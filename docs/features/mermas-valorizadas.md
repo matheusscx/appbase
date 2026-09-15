@@ -48,10 +48,35 @@ Food-service necesita saber *por qué* se perdió stock y cuánto costó, no sol
 |--------|------|-------|
 | `motivo_baja_id` | UUID PK | |
 | `tenant_id` | UUID FK | Del token |
-| `nombre` | TEXT | Único vivo por tenant |
+| `nombre` | TEXT | Único vivo por tenant, **entre todos los tipos** |
 | `activo` | BOOLEAN | Default `true` |
 | `es_fijo` | BOOLEAN | Defaults del sistema |
+| `tipo` | ENUM `tipo_motivo_baja` | `merma` \| `cortesia` \| `no_elaborado`. Obligatorio, sin default. |
 | `creado_el` / `actualizado_el` / `eliminado_el` | TIMESTAMPTZ | Soft delete |
+
+**El tipo decide si la baja descuenta stock** (lo consume la parte 2 del frente "anular un
+plato enviado a cocina", fuera de esta feature): `merma` y `cortesia` descuentan; `no_elaborado`
+no. No hay un flag aparte a propósito — permitiría una merma que no descuenta, que no significa
+nada.
+
+Los siete fijos que siembra el sistema (seeder y alta de tenant, `MOTIVOS_BAJA_FIJOS`):
+
+| Nombre | Tipo |
+|--------|------|
+| Vencimiento | `merma` |
+| Deterioro | `merma` |
+| Robo | `merma` |
+| Error operativo | `merma` |
+| Otro | `merma` |
+| Cortesía de la casa | `cortesia` |
+| No se llegó a hacer | `no_elaborado` |
+
+**El tipo de un motivo propio se puede cambiar solo mientras no se usó.** "Usado" es lo mismo
+que ya bloquea el borrado: algún movimiento de inventario vivo con ese motivo. `PATCH
+/api/motivos-baja/:id` con `tipo` devuelve `400` si el motivo ya tiene movimientos —
+cambiarlo después reescribiría la historia: un *"Se quemó"* pasado a `no_elaborado` haría que
+un plato que salió de la cocina figure como que nunca gastó stock. Los fijos siguen sin poder
+editarse ni borrarse (mismo 400 de siempre, no depende del campo que se mande).
 
 ### `movimientos_inventario` (extensión)
 
@@ -65,8 +90,10 @@ Food-service necesita saber *por qué* se perdió stock y cuánto costó, no sol
 
 ### CRUD `/api/motivos-baja`
 
-- `GET` — cualquier usuario del tenant; query `?soloActivas=true` filtra activas.
-- `POST` / `PATCH /:id` / `DELETE /:id` — `TenantAdminGuard`; rechaza editar/borrar `es_fijo=true`; soft-delete bloqueado si hay movimientos con ese motivo.
+- `GET` — cualquier usuario del tenant; query `?soloActivas=true` filtra activas, `?tipo=merma|cortesia|no_elaborado` filtra por tipo. Cada fila trae `enUso: boolean` — sale de la MISMA consulta del listado (un `EXISTS` sobre `movimientos_inventario`), nunca de una consulta por motivo.
+- `POST` — `TenantAdminGuard`; `tipo` es obligatorio, sin default (el admin lo elige).
+- `PATCH /:id` — `TenantAdminGuard`; rechaza editar `es_fijo=true`. Cambiar `tipo` de un motivo ya usado en movimientos da `400` (ver arriba); el resto de los campos no cambia de regla.
+- `DELETE /:id` — `TenantAdminGuard`; rechaza borrar `es_fijo=true`; soft-delete bloqueado si hay movimientos con ese motivo.
 
 ### `POST /api/mermas`
 

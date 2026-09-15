@@ -168,11 +168,21 @@ describe('Mermas — motivos, registro y rechazo en ajuste (e2e)', () => {
     expect(fijas.some((c) => c.nombre === 'Vencimiento')).toBe(true);
   });
 
+  it('GET /motivos-baja?tipo=merma no devuelve cortesía ni no_elaborado', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/motivos-baja?tipo=merma')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const motivos = res.body as { nombre: string; tipo: string }[];
+    expect(motivos.length).toBeGreaterThanOrEqual(5);
+    expect(motivos.every((m) => m.tipo === 'merma')).toBe(true);
+  });
+
   it('POST /motivos-baja crea motivo custom Rotura envase', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/motivos-baja')
       .set('Authorization', `Bearer ${token}`)
-      .send({ nombre: 'Rotura envase' });
+      .send({ nombre: 'Rotura envase', tipo: 'merma' });
 
     expect(res.status).toBe(201);
     roturaMotivoId = (res.body as { id: string }).id;
@@ -393,6 +403,16 @@ describe('Mermas — motivos, registro y rechazo en ajuste (e2e)', () => {
     expect(resDelete.status).toBe(400);
   });
 
+  // Depende del orden del archivo: va DESPUÉS del test de arriba, que registra
+  // una merma con `roturaMotivoId` y lo deja en uso.
+  it('cambiar el tipo de un motivo propio después de usarlo da 400', async () => {
+    const res = await request(app.getHttpServer())
+      .patch(`/api/motivos-baja/${roturaMotivoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'no_elaborado' });
+    expect(res.status).toBe(400);
+  });
+
   it('la merma de un producto sin costo se registra sin valorizar', async () => {
     const resCreate = await request(app.getHttpServer())
       .post('/api/items')
@@ -580,5 +600,108 @@ describe('Mermas — motivos, registro y rechazo en ajuste (e2e)', () => {
         parseFloat((resItemFinal.body as ItemResponse).stockVendible!),
       ).toBeCloseTo(10, 4);
     });
+  });
+});
+
+// Describe propio: un tenant recién creado, para afirmar el seed de los siete
+// motivos fijos con su tipo — tocar `Paris` acá le rompería el resto de la
+// suite de arriba. Molde de `crearTenantEn`/`entrarA` calcado de
+// `redondeo-por-pais.e2e-spec.ts` (superadmin, POST /api/admin/tenants,
+// switch-tenant).
+describe('Motivos de baja — un tenant nuevo nace con los siete fijos (e2e)', () => {
+  let app: INestApplication<App>;
+  const PROV_RM = '550e8400-e29b-41d4-a716-446655440001'; // Chile
+  const SUPERADMIN = { email: 'admin@sistema.com', pass: 'admin' };
+
+  async function crearTenantEn(provinciaId: string): Promise<{ id: string }> {
+    const loginSuper = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: SUPERADMIN.email, password: SUPERADMIN.pass });
+    expect(loginSuper.status).toBe(200);
+    const tokenSuper = (loginSuper.body as TokenResponse).access_token;
+
+    const sufijo = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    const res = await request(app.getHttpServer())
+      .post('/api/admin/tenants')
+      .set('Authorization', `Bearer ${tokenSuper}`)
+      .send({
+        nombre: `E2E Motivos Baja ${sufijo}`,
+        correo: `motivos-baja-${sufijo}@e2e.test`,
+        provinciaId,
+      });
+    expect(res.status).toBe(201);
+    return res.body as { id: string };
+  }
+
+  async function entrarA(tenantId: string): Promise<string> {
+    const loginSuper = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: SUPERADMIN.email, password: SUPERADMIN.pass });
+    expect(loginSuper.status).toBe(200);
+    const res = await request(app.getHttpServer())
+      .post('/api/auth/switch-tenant')
+      .set(
+        'Cookie',
+        (loginSuper.headers['set-cookie'] as unknown as string[]) ?? [],
+      )
+      .set(
+        'Authorization',
+        `Bearer ${(loginSuper.body as TokenResponse).access_token}`,
+      )
+      .send({ tenantId });
+    expect(res.status).toBe(200);
+    return (res.body as TokenResponse).access_token;
+  }
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.use(cookieParser());
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+  });
+
+  afterAll(async () => {
+    // Sin limpieza del tenant creado: `redondeo-por-pais.e2e-spec.ts`, de
+    // donde sale este molde, tampoco borra los que crea con `crearTenantEn`
+    // (no tiene `afterAll` de datos, solo `app.close()`). Mismo criterio acá:
+    // un tenant de más no rompe ninguna otra suite — nada cuenta tenants
+    // totales ni itera "todos los tenants" en los tests de este repo.
+    await app.close();
+  });
+
+  it('trae los siete fijos con su tipo', async () => {
+    const tenant = await crearTenantEn(PROV_RM);
+    const tokenTenantNuevo = await entrarA(tenant.id);
+
+    const res = await request(app.getHttpServer())
+      .get('/api/motivos-baja')
+      .set('Authorization', `Bearer ${tokenTenantNuevo}`);
+    expect(res.status).toBe(200);
+    const motivos = res.body as {
+      nombre: string;
+      tipo: string;
+      esFijo: boolean;
+    }[];
+    expect(
+      motivos
+        .filter((m) => m.esFijo)
+        .map((m) => [m.nombre, m.tipo])
+        .sort(),
+    ).toEqual([
+      ['Cortesía de la casa', 'cortesia'],
+      ['Deterioro', 'merma'],
+      ['Error operativo', 'merma'],
+      ['No se llegó a hacer', 'no_elaborado'],
+      ['Otro', 'merma'],
+      ['Robo', 'merma'],
+      ['Vencimiento', 'merma'],
+    ]);
   });
 });

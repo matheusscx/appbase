@@ -369,7 +369,10 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
       tabla: 'motivo_baja',
       pk: 'motivo_baja_id',
       crear: () =>
-        crearFila('motivos-baja', 'Motivo baja', (n) => ({ nombre: n })),
+        crearFila('motivos-baja', 'Motivo baja', (n) => ({
+          nombre: n,
+          tipo: 'merma',
+        })),
     },
     {
       nombre: 'descuentos',
@@ -709,7 +712,7 @@ describe('Papelera (e2e) — motivos de baja, SQL cruda + colisión de nombre', 
     const res = await request(app.getHttpServer())
       .post('/api/motivos-baja')
       .set('Authorization', `Bearer ${tokenAdmin}`)
-      .send({ nombre: motivoBajaNombre });
+      .send({ nombre: motivoBajaNombre, tipo: 'merma' });
 
     expect(res.status).toBe(201);
     const body = res.body as MotivoBajaItem;
@@ -767,7 +770,7 @@ describe('Papelera (e2e) — motivos de baja, SQL cruda + colisión de nombre', 
     const otra = await request(app.getHttpServer())
       .post('/api/motivos-baja')
       .set('Authorization', `Bearer ${tokenAdmin}`)
-      .send({ nombre: motivoBajaNombre });
+      .send({ nombre: motivoBajaNombre, tipo: 'merma' });
     expect(otra.status).toBe(201);
     const otraId = (otra.body as MotivoBajaItem).id;
 
@@ -2102,7 +2105,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
       const res = await request(app.getHttpServer())
         .post('/api/motivos-baja')
         .set('Authorization', `Bearer ${tokenAdmin}`)
-        .send({ nombre: n });
+        .send({ nombre: n, tipo: 'merma' });
       expect(res.status).toBe(201);
       return (res.body as RecursoConAuditoria).id;
     };

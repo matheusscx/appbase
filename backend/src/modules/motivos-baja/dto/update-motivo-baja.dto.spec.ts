@@ -3,6 +3,7 @@ import { validate } from 'class-validator';
 import { UpdateMotivoBajaDto } from './update-motivo-baja.dto';
 import { UpdateMotivoDiferenciaDto } from '../../motivos-diferencia/dto/update-motivo-diferencia.dto';
 import { UpdateMotivoDiferenciaInventarioDto } from '../../motivos-diferencia-inventario/dto/update-motivo-diferencia-inventario.dto';
+import { TipoMotivoBaja } from '../tipo-motivo-baja.enum';
 
 /**
  * Los tres DTOs de catálogo que dejaban dejar una fila sin nombre. Son gemelos
@@ -98,5 +99,36 @@ describe.each(CLASES)('%s — activo', (_nombre, Clase) => {
 
   it('rechaza un valor que no es booleano', async () => {
     await expect(errores(Clase, { activo: 'sí' })).resolves.toEqual(['activo']);
+  });
+});
+
+// `tipo` es propio de `UpdateMotivoBajaDto` — los otros dos DTOs de la tabla
+// `CLASES` (motivos de diferencia) no tienen esta columna, así que no van
+// en `describe.each`.
+describe('UpdateMotivoBajaDto — tipo', () => {
+  it('acepta que esté ausente: sigue siendo opcional', async () => {
+    const dto = plainToInstance(UpdateMotivoBajaDto, { nombre: 'Rotura' });
+    expect(await validate(dto)).toHaveLength(0);
+  });
+
+  // Mismo `@ValidateIf` que `activo`: la columna es NOT NULL, así que sin
+  // esto un `null` terminaría en un 500 de Postgres en vez de un 400.
+  it('rechaza null en vez de dejarlo pasar como si estuviera ausente', async () => {
+    const dto = plainToInstance(UpdateMotivoBajaDto, { tipo: null });
+    const errores = await validate(dto);
+    expect(errores.map((e) => e.property)).toEqual(['tipo']);
+  });
+
+  it('rechaza un valor fuera del enum', async () => {
+    const dto = plainToInstance(UpdateMotivoBajaDto, { tipo: 'otro' });
+    const errores = await validate(dto);
+    expect(errores.map((e) => e.property)).toEqual(['tipo']);
+  });
+
+  it('acepta un valor del enum', async () => {
+    const dto = plainToInstance(UpdateMotivoBajaDto, {
+      tipo: TipoMotivoBaja.CORTESIA,
+    });
+    expect(await validate(dto)).toHaveLength(0);
   });
 });

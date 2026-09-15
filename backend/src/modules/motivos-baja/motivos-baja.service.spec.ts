@@ -4,6 +4,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Db } from '../../common/db/db.service';
 import { MotivosBajaService } from './motivos-baja.service';
 import { MotivoBaja } from './entities/motivo-baja.entity';
+import { TipoMotivoBaja } from './tipo-motivo-baja.enum';
 
 const TENANT = 'tenant-uuid';
 const MOTIVO = 'motivo-uuid';
@@ -56,7 +57,10 @@ describe('MotivosBajaService', () => {
         .mockRejectedValueOnce(err23505()) // INSERT: perdió la carrera
         .mockResolvedValueOnce([{ '?column?': 1 }]); // revalidación: tomado
 
-      const promesa = service.create(TENANT, { nombre: '  Rotura  ' });
+      const promesa = service.create(TENANT, {
+        nombre: '  Rotura  ',
+        tipo: TipoMotivoBaja.MERMA,
+      });
       await expect(promesa).rejects.toThrow(BadRequestException);
       await expect(promesa).rejects.toThrow(/Ya existe un motivo de baja/);
       expect(nombresConsultados()).toEqual(['Rotura', 'Rotura']);
@@ -110,21 +114,27 @@ describe('MotivosBajaService', () => {
           nombre: 'Rotura',
           activo: true,
           es_fijo: false,
+          tipo: 'merma',
         },
       ]);
 
-      const result = await service.create(TENANT, { nombre: '  Rotura  ' });
+      const result = await service.create(TENANT, {
+        nombre: '  Rotura  ',
+        tipo: TipoMotivoBaja.MERMA,
+      });
 
       expect(queryMock).toHaveBeenNthCalledWith(
         2,
         expect.stringContaining('es_fijo'),
-        [TENANT, 'Rotura', true],
+        [TENANT, 'Rotura', true, 'merma'],
       );
       expect(result).toEqual({
         id: MOTIVO,
         nombre: 'Rotura',
         activo: true,
         esFijo: false,
+        tipo: 'merma',
+        enUso: false,
       });
     });
 
@@ -132,7 +142,10 @@ describe('MotivosBajaService', () => {
       queryMock.mockResolvedValueOnce([{ '?column?': 1 }]);
 
       await expect(
-        service.create(TENANT, { nombre: 'vencimiento' }),
+        service.create(TENANT, {
+          nombre: 'vencimiento',
+          tipo: TipoMotivoBaja.MERMA,
+        }),
       ).rejects.toThrow(BadRequestException);
       expect(queryMock).toHaveBeenCalledTimes(1);
     });
@@ -397,6 +410,131 @@ describe('MotivosBajaService', () => {
         id: MOTIVO,
         eliminadoPorNombre: 'admin.paris',
       });
+    });
+  });
+
+  describe('tipo', () => {
+    it('create inserta el tipo que manda el DTO', async () => {
+      queryMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        {
+          motivo_baja_id: MOTIVO,
+          nombre: 'Se quemó',
+          activo: true,
+          es_fijo: false,
+          tipo: 'merma',
+        },
+      ]);
+      const result = await service.create(TENANT, {
+        nombre: 'Se quemó',
+        tipo: TipoMotivoBaja.MERMA,
+      });
+      expect(queryMock).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('tipo'),
+        [TENANT, 'Se quemó', true, 'merma'],
+      );
+      expect(result).toMatchObject({ tipo: 'merma', enUso: false });
+    });
+
+    it('update cambia el tipo de un motivo sin uso', async () => {
+      queryMock
+        .mockResolvedValueOnce([
+          {
+            motivo_baja_id: MOTIVO,
+            nombre: 'X',
+            activo: true,
+            es_fijo: false,
+            tipo: 'merma',
+          },
+        ]) // findOneOrFail
+        .mockResolvedValueOnce([{ en_uso: false }]) // uso
+        .mockResolvedValueOnce([
+          {
+            motivo_baja_id: MOTIVO,
+            nombre: 'X',
+            activo: true,
+            es_fijo: false,
+            tipo: 'cortesia',
+            en_uso: false,
+          },
+        ]); // UPDATE … RETURNING
+      const result = await service.update(TENANT, MOTIVO, {
+        tipo: TipoMotivoBaja.CORTESIA,
+      });
+      expect(result.tipo).toBe('cortesia');
+    });
+
+    it('update rechaza cambiar el tipo de un motivo con movimientos', async () => {
+      queryMock
+        .mockResolvedValueOnce([
+          {
+            motivo_baja_id: MOTIVO,
+            nombre: 'X',
+            activo: true,
+            es_fijo: false,
+            tipo: 'merma',
+          },
+        ])
+        .mockResolvedValueOnce([{ en_uso: true }]);
+      await expect(
+        service.update(TENANT, MOTIVO, { tipo: TipoMotivoBaja.NO_ELABORADO }),
+      ).rejects.toThrow('No se puede cambiar el tipo: el motivo ya se usó');
+      expect(queryMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('update con el mismo tipo no hace la consulta aparte de uso', async () => {
+      queryMock
+        .mockResolvedValueOnce([
+          {
+            motivo_baja_id: MOTIVO,
+            nombre: 'X',
+            activo: true,
+            es_fijo: false,
+            tipo: 'merma',
+          },
+        ]) // findOneOrFail
+        .mockResolvedValueOnce([
+          {
+            motivo_baja_id: MOTIVO,
+            nombre: 'X',
+            activo: true,
+            es_fijo: false,
+            tipo: 'merma',
+            en_uso: true,
+          },
+        ]); // UPDATE … RETURNING
+      const result = await service.update(TENANT, MOTIVO, {
+        tipo: TipoMotivoBaja.MERMA,
+      });
+      // Dos consultas: la lectura y el UPDATE. Sin nombre en el body no corre el
+      // chequeo de nombre único, y sin cambio de tipo no corre la de uso.
+      expect(queryMock).toHaveBeenCalledTimes(2);
+      expect(result.enUso).toBe(true);
+    });
+
+    it('findAll trae enUso en la MISMA consulta y filtra por tipo', async () => {
+      queryMock.mockResolvedValueOnce([
+        {
+          motivo_baja_id: MOTIVO,
+          nombre: 'Deterioro',
+          activo: true,
+          es_fijo: true,
+          tipo: 'merma',
+          en_uso: true,
+        },
+      ]);
+      const result = await service.findAll(
+        TENANT,
+        true,
+        false,
+        TipoMotivoBaja.MERMA,
+      );
+      expect(queryMock).toHaveBeenCalledTimes(1);
+      const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+      expect(sql).toMatch(/EXISTS\s*\(\s*SELECT 1 FROM movimientos_inventario/);
+      expect(sql).toMatch(/AND mb\.tipo = \$2/);
+      expect(params).toEqual([TENANT, 'merma']);
+      expect(result[0]).toMatchObject({ tipo: 'merma', enUso: true });
     });
   });
 });

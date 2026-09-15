@@ -117,7 +117,7 @@ describe('El módulo contratado es un borde duro, también para el admin (e2e)',
     const res = await request(app.getHttpServer())
       .post('/api/motivos-baja')
       .set('Authorization', `Bearer ${token}`)
-      .send({ nombre: `Motivo borde duro E2E ${Date.now()}` });
+      .send({ nombre: `Motivo borde duro E2E ${Date.now()}`, tipo: 'merma' });
     expect(res.status).toBe(201);
 
     // Y un módulo que ese tenant SÍ contrató le responde.

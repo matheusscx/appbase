@@ -36,6 +36,7 @@ export class MotivosBajaController {
       user.tenantId,
       query.soloActivas ?? false,
       query.incluirEliminados,
+      query.tipo,
     );
   }
 

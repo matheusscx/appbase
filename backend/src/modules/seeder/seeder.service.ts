@@ -1395,16 +1395,26 @@ export class SeederService implements OnApplicationBootstrap {
     const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
     const uuid = (n: number) =>
       `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
-    const nombres = [...MOTIVOS_BAJA_FIJOS];
 
     await this.dataSource.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS uq_motivo_baja_tenant_nombre
       ON motivo_baja (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
     `);
 
+    // Los cinco de siempre (Vencimiento…Otro) conservan su ID: el contador
+    // que arranca en 266 recorre solo esos cinco, dos tenants.
+    const CINCO_DE_SIEMPRE = MOTIVOS_BAJA_FIJOS.slice(0, 5);
+    // Los dos fijos nuevos son 4 IDs (2 tenants x 2 nombres) que quedan FUERA
+    // de ese contador — si lo siguieran, pisarían turnos ya tomados
+    // (…277-…279). Se toman de números libres, fijos por nombre y tenant.
+    const NUEVOS: Record<string, [paris: number, falabella: number]> = {
+      'Cortesía de la casa': [401, 402],
+      'No se llegó a hacer': [403, 404],
+    };
+
     let id = 266;
     for (const tenantId of [PARIS, FALABELLA]) {
-      for (const nombre of nombres) {
+      for (const { nombre, tipo } of CINCO_DE_SIEMPRE) {
         const motivoId = uuid(id++);
         const exists: unknown[] = await this.dataSource.query(
           `SELECT 1 FROM motivo_baja WHERE motivo_baja_id = $1`,
@@ -1413,9 +1423,31 @@ export class SeederService implements OnApplicationBootstrap {
         if (!exists.length) {
           await this.dataSource.query(
             `INSERT INTO motivo_baja
-               (motivo_baja_id, tenant_id, nombre, activo, es_fijo)
-             VALUES ($1,$2,$3,true,true)`,
-            [motivoId, tenantId, nombre],
+               (motivo_baja_id, tenant_id, nombre, activo, es_fijo, tipo)
+             VALUES ($1,$2,$3,true,true,$4)`,
+            [motivoId, tenantId, nombre, tipo],
+          );
+        }
+      }
+    }
+
+    for (const { nombre, tipo } of MOTIVOS_BAJA_FIJOS.slice(5)) {
+      const [idParis, idFalabella] = NUEVOS[nombre];
+      for (const [tenantId, n] of [
+        [PARIS, idParis],
+        [FALABELLA, idFalabella],
+      ] as const) {
+        const motivoId = uuid(n);
+        const exists: unknown[] = await this.dataSource.query(
+          `SELECT 1 FROM motivo_baja WHERE motivo_baja_id = $1`,
+          [motivoId],
+        );
+        if (!exists.length) {
+          await this.dataSource.query(
+            `INSERT INTO motivo_baja
+               (motivo_baja_id, tenant_id, nombre, activo, es_fijo, tipo)
+             VALUES ($1,$2,$3,true,true,$4)`,
+            [motivoId, tenantId, nombre, tipo],
           );
         }
       }

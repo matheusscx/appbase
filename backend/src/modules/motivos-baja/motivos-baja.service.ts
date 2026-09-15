@@ -11,6 +11,7 @@ import {
 } from '../../common/utils/nombre-sugerido.util';
 import { CreateMotivoBajaDto } from './dto/create-motivo-baja.dto';
 import { UpdateMotivoBajaDto } from './dto/update-motivo-baja.dto';
+import { TipoMotivoBaja } from './tipo-motivo-baja.enum';
 
 // `eliminadoEl`/`eliminadoPor`/`eliminadoPorNombre` solo se completan cuando
 // se pide `incluirEliminados` (o tras `restaurar`): el listado normal no trae
@@ -20,9 +21,23 @@ export interface MotivoBajaListItem {
   nombre: string;
   activo: boolean;
   esFijo: boolean;
+  tipo: TipoMotivoBaja;
+  enUso: boolean;
   eliminadoEl?: string | null;
   eliminadoPor?: string | null;
   eliminadoPorNombre?: string | null;
+}
+
+/** Lo que `findOneOrFail` necesita resolver: identidad + lo que `update`/`remove`
+ *  chequean antes de escribir. Sin `enUso` a propósito — ni `update` (fuera del
+ *  cambio de tipo) ni `remove` lo usan, y `remove` ya calcula su propio uso con
+ *  otra consulta (`COUNT`, no `EXISTS`) para el mensaje que devuelve. */
+interface MotivoBajaActual {
+  id: string;
+  nombre: string;
+  activo: boolean;
+  esFijo: boolean;
+  tipo: TipoMotivoBaja;
 }
 
 interface MotivoBajaRow {
@@ -30,12 +45,22 @@ interface MotivoBajaRow {
   nombre: string;
   activo: boolean;
   es_fijo: boolean;
+  tipo: TipoMotivoBaja;
 }
 
-interface MotivoBajaRowConEliminado extends MotivoBajaRow {
+interface MotivoBajaRowConUso extends MotivoBajaRow {
+  en_uso: boolean;
+}
+
+interface MotivoBajaRowConEliminado extends MotivoBajaRowConUso {
   eliminado_el: string | null;
   eliminado_por: string | null;
   eliminado_por_nombre: string | null;
+}
+
+interface MotivoBajaRowRestaurado extends MotivoBajaRowConUso {
+  eliminado_el: string | null;
+  eliminado_por: string | null;
 }
 
 @Injectable()
@@ -46,21 +71,30 @@ export class MotivosBajaService {
     tenantId: string,
     soloActivas = false,
     incluirEliminados = false,
+    tipo?: TipoMotivoBaja,
   ): Promise<MotivoBajaListItem[]> {
+    const params = tipo ? [tenantId, tipo] : [tenantId];
+
     if (!incluirEliminados) {
-      const rows: MotivoBajaRow[] = await this.db.query(
-        `SELECT motivo_baja_id, nombre, activo, es_fijo
-         FROM motivo_baja
-         WHERE tenant_id = $1 AND eliminado_el IS NULL
-           ${soloActivas ? 'AND activo = true' : ''}
-         ORDER BY es_fijo DESC, nombre ASC`,
-        [tenantId],
+      const rows: MotivoBajaRowConUso[] = await this.db.query(
+        `SELECT mb.motivo_baja_id, mb.nombre, mb.activo, mb.es_fijo, mb.tipo,
+                EXISTS (SELECT 1 FROM movimientos_inventario mv
+                         WHERE mv.motivo_baja_id = mb.motivo_baja_id
+                           AND mv.eliminado_el IS NULL) AS en_uso
+           FROM motivo_baja mb
+          WHERE mb.tenant_id = $1 AND mb.eliminado_el IS NULL
+            ${soloActivas ? 'AND mb.activo = true' : ''}
+            ${tipo ? 'AND mb.tipo = $2' : ''}
+          ORDER BY mb.es_fijo DESC, mb.nombre ASC`,
+        params,
       );
       return rows.map((r) => ({
         id: r.motivo_baja_id,
         nombre: r.nombre,
         activo: r.activo,
         esFijo: r.es_fijo,
+        tipo: r.tipo,
+        enUso: r.en_uso,
       }));
     }
 
@@ -73,7 +107,10 @@ export class MotivosBajaService {
     // del sistema, no restaurable ni visible — decisión del owner,
     // docs/features/papelera.md.
     const rows: MotivoBajaRowConEliminado[] = await this.db.query(
-      `SELECT mb.motivo_baja_id, mb.nombre, mb.activo, mb.es_fijo,
+      `SELECT mb.motivo_baja_id, mb.nombre, mb.activo, mb.es_fijo, mb.tipo,
+              EXISTS (SELECT 1 FROM movimientos_inventario mv
+                       WHERE mv.motivo_baja_id = mb.motivo_baja_id
+                         AND mv.eliminado_el IS NULL) AS en_uso,
               mb.eliminado_el, mb.eliminado_por,
               u.nombre_usuario AS eliminado_por_nombre
          FROM motivo_baja mb
@@ -81,14 +118,17 @@ export class MotivosBajaService {
         WHERE mb.tenant_id = $1
           AND (mb.eliminado_el IS NULL OR mb.eliminado_por IS NOT NULL)
           ${soloActivas ? 'AND mb.activo = true' : ''}
+          ${tipo ? 'AND mb.tipo = $2' : ''}
         ORDER BY mb.es_fijo DESC, mb.nombre ASC`,
-      [tenantId],
+      params,
     );
     return rows.map((r) => ({
       id: r.motivo_baja_id,
       nombre: r.nombre,
       activo: r.activo,
       esFijo: r.es_fijo,
+      tipo: r.tipo,
+      enUso: r.en_uso,
       eliminadoEl: r.eliminado_el,
       eliminadoPor: r.eliminado_por,
       eliminadoPorNombre: r.eliminado_por_nombre,
@@ -104,10 +144,10 @@ export class MotivosBajaService {
     const rows = unwrap<MotivoBajaRow>(
       await traducirColisionDeNombre(
         this.db.query(
-          `INSERT INTO motivo_baja (tenant_id, nombre, activo, es_fijo)
-         VALUES ($1, $2, $3, false)
-         RETURNING motivo_baja_id, nombre, activo, es_fijo`,
-          [tenantId, nombre, dto.activo ?? true],
+          `INSERT INTO motivo_baja (tenant_id, nombre, activo, es_fijo, tipo)
+         VALUES ($1, $2, $3, false, $4)
+         RETURNING motivo_baja_id, nombre, activo, es_fijo, tipo`,
+          [tenantId, nombre, dto.activo ?? true, dto.tipo],
         ),
         () => this.assertNombreUnico(tenantId, nombre),
       ),
@@ -117,6 +157,9 @@ export class MotivosBajaService {
       nombre: rows[0].nombre,
       activo: rows[0].activo,
       esFijo: rows[0].es_fijo,
+      tipo: rows[0].tipo,
+      // Recién creado: no puede tener movimientos todavía.
+      enUso: false,
     };
   }
 
@@ -135,6 +178,23 @@ export class MotivosBajaService {
       await this.assertNombreUnico(tenantId, dto.nombre.trim(), id);
     }
 
+    // Cambiar el tipo después de usarlo reescribiría la historia: un "Se
+    // quemó" pasado a no_elaborado haría que un plato que salió de la cocina
+    // figure como que nunca gastó stock. Solo se consulta el uso cuando el
+    // tipo realmente cambia — mandar el mismo tipo no dispara esta consulta.
+    if (dto.tipo !== undefined && dto.tipo !== motivo.tipo) {
+      const uso: { en_uso: boolean }[] = await this.db.query(
+        `SELECT EXISTS (SELECT 1 FROM movimientos_inventario
+                         WHERE motivo_baja_id = $1 AND eliminado_el IS NULL) AS en_uso`,
+        [id],
+      );
+      if (uso[0].en_uso) {
+        throw new BadRequestException(
+          'No se puede cambiar el tipo: el motivo ya se usó en movimientos',
+        );
+      }
+    }
+
     const sets = ['actualizado_el = NOW()'];
     const params: unknown[] = [];
     let idx = 1;
@@ -147,14 +207,21 @@ export class MotivosBajaService {
       sets.push(`activo = $${idx++}`);
       params.push(dto.activo);
     }
+    if (dto.tipo !== undefined) {
+      sets.push(`tipo = $${idx++}`);
+      params.push(dto.tipo);
+    }
 
     params.push(id, tenantId);
-    const rows = unwrap<MotivoBajaRow>(
+    const rows = unwrap<MotivoBajaRowConUso>(
       await traducirColisionDeNombre(
         this.db.query(
           `UPDATE motivo_baja SET ${sets.join(', ')}
          WHERE motivo_baja_id = $${idx++} AND tenant_id = $${idx} AND eliminado_el IS NULL
-         RETURNING motivo_baja_id, nombre, activo, es_fijo`,
+         RETURNING motivo_baja_id, nombre, activo, es_fijo, tipo,
+                   EXISTS (SELECT 1 FROM movimientos_inventario mv
+                            WHERE mv.motivo_baja_id = motivo_baja.motivo_baja_id
+                              AND mv.eliminado_el IS NULL) AS en_uso`,
           params,
         ),
         async () => {
@@ -174,6 +241,8 @@ export class MotivosBajaService {
       nombre: rows[0].nombre,
       activo: rows[0].activo,
       esFijo: rows[0].es_fijo,
+      tipo: rows[0].tipo,
+      enUso: rows[0].en_uso,
     };
   }
 
@@ -213,7 +282,7 @@ export class MotivosBajaService {
       // `UPDATE … WHERE eliminado_el IS NOT NULL … RETURNING` resuelve
       // búsqueda y escritura en una sentencia: no hay ventana entre leer y
       // escribir.
-      const rows = unwrap<MotivoBajaRowConEliminado>(
+      const rows = unwrap<MotivoBajaRowRestaurado>(
         await this.db.query(
           `UPDATE motivo_baja
               SET eliminado_el = NULL, eliminado_por = NULL,
@@ -221,7 +290,10 @@ export class MotivosBajaService {
                   actualizado_el = NOW()
             WHERE motivo_baja_id = $1 AND tenant_id = $2
               AND eliminado_el IS NOT NULL AND eliminado_por IS NOT NULL
-          RETURNING motivo_baja_id, nombre, activo, es_fijo,
+          RETURNING motivo_baja_id, nombre, activo, es_fijo, tipo,
+                    EXISTS (SELECT 1 FROM movimientos_inventario mv
+                             WHERE mv.motivo_baja_id = motivo_baja.motivo_baja_id
+                               AND mv.eliminado_el IS NULL) AS en_uso,
                     eliminado_el, eliminado_por`,
           [id, tenantId, nombreNuevo ?? null],
         ),
@@ -238,6 +310,8 @@ export class MotivosBajaService {
         nombre: rows[0].nombre,
         activo: rows[0].activo,
         esFijo: rows[0].es_fijo,
+        tipo: rows[0].tipo,
+        enUso: rows[0].en_uso,
         eliminadoEl: rows[0].eliminado_el,
         eliminadoPor: rows[0].eliminado_por,
       };
@@ -294,9 +368,9 @@ export class MotivosBajaService {
   private async findOneOrFail(
     tenantId: string,
     id: string,
-  ): Promise<MotivoBajaListItem> {
+  ): Promise<MotivoBajaActual> {
     const rows: MotivoBajaRow[] = await this.db.query(
-      `SELECT motivo_baja_id, nombre, activo, es_fijo
+      `SELECT motivo_baja_id, nombre, activo, es_fijo, tipo
        FROM motivo_baja
        WHERE motivo_baja_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
       [id, tenantId],
@@ -309,6 +383,7 @@ export class MotivosBajaService {
       nombre: rows[0].nombre,
       activo: rows[0].activo,
       esFijo: rows[0].es_fijo,
+      tipo: rows[0].tipo,
     };
   }
 

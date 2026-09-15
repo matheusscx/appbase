@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
   DeleteDateColumn,
 } from 'typeorm';
+import { TipoMotivoBaja } from '../tipo-motivo-baja.enum';
 
 @Entity('motivo_baja')
 export class MotivoBaja {
@@ -23,6 +24,9 @@ export class MotivoBaja {
 
   @Column({ name: 'es_fijo', type: 'boolean', default: false })
   esFijo: boolean;
+
+  @Column({ type: 'enum', enum: TipoMotivoBaja, enumName: 'tipo_motivo_baja' })
+  tipo: TipoMotivoBaja;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;

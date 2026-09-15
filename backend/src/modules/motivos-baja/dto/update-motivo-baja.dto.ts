@@ -1,11 +1,13 @@
 import {
   IsBoolean,
+  IsEnum,
   IsNotEmpty,
   IsString,
   MaxLength,
   ValidateIf,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { TipoMotivoBaja } from '../tipo-motivo-baja.enum';
 
 /**
  * ⚠️ **Los tres decoradores de `nombre` están acá por un bug distinto cada uno.**
@@ -33,6 +35,10 @@ import { Transform } from 'class-transformer';
  *
  * Los tres se replican en `UpdateMotivoDiferenciaDto` y
  * `UpdateMotivoDiferenciaInventarioDto`, que sirven **rutas distintas**.
+ *
+ * `tipo` lleva el mismo `@ValidateIf` que `activo` por el mismo motivo: la
+ * columna es `NOT NULL`, así que sin esto un `{"tipo": null}` terminaría en un
+ * 500 de Postgres en vez de un 400.
  */
 export class UpdateMotivoBajaDto {
   @Transform(({ value }: { value: unknown }) =>
@@ -47,4 +53,8 @@ export class UpdateMotivoBajaDto {
   @ValidateIf((_o, v) => v !== undefined)
   @IsBoolean()
   activo?: boolean;
+
+  @ValidateIf((_o, v) => v !== undefined)
+  @IsEnum(TipoMotivoBaja)
+  tipo?: TipoMotivoBaja;
 }
