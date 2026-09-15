@@ -159,11 +159,17 @@ interface VentaDetalle {
     /** Decimales con los que se calculó, y cómo se redondeó el último. */
     escalaCalculo: number
     modoRedondeo: string
-    // ⚠️ El JSON congelado trae también `decimalesMoneda` y
-    // `promosAcumulanDescuentos`; acá se declaran solo los campos que esta
-    // pantalla lee. El que necesite cuantizar como el motor —por ejemplo para
-    // anticipar el 400 del modal de nota de crédito— los tiene en la respuesta,
-    // pero tiene que agregarlos a este tipo primero.
+    /**
+     * Minor unit de la moneda OFICIAL, congelado — la escala a la que
+     * `NotaCreditoModal` cuantiza para replicar `cuantizar` del motor
+     * (`useDevolucionInventario.valorDevueltoCuantizado`). Junto con
+     * `modoRedondeo` arriba es el criterio completo; `decimalesMoneda` no se
+     * usa en esta pantalla, solo viaja hacia el modal.
+     */
+    decimalesMoneda: number
+    // ⚠️ El JSON congelado trae también `promosAcumulanDescuentos`; acá se
+    // declaran solo los campos que hacen falta (esta pantalla + el modal de
+    // nota de crédito).
   } | null
   pagos: Pago[]
   customer: { nombre: string; rut?: string } | null
@@ -1230,6 +1236,7 @@ function onNcSuccess(payload: {
     :disponible="disponibleNC"
     :por-porcion="venta.disponibleNotaCredito.porPorcion"
     :detalles="venta.detalles"
+    :config-calculo="venta.configCalculo"
     @success="onNcSuccess"
   />
 </template>

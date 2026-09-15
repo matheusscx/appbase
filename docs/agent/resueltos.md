@@ -23,6 +23,127 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El umbral del motivo en la nota de crédito ya es un gemelo exacto del cuantizador del backend (cerrada 2026-09-14)
+
+Sale de [`pendientes.md` § 2](pendientes.md). El backend exige el `comentario` cuando la nota
+acredita MENOS que lo devuelto — `seEscalo = monto.lt(valorDevuelto)` en `ventas.service.ts:1554`,
+donde `valorDevuelto` es, por línea (una por ítem, la agregación que ya hacía
+`validarDevolucionesReembolso`), `cuantizar(Σ total_linea / Σ cantidad × cantidadDevuelta)` con el
+`decimalesMoneda` y el `modoRedondeo` **congelados** de la venta (`cuantizar` en
+`calculo-precios.engine.ts:444`, `q` armado en `ventas.service.ts:1475-1477`, la valuación en
+`ventas.service.ts:1481-1488`), sumado DESPUÉS de cuantizar cada línea — nunca se vuelve a
+cuantizar la suma. `valorUnitarioBruto` se calcula dividiendo antes de multiplicar
+(`ventas.service.ts:2511-2516`).
+
+**Qué se hizo** (`frontend/`, sin tocar backend):
+- `useDevolucionInventario.ts` gana `cuantizar` (gemela de la del motor: mismo
+  `toDecimalPlaces(decimalesMoneda, modo)`, mismo mapeo de los cuatro modos a las constantes de
+  Decimal.js, mismo fallback a HALF_UP para un modo que no está en el mapeo) y
+  `CriterioRedondeoCongelado` (`{ decimalesMoneda, modoRedondeo }`). `valorAproximadoDevuelto` se
+  reemplaza por `valorDevueltoCuantizado(detalles, filas, cfg)`, que **bifurca por `cfg`**: con
+  `cfg` (el caso real) divide antes de multiplicar —mismo orden que el backend, por la precisión
+  por defecto de Decimal.js (20 cifras significativas, igual en los dos lados)— y cuantiza por
+  línea, antes de sumar; con `cfg: null` el orden vuelve a ser el de ANTES de este cierre —
+  multiplica antes de dividir, sin cuantizar— para no reintroducir en ese camino un residuo de
+  precisión que la versión aproximada nunca tuvo (ver por qué no importa, abajo).
+- `VentaDetalleDrawer.vue` agrega `decimalesMoneda: number` al tipo de `configCalculo` (ya traía
+  `modoRedondeo`) y lo pasa a `VentasNotaCreditoModal` en un prop nuevo, `config-calculo`.
+- `NotaCreditoModal.vue`: `motivoRequerido` pasa de `v.gt(0) && v.gte(monto)` a
+  `valorDevuelto.gt(monto)` — **comparación `>` estricta, igual a la del backend** (antes el `≥`
+  compensaba con margen la falta de cuantización; ya no hace falta). El botón sigue sin
+  deshabilitarse por esto: el único guard sigue siendo el backend.
+- `cfg: null` (ventas sin `config_calculo` congelada) deja el resultado sin cuantizar, y **no hace
+  diferencia**: `crearNotaCreditoDesdeVenta` —el único camino que arma este modal— fija
+  `validarVentaElegible: true`, y con eso el backend rechaza CUALQUIER nota de crédito manual sobre
+  esa venta antes de llegar a valuar nada (`ventas.service.ts:1416-1439`).
+
+**Tres mutantes** sobre `useDevolucionInventario.spec.ts` (41 tests), cada uno puesto, medido y
+revertido por separado — la suite queda en 41/41 en verde entre uno y el siguiente:
+
+**Mutante A — no cuantiza** (`return acc.plus(bruto)` en vez de `acc.plus(cuantizar(bruto, cfg))`,
+dentro de la rama `if (cfg)`, la rama `cfg: null` intacta): **12 caen**.
+
+| Test | Cuantizado (esperado) | Mutante (sin cuantizar) | Por qué lo caza |
+|---|---|---|---|
+| `suma las líneas del mismo ítem antes de dividir` | `5000` | `5000.0000000000000001` | no es un borde de redondeo — es el **residuo** de dividir antes de multiplicar (`5000/3` no es exacto en las 20 cifras de Decimal.js); sin cuantizar, ese residuo queda a la vista |
+| `divide ANTES de multiplicar: con FLOOR, 1 en 3 unidades da 0, no 1` | `0` | `0.99999999999999999999` | mismo residuo que la fila de arriba, con FLOOR en vez de HALF_UP: sin cuantizar, FLOOR no tiene nada que truncar |
+| `1.001/3: el bruto sin cuantizar y el cuantizado por el backend son números distintos` | `334` | `333.66666666666666667` | borde de redondeo (HALF_UP sube) |
+| `tres líneas de 2,6 cuantizan a 3 cada una y suman 9...` | `9` | `7.8` | cada línea sin cuantizar se queda en `2.6`; suman `7.8` en vez de `9` |
+| `HALF_UP: 2,5 sube a 3` | `3` | `2.5` | borde (empate, HALF_UP sube) |
+| `CEIL: 2,5 sube a 3` | `3` | `2.5` | borde (CEIL siempre sube) |
+| `FLOOR: 2,5 baja a 2` | `2` | `2.5` | borde (FLOOR siempre baja) |
+| `HALF_EVEN: 2,5 baja a 2 (par más cercano)` | `2` | `2.5` | borde (empate, par más cercano) |
+| `HALF_EVEN no es solo "redondear para abajo": 3,5 sube a 4` | `4` | `3.5` | borde (empate, par más cercano — el otro lado de HALF_EVEN) |
+| `HALF_UP no es lo mismo que CEIL: 2,4...` | `2` (HALF_UP) | `2.4` | no es empate — HALF_UP redondea al más cercano y sin cuantizar no redondea nada |
+| `un modoRedondeo desconocido cae a HALF_UP, no a CEIL...` | `2` | `2.4` | el fallback solo actúa **si se cuantiza**; sin cuantizar no hay fallback que probar |
+| `moneda con decimales (2): cuantiza a centavos...` | `3.33` | `3.3333333333333333333` | borde de redondeo a 2 decimales, no a la unidad |
+
+Los otros 29 pasan igual bajo el mutante A. 24 prueban otras funciones del composable y no llaman
+a `valorDevueltoCuantizado`. Los 5 restantes sí: `valúa cada ítem...` (2.380 ya es entero, sin
+residuo ni borde), `ignora filas...` y `cantidad cero...` (dan `0`, no llegan a la rama `cfg`), el
+empate exacto (`3000/3` es exacto, sin residuo que la cuantización tenga que limar) y el fallback
+`cfg: null` (ese camino no pasa por la línea mutada).
+
+**Mutante B — cuantiza la suma una sola vez**, no cada línea antes de sumar (se sacó el
+`cuantizar` de adentro del `reduce` y se aplicó una vez sobre el total, al final, cuando `cfg` no
+es `null`): **1 cae** — `tres líneas de 2,6 cuantizan a 3 cada una y suman 9...`, esperado `9`,
+mutante `8` (`2.6+2.6+2.6=7.8`, cuantizado una sola vez con HALF_UP → `8`). Es el único test con
+más de un ítem devuelto bajo el mismo `cfg`; los demás no lo distinguen porque tienen un solo ítem (cuantizar
+antes o después de "sumar" nada es lo mismo).
+
+**Mutante C — multiplica antes de dividir**, dentro de la rama `if (cfg)` (`v.total.times(f.cantidad).dividedBy(v.cantidad)`
+en vez de `v.total.dividedBy(v.cantidad).times(f.cantidad)`): **1 cae** — `divide ANTES de
+multiplicar: con FLOOR, 1 en 3 unidades da 0, no 1`, esperado `0`, mutante `1` (`1×3÷3` cancela el
+residuo de `1÷3` que sí queda con el orden correcto). Buscado con un script Node aparte (no en la
+suite) que corrió las **201.600 combinaciones** de `total` 1-60 × `cantidad` 1-20 × `devuelta`
+1-cantidad × `decimalesMoneda` {0,1,2,4} × los cuatro modos, comparando el resultado cuantizado de
+los dos órdenes: **1.028 combinaciones distinguen el orden** (FLOOR 462, CEIL 533, HALF_EVEN 18,
+HALF_UP 15) — sí hay fixtures con HALF_UP y HALF_EVEN, pero son minoría: el redondeo al más
+cercano absorbe el residuo de 20 cifras salvo que la fracción real caiga casi exacta en el borde de
+`,5`. El test usa la combinación más chica del barrido (`1/3`, FLOOR, `decimalesMoneda: 0`). Los
+otros 40 tests de la suite no lo distinguen: no cruzan ese borde.
+
+**Qué no cubre:** no hay test de componente (`.nuxt.spec.ts`) para `NotaCreditoModal.vue` — no
+existía antes de este cierre y la tarea acotó los tests nuevos a `useDevolucionInventario.spec.ts`.
+La comparación `gt` de `motivoRequerido` (el `>` estricto que reemplazó al `≥`) **no tiene test**:
+lo que los tests de arriba fijan es el VALOR que devuelve `valorDevueltoCuantizado`, no que `gt`
+decida bien con ese valor. Tampoco hay test de que el prop `configCalculo` llegue del drawer al
+modal. Las tres cosas se verificaron leyendo el código y con el gate completo (`build`, `test`,
+`typecheck:ratchet`, `design:check`), no con un test que monte el modal.
+
+La entrada, verbatim:
+
+- [ ] **La cuenta de plata del modal de nota de crédito es aproximada, y queda una ventana de un
+  minor unit** (frontend; **medido el 2026-09-04**, reescrita dos veces ese mismo día) — la
+  entrada nació pidiendo anticipar el 400 de *"la mercadería vale más que la nota"*. **Ese 400 ya
+  no existe** —el frente de la devolución con crédito parcial lo sacó, ver
+  [`resueltos.md`](resueltos.md)— y en su lugar el backend exige el `comentario` cuando la nota
+  acredita menos que lo devuelto. El aviso cambió de signo, de *"no podés"* a *"contame por
+  qué"*, y **ya está construido** (`7fe7046b`): el modal muestra el label "Motivo" con su
+  explicación cuando lo marcado vale `≥` el monto.
+
+  **Lo que queda abierto es la exactitud, y es medido.** El navegador **no puede calcular ese
+  umbral con precisión**: valuar cada línea a `Σ total_linea / Σ cantidad` y cuantizarla a la
+  escala de la moneda con el `modo_redondeo` **congelado de esa venta** es replicar el
+  cuantizador del motor acá. Se escribió sin cuantizar y **quedaba peor que no tenerlo**: con 3
+  unidades de 1.000, `333,3333 > 333` deshabilitaba el botón para una nota que el backend
+  acepta, y el mensaje —pasado por `formatMonto`, que trunca— decía *"vale $333, más que los
+  $333"*. Por eso `valorAproximadoDevuelto` **solo pide** el motivo y **nunca deshabilita el
+  botón**: el único guard es el del backend.
+
+  ⚠️ **El `≥` cubre el empate, no la ventana entera.** Cuando la cuantización del backend sube
+  —1.001/3 → 334 × 3 = 1.002 contra los 1.001 de acá— queda hasta **un minor unit por línea**
+  donde el modal no pide el motivo y el POST igual responde 400. Es la red del backend
+  funcionando; se anota porque es la única parte de la entrada que sigue viva.
+
+  **Para cerrarla del todo:** si alguna vez hace falta una cuenta EXACTA en el navegador, decidir
+  cómo viaja el criterio de redondeo congelado hasta el modal. ⚠️ **El tipo de `configCalculo`
+  en el drawer declara cinco campos y NO `decimalesMoneda`**, que es justamente el que
+  `cuantizar` usa: el JSON congelado sí lo trae, así que es agregarlo al tipo —no ir a buscarlo
+  al store de monedas, que daría la escala de HOY y no la congelada—. Emparentada con la deuda
+  de `unidadBaseItem` / `resolverUnidadBaseDeItem`, que es la misma clase de gemelo sin enlace
+  de compilación.
+
 ## Restaurar una receta, un combo o un grupo a medias frena con 400 (cerrada 2026-09-14)
 
 Sale de [`pendientes.md` § 2](pendientes.md). **Medido primero, por API y en secuencia** (el
@@ -5903,11 +6024,12 @@ introducidos por el cambio mismo:
    primero ofrecía un monto que el POST rechaza, el segundo **escondía el botón** de nota de
    crédito en una venta recién cobrada que sí la admite.
 
-⚠️ **Lo que queda abierto y medido:** el modal **pide** el motivo con una cuenta aproximada
-—cuantizar acá sería el tercer hogar de una regla de plata, y ya se midió que sale peor— así que
-el `≥` cubre el empate pero **no la ventana entera**: cuando la cuantización del backend sube
-queda hasta un minor unit por línea donde el POST igual responde 400. La red es el 400.
-Anotado en [`pendientes.md`](pendientes.md) § 2.
+✅ **Lo que quedaba abierto se cerró el 2026-09-14:** el modal **pide** el motivo con un gemelo
+EXACTO de la cuenta del backend, no una aproximación — `useDevolucionInventario.valorDevueltoCuantizado`
+cuantiza cada línea con la escala y el `modo_redondeo` **congelados de la venta**, en el mismo
+orden que `ventas.service.ts`, y compara con `>` estricto (gemela de `seEscalo`), no con `≥`. Detalle,
+mutantes y qué queda sin test de componente en la entrada **"El umbral del motivo en la nota de
+crédito ya es un gemelo exacto del cuantizador del backend"**, arriba en este mismo archivo.
 
 📌 **El diferencial que esto protege**, y que la investigación mostró que **ningún producto del
 mercado tiene**: el movimiento de stock queda atado al documento que lo acredita. De los 11

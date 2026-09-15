@@ -139,6 +139,46 @@ export function filaEditable(
   return modo === 'acredita' ? filaAcreditable(fila) : filaDevolvible(fila)
 }
 
+/**
+ * El criterio de redondeo CONGELADO de la venta (`venta.configCalculo`), el
+ * subconjunto que hace falta para cuantizar como el motor. Nace acá y no en
+ * `VentaDetalleDrawer.vue` porque es este composable el que lo consume.
+ */
+export interface CriterioRedondeoCongelado {
+  decimalesMoneda: number
+  modoRedondeo: string
+}
+
+/**
+ * Gemela de `ROUNDING_POR_MODO` en
+ * `backend/src/modules/calculo-precios/calculo-precios.engine.ts:399`: los
+ * mismos cuatro modos, a la misma constante de Decimal.js (la librería las
+ * expone iguales en Node y en el navegador). Un modo que no está cae a
+ * HALF_UP, igual que `modoToRounding` en el backend — ahí el motivo es un
+ * valor que el tipo no puede garantizar en runtime porque sale de un JSONB;
+ * acá es el mismo motivo, un nivel más abajo (el campo llega tipado `string`
+ * desde la API).
+ */
+const ROUNDING_POR_MODO: Record<string, Decimal.Rounding> = {
+  HALF_UP: Decimal.ROUND_HALF_UP,
+  HALF_EVEN: Decimal.ROUND_HALF_EVEN,
+  FLOOR: Decimal.ROUND_FLOOR,
+  CEIL: Decimal.ROUND_CEIL,
+}
+
+/**
+ * Gemela de `cuantizar` en
+ * `backend/src/modules/calculo-precios/calculo-precios.engine.ts:444`: lleva
+ * un monto a la escala de la moneda (`decimalesMoneda`) con el modo de
+ * redondeo congelado. Mismo `toDecimalPlaces`, mismo mapeo de modo.
+ */
+function cuantizar(d: Decimal, cfg: CriterioRedondeoCongelado): Decimal {
+  return d.toDecimalPlaces(
+    cfg.decimalesMoneda,
+    ROUNDING_POR_MODO[cfg.modoRedondeo] ?? Decimal.ROUND_HALF_UP,
+  )
+}
+
 export function devolucionesPayload(
   filas: FilaDevolucion[],
 ): { itemId: string, cantidad: string, reponerStock: boolean }[] {
@@ -148,30 +188,35 @@ export function devolucionesPayload(
 }
 
 /**
- * Lo que valen, EN ESTA BOLETA, los ítems que el operador marcó — para decidir
- * si conviene **pedirle** el motivo.
+ * Lo que vale, EN ESTA BOLETA, lo que el operador marcó — para decidir si el
+ * modal le **pide** el motivo.
  *
- * ⚠️ Es APROXIMADO y no puede no serlo. El backend valúa cada línea a
- * `Σ total_linea / Σ cantidad` **cuantizado a la escala de la moneda con el
- * `modo_redondeo` congelado de esa venta**, y replicar ese cuantizador acá ya
- * se intentó el 2026-09-04: bloqueaba notas que el backend acepta y las
- * explicaba con números que el formateador había truncado
- * (`docs/agent/pendientes.md`).
+ * Con `cfg` (el caso real: `venta.configCalculo`, cuando hay criterio
+ * congelado) es gemela exacta de la valuación que hace `ventas.service.ts`
+ * (`crearNotaCreditoEnTransaccion`, desde el comentario "1. Lo que vale la
+ * mercadería devuelta EN ESTA BOLETA" ~línea 1481): cada línea a
+ * `Σ total_linea / Σ cantidad` — **se divide antes de multiplicar**, mismo
+ * orden que `valorUnitarioBruto` en `validarDevolucionesReembolso` (línea
+ * ~2511), porque Decimal.js redondea a su precisión por defecto (20 cifras
+ * significativas, igual en los dos lados) y el orden de las operaciones puede
+ * mover el último dígito antes de cuantizar — multiplicada por lo marcado y
+ * cuantizada a `decimalesMoneda` con el `modoRedondeo` de `cfg`, **por línea,
+ * antes de sumar** (el backend tampoco vuelve a cuantizar la suma).
  *
- * Por eso este número **solo se usa para PEDIR el motivo, nunca para
- * deshabilitar el botón**, y quien lo consume compara con `≥` y no con `>`:
- * pedir el motivo un peso antes de tiempo no molesta a nadie; comerse un 400
- * que no se anticipó, sí.
- *
- * ⚠️ El `≥` cubre el empate exacto, **no la ventana entera**: cuando la
- * cuantización del backend sube (1.001/3 → 334 × 3 = 1.002 contra los 1.001 de
- * acá) queda hasta un minor unit por línea donde el modal no pide el motivo y
- * el POST igual responde 400. Cerrarla exigiría el cuantizador del motor en el
- * navegador, que es justamente lo que no se hace. La red es el 400.
+ * Con `cfg: null` (ventas anteriores al congelado) no hay nada que cuantizar,
+ * y el orden vuelve a ser el de ANTES de este gemelo —multiplica antes de
+ * dividir, para no dejar el residuo de la división a la vista (5.000 / 3 × 3
+ * = 5000,0000000000000001)—: no hace diferencia funcional, porque
+ * `crearNotaCreditoDesdeVenta` —el único camino que arma este modal— fija
+ * `validarVentaElegible: true`, y con eso el backend rechaza CUALQUIER nota
+ * de crédito manual sobre una venta sin `config_calculo`
+ * (`ventas.service.ts:1416-1439`, antes de llegar a valuar nada); el 400 de
+ * esa venta no depende de este número.
  */
-export function valorAproximadoDevuelto(
+export function valorDevueltoCuantizado(
   detalles: DetalleVentaDevolucion[],
   filas: FilaDevolucion[],
+  cfg: CriterioRedondeoCongelado | null,
 ): string {
   const porItem = new Map<string, { total: Decimal, cantidad: Decimal }>()
   for (const d of detalles) {
@@ -186,8 +231,10 @@ export function valorAproximadoDevuelto(
       if (!f.cantidad || !esDecimalValido(f.cantidad)) return acc
       const v = porItem.get(f.itemId)
       if (!v || v.cantidad.isZero()) return acc
-      // Multiplica ANTES de dividir: dividir primero deja el residuo de la
-      // división a la vista (5.000 / 3 × 3 = 5000,0000000000000001).
+      if (cfg) {
+        const bruto = v.total.dividedBy(v.cantidad).times(f.cantidad)
+        return acc.plus(cuantizar(bruto, cfg))
+      }
       return acc.plus(v.total.times(f.cantidad).dividedBy(v.cantidad))
     }, new Decimal(0))
     .toString()

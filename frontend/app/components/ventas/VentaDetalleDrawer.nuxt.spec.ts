@@ -139,6 +139,9 @@ const VENTA = {
     calculoRecargos: 'base',
     escalaCalculo: 6,
     modoRedondeo: 'HALF_UP',
+    // Congelado en CLP (ver `CLP` arriba: `decimales: 0`) — lo que el tipo del
+    // drawer exige desde que `NotaCreditoModal` lo usa para cuantizar.
+    decimalesMoneda: 0,
   },
   pagos: [],
   customer: null,

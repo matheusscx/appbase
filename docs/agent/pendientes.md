@@ -79,37 +79,6 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   owner y del documento (ADR-010). Lo que este frente hizo fue **no empeorarlo** —ese camino ya
   existía para el cálculo fallado—; ampliarlo o cerrarlo es otra conversación.
 
-- [ ] **La cuenta de plata del modal de nota de crédito es aproximada, y queda una ventana de un
-  minor unit** (frontend; **medido el 2026-09-04**, reescrita dos veces ese mismo día) — la
-  entrada nació pidiendo anticipar el 400 de *"la mercadería vale más que la nota"*. **Ese 400 ya
-  no existe** —el frente de la devolución con crédito parcial lo sacó, ver
-  [`resueltos.md`](resueltos.md)— y en su lugar el backend exige el `comentario` cuando la nota
-  acredita menos que lo devuelto. El aviso cambió de signo, de *"no podés"* a *"contame por
-  qué"*, y **ya está construido** (`7fe7046b`): el modal muestra el label "Motivo" con su
-  explicación cuando lo marcado vale `≥` el monto.
-
-  **Lo que queda abierto es la exactitud, y es medido.** El navegador **no puede calcular ese
-  umbral con precisión**: valuar cada línea a `Σ total_linea / Σ cantidad` y cuantizarla a la
-  escala de la moneda con el `modo_redondeo` **congelado de esa venta** es replicar el
-  cuantizador del motor acá. Se escribió sin cuantizar y **quedaba peor que no tenerlo**: con 3
-  unidades de 1.000, `333,3333 > 333` deshabilitaba el botón para una nota que el backend
-  acepta, y el mensaje —pasado por `formatMonto`, que trunca— decía *"vale $333, más que los
-  $333"*. Por eso `valorAproximadoDevuelto` **solo pide** el motivo y **nunca deshabilita el
-  botón**: el único guard es el del backend.
-
-  ⚠️ **El `≥` cubre el empate, no la ventana entera.** Cuando la cuantización del backend sube
-  —1.001/3 → 334 × 3 = 1.002 contra los 1.001 de acá— queda hasta **un minor unit por línea**
-  donde el modal no pide el motivo y el POST igual responde 400. Es la red del backend
-  funcionando; se anota porque es la única parte de la entrada que sigue viva.
-
-  **Para cerrarla del todo:** si alguna vez hace falta una cuenta EXACTA en el navegador, decidir
-  cómo viaja el criterio de redondeo congelado hasta el modal. ⚠️ **El tipo de `configCalculo`
-  en el drawer declara cinco campos y NO `decimalesMoneda`**, que es justamente el que
-  `cuantizar` usa: el JSON congelado sí lo trae, así que es agregarlo al tipo —no ir a buscarlo
-  al store de monedas, que daría la escala de HOY y no la congelada—. Emparentada con la deuda
-  de `unidadBaseItem` / `resolverUnidadBaseDeItem`, que es la misma clase de gemelo sin enlace
-  de compilación.
-
 ---
 
 ### Las suites del e2e se pisan entre sí por el estado del seed (2026-08-22)

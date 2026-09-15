@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
-import type { DetalleVentaDevolucion } from '~/composables/useDevolucionInventario'
+import type { CriterioRedondeoCongelado, DetalleVentaDevolucion } from '~/composables/useDevolucionInventario'
 
 const props = defineProps<{
   ventaId: string
@@ -14,6 +14,12 @@ const props = defineProps<{
    */
   porPorcion: { clasificacion: string, monto: string }[]
   detalles: DetalleVentaDevolucion[]
+  /**
+   * El criterio de redondeo CONGELADO de la venta (`venta.configCalculo`),
+   * `null` en ventas anteriores al congelado. Es lo que permite cuantizar el
+   * umbral del motivo como el backend — ver `valorDevueltoCuantizado`.
+   */
+  configCalculo: CriterioRedondeoCongelado | null
 }>()
 export interface NotaCreditoSuccessPayload {
   id: string
@@ -60,15 +66,8 @@ const montoValido = computed(() => {
 // ⚠️ El botón NO se deshabilita por nada de plata más allá del disponible, que
 // lo dice el backend. "La mercadería vale más que la nota" dejó de ser un
 // rechazo el 2026-09-04 —las líneas se escalan— y lo que el backend exige a
-// cambio, el motivo, este modal lo PIDE (abajo) sin bloquear.
-//
-// La razón es medida, no estética: anticipar cualquiera de las dos cosas con
-// exactitud exige valuar cada línea a `Σ total_linea / Σ cantidad` **y
-// cuantizarla a la escala de la moneda con el `modo_redondeo` congelado de esa
-// venta**, o sea replicar el cuantizador del motor acá. Se intentó sin
-// cuantizar y quedaba peor que no tenerlo: con 3 unidades de 1.000, el modal
-// deshabilitaba el botón para una nota que el backend acepta, mostrando "vale
-// $333, más que los $333". Anotado en `pendientes.md` como frente propio.
+// cambio, el motivo, este modal lo PIDE (abajo) sin bloquear: el único guard
+// sigue siendo el backend, aunque el umbral de abajo ya sea un gemelo exacto.
 const puedeConfirmar = computed(() => montoValido.value && filasValidas.value)
 
 // Solo si hay más de una: en una venta toda afecta, repetir el total al lado
@@ -77,20 +76,22 @@ const mostrarPorPorcion = computed(() => props.porPorcion.length > 1)
 
 /**
  * El backend exige el motivo cuando la nota acredita MENOS de lo que vale la
- * mercadería marcada: es lo único que va a explicar, en el documento, por qué.
+ * mercadería marcada (`seEscalo = monto < valorDevuelto` en
+ * `ventas.service.ts:1554`): es lo único que va a explicar, en el documento,
+ * por qué.
  *
- * ⚠️ Se PIDE, no se bloquea, y se compara con `≥` y no con `>`: la cuenta de
- * acá es aproximada —no cuantiza— así que pedirlo un peso antes de tiempo no
- * molesta, y comerse un 400 que no se anticipó, sí. El botón nunca se
- * deshabilita por esto: el único guard es el del backend.
+ * `valorDevueltoCuantizado` es ahora un gemelo exacto de esa valuación —divide
+ * y cuantiza cada línea en el mismo orden que `ventas.service.ts`, con el criterio CONGELADO de esta
+ * venta—, así que la comparación es la MISMA del backend, `>` estricto y no
+ * `≥`: el empate ya no necesita margen. Se PIDE, nunca se bloquea: el único
+ * guard sigue siendo el backend.
  */
 const valorDevuelto = computed(() =>
-  valorAproximadoDevuelto(props.detalles, filas.value),
+  valorDevueltoCuantizado(props.detalles, filas.value, props.configCalculo),
 )
-const motivoRequerido = computed(() => {
-  const v = new Decimal(valorDevuelto.value)
-  return v.gt(0) && v.gte(new Decimal(monto.value || '0'))
-})
+const motivoRequerido = computed(() =>
+  new Decimal(valorDevuelto.value).gt(new Decimal(monto.value || '0')),
+)
 
 async function confirmar() {
   submitting.value = true

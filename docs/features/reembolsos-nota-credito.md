@@ -350,19 +350,26 @@ Dónde vive: `VentasReembolsoHandler.cuantizarMontoReembolso`
   idénticas con importes distintos. El resto del drawer ya servía sin tocarlo:
   la tabla de líneas con sus reglas congeladas y la fila "Impuestos" de los
   totales existían desde antes.
-- `ventas/NotaCreditoModal.vue` (2026-09-04): muestra el **disponible por porción
-  fiscal** debajo del total —solo si hay más de una: en una venta toda afecta
-  repetir el total es ruido—, un **switch de reponer por fila** (deshabilitado
-  con su nota en lo que no puede volver al stock) y **pide el motivo** cuando lo
-  marcado vale `≥` el monto.
-  ⚠️ **Pide, nunca bloquea.** Esa cuenta es aproximada: el backend valúa cada
-  línea y la **cuantiza con el `modo_redondeo` congelado de esa venta**, y
-  replicar ese cuantizador acá sería el tercer hogar de una regla de plata. Se
-  probó sin cuantizar y quedaba peor: con 3 unidades de 1.000 el botón se
-  deshabilitaba para una nota que el backend acepta, mostrando "vale $333, más
-  que los $333". Por eso se compara con `≥` y no con `>` —pedirlo un peso antes
-  de tiempo no molesta— y **queda una ventana de hasta un minor unit por línea**
-  donde el 400 llega igual. Anotado en `pendientes.md`.
+- `ventas/NotaCreditoModal.vue` (2026-09-04; umbral exacto 2026-09-14): muestra el
+  **disponible por porción fiscal** debajo del total —solo si hay más de una: en
+  una venta toda afecta repetir el total es ruido—, un **switch de reponer por
+  fila** (deshabilitado con su nota en lo que no puede volver al stock) y **pide
+  el motivo** cuando lo marcado vale más que el monto.
+  ⚠️ **Pide, nunca bloquea**: el único guard sigue siendo el backend. Pero desde
+  el 2026-09-14 esa cuenta es un **gemelo exacto** de la del backend, no una
+  aproximación: `useDevolucionInventario.valorDevueltoCuantizado` valúa cada
+  línea a `Σ total_linea / Σ cantidad` (dividiendo antes de multiplicar, mismo
+  orden que `ventas.service.ts` — el orden vive ahí, no en el motor de
+  cálculo) y la **cuantiza con la escala y el `modo_redondeo`
+  congelados de esa venta** (`venta.configCalculo`, que ahora viaja hasta el
+  modal con `decimalesMoneda` incluido), por línea y antes de sumar — igual que
+  el backend. La comparación es `>` estricto, gemela de `seEscalo` en
+  `ventas.service.ts`, no `≥`: el margen que compensaba la falta de
+  cuantización ya no hace falta. En una venta sin `config_calculo` congelada el
+  resultado queda sin cuantizar, pero no cambia nada: el único camino que arma
+  este modal fija `validarVentaElegible: true`, y con eso el backend rechaza
+  cualquier nota manual sobre esa venta antes de llegar a valuar algo. Cierre
+  medido en `docs/agent/resueltos.md`.
 - `pages/ventas/index.vue`: badges "NC" / "Reemb. parcial" / "Reembolsada" junto
   al estado.
 
