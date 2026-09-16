@@ -11,6 +11,7 @@ import { Salon } from './entities/salon.entity';
 import { Mesa } from './entities/mesa.entity';
 import { Cuenta } from './entities/cuenta.entity';
 import { CuentaAsignacion } from './entities/cuenta-asignacion.entity';
+import { CuentaLineaAnulacion } from './entities/cuenta-linea-anulacion.entity';
 import { VentasModule } from '../ventas/ventas.module';
 import { GarzonesModule } from '../garzones/garzones.module';
 import { ItemsModule } from '../items/items.module';
@@ -21,7 +22,13 @@ import { CalculoPreciosModule } from '../calculo-precios/calculo-precios.module'
 
 @Module({
   imports: [
-    RepositoriosModule.forFeature([Salon, Mesa, Cuenta, CuentaAsignacion]),
+    RepositoriosModule.forFeature([
+      Salon,
+      Mesa,
+      Cuenta,
+      CuentaAsignacion,
+      CuentaLineaAnulacion,
+    ]),
     VentasModule,
     GarzonesModule,
     ItemsModule,

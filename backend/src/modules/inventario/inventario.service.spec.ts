@@ -18,6 +18,7 @@ const UNIDAD_2 = 'unidad-uuid-2';
 const LOTE_ID = 'lote-uuid-1';
 const MOTIVO_BAJA_ID = 'motivo-baja-uuid';
 const MOTIVO_DIFERENCIA_ID = 'motivo-diferencia-uuid';
+const CUENTA_LINEA_ANULACION_ID = 'cuenta-linea-anulacion-uuid';
 const UBICACION_ID = 'ubicacion-local-uuid';
 
 describe('InventarioService', () => {
@@ -1239,6 +1240,73 @@ describe('InventarioService', () => {
       const insertCall = managerMock.query.mock.calls[3];
       expect(insertCall[0]).toContain('motivo_baja_id');
       expect(insertCall[1]).toContain(MOTIVO_BAJA_ID);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // cuenta_linea_anulacion_id: trazabilidad hacia la anulación que generó el
+  // consumo (parte 3). Solo se escribe cuando la merma vino de anular un plato
+  // ya despachado; nada la produce todavía, así que acá solo se prueba el
+  // transporte del id.
+  // ---------------------------------------------------------------------------
+  describe('registrarMovimiento — cuenta_linea_anulacion_id', () => {
+    it('motivo distinto de merma con cuentaLineaAnulacionId lanza BadRequest', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '10' }]); // SELECT saldo: statement aparte, ya bajo el lock
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'salida',
+          motivo: 'venta',
+          cantidad: '2',
+          usuarioId: USER_ID,
+          cuentaLineaAnulacionId: CUENTA_LINEA_ANULACION_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'cuenta_linea_anulacion_id solo aplica a merma',
+        ),
+      );
+    });
+
+    it('motivo merma con motivoBajaId y cuentaLineaAnulacionId lleva el id en su posición en el INSERT', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-cla1' }]);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '2',
+          usuarioId: USER_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
+          cuentaLineaAnulacionId: CUENTA_LINEA_ANULACION_ID,
+        },
+      );
+
+      const insertCall = managerMock.query.mock.calls[3] as [string, unknown[]];
+      const columnas = insertCall[0]
+        .match(/\(([^)]+)\)\s*VALUES/)![1]
+        .split(',')
+        .map((c) => c.trim());
+      const idx = columnas.indexOf('cuenta_linea_anulacion_id');
+      expect(idx).toBeGreaterThan(-1);
+      expect(insertCall[1][idx]).toBe(CUENTA_LINEA_ANULACION_ID);
     });
   });
 

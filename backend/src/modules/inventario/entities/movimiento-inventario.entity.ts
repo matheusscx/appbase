@@ -108,6 +108,16 @@ export class MovimientoInventario {
   @Column({ name: 'motivo_baja_id', type: 'uuid', nullable: true })
   motivoBajaId: string | null;
 
+  /**
+   * La anulación (parte 2) que generó este consumo, cuando el motivo es
+   * `merma` porque el plato salió de una línea de cuenta anulada. Nulo en
+   * el resto — incluida una merma que no vino de anular nada.
+   * Trazabilidad para la parte 3: une este movimiento con su fila de
+   * `cuenta_linea_anulaciones`.
+   */
+  @Column({ name: 'cuenta_linea_anulacion_id', type: 'uuid', nullable: true })
+  cuentaLineaAnulacionId: string | null;
+
   @Column({ name: 'motivo_diferencia_id', type: 'uuid', nullable: true })
   motivoDiferenciaId: string | null;
 

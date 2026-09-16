@@ -69,6 +69,12 @@ export interface RegistrarMovimientoParams {
   lote?: LoteInput; // entrada lote: crea o agrega a lote existente
   loteId?: string; // salida lote: lote a descontar
   motivoBajaId?: string | null;
+  /**
+   * La anulación (parte 2) que generó este consumo, cuando `motivo` es
+   * 'merma' porque el plato salió de una línea de cuenta anulada. Solo la
+   * parte 2 la escribe; una merma normal la deja en null.
+   */
+  cuentaLineaAnulacionId?: string | null;
   motivoDiferenciaId?: string | null; // solo en motivo='recuento'
   /**
    * El documento interno que ata las DOS filas de kardex de un traslado
@@ -298,6 +304,11 @@ export class InventarioService {
     if (params.motivo !== 'merma' && params.motivoBajaId) {
       throw new BadRequestException('motivo_baja_id solo aplica a merma');
     }
+    if (params.motivo !== 'merma' && params.cuentaLineaAnulacionId) {
+      throw new BadRequestException(
+        'cuenta_linea_anulacion_id solo aplica a merma',
+      );
+    }
     if (params.motivo === 'recuento' && !params.motivoDiferenciaId) {
       throw new BadRequestException(
         'El recuento requiere una causa de diferencia tipificada',
@@ -443,8 +454,8 @@ export class InventarioService {
          (tenant_id, item_id, ubicacion_id, tipo, motivo, cantidad,
           stock_anterior, stock_resultante, venta_id, usuario_id, comentario,
           costo_unitario, costo_anterior, motivo_baja_id, motivo_diferencia_id,
-          traslado_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+          traslado_id, cuenta_linea_anulacion_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        RETURNING movimiento_id`,
       [
         params.tenantId,
@@ -463,6 +474,7 @@ export class InventarioService {
         params.motivoBajaId ?? null,
         params.motivoDiferenciaId ?? null,
         params.trasladoId ?? null,
+        params.cuentaLineaAnulacionId ?? null,
       ],
     );
 

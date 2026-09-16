@@ -986,6 +986,10 @@ CREATE TABLE "movimientos_inventario" (
   -- solo en motivo='traslado'; NULL en el resto. Las DOS filas de un traslado
   -- comparten el mismo valor: es lo que permite reconstruir desde el kardex
   -- que estos 5 kg salieron de acá y entraron allá.
+  "cuenta_linea_anulacion_id" UUID, -- FK definida después de crear cuenta_linea_anulaciones
+  -- solo en motivo='merma' cuando el consumo vino de anular un plato ya
+  -- despachado; NULL en el resto. Une este movimiento con su fila de
+  -- cuenta_linea_anulaciones (trazabilidad, parte 3).
   "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"   TIMESTAMPTZ,
   "eliminado_el"     TIMESTAMPTZ
@@ -2375,6 +2379,30 @@ CREATE INDEX idx_cuenta_lineas_item ON cuenta_lineas (item_id);
 -- El diff (cantidad - cantidad_enviada) es lo que se envía en el próximo POST.
 ALTER TABLE cuenta_lineas
     ADD COLUMN cantidad_enviada NUMERIC(18,4) NOT NULL DEFAULT 0;
+
+-- Anulación de un plato ya despachado. Una fila por anulación, varias por
+-- línea. Sobrevive al borrado de la línea: cuando queda en cero, cuenta_lineas
+-- la borra con soft delete (manager.softDelete(CuentaLinea, …) en
+-- salones.service.ts), así que la fila sigue existiendo, y es el único rastro
+-- legible una vez que la cuenta ya no la lista.
+CREATE TABLE cuenta_linea_anulaciones (
+    cuenta_linea_anulacion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    cuenta_id UUID NOT NULL REFERENCES cuentas(cuenta_id),
+    cuenta_linea_id UUID NOT NULL REFERENCES cuenta_lineas(cuenta_linea_id),
+    item_id UUID NOT NULL REFERENCES items(item_id),
+    item_nombre TEXT NOT NULL, -- congelado: el catálogo puede renombrar o borrar el ítem después
+    cantidad NUMERIC(18,4) NOT NULL, -- cuánto se anuló en ESTA anulación, unidad canónica
+    motivo_baja_id UUID NOT NULL REFERENCES motivo_baja(motivo_baja_id),
+    autorizado_por UUID NOT NULL REFERENCES usuarios(usuario_id),
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+CREATE INDEX idx_cuenta_linea_anulaciones_cuenta ON cuenta_linea_anulaciones (tenant_id, cuenta_id);
+
+-- FK diferida de movimientos_inventario (depende de cuenta_linea_anulaciones)
+ALTER TABLE "movimientos_inventario" ADD FOREIGN KEY ("cuenta_linea_anulacion_id") REFERENCES "cuenta_linea_anulaciones" ("cuenta_linea_anulacion_id");
 
 
 -- =============================================================
