@@ -702,8 +702,13 @@ reimprime una venta pasada: el ticket siempre se arma contra estado vivo). Se ac
 otro platillo es peor —hoy el mismo gesto deja la venta **sin generar**— y porque es el camino
 que el cálculo fallado ya tenía, con su aviso. La salida buena —recalcular la cuenta cobrada—
 pide llamar al motor por fuera de la maquinaria de vigencia de `useResultadoCalculado`: frente
-propio, anotado con el residuo que arrastra (sin cálculo, la proyección local de caja se infla
-por el vuelto).
+propio.
+
+El otro residuo que ese camino arrastraba —la proyección local de caja inflada por el vuelto—
+**se cerró el 2026-09-16**: sin cálculo `targetCobro` cae en `bruto`, que es la suma de lo
+**tipeado**, así que el `min` no recortaba el vuelto y el `saldoEsperado` se movía de más. Ahora
+esa rama resta el vuelto, igual que los otros dos llamadores de `aplicarCobroLocal`, y que el
+`movimiento_caja` del backend, que ya registra `monto = pago − vuelto`.
 
 📌 **La familia tiene una segunda mitad, con la forma dada vuelta: lo que la acción
 ESCRIBE** (2026-09-05, tres de ellas; **quedan miembros vivos**, ver

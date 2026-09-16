@@ -53,27 +53,24 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
-- [ ] **La venta que se cierra sin cálculo queda sin boleta, y la caja se proyecta inflada por
-  el vuelto** (frontend; **medido el 2026-09-05** por la revisión del cierre de la quinta
-  puerta) — es el residuo **conocido y aceptado** de ese cierre, anotado para que no se
-  redescubra como bug.
+- [ ] **La venta que se cierra sin cálculo queda sin boleta** (frontend; **medido el
+  2026-09-05** por la revisión del cierre de la quinta puerta) — es el residuo **conocido y
+  aceptado** de ese cierre, anotado para que no se redescubra como bug.
 
   Cuando `cerrarCuentaConPin` no puede tomar el cálculo —el garzón se fue de la cuenta durante
-  el flush, o el cálculo falla— la venta se genera igual y el aviso lo dice. Dos costos:
+  el flush, o el cálculo falla— la venta se genera igual y el aviso lo dice. El costo:
+  **esa venta se queda sin boleta para siempre**, porque ningún camino reimprime una venta
+  pasada — el ticket siempre se arma contra estado vivo (medido y escrito en
+  [`resueltos.md`](resueltos.md), en el cierre de *"la moneda del extra en el ticket"*).
 
-  - **esa venta se queda sin boleta para siempre**: ningún camino reimprime una venta pasada,
-    el ticket siempre se arma contra estado vivo (medido y escrito en
-    [`resueltos.md`](resueltos.md), en el cierre de *"la moneda del extra en el ticket"*);
-  - `targetCobro` cae en `bruto`, así que `neto = bruto` y `cajaStore.aplicarCobroLocal` mueve
-    el `saldoEsperado` **incluyendo el vuelto**. Es proyección local, se corrige al recargar,
-    pero el comentario del código enumeraba el costo como "el papel" y esto no estaba.
+  ✅ **El segundo costo que esta entrada tenía —la caja proyectada inflada por el vuelto— se
+  cerró el 2026-09-16** ([`resueltos.md`](resueltos.md)). Lo que sigue abierto es solo la
+  boleta.
 
-  **La salida buena para lo primero es recalcular la cuenta cobrada** en vez de resignar el
-  ticket. Pide llamar al motor por fuera de la maquinaria de vigencia de
-  `useResultadoCalculado` —que es la que garantiza que un resultado corresponda al carrito que
-  se está viendo—, o hacer que el flush devuelva la cuenta fresca que ya recibe de cada
-  `PATCH`. **Lo segundo se arregla con el `vuelto`, que ya es parámetro**, pero es plata en un
-  camino degradado: no se tocó de arrastre.
+  **La salida buena es recalcular la cuenta cobrada** en vez de resignar el ticket. Pide llamar
+  al motor por fuera de la maquinaria de vigencia de `useResultadoCalculado` —que es la que
+  garantiza que un resultado corresponda al carrito que se está viendo—, o hacer que el flush
+  devuelva la cuenta fresca que ya recibe de cada `PATCH`.
 
   ⚠️ **Ojo con el alcance:** decidir que una venta puede quedar sin su boleta es materia del
   owner y del documento (ADR-010). Lo que este frente hizo fue **no empeorarlo** —ese camino ya

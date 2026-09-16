@@ -832,6 +832,11 @@ afterEach(() => {
   // no aparezca un falso verde. Lo corrigió la revisión: la primera versión de
   // este comentario decía que eran los últimos del archivo, y es falso.
   usePermissionsStore().reset()
+  // Mismo motivo que los dos de arriba: el test que siembra `resumenTurno` para
+  // mirar la proyección del cobro se lo dejaría puesto al siguiente, y con él
+  // puesto `aplicarMovimientoLocal` deja de ser no-op en tests que no hablan de
+  // caja. No hay `reset()` acá: el store de caja no expone uno.
+  useCajaStore().resumenTurno = null
 })
 
 async function montar() {
@@ -4546,6 +4551,83 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     // vista quedó.
     expect(botonEn(drawerMesa(), 'Cuentas')).toBeTruthy()
     expect(drawerMesa()?.textContent).toContain('Cuenta 10')
+  })
+
+  it('sin cálculo, la proyección de la caja suma lo cobrado y NO el vuelto', async () => {
+    /**
+     * La escena de arriba, con el vuelto puesto: el garzón cobra $5.000 con
+     * $2.000 de vuelto, o sea que al cajón entran $3.000.
+     *
+     * Con cálculo, `targetCobro` sale de `totalFinal + propina` y el vuelto queda
+     * afuera solo, porque el `min` contra el bruto lo recorta. **Sin cálculo,
+     * `targetCobro` cae en `bruto`** —que es la suma de lo TIPEADO, vuelto
+     * incluido— y el `min` deja de recortar nada: la caja se proyectaba $2.000
+     * más arriba de lo que tiene adentro.
+     *
+     * Los otros dos llamadores de `aplicarCobroLocal` ya restan el vuelto
+     * (`ventas/pos.vue` y `VentaDetalleDrawer.vue`); salones era el único que no.
+     *
+     * ⚠️ El `resumenTurno` se siembra a mano porque esta pantalla nunca lo carga
+     * —`cargarResumenTurno` es del módulo Caja—, y sin él `aplicarMovimientoLocal`
+     * corta en seco (`if (!r || r.ciego) return`) y la aserción no probaría nada.
+     */
+    const caja = useCajaStore()
+    caja.resumenTurno = {
+      ciego: false,
+      saldoInicial: '10000.0000',
+      totalEntradas: '0.0000',
+      totalSalidas: '0.0000',
+      saldoEsperado: '10000.0000',
+      totalMovimientos: 0,
+    }
+
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    // El cobro, con vuelto: $5.000 tipeados, $2.000 que vuelven al cliente.
+    const boton = botonEn(drawerMesa(), 'Cerrar y cobrar')
+    expect(boton?.disabled).toBe(false)
+    boton!.click()
+    await esperar(20)
+    const modal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    expect(modal.props('open'), 'el modal de cobro abrió').toBe(true)
+    modal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5000' }], '2000')
+    await esperar(20)
+    await tipearPin()
+
+    // Irse a la otra cuenta durante la espera es lo que deja el cierre sin
+    // cálculo, igual que en el test de arriba.
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(20)
+    const tarjetas = drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer')
+    tarjetas![1]!.click()
+    await esperar(20)
+
+    soltar()
+    await esperar(300)
+
+    // El camino degradado es el que se está ejercitando, no el feliz.
+    expect(cierresDeCuenta).toEqual(['cuenta-9'])
+    expect(toasts.some(t => t.title === 'Venta generada, pero no se pudo generar la boleta')).toBe(true)
+
+    // $10.000 de saldo inicial + $3.000 que entraron de verdad.
+    expect(caja.resumenTurno?.saldoEsperado).toBe('13000.0000')
   })
 
   it('cambiar de mesa durante la espera no le descuenta la ocupación a la otra mesa', async () => {

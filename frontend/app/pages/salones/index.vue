@@ -2523,9 +2523,7 @@ async function cerrarCuentaConPin(
     // vivo). Se acepta porque el otro platillo es peor —hoy, ese mismo gesto
     // deja la venta **sin generar**— y porque es el camino que el cálculo
     // fallado ya tenía. La salida buena, recalcular la cuenta cobrada por
-    // fuera de la vigencia, es un frente propio (`pendientes.md` § 2), y ahí
-    // también entra que `targetCobro` cae en `bruto` y la proyección de caja
-    // se infla por el vuelto.
+    // fuera de la vigencia, es un frente propio (`pendientes.md` § 2).
     let resultadoCerrado: ResultadoVenta | null = null
     let cuentaDelTicket: CuentaDetalle | null = null
     if (activeCuenta.value?.id === cuentaCerrada.id) {
@@ -2646,9 +2644,16 @@ async function cerrarCuentaConPin(
       (acc, p) => acc.plus(p.monto || '0'),
       new Decimal(0),
     )
+    // ⚠️ **El vuelto se resta en la rama degradada y no en la otra**, que es lo
+    // que parece asimétrico y no lo es: con cálculo, `totalFinal + propina` ya
+    // es lo que queda en el cajón —el `min` contra el bruto recorta lo que el
+    // garzón tipeó de más—, mientras que `bruto` es la suma de lo TIPEADO y el
+    // vuelto está adentro. Sin restarlo, el `min` no recortaba nada y la caja se
+    // proyectaba inflada por el vuelto. Es el idioma que ya usan los otros dos
+    // llamadores de `aplicarCobroLocal` (`ventas/pos.vue` y `VentaDetalleDrawer.vue`).
     const targetCobro = resultadoCerrado
       ? new Decimal(resultadoCerrado.totales.totalFinal).plus(tipMonto)
-      : bruto
+      : bruto.minus(vuelto || '0')
     const neto = Decimal.min(bruto, targetCobro).toFixed(4)
     cajaStore.aplicarCobroLocal(neto, pagosConMonto.length)
     // Lo que se PINTA se condiciona, igual que en cancelar: sacarlo de donde

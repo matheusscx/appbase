@@ -23,6 +23,36 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La proyección de la caja deja de sumar el vuelto cuando el cierre se queda sin cálculo (cerrada 2026-09-16)
+
+Sale de [`pendientes.md` § 2](pendientes.md), que la tenía como **el segundo** de los dos costos de
+*"la venta que se cierra sin cálculo"*. El primero —esa venta se queda sin boleta— **sigue
+abierto** y es materia del owner (ADR-010): no lo toca este cierre.
+
+**Qué pasaba.** Al cerrar una cuenta, `cerrarCuentaConPin` proyecta el cobro en la caja local con
+`cajaStore.aplicarCobroLocal(neto, …)`, donde `neto = min(bruto, targetCobro)`. Con cálculo,
+`targetCobro` es `totalFinal + propina` y el `min` recorta lo que el garzón tipeó de más, así que
+el vuelto queda afuera **solo**. Sin cálculo, `targetCobro` caía en `bruto` —la suma de lo
+**tipeado**, vuelto adentro—, el `min` no recortaba nada y el `saldoEsperado` se movía por el
+total tipeado en vez de por lo que entró al cajón.
+
+**Medido** (`index.nuxt.spec.ts`, escena del garzón que se mete en otra cuenta durante la espera,
+que es la que deja el cierre sin cálculo): saldo inicial 10.000, cobro de 5.000 con 2.000 de
+vuelto. Antes: `saldoEsperado` 15.000. Después: 13.000 — los 3.000 que entraron de verdad.
+
+**Qué se hizo.** La rama degradada pasa a `bruto.minus(vuelto || '0')`. No es un idioma nuevo: es
+el que ya usaban los otros dos llamadores de `aplicarCobroLocal` (`ventas/pos.vue` y
+`VentaDetalleDrawer.vue`), y el que el backend ya aplica del otro lado —el `movimiento_caja` de un
+pago registra `monto = pago − vuelto` ([`features/gestion-cajas.md`](../features/gestion-cajas.md)),
+o sea que la proyección local era la única superficie que no neteaba.
+
+**Qué lo fija.** `sin cálculo, la proyección de la caja suma lo cobrado y NO el vuelto`, que
+afirma sobre `resumenTurno.saldoEsperado` después del cierre. ⚠️ El test **siembra
+`resumenTurno` a mano** porque la pantalla de salones nunca lo carga —`cargarResumenTurno` es del
+módulo Caja—, y sin él `aplicarMovimientoLocal` corta en seco (`if (!r || r.ciego) return`) y la
+aserción no probaría nada. Por eso el `afterEach` del spec lo vuelve a `null`: con el store de
+caja sembrado, la proyección deja de ser no-op en tests que no hablan de caja.
+
 ## Aplicar overrides mientras se le quita el grupo a la receta ya no deja un override colgado (cerrada 2026-09-15)
 
 Sale de [`pendientes.md` § 2](pendientes.md). **Medido sobre base reseteada, antes del arreglo** (los
@@ -5545,9 +5575,10 @@ vivo. O sea que esa venta se queda sin documento para el cliente, definitivament
 igual, por dos razones que sí se sostienen: el otro platillo es peor —hoy ese mismo gesto deja
 la venta **sin generar**— y es el camino que el cálculo fallado **ya tenía**, con su aviso. La
 salida buena —recalcular la cuenta cobrada, por fuera de la maquinaria de vigencia de
-`useResultadoCalculado`— quedó en [`pendientes.md` § 2](pendientes.md), junto con el residuo que
-la revisión encontró en ese mismo camino: sin cálculo, `targetCobro` cae en `bruto` y la
-proyección local de caja se infla por el vuelto.
+`useResultadoCalculado`— quedó en [`pendientes.md` § 2](pendientes.md). El otro residuo que la
+revisión encontró en ese mismo camino —sin cálculo, `targetCobro` cae en `bruto` y la proyección
+local de caja se infla por el vuelto— **se cerró el 2026-09-16**, y su cierre está al principio de
+este archivo.
 
 ### Lo que el barrido encontró, y por eso esto NO dice "la última"
 
