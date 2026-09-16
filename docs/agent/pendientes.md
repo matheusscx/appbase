@@ -339,11 +339,12 @@ revisión independiente no lo pudo reproducir, con razón.
   ⚠️ **Dos filas del 03-09 cambian con esto, y hay que leerlas con esta tabla al lado:**
   - *"Dónde viven los motivos"* decía que cada motivo es merma **o** cortesía: ahora hay un tercer tipo,
     *no se llegó a hacer*.
-  - *"La línea queda marcada como anulada"* y el *"una línea de SQL"* de más arriba asumían una marca en
-    la línea. Con anulaciones parciales, **una marca booleana no alcanza**:
-    `ItemsService.comprometidoPorItem` suma `cantidad` de toda línea viva de una cuenta abierta, y un
-    filtro por marca seguiría apartando lo anulado a medias. Cómo se descuenta lo anulado lo decide la
-    parte 2.
+  - *"La línea queda marcada como anulada"* **quedó reemplazada el 2026-09-16**: la línea anulada se
+    **saca** de la cuenta, el rastro vive en el registro de anulaciones, la mesa lo muestra en un aviso
+    abajo y la precuenta lo imprime desde ahí. El motivo: dejar la línea marcada obligaba a tocar el motor
+    de cálculo, que rechaza una línea en cantidad cero y cruza las promos por orden. El *"una línea de
+    SQL"* de más arriba también cae: al sacar la línea, `comprometidoPorItem` no necesita ningún cambio.
+    Detalle y el resto de las decisiones de ese día, en la spec de la parte 2.
 
   📌 Hechos que salieron al abrirlo: el stock de una mesa **sale al cobrar**, así que una línea anulada
   antes nunca descontó nada; el sistema **no sabe si la cocina hizo el plato** (no hay estados de
@@ -356,10 +357,12 @@ revisión independiente no lo pudo reproducir, con razón.
   **Parte 1 construida (2026-09-15):** backend en tres commits — `b9d8af83` (el renombre del
   catálogo, sin cambiar conducta), `b5de5227` (el `tipo` en el modelo, el CRUD y el filtro
   `?tipo=` de `GET /api/motivos-baja`) y `3fbb359f` (el 400 de `POST /api/mermas` para un
-  motivo que no sea de tipo `merma`). Las pantallas (configuración muestra y edita el tipo;
-  Mermas filtra por `tipo=merma`) van en el mismo cierre. Sigue abierto lo que esta entrada
-  siempre dijo que faltaba: la parte 2 (anular en el salón, con
-  su permiso y su registro) y la parte 3 (el reporte de anulaciones que no descuentan).
+  motivo que no sea de tipo `merma`); las pantallas en `40d18937` y sus tests de navegador en
+  `aaa3241a`.
+
+  **Parte 2 — spec escrita (2026-09-16), sin construir:**
+  [`2026-09-16-anular-plato-despachado-design.md`](../superpowers/specs/2026-09-16-anular-plato-despachado-design.md).
+  Sigue abierto construirla, y la parte 3 (el reporte de anulaciones).
 
 - [ ] **La nota de crédito no es un documento todavía: es un monto libre con líneas
   informativas** (backend, decisión g) — lo medido, no una impresión: la cabecera toma el
