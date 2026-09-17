@@ -2346,6 +2346,29 @@ async function enviarComanda() {
       mesaNombre,
       cuentaNumero: cuenta.numero,
       garzonNombre: cuenta.garzonResponsableNombre,
+    }, (reclamadas) => {
+      // El claim ya avanzó `cantidad_enviada`: se refleja en la pantalla en el
+      // acto, o la línea sigue sin *Anular* y con el basurero vivo hasta salir
+      // de la mesa y volver (medido el 2026-09-17). Va antes de imprimir porque
+      // un QZ caído no deshace el despacho.
+      //
+      // Se parte de la versión VIVA en `cuentas.value`, no de `cuenta`: durante
+      // la espera de `flushPendientes` el catálogo sigue tocable, y el producto
+      // que el garzón agrega ahí no está en la foto —partir de ella lo borraba
+      // de la pantalla—. Y se toca solo `cantidadEnviada` de las líneas que
+      // el claim nombra —las de una categoría sin impresora no avanzan—, que no
+      // entra al cálculo, así que no hace falta `recalcular()`.
+      const enviadas = new Map(reclamadas.flatMap(e =>
+        e.items.map(i => [i.cuentaLineaId, i.cantidadEnviada] as const)))
+      const viva = cuentas.value.find(c => c.id === cuenta.id)
+      if (!viva || enviadas.size === 0) return
+      aplicarCuentaActualizada({
+        ...viva,
+        lineas: viva.lineas.map((l) => {
+          const cantidadEnviada = enviadas.get(l.id)
+          return cantidadEnviada === undefined ? l : { ...l, cantidadEnviada }
+        }),
+      })
     })
     // null = no hay impresoras de comanda activas → se saltó el flujo sin toast.
     if (estaciones === null) return

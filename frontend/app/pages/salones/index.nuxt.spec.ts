@@ -56,7 +56,11 @@ afterAll(() => {
  *
  * Va con `vi.hoisted` porque `vi.mock` se iza por encima de los `const`.
  */
-const { impresionesQz } = vi.hoisted(() => ({ impresionesQz: [] as string[][] }))
+const { impresionesQz, qzFalla } = vi.hoisted(() => ({
+  impresionesQz: [] as string[][],
+  /** `true` = QZ rechaza el `print`, como con QZ Tray cerrado. */
+  qzFalla: { activa: false },
+}))
 vi.mock('qz-tray', () => ({
   default: {
     websocket: { isActive: () => true, connect: () => Promise.resolve() },
@@ -67,6 +71,7 @@ vi.mock('qz-tray', () => ({
       setSignaturePromise: () => {},
     },
     print: (_config: unknown, datos: string[]) => {
+      if (qzFalla.activa) return Promise.reject(new Error('QZ Tray no responde'))
       impresionesQz.push(datos)
       return Promise.resolve()
     },
@@ -230,6 +235,11 @@ let impresorasBoleta: unknown[] = []
  * "salió la de otra cuenta".
  */
 let reclamosDeComanda: string[] = []
+/**
+ * Lo que contesta el claim. Vacío por defecto: así `imprimirComanda()` corta
+ * antes de `imprimirEn()` y los tests que solo miran el claim no imprimen.
+ */
+let estacionesReclamadas: unknown[] = []
 /**
  * Cada `POST /cuentas/:id/cerrar`, con el id que viajó en la URL.
  *
@@ -785,7 +795,7 @@ mockNuxtImport('useApiFetch', () => {
       // pide un `websocket.connect()` a QZ Tray en localhost — no hay ninguno
       // corriendo en un test. Alcanza igual: lo que estos tests miden es que el
       // claim salió y con qué cuenta.
-      return Promise.resolve({ estaciones: [] })
+      return Promise.resolve({ estaciones: estacionesReclamadas })
     }
     // El resto del arranque (unidades, caja, emisor) no interviene en este flujo.
     return Promise.resolve([])
@@ -843,7 +853,9 @@ function reiniciarMock() {
   impresorasComanda = []
   impresorasBoleta = []
   impresionesQz.length = 0
+  qzFalla.activa = false
   reclamosDeComanda = []
+  estacionesReclamadas = []
   cierresDeCuenta = []
   bodiesDeCierre = []
   cierreRetenido = null
@@ -6654,6 +6666,192 @@ describe('salones — anular un plato despachado', () => {
     // La cantidad real (0,5 l), no "1" ni "0" — "0,5 l" son 5 caracteres,
     // el ancho exacto de la columna CANT, así que entra sin truncarse.
     expect(ticket).toContain('0,5 l')
+  })
+
+  /**
+   * Recién mandada a cocina, la línea ya se puede anular **sin salir de la
+   * cuenta** (medido el 2026-09-17 armando `e2e/salones/anular-plato.spec.ts`):
+   * el claim avanzaba `cantidad_enviada` en el servidor, pero la pantalla seguía
+   * con la línea en 0 —sin *Anular* y con el basurero vivo— hasta cerrar el
+   * drawer y volver a tocar la mesa.
+   */
+  describe('después de "Enviar a cocina"', () => {
+    function mandarACocina() {
+      impresorasComanda = [{
+        id: 'imp-1',
+        nombre: 'Cocina',
+        rol: 'comanda',
+        activo: true,
+        tipoConexion: 'red',
+        host: '10.0.0.9',
+        puerto: 9100,
+        nombreCola: null,
+      }]
+      estacionesReclamadas = [{
+        impresoraId: 'imp-1',
+        nombre: 'Cocina',
+        items: [{ cuentaLineaId: 'linea-1', nombre: 'Lomo a lo pobre', cantidad: '2', cantidadEnviada: '2' }],
+      }]
+    }
+
+    function botonQuitar() {
+      return drawerMesa()?.querySelector<HTMLButtonElement>('button[title="Quitar"]')
+    }
+
+    it('la línea despachada muestra *Anular* en el acto', async () => {
+      usePermissionsStore().permisos = ['Salones:Anular']
+      catalogoItemsMock = [producto()]
+      cuentasDeLaMesa = [cuentaCon(LINEA_BASE)]
+      mandarACocina()
+
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      expect(botonAnular()).toBeFalsy()
+
+      botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+      await esperar(100)
+
+      expect(reclamosDeComanda).toEqual(['cuenta-9'])
+      expect(impresionesQz).toHaveLength(1)
+      expect(botonAnular()).toBeTruthy()
+    })
+
+    it('sin el permiso, el basurero de la línea despachada se apaga en el acto', async () => {
+      catalogoItemsMock = [producto()]
+      cuentasDeLaMesa = [cuentaCon(LINEA_BASE)]
+      mandarACocina()
+
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      expect(botonQuitar()?.disabled).toBe(false)
+
+      botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+      await esperar(100)
+
+      expect(botonQuitar()).toBeFalsy()
+      expect(drawerMesa()?.querySelector<HTMLButtonElement>('button[title^="Ya se despachó"]')?.disabled).toBe(true)
+    })
+
+    it('volver al listado y reabrir la cuenta no la devuelve sin despachar', async () => {
+      // `volverACuentas` y `abrirCuenta` reusan el objeto de `cuentas.value`:
+      // actualizar solo `activeCuenta` dejaba la línea en 0 al reabrirla.
+      usePermissionsStore().permisos = ['Salones:Anular']
+      catalogoItemsMock = [producto()]
+      cuentasDeLaMesa = [cuentaCon(LINEA_BASE)]
+      mandarACocina()
+
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+      await esperar(100)
+
+      botonEn(drawerMesa(), 'Cuentas')!.click()
+      await esperar(20)
+      drawerMesa()!.querySelector<HTMLElement>('.cursor-pointer')!.click()
+      await esperar(20)
+
+      expect(botonAnular()).toBeTruthy()
+    })
+
+    it('con QZ caído, la línea igual queda despachada: el claim ya avanzó', async () => {
+      // El claim avanza `cantidad_enviada` ANTES de imprimir, así que el papel
+      // que falla no deshace el despacho. Sin esto el garzón ve el error,
+      // reintenta, el servidor contesta "nada nuevo" y la línea sigue sin
+      // *Anular* igual.
+      usePermissionsStore().permisos = ['Salones:Anular']
+      catalogoItemsMock = [producto()]
+      cuentasDeLaMesa = [cuentaCon(LINEA_BASE)]
+      mandarACocina()
+      qzFalla.activa = true
+
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+      await esperar(100)
+
+      expect(toasts.some(t => t.color === 'error')).toBe(true)
+      expect(botonAnular()).toBeTruthy()
+    })
+
+    it('lo que se agregó mientras se mandaba lo pendiente no desaparece', async () => {
+      // La edición pendiente abre la espera; en ella el garzón toca un producto
+      // y la cuenta viva gana esa línea. Marcar lo despachado sobre la foto
+      // tomada al tocar *Enviar a cocina* la borraba de la pantalla.
+      catalogoItemsMock = [producto()]
+      cuentasDeLaMesa = [cuentaCon(LINEA_BASE)]
+      mandarACocina()
+      let soltar!: () => void
+      patchCantidadRetenido = new Promise<void>((r) => {
+        soltar = r
+      })
+
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!.vm.$emit('change', {
+        presentacion: '3',
+        unidadCodigo: 'unidad',
+        cantidadCanonica: '3',
+      })
+      await esperar(20)
+
+      botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+      await esperar(20)
+      wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', catalogoItemsMock[0])
+      await esperar(20)
+      expect(wrapper.findAllComponents({ name: 'AppCantidadInput' })).toHaveLength(2)
+      // El servidor ya tiene la línea nueva cuando contesta el `PATCH`.
+      cuentasServidor![0]!.lineas.push({ ...LINEA_BASE, id: 'linea-nueva-1', cantidad: '1' })
+
+      soltar()
+      await esperar(150)
+
+      expect(reclamosDeComanda).toEqual(['cuenta-9'])
+      expect(wrapper.findAllComponents({ name: 'AppCantidadInput' })).toHaveLength(2)
+      expect(botonQuitar()?.disabled, 'la agregada no se despachó').toBe(false)
+    })
+
+    it('*Cancelar cuenta* ya la trata como despachada', async () => {
+      // `abrirCancelar` decide la ruta con la misma `cantidadEnviada`: sin
+      // `Salones:Anular`, recién mandada a cocina ya no se cancela por la
+      // ruta simple.
+      catalogoItemsMock = [producto()]
+      cuentasDeLaMesa = [cuentaCon(LINEA_BASE)]
+      mandarACocina()
+
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+      await esperar(100)
+      const dialogosAntes = dialogos().length
+      botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
+      await esperar(20)
+
+      expect(dialogos()).toHaveLength(dialogosAntes)
+      expect(toasts.some(t =>
+        t.color === 'warning' && (t.title ?? '').includes('hace falta un encargado'),
+      )).toBe(true)
+    })
+
+    it('una línea que el claim no nombra queda como estaba', async () => {
+      // El control de los de arriba: una versión que marcara despachada TODA
+      // la cuenta los pasaría igual. Acá la línea 2 no tiene estación (su
+      // categoría no imprime), así que el servidor no le avanzó nada.
+      usePermissionsStore().permisos = ['Salones:Anular']
+      catalogoItemsMock = [producto()]
+      cuentasDeLaMesa = [{
+        ...cuentaCon(LINEA_BASE),
+        lineas: [LINEA_BASE, { ...LINEA_BASE, id: 'linea-2' }],
+      }]
+      mandarACocina()
+
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+      await esperar(100)
+
+      expect(drawerMesa()?.querySelectorAll('button[title^="Anular"]')).toHaveLength(1)
+      expect(botonQuitar()?.disabled).toBe(false)
+    })
   })
 })
 

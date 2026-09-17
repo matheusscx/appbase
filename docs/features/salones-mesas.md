@@ -1074,9 +1074,25 @@ despachado, y sigue cancelando 200/201 cuando no hay nada. El unitario
 `frontend/e2e/salones/anular-plato.spec.ts` (Playwright, navegador real): pide 2 unidades de
 un plato ruteado a cocina, las manda a cocina, anula 1 como cortesía, ve el aviso bajo la
 cuenta y confirma que el total baja de 2 unidades a 1 — sin imprimir la precuenta (QZ Tray),
-que cubre el unit de `buildPrecuentaTicket`. Documenta además un hallazgo de la pantalla que
-no es un bug de esta tarea: `enviarComanda` no vuelve a pedir la cuenta después del claim, así
-que el botón de anular no aparece hasta salir de la mesa y volver a entrar.
+que cubre el unit de `buildPrecuentaTicket`. Anula **sin salir de la cuenta**: ver abajo.
+
+### Lo despachado se ve en el acto (2026-09-17)
+
+Hasta este día *Enviar a cocina* avanzaba `cantidad_enviada` en el servidor pero no en la
+pantalla: la línea seguía sin *Anular*, con el basurero vivo y *Cancelar cuenta* por la ruta
+simple (que rebotaba con 400) hasta cerrar el drawer y volver a tocar la mesa. Volver al
+listado no alcanzaba, porque la cuenta se reabre del mismo objeto en memoria.
+
+Ahora `enviarComanda` aplica lo que contesta el claim —`cantidadEnviada` por línea, solo las
+que nombra— sobre la versión **viva** de la cuenta, sin otro request. Dos detalles:
+
+- **Se aplica antes de imprimir** (`imprimirComanda(…, alReclamar)`): con QZ caído la función
+  tira y el llamador no ve el retorno, pero el despacho ya ocurrió. Es el caso del e2e, que
+  corre sin QZ Tray.
+- **La versión viva, no la foto del click**: durante la espera de lo pendiente el catálogo
+  sigue tocable, y partir de la foto borraba de la pantalla el producto agregado ahí.
+
+Tests: `index.nuxt.spec.ts` § *después de "Enviar a cocina"*.
 
 ### Manual (Frontend)
 

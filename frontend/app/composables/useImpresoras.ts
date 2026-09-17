@@ -198,10 +198,15 @@ export function useImpresoras() {
    *
    * Si no hay impresoras de comanda **activas**, salta el flujo (sin reclamar ni
    * QZ) y devuelve `null` para que la UI no muestre "sin productos pendientes".
+   *
+   * `alReclamar` recibe lo reclamado **antes** de imprimir: si QZ falla, la
+   * función tira y el llamador nunca ve el retorno, pero `cantidad_enviada` ya
+   * avanzó en el servidor y la pantalla tiene que enterarse igual.
    */
   async function imprimirComanda(
     cuentaId: string,
     contexto: { mesaNombre: string, cuentaNumero: number, garzonNombre: string | null },
+    alReclamar?: (estaciones: ComandaEstacion[]) => void,
   ): Promise<ComandaEstacion[] | null> {
     const impresoras = (await listar('comanda')).filter(i => i.activo)
     if (impresoras.length === 0) return null
@@ -210,6 +215,7 @@ export function useImpresoras() {
       `${apiUrl}/cuentas/${cuentaId}/comanda/reclamar`,
       { method: 'POST' },
     )
+    alReclamar?.(estaciones)
     if (estaciones.length === 0) return estaciones
 
     for (const estacion of estaciones) {

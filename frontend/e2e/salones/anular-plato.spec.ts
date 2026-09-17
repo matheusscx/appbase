@@ -13,15 +13,11 @@ import { elegirEnSelector } from '../support/ui'
  * **La precuenta NO se imprime acá** (QZ Tray): eso lo cubre el unit de
  * `buildPrecuentaTicket`. Este test tampoco cobra — no hace falta caja.
  *
- * ⚠️ **`Enviar a cocina` no actualiza el estado local de la pantalla** (medido,
- * 2026-09-17): `enviarComanda` llama a `imprimirComanda`, que hace el claim
- * (`POST .../comanda/reclamar`, que sí avanza `cantidad_enviada` en el server) y
- * después intenta imprimir por QZ Tray, pero nunca vuelve a pedir la cuenta.
- * El botón de anular sigue sin aparecer hasta salir de la mesa (`Escape`, que
- * cierra el drawer) y volver a entrar — recién ahí `onSelectMesa` vuelve a
- * pedir `GET /mesas/:id/cuentas`. Un QZ Tray ausente en CI puede además dejar
- * un toast de error después del claim; no se afirma sobre él porque no importa
- * para este flujo.
+ * **Se anula sin salir de la cuenta**: el gesto aparece en cuanto vuelve el
+ * claim. Sin QZ Tray (CI) la impresión falla después del claim y deja un toast
+ * de error sobre el que no se afirma; el despacho ya ocurrió igual, y la
+ * pantalla lo refleja igual (`docs/features/salones-mesas.md` § *Lo despachado
+ * se ve en el acto*).
  */
 
 const PRECIO_BASE = '1000'
@@ -235,13 +231,7 @@ test('pide, manda a cocina, anula como cortesía y el aviso aparece con el total
   await page.getByRole('button', { name: 'Enviar a cocina' }).click()
   await reclamo
 
-  // 6. El gesto de anular no aparece hasta volver a pedir la cuenta (ver el
-  //    docblock de arriba): salir de la mesa y volver a entrar.
-  await page.keyboard.press('Escape')
-  await page.locator(`[data-qa="mesa-${escenario.mesaId}"]`).click()
-  await page.getByText('Cuenta 1', { exact: false }).click()
-
-  // 7. Anular 1 de las 2 unidades despachadas, como cortesía.
+  // 6. Anular 1 de las 2 unidades despachadas, como cortesía.
   await page
     .getByRole('button', { name: 'Anular (cortesía, merma o no se llegó a hacer)' })
     .click()
@@ -251,16 +241,16 @@ test('pide, manda a cocina, anula como cortesía y el aviso aparece con el total
   await elegirEnSelector(modalAnular, 'Cortesía de la casa (Cortesía)')
   await modalAnular.getByRole('button', { name: 'Anular', exact: true }).click()
 
-  // 8. El toast de éxito…
+  // 7. El toast de éxito…
   await expect(page.getByText('Plato anulado').first()).toBeVisible()
 
-  // 9. …el aviso debajo de la cuenta, con la palabra del owner (spec § 5):
+  // 8. …el aviso debajo de la cuenta, con la palabra del owner (spec § 5):
   //    "{cantidad} {plato} anulado — {tipo}, autorizó {usuario}".
   await expect(
     page.getByText(`1 ${escenario.itemNombre} anulado — Cortesía, autorizó Admin`),
   ).toBeVisible()
 
-  // 10. Y el total bajó exactamente lo anulado: de 2 unidades a 1.
+  // 9. Y el total bajó exactamente lo anulado: de 2 unidades a 1.
   await expect(valorDelTotal(page)).toHaveText(TOTAL_1_UNIDAD)
 
   // Verificación que no es de cliente: el servidor también quedó con una sola
