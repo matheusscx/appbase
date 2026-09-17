@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { cuentaToCalcularInput, type CuentaDetalle, type CuentaLineaDetalle } from './useSalones'
+import {
+  cuentaToCalcularInput,
+  tipoMotivoBajaLabel,
+  formatCantidadAnulacion,
+  type CuentaDetalle,
+  type CuentaLineaDetalle,
+  type CuentaAnulacionDetalle,
+} from './useSalones'
 
 function linea(personalizacion: CuentaLineaDetalle['personalizacion']): CuentaLineaDetalle {
   return {
@@ -29,6 +36,7 @@ function cuenta(overrides: Partial<CuentaDetalle> = {}): CuentaDetalle {
     garzonCierreId: null,
     garzonCierreNombre: null,
     lineas: [linea(null)],
+    anulaciones: [],
     ...overrides,
   }
 }
@@ -143,5 +151,67 @@ describe('cuentaToCalcularInput', () => {
     // total sin descuento en pantalla y se le cobraría CON descuento.
     const input = cuentaToCalcularInput(cuenta({ id: 'cuenta-xyz' }))
     expect(input.cuentaId).toBe('cuenta-xyz')
+  })
+})
+
+describe('tipoMotivoBajaLabel', () => {
+  // Valores fijados por el owner (spec `2026-09-16-anular-plato-despachado-design.md`
+  // § 5, Global Constraints): el modal del salón, el aviso bajo la cuenta y la
+  // precuenta muestran esta misma palabra, no el código.
+  it('cortesia → Cortesía', () => {
+    expect(tipoMotivoBajaLabel('cortesia')).toBe('Cortesía')
+  })
+
+  it('merma → Merma', () => {
+    expect(tipoMotivoBajaLabel('merma')).toBe('Merma')
+  })
+
+  it('no_elaborado → No se llegó a hacer', () => {
+    expect(tipoMotivoBajaLabel('no_elaborado')).toBe('No se llegó a hacer')
+  })
+})
+
+describe('formatCantidadAnulacion', () => {
+  // Fix round 1 (2026-09-17): `cantidad` es canónica y sin la unidad del ítem
+  // no hay forma de saber si redondearla a entero pisa un valor real. `0.5`
+  // deliberadamente en vez de `1`: con un fixture de `1` el bug (redondeo a
+  // entero) y el fix (mostrar la unidad) dan el mismo texto, y el test no
+  // discrimina nada.
+  function anulacion(overrides: Partial<CuentaAnulacionDetalle> = {}): CuentaAnulacionDetalle {
+    return {
+      id: 'anulacion-1',
+      itemId: 'item-papas',
+      itemNombre: 'Papas fritas',
+      cantidad: '0.5',
+      motivoNombre: 'Invitación',
+      motivoTipo: 'cortesia',
+      autorizadoPorNombre: 'Ana',
+      creadoEl: '2026-09-17T12:00:00.000Z',
+      ...overrides,
+    }
+  }
+
+  const esFraccionariaDelCatalogo = (codigo: string | null | undefined) => codigo === 'kg'
+
+  it('un ítem de magnitud continua muestra los decimales con su unidad', () => {
+    const itemsPorId = new Map([['item-papas', { tipo: 'producto', unidadMedida: 'kg' }]])
+    expect(formatCantidadAnulacion(anulacion(), itemsPorId, esFraccionariaDelCatalogo)).toBe('0,5 kg')
+  })
+
+  it('un ítem de conteo muestra un entero, sin unidad', () => {
+    const itemsPorId = new Map([['item-lomo', { tipo: 'producto', unidadMedida: 'unidad' }]])
+    const esFraccionariaConteo = (codigo: string | null | undefined) => codigo === 'kg'
+    expect(
+      formatCantidadAnulacion(
+        anulacion({ itemId: 'item-lomo', cantidad: '2' }),
+        itemsPorId,
+        esFraccionariaConteo,
+      ),
+    ).toBe('2')
+  })
+
+  it('si el ítem ya no está en el catálogo, cae al mismo fallback que `unidadBaseLinea`: unidad', () => {
+    const itemsPorId = new Map<string, { tipo: string, unidadMedida?: string | null }>()
+    expect(formatCantidadAnulacion(anulacion({ cantidad: '3' }), itemsPorId, esFraccionariaDelCatalogo)).toBe('3')
   })
 })

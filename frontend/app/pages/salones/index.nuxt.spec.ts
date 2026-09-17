@@ -332,6 +332,21 @@ let miPinRechaza = false
 let catalogoRechaza403 = false
 /** Fuerza `/metodos-pago` a rechazar con un error genérico — NO un 403 de permiso. */
 let metodosPagoRechaza = false
+/** Cada `POST /cuentas/:id/lineas/:lineaId/anular`: cuentaId, lineaId y el body mandado. */
+let anulacionesPedidas: { cuentaId: string, lineaId: string, body: Record<string, unknown> }[] = []
+/** Lo que devuelve `GET /motivos-baja?soloActivas=true` — el catálogo del modal de anulación. */
+let motivosBajaMock: { id: string, nombre: string, tipo: string }[] = []
+/** Fuerza el rechazo del `POST .../anular`. */
+let anularLineaRechaza = false
+/** `advertencias` que trae el `POST .../anular` junto a la cuenta — avisos de stock informativos. */
+let advertenciasAnular: string[] = []
+/**
+ * La cuenta que devuelve el `POST .../anular`. El test la arma explícita, con
+ * `anulaciones` ya al día: el mock no simula el recálculo del backend, solo
+ * entrega lo que el test necesita para afirmar sobre la pantalla después de
+ * confirmar.
+ */
+let cuentaTrasAnular: Record<string, unknown> | null = null
 
 /**
  * Los toasts no se pueden leer del DOM sin montar `UApp`, así que se captura
@@ -673,6 +688,25 @@ mockNuxtImport('useApiFetch', () => {
       }
       return Promise.resolve([{ metodoPagoId: 'mp-1', nombre: 'Efectivo', permiteVuelto: true, habilitada: true }])
     }
+    // `POST /cuentas/:id/lineas/:lineaId/anular` — spec
+    // `2026-09-16-anular-plato-despachado-design.md`. Va ANTES del `/motivos-baja`
+    // genérico y del `patchLinea` de arriba no lo captura: ese termina en
+    // `$` justo antes de `/lineas/:lineaId`, sin el `/anular` final.
+    const anularMatch = ruta.match(/\/cuentas\/([^/]+)\/lineas\/([^/]+)\/anular$/)
+    if (anularMatch && method === 'POST') {
+      anulacionesPedidas.push({
+        cuentaId: anularMatch[1] ?? '',
+        lineaId: anularMatch[2] ?? '',
+        body: (opts?.body ?? {}) as Record<string, unknown>,
+      })
+      if (anularLineaRechaza) {
+        return Promise.reject(new Error('Solo se puede anular lo despachado a cocina'))
+      }
+      return Promise.resolve({ ...(cuentaTrasAnular ?? {}), advertencias: advertenciasAnular })
+    }
+    if (ruta.endsWith('/motivos-baja')) {
+      return Promise.resolve(motivosBajaMock)
+    }
     if (ruta.endsWith('/caja/testigos/pendientes')) {
       bodiesPendientesTestigo.push(opts?.body ?? {})
       return Promise.resolve(pendientesTestigoMock)
@@ -811,6 +845,11 @@ function reiniciarMock() {
   salonesMock = [{ id: 'salon-1', nombre: 'Principal', mesas: [mesa()] }]
   catalogoRechaza403 = false
   metodosPagoRechaza = false
+  anulacionesPedidas = []
+  motivosBajaMock = []
+  anularLineaRechaza = false
+  advertenciasAnular = []
+  cuentaTrasAnular = null
   toasts = []
   alSalirDeLaRuta = null
 }
@@ -6320,6 +6359,275 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     // en el detalle.
     expect(botonEn(drawerMesa(), 'Cuentas')).toBeTruthy()
     expect(drawerMesa()?.textContent).toContain('Cuenta 1')
+  })
+})
+
+/**
+ * Anular un plato ya despachado — spec
+ * `2026-09-16-anular-plato-despachado-design.md`. Fixtures propias, en el
+ * mismo molde que "cuenta con un ítem eliminado del catálogo": no reutiliza
+ * `producto`/`cuentaConPedido` del describe de arriba porque son locales a él.
+ */
+describe('salones — anular un plato despachado', () => {
+  const ITEM_ID = 'item-lomo'
+
+  const LINEA_BASE = {
+    id: 'linea-1',
+    itemId: ITEM_ID,
+    nombre: 'Lomo a lo pobre',
+    precioBase: '5000',
+    monedaId: CLP_ID,
+    cantidad: '2',
+    cantidadEnviada: '0',
+  }
+
+  function producto() {
+    return {
+      id: ITEM_ID,
+      nombre: 'Lomo a lo pobre',
+      precioBase: '5000',
+      monedaId: CLP_ID,
+      unidadMedida: 'unidad',
+      tipo: 'producto',
+      activo: true,
+    }
+  }
+
+  function cuentaCon(linea: Record<string, unknown>, anulaciones: unknown[] = []) {
+    return {
+      id: 'cuenta-9',
+      numero: 9,
+      nombre: null,
+      estado: 'abierta',
+      mesaId: MESA_ID,
+      ventaId: null,
+      garzonAperturaId: 'g1',
+      garzonAperturaNombre: 'Ana',
+      garzonResponsableId: 'g1',
+      garzonResponsableNombre: 'Ana',
+      garzonCierreId: null,
+      garzonCierreNombre: null,
+      lineas: [linea],
+      anulaciones,
+    }
+  }
+
+  async function montarConMoneda() {
+    const wrapper = await montar()
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    await esperar(0)
+    return wrapper
+  }
+
+  async function abrirLaCuenta(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await seleccionarMesa(wrapper)
+    const tarjeta = drawerMesa()?.querySelector<HTMLElement>('.cursor-pointer')
+    expect(tarjeta).toBeTruthy()
+    tarjeta!.click()
+    await esperar(20)
+  }
+
+  function botonAnular() {
+    return drawerMesa()?.querySelector<HTMLButtonElement>('button[title^="Anular"]')
+  }
+
+  beforeEach(reiniciarMock)
+
+  it('sin el permiso, ni una línea ya despachada muestra el gesto', async () => {
+    // Guard de reentrancia del gate: sin `Salones:Anular` el botón no se
+    // rinde, aunque la línea SÍ cumpla la otra condición (despachada).
+    catalogoItemsMock = [producto()]
+    cuentasDeLaMesa = [cuentaCon({ ...LINEA_BASE, cantidadEnviada: '2' })]
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+
+    expect(botonAnular()).toBeFalsy()
+  })
+
+  it('con el permiso, una línea ya despachada sí lo muestra', async () => {
+    usePermissionsStore().permisos = ['Salones:Anular']
+    catalogoItemsMock = [producto()]
+    cuentasDeLaMesa = [cuentaCon({ ...LINEA_BASE, cantidadEnviada: '2' })]
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+
+    expect(botonAnular()).toBeTruthy()
+  })
+
+  it('con el permiso, una línea SIN nada despachado no lo muestra', async () => {
+    // El contraste que hace falsable al de arriba: un `v-if` que solo mirara
+    // el permiso mostraría el botón en cualquier línea.
+    usePermissionsStore().permisos = ['Salones:Anular']
+    catalogoItemsMock = [producto()]
+    cuentasDeLaMesa = [cuentaCon({ ...LINEA_BASE, cantidadEnviada: '0' })]
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+
+    expect(botonAnular()).toBeFalsy()
+  })
+
+  it('el modal manda { cantidad, motivoBajaId } con la cantidad canónica', async () => {
+    // Unidades reales (kg/g), para que la aserción distinga "convierte de
+    // verdad" de "manda lo mismo que se tipeó". Máximo despachado: 0,5 kg
+    // (500 g); se anulan 300 g → 0,3 kg canónicos.
+    useUnidadesMedidaStore().hydrate([
+      { unidadMedidaId: 'g-uuid', codigo: 'g', nombre: 'Gramo', magnitud: 'masa', factorBase: '1' },
+      { unidadMedidaId: 'kg-uuid', codigo: 'kg', nombre: 'Kilogramo', magnitud: 'masa', factorBase: '1000' },
+    ])
+    usePermissionsStore().permisos = ['Salones:Anular']
+    motivosBajaMock = [
+      { id: 'motivo-cortesia', nombre: 'Invitación', tipo: 'cortesia' },
+      { id: 'motivo-merma', nombre: 'Se cayó', tipo: 'merma' },
+    ]
+    catalogoItemsMock = [{ ...producto(), unidadMedida: 'kg' }]
+    cuentasDeLaMesa = [cuentaCon({
+      ...LINEA_BASE,
+      cantidad: '0.5000',
+      cantidadEnviada: '0.5000',
+      unidadCodigoPresentacion: 'g',
+      cantidadPresentacion: '500',
+    })]
+    cuentaTrasAnular = cuentaCon({ ...LINEA_BASE, cantidad: '0.2000', cantidadEnviada: '0.2000' })
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+    botonAnular()!.click()
+    await esperar(20)
+
+    const modal = dialogos().find(d => d.textContent?.includes('Anular plato'))
+    expect(modal).toBeTruthy()
+    await esperar(20) // carga de `GET /motivos-baja`
+
+    const modalComponent = wrapper.findComponent({ name: 'SalonesAnularLineaModal' })
+    modalComponent.findComponent({ name: 'UInputNumber' }).vm.$emit('update:modelValue', 300)
+    modalComponent.findComponent({ name: 'USelectMenu' }).vm.$emit('update:modelValue', 'motivo-cortesia')
+    await esperar(10)
+
+    botonEn(modal, 'Anular')!.click()
+    await esperar(20)
+
+    expect(anulacionesPedidas).toHaveLength(1)
+    expect(anulacionesPedidas[0]!.cuentaId).toBe('cuenta-9')
+    expect(anulacionesPedidas[0]!.lineaId).toBe('linea-1')
+    expect(anulacionesPedidas[0]!.body).toEqual({ cantidad: '0.3', motivoBajaId: 'motivo-cortesia' })
+  })
+
+  it('muestra las advertencias de stock que trae la respuesta', async () => {
+    usePermissionsStore().permisos = ['Salones:Anular']
+    motivosBajaMock = [{ id: 'motivo-cortesia', nombre: 'Invitación', tipo: 'cortesia' }]
+    catalogoItemsMock = [producto()]
+    cuentasDeLaMesa = [cuentaCon({ ...LINEA_BASE, cantidadEnviada: '2' })]
+    cuentaTrasAnular = cuentaCon({ ...LINEA_BASE, cantidad: '1', cantidadEnviada: '1' })
+    advertenciasAnular = ['Sin stock de "Papas" en el local: quedó en negativo']
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+    botonAnular()!.click()
+    await esperar(20)
+
+    const modal = dialogos().find(d => d.textContent?.includes('Anular plato'))
+    const modalComponent = wrapper.findComponent({ name: 'SalonesAnularLineaModal' })
+    modalComponent.findComponent({ name: 'UInputNumber' }).vm.$emit('update:modelValue', 1)
+    modalComponent.findComponent({ name: 'USelectMenu' }).vm.$emit('update:modelValue', 'motivo-cortesia')
+    await esperar(10)
+    botonEn(modal, 'Anular')!.click()
+    await esperar(20)
+
+    expect(toasts.some(t => t.color === 'success' && t.title === 'Plato anulado')).toBe(true)
+    expect(toasts.some(t =>
+      t.color === 'warning' && t.title === 'Sin stock de "Papas" en el local: quedó en negativo',
+    )).toBe(true)
+  })
+
+  it('el aviso debajo de la cuenta sale del bloque `anulaciones`, no de las líneas', async () => {
+    // Fix round 1 (2026-09-17): `cantidad` es canónica. `0.5` en vez de `1` a
+    // propósito — con `1` el bug (redondeo a entero) y el fix (mostrar la
+    // unidad) daban el mismo texto, y el test no discriminaba nada.
+    useUnidadesMedidaStore().hydrate([
+      { unidadMedidaId: 'l-uuid', codigo: 'l', nombre: 'Litro', magnitud: 'volumen', factorBase: '1' },
+    ])
+    catalogoItemsMock = [producto(), { ...producto(), id: 'item-papas', nombre: 'Papas fritas', unidadMedida: 'l' }]
+    cuentasDeLaMesa = [cuentaCon({ ...LINEA_BASE, cantidadEnviada: '0' }, [{
+      id: 'anulacion-1',
+      itemId: 'item-papas',
+      itemNombre: 'Papas fritas',
+      cantidad: '0.5',
+      motivoNombre: 'Invitación',
+      motivoTipo: 'cortesia',
+      autorizadoPorNombre: 'Ana',
+      creadoEl: '2026-09-16T12:00:00.000Z',
+    }])]
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+
+    expect(drawerMesa()?.textContent).toContain('0,5 l Papas fritas anulado — Cortesía, autorizó Ana')
+  })
+
+  it('el aviso muestra un entero, sin unidad, para un ítem de conteo', async () => {
+    // El control del de arriba: sin él, una versión que SIEMPRE le pega una
+    // unidad (o que nunca la resuelve del catálogo) pasaría igual.
+    catalogoItemsMock = [producto()]
+    cuentasDeLaMesa = [cuentaCon({ ...LINEA_BASE, cantidadEnviada: '0' }, [{
+      id: 'anulacion-1',
+      itemId: ITEM_ID,
+      itemNombre: 'Lomo a lo pobre',
+      cantidad: '2',
+      motivoNombre: 'Invitación',
+      motivoTipo: 'cortesia',
+      autorizadoPorNombre: 'Ana',
+      creadoEl: '2026-09-16T12:00:00.000Z',
+    }])]
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+
+    expect(drawerMesa()?.textContent).toContain('2 Lomo a lo pobre anulado — Cortesía, autorizó Ana')
+  })
+
+  it('la precuenta imprime la cortesía anulada en $0, con la cantidad y unidad reales', async () => {
+    useUnidadesMedidaStore().hydrate([
+      { unidadMedidaId: 'l-uuid', codigo: 'l', nombre: 'Litro', magnitud: 'volumen', factorBase: '1' },
+    ])
+    catalogoItemsMock = [producto(), { ...producto(), id: 'item-papas', nombre: 'Papas fritas', unidadMedida: 'l' }]
+    impresorasBoleta = [{
+      id: 'impresora-1',
+      nombre: 'Boletera',
+      rol: 'boleta',
+      tipoConexion: 'sistema',
+      host: null,
+      puerto: null,
+      nombreCola: 'cola',
+      activo: true,
+    }]
+    cuentasDeLaMesa = [cuentaCon(LINEA_BASE, [{
+      id: 'anulacion-1',
+      itemId: 'item-papas',
+      itemNombre: 'Papas fritas',
+      cantidad: '0.5',
+      motivoNombre: 'Invitación',
+      motivoTipo: 'cortesia',
+      autorizadoPorNombre: 'Ana',
+      creadoEl: '2026-09-16T12:00:00.000Z',
+    }])]
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    botonEn(drawerMesa(), 'Imprimir precuenta')!.click()
+    await esperar(300)
+
+    expect(impresionesQz).toHaveLength(1)
+    const ticket = impresionesQz[0]!.join('')
+    expect(ticket).toContain('Papas fritas')
+    expect(ticket).toContain('(Cortesía)')
+    // La cantidad real (0,5 l), no "1" ni "0" — "0,5 l" son 5 caracteres,
+    // el ancho exacto de la columna CANT, así que entra sin truncarse.
+    expect(ticket).toContain('0,5 l')
   })
 })
 

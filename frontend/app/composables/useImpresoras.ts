@@ -11,6 +11,7 @@ import {
   type BoletaItem,
   type ImpuestoBoleta,
   type PromoBoleta,
+  type TicketAnulada,
 } from '~/utils/ticket-builder'
 import { conTimeout } from '~/utils/con-timeout'
 
@@ -238,6 +239,7 @@ export function useImpresoras() {
     mesaNombre: string
     cuentaNumero: number
     items: BoletaItem[]
+    anuladas?: TicketAnulada[]
     totales: TicketTotales
     impuestos: ImpuestoBoleta[]
     promociones?: PromoBoleta[]

@@ -167,6 +167,36 @@ describe('buildPrecuentaTicket', () => {
     const lines = precuenta()
     expect(lines.some(l => l.startsWith('Propina sugerida'))).toBe(false)
   })
+
+  /**
+   * Spec `2026-09-16-anular-plato-despachado-design.md` § 5: la precuenta
+   * imprime lo anulado de tipo merma/cortesía en $0, después de los ítems, con
+   * la etiqueta de su tipo. `buildBoletaTicket` no recibe este parámetro — se
+   * cubre en su propio describe, más abajo.
+   */
+  it('imprime un plato anulado después de los ítems, en $0 y con su etiqueta', () => {
+    const lines = precuenta({
+      anuladas: [{ nombre: 'Lomo a lo pobre', cantidad: '1', etiqueta: 'Cortesía' }],
+    })
+
+    const idxItem = lines.findIndex(l => l.includes('Pisco Sour'))
+    const idxAnulada = lines.findIndex(l => l.includes('Lomo a lo pobre'))
+    expect(idxAnulada).toBeGreaterThan(idxItem)
+
+    const fila = lines[idxAnulada]!
+    expect(fila).toHaveLength(48)
+    expect(fila.slice(0, 1)).toBe('1')
+    expect(fila.slice(6, 21)).toBe('Lomo a lo pobre')
+    // P.UNIT y TOTAL, ancho 9 alineado a la derecha: "$0" son sus últimos 2 caracteres.
+    expect(fila.slice(36, 38)).toBe('$0')
+    expect(fila.slice(46, 48)).toBe('$0')
+    expect(lines[idxAnulada + 1]).toBe('  (Cortesía)')
+  })
+
+  it('sin anuladas no imprime ninguna etiqueta de anulación', () => {
+    const lines = precuenta()
+    expect(lines.some(l => l.startsWith('  ('))).toBe(false)
+  })
 })
 
 const EMISOR = { nombre: 'Comercial Paris SpA', rut: '76.123.456-7', direccion: 'Av. Providencia 1234', telefono: '+56 2 2345 6789' }

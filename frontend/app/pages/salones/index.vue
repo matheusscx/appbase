@@ -6,10 +6,13 @@ import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import {
   cuentaToCalcularInput,
+  tipoMotivoBajaLabel,
+  formatCantidadAnulacion,
   type SalonConMesas,
   type MesaResumen,
   type CuentaDetalle,
   type CuentaLineaDetalle,
+  type CuentaAnulacionDetalle,
   type CuentaAsignacionDetalle,
   type MotivoCuentaAsignacion,
 } from '~/composables/useSalones'
@@ -20,7 +23,7 @@ import type { Turno } from '~/composables/useTurnos'
 import type { SolicitudTestigo } from '~/composables/useSalones'
 import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
 import { conTimeout } from '~/utils/con-timeout'
-import { agregarImpuestosVenta, agregarPromocionesVenta } from '~/utils/ticket-builder'
+import { agregarImpuestosVenta, agregarPromocionesVenta, type TicketAnulada } from '~/utils/ticket-builder'
 import { shellUi } from '~/utils/ui-shell'
 
 // `Salones:Operar`, no `Leer`: lo que esta pantalla pide para abrirse es
@@ -296,6 +299,29 @@ const { puedeActualizar: puedeTransferirAdmin } = usePermisosCrud('Salones')
 // usa `inventario/traslados.vue`—, así que ve el mensaje y nada más.
 const { puedeCrear: puedeTrasladar } = usePermisosCrud('Inventario')
 const { mostrarRechazoPorStock } = useRechazoPorStock()
+
+// `Anular` no es uno de los cuatro permisos CRUD de `usePermisosCrud` —es la
+// acción de `POST .../lineas/:lineaId/anular`, `@RequiresPermiso('Salones',
+// 'Anular')`—, así que se consulta directo al store, mismo mecanismo que
+// `VentaDetalleDrawer.vue` (`Ventas:Anular`) y `OrdenDetalleDrawer.vue`
+// (`Pasarelas:Reembolsar`) ya usan para este tipo de gesto. Esconder el botón
+// es UX (invariante 6): el candado real es el guard del backend.
+const permissionsStore = usePermissionsStore()
+const puedeAnularLinea = computed(() => permissionsStore.can('Salones', 'Anular'))
+
+const anularModalOpen = ref(false)
+/** La cuenta y la línea del modal, no las activas — mismo motivo que
+ *  `transferAdminCuenta`: el garzón puede irse a otra cuenta mientras el modal
+ *  sigue abierto, y confirmar tiene que anular la que se abrió, no la que
+ *  quedó activa. */
+const anularModalCuenta = ref<CuentaDetalle | null>(null)
+const anularModalLinea = ref<CuentaLineaDetalle | null>(null)
+const anulando = ref(false)
+/** `unidadBaseLinea` depende del catálogo (`items`), cargado en la página —el
+ *  modal no lo tiene, así que recibe el resultado ya resuelto. */
+const anularModalUnidadBase = computed(() =>
+  anularModalLinea.value ? unidadBaseLinea(anularModalLinea.value) : 'unidad',
+)
 
 const transferAdminOpen = ref(false)
 /** La cuenta para la que se abrió el modal de transferencia. Ver `abrirTransferenciaAdmin`. */
@@ -1661,6 +1687,22 @@ function unidadBaseLinea(linea: CuentaLineaDetalle): string {
   return catalogItem ? unidadBaseItem(catalogItem) : 'unidad'
 }
 
+/**
+ * Map del catálogo por id, para resolver la unidad de una anulación sin un
+ * `find` por fila — mismo criterio que el `porItemId` de `itemsParaTicket`.
+ * `computed` para no reconstruirlo en cada fila del aviso (`v-for`).
+ */
+const itemsPorId = computed(() => new Map(items.value.map(it => [it.id, it])))
+
+/**
+ * La cantidad de una anulación, ya formateada con la unidad de su ítem — usa
+ * `formatCantidadAnulacion` (`useSalones.ts`), la misma función para el aviso
+ * bajo la cuenta y para la precuenta (`anuladasParaTicket`).
+ */
+function cantidadAnuladaTexto(anulacion: CuentaAnulacionDetalle): string {
+  return formatCantidadAnulacion(anulacion, itemsPorId.value, unidadesStore.esFraccionaria)
+}
+
 function presentacionLinea(linea: CuentaLineaDetalle): string {
   return linea.cantidadPresentacion ?? linea.cantidad
 }
@@ -2130,6 +2172,44 @@ async function quitarLinea(linea: CuentaLineaDetalle) {
 }
 
 /**
+ * Abre el modal de anulación para ESTA línea, de la cuenta activa. Se
+ * congelan cuenta y línea (mismo motivo que `transferAdminCuenta`, spec del
+ * modal de transferencia): el garzón puede irse a otra cuenta mientras el
+ * modal sigue abierto, y `confirmarAnular` tiene que anular la línea para la
+ * que se abrió, no la que haya quedado activa.
+ */
+function abrirAnularLinea(linea: CuentaLineaDetalle) {
+  if (!activeCuenta.value || cuentaActivaEnCobro.value) return
+  anularModalCuenta.value = activeCuenta.value
+  anularModalLinea.value = linea
+  anularModalOpen.value = true
+}
+
+async function confirmarAnular(payload: { cantidad: string, motivoBajaId: string }) {
+  const cuenta = anularModalCuenta.value
+  const linea = anularModalLinea.value
+  if (!cuenta || !linea || anulando.value) return
+  anulando.value = true
+  try {
+    const { advertencias, ...actualizada } = await salonesApi.anularLinea(cuenta.id, linea.id, payload)
+    syncCuenta(actualizada)
+    anularModalOpen.value = false
+    toast.add({ title: 'Plato anulado', color: 'success' })
+    // Avisos de stock informativos (spec Task 3): la anulación ya ocurrió, no
+    // bloquean nada — se muestran igual que cualquier otro aviso de stock.
+    for (const advertencia of advertencias) {
+      toast.add({ title: advertencia, color: 'warning' })
+    }
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al anular el plato'), color: 'error' })
+  }
+  finally {
+    anulando.value = false
+  }
+}
+
+/**
  * El subtotal de la línea, sobre el precio unitario **que calculó el backend**:
  * ya convertido a moneda oficial y ya con los extras de la personalización
  * adentro.
@@ -2245,6 +2325,22 @@ function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
 }
 
 /**
+ * Los platos anulados que imprime la PRECUENTA (spec § 5): `merma` y
+ * `cortesia`, en $0 con la etiqueta de su tipo. `no_elaborado` queda afuera
+ * —nunca salió de cocina—, y esto no lo consume `imprimirBoleta`: la boleta no
+ * imprime nada de lo anulado.
+ */
+function anuladasParaTicket(cuenta: CuentaDetalle): TicketAnulada[] {
+  return (cuenta.anulaciones ?? [])
+    .filter(a => a.motivoTipo === 'merma' || a.motivoTipo === 'cortesia')
+    .map(a => ({
+      nombre: a.itemNombre,
+      cantidad: cantidadAnuladaTexto(a),
+      etiqueta: tipoMotivoBajaLabel(a.motivoTipo),
+    }))
+}
+
+/**
  * La precuenta es de la familia de *"lo que se lee después del `await`"*, y la
  * menos grave: lo que sale mal es papel.
  *
@@ -2300,6 +2396,7 @@ async function imprimirPrecuenta() {
       mesaNombre: mesa.nombre,
       cuentaNumero: cuentaDelTicket.numero,
       items: itemsParaTicket(cuentaDelTicket, res),
+      anuladas: anuladasParaTicket(cuentaDelTicket),
       totales: res.totales,
       impuestos: agregarImpuestosVenta(res.lineas),
       promociones: agregarPromocionesVenta(res.lineas),
@@ -2958,6 +3055,16 @@ async function cerrarCuentaConPin(
                       @change="onCantidadChange(linea, $event)"
                     />
                     <UButton
+                      v-if="yaEnviadaACocina(linea) && puedeAnularLinea"
+                      icon="i-lucide-ban"
+                      color="warning"
+                      variant="ghost"
+                      size="xs"
+                      title="Anular (cortesía, merma o no se llegó a hacer)"
+                      :disabled="cuentaActivaEnCobro"
+                      @click="abrirAnularLinea(linea)"
+                    />
+                    <UButton
                       icon="i-lucide-trash-2"
                       color="error"
                       variant="ghost"
@@ -2969,6 +3076,24 @@ async function cerrarCuentaConPin(
                       @click="quitarLinea(linea)"
                     />
                   </div>
+                </div>
+                <!--
+                  El aviso de lo anulado (spec § 5): una fila no tocable por
+                  anulación, para que el garzón del turno siguiente sepa que
+                  hubo un plato dado de baja. Debajo de la lista de líneas, no
+                  mezclado con ellas — no es una línea de la cuenta.
+                -->
+                <div
+                  v-if="activeCuenta.anulaciones?.length"
+                  class="mt-2 space-y-1 border-t border-default pt-2"
+                >
+                  <p
+                    v-for="anulacion in activeCuenta.anulaciones ?? []"
+                    :key="anulacion.id"
+                    class="text-xs text-muted"
+                  >
+                    {{ cantidadAnuladaTexto(anulacion) }} {{ anulacion.itemNombre }} anulado — {{ tipoMotivoBajaLabel(anulacion.motivoTipo) }}, autorizó {{ anulacion.autorizadoPorNombre }}
+                  </p>
                 </div>
               </div>
 
@@ -3086,6 +3211,14 @@ async function cerrarCuentaConPin(
         :pin="testigoPin"
         :modo-personal="!!garzonPersonal?.garzonId"
         @resuelto="onTestigoResuelto"
+      />
+
+      <SalonesAnularLineaModal
+        v-model:open="anularModalOpen"
+        :linea="anularModalLinea"
+        :unidad-base="anularModalUnidadBase"
+        :submitting="anulando"
+        @confirm="confirmarAnular"
       />
 
       <UModal

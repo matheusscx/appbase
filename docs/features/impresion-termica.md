@@ -127,6 +127,18 @@ impresora `rol='boleta'` del tenant.
     `PRECUENTA (no válido como boleta)` en vez de tipo de documento/pie fiscal,
     sin sección de pagos/vuelto, y bloque propio de propina *sugerida* (monto
     calculado desde `propinaSugerida`) en vez de propina aceptada.
+  - **Platos anulados (2026-09-16)**: `buildPrecuentaTicket` recibe
+    `anuladas?: TicketAnulada[]` (`{ nombre, cantidad, etiqueta }`) y los imprime
+    **después de los ítems**, en una fila de las mismas columnas con `P.UNIT` y
+    `TOTAL` en `$0`, y la etiqueta del tipo (`Cortesía`/`Merma`) indentada debajo —
+    spec `2026-09-16-anular-plato-despachado-design.md` § 5. Solo se pasan los de
+    tipo `merma`/`cortesia` (`anuladasParaTicket` en `salones/index.vue`, filtrando
+    `CuentaDetalle.anulaciones`); el `no_elaborado` no se imprime — nunca salió de
+    cocina. **`buildBoletaTicket`, `imprimirBoleta` e `itemsParaTicket` no cambian**:
+    la boleta no imprime nada de lo anulado, ni siquiera lo que sí descontó stock —
+    es papel interno de la precuenta, el documento tributario es materia fiscal
+    (ADR-010). Sin twin de `buildPrecuentaTicket` en otro archivo: es la única
+    función que arma este ticket, backend incluido (los tickets son 100% frontend).
   - Cada ítem puede llevar `nota?` (personalización + comentario), impresa indentada
     bajo el nombre.
   - `buildBoletaTicket`/`buildPrecuentaTicket`: alternativa priceada a `nota?` vía

@@ -49,6 +49,7 @@ interface CuentaLineaDetalle {
 }
 interface CuentaAnulacionDetalle {
   id: string;
+  itemId: string;
   itemNombre: string;
   cantidad: string;
   motivoNombre: string;
@@ -450,6 +451,10 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
     expect(Number(lineaRestante.cantidadEnviada)).toBe(2);
     expect(detalle.anulaciones).toHaveLength(1);
     expect(detalle.anulaciones[0]).toMatchObject({
+      // El id del ítem, para que el frontend resuelva su unidad contra el
+      // catálogo y formatee la cantidad fraccionaria (fix round 1, 2026-09-17:
+      // sin esto una anulación de 0,3 kg se leía "0" en pantalla).
+      itemId: platoId,
       cantidad: expect.stringMatching(/^1(\.0+)?$/),
       motivoNombre: expect.any(String),
       motivoTipo: 'cortesia',

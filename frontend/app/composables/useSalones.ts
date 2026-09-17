@@ -5,6 +5,7 @@ import type {
   PersonalizacionPayload,
 } from './useRecetaPersonalizacion'
 import type { PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
+import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
 
 /** Snapshot congelado de un grupo de modificadores en una línea de cuenta (espejo de `SnapshotGrupo` del backend). */
 export interface CuentaLineaGrupoSnapshot {
@@ -36,6 +37,31 @@ export type MotivoCuentaAsignacion =
   | 'apertura'
   | 'transferencia_pin'
   | 'transferencia_admin'
+
+/**
+ * Gemela de `TipoMotivoBaja` (`backend/src/modules/motivos-baja/entities/motivo-baja.entity.ts`
+ * y `salones.service.ts`) y de la copia local en `configuracion/motivos-baja.vue`:
+ * la misma regla, duplicada mientras backend y frontend no compartan workspace
+ * (`docs/agent/pendientes.md` § "workspace compartido"). Cambiar una sin las
+ * otras dos abre una deriva silenciosa.
+ */
+export type TipoMotivoBaja = 'merma' | 'cortesia' | 'no_elaborado'
+
+/**
+ * La palabra del tipo, para el selector del modal de anulación (spec § 5: "que
+ * se vea si descuenta") y para el aviso debajo de la cuenta. Valores fijados
+ * por el owner — no derivar del código (`no_elaborado` → "No elaborado" sería
+ * un texto distinto al pedido).
+ */
+const TIPO_MOTIVO_BAJA_LABELS: Record<TipoMotivoBaja, string> = {
+  merma: 'Merma',
+  cortesia: 'Cortesía',
+  no_elaborado: 'No se llegó a hacer',
+}
+
+export function tipoMotivoBajaLabel(tipo: TipoMotivoBaja): string {
+  return TIPO_MOTIVO_BAJA_LABELS[tipo]
+}
 
 export type FormaMesa = 'redonda' | 'cuadrada' | 'rectangular'
 export type TamanoMesa = 'pequeno' | 'mediano' | 'grande' | 'extra_grande'
@@ -122,6 +148,23 @@ export interface CuentaAsignacionDetalle {
   actorUsuarioNombre: string | null
 }
 
+/**
+ * Un plato ya despachado y anulado, para el aviso debajo de la lista de la
+ * cuenta (spec `2026-09-16-anular-plato-despachado-design.md` § 5) — espejo de
+ * `CuentaAnulacionDetalle` (`backend/src/modules/salones/salones.service.ts`).
+ * No es tocable: es un rastro, no una línea editable.
+ */
+export interface CuentaAnulacionDetalle {
+  id: string
+  itemId: string
+  itemNombre: string
+  cantidad: string
+  motivoNombre: string
+  motivoTipo: TipoMotivoBaja
+  autorizadoPorNombre: string
+  creadoEl: string
+}
+
 export interface CuentaDetalle {
   id: string
   numero: number
@@ -136,6 +179,34 @@ export interface CuentaDetalle {
   garzonCierreId: string | null
   garzonCierreNombre: string | null
   lineas: CuentaLineaDetalle[]
+  /** Platos ya despachados y anulados de esta cuenta (spec § 5). */
+  anulaciones: CuentaAnulacionDetalle[]
+}
+
+/**
+ * La cantidad de una anulación, formateada con la unidad de SU ítem — mismo
+ * camino que ya usa `itemsParaTicket` (`salones/index.vue`): un Map por id
+ * armado una sola vez (no un `find` por fila), `unidadBaseItem` para resolver
+ * la unidad canónica del ítem, y `esFraccionaria` para decidir si recorta a
+ * entero o muestra decimales con el código de unidad.
+ *
+ * Existe porque `CuentaAnulacionDetalle.cantidad` es canónica y sin la unidad
+ * del ítem no hay forma de saber si redondearla a entero pisa un valor real:
+ * hasta el fix round 1 (2026-09-17) una anulación de "0.3" (kg) se leía "0" en
+ * el aviso de la cuenta y en la precuenta. Una sola función para las dos
+ * pantallas, no dos copias.
+ *
+ * Si el ítem ya no está en el catálogo (borrado), cae al mismo fallback que
+ * `unidadBaseLinea` en `salones/index.vue`: `'unidad'`.
+ */
+export function formatCantidadAnulacion(
+  anulacion: CuentaAnulacionDetalle,
+  itemsPorId: Map<string, { tipo: string, unidadMedida?: string | null }>,
+  esFraccionaria: (unidadCodigo: string | null | undefined) => boolean,
+): string {
+  const item = itemsPorId.get(anulacion.itemId)
+  const unidadBase = item ? unidadBaseItem(item) : 'unidad'
+  return formatCantidadLinea(anulacion.cantidad, undefined, undefined, esFraccionaria(unidadBase), unidadBase)
 }
 
 export interface MesaPosicion {
@@ -380,6 +451,29 @@ export function useSalones() {
       { method: 'DELETE' },
     )
 
+  /**
+   * Anula `body.cantidad` unidades (canónicas) de una línea ya despachada a
+   * cocina — spec `2026-09-16-anular-plato-despachado-design.md` §§ 3-4.
+   * `advertencias` son avisos de stock informativos: la anulación ya ocurrió,
+   * se muestran, no bloquean nada (Task 3, `salones.service.ts` →
+   * `anularLinea`).
+   */
+  const anularLinea = (
+    cuentaId: string,
+    lineaId: string,
+    body: { cantidad: string, motivoBajaId: string },
+  ) =>
+    useApiFetch<CuentaDetalle & { advertencias: string[] }>(
+      `${apiUrl}/cuentas/${cuentaId}/lineas/${lineaId}/anular`,
+      { method: 'POST', body },
+    )
+
+  /** Catálogo de motivos de baja activos, para el selector del modal de anulación. */
+  const listarMotivosBajaActivos = () =>
+    useApiFetch<{ id: string, nombre: string, tipo: TipoMotivoBaja }[]>(
+      `${apiUrl}/motivos-baja?soloActivas=true`,
+    )
+
   const cancelarCuenta = (cuentaId: string) =>
     useApiFetch<CuentaDetalle>(`${apiUrl}/cuentas/${cuentaId}/cancelar`, {
       method: 'POST',
@@ -451,6 +545,8 @@ export function useSalones() {
     agregarLinea,
     actualizarLinea,
     quitarLinea,
+    anularLinea,
+    listarMotivosBajaActivos,
     cancelarCuenta,
     cerrarCuenta,
     transferirCuenta,

@@ -3507,6 +3507,7 @@ describe('SalonesService', () => {
             Array.from({ length: cuentas }, (_, i) => ({
               cuenta_id: `cuenta-${i + 1}`,
               cuenta_linea_anulacion_id: `anulacion-${i + 1}`,
+              item_id: ITEM,
               item_nombre: 'Lomo',
               cantidad: '1',
               creado_el: new Date('2026-09-16T12:00:00Z'),
@@ -3554,6 +3555,7 @@ describe('SalonesService', () => {
         ['anulacion-3'],
       ]);
       expect(detalles[0].anulaciones[0]).toMatchObject({
+        itemId: ITEM,
         itemNombre: 'Lomo',
         cantidad: '1',
         motivoNombre: 'Cortesía',

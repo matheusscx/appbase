@@ -137,6 +137,17 @@ function lineasPersonalizacionPreciada(
   return out
 }
 
+/**
+ * Un plato anulado (tipo `merma`/`cortesia`) para la precuenta — spec
+ * `2026-09-16-anular-plato-despachado-design.md` § 5: se imprime en $0, con la
+ * etiqueta del tipo. El `no_elaborado` no se pasa acá — nunca salió de cocina.
+ */
+export interface TicketAnulada {
+  nombre: string
+  cantidad: string
+  etiqueta: string
+}
+
 export interface TicketTotales {
   subtotalNeto: string
   totalDescuentos: string
@@ -255,6 +266,27 @@ function lineasItem(
 }
 
 /**
+ * Fila de un plato anulado: misma tabla de columnas que un ítem normal, en $0,
+ * con la etiqueta del tipo (Cortesía/Merma) debajo en vez de personalización —
+ * un anulado no tiene extras que mostrar, tiene el porqué.
+ */
+function lineasAnulada(
+  anulada: TicketAnulada,
+  formatMonto: (v: string) => string,
+  width: number,
+): string[] {
+  return [
+    filaColumnas([
+      { texto: anulada.cantidad, ancho: COL_CANT, alinear: 'izq' },
+      { texto: anulada.nombre, ancho: COL_DESC, alinear: 'izq' },
+      { texto: formatMonto('0'), ancho: COL_MONTO, alinear: 'der' },
+      { texto: formatMonto('0'), ancho: COL_MONTO, alinear: 'der' },
+    ]),
+    `  (${anulada.etiqueta})`,
+  ]
+}
+
+/**
  * Subtotal, Descuento?, promociones nombradas?, Recargo?, Neto, una línea por
  * impuesto (nombre + tasa). NO incluye la línea de total final (su etiqueta
  * varía entre boleta/precuenta).
@@ -330,6 +362,11 @@ export function buildPrecuentaTicket(input: {
   mesaNombre: string
   cuentaNumero: number
   items: BoletaItem[]
+  /**
+   * Platos anulados de tipo `merma`/`cortesia`, impresos después de los ítems
+   * en $0 (spec § 5). El `no_elaborado` no se pasa: nunca salió de cocina.
+   */
+  anuladas?: TicketAnulada[]
   totales: TicketTotales
   impuestos: ImpuestoBoleta[]
   /** Promos nombradas — ver `agregarPromocionesVenta`. Opcional: sin ellas, `[]`. */
@@ -351,6 +388,9 @@ export function buildPrecuentaTicket(input: {
   out.push(separador(BOLETA_WIDTH))
   for (const item of input.items) {
     out.push(...lineasItem(item, formatMonto, BOLETA_WIDTH))
+  }
+  for (const anulada of input.anuladas ?? []) {
+    out.push(...lineasAnulada(anulada, formatMonto, BOLETA_WIDTH))
   }
   out.push(separador(BOLETA_WIDTH))
   out.push(...lineasTotalesConImpuestos(input.totales, input.promociones ?? [], input.impuestos, formatMonto, BOLETA_WIDTH))

@@ -190,6 +190,7 @@ export interface CuentaLineaDetalle {
 interface AnulacionDetalleRow {
   cuenta_id: string;
   cuenta_linea_anulacion_id: string;
+  item_id: string;
   item_nombre: string;
   cantidad: string;
   creado_el: Date;
@@ -202,9 +203,19 @@ interface AnulacionDetalleRow {
  * Un plato ya despachado y anulado, para el aviso debajo de la cuenta (spec
  * § 5): *"1 lomo anulado — cortesía, autorizó Ana"*. No es tocable: es un
  * rastro, no una línea que se pueda editar.
+ *
+ * `itemId` viaja para que el frontend resuelva la unidad del ítem contra su
+ * catálogo (`unidadBaseItem`) y formatee `cantidad` con ella — sin esto, una
+ * anulación fraccionaria (0,3 kg) se leía como entero (fix round 1,
+ * 2026-09-17: la pantalla mostraba "0"). `cantidad` sigue sin ser
+ * re-derivable del nombre: el ítem puede haberse borrado del catálogo después
+ * (`itemNombre` está congelado), pero el `id` sigue siendo el mismo aunque el
+ * catálogo lo borre — el frontend cae al mismo fallback que ya usa
+ * `unidadBaseLinea` cuando el ítem no aparece en `items.value`.
  */
 export interface CuentaAnulacionDetalle {
   id: string;
+  itemId: string;
   itemNombre: string;
   cantidad: string;
   motivoNombre: string;
@@ -2332,8 +2343,8 @@ export class SalonesService {
     runner: EntityManager | Db,
   ): Promise<Map<string, CuentaAnulacionDetalle[]>> {
     const rows: AnulacionDetalleRow[] = await runner.query(
-      `SELECT cla.cuenta_id, cla.cuenta_linea_anulacion_id, cla.item_nombre,
-              cla.cantidad, cla.creado_el, mb.nombre AS motivo_nombre,
+      `SELECT cla.cuenta_id, cla.cuenta_linea_anulacion_id, cla.item_id,
+              cla.item_nombre, cla.cantidad, cla.creado_el, mb.nombre AS motivo_nombre,
               mb.tipo AS motivo_tipo,
               -- El JOIN a usuarios NO filtra eliminado_el: quién autorizó es
               -- un hecho histórico, mismo criterio que nombresGarzon y que
@@ -2359,6 +2370,7 @@ export class SalonesService {
       const acc = porCuenta.get(r.cuenta_id) ?? [];
       acc.push({
         id: r.cuenta_linea_anulacion_id,
+        itemId: r.item_id,
         itemNombre: r.item_nombre,
         cantidad: r.cantidad,
         motivoNombre: r.motivo_nombre,

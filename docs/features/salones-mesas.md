@@ -653,6 +653,36 @@ tenant_id = $3 AND eliminado_el IS NULL` — no por cuenta ni por anulación.
 - `pages/configuracion/salones.vue` — Administración (dentro de Configuración): CRUD
   de salones/mesas + editor de plano con drag & drop y "Guardar distribución".
 
+#### Anular un plato despachado (2026-09-16)
+
+Junto al basurero de una línea con `cantidadEnviada > 0` (el mismo `yaEnviadaACocina` que
+ya lo deshabilita), un botón "Anular" — visible solo con `Salones:Anular`
+(`permissionsStore.can('Salones', 'Anular')`, mismo mecanismo que `VentaDetalleDrawer.vue`
+y `OrdenDetalleDrawer.vue` ya usan para un permiso de acción que no es uno de los cuatro
+CRUD de `usePermisosCrud`). Esconder el botón es UX (invariante 6): el candado real es el
+`@RequiresPermiso` del backend.
+
+Abre `SalonesAnularLineaModal` (`components/salones/AnularLineaModal.vue`), con la cuenta y
+la línea **congeladas** al abrirse — mismo motivo que el modal de transferencia admin: el
+garzón puede irse a otra cuenta mientras el modal sigue abierto, y confirmar tiene que anular
+la línea para la que se abrió. El modal:
+
+- **Cantidad**, en la presentación de la línea (500 g, no 0,5 kg), con tope en lo despachado
+  y arrancando vacía. Reusa la misma conversión presentación↔canónica que el stepper de
+  cantidad (`aCantidadCanonica`/`desdeCantidadCanonica`, `utils/cantidad-presentacion.ts`) —
+  no una nueva.
+- **Motivo**, de `GET /motivos-baja?soloActivas=true` (`useSalones().listarMotivosBajaActivos`),
+  mostrando la palabra de su tipo (`tipoMotivoBajaLabel`: `merma` → "Merma", `cortesia` →
+  "Cortesía", `no_elaborado` → "No se llegó a hacer") para que se vea si descuenta.
+
+Al confirmar, `useSalones().anularLinea(cuentaId, lineaId, { cantidad, motivoBajaId })` —
+`cantidad` ya convertida a la unidad canónica. Las `advertencias` de stock que trae la
+respuesta (informativas: la anulación ya ocurrió) se muestran como toast de aviso, una por
+cada una, además del toast de éxito.
+
+**El aviso**, debajo de la lista de líneas y no tocable, una fila por elemento de
+`CuentaDetalle.anulaciones`: *"{cantidad} {plato} anulado — {tipo}, autorizó {usuario}"*.
+
 #### Cambiar la cantidad de una línea: qué pasa si el garzón se va antes (2026-09-02)
 
 La cantidad se pinta en el acto y el `PATCH` sale **300 ms después** (debounce: una ráfaga de
@@ -941,7 +971,10 @@ hay que repintar lo que está en pantalla** (recalcular el total, omitir el cont
 
 - `composables/useSalones.ts` — wrappers `useApiFetch` de todos los endpoints +
   `cuentaToCalcularInput` (mapea la cuenta al motor de precios para el total en vivo,
-  vía `useCalculoPrecios`).
+  vía `useCalculoPrecios`). `anularLinea` y `listarMotivosBajaActivos` son los dos que
+  usa el modal de anulación; `tipoMotivoBajaLabel` (con su tipo `TipoMotivoBaja`, gemelo
+  de `configuracion/motivos-baja.vue` y del backend) es la palabra del tipo que
+  comparten el modal, el aviso y la precuenta.
 
 ### Reuso del POS
 
