@@ -299,14 +299,24 @@ describe('Vigencia por fecha — el instante lo decide el pedido (e2e)', () => {
     );
     const cuentaAjenaId = filas[0].cuenta_id;
 
-    const res = await request(app.getHttpServer())
-      .post('/api/calculo-precios/calcular')
-      .set('Authorization', `Bearer ${token}`) // token de Paris, NO de Falabella
-      .send({
-        lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
-        cuentaId: cuentaAjenaId,
-      });
-    expect(res.status).toBe(400);
+    try {
+      const res = await request(app.getHttpServer())
+        .post('/api/calculo-precios/calcular')
+        .set('Authorization', `Bearer ${token}`) // token de Paris, NO de Falabella
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          cuentaId: cuentaAjenaId,
+        });
+      expect(res.status).toBe(400);
+    } finally {
+      // Soft delete, no `DELETE`, y en `finally` para que corra aunque la
+      // aserción falle: la cuenta queda `abierta` en Falabella, un tenant que
+      // esta suite no toca más, y sin esto se acumula una por corrida.
+      await ds.query(
+        `UPDATE cuentas SET eliminado_el = NOW() WHERE cuenta_id = $1`,
+        [cuentaAjenaId],
+      );
+    }
   });
 
   describe('lo pedido con el descuento vigente lo conserva; lo pedido fuera, no', () => {
