@@ -30,14 +30,26 @@ interface LineaDetalle {
   id: string;
   itemId: string;
   cantidad: string;
+  cantidadEnviada?: string;
   cantidadPresentacion?: string | null;
   unidadCodigoPresentacion?: string | null;
+}
+interface CuentaAnulacionDetalle {
+  id: string;
+  itemNombre: string;
+  cantidad: string;
+  motivoTipo: string;
 }
 interface CuentaDetalle {
   id: string;
   numero: number;
   estado: string;
   lineas: LineaDetalle[];
+  anulaciones: CuentaAnulacionDetalle[];
+}
+interface MotivoBajaItem {
+  id: string;
+  tipo: string;
 }
 
 /**
@@ -65,6 +77,9 @@ describe('Salones — fusionar cuentas (e2e)', () => {
   let mesaId: string;
   let itemKgId: string;
   let itemOtroId: string;
+  /** Ruteado a una impresora, para que `reclamar` avance `cantidadEnviada` y se pueda anular. */
+  let itemAnulableId: string;
+  let motivoId: string;
   let garzon: GarzonCreado;
 
   async function abrirCuenta(): Promise<CuentaDetalle> {
@@ -74,6 +89,14 @@ describe('Salones — fusionar cuentas (e2e)', () => {
       .send({ garzonId: garzon.id, pin: garzon.pin });
     expect(res.status).toBe(201);
     return res.body as CuentaDetalle;
+  }
+
+  async function despachar(cuentaId: string): Promise<void> {
+    const res = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/comanda/reclamar`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+    expect(res.status).toBe(201);
   }
 
   async function agregarLinea(
@@ -168,6 +191,57 @@ describe('Salones — fusionar cuentas (e2e)', () => {
       });
     expect(resItemOtro.status).toBe(201);
     itemOtroId = (resItemOtro.body as IdResponse).id;
+
+    // Ruteo a cocina + ítem propio, para el test de fusión con anulaciones:
+    // solo se puede anular lo YA despachado (`cantidad_enviada > 0`), y eso
+    // necesita una categoría con impresora para que `reclamar` avance.
+    const marca = Date.now();
+    const resImpresora = await request(app.getHttpServer())
+      .post('/api/impresoras')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Cocina fusión E2E ${marca}`,
+        rol: 'comanda',
+        tipoConexion: 'sistema',
+        nombreCola: `cola-fusion-e2e-${marca}`,
+      });
+    expect(resImpresora.status).toBe(201);
+    const resCategoria = await request(app.getHttpServer())
+      .post('/api/categorias')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Cocina fusión E2E ${marca}`,
+        impresoraId: (resImpresora.body as IdResponse).id,
+      });
+    expect(resCategoria.status).toBe(201);
+    const resItemAnulable = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Producto fusión anulable E2E ${marca}`,
+        tipo: 'producto',
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        unidadMedida: 'unidad',
+        stock: '1000',
+        costo: '100',
+        categoriaId: (resCategoria.body as IdResponse).id,
+      });
+    expect(resItemAnulable.status).toBe(201);
+    itemAnulableId = (resItemAnulable.body as IdResponse).id;
+
+    const resMotivos = await request(app.getHttpServer())
+      .get('/api/motivos-baja')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resMotivos.status).toBe(200);
+    // `no_elaborado` a propósito: este test es sobre la anulación
+    // SOBREVIVIENDO a la fusión, no sobre el descuento de stock (ya cubierto
+    // en `salones-anular-linea.e2e-spec.ts`), así que no hace falta tocar
+    // inventario acá.
+    motivoId = (resMotivos.body as MotivoBajaItem[]).find(
+      (m) => m.tipo === 'no_elaborado',
+    )!.id;
+    expect(motivoId).toBeTruthy();
 
     // ⚠️ Garzón PROPIO, no el del seed. La sesión es única por garzón y hoy
     // seis specs comparten a Ana, así que el estado se filtra de un spec al
@@ -319,5 +393,67 @@ describe('Salones — fusionar cuentas (e2e)', () => {
       (resAjenaDespues.body as CuentaDetalle[]).find((c) => c.id === ajena.id)
         ?.estado,
     ).toBe('abierta');
+  });
+
+  /**
+   * Spec `2026-09-16-anular-plato-despachado-design.md` § 8: las filas de
+   * `cuenta_linea_anulaciones` de la cuenta de ORIGEN se mudan a la de
+   * destino. Sin esto, el aviso de la pantalla y la precuenta pierden lo
+   * anulado antes de fusionar — sobrevive al borrado de SU línea, pero no a
+   * una fusión que no la mueva.
+   */
+  it('fusionar una cuenta con una anulación deja esa anulación en el detalle de la cuenta de destino', async () => {
+    const destino = await abrirCuenta();
+    const origen = await abrirCuenta();
+
+    // El origen necesita quedar ABIERTA después de anular: si la anulación se
+    // llevara la única línea viva, `anularLinea` cancelaría la cuenta ella
+    // misma (spec § 7) y `fusionarCuentas` la rechazaría por no estar
+    // `abierta`. `itemOtroId` es lo que la mantiene con algo vivo.
+    await agregarLinea(origen.id, { itemId: itemAnulableId, cantidad: '1' });
+    await agregarLinea(origen.id, { itemId: itemOtroId, cantidad: '1' });
+    await despachar(origen.id);
+
+    const detalleOrigen = await request(app.getHttpServer())
+      .get(`/api/mesas/${mesaId}/cuentas`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(detalleOrigen.status).toBe(200);
+    const lineaAnulable = (detalleOrigen.body as CuentaDetalle[])
+      .find((c) => c.id === origen.id)!
+      .lineas.find((l) => l.itemId === itemAnulableId)!;
+
+    const anulado = await request(app.getHttpServer())
+      .post(`/api/cuentas/${origen.id}/lineas/${lineaAnulable.id}/anular`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cantidad: '1', motivoBajaId: motivoId });
+    expect(anulado.status).toBe(201);
+    const anulacionOrigen = (anulado.body as CuentaDetalle).anulaciones[0];
+    expect(anulacionOrigen).toBeDefined();
+
+    const res = await request(app.getHttpServer())
+      .post(`/api/mesas/${mesaId}/cuentas/fusionar`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cuentaIds: [origen.id, destino.id] });
+    expect(res.status).toBe(201);
+
+    const fusionada = res.body as CuentaDetalle;
+    expect(fusionada.anulaciones).toHaveLength(1);
+    expect(fusionada.anulaciones[0].id).toBe(anulacionOrigen.id);
+    expect(fusionada.anulaciones[0].itemNombre).toBe(
+      anulacionOrigen.itemNombre,
+    );
+    expect(fusionada.anulaciones[0].cantidad).toMatch(/^1(\.0+)?$/);
+
+    // Y releída desde cero (no solo la respuesta de la fusión): el detalle de
+    // la cuenta fusionada, vía el mismo camino que usa la pantalla del salón.
+    const relectura = await request(app.getHttpServer())
+      .get(`/api/mesas/${mesaId}/cuentas`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(relectura.status).toBe(200);
+    const destinoReleido = (relectura.body as CuentaDetalle[]).find(
+      (c) => c.id === fusionada.id,
+    )!;
+    expect(destinoReleido.anulaciones).toHaveLength(1);
+    expect(destinoReleido.anulaciones[0].id).toBe(anulacionOrigen.id);
   });
 });

@@ -31,6 +31,7 @@ import { AddLineaDto } from './dto/add-linea.dto';
 import { UpdateLineaDto } from './dto/update-linea.dto';
 import { CerrarCuentaDto } from './dto/cerrar-cuenta.dto';
 import { AnularLineaDto } from './dto/anular-linea.dto';
+import { CancelarConMotivoDto } from './dto/cancelar-con-motivo.dto';
 import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
 import { ConfirmarComandaDto } from './dto/confirmar-comanda.dto';
 import {
@@ -276,6 +277,26 @@ export class CuentasController {
   cancelar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     return this.salonesService.cancelarCuenta(u.tenantId ?? '', id);
+  }
+
+  // Dos rutas separadas, no una sola resuelta por dato, para que el permiso
+  // siga en el guard (invariante 6 de CLAUDE.md: `PermisosGuard` solo resuelve
+  // lo que declara la ruta). Esta exige `Salones:Anular` porque cancela algo
+  // ya despachado a cocina (spec `anular-plato-despachado-design.md` § 6).
+  @Post(':id/cancelar-con-motivo')
+  @RequiresPermiso('Salones', 'Anular')
+  cancelarConMotivo(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CancelarConMotivoDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.salonesService.cancelarConMotivo(
+      u.tenantId ?? '',
+      u.id,
+      id,
+      dto,
+    );
   }
 
   @Post(':id/cerrar')

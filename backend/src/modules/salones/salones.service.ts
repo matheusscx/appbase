@@ -27,6 +27,7 @@ import { AddLineaDto } from './dto/add-linea.dto';
 import { UpdateLineaDto } from './dto/update-linea.dto';
 import { CerrarCuentaDto } from './dto/cerrar-cuenta.dto';
 import { AnularLineaDto } from './dto/anular-linea.dto';
+import { CancelarConMotivoDto } from './dto/cancelar-con-motivo.dto';
 import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
 import { ConfirmarComandaDto } from './dto/confirmar-comanda.dto';
 import { VentasService } from '../ventas/ventas.service';
@@ -241,6 +242,19 @@ export interface CuentaDetalle {
   /** Platos ya despachados y anulados de esta cuenta (spec § 5). */
   anulaciones: CuentaAnulacionDetalle[];
 }
+
+/**
+ * Lo que `ItemsService.consumirLineaAnulada` necesita para descontar stock
+ * (spec § 4.3): el conversor de unidades y la ubicación `local` del tenant.
+ * Se resuelve UNA vez por operación (`resolverContextoStockAnulacion`), nunca
+ * una vez por línea — `cancelarConMotivo` anula varias en la misma
+ * transacción y esto es una lectura, no la escritura por línea que sí está
+ * permitida.
+ */
+type ContextoStockAnulacion = {
+  convertir: (cantidad: string, desde: string, hacia: string) => string;
+  ubicacionLocalId: string;
+};
 
 @Injectable()
 export class SalonesService {
@@ -1241,6 +1255,84 @@ export class SalonesService {
       unidadMedida: itemRows[0].unidad_medida,
     };
 
+    // Solo se resuelve el contexto de stock (conversor + ubicación local) si
+    // hace falta: mismo gate que adentro de `escribirAnulacionEnLinea`,
+    // evaluado acá porque es una LÍNEA sola y el gate decide si vale la pena
+    // pedirlo antes de la escritura común.
+    const tipoDescuenta =
+      motivo.tipo === TipoMotivoBaja.MERMA ||
+      motivo.tipo === TipoMotivoBaja.CORTESIA;
+    const stockCtx =
+      tipoDescuenta &&
+      (item.tipo === 'producto' ||
+        item.tipo === 'receta' ||
+        item.tipo === 'combo')
+        ? await this.resolverContextoStockAnulacion(tenantId)
+        : null;
+
+    const advertencias = await this.escribirAnulacionEnLinea(
+      manager,
+      tenantId,
+      usuarioId,
+      cuentaId,
+      linea,
+      cantidad,
+      motivo,
+      item,
+      catalogo,
+      stockCtx,
+    );
+
+    // Si esta anulación deja la cuenta sin líneas vivas, se cancela en la
+    // MISMA operación (spec § 7): `cerrarCuenta` rechaza una cuenta sin
+    // líneas con "La cuenta no tiene productos", así que no hay otro camino
+    // para liberar la mesa. Mismo cierre de tramo que `cancelarCuenta`.
+    const lineasVivas = await manager.count(CuentaLinea, {
+      where: { tenantId, cuentaId },
+    });
+    if (lineasVivas === 0) {
+      cuenta.estado = EstadoCuenta.CANCELADA;
+      cuenta.cerradaEl = new Date();
+      await this.cuentaAsignacionesService.cerrarTramoVigente(
+        manager,
+        tenantId,
+        cuenta.id,
+        cuenta.cerradaEl,
+      );
+      await manager.save(Cuenta, cuenta);
+    }
+
+    const detalle = await this.armarDetalle(tenantId, cuenta, manager);
+    return { ...detalle, advertencias };
+  }
+
+  /**
+   * La parte que `anularLinea` y `cancelarConMotivo` ESCRIBEN igual, para una
+   * sola línea (spec § 4.3 / § 6, resolución Task 4: no copiarla): la fila de
+   * `cuenta_linea_anulaciones`, el ajuste de `cantidad`/`cantidad_enviada` de
+   * la línea (o su borrado si queda en cero) y, si el tipo de motivo
+   * descuenta, el consumo de stock. Lo que NO hace: validar cantidad/motivo
+   * ni decidir si la cuenta se cancela — eso es de cada llamador, porque
+   * `anularLinea` valida una cantidad pedida contra UNA línea y
+   * `cancelarConMotivo` ya decidió la cantidad (`cantidad_enviada`) para
+   * VARIAS antes de llegar acá.
+   *
+   * `stockCtx` viene resuelto por el llamador (`resolverContextoStockAnulacion`,
+   * memoizado) — nunca se resuelve acá adentro, porque acá SÍ puede correr una
+   * vez por línea.
+   */
+  private async escribirAnulacionEnLinea(
+    manager: EntityManager,
+    tenantId: string,
+    usuarioId: string,
+    cuentaId: string,
+    linea: CuentaLinea,
+    cantidad: Decimal,
+    motivo: { id: string; tipo: TipoMotivoBaja },
+    item: { tipo: string; nombre: string; unidadMedida: string | null },
+    catalogo: UnidadCat[],
+    stockCtx: ContextoStockAnulacion | null,
+  ): Promise<string[]> {
     const anulacion = await manager.save(
       CuentaLineaAnulacion,
       manager.create(CuentaLineaAnulacion, {
@@ -1264,7 +1356,7 @@ export class SalonesService {
     );
     if (nuevaCantidad.lte(0)) {
       await manager.softDelete(CuentaLinea, {
-        id: lineaId,
+        id: linea.id,
         tenantId,
         cuentaId,
       });
@@ -1285,20 +1377,16 @@ export class SalonesService {
     // que no los menciona, así que ahí tampoco pasa nada) — así que acá
     // tampoco, sea cual sea el tipo de motivo. `consumirLineaAnulada` solo
     // acepta `producto | receta | combo`.
-    let advertencias: string[] = [];
     const tipoDescuenta =
       motivo.tipo === TipoMotivoBaja.MERMA ||
       motivo.tipo === TipoMotivoBaja.CORTESIA;
     const itemTipo = item.tipo;
     if (
       tipoDescuenta &&
+      stockCtx &&
       (itemTipo === 'producto' || itemTipo === 'receta' || itemTipo === 'combo')
     ) {
-      const [convertir, ubicacionLocalId] = await Promise.all([
-        this.catalogService.crearConversor(),
-        this.ubicacionesService.localDe(tenantId),
-      ]);
-      advertencias = await this.itemsService.consumirLineaAnulada(manager, {
+      return this.itemsService.consumirLineaAnulada(manager, {
         tenantId,
         usuarioId,
         itemId: linea.itemId,
@@ -1308,29 +1396,197 @@ export class SalonesService {
         snapshot: linea.personalizacion,
         motivoBajaId: motivo.id,
         cuentaLineaAnulacionId: anulacion.id,
-        convertir,
-        ubicacionLocalId,
+        convertir: stockCtx.convertir,
+        ubicacionLocalId: stockCtx.ubicacionLocalId,
       });
     }
+    return [];
+  }
 
-    // Si esta anulación deja la cuenta sin líneas vivas, se cancela en la
-    // MISMA operación (spec § 7): `cerrarCuenta` rechaza una cuenta sin
-    // líneas con "La cuenta no tiene productos", así que no hay otro camino
-    // para liberar la mesa. Mismo cierre de tramo que `cancelarCuenta`.
-    const lineasVivas = await manager.count(CuentaLinea, {
+  /**
+   * `crearConversor` + `localDe`, en un solo lugar: lo que
+   * `consumirLineaAnulada` necesita para descontar stock. Se llama UNA vez
+   * por operación (nunca por línea) — `escribirAnulacionDeLinea` la pide solo
+   * si esa única línea la necesita, y `cancelarConMotivo` la pide una sola
+   * vez para toda la cuenta si ALGUNA línea despachada la necesita.
+   */
+  private async resolverContextoStockAnulacion(
+    tenantId: string,
+  ): Promise<ContextoStockAnulacion> {
+    const [convertir, ubicacionLocalId] = await Promise.all([
+      this.catalogService.crearConversor(),
+      this.ubicacionesService.localDe(tenantId),
+    ]);
+    return { convertir, ubicacionLocalId };
+  }
+
+  /**
+   * Cancela una cuenta con platos despachados, con motivo y permiso
+   * (spec § 6). Dos rutas para que el permiso siga en el guard (invariante 6
+   * de CLAUDE.md): esta exige `Salones:Anular`; `cancelarCuenta` sigue con
+   * `Salones:Operar` y (hasta la Task 6) sigue aceptando cancelar con algo
+   * despachado.
+   *
+   * Por cada línea viva con `cantidad_enviada > 0`, una anulación **por su
+   * `cantidad_enviada`** (no lo pedido) con este motivo, aplicando el stock
+   * según su tipo — el mismo escritor que usa `anularLinea`
+   * (`escribirAnulacionEnLinea`), no una copia. Las unidades no despachadas
+   * y las líneas sin nada despachado no generan fila ni movimiento. Después
+   * se borran TODAS las líneas vivas —hayan generado anulación o no: una
+   * línea 3/1 queda en 2/0 tras la escritura y esta cancelación se la lleva
+   * igual, porque la cuenta entera se cancela— y se cierra el tramo vigente,
+   * igual que `cancelarCuenta`.
+   *
+   * Si no hay nada despachado, 400: manda a la ruta simple (`cancelar`).
+   *
+   * **Reintento ante `40P01`, mismo molde que `anularLinea`**: el consumo de
+   * stock de cualquiera de las líneas puede tomar el mismo lock de
+   * `item_producto` que una venta concurrente.
+   */
+  async cancelarConMotivo(
+    tenantId: string,
+    usuarioId: string,
+    cuentaId: string,
+    dto: CancelarConMotivoDto,
+  ): Promise<CuentaDetalle & { advertencias: string[] }> {
+    const catalogo = await this.loadCatalogoUnidades();
+    for (let intento = 0; ; intento++) {
+      try {
+        return await this.db.transaccion(async (manager) => {
+          return this.escribirCancelacionConMotivo(
+            manager,
+            tenantId,
+            usuarioId,
+            cuentaId,
+            dto,
+            catalogo,
+          );
+        });
+      } catch (error) {
+        if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
+          throw error;
+      }
+    }
+  }
+
+  private async escribirCancelacionConMotivo(
+    manager: EntityManager,
+    tenantId: string,
+    usuarioId: string,
+    cuentaId: string,
+    dto: CancelarConMotivoDto,
+    catalogo: UnidadCat[],
+  ): Promise<CuentaDetalle & { advertencias: string[] }> {
+    const cuenta = await this.getCuentaAbiertaConLock(
+      manager,
+      tenantId,
+      cuentaId,
+    );
+
+    // El motivo se valida UNA vez para toda la cuenta (ruling de la Task 4),
+    // no por línea: es el mismo motivo para todas las anulaciones que esta
+    // cancelación genera.
+    const motivo = await this.motivosBajaService.assertMotivoActivo(
+      manager,
+      tenantId,
+      dto.motivoBajaId,
+    );
+
+    const lineas = await manager.find(CuentaLinea, {
       where: { tenantId, cuentaId },
     });
-    if (lineasVivas === 0) {
-      cuenta.estado = EstadoCuenta.CANCELADA;
-      cuenta.cerradaEl = new Date();
-      await this.cuentaAsignacionesService.cerrarTramoVigente(
+    const despachadas = lineas.filter((l) =>
+      new Decimal(l.cantidadEnviada).greaterThan(0),
+    );
+    if (despachadas.length === 0) {
+      throw new BadRequestException(
+        'La cuenta no tiene nada despachado a cocina: cancelala con ' +
+          'POST /cuentas/:id/cancelar.',
+      );
+    }
+
+    // Ítems de las líneas despachadas en UNA sola consulta (nunca una por
+    // línea): mismo criterio que `escribirAnulacionDeLinea`, sin condición de
+    // vigencia sobre "i" — un ítem pausado o borrado del catálogo no frena
+    // nada (spec § 4.2).
+    const itemIds = [...new Set(despachadas.map((l) => l.itemId))];
+    const itemRows: {
+      item_id: string;
+      tipo: string;
+      nombre: string;
+      unidad_medida: string | null;
+    }[] = await manager.query(
+      `SELECT i.item_id, i.tipo, i.nombre, ip.unidad_medida
+           FROM items i
+           -- Deliberadamente SIN condición de vigencia sobre "i", mismo
+           -- criterio que escribirAnulacionDeLinea (spec § 4.2).
+           LEFT JOIN item_producto ip ON ip.item_id = i.item_id
+          WHERE i.item_id = ANY($1) AND i.tenant_id = $2`,
+      [itemIds, tenantId],
+    );
+    const itemsPorId = new Map(
+      itemRows.map((r) => [
+        r.item_id,
+        { tipo: r.tipo, nombre: r.nombre, unidadMedida: r.unidad_medida },
+      ]),
+    );
+
+    // El contexto de stock se resuelve UNA vez para toda la cancelación, no
+    // por línea: si el motivo descuenta y AL MENOS una línea despachada tiene
+    // un ítem que descuenta, `escribirAnulacionEnLinea` lo va a necesitar.
+    const tipoDescuenta =
+      motivo.tipo === TipoMotivoBaja.MERMA ||
+      motivo.tipo === TipoMotivoBaja.CORTESIA;
+    const necesitaStock =
+      tipoDescuenta &&
+      despachadas.some((l) => {
+        const item = itemsPorId.get(l.itemId);
+        return (
+          !!item &&
+          (item.tipo === 'producto' ||
+            item.tipo === 'receta' ||
+            item.tipo === 'combo')
+        );
+      });
+    const stockCtx = necesitaStock
+      ? await this.resolverContextoStockAnulacion(tenantId)
+      : null;
+
+    const advertencias: string[] = [];
+    for (const linea of despachadas) {
+      const item = itemsPorId.get(linea.itemId);
+      if (!item) {
+        throw new NotFoundException(`Ítem ${linea.itemId} no encontrado`);
+      }
+      const nuevas = await this.escribirAnulacionEnLinea(
         manager,
         tenantId,
-        cuenta.id,
-        cuenta.cerradaEl,
+        usuarioId,
+        cuentaId,
+        linea,
+        new Decimal(linea.cantidadEnviada),
+        motivo,
+        item,
+        catalogo,
+        stockCtx,
       );
-      await manager.save(Cuenta, cuenta);
+      advertencias.push(...nuevas);
     }
+
+    // Todas las líneas vivas se borran, hayan generado anulación o no (spec
+    // § 6): lo pendiente sin despachar de una línea parcial y las líneas sin
+    // nada despachado se van con la cuenta, sin fila ni movimiento propio.
+    await manager.softDelete(CuentaLinea, { tenantId, cuentaId });
+
+    cuenta.estado = EstadoCuenta.CANCELADA;
+    cuenta.cerradaEl = new Date();
+    await this.cuentaAsignacionesService.cerrarTramoVigente(
+      manager,
+      tenantId,
+      cuenta.id,
+      cuenta.cerradaEl,
+    );
+    await manager.save(Cuenta, cuenta);
 
     const detalle = await this.armarDetalle(tenantId, cuenta, manager);
     return { ...detalle, advertencias };
@@ -1535,6 +1791,19 @@ export class SalonesService {
         );
         await manager.save(Cuenta, origen);
       }
+
+      // Las anulaciones de las cuentas de ORIGEN se mudan al destino en una
+      // sola sentencia (spec § 8): sobreviven al borrado de su línea, así que
+      // no se mueven con `porOrigen`/`enDestino` como las líneas — sin esto el
+      // aviso de la pantalla y la precuenta pierden lo anulado antes de
+      // fusionar.
+      await manager.query(
+        `UPDATE cuenta_linea_anulaciones
+            SET cuenta_id = $1
+          WHERE cuenta_id = ANY($2) AND tenant_id = $3
+            AND eliminado_el IS NULL`,
+        [destino.id, origenes.map((o) => o.id), tenantId],
+      );
 
       return this.armarDetalle(tenantId, destino, manager);
     });

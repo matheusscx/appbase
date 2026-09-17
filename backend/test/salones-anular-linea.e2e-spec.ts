@@ -184,6 +184,17 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
       .send(body);
   }
 
+  async function cancelarConMotivo(
+    cuentaId: string,
+    body: { motivoBajaId: string },
+    token = tokenEncargado,
+  ) {
+    return request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/cancelar-con-motivo`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(body);
+  }
+
   /** Cierra sin cobrar (pagos vacíos): alcanza para leer el total congelado. */
   async function cerrarSinCobrar(
     cuentaId: string,
@@ -800,6 +811,21 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
     expect((res.body as { message: string }).message).toBe(
       `Cuenta ${cuentaAjena} no encontrada`,
     );
+
+    // `cancelar-con-motivo` pasa por el mismo `getCuentaAbiertaConLock`: la
+    // cuenta ajena rebota igual y sigue abierta en su tenant.
+    const cancelada = await cancelarConMotivo(cuentaAjena, {
+      motivoBajaId: motivoCortesiaId,
+    });
+    expect(cancelada.status).toBe(404);
+    expect((cancelada.body as { message: string }).message).toBe(
+      `Cuenta ${cuentaAjena} no encontrada`,
+    );
+    const estado: { estado: string }[] = await ds.query(
+      `SELECT estado FROM cuentas WHERE cuenta_id = $1 AND eliminado_el IS NULL`,
+      [cuentaAjena],
+    );
+    expect(estado[0].estado).toBe('abierta');
   });
 
   it('un motivoBajaId de OTRO tenant da 400 (motivo no válido)', async () => {
@@ -951,5 +977,143 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
       .set('Authorization', `Bearer ${tokenAdmin}`)
       .send({ tipo: 'merma' });
     expect(cambioTipo.status).toBe(400);
+  });
+
+  /**
+   * `POST /cuentas/:id/cancelar-con-motivo` (spec § 6): cancela una cuenta con
+   * algo despachado, con permiso y motivo — la Task 4 del mismo frente.
+   */
+  describe('cancelar-con-motivo', () => {
+    it('sin Anular da 403; con Anular cancela la cuenta, sin líneas vivas, y sus anulaciones persisten', async () => {
+      const cuenta = await abrirCuentaCon([
+        { itemId: platoId, cantidad: '2' },
+        { itemId: guarnicionId, cantidad: '1' },
+      ]);
+      await despachar(cuenta.id);
+
+      const rechazado = await cancelarConMotivo(
+        cuenta.id,
+        { motivoBajaId: motivoCortesiaId },
+        tokenSoloOperar,
+      );
+      expect(rechazado.status).toBe(403);
+
+      const res = await cancelarConMotivo(cuenta.id, {
+        motivoBajaId: motivoCortesiaId,
+      });
+      expect(res.status).toBe(201);
+
+      const detalle = res.body as CuentaDetalle;
+      expect(detalle.estado).toBe('cancelada');
+      expect(detalle.ventaId).toBeNull();
+      expect(detalle.lineas).toHaveLength(0);
+      // Una anulación por línea despachada, cada una por lo que esa línea
+      // tenía enviado (2 y 1), no por un total fusionado.
+      expect(detalle.anulaciones).toHaveLength(2);
+      const cantidades = detalle.anulaciones
+        .map((a) => Number(a.cantidad))
+        .sort((a, b) => a - b);
+      expect(cantidades).toEqual([1, 2]);
+      expect(
+        detalle.anulaciones.every((a) => a.motivoTipo === 'cortesia'),
+      ).toBe(true);
+
+      // La mesa queda libre de verdad.
+      const listado = await request(app.getHttpServer())
+        .get(`/api/mesas/${mesaId}/cuentas`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(listado.status).toBe(200);
+      expect(
+        (listado.body as CuentaDetalle[]).some((c) => c.id === cuenta.id),
+      ).toBe(false);
+    });
+
+    it('una línea parcialmente despachada (3 pedidas, 1 enviada): anula y descuenta solo lo despachado, y la cuenta queda cancelada igual', async () => {
+      const antes = await stockVendibleDe(platoId);
+
+      // 1 pedida y despachada…
+      const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '1' }]);
+      await despachar(cuenta.id);
+      // …y 2 más del mismo ítem, agregadas DESPUÉS de despachar: el merge de
+      // `agregarLinea` solo suma `cantidad`, nunca `cantidad_enviada`, así que
+      // la línea queda 3 pedidas / 1 despachada — el mismo escenario 3/1 que
+      // prueba el unitario, acá contra la API real.
+      await post(`/api/cuentas/${cuenta.id}/lineas`, {
+        itemId: platoId,
+        cantidad: '2',
+      });
+      const linea = (await detalleCuenta(cuenta.id)).lineas.find(
+        (l) => l.itemId === platoId,
+      )!;
+      expect(linea.cantidad).toBe('3.0000');
+      expect(linea.cantidadEnviada).toBe('1.0000');
+
+      const res = await cancelarConMotivo(cuenta.id, {
+        motivoBajaId: motivoMermaId,
+      });
+      expect(res.status).toBe(201);
+
+      const detalle = res.body as CuentaDetalle;
+      expect(detalle.estado).toBe('cancelada');
+      expect(detalle.lineas).toHaveLength(0);
+      expect(detalle.anulaciones).toHaveLength(1);
+      expect(detalle.anulaciones[0].cantidad).toMatch(/^1(\.0+)?$/);
+
+      // El stock bajó exactamente 1 (lo despachado), no 3 (lo pedido).
+      const despues = await stockVendibleDe(platoId);
+      expect(parseFloat(despues)).toBeCloseTo(parseFloat(antes) - 1, 4);
+
+      const anulacionId = detalle.anulaciones[0].id;
+      const mov: { motivo: string; motivo_baja_id: string }[] = await ds.query(
+        `SELECT motivo, motivo_baja_id FROM movimientos_inventario
+            WHERE cuenta_linea_anulacion_id = $1`,
+        [anulacionId],
+      );
+      expect(mov).toHaveLength(1);
+      expect(mov[0].motivo).toBe('merma');
+      expect(mov[0].motivo_baja_id).toBe(motivoMermaId);
+    });
+
+    it('no_elaborado: cancela y anula, pero no mueve stock — ese plato nunca salió', async () => {
+      const antes = await stockVendibleDe(platoId);
+      const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '1' }]);
+      await despachar(cuenta.id);
+
+      const res = await cancelarConMotivo(cuenta.id, {
+        motivoBajaId: motivoNoElaboradoId,
+      });
+      expect(res.status).toBe(201);
+
+      const detalle = res.body as CuentaDetalle;
+      expect(detalle.estado).toBe('cancelada');
+      expect(detalle.anulaciones).toHaveLength(1);
+      expect(detalle.anulaciones[0].motivoTipo).toBe('no_elaborado');
+
+      const despues = await stockVendibleDe(platoId);
+      expect(despues).toBe(antes);
+
+      const mov: unknown[] = await ds.query(
+        `SELECT 1 FROM movimientos_inventario
+          WHERE cuenta_linea_anulacion_id = $1`,
+        [detalle.anulaciones[0].id],
+      );
+      expect(mov).toHaveLength(0);
+    });
+
+    it('sin nada despachado: 400, y manda a la ruta simple de cancelar', async () => {
+      const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '1' }]);
+      // Sin `despachar`: nada tiene `cantidad_enviada > 0`.
+
+      const res = await cancelarConMotivo(cuenta.id, {
+        motivoBajaId: motivoCortesiaId,
+      });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toMatch(/cancelar/i);
+
+      // La cuenta sigue abierta: el 400 no tocó nada.
+      const detalle = await detalleCuenta(cuenta.id);
+      expect(detalle.estado).toBe('abierta');
+      expect(detalle.lineas).toHaveLength(1);
+    });
   });
 });

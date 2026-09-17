@@ -2749,6 +2749,207 @@ describe('SalonesService', () => {
     });
   });
 
+  describe('cancelarConMotivo', () => {
+    const MOTIVO = 'motivo-1';
+
+    function cuentaAbierta(overrides: Record<string, unknown> = {}) {
+      return {
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+        garzonAperturaId: null,
+        garzonCierreId: null,
+        garzonResponsableId: null,
+        cerradaEl: null as Date | null,
+        ...overrides,
+      };
+    }
+
+    function lineaViva(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'linea-1',
+        tenantId: TENANT,
+        cuentaId: CUENTA,
+        itemId: ITEM,
+        cantidad: '3',
+        cantidadEnviada: '1',
+        cantidadPresentacion: null,
+        unidadCodigoPresentacion: null,
+        personalizacion: null,
+        ...overrides,
+      };
+    }
+
+    /** Ítems por id, para la consulta batch `= ANY($1)` de `escribirCancelacionConMotivo`. */
+    function mockItemsQuery(
+      items: Record<
+        string,
+        { tipo: string; nombre: string; unidad_medida: string | null }
+      >,
+    ) {
+      manager.query.mockImplementation((sql: string, params?: unknown[]) => {
+        if (sql.includes('i.tipo, i.nombre, ip.unidad_medida')) {
+          const ids = (params?.[0] as string[]) ?? [];
+          return Promise.resolve(
+            ids
+              .filter((id) => items[id])
+              .map((id) => ({ item_id: id, ...items[id] })),
+          );
+        }
+        return Promise.resolve([]);
+      });
+    }
+
+    beforeEach(() => {
+      manager.findOne.mockResolvedValue(cuentaAbierta());
+    });
+
+    it('una línea 3/1: una anulación de 1 y un consumo de 1; las 2 pendientes se descartan sin fila', async () => {
+      const linea = lineaViva();
+      manager.find.mockResolvedValue([linea]);
+      mockItemsQuery({
+        [ITEM]: { tipo: 'producto', nombre: 'Lomo', unidad_medida: 'unidad' },
+      });
+      manager.save.mockImplementation((entidad: unknown, row: unknown) =>
+        Promise.resolve(
+          entidad === CuentaLineaAnulacion
+            ? { ...(row as object), id: 'anulacion-1' }
+            : row,
+        ),
+      );
+
+      const result = await service.cancelarConMotivo(
+        TENANT,
+        USUARIO_ACTOR,
+        CUENTA,
+        { motivoBajaId: MOTIVO },
+      );
+
+      // Una sola anulación, por lo DESPACHADO (1), no por lo pedido (3).
+      expect(manager.create).toHaveBeenCalledTimes(1);
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.objectContaining({
+          cuentaId: CUENTA,
+          cuentaLineaId: linea.id,
+          itemId: ITEM,
+          cantidad: '1',
+          motivoBajaId: 'motivo-1',
+          autorizadoPor: USUARIO_ACTOR,
+        }),
+      );
+      // El consumo también es por lo despachado: 1, no 3 ni 2.
+      expect(items.consumirLineaAnulada).toHaveBeenCalledTimes(1);
+      expect(items.consumirLineaAnulada).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          itemId: ITEM,
+          cantidad: '1',
+          cuentaLineaAnulacionId: 'anulacion-1',
+        }),
+      );
+      // Las 2 pendientes (3 - 1) no generan una segunda fila ni un segundo
+      // consumo: se descartan con el borrado final de todas las líneas vivas.
+      expect(manager.softDelete).toHaveBeenCalledWith(CuentaLinea, {
+        tenantId: TENANT,
+        cuentaId: CUENTA,
+      });
+      expect(result.estado).toBe(EstadoCuenta.CANCELADA);
+      expect(asignaciones.cerrarTramoVigente).toHaveBeenCalledWith(
+        manager,
+        TENANT,
+        CUENTA,
+        expect.any(Date),
+      );
+      expect(manager.save).toHaveBeenCalledWith(
+        Cuenta,
+        expect.objectContaining({ estado: EstadoCuenta.CANCELADA }),
+      );
+    });
+
+    it('una línea 2/0: no genera fila de anulación ni consumo de stock', async () => {
+      manager.find.mockResolvedValue([
+        lineaViva({ cantidad: '2', cantidadEnviada: '0' }),
+      ]);
+
+      await expect(
+        service.cancelarConMotivo(TENANT, USUARIO_ACTOR, CUENTA, {
+          motivoBajaId: MOTIVO,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(manager.create).not.toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.anything(),
+      );
+      expect(items.consumirLineaAnulada).not.toHaveBeenCalled();
+    });
+
+    it('sin nada despachado (ninguna línea con cantidad_enviada > 0): 400, manda a la ruta simple', async () => {
+      manager.find.mockResolvedValue([]);
+
+      await expect(
+        service.cancelarConMotivo(TENANT, USUARIO_ACTOR, CUENTA, {
+          motivoBajaId: MOTIVO,
+        }),
+      ).rejects.toThrow(/cancelar/);
+      expect(motivosBaja.assertMotivoActivo).toHaveBeenCalled();
+      expect(manager.save).not.toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.anything(),
+      );
+    });
+
+    it('el motivo se valida UNA vez para toda la cuenta, no por línea', async () => {
+      manager.find.mockResolvedValue([
+        lineaViva({ id: 'l1', itemId: ITEM, cantidadEnviada: '1' }),
+        lineaViva({ id: 'l2', itemId: ITEM_2, cantidadEnviada: '1' }),
+      ]);
+      mockItemsQuery({
+        [ITEM]: { tipo: 'producto', nombre: 'Lomo', unidad_medida: 'unidad' },
+        [ITEM_2]: {
+          tipo: 'producto',
+          nombre: 'Papas',
+          unidad_medida: 'unidad',
+        },
+      });
+
+      await service.cancelarConMotivo(TENANT, USUARIO_ACTOR, CUENTA, {
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(motivosBaja.assertMotivoActivo).toHaveBeenCalledTimes(1);
+      expect(items.consumirLineaAnulada).toHaveBeenCalledTimes(2);
+    });
+
+    /**
+     * Mismo molde que `anularLinea`: el consumo de stock puede tomar el mismo
+     * lock de `item_producto` que una venta concurrente.
+     */
+    it('reintenta la transacción ante un deadlock 40P01 y devuelve el resultado del segundo intento', async () => {
+      manager.find.mockResolvedValue([lineaViva()]);
+      mockItemsQuery({
+        [ITEM]: { tipo: 'producto', nombre: 'Lomo', unidad_medida: 'unidad' },
+      });
+
+      const real = dataSource.transaction.getMockImplementation()!;
+      dataSource.transaction
+        .mockRejectedValueOnce(
+          Object.assign(new Error('deadlock detected'), { code: '40P01' }),
+        )
+        .mockImplementationOnce(real);
+
+      const result = await service.cancelarConMotivo(
+        TENANT,
+        USUARIO_ACTOR,
+        CUENTA,
+        { motivoBajaId: MOTIVO },
+      );
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(2);
+      expect(result).toBeDefined();
+    });
+  });
+
   describe('cerrarCuenta', () => {
     it('rechaza con el nombre del ítem eliminado, sin llegar a crear la venta', async () => {
       manager.findOne.mockResolvedValue({

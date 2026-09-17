@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-09-01 (lo que la mesa pide queda apartado; pedir de más rebota al pedir)
+**Last Updated**: 2026-09-16 (cancelar con motivo, y la fusión que no pierde anulaciones)
 
 ---
 
@@ -76,7 +76,8 @@ permiso, no del garzón de turno.
 | PATCH | `/cuentas/:id/lineas/:lineaId` | Operar | Cambiar cantidad (canónica + opcional `cantidadPresentacion` / `unidadCodigoPresentacion`) |
 | DELETE | `/cuentas/:id/lineas/:lineaId` | Operar | Quitar producto |
 | POST | `/cuentas/:id/lineas/:lineaId/anular` | Anular | Anular un plato ya despachado, con motivo — ver más abajo |
-| POST | `/cuentas/:id/cancelar` | Operar | Anular cuenta (sin venta) |
+| POST | `/cuentas/:id/cancelar` | Operar | Cancelar cuenta (sin venta) — hasta la Task 6, acepta cancelar aunque haya algo despachado |
+| POST | `/cuentas/:id/cancelar-con-motivo` | Anular | Cancelar una cuenta CON algo despachado, con motivo — ver más abajo |
 | POST | `/cuentas/:id/cerrar` | Operar | Cerrar → genera venta (`FOR UPDATE` de cuenta) |
 | POST | `/cuentas/:id/transferir` | Operar | Transferir responsable vigente por PIN (claim) |
 | POST | `/cuentas/:id/transferir-admin` | Actualizar | Transferir responsable vigente (admin, sin PIN) |
@@ -169,10 +170,13 @@ Requiere caja física abierta (lo valida `crearEnTransaccion`).
 1. Valida que todas las `cuentaIds` existan, pertenezcan a la mesa/tenant y estén
    `abierta` (si falta alguna, `BadRequestException`).
 2. La cuenta **destino** es la de menor `numero`; las demás son **origen**.
-3. Mueve las `cuenta_lineas` de cada origen al destino, mergeando por `itemId`
+3. Por cada origen: mueve sus `cuenta_lineas` al destino, mergeando por `itemId`
    (misma lógica que `agregarLinea`: si el destino ya tiene el ítem, suma
-   cantidades y hace soft-delete de la línea de origen; si no, reasigna la línea).
-4. Cada cuenta origen queda `cancelada` (sin `ventaId`, absorbida por el destino).
+   cantidades y hace soft-delete de la línea de origen; si no, reasigna la línea), y
+   la deja `cancelada` (sin `ventaId`, absorbida por el destino).
+4. Terminado ese recorrido, muda las anulaciones (`cuenta_linea_anulaciones`) de todos los
+   orígenes al destino en un solo `UPDATE` (2026-09-16, detalle más abajo en "Fusión y
+   anulaciones") — no viven en la línea, así que el paso 3 no las mueve solo.
 
 Al quedar solo el destino abierta, la numeración por mesa sigue el mismo criterio
 normal (se reinicia en 1 cuando esa cuenta también se cierre).
@@ -591,10 +595,46 @@ instante después — con el filtro puesto, esa fila desaparecería del aviso (I
 motivo = sin fila) aunque la anulación sea real. El JOIN a `usuarios` (autor) tampoco filtra
 `eliminado_el`, mismo criterio que la papelera: quién autorizó es un hecho histórico.
 
-**Fuera de esta parte:** el reporte de anulaciones con merma y cortesía separadas, deshacer
-una anulación (decidido que no existe: se vuelve a pedir el plato) y las dos rutas de
-cancelar una cuenta con algo despachado (`cancelar` simple vs. `cancelar-con-motivo`) — spec
-§ 6, parte de un frente posterior.
+**Fuera de esta parte:** el reporte de anulaciones con merma y cortesía separadas, y deshacer
+una anulación (decidido que no existe: se vuelve a pedir el plato).
+
+### Cancelar una cuenta con platos despachados (2026-09-16)
+
+Dos rutas, para que el permiso siga en el guard (invariante 6 de `CLAUDE.md`: `PermisosGuard`
+solo resuelve lo que declara la ruta, no un permiso que dependa del dato):
+
+- **`POST /cuentas/:id/cancelar`** (`Salones:Operar`, sin cambios de esta parte): hasta la
+  Task 6 del mismo frente, cancela igual aunque haya algo despachado.
+- **`POST /cuentas/:id/cancelar-con-motivo`** (`Salones:Anular`) body `{ motivoBajaId }`: en
+  una transacción, por cada línea viva con `cantidad_enviada > 0` genera una anulación **por
+  su `cantidad_enviada`** (no lo pedido) con ese motivo, aplicando el stock según su tipo —
+  el mismo escritor privado que usa `POST .../anular` (`escribirAnulacionEnLinea`, no una
+  copia). Las unidades no despachadas y las líneas sin nada despachado no generan fila ni
+  movimiento: una línea con `cantidad` 3 y `cantidad_enviada` 1 genera una anulación de 1
+  y mueve stock de 1, y las 2 pendientes se descartan. Después se borran **todas** las
+  líneas vivas —hayan generado anulación o no, porque la cuenta entera se cancela— y se
+  cancela la cuenta, cerrando el tramo de asignación (`cerrarTramoVigente`), igual que
+  `cancelarCuenta`. Devuelve `CuentaDetalle & { advertencias: string[] }`, el mismo molde
+  que `POST .../anular`, para que las advertencias de stock insuficiente también lleguen acá.
+
+**"Algo despachado"** es alguna línea viva con `cantidad_enviada > 0`. Si no hay nada
+despachado, 400 con un mensaje que manda a la ruta simple (`cancelar`) — una cuenta con todo
+ya anulado no tiene líneas vivas y se cancela por ahí.
+
+**El motivo se valida una sola vez para toda la cuenta**, no por línea (es el mismo motivo
+para todas las anulaciones que esta cancelación genera), y las líneas despachadas y sus
+ítems se leen en bloque (`= ANY($1)`), nunca una consulta por línea — solo la escritura por
+línea (la fila de anulación y el consumo de stock) corre una vez por línea, porque esa sí
+tiene que ser por línea.
+
+### Fusión y anulaciones (2026-09-16)
+
+`fusionarCuentas` mueve las `cuenta_lineas` de cada origen al destino, pero una anulación
+**no vive en la línea** (sobrevive a su borrado): mover solo las líneas dejaba el aviso de
+la pantalla y la precuenta sin lo que se anuló antes de fusionar. Por eso, en la misma
+transacción, las filas de `cuenta_linea_anulaciones` de las cuentas de **origen** se mudan a
+la de **destino** con un solo `UPDATE ... SET cuenta_id = $1 WHERE cuenta_id = ANY($2) AND
+tenant_id = $3 AND eliminado_el IS NULL` — no por cuenta ni por anulación.
 
 ---
 
