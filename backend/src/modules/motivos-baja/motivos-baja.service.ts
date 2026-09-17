@@ -31,7 +31,7 @@ export interface MotivoBajaListItem {
 /** Lo que `findOneOrFail` necesita resolver: identidad + lo que `update`/`remove`
  *  chequean antes de escribir. Sin `enUso` a propósito — ni `update` (fuera del
  *  cambio de tipo) ni `remove` lo usan, y `remove` ya calcula su propio uso con
- *  otra consulta (`COUNT`, no `EXISTS`) para el mensaje que devuelve. */
+ *  otra consulta (su propio `EXISTS` sobre el kardex y las anulaciones de plato). */
 interface MotivoBajaActual {
   id: string;
   nombre: string;
@@ -78,9 +78,19 @@ export class MotivosBajaService {
     if (!incluirEliminados) {
       const rows: MotivoBajaRowConUso[] = await this.db.query(
         `SELECT mb.motivo_baja_id, mb.nombre, mb.activo, mb.es_fijo, mb.tipo,
-                EXISTS (SELECT 1 FROM movimientos_inventario mv
-                         WHERE mv.motivo_baja_id = mb.motivo_baja_id
-                           AND mv.eliminado_el IS NULL) AS en_uso
+                -- "En uso" cuenta las dos fuentes que bloquean editar el tipo
+                -- y borrar (spec motivos-de-baja-con-tipo § 4.3, ampliada por
+                -- anular-plato-despachado § 4.3): el kardex Y las anulaciones
+                -- de plato, en la misma consulta — nunca una por motivo.
+                EXISTS (
+                  SELECT 1 FROM movimientos_inventario mv
+                   WHERE mv.motivo_baja_id = mb.motivo_baja_id
+                     AND mv.eliminado_el IS NULL
+                  UNION ALL
+                  SELECT 1 FROM cuenta_linea_anulaciones cla
+                   WHERE cla.motivo_baja_id = mb.motivo_baja_id
+                     AND cla.eliminado_el IS NULL
+                ) AS en_uso
            FROM motivo_baja mb
           WHERE mb.tenant_id = $1 AND mb.eliminado_el IS NULL
             ${soloActivas ? 'AND mb.activo = true' : ''}
@@ -108,9 +118,17 @@ export class MotivosBajaService {
     // docs/features/papelera.md.
     const rows: MotivoBajaRowConEliminado[] = await this.db.query(
       `SELECT mb.motivo_baja_id, mb.nombre, mb.activo, mb.es_fijo, mb.tipo,
-              EXISTS (SELECT 1 FROM movimientos_inventario mv
-                       WHERE mv.motivo_baja_id = mb.motivo_baja_id
-                         AND mv.eliminado_el IS NULL) AS en_uso,
+              -- Mismas dos fuentes que el listado normal (ver comentario de
+              -- arriba): kardex y anulaciones, una sola consulta.
+              EXISTS (
+                SELECT 1 FROM movimientos_inventario mv
+                 WHERE mv.motivo_baja_id = mb.motivo_baja_id
+                   AND mv.eliminado_el IS NULL
+                UNION ALL
+                SELECT 1 FROM cuenta_linea_anulaciones cla
+                 WHERE cla.motivo_baja_id = mb.motivo_baja_id
+                   AND cla.eliminado_el IS NULL
+              ) AS en_uso,
               mb.eliminado_el, mb.eliminado_por,
               u.nombre_usuario AS eliminado_por_nombre
          FROM motivo_baja mb
@@ -183,14 +201,22 @@ export class MotivosBajaService {
     // figure como que nunca gastó stock. Solo se consulta el uso cuando el
     // tipo realmente cambia — mandar el mismo tipo no dispara esta consulta.
     if (dto.tipo !== undefined && dto.tipo !== motivo.tipo) {
+      // Mismas dos fuentes que bloquean el borrado (spec
+      // anular-plato-despachado § 4.3): kardex Y anulaciones de plato, en la
+      // misma consulta.
       const uso: { en_uso: boolean }[] = await this.db.query(
-        `SELECT EXISTS (SELECT 1 FROM movimientos_inventario
-                         WHERE motivo_baja_id = $1 AND eliminado_el IS NULL) AS en_uso`,
+        `SELECT EXISTS (
+           SELECT 1 FROM movimientos_inventario
+            WHERE motivo_baja_id = $1 AND eliminado_el IS NULL
+           UNION ALL
+           SELECT 1 FROM cuenta_linea_anulaciones
+            WHERE motivo_baja_id = $1 AND eliminado_el IS NULL
+         ) AS en_uso`,
         [id],
       );
       if (uso[0].en_uso) {
         throw new BadRequestException(
-          'No se puede cambiar el tipo: el motivo ya se usó en movimientos',
+          'No se puede cambiar el tipo: el motivo ya se usó en movimientos o en anulaciones de plato',
         );
       }
     }
@@ -219,9 +245,16 @@ export class MotivosBajaService {
           `UPDATE motivo_baja SET ${sets.join(', ')}
          WHERE motivo_baja_id = $${idx++} AND tenant_id = $${idx} AND eliminado_el IS NULL
          RETURNING motivo_baja_id, nombre, activo, es_fijo, tipo,
-                   EXISTS (SELECT 1 FROM movimientos_inventario mv
-                            WHERE mv.motivo_baja_id = motivo_baja.motivo_baja_id
-                              AND mv.eliminado_el IS NULL) AS en_uso`,
+                   -- Mismas dos fuentes que el listado (kardex y anulaciones).
+                   EXISTS (
+                     SELECT 1 FROM movimientos_inventario mv
+                      WHERE mv.motivo_baja_id = motivo_baja.motivo_baja_id
+                        AND mv.eliminado_el IS NULL
+                     UNION ALL
+                     SELECT 1 FROM cuenta_linea_anulaciones cla
+                      WHERE cla.motivo_baja_id = motivo_baja.motivo_baja_id
+                        AND cla.eliminado_el IS NULL
+                   ) AS en_uso`,
           params,
         ),
         async () => {
@@ -253,14 +286,23 @@ export class MotivosBajaService {
         'No se puede eliminar un motivo fijo del sistema',
       );
     }
-    const uso: { cnt: string }[] = await this.db.query(
-      `SELECT COUNT(*)::text AS cnt FROM movimientos_inventario
-       WHERE motivo_baja_id = $1 AND eliminado_el IS NULL`,
+    // Una sola query cubre las dos referencias posibles (mismo molde que
+    // `MotivosDiferenciaInventarioService.remove`): el kardex ya aplicado Y
+    // las anulaciones de plato (spec anular-plato-despachado § 4.3) — nunca
+    // dos consultas sueltas.
+    const uso: { existe: boolean }[] = await this.db.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM movimientos_inventario
+          WHERE motivo_baja_id = $1 AND eliminado_el IS NULL
+         UNION ALL
+         SELECT 1 FROM cuenta_linea_anulaciones
+          WHERE motivo_baja_id = $1 AND eliminado_el IS NULL
+       ) AS existe`,
       [id],
     );
-    if (parseInt(uso[0].cnt, 10) > 0) {
+    if (uso[0].existe) {
       throw new BadRequestException(
-        'No se puede eliminar: el motivo está en uso en movimientos de merma',
+        'No se puede eliminar: el motivo está en uso en movimientos de merma o en anulaciones de plato',
       );
     }
     // Una sola escritura en vez de dos sentencias sueltas: no puede quedar
@@ -291,9 +333,16 @@ export class MotivosBajaService {
             WHERE motivo_baja_id = $1 AND tenant_id = $2
               AND eliminado_el IS NOT NULL AND eliminado_por IS NOT NULL
           RETURNING motivo_baja_id, nombre, activo, es_fijo, tipo,
-                    EXISTS (SELECT 1 FROM movimientos_inventario mv
-                             WHERE mv.motivo_baja_id = motivo_baja.motivo_baja_id
-                               AND mv.eliminado_el IS NULL) AS en_uso,
+                    -- Mismas dos fuentes que el listado (kardex y anulaciones).
+                    EXISTS (
+                      SELECT 1 FROM movimientos_inventario mv
+                       WHERE mv.motivo_baja_id = motivo_baja.motivo_baja_id
+                         AND mv.eliminado_el IS NULL
+                      UNION ALL
+                      SELECT 1 FROM cuenta_linea_anulaciones cla
+                       WHERE cla.motivo_baja_id = motivo_baja.motivo_baja_id
+                         AND cla.eliminado_el IS NULL
+                    ) AS en_uso,
                     eliminado_el, eliminado_por`,
           [id, tenantId, nombreNuevo ?? null],
         ),

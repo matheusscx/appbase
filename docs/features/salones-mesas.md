@@ -54,7 +54,9 @@ módulo modela esa operación reusando el motor de ventas/cobro existente.
 
 Todos bajo `@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)`. Módulo RBAC
 **`Salones`**. Administración usa `Leer`/`Crear`/`Actualizar`/`Eliminar`; la operación
-del garzón usa el permiso dedicado **`Operar`**.
+del garzón usa el permiso dedicado **`Operar`**; anular un plato ya despachado exige
+además **`Anular`** (2026-09-16) — no pide PIN, porque es un gesto de quien tiene el
+permiso, no del garzón de turno.
 
 | Método | Ruta | Permiso | Descripción |
 |---|---|---|---|
@@ -73,6 +75,7 @@ del garzón usa el permiso dedicado **`Operar`**.
 | POST | `/cuentas/:id/lineas` | Operar | Agregar producto (merge por ítem) |
 | PATCH | `/cuentas/:id/lineas/:lineaId` | Operar | Cambiar cantidad (canónica + opcional `cantidadPresentacion` / `unidadCodigoPresentacion`) |
 | DELETE | `/cuentas/:id/lineas/:lineaId` | Operar | Quitar producto |
+| POST | `/cuentas/:id/lineas/:lineaId/anular` | Anular | Anular un plato ya despachado, con motivo — ver más abajo |
 | POST | `/cuentas/:id/cancelar` | Operar | Anular cuenta (sin venta) |
 | POST | `/cuentas/:id/cerrar` | Operar | Cerrar → genera venta (`FOR UPDATE` de cuenta) |
 | POST | `/cuentas/:id/transferir` | Operar | Transferir responsable vigente por PIN (claim) |
@@ -507,10 +510,10 @@ dejar la línea en exactamente lo que salió, que es legítimo.
 Y `quitarLinea` hasta el 2026-08-16 ni siquiera leía la fila: hacía `softDelete` por
 criterio, así que borraba sin mirar nada.
 
-**Lo que falta, y por qué esto no lo reemplaza:** para anular de verdad tiene que existir
-un camino **con motivo** (merma o cortesía). Bloquear evita la pérdida silenciosa; no da
-la salida legítima. Ese camino sigue en `docs/agent/pendientes.md` y ahí entra la
-investigación de mercado.
+**Lo que faltaba, y por qué esto no lo reemplazaba:** para anular de verdad tenía que
+existir un camino **con motivo** (merma, cortesía o no elaborado). Bloquear evitaba la
+pérdida silenciosa; no daba la salida legítima. Ese camino es
+`POST /cuentas/:id/lineas/:lineaId/anular`, más abajo.
 
 **`cantidad_enviada` también sobrevive a la cuenta (2026-08-23).** La venta que sale del
 cierre lo expone como `tieneLineasDespachadas` en `GET /ventas/:id`, y con eso el modal de
@@ -530,6 +533,68 @@ por qué, y "Cerrar y cobrar" e "Imprimir precuenta" quedan deshabilitados hasta
 quite la línea. Las líneas **no** se filtran de la entrada del cálculo a propósito:
 `AdvertenciasPrecio` indexa `resultado.lineas[i]` contra las líneas de la pantalla, así
 que filtrar la entrada las desfasa.
+
+### Anular una línea ya despachada (2026-09-16)
+
+El camino con motivo que la sección anterior prometía
+(spec `docs/superpowers/specs/2026-09-16-anular-plato-despachado-design.md`).
+`POST /cuentas/:id/lineas/:lineaId/anular` — guard `Salones:Anular` (nuevo par de
+`Anular`, que hasta acá solo existía para Ventas) — body `{ cantidad, motivoBajaId }`,
+`cantidad` en la unidad **canónica** de la línea. Devuelve `CuentaDetalle & { advertencias:
+string[] }`: el mismo molde que usa `ventas.service.ts` para las advertencias de stock
+insuficiente (`{ ...detalle, advertencias }`, sin envolver en un tipo dedicado).
+
+**El tope es lo DESPACHADO, `cantidad_enviada`, no lo pedido.** Lo que no salió a cocina ya
+tiene su camino sin motivo (`DELETE`/`PATCH` de arriba); anularlo con un motivo que
+descuenta movería stock de un plato que nunca se cocinó. Anular baja **las dos columnas**,
+`cantidad` y `cantidad_enviada`, en la misma medida — así todo lo que ya lee `cuenta_lineas`
+(cobro, cálculo, comanda, stock apartado) sigue leyendo un número que ya es el vivo, sin
+restar nada aparte. Si `cantidad` llega a cero, la línea se **borra** (soft delete); si no,
+se recalcula `cantidad_presentacion` con el mismo `sincronizarPresentacion` que usan
+`agregarLinea`/`fusionarCuentas`.
+
+**No reusa `actualizarLinea`**: esa rechaza bajar de lo despachado y da 404 con el ítem
+pausado o eliminado del catálogo (`getItemVendibleOrThrow`). Acá es al revés — el tope ES
+lo despachado, y un ítem pausado o **borrado no frena la anulación**: para uno borrado es
+además la única salida, porque la cuenta no se puede cobrar (`cerrarCuenta` rechaza ítems
+eliminados) ni la línea quitar (ya está despachada).
+
+**El motivo decide el stock**, con `MotivosBajaService.assertMotivoActivo` (catálogo de
+[mermas-valorizadas.md](./mermas-valorizadas.md)):
+
+| Tipo del motivo | Efecto |
+|---|---|
+| `merma` / `cortesia` | Descuenta stock — `ItemsService.consumirLineaAnulada`, misma expansión de receta/combo/opciones que el cobro, con el snapshot de personalización **congelado en la línea**. El movimiento va `motivo: 'merma'` + `motivoBajaId` + `cuentaLineaAnulacionId` (nunca `motivo: 'anulacion'`, que en el kardex significa *anular una venta* y hace que el stock **vuelva**) |
+| `no_elaborado` | Sin movimiento: ese stock nunca salió |
+
+Descuenta solo si el ÍTEM tiene stock que descontar — `producto`, `receta` o `combo`.
+`servicio` y `suscripcion` no lo tienen, ni siquiera al vender (`ventas.service.ts` no los
+menciona en su `if`/`else if` de descuento), así que tampoco acá, sea cual sea el tipo de
+motivo. El descuento **nunca aborta por falta de stock**: `consumirLineaAnulada` devuelve
+advertencias en vez de lanzar —el plato ya salió de cocina, no hay nada que deshacer— y
+viajan en `advertencias` de la respuesta.
+
+**Si la anulación deja la cuenta sin líneas vivas**, la misma operación la cancela
+—`cerrarTramoVigente` incluido, igual que `cancelarCuenta`— y devuelve la cuenta
+`cancelada` sin pasar por `cerrarCuenta` (que rechaza una cuenta sin líneas con *"La cuenta
+no tiene productos"*). La mesa queda libre y el rastro vive en las anulaciones.
+
+**El detalle de la cuenta suma `anulaciones: CuentaAnulacionDetalle[]`**
+(`{ id, itemNombre, cantidad, motivoNombre, motivoTipo, autorizadoPorNombre, creadoEl }`),
+para el aviso debajo de la cuenta: *"1 lomo anulado — cortesía, autorizó Ana"*. Sale de la
+tabla nueva `cuenta_linea_anulaciones` —sobrevive al borrado de la línea, es el único
+rastro que queda en la cuenta— en **una sola query para las N cuentas** de `armarDetalles`
+(`idx_cuenta_linea_anulaciones_cuenta`), filtrando `eliminado_el`. El JOIN a `motivo_baja`
+tampoco lo filtra: ni `MotivosBajaService.remove` ni `assertMotivoActivo` toman lock, así
+que una anulación concurrente puede colarse apuntando a un motivo que termina borrado un
+instante después — con el filtro puesto, esa fila desaparecería del aviso (INNER JOIN sin
+motivo = sin fila) aunque la anulación sea real. El JOIN a `usuarios` (autor) tampoco filtra
+`eliminado_el`, mismo criterio que la papelera: quién autorizó es un hecho histórico.
+
+**Fuera de esta parte:** el reporte de anulaciones con merma y cortesía separadas, deshacer
+una anulación (decidido que no existe: se vuelve a pedir el plato) y las dos rutas de
+cancelar una cuenta con algo despachado (`cancelar` simple vs. `cancelar-con-motivo`) — spec
+§ 6, parte de un frente posterior.
 
 ---
 
@@ -915,7 +980,13 @@ que ensanchar la ventana con ganchos de test en el camino caliente del POS.
 ## Decisiones
 
 - Un módulo RBAC `Salones` con permiso extra `Operar` (patrón de `Reembolsar` /
-  `Nota de crédito`) para separar administrar estructura vs. operar cuentas.
+  `Nota de crédito`) para separar administrar estructura vs. operar cuentas. `Anular`
+  (2026-09-16) es un tercer permiso del mismo módulo, para separar operar de anular con
+  motivo — el rol `Salones · Encargado` del seed recibe los dos.
+- **Una anulación no se deshace** (owner): un error se corrige volviendo a pedir el plato,
+  igual que una merma. Quedan los dos rastros.
+- **Una cuenta con todo anulado se cancela, nunca se cobra en $0**: evita ventas en cero:
+  el rastro vive en las anulaciones y en el kardex, no en una venta fantasma.
 - Cierre reusa `VentasService.crearEnTransaccion` (atomicidad; evita el doble commit
   de `crear()`).
 - Estado de mesa derivado, no almacenado.
@@ -933,7 +1004,10 @@ que ensanchar la ventana con ganchos de test en el camino caliente del POS.
 
 - [ventas.md](./ventas.md) — motor de ventas y POS reusado en el cierre.
 - [gestion-cajas.md](./gestion-cajas.md) — caja física requerida para cobrar.
-- [roles-permisos.md](./roles-permisos.md) — módulo RBAC `Salones` y permiso `Operar`.
+- [roles-permisos.md](./roles-permisos.md) — módulo RBAC `Salones` y permisos `Operar` /
+  `Anular`.
+- [mermas-valorizadas.md](./mermas-valorizadas.md) — catálogo de motivos de baja
+  (`merma` / `cortesia` / `no_elaborado`) que decide si anular una línea descuenta stock.
 - [garzones.md](./garzones.md) — identificación por PIN.
 - [turnos-garzones.md](./turnos-garzones.md) — sesión obligatoria para operar cuentas.
 - [inventario-kardex.md](./inventario-kardex.md) — por qué lo apartado al pedir **no**

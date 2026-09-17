@@ -19,6 +19,8 @@ import { CatalogModule } from '../catalog/catalog.module';
 import { TurnosModule } from '../turnos/turnos.module';
 import { MonedasModule } from '../monedas/monedas.module';
 import { CalculoPreciosModule } from '../calculo-precios/calculo-precios.module';
+import { MotivosBajaModule } from '../motivos-baja/motivos-baja.module';
+import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
 
 @Module({
   imports: [
@@ -40,6 +42,12 @@ import { CalculoPreciosModule } from '../calculo-precios/calculo-precios.module'
     // El detalle priceado de la personalización se devuelve convertido a
     // moneda oficial: `convertirAMonedaOficial` + `cargarConfig` salen de acá.
     CalculoPreciosModule,
+    // `anularLinea` valida el motivo con `assertMotivoActivo`. Ninguno de los
+    // dos importa `SalonesModule` — no hay ciclo.
+    MotivosBajaModule,
+    // `anularLinea` resuelve `UbicacionesService.localDe` para el
+    // `ubicacionLocalId` que le pasa a `ItemsService.consumirLineaAnulada`.
+    UbicacionesModule,
   ],
   controllers: [SalonesController, MesasController, CuentasController],
   providers: [SalonesService, CuentaAsignacionesService],

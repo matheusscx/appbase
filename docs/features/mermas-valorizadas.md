@@ -77,8 +77,9 @@ Los siete fijos que siembra el sistema (seeder y alta de tenant, `MOTIVOS_BAJA_F
 | No se llegó a hacer | `no_elaborado` |
 
 **El tipo de un motivo propio se puede cambiar solo mientras no se usó.** "Usado" es lo mismo
-que ya bloquea el borrado: algún movimiento de inventario vivo con ese motivo. `PATCH
-/api/motivos-baja/:id` con `tipo` devuelve `400` si el motivo ya tiene movimientos —
+que ya bloquea el borrado: algún movimiento de inventario vivo con ese motivo **o alguna
+anulación de plato viva** con ese motivo (incluida una `no_elaborado`, que no deja fila en el
+kardex). `PATCH /api/motivos-baja/:id` con `tipo` devuelve `400` si el motivo ya se usó —
 cambiarlo después reescribiría la historia: un *"Se quemó"* pasado a `no_elaborado` haría que
 un plato que salió de la cocina figure como que nunca gastó stock. Los fijos siguen sin poder
 editarse ni borrarse (mismo 400 de siempre, no depende del campo que se mande).
@@ -95,10 +96,10 @@ editarse ni borrarse (mismo 400 de siempre, no depende del campo que se mande).
 
 ### CRUD `/api/motivos-baja`
 
-- `GET` — cualquier usuario del tenant; query `?soloActivas=true` filtra activas, `?tipo=merma|cortesia|no_elaborado` filtra por tipo. Cada fila trae `enUso: boolean` — sale de la MISMA consulta del listado (un `EXISTS` sobre `movimientos_inventario`), nunca de una consulta por motivo.
+- `GET` — cualquier usuario del tenant; query `?soloActivas=true` filtra activas, `?tipo=merma|cortesia|no_elaborado` filtra por tipo. Cada fila trae `enUso: boolean` — sale de la MISMA consulta del listado (un `EXISTS` sobre `movimientos_inventario` **UNION ALL** `cuenta_linea_anulaciones` — anular un plato con este motivo también cuenta como uso, spec `anular-plato-despachado` § 4.3, incluido `no_elaborado`, que no deja fila en el kardex), nunca de una consulta por motivo.
 - `POST` — `TenantAdminGuard`; `tipo` es obligatorio, sin default (el admin lo elige).
-- `PATCH /:id` — `TenantAdminGuard`; rechaza editar `es_fijo=true`. Cambiar `tipo` de un motivo ya usado en movimientos da `400` (ver arriba); el resto de los campos no cambia de regla.
-- `DELETE /:id` — `TenantAdminGuard`; rechaza borrar `es_fijo=true`; soft-delete bloqueado si hay movimientos con ese motivo.
+- `PATCH /:id` — `TenantAdminGuard`; rechaza editar `es_fijo=true`. Cambiar `tipo` de un motivo ya usado —en un movimiento o en una anulación de plato— da `400` (ver arriba); el resto de los campos no cambia de regla.
+- `DELETE /:id` — `TenantAdminGuard`; rechaza borrar `es_fijo=true`; soft-delete bloqueado si hay movimientos o anulaciones de plato con ese motivo.
 
 ### `POST /api/mermas`
 

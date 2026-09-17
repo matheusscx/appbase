@@ -16,6 +16,10 @@ import { CatalogService } from '../catalog/catalog.service';
 import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
 import { MonedasService } from '../monedas/monedas.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
+import { MotivosBajaService } from '../motivos-baja/motivos-baja.service';
+import { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
+import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
+import { CuentaLineaAnulacion } from './entities/cuenta-linea-anulacion.entity';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 
 const UNIDADES_CATALOGO = [
@@ -130,18 +134,22 @@ describe('SalonesService', () => {
     resolverPersonalizacionReceta: jest.Mock;
     resolverPersonalizacionCombo: jest.Mock;
     validarStockAlPedir: jest.Mock;
+    consumirLineaAnulada: jest.Mock;
   };
-  let catalog: { findAllUnidadesMedida: jest.Mock };
+  let catalog: { findAllUnidadesMedida: jest.Mock; crearConversor: jest.Mock };
   let monedas: { findMonedas: jest.Mock };
   let calculoPrecios: {
     cargarConfig: jest.Mock;
     convertirAMonedaOficial: jest.Mock;
     congelarReglasDeItem: jest.Mock;
   };
+  let motivosBaja: { assertMotivoActivo: jest.Mock };
+  let ubicaciones: { localDe: jest.Mock };
   let manager: {
     query: jest.Mock;
     findOne: jest.Mock;
     find: jest.Mock;
+    count: jest.Mock;
     save: jest.Mock;
     create: jest.Mock;
     softDelete: jest.Mock;
@@ -198,10 +206,18 @@ describe('SalonesService', () => {
       // verdad. Acá solo deja pasar, para que estos specs sigan hablando del
       // merge y de la presentación.
       validarStockAlPedir: jest.fn().mockResolvedValue(undefined),
+      // El descuento de stock de una anulación tiene su conducta cubierta por
+      // el e2e (`salones-anular-linea.e2e-spec.ts`), con stock de verdad. Acá
+      // solo devuelve las advertencias que el test arma, para que
+      // `anularLinea` hable del tope, el borrado de línea y la cancelación.
+      consumirLineaAnulada: jest.fn().mockResolvedValue([]),
     };
 
     catalog = {
       findAllUnidadesMedida: jest.fn().mockResolvedValue(UNIDADES_CATALOGO),
+      crearConversor: jest
+        .fn()
+        .mockResolvedValue((cantidad: string) => cantidad),
     };
 
     // El detalle priceado de la personalización se devuelve convertido a moneda
@@ -232,11 +248,22 @@ describe('SalonesService', () => {
         .fn()
         .mockResolvedValue({ descuentos: [], recargos: [] }),
     };
+    motivosBaja = {
+      assertMotivoActivo: jest.fn().mockResolvedValue({
+        id: 'motivo-1',
+        nombre: 'Se cayó',
+        tipo: TipoMotivoBaja.MERMA,
+      }),
+    };
+    ubicaciones = {
+      localDe: jest.fn().mockResolvedValue('ubicacion-local'),
+    };
 
     manager = {
       query: jest.fn(),
       findOne: jest.fn(),
       find: jest.fn(),
+      count: jest.fn().mockResolvedValue(1),
       save: jest.fn((_e: unknown, row: unknown) => Promise.resolve(row)),
       create: jest.fn((_e: unknown, data: Record<string, unknown>) => ({
         ...data,
@@ -270,6 +297,8 @@ describe('SalonesService', () => {
         { provide: CatalogService, useValue: catalog },
         { provide: MonedasService, useValue: monedas },
         { provide: CalculoPreciosService, useValue: calculoPrecios },
+        { provide: MotivosBajaService, useValue: motivosBaja },
+        { provide: UbicacionesService, useValue: ubicaciones },
       ],
     }).compile();
 
@@ -2262,6 +2291,464 @@ describe('SalonesService', () => {
     });
   });
 
+  describe('anularLinea', () => {
+    const LINEA = 'linea-1';
+    const MOTIVO = 'motivo-1';
+
+    /** La línea 3/2: 3 pedidas, 2 ya despachadas — el tope de la anulación. */
+    function lineaViva(overrides: Record<string, unknown> = {}) {
+      return {
+        id: LINEA,
+        tenantId: TENANT,
+        cuentaId: CUENTA,
+        itemId: ITEM,
+        cantidad: '3',
+        cantidadEnviada: '2',
+        cantidadPresentacion: null,
+        unidadCodigoPresentacion: null,
+        personalizacion: null,
+        ...overrides,
+      };
+    }
+
+    function mockCuentaYLinea(linea: Record<string, unknown> | null) {
+      manager.findOne.mockImplementation((entidad: unknown) =>
+        Promise.resolve(
+          entidad === Cuenta
+            ? {
+                id: CUENTA,
+                tenantId: TENANT,
+                estado: EstadoCuenta.ABIERTA,
+                garzonAperturaId: null,
+                garzonCierreId: null,
+                garzonResponsableId: null,
+              }
+            : linea,
+        ),
+      );
+    }
+
+    /** `item.tipo` por defecto: `producto`, el caso que SÍ descuenta stock. */
+    function mockItemQuery(tipo = 'producto') {
+      manager.query.mockImplementation((sql: string) => {
+        if (sql.includes('i.tipo, i.nombre, ip.unidad_medida')) {
+          return Promise.resolve([
+            { item_id: ITEM, tipo, nombre: 'Lomo', unidad_medida: 'unidad' },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+    }
+
+    beforeEach(() => {
+      mockCuentaYLinea(lineaViva());
+      mockItemQuery();
+      manager.count.mockResolvedValue(1); // por defecto, quedan líneas vivas
+    });
+
+    it('rechaza si la cuenta no está abierta', async () => {
+      manager.findOne.mockImplementation((entidad: unknown) =>
+        Promise.resolve(
+          entidad === Cuenta
+            ? { id: CUENTA, tenantId: TENANT, estado: EstadoCuenta.CERRADA }
+            : lineaViva(),
+        ),
+      );
+
+      await expect(
+        service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+          cantidad: '1',
+          motivoBajaId: MOTIVO,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('404 si la línea no pertenece a la cuenta o está borrada', async () => {
+      mockCuentaYLinea(null);
+
+      await expect(
+        service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+          cantidad: '1',
+          motivoBajaId: MOTIVO,
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rechaza cantidad <= 0', async () => {
+      await expect(
+        service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+          cantidad: '0',
+          motivoBajaId: MOTIVO,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(motivosBaja.assertMotivoActivo).not.toHaveBeenCalled();
+    });
+
+    it('el tope es lo DESPACHADO, no lo pedido: cantidad > cantidad_enviada rechaza', async () => {
+      mockCuentaYLinea(lineaViva({ cantidad: '3', cantidadEnviada: '2' }));
+
+      await expect(
+        service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+          cantidad: '3',
+          motivoBajaId: MOTIVO,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+          cantidad: '3',
+          motivoBajaId: MOTIVO,
+        }),
+      ).rejects.toThrow(/despachado/);
+      expect(manager.save).not.toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.anything(),
+      );
+    });
+
+    /**
+     * Ronda de fixes 1 (security I-1 / domain Minor 1): las tres columnas que
+     * esto mueve son `numeric(18,4)`. Sin este guard, "0.00005" pasa el tope
+     * de arriba (`<= cantidad_enviada` en una línea 1/1), Postgres la
+     * redondea a "0.0001" al guardar, la resta nunca baja la línea a cero, y
+     * la anulación se puede repetir sin límite moviendo stock de verdad cada
+     * vez. Mismo criterio que `MonedasService`/`EscalaMonedaPipe`: el formato
+     * ya lo valida `@IsNumberString`, esto es la ESCALA.
+     */
+    it('rechaza más de 4 decimales (escala de numeric(18,4))', async () => {
+      await expect(
+        service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+          cantidad: '0.00005',
+          motivoBajaId: MOTIVO,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+          cantidad: '0.00005',
+          motivoBajaId: MOTIVO,
+        }),
+      ).rejects.toThrow(/4 decimales/);
+      expect(manager.save).not.toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.anything(),
+      );
+    });
+
+    it('4 decimales exactos sí pasan (el límite es el borde, no el rechazo)', async () => {
+      mockCuentaYLinea(lineaViva({ cantidad: '2', cantidadEnviada: '1.0001' }));
+
+      await expect(
+        service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+          cantidad: '1.0001',
+          motivoBajaId: MOTIVO,
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('un motivo inactivo rechaza con lo que tire assertMotivoActivo', async () => {
+      motivosBaja.assertMotivoActivo.mockRejectedValue(
+        new BadRequestException('Motivo de baja no válido o inactivo'),
+      );
+
+      await expect(
+        service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+          cantidad: '1',
+          motivoBajaId: MOTIVO,
+        }),
+      ).rejects.toThrow(/Motivo de baja no válido o inactivo/);
+      expect(manager.save).not.toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.anything(),
+      );
+    });
+
+    it('anula parcial (1 de una línea 3/2): baja cantidad y cantidad_enviada, una fila de anulación de 1', async () => {
+      await service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+        cantidad: '1',
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.objectContaining({
+          tenantId: TENANT,
+          cuentaId: CUENTA,
+          cuentaLineaId: LINEA,
+          itemId: ITEM,
+          itemNombre: 'Lomo',
+          cantidad: '1',
+          motivoBajaId: 'motivo-1',
+          autorizadoPor: USUARIO_ACTOR,
+        }),
+      );
+      expect(manager.save).toHaveBeenCalledWith(
+        CuentaLinea,
+        expect.objectContaining({ cantidad: '2', cantidadEnviada: '1' }),
+      );
+      expect(manager.softDelete).not.toHaveBeenCalledWith(
+        CuentaLinea,
+        expect.anything(),
+      );
+    });
+
+    it('anula el total (2 de una línea 2/2): la línea se borra', async () => {
+      mockCuentaYLinea(lineaViva({ cantidad: '2', cantidadEnviada: '2' }));
+
+      await service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+        cantidad: '2',
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(manager.softDelete).toHaveBeenCalledWith(CuentaLinea, {
+        id: LINEA,
+        tenantId: TENANT,
+        cuentaId: CUENTA,
+      });
+      expect(manager.save).not.toHaveBeenCalledWith(
+        CuentaLinea,
+        expect.objectContaining({ id: LINEA }),
+      );
+    });
+
+    it('tipo merma: descuenta con la cantidad anulada y el snapshot congelado de la línea', async () => {
+      mockCuentaYLinea(lineaViva({ personalizacion: SNAPSHOT }));
+      manager.save.mockImplementation((entidad: unknown, row: unknown) =>
+        Promise.resolve(
+          entidad === CuentaLineaAnulacion
+            ? { ...(row as object), id: 'anulacion-1' }
+            : row,
+        ),
+      );
+
+      await service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+        cantidad: '1',
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(items.consumirLineaAnulada).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          tenantId: TENANT,
+          usuarioId: USUARIO_ACTOR,
+          itemId: ITEM,
+          itemTipo: 'producto',
+          itemNombre: 'Lomo',
+          cantidad: '1',
+          snapshot: SNAPSHOT,
+          motivoBajaId: 'motivo-1',
+          cuentaLineaAnulacionId: 'anulacion-1',
+          ubicacionLocalId: 'ubicacion-local',
+        }),
+      );
+    });
+
+    it('tipo cortesía también descuenta', async () => {
+      motivosBaja.assertMotivoActivo.mockResolvedValue({
+        id: MOTIVO,
+        nombre: 'Cortesía casa',
+        tipo: TipoMotivoBaja.CORTESIA,
+      });
+
+      await service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+        cantidad: '1',
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(items.consumirLineaAnulada).toHaveBeenCalled();
+    });
+
+    it('tipo no_elaborado: NO descuenta, ese stock nunca salió', async () => {
+      motivosBaja.assertMotivoActivo.mockResolvedValue({
+        id: MOTIVO,
+        nombre: 'No se alcanzó a hacer',
+        tipo: TipoMotivoBaja.NO_ELABORADO,
+      });
+
+      const result = await service.anularLinea(
+        TENANT,
+        USUARIO_ACTOR,
+        CUENTA,
+        LINEA,
+        { cantidad: '1', motivoBajaId: MOTIVO },
+      );
+
+      expect(items.consumirLineaAnulada).not.toHaveBeenCalled();
+      expect(result.advertencias).toEqual([]);
+    });
+
+    it('un ítem servicio no descuenta stock aunque el motivo sea merma: no lo tiene', async () => {
+      mockItemQuery('servicio');
+
+      await service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+        cantidad: '1',
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(items.consumirLineaAnulada).not.toHaveBeenCalled();
+    });
+
+    it('un ítem suscripción tampoco descuenta stock', async () => {
+      mockItemQuery('suscripcion');
+
+      await service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+        cantidad: '1',
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(items.consumirLineaAnulada).not.toHaveBeenCalled();
+    });
+
+    it('devuelve en `advertencias` lo que reporte consumirLineaAnulada', async () => {
+      items.consumirLineaAnulada.mockResolvedValue([
+        'No había stock de Lomo para descontar 1 unidad: revisá el inventario.',
+      ]);
+
+      const result = await service.anularLinea(
+        TENANT,
+        USUARIO_ACTOR,
+        CUENTA,
+        LINEA,
+        { cantidad: '1', motivoBajaId: MOTIVO },
+      );
+
+      expect(result.advertencias).toEqual([
+        'No había stock de Lomo para descontar 1 unidad: revisá el inventario.',
+      ]);
+    });
+
+    it('si la anulación deja la cuenta sin líneas vivas, la cancela y cierra el tramo', async () => {
+      mockCuentaYLinea(lineaViva({ cantidad: '2', cantidadEnviada: '2' }));
+      manager.count.mockResolvedValue(0);
+
+      const result = await service.anularLinea(
+        TENANT,
+        USUARIO_ACTOR,
+        CUENTA,
+        LINEA,
+        { cantidad: '2', motivoBajaId: MOTIVO },
+      );
+
+      expect(result.estado).toBe(EstadoCuenta.CANCELADA);
+      expect(asignaciones.cerrarTramoVigente).toHaveBeenCalledWith(
+        manager,
+        TENANT,
+        CUENTA,
+        expect.any(Date),
+      );
+      expect(manager.save).toHaveBeenCalledWith(
+        Cuenta,
+        expect.objectContaining({ estado: EstadoCuenta.CANCELADA }),
+      );
+    });
+
+    it('si quedan líneas vivas, NO cancela la cuenta', async () => {
+      manager.count.mockResolvedValue(1);
+
+      const result = await service.anularLinea(
+        TENANT,
+        USUARIO_ACTOR,
+        CUENTA,
+        LINEA,
+        { cantidad: '1', motivoBajaId: MOTIVO },
+      );
+
+      expect(result.estado).toBe(EstadoCuenta.ABIERTA);
+      expect(asignaciones.cerrarTramoVigente).not.toHaveBeenCalled();
+    });
+
+    it('un ítem pausado o borrado del catálogo NO frena la anulación', async () => {
+      // La query del ítem no filtra `activo` ni `eliminado_el` (a diferencia de
+      // `getItemVendibleOrThrow`): un producto borrado igual se puede anular.
+      manager.query.mockImplementation((sql: string) => {
+        if (sql.includes('i.tipo, i.nombre, ip.unidad_medida')) {
+          expect(sql).not.toMatch(/activo = true/);
+          expect(sql).not.toMatch(/eliminado_el IS NULL/);
+          return Promise.resolve([
+            {
+              item_id: ITEM,
+              tipo: 'producto',
+              nombre: 'Lomo (discontinuado)',
+              unidad_medida: 'unidad',
+            },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
+      const result = await service.anularLinea(
+        TENANT,
+        USUARIO_ACTOR,
+        CUENTA,
+        LINEA,
+        { cantidad: '1', motivoBajaId: MOTIVO },
+      );
+
+      expect(items.consumirLineaAnulada).toHaveBeenCalled();
+      expect(result).toBeDefined();
+    });
+
+    /**
+     * Mismo molde que el bucle de `agregarLinea`/`actualizarLinea` (ronda de
+     * fixes 1, domain I2): cuando el motivo descuenta, `consumirLineaAnulada`
+     * termina en `registrarMovimiento`, que toma `FOR UPDATE OF ip` sobre
+     * `item_producto` en un orden que decide el cliente — el mismo lock, y el
+     * mismo riesgo de deadlock contra una venta concurrente.
+     */
+    it('reintenta la transacción ante un deadlock 40P01 y devuelve el resultado del segundo intento', async () => {
+      const real = dataSource.transaction.getMockImplementation()!;
+      dataSource.transaction
+        .mockRejectedValueOnce(
+          Object.assign(new Error('deadlock detected'), { code: '40P01' }),
+        )
+        .mockImplementationOnce(real);
+
+      const result = await service.anularLinea(
+        TENANT,
+        USUARIO_ACTOR,
+        CUENTA,
+        LINEA,
+        { cantidad: '1', motivoBajaId: MOTIVO },
+      );
+
+      // Dos intentos: el que murió y el que escribió.
+      expect(dataSource.transaction).toHaveBeenCalledTimes(2);
+      expect(result).toBeDefined();
+    });
+
+    it('NO reintenta un error de negocio: se propaga en el primer intento', async () => {
+      // El control del test de arriba: reintentar un 400 lo convertiría en
+      // tres intentos silenciosos, justo lo que `esDeadlock` evita.
+      dataSource.transaction.mockRejectedValueOnce(
+        new BadRequestException('La cantidad debe ser mayor a cero'),
+      );
+
+      await expect(
+        service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+          cantidad: '1',
+          motivoBajaId: MOTIVO,
+        }),
+      ).rejects.toThrow('La cantidad debe ser mayor a cero');
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('deja de reintentar el deadlock y lo propaga: no reintenta para siempre', async () => {
+      const deadlock = () =>
+        Object.assign(new Error('deadlock detected'), { code: '40P01' });
+      dataSource.transaction
+        .mockRejectedValueOnce(deadlock())
+        .mockRejectedValueOnce(deadlock())
+        .mockRejectedValueOnce(deadlock());
+
+      await expect(
+        service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+          cantidad: '1',
+          motivoBajaId: MOTIVO,
+        }),
+      ).rejects.toThrow('deadlock detected');
+      // Intento original + 2 reintentos (`MAX_REINTENTOS_DEADLOCK`), y para.
+      expect(dataSource.transaction).toHaveBeenCalledTimes(3);
+    });
+  });
+
   describe('cerrarCuenta', () => {
     it('rechaza con el nombre del ítem eliminado, sin llegar a crear la venta', async () => {
       manager.findOne.mockResolvedValue({
@@ -2789,6 +3276,99 @@ describe('SalonesService', () => {
         ['linea-2'],
         ['linea-3'],
       ]);
+    });
+  });
+
+  describe('armarDetalles — bloque anulaciones', () => {
+    function cuentaAbierta(n: number) {
+      return {
+        id: `cuenta-${n}`,
+        numero: n,
+        nombre: null,
+        estado: EstadoCuenta.ABIERTA,
+        mesaId: MESA,
+        ventaId: null,
+        garzonAperturaId: null,
+        garzonResponsableId: null,
+        garzonCierreId: null,
+      };
+    }
+
+    /** Una fila de anulación por cuenta, para que cada una vea la SUYA. */
+    function conAnulaciones(cuentas: number) {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      cuentaRepo.find.mockResolvedValue(
+        Array.from({ length: cuentas }, (_, i) => cuentaAbierta(i + 1)),
+      );
+      dataSource.query.mockImplementation((sql: string) => {
+        if (sql.includes('cuenta_linea_anulaciones cla')) {
+          return Promise.resolve(
+            Array.from({ length: cuentas }, (_, i) => ({
+              cuenta_id: `cuenta-${i + 1}`,
+              cuenta_linea_anulacion_id: `anulacion-${i + 1}`,
+              item_nombre: 'Lomo',
+              cantidad: '1',
+              creado_el: new Date('2026-09-16T12:00:00Z'),
+              motivo_nombre: 'Cortesía',
+              motivo_tipo: TipoMotivoBaja.CORTESIA,
+              autorizado_por_nombre: 'Ana Torres',
+            })),
+          );
+        }
+        return Promise.resolve([]);
+      });
+      return dataSource.query;
+    }
+
+    it('sale de UNA sola query para N cuentas, y filtra eliminado_el', async () => {
+      const query = conAnulaciones(1);
+      await service.listarCuentasDeMesa(TENANT, MESA);
+      const conUna = query.mock.calls.filter((c) =>
+        (c[0] as string).includes('cuenta_linea_anulaciones cla'),
+      ).length;
+
+      jest.clearAllMocks();
+      conAnulaciones(4);
+      await service.listarCuentasDeMesa(TENANT, MESA);
+      const conCuatro = query.mock.calls.filter((c) =>
+        (c[0] as string).includes('cuenta_linea_anulaciones cla'),
+      ).length;
+
+      expect(conUna).toBe(1);
+      expect(conCuatro).toBe(1);
+      const [sql] = query.mock.calls.find((c) =>
+        (c[0] as string).includes('cuenta_linea_anulaciones cla'),
+      ) as [string];
+      expect(sql).toMatch(/cla\.eliminado_el IS NULL/);
+    });
+
+    it('reparte las anulaciones por cuenta_id: cada cuenta ve solo la suya', async () => {
+      conAnulaciones(3);
+      const detalles = await service.listarCuentasDeMesa(TENANT, MESA);
+
+      expect(detalles).toHaveLength(3);
+      expect(detalles.map((d) => d.anulaciones.map((a) => a.id))).toEqual([
+        ['anulacion-1'],
+        ['anulacion-2'],
+        ['anulacion-3'],
+      ]);
+      expect(detalles[0].anulaciones[0]).toMatchObject({
+        itemNombre: 'Lomo',
+        cantidad: '1',
+        motivoNombre: 'Cortesía',
+        motivoTipo: TipoMotivoBaja.CORTESIA,
+        autorizadoPorNombre: 'Ana Torres',
+      });
+    });
+
+    it('una cuenta sin anulaciones recibe un arreglo vacío, no undefined', async () => {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      cuentaRepo.find.mockResolvedValue([cuentaAbierta(1)]);
+      dataSource.query.mockResolvedValue([]);
+
+      const [detalle] = await service.listarCuentasDeMesa(TENANT, MESA);
+
+      expect(detalle.anulaciones).toEqual([]);
     });
   });
 

@@ -16,6 +16,7 @@ import { Salon } from './entities/salon.entity';
 import { Mesa, FormaMesa, TamanoMesa } from './entities/mesa.entity';
 import { Cuenta, EstadoCuenta } from './entities/cuenta.entity';
 import { CuentaLinea } from './entities/cuenta-linea.entity';
+import { CuentaLineaAnulacion } from './entities/cuenta-linea-anulacion.entity';
 import { CreateSalonDto } from './dto/create-salon.dto';
 import { UpdateSalonDto } from './dto/update-salon.dto';
 import { CreateMesaDto } from './dto/create-mesa.dto';
@@ -25,6 +26,7 @@ import { CreateCuentaDto } from './dto/create-cuenta.dto';
 import { AddLineaDto } from './dto/add-linea.dto';
 import { UpdateLineaDto } from './dto/update-linea.dto';
 import { CerrarCuentaDto } from './dto/cerrar-cuenta.dto';
+import { AnularLineaDto } from './dto/anular-linea.dto';
 import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
 import { ConfirmarComandaDto } from './dto/confirmar-comanda.dto';
 import { VentasService } from '../ventas/ventas.service';
@@ -37,6 +39,9 @@ import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
 import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
 import { MonedasService } from '../monedas/monedas.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
+import { MotivosBajaService } from '../motivos-baja/motivos-baja.service';
+import { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
+import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import type { CuentaAsignacionDetalle } from './cuenta-asignaciones.service';
 import {
   assertPresentacionPareada,
@@ -180,6 +185,33 @@ export interface CuentaLineaDetalle {
   itemEliminado?: true;
 }
 
+/** Fila cruda del JOIN `cuenta_linea_anulaciones` × `motivo_baja` × `usuarios`. */
+interface AnulacionDetalleRow {
+  cuenta_id: string;
+  cuenta_linea_anulacion_id: string;
+  item_nombre: string;
+  cantidad: string;
+  creado_el: Date;
+  motivo_nombre: string;
+  motivo_tipo: TipoMotivoBaja;
+  autorizado_por_nombre: string;
+}
+
+/**
+ * Un plato ya despachado y anulado, para el aviso debajo de la cuenta (spec
+ * § 5): *"1 lomo anulado — cortesía, autorizó Ana"*. No es tocable: es un
+ * rastro, no una línea que se pueda editar.
+ */
+export interface CuentaAnulacionDetalle {
+  id: string;
+  itemNombre: string;
+  cantidad: string;
+  motivoNombre: string;
+  motivoTipo: TipoMotivoBaja;
+  autorizadoPorNombre: string;
+  creadoEl: Date;
+}
+
 export interface ComandaEstacion {
   impresoraId: string;
   nombre: string;
@@ -206,6 +238,8 @@ export interface CuentaDetalle {
   garzonCierreId: string | null;
   garzonCierreNombre: string | null;
   lineas: CuentaLineaDetalle[];
+  /** Platos ya despachados y anulados de esta cuenta (spec § 5). */
+  anulaciones: CuentaAnulacionDetalle[];
 }
 
 @Injectable()
@@ -223,6 +257,8 @@ export class SalonesService {
     private readonly catalogService: CatalogService,
     private readonly monedasService: MonedasService,
     private readonly calculoPreciosService: CalculoPreciosService,
+    private readonly motivosBajaService: MotivosBajaService,
+    private readonly ubicacionesService: UbicacionesService,
   ) {}
 
   // ── Administración: salones ──────────────────────────────────────────────
@@ -1053,6 +1089,253 @@ export class SalonesService {
     });
   }
 
+  /**
+   * Anula `dto.cantidad` unidades de una línea YA despachada a cocina (spec
+   * `2026-09-16-anular-plato-despachado-design.md` §§ 3-4). A diferencia de
+   * `quitarLinea` —que rechaza lo despachado y manda a este camino— acá SÍ se
+   * puede: queda una fila en `cuenta_linea_anulaciones` que **sobrevive** al
+   * borrado de la línea, baja `cantidad` Y `cantidad_enviada` en la misma
+   * medida (spec § 3.2, para que nada que hoy lea `cuenta_lineas` tenga que
+   * cambiar) y, si el tipo de motivo descuenta, mueve el stock con el
+   * snapshot de personalización congelado en la línea.
+   *
+   * **No reusa `actualizarLinea`** (spec § 3.2): esa rechaza bajar de lo
+   * despachado y da 404 con el ítem pausado o eliminado
+   * (`getItemVendibleOrThrow`). Acá es al revés: el tope ES lo despachado, y
+   * un ítem pausado o borrado **no** frena nada — para uno borrado es además
+   * la única salida, porque la cuenta no se puede cobrar ni la línea quitar
+   * (spec § 4.2). Lo que sí se comparte con `actualizarLinea`/`agregarLinea`
+   * es `sincronizarPresentacion`, para que `cantidad_presentacion` no quede
+   * vieja.
+   *
+   * **Nunca aborta por falta de stock**: `ItemsService.consumirLineaAnulada`
+   * devuelve advertencias en vez de lanzar —el plato ya salió de cocina, no
+   * hay nada que deshacer— y acá se suman a la respuesta (resolución de Task
+   * 3: `CuentaDetalle & { advertencias }`, sin envolver en un objeto nuevo
+   * porque en este módulo no hay un molde previo que seguir — `ventas`
+   * arma la lista igual pero devuelve `{ ...venta, advertencias }`, no un tipo
+   * dedicado).
+   *
+   * **Reintento ante `40P01`, mismo molde que `agregarLinea`/`actualizarLinea`.**
+   * Cuando el tipo de motivo descuenta, `consumirLineaAnulada` termina en
+   * `registrarMovimiento`, que toma `FOR UPDATE OF ip` sobre `item_producto` en
+   * un orden que decide el cliente (ingrediente por ingrediente, componente
+   * por componente) — el mismo lock, y el mismo riesgo de deadlock contra una
+   * venta concurrente, que motivó el bucle de `agregarLinea` el 2026-09-01.
+   * Reintentar es seguro por la misma razón: el deadlock aborta la
+   * transacción ENTERA, así que no queda nada a medio escribir que
+   * deduplicar, y `anularLinea` abre una transacción de nivel superior (su
+   * único llamador es el controller).
+   */
+  async anularLinea(
+    tenantId: string,
+    usuarioId: string,
+    cuentaId: string,
+    lineaId: string,
+    dto: AnularLineaDto,
+  ): Promise<CuentaDetalle & { advertencias: string[] }> {
+    // Catálogo global: no depende de la cuenta ni de la línea, así que se
+    // carga fuera del lock (mismo criterio que `actualizarLinea`).
+    const catalogo = await this.loadCatalogoUnidades();
+    for (let intento = 0; ; intento++) {
+      try {
+        return await this.db.transaccion(async (manager) => {
+          return this.escribirAnulacionDeLinea(
+            manager,
+            tenantId,
+            usuarioId,
+            cuentaId,
+            lineaId,
+            dto,
+            catalogo,
+          );
+        });
+      } catch (error) {
+        if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
+          throw error;
+      }
+    }
+  }
+
+  private async escribirAnulacionDeLinea(
+    manager: EntityManager,
+    tenantId: string,
+    usuarioId: string,
+    cuentaId: string,
+    lineaId: string,
+    dto: AnularLineaDto,
+    catalogo: UnidadCat[],
+  ): Promise<CuentaDetalle & { advertencias: string[] }> {
+    const cuenta = await this.getCuentaAbiertaConLock(
+      manager,
+      tenantId,
+      cuentaId,
+    );
+    const linea = await manager.findOne(CuentaLinea, {
+      where: { id: lineaId, tenantId, cuentaId },
+    });
+    if (!linea) {
+      throw new NotFoundException(`Línea ${lineaId} no encontrada`);
+    }
+
+    const cantidad = new Decimal(dto.cantidad);
+    if (cantidad.lte(0)) {
+      throw new BadRequestException('La cantidad debe ser mayor a cero');
+    }
+    // Mismo criterio que `MonedasService.validarEscala`/`EscalaMonedaPipe`:
+    // el FORMATO ya lo valida `@IsNumberString` en el DTO, acá es la ESCALA
+    // frente a las tres columnas `numeric(18,4)` que esto mueve
+    // (`cuenta_lineas.cantidad`/`cantidad_enviada`,
+    // `cuenta_linea_anulaciones.cantidad`). Sin este guard, "0.00005" pasa
+    // el tope de abajo (`<= cantidad_enviada`), Postgres la redondea a
+    // "0.0001" al guardar, la resta nunca baja la línea a cero, y se puede
+    // repetir sin límite — cada vuelta mueve stock de verdad (security
+    // I-1 / domain Minor 1, ronda de fixes 1).
+    if (cantidad.decimalPlaces() > 4) {
+      throw new BadRequestException(
+        'La cantidad admite como máximo 4 decimales.',
+      );
+    }
+    // El tope es lo DESPACHADO, no lo pedido (spec § 3.2 y § 4.2.3): lo que
+    // no salió a cocina ya tiene su camino sin motivo (`quitarLinea` /
+    // `actualizarLinea`), y anularlo con un motivo que descuenta movería
+    // stock de un plato que nunca se cocinó. Como las dos columnas bajan lo
+    // mismo, nunca queda `cantidad_enviada > cantidad` ni negativa.
+    if (cantidad.greaterThan(linea.cantidadEnviada)) {
+      throw new BadRequestException(
+        `Solo se puede anular lo despachado a cocina (${linea.cantidadEnviada}).`,
+      );
+    }
+
+    const motivo = await this.motivosBajaService.assertMotivoActivo(
+      manager,
+      tenantId,
+      dto.motivoBajaId,
+    );
+
+    // El nombre se congela en la fila de anulación porque el catálogo puede
+    // renombrarlo o borrarlo después.
+    const itemRows: {
+      item_id: string;
+      tipo: string;
+      nombre: string;
+      unidad_medida: string | null;
+    }[] = await manager.query(
+      `SELECT i.item_id, i.tipo, i.nombre, ip.unidad_medida
+           FROM items i
+           -- Deliberadamente SIN condición de vigencia sobre "i": un ítem
+           -- pausado o borrado del catálogo NO frena la anulación (spec
+           -- § 4.2, a diferencia de getItemVendibleOrThrow) — para uno
+           -- borrado es además la única salida, porque la cuenta no se puede
+           -- cobrar ni la línea quitar.
+           LEFT JOIN item_producto ip ON ip.item_id = i.item_id
+          WHERE i.item_id = $1 AND i.tenant_id = $2`,
+      [linea.itemId, tenantId],
+    );
+    if (!itemRows.length) {
+      throw new NotFoundException(`Ítem ${linea.itemId} no encontrado`);
+    }
+    const item = {
+      tipo: itemRows[0].tipo,
+      nombre: itemRows[0].nombre,
+      unidadMedida: itemRows[0].unidad_medida,
+    };
+
+    const anulacion = await manager.save(
+      CuentaLineaAnulacion,
+      manager.create(CuentaLineaAnulacion, {
+        tenantId,
+        cuentaId,
+        cuentaLineaId: linea.id,
+        itemId: linea.itemId,
+        itemNombre: item.nombre,
+        cantidad: cantidad.toString(),
+        motivoBajaId: motivo.id,
+        autorizadoPor: usuarioId,
+      }),
+    );
+
+    // Las dos bajan lo mismo: si `cantidad` llega a cero, `cantidad_enviada`
+    // también (nunca puede quedar `cantidad_enviada > cantidad`), así que la
+    // línea se borra entera en vez de quedar en 0/0.
+    const nuevaCantidad = new Decimal(linea.cantidad).minus(cantidad);
+    const nuevaCantidadEnviada = new Decimal(linea.cantidadEnviada).minus(
+      cantidad,
+    );
+    if (nuevaCantidad.lte(0)) {
+      await manager.softDelete(CuentaLinea, {
+        id: lineaId,
+        tenantId,
+        cuentaId,
+      });
+    } else {
+      linea.cantidad = nuevaCantidad.toString();
+      linea.cantidadEnviada = nuevaCantidadEnviada.toString();
+      // Mismo recálculo que `agregarLinea`/`fusionarCuentas`: la
+      // presentación se reescribe en la unidad que la línea YA mostraba, no
+      // se resta directamente.
+      this.sincronizarPresentacion(linea, item, catalogo);
+      await manager.save(CuentaLinea, linea);
+    }
+
+    // Solo `merma` y `cortesía` descuentan (spec § 4.3); `no_elaborado` no
+    // tiene movimiento porque ese stock nunca salió. Y solo si el ÍTEM
+    // tiene stock que descontar: `servicio` y `suscripcion` no lo tienen —
+    // ni siquiera al vender (`ventas.service.ts`, el mismo `if`/`else if`
+    // que no los menciona, así que ahí tampoco pasa nada) — así que acá
+    // tampoco, sea cual sea el tipo de motivo. `consumirLineaAnulada` solo
+    // acepta `producto | receta | combo`.
+    let advertencias: string[] = [];
+    const tipoDescuenta =
+      motivo.tipo === TipoMotivoBaja.MERMA ||
+      motivo.tipo === TipoMotivoBaja.CORTESIA;
+    const itemTipo = item.tipo;
+    if (
+      tipoDescuenta &&
+      (itemTipo === 'producto' || itemTipo === 'receta' || itemTipo === 'combo')
+    ) {
+      const [convertir, ubicacionLocalId] = await Promise.all([
+        this.catalogService.crearConversor(),
+        this.ubicacionesService.localDe(tenantId),
+      ]);
+      advertencias = await this.itemsService.consumirLineaAnulada(manager, {
+        tenantId,
+        usuarioId,
+        itemId: linea.itemId,
+        itemTipo,
+        itemNombre: item.nombre,
+        cantidad: cantidad.toString(),
+        snapshot: linea.personalizacion,
+        motivoBajaId: motivo.id,
+        cuentaLineaAnulacionId: anulacion.id,
+        convertir,
+        ubicacionLocalId,
+      });
+    }
+
+    // Si esta anulación deja la cuenta sin líneas vivas, se cancela en la
+    // MISMA operación (spec § 7): `cerrarCuenta` rechaza una cuenta sin
+    // líneas con "La cuenta no tiene productos", así que no hay otro camino
+    // para liberar la mesa. Mismo cierre de tramo que `cancelarCuenta`.
+    const lineasVivas = await manager.count(CuentaLinea, {
+      where: { tenantId, cuentaId },
+    });
+    if (lineasVivas === 0) {
+      cuenta.estado = EstadoCuenta.CANCELADA;
+      cuenta.cerradaEl = new Date();
+      await this.cuentaAsignacionesService.cerrarTramoVigente(
+        manager,
+        tenantId,
+        cuenta.id,
+        cuenta.cerradaEl,
+      );
+      await manager.save(Cuenta, cuenta);
+    }
+
+    const detalle = await this.armarDetalle(tenantId, cuenta, manager);
+    return { ...detalle, advertencias };
+  }
+
   async cancelarCuenta(
     tenantId: string,
     cuentaId: string,
@@ -1721,6 +2004,11 @@ export class SalonesService {
       lineas,
       runner,
     );
+    const anulaciones = await this.anulacionesPorCuenta(
+      tenantId,
+      cuentas.map((c) => c.id),
+      runner,
+    );
     // El detalle priceado de la personalización se devuelve convertido a moneda
     // oficial: es el número que la precuenta y la boleta de salón imprimen al
     // lado del P.UNIT, que también viaja convertido. Sin esto una receta en
@@ -1753,8 +2041,65 @@ export class SalonesService {
         nombresGarzon,
         nombres,
         convertir,
+        anulaciones.get(cuenta.id) ?? [],
       ),
     );
+  }
+
+  /**
+   * Anulaciones de N cuentas en una sola query (`armarDetalles` es batch, y
+   * este bloque no puede volver a ser una tanda por cuenta). El índice
+   * `idx_cuenta_linea_anulaciones_cuenta` (`tenant_id`, `cuenta_id`) es el que
+   * esta consulta necesita.
+   *
+   * El porqué de cada JOIN sin filtrar `eliminado_el` va como comentario `--`
+   * dentro de la propia consulta (regla del repo: lo que distingue una
+   * excepción de un olvido es que el porqué esté escrito en la consulta, no
+   * al lado en TypeScript).
+   */
+  private async anulacionesPorCuenta(
+    tenantId: string,
+    cuentaIds: string[],
+    runner: EntityManager | Db,
+  ): Promise<Map<string, CuentaAnulacionDetalle[]>> {
+    const rows: AnulacionDetalleRow[] = await runner.query(
+      `SELECT cla.cuenta_id, cla.cuenta_linea_anulacion_id, cla.item_nombre,
+              cla.cantidad, cla.creado_el, mb.nombre AS motivo_nombre,
+              mb.tipo AS motivo_tipo,
+              -- El JOIN a usuarios NO filtra eliminado_el: quién autorizó es
+              -- un hecho histórico, mismo criterio que nombresGarzon y que
+              -- listarSalones con eliminado_por_nombre.
+              u.nombre AS autorizado_por_nombre
+         FROM cuenta_linea_anulaciones cla
+         -- El JOIN a motivo_baja tampoco filtra el borrado: ni
+         -- MotivosBajaService.remove ni assertMotivoActivo toman lock, así
+         -- que entre que remove() revisa el uso y ejecuta el soft delete, una
+         -- anulación concurrente puede colarse apuntando a un motivo que
+         -- termina borrado un instante después. Con el filtro puesto, esa fila
+         -- desaparecería del aviso (INNER JOIN sin motivo = sin fila) aunque
+         -- la anulación sea real — es el único rastro que queda en la cuenta.
+         JOIN motivo_baja mb ON mb.motivo_baja_id = cla.motivo_baja_id
+         JOIN usuarios u ON u.usuario_id = cla.autorizado_por
+        WHERE cla.cuenta_id = ANY($1) AND cla.tenant_id = $2
+          AND cla.eliminado_el IS NULL
+        ORDER BY cla.creado_el ASC`,
+      [cuentaIds, tenantId],
+    );
+    const porCuenta = new Map<string, CuentaAnulacionDetalle[]>();
+    for (const r of rows) {
+      const acc = porCuenta.get(r.cuenta_id) ?? [];
+      acc.push({
+        id: r.cuenta_linea_anulacion_id,
+        itemNombre: r.item_nombre,
+        cantidad: r.cantidad,
+        motivoNombre: r.motivo_nombre,
+        motivoTipo: r.motivo_tipo,
+        autorizadoPorNombre: r.autorizado_por_nombre,
+        creadoEl: r.creado_el,
+      });
+      porCuenta.set(r.cuenta_id, acc);
+    }
+    return porCuenta;
   }
 
   private mapearDetalle(
@@ -1763,6 +2108,7 @@ export class SalonesService {
     nombresGarzon: Record<string, string>,
     nombres: Map<string, string>,
     convertir: (monto: string, monedaId: string) => string,
+    anulaciones: CuentaAnulacionDetalle[],
   ): CuentaDetalle {
     return {
       id: cuenta.id,
@@ -1819,6 +2165,7 @@ export class SalonesService {
           ...(l.item_eliminado ? { itemEliminado: true as const } : {}),
         };
       }),
+      anulaciones,
     };
   }
 

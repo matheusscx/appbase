@@ -13,6 +13,14 @@ import {
  * **Sobrevive al borrado de la línea**: es el único rastro que queda en la
  * cuenta cuando `cuenta_lineas` la borra por quedar en cero.
  */
+/**
+ * `(tenant_id, cuenta_id)` y no `cuenta_id` solo, mismo criterio que
+ * `idx_cuenta_lineas_cuenta`: la consulta filtra por tenant en las dos tablas
+ * y en ese orden. La usa `SalonesService.anulacionesPorCuenta`, el bloque
+ * `anulaciones` de `armarDetalles` — batch para N cuentas con
+ * `cuenta_id = ANY($1)` — y crece con cada anulación de la historia del
+ * tenant. Postgres no indexa las FK por su cuenta.
+ */
 @Index('idx_cuenta_linea_anulaciones_cuenta', ['tenantId', 'cuentaId'])
 @Entity('cuenta_linea_anulaciones')
 export class CuentaLineaAnulacion {

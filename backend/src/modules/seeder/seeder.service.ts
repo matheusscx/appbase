@@ -1030,6 +1030,13 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppId: SALONES,
         permisoId: OPERAR,
       },
+      // `Anular` (spec `anular-plato-despachado-design.md` § 4.1): faltaba el
+      // par con Salones, que hasta acá solo existía para Ventas.
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440405',
+        moduloAppId: SALONES,
+        permisoId: ANULAR,
+      },
       // Impresoras (config de impresión térmica: comandas, precuenta, boleta)
       {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440242',
@@ -1240,17 +1247,21 @@ export class SeederService implements OnApplicationBootstrap {
         esSuperadmin: false,
       },
       // El encargado del SALÓN: `Salones:Leer` + `Salones:Crear` +
-      // `Salones:Actualizar`, **sin `Salones:Operar`** y **NO admin**. Que no
-      // tenga `Operar` es parte del fixture, no un olvido: es el complemento
-      // exacto de `ana.torres` (`Leer` + `Operar`, sin `Actualizar`), que sirve
-      // para el 403 del mismo e2e. Por eso `/salones` —la pantalla de
-      // operación— le rebota, y su pantalla es Configuración → Salones.
-      // Es la combinación exacta a la que se le muestra el aviso de
-      // "esa cuenta todavía no puede operar el salón… hasta que se lo des", y
-      // por lo tanto la única con la que se puede probar que ahora puede
-      // dárselo sin ser admin (decisión del owner, 2026-08-15). No sirve
-      // `admin.paris` —short-circuita todo por `es_fijo`— ni `ana.torres`, que
-      // tiene `Salones:Operar` pero no `Actualizar`. Ver seedRolEncargadoSalon.
+      // `Salones:Actualizar` + `Salones:Operar` + `Salones:Anular` (las dos
+      // últimas desde el 2026-09-16, spec `anular-plato-despachado-design.md`
+      // § 4.1: sin `Operar` no llegaba a `GET /salones/operacion` para anular
+      // nada), y **NO admin**.
+      // Es la combinación a la que se le muestra el aviso de "esa cuenta
+      // todavía no puede operar el salón… hasta que se lo des", y por lo tanto
+      // la única con la que se puede probar que ahora puede dárselo sin ser
+      // admin (decisión del owner, 2026-08-15) — eso lo prueba
+      // `permiso-operar-salon.e2e-spec.ts` sobre OTRAS cuentas, vía
+      // `POST /garzones/:id/permiso-operar` (guardado por `Salones:Actualizar`,
+      // que este fixture también tiene), así que agregarle `Operar` a él mismo
+      // no lo afecta. No sirve `admin.paris` —short-circuita todo por
+      // `es_fijo`— ni `ana.torres`, que tiene `Salones:Operar` pero no
+      // `Actualizar` y sigue sirviendo para el 403 de esa suite. Ver
+      // seedRolEncargadoSalon.
       {
         id: '550e8400-e29b-41d4-a716-446655440348',
         nombreUsuario: 'encargado.salon',
@@ -2769,11 +2780,22 @@ export class SeederService implements OnApplicationBootstrap {
 
   /**
    * El encargado que administra el salón sin ser admin del tenant:
-   * `Salones:Leer` + `Salones:Crear` + `Salones:Actualizar`. Es a quien `garzones.service.ts` le
-   * muestra el aviso *"…no va a poder entrar en modo personal hasta que se lo
-   * des"*, y desde el 2026-08-16 el único fixture con el que se puede probar
-   * que ese "se lo des" está en su mano: `POST /garzones/:id/permiso-operar`
-   * pide este permiso y **no** `TenantAdminGuard`.
+   * `Salones:Leer` + `Salones:Crear` + `Salones:Actualizar` + `Salones:Operar`
+   * + `Salones:Anular` (las dos últimas, spec `anular-plato-despachado-design.md`
+   * § 4.1). Es a quien `garzones.service.ts` le muestra el aviso *"…no va a
+   * poder entrar en modo personal hasta que se lo des"*, y desde el 2026-08-16
+   * el único fixture con el que se puede probar que ese "se lo des" está en su
+   * mano: `POST /garzones/:id/permiso-operar` pide este permiso y **no**
+   * `TenantAdminGuard`.
+   *
+   * ⚠️ **Hasta el 2026-09-16 este rol NO tenía `Operar`**, a propósito: era el
+   * complemento exacto de `ana.torres` (`Leer` + `Operar`, sin `Actualizar`)
+   * para el 403 de `permiso-operar-salon.e2e-spec.ts`. La pantalla del salón
+   * entra por `GET /salones/operacion`, que exige `Operar` — sin él, el
+   * encargado no podía llegar a la mesa a anular nada, así que la spec lo
+   * agrega. No rompe esa suite: sus asserts son sobre a quién `encargado.salon`
+   * puede otorgarle el permiso (guardado por `Salones:Actualizar`, que sigue
+   * igual), no sobre si `encargado.salon` mismo lo tiene.
    *
    * No reusa `ana.torres` (tiene `Salones:Operar`, no `Actualizar` — sirve
    * justo para el 403 del mismo e2e) ni `admin.paris`, que short-circuita todo
@@ -2788,10 +2810,13 @@ export class SeederService implements OnApplicationBootstrap {
     const NOMBRE = 'Salones · Encargado';
     // moduloTenantId para Paris → Salones (definido en seedTenantModulo)
     const MODULO_TENANT_SALONES = '550e8400-e29b-41d4-a716-446655440228';
-    // moduloAppPermiso Salones/Leer y Salones/Actualizar (seedModuloAppPermisos)
+    // moduloAppPermiso Salones/Leer, Crear, Actualizar, Operar y Anular
+    // (seedModuloAppPermisos)
     const SALONES_LEER = '550e8400-e29b-41d4-a716-446655440223';
     const SALONES_CREAR = '550e8400-e29b-41d4-a716-446655440224';
     const SALONES_ACTUALIZAR = '550e8400-e29b-41d4-a716-446655440225';
+    const SALONES_OPERAR = '550e8400-e29b-41d4-a716-446655440227';
+    const SALONES_ANULAR = '550e8400-e29b-41d4-a716-446655440405';
 
     await this.dataSource.query(
       `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
@@ -2808,7 +2833,16 @@ export class SeederService implements OnApplicationBootstrap {
     // es "quien puede dar de alta y vincular garzones": el aviso de "…hasta
     // que se lo des" sale tanto de `crear()` como de `actualizar()`, y un
     // fixture que solo pudiera actualizar no podría ejercer la mitad del caso.
-    for (const permisoId of [SALONES_LEER, SALONES_CREAR, SALONES_ACTUALIZAR]) {
+    // `Operar` y `Anular` se suman para que el encargado llegue a la mesa
+    // (`GET /salones/operacion` exige `Operar`) y pueda anular un plato
+    // despachado (`Salones:Anular`) — ver el docblock de arriba.
+    for (const permisoId of [
+      SALONES_LEER,
+      SALONES_CREAR,
+      SALONES_ACTUALIZAR,
+      SALONES_OPERAR,
+      SALONES_ANULAR,
+    ]) {
       await this.dataSource.query(
         `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
          VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,

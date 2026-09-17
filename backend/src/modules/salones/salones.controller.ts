@@ -30,6 +30,7 @@ import { CreateCuentaDto } from './dto/create-cuenta.dto';
 import { AddLineaDto } from './dto/add-linea.dto';
 import { UpdateLineaDto } from './dto/update-linea.dto';
 import { CerrarCuentaDto } from './dto/cerrar-cuenta.dto';
+import { AnularLineaDto } from './dto/anular-linea.dto';
 import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
 import { ConfirmarComandaDto } from './dto/confirmar-comanda.dto';
 import {
@@ -250,6 +251,24 @@ export class CuentasController {
   ) {
     const u = req.user as JwtUser;
     return this.salonesService.quitarLinea(u.tenantId ?? '', id, lineaId);
+  }
+
+  @Post(':id/lineas/:lineaId/anular')
+  @RequiresPermiso('Salones', 'Anular')
+  anularLinea(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('lineaId', ParseUUIDPipe) lineaId: string,
+    @Body() dto: AnularLineaDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.salonesService.anularLinea(
+      u.tenantId ?? '',
+      u.id,
+      id,
+      lineaId,
+      dto,
+    );
   }
 
   @Post(':id/cancelar')

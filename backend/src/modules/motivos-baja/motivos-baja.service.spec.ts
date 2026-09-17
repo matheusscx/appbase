@@ -194,7 +194,7 @@ describe('MotivosBajaService', () => {
             es_fijo: false,
           },
         ])
-        .mockResolvedValueOnce([{ cnt: '2' }]);
+        .mockResolvedValueOnce([{ existe: true }]);
 
       await expect(service.remove(TENANT, USUARIO_ID, MOTIVO)).rejects.toThrow(
         'No se puede eliminar: el motivo está en uso en movimientos de merma',
@@ -211,7 +211,7 @@ describe('MotivosBajaService', () => {
             es_fijo: false,
           },
         ])
-        .mockResolvedValueOnce([{ cnt: '0' }])
+        .mockResolvedValueOnce([{ existe: false }])
         .mockResolvedValueOnce([]);
 
       await service.remove(TENANT, USUARIO_ID, MOTIVO);
@@ -233,7 +233,7 @@ describe('MotivosBajaService', () => {
             es_fijo: false,
           },
         ])
-        .mockResolvedValueOnce([{ cnt: '0' }])
+        .mockResolvedValueOnce([{ existe: false }])
         .mockResolvedValueOnce([]);
 
       await service.remove(TENANT, USUARIO_ID, MOTIVO);
@@ -535,6 +535,142 @@ describe('MotivosBajaService', () => {
       expect(sql).toMatch(/AND mb\.tipo = \$2/);
       expect(params).toEqual([TENANT, 'merma']);
       expect(result[0]).toMatchObject({ tipo: 'merma', enUso: true });
+    });
+  });
+
+  /**
+   * Ronda de fixes 1 (domain Minor 4, promovido): la spec de la parte 1
+   * (`docs/superpowers/specs/2026-09-15-motivos-de-baja-con-tipo-design.md`
+   * § 4.3) dice que la parte 2 le suma las anulaciones a "en uso". Un mock no
+   * puede distinguir "hay movimiento" de "hay anulación" — el `EXISTS`
+   * envuelve las dos ramas del `UNION ALL` en una sola fila booleana—, así
+   * que lo que SÍ puede probar un unitario es que la consulta de cada uno de
+   * los seis sitios referencia la tabla nueva, en la MISMA sentencia (nunca
+   * una consulta aparte). El comportamiento real —anular con un motivo
+   * propio y comprobar que borrarlo/cambiarle el tipo rechaza— lo prueba el
+   * e2e (`motivos-baja-en-uso-por-anulacion.e2e-spec.ts`).
+   */
+  describe('en uso también cuenta las anulaciones de plato (ronda de fixes 1)', () => {
+    it('remove(): la consulta de uso incluye cuenta_linea_anulaciones en la MISMA sentencia', async () => {
+      queryMock
+        .mockResolvedValueOnce([
+          {
+            motivo_baja_id: MOTIVO,
+            nombre: 'Rotura',
+            activo: true,
+            es_fijo: false,
+          },
+        ])
+        .mockResolvedValueOnce([{ existe: false }])
+        .mockResolvedValueOnce([]);
+
+      await service.remove(TENANT, USUARIO_ID, MOTIVO);
+
+      const [sql, params] = queryMock.mock.calls[1] as [string, unknown[]];
+      expect(sql).toContain('cuenta_linea_anulaciones');
+      expect(sql).toMatch(/UNION ALL/);
+      expect(params).toEqual([MOTIVO]);
+    });
+
+    it('update(): el guard de cambio de tipo incluye cuenta_linea_anulaciones en la MISMA sentencia', async () => {
+      queryMock
+        .mockResolvedValueOnce([
+          {
+            motivo_baja_id: MOTIVO,
+            nombre: 'X',
+            activo: true,
+            es_fijo: false,
+            tipo: 'merma',
+          },
+        ])
+        .mockResolvedValueOnce([{ en_uso: false }])
+        .mockResolvedValueOnce([
+          {
+            motivo_baja_id: MOTIVO,
+            nombre: 'X',
+            activo: true,
+            es_fijo: false,
+            tipo: 'cortesia',
+            en_uso: false,
+          },
+        ]);
+
+      await service.update(TENANT, MOTIVO, { tipo: TipoMotivoBaja.CORTESIA });
+
+      const [sql] = queryMock.mock.calls[1] as [string, unknown[]];
+      expect(sql).toContain('cuenta_linea_anulaciones');
+      expect(sql).toMatch(/UNION ALL/);
+    });
+
+    it('update(): el RETURNING de en_uso incluye cuenta_linea_anulaciones', async () => {
+      // `activo` no dispara ni el chequeo de nombre único ni el guard de tipo:
+      // la 2ª query es directo el UPDATE … RETURNING que interesa acá.
+      queryMock
+        .mockResolvedValueOnce([
+          {
+            motivo_baja_id: MOTIVO,
+            nombre: 'X',
+            activo: true,
+            es_fijo: false,
+            tipo: 'merma',
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            motivo_baja_id: MOTIVO,
+            nombre: 'X',
+            activo: false,
+            es_fijo: false,
+            tipo: 'merma',
+            en_uso: true,
+          },
+        ]);
+
+      await service.update(TENANT, MOTIVO, { activo: false });
+
+      const [sql] = queryMock.mock.calls[1] as [string, unknown[]];
+      expect(sql).toContain('cuenta_linea_anulaciones');
+      expect(sql).toMatch(/UNION ALL/);
+    });
+
+    it('restaurar(): el RETURNING de en_uso incluye cuenta_linea_anulaciones', async () => {
+      queryMock.mockResolvedValueOnce([
+        {
+          motivo_baja_id: MOTIVO,
+          nombre: 'Vencimiento',
+          activo: true,
+          es_fijo: false,
+          en_uso: true,
+          eliminado_el: null,
+          eliminado_por: USUARIO_ID,
+        },
+      ]);
+
+      await service.restaurar(TENANT, MOTIVO);
+
+      const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('cuenta_linea_anulaciones');
+      expect(sql).toMatch(/UNION ALL/);
+    });
+
+    it('findAll() (listado normal): en_uso incluye cuenta_linea_anulaciones', async () => {
+      queryMock.mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT);
+
+      const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('cuenta_linea_anulaciones');
+      expect(sql).toMatch(/UNION ALL/);
+    });
+
+    it('findAll() (papelera): en_uso incluye cuenta_linea_anulaciones', async () => {
+      queryMock.mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, false, true);
+
+      const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('cuenta_linea_anulaciones');
+      expect(sql).toMatch(/UNION ALL/);
     });
   });
 });

@@ -77,6 +77,15 @@ que compró. Como corolario, el admin de un tenant recién creado puede configur
 admin-only pasan por `TenantAdminGuard`, no por el motor de módulos— pero no operar ningún
 módulo hasta que se le contrate.
 
+### Módulo `Salones`: tercera acción `Anular` (2026-09-16)
+
+Mismo patrón que `Ventas:Anular` (acción dedicada para lo más sensible del módulo, no un
+`Actualizar` reusado): `Salones` suma **`Anular`** junto a `Leer`/`Crear`/`Actualizar`/`Operar`,
+para separar operar una cuenta de anular con motivo un plato ya despachado a cocina — la
+segunda mueve stock y necesita su propio guard, delegable sin dárselo a cualquiera que solo
+opere. El rol del seed `Salones · Encargado` recibe los dos. Detalle funcional:
+[`salones-mesas.md`](./salones-mesas.md#anular-una-línea-ya-despachada-2026-09-16).
+
 ### Admin-only vs permiso de módulo — cuándo cada uno
 
 Dos mecanismos de autorización conviven, y la elección **no es por pantalla sino por la
@@ -510,3 +519,4 @@ body: { moduloAppPermisoIds: string[] }
 ## Related Features
 
 - [Módulo Configuración](./modulo-configuracion.md) — mismo módulo de Configuración.
+- [salones-mesas.md](./salones-mesas.md) — módulo RBAC `Salones` y su acción `Anular`.
