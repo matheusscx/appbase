@@ -15,6 +15,7 @@ import {
   type CuentaAnulacionDetalle,
   type CuentaAsignacionDetalle,
   type MotivoCuentaAsignacion,
+  type TipoMotivoBaja,
 } from '~/composables/useSalones'
 import type { EventoPin, Garzon, MiPinEstado } from '~/composables/useGarzones'
 import { etiquetaCuentaPendiente, useTransferenciaPendientes } from '~/composables/useSesionesGarzon'
@@ -278,6 +279,67 @@ const cancelOpen = ref(false)
  * esto el botón queda inerte y se lee como que la app se colgó.
  */
 const cancelando = ref(false)
+/**
+ * Cancelar una cuenta con algo despachado exige motivo y `Salones:Anular`
+ * (Task 6, spec § 6). Modal APARTE del `CrudModal` de siempre —no un
+ * `#detalle` metido ahí— para no tocar la forma del que ya conviven con el
+ * drawer real abierto: agregarle un slot con `USelectMenu`, aunque no
+ * renderizara nada (`v-if` en falso), desordenaba los dos `[role="dialog"]`
+ * teletransportados y hacía que `drawerMesa()` de los tests agarrara el modal
+ * en vez del drawer. Medido revirtiendo solo el slot.
+ */
+const cancelMotivoId = ref<string | undefined>(undefined)
+const motivosCancelar = ref<{ id: string, nombre: string, tipo: TipoMotivoBaja }[]>([])
+const cargandoMotivosCancelar = ref(false)
+const motivosCancelarItems = computed(() =>
+  motivosCancelar.value.map(m => ({
+    label: `${m.nombre} (${tipoMotivoBajaLabel(m.tipo)})`,
+    value: m.id,
+  })),
+)
+/** Si la cuenta del modal tiene algo despachado — decide qué modal de cancelar mostrar. */
+const cancelTieneDespachado = computed(
+  () => !!activeCuenta.value && tieneAlgoDespachado(activeCuenta.value),
+)
+
+async function cargarMotivosCancelar() {
+  cargandoMotivosCancelar.value = true
+  try {
+    motivosCancelar.value = await salonesApi.listarMotivosBajaActivos()
+  }
+  catch (e: unknown) {
+    motivosCancelar.value = []
+    toast.add({ title: apiErrorMsg(e, 'No se pudieron cargar los motivos'), color: 'error' })
+  }
+  finally {
+    cargandoMotivosCancelar.value = false
+  }
+}
+
+/**
+ * Botón "Cancelar cuenta": si hay algo despachado, hace falta `Anular` —quien
+ * no lo tiene ve el aviso y no se abre ningún modal, la cuenta sigue intacta—.
+ * Sin nada despachado, el flujo simple de siempre.
+ */
+function abrirCancelar() {
+  if (!activeCuenta.value) return
+  if (cuentaActivaEnCobro.value) {
+    avisarCuentaEnCobro()
+    return
+  }
+  const despachado = tieneAlgoDespachado(activeCuenta.value)
+  if (despachado && !puedeAnularLinea.value) {
+    toast.add({
+      title: 'Esta cuenta tiene platos despachados a cocina: hace falta un encargado con permiso para anular.',
+      color: 'warning',
+    })
+    return
+  }
+  cancelMotivoId.value = undefined
+  if (despachado) void cargarMotivosCancelar()
+  cancelOpen.value = true
+}
+
 const propinaMonto = ref('0')
 const propinaSugerida = ref('0')
 
@@ -2156,6 +2218,15 @@ function yaEnviadaACocina(linea: CuentaLineaDetalle): boolean {
   return new Decimal(linea.cantidadEnviada || '0').greaterThan(0)
 }
 
+/**
+ * "Algo despachado" (spec § 6): alguna línea viva de la cuenta con
+ * `cantidad_enviada > 0`. Decide qué ruta de cancelar usar — la simple o la
+ * que exige motivo y permiso `Anular`.
+ */
+function tieneAlgoDespachado(cuenta: CuentaDetalle): boolean {
+  return cuenta.lineas.some(yaEnviadaACocina)
+}
+
 async function quitarLinea(linea: CuentaLineaDetalle) {
   if (!activeCuenta.value || cuentaActivaEnCobro.value) return
   try {
@@ -2431,6 +2502,10 @@ async function confirmarCancelar() {
     avisarCuentaEnCobro()
     return
   }
+  // Con algo despachado, hace falta un motivo — el botón que abrió este modal
+  // ya filtró el permiso (`abrirCancelar`); acá solo falta el dato.
+  const requiereMotivo = tieneAlgoDespachado(activeCuenta.value)
+  if (requiereMotivo && !cancelMotivoId.value) return
   cancelando.value = true
   // **Congelado ANTES de la espera, igual que en fusionar.** El `await` de abajo
   // es de red, y durante ese tramo el garzón puede volver al listado —el botón
@@ -2441,6 +2516,7 @@ async function confirmarCancelar() {
   // y la cuenta seguía abierta. Lo midió la revisión del diff.
   const cuentaId = activeCuenta.value.id
   const mesaId = selectedMesa.value.id
+  const motivoBajaId = cancelMotivoId.value
   try {
     // **Primero se termina lo que quedó a medio guardar** (decisión del owner,
     // 2026-09-05). Hasta ese día se descartaba, y quedaba una ventana: si los
@@ -2456,7 +2532,17 @@ async function confirmarCancelar() {
     // `descartarPendientes` de abajo, que tampoco es una garantía sino una
     // ventana más chica.
     await flushPendientes()
-    await salonesApi.cancelarCuenta(cuentaId)
+    // Dos rutas (spec § 6): con motivo, anula cada línea despachada y cancela;
+    // sin él, la simple de siempre. `motivoBajaId` no puede faltar acá —el
+    // guard de arriba ya cortó antes del `await`—.
+    let advertencias: string[] = []
+    if (requiereMotivo && motivoBajaId) {
+      const res = await salonesApi.cancelarCuentaConMotivo(cuentaId, { motivoBajaId })
+      advertencias = res.advertencias
+    }
+    else {
+      await salonesApi.cancelarCuenta(cuentaId)
+    }
     // Sigue haciendo falta después del flush: el garzón puede tocar el stepper
     // mientras viaja el request de cancelar, y esa edición nueva sí caería sobre
     // una cuenta que ya no está. Va acá y **no antes del request**: cancelar
@@ -2466,6 +2552,11 @@ async function confirmarCancelar() {
     // después. Lo midió la revisión del diff.
     descartarPendientes(cuentaId)
     toast.add({ title: 'Cuenta cancelada', color: 'success' })
+    // Avisos de stock informativos (mismo criterio que `confirmarAnular`): la
+    // cancelación ya ocurrió, no bloquean nada.
+    for (const advertencia of advertencias) {
+      toast.add({ title: advertencia, color: 'warning' })
+    }
     // El mismo id congelado: con `activeCuenta` ya en `null`, este filtro no
     // sacaba nada y la cuenta cancelada se quedaba pintada en el listado.
     cuentas.value = cuentas.value.filter(c => c.id !== cuentaId)
@@ -3151,7 +3242,7 @@ async function cerrarCuentaConPin(
                     variant="soft"
                     class="flex-1 justify-center"
                     :disabled="cuentaActivaEnCobro"
-                    @click="() => { cancelOpen = true }"
+                    @click="abrirCancelar"
                   >
                     Cancelar cuenta
                   </UButton>
@@ -3190,6 +3281,7 @@ async function cerrarCuentaConPin(
       />
 
       <CrudModal
+        v-if="!cancelTieneDespachado"
         v-model:open="cancelOpen"
         title="Cancelar cuenta"
         message="Se anulará la cuenta sin generar venta. Esta acción no se puede deshacer."
@@ -3197,6 +3289,47 @@ async function cerrarCuentaConPin(
         :loading="cancelando"
         @confirm="confirmarCancelar"
       />
+      <!--
+        Modal APARTE del `CrudModal` de arriba (ver el comentario de
+        `cancelTieneDespachado` en el script): cancelar con algo despachado
+        pide motivo y `Salones:Anular` (spec § 6).
+      -->
+      <UModal
+        v-else
+        v-model:open="cancelOpen"
+        title="Cancelar cuenta con platos despachados"
+        description="Hay platos ya despachados a cocina. Elegí el motivo: se van a anular y la cuenta se cancela sin generar venta."
+        :ui="shellUi.modal"
+      >
+        <template #body>
+          <UFormField label="Motivo" required>
+            <USelectMenu
+              v-model="cancelMotivoId"
+              :items="motivosCancelarItems"
+              value-key="value"
+              :loading="cargandoMotivosCancelar"
+              :disabled="cancelando"
+              placeholder="Elegir motivo…"
+              class="w-full"
+            />
+          </UFormField>
+        </template>
+        <template #footer>
+          <AppModalFooter>
+            <UButton color="neutral" variant="ghost" :disabled="cancelando" @click="() => { cancelOpen = false }">
+              Cancelar
+            </UButton>
+            <UButton
+              color="error"
+              :disabled="!cancelMotivoId"
+              :loading="cancelando"
+              @click="confirmarCancelar"
+            >
+              Cancelar cuenta
+            </UButton>
+          </AppModalFooter>
+        </template>
+      </UModal>
 
       <SalonesGarzonPinModal
         v-model:open="pinModalOpen"

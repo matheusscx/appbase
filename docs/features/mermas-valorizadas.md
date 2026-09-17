@@ -174,6 +174,17 @@ desde el propio `POST`): no hay operación real detrás.
 la medianoche de la zona del tenant, el timestamp se respeta al segundo. Ver
 [`inventario-kardex.md`](./inventario-kardex.md) §`GET /inventario/movimientos`.
 
+⚠️ **Hoy este informe mezcla cortesías con merma real, y no es un bug — es la parte 3 sin
+construir.** Anular un plato ya despachado a cocina (`docs/features/salones-mesas.md` §
+*"Anular una línea ya despachada"*) también registra su consumo con `motivo = 'merma'` +
+`motivoBajaId` cuando el motivo es de tipo `merma` **o** `cortesia` — la única diferencia
+entre ambos vive en el `tipo` del motivo, no en el `motivo` del kardex. `GET /api/mermas`
+lista todo movimiento con `motivo = 'merma'` sin filtrar por ese `tipo`, así que una cortesía
+regalada en el salón aparece acá mezclada con una merma real de bodega, y el costo perdido
+las suma juntas. Separarlas —y sacar `no_elaborado`, que ni siquiera genera movimiento— es el
+frente pendiente: [`agent/pendientes.md`](../agent/pendientes.md) § 6, *"El reporte de
+anulaciones de platos, separando merma de cortesía"*.
+
 ---
 
 ## Backend

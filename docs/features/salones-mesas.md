@@ -603,8 +603,10 @@ una anulación (decidido que no existe: se vuelve a pedir el plato).
 Dos rutas, para que el permiso siga en el guard (invariante 6 de `CLAUDE.md`: `PermisosGuard`
 solo resuelve lo que declara la ruta, no un permiso que dependa del dato):
 
-- **`POST /cuentas/:id/cancelar`** (`Salones:Operar`, sin cambios de esta parte): hasta la
-  Task 6 del mismo frente, cancela igual aunque haya algo despachado.
+- **`POST /cuentas/:id/cancelar`** (`Salones:Operar`, sin motivo): rechaza con 400 —un solo
+  `EXISTS`, no una lectura por línea— si alguna línea viva tiene `cantidad_enviada > 0`, con
+  un mensaje que manda a `cancelar-con-motivo`. Sin eso, esta ruta —que tiene cualquier
+  garzón— era la puerta de atrás del control que `Anular` construye (Task 6, 2026-09-17).
 - **`POST /cuentas/:id/cancelar-con-motivo`** (`Salones:Anular`) body `{ motivoBajaId }`: en
   una transacción, por cada línea viva con `cantidad_enviada > 0` genera una anulación **por
   su `cantidad_enviada`** (no lo pedido) con ese motivo, aplicando el stock según su tipo —
@@ -682,6 +684,36 @@ cada una, además del toast de éxito.
 
 **El aviso**, debajo de la lista de líneas y no tocable, una fila por elemento de
 `CuentaDetalle.anulaciones`: *"{cantidad} {plato} anulado — {tipo}, autorizó {usuario}"*.
+
+#### Cancelar cuenta: dos ramas según haya algo despachado (Task 6, 2026-09-17)
+
+El botón *Cancelar cuenta* sigue siendo uno solo — la rama la decide `abrirCancelar()` al
+tocarlo, no un segundo botón:
+
+- **Sin nada despachado** (`tieneAlgoDespachado(activeCuenta)` en `false`): el `CrudModal` de
+  siempre, sin cambios — confirma con `useSalones().cancelarCuenta`.
+- **Con algo despachado y `Salones:Anular`**: un modal APARTE (no un `#detalle` metido en el
+  mismo `CrudModal` — ver el porqué abajo), con un selector de motivo (mismo patrón de carga y
+  etiquetas que `AnularLineaModal`: `listarMotivosBajaActivos` + `tipoMotivoBajaLabel`).
+  Confirma con `useSalones().cancelarCuentaConMotivo(cuentaId, { motivoBajaId })`, y las
+  `advertencias` de la respuesta se muestran como toast, igual que en `confirmarAnular`.
+- **Con algo despachado y SIN `Salones:Anular`**: un toast avisa que hace falta un encargado
+  con el permiso, y no se abre ningún modal ni sale ningún request — la cuenta queda intacta.
+
+⚠️ **Por qué es un modal aparte y no un `#detalle` del `CrudModal` existente** (como el de la
+colisión de nombre de `descuentos.vue`): agregarle a ESE `CrudModal` un `<template #detalle>`
+con un `USelectMenu` —aunque no renderizara nada, con el `v-if` en falso— desordenaba los dos
+`[role="dialog"]` teletransportados al `body` (el `CrudModal` recién abierto pasaba a
+aparecer ANTES que el drawer de la mesa, ya abierto). Los tests de `index.nuxt.spec.ts` que
+ubican el drawer por posición (`dialogos().find(d => !esModalPin(d))`) agarraban el modal en
+vez del drawer, y el "Cancelar cuenta" del modal terminaba clickeando el trigger del drawer.
+Medido revirtiendo solo el slot: sin él, los 7 tests que rompía volvían a pasar. Con el modal
+aparte (`v-if`/`v-else` sobre `cancelTieneDespachado`, mismo `cancelOpen`), el `CrudModal` de
+la rama simple queda IDÉNTICO al de antes de esta tarea.
+
+Igual que `confirmarAnular`: la cuenta y el motivo elegido se leen **antes** del primer
+`await` (`flushPendientes`), por el mismo motivo que el resto de esta pantalla — el garzón
+puede volver al listado mientras viaja el request.
 
 #### Cambiar la cantidad de una línea: qué pasa si el garzón se va antes (2026-09-02)
 
@@ -1031,6 +1063,20 @@ chica que el desfase con que llegan las dos requests. **La red real del orden y 
 presencia del lock es el unitario** *"toma el lock de stock ANTES de leer el comprometido"*
 en `items.service.spec.ts`, que sí muere con los dos mutantes. Se prefirió documentarlo antes
 que ensanchar la ventana con ganchos de test en el camino caliente del POS.
+
+### Cancelar con algo despachado, y el e2e de navegador (Task 6, 2026-09-17)
+
+`backend/test/salones-anular-linea.e2e-spec.ts` § *"cancelar (ruta simple, sin motivo)"*:
+`cancelar` rechaza con 400 y el mensaje manda a `cancelar-con-motivo` cuando hay algo
+despachado, y sigue cancelando 200/201 cuando no hay nada. El unitario
+(`salones.service.spec.ts` § `cancelarCuenta`) cubre lo mismo contra el mock de `manager`.
+
+`frontend/e2e/salones/anular-plato.spec.ts` (Playwright, navegador real): pide 2 unidades de
+un plato ruteado a cocina, las manda a cocina, anula 1 como cortesía, ve el aviso bajo la
+cuenta y confirma que el total baja de 2 unidades a 1 — sin imprimir la precuenta (QZ Tray),
+que cubre el unit de `buildPrecuentaTicket`. Documenta además un hallazgo de la pantalla que
+no es un bug de esta tarea: `enviarComanda` no vuelve a pedir la cuenta después del claim, así
+que el botón de anular no aparece hasta salir de la mesa y volver a entrar.
 
 ### Manual (Frontend)
 

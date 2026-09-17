@@ -196,6 +196,14 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
       .send(body);
   }
 
+  /** La ruta simple de cancelar (`Salones:Operar`), sin motivo. */
+  async function cancelar(cuentaId: string, token = tokenAdmin) {
+    return request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/cancelar`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+  }
+
   /** Cierra sin cobrar (pagos vacíos): alcanza para leer el total congelado. */
   async function cerrarSinCobrar(
     cuentaId: string,
@@ -1119,6 +1127,39 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
       const detalle = await detalleCuenta(cuenta.id);
       expect(detalle.estado).toBe('abierta');
       expect(detalle.lineas).toHaveLength(1);
+    });
+  });
+
+  /**
+   * `POST /cuentas/:id/cancelar` (Task 6, spec § 6): la ruta simple, con
+   * `Salones:Operar`, deja de servir de puerta de atrás para descartar algo
+   * despachado sin motivo ni permiso `Anular`.
+   */
+  describe('cancelar (ruta simple, sin motivo)', () => {
+    it('con algo despachado: 400, y manda a cancelar-con-motivo', async () => {
+      const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '1' }]);
+      await despachar(cuenta.id);
+
+      const res = await cancelar(cuenta.id);
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toMatch(
+        /cancelar-con-motivo/,
+      );
+
+      // La cuenta sigue abierta y con su línea despachada intacta.
+      const detalle = await detalleCuenta(cuenta.id);
+      expect(detalle.estado).toBe('abierta');
+      expect(detalle.lineas).toHaveLength(1);
+      expect(detalle.lineas[0].cantidadEnviada).toBe('1.0000');
+    });
+
+    it('sin nada despachado: sigue cancelando, 200/201', async () => {
+      const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '1' }]);
+      // Sin `despachar`: la línea nunca llegó a cocina.
+
+      const res = await cancelar(cuenta.id);
+      expect([200, 201]).toContain(res.status);
+      expect((res.body as CuentaDetalle).estado).toBe('cancelada');
     });
   });
 });

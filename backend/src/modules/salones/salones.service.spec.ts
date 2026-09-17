@@ -3370,7 +3370,7 @@ describe('SalonesService', () => {
   });
 
   describe('cancelarCuenta', () => {
-    it('marca la cuenta como cancelada sin generar venta', async () => {
+    it('marca la cuenta como cancelada sin generar venta, cuando nada está despachado', async () => {
       const cuenta = {
         id: CUENTA,
         tenantId: TENANT,
@@ -3378,6 +3378,10 @@ describe('SalonesService', () => {
         cerradaEl: null as Date | null,
       };
       manager.findOne.mockResolvedValue(cuenta);
+      // El EXISTS del rechazo es la PRIMERA query de cancelarCuenta: "una vez"
+      // dice que nada está despachado, y el resto (armarDetalle) cae en el
+      // mock genérico de abajo.
+      manager.query.mockResolvedValueOnce([{ existe: false }]);
       manager.query.mockResolvedValue([]);
 
       const result = await service.cancelarCuenta(TENANT, CUENTA);
@@ -3401,6 +3405,27 @@ describe('SalonesService', () => {
       );
       expect(cuentaRepo.save).not.toHaveBeenCalled();
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con 400 si alguna línea viva tiene algo despachado, y manda a cancelar con motivo', async () => {
+      const cuenta = {
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+        cerradaEl: null as Date | null,
+      };
+      manager.findOne.mockResolvedValue(cuenta);
+      manager.query.mockResolvedValueOnce([{ existe: true }]);
+
+      await expect(service.cancelarCuenta(TENANT, CUENTA)).rejects.toThrow(
+        new BadRequestException(
+          'La cuenta tiene platos despachados a cocina: cancelala con ' +
+            'POST /cuentas/:id/cancelar-con-motivo.',
+        ),
+      );
+      expect(cuenta.estado).toBe(EstadoCuenta.ABIERTA);
+      expect(manager.save).not.toHaveBeenCalledWith(Cuenta, cuenta);
+      expect(asignaciones.cerrarTramoVigente).not.toHaveBeenCalled();
     });
   });
 

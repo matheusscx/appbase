@@ -86,6 +86,20 @@ segunda mueve stock y necesita su propio guard, delegable sin dárselo a cualqui
 opere. El rol del seed `Salones · Encargado` recibe los dos. Detalle funcional:
 [`salones-mesas.md`](./salones-mesas.md#anular-una-línea-ya-despachada-2026-09-16).
 
+**Cancelar una cuenta también se parte en dos rutas por el mismo motivo (Task 6, 2026-09-17):**
+`PermisosGuard` solo resuelve el permiso que declara la RUTA, nunca uno que dependa del dato
+(invariante 6 de `CLAUDE.md`), así que no hay un solo `POST /cuentas/:id/cancelar` que decida
+el permiso mirando si hay algo despachado.
+
+| Ruta | Permiso | Qué hace |
+|---|---|---|
+| `POST /cuentas/:id/cancelar` | `Salones:Operar` | Cancela sin motivo. Rechaza con 400 si alguna línea viva tiene algo despachado — sin esto sería la puerta de atrás del control de abajo, porque `Operar` lo tiene cualquier garzón |
+| `POST /cuentas/:id/cancelar-con-motivo` | `Salones:Anular` | Anula cada línea despachada por su motivo y cancela. Exige el mismo permiso que anular una línea suelta |
+
+Un garzón sin `Anular` que intenta cancelar una cuenta con algo despachado ve el 400 en el
+backend; la pantalla no lo deja ni intentarlo — un aviso de que hace falta un encargado, sin
+abrir ningún modal (`salones-mesas.md` § *"Cancelar cuenta: dos ramas..."*).
+
 ### Admin-only vs permiso de módulo — cuándo cada uno
 
 Dos mecanismos de autorización conviven, y la elección **no es por pantalla sino por la

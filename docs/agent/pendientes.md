@@ -266,104 +266,6 @@ revisión independiente no lo pudo reproducir, con razón.
   estado propio para el pedido sin cobrar, (b) que el backend distinga el caso por config del
   tenant, o (c) que ese medio no se ofrezca. Ninguna es una corrección: las tres son producto.
 
-- [ ] **Anular o reducir una línea ya enviada a cocina** (backend + frontend) — **decidido
-  el 2026-08-06: al backlog.** Lo medido, sin interpretar: `quitarLinea` hace `softDelete`
-  sin mirar `cantidadEnviada`, y `actualizarLinea` reemplaza la cantidad por un valor
-  absoluto sin validar que no baje de lo ya enviado. Ninguno bloquea ni advierte, y el
-  frontend **ni siquiera conoce el campo** `cantidadEnviada` (cero ocurrencias en
-  `frontend/app`): el botón de tacho está siempre habilitado y sin confirmación. Se
-  sirvieron 2 platos, se cobra 1, y no queda rastro de que había comanda despachada.
-  Encararlo es definir la regla (¿motivo obligatorio? ¿qué rol aprueba? ¿queda registro?),
-  que es terreno donde el mercado ya tiene respuestas (Toast, Square, Lightspeed manejan
-  *voids* de ítems despachados) — con la regla del cruce de
-  [`investigacion-mercado.md`](investigacion-mercado.md).
-  **Decisión del owner (2026-08-08): bloquear por debajo de lo ya enviado.** `quitarLinea`
-  rechaza si `cantidadEnviada > 0`; `actualizarLinea` no deja bajar la cantidad por debajo de
-  `cantidadEnviada`. El razonamiento: la comida ya se hizo, así que reducirla en el sistema
-  la regala **sin registro**. Para anular de verdad tiene que existir un camino con motivo
-  (merma o cortesía), no un borrado silencioso — ese camino es lo que falta diseñar, y ahí
-  sí entra la investigación de mercado. **No es simétrico con las advertencias de
-  `garzones`**: allá el costo era un aviso tardío, acá es plata que sale sin rastro.
-
-  **Hoy el bloqueo ya existe:** `quitarLinea` rechaza si hay algo despachado y `actualizarLinea`
-  no deja bajar por debajo de lo despachado; la pantalla deshabilita el tacho con el motivo
-  → [`resueltos.md`](resueltos.md). **Lo que falta es el camino con motivo.**
-
-  🔗 **Cruza con la reserva de stock al pedir, que se CONSTRUYÓ el 2026-09-01**
-  ([`resueltos.md`](resueltos.md); spec:
-  [`specs/2026-09-01-reserva-de-stock-al-pedir-design.md`](../superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md)).
-  **Esa feature no cierra ésta, y hay que decirlo porque ahora que existe es fácil creer que
-  sí**: achica el caso, no lo borra —una merma, un recuento o un ajuste manual siguen pudiendo
-  dejar el stock por debajo de lo ya comprometido, y esa mesa vuelve a quedar sin poder cobrar
-  y sin poder sacar la línea—. Y su § 5 dice cómo componen: sacar la línea con motivo baja el
-  comprometido y baja el stock a la vez, **neto cero y automático**, sin que nadie tenga que
-  acordarse de liberar nada. ⚠️ **Salvo que este frente decida conservar la línea marcada como
-  anulada** en vez de sacarla o bajarle la cantidad: en ese caso la consulta del comprometido
-  —`ItemsService.comprometidoPorItem`, que hoy suma toda línea viva de una cuenta `abierta`—
-  necesita una condición más para dejar de contarla. Una línea de SQL, pero hay que acordarse.
-
-  ⏳ **Lo que sigue abierto es lo que esta entrada siempre dijo que faltaba: el camino con
-  motivo.** Bloquear evita la pérdida silenciosa; **no da la salida legítima**. Un plato que
-  se quemó o que se regala tiene que poder salir de la cuenta **con motivo** (merma o
-  cortesía). Sin eso, hoy el garzón que se equivocó de plato después de mandar la comanda no
-  tiene ninguna salida.
-
-  ✅ **LAS SEIS REGLAS DECIDIDAS POR EL OWNER (2026-09-03).** La investigación de mercado
-  ([`investigaciones/2026-09-01-anular-linea-despachada.md`](investigaciones/2026-09-01-anular-linea-despachada.md))
-  dejó tres preguntas que el mercado no contesta; se preguntaron esas más tres que salieron
-  del diseño. **Con esto se puede escribir la spec.**
-
-  | Qué | Decisión | Lo que se descartó, y por qué importa |
-  |---|---|---|
-  | **La cortesía y el stock** | **Descuenta**, y se reporta **aparte** de la merma | No descontar deja el stock mintiendo —la carne salió— y reabre la mesa trabada. Mezclarlo con merma arruina el costo de comida: *"se me cayó al piso"* y *"se lo regalé"* dejan de ser distinguibles |
-  | **Dónde viven los motivos** | **Un catálogo único con tipo**: se renombra el actual a algo neutro y cada motivo dice si es merma o cortesía | Reusar `causas_merma` tal cual deja una tabla cuyo nombre miente. Dos catálogos separados son dos pantallas casi idénticas para una diferencia de una palabra |
-  | **Quién puede** | **Permiso propio**, que nace en el rol de encargado y el admin reparte | Que lo haga cualquier garzón deja el control a posteriori y permite tapar el propio error. Solo el admin deja la mesa trabada en un turno sin el dueño, o sea no resuelve el caso |
-  | **Parcial** | **Sí**: se despacharon 3, se saca 1 | Nuestro modelo ya lo permite (`cantidad_enviada` es una cantidad, no un flag) y **ningún POS relevado lo documenta**. Sacar la línea entera obliga a anular 3 y re-pedir 2, ensuciando comanda, reporte y kardex con movimientos que no pasaron |
-  | **La línea** | **Queda marcada como anulada**, con motivo y quién autorizó | Que desaparezca deja la cuenta sin rastro del plato regalado. ⚠️ El costo está medido y hay que acordarse: `ItemsService.comprometidoPorItem` suma toda línea viva de una cuenta `abierta`, así que **necesita una condición más** para dejar de contar la anulada — si no, la mesa sigue apartando stock de un plato que ya no está |
-  | **La precuenta** | **Muestra el plato en $0 con la palabra "cortesía"** | Que no aparezca pierde el gesto comercial: regalaste un plato y el cliente no se entera |
-
-  ⛔ **Lo que NO se decidió y no se pregunta acá: qué muestra la BOLETA.** El documento
-  tributario es fiscal y abre su propio frente (`CLAUDE.md`, ADR-010). La precuenta no es un
-  documento tributario, por eso sí se decidió.
-
-  ✅ **LO QUE DECIDIÓ EL OWNER EL 2026-09-15**, al abrir el frente:
-
-  | Qué | Decisión | Lo que se descartó, y por qué importa |
-  |---|---|---|
-  | **Quién decide si una anulación descuenta stock** | **El motivo lo trae fijo.** Un tercer tipo, *"no se llegó a hacer"*, no descuenta; merma y cortesía sí | Elegir "descuenta sí / no" caso por caso, lo haga el garzón o el encargado, es la palanca de un arreglo con la cocina: marcar que no se hizo algo que salió. Descontar siempre deja el plato anulado a los 5 minutos como merma falsa |
-  | **Cómo aprueba el encargado** | **Solo desde su propia sesión**, logueado con su cuenta | Su PIN en el tótem compartido obliga a construir "PIN → persona → permiso", que no existe, y un PIN se ve por encima del hombro. Pedir y aprobar a distancia deja la mesa esperando a que el encargado mire su pantalla |
-  | **Cómo se guarda** | **Un registro aparte por anulación** (cantidad, motivo, quién, cuándo) | Columnas en la línea admiten un solo motivo: de 3 lomos, 1 quemado y 1 no hecho no entra. Bajar la cantidad deja un "no se llegó a hacer" sin ningún rastro |
-  | **En cuántas partes** | **Tres**: el catálogo con tipo; anular en el salón; el reporte de anulaciones que no descuentan | — |
-  | **El renombre del catálogo** | **Entero** (`motivo_baja`, *Motivos de baja*), en un commit aparte | Renombrar solo la pantalla es lo que el 03-09 descartó: un nombre interno que miente |
-
-  ⚠️ **Dos filas del 03-09 cambian con esto, y hay que leerlas con esta tabla al lado:**
-  - *"Dónde viven los motivos"* decía que cada motivo es merma **o** cortesía: ahora hay un tercer tipo,
-    *no se llegó a hacer*.
-  - *"La línea queda marcada como anulada"* **quedó reemplazada el 2026-09-16**: la línea anulada se
-    **saca** de la cuenta, el rastro vive en el registro de anulaciones, la mesa lo muestra en un aviso
-    abajo y la precuenta lo imprime desde ahí. El motivo: dejar la línea marcada obligaba a tocar el motor
-    de cálculo, que rechaza una línea en cantidad cero y cruza las promos por orden. El *"una línea de
-    SQL"* de más arriba también cae: al sacar la línea, `comprometidoPorItem` no necesita ningún cambio.
-    Detalle y el resto de las decisiones de ese día, en la spec de la parte 2.
-
-  📌 Hechos que salieron al abrirlo: el stock de una mesa **sale al cobrar**, así que una línea anulada
-  antes nunca descontó nada; el sistema **no sabe si la cocina hizo el plato** (no hay estados de
-  cocina, solo `cantidad_enviada`); y no se guarda **cuándo** se envió cada cantidad: `creado_el` es la
-  hora del primer pedido de la línea y `actualizado_el` la de su última modificación, envío incluido.
-
-  **Spec de la parte 1** (con el renombre):
-  [`2026-09-15-motivos-de-baja-con-tipo-design.md`](../superpowers/specs/2026-09-15-motivos-de-baja-con-tipo-design.md).
-
-  **Parte 1 construida (2026-09-15):** backend en tres commits — `b9d8af83` (el renombre del
-  catálogo, sin cambiar conducta), `b5de5227` (el `tipo` en el modelo, el CRUD y el filtro
-  `?tipo=` de `GET /api/motivos-baja`) y `3fbb359f` (el 400 de `POST /api/mermas` para un
-  motivo que no sea de tipo `merma`); las pantallas en `40d18937` y sus tests de navegador en
-  `aaa3241a`.
-
-  **Parte 2 — spec escrita (2026-09-16), sin construir:**
-  [`2026-09-16-anular-plato-despachado-design.md`](../superpowers/specs/2026-09-16-anular-plato-despachado-design.md).
-  Sigue abierto construirla, y la parte 3 (el reporte de anulaciones).
-
 - [ ] **La nota de crédito no es un documento todavía: es un monto libre con líneas
   informativas** (backend, decisión g) — lo medido, no una impresión: la cabecera toma el
   monto que manda el cliente, `totalImpuestos: '0'` fijo (`ventas.service.ts:1023`), y las
@@ -895,6 +797,15 @@ transaccional nativo, con ALS — [ADR-020](../adr/020-contexto-transaccional-al
 Prisma y Drizzle tienen el mismo modelo manual de transacciones que TypeORM. No es un
 pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evaluación.
 
+- [ ] **El reporte de anulaciones de platos, separando merma de cortesía** — parte 3 (y
+  última) del frente *"Anular un plato ya enviado a cocina"*. Las partes 0-2 están
+  construidas y desplegadas → [`resueltos.md`](resueltos.md). El dato ya es trazable —cada
+  `movimientos_inventario` que nace de una anulación lleva `cuenta_linea_anulacion_id`, y
+  cada anulación lleva el `motivo_baja_id` con su `tipo`—, pero el informe de Mermas
+  (`docs/features/mermas-valorizadas.md`) todavía lista todo movimiento con `motivo = 'merma'`
+  sin filtrar por tipo, así que hoy mezcla cortesías y platos no elaborados junto con la merma
+  real. Encararla es spec propia: qué separa el reporte (¿una columna más, una pestaña, dos
+  reportes?) y si cruza con algún KPI existente de costo de comida.
 - [ ] **Serie y lote están a medias, y cada camino decide por su cuenta si rechazar o aceptar y
   corromper** (backend + BD, auditoría `inventario` 2026-08-15) — tres caras del mismo hueco,
   agrupadas porque se deciden juntas:

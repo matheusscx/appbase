@@ -1618,6 +1618,24 @@ export class SalonesService {
       if (cuenta.estado !== EstadoCuenta.ABIERTA) {
         throw new BadRequestException('La cuenta no está abierta');
       }
+      // Cancelar sin motivo exige `Salones:Operar`, que tiene cualquier
+      // garzón: dejarla pasar con algo despachado sería la puerta de atrás
+      // del control que exige `Anular` (spec § 6). Un solo EXISTS —no una
+      // lectura de línea por línea— para no volver esto un N+1.
+      const [{ existe }]: [{ existe: boolean }] = await manager.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM cuenta_lineas
+            WHERE cuenta_id = $1 AND tenant_id = $2
+              AND eliminado_el IS NULL AND cantidad_enviada > 0
+         ) AS existe`,
+        [cuentaId, tenantId],
+      );
+      if (existe) {
+        throw new BadRequestException(
+          'La cuenta tiene platos despachados a cocina: cancelala con ' +
+            'POST /cuentas/:id/cancelar-con-motivo.',
+        );
+      }
       cuenta.estado = EstadoCuenta.CANCELADA;
       cuenta.cerradaEl = new Date();
       await this.cuentaAsignacionesService.cerrarTramoVigente(

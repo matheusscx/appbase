@@ -347,6 +347,14 @@ let advertenciasAnular: string[] = []
  * confirmar.
  */
 let cuentaTrasAnular: Record<string, unknown> | null = null
+/** Cada `POST /cuentas/:id/cancelar-con-motivo`: cuentaId y el body mandado. */
+let cancelacionesConMotivoPedidas: { cuentaId: string, body: Record<string, unknown> }[] = []
+/** Fuerza el rechazo del `POST .../cancelar-con-motivo`. */
+let cancelarConMotivoRechaza = false
+/** `advertencias` que trae el `POST .../cancelar-con-motivo` junto a la cuenta. */
+let advertenciasCancelarConMotivo: string[] = []
+/** La cuenta (ya cancelada) que devuelve el `POST .../cancelar-con-motivo`. */
+let cuentaTrasCancelarConMotivo: Record<string, unknown> | null = null
 
 /**
  * Los toasts no se pueden leer del DOM sin montar `UApp`, así que se captura
@@ -614,6 +622,20 @@ mockNuxtImport('useApiFetch', () => {
     if (ruta.endsWith('/garzones/verificar-pin')) {
       return Promise.resolve({ garzonId: 'g1', nombre: 'Ana' })
     }
+    const cancelarConMotivoMatch = ruta.match(/\/cuentas\/([^/]+)\/cancelar-con-motivo$/)
+    if (cancelarConMotivoMatch) {
+      cancelacionesConMotivoPedidas.push({
+        cuentaId: cancelarConMotivoMatch[1] ?? '',
+        body: (opts?.body ?? {}) as Record<string, unknown>,
+      })
+      if (cancelarConMotivoRechaza) {
+        return Promise.reject(new Error('La cuenta no tiene nada despachado a cocina'))
+      }
+      return Promise.resolve({
+        ...(cuentaTrasCancelarConMotivo ?? {}),
+        advertencias: advertenciasCancelarConMotivo,
+      })
+    }
     if (/\/cuentas\/[^/]+\/cancelar$/.test(ruta)) {
       // Cuántas ediciones habían salido ya cuando llegó el cancelar. Es la única
       // forma de afirmar el ORDEN: los dos requests terminan igual, y con
@@ -850,6 +872,10 @@ function reiniciarMock() {
   anularLineaRechaza = false
   advertenciasAnular = []
   cuentaTrasAnular = null
+  cancelacionesConMotivoPedidas = []
+  cancelarConMotivoRechaza = false
+  advertenciasCancelarConMotivo = []
+  cuentaTrasCancelarConMotivo = null
   toasts = []
   alSalirDeLaRuta = null
 }
@@ -6628,6 +6654,156 @@ describe('salones — anular un plato despachado', () => {
     // La cantidad real (0,5 l), no "1" ni "0" — "0,5 l" son 5 caracteres,
     // el ancho exacto de la columna CANT, así que entra sin truncarse.
     expect(ticket).toContain('0,5 l')
+  })
+})
+
+/**
+ * `confirmarCancelar` (Task 6, spec § 6): con algo despachado hace falta
+ * `Salones:Anular` y un motivo — sin eso, la cuenta no se cancela por la
+ * puerta de atrás de la ruta simple. Describe PROPIO: el modal de motivo es
+ * uno nuevo, aparte del `CrudModal` de siempre (ver el comentario en
+ * `index.vue` sobre por qué no es un `#detalle` del mismo).
+ */
+describe('salones — cancelar una cuenta con algo despachado', () => {
+  const ITEM_ID = 'item-lomo'
+
+  const LINEA_BASE = {
+    id: 'linea-1',
+    itemId: ITEM_ID,
+    nombre: 'Lomo a lo pobre',
+    precioBase: '5000',
+    monedaId: CLP_ID,
+    cantidad: '2',
+    cantidadEnviada: '0',
+  }
+
+  function producto() {
+    return {
+      id: ITEM_ID,
+      nombre: 'Lomo a lo pobre',
+      precioBase: '5000',
+      monedaId: CLP_ID,
+      unidadMedida: 'unidad',
+      tipo: 'producto',
+      activo: true,
+    }
+  }
+
+  function cuentaCon(linea: Record<string, unknown>) {
+    return {
+      id: 'cuenta-9',
+      numero: 9,
+      nombre: null,
+      estado: 'abierta',
+      mesaId: MESA_ID,
+      ventaId: null,
+      garzonAperturaId: 'g1',
+      garzonAperturaNombre: 'Ana',
+      garzonResponsableId: 'g1',
+      garzonResponsableNombre: 'Ana',
+      garzonCierreId: null,
+      garzonCierreNombre: null,
+      lineas: [linea],
+      anulaciones: [] as unknown[],
+    }
+  }
+
+  async function montarConMoneda() {
+    const wrapper = await montar()
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    await esperar(0)
+    return wrapper
+  }
+
+  async function abrirLaCuenta(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await seleccionarMesa(wrapper)
+    const tarjeta = drawerMesa()?.querySelector<HTMLElement>('.cursor-pointer')
+    expect(tarjeta).toBeTruthy()
+    tarjeta!.click()
+    await esperar(20)
+  }
+
+  /** El modal NUEVO de cancelar con motivo — por texto, no por posición (ver el porqué en `index.vue`). */
+  function modalConMotivo() {
+    return dialogos().find(d => d.textContent?.includes('Cancelar cuenta con platos despachados'))
+  }
+
+  beforeEach(reiniciarMock)
+
+  it('sin nada despachado: sigue el flujo simple, sin pedir motivo', async () => {
+    catalogoItemsMock = [producto()]
+    cuentasDeLaMesa = [cuentaCon({ ...LINEA_BASE, cantidadEnviada: '0' })]
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+    botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
+    await esperar(20)
+
+    expect(modalConMotivo(), 'no hay motivo que pedir').toBeFalsy()
+    const modal = dialogos().find(d => d !== drawerMesa() && !esModalPin(d))
+    botonEn(modal, 'Cancelar cuenta')!.click()
+    await esperar(20)
+
+    expect(cancelacionesConMotivoPedidas, 'no pasó por la ruta con motivo').toEqual([])
+    expect(toasts.some(t => t.title === 'Cuenta cancelada')).toBe(true)
+  })
+
+  it('con algo despachado y SIN `Salones:Anular`: aviso de que hace falta un encargado, sin abrir ningún modal ni llamar nada', async () => {
+    catalogoItemsMock = [producto()]
+    cuentasDeLaMesa = [cuentaCon({ ...LINEA_BASE, cantidadEnviada: '2' })]
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+    const dialogosAntes = dialogos().length
+    botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
+    await esperar(20)
+
+    // Ni el modal simple ni el de motivo: el click no abrió nada.
+    expect(dialogos()).toHaveLength(dialogosAntes)
+    expect(toasts.some(t =>
+      t.color === 'warning' && (t.title ?? '').includes('hace falta un encargado'),
+    )).toBe(true)
+    expect(cancelacionesConMotivoPedidas).toEqual([])
+  })
+
+  it('con algo despachado y `Salones:Anular`: pide motivo y cancela por `cancelar-con-motivo`, mostrando las advertencias', async () => {
+    usePermissionsStore().permisos = ['Salones:Anular']
+    motivosBajaMock = [{ id: 'motivo-cortesia', nombre: 'Invitación', tipo: 'cortesia' }]
+    catalogoItemsMock = [producto()]
+    cuentasDeLaMesa = [cuentaCon({ ...LINEA_BASE, cantidadEnviada: '2' })]
+    cuentaTrasCancelarConMotivo = { id: 'cuenta-9', estado: 'cancelada', lineas: [], anulaciones: [] }
+    advertenciasCancelarConMotivo = ['Sin stock de "Papas" en el local: quedó en negativo']
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+    botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
+    await esperar(20)
+
+    const modal = modalConMotivo()
+    expect(modal, 'el modal de motivo se abrió').toBeTruthy()
+    await esperar(20) // carga de `GET /motivos-baja`
+
+    // El botón de confirmar arranca deshabilitado: falta el motivo.
+    expect(botonEn(modal, 'Cancelar cuenta')?.disabled, 'sin motivo todavía').toBe(true)
+
+    // Por elemento contenido en el modal, no el primero de la página: puede
+    // convivir con otros `USelectMenu` montados en el resto de la pantalla.
+    const motivoSelect = wrapper.findAllComponents({ name: 'USelectMenu' })
+      .find(c => modal!.contains(c.element))
+    expect(motivoSelect, 'el selector de motivo').toBeTruthy()
+    motivoSelect!.vm.$emit('update:modelValue', 'motivo-cortesia')
+    await esperar(10)
+
+    botonEn(modal, 'Cancelar cuenta')!.click()
+    await esperar(20)
+
+    expect(cancelacionesConMotivoPedidas).toHaveLength(1)
+    expect(cancelacionesConMotivoPedidas[0]!.cuentaId).toBe('cuenta-9')
+    expect(cancelacionesConMotivoPedidas[0]!.body).toEqual({ motivoBajaId: 'motivo-cortesia' })
+    expect(toasts.some(t => t.color === 'success' && t.title === 'Cuenta cancelada')).toBe(true)
+    expect(toasts.some(t =>
+      t.color === 'warning' && t.title === 'Sin stock de "Papas" en el local: quedó en negativo',
+    )).toBe(true)
   })
 })
 

@@ -479,6 +479,21 @@ export function useSalones() {
       method: 'POST',
     })
 
+  /**
+   * Cancela una cuenta con algo despachado a cocina, anulando cada línea viva
+   * con `cantidad_enviada > 0` por ese motivo (Task 6, spec § 6). Exige
+   * `Salones:Anular`; `cancelarCuenta` rechaza con 400 en este caso y manda acá.
+   * `advertencias` son avisos de stock informativos, igual que en `anularLinea`.
+   */
+  const cancelarCuentaConMotivo = (
+    cuentaId: string,
+    body: { motivoBajaId: string },
+  ) =>
+    useApiFetch<CuentaDetalle & { advertencias: string[] }>(
+      `${apiUrl}/cuentas/${cuentaId}/cancelar-con-motivo`,
+      { method: 'POST', body },
+    )
+
   const cerrarCuenta = (cuentaId: string, body: CerrarCuentaBody) =>
     useApiFetch<{ cuenta: CuentaDetalle, ventaId: string }>(
       `${apiUrl}/cuentas/${cuentaId}/cerrar`,
@@ -548,6 +563,7 @@ export function useSalones() {
     anularLinea,
     listarMotivosBajaActivos,
     cancelarCuenta,
+    cancelarCuentaConMotivo,
     cerrarCuenta,
     transferirCuenta,
     transferirCuentaAdmin,

@@ -452,7 +452,26 @@ día; **la segunda recién desde el 2026-09-02**, y el porqué está en su propi
 ⚠️ **Esto achica el caso de la mesa trabada, no lo borra.** Una merma, un recuento o un
 ajuste manual pueden dejar el stock por debajo de lo ya comprometido, y esa mesa vuelve a
 quedar sin poder cobrar y sin poder sacar la línea. **La salida con motivo —merma o
-cortesía— sigue sin existir** y sigue haciendo falta ([`agent/pendientes.md`](./agent/pendientes.md) § 3).
+cortesía— ya existe**: anular un plato ya despachado a cocina, con motivo y el permiso
+propio `Salones:Anular` (no alcanza con `Operar`, que tiene cualquier garzón). Las reglas:
+
+- **El motivo decide si descuenta stock, no quien anula.** `merma` y `cortesia` descuentan
+  (se reportan por separado — pendiente, ver abajo); `no_elaborado` no deja movimiento,
+  porque ese plato nunca salió de cocina.
+- **El tope es lo ya despachado**, no lo pedido: se puede anular parcial (3 despachados, se
+  anulan 2) y el resto sigue pedido. Lo que no salió a cocina se saca sin motivo, por el
+  camino de siempre.
+- **Una anulación no se deshace.** Un error se corrige pidiendo el plato de nuevo — igual que
+  una merma.
+- **Cancelar una cuenta con algo despachado exige el mismo permiso y un motivo.** La ruta
+  simple de cancelar (`Salones:Operar`) rechaza si hay algo despachado, para que no sea la
+  puerta de atrás del control de arriba.
+- **Una cuenta que queda sin nada vivo se cancela, no se cobra en $0.**
+
+Detalle en [`features/salones-mesas.md`](./features/salones-mesas.md) y el cierre del frente
+en [`agent/resueltos.md`](./agent/resueltos.md). Falta separar el reporte de anulaciones por
+tipo (merma vs. cortesía) — hoy `GET /api/mermas` las mezcla: parte 3, sigue en
+[`agent/pendientes.md`](./agent/pendientes.md) § 6.
 
 **Fuera de alcance (fases futuras):** FIFO o método de costeo elegible por tenant, y la
 emisión del **DTE 52** que legaliza un traslado en la vía pública —bodegas y traslados ya
