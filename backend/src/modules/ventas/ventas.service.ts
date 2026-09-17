@@ -146,6 +146,64 @@ export interface LineaCongelada {
   reglasCongeladas: ReglasCongeladas;
 }
 
+/**
+ * Payload de la boleta, armado desde la venta YA PERSISTIDA — nunca desde el
+ * motor de cálculo. Un solo tipo para los dos caminos que la producen: el
+ * cierre (`SalonesService.cerrarCuenta`, dentro de la misma transacción) y la
+ * reimpresión (`GET /ventas/:id/boleta`, fuera de transacción).
+ *
+ * Los nombres de `totales` son los de `TicketTotales` del frontend
+ * (`frontend/app/utils/ticket-builder.ts:151-157`), no los de la fila de
+ * `ventas` (`total_bruto`, `total_descuentos`…): el mapeo lo hace
+ * `armarBoleta`, una sola vez, y no cada pantalla que imprime.
+ *
+ * Ver `docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`.
+ */
+export interface BoletaVenta {
+  ventaId: string;
+  fecha: Date;
+  canal: string;
+  mesa: string | null;
+  cuentaNumero: number | null;
+  cajero: string | null;
+  items: {
+    descripcion: string;
+    cantidad: string;
+    cantidadPresentacion: string | null;
+    unidadCodigoPresentacion: string | null;
+    unidadCodigoBase: string;
+    precioUnitario: string;
+    totalLinea: string;
+    /**
+     * Gemelo deliberado de `PersonalizacionDetalleLinea`
+     * (`frontend/app/utils/ticket-builder.ts:110-115`): misma forma, sin
+     * fraseo. El texto ("Sin X" / "Extra X xN", con los prefijos `- `/`+ ` y
+     * el monto alineado) lo arma `lineasPersonalizacionPreciada` allá
+     * (`:122-138`), que es quien ya lo hace para la precuenta — mandarlo
+     * fraseado desde acá le daría dos dueños al mismo renglón.
+     */
+    personalizacionDetalle?: {
+      nombre: string;
+      tipo: 'omitido' | 'extra';
+      unidades?: number;
+      monto: string;
+    }[];
+    comentario?: string;
+  }[];
+  totales: {
+    subtotalNeto: string;
+    totalDescuentos: string;
+    totalRecargos: string;
+    totalImpuestos: string;
+    totalFinal: string;
+  };
+  impuestos: { nombre: string; tasa: string; monto: string }[];
+  promociones: { id: string; nombre: string; monto: string }[];
+  propina: { monto: string } | null;
+  pagos: { nombre: string; monto: string }[];
+  vuelto: string | null;
+}
+
 @Injectable()
 export class VentasService {
   constructor(
@@ -3415,6 +3473,300 @@ export class VentasService {
           montoAplicadoPropina,
         };
       }),
+    };
+  }
+
+  /**
+   * Arma el payload de la boleta desde la venta YA PERSISTIDA. No llama al
+   * motor de cálculo (`calculo-precios/` no se toca): los importes de
+   * `venta_detalles` y sus tablas hijas ya están cuantizados y congelados.
+   *
+   * `runner` acepta el `EntityManager` de una transacción abierta (el cierre,
+   * que arma la boleta en el mismo commit que la venta) o el `Db` de una
+   * lectura suelta (la reimpresión) — los dos exponen `.query(sql, params)`
+   * con la misma firma, así que no hace falta ramificar.
+   *
+   * Una query por tabla, todas con `eliminado_el IS NULL`, y ninguna dentro de
+   * un loop. La cabecera junta `ventas` con `cuentas`/`mesas` (mesa y número de
+   * cuenta cuando la venta viene de salones) y con `cajas`/`usuarios` (el
+   * cajero: el usuario dueño de la caja con la que se cobró — el mismo que
+   * `crearEnTransaccion` resuelve con `cajaService.findActiva`/`findVirtual`
+   * más arriba), todo con `LEFT JOIN`: una venta del POS no tiene cuenta, y la
+   * caja virtual de una venta online no tiene usuario dueño.
+   */
+  async armarBoleta(
+    runner: EntityManager | Db,
+    tenantId: string,
+    ventaId: string,
+  ): Promise<BoletaVenta> {
+    type CabeceraRow = {
+      venta_id: string;
+      fecha: Date;
+      canal: string;
+      total_bruto: string;
+      total_descuentos: string;
+      total_recargos: string;
+      total_impuestos: string;
+      total_final: string;
+      cuenta_numero: number | null;
+      mesa_nombre: string | null;
+      cajero_nombre: string | null;
+      cajero_apellido: string | null;
+    };
+    const cabeceraRows: CabeceraRow[] = await runner.query(
+      `SELECT v.venta_id, v.fecha, v.canal,
+              v.total_bruto, v.total_descuentos, v.total_recargos,
+              v.total_impuestos, v.total_final,
+              cta.numero AS cuenta_numero, m.nombre AS mesa_nombre,
+              u.nombre AS cajero_nombre, u.apellido AS cajero_apellido
+         FROM ventas v
+         LEFT JOIN cuentas cta ON cta.venta_id = v.venta_id
+                AND cta.tenant_id = v.tenant_id AND cta.eliminado_el IS NULL
+         LEFT JOIN mesas m ON m.mesa_id = cta.mesa_id
+                AND m.tenant_id = v.tenant_id AND m.eliminado_el IS NULL
+         LEFT JOIN cajas cj ON cj.caja_id = v.caja_id
+                AND cj.tenant_id = v.tenant_id AND cj.eliminado_el IS NULL
+         LEFT JOIN usuarios u ON u.usuario_id = cj.usuario_id
+                AND u.eliminado_el IS NULL
+        WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL`,
+      [ventaId, tenantId],
+    );
+    // 404 y no 403: mismo criterio que `findOne` — un 403 confirmaría que la
+    // venta existe.
+    if (!cabeceraRows.length)
+      throw new NotFoundException('Venta no encontrada');
+    const cabecera = cabeceraRows[0];
+
+    type DetalleRow = {
+      item_id: string;
+      descripcion: string | null;
+      cantidad: string;
+      cantidad_presentacion: string | null;
+      unidad_codigo_presentacion: string | null;
+      unidad_codigo_base: string;
+      precio_unitario: string;
+      total_linea: string;
+      personalizacion: PersonalizacionRecetaSnapshot | null;
+    };
+    const detalles: DetalleRow[] = await runner.query(
+      `SELECT d.item_id, d.descripcion, d.cantidad, d.cantidad_presentacion,
+              d.unidad_codigo_presentacion, d.unidad_codigo_base,
+              d.precio_unitario, d.total_linea, d.personalizacion
+         FROM venta_detalles d
+        WHERE d.venta_id = $1 AND d.eliminado_el IS NULL
+        -- Mismo desempate que \`findOne\`: las líneas de un solo \`save\`
+        -- comparten \`creado_el\` al microsegundo.
+        ORDER BY d.creado_el ASC, d.detalle_id ASC`,
+      [ventaId],
+    );
+
+    // Nombres de los ingredientes omitidos/extras, en UNA query. Gemelo
+    // deliberado de `nombresIngredientesPersonalizacion` (arriba, para
+    // `crearEnTransaccion`): ese recibe siempre el `EntityManager` de la
+    // transacción de venta; acá `runner` también puede ser el `Db` de una
+    // lectura fuera de transacción, así que no comparte su firma.
+    const ingredienteIds = new Set<string>();
+    for (const d of detalles) {
+      const p = d.personalizacion;
+      if (!p) continue;
+      for (const id of p.omitidos ?? []) ingredienteIds.add(id);
+      for (const e of p.extras ?? []) ingredienteIds.add(e.ingredienteItemId);
+    }
+    let nombresIngredientes = new Map<string, string>();
+    if (ingredienteIds.size > 0) {
+      const filasNombre: { item_id: string; nombre: string }[] =
+        await runner.query(
+          `SELECT item_id, nombre FROM items
+            WHERE item_id = ANY($1) AND tenant_id = $2 AND eliminado_el IS NULL`,
+          [[...ingredienteIds], tenantId],
+        );
+      nombresIngredientes = new Map(
+        filasNombre.map((f) => [f.item_id, f.nombre]),
+      );
+    }
+
+    const items = detalles.map((d) => {
+      const lineasDetalle = detallePersonalizacion(
+        d.personalizacion,
+        nombresIngredientes,
+      );
+      const comentario = d.personalizacion?.comentario;
+      return {
+        descripcion: d.descripcion ?? d.item_id,
+        cantidad: d.cantidad,
+        cantidadPresentacion: d.cantidad_presentacion,
+        unidadCodigoPresentacion: d.unidad_codigo_presentacion,
+        unidadCodigoBase: d.unidad_codigo_base,
+        precioUnitario: d.precio_unitario,
+        totalLinea: d.total_linea,
+        // Sin frasear: `detallePersonalizacion` ya devuelve la forma que
+        // `BoletaVenta['items'][number]['personalizacionDetalle']` declara
+        // (gemela de `PersonalizacionDetalleLinea` del frontend), y el texto
+        // ("Sin X" / "Extra X xN") lo arma `lineasPersonalizacionPreciada`
+        // allá — mandarlo ya fraseado le daría dos dueños al mismo renglón.
+        ...(lineasDetalle.length
+          ? { personalizacionDetalle: lineasDetalle }
+          : {}),
+        ...(comentario ? { comentario } : {}),
+      };
+    });
+
+    const impuestosRows: {
+      impuesto_id: string;
+      nombre_regla: string;
+      valor_aplicado: string;
+      porcentaje_aplicado: string | null;
+    }[] = await runner.query(
+      `SELECT impuesto_id, nombre_regla, valor_aplicado, porcentaje_aplicado
+         FROM ventas_impuestos WHERE venta_id = $1 AND eliminado_el IS NULL`,
+      [ventaId],
+    );
+    // Agrupado por impuesto: un impuesto se congela POR LÍNEA
+    // (`aplicado_en = 'detalle'`), y la boleta muestra un total por impuesto,
+    // no uno por línea — mismo criterio que `agregarImpuestosVenta` en
+    // `ticket-builder.ts` (frontend), que agrupa las trazas del motor cuando
+    // arma la precuenta del carrito vivo.
+    const impuestosOrden: string[] = [];
+    const impuestosPorId = new Map<
+      string,
+      { nombre: string; tasa: string; monto: Decimal }
+    >();
+    for (const row of impuestosRows) {
+      const prev = impuestosPorId.get(row.impuesto_id);
+      if (prev) {
+        prev.monto = prev.monto.plus(row.valor_aplicado);
+      } else {
+        impuestosOrden.push(row.impuesto_id);
+        impuestosPorId.set(row.impuesto_id, {
+          nombre: row.nombre_regla,
+          tasa: row.porcentaje_aplicado ?? '0',
+          monto: new Decimal(row.valor_aplicado),
+        });
+      }
+    }
+    const impuestos = impuestosOrden.map((id) => {
+      const i = impuestosPorId.get(id)!;
+      return { nombre: i.nombre, tasa: i.tasa, monto: i.monto.toFixed(4) };
+    });
+
+    const promocionesRows: {
+      promocion_id: string;
+      nombre_promocion: string;
+      monto: string;
+    }[] = await runner.query(
+      `SELECT promocion_id, nombre_promocion, monto
+         FROM ventas_promociones WHERE venta_id = $1 AND eliminado_el IS NULL`,
+      [ventaId],
+    );
+    const promocionesOrden: string[] = [];
+    const promocionesPorId = new Map<
+      string,
+      { nombre: string; monto: Decimal }
+    >();
+    for (const row of promocionesRows) {
+      const prev = promocionesPorId.get(row.promocion_id);
+      if (prev) {
+        prev.monto = prev.monto.plus(row.monto);
+      } else {
+        promocionesOrden.push(row.promocion_id);
+        promocionesPorId.set(row.promocion_id, {
+          nombre: row.nombre_promocion,
+          monto: new Decimal(row.monto),
+        });
+      }
+    }
+    const promociones = promocionesOrden.map((id) => {
+      const p = promocionesPorId.get(id)!;
+      return { id, nombre: p.nombre, monto: p.monto.toFixed(4) };
+    });
+
+    const pagosRows: {
+      pago_id: string;
+      metodo_pago_id: string;
+      monto: string;
+      vuelto: string;
+    }[] = await runner.query(
+      `SELECT pago_id, metodo_pago_id, monto, vuelto
+         FROM pagos WHERE venta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+        ORDER BY creado_el ASC`,
+      [ventaId, tenantId],
+    );
+    const metodoPagoIds = [...new Set(pagosRows.map((p) => p.metodo_pago_id))];
+    let nombresMetodoPago = new Map<string, string>();
+    if (metodoPagoIds.length > 0) {
+      const filasMetodo: { metodo_pago_id: string; nombre: string }[] =
+        await runner.query(
+          `SELECT metodo_pago_id, nombre FROM metodos_pago
+            WHERE metodo_pago_id = ANY($1) AND eliminado_el IS NULL`,
+          [metodoPagoIds],
+        );
+      nombresMetodoPago = new Map(
+        filasMetodo.map((f) => [f.metodo_pago_id, f.nombre]),
+      );
+    }
+    const pagos = pagosRows.map((p) => ({
+      // '' y no el id: mismo fallback que hoy usa `index.vue` al resolver el
+      // método por nombre (un método soft-borrado desaparece del JOIN, no la
+      // fila del pago).
+      nombre: nombresMetodoPago.get(p.metodo_pago_id) ?? '',
+      monto: p.monto,
+    }));
+    // El vuelto es de la VENTA, no de cada pago: solo el efectivo lo admite
+    // (`permite_vuelto`), así que sumar el `vuelto` de todos los pagos da el
+    // mismo número que leer el del único que puede tenerlo, sin tener que
+    // saber cuál es.
+    const totalVuelto = pagosRows.reduce(
+      (acc, p) => acc.plus(p.vuelto),
+      new Decimal(0),
+    );
+    const vuelto = totalVuelto.isZero() ? null : totalVuelto.toFixed(4);
+
+    // ⚠️ La propina de la venta vive en `venta_propina.monto_pagado`, NUNCA en
+    // `pago_aplicaciones` (eso reparte un pago entre venta/propina cuando un
+    // solo cobro paga las dos cosas — ver `findOne` más arriba). El cierre de
+    // mesa crea SIEMPRE una fila acá, incluso sin propina (con
+    // `estado = 'sin_propina'` y `monto_pagado = '0'`,
+    // `venta-propina.service.ts:47-49`): filtrar por `estado = 'pagada'` es lo
+    // que separa "no hay propina" de "hay una fila en cero".
+    const propinaRows: { monto_pagado: string }[] = await runner.query(
+      `SELECT monto_pagado FROM venta_propina
+        WHERE venta_id = $1 AND tenant_id = $2 AND estado = 'pagada'
+          AND eliminado_el IS NULL`,
+      [ventaId, tenantId],
+    );
+    const propina = propinaRows.length
+      ? { monto: propinaRows[0].monto_pagado }
+      : null;
+
+    // Mismo molde que `CajaService` para nombre+apellido: filtrar el
+    // soft-delete va en el ON del LEFT JOIN de la cabecera, no acá — así la
+    // fila sobrevive y solo el nombre del cajero se pierde.
+    const cajero =
+      [cabecera.cajero_nombre, cabecera.cajero_apellido]
+        .filter((p): p is string => Boolean(p))
+        .join(' ')
+        .trim() || null;
+
+    return {
+      ventaId: cabecera.venta_id,
+      fecha: cabecera.fecha,
+      canal: cabecera.canal,
+      mesa: cabecera.mesa_nombre,
+      cuentaNumero: cabecera.cuenta_numero,
+      cajero,
+      items,
+      totales: {
+        subtotalNeto: cabecera.total_bruto,
+        totalDescuentos: cabecera.total_descuentos,
+        totalRecargos: cabecera.total_recargos,
+        totalImpuestos: cabecera.total_impuestos,
+        totalFinal: cabecera.total_final,
+      },
+      impuestos,
+      promociones,
+      propina,
+      pagos,
+      vuelto,
     };
   }
 }

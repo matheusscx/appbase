@@ -197,6 +197,7 @@ function mapaDe(item: unknown) {
 
 describe('VentasService', () => {
   let service: VentasService;
+  let dbService: Db;
   let cajaService: jest.Mocked<CajaService>;
   let calculoPreciosService: jest.Mocked<CalculoPreciosService>;
   let inventarioService: jest.Mocked<InventarioService>;
@@ -390,6 +391,7 @@ describe('VentasService', () => {
     }).compile();
 
     service = module.get<VentasService>(VentasService);
+    dbService = module.get(Db);
     cajaService = module.get(CajaService);
     calculoPreciosService = module.get(CalculoPreciosService);
     inventarioService = module.get(InventarioService);
@@ -3646,6 +3648,360 @@ describe('VentasService', () => {
       const res = await service.findOne(TENANT_ID, VENTA_ID, USUARIO, true);
 
       expect(res.promociones).toEqual([]);
+    });
+  });
+
+  /**
+   * `armarBoleta` arma el payload de la boleta desde la venta ya persistida
+   * (Task 1 de `docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`).
+   * `runner` es `Db` en estos tests —el mismo objeto que la Task 2 (reimpresión)
+   * le pasa fuera de transacción—; `db.query` ya está mockeado sobre
+   * `dataSourceMock.query` en el `beforeEach` de arriba.
+   */
+  describe('armarBoleta()', () => {
+    const VENTA_ID = 'venta-uuid-boleta';
+
+    type BoletaFixture = {
+      cabecera: Record<string, unknown>;
+      detalles?: Record<string, unknown>[];
+      nombresItems?: Record<string, unknown>[];
+      impuestos?: Record<string, unknown>[];
+      promociones?: Record<string, unknown>[];
+      pagos?: Record<string, unknown>[];
+      metodosPago?: Record<string, unknown>[];
+      propina?: Record<string, unknown>[];
+    };
+
+    /** Cabecera con todos los campos en blanco: cada test pisa lo que necesita. */
+    const cabeceraBase = (overrides: Record<string, unknown> = {}) => ({
+      venta_id: VENTA_ID,
+      fecha: new Date('2026-09-17T12:00:00Z'),
+      canal: 'fisico',
+      total_bruto: '0.0000',
+      total_descuentos: '0.0000',
+      total_recargos: '0.0000',
+      total_impuestos: '0.0000',
+      total_final: '0.0000',
+      cuenta_numero: null,
+      mesa_nombre: null,
+      cajero_nombre: null,
+      cajero_apellido: null,
+      ...overrides,
+    });
+
+    /** Despacha cada tabla de `armarBoleta` por el `FROM` de su SQL. */
+    const mockArmarBoleta = (fixture: BoletaFixture) => {
+      dataSourceMock.query.mockImplementation((sql: string) => {
+        if (sql.includes('FROM ventas v'))
+          return Promise.resolve([fixture.cabecera]);
+        if (sql.includes('FROM venta_detalles'))
+          return Promise.resolve(fixture.detalles ?? []);
+        if (sql.includes('FROM items'))
+          return Promise.resolve(fixture.nombresItems ?? []);
+        if (sql.includes('FROM ventas_impuestos'))
+          return Promise.resolve(fixture.impuestos ?? []);
+        if (sql.includes('FROM ventas_promociones'))
+          return Promise.resolve(fixture.promociones ?? []);
+        if (sql.includes('FROM pagos'))
+          return Promise.resolve(fixture.pagos ?? []);
+        if (sql.includes('FROM metodos_pago'))
+          return Promise.resolve(fixture.metodosPago ?? []);
+        if (sql.includes('FROM venta_propina'))
+          return Promise.resolve(fixture.propina ?? []);
+        return Promise.resolve([]);
+      });
+    };
+
+    it('una venta de dos líneas devuelve items en el orden persistido', async () => {
+      mockArmarBoleta({
+        cabecera: cabeceraBase(),
+        detalles: [
+          {
+            item_id: 'item-1',
+            descripcion: 'Hamburguesa clásica',
+            cantidad: '2',
+            cantidad_presentacion: null,
+            unidad_codigo_presentacion: null,
+            unidad_codigo_base: 'unidad',
+            precio_unitario: '5000.0000',
+            total_linea: '10000.0000',
+            personalizacion: null,
+          },
+          {
+            item_id: 'item-2',
+            descripcion: 'Papas fritas',
+            cantidad: '1',
+            cantidad_presentacion: null,
+            unidad_codigo_presentacion: null,
+            unidad_codigo_base: 'unidad',
+            precio_unitario: '3000.0000',
+            total_linea: '3000.0000',
+            personalizacion: null,
+          },
+        ],
+      });
+
+      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+
+      expect(boleta.items).toEqual([
+        {
+          descripcion: 'Hamburguesa clásica',
+          cantidad: '2',
+          cantidadPresentacion: null,
+          unidadCodigoPresentacion: null,
+          unidadCodigoBase: 'unidad',
+          precioUnitario: '5000.0000',
+          totalLinea: '10000.0000',
+        },
+        {
+          descripcion: 'Papas fritas',
+          cantidad: '1',
+          cantidadPresentacion: null,
+          unidadCodigoPresentacion: null,
+          unidadCodigoBase: 'unidad',
+          precioUnitario: '3000.0000',
+          totalLinea: '3000.0000',
+        },
+      ]);
+    });
+
+    it('una línea vendida por presentación no cruza cantidad con cantidad_presentacion ni sus unidades', async () => {
+      // Bug ya cometido en este repo: 0,3 kg impreso como "0" por cruzar
+      // `cantidad`/`cantidad_presentacion` o sus unidades. Los cuatro valores
+      // son distintos entre sí a propósito, para que ningún par sea
+      // intercambiable sin romper esta aserción.
+      mockArmarBoleta({
+        cabecera: cabeceraBase(),
+        detalles: [
+          {
+            item_id: 'item-carne',
+            descripcion: 'Carne molida',
+            cantidad: '0.5',
+            cantidad_presentacion: '500',
+            unidad_codigo_presentacion: 'g',
+            unidad_codigo_base: 'kg',
+            precio_unitario: '8000.0000',
+            total_linea: '4000.0000',
+            personalizacion: null,
+          },
+        ],
+      });
+
+      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+
+      expect(boleta.items).toEqual([
+        {
+          descripcion: 'Carne molida',
+          cantidad: '0.5',
+          cantidadPresentacion: '500',
+          unidadCodigoPresentacion: 'g',
+          unidadCodigoBase: 'kg',
+          precioUnitario: '8000.0000',
+          totalLinea: '4000.0000',
+        },
+      ]);
+    });
+
+    it('una línea con personalización devuelve personalizacionDetalle con su monto y el comentario', async () => {
+      mockArmarBoleta({
+        cabecera: cabeceraBase(),
+        detalles: [
+          {
+            item_id: 'item-1',
+            descripcion: 'Hamburguesa clásica',
+            cantidad: '1',
+            cantidad_presentacion: null,
+            unidad_codigo_presentacion: null,
+            unidad_codigo_base: 'unidad',
+            precio_unitario: '5000.0000',
+            total_linea: '6000.0000',
+            personalizacion: {
+              omitidos: ['ing-cebolla'],
+              extras: [
+                {
+                  ingredienteItemId: 'ing-tocino',
+                  cantidad: '2',
+                  unidadCodigo: 'unidad',
+                  precioExtra: '1000.0000',
+                  unidades: '2',
+                },
+              ],
+              comentario: 'sin sal',
+            },
+          },
+        ],
+        nombresItems: [
+          { item_id: 'ing-cebolla', nombre: 'Cebolla' },
+          { item_id: 'ing-tocino', nombre: 'Tocino' },
+        ],
+      });
+
+      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+
+      // Estructurado, sin frasear: el texto ("Sin X" / "Extra X xN") lo arma
+      // `lineasPersonalizacionPreciada` en el frontend
+      // (`ticket-builder.ts:122-138`), no el backend — dos dueños del mismo
+      // renglón mandarían el papel a divergir en silencio. `unidades: 2` va
+      // explícito para que no sea un campo decorativo sin cubrir.
+      expect(boleta.items[0].personalizacionDetalle).toEqual([
+        { nombre: 'Cebolla', tipo: 'omitido', monto: '0' },
+        { nombre: 'Tocino', tipo: 'extra', unidades: 2, monto: '2000' },
+      ]);
+      expect(boleta.items[0].comentario).toBe('sin sal');
+    });
+
+    it('los totales se mapean con los nombres del ticket (subtotalNeto sale de total_bruto)', async () => {
+      mockArmarBoleta({
+        cabecera: cabeceraBase({
+          total_bruto: '10000.0000',
+          total_descuentos: '500.0000',
+          total_recargos: '200.0000',
+          total_impuestos: '1800.0000',
+          total_final: '11500.0000',
+        }),
+        detalles: [],
+      });
+
+      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+
+      expect(boleta.totales).toEqual({
+        subtotalNeto: '10000.0000',
+        totalDescuentos: '500.0000',
+        totalRecargos: '200.0000',
+        totalImpuestos: '1800.0000',
+        totalFinal: '11500.0000',
+      });
+    });
+
+    it('dos pagos de métodos distintos devuelven sus nombres, y el vuelto del pago en efectivo', async () => {
+      mockArmarBoleta({
+        cabecera: cabeceraBase(),
+        detalles: [],
+        pagos: [
+          {
+            pago_id: 'pago-1',
+            metodo_pago_id: 'metodo-efectivo',
+            monto: '10000.0000',
+            vuelto: '1500.0000',
+          },
+          {
+            pago_id: 'pago-2',
+            metodo_pago_id: 'metodo-tarjeta',
+            monto: '5894.0000',
+            vuelto: '0.0000',
+          },
+        ],
+        metodosPago: [
+          { metodo_pago_id: 'metodo-efectivo', nombre: 'Efectivo' },
+          { metodo_pago_id: 'metodo-tarjeta', nombre: 'Tarjeta de débito' },
+        ],
+      });
+
+      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+
+      expect(boleta.pagos).toEqual([
+        { nombre: 'Efectivo', monto: '10000.0000' },
+        { nombre: 'Tarjeta de débito', monto: '5894.0000' },
+      ]);
+      expect(boleta.vuelto).toBe('1500.0000');
+    });
+
+    it('impuestos y promociones se agregan por id: dos filas del mismo id se suman, y no se cruzan con las de otro', async () => {
+      mockArmarBoleta({
+        cabecera: cabeceraBase(),
+        detalles: [],
+        impuestos: [
+          {
+            impuesto_id: 'iva',
+            nombre_regla: 'IVA',
+            valor_aplicado: '950.0000',
+            porcentaje_aplicado: '0.1900',
+          },
+          {
+            impuesto_id: 'iva',
+            nombre_regla: 'IVA',
+            valor_aplicado: '550.0000',
+            porcentaje_aplicado: '0.1900',
+          },
+          {
+            impuesto_id: 'ila',
+            nombre_regla: 'ILA',
+            valor_aplicado: '300.0000',
+            porcentaje_aplicado: '0.1000',
+          },
+        ],
+        promociones: [
+          {
+            promocion_id: 'promo-2x1',
+            nombre_promocion: '2x1 martes',
+            monto: '1200.0000',
+          },
+          {
+            promocion_id: 'promo-2x1',
+            nombre_promocion: '2x1 martes',
+            monto: '800.0000',
+          },
+          {
+            promocion_id: 'promo-happy',
+            nombre_promocion: 'Happy hour',
+            monto: '400.0000',
+          },
+        ],
+      });
+
+      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+
+      // Ni el de una sola fila (950 o 1200) ni la suma cruzada entre ids
+      // (950+550+300, o 1200+800+400): cada id agregado por su cuenta.
+      expect(boleta.impuestos).toEqual([
+        { nombre: 'IVA', tasa: '0.1900', monto: '1500.0000' },
+        { nombre: 'ILA', tasa: '0.1000', monto: '300.0000' },
+      ]);
+      expect(boleta.promociones).toEqual([
+        { id: 'promo-2x1', nombre: '2x1 martes', monto: '2000.0000' },
+        { id: 'promo-happy', nombre: 'Happy hour', monto: '400.0000' },
+      ]);
+    });
+
+    it('propina con estado pagada devuelve el monto', async () => {
+      mockArmarBoleta({
+        cabecera: cabeceraBase(),
+        detalles: [],
+        propina: [{ monto_pagado: '1500.0000' }],
+      });
+
+      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+
+      expect(boleta.propina).toEqual({ monto: '1500.0000' });
+    });
+
+    it('sin fila de propina pagada, la boleta no inventa una: null', async () => {
+      // Qué controla esto y qué NO: controla la rama de cero filas — un
+      // `armarBoleta` que fabricara `{ monto: '0' }` en vez de `null` pasaría
+      // el test de arriba y fallaría este. **No** controla el filtro
+      // `estado = 'pagada'` del SQL: el mock despacha por substring de la
+      // tabla y devuelve el fixture sin mirar el `WHERE`, así que borrar el
+      // filtro no cambiaría nada acá. Ese control vive en el e2e de la ruta
+      // de reimpresión, donde la query se ejecuta de verdad contra una venta
+      // sin propina (`cerrarCuenta` siempre crea la fila, con
+      // `estado = 'sin_propina'` — `venta-propina.service.ts:47-49`).
+      mockArmarBoleta({
+        cabecera: cabeceraBase(),
+        detalles: [],
+        propina: [],
+      });
+
+      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+
+      expect(boleta.propina).toBeNull();
+    });
+
+    it('una venta de otro tenant no se encuentra (404)', async () => {
+      dataSourceMock.query.mockResolvedValueOnce([]);
+
+      await expect(
+        service.armarBoleta(dbService, TENANT_ID, 'venta-ajena'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });
