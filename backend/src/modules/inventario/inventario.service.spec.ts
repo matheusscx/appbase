@@ -231,6 +231,7 @@ describe('InventarioService', () => {
         movimientoId: 'mov-1',
         stockAnterior: '10',
         stockResultante: '15',
+        cantidadMovida: '5',
         costoActualPrevio: null,
         costoActual: null,
       });
@@ -304,16 +305,26 @@ describe('InventarioService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Ítem eliminado: solo lo que deshace algo
+  // Ítem eliminado: solo lo que deshace algo, o lo que ya ocurrió de verdad
   //
   // Como los tests del acote por tenant de más arriba, esto es **defensa en
   // profundidad y no un bug alcanzable hoy**: se midió caller por caller y los
-  // seis caminos que no son anulación/devolución ya filtran `eliminado_el IS
-  // NULL` aguas arriba —`items.ajustarStock` y `create`/`update`,
-  // `inventario.registrarAjusteCosto` y `mermas.registrar` cortan con 404;
-  // `recuentos.aplicar` descarta la línea; las recetas y combos excluyen al
-  // ingrediente borrado de la expansión—. Lo que fijan estos tests es la regla
-  // en el chokepoint, para el llamador que se agregue mañana sin ese filtro.
+  // caminos que no son anulación/devolución/merma-por-anulación ya filtran
+  // `eliminado_el IS NULL` aguas arriba —`items.ajustarStock` y
+  // `create`/`update`, `inventario.registrarAjusteCosto` y `mermas.registrar`
+  // cortan con 404; `recuentos.aplicar` descarta la línea; las recetas y
+  // combos excluyen al ingrediente borrado de la expansión—. Lo que fijan
+  // estos tests es la regla en el chokepoint, para el llamador que se agregue
+  // mañana sin ese filtro.
+  //
+  // `merma` es la excepción con matices (spec `anular-plato-despachado` §4.3):
+  // la allowlist la acepta sobre un eliminado porque
+  // `ItemsService.consumirLineaAnulada` la necesita —el plato ya salió de
+  // cocina—, pero `mermas.registrar`, el único otro llamador con este motivo,
+  // sigue rechazando por su cuenta antes de llegar acá (404, ver su propio
+  // service). Por eso ya no está en el `it.each` de motivos rechazados de
+  // más abajo: tiene su propio test de aceptación, junto a `anulacion` y
+  // `devolucion`.
   // ---------------------------------------------------------------------------
   describe('registrarMovimiento — ítem eliminado', () => {
     const BORRADO_EL = new Date('2026-08-16T10:00:00Z');
@@ -336,7 +347,7 @@ describe('InventarioService', () => {
       return [{ stock: '10' }];
     }
 
-    it.each(['compra', 'merma', 'recuento', 'ajuste_manual', 'venta'])(
+    it.each(['compra', 'recuento', 'ajuste_manual', 'venta'])(
       "rechaza el motivo '%s' sobre un ítem eliminado",
       async (motivo) => {
         managerMock.query.mockResolvedValueOnce(lockRowEliminado());
@@ -350,7 +361,6 @@ describe('InventarioService', () => {
             motivo,
             cantidad: '5',
             usuarioId: USER_ID,
-            motivoBajaId: motivo === 'merma' ? MOTIVO_BAJA_ID : undefined,
             motivoDiferenciaId:
               motivo === 'recuento' ? MOTIVO_DIFERENCIA_ID : undefined,
           }),
@@ -418,6 +428,30 @@ describe('InventarioService', () => {
         expect(res.stockResultante).toBe('12');
       },
     );
+
+    it('acepta el motivo merma sobre un ítem eliminado: el plato ya salió de cocina y hay que poder anularlo', async () => {
+      managerMock.query
+        .mockResolvedValueOnce(lockRowEliminado())
+        .mockResolvedValueOnce(saldoRow()) // SELECT saldo, ya bajo el lock
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-merma-borrado' }]); // INSERT kardex
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '2',
+          usuarioId: USER_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
+        },
+      );
+
+      expect(res.stockResultante).toBe('8');
+    });
 
     it('un ítem vivo no cambia: el guard solo mira `eliminado_el`', async () => {
       managerMock.query
@@ -1307,6 +1341,198 @@ describe('InventarioService', () => {
       const idx = columnas.indexOf('cuenta_linea_anulacion_id');
       expect(idx).toBeGreaterThan(-1);
       expect(insertCall[1][idx]).toBe(CUENTA_LINEA_ANULACION_ID);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // permiteSalidaParcial: la anulación de un plato despachado (parte 2, ronda
+  // de fixes 1, owner) descuenta lo que hay en vez de abortar. Solo aplica en
+  // modo `cantidad` — es el único modo donde "la mitad de lo pedido" tiene
+  // sentido.
+  // ---------------------------------------------------------------------------
+  describe('registrarMovimiento — permiteSalidaParcial', () => {
+    it('motivo distinto de merma con permiteSalidaParcial lanza BadRequest', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '10' }]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'salida',
+          motivo: 'venta',
+          cantidad: '2',
+          usuarioId: USER_ID,
+          permiteSalidaParcial: true,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('permiteSalidaParcial solo aplica a merma'),
+      );
+    });
+
+    it('permiteSalidaParcial en una entrada lanza BadRequest', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '10' }]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'entrada',
+          motivo: 'merma',
+          cantidad: '2',
+          usuarioId: USER_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
+          permiteSalidaParcial: true,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'permiteSalidaParcial solo aplica a una salida',
+        ),
+      );
+    });
+
+    it('sin permiteSalidaParcial, stock insuficiente sigue lanzando (comportamiento por defecto sin cambios)', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '1' }]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '5',
+          usuarioId: USER_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('Stock insuficiente para la salida'),
+      );
+    });
+
+    it('con permiteSalidaParcial y disponible 0, lanza sin escribir nada (ni INSERT de kardex, ni upsert de stock)', async () => {
+      // Ronda de fixes 2, Important I-A: con `stockAnterior = 0` no hay "lo
+      // que hay" que mover — clampar igual a 0 escribiría una merma de
+      // cantidad 0 (viola "la cantidad debe ser mayor a cero", más arriba en
+      // este mismo chokepoint) y un upsert de stock a 0 que no cambió nada.
+      // Es el caso más común de una anulación sin stock, así que tiene que
+      // comportarse como serie/lote: lanzar, y que `moverConsumoOSaltear` lo
+      // trate como un salteo completo con aviso.
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '0' }]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '5',
+          usuarioId: USER_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
+          permiteSalidaParcial: true,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('Stock insuficiente para la salida'),
+      );
+
+      // Ni el upsert de stock_ubicacion ni el INSERT del kardex: se cortó en
+      // el `throw`, antes de la primera escritura. Solo las dos lecturas de
+      // arriba (lock + saldo).
+      expect(managerMock.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('con permiteSalidaParcial, descuenta lo que hay, deja el stock en 0 (nunca negativo) y devuelve cantidadMovida', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '1' }]) // disponible: 1, pedido: 5
+        .mockResolvedValueOnce(undefined) // INSERT/UPDATE stock_ubicacion
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-parcial' }]);
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '5',
+          usuarioId: USER_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
+          permiteSalidaParcial: true,
+        },
+      );
+
+      expect(res.cantidadMovida).toBe('1');
+      expect(res.stockResultante).toBe('0');
+
+      // No hay lectura de stock nueva: sigue siendo UNA sola (la de arriba,
+      // ya bajo el lock) antes del upsert — reusa `stockAnterior`.
+      expect(managerMock.query).toHaveBeenCalledTimes(4);
+
+      // El upsert de stock_ubicacion escribe 0, no un negativo.
+      const upsertCall = managerMock.query.mock.calls[2] as [string, unknown[]];
+      expect(upsertCall[1]).toEqual([ITEM_ID, UBICACION_ID, '0']);
+
+      // El kardex registra lo que de verdad se movió (1), no lo pedido (5):
+      // si guardara 5, la fila diría "salieron 5" con un stock_resultante que
+      // solo bajó 1 desde stock_anterior 1 — un kardex que no cierra con su
+      // propio saldo.
+      const insertCall = managerMock.query.mock.calls[3] as [string, unknown[]];
+      const columnas = insertCall[0]
+        .match(/\(([^)]+)\)\s*VALUES/)![1]
+        .split(',')
+        .map((c) => c.trim());
+      const idxCantidad = columnas.indexOf('cantidad');
+      expect(insertCall[1][idxCantidad]).toBe('1');
+    });
+
+    it('con permiteSalidaParcial pero stock suficiente, se comporta como una salida normal', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '10' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-completo' }]);
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '3',
+          usuarioId: USER_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
+          permiteSalidaParcial: true,
+        },
+      );
+
+      expect(res.cantidadMovida).toBe('3');
+      expect(res.stockResultante).toBe('7');
     });
   });
 

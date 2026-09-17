@@ -23,7 +23,10 @@ import {
 import { UpdateItemDto } from './dto/update-item.dto';
 import { AjusteStockDto } from './dto/ajuste-stock.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
-import { InventarioService } from '../inventario/inventario.service';
+import {
+  InventarioService,
+  type RegistrarMovimientoParams,
+} from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
@@ -42,6 +45,71 @@ import {
   type PersonalizacionRecetaSnapshot,
   type SnapshotGrupo,
 } from '../../common/dto/personalizacion-receta.dto';
+
+/**
+ * A quién le atribuye el kardex el consumo que genera la expansión
+ * (ingrediente de receta, componente de combo, opción de grupo) y bajo qué
+ * motivo. Unión discriminada por `motivo` — no un objeto con todo opcional —
+ * a propósito (ronda de fixes 1, revisión Important 3): un objeto con todo
+ * opcional dejaba compilar un llamador que no pasa ni `motivo` ni `ventaId`, y
+ * ese llamador escribiría `motivo: 'venta'` con `venta_id` NULL en el kardex
+ * sin que nada lo avisara. Con la unión, quien no pasa `motivo: 'merma'` está
+ * OBLIGADO a pasar `ventaId`, y quien pasa `motivo: 'merma'` está obligado a
+ * pasar `motivoBajaId` + `cuentaLineaAnulacionId`. Tampoco acepta un tercer
+ * valor de `motivo` (p. ej. `'anulacion'`, que en este chokepoint significa
+ * otra cosa — ver `MOTIVOS_QUE_RECALCULAN_CPP`/`MOTIVOS_SOBRE_ITEM_ELIMINADO`
+ * en `inventario.service.ts`).
+ *
+ * Ningún llamador de venta pasa `motivo` (cae al default `'venta'`).
+ * `consumirLineaAnulada` (spec `anular-plato-despachado` §4.3) es el único
+ * que pasa la rama `'merma'`.
+ */
+type ContextoConsumo =
+  | { motivo?: 'venta'; ventaId: string }
+  | { motivo: 'merma'; motivoBajaId: string; cuentaLineaAnulacionId: string };
+
+/** Los cuatro campos de `ContextoConsumo`, ya desambiguados, más si estamos
+ * en la rama de anulación — para no repetir el `if (params.motivo === 'merma')`
+ * en cada uno de los tres métodos que lo reciben. */
+interface ContextoResuelto {
+  motivo: string;
+  ventaId: string | null;
+  motivoBajaId: string | null;
+  cuentaLineaAnulacionId: string | null;
+  enAnulacion: boolean;
+}
+
+function resolverContexto(ctx: ContextoConsumo): ContextoResuelto {
+  if (ctx.motivo === 'merma') {
+    return {
+      motivo: 'merma',
+      ventaId: null,
+      motivoBajaId: ctx.motivoBajaId,
+      cuentaLineaAnulacionId: ctx.cuentaLineaAnulacionId,
+      enAnulacion: true,
+    };
+  }
+  return {
+    motivo: 'venta',
+    ventaId: ctx.ventaId,
+    motivoBajaId: null,
+    cuentaLineaAnulacionId: null,
+    enAnulacion: false,
+  };
+}
+
+/** El mismo contexto ya resuelto, reempaquetado para pasarlo a una llamada
+ * anidada (`venderIngredientesReceta` → `venderOpcionesGrupos`, etc.) sin
+ * volver a bifurcar por `motivo`. */
+function contextoParaHijo(r: ContextoResuelto): ContextoConsumo {
+  return r.enAnulacion
+    ? {
+        motivo: 'merma',
+        motivoBajaId: r.motivoBajaId!,
+        cuentaLineaAnulacionId: r.cuentaLineaAnulacionId!,
+      }
+    : { motivo: 'venta', ventaId: r.ventaId! };
+}
 
 interface ItemRow {
   item_id: string;
@@ -3857,20 +3925,180 @@ export class ItemsService {
   }
 
   /**
+   * La unidad de stock (`item_producto.unidad_medida`) de un ítem, para
+   * frasear una advertencia de faltante. Sin filtrar `eliminado_el` a
+   * propósito — ver el comentario `--` en la propia consulta.
+   *
+   * Único llamador: el producto simple de `consumirLineaAnulada`, que no trae
+   * la unidad en su contrato (`itemId` + `itemNombre`, nada de unidad) y no
+   * pasa por ninguna de las tres expansiones —así que no la tiene cargada de
+   * otro lado—. Corre COMO MUCHO una vez por línea anulada, nunca dentro de
+   * un loop: el ingrediente de receta y la opción de grupo ya traen su unidad
+   * de la query que cada uno hace de todos modos, y el componente-producto de
+   * un combo la trae del `LEFT JOIN item_producto` de su propio SELECT
+   * (ronda de fixes 2, Important I-B: antes se resolvía acá por componente,
+   * N+1 dentro del loop del combo).
+   */
+  private async unidadDeItem(
+    manager: EntityManager,
+    tenantId: string,
+    itemId: string,
+  ): Promise<string | null> {
+    const rows: { unidad_medida: string | null }[] = await manager.query(
+      `SELECT ip.unidad_medida
+         FROM item_producto ip
+         -- Sin "AND i.eliminado_el IS NULL": un producto borrado igual
+         -- descuenta en la anulación (spec anular-plato-despachado §4.3) y su
+         -- advertencia de faltante también necesita la unidad — mismo
+         -- criterio que el SELECT ancla de registrarMovimiento.
+         JOIN items i ON i.item_id = ip.item_id
+        WHERE ip.item_id = $1 AND i.tenant_id = $2`,
+      [itemId, tenantId],
+    );
+    return rows[0]?.unidad_medida ?? null;
+  }
+
+  /**
+   * El texto de la advertencia de faltante de una anulación — distinto del de
+   * la venta ("se vendió sin ese insumo/componente") porque acá no hay nada
+   * que "vender sin": se descontó lo que había (o nada) y falta decir cuánto.
+   * Sin prefijo de receta/combo a propósito (owner, ronda de fixes 1): quien
+   * lee esta advertencia ya está parado en la línea de cuenta que anuló, así
+   * que repetir el nombre del plato no agrega información — solo el
+   * ingrediente/componente/opción y cuánto faltó.
+   */
+  private advertenciaFaltanteAnulacion(
+    itemNombre: string,
+    faltante: Decimal,
+    unidadMedida: string | null,
+  ): string {
+    const cantidadTxt = unidadMedida
+      ? `${faltante.toString()} ${unidadMedida}`
+      : faltante.toString();
+    return `No había stock de ${itemNombre} para descontar ${cantidadTxt}: revisá el inventario`;
+  }
+
+  /**
+   * Escribe UN movimiento de salida de la expansión compartida (ingrediente de
+   * receta, componente de combo, opción de grupo) y decide qué hacer si falta
+   * stock — el ÚNICO lugar donde esa política vive, para que los tres caminos
+   * no la repitan (la ronda de fixes 1 encontró justo ese bug: la bandera
+   * vieja solo llegaba a uno de los tres).
+   *
+   * - **Venta** (`enAnulacion` false, dentro de `ContextoResuelto`): un
+   *   ingrediente/componente bloqueante deja que 'Stock insuficiente para la
+   *   salida' aborte toda la venta (sin try/catch, gratis). Uno no bloqueante
+   *   degrada esa misma excepción a advertencia y NO escribe nada — todo o
+   *   nada, sin cambios de comportamiento.
+   * - **Anulación** (owner, ronda de fixes 1): bloqueante y no bloqueante se
+   *   tratan IGUAL — el plato ya salió de cocina, así que la anulación nunca
+   *   aborta por stock. En modo `cantidad` la salida es PARCIAL:
+   *   `registrarMovimiento` recibe `permiteSalidaParcial: true` y descuenta
+   *   `min(disponible, requerido)` sin negativo, reusando el mismo saldo que
+   *   ya leyó bajo su lock (cero consultas nuevas en el chokepoint). En modo
+   *   serie/lote el chokepoint no soporta parcial —no hay forma de decir
+   *   "media unidad" o "medio lote"— así que la salida completa se saltea. En
+   *   los dos casos, si falta algo, se agrega una advertencia con el faltante.
+   *
+   * Devuelve la advertencia (o `null`) y si se sirvió algo del todo
+   * (`sirvioAlgo`): un consumidor lo usa para decidir si sus modificadores de
+   * grupo también corren (ver `componentesOmitidos` en `venderComponentesCombo`).
+   */
+  private async moverConsumoOSaltear(
+    manager: EntityManager,
+    movimientoParams: RegistrarMovimientoParams,
+    opciones: {
+      enAnulacion: boolean;
+      bloqueante: boolean;
+      /** Texto EXACTO para la degradación de venta (no bloqueante). Ignorado
+       * en anulación. */
+      mensajeDegradadoVenta?: string;
+      itemNombre: string;
+      /** Ya conocida, o resuelta al vuelo SOLO si hay faltante (evita una
+       * consulta por fila en el camino feliz — ver `unidadDeItem`). */
+      unidadMedida: string | null | (() => Promise<string | null>);
+    },
+  ): Promise<{ advertencia: string | null; sirvioAlgo: boolean }> {
+    if (!opciones.enAnulacion && opciones.bloqueante) {
+      await this.inventarioService.registrarMovimiento(
+        manager,
+        movimientoParams,
+      );
+      return { advertencia: null, sirvioAlgo: true };
+    }
+
+    const paramsEnvio = opciones.enAnulacion
+      ? { ...movimientoParams, permiteSalidaParcial: true }
+      : movimientoParams;
+
+    const resolverUnidad = async () =>
+      typeof opciones.unidadMedida === 'function'
+        ? await opciones.unidadMedida()
+        : opciones.unidadMedida;
+
+    try {
+      const mov = await this.inventarioService.registrarMovimiento(
+        manager,
+        paramsEnvio,
+      );
+      if (!opciones.enAnulacion) return { advertencia: null, sirvioAlgo: true };
+
+      const requerido = new Decimal(movimientoParams.cantidad);
+      const movido = new Decimal(mov.cantidadMovida);
+      const faltante = requerido.minus(movido);
+      if (faltante.lessThanOrEqualTo(0)) {
+        return { advertencia: null, sirvioAlgo: true };
+      }
+      return {
+        advertencia: this.advertenciaFaltanteAnulacion(
+          opciones.itemNombre,
+          faltante,
+          await resolverUnidad(),
+        ),
+        sirvioAlgo: movido.greaterThan(0),
+      };
+    } catch (error) {
+      const esStockInsuficiente =
+        error instanceof BadRequestException &&
+        error.message.startsWith('Stock insuficiente');
+
+      if (opciones.enAnulacion && esStockInsuficiente) {
+        // Serie/lote: no se movió nada, el faltante es el pedido completo.
+        return {
+          advertencia: this.advertenciaFaltanteAnulacion(
+            opciones.itemNombre,
+            new Decimal(movimientoParams.cantidad),
+            await resolverUnidad(),
+          ),
+          sirvioAlgo: false,
+        };
+      }
+      if (
+        !opciones.enAnulacion &&
+        !opciones.bloqueante &&
+        error instanceof BadRequestException &&
+        error.message === 'Stock insuficiente para la salida'
+      ) {
+        return {
+          advertencia: opciones.mensajeDegradadoVenta ?? null,
+          sirvioAlgo: false,
+        };
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Vende N unidades de una receta: expande a un movimiento de salida por
-   * ingrediente. Un ingrediente bloqueante sin stock deja que
-   * registrarMovimiento lance su validación de "salida no negativa" —
-   * eso aborta toda la transacción de la venta, gratis. Uno no bloqueante
-   * intenta el mismo movimiento; si falla solo por
-   * 'Stock insuficiente para la salida', se omite y se reporta como
-   * advertencia (evita la carrera del pre-chequeo SELECT sin lock).
+   * ingrediente. En venta, un ingrediente bloqueante sin stock aborta toda la
+   * transacción y uno no bloqueante degrada a advertencia; en anulación los
+   * dos se tratan igual y nunca abortan (ver `moverConsumoOSaltear`).
    */
   async venderIngredientesReceta(
     manager: EntityManager,
     params: {
       tenantId: string;
       usuarioId: string | null;
-      ventaId: string;
       recetaItemId: string;
       recetaNombre: string;
       cantidadVendida: string;
@@ -3888,8 +4116,9 @@ export class ItemsService {
        * esto, `localDe` se releía una vez por receta dentro de ese loop.
        */
       ubicacionLocalId?: string;
-    },
+    } & ContextoConsumo,
   ): Promise<string[]> {
+    const ctx = resolverContexto(params);
     const convertir =
       params.convertir ?? (await this.catalogService.crearConversor());
     const ingredientesBase = await this.obtenerIngredientesReceta(
@@ -3937,56 +4166,46 @@ export class ItemsService {
         ing.ingredienteUnidadMedida,
       );
 
-      const movimientoParams = {
+      const movimientoParams: RegistrarMovimientoParams = {
         tenantId: params.tenantId,
         itemId: ing.ingredienteItemId,
         ubicacionId: ubicacionLocalId,
-        tipo: 'salida' as const,
-        motivo: 'venta',
+        tipo: 'salida',
+        motivo: ctx.motivo,
         cantidad: cantidadConvertida,
         usuarioId: params.usuarioId,
-        ventaId: params.ventaId,
+        ventaId: ctx.ventaId,
+        motivoBajaId: ctx.motivoBajaId,
+        cuentaLineaAnulacionId: ctx.cuentaLineaAnulacionId,
       };
 
-      if (ing.bloqueante) {
-        await this.inventarioService.registrarMovimiento(
-          manager,
-          movimientoParams,
-        );
-        continue;
-      }
-
-      try {
-        await this.inventarioService.registrarMovimiento(
-          manager,
-          movimientoParams,
-        );
-      } catch (error) {
-        if (
-          error instanceof BadRequestException &&
-          error.message === 'Stock insuficiente para la salida'
-        ) {
-          advertencias.push(
-            `${params.recetaNombre}: no había stock suficiente de ${ing.ingredienteNombre}, se vendió sin ese insumo`,
-          );
-        } else {
-          throw error;
-        }
-      }
+      const { advertencia } = await this.moverConsumoOSaltear(
+        manager,
+        movimientoParams,
+        {
+          enAnulacion: ctx.enAnulacion,
+          bloqueante: ing.bloqueante,
+          mensajeDegradadoVenta: `${params.recetaNombre}: no había stock suficiente de ${ing.ingredienteNombre}, se vendió sin ese insumo`,
+          itemNombre: ing.ingredienteNombre,
+          unidadMedida: ing.ingredienteUnidadMedida,
+        },
+      );
+      if (advertencia) advertencias.push(advertencia);
     }
 
-    await this.venderOpcionesGrupos(
+    const advGrupos = await this.venderOpcionesGrupos(
       manager,
       {
+        ...contextoParaHijo(ctx),
         tenantId: params.tenantId,
         usuarioId: params.usuarioId,
-        ventaId: params.ventaId,
         cantidadVendida: params.cantidadVendida,
         convertir,
         ubicacionLocalId,
       },
       params.snapshot?.grupos,
     );
+    advertencias.push(...advGrupos);
 
     return advertencias;
   }
@@ -4004,7 +4223,6 @@ export class ItemsService {
     params: {
       tenantId: string;
       usuarioId: string | null;
-      ventaId: string;
       comboItemId: string;
       comboNombre: string;
       cantidadVendida: string;
@@ -4018,8 +4236,9 @@ export class ItemsService {
        * una vez por combo.
        */
       ubicacionLocalId?: string;
-    },
+    } & ContextoConsumo,
   ): Promise<string[]> {
+    const ctx = resolverContexto(params);
     // Una sola lectura del catálogo para TODO el combo: es el peor caso de la
     // familia, porque cada componente-receta vuelve a expandir sus propios
     // ingredientes (N componentes × M ingredientes).
@@ -4031,19 +4250,30 @@ export class ItemsService {
       tipo: string;
       cantidad: string;
       bloqueante: boolean;
+      unidad_medida: string | null;
     }[] = await manager.query(
+      // `LEFT JOIN item_producto`, no `JOIN`: una receta o un servicio no
+      // tienen fila ahí, y siguen siendo componentes válidos (`ip.unidad_medida`
+      // les queda NULL, sin filtrar la fila). La unidad viaja en ESTA query —
+      // una por combo, no una por componente— para que la advertencia de
+      // faltante del producto-componente (`moverConsumoOSaltear`) no dispare
+      // una consulta propia por cada uno (ronda de fixes 2, Important I-B).
       `SELECT cc.componente_item_id, i.nombre AS componente_nombre, i.tipo,
-              cc.cantidad, cc.bloqueante
+              cc.cantidad, cc.bloqueante, ip.unidad_medida
        FROM combo_componentes cc
        JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
+       LEFT JOIN item_producto ip ON ip.item_id = cc.componente_item_id
        WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2 AND cc.eliminado_el IS NULL
        ORDER BY cc.componente_item_id`,
       [params.comboItemId, params.tenantId],
     );
 
     const advertencias: string[] = [];
-    // Componentes que no se sirvieron: sus grupos de modificadores tampoco
-    // deben descontarse (ver el filtro de `gruposComponentes` más abajo).
+    // Componentes que no se sirvieron NADA: sus grupos de modificadores
+    // tampoco deben descontarse (ver el filtro de `gruposComponentes` más
+    // abajo). En anulación, un componente con descuento PARCIAL sí cuenta
+    // como servido — sus modificadores igual corren, la advertencia del
+    // faltante ya la reportó `moverConsumoOSaltear` por su cuenta.
     const componentesOmitidos = new Set<string>();
     // Resuelto UNA vez antes del loop: `localDe` por componente sería una
     // consulta por línea de combo, N+1 en el camino más caliente del sistema.
@@ -4061,17 +4291,17 @@ export class ItemsService {
       if (comp.tipo === 'servicio') continue;
 
       if (comp.tipo === 'receta') {
-        // La receta gestiona el bloqueo a nivel de ingrediente. Si el componente
-        // es no bloqueante, primero se pre-chequea disponibilidad: sin esto,
-        // `venderIngredientesReceta` podría deducir algunos de sus propios
-        // ingredientes bloqueantes (los que sí tienen stock) antes de lanzar
-        // por otro que no lo tiene, y ese throw quedaría engullido más abajo
-        // sin revertir las deducciones ya escritas en la misma transacción
-        // (deriva silenciosa de inventario). Si no alcanza, se omite el
-        // llamado completo (cero escrituras) y se reporta como advertencia.
-        // El try/catch se conserva como defensa en profundidad para la
-        // ventana de carrera residual entre el pre-chequeo y la deducción.
-        if (!comp.bloqueante) {
+        // La receta gestiona el bloqueo/faltante a nivel de ingrediente
+        // (`venderIngredientesReceta`, vía `moverConsumoOSaltear`). El
+        // pre-chequeo de disponibilidad de ACÁ solo tiene sentido en venta: es
+        // lo que evita que una receta no bloqueante deduzca algunos de sus
+        // ingredientes antes de abortar a mitad de camino (deriva silenciosa
+        // de inventario) — en anulación no hay "abortar a mitad de camino"
+        // que evitar, porque cada ingrediente ya resuelve su propio faltante
+        // sin tirar. El try/catch se conserva como defensa en profundidad
+        // para la ventana de carrera residual entre el pre-chequeo y la
+        // deducción (venta) y por si algo inesperado escapa (anulación).
+        if (!ctx.enAnulacion && !comp.bloqueante) {
           const disponible = await this.calcularDisponibleReceta(
             params.tenantId,
             comp.componente_item_id,
@@ -4091,9 +4321,9 @@ export class ItemsService {
         }
         try {
           const adv = await this.venderIngredientesReceta(manager, {
+            ...contextoParaHijo(ctx),
             tenantId: params.tenantId,
             usuarioId: params.usuarioId,
-            ventaId: params.ventaId,
             recetaItemId: comp.componente_item_id,
             recetaNombre: comp.componente_nombre,
             cantidadVendida: cantidadTotal,
@@ -4103,6 +4333,7 @@ export class ItemsService {
           advertencias.push(...adv);
         } catch (error) {
           if (
+            !ctx.enAnulacion &&
             !comp.bloqueante &&
             error instanceof BadRequestException &&
             error.message === 'Stock insuficiente para la salida'
@@ -4119,55 +4350,49 @@ export class ItemsService {
       }
 
       // producto
-      const movimientoParams = {
+      const movimientoParams: RegistrarMovimientoParams = {
         tenantId: params.tenantId,
         itemId: comp.componente_item_id,
         ubicacionId: ubicacionLocalId,
-        tipo: 'salida' as const,
-        motivo: 'venta',
+        tipo: 'salida',
+        motivo: ctx.motivo,
         cantidad: cantidadTotal,
         usuarioId: params.usuarioId,
-        ventaId: params.ventaId,
+        ventaId: ctx.ventaId,
+        motivoBajaId: ctx.motivoBajaId,
+        cuentaLineaAnulacionId: ctx.cuentaLineaAnulacionId,
       };
-      if (comp.bloqueante) {
-        await this.inventarioService.registrarMovimiento(
-          manager,
-          movimientoParams,
-        );
-        continue;
-      }
-      try {
-        await this.inventarioService.registrarMovimiento(
-          manager,
-          movimientoParams,
-        );
-      } catch (error) {
-        if (
-          error instanceof BadRequestException &&
-          error.message === 'Stock insuficiente para la salida'
-        ) {
-          advertencias.push(
-            `${params.comboNombre}: no había stock suficiente de ${comp.componente_nombre}, se vendió sin ese componente`,
-          );
-          componentesOmitidos.add(comp.componente_item_id);
-        } else {
-          throw error;
-        }
-      }
+      const { advertencia, sirvioAlgo } = await this.moverConsumoOSaltear(
+        manager,
+        movimientoParams,
+        {
+          enAnulacion: ctx.enAnulacion,
+          bloqueante: comp.bloqueante,
+          mensajeDegradadoVenta: `${params.comboNombre}: no había stock suficiente de ${comp.componente_nombre}, se vendió sin ese componente`,
+          itemNombre: comp.componente_nombre,
+          // Ya viene del SELECT de componentes de arriba (`LEFT JOIN
+          // item_producto`, ronda de fixes 2, Important I-B): una consulta
+          // por combo, no una por componente con faltante.
+          unidadMedida: comp.unidad_medida,
+        },
+      );
+      if (advertencia) advertencias.push(advertencia);
+      if (!sirvioAlgo) componentesOmitidos.add(comp.componente_item_id);
     }
 
-    await this.venderOpcionesGrupos(
+    const advGrupos = await this.venderOpcionesGrupos(
       manager,
       {
+        ...contextoParaHijo(ctx),
         tenantId: params.tenantId,
         usuarioId: params.usuarioId,
-        ventaId: params.ventaId,
         cantidadVendida: params.cantidadVendida,
         convertir,
         ubicacionLocalId,
       },
       params.snapshot?.grupos,
     );
+    advertencias.push(...advGrupos);
 
     // Grupos de los componentes receta (elección por unidad congelada en el
     // snapshot). Cada entrada es UNA unidad → venderOpcionesGrupos ya
@@ -4182,18 +4407,19 @@ export class ItemsService {
       .filter((c) => !componentesOmitidos.has(c.componenteItemId))
       .flatMap((c) => c.grupos);
     if (gruposComponentes.length) {
-      await this.venderOpcionesGrupos(
+      const advGruposComponentes = await this.venderOpcionesGrupos(
         manager,
         {
+          ...contextoParaHijo(ctx),
           tenantId: params.tenantId,
           usuarioId: params.usuarioId,
-          ventaId: params.ventaId,
           cantidadVendida: params.cantidadVendida,
           convertir,
           ubicacionLocalId,
         },
         gruposComponentes,
       );
+      advertencias.push(...advGruposComponentes);
     }
 
     return advertencias;
@@ -4201,25 +4427,29 @@ export class ItemsService {
 
   /**
    * Vende las opciones elegidas de los grupos de modificadores (SnapshotGrupo[])
-   * congelados en la personalización. A diferencia de los componentes fijos de
-   * combo/ingredientes de receta, las opciones de grupo NO tienen concepto de
-   * "no bloqueante": cualquier error de stock insuficiente se propaga sin
-   * capturar y aborta toda la transacción de la venta.
+   * congelados en la personalización. En venta, una opción de grupo se trata
+   * SIEMPRE como bloqueante (no existe la noción de "no bloqueante" para una
+   * opción): cualquier error de stock insuficiente se propaga sin capturar y
+   * aborta toda la transacción de la venta. En anulación (`ContextoConsumo`
+   * con `motivo: 'merma'`) se comporta igual que el resto de la expansión —
+   * ver `moverConsumoOSaltear`: nunca aborta, descuenta lo que hay y avisa el
+   * faltante.
    */
   private async venderOpcionesGrupos(
     manager: EntityManager,
     params: {
       tenantId: string;
       usuarioId: string | null;
-      ventaId: string;
       cantidadVendida: string;
       /** Requerido: los tres llamadores ya lo tienen cargado. */
       convertir: ConvertirUnidad;
       /** Requerido: los tres llamadores ya lo tienen cargado (ver `venderIngredientesReceta`). */
       ubicacionLocalId: string;
-    },
+    } & ContextoConsumo,
     grupos: SnapshotGrupo[] | undefined,
-  ): Promise<void> {
+  ): Promise<string[]> {
+    const ctx = resolverContexto(params);
+    const advertencias: string[] = [];
     // Este loop también toma `FOR UPDATE` por opción, y el orden del snapshot
     // lo decide el cliente al armar el carrito — el mismo problema que el
     // `ordenLocks` de `ventas.service.ts` vino a resolver un nivel más arriba.
@@ -4259,35 +4489,181 @@ export class ItemsService {
 
       if (tipo === 'receta') {
         // Para una opción receta, cantidadTotal son unidades enteras de la receta.
-        await this.venderIngredientesReceta(manager, {
+        const adv = await this.venderIngredientesReceta(manager, {
+          ...contextoParaHijo(ctx),
           tenantId: params.tenantId,
           usuarioId: params.usuarioId,
-          ventaId: params.ventaId,
           recetaItemId: op.itemId,
           recetaNombre: op.nombre,
           cantidadVendida: cantidadTotal,
           convertir: params.convertir,
           ubicacionLocalId,
         });
+        advertencias.push(...adv);
         continue;
       }
 
-      // producto o ingrediente → salida (siempre bloqueante: el error se propaga)
+      // producto o ingrediente → salida
       const cantidadSalida =
         tipo === 'ingrediente' && op.unidadCodigo
           ? params.convertir(cantidadTotal, op.unidadCodigo, unidad_medida!)
           : cantidadTotal;
-      await this.inventarioService.registrarMovimiento(manager, {
+      const { advertencia } = await this.moverConsumoOSaltear(
+        manager,
+        {
+          tenantId: params.tenantId,
+          itemId: op.itemId,
+          ubicacionId: ubicacionLocalId,
+          tipo: 'salida',
+          motivo: ctx.motivo,
+          cantidad: cantidadSalida,
+          usuarioId: params.usuarioId,
+          ventaId: ctx.ventaId,
+          motivoBajaId: ctx.motivoBajaId,
+          cuentaLineaAnulacionId: ctx.cuentaLineaAnulacionId,
+        },
+        {
+          enAnulacion: ctx.enAnulacion,
+          // Una opción de grupo siempre es bloqueante en la venta (ver
+          // docblock): en ese modo esto solo decide propagar el error tal
+          // cual, gratis (nunca degrada, `mensajeDegradadoVenta` no aplica).
+          bloqueante: true,
+          itemNombre: op.nombre,
+          unidadMedida: unidad_medida,
+        },
+      );
+      if (advertencia) advertencias.push(advertencia);
+    }
+
+    return advertencias;
+  }
+
+  /**
+   * Descuenta el consumo de UNA línea de cuenta ya anulada (spec
+   * `anular-plato-despachado` §4.3): el plato salió a cocina y sus
+   * ingredientes/componentes/opciones ya se usaron de verdad, se anule la
+   * línea o no. Reusa la MISMA expansión que el cobro —receta, combo y
+   * opciones de grupo, moduladas por el snapshot congelado en la línea— para
+   * no duplicarla; lo único que cambia es a quién se le atribuye el consumo:
+   * `motivo: 'merma'` + `motivoBajaId` + `cuentaLineaAnulacionId`, nunca
+   * `ventaId` (`ContextoConsumo`, arriba de esta clase). Ingredientes,
+   * componentes y opciones borrados se siguen salteando sin movimiento —eso
+   * lo decide la expansión compartida, no este método— y se saltean igual
+   * que al cobrar.
+   *
+   * El producto simple NO pasa por `venderComponentesCombo` ni por
+   * `venderIngredientesReceta`: tampoco lo hace la venta (vive en el loop de
+   * `ventas.service.ts`), así que acá es un `registrarMovimiento` directo (vía
+   * `moverConsumoOSaltear`) con la misma forma.
+   *
+   * Un ítem del catálogo borrado igual descuenta (owner, 2026-09-16): no hay
+   * ningún filtro `eliminado_el` acá arriba de `registrarMovimiento` — el
+   * chokepoint es el que decide, y ahora acepta `merma` sobre un eliminado
+   * (`MOTIVOS_SOBRE_ITEM_ELIMINADO`, `inventario.service.ts`); ver ahí por
+   * qué esto no reabre la merma manual sobre un producto discontinuado.
+   *
+   * **Devuelve `Promise<string[]>` (ronda de fixes 1, owner)**: antes no
+   * devolvía nada porque un faltante se saltaba en silencio; ahora la
+   * anulación SIEMPRE avanza —nunca aborta por stock— pero puede quedar con
+   * un faltante que alguien tiene que ver. Task 3 muestra estas advertencias
+   * en la respuesta de la anulación; están fraseadas para ese contexto ("No
+   * había stock de X para descontar N unidad: revisá el inventario"), no con
+   * el "se vendió sin..." de una venta.
+   *
+   * **Stock insuficiente nunca aborta, y ya no se saltea en silencio** (owner,
+   * ronda de fixes 1): el plato ya salió de cocina, negarse a registrar su
+   * consumo no deshace nada. En modo `cantidad` la salida es PARCIAL —se
+   * descuenta lo que hay, nunca queda stock negativo— vía
+   * `registrarMovimiento({ permiteSalidaParcial: true })`, reusando el mismo
+   * saldo que el chokepoint ya leyó bajo su lock (ninguna lectura de stock
+   * nueva). En modo serie/lote el chokepoint no soporta un descuento parcial
+   * —no hay forma de entregar "media unidad" o "medio lote"— así que esa
+   * salida puntual se saltea entera; como la línea de cuenta no registra QUÉ
+   * unidad serializada o lote salió, tampoco se le puede pedir uno en
+   * particular: se deja que el chokepoint elija por FIFO como ya hace hoy
+   * (ningún llamador de esta expansión pasa `unidadIds`/`loteId`). Bloqueante
+   * y no bloqueante se tratan IGUAL en anulación (owner, ronda de fixes 1,
+   * Minor 6 de la revisión): el descuento parcial no depende de esa bandera.
+   * Todo esto vive en `moverConsumoOSaltear`, el único lugar que decide la
+   * política — los tres caminos (producto, receta, combo) la comparten.
+   */
+  async consumirLineaAnulada(
+    manager: EntityManager,
+    params: {
+      tenantId: string;
+      usuarioId: string;
+      itemId: string;
+      itemTipo: 'producto' | 'receta' | 'combo';
+      itemNombre: string;
+      /** Canónica: ya multiplicada, en la unidad de venta del ítem. */
+      cantidad: string;
+      /** El congelado en la línea. Ausente = sin extras/omitidos/grupos. */
+      snapshot?: PersonalizacionRecetaSnapshot | null;
+      motivoBajaId: string;
+      cuentaLineaAnulacionId: string;
+      /** Ver `venderIngredientesReceta`: quien recorre varias líneas lo resuelve una vez. */
+      convertir: ConvertirUnidad;
+      /** Ver `venderIngredientesReceta`. */
+      ubicacionLocalId: string;
+    },
+  ): Promise<string[]> {
+    const contexto: ContextoConsumo = {
+      motivo: 'merma',
+      motivoBajaId: params.motivoBajaId,
+      cuentaLineaAnulacionId: params.cuentaLineaAnulacionId,
+    };
+
+    if (params.itemTipo === 'producto') {
+      const { advertencia } = await this.moverConsumoOSaltear(
+        manager,
+        {
+          tenantId: params.tenantId,
+          itemId: params.itemId,
+          ubicacionId: params.ubicacionLocalId,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: params.cantidad,
+          usuarioId: params.usuarioId,
+          motivoBajaId: params.motivoBajaId,
+          cuentaLineaAnulacionId: params.cuentaLineaAnulacionId,
+        },
+        {
+          enAnulacion: true,
+          bloqueante: true,
+          itemNombre: params.itemNombre,
+          unidadMedida: () =>
+            this.unidadDeItem(manager, params.tenantId, params.itemId),
+        },
+      );
+      return advertencia ? [advertencia] : [];
+    }
+
+    if (params.itemTipo === 'receta') {
+      return this.venderIngredientesReceta(manager, {
+        ...contexto,
         tenantId: params.tenantId,
-        itemId: op.itemId,
-        ubicacionId: ubicacionLocalId,
-        tipo: 'salida',
-        motivo: 'venta',
-        cantidad: cantidadSalida,
         usuarioId: params.usuarioId,
-        ventaId: params.ventaId,
+        recetaItemId: params.itemId,
+        recetaNombre: params.itemNombre,
+        cantidadVendida: params.cantidad,
+        snapshot: params.snapshot ?? undefined,
+        convertir: params.convertir,
+        ubicacionLocalId: params.ubicacionLocalId,
       });
     }
+
+    // combo
+    return this.venderComponentesCombo(manager, {
+      ...contexto,
+      tenantId: params.tenantId,
+      usuarioId: params.usuarioId,
+      comboItemId: params.itemId,
+      comboNombre: params.itemNombre,
+      cantidadVendida: params.cantidad,
+      snapshot: params.snapshot ?? undefined,
+      convertir: params.convertir,
+      ubicacionLocalId: params.ubicacionLocalId,
+    });
   }
 
   /**

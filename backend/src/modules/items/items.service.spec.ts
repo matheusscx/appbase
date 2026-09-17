@@ -18,6 +18,10 @@ const CATEGORIA_ID = 'categoria-uuid';
 const COMBO_ID = 'combo-uuid';
 const COMBO_SIN_BLOQUEANTES_ID = 'combo-sin-bloqueantes-uuid';
 const UBICACION_LOCAL_ID = 'ubicacion-local-uuid';
+// Anulación de una línea (`consumirLineaAnulada`, spec `anular-plato-despachado`
+// §4.3): motivo 'merma' con estos dos ids, nunca `ventaId`.
+const MOTIVO_BAJA_ID = 'motivo-baja-uuid';
+const CUENTA_LINEA_ANULACION_ID = 'cuenta-linea-anulacion-uuid';
 
 describe('ItemsService', () => {
   let service: ItemsService;
@@ -4906,6 +4910,7 @@ describe('ItemsService', () => {
           itemId: 'carne',
           cantidad: '0.3',
           motivo: 'venta',
+          ventaId: PARAMS.ventaId,
         }),
       );
       expect(inventarioServiceMock.registrarMovimiento).toHaveBeenNthCalledWith(
@@ -4915,6 +4920,7 @@ describe('ItemsService', () => {
           itemId: 'pan',
           cantidad: '2',
           motivo: 'venta',
+          ventaId: PARAMS.ventaId,
         }),
       );
     });
@@ -4939,6 +4945,140 @@ describe('ItemsService', () => {
       await expect(
         service.venderIngredientesReceta(managerMock as any, PARAMS),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('en anulación (motivo merma), un ingrediente bloqueante en modo serie/lote sin stock se saltea y avisa el faltante completo, sin abortar', async () => {
+      // Único caso en que `motivo: 'merma'` cambia el resultado frente al
+      // mismo escenario de "propaga el error" de arriba: lo usa
+      // `consumirLineaAnulada` (owner, ronda de fixes 1) porque el plato ya
+      // salió de cocina y frenar acá no deshace ese consumo, solo bloquea la
+      // anulación. El chokepoint sigue rechazando (serie/lote no soportan
+      // parcial — ver `moverCantidad`/`RegistrarMovimientoParams.permiteSalidaParcial`),
+      // pero acá eso se traduce en "saltear y avisar", no en abortar.
+      managerMock.query.mockResolvedValueOnce([
+        {
+          receta_item_id: 'receta-uuid',
+          ingrediente_item_id: 'carne',
+          ingrediente_nombre: 'Carne',
+          ingrediente_unidad_medida: 'kg',
+          cantidad: '150',
+          unidad_codigo: 'g',
+          bloqueante: true,
+        },
+      ]);
+      inventarioServiceMock.registrarMovimiento.mockRejectedValueOnce(
+        new BadRequestException(
+          'Stock insuficiente en lotes en esta ubicación (disponible: 0, requerido: 0.3)',
+        ),
+      );
+
+      const advertencias = await service.venderIngredientesReceta(
+        managerMock as any,
+        {
+          tenantId: PARAMS.tenantId,
+          usuarioId: PARAMS.usuarioId,
+          recetaItemId: PARAMS.recetaItemId,
+          recetaNombre: PARAMS.recetaNombre,
+          cantidadVendida: PARAMS.cantidadVendida,
+          motivo: 'merma',
+          motivoBajaId: MOTIVO_BAJA_ID,
+          cuentaLineaAnulacionId: CUENTA_LINEA_ANULACION_ID,
+        },
+      );
+
+      // 0.3 kg: 150 g/receta × 2 vendidas = 300 g → 0.3 kg (conversorMock).
+      expect(advertencias).toEqual([
+        'No había stock de Carne para descontar 0.3 kg: revisá el inventario',
+      ]);
+      // Nunca abortó: no hay `rejects` acá, la promesa se resuelve.
+    });
+
+    it('en anulación (motivo merma), un ingrediente bloqueante en modo cantidad con stock parcial descuenta lo que hay y avisa SOLO el faltante', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        {
+          receta_item_id: 'receta-uuid',
+          ingrediente_item_id: 'carne',
+          ingrediente_nombre: 'Carne',
+          ingrediente_unidad_medida: 'kg',
+          cantidad: '150',
+          unidad_codigo: 'g',
+          bloqueante: true,
+        },
+      ]);
+      // Pedido: 0.3 kg. El chokepoint (con permiteSalidaParcial) solo pudo
+      // mover 0.1: devuelve éxito con `cantidadMovida` menor, no un rechazo.
+      inventarioServiceMock.registrarMovimiento.mockResolvedValueOnce({
+        movimientoId: 'mov-parcial',
+        stockAnterior: '0.1',
+        stockResultante: '0',
+        cantidadMovida: '0.1',
+        costoActualPrevio: null,
+        costoActual: null,
+      });
+
+      const advertencias = await service.venderIngredientesReceta(
+        managerMock as any,
+        {
+          tenantId: PARAMS.tenantId,
+          usuarioId: PARAMS.usuarioId,
+          recetaItemId: PARAMS.recetaItemId,
+          recetaNombre: PARAMS.recetaNombre,
+          cantidadVendida: PARAMS.cantidadVendida,
+          motivo: 'merma',
+          motivoBajaId: MOTIVO_BAJA_ID,
+          cuentaLineaAnulacionId: CUENTA_LINEA_ANULACION_ID,
+        },
+      );
+
+      expect(advertencias).toEqual([
+        'No había stock de Carne para descontar 0.2 kg: revisá el inventario',
+      ]);
+      // Pasó `permiteSalidaParcial: true` al chokepoint.
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          motivo: 'merma',
+          permiteSalidaParcial: true,
+        }),
+      );
+    });
+
+    it('en anulación (motivo merma), sin faltante no agrega ninguna advertencia', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        {
+          receta_item_id: 'receta-uuid',
+          ingrediente_item_id: 'carne',
+          ingrediente_nombre: 'Carne',
+          ingrediente_unidad_medida: 'kg',
+          cantidad: '150',
+          unidad_codigo: 'g',
+          bloqueante: true,
+        },
+      ]);
+      inventarioServiceMock.registrarMovimiento.mockResolvedValueOnce({
+        movimientoId: 'mov-completo',
+        stockAnterior: '5',
+        stockResultante: '4.7',
+        cantidadMovida: '0.3',
+        costoActualPrevio: null,
+        costoActual: null,
+      });
+
+      const advertencias = await service.venderIngredientesReceta(
+        managerMock as any,
+        {
+          tenantId: PARAMS.tenantId,
+          usuarioId: PARAMS.usuarioId,
+          recetaItemId: PARAMS.recetaItemId,
+          recetaNombre: PARAMS.recetaNombre,
+          cantidadVendida: PARAMS.cantidadVendida,
+          motivo: 'merma',
+          motivoBajaId: MOTIVO_BAJA_ID,
+          cuentaLineaAnulacionId: CUENTA_LINEA_ANULACION_ID,
+        },
+      );
+
+      expect(advertencias).toEqual([]);
     });
 
     it('omite el movimiento y agrega advertencia si un ingrediente no bloqueante no tiene stock', async () => {
@@ -5165,7 +5305,7 @@ describe('ItemsService', () => {
       managerMock.query.mockResolvedValueOnce([]); // sin ingredientes base
       const spyOpciones = jest
         .spyOn(service as any, 'venderOpcionesGrupos')
-        .mockResolvedValue(undefined);
+        .mockResolvedValue([]);
 
       const grupos = [
         {
@@ -5357,7 +5497,12 @@ describe('ItemsService', () => {
       expect(advertencias).toEqual([]);
       expect(spyMov).toHaveBeenCalledWith(
         managerMock,
-        expect.objectContaining({ itemId: 'prod-uuid', cantidad: '2' }),
+        expect.objectContaining({
+          itemId: 'prod-uuid',
+          cantidad: '2',
+          motivo: 'venta',
+          ventaId: VENTA_ID,
+        }),
       );
       expect(spyReceta).toHaveBeenCalledWith(
         managerMock,
@@ -5371,6 +5516,137 @@ describe('ItemsService', () => {
         managerMock,
         expect.objectContaining({ itemId: 'servicio-uuid' }),
       );
+    });
+
+    it('componente producto: venta escribe motivo venta + su ventaId; anulación escribe motivo merma sin ventaId (sin mockear venderComponentesCombo)', async () => {
+      // Important 4 de la revisión (ronda de fixes 1): llamado DIRECTO y real
+      // a `venderComponentesCombo` en los dos modos — nada de espiar la propia
+      // función bajo prueba.
+      managerMock.query.mockResolvedValue([
+        {
+          componente_item_id: 'prod-uuid',
+          componente_nombre: 'Papas',
+          tipo: 'producto',
+          cantidad: '1',
+          bloqueante: true,
+        },
+      ]);
+      const spyMov = jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockResolvedValue({
+          movimientoId: 'mov-1',
+          stockAnterior: '10',
+          stockResultante: '8',
+          cantidadMovida: '2',
+          costoActualPrevio: null,
+          costoActual: null,
+        } as any);
+
+      await service.venderComponentesCombo(managerMock as any, {
+        tenantId: TENANT,
+        usuarioId: USUARIO_ID,
+        ventaId: VENTA_ID,
+        comboItemId: COMBO_ID,
+        comboNombre: 'Combo',
+        cantidadVendida: '2',
+      });
+
+      expect(spyMov).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          itemId: 'prod-uuid',
+          motivo: 'venta',
+          ventaId: VENTA_ID,
+        }),
+      );
+      const ventaCallArgs = spyMov.mock.calls[0][1] as Record<string, unknown>;
+      expect(ventaCallArgs.motivoBajaId).toBeFalsy();
+      expect(ventaCallArgs.cuentaLineaAnulacionId).toBeFalsy();
+
+      spyMov.mockClear();
+
+      await service.venderComponentesCombo(managerMock as any, {
+        tenantId: TENANT,
+        usuarioId: USUARIO_ID,
+        motivo: 'merma',
+        motivoBajaId: MOTIVO_BAJA_ID,
+        cuentaLineaAnulacionId: CUENTA_LINEA_ANULACION_ID,
+        comboItemId: COMBO_ID,
+        comboNombre: 'Combo',
+        cantidadVendida: '2',
+      });
+
+      expect(spyMov).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          itemId: 'prod-uuid',
+          motivo: 'merma',
+          motivoBajaId: MOTIVO_BAJA_ID,
+          cuentaLineaAnulacionId: CUENTA_LINEA_ANULACION_ID,
+          permiteSalidaParcial: true,
+        }),
+      );
+      const anulacionCallArgs = spyMov.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect(anulacionCallArgs.ventaId).toBeFalsy();
+    });
+
+    it('en anulación, la unidad de un componente-producto con faltante sale del SELECT de componentes, NO de una consulta por componente (N+1)', async () => {
+      // Ronda de fixes 2, Important I-B: antes `unidadDeItem` se resolvía
+      // dentro de este loop, una vez por componente CON faltante — N+1 real
+      // en el camino de anular un combo con varios productos sin stock. La
+      // unidad ahora viaja en el mismo SELECT de componentes (`LEFT JOIN
+      // item_producto`), así que `managerMock.query` solo se llama UNA vez
+      // sin importar cuántos componentes falten.
+      managerMock.query.mockResolvedValueOnce([
+        {
+          componente_item_id: 'papas-uuid',
+          componente_nombre: 'Papas',
+          tipo: 'producto',
+          cantidad: '1',
+          bloqueante: true,
+          unidad_medida: 'unidad',
+        },
+        {
+          componente_item_id: 'salsa-uuid',
+          componente_nombre: 'Salsa',
+          tipo: 'producto',
+          cantidad: '1',
+          bloqueante: true,
+          unidad_medida: 'kg',
+        },
+      ]);
+      jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockRejectedValue(
+          new BadRequestException('Stock insuficiente para la salida'),
+        );
+
+      const advertencias = await service.venderComponentesCombo(
+        managerMock as any,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          motivo: 'merma',
+          motivoBajaId: MOTIVO_BAJA_ID,
+          cuentaLineaAnulacionId: CUENTA_LINEA_ANULACION_ID,
+          comboItemId: COMBO_ID,
+          comboNombre: 'Combo',
+          cantidadVendida: '1',
+        },
+      );
+
+      expect(advertencias.sort()).toEqual(
+        [
+          'No había stock de Papas para descontar 1 unidad: revisá el inventario',
+          'No había stock de Salsa para descontar 1 kg: revisá el inventario',
+        ].sort(),
+      );
+      // UNA sola consulta en total: el SELECT de componentes. Si
+      // `unidadDeItem` se llamara por componente, serían 3 (1 + 2).
+      expect(managerMock.query).toHaveBeenCalledTimes(1);
     });
 
     it('lee el catálogo de unidades y la ubicación local UNA vez para todo el combo, no una por componente-receta', async () => {
@@ -5569,7 +5845,7 @@ describe('ItemsService', () => {
       jest.spyOn(service, 'venderIngredientesReceta').mockResolvedValue([]);
       const spyOpciones = jest
         .spyOn(service as any, 'venderOpcionesGrupos')
-        .mockResolvedValue(undefined);
+        .mockResolvedValue([]);
 
       const grupoDeLaHamburguesa = {
         grupoId: 'proteina-uuid',
@@ -5699,7 +5975,7 @@ describe('ItemsService', () => {
       managerMock.query.mockResolvedValueOnce([]); // combo sin componentes fijos
       const spyOpciones = jest
         .spyOn(service as any, 'venderOpcionesGrupos')
-        .mockResolvedValue(undefined);
+        .mockResolvedValue([]);
 
       const grupos = [
         {
@@ -5956,6 +6232,16 @@ describe('ItemsService', () => {
 
       expect(spyMov).toHaveBeenCalledTimes(2); // producto + ingrediente
       expect(spyReceta).toHaveBeenCalled(); // receta
+      // Important 4 de la revisión: la venta sigue escribiendo motivo 'venta'
+      // y SU ventaId, no solo el motivo.
+      expect(spyMov).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          itemId: PROD_ID,
+          motivo: 'venta',
+          ventaId: VENTA_ID,
+        }),
+      );
     });
 
     it('calcula cantidad = cantidad × unidades × cantidadVendida (producto, sin conversión)', async () => {
@@ -6080,6 +6366,52 @@ describe('ItemsService', () => {
       ).rejects.toThrow('Stock insuficiente para la salida');
     });
 
+    it('en anulación (motivo merma), una opción sin stock no aborta: avisa el faltante en vez de propagar', async () => {
+      // Única excepción a "siempre bloqueante" del test de arriba: la pasa
+      // `consumirLineaAnulada` porque el plato ya salió de cocina (owner,
+      // ronda de fixes 1).
+      jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockRejectedValue(
+          new BadRequestException('Stock insuficiente para la salida'),
+        );
+      managerMock.query.mockResolvedValueOnce([
+        { tipo: 'producto', unidad_medida: 'unidad' },
+      ]);
+
+      const advertencias = await (service as any).venderOpcionesGrupos(
+        managerMock,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          motivo: 'merma',
+          motivoBajaId: MOTIVO_BAJA_ID,
+          cuentaLineaAnulacionId: CUENTA_LINEA_ANULACION_ID,
+          cantidadVendida: '1',
+          convertir: conversorMock,
+        },
+        [
+          {
+            grupoId: 'G',
+            grupoNombre: 'Bebida',
+            opciones: [
+              {
+                itemId: PROD_ID,
+                nombre: 'Coca',
+                cantidad: '1',
+                precioExtra: '0',
+                unidades: '1',
+              },
+            ],
+          },
+        ],
+      );
+
+      expect(advertencias).toEqual([
+        'No había stock de Coca para descontar 1 unidad: revisá el inventario',
+      ]);
+    });
+
     it('grupos undefined → no hace nada', async () => {
       const spyMov = jest.spyOn(inventarioServiceMock, 'registrarMovimiento');
 
@@ -6134,6 +6466,403 @@ describe('ItemsService', () => {
 
       expect(spyMov).not.toHaveBeenCalled();
       expect(spyReceta).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── consumirLineaAnulada ─────────────────────────────────────────────────
+  // Spec `anular-plato-despachado` §4.3: descuenta el consumo de una línea de
+  // cuenta ya anulada, sin atarlo a una venta. Reusa la expansión de
+  // venderIngredientesReceta/venderComponentesCombo — estos tests prueban el
+  // ENRUTAMIENTO por `itemTipo` y el contexto que viaja (motivo 'merma',
+  // motivoBajaId, cuentaLineaAnulacionId, sin ventaId), no la expansión en sí
+  // (ya cubierta arriba). Devuelve `Promise<string[]>` (ronda de fixes 1,
+  // owner): las advertencias de faltante, nunca aborta por stock.
+  describe('consumirLineaAnulada', () => {
+    const ITEM_ANULADO_ID = 'item-anulado-uuid';
+    const PARAMS = {
+      tenantId: TENANT,
+      usuarioId: USUARIO,
+      itemId: ITEM_ANULADO_ID,
+      itemNombre: 'Hamburguesa',
+      motivoBajaId: MOTIVO_BAJA_ID,
+      cuentaLineaAnulacionId: CUENTA_LINEA_ANULACION_ID,
+      ubicacionLocalId: UBICACION_LOCAL_ID,
+    };
+
+    it('producto: registrarMovimiento directo, motivo merma + motivoBajaId + cuentaLineaAnulacionId, sin ventaId, y sin faltante devuelve []', async () => {
+      const spyMov = jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockResolvedValue({
+          movimientoId: 'mov-1',
+          stockAnterior: '10',
+          stockResultante: '7',
+          cantidadMovida: '3',
+          costoActualPrevio: null,
+          costoActual: null,
+        } as any);
+
+      const advertencias = await service.consumirLineaAnulada(
+        managerMock as any,
+        {
+          ...PARAMS,
+          itemTipo: 'producto',
+          cantidad: '3',
+          convertir: conversorMock,
+        },
+      );
+
+      expect(advertencias).toEqual([]);
+      expect(spyMov).toHaveBeenCalledTimes(1);
+      // Objeto exacto (no `objectContaining`): confirma también que `ventaId`
+      // NO viaja, ni siquiera como `undefined` explícito.
+      expect(spyMov).toHaveBeenCalledWith(managerMock, {
+        tenantId: TENANT,
+        itemId: ITEM_ANULADO_ID,
+        ubicacionId: UBICACION_LOCAL_ID,
+        tipo: 'salida',
+        motivo: 'merma',
+        cantidad: '3',
+        usuarioId: USUARIO,
+        motivoBajaId: MOTIVO_BAJA_ID,
+        cuentaLineaAnulacionId: CUENTA_LINEA_ANULACION_ID,
+        permiteSalidaParcial: true,
+      });
+    });
+
+    it('producto con descuento parcial (modo cantidad): no aborta, avisa el faltante con nombre y unidad', async () => {
+      jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockResolvedValue({
+          movimientoId: 'mov-parcial',
+          stockAnterior: '1',
+          stockResultante: '0',
+          cantidadMovida: '1',
+          costoActualPrevio: null,
+          costoActual: null,
+        } as any);
+      // Unidad del producto (solo se consulta porque hay faltante).
+      managerMock.query.mockResolvedValueOnce([{ unidad_medida: 'kg' }]);
+
+      const advertencias = await service.consumirLineaAnulada(
+        managerMock as any,
+        {
+          ...PARAMS,
+          itemTipo: 'producto',
+          cantidad: '3',
+          convertir: conversorMock,
+        },
+      );
+
+      expect(advertencias).toEqual([
+        'No había stock de Hamburguesa para descontar 2 kg: revisá el inventario',
+      ]);
+    });
+
+    it('producto en modo serie/lote sin stock: se saltea, avisa el faltante completo, nunca propaga el 400', async () => {
+      // El plato ya salió de cocina: negarse a registrar el consumo por un
+      // faltante de stock no deshace nada, solo deja la anulación bloqueada.
+      jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockRejectedValueOnce(
+          new BadRequestException(
+            'Stock insuficiente: se requieren 3 unidades disponibles, hay 0',
+          ),
+        );
+      managerMock.query.mockResolvedValueOnce([{ unidad_medida: 'unidad' }]);
+
+      const advertencias = await service.consumirLineaAnulada(
+        managerMock as any,
+        {
+          ...PARAMS,
+          itemTipo: 'producto',
+          cantidad: '3',
+          convertir: conversorMock,
+        },
+      );
+
+      expect(advertencias).toEqual([
+        'No había stock de Hamburguesa para descontar 3 unidad: revisá el inventario',
+      ]);
+    });
+
+    it('receta: delega en venderIngredientesReceta con motivo merma y sin ventaId', async () => {
+      const spyReceta = jest
+        .spyOn(service, 'venderIngredientesReceta')
+        .mockResolvedValue([]);
+
+      const advertencias = await service.consumirLineaAnulada(
+        managerMock as any,
+        {
+          ...PARAMS,
+          itemTipo: 'receta',
+          cantidad: '2',
+          convertir: conversorMock,
+        },
+      );
+
+      expect(advertencias).toEqual([]);
+      expect(spyReceta).toHaveBeenCalledTimes(1);
+      const [managerArg, recetaParams] = spyReceta.mock.calls[0];
+      expect(managerArg).toBe(managerMock);
+      expect(recetaParams).toEqual(
+        expect.objectContaining({
+          recetaItemId: ITEM_ANULADO_ID,
+          recetaNombre: 'Hamburguesa',
+          cantidadVendida: '2',
+          motivo: 'merma',
+          motivoBajaId: MOTIVO_BAJA_ID,
+          cuentaLineaAnulacionId: CUENTA_LINEA_ANULACION_ID,
+          convertir: conversorMock,
+          ubicacionLocalId: UBICACION_LOCAL_ID,
+        }),
+      );
+      expect(recetaParams).not.toHaveProperty('ventaId');
+    });
+
+    it('receta: las advertencias de faltante de la expansión llegan hasta el resultado', async () => {
+      jest
+        .spyOn(service, 'venderIngredientesReceta')
+        .mockResolvedValue([
+          'No había stock de Queso para descontar 0.1 kg: revisá el inventario',
+        ]);
+
+      const advertencias = await service.consumirLineaAnulada(
+        managerMock as any,
+        {
+          ...PARAMS,
+          itemTipo: 'receta',
+          cantidad: '2',
+          convertir: conversorMock,
+        },
+      );
+
+      expect(advertencias).toEqual([
+        'No había stock de Queso para descontar 0.1 kg: revisá el inventario',
+      ]);
+    });
+
+    it('combo: delega en venderComponentesCombo con motivo merma y sin ventaId', async () => {
+      const spyCombo = jest
+        .spyOn(service, 'venderComponentesCombo')
+        .mockResolvedValue([]);
+
+      const advertencias = await service.consumirLineaAnulada(
+        managerMock as any,
+        {
+          ...PARAMS,
+          itemTipo: 'combo',
+          itemNombre: 'Combo 1',
+          cantidad: '1',
+          convertir: conversorMock,
+        },
+      );
+
+      expect(advertencias).toEqual([]);
+      expect(spyCombo).toHaveBeenCalledTimes(1);
+      const [managerArg, comboParams] = spyCombo.mock.calls[0];
+      expect(managerArg).toBe(managerMock);
+      expect(comboParams).toEqual(
+        expect.objectContaining({
+          comboItemId: ITEM_ANULADO_ID,
+          comboNombre: 'Combo 1',
+          cantidadVendida: '1',
+          motivo: 'merma',
+          motivoBajaId: MOTIVO_BAJA_ID,
+          cuentaLineaAnulacionId: CUENTA_LINEA_ANULACION_ID,
+          convertir: conversorMock,
+          ubicacionLocalId: UBICACION_LOCAL_ID,
+        }),
+      );
+      expect(comboParams).not.toHaveProperty('ventaId');
+    });
+
+    it('receta con snapshot que omite un ingrediente: ese ingrediente no se descuenta', async () => {
+      // Flujo real (sin mockear venderIngredientesReceta): confirma que el
+      // snapshot congelado en la línea viaja hasta la expansión compartida.
+      // El mock "mueve" exactamente lo pedido (`cantidadMovida: params.cantidad`)
+      // para que ningún ingrediente quede con falso faltante.
+      const spyMov = jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockImplementation(async (_manager: unknown, movParams: any) => ({
+          movimientoId: 'mov-1',
+          stockAnterior: '10',
+          stockResultante: '9',
+          cantidadMovida: movParams.cantidad,
+          costoActualPrevio: null,
+          costoActual: null,
+        }));
+      managerMock.query.mockResolvedValueOnce([
+        {
+          receta_item_id: ITEM_ANULADO_ID,
+          ingrediente_item_id: 'pan',
+          ingrediente_nombre: 'Pan',
+          ingrediente_unidad_medida: 'unidad',
+          cantidad: '1',
+          unidad_codigo: 'unidad',
+          bloqueante: true,
+        },
+        {
+          receta_item_id: ITEM_ANULADO_ID,
+          ingrediente_item_id: 'tomate',
+          ingrediente_nombre: 'Tomate',
+          ingrediente_unidad_medida: 'kg',
+          cantidad: '50',
+          unidad_codigo: 'g',
+          bloqueante: false,
+        },
+      ]);
+
+      const advertencias = await service.consumirLineaAnulada(
+        managerMock as any,
+        {
+          ...PARAMS,
+          itemTipo: 'receta',
+          cantidad: '2',
+          convertir: conversorMock,
+          snapshot: { omitidos: ['tomate'], extras: [] },
+        },
+      );
+
+      expect(advertencias).toEqual([]);
+      expect(spyMov).toHaveBeenCalledTimes(1);
+      expect(spyMov).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          itemId: 'pan',
+          motivo: 'merma',
+          motivoBajaId: MOTIVO_BAJA_ID,
+          cuentaLineaAnulacionId: CUENTA_LINEA_ANULACION_ID,
+        }),
+      );
+      expect(spyMov).not.toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({ itemId: 'tomate' }),
+      );
+    });
+
+    it('receta con extras y opciones de grupo del snapshot: se descuentan igual que al cobrar', async () => {
+      // Confirma que consumirLineaAnulada no solo pasa por los ingredientes
+      // fijos: extras (catálogo de extras) y opciones de grupo también deben
+      // generar su propio movimiento.
+      const spyMov = jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockImplementation(async (_manager: unknown, movParams: any) => ({
+          movimientoId: 'mov-1',
+          stockAnterior: '10',
+          stockResultante: '9',
+          cantidadMovida: movParams.cantidad,
+          costoActualPrevio: null,
+          costoActual: null,
+        }));
+      managerMock.query
+        .mockResolvedValueOnce([]) // ingredientes base: ninguno
+        .mockResolvedValueOnce([
+          {
+            item_id: 'queso-extra',
+            nombre: 'Queso extra',
+            unidad_medida: 'kg',
+          },
+        ]) // catálogo de extras
+        .mockResolvedValueOnce([{ tipo: 'producto', unidad_medida: 'unidad' }]); // opción de grupo
+
+      const advertencias = await service.consumirLineaAnulada(
+        managerMock as any,
+        {
+          ...PARAMS,
+          itemTipo: 'receta',
+          cantidad: '1',
+          convertir: conversorMock,
+          snapshot: {
+            omitidos: [],
+            extras: [
+              {
+                ingredienteItemId: 'queso-extra',
+                cantidad: '30',
+                unidadCodigo: 'g',
+                precioExtra: '500',
+              },
+            ],
+            grupos: [
+              {
+                grupoId: 'G',
+                grupoNombre: 'Salsas',
+                opciones: [
+                  {
+                    itemId: 'salsa-uuid',
+                    nombre: 'Salsa',
+                    cantidad: '1',
+                    unidadCodigo: undefined,
+                    precioExtra: '0',
+                    unidades: '1',
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      );
+
+      expect(advertencias).toEqual([]);
+      expect(spyMov).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({ itemId: 'queso-extra', motivo: 'merma' }),
+      );
+      expect(spyMov).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({ itemId: 'salsa-uuid', motivo: 'merma' }),
+      );
+    });
+
+    // Critical 1 de la revisión (ronda de fixes 1): el contexto de anulación
+    // tiene que llegar hasta `venderOpcionesGrupos` también cuando el
+    // llamador es `consumirLineaAnulada` — antes solo llegaba motivo/ids pero
+    // no la bandera de "no abortar", así que una opción de grupo sin stock
+    // abortaba TODA la anulación. Este test pasa por el camino real (sin
+    // mockear `venderIngredientesReceta` ni `venderOpcionesGrupos`).
+    it('receta con una opción de grupo sin stock: no aborta la anulación, avisa el faltante de esa opción', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([]) // ingredientes base: ninguno
+        .mockResolvedValueOnce([{ tipo: 'producto', unidad_medida: 'unidad' }]); // opción de grupo: 'salsa-uuid'
+      jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockRejectedValueOnce(
+          new BadRequestException('Stock insuficiente para la salida'),
+        );
+
+      const advertencias = await service.consumirLineaAnulada(
+        managerMock as any,
+        {
+          ...PARAMS,
+          itemTipo: 'receta',
+          cantidad: '1',
+          convertir: conversorMock,
+          snapshot: {
+            omitidos: [],
+            extras: [],
+            grupos: [
+              {
+                grupoId: 'G',
+                grupoNombre: 'Salsas',
+                opciones: [
+                  {
+                    itemId: 'salsa-uuid',
+                    nombre: 'Salsa',
+                    cantidad: '1',
+                    unidadCodigo: undefined,
+                    precioExtra: '0',
+                    unidades: '1',
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      );
+
+      // No lanzó (la promesa arriba se resolvió) y avisó el faltante.
+      expect(advertencias).toEqual([
+        'No había stock de Salsa para descontar 1 unidad: revisá el inventario',
+      ]);
     });
   });
 

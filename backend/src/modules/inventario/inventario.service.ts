@@ -75,6 +75,23 @@ export interface RegistrarMovimientoParams {
    * parte 2 la escribe; una merma normal la deja en null.
    */
   cuentaLineaAnulacionId?: string | null;
+  /**
+   * Si es true y la salida en modo `cantidad` no tiene stock suficiente,
+   * descuenta `min(disponible, cantidad)` en vez de lanzar — nunca deja el
+   * stock negativo. Reusa el `stockAnterior` que este método ya leyó bajo su
+   * propio lock: no dispara ninguna lectura de stock nueva. Solo aplica en
+   * modo `cantidad`: en modo serie/lote el chokepoint no tiene forma de
+   * entregar "media unidad" o "medio lote", así que ahí sigue lanzando
+   * `Stock insuficiente...` igual que siempre, banderas o no.
+   *
+   * Solo con `motivo: 'merma'` (mismo par de guards que `motivoBajaId`):
+   * `ItemsService.consumirLineaAnulada` (spec `anular-plato-despachado` §4.3,
+   * ronda de fixes 1, owner) la usa porque el plato ya salió de cocina y la
+   * anulación no puede quedar bloqueada por un faltante de stock que no es
+   * culpa de ese momento. Default `false`/ausente: el resto de los llamadores
+   * (incluida la venta) no cambia de comportamiento.
+   */
+  permiteSalidaParcial?: boolean;
   motivoDiferenciaId?: string | null; // solo en motivo='recuento'
   /**
    * El documento interno que ata las DOS filas de kardex de un traslado
@@ -109,14 +126,22 @@ interface MoverResult {
   unidadIds?: string[];
   loteId?: string;
   loteConsumos?: { loteId: string; cantidad: string }[];
+  /**
+   * Lo que de verdad se movió, cuando puede ser MENOS que lo pedido —solo lo
+   * llena `moverCantidad` con `permiteSalidaParcial`—. Ausente en el resto de
+   * los casos: el chokepoint asume `cantidad` (lo pedido) cuando no viene.
+   */
+  cantidadMovida?: Decimal;
 }
 
 /**
  * Los únicos motivos que un ítem eliminado sigue aceptando: los que **deshacen**
- * algo. Anular una venta o recibir una devolución cierran una operación que
- * existió y cuya plata ya se movió, así que tienen que poder ejecutarse aunque
- * el producto se haya discontinuado después. Comprar, mermar, ajustar costo,
- * contar o vender un producto eliminado no tiene operación real detrás.
+ * algo, o los que registran un consumo que YA ocurrió aunque el catálogo haya
+ * cambiado después. Anular una venta o recibir una devolución cierran una
+ * operación que existió y cuya plata ya se movió, así que tienen que poder
+ * ejecutarse aunque el producto se haya discontinuado después. Comprar,
+ * ajustar costo o contar un producto eliminado no tiene operación real
+ * detrás.
  *
  * `traslado` entró el 2026-09-07 con `POST /traslados` y no rompe ese criterio:
  * mover mercadería de lugar no crea ni valoriza nada —el costo no se toca y el
@@ -125,10 +150,32 @@ interface MoverResult {
  * para poder eliminar esa bodega (`docs/features/bodegas-y-traslados.md`, «Bordes»,
  * última fila).
  *
+ * `merma` entró el 2026-09-16 (spec `anular-plato-despachado` §4.3, owner): un
+ * plato ya despachado a cocina consumió el ingrediente de verdad, se anule la
+ * línea o no — borrar el producto del catálogo entretanto no deshace ese
+ * consumo, y no dejar rastro en el kardex sería peor que dejarlo.
+ *
+ * ⚠️ La allowlist es por MOTIVO, no por llamador: se abre para **cualquier**
+ * escritura de `merma` sobre un ítem eliminado, no solo para
+ * `ItemsService.consumirLineaAnulada` (que es quien lo necesita). Hoy es
+ * segura igual porque `MermasService.registrar` —el único otro llamador con
+ * este motivo— sigue rechazando un ítem borrado por su cuenta (404, antes de
+ * llegar a este chokepoint) y no hay un tercer llamador. Si mañana aparece
+ * uno, hereda esta apertura salvo que también filtre `eliminado_el` por su
+ * cuenta — corregido acá (ronda de fixes 1, Minor 5 de la revisión): la
+ * versión anterior de este comentario decía que la allowlist "solo le abre la
+ * puerta" al llamador nuevo, lo cual no es cierto: la lista no distingue
+ * quién llama.
+ *
  * Es una allowlist y no una lista de rechazos a propósito: un motivo nuevo nace
  * rechazado sobre un eliminado, que es el lado seguro del default.
  */
-const MOTIVOS_SOBRE_ITEM_ELIMINADO = ['anulacion', 'devolucion', 'traslado'];
+const MOTIVOS_SOBRE_ITEM_ELIMINADO = [
+  'anulacion',
+  'devolucion',
+  'traslado',
+  'merma',
+];
 
 /**
  * Entradas que mueven el promedio ponderado. `compra` es la obvia: trae
@@ -165,6 +212,13 @@ export class InventarioService {
     movimientoId: string;
     stockAnterior: string;
     stockResultante: string;
+    /**
+     * Lo que de verdad se descontó/agregó. Igual a `params.cantidad` salvo
+     * que `permiteSalidaParcial` haya clampado una salida en modo `cantidad`
+     * por falta de stock — ahí es MENOS, y el llamador lo usa para calcular
+     * el faltante (`params.cantidad - cantidadMovida`) y avisarlo.
+     */
+    cantidadMovida: string;
     // Costo vigente antes/después de este movimiento, leídos dentro del mismo
     // FOR UPDATE que serializa la concurrencia — a diferencia de un pre-check
     // que corre antes de tomar el lock (bajo READ COMMITTED, una compra
@@ -255,7 +309,7 @@ export class InventarioService {
     ) {
       throw new BadRequestException(
         `El producto "${productoRows[0].item_nombre}" está eliminado: ` +
-          'solo admite movimientos de anulación, devolución o traslado',
+          'solo admite movimientos de anulación, devolución, traslado o merma',
       );
     }
 
@@ -307,6 +361,14 @@ export class InventarioService {
     if (params.motivo !== 'merma' && params.cuentaLineaAnulacionId) {
       throw new BadRequestException(
         'cuenta_linea_anulacion_id solo aplica a merma',
+      );
+    }
+    if (params.motivo !== 'merma' && params.permiteSalidaParcial) {
+      throw new BadRequestException('permiteSalidaParcial solo aplica a merma');
+    }
+    if (params.permiteSalidaParcial && params.tipo !== 'salida') {
+      throw new BadRequestException(
+        'permiteSalidaParcial solo aplica a una salida',
       );
     }
     if (params.motivo === 'recuento' && !params.motivoDiferenciaId) {
@@ -448,6 +510,12 @@ export class InventarioService {
     }
 
     const { stockResultante } = result;
+    // Lo que de verdad se movió: normalmente igual a lo pedido, MENOS que eso
+    // solo cuando `moverCantidad` clampó por `permiteSalidaParcial`. El kardex
+    // registra esto, no lo pedido — si guardara `cantidad` (lo pedido) la fila
+    // diría "salieron 0.2 kg" cuando `stock_resultante` solo bajó 0.05, un
+    // kardex que no cierra con su propio saldo.
+    const cantidadMovida = result.cantidadMovida ?? cantidad;
 
     const insertRows: { movimiento_id: string }[] = await manager.query(
       `INSERT INTO movimientos_inventario
@@ -463,7 +531,7 @@ export class InventarioService {
         params.ubicacionId,
         params.tipo,
         params.motivo,
-        cantidad.toString(),
+        cantidadMovida.toString(),
         stockAnterior.toString(),
         stockResultante.toString(),
         params.ventaId ?? null,
@@ -497,6 +565,7 @@ export class InventarioService {
       movimientoId,
       stockAnterior: stockAnterior.toString(),
       stockResultante: stockResultante.toString(),
+      cantidadMovida: cantidadMovida.toString(),
       costoActualPrevio,
       costoActual: costoActualNuevo ?? costoActualPrevio,
       unidadIds: result.unidadIds,
@@ -671,13 +740,36 @@ export class InventarioService {
     stockAnterior: Decimal,
     cantidad: Decimal,
   ): Promise<MoverResult> {
-    const stockResultante =
+    let cantidadMovida = cantidad;
+    let stockResultante =
       params.tipo === 'entrada'
         ? stockAnterior.plus(cantidad)
         : stockAnterior.minus(cantidad);
 
     if (stockResultante.lessThan(0)) {
-      throw new BadRequestException('Stock insuficiente para la salida');
+      // `permiteSalidaParcial` (ver su docblock en `RegistrarMovimientoParams`):
+      // en vez de lanzar, se clampa a lo que HAY —nunca se inventa stock ni
+      // queda negativo—. Reusa `stockAnterior`, ya leído bajo el lock de este
+      // mismo método: no hay SELECT nuevo acá.
+      //
+      // `stockAnterior.greaterThan(0)` es la otra mitad de la condición (ronda
+      // de fixes 2, Important I-A): con NADA disponible no hay "lo que hay"
+      // que mover, y clampar igual a 0 escribiría una fila de kardex con
+      // `cantidad = 0` —viola la regla de más arriba, "la cantidad debe ser
+      // mayor a cero"— además de un upsert de `stock_ubicacion` a 0 que no
+      // cambió nada. Con 0 disponible cae al mismo throw de siempre, y
+      // `ItemsService.moverConsumoOSaltear` lo trata como el salteo completo
+      // que ya usa para serie/lote.
+      if (
+        params.tipo === 'salida' &&
+        params.permiteSalidaParcial &&
+        stockAnterior.greaterThan(0)
+      ) {
+        cantidadMovida = stockAnterior;
+        stockResultante = new Decimal(0);
+      } else {
+        throw new BadRequestException('Stock insuficiente para la salida');
+      }
     }
 
     await manager.query(
@@ -687,7 +779,7 @@ export class InventarioService {
       [params.itemId, params.ubicacionId, stockResultante.toString()],
     );
 
-    return { stockResultante };
+    return { stockResultante, cantidadMovida };
   }
 
   private async moverSerie(
