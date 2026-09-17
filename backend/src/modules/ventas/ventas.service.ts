@@ -3493,11 +3493,26 @@ export class VentasService {
    * `crearEnTransaccion` resuelve con `cajaService.findActiva`/`findVirtual`
    * más arriba), todo con `LEFT JOIN`: una venta del POS no tiene cuenta, y la
    * caja virtual de una venta online no tiene usuario dueño.
+   *
+   * `usuarioId`/`verTodas` son el mismo alcance por caja de `findOne`
+   * (`filtroDeMisCajas`, ver su docblock): la boleta devuelve pagos con monto,
+   * vuelto y cajero, exactamente el dato por el que la auditoría del
+   * 2026-08-22 le puso alcance a `findOne`
+   * (`docs/superpowers/specs/2026-08-22-visibilidad-ventas-pagos-design.md`).
+   * Sin este filtro acá, `GET /ventas/:id/boleta` reabría por otra puerta lo
+   * que esa auditoría cerró — pedir `Ventas:Anular` no alcanza, porque el
+   * alcance cuelga de un eje distinto (`Cajas:Leer`) y alguien puede tener
+   * `Anular` con la caja acotada. Parámetros obligatorios y sin default a
+   * propósito: que ningún llamador futuro se olvide del alcance por omisión.
+   * Solo hace falta en la query de CABECERA — las hijas cuelgan de un
+   * `venta_id` que la cabecera ya validó.
    */
   async armarBoleta(
     runner: EntityManager | Db,
     tenantId: string,
     ventaId: string,
+    usuarioId: string,
+    verTodas: boolean,
   ): Promise<BoletaVenta> {
     type CabeceraRow = {
       venta_id: string;
@@ -3513,6 +3528,12 @@ export class VentasService {
       cajero_nombre: string | null;
       cajero_apellido: string | null;
     };
+    const paramsCabecera: unknown[] = [ventaId, tenantId];
+    let filtroPropio = '';
+    if (!verTodas) {
+      paramsCabecera.push(usuarioId);
+      filtroPropio = this.filtroDeMisCajas(paramsCabecera.length);
+    }
     const cabeceraRows: CabeceraRow[] = await runner.query(
       `SELECT v.venta_id, v.fecha, v.canal,
               v.total_bruto, v.total_descuentos, v.total_recargos,
@@ -3528,8 +3549,9 @@ export class VentasService {
                 AND cj.tenant_id = v.tenant_id AND cj.eliminado_el IS NULL
          LEFT JOIN usuarios u ON u.usuario_id = cj.usuario_id
                 AND u.eliminado_el IS NULL
-        WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL`,
-      [ventaId, tenantId],
+        WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL
+          ${filtroPropio}`,
+      paramsCabecera,
     );
     // 404 y no 403: mismo criterio que `findOne` — un 403 confirmaría que la
     // venta existe.

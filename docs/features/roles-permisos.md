@@ -77,6 +77,28 @@ que compró. Como corolario, el admin de un tenant recién creado puede configur
 admin-only pasan por `TenantAdminGuard`, no por el motor de módulos— pero no operar ningún
 módulo hasta que se le contrate.
 
+### `Ventas:Anular` también habilita reimprimir una boleta (2026-09-17)
+
+`GET /ventas/:id/boleta` (reimprimir la boleta de una venta ya cobrada, spec
+[`2026-09-17-boleta-desde-la-venta-design.md`](../superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md))
+pide el mismo `Ventas:Anular` que anular una venta, no un permiso nuevo: es la operación
+sensible del módulo (reimprimir un comprobante ya emitido) y el owner eligió reusar el
+permiso del encargado en vez de crear uno a medida — mismo criterio que el ensanche de
+`Cajas:Actualizar` documentado más abajo. `GET /ventas/:id` (con solo `Ventas:Leer`) no
+alcanza para reimprimir: su `SELECT` no trae `venta_detalles.personalizacion`, así que un
+plato con ingredientes sacados o extras saldría distinto al original.
+
+⚠️ **El permiso no alcanza solo (ronda de corrección 1).** La ruta también hereda el
+**alcance por caja** de `findOne`/`resumen`/`listar` (`resolverAlcanceDerivadoDeCaja`, eje
+`Cajas:Leer`, no `Ventas:*`): la boleta trae pagos con monto, vuelto y cajero, el mismo dato
+por el que la auditoría del 2026-08-22 (más abajo) le puso alcance a `findOne`. Sin este
+filtro también en `armarBoleta`, `Ventas:Anular` reabriría por otra puerta lo que esa
+auditoría cerró — alguien puede tener `Anular` con la caja acotada, porque el eje que la
+acota es otro. El seed de hoy no tiene ningún usuario con `Ventas:Anular` fuera del admin
+(que siempre ve todas las cajas por el short-circuit de `es_fijo`), así que el caso
+"`Anular` con caja acotada" queda medido —y cubierto por unit sobre el SQL de
+`armarBoleta`— pero sin un fixture real de ese usuario para ejercerlo en el e2e.
+
 ### Módulo `Salones`: tercera acción `Anular` (2026-09-16)
 
 Mismo patrón que `Ventas:Anular` (acción dedicada para lo más sensible del módulo, no un

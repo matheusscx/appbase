@@ -3741,7 +3741,13 @@ describe('VentasService', () => {
         ],
       });
 
-      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+      const boleta = await service.armarBoleta(
+        dbService,
+        TENANT_ID,
+        VENTA_ID,
+        USUARIO_ID,
+        true,
+      );
 
       expect(boleta.items).toEqual([
         {
@@ -3787,7 +3793,13 @@ describe('VentasService', () => {
         ],
       });
 
-      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+      const boleta = await service.armarBoleta(
+        dbService,
+        TENANT_ID,
+        VENTA_ID,
+        USUARIO_ID,
+        true,
+      );
 
       expect(boleta.items).toEqual([
         {
@@ -3836,7 +3848,13 @@ describe('VentasService', () => {
         ],
       });
 
-      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+      const boleta = await service.armarBoleta(
+        dbService,
+        TENANT_ID,
+        VENTA_ID,
+        USUARIO_ID,
+        true,
+      );
 
       // Estructurado, sin frasear: el texto ("Sin X" / "Extra X xN") lo arma
       // `lineasPersonalizacionPreciada` en el frontend
@@ -3862,7 +3880,13 @@ describe('VentasService', () => {
         detalles: [],
       });
 
-      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+      const boleta = await service.armarBoleta(
+        dbService,
+        TENANT_ID,
+        VENTA_ID,
+        USUARIO_ID,
+        true,
+      );
 
       expect(boleta.totales).toEqual({
         subtotalNeto: '10000.0000',
@@ -3897,7 +3921,13 @@ describe('VentasService', () => {
         ],
       });
 
-      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+      const boleta = await service.armarBoleta(
+        dbService,
+        TENANT_ID,
+        VENTA_ID,
+        USUARIO_ID,
+        true,
+      );
 
       expect(boleta.pagos).toEqual([
         { nombre: 'Efectivo', monto: '10000.0000' },
@@ -3949,7 +3979,13 @@ describe('VentasService', () => {
         ],
       });
 
-      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+      const boleta = await service.armarBoleta(
+        dbService,
+        TENANT_ID,
+        VENTA_ID,
+        USUARIO_ID,
+        true,
+      );
 
       // Ni el de una sola fila (950 o 1200) ni la suma cruzada entre ids
       // (950+550+300, o 1200+800+400): cada id agregado por su cuenta.
@@ -3970,7 +4006,13 @@ describe('VentasService', () => {
         propina: [{ monto_pagado: '1500.0000' }],
       });
 
-      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+      const boleta = await service.armarBoleta(
+        dbService,
+        TENANT_ID,
+        VENTA_ID,
+        USUARIO_ID,
+        true,
+      );
 
       expect(boleta.propina).toEqual({ monto: '1500.0000' });
     });
@@ -3991,7 +4033,13 @@ describe('VentasService', () => {
         propina: [],
       });
 
-      const boleta = await service.armarBoleta(dbService, TENANT_ID, VENTA_ID);
+      const boleta = await service.armarBoleta(
+        dbService,
+        TENANT_ID,
+        VENTA_ID,
+        USUARIO_ID,
+        true,
+      );
 
       expect(boleta.propina).toBeNull();
     });
@@ -4000,8 +4048,60 @@ describe('VentasService', () => {
       dataSourceMock.query.mockResolvedValueOnce([]);
 
       await expect(
-        service.armarBoleta(dbService, TENANT_ID, 'venta-ajena'),
+        service.armarBoleta(
+          dbService,
+          TENANT_ID,
+          'venta-ajena',
+          USUARIO_ID,
+          true,
+        ),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    /**
+     * Ronda de corrección 1 (Task 2, 2026-09-17): la boleta trae pagos con
+     * monto, vuelto y cajero — el mismo dato por el que la auditoría del
+     * 2026-08-22 le puso alcance por caja a `findOne`
+     * (`docs/superpowers/specs/2026-08-22-visibilidad-ventas-pagos-design.md`).
+     * `armarBoleta` reusa `filtroDeMisCajas` en la query de CABECERA, igual
+     * que `findOne`. El mock despacha por nombre de tabla y no ejecuta el
+     * `WHERE`, así que no controla si el filtro EXCLUYE una fila — pero sí
+     * puede afirmar sobre el SQL que de verdad se mandó a Postgres: con
+     * `verTodas: false` la query de cabecera lleva el filtro de
+     * `filtroDeMisCajas` (la subquery contra `cajas c`), y con `true` no.
+     */
+    it('la query de cabecera lleva el filtro de alcance por caja solo cuando verTodas es false', async () => {
+      mockArmarBoleta({ cabecera: cabeceraBase() });
+
+      await service.armarBoleta(
+        dbService,
+        TENANT_ID,
+        VENTA_ID,
+        USUARIO_ID,
+        false,
+      );
+      const [sqlAcotado, paramsAcotado] = dataSourceMock.query.mock.calls.find(
+        ([sql]: [string]) => sql.includes('FROM ventas v'),
+      ) as [string, unknown[]];
+      expect(sqlAcotado).toContain('FROM cajas c');
+      expect(paramsAcotado).toEqual([VENTA_ID, TENANT_ID, USUARIO_ID]);
+
+      dataSourceMock.query.mockClear();
+      mockArmarBoleta({ cabecera: cabeceraBase() });
+
+      await service.armarBoleta(
+        dbService,
+        TENANT_ID,
+        VENTA_ID,
+        USUARIO_ID,
+        true,
+      );
+      const [sqlCompleto, paramsCompleto] =
+        dataSourceMock.query.mock.calls.find(([sql]: [string]) =>
+          sql.includes('FROM ventas v'),
+        ) as [string, unknown[]];
+      expect(sqlCompleto).not.toContain('FROM cajas c');
+      expect(paramsCompleto).toEqual([VENTA_ID, TENANT_ID]);
     });
   });
 });
