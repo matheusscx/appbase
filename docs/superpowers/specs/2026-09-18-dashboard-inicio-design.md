@@ -24,7 +24,7 @@ propio módulo (el de anulaciones pide `Salones: Ver todas`, el de propinas `Pro
 | Decisión (owner, 2026-09-18) | Por qué importa |
 |---|---|
 | **Cada bloque aparece según los permisos de quien entra** | El encargado no ve la plata del día; el dueño que también es encargado ve las dos zonas en una sola pantalla |
-| **Los bloques del dueño van con un permiso nuevo**, `Resumen del negocio: Ver`, no con `Ventas: Leer` | La cajera tiene `Ventas: Leer` para buscar una boleta y reimprimirla. Con ese permiso vería también cuánto factura el local, y no habría forma de darle una cosa sin la otra |
+| **Los bloques del dueño van con un permiso nuevo**, `Resumen del negocio: Leer`, no con `Ventas: Leer` | La cajera tiene `Ventas: Leer` para buscar una boleta y reimprimirla. Con ese permiso vería también cuánto factura el local, y no habría forma de darle una cosa sin la otra |
 | **"Resumen del negocio" es un módulo propio, contratado junto con Ventas** | Todo permiso cuelga de un módulo contratado (`tenant_modulos`). No se llama "Reportes": un dashboard no es un reporte, y los reportes ya viven en su módulo |
 | **"Hoy" corta a medianoche por ahora.** La hora de corte configurable quedó decidida y va entera, más adelante | Hay otras pantallas que ya cortan a medianoche. Si solo el dashboard usara otro corte, el mismo "sábado" daría dos números al hacer clic. Entrada: *El día del negocio termina en una hora de corte* (`pendientes.md` § 3) |
 | **Solo hoy, comparado con el mismo día de la semana pasada** | Es el vistazo. La semana y el mes son trabajo de un reporte de ventas, que no existe |
@@ -45,7 +45,7 @@ propio módulo (el de anulaciones pide `Salones: Ver todas`, el de propinas `Pro
 
 ### 3.2 Zona "Hoy" (el dueño)
 
-Todos con `Resumen del negocio: Ver`, en una sola llamada: `GET /resumen-negocio/hoy`.
+Todos con `Resumen del negocio: Leer`, en una sola llamada: `GET /resumen-negocio/hoy`.
 
 | Bloque | Qué muestra |
 |---|---|
@@ -67,8 +67,11 @@ Todos con `Resumen del negocio: Ver`, en una sola llamada: `GET /resumen-negocio
   de ventas de hoy o de antes. Es la misma cuenta con la que `/ventas/resumen` saca el saldo, y
   deja el vuelto afuera. **El plan mide** cómo quedan registrados el pago de una nota de crédito y
   el de una venta cancelada, antes de decidir si hay que excluirlos.
-- **Ticket promedio:** vendido / cantidad, cuantizado a la escala de la moneda oficial con el
-  modo de redondeo del tenant. Con cantidad 0, `null`.
+- **Ticket promedio:** vendido / cantidad, como **proyección de lectura a `ESCALA_COSTO` (4)**,
+  igual que el costo perdido de Mermas y el precio de carta de Anulaciones: nadie paga este
+  número, así que no se cuantiza con la configuración del tenant (eso obligaría a importar
+  `cuantizar` del motor), y el formateo a los decimales de la moneda lo hace la pantalla con
+  `formatMonto`. Con cantidad 0, `null`.
 
 ⚠️ **Si el vendido resta las notas de crédito es una pregunta fiscal**, y no se decidió acá: lo
 fiscal va en su propio frente (`CLAUDE.md`, ADR-010). Queda como entrada en `pendientes.md`.
@@ -104,7 +107,8 @@ con porcentajes.
 ### 5.1 `GET /api/resumen-negocio/hoy` (nueva)
 
 Módulo nuevo `backend/src/modules/resumen-negocio/`, registrado en `app.module.ts`.
-`@RequiresPermiso('Resumen del negocio', 'Ver')`. Sin parámetros: `tenant_id` sale del token.
+`@RequiresPermiso('Resumen del negocio', 'Leer')`. La acción es la `Leer` que ya existe: el catálogo
+de permisos no suma una acción "Ver" para decir lo mismo. Sin parámetros: `tenant_id` sale del token.
 
 ```
 {
@@ -144,7 +148,7 @@ en la consulta.
 
 ### 5.4 Seed
 
-El seeder crea el módulo "Resumen del negocio" con el permiso "Ver" y lo contrata para el tenant
+El seeder crea el módulo "Resumen del negocio" con el permiso "Leer" y lo contrata para el tenant
 de demo junto con Ventas (IDs fijos, siguiente número libre). El rol admin lo recibe como
 cualquier otro módulo. Igual que con `MiCaja` y `Cajas`, **el código no obliga a contratar los dos
 juntos**: es una regla comercial, y se documenta en `PRODUCTO.md` al lado de esa.
@@ -168,10 +172,12 @@ juntos**: es una regla comercial, y se documenta en `PRODUCTO.md` al lado de esa
 - **"Hoy"** carga una vez y tiene un botón "Actualizar".
 - Montos con `useFormatters`, y en la vista solo tokens semánticos de Nuxt UI.
 
-⚠️ **A medir en el plan:** si un tenant no contrató "Resumen del negocio", falta ver si `can()` ya
-lo refleja o si el admin (por su bypass `esAdmin`) ve el bloque y recibe un 403. Si pasa lo
-segundo, el bloque se oculta: un error en el inicio por un módulo que no se contrató no es un
-error.
+⚠️ **Medido al escribir el plan: el admin de un tenant que no contrató el módulo ve el bloque y
+recibe 403.** El backend trata el módulo como borde duro también para el admin
+(`rbac.service.ts`, rama del rol fijo), pero `/rbac/mis-permisos` le devuelve `[]` al admin y el
+frontend lo deja pasar por `esAdmin`: no tiene cómo saber qué módulos contrató el tenant. Es la
+misma conducta que hoy tienen los links del menú. Por eso **una zona o un bloque que recibe 403
+se oculta**, sin aviso de error: un módulo que no se contrató no es una falla.
 
 ## 7. Fuera de alcance
 
@@ -215,9 +221,13 @@ La comparación con 7 días antes y la variación `null` con semana pasada en 0 
 venta "de la semana pasada" no se puede crear por la API, porque el tiempo no se fabrica.
 
 **e2e de API:**
-- Sin `Resumen del negocio: Ver`, 403. Sin `Salones: Ver todas`, 403 en la ocupación. El admin
+- Sin `Resumen del negocio: Leer`, 403. Sin `Salones: Ver todas`, 403 en la ocupación. El admin
   recibe 200. Un tenant no ve datos de otro.
-- Una venta a las 22:00 de Chile cuenta como de hoy, aunque en UTC ya sea mañana.
+- Una venta hecha durante la corrida suma al total de hoy (delta antes/después: la suite corre
+  con `maxWorkers: 1`). **El borde de la zona no se prueba acá**: la ruta no recibe fecha y el
+  e2e no controla la hora del reloj, así que "una venta a las 22:00 de Chile" solo se puede
+  armar en el unitario, afirmando que el día sale de `fechaLocalTenant` y el rango de
+  `bordeFechaSql`/`bordeHastaSql` con la zona del tenant.
 - Los escenarios se arman por el camino de la app (venta, pago, anulación, merma), con un garzón
   propio, no con el del seed.
 
