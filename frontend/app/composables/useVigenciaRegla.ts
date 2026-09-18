@@ -16,8 +16,11 @@ const ETIQUETA: Record<EstadoVigenciaConBadge, string> = {
 
 /** 'YYYY-MM-DD' del navegador. NO `toISOString().slice(0, 10)`: eso da la fecha
  *  en UTC, que en husos negativos (Chile) puede ir un día atrás de la fecha
- *  local real — mismo motivo que documenta `inicioDiaIso` en `date-value.ts`. */
-function hoyLocal(): string {
+ *  local real — mismo motivo que documenta `inicioDiaIso` en `date-value.ts`.
+ *  Exportada (spec `2026-09-18-reporte-anulaciones-design.md` § 6): la pantalla
+ *  de Anulaciones arma su rango por defecto ("hoy") con esta misma función, en
+ *  vez de duplicarla como ya hace `usePromociones.ts`. */
+export function hoyLocal(): string {
   const d = new Date()
   const mes = String(d.getMonth() + 1).padStart(2, '0')
   const dia = String(d.getDate()).padStart(2, '0')

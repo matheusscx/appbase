@@ -85,6 +85,13 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/sesiones-garzon',
     })
   }
+  if (permissionsStore.esAdmin || permissionsStore.can('Salones', 'Ver todas')) {
+    base.push({
+      label: 'Anulaciones',
+      icon: 'i-lucide-ban',
+      to: '/salones/anulaciones',
+    })
+  }
   if (permissionsStore.esAdmin || permissionsStore.can('Tienda Online', 'Leer')) {
     base.push({
       label: 'Tienda Online',

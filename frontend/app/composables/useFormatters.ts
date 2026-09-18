@@ -58,6 +58,21 @@ export function useFormatters() {
     return map[code] ?? code
   }
 
+  /**
+   * Costo desglosado por moneda (spec `2026-09-18-reporte-anulaciones-design.md`
+   * § 4: "el costo nunca se convierte de moneda", va como lista `{ monedaId,
+   * monto }`) → texto para la pantalla, `formatMonto(monto, monedaId)` por
+   * cada entrada, separadas por coma. `[]` da `—` — cubre los dos casos que
+   * la producen (`no_aplica` y, agregado, un grupo de puro `no_elaborado`)
+   * sin que la pantalla tenga que distinguirlos.
+   */
+  function formatCostoPorMoneda(
+    costo: { monedaId: string, monto: string }[],
+  ): string {
+    if (costo.length === 0) return '—'
+    return costo.map(c => formatMonto(c.monto, c.monedaId)).join(', ')
+  }
+
   /** Valor decimal (0.19 = 19%) → string localizado con sufijo %. */
   function formatPorcentaje(
     value: string | Decimal | null | undefined,
@@ -76,5 +91,5 @@ export function useFormatters() {
   // su propia regla (los decimales de la moneda son el piso, ver `useCurrency`).
   // Va por acá y no importando `useCurrency` en la página porque las pantallas
   // formatean por `useFormatters` — una sola puerta, no dos.
-  return { formatMonto, formatCosto, formatFecha, formatStock, formatTipoPago, formatPorcentaje }
+  return { formatMonto, formatCosto, formatFecha, formatStock, formatTipoPago, formatPorcentaje, formatCostoPorMoneda }
 }
