@@ -4074,6 +4074,66 @@ describe('SalonesService', () => {
     });
   });
 
+  // `ocupacion` (dashboard de inicio, spec `2026-09-18-dashboard-inicio-design.md`
+  // § 5.2): una sola consulta, sin importar cuántas filas haya. "Mesa ocupada"
+  // reusa la misma noción que `listarSalonesOperacion`/`listarSalones` —
+  // `cuentas.estado = 'abierta'` no borrada, de una mesa no borrada, de un
+  // salón no borrado.
+  describe('ocupacion', () => {
+    /**
+     * El tramo del `LEFT JOIN cuentas c` hasta el `WHERE`. Sin acotar así,
+     * `toContain("c.estado = 'abierta'")` también matchea `cc.estado =
+     * 'abierta'` de la subconsulta de `cuentasAbiertas` —"cc." contiene "c."
+     * como substring— y daría un test verde aunque el filtro del JOIN a
+     * mesas se borrara del todo.
+     */
+    const tramoJoinCuentas = (sql: string) =>
+      /LEFT JOIN cuentas c\b[\s\S]*?(?=\bWHERE\b)/.exec(sql)?.[0] ?? '';
+
+    it('mapea el COUNT de pg (string) a número y filtra borrado de salón, mesa y cuenta', async () => {
+      // Valores DISTINTOS entre sí a propósito: un 1 o columnas iguales no
+      // discriminan si el mapeo de columna quedó cruzado.
+      dataSource.query.mockResolvedValueOnce([
+        { mesas_ocupadas: '14', mesas_total: '20', cuentas_abiertas: '16' },
+      ]);
+
+      const resultado = await service.ocupacion(TENANT);
+
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = dataSource.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(params).toEqual([TENANT]);
+      const joinCuentas = tramoJoinCuentas(sql);
+      expect(joinCuentas).toContain("c.estado = 'abierta'");
+      expect(joinCuentas).toContain('c.eliminado_el IS NULL');
+      // La subconsulta de `cuentasAbiertas` filtra por su cuenta, con su
+      // propio alias.
+      expect(sql).toContain("cc.estado = 'abierta'");
+      expect(sql).toContain('cc.eliminado_el IS NULL');
+      expect(sql).toContain('m.eliminado_el IS NULL');
+      expect(sql).toContain('s.eliminado_el IS NULL');
+      expect(resultado).toEqual({
+        mesasOcupadas: 14,
+        mesasTotal: 20,
+        cuentasAbiertas: 16,
+      });
+    });
+
+    it('sin filas (tenant sin salones) devuelve todo en cero', async () => {
+      dataSource.query.mockResolvedValueOnce([]);
+
+      const resultado = await service.ocupacion(TENANT);
+
+      expect(resultado).toEqual({
+        mesasOcupadas: 0,
+        mesasTotal: 0,
+        cuentasAbiertas: 0,
+      });
+    });
+  });
+
   describe('restaurarSalon', () => {
     const SALON = 'salon-uuid';
 

@@ -107,6 +107,20 @@ export interface SalonConMesas {
   eliminadoPorNombre?: string | null;
 }
 
+/** `GET /api/salones/ocupacion` — el bloque "Ahora" del dashboard de inicio. */
+export interface OcupacionSalones {
+  mesasOcupadas: number;
+  mesasTotal: number;
+  cuentasAbiertas: number;
+}
+
+/** Fila cruda de `ocupacion`: los tres `COUNT` de pg vienen como `string` (bigint). */
+interface OcupacionRow {
+  mesas_ocupadas: string;
+  mesas_total: string;
+  cuentas_abiertas: string;
+}
+
 // Fila cruda de `listarSalones`. Los campos `*_eliminado_*` solo vienen
 // seleccionados cuando `incluirEliminados` es true — `undefined` (no `null`)
 // distingue "no se pidió la papelera" de "esta fila no está borrada".
@@ -360,6 +374,51 @@ export class SalonesService {
   /** Igual que listarSalones — la operación del garzón usa la misma foto. */
   listarSalonesOperacion(tenantId: string): Promise<SalonConMesas[]> {
     return this.listarSalones(tenantId);
+  }
+
+  /**
+   * La ocupación del salón para el dashboard de inicio (spec
+   * `2026-09-18-dashboard-inicio-design.md` § 5.2). Una sola consulta, sin
+   * importar cuántas mesas o cuentas haya.
+   *
+   * "Mesa ocupada" es la misma noción que ya resuelve `listarSalones` (de la
+   * que `listarSalonesOperacion` es un alias): una mesa no borrada, de un
+   * salón no borrado, con al menos una `cuentas.estado = 'abierta'` no
+   * borrada — ahí el conteo por mesa sale de un `LEFT JOIN` a una subconsulta
+   * agregada; acá alcanza con un `LEFT JOIN` directo a `cuentas` porque solo
+   * hace falta saber SI hay alguna, no cuántas, y `COUNT(DISTINCT m.mesa_id)`
+   * ya lo desduplica si una mesa tiene más de una cuenta abierta.
+   *
+   * `cuentasAbiertas` es un número aparte: cuenta TODAS las cuentas abiertas
+   * no borradas del tenant, tengan mesa o no (una mesa borrada no debería
+   * dejar cuentas abiertas huérfanas por el camino de la app, pero el dato
+   * que importa acá es "cuántas cuentas hay que atender", no "cuántas caen
+   * dentro del universo de mesas vivas") — por eso va en una subconsulta
+   * propia y no como `COUNT(c.cuenta_id)` del mismo JOIN.
+   */
+  async ocupacion(tenantId: string): Promise<OcupacionSalones> {
+    const rows: OcupacionRow[] = await this.db.query(
+      `SELECT
+          COUNT(DISTINCT m.mesa_id) FILTER (WHERE c.cuenta_id IS NOT NULL)
+            AS mesas_ocupadas,
+          COUNT(DISTINCT m.mesa_id) AS mesas_total,
+          (SELECT COUNT(*) FROM cuentas cc
+            WHERE cc.tenant_id = $1 AND cc.estado = 'abierta'
+              AND cc.eliminado_el IS NULL) AS cuentas_abiertas
+         FROM salones s
+         JOIN mesas m ON m.salon_id = s.salon_id AND m.eliminado_el IS NULL
+         LEFT JOIN cuentas c
+           ON c.mesa_id = m.mesa_id AND c.tenant_id = $1
+          AND c.estado = 'abierta' AND c.eliminado_el IS NULL
+        WHERE s.tenant_id = $1 AND s.eliminado_el IS NULL`,
+      [tenantId],
+    );
+    const r = rows[0];
+    return {
+      mesasOcupadas: Number(r?.mesas_ocupadas ?? 0),
+      mesasTotal: Number(r?.mesas_total ?? 0),
+      cuentasAbiertas: Number(r?.cuentas_abiertas ?? 0),
+    };
   }
 
   private agruparSalones(rows: SalonMesaRow[]): SalonConMesas[] {

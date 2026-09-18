@@ -60,9 +60,21 @@ export class SalonesController {
     return this.salonesService.listarSalonesOperacion(u.tenantId ?? '');
   }
 
+  // ── Ocupación del salón (dashboard de inicio, spec
+  // `2026-09-18-dashboard-inicio-design.md` § 5.2). Ruta ESTÁTICA, declarada
+  // antes de cualquier `@Get(':id...')` de este controller (invariante 6 de
+  // CLAUDE.md) — no hay ninguna hoy, pero si se agrega una, va después.
+  @Get('ocupacion')
+  @RequiresPermiso('Salones', 'Ver todas')
+  ocupacion(@Req() req: Request) {
+    const u = req.user as JwtUser;
+    return this.salonesService.ocupacion(u.tenantId ?? '');
+  }
+
   // ── Reporte de anulaciones (spec `2026-09-18-reporte-anulaciones-design.md`)
   // Rutas ESTÁTICAS, sin `:id`: no chocan entre ellas ni con ninguna ruta
-  // `:id/...` de este controller (sus otros `GET` son `operacion` y `''`).
+  // `:id/...` de este controller (sus otros `GET` son `operacion`, `ocupacion`
+  // y `''`).
   @Get('anulaciones')
   @RequiresPermiso('Salones', 'Ver todas')
   anulaciones(@Req() req: Request, @Query() query: FindAnulacionesDto) {
