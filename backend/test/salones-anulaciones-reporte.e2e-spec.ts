@@ -85,6 +85,20 @@ interface ReportePaginado {
   data: AnulacionReporteItem[];
   meta: { page: number; pageSize: number; total: number; totalPages: number };
 }
+interface GrupoResumen {
+  platos: string;
+  precioCarta: string;
+  costo: CostoPorMoneda[];
+  sinValorizar: number;
+}
+interface ResumenAnulaciones {
+  porTipo: (GrupoResumen & { tipo: string })[];
+  porGarzon: (GrupoResumen & {
+    garzonId: string | null;
+    garzonNombre: string | null;
+  })[];
+  porAutorizo: (GrupoResumen & { usuarioId: string; usuarioNombre: string })[];
+}
 
 async function entrar(
   app: INestApplication<App>,
@@ -205,6 +219,44 @@ describe('Salones — reporte de anulaciones, listado (e2e)', () => {
     // `.body`, nunca acá.
     // status-tolerante: status y body se devuelven juntos; se afirma en cada llamador
     return { status: res.status, body: res.body as ReportePaginado };
+  }
+
+  /**
+   * `GET /api/salones/anulaciones/resumen` (Task 3): mismo DTO de filtros que
+   * `reporte`, sin paginar. Molde de `post` (`salones-anular-linea.e2e-spec.ts`):
+   * asevera el status DENTRO del helper, antes de leer `.body` — a diferencia
+   * de `reporte` (status-tolerante: devuelve status+body juntos porque el 403
+   * es un caso de uso legítimo de ESE test y cada llamador lo afirma antes de
+   * tocar `.body`), acá cada llamador ya sabe de antemano qué status espera
+   * (200, 403 o 400), así que se lo pasa y el helper lo afirma él mismo.
+   */
+  async function resumen(
+    token: string,
+    query: Record<string, string> = {},
+    esperado = 200,
+  ): Promise<ResumenAnulaciones> {
+    const qs = new URLSearchParams(query).toString();
+    const res = await request(app.getHttpServer())
+      .get(`/api/salones/anulaciones/resumen${qs ? `?${qs}` : ''}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(esperado);
+    return res.body as ResumenAnulaciones;
+  }
+
+  /**
+   * `desde`/`hasta` son obligatorios en `/resumen` desde la ronda de fix 1
+   * (tope de 366 días, spec § 5.1). Una ventana de ±3 días alrededor de
+   * "ahora" cubre cualquier fixture que este archivo cree en su propia
+   * corrida sin acercarse al tope, sea cual sea la zona horaria del tenant.
+   */
+  function rangoAmplio(): { desde: string; hasta: string } {
+    const fmt = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+    const ahora = Date.now();
+    const tresDiasMs = 3 * 24 * 60 * 60 * 1000;
+    return {
+      desde: fmt(ahora - tresDiasMs),
+      hasta: fmt(ahora + tresDiasMs),
+    };
   }
 
   beforeAll(async () => {
@@ -335,6 +387,38 @@ describe('Salones — reporte de anulaciones, listado (e2e)', () => {
 
     const conAdmin = await reporte(tokenAdmin);
     expect(conAdmin.status).toBe(200);
+  });
+
+  it('el permiso rige también en `/resumen`: 403 sin `Ver todas`, 200 con el encargado y con el admin', async () => {
+    // Sin `desde`/`hasta`: el guard de permiso corre ANTES que el pipe de
+    // validación, así que el 403 tiene que llegar igual, sin rango.
+    await resumen(tokenSoloOperar, {}, 403);
+
+    const conEncargado = await resumen(tokenEncargado, rangoAmplio());
+    expect(Array.isArray(conEncargado.porTipo)).toBe(true);
+    expect(Array.isArray(conEncargado.porGarzon)).toBe(true);
+    expect(Array.isArray(conEncargado.porAutorizo)).toBe(true);
+
+    await resumen(tokenAdmin, rangoAmplio());
+  });
+
+  it('`/resumen` exige `desde`/`hasta` y acota el rango a 366 días (ronda de fix 1)', async () => {
+    await resumen(tokenEncargado, {}, 400);
+
+    const desde = '2026-01-01';
+    // 367 días después: uno más que el tope de 366 (spec § 5.1, mismo tope
+    // que `propinas`).
+    const hasta = new Date(
+      Date.parse(`${desde}T00:00:00.000Z`) + 367 * 24 * 60 * 60 * 1000,
+    )
+      .toISOString()
+      .slice(0, 10);
+    await resumen(tokenEncargado, { desde, hasta }, 400);
+
+    // El mismo día en las dos puntas es válido (`hasta` es inclusivo acá, a
+    // diferencia de `propinas`): no debe rechazarlo.
+    const hoy = new Date().toISOString().slice(0, 10);
+    await resumen(tokenEncargado, { desde: hoy, hasta: hoy }); // default 200
   });
 
   it('cortesía, merma y no_elaborado: cada fila con su precioCarta, costoEstado y costo esperado (calculados a mano)', async () => {
@@ -663,6 +747,155 @@ describe('Salones — reporte de anulaciones, listado (e2e)', () => {
     expect(soloGarzon2.body.data[0].garzonNombre).toBe(
       `Garzón reporte-anulaciones-2 E2E ${marca}`,
     );
+  });
+
+  it('receta con dos ingredientes de costo distinto, anulada como merma: costo = suma de los dos movimientos; el resumen coincide con la suma de las filas del listado', async () => {
+    // Dos ingredientes, misma moneda (CLP), costos distintos a propósito: un
+    // mutante que sumara solo uno de los dos, o que multiplicara por el
+    // ingrediente equivocado, da otro número. Cantidades ≠ 1 en los dos ejes
+    // (cantidad de la receta en la línea Y cantidad de cada ingrediente por
+    // receta) por la misma razón.
+    const ingredienteA = (
+      await post<IdResponse>('/api/items', {
+        nombre: `Ingrediente A reporte E2E ${marca}`,
+        precioBase: '800',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'ingrediente',
+        unidadMedida: 'unidad',
+        stock: '1000',
+        costo: '800',
+      })
+    ).id;
+    const ingredienteB = (
+      await post<IdResponse>('/api/items', {
+        nombre: `Ingrediente B reporte E2E ${marca}`,
+        precioBase: '650',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'ingrediente',
+        unidadMedida: 'unidad',
+        stock: '1000',
+        costo: '650',
+      })
+    ).id;
+    const platoReceta = (
+      await post<IdResponse>('/api/items', {
+        nombre: `Receta reporte E2E ${marca}`,
+        precioBase: '9500',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        categoriaId: catCocinaId,
+        ingredientes: [
+          {
+            ingredienteItemId: ingredienteA,
+            cantidad: '2',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+          {
+            ingredienteItemId: ingredienteB,
+            cantidad: '3',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+      })
+    ).id;
+
+    const cuenta = await abrirCuentaCon(
+      [{ itemId: platoReceta, cantidad: '2' }],
+      garzon1,
+    );
+    await despachar(cuenta.id);
+    const lineaReceta = (await detalleCuenta(cuenta.id)).lineas.find(
+      (l) => l.itemId === platoReceta,
+    )!;
+
+    const detalle = await anular(cuenta.id, lineaReceta.id, {
+      cantidad: '2',
+      motivoBajaId: motivoMermaId,
+    });
+    const anulacionRecetaId = detalle.anulaciones.find(
+      (a) => a.itemId === platoReceta,
+    )!.id;
+
+    // Por cada unidad de la receta anulada (2), se consume `cantidad` de cada
+    // ingrediente: 2×2=4 de A (a 800) y 2×3=6 de B (a 650). Los dos
+    // movimientos comparten `cuenta_linea_anulacion_id` y la misma moneda
+    // (CLP), así que el costo de la fila es su SUMA, no uno de los dos.
+    const costoEsperado = new Decimal('4')
+      .mul('800')
+      .plus(new Decimal('6').mul('650'))
+      .toFixed(4); // 3200 + 3900 = 7100.0000
+
+    const listado = await reporte(tokenEncargado, { garzonId: garzon1.id });
+    expect(listado.status).toBe(200);
+    const filaReceta = listado.body.data.find(
+      (f) => f.id === anulacionRecetaId,
+    )!;
+    expect(filaReceta).toBeDefined();
+    expect(filaReceta.precioCarta).toBe(
+      new Decimal('2').mul(lineaReceta.precioUnitario).toFixed(4),
+    );
+    expect(filaReceta.costoEstado).toBe('valorizado');
+    expect(filaReceta.costo).toEqual([
+      { monedaId: CLP_MONEDA_ID, monto: costoEsperado },
+    ]);
+
+    // La prueba de fondo: el resumen y el listado llevan el MISMO `garzonId`
+    // — el resumen además lleva `rangoAmplio()` (±3 días) porque `desde`/
+    // `hasta` son obligatorios ahí, el listado no lleva rango. Esa ventana
+    // cubre TODO lo de este garzón porque es fresco de este mismo spec (todo
+    // se crea segundos antes de leerlo): si no lo cubriera, el resumen
+    // devolvería de menos y el test FALLARÍA al comparar contra la suma del
+    // listado, no pasaría en falso. Se calcula acá sumando `listado.body.data`,
+    // nunca copiando la respuesta del resumen (si divergen, uno de los dos
+    // miente).
+    const resumenGarzon1 = await resumen(tokenEncargado, {
+      garzonId: garzon1.id,
+      ...rangoAmplio(),
+    });
+
+    let platosEsperados = new Decimal(0);
+    let precioCartaEsperado = new Decimal(0);
+    let sinValorizarEsperado = 0;
+    const costoPorMonedaEsperado = new Map<string, Decimal>();
+    for (const fila of listado.body.data) {
+      platosEsperados = platosEsperados.plus(fila.cantidad);
+      precioCartaEsperado = precioCartaEsperado.plus(fila.precioCarta);
+      if (fila.costoEstado === 'sin_valorizar') {
+        sinValorizarEsperado += 1;
+      } else {
+        for (const c of fila.costo) {
+          costoPorMonedaEsperado.set(
+            c.monedaId,
+            (costoPorMonedaEsperado.get(c.monedaId) ?? new Decimal(0)).plus(
+              c.monto,
+            ),
+          );
+        }
+      }
+    }
+
+    // `garzonId=garzon1.id` filtra a un solo garzón: un único grupo en `porGarzon`.
+    expect(resumenGarzon1.porGarzon).toHaveLength(1);
+    const grupoGarzon1 = resumenGarzon1.porGarzon[0];
+    expect(grupoGarzon1.garzonId).toBe(garzon1.id);
+    expect(grupoGarzon1.platos).toBe(platosEsperados.toFixed(4));
+    expect(grupoGarzon1.precioCarta).toBe(precioCartaEsperado.toFixed(4));
+    expect(grupoGarzon1.sinValorizar).toBe(sinValorizarEsperado);
+    expect(grupoGarzon1.costo).toEqual(
+      [...costoPorMonedaEsperado].map(([monedaId, monto]) => ({
+        monedaId,
+        monto: monto.toFixed(4),
+      })),
+    );
+    // Y el aporte de ESTA fila realmente entró a la suma (no es un cruce que
+    // pasa de casualidad porque ambos lados están vacíos).
+    expect(
+      new Decimal(costoEsperado).lessThanOrEqualTo(
+        costoPorMonedaEsperado.get(CLP_MONEDA_ID) ?? new Decimal(0),
+      ),
+    ).toBe(true);
   });
 
   /**

@@ -23,6 +23,7 @@ import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { SalonesService } from './salones.service';
 import { AnulacionesReporteService } from './anulaciones-reporte.service';
 import { FindAnulacionesDto } from './dto/find-anulaciones.dto';
+import { ResumenAnulacionesDto } from './dto/resumen-anulaciones.dto';
 import { CreateSalonDto } from './dto/create-salon.dto';
 import { UpdateSalonDto } from './dto/update-salon.dto';
 import { CreateMesaDto } from './dto/create-mesa.dto';
@@ -60,13 +61,23 @@ export class SalonesController {
   }
 
   // ── Reporte de anulaciones (spec `2026-09-18-reporte-anulaciones-design.md`)
-  // Ruta ESTÁTICA de un solo segmento: no choca con ninguna ruta `:id/...` de
-  // este controller (sus otros `GET` son `operacion` y `''`, sin `:id`).
+  // Rutas ESTÁTICAS, sin `:id`: no chocan entre ellas ni con ninguna ruta
+  // `:id/...` de este controller (sus otros `GET` son `operacion` y `''`).
   @Get('anulaciones')
   @RequiresPermiso('Salones', 'Ver todas')
   anulaciones(@Req() req: Request, @Query() query: FindAnulacionesDto) {
     const u = req.user as JwtUser;
     return this.anulacionesReporteService.findAll(u.tenantId ?? '', query);
+  }
+
+  @Get('anulaciones/resumen')
+  @RequiresPermiso('Salones', 'Ver todas')
+  anulacionesResumen(
+    @Req() req: Request,
+    @Query() query: ResumenAnulacionesDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.anulacionesReporteService.resumen(u.tenantId ?? '', query);
   }
 
   // ── Administración: salones ────────────────────────────────────────────

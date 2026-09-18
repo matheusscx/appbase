@@ -106,9 +106,24 @@ El par `Salones × Ver todas` **no existe hoy** en `modulo_app_permiso`: se siem
 del seeder) y se suma al rol del encargado del salón (`seedRolEncargadoSalon`). La acción `Ver todas` ya
 existe; no se crea ninguna. El admin del tenant la tiene sin sembrar nada, por `es_fijo`.
 
-**Filtros (los mismos en las dos):** `desde` / `hasta` (criterio compartido de rangos por fecha: la fecha
-pura se expande a la medianoche de la zona del tenant; `rango-fecha.util.ts`), `garzonId`, `tipo`
-(`merma` | `cortesia` | `no_elaborado`), `motivoBajaId`. El listado suma `page` / `pageSize`.
+**Filtros — comparten `garzonId`, `tipo` (`merma` | `cortesia` | `no_elaborado`) y `motivoBajaId`, pero
+`desde`/`hasta` NO son iguales en las dos rutas.** Los dos usan el criterio compartido de rangos por
+fecha (la fecha pura se expande a la medianoche de la zona del tenant; `rango-fecha.util.ts`). El listado
+suma `page` / `pageSize` y `desde`/`hasta` son **opcionales**: pagina, así que un rango sin acotar no
+trae todo a memoria de una vez. El resumen no pagina — corre dos consultas **sin `LIMIT`** sobre TODO el
+rango filtrado — así que ahí `desde`/`hasta` son **obligatorios**, con un **tope de 366 días de
+diferencia entre los dos** (ronda de fix 1, hallazgo de la revisión de seguridad: sin este piso, `{}`
+traía a memoria el historial entero de anulaciones del tenant). Mismo tope que
+`propinas/dto/query-propina-reporte.dto.ts`, pero **no** se reusa su `normalizarRangoReporte`: ahí
+`hasta` es exclusivo y rechaza `hasta <= desde`; acá `hasta` es inclusivo (`bordeHastaSql`, igual que el
+listado), así que `desde === hasta` es válido — la pantalla lo arma para pedir "hoy" con el mismo día en
+las dos puntas. ⚠️ **366 días de diferencia no son 366 días calendario cubiertos**: con fecha pura y
+`hasta` inclusivo (`bordeHastaSql` le suma un día a `hasta` antes de comparar), el resumen puede terminar
+cubriendo hasta **367 días calendario** — el tope acota la resta literal `hasta - desde`, no el rango que
+la consulta SQL termina trayendo, y el mensaje del 400 dice exactamente eso (ronda de fix 2: la lógica no
+cambió, solo el texto para que no prometa un número que el comportamiento no cumple). DTO propio del
+resumen (`ResumenAnulacionesDto`), la validación del rango vive en el service
+(`AnulacionesReporteService.validarRangoResumen`), no en un decorator.
 
 **Listado:**
 

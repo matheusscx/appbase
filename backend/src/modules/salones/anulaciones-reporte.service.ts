@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import { ESCALA_COSTO } from '../../common/constants/escalas';
@@ -15,12 +15,48 @@ import {
 } from '../../common/utils/rango-fecha.util';
 import { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
 import { FindAnulacionesDto } from './dto/find-anulaciones.dto';
+import { ResumenAnulacionesDto } from './dto/resumen-anulaciones.dto';
+
+/**
+ * Lo que `buildFilters` necesita de cualquiera de los dos DTOs del reporte.
+ * `FindAnulacionesDto` (listado, `desde`/`hasta` opcionales) y
+ * `ResumenAnulacionesDto` (resumen, obligatorios) califican los dos: un campo
+ * requerido es asignable a uno opcional, así que no hace falta que ninguno de
+ * los dos extienda al otro.
+ */
+interface FiltrosAnulacionesQuery {
+  desde?: string;
+  hasta?: string;
+  garzonId?: string;
+  motivoBajaId?: string;
+  tipo?: TipoMotivoBaja;
+}
 
 export type CostoEstado = 'valorizado' | 'no_aplica' | 'sin_valorizar';
 
 export interface CostoPorMoneda {
   monedaId: string;
   monto: string;
+}
+
+export interface GrupoResumen {
+  /** Σ `cantidad` de las filas del grupo, a la escala de `cantidad` (4). */
+  platos: string;
+  /** Σ del `precioCarta` YA REDONDEADO de cada fila, nunca `ROUND(Σ…)` (spec § 4). */
+  precioCarta: string;
+  /** Σ por moneda, solo de las filas `valorizado` (una `sin_valorizar` no suma acá). */
+  costo: CostoPorMoneda[];
+  /** Cuántas anulaciones del grupo quedaron `sin_valorizar`. `no_aplica` no cuenta. */
+  sinValorizar: number;
+}
+
+export interface ResumenAnulaciones {
+  porTipo: (GrupoResumen & { tipo: TipoMotivoBaja })[];
+  porGarzon: (GrupoResumen & {
+    garzonId: string | null;
+    garzonNombre: string | null;
+  })[];
+  porAutorizo: (GrupoResumen & { usuarioId: string; usuarioNombre: string })[];
 }
 
 export interface AnulacionReporteItem {
@@ -59,6 +95,27 @@ interface AnulacionRow {
   autorizado_por_nombre: string;
 }
 
+/** Fila cruda de la consulta base del resumen: sin paginar, todo el rango. */
+interface ResumenBaseRow {
+  id: string;
+  cantidad: string;
+  precio_unitario: string;
+  tipo: TipoMotivoBaja;
+  garzon_id: string | null;
+  garzon_nombre: string | null;
+  usuario_id: string;
+  usuario_nombre: string;
+}
+
+/** Acumulador en memoria de un grupo del resumen, antes de formatear a `GrupoResumen`. */
+interface AcumuladorGrupo {
+  meta: Record<string, unknown>;
+  platos: Decimal;
+  precioCarta: Decimal;
+  costoPorMoneda: Map<string, Decimal>;
+  sinValorizar: number;
+}
+
 interface CostoGrupoRow {
   cuenta_linea_anulacion_id: string;
   moneda_id: string;
@@ -93,7 +150,61 @@ const JOINS_BASE = `
 
 @Injectable()
 export class AnulacionesReporteService {
+  /**
+   * Tope de la DIFERENCIA entre `desde` y `hasta` en `resumen()` (ronda de
+   * fix 1): 366 días en ms. No es el tope de días calendario que el resumen
+   * puede llegar a cubrir — ver el docblock de `validarRangoResumen`.
+   */
+  private static readonly TOPE_RANGO_RESUMEN_MS = 366 * 24 * 60 * 60 * 1000;
+
   constructor(private readonly db: Db) {}
+
+  /**
+   * Rango de `resumen()`: `hasta` no puede ser anterior a `desde`, y la
+   * DIFERENCIA entre los dos no puede superar 366 días — mismo tope que
+   * `propinas/dto/query-propina-reporte.dto.ts`, mismo motivo (dos consultas
+   * SIN `LIMIT` sobre todo el rango). Corre ANTES de cualquier consulta.
+   *
+   * ⚠️ **366 días de diferencia no es 366 días calendario cubiertos.** Con
+   * fechas PURAS (`2026-01-01`, sin hora) y `hasta` INCLUSIVO
+   * (`bordeHastaSql`, que le suma un día a `hasta` antes de comparar — igual
+   * que el listado), el rango efectivo que la consulta SQL termina trayendo
+   * es de hasta **367 días calendario**: `desde` 1-ene, `hasta` 1-ene+366
+   * cubre del 1 de enero al 2 de enero del año siguiente inclusive, 367 días.
+   * Es la diferencia LITERAL entre los dos valores la que no puede superar
+   * 366 días — no el día calendario cubierto —, y así queda dicho en el
+   * mensaje del 400. Decisión del owner (ronda de fix 2): no cambiar la
+   * lógica —el tope ya es coherente con el criterio "`hasta` inclusivo" del
+   * resto del reporte—, solo que el texto no prometa un número que el
+   * comportamiento no cumple.
+   *
+   * Mide el INSTANTE tal cual llega (`Date.parse`), no el día calendario de
+   * la zona del tenant: si `desde`/`hasta` traen hora (`@IsDateString()` la
+   * permite), el tope se mide sobre esa hora exacta. La zona del tenant sí
+   * se usa más abajo, pero solo para expandir una fecha PURA a la consulta
+   * SQL (`bordeFechaSql`/`bordeHastaSql`), no para este chequeo.
+   *
+   * A diferencia de `normalizarRangoReporte` (propinas), donde `hasta` es
+   * EXCLUSIVO y rechaza `hasta <= desde`: acá `hasta` es INCLUSIVO
+   * (`bordeHastaSql`, igual que el listado), así que `desde === hasta` es
+   * válido — la pantalla lo arma para pedir "hoy" con el mismo día en las
+   * dos puntas.
+   */
+  private validarRangoResumen(desde: string, hasta: string): void {
+    const desdeMs = Date.parse(desde);
+    const hastaMs = Date.parse(hasta);
+    if (!Number.isFinite(desdeMs) || !Number.isFinite(hastaMs)) {
+      throw new BadRequestException('desde/hasta deben ser fechas válidas');
+    }
+    if (hastaMs < desdeMs) {
+      throw new BadRequestException('hasta no puede ser anterior a desde');
+    }
+    if (hastaMs - desdeMs > AnulacionesReporteService.TOPE_RANGO_RESUMEN_MS) {
+      throw new BadRequestException(
+        'La diferencia entre desde y hasta no puede superar 366 días',
+      );
+    }
+  }
 
   async findAll(
     tenantId: string,
@@ -151,13 +262,15 @@ export class AnulacionesReporteService {
 
   /**
    * El `WHERE` de filtros (sin tenant ni soft-delete de `cla`, que ya van en
-   * `JOINS_BASE`). Reutilizable por el resumen (Task 3): arma el mismo
-   * `FindAnulacionesDto` sin paginar, así que llama a este mismo método con
-   * `zona` ya resuelta por el llamador.
+   * `JOINS_BASE`). Compartido por `findAll` (`FindAnulacionesDto`, rango
+   * opcional) y `resumen` (`ResumenAnulacionesDto`, rango obligatorio, Task
+   * 3) vía `FiltrosAnulacionesQuery` — el tipo de `query` acá es esa
+   * interfaz, no ninguno de los dos DTOs concretos. `zona` ya viene resuelta
+   * por el llamador.
    */
   private buildFilters(
     tenantId: string,
-    query: FindAnulacionesDto,
+    query: FiltrosAnulacionesQuery,
     zona: string | null,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
@@ -242,37 +355,208 @@ export class AnulacionesReporteService {
     return grupos;
   }
 
+  /**
+   * `cantidad × precio_unitario`, YA REDONDEADO a `ESCALA_COSTO`: es la
+   * cifra que muestra cada fila del listado y la que suma el resumen (spec §
+   * 4: `Σ ROUND(...)`, no `ROUND(Σ...)`). Proyección de lectura: nadie paga
+   * este número y no se persiste. Redondearlo con la config vigente del
+   * tenant haría que el historial cambie al cambiar esa preferencia.
+   */
+  private precioCartaDeFila(cantidad: string, precioUnitario: string): string {
+    return new Decimal(cantidad).mul(precioUnitario).toFixed(ESCALA_COSTO);
+  }
+
+  /**
+   * El estado del costo de una fila y su desglose por moneda, compartido por
+   * `mapRow` (Task 2) y `resumen` (Task 3): mismo criterio de los tres
+   * estados en los dos lugares, sin duplicarlo.
+   */
+  private resolverCosto(
+    tipo: TipoMotivoBaja,
+    grupos: CostoGrupo[] | undefined,
+  ): { costoEstado: CostoEstado; costo: CostoPorMoneda[] } {
+    if (tipo === TipoMotivoBaja.NO_ELABORADO) {
+      return { costoEstado: 'no_aplica', costo: [] };
+    }
+    if (grupos?.some((g) => g.faltaCosto)) {
+      // Sin valorizar: la fila entera se marca, nunca una cifra parcial que
+      // parezca completa (spec § 4).
+      return { costoEstado: 'sin_valorizar', costo: [] };
+    }
+    // Incluye el hueco conocido (spec § 4): una merma/cortesía SIN ningún
+    // movimiento (ingredientes todos borrados) cae acá, con `costo: []` — no
+    // se inventa un cuarto estado para ese caso.
+    return {
+      costoEstado: 'valorizado',
+      costo: (grupos ?? []).map((g) => ({
+        monedaId: g.monedaId,
+        monto: g.monto,
+      })),
+    };
+  }
+
+  /**
+   * `GET /salones/anulaciones/resumen` (spec § 5.1). Cubre TODO el rango
+   * filtrado, no una página: dos consultas fijas, sin importar cuántas filas
+   * haya en el rango —esta (sin `LIMIT`/`OFFSET`, mismos `JOINS_BASE` +
+   * `buildFilters` que `findAll`) y `cargarCostosPorAnulacion` reutilizada
+   * tal cual, con TODOS los ids del rango en vez de los de una página—. Se
+   * agrupa en memoria porque el costo de cada fila ya viene resuelto por
+   * `resolverCosto` (mismo criterio que el listado: una fila `sin_valorizar`
+   * no aporta a `costo`, y `no_aplica` no aporta a `sinValorizar`) y no hay
+   * forma de expresar eso en un solo `GROUP BY` de SQL sin duplicar esa
+   * lógica en la consulta.
+   */
+  async resumen(
+    tenantId: string,
+    query: ResumenAnulacionesDto,
+  ): Promise<ResumenAnulaciones> {
+    // Primero que nada, antes de cualquier consulta: sin esto, las dos de
+    // abajo corren sin `LIMIT` sobre el historial entero del tenant (ronda de
+    // fix 1, hallazgo de la revisión de seguridad).
+    this.validarRangoResumen(query.desde, query.hasta);
+
+    const zona = requiereZonaTenant(query.desde, query.hasta)
+      ? await zonaHorariaTenant(this.db, tenantId)
+      : null;
+    const { filters, params } = this.buildFilters(tenantId, query, zona);
+
+    const rows: ResumenBaseRow[] = await this.db.query(
+      `SELECT
+         cla.cuenta_linea_anulacion_id AS id, cla.cantidad, cla.precio_unitario,
+         mb.tipo,
+         cla.garzon_id, g.nombre AS garzon_nombre,
+         cla.autorizado_por AS usuario_id, u.nombre AS usuario_nombre
+       ${JOINS_BASE}
+         ${filters}`,
+      params,
+    );
+
+    const idsConCosto = rows
+      .filter((r) => r.tipo !== TipoMotivoBaja.NO_ELABORADO)
+      .map((r) => r.id);
+    const costosPorAnulacion = await this.cargarCostosPorAnulacion(
+      tenantId,
+      idsConCosto,
+    );
+
+    const porTipo = new Map<string, AcumuladorGrupo>();
+    const porGarzon = new Map<string, AcumuladorGrupo>();
+    const porAutorizo = new Map<string, AcumuladorGrupo>();
+    const SIN_GARZON = '__sin_garzon__';
+
+    for (const r of rows) {
+      const { costoEstado, costo } = this.resolverCosto(
+        r.tipo,
+        costosPorAnulacion.get(r.id),
+      );
+      const cantidad = new Decimal(r.cantidad);
+      const precioCartaFila = this.precioCartaDeFila(
+        r.cantidad,
+        r.precio_unitario,
+      );
+
+      this.acumular(
+        porTipo,
+        r.tipo,
+        { tipo: r.tipo },
+        cantidad,
+        precioCartaFila,
+        costoEstado,
+        costo,
+      );
+      this.acumular(
+        porGarzon,
+        r.garzon_id ?? SIN_GARZON,
+        { garzonId: r.garzon_id, garzonNombre: r.garzon_nombre },
+        cantidad,
+        precioCartaFila,
+        costoEstado,
+        costo,
+      );
+      this.acumular(
+        porAutorizo,
+        r.usuario_id,
+        { usuarioId: r.usuario_id, usuarioNombre: r.usuario_nombre },
+        cantidad,
+        precioCartaFila,
+        costoEstado,
+        costo,
+      );
+    }
+
+    return {
+      porTipo: [...porTipo.values()].map((a) =>
+        this.cerrarGrupo<{ tipo: TipoMotivoBaja }>(a),
+      ),
+      porGarzon: [...porGarzon.values()].map((a) =>
+        this.cerrarGrupo<{
+          garzonId: string | null;
+          garzonNombre: string | null;
+        }>(a),
+      ),
+      porAutorizo: [...porAutorizo.values()].map((a) =>
+        this.cerrarGrupo<{ usuarioId: string; usuarioNombre: string }>(a),
+      ),
+    };
+  }
+
+  /** Acumula una fila del resumen en el grupo `clave` de `mapa`, creándolo si falta. */
+  private acumular(
+    mapa: Map<string, AcumuladorGrupo>,
+    clave: string,
+    meta: Record<string, unknown>,
+    cantidad: Decimal,
+    precioCartaFila: string,
+    costoEstado: CostoEstado,
+    costo: CostoPorMoneda[],
+  ): void {
+    let acc = mapa.get(clave);
+    if (!acc) {
+      acc = {
+        meta,
+        platos: new Decimal(0),
+        precioCarta: new Decimal(0),
+        costoPorMoneda: new Map<string, Decimal>(),
+        sinValorizar: 0,
+      };
+      mapa.set(clave, acc);
+    }
+    acc.platos = acc.platos.plus(cantidad);
+    acc.precioCarta = acc.precioCarta.plus(precioCartaFila);
+    if (costoEstado === 'sin_valorizar') {
+      acc.sinValorizar += 1;
+    } else {
+      for (const c of costo) {
+        acc.costoPorMoneda.set(
+          c.monedaId,
+          (acc.costoPorMoneda.get(c.monedaId) ?? new Decimal(0)).plus(c.monto),
+        );
+      }
+    }
+  }
+
+  private cerrarGrupo<T extends Record<string, unknown>>(
+    acc: AcumuladorGrupo,
+  ): GrupoResumen & T {
+    return {
+      ...(acc.meta as T),
+      platos: acc.platos.toFixed(ESCALA_COSTO),
+      precioCarta: acc.precioCarta.toFixed(ESCALA_COSTO),
+      costo: [...acc.costoPorMoneda].map(([monedaId, monto]) => ({
+        monedaId,
+        monto: monto.toFixed(ESCALA_COSTO),
+      })),
+      sinValorizar: acc.sinValorizar,
+    };
+  }
+
   private mapRow(
     r: AnulacionRow,
     grupos: CostoGrupo[] | undefined,
   ): AnulacionReporteItem {
-    // Proyección de lectura: nadie paga este número y no se persiste.
-    // Redondearlo con la config vigente del tenant haría que el historial
-    // cambie al cambiar esa preferencia (spec § 4).
-    const precioCarta = new Decimal(r.cantidad)
-      .mul(r.precio_unitario)
-      .toFixed(ESCALA_COSTO);
-
-    let costoEstado: CostoEstado;
-    let costo: CostoPorMoneda[];
-    if (r.tipo === TipoMotivoBaja.NO_ELABORADO) {
-      costoEstado = 'no_aplica';
-      costo = [];
-    } else if (grupos?.some((g) => g.faltaCosto)) {
-      // Sin valorizar: la fila entera se marca, nunca una cifra parcial que
-      // parezca completa (spec § 4).
-      costoEstado = 'sin_valorizar';
-      costo = [];
-    } else {
-      // Incluye el hueco conocido (spec § 4): una merma/cortesía SIN ningún
-      // movimiento (ingredientes todos borrados) cae acá, con `costo: []` —
-      // no se inventa un cuarto estado para ese caso.
-      costoEstado = 'valorizado';
-      costo = (grupos ?? []).map((g) => ({
-        monedaId: g.monedaId,
-        monto: g.monto,
-      }));
-    }
+    const precioCarta = this.precioCartaDeFila(r.cantidad, r.precio_unitario);
+    const { costoEstado, costo } = this.resolverCosto(r.tipo, grupos);
 
     return {
       id: r.id,
