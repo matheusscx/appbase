@@ -100,11 +100,11 @@ Body (opcional):  { "nombre": "Black Friday 2" }
                   Solo en los recursos con unicidad de nombre, y solo cuando
                   el usuario resolvió una colisión desde el modal. SIN body el
                   comportamiento es el de siempre: revive con el nombre que la
-                  fila ya tenía. Lo aceptan los 8 recursos con unicidad de
+                  fila ya tenía. Lo aceptan los 11 recursos con unicidad de
                   nombre. `garzones` NO: su colisión no es de nombre.
 
 Response (201): la entidad restaurada. (No hay `@HttpCode(200)` en ninguno
-                  de los 16 — Nest devuelve 201 por default en un POST, y
+                  de los 18 — Nest devuelve 201 por default en un POST, y
                   ninguno lo pisa.)
 Response (404): "<recurso> no está en la papelera" — no existe, existe y
                   está vivo, o existe borrada pero por el SISTEMA (no por
@@ -112,13 +112,16 @@ Response (404): "<recurso> no está en la papelera" — no existe, existe y
                   Una sola regla (WHERE ... AND eliminado_el IS NOT NULL AND
                   eliminado_por IS NOT NULL), sin rama que distinga los tres
                   casos.
-Response (400): en 9 de los 16 — los 8 con unicidad de nombre (descuentos,
-                  recargos, turnos, cajones, motivos-baja, motivos-diferencia,
-                  motivos-diferencia-inventario, grupos-modificadores) y
-                  `garzones`, por una restricción distinta que no es de nombre.
+Response (400): por colisión, en 12 de los 18 — los 11 con unicidad de
+                  nombre (descuentos, recargos, turnos, cajones, motivos-baja,
+                  motivos-diferencia, motivos-diferencia-inventario,
+                  grupos-modificadores, impuestos, ubicaciones,
+                  motivos-traslado) y `garzones`, por una restricción distinta
+                  que no es de nombre. (El otro 400, el del compuesto a medias
+                  en items y grupos-modificadores, está en su sección arriba.)
                   El reparto completo y por qué no se deduce de la familia de
                   borrado: "Colisión al restaurar" abajo.
-                  En los 8 con unicidad de nombre el 400 trae además
+                  En los 11 con unicidad de nombre el 400 trae además
                   `nombreSugerido` — un nombre libre para reintentar, ver
                   "Salida de la colisión" abajo. En `garzones` no, y en la
                   colisión de OPCIÓN de `grupos-modificadores` tampoco:
@@ -135,7 +138,7 @@ Response (400): en 9 de los 16 — los 8 con unicidad de nombre (descuentos,
 ### Esquema
 
 `eliminado_por UUID REFERENCES usuarios(usuario_id)`, **nullable**, agregada en las
-16 tablas del alcance (no en las 88 que ya tenían `eliminado_el` — una columna en
+18 tablas del alcance (no en las 88 que ya tenían `eliminado_el` — una columna en
 tablas cuyo borrado nadie puede deshacer es peso muerto). Nullable porque las filas
 ya borradas antes de esta feature no lo tienen, y porque el seeder borra sin usuario.
 
@@ -148,11 +151,11 @@ desaparecer solo porque ese usuario se dio de baja después.
 
 ### Las tres conductas
 
-**a) Restaurar deja inactivo SOLO a `items`.** De los 16 recursos, `items.remove()`
+**a) Restaurar deja inactivo SOLO a `items`.** De los 18 recursos, `items.remove()`
 es el único que pisa `activo = false` junto con `eliminado_el` — el valor previo de
 `activo` se pierde de verdad. Por eso `items.restaurar()` nunca vuelve a poner
 `activo: true`: reactivarlo es un segundo gesto deliberado, no algo que restaurar
-pueda inferir. En los otros 15 recursos `remove()` no toca ninguna columna de
+pueda inferir. En los otros 17 recursos `remove()` no toca ninguna columna de
 estado equivalente, así que restaurar no tiene nada que decidir ahí.
 
 **b) El colateral revive acotado por el timestamp exacto de ese borrado.** Tres
@@ -211,22 +214,23 @@ Probado con compuerta en `test/borrado-item-concurrente.e2e-spec.ts`, tests 6 a 
 ### Colisión al restaurar → 400
 
 La unicidad de nombre por tenant no es una propiedad de familia de borrado (SQL
-cruda vs. `softDelete()`): hay que medirla recurso por recurso. Medido para los 16:
+cruda vs. `softDelete()`): hay que medirla recurso por recurso. Medido para los 18:
 
-- **Con unicidad de nombre** — ocho recursos: `descuentos`, `recargos`, `turnos`,
+- **Con unicidad de nombre** — once recursos: `descuentos`, `recargos`, `turnos`,
   `cajones`, `motivos-baja`, `motivos-diferencia`, `motivos-diferencia-inventario`,
-  `grupos-modificadores`. Los ocho la enforcean igual: **índice único parcial**
+  `grupos-modificadores`, `impuestos` (2026-08-16), `ubicaciones` y
+  `motivos-traslado` (2026-09). Los once la enforcean igual: **índice único parcial**
   (`WHERE eliminado_el IS NULL`) sobre `(tenant_id, lower(nombre))`, más una
   validación en código que compara igual y da el mensaje amable. Si alguien ocupó
   el nombre mientras la fila estaba en la papelera, `restaurar()` capta el `23505`
   (unique_violation) de Postgres y responde 400 pidiendo renombrar el vivo o el
   restaurado — no sobrescribe en silencio ni intenta un nombre alternativo.
-- **Sin unicidad de ningún tipo** — siete recursos: `items`, `categorias`,
-  `impuestos`, `terceros` (catálogo del negocio), `salones`, `mesas`, `impresoras`
+- **Sin unicidad de ningún tipo** — seis recursos: `items`, `categorias`,
+  `terceros` (catálogo del negocio), `salones`, `mesas`, `impresoras`
   (config operativa). Ahí la colisión no puede ocurrir porque no hay regla que
   colisionar.
 
-Total: 8 (unicidad de nombre) + 7 (sin unicidad) = 15. El recurso 16,
+Total: 11 (unicidad de nombre) + 6 (sin unicidad) = 17. El recurso 18,
 `garzones`, tiene índice único parcial pero NO de nombre — es un caso aparte,
 documentado abajo.
 
@@ -243,7 +247,7 @@ eliminado_el IS NULL`) permite un solo garzón placeholder "Mostrador" vivo por
 tenant (lo crea `asegurarMostrador()` al procesar la primera propina directa del
 POS de cada tenant; ver `docs/features/pagos.md`). `garzones` no indexa `nombre` —
 dos garzones con el mismo nombre conviven sin problema —, así que esto no es el
-mismo caso que los ocho de arriba. Colisiona por un camino angosto: si el
+mismo caso que los once de arriba. Colisiona por un camino angosto: si el
 Mostrador se borra y otra venta con propina directa crea uno nuevo mientras el
 viejo sigue en la papelera, restaurar el viejo choca contra el nuevo — mismo 400,
 capturando el mismo `23505`.
@@ -281,8 +285,8 @@ dejar editar, no renombrar solo—, con el número al final empezando en 2
 («Black Friday 2»), porque el "1" implícito es la fila viva.
 
 El cuerpo del 400 pasa a ser `{ message, nombreSugerido }`. El cálculo vive en
-`backend/src/common/utils/nombre-sugerido.util.ts` (compartido por los 8 recursos
-con unicidad de nombre: en los 8 la aritmética es la misma aunque la query no lo
+`backend/src/common/utils/nombre-sugerido.util.ts` (compartido por los 11 recursos
+con unicidad de nombre: en los 11 la aritmética es la misma aunque la query no lo
 sea) y trae **una sola query** con todos los nombres que compiten — no un `SELECT`
 por candidato, que sería un N+1 disfrazado de bucle.
 
@@ -300,23 +304,23 @@ que también está tomado, vuelve el 400 con la sugerencia **siguiente** (nunca
 encadena "… 2 2"). La alternativa —que el frontend confíe en que la sugerencia
 sigue libre cuando la manda— apuesta a que nada pasó entre que la vio y confirmó.
 
-**Implementado en los 8, con una sola forma**: la sugerencia se calcula **dentro
+**Implementado en los 11, con una sola forma**: la sugerencia se calcula **dentro
 del `catch` del `23505`**. Se evaluó consultar antes y se descartó con un
 argumento, no por gusto: con un índice el `catch` hace falta igual —entre
 consultar y escribir, otra transacción puede tomar el nombre—, así que
 pre-consultar agrega una query en TODOS los restaurar y no permite sacar el
 bloque. Queda dominada. El `UPDATE` corre en autocommit, así que su fallo no deja
 una transacción abortada y las queries del `catch` funcionan (verificado:
-ninguno de los 8 envuelve el restaurar en una transacción explícita).
+ninguno de los 11 envuelve el restaurar en una transacción explícita).
 
 La query compartida vive en `errorDeColisionNombre()` (por repositorio) y
-`errorDeColisionNombreSQL()` (por `DataSource`, para los cuatro services que
+`errorDeColisionNombreSQL()` (por `DataSource`, para los seis services que
 hablan SQL cruda y no tienen repo), en
-`common/utils/nombre-sugerido.util.ts`. Sirve para los 8 porque las 8 tablas
+`common/utils/nombre-sugerido.util.ts`. Sirve para los 11 porque las 11 tablas
 comparten exactamente `tenant_id`, `nombre` y `eliminado_el` (verificado contra
 `information_schema`, no asumido por parecido de nombre).
 
-**Las 8 comparan sin mayúsculas**, y eso importa para la sugerencia: las 8
+**Las 11 comparan sin mayúsculas**, y eso importa para la sugerencia: las 11
 llamadas pasan `ignorarMayusculas`, porque si no devolverían un nombre que la
 base considera tomado y el usuario recibiría **el mismo 400 después de
 confirmar el modal**. El parámetro sigue existiendo aunque hoy todas lo pasen en
@@ -331,7 +335,7 @@ algo que no es la causa.
 ### Solo lo que borró una persona
 
 > ✅ **Implementada entera y verificada contra Postgres el 2026-08-01**, en las dos
-> puertas y en los 16 recursos. Se llegó acá cerrando dos agujeros que la primera
+> puertas y en los 18 recursos. Se llegó acá cerrando dos agujeros que la primera
 > entrega dejó abiertos, los dos anotados por si vuelven a aparecer en código nuevo:
 >
 > 1. **El listado de `impuestos` no filtraba** — el `OR` de tenant/país no estaba
@@ -342,11 +346,11 @@ algo que no es la causa.
 >    persona, y volvía a hacerlo restaurable. En `impuestos` eso reabría la doble
 >    tributación de [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md).
 >
-> El e2e de esta regla pasó de cubrir 2 recursos a cubrir los **16**, con un test
+> El e2e de esta regla pasó de cubrir 2 recursos a cubrir los **18**, con un test
 > que falla si la lista deja de nombrarlos a todos.
 
 **Decisión del owner (2026-08):** la papelera solo expone y restaura filas con
-`eliminado_por` **no nulo**. Aplica a los 16 recursos, en las dos puertas —el
+`eliminado_por` **no nulo**. Aplica a los 18 recursos, en las dos puertas —el
 listado con `incluirEliminados` y `restaurar()`— con una sola regla, sin casos
 especiales por recurso:
 
@@ -446,7 +450,7 @@ en vuelo, y sin protección gana el que responda último, no el último click. L
 pantallas con `cargar()` propio (como `categorias.vue`) necesitan su propia cola
 serial local (`cargaEnCurso`); las que usan `usePaginatedList` (como `items.vue`)
 ya la heredan del composable (`usePaginatedList.ts` → `fetch()`), sin nada que
-replicar. **De las 15, solo `items.vue` la hereda**: las otras 14 tienen su
+replicar. **De las 17, solo `items.vue` la hereda**: las otras 16 tienen su
 `cargar()` propio y su cola local. Al cablear una pantalla nueva, medí cómo carga
 de verdad en vez de grepear `usePaginatedList` — el import del TIPO
 `PaginatedResponse` para otra cosa hace que el grep mienta, y ya pasó una vez.
@@ -461,15 +465,19 @@ de verdad en vez de grepear `usePaginatedList` — el import del TIPO
   pero sin `eliminado_por` (la borró el sistema).
 - **Colisión**: con un vivo ocupando el nombre (o, en `garzones`, con el Mostrador
   nuevo ya creado), `restaurar()` da 400 y no modifica ninguna de las dos filas.
-  Cubre los 8 con unicidad de nombre más `garzones`, cuyo índice único es de otra
-  cosa.
+  `test/papelera.e2e-spec.ts` cubre ocho de los 11 con unicidad de nombre más
+  `garzones`, cuyo índice único es de otra cosa. De los tres que faltan ahí,
+  `impuestos` lo tiene en `test/unicidad-nombre.e2e-spec.ts`, `motivos-traslado`
+  en `test/motivos-traslado.e2e-spec.ts`, y `ubicaciones` todavía no tiene test de
+  colisión en ningún lado.
 - **Que la unicidad sea case-insensitive se prueba contra Postgres**
-  (`test/unicidad-nombre.e2e-spec.ts`): la forma del índice de las 8 tablas —por
+  (`test/unicidad-nombre.e2e-spec.ts`): la forma del índice de las 9 tablas que
+  lista (faltan `ubicaciones` y `motivo_traslado`) —por
   tabla, no por nombre de índice, que no es la regla— y la conducta por el camino
   de `restaurar()`, que es el único que escribe sin pasar por la validación de
   código. Un unit con el repositorio mockeado no ve la base, que es justo lo que
   acá se está fijando.
-- **Salida de la colisión** (los 8 con unicidad de nombre): el 400 trae un
+- **Salida de la colisión** (los 8 que cubre `test/papelera.e2e-spec.ts`): el 400 trae un
   `nombreSugerido` libre y restaurar con él revive y renombra en una sola
   escritura; reintentar con un nombre también tomado da la sugerencia siguiente
   sin encadenar sufijos. La aritmética del sufijo tiene su unit propio

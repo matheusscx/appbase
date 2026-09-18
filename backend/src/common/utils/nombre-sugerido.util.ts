@@ -5,9 +5,10 @@ import type { Db } from '../db/db.service';
  * Sufijo numérico para proponer un nombre libre cuando restaurar una fila de
  * la papelera choca con una viva que ya tomó ese nombre.
  *
- * Lo consumen los 8 recursos con unicidad de nombre por tenant (`descuentos`,
- * `recargos`, `turnos`, `cajones`, `motivos-baja`, `motivos-diferencia`,
- * `motivos-diferencia-inventario`, `grupos-modificadores`), y los 8 la detectan
+ * Lo consumen los 11 recursos de la papelera con unicidad de nombre por tenant
+ * (`descuentos`, `recargos`, `turnos`, `cajones`, `motivos-baja`,
+ * `motivos-diferencia`, `motivos-diferencia-inventario`, `grupos-modificadores`,
+ * `impuestos`, `ubicaciones`, `motivos-traslado`), y los 11 la detectan
  * igual: capturando el `23505` de Postgres, o sea recién DESPUÉS de que falla
  * el UPDATE que revive la fila. Pre-consultar sería una query extra en TODOS
  * los restaurar sin poder sacar el `catch` —entre consultar y escribir, otra
@@ -16,6 +17,11 @@ import type { Db } from '../db/db.service';
  * ⚠️ `garzones` NO usa esto: también devuelve 400 al restaurar, pero su
  * colisión no es de nombre (`uq_garzones_mostrador_tenant` permite un solo
  * placeholder "Mostrador" vivo por tenant). Renombrar no la resuelve.
+ *
+ * ⚠️ `promociones` tampoco, por el otro motivo: tiene nombre único por tenant
+ * —y usa `traducirColisionDeNombre` de más abajo— pero no está en la papelera,
+ * así que no tiene `restaurar()` donde sugerir nada. La lista de arriba son los
+ * recursos de la papelera con nombre único, no todas las tablas que lo tienen.
  */
 
 /**
@@ -65,9 +71,9 @@ export function baseParaSugerir(
  * están todos ocupados, sigue subiendo.
  *
  * `ignorarMayusculas` tiene que reflejar **cómo enforcea la unicidad la tabla
- * de destino**, no una preferencia. Desde el 2026-08-01 las 8 la indexan por
+ * de destino**, no una preferencia. Desde el 2026-08-01 se indexan por
  * `lower(nombre)` (decisión del owner: "Extras" y "extras" son el mismo
- * nombre), así que las 8 llamadas lo pasan en `true` — pero el parámetro sigue
+ * nombre), así que las 11 llamadas lo pasan en `true` — pero el parámetro sigue
  * existiendo porque es la tabla la que manda, no una convención: si mañana
  * alguna se indexa distinto, el default en `false` sobre una tabla
  * case-insensitive haría sugerir "Merma 2" habiendo un "merma 2" vivo, un
@@ -108,13 +114,13 @@ export function patronLikeNombre(base: string): string {
  * `base` y cualquier `"<base> …"`); numerar es después aritmética en memoria.
  * Un `SELECT` por candidato sería un N+1 disfrazado de bucle.
  *
- * Sirve para cualquier recurso de la papelera porque las 9 tablas con unicidad
+ * Sirve para cualquier recurso de la papelera porque las 11 tablas con unicidad
  * de nombre comparten exactamente las tres columnas que toca —`tenant_id`,
  * `nombre`, `eliminado_el`— **verificado contra `information_schema` el
  * 2026-08-01**, no asumido por parecido de nombre.
  *
  * La novena (`impuestos`, 2026-08-16) tiene las tres, con una diferencia que
- * NO rompe nada y conviene saber: su `tenant_id` es **nullable** (las otras 8
+ * NO rompe nada y conviene saber: su `tenant_id` es **nullable** (las otras 10
  * lo tienen `NOT NULL`), porque ahí conviven el catálogo del país y el del
  * tenant. El `WHERE tenant_id = :tenantId` de acá abajo deja fuera las filas
  * del país —`NULL = valor` no matchea— y eso es exactamente lo que se quiere:
@@ -164,8 +170,9 @@ export async function errorDeColisionNombre<T extends ObjectLiteral>(
 /**
  * Igual que `errorDeColisionNombre` pero para los services que hablan SQL
  * cruda y **no tienen repositorio** (`motivos-baja`, `motivos-diferencia`,
- * `motivos-diferencia-inventario`, `grupos-modificadores`: los cuatro
- * resuelven el restaurar con un `UPDATE … RETURNING` sobre `ds`).
+ * `motivos-diferencia-inventario`, `grupos-modificadores`, `ubicaciones`,
+ * `motivos-traslado`: los seis resuelven el restaurar con un
+ * `UPDATE … RETURNING` sobre `ds`).
  *
  * Existe como gemela y no como parámetro opcional de la otra porque lo que
  * cambia es el motor de la query, no un detalle: `Repository.createQueryBuilder`
@@ -175,7 +182,7 @@ export async function errorDeColisionNombre<T extends ObjectLiteral>(
  * `tabla` se interpola en el SQL: **constante del código, nunca dato de
  * request**. Los valores van parametrizados (`$1`, `$2`).
  *
- * ⚠️ **Precondición del `ds: Db`:** los cuatro llamadores actuales lo pasan
+ * ⚠️ **Precondición del `ds: Db`:** los seis llamadores actuales lo pasan
  * desde el `catch` de un `restaurar()` que corre en autocommit (el `UPDATE …
  * RETURNING` de arriba no vive dentro de un `db.transaccion(...)`), así que
  * `Db.query()` resuelve al pool sin depender de contexto. Si algún día se
@@ -233,11 +240,11 @@ function armarError(
 /**
  * Traduce el `23505` de una colisión de nombre en `create()`/`update()`.
  *
- * Los 8 recursos con nombre único pre-consultan el nombre y después escriben.
+ * Los 11 recursos que usan esta red pre-consultan el nombre y después escriben.
  * Entre esas dos sentencias otra transacción puede tomarlo: el índice único
  * hace su trabajo —nunca quedan dos filas vivas con el mismo nombre— pero
  * quien pierde la carrera veía un **500** en vez del 400 que ve todo el mundo
- * cuando el nombre está tomado. `restaurar()` ya lo traducía en los 8; esto es
+ * cuando el nombre está tomado. `restaurar()` ya lo traducía; esto es
  * la misma red para las otras dos puertas.
  *
  * `revalidar` es la validación de nombre que el propio módulo ya tiene, y se
@@ -249,7 +256,8 @@ function armarError(
  *
  * Toma la escritura **ya en vuelo** y no un thunk: así el llamador no tiene que
  * re-indentar el cuerpo de su transacción para envolverlo, y el diff de sumar
- * esta red queda en dos líneas por método en vez de reformatear los 16.
+ * esta red queda en dos líneas por método en vez de reformatear el cuerpo de
+ * cada uno.
  *
  * ⚠️ **El filo de esa decisión:** entre `const escritura = …` y esta llamada no
  * puede meterse un `await`. La promesa ya está corriendo, así que en esa ventana
@@ -262,11 +270,11 @@ function armarError(
  * `grupo_modificador_id + item_id` de las opciones). Sin él, un 23505 del OTRO
  * índice igual dispara `revalidar`, y si el nombre además está tomado por una
  * tercera transacción el usuario recibe "Ya existe un grupo con el nombre…" —
- * mandándolo a renombrar algo que no es la causa. Los otros 7 recursos no lo
+ * mandándolo a renombrar algo que no es la causa. Los otros 10 llamadores no lo
  * pasan y su comportamiento no cambia.
  *
  * Cuando el error no trae `constraint` se revalida igual: preferir el mensaje
- * accionable a un 500, que es el comportamiento que ya tenían los 8.
+ * accionable a un 500, que es el comportamiento que ya tenían todos.
  */
 export async function traducirColisionDeNombre<T>(
   escritura: Promise<T>,
