@@ -89,6 +89,11 @@ Response (200):
 
 Query params opcionales: `page`, `pageSize`, `fechaDesde`, `fechaHasta`, `metodoPagoId`, `cajaId`, `ventaId`, `ventaEstado`.
 
+`fechaDesde`/`fechaHasta` siguen el contrato del resto de los filtros de fecha
+(`rango-fecha.util.ts`): una fecha pura (`2026-09-16`) es el día **local del tenant** y
+`fechaHasta` lo incluye completo; un timestamp con hora se respeta tal cual. Hasta el
+2026-09-18 la fecha pura se leía en UTC y `fechaHasta` dejaba afuera el día elegido.
+
 ### GET /api/pagos/resumen
 
 KPIs globales del tenant (independientes de filtros/página).

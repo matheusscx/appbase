@@ -16,6 +16,9 @@ import { AppModule } from '../src/app.module';
  *
  * Estos casos fijan las dos mitades contra el stack real, que es donde se
  * resuelve la aritmética de la zona.
+ *
+ * `fechaDesde`/`fechaHasta` de `GET /pagos` siguen el mismo contrato, pero sus
+ * casos viven en `pagos-dia-local.e2e-spec.ts`, que ya crea sus propios pagos.
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';

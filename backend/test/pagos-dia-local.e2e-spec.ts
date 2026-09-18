@@ -24,19 +24,25 @@ interface Resumen {
 }
 
 /**
- * El "Hoy" de `GET /pagos/resumen` es el día LOCAL del tenant.
+ * En pagos, "el día" es el día LOCAL del tenant: el "Hoy" de
+ * `GET /pagos/resumen` y la fecha pura de `fechaDesde`/`fechaHasta` en
+ * `GET /pagos`.
  *
- * El bug que fija: el resumen comparaba `p.fecha::date = CURRENT_DATE`, que
- * resuelve el día en la zona de la SESIÓN de Postgres —UTC, nadie la fija—. En
- * Chile eso corta a las 21:00 (20:00 en invierno): lo cobrado en la noche caía
- * en "mañana".
+ * Los bugs que fija: el resumen comparaba `p.fecha::date = CURRENT_DATE` y el
+ * listado `p.fecha >= $n` con la fecha pura cruda. Los dos resuelven el día en
+ * la zona de la SESIÓN de Postgres —UTC, nadie la fija—: en Chile el día
+ * cortaba a las 21:00 (20:00 en invierno), y `fechaHasta` dejaba afuera el día
+ * elegido entero. El contrato del listado es el de los demás filtros de fecha
+ * (`filtros-fecha-zona.e2e-spec.ts`): fecha pura = medianoche local, `hasta`
+ * inclusivo del día, timestamp respetado tal cual.
  *
  * Los dos pagos se crean por la API; el SQL solo les mueve la hora, que es lo
  * único que un test no puede esperar. Las dos horas quedan a 30 minutos de la
  * medianoche local, una de cada lado, y se calculan en Postgres con la zona de
  * la provincia del tenant — así el test discrimina a cualquier hora en que
- * corra: antes de las 21:00 locales el código viejo cuenta los dos, después no
- * cuenta ninguno.
+ * corra: antes de las 21:00 locales el resumen viejo cuenta los dos, después no
+ * cuenta ninguno; y el listado viejo mete el de ayer y saca el de hoy a
+ * cualquier hora, porque la fecha que se le pasa es la local.
  *
  * Vale también el día del salto de septiembre, cuando la medianoche local no
  * existe: medido el 2026-09-18 sobre el 2026-09-06, los ±30 minutos de
@@ -44,7 +50,7 @@ interface Resumen {
  * En abril la hora que se repite es la de 23:00 a 23:59 del sábado, no la
  * medianoche, así que el borde del service nunca cae en ella.
  */
-describe('Pagos: el "Hoy" del resumen es el día local del tenant (e2e)', () => {
+describe('Pagos: el día es el día local del tenant (e2e)', () => {
   let app: INestApplication<App>;
   let ds: DataSource;
   let token: string;
@@ -103,6 +109,45 @@ describe('Pagos: el "Hoy" del resumen es el día local del tenant (e2e)', () => 
           AND t.tenant_id = p.tenant_id`,
       [pagoId, minutos],
     );
+  }
+
+  /** Deja un pago a las 00:30 locales de hoy y el otro a las 23:30 de ayer. */
+  async function ubicarAlrededorDeMedianoche(): Promise<void> {
+    const [deHoy, deAyer] = pagoIds;
+    await moverAMedianocheLocal(deHoy, 30);
+    await moverAMedianocheLocal(deAyer, -30);
+  }
+
+  /** `YYYY-MM-DD` de hoy en la zona de la provincia del tenant. */
+  async function hoyLocal(): Promise<string> {
+    const [{ hoy }]: { hoy: string }[] = await ds.query(
+      `SELECT to_char((NOW() AT TIME ZONE pr.zona_horaria)::date, 'YYYY-MM-DD') AS hoy
+         FROM tenants t
+         JOIN provincia pr ON pr.provincia_id = t.provincia_id
+        WHERE t.tenant_id = $1`,
+      [PARIS_TENANT_ID],
+    );
+    return hoy;
+  }
+
+  async function instanteDe(pagoId: string): Promise<Date> {
+    const [{ fecha }]: { fecha: Date }[] = await ds.query(
+      `SELECT fecha FROM pagos WHERE pago_id = $1`,
+      [pagoId],
+    );
+    return fecha;
+  }
+
+  /** Ids de los pagos de ESTA suite que devuelve el listado con esos filtros. */
+  async function listados(filtros: Record<string, string>): Promise<string[]> {
+    const res = await request(app.getHttpServer())
+      .get('/api/pagos')
+      .query({ ...filtros, cajaId: caja!.id, pageSize: '100' })
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    return (res.body as { data: { id: string }[] }).data
+      .map((p) => p.id)
+      .filter((id) => pagoIds.includes(id));
   }
 
   beforeAll(async () => {
@@ -200,5 +245,52 @@ describe('Pagos: el "Hoy" del resumen es el día local del tenant (e2e)', () => 
     expect(new Decimal(despues.montoHoy).minus(antes.montoHoy).toFixed(4)).toBe(
       new Decimal(neto).toFixed(4),
     );
+  });
+
+  describe('el listado filtra por el día local', () => {
+    it('`fechaDesde` en fecha pura arranca a la medianoche local, no a la de UTC', async () => {
+      await ubicarAlrededorDeMedianoche();
+      const [deHoy, deAyer] = pagoIds;
+
+      const ids = await listados({ fechaDesde: await hoyLocal() });
+
+      expect(ids).toContain(deHoy);
+      expect(ids).not.toContain(deAyer);
+    });
+
+    it('`fechaHasta` en fecha pura incluye el día elegido completo', async () => {
+      await ubicarAlrededorDeMedianoche();
+      const [deHoy, deAyer] = pagoIds;
+
+      const ids = await listados({ fechaHasta: await hoyLocal() });
+
+      expect(ids).toContain(deHoy);
+      expect(ids).toContain(deAyer);
+    });
+
+    it('un timestamp en `fechaDesde` corta en el instante, sin ensancharse a la medianoche', async () => {
+      await ubicarAlrededorDeMedianoche();
+      const [deHoy] = pagoIds;
+      const unSegundoDespues = new Date(
+        (await instanteDe(deHoy)).getTime() + 1000,
+      ).toISOString();
+
+      const ids = await listados({ fechaDesde: unSegundoDespues });
+
+      expect(ids).not.toContain(deHoy);
+    });
+
+    it('un timestamp en `fechaHasta` corta en el instante, no al final del día', async () => {
+      await ubicarAlrededorDeMedianoche();
+      const [deHoy, deAyer] = pagoIds;
+      const unSegundoAntes = new Date(
+        (await instanteDe(deHoy)).getTime() - 1000,
+      ).toISOString();
+
+      const ids = await listados({ fechaHasta: unSegundoAntes });
+
+      expect(ids).not.toContain(deHoy);
+      expect(ids).toContain(deAyer);
+    });
   });
 });

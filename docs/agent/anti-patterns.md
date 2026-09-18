@@ -110,13 +110,15 @@ respuesta al TIPO de la columna, no una verdad permanente. `items.service.ts` te
 corrimiento con la sesión en `America/Santiago`). Si cambiás el tipo de una columna, releé
 los casts que la tocan en vez de conservarlos.
 
-**Otra cara que tampoco caza ningún test de esquema (2026-09-18):** `CURRENT_DATE` y
-`columna::date` resuelven el día en el `TimeZone` de la **sesión** —UTC, nadie lo fija—, no en
-el del tenant. `GET /pagos/resumen` contaba su "Hoy" con `p.fecha::date = CURRENT_DATE`, así
-que en Chile cortaba a las 21:00 (20:00 en invierno). "El día" sale de `zonaHorariaTenant`
-(`rango-fecha.util.ts`) y se compara como ventana `>= medianoche local AND < la siguiente`,
-con el molde de `caja.service.ts` → `resumenDescuadresDia`. Lo fija
-`test/pagos-resumen-hoy.e2e-spec.ts`.
+**Otra cara que tampoco caza ningún test de esquema (2026-09-18):** `CURRENT_DATE`,
+`columna::date` y una fecha pura comparada cruda contra un `timestamptz` resuelven el día en el
+`TimeZone` de la **sesión** —UTC, nadie lo fija—, no en el del tenant. En pagos estaban las
+dos formas: el "Hoy" de `GET /pagos/resumen` (`p.fecha::date = CURRENT_DATE`) y
+`fechaDesde`/`fechaHasta` de `GET /pagos` (`p.fecha >= $n`). En Chile el día cortaba a las
+21:00 (20:00 en invierno), y "hasta el 16" dejaba afuera el 16. "El día" sale de
+`zonaHorariaTenant` (`rango-fecha.util.ts`): una ventana `>= medianoche local AND < la
+siguiente` para "hoy" (molde de `caja.service.ts` → `resumenDescuadresDia`) y
+`bordeFechaSql`/`bordeHastaSql` para un filtro. Lo fija `test/pagos-dia-local.e2e-spec.ts`.
 
 ### ❌ `tenant_id` tomado del request
 

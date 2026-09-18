@@ -6,7 +6,12 @@ import {
 import { EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
-import { zonaHorariaTenant } from '../../common/utils/rango-fecha.util';
+import {
+  bordeFechaSql,
+  bordeHastaSql,
+  requiereZonaTenant,
+  zonaHorariaTenant,
+} from '../../common/utils/rango-fecha.util';
 import { CajaService } from '../caja/caja.service';
 import { EstadoVenta } from '../ventas/entities/venta.entity';
 import { Pago } from './entities/pago.entity';
@@ -540,11 +545,16 @@ export class PagosService {
     verTodas: boolean,
   ): Promise<PaginatedResponse<PagoListItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
+    // Solo si hay borde de fecha que expandir: ver `rango-fecha.util.ts`.
+    const zona = requiereZonaTenant(query.fechaDesde, query.fechaHasta)
+      ? await zonaHorariaTenant(this.db, tenantId)
+      : null;
     const { filters, params } = this.buildListarFilters(
       tenantId,
       query,
       usuarioId,
       verTodas,
+      zona,
     );
 
     const countRows: { total: number }[] = await this.db.query(
@@ -613,6 +623,7 @@ export class PagosService {
     query: QueryPagosDto,
     usuarioId: string,
     verTodas: boolean,
+    zona: string | null,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let paramIdx = 2;
@@ -626,13 +637,32 @@ export class PagosService {
       filters += this.filtroDeMisCajas(paramIdx++);
     }
 
+    // Fecha pura = medianoche LOCAL del tenant y `hasta` inclusivo del día;
+    // un timestamp se respeta tal cual. La zona solo viaja si algún borde la
+    // usa: Postgres rechaza un parámetro que la consulta no referencia.
+    let idxZona = 0;
+    if (zona != null) {
+      params.push(zona);
+      idxZona = paramIdx++;
+    }
     if (query.fechaDesde) {
-      filters += ` AND p.fecha >= $${paramIdx++}`;
       params.push(query.fechaDesde);
+      filters += bordeFechaSql(
+        'p.fecha',
+        '>=',
+        query.fechaDesde,
+        paramIdx++,
+        idxZona,
+      );
     }
     if (query.fechaHasta) {
-      filters += ` AND p.fecha <= $${paramIdx++}`;
       params.push(query.fechaHasta);
+      filters += bordeHastaSql(
+        'p.fecha',
+        query.fechaHasta,
+        paramIdx++,
+        idxZona,
+      );
     }
     if (query.metodoPagoId) {
       filters += ` AND p.metodo_pago_id = $${paramIdx++}`;
