@@ -359,12 +359,15 @@ Trazabilidad de stock para items tipo **producto**. Todo cambio de stock queda r
 - `tenant_id` y `usuario_id` vienen del token, nunca del body.
 
 **Costo de un producto: promedio ponderado móvil (CPP), no último costo.**
-`item_producto.costo_actual` se recalcula **solo** con una entrada `motivo = 'compra'`
-que trae `costoUnitario`: `(stock_anterior × costo_actual + cantidad × costo_compra) /
-(stock_anterior + cantidad)`. Sin stock previo o sin costo previo, el costo de compra
-manda tal cual (no hay masa que promediar). Ninguna otra entrada ni ninguna salida mueve
-el costo — ni siquiera la devolución de venta, porque la unidad que vuelve ya salió con
-un costo congelado y re-promediarla mezclaría costo de venta con costo de compra.
+`item_producto.costo_actual` se recalcula con una entrada que trae `costoUnitario` y es
+una **compra** o una **reversión de salida** (`anulacion`, `devolucion`, que reingresan al
+costo con el que la unidad salió): `(stock_previo × costo_actual + cantidad × costo_compra)
+/ (stock_previo + cantidad)`. `stock_previo` es el stock del producto en **todas** sus
+ubicaciones, no el de la ubicación que recibe: el costo es uno solo por producto para todo
+el tenant. Sin stock previo o sin costo previo, el costo de compra manda tal cual (no hay
+masa que promediar). Ninguna otra entrada ni ninguna salida mueve el costo, y un traslado
+tampoco: mueve kilos, no valor. Detalle: `docs/features/inventario-kardex.md` § Regla de
+costo.
 
 **Costo `0` y "sin costo" son estados distintos, y el sistema no los mezcla** (decisión
 del owner, 2026-08-29). El `0` es un costo **conocido**: mercadería de donación o muestra

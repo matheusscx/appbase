@@ -466,8 +466,32 @@ export class InventarioService {
       params.tipo === 'entrada' &&
       MOTIVOS_QUE_RECALCULAN_CPP.includes(params.motivo)
     ) {
+      // El peso del promedio es el stock del PRODUCTO en todo el tenant, no
+      // `stockAnterior`: ése es el de la ubicación del movimiento y el costo es
+      // uno solo por producto (decisión 3 de
+      // `docs/features/bodegas-y-traslados.md`). Con el de la ubicación, 10 kg
+      // comprados en un local vacío pisaban el costo de los 100 kg de la bodega.
+      // Red: `test/costeo-cpp-multiubicacion.e2e-spec.ts`.
+      //
+      // Statement aparte y ya con el lock de `item_producto` en la mano, por lo
+      // mismo que el saldo de arriba: todo escritor de `stock_ubicacion` en
+      // runtime (el seeder solo siembra al arrancar) pasa por este método y
+      // toma ese lock primero, así que una entrada concurrente en OTRA
+      // ubicación ya commiteó cuando esto lee. Va antes del upsert de `moverX`:
+      // es el stock previo a este movimiento.
+      //
+      // Filtra ubicaciones eliminadas igual que el stock total de `GET /items`,
+      // para que el peso sea el mismo número que ve la pantalla.
+      const totalRows: { stock: string }[] = await manager.query(
+        `SELECT COALESCE(SUM(su.stock), 0) AS stock
+           FROM stock_ubicacion su
+           JOIN ubicaciones u
+             ON u.ubicacion_id = su.ubicacion_id AND u.eliminado_el IS NULL
+          WHERE su.item_id = $1`,
+        [params.itemId],
+      );
       costoActualNuevo = this.calcularCostoPromedio(
-        stockAnterior,
+        new Decimal(totalRows[0].stock),
         costoActualPrevio,
         cantidad,
         params.costoUnitario,
@@ -702,22 +726,26 @@ export class InventarioService {
    * el comentario viejo temía sigue prohibido: ningún camino pasa acá un precio
    * de venta.
    *
+   * `stockPrevio` es el del producto en todas las ubicaciones del tenant, no
+   * el `stock_anterior` del kardex (que es de la ubicación del movimiento):
+   * el costo es uno solo por producto.
+   *
    * Sin stock previo o sin costo previo no hay masa que promediar: manda el
    * costo de compra. Eso además evita dividir por cero.
    */
   private calcularCostoPromedio(
-    stockAnterior: Decimal,
+    stockPrevio: Decimal,
     costoActualPrevio: string | null,
     cantidad: Decimal,
     costoCompra: string,
   ): string {
     const compra = new Decimal(costoCompra);
-    if (stockAnterior.lessThanOrEqualTo(0) || costoActualPrevio == null) {
+    if (stockPrevio.lessThanOrEqualTo(0) || costoActualPrevio == null) {
       // Misma escala y mismo criterio que el CPP de abajo: el comentario de
       // ese `toFixed` cubre el método entero, esta rama incluida.
       return compra.toFixed(ESCALA_COSTO);
     }
-    const valorPrevio = stockAnterior.mul(new Decimal(costoActualPrevio));
+    const valorPrevio = stockPrevio.mul(new Decimal(costoActualPrevio));
     const valorEntrante = cantidad.mul(compra);
     // HALF_UP fijo a escala de costo (4): el CPP es una tasa interna —dinero por
     // unidad base de stock—, no un monto cobrable, y por eso no mira modo_redondeo:
@@ -726,7 +754,7 @@ export class InventarioService {
     // promedio. La escala de la moneda tampoco aplica: hay costos por gramo (< $1).
     return valorPrevio
       .plus(valorEntrante)
-      .div(stockAnterior.plus(cantidad))
+      .div(stockPrevio.plus(cantidad))
       .toFixed(ESCALA_COSTO);
   }
 

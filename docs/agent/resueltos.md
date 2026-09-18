@@ -23,6 +23,65 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El costo promedio pondera con el stock del producto, no con el de la ubicación (cerrada 2026-09-18)
+
+Sale de [`pendientes.md` § 2](pendientes.md). La entrada, verbatim:
+
+- [ ] **El costo promedio pondera con el stock de la ubicación, no con el del producto**
+  *(hallado el 2026-09-18 al diseñar compras; **leído en el código, sin medir**)* —
+  `registrarMovimiento` lee el saldo de `stock_ubicacion` para **la ubicación del
+  movimiento** (`inventario.service.ts`, el `SELECT stock FROM stock_ubicacion WHERE
+  item_id = $1 AND ubicacion_id = $2`) y ese mismo `stockAnterior` es el que recibe
+  `calcularCostoPromedio`. Pero el costo es **uno solo por producto para todo el tenant**
+  (decisión 3 de [`bodegas-y-traslados.md`](../features/bodegas-y-traslados.md)).
+  **En el local:** la bodega tiene 100 kg de harina a $1.000 y el local 0; entran 10 kg al
+  local a $1.500. El sistema ve stock anterior 0, toma la rama *"sin stock previo manda el
+  costo de compra"* y deja **toda** la harina a $1.500, cuando corresponde
+  (100.000 + 15.000) / 110 = **$1.045**. Lo mismo vale para `anulacion` y `devolucion`,
+  que también recalculan. Viene desde bodegas (2026-09-06), y `costeo-cpp.e2e-spec.ts`
+  no lo ve porque solo usa el local.
+  **Primero se mide:** un e2e con stock en la bodega y una compra al local, antes de tocar
+  nada. Si se confirma, **el arreglo va solo y con el sistema quieto**: es el motor de
+  costeo (la misma regla de `CLAUDE.md` que para el motor de cálculo).
+  ⛔ **Bloquea compras:** recibir en bodega va a ser lo normal, y el *"rehacer la cuenta
+  desde la recepción"* que decidió el owner para completar un costo necesita el stock
+  **total** del producto en cada momento, que el kardex hoy no guarda (`stock_anterior`
+  y `stock_resultante` son de la ubicación). Ver
+  [`investigaciones/2026-09-18-compras.md`](investigaciones/2026-09-18-compras.md).
+
+**Cómo se cerró.** Primero se midió: `backend/test/costeo-cpp-multiubicacion.e2e-spec.ts`
+armado por API, contra el código de entonces, dio rojo en los tres casos con los valores que
+predecía la entrada: compra al local vacío con 100 kg en bodega → `1500.0000` (correcto
+`1045.4545`); la misma compra con un traslado previo bodega→local → `1333.3333` (correcto
+`1045.4545`); anulación con stock en bodega → `1900.0000` (correcto `1990.9091`).
+
+El arreglo, con el diseño aprobado por el owner: en `registrarMovimiento`, **solo** cuando la
+entrada recalcula el CPP (`compra`, `anulacion`, `devolucion` con `costoUnitario`), se lee
+`SUM(stock)` del ítem en todas sus ubicaciones activas y ese es el peso de
+`calcularCostoPromedio`. Va en un statement aparte y ya con el lock de `item_producto`
+tomado, antes del upsert del movimiento: todo escritor de `stock_ubicacion` en runtime pasa
+por ese método y toma ese lock primero, así que una entrada concurrente en otra ubicación ya
+commiteó cuando se lee. No se toma ningún lock nuevo. El kardex (`stock_anterior` /
+`stock_resultante`) sigue siendo por ubicación, y las salidas y los traslados no pagan la
+consulta.
+
+**Qué lo fija.**
+- El e2e, con un cuarto caso: dos compras simultáneas del mismo ítem, una al local y otra a
+  la bodega, simétricas para que el resultado (`1083.3333`) no dependa del orden. Solo ve un
+  lost update cuando el intercalado se da, no en cada corrida.
+- Unitarios de `inventario.service.spec.ts`: la compra y la anulación/devolución mockean un
+  saldo de ubicación distinto del total, para que el test distinga cuál pesa.
+- Mutante que **revierte** al código viejo (el peso vuelve a `stockAnterior`): mata los 4
+  casos del e2e con exactamente `1500.0000`, `1333.3333`, `1900.0000` y `1500.0000`, y 3
+  unitarios (compra, anulación, devolución). Sobrevive el unitario del costo 0, cuyo saldo
+  de ubicación es igual al total.
+
+Documentado en el addendum 2026-09-18 de
+[ADR-016](../adr/016-costeo-promedio-ponderado-movil.md), en
+[`inventario-kardex.md`](../features/inventario-kardex.md) § Regla de costo, en la
+decisión 3 de [`bodegas-y-traslados.md`](../features/bodegas-y-traslados.md) y en
+`PRODUCTO.md`. Sin backfill: no hay datos productivos.
+
 ## Reimprimir boleta según el estado de la venta (cerrada 2026-09-18)
 
 Sale de [`pendientes.md` § 4](pendientes.md). La entrada, verbatim:

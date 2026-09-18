@@ -53,28 +53,6 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
-- [ ] **El costo promedio pondera con el stock de la ubicación, no con el del producto**
-  *(hallado el 2026-09-18 al diseñar compras; **leído en el código, sin medir**)* —
-  `registrarMovimiento` lee el saldo de `stock_ubicacion` para **la ubicación del
-  movimiento** (`inventario.service.ts`, el `SELECT stock FROM stock_ubicacion WHERE
-  item_id = $1 AND ubicacion_id = $2`) y ese mismo `stockAnterior` es el que recibe
-  `calcularCostoPromedio`. Pero el costo es **uno solo por producto para todo el tenant**
-  (decisión 3 de [`bodegas-y-traslados.md`](../features/bodegas-y-traslados.md)).
-  **En el local:** la bodega tiene 100 kg de harina a $1.000 y el local 0; entran 10 kg al
-  local a $1.500. El sistema ve stock anterior 0, toma la rama *"sin stock previo manda el
-  costo de compra"* y deja **toda** la harina a $1.500, cuando corresponde
-  (100.000 + 15.000) / 110 = **$1.045**. Lo mismo vale para `anulacion` y `devolucion`,
-  que también recalculan. Viene desde bodegas (2026-09-06), y `costeo-cpp.e2e-spec.ts`
-  no lo ve porque solo usa el local.
-  **Primero se mide:** un e2e con stock en la bodega y una compra al local, antes de tocar
-  nada. Si se confirma, **el arreglo va solo y con el sistema quieto**: es el motor de
-  costeo (la misma regla de `CLAUDE.md` que para el motor de cálculo).
-  ⛔ **Bloquea compras:** recibir en bodega va a ser lo normal, y el *"rehacer la cuenta
-  desde la recepción"* que decidió el owner para completar un costo necesita el stock
-  **total** del producto en cada momento, que el kardex hoy no guarda (`stock_anterior`
-  y `stock_resultante` son de la ubicación). Ver
-  [`investigaciones/2026-09-18-compras.md`](investigaciones/2026-09-18-compras.md).
-
 ---
 
 ## 3. Ya decidido, falta construir

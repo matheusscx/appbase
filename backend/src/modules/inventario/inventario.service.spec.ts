@@ -1625,7 +1625,10 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([
           { modo_inventario: 'cantidad', costo_actual: '4000' },
         ]) // SELECT FOR UPDATE
-        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        // La ubicación del movimiento está vacía y el producto tiene 10 en
+        // otra: el promedio pondera con el total, no con el saldo de acá.
+        .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT stock total del producto
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-c1' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // UPDATE costo_actual
@@ -1644,15 +1647,16 @@ describe('InventarioService', () => {
         },
       );
 
-      // El INSERT del movimiento (4ª llamada) congela lo PAGADO en el kardex: 4500
-      const insertCall = managerMock.query.mock.calls[3];
+      // El INSERT del movimiento (5ª llamada) congela lo PAGADO en el kardex: 4500
+      const insertCall = managerMock.query.mock.calls[4];
       expect(insertCall[0]).toContain('costo_unitario');
       expect(insertCall[1]).toContain('4500');
-      // La 5ª llamada actualiza costo_actual con el promedio ponderado (CPP), no
+      // La 6ª llamada actualiza costo_actual con el promedio ponderado (CPP), no
       // con el costo de compra crudo: (10×4000 + 5×4500) / 15 = 4166.6667.
-      // Antes del CPP este valor era '4500' (último costo) — ese era el bug.
+      // '4500' era el bug dos veces: antes del CPP (último costo) y, después,
+      // ponderando con el saldo de la ubicación (0 → rama "sin stock previo").
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        5,
+        6,
         expect.stringContaining('costo_actual'),
         ['4166.6667', ITEM_ID],
       );
@@ -1700,7 +1704,9 @@ describe('InventarioService', () => {
               costo_actual: '57.1429',
             },
           ])
-          .mockResolvedValueOnce([{ stock: '14' }]) // SELECT saldo: statement aparte, ya bajo el lock
+          // 4 en la ubicación que repone, 14 en todo el producto.
+          .mockResolvedValueOnce([{ stock: '4' }]) // SELECT saldo: statement aparte, ya bajo el lock
+          .mockResolvedValueOnce([{ stock: '14' }]) // SELECT stock total del producto
           .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
           .mockResolvedValueOnce([{ movimiento_id: 'mov-rev' }])
           .mockResolvedValueOnce(undefined);
@@ -1720,10 +1726,11 @@ describe('InventarioService', () => {
         );
 
         // El kardex congela el costo real de la reposición, no el CPP vigente.
-        expect(managerMock.query.mock.calls[3][1]).toContain('50');
-        // (14 × 57,1429 + 1 × 50) / 15 = 56,6667.
+        expect(managerMock.query.mock.calls[4][1]).toContain('50');
+        // (14 × 57,1429 + 1 × 50) / 15 = 56,6667. Con el saldo de la
+        // ubicación (4) daba 55,7143.
         expect(managerMock.query).toHaveBeenNthCalledWith(
-          5,
+          6,
           expect.stringContaining('costo_actual'),
           ['56.6667', ITEM_ID],
         );
@@ -1791,6 +1798,7 @@ describe('InventarioService', () => {
           { modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
         .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT stock total del producto
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-donacion' }])
         .mockResolvedValueOnce(undefined);
@@ -1811,7 +1819,7 @@ describe('InventarioService', () => {
 
       // (10 × 4000 + 5 × 0) / 15 = 2666,6667.
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        5,
+        6,
         expect.stringContaining('costo_actual'),
         ['2666.6667', ITEM_ID],
       );

@@ -90,7 +90,7 @@ productores, ninguno más:
 | Productor | Recalcula vía |
 |---|---|
 | Creación del item con costo de apertura | INSERT + movimiento `inventario_inicial` (congela, no promedia) |
-| Compra con `costoUnitario` | fórmula CPP: `(stock_anterior × costo_actual + cantidad × costo_compra) / (stock_anterior + cantidad)` |
+| Compra con `costoUnitario` | fórmula CPP: `(stock_previo × costo_actual + cantidad × costo_compra) / (stock_previo + cantidad)`, con `stock_previo` = stock del producto en todas sus ubicaciones (ver addendum 2026-09-18) |
 | Reversión de una salida (`anulacion`, `devolucion`) con `costoUnitario` — **agregado 2026-08-22** | misma fórmula CPP, con el costo **congelado en el kardex por la salida original** |
 | Ajuste de costo (`motivo='ajuste_costo'`, `tipo='ajuste'`) | override directo, auditado con `costo_anterior` y comentario obligatorio |
 
@@ -106,6 +106,17 @@ productores, ninguno más:
 > valorización previa. La decisión es del owner (2026-08-15) y no reemplaza esta ADR: le
 > agrega una fila a la tabla de arriba. Detalle y aritmética:
 > `docs/features/inventario-kardex.md` § Regla de costo.
+
+> **Addendum 2026-09-18 — el peso es el stock del producto, no el de la ubicación.** Esta
+> ADR se escribió cuando el stock era un escalar por producto, y la fórmula decía
+> `stock_anterior`. Con bodegas (2026-09-06) el saldo pasó a ser por ubicación y el código
+> siguió ponderando con el de **la ubicación del movimiento** —el mismo `stock_anterior` que
+> guarda el kardex—, mientras el costo seguía siendo uno solo por producto. Resultado medido:
+> 100 kg en bodega a $1.000 y 10 kg comprados al local vacío a $1.500 dejaban **todo** a
+> $1.500 en vez de $1.045,4545. Desde el 2026-09-18 el peso es el stock del producto en todas
+> sus ubicaciones activas, leído bajo el mismo lock de `item_producto`; el kardex sigue
+> guardando el saldo por ubicación. No reemplaza la decisión: corrige su premisa. Red:
+> `backend/test/costeo-cpp-multiubicacion.e2e-spec.ts`.
 
 La puerta trasera de `PATCH /items/:id` se cierra: el campo `costo` del DTO de edición
 ahora rechaza siempre con un mensaje explícito en vez de aceptarse en silencio (ver

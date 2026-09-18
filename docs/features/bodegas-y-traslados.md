@@ -119,6 +119,12 @@ tampoco lleva costo: la entrada al destino congela el `costo_actual` vigente sin
 ninguno (`TrasladosService.moverLinea`), porque pasarlo volvería a promediarlo contra sí
 mismo e inflaría la valorización en cada traslado.
 
+Un costo por producto también fija **con qué stock se pondera**: el del producto en todas
+sus ubicaciones, no el de la que recibe la compra. Hasta el 2026-09-18 el promedio usaba el
+saldo de la ubicación del movimiento, así que una compra al local vacío pisaba el costo de
+lo que había en bodega, y un traslado previo cambiaba el resultado. Detalle en
+[ADR-016](../adr/016-costeo-promedio-ponderado-movil.md), addendum 2026-09-18.
+
 ### Por qué un traslado son dos filas de kardex, no una
 
 Un traslado genera **dos filas** en `movimientos_inventario` —salida en el origen, entrada en
