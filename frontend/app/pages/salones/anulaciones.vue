@@ -263,7 +263,7 @@ const columnasAutorizo: TableColumn<GrupoPorAutorizo>[] = [
               {{ t.titulo }}
             </p>
             <p class="text-lg font-semibold mt-1">
-              {{ loadingResumen ? '…' : `${formatStock(t.grupo.platos)} platos` }}
+              {{ loadingResumen ? '…' : `${formatStock(t.grupo.platos)} ${Number(t.grupo.platos) === 1 ? 'plato' : 'platos'}` }}
             </p>
             <p class="text-sm text-muted mt-1">
               Precio de carta: {{ loadingResumen ? '…' : formatMonto(t.grupo.precioCarta) }}

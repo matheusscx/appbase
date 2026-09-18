@@ -3,7 +3,8 @@
 // Reporte de anulaciones (spec `2026-09-18-reporte-anulaciones-design.md` § 6).
 // Lo que este spec fija:
 //   1. Las tres tarjetas del resumen (Cortesías / Mermas en mesa / No se hizo)
-//      muestran sus cifras (platos, precio de carta, costo por moneda).
+//      muestran sus cifras (platos, precio de carta, costo por moneda), con
+//      "1 plato" en singular.
 //   2. La línea "N platos sin valorizar" aparece cuando `sinValorizar > 0`,
 //      con singular correcto ("1 plato sin valorizar").
 //   3. El detalle: `—` en la fila `no_aplica`, badge "Sin valorizar" en la
@@ -191,6 +192,19 @@ describe('anulaciones — resumen', () => {
     expect(wrapper.text()).toContain('1 plato sin valorizar')
     // Ningún grupo tiene sinValorizar 0 platos ni más de uno en este fixture.
     expect(wrapper.text()).not.toContain('1 platos sin valorizar')
+    wrapper.unmount()
+  })
+
+  it('la tarjeta dice "1 plato" en singular y "3 platos" en plural', async () => {
+    const wrapper = await montar()
+    // Acotado a la tarjeta: en el texto de la página, "1 plato" ya lo cumple
+    // "1 plato sin valorizar" de Mermas. No se hizo trae platos '1.0000' y
+    // sinValorizar 0; Cortesías, '3.0000' — la rama del plural.
+    const tarjeta = (titulo: string) =>
+      wrapper.findAll('div.rounded-lg').find(c => c.text().includes(titulo))!.text()
+    expect(tarjeta('No se hizo')).toContain('1 plato')
+    expect(tarjeta('No se hizo')).not.toContain('1 platos')
+    expect(tarjeta('Cortesías')).toContain('3 platos')
     wrapper.unmount()
   })
 
