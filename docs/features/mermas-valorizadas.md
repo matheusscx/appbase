@@ -158,7 +158,7 @@ servidor es el que manda.
 
 ### `GET /api/mermas`
 
-Permiso: **Inventario:Leer**. Paginado; filtros `itemId`, `motivoBajaId`, `desde`, `hasta`. Cada fila incluye `motivoBajaNombre` y `costoPerdido`.
+Permiso: **Inventario:Leer**. Paginado; filtros `itemId`, `motivoBajaId`, `desde`, `hasta`. Cada fila incluye `motivoBajaNombre`, `costoPerdido` y `deAnulacion` (ver más abajo).
 
 **El listado sobrevive a la baja del producto.** Una merma registrada es plata
 perdida que ya ocurrió, así que dar de baja el producto después no la saca del
@@ -174,16 +174,21 @@ desde el propio `POST`): no hay operación real detrás.
 la medianoche de la zona del tenant, el timestamp se respeta al segundo. Ver
 [`inventario-kardex.md`](./inventario-kardex.md) §`GET /inventario/movimientos`.
 
-⚠️ **Hoy este informe mezcla cortesías con merma real, y no es un bug — es la parte 3 sin
-construir.** Anular un plato ya despachado a cocina (`docs/features/salones-mesas.md` §
-*"Anular una línea ya despachada"*) también registra su consumo con `motivo = 'merma'` +
-`motivoBajaId` cuando el motivo es de tipo `merma` **o** `cortesia` — la única diferencia
-entre ambos vive en el `tipo` del motivo, no en el `motivo` del kardex. `GET /api/mermas`
-lista todo movimiento con `motivo = 'merma'` sin filtrar por ese `tipo`, así que una cortesía
-regalada en el salón aparece acá mezclada con una merma real de bodega, y el costo perdido
-las suma juntas. Separarlas —y sacar `no_elaborado`, que ni siquiera genera movimiento— es el
-frente pendiente: [`agent/pendientes.md`](../agent/pendientes.md) § 6, *"El reporte de
-anulaciones de platos, separando merma de cortesía"*.
+**Filtra por el `tipo` del motivo, no solo por `motivo = 'merma'` del kardex.** Anular un
+plato ya despachado a cocina (`docs/features/salones-mesas.md` § *"Anular una línea ya
+despachada"*) también registra su consumo con `motivo = 'merma'` + `motivoBajaId` cuando el
+motivo es de tipo `merma` **o** `cortesia` — la única diferencia entre ambos vive en el
+`tipo` del motivo, no en el `motivo` del kardex. `GET /api/mermas` exige además `motivo_baja.tipo
+= 'merma'` (un `EXISTS` en el `WHERE`, en el `COUNT` y en la página, para que el total no se
+mueva sin avisar), así que una cortesía regalada en el salón **no aparece acá** — vive en el
+reporte de Anulaciones (`GET /salones/anulaciones`, spec
+[`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md)
+§ 5.1), igual que `no_elaborado`, que ni siquiera genera movimiento.
+
+**`deAnulacion: boolean`** en cada fila (`cuenta_linea_anulacion_id IS NOT NULL`) marca las
+que sí sobrevivieron el filtro por venir de una merma de mesa, no de bodega: la pantalla las
+muestra con el badge *"Anulación en mesa"*, junto al nombre del motivo — es lo que hace
+visible que ese plato quemado también está contado en el otro reporte.
 
 ---
 
@@ -203,7 +208,7 @@ anulaciones de platos, separando merma de cortesía"*.
   y campo Tipo en el formulario (`USelect` con las tres opciones); en un motivo `enUso` el
   campo se muestra deshabilitado, con la ayuda que explica por qué — el 400 del servidor
   sigue siendo la regla, esto es solo UX.
-- `/mermas` — listado filtrable + drawer registrar (solo cantidad, unidad y motivo; **sin campo de costo**). El selector de motivo pide `GET /api/motivos-baja?soloActivas=true&tipo=merma`: *Cortesía de la casa* y *No se llegó a hacer* no aparecen ahí, aunque el filtro de pantalla no reemplaza el 400 de `POST /api/mermas`. Cartel no bloqueante cuando el producto no tiene `costo_actual`: avisa que la merma se va a registrar igual pero sin valorizar, y que no se puede corregir después. Columna Cantidad formateada por magnitud vía `formatStock` (`useFormatters`) — `MermaListItem.unidadMedida` (viene de `item_producto.unidad_medida`).
+- `/mermas` — listado filtrable + drawer registrar (solo cantidad, unidad y motivo; **sin campo de costo**). El selector de motivo pide `GET /api/motivos-baja?soloActivas=true&tipo=merma`: *Cortesía de la casa* y *No se llegó a hacer* no aparecen ahí, aunque el filtro de pantalla no reemplaza el 400 de `POST /api/mermas`. Cartel no bloqueante cuando el producto no tiene `costo_actual`: avisa que la merma se va a registrar igual pero sin valorizar, y que no se puede corregir después. Columna Cantidad formateada por magnitud vía `formatStock` (`useFormatters`) — `MermaListItem.unidadMedida` (viene de `item_producto.unidad_medida`). Columna Motivo: `UBadge` con el nombre y, cuando `deAnulacion` es `true`, un segundo `UBadge` *"Anulación en mesa"* al lado.
 - Kardex / historial de movimientos: `Merma · {motivoBajaNombre}` y costo perdido formateado (`formatMonto`), o `—` cuando es `null`.
 - Modal de ajuste de stock en items: opción Merma eliminada.
 - `configuracion/items.vue` — mismo cartel no bloqueante en el drawer de entrada por compra cuando el producto no tiene costo; badge **Sin costo** y checkbox **Solo sin costo** en el listado (filtro `sinCosto`, ver [`inventario-kardex.md`](./inventario-kardex.md)).

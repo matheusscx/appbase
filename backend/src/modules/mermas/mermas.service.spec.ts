@@ -548,6 +548,7 @@ describe('MermasService', () => {
             creado_el: new Date('2026-07-18T00:00:00Z'),
             usuario_nombre: 'Admin',
             unidad_medida: 'kg',
+            de_anulacion: false,
           },
         ]);
 
@@ -565,6 +566,88 @@ describe('MermasService', () => {
         expect.stringContaining('unidad_medida'),
         expect.any(Array),
       );
+    });
+
+    // Task 4 (spec § 5.2): el filtro por tipo va en el WHERE de las DOS
+    // consultas (COUNT y página), nunca en el LEFT JOIN a `motivo_baja` — un
+    // `LEFT JOIN … AND mb.tipo = 'merma'` dejaría pasar la cortesía con
+    // nombre `null` en vez de excluir la fila.
+    it('el filtro por tipo de motivo va en el WHERE del COUNT y de la página, no en el LEFT JOIN', async () => {
+      dataSourceQueryMock
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, {});
+
+      const [countSql] = dataSourceQueryMock.mock.calls[0] as [string];
+      const [listSql] = dataSourceQueryMock.mock.calls[1] as [string];
+
+      for (const sql of [countSql, listSql]) {
+        expect(sql).toMatch(/WHERE[\s\S]*EXISTS[\s\S]*mbf\.tipo = 'merma'/);
+      }
+      // La condición no cuelga del `LEFT JOIN motivo_baja mb` (el que trae el
+      // nombre en la página): ese sigue LEFT y sin `tipo` en su ON.
+      expect(listSql).toMatch(
+        /LEFT JOIN motivo_baja mb ON mb\.motivo_baja_id = mv\.motivo_baja_id AND mb\.eliminado_el IS NULL/,
+      );
+    });
+
+    // de_anulacion sale de `cuenta_linea_anulacion_id IS NOT NULL`: mapRow lo
+    // traduce a `deAnulacion` sin invertirlo ni perderlo.
+    it('mapRow traduce de_anulacion=true a deAnulacion:true', async () => {
+      dataSourceQueryMock
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([
+          {
+            movimiento_id: 'mov-anulacion',
+            item_id: ITEM,
+            item_nombre: 'Lomo',
+            cantidad: '1.0000',
+            costo_unitario: '5000',
+            motivo_baja_id: MOTIVO,
+            motivo_baja_nombre: 'Deterioro',
+            comentario: null,
+            creado_el: new Date('2026-09-18T00:00:00Z'),
+            usuario_nombre: 'Admin',
+            unidad_medida: null,
+            de_anulacion: true,
+          },
+        ]);
+
+      const res = await service.findAll(TENANT, {});
+
+      expect(res.data[0]).toMatchObject({
+        id: 'mov-anulacion',
+        deAnulacion: true,
+      });
+    });
+
+    it('mapRow traduce de_anulacion=false a deAnulacion:false (merma de bodega)', async () => {
+      dataSourceQueryMock
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([
+          {
+            movimiento_id: 'mov-bodega',
+            item_id: ITEM,
+            item_nombre: 'Lomo',
+            cantidad: '1.0000',
+            costo_unitario: '5000',
+            motivo_baja_id: MOTIVO,
+            motivo_baja_nombre: 'Deterioro',
+            comentario: null,
+            creado_el: new Date('2026-09-18T00:00:00Z'),
+            usuario_nombre: 'Admin',
+            unidad_medida: null,
+            de_anulacion: false,
+          },
+        ]);
+
+      const res = await service.findAll(TENANT, {});
+
+      expect(res.data[0]).toMatchObject({
+        id: 'mov-bodega',
+        deAnulacion: false,
+      });
     });
   });
 });

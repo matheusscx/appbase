@@ -21,6 +21,9 @@ interface MermaListItem {
   monedaId: string
   /** El producto se dio de baja después de esta merma; la fila se conserva. */
   itemEliminado: boolean
+  /** Nace de anular un plato ya despachado en una mesa, no de una merma de
+   *  bodega — también está en el reporte de Anulaciones (Salones). */
+  deAnulacion: boolean
 }
 
 interface ProductoOpt {
@@ -311,12 +314,21 @@ const columns: TableColumn<MermaListItem>[] = [
         <span class="text-warning">{{ formatStock(row.original.cantidad, row.original.unidadMedida) }}</span>
       </template>
       <template #motivoBajaNombre-cell="{ row }">
-        <UBadge
-          :label="row.original.motivoBajaNombre ?? '—'"
-          color="neutral"
-          variant="subtle"
-          size="sm"
-        />
+        <div class="flex items-center gap-2">
+          <UBadge
+            :label="row.original.motivoBajaNombre ?? '—'"
+            color="neutral"
+            variant="subtle"
+            size="sm"
+          />
+          <UBadge
+            v-if="row.original.deAnulacion"
+            label="Anulación en mesa"
+            color="neutral"
+            variant="subtle"
+            size="sm"
+          />
+        </div>
       </template>
       <template #costoUnitario-cell="{ row }">
         {{ row.original.costoUnitario != null ? formatMonto(row.original.costoUnitario, row.original.monedaId) : '—' }}

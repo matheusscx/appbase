@@ -27,6 +27,10 @@ const MOTIVO = { id: 'motivo-1', nombre: 'Vencimiento' }
 /** Ubicaciones que devuelve `GET /ubicaciones` en cada test. */
 let ubicacionesBackend: typeof LOCAL[] = [LOCAL]
 let mermasEnviadas: Record<string, unknown>[] = []
+/** Filas que devuelve `GET /mermas` (el listado) — Task 4: el badge de
+ *  anulación en mesa se prueba montando filas con `deAnulacion` en true y
+ *  en false. */
+let mermasListado: Record<string, unknown>[] = []
 /** Última URL con la que se pidieron los motivos — Task 4: tiene que llevar
  *  `tipo=merma` además del `soloActivas=true` de siempre; el filtro de
  *  pantalla no alcanza (el servidor es el que manda), pero sin esto
@@ -50,6 +54,12 @@ mockNuxtImport('useApiFetch', () => {
         costoPerdido: '100.0000',
         motivoBajaNombre: MOTIVO.nombre,
         merma: { id: 'mov-1', itemId: HARINA.id, cantidad: '1', costoUnitario: '100', costoPerdido: '100.0000', motivoBajaId: MOTIVO.id, motivoBajaNombre: MOTIVO.nombre, comentario: null, creadoEl: new Date().toISOString(), usuarioNombre: null, unidadMedida: 'kg', monedaId: 'clp-1', itemEliminado: false },
+      })
+    }
+    if (url.includes('/mermas') && opts?.method !== 'POST') {
+      return Promise.resolve({
+        data: mermasListado,
+        meta: { page: 1, pageSize: 15, total: mermasListado.length, totalPages: 1 },
       })
     }
     if (url.includes('/items?tipo=producto')) {
@@ -218,6 +228,59 @@ describe('mermas — filtro de motivos', () => {
 
     expect(motivosUrlSolicitada).toContain('tipo=merma')
     expect(motivosUrlSolicitada).toContain('soloActivas=true')
+
+    wrapper.unmount()
+  })
+})
+
+// Task 4 (spec § 5.2): `deAnulacion` nace de anular un plato en mesa
+// (`cuenta_linea_anulacion_id IS NOT NULL`). El badge "Anulación en mesa"
+// hace visible que ese plato quemado también está en el reporte de
+// Anulaciones — tiene que aparecer solo en la fila con `deAnulacion: true`.
+describe('mermas — badge de anulación en mesa', () => {
+  const filaConAnulacion = {
+    id: 'mov-anulacion',
+    itemId: HARINA.id,
+    itemNombre: 'Harina',
+    cantidad: '1.0000',
+    costoUnitario: '100.0000',
+    costoPerdido: '100.0000',
+    motivoBajaId: MOTIVO.id,
+    motivoBajaNombre: 'Motivo con anulación',
+    comentario: null,
+    creadoEl: new Date().toISOString(),
+    usuarioNombre: null,
+    unidadMedida: 'kg',
+    monedaId: 'clp-1',
+    itemEliminado: false,
+    deAnulacion: true,
+  }
+  const filaSinAnulacion = {
+    ...filaConAnulacion,
+    id: 'mov-bodega',
+    motivoBajaNombre: 'Motivo sin anulación',
+    deAnulacion: false,
+  }
+
+  beforeEach(() => {
+    ubicacionesBackend = [LOCAL]
+    mermasListado = [filaConAnulacion, filaSinAnulacion]
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  it('el badge "Anulación en mesa" aparece solo en la fila con deAnulacion:true', async () => {
+    const wrapper = await montar()
+
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(2)
+
+    const conAnulacion = filas.find(f => f.text().includes('Motivo con anulación'))
+    const sinAnulacion = filas.find(f => f.text().includes('Motivo sin anulación'))
+    expect(conAnulacion, 'fila con deAnulacion:true').toBeTruthy()
+    expect(sinAnulacion, 'fila con deAnulacion:false').toBeTruthy()
+
+    expect(conAnulacion!.text()).toContain('Anulación en mesa')
+    expect(sinAnulacion!.text()).not.toContain('Anulación en mesa')
 
     wrapper.unmount()
   })

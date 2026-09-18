@@ -45,8 +45,12 @@ interface UbicacionListada {
 interface MermaListItem {
   id: string;
   itemId: string;
+  motivoBajaId: string | null;
   motivoBajaNombre: string | null;
   costoPerdido: string | null;
+  /** Task 4: `true` cuando el movimiento nace de anular un plato en mesa
+   *  (`cuenta_linea_anulacion_id IS NOT NULL`), no de una merma de bodega. */
+  deAnulacion: boolean;
 }
 interface PaginatedMermas {
   data: MermaListItem[];
@@ -737,5 +741,265 @@ describe('Motivos de baja — un tenant nuevo nace con los siete fijos (e2e)', (
       ['Robo', 'merma'],
       ['Vencimiento', 'merma'],
     ]);
+  });
+});
+
+// Task 4 (spec `2026-09-18-reporte-anulaciones-design.md` § 5.2): `GET /mermas`
+// deja de listar cortesías y marca `deAnulacion` en lo que vino de anular un
+// plato en mesa. Describe propio, con su propio `app`: el molde de fixtures
+// (garzón, salón, mesa, ítem ruteado a cocina) es el de
+// `salones-anular-linea.e2e-spec.ts` / `salones-anulaciones-reporte.e2e-spec.ts`
+// — la sesión de garzón es única por garzón y varias suites la comparten, así
+// que este archivo se siembra el suyo en vez de tomar uno del seed
+// (`docs/agent/pendientes.md`).
+describe('Mermas — deja de listar cortesías, marca deAnulacion (Task 4, e2e)', () => {
+  let app: INestApplication<App>;
+  let tokenAdmin: string;
+  let mesaId: string;
+  let garzon: { id: string; pin: string };
+  let localId: string;
+  let platoId: string;
+  let motivoMermaId: string;
+  let motivoCortesiaId: string;
+  let motivoMermaNombre: string;
+
+  async function post<T>(
+    url: string,
+    body: Record<string, unknown>,
+    token = tokenAdmin,
+    esperado = 201,
+  ): Promise<T> {
+    const res = await request(app.getHttpServer())
+      .post(url)
+      .set('Authorization', `Bearer ${token}`)
+      .send(body);
+    expect(res.status).toBe(esperado);
+    return res.body as T;
+  }
+
+  interface CuentaLineaDetalle {
+    id: string;
+    itemId: string;
+    cantidad: string;
+    cantidadEnviada: string;
+  }
+  interface CuentaDetalle {
+    id: string;
+    lineas: CuentaLineaDetalle[];
+  }
+
+  async function abrirCuentaCon(
+    lineas: { itemId: string; cantidad: string }[],
+  ): Promise<CuentaDetalle> {
+    const cuenta = await post<CuentaDetalle>(`/api/mesas/${mesaId}/cuentas`, {
+      garzonId: garzon.id,
+      pin: garzon.pin,
+    });
+    for (const linea of lineas) {
+      await post(`/api/cuentas/${cuenta.id}/lineas`, linea);
+    }
+    return cuenta;
+  }
+
+  async function despachar(cuentaId: string): Promise<void> {
+    await post(`/api/cuentas/${cuentaId}/comanda/reclamar`, {});
+  }
+
+  async function detalleCuenta(cuentaId: string): Promise<CuentaDetalle> {
+    const res = await request(app.getHttpServer())
+      .get(`/api/mesas/${mesaId}/cuentas`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(res.status).toBe(200);
+    const cuenta = (res.body as CuentaDetalle[]).find((c) => c.id === cuentaId);
+    expect(cuenta).toBeDefined();
+    return cuenta!;
+  }
+
+  async function anular(
+    cuentaId: string,
+    lineaId: string,
+    body: { cantidad: string; motivoBajaId: string },
+  ): Promise<CuentaDetalle> {
+    const res = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/lineas/${lineaId}/anular`)
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send(body);
+    expect(res.status).toBe(201);
+    return res.body as CuentaDetalle;
+  }
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.use(cookieParser());
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    tokenAdmin = await login(app);
+
+    const resUbic = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resUbic.status).toBe(200);
+    localId = (resUbic.body as UbicacionListada[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
+
+    const resMotivos = await request(app.getHttpServer())
+      .get('/api/motivos-baja')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resMotivos.status).toBe(200);
+    const motivos = resMotivos.body as {
+      id: string;
+      nombre: string;
+      tipo: string;
+    }[];
+    const motivoMerma = motivos.find((m) => m.tipo === 'merma')!;
+    motivoMermaId = motivoMerma.id;
+    motivoMermaNombre = motivoMerma.nombre;
+    motivoCortesiaId = motivos.find((m) => m.tipo === 'cortesia')!.id;
+    expect(motivoMermaId).toBeTruthy();
+    expect(motivoCortesiaId).toBeTruthy();
+
+    const marca = Date.now();
+
+    // Ruteo a cocina: sin impresora, `reclamarComanda` nunca avanza
+    // `cantidadEnviada`, y sin eso no hay nada que anular con tope > 0.
+    const cocinaId = (
+      await post<{ id: string }>('/api/impresoras', {
+        nombre: `Cocina mermas-anulacion E2E ${marca}`,
+        rol: 'comanda',
+        tipoConexion: 'sistema',
+        nombreCola: `cola-mermas-anulacion-e2e-${marca}`,
+      })
+    ).id;
+    const catCocinaId = (
+      await post<{ id: string }>('/api/categorias', {
+        nombre: `Cocina mermas-anulacion E2E ${marca}`,
+        impresoraId: cocinaId,
+      })
+    ).id;
+
+    platoId = (
+      await post<ItemResponse>('/api/items', {
+        nombre: `Plato mermas-anulacion E2E ${marca}`,
+        tipo: 'producto',
+        precioBase: '5000',
+        monedaId: CLP_MONEDA_ID,
+        unidadMedida: 'unidad',
+        stock: '1000',
+        costo: '1000',
+        categoriaId: catCocinaId,
+      })
+    ).id;
+
+    garzon = await post<{ id: string; pin: string }>('/api/garzones', {
+      nombre: `Garzón mermas-anulacion E2E ${marca}`,
+    });
+    await post('/api/sesiones-garzon/iniciar', {
+      garzonId: garzon.id,
+      pin: garzon.pin,
+      turnoId: '550e8400-e29b-41d4-a716-446655440277', // turno mañana, fijo del seed
+    });
+
+    const salonId = (
+      await post<{ id: string }>('/api/salones', {
+        nombre: `Salón mermas-anulacion E2E ${marca}`,
+      })
+    ).id;
+    mesaId = (
+      await post<{ id: string }>(`/api/salones/${salonId}/mesas`, {
+        nombre: 'Mesa mermas-anulacion',
+      })
+    ).id;
+  }, 60000);
+
+  afterAll(async () => {
+    const fallos: string[] = [];
+    try {
+      const cerrar = await request(app.getHttpServer())
+        .post('/api/sesiones-garzon/cerrar')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ garzonId: garzon.id, pin: garzon.pin });
+      if (![200, 201].includes(cerrar.status)) {
+        fallos.push(`cerrar sesión del garzón → ${cerrar.status}`);
+      }
+    } finally {
+      await app.close();
+    }
+    expect(fallos).toEqual([]);
+  });
+
+  it('la cortesía no aparece, la merma en mesa sí con deAnulacion:true, la de bodega con deAnulacion:false, y meta.total coincide con las filas', async () => {
+    const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '2' }]);
+    await despachar(cuenta.id);
+    const lineaInicial = (await detalleCuenta(cuenta.id)).lineas.find(
+      (l) => l.itemId === platoId,
+    )!;
+
+    // Cortesía: 1 de las 2 unidades despachadas.
+    await anular(cuenta.id, lineaInicial.id, {
+      cantidad: '1',
+      motivoBajaId: motivoCortesiaId,
+    });
+    const lineaTrasCortesia = (await detalleCuenta(cuenta.id)).lineas.find(
+      (l) => l.itemId === platoId,
+    )!;
+    // Merma de mesa: la unidad restante.
+    await anular(cuenta.id, lineaTrasCortesia.id, {
+      cantidad: '1',
+      motivoBajaId: motivoMermaId,
+    });
+
+    // Merma de bodega, sobre el mismo ítem — para que el filtro por itemId de
+    // más abajo mida las DOS formas de merma en un solo conteo.
+    const resMermaBodega = await request(app.getHttpServer())
+      .post('/api/mermas')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({
+        itemId: platoId,
+        ubicacionId: localId,
+        cantidad: '1',
+        motivoBajaId: motivoMermaId,
+      });
+    expect(resMermaBodega.status).toBe(201);
+    const movimientoBodegaId = (resMermaBodega.body as MermaResponse)
+      .movimientoId;
+
+    // Acotado con `itemId` propio del spec: la base es compartida y otras
+    // suites (incluido `salones-anulaciones-reporte.e2e-spec.ts`) dejan
+    // mermas de mesa en el mismo tenant — un assert de conteo sin este filtro
+    // pasa aislado y falla en la corrida completa.
+    const res = await request(app.getHttpServer())
+      .get(`/api/mermas?itemId=${platoId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(res.status).toBe(200);
+    const lista = res.body as PaginatedMermas;
+
+    // meta.total coincide con las filas: exactamente 2 (merma de mesa + merma
+    // de bodega), la cortesía no cuenta.
+    expect(lista.meta.total).toBe(2);
+    expect(lista.data).toHaveLength(2);
+
+    // La cortesía no aparece en absoluto: ninguna fila trae su motivo.
+    expect(lista.data.every((m) => m.motivoBajaId !== motivoCortesiaId)).toBe(
+      true,
+    );
+
+    const filaBodega = lista.data.find((m) => m.id === movimientoBodegaId);
+    expect(filaBodega).toBeDefined();
+    expect(filaBodega?.deAnulacion).toBe(false);
+
+    const filaMesa = lista.data.find((m) => m.id !== movimientoBodegaId);
+    expect(filaMesa).toBeDefined();
+    expect(filaMesa?.deAnulacion).toBe(true);
+    expect(filaMesa?.motivoBajaId).toBe(motivoMermaId);
+    expect(filaMesa?.motivoBajaNombre).toBe(motivoMermaNombre);
   });
 });

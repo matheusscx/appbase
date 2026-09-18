@@ -58,6 +58,14 @@ export interface MermaListItem {
   monedaId: string;
   /** El producto fue dado de baja después de esta merma. La fila se conserva. */
   itemEliminado: boolean;
+  /**
+   * `true` cuando el movimiento nace de anular un plato ya despachado en una
+   * mesa (`movimientos_inventario.cuenta_linea_anulacion_id IS NOT NULL`), no
+   * de una merma registrada por este módulo. La pantalla lo muestra con un
+   * badge: es lo que hace visible que ese plato quemado también está en el
+   * reporte de Anulaciones (`docs/features/salones-mesas.md`).
+   */
+  deAnulacion: boolean;
 }
 
 interface MermaRow {
@@ -76,6 +84,7 @@ interface MermaRow {
   unidad_medida: string | null;
   moneda_id: string;
   item_eliminado: boolean;
+  de_anulacion: boolean;
 }
 
 @Injectable()
@@ -234,6 +243,10 @@ export class MermasService {
           // un producto dado de baja, así que la fila recién creada nunca nace
           // marcada. Solo llega a `true` releyendo el listado tras la baja.
           itemEliminado: false,
+          // `registrarMovimiento` acá arriba nunca recibe `cuentaLineaAnulacionId`:
+          // este POST es la merma de bodega, no la anulación de una línea en
+          // mesa (esa vive en `SalonesService.escribirAnulacionDeLinea`).
+          deAnulacion: false,
         },
       };
     });
@@ -250,16 +263,33 @@ export class MermasService {
       : null;
     const { filters, params } = this.buildFilters(tenantId, query, zona);
 
+    // El `EXISTS` de acá abajo es la condición que EXCLUYE la cortesía, y va
+    // en las DOS consultas (COUNT y página) para que el total no se mueva sin
+    // avisar (Task 4, spec § 5.2). No puede vivir en el `LEFT JOIN mb` de más
+    // abajo: ese JOIN es LEFT a propósito para no perder la fila cuando el
+    // motivo se borró (mermas-valorizadas.md, "El listado sobrevive a la baja
+    // del producto" — mismo criterio con el motivo), y sumarle `AND mb.tipo =
+    // 'merma'` ahí dejaría pasar la cortesía con `motivo_baja_nombre: null`
+    // en vez de sacarla. Tampoco filtra `eliminado_el` sobre `motivo_baja`: un
+    // motivo en uso no se puede borrar (`motivos-baja.service.ts`), así que
+    // esta condición no depende de esa columna.
+    //
     // Sin filtro de borrado del ítem, y en las DOS consultas: una merma
     // registrada es plata perdida que ya ocurrió, así que dar de baja el
     // producto después no puede borrarla del informe ni —peor— bajar el total
     // sin avisar. Mismo criterio que el kardex (`InventarioService`).
+    const filtroTipoMerma = `AND EXISTS (
+         SELECT 1 FROM motivo_baja mbf
+         WHERE mbf.motivo_baja_id = mv.motivo_baja_id AND mbf.tipo = 'merma'
+       )`;
+
     const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total
        FROM movimientos_inventario mv
        LEFT JOIN items i ON i.item_id = mv.item_id
        WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
          AND mv.motivo = 'merma'
+         ${filtroTipoMerma}
          ${filters}`,
       params,
     );
@@ -276,7 +306,8 @@ export class MermasService {
          mv.motivo_baja_id, mb.nombre AS motivo_baja_nombre,
          mv.comentario, mv.creado_el, u.nombre AS usuario_nombre,
          p.unidad_medida, i.moneda_id,
-         (i.eliminado_el IS NOT NULL) AS item_eliminado
+         (i.eliminado_el IS NOT NULL) AS item_eliminado,
+         (mv.cuenta_linea_anulacion_id IS NOT NULL) AS de_anulacion
        FROM movimientos_inventario mv
        LEFT JOIN items i ON i.item_id = mv.item_id
        LEFT JOIN item_producto p ON p.item_id = mv.item_id
@@ -284,6 +315,7 @@ export class MermasService {
        LEFT JOIN motivo_baja mb ON mb.motivo_baja_id = mv.motivo_baja_id AND mb.eliminado_el IS NULL
        WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
          AND mv.motivo = 'merma'
+         ${filtroTipoMerma}
          ${filters}
        ORDER BY mv.creado_el DESC
        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
@@ -364,6 +396,7 @@ export class MermasService {
       unidadMedida: r.unidad_medida,
       monedaId: r.moneda_id,
       itemEliminado: r.item_eliminado,
+      deAnulacion: r.de_anulacion,
     };
   }
 }
