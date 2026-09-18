@@ -785,6 +785,13 @@ prohíbe.
   no existe (fuerza a `sin_valorizar` explícito), o se acepta el hueco y se documenta que el
   costo mostrado es un piso, no una cifra exacta? La primera es más segura y más trabajo; la
   segunda es lo que hay hoy, sin decirlo en ningún lado que el usuario vea.
+- [ ] **¿El vendido del día resta las notas de crédito?** (dashboard de inicio, bloque
+  Ventas, `resumen-negocio.service.ts`) — hoy `GET /resumen-negocio/hoy` **excluye** las
+  notas de crédito del vendido (no las resta: las saca del cálculo entero, igual que
+  `GET /ventas/resumen`), y la pantalla lo va a rotular "antes de notas de crédito". Es una
+  pregunta **fiscal** y no se decidió en el diseño (spec `2026-09-18-dashboard-inicio-design.md`
+  § 4.1): va en su propio frente, con su propia sesión y su propia verificación — no se toma
+  de arrastre de otra tarea (`CLAUDE.md`, ADR-010).
 
 ## 5. Carreras de concurrencia
 

@@ -144,6 +144,12 @@ Modelo: `rol → módulo contratado → permisos`
   en el código sostiene la convención: el alta de tenant no contrata **ningún** módulo, así
   que un tenant con `MiCaja` y sin `Cajas` es construible por descuido, y ahí sus cajeros se
   ven la plata entre ellos ([`features/ventas.md`](features/ventas.md)).
+  📌 **`Resumen del negocio` se vende junto con `Ventas`** (spec
+  `2026-09-18-dashboard-inicio-design.md` § 5.4): es el dashboard de plata del dueño —vendido,
+  cobrado, por cobrar— y separado de `Ventas` para que la cajera (que solo necesita
+  `Ventas:Leer` para reimprimir una boleta) no vea cuánto factura el local. Misma advertencia
+  que arriba: **el código no lo obliga**, es una regla comercial que sostiene el seed
+  ([`features/roles-permisos.md`](features/roles-permisos.md)).
 - **Admin del tenant** — crea roles personalizados, les asigna módulos contratados y permisos, y los asigna a usuarios del tenant.
 
 **Roles:**

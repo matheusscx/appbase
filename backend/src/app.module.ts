@@ -143,6 +143,7 @@ import { MotivoDiferenciaInventario } from './modules/motivos-diferencia-inventa
 import { MotivosDiferenciaInventarioModule } from './modules/motivos-diferencia-inventario/motivos-diferencia-inventario.module';
 import { MotivoTraslado } from './modules/motivos-traslado/entities/motivo-traslado.entity';
 import { MotivosTrasladoModule } from './modules/motivos-traslado/motivos-traslado.module';
+import { ResumenNegocioModule } from './modules/resumen-negocio/resumen-negocio.module';
 import { Impresora } from './modules/impresoras/entities/impresora.entity';
 import { GrupoModificador } from './modules/grupos-modificadores/entities/grupo-modificador.entity';
 import { GrupoModificadorOpcion } from './modules/grupos-modificadores/entities/grupo-modificador-opcion.entity';
@@ -342,6 +343,7 @@ import { UbicacionesModule } from './modules/ubicaciones/ubicaciones.module';
     PromocionesModule,
     UbicacionesModule,
     TrasladosModule,
+    ResumenNegocioModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -49,6 +49,7 @@ startup-app/
 │   │       ├── pagos/            # Abonos a ventas pendientes y ledger de pagos
 │   │       ├── caja/             # Gestión de cajas (física/virtual, movimientos, cierre)
 │   │       ├── propinas/         # Registro, distribución, liquidación y reportes agregados
+│   │       ├── resumen-negocio/  # Dashboard de inicio (zona "Hoy"): ventas, por cobrar, pérdidas, más vendidos
 │   │       ├── seeder/           # Seed de datos de desarrollo (corre al arrancar)
 │   │       └── test/             # Módulo de prueba para validación RBAC end-to-end
 │   ├── test/                     # Tests e2e

@@ -72,6 +72,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [recuento-inventario.md](./features/recuento-inventario.md) | Recuento de inventario (conteo físico): sesión con ciclo de vida, diferencia como delta, catálogo propio de causas, permisos separados entre contar y aplicar |
 | [bodegas-y-traslados.md](./features/bodegas-y-traslados.md) | Bodegas y traslados: el stock deja de ser un escalar por tenant — saldo por `(ítem, ubicación)`, el local vende y la bodega solo guarda, traslados como documento interno sin emisión del DTE 52 |
 | [papelera.md](./features/papelera.md) | Papelera (restaurar eliminados): `incluirEliminados` + `POST .../:id/restaurar` en 18 recursos de catálogo/config; frontend cableado solo en items y categorías |
+| [dashboard-inicio.md](./features/dashboard-inicio.md) | Dashboard de inicio: `GET /resumen-negocio/hoy` (ventas, por cobrar; Task 2 suma pérdidas y más vendidos), módulo y permiso propio `Resumen del negocio: Leer` |
 
 ## Otros
 

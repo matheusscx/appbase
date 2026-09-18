@@ -139,6 +139,22 @@ anulación revisándose a sí mismo. `Ver todas` es la puerta angosta que ya usa
 mismo problema ("ver lo de los demás"), sin inventar una acción nueva.
 Detalle funcional: [`spec del reporte`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md) § 2 y 5.1.
 
+### Módulo nuevo `Resumen del negocio`, una sola acción `Leer` (dashboard de inicio, 2026-09-18)
+
+Módulo propio, contratado junto con `Ventas` (regla comercial, el código no lo obliga — ver
+[`PRODUCTO.md`](../PRODUCTO.md) § 3). Una sola acción, `Leer` — la que ya existe en el
+catálogo, no una "Ver" nueva para decir lo mismo. Gobierna `GET /resumen-negocio/hoy`: el
+bloque de plata del dashboard de inicio (vendido, cobrado, por cobrar; Task 2 suma pérdidas y
+más vendidos al mismo endpoint). El admin la tiene sin sembrar nada (`es_fijo`); ningún rol
+del seed la recibe.
+
+**Por qué no `Ventas:Leer`.** La cajera tiene `Ventas:Leer` para buscar una boleta puntual y
+reimprimirla — es un permiso operativo, de caja. Colgar el dashboard de facturación del mismo
+permiso le mostraría a cualquier cajera cuánto factura el local entero, sin forma de darle una
+cosa sin la otra. Un módulo propio es la única manera de separar "puedo buscar UNA venta" de
+"veo la plata del negocio". Detalle funcional:
+[`dashboard-inicio.md`](./dashboard-inicio.md).
+
 ### Admin-only vs permiso de módulo — cuándo cada uno
 
 Dos mecanismos de autorización conviven, y la elección **no es por pantalla sino por la

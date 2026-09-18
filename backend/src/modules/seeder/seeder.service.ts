@@ -713,6 +713,18 @@ export class SeederService implements OnApplicationBootstrap {
         icono: 'mdi-cash-plus',
         tieneConfiguracion: true,
       },
+      {
+        // Dashboard del dueño ("Hoy": ventas, por cobrar, pérdidas, más
+        // vendidos). Módulo propio y no colgado de `Ventas` porque el permiso
+        // que gobierna es distinto: `Ventas:Leer` lo tiene la cajera para
+        // reimprimir una boleta, y con ese permiso vería también cuánto
+        // factura el local (spec 2026-09-18-dashboard-inicio § 2).
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440407',
+        nombre: 'Resumen del negocio',
+        url: '/',
+        icono: 'mdi-view-dashboard-outline',
+        tieneConfiguracion: false,
+      },
     ];
 
     for (const data of modulos) {
@@ -801,6 +813,7 @@ export class SeederService implements OnApplicationBootstrap {
     const INVENTARIO = '550e8400-e29b-41d4-a716-446655440181';
     const ITEMS = '550e8400-e29b-41d4-a716-446655440182';
     const TERCEROS = '550e8400-e29b-41d4-a716-446655440183';
+    const RESUMEN_NEGOCIO = '550e8400-e29b-41d4-a716-446655440407';
 
     const entries: Partial<ModuloAppPermiso>[] = [
       {
@@ -1105,6 +1118,14 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440359',
         moduloAppId: PROPINAS,
         permisoId: ELIMINAR,
+      },
+      // Resumen del negocio: solo `Leer`. No suma una acción "Ver" para decir
+      // lo mismo (spec 2026-09-18-dashboard-inicio § 5.1) — es la `Leer` que
+      // ya existe.
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440408',
+        moduloAppId: RESUMEN_NEGOCIO,
+        permisoId: LEER,
       },
     ];
 
@@ -1782,6 +1803,18 @@ export class SeederService implements OnApplicationBootstrap {
         moduloTenantId: '550e8400-e29b-41d4-a716-446655440061',
         tenantId: '550e8400-e29b-41d4-a716-446655440007',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440058', // Paris → Ventas
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        // Paris → Resumen del negocio. Al lado del de Ventas a propósito: se
+        // vende junto con Ventas (spec 2026-09-18-dashboard-inicio § 5.4),
+        // igual que MiCaja + Cajas — el código no lo obliga, es una regla
+        // comercial. El segundo tenant NO lo contrata: es el caso de 403 del
+        // e2e (`resumen-negocio.e2e-spec.ts`).
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440409',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440407', // Paris → Resumen del negocio
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
