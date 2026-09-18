@@ -1,6 +1,7 @@
 # Feature: Dashboard de inicio
 
-**Status**: In Development (Task 2 de 2 — falta el frontend)
+**Status**: In Development (Task 4 de 6 — falta la zona "Hoy" del frontend, Task 5, y el
+cierre con smoke/mutantes, Task 6)
 **Owner**: Cesar Matheus
 **Last Updated**: 2026-09-18
 
@@ -193,6 +194,58 @@ backend trata el módulo contratado como borde duro también para `es_fijo`).
 
 ---
 
+## Frontend — la zona "Ahora" (Task 4)
+
+`pages/index.vue` pasa a ser el dashboard: el saludo queda arriba, más chico, y debajo
+la zona **"Ahora"** con tres bloques — Salón, Cajas y Cierres del día — cada uno un
+componente propio en `app/components/inicio/`. La página **solo los ordena**: monta
+cada bloque con `permissionsStore.esAdmin || permissionsStore.can(módulo, permiso)`
+(`Salones`/`Ver todas` para Salón; `Cajas`/`Leer` para Cajas y Cierres) y no tiene
+lógica propia. **Un bloque no montado no hace su llamada** — es UX, la seguridad la da
+el guard de cada ruta (igual que el resto de la app).
+
+### `useRefrescoPeriodico` (`app/composables/useRefrescoPeriodico.ts`)
+
+El primer refresco periódico del sistema. Cada bloque lo usa así:
+
+```ts
+const { datos, actualizadoEl, sinConexion, oculto } = useRefrescoPeriodico(
+  () => useApiFetch<T>(`${apiUrl}/…`),
+)
+```
+
+- Carga al invocarse y después cada `intervaloMs` (default 60 s) — pero **solo si
+  `document.visibilityState === 'visible'`**; un `visibilitychange` a visible dispara
+  una carga extra, para no esperar hasta el próximo tick con la pestaña recién abierta.
+- **Un fallo NO reintenta antes del próximo ciclo** (el owner no quiere reintentos
+  automáticos): conserva el último `datos`, marca `sinConexion`, y la pantalla muestra
+  "Sin conexión — se reintenta en el próximo ciclo" sin borrar el dato. Una carga
+  exitosa la apaga y actualiza `actualizadoEl` (el "Actualizado HH:MM").
+- **Un 403 marca `oculto` y DETIENE el intervalo**: spec § 6 midió que el admin de un
+  tenant que no contrató el módulo pasa el `v-if` de la página (`esAdmin`) pero el
+  backend igual responde 403 — el frontend no tiene cómo saber qué módulos contrató el
+  tenant. Reintentar un 403 no lo iba a arreglar, así que el bloque se esconde en vez
+  de mostrar un error. El status se lee como `useApiFetch`/`apiErrorMsg`:
+  `err?.status ?? err?.response?.status`.
+- `onScopeDispose` limpia el intervalo y el listener — no sobrevive al bloque que lo
+  agendó. Sin dependencias nuevas: `@vueuse/core` no está en `package.json`.
+- `formatHora` (`useFormatters.ts`) da el `HH:MM` de `actualizadoEl`.
+
+### Los tres bloques
+
+| Bloque | Fuente | Qué muestra | Link |
+|---|---|---|---|
+| `InicioSalon.vue` | `GET /salones/ocupacion` | "14 de 20 mesas ocupadas · 16 cuentas abiertas" | `/salones` |
+| `InicioCajas.vue` | `GET /caja/cajones-estado` | Cajones **con sesión abierta**: nombre y quién la tiene, **sin montos** — el modo ciego ya decide quién ve el esperado, el dashboard no lo repite | `/cajas` (bandeja) |
+| `InicioCierres.vue` | `GET /caja/resumen-descuadres-dia` | Cierres del día, cuántos con descuadre, y la suma con signo del efectivo (`formatMonto`, coloreado igual que `CajaPendientesRevision.vue`) | `/cajas` (bandeja) |
+
+`InicioCajas` reusa el tipo `CajonEstado` de `~/stores/caja` (sin usar el store: no
+tiene sentido pisar su `cajonesEstado` compartido desde un bloque de lectura del
+dashboard). `InicioCierres` sí reusa `cajaStore.cargarResumenDescuadresDia()`, que ya
+devolvía el dato sin tocar estado del store.
+
+---
+
 ## Testing
 
 ### Unit (`resumen-negocio.service.spec.ts`)
@@ -243,6 +296,29 @@ cd backend && npm test -- resumen-negocio.service.spec.ts mermas.service.spec.ts
 npm run test:e2e -- resumen-negocio.e2e-spec.ts
 ```
 
+### Frontend — zona "Ahora" (Task 4)
+
+**`useRefrescoPeriodico.spec.ts`**, con `vi.useFakeTimers()` y
+`document.visibilityState` stubbeado: carga al inicio y otra vez a los 60 s; con la
+pestaña oculta el tick no carga y al volver a visible carga una vez; un fallo conserva
+`datos`, pone `sinConexion`, y NO reintenta hasta el próximo tick (contado por llamadas
+del mock); un 403 pone `oculto`, detiene el intervalo, y ni un `visibilitychange`
+posterior insiste; `intervaloMs` custom; `onScopeDispose` limpia intervalo y listener.
+
+**`InicioAhora.nuxt.spec.ts`** (molde `pages/salones/anulaciones.nuxt.spec.ts`, monta
+`pages/index.vue` completa — la página es la que gatea los tres bloques): sin
+`Salones:Ver todas` no se pide `/salones/ocupacion`; sin `Cajas:Leer` no se piden las
+de caja; sin ningún permiso, ninguna de las tres rutas se pide; con `Cajas:Leer` se
+piden las dos rutas de caja; el texto de ocupación sale de la respuesta real; el
+bloque de Cajas muestra el cajón abierto y quién lo tiene, sin sus montos; y el caso
+403-con-`esAdmin` (spec § 6) oculta el bloque sin mostrar "Sin conexión". Los bodies
+simulados tienen la forma real de cada ruta (copiada de `caja.service.ts` y
+`salones.service.ts`), no una inventada.
+
+```bash
+cd frontend && npm test -- useRefrescoPeriodico.spec.ts InicioAhora.nuxt.spec.ts
+```
+
 ---
 
 ## Related Features
@@ -251,5 +327,9 @@ npm run test:e2e -- resumen-negocio.e2e-spec.ts
   crédito.
 - [`pagos.md`](./pagos.md) — `pago_aplicaciones` y el criterio de excluir el vuelto.
 - [`roles-permisos.md`](./roles-permisos.md) — el permiso `Resumen del negocio:Leer`.
+- [`gestion-cajas.md`](./gestion-cajas.md) — `GET /caja/cajones-estado` y
+  `GET /caja/resumen-descuadres-dia`, que reusa el bloque Cajas/Cierres.
+- `docs/patterns/frontend.md` § "Refresco periódico" — el contrato de
+  `useRefrescoPeriodico`.
 - `docs/superpowers/specs/2026-09-18-dashboard-inicio-design.md` — spec completa
   (zona "Ahora" del turno, pérdidas, más vendidos, frontend).

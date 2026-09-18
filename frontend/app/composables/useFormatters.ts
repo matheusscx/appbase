@@ -7,6 +7,7 @@ const dateFmt = new Intl.DateTimeFormat('es-CL', {
 })
 
 const dateOnlyFmt = new Intl.DateTimeFormat('es-CL', { dateStyle: 'medium' })
+const horaFmt = new Intl.DateTimeFormat('es-CL', { hour: '2-digit', minute: '2-digit' })
 
 export function useFormatters() {
   const { format: formatCurrency, formatCosto, formatOficial } = useCurrency()
@@ -17,6 +18,13 @@ export function useFormatters() {
   ): string {
     if (monedaId) return formatCurrency(value, monedaId)
     return formatOficial(value)
+  }
+
+  /** `HH:MM` local — el "Actualizado HH:MM" de los bloques con refresco
+   *  periódico (`useRefrescoPeriodico`, zona "Ahora" del dashboard). */
+  function formatHora(fecha: Date | null | undefined): string {
+    if (!fecha) return '—'
+    return horaFmt.format(fecha)
   }
 
   function formatFecha(iso: string | null | undefined): string {
@@ -91,5 +99,5 @@ export function useFormatters() {
   // su propia regla (los decimales de la moneda son el piso, ver `useCurrency`).
   // Va por acá y no importando `useCurrency` en la página porque las pantallas
   // formatean por `useFormatters` — una sola puerta, no dos.
-  return { formatMonto, formatCosto, formatFecha, formatStock, formatTipoPago, formatPorcentaje, formatCostoPorMoneda }
+  return { formatMonto, formatCosto, formatFecha, formatHora, formatStock, formatTipoPago, formatPorcentaje, formatCostoPorMoneda }
 }

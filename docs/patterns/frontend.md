@@ -1107,3 +1107,53 @@ algún ancestro suyo desborda de verdad (`scrollWidth > clientWidth`). Así igno
 `.truncate` ya seguros (item = él mismo) y no confunde un desborde de layout ajeno
 (p. ej. un contenedor con ancho fraccionario de una librería de terceros) con el bug de
 esta regla, aunque ese contenedor también tenga descendientes truncados en algún lado.
+
+---
+
+## 17. Refresco periódico (`useRefrescoPeriodico`)
+
+Primer refresco periódico del sistema (dashboard de inicio, zona "Ahora" — spec
+`2026-09-18-dashboard-inicio-design.md` § 6). Para un bloque que muestra un estado en
+vivo (turno, cajas abiertas) y necesita refrescarse solo sin que la persona recargue la
+página, **no una pantalla completa con paginación/filtros** (eso sigue siendo
+`usePaginatedList`, §12).
+
+```typescript
+const { datos, actualizadoEl, sinConexion, oculto } = useRefrescoPeriodico(
+  () => useApiFetch<T>(`${apiUrl}/…`),
+  { intervaloMs: 60_000 }, // default; opcional
+)
+```
+
+- Carga al invocarse (**no** `onMounted`: el composable se invoca directo en el
+  `<script setup>` del bloque) y después cada `intervaloMs`, **solo si
+  `document.visibilityState === 'visible'`**. Un `visibilitychange` a visible dispara
+  una carga extra, para no dejar la pantalla con un dato viejo hasta el próximo tick.
+- **Un fallo NO reintenta antes del próximo ciclo** — regla de producto, no límite
+  técnico: el owner no quiere que la app repita sola una acción que falló (memoria
+  `sin-reintento-automatico`). Conserva el último `datos` y marca `sinConexion`; la
+  pantalla muestra un aviso ("Sin conexión — se reintenta en el próximo ciclo") **sin
+  borrar el dato**. Una carga exitosa apaga `sinConexion` y actualiza `actualizadoEl`
+  (mostrado con `formatHora` de `useFormatters`, "Actualizado HH:MM").
+- **Un 403 marca `oculto` y DETIENE el intervalo** — no es una falla de red, es un
+  módulo que el tenant no contrató. Insistir no lo arregla. El status se lee con el
+  mismo idioma que `apiErrorMsg`/`useApiFetch`: `err?.status ?? err?.response?.status`.
+  El componente esconde el bloque entero (`v-if="!oculto"`) sin mostrar error — la
+  razón de fondo (spec § 6): el frontend no tiene cómo distinguir "el tenant no
+  contrató este módulo" de "a este admin no le tocaría verlo", porque
+  `/rbac/mis-permisos` le devuelve `[]` a un admin y el `v-if` de la página lo deja
+  pasar igual por `esAdmin` — el 403 en vivo es la única señal que sí lo sabe.
+- `onScopeDispose` limpia el intervalo y el listener de `visibilitychange`: no
+  sobrevive al bloque que lo agendó (mismo criterio que el debounce de
+  `useCalculoPrecios.ts` — `if (getCurrentScope()) onScopeDispose(...)`).
+- Sin dependencias nuevas: no hay `@vueuse/core` en `package.json`, y no hace falta
+  para esto.
+
+**Qué NO resuelve:** no es para carga inicial simple (eso es un `onMounted` con
+`useApiFetch` liso) ni para un botón "Actualizar" manual sin ciclo automático — para
+eso, `refrescar()` expuesto alcanza sin el `setInterval` (llamarlo directo desde el
+handler del botón).
+
+Referencia: `app/composables/useRefrescoPeriodico.ts` +
+`useRefrescoPeriodico.spec.ts`; consumido por `app/components/inicio/InicioSalon.vue`,
+`InicioCajas.vue`, `InicioCierres.vue` (`docs/features/dashboard-inicio.md`).
