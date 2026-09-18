@@ -21,19 +21,28 @@ Nuxt 4 + Nuxt UI v4; Jest + supertest; Vitest.
 **Spec:** [`docs/superpowers/specs/2026-09-18-compras-recepcion-design.md`](../specs/2026-09-18-compras-recepcion-design.md).
 Decisiones del owner: [`docs/agent/investigaciones/2026-09-18-compras.md`](../../agent/investigaciones/2026-09-18-compras.md) § 5 y § 5b.
 
-## ⛔ Bloqueo: las tareas 5 a 10 esperan el frente del CPP
+## Estado de las tareas 5 a 10: desbloqueadas, todavía sin código fijado
 
-El owner decidió que el frente *"El costo promedio pondera con el stock de la ubicación, no con el
-del producto"* (`docs/agent/pendientes.md` § 2) va **primero y solo**. Hay una investigación de
-solo lectura en curso, lanzada por la sesión coordinadora.
+El frente del CPP con stock total **cerró en `6f5a1821`** (2026-09-18) y esta rama ya está
+rebasada encima. Lo que cambió en `inventario.service.ts`, revisado contra el diff:
 
-- **Tareas 1 a 4: se pueden hacer ya.** No tocan `inventario.service.ts`.
-- **Tareas 5 a 10: bloqueadas.** Tocan `registrarMovimiento` o dependen de cómo quede el CPP. Por
-  eso llevan **intención y contrato**, no código fijado: el código se escribe cuando ese frente
-  cierre, contra el `inventario.service.ts` que deje.
-- **Si una tarea desbloqueada termina necesitando tocar `registrarMovimiento` o
-  `calcularCostoPromedio`: parar y avisar** a la sesión coordinadora ("Listado de sesiones
-  activas").
+- Solo en las entradas que recalculan con costo (`compra`, `anulacion`, `devolucion`),
+  `registrarMovimiento` lee `SUM(stock)` de `stock_ubicacion` con `JOIN ubicaciones … AND
+  u.eliminado_el IS NULL`, **después** del `FOR UPDATE OF ip` y **antes** del upsert del saldo, y
+  se lo pasa a `calcularCostoPromedio` (el parámetro pasó a llamarse `stockPrevio`).
+- **No cambiaron** la firma pública de `registrarMovimiento`
+  (`RegistrarMovimientoParams` y su retorno), el lock (`FOR UPDATE OF ip`) ni la regla de
+  reinicio (`stockPrevio <= 0` o sin costo previo → manda el costo de compra).
+- **Lo que este frente no resolvió:** el kardex sigue guardando el saldo **por ubicación**. El
+  stock total histórico no está escrito en ningún lado, y "rehacer la cuenta" (T7) lo reconstruye
+  desde `stock_total_anterior`, congelado en la línea, más las cantidades posteriores (spec § 4.3).
+
+Por eso:
+
+- **Tareas 1 a 4:** se hacen primero; no tocan `inventario.service.ts`.
+- **Tareas 5 a 10:** ya no esperan nada externo, pero siguen con **intención y contrato**. El código
+  se escribe al ejecutarlas, contra el `inventario.service.ts` de ese momento, porque la tarea 5
+  cambia el chokepoint y todo lo demás depende de cómo quede.
 - **La rama no se integra a `main` hasta la tarea 11.** El estado intermedio (borradores que no se
   pueden confirmar) no llega a nadie.
 
@@ -87,7 +96,7 @@ solo lectura en curso, lanzada por la sesión coordinadora.
 
 **Backend — modificados:** `app.module.ts` (entities + import),
 `seeder/seeder.service.ts` (catálogo, módulo, permisos, rol y usuario fixture).
-Bloqueadas: `inventario/entities/movimiento-inventario.entity.ts`,
+Desde la tarea 5: `inventario/entities/movimiento-inventario.entity.ts`,
 `inventario/inventario.service.ts`.
 
 **Backend — tests:** `test/compras.e2e-spec.ts`.
@@ -1046,12 +1055,19 @@ git commit -m "feat(compras): el listado y la carga del borrador"
 
 ---
 
-### ⛔ Task 5: Kardex: la línea de compra, la secuencia y `correccion_compra`
+### Task 5: Kardex: la línea de compra, la secuencia, `correccion_compra` y el stock total
 
-**Bloqueada por el frente del CPP**, porque toca `registrarMovimiento` y la entidad del kardex.
-Sin código fijado.
+Después de las tareas 1 a 4. Toca `registrarMovimiento`, así que el código se escribe contra el
+`inventario.service.ts` de ese momento.
 
 **Intención (spec § 3.4):**
+- **Un solo dueño para el "stock total del producto".** Hoy la query vive en línea dentro de
+  `registrarMovimiento` (`6f5a1821`). Compras la necesita también: T6 para congelar
+  `stock_total_anterior`, incluso en las líneas **sin precio**, donde `registrarMovimiento` no la
+  corre, y T7 como definición del peso. Se extrae a un método de `InventarioService`, **en lote**
+  para no hacer N+1 al confirmar, y `registrarMovimiento` pasa a llamarlo con un solo id. Es la
+  misma SQL (con el `JOIN ubicaciones … eliminado_el IS NULL`), movida, no reescrita. Copiarla en
+  compras dejaría dos definiciones del peso que se separan con el primer cambio.
 - `movimientos_inventario.compra_linea_id uuid NULL`, con índice. Llega como
   `RegistrarMovimientoParams.compraLineaId?` y se inserta como `trasladoId`.
 - `movimientos_inventario.secuencia bigserial NOT NULL`, **tomada al insertar bajo el lock del
@@ -1066,6 +1082,8 @@ Sin código fijado.
 **Contrato:**
 
 ```ts
+// El peso del CPP, con un solo dueño. Sin fila → '0' para ese id.
+stockTotalPorProducto(manager: EntityManager, itemIds: string[]): Promise<Map<string, string>>;
 // RegistrarMovimientoParams gana:
 compraLineaId?: string | null;
 // Método nuevo en InventarioService, el único que escribe una correccion_compra:
@@ -1075,15 +1093,19 @@ registrarCorreccionCosto(manager, p: {
 }): Promise<{ movimientoId: string; costoAnterior: string | null; costoNuevo: string }>;
 ```
 
-**Qué tiene que probar:** que la secuencia sale ordenada con dos transacciones concurrentes sobre
-el mismo producto (el caso cruzado de `traslados.e2e-spec.ts` es el molde), y que una
-`correccion_compra` no mueve stock y deja `costo_anterior`.
+**Qué tiene que probar:**
+- que la secuencia sale ordenada con dos transacciones concurrentes sobre el mismo producto (el
+  caso cruzado de `traslados.e2e-spec.ts` es el molde);
+- que una `correccion_compra` no mueve stock y deja `costo_anterior`;
+- que `test/costeo-cpp-multiubicacion.e2e-spec.ts` sigue verde después de extraer
+  `stockTotalPorProducto`: es la red del frente del CPP, y el mutante que revierte al peso de la
+  ubicación la tiene que seguir matando.
 
 ---
 
-### ⛔ Task 6: Confirmar
+### Task 6: Confirmar
 
-**Bloqueada** por las tareas 5 y 7. Sin código fijado.
+Depende de las tareas 5 y 7. Sin código fijado.
 
 **Intención (spec § 4.2):** `POST /compras/:id/confirmar` (`Compras:Crear`) en una sola
 transacción, con el reintento de deadlock de `traslados.crear`:
@@ -1093,9 +1115,10 @@ transacción, con el reintento de deadlock de `traslados.crear`:
    línea.
 3. Lock de los productos en **un** statement ordenado por `item_id` (`FOR UPDATE OF ip`, el molde
    de `traslados`, líneas 262–310).
-4. Stock total **antes** de cada línea: **una** query `SUM(stock) GROUP BY item_id` sobre
-   `stock_ubicacion`, después del lock. Dos líneas del mismo producto: la segunda parte de la
-   primera más su cantidad.
+4. Stock total **antes** de cada línea: `stockTotalPorProducto` (T5), una sola llamada con todos
+   los ítems, después del lock. Dos líneas del mismo producto: la segunda parte de la primera más
+   su `cantidadBase`. Tiene que dar **el mismo número** que el peso que usa `registrarMovimiento`
+   para una línea con precio; si no, T7 rehace la cuenta desde otro punto de partida.
 5. Convertir a unidad base (`convertirUnidad` + `convertirCostoUnitario`, como `ajustarStock`) y
    costear con `costearLineas` (tarea 2) las líneas con precio. `cfg` con
    `calculoPreciosService.cargarConfig(tenantId, decimalesMonedaOficial)`.
@@ -1113,18 +1136,19 @@ transacción, con el reintento de deadlock de `traslados.crear`:
 - confirmar dos veces es 409;
 - folio duplicado al confirmar es 409;
 - sin `Compras:Crear` es 403;
-- **una compra a la bodega con stock en el local deja el CPP ponderado con el total** (el caso que
-  el frente del CPP arregla).
+- **una compra a la bodega con stock en el local deja el CPP ponderado con el total**. Es el caso
+  de `6f5a1821`, repetido por el camino de compras.
 
 En el front, habilitar *Confirmar recepción* con su modal de resumen.
 
 ---
 
-### ⛔ Task 7: Rehacer la cuenta
+### Task 7: Rehacer la cuenta
 
-**Bloqueada** por el frente del CPP y la tarea 5. Es la tarea con más riesgo del plan: **no se
-escribe su código hasta que ese frente cierre**, porque tiene que usar la misma lectura de stock
-total y la misma regla de reinicio que deje ese arreglo.
+Depende de la tarea 5. Es la tarea con más riesgo del plan. Usa la **misma** regla de reinicio
+que `calcularCostoPromedio` (es privado de la misma clase: se llama, no se copia) y el **mismo**
+peso: el punto de partida sale de `stockTotalPorProducto` (vía `stock_total_anterior`), y a partir
+de ahí se suman las cantidades con signo.
 
 **Intención (spec § 4.3):** un método nuevo de `InventarioService`, porque es el único dueño de
 `costo_actual`. Por producto y bajo su lock:
@@ -1132,9 +1156,15 @@ total y la misma regla de reinicio que deje ese arreglo.
 1. Parte del `stockTotalAnterior` y el `costoProductoAnterior` de la primera línea de la compra con
    ese producto.
 2. Recorre los movimientos del producto en **todas** las ubicaciones, desde esa entrada, por
-   `secuencia`, filtrando `eliminado_el IS NULL`, con **una** query (join a `compra_lineas` y
-   `compras` para traer la cantidad y el costo vigentes de cada línea y el estado de su compra).
-   Las reglas de cada tipo de movimiento son las de la spec § 4.3, **sin reinterpretarlas**.
+   `secuencia`, filtrando `eliminado_el IS NULL` **del movimiento** y **sin** filtrar la ubicación
+   eliminada (spec § 4.3: mientras tuvo stock, ese stock entró en el peso). Es **una** query, con
+   join a `compra_lineas` y `compras` para traer la cantidad y el costo vigentes de cada línea y el
+   estado de su compra. Las reglas de cada tipo de movimiento son las de la spec § 4.3, **sin
+   reinterpretarlas**.
+   ⚠️ **El borde a medir:** `stockTotalPorProducto` excluye las ubicaciones eliminadas **hoy**,
+   pero la reconstrucción suma movimientos de todas. Coinciden solo porque una ubicación se borra
+   **vacía** (`UbicacionesService.remove` cuenta 0 stock). El test lo fija: una bodega con
+   movimientos en la ventana, vaciada y borrada antes de completar el precio.
 3. Si el costo resultante difiere del `costo_actual`, `registrarCorreccionCosto` (tarea 5).
 
 **Contrato:**
@@ -1164,9 +1194,9 @@ compras corregidas".
 
 ---
 
-### ⛔ Task 8: Corregir precio, cantidad y descuento
+### Task 8: Corregir precio, cantidad y descuento
 
-**Bloqueada** por las tareas 6 y 7.
+Depende de las tareas 6 y 7.
 
 **Intención (spec § 4.4):**
 - `PATCH /compras/:id/lineas/:lineaId` (`Compras:Actualizar`):
@@ -1186,9 +1216,9 @@ cantidad ya vendida da 400; cargar el descuento con una línea sin precio da 400
 
 ---
 
-### ⛔ Task 9: Anular
+### Task 9: Anular
 
-**Bloqueada** por las tareas 6 y 7.
+Depende de las tareas 6 y 7.
 
 **Intención (spec § 4.5):** `POST /compras/:id/anular` con `{ motivo }` (`Compras:Anular`). Una
 salida `compra` por línea en la ubicación de la compra. Si **alguna** no alcanza, no anula nada y
@@ -1201,9 +1231,9 @@ sin `Compras:Anular` es 403.
 
 ---
 
-### ⛔ Task 10: Frontend — detalle de una confirmada
+### Task 10: Frontend — detalle de una confirmada
 
-**Bloqueada** por las tareas 8 y 9.
+Depende de las tareas 8 y 9.
 
 **Intención (spec § 6):** en `pages/compras/[id].vue`, modo confirmada:
 - *Completar* en las líneas sin precio y *Corregir* por línea, cada uno con un modal que muestra el

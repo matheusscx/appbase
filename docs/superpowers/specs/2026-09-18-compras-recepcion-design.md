@@ -8,11 +8,12 @@ con el proveedor y sus pagos, con la salida de caja, y (4) los gastos sin stock 
 **Investigación y decisiones:** [`2026-09-18-compras.md`](../../agent/investigaciones/2026-09-18-compras.md),
 § 5 y § 5b.
 
-> ⛔ **No se construye antes del frente del costo promedio.** Hoy el CPP pondera con el stock de
-> **la ubicación** del movimiento y no con el del producto (entrada *"El costo promedio pondera
-> con el stock de la ubicación"*, `pendientes.md` § 2). Esta spec asume el CPP con **stock
-> total**, que es la regla ya decidida en bodegas. Recibir en bodega va a ser lo normal, así que
-> sobre el cálculo de hoy compras amplificaría el error.
+> ✅ **El CPP ya pondera con el stock total del producto** (`6f5a1821`, 2026-09-18; ADR-016,
+> addendum; `docs/agent/resueltos.md`). Es `SUM(stock)` de `stock_ubicacion` en las ubicaciones
+> no eliminadas, leído bajo el lock de `item_producto`, **solo** en las entradas que recalculan.
+> El kardex sigue guardando el saldo **por ubicación**, así que el stock total histórico no está
+> escrito en ningún lado: § 4.3 lo reconstruye desde el valor congelado en la línea
+> (`stock_total_anterior`) más las cantidades de los movimientos posteriores.
 
 ---
 
@@ -178,7 +179,10 @@ Por cada producto afectado, bajo su lock:
 1. Parte del `stock_total_anterior` y el `costo_producto_anterior` de **la primera línea de esa
    compra con ese producto**.
 2. Recorre los movimientos del producto **en todas las ubicaciones**, desde esa entrada, por
-   `secuencia`, filtrando `eliminado_el IS NULL`:
+   `secuencia`, filtrando `eliminado_el IS NULL` **del movimiento**. **No** filtra por la
+   ubicación eliminada: una bodega se borra recién vacía, y mientras tuvo stock ese stock entró
+   en el peso del CPP de su momento. Si se filtrara, la cuenta rehecha no coincidiría con la
+   original. El stock total va sumando las cantidades con su signo desde `stock_total_anterior`:
    - **Entrada original de una línea de compra:** entra con la cantidad y el costo **vigentes de la
      línea**, no con los del momento en que se movió. Si la compra está anulada, se salta.
    - **Diferencias de cantidad y salidas de anulación de una línea:** se saltan, porque ya
@@ -342,7 +346,6 @@ Se escriben primero. Cada mutante **revierte al código anterior**, no solo romp
 
 ## 10. Dependencias y orden
 
-1. ⛔ **El frente del CPP con stock total** (`pendientes.md` § 2): primero se mide, y el arreglo va
-   solo y con el sistema quieto.
+1. ✅ **El frente del CPP con stock total**, cerrado en `6f5a1821` (2026-09-18).
 2. Esta pieza, en un **worktree**. La spec queda en main.
 3. Después, las piezas 2 a 4, cada una con su spec.
