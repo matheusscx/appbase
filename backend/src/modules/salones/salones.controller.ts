@@ -21,6 +21,8 @@ import { RequiresPermiso } from '../../common/decorators/requires-permiso.decora
 import { QueryIncluirEliminadosDto } from '../../common/dto/query-incluir-eliminados.dto';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { SalonesService } from './salones.service';
+import { AnulacionesReporteService } from './anulaciones-reporte.service';
+import { FindAnulacionesDto } from './dto/find-anulaciones.dto';
 import { CreateSalonDto } from './dto/create-salon.dto';
 import { UpdateSalonDto } from './dto/update-salon.dto';
 import { CreateMesaDto } from './dto/create-mesa.dto';
@@ -44,7 +46,10 @@ import {
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('salones')
 export class SalonesController {
-  constructor(private readonly salonesService: SalonesService) {}
+  constructor(
+    private readonly salonesService: SalonesService,
+    private readonly anulacionesReporteService: AnulacionesReporteService,
+  ) {}
 
   // ── Operación (garzón) ─────────────────────────────────────────────────
   @Get('operacion')
@@ -52,6 +57,16 @@ export class SalonesController {
   operacion(@Req() req: Request) {
     const u = req.user as JwtUser;
     return this.salonesService.listarSalonesOperacion(u.tenantId ?? '');
+  }
+
+  // ── Reporte de anulaciones (spec `2026-09-18-reporte-anulaciones-design.md`)
+  // Ruta ESTÁTICA de un solo segmento: no choca con ninguna ruta `:id/...` de
+  // este controller (sus otros `GET` son `operacion` y `''`, sin `:id`).
+  @Get('anulaciones')
+  @RequiresPermiso('Salones', 'Ver todas')
+  anulaciones(@Req() req: Request, @Query() query: FindAnulacionesDto) {
+    const u = req.user as JwtUser;
+    return this.anulacionesReporteService.findAll(u.tenantId ?? '', query);
   }
 
   // ── Administración: salones ────────────────────────────────────────────

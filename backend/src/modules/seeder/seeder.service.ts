@@ -1037,6 +1037,18 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppId: SALONES,
         permisoId: ANULAR,
       },
+      // `Ver todas` (spec `reporte-anulaciones-design.md` § 2/5.1): gobierna
+      // `GET /salones/anulaciones` (y su `/resumen`, Task 3) — ve las
+      // anulaciones de TODOS los garzones, no solo las propias. La acción ya
+      // existe (Ventas la usa desde …186); acá se empareja con Salones, sin
+      // acción nueva. `Salones:Leer` no sirve: el garzón la necesita para el
+      // historial de la cuenta y Sesiones, y con eso vería las cortesías de
+      // todos. Siguiente id libre: el máximo previo era …405.
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440406',
+        moduloAppId: SALONES,
+        permisoId: VER_TODAS,
+      },
       // Impresoras (config de impresión térmica: comandas, precuenta, boleta)
       {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440242',
@@ -2781,12 +2793,13 @@ export class SeederService implements OnApplicationBootstrap {
   /**
    * El encargado que administra el salón sin ser admin del tenant:
    * `Salones:Leer` + `Salones:Crear` + `Salones:Actualizar` + `Salones:Operar`
-   * + `Salones:Anular` (las dos últimas, spec `anular-plato-despachado-design.md`
-   * § 4.1). Es a quien `garzones.service.ts` le muestra el aviso *"…no va a
-   * poder entrar en modo personal hasta que se lo des"*, y desde el 2026-08-16
-   * el único fixture con el que se puede probar que ese "se lo des" está en su
-   * mano: `POST /garzones/:id/permiso-operar` pide este permiso y **no**
-   * `TenantAdminGuard`.
+   * + `Salones:Anular` + `Salones:Ver todas` (las tres últimas, spec
+   * `anular-plato-despachado-design.md` § 4.1 y
+   * `reporte-anulaciones-design.md` § 2). Es a quien `garzones.service.ts` le
+   * muestra el aviso *"…no va a poder entrar en modo personal hasta que se lo
+   * des"*, y desde el 2026-08-16 el único fixture con el que se puede probar
+   * que ese "se lo des" está en su mano: `POST /garzones/:id/permiso-operar`
+   * pide este permiso y **no** `TenantAdminGuard`.
    *
    * ⚠️ **Hasta el 2026-09-16 este rol NO tenía `Operar`**, a propósito: era el
    * complemento exacto de `ana.torres` (`Leer` + `Operar`, sin `Actualizar`)
@@ -2797,9 +2810,14 @@ export class SeederService implements OnApplicationBootstrap {
    * puede otorgarle el permiso (guardado por `Salones:Actualizar`, que sigue
    * igual), no sobre si `encargado.salon` mismo lo tiene.
    *
-   * No reusa `ana.torres` (tiene `Salones:Operar`, no `Actualizar` — sirve
-   * justo para el 403 del mismo e2e) ni `admin.paris`, que short-circuita todo
-   * por `es_fijo` y probaría otra cosa.
+   * `Ver todas` se suma desde el 2026-09-18: `encargado.salon` es el fixture
+   * de `200` en `salones-anulaciones-reporte.e2e-spec.ts` (el `403` lo prueba
+   * `ana.torres`, que se queda a propósito con `Leer` + `Operar`, sin `Ver
+   * todas` — es justo el caso que motivó el permiso nuevo).
+   *
+   * No reusa `ana.torres` (tiene `Salones:Operar`, no `Actualizar`/`Ver
+   * todas` — sirve justo para los `403`) ni `admin.paris`, que short-circuita
+   * todo por `es_fijo` y probaría otra cosa.
    *
    * ID 348/349: el máximo previo era 347.
    */
@@ -2810,13 +2828,14 @@ export class SeederService implements OnApplicationBootstrap {
     const NOMBRE = 'Salones · Encargado';
     // moduloTenantId para Paris → Salones (definido en seedTenantModulo)
     const MODULO_TENANT_SALONES = '550e8400-e29b-41d4-a716-446655440228';
-    // moduloAppPermiso Salones/Leer, Crear, Actualizar, Operar y Anular
-    // (seedModuloAppPermisos)
+    // moduloAppPermiso Salones/Leer, Crear, Actualizar, Operar, Anular y Ver
+    // todas (seedModuloAppPermisos)
     const SALONES_LEER = '550e8400-e29b-41d4-a716-446655440223';
     const SALONES_CREAR = '550e8400-e29b-41d4-a716-446655440224';
     const SALONES_ACTUALIZAR = '550e8400-e29b-41d4-a716-446655440225';
     const SALONES_OPERAR = '550e8400-e29b-41d4-a716-446655440227';
     const SALONES_ANULAR = '550e8400-e29b-41d4-a716-446655440405';
+    const SALONES_VER_TODAS = '550e8400-e29b-41d4-a716-446655440406';
 
     await this.dataSource.query(
       `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
@@ -2835,13 +2854,15 @@ export class SeederService implements OnApplicationBootstrap {
     // fixture que solo pudiera actualizar no podría ejercer la mitad del caso.
     // `Operar` y `Anular` se suman para que el encargado llegue a la mesa
     // (`GET /salones/operacion` exige `Operar`) y pueda anular un plato
-    // despachado (`Salones:Anular`) — ver el docblock de arriba.
+    // despachado (`Salones:Anular`); `Ver todas` para que vea el reporte de
+    // anulaciones de todos los garzones — ver el docblock de arriba.
     for (const permisoId of [
       SALONES_LEER,
       SALONES_CREAR,
       SALONES_ACTUALIZAR,
       SALONES_OPERAR,
       SALONES_ANULAR,
+      SALONES_VER_TODAS,
     ]) {
       await this.dataSource.query(
         `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)

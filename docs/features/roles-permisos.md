@@ -122,6 +122,23 @@ Un garzón sin `Anular` que intenta cancelar una cuenta con algo despachado ve e
 backend; la pantalla no lo deja ni intentarlo — un aviso de que hace falta un encargado, sin
 abrir ningún modal (`salones-mesas.md` § *"Cancelar cuenta: dos ramas..."*).
 
+### Módulo `Salones`: cuarta acción `Ver todas` (reporte de anulaciones, 2026-09-18)
+
+`Salones` suma **`Ver todas`** — la acción ya existía (la usa `Ventas:Ver todas`); acá se
+empareja con Salones, sin acción nueva. Gobierna `GET /salones/anulaciones` (Task 2) y su
+`/resumen` (Task 3): el reporte que agrupa, por garzón y por quién autorizó, las cortesías,
+mermas de mesa y platos no elaborados de **todos** los garzones del tenant. El admin la tiene
+sin sembrar nada (short-circuit de `es_fijo`); el seed se la suma al rol `Salones · Encargado`
+junto a las otras cuatro.
+
+**Por qué no alcanza `Salones:Leer`.** El garzón necesita `Leer` para trabajar — el historial
+de la cuenta en la mesa (`GET /cuentas/:id/asignaciones`) y la pantalla *Sesiones* lo piden —,
+así que dárselo también al reporte de anulaciones dejaría a cualquier garzón viendo las
+cortesías de todos los demás. `Salones:Anular` tampoco sirve: dejaría a quien autoriza una
+anulación revisándose a sí mismo. `Ver todas` es la puerta angosta que ya usa `Ventas` para el
+mismo problema ("ver lo de los demás"), sin inventar una acción nueva.
+Detalle funcional: [`spec del reporte`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md) § 2 y 5.1.
+
 ### Admin-only vs permiso de módulo — cuándo cada uno
 
 Dos mecanismos de autorización conviven, y la elección **no es por pantalla sino por la

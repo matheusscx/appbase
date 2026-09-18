@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { SalonesService } from './salones.service';
 import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
+import { AnulacionesReporteService } from './anulaciones-reporte.service';
 import {
   SalonesController,
   MesasController,
@@ -50,7 +51,11 @@ import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
     UbicacionesModule,
   ],
   controllers: [SalonesController, MesasController, CuentasController],
-  providers: [SalonesService, CuentaAsignacionesService],
+  providers: [
+    SalonesService,
+    CuentaAsignacionesService,
+    AnulacionesReporteService,
+  ],
   exports: [SalonesService, CuentaAsignacionesService],
 })
 export class SalonesModule {}

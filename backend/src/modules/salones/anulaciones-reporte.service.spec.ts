@@ -1,0 +1,207 @@
+import { Test, type TestingModule } from '@nestjs/testing';
+import { Db } from '../../common/db/db.service';
+import { AnulacionesReporteService } from './anulaciones-reporte.service';
+import { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
+
+const TENANT = 'tenant-uuid';
+
+/**
+ * Fila cruda de `cuenta_linea_anulaciones` + sus JOINs (molde:
+ * `mermas.service.spec.ts`, mock de `Db.query` por orden de llamada).
+ */
+const anulacionRow = (overrides: Record<string, unknown> = {}) => ({
+  id: 'anulacion-1',
+  creado_el: new Date('2026-09-18T12:00:00Z'),
+  cuenta_id: 'cuenta-1',
+  cuenta_numero: 42,
+  mesa_nombre: 'Mesa 3',
+  salon_nombre: 'Salón principal',
+  item_nombre: 'Lomo a lo pobre',
+  cantidad: '2.0000',
+  precio_unitario: '12900.0000',
+  motivo_baja_nombre: 'Cortesía de la casa',
+  tipo: TipoMotivoBaja.CORTESIA,
+  garzon_nombre: 'Ana Torres',
+  autorizado_por_nombre: 'Encargado',
+  ...overrides,
+});
+
+describe('AnulacionesReporteService', () => {
+  let service: AnulacionesReporteService;
+  let dbQueryMock: jest.Mock;
+
+  beforeEach(async () => {
+    dbQueryMock = jest.fn();
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AnulacionesReporteService,
+        {
+          provide: Db,
+          useValue: {
+            query: dbQueryMock,
+            transaccion: jest.fn((cb: (manager: unknown) => unknown) => cb({})),
+            sinTransaccion: (fn: () => unknown) => fn(),
+          },
+        },
+      ],
+    }).compile();
+
+    service = module.get(AnulacionesReporteService);
+  });
+
+  describe('findAll — mapeo de plata y estados del costo', () => {
+    it('mapea una cortesía de cantidad 2 y precio_unitario 12900.0000 a precioCarta 25800.0000', async () => {
+      dbQueryMock
+        .mockResolvedValueOnce([{ total: 1 }]) // COUNT
+        .mockResolvedValueOnce([anulacionRow()]) // página
+        .mockResolvedValueOnce([]); // costo (sin movimientos: valorizado con costo [])
+
+      const res = await service.findAll(TENANT, {});
+
+      expect(res.data[0]).toMatchObject({
+        id: 'anulacion-1',
+        cantidad: '2.0000',
+        precioCarta: '25800.0000',
+      });
+    });
+
+    it('costo valorizado con dos monedas devuelve una lista de dos', async () => {
+      dbQueryMock
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([anulacionRow()])
+        .mockResolvedValueOnce([
+          {
+            cuenta_linea_anulacion_id: 'anulacion-1',
+            moneda_id: 'clp-uuid',
+            monto: '4300.0000',
+            falta_costo: false,
+          },
+          {
+            cuenta_linea_anulacion_id: 'anulacion-1',
+            moneda_id: 'usd-uuid',
+            monto: '3.5000',
+            falta_costo: false,
+          },
+        ]);
+
+      const res = await service.findAll(TENANT, {});
+
+      expect(res.data[0].costoEstado).toBe('valorizado');
+      expect(res.data[0].costo).toEqual([
+        { monedaId: 'clp-uuid', monto: '4300.0000' },
+        { monedaId: 'usd-uuid', monto: '3.5000' },
+      ]);
+    });
+
+    it('no_elaborado: costoEstado no_aplica, costo [], y NO entra al ANY($2) de la consulta de costo', async () => {
+      dbQueryMock.mockResolvedValueOnce([{ total: 1 }]).mockResolvedValueOnce([
+        anulacionRow({
+          tipo: TipoMotivoBaja.NO_ELABORADO,
+          motivo_baja_nombre: 'No se hizo',
+        }),
+      ]);
+      // Sin tercer mockResolvedValueOnce: si el service igual pidiera el
+      // costo, `dbQueryMock` devolvería `undefined` y el test fallaría al
+      // iterar `rows` de esa respuesta — lo cual es la prueba de que NO se
+      // llamó una tercera vez.
+
+      const res = await service.findAll(TENANT, {});
+
+      expect(res.data[0]).toMatchObject({
+        costoEstado: 'no_aplica',
+        costo: [],
+      });
+      expect(dbQueryMock).toHaveBeenCalledTimes(2);
+      const costoCall = dbQueryMock.mock.calls.find(([sql]) =>
+        (sql as string).includes('movimientos_inventario'),
+      );
+      expect(costoCall).toBeUndefined();
+    });
+
+    it('un grupo con falta_costo: sin_valorizar y costo [] (no una cifra parcial)', async () => {
+      dbQueryMock
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([anulacionRow({ tipo: TipoMotivoBaja.MERMA })])
+        .mockResolvedValueOnce([
+          {
+            cuenta_linea_anulacion_id: 'anulacion-1',
+            moneda_id: 'clp-uuid',
+            monto: '1000.0000',
+            falta_costo: false,
+          },
+          {
+            cuenta_linea_anulacion_id: 'anulacion-1',
+            moneda_id: 'clp-uuid',
+            // `falta_costo=true`: al menos un movimiento del grupo no tiene
+            // costo_unitario. El `monto` que igual trae la fila (una suma
+            // parcial de Postgres) NO tiene que llegar al mapeo.
+            monto: '500.0000',
+            falta_costo: true,
+          },
+        ]);
+
+      const res = await service.findAll(TENANT, {});
+
+      expect(res.data[0].costoEstado).toBe('sin_valorizar');
+      expect(res.data[0].costo).toEqual([]);
+    });
+
+    it('garzon_nombre null mapea a garzonNombre null', async () => {
+      dbQueryMock
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([anulacionRow({ garzon_nombre: null })])
+        .mockResolvedValueOnce([]);
+
+      const res = await service.findAll(TENANT, {});
+
+      expect(res.data[0].garzonNombre).toBeNull();
+    });
+  });
+
+  describe('findAll — filtros', () => {
+    it('tipo, garzonId, motivoBajaId y desde (fecha pura) llegan como parámetros de la cláusula', async () => {
+      dbQueryMock
+        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }]) // zonaHorariaTenant
+        .mockResolvedValueOnce([{ total: 0 }]) // COUNT
+        .mockResolvedValueOnce([]); // página (sin filas → sin consulta de costo)
+
+      await service.findAll(TENANT, {
+        tipo: TipoMotivoBaja.CORTESIA,
+        garzonId: 'garzon-uuid',
+        motivoBajaId: 'motivo-uuid',
+        desde: '2026-09-01',
+      });
+
+      // Llamada 0: zonaHorariaTenant. Llamada 1: el COUNT con el WHERE armado
+      // por `buildFilters` — se afirma sobre la cláusula exacta (no un
+      // `toContain` suelto que matchee un comentario del SQL).
+      const [countSql, countParams] = dbQueryMock.mock.calls[1] as [
+        string,
+        unknown[],
+      ];
+      expect(countSql).toContain('AND mb.tipo = $3');
+      expect(countSql).toContain('AND cla.garzon_id = $4');
+      expect(countSql).toContain('AND cla.motivo_baja_id = $5');
+      expect(countSql).toContain(
+        'AND cla.creado_el >= ($6::date::timestamp AT TIME ZONE $2)',
+      );
+      expect(countParams).toEqual([
+        TENANT,
+        'America/Santiago',
+        TipoMotivoBaja.CORTESIA,
+        'garzon-uuid',
+        'motivo-uuid',
+        '2026-09-01',
+      ]);
+
+      // La página comparte la misma cláusula de filtros.
+      const [pageSql, pageParams] = dbQueryMock.mock.calls[2] as [
+        string,
+        unknown[],
+      ];
+      expect(pageSql).toContain('AND mb.tipo = $3');
+      expect(pageParams.slice(0, 6)).toEqual(countParams);
+    });
+  });
+});
