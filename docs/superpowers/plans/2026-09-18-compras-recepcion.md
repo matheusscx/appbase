@@ -57,10 +57,11 @@ solo lectura en curso, lanzada por la sesión coordinadora.
 - Frontend: `useApiFetch`/`$fetch`, nunca axios. Tokens semánticos de Nuxt UI, nunca colores
   Tailwind hardcodeados. Utilidades de presentación en `app/composables/`, nunca locales a un
   `.vue`. Montos en `UInput` con `inputmode="decimal"` y **string**, nunca `type="number"`.
-- **Ids fijos del seed** desde `550e8400-e29b-41d4-a716-446655440407`. El máximo ocupado al
-  escribir este plan es `…406` (fijo) y `…400` (loop de `seedMotivosTraslado`). **Hay otras ramas
-  abiertas que también siembran:** al ejecutar la tarea 1, se vuelve a medir con el método de
-  `docs/patterns/backend.md` § 8 contra el `main` de ese momento y se corre el rango si hace falta.
+- **Ids fijos del seed: rango reservado `…420`–`…440`** por la sesión coordinadora
+  (2026-09-18). En `main` el máximo es `…406`, pero la rama `claude/dashboard-inicio` (KPIs) ya
+  siembra `…407`–`…409` y puede sumar más; el hueco `…410`–`…419` es su margen. Al ejecutar la
+  tarea 1 se vuelve a medir, con el método de `docs/patterns/backend.md` § 8, contra `main`
+  **y contra las ramas vivas**.
 - **Stack compartido:** antes de cualquier `reset-db.sh` o `test:e2e`, **pedir turno** a la sesión
   coordinadora. No tocar un `.ts` del backend con el e2e corriendo. Después del e2e,
   `./scripts/reset-db.sh --verificar`.
@@ -124,10 +125,17 @@ Bloqueadas: `inventario/entities/movimiento-inventario.entity.ts`,
   nombres de propiedad de abajo. El módulo `Compras` con acciones `Leer`, `Crear`, `Actualizar` y
   `Anular`. El usuario fixture `encargado.compras@paris.cl` (pass del seed `admin`).
 
-- [ ] **Step 1: Medir el primer id libre** contra el `main` actual, con el método de
-  `docs/patterns/backend.md` § 8 (literales, `const uuid = ` y los loops `let id =`). Si el máximo
-  ya no es `…406`, correr **todo** el rango de abajo (407–427) en bloque y anotarlo en el
-  comentario del seed.
+- [ ] **Step 1: Verificar que el rango reservado `…420`–`…440` sigue libre**, con el método de
+  `docs/patterns/backend.md` § 8 (literales, `const uuid = ` y los loops `let id =`), contra
+  `main` **y** contra cada rama viva que toque el seeder:
+
+```bash
+git worktree list
+git diff main...claude/dashboard-inicio -- backend/src/modules/seeder/seeder.service.ts | grep -o "446655440[0-9]\{3\}" | sort -u
+```
+
+  Si algo del rango ya está tomado, **parar y pedirle un rango nuevo a la sesión coordinadora**.
+  No correrlo por cuenta propia.
 
 - [ ] **Step 2: `tipo-documento-compra.entity.ts`**
 
@@ -443,26 +451,26 @@ En `app.module.ts`: sumar las cuatro clases al array `entities` del `TypeOrmModu
 
      | id | país | nombre | codigo | requiere_folio |
      |---|---|---|---|---|
-     | 407 | CL | Factura | 33 | true |
-     | 408 | CL | Factura exenta | 34 | true |
-     | 409 | CL | Factura de compra | 46 | true |
-     | 410 | CL | Guía de despacho | 52 | true |
-     | 411 | CL | Boleta | 39 | true |
-     | 412 | CL | Sin documento | null | false |
-     | 413 / 414 | AR | Factura / Sin documento | null | true / false |
-     | 415 / 416 | CO | Factura / Sin documento | null | true / false |
-     | 417 / 418 | MX | Factura / Sin documento | null | true / false |
+     | 420 | CL | Factura | 33 | true |
+     | 421 | CL | Factura exenta | 34 | true |
+     | 422 | CL | Factura de compra | 46 | true |
+     | 423 | CL | Guía de despacho | 52 | true |
+     | 424 | CL | Boleta | 39 | true |
+     | 425 | CL | Sin documento | null | false |
+     | 426 / 427 | AR | Factura / Sin documento | null | true / false |
+     | 428 / 429 | CO | Factura / Sin documento | null | true / false |
+     | 430 / 431 | MX | Factura / Sin documento | null | true / false |
 
-  2. **Módulo:** en el array `modulos` (`seedModulosApp`, ~línea 624), `{ moduloAppId: …419,
+  2. **Módulo:** en el array `modulos` (`seedModulosApp`, ~línea 624), `{ moduloAppId: …432,
      nombre: 'Compras', … }` con los mismos campos que la fila de `Inventario`.
-  3. **Permisos del módulo** en `seedModuloAppPermisos` (~línea 778), con las constantes que ya
-     existen (`LEER`, `CREAR`, `ACTUALIZAR`, `ANULAR …333`): `…420` Leer, `…421` Crear, `…422`
-     Actualizar, `…423` Anular.
-  4. **Contratado** en `seedTenantModulo` (~línea 1772): Paris `…424` y Falabella `…425`, con el
+  3. **Permisos del módulo** en `seedModuloAppPermisos` (~línea 783), con las constantes que ya
+     existen (`LEER`, `CREAR`, `ACTUALIZAR`, `ANULAR …333`): `…433` Leer, `…434` Crear, `…435`
+     Actualizar, `…436` Anular.
+  4. **Contratado** en `seedTenantModulo` (~línea 1772): Paris `…437` y Falabella `…438`, con el
      mismo `estado` y `expiraEn` que Inventario.
   5. **Rol fixture** `seedRolEncargadoCompras()`, copiando la forma de `seedRolEncargadoSalon`
-     (~línea 2824): rol `…426` "Compras · Encargado" en Paris, con las cuatro acciones sobre el
-     `moduloTenantId` `…424`; usuario `…427` `encargado.compras` / `encargado.compras@paris.cl`,
+     (~línea 2824): rol `…439` "Compras · Encargado" en Paris, con las cuatro acciones sobre el
+     `moduloTenantId` `…437`; usuario `…440` `encargado.compras` / `encargado.compras@paris.cl`,
      agregado a `seedUsuariosAdicionales` con el mismo `HASH`. Se llama junto a
      `seedRolEncargadoSalon()` (~línea 214).
      > **Desvío de la spec, a confirmar con el owner al revisar el plan:** la spec dice "el rol
@@ -470,8 +478,9 @@ En `app.module.ts`: sumar las cuatro clases al array `entities` del `TypeOrmModu
      > `Encargado Cajas`, `Salones · Encargado` e `Inventario · …`. Se crea un rol propio para no
      > darle compras de arrastre a un rol de otro módulo, y porque las suites de ese rol no
      > deberían cambiar de conducta.
-  6. Un comentario arriba del rango: *"Rango 407–427: el máximo previo era 406 (…); medido con
-     § 8."*
+  6. Un comentario arriba del rango: *"Rango 420–440, reservado por la sesión coordinadora el
+     2026-09-18: en main el máximo era 406, y la rama de KPIs (`claude/dashboard-inicio`) toma
+     407–409 con margen hasta 419. Medido con § 8 contra main y las ramas vivas."*
 
 - [ ] **Step 8: Verificar que compila y arranca.**
 
