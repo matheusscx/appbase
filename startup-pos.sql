@@ -2392,9 +2392,11 @@ CREATE TABLE cuenta_linea_anulaciones (
     cuenta_linea_id UUID NOT NULL REFERENCES cuenta_lineas(cuenta_linea_id),
     item_id UUID NOT NULL REFERENCES items(item_id),
     item_nombre TEXT NOT NULL, -- congelado: el catálogo puede renombrar o borrar el ítem después
+    precio_unitario NUMERIC(18,4) NOT NULL, -- congelado: precio de carta de cuenta_lineas al anular, moneda oficial, antes de descuentos/recargos/impuestos
     cantidad NUMERIC(18,4) NOT NULL, -- cuánto se anuló en ESTA anulación, unidad canónica
     motivo_baja_id UUID NOT NULL REFERENCES motivo_baja(motivo_baja_id),
     autorizado_por UUID NOT NULL REFERENCES usuarios(usuario_id),
+    garzon_id UUID REFERENCES garzones(garzon_id), -- congelado: cuentas.garzon_responsable_id al anular; ni transferencia ni fusión posterior lo cambian
     creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     eliminado_el TIMESTAMPTZ

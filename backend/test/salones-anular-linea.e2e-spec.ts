@@ -540,6 +540,21 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
     expect(mov[0].motivo).toBe('merma');
     expect(mov[0].motivo_baja_id).toBe(motivoCortesiaId);
     expect(mov[0].cuenta_linea_anulacion_id).toBe(anulacionId);
+
+    // La anulación congela el precio de carta de la línea y el garzón
+    // responsable de la cuenta en ese momento (spec § 3.1) — lectura de
+    // verificación, no montaje de escenario: el escenario ya se armó por API.
+    const [filaAnulacion]: { precio_unitario: string; garzon_id: string }[] =
+      await ds.query(
+        `SELECT precio_unitario, garzon_id FROM cuenta_linea_anulaciones WHERE cuenta_id = $1`,
+        [cuenta.id],
+      );
+    const [filaLinea]: { precio_unitario: string }[] = await ds.query(
+      `SELECT precio_unitario FROM cuenta_lineas WHERE cuenta_linea_id = $1`,
+      [linea.id],
+    );
+    expect(filaAnulacion.precio_unitario).toBe(filaLinea.precio_unitario);
+    expect(filaAnulacion.garzon_id).toBe(garzon.id);
   });
 
   it('no_elaborado: el stock no se mueve, porque ese plato nunca salió', async () => {

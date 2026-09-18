@@ -2311,7 +2311,10 @@ describe('SalonesService', () => {
       };
     }
 
-    function mockCuentaYLinea(linea: Record<string, unknown> | null) {
+    function mockCuentaYLinea(
+      linea: Record<string, unknown> | null,
+      garzonResponsableId: string | null = null,
+    ) {
       manager.findOne.mockImplementation((entidad: unknown) =>
         Promise.resolve(
           entidad === Cuenta
@@ -2321,7 +2324,7 @@ describe('SalonesService', () => {
                 estado: EstadoCuenta.ABIERTA,
                 garzonAperturaId: null,
                 garzonCierreId: null,
-                garzonResponsableId: null,
+                garzonResponsableId,
               }
             : linea,
         ),
@@ -2506,6 +2509,43 @@ describe('SalonesService', () => {
       expect(manager.save).not.toHaveBeenCalledWith(
         CuentaLinea,
         expect.objectContaining({ id: LINEA }),
+      );
+    });
+
+    it('congela el precio de carta de la línea y el garzón responsable de la cuenta', async () => {
+      mockCuentaYLinea(
+        lineaViva({ precioUnitario: '12900.0000' }),
+        'garzon-pedro',
+      );
+
+      await service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+        cantidad: '1',
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.objectContaining({
+          precioUnitario: '12900.0000',
+          garzonId: 'garzon-pedro',
+        }),
+      );
+    });
+
+    it('la cuenta sin garzón responsable no inventa uno: garzonId null', async () => {
+      mockCuentaYLinea(lineaViva({ precioUnitario: '4500.0000' }), null);
+
+      await service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+        cantidad: '1',
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.objectContaining({
+          precioUnitario: '4500.0000',
+          garzonId: null,
+        }),
       );
     });
 
@@ -2896,6 +2936,55 @@ describe('SalonesService', () => {
       expect(manager.save).not.toHaveBeenCalledWith(
         CuentaLineaAnulacion,
         expect.anything(),
+      );
+    });
+
+    it('cada fila de anulación lleva su propio precio de carta y el mismo garzón responsable', async () => {
+      manager.findOne.mockResolvedValue(
+        cuentaAbierta({ garzonResponsableId: 'garzon-pedro' }),
+      );
+      manager.find.mockResolvedValue([
+        lineaViva({
+          id: 'l1',
+          itemId: ITEM,
+          cantidadEnviada: '1',
+          precioUnitario: '12900.0000',
+        }),
+        lineaViva({
+          id: 'l2',
+          itemId: ITEM_2,
+          cantidadEnviada: '1',
+          precioUnitario: '4500.0000',
+        }),
+      ]);
+      mockItemsQuery({
+        [ITEM]: { tipo: 'producto', nombre: 'Lomo', unidad_medida: 'unidad' },
+        [ITEM_2]: {
+          tipo: 'producto',
+          nombre: 'Papas',
+          unidad_medida: 'unidad',
+        },
+      });
+
+      await service.cancelarConMotivo(TENANT, USUARIO_ACTOR, CUENTA, {
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.objectContaining({
+          cuentaLineaId: 'l1',
+          precioUnitario: '12900.0000',
+          garzonId: 'garzon-pedro',
+        }),
+      );
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.objectContaining({
+          cuentaLineaId: 'l2',
+          precioUnitario: '4500.0000',
+          garzonId: 'garzon-pedro',
+        }),
       );
     });
 

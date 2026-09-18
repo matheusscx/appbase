@@ -595,6 +595,22 @@ instante después — con el filtro puesto, esa fila desaparecería del aviso (I
 motivo = sin fila) aunque la anulación sea real. El JOIN a `usuarios` (autor) tampoco filtra
 `eliminado_el`, mismo criterio que la papelera: quién autorizó es un hecho histórico.
 
+**Cada fila de `cuenta_linea_anulaciones` congela dos datos más, al escribirse** (2026-09-18,
+parte 1 del reporte de anulaciones):
+
+- `precio_unitario` (`numeric(18,4)` NOT NULL): copiado de `cuenta_lineas.precio_unitario` —
+  lo que decía la carta, ya en la moneda oficial, antes de descuentos, recargos e impuestos.
+  Se copia porque la línea se borra cuando queda en cero: leerlo de ahí después obligaría a
+  saltarse el filtro de borrado.
+- `garzon_id` (`uuid` NULL): `cuentas.garzon_responsable_id` **en el momento de anular**, no
+  el vigente — ni una transferencia ni una fusión posterior lo cambian. Null si la cuenta no
+  tenía responsable.
+
+Las escribe `escribirAnulacionEnLinea`, el escritor común de `anularLinea` y
+`cancelarConMotivo`: el precio sale de la línea que el llamador ya recibe, el garzón de la
+cuenta que el llamador ya tiene bloqueada (`getCuentaAbiertaConLock`) — no se relee dentro del
+escritor aunque corra una vez por línea.
+
 **Fuera de esta parte:** el reporte de anulaciones con merma y cortesía separadas, y deshacer
 una anulación (decidido que no existe: se vuelve a pedir el plato).
 

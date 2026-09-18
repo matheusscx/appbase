@@ -1286,6 +1286,7 @@ export class SalonesService {
       tenantId,
       usuarioId,
       cuentaId,
+      cuenta.garzonResponsableId,
       linea,
       cantidad,
       motivo,
@@ -1331,12 +1332,19 @@ export class SalonesService {
    * `stockCtx` viene resuelto por el llamador (`resolverContextoStockAnulacion`,
    * memoizado) — nunca se resuelve acá adentro, porque acá SÍ puede correr una
    * vez por línea.
+   *
+   * `garzonId` es `cuenta.garzonResponsableId` en el momento de anular: el
+   * llamador ya tiene la cuenta bloqueada (`getCuentaAbiertaConLock`), así
+   * que no se relee acá adentro aunque esto corra una vez por línea (spec
+   * § 3.1). El precio de carta sale de `linea.precioUnitario`, que el
+   * llamador ya recibe.
    */
   private async escribirAnulacionEnLinea(
     manager: EntityManager,
     tenantId: string,
     usuarioId: string,
     cuentaId: string,
+    garzonId: string | null,
     linea: CuentaLinea,
     cantidad: Decimal,
     motivo: { id: string; tipo: TipoMotivoBaja },
@@ -1352,9 +1360,11 @@ export class SalonesService {
         cuentaLineaId: linea.id,
         itemId: linea.itemId,
         itemNombre: item.nombre,
+        precioUnitario: linea.precioUnitario,
         cantidad: cantidad.toString(),
         motivoBajaId: motivo.id,
         autorizadoPor: usuarioId,
+        garzonId,
       }),
     );
 
@@ -1574,6 +1584,7 @@ export class SalonesService {
         tenantId,
         usuarioId,
         cuentaId,
+        cuenta.garzonResponsableId,
         linea,
         new Decimal(linea.cantidadEnviada),
         motivo,

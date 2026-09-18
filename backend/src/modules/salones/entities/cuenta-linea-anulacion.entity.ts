@@ -44,6 +44,20 @@ export class CuentaLineaAnulacion {
   @Column({ name: 'item_nombre', type: 'text' })
   itemNombre: string;
 
+  /**
+   * Precio de carta de la línea al anular (`cuenta_lineas.precio_unitario`,
+   * ya en la moneda oficial, antes de descuentos/recargos/impuestos): la
+   * línea se borra cuando queda en cero, así que este es el único rastro
+   * que sobrevive (spec § 3.1).
+   */
+  @Column({
+    name: 'precio_unitario',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+  })
+  precioUnitario: string;
+
   /** Unidad canónica de la línea, la misma que `cuenta_lineas.cantidad_enviada`. */
   @Column({ type: 'numeric', precision: 18, scale: 4 })
   cantidad: string;
@@ -53,6 +67,14 @@ export class CuentaLineaAnulacion {
 
   @Column({ name: 'autorizado_por', type: 'uuid' })
   autorizadoPor: string;
+
+  /**
+   * `cuentas.garzon_responsable_id` en el momento de anular, no el actual:
+   * ni una transferencia ni una fusión posterior lo cambian. Null si la
+   * cuenta no tenía responsable (spec § 3.1).
+   */
+  @Column({ name: 'garzon_id', type: 'uuid', nullable: true })
+  garzonId: string | null;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
