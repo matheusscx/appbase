@@ -62,10 +62,10 @@ adentro, y alguna quedó a medias a propósito— pero nadie está esperando una
 empezarlas.
 
 ⚠️ **Esta sección no es una tanda que se "termine", y leerla como tal hace tomar malas
-decisiones.** **Siete de sus entradas son features de producto con su propia spec** —el
+decisiones.** **Varias de sus entradas son features de producto con su propia spec** —entre ellas el
 motor de promociones, la NC como documento, la UF como moneda oficial, `cashRounding`, el
-conteo por denominación, anular o reducir una línea ya enviada a cocina, y el envío diario del
-resumen de descuadres—. Están acá porque se decidieron, no porque sean deuda: **son la cola de
+conteo por denominación, anular o reducir una línea ya enviada a cocina, el envío diario del
+resumen de descuadres y la hora de corte del día del negocio—. Están acá porque se decidieron, no porque sean deuda: **son la cola de
 trabajo, y cada una abre su propio frente.**
 
 De la deuda chica que quedaba, el **2026-08-24 salieron tres**: la escala de la pasarela, el
@@ -689,11 +689,50 @@ hereda), que es lo que carga el formulario de ítems.
 un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya está construido
 (2026-09-09) y es el que la API tiene que espejar, no contradecir.
 
+### El día del negocio termina en una hora de corte (owner, 2026-09-18)
+
+- [ ] **Cada tenant configura la hora a la que termina su día** (backend + frontend, decidido
+  por el owner el 2026-09-18, en el brainstorm del dashboard de inicio) — un bar que abre el
+  sábado a las 19:00 y cierra el domingo a las 03:00 cobra una cuenta a la 01:30: con corte a
+  las 05:00 esa venta es **del sábado**. Hoy "el día" es el calendario local del tenant y corta
+  a medianoche, así que el sábado del bar sale partido en dos.
+
+  **Va entera, no pantalla por pantalla.** El corte cambia a la vez en todo lector que resuelve
+  "el día" con [`rango-fecha.util.ts`](../../backend/src/common/utils/rango-fecha.util.ts)
+  —la lista sale de `grep -rn zonaHorariaTenant backend/src`, no de esta entrada—: si una
+  pantalla corta a las 05:00 y el reporte al que enlaza corta a medianoche, el mismo "sábado"
+  da dos números distintos al hacer clic. Por eso el dashboard salió cortando a medianoche,
+  como el resto, en vez de estrenar el corte solo.
+
+  ⚠️ **El motor de precios queda afuera.** `calculo-precios.service.ts` también usa la zona
+  del tenant, pero para la vigencia de una regla por horario: un happy hour de "sábado 23:00
+  a 02:00" es hora de reloj, no día del negocio. Además tocar el motor es frente propio.
+
+  🔗 Se cruza con *Manejo de fechas y zonas horarias* (§ 6): ahí vive la pregunta de qué
+  significa "desde el 1 de agosto" para una empresa, y el corte es parte de esa respuesta.
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
+
+- [ ] **Aviso de stock bajo** (backend + frontend + producto, pedido por el owner el
+  2026-09-18 en el brainstorm del dashboard de inicio) — que el sistema avise cuando un
+  producto se está acabando. Quedó afuera del dashboard porque **no existe el dato**: ningún
+  ítem tiene stock mínimo (`grep -rniE "stock_minimo|punto_reorden" backend/src` no devuelve
+  nada), así que no hay contra qué comparar el saldo de `stock_ubicacion`.
+
+  **Las preguntas, antes de diseñar:**
+  - El mínimo, **¿es por producto o por producto y lugar?** El saldo vive por (ítem,
+    ubicación): 3 cajas de cerveza en la bodega y 0 en el local, ¿es stock bajo?
+  - **¿Dónde avisa?** Un bloque en el dashboard (¿con qué permiso? `Inventario: Leer` es el
+    candidato), una marca en el listado de inventario, o las dos.
+  - Los productos en modo `serie` o `lote`, ¿cuentan unidades igual que los de `cantidad`?
+
+  Es una pregunta del tipo que los POS maduros ya resolvieron (punto de reorden): ofrecer la
+  pasada de investigación de mercado antes de diseñar. Cuando exista el frente de **compras**
+  (§ 3), el aviso es el insumo natural de un "sugerir pedido" — no construirlo antes.
 
 ## 5. Carreras de concurrencia
 
