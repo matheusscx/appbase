@@ -271,6 +271,8 @@ export function useImpresoras() {
     propina?: { monto: string }
     pagos: TicketPago[]
     vuelto?: string
+    /** Reimpresión — ver `buildBoletaTicket`. Se pasa derecho, sin tocarlo. */
+    copia?: { impresaEl: Date }
     formatMonto: (v: string) => string
   }): Promise<void> {
     const impresora = await obtenerImpresoraBoleta()

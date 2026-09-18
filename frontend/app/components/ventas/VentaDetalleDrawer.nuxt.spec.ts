@@ -16,9 +16,37 @@
 //   4. El total rotulado "Descuentos" incluye la plata de la promo — al revés
 //      que el ticket impreso, que la resta del agregado y la nombra aparte
 //      (`ticket-builder.ts`, `lineasTotalesConImpuestos`).
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import VentaDetalleDrawer from './VentaDetalleDrawer.vue'
+
+/**
+ * Lo que efectivamente se mandó a imprimir. `imprimirEn()` importa el cliente
+ * de QZ de verdad —que en un test le pediría un `websocket.connect()` a un QZ
+ * Tray que no existe—, así que se stubea acá. Mismo molde que
+ * `pages/ventas/pos.nuxt.spec.ts` y `pages/salones/index.nuxt.spec.ts`: la
+ * aserción de "Reimprimir boleta" es sobre el TEXTO que termina impreso, no
+ * sobre `itemsParaBoletaReimpresion` como objeto intermedio. Va con
+ * `vi.hoisted` porque `vi.mock` se iza por encima de los `const`.
+ */
+const { impresionesQz } = vi.hoisted(() => ({
+  impresionesQz: [] as string[][],
+}))
+vi.mock('qz-tray', () => ({
+  default: {
+    websocket: { isActive: () => true, connect: () => Promise.resolve() },
+    configs: { create: () => ({}) },
+    security: {
+      setCertificatePromise: () => {},
+      setSignatureAlgorithm: () => {},
+      setSignaturePromise: () => {},
+    },
+    print: (_config: unknown, datos: string[]) => {
+      impresionesQz.push(datos)
+      return Promise.resolve()
+    },
+  },
+}))
 
 const CLP = {
   monedaId: 'clp-1',
@@ -188,15 +216,82 @@ const NOTA_CREDITO = {
   ],
 }
 
+/** La boleta que devuelve `GET /ventas/:id/boleta` para la venta `v-1` ya cobrada. */
+const BOLETA_REIMPRESION = {
+  ventaId: 'v-1',
+  fecha: '2026-08-28T12:00:00.000Z',
+  canal: 'fisico',
+  mesa: null,
+  cuentaNumero: null,
+  cajero: 'Ana Torres',
+  items: [{
+    descripcion: 'Pizza grande',
+    cantidad: '1',
+    cantidadPresentacion: null,
+    unidadCodigoPresentacion: null,
+    unidadCodigoBase: 'unidad',
+    precioUnitario: '7500',
+    totalLinea: '7500',
+  }],
+  totales: {
+    subtotalNeto: '7500',
+    totalDescuentos: '0',
+    totalRecargos: '0',
+    totalImpuestos: '0',
+    totalFinal: '7500',
+  },
+  impuestos: [],
+  promociones: [],
+  propina: null,
+  pagos: [{ nombre: 'Efectivo', monto: '7500' }],
+  vuelto: null,
+}
+
+/** Una impresora de boleta activa: sin ella `obtenerImpresoraBoleta()` da `null` y no imprime nada. */
+const IMPRESORA_BOLETA = {
+  id: 'imp-b1',
+  nombre: 'Caja',
+  rol: 'boleta',
+  activo: true,
+  tipoConexion: 'red',
+  host: '10.0.0.8',
+  puerto: 9100,
+  nombreCola: null,
+}
+
+/** Razón social del emisor para `useRazonSocialEmisor`. */
+const RAZON_SOCIAL = {
+  nombre: 'Comercial Paris SpA',
+  rut: '76.123.456-7',
+  direccion: 'Av. Providencia 1234',
+  habilitado: true,
+  preferida: true,
+}
+
 /** Qué documento contesta el mock. Se cambia ANTES de montar. */
 let documentoActual: typeof VENTA = VENTA
+
+/**
+ * Permisos del usuario simulado, mismo molde que
+ * `pages/configuracion/cajas.nuxt.spec.ts`: mutable para poder afirmar el
+ * botón de "Reimprimir boleta" con y sin `Ventas:Anular` en el mismo archivo.
+ * Con las dos ramas que ya usaba el resto de la suite (`Ventas:Anular` para
+ * `puedeAnular`... — acá siempre `false` porque `VENTA.estado === 'pagada'` —
+ * y `Ventas:Nota de crédito` para `puedeCrearNC`).
+ */
+let permisos = ['Ventas:Anular', 'Ventas:Nota de crédito']
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
     get esAdmin() { return true },
-    can: () => true,
+    can: (modulo: string, permiso: string) => permisos.includes(`${modulo}:${permiso}`),
   })
 })
+
+/** La boleta que devuelve `GET /ventas/:id/boleta`. Se cambia ANTES de montar. */
+let boletaActual: Record<string, unknown> | null = BOLETA_REIMPRESION
+/** Impresoras de rol `boleta`; vacío = `imprimirBoleta` no llama a QZ. */
+let impresorasBoleta: unknown[] = [IMPRESORA_BOLETA]
 
 /**
  * ⚠️ El fallback devuelve `[]`, **no `null`**. El drawer dispara
@@ -209,6 +304,18 @@ mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
     if (typeof url !== 'string') return Promise.resolve([])
     if (url.includes('/metodos-pago')) return Promise.resolve([])
+    // Antes del chequeo genérico de `/ventas/`: las dos rutas comparten el
+    // substring y `/ventas/:id/boleta` necesita SU PROPIA respuesta, no la
+    // del detalle de venta.
+    if (url.endsWith('/boleta')) return Promise.resolve(structuredClone(boletaActual))
+    // `endsWith`, no `includes`: `/impresoras/qz/certificado` también contiene
+    // el substring y espera `{ certificado }`, no la lista — con `includes`
+    // acá esa llamada recibiría este array igual, y aunque degrada sin romper
+    // (destructurar `.certificado` de un array da `undefined`, que es el
+    // camino "sin firmar" que `asegurarSeguridadQz` ya maneja), separarla deja
+    // el mock diciendo la verdad sobre qué contesta cada ruta.
+    if (url.split('?')[0]!.endsWith('/impresoras')) return Promise.resolve(impresorasBoleta)
+    if (url.includes('/tenants/razones-sociales')) return Promise.resolve([RAZON_SOCIAL])
     if (url.includes('/ventas/')) return Promise.resolve(structuredClone(documentoActual))
     return Promise.resolve([])
   }
@@ -403,5 +510,53 @@ describe('VentaDetalleDrawer — resincroniza lo que calcula el backend', () => 
 
     expect(boton()).toBeDefined()
     documentoActual = VENTA
+  })
+})
+
+describe('VentaDetalleDrawer — reimprimir boleta', () => {
+  /** El botón de "Reimprimir boleta", si está presente. */
+  function botonReimprimir(wrapper: Awaited<ReturnType<typeof montar>>) {
+    return wrapper.findAll('button').find(b => b.text().trim() === 'Reimprimir boleta')
+  }
+
+  it('no aparece sin el permiso Ventas:Anular', async () => {
+    permisos = ['Ventas:Nota de crédito']
+    try {
+      const wrapper = await montar()
+      expect(botonReimprimir(wrapper)).toBeUndefined()
+    }
+    finally {
+      permisos = ['Ventas:Anular', 'Ventas:Nota de crédito']
+    }
+  })
+
+  it('aparece con el permiso Ventas:Anular — el mismo que exige la ruta', async () => {
+    const wrapper = await montar()
+    expect(botonReimprimir(wrapper)).toBeDefined()
+  })
+
+  /**
+   * Al apretarlo pide `GET /ventas/:id/boleta` (no reusa el detalle que el
+   * drawer ya tiene, que no trae la venta persistida con la que se cobró) e
+   * imprime CON la marca de copia. La aserción es sobre el TEXTO que termina
+   * impreso (`impresionesQz`, vía el mock de `qz-tray`), no sobre
+   * `itemsParaBoletaReimpresion` como objeto intermedio — mismo criterio que
+   * `pos.nuxt.spec.ts` para el mismo bug de origen (un objeto intermedio
+   * correcto no prueba que el texto impreso lo sea).
+   */
+  it('al apretarlo pide la boleta de la venta e imprime con COPIA y su contenido', async () => {
+    impresionesQz.length = 0
+    const wrapper = await montar()
+    const boton = botonReimprimir(wrapper)
+    expect(boton, 'el botón está presente').toBeDefined()
+
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(impresionesQz, 'la boleta se imprimió').toHaveLength(1)
+    const texto = impresionesQz[0]!.join('')
+    expect(texto).toContain('COPIA')
+    expect(texto).toContain('Pizza grande')
+    expect(texto).toContain('Ana Torres')
   })
 })

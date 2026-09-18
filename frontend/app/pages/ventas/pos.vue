@@ -4,10 +4,14 @@ import { useVenta, descontarStockCatalogo, tieneCustomerData, toVentaLineasBody,
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
-import { formatCantidadLinea } from '~/utils/cantidad-presentacion'
-import type { PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
+import { itemsParaBoletaImpresion } from '~/utils/ticket-builder'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { fetchPorcentajeSugeridoVenta, PROPINA_PORCENTAJE_DEFAULT } from '~/composables/usePropina'
+// Tipo compartido — no importado de `~/composables/useSalones` porque esta
+// pantalla no depende de Salones (ver el docblock de `~/types/boleta`). Trae
+// más campos (`fecha`, `canal`, `mesa`, `cuentaNumero`) de los que el
+// mostrador usa; los sobrantes llegan igual en la respuesta y no se leen acá.
+import type { BoletaVenta } from '~/types/boleta'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -17,43 +21,6 @@ interface MetodoPago {
   nombre: string
   permiteVuelto: boolean
   habilitada: boolean
-}
-/**
- * Espejo de `BoletaVenta` (`backend/src/modules/ventas/ventas.service.ts`):
- * la venta YA PERSISTIDA que devuelve `POST /ventas` — no el carrito vivo ni
- * el motor de cálculo. Copiado a mano, mismo criterio que el resto del
- * frontend mientras backend y frontend no comparten workspace. **Subconjunto**
- * de `BoletaVenta` de `~/composables/useSalones` —le faltan `fecha`, `canal`,
- * `mesa` y `cuentaNumero`, que el mostrador no imprime—, declarado acá y no
- * importado de allá porque esta pantalla no depende de Salones. Los campos
- * sobrantes llegan igual en la respuesta; simplemente no se usan.
- */
-interface BoletaVenta {
-  ventaId: string
-  cajero: string | null
-  items: {
-    descripcion: string
-    cantidad: string
-    cantidadPresentacion: string | null
-    unidadCodigoPresentacion: string | null
-    unidadCodigoBase: string
-    precioUnitario: string
-    totalLinea: string
-    personalizacionDetalle?: PersonalizacionDetalleLinea[]
-    comentario?: string
-  }[]
-  totales: {
-    subtotalNeto: string
-    totalDescuentos: string
-    totalRecargos: string
-    totalImpuestos: string
-    totalFinal: string
-  }
-  impuestos: { nombre: string, tasa: string, monto: string }[]
-  promociones: { id: string, nombre: string, monto: string }[]
-  propina: { monto: string } | null
-  pagos: { nombre: string, monto: string }[]
-  vuelto: string | null
 }
 
 const config = useRuntimeConfig()
@@ -227,38 +194,6 @@ const estadoToastTitle: Record<string, string> = {
   pendiente: 'Venta registrada — pendiente de pago',
 }
 
-/**
- * El mapeo mínimo de `BoletaVenta` —la venta YA PERSISTIDA que devuelve
- * `POST /ventas`— al `BoletaItem` que consume `buildBoletaTicket`. Vive acá y
- * no en `ticket-builder.ts` para no tocarle la firma, que comparte la
- * precuenta. Gemelo de `itemsParaBoletaCierre` (`frontend/app/pages/salones/index.vue`).
- *
- * Sin cruce por índice contra `items.value` (el catálogo cargado): la unidad
- * de cada línea ya viene resuelta en la propia `BoletaVenta.items[]`
- * (`unidadCodigoBase` / `unidadCodigoPresentacion`), porque es la que el
- * servidor cobró.
- */
-function itemsParaBoletaVenta(boleta: BoletaVenta) {
-  return boleta.items.map((item) => {
-    const cantidadTicket = formatCantidadLinea(
-      item.cantidad,
-      item.cantidadPresentacion,
-      item.unidadCodigoPresentacion,
-      unidadesStore.esFraccionaria(item.unidadCodigoPresentacion ?? item.unidadCodigoBase),
-      item.unidadCodigoBase,
-    )
-    return {
-      nombre: item.descripcion,
-      cantidad: cantidadTicket,
-      precioUnitario: item.precioUnitario,
-      totalLinea: item.totalLinea,
-      ...(item.personalizacionDetalle?.length
-        ? { personalizacionDetalle: item.personalizacionDetalle, comentario: item.comentario }
-        : item.comentario ? { nota: item.comentario } : {}),
-    }
-  })
-}
-
 async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
   const docSel = tiposDocumento.value.find((t) => t.id === tipoDocumentoId.value)
   const incluirCustomer = docSel?.customerRequerido || customerExpandido.value
@@ -325,7 +260,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         cliente: incluirCustomer
           ? { nombre: customer.value.nombre || undefined, rut: customer.value.rut || undefined, direccion: customer.value.direccion || undefined }
           : undefined,
-        items: itemsParaBoletaVenta(venta.boleta),
+        items: itemsParaBoletaImpresion(venta.boleta.items, unidadesStore.esFraccionaria),
         totales: venta.boleta.totales,
         impuestos: venta.boleta.impuestos,
         promociones: venta.boleta.promociones,

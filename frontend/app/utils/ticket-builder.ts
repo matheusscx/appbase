@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js'
+import { formatCantidadLinea } from './cantidad-presentacion'
 
 export interface ImpuestoBoleta {
   nombre: string
@@ -224,6 +225,67 @@ export interface BoletaItem extends TicketItem {
   comentario?: string
 }
 
+/** Una línea de `BoletaVenta.items` (`~/types/boleta.ts`), inline y no importada desde
+ * ahí para no crear un import circular: ese tipo importa `PersonalizacionDetalleLinea`
+ * DE ESTE archivo. Estructuralmente es el mismo shape — `boleta.items` se le pasa tal
+ * cual a `itemsParaBoletaImpresion`. */
+export interface BoletaVentaItem {
+  descripcion: string
+  cantidad: string
+  cantidadPresentacion: string | null
+  unidadCodigoPresentacion: string | null
+  unidadCodigoBase: string
+  precioUnitario: string
+  totalLinea: string
+  personalizacionDetalle?: PersonalizacionDetalleLinea[]
+  comentario?: string
+}
+
+/**
+ * El mapeo de `BoletaVenta.items[]` —la venta YA PERSISTIDA que devuelven
+ * `POST /cuentas/:id/cerrar`, `POST /ventas` y `GET /ventas/:id/boleta`— al
+ * `BoletaItem` que consume `buildBoletaTicket`. Sin cruce por índice contra
+ * ningún catálogo: la unidad de cada línea ya viene resuelta en la propia
+ * `BoletaVenta.items[]`, porque es la que el servidor cobró.
+ *
+ * Única función — hasta el 2026-09-17 estaba triplicada a mano, byte a byte
+ * idéntica, en `pages/salones/index.vue` (`itemsParaBoletaCierre`),
+ * `pages/ventas/pos.vue` (`itemsParaBoletaVenta`) y
+ * `components/ventas/VentaDetalleDrawer.vue` (`itemsParaBoletaReimpresion`) —
+ * misma regla que sacó a `BoletaVenta` de esos mismos tres archivos hacia
+ * `~/types/boleta.ts` (duplicar dos veces se tolera, a la tercera se extrae,
+ * `CLAUDE.md` § Archivos).
+ *
+ * `esFraccionaria` se recibe **inyectada** (mismo criterio que
+ * `formatCantidadAnulacion` en `useSalones.ts`) y no se resuelve acá contra
+ * `useUnidadesMedidaStore()`: este archivo es 100% Vitest, sin Nuxt/Vue, y
+ * así se mantiene — el caller ya tiene el store a mano (`unidadesStore.esFraccionaria`
+ * pasada tal cual, sin necesidad de "bindearla").
+ */
+export function itemsParaBoletaImpresion(
+  items: BoletaVentaItem[],
+  esFraccionaria: (unidadCodigo: string | null | undefined) => boolean,
+): BoletaItem[] {
+  return items.map((item) => {
+    const cantidadTicket = formatCantidadLinea(
+      item.cantidad,
+      item.cantidadPresentacion,
+      item.unidadCodigoPresentacion,
+      esFraccionaria(item.unidadCodigoPresentacion ?? item.unidadCodigoBase),
+      item.unidadCodigoBase,
+    )
+    return {
+      nombre: item.descripcion,
+      cantidad: cantidadTicket,
+      precioUnitario: item.precioUnitario,
+      totalLinea: item.totalLinea,
+      ...(item.personalizacionDetalle?.length
+        ? { personalizacionDetalle: item.personalizacionDetalle, comentario: item.comentario }
+        : item.comentario ? { nota: item.comentario } : {}),
+    }
+  })
+}
+
 // ── Bloques compartidos entre boleta y precuenta (misma tabla, mismo desglose) ──
 
 /** Cabecera del emisor: nombre centrado + RUT/dirección/teléfono si existen. */
@@ -447,6 +509,13 @@ export function buildBoletaTicket(input: {
   /** Excedente devuelto en efectivo — 0 o ausente cuando el pago fue con tarjeta/transferencia. */
   vuelto?: string
   fecha: Date
+  /**
+   * Reimpresión de una venta ya cobrada (`GET /ventas/:id/boleta`,
+   * `Ventas:Anular`). Con este parámetro imprime `COPIA` + la fecha/hora de
+   * la reimpresión; **sin él, el ticket sale exactamente igual que hoy** — es
+   * el control que separa el original de la copia.
+   */
+  copia?: { impresaEl: Date }
   formatMonto: (v: string) => string
 }): string[] {
   const { meta, cliente, formatMonto } = input
@@ -465,6 +534,14 @@ export function buildBoletaTicket(input: {
     out.push(center('DOCUMENTO INTERNO', BOLETA_WIDTH))
   }
   out.push(separador(BOLETA_WIDTH))
+
+  // Marca de copia (reimpresión) — después del tipo de documento y antes de
+  // los ítems, para que se lea antes que la lista. Solo si `copia` viene.
+  if (input.copia) {
+    out.push(center('COPIA', BOLETA_WIDTH))
+    out.push(center(`Reimpreso: ${input.copia.impresaEl.toLocaleString('es-CL')}`, BOLETA_WIDTH))
+    out.push(separador(BOLETA_WIDTH))
+  }
 
   // Metadata operativa (omitir vacíos)
   out.push(`Fecha : ${input.fecha.toLocaleString('es-CL')}`)

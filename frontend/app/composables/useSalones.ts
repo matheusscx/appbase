@@ -6,6 +6,7 @@ import type {
 } from './useRecetaPersonalizacion'
 import type { PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
 import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
+import type { BoletaVenta } from '~/types/boleta'
 
 /** Snapshot congelado de un grupo de modificadores en una línea de cuenta (espejo de `SnapshotGrupo` del backend). */
 export interface CuentaLineaGrupoSnapshot {
@@ -258,48 +259,10 @@ export interface CerrarCuentaBody {
   propinaPorcentajeSugerido?: string
 }
 
-/**
- * Espejo de `BoletaVenta` (`backend/src/modules/ventas/ventas.service.ts`):
- * el papel de la venta, armado desde `venta_detalles` y sus tablas hijas ya
- * persistidas — no del carrito vivo ni del motor de cálculo. Copiado a mano,
- * mismo criterio que el resto de este archivo mientras backend y frontend no
- * compartan workspace.
- *
- * `personalizacionDetalle` es la misma forma que `PersonalizacionDetalleLinea`
- * (`~/utils/ticket-builder`): sin frasear, para que el texto del ticket
- * ("Sin X" / "Extra X xN") lo siga armando un solo lugar.
- */
-export interface BoletaVenta {
-  ventaId: string
-  fecha: string
-  canal: string
-  mesa: string | null
-  cuentaNumero: number | null
-  cajero: string | null
-  items: {
-    descripcion: string
-    cantidad: string
-    cantidadPresentacion: string | null
-    unidadCodigoPresentacion: string | null
-    unidadCodigoBase: string
-    precioUnitario: string
-    totalLinea: string
-    personalizacionDetalle?: PersonalizacionDetalleLinea[]
-    comentario?: string
-  }[]
-  totales: {
-    subtotalNeto: string
-    totalDescuentos: string
-    totalRecargos: string
-    totalImpuestos: string
-    totalFinal: string
-  }
-  impuestos: { nombre: string, tasa: string, monto: string }[]
-  promociones: { id: string, nombre: string, monto: string }[]
-  propina: { monto: string } | null
-  pagos: { nombre: string, monto: string }[]
-  vuelto: string | null
-}
+// `BoletaVenta` vive en `~/types/boleta` (tercera copia extraída — ver el
+// docblock de ese archivo). Se reexporta acá para no romper a quien ya la
+// importa de este composable (`salones/index.vue`).
+export type { BoletaVenta } from '~/types/boleta'
 
 /**
  * El snapshot congelado de la línea, de vuelta a la forma que el motor espera:

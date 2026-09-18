@@ -247,6 +247,21 @@ dentro de la misma consulta de la cabecera —`cuentas` → `cuenta_lineas` con
 `cantidad_enviada > 0`—, así que no agrega ni una ida a la base; `cantidad_enviada` vive
 solo en `cuenta_lineas`, nunca en `venta_detalles`. `false` en la venta de POS.
 
+### GET /api/ventas/:id/boleta
+
+Reimprime la boleta de una venta **ya cobrada** (2026-09-17): devuelve `BoletaVenta`, el
+mismo payload que arma el servidor al cobrar (`POST /cuentas/:id/cerrar` y `POST /ventas`,
+ver [`impresion-termica.md`](./impresion-termica.md)) — no un recálculo, así que reimprimir
+y el original dan el mismo papel.
+
+Exige `@RequiresPermiso('Ventas', 'Anular')` — el del encargado, sin permiso nuevo — y
+hereda el **mismo alcance por caja** que `GET /ventas/:id` (§ "Quién ve qué" abajo): la
+boleta trae pagos con su monto, el vuelto y el cajero, el mismo dato con el que se
+reconstruía el esperado de una caja ajena.
+
+`GET /ventas/:id` no sirve para esto: no trae `venta_detalles.personalizacion`, así que un
+plato con ingredientes sacados o extras saldría distinto al original.
+
 ---
 
 ## Quién ve qué: el eje `Cajas:Leer`
@@ -506,8 +521,15 @@ Implementado en 2026-06-30; rutas unificadas en 2026-07-01.
 | Página | Ruta | Descripción |
 |--------|------|-------------|
 | Historial de ventas | `/ventas` | Tabla con filtros, KPIs; fila clickeable abre detalle |
-| Detalle de venta | `/ventas?venta={uuid}` | Drawer lateral (`VentaDetalleDrawer`): líneas, totales, pagos, saldo; botón "Registrar pago" para `pendiente`/`pagada_parcial` |
+| Detalle de venta | `/ventas?venta={uuid}` | Drawer lateral (`VentaDetalleDrawer`): líneas, totales, pagos, saldo; botón "Registrar pago" para `pendiente`/`pagada_parcial`; botón "Reimprimir boleta" (ver abajo) |
 | Punto de venta | `/ventas/pos` | Crear venta (ver sección POS arriba) |
+
+**Reimprimir boleta (2026-09-17):** visible con `Ventas:Anular` — el permiso real lo
+enforcea la ruta, el `v-if` solo evita ofrecer lo que el backend va a rechazar. Al apretarlo
+(no al abrir el drawer) pide `GET /ventas/:id/boleta` e imprime con `buildBoletaTicket`
+marcada `COPIA` + la fecha/hora de la reimpresión (`ticket-builder.ts`, detalle en
+[`impresion-termica.md`](./impresion-termica.md)). `BoletaVenta` es un tipo único,
+compartido con `useSalones.ts` y `pos.vue` desde `~/types/boleta.ts`.
 
 ### Redirects de compatibilidad
 

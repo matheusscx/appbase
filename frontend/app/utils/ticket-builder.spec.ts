@@ -6,6 +6,7 @@ import {
   agregarImpuestosVenta,
   agregarPromocionesVenta,
   formatTasaPorcentaje,
+  itemsParaBoletaImpresion,
 } from './ticket-builder'
 
 const formatMonto = (v: string) => `$${v}`
@@ -249,6 +250,35 @@ describe('buildBoletaTicket', () => {
     expect(lines.some(l => l.includes('SIN VALIDEZ FISCAL'))).toBe(false)
   })
 
+  it('con copia imprime COPIA y la fecha/hora de la reimpresión, después del tipo de documento', () => {
+    const impresaEl = new Date('2026-09-17T15:45:00')
+    const lines = boleta({ copia: { impresaEl } })
+    expect(lines.some(l => l.includes('COPIA'))).toBe(true)
+    expect(lines.some(l => l.includes(impresaEl.toLocaleString('es-CL')))).toBe(true)
+    const tipoDoc = lines.findIndex(l => l.includes('DOCUMENTO INTERNO'))
+    const marcaCopia = lines.findIndex(l => l.includes('COPIA'))
+    const primerItem = lines.findIndex(l => l.startsWith('CANT'))
+    expect(tipoDoc).toBeGreaterThan(-1)
+    expect(marcaCopia).toBeGreaterThan(tipoDoc)
+    expect(marcaCopia).toBeLessThan(primerItem)
+  })
+
+  // Control: sin `copia`, el ticket sale EXACTAMENTE igual que hoy. Sin este
+  // test, un builder que imprimiera la marca siempre pasaría igual el test de
+  // arriba — es la mitad que prueba que el parámetro es de verdad opcional.
+  it('sin copia el ticket sale idéntico al de hoy — no imprime COPIA y no agrega ninguna línea de más', () => {
+    const conCopia = boleta({ copia: { impresaEl: new Date('2026-09-17T15:45:00') } })
+    const sinCopia = boleta()
+    expect(sinCopia.some(l => l.includes('COPIA'))).toBe(false)
+    expect(sinCopia.some(l => l.includes('Reimpreso:'))).toBe(false)
+    // `copia` agrega exactamente 3 líneas (COPIA + fecha/hora + separador) y
+    // nada más: sacándolas, el resto del ticket es carácter por carácter el
+    // mismo que sin el parámetro.
+    const esLineaDeCopia = (l: string) => l.includes('COPIA') || l.includes('Reimpreso:') || /^-+$/.test(l)
+    expect(conCopia.length).toBe(sinCopia.length + 3)
+    expect(conCopia.filter(l => !esLineaDeCopia(l))).toEqual(sinCopia.filter(l => !esLineaDeCopia(l)))
+  })
+
   it('imprime cantidad con unidad de presentación preformateada dentro de la columna CANT', () => {
     const lines = boleta({ items: [{ nombre: 'Harina', cantidad: '500 g', precioUnitario: '2500', totalLinea: '2500' }] })
     const fila = lines.find(l => l.includes('Harina'))
@@ -461,6 +491,76 @@ describe('agregarPromocionesVenta', () => {
       { id: 'p1', nombre: '2x1 martes', monto: '2500' },
       { id: 'p2', nombre: 'Combo almuerzo', monto: '1500' },
     ])
+  })
+})
+
+describe('itemsParaBoletaImpresion', () => {
+  // `esFraccionaria` inyectada (no un store real): la función es pura, sin
+  // Nuxt/Vue — mismo criterio que `formatCantidadAnulacion` (`useSalones.ts`).
+  const esFraccionaria = (codigo: string | null | undefined) => codigo === 'kg'
+
+  it('mapea descripcion/precio/total y formatea la cantidad con la unidad resuelta en la propia línea', () => {
+    const r = itemsParaBoletaImpresion([{
+      descripcion: 'Palta',
+      cantidad: '0.3000',
+      cantidadPresentacion: null,
+      unidadCodigoPresentacion: null,
+      unidadCodigoBase: 'kg',
+      precioUnitario: '4000',
+      totalLinea: '1200',
+    }], esFraccionaria)
+    expect(r).toEqual([{
+      nombre: 'Palta',
+      cantidad: '0,3 kg',
+      precioUnitario: '4000',
+      totalLinea: '1200',
+    }])
+  })
+
+  it('con personalizacionDetalle la incluye junto al comentario, sin caer a `nota`', () => {
+    const detalle = [{ nombre: 'Cebolla', tipo: 'omitido' as const, monto: '0' }]
+    const r = itemsParaBoletaImpresion([{
+      descripcion: 'Hamburguesa',
+      cantidad: '1',
+      cantidadPresentacion: null,
+      unidadCodigoPresentacion: null,
+      unidadCodigoBase: 'unidad',
+      precioUnitario: '5000',
+      totalLinea: '5000',
+      personalizacionDetalle: detalle,
+      comentario: 'Bien cocida',
+    }], esFraccionaria)
+    expect(r[0]).toMatchObject({ personalizacionDetalle: detalle, comentario: 'Bien cocida' })
+    expect(r[0]).not.toHaveProperty('nota')
+  })
+
+  it('sin personalizacionDetalle pero con comentario, cae al formato `nota` plano', () => {
+    const r = itemsParaBoletaImpresion([{
+      descripcion: 'Pizza',
+      cantidad: '1',
+      cantidadPresentacion: null,
+      unidadCodigoPresentacion: null,
+      unidadCodigoBase: 'unidad',
+      precioUnitario: '7500',
+      totalLinea: '7500',
+      comentario: 'Sin orégano',
+    }], esFraccionaria)
+    expect(r[0]).toMatchObject({ nota: 'Sin orégano' })
+    expect(r[0]).not.toHaveProperty('personalizacionDetalle')
+  })
+
+  it('sin comentario ni personalizacionDetalle no agrega ninguna de las dos claves', () => {
+    const r = itemsParaBoletaImpresion([{
+      descripcion: 'Agua',
+      cantidad: '1',
+      cantidadPresentacion: null,
+      unidadCodigoPresentacion: null,
+      unidadCodigoBase: 'unidad',
+      precioUnitario: '1000',
+      totalLinea: '1000',
+    }], esFraccionaria)
+    expect(r[0]).not.toHaveProperty('nota')
+    expect(r[0]).not.toHaveProperty('personalizacionDetalle')
   })
 })
 

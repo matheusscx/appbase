@@ -28,7 +28,8 @@ imprimiendo directo desde el dispositivo del garzón/cajero, que sí está en es
   sistema), ruteo de comanda por `categorias.impresora_id`, envío manual de comanda
   con diff (`cuenta_lineas.cantidad_enviada`), precuenta y boleta desde Salones y
   desde el POS de mostrador; **nota de personalización** (omitidos, extras,
-  comentario) en comanda/precuenta/boleta vía `TicketItem.nota`.
+  comentario) en comanda/precuenta/boleta vía `TicketItem.nota`; **reimpresión de
+  boleta** de una venta ya cobrada, marcada `COPIA` (2026-09-17).
 - NO incluido (futuro): reimpresión de comandas, impresoras de rol dual.
 
 ---
@@ -141,6 +142,20 @@ impresora `rol='boleta'` del tenant.
     función que arma este ticket, backend incluido (los tickets son 100% frontend).
   - Cada ítem puede llevar `nota?` (personalización + comentario), impresa indentada
     bajo el nombre.
+  - **Reimpresión marcada `COPIA` (2026-09-17)**: `buildBoletaTicket` recibe un
+    parámetro opcional `copia?: { impresaEl: Date }`. Con él imprime `COPIA` + la
+    fecha/hora de la reimpresión, **después del tipo de documento y antes de los
+    ítems** (para que se lea antes que la lista); sin él, el ticket sale
+    exactamente igual que hoy — la reimpresión reusa el mismo builder, no uno
+    aparte. `imprimirBoleta` (`useImpresoras.ts`) suma el mismo parámetro y lo
+    pasa derecho. Único llamador: el botón "Reimprimir boleta" del detalle de
+    venta (`VentaDetalleDrawer.vue`, permiso `Ventas:Anular`, ver
+    [`ventas.md`](./ventas.md)), que pide `GET /ventas/:id/boleta` — la boleta ya
+    armada del lado del servidor, no un recálculo — al apretar el botón, no al
+    abrir el drawer. El mapeo de `BoletaVenta.items[]` (`~/types/boleta.ts`) al
+    `BoletaItem` del ticket es una única función, `itemsParaBoletaImpresion`
+    (`ticket-builder.ts`) — hasta el 2026-09-17 estaba triplicada a mano en
+    `salones/index.vue`, `pos.vue` y `VentaDetalleDrawer.vue`.
   - `buildBoletaTicket`/`buildPrecuentaTicket`: alternativa priceada a `nota?` vía
     `personalizacionDetalle?: PersonalizacionDetalleLinea[]` (transparencia ante
     reclamos) — omitidos como texto plano sin monto (nunca tienen costo), extras

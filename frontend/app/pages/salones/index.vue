@@ -16,7 +16,6 @@ import {
   type CuentaAsignacionDetalle,
   type MotivoCuentaAsignacion,
   type TipoMotivoBaja,
-  type BoletaVenta,
 } from '~/composables/useSalones'
 import type { EventoPin, Garzon, MiPinEstado } from '~/composables/useGarzones'
 import { etiquetaCuentaPendiente, useTransferenciaPendientes } from '~/composables/useSesionesGarzon'
@@ -25,7 +24,7 @@ import type { Turno } from '~/composables/useTurnos'
 import type { SolicitudTestigo } from '~/composables/useSalones'
 import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
 import { conTimeout } from '~/utils/con-timeout'
-import { agregarImpuestosVenta, agregarPromocionesVenta, type TicketAnulada } from '~/utils/ticket-builder'
+import { agregarImpuestosVenta, agregarPromocionesVenta, itemsParaBoletaImpresion, type TicketAnulada } from '~/utils/ticket-builder'
 import { shellUi } from '~/utils/ui-shell'
 
 // `Salones:Operar`, no `Leer`: lo que esta pantalla pide para abrirse es
@@ -2419,40 +2418,6 @@ function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
 }
 
 /**
- * El mapeo mínimo de `BoletaVenta` —la venta YA PERSISTIDA que devuelve el
- * cierre (`salonesApi.cerrarCuenta`)— al `BoletaItem` que consume
- * `buildBoletaTicket`. Vive acá y no en `ticket-builder.ts` para no tocarle la
- * firma, que comparte la precuenta.
- *
- * A diferencia de `itemsParaTicket`, acá NO hay cruce por índice contra
- * `items.value` (el catálogo cargado): la unidad de cada línea ya viene
- * resuelta en la propia `BoletaVenta.items[]` (`unidadCodigoBase` /
- * `unidadCodigoPresentacion`), porque es la que el servidor cobró — cruzar de
- * nuevo contra el catálogo de HOY es exactamente el error de origen que
- * `armarBoleta` vino a evitar.
- */
-function itemsParaBoletaCierre(boleta: BoletaVenta) {
-  return boleta.items.map((item) => {
-    const cantidadTicket = formatCantidadLinea(
-      item.cantidad,
-      item.cantidadPresentacion,
-      item.unidadCodigoPresentacion,
-      unidadesStore.esFraccionaria(item.unidadCodigoPresentacion ?? item.unidadCodigoBase),
-      item.unidadCodigoBase,
-    )
-    return {
-      nombre: item.descripcion,
-      cantidad: cantidadTicket,
-      precioUnitario: item.precioUnitario,
-      totalLinea: item.totalLinea,
-      ...(item.personalizacionDetalle?.length
-        ? { personalizacionDetalle: item.personalizacionDetalle, comentario: item.comentario }
-        : item.comentario ? { nota: item.comentario } : {}),
-    }
-  })
-}
-
-/**
  * Los platos anulados que imprime la PRECUENTA (spec § 5): `merma` y
  * `cortesia`, en $0 con la etiqueta de su tipo. `no_elaborado` queda afuera
  * —nunca salió de cocina—, y esto no lo consume `imprimirBoleta`: la boleta no
@@ -2824,7 +2789,7 @@ async function cerrarCuentaConPin(
           cajero: boleta.cajero ?? undefined,
           mesa: boleta.mesa ?? undefined,
         },
-        items: itemsParaBoletaCierre(boleta),
+        items: itemsParaBoletaImpresion(boleta.items, unidadesStore.esFraccionaria),
         totales: boleta.totales,
         impuestos: boleta.impuestos,
         promociones: boleta.promociones,

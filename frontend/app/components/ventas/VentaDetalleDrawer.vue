@@ -2,6 +2,8 @@
 import Decimal from 'decimal.js'
 import type { TableColumn } from '@nuxt/ui'
 import { formatCantidadLinea } from '~/utils/cantidad-presentacion'
+import { itemsParaBoletaImpresion } from '~/utils/ticket-builder'
+import type { BoletaVenta } from '~/types/boleta'
 
 interface PagoAplicacion {
   tipo: string
@@ -203,6 +205,8 @@ const cajaStore = useCajaStore()
 const unidadesStore = useUnidadesMedidaStore()
 const { formatMonto, formatFecha, formatPorcentaje } = useFormatters()
 const apiUrl = config.public.apiUrl
+const impresorasApi = useImpresoras()
+const { emisor, cargar: cargarEmisor } = useRazonSocialEmisor()
 
 const venta = ref<VentaDetalle | null>(null)
 const metodos = ref<MetodoPago[]>([])
@@ -210,6 +214,7 @@ const loading = ref(false)
 const abonoOpen = ref(false)
 const ncOpen = ref(false)
 const anularOpen = ref(false)
+const reimprimiendoBoleta = ref(false)
 const permissionsStore = usePermissionsStore()
 
 const montoPagado = computed(() => {
@@ -720,6 +725,47 @@ function onAnularSuccess(payload: { estado: string }) {
   emitPatch()
 }
 
+/**
+ * Reimprime la boleta de una venta ya cobrada, marcada `COPIA`. La boleta se
+ * pide acá, al apretar el botón — no al abrir el drawer: es la que arma el
+ * servidor desde la venta persistida (`GET /ventas/:id/boleta`), no un
+ * recálculo local. El permiso real lo enforcea la ruta (`Ventas:Anular`); el
+ * `v-if` del botón solo evita ofrecer lo que el backend va a rechazar.
+ */
+async function reimprimirBoleta() {
+  if (!venta.value) return
+  reimprimiendoBoleta.value = true
+  try {
+    const [boleta] = await Promise.all([
+      useApiFetch<BoletaVenta>(`${apiUrl}/ventas/${venta.value.id}/boleta`),
+      cargarEmisor(),
+    ])
+    await impresorasApi.imprimirBoleta({
+      emisor: emisor.value,
+      facturacionElectronica: false,
+      meta: {
+        cajero: boleta.cajero ?? undefined,
+        mesa: boleta.mesa ?? undefined,
+      },
+      items: itemsParaBoletaImpresion(boleta.items, unidadesStore.esFraccionaria),
+      totales: boleta.totales,
+      impuestos: boleta.impuestos,
+      promociones: boleta.promociones,
+      ...(boleta.propina ? { propina: boleta.propina } : {}),
+      pagos: boleta.pagos,
+      vuelto: boleta.vuelto ?? undefined,
+      copia: { impresaEl: new Date() },
+      formatMonto: (v: string) => formatMonto(v),
+    })
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'No se pudo reimprimir la boleta'), color: 'error' })
+  }
+  finally {
+    reimprimiendoBoleta.value = false
+  }
+}
+
 function onNcSuccess(payload: {
   id: string
   totalFinal: string
@@ -1187,6 +1233,15 @@ function onNcSuccess(payload: {
       >
         Cerrar
       </UButton>
+      <UButton
+        v-if="permissionsStore.can('Ventas', 'Anular')"
+        label="Reimprimir boleta"
+        icon="i-lucide-printer"
+        color="neutral"
+        variant="outline"
+        :loading="reimprimiendoBoleta"
+        @click="reimprimirBoleta"
+      />
       <UButton
         v-if="puedeAnular"
         label="Anular"
