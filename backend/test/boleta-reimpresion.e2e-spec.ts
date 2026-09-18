@@ -80,6 +80,11 @@ interface BoletaVentaRes {
   impuestos: { nombre: string; tasa: string; monto: string }[];
   pagos: { nombre: string; monto: string }[];
   propina: { monto: string } | null;
+  customer: {
+    nombre: string;
+    rut: string | null;
+    direccion: string | null;
+  } | null;
 }
 
 async function entrar(
@@ -364,6 +369,9 @@ describe('GET /ventas/:id/boleta — reimprimir boleta (e2e)', () => {
     expect(Number(cuerpo.totales.totalImpuestos)).toBeGreaterThan(0);
     expect(cuerpo.impuestos.length).toBeGreaterThan(0);
     expect(cuerpo.pagos.length).toBeGreaterThan(0);
+    // `ventaBasicaId` se cobró sin `customer` (línea ~180): `null`, no un
+    // objeto vacío — el contraste con la venta CON cliente, más abajo.
+    expect(cuerpo.customer).toBeNull();
   });
 
   it('una venta de OTRO tenant da 404', async () => {
@@ -472,6 +480,39 @@ describe('GET /ventas/:id/boleta — reimprimir boleta (e2e)', () => {
     const res = await boleta(cierre.ventaId, tokenAdmin);
     expect(res.status).toBe(200);
     expect(res.body).toEqual(cierre.boleta);
+  });
+
+  /**
+   * El agujero que encontró la revisión de toda la rama: `BoletaVenta` no
+   * llevaba ningún dato del cliente, así que el POS imprimía nombre/RUT/
+   * dirección al cobrar (desde el formulario, en memoria) y la reimpresión
+   * los perdía — el papel COPIA mentía respecto al original. Gemelo del test
+   * de arriba ("cierre de una cuenta... igual a GET"), pero con `customer`:
+   * ese test comparaba dos boletas SIN cliente y por eso no lo cazó.
+   */
+  it('una venta con cliente por POS: el payload del cobro trae el cliente, igual al de GET /ventas/:id/boleta', async () => {
+    const venta = await post<VentaCreada & { boleta: BoletaVentaRes }>(
+      '/api/ventas',
+      {
+        lineas: [{ itemId: itemBasicoId, cantidad: '1' }],
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100000.0000' }],
+        customer: {
+          nombre: `Cliente boleta E2E ${Date.now()}`,
+          rut: '11.111.111-1',
+          direccion: 'Calle Falsa 123',
+        },
+      },
+    );
+
+    expect(venta.boleta.customer).toEqual({
+      nombre: expect.stringContaining('Cliente boleta E2E'),
+      rut: '11.111.111-1',
+      direccion: 'Calle Falsa 123',
+    });
+
+    const res = await boleta(venta.id, tokenAdmin);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(venta.boleta);
   });
 
   /**

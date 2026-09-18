@@ -2789,6 +2789,20 @@ async function cerrarCuentaConPin(
           cajero: boleta.cajero ?? undefined,
           mesa: boleta.mesa ?? undefined,
         },
+        // `cerrarCuenta` acepta `customer` (`CerrarCuentaDto`, reenviado tal
+        // cual a `crearEnTransaccion`, que arma el `VentaCustomer` sin mirar
+        // el canal) — esta pantalla hoy no tiene formulario que lo cargue, así
+        // que `boleta.customer` sale `null` en la práctica, pero el día que lo
+        // tenga, el ticket ya sale bien: mismo criterio que `pos.vue` y
+        // `VentaDetalleDrawer.vue`, el papel sale de lo que `armarBoleta`
+        // devolvió, no de estado local.
+        cliente: boleta.customer
+          ? {
+              nombre: boleta.customer.nombre || undefined,
+              rut: boleta.customer.rut || undefined,
+              direccion: boleta.customer.direccion || undefined,
+            }
+          : undefined,
         items: itemsParaBoletaImpresion(boleta.items, unidadesStore.esFraccionaria),
         totales: boleta.totales,
         impuestos: boleta.impuestos,

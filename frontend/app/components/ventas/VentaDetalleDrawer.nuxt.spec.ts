@@ -242,6 +242,7 @@ const BOLETA_REIMPRESION = {
   },
   impuestos: [],
   promociones: [],
+  customer: null,
   propina: null,
   pagos: [{ nombre: 'Efectivo', monto: '7500' }],
   vuelto: null,
@@ -558,5 +559,39 @@ describe('VentaDetalleDrawer — reimprimir boleta', () => {
     expect(texto).toContain('COPIA')
     expect(texto).toContain('Pizza grande')
     expect(texto).toContain('Ana Torres')
+  })
+
+  /**
+   * El agujero que encontró la revisión de toda la rama: `reimprimirBoleta()`
+   * no le pasaba `cliente` a `imprimirBoleta` en absoluto, aunque el drawer ya
+   * tiene `venta.customer` en memoria (se pinta en pantalla, arriba). Una
+   * venta con cliente registrado imprimía nombre/RUT al cobrar y los perdía
+   * al reimprimirse como COPIA — el papel reimpreso mentía respecto al
+   * original. La boleta trae ahora su PROPIO `customer` (`boleta.customer`,
+   * no `venta.customer`): mismo criterio que el resto de esta función, que ya
+   * imprime `boleta.items`/`boleta.pagos` y no los del detalle en memoria.
+   */
+  it('imprime el nombre y el RUT del cliente cuando la boleta trae uno', async () => {
+    impresionesQz.length = 0
+    boletaActual = {
+      ...BOLETA_REIMPRESION,
+      customer: { nombre: 'María González', rut: '12.345.678-9', direccion: 'Los Aromos 456' },
+    }
+    try {
+      const wrapper = await montar()
+      const boton = botonReimprimir(wrapper)
+      expect(boton, 'el botón está presente').toBeDefined()
+
+      await boton!.trigger('click')
+      await new Promise(r => setTimeout(r, 50))
+
+      expect(impresionesQz, 'la boleta se imprimió').toHaveLength(1)
+      const texto = impresionesQz[0]!.join('')
+      expect(texto, 'imprime el nombre del cliente').toContain('María González')
+      expect(texto, 'imprime el RUT del cliente').toContain('12.345.678-9')
+    }
+    finally {
+      boletaActual = BOLETA_REIMPRESION
+    }
   })
 })

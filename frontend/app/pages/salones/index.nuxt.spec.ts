@@ -151,6 +151,7 @@ function boletaCierreDefault() {
     },
     impuestos: [],
     promociones: [],
+    customer: null,
     propina: null,
     pagos: [{ nombre: 'Efectivo', monto: '5000' }],
     vuelto: null,
@@ -4837,6 +4838,39 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     // el entero redondeado.
     expect(filaItem, 'muestra la fracción, no el entero redondeado').toContain('0,3')
     expect(filaItem.slice(0, 5).trim(), 'la columna CANT no quedó en "0"').not.toBe('0')
+  })
+
+  /**
+   * `cerrarCuenta` acepta `customer` (`CerrarCuentaDto`) y lo reenvía tal cual
+   * a `crearEnTransaccion`, que arma el `VentaCustomer` sin mirar el canal —el
+   * mismo camino que el POS—, así que un cierre de cuenta de salón SÍ puede
+   * traer cliente aunque esta pantalla todavía no tenga formulario para
+   * cargarlo. El ticket tiene que imprimirlo igual que el POS y el drawer:
+   * desde `boleta.customer` (la respuesta de `cerrarCuenta`), no desde un
+   * estado local que acá ni existe.
+   */
+  it('con cliente en la boleta del cierre, el ticket imprime nombre y RUT', async () => {
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    impresorasBoleta = [impresoraDeBoleta()]
+    cierreBoletaOverride = {
+      ...boletaCierreDefault(),
+      customer: { nombre: 'Empresa Cliente SpA', rut: '76.543.210-K', direccion: 'Av. Siempre Viva 742' },
+    }
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    await esperar(300)
+
+    expect(impresionesQz, 'la boleta salió').toHaveLength(1)
+    const texto = impresionesQz[0]!.join('')
+    expect(texto, 'imprime el nombre del cliente').toContain('Empresa Cliente SpA')
+    expect(texto, 'imprime el RUT del cliente').toContain('76.543.210-K')
   })
 
   it('cambiar de mesa durante la espera no le descuenta la ocupación a la otra mesa', async () => {

@@ -258,8 +258,16 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         meta: {
           cajero: venta.boleta.cajero ?? undefined,
         },
-        cliente: incluirCustomer
-          ? { nombre: customer.value.nombre || undefined, rut: customer.value.rut || undefined, direccion: customer.value.direccion || undefined }
+        // Del payload del `POST` (`venta.boleta.customer`), no del formulario:
+        // `customer.value` se vacía más abajo al limpiar el carrito, y es el
+        // mismo criterio que ya usan `items`/`totales`/`pagos` acá — el papel
+        // sale de lo que el servidor persistió, no de estado local.
+        cliente: venta.boleta.customer
+          ? {
+              nombre: venta.boleta.customer.nombre || undefined,
+              rut: venta.boleta.customer.rut || undefined,
+              direccion: venta.boleta.customer.direccion || undefined,
+            }
           : undefined,
         items: itemsParaBoletaImpresion(venta.boleta.items, unidadesStore.esFraccionaria),
         totales: venta.boleta.totales,

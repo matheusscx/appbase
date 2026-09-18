@@ -199,6 +199,11 @@ export interface BoletaVenta {
   };
   impuestos: { nombre: string; tasa: string; monto: string }[];
   promociones: { id: string; nombre: string; monto: string }[];
+  customer: {
+    nombre: string;
+    rut: string | null;
+    direccion: string | null;
+  } | null;
   propina: { monto: string } | null;
   pagos: { nombre: string; monto: string }[];
   vuelto: string | null;
@@ -3721,6 +3726,29 @@ export class VentasService {
       return { id, nombre: p.nombre, monto: p.monto.toFixed(4) };
     });
 
+    // Mismo criterio que `findOne` (arriba): `venta_customer` no tiene
+    // `tenant_id` propio, así que el aislamiento por tenant ya lo dio el
+    // filtro de la CABECERA (`v.tenant_id = $2`) — `venta_id` es su única FK.
+    // Solo las tres columnas que el ticket imprime (`BoletaCliente` en
+    // `ticket-builder.ts`): el resto de `venta_customer` (telefono, email,
+    // terceroId) no tiene lector en el papel.
+    const customerRows: {
+      nombre: string;
+      rut: string | null;
+      direccion: string | null;
+    }[] = await runner.query(
+      `SELECT nombre, rut, direccion
+           FROM venta_customer WHERE venta_id = $1 AND eliminado_el IS NULL`,
+      [ventaId],
+    );
+    const customer = customerRows[0]
+      ? {
+          nombre: customerRows[0].nombre,
+          rut: customerRows[0].rut,
+          direccion: customerRows[0].direccion,
+        }
+      : null;
+
     const pagosRows: {
       pago_id: string;
       metodo_pago_id: string;
@@ -3805,6 +3833,7 @@ export class VentasService {
       },
       impuestos,
       promociones,
+      customer,
       propina,
       pagos,
       vuelto,

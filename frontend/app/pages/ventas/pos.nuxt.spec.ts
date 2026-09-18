@@ -96,6 +96,15 @@ async function esperar(ms: number) {
 let urlsCatalogo: string[] = []
 /** Impresoras de rol `boleta` que devuelve `GET /impresoras?rol=boleta`. Vacío = no imprime nada. */
 let impresorasBoleta: unknown[] = []
+/**
+ * Override de `GET /caja/activa`. `null` (default) es el caso que necesita el
+ * resto de este archivo — sin caja abierta, `VentasCobroModal` igual vive
+ * fuera del `v-else` que la exige. `VentasCarritoPanel` SÍ está adentro de ese
+ * `v-else` (`tieneCaja`, `pos.vue`): el test que necesita emitir sobre ese
+ * componente tiene que pisar esto con una caja abierta o `findComponent`
+ * encuentra un wrapper vacío.
+ */
+let cajaActivaMock: unknown = null
 /** Override de la `boleta` que devuelve `POST /ventas`; `null` = no se llegó a pedir. */
 let ventaBoletaMock: Record<string, unknown> | null = null
 /** Cada body de `POST /ventas` recibido. */
@@ -107,11 +116,7 @@ mockNuxtImport('useApiFetch', () => {
     const ruta = url.split('?')[0] ?? ''
 
     if (ruta.endsWith('/caja/activa')) {
-      // Sin caja abierta: la pantalla igual dispara `cargar()` en paralelo
-      // (`Promise.all` de `onMounted`), así que el catálogo se pide de todos
-      // modos — es justo lo que este spec necesita. `VentasCobroModal` tampoco
-      // depende de la caja: vive fuera del `v-else` que la exige.
-      return Promise.resolve(null)
+      return Promise.resolve(cajaActivaMock)
     }
     if (ruta.includes('/items')) {
       urlsCatalogo.push(url)
@@ -157,6 +162,7 @@ afterEach(() => {
 beforeEach(() => {
   urlsCatalogo = []
   impresorasBoleta = []
+  cajaActivaMock = null
   ventaBoletaMock = null
   bodiesDeVenta = []
   toasts = []
@@ -164,7 +170,15 @@ beforeEach(() => {
 })
 
 async function montar() {
-  const wrapper = await mountSuspended(Pos)
+  const wrapper = await mountSuspended(Pos, {
+    // `UTooltip` necesita un `TooltipProviderContext` que solo existe con
+    // `UApp` en la raíz (`docs/patterns/frontend.md` §15, molde de
+    // `CarritoPanel.nuxt.spec.ts`) — sin esto, el test con caja abierta que
+    // llega a renderizar `VentasCarritoPanel` (el botón "Vaciar todo" lleva
+    // tooltip) revienta antes de montar nada. El resto de este archivo nunca
+    // lo pisó porque `tieneCaja` era `false` en todos esos tests.
+    global: { stubs: { UTooltip: { template: '<div><slot /></div>' } } },
+  })
   montado = wrapper
   await new Promise(r => setTimeout(r, 0))
   return wrapper
@@ -247,5 +261,81 @@ describe('ventas/pos — la boleta se imprime desde la respuesta de POST /ventas
     expect(filaItem, 'la línea del pesable está en el ticket').not.toBe('')
     expect(filaItem, 'muestra la fracción, no el entero redondeado').toContain('0,3')
     expect(filaItem.slice(0, 5).trim(), 'la columna CANT no quedó en "0"').not.toBe('0')
+  })
+
+  /**
+   * El agujero que encontró la revisión de toda la rama: el cliente impreso
+   * salía de `customer.value` (el formulario, estado local), no de la
+   * respuesta del servidor — así que reimprimir la misma venta como COPIA
+   * (`VentaDetalleDrawer`) perdía esos datos, porque ahí no hay formulario.
+   * La prueba que lo distingue: el formulario lleva un cliente, `venta.boleta`
+   * trae OTRO — el ticket tiene que imprimir el del servidor. El mutante que
+   * describe el brief ("vaciar `customer.value` antes de imprimir") es el
+   * mismo caso: si el ticket dependiera del formulario, esta aserción fallaría
+   * apenas se lea `customer.value` en vez de `venta.boleta.customer`.
+   */
+  it('el cliente impreso sale del payload del servidor, no del formulario', async () => {
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    // A diferencia del resto de este describe: acá el test necesita EMITIR
+    // sobre `VentasCarritoPanel` (para simular el formulario cargado), y ese
+    // componente vive adentro del `v-else` que exige `tieneCaja` — sin esto
+    // `findComponent` da un wrapper vacío.
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    impresorasBoleta = [impresoraDeBoleta()]
+    ventaBoletaMock = {
+      ventaId: 'venta-2',
+      cajero: 'Ana Torres',
+      items: [{
+        descripcion: 'Palta',
+        cantidad: '1',
+        cantidadPresentacion: null,
+        unidadCodigoPresentacion: null,
+        unidadCodigoBase: 'unidad',
+        precioUnitario: '4000',
+        totalLinea: '4000',
+      }],
+      totales: {
+        subtotalNeto: '4000',
+        totalDescuentos: '0',
+        totalRecargos: '0',
+        totalImpuestos: '0',
+        totalFinal: '4000',
+      },
+      impuestos: [],
+      promociones: [],
+      propina: null,
+      pagos: [{ nombre: 'Efectivo', monto: '4000' }],
+      vuelto: null,
+      // Deliberadamente distinto del formulario de abajo: si el ticket
+      // imprimiera el del formulario, esta aserción lo cazaría.
+      customer: { nombre: 'Cliente Servidor', rut: '99.999.999-9', direccion: 'Dirección Servidor' },
+    }
+
+    const wrapper = await montar()
+    const carritoPanel = wrapper.findComponent({ name: 'VentasCarritoPanel' })
+    // Formulario en memoria: el que `customer.value` tendría al momento del
+    // cobro, y el que `limpiar()` vacía DESPUÉS de imprimir.
+    carritoPanel.vm.$emit('update:customer', {
+      nombre: 'Cliente Formulario',
+      rut: '11.111.111-1',
+      direccion: 'Dirección Formulario',
+      telefono: '',
+      email: '',
+      terceroId: null,
+    })
+    carritoPanel.vm.$emit('update:customerExpandido', true)
+    await esperar(0)
+
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    cobroModal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-efectivo', monto: '4000' }], '0')
+    await esperar(50)
+
+    expect(bodiesDeVenta, 'el POST de venta salió').toHaveLength(1)
+    expect(impresionesQz, 'la boleta salió').toHaveLength(1)
+    const texto = impresionesQz[0]!.join('')
+    expect(texto, 'imprime el nombre que devolvió el servidor').toContain('Cliente Servidor')
+    expect(texto, 'imprime el RUT que devolvió el servidor').toContain('99.999.999-9')
+    expect(texto, 'NO imprime el nombre del formulario').not.toContain('Cliente Formulario')
+    expect(texto, 'NO imprime el RUT del formulario').not.toContain('11.111.111-1')
   })
 })

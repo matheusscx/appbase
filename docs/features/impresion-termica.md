@@ -78,6 +78,18 @@ eso podía dejar una venta ya cobrada sin boleta si el garzón cambiaba de cuent
 el cierre viajaba (`docs/agent/resueltos.md`, entrada *"La venta que se cierra sin
 cálculo queda sin boleta"*).
 
+`BoletaVenta.customer` (nombre, rut, direccion — leído de `venta_customer`, `null` sin
+cliente) viaja con el resto del payload, corrección del 2026-09-18: hasta entonces solo
+`items`/`totales`/`pagos`/etc. salían de `armarBoleta`, y el cliente lo seguía armando
+cada pantalla por su cuenta (POS desde `customer.value`, el formulario; el drawer de
+reimpresión ni lo mandaba). Una venta con cliente registrado imprimía nombre/RUT/dirección
+al cobrar y los perdía al reimprimirse como `COPIA`. `pos.vue`, `VentaDetalleDrawer.vue` y
+`salones/index.vue` leen `boleta.customer`, no estado local. `cerrarCuenta` (`salones`)
+reenvía `dto.customer` a `crearEnTransaccion` sin mirar el canal —el mismo camino que el
+POS—, así que un cierre de cuenta SÍ puede crear un `venta_customer`; hoy esa pantalla no
+tiene formulario que lo cargue (`boleta.customer` sale `null` en la práctica), pero el
+ticket no depende de que nadie lo use.
+
 ---
 
 ## Backend

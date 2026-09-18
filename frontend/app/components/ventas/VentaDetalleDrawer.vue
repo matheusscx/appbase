@@ -751,6 +751,17 @@ async function reimprimirBoleta() {
         cajero: boleta.cajero ?? undefined,
         mesa: boleta.mesa ?? undefined,
       },
+      // Del payload de ESTA reimpresión (`boleta.customer`), no de
+      // `venta.customer` (el que ya está en memoria del `findOne` original):
+      // mismo criterio que cierre/POS — el papel sale de lo que
+      // `armarBoleta` acaba de devolver, no de un estado leído antes.
+      cliente: boleta.customer
+        ? {
+            nombre: boleta.customer.nombre || undefined,
+            rut: boleta.customer.rut || undefined,
+            direccion: boleta.customer.direccion || undefined,
+          }
+        : undefined,
       items: itemsParaBoletaImpresion(boleta.items, unidadesStore.esFraccionaria),
       totales: boleta.totales,
       impuestos: boleta.impuestos,

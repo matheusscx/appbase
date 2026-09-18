@@ -3699,6 +3699,7 @@ describe('VentasService', () => {
       pagos?: Record<string, unknown>[];
       metodosPago?: Record<string, unknown>[];
       propina?: Record<string, unknown>[];
+      customer?: Record<string, unknown>[];
     };
 
     /** Cabecera con todos los campos en blanco: cada test pisa lo que necesita. */
@@ -3737,6 +3738,8 @@ describe('VentasService', () => {
           return Promise.resolve(fixture.metodosPago ?? []);
         if (sql.includes('FROM venta_propina'))
           return Promise.resolve(fixture.propina ?? []);
+        if (sql.includes('FROM venta_customer'))
+          return Promise.resolve(fixture.customer ?? []);
         return Promise.resolve([]);
       });
     };
@@ -4071,6 +4074,61 @@ describe('VentasService', () => {
       );
 
       expect(boleta.propina).toBeNull();
+    });
+
+    /**
+     * El agujero que encontró la revisión de toda la rama (post
+     * `docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`):
+     * `BoletaVenta` no llevaba ningún dato del cliente, así que el POS
+     * imprimía nombre/RUT/dirección desde el formulario y la reimpresión los
+     * perdía. Mismos tres campos que `BoletaCliente` imprime
+     * (`ticket-builder.ts`) — `telefono`/`email`/`terceroId` de
+     * `venta_customer` no tienen lector en el papel.
+     */
+    it('con fila en venta_customer, la boleta trae nombre, rut y dirección', async () => {
+      mockArmarBoleta({
+        cabecera: cabeceraBase(),
+        detalles: [],
+        customer: [
+          {
+            nombre: 'Juan Pérez',
+            rut: '11.111.111-1',
+            direccion: 'Calle Falsa 123',
+          },
+        ],
+      });
+
+      const boleta = await service.armarBoleta(
+        dbService,
+        TENANT_ID,
+        VENTA_ID,
+        USUARIO_ID,
+        true,
+      );
+
+      expect(boleta.customer).toEqual({
+        nombre: 'Juan Pérez',
+        rut: '11.111.111-1',
+        direccion: 'Calle Falsa 123',
+      });
+    });
+
+    it('una venta sin cliente registrado: null, no un objeto vacío', async () => {
+      mockArmarBoleta({
+        cabecera: cabeceraBase(),
+        detalles: [],
+        customer: [],
+      });
+
+      const boleta = await service.armarBoleta(
+        dbService,
+        TENANT_ID,
+        VENTA_ID,
+        USUARIO_ID,
+        true,
+      );
+
+      expect(boleta.customer).toBeNull();
     });
 
     it('una venta de otro tenant no se encuentra (404)', async () => {

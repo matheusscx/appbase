@@ -38,6 +38,7 @@ export interface BoletaVenta {
   }
   impuestos: { nombre: string, tasa: string, monto: string }[]
   promociones: { id: string, nombre: string, monto: string }[]
+  customer: { nombre: string, rut: string | null, direccion: string | null } | null
   propina: { monto: string } | null
   pagos: { nombre: string, monto: string }[]
   vuelto: string | null
