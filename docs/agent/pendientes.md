@@ -53,6 +53,28 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
+- [ ] **El costo promedio pondera con el stock de la ubicación, no con el del producto**
+  *(hallado el 2026-09-18 al diseñar compras; **leído en el código, sin medir**)* —
+  `registrarMovimiento` lee el saldo de `stock_ubicacion` para **la ubicación del
+  movimiento** (`inventario.service.ts`, el `SELECT stock FROM stock_ubicacion WHERE
+  item_id = $1 AND ubicacion_id = $2`) y ese mismo `stockAnterior` es el que recibe
+  `calcularCostoPromedio`. Pero el costo es **uno solo por producto para todo el tenant**
+  (decisión 3 de [`bodegas-y-traslados.md`](../features/bodegas-y-traslados.md)).
+  **En el local:** la bodega tiene 100 kg de harina a $1.000 y el local 0; entran 10 kg al
+  local a $1.500. El sistema ve stock anterior 0, toma la rama *"sin stock previo manda el
+  costo de compra"* y deja **toda** la harina a $1.500, cuando corresponde
+  (100.000 + 15.000) / 110 = **$1.045**. Lo mismo vale para `anulacion` y `devolucion`,
+  que también recalculan. Viene desde bodegas (2026-09-06), y `costeo-cpp.e2e-spec.ts`
+  no lo ve porque solo usa el local.
+  **Primero se mide:** un e2e con stock en la bodega y una compra al local, antes de tocar
+  nada. Si se confirma, **el arreglo va solo y con el sistema quieto**: es el motor de
+  costeo (la misma regla de `CLAUDE.md` que para el motor de cálculo).
+  ⛔ **Bloquea compras:** recibir en bodega va a ser lo normal, y el *"rehacer la cuenta
+  desde la recepción"* que decidió el owner para completar un costo necesita el stock
+  **total** del producto en cada momento, que el kardex hoy no guarda (`stock_anterior`
+  y `stock_resultante` son de la ubicación). Ver
+  [`investigaciones/2026-09-18-compras.md`](investigaciones/2026-09-18-compras.md).
+
 ---
 
 ## 3. Ya decidido, falta construir
@@ -513,6 +535,16 @@ pantalla muestra lo que se puede pedir*). Contexto del frente:
   tipear — no es un segundo flujo con su propia forma. Dos caminos que produzcan registros
   distintos es exactamente lo que `CLAUDE.md` prohíbe, y acá se notaría enseguida: la varianza
   y el CPP leen de un solo lugar.
+
+  ✅ **Alcance de la primera fase, decidido por el owner el 2026-09-18** tras una
+  investigación de mercado ([`investigaciones/2026-09-18-compras.md`](investigaciones/2026-09-18-compras.md) §5):
+  recepción sin orden de compra; tipo de documento siempre, con "sin documento" como
+  opción; proveedor siempre; el costo puede faltar al recibir y se completa con la
+  factura, sin tocar lo que ya salió; deuda con el proveedor y pagos desde el inicio, con
+  la salida de caja automática; unidad de compra por proveedor ("caja de 12"); gastos sin
+  stock con categoría; descuento global y bonificados repartidos en el costo. Quedan
+  fuera: orden de compra, devolución al proveedor, moneda extranjera y flete. ⛔ Falta
+  la pregunta fiscal (IVA no recuperable e ILA en el costo), que es frente propio.
 
   ✅ **Y esto reordena la construcción a favor:** compras **manual se construye sin ninguna
   integración**, así que la lectura del DTE queda como **segunda fase**. La varianza —que espera
