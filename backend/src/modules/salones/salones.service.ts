@@ -30,7 +30,7 @@ import { AnularLineaDto } from './dto/anular-linea.dto';
 import { CancelarConMotivoDto } from './dto/cancelar-con-motivo.dto';
 import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
 import { ConfirmarComandaDto } from './dto/confirmar-comanda.dto';
-import { VentasService } from '../ventas/ventas.service';
+import { VentasService, type BoletaVenta } from '../ventas/ventas.service';
 import type { CreateVentaDto } from '../ventas/dto/create-venta.dto';
 import { EstrategiaAsignacionPropina } from '../propinas/enums/estrategia-asignacion-propina.enum';
 import { GarzonesService } from '../garzones/garzones.service';
@@ -1848,7 +1848,7 @@ export class SalonesService {
     usuarioId: string,
     cuentaId: string,
     dto: CerrarCuentaDto,
-  ): Promise<{ cuenta: CuentaDetalle; ventaId: string }> {
+  ): Promise<{ cuenta: CuentaDetalle; ventaId: string; boleta: BoletaVenta }> {
     // Quién cierra: del JWT en tablet personal, del PIN en dispositivo
     // compartido (400 si no hay ninguno de los dos).
     const garzon = await this.garzonesService.resolverGarzonActuante(
@@ -2004,7 +2004,19 @@ export class SalonesService {
       await manager.save(Cuenta, cuenta);
 
       const detalle = await this.armarDetalle(tenantId, cuenta, manager);
-      return { cuenta: detalle, ventaId: venta.id };
+      // `verTodas: true`: el alcance por caja de `armarBoleta` (`filtroDeMisCajas`)
+      // existe para que nadie navegue ventas de una caja ajena, no para esconderle
+      // a quien cierra la cuenta la boleta de la venta que acaba de cobrar en ESTA
+      // misma request. Se arma con el `manager` de la transacción para que la
+      // lectura vea la venta recién insertada, todavía sin commitear.
+      const boleta = await this.ventasService.armarBoleta(
+        manager,
+        tenantId,
+        venta.id,
+        usuarioId,
+        true,
+      );
+      return { cuenta: detalle, ventaId: venta.id, boleta };
     });
   }
 

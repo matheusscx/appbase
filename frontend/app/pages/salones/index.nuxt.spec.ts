@@ -117,6 +117,46 @@ function mesa() {
   }
 }
 
+/**
+ * La `boleta` que trae por default la respuesta de `POST /cuentas/:id/cerrar`
+ * (Task 3): una `BoletaVenta` mínima pero completa, para que
+ * `itemsParaBoletaCierre` y `buildBoletaTicket` —que corren de VERDAD en este
+ * archivo— no revienten en los tests que cobran una cuenta sin mirar el papel.
+ * `cierreBoletaOverride` la reemplaza cuando un test necesita afirmar sobre su
+ * contenido.
+ */
+function boletaCierreDefault() {
+  return {
+    ventaId: 'venta-1',
+    fecha: new Date().toISOString(),
+    canal: 'fisico',
+    mesa: 'Mesa 1',
+    cuentaNumero: 9,
+    cajero: 'Ana Torres',
+    items: [{
+      descripcion: 'Coca-Cola',
+      cantidad: '1.0000',
+      cantidadPresentacion: null,
+      unidadCodigoPresentacion: null,
+      unidadCodigoBase: 'unidad',
+      precioUnitario: '5000',
+      totalLinea: '5000',
+    }],
+    totales: {
+      subtotalNeto: '5000',
+      totalDescuentos: '0',
+      totalRecargos: '0',
+      totalImpuestos: '0',
+      totalFinal: '5000',
+    },
+    impuestos: [],
+    promociones: [],
+    propina: null,
+    pagos: [{ nombre: 'Efectivo', monto: '5000' }],
+    vuelto: null,
+  }
+}
+
 /** Cada `POST /mesas/:id/cuentas` recibido: el contador del doble submit. */
 let postsAbrirCuenta: string[] = []
 /** El body de cada uno: quién dijo la pantalla que abría la cuenta. */
@@ -264,6 +304,13 @@ let cierreRetenido: Promise<void> | null = null
  * saldría bien, así que se vería.
  */
 let cierreFallaSesion = false
+/**
+ * La `boleta` del `POST /cuentas/:id/cerrar` (Task 3): sale de la venta ya
+ * persistida, no del carrito. Un override por test, `null` = el default de
+ * `boletaCierreDefault()` — así los ~30 tests de este `describe` que cobran
+ * una cuenta sin mirar el papel no tienen que armar el payload a mano.
+ */
+let cierreBoletaOverride: Record<string, unknown> | null = null
 /**
  * Retiene el `POST /cuentas/:id/lineas`, igual que `abrirCuentaRetenido`. Es lo
  * que abre la ventana "agregué un producto y me fui": sin esto el mock contesta
@@ -776,8 +823,13 @@ mockNuxtImport('useApiFetch', () => {
         err.data = { message: 'El garzón no tiene una sesión de trabajo abierta' }
         return Promise.reject(err)
       }
-      // La pantalla descarta la respuesta; lo que importa es que el POST salió.
-      const cerrado = { cuenta: null, ventaId: 'venta-1' }
+      // Desde la Task 3 la pantalla SÍ lee la respuesta: `boleta` es lo que
+      // imprime. `cuenta` sigue sin usarse.
+      const cerrado = {
+        cuenta: null,
+        ventaId: 'venta-1',
+        boleta: cierreBoletaOverride ?? boletaCierreDefault(),
+      }
       return cierreRetenido ? cierreRetenido.then(() => cerrado) : Promise.resolve(cerrado)
     }
     if (ruta.endsWith('/impresoras')) {
@@ -860,6 +912,7 @@ function reiniciarMock() {
   bodiesDeCierre = []
   cierreRetenido = null
   cierreFallaSesion = false
+  cierreBoletaOverride = null
   agregarLineaRetenido = null
   quitarLineaRetenido = null
   cuentasPorMesa = {}
@@ -4377,9 +4430,11 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
   it('volver al listado durante la espera no impide que la comanda salga', async () => {
     /**
      * La cuarta puerta de la misma forma —precondición antes del `await`, estado
-     * reactivo releído después—. **No la última**: `cerrarCuentaConPin` es la
-     * quinta y sigue abierta (`docs/agent/pendientes.md` § 2). `enviarComanda`
-     * valida `activeCuenta`, hace `await flushPendientes()` y recién ahí lee
+     * reactivo releído después—. `cerrarCuentaConPin` fue la quinta: la boleta
+     * ya no cuelga de `activeCuenta` (Task 3, 2026-09-17; ver los tests de
+     * *"meterse en otra cuenta"* y *"la proyección de la caja"* más abajo).
+     * `enviarComanda` valida `activeCuenta`, hace `await flushPendientes()` y
+     * recién ahí lee
      * `activeCuenta.value.id` —y su `numero`, y su garzón— para armar el claim.
      *
      * Durante esa espera el botón *Cuentas* sigue vivo (`:loading` va solo al de
@@ -4567,28 +4622,42 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(toasts.some(t => t.title === 'Cuenta cerrada — propina registrada')).toBe(true)
   })
 
-  it('meterse en otra cuenta durante la espera no cobra esa otra ni le pide su cálculo', async () => {
+  it('meterse en otra cuenta durante la espera no le impide imprimir la boleta de la que cerró', async () => {
     /**
-     * Dos fallas en una escena, y la segunda es la que separa **congelar** de
-     * congelar tarde:
+     * El caso que esta tarea vino a cerrar
+     * (`docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`):
+     * hasta el 2026-09-17, `cerrarCuentaConPin` armaba el ticket con un
+     * `asegurarVigente()` fresco, condicionado a seguir parado en la cuenta que
+     * se cobra —porque ese cálculo evalúa el carrito **vivo**—. Meterse en OTRA
+     * cuenta durante el `await flushPendientes()` degradaba al camino sin
+     * cálculo: la venta se generaba igual, pero **sin boleta, punto** —no hay
+     * reimpresión— y el aviso era *"Venta generada, pero no se pudo generar la
+     * boleta"*.
      *
-     * 1. `cerrarCuentaConPin` congelaba `activeCuenta` recién **después** del
-     *    flush, así que el `POST /cuentas/:id/cerrar` salía con el id de la
-     *    cuenta en la que el garzón se acababa de meter. Cobraba la que no era.
-     * 2. `asegurarVigente()` calcula el carrito **vivo**. De ahí salen los
-     *    totales de la boleta y la proyección local de la caja, así que la
-     *    boleta se armaba con las líneas de la cuenta cobrada y los totales de
-     *    la otra.
-     *
-     * Con la cuenta congelada y el cálculo condicionado a seguir parado en ella,
-     * lo segundo se degrada al camino que ya existía para cuando no hay cálculo:
-     * la venta se genera igual y el aviso lo dice — y esa venta se queda sin
-     * boleta, porque acá no hay reimpresión. Se acepta igual: hoy ese mismo
-     * gesto deja la venta **sin generar**, que es peor, y es el camino que el
-     * cálculo fallado ya tenía. Ver `docs/agent/pendientes.md` § 2.
+     * Ahora el ticket sale de la RESPUESTA del `POST /cuentas/:id/cerrar`
+     * (`armarBoleta` sobre la venta ya persistida): no depende de qué cuenta
+     * esté activa cuando el cierre vuelve. Este test tiene que fallar contra el
+     * código de antes de esta tarea (revertirla lo confirma) y pasar contra el
+     * de ahora.
      */
     catalogoItemsMock = [producto('20.0000', '10.0000')]
     cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    impresorasBoleta = [impresoraDeBoleta()]
+    // Un ítem PROPIO de esta boleta, corto para no caer en la columna truncada
+    // de `lineasItem` (22 caracteres): si el ticket sale de acá y no de un
+    // recálculo local, tiene que aparecer textual.
+    cierreBoletaOverride = {
+      ...boletaCierreDefault(),
+      items: [{
+        descripcion: 'Item de boleta',
+        cantidad: '2.0000',
+        cantidadPresentacion: null,
+        unidadCodigoPresentacion: null,
+        unidadCodigoBase: 'unidad',
+        precioUnitario: '5000',
+        totalLinea: '10000',
+      }],
+    }
     let soltar!: () => void
     patchCantidadRetenido = new Promise<void>((r) => {
       soltar = r
@@ -4610,6 +4679,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     await esperar(20)
     await tipearPin()
 
+    // Se va a OTRA cuenta con el `POST` de cierre todavía en vuelo.
     botonEn(drawerMesa(), 'Cuentas')!.click()
     await esperar(20)
     const tarjetas = drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer')
@@ -4621,7 +4691,11 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     await esperar(300)
 
     expect(cierresDeCuenta).toEqual(['cuenta-9'])
-    expect(toasts.some(t => t.title === 'Venta generada, pero no se pudo generar la boleta')).toBe(true)
+    // El papel SALIÓ, con el ítem de la respuesta — ya no el aviso de "no se
+    // pudo generar la boleta".
+    expect(impresionesQz, 'la boleta salió igual').toHaveLength(1)
+    expect(impresionesQz[0]!.join('\n')).toContain('Item de boleta')
+    expect(toasts.some(t => t.title === 'Venta generada, pero no se pudo generar la boleta')).toBe(false)
     // Y no se lo expulsa de donde está: el `volverACuentas()` del camino feliz
     // se condiciona a seguir parado en la cuenta que se cobró. El botón
     // *Cuentas* solo existe en el detalle, así que su presencia dice en qué
@@ -4630,19 +4704,20 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(drawerMesa()?.textContent).toContain('Cuenta 10')
   })
 
-  it('sin cálculo, la proyección de la caja suma lo cobrado y NO el vuelto', async () => {
+  it('la proyección de la caja usa el total de la boleta, y no resta el vuelto dos veces', async () => {
     /**
-     * La escena de arriba, con el vuelto puesto: el garzón cobra $5.000 con
-     * $2.000 de vuelto, o sea que al cajón entran $3.000.
+     * El garzón cobra $5.000 con $2.000 de vuelto sobre una venta de $3.000: al
+     * cajón entran $3.000. `targetCobro` sale de `boleta.totales.totalFinal +
+     * propina` —el total que el SERVIDOR registró, no un recálculo local— y el
+     * `min` contra el bruto tipeado ($5.000) es lo único que recorta el vuelto;
+     * no hay una resta aparte. Los otros dos llamadores de `aplicarCobroLocal`
+     * (`ventas/pos.vue` y `VentaDetalleDrawer.vue`) ya seguían este idioma —acá
+     * era distinto mientras existió la rama sin cálculo, que restaba el vuelto
+     * de `bruto` directo y se comía el `min`.
      *
-     * Con cálculo, `targetCobro` sale de `totalFinal + propina` y el vuelto queda
-     * afuera solo, porque el `min` contra el bruto lo recorta. **Sin cálculo,
-     * `targetCobro` cae en `bruto`** —que es la suma de lo TIPEADO, vuelto
-     * incluido— y el `min` deja de recortar nada: la caja se proyectaba $2.000
-     * más arriba de lo que tiene adentro.
-     *
-     * Los otros dos llamadores de `aplicarCobroLocal` ya restan el vuelto
-     * (`ventas/pos.vue` y `VentaDetalleDrawer.vue`); salones era el único que no.
+     * Se cobra habiendo navegado a OTRA cuenta durante la espera, a propósito:
+     * la proyección tiene que seguir saliendo de la boleta de la respuesta pase
+     * lo que pase con `activeCuenta`.
      *
      * ⚠️ El `resumenTurno` se siembra a mano porque esta pantalla nunca lo carga
      * —`cargarResumenTurno` es del módulo Caja—, y sin él `aplicarMovimientoLocal`
@@ -4660,6 +4735,8 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
     catalogoItemsMock = [producto('20.0000', '10.0000')]
     cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    const boletaBase = boletaCierreDefault() as { totales: Record<string, string> }
+    cierreBoletaOverride = { ...boletaBase, totales: { ...boletaBase.totales, totalFinal: '3000' } }
     let soltar!: () => void
     patchCantidadRetenido = new Promise<void>((r) => {
       soltar = r
@@ -4684,12 +4761,15 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     await esperar(20)
     const modal = wrapper.findComponent({ name: 'VentasCobroModal' })
     expect(modal.props('open'), 'el modal de cobro abrió').toBe(true)
+    // Sin propina: el modal abre con la sugerida puesta (10%) y acá se mide
+    // solo el vuelto, no la propina sumándose al target.
+    modal.vm.$emit('update:propinaMonto', '0')
+    await esperar(10)
     modal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5000' }], '2000')
     await esperar(20)
     await tipearPin()
 
-    // Irse a la otra cuenta durante la espera es lo que deja el cierre sin
-    // cálculo, igual que en el test de arriba.
+    // Se va a la otra cuenta con el cierre todavía en vuelo.
     botonEn(drawerMesa(), 'Cuentas')!.click()
     await esperar(20)
     const tarjetas = drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer')
@@ -4699,12 +4779,64 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     soltar()
     await esperar(300)
 
-    // El camino degradado es el que se está ejercitando, no el feliz.
     expect(cierresDeCuenta).toEqual(['cuenta-9'])
-    expect(toasts.some(t => t.title === 'Venta generada, pero no se pudo generar la boleta')).toBe(true)
-
     // $10.000 de saldo inicial + $3.000 que entraron de verdad.
     expect(caja.resumenTurno?.saldoEsperado).toBe('13000.0000')
+  })
+
+  it('un producto pesable en la boleta imprime la cantidad real, no redondeada a entero', async () => {
+    /**
+     * Ronda de corrección 1: todo el resto de este archivo cierra con
+     * `unidad` (conteo) — nada ejercitaba el cableado de un PESABLE en el
+     * camino nuevo. `itemsParaBoletaCierre` decide `esFraccionaria` con
+     * `unidadCodigoPresentacion ?? unidadCodigoBase`: si ese cableado cruza
+     * un campo con otro (o pierde el `true` de fraccionaria),
+     * `formatStockCantidad` redondea a entero — el bug real de este repo,
+     * "0,3 kg" impreso como "0". El valor es a propósito: con una cantidad
+     * que redondeara IGUAL con y sin fracción (un entero) el mutante no se
+     * notaría. Y la aserción es sobre el TEXTO que llega a `imprimirBoleta`
+     * (`impresionesQz`), no sobre `itemsParaBoletaCierre` como objeto
+     * intermedio.
+     */
+    useUnidadesMedidaStore().hydrate([
+      { unidadMedidaId: 'g-uuid', codigo: 'g', nombre: 'Gramo', magnitud: 'masa', factorBase: '1' },
+      { unidadMedidaId: 'kg-uuid', codigo: 'kg', nombre: 'Kilogramo', magnitud: 'masa', factorBase: '1000' },
+    ])
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    impresorasBoleta = [impresoraDeBoleta()]
+    // Sin presentación (se pidió directo "0,3 kg"): así se ejercita el mismo
+    // camino canónico del bug real, no el de la presentación.
+    cierreBoletaOverride = {
+      ...boletaCierreDefault(),
+      items: [{
+        descripcion: 'Palta',
+        cantidad: '0.3000',
+        cantidadPresentacion: null,
+        unidadCodigoPresentacion: null,
+        unidadCodigoBase: 'kg',
+        precioUnitario: '4000',
+        totalLinea: '1200',
+      }],
+    }
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    await esperar(300)
+
+    expect(impresionesQz, 'la boleta salió').toHaveLength(1)
+    const filaItem = impresionesQz[0]!.join('').split('\n').find(l => l.includes('Palta')) ?? ''
+    expect(filaItem, 'la línea del pesable está en el ticket').not.toBe('')
+    // La columna CANT son los primeros 5 caracteres de la fila
+    // (`COL_CANT` en `ticket-builder.ts`): tiene que mostrar la fracción, no
+    // el entero redondeado.
+    expect(filaItem, 'muestra la fracción, no el entero redondeado').toContain('0,3')
+    expect(filaItem.slice(0, 5).trim(), 'la columna CANT no quedó en "0"').not.toBe('0')
   })
 
   it('cambiar de mesa durante la espera no le descuenta la ocupación a la otra mesa', async () => {

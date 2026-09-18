@@ -117,7 +117,7 @@ describe('SalonesService', () => {
   let salonRepo: Repo;
   let mesaRepo: Repo;
   let cuentaRepo: Repo;
-  let ventas: { crearEnTransaccion: jest.Mock };
+  let ventas: { crearEnTransaccion: jest.Mock; armarBoleta: jest.Mock };
   let garzones: { resolverGarzonActuante: jest.Mock };
   let sesiones: {
     assertSesionAbierta: jest.Mock;
@@ -170,7 +170,7 @@ describe('SalonesService', () => {
     salonRepo = makeRepo();
     mesaRepo = makeRepo();
     cuentaRepo = makeRepo();
-    ventas = { crearEnTransaccion: jest.fn() };
+    ventas = { crearEnTransaccion: jest.fn(), armarBoleta: jest.fn() };
     garzones = {
       resolverGarzonActuante: jest.fn().mockResolvedValue({
         id: GARZON,
@@ -3054,6 +3054,51 @@ describe('SalonesService', () => {
         cuenta.cerradaEl,
       );
       expect(sesiones.assertSesionAbierta).toHaveBeenCalledWith(TENANT, GARZON);
+    });
+
+    it('arma la boleta con `armarBoleta` dentro de la transacción y la devuelve en la respuesta', async () => {
+      // Task 3 (`docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`):
+      // el cliente se iba sin boleta cuando la pantalla se quedaba sin el
+      // cálculo con el que armaba el ticket. La boleta ahora sale de la venta
+      // ya persistida, en la misma transacción del cierre.
+      const cuenta = {
+        id: CUENTA,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 85,
+        estado: EstadoCuenta.ABIERTA,
+        ventaId: null,
+        garzonResponsableId: GARZON_RESPONSABLE,
+        cerradaEl: null as Date | null,
+      };
+      manager.findOne.mockResolvedValue(cuenta);
+      manager.find.mockResolvedValue([
+        { itemId: ITEM, cantidad: '2', personalizacion: SNAPSHOT },
+      ]);
+      manager.query.mockResolvedValue([]);
+      ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
+      const boletaMock = { ventaId: 'venta-1', items: [] };
+      ventas.armarBoleta.mockResolvedValue(boletaMock);
+
+      const result = await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+        garzonId: GARZON,
+        pin: PIN,
+        pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
+      });
+
+      // `manager` y no `db`/`this.db`: la boleta se arma DENTRO de la misma
+      // transacción, para leer la venta recién insertada sin esperar el commit.
+      // `usuarioId` es el actor del token; `verTodas: true` porque el alcance
+      // por caja (`filtroDeMisCajas`) protege navegar ventas de una caja ajena,
+      // no la venta que esta misma request acaba de cerrar.
+      expect(ventas.armarBoleta).toHaveBeenCalledWith(
+        manager,
+        TENANT,
+        'venta-1',
+        USUARIO,
+        true,
+      );
+      expect(result.boleta).toBe(boletaMock);
     });
 
     it('reenvía personalizacion.grupos a la venta cuando la línea tiene un combo con grupos', async () => {

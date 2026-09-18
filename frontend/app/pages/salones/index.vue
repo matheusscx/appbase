@@ -16,6 +16,7 @@ import {
   type CuentaAsignacionDetalle,
   type MotivoCuentaAsignacion,
   type TipoMotivoBaja,
+  type BoletaVenta,
 } from '~/composables/useSalones'
 import type { EventoPin, Garzon, MiPinEstado } from '~/composables/useGarzones'
 import { etiquetaCuentaPendiente, useTransferenciaPendientes } from '~/composables/useSesionesGarzon'
@@ -68,7 +69,6 @@ const sesionesApi = useSesionesGarzon()
 const unidadesStore = useUnidadesMedidaStore()
 const { formatMonto, formatFecha } = useFormatters()
 const impresorasApi = useImpresoras()
-const authStore = useAuthStore()
 const { emisor, cargar: cargarEmisor } = useRazonSocialEmisor()
 
 const enviandoComanda = ref(false)
@@ -182,8 +182,8 @@ const submitting = ref(false)
 /**
  * La cuenta de un cobro **ya confirmado con el PIN y todavía en vuelo**: el
  * tramo entre el *Confirmar* y el `POST /cuentas/:id/cerrar`, que espera el
- * flush y —si el garzón sigue parado en la cuenta— el cálculo. Se prende en
- * `confirmarCobro` y se apaga con `submitting`, que cubre el mismo tramo.
+ * flush. Se prende en `confirmarCobro` y se apaga con `submitting`, que cubre
+ * el mismo tramo.
  *
  * ⚠️ **`cerrarCuentaConPin` no la re-arma, y tampoco a `submitting`: las dos las
  * prende `confirmarCobro`.** Con esta además importa el orden —el porqué está
@@ -818,14 +818,14 @@ const cuentaConItemEliminado = computed(
  * no releyendo el ref, que es la regla del composable.
  *
  * ℹ️ **Lo que este congelado separa, dicho:** la boleta **no** imprime este
- * número — sale de un `asegurarVigente()` fresco adentro de `cerrarCuentaConPin`,
- * a propósito, porque el ticket tiene que salir de la cuenta de **después** del
- * flush. Antes los dos eran el mismo; ahora pueden diferir si la cuenta se movió
- * entre que el modal abrió y el cierre salió. No es plata cobrada de más ni de
+ * número. Hasta el 2026-09-17 salía de un `asegurarVigente()` fresco adentro de
+ * `cerrarCuentaConPin` —y por eso podía quedarse sin papel si la cuenta se
+ * movió entre que el modal abrió y el cierre salió (`docs/agent/pendientes.md`
+ * § 2)—; ahora sale de la respuesta del propio `POST .../cerrar`
+ * (`armarBoleta` sobre la venta ya persistida), así que no depende de qué
+ * cuenta esté activa cuando el cierre vuelve. No es plata cobrada de más ni de
  * menos: el total de la venta lo calcula el backend a partir de las líneas —acá
- * no viaja ningún total—, y lo que sí queda del lado de la pantalla ya está
- * anotado (`docs/agent/pendientes.md` § 2: la venta sin boleta y la caja
- * proyectada por el bruto).
+ * no viaja ningún total—.
  */
 async function abrirCobro() {
   const cuenta = activeCuenta.value
@@ -2419,6 +2419,40 @@ function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
 }
 
 /**
+ * El mapeo mínimo de `BoletaVenta` —la venta YA PERSISTIDA que devuelve el
+ * cierre (`salonesApi.cerrarCuenta`)— al `BoletaItem` que consume
+ * `buildBoletaTicket`. Vive acá y no en `ticket-builder.ts` para no tocarle la
+ * firma, que comparte la precuenta.
+ *
+ * A diferencia de `itemsParaTicket`, acá NO hay cruce por índice contra
+ * `items.value` (el catálogo cargado): la unidad de cada línea ya viene
+ * resuelta en la propia `BoletaVenta.items[]` (`unidadCodigoBase` /
+ * `unidadCodigoPresentacion`), porque es la que el servidor cobró — cruzar de
+ * nuevo contra el catálogo de HOY es exactamente el error de origen que
+ * `armarBoleta` vino a evitar.
+ */
+function itemsParaBoletaCierre(boleta: BoletaVenta) {
+  return boleta.items.map((item) => {
+    const cantidadTicket = formatCantidadLinea(
+      item.cantidad,
+      item.cantidadPresentacion,
+      item.unidadCodigoPresentacion,
+      unidadesStore.esFraccionaria(item.unidadCodigoPresentacion ?? item.unidadCodigoBase),
+      item.unidadCodigoBase,
+    )
+    return {
+      nombre: item.descripcion,
+      cantidad: cantidadTicket,
+      precioUnitario: item.precioUnitario,
+      totalLinea: item.totalLinea,
+      ...(item.personalizacionDetalle?.length
+        ? { personalizacionDetalle: item.personalizacionDetalle, comentario: item.comentario }
+        : item.comentario ? { nota: item.comentario } : {}),
+    }
+  })
+}
+
+/**
  * Los platos anulados que imprime la PRECUENTA (spec § 5): `merma` y
  * `cortesia`, en $0 con la etiqueta de su tipo. `no_elaborado` queda afuera
  * —nunca salió de cocina—, y esto no lo consume `imprimirBoleta`: la boleta no
@@ -2683,9 +2717,19 @@ function confirmarCobro(pagos: PagoInput[], vuelto: string) {
  * `confirmarCobro`, que la saca.
  *
  * Lo que se lee de un `ref` acá adentro es una decisión aparte, tomada de a una
- * y escrita donde se toma. Las que quedan vivas —`propinaPorcentaje`,
- * `propinaHabilitada`, `emisor`, `metodos`, `tiposDocumento`— se cargan las
- * cinco en el `Promise.all` del arranque y nada de esta ventana las mueve.
+ * y escrita donde se toma. Las que quedan vivas —`propinaPorcentaje`, `emisor`,
+ * `metodos`, `tiposDocumento`— se cargan en el `Promise.all` del arranque y
+ * nada de esta ventana las mueve.
+ *
+ * ⚠️ **La boleta que se imprime es la que devuelve el `POST` de cierre**
+ * (`salonesApi.cerrarCuenta` → `armarBoleta` en el backend, sobre la venta ya
+ * persistida dentro de la MISMA transacción): no se recalcula acá, y por eso
+ * ya no depende de `activeCuenta` ni de `asegurarVigente()`. Hasta el
+ * 2026-09-17 el ticket salía de un `asegurarVigente()` fresco, condicionado a
+ * seguir parado en la cuenta que se cobra — si el garzón se metía en otra
+ * durante el `await flushPendientes()`, la venta se generaba igual pero
+ * **sin boleta, punto**: no había reimpresión (`docs/agent/pendientes.md` § 2).
+ * Con la boleta en la respuesta del cierre, ese camino ya no existe.
  */
 async function cerrarCuentaConPin(
   cobro: {
@@ -2706,47 +2750,14 @@ async function cerrarCuentaConPin(
   // abajo no cortaría nunca—.
   // Todo lo que viene adentro de `cobro` es la foto; lo que se lee de un `ref`
   // acá abajo es una decisión aparte, tomada de a una.
-  const { cuenta: cuentaCerrada, mesa: mesaCerrada, pagos, vuelto } = cobro
+  const { cuenta: cuentaCerrada, mesa: mesaCerrada, pagos } = cobro
   const tipMonto = cobro.propinaMonto
   const tipSugerida = cobro.propinaSugerida
   try {
-    // La boleta y la proyección local de la caja salen de acá: se espera el
-    // cálculo de ESTA cuenta, no el que quedó de la mutación anterior. Dentro
-    // del `try` para que un fallo no deje el drawer trabado en `submitting`.
-    //
-    // ⚠️ **Condicionado a seguir parado en la cuenta que se cobra**, porque
-    // `asegurarVigente()` calcula el carrito **vivo**: si el garzón se metió en
-    // otra durante el flush, devolvía el resultado de ESA, y la boleta salía con
-    // las líneas de una cuenta y los totales de la otra —y con esos totales se
-    // proyectaba la caja—.
-    //
-    // ⚠️ **Y la cuenta del ticket se toma acá, no de la foto**, porque el flush
-    // que acaba de correr REEMPLAZA el objeto de la cuenta: `itemsParaTicket`
-    // cruza líneas y cálculo **por índice** y prefiere la `cantidadPresentacion`
-    // de la línea, así que una foto vieja contra un cálculo fresco imprime una
-    // cantidad y cobra otra. Lo levantó la revisión: la primera versión de este
-    // arreglo pasaba `cuentaCerrada`, que es de antes del flush. Se relee
-    // después del `await` de `asegurarVigente()` porque ése también espera.
-    //
-    // Sin cálculo se cae al camino que ya existía más abajo: la venta se genera
-    // igual y el aviso lo dice. ⚠️ **Y esa venta se queda sin boleta, punto:**
-    // no hay reimpresión en el sistema (el ticket siempre se arma contra estado
-    // vivo). Se acepta porque el otro platillo es peor —hoy, ese mismo gesto
-    // deja la venta **sin generar**— y porque es el camino que el cálculo
-    // fallado ya tenía. La salida buena, recalcular la cuenta cobrada por
-    // fuera de la vigencia, es un frente propio (`pendientes.md` § 2).
-    let resultadoCerrado: ResultadoVenta | null = null
-    let cuentaDelTicket: CuentaDetalle | null = null
-    if (activeCuenta.value?.id === cuentaCerrada.id) {
-      const res = await asegurarVigente()
-      if (res && activeCuenta.value?.id === cuentaCerrada.id) {
-        resultadoCerrado = res
-        cuentaDelTicket = activeCuenta.value
-      }
-    }
     // ⛔ **Si la fusión se llevó puesta esta cuenta durante las esperas de
-    // arriba, el `POST` no sale.** Quien anula la marca en esa escena es
-    // `fusionarSeleccionadas`, y solo para las cuentas que entraron a la fusión.
+    // arriba (el teclado del PIN, `flushPendientes`), el `POST` no sale.**
+    // Quien anula la marca en esa escena es `fusionarSeleccionadas`, y solo
+    // para las cuentas que entraron a la fusión.
     //
     // **El aviso lo da este guard y no ella**, al revés que en los otros dos
     // tramos: allá no hay nada en vuelo que dudar, acá la fusión y el cierre
@@ -2790,7 +2801,7 @@ async function cerrarCuentaConPin(
       })
       return
     }
-    await salonesApi.cerrarCuenta(cuentaCerrada.id, {
+    const { boleta } = await salonesApi.cerrarCuenta(cuentaCerrada.id, {
       ...credencialGarzon(garzonId, pin),
       pagos,
       tipoDocumentoId: tiposDocumento.value[0]?.id,
@@ -2805,36 +2816,26 @@ async function cerrarCuentaConPin(
       color: 'success',
     })
 
-    if (resultadoCerrado && cuentaDelTicket) {
-      try {
-        await impresorasApi.imprimirBoleta({
-          emisor: emisor.value,
-          facturacionElectronica: false,
-          meta: {
-            cajero: authStore.user?.nombre ?? undefined,
-            mesa: mesaCerrada?.nombre,
-          },
-          items: itemsParaTicket(cuentaDelTicket, resultadoCerrado),
-          totales: resultadoCerrado.totales,
-          impuestos: agregarImpuestosVenta(resultadoCerrado.lineas),
-          promociones: agregarPromocionesVenta(resultadoCerrado.lineas),
-          ...(propinaHabilitada.value && new Decimal(tipMonto).gt(0) ? { propina: { monto: tipMonto } } : {}),
-          pagos: pagos.map(p => ({
-            nombre: metodos.value.find(m => m.metodoPagoId === p.metodoPagoId)?.nombre ?? '',
-            monto: p.monto,
-          })),
-          vuelto,
-          formatMonto: (v: string) => formatMonto(v),
-        })
-      }
-      catch (e: unknown) {
-        toast.add({ title: apiErrorMsg(e, 'Venta generada, pero falló la impresión de la boleta'), color: 'warning' })
-      }
+    try {
+      await impresorasApi.imprimirBoleta({
+        emisor: emisor.value,
+        facturacionElectronica: false,
+        meta: {
+          cajero: boleta.cajero ?? undefined,
+          mesa: boleta.mesa ?? undefined,
+        },
+        items: itemsParaBoletaCierre(boleta),
+        totales: boleta.totales,
+        impuestos: boleta.impuestos,
+        promociones: boleta.promociones,
+        ...(boleta.propina ? { propina: boleta.propina } : {}),
+        pagos: boleta.pagos,
+        vuelto: boleta.vuelto ?? undefined,
+        formatMonto: (v: string) => formatMonto(v),
+      })
     }
-    else {
-      // Mismo criterio que el fallo de impresora: la cuenta ya se cerró, pero
-      // quedarse sin el cálculo del que sale el ticket no puede ser silencioso.
-      toast.add({ title: 'Venta generada, pero no se pudo generar la boleta', color: 'warning' })
+    catch (e: unknown) {
+      toast.add({ title: apiErrorMsg(e, 'Venta generada, pero falló la impresión de la boleta'), color: 'warning' })
     }
 
     // El filtro va sin condicionar: si el garzón se cambió de mesa, `cuentas`
@@ -2855,16 +2856,13 @@ async function cerrarCuentaConPin(
       (acc, p) => acc.plus(p.monto || '0'),
       new Decimal(0),
     )
-    // ⚠️ **El vuelto se resta en la rama degradada y no en la otra**, que es lo
-    // que parece asimétrico y no lo es: con cálculo, `totalFinal + propina` ya
-    // es lo que queda en el cajón —el `min` contra el bruto recorta lo que el
-    // garzón tipeó de más—, mientras que `bruto` es la suma de lo TIPEADO y el
-    // vuelto está adentro. Sin restarlo, el `min` no recortaba nada y la caja se
-    // proyectaba inflada por el vuelto. Es el idioma que ya usan los otros dos
-    // llamadores de `aplicarCobroLocal` (`ventas/pos.vue` y `VentaDetalleDrawer.vue`).
-    const targetCobro = resultadoCerrado
-      ? new Decimal(resultadoCerrado.totales.totalFinal).plus(tipMonto)
-      : bruto.minus(vuelto || '0')
+    // El total cobrado sale de la boleta —lo que el servidor efectivamente
+    // registró—, no de un recálculo local: `totalFinal + propina` es lo que
+    // queda en el cajón, y el `min` contra el bruto recorta lo que el garzón
+    // tipeó de más (y con él, el vuelto: `bruto` es la suma de lo TIPEADO, con
+    // el vuelto adentro). Mismo idioma que los otros dos llamadores de
+    // `aplicarCobroLocal` (`ventas/pos.vue` y `VentaDetalleDrawer.vue`).
+    const targetCobro = new Decimal(boleta.totales.totalFinal).plus(tipMonto)
     const neto = Decimal.min(bruto, targetCobro).toFixed(4)
     cajaStore.aplicarCobroLocal(neto, pagosConMonto.length)
     // Lo que se PINTA se condiciona, igual que en cancelar: sacarlo de donde

@@ -61,6 +61,9 @@ interface PersonalizacionDetalleLinea {
 interface BoletaItem {
   descripcion: string;
   cantidad: string;
+  cantidadPresentacion: string | null;
+  unidadCodigoPresentacion: string | null;
+  unidadCodigoBase: string;
   totalLinea: string;
   personalizacionDetalle?: PersonalizacionDetalleLinea[];
 }
@@ -418,5 +421,115 @@ describe('GET /ventas/:id/boleta — reimprimir boleta (e2e)', () => {
     const res = await boleta(cierre.ventaId, tokenAdmin);
     expect(res.status).toBe(200);
     expect((res.body as BoletaVentaRes).propina).toBeNull();
+  });
+
+  /**
+   * Task 3 (`docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`):
+   * el cierre de cuenta suma `boleta` a su respuesta, armada con el mismo
+   * `armarBoleta` que esta ruta, dentro de la transacción del cobro. La
+   * prueba que importa es la segunda aserción: cerrar y reimprimir tienen que
+   * dar el MISMO papel para la misma venta, o la reimpresión miente.
+   */
+  it('el cierre de una cuenta con dos líneas devuelve la boleta, igual a la de GET /ventas/:id/boleta', async () => {
+    const itemSegundoId = (
+      await post<ItemResponse>('/api/items', {
+        nombre: `Item boleta E2E dos líneas ${Date.now()}`,
+        tipo: 'producto',
+        precioBase: '2000',
+        monedaId: CLP_MONEDA_ID,
+        unidadMedida: 'unidad',
+        stock: '50',
+        costo: '500',
+      })
+    ).id;
+
+    const cuenta = await post<CuentaCreada>(`/api/mesas/${mesaId}/cuentas`, {
+      garzonId: garzon.id,
+      pin: garzon.pin,
+    });
+    await post(`/api/cuentas/${cuenta.id}/lineas`, {
+      itemId: itemBasicoId,
+      cantidad: '2',
+    });
+    await post(`/api/cuentas/${cuenta.id}/lineas`, {
+      itemId: itemSegundoId,
+      cantidad: '1',
+    });
+
+    const cierre = await post<{ ventaId: string; boleta: BoletaVentaRes }>(
+      `/api/cuentas/${cuenta.id}/cerrar`,
+      {
+        garzonId: garzon.id,
+        pin: garzon.pin,
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100000.0000' }],
+      },
+    );
+
+    expect(cierre.boleta.ventaId).toBe(cierre.ventaId);
+    expect(cierre.boleta.items).toHaveLength(2);
+    expect(Number(cierre.boleta.totales.totalFinal)).toBeGreaterThan(0);
+
+    const res = await boleta(cierre.ventaId, tokenAdmin);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(cierre.boleta);
+  });
+
+  /**
+   * Ronda de corrección 1: nada probaba el CABLEADO de la cantidad de un
+   * pesable en el camino nuevo. `armarBoleta` reenvía `cantidad` (canónica),
+   * `cantidadPresentacion`, `unidadCodigoPresentacion` y `unidadCodigoBase`
+   * desde `venta_detalles` — cuatro columnas, y cruzar dos sin que nada lo
+   * note es exactamente cómo un plato de 0,3 kg salió impreso como "0" en
+   * este repo. Los cuatro valores de acá son deliberadamente DISTINTOS entre
+   * sí (0,7 / 700 / 'g' / 'kg') para que ningún swap entre columnas pase
+   * inadvertido.
+   */
+  it('una línea pesable (kg, pedida en g) trae los cuatro campos de cantidad sin cruzar', async () => {
+    const itemKgId = (
+      await post<ItemResponse>('/api/items', {
+        nombre: `Item boleta E2E pesable ${Date.now()}`,
+        tipo: 'producto',
+        precioBase: '10000',
+        monedaId: CLP_MONEDA_ID,
+        unidadMedida: 'kg',
+        stock: '50',
+        costo: '2000',
+      })
+    ).id;
+
+    const cuenta = await post<CuentaCreada>(`/api/mesas/${mesaId}/cuentas`, {
+      garzonId: garzon.id,
+      pin: garzon.pin,
+    });
+    // Canónico en kg (base del ítem) distinto de la presentación en g, que a
+    // su vez es distinta de las dos unidades — mismo patrón que
+    // `salones-fusion.e2e-spec.ts` ("Unidad base kg: cargar 500 g deja
+    // canónico 0,5 y presentación 500 g").
+    await post(`/api/cuentas/${cuenta.id}/lineas`, {
+      itemId: itemKgId,
+      cantidad: '0.7',
+      cantidadPresentacion: '700',
+      unidadCodigoPresentacion: 'g',
+    });
+
+    const cierre = await post<{ ventaId: string; boleta: BoletaVentaRes }>(
+      `/api/cuentas/${cuenta.id}/cerrar`,
+      {
+        garzonId: garzon.id,
+        pin: garzon.pin,
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100000.0000' }],
+      },
+    );
+
+    expect(cierre.boleta.items).toHaveLength(1);
+    const linea = cierre.boleta.items[0];
+    // Los cuatro campos, uno por uno: si `armarBoleta` mandara
+    // `unidadCodigoBase` donde va `unidadCodigoPresentacion` (o `cantidad`
+    // donde va `cantidadPresentacion`), alguna de estas cuatro aserciones —
+    // nunca las cuatro por la misma razón— rompería.
+    expect(linea.cantidad).toBe('0.7000');
+    expect(linea.cantidadPresentacion).toBe('700.0000');
+    expect(linea.unidadCodigoPresentacion).toBe('g');
+    expect(linea.unidadCodigoBase).toBe('kg');
   });
 });
