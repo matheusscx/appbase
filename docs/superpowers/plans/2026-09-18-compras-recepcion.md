@@ -1112,7 +1112,9 @@ transacción, con el reintento de deadlock de `traslados.crear`:
 
 1. `SELECT … FOR UPDATE` de la compra; si no es `borrador`, 409.
 2. `validarEncabezado` + `validarLineas` (tarea 3), `assertFolioLibre` otra vez, y al menos una
-   línea.
+   línea. La ubicación de la compra se lee con **`FOR SHARE`**, el par del `FOR UPDATE` de
+   `UbicacionesService.remove` (molde: `traslados.crearEnTransaccion`, que explica la carrera).
+   Así compras no abre, por su camino, la carrera de la bodega que se borra con stock (ver T7).
 3. Lock de los productos en **un** statement ordenado por `item_id` (`FOR UPDATE OF ip`, el molde
    de `traslados`, líneas 262–310).
 4. Stock total **antes** de cada línea: `stockTotalPorProducto` (T5), una sola llamada con todos
@@ -1161,10 +1163,18 @@ de ahí se suman las cantidades con signo.
    join a `compra_lineas` y `compras` para traer la cantidad y el costo vigentes de cada línea y el
    estado de su compra. Las reglas de cada tipo de movimiento son las de la spec § 4.3, **sin
    reinterpretarlas**.
-   ⚠️ **El borde a medir:** `stockTotalPorProducto` excluye las ubicaciones eliminadas **hoy**,
-   pero la reconstrucción suma movimientos de todas. Coinciden solo porque una ubicación se borra
-   **vacía** (`UbicacionesService.remove` cuenta 0 stock). El test lo fija: una bodega con
-   movimientos en la ventana, vaciada y borrada antes de completar el precio.
+   ⛔ **Dependencia, no hecho verificado:** `stockTotalPorProducto` excluye las ubicaciones
+   eliminadas **hoy**, y la reconstrucción suma movimientos de todas. Los dos números coinciden
+   **solo si una ubicación se borra vacía**, y eso **no está garantizado**:
+   - `UbicacionesService.remove` cuenta el stock bajo `FOR UPDATE` de la fila de `ubicaciones`;
+   - `registrarMovimiento` no toma ese lock, y solo `traslados` toma `FOR SHARE`;
+   - así, una entrada concurrente puede dejar stock en una bodega que se está borrando.
+
+   La revisión del frente del CPP lo encontró, y está anotado como tarea aparte, sin arreglar.
+   **La reconstrucción es exacta recién cuando esa carrera se cierre.** Hasta entonces, el caso
+   de la carrera puede dar un costo rehecho distinto del original. El test fija el caso sin
+   carrera (una bodega con movimientos en la ventana, vaciada y borrada antes de completar el
+   precio) y **no** declara cubierto el concurrente.
 3. Si el costo resultante difiere del `costo_actual`, `registrarCorreccionCosto` (tarea 5).
 
 **Contrato:**
