@@ -461,6 +461,48 @@ La regla es más ancha que el login —vale para cualquier `.body` del que se ex
 token para usarlo después—, pero el login es donde más caro sale, porque contamina todo el
 archivo en vez de un test.
 
+### E2E de API: el estado que es único por definición, el spec se lo crea (2026-09-18)
+
+Las suites comparten los usuarios del seed y corren una detrás de otra (`maxWorkers: 1` en
+`test/jest-e2e.json`: el choque es **secuencial**, no concurrente). Mientras un spec solo **lea**
+o cree filas nuevas con `admin.paris@paris.cl`, compartirlo no cuesta nada. Lo que cuesta es
+**el estado del que el sistema admite uno solo**: el spec que lo deja abierto le rompe al
+siguiente, que pasa aislado y falla en la corrida completa, lejos de la causa.
+
+| Estado único | Por qué choca | Precedente |
+|---|---|---|
+| Sesión de garzón | una sesión abierta por garzón | garzón propio con `POST /garzones`, que devuelve el PIN una sola vez — `caja-testigo` (`crearGarzon`), `salones-fusion`, `items-pausados` |
+| Roles o permisos de un usuario | los hereda todo spec que se loguee con él | usuario propio con `POST /tenants/usuarios` — `permiso-operar-salon` |
+| Algo del tenant entero (el último admin, una preferencia) | lo lee el spec que viene después | `tenantPropio` con `POST /admin/tenants` — `membresia-ultimo-admin` |
+
+```ts
+// ❌ MAL — Ana del seed (…440238): si el spec cae antes de cerrar, su sesión queda abierta
+await request(app.getHttpServer())
+  .post('/api/sesiones-garzon/iniciar')
+  .set('Authorization', `Bearer ${token}`)
+  .send({ turnoId, garzonId: '550e8400-e29b-41d4-a716-446655440238', pin });
+
+// ✅ BIEN — garzón propio en el beforeAll; nadie más lo conoce
+const garzon = await crearGarzon(`E2E ${Date.now()}`);
+await abrirSesion(garzon.id, garzon.pin);
+```
+
+El cierre defensivo (`POST /sesiones-garzon/cerrar` antes de `iniciar`) **no** lo reemplaza:
+tapa el choque en este spec y deja el estado cambiado para el siguiente.
+
+⚠️ **La caja física es la excepción, por decisión del owner (2026-09-03):** es una por tenant +
+usuario y **se comparte** —las suites la abren con el admin del seed—, pero siempre con
+`abrirCaja`/`cerrarCaja` de `test/helpers/caja.ts`, y el `cerrarCaja` en el `afterAll`. El
+helper hace las dos fases del cierre: con solo la primera, una caja que vendió en efectivo queda
+`en_conciliacion` y el spec siguiente recibe un `409` al abrir.
+
+**El caso que lo trajo:** al sumar `salones-comanda` (2026-08-09), `garzon-modo-personal` cayó con
+`400 "El garzón ya tiene una sesión abierta"`; y la familia de rojos intermitentes que primero se
+llamó *"el `401` fantasma"* —historia y medición en
+[`pendientes.md` § Vigilancia](../agent/pendientes.md#vigilancia--evaluado-y-descartado-no-es-trabajo)—.
+**Ante un e2e que falla solo en la corrida completa**, sospechar primero de un recurso del seed
+que es único por definición, antes que del código.
+
 ---
 
 ## 8. Seeding

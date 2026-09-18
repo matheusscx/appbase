@@ -1507,8 +1507,8 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   **Lo que sigue igual y es el riesgo de fondo:** las suites comparten los usuarios del seed con
   `maxWorkers: 1` como única red —
   `grep -rl 'admin.paris@paris.cl' backend/test --include='*.e2e-spec.ts' | wc -l`—. Un spec nuevo
-  que deje estado a medias sobre ellos puede destapar esto de nuevo; el precedente de cómo evitarlo
-  es crear sus propios usuarios (como el garzón propio en vez de Ana).
+  que deje estado a medias sobre ellos puede destapar esto de nuevo. Cómo evitarlo quedó como
+  convención en [`patterns/backend.md` § 7](../patterns/backend.md#e2e-de-api-el-estado-que-es-único-por-definición-el-spec-se-lo-crea-2026-09-18).
   **Qué lo reabre:** un rojo intermitente en una suite que el diff no toca. Antes de buscar en el
   módulo que falló, `./scripts/reset-db.sh --verificar` y el loop de arriba.
 
