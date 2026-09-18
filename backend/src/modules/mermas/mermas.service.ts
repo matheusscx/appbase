@@ -22,6 +22,7 @@ import { CatalogService } from '../catalog/catalog.service';
 import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import { MotivosBajaService } from '../motivos-baja/motivos-baja.service';
 import { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
+import type { CostoPorMoneda } from '../salones/anulaciones-reporte.service';
 import { CreateMermaDto } from './dto/create-merma.dto';
 import { FindMermasDto } from './dto/find-mermas.dto';
 
@@ -66,6 +67,34 @@ export interface MermaListItem {
    * reporte de Anulaciones (`docs/features/salones-mesas.md`).
    */
   deAnulacion: boolean;
+}
+
+export interface ResumenMermas {
+  /** Mermas del rango, valorizadas o no. */
+  cantidad: number;
+  /**
+   * Σ por moneda DEL ÍTEM (`items.moneda_id`, como agrupa el reporte de
+   * anulaciones), solo de las filas valorizadas. El número de cada fila es el
+   * mismo que `costoPerdido` (`ROUND(cantidad * costo_unitario, 4)`).
+   */
+  costo: CostoPorMoneda[];
+  /**
+   * Cuántas quedaron con `costo_unitario IS NULL`: regla 6 de la spec del
+   * costo sin tipear (`docs/agent/pendientes.md` § 3) — un `SUM` que ignora
+   * esas filas informaría menos pérdida que la real sin decirlo. Esta entrada
+   * NO se cierra con este método: sigue faltando un reporte de mermas
+   * completo (listado agregable, filtros propios); esto es solo el bloque
+   * que el dashboard de inicio necesita.
+   */
+  sinValorizar: number;
+}
+
+interface ResumenMermaRow {
+  moneda_id: string;
+  total_grupo: number;
+  sin_valorizar_grupo: number;
+  /** `null` cuando TODAS las filas del grupo (misma moneda) quedaron sin costo. */
+  monto: string | null;
 }
 
 interface MermaRow {
@@ -278,10 +307,7 @@ export class MermasService {
     // registrada es plata perdida que ya ocurrió, así que dar de baja el
     // producto después no puede borrarla del informe ni —peor— bajar el total
     // sin avisar. Mismo criterio que el kardex (`InventarioService`).
-    const filtroTipoMerma = `AND EXISTS (
-         SELECT 1 FROM motivo_baja mbf
-         WHERE mbf.motivo_baja_id = mv.motivo_baja_id AND mbf.tipo = 'merma'
-       )`;
+    const filtroTipoMerma = this.filtroTipoMerma();
 
     const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total
@@ -371,6 +397,101 @@ export class MermasService {
     }
 
     return { filters, params };
+  }
+
+  /**
+   * La condición que EXCLUYE la cortesía (desde `2e1fad74`), compartida por
+   * `findAll` (Task 4, spec § 5.2) y `resumen` (Task 2, spec
+   * 2026-09-18-dashboard-inicio § 4.4): un mismo motivo puede tener tipo
+   * `merma`, `cortesia` o `no_elaborado`, y solo el primero es plata perdida
+   * de bodega. No cuelga de un `LEFT JOIN … AND mb.tipo = 'merma'`: ese JOIN
+   * es LEFT a propósito para no perder la fila cuando el motivo se borró, y
+   * agregarle el tipo ahí dejaría pasar la cortesía con `motivo_baja_nombre:
+   * null` en vez de sacarla (ver el comentario grande de `findAll`).
+   */
+  private filtroTipoMerma(): string {
+    return `AND EXISTS (
+         SELECT 1 FROM motivo_baja mbf
+         WHERE mbf.motivo_baja_id = mv.motivo_baja_id AND mbf.tipo = 'merma'
+       )`;
+  }
+
+  /**
+   * `perdidas.mermas` del dashboard de inicio (Task 2, spec
+   * 2026-09-18-dashboard-inicio § 4.4/§ 5.1): cantidad de mermas del rango,
+   * costo por moneda (solo las valorizadas) y cuántas quedaron sin valorizar.
+   * UNA sola consulta agregada por `items.moneda_id` —igual que
+   * `AnulacionesReporteService.cargarCostosPorAnulacion`—, sin importar
+   * cuántas mermas haya en el rango: la fila sin costo aporta a
+   * `sinValorizar`, nunca a `costo` (regla 6 de la spec del costo sin tipear,
+   * `pendientes.md` § 3 — un `SUM` que la ignorara informaría menos pérdida
+   * que la real sin decirlo).
+   */
+  async resumen(
+    tenantId: string,
+    desde: string,
+    hasta: string,
+  ): Promise<ResumenMermas> {
+    // Mismo criterio que `buildFilters`: solo se resuelve la zona si hace
+    // falta expandir una fecha pura (`requiereZonaTenant`).
+    const zona = requiereZonaTenant(desde, hasta)
+      ? await zonaHorariaTenant(this.db, tenantId)
+      : null;
+
+    const params: unknown[] = [tenantId];
+    let idxZona = 0;
+    if (zona != null) {
+      params.push(zona);
+      idxZona = params.length;
+    }
+    params.push(desde);
+    const bordeDesde = bordeFechaSql(
+      'mv.creado_el',
+      '>=',
+      desde,
+      params.length,
+      idxZona,
+    );
+    params.push(hasta);
+    const bordeHasta = bordeHastaSql(
+      'mv.creado_el',
+      hasta,
+      params.length,
+      idxZona,
+    );
+
+    const rows: ResumenMermaRow[] = await this.db.query(
+      `SELECT i.moneda_id,
+              COUNT(*)::int AS total_grupo,
+              COUNT(*) FILTER (WHERE mv.costo_unitario IS NULL)::int
+                AS sin_valorizar_grupo,
+              SUM(ROUND(mv.cantidad * mv.costo_unitario, 4))
+                FILTER (WHERE mv.costo_unitario IS NOT NULL) AS monto
+         FROM movimientos_inventario mv
+         -- Sin filtro de borrado del ítem: una merma registrada es plata
+         -- perdida que ya ocurrió, así que dar de baja el producto después
+         -- no puede sacarla del bloque de pérdidas ni bajar el total sin
+         -- avisar (mismo criterio que findAll, arriba).
+         LEFT JOIN items i ON i.item_id = mv.item_id
+        WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
+          AND mv.motivo = 'merma'
+          ${this.filtroTipoMerma()}
+          ${bordeDesde}${bordeHasta}
+        GROUP BY i.moneda_id`,
+      params,
+    );
+
+    let cantidad = 0;
+    let sinValorizar = 0;
+    const costo: CostoPorMoneda[] = [];
+    for (const r of rows) {
+      cantidad += r.total_grupo;
+      sinValorizar += r.sin_valorizar_grupo;
+      if (r.monto != null) {
+        costo.push({ monedaId: r.moneda_id, monto: r.monto });
+      }
+    }
+    return { cantidad, costo, sinValorizar };
   }
 
   private mapRow(r: MermaRow): MermaListItem {

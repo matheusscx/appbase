@@ -56,6 +56,13 @@ import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
     CuentaAsignacionesService,
     AnulacionesReporteService,
   ],
-  exports: [SalonesService, CuentaAsignacionesService],
+  // `AnulacionesReporteService` exportado para `ResumenNegocioModule` (Task 2,
+  // spec 2026-09-18-dashboard-inicio § 4.4): `perdidas.anulaciones` reusa
+  // `resumen()` tal cual, sin reescribir su SQL.
+  exports: [
+    SalonesService,
+    CuentaAsignacionesService,
+    AnulacionesReporteService,
+  ],
 })
 export class SalonesModule {}

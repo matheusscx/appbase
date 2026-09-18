@@ -16,9 +16,33 @@ const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
+/** Turno de la mañana del seed — mismo que usa `salones-anular-linea.e2e-spec.ts`. */
+const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
 
 interface TokenResponse {
   access_token: string;
+}
+interface CostoPorMonedaResp {
+  monedaId: string;
+  monto: string;
+}
+interface GrupoAnulacionResp {
+  tipo: string;
+  platos: string;
+  precioCarta: string;
+  costo: CostoPorMonedaResp[];
+  sinValorizar: number;
+}
+interface ResumenMermasResp {
+  cantidad: number;
+  costo: CostoPorMonedaResp[];
+  sinValorizar: number;
+}
+interface MasVendidoResp {
+  itemId: string;
+  itemNombre: string;
+  cantidad: string;
+  monto: string;
 }
 interface ResumenHoyResponse {
   fecha: string;
@@ -34,9 +58,40 @@ interface ResumenHoyResponse {
     porCanal: { fisico: string; online: string };
   };
   porCobrar: { cantidad: number; saldo: string };
+  perdidas: {
+    anulaciones: GrupoAnulacionResp[];
+    mermas: ResumenMermasResp;
+  };
+  masVendidos: MasVendidoResp[];
 }
 interface ItemResponse {
   id: string;
+}
+interface IdResponse {
+  id: string;
+}
+interface GarzonCreado {
+  id: string;
+  pin: string;
+}
+interface MotivoBajaItem {
+  id: string;
+  nombre: string;
+  tipo: string;
+}
+interface UbicacionListada {
+  id: string;
+  nombre: string;
+  tipo: 'local' | 'bodega';
+}
+interface CuentaLineaDetalle {
+  id: string;
+  itemId: string;
+}
+interface CuentaDetalle {
+  id: string;
+  estado: string;
+  lineas: CuentaLineaDetalle[];
 }
 interface VentaCreadaResponse {
   id: string;
@@ -121,6 +176,21 @@ describe('Resumen del negocio (e2e)', () => {
     return request(app.getHttpServer())
       .get(`/api/resumen-negocio/hoy${query}`)
       .set('Authorization', `Bearer ${token}`);
+  }
+
+  /** `POST` genérico contra la API real, con el admin por defecto (mismo molde que `salones-anular-linea.e2e-spec.ts`). */
+  async function post<T>(
+    url: string,
+    body: Record<string, unknown>,
+    token = tokenAdmin,
+    esperado = 201,
+  ): Promise<T> {
+    const res = await request(app.getHttpServer())
+      .post(url)
+      .set('Authorization', `Bearer ${token}`)
+      .send(body);
+    expect(res.status).toBe(esperado);
+    return res.body as T;
   }
 
   /**
@@ -356,6 +426,231 @@ describe('Resumen del negocio (e2e)', () => {
 
       expect(despues.ventas.vendido.hoy).toBe(antes.ventas.vendido.hoy);
       expect(despues.ventas.cantidad.hoy).toBe(antes.ventas.cantidad.hoy);
+    });
+  });
+
+  /**
+   * Task 2 (spec 2026-09-18-dashboard-inicio § 4.4/§ 5.1): `perdidas` y
+   * `masVendidos`. Salón, mesa y garzón PROPIOS (molde:
+   * `salones-anular-linea.e2e-spec.ts`) — la sesión de garzón es única y
+   * varios specs la comparten (`docs/agent/pendientes.md`).
+   */
+  describe('pérdidas y lo más vendido (delta)', () => {
+    let motivoCortesiaId: string;
+    let motivoMermaId: string;
+    let localId: string;
+    let garzon: GarzonCreado;
+    let mesaId: string;
+    let platoId: string;
+
+    beforeAll(async () => {
+      const resMotivos = await request(app.getHttpServer())
+        .get('/api/motivos-baja')
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resMotivos.status).toBe(200);
+      const motivos = resMotivos.body as MotivoBajaItem[];
+      motivoCortesiaId = motivos.find((m) => m.tipo === 'cortesia')!.id;
+      motivoMermaId = motivos.find((m) => m.tipo === 'merma')!.id;
+      expect(motivoCortesiaId).toBeTruthy();
+      expect(motivoMermaId).toBeTruthy();
+
+      const resUbic = await request(app.getHttpServer())
+        .get('/api/ubicaciones')
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resUbic.status).toBe(200);
+      localId = (resUbic.body as UbicacionListada[]).find(
+        (u) => u.tipo === 'local',
+      )!.id;
+
+      const marca = Date.now();
+
+      // Ruteo a cocina: sin impresora, `reclamarComanda` nunca avanza
+      // `cantidadEnviada`, y sin despachar no hay nada que anular (mismo
+      // molde que `salones-anular-linea.e2e-spec.ts`).
+      const cocinaId = (
+        await post<IdResponse>('/api/impresoras', {
+          nombre: `Cocina resumen-negocio E2E ${marca}`,
+          rol: 'comanda',
+          tipoConexion: 'sistema',
+          nombreCola: `cola-resumen-negocio-e2e-${marca}`,
+        })
+      ).id;
+      const catCocinaId = (
+        await post<IdResponse>('/api/categorias', {
+          nombre: `Cocina resumen-negocio E2E ${marca}`,
+          impresoraId: cocinaId,
+        })
+      ).id;
+      platoId = (
+        await post<IdResponse>('/api/items', {
+          nombre: `Plato resumen-negocio E2E ${marca}`,
+          tipo: 'producto',
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          unidadMedida: 'unidad',
+          stock: '100',
+          costo: '100',
+          categoriaId: catCocinaId,
+        })
+      ).id;
+
+      garzon = await post<GarzonCreado>('/api/garzones', {
+        nombre: `Garzón resumen-negocio E2E ${marca}`,
+      });
+      await post('/api/sesiones-garzon/iniciar', {
+        garzonId: garzon.id,
+        pin: garzon.pin,
+        turnoId: TURNO_MANANA_ID,
+      });
+
+      const salonId = (
+        await post<IdResponse>('/api/salones', {
+          nombre: `Salón resumen-negocio E2E ${marca}`,
+        })
+      ).id;
+      mesaId = (
+        await post<IdResponse>(`/api/salones/${salonId}/mesas`, {
+          nombre: 'Mesa resumen-negocio',
+        })
+      ).id;
+    });
+
+    afterAll(async () => {
+      const cerrar = await request(app.getHttpServer())
+        .post('/api/sesiones-garzon/cerrar')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ garzonId: garzon.id, pin: garzon.pin });
+      expect(cerrar.status).toBe(201);
+    });
+
+    it('anular un plato despachado como cortesía mueve perdidas.anulaciones de tipo cortesia', async () => {
+      const antes = (await leerResumen(tokenAdmin)).body as ResumenHoyResponse;
+      const platosAntes = new Decimal(
+        antes.perdidas.anulaciones.find((a) => a.tipo === 'cortesia')?.platos ??
+          '0',
+      );
+
+      const cuenta = await post<{ id: string }>(
+        `/api/mesas/${mesaId}/cuentas`,
+        { garzonId: garzon.id, pin: garzon.pin },
+      );
+      await post(`/api/cuentas/${cuenta.id}/lineas`, {
+        itemId: platoId,
+        cantidad: '1',
+      });
+      await post(`/api/cuentas/${cuenta.id}/comanda/reclamar`, {});
+
+      const resDetalle = await request(app.getHttpServer())
+        .get(`/api/mesas/${mesaId}/cuentas`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resDetalle.status).toBe(200);
+      const cuentaAbierta = (resDetalle.body as CuentaDetalle[]).find(
+        (c) => c.id === cuenta.id,
+      )!;
+      const lineaId = cuentaAbierta.lineas.find(
+        (l) => l.itemId === platoId,
+      )!.id;
+
+      // Anula la línea ENTERA (única línea de la cuenta): la cuenta queda
+      // cancelada, sin dejar nada abierto para el resto de la suite.
+      const anular = await request(app.getHttpServer())
+        .post(`/api/cuentas/${cuenta.id}/lineas/${lineaId}/anular`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ cantidad: '1', motivoBajaId: motivoCortesiaId });
+      expect(anular.status).toBe(201);
+
+      const despues = (await leerResumen(tokenAdmin))
+        .body as ResumenHoyResponse;
+      const grupoCortesia = despues.perdidas.anulaciones.find(
+        (a) => a.tipo === 'cortesia',
+      );
+      expect(grupoCortesia).toBeDefined();
+      expect(
+        new Decimal(grupoCortesia!.platos).minus(platosAntes).toString(),
+      ).toBe('1');
+    });
+
+    it('registrar una merma sin costo cargado sube sinValorizar en 1 sin mover costo', async () => {
+      const antes = (await leerResumen(tokenAdmin)).body as ResumenHoyResponse;
+
+      const itemSinCosto = await post<ItemResponse>('/api/items', {
+        nombre: `Insumo resumen-negocio E2E ${Date.now()}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'kg',
+      });
+
+      // Entrada de stock SIN costoUnitario, para que costo_actual quede NULL
+      // (mismo molde que `test/mermas.e2e-spec.ts`).
+      const entrada = await request(app.getHttpServer())
+        .patch(`/api/items/${itemSinCosto.id}/stock`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          tipo: 'entrada',
+          motivo: 'inventario_inicial',
+          ubicacionId: localId,
+          cantidad: '5',
+        });
+      expect(entrada.status).toBe(200);
+
+      const merma = await request(app.getHttpServer())
+        .post('/api/mermas')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          itemId: itemSinCosto.id,
+          ubicacionId: localId,
+          cantidad: '1',
+          motivoBajaId: motivoMermaId,
+        });
+      expect(merma.status).toBe(201);
+      expect(
+        (merma.body as { costoPerdido: string | null }).costoPerdido,
+      ).toBeNull();
+
+      const despues = (await leerResumen(tokenAdmin))
+        .body as ResumenHoyResponse;
+
+      expect(
+        despues.perdidas.mermas.sinValorizar -
+          antes.perdidas.mermas.sinValorizar,
+      ).toBe(1);
+      // El costo por moneda no se mueve: la fila sin costo no suma (regla 6
+      // de la spec del costo sin tipear).
+      expect(despues.perdidas.mermas.costo).toEqual(
+        antes.perdidas.mermas.costo,
+      );
+    });
+
+    it('una venta de un ítem propio con precio muy alto sale primera en masVendidos, con su monto igual al totalFinal de la línea', async () => {
+      // El precio suma los ms de Date.now(), no un '9990000' fijo: un fijo le
+      // gana a cualquier venta del seed o de otros specs del día (spec del
+      // Step 5), pero EMPATA byte a byte si esta suite corre dos veces el
+      // mismo día sin `reset-db.sh` —medido: el segundo ítem "carísimo" quedó
+      // con el mismo `monto` que el primero, y el desempate de la consulta
+      // (`item_id`) no tenía por qué favorecer al de esta corrida—. Sumar
+      // `Date.now()` hace que cada corrida tenga un monto distinto, sin
+      // depender de qué corrida quedó primera por id.
+      const marca = Date.now();
+      const itemCaro = await post<ItemResponse>('/api/items', {
+        nombre: `Ítem carísimo resumen-negocio E2E ${marca}`,
+        precioBase: (9990000 + marca).toString(),
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'servicio',
+      });
+
+      const venta = await post<VentaCreadaResponse>('/api/ventas', {
+        lineas: [{ itemId: itemCaro.id, cantidad: '1' }],
+      });
+
+      const despues = (await leerResumen(tokenAdmin))
+        .body as ResumenHoyResponse;
+
+      expect(despues.masVendidos.length).toBeGreaterThan(0);
+      expect(despues.masVendidos[0]).toMatchObject({
+        itemId: itemCaro.id,
+        monto: venta.totalFinal,
+      });
     });
   });
 });

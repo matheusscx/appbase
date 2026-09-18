@@ -650,4 +650,90 @@ describe('MermasService', () => {
       });
     });
   });
+
+  // Task 2 (spec 2026-09-18-dashboard-inicio § 4.4/§ 5.1): `perdidas.mermas`
+  // del dashboard de inicio. `dataSourceQueryMock` encadena DOS respuestas —
+  // zona (porque `desde`/`hasta` acá son fecha pura) y la agregación por
+  // `items.moneda_id` — mismo orden en que `resumen()` las pide.
+  describe('resumen', () => {
+    const CLP = 'moneda-clp-uuid';
+    const USD = 'moneda-usd-uuid';
+
+    it('tres mermas (CLP 4300.0000 valorizada, otra CLP sin costo, USD 3.5000 valorizada) → cantidad 3, costo de dos entradas, sinValorizar 1', async () => {
+      dataSourceQueryMock
+        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([
+          // Grupo CLP: dos mermas —una valorizada, una sin costo— colapsadas
+          // por el `GROUP BY i.moneda_id` de la consulta real.
+          {
+            moneda_id: CLP,
+            total_grupo: 2,
+            sin_valorizar_grupo: 1,
+            monto: '4300.0000',
+          },
+          {
+            moneda_id: USD,
+            total_grupo: 1,
+            sin_valorizar_grupo: 0,
+            monto: '3.5000',
+          },
+        ]);
+
+      const res = await service.resumen(TENANT, '2026-09-18', '2026-09-18');
+
+      expect(res.cantidad).toBe(3);
+      expect(res.sinValorizar).toBe(1);
+      expect(res.costo).toEqual([
+        { monedaId: CLP, monto: '4300.0000' },
+        { monedaId: USD, monto: '3.5000' },
+      ]);
+    });
+
+    it('un grupo TODO sin valorizar (monto null) no aporta ninguna entrada a costo, pero sí suma a cantidad y sinValorizar', async () => {
+      dataSourceQueryMock
+        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([
+          {
+            moneda_id: CLP,
+            total_grupo: 2,
+            sin_valorizar_grupo: 2,
+            monto: null,
+          },
+        ]);
+
+      const res = await service.resumen(TENANT, '2026-09-18', '2026-09-18');
+
+      expect(res.cantidad).toBe(2);
+      expect(res.sinValorizar).toBe(2);
+      expect(res.costo).toEqual([]);
+    });
+
+    it('sin mermas en el rango: cantidad 0, costo vacío, sinValorizar 0', async () => {
+      dataSourceQueryMock
+        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([]);
+
+      const res = await service.resumen(TENANT, '2026-09-18', '2026-09-18');
+
+      expect(res).toEqual({ cantidad: 0, costo: [], sinValorizar: 0 });
+    });
+
+    it('el SQL filtra eliminado_el, motivo = merma y el mismo tipo (EXISTS mbf.tipo) que findAll', async () => {
+      dataSourceQueryMock
+        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([]);
+
+      await service.resumen(TENANT, '2026-09-18', '2026-09-18');
+
+      // Llamada #1 es la zona; la agregación es la #2.
+      const [sql] = dataSourceQueryMock.mock.calls[1] as [string];
+      expect(sql).toMatch(/mv\.tenant_id = \$1/);
+      expect(sql).toMatch(/mv\.eliminado_el IS NULL/);
+      expect(sql).toMatch(/mv\.motivo = 'merma'/);
+      expect(sql).toMatch(
+        /EXISTS[\s\S]*mbf\.motivo_baja_id = mv\.motivo_baja_id AND mbf\.tipo = 'merma'/,
+      );
+      expect(sql).toMatch(/GROUP BY i\.moneda_id/);
+    });
+  });
 });

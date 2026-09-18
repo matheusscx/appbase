@@ -1,8 +1,26 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { Db } from '../../common/db/db.service';
 import { ResumenNegocioService } from './resumen-negocio.service';
+import {
+  AnulacionesReporteService,
+  type ResumenAnulaciones,
+} from '../salones/anulaciones-reporte.service';
+import { MermasService, type ResumenMermas } from '../mermas/mermas.service';
+import { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
 
 const TENANT = 'tenant-uuid';
+
+const RESUMEN_ANULACIONES_VACIO: ResumenAnulaciones = {
+  porTipo: [],
+  porGarzon: [],
+  porAutorizo: [],
+};
+
+const RESUMEN_MERMAS_VACIO: ResumenMermas = {
+  cantidad: 0,
+  costo: [],
+  sinValorizar: 0,
+};
 
 interface VentasRowFixture {
   vendido_hoy: string;
@@ -23,9 +41,18 @@ interface PorCobrarRowFixture {
   saldo: string;
 }
 
+interface MasVendidoRowFixture {
+  item_id: string;
+  item_nombre: string;
+  cantidad: string;
+  monto: string;
+}
+
 describe('ResumenNegocioService', () => {
   let service: ResumenNegocioService;
   let queryMock: jest.Mock;
+  let anulacionesResumenMock: jest.Mock;
+  let mermasResumenMock: jest.Mock;
 
   beforeEach(async () => {
     queryMock = jest.fn();
@@ -34,9 +61,19 @@ describe('ResumenNegocioService', () => {
       transaccion: jest.fn((cb: (manager: unknown) => unknown) => cb({})),
       sinTransaccion: (fn: () => unknown) => fn(),
     };
+    anulacionesResumenMock = jest.fn();
+    mermasResumenMock = jest.fn();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ResumenNegocioService, { provide: Db, useValue: dbMock }],
+      providers: [
+        ResumenNegocioService,
+        { provide: Db, useValue: dbMock },
+        {
+          provide: AnulacionesReporteService,
+          useValue: { resumen: anulacionesResumenMock },
+        },
+        { provide: MermasService, useValue: { resumen: mermasResumenMock } },
+      ],
     }).compile();
 
     service = module.get(ResumenNegocioService);
@@ -47,16 +84,21 @@ describe('ResumenNegocioService', () => {
   });
 
   /**
-   * Encadena las 4 respuestas de `Db.query`, EN ORDEN: zona, ventas, cobrado,
-   * por cobrar — el mismo orden en que `ResumenNegocioService.hoy` las pide.
-   * Cada bloque parte de un fixture "todo cero" para que un test solo declare
-   * lo que le importa.
+   * Encadena las 5 respuestas de `Db.query`, EN ORDEN: zona, ventas, cobrado,
+   * por cobrar, más vendidos — el mismo orden en que `ResumenNegocioService.hoy`
+   * las pide. `AnulacionesReporteService.resumen` y `MermasService.resumen`
+   * NO son `Db.query`: son servicios inyectados aparte, mockeados con su
+   * propio default "todo cero" (Task 2, spec § 4.4). Cada bloque parte de un
+   * fixture "todo cero" para que un test solo declare lo que le importa.
    */
   function mockRespuestas(opts: {
     zona?: string;
     ventas?: Partial<VentasRowFixture>;
     cobrado?: Partial<CobradoRowFixture>;
     porCobrar?: Partial<PorCobrarRowFixture>;
+    masVendidos?: MasVendidoRowFixture[];
+    anulaciones?: ResumenAnulaciones;
+    mermas?: ResumenMermas;
   }): void {
     queryMock
       .mockResolvedValueOnce([
@@ -76,7 +118,14 @@ describe('ResumenNegocioService', () => {
       .mockResolvedValueOnce([
         { cobrado_hoy: '0', cobrado_semana_pasada: '0', ...opts.cobrado },
       ])
-      .mockResolvedValueOnce([{ cantidad: 0, saldo: '0', ...opts.porCobrar }]);
+      .mockResolvedValueOnce([{ cantidad: 0, saldo: '0', ...opts.porCobrar }])
+      .mockResolvedValueOnce(opts.masVendidos ?? []);
+    anulacionesResumenMock.mockResolvedValueOnce(
+      opts.anulaciones ?? RESUMEN_ANULACIONES_VACIO,
+    );
+    mermasResumenMock.mockResolvedValueOnce(
+      opts.mermas ?? RESUMEN_MERMAS_VACIO,
+    );
   }
 
   it('vendido hoy 184500.0000 y semana pasada 150000.0000 → variación 0.2300', async () => {
@@ -197,12 +246,13 @@ describe('ResumenNegocioService', () => {
     const res = await service.hoy(TENANT);
 
     expect(res.fecha).toBe('2026-09-18');
-    // Una sola consulta de zona: el mock encadenó 4 respuestas y las 4 se
+    // Una sola consulta de zona: el mock encadenó las 5 respuestas de
+    // `Db.query` (zona, ventas, cobrado, por cobrar, más vendidos) y las 5 se
     // consumieron — si el service volviera a pedirla (por ejemplo llamando a
     // `fechaLocalTenant` ADEMÁS de `zonaHorariaTenant`), sobrarían llamadas
     // sin respuesta mockeada y el service fallaría con datos `undefined`
     // antes de llegar acá.
-    expect(queryMock).toHaveBeenCalledTimes(4);
+    expect(queryMock).toHaveBeenCalledTimes(5);
     const [, ventasParams] = queryMock.mock.calls[1] as [string, unknown[]];
     expect(ventasParams).toEqual([
       TENANT,
@@ -210,5 +260,126 @@ describe('ResumenNegocioService', () => {
       'America/Santiago',
       '2026-09-11',
     ]);
+  });
+
+  // Task 2 (spec 2026-09-18-dashboard-inicio § 4.4/§ 5.1): perdidas + masVendidos.
+  describe('perdidas y masVendidos', () => {
+    it('pasa { desde: fecha, hasta: fecha } al resumen de anulaciones y devuelve su porTipo tal cual', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-18T15:00:00Z'));
+      const porTipoFixture: ResumenAnulaciones['porTipo'] = [
+        {
+          tipo: TipoMotivoBaja.CORTESIA,
+          platos: '2.0000',
+          precioCarta: '5000.0000',
+          costo: [{ monedaId: 'clp-uuid', monto: '1200.0000' }],
+          sinValorizar: 0,
+        },
+      ];
+      mockRespuestas({
+        zona: 'America/Santiago',
+        anulaciones: { ...RESUMEN_ANULACIONES_VACIO, porTipo: porTipoFixture },
+      });
+
+      const res = await service.hoy(TENANT);
+
+      expect(anulacionesResumenMock).toHaveBeenCalledWith(TENANT, {
+        desde: '2026-09-18',
+        hasta: '2026-09-18',
+      });
+      // Tal cual: ni se reordena ni se le agrega/quita nada.
+      expect(res.perdidas.anulaciones).toBe(porTipoFixture);
+    });
+
+    it('pasa (tenantId, fecha, fecha) a MermasService.resumen y devuelve su resultado tal cual en perdidas.mermas', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-18T15:00:00Z'));
+      const mermasFixture: ResumenMermas = {
+        cantidad: 4,
+        costo: [{ monedaId: 'clp-uuid', monto: '900.0000' }],
+        sinValorizar: 1,
+      };
+      mockRespuestas({ zona: 'America/Santiago', mermas: mermasFixture });
+
+      const res = await service.hoy(TENANT);
+
+      expect(mermasResumenMock).toHaveBeenCalledWith(
+        TENANT,
+        '2026-09-18',
+        '2026-09-18',
+      );
+      expect(res.perdidas.mermas).toBe(mermasFixture);
+    });
+
+    it('masVendidos mapea snake_case → camelCase, hasta las filas que la consulta devuelva (tope 5 lo pone el SQL)', async () => {
+      mockRespuestas({
+        masVendidos: [
+          {
+            item_id: 'item-1',
+            item_nombre: 'Lomo a lo pobre',
+            cantidad: '3.0000',
+            monto: '29997000.0000',
+          },
+          {
+            item_id: 'item-2',
+            item_nombre: 'Papas fritas',
+            cantidad: '10.0000',
+            monto: '35000.0000',
+          },
+        ],
+      });
+
+      const res = await service.hoy(TENANT);
+
+      expect(res.masVendidos).toEqual([
+        {
+          itemId: 'item-1',
+          itemNombre: 'Lomo a lo pobre',
+          cantidad: '3.0000',
+          monto: '29997000.0000',
+        },
+        {
+          itemId: 'item-2',
+          itemNombre: 'Papas fritas',
+          cantidad: '10.0000',
+          monto: '35000.0000',
+        },
+      ]);
+    });
+
+    it('sin ventas hoy, masVendidos es []', async () => {
+      mockRespuestas({});
+
+      const res = await service.hoy(TENANT);
+
+      expect(res.masVendidos).toEqual([]);
+    });
+
+    it('la consulta de más vendidos excluye canceladas y notas de crédito, y filtra venta_detalles.eliminado_el, afirmando sobre la cláusula', async () => {
+      mockRespuestas({});
+
+      await service.hoy(TENANT);
+
+      // Orden de `Db.query`: zona(0), ventas(1), cobrado(2), porCobrar(3),
+      // masVendidos(4).
+      const [masVendidosSql] = queryMock.mock.calls[4] as [string];
+      expect(masVendidosSql).toMatch(/FROM venta_detalles vd/);
+      expect(masVendidosSql).toMatch(/v\.estado\s*<>\s*'cancelada'/);
+      expect(masVendidosSql).toMatch(
+        /COALESCE\(td\.es_nota_credito,\s*false\)\s*=\s*false/,
+      );
+      expect(masVendidosSql).toMatch(/vd\.eliminado_el IS NULL/);
+      expect(masVendidosSql).toMatch(/GROUP BY vd\.item_id/);
+      expect(masVendidosSql).toMatch(/LIMIT 5/);
+    });
+
+    it('la consulta de más vendidos ordena por el SUM numérico, no por el alias de texto (evita el orden lexicográfico)', async () => {
+      mockRespuestas({});
+
+      await service.hoy(TENANT);
+
+      const [masVendidosSql] = queryMock.mock.calls[4] as [string];
+      expect(masVendidosSql).toMatch(
+        /ORDER BY SUM\(vd\.total_linea\) DESC, vd\.item_id/,
+      );
+    });
   });
 });

@@ -8,6 +8,11 @@ import {
   instanteLocalEnZona,
   zonaHorariaTenant,
 } from '../../common/utils/rango-fecha.util';
+import {
+  AnulacionesReporteService,
+  type ResumenAnulaciones,
+} from '../salones/anulaciones-reporte.service';
+import { MermasService, type ResumenMermas } from '../mermas/mermas.service';
 
 export interface Comparado<T = string> {
   hoy: T;
@@ -31,12 +36,32 @@ export interface PorCobrar {
   saldo: string;
 }
 
+export interface PerdidasHoy {
+  /** `porTipo` tal cual lo devuelve `AnulacionesReporteService.resumen`. */
+  anulaciones: ResumenAnulaciones['porTipo'];
+  mermas: ResumenMermas;
+  // No hay "total de pérdidas": sumar los dos bloques contaría dos veces un
+  // plato quemado en mesa (anulación tipo merma Y merma de cocina a la vez),
+  // y los costos vienen en más de una moneda (spec § 4.4).
+}
+
+export interface MasVendidoItem {
+  itemId: string;
+  itemNombre: string;
+  /** Σ en unidad base, `venta_detalles.cantidad`. */
+  cantidad: string;
+  /** Σ `venta_detalles.total_linea`. */
+  monto: string;
+}
+
 export interface ResumenNegocioHoy {
   /** `YYYY-MM-DD`, día local del tenant. */
   fecha: string;
   ventas: VentasHoy;
   porCobrar: PorCobrar;
-  // Task 2 (spec 2026-09-18-dashboard-inicio § 5.1) agrega acá: perdidas, masVendidos.
+  perdidas: PerdidasHoy;
+  /** Hasta 5, `ORDER BY monto DESC, itemId`. */
+  masVendidos: MasVendidoItem[];
 }
 
 interface VentasRow {
@@ -56,6 +81,13 @@ interface CobradoRow {
 interface PorCobrarRow {
   cantidad: number;
   saldo: string;
+}
+
+interface MasVendidoRow {
+  item_id: string;
+  item_nombre: string;
+  cantidad: string;
+  monto: string;
 }
 
 /**
@@ -83,7 +115,11 @@ function calcularVariacion(hoy: Decimal, semanaPasada: Decimal): string | null {
 
 @Injectable()
 export class ResumenNegocioService {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly anulacionesReporteService: AnulacionesReporteService,
+    private readonly mermasService: MermasService,
+  ) {}
 
   async hoy(tenantId: string): Promise<ResumenNegocioHoy> {
     // La zona se resuelve UNA sola vez —una consulta— y de ahí salen `fecha` y
@@ -234,6 +270,51 @@ export class ResumenNegocioService {
       [tenantId],
     );
 
+    // Pérdidas (Task 2, spec § 4.4): dos reportes ajenos, reusados tal cual
+    // con el rango de HOY, cada uno resolviendo su propia zona (mismo costo
+    // que paga `AnulacionesReporteService.resumen` cuando lo llama su propio
+    // controller). No se suman entre sí acá ni en ningún lado — ver el
+    // docblock de `PerdidasHoy`.
+    const anulacionesHoy = await this.anulacionesReporteService.resumen(
+      tenantId,
+      { desde: fecha, hasta: fecha },
+    );
+    const mermasHoy = await this.mermasService.resumen(tenantId, fecha, fecha);
+
+    // Lo más vendido: los mismos filtros de venta que "vendido" arriba (sin
+    // canceladas, sin nota de crédito, rango de HOY — reusa `condHoyVenta` y
+    // sus mismos binds $2/$3), agregado por ítem. `ORDER BY` sobre la
+    // expresión SUM y no sobre el alias `monto`: el alias sale con `::text`
+    // (para no perder precisión de Decimal en el mapeo), y ordenar por un
+    // texto compararía "9990000" antes que "500" lexicográficamente.
+    const masVendidosRows: MasVendidoRow[] = await this.db.query(
+      `SELECT vd.item_id, i.nombre AS item_nombre,
+              SUM(vd.total_linea)::text AS monto,
+              SUM(vd.cantidad)::text AS cantidad
+         FROM venta_detalles vd
+         JOIN ventas v ON v.venta_id = vd.venta_id
+         -- Mismo criterio que "vendido" (arriba): sin canceladas, sin nota de
+         -- crédito, JOIN a td SIN eliminado_el por el mismo porqué (un tipo
+         -- de documento dado de baja después no deja de marcar como NC a la
+         -- venta que ya lo usó).
+         LEFT JOIN tipos_documento_tributario td
+           ON td.tipo_documento_id = v.tipo_documento_id
+         -- Nombre del ítem SIN filtro de borrado, a propósito: se vendió
+         -- hoy, y darlo de baja después no lo saca de lo más vendido (spec
+         -- 2026-09-18-dashboard-inicio § 4.4/§ 5.1).
+         JOIN items i ON i.item_id = vd.item_id
+        WHERE v.tenant_id = $1
+          AND v.eliminado_el IS NULL
+          AND vd.eliminado_el IS NULL
+          AND v.estado <> 'cancelada'
+          AND COALESCE(td.es_nota_credito, false) = false
+          AND ${condHoyVenta}
+        GROUP BY vd.item_id, i.nombre
+        ORDER BY SUM(vd.total_linea) DESC, vd.item_id
+        LIMIT 5`,
+      [tenantId, fecha, zona],
+    );
+
     const vr = ventasRows[0];
     const cr = cobradoRows[0];
     const pc = porCobrarRows[0];
@@ -297,6 +378,16 @@ export class ResumenNegocioService {
         cantidad: pc?.cantidad ?? 0,
         saldo: pc?.saldo ?? '0',
       },
+      perdidas: {
+        anulaciones: anulacionesHoy.porTipo,
+        mermas: mermasHoy,
+      },
+      masVendidos: masVendidosRows.map((r) => ({
+        itemId: r.item_id,
+        itemNombre: r.item_nombre,
+        cantidad: r.cantidad,
+        monto: r.monto,
+      })),
     };
   }
 }
