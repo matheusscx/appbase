@@ -177,7 +177,36 @@ function buildManagerMock() {
           );
         },
       ),
-    query: jest.fn().mockResolvedValue([]),
+    // Tarea 4 (`docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`):
+    // `crear()` arma la boleta con ESTE mismo `manager` antes de retornar
+    // (`armarBoleta(manager, …)`), así que su consulta de CABECERA
+    // (`FROM ventas v`) necesita al menos una fila o tira 404 — y con eso
+    // reventarían los ~40 tests de este archivo que llaman `service.crear()`
+    // sin afirmar nada sobre `result.boleta`. El resto de las tablas de la
+    // boleta (detalles, impuestos, pagos…) se queda en `[]`: nadie en este
+    // describe mira `result.boleta.items`, eso lo cubre `armarBoleta()` en el
+    // suyo, más abajo, con su propio dispatcher completo.
+    query: jest.fn().mockImplementation((sql: string) => {
+      if (typeof sql === 'string' && sql.includes('FROM ventas v')) {
+        return Promise.resolve([
+          {
+            venta_id: venta.id,
+            fecha: new Date(),
+            canal: 'fisico',
+            total_bruto: '0.0000',
+            total_descuentos: '0.0000',
+            total_recargos: '0.0000',
+            total_impuestos: '0.0000',
+            total_final: '0.0000',
+            cuenta_numero: null,
+            mesa_nombre: null,
+            cajero_nombre: null,
+            cajero_apellido: null,
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    }),
     // Sin config de propinas -> ambos canales habilitados por default (?? true).
     findOne: jest.fn().mockResolvedValue(null),
   };

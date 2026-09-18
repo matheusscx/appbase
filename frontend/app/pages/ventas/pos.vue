@@ -4,8 +4,8 @@ import { useVenta, descontarStockCatalogo, tieneCustomerData, toVentaLineasBody,
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
-import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
-import { agregarImpuestosVenta, agregarPromocionesVenta, type PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
+import { formatCantidadLinea } from '~/utils/cantidad-presentacion'
+import type { PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { fetchPorcentajeSugeridoVenta, PROPINA_PORCENTAJE_DEFAULT } from '~/composables/usePropina'
 
@@ -18,12 +18,48 @@ interface MetodoPago {
   permiteVuelto: boolean
   habilitada: boolean
 }
+/**
+ * Espejo de `BoletaVenta` (`backend/src/modules/ventas/ventas.service.ts`):
+ * la venta YA PERSISTIDA que devuelve `POST /ventas` — no el carrito vivo ni
+ * el motor de cálculo. Copiado a mano, mismo criterio que el resto del
+ * frontend mientras backend y frontend no comparten workspace. **Subconjunto**
+ * de `BoletaVenta` de `~/composables/useSalones` —le faltan `fecha`, `canal`,
+ * `mesa` y `cuentaNumero`, que el mostrador no imprime—, declarado acá y no
+ * importado de allá porque esta pantalla no depende de Salones. Los campos
+ * sobrantes llegan igual en la respuesta; simplemente no se usan.
+ */
+interface BoletaVenta {
+  ventaId: string
+  cajero: string | null
+  items: {
+    descripcion: string
+    cantidad: string
+    cantidadPresentacion: string | null
+    unidadCodigoPresentacion: string | null
+    unidadCodigoBase: string
+    precioUnitario: string
+    totalLinea: string
+    personalizacionDetalle?: PersonalizacionDetalleLinea[]
+    comentario?: string
+  }[]
+  totales: {
+    subtotalNeto: string
+    totalDescuentos: string
+    totalRecargos: string
+    totalImpuestos: string
+    totalFinal: string
+  }
+  impuestos: { nombre: string, tasa: string, monto: string }[]
+  promociones: { id: string, nombre: string, monto: string }[]
+  propina: { monto: string } | null
+  pagos: { nombre: string, monto: string }[]
+  vuelto: string | null
+}
 
 const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
 const toast = useToast()
 const cajaStore = useCajaStore()
-const authStore = useAuthStore()
 const { emisor, cargar: cargarEmisor } = useRazonSocialEmisor()
 
 const { lineas, resultado, loadingCalculo, vigente, asegurarVigente, add, quitar, cambiarCantidadPresentacion, limpiar } = useVenta()
@@ -191,6 +227,38 @@ const estadoToastTitle: Record<string, string> = {
   pendiente: 'Venta registrada — pendiente de pago',
 }
 
+/**
+ * El mapeo mínimo de `BoletaVenta` —la venta YA PERSISTIDA que devuelve
+ * `POST /ventas`— al `BoletaItem` que consume `buildBoletaTicket`. Vive acá y
+ * no en `ticket-builder.ts` para no tocarle la firma, que comparte la
+ * precuenta. Gemelo de `itemsParaBoletaCierre` (`frontend/app/pages/salones/index.vue`).
+ *
+ * Sin cruce por índice contra `items.value` (el catálogo cargado): la unidad
+ * de cada línea ya viene resuelta en la propia `BoletaVenta.items[]`
+ * (`unidadCodigoBase` / `unidadCodigoPresentacion`), porque es la que el
+ * servidor cobró.
+ */
+function itemsParaBoletaVenta(boleta: BoletaVenta) {
+  return boleta.items.map((item) => {
+    const cantidadTicket = formatCantidadLinea(
+      item.cantidad,
+      item.cantidadPresentacion,
+      item.unidadCodigoPresentacion,
+      unidadesStore.esFraccionaria(item.unidadCodigoPresentacion ?? item.unidadCodigoBase),
+      item.unidadCodigoBase,
+    )
+    return {
+      nombre: item.descripcion,
+      cantidad: cantidadTicket,
+      precioUnitario: item.precioUnitario,
+      totalLinea: item.totalLinea,
+      ...(item.personalizacionDetalle?.length
+        ? { personalizacionDetalle: item.personalizacionDetalle, comentario: item.comentario }
+        : item.comentario ? { nota: item.comentario } : {}),
+    }
+  })
+}
+
 async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
   const docSel = tiposDocumento.value.find((t) => t.id === tipoDocumentoId.value)
   const incluirCustomer = docSel?.customerRequerido || customerExpandido.value
@@ -224,23 +292,14 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         terceroId: customer.value.terceroId || undefined,
       }
     }
-    // La boleta cruza `resultadoVenta.lineas[i]` con `lineasVenta[i]`: los dos
-    // se toman del mismo cálculo vigente, si no el ticket mezcla el nombre de
-    // una línea con el monto de otra.
-    const resultadoVenta = await asegurarVigente()
+    // Snapshot del carrito ANTES del `POST`: `limpiar()` lo vacía más abajo, y
+    // `descontarStockCatalogo` necesita las líneas que se vendieron.
     const lineasVenta = [...lineas.value]
 
-    // `detalles` viene en el mismo orden que `body.lineas` —y que `lineasVenta`—:
-    // el backend arma las filas desde `resultado.lineas`, que el motor devuelve
-    // 1:1 con `dto.lineas`. Es el mismo cruce por índice que `ventas.service.ts`
-    // ya usa para atar cada regla aplicada a su línea.
     const venta = await useApiFetch<{
       estado: string
       advertencias?: string[]
-      detalles: {
-        personalizacion?: { comentario?: string } | null
-        personalizacionDetalle?: PersonalizacionDetalleLinea[]
-      }[]
+      boleta: BoletaVenta
     }>(`${apiUrl}/ventas`, {
       method: 'POST',
       body,
@@ -252,61 +311,31 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     cobroOpen.value = false
     propinaMonto.value = '0'
 
-    if (resultadoVenta) {
-      try {
-        await impresorasApi.imprimirBoleta({
-          emisor: emisor.value,
-          facturacionElectronica: false,
-          meta: {
-            cajero: authStore.user?.nombre ?? undefined,
-          },
-          cliente: incluirCustomer
-            ? { nombre: customer.value.nombre || undefined, rut: customer.value.rut || undefined, direccion: customer.value.direccion || undefined }
-            : undefined,
-          items: resultadoVenta.lineas.map((l, i) => {
-            const ln = lineasVenta[i]
-            const vd = venta.detalles[i]
-            return {
-              nombre: ln?.item.nombre ?? '',
-              cantidad: formatCantidadLinea(
-                l.cantidad,
-                ln?.cantidadPresentacion,
-                ln?.unidadCodigoPresentacion,
-                unidadesStore.esFraccionaria(
-                  ln?.unidadCodigoPresentacion ?? (ln ? unidadBaseItem(ln.item) : null),
-                ),
-                ln ? unidadBaseItem(ln.item) : null,
-              ),
-              precioUnitario: l.precioUnitario,
-              totalLinea: l.totalLinea,
-              // El detalle sale de la VENTA, no del carrito: el backend es el
-              // único que lo produce y el único que lo convierte a moneda
-              // oficial. El carrito lo calculaba en la moneda del ítem y el
-              // ticket lo formateaba con la oficial, que era el bug.
-              ...(vd?.personalizacionDetalle
-                ? { personalizacionDetalle: vd.personalizacionDetalle, comentario: vd.personalizacion?.comentario }
-                : ln?.personalizacionResumen ? { nota: ln.personalizacionResumen } : {}),
-            }
-          }),
-          totales: resultadoVenta.totales,
-          impuestos: agregarImpuestosVenta(resultadoVenta.lineas),
-          promociones: agregarPromocionesVenta(resultadoVenta.lineas),
-          pagos: pagos.map((p) => ({
-            nombre: metodos.value.find((m) => m.metodoPagoId === p.metodoPagoId)?.nombre ?? '',
-            monto: p.monto,
-          })),
-          vuelto,
-          formatMonto: (v: string) => formatMonto(v),
-        })
-      } catch (e: unknown) {
-        toast.add({ title: apiErrorMsg(e, 'Venta registrada, pero falló la impresión de la boleta'), color: 'warning' })
-      }
-    }
-    else {
-      // Un fallo de impresora avisa; quedarse sin el cálculo del que sale el
-      // ticket también tiene que avisar, si no la venta queda sin comprobante
-      // y sin que nadie se entere.
-      toast.add({ title: 'Venta registrada, pero no se pudo generar la boleta', color: 'warning' })
+    // La boleta que se imprime es la que devuelve el propio `POST /ventas`
+    // (`armarBoleta` en el backend, sobre la venta ya persistida): no se
+    // recalcula acá. Ya no hay camino sin boleta, así que el único aviso que
+    // queda es el de la impresora que no responde.
+    try {
+      await impresorasApi.imprimirBoleta({
+        emisor: emisor.value,
+        facturacionElectronica: false,
+        meta: {
+          cajero: venta.boleta.cajero ?? undefined,
+        },
+        cliente: incluirCustomer
+          ? { nombre: customer.value.nombre || undefined, rut: customer.value.rut || undefined, direccion: customer.value.direccion || undefined }
+          : undefined,
+        items: itemsParaBoletaVenta(venta.boleta),
+        totales: venta.boleta.totales,
+        impuestos: venta.boleta.impuestos,
+        promociones: venta.boleta.promociones,
+        ...(venta.boleta.propina ? { propina: venta.boleta.propina } : {}),
+        pagos: venta.boleta.pagos,
+        vuelto: venta.boleta.vuelto ?? undefined,
+        formatMonto: (v: string) => formatMonto(v),
+      })
+    } catch (e: unknown) {
+      toast.add({ title: apiErrorMsg(e, 'Venta registrada, pero falló la impresión de la boleta'), color: 'warning' })
     }
 
     // Persiste la venta en el catálogo base; el carrito se limpia después.

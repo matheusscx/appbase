@@ -256,9 +256,28 @@ export class VentasService {
   async crear(tenantId: string, usuarioId: string, dto: CreateVentaDto) {
     for (let intento = 0; ; intento++) {
       try {
-        return await this.db.transaccion((manager) =>
-          this.crearEnTransaccion(manager, tenantId, usuarioId, dto),
-        );
+        return await this.db.transaccion(async (manager) => {
+          const venta = await this.crearEnTransaccion(
+            manager,
+            tenantId,
+            usuarioId,
+            dto,
+          );
+          // `verTodas: true`, mismo porqué que `SalonesService.cerrarCuenta`:
+          // el alcance por caja de `armarBoleta` (`filtroDeMisCajas`) existe
+          // para que nadie navegue ventas de una caja ajena, no para
+          // esconderle a quien la creó la venta que esta misma request acaba
+          // de cobrar. Se arma con el `manager` de la transacción para leer
+          // la venta recién insertada, todavía sin commitear.
+          const boleta = await this.armarBoleta(
+            manager,
+            tenantId,
+            venta.id,
+            usuarioId,
+            true,
+          );
+          return { ...venta, boleta };
+        });
       } catch (error) {
         if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
           throw error;

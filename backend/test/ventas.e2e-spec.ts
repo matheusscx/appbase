@@ -49,6 +49,29 @@ interface VentaDetalleResponse {
   tasaCambio: string;
   precioUnitario: string;
 }
+/**
+ * Espejo mínimo de `BoletaVenta` (`ventas.service.ts`) para el test de Tarea 4
+ * (`docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`): el
+ * POS también imprime lo que `POST /ventas` cobró, sin recalcular.
+ */
+interface BoletaVentaResponse {
+  ventaId: string;
+  items: {
+    descripcion: string;
+    cantidad: string;
+    cantidadPresentacion: string | null;
+    unidadCodigoPresentacion: string | null;
+    unidadCodigoBase: string;
+    totalLinea: string;
+  }[];
+  totales: {
+    subtotalNeto: string;
+    totalDescuentos: string;
+    totalRecargos: string;
+    totalImpuestos: string;
+    totalFinal: string;
+  };
+}
 
 async function login(app: INestApplication<App>): Promise<string> {
   const resLogin = await request(app.getHttpServer())
@@ -201,6 +224,64 @@ describe('Ventas (e2e)', () => {
       );
       expect(movCaja.length).toBeGreaterThan(0);
       expect(movCaja[0].tipo).toBe('entrada');
+    });
+
+    /**
+     * Tarea 4 (`docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`):
+     * el POS también imprime lo que el servidor cobró, en vez de recalcularlo.
+     * `POST /ventas` suma `boleta`, armada con el mismo `armarBoleta` que ya
+     * usa el cierre de cuenta de salón y la reimpresión.
+     *
+     * La línea pesable (kg pedido en g) es el molde exacto de
+     * `boleta-reimpresion.e2e-spec.ts`: los cuatro campos de cantidad son
+     * DELIBERADAMENTE distintos entre sí (0,7 / 700 / 'g' / 'kg') para que un
+     * cruce entre columnas no pase inadvertido.
+     */
+    it('la respuesta trae la boleta armada, con la línea de un pesable sin cruzar sus cuatro campos de cantidad', async () => {
+      const itemKg = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Item venta E2E pesable ${Date.now()}`,
+          tipo: 'producto',
+          precioBase: '10000',
+          monedaId: CLP_MONEDA_ID,
+          unidadMedida: 'kg',
+          stock: '50',
+          costo: '2000',
+        });
+      expect(itemKg.status).toBe(201);
+      const itemKgId = (itemKg.body as { id: string }).id;
+
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [
+            { itemId: ITEM_ID, cantidad: '1' },
+            {
+              itemId: itemKgId,
+              cantidad: '0.7',
+              cantidadPresentacion: '700',
+              unidadCodigoPresentacion: 'g',
+            },
+          ],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000000.0000' }],
+        });
+
+      expect(res.status).toBe(201);
+      const venta = res.body as VentaResponse & { boleta: BoletaVentaResponse };
+      expect(venta.boleta.ventaId).toBe(venta.id);
+      expect(venta.boleta.items).toHaveLength(2);
+      expect(Number(venta.boleta.totales.totalFinal)).toBeGreaterThan(0);
+
+      const linea = venta.boleta.items.find(
+        (i) => i.unidadCodigoBase === 'kg',
+      )!;
+      expect(linea.cantidad).toBe('0.7000');
+      expect(linea.cantidadPresentacion).toBe('700.0000');
+      expect(linea.unidadCodigoPresentacion).toBe('g');
+      expect(linea.unidadCodigoBase).toBe('kg');
     });
 
     it('crea venta con pago menor y queda en estado pagada_parcial', async () => {
