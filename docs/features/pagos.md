@@ -105,6 +105,10 @@ Response (200):
 }
 ```
 
+"Hoy" es el día **local del tenant** (zona de su provincia), de medianoche a medianoche —la
+misma ventana que el resumen de descuadres de caja—. Hasta el 2026-09-18 se resolvía en UTC y
+en Chile cortaba a las 21:00 (20:00 en invierno).
+
 ---
 
 ## Quién ve qué: el eje `Cajas:Leer`

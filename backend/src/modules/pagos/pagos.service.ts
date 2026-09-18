@@ -6,6 +6,7 @@ import {
 import { EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
+import { zonaHorariaTenant } from '../../common/utils/rango-fecha.util';
 import { CajaService } from '../caja/caja.service';
 import { EstadoVenta } from '../ventas/entities/venta.entity';
 import { Pago } from './entities/pago.entity';
@@ -471,13 +472,20 @@ export class PagosService {
    * el cajero ve el total de lo suyo, no el del local. Que ambos usen
    * `filtroDeMisCajas` no es prolijidad: si el resumen fuera global, la resta
    * contra lo listado devolvería justo lo que el eje esconde.
+   *
+   * "Hoy" es el día LOCAL del tenant, con la ventana de
+   * `resumenDescuadresDia` (caja): hasta el 2026-09-18 comparaba
+   * `p.fecha::date = CURRENT_DATE`, que resuelve el día en la zona de la
+   * sesión de Postgres —UTC, nadie la fija— y en Chile cortaba a las 21:00
+   * (20:00 en invierno).
    */
   async resumen(
     tenantId: string,
     usuarioId: string,
     verTodas: boolean,
   ): Promise<PagosResumen> {
-    const params: unknown[] = [tenantId];
+    const zona = await zonaHorariaTenant(this.db, tenantId);
+    const params: unknown[] = [tenantId, zona];
     let filtroPropio = '';
     if (!verTodas) {
       params.push(usuarioId);
@@ -490,14 +498,23 @@ export class PagosService {
       pagos_hoy: number;
       monto_hoy: string;
     }[] = await this.db.query(
-      `SELECT COUNT(*)::int AS total_pagos,
+      `WITH hoy AS (
+         SELECT ((NOW() AT TIME ZONE $2)::date::timestamp AT TIME ZONE $2) AS desde,
+                (((NOW() AT TIME ZONE $2)::date + 1)::timestamp AT TIME ZONE $2) AS hasta
+       )
+       SELECT COUNT(*)::int AS total_pagos,
               COALESCE(SUM(p.monto - p.vuelto), 0)::text AS monto_cobrado,
-              COUNT(*) FILTER (WHERE p.fecha::date = CURRENT_DATE)::int AS pagos_hoy,
+              COUNT(*) FILTER (
+                WHERE p.fecha >= hoy.desde AND p.fecha < hoy.hasta
+              )::int AS pagos_hoy,
               COALESCE(
-                SUM(p.monto - p.vuelto) FILTER (WHERE p.fecha::date = CURRENT_DATE),
+                SUM(p.monto - p.vuelto) FILTER (
+                  WHERE p.fecha >= hoy.desde AND p.fecha < hoy.hasta
+                ),
                 0
               )::text AS monto_hoy
        FROM pagos p
+       CROSS JOIN hoy
        WHERE p.tenant_id = $1
          AND p.eliminado_el IS NULL
          ${filtroPropio}`,

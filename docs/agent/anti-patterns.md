@@ -110,6 +110,14 @@ respuesta al TIPO de la columna, no una verdad permanente. `items.service.ts` te
 corrimiento con la sesión en `America/Santiago`). Si cambiás el tipo de una columna, releé
 los casts que la tocan en vez de conservarlos.
 
+**Otra cara que tampoco caza ningún test de esquema (2026-09-18):** `CURRENT_DATE` y
+`columna::date` resuelven el día en el `TimeZone` de la **sesión** —UTC, nadie lo fija—, no en
+el del tenant. `GET /pagos/resumen` contaba su "Hoy" con `p.fecha::date = CURRENT_DATE`, así
+que en Chile cortaba a las 21:00 (20:00 en invierno). "El día" sale de `zonaHorariaTenant`
+(`rango-fecha.util.ts`) y se compara como ventana `>= medianoche local AND < la siguiente`,
+con el molde de `caja.service.ts` → `resumenDescuadresDia`. Lo fija
+`test/pagos-resumen-hoy.e2e-spec.ts`.
+
 ### ❌ `tenant_id` tomado del request
 
 ```ts

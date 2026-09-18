@@ -655,6 +655,9 @@ describe('PagosService', () => {
   describe('resumen()', () => {
     it('retorna KPIs globales del tenant', async () => {
       dataSourceMock.query.mockResolvedValueOnce([
+        { zona_horaria: 'America/Santiago' },
+      ]);
+      dataSourceMock.query.mockResolvedValueOnce([
         {
           total_pagos: 10,
           monto_cobrado: '1500.0000',
@@ -752,21 +755,26 @@ describe('PagosService', () => {
       expect(sqlDe(0)).toContain("vo.canal = 'online'");
     });
 
+    // La llamada 0 del resumen resuelve la zona del tenant; los KPI son la 1.
     it('resumen acota igual que listar', async () => {
-      dataSourceMock.query.mockResolvedValueOnce([{}]);
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([{}]);
 
       await service.resumen(TENANT_ID, USUARIO_ID, false);
 
-      expect(sqlDe(0)).toContain('c.usuario_id =');
-      expect(dataSourceMock.query.mock.calls[0][1]).toContain(USUARIO_ID);
+      expect(sqlDe(1)).toContain('c.usuario_id =');
+      expect(dataSourceMock.query.mock.calls[1][1]).toContain(USUARIO_ID);
     });
 
     it('resumen con alcance completo sigue siendo del tenant', async () => {
-      dataSourceMock.query.mockResolvedValueOnce([{}]);
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([{}]);
 
       await service.resumen(TENANT_ID, USUARIO_ID, true);
 
-      expect(sqlDe(0)).not.toContain('c.usuario_id =');
+      expect(sqlDe(1)).not.toContain('c.usuario_id =');
     });
   });
 
