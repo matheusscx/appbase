@@ -55,63 +55,6 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
 
 ---
 
-### Las suites del e2e se pisan entre sí por el estado del seed (2026-08-22)
-
-⚠️ **Encuadre, porque la primera versión de esta entrada se llamaba "el `401` fantasma" y eso
-mandó a buscar en `auth` durante horas.** El `401` era **un síntoma, no el problema**. El
-problema es que las suites del e2e comparten usuarios, ítems y cajas del seed, y una que deja
-estado a medias rompe a otra **lejos de donde estaba la causa**.
-
-**Síntomas vistos, todos intermitentes y en suites distintas cada corrida:**
-
-| Suite | Síntoma |
-|---|---|
-| `costeo-cpp` | `401` en `POST /api/items` con token recién emitido; y `409` al abrir caja |
-| `alta-usuarios-tenant` | `401` en `POST /api/auth/register` — **endpoint público, sin ninguna rama que tire 401** |
-| `papelera` | `401` en `POST /api/auth/login` con credenciales del seed — 20 tests detrás |
-| `rbac-y-contrasena` | `401` al loguear un usuario **recién verificado** (el `verificar` dio 200 en la línea anterior) |
-| `reglas-valor` | `401` en un `PATCH` con un Bearer que la misma suite venía usando |
-| `inventario` | `costoActual` en `undefined` — **no es un 401**, y es lo que muestra que la familia es más ancha |
-
-**Efecto medido de los dos arreglos** —`app.close()` en un `finally` y no tratar como error el `400`
-de la fase 2 de cierre, los dos en [`resueltos.md`](resueltos.md)—: de **3 de 5** corridas completas en rojo a **1 de 10**, y
-**el `401` no volvió a aparecer**. ⚠️ **No está probado que la fuga de la app lo causara**: nunca
-se explicó el mecanismo —`JwtStrategy` es *stateless*, y con sondas puestas en `validateUser` y
-en el `JwtAuthGuard` no se logró atrapar ninguno— y el cron no toca nada de auth: lee
-`pasarela_ordenes` y `pasarela_transacciones`, y escribe una fila en `cron_ejecucion` en **cada**
-tick. Es más de lo que parece —el módulo desmontado seguía escribiendo—, pero ninguna de las
-tres tablas tiene camino a una falla de auth. **Dejó de reproducirse, que no es lo mismo que resuelto.**
-
-**Lo que queda abierto:** la falla de `inventario` (`costoActual: undefined`), que **pasa sola**
-y no la toca ningún diff reciente. Y la pregunta de fondo: hoy 42 archivos de test comparten
-`admin.paris@paris.cl` y 13 `vendedor@paris.cl` (12 de ellos ajenos a este frente), con `maxWorkers: 1` como única red. Mientras
-siga así, cualquier spec nuevo puede destapar esto de nuevo.
-
-**Descartado con evidencia, para no rehacerlo:** no es re-siembra (`reset-db.sh --verificar`
-justo después de una corrida roja: *"1 solo 'Seed complete'"*); no es estado corrupto (los dos
-usuarios del seed quedaron con `correo_verificado_el` puesto, `eliminado_el` nulo y el hash
-intacto); no es vencimiento ni firma (`JWT_EXPIRATION=15m` contra corridas de ~115s, y ningún
-spec toca `process.env`); no hay throttler; y el `DeprecationWarning` de `pg` que aparece ~45
-veces por corrida **no es evidencia de nada**: sale del `Promise.all` interno de TypeORM en
-`DataSource.synchronize`, una vez por app de test (ya medido el 2026-08-21), y su conteo es
-casi idéntico con y sin el spec nuevo (45 vs 44).
-
-### Un `400` latente en un campo precargado, si el tenant pudiera bajarle los decimales a su oficial (2026-09-08)
-
-- [ ] **Salió del cierre del ×10** ([`resueltos.md`](resueltos.md)) y es la que queda de la entrada
-  *"Tres formas en que la pantalla puede quedarse con plata que la moneda no expresa"* —las otras
-  dos se cerraron el 2026-09-11, también en [`resueltos.md`](resueltos.md)—. Vive acá porque es
-  riesgo de plata, no relato; comparte la causa de aquellas —el campo muestra lo que puede y el
-  modelo conserva lo que le llegó— y no es regresión de ese commit.
-  **Vía nueva de 400 en un campo precargado, hoy sin puerta de entrada.** No aplica a los
-  seis campos de `items.vue` (`@EsCosto()`, escala 4); aplicaría a la familia
-  `MoneyInput oficial` contra un `@EsMontoCobrado()` **si** el tenant pudiera cambiar su
-  oficial por una de menos decimales — y **no puede**: el único `PATCH` de moneda del tenant
-  acepta `habilitada` y `valorDelDia`, y el país no es editable. O sea que hoy es latente y
-  lo que lo reabre es que aparezca esa vía. 📌 Y no confundirlo con el round-trip del crudo
-  (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
-  Decimal, que normaliza los ceros a la derecha.
-
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
@@ -1537,6 +1480,56 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
 ---
 
 ## Vigilancia — evaluado y descartado, no es trabajo
+
+- [ ] **Las suites del e2e se pisaban entre sí por el estado del seed: no reprodujo en 150
+  corridas completas** (backend/tests; anotado 2026-08-22, **medido y pasado a vigilancia el
+  2026-09-18**) — ⚠️ la primera versión se llamaba *"el `401` fantasma"* y mandó a buscar en `auth`
+  durante horas: el `401` era un síntoma. El problema es que las suites comparten usuarios, ítems y
+  cajas del seed, y una que deja estado a medias rompe a otra lejos de la causa.
+  **Lo que se vio, intermitente y en suites distintas cada corrida:** `401` con token recién
+  emitido (`costeo-cpp`, `reglas-valor`), en `register` —público, sin rama que tire 401—
+  (`alta-usuarios-tenant`), en `login` con credenciales del seed (`papelera`) y tras un `verificar`
+  en 200 (`rbac-y-contrasena`); `409` al abrir caja (`costeo-cpp`); y `costoActual: undefined` en
+  `inventario`, que no es 401 y muestra que la familia es más ancha.
+  **Lo medido:** con `app.close()` en un `finally` y el `400` de la fase 2 de cierre ya no tratado
+  como error (los dos en [`resueltos.md`](resueltos.md)) pasó de 3 rojas en 5 a 1 en 10. Después,
+  **0 rojas en 150 corridas completas con `reset-db.sh` por vuelta**: 140 de la caza del timeout
+  del pool (2026-08-27 y 2026-09-13, todas `e2e=0`) y 10 sobre `main` `31697b0c` el 2026-09-18
+  (922 tests por vuelta). `docs/agent/caza-timeout-pool.sh` frena ante **cualquier** e2e rojo, no
+  solo el timeout, así que sirve para esto tal cual.
+  **No se explicó el mecanismo** —`JwtStrategy` es *stateless*, y con sondas en `validateUser` y en
+  el `JwtAuthGuard` no se atrapó ninguno—: dejó de reproducirse, que no es lo mismo que resuelto.
+  **Descartado con evidencia, para no rehacerlo:** re-siembra (`--verificar` tras una corrida roja:
+  un solo `Seed complete`); estado corrupto de los usuarios del seed; vencimiento o firma del JWT
+  (`JWT_EXPIRATION=15m`, ningún spec toca `process.env`); throttler (no hay); y el
+  `DeprecationWarning` de `pg` (~45 por corrida), que sale del `Promise.all` de TypeORM en
+  `DataSource.synchronize`, uno por app de test.
+  **Lo que sigue igual y es el riesgo de fondo:** las suites comparten los usuarios del seed con
+  `maxWorkers: 1` como única red —
+  `grep -rl 'admin.paris@paris.cl' backend/test --include='*.e2e-spec.ts' | wc -l`—. Un spec nuevo
+  que deje estado a medias sobre ellos puede destapar esto de nuevo; el precedente de cómo evitarlo
+  es crear sus propios usuarios (como el garzón propio en vez de Ana).
+  **Qué lo reabre:** un rojo intermitente en una suite que el diff no toca. Antes de buscar en el
+  módulo que falló, `./scripts/reset-db.sh --verificar` y el loop de arriba.
+
+- [ ] **Un `400` en un campo precargado si un tenant terminara con una oficial de menos
+  decimales: sin puerta de entrada** (frontend + backend; anotado 2026-09-08 al cerrar el ×10,
+  **medido y pasado a vigilancia el 2026-09-18**) — es la que quedaba de *"Tres formas en que la
+  pantalla puede quedarse con plata que la moneda no expresa"* (las otras dos, en
+  [`resueltos.md`](resueltos.md)). Misma causa que aquellas: el campo muestra lo que puede y el
+  modelo conserva lo que le llegó. Aplicaría a la familia `MoneyInput oficial` contra un
+  `@EsMontoCobrado()`, no a los seis campos de `items.vue` (`@EsCosto()`, escala 4).
+  **Por qué hoy no es alcanzable — las tres puertas, leídas en el service y no en el DTO:**
+  - `PATCH /monedas/:monedaId` (`UpdateTenantMonedaDto`) solo acepta `habilitada` y `valorDelDia`.
+  - El país sale de la provincia, y los dos caminos que la cambian —`PATCH /tenants/me`
+    (`updateMine`) y el `PATCH /tenants/:id` del superadmin— pasan por
+    `TenantsService.assertMismoPais`, que rechaza una provincia de otro país.
+  - `catalog` no tiene ninguna ruta de escritura: `moneda.decimales` y `pais.moneda_oficial_id`
+    solo los escribe el seeder.
+  **Qué lo reabre:** cualquier camino nuevo que cambie `moneda.decimales`, `pais.moneda_oficial_id`
+  o el país de un tenant (aflojar `assertMismoPais`, un ABM de monedas o países en `/admin`).
+  📌 No confundirlo con el round-trip del crudo (`'50000.0000'`): **no** da 400, porque el pipe
+  compara con `decimalPlaces()` de Decimal, que normaliza los ceros a la derecha.
 
 - [ ] **El `timeout exceeded when trying to connect` intermitente del e2e local: no reprodujo en
   140 corridas con la sonda puesta** (backend/tests; **pasado a vigilancia por el owner el
