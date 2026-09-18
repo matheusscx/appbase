@@ -1,6 +1,6 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext } from '@playwright/test'
 import { API, api, tokenDe, limpiarItems, TENANTS, CLP } from '../support/api'
-import { elegirEnSelector } from '../support/ui'
+import { elegirEnSelector, rondaDePin, valorDelTotal } from '../support/ui'
 
 /**
  * Anular un plato ya despachado a cocina, de punta a punta en un navegador real
@@ -171,31 +171,9 @@ test.afterAll(async ({ request }) => {
   }
 })
 
-/**
- * Una ronda completa de identificación: elegir quién sos y teclear los 6
- * dígitos. Mismo helper que `cuenta-hasta-cobro.spec.ts` (no exportado desde
- * ahí, así que se duplica acá — es la segunda vez, no la tercera).
- */
-async function rondaDePin(page: Page, garzon: { pin: string, nombre: string }) {
-  const modal = page.getByRole('dialog').last()
-  await modal.getByRole('button', { name: garzon.nombre, exact: true }).click()
-  for (const digito of garzon.pin) {
-    await modal.getByRole('button', { name: digito, exact: true }).click()
-  }
-}
-
-/**
- * El valor de la fila "Total", no cualquier `$1.190`/`$2.380` de la pantalla:
- * el catálogo comparte pantalla con el panel y basta un ítem del mismo precio
- * para que un `getByText` vacuo pase con la cuenta equivocada.
- */
-function valorDelTotal(page: Page) {
-  return page
-    .locator('span')
-    .filter({ hasText: /^Total$/ })
-    .first()
-    .locator('xpath=following-sibling::span[1]')
-}
+// `rondaDePin` y `valorDelTotal` viven en `../support/ui`: se extrajeron ahí al
+// tercer uso (este archivo era la segunda duplicación, junto con
+// `cuenta-hasta-cobro.spec.ts`; `boleta-al-cobrar.spec.ts` fue la tercera).
 
 test('pide, manda a cocina, anula como cortesía y el aviso aparece con el total ya abajo', async ({
   page,

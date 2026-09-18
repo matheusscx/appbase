@@ -248,8 +248,9 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
 
     // La boleta que se imprime es la que devuelve el propio `POST /ventas`
     // (`armarBoleta` en el backend, sobre la venta ya persistida): no se
-    // recalcula acá. Ya no hay camino sin boleta, así que el único aviso que
-    // queda es el de la impresora que no responde.
+    // recalcula acá. Ya no hay camino sin boleta; lo que puede seguir
+    // fallando es la impresión en sí (QZ Tray sin responder), un problema de
+    // hardware ajeno al armado de la boleta.
     try {
       await impresorasApi.imprimirBoleta({
         emisor: emisor.value,

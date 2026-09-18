@@ -775,6 +775,14 @@ Registra una venta completa en una sola transacción atómica:
 
 **Regla:** total por línea = valores unitarios × cantidad. Los descuentos/recargos/impuestos se calculan por unidad y se multiplican.
 
+**La boleta que se imprime al cobrar es la venta ya persistida, no un recálculo del
+carrito (2026-09-17).** Al cerrar una cuenta de salón o cobrar en el POS, el servidor arma
+el ticket completo dentro de la misma transacción que registra la venta y lo devuelve en
+la respuesta; la pantalla lo imprime tal cual, sin volver a pasar por el motor de precios.
+Antes, la pantalla recalculaba contra el carrito vivo para imprimir, y si el garzón cambiaba
+de cuenta mientras el cierre viajaba, la venta quedaba cobrada pero sin boleta y sin forma
+de reimprimirla.
+
 ---
 
 ### 10b. Suscripciones (cobro recurrente)
@@ -829,6 +837,15 @@ muestra un **modal informativo** con ambas fechas.
 - Lista las ventas de un tenant con todos sus detalles expandidos
 - Distingue reglas aplicadas por línea vs globales (`aplicado_en`)
 - CRUD básico por `venta_id + tenant_id`
+
+**Reimprimir la boleta de una venta ya cobrada (2026-09-17):** botón en el detalle de la
+venta, visible con el mismo permiso que anula una venta (`Ventas/Anular` — no se creó uno
+nuevo). Devuelve exactamente el mismo papel que se imprimió al cobrar, marcado `COPIA` con
+la fecha y hora de la reimpresión; el original no lleva esa marca. No reemplaza a la nota de
+crédito — es el mismo documento tal como se cobró, no un documento tributario nuevo. ⚠️ **No
+distingue el estado de la venta**: hoy reimprime igual una venta `pagada`, una `cancelada` o
+una `pendiente` (que sale con la sección de pagos vacía) — es un hueco anotado en
+`docs/agent/pendientes.md`, no una regla decidida.
 
 ---
 

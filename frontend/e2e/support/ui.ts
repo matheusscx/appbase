@@ -73,3 +73,45 @@ export async function elegirEnSelector(
   await expect(trigger).toContainText(nombre)
   await expect(page.getByRole('listbox')).toHaveCount(0)
 }
+
+/**
+ * Una ronda completa de identificación de garzón: elegir quién sos y teclear
+ * los 6 dígitos del PIN. El modal tiene DOS pasos y el segundo no existe hasta
+ * que el primero elige un garzón.
+ *
+ * Extraído acá al tercer uso (`cuenta-hasta-cobro.spec.ts` y
+ * `anular-plato.spec.ts` ya lo duplicaban) — regla del repo: duplicar dos veces
+ * es aceptable, se extrae a la tercera.
+ *
+ * El nombre va **exacto**: por prefijo, un garzón que quedó vivo de una corrida
+ * interrumpida hace que el locator matchee dos botones y la suite entera se
+ * vuelve inarrancable hasta limpiar la base a mano. Medido.
+ */
+export async function rondaDePin(
+  page: Page,
+  garzon: { pin: string, nombre: string },
+): Promise<void> {
+  const modal = page.getByRole('dialog').last()
+  await modal.getByRole('button', { name: garzon.nombre, exact: true }).click()
+  for (const digito of garzon.pin) {
+    await modal.getByRole('button', { name: digito, exact: true }).click()
+  }
+}
+
+/**
+ * El valor de la fila "Total" del panel de la cuenta/carrito, no cualquier
+ * monto suelto de la pantalla.
+ *
+ * ⚠️ Un `getByText('$1.190').first()` es **vacuo**: el catálogo comparte
+ * pantalla con el panel, y basta un ítem de ese precio en el catálogo del
+ * tenant para que la aserción pase con la cuenta equivocada. Medido.
+ *
+ * Extraído acá al tercer uso, misma regla que `rondaDePin`.
+ */
+export function valorDelTotal(page: Page): Locator {
+  return page
+    .locator('span')
+    .filter({ hasText: /^Total$/ })
+    .first()
+    .locator('xpath=following-sibling::span[1]')
+}

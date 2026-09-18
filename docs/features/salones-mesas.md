@@ -864,12 +864,19 @@ que un `PATCH` rebote por stock y haga rollback—. Por eso la cuenta del **tick
 junto al cálculo, aunque el id que se cierra siga saliendo de la foto: son dos cosas distintas
 que se llamaban igual. Lo levantó la revisión sobre el primer intento de este arreglo.
 
-⚠️ **Sin cálculo, esa venta se queda sin boleta y no hay dónde reimprimirla** (ningún camino
-reimprime una venta pasada: el ticket siempre se arma contra estado vivo). Se acepta porque el
-otro platillo es peor —hoy el mismo gesto deja la venta **sin generar**— y porque es el camino
-que el cálculo fallado ya tenía, con su aviso. La salida buena —recalcular la cuenta cobrada—
-pide llamar al motor por fuera de la maquinaria de vigencia de `useResultadoCalculado`: frente
-propio.
+✅ **Cerrado el 2026-09-17** (`docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`):
+los dos párrafos de arriba —"lo que la acción CALCULA" y su corolario— describen cómo armaba la
+**boleta del cierre** `cerrarCuentaConPin` hasta esa fecha. Ya no depende de `asegurarVigente()`
+ni de en qué cuenta esté parado el garzón cuando el cierre vuelve: el `POST /cuentas/:id/cerrar`
+devuelve la boleta ya armada por el backend (`armarBoleta`, sobre la venta persistida), y la
+pantalla la imprime tal cual. El aviso que puede seguir saliendo es el de `imprimirBoleta` sin
+respuesta de la impresora (QZ Tray) — un problema de hardware/conectividad, no del armado de la
+boleta, que ya no depende de nada de lo de arriba. Y
+la reimpresión que acá se daba por inexistente **ahora existe**: `GET /api/ventas/:id/boleta`
+(`Ventas:Anular`), botón en `VentaDetalleDrawer.vue`, marcada `COPIA`. La **precuenta** no
+cambió: sigue siendo del carrito vivo, y sus propios `asegurarVigente()`/`itemsParaTicket` no son
+los que este cierre tocó. Detalle: [`impresion-termica.md`](./impresion-termica.md),
+[`ventas.md`](./ventas.md).
 
 El otro residuo que ese camino arrastraba —la proyección local de caja inflada por el vuelto—
 **se cerró el 2026-09-16**: sin cálculo `targetCobro` cae en `bruto`, que es la suma de lo

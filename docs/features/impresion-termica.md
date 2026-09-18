@@ -64,9 +64,19 @@ La comanda usa **claim atómico** (permiso `Salones:Operar`, ver
 - `POST /cuentas/:id/comanda` (confirm legado) se mantiene por compatibilidad; el FE
   principal ya no lo usa tras el claim.
 
-Precuenta y boleta no tienen endpoint propio: el frontend arma el ticket con los
-datos que ya tiene (resultado del motor de precios + pagos) y lo imprime en la
+**Precuenta**: no tiene endpoint propio. Es del carrito vivo, todavía sin venta —el
+frontend arma el ticket con el resultado del motor de precios y lo imprime en la
 impresora `rol='boleta'` del tenant.
+
+**Boleta (2026-09-17)**: la arma el backend, no la pantalla. `armarBoleta` corre sobre
+la venta ya persistida y su payload (`BoletaVenta`) viaja en la respuesta de
+`POST /cuentas/:id/cerrar`, `POST /ventas` y `GET /ventas/:id/boleta` (reimpresión) —
+mismo dato en los tres, así que el papel no cambia según por dónde salió. El frontend
+solo lo mapea a `TicketItem[]` e imprime; no vuelve a llamar al motor de precios. Hasta
+esa fecha era al revés —el frontend recalculaba con el resultado vigente del carrito—, y
+eso podía dejar una venta ya cobrada sin boleta si el garzón cambiaba de cuenta mientras
+el cierre viajaba (`docs/agent/resueltos.md`, entrada *"La venta que se cierra sin
+cálculo queda sin boleta"*).
 
 ---
 

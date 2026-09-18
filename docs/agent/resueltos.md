@@ -133,8 +133,12 @@ prueba pedir → mandar a cocina → anular como cortesía → ver el aviso → 
 ## La proyección de la caja deja de sumar el vuelto cuando el cierre se queda sin cálculo (cerrada 2026-09-16)
 
 Sale de [`pendientes.md` § 2](pendientes.md), que la tenía como **el segundo** de los dos costos de
-*"la venta que se cierra sin cálculo"*. El primero —esa venta se queda sin boleta— **sigue
-abierto** y es materia del owner (ADR-010): no lo toca este cierre.
+*"la venta que se cierra sin cálculo"*. El primero —esa venta se queda sin boleta— no lo tocó
+**este** cierre. ✅ **Se cerró aparte, el 2026-09-17**
+(`docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`): la boleta dejó de salir
+de un recálculo condicionado a `activeCuenta` y pasó a salir de la respuesta del propio cierre
+(`armarBoleta`, sobre la venta persistida). Entrada que lo cierra, en este mismo archivo: *"La
+venta que se cierra sin cálculo queda sin boleta"*.
 
 **Qué pasaba.** Al cerrar una cuenta, `cerrarCuentaConPin` proyecta el cobro en la caja local con
 `cajaStore.aplicarCobroLocal(neto, …)`, donde `neto = min(bruto, targetCobro)`. Con cálculo,
@@ -5676,16 +5680,25 @@ sentencia, según el corolario de
   refresco de `selectedMesa` que hace `patchMesaOcupacion` adentro.
 
 ⚠️ **Lo que NO se hizo, y el porqué corregido.** La primera versión de esta sección justificaba
-resignar la boleta con *"papel se reimprime"*. **Es falso, y este mismo archivo lo tenía
-medido**: ningún camino reimprime una venta pasada, el ticket siempre se arma contra estado
-vivo. O sea que esa venta se queda sin documento para el cliente, definitivamente. Se acepta
-igual, por dos razones que sí se sostienen: el otro platillo es peor —hoy ese mismo gesto deja
-la venta **sin generar**— y es el camino que el cálculo fallado **ya tenía**, con su aviso. La
-salida buena —recalcular la cuenta cobrada, por fuera de la maquinaria de vigencia de
-`useResultadoCalculado`— quedó en [`pendientes.md` § 2](pendientes.md). El otro residuo que la
-revisión encontró en ese mismo camino —sin cálculo, `targetCobro` cae en `bruto` y la proyección
-local de caja se infla por el vuelto— **se cerró el 2026-09-16**, y su cierre está al principio de
-este archivo.
+resignar la boleta con *"papel se reimprime"*. **Era falso cuando se escribió, y este mismo
+archivo lo tenía medido**: en ese momento ningún camino reimprimía una venta pasada, el ticket
+siempre se armaba contra estado vivo. O sea que esa venta se quedaba sin documento para el
+cliente, definitivamente. Se aceptó igual, por dos razones que sí se sostenían: el otro
+platillo era peor —ese mismo gesto dejaba la venta **sin generar**— y era el camino que el
+cálculo fallado **ya tenía**, con su aviso. La salida buena —recalcular la cuenta cobrada, por
+fuera de la maquinaria de vigencia de `useResultadoCalculado`— quedó en `pendientes.md` § 2. El
+otro residuo que la revisión encontró en ese mismo camino —sin cálculo, `targetCobro` cae en
+`bruto` y la proyección local de caja se infla por el vuelto— **se cerró el 2026-09-16**, y su
+cierre está al principio de este archivo.
+
+✅ **Y la boleta dejó de depender de `asegurarVigente()`, cerrado el 2026-09-17**
+(`docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`): el cierre
+(`POST /cuentas/:id/cerrar`) devuelve la boleta ya armada por el backend (`armarBoleta`, sobre
+la venta persistida), así que ya no depende de en qué cuenta esté parado el garzón cuando el
+cierre vuelve. Y la frase de arriba —"ningún camino reimprime una venta pasada"— ya **no** es
+cierta: `GET /api/ventas/:id/boleta` (`Ventas:Anular`) la reimprime, marcada `COPIA`, desde el
+botón de `VentaDetalleDrawer.vue`. Entrada que cerró: *"La venta que se cierra sin cálculo queda
+sin boleta"* (`pendientes.md` § 2 → este archivo).
 
 ### Lo que el barrido encontró, y por eso esto NO dice "la última"
 
@@ -7890,9 +7903,13 @@ el código antes de escribir. El texto original, con las tres respuestas del own
   📌 **Por qué no hay campo nuevo:** `venta_detalles` ya persiste `precio_unitario_origen`,
   `tasa_cambio`, `moneda_id_origen` y el snapshot de personalización completo
   (`venta-detalle.entity.ts:26,41,152`), o sea todo lo necesario para reproducir el extra
-  convertido de una venta vieja **con la tasa de ese día**. Y todavía no hace falta: grepeados
-  los consumidores del builder (`useImpresoras.ts` es el único que lo importa), **ningún camino
-  reimprime una venta pasada** — el ticket se arma siempre contra estado vivo.
+  convertido de una venta vieja **con la tasa de ese día**. En ese momento todavía no hacía
+  falta: grepeados los consumidores del builder (`useImpresoras.ts` era el único que lo
+  importaba), **ningún camino reimprimía una venta pasada** — el ticket se armaba siempre contra
+  estado vivo. ✅ **Desde el 2026-09-17 sí lo hay** (`GET /api/ventas/:id/boleta`, botón en
+  `VentaDetalleDrawer.vue`, `armarBoleta` en el backend) y sigue sin haber hecho falta el campo
+  nuevo: lee `precio_unitario`/`total_linea` de `venta_detalles`, ya convertidos y persistidos —
+  la previsión de este párrafo se cumplió.
 
   **El plan, en cinco puntos:** (1) el `POST /ventas` devuelve el detalle convertido; (2) cada
   extra convertido por su cuenta; (3) `salones.service.ts:1540` igual al leer la cuenta; (4) el

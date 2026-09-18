@@ -730,7 +730,11 @@ function onAnularSuccess(payload: { estado: string }) {
  * pide acá, al apretar el botón — no al abrir el drawer: es la que arma el
  * servidor desde la venta persistida (`GET /ventas/:id/boleta`), no un
  * recálculo local. El permiso real lo enforcea la ruta (`Ventas:Anular`); el
- * `v-if` del botón solo evita ofrecer lo que el backend va a rechazar.
+ * `v-if` del botón replica ESE mismo permiso, para no ofrecer un botón que al
+ * clic rebotaría con 403 — no filtra por estado de la venta, porque ni la
+ * ruta ni `armarBoleta` lo hacen: hoy se puede reimprimir una venta
+ * `cancelada` o `pendiente` igual que una `pagada` (`docs/agent/pendientes.md`,
+ * *"Reimprimir no distingue el estado de la venta"*).
  */
 async function reimprimirBoleta() {
   if (!venta.value) return

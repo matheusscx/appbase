@@ -2,9 +2,8 @@ import {
   test,
   expect,
   type APIRequestContext,
-  type Page,
 } from '@playwright/test'
-import { elegirEnSelector } from '../support/ui'
+import { elegirEnSelector, rondaDePin, valorDelTotal } from '../support/ui'
 
 /**
  * Salones de punta a punta, en un navegador de verdad:
@@ -235,41 +234,13 @@ test.afterAll(async ({ request }) => {
 })
 
 /**
- * Una ronda completa de identificación: elegir quién sos y teclear los 6
- * dígitos. El modal tiene DOS pasos y el segundo no existe hasta el primero.
- *
- * Se usa dos veces —al abrir la cuenta y al cobrarla— porque el dispositivo es
- * compartido: `resolverGarzonActuante` pide credencial en cada operación que
- * necesita saber quién la hace. En una tablet personal no se pediría ninguna.
- *
- * El nombre va **exacto**: por prefijo, un garzón que quedó vivo de una corrida
- * interrumpida hace que el locator matchee dos botones y la suite entera se
- * vuelve inarrancable hasta limpiar la base a mano. Medido.
+ * `rondaDePin` se usa dos veces acá —al abrir la cuenta y al cobrarla— porque
+ * el dispositivo es compartido: `resolverGarzonActuante` pide credencial en
+ * cada operación que necesita saber quién la hace. En una tablet personal no
+ * se pediría ninguna. Ambos helpers (`rondaDePin`, `valorDelTotal`) viven en
+ * `../support/ui`, compartidos con `anular-plato.spec.ts` y
+ * `boleta-al-cobrar.spec.ts`.
  */
-async function rondaDePin(page: Page, garzon: { pin: string; nombre: string }) {
-  const modal = page.getByRole('dialog').last()
-  await modal.getByRole('button', { name: garzon.nombre, exact: true }).click()
-  for (const digito of garzon.pin) {
-    await modal.getByRole('button', { name: digito, exact: true }).click()
-  }
-}
-
-/**
- * El valor de la fila "Total" del panel de la cuenta, no cualquier `$1.190` de
- * la pantalla.
- *
- * ⚠️ Un `getByText('$1.190').first()` es **vacuo**: el catálogo comparte
- * pantalla con el panel, y basta un ítem de $1.190 en el catálogo del tenant
- * para que la aserción pase con la cuenta equivocada. Medido — y este mismo test
- * le agrega un ítem al catálogo por corrida, así que la ambigüedad crece sola.
- */
-function valorDelTotal(page: Page) {
-  return page
-    .locator('span')
-    .filter({ hasText: /^Total$/ })
-    .first()
-    .locator('xpath=following-sibling::span[1]')
-}
 
 test('abre una cuenta en una mesa, le carga un producto y la cobra', async ({
   page,
