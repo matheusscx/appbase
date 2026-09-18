@@ -29,7 +29,7 @@ motivo sin mirar el tipo. Hoy, en el local:
 | **El precio se congela en la anulación** al anular | Hoy solo vive en la línea, que se borra cuando el plato se anula entero: leerlo de ahí obliga a saltarse el filtro de borrado |
 | **La anulación guarda el garzón de la mesa en ese momento**, y el reporte agrupa por garzón y por quién autorizó | Si siempre autoriza el encargado, agrupar solo por quien autorizó esconde de qué garzón son las cortesías. Leer el responsable vigente de la cuenta se la atribuye al que recibió la mesa después de una transferencia |
 | **Sin % sobre ventas en esta versión** | La app no calcula en ningún lado cuánto vendió cada garzón, y "de quién es la venta de una mesa transferida" es una regla nueva que merece pensarse aparte (§ 7) |
-| **Lo ve quien tenga `Salones:Leer`** | Es la lectura de auditoría del salón (ya protege `GET /cuentas/:id/asignaciones`) y el dueño decide a qué rol dársela. No se crea permiso nuevo. `Salones:Anular` dejaría a quien autoriza revisándose a sí mismo |
+| **Lo ve quien tenga `Salones:Ver todas`** | Es la acción que ya existe para "ver lo de los demás" (`Ventas:Ver todas`); acá se empareja con Salones, sin acción nueva. El dueño decide a qué rol dársela; el seed se la da al encargado del salón. `Salones:Leer` **no sirve**: el garzón lo necesita para trabajar —el historial de la cuenta en la mesa (`GET /cuentas/:id/asignaciones`) y *Sesiones* lo piden—, así que cualquier garzón vería las cortesías de todos. `Salones:Anular` dejaría a quien autoriza revisándose a sí mismo. *(Se eligió primero `Salones:Leer` y se reabrió el mismo día, al medir quién lo tiene.)* |
 
 ## 3. Modelo de datos
 
@@ -96,23 +96,24 @@ Queda anotado en § 7; no se arregla acá.
 
 ## 5. API
 
-### 5.1 `GET /api/salones/anulaciones` (nuevo)
+### 5.1 `GET /api/salones/anulaciones` y `GET /api/salones/anulaciones/resumen` (nuevos)
 
-`@RequiresPermiso('Salones', 'Leer')`, en `SalonesController`. `tenant_id` del token.
+Dos rutas, como `GET /pagos` y `GET /pagos/resumen`: el listado paginado es lo que consume
+`usePaginatedList` en el frontend, y el resumen va aparte. Las dos con
+`@RequiresPermiso('Salones', 'Ver todas')`, en `SalonesController`. `tenant_id` del token.
 
-**Filtros:** `desde` / `hasta` (criterio compartido de rangos por fecha: la fecha pura se expande a la
-medianoche de la zona del tenant; `rango-fecha.util.ts`), `garzonId`, `tipo`
-(`merma` | `cortesia` | `no_elaborado`), `motivoBajaId`, `page` / `pageSize`.
+El par `Salones × Ver todas` **no existe hoy** en `modulo_app_permiso`: se siembra (el siguiente id libre
+del seeder) y se suma al rol del encargado del salón (`seedRolEncargadoSalon`). La acción `Ver todas` ya
+existe; no se crea ninguna. El admin del tenant la tiene sin sembrar nada, por `es_fijo`.
 
-**Respuesta:**
+**Filtros (los mismos en las dos):** `desde` / `hasta` (criterio compartido de rangos por fecha: la fecha
+pura se expande a la medianoche de la zona del tenant; `rango-fecha.util.ts`), `garzonId`, `tipo`
+(`merma` | `cortesia` | `no_elaborado`), `motivoBajaId`. El listado suma `page` / `pageSize`.
+
+**Listado:**
 
 ```
 {
-  resumen: {
-    porTipo:      [{ tipo, platos, precioCarta, costo: [{ monedaId, monto }], sinValorizar }],
-    porGarzon:    [{ garzonId | null, garzonNombre | null, platos, precioCarta, costo, sinValorizar }],
-    porAutorizo:  [{ usuarioId, usuarioNombre, platos, precioCarta, costo, sinValorizar }],
-  },
   data: [{
     id, creadoEl, cuentaId, cuentaNumero, mesaNombre, salonNombre,
     itemNombre, cantidad, motivoBajaNombre, tipo,
@@ -124,11 +125,22 @@ medianoche de la zona del tenant; `rango-fecha.util.ts`), `garzonId`, `tipo`
 }
 ```
 
-`platos` es la suma de `cantidad`. El resumen cubre **todo el rango filtrado**, no la página.
+**Resumen:**
 
-**Consultas:** un número fijo —el `COUNT`, la página y el resumen—, sin importar cuántas filas haya. El
-costo de cada anulación sale de un `GROUP BY` sobre sus movimientos (por anulación y moneda) unido a la
-consulta, **nunca** una consulta por fila.
+```
+{
+  porTipo:     [{ tipo, platos, precioCarta, costo: [{ monedaId, monto }], sinValorizar }],
+  porGarzon:   [{ garzonId | null, garzonNombre | null, platos, precioCarta, costo, sinValorizar }],
+  porAutorizo: [{ usuarioId, usuarioNombre, platos, precioCarta, costo, sinValorizar }]
+}
+```
+
+`platos` es la suma de `cantidad`; `sinValorizar`, cuántas anulaciones de ese grupo quedaron sin
+valorizar. El resumen cubre **todo el rango filtrado**, no una página.
+
+**Consultas:** un número fijo por ruta —`COUNT` y página en el listado; las agregaciones en el resumen—,
+sin importar cuántas filas haya. El costo de cada anulación sale de un `GROUP BY` sobre sus movimientos
+(por anulación y moneda) unido a la consulta, **nunca** una consulta por fila.
 
 **Filtro de borrado:** todo filtra `eliminado_el IS NULL` (anulaciones, movimientos, motivos), con dos
 **excepciones deliberadas**, cada una con su porqué escrito en la consulta:
@@ -156,7 +168,7 @@ controller. Si el plan encuentra una colisión, la ruta estática va declarada a
 ## 6. Pantalla
 
 **`/salones/anulaciones`**, con entrada *"Anulaciones"* en el menú (`layouts/dashboard.vue`) visible con
-`can('Salones', 'Leer')`.
+`can('Salones', 'Ver todas')`.
 
 - **Filtros:** rango de fechas (por defecto **hoy**: el hábito del mercado es la revisión diaria),
   garzón, tipo y motivo.
@@ -207,7 +219,7 @@ decide** (`docs/agent/investigacion-mercado.md`): lo que sigue es lo que sobrevi
   convertir; precio de carta = cantidad × precio congelado; una fila sin valorizar no suma al costo y sí
   cuenta en `sinValorizar`; filtros; `escribirAnulacionEnLinea` escribe precio y garzón.
 - **E2E de backend:**
-  - el permiso rige: `403` sin `Salones:Leer` (molde: `permiso-operar-salon.e2e-spec.ts`);
+  - el permiso rige en las dos rutas: `403` con `Salones:Leer` + `Operar` y sin `Ver todas` (`ana.torres`, la garzona del seed: es justo el caso que motivó el cambio), `200` con el encargado del salón (molde: `permiso-operar-salon.e2e-spec.ts`);
   - anular una cortesía, una merma y un *no se hizo* y ver cada una con su precio de carta y su costo;
   - **transferir la mesa después de anular y que el garzón siga siendo el original**;
   - `cancelar-con-motivo` también deja precio y garzón;
@@ -225,7 +237,7 @@ decide** (`docs/agent/investigacion-mercado.md`): lo que sigue es lo que sobrevi
 - `docs/features/mermas-valorizadas.md`: sale el ⚠️ que anunciaba la parte 3; entra el filtro por tipo y
   `deAnulacion`.
 - `docs/features/salones-mesas.md`: el reporte, su permiso y sus dos columnas nuevas.
-- `docs/features/roles-permisos.md`: qué gobierna ahora `Salones:Leer`.
+- `docs/features/roles-permisos.md`: el par nuevo `Salones:Ver todas`, qué gobierna y que el seed se lo da al encargado del salón.
 - `docs/ESTADO.md`: fila del reporte.
 - `docs/agent/pendientes.md`: la parte 3 sale (a `resueltos.md`) y entran las de § 7. La entrada de la
   **regla 6** se reescribe, no se cierra: dice que no existe ningún reporte agregado, y desde acá existe
