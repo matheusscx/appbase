@@ -270,24 +270,28 @@ revisión independiente no lo pudo reproducir, con razón.
   nadie construyó. Hoy no molesta a nadie porque Google no está habilitado; el día que se
   habilite, sin esto la gente con cuenta local queda sin poder usar el botón nunca.
 
-- [ ] **Regla 6 de la spec del costo sin tipear: cuando exista un reporte de mermas, tiene
-  que decir cuántas quedaron sin valorizar** (backend + producto, decisión del owner
-  2026-08-28, [`2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md)
-  §2 regla 6 y §4) — **hoy no existe ningún reporte de mermas.**
-  `mermas.controller.ts` tiene solo el `GET` de listado (paginado, sin agregación) y el
-  `POST`; no hay nada que arreglar todavía.
+- [ ] **Regla 6 de la spec del costo sin tipear: un reporte agregado tiene que decir cuántas
+  filas quedaron sin valorizar** (backend + producto, decisión del owner 2026-08-28,
+  [`2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md)
+  §2 regla 6 y §4). **Ya existe un reporte agregado que la cumple**: `GET
+  /salones/anulaciones/resumen` (2026-09-18,
+  [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md))
+  agrupa por tipo, por garzón y por quién autorizó, y cada grupo trae `sinValorizar` — cuántas
+  anulaciones del grupo no tienen costo, sin que su cifra parcial se sume al costo del grupo.
+  Cubre merma, cortesía y "no se hizo" que salen de **anular un plato en la mesa**.
+  **Lo que sigue abierto:** un reporte agregado de **Mermas** (`GET /api/mermas`, las
+  registradas desde bodega/local sin pasar por una mesa). `mermas.controller.ts` sigue
+  teniendo solo el `GET` de listado paginado (sin agregación) y el `POST`; nadie agregó
+  `costoPerdido` todavía, así que no hay ningún `SUM` roto hoy. Es una cuenta futura que va a
+  nacer mal si nadie la avisa: el día que se construya ese agregado, cualquier `SUM`/promedio
+  que ignore las filas con `costoUnitario: null` va a informar **menos pérdida que la real,
+  sin decirlo** — exactamente lo que hace posible el congelado de la regla 2 de la misma spec.
   ⚠️ **Ojo con cómo se lee el hueco: `costoPerdido` no es una columna.** Se deriva en la
   lectura (`mermas.service.ts` → `mapRow`, `cantidad × costo_unitario` a la escala de
   costo cuando `costo_unitario` no es `null`; `null` si no hay costo) — verificado
-  2026-08-28. El camino de lectura de hoy funciona sin cambios: esto no es "falta un
-  `SUM`", porque no hay ningún `SUM` roto. Es una cuenta futura que va a nacer mal si nadie
-  la avisa: el día que se construya un reporte que agregue `costoPerdido`, cualquier
-  `SUM`/promedio que simplemente ignore las filas con `costoUnitario: null` va a informar
-  **menos pérdida que la real, sin decirlo** — exactamente lo que hace posible el congelado de
-  la regla 2 de
-  [`2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md).
-  **Al construir el reporte:** contar esas filas aparte (cuántas mermas
-  quedaron sin valorizar, no solo omitirlas del total).
+  2026-08-28. **Al construir el reporte de Mermas:** contar esas filas aparte (cuántas
+  quedaron sin valorizar, no solo omitirlas del total) — mismo criterio que ya usa el resumen
+  de anulaciones.
 
 - [ ] **Re-tasar una línea ya pedida tiene que re-preciar, no re-validar** (backend, motor
   de cálculo — **frente propio, decidido por el owner el 2026-08-30**; los caminos
@@ -734,6 +738,33 @@ prohíbe.
   pasada de investigación de mercado antes de diseñar. Cuando exista el frente de **compras**
   (§ 3), el aviso es el insumo natural de un "sugerir pedido" — no construirlo antes.
 
+- [ ] **% de anulaciones y cortesías sobre lo vendido por garzón** (backend + frontend,
+  fuera de alcance de
+  [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md)
+  § 7) — el resumen del reporte de anulaciones (`GET /salones/anulaciones/resumen`) ya trae
+  `platos`/`precioCarta`/`costo` por garzón; falta la venta con la que compararlos para armar
+  el porcentaje. **La pregunta que frena:** una mesa que se **transfiere** a mitad de servicio
+  (`POST /cuentas/:id/transferir`, `docs/features/salones-mesas.md`) — ¿la venta es del
+  garzón que la abrió, del que la cerró/cobró, o se reparte entre los dos? Hoy
+  `cuentas.garzon_responsable_id` solo guarda el **vigente** (el reporte de anulaciones
+  resolvió lo mismo para sí mismo congelando el garzón al anular —
+  `cuenta_linea_anulaciones.garzon_id`—, pero eso fija quién anuló, no quién vendió). Sin esa
+  regla, el % queda indefinido para cualquier mesa transferida, que no es un caso raro.
+- [ ] **Ingredientes, componentes u opciones borrados del catálogo se saltean sin
+  movimiento al anular una receta o combo** (backend, heredado de la parte 2 del frente
+  *"Anular un plato ya enviado a cocina"*, documentado como hueco conocido en
+  [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md)
+  § 4 y § 7) — `ItemsService.consumirLineaAnulada` (`backend/src/modules/items/items.service.ts:4590`)
+  delega en `venderIngredientesReceta`/`venderComponentesCombo` para descontar stock; un
+  ingrediente que ya no está en el catálogo al momento de anular no genera ningún
+  `movimiento_inventario`, igual que al **vender** (mismo camino, mismo hueco). El costo de
+  ese plato en el reporte de anulaciones y en Mermas sale más bajo y **nada lo marca**: desde
+  el kardex no se distingue "la receta no tenía ese ingrediente" de "se lo saltearon". **La
+  pregunta antes de diseñar:** ¿se bloquea la anulación si algún ingrediente del snapshot ya
+  no existe (fuerza a `sin_valorizar` explícito), o se acepta el hueco y se documenta que el
+  costo mostrado es un piso, no una cifra exacta? La primera es más segura y más trabajo; la
+  segunda es lo que hay hoy, sin decirlo en ningún lado que el usuario vea.
+
 ## 5. Carreras de concurrencia
 
 Van juntas porque el arreglo pide **un solo análisis de orden de locks** —qué fila se
@@ -756,15 +787,28 @@ transaccional nativo, con ALS — [ADR-020](../adr/020-contexto-transaccional-al
 Prisma y Drizzle tienen el mismo modelo manual de transacciones que TypeORM. No es un
 pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evaluación.
 
-- [ ] **El reporte de anulaciones de platos, separando merma de cortesía** — parte 3 (y
-  última) del frente *"Anular un plato ya enviado a cocina"*. Las partes 0-2 están
-  construidas y desplegadas → [`resueltos.md`](resueltos.md). El dato ya es trazable —cada
-  `movimientos_inventario` que nace de una anulación lleva `cuenta_linea_anulacion_id`, y
-  cada anulación lleva el `motivo_baja_id` con su `tipo`—, pero el informe de Mermas
-  (`docs/features/mermas-valorizadas.md`) todavía lista todo movimiento con `motivo = 'merma'`
-  sin filtrar por tipo, así que hoy mezcla cortesías y platos no elaborados junto con la merma
-  real. Encararla es spec propia: qué separa el reporte (¿una columna más, una pestaña, dos
-  reportes?) y si cruza con algún KPI existente de costo de comida.
+- [ ] **La cortesía como retiro gravado con IVA** (fiscal — **frente propio, con su propia
+  sesión**: `CLAUDE.md` y ADR-010 lo sacan de cualquier tanda de producto o de arrastre de
+  otra tarea, y no se cuelga al final de una ronda de preguntas). Un retiro de mercadería
+  para consumo de terceros es venta gravada con IVA (DL 825, art. 8 letra d), salvo rifas y
+  sorteos promocionales — hoy la cortesía registrada en `/salones/anulaciones` no genera
+  ningún hecho tributario, solo el descuento de stock y el registro del reporte. **Fuentes de
+  la investigación de mercado** (spec
+  [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md)
+  § 8, pasada del 2026-09-18): [DL 825](https://www.sii.cl/pagina/jurisprudencia/legislacion/basica/dl825.doc)
+  (el hecho gravado del retiro); no se encontró oficio del SII específico sobre la cortesía de
+  restaurante, así que la aplicación del art. 8 d a este caso concreto **no está confirmada**,
+  solo es la lectura más cercana. La merma normal se acredita con control interno
+  ([SII — mermas](https://www.sii.cl/preguntas_frecuentes/declaracion_renta/001_140_0736.htm));
+  la pérdida por caso fortuito exige aviso en 48 h
+  ([SII — pérdida de existencias](https://www.sii.cl/portales/sismo/pf_perdida_exis_docum.html)) —
+  ninguna de las dos aplica a la cortesía, que es deliberada, no una pérdida.
+  **Antes de diseñar:** decidir si se emite un documento tributario por cada cortesía, se
+  acumulan y se declaran aparte, o se espera a tener la emisión electrónica (ADR-010) para
+  resolverlo junto con el resto de lo fiscal — es la misma pregunta que la regla de "congelar
+  el hecho fiscal en la transacción, diferir lo que solo transmite o formatea" de ADR-010, y la
+  regla la pone el owner, no el agente.
+
 - [ ] **Serie y lote están a medias, y cada camino decide por su cuenta si rechazar o aceptar y
   corromper** (backend + BD, auditoría `inventario` 2026-08-15) — tres caras del mismo hueco,
   agrupadas porque se deciden juntas:

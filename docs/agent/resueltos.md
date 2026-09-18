@@ -175,8 +175,65 @@ la pantalla ofrece el selector de motivo a quien tiene el permiso y el aviso de 
 un encargado" a quien no, y el e2e de navegador (`frontend/e2e/salones/anular-plato.spec.ts`)
 prueba pedir → mandar a cocina → anular como cortesía → ver el aviso → el total ya abajo.
 
-**Sigue abierta la parte 3**: el reporte de anulaciones que separe merma de cortesía. Ver
-[`pendientes.md` § 6](pendientes.md).
+**Parte 3 construida** (2026-09-18): el reporte de anulaciones que separa merma de cortesía.
+Ver la entrada siguiente.
+
+---
+
+## El reporte de anulaciones de platos, separando merma de cortesía — parte 3 construida (cerrada 2026-09-18)
+
+Sale de [`pendientes.md` § 6](pendientes.md). La entrada, verbatim:
+
+**El reporte de anulaciones de platos, separando merma de cortesía** — parte 3 (y
+última) del frente *"Anular un plato ya enviado a cocina"*. Las partes 0-2 están
+construidas y desplegadas → [`resueltos.md`](resueltos.md). El dato ya es trazable —cada
+`movimientos_inventario` que nace de una anulación lleva `cuenta_linea_anulacion_id`, y
+cada anulación lleva el `motivo_baja_id` con su `tipo`—, pero el informe de Mermas
+(`docs/features/mermas-valorizadas.md`) todavía lista todo movimiento con `motivo = 'merma'`
+sin filtrar por tipo, así que hoy mezcla cortesías y platos no elaborados junto con la merma
+real. Encararla es spec propia: qué separa el reporte (¿una columna más, una pestaña, dos
+reportes?) y si cruza con algún KPI existente de costo de comida.
+
+**Spec:** [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md).
+
+**Construida**, cinco commits: `0b33fd27` (la anulación congela el precio de carta y el
+garzón de la mesa en `cuenta_linea_anulaciones`, en vez de leerlos en vivo cuando se arme el
+reporte), `b84e3413` (`GET /salones/anulaciones`, el listado paginado con
+`Salones:Ver todas` — el par de permiso nuevo, sembrado en el rol de encargado de salón), `acf646d3`
+(`GET /salones/anulaciones/resumen`, agrupado por tipo, por garzón y por quién autorizó, con
+`desde`/`hasta` obligatorios y tope de 366 días de diferencia entre los dos — hallazgo de la
+revisión de seguridad: sin el tope, el resumen corría sin `LIMIT` sobre el historial entero
+del tenant), `2e1fad74` (`GET /api/mermas` deja de listar la cortesía —filtra por el tipo del
+motivo en el `COUNT` y en la página, para que el total no se mueva sin avisar— y cada fila
+suma `deAnulacion`, para que se vea que ese movimiento también está en el otro reporte) y
+`34dc8363` (la pantalla `/salones/anulaciones`: filtros, tres tarjetas de resumen, dos tablas
+chicas por garzón y por quién autorizó, detalle paginado, y el badge "Anulación en mesa" en
+`/mermas`).
+
+El costo de cada anulación sale de `movimientos_inventario` agregado por moneda (nunca una
+consulta por fila); una fila sin ningún movimiento de costo (ingredientes todos borrados)
+queda `valorizado` con `costo: []` en vez de inventar un cuarto estado. `Salones:Ver todas`
+gobierna las dos rutas nuevas.
+
+**Fijado por:** unit de `AnulacionesReporteService` (mapeo de plata y estados del costo,
+filtros, agrupación del resumen, validación del rango) y el e2e
+`salones-anulaciones-reporte.e2e-spec.ts` (permiso, los tres tipos con su `precioCarta` y
+costo calculados a mano, un ítem sin costo → `sin_valorizar`, transferir la cuenta después de
+anular → el garzón congelado no cambia, y la prueba de fondo: el resumen coincide con la suma
+de las filas del listado para el mismo filtro). Task 6 (mutantes): el garzón vigente en vez
+del congelado, el precio de carta leído de la línea viva en vez de `cuenta_linea_anulaciones`,
+`sin_valorizar` sumando al costo del resumen, `validarRangoResumen` salteado, el filtro por
+tipo faltando en el `COUNT` o en la página de Mermas, y el permiso `Salones:Leer` en vez de
+`Ver todas` — los siete mueren con la suite completa (unit y/o e2e según el caso); detalle en
+`.superpowers/sdd/2026-09-18-reporte-anulaciones/task-6-report.md`.
+
+**Lo que queda abierto**, cada uno en `pendientes.md` por lo que hace falta para tomarlo: el
+% de anulaciones y cortesías sobre lo vendido por garzón (necesita la regla de de quién es la
+venta de una mesa transferida); la cortesía como retiro gravado con IVA (fiscal, frente
+propio); el día comercial que cruza la medianoche; los ingredientes borrados que se saltean
+sin movimiento al anular; y un reporte agregado propio de **Mermas** (la regla 6 de
+[`2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md)
+sigue abierta para ese, ver `pendientes.md` § 3).
 
 ---
 

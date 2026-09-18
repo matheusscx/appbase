@@ -56,7 +56,9 @@ Todos bajo `@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)`. Módulo RBAC
 **`Salones`**. Administración usa `Leer`/`Crear`/`Actualizar`/`Eliminar`; la operación
 del garzón usa el permiso dedicado **`Operar`**; anular un plato ya despachado exige
 además **`Anular`** (2026-09-16) — no pide PIN, porque es un gesto de quien tiene el
-permiso, no del garzón de turno.
+permiso, no del garzón de turno; el reporte de anulaciones exige **`Ver todas`**
+(2026-09-18) — par nuevo, sembrado en el rol de encargado de salón; el admin del tenant
+lo tiene sin sembrar nada, por `es_fijo`.
 
 | Método | Ruta | Permiso | Descripción |
 |---|---|---|---|
@@ -82,6 +84,8 @@ permiso, no del garzón de turno.
 | POST | `/cuentas/:id/transferir` | Operar | Transferir responsable vigente por PIN (claim) |
 | POST | `/cuentas/:id/transferir-admin` | Actualizar | Transferir responsable vigente (admin, sin PIN) |
 | GET | `/cuentas/:id/asignaciones` | Leer | Historial auditable de asignaciones de la cuenta |
+| GET | `/salones/anulaciones` | Ver todas | Reporte de anulaciones, listado paginado — ver más abajo |
+| GET | `/salones/anulaciones/resumen` | Ver todas | Reporte de anulaciones, agrupado por tipo/garzón/quién autorizó — ver más abajo |
 
 **Merge de líneas del mismo ítem** (misma personalización) — pasa en dos puertas, `POST
 /cuentas/:id/lineas` y la fusión de cuentas, y las dos siguen la misma regla: la cantidad
@@ -611,8 +615,51 @@ Las escribe `escribirAnulacionEnLinea`, el escritor común de `anularLinea` y
 cuenta que el llamador ya tiene bloqueada (`getCuentaAbiertaConLock`) — no se relee dentro del
 escritor aunque corra una vez por línea.
 
-**Fuera de esta parte:** el reporte de anulaciones con merma y cortesía separadas, y deshacer
-una anulación (decidido que no existe: se vuelve a pedir el plato).
+**Fuera de esta parte:** deshacer una anulación (decidido que no existe: se vuelve a pedir el
+plato). El reporte de anulaciones con merma y cortesía separadas es la parte 3, construida —
+ver la sección siguiente.
+
+### El reporte de anulaciones, con merma y cortesía separadas (2026-09-18)
+
+Parte 3 (y última) del frente. Spec:
+[`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md).
+Pantalla **`/salones/anulaciones`**, entrada *"Anulaciones"* en el menú, visible con
+`can('Salones', 'Ver todas')`.
+
+**`GET /salones/anulaciones`** — listado paginado. Filtros: rango de fechas (**opcional**,
+pagina así que un rango sin acotar no trae todo a memoria de una vez), `garzonId`, `tipo`
+(`merma` | `cortesia` | `no_elaborado`), `motivoBajaId`. Cada fila: `precioCarta`
+(`cantidad × precio_unitario` **congelado** en `cuenta_linea_anulaciones`, nunca el de la
+línea viva — la línea se borra cuando la anulación es total) y `costoEstado` (`valorizado` |
+`no_aplica` para `no_elaborado` | `sin_valorizar` si algún movimiento no tiene costo — la fila
+entera se marca, nunca una cifra parcial que parezca completa) con `costo` desglosado por
+moneda, nunca convertido.
+
+**`GET /salones/anulaciones/resumen`** — agrupado por tipo, por garzón y por quién autorizó,
+sin paginar (dos consultas fijas sobre TODO el rango filtrado). A diferencia del listado,
+`desde`/`hasta` son **obligatorios** acá, con un tope de **366 días de diferencia** entre los
+dos (`AnulacionesReporteService.validarRangoResumen`) — sin este piso, las dos consultas sin
+`LIMIT` traían a memoria el historial entero del tenant (hallazgo de la revisión de
+seguridad). `hasta` es inclusivo (`desde === hasta` vale, para pedir "hoy" con el mismo día en
+las dos puntas) — a diferencia de `propinas/query-propina-reporte.dto.ts`, que no se reusa
+porque ahí `hasta` es exclusivo. Cada grupo trae `sinValorizar`: cuántas anulaciones del grupo
+quedaron sin costo, sin que esa cifra parcial se sume al total del grupo — es la regla 6 de
+[`2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md).
+
+**El garzón y el precio de carta que muestra el reporte son los que se congelaron al anular**
+(`cuenta_linea_anulaciones.garzon_id`/`.precio_unitario`, ver la sección anterior): transferir
+o fusionar la cuenta después no cambia lo que ya se anuló a nombre de quién.
+
+**Pantalla:** tres tarjetas de resumen (Cortesías · Mermas en mesa · No se hizo), con la línea
+*"N platos sin valorizar"* si aplica; dos tablas chicas (por garzón, por quién autorizó);
+detalle paginado; aviso fijo *"Las mermas de esta lista también están contadas en Mermas"*.
+`Mermas` (`frontend/app/pages/mermas.vue`) suma el badge *"Anulación en mesa"* en las filas
+con `deAnulacion: true` — ver [mermas-valorizadas.md](./mermas-valorizadas.md).
+
+**Fuera de esta parte** (`pendientes.md`): el % de anulaciones y cortesías sobre lo vendido
+por garzón; la cortesía como retiro gravado con IVA (fiscal, frente propio); el día comercial
+que cruza la medianoche; y los ingredientes/componentes borrados del catálogo que se saltean
+sin movimiento al anular (el costo sale bajo sin marca — hueco heredado de la parte 2).
 
 ### Cancelar una cuenta con platos despachados (2026-09-16)
 

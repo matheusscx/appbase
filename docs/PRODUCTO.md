@@ -456,8 +456,8 @@ cortesía— ya existe**: anular un plato ya despachado a cocina, con motivo y e
 propio `Salones:Anular` (no alcanza con `Operar`, que tiene cualquier garzón). Las reglas:
 
 - **El motivo decide si descuenta stock, no quien anula.** `merma` y `cortesia` descuentan
-  (se reportan por separado — pendiente, ver abajo); `no_elaborado` no deja movimiento,
-  porque ese plato nunca salió de cocina.
+  y se reportan por separado (ver abajo); `no_elaborado` no deja movimiento, porque ese
+  plato nunca salió de cocina.
 - **El tope es lo ya despachado**, no lo pedido: se puede anular parcial (3 despachados, se
   anulan 2) y el resto sigue pedido. Lo que no salió a cocina se saca sin motivo, por el
   camino de siempre.
@@ -469,9 +469,19 @@ propio `Salones:Anular` (no alcanza con `Operar`, que tiene cualquier garzón). 
 - **Una cuenta que queda sin nada vivo se cancela, no se cobra en $0.**
 
 Detalle en [`features/salones-mesas.md`](./features/salones-mesas.md) y el cierre del frente
-en [`agent/resueltos.md`](./agent/resueltos.md). Falta separar el reporte de anulaciones por
-tipo (merma vs. cortesía) — hoy `GET /api/mermas` las mezcla: parte 3, sigue en
-[`agent/pendientes.md`](./agent/pendientes.md) § 6.
+en [`agent/resueltos.md`](./agent/resueltos.md).
+
+**El reporte de anulaciones (`/salones/anulaciones`, permiso `Salones:Ver todas`) separa
+merma de cortesía y de "no se hizo".** Listado paginado con el precio de carta y el costo de
+cada anulación, y un resumen agrupado por tipo, por garzón y por quién autorizó — cada grupo
+dice cuántas anulaciones quedaron sin costo, sin que esa cifra parcial se sume al total.
+`GET /api/mermas` dejó de listar la cortesía (solo motivos de tipo `merma`) y cada fila de
+Mermas marca si vino de anular un plato en la mesa, para que se vea que ese movimiento
+también está contado en el otro reporte. Detalle en
+[`features/salones-mesas.md`](./features/salones-mesas.md) § *"El reporte de anulaciones"*.
+Lo que sigue sin existir: el % de anulaciones y cortesías sobre lo vendido por garzón, y la
+cortesía como retiro gravado con IVA (fiscal, frente propio) — `agent/pendientes.md` § 4 y
+§ 6.
 
 **Fuera de alcance (fases futuras):** FIFO o método de costeo elegible por tenant, y la
 emisión del **DTE 52** que legaliza un traslado en la vía pública —bodegas y traslados ya
