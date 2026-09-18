@@ -272,7 +272,7 @@ export function useImpresoras() {
     pagos: TicketPago[]
     vuelto?: string
     /** Reimpresión — ver `buildBoletaTicket`. Se pasa derecho, sin tocarlo. */
-    copia?: { impresaEl: Date }
+    copia?: { impresaEl: Date, anulada?: boolean }
     formatMonto: (v: string) => string
   }): Promise<void> {
     const impresora = await obtenerImpresoraBoleta()

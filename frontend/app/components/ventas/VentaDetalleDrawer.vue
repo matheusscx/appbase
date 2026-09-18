@@ -270,6 +270,17 @@ const puedeAnular = computed(() =>
   && permissionsStore.can('Ventas', 'Anular'),
 )
 
+/**
+ * Reimprimir: solo una venta pagada o anulada (owner, 2026-09-18). Espeja el
+ * 400 de `GET /ventas/:id/boleta` (`VentasService.reimprimirBoleta`), que es el
+ * que manda; esto evita ofrecer un botón que rebotaría.
+ */
+const puedeReimprimir = computed(() =>
+  !!venta.value
+  && (venta.value.estado === 'pagada' || venta.value.estado === 'cancelada')
+  && permissionsStore.can('Ventas', 'Anular'),
+)
+
 const totalReembolsado = computed(() => {
   if (!venta.value) return '0'
   return venta.value.reembolsos
@@ -726,15 +737,11 @@ function onAnularSuccess(payload: { estado: string }) {
 }
 
 /**
- * Reimprime la boleta de una venta ya cobrada, marcada `COPIA`. La boleta se
- * pide acá, al apretar el botón — no al abrir el drawer: es la que arma el
- * servidor desde la venta persistida (`GET /ventas/:id/boleta`), no un
- * recálculo local. El permiso real lo enforcea la ruta (`Ventas:Anular`); el
- * `v-if` del botón replica ESE mismo permiso, para no ofrecer un botón que al
- * clic rebotaría con 403 — no filtra por estado de la venta, porque ni la
- * ruta ni `armarBoleta` lo hacen: hoy se puede reimprimir una venta
- * `cancelada` o `pendiente` igual que una `pagada` (`docs/agent/pendientes.md`,
- * *"Reimprimir no distingue el estado de la venta"*).
+ * Reimprime la boleta de una venta pagada o anulada, marcada `COPIA` (y
+ * `ANULADA` si la venta se anuló). La boleta se pide acá, al apretar el
+ * botón — no al abrir el drawer: es la que arma el servidor desde la venta
+ * persistida (`GET /ventas/:id/boleta`), no un recálculo local. Permiso y
+ * estado los enforcea la ruta; `puedeReimprimir` los espeja.
  */
 async function reimprimirBoleta() {
   if (!venta.value) return
@@ -769,7 +776,9 @@ async function reimprimirBoleta() {
       ...(boleta.propina ? { propina: boleta.propina } : {}),
       pagos: boleta.pagos,
       vuelto: boleta.vuelto ?? undefined,
-      copia: { impresaEl: new Date() },
+      // `boleta.estado` y no `venta.estado`: mismo criterio que `cliente`
+      // arriba, el papel sale de lo que la ruta acaba de devolver.
+      copia: { impresaEl: new Date(), anulada: boleta.estado === 'cancelada' },
       formatMonto: (v: string) => formatMonto(v),
     })
   }
@@ -1249,7 +1258,7 @@ function onNcSuccess(payload: {
         Cerrar
       </UButton>
       <UButton
-        v-if="permissionsStore.can('Ventas', 'Anular')"
+        v-if="puedeReimprimir"
         label="Reimprimir boleta"
         icon="i-lucide-printer"
         color="neutral"

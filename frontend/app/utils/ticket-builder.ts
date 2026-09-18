@@ -510,12 +510,16 @@ export function buildBoletaTicket(input: {
   vuelto?: string
   fecha: Date
   /**
-   * Reimpresión de una venta ya cobrada (`GET /ventas/:id/boleta`,
+   * Reimpresión de una venta pagada o anulada (`GET /ventas/:id/boleta`,
    * `Ventas:Anular`). Con este parámetro imprime `COPIA` + la fecha/hora de
    * la reimpresión; **sin él, el ticket sale exactamente igual que hoy** — es
    * el control que separa el original de la copia.
+   *
+   * `anulada`: la venta se anuló (`estado = 'cancelada'`) — la copia suma
+   * `ANULADA` debajo de `COPIA`, para que el papel no pase por el de una venta
+   * vigente (owner, 2026-09-18).
    */
-  copia?: { impresaEl: Date }
+  copia?: { impresaEl: Date, anulada?: boolean }
   formatMonto: (v: string) => string
 }): string[] {
   const { meta, cliente, formatMonto } = input
@@ -539,6 +543,7 @@ export function buildBoletaTicket(input: {
   // los ítems, para que se lea antes que la lista. Solo si `copia` viene.
   if (input.copia) {
     out.push(center('COPIA', BOLETA_WIDTH))
+    if (input.copia.anulada) out.push(center('ANULADA', BOLETA_WIDTH))
     out.push(center(`Reimpreso: ${input.copia.impresaEl.toLocaleString('es-CL')}`, BOLETA_WIDTH))
     out.push(separador(BOLETA_WIDTH))
   }

@@ -29,7 +29,7 @@ imprimiendo directo desde el dispositivo del garzón/cajero, que sí está en es
   con diff (`cuenta_lineas.cantidad_enviada`), precuenta y boleta desde Salones y
   desde el POS de mostrador; **nota de personalización** (omitidos, extras,
   comentario) en comanda/precuenta/boleta vía `TicketItem.nota`; **reimpresión de
-  boleta** de una venta ya cobrada, marcada `COPIA` (2026-09-17).
+  boleta** de una venta pagada o anulada, marcada `COPIA` (2026-09-17; `ANULADA` la anulada, 2026-09-18).
 - NO incluido (futuro): reimpresión de comandas, impresoras de rol dual.
 
 ---
@@ -165,8 +165,9 @@ ticket no depende de que nadie lo use.
   - Cada ítem puede llevar `nota?` (personalización + comentario), impresa indentada
     bajo el nombre.
   - **Reimpresión marcada `COPIA` (2026-09-17)**: `buildBoletaTicket` recibe un
-    parámetro opcional `copia?: { impresaEl: Date }`. Con él imprime `COPIA` + la
-    fecha/hora de la reimpresión, **después del tipo de documento y antes de los
+    parámetro opcional `copia?: { impresaEl: Date, anulada?: boolean }`. Con él imprime
+    `COPIA` (y `ANULADA` debajo, si `anulada` — 2026-09-18) + la fecha/hora de la
+    reimpresión, **después del tipo de documento y antes de los
     ítems** (para que se lea antes que la lista); sin él, el ticket sale
     exactamente igual que hoy — la reimpresión reusa el mismo builder, no uno
     aparte. `imprimirBoleta` (`useImpresoras.ts`) suma el mismo parámetro y lo

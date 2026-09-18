@@ -3707,6 +3707,7 @@ describe('VentasService', () => {
       venta_id: VENTA_ID,
       fecha: new Date('2026-09-17T12:00:00Z'),
       canal: 'fisico',
+      estado: 'pagada',
       total_bruto: '0.0000',
       total_descuentos: '0.0000',
       total_recargos: '0.0000',
@@ -4189,6 +4190,54 @@ describe('VentasService', () => {
         ) as [string, unknown[]];
       expect(sqlCompleto).not.toContain('FROM cajas c');
       expect(paramsCompleto).toEqual([VENTA_ID, TENANT_ID]);
+    });
+
+    /**
+     * Reimprimir: solo una venta pagada o anulada (owner, 2026-09-18). El
+     * filtro vive en `reimprimirBoleta` y no en `armarBoleta`, porque el cobro
+     * del POS también arma la boleta de una venta que queda pendiente.
+     */
+    describe('reimprimirBoleta()', () => {
+      it.each(['pagada', 'cancelada'])(
+        'una venta %s se reimprime, con su estado en el payload',
+        async (estado) => {
+          mockArmarBoleta({ cabecera: cabeceraBase({ estado }) });
+
+          const boleta = await service.reimprimirBoleta(
+            TENANT_ID,
+            VENTA_ID,
+            USUARIO_ID,
+            true,
+          );
+
+          expect(boleta.estado).toBe(estado);
+        },
+      );
+
+      it.each(['pendiente', 'pagada_parcial'])(
+        'una venta %s da 400',
+        async (estado) => {
+          mockArmarBoleta({ cabecera: cabeceraBase({ estado }) });
+
+          await expect(
+            service.reimprimirBoleta(TENANT_ID, VENTA_ID, USUARIO_ID, true),
+          ).rejects.toThrow(BadRequestException);
+        },
+      );
+
+      it('armarBoleta sigue armando la de una venta pendiente: el cobro del POS la necesita', async () => {
+        mockArmarBoleta({ cabecera: cabeceraBase({ estado: 'pendiente' }) });
+
+        const boleta = await service.armarBoleta(
+          dbService,
+          TENANT_ID,
+          VENTA_ID,
+          USUARIO_ID,
+          true,
+        );
+
+        expect(boleta.estado).toBe('pendiente');
+      });
     });
   });
 });

@@ -783,6 +783,11 @@ Antes, la pantalla recalculaba contra el carrito vivo para imprimir, y si el gar
 de cuenta mientras el cierre viajaba, la venta quedaba cobrada pero sin boleta y sin forma
 de reimprimirla.
 
+**Reimprimir la boleta: solo una venta pagada o anulada (owner, 2026-09-18).** La copia de
+una venta anulada sale marcada `ANULADA`, para que no pase por la de una venta vigente. Una
+venta que todavía no se cobró del todo no se reimprime: el papel saldría con los pagos
+incompletos y sin nada que diga que sigue abierta.
+
 ---
 
 ### 10b. Suscripciones (cobro recurrente)

@@ -249,10 +249,15 @@ solo en `cuenta_lineas`, nunca en `venta_detalles`. `false` en la venta de POS.
 
 ### GET /api/ventas/:id/boleta
 
-Reimprime la boleta de una venta **ya cobrada** (2026-09-17): devuelve `BoletaVenta`, el
+Reimprime la boleta de una venta **pagada o anulada** (2026-09-17; el estado, 2026-09-18):
+devuelve `BoletaVenta`, el
 mismo payload que arma el servidor al cobrar (`POST /cuentas/:id/cerrar` y `POST /ventas`,
 ver [`impresion-termica.md`](./impresion-termica.md)) — no un recálculo, así que reimprimir
-y el original dan el mismo papel.
+y el original dan el mismo papel. `BoletaVenta.estado` viaja en el payload: una venta
+`cancelada` sale marcada `ANULADA`. La que todavía no se cobró del todo (`pendiente`,
+`pagada_parcial`) da **400** — su papel saldría con los pagos incompletos y sin nada que diga
+que sigue abierta. El filtro vive en `reimprimirBoleta`, no en `armarBoleta`: el cobro del
+POS también arma la boleta de una venta que queda pendiente.
 
 Exige `@RequiresPermiso('Ventas', 'Anular')` — el del encargado, sin permiso nuevo — y
 hereda el **mismo alcance por caja** que `GET /ventas/:id` (§ "Quién ve qué" abajo): la
@@ -524,10 +529,12 @@ Implementado en 2026-06-30; rutas unificadas en 2026-07-01.
 | Detalle de venta | `/ventas?venta={uuid}` | Drawer lateral (`VentaDetalleDrawer`): líneas, totales, pagos, saldo; botón "Registrar pago" para `pendiente`/`pagada_parcial`; botón "Reimprimir boleta" (ver abajo) |
 | Punto de venta | `/ventas/pos` | Crear venta (ver sección POS arriba) |
 
-**Reimprimir boleta (2026-09-17):** visible con `Ventas:Anular` — el permiso real lo
-enforcea la ruta, el `v-if` solo evita ofrecer lo que el backend va a rechazar. Al apretarlo
+**Reimprimir boleta (2026-09-17):** visible con `Ventas:Anular` y en una venta `pagada` o
+`cancelada` (`puedeReimprimir`) — permiso y estado los enforcea la ruta, el `v-if` solo evita
+ofrecer lo que el backend va a rechazar. Al apretarlo
 (no al abrir el drawer) pide `GET /ventas/:id/boleta` e imprime con `buildBoletaTicket`
-marcada `COPIA` + la fecha/hora de la reimpresión (`ticket-builder.ts`, detalle en
+marcada `COPIA` (+ `ANULADA` si la venta se anuló) + la fecha/hora de la reimpresión
+(`ticket-builder.ts`, detalle en
 [`impresion-termica.md`](./impresion-termica.md)). `BoletaVenta` es un tipo único,
 compartido con `useSalones.ts` y `pos.vue` desde `~/types/boleta.ts`.
 

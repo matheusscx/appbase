@@ -163,6 +163,11 @@ export interface BoletaVenta {
   ventaId: string;
   fecha: Date;
   canal: string;
+  /**
+   * Lo lee la reimpresión: una venta `cancelada` sale marcada `ANULADA`, y
+   * `reimprimirBoleta` rechaza la que todavía no se cobró del todo.
+   */
+  estado: EstadoVenta;
   mesa: string | null;
   cuentaNumero: number | null;
   cajero: string | null;
@@ -3501,6 +3506,41 @@ export class VentasService {
   }
 
   /**
+   * La boleta de `GET /ventas/:id/boleta`: la misma de `armarBoleta`, solo
+   * para una venta `pagada` o `cancelada` (owner, 2026-09-18). La `cancelada`
+   * se reimprime —el papel la marca `ANULADA`, `ticket-builder.ts`—; la que
+   * todavía no se cobró del todo (`pendiente`, `pagada_parcial`) no, porque
+   * su papel saldría con la sección de pagos incompleta y sin nada que diga
+   * que la venta sigue abierta.
+   *
+   * ⚠️ El filtro va acá y no dentro de `armarBoleta`: el cobro también la
+   * llama (`crear`, `SalonesService.cerrarCuenta`), y un cobro del POS puede
+   * dejar la venta `pendiente` o `pagada_parcial` — ese papel sí se imprime.
+   */
+  async reimprimirBoleta(
+    tenantId: string,
+    ventaId: string,
+    usuarioId: string,
+    verTodas: boolean,
+  ): Promise<BoletaVenta> {
+    const boleta = await this.armarBoleta(
+      this.db,
+      tenantId,
+      ventaId,
+      usuarioId,
+      verTodas,
+    );
+    if (
+      boleta.estado !== EstadoVenta.PAGADA &&
+      boleta.estado !== EstadoVenta.CANCELADA
+    )
+      throw new BadRequestException(
+        `Solo se reimprime la boleta de una venta pagada o anulada (esta está "${boleta.estado}").`,
+      );
+    return boleta;
+  }
+
+  /**
    * Arma el payload de la boleta desde la venta YA PERSISTIDA. No llama al
    * motor de cálculo (`calculo-precios/` no se toca): los importes de
    * `venta_detalles` y sus tablas hijas ya están cuantizados y congelados.
@@ -3542,6 +3582,7 @@ export class VentasService {
       venta_id: string;
       fecha: Date;
       canal: string;
+      estado: EstadoVenta;
       total_bruto: string;
       total_descuentos: string;
       total_recargos: string;
@@ -3559,7 +3600,7 @@ export class VentasService {
       filtroPropio = this.filtroDeMisCajas(paramsCabecera.length);
     }
     const cabeceraRows: CabeceraRow[] = await runner.query(
-      `SELECT v.venta_id, v.fecha, v.canal,
+      `SELECT v.venta_id, v.fecha, v.canal, v.estado,
               v.total_bruto, v.total_descuentos, v.total_recargos,
               v.total_impuestos, v.total_final,
               cta.numero AS cuenta_numero, m.nombre AS mesa_nombre,
@@ -3820,6 +3861,7 @@ export class VentasService {
       ventaId: cabecera.venta_id,
       fecha: cabecera.fecha,
       canal: cabecera.canal,
+      estado: cabecera.estado,
       mesa: cabecera.mesa_nombre,
       cuentaNumero: cabecera.cuenta_numero,
       cajero,

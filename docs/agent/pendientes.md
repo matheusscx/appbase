@@ -695,35 +695,6 @@ Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no s
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
-- [ ] **Reimprimir boleta no filtra por estado de la venta** (frontend + backend; medido al
-  cerrar la Task 6 de `docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`,
-  levantado por la revisión independiente).
-
-  `GET /ventas/:id/boleta` (`backend/src/modules/ventas/ventas.controller.ts:103-116`) solo
-  exige el permiso `Ventas:Anular` y el alcance por caja — no mira `estado`. La query de
-  cabecera de `armarBoleta` tampoco lo filtra, y una venta `cancelada` no se soft-borra
-  (`cancelarUnaVez` solo hace `UPDATE ventas SET estado='cancelada'`), así que sigue siendo
-  legible entera. El botón "Reimprimir boleta" del drawer
-  (`frontend/app/components/ventas/VentaDetalleDrawer.vue:1241`) repite el mismo permiso y
-  tampoco filtra por estado — a diferencia del botón "Anular" al lado (`:1250`, que exige
-  `puedeAnular`, con `estado === 'pendiente'` en `:267`).
-
-  **Lo que hoy se puede hacer, sin que nada lo impida:**
-  - Reimprimir, marcada `COPIA`, la boleta de una venta **`cancelada`** — el papel sale
-    idéntico al original, sin ninguna marca de que la venta se anuló.
-  - Reimprimir la boleta de una venta **`pendiente`** (todavía no cobrada del todo): sale con
-    la sección de pagos vacía (`armarBoleta` arma `pagos` desde la tabla `pagos`, que no tiene
-    filas para lo que todavía no se pagó) y sin que nada en el papel diga que es un documento
-    de una venta sin cerrar.
-
-  Ninguno de los dos caminos tiene test — ni backend ni e2e de navegador.
-
-  **La pregunta para el owner:** si el botón y/o la ruta deben dejar de ofrecer/permitir la
-  reimpresión según el estado de la venta, y cuál. No es una decisión técnica: toca qué
-  documento se considera válidamente "emitido" para el negocio, y roza lo fiscal —aunque hoy
-  la boleta es un ticket térmico y no un DTE (ADR-010), la pregunta de "qué puede reimprimirse
-  tal cual" es la misma que se va a repetir cuando llegue la emisión electrónica.
-
 ## 5. Carreras de concurrencia
 
 Van juntas porque el arreglo pide **un solo análisis de orden de locks** —qué fila se

@@ -221,6 +221,7 @@ const BOLETA_REIMPRESION = {
   ventaId: 'v-1',
   fecha: '2026-08-28T12:00:00.000Z',
   canal: 'fisico',
+  estado: 'pagada',
   mesa: null,
   cuentaNumero: null,
   cajero: 'Ana Torres',
@@ -537,6 +538,45 @@ describe('VentaDetalleDrawer — reimprimir boleta', () => {
   })
 
   /**
+   * Solo una venta pagada o anulada se reimprime (owner, 2026-09-18): la ruta
+   * contesta 400 a la que todavía no se cobró del todo. La `pagada` es el
+   * control de arriba; la `cancelada`, el de más abajo.
+   */
+  it.each(['pendiente', 'pagada_parcial'])('no aparece en una venta %s', async (estado) => {
+    documentoActual = { ...VENTA, estado } as unknown as typeof VENTA
+    try {
+      const wrapper = await montar()
+      expect(botonReimprimir(wrapper)).toBeUndefined()
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  })
+
+  it('en una venta anulada aparece e imprime COPIA y ANULADA', async () => {
+    impresionesQz.length = 0
+    documentoActual = { ...VENTA, estado: 'cancelada' } as unknown as typeof VENTA
+    boletaActual = { ...BOLETA_REIMPRESION, estado: 'cancelada' }
+    try {
+      const wrapper = await montar()
+      const boton = botonReimprimir(wrapper)
+      expect(boton, 'el botón está presente').toBeDefined()
+
+      await boton!.trigger('click')
+      await new Promise(r => setTimeout(r, 50))
+
+      expect(impresionesQz, 'la boleta se imprimió').toHaveLength(1)
+      const texto = impresionesQz[0]!.join('')
+      expect(texto).toContain('COPIA')
+      expect(texto).toContain('ANULADA')
+    }
+    finally {
+      documentoActual = VENTA
+      boletaActual = BOLETA_REIMPRESION
+    }
+  })
+
+  /**
    * Al apretarlo pide `GET /ventas/:id/boleta` (no reusa el detalle que el
    * drawer ya tiene, que no trae la venta persistida con la que se cobró) e
    * imprime CON la marca de copia. La aserción es sobre el TEXTO que termina
@@ -557,6 +597,7 @@ describe('VentaDetalleDrawer — reimprimir boleta', () => {
     expect(impresionesQz, 'la boleta se imprimió').toHaveLength(1)
     const texto = impresionesQz[0]!.join('')
     expect(texto).toContain('COPIA')
+    expect(texto, 'una venta pagada no sale ANULADA').not.toContain('ANULADA')
     expect(texto).toContain('Pizza grande')
     expect(texto).toContain('Ana Torres')
   })

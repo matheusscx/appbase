@@ -279,6 +279,15 @@ describe('buildBoletaTicket', () => {
     expect(conCopia.filter(l => !esLineaDeCopia(l))).toEqual(sinCopia.filter(l => !esLineaDeCopia(l)))
   })
 
+  it('una copia anulada imprime ANULADA debajo de COPIA; sin `anulada`, no', () => {
+    const impresaEl = new Date('2026-09-18T10:00:00')
+    const anulada = boleta({ copia: { impresaEl, anulada: true } })
+    const marcaCopia = anulada.findIndex(l => l.includes('COPIA'))
+    expect(anulada[marcaCopia + 1]).toContain('ANULADA')
+
+    expect(boleta({ copia: { impresaEl } }).some(l => l.includes('ANULADA'))).toBe(false)
+  })
+
   it('imprime cantidad con unidad de presentación preformateada dentro de la columna CANT', () => {
     const lines = boleta({ items: [{ nombre: 'Harina', cantidad: '500 g', precioUnitario: '2500', totalLinea: '2500' }] })
     const fila = lines.find(l => l.includes('Harina'))

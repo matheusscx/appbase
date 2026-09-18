@@ -69,6 +69,7 @@ interface BoletaItem {
 }
 interface BoletaVentaRes {
   ventaId: string;
+  estado: string;
   items: BoletaItem[];
   totales: {
     subtotalNeto: string;
@@ -360,6 +361,7 @@ describe('GET /ventas/:id/boleta — reimprimir boleta (e2e)', () => {
     const cuerpo = res.body as BoletaVentaRes;
 
     expect(cuerpo.ventaId).toBe(ventaBasicaId);
+    expect(cuerpo.estado).toBe('pagada');
     expect(cuerpo.items.length).toBeGreaterThan(0);
     expect(cuerpo.items[0].totalLinea).toBeTruthy();
     expect(Number(cuerpo.totales.totalFinal)).toBeGreaterThan(0);
@@ -372,6 +374,50 @@ describe('GET /ventas/:id/boleta — reimprimir boleta (e2e)', () => {
     // `ventaBasicaId` se cobró sin `customer` (línea ~180): `null`, no un
     // objeto vacío — el contraste con la venta CON cliente, más abajo.
     expect(cuerpo.customer).toBeNull();
+  });
+
+  /**
+   * Solo se reimprime una venta pagada o anulada (owner, 2026-09-18): la que
+   * todavía no se cobró del todo saldría con los pagos incompletos y sin nada
+   * que diga que sigue abierta. La anulada sí, y el papel la marca `ANULADA`
+   * (`ticket-builder.ts`) con el `estado` que esta ruta devuelve.
+   */
+  describe('según el estado de la venta', () => {
+    async function ventaSinCobrar(pagos: Record<string, unknown>[]) {
+      return await post<VentaCreada & { estado: string }>('/api/ventas', {
+        lineas: [{ itemId: itemBasicoId, cantidad: '1' }],
+        pagos,
+      });
+    }
+
+    it('una venta pendiente (sin pagos) da 400', async () => {
+      const venta = await ventaSinCobrar([]);
+      expect(venta.estado).toBe('pendiente');
+
+      const res = await boleta(venta.id);
+      expect(res.status).toBe(400);
+    });
+
+    it('una venta pagada a medias da 400', async () => {
+      const venta = await ventaSinCobrar([
+        { metodoPagoId: EFECTIVO_ID, monto: '100.0000' },
+      ]);
+      expect(venta.estado).toBe('pagada_parcial');
+
+      const res = await boleta(venta.id);
+      expect(res.status).toBe(400);
+    });
+
+    it('una venta anulada se reimprime, con estado cancelada', async () => {
+      const venta = await ventaSinCobrar([]);
+      await post(`/api/ventas/${venta.id}/anular`, {
+        motivo: 'Anulada para el e2e de reimpresión',
+      });
+
+      const res = await boleta(venta.id);
+      expect(res.status).toBe(200);
+      expect((res.body as BoletaVentaRes).estado).toBe('cancelada');
+    });
   });
 
   it('una venta de OTRO tenant da 404', async () => {

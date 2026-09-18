@@ -1,3 +1,4 @@
+import type { EstadoVenta } from '~/composables/useEstadoVenta'
 import type { BoletaVentaItem } from '~/utils/ticket-builder'
 
 /**
@@ -25,6 +26,8 @@ export interface BoletaVenta {
   ventaId: string
   fecha: string
   canal: string
+  /** La reimpresión marca `ANULADA` una venta `cancelada` (`VentaDetalleDrawer.vue`). */
+  estado: EstadoVenta
   mesa: string | null
   cuentaNumero: number | null
   cajero: string | null

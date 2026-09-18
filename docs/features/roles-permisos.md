@@ -79,7 +79,7 @@ módulo hasta que se le contrate.
 
 ### `Ventas:Anular` también habilita reimprimir una boleta (2026-09-17)
 
-`GET /ventas/:id/boleta` (reimprimir la boleta de una venta ya cobrada, spec
+`GET /ventas/:id/boleta` (reimprimir la boleta de una venta pagada o anulada, spec
 [`2026-09-17-boleta-desde-la-venta-design.md`](../superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md))
 pide el mismo `Ventas:Anular` que anular una venta, no un permiso nuevo: es la operación
 sensible del módulo (reimprimir un comprobante ya emitido) y el owner eligió reusar el
