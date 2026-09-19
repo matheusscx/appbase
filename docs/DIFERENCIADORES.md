@@ -375,10 +375,11 @@ lo **documenta**.
 **Por qué le importa:** un dueño que ve "$450.000" el domingo y "$410.000" el martes para el
 mismo sábado, sin que nadie haya tocado una venta, deja de confiar en el reporte. Documentar la
 regla —cualquiera sea— ya es más de lo que muestra el mercado relevado.
-**Estado del producto:** 📐 diseñado, sin construir. El owner decidió que cambiar la hora
+**Estado del producto:** ✅ construido (2026-09-19). El owner decidió que cambiar la hora
 **recalcula** el pasado (2026-09-18), y la ayuda del selector de la hora lo avisa antes de
 cambiarla: la regla queda escrita donde el dueño la ve. Diseño:
 [`2026-09-18-hora-de-corte-dia-negocio-design.md`](superpowers/specs/2026-09-18-hora-de-corte-dia-negocio-design.md).
+Cierre: [`docs/agent/resueltos.md`](agent/resueltos.md).
 **Evidencia:** [investigación 2026-09-18 §2 y §4](agent/investigaciones/2026-09-18-hora-de-corte-dia-negocio.md) ·
 [Toast — Close Out Day](https://doc.toasttab.com/doc/platformguide/platformCloseOutDayOverview.html) ·
 [Square — close of day](https://squareup.com/help/us/en/article/5439-customize-your-close-of-day) ·

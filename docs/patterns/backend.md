@@ -677,20 +677,36 @@ Para listados grandes (pagos, ventas, kardex):
 
 ---
 
-## 10b. Bordes de rango por fecha en un listado
+## 10b. El día se arma en un solo lugar: `rango-fecha.util.ts`
 
 `AppDateInput` emite **fecha pura** (`YYYY-MM-DD`) y los DTOs validan con
 `@IsDateString()`, que también acepta un timestamp. Contra una columna
-`timestamptz`, una fecha pura se castea a la **medianoche**, y de ahí salen los dos
-bordes — que **no son simétricos**:
+`timestamptz`, una fecha pura se castea a la **medianoche**, así que a qué rango
+—y a qué **día**— pertenece es una decisión del backend, nunca de Postgres ni de
+cada service por su cuenta.
+
+**No es el día calendario, es el día del NEGOCIO.** Cada tenant tiene una
+`hora_corte` (`tenants.hora_corte`, entero 0–6, default 0): la hora local en que
+termina su día. Con corte 0 el día del negocio coincide con la medianoche de
+siempre; con un corte mayor, una venta de la madrugada cuenta en el día anterior.
+`diaNegocioTenant(db, tenantId)` trae `{ zona, horaCorte }` en una sola consulta
+(la zona sale de la **provincia** del tenant, no del país); `empujarDiaNegocio(params,
+dia)` empuja los dos al array de params del llamador y devuelve sus posiciones
+(`IdxDiaNegocio { zona, corte }`) para pasarlas a los helpers de abajo.
 
 | Borde | Helper | Fecha pura | Timestamp |
 |---|---|---|---|
-| Inferior (`desde`) | `bordeFechaSql(col, '>=', …)` | `>= medianoche local` | `>= $n`, tal cual |
-| Superior (`hasta`) | **`bordeHastaSql(col, …)`** | `< (día + 1) local` — **inclusivo del día** | `<= $n`, tal cual |
+| Inferior (`desde`) | `bordeFechaSql(col, '>=', valor, idxValor, idx)` | `>= inicio del día del negocio` | `>= $n`, tal cual |
+| Superior (`hasta`) | **`bordeHastaSql(col, valor, idxValor, idx)`** | `< inicio del día del negocio SIGUIENTE` — **inclusivo del día** | `<= $n`, tal cual |
 
-Los dos helpers viven en `common/utils/rango-fecha.util.ts`, y la zona sale del
-**país del tenant** (`zonaHorariaTenant`), no de una preferencia.
+`idx` es el `IdxDiaNegocio` de `empujarDiaNegocio` (`null` si ningún borde del
+llamador es fecha pura, ver `requiereDiaNegocio` más abajo). Para colapsar un
+**instante** a su día del negocio dentro del SQL (un `NOW()`, un `GROUP BY` de
+serie diaria) está `diaNegocioDeSql(instanteSql, idx)` — la contraparte SQL de
+`diaNegocioEnZona` (TypeScript, para un `Date` ya en memoria). Las dos siguen el
+mismo orden: primero a hora LOCAL, recién ahí se resta el corte, porque restarlo
+sobre el instante crudo aterriza en el día equivocado la noche del cambio de
+horario (docblock de `diaNegocioEnZona`).
 
 - **`hasta` es inclusivo del día** (decisión del owner, 2026-08-22): quien elige
   "16" ve el 16 completo. Se resuelve acá y no compensando en cada pantalla, para
@@ -702,19 +718,33 @@ Los dos helpers viven en `common/utils/rango-fecha.util.ts`, y la zona sale del
 - **Un timestamp explícito no se expande, en ninguno de los dos bordes.** Quien
   manda `T15:30:00Z` pidió ese instante; `::date` le comería la hora en silencio y
   el filtro se ensancharía sin avisar.
-- **`requiereZonaTenant(...)` antes de pushear la zona al array de params:** si
-  ningún borde es fecha pura, el SQL no la nombra y Postgres **rechaza el bind**
-  con un parámetro de más (*"bind message supplies N parameters"*) → 500.
+- **`requiereDiaNegocio(...)` antes de pushear zona/corte al array de params:** si
+  ningún borde es fecha pura, el SQL no los nombra y Postgres **rechaza el bind**
+  con un parámetro de más (*"bind message supplies N parameters"*) → 500. Cada
+  consulta que este frente tocó (2026-09-19) lleva además un test que compara cada
+  `$n` contra la posición real en `params`: un parámetro que la SQL no referencia
+  compila y pasa lint igual, y solo lo caza Postgres real (e2e).
+
+⚠️ **Invariante: nadie arma el día a mano.** Un `AT TIME ZONE $` o un
+`CURRENT_DATE` sueltos, o un colapso con `Intl` (`instanteLocalEnZona` /
+`instanteLocalTenant` / `fechaLocalTenant`) fuera de este archivo, reintroducen el
+bug que la hora de corte existe para cerrar — en silencio, porque compilan y pasan
+lint igual. `common/invariants/dia-negocio.invariant.spec.ts` barre todo
+`src/modules` y lo rechaza, con una allowlist chica para lo que sí es hora de
+RELOJ y no día de negocio: el motor de precios y las promociones (vigencia de una
+regla por horario).
 
 ⚠️ **La otra convención que convive, y por qué no se unificó:** los reportes y la
 liquidación de propinas usan un borde superior **exclusivo compensado por el
 llamador** — `propina-reportes` recibe `hasta` y filtra `< hasta`, y la pantalla le
 manda el primer día del mes siguiente (`rangoMesActual()`); la liquidación manda un
-instante ya corrido (`finDiaExclusivoIso`). **Funciona y está fuera del alcance de
-la corrección de 2026-08-22**: tocar el backend sin tocar esos dos llamadores haría
-que el resumen de agosto incluyera el 1° de septiembre. Si algún día se unifica, van
-juntos backend y llamador, y las consultas de liquidación comparan **períodos
-guardados** (`fecha_desde`/`fecha_hasta`), no eventos — es otro análisis.
+instante ya corrido. **Funciona y está fuera del alcance de la corrección de
+2026-08-22**: tocar el backend sin tocar esos dos llamadores haría que el resumen
+de agosto incluyera el 1° de septiembre. Los dos pasan igual por el corte del
+tenant (`inicioDiaNegocioSql`/`diaNegocioDeSql`, 2026-09-19). Si algún día se
+unifica con `bordeFechaSql`/`bordeHastaSql`, van juntos backend y llamador, y las
+consultas de liquidación comparan **períodos guardados** (`fecha_desde`/
+`fecha_hasta`), no eventos — es otro análisis.
 
 ---
 

@@ -101,9 +101,11 @@ Response (200):
 Query params opcionales: `page`, `pageSize`, `fechaDesde`, `fechaHasta`, `metodoPagoId`, `cajaId`, `ventaId`, `ventaEstado`.
 
 `fechaDesde`/`fechaHasta` siguen el contrato del resto de los filtros de fecha
-(`rango-fecha.util.ts`): una fecha pura (`2026-09-16`) es el día **local del tenant** y
-`fechaHasta` lo incluye completo; un timestamp con hora se respeta tal cual. Hasta el
-2026-09-18 la fecha pura se leía en UTC y `fechaHasta` dejaba afuera el día elegido.
+(`rango-fecha.util.ts`): una fecha pura (`2026-09-16`) es el **día del negocio** del tenant —el
+día local que termina en su hora de corte, no la medianoche del calendario— y `fechaHasta` lo
+incluye completo; un timestamp con hora se respeta tal cual. Con `hora_corte = 0` (el default)
+coincide con la medianoche de siempre. Hasta el 2026-09-18 la fecha pura se leía en UTC y
+`fechaHasta` dejaba afuera el día elegido.
 
 ### GET /api/pagos/resumen
 
@@ -121,9 +123,10 @@ Response (200):
 }
 ```
 
-"Hoy" es el día **local del tenant** (zona de su provincia), de medianoche a medianoche —la
-misma ventana que el resumen de descuadres de caja—. Hasta el 2026-09-18 se resolvía en UTC y
-en Chile cortaba a las 21:00 (20:00 en invierno).
+"Hoy" es el **día del negocio** del tenant: el día local (zona de su provincia) que termina en
+la hora de corte configurada (`tenants.hora_corte`, 0–6, default 0) —la misma ventana que el
+resumen de descuadres de caja—. Con corte 0 coincide con la medianoche de siempre. Hasta el
+2026-09-18 se resolvía en UTC y en Chile cortaba a las 21:00 (20:00 en invierno).
 
 ---
 

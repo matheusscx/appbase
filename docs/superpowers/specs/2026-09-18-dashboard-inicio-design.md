@@ -26,7 +26,7 @@ propio módulo (el de anulaciones pide `Salones: Ver todas`, el de propinas `Pro
 | **Cada bloque aparece según los permisos de quien entra** | El encargado no ve la plata del día; el dueño que también es encargado ve las dos zonas en una sola pantalla |
 | **Los bloques del dueño van con un permiso nuevo**, `Resumen del negocio: Leer`, no con `Ventas: Leer` | La cajera tiene `Ventas: Leer` para buscar una boleta y reimprimirla. Con ese permiso vería también cuánto factura el local, y no habría forma de darle una cosa sin la otra |
 | **"Resumen del negocio" es un módulo propio, contratado junto con Ventas** | Todo permiso cuelga de un módulo contratado (`tenant_modulos`). No se llama "Reportes": un dashboard no es un reporte, y los reportes ya viven en su módulo |
-| **"Hoy" corta a medianoche por ahora.** La hora de corte configurable quedó decidida y va entera, más adelante | Hay otras pantallas que ya cortan a medianoche. Si solo el dashboard usara otro corte, el mismo "sábado" daría dos números al hacer clic. Entrada: *El día del negocio termina en una hora de corte* (`pendientes.md` § 3) |
+| **"Hoy" corta a medianoche por ahora.** La hora de corte configurable quedó decidida y va entera, más adelante *(cerrado 2026-09-19: `resumen-negocio.service.ts` ya calcula "hoy" con el corte del tenant — ver `docs/agent/resueltos.md`)* | Hay otras pantallas que ya cortan a medianoche. Si solo el dashboard usara otro corte, el mismo "sábado" daría dos números al hacer clic. Entrada: *El día del negocio termina en una hora de corte* (`pendientes.md` § 3) |
 | **Solo hoy, comparado con el mismo día de la semana pasada** | Es el vistazo. La semana y el mes son trabajo de un reporte de ventas, que no existe |
 | **Se muestran Vendido y Cobrado** | La diferencia entre los dos es lo que el dueño tiene que salir a cobrar |
 | **La zona del turno se refresca sola**; la del dueño, no | Un tablero de turno que no se actualiza termina mostrando información vieja. Recalcular ventas y pérdidas cada minuto no aporta |
@@ -181,7 +181,8 @@ se oculta**, sin aviso de error: un módulo que no se contrató no es una falla.
 
 ## 7. Fuera de alcance
 
-- **La hora de corte.** Decidida, va entera y en su frente (`pendientes.md` § 3).
+- **La hora de corte.** Decidida, va entera y en su frente (`pendientes.md` § 3) — cerrado
+  2026-09-19, ver `docs/agent/resueltos.md`.
 - **Restar las notas de crédito del vendido.** Pregunta fiscal, frente propio.
 - **Plata de las cuentas abiertas.** Necesita el motor (§ 2).
 - **Stock bajo.** No existe el stock mínimo. Entrada *Aviso de stock bajo* (`pendientes.md` § 4).

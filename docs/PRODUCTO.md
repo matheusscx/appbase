@@ -187,6 +187,18 @@ omisión de UI, es esta regla**.
 - CRUD de datos del tenant: nombre, correo único, teléfono, dirección, provincia
 - CRUD de razones sociales del tenant: datos legales para emitir facturas (nombre legal, RUT, dirección)
 
+**El día del negocio termina en una hora de corte** (`tenants.hora_corte`, entero **0–6**,
+default **0**, admin-only vía `PATCH /tenants/me`): la hora local en que termina el día del
+tenant, no la medianoche del calendario. Un bar con corte 5 cuenta la venta de la 01:30 del
+domingo como venta **del sábado**. El día se calcula **al consultar, con el corte vigente**:
+cambiar la hora **recalcula el pasado** — un reporte ya visto puede mostrar otro total sin que
+nadie toque una venta, porque nada queda grabado con un día fijo. Rige "hoy" y cualquier filtro
+de fecha en pagos, caja, inventario, mermas, pasarela, anulaciones, sesiones de garzón, el
+resumen del negocio y propinas. **Lo que el corte nunca toca:** el motor de precios (la vigencia
+de una regla por horario es hora de reloj, no día de negocio) y la **boleta electrónica**, que
+siempre lleva la fecha calendario real (`FchEmis`) — el día de negocio es solo una vista de
+reporte, nunca el hecho fiscal.
+
 **Sub-tenants:** funcionalidad futura — no entra en el alcance actual.
 
 ---

@@ -120,6 +120,14 @@ dos formas: el "Hoy" de `GET /pagos/resumen` (`p.fecha::date = CURRENT_DATE`) y
 siguiente` para "hoy" (molde de `caja.service.ts` → `resumenDescuadresDia`) y
 `bordeFechaSql`/`bordeHastaSql` para un filtro. Lo fija `test/pagos-dia-local.e2e-spec.ts`.
 
+**Y "el día" en sí tiene otra cara (2026-09-19):** medianoche local no es el único borde válido
+— cada tenant puede correr una `hora_corte` (0–6) que mueve dónde empieza su día, y un lector
+que arma "hoy" o un filtro con su propio `AT TIME ZONE`/`CURRENT_DATE`/`Intl` en vez de pasar
+por `rango-fecha.util.ts` (`diaNegocioTenant`, `bordeFechaSql`/`bordeHastaSql`,
+`diaNegocioDeSql`, `diaNegocioEnZona`) vuelve a cortar a medianoche sin que nadie lo pida, en
+silencio: compila y pasa lint igual. `common/invariants/dia-negocio.invariant.spec.ts` barre
+`src/modules` y lo rechaza.
+
 ### ❌ `tenant_id` tomado del request
 
 ```ts

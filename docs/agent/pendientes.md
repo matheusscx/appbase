@@ -64,8 +64,8 @@ empezarlas.
 ⚠️ **Esta sección no es una tanda que se "termine", y leerla como tal hace tomar malas
 decisiones.** **Varias de sus entradas son features de producto con su propia spec** —entre ellas el
 motor de promociones, la NC como documento, la UF como moneda oficial, `cashRounding`, el
-conteo por denominación, anular o reducir una línea ya enviada a cocina, el envío diario del
-resumen de descuadres y la hora de corte del día del negocio—. Están acá porque se decidieron, no porque sean deuda: **son la cola de
+conteo por denominación, anular o reducir una línea ya enviada a cocina y el envío diario del
+resumen de descuadres—. Están acá porque se decidieron, no porque sean deuda: **son la cola de
 trabajo, y cada una abre su propio frente.**
 
 De la deuda chica que quedaba, el **2026-08-24 salieron tres**: la escala de la pasarela, el
@@ -702,40 +702,6 @@ hereda), que es lo que carga el formulario de ítems.
 📌 **Va en su propio frente.** Toca DTO y service de items, dos pantallas y una regla de qué es
 un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya está construido
 (2026-09-09) y es el que la API tiene que espejar, no contradecir.
-
-### El día del negocio termina en una hora de corte (owner, 2026-09-18)
-
-- [ ] **Cada tenant configura la hora a la que termina su día** (backend + frontend, decidido
-  por el owner el 2026-09-18, en el brainstorm del dashboard de inicio) — un bar que abre el
-  sábado a las 19:00 y cierra el domingo a las 03:00 cobra una cuenta a la 01:30: con corte a
-  las 05:00 esa venta es **del sábado**. Hoy "el día" es el calendario local del tenant y corta
-  a medianoche, así que el sábado del bar sale partido en dos.
-
-  **Va entera, no pantalla por pantalla.** El corte cambia a la vez en todo lector que resuelve
-  "el día" con [`rango-fecha.util.ts`](../../backend/src/common/utils/rango-fecha.util.ts)
-  —la lista sale de `grep -rn zonaHorariaTenant backend/src`, no de esta entrada—: si una
-  pantalla corta a las 05:00 y el reporte al que enlaza corta a medianoche, el mismo "sábado"
-  da dos números distintos al hacer clic. Por eso el dashboard salió cortando a medianoche,
-  como el resto, en vez de estrenar el corte solo.
-
-  ⚠️ **El motor de precios queda afuera.** `calculo-precios.service.ts` también usa la zona
-  del tenant, pero para la vigencia de una regla por horario: un happy hour de "sábado 23:00
-  a 02:00" es hora de reloj, no día del negocio. Además tocar el motor es frente propio.
-
-  🔗 Se cruza con *Manejo de fechas y zonas horarias* (§ 6): ahí vive la pregunta de qué
-  significa "desde el 1 de agosto" para una empresa, y el corte es parte de esa respuesta.
-
-  🔎 **Investigación de mercado hecha** (2026-09-18, pedida por el owner):
-  [`investigaciones/2026-09-18-hora-de-corte-dia-negocio.md`](investigaciones/2026-09-18-hora-de-corte-dia-negocio.md).
-  **Cambiar la hora recalcula el pasado** (owner, 2026-09-18, revirtiendo "congelar" del mismo
-  día): el día se calcula al consultar con el corte vigente. Congelar obligaba a grabar el día
-  de negocio en cada tabla que un reporte lee, no solo en la venta. **Una sola hora para toda la
-  semana**, entre 00:00 y 06:00, en horas enteras y 00:00 por defecto. Lo que no depende de
-  ninguna decisión: la boleta electrónica lleva siempre la fecha calendario real (`FchEmis`); el
-  día de negocio es solo una vista de reporte.
-
-  📐 **Diseño:** [`specs/2026-09-18-hora-de-corte-dia-negocio-design.md`](../superpowers/specs/2026-09-18-hora-de-corte-dia-negocio-design.md),
-  con la lista completa de lectores. Plan: [`plans/2026-09-18-hora-de-corte-dia-negocio.md`](../superpowers/plans/2026-09-18-hora-de-corte-dia-negocio.md).
 
 ## 4. Necesita que el owner conteste
 

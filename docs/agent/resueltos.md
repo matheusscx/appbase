@@ -89,6 +89,107 @@ patrones en [`patterns/backend.md` § 18](../patterns/backend.md) y
 
 ---
 
+## El día del negocio termina en una hora de corte (cerrada 2026-09-19)
+
+Sale de [`pendientes.md` § 3](pendientes.md). La entrada, verbatim:
+
+### El día del negocio termina en una hora de corte (owner, 2026-09-18)
+
+- [ ] **Cada tenant configura la hora a la que termina su día** (backend + frontend, decidido
+  por el owner el 2026-09-18, en el brainstorm del dashboard de inicio) — un bar que abre el
+  sábado a las 19:00 y cierra el domingo a las 03:00 cobra una cuenta a la 01:30: con corte a
+  las 05:00 esa venta es **del sábado**. Hoy "el día" es el calendario local del tenant y corta
+  a medianoche, así que el sábado del bar sale partido en dos.
+
+  **Va entera, no pantalla por pantalla.** El corte cambia a la vez en todo lector que resuelve
+  "el día" con [`rango-fecha.util.ts`](../../backend/src/common/utils/rango-fecha.util.ts)
+  —la lista sale de `grep -rn zonaHorariaTenant backend/src`, no de esta entrada—: si una
+  pantalla corta a las 05:00 y el reporte al que enlaza corta a medianoche, el mismo "sábado"
+  da dos números distintos al hacer clic. Por eso el dashboard salió cortando a medianoche,
+  como el resto, en vez de estrenar el corte solo.
+
+  ⚠️ **El motor de precios queda afuera.** `calculo-precios.service.ts` también usa la zona
+  del tenant, pero para la vigencia de una regla por horario: un happy hour de "sábado 23:00
+  a 02:00" es hora de reloj, no día del negocio. Además tocar el motor es frente propio.
+
+  🔗 Se cruza con *Manejo de fechas y zonas horarias* (§ 6): ahí vive la pregunta de qué
+  significa "desde el 1 de agosto" para una empresa, y el corte es parte de esa respuesta.
+
+  🔎 **Investigación de mercado hecha** (2026-09-18, pedida por el owner):
+  [`investigaciones/2026-09-18-hora-de-corte-dia-negocio.md`](investigaciones/2026-09-18-hora-de-corte-dia-negocio.md).
+  **Cambiar la hora recalcula el pasado** (owner, 2026-09-18, revirtiendo "congelar" del mismo
+  día): el día se calcula al consultar con el corte vigente. Congelar obligaba a grabar el día
+  de negocio en cada tabla que un reporte lee, no solo en la venta. **Una sola hora para toda la
+  semana**, entre 00:00 y 06:00, en horas enteras y 00:00 por defecto. Lo que no depende de
+  ninguna decisión: la boleta electrónica lleva siempre la fecha calendario real (`FchEmis`); el
+  día de negocio es solo una vista de reporte.
+
+  📐 **Diseño:** [`specs/2026-09-18-hora-de-corte-dia-negocio-design.md`](../superpowers/specs/2026-09-18-hora-de-corte-dia-negocio-design.md),
+  con la lista completa de lectores. Plan: [`plans/2026-09-18-hora-de-corte-dia-negocio.md`](../superpowers/plans/2026-09-18-hora-de-corte-dia-negocio.md).
+
+### Qué se hizo
+
+**El dato.** `tenants.hora_corte` (`smallint NOT NULL DEFAULT 0`, `CHECK (hora_corte BETWEEN 0
+AND 6)`, entity `Tenant`). `GET /tenants/me` (cualquier miembro autenticado del tenant) devuelve
+`horaCorte` y `diaNegocioHoy` (`YYYY-MM-DD`, calculado por el servidor con el corte vigente).
+`PATCH /tenants/me` acepta `horaCorte` (`@IsInt() @Min(0) @Max(6)`, admin-only vía
+`TenantAdminGuard`, ya existente).
+
+**El cálculo, en un solo lugar.** `common/utils/rango-fecha.util.ts` gana `DiaNegocio` ({zona,
+horaCorte}), `IdxDiaNegocio` ({zona, corte}, las posiciones `$n` que reserva
+`empujarDiaNegocio`), `diaNegocioTenant` (una sola consulta trae zona de la provincia + corte —
+`zonaHorariaTenant` queda como el subconjunto que solo pide la zona), `requiereDiaNegocio`
+(¿hace falta expandir?, evita el 500 de Postgres por parámetro no referenciado),
+`inicioDiaNegocioSql`/`bordeFechaSql`/`bordeHastaSql` (fecha pura → rango del día del negocio,
+timestamp → tal cual), `diaNegocioDeSql` (instante → día del negocio, en SQL, para un `NOW()` o
+un `GROUP BY`) y `diaNegocioEnZona` (la misma colapsión en TypeScript, para un `Date` ya en
+memoria). Las dos últimas comparten el mismo orden —primero a hora LOCAL, recién ahí se resta el
+corte— porque restar sobre el instante crudo aterriza en el día de calendario equivocado la
+noche del cambio de horario (medido con el salto del 2026-09-06 en Santiago).
+
+**Los lectores que cambiaron a la vez** (filtros de rango por fecha y/o el "hoy" calculado en el
+servidor): `pagos.service.ts` (`listar`, `resumen`), `caja.service.ts` (tendencia de
+descuadres, `resumenDescuadresDia`), `inventario.service.ts` (movimientos), `mermas.service.ts`
+(listado y resumen), `pasarela/services/cobros.service.ts` (órdenes),
+`salones/anulaciones-reporte.service.ts` (listado y resumen), `turnos/sesiones-garzon.service.ts`
+(historial), `resumen-negocio.service.ts` (`hoy`, que arrastra a anulaciones y mermas) y
+`propinas/propina-reportes.service.ts` (reportes, liquidaciones del período y la serie diaria por
+`GROUP BY`). La liquidación de propinas (`propinas/utils/rango-liquidacion.ts`) pasó de recibir
+un instante armado por el navegador con su propia medianoche a recibir fechas puras que el
+servidor expande con zona y corte, igual que los filtros; las liquidaciones ya hechas no se
+tocan (guardan sus bordes, son plata pagada).
+
+**La invariante.** `common/invariants/dia-negocio.invariant.spec.ts` barre todo `src/modules` y
+rechaza `AT TIME ZONE $`/`CURRENT_DATE` sueltos y `instanteLocalEnZona`/`instanteLocalTenant`/
+`fechaLocalTenant` fuera de una allowlist chica (`calculo-precios.service.ts` y `promociones/`,
+que resuelven hora de RELOJ y no día de negocio, a propósito fuera de este frente). Así un lector
+nuevo no puede nacer cortando a medianoche sin que el test lo note.
+
+**Frontend.** Selector "Fin del día" (00:00–06:00) en Configuración → Empresa, con la ayuda que
+avisa que cambiarlo recalcula el pasado. `useDiaNegocio` (composable, cache por montaje de
+pantalla — no global, para que un cambio de tenant no deje una pantalla mostrando el corte
+ajeno) y `DiaNegocioNota` (nota junto al filtro, visible solo con corte ≠ 0) en seis pantallas:
+`sesiones-garzon.vue`, `mermas.vue`, `ordenes.vue`, `propinas/index.vue`,
+`salones/anulaciones.vue` y `CajaTendencia.vue`. Anulaciones arranca sus filtros en el día del
+negocio de hoy (`diaNegocioHoy` de `GET /tenants/me`), no en el `hoyLocal()` del navegador.
+
+**Lo que queda afuera, a propósito:** el motor de precios y las promociones (vigencia por
+horario, hora de reloj); la boleta electrónica (siempre `FchEmis`, la fecha calendario real); y
+cerrar automáticamente una caja o un turno al llegar el corte (el corte cambia cómo se *lee* el
+día, no cuándo se *fuerza* un cierre).
+
+**Pruebas.** Unitarios del util (bordes con corte 0 y 5, `diaNegocioEnZona` a las 04:59 y a las
+05:00, la noche del cambio de horario del 2026-09-06, un timestamp completo que no se expande) y
+`test/dia-negocio.e2e-spec.ts` (754 líneas): un tenant en corte 05:00 con una venta cobrada el
+domingo a la 01:30 hora local cuenta en el sábado en el dashboard, `GET /pagos`, la serie diaria
+de propinas y la liquidación con fechas puras; un control con corte 0 sigue dando el domingo;
+`afterAll` devuelve el tenant a 0. Mutante (corte forzado a 0 dentro del util) rompe el e2e y se
+revirtió. Cada consulta tocada lleva además un test que compara sus `$n` contra la posición real
+en `params` — lección del frente: un parámetro que el SQL no referencia compila y pasa lint
+igual, y solo lo caza Postgres real con un 500 (`42P18`).
+
+---
+
 ## Borrar una bodega mientras otro movimiento escribe stock en ella (cerrada 2026-09-18)
 
 Sale de [`pendientes.md` § 5](pendientes.md). La entrada, verbatim:
