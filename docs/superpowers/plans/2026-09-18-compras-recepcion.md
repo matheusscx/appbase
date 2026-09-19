@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Draft · **Date:** 2026-09-18 · **Owner:** Cesar Matheus
+**Status:** In Progress · **Date:** 2026-09-18 · **Owner:** Cesar Matheus
 **Worktree:** `.claude/worktrees/compras-recepcion`, rama `compras-recepcion` (sale de `main` en `dfba1818`).
 
 **Goal:** Una compra con encabezado (proveedor, documento, folio, ubicación) y líneas, que pasa de
@@ -45,6 +45,15 @@ Por eso:
   cambia el chokepoint y todo lo demás depende de cómo quede.
 - **La rama no se integra a `main` hasta la tarea 11.** El estado intermedio (borradores que no se
   pueden confirmar) no llega a nadie.
+
+### Ejecución (2026-09-18)
+
+| Tarea | Commit | Lo que cambió respecto del plan |
+|---|---|---|
+| 1 | `531a51ee` | La revisión independiente encontró que al usuario fixture le faltaba la fila en `usuarios_tenants` (sin ella no entra a Paris) |
+| 2 | `abb3c5f4` | Sin cambios |
+| 3 | `a34a6bad` | Se compran `producto` **e** `ingrediente` (owner). Un fixture más, `compras.lectura` (ids …441/…442, del bloque 441–445): sin él, un `POST` guardado con `Leer` pasaba la suite. La revisión agregó `EscalaMonedaPipe` al body (el `@EsCosto()` solo no valida) y cambió la validación de unidades a `crearConversor` |
+| 4 | `1b15c224` | `useCompras()` devuelve funciones, como `useEstadoVenta`. El precio usa `MoneyInput` en vez de un `UInput` |
 
 ## Global Constraints
 
@@ -134,7 +143,7 @@ Desde la tarea 5: `inventario/entities/movimiento-inventario.entity.ts`,
   nombres de propiedad de abajo. El módulo `Compras` con acciones `Leer`, `Crear`, `Actualizar` y
   `Anular`. El usuario fixture `encargado.compras@paris.cl` (pass del seed `admin`).
 
-- [ ] **Step 1: Verificar que el rango reservado `…420`–`…440` sigue libre**, con el método de
+- [x] **Step 1: Verificar que el rango reservado `…420`–`…440` sigue libre**, con el método de
   `docs/patterns/backend.md` § 8 (literales, `const uuid = ` y los loops `let id =`), contra
   `main` **y** contra cada rama viva que toque el seeder:
 
@@ -146,7 +155,7 @@ git diff main...claude/dashboard-inicio -- backend/src/modules/seeder/seeder.ser
   Si algo del rango ya está tomado, **parar y pedirle un rango nuevo a la sesión coordinadora**.
   No correrlo por cuenta propia.
 
-- [ ] **Step 2: `tipo-documento-compra.entity.ts`**
+- [x] **Step 2: `tipo-documento-compra.entity.ts`**
 
 ```ts
 import {
@@ -197,7 +206,7 @@ export class TipoDocumentoCompra {
 }
 ```
 
-- [ ] **Step 3: `compra.entity.ts`**
+- [x] **Step 3: `compra.entity.ts`**
 
 ```ts
 import {
@@ -297,7 +306,7 @@ export class Compra {
 }
 ```
 
-- [ ] **Step 4: `compra-linea.entity.ts`**
+- [x] **Step 4: `compra-linea.entity.ts`**
 
 ```ts
 import {
@@ -388,7 +397,7 @@ export class CompraLinea {
 }
 ```
 
-- [ ] **Step 5: `compra-linea-cambio.entity.ts`**
+- [x] **Step 5: `compra-linea-cambio.entity.ts`**
 
 ```ts
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
@@ -430,7 +439,7 @@ export class CompraLineaCambio {
 > Append-only: sin `eliminado_el`, igual que el kardex. Si el test de esquema exige la columna a
 > toda tabla, se agrega nullable y se deja escrito el porqué en el docblock.
 
-- [ ] **Step 6: `compras.module.ts` y `app.module.ts`**
+- [x] **Step 6: `compras.module.ts` y `app.module.ts`**
 
 ```ts
 import { Module } from '@nestjs/common';
@@ -451,7 +460,7 @@ export class ComprasModule {}
 En `app.module.ts`: sumar las cuatro clases al array `entities` del `TypeOrmModule.forRoot` y
 `ComprasModule` a `imports`.
 
-- [ ] **Step 7: Seed.** En `seeder.service.ts`, siguiendo los moldes que se citan:
+- [x] **Step 7: Seed.** En `seeder.service.ts`, siguiendo los moldes que se citan:
 
   1. **Catálogo:** `seedTiposDocumentoCompra()`, llamado después de `seedTiposDocumentoTributario()`
      (línea ~201 de `onApplicationBootstrap`), con `INSERT … ON CONFLICT DO NOTHING` y los países
@@ -491,13 +500,13 @@ En `app.module.ts`: sumar las cuatro clases al array `entities` del `TypeOrmModu
      2026-09-18: en main el máximo era 406, y la rama de KPIs (`claude/dashboard-inicio`) toma
      407–409 con margen hasta 419. Medido con § 8 contra main y las ramas vivas."*
 
-- [ ] **Step 8: Verificar que compila y arranca.**
+- [x] **Step 8: Verificar que compila y arranca.**
 
 Run: `cd backend && npm run typecheck && npm run lint:check`
 Expected: sin errores.
 El arranque real (synchronize + seed) se mide en la tarea 3, con turno de stack.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/src/modules/compras/entities backend/src/modules/compras/compras.module.ts backend/src/app.module.ts backend/src/modules/seeder/seeder.service.ts
@@ -538,7 +547,7 @@ export function costearLineas(
 ): string[];
 ```
 
-- [ ] **Step 1: Test que falla**
+- [x] **Step 1: Test que falla**
 
 ```ts
 import Decimal from 'decimal.js';
@@ -606,12 +615,12 @@ describe('costearLineas', () => {
 });
 ```
 
-- [ ] **Step 2: Correrlo y ver que falla**
+- [x] **Step 2: Correrlo y ver que falla**
 
 Run: `cd backend && npx jest src/modules/compras/reparto-descuento.spec.ts`
 Expected: FAIL, *"Cannot find module './reparto-descuento'"*.
 
-- [ ] **Step 3: Implementación**
+- [x] **Step 3: Implementación**
 
 ```ts
 import Decimal from 'decimal.js';
@@ -665,16 +674,16 @@ export function costearLineas(
 > el test o la elección del `cfg`, no la función del motor. Leer su docblock (tabla de tramos)
 > antes de cambiar nada.
 
-- [ ] **Step 4: Correrlo y ver que pasa**
+- [x] **Step 4: Correrlo y ver que pasa**
 
 Run: `cd backend && npx jest src/modules/compras/reparto-descuento.spec.ts`
 Expected: PASS, 4 tests.
 
-- [ ] **Step 5: Mutante que revierte.** Cambiar la llamada a `repartirProporcional` por un reparto
+- [x] **Step 5: Mutante que revierte.** Cambiar la llamada a `repartirProporcional` por un reparto
   línea por línea (`descuento.times(valor).dividedBy(total)` sin residuo). El tercer test tiene que
   quedar en **rojo**. Restaurar.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/src/modules/compras/reparto-descuento.ts backend/src/modules/compras/reparto-descuento.spec.ts
@@ -743,7 +752,7 @@ Rutas de esta tarea (spec § 5):
 > ⚠️ Las rutas fijas (`/tipos-documento`, `/proveedores`) van **antes** de `/:id` en el
 > controller, o Nest las captura como id. `/:id` lleva `ParseUUIDPipe`.
 
-- [ ] **Step 1: DTOs**
+- [x] **Step 1: DTOs**
 
 ```ts
 // dto/compra-borrador.dto.ts
@@ -810,7 +819,7 @@ export class FindComprasDto extends PaginationQueryDto {
 > Los bordes `desde`/`hasta` van con la regla de `docs/patterns/backend.md` § 10b (día local del
 > tenant). Sobre `fecha_documento`, que es `date`, se compara directo: no hay zona que convertir.
 
-- [ ] **Step 2: Tests unitarios del service que fallan.** En `compras.service.spec.ts`, con
+- [x] **Step 2: Tests unitarios del service que fallan.** En `compras.service.spec.ts`, con
   `dbMock` según `docs/patterns/backend.md` § 7. Una prueba por regla:
 
   1. Rechaza un proveedor que no es del tenant, con 400 *"Proveedor no encontrado"* (el mismo
@@ -836,7 +845,7 @@ export class FindComprasDto extends PaginationQueryDto {
 Run: `cd backend && npx jest src/modules/compras/compras.service.spec.ts`
 Expected: FAIL, los 12.
 
-- [ ] **Step 3: Implementar el service.** Estas son las piezas; ninguna toca el kardex:
+- [x] **Step 3: Implementar el service.** Estas son las piezas; ninguna toca el kardex:
 
   - Una sola función privada `validarEncabezado(manager, tenantId, dto)` que usan `crearBorrador`
     y `actualizarBorrador`. Resuelve proveedor, tipo de documento y ubicación con **una query por
@@ -863,16 +872,16 @@ Expected: FAIL, los 12.
   - Respuesta de POST/PATCH: `findOne` al final de la transacción (el molde de `traslados`, que
     explica por qué releer en vez de armar a mano).
 
-- [ ] **Step 4: Controller** con `@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)` a nivel de
+- [x] **Step 4: Controller** con `@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)` a nivel de
   clase y `@RequiresPermiso('Compras', …)` por handler, según la tabla de arriba. El molde es
   `traslados.controller.ts`.
 
-- [ ] **Step 5: Correr los unitarios**
+- [x] **Step 5: Correr los unitarios**
 
 Run: `cd backend && npx jest src/modules/compras`
 Expected: PASS.
 
-- [ ] **Step 6: e2e.** `test/compras.e2e-spec.ts`, con el bootstrap de `traslados.e2e-spec.ts`
+- [x] **Step 6: e2e.** `test/compras.e2e-spec.ts`, con el bootstrap de `traslados.e2e-spec.ts`
   (líneas 175–248: `setGlobalPrefix`, `cookieParser`, `ValidationPipe`, login en dos pasos con
   `switch-tenant`). Reglas del spec:
   - **Todo `.body` del que se saca un valor lleva su `expect(status)` al lado.**
@@ -897,7 +906,7 @@ Expected: PASS.
   10. **Aislamiento:** con el token del segundo tenant (`helpers/segundo-tenant.ts`), el
       `GET /compras/:id` de una compra de Paris → 404, y usar el proveedor de Paris → 400.
 
-- [ ] **Step 7: Pedir turno de stack** a la sesión coordinadora. Con el turno:
+- [x] **Step 7: Pedir turno de stack** a la sesión coordinadora. Con el turno:
 
 ```bash
 ./scripts/reset-db.sh
@@ -909,7 +918,7 @@ Expected: PASS, y `--verificar` sin movimiento. Si el arranque falla con un erro
 causa más probable es el tipo de columna de alguna unión (`estado`, `campo`): ver la memoria
 *typeorm tipo de columna explícito*.
 
-- [ ] **Step 8: Mutantes que revierten** (uno por vez, restaurar después, y verificar la hora de
+- [x] **Step 8: Mutantes que revierten** (uno por vez, restaurar después, y verificar la hora de
   restart del watcher antes de volver a correr):
   - Sacar `AND c.estado <> 'anulada'` del pre-check de folio → no mata nada todavía, porque la
     anulación es de la tarea 9. Se anota para la tarea 9.
@@ -917,7 +926,7 @@ causa más probable es el tipo de columna de alguna unión (`estado`, `campo`): 
   - Cambiar `@RequiresPermiso('Compras','Crear')` por `('Compras','Leer')` en `POST` → el caso 9
     tiene que quedar en rojo.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/src/modules/compras backend/test/compras.e2e-spec.ts
@@ -951,10 +960,10 @@ export function insigniaEstado(c: { estado: string; faltaCosto: boolean }):
   { label: string; color: 'neutral' | 'success' | 'error' | 'warning' }[]
 ```
 
-- [ ] **Step 0: Invocar el skill `nuxt-ui`** antes de escribir la página. Es regla de la memoria
+- [x] **Step 0: Invocar el skill `nuxt-ui`** antes de escribir la página. Es regla de la memoria
   del proyecto.
 
-- [ ] **Step 1: Test del composable que falla**
+- [x] **Step 1: Test del composable que falla**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -985,13 +994,13 @@ describe('useCompras', () => {
 Run: `cd frontend && npx vitest run app/composables/useCompras.spec.ts`
 Expected: FAIL.
 
-- [ ] **Step 2: Implementar `useCompras.ts`** con Decimal.js (ya es dependencia del front; si no,
+- [x] **Step 2: Implementar `useCompras.ts`** con Decimal.js (ya es dependencia del front; si no,
   **parar**: una dependencia nueva se pregunta). `totalLinea` y `subtotal` **no redondean**: son
   para comparar con el papel, y el costo lo calcula el servidor.
 
-- [ ] **Step 3: Correrlo y ver que pasa.** Mismo comando. Expected: PASS.
+- [x] **Step 3: Correrlo y ver que pasa.** Mismo comando. Expected: PASS.
 
-- [ ] **Step 4: Menú.** En `dashboard.vue`, un bloque propio:
+- [x] **Step 4: Menú.** En `dashboard.vue`, un bloque propio:
 
 ```ts
 if (permissionsStore.esAdmin || permissionsStore.can('Compras', 'Leer')) {
@@ -999,7 +1008,7 @@ if (permissionsStore.esAdmin || permissionsStore.can('Compras', 'Leer')) {
 }
 ```
 
-- [ ] **Step 5: `pages/compras/index.vue`.** Es el molde del listado de `inventario/traslados.vue`
+- [x] **Step 5: `pages/compras/index.vue`.** Es el molde del listado de `inventario/traslados.vue`
   (líneas 1–140: `definePageMeta`, `usePaginatedList`, `usePermisosCrud`), pero **sin drawer**:
   - Columnas: fecha del documento, proveedor, documento (`tipoDocumentoNombre` + `folio`),
     ubicación, líneas, total y estado. El estado va con `insigniaEstado` en `UBadge`, y la fila
@@ -1009,7 +1018,7 @@ if (permissionsStore.esAdmin || permissionsStore.can('Compras', 'Leer')) {
     (`faltaCosto=true`).
   - Botón *Nueva compra* → `/compras/nueva`, visible con `usePermisosCrud('Compras').puedeCrear`.
 
-- [ ] **Step 6: `pages/compras/[id].vue`, en modo carga** (`id === 'nueva'` o una compra en
+- [x] **Step 6: `pages/compras/[id].vue`, en modo carga** (`id === 'nueva'` o una compra en
   `borrador`):
   - **Arriba:** proveedor (`/compras/proveedores`), tipo (`/compras/tipos-documento`), folio
     (oculto si `requiereFolio` es false), fecha y ubicación (`useUbicaciones`, solo activas).
@@ -1030,7 +1039,7 @@ if (permissionsStore.esAdmin || permissionsStore.can('Compras', 'Leer')) {
   - Una compra `confirmada` o `anulada` abierta acá muestra, por ahora, el detalle en solo
     lectura. Las acciones son de la tarea 10.
 
-- [ ] **Step 7: Spec de componente** `compras-carga.nuxt.spec.ts`, con el mock de `useApiFetch` que
+- [x] **Step 7: Spec de componente** `compras-carga.nuxt.spec.ts`, con el mock de `useApiFetch` que
   usan los otros `.nuxt.spec.ts`:
   1. Tipear 20,35 y $1.490 muestra *"30.321,5"* al lado.
   2. Con una línea sin precio, el descuento está deshabilitado y dice por qué.
@@ -1042,13 +1051,13 @@ if (permissionsStore.esAdmin || permissionsStore.can('Compras', 'Leer')) {
 Run: `cd frontend && npx vitest run app/pages/compras app/composables/useCompras.spec.ts`
 Expected: PASS.
 
-- [ ] **Step 8: Gate del front**
+- [x] **Step 8: Gate del front**
 
 Run: `cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run design:check`
 Expected: todo verde (exit code 0 de cada uno, no la última línea: memoria *exit code, no la última
 línea*).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add frontend/app/composables/useCompras.ts frontend/app/composables/useCompras.spec.ts frontend/app/pages/compras frontend/app/layouts/dashboard.vue
