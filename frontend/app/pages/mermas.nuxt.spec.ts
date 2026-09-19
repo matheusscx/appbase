@@ -36,6 +36,9 @@ let mermasListado: Record<string, unknown>[] = []
  *  pantalla no alcanza (el servidor es el que manda), pero sin esto
  *  "Cortesía de la casa" aparecería en el selector de Mermas. */
 let motivosUrlSolicitada = ''
+/** Task 5: corte del día de negocio que devuelve `GET /tenants/me` — 0 por
+ *  defecto (sin corte, la `DiaNegocioNota` no se dibuja). */
+let horaCorteBackend = 0
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -48,6 +51,9 @@ mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     if (typeof url !== 'string') return Promise.resolve({ data: [], meta: {} })
     if (url.includes('/ubicaciones')) return Promise.resolve(ubicacionesBackend)
+    if (url.includes('/tenants/me')) {
+      return Promise.resolve({ horaCorte: horaCorteBackend, diaNegocioHoy: '2026-09-18' })
+    }
     if (opts?.method === 'POST' && url.includes('/mermas')) {
       mermasEnviadas.push({ ...(opts.body ?? {}) })
       return Promise.resolve({
@@ -282,6 +288,31 @@ describe('mermas — badge de anulación en mesa', () => {
     expect(conAnulacion!.text()).toContain('Anulación en mesa')
     expect(sinAnulacion!.text()).not.toContain('Anulación en mesa')
 
+    wrapper.unmount()
+  })
+})
+
+// Task 5: la nota del día de negocio, debajo de la fila de filtros de fecha.
+describe('mermas — nota del día de negocio', () => {
+  beforeEach(() => {
+    ubicacionesBackend = [LOCAL]
+    mermasListado = []
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  it('con corte configurado, muestra "Tu día va de HH:00 a HH:00"', async () => {
+    horaCorteBackend = 5
+    const wrapper = await montar()
+
+    expect(wrapper.text()).toContain('Tu día va de 05:00 a 05:00')
+    wrapper.unmount()
+  })
+
+  it('sin corte (0), no muestra la nota', async () => {
+    horaCorteBackend = 0
+    const wrapper = await montar()
+
+    expect(wrapper.text()).not.toContain('Tu día va de')
     wrapper.unmount()
   })
 })

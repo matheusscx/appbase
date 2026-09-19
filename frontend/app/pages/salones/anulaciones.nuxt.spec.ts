@@ -108,6 +108,14 @@ const RESUMEN = {
 
 /** URLs con las que se llamó a `useApiFetch`, en orden — Step 1, punto 5. */
 let llamadas: string[] = []
+/** Task 5: corte y día de negocio que devuelve `GET /tenants/me`. */
+let horaCorteBackend = 0
+let diaNegocioHoyBackend = '2026-09-18'
+/** Con esto en `true`, `/tenants/me` NO resuelve solo — el test dispara
+ *  `tenantMeResolver` cuando quiere, para poder tocar un filtro ANTES de que
+ *  el día de negocio llegue y comprobar que el ajuste automático no lo pisa. */
+let tenantMePendiente = false
+let tenantMeResolver: ((v: { horaCorte: number, diaNegocioHoy: string }) => void) | null = null
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -120,6 +128,12 @@ mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
     if (typeof url !== 'string') return Promise.resolve({ data: [], meta: {} })
     llamadas.push(url)
+    if (url.includes('/tenants/me')) {
+      if (tenantMePendiente) {
+        return new Promise((res) => { tenantMeResolver = res })
+      }
+      return Promise.resolve({ horaCorte: horaCorteBackend, diaNegocioHoy: diaNegocioHoyBackend })
+    }
     // Ojo con el orden: '/salones/anulaciones/resumen' también matchea
     // '/salones/anulaciones', así que el resumen se chequea primero.
     if (url.includes('/salones/anulaciones/resumen')) {
@@ -165,8 +179,22 @@ async function emitir(comp: ReturnType<typeof selectConOpcion>, valor: string) {
   await new Promise(r => setTimeout(r, 20))
 }
 
+/** 'YYYY-MM-DD' de HOY, mismo criterio que `hoyLocal()` (fecha LOCAL, no
+ *  `toISOString()` que da UTC) — la página arranca sus filtros con esa
+ *  función y este test necesita el mismo "hoy" para comparar. */
+function hoyLocalTest(): string {
+  const d = new Date()
+  const mes = String(d.getMonth() + 1).padStart(2, '0')
+  const dia = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${mes}-${dia}`
+}
+
 beforeEach(() => {
   llamadas = []
+  horaCorteBackend = 0
+  diaNegocioHoyBackend = hoyLocalTest()
+  tenantMePendiente = false
+  tenantMeResolver = null
 })
 
 describe('anulaciones — resumen', () => {
@@ -279,6 +307,112 @@ describe('anulaciones — filtros comparten las dos rutas', () => {
     expect(listadoConTipo, `listado con tipo=cortesia entre: ${JSON.stringify(llamadas)}`).toBe(true)
     expect(resumenConTipo, `resumen con tipo=cortesia entre: ${JSON.stringify(llamadas)}`).toBe(true)
 
+    wrapper.unmount()
+  })
+})
+
+// Task 5: la nota del día de negocio, debajo de la fila de filtros de fecha.
+describe('anulaciones — nota del día de negocio', () => {
+  it('con corte configurado, muestra la nota', async () => {
+    horaCorteBackend = 5
+    const wrapper = await montar()
+
+    expect(wrapper.text()).toContain('Tu día va de 05:00 a 05:00')
+    wrapper.unmount()
+  })
+
+  it('sin corte (0), no muestra la nota', async () => {
+    horaCorteBackend = 0
+    const wrapper = await montar()
+
+    expect(wrapper.text()).not.toContain('Tu día va de')
+    wrapper.unmount()
+  })
+})
+
+// Task 5, brief § Step 4 — fix round 1 (revisión de dominio, BLOQUEA):
+// el mecanismo anterior (flag `aplicandoDiaNegocio` + `watch`) no protegía
+// nada — el `watch` es `flush: 'pre'` y corre DESPUÉS de que la función ya
+// puso el flag en `false`, así que `filtrosTocados` terminaba en `true` tras
+// CUALQUIER ajuste automático, tocado o no. El reemplazo lo decide ahora
+// comparando el valor ACTUAL contra `hoyLocalInicial` (el `hoyLocal()` con el
+// que la página arrancó) al resolver `cargar()` — sin flag, sin watch, sin
+// orden de microtasks de por medio.
+function ayer(): string {
+  const d = new Date()
+  d.setDate(d.getDate() - 1)
+  const mes = String(d.getMonth() + 1).padStart(2, '0')
+  const dia = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${mes}-${dia}`
+}
+
+describe('anulaciones — arranca en el día de negocio', () => {
+  it('sin tocar los filtros, con diaNegocioHoy = ayer, los dos terminan en ayer', async () => {
+    horaCorteBackend = 5
+    diaNegocioHoyBackend = ayer()
+
+    const wrapper = await montar()
+    const vm = wrapper.vm as unknown as { filtroDesde: string, filtroHasta: string }
+
+    expect(vm.filtroDesde).toBe(diaNegocioHoyBackend)
+    expect(vm.filtroHasta).toBe(diaNegocioHoyBackend)
+    wrapper.unmount()
+  })
+
+  it('si el usuario ya cambió "desde" antes de resolver, ningún filtro se pisa', async () => {
+    // `/tenants/me` queda PENDIENTE a propósito: el test toca el filtro antes
+    // de que el día de negocio llegue.
+    tenantMePendiente = true
+    horaCorteBackend = 5
+
+    const wrapper = await mountSuspended(Anulaciones, { attachTo: document.body })
+    useMonedasStore().hydrate([CLP], 'tenant-1')
+    const vm = wrapper.vm as unknown as { filtroDesde: string, filtroHasta: string }
+    vm.filtroDesde = '2026-01-01'
+
+    tenantMeResolver?.({ horaCorte: 5, diaNegocioHoy: ayer() })
+    await new Promise(r => setTimeout(r, 40))
+
+    expect(vm.filtroDesde).toBe('2026-01-01')
+    // "hasta" tampoco se toca: el ajuste es de a dos, y "desde" ya cambió.
+    expect(vm.filtroHasta).not.toBe(ayer())
+    wrapper.unmount()
+  })
+
+  it('si el usuario ya cambió "hasta" antes de resolver, ningún filtro se pisa', async () => {
+    tenantMePendiente = true
+    horaCorteBackend = 5
+
+    const wrapper = await mountSuspended(Anulaciones, { attachTo: document.body })
+    useMonedasStore().hydrate([CLP], 'tenant-1')
+    const vm = wrapper.vm as unknown as { filtroDesde: string, filtroHasta: string }
+    vm.filtroHasta = '2026-01-31'
+
+    tenantMeResolver?.({ horaCorte: 5, diaNegocioHoy: ayer() })
+    await new Promise(r => setTimeout(r, 40))
+
+    expect(vm.filtroHasta).toBe('2026-01-31')
+    expect(vm.filtroDesde).not.toBe(ayer())
+    wrapper.unmount()
+  })
+
+  it('con diaNegocioHoy igual a hoyLocal(), no reasigna ni dispara una recarga extra', async () => {
+    // `diaNegocioHoyBackend` por defecto (`beforeEach`) ya es `hoyLocalTest()`
+    // — el caso donde el corte no mueve el día de negocio del que ve el
+    // navegador, así que no hay nada que corregir.
+    horaCorteBackend = 5
+
+    const wrapper = await montar()
+    const vm = wrapper.vm as unknown as { filtroDesde: string, filtroHasta: string }
+    expect(vm.filtroDesde).toBe(hoyLocalTest())
+    expect(vm.filtroHasta).toBe(hoyLocalTest())
+
+    const llamadasTrasMontar = llamadas.length
+    await new Promise(r => setTimeout(r, 40))
+
+    // Sin reasignación, `watch(listFilters, cargarResumen)` y el refetch
+    // interno de `usePaginatedList` no tienen motivo para disparar de nuevo.
+    expect(llamadas.length).toBe(llamadasTrasMontar)
     wrapper.unmount()
   })
 })

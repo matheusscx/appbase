@@ -11,6 +11,7 @@
 // garzones: `transferir-admin` rechaza a quien no tiene sesión, y ofrecer a
 // todos sería ofrecer opciones que terminan en 400.
 import { describe, it, expect, beforeEach } from 'vitest'
+import { nextTick } from 'vue'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import type { CuentaPendienteGarzon } from '~/composables/useSesionesGarzon'
 import Sesiones from './sesiones-garzon.vue'
@@ -71,11 +72,17 @@ let pendientesAlCerrar: ReturnType<typeof pendiente>[] = []
 let transferencias: { cuentaId: string, garzonId: string }[] = []
 /** `cuentaId` que el backend rechaza al transferir (null = todas pasan). */
 let transferenciaFalla: string | null = null
+/** Task 5: corte del día de negocio que devuelve `GET /tenants/me`. */
+let horaCorteBackend = 0
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: { garzonId?: string } }) => {
     if (typeof url !== 'string') return Promise.resolve([])
     const method = opts?.method ?? 'GET'
+
+    if (url.includes('/tenants/me')) {
+      return Promise.resolve({ horaCorte: horaCorteBackend, diaNegocioHoy: '2026-09-18' })
+    }
 
     const transferir = /\/cuentas\/([^/]+)\/transferir-admin$/.exec(url)
     if (transferir && method === 'POST') {
@@ -256,6 +263,42 @@ describe('sesiones-garzon — cierre admin con mesas abiertas', () => {
       [...d!.querySelectorAll('button')].map(b => b.textContent?.trim()),
     ).not.toContain('Transferir')
 
+    wrapper.unmount()
+  })
+})
+
+// Task 5: la nota del día de negocio, debajo de los filtros de fecha del
+// historial (la pestaña "Abiertas" no filtra por fecha, así que no la lleva).
+describe('sesiones-garzon — nota del día de negocio', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    abiertasBackend = []
+    pendientesAlCerrar = []
+    transferencias = []
+    transferenciaFalla = null
+  })
+
+  it('en el historial, con corte configurado, muestra la nota', async () => {
+    horaCorteBackend = 5
+    const wrapper = await montar()
+    const vm = wrapper.vm as unknown as { tab: string }
+    vm.tab = 'historial'
+    await nextTick()
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(wrapper.text()).toContain('Tu día va de 05:00 a 05:00')
+    wrapper.unmount()
+  })
+
+  it('en el historial, sin corte (0), no muestra la nota', async () => {
+    horaCorteBackend = 0
+    const wrapper = await montar()
+    const vm = wrapper.vm as unknown as { tab: string }
+    vm.tab = 'historial'
+    await nextTick()
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(wrapper.text()).not.toContain('Tu día va de')
     wrapper.unmount()
   })
 })

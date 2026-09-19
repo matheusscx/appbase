@@ -301,6 +301,8 @@ onMounted(async () => {
               />
             </div>
 
+            <DiaNegocioNota />
+
             <CrudTable
               :data="historial"
               :columns="columnsHistorial"

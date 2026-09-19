@@ -24,7 +24,16 @@ interface TenantMe {
   telefono: string | null
   direccion: string | null
   provinciaId: string
+  horaCorte: number
 }
+
+// 00:00…06:00 — mismo rango que acepta `UpdateMyTenantDto.horaCorte` en el
+// backend (entero 0-6). Junto a la provincia porque las dos definen "cuándo
+// es hoy" (spec § 3.1).
+const horaCorteItems = Array.from({ length: 7 }, (_, h) => ({
+  label: `${String(h).padStart(2, '0')}:00`,
+  value: h,
+}))
 
 const config = useRuntimeConfig()
 const toast = useToast()
@@ -43,6 +52,7 @@ const form = ref({
   direccion: '',
   paisId: '',
   provinciaId: '',
+  horaCorte: 0,
 })
 
 async function cargar() {
@@ -58,6 +68,7 @@ async function cargar() {
     form.value.telefono = tenant.telefono ?? ''
     form.value.direccion = tenant.direccion ?? ''
     form.value.provinciaId = tenant.provinciaId
+    form.value.horaCorte = tenant.horaCorte
 
     // Cargar todas las provincias para inferir el país actual
     const todasProvincias = await useApiFetch<Provincia[]>(`${apiUrl}/catalog/provincias`)
@@ -98,6 +109,7 @@ async function guardar() {
       correo: form.value.correo,
       telefono: form.value.telefono || null,
       direccion: form.value.direccion || null,
+      horaCorte: form.value.horaCorte,
     }
     if (form.value.provinciaId) {
       body.provinciaId = form.value.provinciaId
@@ -179,6 +191,16 @@ onMounted(cargar)
             label-key="label"
             placeholder="Selecciona una provincia"
             :disabled="!form.paisId"
+          />
+        </UFormField>
+
+        <UFormField
+          label="Fin del día"
+          help="Una venta a la 01:30 con corte a las 05:00 cuenta en el día anterior. Si lo cambias, los reportes pasados se recalculan con el corte nuevo."
+        >
+          <USelect
+            v-model="form.horaCorte"
+            :items="horaCorteItems"
           />
         </UFormField>
 

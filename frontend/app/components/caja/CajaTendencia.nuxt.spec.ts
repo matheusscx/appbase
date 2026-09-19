@@ -27,6 +27,20 @@ const FILAS: TendenciaDescuadres[] = [
 const cargarTendencia = vi.fn<(desde?: string, hasta?: string) => Promise<TendenciaDescuadres[]>>()
 mockNuxtImport('useCajaStore', () => () => ({ cargarTendencia }))
 
+// Task 5: la `DiaNegocioNota` pide su propio `/tenants/me` — sin mockear
+// `useApiFetch` acá, el `$fetch` global (`vi.fn()` en `test.setup.ts`) devuelve
+// `undefined` y la nota cae en su rama de error de red, que no es lo que este
+// spec necesita cubrir.
+let horaCorteBackend = 0
+mockNuxtImport('useApiFetch', () => {
+  return (url: string) => {
+    if (typeof url === 'string' && url.includes('/tenants/me')) {
+      return Promise.resolve({ horaCorte: horaCorteBackend, diaNegocioHoy: '2026-09-18' })
+    }
+    return Promise.resolve({})
+  }
+})
+
 // `formatMonto` cae en `formatOficial`, que devuelve '—' si la store de monedas
 // está vacía. En la app la hidrata el layout `dashboard` (que esta página usa);
 // acá la página se monta sola, así que hay que hidratarla a mano o los montos
@@ -52,6 +66,7 @@ beforeEach(() => {
   cargarTendencia.mockReset()
   cargarTendencia.mockResolvedValue(FILAS)
   useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+  horaCorteBackend = 0
 })
 
 describe('CajaTendencia', () => {
@@ -134,5 +149,22 @@ describe('CajaTendencia', () => {
 
     expect(html).toContain('text-red-600')
     expect(html).toContain('text-green-600')
+  })
+
+  // Task 5: la nota del día de negocio, debajo de los filtros de fecha.
+  it('con corte configurado, muestra la nota del día de negocio', async () => {
+    horaCorteBackend = 5
+    const wrapper = await mountSuspended(CajaTendencia)
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(wrapper.text()).toContain('Tu día va de 05:00 a 05:00')
+  })
+
+  it('sin corte (0), no muestra la nota', async () => {
+    horaCorteBackend = 0
+    const wrapper = await mountSuspended(CajaTendencia)
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(wrapper.text()).not.toContain('Tu día va de')
   })
 })

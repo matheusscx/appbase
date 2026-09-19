@@ -72,11 +72,31 @@ const { formatFecha, formatMonto, formatStock, formatCostoPorMoneda } = useForma
 const { pageSize } = useUserPreferences()
 
 const motivos = ref<MotivoOpt[]>([])
-const filtroDesde = ref(hoyLocal())
-const filtroHasta = ref(hoyLocal())
+// La lista pide al montar con el `hoyLocal()` del navegador (arranque
+// optimista, sin esperar la red) y se corrige cuando resuelve el día de
+// negocio del servidor — solo difieren entre las 00:00 y la hora de corte
+// (Task 5, brief § Step 4). `hoyLocalInicial` congela ESE valor de arranque:
+// si al resolver el filtro sigue siendo igual a él, el usuario no lo tocó
+// todavía y el ajuste automático puede reemplazarlo. Si ya cambió —a mano o
+// por cualquier otro motivo— no se lo pisa. Sin flag de reentrada: no hace
+// falta distinguir "quién" escribió el ref, alcanza con comparar el valor
+// contra el que había al montar.
+const hoyLocalInicial = hoyLocal()
+const filtroDesde = ref(hoyLocalInicial)
+const filtroHasta = ref(hoyLocalInicial)
 const filtroTipo = ref('todos')
 const filtroMotivo = ref('todos')
 const filtroGarzon = ref('todos')
+
+const { horaCorte, diaNegocioHoy, cargar: cargarDiaNegocio } = useDiaNegocio()
+
+async function ajustarAlDiaDeNegocio() {
+  await cargarDiaNegocio()
+  if (!diaNegocioHoy.value || diaNegocioHoy.value === hoyLocalInicial) return
+  if (filtroDesde.value !== hoyLocalInicial || filtroHasta.value !== hoyLocalInicial) return
+  filtroDesde.value = diaNegocioHoy.value
+  filtroHasta.value = diaNegocioHoy.value
+}
 
 const listFilters = computed(() => ({
   desde: filtroDesde.value || undefined,
@@ -144,6 +164,7 @@ async function cargarMotivos() {
 onMounted(() => {
   cargarMotivos()
   cargarResumen()
+  ajustarAlDiaDeNegocio()
 })
 
 const tipoOpts: Opt[] = [
@@ -248,6 +269,8 @@ const columnasAutorizo: TableColumn<GrupoPorAutorizo>[] = [
             placeholder="Garzón"
           />
         </div>
+
+        <DiaNegocioNota :hora-corte="horaCorte" />
 
         <div v-if="!rangoCompleto" class="rounded-lg bg-muted p-4 text-sm text-muted">
           Selecciona desde y hasta para ver el resumen.

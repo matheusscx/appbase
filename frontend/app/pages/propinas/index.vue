@@ -265,6 +265,8 @@ onMounted(async () => {
             </div>
           </UCard>
 
+          <DiaNegocioNota />
+
           <!-- Reparto en vivo -->
           <template v-if="reparto">
             <UCard>

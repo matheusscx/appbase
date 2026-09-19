@@ -131,6 +131,8 @@ function onSelectFila(_e: Event, row: Row<TendenciaDescuadres>) {
           <AppDateInput v-model="filtroDesde" class="w-40" qa="tendencia-desde" />
           <AppDateInput v-model="filtroHasta" class="w-40" qa="tendencia-hasta" />
         </div>
+
+        <DiaNegocioNota />
       </div>
     </template>
 

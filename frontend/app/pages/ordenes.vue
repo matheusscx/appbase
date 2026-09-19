@@ -186,6 +186,8 @@ const columns: TableColumn<OrdenRow>[] = [
           />
         </div>
 
+        <DiaNegocioNota />
+
         <CrudTable
           :data="ordenes"
           :columns="columns"

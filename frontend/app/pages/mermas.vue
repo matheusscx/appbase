@@ -290,6 +290,8 @@ const columns: TableColumn<MermaListItem>[] = [
       <AppDateInput v-model="filtroHasta" class="w-40" qa="mermas-hasta" />
     </div>
 
+    <DiaNegocioNota />
+
     <CrudTable
       :data="mermas"
       :columns="columns"
