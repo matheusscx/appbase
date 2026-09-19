@@ -48,6 +48,14 @@ const permissionsStore = usePermissionsStore()
             <InicioCierres v-if="permissionsStore.esAdmin || permissionsStore.can('Cajas', 'Leer')" />
           </div>
         </section>
+
+        <!-- Zona "Hoy": el día del dueño (spec `2026-09-18-dashboard-inicio-design.md`
+             § 3.2 y § 6). Un solo componente —a diferencia de "Ahora"— porque
+             sus cuatro bloques comparten UNA llamada a `/resumen-negocio/hoy`;
+             `InicioHoy.vue` hace esa carga y esconde la zona entera si recibe
+             un 403 (mismo motivo que "Ahora": el frontend no sabe qué módulos
+             contrató el tenant). -->
+        <InicioHoy v-if="permissionsStore.esAdmin || permissionsStore.can('Resumen del negocio', 'Leer')" />
       </div>
     </template>
   </UDashboardPanel>

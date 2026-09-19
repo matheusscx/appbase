@@ -8,6 +8,7 @@ const dateFmt = new Intl.DateTimeFormat('es-CL', {
 
 const dateOnlyFmt = new Intl.DateTimeFormat('es-CL', { dateStyle: 'medium' })
 const horaFmt = new Intl.DateTimeFormat('es-CL', { hour: '2-digit', minute: '2-digit' })
+const diaSemanaFmt = new Intl.DateTimeFormat('es-CL', { weekday: 'long' })
 
 export function useFormatters() {
   const { format: formatCurrency, formatCosto, formatOficial } = useCurrency()
@@ -37,6 +38,20 @@ export function useFormatters() {
       return dateOnlyFmt.format(new Date(Number(y), Number(m) - 1, Number(d)))
     }
     return dateFmt.format(new Date(iso))
+  }
+
+  /**
+   * Nombre del día de semana (`"miércoles"`) de una fecha `YYYY-MM-DD`, en
+   * hora local — mismo cuidado de fecha pura que `formatFecha`: interpretar
+   * el string como UTC corre el día hacia atrás en TZ negativas. Lo usa
+   * `InicioVentas.vue` para "vs. <día> pasado": el backend siempre compara
+   * contra 7 días antes, que cae en el mismo día de semana que `fecha`.
+   */
+  function formatDiaSemana(fecha: string): string {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fecha)
+    if (!m) return '—'
+    const [, y, mo, d] = m
+    return diaSemanaFmt.format(new Date(Number(y), Number(mo) - 1, Number(d)))
   }
 
   function formatStock(
@@ -99,5 +114,5 @@ export function useFormatters() {
   // su propia regla (los decimales de la moneda son el piso, ver `useCurrency`).
   // Va por acá y no importando `useCurrency` en la página porque las pantallas
   // formatean por `useFormatters` — una sola puerta, no dos.
-  return { formatMonto, formatCosto, formatFecha, formatHora, formatStock, formatTipoPago, formatPorcentaje, formatCostoPorMoneda }
+  return { formatMonto, formatCosto, formatFecha, formatHora, formatDiaSemana, formatStock, formatTipoPago, formatPorcentaje, formatCostoPorMoneda }
 }

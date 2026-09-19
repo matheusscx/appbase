@@ -1,7 +1,6 @@
 # Feature: Dashboard de inicio
 
-**Status**: In Development (Task 4 de 6 — falta la zona "Hoy" del frontend, Task 5, y el
-cierre con smoke/mutantes, Task 6)
+**Status**: In Development (Task 5 de 6 — falta el cierre con smoke/mutantes, Task 6)
 **Owner**: Cesar Matheus
 **Last Updated**: 2026-09-18
 
@@ -31,10 +30,14 @@ filtros — el detalle sigue viviendo en `/ventas`.
   de ventas (vendido/cobrado/cantidad/ticket promedio/por canal) + por cobrar.
 - Incluido en Task 2: `perdidas` (anulaciones, reusando `AnulacionesReporteService.resumen`,
   y mermas, con `MermasService.resumen` nuevo) y `masVendidos` (hasta 5 ítems).
+- Incluido en Task 4: el frontend de la zona "Ahora" (el turno en vivo, con refresco
+  periódico) — ver más abajo.
+- Incluido en Task 5: el frontend de la zona "Hoy" (la plata del día, sin refresco
+  periódico) — ver más abajo.
 - NO incluido (fuera de alcance de la spec): la hora de corte configurable, restar las
   notas de crédito del vendido (pregunta fiscal, `pendientes.md` § 4), plata de cuentas
   abiertas, un total de pérdidas (spec § 4.4 — ver más abajo), un reporte de mermas
-  completo (`pendientes.md` § 3), y el frontend (llega en una tarea posterior).
+  completo (`pendientes.md` § 3), y una biblioteca de gráficos (spec § 8).
 
 ---
 
@@ -246,6 +249,42 @@ devolvía el dato sin tocar estado del store.
 
 ---
 
+## Frontend — la zona "Hoy" (Task 5)
+
+`~/types/resumen-negocio.ts` copia `ResumenNegocioHoy` campo por campo desde
+`resumen-negocio.service.ts` (mismo criterio que `~/types/boleta.ts` mientras backend y
+frontend no comparten workspace). `AnulacionPorTipo['tipo']` importa `TipoMotivoBaja`
+de `useSalones.ts` en vez de duplicarlo una cuarta vez.
+
+**`InicioHoy.vue`** es la zona completa: `index.vue` la monta con
+`permissionsStore.esAdmin || permissionsStore.can('Resumen del negocio', 'Leer')`,
+igual que los bloques de "Ahora", y no repite el chequeo. A diferencia de "Ahora", NO
+usa `useRefrescoPeriodico` — carga UNA vez al invocarse (mismo criterio: sin
+`onMounted`, se prueba con un spec plano) y tiene un botón "Actualizar" manual que
+vuelve a llamar la misma función, sin `setInterval` (spec § 6, "'Hoy' carga una vez").
+Un 403 esconde la zona ENTERA (`v-if="!oculto"`) sin aviso de error — mismo motivo que
+"Ahora": el frontend no sabe qué módulos contrató el tenant. Un fallo que no es 403
+muestra un toast (`apiErrorMsg`) y no oculta nada.
+
+`InicioHoy` pasa `datos.ventas`/`datos.porCobrar`/`datos.perdidas`/`datos.masVendidos`
+por props a cuatro bloques, todos con la misma UNA llamada:
+
+| Bloque | Qué muestra | Link |
+|---|---|---|
+| `InicioVentas.vue` | Vendido ("antes de notas de crédito") y cobrado grandes; cantidad, ticket promedio y local/online chicos. Cada comparado con "vs. `<día>` pasado" (`formatDiaSemana`, `useFormatters.ts` — la semana pasada cae en el mismo día de semana que hoy) y `formatPorcentaje(variacion, 0)`, que ya rinde `null` como "—" | `/ventas` (card-link) |
+| `InicioPorCobrar.vue` | "N ventas · $X por cobrar" | `/ventas` (card-link) |
+| `InicioPerdidas.vue` | Anulaciones por tipo (`tipoMotivoBajaLabel`, auto-importado de `useSalones.ts`) con platos, precio de carta y costo (`formatCostoPorMoneda`); mermas con su costo. **Cada uno** —cada tipo de anulación y el bloque de mermas— muestra "N sin costo cargado" si su propio `sinValorizar > 0` (regla 6 del costo sin tipear, `pendientes.md` § 3: `AnulacionPorTipo.sinValorizar` calla lo mismo que `ResumenMermas.sinValorizar` si no se muestra — fix round 1, 2026-09-18). **Sin total** (mismo porqué que el backend, spec § 4.4) | Dos `ULink` internos: "Ver anulaciones" → `/salones/anulaciones`, "Ver mermas" → `/mermas` — no es un card-link único porque tiene dos destinos |
+| `InicioMasVendidos.vue` | Hasta 5 ítems, ya ordenados por el backend, con nombre/cantidad/monto | Sin link: no existe un reporte de ventas al que llevar (spec § 7) |
+
+**Cards accesibles con teclado:** `InicioVentas` y `InicioPorCobrar` son
+`<UCard as="NuxtLink" to="…">` — un `<a>` real, focuseable y activable con Enter — en
+vez del `@click="navigateTo(...)"` sobre un `<div>` que usan los bloques de "Ahora"
+(hallazgo de revisión diferido de Task 4; no se tocaron esos componentes, solo se
+aplicó acá). `InicioPerdidas` usa `ULink` (el mismo mecanismo, sin envolver toda la
+tarjeta) para sus dos destinos.
+
+---
+
 ## Testing
 
 ### Unit (`resumen-negocio.service.spec.ts`)
@@ -319,6 +358,36 @@ simulados tienen la forma real de cada ruta (copiada de `caja.service.ts` y
 cd frontend && npm test -- useRefrescoPeriodico.spec.ts InicioAhora.nuxt.spec.ts
 ```
 
+### Frontend — zona "Hoy" (Task 5)
+
+**`InicioHoy.nuxt.spec.ts`** (molde `InicioAhora.nuxt.spec.ts` y
+`pages/salones/anulaciones.nuxt.spec.ts` — moneda oficial hidratada a mano tras
+montar). El gate por permiso se prueba montando `pages/index.vue` completa (mismo
+criterio que "Ahora": la página es la que decide si monta el bloque); el resto monta
+`InicioHoy.vue` directo:
+
+- Sin `Resumen del negocio:Leer` no se pide `/resumen-negocio/hoy`; con el permiso, se
+  pide una vez.
+- Al montar `InicioHoy` directo: UNA sola llamada; "Actualizar" (botón encontrado por
+  texto, no por atributo) dispara una segunda.
+- `variacion: null` (Cobrado, en el fixture) rinde "vs. viernes pasado: —", mientras
+  que Vendido/Cantidad/Ticket promedio (con variaciones reales, todas distintas entre
+  sí) rinden sus porcentajes — así un mutante que cruce dos campos se nota.
+- `perdidas.mermas.sinValorizar`: aviso "2 sin costo cargado" con 2, ausente con 0. La
+  misma regla, por tipo, en `perdidas.anulaciones`: `sinValorizar: 4` en `merma` (valor
+  distinto del de mermas, 2, a propósito — un mutante que cruce los dos campos falla)
+  muestra "4 sin costo cargado"; `sinValorizar: 0` en `cortesia` no agrega un tercer
+  aviso. Con las dos fuentes en 0, ningún "sin costo cargado" en pantalla.
+- Un 403 deja el `wrapper.text()` vacío y no dispara ningún toast.
+
+El body simulado (`RESUMEN_HOY`) tiene la forma exacta de `ResumenNegocioHoy` — el
+mock de `useApiFetch` contesta 200 a lo que sea, así que un DTO inventado no se vería
+en el test.
+
+```bash
+cd frontend && npm test -- InicioHoy.nuxt.spec.ts
+```
+
 ---
 
 ## Related Features
@@ -329,6 +398,10 @@ cd frontend && npm test -- useRefrescoPeriodico.spec.ts InicioAhora.nuxt.spec.ts
 - [`roles-permisos.md`](./roles-permisos.md) — el permiso `Resumen del negocio:Leer`.
 - [`gestion-cajas.md`](./gestion-cajas.md) — `GET /caja/cajones-estado` y
   `GET /caja/resumen-descuadres-dia`, que reusa el bloque Cajas/Cierres.
+- [`salones-mesas.md`](./salones-mesas.md) — el reporte de anulaciones que reusa
+  `perdidas.anulaciones`, y el destino de `InicioPerdidas.vue`.
+- [`mermas-valorizadas.md`](./mermas-valorizadas.md) — de donde sale
+  `MermasService.resumen` y el criterio `sinValorizar`.
 - `docs/patterns/frontend.md` § "Refresco periódico" — el contrato de
   `useRefrescoPeriodico`.
 - `docs/superpowers/specs/2026-09-18-dashboard-inicio-design.md` — spec completa
