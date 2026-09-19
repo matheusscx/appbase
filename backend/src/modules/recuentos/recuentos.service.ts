@@ -179,10 +179,14 @@ export class RecuentosService {
     return this.db.transaccion(async (manager: EntityManager) => {
       // Valida el `ubicacionId` del cliente contra el tenant ANTES de tocar
       // nada más — mismo criterio que `MermasService.registrar` con el suyo.
-      await this.ubicacionesService.findOneOrFail(
+      // Con lock y no con una lectura suelta: `UbicacionesService.remove`
+      // rechaza la bodega con un recuento abierto (decisión del owner,
+      // 2026-09-18), y sin el lock un borrado concurrente no vería esta sesión
+      // todavía sin commitear.
+      await this.ubicacionesService.bloquearContraBorrado(
+        manager,
         tenantId,
         dto.ubicacionId,
-        manager,
       );
 
       // Una sola query trae todos los items pedidos con su stock vigente —

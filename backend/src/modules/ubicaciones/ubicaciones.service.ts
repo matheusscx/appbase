@@ -229,12 +229,19 @@ export class UbicacionesService {
   // `db.transaccion` + `FOR UPDATE` sobre la fila que el escritor toma con
   // `FOR SHARE`.
   //
-  // El `FOR UPDATE` acá abajo es el lado exclusivo del par: el `FOR SHARE`
-  // que toma `TrasladosService.crearEnTransaccion` al leer origen/destino es
-  // el otro lado. Si un traslado ya está en vuelo sobre esta ubicación, este
+  // El `FOR UPDATE` acá abajo es el lado exclusivo del par. El otro lado es
+  // todo el que escribe en la ubicación: el `FOR SHARE` que toma
+  // `TrasladosService.crearEnTransaccion` al leer origen/destino, y
+  // `bloquearContraBorrado` (más abajo), que toman `registrarMovimiento` —el
+  // chokepoint de todo movimiento de stock— y el alta de un recuento. Hasta el
+  // 2026-09-18 solo lo tomaba el traslado, y un ajuste de stock concurrente
+  // dejaba saldo colgado de la bodega borrada
+  // (`test/ajuste-borrado-ubicacion-concurrente.e2e-spec.ts`).
+  //
+  // Si un escritor ya está en vuelo sobre esta ubicación, este
   // `FOR UPDATE` espera a que su transacción termine —commit o rollback—
   // antes de correr el `COUNT`, así que lee el saldo ya actualizado. Y si
-  // este `remove()` toma el lock primero, el traslado que llegue después
+  // este `remove()` toma el lock primero, el escritor que llegue después
   // vuelve a leer la ubicación tras esperar: la encuentra borrada
   // (`eliminado_el IS NOT NULL`) y su propio `SELECT ... WHERE eliminado_el
   // IS NULL` la trata como inexistente.
@@ -269,6 +276,25 @@ export class UbicacionesService {
         throw new BadRequestException(
           `"${filas[0].nombre}" todavía tiene ${cuantos} producto(s) con stock. ` +
             'Trasladá lo que queda antes de eliminarla.',
+        );
+      }
+
+      // Decisión del owner (2026-09-18): un recuento abierto frena el borrado,
+      // no rebota después al aplicarlo. Sin esto el recuento aplicaba su delta
+      // sobre la bodega ya borrada y el saldo quedaba colgado. Bajo el
+      // `FOR UPDATE` de arriba este `COUNT` ve el recuento que un alta
+      // concurrente acaba de commitear: el alta toma `bloquearContraBorrado`.
+      const abiertos: { recuentos_abiertos: string }[] = await manager.query(
+        `SELECT COUNT(*) AS recuentos_abiertos
+           FROM recuento_inventario
+          WHERE ubicacion_id = $1 AND tenant_id = $2
+            AND estado = 'borrador' AND eliminado_el IS NULL`,
+        [id, tenantId],
+      );
+      if (Number(abiertos[0].recuentos_abiertos) > 0) {
+        throw new BadRequestException(
+          `"${filas[0].nombre}" tiene un recuento abierto. ` +
+            'Aplicalo o cancelalo antes de eliminarla.',
         );
       }
 
@@ -367,6 +393,36 @@ export class UbicacionesService {
       tipo: rows[0].tipo,
       activo: rows[0].activo,
     };
+  }
+
+  /**
+   * El lado compartido del par con `remove()`: `FOR SHARE` sobre la ubicación
+   * viva, retenido hasta el commit del llamador. Si `remove()` llega después,
+   * su `FOR UPDATE` espera y recién entonces cuenta saldo y recuentos, ya con
+   * lo que este llamador escribió. Si llegó antes, este `SELECT` espera a su
+   * commit, relee la fila (EvalPlanQual), la encuentra borrada y rechaza.
+   *
+   * Lo toman quienes escriben en una ubicación sin pasar por el traslado, que
+   * lockea origen y destino en su propia lectura. Va antes de cualquier lock
+   * de `item_producto`: el orden de `docs/patterns/backend.md` §15. Solo
+   * `remove()`, `update()` y `restaurar()` toman esta fila en exclusivo, y
+   * ninguno toca `item_producto`, así que el orden no puede cerrar un ciclo
+   * con ellos.
+   */
+  async bloquearContraBorrado(
+    runner: SqlRunner,
+    tenantId: string,
+    id: string,
+  ): Promise<void> {
+    const rows = (await runner.query(
+      `SELECT ubicacion_id FROM ubicaciones
+        WHERE ubicacion_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+        FOR SHARE`,
+      [id, tenantId],
+    )) as { ubicacion_id: string }[];
+    if (!rows.length) {
+      throw new NotFoundException(`Ubicación ${id} no encontrada`);
+    }
   }
 
   private async assertNombreUnico(

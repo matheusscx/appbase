@@ -90,6 +90,12 @@ Dos sesiones en `borrador` sobre el mismo producto **en la misma ubicación** si
 coexistir —cada una congelaría su propio delta y aplicar las dos descontaría el faltante dos
 veces—; en ubicaciones distintas sí pueden convivir, porque cuentan saldos independientes.
 
+Mientras haya un recuento en `borrador` sobre una bodega, **la bodega no se puede borrar**:
+primero se aplica o se cancela (decisión del owner, 2026-09-18). Sin esa regla, el recuento
+aplicaba su delta sobre la bodega ya borrada y el saldo quedaba donde nadie lo ve. Por eso el
+alta de la sesión toma `FOR SHARE` sobre la ubicación: un borrado concurrente espera a que la
+sesión exista y la cuenta.
+
 Odoo setea el stock a un absoluto porque asume que la ubicación se bloquea durante el
 conteo (nadie vende de ahí mientras se cuenta). Un POS de venta física no puede darse ese
 lujo: sigue vendiendo mientras alguien cuenta. El delta es la única semántica que nunca

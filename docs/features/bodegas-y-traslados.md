@@ -205,6 +205,8 @@ por un `toast.add` propio.
 | Situación | Qué hace |
 |---|---|
 | Borrar una bodega con stock adentro | **400**, con el mensaje diciendo cuánto queda. Se vacía con un traslado primero. Soft delete + papelera, como el resto de los catálogos de configuración |
+| Borrar una bodega con un recuento abierto | **400** ("tiene un recuento abierto"), aunque esté vacía: primero se aplica o se cancela el recuento. El recuento nunca rebota después por una bodega borrada (decisión del owner, 2026-09-18) |
+| Borrar una bodega mientras alguien escribe stock en ella | Gana uno de los dos. Si el movimiento ya empezó, el borrado lo espera y cuenta lo que dejó, así que rebota con 400. Si el borrado ganó, el movimiento rebota con 404. Todo el que escribe en una ubicación toma `FOR SHARE` sobre ella, y el borrado toma `FOR UPDATE` (`docs/patterns/backend.md` §15) |
 | Desactivar una bodega con stock | Se puede: deja de ser **destino** válido, pero sigue sirviendo de **origen**. Si no, la mercadería quedaría encerrada sin forma de sacarla |
 | Traslado a sí misma (`origenId === destinoId`) | 400 |
 | Traslado que deja el local bajo lo apartado | 400 nombrando el ítem y la cantidad que falta |
@@ -390,6 +392,7 @@ npm run test:e2e -- inventario-serie-ubicacion
 npm run test:e2e -- inventario-lote-ubicacion
 npm run test:e2e -- recuentos-stock-por-ubicacion
 npm run test:e2e -- sobreventa-concurrente-ubicacion
+npm run test:e2e -- ajuste-borrado-ubicacion-concurrente
 ```
 
 Casos que importan por lo que prueban, no por su nombre: traslado feliz en los tres modos,

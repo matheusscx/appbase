@@ -27,7 +27,7 @@ describe('RecuentosService', () => {
   let dataSource: { query: jest.Mock; transaction: jest.Mock };
   let motivosService: { assertMotivoActivo: jest.Mock };
   let inventarioService: { registrarMovimiento: jest.Mock };
-  let ubicacionesService: { findOneOrFail: jest.Mock };
+  let ubicacionesService: { bloquearContraBorrado: jest.Mock };
 
   beforeEach(async () => {
     manager = { query: jest.fn() };
@@ -49,12 +49,7 @@ describe('RecuentosService', () => {
     // de `manager.query.mockResolvedValueOnce(...)`, así que el orden de los
     // mocks de cada test de más abajo no cambia por este nuevo paso.
     ubicacionesService = {
-      findOneOrFail: jest.fn().mockResolvedValue({
-        id: UBICACION_LOCAL_ID,
-        nombre: 'Local',
-        tipo: 'local',
-        activo: true,
-      }),
+      bloquearContraBorrado: jest.fn().mockResolvedValue(undefined),
     };
 
     const dbMock = {
@@ -126,10 +121,10 @@ describe('RecuentosService', () => {
      * la etapa del recuento por ubicación levanta:
      * `docs/features/recuento-inventario.md`.
      *
-     * `ubicacionId: UBICACION_BODEGA_ID` (≠ `UBICACION_LOCAL_ID`, el default
-     * que devuelve el mock de `findOneOrFail`) es la parte que discrimina: si
-     * el service ignorara `dto.ubicacionId` y siguiera resolviendo el local
-     * por su cuenta, `params` traería `UBICACION_LOCAL_ID` y el test fallaría.
+     * `ubicacionId: UBICACION_BODEGA_ID` (≠ el local) es la parte que
+     * discrimina: si el service ignorara `dto.ubicacionId` y siguiera
+     * resolviendo el local por su cuenta, `params` traería otro id y el test
+     * fallaría.
      *
      * La aserción va por PARÁMETRO y por ausencia de `SUM`, no por un
      * `toContain` de texto suelto: sin ella, el mutante que restaura el
@@ -162,15 +157,19 @@ describe('RecuentosService', () => {
       expect(params).toEqual([[ITEM_ID], TENANT_ID, UBICACION_BODEGA_ID]);
       expect(sql).toContain('su.ubicacion_id = $3');
       expect(sql).not.toMatch(/SUM\s*\(/i);
-      expect(ubicacionesService.findOneOrFail).toHaveBeenCalledWith(
+      // El lock, no una lectura suelta: es la mitad del par con
+      // `UbicacionesService.remove`, que rechaza la bodega con un recuento
+      // abierto. Sin él, un borrado concurrente no ve esta sesión y la deja
+      // colgada de una bodega borrada.
+      expect(ubicacionesService.bloquearContraBorrado).toHaveBeenCalledWith(
+        manager,
         TENANT_ID,
         UBICACION_BODEGA_ID,
-        expect.anything(),
       );
     });
 
     it('la validación de ubicación corre ANTES del SELECT de items, y corta sin tocar nada si el ubicacionId es de otro tenant', async () => {
-      ubicacionesService.findOneOrFail.mockRejectedValueOnce(
+      ubicacionesService.bloquearContraBorrado.mockRejectedValueOnce(
         new Error('Ubicación no encontrada'),
       );
 
@@ -533,7 +532,7 @@ describe('RecuentosService', () => {
         expect.anything(),
         expect.objectContaining({ ubicacionId: UBICACION_BODEGA_ID }),
       );
-      expect(ubicacionesService.findOneOrFail).not.toHaveBeenCalled();
+      expect(ubicacionesService.bloquearContraBorrado).not.toHaveBeenCalled();
     });
 
     it('genera una entrada cuando el contado es mayor', async () => {

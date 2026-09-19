@@ -2,7 +2,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { type EntityManager } from 'typeorm';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import { InventarioService } from './inventario.service';
@@ -26,13 +26,19 @@ describe('InventarioService', () => {
   let managerMock: { query: jest.Mock };
   let dataSource: { query: jest.Mock; transaction: jest.Mock };
   let catalogService: { convertirUnidad: jest.Mock };
-  let ubicacionesService: { localDe: jest.Mock };
+  let ubicacionesService: {
+    localDe: jest.Mock;
+    bloquearContraBorrado: jest.Mock;
+  };
 
   beforeEach(async () => {
     managerMock = { query: jest.fn() };
     dataSource = { query: jest.fn(), transaction: jest.fn() };
     catalogService = { convertirUnidad: jest.fn() };
-    ubicacionesService = { localDe: jest.fn().mockResolvedValue(UBICACION_ID) };
+    ubicacionesService = {
+      localDe: jest.fn().mockResolvedValue(UBICACION_ID),
+      bloquearContraBorrado: jest.fn().mockResolvedValue(undefined),
+    };
     // Delega en `dataSource.*` en el momento de la llamada: varios tests de
     // `registrarAjusteCosto` reasignan `dataSource.transaction` DESPUÉS de
     // compilar el módulo, y `Db.transaccion` tiene que ver ese reemplazo.
@@ -66,6 +72,64 @@ describe('InventarioService', () => {
   // profundidad**. Lo que fijan es que siga estando el día que aparezca el
   // llamador 17.
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // La ubicación, contra su borrado
+  //
+  // `UbicacionesService.remove` toma `FOR UPDATE` sobre la ubicación antes de
+  // contar su saldo; este `FOR SHARE` es la otra mitad del par. Va ANTES del
+  // lock de `item_producto`: el mismo orden que el traslado (§15).
+  // Red de la carrera: `test/ajuste-borrado-ubicacion-concurrente.e2e-spec.ts`.
+  // ---------------------------------------------------------------------------
+  describe('registrarMovimiento — lock sobre la ubicación', () => {
+    const params = {
+      tenantId: TENANT,
+      itemId: ITEM_ID,
+      ubicacionId: UBICACION_ID,
+      tipo: 'entrada' as const,
+      motivo: 'compra',
+      cantidad: '5',
+      usuarioId: USER_ID,
+    };
+
+    it('bloquea la ubicación del movimiento ANTES del lock de item_producto', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'cantidad' }])
+        .mockResolvedValueOnce([{ stock: '10' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        params,
+      );
+
+      expect(ubicacionesService.bloquearContraBorrado).toHaveBeenCalledWith(
+        managerMock,
+        TENANT,
+        UBICACION_ID,
+      );
+      const ordenLockUbicacion =
+        ubicacionesService.bloquearContraBorrado.mock.invocationCallOrder[0];
+      const ordenLockItem = managerMock.query.mock.invocationCallOrder[0];
+      expect(ordenLockUbicacion).toBeLessThan(ordenLockItem);
+      expect(managerMock.query.mock.calls[0][0]).toContain('FOR UPDATE OF ip');
+    });
+
+    it('si la ubicación ya está borrada, no toca item_producto ni escribe nada', async () => {
+      ubicacionesService.bloquearContraBorrado.mockRejectedValueOnce(
+        new NotFoundException('Ubicación no encontrada'),
+      );
+
+      await expect(
+        service.registrarMovimiento(
+          managerMock as unknown as EntityManager,
+          params,
+        ),
+      ).rejects.toThrow(NotFoundException);
+      expect(managerMock.query).not.toHaveBeenCalled();
+    });
+  });
+
   describe('registrarMovimiento — acote por tenant en el lock', () => {
     function lockQuery(): [string, unknown[]] {
       return managerMock.query.mock.calls[0] as [string, unknown[]];

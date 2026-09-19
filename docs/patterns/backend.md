@@ -1036,6 +1036,38 @@ mecanismo con una compuerta determinista, y cuenta las sesiones esperando un loc
 soltarla. Los unitarios de los tres services afirman el SQL del lock y su posición. El
 `ORDER BY` lo fija solo el unitario, por lo dicho al principio de esta sección.
 
+### Borrar una ubicación contra escribir en ella (2026-09-18)
+
+Mismo molde que el borrado de un ítem: un **par de locks sobre la fila de `ubicaciones`**.
+`UbicacionesService.remove` cuenta saldo y recuentos abiertos antes de marcar `eliminado_el`, y
+ese conteo solo es confiable si nadie puede estar escribiendo en la ubicación sin que el borrado
+lo espere.
+
+| Lado | Quién | Lock |
+|---|---|---|
+| Exclusivo | `UbicacionesService.remove`, antes de contar | `FOR UPDATE` |
+| Compartido | `TrasladosService.crearEnTransaccion`, al leer origen y destino | `FOR SHARE` |
+| Compartido | `InventarioService.registrarMovimiento`, antes del `FOR UPDATE OF ip` | `FOR SHARE` (`UbicacionesService.bloquearContraBorrado`) |
+| Compartido | `RecuentosService.create`, antes de congelar las líneas | `FOR SHARE` (`bloquearContraBorrado`) |
+
+**Un camino nuevo que escriba en una ubicación** —stock, o una fila que `remove()` cuente— entra
+en la parte compartida. Si mueve stock, ya entra solo, porque pasa por `registrarMovimiento`.
+
+**Dónde va en el orden:** `ubicaciones` antes que `item_producto`. No todo llamador lo cumple:
+`ItemsService.ajustarStock`, cuando convierte unidades, toma `FOR UPDATE` sobre `item_producto`
+antes de llamar a `registrarMovimiento`. No cierra un ciclo, porque los únicos que toman esta
+fila en exclusivo son `remove()`, `update()` y `restaurar()` de ubicaciones, y ninguno toma
+`item_producto`. Si alguno lo tomara algún día, esto es lo primero que hay que volver a mirar.
+
+**Qué cuesta:** una consulta por PK por movimiento, y la venta retiene un `FOR SHARE` sobre la
+fila del local hasta su commit. Mientras tanto, renombrar o desactivar el local espera.
+
+**Qué lo fija:** `backend/test/ajuste-borrado-ubicacion-concurrente.e2e-spec.ts` (compuerta
+determinista, repetición sin compuerta, y la bodega con un recuento abierto),
+`traslado-borrado-ubicacion-concurrente.e2e-spec.ts` para el traslado, y los unitarios de
+`inventario.service.spec.ts` (el lock va antes que el de `item_producto`) y de
+`recuentos.service.spec.ts`.
+
 ### El lock de stock ancla en `item_producto`, nunca en `stock_ubicacion` (2026-09-06)
 
 **El criterio, no la lista:** todo lo que lockea para leer o mover saldo de

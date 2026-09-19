@@ -241,6 +241,21 @@ export class InventarioService {
       throw new BadRequestException('El movimiento necesita una ubicación');
     }
 
+    // La ubicación, contra su borrado: `FOR SHARE`, el par del `FOR UPDATE` de
+    // `UbicacionesService.remove`. Sin él, un borrado concurrente contaba 0 de
+    // saldo sin ver lo que este movimiento todavía no commiteaba, y el saldo
+    // quedaba colgado de una bodega borrada: fuera de `GET /items` y del peso
+    // del CPP (`test/ajuste-borrado-ubicacion-concurrente.e2e-spec.ts`). Acá y
+    // no en cada llamador, porque este método es el chokepoint. Y ANTES del
+    // `FOR UPDATE OF ip` de abajo: el orden del traslado
+    // (`docs/patterns/backend.md` §15). Para el traslado, que ya tomó este
+    // lock al leer origen y destino, volver a pedirlo no hace nada.
+    await this.ubicacionesService.bloquearContraBorrado(
+      manager,
+      params.tenantId,
+      params.ubicacionId,
+    );
+
     // `item_producto` no tiene `tenant_id`: es una extensión de `items` con PK
     // compartida, así que el tenant vive en el padre (ver `docs/patterns/backend.md`
     // § "Tablas sin tenant_id"). El JOIN es la única forma de acotarlo acá — y este
