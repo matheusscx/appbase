@@ -145,6 +145,13 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/inventario/traslados',
     })
   }
+  if (permissionsStore.esAdmin || permissionsStore.can('Compras', 'Leer')) {
+    base.push({
+      label: 'Compras',
+      icon: 'i-lucide-truck',
+      to: '/compras',
+    })
+  }
   if (permissionsStore.esAdmin || permissionsStore.can('Items', 'Leer')) {
     base.push({
       label: 'Costos desfasados',
