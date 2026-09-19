@@ -1141,9 +1141,10 @@ transacción, con el reintento de deadlock de `traslados.crear`:
 
 1. `SELECT … FOR UPDATE` de la compra; si no es `borrador`, 409.
 2. `validarEncabezado` + `validarLineas` (tarea 3), `assertFolioLibre` otra vez, y al menos una
-   línea. La ubicación de la compra se lee con **`FOR SHARE`**, el par del `FOR UPDATE` de
-   `UbicacionesService.remove` (molde: `traslados.crearEnTransaccion`, que explica la carrera).
-   Así compras no abre, por su camino, la carrera de la bodega que se borra con stock (ver T7).
+   línea. **El `FOR SHARE` sobre la ubicación ya no se toma acá:** desde `8dadb792`
+   `registrarMovimiento` lo toma para cada movimiento (`bloquearContraBorrado`). Si igual hace
+   falta tomarlo antes, por ejemplo para validar la ubicación bajo lock, va **antes** del lock de
+   productos: el orden es ubicaciones → `item_producto` (`docs/patterns/backend.md` §15).
 3. Lock de los productos en **un** statement ordenado por `item_id` (`FOR UPDATE OF ip`, el molde
    de `traslados`, líneas 262–310).
 4. Stock total **antes** de cada línea: `stockTotalPorProducto` (T5), una sola llamada con todos
@@ -1192,18 +1193,19 @@ de ahí se suman las cantidades con signo.
    join a `compra_lineas` y `compras` para traer la cantidad y el costo vigentes de cada línea y el
    estado de su compra. Las reglas de cada tipo de movimiento son las de la spec § 4.3, **sin
    reinterpretarlas**.
-   ⛔ **Dependencia, no hecho verificado:** `stockTotalPorProducto` excluye las ubicaciones
-   eliminadas **hoy**, y la reconstrucción suma movimientos de todas. Los dos números coinciden
-   **solo si una ubicación se borra vacía**, y eso **no está garantizado**:
-   - `UbicacionesService.remove` cuenta el stock bajo `FOR UPDATE` de la fila de `ubicaciones`;
-   - `registrarMovimiento` no toma ese lock, y solo `traslados` toma `FOR SHARE`;
-   - así, una entrada concurrente puede dejar stock en una bodega que se está borrando.
+   ✅ **La dependencia está cerrada desde `8dadb792`** (main, 2026-09-18): `registrarMovimiento`
+   empieza por `UbicacionesService.bloquearContraBorrado`, un `FOR SHARE` sobre la ubicación,
+   el par del `FOR UPDATE` de `remove()`. Un borrado espera a quien escribe stock en esa
+   ubicación, así que una ubicación se borra vacía. `stockTotalPorProducto` excluye las
+   ubicaciones eliminadas **hoy** y la reconstrucción suma movimientos de todas: con esa
+   garantía, los dos números coinciden. El test fija el caso: una bodega con movimientos en la
+   ventana, vaciada y borrada antes de completar el precio.
 
-   La revisión del frente del CPP lo encontró, y está anotado como tarea aparte, sin arreglar.
-   **La reconstrucción es exacta recién cuando esa carrera se cierre.** Hasta entonces, el caso
-   de la carrera puede dar un costo rehecho distinto del original. El test fija el caso sin
-   carrera (una bodega con movimientos en la ventana, vaciada y borrada antes de completar el
-   precio) y **no** declara cubierto el concurrente.
+   ⚠️ **Borde que abre ese mismo lock:** `bloquearContraBorrado` da **404** sobre una ubicación
+   ya borrada, y la `correccion_compra` se escribe con una `ubicacionId`, aunque no mueva
+   stock. Si la bodega de la compra se vació y se borró antes de que llegue la factura,
+   completar el precio fallaría. La corrección va a la ubicación de la compra si sigue viva, y
+   si no, al local (`UbicacionesService.localDe`, que no se borra). El test lo fija.
 3. Si el costo resultante difiere del `costo_actual`, una `correccion_compra` vía `registrarMovimiento` (tarea 5).
 
 **Contrato:**

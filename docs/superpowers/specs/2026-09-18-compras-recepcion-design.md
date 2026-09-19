@@ -184,10 +184,11 @@ Por cada producto afectado, bajo su lock:
 2. Recorre los movimientos del producto **en todas las ubicaciones**, desde esa entrada, por
    `secuencia`, filtrando `eliminado_el IS NULL` **del movimiento**. **No** filtra por la
    ubicación eliminada: mientras tuvo stock, ese stock entró en el peso del CPP de su momento, y
-   si se filtrara la cuenta rehecha no coincidiría con la original. ⚠️ Coincide exacto solo si la
-   ubicación se borró vacía, y **eso no está garantizado**: `registrarMovimiento` no toma el lock
-   de la fila de `ubicaciones` que usa el borrado. Es una carrera anotada aparte, y hasta que se
-   cierre, la reconstrucción depende de ella. El stock total va sumando las cantidades con su
+   si se filtrara la cuenta rehecha no coincidiría con la original. Coincide exacto porque una
+   ubicación se borra vacía: desde `8dadb792`, `registrarMovimiento` toma `FOR SHARE` sobre la
+   ubicación y el borrado espera a quien escribe stock en ella. La `correccion_compra` va a la
+   ubicación de la compra si sigue viva, y si no, al local: ese lock da 404 sobre una ubicación
+   ya borrada. El stock total va sumando las cantidades con su
    signo desde `stock_total_anterior`:
    - **Entrada original de una línea de compra:** entra con la cantidad y el costo **vigentes de la
      línea**, no con los del momento en que se movió. Si la compra está anulada, se salta.
