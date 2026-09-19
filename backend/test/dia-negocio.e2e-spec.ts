@@ -484,7 +484,18 @@ describe('Día del negocio: hora de corte (e2e)', () => {
     let itemId: string;
     let caja: CajaAbierta | undefined;
     let tipId: string;
+    let montoTip: string;
     let antesDeMover: Array<{ fecha: string; conPropina: number }>;
+    // Línea de base del `poolTotal` de la Task 4 (liquidación), una por
+    // combinación fecha × corte que usan sus tests: el borde de un período
+    // de un solo día es sensible al corte, así que una sola línea de base no
+    // sirve para las dos —a diferencia de `tendenciaEntre`, cuya ventana
+    // 12-14 es tan ancha que el corte no le mueve la inclusión, solo el
+    // bucket—.
+    let poolAntes12Corte5: string;
+    let poolAntes13Corte5: string;
+    let poolAntes12Corte0: string;
+    let poolAntes13Corte0: string;
 
     async function crearVentaConPropina(monto: string): Promise<string> {
       const res = await request(app.getHttpServer())
@@ -520,6 +531,19 @@ describe('Día del negocio: hora de corte (e2e)', () => {
       return lista.find((f) => f.fecha === fecha)?.conPropina ?? 0;
     }
 
+    /** `poolTotal` del preview de liquidación para ese período. */
+    async function previewPool(
+      fechaDesde: string,
+      fechaHasta: string,
+    ): Promise<string> {
+      const res = await request(app.getHttpServer())
+        .post('/api/propinas/liquidaciones/preview')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fechaDesde, fechaHasta });
+      expect(res.status).toBe(201);
+      return (res.body as { poolTotal: string }).poolTotal;
+    }
+
     beforeAll(async () => {
       const item = await request(app.getHttpServer())
         .post('/api/items')
@@ -535,18 +559,32 @@ describe('Día del negocio: hora de corte (e2e)', () => {
 
       caja = await abrirCaja(app, token);
       const ventaId = await crearVentaConPropina('700');
-      const [{ venta_propina_id }]: { venta_propina_id: string }[] =
-        await ds.query(
-          `SELECT venta_propina_id FROM venta_propina
+      const [{ venta_propina_id, monto_pagado }]: {
+        venta_propina_id: string;
+        monto_pagado: string;
+      }[] = await ds.query(
+        `SELECT venta_propina_id, monto_pagado FROM venta_propina
             WHERE venta_id = $1 AND eliminado_el IS NULL`,
-          [ventaId],
-        );
+        [ventaId],
+      );
       tipId = venta_propina_id;
+      montoTip = monto_pagado;
 
       // Con el corte en 0 (el default entre bloques de esta suite), "ahora"
       // no cae en la ventana 12-14 de septiembre de 2026: la línea de base
       // es cero en las dos filas.
       antesDeMover = await tendenciaEntre('2026-09-12', '2026-09-14');
+
+      // Línea de base del pool de liquidación, ANTES de mover el tip y con
+      // los dos cortes que usan los tests de Task 4 — tiene que capturarse
+      // acá, antes del UPDATE de abajo, porque un `it` ya no puede volver a
+      // un "antes".
+      await fijarCorte(5);
+      poolAntes12Corte5 = await previewPool('2026-09-12', '2026-09-12');
+      poolAntes13Corte5 = await previewPool('2026-09-13', '2026-09-13');
+      await fijarCorte(0);
+      poolAntes12Corte0 = await previewPool('2026-09-12', '2026-09-12');
+      poolAntes13Corte0 = await previewPool('2026-09-13', '2026-09-13');
 
       await ds.query(
         `UPDATE venta_propina p
@@ -600,6 +638,47 @@ describe('Día del negocio: hora de corte (e2e)', () => {
       expect(
         filaDe(despues, '2026-09-12') - filaDe(antesDeMover, '2026-09-12'),
       ).toBe(0);
+    });
+
+    /**
+     * Task 4: la liquidación de propinas (`POST .../liquidaciones/preview`)
+     * usa el mismo período de negocio que `tendencia()` arriba — reusa el
+     * mismo tip, ya movido al domingo 01:30 local con corte 5.
+     */
+    it('con corte 5, el preview del 12 incluye la propina en el pool y el del 13 no', async () => {
+      await fijarCorte(5);
+      const despues12 = await previewPool('2026-09-12', '2026-09-12');
+      const despues13 = await previewPool('2026-09-13', '2026-09-13');
+
+      expect(new Decimal(despues12).minus(poolAntes12Corte5).toFixed(4)).toBe(
+        new Decimal(montoTip).toFixed(4),
+      );
+      expect(new Decimal(despues13).minus(poolAntes13Corte5).toFixed(4)).toBe(
+        '0.0000',
+      );
+    });
+
+    it('control, corte 0: el preview del 13 incluye la propina (su calendario) y el del 12 no', async () => {
+      await fijarCorte(0);
+      const despues12 = await previewPool('2026-09-12', '2026-09-12');
+      const despues13 = await previewPool('2026-09-13', '2026-09-13');
+
+      expect(new Decimal(despues13).minus(poolAntes13Corte0).toFixed(4)).toBe(
+        new Decimal(montoTip).toFixed(4),
+      );
+      expect(new Decimal(despues12).minus(poolAntes12Corte0).toFixed(4)).toBe(
+        '0.0000',
+      );
+    });
+
+    it('2026-09-13 → 2026-09-12 (orden invertido) da 400, incluso con fechas puras que requieren día del negocio', async () => {
+      await fijarCorte(5);
+      const res = await request(app.getHttpServer())
+        .post('/api/propinas/liquidaciones/preview')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fechaDesde: '2026-09-13', fechaHasta: '2026-09-12' });
+
+      expect(res.status).toBe(400);
     });
   });
 });

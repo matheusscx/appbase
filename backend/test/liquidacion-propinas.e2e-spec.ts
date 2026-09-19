@@ -878,7 +878,7 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
 
     /**
      * ⚠️ Este test **no** valía lo que decía hasta el 2026-08-09: la guarda de
-     * orden estaba duplicada —una en `rangoLiquidacionDesde` y otra dentro de
+     * orden estaba duplicada —una en `rangoLiquidacion` y otra dentro de
      * `computarReparto`, con el mismo mensaje— así que apagar cualquiera de las
      * dos lo dejaba en verde y no se sabía cuál estaba viva. Lo midió la
      * revisión independiente. La duplicada se borró (era inalcanzable: todos
@@ -907,7 +907,7 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
       },
     );
 
-    // El otro borde que solo cierra `rangoLiquidacionDesde`: una fecha ISO 8601
+    // El otro borde que solo cierra `rangoLiquidacion`: una fecha ISO 8601
     // legítima que `new Date` no sabe leer. La guarda de orden NO la frena
     // —compara `NaN <= NaN`, siempre `false`— y antes llegaba a Postgres como
     // un 500.

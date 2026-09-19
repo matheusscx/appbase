@@ -30,7 +30,7 @@ import {
 } from './dto/update-liquidacion.dto';
 import { AnularLiquidacionDto } from './dto/anular-liquidacion.dto';
 import { LiquidarDto } from './dto/liquidar.dto';
-import { rangoLiquidacionDesde } from './utils/rango-liquidacion';
+import { rangoLiquidacion } from './utils/rango-liquidacion';
 import { GarzonesService } from '../garzones/garzones.service';
 import { horasInterseccionHoras } from './utils/horas-interseccion';
 import { repartirMayoresRestos } from './utils/mayores-restos';
@@ -155,7 +155,9 @@ export class LiquidacionPropinasService {
     usuarioId: string,
     dto: CreateLiquidacionDto,
   ): Promise<LiquidacionDetalle> {
-    const { fechaDesde, fechaHasta } = rangoLiquidacionDesde(
+    const { fechaDesde, fechaHasta } = await rangoLiquidacion(
+      this.db,
+      tenantId,
       dto.fechaDesde,
       dto.fechaHasta,
     );
@@ -198,12 +200,27 @@ export class LiquidacionPropinasService {
   }
 
   /**
+   * Resuelve el período de una liquidación —wrapper fino sobre
+   * `rangoLiquidacion`— para que el `preview` del controller no toque la
+   * base directamente: el controller valida y delega, el service tiene el
+   * acceso a datos (`this.db`, con la zona/corte del tenant).
+   */
+  async resolverPeriodo(
+    tenantId: string,
+    fechaDesde: string,
+    fechaHasta: string,
+  ): Promise<{ fechaDesde: Date; fechaHasta: Date }> {
+    return rangoLiquidacion(this.db, tenantId, fechaDesde, fechaHasta);
+  }
+
+  /**
    * Reparto sin persistir (el `preview` de la pantalla).
    *
    * ⚠️ **Recibe el período ya validado**: `fechaDesde`/`fechaHasta` son `Date`
    * reales y en orden, porque su único llamador —el `preview` del controller—
-   * los construye con `rangoLiquidacionDesde`, que es donde vive la guarda de
-   * orden y la de "fecha ISO que `new Date` no sabe leer".
+   * los construye con `resolverPeriodo` (que envuelve `rangoLiquidacion`,
+   * abajo), que es donde vive la guarda de orden y la de "fecha ISO que
+   * `new Date` no sabe leer".
    *
    * Acá había una **segunda** guarda de orden, con el mismo mensaje. Se sacó el
    * 2026-08-09: era inalcanzable —ningún llamador llega sin normalizar— y
@@ -599,7 +616,9 @@ export class LiquidacionPropinasService {
     usuarioId: string,
     dto: LiquidarDto,
   ): Promise<LiquidacionDetalle> {
-    const { fechaDesde, fechaHasta } = rangoLiquidacionDesde(
+    const { fechaDesde, fechaHasta } = await rangoLiquidacion(
+      this.db,
+      tenantId,
       dto.fechaDesde,
       dto.fechaHasta,
     );

@@ -175,9 +175,20 @@ eventos y advertencias.
 
 #### Qué se acepta como fecha de período
 
-Fecha pura (`2026-07-17`) o timestamp completo: el SQL no hace `::date`, así que
-una hora es un límite de período legítimo. Lo que se rechaza con `400`, en los
-tres endpoints que reciben un período (`POST`, `preview` y `liquidar`):
+Fecha pura (`2026-07-17`) o timestamp completo, con contrato distinto para
+cada una (hora-de-corte, Task 4):
+
+- **Fecha pura** es el **día del negocio** del tenant (zona horaria +
+  `hora_corte`, `0`-`6`), no la medianoche calendario: `fechaDesde` es el
+  inicio de ese día del negocio, y `fechaHasta` es **inclusiva** — el período
+  llega hasta el inicio del día del negocio SIGUIENTE. Con `hora_corte = 0`
+  es exactamente la medianoche local de siempre.
+- **Timestamp completo** se respeta tal cual, como siempre: el SQL no le hace
+  `::date`, así que una hora es un límite de período legítimo y no se
+  ensancha al día del negocio.
+
+Lo que se rechaza con `400`, en los tres endpoints que reciben un período
+(`POST`, `preview` y `liquidar`):
 
 - **Fechas que no existen en el calendario** — `2026-02-31`, `2026-04-31`,
   `2026-02-29`. Son ISO bien formadas, así que solo las ve `@IsISO8601` con
@@ -189,8 +200,13 @@ tres endpoints que reciben un período (`POST`, `preview` y `liquidar`):
   válidas, y producen `Invalid Date`. La guarda de orden no las detiene:
   `NaN <= NaN` es `false`. Llegaban hasta Postgres, que cortaba con un `500`.
 
-Las corta `rangoLiquidacionDesde` (`propinas/utils/rango-liquidacion.ts`), que
-también aplica la guarda `fechaHasta > fechaDesde`.
+Las corta `rangoLiquidacion` (`propinas/utils/rango-liquidacion.ts`), que
+también aplica la guarda `fechaHasta > fechaDesde` — **después** de expandir
+el día del negocio, así que `fechaDesde = fechaHasta` en fecha pura es un
+período válido de un día. `crear()` y `liquidar()` la llaman directo;
+`preview` la llama vía `LiquidacionPropinasService.resolverPeriodo`, porque
+el controller no toca la base y la expansión puede necesitar la zona/corte
+del tenant (`rango-fecha.util.ts`).
 
 ### Preview del reparto (sin persistir)
 

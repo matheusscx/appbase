@@ -21,7 +21,6 @@ import { AnularLiquidacionDto } from './dto/anular-liquidacion.dto';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { LiquidarDto } from './dto/liquidar.dto';
 import { PreviewLiquidacionDto } from './dto/preview-liquidacion.dto';
-import { rangoLiquidacionDesde } from './utils/rango-liquidacion';
 import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { LiquidacionPropinasService } from './liquidacion-propinas.service';
 
@@ -41,12 +40,13 @@ export class LiquidacionPropinasController {
 
   @Post('preview')
   @RequiresPermiso('Propinas', 'Leer')
-  preview(
+  async preview(
     @Req() req: Request,
     @Body(EscalaMonedaPipe) dto: PreviewLiquidacionDto,
   ) {
     const user = req.user as JwtUser;
-    const { fechaDesde, fechaHasta } = rangoLiquidacionDesde(
+    const { fechaDesde, fechaHasta } = await this.liquidaciones.resolverPeriodo(
+      user.tenantId!,
       dto.fechaDesde,
       dto.fechaHasta,
     );

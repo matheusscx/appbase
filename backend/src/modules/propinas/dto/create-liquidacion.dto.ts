@@ -9,7 +9,7 @@ import {
 export class CreateLiquidacionDto {
   // `strict` valida el calendario: sin él `2026-02-31` pasa y `new Date` lo
   // rueda a marzo, dejando la liquidación con un período que nadie pidió.
-  // No cierra `2026-W32-1` ni `20260807` — de eso se ocupa `rangoLiquidacionDesde`.
+  // No cierra `2026-W32-1` ni `20260807` — de eso se ocupa `rangoLiquidacion`.
   @IsISO8601({ strict: true })
   fechaDesde: string;
 

@@ -4,65 +4,76 @@ import { LiquidacionPropinasController } from './liquidacion-propinas.controller
 import { type LiquidacionPropinasService } from './liquidacion-propinas.service';
 
 /**
- * El `preview` es el tercer punto de entrada del período, y el único que valida
- * en el controller: `crear()` y `liquidar()` reciben el DTO y normalizan
- * adentro, mientras que `computarReparto` recibe dos `Date` ya construidos.
+ * El `preview` es el tercer punto de entrada del período. Hasta Task 4 de
+ * `hora-de-corte` normalizaba con `rangoLiquidacionDesde` (síncrona, sin
+ * base) directo en el controller; ahora el período puede requerir el día del
+ * negocio del tenant (zona + `hora_corte`), que sale de una consulta, así que
+ * el controller **no toca la base**: delega en
+ * `LiquidacionPropinasService.resolverPeriodo` (async), que envuelve
+ * `rangoLiquidacion` — ahí vive la guarda de orden y la de "fecha ISO que
+ * `new Date` no sabe leer", cubiertas en `rango-liquidacion.spec.ts`.
  *
- * Existe porque la doc promete el rechazo en **los tres** endpoints
- * (`docs/features/liquidacion-propinas-motor.md`) y los otros dos ya tienen su
- * test en `liquidacion-propinas.service.spec.ts`. Sin esto, el `preview` era el
- * único de los tres sin nada que lo fije.
+ * Lo que este test fija es la ÚNICA responsabilidad que le queda al
+ * controller: pasarle a `resolverPeriodo` el tenant del JWT (nunca del body)
+ * y las fechas crudas del DTO, y propagar tanto el resultado como el rechazo
+ * a `computarReparto` sin tocarlos.
  */
 describe('LiquidacionPropinasController — el período del preview', () => {
   const tenantId = '550e8400-e29b-41d4-a716-446655440001';
   const request = { user: { tenantId, id: 'user-1' } } as unknown as Request;
-  const liquidaciones = { computarReparto: jest.fn() };
+  const liquidaciones = {
+    computarReparto: jest.fn(),
+    resolverPeriodo: jest.fn(),
+  };
   const controller = new LiquidacionPropinasController(
     liquidaciones as unknown as LiquidacionPropinasService,
   );
 
   beforeEach(() => jest.clearAllMocks());
 
-  it('convierte el período y lo delega con el tenant del JWT', async () => {
+  it('resuelve el período vía el service, con el tenant del JWT y las fechas crudas del DTO', async () => {
+    const fechaDesde = new Date('2026-07-17T00:00:00.000Z');
+    const fechaHasta = new Date('2026-07-18T12:00:00.000Z');
+    liquidaciones.resolverPeriodo.mockResolvedValue({
+      fechaDesde,
+      fechaHasta,
+    });
+
     await controller.preview(request, {
       fechaDesde: '2026-07-17',
       fechaHasta: '2026-07-18T12:00:00Z',
       turnoIds: ['turno-1'],
     });
 
+    expect(liquidaciones.resolverPeriodo).toHaveBeenCalledWith(
+      tenantId,
+      '2026-07-17',
+      '2026-07-18T12:00:00Z',
+    );
     expect(liquidaciones.computarReparto).toHaveBeenCalledWith(
       tenantId,
-      new Date('2026-07-17'),
-      new Date('2026-07-18T12:00:00Z'),
+      fechaDesde,
+      fechaHasta,
       ['turno-1'],
       undefined,
     );
   });
 
-  // `2026-W32-1` pasa `@IsISO8601({ strict: true })` —es ISO válida— y
-  // `new Date` la deja en `Invalid Date`. La guarda de orden no la ve porque
-  // compara `NaN <= NaN`. Sin el normalizador llegaba a la query y Postgres
-  // cortaba con un 500.
-  it.each(['2026-W32-1', '20260807'])(
-    'rechaza %s con un 400, sin llamar al service',
-    (valor) => {
-      expect(() =>
-        controller.preview(request, {
-          fechaDesde: '2026-07-17',
-          fechaHasta: valor,
-        }),
-      ).toThrow(BadRequestException);
-      expect(liquidaciones.computarReparto).not.toHaveBeenCalled();
-    },
-  );
+  // El controller no repite ninguna guarda: solo confirma que un rechazo de
+  // `resolverPeriodo` (orden invertido, fecha ISO que `new Date` no sabe leer,
+  // etc. — casos cubiertos en `rango-liquidacion.spec.ts`) llega tal cual al
+  // caller y nunca dispara `computarReparto`.
+  it('propaga el rechazo de resolverPeriodo sin llamar a computarReparto', async () => {
+    liquidaciones.resolverPeriodo.mockRejectedValue(
+      new BadRequestException('La fecha hasta debe ser posterior a desde'),
+    );
 
-  it('rechaza un período invertido sin llamar al service', () => {
-    expect(() =>
+    await expect(
       controller.preview(request, {
         fechaDesde: '2026-07-18',
         fechaHasta: '2026-07-17',
       }),
-    ).toThrow('La fecha hasta debe ser posterior a desde');
+    ).rejects.toThrow('La fecha hasta debe ser posterior a desde');
     expect(liquidaciones.computarReparto).not.toHaveBeenCalled();
   });
 });

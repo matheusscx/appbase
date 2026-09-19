@@ -9,7 +9,6 @@ import type {
 } from '~/composables/usePropinaLiquidaciones'
 import type { Turno } from '~/composables/useTurnos'
 import type { Garzon } from '~/composables/useGarzones'
-import { finDiaExclusivoIso, inicioDiaIso } from '~/utils/date-value'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -111,8 +110,8 @@ async function cargarPreview() {
   loadingPreview.value = true
   try {
     reparto.value = await api.preview({
-      fechaDesde: inicioDiaIso(fechaDesde.value),
-      fechaHasta: finDiaExclusivoIso(fechaHasta.value),
+      fechaDesde: fechaDesde.value,
+      fechaHasta: fechaHasta.value,
       turnoIds: turnoIds.value,
       ajustes: ajustes.value,
     })
@@ -141,8 +140,8 @@ async function liquidar() {
   liquidando.value = true
   try {
     const detalle = await api.liquidar({
-      fechaDesde: inicioDiaIso(fechaDesde.value),
-      fechaHasta: finDiaExclusivoIso(fechaHasta.value),
+      fechaDesde: fechaDesde.value,
+      fechaHasta: fechaHasta.value,
       turnoIds: turnoIds.value,
       ajustes: ajustes.value,
     })
