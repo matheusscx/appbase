@@ -249,6 +249,8 @@ Por cada producto afectado, bajo su lock:
 Pide motivo. Es una salida `compra` por línea, en la ubicación de la compra. Si **alguna** no
 alcanza, no anula nada (todo en una transacción) y el 400 dice cuál. Después rehace la cuenta como
 si la compra no hubiera existido y la deja `anulada`: se sigue viendo, tachada, y nunca se borra.
+Si era la única entrada con costo de un producto que antes no tenía, el producto queda **sin
+costo**, como antes de ella: la `correccion_compra` acepta un costo nulo (owner, 2026-09-19).
 Una compra anulada libera su folio para cargarla bien.
 
 ## 5. Permisos y API

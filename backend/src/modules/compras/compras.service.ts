@@ -37,6 +37,7 @@ import type {
   LineaCompraDto,
 } from './dto/compra-borrador.dto';
 import type { FindComprasDto } from './dto/find-compras.dto';
+import type { AnularCompraDto } from './dto/anular-compra.dto';
 import type {
   CorregirDescuentoDto,
   CorregirLineaDto,
@@ -99,6 +100,8 @@ export interface CompraCambio {
 export interface CompraDetalle extends Omit<CompraListItem, 'lineas'> {
   observacion: string | null;
   descuentoTotal: string | null;
+  /** Por qué se anuló; null si no está anulada. */
+  motivoAnulacion: string | null;
   lineas: CompraLineaDetalle[];
   cambios: CompraCambio[];
 }
@@ -401,13 +404,14 @@ export class ComprasService {
 
   /** Encabezado, líneas e historial: tres consultas fijas, sin importar el largo. */
   async findOne(tenantId: string, id: string): Promise<CompraDetalle> {
-    const cabecera: CabeceraRow[] = await this.db.query(
-      `SELECT ${SELECT_CABECERA}
-         FROM compras c
-         ${JOINS_CABECERA}
-        WHERE c.tenant_id = $1 AND c.compra_id = $2 AND c.eliminado_el IS NULL`,
-      [tenantId, id],
-    );
+    const cabecera: (CabeceraRow & { motivo_anulacion: string | null })[] =
+      await this.db.query(
+        `SELECT ${SELECT_CABECERA}, c.motivo_anulacion
+           FROM compras c
+           ${JOINS_CABECERA}
+          WHERE c.tenant_id = $1 AND c.compra_id = $2 AND c.eliminado_el IS NULL`,
+        [tenantId, id],
+      );
     if (!cabecera.length) {
       throw new NotFoundException('Compra no encontrada');
     }
@@ -445,6 +449,7 @@ export class ComprasService {
       ...this.mapCabecera(cabecera[0]),
       observacion: cabecera[0].observacion,
       descuentoTotal: cabecera[0].descuento_total,
+      motivoAnulacion: cabecera[0].motivo_anulacion,
       lineas: lineas.map((l) => ({
         id: l.compra_linea_id,
         orden: l.orden,
@@ -1204,6 +1209,264 @@ export class ComprasService {
     });
   }
 
+  // ───────────────────────────────────────────────────────────────────────
+  // Anular (spec § 4.5)
+  // ───────────────────────────────────────────────────────────────────────
+
+  /**
+   * Anula una compra confirmada: una salida `compra` por línea en la
+   * ubicación de la compra, la cuenta rehecha de cada producto como si la
+   * compra no hubiera existido, y la compra queda `anulada` con su motivo. Se
+   * sigue viendo, tachada, nunca se borra, y libera su folio.
+   *
+   * Todo o nada: si alguna línea no alcanza, no anula ninguna, y el 400 dice
+   * cuál. Lo decide un chequeo previo que mira todas las líneas con los locks
+   * ya tomados, así el mensaje nombra el producto en vez de salir del kardex
+   * a mitad de camino.
+   */
+  async anular(
+    tenantId: string,
+    usuarioId: string,
+    id: string,
+    dto: AnularCompraDto,
+  ): Promise<CompraDetalle> {
+    const motivo = dto.motivo.trim();
+    if (!motivo) {
+      throw new BadRequestException('La anulación necesita un motivo');
+    }
+    return this.conReintento(async (manager) => {
+      const compra = await this.bloquearConfirmada(
+        tenantId,
+        id,
+        'La compra es un borrador: se descarta, no se anula',
+      );
+      const lineas = await this.lineasConfirmadas(tenantId, id);
+      if (!compra.ubicacion_viva) {
+        throw new BadRequestException(
+          `La ubicación de la compra (${compra.ubicacion_nombre}) fue eliminada: no hay de dónde sacar lo que entró`,
+        );
+      }
+      const enPapelera = lineas.find((l) => l.item_eliminado);
+      if (enPapelera) {
+        throw new BadRequestException(
+          `El producto "${enPapelera.item_nombre}" está en la papelera: restauralo para anular la compra`,
+        );
+      }
+
+      // Los locks, en el orden de siempre: la ubicación y después todos los
+      // productos en un statement ordenado.
+      await this.ubicacionesService.bloquearContraBorrado(
+        manager,
+        tenantId,
+        compra.ubicacion_id,
+      );
+      const itemIds = [...new Set(lineas.map((l) => l.item_id))].sort((a, b) =>
+        a.localeCompare(b),
+      );
+      await manager.query(
+        `SELECT ip.item_id
+           FROM item_producto ip
+           JOIN items i ON i.item_id = ip.item_id
+          WHERE ip.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
+          ORDER BY ip.item_id
+          FOR UPDATE OF ip`,
+        [itemIds, tenantId],
+      );
+
+      const porLinea = await this.salidasDeAnulacion(
+        manager,
+        tenantId,
+        compra,
+        lineas,
+      );
+
+      const comentario = `${comentarioDeCompra(
+        compra.tipo_documento_nombre,
+        compra.folio,
+        compra.proveedor_nombre,
+      )}: anulada (${motivo})`;
+      // En el orden de los locks: por producto, y dentro del producto por el
+      // orden de la factura (`lineasConfirmadas` ya viene por `orden`).
+      const ordenadas = [...lineas].sort((a, b) =>
+        a.item_id.localeCompare(b.item_id),
+      );
+      for (const l of ordenadas) {
+        await this.inventarioService.registrarMovimiento(manager, {
+          tenantId,
+          itemId: l.item_id,
+          ubicacionId: compra.ubicacion_id,
+          usuarioId,
+          tipo: 'salida',
+          motivo: 'compra',
+          cantidad: l.cantidad_base,
+          compraLineaId: l.compra_linea_id,
+          comentario,
+          ...porLinea.get(l.compra_linea_id),
+        });
+      }
+
+      // El estado ANTES de rehacer las cuentas: el recorrido salta la entrada
+      // de una compra anulada.
+      await this.db.query(
+        `UPDATE compras
+            SET estado = 'anulada', anulado_por = $3, anulado_el = NOW(),
+                motivo_anulacion = $4, actualizado_el = NOW()
+          WHERE tenant_id = $1 AND compra_id = $2`,
+        [tenantId, id, usuarioId, motivo],
+      );
+      for (const itemId of itemIds) {
+        await this.inventarioService.recalcularCostoDesdeCompra(manager, {
+          tenantId,
+          itemId,
+          compraId: id,
+          usuarioId,
+          comentario,
+        });
+      }
+      return this.findOne(tenantId, id);
+    });
+  }
+
+  /**
+   * Lo que cada línea necesita para salir, y el 400 si alguna no alcanza.
+   * Una consulta por modo, no por línea:
+   * - **cantidad:** el saldo del producto en la ubicación, contra lo que
+   *   entró por todas las líneas de ese producto;
+   * - **lote:** el lote de cada línea por su código, y su saldo ahí;
+   * - **serie:** cada unidad que trajo la línea, disponible en la ubicación.
+   */
+  private async salidasDeAnulacion(
+    manager: EntityManager,
+    tenantId: string,
+    compra: CompraConfirmada,
+    lineas: LineaConfirmada[],
+  ): Promise<Map<string, Partial<RegistrarMovimientoParams>>> {
+    const porLinea = new Map<string, Partial<RegistrarMovimientoParams>>();
+    const noAlcanza = (que: string, queda: Decimal, trajo: Decimal) =>
+      new BadRequestException(
+        `No se puede anular: ${que} quedan ${queda.toString()} en ${compra.ubicacion_nombre} y la compra trajo ${trajo.toString()}`,
+      );
+
+    const deCantidad = lineas.filter((l) => l.modo_inventario === 'cantidad');
+    if (deCantidad.length) {
+      const trajo = new Map<string, Decimal>();
+      for (const l of deCantidad) {
+        trajo.set(
+          l.item_id,
+          (trajo.get(l.item_id) ?? new Decimal(0)).plus(l.cantidad_base),
+        );
+      }
+      const saldos: { item_id: string; stock: string }[] = await manager.query(
+        `SELECT item_id, stock FROM stock_ubicacion
+          WHERE item_id = ANY($1::uuid[]) AND ubicacion_id = $2`,
+        [[...trajo.keys()], compra.ubicacion_id],
+      );
+      const queda = new Map(saldos.map((s) => [s.item_id, s.stock]));
+      for (const [itemId, cantidad] of trajo) {
+        const hay = new Decimal(queda.get(itemId) ?? 0);
+        if (hay.lessThan(cantidad)) {
+          const nombre = deCantidad.find((l) => l.item_id === itemId)!;
+          throw noAlcanza(`de "${nombre.item_nombre}"`, hay, cantidad);
+        }
+      }
+    }
+
+    const deLote = lineas.filter((l) => l.modo_inventario === 'lote');
+    if (deLote.length) {
+      const lotes: { lote_id: string; item_id: string; codigo_lote: string }[] =
+        await manager.query(
+          `SELECT lote_id, item_id, codigo_lote FROM item_lote
+            WHERE item_id = ANY($1::uuid[]) AND codigo_lote = ANY($2::text[])
+              AND tenant_id = $3 AND eliminado_el IS NULL`,
+          [
+            deLote.map((l) => l.item_id),
+            deLote.map((l) => l.lote?.codigoLote),
+            tenantId,
+          ],
+        );
+      const loteDe = (l: LineaConfirmada) =>
+        lotes.find(
+          (x) =>
+            x.item_id === l.item_id && x.codigo_lote === l.lote?.codigoLote,
+        );
+      const faltante = deLote.find((l) => !loteDe(l));
+      if (faltante) {
+        throw new BadRequestException(
+          `No se puede anular: el lote ${faltante.lote?.codigoLote} de "${faltante.item_nombre}" ya no existe`,
+        );
+      }
+      const saldos: { lote_id: string; cantidad: string }[] =
+        await manager.query(
+          `SELECT lote_id, cantidad FROM lote_ubicacion
+            WHERE lote_id = ANY($1::uuid[]) AND ubicacion_id = $2`,
+          [deLote.map((l) => loteDe(l)!.lote_id), compra.ubicacion_id],
+        );
+      const trajo = new Map<string, Decimal>();
+      for (const l of deLote) {
+        const loteId = loteDe(l)!.lote_id;
+        trajo.set(
+          loteId,
+          (trajo.get(loteId) ?? new Decimal(0)).plus(l.cantidad_base),
+        );
+        porLinea.set(l.compra_linea_id, { loteId });
+      }
+      for (const l of deLote) {
+        const loteId = loteDe(l)!.lote_id;
+        const hay = new Decimal(
+          saldos.find((s) => s.lote_id === loteId)?.cantidad ?? 0,
+        );
+        if (hay.lessThan(trajo.get(loteId)!)) {
+          throw noAlcanza(
+            `del lote ${l.lote?.codigoLote} de "${l.item_nombre}"`,
+            hay,
+            trajo.get(loteId)!,
+          );
+        }
+      }
+    }
+
+    const deSerie = lineas.filter((l) => l.modo_inventario === 'serie');
+    if (deSerie.length) {
+      const unidades: {
+        unidad_id: string;
+        item_id: string;
+        serie: string;
+        estado: string;
+        ubicacion_id: string | null;
+      }[] = await manager.query(
+        `SELECT unidad_id, item_id, serie, estado, ubicacion_id FROM item_unidad
+          WHERE item_id = ANY($1::uuid[]) AND serie = ANY($2::text[])
+            AND tenant_id = $3 AND eliminado_el IS NULL`,
+        [
+          deSerie.map((l) => l.item_id),
+          deSerie.flatMap((l) => (l.series ?? []).map((s) => s.serie)),
+          tenantId,
+        ],
+      );
+      for (const l of deSerie) {
+        const ids: string[] = [];
+        for (const s of l.series ?? []) {
+          const u = unidades.find(
+            (x) => x.item_id === l.item_id && x.serie === s.serie,
+          );
+          if (
+            !u ||
+            u.estado !== 'disponible' ||
+            u.ubicacion_id !== compra.ubicacion_id
+          ) {
+            throw new BadRequestException(
+              `No se puede anular: la unidad ${s.serie} de "${l.item_nombre}" ya no está disponible en ${compra.ubicacion_nombre}`,
+            );
+          }
+          ids.push(u.unidad_id);
+        }
+        porLinea.set(l.compra_linea_id, { unidadIds: ids });
+      }
+    }
+
+    return porLinea;
+  }
+
   /**
    * Lock de la compra y los datos que las correcciones necesitan. 409 si no
    * está confirmada: un borrador se edita entero, y una anulada no se toca.
@@ -1217,6 +1480,7 @@ export class ComprasService {
   private async bloquearConfirmada(
     tenantId: string,
     id: string,
+    siEsBorrador = 'La compra es un borrador: se edita, no se corrige',
   ): Promise<CompraConfirmada> {
     const rows: (CompraConfirmada & { estado: EstadoCompra })[] =
       await this.db.query(
@@ -1238,9 +1502,7 @@ export class ComprasService {
       throw new NotFoundException('Compra no encontrada');
     }
     if (rows[0].estado === 'borrador') {
-      throw new ConflictException(
-        'La compra es un borrador: se edita, no se corrige',
-      );
+      throw new ConflictException(siEsBorrador);
     }
     if (rows[0].estado === 'anulada') {
       throw new ConflictException('La compra está anulada');

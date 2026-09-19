@@ -380,7 +380,14 @@ export class InventarioService {
       if (!cantidad.isZero()) {
         throw new BadRequestException('El ajuste de costo no mueve cantidad');
       }
-      if (params.costoUnitario == null) {
+      // `correccion_compra` es la única que puede dejar el producto SIN costo:
+      // anular la única entrada con costo de un producto que no tenía lo
+      // devuelve a como estaba (owner, 2026-09-19). Un `ajuste_costo` lo tipea
+      // una persona, y "sin costo" no es un costo que se tipee.
+      if (
+        params.costoUnitario == null &&
+        params.motivo !== 'correccion_compra'
+      ) {
         throw new BadRequestException(
           'El ajuste de costo requiere el costo nuevo',
         );
@@ -547,18 +554,27 @@ export class InventarioService {
         cantidad,
         params.costoUnitario,
       );
-    } else if (esAjusteCosto) {
+    } else if (esAjusteCosto && params.costoUnitario != null) {
       // Escala de captura: el número lo tipeó una persona en el ajuste manual
       // y se lleva a la escala de costo (ESCALA_COSTO). No mira modo_redondeo
       // a propósito — esa perilla es la política de lo cobrado, no de captura.
-      costoActualNuevo = new Decimal(params.costoUnitario!).toFixed(
+      costoActualNuevo = new Decimal(params.costoUnitario).toFixed(
         ESCALA_COSTO,
       );
     }
+    // La corrección que deja el producto sin costo (validada arriba): pisa
+    // `costo_actual` con null. Aparte de `costoActualNuevo`, cuyo null
+    // significa "no se toca".
+    const borraCosto = esAjusteCosto && params.costoUnitario == null;
 
-    // El kardex congela lo que se PAGÓ en este movimiento, no el promedio.
+    // El kardex congela lo que se PAGÓ en este movimiento, no el promedio. La
+    // corrección a "sin costo" congela eso: null, no el costo que borra.
     const costoUnitarioCongelado =
-      params.costoUnitario != null ? params.costoUnitario : costoActualPrevio;
+      params.costoUnitario != null
+        ? params.costoUnitario
+        : borraCosto
+          ? null
+          : costoActualPrevio;
 
     let result: MoverResult;
 
@@ -635,7 +651,7 @@ export class InventarioService {
       result,
     );
 
-    if (costoActualNuevo != null) {
+    if (costoActualNuevo != null || borraCosto) {
       await manager.query(
         `UPDATE item_producto SET costo_actual = $1 WHERE item_id = $2`,
         [costoActualNuevo, params.itemId],
@@ -648,7 +664,7 @@ export class InventarioService {
       stockResultante: stockResultante.toString(),
       cantidadMovida: cantidadMovida.toString(),
       costoActualPrevio,
-      costoActual: costoActualNuevo ?? costoActualPrevio,
+      costoActual: borraCosto ? null : (costoActualNuevo ?? costoActualPrevio),
       unidadIds: result.unidadIds,
       loteConsumos: result.loteConsumos,
       loteId: result.loteId,
@@ -828,9 +844,9 @@ export class InventarioService {
    * `correccion_compra`. Ningún movimiento pasado cambia su costo congelado: lo
    * vendido queda como estaba.
    *
-   * ⚠️ Un resultado sin costo (`null`) no se escribe, porque un ajuste de valor
-   * exige un costo. Solo pasa si la compra anulada era la única entrada con
-   * costo de un producto que no tenía: lo resuelve la tarea de anular.
+   * Un resultado sin costo (`null`) también se escribe: pasa cuando la compra
+   * anulada era la única entrada con costo de un producto que no tenía, y el
+   * producto vuelve a quedar sin costo (owner, 2026-09-19).
    */
   async recalcularCostoDesdeCompra(
     manager: EntityManager,
@@ -1007,7 +1023,7 @@ export class InventarioService {
       costo == null || costoAnterior == null
         ? costo === costoAnterior
         : new Decimal(costo).equals(costoAnterior);
-    if (igual || costo == null) {
+    if (igual) {
       return { costoAnterior, costoNuevo: costo, movimientoId: null };
     }
 

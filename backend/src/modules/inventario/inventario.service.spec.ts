@@ -2030,6 +2030,40 @@ describe('InventarioService', () => {
       ).toBe(false);
     });
 
+    it('correccion_compra sin costo deja el producto sin costo y congela null (owner, anular la única compra con costo)', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '1500.0000' },
+        ]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '5' }]) // SELECT saldo
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-sin-costo' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // UPDATE costo_actual
+
+      const r = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'ajuste',
+          motivo: 'correccion_compra',
+          cantidad: '0',
+          usuarioId: USER_ID,
+          costoUnitario: null,
+          compraLineaId: LINEA,
+        },
+      );
+
+      const insert = managerMock.query.mock.calls[2] as [string, unknown[]];
+      expect(insert[1][11]).toBeNull(); // costo_unitario: no el que borra
+      expect(insert[1][12]).toBe('1500.0000'); // costo_anterior
+      expect(managerMock.query).toHaveBeenLastCalledWith(
+        expect.stringContaining('costo_actual'),
+        [null, ITEM_ID],
+      );
+      expect(r.costoActual).toBeNull();
+    });
+
     it('correccion_compra sin línea es 400', async () => {
       managerMock.query
         .mockResolvedValueOnce([
@@ -2377,6 +2411,35 @@ describe('InventarioService', () => {
 
       // (5 × 1.000 + 12 × 1.500) / 17. Contar 10 y después los 2 daba $1.370,37.
       expect((await recalcular()).costoNuevo).toBe('1352.9412');
+    });
+
+    it('anular la única compra con costo de un producto que no tenía lo deja sin costo', async () => {
+      prepararCuenta({
+        costoActual: '1500.0000',
+        partida: { stock: '5', costo: null },
+        movimientos: [
+          entradaDeLinea(5, '20', '1500', { compra_estado: 'anulada' }),
+          mov('salida', 'compra', 25, 20, {
+            compra_linea_id: LINEA,
+            es_entrada_de_linea: false,
+            cantidad_base: '20',
+            costo_unitario_base: '1500',
+            compra_estado: 'anulada',
+          }),
+        ],
+      });
+
+      const r = await recalcular();
+
+      expect(r).toEqual({
+        costoAnterior: '1500.0000',
+        costoNuevo: null,
+        movimientoId: 'mov-correccion',
+      });
+      expect(managerMock.query).toHaveBeenLastCalledWith(
+        expect.stringContaining('costo_actual'),
+        [null, ITEM_ID],
+      );
     });
 
     it('una compra anulada cuenta como si no hubiera existido', async () => {

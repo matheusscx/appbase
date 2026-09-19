@@ -1265,10 +1265,10 @@ recalcularCostoDesdeCompra(manager, p: {
   unitario lo mata la aserción sobre la cláusula `ORDER BY`.
 - `correccion_compra` no tiene rama propia en el recorrido: es un ajuste sin cantidad y no es
   entrada, así que ya no toca nada. Lo que el test fija es que no reinicie como `ajuste_costo`.
-- ⚠️ **Queda para la tarea 9:** si la compra anulada era la única entrada con costo de un producto
-  que antes no tenía, la cuenta da "sin costo", y eso no se puede escribir, porque un ajuste de
-  valor exige costo. El método devuelve `costoNuevo: null` sin escribir. La tarea 9 decide qué
-  hace (preguntar al owner).
+- **Resuelto en la tarea 9:** si la compra anulada era la única entrada con costo de un producto
+  que antes no tenía, la cuenta da "sin costo". El owner eligió que quede así, sin costo, como
+  antes de esa compra (2026-09-19, *"vamos con A"*). La `correccion_compra` gana la forma de
+  escribir un costo nulo. Ver la tarea 9.
 
 **Mutantes:** cambiar el orden por `creado_el` en vez de `secuencia` tiene que romper el test
 concurrente, y usar el costo del movimiento en vez del de la línea tiene que romper el de "dos
@@ -1342,9 +1342,37 @@ cantidad ya vendida da 400; cargar el descuento con una línea sin precio da 400
 
 Depende de las tareas 6 y 7.
 
+✅ **OK del owner para esta tarea (2026-09-19):** *"dale luz verde a la 9"*. Escribe en
+`movimientos_inventario`: una salida `compra` por línea y la `correccion_compra` del recálculo.
+
+✅ **Decisión del owner (2026-09-19), *"vamos con A"*:** si la compra anulada era la única entrada
+con costo de un producto que antes no tenía, el producto queda **sin costo**, como antes de esa
+compra. La `correccion_compra` acepta un costo nulo y deja `costo_actual` en null. `ajuste_costo`
+lo sigue exigiendo. Las alternativas eran dejar el último costo conocido o no dejar anular.
+
+Fixture sin `Anular` (`Leer`, `Crear` y `Actualizar`): rol 445 y usuario 446.
+
 **Intención (spec § 4.5):** `POST /compras/:id/anular` con `{ motivo }` (`Compras:Anular`). Una
 salida `compra` por línea en la ubicación de la compra. Si **alguna** no alcanza, no anula nada y
 el 400 dice cuál. Después, el recálculo por producto, `estado='anulada'` y la auditoría.
+
+**Al ejecutarla (2026-09-19):**
+- **Chequeo previo, una consulta por modo:** en cantidad, el saldo del producto contra lo que
+  entró por todas sus líneas; en lote, el saldo de cada lote; en serie, cada unidad que trajo la
+  línea, disponible en la ubicación. Así el 400 nombra el producto, el lote o la unidad, en vez de
+  salir del kardex a mitad de camino.
+- **El estado pasa a `anulada` antes de rehacer las cuentas:** el recorrido salta la entrada de una
+  compra anulada.
+- **Un producto en la papelera o la ubicación de la compra borrada es 400.** Anular un borrador
+  es 409 ("se descarta, no se anula").
+- **Fixture `compras.correccion`** (rol 445, usuario 446).
+- **"Sin costo" lo escribe cualquier cuenta rehecha, no solo la de anular.** La revisión marcó que
+  el guard se abre por motivo (`correccion_compra`), no por quién llama. Una corrección de precio o
+  cantidad sobre una compra viva no llega a ese resultado: una línea con precio siempre da costo,
+  y el precio no se puede volver a null. Y si llegara, "sin costo" sería el valor correcto de la
+  cuenta. Se deja así, anotado.
+- **El mutante pendiente de la tarea 3 quedó cerrado:** sacar `estado <> 'anulada'` de
+  `assertFolioLibre` rompe el e2e que recarga la factura con el mismo folio.
 
 **Qué tiene que probar:** el stock vuelve; el CPP queda como si la compra no hubiera existido; el
 folio se libera (acá entra el mutante pendiente de la tarea 3: sacar `estado <> 'anulada'` del

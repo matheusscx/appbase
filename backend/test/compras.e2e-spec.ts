@@ -18,8 +18,8 @@ import { InventarioService } from '../src/modules/inventario/inventario.service'
  * El borrador (crear, editar, descartar, el folio único por proveedor y tipo,
  * los catálogos del formulario, el descuento al total), confirmar (el stock, el
  * costo, el regalo, los modos serie y lote), rehacer la cuenta, corregir una
- * confirmada (precio, cantidad y descuento), los permisos y el aislamiento
- * entre tenants. Anular es de la tarea siguiente del plan.
+ * confirmada (precio, cantidad y descuento), anular, los permisos y el
+ * aislamiento entre tenants.
  *
  * Proveedor, bodega y producto son **propios** del spec, con nombre único, y
  * el folio también: el archivo no depende de lo que dejaron otras suites.
@@ -35,6 +35,8 @@ const SIN_COMPRAS_EMAIL = 'encargado.salon@paris.cl';
 const COMPRAS_LECTURA_EMAIL = 'compras.lectura@paris.cl';
 /** `Leer` y `Crear`, sin `Actualizar`: recibe, pero no corrige. */
 const COMPRAS_CARGA_EMAIL = 'compras.carga@paris.cl';
+/** `Leer`, `Crear` y `Actualizar`, sin `Anular`: corrige, pero no anula. */
+const COMPRAS_CORRECCION_EMAIL = 'compras.correccion@paris.cl';
 const PASS = 'admin';
 
 interface TokenResponse {
@@ -61,6 +63,7 @@ interface CompraDetalle {
   total: string | null;
   faltaCosto: boolean;
   descuentoTotal: string | null;
+  motivoAnulacion: string | null;
   lineas: {
     id: string;
     itemId: string;
@@ -1434,6 +1437,212 @@ describe('Compras — borrador (e2e)', () => {
         expect(
           (await get<CompraDetalle>(`/api/compras/${compraId}`)).cambios,
         ).toHaveLength(0);
+      });
+    });
+    describe('anular (spec § 4.5)', () => {
+      function anular(compraId: string, conToken = token) {
+        return intentar(
+          'post',
+          `/api/compras/${compraId}/anular`,
+          { motivo: 'Factura equivocada' },
+          conToken,
+        );
+      }
+
+      async function compraConPrecio(
+        itemId: string,
+        cantidad: string,
+        precioUnitario: string,
+        extra: Record<string, unknown> = {},
+      ) {
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            ...extra,
+            lineas: [
+              { itemId, cantidad, unidadCodigo: 'unidad', precioUnitario },
+            ],
+          }),
+        );
+        await confirmar(compra.id);
+        return compra;
+      }
+
+      it('el stock sale y el costo queda como si la compra no hubiera existido', async () => {
+        const itemId = await productoVacio();
+        await ajustarStock(itemId, {
+          ubicacionId: localId,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+          costoUnitario: '1000',
+        });
+        const compra = await compraConPrecio(itemId, '10', '1500');
+        expect(await costoActual(itemId)).toBe('1333.3333');
+
+        expect((await anular(compra.id)).status).toBe(201);
+
+        expect(await stockEn(itemId, bodegaId)).toBe(0);
+        expect(await costoActual(itemId)).toBe('1000.0000');
+        const detalle = await get<CompraDetalle>(`/api/compras/${compra.id}`);
+        expect(detalle.estado).toBe('anulada');
+        expect(detalle.motivoAnulacion).toBe('Factura equivocada');
+      });
+
+      it('libera el folio para cargarla bien', async () => {
+        const folio = folioUnico();
+        const compra = await compraConPrecio(
+          await productoVacio(),
+          '1',
+          '100',
+          {
+            folio,
+          },
+        );
+        const repetida = await intentar(
+          'post',
+          '/api/compras',
+          borrador({ folio }),
+        );
+        expect(repetida.status).toBe(409);
+
+        expect((await anular(compra.id)).status).toBe(201);
+        expect(
+          (await intentar('post', '/api/compras', borrador({ folio }))).status,
+        ).toBe(201);
+      });
+
+      it('si lo que entró ya salió es 400, dice cuánto queda y no anula nada', async () => {
+        const itemId = await productoVacio();
+        const compra = await compraConPrecio(itemId, '10', '1500');
+        await ajustarStock(itemId, {
+          ubicacionId: bodegaId,
+          tipo: 'salida',
+          motivo: 'ajuste_manual',
+          cantidad: '8',
+        });
+
+        const r = await anular(compra.id);
+        expect(r.status).toBe(400);
+        expect(r.message).toContain('quedan 2');
+        expect(await stockEn(itemId, bodegaId)).toBe(2);
+        expect(
+          (await get<CompraDetalle>(`/api/compras/${compra.id}`)).estado,
+        ).toBe('confirmada');
+      });
+
+      it('la única compra con costo de un producto que no tenía lo deja sin costo (owner)', async () => {
+        const itemId = await productoVacio();
+        // 5 que entraron sin costo: el producto no tiene costo.
+        await ajustarStock(itemId, {
+          ubicacionId: localId,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+        });
+        expect(await costoActual(itemId)).toBeNull();
+        const compra = await compraConPrecio(itemId, '10', '1500');
+        expect(await costoActual(itemId)).toBe('1500.0000');
+
+        expect((await anular(compra.id)).status).toBe(201);
+        expect(await costoActual(itemId)).toBeNull();
+      });
+
+      it('sin Compras:Anular es 403 aunque pueda corregir; el encargado sí anula', async () => {
+        const compra = await compraConPrecio(await productoVacio(), '1', '100');
+        const correccion = await login(COMPRAS_CORRECCION_EMAIL);
+        // Control: `compras.correccion` SÍ corrige. Sin esto, su 403 podría ser
+        // por no tener Compras en absoluto.
+        expect(
+          (
+            await intentar(
+              'patch',
+              `/api/compras/${compra.id}/lineas/${(await get<CompraDetalle>(`/api/compras/${compra.id}`)).lineas[0].id}`,
+              { precioUnitario: '120' },
+              correccion,
+            )
+          ).status,
+        ).toBe(200);
+        expect((await anular(compra.id, correccion)).status).toBe(403);
+
+        const encargado = await login(ENCARGADO_COMPRAS_EMAIL);
+        expect((await anular(compra.id, encargado)).status).toBe(201);
+      });
+
+      it('el motivo es obligatorio: vacío, solo espacios o de más de 500 es 400', async () => {
+        const compra = await compraConPrecio(await productoVacio(), '1', '100');
+        for (const motivo of ['', '   ', 'x'.repeat(501)]) {
+          const r = await intentar('post', `/api/compras/${compra.id}/anular`, {
+            motivo,
+          });
+          expect(r.status).toBe(400);
+        }
+        expect(
+          (await get<CompraDetalle>(`/api/compras/${compra.id}`)).estado,
+        ).toBe('confirmada');
+      });
+
+      it('anular dos veces, o un borrador, es 409', async () => {
+        const compra = await compraConPrecio(await productoVacio(), '1', '100');
+        expect((await anular(compra.id)).status).toBe(201);
+        expect((await anular(compra.id)).status).toBe(409);
+
+        const borradorId = (
+          await post<CompraDetalle>('/api/compras', borrador())
+        ).id;
+        const r = await anular(borradorId);
+        expect(r.status).toBe(409);
+        expect(r.message).toContain('se descarta, no se anula');
+      });
+
+      it('otro tenant no puede anular una compra de Paris: 404', async () => {
+        const compra = await compraConPrecio(await productoVacio(), '1', '100');
+        const otro = await loginSegundoTenant(app);
+        expect((await anular(compra.id, otro)).status).toBe(404);
+        expect(
+          (await get<CompraDetalle>(`/api/compras/${compra.id}`)).estado,
+        ).toBe('confirmada');
+      });
+
+      it('en serie salen las unidades que trajo, y en lote baja su lote', async () => {
+        const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+        const serie = await productoVacio({ modoInventario: 'serie' });
+        const lote = await productoVacio({ modoInventario: 'lote' });
+        const codigoLote = `LT-ANUL-${marca}`;
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            lineas: [
+              {
+                itemId: serie,
+                cantidad: '2',
+                unidadCodigo: 'unidad',
+                precioUnitario: '90000',
+                series: [
+                  { serie: `SN-X-${marca}` },
+                  { serie: `SN-Y-${marca}` },
+                ],
+              },
+              {
+                itemId: lote,
+                cantidad: '6',
+                unidadCodigo: 'unidad',
+                precioUnitario: '500',
+                lote: { codigoLote },
+              },
+            ],
+          }),
+        );
+        await confirmar(compra.id);
+
+        expect((await anular(compra.id)).status).toBe(201);
+
+        expect(
+          await get<unknown[]>(
+            `/api/items/${serie}/unidades?estado=disponible`,
+          ),
+        ).toHaveLength(0);
+        expect(await stockEn(lote, bodegaId)).toBe(0);
       });
     });
   });

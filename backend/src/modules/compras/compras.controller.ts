@@ -20,6 +20,7 @@ import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { ComprasService } from './compras.service';
 import { CompraBorradorDto } from './dto/compra-borrador.dto';
 import { FindComprasDto } from './dto/find-compras.dto';
+import { AnularCompraDto } from './dto/anular-compra.dto';
 import {
   CorregirDescuentoDto,
   CorregirLineaDto,
@@ -141,6 +142,24 @@ export class ComprasController {
       id: string;
     };
     return this.comprasService.corregirDescuento(tenantId, usuarioId, id, dto);
+  }
+
+  /**
+   * Anula una confirmada (spec compras-recepcion § 4.5). `Anular` va aparte
+   * porque es la acción que más mueve: saca del stock todo lo que entró.
+   */
+  @Post(':id/anular')
+  @RequiresPermiso('Compras', 'Anular')
+  anular(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AnularCompraDto,
+  ) {
+    const { tenantId, id: usuarioId } = req.user as {
+      tenantId: string;
+      id: string;
+    };
+    return this.comprasService.anular(tenantId, usuarioId, id, dto);
   }
 
   @Delete(':id')

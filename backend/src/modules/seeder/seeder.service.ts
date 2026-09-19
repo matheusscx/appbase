@@ -1382,6 +1382,19 @@ export class SeederService implements OnApplicationBootstrap {
         correo: 'compras.carga@paris.cl',
         esSuperadmin: false,
       },
+      // `Leer`, `Crear` y `Actualizar`, sin `Anular`: el que distingue
+      // "corregir" de "anular". Sin él, un guard que pidiera `Actualizar` donde
+      // va `Anular` pasaba la suite. Ver seedRolEncargadoCompras.
+      {
+        id: '550e8400-e29b-41d4-a716-446655440446',
+        nombreUsuario: 'compras.correccion',
+        contrasena: HASH,
+        nombre: 'Correccion',
+        apellido: 'Compras',
+        telefono: '987654446',
+        correo: 'compras.correccion@paris.cl',
+        esSuperadmin: false,
+      },
     ];
 
     for (const data of usuarios) {
@@ -2599,6 +2612,7 @@ export class SeederService implements OnApplicationBootstrap {
     const ENCARGADO_COMPRAS_PARIS = '550e8400-e29b-41d4-a716-446655440440';
     const COMPRAS_LECTURA_PARIS = '550e8400-e29b-41d4-a716-446655440442';
     const COMPRAS_CARGA_PARIS = '550e8400-e29b-41d4-a716-446655440444';
+    const COMPRAS_CORRECCION_PARIS = '550e8400-e29b-41d4-a716-446655440446';
     const pairs = [
       [ADMIN, PARIS], // superadmin → Paris
       [ADMIN, FALABELLA], // superadmin → Falabella
@@ -2615,6 +2629,7 @@ export class SeederService implements OnApplicationBootstrap {
       [ENCARGADO_COMPRAS_PARIS, PARIS], // las cuatro de Compras, no admin → Paris
       [COMPRAS_LECTURA_PARIS, PARIS], // solo Compras:Leer → Paris
       [COMPRAS_CARGA_PARIS, PARIS], // Compras:Leer y Crear, sin Actualizar → Paris
+      [COMPRAS_CORRECCION_PARIS, PARIS], // Compras sin Anular → Paris
     ];
 
     for (const [usuarioId, tenantId] of pairs) {
@@ -3111,6 +3126,36 @@ export class SeederService implements OnApplicationBootstrap {
       `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
        VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
       [COMPRAS_CARGA, PARIS, ROL_CARGA],
+    );
+
+    // Rol "Compras · Corrección" (445) + usuario `compras.correccion` (446):
+    // `Leer`, `Crear` y `Actualizar`, sin `Anular`. Corrige una compra
+    // confirmada pero no la anula: es el control del 403 de anular.
+    const ROL_CORRECCION = '550e8400-e29b-41d4-a716-446655440445';
+    const COMPRAS_CORRECCION = '550e8400-e29b-41d4-a716-446655440446';
+    const COMPRAS_ACTUALIZAR = '550e8400-e29b-41d4-a716-446655440435';
+    await this.dataSource.query(
+      `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
+       VALUES ($1, $2, 'Compras · Corrección', 'Recibe y corrige compras; no las anula', false, NOW(), NOW())
+       ON CONFLICT DO NOTHING`,
+      [ROL_CORRECCION, PARIS],
+    );
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [ROL_CORRECCION, MODULO_TENANT_COMPRAS],
+    );
+    for (const permisoId of [COMPRAS_LEER, COMPRAS_CREAR, COMPRAS_ACTUALIZAR]) {
+      await this.dataSource.query(
+        `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [ROL_CORRECCION, MODULO_TENANT_COMPRAS, permisoId],
+      );
+    }
+    await this.dataSource.query(
+      `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+       VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [COMPRAS_CORRECCION, PARIS, ROL_CORRECCION],
     );
   }
 
@@ -4908,8 +4953,9 @@ export class SeederService implements OnApplicationBootstrap {
    * contra main y las ramas vivas. Lo usan también el módulo Compras (432),
    * sus permisos (433–436), su contratación (437–438), el rol y usuario
    * `encargado.compras` (439–440), el rol y usuario `compras.lectura`
-   * (441–442) y el rol y usuario `compras.carga` (443–444). 445–446 quedan
-   * para el fixture sin `Anular`. El próximo frente arranca en 447.
+   * (441–442), el rol y usuario `compras.carga` (443–444) y el rol y
+   * usuario `compras.correccion`, sin `Anular` (445–446). El próximo frente
+   * arranca en 447.
    */
   private async seedTiposDocumentoCompra(): Promise<void> {
     const CHILE = '550e8400-e29b-41d4-a716-446655440000';

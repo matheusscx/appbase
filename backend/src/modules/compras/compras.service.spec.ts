@@ -1132,6 +1132,214 @@ describe('ComprasService (borrador)', () => {
       });
     });
 
+    describe('anular (spec § 4.5)', () => {
+      function anular(motivo = 'Factura equivocada') {
+        return service.anular(TENANT, USUARIO, COMPRA, { motivo });
+      }
+
+      function stock(filas: { item_id: string; stock: string }[]) {
+        pisar(/SELECT item_id, stock FROM stock_ubicacion/, filas);
+      }
+
+      function salidas() {
+        return registrarMovimiento.mock.calls.map(
+          (c) => c[1] as Record<string, unknown>,
+        );
+      }
+
+      it('saca cada línea en orden de producto, la deja anulada y después rehace las cuentas', async () => {
+        compra();
+        lineas([
+          linea({ compra_linea_id: 'lb', item_id: ITEM_B, cantidad_base: '4' }),
+          linea({
+            compra_linea_id: 'la',
+            item_id: ITEM_A,
+            cantidad_base: '10',
+          }),
+        ]);
+        stock([
+          { item_id: ITEM_A, stock: '10' },
+          { item_id: ITEM_B, stock: '4' },
+        ]);
+
+        await anular();
+
+        expect(
+          salidas().map((p) => [
+            p.compraLineaId,
+            p.tipo,
+            p.motivo,
+            p.cantidad,
+            p.ubicacionId,
+          ]),
+        ).toEqual([
+          ['la', 'salida', 'compra', '10', UBICACION],
+          ['lb', 'salida', 'compra', '4', UBICACION],
+        ]);
+        expect(cuentas()).toEqual([ITEM_A, ITEM_B]);
+
+        const db = (service as unknown as { db: { query: jest.Mock } }).db;
+        const i = db.query.mock.calls.findIndex(([sql]) =>
+          /SET estado = 'anulada'/.test(sql as string),
+        );
+        expect(db.query.mock.calls[i][1]).toEqual([
+          TENANT,
+          COMPRA,
+          USUARIO,
+          'Factura equivocada',
+        ]);
+        // El estado antes de las cuentas: el recorrido salta la anulada.
+        expect(db.query.mock.invocationCallOrder[i]).toBeLessThan(
+          recalcularCostoDesdeCompra.mock.invocationCallOrder[0],
+        );
+      });
+
+      it('bloquea la ubicación y todos los productos antes de mover', async () => {
+        compra();
+        lineas([linea({})]);
+        stock([{ item_id: ITEM_A, stock: '10' }]);
+
+        await anular();
+
+        expect(eventos).toEqual([
+          'bloquearContraBorrado',
+          'lock productos',
+          'registrarMovimiento',
+        ]);
+      });
+
+      it('si no alcanza, no saca nada y dice cuál', async () => {
+        compra();
+        lineas([linea({})]);
+        stock([{ item_id: ITEM_A, stock: '3' }]);
+
+        await expect(anular()).rejects.toThrow(
+          'No se puede anular: de "Tomate" quedan 3 en Bodega y la compra trajo 10',
+        );
+        expect(registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      it('dos líneas del mismo producto suman lo que tiene que salir', async () => {
+        compra();
+        lineas([
+          linea({ compra_linea_id: 'l1', cantidad_base: '10' }),
+          linea({ compra_linea_id: 'l2', cantidad_base: '20' }),
+        ]);
+        stock([{ item_id: ITEM_A, stock: '25' }]);
+
+        await expect(anular()).rejects.toThrow(
+          'quedan 25 en Bodega y la compra trajo 30',
+        );
+      });
+
+      it('en lote sale del lote de la línea, y decide su saldo', async () => {
+        const LOTE = {
+          modo_inventario: 'lote',
+          unidad_base: 'unidad',
+          unidad_codigo: 'unidad',
+          lote: { codigoLote: 'L-7' },
+        };
+        compra();
+        lineas([linea(LOTE)]);
+        pisar(/FROM item_lote/, [
+          { lote_id: 'lote-7', item_id: ITEM_A, codigo_lote: 'L-7' },
+        ]);
+        pisar(/FROM lote_ubicacion/, [{ lote_id: 'lote-7', cantidad: '4' }]);
+        await expect(anular()).rejects.toThrow(
+          'del lote L-7 de "Tomate" quedan 4 en Bodega y la compra trajo 10',
+        );
+
+        pisar(/FROM lote_ubicacion/, [{ lote_id: 'lote-7', cantidad: '10' }]);
+        await anular();
+        expect(salidas()[0]).toMatchObject({ loteId: 'lote-7' });
+      });
+
+      it('en lote, un lote que ya no existe es 400', async () => {
+        compra();
+        lineas([
+          linea({
+            modo_inventario: 'lote',
+            unidad_base: 'unidad',
+            unidad_codigo: 'unidad',
+            lote: { codigoLote: 'L-7' },
+          }),
+        ]);
+        await expect(anular()).rejects.toThrow(
+          'el lote L-7 de "Tomate" ya no existe',
+        );
+      });
+
+      it('en serie salen las unidades que trajo la línea, si siguen disponibles ahí', async () => {
+        const SERIE = {
+          modo_inventario: 'serie',
+          unidad_base: 'unidad',
+          unidad_codigo: 'unidad',
+          cantidad_base: '2',
+          series: [{ serie: 'SN-1' }, { serie: 'SN-2' }],
+        };
+        const unidad = (serie: string, o: Record<string, unknown> = {}) => ({
+          unidad_id: `u-${serie}`,
+          item_id: ITEM_A,
+          serie,
+          estado: 'disponible',
+          ubicacion_id: UBICACION,
+          ...o,
+        });
+        compra();
+        lineas([linea(SERIE)]);
+        pisar(/FROM item_unidad/, [
+          unidad('SN-1'),
+          unidad('SN-2', { estado: 'vendida' }),
+        ]);
+        await expect(anular()).rejects.toThrow(
+          'la unidad SN-2 de "Tomate" ya no está disponible en Bodega',
+        );
+
+        pisar(/FROM item_unidad/, [
+          unidad('SN-1'),
+          unidad('SN-2', { ubicacion_id: 'otra-ubicacion' }),
+        ]);
+        await expect(anular()).rejects.toThrow(
+          'la unidad SN-2 de "Tomate" ya no está disponible en Bodega',
+        );
+
+        pisar(/FROM item_unidad/, [unidad('SN-1'), unidad('SN-2')]);
+        await anular();
+        expect(salidas()[0]).toMatchObject({
+          cantidad: '2',
+          unidadIds: ['u-SN-1', 'u-SN-2'],
+        });
+      });
+
+      it('sin motivo es 400', async () => {
+        await expect(anular('   ')).rejects.toThrow(
+          'La anulación necesita un motivo',
+        );
+      });
+
+      it.each([
+        ['borrador', 'se descarta, no se anula'],
+        ['anulada', 'La compra está anulada'],
+      ])('una compra %s no se anula: 409', async (estado, mensaje) => {
+        compra({ estado });
+        lineas([linea({})]);
+        await expect(anular()).rejects.toThrow(
+          new ConflictException(mensaje).message,
+        );
+      });
+
+      it('con la ubicación borrada o un producto en la papelera es 400', async () => {
+        compra({ ubicacion_viva: false });
+        lineas([linea({})]);
+        await expect(anular()).rejects.toThrow('(Bodega) fue eliminada');
+
+        compra();
+        lineas([linea({ item_eliminado: true })]);
+        await expect(anular()).rejects.toThrow('"Tomate" está en la papelera');
+        expect(registrarMovimiento).not.toHaveBeenCalled();
+      });
+    });
+
     describe('descuento al total', () => {
       it('se reparte, rehace la cuenta y deja el historial en cada línea que cambió', async () => {
         compra();
