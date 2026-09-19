@@ -121,6 +121,12 @@ no un enum, por la misma regla que los documentos de venta. Va **aparte** de
 - **El motivo `compra` cubre todo lo que mueve stock por una compra:** la entrada original, la
   diferencia de una corrección de cantidad (entrada o salida) y la salida de la anulación. La
   varianza suma el neto de un solo motivo.
+- `movimientos_inventario.costo_informado` (`boolean` NOT NULL, default false), que escribe
+  `registrarMovimiento`: true cuando el movimiento trajo su costo. Hace falta porque, cuando una
+  entrada llega sin costo, el kardex congela en `costo_unitario` el CPP de ese momento, y desde
+  ahí "trajo $1.000" y "no trajo costo y el CPP era $1.000" se leen igual. La columna guarda el
+  hecho, no la regla: cuál entrada promedia lo sigue decidiendo el código, el mismo en los dos
+  lados (§ 4.3). Decisión del owner, 2026-09-19.
 - **Motivo nuevo `correccion_compra`**, de tipo `ajuste`, con cantidad 0: el cambio de CPP que
   produce § 4.3, con el costo anterior y el nuevo. No entra en `MOTIVOS_QUE_RECALCULAN_CPP` porque
   su costo **es** el resultado. Tampoco entra en `MOTIVOS_SOBRE_ITEM_ELIMINADO`: una línea de un
@@ -196,7 +202,13 @@ Por cada producto afectado, bajo su lock:
      quedaron contadas en la entrada original.
    - **Entrada `compra` sin línea** (el atajo del ajuste de stock, que se mantiene): promedia
      con su costo congelado. Si no trae costo, solo suma stock.
-   - **`anulacion` y `devolucion`:** promedian con su costo congelado, como hoy.
+   - **`anulacion` y `devolucion`:** promedian con su costo congelado, como hoy. Sin costo,
+     solo suman stock.
+   - **Qué es "trae costo"** en esas tres: `costo_informado` (§ 3.4), no `costo_unitario`, que
+     sin costo guarda el CPP de su momento. Tomate: 5 kg a $1.000, entran 20 kg sin precio,
+     entran 10 kg por el ajuste de stock **sin costo**, y la factura llega a $1.500. Da
+     **$1.400**, porque los 10 kg no mueven el promedio, igual que cuando entraron. Promediarlos
+     con el $1.000 congelado daría $1.285,71, sin que nada lo avise (owner, 2026-09-19).
    - **`ajuste_costo`:** reinicia el costo al suyo.
    - **`correccion_compra`:** se salta, porque es un resultado y no un hecho.
    - **Todo lo demás** (ventas, mermas, recuentos, traslados, ajustes): mueve el stock sin tocar el

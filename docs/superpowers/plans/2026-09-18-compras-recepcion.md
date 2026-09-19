@@ -48,15 +48,18 @@ Por eso:
 
 ### Ejecución (2026-09-18)
 
+Los hashes son los de la rama **después** del rebase sobre `8dadb792`. Cada rebase los reescribe,
+así que la tarea 11 los vuelve a copiar de `git log` después del rebase final.
+
 | Tarea | Commit | Lo que cambió respecto del plan |
 |---|---|---|
-| 1 | `531a51ee` | La revisión independiente encontró que al usuario fixture le faltaba la fila en `usuarios_tenants` (sin ella no entra a Paris) |
-| 2 | `abb3c5f4` | Sin cambios |
-| 3 | `a34a6bad` | Se compran `producto` **e** `ingrediente` (owner). Un fixture más, `compras.lectura` (ids …441/…442, del bloque 441–445): sin él, un `POST` guardado con `Leer` pasaba la suite. La revisión agregó `EscalaMonedaPipe` al body (el `@EsCosto()` solo no valida) y cambió la validación de unidades a `crearConversor` |
-| 4 | `1b15c224` | `useCompras()` devuelve funciones, como `useEstadoVenta`. El precio usa `MoneyInput` en vez de un `UInput` |
-| 5 | `7de0dcb4` | Sin `registrarCorreccionCosto`: `correccion_compra` es un ajuste de valor como `ajuste_costo` (ver la tarea 5). El e2e de la secuencia usa 5 concurrentes, no 10, porque con 10 el pool de conexiones se agotaba |
-| 6 | ver `git log` | Va **antes** que la 7 (OK del owner). Toma `bloquearContraBorrado` por su cuenta, **antes** del lock de productos, aunque `registrarMovimiento` lo repita: bloquea todos los productos en un solo statement antes de mover nada (para leer el stock total con los locks tomados), y el orden tiene que ser ubicación → productos. El front guarda lo que está en pantalla y después confirma, detrás de un modal con el resumen |
-| 5, seguimiento | ver `git log` | `stockTotalPorProducto` recibe el tenant y lo acota por la ubicación (hallazgo MEDIO de la revisión de seguridad). **`compras` pierde `eliminado_por`**: la suite completa mostró que el test de la papelera exige decidir si toda tabla con esa columna va a la papelera, y el owner decidió que un borrador descartado **no** va (2026-09-18). El bloque de código de la tarea 1 muestra la entidad como se escribió entonces |
+| 1 | `3f6d6aa7` | La revisión independiente encontró que al usuario fixture le faltaba la fila en `usuarios_tenants` (sin ella no entra a Paris) |
+| 2 | `3e66706d` | Sin cambios |
+| 3 | `0bd439e6` | Se compran `producto` **e** `ingrediente` (owner). Un fixture más, `compras.lectura` (ids …441/…442, del bloque 441–445): sin él, un `POST` guardado con `Leer` pasaba la suite. La revisión agregó `EscalaMonedaPipe` al body (el `@EsCosto()` solo no valida) y cambió la validación de unidades a `crearConversor` |
+| 4 | `4d2c06b3` | `useCompras()` devuelve funciones, como `useEstadoVenta`. El precio usa `MoneyInput` en vez de un `UInput` |
+| 5 | `8b0027e6` | Sin `registrarCorreccionCosto`: `correccion_compra` es un ajuste de valor como `ajuste_costo` (ver la tarea 5). El e2e de la secuencia usa 5 concurrentes, no 10, porque con 10 el pool de conexiones se agotaba |
+| 6 | `69a0127a` | Va **antes** que la 7 (OK del owner). Toma `bloquearContraBorrado` por su cuenta, **antes** del lock de productos, aunque `registrarMovimiento` lo repita: bloquea todos los productos en un solo statement antes de mover nada (para leer el stock total con los locks tomados), y el orden tiene que ser ubicación → productos. El front guarda lo que está en pantalla y después confirma, detrás de un modal con el resumen |
+| 5, seguimiento | `650f2edf`, `1a2725d9` | `stockTotalPorProducto` recibe el tenant y lo acota por la ubicación (hallazgo MEDIO de la revisión de seguridad). **`compras` pierde `eliminado_por`**: la suite completa mostró que el test de la papelera exige decidir si toda tabla con esa columna va a la papelera, y el owner decidió que un borrador descartado **no** va (2026-09-18). El bloque de código de la tarea 1 muestra la entidad como se escribió entonces |
 
 ## Global Constraints
 
@@ -1184,6 +1187,17 @@ En el front, habilitar *Confirmar recepción* con su modal de resumen.
 
 ### Task 7: Rehacer la cuenta
 
+✅ **OK del owner para esta tarea (2026-09-19):** *"si"*. Escribe en `movimientos_inventario`:
+recalcula el CPP del producto desde la compra hacia adelante, por `secuencia`, y deja una
+`correccion_compra` (ajuste de valor, sin mover stock) si el costo cambia.
+
+✅ **Y una columna más, también del owner (2026-09-19):** *"dale con A"*. El kardex no guardaba si
+una entrada trajo costo: sin costo, `costo_unitario` congela el CPP de ese momento. Sin ese dato,
+la cuenta rehecha promediaba 10 kg que entraron sin costo como si hubieran costado $1.000
+($1.285,71 en vez de $1.400). `movimientos_inventario.costo_informado` (boolean NOT NULL, default
+false) lo escribe `registrarMovimiento`. Guarda el hecho y la regla queda en el código (spec § 3.4 y
+§ 4.3). Como cambia a **todo** escritor del kardex, el cierre de esta tarea lleva el e2e completo.
+
 Depende de la tarea 5. Es la tarea con más riesgo del plan. Usa la **misma** regla de reinicio
 que `calcularCostoPromedio` (es privado de la misma clase: se llama, no se copia) y el **mismo**
 peso: el punto de partida sale de `stockTotalPorProducto` (vía `stock_total_anterior`), y a partir
@@ -1235,6 +1249,22 @@ recalcularCostoDesdeCompra(manager, p: {
 | El stock pasa por cero | La entrada siguiente reinicia |
 | Dos compras corregidas del mismo producto | No se pisan |
 | Una entrada `compra` del atajo | Promedia con su costo congelado |
+| El atajo **sin** costo (owner, 2026-09-19) | $1.400, no $1.285,71: no mueve el promedio |
+
+**Al ejecutarla (2026-09-19):**
+- Además de las unitarias, un e2e contra la base real en `compras.e2e-spec.ts`. El recorrido, sus
+  JOIN y `costo_informado` son SQL, y el unitario los mockea. Como la tarea no tiene endpoint,
+  llama al service directo y completa el precio de la línea con SQL. El e2e de la tarea 8 repite
+  el tomate por HTTP.
+- El mutante de `creado_el` lo mata el e2e con los `creado_el` invertidos a mano: el mismo
+  desorden que produce la concurrencia (medido en `kardex-secuencia`), pero determinista. En el
+  unitario lo mata la aserción sobre la cláusula `ORDER BY`.
+- `correccion_compra` no tiene rama propia en el recorrido: es un ajuste sin cantidad y no es
+  entrada, así que ya no toca nada. Lo que el test fija es que no reinicie como `ajuste_costo`.
+- ⚠️ **Queda para la tarea 9:** si la compra anulada era la única entrada con costo de un producto
+  que antes no tenía, la cuenta da "sin costo", y eso no se puede escribir, porque un ajuste de
+  valor exige costo. El método devuelve `costoNuevo: null` sin escribir. La tarea 9 decide qué
+  hace (preguntar al owner).
 
 **Mutantes:** cambiar el orden por `creado_el` en vez de `secuencia` tiene que romper el test
 concurrente, y usar el costo del movimiento en vez del de la línea tiene que romper el de "dos

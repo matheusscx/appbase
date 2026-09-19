@@ -113,6 +113,17 @@ export class MovimientoInventario {
   })
   costoAnterior: string | null;
 
+  /**
+   * Si el movimiento TRAJO su costo. Sin costo, `costo_unitario` congela el CPP
+   * de ese momento, así que desde esa columna "entró a $1.000" y "entró sin
+   * costo cuando el CPP era $1.000" se leen igual. "Rehacer la cuenta" necesita
+   * distinguirlos: el primero promedia y el segundo solo suma stock (spec
+   * compras-recepcion § 3.4 y § 4.3, owner 2026-09-19). Guarda el hecho, no la
+   * regla: cuál entrada promedia lo decide el código.
+   */
+  @Column({ name: 'costo_informado', type: 'boolean', default: false })
+  costoInformado: boolean;
+
   @Column({ name: 'motivo_baja_id', type: 'uuid', nullable: true })
   motivoBajaId: string | null;
 

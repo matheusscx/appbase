@@ -7,6 +7,8 @@ import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import { loginSegundoTenant } from './helpers/segundo-tenant';
+import { Db } from '../src/common/db/db.service';
+import { InventarioService } from '../src/modules/inventario/inventario.service';
 
 /**
  * **Compras, pieza 1 — el borrador y la confirmación** (spec
@@ -667,6 +669,229 @@ describe('Compras — borrador (e2e)', () => {
         [`SN-A-${marca}`, `SN-B-${marca}`].sort(),
       );
       expect(unidades.every((u) => u.ubicacionId === bodegaId)).toBe(true);
+    });
+
+    /**
+     * **Rehacer la cuenta** (spec § 4.3), contra la base real: el recorrido,
+     * sus JOIN y `costo_informado` son SQL, y el unitario los mockea.
+     *
+     * La tarea 7 no tiene endpoint: lo llaman corregir y anular (tareas 8 y 9).
+     * Por eso se llama al service directo y el precio de la línea se completa
+     * con SQL, en lugar de la corrección de la tarea 8. El e2e de esa tarea
+     * repite el tomate por HTTP.
+     */
+    describe('rehacer la cuenta (spec § 4.3)', () => {
+      let usuarioId: string;
+
+      beforeAll(async () => {
+        const filas: { usuario_id: string }[] = await ds.query(
+          `SELECT usuario_id FROM usuarios WHERE correo = $1 AND eliminado_el IS NULL`,
+          [ADMIN_EMAIL],
+        );
+        usuarioId = filas[0].usuario_id;
+      });
+
+      async function ajustarStock(
+        itemId: string,
+        body: Record<string, unknown>,
+      ) {
+        const res = await request(app.getHttpServer())
+          .patch(`/api/items/${itemId}/stock`)
+          .set('Authorization', `Bearer ${token}`)
+          .send(body);
+        expect(res.status).toBe(200);
+      }
+
+      /** Confirma una compra de UNA línea sin precio y devuelve su id. */
+      async function compraSinPrecio(
+        itemId: string,
+        cantidad: string,
+        ubicacionId: string,
+      ): Promise<string> {
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            ubicacionId,
+            lineas: [{ itemId, cantidad, unidadCodigo: 'unidad' }],
+          }),
+        );
+        await confirmar(compra.id);
+        return compra.id;
+      }
+
+      /** En lugar de la corrección de precio de la tarea 8. */
+      async function completarPrecio(compraId: string, precio: string) {
+        await ds.query(
+          `UPDATE compra_lineas SET precio_unitario = $2, costo_unitario_base = $2
+            WHERE compra_id = $1`,
+          [compraId, precio],
+        );
+      }
+
+      function rehacerCuenta(itemId: string, compraId: string) {
+        return app.get(Db).transaccion((manager) =>
+          app.get(InventarioService).recalcularCostoDesdeCompra(manager, {
+            tenantId: PARIS_TENANT_ID,
+            itemId,
+            compraId,
+            usuarioId,
+            comentario: 'Rehacer la cuenta E2E',
+          }),
+        );
+      }
+
+      async function correcciones(itemId: string) {
+        const filas: {
+          ubicacion_id: string;
+          costo_anterior: string;
+          compra_linea_id: string;
+        }[] = await ds.query(
+          `SELECT ubicacion_id, costo_anterior, compra_linea_id
+             FROM movimientos_inventario
+            WHERE item_id = $1 AND motivo = 'correccion_compra'
+              AND eliminado_el IS NULL`,
+          [itemId],
+        );
+        return filas;
+      }
+
+      it('tomate del owner: 10 que entraron sin costo por el ajuste de stock no mueven el promedio → $1.400', async () => {
+        const itemId = await productoVacio();
+        await ajustarStock(itemId, {
+          ubicacionId: localId,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+          costoUnitario: '1000',
+        });
+        const compraId = await compraSinPrecio(itemId, '20', bodegaId);
+        await ajustarStock(itemId, {
+          ubicacionId: localId,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '10',
+        });
+
+        // El kardex dice cuál trajo costo; `costo_unitario` no alcanza: el
+        // de los 10 sin costo congeló el CPP de ese momento.
+        const kardex: { costo_unitario: string; costo_informado: boolean }[] =
+          await ds.query(
+            `SELECT costo_unitario, costo_informado FROM movimientos_inventario
+              WHERE item_id = $1 AND eliminado_el IS NULL ORDER BY secuencia`,
+            [itemId],
+          );
+        expect(kardex.map((m) => m.costo_informado)).toEqual([
+          true,
+          false,
+          false,
+        ]);
+        expect(new Decimal(kardex[2].costo_unitario).toFixed(4)).toBe(
+          '1000.0000',
+        );
+
+        await completarPrecio(compraId, '1500');
+        const r = await rehacerCuenta(itemId, compraId);
+
+        // (5 × 1.000 + 20 × 1.500) / 25, y los 10 sin costo no lo mueven.
+        // Promediarlos con el $1.000 congelado daba $1.285,71.
+        expect(r.costoNuevo).toBe('1400.0000');
+        expect(await costoActual(itemId)).toBe('1400.0000');
+        const [corr] = await correcciones(itemId);
+        expect(corr.ubicacion_id).toBe(bodegaId);
+        expect(new Decimal(corr.costo_anterior).toFixed(4)).toBe('1000.0000');
+        expect(corr.compra_linea_id).not.toBeNull();
+      });
+
+      it('recorre por secuencia aunque creado_el diga otro orden', async () => {
+        const itemId = await productoVacio();
+        await ajustarStock(itemId, {
+          ubicacionId: localId,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+          costoUnitario: '1000',
+        });
+        const compraId = await compraSinPrecio(itemId, '20', localId);
+        await ajustarStock(itemId, {
+          ubicacionId: localId,
+          tipo: 'salida',
+          motivo: 'ajuste_manual',
+          cantidad: '25',
+        });
+        // Stock en cero: esta entrada reinicia el costo a $2.000.
+        await ajustarStock(itemId, {
+          ubicacionId: localId,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '10',
+          costoUnitario: '2000',
+        });
+        expect(await costoActual(itemId)).toBe('2000.0000');
+
+        // Dos transacciones que compiten por el lock del producto pueden
+        // quedar con `creado_el` al revés del orden en que se aplicaron
+        // (medido en `kardex-secuencia.e2e-spec.ts`). Acá se fija a mano para
+        // que sea determinista: la entrada queda "antes" que la salida.
+        await ds.query(
+          `UPDATE movimientos_inventario e
+              SET creado_el = s.creado_el - interval '1 millisecond'
+             FROM movimientos_inventario s
+            WHERE e.item_id = $1 AND s.item_id = $1
+              AND e.tipo = 'entrada' AND e.costo_unitario = 2000
+              AND s.tipo = 'salida'`,
+          [itemId],
+        );
+
+        await completarPrecio(compraId, '1500');
+        const r = await rehacerCuenta(itemId, compraId);
+
+        // Por secuencia: la salida deja el stock en cero y la entrada reinicia
+        // a $2.000, que ya es el vigente. Por `creado_el`, la entrada promediaba
+        // con los 25 a $1.400 y daba $1.571,43.
+        expect(r).toEqual({
+          costoAnterior: '2000.0000',
+          costoNuevo: '2000.0000',
+          movimientoId: null,
+        });
+        expect(await correcciones(itemId)).toHaveLength(0);
+      });
+
+      it('si la bodega de la compra se vació y se borró, la corrección va al local', async () => {
+        const bodegaEfimera = (
+          await post<IdResponse>('/api/ubicaciones', {
+            nombre: nombreUnico('Bodega efímera E2E'),
+            tipo: 'bodega',
+          })
+        ).id;
+        const itemId = await productoVacio();
+        await ajustarStock(itemId, {
+          ubicacionId: localId,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+          costoUnitario: '1000',
+        });
+        const compraId = await compraSinPrecio(itemId, '20', bodegaEfimera);
+        await ajustarStock(itemId, {
+          ubicacionId: bodegaEfimera,
+          tipo: 'salida',
+          motivo: 'ajuste_manual',
+          cantidad: '20',
+        });
+        const borrado = await request(app.getHttpServer())
+          .delete(`/api/ubicaciones/${bodegaEfimera}`)
+          .set('Authorization', `Bearer ${token}`);
+        expect(borrado.status).toBe(204);
+
+        await completarPrecio(compraId, '1500');
+        await rehacerCuenta(itemId, compraId);
+
+        // La salida de la bodega pesa: (5 × 1.000 + 20 × 1.500) / 25 = 1.400,
+        // y después quedan 5 a ese costo.
+        expect(await costoActual(itemId)).toBe('1400.0000');
+        const [corr] = await correcciones(itemId);
+        expect(corr.ubicacion_id).toBe(localId);
+      });
     });
   });
 

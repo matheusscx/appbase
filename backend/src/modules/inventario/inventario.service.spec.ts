@@ -2077,6 +2077,461 @@ describe('InventarioService', () => {
     });
   });
 
+  describe('registrarMovimiento — costo_informado', () => {
+    // Sin costo, `costo_unitario` congela el CPP vigente: esta columna es la
+    // única que dice si el movimiento trajo el suyo (spec compras § 3.4).
+    it.each([
+      ['con costo', '1200', true],
+      ['sin costo', undefined, false],
+    ])('una entrada compra %s lo deja escrito', async (_, costo, esperado) => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '1000.0000' },
+        ]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '5' }]); // SELECT saldo
+      if (costo) {
+        managerMock.query.mockResolvedValueOnce([
+          { item_id: ITEM_ID, stock: '5' },
+        ]); // SELECT stock total
+      }
+      managerMock.query
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-ci' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // UPDATE costo_actual
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '10',
+          usuarioId: USER_ID,
+          costoUnitario: costo,
+        },
+      );
+
+      const insert = managerMock.query.mock.calls.find(([sql]) =>
+        /INSERT INTO movimientos_inventario/.test(sql as string),
+      ) as [string, unknown[]];
+      expect(insert[0]).toContain('costo_informado');
+      expect(insert[1][18]).toBe(esperado);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Rehacer la cuenta (spec compras-recepcion § 4.3)
+  //
+  // Los números son los de la spec (tomate) y los de la tabla del plan. Cada
+  // caso está armado para que la regla que prueba cambie el resultado: si la
+  // regla se saltara, el número sería otro.
+  // ---------------------------------------------------------------------------
+  describe('recalcularCostoDesdeCompra', () => {
+    const COMPRA = 'compra-uuid';
+    const LINEA = 'linea-uuid';
+    const BODEGA = 'bodega-uuid';
+
+    interface Mov {
+      tipo: string;
+      motivo: string;
+      cantidad: string;
+      stock_anterior: string;
+      stock_resultante: string;
+      costo_unitario: string | null;
+      costo_informado: boolean;
+      compra_linea_id: string | null;
+      es_entrada_de_linea: boolean | null;
+      cantidad_base: string | null;
+      costo_unitario_base: string | null;
+      compra_estado: string | null;
+    }
+
+    /** La entrada original de una línea: cuenta con lo que la línea vale HOY. */
+    function entradaDeLinea(
+      antes: number,
+      cantidadBase: string,
+      costoBase: string | null,
+      o: Partial<Mov> = {},
+    ): Mov {
+      return {
+        tipo: 'entrada',
+        motivo: 'compra',
+        cantidad: cantidadBase,
+        stock_anterior: String(antes),
+        stock_resultante: String(antes + Number(cantidadBase)),
+        costo_unitario: null,
+        costo_informado: costoBase != null,
+        compra_linea_id: LINEA,
+        es_entrada_de_linea: true,
+        cantidad_base: cantidadBase,
+        costo_unitario_base: costoBase,
+        compra_estado: 'confirmada',
+        ...o,
+      };
+    }
+
+    function mov(
+      tipo: 'entrada' | 'salida' | 'ajuste',
+      motivo: string,
+      antes: number,
+      cantidad: number,
+      o: Partial<Mov> = {},
+    ): Mov {
+      const signo = tipo === 'salida' ? -1 : tipo === 'entrada' ? 1 : 0;
+      return {
+        tipo,
+        motivo,
+        cantidad: String(cantidad),
+        stock_anterior: String(antes),
+        stock_resultante: String(antes + signo * cantidad),
+        costo_unitario: null,
+        costo_informado: false,
+        compra_linea_id: null,
+        es_entrada_de_linea: null,
+        cantidad_base: null,
+        costo_unitario_base: null,
+        compra_estado: null,
+        ...o,
+      };
+    }
+
+    /**
+     * Las consultas en orden: compra, producto (lock), punto de partida,
+     * recorrido y, si el costo cambia, las cuatro de `registrarMovimiento`.
+     */
+    function prepararCuenta(p: {
+      costoActual: string | null;
+      partida: { stock: string; costo: string | null };
+      movimientos: Mov[];
+      ubicacionViva?: boolean;
+    }) {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { ubicacion_id: BODEGA, ubicacion_viva: p.ubicacionViva ?? true },
+        ])
+        .mockResolvedValueOnce([{ costo_actual: p.costoActual }])
+        .mockResolvedValueOnce([
+          {
+            compra_linea_id: LINEA,
+            stock_total_anterior: p.partida.stock,
+            costo_producto_anterior: p.partida.costo,
+            secuencia: '100',
+          },
+        ])
+        .mockResolvedValueOnce(p.movimientos)
+        // `registrarMovimiento` de la corrección, si la hay:
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: p.costoActual },
+        ])
+        .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-correccion' }])
+        .mockResolvedValueOnce(undefined);
+    }
+
+    function recalcular() {
+      return service.recalcularCostoDesdeCompra(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          compraId: COMPRA,
+          usuarioId: USER_ID,
+          comentario: 'Precio completado',
+        },
+      );
+    }
+
+    /** El INSERT de la `correccion_compra`, si se escribió. */
+    function correccion() {
+      return managerMock.query.mock.calls.find(([sql]) =>
+        /INSERT INTO movimientos_inventario/.test(sql as string),
+      ) as [string, unknown[]] | undefined;
+    }
+
+    it('tomate: 5 kg a $1.000, entran 20 sin precio, se venden 8 y se completan a $1.500 → $1.400', async () => {
+      prepararCuenta({
+        costoActual: '1000.0000',
+        partida: { stock: '5', costo: '1000.0000' },
+        movimientos: [
+          entradaDeLinea(5, '20', '1500'),
+          mov('salida', 'venta', 25, 8, { costo_unitario: '1000.0000' }),
+        ],
+      });
+
+      const r = await recalcular();
+
+      expect(r).toEqual({
+        costoAnterior: '1000.0000',
+        costoNuevo: '1400.0000',
+        movimientoId: 'mov-correccion',
+      });
+      const insert = correccion()!;
+      expect(insert[1][4]).toBe('correccion_compra');
+      expect(insert[1][17]).toBe(LINEA);
+      // Lo vendido queda como estaba: ningún movimiento pasado se reescribe.
+      expect(
+        managerMock.query.mock.calls.some(([sql]) =>
+          /UPDATE movimientos_inventario/.test(sql as string),
+        ),
+      ).toBe(false);
+    });
+
+    it('con 10 kg a $1.200 el martes, después de la venta → $1.326', async () => {
+      prepararCuenta({
+        costoActual: '1074.0741',
+        partida: { stock: '5', costo: '1000.0000' },
+        movimientos: [
+          entradaDeLinea(5, '20', '1500'),
+          mov('salida', 'venta', 25, 8),
+          entradaDeLinea(17, '10', '1200', { compra_linea_id: 'linea-martes' }),
+        ],
+      });
+
+      // (17 × 1.400 + 10 × 1.200) / 27. Sumar la diferencia daba $1.474.
+      expect((await recalcular()).costoNuevo).toBe('1325.9259');
+    });
+
+    it('owner: 10 kg que entraron SIN costo por el ajuste de stock no mueven el promedio → $1.400, no $1.285,71', async () => {
+      prepararCuenta({
+        costoActual: '1000.0000',
+        partida: { stock: '5', costo: '1000.0000' },
+        movimientos: [
+          // La línea entró sin precio y hoy tiene $1.500.
+          entradaDeLinea(5, '20', '1500'),
+          // Sin costo, el kardex congeló el CPP de ese momento: $1.000.
+          mov('entrada', 'compra', 25, 10, {
+            costo_unitario: '1000.0000',
+            costo_informado: false,
+          }),
+        ],
+      });
+
+      expect((await recalcular()).costoNuevo).toBe('1400.0000');
+    });
+
+    it('una entrada compra del atajo CON costo promedia con su costo congelado', async () => {
+      prepararCuenta({
+        costoActual: '1285.7143',
+        partida: { stock: '5', costo: '1000.0000' },
+        movimientos: [
+          entradaDeLinea(5, '20', '1500'),
+          mov('entrada', 'compra', 25, 10, {
+            costo_unitario: '2000.0000',
+            costo_informado: true,
+          }),
+        ],
+      });
+
+      // (25 × 1.400 + 10 × 2.000) / 35
+      expect((await recalcular()).costoNuevo).toBe('1571.4286');
+    });
+
+    it('un ajuste_costo en medio reinicia al suyo', async () => {
+      prepararCuenta({
+        costoActual: '900.0000',
+        partida: { stock: '5', costo: '1000.0000' },
+        movimientos: [
+          entradaDeLinea(5, '20', '1500'),
+          mov('ajuste', 'ajuste_costo', 25, 0, { costo_unitario: '900.0000' }),
+          mov('salida', 'venta', 25, 8),
+        ],
+      });
+
+      const r = await recalcular();
+
+      // Igual al vigente: no hay corrección que escribir.
+      expect(r).toEqual({
+        costoAnterior: '900.0000',
+        costoNuevo: '900.0000',
+        movimientoId: null,
+      });
+      expect(correccion()).toBeUndefined();
+    });
+
+    it('la cantidad sube de 10 a 12: la línea cuenta 12 en su lugar original y la diferencia no vuelve a entrar', async () => {
+      prepararCuenta({
+        costoActual: '1000.0000',
+        partida: { stock: '5', costo: '1000.0000' },
+        movimientos: [
+          // Entró con 10; la línea hoy dice 12.
+          {
+            ...entradaDeLinea(5, '12', '1500'),
+            cantidad: '10',
+            stock_resultante: '15',
+          },
+          mov('salida', 'venta', 15, 8),
+          // La diferencia, colgada de la misma línea.
+          mov('entrada', 'compra', 7, 2, {
+            compra_linea_id: LINEA,
+            es_entrada_de_linea: false,
+            cantidad_base: '12',
+            costo_unitario_base: '1500',
+            compra_estado: 'confirmada',
+            costo_unitario: '1500.0000',
+            costo_informado: true,
+          }),
+        ],
+      });
+
+      // (5 × 1.000 + 12 × 1.500) / 17. Contar 10 y después los 2 daba $1.370,37.
+      expect((await recalcular()).costoNuevo).toBe('1352.9412');
+    });
+
+    it('una compra anulada cuenta como si no hubiera existido', async () => {
+      prepararCuenta({
+        costoActual: '1400.0000',
+        partida: { stock: '5', costo: '1000.0000' },
+        movimientos: [
+          entradaDeLinea(5, '20', '1500', { compra_estado: 'anulada' }),
+          mov('salida', 'venta', 25, 3),
+          mov('salida', 'compra', 22, 20, {
+            compra_linea_id: LINEA,
+            es_entrada_de_linea: false,
+            cantidad_base: '20',
+            costo_unitario_base: '1500',
+            compra_estado: 'anulada',
+          }),
+        ],
+      });
+
+      expect((await recalcular()).costoNuevo).toBe('1000.0000');
+    });
+
+    it('el stock pasa por cero: la entrada siguiente reinicia el costo', async () => {
+      prepararCuenta({
+        costoActual: '2000.0000',
+        partida: { stock: '5', costo: '1000.0000' },
+        movimientos: [
+          entradaDeLinea(5, '20', '1500'),
+          mov('salida', 'venta', 25, 25),
+          mov('entrada', 'compra', 0, 10, {
+            costo_unitario: '2000.0000',
+            costo_informado: true,
+          }),
+        ],
+      });
+
+      // Sin la venta en la cuenta daría (25 × 1.400 + 10 × 2.000) / 35 = 1.571,43.
+      expect((await recalcular()).costoNuevo).toBe('2000.0000');
+      expect(correccion()).toBeUndefined();
+    });
+
+    it('dos compras corregidas del mismo producto no se pisan: la otra entra con el costo de su línea, no el de su movimiento', async () => {
+      prepararCuenta({
+        costoActual: '1000.0000',
+        partida: { stock: '5', costo: '1000.0000' },
+        movimientos: [
+          entradaDeLinea(5, '20', '1500'),
+          // La otra compra entró a $1.200 y ya se corrigió a $1.300.
+          entradaDeLinea(25, '10', '1300', {
+            compra_linea_id: 'linea-otra',
+            costo_unitario: '1200.0000',
+          }),
+        ],
+      });
+
+      // (25 × 1.400 + 10 × 1.300) / 35. Con el $1.200 del movimiento: 1.342,86.
+      expect((await recalcular()).costoNuevo).toBe('1371.4286');
+    });
+
+    it('una correccion_compra anterior se salta: es un resultado, no un hecho', async () => {
+      prepararCuenta({
+        costoActual: '1300.0000',
+        partida: { stock: '5', costo: '1000.0000' },
+        movimientos: [
+          entradaDeLinea(5, '20', '1500'),
+          mov('ajuste', 'correccion_compra', 25, 0, {
+            costo_unitario: '1300.0000',
+            compra_linea_id: LINEA,
+            es_entrada_de_linea: false,
+          }),
+        ],
+      });
+
+      expect((await recalcular()).costoNuevo).toBe('1400.0000');
+    });
+
+    it('recorre por secuencia, desde la entrada de la compra', async () => {
+      prepararCuenta({
+        costoActual: '1400.0000',
+        partida: { stock: '5', costo: '1000.0000' },
+        movimientos: [entradaDeLinea(5, '20', '1500')],
+      });
+
+      await recalcular();
+
+      const [sql, params] = managerMock.query.mock.calls[3] as [
+        string,
+        unknown[],
+      ];
+      // `creado_el` es la hora en que EMPEZÓ la transacción: no es el orden
+      // de aplicación. Acotado a la cláusula, no al comentario.
+      expect(sql.trim()).toMatch(/ORDER BY m\.secuencia$/);
+      expect(sql).toMatch(/m\.secuencia >= \$3/);
+      expect(params).toEqual([TENANT, ITEM_ID, '100']);
+    });
+
+    it('bloquea la ubicación antes que el producto', async () => {
+      prepararCuenta({
+        costoActual: '1400.0000',
+        partida: { stock: '5', costo: '1000.0000' },
+        movimientos: [entradaDeLinea(5, '20', '1500')],
+      });
+
+      await recalcular();
+
+      const lockUbicacion =
+        ubicacionesService.bloquearContraBorrado.mock.invocationCallOrder[0];
+      const lockProducto = managerMock.query.mock.invocationCallOrder[1];
+      expect(managerMock.query.mock.calls[1][0]).toContain('FOR UPDATE OF ip');
+      expect(lockUbicacion).toBeLessThan(lockProducto);
+      expect(ubicacionesService.bloquearContraBorrado).toHaveBeenCalledWith(
+        managerMock,
+        TENANT,
+        BODEGA,
+      );
+    });
+
+    it('si la bodega de la compra se borró, la corrección va al local', async () => {
+      prepararCuenta({
+        costoActual: '1000.0000',
+        partida: { stock: '5', costo: '1000.0000' },
+        movimientos: [entradaDeLinea(5, '20', '1500')],
+        ubicacionViva: false,
+      });
+
+      await recalcular();
+
+      expect(ubicacionesService.localDe).toHaveBeenCalledWith(TENANT);
+      expect(ubicacionesService.bloquearContraBorrado).not.toHaveBeenCalledWith(
+        expect.anything(),
+        TENANT,
+        BODEGA,
+      );
+      expect(correccion()![1][2]).toBe(UBICACION_ID);
+    });
+
+    it('una compra sin entrada de ese producto es 400', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ ubicacion_id: BODEGA, ubicacion_viva: true }])
+        .mockResolvedValueOnce([{ costo_actual: '1000.0000' }])
+        .mockResolvedValueOnce([]);
+
+      await expect(recalcular()).rejects.toThrow(
+        'La compra no tiene una entrada de ese producto',
+      );
+    });
+
+    it('una compra de otro tenant o inexistente es 404', async () => {
+      managerMock.query.mockResolvedValueOnce([]);
+
+      await expect(recalcular()).rejects.toThrow(NotFoundException);
+      expect(ubicacionesService.bloquearContraBorrado).not.toHaveBeenCalled();
+    });
+  });
+
   describe('stockTotalPorProducto', () => {
     it('suma por producto, y un producto sin filas vale 0', async () => {
       managerMock.query.mockResolvedValueOnce([

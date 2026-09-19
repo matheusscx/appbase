@@ -490,8 +490,8 @@ export class InventarioService {
     // `unidad_medida` usando este mismo motivo, así que un producto donado (costo
     // 0) no podía corregir su unidad. Lo que hay que atajar no es el motivo sino
     // el costo positivo que COLAPSA a 0 al convertirse, y eso solo se ve donde
-    // está el valor de antes: `assertCostoNoColapsaACero`, en los tres
-    // llamadores que convierten.
+    // está el valor de antes: `assertCostoNoColapsaACero`, en cada llamador
+    // que convierte.
     if (params.costoUnitario != null) {
       let costoIngresado: Decimal;
       try {
@@ -597,8 +597,9 @@ export class InventarioService {
          (tenant_id, item_id, ubicacion_id, tipo, motivo, cantidad,
           stock_anterior, stock_resultante, venta_id, usuario_id, comentario,
           costo_unitario, costo_anterior, motivo_baja_id, motivo_diferencia_id,
-          traslado_id, cuenta_linea_anulacion_id, compra_linea_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+          traslado_id, cuenta_linea_anulacion_id, compra_linea_id,
+          costo_informado)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        RETURNING movimiento_id`,
       [
         params.tenantId,
@@ -619,6 +620,10 @@ export class InventarioService {
         params.trasladoId ?? null,
         params.cuentaLineaAnulacionId ?? null,
         params.compraLineaId ?? null,
+        // Si trajo costo: `costo_unitario` no lo dice, porque sin costo congela
+        // el CPP vigente. "Rehacer la cuenta" lo lee para saber qué entrada
+        // promedió (spec compras-recepcion § 4.3).
+        params.costoUnitario != null,
       ],
     );
 
@@ -766,29 +771,9 @@ export class InventarioService {
   }
 
   /**
-   * Promedio ponderado móvil (CPP). Las salidas nunca lo mueven; las entradas
-   * que sí, en MOTIVOS_QUE_RECALCULAN_CPP.
-   *
-   * ⚠️ Este bloque decía hasta el 2026-08-22 que la devolución **tampoco**
-   * recalcula, *"porque re-promediarla metería costo de venta dentro del costo
-   * de compra"*. El razonamiento valía mientras el reingreso llegaba sin costo
-   * propio; ahora llega con el costo congelado de la salida original, que es
-   * costo de compra —el mismo con el que la unidad había entrado—, así que
-   * promediarlo devuelve exactamente la valorización previa a la venta. Lo que
-   * el comentario viejo temía sigue prohibido: ningún camino pasa acá un precio
-   * de venta.
-   *
-   * `stockPrevio` es el del producto en todas las ubicaciones del tenant, no
-   * el `stock_anterior` del kardex (que es de la ubicación del movimiento):
-   * el costo es uno solo por producto.
-   *
-   * Sin stock previo o sin costo previo no hay masa que promediar: manda el
-   * costo de compra. Eso además evita dividir por cero.
-   */
-  /**
    * El stock de cada producto sumado en todas sus ubicaciones: el PESO del
    * costo promedio (ADR-016, addendum 2026-09-18). Una sola definición para
-   * los tres que lo usan —el promedio de `registrarMovimiento`, la línea de
+   * todos los que lo usan —el promedio de `registrarMovimiento`, la línea de
    * compra que lo congela al confirmar y "rehacer la cuenta"—, porque dos
    * copias de esta SQL se separarían con el primer cambio y la cuenta rehecha
    * partiría de otro número.
@@ -825,6 +810,246 @@ export class InventarioService {
     return new Map(itemIds.map((id) => [id, porItem.get(id) ?? '0']));
   }
 
+  /**
+   * "Rehacer la cuenta" (spec compras-recepcion § 4.3): el CPP del producto
+   * recalculado desde una compra hacia adelante, como si sus líneas hubieran
+   * llegado desde el principio con la cantidad y el costo que tienen HOY. Lo
+   * llaman corregir y anular una compra; confirmar no, porque ahí no hay nada
+   * que rehacer.
+   *
+   * Parte del punto congelado en la primera línea de la compra con ese producto
+   * (`stock_total_anterior`, `costo_producto_anterior`) y recorre el kardex del
+   * producto en todas las ubicaciones por `secuencia`, el orden real de
+   * aplicación (`creado_el` es la hora en que EMPEZÓ cada transacción). Las
+   * entradas que promedian pasan por `calcularCostoPromedio`, la misma cuenta
+   * que `registrarMovimiento`: una copia se separaría con el primer cambio.
+   *
+   * Si el resultado difiere del `costo_actual`, lo escribe con una
+   * `correccion_compra`. Ningún movimiento pasado cambia su costo congelado: lo
+   * vendido queda como estaba.
+   *
+   * ⚠️ Un resultado sin costo (`null`) no se escribe, porque un ajuste de valor
+   * exige un costo. Solo pasa si la compra anulada era la única entrada con
+   * costo de un producto que no tenía: lo resuelve la tarea de anular.
+   */
+  async recalcularCostoDesdeCompra(
+    manager: EntityManager,
+    p: {
+      tenantId: string;
+      itemId: string;
+      compraId: string;
+      usuarioId: string;
+      comentario: string;
+    },
+  ): Promise<{
+    costoAnterior: string | null;
+    costoNuevo: string | null;
+    movimientoId: string | null;
+  }> {
+    // 1. Dónde queda la corrección, con su lock ANTES del de `item_producto`
+    //    (`docs/patterns/backend.md` §15). El JOIN no filtra la ubicación
+    //    eliminada a propósito: es justo lo que se pregunta. Si la bodega de la
+    //    compra se vació y se borró, la corrección va al local, porque
+    //    `bloquearContraBorrado` da 404 sobre una ubicación borrada. La
+    //    corrección no mueve stock, así que la ubicación solo dice dónde se lee.
+    const compraRows: { ubicacion_id: string; ubicacion_viva: boolean }[] =
+      await manager.query(
+        `SELECT c.ubicacion_id, (u.eliminado_el IS NULL) AS ubicacion_viva
+           FROM compras c
+           JOIN ubicaciones u
+             ON u.ubicacion_id = c.ubicacion_id AND u.tenant_id = c.tenant_id
+          WHERE c.tenant_id = $1 AND c.compra_id = $2 AND c.eliminado_el IS NULL`,
+        [p.tenantId, p.compraId],
+      );
+    if (!compraRows.length) {
+      throw new NotFoundException('Compra no encontrada');
+    }
+    const ubicacionId = compraRows[0].ubicacion_viva
+      ? compraRows[0].ubicacion_id
+      : await this.ubicacionesService.localDe(p.tenantId);
+    await this.ubicacionesService.bloquearContraBorrado(
+      manager,
+      p.tenantId,
+      ubicacionId,
+    );
+
+    // 2. El producto, bajo el mismo lock que `registrarMovimiento`: mientras se
+    //    recorre el kardex nadie le agrega un movimiento, y la corrección de
+    //    abajo lo vuelve a pedir dentro de esta transacción, así que no espera.
+    const productoRows: { costo_actual: string | null }[] = await manager.query(
+      `SELECT ip.costo_actual
+         FROM item_producto ip
+         JOIN items i ON i.item_id = ip.item_id
+        WHERE ip.item_id = $1 AND i.tenant_id = $2
+        FOR UPDATE OF ip`,
+      [p.itemId, p.tenantId],
+    );
+    if (!productoRows.length) {
+      throw new BadRequestException('El item no tiene control de stock');
+    }
+    const costoAnterior = productoRows[0].costo_actual;
+
+    // 3. El punto de partida: la primera línea de la compra con este producto,
+    //    por el orden en que entró al kardex.
+    const partidaRows: {
+      compra_linea_id: string;
+      stock_total_anterior: string;
+      costo_producto_anterior: string | null;
+      secuencia: string;
+    }[] = await manager.query(
+      `SELECT cl.compra_linea_id, cl.stock_total_anterior,
+              cl.costo_producto_anterior, m.secuencia
+         FROM compra_lineas cl
+         JOIN movimientos_inventario m
+           ON m.movimiento_id = cl.movimiento_id AND m.eliminado_el IS NULL
+        WHERE cl.tenant_id = $1 AND cl.compra_id = $2 AND cl.item_id = $3
+          AND cl.eliminado_el IS NULL
+        ORDER BY m.secuencia
+        LIMIT 1`,
+      [p.tenantId, p.compraId, p.itemId],
+    );
+    if (!partidaRows.length) {
+      throw new BadRequestException(
+        'La compra no tiene una entrada de ese producto: no hay cuenta que rehacer',
+      );
+    }
+    const partida = partidaRows[0];
+
+    // 4. El recorrido, en UNA consulta: cada movimiento con la cantidad y el
+    //    costo VIGENTES de su línea de compra, si tiene, y el estado de la
+    //    compra. Sin filtro de ubicación eliminada (spec § 4.3): mientras tuvo
+    //    stock, ese stock entró en el peso del CPP de su momento.
+    //    Los JOIN a `compra_lineas` y `compras` no filtran `eliminado_el`, y no
+    //    es un olvido: una línea con movimiento es de una compra confirmada, y
+    //    ni esa línea ni esa compra se borran (la compra se anula). Filtrarlos
+    //    mandaría su entrada, en silencio, a la rama de "sin línea".
+    const movimientos: {
+      tipo: string;
+      motivo: string;
+      cantidad: string;
+      stock_anterior: string;
+      stock_resultante: string;
+      costo_unitario: string | null;
+      costo_informado: boolean;
+      compra_linea_id: string | null;
+      es_entrada_de_linea: boolean | null;
+      cantidad_base: string | null;
+      costo_unitario_base: string | null;
+      compra_estado: string | null;
+    }[] = await manager.query(
+      `SELECT m.tipo, m.motivo, m.cantidad, m.stock_anterior,
+              m.stock_resultante, m.costo_unitario, m.costo_informado,
+              m.compra_linea_id,
+              (m.movimiento_id = cl.movimiento_id) AS es_entrada_de_linea,
+              cl.cantidad_base, cl.costo_unitario_base,
+              c.estado AS compra_estado
+         FROM movimientos_inventario m
+         LEFT JOIN compra_lineas cl
+           ON cl.compra_linea_id = m.compra_linea_id
+          AND cl.tenant_id = m.tenant_id
+         LEFT JOIN compras c
+           ON c.compra_id = cl.compra_id AND c.tenant_id = cl.tenant_id
+        WHERE m.tenant_id = $1 AND m.item_id = $2 AND m.secuencia >= $3
+          AND m.eliminado_el IS NULL
+        ORDER BY m.secuencia`,
+      [p.tenantId, p.itemId, partida.secuencia],
+    );
+
+    // 5. La cuenta. El stock va sumando lo que cada movimiento cambió en su
+    //    ubicación (`stock_resultante - stock_anterior`), que es exactamente lo
+    //    que ese movimiento le sumó al stock total.
+    let stock = new Decimal(partida.stock_total_anterior);
+    let costo = partida.costo_producto_anterior;
+    for (const m of movimientos) {
+      if (m.motivo === 'compra' && m.compra_linea_id != null) {
+        // Una línea de compra entra UNA vez, en su lugar original, con lo que
+        // vale hoy. Sus diferencias de cantidad y la salida de su anulación ya
+        // están contadas ahí; una compra anulada no entra.
+        if (!m.es_entrada_de_linea || m.compra_estado === 'anulada') continue;
+        const cantidad = new Decimal(m.cantidad_base!);
+        if (m.costo_unitario_base != null) {
+          costo = this.calcularCostoPromedio(
+            stock,
+            costo,
+            cantidad,
+            m.costo_unitario_base,
+          );
+        }
+        stock = stock.plus(cantidad);
+        continue;
+      }
+      // Solo `ajuste_costo` reinicia, aunque `correccion_compra` también sea un
+      // ajuste de valor: ésa es un resultado de esta misma cuenta, no un hecho.
+      // Como no mueve cantidad ni es entrada, cae abajo sin tocar nada.
+      if (m.motivo === 'ajuste_costo') {
+        costo = m.costo_unitario;
+        continue;
+      }
+      // La misma condición que decide el promedio en `registrarMovimiento`.
+      if (
+        m.tipo === 'entrada' &&
+        m.costo_informado &&
+        MOTIVOS_QUE_RECALCULAN_CPP.includes(m.motivo)
+      ) {
+        costo = this.calcularCostoPromedio(
+          stock,
+          costo,
+          new Decimal(m.cantidad),
+          m.costo_unitario!,
+        );
+      }
+      stock = stock.plus(
+        new Decimal(m.stock_resultante).minus(m.stock_anterior),
+      );
+    }
+
+    const igual =
+      costo == null || costoAnterior == null
+        ? costo === costoAnterior
+        : new Decimal(costo).equals(costoAnterior);
+    if (igual || costo == null) {
+      return { costoAnterior, costoNuevo: costo, movimientoId: null };
+    }
+
+    const mov = await this.registrarMovimiento(manager, {
+      tenantId: p.tenantId,
+      itemId: p.itemId,
+      ubicacionId,
+      tipo: 'ajuste',
+      motivo: 'correccion_compra',
+      cantidad: '0',
+      costoUnitario: costo,
+      compraLineaId: partida.compra_linea_id,
+      usuarioId: p.usuarioId,
+      comentario: p.comentario,
+    });
+    return {
+      costoAnterior: mov.costoActualPrevio,
+      costoNuevo: costo,
+      movimientoId: mov.movimientoId,
+    };
+  }
+
+  /**
+   * Promedio ponderado móvil (CPP). Las salidas nunca lo mueven; las entradas
+   * que sí, en MOTIVOS_QUE_RECALCULAN_CPP.
+   *
+   * ⚠️ Este bloque decía hasta el 2026-08-22 que la devolución **tampoco**
+   * recalcula, *"porque re-promediarla metería costo de venta dentro del costo
+   * de compra"*. El razonamiento valía mientras el reingreso llegaba sin costo
+   * propio; ahora llega con el costo congelado de la salida original, que es
+   * costo de compra —el mismo con el que la unidad había entrado—, así que
+   * promediarlo devuelve exactamente la valorización previa a la venta. Lo que
+   * el comentario viejo temía sigue prohibido: ningún camino pasa acá un precio
+   * de venta.
+   *
+   * `stockPrevio` es el del producto en todas las ubicaciones del tenant, no
+   * el `stock_anterior` del kardex (que es de la ubicación del movimiento):
+   * el costo es uno solo por producto.
+   *
+   * Sin stock previo o sin costo previo no hay masa que promediar: manda el
+   * costo de compra. Eso además evita dividir por cero.
+   */
   private calcularCostoPromedio(
     stockPrevio: Decimal,
     costoActualPrevio: string | null,
