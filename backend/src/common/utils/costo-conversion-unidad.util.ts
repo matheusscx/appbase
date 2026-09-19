@@ -43,10 +43,11 @@ export function convertirCostoUnitario(
  * chequeo el costo colapsado se persistiría como 0 **en silencio**. La distinción
  * que sostiene: se rechaza el 0 que NADIE escribió, nunca el que alguien eligió.
  *
- * Los tres llamadores son los tres lugares donde el costo se convierte de unidad:
+ * Lo llama todo lugar donde el costo se convierte de unidad —por ejemplo
  * `ItemsService.ajustarStock` (compra en otra unidad), `ItemsService.update`
- * (cambio de `unidad_medida`, que reconvierte el costo vigente) e
- * `InventarioService.registrarAjusteCosto` (costo tipeado por la unidad elegida).
+ * (cambio de `unidad_medida`), `InventarioService.registrarAjusteCosto` (costo
+ * tipeado por la unidad elegida) y `ComprasService.confirmar` (precio por la unidad
+ * del proveedor)—. Un camino nuevo que convierta un costo va también por acá.
  */
 export function assertCostoNoColapsaACero(
   costoOriginal: string,

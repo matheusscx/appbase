@@ -293,18 +293,23 @@ function armarBody() {
   }
 }
 
-async function guardar() {
-  if (!puedeGuardar.value || guardando.value) return
-  guardando.value = true
+/**
+ * Guarda lo que está en pantalla (POST si es nueva, PATCH si no) y devuelve la
+ * compra guardada, o `null` si falló, con el error ya mostrado. La usan
+ * "Guardar borrador" y "Confirmar recepción": confirmar sin guardar primero
+ * recibiría lo último guardado, no lo que el encargado ve.
+ */
+async function persistirBorrador(): Promise<CompraDetalle | null> {
   folioError.value = null
   try {
     const body = armarBody()
-    const res = esNueva.value
+    const eraNueva = esNueva.value
+    const res = eraNueva
       ? await useApiFetch<CompraDetalle>(`${apiUrl}/compras`, { method: 'POST', body })
       : await useApiFetch<CompraDetalle>(`${apiUrl}/compras/${compra.value!.id}`, { method: 'PATCH', body })
     llenarDesde(res)
-    toast.add({ title: 'Borrador guardado', color: 'success' })
-    if (esNueva.value) await router.replace(`/compras/${res.id}`)
+    if (eraNueva) await router.replace(`/compras/${res.id}`)
+    return res
   } catch (e: unknown) {
     const status = (e as { status?: number, statusCode?: number }).status
       ?? (e as { statusCode?: number }).statusCode
@@ -312,8 +317,55 @@ async function guardar() {
     // El folio repetido se muestra al lado del campo, que es donde se arregla.
     if (status === 409) folioError.value = mensaje
     else toast.add({ title: mensaje, color: 'error' })
+    return null
+  }
+}
+
+async function guardar() {
+  if (!puedeGuardar.value || guardando.value) return
+  guardando.value = true
+  try {
+    if (await persistirBorrador()) {
+      toast.add({ title: 'Borrador guardado', color: 'success' })
+    }
   } finally {
     guardando.value = false
+  }
+}
+
+// ── Confirmar ───────────────────────────────────────────────────────────────
+
+const confirmarOpen = ref(false)
+const puedeConfirmar = computed(() => puedeGuardar.value && lineasCargadas.value.length > 0)
+
+const ubicacionNombre = computed(() =>
+  ubicaciones.value.find(u => u.id === form.value.ubicacionId)?.nombre ?? '',
+)
+const lineasSinPrecio = computed(() =>
+  lineasCargadas.value.filter(l => !l.precioUnitario).length,
+)
+
+/**
+ * Guarda y confirma. Confirmar mueve stock y costo: por eso pasa por un modal
+ * que dice cuánto entra y adónde antes de mandar nada.
+ */
+async function confirmarRecepcion() {
+  if (!puedeConfirmar.value || guardando.value) return
+  guardando.value = true
+  try {
+    const guardada = await persistirBorrador()
+    if (!guardada) return
+    const res = await useApiFetch<CompraDetalle>(
+      `${apiUrl}/compras/${guardada.id}/confirmar`,
+      { method: 'POST' },
+    )
+    llenarDesde(res)
+    toast.add({ title: 'Recepción confirmada: la mercadería ya entró al stock', color: 'success' })
+  } catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al confirmar la recepción'), color: 'error' })
+  } finally {
+    guardando.value = false
+    confirmarOpen.value = false
   }
 }
 
@@ -555,8 +607,10 @@ const titulo = computed(() => {
             </UButton>
             <UButton
               icon="i-lucide-package-check"
-              disabled
-              title="Disponible cuando se habilite la recepción"
+              color="success"
+              :disabled="!puedeConfirmar || guardando"
+              data-qa="compra-confirmar"
+              @click="() => { confirmarOpen = true }"
             >
               Confirmar recepción
             </UButton>
@@ -598,6 +652,39 @@ const titulo = computed(() => {
             <span class="tabular-nums">{{ compra.total != null ? formatMonto(compra.total) : '—' }}</span>
           </div>
         </div>
+
+        <UModal v-model:open="confirmarOpen" title="¿Confirmar la recepción?">
+          <template #body>
+            <div class="space-y-2 text-sm text-default" data-qa="compra-confirmar-resumen">
+              <p>
+                Entran {{ lineasCargadas.length }} {{ lineasCargadas.length === 1 ? 'línea' : 'líneas' }}
+                a <strong>{{ ubicacionNombre }}</strong>: el stock sube ahora.
+              </p>
+              <p v-if="lineasSinPrecio > 0" class="text-muted">
+                {{ lineasSinPrecio }} {{ lineasSinPrecio === 1 ? 'línea entra' : 'líneas entran' }} sin precio:
+                el costo se completa cuando llegue la factura.
+              </p>
+              <p class="text-muted">
+                Una compra confirmada ya no se edita como borrador.
+              </p>
+            </div>
+          </template>
+          <template #footer>
+            <div class="flex justify-end gap-2 w-full">
+              <UButton variant="ghost" @click="() => { confirmarOpen = false }">
+                Cancelar
+              </UButton>
+              <UButton
+                color="success"
+                :loading="guardando"
+                data-qa="compra-confirmar-si"
+                @click="confirmarRecepcion"
+              >
+                Confirmar recepción
+              </UButton>
+            </div>
+          </template>
+        </UModal>
 
         <UModal v-model:open="descartarOpen" title="¿Descartar este borrador?">
           <template #body>

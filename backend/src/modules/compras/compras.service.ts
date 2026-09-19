@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import type { EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
@@ -12,7 +13,17 @@ import {
   resolvePagination,
 } from '../../common/utils/pagination.util';
 import { unwrap } from '../../common/utils/pg-returning.util';
+import {
+  MAX_REINTENTOS_DEADLOCK,
+  esDeadlock,
+} from '../../common/db/reintento-deadlock';
+import { assertCostoNoColapsaACero } from '../../common/utils/costo-conversion-unidad.util';
 import { CatalogService } from '../catalog/catalog.service';
+import { InventarioService } from '../inventario/inventario.service';
+import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
+import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
+import { MonedasService } from '../monedas/monedas.service';
+import { costearLineas } from './reparto-descuento';
 import type { EstadoCompra } from './entities/compra.entity';
 import type {
   LoteCompraInput,
@@ -183,6 +194,10 @@ export class ComprasService {
   constructor(
     private readonly db: Db,
     private readonly catalogService: CatalogService,
+    private readonly inventarioService: InventarioService,
+    private readonly ubicacionesService: UbicacionesService,
+    private readonly calculoPreciosService: CalculoPreciosService,
+    private readonly monedasService: MonedasService,
   ) {}
 
   // ───────────────────────────────────────────────────────────────────────
@@ -481,6 +496,282 @@ export class ComprasService {
     });
   }
 
+  // ───────────────────────────────────────────────────────────────────────
+  // Confirmar
+  // ───────────────────────────────────────────────────────────────────────
+
+  /**
+   * Confirma la recepción (spec compras-recepcion § 4.2): cada línea entra al
+   * stock de la ubicación de la compra por el chokepoint del kardex, con su
+   * costo por unidad base (o sin costo, si todavía no llegó la factura).
+   *
+   * El reintento es el de siempre (`MAX_REINTENTOS_DEADLOCK`), y vale porque el
+   * único llamador es el controller: sin transacción envolvente, un `40P01`
+   * reintenta limpio (mismo razonamiento que `TrasladosService.crear`).
+   */
+  async confirmar(
+    tenantId: string,
+    usuarioId: string,
+    id: string,
+  ): Promise<CompraDetalle> {
+    for (let intento = 0; ; intento++) {
+      try {
+        return await this.db.transaccion((manager) =>
+          this.confirmarEnTransaccion(manager, tenantId, usuarioId, id),
+        );
+      } catch (error) {
+        if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
+          throw error;
+      }
+    }
+  }
+
+  private async confirmarEnTransaccion(
+    manager: EntityManager,
+    tenantId: string,
+    usuarioId: string,
+    id: string,
+  ): Promise<CompraDetalle> {
+    // 1. El encabezado, bajo lock: nadie más lo edita ni lo confirma a la vez.
+    await this.bloquearBorrador(tenantId, id);
+    const cabecera: {
+      proveedor_id: string;
+      tipo_documento_compra_id: string;
+      folio: string | null;
+      fecha_documento: string;
+      ubicacion_id: string;
+      observacion: string | null;
+      descuento_total: string | null;
+    }[] = await this.db.query(
+      `SELECT proveedor_id, tipo_documento_compra_id, folio,
+              fecha_documento::text AS fecha_documento, ubicacion_id,
+              observacion, descuento_total
+         FROM compras
+        WHERE tenant_id = $1 AND compra_id = $2 AND eliminado_el IS NULL`,
+      [tenantId, id],
+    );
+    const c = cabecera[0];
+    const lineas: {
+      compra_linea_id: string;
+      item_id: string;
+      cantidad: string;
+      unidad_codigo: string;
+      precio_unitario: string | null;
+      series: SerieCompraInput[] | null;
+      lote: LoteCompraInput | null;
+    }[] = await this.db.query(
+      `SELECT compra_linea_id, item_id, cantidad, unidad_codigo,
+              precio_unitario, series, lote
+         FROM compra_lineas
+        WHERE tenant_id = $1 AND compra_id = $2 AND eliminado_el IS NULL
+        ORDER BY orden`,
+      [tenantId, id],
+    );
+    if (!lineas.length) {
+      throw new BadRequestException(
+        'La compra no tiene líneas: no hay nada que recibir',
+      );
+    }
+
+    // 2. Las mismas validaciones que el borrador, otra vez: entre guardar y
+    // confirmar pudo pausarse el proveedor, desactivarse la bodega o
+    // cargarse el mismo folio en otra compra.
+    const dto: CompraBorradorDto = {
+      proveedorId: c.proveedor_id,
+      tipoDocumentoCompraId: c.tipo_documento_compra_id,
+      folio: c.folio,
+      fechaDocumento: c.fecha_documento,
+      ubicacionId: c.ubicacion_id,
+      observacion: c.observacion,
+      lineas: lineas.map((l) => ({
+        itemId: l.item_id,
+        cantidad: l.cantidad,
+        unidadCodigo: l.unidad_codigo,
+        precioUnitario: l.precio_unitario,
+        series: l.series ?? undefined,
+        lote: l.lote ?? undefined,
+      })),
+    };
+    const enc = await this.validarEncabezado(tenantId, dto);
+    const items = await this.validarLineas(tenantId, dto.lineas);
+    await this.assertFolioLibre(
+      tenantId,
+      c.proveedor_id,
+      c.tipo_documento_compra_id,
+      enc,
+      id,
+    );
+
+    // 3. Los locks, en el orden de `docs/patterns/backend.md` §15: primero la
+    // ubicación contra su borrado, después los productos en UN statement
+    // ordenado por `item_id` (el mismo orden que `ventas.crear()` y
+    // `traslados`). `registrarMovimiento` vuelve a pedir los dos; con los
+    // locks ya en la mano no espera nada.
+    await this.ubicacionesService.bloquearContraBorrado(
+      manager,
+      tenantId,
+      c.ubicacion_id,
+    );
+    const itemIds = [...new Set(lineas.map((l) => l.item_id))].sort((a, b) =>
+      a.localeCompare(b),
+    );
+    await manager.query(
+      `SELECT ip.item_id
+         FROM item_producto ip
+         JOIN items i ON i.item_id = ip.item_id
+        WHERE ip.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
+        ORDER BY ip.item_id
+        FOR UPDATE OF ip`,
+      [itemIds, tenantId],
+    );
+
+    // 4. El stock total ANTES de la compra, ya con los locks: una sola
+    // consulta, y la misma definición que usa el CPP.
+    const stockTotal = await this.inventarioService.stockTotalPorProducto(
+      manager,
+      tenantId,
+      itemIds,
+    );
+
+    // 5. Cantidad y costo por unidad base. El descuento al total se reparte
+    // entre las líneas con precio (si falta alguno, no se pudo cargar).
+    const necesitaConversion = lineas.some(
+      (l) => l.unidad_codigo !== items.get(l.item_id)!.unidadBase,
+    );
+    const convertir = necesitaConversion
+      ? await this.catalogService.crearConversor()
+      : null;
+    const bases = lineas.map((l) => {
+      const base = items.get(l.item_id)!.unidadBase;
+      return l.unidad_codigo === base
+        ? l.cantidad
+        : convertir!(l.cantidad, l.unidad_codigo, base);
+    });
+    const conPrecio = lineas
+      .map((l, i) => ({ l, i }))
+      .filter(({ l }) => l.precio_unitario != null);
+    const cfg = await this.calculoPreciosService.cargarConfig(
+      tenantId,
+      await this.monedasService.decimalesOficiales(tenantId),
+    );
+    const costos = costearLineas(
+      conPrecio.map(({ l, i }) => ({
+        cantidad: l.cantidad,
+        precioUnitario: l.precio_unitario!,
+        cantidadBase: bases[i],
+      })),
+      c.descuento_total,
+      cfg,
+    );
+    const costoBasePorLinea = new Map<number, string>();
+    conPrecio.forEach(({ l, i }, k) => {
+      assertCostoNoColapsaACero(
+        l.precio_unitario!,
+        costos[k],
+        items.get(l.item_id)!.unidadBase,
+      );
+      costoBasePorLinea.set(i, costos[k]);
+    });
+
+    // 6. Una entrada por línea, en el orden de los locks (por `item_id`, y
+    // dentro del mismo producto por el orden de la factura). El stock total
+    // anterior de cada línea es el del producto antes de la compra más lo que
+    // ya entró por las líneas anteriores del mismo producto: el mismo número
+    // que pondera el CPP de esa entrada.
+    const orden = lineas
+      .map((l, i) => i)
+      .sort(
+        (a, b) => lineas[a].item_id.localeCompare(lineas[b].item_id) || a - b,
+      );
+    const acumulado = new Map(
+      itemIds.map((itemId) => [itemId, new Decimal(stockTotal.get(itemId)!)]),
+    );
+    const congelados: {
+      compraLineaId: string;
+      cantidadBase: string;
+      costoUnitarioBase: string | null;
+      movimientoId: string;
+      stockTotalAnterior: string;
+      costoProductoAnterior: string | null;
+    }[] = [];
+    const comentario =
+      `Compra: ${enc.tipoDocumentoNombre}` +
+      (enc.folio ? ` ${enc.folio}` : '') +
+      ` — ${enc.proveedorNombre}`;
+    for (const i of orden) {
+      const l = lineas[i];
+      const anterior = acumulado.get(l.item_id)!;
+      const costoBase = costoBasePorLinea.get(i) ?? null;
+      const mov = await this.inventarioService.registrarMovimiento(manager, {
+        tenantId,
+        itemId: l.item_id,
+        ubicacionId: c.ubicacion_id,
+        usuarioId,
+        tipo: 'entrada',
+        motivo: 'compra',
+        cantidad: bases[i],
+        costoUnitario: costoBase,
+        compraLineaId: l.compra_linea_id,
+        comentario,
+        series: l.series ?? undefined,
+        lote: l.lote ?? undefined,
+      });
+      congelados.push({
+        compraLineaId: l.compra_linea_id,
+        cantidadBase: bases[i],
+        costoUnitarioBase: costoBase,
+        movimientoId: mov.movimientoId,
+        stockTotalAnterior: anterior.toString(),
+        costoProductoAnterior: mov.costoActualPrevio,
+      });
+      acumulado.set(l.item_id, anterior.plus(bases[i]));
+    }
+
+    // 7. Lo congelado, en UN update para todas las líneas.
+    const COLUMNAS = 6;
+    const valores = congelados
+      .map((_, k) => {
+        const p = k * COLUMNAS + 2;
+        return `($${p}::uuid, $${p + 1}::numeric, $${p + 2}::numeric, $${p + 3}::uuid, $${p + 4}::numeric, $${p + 5}::numeric)`;
+      })
+      .join(', ');
+    await this.db.query(
+      `UPDATE compra_lineas cl
+          SET cantidad_base = v.cantidad_base,
+              costo_unitario_base = v.costo_unitario_base,
+              movimiento_id = v.movimiento_id,
+              stock_total_anterior = v.stock_total_anterior,
+              costo_producto_anterior = v.costo_producto_anterior,
+              actualizado_el = NOW()
+         FROM (VALUES ${valores}) AS v(compra_linea_id, cantidad_base,
+              costo_unitario_base, movimiento_id, stock_total_anterior,
+              costo_producto_anterior)
+        WHERE cl.compra_linea_id = v.compra_linea_id AND cl.tenant_id = $1`,
+      [
+        tenantId,
+        ...congelados.flatMap((g) => [
+          g.compraLineaId,
+          g.cantidadBase,
+          g.costoUnitarioBase,
+          g.movimientoId,
+          g.stockTotalAnterior,
+          g.costoProductoAnterior,
+        ]),
+      ],
+    );
+
+    // 8. El estado.
+    await this.db.query(
+      `UPDATE compras
+          SET estado = 'confirmada', confirmado_por = $3,
+              confirmado_el = NOW(), actualizado_el = NOW()
+        WHERE tenant_id = $1 AND compra_id = $2`,
+      [tenantId, id, usuarioId],
+    );
+
+    return this.findOne(tenantId, id);
+  }
+
   /**
    * El folio repetido es 409, y el mensaje nombra la compra que ya lo tiene.
    * Por ley el folio es único por emisor y tipo de documento (owner,
@@ -611,8 +902,8 @@ export class ComprasService {
   private async validarLineas(
     tenantId: string,
     lineas: LineaCompraDto[],
-  ): Promise<void> {
-    if (!lineas.length) return;
+  ): Promise<Map<string, { unidadBase: string }>> {
+    if (!lineas.length) return new Map();
 
     const itemIds = [...new Set(lineas.map((l) => l.itemId))];
     const items: {
@@ -660,6 +951,13 @@ export class ComprasService {
 
       this.validarTrazabilidad(linea, item.nombre, item.modo_inventario);
     }
+
+    return new Map(
+      items.map((i) => [
+        i.item_id,
+        { unidadBase: i.unidad_medida ?? 'unidad' },
+      ]),
+    );
   }
 
   private validarTrazabilidad(

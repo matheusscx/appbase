@@ -35,6 +35,16 @@ mockNuxtImport('useRoute', () => {
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     if (typeof url !== 'string') return Promise.resolve([])
+    if (opts?.method === 'POST' && url.endsWith('/confirmar')) {
+      enviados.push({ method: `POST ${url.split('/api').pop()}` })
+      return Promise.resolve({
+        id: 'compra-1', estado: 'confirmada', faltaCosto: true, fechaDocumento: '2026-09-15',
+        proveedorId: PROVEEDOR.id, proveedorNombre: PROVEEDOR.nombre,
+        tipoDocumentoCompraId: FACTURA.id, tipoDocumentoNombre: 'Factura', folio: '4521',
+        ubicacionId: BODEGA.id, ubicacionNombre: BODEGA.nombre, observacion: null,
+        descuentoTotal: null, total: null, lineas: [],
+      })
+    }
     if (opts?.method === 'POST' && url.endsWith('/compras')) {
       enviados.push({ method: opts.method, body: opts.body })
       return Promise.resolve({
@@ -148,6 +158,33 @@ describe('compras/[id] — carga del borrador', () => {
     expect(body.lineas).toEqual([
       { itemId: HARINA.id, cantidad: '20', unidadCodigo: 'kg', precioUnitario: null },
     ])
+    wrapper.unmount()
+  })
+
+  it('confirmar muestra el resumen, guarda lo que está en pantalla y después confirma', async () => {
+    const wrapper = await montar()
+    await emitir(selectConOpcion(wrapper, PROVEEDOR.id), PROVEEDOR.id)
+    await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
+    await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
+    await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
+    await emitir(selectConOpcion(wrapper, HARINA.id), HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+
+    await wrapper.find('[data-qa="compra-confirmar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    // El modal lo teletransporta UModal fuera del wrapper.
+    const resumen = document.body.querySelector('[data-qa="compra-confirmar-resumen"]')
+    expect(resumen?.textContent).toContain('Entran 1 línea a')
+    expect(resumen?.textContent).toContain('Bodega')
+    expect(resumen?.textContent).toContain('1 línea entra sin precio')
+    // Nada se mandó todavía: el modal frena.
+    expect(enviados).toHaveLength(0)
+
+    ;(document.body.querySelector('[data-qa="compra-confirmar-si"]') as HTMLButtonElement).click()
+    await new Promise(r => setTimeout(r, 30))
+
+    // Primero se guarda lo que está en pantalla, después se confirma esa compra.
+    expect(enviados.map(e => e.method)).toEqual(['POST', 'POST /compras/compra-1/confirmar'])
     wrapper.unmount()
   })
 })

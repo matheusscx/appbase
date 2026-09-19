@@ -55,6 +55,7 @@ Por eso:
 | 3 | `a34a6bad` | Se compran `producto` **e** `ingrediente` (owner). Un fixture más, `compras.lectura` (ids …441/…442, del bloque 441–445): sin él, un `POST` guardado con `Leer` pasaba la suite. La revisión agregó `EscalaMonedaPipe` al body (el `@EsCosto()` solo no valida) y cambió la validación de unidades a `crearConversor` |
 | 4 | `1b15c224` | `useCompras()` devuelve funciones, como `useEstadoVenta`. El precio usa `MoneyInput` en vez de un `UInput` |
 | 5 | `7de0dcb4` | Sin `registrarCorreccionCosto`: `correccion_compra` es un ajuste de valor como `ajuste_costo` (ver la tarea 5). El e2e de la secuencia usa 5 concurrentes, no 10, porque con 10 el pool de conexiones se agotaba |
+| 6 | ver `git log` | Va **antes** que la 7 (OK del owner). Toma `bloquearContraBorrado` por su cuenta, **antes** del lock de productos, aunque `registrarMovimiento` lo repita: bloquea todos los productos en un solo statement antes de mover nada (para leer el stock total con los locks tomados), y el orden tiene que ser ubicación → productos. El front guarda lo que está en pantalla y después confirma, detrás de un modal con el resumen |
 | 5, seguimiento | ver `git log` | `stockTotalPorProducto` recibe el tenant y lo acota por la ubicación (hallazgo MEDIO de la revisión de seguridad). **`compras` pierde `eliminado_por`**: la suite completa mostró que el test de la papelera exige decidir si toda tabla con esa columna va a la papelera, y el owner decidió que un borrador descartado **no** va (2026-09-18). El bloque de código de la tarea 1 muestra la entidad como se escribió entonces |
 
 ## Global Constraints
@@ -1134,7 +1135,13 @@ registrarMovimiento(manager, {
 
 ### Task 6: Confirmar
 
-Depende de las tareas 5 y 7. Sin código fijado.
+Depende de la tarea 5. **Va antes que la 7** (cambio de orden al ejecutar): confirmar solo
+registra las entradas y congela el punto de partida en cada línea; no rehace ninguna cuenta.
+"Rehacer la cuenta" la necesitan corregir y anular (tareas 8 y 9), no confirmar.
+
+✅ **OK del owner para esta tarea y para el cambio de orden (2026-09-18):** *"dale luz verde"*.
+Escribe en `movimientos_inventario`: una entrada `compra` por línea vía `registrarMovimiento`,
+que mueve stock y el CPP.
 
 **Intención (spec § 4.2):** `POST /compras/:id/confirmar` (`Compras:Crear`) en una sola
 transacción, con el reintento de deadlock de `traslados.crear`:

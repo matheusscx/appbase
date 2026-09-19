@@ -83,6 +83,21 @@ export class ComprasController {
     return this.comprasService.actualizarBorrador(tenantId, id, dto);
   }
 
+  /**
+   * Mueve stock y costo: una entrada por línea. `Crear` y no un permiso
+   * aparte, porque recibir la mercadería es el mismo trabajo que cargarla
+   * (spec compras-recepcion § 5).
+   */
+  @Post(':id/confirmar')
+  @RequiresPermiso('Compras', 'Crear')
+  confirmar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
+    const { tenantId, id: usuarioId } = req.user as {
+      tenantId: string;
+      id: string;
+    };
+    return this.comprasService.confirmar(tenantId, usuarioId, id);
+  }
+
   @Delete(':id')
   @RequiresPermiso('Compras', 'Crear')
   descartar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {

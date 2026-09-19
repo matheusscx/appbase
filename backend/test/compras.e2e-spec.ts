@@ -3,16 +3,20 @@ import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
+import { DataSource } from 'typeorm';
+import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import { loginSegundoTenant } from './helpers/segundo-tenant';
 
 /**
- * **Compras, pieza 1 — el borrador** (spec
- * `docs/superpowers/specs/2026-09-18-compras-recepcion-design.md` § 4.1 y § 5).
+ * **Compras, pieza 1 — el borrador y la confirmación** (spec
+ * `docs/superpowers/specs/2026-09-18-compras-recepcion-design.md` § 4.1, § 4.2
+ * y § 5).
  *
- * Solo el borrador: crear, editar, descartar, el folio único por proveedor y
- * tipo, los catálogos del formulario, los permisos y el aislamiento entre
- * tenants. Confirmar, corregir y anular son de las tareas siguientes del plan.
+ * El borrador (crear, editar, descartar, el folio único por proveedor y tipo,
+ * los catálogos del formulario), confirmar (el stock, el costo, el regalo, los
+ * modos serie y lote), los permisos y el aislamiento entre tenants. Corregir y
+ * anular son de tareas siguientes del plan.
  *
  * Proveedor, bodega y producto son **propios** del spec, con nombre único, y
  * el folio también: el archivo no depende de lo que dejaron otras suites.
@@ -64,7 +68,9 @@ describe('Compras — borrador (e2e)', () => {
   let otroProveedorId: string;
   let empresaId: string;
   let bodegaId: string;
+  let localId: string;
   let productoId: string;
+  let ds: DataSource;
   let factura: TipoDocumento;
   let sinDocumento: TipoDocumento;
 
@@ -168,8 +174,13 @@ describe('Compras — borrador (e2e)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
+    ds = app.get(DataSource);
 
     token = await login(ADMIN_EMAIL);
+
+    const ubicaciones =
+      await get<{ id: string; tipo: string }[]>('/api/ubicaciones');
+    localId = ubicaciones.find((u) => u.tipo === 'local')!.id;
 
     proveedorId = (
       await post<IdResponse>('/api/terceros', {
@@ -411,6 +422,254 @@ describe('Compras — borrador (e2e)', () => {
     });
   });
 
+  describe('confirmar (spec § 4.2)', () => {
+    /** Producto propio, sin stock ni costo: el CPP parte de cero. */
+    async function productoVacio(
+      extra: Record<string, unknown> = {},
+    ): Promise<string> {
+      return (
+        await post<IdResponse>('/api/items', {
+          nombre: nombreUnico('Compra confirmar E2E'),
+          precioBase: '1000',
+          precioIncluyeImpuesto: true,
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'producto',
+          unidadMedida: 'unidad',
+          ...extra,
+        })
+      ).id;
+    }
+
+    async function costoActual(itemId: string): Promise<string | null> {
+      const item = await get<{ costoActual: string | null }>(
+        `/api/items/${itemId}`,
+      );
+      return item.costoActual == null
+        ? null
+        : new Decimal(item.costoActual).toFixed(4);
+    }
+
+    async function stockEn(itemId: string, ubicacionId: string) {
+      const filas: { stock: string }[] = await ds.query(
+        `SELECT stock FROM stock_ubicacion WHERE item_id = $1 AND ubicacion_id = $2`,
+        [itemId, ubicacionId],
+      );
+      return filas.length ? Number(filas[0].stock) : 0;
+    }
+
+    async function confirmar(
+      compraId: string,
+      esperado = 201,
+      conToken = token,
+    ) {
+      return post<CompraDetalle>(
+        `/api/compras/${compraId}/confirmar`,
+        {},
+        esperado,
+        conToken,
+      );
+    }
+
+    it('mueve el stock a la ubicación de la compra; la línea sin precio no toca el costo', async () => {
+      const itemId = await productoVacio();
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({
+          lineas: [
+            {
+              itemId,
+              cantidad: '10',
+              unidadCodigo: 'unidad',
+              precioUnitario: '1500',
+            },
+            { itemId, cantidad: '5', unidadCodigo: 'unidad' },
+          ],
+        }),
+      );
+      const confirmada = await confirmar(compra.id);
+      expect(confirmada.estado).toBe('confirmada');
+
+      expect(await stockEn(itemId, bodegaId)).toBe(15);
+      // La primera entrada fija 1.500; la segunda, sin precio, no promedia.
+      expect(await costoActual(itemId)).toBe('1500.0000');
+
+      // Cada movimiento cuelga de su línea.
+      const movs: { compra_linea_id: string | null; motivo: string }[] =
+        await ds.query(
+          `SELECT compra_linea_id, motivo FROM movimientos_inventario
+            WHERE item_id = $1 AND eliminado_el IS NULL ORDER BY secuencia`,
+          [itemId],
+        );
+      expect(movs).toHaveLength(2);
+      expect(movs.every((m) => m.motivo === 'compra')).toBe(true);
+      expect(movs.every((m) => m.compra_linea_id != null)).toBe(true);
+    });
+
+    it('una compra a la bodega pondera el costo con el stock del local (el total del producto)', async () => {
+      // 10 en el local a $1.000, por el ajuste de stock.
+      const itemId = await productoVacio();
+      const res = await request(app.getHttpServer())
+        .patch(`/api/items/${itemId}/stock`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          ubicacionId: localId,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '10',
+          costoUnitario: '1000',
+        });
+      expect(res.status).toBe(200);
+
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({
+          lineas: [
+            {
+              itemId,
+              cantidad: '10',
+              unidadCodigo: 'unidad',
+              precioUnitario: '1600',
+            },
+          ],
+        }),
+      );
+      await confirmar(compra.id);
+      // (10×1.000 + 10×1.600) / 20 = 1.300. Con el peso de la bodega (0) daría 1.600.
+      expect(await costoActual(itemId)).toBe('1300.0000');
+    });
+
+    it('lo regalado entra a $0 y el costo promedio lo reparte: $738,4615 la unidad', async () => {
+      const itemId = await productoVacio();
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({
+          lineas: [
+            {
+              itemId,
+              cantidad: '144',
+              unidadCodigo: 'unidad',
+              precioUnitario: '800',
+            },
+            {
+              itemId,
+              cantidad: '12',
+              unidadCodigo: 'unidad',
+              precioUnitario: '0',
+            },
+          ],
+        }),
+      );
+      await confirmar(compra.id);
+      // 115.200 / 156
+      expect(await costoActual(itemId)).toBe('738.4615');
+    });
+
+    it('confirmar dos veces es 409, y una confirmada no se edita ni se descarta', async () => {
+      const compra = await post<CompraDetalle>('/api/compras', borrador());
+      await confirmar(compra.id);
+      expect(
+        (await intentar('post', `/api/compras/${compra.id}/confirmar`)).status,
+      ).toBe(409);
+      expect(
+        (
+          await intentar(
+            'patch',
+            `/api/compras/${compra.id}`,
+            borrador({ folio: compra.folio }),
+          )
+        ).status,
+      ).toBe(409);
+      expect(
+        (await intentar('delete', `/api/compras/${compra.id}`)).status,
+      ).toBe(409);
+    });
+
+    it('una compra sin líneas no se confirma', async () => {
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({ lineas: [] }),
+      );
+      const r = await intentar('post', `/api/compras/${compra.id}/confirmar`);
+      expect(r.status).toBe(400);
+      expect(r.message).toContain('no tiene líneas');
+    });
+
+    it('con solo Compras:Leer no se confirma', async () => {
+      const compra = await post<CompraDetalle>('/api/compras', borrador());
+      const lectura = await login(COMPRAS_LECTURA_EMAIL);
+      expect(
+        (
+          await intentar(
+            'post',
+            `/api/compras/${compra.id}/confirmar`,
+            {},
+            lectura,
+          )
+        ).status,
+      ).toBe(403);
+    });
+
+    it('modo lote: entra el lote con su vencimiento en la bodega', async () => {
+      const itemId = await productoVacio({ modoInventario: 'lote' });
+      const codigoLote = `LT-COMPRA-${Date.now()}`;
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({
+          lineas: [
+            {
+              itemId,
+              cantidad: '6',
+              unidadCodigo: 'unidad',
+              precioUnitario: '500',
+              lote: { codigoLote, fechaVencimiento: '2028-01-31' },
+            },
+          ],
+        }),
+      );
+      await confirmar(compra.id);
+      const lotes = await get<
+        {
+          codigoLote: string;
+          desglosePorUbicacion: { ubicacionId: string; cantidad: string }[];
+        }[]
+      >(`/api/items/${itemId}/lotes`);
+      const lote = lotes.find((l) => l.codigoLote === codigoLote)!;
+      expect(
+        Number(
+          lote.desglosePorUbicacion.find((d) => d.ubicacionId === bodegaId)!
+            .cantidad,
+        ),
+      ).toBe(6);
+    });
+
+    it('modo serie: entran las series en la bodega', async () => {
+      const itemId = await productoVacio({ modoInventario: 'serie' });
+      const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({
+          lineas: [
+            {
+              itemId,
+              cantidad: '2',
+              unidadCodigo: 'unidad',
+              precioUnitario: '90000',
+              series: [{ serie: `SN-A-${marca}` }, { serie: `SN-B-${marca}` }],
+            },
+          ],
+        }),
+      );
+      await confirmar(compra.id);
+      const unidades = await get<{ serie: string; ubicacionId: string }[]>(
+        `/api/items/${itemId}/unidades?estado=disponible`,
+      );
+      expect(unidades.map((u) => u.serie).sort()).toEqual(
+        [`SN-A-${marca}`, `SN-B-${marca}`].sort(),
+      );
+      expect(unidades.every((u) => u.ubicacionId === bodegaId)).toBe(true);
+    });
+  });
+
   describe('aislamiento entre tenants', () => {
     it('una compra de Paris no existe para el otro tenant', async () => {
       const creado = await post<CompraDetalle>('/api/compras', borrador());
@@ -425,6 +684,21 @@ describe('Compras — borrador (e2e)', () => {
       const r = await intentar('post', '/api/compras', borrador(), otro);
       expect(r.status).toBe(400);
       expect(r.message).toBe('Proveedor no encontrado');
+    });
+
+    it('el otro tenant no puede confirmar una compra de Paris: 404, y sigue en borrador', async () => {
+      const creada = await post<{ id: string }>('/api/compras', borrador());
+      const otro = await loginSegundoTenant(app);
+      const r = await intentar(
+        'post',
+        `/api/compras/${creada.id}/confirmar`,
+        {},
+        otro,
+      );
+      expect(r.status).toBe(404);
+
+      const sigue = await get<{ estado: string }>(`/api/compras/${creada.id}`);
+      expect(sigue.estado).toBe('borrador');
     });
   });
 });
