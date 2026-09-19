@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import type { TableColumn } from '@nuxt/ui'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
-import type { EstadoCompra } from '~/composables/useCompras'
+import type { CompraDetalle, LineaCompra as LineaDetalle } from '~/composables/useCompras'
 import { hoyLocal } from '~/composables/useVigenciaRegla'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -15,38 +14,6 @@ interface ProductoOpt {
   nombre: string
   modoInventario: string | null
   unidadMedida: string | null
-}
-
-interface LineaDetalle {
-  id: string
-  orden: number
-  itemId: string
-  itemNombre: string | null
-  modoInventario: string | null
-  unidadMedidaBase: string | null
-  cantidad: string
-  unidadCodigo: string
-  precioUnitario: string | null
-  series: { serie: string }[] | null
-  lote: { codigoLote: string, fechaVencimiento?: string } | null
-}
-
-interface CompraDetalle {
-  id: string
-  estado: EstadoCompra
-  faltaCosto: boolean
-  fechaDocumento: string
-  proveedorId: string
-  proveedorNombre: string | null
-  tipoDocumentoCompraId: string
-  tipoDocumentoNombre: string | null
-  folio: string | null
-  ubicacionId: string
-  ubicacionNombre: string | null
-  observacion: string | null
-  descuentoTotal: string | null
-  total: string | null
-  lineas: LineaDetalle[]
 }
 
 interface LineaForm {
@@ -75,7 +42,7 @@ const router = useRouter()
 const { formatMonto } = useFormatters()
 const { ubicaciones, cargar: cargarUbicaciones } = useUbicaciones()
 const unidadesMedidaStore = useUnidadesMedidaStore()
-const { totalLinea, subtotal, totalConDescuento, faltaAlgunPrecio, insigniaEstado } = useCompras()
+const { totalLinea, subtotal, totalConDescuento, faltaAlgunPrecio, insigniaEstado, cantidadParaEditar } = useCompras()
 const { puedeCrear } = usePermisosCrud('Compras')
 
 const esNueva = computed(() => route.params.id === 'nueva')
@@ -164,7 +131,7 @@ function lineaDesdeDetalle(l: LineaDetalle): LineaForm {
     itemId: l.itemId,
     modoInventario: l.modoInventario,
     unidadMedida: l.unidadMedidaBase,
-    cantidad: l.cantidad,
+    cantidad: cantidadParaEditar(l.cantidad),
     unidadCodigo: l.unidadCodigo,
     precioUnitario: l.precioUnitario ?? '',
     seriesTexto: (l.series ?? []).map(s => s.serie).join('\n'),
@@ -398,14 +365,6 @@ async function descartar() {
     descartarOpen.value = false
   }
 }
-
-// ── Solo lectura (confirmada o anulada) ────────────────────────────────────
-
-const columnsDetalle: TableColumn<LineaDetalle>[] = [
-  { accessorKey: 'itemNombre', header: 'Producto' },
-  { accessorKey: 'cantidad', header: 'Cantidad', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { accessorKey: 'precioUnitario', header: 'Precio unitario', meta: { class: { th: 'text-right', td: 'text-right' } } },
-]
 
 const titulo = computed(() => {
   if (esNueva.value) return 'Nueva compra'
@@ -655,31 +614,12 @@ const titulo = computed(() => {
           </div>
         </UForm>
 
-        <!-- ── Solo lectura ───────────────────────────────────────────────── -->
-        <div v-else-if="compra" class="space-y-4">
-          <dl class="grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
-            <div><dt class="text-muted">Proveedor</dt><dd>{{ compra.proveedorNombre || '—' }}</dd></div>
-            <div><dt class="text-muted">Fecha del documento</dt><dd>{{ compra.fechaDocumento }}</dd></div>
-            <div><dt class="text-muted">Entró a</dt><dd>{{ compra.ubicacionNombre || '—' }}</dd></div>
-          </dl>
-          <CrudTable :data="compra.lineas" :columns="columnsDetalle">
-            <template #itemNombre-cell="{ row }">
-              {{ row.original.itemNombre || '—' }}
-            </template>
-            <template #cantidad-cell="{ row }">
-              <span class="tabular-nums">{{ row.original.cantidad }} {{ row.original.unidadCodigo }}</span>
-            </template>
-            <template #precioUnitario-cell="{ row }">
-              <span class="tabular-nums">
-                {{ row.original.precioUnitario != null ? formatMonto(row.original.precioUnitario) : 'Falta costo' }}
-              </span>
-            </template>
-          </CrudTable>
-          <div class="flex justify-end text-sm">
-            <span class="text-muted mr-3">Total</span>
-            <span class="tabular-nums">{{ compra.total != null ? formatMonto(compra.total) : '—' }}</span>
-          </div>
-        </div>
+        <!-- ── Confirmada o anulada ────────────────────────────────────────── -->
+        <ComprasCompraConfirmada
+          v-else-if="compra"
+          :compra="compra"
+          @actualizada="llenarDesde"
+        />
 
         <UModal v-model:open="confirmarOpen" title="¿Confirmar la recepción?">
           <template #body>

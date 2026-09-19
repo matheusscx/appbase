@@ -1396,6 +1396,28 @@ Depende de las tareas 8 y 9.
 
 **Qué tiene que probar:** specs de componente de los tres modales, con bodies que pasen el DTO.
 
+**Al ejecutarla (2026-09-19):**
+- **La vista confirmada es un componente propio** (`components/compras/CompraConfirmada.vue`),
+  con un componente por modal (`CorregirLineaModal`, `DescuentoModal`, `AnularCompraModal`). La
+  página ya pasaba las 700 líneas.
+- **Qué se manda sale del composable** (`cuerpoCorreccion`, `cuerpoDescuento`,
+  `diferenciaCantidad`), no del `.vue`. Corregir manda solo lo que cambió; el descuento manda la
+  clave siempre y vacío es null.
+- **En serie, bajar ofrece solo las unidades que trajo la línea** y siguen disponibles en la
+  ubicación de la compra (decisión del owner de la tarea 8).
+- **El modal de corregir se monta ya abierto** (con `v-if` sobre la línea elegida), así que su
+  `watch(open)` va con `immediate`. Sin eso abría vacío, y un test lo fija.
+- **Los tipos del detalle viven en `useCompras`** y la página y los componentes los comparten.
+- **El smoke de navegador** (`e2e/compras/compra-confirmada.spec.ts`: confirmar por API; completar,
+  descontar y anular por pantalla) encontró dos cosas que los specs de componente no veían:
+  - la cantidad salía "10.0000", la columna `numeric(18,4)` cruda, también al recargar un borrador
+    (tarea 4). Ahora se muestra con `cantidadConUnidad` y se edita con `cantidadParaEditar`;
+  - `CrudTable` pasa el `data-qa` también a su tabla interna, así que va en un `div` propio.
+- **Pendiente para la tarea 11 (lo marcó la revisión):** bajar la cantidad en serie consulta las
+  unidades con `GET /items/:id/unidades`, que pide `Items:Leer`. Un rol con `Compras:Actualizar` y
+  sin `Items:Leer` ve un toast de error en vez de la lista. El modal no se rompe: queda sin poder
+  enviar.
+
 ---
 
 ### Task 11: Documentación, gate y cierre
