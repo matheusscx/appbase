@@ -190,6 +190,11 @@ describe('ResumenNegocioService', () => {
     expect(ventasSql).toMatch(
       /COALESCE\(td\.es_nota_credito,\s*false\)\s*=\s*false/,
     );
+    // `v\.eliminado_el` (no `vd\.` ni `td\.`) acotado al WHERE de esta
+    // consulta: una venta soft-deleteada no puede nacer por API, así que el
+    // e2e no la puede probar — esta es la única red para el mutante
+    // "dropear el filtro" (task-6-mutantes.md, mutante #5).
+    expect(ventasSql).toMatch(/WHERE[\s\S]*?v\.eliminado_el IS NULL/);
   });
 
   it('el cobrado lee pago_aplicaciones con tipo = venta, no pagos.monto (que trae el vuelto)', async () => {
@@ -201,6 +206,21 @@ describe('ResumenNegocioService', () => {
     expect(cobradoSql).toMatch(/SUM\(pa\.monto\)/);
     expect(cobradoSql).toMatch(/pa\.tipo\s*=\s*'venta'/);
     expect(cobradoSql).not.toMatch(/SUM\(p\.monto\)/);
+  });
+
+  it('el SQL de cobrado filtra pagos y pago_aplicaciones no eliminados', async () => {
+    mockRespuestas({});
+
+    await service.hoy(TENANT);
+
+    const [cobradoSql] = queryMock.mock.calls[2] as [string];
+    // `pa.eliminado_el IS NULL` vive en el ON del JOIN, no en el WHERE —se
+    // acota a esa condición para no ser un `toMatch` suelto.
+    expect(cobradoSql).toMatch(
+      /ON pa\.pago_id = p\.pago_id[\s\S]*?pa\.eliminado_el IS NULL/,
+    );
+    // `p.eliminado_el IS NULL` sí vive en el WHERE de esta consulta.
+    expect(cobradoSql).toMatch(/WHERE[\s\S]*?p\.eliminado_el IS NULL/);
   });
 
   it('porCanal mapea vendido_fisico_hoy y vendido_online_hoy sin cruzarlos', async () => {
@@ -235,6 +255,20 @@ describe('ResumenNegocioService', () => {
     expect(ventasSql).toMatch(
       /FILTER\s*\(WHERE[\s\S]*?v\.canal\s*=\s*'online'/,
     );
+  });
+
+  it('el SQL de por cobrar filtra v.eliminado_el IS NULL', async () => {
+    mockRespuestas({});
+
+    await service.hoy(TENANT);
+
+    // Llamada #4: zona(0), ventas(1), cobrado(2), porCobrar(3).
+    const [porCobrarSql] = queryMock.mock.calls[3] as [string];
+    // Esta consulta tiene DOS WHERE (el del subselect de pagos aplicados y
+    // el de la `ventas v` externa): el regex no-greedy encuentra el primer
+    // WHERE y busca hacia adelante la cláusula de la venta externa, que es
+    // la que importa acá.
+    expect(porCobrarSql).toMatch(/WHERE[\s\S]*?v\.eliminado_el IS NULL/);
   });
 
   it('la zona se resuelve una sola vez: 22:00 de Chile sigue siendo hoy, y el rango de la semana pasada sale de la fecha pura', async () => {
@@ -367,6 +401,9 @@ describe('ResumenNegocioService', () => {
         /COALESCE\(td\.es_nota_credito,\s*false\)\s*=\s*false/,
       );
       expect(masVendidosSql).toMatch(/vd\.eliminado_el IS NULL/);
+      // `v\.eliminado_el` (la venta), no solo `vd\.eliminado_el` (el
+      // detalle): son dos filas de soft-delete independientes.
+      expect(masVendidosSql).toMatch(/WHERE[\s\S]*?v\.eliminado_el IS NULL/);
       expect(masVendidosSql).toMatch(/GROUP BY vd\.item_id/);
       expect(masVendidosSql).toMatch(/LIMIT 5/);
     });
