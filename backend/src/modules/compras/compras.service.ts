@@ -19,7 +19,10 @@ import {
 } from '../../common/db/reintento-deadlock';
 import { assertCostoNoColapsaACero } from '../../common/utils/costo-conversion-unidad.util';
 import { CatalogService } from '../catalog/catalog.service';
-import { InventarioService } from '../inventario/inventario.service';
+import {
+  InventarioService,
+  type RegistrarMovimientoParams,
+} from '../inventario/inventario.service';
 import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import { MonedasService } from '../monedas/monedas.service';
@@ -144,6 +147,9 @@ interface CambioRow {
 /** La compra bajo lock, con lo que las correcciones necesitan. */
 interface CompraConfirmada {
   compra_id: string;
+  ubicacion_id: string;
+  ubicacion_nombre: string | null;
+  ubicacion_viva: boolean;
   descuento_total: string | null;
   folio: string | null;
   tipo_documento_nombre: string | null;
@@ -156,11 +162,15 @@ interface LineaConfirmada {
   item_id: string;
   item_nombre: string;
   item_eliminado: boolean;
+  modo_inventario: string;
   unidad_base: string;
+  unidad_codigo: string;
   cantidad: string;
   precio_unitario: string | null;
   cantidad_base: string;
   costo_unitario_base: string | null;
+  series: SerieCompraInput[] | null;
+  lote: LoteCompraInput | null;
 }
 
 /** El comentario del kardex: qué documento y de quién. */
@@ -839,10 +849,13 @@ export class ComprasService {
   // ───────────────────────────────────────────────────────────────────────
 
   /**
-   * Completa o corrige el precio de una línea confirmada: el caso de la factura
-   * que llega después de la mercadería. Rehace la cuenta de cada producto cuyo
-   * costo cambió, y con descuento al total pueden ser varios, porque el precio
-   * de una línea mueve el reparto de todas.
+   * Corrige una línea confirmada: el precio (la factura que llega después de
+   * la mercadería), la cantidad (lo que de verdad entró) o los dos. Rehace la
+   * cuenta de cada producto cuyo costo cambió, y con descuento al total pueden
+   * ser varios, porque el valor de una línea mueve el reparto de todas.
+   *
+   * La cantidad va primero: mueve la diferencia en el kardex y deja la línea
+   * con lo que vale hoy, que es lo que el recosteo y la cuenta leen.
    */
   async corregirLinea(
     tenantId: string,
@@ -851,6 +864,11 @@ export class ComprasService {
     lineaId: string,
     dto: CorregirLineaDto,
   ): Promise<CompraDetalle> {
+    if (dto.precioUnitario == null && dto.cantidad == null) {
+      throw new BadRequestException(
+        'No hay nada que corregir: falta el precio o la cantidad',
+      );
+    }
     return this.conReintento(async (manager) => {
       const compra = await this.bloquearConfirmada(tenantId, id);
       const lineas = await this.lineasConfirmadas(tenantId, id);
@@ -865,6 +883,7 @@ export class ComprasService {
       }
       const anterior = linea.precio_unitario;
       if (
+        dto.precioUnitario != null &&
         anterior != null &&
         new Decimal(anterior).equals(dto.precioUnitario)
       ) {
@@ -873,32 +892,259 @@ export class ComprasService {
         );
       }
 
-      await this.db.query(
-        `UPDATE compra_lineas SET precio_unitario = $3, actualizado_el = NOW()
-          WHERE tenant_id = $1 AND compra_linea_id = $2`,
-        [tenantId, lineaId, dto.precioUnitario],
-      );
-      linea.precio_unitario = dto.precioUnitario;
+      const cantidad =
+        dto.cantidad != null
+          ? await this.corregirCantidad(
+              manager,
+              tenantId,
+              usuarioId,
+              compra,
+              lineas,
+              linea,
+              dto,
+            )
+          : null;
 
+      if (dto.precioUnitario != null) {
+        await this.db.query(
+          `UPDATE compra_lineas SET precio_unitario = $3, actualizado_el = NOW()
+            WHERE tenant_id = $1 AND compra_linea_id = $2`,
+          [tenantId, lineaId, dto.precioUnitario],
+        );
+        linea.precio_unitario = dto.precioUnitario;
+      }
+
+      const queCambio = [
+        cantidad && 'cantidad corregida',
+        dto.precioUnitario != null && 'precio corregido',
+      ]
+        .filter(Boolean)
+        .join(' y ');
+      // La cantidad cambia el peso del producto aunque su costo por unidad no
+      // cambie: su cuenta se rehace siempre.
       const { movimientos } = await this.recostear(
         manager,
         tenantId,
         usuarioId,
         compra,
         lineas,
-        'precio corregido',
+        queCambio,
+        cantidad ? [linea.item_id] : [],
       );
       await this.registrarCambios(tenantId, usuarioId, [
-        {
-          compraLineaId: lineaId,
-          campo: 'precio',
-          anterior,
-          nuevo: dto.precioUnitario,
-          movimientoId: movimientos.get(linea.item_id) ?? null,
-        },
+        ...(cantidad
+          ? [
+              {
+                compraLineaId: lineaId,
+                campo: 'cantidad' as const,
+                anterior: cantidad.anterior,
+                nuevo: cantidad.nuevo,
+                movimientoId: cantidad.movimientoId,
+              },
+            ]
+          : []),
+        ...(dto.precioUnitario != null
+          ? [
+              {
+                compraLineaId: lineaId,
+                campo: 'precio' as const,
+                anterior,
+                nuevo: dto.precioUnitario,
+                movimientoId: movimientos.get(linea.item_id) ?? null,
+              },
+            ]
+          : []),
       ]);
       return this.findOne(tenantId, id);
     });
+  }
+
+  /**
+   * Mueve la diferencia de cantidad en la ubicación de la compra (spec § 4.4):
+   * una entrada o salida `compra` colgada de la línea, que "rehacer la cuenta"
+   * salta porque la línea ya cuenta con su cantidad nueva en su lugar original.
+   *
+   * - Si baja y no alcanza, 400 con el producto, la ubicación y cuánto queda.
+   * - En serie, subir pide las series nuevas y bajar pide cuáles salen.
+   * - En lote, la diferencia va al mismo lote.
+   *
+   * Bloquea la ubicación y después TODOS los productos de la compra en un solo
+   * statement ordenado: la salida lockea este producto y el recosteo puede
+   * rehacer la cuenta de otros; sin esto se tomarían fuera de orden.
+   */
+  private async corregirCantidad(
+    manager: EntityManager,
+    tenantId: string,
+    usuarioId: string,
+    compra: CompraConfirmada,
+    lineas: LineaConfirmada[],
+    linea: LineaConfirmada,
+    dto: CorregirLineaDto,
+  ): Promise<{ anterior: string; nuevo: string; movimientoId: string }> {
+    if (!compra.ubicacion_viva) {
+      throw new BadRequestException(
+        `La ubicación de la compra (${compra.ubicacion_nombre}) fue eliminada: la cantidad no se puede corregir`,
+      );
+    }
+    const nuevaBase =
+      linea.unidad_codigo === linea.unidad_base
+        ? dto.cantidad!
+        : (await this.catalogService.crearConversor())(
+            dto.cantidad!,
+            linea.unidad_codigo,
+            linea.unidad_base,
+          );
+    const diferencia = new Decimal(nuevaBase).minus(linea.cantidad_base);
+    if (diferencia.isZero()) {
+      throw new BadRequestException(
+        'La cantidad es igual a la vigente: no hay nada que corregir',
+      );
+    }
+
+    await this.ubicacionesService.bloquearContraBorrado(
+      manager,
+      tenantId,
+      compra.ubicacion_id,
+    );
+    const itemIds = [...new Set(lineas.map((l) => l.item_id))].sort((a, b) =>
+      a.localeCompare(b),
+    );
+    await manager.query(
+      `SELECT ip.item_id
+         FROM item_producto ip
+         JOIN items i ON i.item_id = ip.item_id
+        WHERE ip.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
+        ORDER BY ip.item_id
+        FOR UPDATE OF ip`,
+      [itemIds, tenantId],
+    );
+
+    const cuanto = diferencia.abs();
+    const sube = diferencia.greaterThan(0);
+    const porModo: Partial<RegistrarMovimientoParams> = {};
+    let series = linea.series;
+    if (sube) {
+      if (linea.modo_inventario === 'serie') {
+        if (!cuanto.equals(dto.series?.length ?? 0)) {
+          throw new BadRequestException(
+            `Subir ${cuanto.toString()} unidades pide ${cuanto.toString()} series nuevas`,
+          );
+        }
+        porModo.series = dto.series;
+        series = [...(linea.series ?? []), ...dto.series!];
+      } else if (linea.modo_inventario === 'lote') {
+        porModo.lote = linea.lote ?? undefined;
+      }
+    } else {
+      // En lote, la salida baja del lote de la línea: primero ese lote, y el
+      // saldo que decide es el suyo, no el del producto entero.
+      let loteCodigo: string | null = null;
+      if (linea.modo_inventario === 'lote') {
+        loteCodigo = linea.lote?.codigoLote ?? null;
+        const lote: { lote_id: string }[] = await manager.query(
+          `SELECT lote_id FROM item_lote
+            WHERE item_id = $1 AND codigo_lote = $2 AND tenant_id = $3
+              AND eliminado_el IS NULL`,
+          [linea.item_id, loteCodigo, tenantId],
+        );
+        // Sin él, la salida elegiría lotes por FIFO: bajaría de otro lote.
+        if (!lote.length) {
+          throw new BadRequestException(
+            `El lote ${loteCodigo} de "${linea.item_nombre}" ya no existe: la cantidad no se puede bajar`,
+          );
+        }
+        porModo.loteId = lote[0].lote_id;
+      }
+
+      // El saldo ya con el lock del producto en la mano: es el que decide.
+      const saldo: { stock: string }[] =
+        porModo.loteId != null
+          ? await manager.query(
+              `SELECT cantidad AS stock FROM lote_ubicacion
+                WHERE lote_id = $1 AND ubicacion_id = $2`,
+              [porModo.loteId, compra.ubicacion_id],
+            )
+          : await manager.query(
+              `SELECT stock FROM stock_ubicacion WHERE item_id = $1 AND ubicacion_id = $2`,
+              [linea.item_id, compra.ubicacion_id],
+            );
+      const queda = new Decimal(saldo[0]?.stock ?? 0);
+      if (queda.lessThan(cuanto)) {
+        const deQue =
+          loteCodigo != null
+            ? `del lote ${loteCodigo} de "${linea.item_nombre}"`
+            : `de "${linea.item_nombre}"`;
+        throw new BadRequestException(
+          `No alcanza para bajar ${cuanto.toString()}: ${deQue} quedan ${queda.toString()} en ${compra.ubicacion_nombre}`,
+        );
+      }
+
+      if (linea.modo_inventario === 'serie') {
+        if (!cuanto.equals(dto.unidadIds?.length ?? 0)) {
+          throw new BadRequestException(
+            `Bajar ${cuanto.toString()} unidades pide cuáles salen: ${cuanto.toString()} ids`,
+          );
+        }
+        // Las que salen tienen que ser de las que trajo ESTA línea: bajar la
+        // cantidad de una compra es decir que llegaron menos de las que dice
+        // la factura. Una unidad de otra compra dejaría las series de la línea
+        // descuadradas con su cantidad, sin aviso.
+        const salen: { serie: string }[] = await manager.query(
+          `SELECT serie FROM item_unidad
+            WHERE unidad_id = ANY($1::uuid[]) AND item_id = $2 AND tenant_id = $3
+              AND eliminado_el IS NULL`,
+          [dto.unidadIds, linea.item_id, tenantId],
+        );
+        const deLaLinea = new Set((linea.series ?? []).map((s) => s.serie));
+        if (
+          salen.length !== dto.unidadIds!.length ||
+          salen.some((u) => !deLaLinea.has(u.serie))
+        ) {
+          throw new BadRequestException(
+            'Las unidades que salen tienen que ser de las que trajo esta compra',
+          );
+        }
+        porModo.unidadIds = dto.unidadIds;
+        const quitar = new Set(salen.map((u) => u.serie));
+        series = (linea.series ?? []).filter((s) => !quitar.has(s.serie));
+      }
+    }
+
+    const mov = await this.inventarioService.registrarMovimiento(manager, {
+      tenantId,
+      itemId: linea.item_id,
+      ubicacionId: compra.ubicacion_id,
+      usuarioId,
+      tipo: sube ? 'entrada' : 'salida',
+      motivo: 'compra',
+      cantidad: cuanto.toString(),
+      costoUnitario: sube ? linea.costo_unitario_base : null,
+      compraLineaId: linea.compra_linea_id,
+      comentario: `${comentarioDeCompra(
+        compra.tipo_documento_nombre,
+        compra.folio,
+        compra.proveedor_nombre,
+      )}: cantidad corregida`,
+      ...porModo,
+    });
+
+    await this.db.query(
+      `UPDATE compra_lineas
+          SET cantidad = $3, cantidad_base = $4, series = $5::jsonb,
+              actualizado_el = NOW()
+        WHERE tenant_id = $1 AND compra_linea_id = $2`,
+      [
+        tenantId,
+        linea.compra_linea_id,
+        dto.cantidad,
+        nuevaBase,
+        series == null ? null : JSON.stringify(series),
+      ],
+    );
+    const anterior = linea.cantidad;
+    linea.cantidad = dto.cantidad!;
+    linea.cantidad_base = nuevaBase;
+    return { anterior, nuevo: dto.cantidad!, movimientoId: mov.movimientoId };
   }
 
   /**
@@ -964,7 +1210,9 @@ export class ComprasService {
    *
    * Los `LEFT JOIN` de proveedor y documento van sin `eliminado_el`, por lo
    * mismo que la cabecera (`SELECT_CABECERA`): arman el comentario del kardex,
-   * que tiene que seguir nombrando a quién se le compró.
+   * que tiene que seguir nombrando a quién se le compró. El `JOIN` a la
+   * ubicación tampoco filtra, porque lo que se pregunta es si sigue viva: una
+   * corrección de cantidad mueve stock ahí y sobre una borrada no puede.
    */
   private async bloquearConfirmada(
     tenantId: string,
@@ -974,8 +1222,11 @@ export class ComprasService {
       await this.db.query(
         `SELECT c.compra_id, c.estado, c.descuento_total, c.folio,
                 td.nombre AS tipo_documento_nombre,
-                pr.nombre AS proveedor_nombre
+                pr.nombre AS proveedor_nombre,
+                c.ubicacion_id, ub.nombre AS ubicacion_nombre,
+                (ub.eliminado_el IS NULL) AS ubicacion_viva
            FROM compras c
+           JOIN ubicaciones ub ON ub.ubicacion_id = c.ubicacion_id
            LEFT JOIN terceros pr ON pr.tercero_id = c.proveedor_id
            LEFT JOIN tipos_documento_compra td
                   ON td.tipo_documento_compra_id = c.tipo_documento_compra_id
@@ -1009,9 +1260,10 @@ export class ComprasService {
     return this.db.query(
       `SELECT cl.compra_linea_id, cl.item_id, i.nombre AS item_nombre,
               (i.eliminado_el IS NOT NULL) AS item_eliminado,
+              ip.modo_inventario,
               COALESCE(ip.unidad_medida, 'unidad') AS unidad_base,
-              cl.cantidad, cl.precio_unitario, cl.cantidad_base,
-              cl.costo_unitario_base
+              cl.unidad_codigo, cl.cantidad, cl.precio_unitario,
+              cl.cantidad_base, cl.costo_unitario_base, cl.series, cl.lote
          FROM compra_lineas cl
          JOIN items i ON i.item_id = cl.item_id
          JOIN item_producto ip ON ip.item_id = cl.item_id
@@ -1034,6 +1286,8 @@ export class ComprasService {
     compra: CompraConfirmada,
     lineas: LineaConfirmada[],
     queCambio: string,
+    /** Productos cuya cuenta se rehace aunque su costo no cambie. */
+    tambien: string[] = [],
   ): Promise<{
     cambiadas: LineaConfirmada[];
     movimientos: Map<string, string | null>;
@@ -1051,9 +1305,9 @@ export class ComprasService {
     const cambiadas = lineas.filter(
       (l, i) => !mismoCosto(l.costo_unitario_base, costos[i]),
     );
-    const itemIds = [...new Set(cambiadas.map((l) => l.item_id))].sort((a, b) =>
-      a.localeCompare(b),
-    );
+    const itemIds = [
+      ...new Set([...cambiadas.map((l) => l.item_id), ...tambien]),
+    ].sort((a, b) => a.localeCompare(b));
     const enPapelera = lineas.find(
       (l) => l.item_eliminado && itemIds.includes(l.item_id),
     );
@@ -1062,29 +1316,31 @@ export class ComprasService {
         `El producto "${enPapelera.item_nombre}" está en la papelera: restauralo para corregir la compra`,
       );
     }
-    if (!cambiadas.length) {
+    if (!itemIds.length) {
       return { cambiadas, movimientos: new Map() };
     }
 
     const nuevos = new Map(
       lineas.map((l, i) => [l.compra_linea_id, costos[i]]),
     );
-    const valores = cambiadas
-      .map((_, k) => `($${k * 2 + 2}::uuid, $${k * 2 + 3}::numeric)`)
-      .join(', ');
-    await this.db.query(
-      `UPDATE compra_lineas cl
-          SET costo_unitario_base = v.costo, actualizado_el = NOW()
-         FROM (VALUES ${valores}) AS v(compra_linea_id, costo)
-        WHERE cl.compra_linea_id = v.compra_linea_id AND cl.tenant_id = $1`,
-      [
-        tenantId,
-        ...cambiadas.flatMap((l) => [
-          l.compra_linea_id,
-          nuevos.get(l.compra_linea_id),
-        ]),
-      ],
-    );
+    if (cambiadas.length) {
+      const valores = cambiadas
+        .map((_, k) => `($${k * 2 + 2}::uuid, $${k * 2 + 3}::numeric)`)
+        .join(', ');
+      await this.db.query(
+        `UPDATE compra_lineas cl
+            SET costo_unitario_base = v.costo, actualizado_el = NOW()
+           FROM (VALUES ${valores}) AS v(compra_linea_id, costo)
+          WHERE cl.compra_linea_id = v.compra_linea_id AND cl.tenant_id = $1`,
+        [
+          tenantId,
+          ...cambiadas.flatMap((l) => [
+            l.compra_linea_id,
+            nuevos.get(l.compra_linea_id),
+          ]),
+        ],
+      );
+    }
 
     const comentario = `${comentarioDeCompra(
       compra.tipo_documento_nombre,

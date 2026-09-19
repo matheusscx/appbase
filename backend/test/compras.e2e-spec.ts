@@ -16,9 +16,10 @@ import { InventarioService } from '../src/modules/inventario/inventario.service'
  * y § 5).
  *
  * El borrador (crear, editar, descartar, el folio único por proveedor y tipo,
- * los catálogos del formulario), confirmar (el stock, el costo, el regalo, los
- * modos serie y lote), los permisos y el aislamiento entre tenants. Corregir y
- * anular son de tareas siguientes del plan.
+ * los catálogos del formulario, el descuento al total), confirmar (el stock, el
+ * costo, el regalo, los modos serie y lote), rehacer la cuenta, corregir una
+ * confirmada (precio, cantidad y descuento), los permisos y el aislamiento
+ * entre tenants. Anular es de la tarea siguiente del plan.
  *
  * Proveedor, bodega y producto son **propios** del spec, con nombre único, y
  * el folio también: el archivo no depende de lo que dejaron otras suites.
@@ -1123,6 +1124,263 @@ describe('Compras — borrador (e2e)', () => {
             )
           ).status,
         ).toBe(400);
+      });
+
+      function corregirCantidad(
+        compraId: string,
+        lineaId: string,
+        body: Record<string, unknown>,
+      ) {
+        return intentar(
+          'patch',
+          `/api/compras/${compraId}/lineas/${lineaId}`,
+          body,
+        );
+      }
+
+      it('subir la cantidad: el stock entra en la bodega de la compra y la cuenta se rehace', async () => {
+        const itemId = await productoVacio();
+        await ajustarStock(itemId, {
+          ubicacionId: localId,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+          costoUnitario: '1000',
+        });
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            lineas: [
+              {
+                itemId,
+                cantidad: '10',
+                unidadCodigo: 'unidad',
+                precioUnitario: '1500',
+              },
+            ],
+          }),
+        );
+        await confirmar(compra.id);
+        // (5 × 1.000 + 10 × 1.500) / 15
+        expect(await costoActual(itemId)).toBe('1333.3333');
+
+        const r = await corregirCantidad(
+          compra.id,
+          await primeraLinea(compra.id),
+          { cantidad: '20' },
+        );
+        expect(r.status).toBe(200);
+
+        expect(await stockEn(itemId, bodegaId)).toBe(20);
+        // (5 × 1.000 + 20 × 1.500) / 25: los 10 de más cuentan en su lugar.
+        expect(await costoActual(itemId)).toBe('1400.0000');
+        const detalle = await get<CompraDetalle>(`/api/compras/${compra.id}`);
+        expect(detalle.cambios.map((c) => [c.campo, c.valorNuevo])).toEqual([
+          ['cantidad', '20'],
+        ]);
+      });
+
+      it('bajar lo que ya salió es 400 y dice cuánto queda', async () => {
+        const itemId = await productoVacio();
+        const compraId = await compraSinPrecio(itemId, '10', bodegaId);
+        await ajustarStock(itemId, {
+          ubicacionId: bodegaId,
+          tipo: 'salida',
+          motivo: 'ajuste_manual',
+          cantidad: '8',
+        });
+
+        const r = await corregirCantidad(
+          compraId,
+          await primeraLinea(compraId),
+          { cantidad: '5' },
+        );
+        expect(r.status).toBe(400);
+        expect(r.message).toContain('quedan 2');
+        expect(await stockEn(itemId, bodegaId)).toBe(2);
+      });
+
+      it('en serie, subir entra las series nuevas y bajar saca las elegidas', async () => {
+        const itemId = await productoVacio({ modoInventario: 'serie' });
+        const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            lineas: [
+              {
+                itemId,
+                cantidad: '2',
+                unidadCodigo: 'unidad',
+                precioUnitario: '90000',
+                series: [
+                  { serie: `SN-A-${marca}` },
+                  { serie: `SN-B-${marca}` },
+                ],
+              },
+            ],
+          }),
+        );
+        await confirmar(compra.id);
+        const lineaId = await primeraLinea(compra.id);
+
+        expect(
+          (
+            await corregirCantidad(compra.id, lineaId, {
+              cantidad: '3',
+              series: [{ serie: `SN-C-${marca}` }],
+            })
+          ).status,
+        ).toBe(200);
+        const disponibles = () =>
+          get<{ id: string; serie: string; ubicacionId: string }[]>(
+            `/api/items/${itemId}/unidades?estado=disponible`,
+          );
+        expect((await disponibles()).map((u) => u.serie).sort()).toEqual(
+          [`SN-A-${marca}`, `SN-B-${marca}`, `SN-C-${marca}`].sort(),
+        );
+
+        const sale = (await disponibles()).find(
+          (u) => u.serie === `SN-A-${marca}`,
+        )!;
+        expect(
+          (
+            await corregirCantidad(compra.id, lineaId, {
+              cantidad: '2',
+              unidadIds: [sale.id],
+            })
+          ).status,
+        ).toBe(200);
+        expect((await disponibles()).map((u) => u.serie).sort()).toEqual(
+          [`SN-B-${marca}`, `SN-C-${marca}`].sort(),
+        );
+
+        // Del MISMO producto y en la misma bodega, pero traída por OTRA compra:
+        // el kardex la dejaría salir, y es este chequeo el que la frena.
+        const otraCompra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            lineas: [
+              {
+                itemId,
+                cantidad: '1',
+                unidadCodigo: 'unidad',
+                precioUnitario: '90000',
+                series: [{ serie: `SN-D-${marca}` }],
+              },
+            ],
+          }),
+        );
+        await confirmar(otraCompra.id);
+        const deOtraCompra = (await disponibles()).find(
+          (u) => u.serie === `SN-D-${marca}`,
+        )!;
+        const r1 = await corregirCantidad(compra.id, lineaId, {
+          cantidad: '1',
+          unidadIds: [deOtraCompra.id],
+        });
+        expect(r1.status).toBe(400);
+        expect(r1.message).toContain('de las que trajo esta compra');
+        expect((await disponibles()).map((u) => u.serie).sort()).toEqual(
+          [`SN-B-${marca}`, `SN-C-${marca}`, `SN-D-${marca}`].sort(),
+        );
+
+        // Una unidad de OTRO producto la frena ya el kardex: 400, y no se mueve nada.
+        const otro = await productoVacio({ modoInventario: 'serie' });
+        await ajustarStock(otro, {
+          ubicacionId: bodegaId,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '1',
+          series: [{ serie: `SN-OTRO-${marca}` }],
+        });
+        const ajena = (
+          await get<{ id: string }[]>(
+            `/api/items/${otro}/unidades?estado=disponible`,
+          )
+        )[0];
+        const r = await corregirCantidad(compra.id, lineaId, {
+          cantidad: '1',
+          unidadIds: [ajena.id],
+        });
+        expect(r.status).toBe(400);
+        expect((await disponibles()).map((u) => u.serie).sort()).toEqual(
+          [`SN-B-${marca}`, `SN-C-${marca}`, `SN-D-${marca}`].sort(),
+        );
+      });
+
+      it('en lote, la diferencia va al mismo lote', async () => {
+        const itemId = await productoVacio({ modoInventario: 'lote' });
+        const codigoLote = `LT-CORR-${Date.now()}`;
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            lineas: [
+              {
+                itemId,
+                cantidad: '6',
+                unidadCodigo: 'unidad',
+                precioUnitario: '500',
+                lote: { codigoLote },
+              },
+            ],
+          }),
+        );
+        await confirmar(compra.id);
+        const lineaId = await primeraLinea(compra.id);
+
+        const enBodega = async () => {
+          const lotes = await get<
+            {
+              codigoLote: string;
+              desglosePorUbicacion: { ubicacionId: string; cantidad: string }[];
+            }[]
+          >(`/api/items/${itemId}/lotes`);
+          const lote = lotes.find((l) => l.codigoLote === codigoLote)!;
+          return Number(
+            lote.desglosePorUbicacion.find((d) => d.ubicacionId === bodegaId)!
+              .cantidad,
+          );
+        };
+        expect(
+          (await corregirCantidad(compra.id, lineaId, { cantidad: '9' }))
+            .status,
+        ).toBe(200);
+        expect(await enBodega()).toBe(9);
+        expect(
+          (await corregirCantidad(compra.id, lineaId, { cantidad: '4' }))
+            .status,
+        ).toBe(200);
+        expect(await enBodega()).toBe(4);
+      });
+
+      it('un null explícito en el precio o la cantidad es 400, no "no tocar"', async () => {
+        const compraId = await compraSinPrecio(
+          await productoVacio(),
+          '10',
+          bodegaId,
+        );
+        const lineaId = await primeraLinea(compraId);
+        // Junto a un campo válido, que es lo que distingue: si el null se
+        // tomara como "no tocar", el otro campo se aplicaría y daría 200.
+        expect(
+          (
+            await corregirCantidad(compraId, lineaId, {
+              cantidad: '12',
+              precioUnitario: null,
+            })
+          ).status,
+        ).toBe(400);
+        expect(
+          (
+            await corregirCantidad(compraId, lineaId, {
+              precioUnitario: '1500',
+              cantidad: null,
+            })
+          ).status,
+        ).toBe(400);
+        expect(
+          (await get<CompraDetalle>(`/api/compras/${compraId}`)).cambios,
+        ).toHaveLength(0);
       });
 
       it('un borrador no se corrige: 409', async () => {

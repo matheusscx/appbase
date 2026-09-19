@@ -1312,6 +1312,19 @@ llega a nadie.
   historial en cada línea cuyo costo cambió.
 - **La papelera frena la corrección de la línea aunque su costo base no cambie.** También frena si el
   reparto le mueve el costo a otro producto que está en la papelera.
+- **8b, cantidad:** va antes que el precio en el mismo PATCH. La corrección bloquea la ubicación y
+  después **todos** los productos de la compra en un solo statement, porque el recosteo puede
+  rehacer la cuenta de otros y los tomaría fuera de orden. La cuenta del producto corregido se
+  rehace siempre: la cantidad cambia el peso aunque el costo por unidad no cambie. En modo cantidad,
+  la salida chequea el saldo antes de mover, porque el mensaje del kardex no dice cuánto queda. En
+  lote, bajar busca el lote por su código, y si ya no existe es 400: sin `loteId` la salida elegiría
+  otro lote por FIFO. En lote, el saldo que decide es el del lote, no el del producto. Con la
+  ubicación de la compra borrada es 400.
+- ⚠️ **Interpretación a confirmar con el owner:** en serie, las unidades que salen al bajar tienen
+  que ser de las que trajo esta línea. La spec pide que estén "en stock en esa ubicación"; esto es
+  más estricto. Bajar la cantidad de una compra significa que llegaron menos de las facturadas, y
+  una unidad de otra compra dejaría las series de la línea sin cuadrar con su cantidad, sin aviso
+  (lo marcó la revisión).
 - **Fixture `compras.carga`** (rol 443, usuario 444): `Leer` y `Crear`, sin `Actualizar`. Sin él, un
   guard con `Crear` donde va `Actualizar` pasaba la suite.
 

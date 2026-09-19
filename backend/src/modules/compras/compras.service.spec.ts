@@ -623,6 +623,9 @@ describe('ComprasService (borrador)', () => {
           folio: '4521',
           tipo_documento_nombre: 'Factura',
           proveedor_nombre: 'Distribuidora X',
+          ubicacion_id: UBICACION,
+          ubicacion_nombre: 'Bodega',
+          ubicacion_viva: true,
           ...o,
         },
       ]);
@@ -634,7 +637,11 @@ describe('ComprasService (borrador)', () => {
         item_id: ITEM_A,
         item_nombre: 'Tomate',
         item_eliminado: false,
+        modo_inventario: 'cantidad',
         unidad_base: 'kg',
+        unidad_codigo: 'kg',
+        series: null,
+        lote: null,
         cantidad: '10',
         precio_unitario: '1000',
         cantidad_base: '10',
@@ -820,6 +827,308 @@ describe('ComprasService (borrador)', () => {
             precioUnitario: '1500',
           }),
         ).rejects.toThrow(new ConflictException(mensaje).message);
+      });
+    });
+
+    describe('cantidad', () => {
+      /** Params de la ÚNICA llamada a `registrarMovimiento`. */
+      function movido() {
+        expect(registrarMovimiento).toHaveBeenCalledTimes(1);
+        return registrarMovimiento.mock.calls[0][1] as Record<string, unknown>;
+      }
+
+      /** Params del UPDATE de la línea: [tenant, id, cantidad, base, series]. */
+      function lineaGuardada(): unknown[] {
+        const db = (service as unknown as { db: { query: jest.Mock } }).db;
+        return db.query.mock.calls.find(([sql]) =>
+          /SET cantidad = \$3, cantidad_base = \$4/.test(sql as string),
+        )![1] as unknown[];
+      }
+
+      function saldo(stock: string) {
+        pisar(/SELECT stock FROM stock_ubicacion/, [{ stock }]);
+      }
+
+      function saldoLote(stock: string) {
+        pisar(/FROM lote_ubicacion/, [{ stock }]);
+      }
+
+      it('subir mueve la diferencia como entrada compra de la línea y rehace la cuenta aunque el costo por unidad no cambie', async () => {
+        compra();
+        lineas([linea({})]);
+
+        await service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+          cantidad: '12',
+        });
+
+        expect(movido()).toMatchObject({
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '2',
+          ubicacionId: UBICACION,
+          compraLineaId: 'l1',
+          costoUnitario: '1000.0000',
+        });
+        expect(lineaGuardada()).toEqual([TENANT, 'l1', '12', '12', null]);
+        // Sin descuento, 12 a $1.000 sigue costando $1.000 por kg: la cuenta
+        // se rehace igual, porque cambió el peso.
+        expect(cuentas()).toEqual([ITEM_A]);
+        expect(historial()).toEqual([
+          ['l1', TENANT, 'cantidad', '10', '12', USUARIO, 'mov-1'],
+        ]);
+      });
+
+      it('bajar lo que alcanza es una salida sin costo propio', async () => {
+        compra();
+        lineas([linea({})]);
+        saldo('5');
+
+        await service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+          cantidad: '8',
+        });
+
+        expect(movido()).toMatchObject({
+          tipo: 'salida',
+          cantidad: '2',
+          costoUnitario: null,
+        });
+      });
+
+      it('bajar más de lo que queda es 400 con el producto, la ubicación y cuánto queda', async () => {
+        compra();
+        lineas([linea({})]);
+        saldo('1');
+
+        await expect(
+          service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+            cantidad: '8',
+          }),
+        ).rejects.toThrow(
+          'No alcanza para bajar 2: de "Tomate" quedan 1 en Bodega',
+        );
+        expect(registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      it('en otra unidad, la diferencia se convierte a la base', async () => {
+        compra();
+        lineas([
+          linea({
+            unidad_codigo: 'kg',
+            unidad_base: 'g',
+            cantidad: '1',
+            cantidad_base: '1000',
+          }),
+        ]);
+        convertir.mockReturnValue('1500');
+
+        await service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+          cantidad: '1.5',
+        });
+
+        expect(convertir).toHaveBeenCalledWith('1.5', 'kg', 'g');
+        expect(movido()).toMatchObject({ tipo: 'entrada', cantidad: '500' });
+        expect(lineaGuardada().slice(2, 4)).toEqual(['1.5', '1500']);
+      });
+
+      it('bloquea la ubicación y después todos los productos de la compra, antes de mover', async () => {
+        compra();
+        lineas([
+          linea({ compra_linea_id: 'lb', item_id: ITEM_B }),
+          linea({ compra_linea_id: 'la', item_id: ITEM_A }),
+        ]);
+
+        await service.corregirLinea(TENANT, USUARIO, COMPRA, 'lb', {
+          cantidad: '12',
+        });
+
+        expect(eventos).toEqual([
+          'bloquearContraBorrado',
+          'lock productos',
+          'registrarMovimiento',
+        ]);
+        const db = (service as unknown as { db: { query: jest.Mock } }).db;
+        const lock = db.query.mock.calls.find(([sql]) =>
+          /FOR UPDATE OF ip/.test(sql as string),
+        )!;
+        expect(lock[1]).toEqual([[ITEM_A, ITEM_B], TENANT]);
+        // El orden lo fija el SQL, no el arreglo: `docs/patterns/backend.md` §15.
+        expect(lock[0] as string).toMatch(
+          /ORDER BY ip\.item_id\s+FOR UPDATE OF ip/,
+        );
+      });
+
+      it('con la ubicación de la compra borrada es 400', async () => {
+        compra({ ubicacion_viva: false });
+        lineas([linea({})]);
+        await expect(
+          service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+            cantidad: '12',
+          }),
+        ).rejects.toThrow('(Bodega) fue eliminada');
+      });
+
+      it('la misma cantidad es 400, y sin precio ni cantidad también', async () => {
+        compra();
+        lineas([linea({})]);
+        await expect(
+          service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+            cantidad: '10.000',
+          }),
+        ).rejects.toThrow('La cantidad es igual a la vigente');
+        await expect(
+          service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {}),
+        ).rejects.toThrow('No hay nada que corregir');
+      });
+
+      it('precio y cantidad juntos: la cantidad primero, dos filas de historial y una sola cuenta', async () => {
+        compra();
+        lineas([linea({})]);
+
+        await service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+          cantidad: '12',
+          precioUnitario: '1500',
+        });
+
+        expect(cuentas()).toEqual([ITEM_A]);
+        expect(historial().map((f) => [f[2], f[3], f[4], f[6]])).toEqual([
+          ['cantidad', '10', '12', 'mov-1'],
+          ['precio', '1000', '1500', `corr-${ITEM_A}`],
+        ]);
+      });
+
+      describe('serie', () => {
+        const SERIE = {
+          modo_inventario: 'serie',
+          unidad_codigo: 'unidad',
+          unidad_base: 'unidad',
+          cantidad: '2',
+          cantidad_base: '2',
+          series: [{ serie: 'SN-1' }, { serie: 'SN-2' }],
+        };
+
+        it('subir pide las series nuevas y las agrega a la línea', async () => {
+          compra();
+          lineas([linea(SERIE)]);
+          await expect(
+            service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+              cantidad: '3',
+            }),
+          ).rejects.toThrow('Subir 1 unidades pide 1 series nuevas');
+
+          await service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+            cantidad: '3',
+            series: [{ serie: 'SN-3' }],
+          });
+          expect(movido()).toMatchObject({ series: [{ serie: 'SN-3' }] });
+          expect(JSON.parse(lineaGuardada()[4] as string)).toEqual([
+            { serie: 'SN-1' },
+            { serie: 'SN-2' },
+            { serie: 'SN-3' },
+          ]);
+        });
+
+        it('bajar pide cuáles salen y las saca de la línea', async () => {
+          compra();
+          lineas([linea(SERIE)]);
+          saldo('2');
+          const UNIDAD = '99999999-9999-4999-8999-999999999999';
+          await expect(
+            service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+              cantidad: '1',
+            }),
+          ).rejects.toThrow('Bajar 1 unidades pide cuáles salen');
+
+          pisar(/SELECT serie FROM item_unidad/, [{ serie: 'SN-1' }]);
+          await service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+            cantidad: '1',
+            unidadIds: [UNIDAD],
+          });
+          expect(movido()).toMatchObject({
+            tipo: 'salida',
+            unidadIds: [UNIDAD],
+          });
+          const db = (service as unknown as { db: { query: jest.Mock } }).db;
+          const salen = db.query.mock.calls.find(([sql]) =>
+            /SELECT serie FROM item_unidad/.test(sql as string),
+          )!;
+          expect(salen[0] as string).toMatch(
+            /AND item_id = \$2 AND tenant_id = \$3\s+AND eliminado_el IS NULL/,
+          );
+          expect(JSON.parse(lineaGuardada()[4] as string)).toEqual([
+            { serie: 'SN-2' },
+          ]);
+        });
+
+        it('una unidad que no trajo esta compra no sale por acá', async () => {
+          compra();
+          lineas([linea(SERIE)]);
+          saldo('2');
+          pisar(/SELECT serie FROM item_unidad/, [{ serie: 'SN-DE-OTRA' }]);
+          await expect(
+            service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+              cantidad: '1',
+              unidadIds: ['99999999-9999-4999-8999-999999999999'],
+            }),
+          ).rejects.toThrow('tienen que ser de las que trajo esta compra');
+          expect(registrarMovimiento).not.toHaveBeenCalled();
+        });
+      });
+
+      describe('lote', () => {
+        const LOTE = {
+          modo_inventario: 'lote',
+          unidad_codigo: 'unidad',
+          unidad_base: 'unidad',
+          lote: { codigoLote: 'L-7' },
+        };
+
+        it('subir va al mismo lote', async () => {
+          compra();
+          lineas([linea(LOTE)]);
+          await service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+            cantidad: '12',
+          });
+          expect(movido()).toMatchObject({ lote: { codigoLote: 'L-7' } });
+        });
+
+        it('bajar sale del lote de la línea, buscado por su código', async () => {
+          compra();
+          lineas([linea(LOTE)]);
+          saldoLote('10');
+          pisar(/SELECT lote_id FROM item_lote/, [{ lote_id: 'lote-7' }]);
+          await service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+            cantidad: '8',
+          });
+          expect(movido()).toMatchObject({ tipo: 'salida', loteId: 'lote-7' });
+        });
+
+        it('el saldo que decide es el del lote, no el del producto entero', async () => {
+          compra();
+          lineas([linea(LOTE)]);
+          // 10 del producto en la bodega, pero solo 1 de este lote.
+          saldo('10');
+          saldoLote('1');
+          pisar(/SELECT lote_id FROM item_lote/, [{ lote_id: 'lote-7' }]);
+          await expect(
+            service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+              cantidad: '8',
+            }),
+          ).rejects.toThrow(
+            'No alcanza para bajar 2: del lote L-7 de "Tomate" quedan 1 en Bodega',
+          );
+        });
+
+        it('si el lote ya no existe, bajar es 400 en vez de elegir otro', async () => {
+          compra();
+          lineas([linea(LOTE)]);
+          saldo('10');
+          await expect(
+            service.corregirLinea(TENANT, USUARIO, COMPRA, 'l1', {
+              cantidad: '8',
+            }),
+          ).rejects.toThrow('El lote L-7 de "Tomate" ya no existe');
+          expect(registrarMovimiento).not.toHaveBeenCalled();
+        });
       });
     });
 
