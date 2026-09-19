@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
@@ -136,6 +137,7 @@ describe('Día del negocio: hora de corte (e2e)', () => {
     async function venderEnEfectivo(): Promise<string> {
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           tipoDocumentoId: BOLETA_ID,
@@ -149,6 +151,7 @@ describe('Día del negocio: hora de corte (e2e)', () => {
 
       const pago = await request(app.getHttpServer())
         .post('/api/pagos')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           ventaId: id,
@@ -324,6 +327,7 @@ describe('Día del negocio: hora de corte (e2e)', () => {
     async function venderEnEfectivo(): Promise<string> {
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           tipoDocumentoId: BOLETA_ID,
@@ -337,6 +341,7 @@ describe('Día del negocio: hora de corte (e2e)', () => {
 
       const pago = await request(app.getHttpServer())
         .post('/api/pagos')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           ventaId: id,
@@ -525,6 +530,7 @@ describe('Día del negocio: hora de corte (e2e)', () => {
     async function crearVentaConPropina(monto: string): Promise<string> {
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId, cantidad: '1' }],
