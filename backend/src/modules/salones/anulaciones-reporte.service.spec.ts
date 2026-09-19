@@ -8,7 +8,7 @@ const TENANT = 'tenant-uuid';
 
 /**
  * `resumen()` exige `desde`/`hasta` (ronda de fix 1). Con hora (`esFechaPura`
- * da `false`) para que `requiereZonaTenant` no dispare la consulta de zona y
+ * da `false`) para que `requiereDiaNegocio` no dispare la consulta del día del negocio y
  * los tests de agrupación sigan mockeando solo las dos consultas que
  * `resumen()` hace de por sí.
  */
