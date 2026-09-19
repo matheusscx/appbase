@@ -237,7 +237,9 @@ Por cada producto afectado, bajo su lock:
   colgada de la línea) y rehace la cuenta.
   - Si baja y no alcanza, es **400** con el producto, la ubicación y cuánto queda.
   - En **serie**, subir pide las series nuevas y bajar pide cuáles salen, que tienen que estar en
-    stock en esa ubicación.
+    stock en esa ubicación **y ser de las que trajo esa línea** (owner, 2026-09-19). Bajar la
+    cantidad significa que llegaron menos de las facturadas: una unidad de otra compra dejaría las
+    series de la factura sin cuadrar con su cantidad.
   - En **lote**, la diferencia va al mismo lote.
 - **Descuento al total:** se acepta solo si **todas** las líneas tienen precio. Cambiarlo reparte de
   nuevo (§ 4.2, paso 2) y rehace la cuenta de cada producto cuyo costo cambió.

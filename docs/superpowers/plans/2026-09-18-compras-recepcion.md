@@ -60,6 +60,10 @@ así que la tarea 11 los vuelve a copiar de `git log` después del rebase final.
 | 5 | `8b0027e6` | Sin `registrarCorreccionCosto`: `correccion_compra` es un ajuste de valor como `ajuste_costo` (ver la tarea 5). El e2e de la secuencia usa 5 concurrentes, no 10, porque con 10 el pool de conexiones se agotaba |
 | 6 | `69a0127a` | Va **antes** que la 7 (OK del owner). Toma `bloquearContraBorrado` por su cuenta, **antes** del lock de productos, aunque `registrarMovimiento` lo repita: bloquea todos los productos en un solo statement antes de mover nada (para leer el stock total con los locks tomados), y el orden tiene que ser ubicación → productos. El front guarda lo que está en pantalla y después confirma, detrás de un modal con el resumen |
 | 5, seguimiento | `650f2edf`, `1a2725d9` | `stockTotalPorProducto` recibe el tenant y lo acota por la ubicación (hallazgo MEDIO de la revisión de seguridad). **`compras` pierde `eliminado_por`**: la suite completa mostró que el test de la papelera exige decidir si toda tabla con esa columna va a la papelera, y el owner decidió que un borrador descartado **no** va (2026-09-18). El bloque de código de la tarea 1 muestra la entidad como se escribió entonces |
+| 7 | `56441145` | El kardex gana `costo_informado` (owner): sin él, una entrada sin costo se promediaba con el CPP congelado. Además de las unitarias, un e2e contra la base que llama al service directo |
+| 8a | `6636c821` | Precio y descuento. Confirmar y corregir costean con la misma función. El chequeo de colapso mira la conversión sola y el costo con descuento. La clave `descuentoTotal` es obligatoria (null = quitar). Fixture `compras.carga` (443/444) |
+| 3 y 4, seguimiento | `531a4578` | El borrador carga el descuento al total (spec § 6): el DTO no lo aceptaba y la pantalla lo tenía deshabilitado siempre. Una sola `validarDescuento` |
+| 8b | `73c05502` | Cantidad. Bloquea todos los productos de la compra antes de mover; en lote decide el saldo del lote; en serie salen solo unidades de esta línea (owner). Desde acá el e2e corre contra una base aislada por worktree (`db-aislada.sh`) |
 
 ## Global Constraints
 
@@ -1320,11 +1324,11 @@ llega a nadie.
   lote, bajar busca el lote por su código, y si ya no existe es 400: sin `loteId` la salida elegiría
   otro lote por FIFO. En lote, el saldo que decide es el del lote, no el del producto. Con la
   ubicación de la compra borrada es 400.
-- ⚠️ **Interpretación a confirmar con el owner:** en serie, las unidades que salen al bajar tienen
-  que ser de las que trajo esta línea. La spec pide que estén "en stock en esa ubicación"; esto es
-  más estricto. Bajar la cantidad de una compra significa que llegaron menos de las facturadas, y
-  una unidad de otra compra dejaría las series de la línea sin cuadrar con su cantidad, sin aviso
-  (lo marcó la revisión).
+- ✅ **Decisión del owner (2026-09-19):** *"vamos con tu recomendacion"*. En serie, las unidades
+  que salen al bajar tienen que ser de las que trajo esta línea, no solo estar en stock en la
+  ubicación. Bajar la cantidad de una compra significa que llegaron menos de las facturadas, y una
+  unidad de otra compra dejaría las series de la línea sin cuadrar con su cantidad, sin aviso (lo
+  marcó la revisión). Registrado en la spec § 4.4.
 - **Fixture `compras.carga`** (rol 443, usuario 444): `Leer` y `Crear`, sin `Actualizar`. Sin él, un
   guard con `Crear` donde va `Actualizar` pasaba la suite.
 
