@@ -798,6 +798,44 @@ prohíbe.
 Van juntas porque el arreglo pide **un solo análisis de orden de locks** —qué fila se
 bloquea y en qué orden en cada camino—, no un parche por entrada.
 
+### Borrar una bodega mientras un movimiento que no es traslado escribe stock en ella (medido 2026-09-18)
+
+**Qué pasa.** `UbicacionesService.remove` (`ubicaciones.service.ts:241`) toma `FOR UPDATE`
+sobre la ubicación, cuenta `stock_ubicacion … stock <> 0` y, si da 0, marca `eliminado_el`.
+Ese `FOR UPDATE` solo frena a quien toma la otra mitad del par sobre la **fila de
+`ubicaciones`**, y eso lo hace únicamente el traslado (`FOR SHARE`, `traslados.service.ts:199`).
+`InventarioService.registrarMovimiento` bloquea `item_producto` (`FOR UPDATE OF ip`) y nada
+sobre la ubicación, y los llamadores que reciben `ubicacionId` del cliente la validan con
+`findOneOrFail` **sin lock** (`items.service.ts:2969` en el ajuste; mermas y recuentos igual).
+El `COUNT` de `remove()` corre en READ COMMITTED y no ve el saldo que el otro todavía no
+commiteó: los dos terminan bien y el saldo queda colgado de una bodega borrada.
+
+**Medido por API** (spec de medición en un worktree, sin commitear; la técnica es la compuerta
+de `test/traslado-borrado-ubicacion-concurrente.e2e-spec.ts`):
+
+| Caso | Resultado |
+|---|---|
+| A · Compuerta: el ajuste de entrada de 5 a la bodega queda encolado en `item_producto`, llega el `DELETE` | el `DELETE` **termina con la compuerta todavía cerrada** (204); al soltarla, el ajuste da 200. Hay 5 en `stock_ubicacion` de una bodega borrada, y `GET /items/:id` → `stock: "0.0000"` |
+| B · Sin compuerta, `PATCH /items/:id/stock` y `DELETE /ubicaciones/:id` a la vez, 20 veces | **20 de 20** colgados (ajuste 200, borrado 204) |
+| C · Secuencial, sin carrera: recuento abierto sobre una bodega vacía → `DELETE` de la bodega → contar 3 → `aplicar` | borrado 204, `aplicar` 201 con `lineasAplicadas: 1`: 3 colgados. `aplicar` no vuelve a validar la ubicación (usa `sesion.ubicacion_id`, `recuentos.service.ts:756`) y `remove()` no mira los recuentos abiertos |
+
+**Consecuencias.** El saldo no aparece en `GET /items` (`items.service.ts:480` filtra
+`u2.eliminado_el IS NULL`) ni en el peso del CPP (`inventario.service.ts:483`, mismo filtro):
+la próxima compra pondera como si esas unidades no existieran. No se pierde para siempre:
+restaurar la bodega desde la papelera lo vuelve visible, y la limpieza del spec lo sacó así
+(restaurar + salida, sin error). Pero nada le avisa al usuario que tiene algo que buscar.
+
+**Qué no es.** No es el traslado: su par de locks funciona. Y las mermas solo sacan stock, así que
+no pueden dejar saldo en una bodega que `remove()` aceptó borrar con saldo 0.
+
+**Diseño propuesto, pendiente de aprobación del owner:** `registrarMovimiento` toma
+`FOR SHARE` sobre la fila de `ubicaciones` de `params.ubicacionId`, filtrando
+`eliminado_el IS NULL`, **antes** de su `FOR UPDATE OF ip`. Si no hay fila, rechaza. Ese es el
+orden del traslado (`ubicaciones` → `item_producto`, §15 de `docs/patterns/backend.md`). En el
+chokepoint cubre a todo escritor de hoy y de mañana, y también cierra el caso C. Falta decidir
+qué ve el usuario ahí: ¿`remove()` rechaza la bodega con un recuento abierto, o el recuento
+rebota al aplicarlo? Es una pregunta de producto.
+
 ---
 
 ## 6. Proyectos que van solos
