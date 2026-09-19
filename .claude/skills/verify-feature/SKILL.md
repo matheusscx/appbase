@@ -38,6 +38,12 @@ punto: el contenedor levanta antes de que el seed termine, y una suite que
 arranca a mitad del seed falla con errores que no son regresiones. Tarda ~30s.
 No hay datos productivos que perder (decisión registrada del owner).
 
+**En un worktree, `./scripts/db-aislada.sh reset <puerto>` reemplaza a `reset-db.sh`
+para el `test:e2e`**: le da al worktree un Postgres propio y vacío, sin turno del stack
+compartido. La regla de la primera corrida vale igual —cada `reset` es la base vacía—,
+pero `--verificar` no aplica: ningún backend del compose apunta a esa base, así que no
+hay watcher que la re-siembre. El e2e de navegador sigue en el stack, con `reset-db.sh`.
+
 **`typecheck:ratchet`**: `nuxt build` NO tipa-chequea, así que el frontend arrastra una
 deuda de errores de tipo (vue-tsc estricto) registrada en `frontend/typecheck-baseline.json`.
 El ratchet falla solo si un archivo **empeora** respecto a la baseline — no bloquea por la

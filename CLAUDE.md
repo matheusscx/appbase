@@ -131,6 +131,7 @@ docker-compose down -v       # Detener y borrar el volumen de la BD
 ./scripts/reset-db.sh        # Reset + espera del seed, ANTES de cada test:e2e (~30s)
 ./scripts/reset-db.sh --verificar   # DESPUÉS del e2e: ¿la base se movió abajo de la suite?
 ./scripts/smoke-produccion.sh       # El demo de Railway, ¿funciona? (correr con el deploy en SUCCESS)
+./scripts/db-aislada.sh reset <puerto>   # En un worktree: Postgres propio para test:e2e, sin turno
 
 cd backend
 npm run start:dev            # Watch mode
@@ -153,6 +154,17 @@ reinicia y **vuelve a sembrar** (medido: crear un `.ts` lleva el contador de
 `Seed complete` de 1 a 2). Si eso pasa a mitad de la suite, salen decenas de
 fallos repartidos que **no son regresiones**. Ante un e2e que falla raro, la
 primera pregunta la contesta `./scripts/reset-db.sh --verificar`.
+
+🧪 **En un worktree, el e2e de la API va contra un Postgres propio.** El stack del
+compose es uno solo para todos los worktrees, y compartirlo costaba dos cosas: el
+`synchronize` de una rama le borraba columnas a la otra, y el watcher re-sembraba en
+medio de una suite ajena. Pero `test:e2e` no usa el backend del compose: levanta la
+app en proceso contra el `DATABASE_URL` del `.env` del worktree, y esa app crea el
+esquema y siembra al arrancar. `./scripts/db-aislada.sh reset <puerto>` (5433–5499,
+uno por worktree) crea ese Postgres y apunta el `.env` ahí; cada `reset` es una base
+vacía, y la corrida que vale es la primera. **El e2e de navegador (Playwright) y el
+smoke manual siguen en el stack del compose, con `reset-db.sh` y turno**: necesitan
+backend y frontend corriendo. `borrar` devuelve el `.env` al compose.
 
 **Git hook (una vez por clone):** `git config core.hooksPath .githooks` activa el
 pre-commit (`.githooks/pre-commit`), que bloquea sobre lo staged: casing malo de
