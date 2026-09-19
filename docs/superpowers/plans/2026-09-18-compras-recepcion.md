@@ -48,22 +48,27 @@ Por eso:
 
 ### Ejecución (2026-09-18)
 
-Los hashes son los de la rama **después** del rebase sobre `8dadb792`. Cada rebase los reescribe,
-así que la tarea 11 los vuelve a copiar de `git log` después del rebase final.
+Los hashes son los de la rama **después del rebase final**, sobre `d05208a8` (main con idempotencia
+de cobros y la hora de corte, 2026-09-19), copiados de `git log`. Si la rama se integra con otro
+rebase, vuelven a cambiar.
 
 | Tarea | Commit | Lo que cambió respecto del plan |
 |---|---|---|
-| 1 | `3f6d6aa7` | La revisión independiente encontró que al usuario fixture le faltaba la fila en `usuarios_tenants` (sin ella no entra a Paris) |
-| 2 | `3e66706d` | Sin cambios |
-| 3 | `0bd439e6` | Se compran `producto` **e** `ingrediente` (owner). Un fixture más, `compras.lectura` (ids …441/…442, del bloque 441–445): sin él, un `POST` guardado con `Leer` pasaba la suite. La revisión agregó `EscalaMonedaPipe` al body (el `@EsCosto()` solo no valida) y cambió la validación de unidades a `crearConversor` |
-| 4 | `4d2c06b3` | `useCompras()` devuelve funciones, como `useEstadoVenta`. El precio usa `MoneyInput` en vez de un `UInput` |
-| 5 | `8b0027e6` | Sin `registrarCorreccionCosto`: `correccion_compra` es un ajuste de valor como `ajuste_costo` (ver la tarea 5). El e2e de la secuencia usa 5 concurrentes, no 10, porque con 10 el pool de conexiones se agotaba |
-| 6 | `69a0127a` | Va **antes** que la 7 (OK del owner). Toma `bloquearContraBorrado` por su cuenta, **antes** del lock de productos, aunque `registrarMovimiento` lo repita: bloquea todos los productos en un solo statement antes de mover nada (para leer el stock total con los locks tomados), y el orden tiene que ser ubicación → productos. El front guarda lo que está en pantalla y después confirma, detrás de un modal con el resumen |
-| 5, seguimiento | `650f2edf`, `1a2725d9` | `stockTotalPorProducto` recibe el tenant y lo acota por la ubicación (hallazgo MEDIO de la revisión de seguridad). **`compras` pierde `eliminado_por`**: la suite completa mostró que el test de la papelera exige decidir si toda tabla con esa columna va a la papelera, y el owner decidió que un borrador descartado **no** va (2026-09-18). El bloque de código de la tarea 1 muestra la entidad como se escribió entonces |
-| 7 | `56441145` | El kardex gana `costo_informado` (owner): sin él, una entrada sin costo se promediaba con el CPP congelado. Además de las unitarias, un e2e contra la base que llama al service directo |
-| 8a | `6636c821` | Precio y descuento. Confirmar y corregir costean con la misma función. El chequeo de colapso mira la conversión sola y el costo con descuento. La clave `descuentoTotal` es obligatoria (null = quitar). Fixture `compras.carga` (443/444) |
-| 3 y 4, seguimiento | `531a4578` | El borrador carga el descuento al total (spec § 6): el DTO no lo aceptaba y la pantalla lo tenía deshabilitado siempre. Una sola `validarDescuento` |
-| 8b | `73c05502` | Cantidad. Bloquea todos los productos de la compra antes de mover; en lote decide el saldo del lote; en serie salen solo unidades de esta línea (owner). Desde acá el e2e corre contra una base aislada por worktree (`db-aislada.sh`) |
+| 1 | `69227dbf` | La revisión independiente encontró que al usuario fixture le faltaba la fila en `usuarios_tenants` (sin ella no entra a Paris) |
+| 2 | `ec6676eb` | Sin cambios |
+| 3 | `89471dc7` | Se compran `producto` **e** `ingrediente` (owner). Un fixture más, `compras.lectura` (ids …441/…442, del bloque 441–445): sin él, un `POST` guardado con `Leer` pasaba la suite. La revisión agregó `EscalaMonedaPipe` al body (el `@EsCosto()` solo no valida) y cambió la validación de unidades a `crearConversor` |
+| 4 | `f78398db` | `useCompras()` devuelve funciones, como `useEstadoVenta`. El precio usa `MoneyInput` en vez de un `UInput` |
+| 5 | `0beb7298` | Sin `registrarCorreccionCosto`: `correccion_compra` es un ajuste de valor como `ajuste_costo` (ver la tarea 5). El e2e de la secuencia usa 5 concurrentes, no 10, porque con 10 el pool de conexiones se agotaba |
+| 6 | `951333cd` | Va **antes** que la 7 (OK del owner). Toma `bloquearContraBorrado` por su cuenta, **antes** del lock de productos, aunque `registrarMovimiento` lo repita: bloquea todos los productos en un solo statement antes de mover nada (para leer el stock total con los locks tomados), y el orden tiene que ser ubicación → productos. El front guarda lo que está en pantalla y después confirma, detrás de un modal con el resumen |
+| 5, seguimiento | `b9c7433f`, `d869527b` | `stockTotalPorProducto` recibe el tenant y lo acota por la ubicación (hallazgo MEDIO de la revisión de seguridad). **`compras` pierde `eliminado_por`**: la suite completa mostró que el test de la papelera exige decidir si toda tabla con esa columna va a la papelera, y el owner decidió que un borrador descartado **no** va (2026-09-18). El bloque de código de la tarea 1 muestra la entidad como se escribió entonces |
+| 7 | `a025b21a` | El kardex gana `costo_informado` (owner): sin él, una entrada sin costo se promediaba con el CPP congelado. Además de las unitarias, un e2e contra la base que llama al service directo |
+| 8a | `26a18c7d` | Precio y descuento. Confirmar y corregir costean con la misma función. El chequeo de colapso mira la conversión sola y el costo con descuento. La clave `descuentoTotal` es obligatoria (null = quitar). Fixture `compras.carga` (443/444) |
+| 3 y 4, seguimiento | `b1be5e67` | El borrador carga el descuento al total (spec § 6): el DTO no lo aceptaba y la pantalla lo tenía deshabilitado siempre. Una sola `validarDescuento` |
+| 8b | `5e3fe05b` | Cantidad. Bloquea todos los productos de la compra antes de mover; en lote decide el saldo del lote; en serie salen solo unidades de esta línea (owner). Desde acá el e2e corre contra una base aislada por worktree (`db-aislada.sh`) |
+| 8b, seguimiento | `bc6d871e` | Docs: el owner confirma que al bajar en serie salen solo unidades de la línea |
+| 9 | `64e2504b` | Chequeo previo con una consulta por modo. `correccion_compra` acepta un costo nulo (owner: anular la única compra con costo deja el producto sin costo). Cierra el mutante pendiente de la tarea 3 (el folio de una anulada) |
+| 10 | `8909dddc` | Componente propio con un modal por acción. El smoke de navegador encontró la cantidad cruda ("10.0000") y un `data-qa` que `CrudTable` duplicaba |
+| 11 | `e31c648e` | Listas propias de Compras (owner, "vamos A"): el encargado recibía 403 en `/items` y no podía cargar una compra. Docs de cierre. Rebase final sobre `d05208a8`, con un solo conflicto (`app.module.ts`) |
 
 ## Global Constraints
 
