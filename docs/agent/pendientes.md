@@ -727,8 +727,12 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
 
   🔎 **Investigación de mercado hecha** (2026-09-18, pedida por el owner):
   [`investigaciones/2026-09-18-hora-de-corte-dia-negocio.md`](investigaciones/2026-09-18-hora-de-corte-dia-negocio.md).
-  Antes de diseñar faltan dos respuestas del owner: si cambiar la hora recalcula los días
-  pasados o los deja congelados, y si es una sola hora o una por día de la semana. Lo que no
+  **Cambiar la hora congela el pasado** (owner, 2026-09-18): el sábado que se vio en $450.000
+  sigue en $450.000 aunque el lunes se mueva el corte; solo lo nuevo usa la hora nueva, así que
+  el día de negocio se graba en la venta, no se deriva al consultar. **Y es una sola hora para
+  toda la semana** (owner, 2026-09-18), como Toast, Clover y Aloha: entre el cierre y el corte
+  casi no hay ventas, así que una hora por día resolvía un caso que casi no aparece. Con las
+  dos respuestas el frente queda listo para diseñar. Lo que no
   depende de él: la boleta electrónica lleva siempre la fecha calendario real (`FchEmis`), el
   día de negocio es solo una vista de reporte.
 
