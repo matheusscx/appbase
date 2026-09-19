@@ -735,7 +735,7 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   día de negocio es solo una vista de reporte.
 
   📐 **Diseño:** [`specs/2026-09-18-hora-de-corte-dia-negocio-design.md`](../superpowers/specs/2026-09-18-hora-de-corte-dia-negocio-design.md),
-  con la lista completa de lectores. Falta el plan.
+  con la lista completa de lectores. Plan: [`plans/2026-09-18-hora-de-corte-dia-negocio.md`](../superpowers/plans/2026-09-18-hora-de-corte-dia-negocio.md).
 
 ## 4. Necesita que el owner conteste
 
