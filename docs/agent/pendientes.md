@@ -66,12 +66,13 @@ decisión que no es mía).
     la corrección de cantidad (`corregirCantidad`, que también crea unidades) no pasa por
     ahí.
 
-  **Qué medir antes de arreglarlo, que es lo que lo deja en esta sección y no en la 1:** el
-  `.sql` eligió `(tenant_id, serie)`, o sea que **dos productos distintos del mismo tenant no
-  pueden repetir número**. Hay que confirmar que esa es la regla querida y no un arrastre
-  —`(item_id, serie)` es la alternativa— porque de eso depende el índice y el mensaje de
-  error. Después: declararlo en la entity y que los tres caminos den 400 con el nombre de la
-  serie repetida, en vez de dejar que reviente el índice.
+  **La regla ya está decidida (owner, 2026-09-19):** la serie es única **por producto**,
+  `(item_id, serie)` con `eliminado_el IS NULL`. Dos productos distintos del mismo tenant
+  **sí** pueden repetir número, porque cada proveedor numera como quiere y no hay un estándar
+  global. O sea que el `(tenant_id, serie)` de `startup-pos.sql:1170` es un arrastre y hay que
+  corregirlo ahí también. Falta: declarar el índice en `ItemUnidad`, y que los tres caminos
+  —alta con stock inicial, ajuste de stock y compras, incluida `corregirCantidad`— den 400
+  con la serie repetida en vez de dejar que reviente el índice.
 
 ⚠️ **De la familia de "lo que la pantalla lee y escribe después del `await`" hay funciones con
 la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron una vez:
