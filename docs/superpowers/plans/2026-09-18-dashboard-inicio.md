@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Draft · **Date:** 2026-09-18 · **Owner:** Cesar Matheus
+**Status:** Done (2026-09-18) · **Date:** 2026-09-18 · **Owner:** Cesar Matheus
 
 **Goal:** que el inicio le muestre al encargado lo que pasa **ahora** en el turno (salón, cajas,
 cierres) y al dueño **cómo le fue hoy** (ventas, por cobrar, pérdidas, lo más vendido), cada
@@ -125,12 +125,12 @@ inyecta `Db` como `cuenta-asignaciones.service.ts`. Controller fino: valida y de
 - **Ticket promedio y variación** en el mapeo, con Decimal y `toFixed(ESCALA_COSTO)`.
 - **Tres o cuatro consultas en total**, sin importar cuántas ventas haya.
 
-- [ ] **Step 1: Medir antes de escribir.** Leer `crearNotaCredito` (`ventas.service.ts` ~`:1462`) y el
+- [x] **Step 1: Medir antes de escribir.** Leer `crearNotaCredito` (`ventas.service.ts` ~`:1462`) y el
   camino de anular (`POST /ventas/:id/anular`): ¿la NC escribe `pagos`/`pago_aplicaciones`? ¿Una venta
   cancelada puede tener pagos? Anotar la respuesta en el docblock de la consulta de cobrado. Si la NC
   sí escribe aplicaciones `tipo = 'venta'`, **parar y reportar**: el cobrado las contaría y la
   exclusión es una decisión.
-- [ ] **Step 2: Unitarios que fallan** en `resumen-negocio.service.spec.ts`, con `Db.query` mockeado
+- [x] **Step 2: Unitarios que fallan** en `resumen-negocio.service.spec.ts`, con `Db.query` mockeado
   por orden de llamada (molde: `backend/src/modules/mermas/mermas.service.spec.ts` ~`:534`):
   - vendido hoy `'184500.0000'` y semana pasada `'150000.0000'` → `variacion '0.2300'`;
   - semana pasada `'0'` → `variacion null`; cantidad 0 → `ticketPromedio.hoy null`;
@@ -142,8 +142,8 @@ inyecta `Db` como `cuenta-asignaciones.service.ts`. Controller fino: valida y de
   - **la zona:** con `fechaLocalTenant` devolviendo `'2026-09-18'` (mock de la consulta de zona con
     `America/Santiago`) los parámetros del rango son `'2026-09-18'` y la zona, y el de la semana
     pasada es `'2026-09-11'`. Es el único lugar donde se prueba "22:00 de Chile es hoy" (spec § 9).
-- [ ] **Step 3: Verlos fallar.**
-- [ ] **Step 4: Implementar** service, controller, módulo, registro en `app.module.ts` y seed:
+- [x] **Step 3: Verlos fallar.**
+- [x] **Step 4: Implementar** service, controller, módulo, registro en `app.module.ts` y seed:
   - `seedModulosApp`: `{ moduloAppId: '…407', nombre: 'Resumen del negocio', url: '/', icono:
     'mdi-view-dashboard-outline', tieneConfiguracion: false }`.
   - `seedModuloAppPermisos`: `{ moduloAppPermisoId: '…408', moduloAppId: RESUMEN, permisoId: LEER }`.
@@ -153,8 +153,8 @@ inyecta `Db` como `cuenta-asignaciones.service.ts`. Controller fino: valida y de
     Ventas (spec 2026-09-18-dashboard-inicio § 5.4); el código no lo obliga"*. **El segundo tenant no
     lo contrata**: es el caso de 403 del e2e.
   - Ningún rol del seed recibe el permiso: el admin lo tiene por ser rol fijo.
-- [ ] **Step 5: Verlos pasar.**
-- [ ] **Step 6: E2E** `resumen-negocio.e2e-spec.ts` (molde de login y caja:
+- [x] **Step 5: Verlos pasar.**
+- [x] **Step 6: E2E** `resumen-negocio.e2e-spec.ts` (molde de login y caja:
   `test/ventas.e2e-spec.ts` ~`:160-200` y `test/helpers/caja.ts`):
   - `200` con `admin.paris@paris.cl`; `403` con un usuario del seed que tenga `Ventas: Leer` y no el
     módulo nuevo (buscarlo en `seedRolesUsuarios`; si no hay, crear el rol por API en el `beforeAll`);
@@ -172,7 +172,7 @@ inyecta `Db` como `cuenta-asignaciones.service.ts`. Controller fino: valida y de
   - la ruta no acepta tenant de afuera: `GET /hoy?tenantId=<segundo tenant>` devuelve lo mismo que sin
     el parámetro.
   ⚠️ Todo helper que lea `.body` mira antes el `.status` (`node scripts/check-e2e-status.mjs --staged`).
-- [ ] **Step 7: Docs.**
+- [x] **Step 7: Docs.**
   - `docs/features/dashboard-inicio.md` desde el template: qué muestra, las reglas de § 4 de la spec
     (vendido sin canceladas ni NC, cobrado desde aplicaciones, por cobrar de cualquier fecha, variación
     `null`), y el porqué del permiso propio. Link en `docs/README.md`.
@@ -184,7 +184,7 @@ inyecta `Db` como `cuenta-asignaciones.service.ts`. Controller fino: valida y de
   - `pendientes.md` § 4, entrada nueva: *"¿El vendido del día resta las notas de crédito?"* — pregunta
     fiscal, va en su propio frente (ADR-010); hoy se excluyen y la pantalla lo rotula "antes de notas
     de crédito".
-- [ ] **Step 8: Gate completo**, stagear por ruta. Revisión: `domain-reviewer` **y**
+- [x] **Step 8: Gate completo**, stagear por ruta. Revisión: `domain-reviewer` **y**
   `api-security-reviewer` (ruta nueva).
 
 ---
@@ -242,24 +242,25 @@ inyecta `Db` como `cuenta-asignaciones.service.ts`. Controller fino: valida y de
   cantidad en unidad base antes de escribir la suma.
 - **No hay total de pérdidas** (spec § 4.4): no sumar anulaciones con mermas en ningún lado.
 
-- [ ] **Step 1: Unitarios que fallan.**
+- [x] **Step 1: Unitarios que fallan.**
   - `MermasService.resumen`: tres mermas (`CLP 4300.0000`, `USD 3.5000`, y una sin costo) →
     `cantidad 3`, `costo` de dos entradas, `sinValorizar 1`; el SQL filtra `eliminado_el` y el tipo como
     el listado.
   - `ResumenNegocioService.hoy`: pasa `{ desde: fecha, hasta: fecha }` al resumen de anulaciones y
     devuelve su `porTipo` tal cual; `masVendidos` mapea hasta 5 filas; la consulta de más vendidos
     excluye canceladas y NC (afirmar sobre la cláusula).
-- [ ] **Step 2: Verlos fallar.** **Step 3: Implementar.** **Step 4: Verlos pasar.**
+- [x] **Step 2: Verlos fallar.** **Step 3: Implementar.** **Step 4: Verlos pasar.**
 - [ ] **Step 5: E2E**, en el mismo archivo y con delta: anular un plato despachado como **cortesía**
+  **Desvío:** el ítem de "lo más vendido" suma `Date.now()` a su precio en vez del `'9990000.0000'` fijo: con un fijo, dos corridas sin reset empataban el primer lugar.
   (molde: `test/salones-anular-linea.e2e-spec.ts`, con salón, mesa y garzón propios) mueve
   `perdidas.anulaciones` de tipo `cortesia`; registrar una merma sin costo cargado (`POST /mermas`,
   molde `test/mermas.e2e-spec.ts`) sube `sinValorizar` en 1 sin mover `costo`; una venta de un ítem
   propio con precio muy alto (p. ej. `'9990000.0000'`, para ganarle a cualquier venta del seed o de
   otros specs del día) sale **primera** en `masVendidos` con su `monto` igual al `totalFinal` de la
   línea.
-- [ ] **Step 6: Docs:** `dashboard-inicio.md` suma pérdidas y lo más vendido, y **por qué no hay
+- [x] **Step 6: Docs:** `dashboard-inicio.md` suma pérdidas y lo más vendido, y **por qué no hay
   total de pérdidas**.
-- [ ] **Step 7: Gate completo**, stagear. Revisión: `domain-reviewer`.
+- [x] **Step 7: Gate completo**, stagear. Revisión: `domain-reviewer`.
 
 ---
 
@@ -288,14 +289,14 @@ cuenta abierta": si la de ahí difiere de la de acá, gana la de ahí y se docum
 estática: declararla **antes** de cualquier `@Get(':id…')` del controller. ⚠️ `salones.controller.ts`
 y `salones.module.ts` los toca también la otra sesión: `git status` antes (Global Constraints).
 
-- [ ] **Step 1: Unitario que falla:** el mapeo de la fila (`'14'`, `'20'`, `'16'` como vienen de
+- [x] **Step 1: Unitario que falla:** el mapeo de la fila (`'14'`, `'20'`, `'16'` como vienen de
   `COUNT` en pg) a números, y el SQL con `estado = 'abierta'` y los filtros de borrado de mesa, salón y
   cuenta, afirmados sobre la cláusula.
-- [ ] **Step 2: Verlo fallar.** **Step 3: Implementar.** **Step 4: Verlo pasar.**
-- [ ] **Step 5: E2E:** `403` con `ana.torres@paris.cl` (Leer + Operar, sin Ver todas); `200` con
+- [x] **Step 2: Verlo fallar.** **Step 3: Implementar.** **Step 4: Verlo pasar.**
+- [x] **Step 5: E2E:** `403` con `ana.torres@paris.cl` (Leer + Operar, sin Ver todas); `200` con
   `encargado.salon@paris.cl` y el admin; abrir una cuenta en una mesa propia sube `mesasOcupadas` y
   `cuentasAbiertas` en 1 (delta); cerrarla o cancelarla los baja.
-- [ ] **Step 6: Gate completo**, stagear. Revisión: `domain-reviewer` y `api-security-reviewer`.
+- [x] **Step 6: Gate completo**, stagear. Revisión: `domain-reviewer` y `api-security-reviewer`.
 
 ---
 
@@ -354,24 +355,25 @@ y `salones.module.ts` los toca también la otra sesión: `git status` antes (Glo
 - Solo tokens semánticos de Nuxt UI (`UCard`, `text-muted`, `text-highlighted`…); `design:check` lo
   enforcea. Invocar la skill `nuxt-ui` antes de escribir los `.vue`.
 
-- [ ] **Step 1: Tests que fallan** de `useRefrescoPeriodico.spec.ts`, con `vi.useFakeTimers()` y
+- [x] **Step 1: Tests que fallan** de `useRefrescoPeriodico.spec.ts`, con `vi.useFakeTimers()` y
   `document.visibilityState` stubbeado:
   - carga al inicio y otra vez a los 60 s;
   - con la pestaña oculta el tick no carga; al volver a visible carga una vez;
   - un fallo conserva `datos`, pone `sinConexion`, y **no** vuelve a llamar antes del próximo tick
     (contar llamadas del mock);
   - un 403 pone `oculto` y no hay más llamadas en los ticks siguientes.
-- [ ] **Step 2: Verlos fallar.** **Step 3: Implementar el composable.** **Step 4: Verlos pasar.**
-- [ ] **Step 5: Tests de pantalla** `InicioAhora.nuxt.spec.ts` (molde:
+- [x] **Step 2: Verlos fallar.** **Step 3: Implementar el composable.** **Step 4: Verlos pasar.**
+- [x] **Step 5: Tests de pantalla** `InicioAhora.nuxt.spec.ts` (molde:
   `pages/salones/anulaciones.nuxt.spec.ts`, con `mockNuxtImport` de `usePermissionsStore` y
   `useApiFetch`, registrando las URLs pedidas): sin `Salones: Ver todas` no se pide
   `/salones/ocupacion`; con `Cajas: Leer` se piden las dos de caja; el texto de ocupación sale de la
   respuesta. ⚠️ Los bodies simulados tienen **la forma real** de cada ruta (copiarla del tipo del
   backend), no una inventada: el mock contesta 200 a lo que sea.
 - [ ] **Step 6: Implementar** los tres bloques y la página. **Step 7: Verlos pasar.**
-- [ ] **Step 8: Docs:** `patterns/frontend.md`, el refresco periódico (cuándo usarlo, por qué no
+  **Desvío:** las tarjetas salieron con `@click` sobre un `div`, sin teclado, y el bloque de cierres pintaba el efectivo con verde/rojo de Tailwind (la excepción del módulo Caja). Se corrigió a `text-success`/`text-error` en la revisión de la tarea y a `<a>` reales (`UCard as="a"` + `href`) en la ola final.
+- [x] **Step 8: Docs:** `patterns/frontend.md`, el refresco periódico (cuándo usarlo, por qué no
   reintenta, el 403 que oculta); `dashboard-inicio.md`, la zona "Ahora".
-- [ ] **Step 9: Gate completo del frontend**, stagear. Revisión: `domain-reviewer`.
+- [x] **Step 9: Gate completo del frontend**, stagear. Revisión: `domain-reviewer`.
 
 ---
 
@@ -405,13 +407,14 @@ y `salones.module.ts` los toca también la otra sesión: `git status` antes (Glo
 - Lo más vendido: lista de hasta 5, nombre, cantidad y monto.
 - Links: Ventas y Por cobrar → `/ventas`; Pérdidas → `/salones/anulaciones` y `/mermas`.
 
-- [ ] **Step 1: Tests que fallan** `InicioHoy.nuxt.spec.ts`: sin el permiso no se pide
+- [x] **Step 1: Tests que fallan** `InicioHoy.nuxt.spec.ts`: sin el permiso no se pide
   `/resumen-negocio/hoy`; con él, una sola llamada; "Actualizar" hace otra; `variacion null` muestra
   "—"; `sinValorizar 2` muestra el aviso y `0` no; una respuesta 403 no renderiza la zona. Bodies con
   la forma exacta de `ResumenNegocioHoy`.
 - [ ] **Step 2: Verlos fallar.** **Step 3: Implementar.** **Step 4: Verlos pasar.**
-- [ ] **Step 5: Docs:** `dashboard-inicio.md` completo; fila en `docs/ESTADO.md` (✅ con fecha).
-- [ ] **Step 6: Gate completo del frontend**, stagear. Revisión: `domain-reviewer`.
+  **Desvío:** las tarjetas de Ventas y Por cobrar salieron con `UCard as="NuxtLink"`, que monta un `<nuxtlink>` sin `href` y no navega; los tests de componente no lo veían. Se corrigió a `as="a"` + `href` en la ola final, con un test de `href` que falla contra el código anterior. También se sumó el aviso "sin costo cargado" por tipo de anulación, que el paso no pedía.
+- [x] **Step 5: Docs:** `dashboard-inicio.md` completo; fila en `docs/ESTADO.md` (✅ con fecha).
+- [x] **Step 6: Gate completo del frontend**, stagear. Revisión: `domain-reviewer`.
 
 ---
 
@@ -419,8 +422,9 @@ y `salones.module.ts` los toca también la otra sesión: `git status` antes (Glo
 
 **Files:** los de las tareas anteriores (solo correcciones que salgan de acá).
 
-- [ ] **Step 1:** `./scripts/reset-db.sh` **antes** de probar.
+- [x] **Step 1:** `./scripts/reset-db.sh` **antes** de probar.
 - [ ] **Step 2: Smoke en Chrome con devtools** (no en el navegador de Claude: el owner mira la ventana
+  **Desvío:** no se hizo a mano en Chrome (requería tipear la contraseña del login). Se hizo con Playwright: `frontend/e2e/inicio/dashboard.spec.ts` recorre esta lista con el admin del seed, `encargado.salon@paris.cl` y el admin en "Demo Bodega" (403, sin error), y la suite completa dio 40/40 desde reset. De paso rompía `@smoke el dashboard carga` (el link "Ventas" también matcheaba las tarjetas): pasó a `exact: true`.
   real y ahí se ven las llamadas):
   - admin de Paris: las dos zonas; vender algo en `/ventas` y volver: "Hoy" cambia al tocar
     "Actualizar", "Ahora" no pide `/resumen-negocio/hoy`;
@@ -430,6 +434,7 @@ y `salones.module.ts` los toca también la otra sesión: `git status` antes (Glo
   - admin del segundo tenant: sin "Hoy", sin error en pantalla (el 403 queda en la red, oculto);
   - cortar el backend un ciclo: aviso "Sin conexión" con el dato anterior.
 - [ ] **Step 3: Mutantes que revierten** (spec § 9), uno por vez, con el watcher: tras revertir,
+  **Desvío:** "contar las canceladas" lo mata un unitario, no solo el e2e; "sacar `eliminado_el IS NULL` de ventas" sobrevivía (ningún test afirmaba la cláusula) y se cerró sumando asertos en cada consulta que lee ventas: 8/8 muertos. En el navegador, "el refresco ignora la pestaña oculta" lo mata el caso de la pestaña oculta.
   verificar en los logs la hora del restart antes de seguir.
 
   | Mutante | Test que tiene que caer |
@@ -444,6 +449,7 @@ y `salones.module.ts` los toca también la otra sesión: `git status` antes (Glo
   Anotar en el cierre qué test mató a cada uno. Un superviviente se intenta matar con otro fixture
   antes de declararlo, y el motivo se mide.
 - [ ] **Step 4: Gate completo** backend y frontend, `./scripts/reset-db.sh --verificar` después del
+  **Desvío:** no se invocó la skill `verify-feature` como tal. Su revisión independiente corrió por tarea (spec + calidad, `domain-reviewer`, y `api-security-reviewer` en las rutas nuevas) más una revisión final de la rama; el gate completo con e2e y `--verificar` se corrió sobre la rama rebaseada.
   e2e, y `verify-feature` entero con la revisión independiente.
 
 ---

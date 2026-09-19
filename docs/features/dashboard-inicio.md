@@ -414,6 +414,31 @@ en el test.
 cd frontend && npm test -- InicioHoy.nuxt.spec.ts
 ```
 
+### Navegador (`frontend/e2e/inicio/dashboard.spec.ts`, Playwright)
+
+Lo que los tests de componente no ven, porque ahí `useApiFetch` y el router están
+mockeados: con ellos en verde, las tarjetas de "Hoy" no navegaban. Corre con la sesión del
+admin del seed (`auth.setup.ts`) y, para los otros casos, entra desde el test con el login
+de la app:
+
+- las dos zonas con sus datos; las tarjetas llevan a su detalle con un clic y con Enter;
+- "Actualizar" vuelve a pedir el día del dueño, y trae una venta hecha después de abrir el
+  inicio (caja, ítem y venta propios por API; la venta se anula y la caja se cierra al
+  final — ningún garzón del seed);
+- "Ahora" se refresca sola al minuto (`page.clock`); con la pestaña oculta no pide nada y
+  al volver pide una vez; si el backend se corta, avisa "Sin conexión" y conserva el dato;
+- `encargado.salon@paris.cl` ve "Ahora" y no "Hoy";
+- el admin en "Demo Bodega", que no contrató el módulo, recibe 403 y "Hoy" no aparece, sin
+  error en pantalla.
+
+Las tarjetas-link también cambiaron el smoke `@smoke el dashboard carga`: buscaba el link
+"Ventas" del menú sin nombre exacto y ahora también matchea las tarjetas, así que usa
+`exact: true`.
+
+```bash
+cd frontend && npm run e2e   # necesita el stack levantado
+```
+
 ---
 
 ## Related Features
