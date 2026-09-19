@@ -816,6 +816,16 @@ transaccional nativo, con ALS — [ADR-020](../adr/020-contexto-transaccional-al
 Prisma y Drizzle tienen el mismo modelo manual de transacciones que TypeORM. No es un
 pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evaluación.
 
+- [ ] **Una nota de crédito que se reintenta se emite dos veces** (fiscal, **frente propio**,
+  anotado 2026-09-19 al diseñar la idempotencia del cobro). `POST /ventas/:id/notas-credito`
+  no tiene clave de idempotencia: un corte de red después de emitir y un reintento del
+  operador emiten **dos** notas por el mismo monto. Con `devolverDinero` sale también **dos
+  veces** el efectivo de la caja. Lo acota solo el tope de la serie: la segunda rebota si la
+  primera ya agotó lo acreditable, y pasa si quedaba saldo. El mecanismo ya existe desde el
+  frente de la idempotencia del cobro (spec
+  [`2026-09-19-idempotencia-venta-design.md`](../superpowers/specs/2026-09-19-idempotencia-venta-design.md)).
+  Lo que falta es decidir, **en su propia sesión** (`CLAUDE.md`, ADR-010), qué ve el operador
+  cuando la segunda nota se frena, y verificarlo contra la serie de notas, no contra una sola.
 - [ ] **La cortesía como retiro gravado con IVA** (fiscal — **frente propio, con su propia
   sesión**: `CLAUDE.md` y ADR-010 lo sacan de cualquier tanda de producto o de arrastre de
   otra tarea, y no se cuelga al final de una ronda de preguntas). Un retiro de mercadería
@@ -1348,6 +1358,15 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   ⛔ **La opción barata es la incorrecta:** deduplicar por hash del carrito en una ventana
   de segundos rompe el caso real de dos clientes comprando lo mismo con segundos de
   diferencia — cotidiano en un minimarket o una cafetería. No es un atajo aceptable.
+  📌 **En curso desde el 2026-09-19**, con spec
+  [`2026-09-19-idempotencia-venta-design.md`](../superpowers/specs/2026-09-19-idempotencia-venta-design.md)
+  y plan [`2026-09-19-idempotencia-venta.md`](../superpowers/plans/2026-09-19-idempotencia-venta.md).
+  Lo que decidió el owner ese día: el reintento **con otros datos** se frena con un aviso y un
+  link a la venta, nunca crea otra; el reintento **igual** muestra el éxito con el aviso *"ya
+  había entrado"* e imprime la boleta; el cobro en duda queda atado al carrito **hasta que sale
+  bien o se vacía**, sin vencimiento por tiempo; entran también el **cobro de mesa** y el
+  **abono**. Costo asumido: vaciar el carrito después de un corte y volver a armarlo es una
+  venta nueva. La nota de crédito tiene el mismo hueco, pero es fiscal y va aparte (§ 6).
 - [ ] **`synchronize: true` → migraciones (CRÍTICO, bloqueante de prod)** (backend) —
   hoy el esquema lo crea `synchronize` al bootstrap (dev + CI, porque `NODE_ENV != production`).
   En prod `synchronize` **puede dropear columnas y perder datos** al arrancar tras un cambio
