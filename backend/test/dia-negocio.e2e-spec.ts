@@ -483,6 +483,9 @@ describe('Día del negocio: hora de corte (e2e)', () => {
   describe('serie de propinas: tendencia() por el día del negocio', () => {
     let itemId: string;
     let caja: CajaAbierta | undefined;
+    let garzonId: string;
+    let turnoId: string;
+    let sesionGarzonId: string;
     let tipId: string;
     let montoTip: string;
     let antesDeMover: Array<{ fecha: string; conPropina: number }>;
@@ -497,6 +500,28 @@ describe('Día del negocio: hora de corte (e2e)', () => {
     let poolAntes12Corte0: string;
     let poolAntes13Corte0: string;
 
+    /**
+     * `propinaCierreMesa`, no `propinaDirecta`: esta última la atribuye
+     * `ventas.service.ts` SIEMPRE al placeholder "Mostrador", con
+     * `tipoGarzon: null` (ver `PropinaDirectaDto`) — y `computarReparto`
+     * corta con 400 ("ningún participante puede recibirlas") si el pool del
+     * período es > 0 y ningún grupo cubre ese `tipoGarzon`, que el
+     * "Mostrador" nunca hace por diseño.
+     *
+     * `garzonId`, `sesionGarzonId`, `turnoId` y `tipoGarzon` van los CUATRO
+     * juntos: `ventas.service.ts` exige que `sesionGarzonId`/`turnoId`/
+     * `tipoGarzon` sean todos `null` o todos presentes ("Sesión, turno y
+     * tipo de propina deben ir juntos o ser todos null" — medido: con solo
+     * `garzonId` + `tipoGarzon` explícitos, esa guarda corta con 400 antes
+     * de llegar a la de arriba). Por eso el `beforeAll` abre una sesión de
+     * trabajo real para el garzón propio de este describe, en vez de solo
+     * crearlo.
+     *
+     * Con la sesión y el tipo puestos, el propio tip vuelve al garzón
+     * receptor elegible del grupo "Garzones" (los receptores de un grupo son
+     * los garzones que APARECEN en tips/sesiones de ese tipo, no un roster
+     * fijo).
+     */
     async function crearVentaConPropina(monto: string): Promise<string> {
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
@@ -504,7 +529,14 @@ describe('Día del negocio: hora de corte (e2e)', () => {
         .send({
           lineas: [{ itemId, cantidad: '1' }],
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50000.0000' }],
-          propinaDirecta: { montoPagado: monto, porcentajeSugerido: '0.10' },
+          propinaCierreMesa: {
+            garzonId,
+            sesionGarzonId,
+            turnoId,
+            tipoGarzon: 'garzon',
+            montoPagado: monto,
+            porcentajeSugerido: '0.10',
+          },
         })
         .expect(201);
       return (res.body as { id: string }).id;
@@ -556,6 +588,34 @@ describe('Día del negocio: hora de corte (e2e)', () => {
         });
       expect(item.status).toBe(201);
       itemId = (item.body as { id: string }).id;
+
+      // Garzón propio: no reusar uno del seed compartido por otras suites
+      // (ver `docs/agent/...` — la sesión/atribución de un garzón del seed
+      // se pisa entre specs).
+      const garzon = await request(app.getHttpServer())
+        .post('/api/garzones')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ nombre: `E2E Día Negocio Garzón ${Date.now()}` });
+      expect(garzon.status).toBe(201);
+      garzonId = (garzon.body as { id: string }).id;
+      const pin = (garzon.body as { pin: string }).pin;
+
+      // Un turno cualquiera del tenant sembrado, no uno propio: mismo molde
+      // que `sembrarSesionCerrada` en liquidacion-propinas.e2e-spec.ts.
+      const [{ turno_id }]: { turno_id: string }[] = await ds.query(
+        `SELECT turno_id FROM turnos
+          WHERE tenant_id = $1 AND eliminado_el IS NULL
+          LIMIT 1`,
+        [PARIS_TENANT_ID],
+      );
+      turnoId = turno_id;
+
+      const sesion = await request(app.getHttpServer())
+        .post('/api/sesiones-garzon/iniciar')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ turnoId, garzonId, pin });
+      expect(sesion.status).toBe(201);
+      sesionGarzonId = (sesion.body as { id: string }).id;
 
       caja = await abrirCaja(app, token);
       const ventaId = await crearVentaConPropina('700');
@@ -609,6 +669,16 @@ describe('Día del negocio: hora de corte (e2e)', () => {
         if (itemId) {
           await request(app.getHttpServer())
             .delete(`/api/items/${itemId}`)
+            .set('Authorization', `Bearer ${token}`);
+        }
+        if (sesionGarzonId) {
+          await request(app.getHttpServer())
+            .post(`/api/sesiones-garzon/${sesionGarzonId}/cerrar`)
+            .set('Authorization', `Bearer ${token}`);
+        }
+        if (garzonId) {
+          await request(app.getHttpServer())
+            .delete(`/api/garzones/${garzonId}`)
             .set('Authorization', `Bearer ${token}`);
         }
       } finally {
