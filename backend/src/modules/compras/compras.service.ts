@@ -460,12 +460,12 @@ export class ComprasService {
     });
   }
 
-  /** Soft delete. Una compra confirmada no se descarta: se anula. */
-  async descartarBorrador(
-    tenantId: string,
-    usuarioId: string,
-    id: string,
-  ): Promise<void> {
+  /**
+   * Soft delete. Una compra confirmada no se descarta: se anula. No registra
+   * quién la descartó a propósito: sin `eliminado_por` no entra a la papelera
+   * (owner, 2026-09-18; ver la entidad).
+   */
+  async descartarBorrador(tenantId: string, id: string): Promise<void> {
     await this.db.transaccion(async () => {
       await this.bloquearBorrador(tenantId, id);
       await this.db.query(
@@ -474,9 +474,9 @@ export class ComprasService {
         [tenantId, id],
       );
       await this.db.query(
-        `UPDATE compras SET eliminado_el = NOW(), eliminado_por = $3
+        `UPDATE compras SET eliminado_el = NOW()
           WHERE tenant_id = $1 AND compra_id = $2`,
-        [tenantId, id, usuarioId],
+        [tenantId, id],
       );
     });
   }

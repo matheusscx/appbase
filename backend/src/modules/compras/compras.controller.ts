@@ -86,10 +86,7 @@ export class ComprasController {
   @Delete(':id')
   @RequiresPermiso('Compras', 'Crear')
   descartar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
-    const { tenantId, id: usuarioId } = req.user as {
-      tenantId: string;
-      id: string;
-    };
-    return this.comprasService.descartarBorrador(tenantId, usuarioId, id);
+    const { tenantId } = req.user as { tenantId: string };
+    return this.comprasService.descartarBorrador(tenantId, id);
   }
 }

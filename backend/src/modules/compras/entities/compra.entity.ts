@@ -96,14 +96,20 @@ export class Compra {
   @UpdateDateColumn({ name: 'actualizado_el', type: 'timestamptz' })
   actualizadoEl: Date;
 
-  /** Solo un BORRADOR descartado se borra. Una confirmada se anula, nunca se borra. */
+  /**
+   * Solo un BORRADOR descartado se borra. Una confirmada se anula, nunca se
+   * borra.
+   *
+   * Sin `eliminado_por`, y es deliberado: esa columna es la que decide qué va
+   * a la papelera ("solo lo que borró una persona", `docs/features/papelera.md`),
+   * y un borrador descartado NO se ofrece para restaurar (owner, 2026-09-18).
+   * No movió stock ni plata, y restaurarlo chocaría con el folio que otro
+   * borrador ya tomó. Sigue siendo soft delete: nunca un `DELETE` físico.
+   */
   @DeleteDateColumn({
     name: 'eliminado_el',
     type: 'timestamptz',
     nullable: true,
   })
   eliminadoEl: Date | null;
-
-  @Column({ name: 'eliminado_por', type: 'uuid', nullable: true })
-  eliminadoPor: string | null;
 }

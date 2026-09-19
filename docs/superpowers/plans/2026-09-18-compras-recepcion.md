@@ -54,6 +54,8 @@ Por eso:
 | 2 | `abb3c5f4` | Sin cambios |
 | 3 | `a34a6bad` | Se compran `producto` **e** `ingrediente` (owner). Un fixture más, `compras.lectura` (ids …441/…442, del bloque 441–445): sin él, un `POST` guardado con `Leer` pasaba la suite. La revisión agregó `EscalaMonedaPipe` al body (el `@EsCosto()` solo no valida) y cambió la validación de unidades a `crearConversor` |
 | 4 | `1b15c224` | `useCompras()` devuelve funciones, como `useEstadoVenta`. El precio usa `MoneyInput` en vez de un `UInput` |
+| 5 | `7de0dcb4` | Sin `registrarCorreccionCosto`: `correccion_compra` es un ajuste de valor como `ajuste_costo` (ver la tarea 5). El e2e de la secuencia usa 5 concurrentes, no 10, porque con 10 el pool de conexiones se agotaba |
+| 5, seguimiento | ver `git log` | `stockTotalPorProducto` recibe el tenant y lo acota por la ubicación (hallazgo MEDIO de la revisión de seguridad). **`compras` pierde `eliminado_por`**: la suite completa mostró que el test de la papelera exige decidir si toda tabla con esa columna va a la papelera, y el owner decidió que un borrador descartado **no** va (2026-09-18). El bloque de código de la tarea 1 muestra la entidad como se escribió entonces |
 
 ## Global Constraints
 

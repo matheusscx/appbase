@@ -53,6 +53,7 @@ Todas son del owner, 2026-09-18.
 | **Permisos en un módulo propio `Compras`** | El bodeguero recibe y el dueño paga (pieza 3). Colgar de Inventario daría compras a todo el que cuenta stock |
 | **El atajo "compra" del ajuste de stock se mantiene por ahora** | Como Bsale y Square. Se revisa cuando Compras esté en uso. Costo asumido: esa compra no aparece en la deuda ni en los reportes de compras |
 | **Todo en la moneda oficial, sin flete** | Poco frecuente en el tipo de cliente |
+| **Un borrador descartado no va a la papelera**: sigue siendo soft delete, pero no se ofrece para restaurar. Por eso `compras` no tiene `eliminado_por`, la columna que decide qué entra a la papelera. Decisión del owner al ejecutar la tarea 5 | No movió stock ni plata, y restaurarlo chocaría con el folio que otro borrador ya tomó. Costo asumido: si se descarta por error, la factura se vuelve a cargar |
 | **Se compran productos e ingredientes** (los dos tipos con `item_producto`), aprobado por el owner al ejecutar la tarea 3 | Un restaurante compra sobre todo ingredientes: la harina, el tomate. Es la misma pareja que ya aceptan mermas y el ajuste de stock. La primera versión de esta spec decía solo `producto` |
 
 ## 3. Modelo de datos
@@ -72,7 +73,7 @@ Todas son del owner, 2026-09-18.
 | `descuento_total` | `numeric(18,4)` NULL | Monto a la escala de la moneda oficial |
 | `observacion` | `text` NULL | |
 | `creado_por`, `confirmado_por`, `confirmado_el`, `anulado_por`, `anulado_el`, `motivo_anulacion` | | Auditoría |
-| `creado_el`, `actualizado_el`, `eliminado_el`, `eliminado_por` | | Solo un **borrador** descartado se borra (soft delete) |
+| `creado_el`, `actualizado_el`, `eliminado_el` | | Solo un **borrador** descartado se borra (soft delete). **Sin `eliminado_por`**: un borrador descartado no va a la papelera (§ 2) |
 
 **Índice único parcial contra el duplicado:** `(tenant_id, proveedor_id,
 tipo_documento_compra_id, folio)` con `folio IS NOT NULL AND estado <> 'anulada' AND

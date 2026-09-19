@@ -332,9 +332,9 @@ describe('ComprasService (borrador)', () => {
       /FROM compras\s+WHERE tenant_id = \$1 AND compra_id = \$2[\s\S]*FOR UPDATE/,
       [{ estado: 'confirmada' }],
     );
-    await expect(
-      service.descartarBorrador(TENANT, USUARIO, COMPRA),
-    ).rejects.toThrow(new ConflictException('La compra ya está confirmada'));
+    await expect(service.descartarBorrador(TENANT, COMPRA)).rejects.toThrow(
+      new ConflictException('La compra ya está confirmada'),
+    );
   });
 
   it('editar un borrador excluye su propio folio del chequeo de duplicados', async () => {
