@@ -20,6 +20,10 @@ import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { ComprasService } from './compras.service';
 import { CompraBorradorDto } from './dto/compra-borrador.dto';
 import { FindComprasDto } from './dto/find-compras.dto';
+import {
+  CorregirDescuentoDto,
+  CorregirLineaDto,
+} from './dto/corregir-compra.dto';
 
 /**
  * Módulo propio `Compras` (spec compras-recepcion § 5): el que recibe no es
@@ -96,6 +100,47 @@ export class ComprasController {
       id: string;
     };
     return this.comprasService.confirmar(tenantId, usuarioId, id);
+  }
+
+  /**
+   * Completa o corrige el precio de una línea ya confirmada (spec
+   * compras-recepcion § 4.4). `Actualizar` y no `Crear`: cambia el costo de
+   * mercadería que ya entró, y puede tocar lo que se vendió después.
+   */
+  @Patch(':id/lineas/:lineaId')
+  @RequiresPermiso('Compras', 'Actualizar')
+  corregirLinea(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('lineaId', ParseUUIDPipe) lineaId: string,
+    @Body(EscalaMonedaPipe) dto: CorregirLineaDto,
+  ) {
+    const { tenantId, id: usuarioId } = req.user as {
+      tenantId: string;
+      id: string;
+    };
+    return this.comprasService.corregirLinea(
+      tenantId,
+      usuarioId,
+      id,
+      lineaId,
+      dto,
+    );
+  }
+
+  /** El descuento al total de una confirmada. Mismo permiso que la línea. */
+  @Patch(':id/descuento')
+  @RequiresPermiso('Compras', 'Actualizar')
+  corregirDescuento(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(EscalaMonedaPipe) dto: CorregirDescuentoDto,
+  ) {
+    const { tenantId, id: usuarioId } = req.user as {
+      tenantId: string;
+      id: string;
+    };
+    return this.comprasService.corregirDescuento(tenantId, usuarioId, id, dto);
   }
 
   @Delete(':id')

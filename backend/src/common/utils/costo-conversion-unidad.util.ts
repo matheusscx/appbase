@@ -46,8 +46,9 @@ export function convertirCostoUnitario(
  * Lo llama todo lugar donde el costo se convierte de unidad —por ejemplo
  * `ItemsService.ajustarStock` (compra en otra unidad), `ItemsService.update`
  * (cambio de `unidad_medida`), `InventarioService.registrarAjusteCosto` (costo
- * tipeado por la unidad elegida) y `ComprasService.confirmar` (precio por la unidad
- * del proveedor)—. Un camino nuevo que convierta un costo va también por acá.
+ * tipeado por la unidad elegida) y `ComprasService.costearCompra`, al confirmar y
+ * al corregir una compra (precio por la unidad del proveedor)—. Un camino nuevo
+ * que convierta un costo va también por acá.
  */
 export function assertCostoNoColapsaACero(
   costoOriginal: string,

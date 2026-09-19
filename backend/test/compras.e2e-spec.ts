@@ -32,6 +32,8 @@ const ENCARGADO_COMPRAS_EMAIL = 'encargado.compras@paris.cl';
 const SIN_COMPRAS_EMAIL = 'encargado.salon@paris.cl';
 /** Solo `Compras:Leer`: el que distingue "ver" de "recibir". */
 const COMPRAS_LECTURA_EMAIL = 'compras.lectura@paris.cl';
+/** `Leer` y `Crear`, sin `Actualizar`: recibe, pero no corrige. */
+const COMPRAS_CARGA_EMAIL = 'compras.carga@paris.cl';
 const PASS = 'admin';
 
 interface TokenResponse {
@@ -56,7 +58,21 @@ interface CompraDetalle {
   folio: string | null;
   proveedorNombre: string | null;
   total: string | null;
-  lineas: { itemId: string; cantidad: string; precioUnitario: string | null }[];
+  faltaCosto: boolean;
+  descuentoTotal: string | null;
+  lineas: {
+    id: string;
+    itemId: string;
+    cantidad: string;
+    precioUnitario: string | null;
+  }[];
+  cambios: {
+    compraLineaId: string;
+    campo: string;
+    valorAnterior: string | null;
+    valorNuevo: string | null;
+    usuarioNombre: string | null;
+  }[];
 }
 interface Paginado<T> {
   data: T[];
@@ -671,6 +687,31 @@ describe('Compras — borrador (e2e)', () => {
       expect(unidades.every((u) => u.ubicacionId === bodegaId)).toBe(true);
     });
 
+    async function ajustarStock(itemId: string, body: Record<string, unknown>) {
+      const res = await request(app.getHttpServer())
+        .patch(`/api/items/${itemId}/stock`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(body);
+      expect(res.status).toBe(200);
+    }
+
+    /** Confirma una compra de UNA línea sin precio y devuelve su id. */
+    async function compraSinPrecio(
+      itemId: string,
+      cantidad: string,
+      ubicacionId: string,
+    ): Promise<string> {
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({
+          ubicacionId,
+          lineas: [{ itemId, cantidad, unidadCodigo: 'unidad' }],
+        }),
+      );
+      await confirmar(compra.id);
+      return compra.id;
+    }
+
     /**
      * **Rehacer la cuenta** (spec § 4.3), contra la base real: el recorrido,
      * sus JOIN y `costo_informado` son SQL, y el unitario los mockea.
@@ -690,34 +731,6 @@ describe('Compras — borrador (e2e)', () => {
         );
         usuarioId = filas[0].usuario_id;
       });
-
-      async function ajustarStock(
-        itemId: string,
-        body: Record<string, unknown>,
-      ) {
-        const res = await request(app.getHttpServer())
-          .patch(`/api/items/${itemId}/stock`)
-          .set('Authorization', `Bearer ${token}`)
-          .send(body);
-        expect(res.status).toBe(200);
-      }
-
-      /** Confirma una compra de UNA línea sin precio y devuelve su id. */
-      async function compraSinPrecio(
-        itemId: string,
-        cantidad: string,
-        ubicacionId: string,
-      ): Promise<string> {
-        const compra = await post<CompraDetalle>(
-          '/api/compras',
-          borrador({
-            ubicacionId,
-            lineas: [{ itemId, cantidad, unidadCodigo: 'unidad' }],
-          }),
-        );
-        await confirmar(compra.id);
-        return compra.id;
-      }
 
       /** En lugar de la corrección de precio de la tarea 8. */
       async function completarPrecio(compraId: string, precio: string) {
@@ -891,6 +904,247 @@ describe('Compras — borrador (e2e)', () => {
         expect(await costoActual(itemId)).toBe('1400.0000');
         const [corr] = await correcciones(itemId);
         expect(corr.ubicacion_id).toBe(localId);
+      });
+    });
+
+    describe('corregir una confirmada (spec § 4.4)', () => {
+      async function primeraLinea(compraId: string): Promise<string> {
+        return (await get<CompraDetalle>(`/api/compras/${compraId}`)).lineas[0]
+          .id;
+      }
+
+      function corregirPrecio(
+        compraId: string,
+        lineaId: string,
+        precioUnitario: string,
+        conToken = token,
+      ) {
+        return intentar(
+          'patch',
+          `/api/compras/${compraId}/lineas/${lineaId}`,
+          { precioUnitario },
+          conToken,
+        );
+      }
+
+      function corregirDescuento(
+        compraId: string,
+        descuentoTotal: string | null,
+        conToken = token,
+      ) {
+        return intentar(
+          'patch',
+          `/api/compras/${compraId}/descuento`,
+          { descuentoTotal },
+          conToken,
+        );
+      }
+
+      it('tomate: completar el precio llega a $1.400, y lo que salió antes queda a $1.000', async () => {
+        const itemId = await productoVacio();
+        await ajustarStock(itemId, {
+          ubicacionId: localId,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+          costoUnitario: '1000',
+        });
+        const compraId = await compraSinPrecio(itemId, '20', bodegaId);
+        await ajustarStock(itemId, {
+          ubicacionId: bodegaId,
+          tipo: 'salida',
+          motivo: 'ajuste_manual',
+          cantidad: '8',
+        });
+
+        const r = await corregirPrecio(
+          compraId,
+          await primeraLinea(compraId),
+          '1500',
+        );
+        expect(r.status).toBe(200);
+
+        // (5 × 1.000 + 20 × 1.500) / 25
+        expect(await costoActual(itemId)).toBe('1400.0000');
+        const detalle = await get<CompraDetalle>(`/api/compras/${compraId}`);
+        expect(detalle.faltaCosto).toBe(false);
+        expect(detalle.cambios).toHaveLength(1);
+        expect(detalle.cambios[0]).toMatchObject({
+          campo: 'precio',
+          valorAnterior: null,
+          valorNuevo: '1500',
+        });
+        expect(detalle.cambios[0].usuarioNombre).not.toBeNull();
+
+        const salida: { costo_unitario: string }[] = await ds.query(
+          `SELECT costo_unitario FROM movimientos_inventario
+            WHERE item_id = $1 AND tipo = 'salida' AND eliminado_el IS NULL`,
+          [itemId],
+        );
+        expect(new Decimal(salida[0].costo_unitario).toFixed(4)).toBe(
+          '1000.0000',
+        );
+      });
+
+      it('sin Compras:Actualizar es 403 aunque pueda recibir; el encargado sí corrige', async () => {
+        const itemId = await productoVacio();
+        const carga = await login(COMPRAS_CARGA_EMAIL);
+        // Control: `compras.carga` SÍ recibe. Sin esto, su 403 de abajo podría
+        // ser por no tener Compras en absoluto.
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            lineas: [{ itemId, cantidad: '10', unidadCodigo: 'unidad' }],
+          }),
+          201,
+          carga,
+        );
+        await confirmar(compra.id, 201, carga);
+        const lineaId = await primeraLinea(compra.id);
+
+        expect(
+          (await corregirPrecio(compra.id, lineaId, '1500', carga)).status,
+        ).toBe(403);
+        expect((await corregirDescuento(compra.id, '100', carga)).status).toBe(
+          403,
+        );
+        const lectura = await login(COMPRAS_LECTURA_EMAIL);
+        expect(
+          (await corregirPrecio(compra.id, lineaId, '1500', lectura)).status,
+        ).toBe(403);
+
+        const encargado = await login(ENCARGADO_COMPRAS_EMAIL);
+        expect(
+          (await corregirPrecio(compra.id, lineaId, '1500', encargado)).status,
+        ).toBe(200);
+      });
+
+      it('el descuento al total se reparte en el costo; con una línea sin precio es 400', async () => {
+        const sinPrecio = await compraSinPrecio(
+          await productoVacio(),
+          '10',
+          bodegaId,
+        );
+        const falta = await corregirDescuento(sinPrecio, '1000');
+        expect(falta.status).toBe(400);
+        expect(falta.message).toContain('Falta el precio de alguna línea');
+
+        const itemId = await productoVacio();
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            lineas: [
+              {
+                itemId,
+                cantidad: '10',
+                unidadCodigo: 'unidad',
+                precioUnitario: '1000',
+              },
+            ],
+          }),
+        );
+        await confirmar(compra.id);
+        expect(await costoActual(itemId)).toBe('1000.0000');
+
+        expect((await corregirDescuento(compra.id, '1000')).status).toBe(200);
+
+        // (10 × 1.000 − 1.000) / 10
+        expect(await costoActual(itemId)).toBe('900.0000');
+        const detalle = await get<CompraDetalle>(`/api/compras/${compra.id}`);
+        expect(new Decimal(detalle.descuentoTotal!).toFixed(0)).toBe('1000');
+        expect(detalle.cambios.map((c) => c.campo)).toEqual(['descuento']);
+
+        // Sin la clave es 400, no "quitar el descuento": un cliente que se
+        // olvida del campo no puede borrar el vigente sin aviso.
+        const sinClave = await intentar(
+          'patch',
+          `/api/compras/${compra.id}/descuento`,
+          {},
+        );
+        expect(sinClave.status).toBe(400);
+        expect(await costoActual(itemId)).toBe('900.0000');
+      });
+
+      it('la plata que no cabe en la moneda es 400: el descuento en pesos, el precio a 4 decimales', async () => {
+        const itemId = await productoVacio();
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            lineas: [
+              {
+                itemId,
+                cantidad: '10',
+                unidadCodigo: 'unidad',
+                precioUnitario: '1000',
+              },
+            ],
+          }),
+        );
+        await confirmar(compra.id);
+
+        expect((await corregirDescuento(compra.id, '100.5')).status).toBe(400);
+        expect(
+          (
+            await corregirPrecio(
+              compra.id,
+              await primeraLinea(compra.id),
+              '1000.12345',
+            )
+          ).status,
+        ).toBe(400);
+      });
+
+      it('un borrador no se corrige: 409', async () => {
+        const compra = await post<CompraDetalle>('/api/compras', borrador());
+        const r = await corregirPrecio(
+          compra.id,
+          await primeraLinea(compra.id),
+          '1700',
+        );
+        expect(r.status).toBe(409);
+      });
+
+      it('una línea de otra compra, aunque sea del mismo tenant, es 404', async () => {
+        const propia = await compraSinPrecio(
+          await productoVacio(),
+          '10',
+          bodegaId,
+        );
+        const ajena = await compraSinPrecio(
+          await productoVacio(),
+          '10',
+          bodegaId,
+        );
+
+        const r = await corregirPrecio(
+          propia,
+          await primeraLinea(ajena),
+          '1500',
+        );
+        expect(r.status).toBe(404);
+        expect(
+          (await get<CompraDetalle>(`/api/compras/${ajena}`)).cambios,
+        ).toHaveLength(0);
+      });
+
+      it('otro tenant no puede corregir una compra de Paris: 404', async () => {
+        const compraId = await compraSinPrecio(
+          await productoVacio(),
+          '10',
+          bodegaId,
+        );
+        const lineaId = await primeraLinea(compraId);
+        const otro = await loginSegundoTenant(app);
+
+        expect(
+          (await corregirPrecio(compraId, lineaId, '1500', otro)).status,
+        ).toBe(404);
+        expect((await corregirDescuento(compraId, null, otro)).status).toBe(
+          404,
+        );
+        expect(
+          (await get<CompraDetalle>(`/api/compras/${compraId}`)).cambios,
+        ).toHaveLength(0);
       });
     });
   });

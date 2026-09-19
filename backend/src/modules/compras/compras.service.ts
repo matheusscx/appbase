@@ -34,6 +34,10 @@ import type {
   LineaCompraDto,
 } from './dto/compra-borrador.dto';
 import type { FindComprasDto } from './dto/find-compras.dto';
+import type {
+  CorregirDescuentoDto,
+  CorregirLineaDto,
+} from './dto/corregir-compra.dto';
 
 export interface TipoDocumentoCompraOpcion {
   id: string;
@@ -135,6 +139,46 @@ interface CambioRow {
   valor_nuevo: string | null;
   usuario_nombre: string | null;
   creado_el: Date;
+}
+
+/** La compra bajo lock, con lo que las correcciones necesitan. */
+interface CompraConfirmada {
+  compra_id: string;
+  descuento_total: string | null;
+  folio: string | null;
+  tipo_documento_nombre: string | null;
+  proveedor_nombre: string | null;
+}
+
+/** Una línea de una compra confirmada, con lo congelado al confirmar. */
+interface LineaConfirmada {
+  compra_linea_id: string;
+  item_id: string;
+  item_nombre: string;
+  item_eliminado: boolean;
+  unidad_base: string;
+  cantidad: string;
+  precio_unitario: string | null;
+  cantidad_base: string;
+  costo_unitario_base: string | null;
+}
+
+/** El comentario del kardex: qué documento y de quién. */
+function comentarioDeCompra(
+  tipoDocumento: string | null,
+  folio: string | null,
+  proveedor: string | null,
+): string {
+  return (
+    `Compra: ${tipoDocumento ?? ''}` +
+    (folio ? ` ${folio}` : '') +
+    ` — ${proveedor ?? ''}`
+  );
+}
+
+/** Igualdad de costo congelado: '1400' y '1400.0000' son el mismo. */
+function mismoCosto(a: string | null, b: string | null): boolean {
+  return a == null || b == null ? a === b : new Decimal(a).equals(b);
 }
 
 interface EncabezadoValidado {
@@ -514,16 +558,9 @@ export class ComprasService {
     usuarioId: string,
     id: string,
   ): Promise<CompraDetalle> {
-    for (let intento = 0; ; intento++) {
-      try {
-        return await this.db.transaccion((manager) =>
-          this.confirmarEnTransaccion(manager, tenantId, usuarioId, id),
-        );
-      } catch (error) {
-        if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
-          throw error;
-      }
-    }
+    return this.conReintento((manager) =>
+      this.confirmarEnTransaccion(manager, tenantId, usuarioId, id),
+    );
   }
 
   private async confirmarEnTransaccion(
@@ -647,31 +684,16 @@ export class ComprasService {
         ? l.cantidad
         : convertir!(l.cantidad, l.unidad_codigo, base);
     });
-    const conPrecio = lineas
-      .map((l, i) => ({ l, i }))
-      .filter(({ l }) => l.precio_unitario != null);
-    const cfg = await this.calculoPreciosService.cargarConfig(
+    const costosBase = await this.costearCompra(
       tenantId,
-      await this.monedasService.decimalesOficiales(tenantId),
-    );
-    const costos = costearLineas(
-      conPrecio.map(({ l, i }) => ({
+      lineas.map((l, i) => ({
         cantidad: l.cantidad,
-        precioUnitario: l.precio_unitario!,
+        precioUnitario: l.precio_unitario,
         cantidadBase: bases[i],
+        unidadBase: items.get(l.item_id)!.unidadBase,
       })),
       c.descuento_total,
-      cfg,
     );
-    const costoBasePorLinea = new Map<number, string>();
-    conPrecio.forEach(({ l, i }, k) => {
-      assertCostoNoColapsaACero(
-        l.precio_unitario!,
-        costos[k],
-        items.get(l.item_id)!.unidadBase,
-      );
-      costoBasePorLinea.set(i, costos[k]);
-    });
 
     // 6. Una entrada por línea, en el orden de los locks (por `item_id`, y
     // dentro del mismo producto por el orden de la factura). El stock total
@@ -694,14 +716,15 @@ export class ComprasService {
       stockTotalAnterior: string;
       costoProductoAnterior: string | null;
     }[] = [];
-    const comentario =
-      `Compra: ${enc.tipoDocumentoNombre}` +
-      (enc.folio ? ` ${enc.folio}` : '') +
-      ` — ${enc.proveedorNombre}`;
+    const comentario = comentarioDeCompra(
+      enc.tipoDocumentoNombre,
+      enc.folio,
+      enc.proveedorNombre,
+    );
     for (const i of orden) {
       const l = lineas[i];
       const anterior = acumulado.get(l.item_id)!;
-      const costoBase = costoBasePorLinea.get(i) ?? null;
+      const costoBase = costosBase[i];
       const mov = await this.inventarioService.registrarMovimiento(manager, {
         tenantId,
         itemId: l.item_id,
@@ -770,6 +793,403 @@ export class ComprasService {
     );
 
     return this.findOne(tenantId, id);
+  }
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Corregir una confirmada (spec § 4.4)
+  // ───────────────────────────────────────────────────────────────────────
+
+  /**
+   * Completa o corrige el precio de una línea confirmada: el caso de la factura
+   * que llega después de la mercadería. Rehace la cuenta de cada producto cuyo
+   * costo cambió, y con descuento al total pueden ser varios, porque el precio
+   * de una línea mueve el reparto de todas.
+   */
+  async corregirLinea(
+    tenantId: string,
+    usuarioId: string,
+    id: string,
+    lineaId: string,
+    dto: CorregirLineaDto,
+  ): Promise<CompraDetalle> {
+    return this.conReintento(async (manager) => {
+      const compra = await this.bloquearConfirmada(tenantId, id);
+      const lineas = await this.lineasConfirmadas(tenantId, id);
+      const linea = lineas.find((l) => l.compra_linea_id === lineaId);
+      if (!linea) {
+        throw new NotFoundException('Línea no encontrada');
+      }
+      if (linea.item_eliminado) {
+        throw new BadRequestException(
+          `El producto "${linea.item_nombre}" está en la papelera: restauralo para corregir la compra`,
+        );
+      }
+      const anterior = linea.precio_unitario;
+      if (
+        anterior != null &&
+        new Decimal(anterior).equals(dto.precioUnitario)
+      ) {
+        throw new BadRequestException(
+          'El precio es igual al vigente: no hay nada que corregir',
+        );
+      }
+
+      await this.db.query(
+        `UPDATE compra_lineas SET precio_unitario = $3, actualizado_el = NOW()
+          WHERE tenant_id = $1 AND compra_linea_id = $2`,
+        [tenantId, lineaId, dto.precioUnitario],
+      );
+      linea.precio_unitario = dto.precioUnitario;
+
+      const { movimientos } = await this.recostear(
+        manager,
+        tenantId,
+        usuarioId,
+        compra,
+        lineas,
+        'precio corregido',
+      );
+      await this.registrarCambios(tenantId, usuarioId, [
+        {
+          compraLineaId: lineaId,
+          campo: 'precio',
+          anterior,
+          nuevo: dto.precioUnitario,
+          movimientoId: movimientos.get(linea.item_id) ?? null,
+        },
+      ]);
+      return this.findOne(tenantId, id);
+    });
+  }
+
+  /**
+   * Carga, cambia o quita el descuento al total. Se reparte según el valor de
+   * cada línea, así que exige que todas tengan precio. El historial lo registra
+   * en cada línea cuyo costo cambió (spec § 3.5).
+   */
+  async corregirDescuento(
+    tenantId: string,
+    usuarioId: string,
+    id: string,
+    dto: CorregirDescuentoDto,
+  ): Promise<CompraDetalle> {
+    return this.conReintento(async (manager) => {
+      const compra = await this.bloquearConfirmada(tenantId, id);
+      const lineas = await this.lineasConfirmadas(tenantId, id);
+      if (lineas.some((l) => l.precio_unitario == null)) {
+        throw new BadRequestException(
+          'Falta el precio de alguna línea: el descuento al total se carga cuando todas tienen precio',
+        );
+      }
+      // Un descuento de 0 es no tener descuento: se guarda igual que quitarlo.
+      const nuevo =
+        dto.descuentoTotal == null || new Decimal(dto.descuentoTotal).isZero()
+          ? null
+          : dto.descuentoTotal;
+      const anterior = compra.descuento_total;
+      if (new Decimal(anterior ?? 0).equals(nuevo ?? 0)) {
+        throw new BadRequestException(
+          'El descuento es igual al vigente: no hay nada que corregir',
+        );
+      }
+      // `costearLineas` no lo chequea, y un descuento mayor que la factura
+      // dejaría costos negativos.
+      const bruto = lineas.reduce(
+        (acc, l) => acc.plus(new Decimal(l.cantidad).times(l.precio_unitario!)),
+        new Decimal(0),
+      );
+      if (nuevo != null && new Decimal(nuevo).greaterThan(bruto)) {
+        throw new BadRequestException(
+          `El descuento (${nuevo}) supera el total de la compra (${bruto.toString()})`,
+        );
+      }
+
+      await this.db.query(
+        `UPDATE compras SET descuento_total = $3, actualizado_el = NOW()
+          WHERE tenant_id = $1 AND compra_id = $2`,
+        [tenantId, id, nuevo],
+      );
+
+      const { cambiadas, movimientos } = await this.recostear(
+        manager,
+        tenantId,
+        usuarioId,
+        { ...compra, descuento_total: nuevo },
+        lineas,
+        'descuento al total corregido',
+      );
+      await this.registrarCambios(
+        tenantId,
+        usuarioId,
+        cambiadas.map((l) => ({
+          compraLineaId: l.compra_linea_id,
+          campo: 'descuento',
+          anterior,
+          nuevo,
+          movimientoId: movimientos.get(l.item_id) ?? null,
+        })),
+      );
+      return this.findOne(tenantId, id);
+    });
+  }
+
+  /**
+   * Lock de la compra y los datos que las correcciones necesitan. 409 si no
+   * está confirmada: un borrador se edita entero, y una anulada no se toca.
+   *
+   * Los `LEFT JOIN` de proveedor y documento van sin `eliminado_el`, por lo
+   * mismo que la cabecera (`SELECT_CABECERA`): arman el comentario del kardex,
+   * que tiene que seguir nombrando a quién se le compró.
+   */
+  private async bloquearConfirmada(
+    tenantId: string,
+    id: string,
+  ): Promise<CompraConfirmada> {
+    const rows: (CompraConfirmada & { estado: EstadoCompra })[] =
+      await this.db.query(
+        `SELECT c.compra_id, c.estado, c.descuento_total, c.folio,
+                td.nombre AS tipo_documento_nombre,
+                pr.nombre AS proveedor_nombre
+           FROM compras c
+           LEFT JOIN terceros pr ON pr.tercero_id = c.proveedor_id
+           LEFT JOIN tipos_documento_compra td
+                  ON td.tipo_documento_compra_id = c.tipo_documento_compra_id
+          WHERE c.tenant_id = $1 AND c.compra_id = $2 AND c.eliminado_el IS NULL
+          FOR UPDATE OF c`,
+        [tenantId, id],
+      );
+    if (!rows.length) {
+      throw new NotFoundException('Compra no encontrada');
+    }
+    if (rows[0].estado === 'borrador') {
+      throw new ConflictException(
+        'La compra es un borrador: se edita, no se corrige',
+      );
+    }
+    if (rows[0].estado === 'anulada') {
+      throw new ConflictException('La compra está anulada');
+    }
+    return rows[0];
+  }
+
+  /**
+   * Las líneas de una confirmada con lo congelado al confirmar. `items` va sin
+   * filtro de borrado a propósito: lo que se pregunta es si el producto está en
+   * la papelera, para rechazar la corrección con un mensaje que lo diga.
+   */
+  private async lineasConfirmadas(
+    tenantId: string,
+    compraId: string,
+  ): Promise<LineaConfirmada[]> {
+    return this.db.query(
+      `SELECT cl.compra_linea_id, cl.item_id, i.nombre AS item_nombre,
+              (i.eliminado_el IS NOT NULL) AS item_eliminado,
+              COALESCE(ip.unidad_medida, 'unidad') AS unidad_base,
+              cl.cantidad, cl.precio_unitario, cl.cantidad_base,
+              cl.costo_unitario_base
+         FROM compra_lineas cl
+         JOIN items i ON i.item_id = cl.item_id
+         JOIN item_producto ip ON ip.item_id = cl.item_id
+        WHERE cl.tenant_id = $1 AND cl.compra_id = $2 AND cl.eliminado_el IS NULL
+        ORDER BY cl.orden`,
+      [tenantId, compraId],
+    );
+  }
+
+  /**
+   * Vuelve a costear la compra entera con los precios, cantidades y descuento
+   * de ahora, guarda el costo de las líneas que cambiaron y rehace la cuenta
+   * de cada producto afectado, en orden de `item_id`: el mismo orden de locks
+   * que `ventas.crear()`, porque cada cuenta toma el lock de su producto.
+   */
+  private async recostear(
+    manager: EntityManager,
+    tenantId: string,
+    usuarioId: string,
+    compra: CompraConfirmada,
+    lineas: LineaConfirmada[],
+    queCambio: string,
+  ): Promise<{
+    cambiadas: LineaConfirmada[];
+    movimientos: Map<string, string | null>;
+  }> {
+    const costos = await this.costearCompra(
+      tenantId,
+      lineas.map((l) => ({
+        cantidad: l.cantidad,
+        precioUnitario: l.precio_unitario,
+        cantidadBase: l.cantidad_base,
+        unidadBase: l.unidad_base,
+      })),
+      compra.descuento_total,
+    );
+    const cambiadas = lineas.filter(
+      (l, i) => !mismoCosto(l.costo_unitario_base, costos[i]),
+    );
+    const itemIds = [...new Set(cambiadas.map((l) => l.item_id))].sort((a, b) =>
+      a.localeCompare(b),
+    );
+    const enPapelera = lineas.find(
+      (l) => l.item_eliminado && itemIds.includes(l.item_id),
+    );
+    if (enPapelera) {
+      throw new BadRequestException(
+        `El producto "${enPapelera.item_nombre}" está en la papelera: restauralo para corregir la compra`,
+      );
+    }
+    if (!cambiadas.length) {
+      return { cambiadas, movimientos: new Map() };
+    }
+
+    const nuevos = new Map(
+      lineas.map((l, i) => [l.compra_linea_id, costos[i]]),
+    );
+    const valores = cambiadas
+      .map((_, k) => `($${k * 2 + 2}::uuid, $${k * 2 + 3}::numeric)`)
+      .join(', ');
+    await this.db.query(
+      `UPDATE compra_lineas cl
+          SET costo_unitario_base = v.costo, actualizado_el = NOW()
+         FROM (VALUES ${valores}) AS v(compra_linea_id, costo)
+        WHERE cl.compra_linea_id = v.compra_linea_id AND cl.tenant_id = $1`,
+      [
+        tenantId,
+        ...cambiadas.flatMap((l) => [
+          l.compra_linea_id,
+          nuevos.get(l.compra_linea_id),
+        ]),
+      ],
+    );
+
+    const comentario = `${comentarioDeCompra(
+      compra.tipo_documento_nombre,
+      compra.folio,
+      compra.proveedor_nombre,
+    )}: ${queCambio}`;
+    const movimientos = new Map<string, string | null>();
+    for (const itemId of itemIds) {
+      const r = await this.inventarioService.recalcularCostoDesdeCompra(
+        manager,
+        { tenantId, itemId, compraId: compra.compra_id, usuarioId, comentario },
+      );
+      movimientos.set(itemId, r.movimientoId);
+    }
+    return { cambiadas, movimientos };
+  }
+
+  /**
+   * El costo por unidad base de cada línea (null si no tiene precio), con el
+   * descuento al total repartido. Una sola regla para confirmar y para
+   * corregir: si costearan distinto, la cuenta rehecha partiría de otro número.
+   *
+   * El chequeo de colapso rechaza el 0,0000 que nadie eligió. Mira la
+   * conversión sola y, además, el costo con el descuento: uno parcial más la
+   * conversión también puede dejar una línea en 0,0000. El único 0 elegido es
+   * el de un descuento que se lleva la factura entera, porque con un reparto
+   * proporcional es el único que deja en 0 una línea con precio.
+   */
+  private async costearCompra(
+    tenantId: string,
+    lineas: {
+      cantidad: string;
+      precioUnitario: string | null;
+      cantidadBase: string;
+      unidadBase: string;
+    }[],
+    descuentoTotal: string | null,
+  ): Promise<(string | null)[]> {
+    const conPrecio = lineas
+      .map((l, i) => ({ l, i }))
+      .filter(({ l }) => l.precioUnitario != null);
+    const resultado: (string | null)[] = lineas.map(() => null);
+    if (!conPrecio.length) return resultado;
+
+    const cfg = await this.calculoPreciosService.cargarConfig(
+      tenantId,
+      await this.monedasService.decimalesOficiales(tenantId),
+    );
+    const paraCostear = conPrecio.map(({ l }) => ({
+      cantidad: l.cantidad,
+      precioUnitario: l.precioUnitario!,
+      cantidadBase: l.cantidadBase,
+    }));
+    const costos = costearLineas(paraCostear, descuentoTotal, cfg);
+    const sinDescuento =
+      descuentoTotal == null ? costos : costearLineas(paraCostear, null, cfg);
+    const bruto = paraCostear.reduce(
+      (acc, l) => acc.plus(new Decimal(l.cantidad).times(l.precioUnitario)),
+      new Decimal(0),
+    );
+    const facturaEntera =
+      descuentoTotal != null && new Decimal(descuentoTotal).equals(bruto);
+    conPrecio.forEach(({ l, i }, k) => {
+      assertCostoNoColapsaACero(
+        l.precioUnitario!,
+        sinDescuento[k],
+        l.unidadBase,
+      );
+      if (!facturaEntera) {
+        assertCostoNoColapsaACero(l.precioUnitario!, costos[k], l.unidadBase);
+      }
+      resultado[i] = costos[k];
+    });
+    return resultado;
+  }
+
+  /** Todas las filas del historial en UN insert. */
+  private async registrarCambios(
+    tenantId: string,
+    usuarioId: string,
+    cambios: {
+      compraLineaId: string;
+      campo: 'precio' | 'cantidad' | 'descuento';
+      anterior: string | null;
+      nuevo: string | null;
+      movimientoId: string | null;
+    }[],
+  ): Promise<void> {
+    if (!cambios.length) return;
+    const COLUMNAS = 7;
+    const valores = cambios
+      .map((_, k) => {
+        const p = k * COLUMNAS + 1;
+        return `($${p}, $${p + 1}, $${p + 2}, $${p + 3}, $${p + 4}, $${p + 5}, $${p + 6})`;
+      })
+      .join(', ');
+    await this.db.query(
+      `INSERT INTO compra_linea_cambios
+         (compra_linea_id, tenant_id, campo, valor_anterior, valor_nuevo,
+          usuario_id, movimiento_id)
+       VALUES ${valores}`,
+      cambios.flatMap((c) => [
+        c.compraLineaId,
+        tenantId,
+        c.campo,
+        c.anterior,
+        c.nuevo,
+        usuarioId,
+        c.movimientoId,
+      ]),
+    );
+  }
+
+  /**
+   * Una transacción con el reintento ante deadlock de siempre
+   * (`MAX_REINTENTOS_DEADLOCK`). Vale porque los llamadores son el controller:
+   * sin transacción envolvente, un `40P01` reintenta limpio (mismo
+   * razonamiento que `TrasladosService.crear`).
+   */
+  private async conReintento<T>(
+    fn: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
+    for (let intento = 0; ; intento++) {
+      try {
+        return await this.db.transaccion(fn);
+      } catch (error) {
+        if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
+          throw error;
+      }
+    }
   }
 
   /**

@@ -1276,6 +1276,10 @@ compras corregidas".
 
 Depende de las tareas 6 y 7.
 
+✅ **OK del owner para esta tarea (2026-09-19):** *"dale con la 8"*. Escribe en
+`movimientos_inventario`: la diferencia de cantidad (entrada o salida `compra` colgada de la línea)
+y la `correccion_compra` que deja `recalcularCostoDesdeCompra`.
+
 **Intención (spec § 4.4):**
 - `PATCH /compras/:id/lineas/:lineaId` (`Compras:Actualizar`):
   - **Precio:** actualiza, historial y `recalcularCostoDesdeCompra`.
@@ -1287,6 +1291,27 @@ Depende de las tareas 6 y 7.
   falta algún precio. Si no, reparte de nuevo (`costearLineas`), actualiza `costoUnitarioBase`,
   deja el historial por línea que cambió y recalcula cada producto afectado.
 - Toda corrección sobre una compra no confirmada es 409, y sobre un producto en la papelera es 400.
+
+**Al ejecutarla (2026-09-19): en dos commits.** 8a = precio y descuento; 8b = cantidad, que sola
+arrastra serie y lote. La rama no se integra hasta la tarea 11, así que el estado entre los dos no
+llega a nadie.
+- **Confirmar y corregir costean con la misma función** (`costearCompra`). Si costearan distinto,
+  la cuenta rehecha partiría de otro número.
+- **El chequeo de colapso mira solo la conversión de unidad, sin descuento.** Un descuento igual al
+  total deja la mercadería a $0, y ese 0 alguien lo eligió.
+- **El descuento no puede superar el total:** `costearLineas` no lo chequea y dejaría costos
+  negativos. Un 0 se guarda como sin descuento.
+- ⚠️ **Hueco de las tareas 3 y 4, encontrado acá:** la spec (§ 6, pie de la pantalla de carga) pide
+  cargar el descuento en el borrador cuando todas las líneas tienen precio, porque la factura ya lo
+  trae. Pero el DTO del borrador no lo acepta y la pantalla lo deja deshabilitado siempre. Se
+  arregla en un commit propio después de 8a, con la misma validación que este PATCH.
+- **Un precio corregido rehace la cuenta de cada producto cuyo costo cambió.** Con descuento al total
+  pueden ser varios, en orden de `item_id`. El historial es de la línea corregida. El descuento deja
+  historial en cada línea cuyo costo cambió.
+- **La papelera frena la corrección de la línea aunque su costo base no cambie.** También frena si el
+  reparto le mueve el costo a otro producto que está en la papelera.
+- **Fixture `compras.carga`** (rol 443, usuario 444): `Leer` y `Crear`, sin `Actualizar`. Sin él, un
+  guard con `Crear` donde va `Actualizar` pasaba la suite.
 
 **Qué tiene que probar:** completar el precio del tomate llega a $1.400 por HTTP; bajar una
 cantidad ya vendida da 400; cargar el descuento con una línea sin precio da 400; sin

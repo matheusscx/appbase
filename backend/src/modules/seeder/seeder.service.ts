@@ -1369,6 +1369,19 @@ export class SeederService implements OnApplicationBootstrap {
         correo: 'compras.lectura@paris.cl',
         esSuperadmin: false,
       },
+      // `Leer` y `Crear`, sin `Actualizar`: el que distingue "recibir" de
+      // "corregir". Sin él, un guard que pidiera `Crear` donde va `Actualizar`
+      // pasaba la suite. Ver seedRolEncargadoCompras.
+      {
+        id: '550e8400-e29b-41d4-a716-446655440444',
+        nombreUsuario: 'compras.carga',
+        contrasena: HASH,
+        nombre: 'Carga',
+        apellido: 'Compras',
+        telefono: '987654444',
+        correo: 'compras.carga@paris.cl',
+        esSuperadmin: false,
+      },
     ];
 
     for (const data of usuarios) {
@@ -2585,6 +2598,7 @@ export class SeederService implements OnApplicationBootstrap {
     const ENCARGADO_SALON_PARIS = '550e8400-e29b-41d4-a716-446655440348';
     const ENCARGADO_COMPRAS_PARIS = '550e8400-e29b-41d4-a716-446655440440';
     const COMPRAS_LECTURA_PARIS = '550e8400-e29b-41d4-a716-446655440442';
+    const COMPRAS_CARGA_PARIS = '550e8400-e29b-41d4-a716-446655440444';
     const pairs = [
       [ADMIN, PARIS], // superadmin → Paris
       [ADMIN, FALABELLA], // superadmin → Falabella
@@ -2600,6 +2614,7 @@ export class SeederService implements OnApplicationBootstrap {
       [ENCARGADO_SALON_PARIS, PARIS], // Salones:Actualizar sin ser admin → Paris
       [ENCARGADO_COMPRAS_PARIS, PARIS], // las cuatro de Compras, no admin → Paris
       [COMPRAS_LECTURA_PARIS, PARIS], // solo Compras:Leer → Paris
+      [COMPRAS_CARGA_PARIS, PARIS], // Compras:Leer y Crear, sin Actualizar → Paris
     ];
 
     for (const [usuarioId, tenantId] of pairs) {
@@ -3042,8 +3057,8 @@ export class SeederService implements OnApplicationBootstrap {
 
     // Rol "Compras · Lectura" (441) + usuario `compras.lectura` (442): SOLO
     // `Leer`. Es el control que distingue "ver" de "recibir" en el e2e. Del
-    // bloque 441–445, reservado por la sesión coordinadora para los fixtures
-    // parciales de Compras (443–445 quedan para `Actualizar` y `Anular`).
+    // bloque 441–446, reservado por la sesión coordinadora para los fixtures
+    // parciales de Compras.
     const ROL_LECTURA = '550e8400-e29b-41d4-a716-446655440441';
     const COMPRAS_LECTURA = '550e8400-e29b-41d4-a716-446655440442';
     await this.dataSource.query(
@@ -3066,6 +3081,36 @@ export class SeederService implements OnApplicationBootstrap {
       `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
        VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
       [COMPRAS_LECTURA, PARIS, ROL_LECTURA],
+    );
+
+    // Rol "Compras · Carga" (443) + usuario `compras.carga` (444): `Leer` y
+    // `Crear`, sin `Actualizar`. Recibe mercadería pero no corrige una compra
+    // ya confirmada: es el control del 403 de las correcciones.
+    const ROL_CARGA = '550e8400-e29b-41d4-a716-446655440443';
+    const COMPRAS_CARGA = '550e8400-e29b-41d4-a716-446655440444';
+    await this.dataSource.query(
+      `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
+       VALUES ($1, $2, 'Compras · Carga', 'Recibe compras; no corrige ni anula una confirmada', false, NOW(), NOW())
+       ON CONFLICT DO NOTHING`,
+      [ROL_CARGA, PARIS],
+    );
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [ROL_CARGA, MODULO_TENANT_COMPRAS],
+    );
+    const COMPRAS_CREAR = '550e8400-e29b-41d4-a716-446655440434';
+    for (const permisoId of [COMPRAS_LEER, COMPRAS_CREAR]) {
+      await this.dataSource.query(
+        `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [ROL_CARGA, MODULO_TENANT_COMPRAS, permisoId],
+      );
+    }
+    await this.dataSource.query(
+      `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+       VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [COMPRAS_CARGA, PARIS, ROL_CARGA],
     );
   }
 
@@ -4856,14 +4901,15 @@ export class SeederService implements OnApplicationBootstrap {
    * inventar documentos de otro país (el mismo criterio que la nota de crédito
    * interna de `seedTiposDocumentoTributario`).
    *
-   * Rango 420–445, reservado por la sesión coordinadora el 2026-09-18: en main
+   * Rango 420–446, reservado por la sesión coordinadora el 2026-09-18 (el 446,
+   * el 2026-09-19): en main
    * el máximo era 406, y la rama de KPIs (`claude/dashboard-inicio`) toma
    * 407–409 con margen hasta 419. Medido con `docs/patterns/backend.md` § 8
    * contra main y las ramas vivas. Lo usan también el módulo Compras (432),
    * sus permisos (433–436), su contratación (437–438), el rol y usuario
-   * `encargado.compras` (439–440) y el rol y usuario `compras.lectura`
-   * (441–442). 443–445 quedan para los fixtures parciales de las tareas
-   * siguientes. El próximo frente arranca en 446.
+   * `encargado.compras` (439–440), el rol y usuario `compras.lectura`
+   * (441–442) y el rol y usuario `compras.carga` (443–444). 445–446 quedan
+   * para el fixture sin `Anular`. El próximo frente arranca en 447.
    */
   private async seedTiposDocumentoCompra(): Promise<void> {
     const CHILE = '550e8400-e29b-41d4-a716-446655440000';
