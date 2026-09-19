@@ -2084,15 +2084,22 @@ describe('InventarioService', () => {
       ]);
       const total = await service.stockTotalPorProducto(
         managerMock as unknown as EntityManager,
+        TENANT,
         ['a', 'b'],
       );
       expect(total.get('a')).toBe('12.5000');
       expect(total.get('b')).toBe('0');
       // Una sola consulta para todos, filtrando ubicaciones eliminadas.
       expect(managerMock.query).toHaveBeenCalledTimes(1);
-      expect(managerMock.query.mock.calls[0][0]).toContain(
-        'u.eliminado_el IS NULL',
-      );
+      const [sql, params] = managerMock.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toContain('u.eliminado_el IS NULL');
+      // Acota por tenant por su cuenta, a través de la ubicación: un id ajeno
+      // colado en el lote suma cero.
+      expect(sql).toMatch(/AND u\.tenant_id = \$2/);
+      expect(params).toEqual([['a', 'b'], TENANT]);
     });
   });
 

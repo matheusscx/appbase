@@ -1230,10 +1230,10 @@ export class VentasService {
    * leía.
    *
    * `MIN(costo_unitario)` y no un promedio: dentro de UNA venta todas las
-   * salidas de un mismo ítem congelan el mismo costo. `costo_actual` solo lo
-   * mueven `compra` y `ajuste_costo`, y ninguno de los dos puede ocurrir en el
-   * medio — la venta toma `FOR UPDATE` sobre el ítem en su primera salida y no
-   * lo suelta hasta commitear. Por eso una devolución **parcial** puede usar el
+   * salidas de un mismo ítem congelan el mismo costo. `costo_actual` solo
+   * cambia dentro de `InventarioService.registrarMovimiento`, que toma
+   * `FOR UPDATE` sobre el ítem, y nada puede cambiarlo en el medio — la venta
+   * toma ese mismo lock en su primera salida y no lo suelta hasta commitear. Por eso una devolución **parcial** puede usar el
    * mismo costo que una total sin prorratear nada.
    *
    * Una sola query por venta: el llamador resuelve por ítem contra el Map, sin

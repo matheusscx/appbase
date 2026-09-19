@@ -537,7 +537,9 @@ export class InventarioService {
       // La definición del peso vive en `stockTotalPorProducto`, que comparten
       // compras (la congela en la línea) y "rehacer la cuenta".
       const stockTotal = (
-        await this.stockTotalPorProducto(manager, [params.itemId])
+        await this.stockTotalPorProducto(manager, params.tenantId, [
+          params.itemId,
+        ])
       ).get(params.itemId)!;
       costoActualNuevo = this.calcularCostoPromedio(
         new Decimal(stockTotal),
@@ -798,9 +800,15 @@ export class InventarioService {
    *
    * ⚠️ Se llama con el lock de `item_producto` ya tomado: fuera de él, una
    * entrada concurrente en otra ubicación puede no estar commiteada todavía.
+   *
+   * Acota por tenant por su cuenta, a través de la ubicación, en vez de
+   * confiar en que el llamador ya validó los ids: los llamadores de compras
+   * arman el lote desde las líneas de un documento, y un id de otro tenant
+   * colado en ese arreglo tiene que sumar cero, no el stock ajeno.
    */
   async stockTotalPorProducto(
     manager: EntityManager,
+    tenantId: string,
     itemIds: string[],
   ): Promise<Map<string, string>> {
     const rows: { item_id: string; stock: string }[] = await manager.query(
@@ -808,9 +816,10 @@ export class InventarioService {
          FROM stock_ubicacion su
          JOIN ubicaciones u
            ON u.ubicacion_id = su.ubicacion_id AND u.eliminado_el IS NULL
+          AND u.tenant_id = $2
         WHERE su.item_id = ANY($1::uuid[])
         GROUP BY su.item_id`,
-      [itemIds],
+      [itemIds, tenantId],
     );
     const porItem = new Map(rows.map((r) => [r.item_id, r.stock]));
     return new Map(itemIds.map((id) => [id, porItem.get(id) ?? '0']));
