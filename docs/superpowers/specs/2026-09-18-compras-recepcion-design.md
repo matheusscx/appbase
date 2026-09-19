@@ -53,6 +53,7 @@ Todas son del owner, 2026-09-18.
 | **Permisos en un módulo propio `Compras`** | El bodeguero recibe y el dueño paga (pieza 3). Colgar de Inventario daría compras a todo el que cuenta stock |
 | **El atajo "compra" del ajuste de stock se mantiene por ahora** | Como Bsale y Square. Se revisa cuando Compras esté en uso. Costo asumido: esa compra no aparece en la deuda ni en los reportes de compras |
 | **Todo en la moneda oficial, sin flete** | Poco frecuente en el tipo de cliente |
+| **Se compran productos e ingredientes** (los dos tipos con `item_producto`), aprobado por el owner al ejecutar la tarea 3 | Un restaurante compra sobre todo ingredientes: la harina, el tomate. Es la misma pareja que ya aceptan mermas y el ajuste de stock. La primera versión de esta spec decía solo `producto` |
 
 ## 3. Modelo de datos
 
@@ -86,7 +87,7 @@ precio.
 | Columna | Tipo | Nota |
 |---|---|---|
 | `compra_linea_id` | `uuid` PK | |
-| `compra_id`, `tenant_id`, `item_id` | `uuid` NOT NULL | El ítem es `tipo='producto'` |
+| `compra_id`, `tenant_id`, `item_id` | `uuid` NOT NULL | El ítem es `producto` o `ingrediente` (los dos con `item_producto`) |
 | `cantidad` | `numeric(18,4)` NOT NULL | Como se tipeó, `> 0` |
 | `unidad_codigo` | `text` NOT NULL | Compatible con la unidad base del producto |
 | `precio_unitario` | `numeric(18,4)` NULL | **Por unidad tipeada.** Null = falta costo. `>= 0` (el 0 es el regalo) |
@@ -149,7 +150,8 @@ no cruzarse con `ventas.crear()`.
 
 1. **Valida:** proveedor activo de tipo `proveedor`; tipo de documento activo del país del tenant;
    folio si el tipo lo pide; que no haya duplicado; ubicación activa; al menos una línea; cada
-   ítem `producto`, no eliminado, con unidad compatible; series o lote según el modo.
+   ítem `producto` o `ingrediente`, no eliminado, con unidad compatible; series o lote según el
+   modo.
 2. **Reparte el descuento al total** entre las líneas con precio, según su valor
    (`cantidad × precio_unitario`), a la escala de la moneda oficial. El residuo se asigna para que la
    suma calce **exacto** con el descuento. Una línea a $0 no recibe descuento. El criterio para

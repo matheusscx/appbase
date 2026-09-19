@@ -730,7 +730,7 @@ export class SeederService implements OnApplicationBootstrap {
       // Compras (spec `compras-recepcion-design.md` § 5): módulo propio y no
       // colgado de Inventario, porque el que recibe no es el que paga
       // (pieza 3) y colgarlo daría compras a todo el que cuenta stock.
-      // Rango 420–440: ver `seedTiposDocumentoCompra`.
+      // Rango 420–445: ver `seedTiposDocumentoCompra`.
       {
         moduloAppId: '550e8400-e29b-41d4-a716-446655440432',
         nombre: 'Compras',
@@ -1353,6 +1353,20 @@ export class SeederService implements OnApplicationBootstrap {
         apellido: 'Compras',
         telefono: '987654440',
         correo: 'encargado.compras@paris.cl',
+        esSuperadmin: false,
+      },
+      // Solo `Compras:Leer`: el que distingue "ver" de "recibir". Sin él, un
+      // guard que pidiera `Leer` donde va `Crear` pasaba el e2e (medido: el
+      // único sin Compras da 403 con los dos, y el encargado pasa con los
+      // dos). Ver seedRolEncargadoCompras.
+      {
+        id: '550e8400-e29b-41d4-a716-446655440442',
+        nombreUsuario: 'compras.lectura',
+        contrasena: HASH,
+        nombre: 'Lectura',
+        apellido: 'Compras',
+        telefono: '987654442',
+        correo: 'compras.lectura@paris.cl',
         esSuperadmin: false,
       },
     ];
@@ -2570,6 +2584,7 @@ export class SeederService implements OnApplicationBootstrap {
     const GARZON_PIN_PARIS = '550e8400-e29b-41d4-a716-446655440346';
     const ENCARGADO_SALON_PARIS = '550e8400-e29b-41d4-a716-446655440348';
     const ENCARGADO_COMPRAS_PARIS = '550e8400-e29b-41d4-a716-446655440440';
+    const COMPRAS_LECTURA_PARIS = '550e8400-e29b-41d4-a716-446655440442';
     const pairs = [
       [ADMIN, PARIS], // superadmin → Paris
       [ADMIN, FALABELLA], // superadmin → Falabella
@@ -2584,6 +2599,7 @@ export class SeederService implements OnApplicationBootstrap {
       [GARZON_PIN_PARIS, PARIS], // fixture exclusiva de garzon-pin.e2e-spec.ts → Paris
       [ENCARGADO_SALON_PARIS, PARIS], // Salones:Actualizar sin ser admin → Paris
       [ENCARGADO_COMPRAS_PARIS, PARIS], // las cuatro de Compras, no admin → Paris
+      [COMPRAS_LECTURA_PARIS, PARIS], // solo Compras:Leer → Paris
     ];
 
     for (const [usuarioId, tenantId] of pairs) {
@@ -2992,8 +3008,9 @@ export class SeederService implements OnApplicationBootstrap {
     const MODULO_TENANT_COMPRAS = '550e8400-e29b-41d4-a716-446655440437';
     // moduloAppPermiso Compras/Leer, Crear, Actualizar y Anular
     // (seedModuloAppPermisos)
+    const COMPRAS_LEER = '550e8400-e29b-41d4-a716-446655440433';
     const PERMISOS_COMPRAS = [
-      '550e8400-e29b-41d4-a716-446655440433',
+      COMPRAS_LEER,
       '550e8400-e29b-41d4-a716-446655440434',
       '550e8400-e29b-41d4-a716-446655440435',
       '550e8400-e29b-41d4-a716-446655440436',
@@ -3021,6 +3038,34 @@ export class SeederService implements OnApplicationBootstrap {
       `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
        VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
       [ENCARGADO_COMPRAS, PARIS, ROL_ID],
+    );
+
+    // Rol "Compras · Lectura" (441) + usuario `compras.lectura` (442): SOLO
+    // `Leer`. Es el control que distingue "ver" de "recibir" en el e2e. Del
+    // bloque 441–445, reservado por la sesión coordinadora para los fixtures
+    // parciales de Compras (443–445 quedan para `Actualizar` y `Anular`).
+    const ROL_LECTURA = '550e8400-e29b-41d4-a716-446655440441';
+    const COMPRAS_LECTURA = '550e8400-e29b-41d4-a716-446655440442';
+    await this.dataSource.query(
+      `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
+       VALUES ($1, $2, 'Compras · Lectura', 'Ve las compras; no recibe, no corrige, no anula', false, NOW(), NOW())
+       ON CONFLICT DO NOTHING`,
+      [ROL_LECTURA, PARIS],
+    );
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [ROL_LECTURA, MODULO_TENANT_COMPRAS],
+    );
+    await this.dataSource.query(
+      `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+       VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [ROL_LECTURA, MODULO_TENANT_COMPRAS, COMPRAS_LEER],
+    );
+    await this.dataSource.query(
+      `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+       VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [COMPRAS_LECTURA, PARIS, ROL_LECTURA],
     );
   }
 
@@ -4811,12 +4856,14 @@ export class SeederService implements OnApplicationBootstrap {
    * inventar documentos de otro país (el mismo criterio que la nota de crédito
    * interna de `seedTiposDocumentoTributario`).
    *
-   * Rango 420–440, reservado por la sesión coordinadora el 2026-09-18: en main
+   * Rango 420–445, reservado por la sesión coordinadora el 2026-09-18: en main
    * el máximo era 406, y la rama de KPIs (`claude/dashboard-inicio`) toma
    * 407–409 con margen hasta 419. Medido con `docs/patterns/backend.md` § 8
    * contra main y las ramas vivas. Lo usan también el módulo Compras (432),
-   * sus permisos (433–436), su contratación (437–438), el rol (439) y el
-   * usuario fixture (440).
+   * sus permisos (433–436), su contratación (437–438), el rol y usuario
+   * `encargado.compras` (439–440) y el rol y usuario `compras.lectura`
+   * (441–442). 443–445 quedan para los fixtures parciales de las tareas
+   * siguientes. El próximo frente arranca en 446.
    */
   private async seedTiposDocumentoCompra(): Promise<void> {
     const CHILE = '550e8400-e29b-41d4-a716-446655440000';

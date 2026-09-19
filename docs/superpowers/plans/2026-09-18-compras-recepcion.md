@@ -824,7 +824,9 @@ export class FindComprasDto extends PaginationQueryDto {
   7. Un folio repetido (misma tripleta, compra no anulada) es **409**, y el mensaje nombra la
      compra existente: *"Ya cargaste la factura 4521 de Distribuidora X el 2026-09-15"*.
   8. Una ubicación inactiva es 400.
-  9. Un ítem que no es producto es 400 *"… no lleva stock"*.
+  9. Un ítem sin stock (un servicio) es 400 *"… no lleva stock"*. Un **ingrediente sí se compra**:
+     se aceptan `producto` e `ingrediente`, los dos con `item_producto` (decisión del owner,
+     2026-09-18, al ejecutar esta tarea; la versión anterior del plan decía solo `producto`).
   10. Una unidad incompatible es 400. El mensaje es el de `convertirUnidad`, sin reescribirlo.
   11. En serie, `series.length` distinto de `cantidad` es 400. En lote, falta `lote` y es 400. En
       serie o lote, una unidad distinta de la base es 400 (la regla de `ajustarStock`).
@@ -1011,7 +1013,8 @@ if (permissionsStore.esAdmin || permissionsStore.can('Compras', 'Leer')) {
   `borrador`):
   - **Arriba:** proveedor (`/compras/proveedores`), tipo (`/compras/tipos-documento`), folio
     (oculto si `requiereFolio` es false), fecha y ubicación (`useUbicaciones`, solo activas).
-  - **Líneas:** producto (el mismo selector que traslados, `items?tipo=producto`), cantidad,
+  - **Líneas:** producto (el mismo selector que traslados: `items?tipo=producto` más
+    `items?tipo=ingrediente`), cantidad,
     unidad (las compatibles, con `useUnidadConversion`) y precio unitario (`UInput`
     `inputmode="decimal"`, string). Al lado, `totalLinea` como texto. Según el modo del producto,
     series (una por unidad) o lote.
