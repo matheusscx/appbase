@@ -219,10 +219,15 @@ CREATE TABLE "tenants" (
   -- "caja_arqueo_medio"."diferencia", que es NUMERIC(18,4).
   "umbral_descuadre_aviso" NUMERIC(18,4) NOT NULL DEFAULT 0,
   "umbral_descuadre_alto"  NUMERIC(18,4) NOT NULL DEFAULT 0,
+  -- Hora local a la que termina el día del negocio (0 = medianoche). Un bar
+  -- con corte 5 cuenta la venta del domingo a la 01:30 en el sábado. Se
+  -- aplica solo en "common/utils/rango-fecha.util.ts".
+  "hora_corte"         SMALLINT    NOT NULL DEFAULT 0,
   "creado_el"          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"     TIMESTAMPTZ,
   "eliminado_el"       TIMESTAMPTZ,
-  CONSTRAINT chk_tenants_nivel_redondeo CHECK ("nivel_redondeo" IN ('linea','documento'))
+  CONSTRAINT chk_tenants_nivel_redondeo CHECK ("nivel_redondeo" IN ('linea','documento')),
+  CONSTRAINT chk_tenants_hora_corte CHECK ("hora_corte" BETWEEN 0 AND 6)
 );
 
 CREATE TABLE "razones_sociales" (

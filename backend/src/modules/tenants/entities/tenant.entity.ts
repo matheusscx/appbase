@@ -17,6 +17,7 @@ import type {
   'chk_tenants_nivel_redondeo',
   `"nivel_redondeo" IN ('linea','documento')`,
 )
+@Check('chk_tenants_hora_corte', '"hora_corte" BETWEEN 0 AND 6')
 export class Tenant {
   @PrimaryGeneratedColumn('uuid', { name: 'tenant_id' })
   id: string;
@@ -128,6 +129,16 @@ export class Tenant {
     default: 0,
   })
   umbralDescuadreAlto: string;
+
+  /**
+   * Hora local a la que termina el día del negocio (0 = medianoche). Un bar con
+   * corte 5 cuenta la venta del domingo a la 01:30 en el sábado. El día se
+   * calcula al consultar con el corte vigente: cambiarlo recalcula los reportes
+   * pasados. Lo aplica `common/utils/rango-fecha.util.ts`, y solo ahí.
+   * Spec: docs/superpowers/specs/2026-09-18-hora-de-corte-dia-negocio-design.md
+   */
+  @Column({ name: 'hora_corte', type: 'smallint', default: 0 })
+  horaCorte: number;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;

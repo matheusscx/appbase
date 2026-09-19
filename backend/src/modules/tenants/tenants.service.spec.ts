@@ -42,6 +42,7 @@ const mockTenant: Tenant = {
   umbralDescuadreAlto: '0',
   arqueoCiego: false,
   promosAcumulanDescuentos: false,
+  horaCorte: 0,
   creadoEl: new Date(),
   actualizadoEl: new Date(),
   eliminadoEl: null,

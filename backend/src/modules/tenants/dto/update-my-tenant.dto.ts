@@ -1,10 +1,13 @@
 import {
   IsEmail,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
+  Min,
   ValidateIf,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
@@ -56,4 +59,15 @@ export class UpdateMyTenantDto {
   @IsOptional()
   @IsString()
   direccion?: string | null;
+
+  // Hora local (0–6) a la que termina el día del negocio. `@ValidateIf` y no
+  // `@IsOptional()`, por lo mismo que `nombre`: la columna es NOT NULL y un
+  // `null` saltearía los validadores hasta el 500 de Postgres. Horas enteras y
+  // solo de madrugada, por decisión del owner (spec de la hora de corte, § 2):
+  // un corte de tarde pasaría ventas de la tarde al día anterior.
+  @ValidateIf((_o: unknown, v: unknown) => v !== undefined)
+  @IsInt()
+  @Min(0)
+  @Max(6)
+  horaCorte?: number;
 }

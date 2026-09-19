@@ -106,3 +106,24 @@ describe('UpdateMyTenantDto — nombre', () => {
     );
   });
 });
+
+describe('horaCorte', () => {
+  it.each([0, 5, 6])('acepta %p', async (horaCorte) => {
+    const errores = await validate(
+      plainToInstance(UpdateMyTenantDto, { horaCorte }),
+    );
+    expect(errores).toHaveLength(0);
+  });
+
+  it.each([7, -1, 2.5, '5', null])('rechaza %p', async (horaCorte) => {
+    const errores = await validate(
+      plainToInstance(UpdateMyTenantDto, { horaCorte }),
+    );
+    expect(errores.map((e) => e.property)).toEqual(['horaCorte']);
+  });
+
+  it('ausente no se valida', async () => {
+    const errores = await validate(plainToInstance(UpdateMyTenantDto, {}));
+    expect(errores).toHaveLength(0);
+  });
+});
