@@ -6,6 +6,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   DeleteDateColumn,
+  Generated,
 } from 'typeorm';
 
 /**
@@ -37,6 +38,13 @@ import {
  * encolada detrás.
  */
 @Index('idx_movimientos_inventario_traslado', ['trasladoId'])
+/** Por línea de compra: "los movimientos de esta línea" (la entrada y sus correcciones). */
+@Index('idx_movimientos_inventario_compra_linea', ['compraLineaId'])
+/**
+ * El recorrido de "rehacer la cuenta" (spec compras-recepcion § 4.3): los
+ * movimientos de UN producto desde una secuencia en adelante, en orden.
+ */
+@Index('idx_movimientos_inventario_item_secuencia', ['itemId', 'secuencia'])
 @Entity('movimientos_inventario')
 export class MovimientoInventario {
   @PrimaryGeneratedColumn('uuid', { name: 'movimiento_id' })
@@ -62,7 +70,7 @@ export class MovimientoInventario {
   tipo: string; // 'entrada' | 'salida' | 'ajuste'
 
   @Column({ type: 'text' })
-  motivo: string; // 'compra' | 'venta' | 'devolucion' | 'anulacion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'recuento' | 'traslado'
+  motivo: string; // 'compra' | 'venta' | 'devolucion' | 'anulacion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'correccion_compra' | 'recuento' | 'traslado'
 
   @Column({ type: 'numeric', precision: 18, scale: 4 })
   cantidad: string;
@@ -129,6 +137,27 @@ export class MovimientoInventario {
    */
   @Column({ name: 'traslado_id', type: 'uuid', nullable: true })
   trasladoId: string | null;
+
+  /**
+   * La línea de compra que generó este movimiento: su entrada original, las
+   * diferencias de una corrección de cantidad, la salida de una anulación y las
+   * `correccion_compra` de costo. Nulo en todo lo demás, incluida la entrada
+   * `compra` del atajo del ajuste de stock, que no tiene documento.
+   */
+  @Column({ name: 'compra_linea_id', type: 'uuid', nullable: true })
+  compraLineaId: string | null;
+
+  /**
+   * El orden REAL en que se aplicaron los movimientos. `creado_el` no sirve para
+   * eso: es la hora en que EMPEZÓ la transacción, y dos que compiten por el lock
+   * del mismo producto pueden aplicarse en el orden inverso. La secuencia se toma
+   * en el `INSERT`, que corre con el lock de `item_producto` ya tomado, así que
+   * sobre un mismo producto respeta el orden de aplicación. La usa "rehacer la
+   * cuenta" (spec compras-recepcion § 4.3).
+   */
+  @Column({ type: 'bigint' })
+  @Generated('increment')
+  secuencia: string;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' }) creadoEl: Date;
   @UpdateDateColumn({ name: 'actualizado_el', type: 'timestamptz' })

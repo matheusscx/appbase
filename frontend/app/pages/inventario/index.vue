@@ -5,7 +5,7 @@ import type { PaginatedResponse } from '~/composables/usePaginatedList'
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 const toast = useToast()
-const { formatFecha, formatMonto, formatCosto, formatStock } = useFormatters()
+const { formatFecha, formatMonto, formatCosto, formatStock, esAjusteDeValor } = useFormatters()
 const { convertirCosto } = useUnidadConversion()
 const { pageSize } = useUserPreferences()
 const { ubicaciones, hayBodegas, cargar: cargarUbicaciones } = useUbicaciones()
@@ -85,6 +85,7 @@ const motivoOpts: Opt[] = [
   { label: 'Merma', value: 'merma' },
   { label: 'Ajuste manual', value: 'ajuste_manual' },
   { label: 'Ajuste de costo', value: 'ajuste_costo' },
+  { label: 'Corrección de compra', value: 'correccion_compra' },
   { label: 'Inventario inicial', value: 'inventario_inicial' },
   { label: 'Recuento', value: 'recuento' },
   { label: 'Traslado', value: 'traslado' },
@@ -376,13 +377,13 @@ async function registrarAjusteCosto() {
             />
           </template>
           <template #cantidad-cell="{ row }">
-            <span v-if="row.original.motivo === 'ajuste_costo'" class="text-muted">—</span>
+            <span v-if="esAjusteDeValor(row.original.motivo)" class="text-muted">—</span>
             <span v-else :class="row.original.tipo === 'entrada' ? 'text-success' : 'text-warning'">
               {{ formatStock(row.original.cantidad, row.original.unidadMedida) }}
             </span>
           </template>
           <template #costoAjuste-cell="{ row }">
-            <span v-if="row.original.motivo === 'ajuste_costo'" class="font-mono">
+            <span v-if="esAjusteDeValor(row.original.motivo)" class="font-mono">
               {{ formatMonto(row.original.costoAnterior, row.original.monedaId) }}
               <span class="text-muted">→</span>
               {{ formatMonto(row.original.costoUnitario, row.original.monedaId) }}

@@ -9,6 +9,7 @@ const MOTIVOS = [
   'merma',
   'ajuste_manual',
   'ajuste_costo',
+  'correccion_compra',
   'inventario_inicial',
   'recuento',
   // Desde `POST /traslados`: el kardex se llena de filas `motivo='traslado'`

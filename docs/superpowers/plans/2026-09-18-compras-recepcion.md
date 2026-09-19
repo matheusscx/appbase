@@ -1072,6 +1072,11 @@ git commit -m "feat(compras): el listado y la carga del borrador"
 Después de las tareas 1 a 4. Toca `registrarMovimiento`, así que el código se escribe contra el
 `inventario.service.ts` de ese momento.
 
+✅ **OK del owner para esta tarea (2026-09-18):** *"Dale con la 5"*. Escribe en
+`movimientos_inventario`, lo que `CLAUDE.md` pide consultar antes. Se le explicó el alcance antes
+de pedir el OK: `compra_linea_id`, la secuencia, el motivo `correccion_compra` y la extracción de
+`stockTotalPorProducto`.
+
 **Intención (spec § 3.4):**
 - **Un solo dueño para el "stock total del producto".** Hoy la query vive en línea dentro de
   `registrarMovimiento` (`6f5a1821`). Compras la necesita también: T6 para congelar
@@ -1098,12 +1103,22 @@ Después de las tareas 1 a 4. Toca `registrarMovimiento`, así que el código se
 stockTotalPorProducto(manager: EntityManager, itemIds: string[]): Promise<Map<string, string>>;
 // RegistrarMovimientoParams gana:
 compraLineaId?: string | null;
-// Método nuevo en InventarioService, el único que escribe una correccion_compra:
-registrarCorreccionCosto(manager, p: {
-  tenantId: string; itemId: string; ubicacionId: string; usuarioId: string;
-  compraLineaId: string; costoNuevo: string; comentario: string;
-}): Promise<{ movimientoId: string; costoAnterior: string | null; costoNuevo: string }>;
+// La corrección de costo es un ajuste de VALOR, como `ajuste_costo`
+// (`MOTIVOS_DE_VALOR`): se escribe con registrarMovimiento, sin método propio.
+registrarMovimiento(manager, {
+  tipo: 'ajuste', motivo: 'correccion_compra', cantidad: '0',
+  costoUnitario: costoNuevo, compraLineaId, /* tenantId, itemId, ubicacionId, usuarioId */
+});
 ```
+
+> **Cambio al ejecutar (2026-09-18):** el contrato original tenía un método aparte,
+> `registrarCorreccionCosto`. No hizo falta: la mecánica es idéntica a la de `ajuste_costo`
+> (cantidad 0, pisa `costo_actual`, deja `costo_anterior`), así que `correccion_compra` entró en
+> la misma lista de motivos de valor. El motivo exige `compraLineaId`, y `compraLineaId` solo se
+> acepta con `compra` o `correccion_compra`. Entró también `correccion_compra` en el `@IsIn` del
+> filtro del kardex (`find-movimientos.dto.ts`) y en su gemelo del front, y las dos tablas de
+> kardex (`inventario/index.vue` y el historial de `configuracion/items.vue`) dibujan los dos
+> motivos de valor con `esAjusteDeValor` de `useFormatters`.
 
 **Qué tiene que probar:**
 - que la secuencia sale ordenada con dos transacciones concurrentes sobre el mismo producto (el
@@ -1187,7 +1202,7 @@ de ahí se suman las cantidades con signo.
    de la carrera puede dar un costo rehecho distinto del original. El test fija el caso sin
    carrera (una bodega con movimientos en la ventana, vaciada y borrada antes de completar el
    precio) y **no** declara cubierto el concurrente.
-3. Si el costo resultante difiere del `costo_actual`, `registrarCorreccionCosto` (tarea 5).
+3. Si el costo resultante difiere del `costo_actual`, una `correccion_compra` vía `registrarMovimiento` (tarea 5).
 
 **Contrato:**
 
@@ -1324,5 +1339,5 @@ cd .. && ./scripts/reset-db.sh --verificar
 - **Desvío declarado:** el rol del seed es propio ("Compras · Encargado"), no uno "Encargado"
   genérico, que no existe (T1, paso 7.5).
 - **Nombres cruzados:** `costearLineas` (T2 → T6, T8); `assertFolioLibre`, `validarEncabezado` y
-  `validarLineas` (T3 → T6); `compraLineaId` y `registrarCorreccionCosto` (T5 → T7, T8);
+  `validarLineas` (T3 → T6); `compraLineaId` y el motivo `correccion_compra` (T5 → T7, T8);
   `recalcularCostoDesdeCompra` (T7 → T8, T9).

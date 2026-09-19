@@ -1692,7 +1692,7 @@ describe('InventarioService', () => {
         // La ubicación del movimiento está vacía y el producto tiene 10 en
         // otra: el promedio pondera con el total, no con el saldo de acá.
         .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo: statement aparte, ya bajo el lock
-        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT stock total del producto
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '10' }]) // SELECT stock total del producto
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-c1' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // UPDATE costo_actual
@@ -1770,7 +1770,7 @@ describe('InventarioService', () => {
           ])
           // 4 en la ubicación que repone, 14 en todo el producto.
           .mockResolvedValueOnce([{ stock: '4' }]) // SELECT saldo: statement aparte, ya bajo el lock
-          .mockResolvedValueOnce([{ stock: '14' }]) // SELECT stock total del producto
+          .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '14' }]) // SELECT stock total del producto
           .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
           .mockResolvedValueOnce([{ movimiento_id: 'mov-rev' }])
           .mockResolvedValueOnce(undefined);
@@ -1862,7 +1862,7 @@ describe('InventarioService', () => {
           { modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
         .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
-        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT stock total del producto
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '10' }]) // SELECT stock total del producto
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-donacion' }])
         .mockResolvedValueOnce(undefined);
@@ -1950,6 +1950,149 @@ describe('InventarioService', () => {
       const insertCall = managerMock.query.mock.calls[3];
       expect(insertCall[1]).toContain('4200');
       expect(managerMock.query).toHaveBeenCalledTimes(4);
+    });
+  });
+
+  // Compras (spec compras-recepcion § 3.4): la línea de compra en el kardex y
+  // el ajuste de valor que deja "rehacer la cuenta".
+  describe('registrarMovimiento — compras', () => {
+    const LINEA = 'linea-uuid';
+
+    it('la entrada compra lleva su línea en el kardex', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: null },
+        ]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-l1' }]); // INSERT movimiento
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '20',
+          usuarioId: USER_ID,
+          compraLineaId: LINEA,
+        },
+      );
+
+      const insert = managerMock.query.mock.calls[3] as [string, unknown[]];
+      expect(insert[0]).toContain('compra_linea_id');
+      expect(insert[1][17]).toBe(LINEA);
+    });
+
+    it('correccion_compra pisa el costo, deja el anterior y no mueve stock', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '1000.0000' },
+        ]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '17' }]) // SELECT saldo
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-corr' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // UPDATE costo_actual
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'ajuste',
+          motivo: 'correccion_compra',
+          cantidad: '0',
+          usuarioId: USER_ID,
+          costoUnitario: '1400',
+          compraLineaId: LINEA,
+        },
+      );
+
+      const insert = managerMock.query.mock.calls[2] as [string, unknown[]];
+      // cantidad 0, stock anterior = resultante (no hubo movimiento de stock)
+      expect(insert[1][5]).toBe('0');
+      expect(insert[1][6]).toBe(insert[1][7]);
+      // costo_anterior: el que había
+      expect(insert[1][12]).toBe('1000.0000');
+      expect(insert[1][17]).toBe(LINEA);
+      expect(managerMock.query).toHaveBeenLastCalledWith(
+        expect.stringContaining('costo_actual'),
+        ['1400.0000', ITEM_ID],
+      );
+      // Sin UPSERT de stock_ubicacion: son cuatro consultas y ninguna lo toca.
+      expect(managerMock.query).toHaveBeenCalledTimes(4);
+      expect(
+        managerMock.query.mock.calls.some(([sql]) =>
+          /INSERT INTO stock_ubicacion/.test(sql as string),
+        ),
+      ).toBe(false);
+    });
+
+    it('correccion_compra sin línea es 400', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '1000.0000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '17' }]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'ajuste',
+          motivo: 'correccion_compra',
+          cantidad: '0',
+          usuarioId: USER_ID,
+          costoUnitario: '1400',
+        }),
+      ).rejects.toThrow(
+        'La corrección de compra requiere la línea que la respalda',
+      );
+    });
+
+    it('una línea de compra colgada de otro motivo es 400', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '1000.0000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '17' }]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'salida',
+          motivo: 'venta',
+          cantidad: '1',
+          usuarioId: USER_ID,
+          compraLineaId: LINEA,
+        }),
+      ).rejects.toThrow(
+        'compra_linea_id solo aplica a compra y a correccion_compra',
+      );
+    });
+  });
+
+  describe('stockTotalPorProducto', () => {
+    it('suma por producto, y un producto sin filas vale 0', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { item_id: 'a', stock: '12.5000' },
+      ]);
+      const total = await service.stockTotalPorProducto(
+        managerMock as unknown as EntityManager,
+        ['a', 'b'],
+      );
+      expect(total.get('a')).toBe('12.5000');
+      expect(total.get('b')).toBe('0');
+      // Una sola consulta para todos, filtrando ubicaciones eliminadas.
+      expect(managerMock.query).toHaveBeenCalledTimes(1);
+      expect(managerMock.query.mock.calls[0][0]).toContain(
+        'u.eliminado_el IS NULL',
+      );
     });
   });
 

@@ -114,5 +114,19 @@ export function useFormatters() {
   // su propia regla (los decimales de la moneda son el piso, ver `useCurrency`).
   // Va por acá y no importando `useCurrency` en la página porque las pantallas
   // formatean por `useFormatters` — una sola puerta, no dos.
-  return { formatMonto, formatCosto, formatFecha, formatHora, formatDiaSemana, formatStock, formatTipoPago, formatPorcentaje, formatCostoPorMoneda }
+  return { formatMonto, formatCosto, formatFecha, formatHora, formatDiaSemana, formatStock, formatTipoPago, formatPorcentaje, formatCostoPorMoneda, esAjusteDeValor }
+}
+
+/**
+ * Movimientos del kardex que no mueven cantidad sino valor: el costo pasa de
+ * `costoAnterior` a `costoUnitario`. Espejo de `MOTIVOS_DE_VALOR` del backend
+ * (`backend/src/modules/inventario/inventario.service.ts`): `ajuste_costo` lo
+ * tipea una persona, `correccion_compra` lo deja completar o corregir el precio
+ * de una compra. Las dos tablas de kardex (inventario e historial del ítem) los
+ * dibujan igual, así que la lista vive en un solo lugar.
+ */
+const MOTIVOS_DE_VALOR = ['ajuste_costo', 'correccion_compra']
+
+export function esAjusteDeValor(motivo: string): boolean {
+  return MOTIVOS_DE_VALOR.includes(motivo)
 }

@@ -19,7 +19,7 @@ const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Items')
 
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
-const { formatFecha, formatMonto, formatStock } = useFormatters()
+const { formatFecha, formatMonto, formatStock, esAjusteDeValor } = useFormatters()
 const { pageSize } = useUserPreferences()
 const { ubicaciones, local, hayBodegas, cargar: cargarUbicaciones } = useUbicaciones()
 
@@ -3203,11 +3203,11 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             />
           </template>
           <template #cantidad-cell="{ row }">
-            <span v-if="row.original.motivo === 'ajuste_costo'" class="text-muted">—</span>
+            <span v-if="esAjusteDeValor(row.original.motivo)" class="text-muted">—</span>
             <span v-else>{{ row.original.cantidad }}</span>
           </template>
           <template #costoUnitario-cell="{ row }">
-            <span v-if="row.original.motivo === 'ajuste_costo'" class="font-mono">
+            <span v-if="esAjusteDeValor(row.original.motivo)" class="font-mono">
               {{ formatMonto(row.original.costoAnterior, historialItemMonedaId) }}
               <span class="text-muted">→</span>
               {{ formatMonto(row.original.costoUnitario, historialItemMonedaId) }}

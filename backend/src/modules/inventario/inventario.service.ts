@@ -101,6 +101,12 @@ export interface RegistrarMovimientoParams {
    */
   trasladoId?: string | null;
   /**
+   * La línea de compra que genera este movimiento (spec compras-recepcion
+   * § 3.4). Solo en motivo `compra` (la entrada, las diferencias de cantidad,
+   * la anulación) y `correccion_compra`, que además la exige.
+   */
+  compraLineaId?: string | null;
+  /**
    * A dónde se van físicamente las unidades serializadas. Solo en la SALIDA de
    * un traslado en modo `serie`, y ahí es obligatorio.
    *
@@ -196,6 +202,16 @@ const MOTIVOS_SOBRE_ITEM_ELIMINADO = [
  * de una operación que aporte valor conocido al inventario.
  */
 const MOTIVOS_QUE_RECALCULAN_CPP = ['compra', 'anulacion', 'devolucion'];
+
+/**
+ * Ajustes de VALOR: cantidad 0, tipo `ajuste`, pisan `costo_actual` y dejan el
+ * anterior en `costo_anterior`. `correccion_compra` NO va en
+ * `MOTIVOS_QUE_RECALCULAN_CPP` —su costo ES el resultado de rehacer la
+ * cuenta, no una entrada que promediar— ni en `MOTIVOS_SOBRE_ITEM_ELIMINADO`:
+ * una línea de un producto en la papelera no se corrige (lado seguro del
+ * default de esa allowlist).
+ */
+const MOTIVOS_DE_VALOR = ['ajuste_costo', 'correccion_compra'];
 
 @Injectable()
 export class InventarioService {
@@ -350,9 +366,13 @@ export class InventarioService {
     const stockAnterior = new Decimal(saldoRows[0]?.stock ?? 0);
     const cantidad = new Decimal(params.cantidad);
 
-    // El ajuste de costo no mueve cantidad, mueve valor: es el único motivo
-    // que registra cantidad 0.
-    const esAjusteCosto = params.motivo === 'ajuste_costo';
+    // Los ajustes de VALOR no mueven cantidad: son los únicos motivos que
+    // registran cantidad 0. `ajuste_costo` es el que tipea una persona;
+    // `correccion_compra` es el que deja "rehacer la cuenta" de compras
+    // (spec compras-recepcion § 4.3) con el costo recalculado. La mecánica es la
+    // misma —pisa `costo_actual` y deja el anterior en el kardex—; lo que cambia
+    // es de dónde sale el número.
+    const esAjusteCosto = MOTIVOS_DE_VALOR.includes(params.motivo);
     if (esAjusteCosto) {
       if (params.tipo !== 'ajuste') {
         throw new BadRequestException("El ajuste de costo usa tipo 'ajuste'");
@@ -410,6 +430,23 @@ export class InventarioService {
     }
     if (params.motivo !== 'traslado' && params.trasladoId) {
       throw new BadRequestException('traslado_id solo aplica a traslado');
+    }
+    // Mismo par para la línea de compra. La entrada `compra` del atajo del
+    // ajuste de stock no tiene línea, así que ahí es opcional; la corrección de
+    // costo sí la exige, porque sin ella el kardex no dice qué compra la causó.
+    if (params.motivo === 'correccion_compra' && !params.compraLineaId) {
+      throw new BadRequestException(
+        'La corrección de compra requiere la línea que la respalda',
+      );
+    }
+    if (
+      params.compraLineaId &&
+      params.motivo !== 'compra' &&
+      params.motivo !== 'correccion_compra'
+    ) {
+      throw new BadRequestException(
+        'compra_linea_id solo aplica a compra y a correccion_compra',
+      );
     }
     // Los otros dos campos que solo el traslado usa. Van con su guard por la
     // misma razón que `motivo_baja_id`: un campo que llega poblado donde no
@@ -497,18 +534,13 @@ export class InventarioService {
       // ubicación ya commiteó cuando esto lee. Va antes del upsert de `moverX`:
       // es el stock previo a este movimiento.
       //
-      // Filtra ubicaciones eliminadas igual que el stock total de `GET /items`,
-      // para que el peso sea el mismo número que ve la pantalla.
-      const totalRows: { stock: string }[] = await manager.query(
-        `SELECT COALESCE(SUM(su.stock), 0) AS stock
-           FROM stock_ubicacion su
-           JOIN ubicaciones u
-             ON u.ubicacion_id = su.ubicacion_id AND u.eliminado_el IS NULL
-          WHERE su.item_id = $1`,
-        [params.itemId],
-      );
+      // La definición del peso vive en `stockTotalPorProducto`, que comparten
+      // compras (la congela en la línea) y "rehacer la cuenta".
+      const stockTotal = (
+        await this.stockTotalPorProducto(manager, [params.itemId])
+      ).get(params.itemId)!;
       costoActualNuevo = this.calcularCostoPromedio(
-        new Decimal(totalRows[0].stock),
+        new Decimal(stockTotal),
         costoActualPrevio,
         cantidad,
         params.costoUnitario,
@@ -563,8 +595,8 @@ export class InventarioService {
          (tenant_id, item_id, ubicacion_id, tipo, motivo, cantidad,
           stock_anterior, stock_resultante, venta_id, usuario_id, comentario,
           costo_unitario, costo_anterior, motivo_baja_id, motivo_diferencia_id,
-          traslado_id, cuenta_linea_anulacion_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+          traslado_id, cuenta_linea_anulacion_id, compra_linea_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
        RETURNING movimiento_id`,
       [
         params.tenantId,
@@ -584,6 +616,7 @@ export class InventarioService {
         params.motivoDiferenciaId ?? null,
         params.trasladoId ?? null,
         params.cuentaLineaAnulacionId ?? null,
+        params.compraLineaId ?? null,
       ],
     );
 
@@ -750,6 +783,39 @@ export class InventarioService {
    * Sin stock previo o sin costo previo no hay masa que promediar: manda el
    * costo de compra. Eso además evita dividir por cero.
    */
+  /**
+   * El stock de cada producto sumado en todas sus ubicaciones: el PESO del
+   * costo promedio (ADR-016, addendum 2026-09-18). Una sola definición para
+   * los tres que lo usan —el promedio de `registrarMovimiento`, la línea de
+   * compra que lo congela al confirmar y "rehacer la cuenta"—, porque dos
+   * copias de esta SQL se separarían con el primer cambio y la cuenta rehecha
+   * partiría de otro número.
+   *
+   * En lote (`ANY`) para que compras no haga una consulta por línea. Filtra
+   * ubicaciones eliminadas igual que el stock total de `GET /items`, para que
+   * el peso sea el mismo número que ve la pantalla. Un id sin filas vuelve
+   * `'0'`.
+   *
+   * ⚠️ Se llama con el lock de `item_producto` ya tomado: fuera de él, una
+   * entrada concurrente en otra ubicación puede no estar commiteada todavía.
+   */
+  async stockTotalPorProducto(
+    manager: EntityManager,
+    itemIds: string[],
+  ): Promise<Map<string, string>> {
+    const rows: { item_id: string; stock: string }[] = await manager.query(
+      `SELECT su.item_id, COALESCE(SUM(su.stock), 0) AS stock
+         FROM stock_ubicacion su
+         JOIN ubicaciones u
+           ON u.ubicacion_id = su.ubicacion_id AND u.eliminado_el IS NULL
+        WHERE su.item_id = ANY($1::uuid[])
+        GROUP BY su.item_id`,
+      [itemIds],
+    );
+    const porItem = new Map(rows.map((r) => [r.item_id, r.stock]));
+    return new Map(itemIds.map((id) => [id, porItem.get(id) ?? '0']));
+  }
+
   private calcularCostoPromedio(
     stockPrevio: Decimal,
     costoActualPrevio: string | null,
