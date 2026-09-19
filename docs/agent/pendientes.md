@@ -528,6 +528,21 @@ pantalla muestra lo que se puede pedir*). Contexto del frente:
   integración**, así que la lectura del DTE queda como **segunda fase**. La varianza —que espera
   a compras— deja de esperar además a que funcione una integración con el SII.
 
+  ✅ **Pieza 1 hecha (2026-09-19):** recibir mercadería. Incluye borrador, confirmar, completar y
+  corregir precio y cantidad, descuento al total, anular e historial ([`features/compras.md`](../features/compras.md)).
+  **Quedan, cada una con su spec y en este orden:**
+  - **Pieza 2:** la unidad de compra por proveedor ("caja de 12").
+  - **Pieza 3:** la deuda con el proveedor y sus pagos, con la salida de caja automática.
+  - **Pieza 4:** los gastos sin stock, con la categoría que define el tenant.
+
+  **Bordes de la pieza 1 que quedaron abiertos:**
+  - `UbicacionesService.remove` no mira los borradores de compra: se puede borrar la bodega de un
+    borrador, y después guardarlo o confirmarlo da 400 "Ubicación no encontrada"
+    (`ComprasService.validarEncabezado`). No se pierde nada, porque el borrador no movió stock,
+    pero el mensaje no dice que la borraron.
+  - En la carga del borrador, una línea en lote sin código o en serie sin series llega al backend y
+    vuelve como 400 en un toast, en vez de marcarse en el formulario.
+
   ⚠️ **Cuatro cosas que hay que tener presentes, y la primera no es técnica:**
 
   1. ⛔ **Leer facturas arrastra un reloj legal.** Por la **Ley 19.983** el comprador tiene

@@ -275,6 +275,8 @@ plan verifica en el seeder al escribirlo.
 | `GET /compras/:id`: encabezado, líneas e historial | Leer |
 | `GET /compras/tipos-documento`: los del país del tenant | Leer |
 | `GET /compras/proveedores`: terceros activos de tipo `proveedor` | Leer |
+| `GET /compras/productos`: productos e ingredientes con stock | Crear |
+| `GET /compras/:id/lineas/:lineaId/unidades`: las series de la línea, disponibles en su ubicación | Actualizar |
 | `POST /compras`, `PATCH /compras/:id`, `DELETE /compras/:id` (solo borradores) | Crear |
 | `POST /compras/:id/confirmar` | Crear |
 | `PATCH /compras/:id/lineas/:lineaId` con `{ precioUnitario? , cantidad?, series?, unidadIds? }` | Actualizar |
@@ -283,6 +285,12 @@ plan verifica en el seeder al escribirlo.
 
 - **`/compras/proveedores` es propio a propósito:** el bodeguero no necesita permiso de Terceros
   para elegir a quién le compró. Crear un proveedor sigue siendo de Terceros.
+- **Por lo mismo, `GET /compras/productos` (`Crear`) y `GET /compras/:id/lineas/:lineaId/unidades`
+  (`Actualizar`)** (owner, 2026-09-19): la lista de productos e ingredientes para cargar la compra,
+  y las unidades serializadas que trajo una línea, disponibles en su ubicación, para bajar su
+  cantidad. Sin ellas, la pantalla usaba `/items`, que exige `Items:Leer`: el encargado de compras
+  recibía 403 y no podía cargar una compra. Así el bodeguero tampoco ve el catálogo con sus precios
+  de venta ni lo puede tocar.
 - **El `tenant_id` sale del token.** Los montos llegan como string, con Decimal.js:
   `precioUnitario` con `@EsCosto()` y `descuentoTotal` con `@EsMontoCobrado()`, porque es plata del
   papel, a la escala de la moneda.

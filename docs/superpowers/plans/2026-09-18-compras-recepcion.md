@@ -1413,16 +1413,32 @@ Depende de las tareas 8 y 9.
   - la cantidad salía "10.0000", la columna `numeric(18,4)` cruda, también al recargar un borrador
     (tarea 4). Ahora se muestra con `cantidadConUnidad` y se edita con `cantidadParaEditar`;
   - `CrudTable` pasa el `data-qa` también a su tabla interna, así que va en un `div` propio.
-- **Pendiente para la tarea 11 (lo marcó la revisión):** bajar la cantidad en serie consulta las
-  unidades con `GET /items/:id/unidades`, que pide `Items:Leer`. Un rol con `Compras:Actualizar` y
-  sin `Items:Leer` ve un toast de error en vez de la lista. El modal no se rompe: queda sin poder
-  enviar.
+- **Resuelto en la tarea 11:** bajar la cantidad en serie consultaba las unidades con
+  `GET /items/:id/unidades`, que pide `Items:Leer`. Al medirlo, el hueco resultó más grande: la
+  carga del borrador también usaba `/items`. Ver la tarea 11.
 
 ---
 
 ### Task 11: Documentación, gate y cierre
 
 **Después de las tareas 1 a 10.**
+
+✅ **Decisión del owner (2026-09-19), *"vamos A"*:** medido con `encargado.compras`, el rol que
+tiene las cuatro acciones de Compras y nada más, `GET /items?tipo=producto` e `?tipo=ingrediente`
+daban **403**. La carga del borrador usaba esos listados, así que **el encargado no podía cargar
+una compra desde la pantalla**, y por lo mismo tampoco veía las unidades al bajar una cantidad en
+serie. No lo cazó nadie: el e2e de la API usaba al encargado solo contra rutas `/compras`, y el
+smoke corría como admin. El owner eligió listas propias de Compras, como la de proveedores:
+`GET /compras/productos` (`Crear`) y `GET /compras/:id/lineas/:lineaId/unidades` (`Actualizar`),
+con el filtro de la línea y la ubicación hecho en el backend. Para que no vuelva a pasar, el e2e
+de las listas y el smoke de navegador corren como el encargado (spec § 5).
+
+Mutantes e2e de las listas: 5 de 6 mueren (los dos guards y los tres filtros de las unidades:
+serie de la línea, ubicación y disponible). **Sobrevive** sacar `i.tipo = ANY(...)` de
+`productos`, y el motivo está medido: el `JOIN item_producto` ya deja solo producto e ingrediente,
+los únicos tipos con esa fila (43 filas en la base aislada después de la suite de compras). Queda
+como espejo de `validarLineas`: si mañana otro tipo tuviera `item_producto`, la lista y la
+validación siguen ofreciendo y aceptando lo mismo.
 
 - [ ] **Step 1: Docs**, en el mismo commit que el último código:
   - `docs/features/compras.md`, desde `TEMPLATE.md`;

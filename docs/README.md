@@ -71,6 +71,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [grupos-modificadores.md](./features/grupos-modificadores.md) | Grupos de modificadores reutilizables (ej. "elige tu bebida/proteína"): asociables a combos y recetas, familia derivada, min/max en unidades, snapshot congelado en la venta |
 | [recuento-inventario.md](./features/recuento-inventario.md) | Recuento de inventario (conteo físico): sesión con ciclo de vida, diferencia como delta, catálogo propio de causas, permisos separados entre contar y aplicar |
 | [bodegas-y-traslados.md](./features/bodegas-y-traslados.md) | Bodegas y traslados: el stock deja de ser un escalar por tenant — saldo por `(ítem, ubicación)`, el local vende y la bodega solo guarda, traslados como documento interno sin emisión del DTE 52 |
+| [compras.md](./features/compras.md) | Compras, pieza 1 (recibir mercadería): borrador, confirmar, completar y corregir precio y cantidad, descuento al total y anular; el costo se rehace desde la compra por la `secuencia` del kardex sin tocar lo vendido |
 | [papelera.md](./features/papelera.md) | Papelera (restaurar eliminados): `incluirEliminados` + `POST .../:id/restaurar` en 18 recursos de catálogo/config; frontend cableado solo en items y categorías |
 | [dashboard-inicio.md](./features/dashboard-inicio.md) | Dashboard de inicio: `GET /resumen-negocio/hoy` (ventas, por cobrar, pérdidas, más vendidos) con permiso propio `Resumen del negocio: Leer`; `pages/index.vue` con las zonas "Ahora" (refresco periódico) y "Hoy" (carga única + "Actualizar") |
 

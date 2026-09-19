@@ -11,11 +11,15 @@ import type { LineaCompra } from '~/composables/useCompras'
 import CorregirLineaModal from './CorregirLineaModal.vue'
 
 const llamadas: { url: string, method?: string, body?: unknown }[] = []
-let unidades: { id: string, serie: string, ubicacionId: string }[] = []
+let unidades: { id: string, serie: string }[] = []
+let urlUnidades = ''
 
 mockNuxtImport('useToast', () => () => ({ add: vi.fn() }))
 mockNuxtImport('useApiFetch', () => (url: string, opts?: { method?: string, body?: unknown }) => {
-  if (url.includes('/unidades')) return Promise.resolve(unidades)
+  if (url.includes('/unidades')) {
+    urlUnidades = url.split('/api').pop()!
+    return Promise.resolve(unidades)
+  }
   llamadas.push({ url: url.split('/api').pop()!, method: opts?.method, body: opts?.body })
   return Promise.resolve({ id: 'compra-1' })
 })
@@ -45,7 +49,7 @@ async function abrir(l: LineaCompra) {
     esOficial: true, valorDelDia: null,
   }], 'tenant-1')
   const wrapper = await mountSuspended(CorregirLineaModal, {
-    props: { compraId: 'compra-1', ubicacionId: 'bodega-1', linea: l, open: true },
+    props: { compraId: 'compra-1', linea: l, open: true },
   })
   await new Promise(r => setTimeout(r, 50))
   return wrapper
@@ -79,6 +83,7 @@ beforeEach(() => {
   document.body.innerHTML = ''
   llamadas.length = 0
   unidades = []
+  urlUnidades = ''
 })
 
 describe('CorregirLineaModal', () => {
@@ -129,12 +134,11 @@ describe('CorregirLineaModal', () => {
     expect(llamadas[0]!.body).toEqual({ cantidad: '3', series: [{ serie: 'SN-3' }] })
   })
 
-  it('en serie, bajar ofrece solo las unidades de esta línea en la ubicación de la compra', async () => {
-    unidades = [
-      { id: 'u1', serie: 'SN-1', ubicacionId: 'bodega-1' },
-      { id: 'u9', serie: 'SN-DE-OTRA', ubicacionId: 'bodega-1' },
-      { id: 'u2', serie: 'SN-2', ubicacionId: 'otra-bodega' },
-    ]
+  it('en serie, bajar ofrece las unidades de esta línea que da Compras, y manda las elegidas', async () => {
+    // Cuáles son (las de la línea, disponibles en su ubicación) lo decide el
+    // backend: lo fija el e2e de la API. Acá, que se piden a la ruta de la
+    // línea y no a `/items`, que exige un permiso que el encargado no tiene.
+    unidades = [{ id: 'u1', serie: 'SN-1' }]
     await abrir(linea({
       modoInventario: 'serie',
       unidadCodigo: 'unidad',
@@ -143,10 +147,10 @@ describe('CorregirLineaModal', () => {
     }))
     await tipear('corregir-cantidad', '1')
 
+    expect(urlUnidades).toBe('/compras/compra-1/lineas/linea-1/unidades')
     const casillas = [...document.body.querySelectorAll('[role="checkbox"]')]
     expect(casillas).toHaveLength(1)
     expect(document.body.textContent).toContain('SN-1')
-    expect(document.body.textContent).not.toContain('SN-DE-OTRA')
 
     ;(casillas[0] as HTMLElement).click()
     await new Promise(r => setTimeout(r, 20))

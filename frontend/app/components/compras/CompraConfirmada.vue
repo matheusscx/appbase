@@ -180,7 +180,6 @@ const columnsHistorial: TableColumn<CambioCompra>[] = [
       v-if="lineaEnEdicion"
       v-model:open="corregirOpen"
       :compra-id="compra.id"
-      :ubicacion-id="compra.ubicacionId"
       :linea="lineaEnEdicion"
       @success="(c: CompraDetalle) => emit('actualizada', c)"
     />

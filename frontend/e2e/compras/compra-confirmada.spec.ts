@@ -1,15 +1,23 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 import { API, api, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/api'
 
 /**
- * El detalle de una compra confirmada, por pantalla (spec compras § 6): completar
- * el precio que faltaba, cargar el descuento y anularla.
+ * Compras por pantalla, **como el encargado de compras** (`encargado.compras`:
+ * las cuatro acciones de Compras y nada más). Con admin, que lo puede todo,
+ * pasaba que la carga del borrador pedía `/items`, el encargado recibía 403 y
+ * nadie se enteraba (owner, 2026-09-19).
  *
- * La compra se arma y se confirma por API: recibirla ya está cubierto en el
- * e2e de la API, y lo que se ejercita acá es lo que la pantalla hace con una
- * confirmada. Las cuentas del costo también las cubre el e2e de la API; acá
- * alcanza con que cada acción viaje y la pantalla la refleje.
+ * Las precondiciones —el producto, el proveedor, la compra confirmada— se arman
+ * por API como admin: crear ítems y proveedores no es de Compras, y recibir ya
+ * lo cubre el e2e de la API. Las cuentas del costo también; acá alcanza con que
+ * cada acción viaje y la pantalla la refleje.
  */
+
+// Sin la sesión de admin que guarda `auth.setup.ts`: cada test entra como el
+// encargado.
+test.use({ storageState: { cookies: [], origins: [] } })
+
+const ENCARGADO = { email: 'encargado.compras@paris.cl', password: 'admin' }
 
 let escenario: { token?: string, itemIds: string[], proveedorId?: string } = { itemIds: [] }
 
@@ -34,6 +42,18 @@ test.afterEach(async ({ request }) => {
   }
 })
 
+/** Login por pantalla. Tiene un solo tenant: entra directo, sin elegir. */
+async function entrarComoEncargado(page: Page) {
+  // networkidle: esperar la hidratación antes de tipear (ver auth.setup.ts).
+  await page.goto('/login', { waitUntil: 'networkidle' })
+  await page.getByPlaceholder('tu@email.com').fill(ENCARGADO.email)
+  await page.locator('input[type="password"]').first().fill(ENCARGADO.password)
+  const submit = page.locator('button[type="submit"]').first()
+  await expect(submit).toBeEnabled()
+  await submit.click()
+  await page.waitForURL(url => url.pathname === '/')
+}
+
 /** Tipea en un `MoneyInput` tecla por tecla (maska ignora `fill`). */
 async function escribirEn(page: Page, qa: string, valor: string) {
   const input = page.locator(`input[data-qa="${qa}"]`)
@@ -41,7 +61,8 @@ async function escribirEn(page: Page, qa: string, valor: string) {
   await input.pressSequentially(valor)
 }
 
-test('completar el precio, cargar el descuento y anular una compra confirmada', async ({ page, request }) => {
+/** Un producto propio y un proveedor, como admin. */
+async function precondiciones(request: APIRequestContext) {
   const token = escenario.token!
   const producto = await crearProducto(request, token, {
     nombre: `Tomate compras e2e ${Date.now()}`,
@@ -49,12 +70,36 @@ test('completar el precio, cargar el descuento y anular una compra confirmada', 
     stock: '0',
   })
   escenario.itemIds.push(producto.id)
-
   const proveedor = await api<{ id: string }>(request, 'post', '/terceros', {
     token,
     data: { tipo: 'proveedor', nombre: `Distribuidora e2e ${Date.now()}` },
   })
   escenario.proveedorId = proveedor.id
+  return { producto, proveedor }
+}
+
+test('el encargado encuentra el producto al cargar una compra: la lista es de Compras', async ({ page, request }) => {
+  const nombre = `Harina compras e2e ${Date.now()}`
+  const producto = await crearProducto(request, escenario.token!, { nombre, precioBase: '900', stock: '0' })
+  escenario.itemIds.push(producto.id)
+
+  await entrarComoEncargado(page)
+  const listados: string[] = []
+  page.on('response', (r) => {
+    if (r.url().includes('/api/items')) listados.push(`${r.status()} ${r.url()}`)
+  })
+  await page.goto('/compras/nueva', { waitUntil: 'networkidle' })
+
+  await page.getByText('Selecciona un producto').click()
+  await page.keyboard.type(nombre)
+  await expect(page.getByRole('option', { name: nombre })).toBeVisible()
+  // Ni un pedido al catálogo de ítems, que el encargado no puede leer.
+  expect(listados).toEqual([])
+})
+
+test('completar el precio, cargar el descuento y anular una compra confirmada', async ({ page, request }) => {
+  const token = escenario.token!
+  const { producto, proveedor } = await precondiciones(request)
   const tipos = await api<{ id: string, requiereFolio: boolean }[]>(
     request, 'get', '/compras/tipos-documento', { token },
   )
@@ -76,6 +121,7 @@ test('completar el precio, cargar el descuento y anular una compra confirmada', 
   await api(request, 'post', `/compras/${borrador.id}/confirmar`, { token })
   const lineaId = borrador.lineas[0]!.id
 
+  await entrarComoEncargado(page)
   await page.goto(`/compras/${borrador.id}`, { waitUntil: 'networkidle' })
   const detalle = page.locator('[data-qa="compra-confirmada"]')
   await expect(detalle).toBeVisible()

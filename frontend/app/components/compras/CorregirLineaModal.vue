@@ -11,7 +11,6 @@ import type { CompraDetalle, LineaCompra } from '~/composables/useCompras'
  */
 const props = defineProps<{
   compraId: string
-  ubicacionId: string
   linea: LineaCompra
 }>()
 
@@ -48,16 +47,14 @@ watch(open, async (v) => {
 
 /**
  * Las unidades que trajo esta línea y siguen disponibles en la ubicación de
- * la compra: son las únicas que pueden salir al bajar la cantidad.
+ * la compra: son las únicas que pueden salir al bajar la cantidad. El filtro lo
+ * hace el backend, en una ruta de Compras: con `/items/:id/unidades` corregir
+ * exigía `Items:Leer` (owner, 2026-09-19).
  */
 async function cargarUnidades() {
   try {
-    const disponibles = await useApiFetch<{ id: string, serie: string, ubicacionId: string }[]>(
-      `${apiUrl}/items/${props.linea.itemId}/unidades?estado=disponible`,
-    )
-    const deLaLinea = new Set((props.linea.series ?? []).map(s => s.serie))
-    unidadesDeLaLinea.value = disponibles.filter(
-      u => deLaLinea.has(u.serie) && u.ubicacionId === props.ubicacionId,
+    unidadesDeLaLinea.value = await useApiFetch<{ id: string, serie: string }[]>(
+      `${apiUrl}/compras/${props.compraId}/lineas/${props.linea.id}/unidades`,
     )
   }
   catch (e: unknown) {

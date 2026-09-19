@@ -1386,6 +1386,135 @@ describe('Compras — borrador (e2e)', () => {
         ).toHaveLength(0);
       });
 
+      /**
+       * Las listas propias de Compras (owner, 2026-09-19). Corren como el
+       * **encargado de compras**, que solo tiene permisos de Compras: con admin,
+       * que lo puede todo, el 403 de `GET /items` que dejaba al encargado sin
+       * poder cargar una compra pasó todas las suites.
+       */
+      describe('listas propias de Compras, como el encargado', () => {
+        it('productos: el encargado ve productos e ingredientes, no servicios; sin Crear es 403', async () => {
+          const encargado = await login(ENCARGADO_COMPRAS_EMAIL);
+          const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+          const producto = await productoVacio({
+            nombre: `Producto lista ${marca}`,
+          });
+          const ingrediente = (
+            await post<IdResponse>('/api/items', {
+              nombre: `Ingrediente lista ${marca}`,
+              tipo: 'ingrediente',
+              precioBase: '500',
+              monedaId: CLP_MONEDA_ID,
+              unidadMedida: 'kg',
+            })
+          ).id;
+          const servicio = (
+            await post<IdResponse>('/api/items', {
+              nombre: `Servicio lista ${marca}`,
+              tipo: 'servicio',
+              precioBase: '500',
+              monedaId: CLP_MONEDA_ID,
+            })
+          ).id;
+
+          // Lo que antes no podía: el catálogo de ítems.
+          expect(
+            (await intentar('get', '/api/items?tipo=producto', {}, encargado))
+              .status,
+          ).toBe(403);
+
+          const lista = await get<{ id: string; modoInventario: string }[]>(
+            '/api/compras/productos',
+            200,
+            encargado,
+          );
+          const ids = lista.map((p) => p.id);
+          expect(ids).toContain(producto);
+          expect(ids).toContain(ingrediente);
+          expect(ids).not.toContain(servicio);
+
+          const lectura = await login(COMPRAS_LECTURA_EMAIL);
+          expect(
+            (await intentar('get', '/api/compras/productos', {}, lectura))
+              .status,
+          ).toBe(403);
+        });
+
+        it('unidades de una línea: solo las que trajo, disponibles en la ubicación; sin Actualizar 403; otro tenant 404', async () => {
+          const encargado = await login(ENCARGADO_COMPRAS_EMAIL);
+          const itemId = await productoVacio({ modoInventario: 'serie' });
+          const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+          const compraSerie = async (series: string[]) => {
+            const compra = await post<CompraDetalle>(
+              '/api/compras',
+              borrador({
+                lineas: [
+                  {
+                    itemId,
+                    cantidad: String(series.length),
+                    unidadCodigo: 'unidad',
+                    precioUnitario: '90000',
+                    series: series.map((serie) => ({ serie })),
+                  },
+                ],
+              }),
+            );
+            await confirmar(compra.id);
+            return compra.id;
+          };
+          const compraId = await compraSerie([
+            `SN-A-${marca}`,
+            `SN-B-${marca}`,
+          ]);
+          // Del mismo producto, en la misma bodega, pero de otra compra.
+          await compraSerie([`SN-C-${marca}`]);
+          const lineaId = await primeraLinea(compraId);
+          const url = `/api/compras/${compraId}/lineas/${lineaId}/unidades`;
+
+          const unidades = await get<{ id: string; serie: string }[]>(
+            url,
+            200,
+            encargado,
+          );
+          expect(unidades.map((u) => u.serie)).toEqual([
+            `SN-A-${marca}`,
+            `SN-B-${marca}`,
+          ]);
+
+          const carga = await login(COMPRAS_CARGA_EMAIL);
+          expect((await intentar('get', url, {}, carga)).status).toBe(403);
+          const otro = await loginSegundoTenant(app);
+          expect((await intentar('get', url, {}, otro)).status).toBe(404);
+
+          // La que se trasladó a otra ubicación ya no puede salir por esta compra.
+          const [a, b] = unidades;
+          const motivos = await get<{ id: string }[]>(
+            '/api/motivos-traslado?soloActivas=true',
+          );
+          await post('/api/traslados', {
+            origenId: bodegaId,
+            destinoId: localId,
+            motivoTrasladoId: motivos[0].id,
+            lineas: [{ itemId, cantidad: '1', unidadIds: [b.id] }],
+          });
+          expect(
+            (await get<{ serie: string }[]>(url, 200, encargado)).map(
+              (u) => u.serie,
+            ),
+          ).toEqual([a.serie]);
+
+          // Y la que salió de la bodega, tampoco.
+          await ajustarStock(itemId, {
+            ubicacionId: bodegaId,
+            tipo: 'salida',
+            motivo: 'ajuste_manual',
+            cantidad: '1',
+            unidadIds: [a.id],
+          });
+          expect(await get<unknown[]>(url, 200, encargado)).toHaveLength(0);
+        });
+      });
+
       it('un borrador no se corrige: 409', async () => {
         const compra = await post<CompraDetalle>('/api/compras', borrador());
         const r = await corregirPrecio(

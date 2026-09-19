@@ -53,6 +53,19 @@ export class ComprasController {
     return this.comprasService.proveedores(tenantId);
   }
 
+  /**
+   * Los productos e ingredientes que se pueden comprar. Propio de Compras, como
+   * `proveedores`: quien recibe mercadería no necesita permiso sobre el
+   * catálogo de ítems (owner, 2026-09-19). `Crear`, porque es la lista para
+   * cargar una compra.
+   */
+  @Get('productos')
+  @RequiresPermiso('Compras', 'Crear')
+  productos(@Req() req: Request) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.comprasService.productos(tenantId);
+  }
+
   @Get()
   @RequiresPermiso('Compras', 'Leer')
   findAll(@Req() req: Request, @Query() query: FindComprasDto) {
@@ -160,6 +173,21 @@ export class ComprasController {
       id: string;
     };
     return this.comprasService.anular(tenantId, usuarioId, id, dto);
+  }
+
+  /**
+   * Las unidades serializadas de una línea que pueden salir al bajar su
+   * cantidad. `Actualizar`, el mismo permiso que la corrección que las usa.
+   */
+  @Get(':id/lineas/:lineaId/unidades')
+  @RequiresPermiso('Compras', 'Actualizar')
+  unidadesDeLinea(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('lineaId', ParseUUIDPipe) lineaId: string,
+  ) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.comprasService.unidadesDeLinea(tenantId, id, lineaId);
   }
 
   @Delete(':id')

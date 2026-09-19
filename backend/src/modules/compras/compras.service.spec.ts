@@ -255,6 +255,67 @@ describe('ComprasService (borrador)', () => {
     });
   });
 
+  describe('listas propias de Compras (owner, 2026-09-19)', () => {
+    it('productos ofrece lo mismo que validarLineas acepta: producto e ingrediente con stock, no borrados', async () => {
+      pisar(
+        /JOIN item_producto ip ON ip\.item_id = i\.item_id\s+WHERE i\.tenant_id = \$1/,
+        [
+          {
+            item_id: ITEM,
+            nombre: 'Harina',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'kg',
+          },
+        ],
+      );
+
+      const r = await service.productos(TENANT);
+
+      expect(r).toEqual([
+        {
+          id: ITEM,
+          nombre: 'Harina',
+          modoInventario: 'cantidad',
+          unidadMedida: 'kg',
+        },
+      ]);
+      const db = (service as unknown as { db: { query: jest.Mock } }).db;
+      const [sql, params] = db.query.mock.calls.find(([q]) =>
+        /JOIN item_producto ip ON ip\.item_id = i\.item_id\s+WHERE i\.tenant_id/.test(
+          q as string,
+        ),
+      )! as [string, unknown[]];
+      expect(sql).toMatch(
+        /i\.tipo = ANY\(\$2::text\[\]\)\s+AND i\.eliminado_el IS NULL/,
+      );
+      expect(params).toEqual([TENANT, ['producto', 'ingrediente']]);
+    });
+
+    it('las unidades de una línea que no es de esa compra (o de otro tenant) son 404', async () => {
+      await expect(
+        service.unidadesDeLinea(TENANT, COMPRA, 'otra-linea'),
+      ).rejects.toThrow('Línea no encontrada');
+    });
+
+    it('las unidades filtran la papelera en cada tabla, también en la consulta que las devuelve', async () => {
+      pisar(/SELECT cl\.compra_linea_id\s+FROM compra_lineas cl/, [
+        { compra_linea_id: 'l1' },
+      ]);
+      await service.unidadesDeLinea(TENANT, COMPRA, 'l1');
+      const db = (service as unknown as { db: { query: jest.Mock } }).db;
+      const [sql] = db.query.mock.calls.find(([q]) =>
+        /SELECT u\.unidad_id, u\.serie/.test(q as string),
+      )! as [string];
+      expect(sql).toMatch(
+        /c\.tenant_id = cl\.tenant_id\s+AND c\.eliminado_el IS NULL/,
+      );
+      expect(sql).toMatch(/AND u\.eliminado_el IS NULL/);
+      expect(sql).toMatch(
+        /cl\.compra_linea_id = \$2\s+AND cl\.eliminado_el IS NULL/,
+      );
+    });
+  });
+
   it('un proveedor de otro tenant da el mismo 400 que uno inexistente', async () => {
     pisar(/FROM terceros\s+WHERE tercero_id/, []);
     await expect(service.crearBorrador(TENANT, USUARIO, dto())).rejects.toThrow(

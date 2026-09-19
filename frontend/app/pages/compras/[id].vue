@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CompraDetalle, LineaCompra as LineaDetalle } from '~/composables/useCompras'
 import { hoyLocal } from '~/composables/useVigenciaRegla'
 
@@ -109,20 +108,18 @@ const pideFolio = computed(() => tipoSeleccionado.value?.requiereFolio ?? true)
 
 async function cargarCatalogos() {
   await unidadesMedidaStore.ensureLoaded()
-  // Producto e ingrediente: los dos llevan stock, y un restaurante compra sobre
-  // todo ingredientes (mismo par que traslados y mermas).
-  const [tiposRes, provRes, prodRes, ingRes] = await Promise.all([
+  // La lista es de Compras y no `/items`: quien recibe mercadería no necesita
+  // permiso sobre el catálogo de ítems (owner, 2026-09-19). Trae producto e
+  // ingrediente, los dos con stock, ya ordenados.
+  const [tiposRes, provRes, prodRes] = await Promise.all([
     useApiFetch<TipoDocumento[]>(`${apiUrl}/compras/tipos-documento`),
     useApiFetch<Proveedor[]>(`${apiUrl}/compras/proveedores`),
-    useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=producto&pageSize=100`),
-    useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=ingrediente&pageSize=100`),
+    useApiFetch<ProductoOpt[]>(`${apiUrl}/compras/productos`),
     cargarUbicaciones(),
   ])
   tipos.value = tiposRes
   proveedores.value = provRes
-  productos.value = [...prodRes.data, ...ingRes.data].sort((a, b) =>
-    a.nombre.localeCompare(b.nombre, 'es'),
-  )
+  productos.value = prodRes
 }
 
 function lineaDesdeDetalle(l: LineaDetalle): LineaForm {

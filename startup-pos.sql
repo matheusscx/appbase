@@ -975,7 +975,7 @@ CREATE TABLE "movimientos_inventario" (
   "item_id"          UUID          NOT NULL REFERENCES "items" ("item_id"),
   "ubicacion_id"     UUID          NOT NULL REFERENCES "ubicaciones" ("ubicacion_id"),
   "tipo"             TEXT          NOT NULL,   -- 'entrada' | 'salida' | 'ajuste'
-  "motivo"           TEXT          NOT NULL,   -- 'compra' | 'venta' | 'devolucion' | 'anulacion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'recuento' | 'traslado'
+  "motivo"           TEXT          NOT NULL,   -- 'compra' | 'venta' | 'devolucion' | 'anulacion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'correccion_compra' | 'recuento' | 'traslado'
   "cantidad"         NUMERIC(18,4) NOT NULL,   -- siempre positiva; el tipo define el signo
   "stock_anterior"   NUMERIC(18,4) NOT NULL,
   "stock_resultante" NUMERIC(18,4) NOT NULL,
@@ -983,7 +983,11 @@ CREATE TABLE "movimientos_inventario" (
   "usuario_id"       UUID          REFERENCES "usuarios" ("usuario_id"),
   "comentario"       TEXT,
   "costo_unitario"   NUMERIC(18,4),
-  "costo_anterior"   NUMERIC(18,4),   -- costo vigente ANTES del movimiento; solo en motivo 'ajuste_costo'
+  "costo_anterior"   NUMERIC(18,4),   -- costo vigente ANTES del movimiento; solo en los ajustes de valor ('ajuste_costo', 'correccion_compra')
+  "costo_informado"  BOOLEAN       NOT NULL DEFAULT false,
+  -- si el movimiento TRAJO su costo. Sin costo, costo_unitario congela el CPP
+  -- de ese momento; "rehacer la cuenta" de compras lo lee para saber qué
+  -- entrada promedió (owner, 2026-09-19).
   "motivo_baja_id"   UUID REFERENCES "motivo_baja" ("motivo_baja_id"),
   "motivo_diferencia_id" UUID REFERENCES "motivo_diferencia_inventario" ("motivo_diferencia_inventario_id"),
   -- solo en motivo='recuento'; NULL en el resto
@@ -995,6 +999,14 @@ CREATE TABLE "movimientos_inventario" (
   -- solo en motivo='merma' cuando el consumo vino de anular un plato ya
   -- despachado; NULL en el resto. Une este movimiento con su fila de
   -- cuenta_linea_anulaciones (trazabilidad, parte 3).
+  "compra_linea_id"  UUID,          -- FK definida después de crear compra_lineas
+  -- la línea de compra que lo generó: su entrada, las diferencias de cantidad,
+  -- la salida de su anulación y la correccion_compra. NULL en el resto,
+  -- incluida la entrada 'compra' del atajo del ajuste de stock.
+  "secuencia"        BIGSERIAL     NOT NULL,
+  -- el orden REAL de aplicación: se toma en el INSERT, con el lock del
+  -- producto ya tomado. creado_el es la hora en que EMPEZÓ la transacción, y
+  -- dos que compiten por el mismo producto pueden quedar al revés.
   "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"   TIMESTAMPTZ,
   "eliminado_el"     TIMESTAMPTZ
@@ -1006,6 +1018,100 @@ CREATE INDEX "idx_movimientos_inventario_venta" ON "movimientos_inventario" ("ve
 -- el detalle (GET /traslados/:id, que corre dentro de la transacción del
 -- traslado) y el conteo de productos movidos del listado.
 CREATE INDEX "idx_movimientos_inventario_traslado" ON "movimientos_inventario" ("traslado_id");
+-- Los movimientos de una línea de compra: su entrada y sus correcciones.
+CREATE INDEX "idx_movimientos_inventario_compra_linea" ON "movimientos_inventario" ("compra_linea_id");
+-- El recorrido de "rehacer la cuenta": los movimientos de UN producto desde
+-- una secuencia en adelante, en orden.
+CREATE INDEX "idx_movimientos_inventario_item_secuencia" ON "movimientos_inventario" ("item_id", "secuencia");
+
+-- ─── Compras (pieza 1: recibir mercadería) ──────────────────────────────────
+-- docs/features/compras.md
+
+-- Documentos de compra por país. Tabla y no enum, como los de venta; aparte de
+-- tipos_documento_tributario porque ésa alimenta el selector del POS.
+CREATE TABLE "tipos_documento_compra" (
+  "tipo_documento_compra_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "pais_id"        UUID         NOT NULL REFERENCES "pais" ("pais_id"),
+  "nombre"         VARCHAR(100) NOT NULL,
+  "codigo"         VARCHAR(20),         -- NULL si no es tributario ("Sin documento")
+  "requiere_folio" BOOLEAN      NOT NULL DEFAULT true,
+  "activo"         BOOLEAN      NOT NULL DEFAULT true,
+  "creado_el"      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ
+);
+
+-- El encabezado. Un borrador se edita entero; una confirmada se corrige por
+-- línea o se anula, nunca se borra. Sin eliminado_por: un borrador descartado
+-- no va a la papelera (owner, 2026-09-18).
+CREATE TABLE "compras" (
+  "compra_id"                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"                UUID         NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "proveedor_id"             UUID         NOT NULL REFERENCES "terceros" ("tercero_id"),
+  "tipo_documento_compra_id" UUID         NOT NULL REFERENCES "tipos_documento_compra" ("tipo_documento_compra_id"),
+  "folio"                    VARCHAR(40),     -- NULL con "Sin documento"
+  "fecha_documento"          DATE         NOT NULL,
+  "ubicacion_id"             UUID         NOT NULL REFERENCES "ubicaciones" ("ubicacion_id"),
+  "estado"                   TEXT         NOT NULL DEFAULT 'borrador', -- 'borrador' | 'confirmada' | 'anulada'
+  "descuento_total"          NUMERIC(18,4),   -- a la escala de la moneda oficial; solo con todas las líneas con precio
+  "observacion"              TEXT,
+  "creado_por"               UUID         NOT NULL REFERENCES "usuarios" ("usuario_id"),
+  "confirmado_por"           UUID         REFERENCES "usuarios" ("usuario_id"),
+  "confirmado_el"            TIMESTAMPTZ,
+  "anulado_por"              UUID         REFERENCES "usuarios" ("usuario_id"),
+  "anulado_el"               TIMESTAMPTZ,
+  "motivo_anulacion"         TEXT,
+  "creado_el"                TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  "actualizado_el"           TIMESTAMPTZ,
+  "eliminado_el"             TIMESTAMPTZ
+);
+-- El folio es único por emisor y tipo (ley); una anulada libera el suyo.
+CREATE UNIQUE INDEX "uq_compra_folio"
+  ON "compras" ("tenant_id", "proveedor_id", "tipo_documento_compra_id", "folio")
+  WHERE "folio" IS NOT NULL AND "estado" <> 'anulada' AND "eliminado_el" IS NULL;
+
+-- Las líneas, en la unidad de la factura. Lo "congelado al confirmar" es el
+-- punto de partida de "rehacer la cuenta".
+CREATE TABLE "compra_lineas" (
+  "compra_linea_id"         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "compra_id"               UUID          NOT NULL REFERENCES "compras" ("compra_id"),
+  "tenant_id"               UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "item_id"                 UUID          NOT NULL REFERENCES "items" ("item_id"),  -- producto o ingrediente
+  "orden"                   INT           NOT NULL,   -- el de la factura
+  "cantidad"                NUMERIC(18,4) NOT NULL,   -- como se tipeó, > 0
+  "unidad_codigo"           TEXT          NOT NULL,
+  "precio_unitario"         NUMERIC(18,4),            -- por unidad TIPEADA; NULL = falta costo; 0 = regalo
+  "series"                  JSONB,
+  "lote"                    JSONB,
+  -- congelado al confirmar
+  "cantidad_base"           NUMERIC(18,4),            -- en la unidad del producto
+  "costo_unitario_base"     NUMERIC(18,4),            -- convertido y con su parte del descuento; NULL sin precio
+  "movimiento_id"           UUID REFERENCES "movimientos_inventario" ("movimiento_id"),  -- la entrada original
+  "stock_total_anterior"    NUMERIC(18,4),            -- del producto, justo antes de la entrada
+  "costo_producto_anterior" NUMERIC(18,4),            -- el CPP, justo antes de la entrada
+  "creado_el"               TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"          TIMESTAMPTZ,
+  "eliminado_el"            TIMESTAMPTZ               -- solo las de un borrador reemplazado o descartado
+);
+CREATE INDEX "idx_compra_lineas_compra" ON "compra_lineas" ("compra_id");
+
+-- FK diferida de movimientos_inventario (depende de compra_lineas)
+ALTER TABLE "movimientos_inventario" ADD FOREIGN KEY ("compra_linea_id") REFERENCES "compra_lineas" ("compra_linea_id");
+
+-- Historial de correcciones de una línea confirmada. Append-only: un cambio
+-- hecho no se deshace borrándolo, se corrige con otro.
+CREATE TABLE "compra_linea_cambios" (
+  "compra_linea_cambio_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "compra_linea_id"        UUID NOT NULL REFERENCES "compra_lineas" ("compra_linea_id"),
+  "tenant_id"              UUID NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "campo"                  TEXT NOT NULL,   -- 'precio' | 'cantidad' | 'descuento'
+  "valor_anterior"         TEXT,
+  "valor_nuevo"            TEXT,
+  "usuario_id"             UUID NOT NULL REFERENCES "usuarios" ("usuario_id"),
+  "movimiento_id"          UUID REFERENCES "movimientos_inventario" ("movimiento_id"),  -- la diferencia de stock o la correccion_compra
+  "creado_el"              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX "idx_compra_linea_cambios_linea" ON "compra_linea_cambios" ("compra_linea_id");
 
 -- Lotes: identidad del lote (código, elaboración, vencimiento), una sola vez
 -- por lote — no varía por ubicación. `cantidad_inicial` es acumulado

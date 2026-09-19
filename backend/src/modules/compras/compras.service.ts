@@ -56,6 +56,13 @@ export interface ProveedorOpcion {
   rut: string | null;
 }
 
+export interface ProductoCompraOpcion {
+  id: string;
+  nombre: string;
+  modoInventario: string;
+  unidadMedida: string | null;
+}
+
 export interface CompraListItem {
   id: string;
   estado: EstadoCompra;
@@ -340,6 +347,88 @@ export class ComprasService {
       nombre: r.nombre,
       rut: r.rut,
     }));
+  }
+
+  /**
+   * Lo que se puede comprar: los productos e ingredientes con stock del
+   * tenant. Es propio de Compras por lo mismo que `proveedores` (spec § 5,
+   * owner 2026-09-19): el bodeguero elige qué recibió sin permiso sobre el
+   * catálogo de ítems, que muestra precios de venta y deja editarlos. Sin él,
+   * `encargado.compras` recibía 403 en `GET /items` y no podía cargar una
+   * compra desde la pantalla.
+   *
+   * Es el mismo conjunto que acepta `validarLineas`: ofrecer algo que después
+   * rebota, o esconder algo que se acepta, desincroniza la pantalla del
+   * backend.
+   */
+  async productos(tenantId: string): Promise<ProductoCompraOpcion[]> {
+    const rows: {
+      item_id: string;
+      nombre: string;
+      modo_inventario: string;
+      unidad_medida: string | null;
+    }[] = await this.db.query(
+      `SELECT i.item_id, i.nombre, ip.modo_inventario, ip.unidad_medida
+         FROM items i
+         JOIN item_producto ip ON ip.item_id = i.item_id
+        WHERE i.tenant_id = $1 AND i.tipo = ANY($2::text[])
+          AND i.eliminado_el IS NULL
+        ORDER BY i.nombre`,
+      [tenantId, TIPOS_CON_STOCK],
+    );
+    return rows.map((r) => ({
+      id: r.item_id,
+      nombre: r.nombre,
+      modoInventario: r.modo_inventario,
+      unidadMedida: r.unidad_medida,
+    }));
+  }
+
+  /**
+   * Las unidades serializadas que trajo una línea y siguen disponibles en la
+   * ubicación de la compra: las únicas que pueden salir al bajar su cantidad
+   * (owner, 2026-09-19). Propio de Compras por lo mismo que `productos`: sin
+   * él, corregir exigía `Items:Leer`.
+   *
+   * `item_unidad` filtra `eliminado_el`; `compras` y `compra_lineas` también,
+   * aunque una confirmada no se borra.
+   */
+  async unidadesDeLinea(
+    tenantId: string,
+    compraId: string,
+    lineaId: string,
+  ): Promise<{ id: string; serie: string }[]> {
+    const linea: { compra_linea_id: string }[] = await this.db.query(
+      `SELECT cl.compra_linea_id
+         FROM compra_lineas cl
+         JOIN compras c ON c.compra_id = cl.compra_id
+          AND c.tenant_id = cl.tenant_id AND c.eliminado_el IS NULL
+        WHERE cl.tenant_id = $1 AND cl.compra_id = $2
+          AND cl.compra_linea_id = $3 AND cl.eliminado_el IS NULL`,
+      [tenantId, compraId, lineaId],
+    );
+    if (!linea.length) {
+      throw new NotFoundException('Línea no encontrada');
+    }
+    const rows: { unidad_id: string; serie: string }[] = await this.db.query(
+      `SELECT u.unidad_id, u.serie
+         FROM compra_lineas cl
+         JOIN compras c
+           ON c.compra_id = cl.compra_id AND c.tenant_id = cl.tenant_id
+          AND c.eliminado_el IS NULL
+         JOIN item_unidad u
+           ON u.item_id = cl.item_id AND u.tenant_id = cl.tenant_id
+          AND u.ubicacion_id = c.ubicacion_id AND u.estado = 'disponible'
+          AND u.eliminado_el IS NULL
+        WHERE cl.tenant_id = $1 AND cl.compra_linea_id = $2
+          AND cl.eliminado_el IS NULL
+          AND u.serie IN (
+            SELECT s->>'serie' FROM jsonb_array_elements(cl.series) s
+          )
+        ORDER BY u.serie`,
+      [tenantId, lineaId],
+    );
+    return rows.map((r) => ({ id: r.unidad_id, serie: r.serie }));
   }
 
   // ───────────────────────────────────────────────────────────────────────

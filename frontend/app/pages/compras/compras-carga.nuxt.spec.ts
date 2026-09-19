@@ -58,12 +58,9 @@ mockNuxtImport('useApiFetch', () => {
     if (url.includes('/compras/tipos-documento')) return Promise.resolve([FACTURA, SIN_DOC])
     if (url.includes('/compras/proveedores')) return Promise.resolve([PROVEEDOR])
     if (url.includes('/ubicaciones')) return Promise.resolve([BODEGA])
-    if (url.includes('/items?tipo=producto')) {
-      return Promise.resolve({ data: [HARINA], meta: { page: 1, pageSize: 100, total: 1, totalPages: 1 } })
-    }
-    if (url.includes('/items?tipo=ingrediente')) {
-      return Promise.resolve({ data: [], meta: { page: 1, pageSize: 100, total: 0, totalPages: 0 } })
-    }
+    // La lista de Compras, no `/items`: el encargado no tiene permiso de Ítems.
+    if (url.includes('/compras/productos')) return Promise.resolve([HARINA])
+    if (url.includes('/items')) throw new Error('la carga de compras no debe pedir /items')
     if (url.includes('/catalog/unidades-medida')) return Promise.resolve([])
     return Promise.resolve([])
   }
