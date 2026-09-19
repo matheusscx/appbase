@@ -152,6 +152,18 @@ describe('zona "Ahora" — con permiso, pide y muestra', () => {
     wrapper.unmount()
   })
 
+  it('cada tarjeta es un link real, focuseable con Tab y con su destino como href', async () => {
+    permisos = ['Salones:Ver todas', 'Cajas:Leer']
+    const wrapper = await montar()
+
+    const hrefs = wrapper.findAll('a').map(a => a.attributes('href'))
+    expect(hrefs).toContain('/salones')
+    // Cajas y Cierres del día comparten destino: la bandeja de cajas.
+    expect(hrefs.filter(h => h === '/cajas')).toHaveLength(2)
+
+    wrapper.unmount()
+  })
+
   it('un admin de un tenant que no contrató el módulo (403) lo oculta sin aviso de error', async () => {
     // `esAdmin` deja pasar el `v-if` de la página (spec § 6: el frontend no
     // sabe qué módulos contrató el tenant) — el bloque se esconde solo cuando

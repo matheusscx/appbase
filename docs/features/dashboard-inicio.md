@@ -1,6 +1,6 @@
 # Feature: Dashboard de inicio
 
-**Status**: In Development (Task 5 de 6 — falta el cierre con smoke/mutantes, Task 6)
+**Status**: Complete
 **Owner**: Cesar Matheus
 **Last Updated**: 2026-09-18
 
@@ -10,13 +10,23 @@
 
 ### What is it?
 
-Un endpoint, `GET /api/resumen-negocio/hoy`, que devuelve de un vistazo cómo le fue
-al negocio HOY: vendido, cobrado, cantidad de ventas, ticket promedio (cada uno con el
-valor de hoy, el del mismo día de la semana pasada y la variación), vendido por canal
-(físico/online), lo que hay por cobrar de cualquier fecha, las pérdidas del día
-(anulaciones y mermas, cada una por su lado) y lo más vendido de hoy. Es la plata del
-dashboard de inicio (spec `2026-09-18-dashboard-inicio-design.md` § 3.2) — el turno en
-vivo y el frontend quedan para una tarea posterior.
+El dashboard de inicio (`pages/index.vue`) que ve el dueño al entrar: dos zonas, una
+arriba de la otra.
+
+`GET /api/resumen-negocio/hoy` es la plata del día — vendido, cobrado, cantidad de
+ventas, ticket promedio (cada uno con el valor de hoy, el del mismo día de la semana
+pasada y la variación), vendido por canal (físico/online), lo que hay por cobrar de
+cualquier fecha, las pérdidas del día (anulaciones y mermas, cada una por su lado) y lo
+más vendido de hoy. La consume la zona **"Hoy"** del frontend, que carga una vez y se
+refresca con un botón manual.
+
+La zona **"Ahora"** es el turno en vivo — salón (mesas ocupadas, cuentas abiertas),
+cajas (cajones con sesión abierta, sin montos) y cierres del día (cuántos, con
+descuadre y el efectivo con signo) — con refresco periódico automático cada 60 s
+mientras la pestaña está visible.
+
+Ambas zonas ocultan su bloque sin aviso de error cuando el tenant no contrató el
+módulo (403). El detalle de cada zona está más abajo, en "Frontend".
 
 ### Why does it exist?
 
@@ -276,12 +286,28 @@ por props a cuatro bloques, todos con la misma UNA llamada:
 | `InicioPerdidas.vue` | Anulaciones por tipo (`tipoMotivoBajaLabel`, auto-importado de `useSalones.ts`) con platos, precio de carta y costo (`formatCostoPorMoneda`); mermas con su costo. **Cada uno** —cada tipo de anulación y el bloque de mermas— muestra "N sin costo cargado" si su propio `sinValorizar > 0` (regla 6 del costo sin tipear, `pendientes.md` § 3: `AnulacionPorTipo.sinValorizar` calla lo mismo que `ResumenMermas.sinValorizar` si no se muestra — fix round 1, 2026-09-18). **Sin total** (mismo porqué que el backend, spec § 4.4) | Dos `ULink` internos: "Ver anulaciones" → `/salones/anulaciones`, "Ver mermas" → `/mermas` — no es un card-link único porque tiene dos destinos |
 | `InicioMasVendidos.vue` | Hasta 5 ítems, ya ordenados por el backend, con nombre/cantidad/monto | Sin link: no existe un reporte de ventas al que llevar (spec § 7) |
 
-**Cards accesibles con teclado:** `InicioVentas` y `InicioPorCobrar` son
-`<UCard as="NuxtLink" to="…">` — un `<a>` real, focuseable y activable con Enter — en
-vez del `@click="navigateTo(...)"` sobre un `<div>` que usan los bloques de "Ahora"
-(hallazgo de revisión diferido de Task 4; no se tocaron esos componentes, solo se
-aplicó acá). `InicioPerdidas` usa `ULink` (el mismo mecanismo, sin envolver toda la
-tarjeta) para sus dos destinos.
+**Cards accesibles con teclado:** todas las tarjetas-link de las dos zonas —"Ahora"
+(`InicioSalon`, `InicioCajas`, `InicioCierres`) y "Hoy" (`InicioVentas`,
+`InicioPorCobrar`)— usan `<UCard as="a" href="…" @click.prevent="navigateTo('…')">`:
+un `<a>` real, focuseable con Tab y activable con Enter (el navegador dispara
+`click` sobre un `<a>` enfocado al presionar Enter, y el handler lo captura igual
+que un click de mouse), con la navegación SPA client-side preservada por
+`navigateTo`.
+
+**Por qué no `as="NuxtLink"`:** `UCard` reenvía `as` sin resolver al `Primitive`
+de `reka-ui`, que llama `h(props.as, attrs)` en crudo — sin pasar por
+`resolveComponent`. Vue trata **cualquier** `type` string como una etiqueta HTML
+literal (`createVNode`: `shapeFlag = isString(type) ? ELEMENT : …`), así que
+`as="NuxtLink"` no resuelve al componente global `NuxtLink`: monta un
+`<nuxtlink>` custom-element sin `href`, que no navega al hacer click y no es
+focuseable de forma útil. Esto se usó en Task 5 y se creyó que producía un `<a>`
+real —no se había verificado en el navegador—; quedó así hasta que la revisión de
+rama lo detectó. `as="a"` sí funciona porque `"a"` es una etiqueta HTML válida:
+el mismo `h()` crudo la monta como un `<a>` de verdad.
+
+`InicioPerdidas` usa `ULink` (un componente de Nuxt UI con soporte nativo de
+`to`/`href`, no `UCard` con `as`) para sus dos destinos — ese mecanismo sí
+resuelve a un `<a>` real y no tiene este problema.
 
 ---
 

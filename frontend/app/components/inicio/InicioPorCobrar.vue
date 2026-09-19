@@ -12,9 +12,10 @@ const { formatMonto } = useFormatters()
 
 <template>
   <UCard
-    as="NuxtLink"
-    to="/ventas"
+    as="a"
+    href="/ventas"
     class="cursor-pointer transition hover:ring-2 hover:ring-primary-500"
+    @click.prevent="navigateTo('/ventas')"
   >
     <template #header>
       <div class="flex items-center justify-between gap-2">

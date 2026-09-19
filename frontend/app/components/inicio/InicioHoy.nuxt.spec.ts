@@ -186,6 +186,18 @@ describe('zona "Hoy" — una sola carga y "Actualizar"', () => {
   })
 })
 
+describe('zona "Hoy" — tarjetas como links reales', () => {
+  it('Ventas y Por cobrar son <a href="/ventas">, focuseables con Tab', async () => {
+    const wrapper = await montarHoy()
+
+    const hrefs = wrapper.findAll('a').map(a => a.attributes('href'))
+    // Ventas y Por cobrar comparten destino (no hay reporte de ventas propio).
+    expect(hrefs.filter(h => h === '/ventas')).toHaveLength(2)
+
+    wrapper.unmount()
+  })
+})
+
 describe('zona "Hoy" — formato', () => {
   it('variación null (Cobrado) se muestra "—"', async () => {
     const wrapper = await montarHoy()

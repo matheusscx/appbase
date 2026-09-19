@@ -22,8 +22,10 @@ const { datos, actualizadoEl, sinConexion, oculto } = useRefrescoPeriodico(
 <template>
   <UCard
     v-if="!oculto"
+    as="a"
+    href="/salones"
     class="cursor-pointer transition hover:ring-2 hover:ring-primary-500"
-    @click="navigateTo('/salones')"
+    @click.prevent="navigateTo('/salones')"
   >
     <template #header>
       <div class="flex items-center justify-between gap-2">
