@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** In Progress · **Date:** 2026-09-18 · **Owner:** Cesar Matheus
+**Status:** Done · **Date:** 2026-09-18 · **Owner:** Cesar Matheus
 **Worktree:** `.claude/worktrees/compras-recepcion`, rama `compras-recepcion` (sale de `main` en `dfba1818`).
 
 **Goal:** Una compra con encabezado (proveedor, documento, folio, ubicación) y líneas, que pasa de
@@ -21,10 +21,13 @@ Nuxt 4 + Nuxt UI v4; Jest + supertest; Vitest.
 **Spec:** [`docs/superpowers/specs/2026-09-18-compras-recepcion-design.md`](../specs/2026-09-18-compras-recepcion-design.md).
 Decisiones del owner: [`docs/agent/investigaciones/2026-09-18-compras.md`](../../agent/investigaciones/2026-09-18-compras.md) § 5 y § 5b.
 
-## Estado de las tareas 5 a 10: desbloqueadas, todavía sin código fijado
+## Por qué las tareas 5 a 10 se escribieron sin código fijado
 
-El frente del CPP con stock total **cerró en `6f5a1821`** (2026-09-18) y esta rama ya está
-rebasada encima. Lo que cambió en `inventario.service.ts`, revisado contra el diff:
+📌 **Queda como registro de cómo se planificó, no como estado**: el plan está terminado y lo
+que de verdad se ejecutó está en la tabla de abajo.
+
+El frente del CPP con stock total **cerró en `6f5a1821`** (2026-09-18) y esta rama se rebasó
+encima antes de empezar. Lo que cambió en `inventario.service.ts`, revisado contra el diff:
 
 - Solo en las entradas que recalculan con costo (`compra`, `anulacion`, `devolucion`),
   `registrarMovimiento` lee `SUM(stock)` de `stock_ubicacion` con `JOIN ubicaciones … AND
@@ -39,12 +42,12 @@ rebasada encima. Lo que cambió en `inventario.service.ts`, revisado contra el d
 
 Por eso:
 
-- **Tareas 1 a 4:** se hacen primero; no tocan `inventario.service.ts`.
-- **Tareas 5 a 10:** ya no esperan nada externo, pero siguen con **intención y contrato**. El código
-  se escribe al ejecutarlas, contra el `inventario.service.ts` de ese momento, porque la tarea 5
-  cambia el chokepoint y todo lo demás depende de cómo quede.
+- **Tareas 1 a 4:** iban primero; no tocan `inventario.service.ts`.
+- **Tareas 5 a 10:** ya no esperaban nada externo, pero se escribieron con **intención y
+  contrato**, no con código. El código salió al ejecutarlas, contra el `inventario.service.ts`
+  de ese momento, porque la tarea 5 cambia el chokepoint y todo lo demás depende de cómo quede.
 - **La rama no se integra a `main` hasta la tarea 11.** El estado intermedio (borradores que no se
-  pueden confirmar) no llega a nadie.
+  pueden confirmar) no llega a nadie. Se cumplió: se integró una sola vez, en `51570245`.
 
 ### Ejecución (2026-09-18)
 
@@ -1445,7 +1448,7 @@ los únicos tipos con esa fila (43 filas en la base aislada después de la suite
 como espejo de `validarLineas`: si mañana otro tipo tuviera `item_producto`, la lista y la
 validación siguen ofreciendo y aceptando lo mismo.
 
-- [ ] **Step 1: Docs**, en el mismo commit que el último código:
+- [x] **Step 1: Docs**, en el mismo commit que el último código:
   - `docs/features/compras.md`, desde `TEMPLATE.md`;
   - su link en `docs/README.md`;
   - la fila en `docs/ESTADO.md`;
@@ -1453,7 +1456,16 @@ validación siguen ofreciendo y aceptando lo mismo.
   - `docs/agent/pendientes.md`: la entrada de compras pasa a "pieza 1 hecha" y quedan anotadas las
     piezas 2 a 4;
   - `docs/patterns/backend.md`, si la secuencia del kardex se vuelve patrón.
-- [ ] **Step 2: Gate completo**, con turno de stack y la base reseteada **antes**:
+
+  **Desviación:** salieron en dos commits, no en uno. El de código (`e31c648e`) trajo
+  `features/compras.md`, `README.md`, `ESTADO.md` y `startup-pos.sql`; el cierre que pidió el
+  owner —*"que deje todo listo"*— trajo el resto, ya con la rama integrada. Y el patrón que
+  quedó escrito **no es** la secuencia del kardex sino las **listas propias del módulo**
+  (`patterns/backend.md` § 19): la secuencia es una columna con su docblock, las listas son
+  una decisión que el próximo módulo con permisos propios va a tener que tomar igual. En
+  `PRODUCTO.md` entró § 8f, porque compras trae reglas de negocio nuevas (el costo que puede
+  faltar, corregir en vez de editar).
+- [x] **Step 2: Gate completo**, con turno de stack y la base reseteada **antes**:
 
 ```bash
 ./scripts/reset-db.sh
@@ -1464,13 +1476,32 @@ cd .. && ./scripts/reset-db.sh --verificar
 
   Expected: exit 0 en cada comando. Es el e2e **entero**, no un subset (memoria *gate e2e y
   unit completos*).
+
+  **Desviación: el e2e de la API no corrió contra el stack compartido sino contra la base
+  aislada del worktree** (`./scripts/db-aislada.sh reset 5433`), que es lo que se adoptó a
+  mitad del plan (tarea 8b) porque el `synchronize` de una rama le borraba columnas a la otra.
+  El stack compartido, con turno y `reset-db.sh`, se usó para lo que sí lo necesita:
+  Playwright. Corrido después del rebase final, en verde: e2e de API 1038 pasados / 6
+  salteados, unitarios de backend 2887, front 1409 + ratchet + design + build, Playwright 45,
+  y `reset-db.sh --verificar` OK.
 - [ ] **Step 3: Smoke test en el navegador**, en el Chrome del owner vía devtools: nueva compra,
   confirmar con una línea sin precio, completarla, corregir una cantidad y anular otra.
-- [ ] **Step 4: Skill `verify-feature`**, incluida la revisión independiente (`domain-reviewer`)
+
+  ⛔ **Único paso que queda abierto, y lo cierra el owner, no el agente.** El paso a paso
+  quedó escrito en [`features/compras.md`](../../features/compras.md) § *Smoke manual*, para
+  seguir tal cual y **entrando como `encargado.compras`**. Tiene su entrada en
+  [`pendientes.md`](../../agent/pendientes.md) § 7 para que no se pierda.
+- [x] **Step 4: Skill `verify-feature`**, incluida la revisión independiente (`domain-reviewer`)
   sobre el diff staged. **No correr la revisión y el e2e a la vez**: el revisor muta el working
   tree.
-- [ ] **Step 5: Integrar a `main`** solo con el visto bueno de la sesión coordinadora y el main
-  limpio, sin push.
+
+  **Desviación:** no fue una pasada al final sino **una por tarea**, cada una con su recibo
+  atado al diff staged de ese commit (lo exige el pre-commit). Bloqueó varias veces con razón
+  —los filtros de borrado, el saldo del lote, las unidades que no eran de la línea—, y todo lo
+  que levantó se corrigió antes de commitear.
+- [x] **Step 5: Integrar a `main`** solo con el visto bueno de la sesión coordinadora y el main
+  limpio, sin push. → Integrado en **`51570245`** por fast-forward de la coordinadora, con el
+  OK del owner. Sin push: el deploy a Railway lo decide él.
 
 ---
 

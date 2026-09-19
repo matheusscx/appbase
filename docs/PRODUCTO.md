@@ -367,7 +367,7 @@ Extensiones futuras contempladas: combos con grupos de modificadores (elección,
 
 Trazabilidad de stock para items tipo **producto**. Todo cambio de stock queda registrado como un movimiento auditable; la tabla `stock_ubicacion` (una fila por ítem y ubicación) es el **saldo materializado** para lectura rápida y alertas, y la tabla de movimientos es la **fuente de verdad**.
 
-**`movimientos_inventario`:** tenant, item, `tipo` (`entrada` | `salida` | `ajuste`), `motivo` (`compra` | `venta` | `devolucion` | `merma` | `ajuste_manual` | `inventario_inicial` | `recuento`), cantidad (siempre positiva; el tipo define el signo), `stock_anterior`, `stock_resultante`, `venta_id` opcional, `usuario_id` (quién lo registró), comentario.
+**`movimientos_inventario`:** tenant, item, `tipo` (`entrada` | `salida` | `ajuste`), `motivo`, cantidad (siempre positiva; el tipo define el signo), `stock_anterior`, `stock_resultante`, `venta_id` opcional, `usuario_id` (quién lo registró), comentario. Los motivos son `compra`, `venta`, `devolucion`, `anulacion`, `merma`, `ajuste_manual`, `ajuste_costo`, `correccion_compra`, `inventario_inicial`, `recuento` y `traslado`; **la lista que manda es la del código** (`inventario/dto/find-movimientos.dto.ts`, que además explica el gemelo que hay en la pantalla).
 
 **Reglas:**
 - Solo aplica a items `tipo = 'producto'` (los servicios no tienen stock).
@@ -714,6 +714,44 @@ era la pieza que faltaba.
 **Fuera de alcance (fases futuras):** modos `serie` y `lote`, cycle count programado
 (recordatorio de contar cada N días), conteo ciego, reporte de varianza (AVT) en sí.
 Detalle completo: [`docs/features/recuento-inventario.md`](./features/recuento-inventario.md).
+
+---
+
+### 8f. Compras — recepción de mercadería
+
+Registrar lo que llega del proveedor: qué llegó, a qué ubicación, con qué documento y a qué
+costo. Es la **fuente del costo** del sistema — de acá sale el CPP, y de ahí los márgenes,
+el food-cost y las mermas valorizadas.
+
+**Las reglas de negocio que la definen:**
+
+- **La carga manual es el camino base, no un plan B.** Hay compras sin documento electrónico
+  (la feria, el productor chico), y las que lo tienen no lo tienen a tiempo. La lectura del
+  DTE del SII —fase siguiente— **pre-llena este mismo formulario**; no es un segundo flujo.
+- **El costo puede faltar al recibir.** La mercadería entra al stock aunque la factura no
+  haya llegado: esa línea **congela el costo promedio vigente** en vez de ensuciarlo con un
+  cero. Cuando llega el precio se completa, y ahí sí se rehace la cuenta. Lo que ya salió
+  no se toca.
+- **Una compra confirmada se corrige, no se edita.** Cambiar el precio o la cantidad de una
+  línea ya recibida escribe movimientos **nuevos** y recalcula el costo promedio
+  reproduciendo la historia; las filas viejas del kardex quedan como están. Todo cambio
+  queda en un historial con quién y cuándo.
+- **Anular es todo o nada**, con motivo obligatorio, y solo si el stock que entró sigue
+  disponible. Una compra anulada ya no se corrige.
+- **El descuento va al total y se reparte entre las líneas** según lo que vale cada una: el
+  costo de cada producto tiene que reflejar lo que de verdad se pagó por él. Exige todas las
+  líneas con precio, y no puede superar el total.
+- **Recibir no exige permiso sobre el catálogo de ítems.** El encargado de compras elige el
+  producto desde una lista propia del módulo: el catálogo muestra precios de venta y deja
+  editarlos, y eso no es asunto de quien recibe mercadería.
+
+**Fuera de alcance (piezas siguientes, cada una con su spec):** la unidad de compra por
+proveedor (*"caja de 12"*), la deuda con el proveedor y sus pagos con salida de caja, los
+gastos sin stock, y la lectura del DTE. También quedan afuera la orden de compra, la
+devolución al proveedor, la moneda extranjera y el flete. ⛔ La pregunta fiscal —IVA no
+recuperable e ILA dentro del costo— **es frente propio** (ADR-010).
+
+Detalle completo: [`docs/features/compras.md`](./features/compras.md).
 
 ---
 

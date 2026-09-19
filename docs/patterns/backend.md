@@ -1411,6 +1411,45 @@ return this.idempotencia.ejecutar(
 
 ---
 
+## 19. La pantalla de un módulo lee de listas propias, no de las rutas de otro módulo
+
+Una pantalla casi nunca se alimenta sola: la carga de una compra necesita productos,
+proveedores y ubicaciones, que viven en **otros** módulos, con **sus** guards. Si la pantalla
+pide `GET /items`, su usuario necesita `Inventario: Leer` —un permiso que no tiene nada que
+ver con comprar— y sin él recibe **403 en una ruta que no es la suya**.
+
+**La regla: el módulo publica su propia lista, bajo su propio permiso, con exactamente las
+columnas que su pantalla usa.** Compras expone `GET /compras/productos` (permiso
+`Compras: Crear`), `GET /compras/proveedores` y las unidades de una línea, en vez de mandar
+al encargado a `/items` y `/terceros`.
+
+```ts
+// compras.controller.ts — la lista propia va ANTES del `@Get(':id')`,
+// o "productos" entra como un id.
+@Get('productos')
+@RequiresPermiso('Compras', 'Crear')
+productos(@Req() req: Request) {
+  const { tenantId } = req.user as { tenantId: string };
+  return this.comprasService.productos(tenantId);
+}
+```
+
+- **Por qué no sumarle permisos al rol:** `Inventario: Leer` no abre una lista, abre el
+  módulo entero —saldos, kardex, costos—. Comprar no es ver el inventario, y un rol que
+  acumula permisos ajenos para que le ande una pantalla deja de describir un oficio.
+- **Por qué no una ruta "compartida" sin guard:** sería una lectura del catálogo sin permiso,
+  y la invariante 6 de `CLAUDE.md` es que el enforcement vive en el backend.
+- **El costo que se acepta a cambio:** la misma tabla se lee desde dos lugares. Es
+  deliberado, y por eso la lista propia **no es un `SELECT *` del otro módulo**: devuelve lo
+  que la pantalla pinta y nada más, así que no se vuelve una segunda API del catálogo.
+- **Cómo se detecta el problema, que es lo que más cuesta:** ninguna suite del módulo lo ve
+  —todas pegan a rutas propias— y correrlas como admin lo tapa entero. **El e2e y el smoke de
+  un módulo con permisos propios corren como el usuario de su rol** (en compras,
+  `encargado.compras`). Listar cada `useApiFetch` de la pantalla con el guard de su ruta, al
+  cerrar, es lo que lo encuentra antes que el usuario.
+
+---
+
 ## 12. Docs vivas a tocar en el mismo commit
 
 - `startup-pos.sql` — agregar las tablas nuevas.

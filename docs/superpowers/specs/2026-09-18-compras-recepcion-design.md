@@ -8,6 +8,14 @@ con el proveedor y sus pagos, con la salida de caja, y (4) los gastos sin stock 
 **Investigación y decisiones:** [`2026-09-18-compras.md`](../../agent/investigaciones/2026-09-18-compras.md),
 § 5 y § 5b.
 
+> ✅ **Construida e integrada el 2026-09-19** (`51570245`). Lo que se ejecutó, tarea por tarea y
+> con las desviaciones respecto de esta spec, está en el plan
+> [`2026-09-18-compras-recepcion.md`](../plans/2026-09-18-compras-recepcion.md); lo que la
+> feature hace hoy, en [`features/compras.md`](../../features/compras.md). **Esta spec queda
+> como el diseño con el que se construyó, no como el estado**: si mañana la conducta cambia, se
+> corrige `features/compras.md`, no esto. Sigue abierto el **smoke manual del owner**
+> ([`pendientes.md`](../../agent/pendientes.md) § 7), y quedan las piezas 2 a 4.
+
 > ✅ **El CPP ya pondera con el stock total del producto** (`6f5a1821`, 2026-09-18; ADR-016,
 > addendum; `docs/agent/resueltos.md`). Es `SUM(stock)` de `stock_ubicacion` en las ubicaciones
 > no eliminadas, leído bajo el lock de `item_producto`, **solo** en las entradas que recalculan.

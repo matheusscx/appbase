@@ -196,6 +196,38 @@ editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar
 
 ---
 
+## Smoke manual
+
+Para correr a mano en el navegador, con `docker-compose up` y la base recién sembrada
+(`./scripts/reset-db.sh`). **Se entra como `encargado.compras` / `admin`, no como admin del
+tenant**: el rol es lo que las suites no miran igual, y con admin un 403 en una ruta de otro
+módulo no se ve (pasó: el encargado no podía cargar una compra). El seed trae el proveedor
+*Distribuidora Andina* y los productos del tenant Paris.
+
+1. **Cargar una compra con una línea sin precio.** Compras → *Nueva*. Proveedor, Documento,
+   Fecha, *Entra a* (la ubicación), y dos líneas: una con precio y otra con **Precio unitario
+   vacío**. Guardar. → Queda **Borrador**, y en el listado aparece con la insignia **Falta
+   costo**.
+2. **Confirmar así, sin ese precio.** El modal resume lo que va a entrar. Al confirmar, el
+   stock de los dos productos sube. El de la línea sin precio **entra igual**: congela el
+   costo promedio que ya tenía, no lo ensucia con un cero.
+3. **Completar el precio que faltaba.** En la compra confirmada, corregir esa línea y poner el
+   precio de la factura. → El costo promedio del producto se recalcula, la insignia *Falta
+   costo* desaparece y el **historial** de la línea muestra el cambio.
+4. **Corregir una cantidad.** En una línea con precio, bajar la cantidad (llegaron menos). →
+   El stock baja, el costo se rehace y el historial lo anota. Si de ese producto ya salió
+   mercadería y no queda saldo, el rebote es 400 diciendo cuánto queda: eso también es un
+   resultado correcto.
+5. **Anular otra compra.** Cargar y confirmar una segunda compra, y anularla con un motivo. →
+   El stock vuelve a donde estaba, la compra queda **Anulada** con su motivo a la vista, y ya
+   no se puede corregir.
+
+Lo que conviene mirar de reojo en cada paso: **Inventario → movimientos** del producto, que
+es donde se ve si la cuenta cierra —cada corrección deja su propia fila, no reescribe las
+anteriores—.
+
+---
+
 ## Related Features
 
 - [bodegas-y-traslados.md](./bodegas-y-traslados.md): el stock por ubicación y el orden de

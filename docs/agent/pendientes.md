@@ -46,6 +46,33 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
+- [ ] **La unicidad de `serie` solo existe en `startup-pos.sql`: el esquema real no la tiene**
+  (backend + BD, medido el 2026-09-19 al cerrar la pieza 1 de compras) —
+  `startup-pos.sql:1170` declara `uq_unidad_tenant_serie` sobre `(tenant_id, serie)` con
+  `eliminado_el IS NULL`, pero **el esquema lo crea `synchronize` desde las entities** —el
+  `.sql` es documentación— y `ItemUnidad` no declara ningún `@Index`; el seeder, que para
+  otras tablas sí crea índices únicos a mano, tampoco crea este. Medido contra la base del
+  stack:
+  `select indexname from pg_indexes where tablename='item_unidad'` devuelve **solo la PK**.
+  **Consecuencia:** dos unidades vivas pueden compartir serie y nada lo impide — ni un 500
+  del índice, que sería lo esperable: entran en silencio.
+
+  **Los tres caminos que insertan series, y qué chequea cada uno:**
+  - `ItemsService` al crear un producto en modo serie (stock inicial) — no chequea.
+  - `ItemsService` en el ajuste/entrada manual de stock (`AjusteStockDto`, que acepta
+    `motivo='compra'`) — no chequea.
+  - `ComprasService` — `validarTrazabilidad` rechaza con 400 las repetidas **dentro de una
+    misma línea del borrador**; no ve las de otra línea, ni las que ya existen en la base, y
+    la corrección de cantidad (`corregirCantidad`, que también crea unidades) no pasa por
+    ahí.
+
+  **Qué medir antes de arreglarlo, que es lo que lo deja en esta sección y no en la 1:** el
+  `.sql` eligió `(tenant_id, serie)`, o sea que **dos productos distintos del mismo tenant no
+  pueden repetir número**. Hay que confirmar que esa es la regla querida y no un arrastre
+  —`(item_id, serie)` es la alternativa— porque de eso depende el índice y el mensaje de
+  error. Después: declararlo en la entity y que los tres caminos den 400 con el nombre de la
+  serie repetida, en vez de dejar que reviente el índice.
+
 ⚠️ **De la familia de "lo que la pantalla lee y escribe después del `await`" hay funciones con
 la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron una vez:
 `abrirHistorial` congela la cuenta y abre el modal **antes** del `await`;
@@ -491,9 +518,10 @@ pantalla muestra lo que se puede pedir*). Contexto del frente:
   ⛔ **Es la primera integración con el SII del sistema, y es de ENTRADA.** [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md)
   difirió la **emisión**; leer documentos recibidos es otro eje. Queda registrado que el orden
   se invierte respecto de lo que cualquiera supondría: **vamos a leer DTE antes de emitir uno**.
-  **Hoy no existe nada**: no hay módulo, ni entidad, ni directorio de compras (verificado
-  2026-09-03). Lo que sí existe es el motivo `compra` en `movimientos_inventario`, o sea el
-  lugar donde la recepción va a aterrizar.
+  **De la lectura del DTE no existe nada** (verificado 2026-09-19): ni credenciales, ni
+  cliente del SII, ni mapeo proveedor→ítem. Lo que sí existe desde el 2026-09-19 es el
+  módulo de compras con la **carga manual**, o sea el formulario que el DTE va a pre-llenar
+  ([`features/compras.md`](../features/compras.md), pieza 1 en [`resueltos.md`](resueltos.md)).
 
   ⛔ **La carga manual NO es un plan B: es el camino base** (owner, 2026-09-03, agregado el
   mismo día que la decisión de leer del SII). Leer la factura **no puede ser el único camino**.
@@ -528,20 +556,28 @@ pantalla muestra lo que se puede pedir*). Contexto del frente:
   integración**, así que la lectura del DTE queda como **segunda fase**. La varianza —que espera
   a compras— deja de esperar además a que funcione una integración con el SII.
 
-  ✅ **Pieza 1 hecha (2026-09-19):** recibir mercadería. Incluye borrador, confirmar, completar y
-  corregir precio y cantidad, descuento al total, anular e historial ([`features/compras.md`](../features/compras.md)).
-  **Quedan, cada una con su spec y en este orden:**
+  📌 **La pieza 1 —recibir mercadería— salió el 2026-09-19** y su detalle está en
+  [`resueltos.md`](resueltos.md). Lo que sigue abierto de este frente:
+
+  **Las piezas que faltan, cada una con su spec y en este orden:**
   - **Pieza 2:** la unidad de compra por proveedor ("caja de 12").
   - **Pieza 3:** la deuda con el proveedor y sus pagos, con la salida de caja automática.
   - **Pieza 4:** los gastos sin stock, con la categoría que define el tenant.
 
-  **Bordes de la pieza 1 que quedaron abiertos:**
+  **Bordes de la pieza 1 que quedaron abiertos** (los tres verificados contra el código el
+  2026-09-19):
   - `UbicacionesService.remove` no mira los borradores de compra: se puede borrar la bodega de un
     borrador, y después guardarlo o confirmarlo da 400 "Ubicación no encontrada"
     (`ComprasService.validarEncabezado`). No se pierde nada, porque el borrador no movió stock,
     pero el mensaje no dice que la borraron.
   - En la carga del borrador, una línea en lote sin código o en serie sin series llega al backend y
     vuelve como 400 en un toast, en vez de marcarse en el formulario.
+  - **El pie muestra un total negativo mientras se tipea un descuento mayor al subtotal.**
+    `totalConDescuento` (`frontend/app/composables/useCompras.ts:116`) resta sin piso y
+    `puedeGuardar` (`frontend/app/pages/compras/[id].vue:237`) no mira el total, así que el
+    rebote llega recién al guardar, como toast del 400 de `validarDescuento`. Decidir al
+    tomarlo si el campo se marca en rojo en el momento o si el pie se queda en cero: el
+    backend ya es la red, esto es solo cuándo se entera quien tipea.
 
   ⚠️ **Cuatro cosas que hay que tener presentes, y la primera no es técnica:**
 
@@ -563,6 +599,15 @@ pantalla muestra lo que se puede pedir*). Contexto del frente:
   4. **Credenciales fiscales por tenant.** Hay precedente de cómo guardarlas cifradas:
      [ADR-008](../adr/008-cifrado-credenciales-pasarela.md), de la pasarela de pagos.
 
+  🔁 **Pendiente de revisar ahora que compras existe: el atajo del ajuste de stock.**
+  `AjusteStockDto` acepta `motivo='compra'`, así que una compra se puede seguir cargando por
+  Inventario sin proveedor ni documento —y entonces no aparece en el listado de compras ni,
+  cuando exista, en la deuda—. El owner decidió el 2026-09-18 **mantenerlo**, como Bsale y
+  Square, y **revisarlo cuando Compras esté en uso real**
+  ([`investigaciones/2026-09-18-compras.md`](investigaciones/2026-09-18-compras.md) §5). La
+  pieza 1 puso el flujo en pie, pero "en uso real" es el smoke del owner y lo que venga
+  después, no el merge: la revisión sigue esperando.
+
 - [ ] **Reporte de varianza (AVT) — después de compras** ✅ *(owner, 2026-09-03)* —
   *"Según tus recetas debías usar 40 kilos y usaste 47"*: consumo **teórico** (lo que las
   recetas dicen que se consumió, dado lo vendido) contra consumo **real**
@@ -574,6 +619,10 @@ pantalla muestra lo que se puede pedir*). Contexto del frente:
   `compra` en `movimientos_inventario` (da las entradas). **Técnicamente se podría hacer ya** —
   el owner decidió esperar a compras **para que el insumo sea confiable**, no porque falte
   maquinaria.
+  📌 **Desde el 2026-09-19 el insumo existe**: la pieza 1 de compras registra las entradas con
+  proveedor, documento y costo. **Falta que el owner diga si eso alcanza** o si la varianza
+  espera también a las piezas 2 a 4 —la unidad de compra ("caja de 12") es la que más pesa
+  acá, porque la varianza compara cantidades y una caja mal convertida las corre todas—.
 
 ### Un descuento o recargo de monto fijo declara su propia moneda (owner, 2026-09-09)
 
@@ -738,8 +787,10 @@ prohíbe.
   - Los productos en modo `serie` o `lote`, ¿cuentan unidades igual que los de `cantidad`?
 
   Es una pregunta del tipo que los POS maduros ya resolvieron (punto de reorden): ofrecer la
-  pasada de investigación de mercado antes de diseñar. Cuando exista el frente de **compras**
-  (§ 3), el aviso es el insumo natural de un "sugerir pedido" — no construirlo antes.
+  pasada de investigación de mercado antes de diseñar. **Compras ya existe** desde el
+  2026-09-19 (§ 3, pieza 1), así que el "sugerir pedido" dejó de ser hipotético: el aviso es
+  su insumo natural, y quien tome esta entrada debería mirar si conviene diseñar el mínimo
+  pensando en que después alimente un pedido al proveedor.
 
 - [ ] **% de anulaciones y cortesías sobre lo vendido por garzón** (backend + frontend,
   fuera de alcance de
@@ -1304,6 +1355,14 @@ marcador interno, no un documento tributario.
 ## 7. Acción del owner fuera del código
 
 No se resuelve programando. Está acá para que tenga quién la reclame.
+
+- [ ] 🛒 **El smoke manual de compras, en el navegador del owner** — la pieza 1 salió el
+  2026-09-19 con el gate entero en verde (unitarios, e2e de API, Playwright, build), pero
+  **nadie la usó a mano todavía**. El paso a paso está escrito y listo para seguir en
+  [`features/compras.md`](../features/compras.md) § "Smoke manual"; se entra como
+  `encargado.compras` (contraseña `admin`), no como admin, porque el rol es justamente lo que
+  el gate no mira igual —ya pasó una vez que el encargado no podía cargar una compra y todas
+  las suites pasaban—. Si algo salta, vuelve como entrada acá.
 
 - [ ] 🇨🇱 **Validar con un abogado el ángulo legal chileno del testigo** — quedó huérfano al
   cerrar la entrada del cierre forzado (2026-08-13): la fuente es doctrina de la DT **leída

@@ -1162,6 +1162,11 @@ CREATE TABLE "item_unidad" (
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ
 );
+-- ⚠️ Este índice NO existe en la base real (medido 2026-09-19: `item_unidad` solo
+-- tiene su PK). El esquema lo crea `synchronize` desde las entities y `ItemUnidad`
+-- no lo declara, así que hoy dos unidades vivas pueden compartir serie. Queda
+-- escrito porque es la regla querida, no porque esté vigente:
+-- `docs/agent/pendientes.md` § 2.
 CREATE UNIQUE INDEX "uq_unidad_tenant_serie"
   ON "item_unidad" ("tenant_id", "serie") WHERE "eliminado_el" IS NULL;
 

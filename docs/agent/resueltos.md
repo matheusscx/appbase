@@ -23,6 +23,42 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Compras, pieza 1: recibir mercadería (cerrada 2026-09-19)
+
+Sale de [`pendientes.md` § 3, entrada *"Compras: carga manual, y el DTE del SII como
+atajo encima"*](pendientes.md), que **sigue abierta**: esto cierra su primera pieza, no el
+frente. Ahí quedan las piezas 2 a 4, la segunda fase del DTE, los bordes que la pieza 1
+dejó abiertos y la revisión del atajo del ajuste de stock.
+
+**Qué se construyó:** recibir mercadería de punta a punta. Borrador que se guarda
+incompleto, confirmar —que es lo que mueve stock y alimenta el CPP—, completar el costo que
+faltaba, corregir precio y cantidad de una línea ya confirmada, descuento al total, anular
+con motivo, e historial de cambios. Los tres modos de inventario (cantidad, lote, serie).
+Detalle funcional y reglas: [`features/compras.md`](../features/compras.md); el diseño y las
+decisiones del owner, en
+[`superpowers/specs/2026-09-18-compras-recepcion-design.md`](../superpowers/specs/2026-09-18-compras-recepcion-design.md).
+
+**Las tres decisiones que más forma le dieron, todas del owner:**
+
+1. **Corregir una compra confirmada no reescribe el kardex: lo continúa.** Una corrección
+   escribe movimientos nuevos y recalcula el costo promedio **reproduciendo la historia**
+   (`InventarioService.recalcularCostoDesdeCompra`), en vez de tocar las filas viejas. El
+   resultado se guarda como un movimiento `correccion_compra`, así que el kardex sigue
+   contando lo que pasó y en qué orden.
+2. **`costo_informado`**: una fila del kardex dice ahora si el movimiento **trajo su propio
+   costo** o si congeló el promedio vigente. Sin ese dato, rehacer la cuenta no puede saber
+   qué entrada promedió y cuál no.
+3. **Listas propias del módulo** en vez de sumarle permisos al rol: `GET /compras/productos`
+   y las unidades de una línea viven en Compras, como ya vivía `/compras/proveedores`. El
+   encargado de compras pedía `/items` y recibía 403 —**no podía cargar una compra**— y eso
+   pasó diez tareas, varias revisiones y un smoke, porque las suites corrían como admin.
+   Quedó como patrón en [`patterns/backend.md`](../patterns/backend.md) y como memoria del
+   agente.
+
+**Qué lo fija:** la suite de API y la de navegador corren como `encargado.compras`, no como
+admin, que es la parte que el gate no miraba. Gate completo en verde al integrar
+(`51570245`).
+
 ## Idempotencia en la creación de venta (cerrada 2026-09-19)
 
 Sale de [`pendientes.md` § *Endurecimiento para producción*](pendientes.md). La entrada, verbatim:
