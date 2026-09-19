@@ -361,6 +361,27 @@ abiertas de la investigación.
 [docs.stripe.com — tax rate rounding](https://docs.stripe.com/billing/taxes/tax-rates) ·
 Avalara `RoundingLevelId` · NetSuite Tax Rounding Levels · TJUE C‑484/06.
 
+### Decir qué pasa con el historial al cambiar la hora de corte del día
+
+**El hueco:** los POS de restaurante dejan configurar a qué hora termina el "día de negocio"
+—para que la venta de la 01:30 de un bar cuente en el sábado—, pero **ninguno de los relevados
+documenta qué les pasa a los días ya pasados si esa hora se cambia**: si el reporte del sábado
+anterior se reacomoda solo con la hora nueva o queda como estaba. Tampoco documentan qué pasa
+con una venta que cae justo en el instante del corte.
+**Qué se relevó:** Toast, Square, Lightspeed K-Series, Clover, NCR Aloha, KORONA y Oracle; en
+Chile, Toteat, Bsale, Fudo y Defontana, que no publican nada sobre una hora de corte.
+⚠️ **Ausencia de documentación pública no es ausencia de la función**: lo medido es que ninguno
+lo **documenta**.
+**Por qué le importa:** un dueño que ve "$450.000" el domingo y "$410.000" el martes para el
+mismo sábado, sin que nadie haya tocado una venta, deja de confiar en el reporte. Documentar la
+regla —cualquiera sea— ya es más de lo que muestra el mercado relevado.
+**Estado del producto:** 💡 hallazgo. La hora de corte está decidida (backlog, 2026-09-18) pero
+sin diseño: recalcular o congelar el historial es pregunta abierta para el owner.
+**Evidencia:** [investigación 2026-09-18 §2 y §4](agent/investigaciones/2026-09-18-hora-de-corte-dia-negocio.md) ·
+[Toast — Close Out Day](https://doc.toasttab.com/doc/platformguide/platformCloseOutDayOverview.html) ·
+[Square — close of day](https://squareup.com/help/us/en/article/5439-customize-your-close-of-day) ·
+[Aloha — business dates](https://docs.ncrvoyix.com/restaurant/aloha-cloud/using/understanding_business_dates).
+
 ---
 
 ## Cómo se agrega una entrada

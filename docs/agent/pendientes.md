@@ -725,6 +725,13 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   🔗 Se cruza con *Manejo de fechas y zonas horarias* (§ 6): ahí vive la pregunta de qué
   significa "desde el 1 de agosto" para una empresa, y el corte es parte de esa respuesta.
 
+  🔎 **Investigación de mercado hecha** (2026-09-18, pedida por el owner):
+  [`investigaciones/2026-09-18-hora-de-corte-dia-negocio.md`](investigaciones/2026-09-18-hora-de-corte-dia-negocio.md).
+  Antes de diseñar faltan dos respuestas del owner: si cambiar la hora recalcula los días
+  pasados o los deja congelados, y si es una sola hora o una por día de la semana. Lo que no
+  depende de él: la boleta electrónica lleva siempre la fecha calendario real (`FchEmis`), el
+  día de negocio es solo una vista de reporte.
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
