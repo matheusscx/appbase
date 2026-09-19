@@ -2187,6 +2187,83 @@ describe('CajaService', () => {
     });
   });
 
+  describe('resumenDescuadresDia', () => {
+    it('resuelve el día del negocio del tenant y arma la ventana con zona/corte', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([
+          { zona_horaria: 'America/Santiago', hora_corte: 5 },
+        ])
+        .mockResolvedValueOnce([
+          {
+            fecha: '2026-09-12',
+            cierres: 3,
+            con_descuadre: 1,
+            nivel_aviso: 1,
+            nivel_alto: 0,
+            alto_sin_revisar: 0,
+            efectivo_suma: '-500.0000',
+          },
+        ]);
+
+      const result = await service.resumenDescuadresDia(TENANT_ID);
+
+      expect(result).toEqual({
+        fecha: '2026-09-12',
+        cierres: 3,
+        conDescuadre: 1,
+        nivelAviso: 1,
+        nivelAlto: 0,
+        altoSinRevisar: 0,
+        efectivoSuma: '-500.0000',
+      });
+      const [sql, params] = dataSource.query.mock.calls[1];
+      // Zona y corte viajan como bind, no interpolados: `make_interval` usa
+      // `$3`, la posición que `empujarDiaNegocio` le da al corte.
+      expect(params).toEqual([TENANT_ID, 'America/Santiago', 5]);
+      expect(sql).toContain('make_interval(hours => $3::int)');
+    });
+
+    it('el tenant sale del argumento, nunca de la query', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([
+          { zona_horaria: 'America/Santiago', hora_corte: 0 },
+        ])
+        .mockResolvedValueOnce([]);
+
+      await service.resumenDescuadresDia(TENANT_ID);
+
+      const [sql, params] = dataSource.query.mock.calls[1];
+      expect(sql).toContain('c.tenant_id = $1');
+      expect(params[0]).toBe(TENANT_ID);
+    });
+
+    // Regresión del mismo 42P18 que cerró resumen-negocio.service.ts (Task 2
+    // de `hora-de-corte`): un `$n` sin bind, o un bind sin `$n` que lo
+    // referencie, revienta en Postgres real aunque el mock de `Db.query` de
+    // este test no lo vea.
+    it('cada $n del SQL tiene bind, y cada bind está referenciado (evita 42P18)', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([
+          { zona_horaria: 'America/Santiago', hora_corte: 5 },
+        ])
+        .mockResolvedValueOnce([]);
+
+      await service.resumenDescuadresDia(TENANT_ID);
+
+      const [sql, params] = dataSource.query.mock.calls[1] as [
+        string,
+        unknown[],
+      ];
+      const referenciados = new Set(
+        Array.from(sql.matchAll(/\$(\d+)/g)).map((m) => Number(m[1])),
+      );
+      expect(Math.max(...referenciados)).toBeLessThanOrEqual(params.length);
+      for (let i = 1; i <= params.length; i++) {
+        expect(referenciados.has(i)).toBe(true);
+      }
+    });
+  });
+
   describe('getArqueoCiego / setArqueoCiego', () => {
     it('getArqueoCiego lee tenants.arqueo_ciego filtrando soft-delete', async () => {
       dataSource.query.mockResolvedValueOnce([{ arqueo_ciego: true }]);

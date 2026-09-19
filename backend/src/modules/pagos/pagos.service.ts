@@ -9,10 +9,11 @@ import { Db } from '../../common/db/db.service';
 import {
   bordeFechaSql,
   bordeHastaSql,
+  diaNegocioDeSql,
   diaNegocioTenant,
   empujarDiaNegocio,
+  inicioDiaNegocioSql,
   requiereDiaNegocio,
-  zonaHorariaTenant,
   type DiaNegocio,
 } from '../../common/utils/rango-fecha.util';
 import { CajaService } from '../caja/caja.service';
@@ -504,19 +505,21 @@ export class PagosService {
    * `filtroDeMisCajas` no es prolijidad: si el resumen fuera global, la resta
    * contra lo listado devolvería justo lo que el eje esconde.
    *
-   * "Hoy" es el día LOCAL del tenant, con la ventana de
-   * `resumenDescuadresDia` (caja): hasta el 2026-09-18 comparaba
-   * `p.fecha::date = CURRENT_DATE`, que resuelve el día en la zona de la
-   * sesión de Postgres —UTC, nadie la fija— y en Chile cortaba a las 21:00
-   * (20:00 en invierno).
+   * "Hoy" es el día del NEGOCIO del tenant (zona + hora de corte), con la
+   * misma ventana que `resumenDescuadresDia` (caja): hasta el 2026-09-18
+   * comparaba `p.fecha::date = CURRENT_DATE`, que resuelve el día en la zona
+   * de la sesión de Postgres —UTC, nadie la fija— y en Chile cortaba a las
+   * 21:00 (20:00 en invierno); desde el 2026-09-19 (Task 3 de
+   * `hora-de-corte`) corta donde el tenant eligió, no a medianoche calendario.
    */
   async resumen(
     tenantId: string,
     usuarioId: string,
     verTodas: boolean,
   ): Promise<PagosResumen> {
-    const zona = await zonaHorariaTenant(this.db, tenantId);
-    const params: unknown[] = [tenantId, zona];
+    const dia = await diaNegocioTenant(this.db, tenantId);
+    const params: unknown[] = [tenantId];
+    const idx = empujarDiaNegocio(params, dia);
     let filtroPropio = '';
     if (!verTodas) {
       params.push(usuarioId);
@@ -529,10 +532,12 @@ export class PagosService {
       pagos_hoy: number;
       monto_hoy: string;
     }[] = await this.db.query(
-      `WITH hoy AS (
-         SELECT ((NOW() AT TIME ZONE $2)::date::timestamp AT TIME ZONE $2) AS desde,
-                (((NOW() AT TIME ZONE $2)::date + 1)::timestamp AT TIME ZONE $2) AS hasta
-       )
+      `WITH d AS (SELECT ${diaNegocioDeSql('NOW()', idx)} AS dia),
+            hoy AS (
+              SELECT (${inicioDiaNegocioSql('d.dia', idx)}) AS desde,
+                     (${inicioDiaNegocioSql('d.dia + 1', idx)}) AS hasta
+                FROM d
+            )
        SELECT COUNT(*)::int AS total_pagos,
               COALESCE(SUM(p.monto - p.vuelto), 0)::text AS monto_cobrado,
               COUNT(*) FILTER (

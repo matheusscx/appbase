@@ -366,3 +366,29 @@ export function diaNegocioEnZona(dia: DiaNegocio, instante: Date): string {
     ? fechaMenosDias(fecha, 1)
     : fecha;
 }
+
+/**
+ * La contraparte en SQL de `diaNegocioEnZona`, para cuando el "hoy"/la serie
+ * se calcula DENTRO de la consulta (`GROUP BY` de una tendencia, un `SELECT`
+ * de `NOW()`) y no sobre un `Date` ya en memoria — un viaje a la base solo
+ * para colapsar un instante sería el mismo desperdicio que el docblock de
+ * `fechaLocalTenant` documenta para el otro sentido.
+ *
+ * Mismo orden que su gemela TypeScript y por la misma razón (spec § 5,
+ * medido con el salto del 2026-09-06 en Santiago): primero `AT TIME ZONE`
+ * para llegar a hora LOCAL, y RECIÉN AHÍ se resta el corte — sobre la hora
+ * local, no sobre el instante crudo. Restar el corte al instante y convertir
+ * a zona después puede aterrizar en el día de calendario equivocado la noche
+ * del cambio de horario: restar 5h al instante da sábado, pero la hora local
+ * ya es domingo 00:xx-05:29, que tiene que seguir siendo domingo.
+ *
+ * Corte 0 es el caso trivial: `make_interval(hours => 0)` no mueve nada, así
+ * que el día del negocio es el de calendario — mismo comportamiento que
+ * antes de esta feature.
+ */
+export function diaNegocioDeSql(
+  instanteSql: string,
+  idx: IdxDiaNegocio,
+): string {
+  return `(((${instanteSql}) AT TIME ZONE $${idx.zona}) - make_interval(hours => $${idx.corte}::int))::date`;
+}

@@ -19,7 +19,9 @@ describe('PropinaReportesService', () => {
 
   function prepararResumenVacio() {
     query
-      .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+      .mockResolvedValueOnce([
+        { zona_horaria: 'America/Santiago', hora_corte: 0 },
+      ])
       .mockResolvedValueOnce([
         {
           cierres: '0',
@@ -97,7 +99,9 @@ describe('PropinaReportesService', () => {
 
     it('mapea tendencia, desgloses, anulaciones y advertencias', async () => {
       query
-        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([
+          { zona_horaria: 'America/Santiago', hora_corte: 0 },
+        ])
         .mockResolvedValueOnce([
           {
             cierres: '2',
@@ -177,7 +181,9 @@ describe('PropinaReportesService', () => {
   describe('trabajadores', () => {
     it('une originadores y participantes y calcula totales decimales', async () => {
       query
-        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([
+          { zona_horaria: 'America/Santiago', hora_corte: 0 },
+        ])
         .mockResolvedValueOnce([
           {
             garzon_id: 'camila',
@@ -243,7 +249,9 @@ describe('PropinaReportesService', () => {
 
     it('ordena por monto asignado desc y luego nombre asc', async () => {
       query
-        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([
+          { zona_horaria: 'America/Santiago', hora_corte: 0 },
+        ])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([
           {
@@ -296,7 +304,9 @@ describe('PropinaReportesService', () => {
 
     it('reporta liquidaciones de todos los turnos excluidas', async () => {
       query
-        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([
+          { zona_horaria: 'America/Santiago', hora_corte: 0 },
+        ])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ cantidad: '1' }])
@@ -316,7 +326,9 @@ describe('PropinaReportesService', () => {
 
     it('parametriza tipo y turnos en la asignación confirmada', async () => {
       query
-        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([
+          { zona_horaria: 'America/Santiago', hora_corte: 0 },
+        ])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ cantidad: '0' }])
@@ -342,7 +354,9 @@ describe('PropinaReportesService', () => {
     // 'Trabajador eliminado' que el propio código define para ese caso.
     it('la query de etiquetas filtra los garzones borrados', async () => {
       query
-        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([
+          { zona_horaria: 'America/Santiago', hora_corte: 0 },
+        ])
         .mockResolvedValueOnce([{ garzon_id: 'g1', cierres: '1' }])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ cantidad: '0' }])
@@ -357,6 +371,75 @@ describe('PropinaReportesService', () => {
       expect(etiquetasCall?.[0]).toContain('g.eliminado_el IS NULL');
       // Y el fallback deja de ser código muerto.
       expect(result.data[0]?.nombre).toBe('Trabajador eliminado');
+    });
+  });
+
+  // Regresión del mismo 42P18 que cerró resumen-negocio.service.ts (Task 2 de
+  // `hora-de-corte`, medido 2026-09-19): un `$n` en el SQL sin bind, o un
+  // bind sin `$n` que lo referencie, revienta en Postgres real aunque el mock
+  // de `Db.query` de estos tests no lo vea — reconstruye la MISMA regla desde
+  // el string y el array que cada consulta migrada le mandó a `db.query`.
+  // Task 3 tocó las nueve: `filtrosVenta` (y sus cuatro llamadoras:
+  // cobranzaYEstado, tendencia, porTurno, porTipo, origenTrabajadores),
+  // anulaciones, solapadas, asignacionTrabajadores y todosLosTurnosExcluidas
+  // — esta última es la que corrió el booleano de `$5` a `$6`.
+  describe('cada consulta migrada al día del negocio: $n↔params sin huecos', () => {
+    function assertSinHuecos(sql: string, params: unknown[] | undefined) {
+      const referenciados = new Set(
+        Array.from(sql.matchAll(/\$(\d+)/g)).map((m) => Number(m[1])),
+      );
+      const total = params?.length ?? 0;
+      expect(Math.max(0, ...referenciados)).toBeLessThanOrEqual(total);
+      for (let i = 1; i <= total; i++) {
+        expect(referenciados.has(i)).toBe(true);
+      }
+    }
+
+    it('resumen(): las 6 consultas paralelas (cobranza, anulaciones, tendencia, porTurno, porTipo, solapadas)', async () => {
+      prepararResumenVacio();
+
+      await service.resumen(TENANT_ID, {
+        ...QUERY,
+        turnoIds: [TURNO_ID],
+        tipoGarzon: TipoGarzon.GARZON,
+      });
+
+      // La llamada 0 resuelve el día del negocio (diaNegocioTenant); las
+      // seis siguientes son las que arman `idx` de zona/corte.
+      for (const [sql, params] of query.mock.calls.slice(1)) {
+        assertSinHuecos(sql, params);
+      }
+    });
+
+    it('trabajadores(): origenTrabajadores, asignacionTrabajadores, solapadas y todosLosTurnosExcluidas — el booleano queda en $6, no en $5', async () => {
+      query
+        .mockResolvedValueOnce([
+          { zona_horaria: 'America/Santiago', hora_corte: 5 },
+        ])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ cantidad: '0' }])
+        .mockResolvedValueOnce([{ cantidad: '0' }])
+        .mockResolvedValueOnce([]);
+
+      await service.trabajadores(TENANT_ID, {
+        ...QUERY,
+        turnoIds: [TURNO_ID],
+        tipoGarzon: TipoGarzon.COCINA,
+      });
+
+      // calls[1..4] = origenTrabajadores, asignacionTrabajadores, solapadas,
+      // todosLosTurnosExcluidas (el Promise.all); calls[5] = etiquetasGarzones,
+      // que no pasa por rango-fecha.util y queda fuera de este chequeo.
+      for (const [sql, params] of query.mock.calls.slice(1, 5)) {
+        assertSinHuecos(sql, params);
+      }
+
+      const todosLosTurnosCall = query.mock.calls.find(([sql]) =>
+        sql.includes('cardinality(l.turno_ids) = 0'),
+      );
+      expect(todosLosTurnosCall?.[0]).toContain('$6::boolean');
+      expect(todosLosTurnosCall?.[0]).not.toContain('$5::boolean');
     });
   });
 });

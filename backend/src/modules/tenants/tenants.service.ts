@@ -10,6 +10,10 @@ import { Repository, IsNull, type EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { randomUUID } from 'crypto';
 import { Db } from '../../common/db/db.service';
+import {
+  diaNegocioEnZona,
+  diaNegocioTenant,
+} from '../../common/utils/rango-fecha.util';
 import { Usuario } from '../users/usuario.entity';
 import { CrearUsuarioTenantDto } from './dto/crear-usuario-tenant.dto';
 import { Tenant } from './entities/tenant.entity';
@@ -562,8 +566,18 @@ export class TenantsService {
   // Tenant-active group (authenticated users with tenantId in JWT)
   // ─────────────────────────────────────────────────────────────────────────
 
-  async findMine(tenantId: string): Promise<Tenant> {
-    return this.findOne(tenantId);
+  /**
+   * El tenant más el día del negocio de HOY (Task 3 de `hora-de-corte`,
+   * 2026-09-19): el mismo cálculo que usa cada reporte para su "hoy"
+   * (`diaNegocioEnZona`), resuelto acá una vez para que el frontend no tenga
+   * que reimplementar zona+corte para pintar el rótulo de la jornada actual.
+   */
+  async findMine(
+    tenantId: string,
+  ): Promise<Tenant & { diaNegocioHoy: string }> {
+    const tenant = await this.findOne(tenantId);
+    const dia = await diaNegocioTenant(this.db, tenantId);
+    return { ...tenant, diaNegocioHoy: diaNegocioEnZona(dia, new Date()) };
   }
 
   /**

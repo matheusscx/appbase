@@ -3,6 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 import {
   bordeFechaSql,
   bordeHastaSql,
+  diaNegocioDeSql,
   diaNegocioEnZona,
   diaNegocioTenant,
   empujarDiaNegocio,
@@ -409,6 +410,14 @@ describe('rango-fecha.util', () => {
           new Date('2027-01-01T05:00:00Z'),
         ),
       ).toBe('2026-12-31');
+    });
+  });
+
+  describe('diaNegocioDeSql', () => {
+    it('primero a hora local, después resta el corte, después el día', () => {
+      expect(diaNegocioDeSql('NOW()', { zona: 2, corte: 3 })).toBe(
+        '(((NOW()) AT TIME ZONE $2) - make_interval(hours => $3::int))::date',
+      );
     });
   });
 });

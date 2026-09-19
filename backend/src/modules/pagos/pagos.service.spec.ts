@@ -706,7 +706,7 @@ describe('PagosService', () => {
   describe('resumen()', () => {
     it('retorna KPIs globales del tenant', async () => {
       dataSourceMock.query.mockResolvedValueOnce([
-        { zona_horaria: 'America/Santiago' },
+        { zona_horaria: 'America/Santiago', hora_corte: 5 },
       ]);
       dataSourceMock.query.mockResolvedValueOnce([
         {
@@ -725,6 +725,32 @@ describe('PagosService', () => {
         pagosHoy: 2,
         montoHoy: '300.0000',
       });
+    });
+
+    // Regresión del mismo 42P18 que cerró resumen-negocio.service.ts (Task 2
+    // de `hora-de-corte`, medido 2026-09-19): un `$n` en el SQL sin bind, o un
+    // bind sin `$n` que lo referencie, revienta en Postgres real aunque el
+    // mock de `Db.query` de este test no lo vea — reconstruye la MISMA regla
+    // desde el string y el array que el service le mandó a `db.query`.
+    it('cada $n del SQL de "hoy" tiene bind, y cada bind está referenciado (evita 42P18)', async () => {
+      dataSourceMock.query.mockResolvedValueOnce([
+        { zona_horaria: 'America/Santiago', hora_corte: 5 },
+      ]);
+      dataSourceMock.query.mockResolvedValueOnce([{}]);
+
+      await service.resumen(TENANT_ID, USUARIO_ID, true);
+
+      const [sql, params] = dataSourceMock.query.mock.calls[1] as [
+        string,
+        unknown[],
+      ];
+      const referenciados = new Set(
+        Array.from(sql.matchAll(/\$(\d+)/g)).map((m) => Number(m[1])),
+      );
+      expect(Math.max(...referenciados)).toBeLessThanOrEqual(params.length);
+      for (let i = 1; i <= params.length; i++) {
+        expect(referenciados.has(i)).toBe(true);
+      }
     });
   });
 
@@ -809,7 +835,9 @@ describe('PagosService', () => {
     // La llamada 0 del resumen resuelve la zona del tenant; los KPI son la 1.
     it('resumen acota igual que listar', async () => {
       dataSourceMock.query
-        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([
+          { zona_horaria: 'America/Santiago', hora_corte: 5 },
+        ])
         .mockResolvedValueOnce([{}]);
 
       await service.resumen(TENANT_ID, USUARIO_ID, false);
@@ -820,7 +848,9 @@ describe('PagosService', () => {
 
     it('resumen con alcance completo sigue siendo del tenant', async () => {
       dataSourceMock.query
-        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([
+          { zona_horaria: 'America/Santiago', hora_corte: 5 },
+        ])
         .mockResolvedValueOnce([{}]);
 
       await service.resumen(TENANT_ID, USUARIO_ID, true);

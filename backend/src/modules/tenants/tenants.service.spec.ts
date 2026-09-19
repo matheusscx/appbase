@@ -636,6 +636,40 @@ describe('TenantsService', () => {
     });
   });
 
+  describe('findMine', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('devuelve el tenant más diaNegocioHoy, calculado con zona+corte del tenant', async () => {
+      // 2026-09-13T07:30:00Z es domingo 04:30 en Santiago (UTC-3): antes del
+      // corte 5, así que el día del negocio sigue siendo el sábado 12.
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-13T07:30:00Z'));
+      tenantRepo.findOne.mockResolvedValueOnce(mockTenant);
+      dataSource.query.mockResolvedValueOnce([
+        { zona_horaria: 'America/Santiago', hora_corte: 5 },
+      ]);
+
+      const result = await service.findMine(mockTenant.id);
+
+      expect(result.diaNegocioHoy).toBe('2026-09-12');
+      expect(result.id).toBe(mockTenant.id);
+      expect(result.nombre).toBe(mockTenant.nombre);
+    });
+
+    it('con corte 0, el día del negocio es el calendario local de siempre', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-13T07:30:00Z'));
+      tenantRepo.findOne.mockResolvedValueOnce(mockTenant);
+      dataSource.query.mockResolvedValueOnce([
+        { zona_horaria: 'America/Santiago', hora_corte: 0 },
+      ]);
+
+      const result = await service.findMine(mockTenant.id);
+
+      expect(result.diaNegocioHoy).toBe('2026-09-13');
+    });
+  });
+
   describe('findMembers', () => {
     it('el JOIN a roles ata también el tenant_id, no solo el rol_id', async () => {
       // El `LEFT JOIN roles_usuarios` ya filtra por `ru.tenant_id = ut.tenant_id`,

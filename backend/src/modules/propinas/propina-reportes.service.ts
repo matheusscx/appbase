@@ -1,7 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
-import { zonaHorariaTenant } from '../../common/utils/rango-fecha.util';
+import {
+  diaNegocioDeSql,
+  diaNegocioTenant,
+  empujarDiaNegocio,
+  inicioDiaNegocioSql,
+  type DiaNegocio,
+  type IdxDiaNegocio,
+} from '../../common/utils/rango-fecha.util';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import {
   normalizarRangoReporte,
@@ -98,7 +105,7 @@ export class PropinaReportesService {
     query: QueryPropinaReporteDto,
   ): Promise<PropinaReporteResumen> {
     const rango = normalizarRangoReporte(query);
-    const zona = await this.zonaHoraria(tenantId);
+    const dia = await this.diaNegocio(tenantId);
     const [
       cobranza,
       anulaciones,
@@ -107,12 +114,12 @@ export class PropinaReportesService {
       porTipo,
       liquidacionesParcialmenteSolapadas,
     ] = await Promise.all([
-      this.cobranzaYEstado(tenantId, rango, zona),
-      this.anulaciones(tenantId, rango, zona),
-      this.tendencia(tenantId, rango, zona),
-      this.porTurno(tenantId, rango, zona),
-      this.porTipo(tenantId, rango, zona),
-      this.solapadas(tenantId, rango, zona),
+      this.cobranzaYEstado(tenantId, rango, dia),
+      this.anulaciones(tenantId, rango, dia),
+      this.tendencia(tenantId, rango, dia),
+      this.porTurno(tenantId, rango, dia),
+      this.porTipo(tenantId, rango, dia),
+      this.solapadas(tenantId, rango, dia),
     ]);
 
     return {
@@ -168,17 +175,17 @@ export class PropinaReportesService {
     query: QueryPropinaReporteDto,
   ): Promise<PropinaReporteTrabajadores> {
     const rango = normalizarRangoReporte(query);
-    const zona = await this.zonaHoraria(tenantId);
+    const dia = await this.diaNegocio(tenantId);
     const [
       origenRows,
       asignacionRows,
       liquidacionesParcialmenteSolapadas,
       liquidacionesTodosLosTurnosExcluidas,
     ] = await Promise.all([
-      this.origenTrabajadores(tenantId, rango, zona),
-      this.asignacionTrabajadores(tenantId, rango, zona),
-      this.solapadas(tenantId, rango, zona),
-      this.todosLosTurnosExcluidas(tenantId, rango, zona),
+      this.origenTrabajadores(tenantId, rango, dia),
+      this.asignacionTrabajadores(tenantId, rango, dia),
+      this.solapadas(tenantId, rango, dia),
+      this.todosLosTurnosExcluidas(tenantId, rango, dia),
     ]);
 
     const ids = [
@@ -253,17 +260,29 @@ export class PropinaReportesService {
     };
   }
 
+  /**
+   * `idx` es siempre `{ zona: 4, corte: 5 }`: `params` arranca con los tres
+   * fijos (`tenantId`, `desde`, `hasta`) y `empujarDiaNegocio` empuja zona y
+   * corte a continuación, ANTES que `turnoIds`/`tipoGarzon` — así que
+   * cualquier llamador que necesite ese `idx` para un fragmento propio
+   * (`tendencia`, más abajo) lo puede fijar como constante sin volver a
+   * calcularlo.
+   */
   private filtrosVenta(
     tenantId: string,
     rango: RangoReporteNormalizado,
-    zonaHoraria: string,
+    dia: DiaNegocio,
     alias = 'vp',
   ): { sql: string; params: unknown[] } {
-    const params: unknown[] = [tenantId, rango.desde, rango.hasta, zonaHoraria];
+    const params: unknown[] = [tenantId, rango.desde, rango.hasta];
+    const idx = empujarDiaNegocio(params, dia);
+    // El `hasta` de estos reportes ya llega EXCLUSIVO (lo normaliza el DTO,
+    // `normalizarRangoReporte`): el llamador compensa, así que acá no se le
+    // suma un día como sí hace `bordeHastaSql` para un filtro inclusivo.
     let sql = ` AND ${alias}.tenant_id = $1
       AND ${alias}.eliminado_el IS NULL
-      AND ${alias}.creado_el >= ($2::date::timestamp AT TIME ZONE $4)
-      AND ${alias}.creado_el < ($3::date::timestamp AT TIME ZONE $4)`;
+      AND ${alias}.creado_el >= (${inicioDiaNegocioSql('$2::date', idx)})
+      AND ${alias}.creado_el < (${inicioDiaNegocioSql('$3::date', idx)})`;
     if (rango.turnoIds.length) {
       params.push(rango.turnoIds);
       sql += ` AND ${alias}.turno_id = ANY($${params.length}::uuid[])`;
@@ -275,20 +294,27 @@ export class PropinaReportesService {
     return { sql, params };
   }
 
-  private async zonaHoraria(tenantId: string): Promise<string> {
+  /** `idx` fijo de `filtrosVenta`, ver su docblock. */
+  private readonly IDX_DIA: IdxDiaNegocio = { zona: 4, corte: 5 };
+
+  private async diaNegocio(tenantId: string): Promise<DiaNegocio> {
     // Antes esta consulta estaba copiada acá, byte a byte. Se colapsó contra
     // `zonaHorariaTenant` el 2026-08-23, al corregir que la zona sale de la
     // PROVINCIA y no del país: con tres copias, arreglar una sola dejaba
     // módulos leyendo zonas distintas.
-    return zonaHorariaTenant(this.db, tenantId);
+    //
+    // Pide también `horaCorte` (Task 3 de `hora-de-corte`, 2026-09-19): los
+    // reportes de propinas cortan el día donde el tenant corta su jornada,
+    // no a medianoche calendario.
+    return diaNegocioTenant(this.db, tenantId);
   }
 
   private async cobranzaYEstado(
     tenantId: string,
     rango: RangoReporteNormalizado,
-    zona: string,
+    dia: DiaNegocio,
   ): Promise<CobranzaRow> {
-    const filtros = this.filtrosVenta(tenantId, rango, zona);
+    const filtros = this.filtrosVenta(tenantId, rango, dia);
     const rows = await this.db.query<CobranzaRow[]>(
       `WITH base AS (
          SELECT vp.*
@@ -379,9 +405,10 @@ export class PropinaReportesService {
   private async anulaciones(
     tenantId: string,
     rango: RangoReporteNormalizado,
-    zona: string,
+    dia: DiaNegocio,
   ): Promise<AnulacionRow> {
-    const params: unknown[] = [tenantId, rango.desde, rango.hasta, zona];
+    const params: unknown[] = [tenantId, rango.desde, rango.hasta];
+    const idx = empujarDiaNegocio(params, dia);
     let filtroTurno = '';
     if (rango.turnoIds.length) {
       params.push(rango.turnoIds);
@@ -400,8 +427,8 @@ export class PropinaReportesService {
        WHERE l.tenant_id = $1
          AND l.eliminado_el IS NULL
          AND l.estado = 'anulada'
-         AND l.fecha_desde >= ($2::date::timestamp AT TIME ZONE $4)
-         AND l.fecha_hasta <= ($3::date::timestamp AT TIME ZONE $4)
+         AND l.fecha_desde >= (${inicioDiaNegocioSql('$2::date', idx)})
+         AND l.fecha_hasta <= (${inicioDiaNegocioSql('$3::date', idx)})
          ${filtroTurno}`,
       params,
     );
@@ -411,9 +438,9 @@ export class PropinaReportesService {
   private async tendencia(
     tenantId: string,
     rango: RangoReporteNormalizado,
-    zona: string,
+    dia: DiaNegocio,
   ): Promise<TendenciaRow[]> {
-    const filtros = this.filtrosVenta(tenantId, rango, zona);
+    const filtros = this.filtrosVenta(tenantId, rango, dia);
     return await this.db.query<TendenciaRow[]>(
       `WITH dias AS (
          SELECT generate_series(
@@ -424,13 +451,13 @@ export class PropinaReportesService {
        ),
        agregado AS (
          SELECT
-           (vp.creado_el AT TIME ZONE $4)::date AS fecha,
+           ${diaNegocioDeSql('vp.creado_el', this.IDX_DIA)} AS fecha,
            COUNT(*) AS cierres,
            COUNT(*) FILTER (WHERE vp.monto_pagado > 0) AS con_propina,
            COALESCE(SUM(vp.monto_pagado), 0) AS monto_cobrado
          FROM venta_propina vp
          WHERE 1 = 1 ${filtros.sql}
-         GROUP BY (vp.creado_el AT TIME ZONE $4)::date
+         GROUP BY ${diaNegocioDeSql('vp.creado_el', this.IDX_DIA)}
        )
        SELECT
          to_char(d.fecha, 'YYYY-MM-DD') AS fecha,
@@ -447,9 +474,9 @@ export class PropinaReportesService {
   private async porTurno(
     tenantId: string,
     rango: RangoReporteNormalizado,
-    zona: string,
+    dia: DiaNegocio,
   ): Promise<TurnoRow[]> {
-    const filtros = this.filtrosVenta(tenantId, rango, zona);
+    const filtros = this.filtrosVenta(tenantId, rango, dia);
     return await this.db.query<TurnoRow[]>(
       `SELECT
          vp.turno_id,
@@ -472,9 +499,9 @@ export class PropinaReportesService {
   private async porTipo(
     tenantId: string,
     rango: RangoReporteNormalizado,
-    zona: string,
+    dia: DiaNegocio,
   ): Promise<TipoRow[]> {
-    const filtros = this.filtrosVenta(tenantId, rango, zona);
+    const filtros = this.filtrosVenta(tenantId, rango, dia);
     return await this.db.query<TipoRow[]>(
       `SELECT
          vp.tipo_garzon,
@@ -492,9 +519,10 @@ export class PropinaReportesService {
   private async solapadas(
     tenantId: string,
     rango: RangoReporteNormalizado,
-    zona: string,
+    dia: DiaNegocio,
   ): Promise<number> {
-    const params: unknown[] = [tenantId, rango.desde, rango.hasta, zona];
+    const params: unknown[] = [tenantId, rango.desde, rango.hasta];
+    const idx = empujarDiaNegocio(params, dia);
     let filtroTurno = '';
     if (rango.turnoIds.length) {
       params.push(rango.turnoIds);
@@ -507,11 +535,11 @@ export class PropinaReportesService {
        WHERE l.tenant_id = $1
          AND l.eliminado_el IS NULL
          AND l.estado IN ('confirmada', 'anulada')
-         AND l.fecha_desde < ($3::date::timestamp AT TIME ZONE $4)
-         AND l.fecha_hasta > ($2::date::timestamp AT TIME ZONE $4)
+         AND l.fecha_desde < (${inicioDiaNegocioSql('$3::date', idx)})
+         AND l.fecha_hasta > (${inicioDiaNegocioSql('$2::date', idx)})
          AND NOT (
-           l.fecha_desde >= ($2::date::timestamp AT TIME ZONE $4)
-           AND l.fecha_hasta <= ($3::date::timestamp AT TIME ZONE $4)
+           l.fecha_desde >= (${inicioDiaNegocioSql('$2::date', idx)})
+           AND l.fecha_hasta <= (${inicioDiaNegocioSql('$3::date', idx)})
          )
          ${filtroTurno}`,
       params,
@@ -522,9 +550,9 @@ export class PropinaReportesService {
   private async origenTrabajadores(
     tenantId: string,
     rango: RangoReporteNormalizado,
-    zona: string,
+    dia: DiaNegocio,
   ): Promise<OrigenTrabajadorRow[]> {
-    const filtros = this.filtrosVenta(tenantId, rango, zona);
+    const filtros = this.filtrosVenta(tenantId, rango, dia);
     return await this.db.query<OrigenTrabajadorRow[]>(
       `SELECT
          vp.garzon_id,
@@ -542,9 +570,10 @@ export class PropinaReportesService {
   private async asignacionTrabajadores(
     tenantId: string,
     rango: RangoReporteNormalizado,
-    zona: string,
+    dia: DiaNegocio,
   ): Promise<AsignacionTrabajadorRow[]> {
-    const params: unknown[] = [tenantId, rango.desde, rango.hasta, zona];
+    const params: unknown[] = [tenantId, rango.desde, rango.hasta];
+    const idx = empujarDiaNegocio(params, dia);
     let filtros = '';
     if (rango.tipoGarzon) {
       params.push(rango.tipoGarzon);
@@ -574,8 +603,8 @@ export class PropinaReportesService {
        WHERE p.tenant_id = $1
          AND p.eliminado_el IS NULL
          AND p.incluido = true
-         AND l.fecha_desde >= ($2::date::timestamp AT TIME ZONE $4)
-         AND l.fecha_hasta <= ($3::date::timestamp AT TIME ZONE $4)
+         AND l.fecha_desde >= (${inicioDiaNegocioSql('$2::date', idx)})
+         AND l.fecha_hasta <= (${inicioDiaNegocioSql('$3::date', idx)})
          ${filtros}
        GROUP BY p.garzon_id`,
       params,
@@ -585,15 +614,15 @@ export class PropinaReportesService {
   private async todosLosTurnosExcluidas(
     tenantId: string,
     rango: RangoReporteNormalizado,
-    zona: string,
+    dia: DiaNegocio,
   ): Promise<number> {
-    const params: unknown[] = [
-      tenantId,
-      rango.desde,
-      rango.hasta,
-      zona,
-      rango.turnoIds.length > 0,
-    ];
+    const params: unknown[] = [tenantId, rango.desde, rango.hasta];
+    const idx = empujarDiaNegocio(params, dia);
+    // El booleano de "había filtro de turno" viaja DESPUÉS de zona/corte, así
+    // que su posición corre de $5 a $6 frente al molde anterior — mismo
+    // motivo por el que `params.length` y no un literal.
+    params.push(rango.turnoIds.length > 0);
+    const idxTodosLosTurnos = params.length;
     let filtroTipo = '';
     if (rango.tipoGarzon) {
       params.push(rango.tipoGarzon);
@@ -613,9 +642,9 @@ export class PropinaReportesService {
        WHERE l.tenant_id = $1
          AND l.eliminado_el IS NULL
          AND l.estado = 'confirmada'
-         AND l.fecha_desde >= ($2::date::timestamp AT TIME ZONE $4)
-         AND l.fecha_hasta <= ($3::date::timestamp AT TIME ZONE $4)
-         AND $5::boolean
+         AND l.fecha_desde >= (${inicioDiaNegocioSql('$2::date', idx)})
+         AND l.fecha_hasta <= (${inicioDiaNegocioSql('$3::date', idx)})
+         AND $${idxTodosLosTurnos}::boolean
          AND cardinality(l.turno_ids) = 0
          ${filtroTipo}`,
       params,

@@ -39,10 +39,11 @@ import {
 import {
   bordeFechaSql,
   bordeHastaSql,
+  diaNegocioDeSql,
   diaNegocioTenant,
   empujarDiaNegocio,
+  inicioDiaNegocioSql,
   requiereDiaNegocio,
-  zonaHorariaTenant,
 } from '../../common/utils/rango-fecha.util';
 
 export interface CajonEstado {
@@ -1858,12 +1859,16 @@ export class CajaService {
    * `CronRunnerService` + `@Cron` en `cron/jobs`), lo que falta es el job y la
    * política de destinatario y hora, anotado en `docs/features/gestion-cajas.md`.
    *
-   * "El día" es el día LOCAL del tenant (zona horaria del país, misma fuente
-   * que el resto de los reportes), no el UTC: en Chile un cierre de las 22:00
-   * cae en el día siguiente en UTC y saldría del resumen de su propia jornada.
+   * "El día" es el día del NEGOCIO del tenant (zona + hora de corte, misma
+   * fuente que el resto de los reportes), no el UTC ni la medianoche
+   * calendario: en Chile un cierre de las 22:00 cae en el día siguiente en
+   * UTC y saldría del resumen de su propia jornada, y con corte configurado
+   * un cierre de la madrugada sigue perteneciendo a la jornada de ayer.
    */
   async resumenDescuadresDia(tenantId: string): Promise<ResumenDescuadresDia> {
-    const zona = await zonaHorariaTenant(this.db, tenantId);
+    const dia = await diaNegocioTenant(this.db, tenantId);
+    const params: unknown[] = [tenantId];
+    const idx = empujarDiaNegocio(params, dia);
     const rows: {
       fecha: string;
       cierres: number;
@@ -1874,10 +1879,10 @@ export class CajaService {
       efectivo_suma: string;
     }[] = await this.db.query(
       // La ventana se arma con el mismo molde DST-correcto de
-      // `rango-fecha.util.ts`: la medianoche local de HOY y la de mañana, con
-      // la aritmética del lado de Postgres. `< mañana` y no `<= 23:59:59`, que
-      // se come el último segundo.
-      `WITH hoy AS (SELECT (NOW() AT TIME ZONE $2)::date AS d)
+      // `rango-fecha.util.ts`: el inicio del día del negocio de HOY y el del
+      // día siguiente, con la aritmética del lado de Postgres. `< mañana` y
+      // no `<= 23:59:59`, que se come el último segundo.
+      `WITH hoy AS (SELECT ${diaNegocioDeSql('NOW()', idx)} AS d)
        SELECT to_char((SELECT d FROM hoy), 'YYYY-MM-DD') AS fecha,
               COUNT(*)::int AS cierres,
               -- Cualquier línea del arqueo, no solo el efectivo: el nivel se
@@ -1905,10 +1910,10 @@ export class CajaService {
           -- y las en conciliación, deja afuera la caja todavía abierta.
           AND c.diferencia IS NOT NULL
           AND COALESCE(c.fecha_cierre, c.fecha_apertura)
-              >= ((SELECT d FROM hoy)::timestamp AT TIME ZONE $2)
+              >= (${inicioDiaNegocioSql('(SELECT d FROM hoy)', idx)})
           AND COALESCE(c.fecha_cierre, c.fecha_apertura)
-              < (((SELECT d FROM hoy) + 1)::timestamp AT TIME ZONE $2)`,
-      [tenantId, zona],
+              < (${inicioDiaNegocioSql('(SELECT d FROM hoy) + 1', idx)})`,
+      params,
     );
 
     const r = rows[0];
