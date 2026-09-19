@@ -727,14 +727,15 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
 
   🔎 **Investigación de mercado hecha** (2026-09-18, pedida por el owner):
   [`investigaciones/2026-09-18-hora-de-corte-dia-negocio.md`](investigaciones/2026-09-18-hora-de-corte-dia-negocio.md).
-  **Cambiar la hora congela el pasado** (owner, 2026-09-18): el sábado que se vio en $450.000
-  sigue en $450.000 aunque el lunes se mueva el corte; solo lo nuevo usa la hora nueva, así que
-  el día de negocio se graba en la venta, no se deriva al consultar. **Y es una sola hora para
-  toda la semana** (owner, 2026-09-18), como Toast, Clover y Aloha: entre el cierre y el corte
-  casi no hay ventas, así que una hora por día resolvía un caso que casi no aparece. Con las
-  dos respuestas el frente queda listo para diseñar. Lo que no
-  depende de él: la boleta electrónica lleva siempre la fecha calendario real (`FchEmis`), el
+  **Cambiar la hora recalcula el pasado** (owner, 2026-09-18, revirtiendo "congelar" del mismo
+  día): el día se calcula al consultar con el corte vigente. Congelar obligaba a grabar el día
+  de negocio en cada tabla que un reporte lee, no solo en la venta. **Una sola hora para toda la
+  semana**, entre 00:00 y 06:00, en horas enteras y 00:00 por defecto. Lo que no depende de
+  ninguna decisión: la boleta electrónica lleva siempre la fecha calendario real (`FchEmis`); el
   día de negocio es solo una vista de reporte.
+
+  📐 **Diseño:** [`specs/2026-09-18-hora-de-corte-dia-negocio-design.md`](../superpowers/specs/2026-09-18-hora-de-corte-dia-negocio-design.md),
+  con la lista completa de lectores. Falta el plan.
 
 ## 4. Necesita que el owner conteste
 
