@@ -1303,8 +1303,10 @@ llega a nadie.
   negativos. Un 0 se guarda como sin descuento.
 - ⚠️ **Hueco de las tareas 3 y 4, encontrado acá:** la spec (§ 6, pie de la pantalla de carga) pide
   cargar el descuento en el borrador cuando todas las líneas tienen precio, porque la factura ya lo
-  trae. Pero el DTO del borrador no lo acepta y la pantalla lo deja deshabilitado siempre. Se
-  arregla en un commit propio después de 8a, con la misma validación que este PATCH.
+  trae. Pero el DTO del borrador no lo acepta y la pantalla lo deja deshabilitado siempre.
+  Arreglado en un commit propio, después de 8a. Borrador, confirmación y PATCH validan con la
+  misma `validarDescuento`. La pantalla habilita el campo cuando no falta ningún precio, lo vacía
+  si se borra uno y muestra el total en el pie.
 - **Un precio corregido rehace la cuenta de cada producto cuyo costo cambió.** Con descuento al total
   pueden ser varios, en orden de `item_id`. El historial es de la línea corregida. El descuento deja
   historial en cada línea cuyo costo cambió.

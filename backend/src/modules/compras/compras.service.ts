@@ -181,6 +181,39 @@ function mismoCosto(a: string | null, b: string | null): boolean {
   return a == null || b == null ? a === b : new Decimal(a).equals(b);
 }
 
+/**
+ * El descuento al total, validado y normalizado: `null` si no hay (un 0 es no
+ * tener descuento). Una sola regla para el borrador, la confirmación y la
+ * corrección (spec § 4.4 y § 6):
+ * - se reparte según el valor de cada línea, así que exige que todas tengan
+ *   precio;
+ * - no puede superar el total: `costearLineas` no lo chequea, y dejaría costos
+ *   negativos.
+ */
+function validarDescuento(
+  lineas: { cantidad: string; precioUnitario?: string | null }[],
+  descuentoTotal: string | null | undefined,
+): string | null {
+  if (descuentoTotal == null || new Decimal(descuentoTotal).isZero()) {
+    return null;
+  }
+  if (lineas.some((l) => l.precioUnitario == null)) {
+    throw new BadRequestException(
+      'Falta el precio de alguna línea: el descuento al total se carga cuando todas tienen precio',
+    );
+  }
+  const bruto = lineas.reduce(
+    (acc, l) => acc.plus(new Decimal(l.cantidad).times(l.precioUnitario!)),
+    new Decimal(0),
+  );
+  if (new Decimal(descuentoTotal).greaterThan(bruto)) {
+    throw new BadRequestException(
+      `El descuento (${descuentoTotal}) supera el total de la compra (${bruto.toString()})`,
+    );
+  }
+  return descuentoTotal;
+}
+
 interface EncabezadoValidado {
   folio: string | null;
   proveedorNombre: string;
@@ -438,6 +471,7 @@ export class ComprasService {
     return this.db.transaccion(async () => {
       const enc = await this.validarEncabezado(tenantId, dto);
       await this.validarLineas(tenantId, dto.lineas);
+      const descuento = validarDescuento(dto.lineas, dto.descuentoTotal);
       await this.assertFolioLibre(
         tenantId,
         dto.proveedorId,
@@ -450,8 +484,9 @@ export class ComprasService {
           this.db.query(
             `INSERT INTO compras
                (tenant_id, proveedor_id, tipo_documento_compra_id, folio,
-                fecha_documento, ubicacion_id, observacion, creado_por)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                fecha_documento, ubicacion_id, observacion, creado_por,
+                descuento_total)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
              RETURNING compra_id`,
             [
               tenantId,
@@ -462,6 +497,7 @@ export class ComprasService {
               dto.ubicacionId,
               dto.observacion ?? null,
               usuarioId,
+              descuento,
             ],
           ),
         ),
@@ -482,6 +518,7 @@ export class ComprasService {
       await this.bloquearBorrador(tenantId, id);
       const enc = await this.validarEncabezado(tenantId, dto);
       await this.validarLineas(tenantId, dto.lineas);
+      const descuento = validarDescuento(dto.lineas, dto.descuentoTotal);
       await this.assertFolioLibre(
         tenantId,
         dto.proveedorId,
@@ -495,7 +532,7 @@ export class ComprasService {
           `UPDATE compras
               SET proveedor_id = $3, tipo_documento_compra_id = $4, folio = $5,
                   fecha_documento = $6, ubicacion_id = $7, observacion = $8,
-                  actualizado_el = NOW()
+                  descuento_total = $9, actualizado_el = NOW()
             WHERE tenant_id = $1 AND compra_id = $2`,
           [
             tenantId,
@@ -506,6 +543,7 @@ export class ComprasService {
             dto.fechaDocumento,
             dto.ubicacionId,
             dto.observacion ?? null,
+            descuento,
           ],
         ),
       );
@@ -631,6 +669,7 @@ export class ComprasService {
     };
     const enc = await this.validarEncabezado(tenantId, dto);
     const items = await this.validarLineas(tenantId, dto.lineas);
+    validarDescuento(dto.lineas, c.descuento_total);
     await this.assertFolioLibre(
       tenantId,
       c.proveedor_id,
@@ -876,31 +915,17 @@ export class ComprasService {
     return this.conReintento(async (manager) => {
       const compra = await this.bloquearConfirmada(tenantId, id);
       const lineas = await this.lineasConfirmadas(tenantId, id);
-      if (lineas.some((l) => l.precio_unitario == null)) {
-        throw new BadRequestException(
-          'Falta el precio de alguna línea: el descuento al total se carga cuando todas tienen precio',
-        );
-      }
-      // Un descuento de 0 es no tener descuento: se guarda igual que quitarlo.
-      const nuevo =
-        dto.descuentoTotal == null || new Decimal(dto.descuentoTotal).isZero()
-          ? null
-          : dto.descuentoTotal;
+      const nuevo = validarDescuento(
+        lineas.map((l) => ({
+          cantidad: l.cantidad,
+          precioUnitario: l.precio_unitario,
+        })),
+        dto.descuentoTotal,
+      );
       const anterior = compra.descuento_total;
       if (new Decimal(anterior ?? 0).equals(nuevo ?? 0)) {
         throw new BadRequestException(
           'El descuento es igual al vigente: no hay nada que corregir',
-        );
-      }
-      // `costearLineas` no lo chequea, y un descuento mayor que la factura
-      // dejaría costos negativos.
-      const bruto = lineas.reduce(
-        (acc, l) => acc.plus(new Decimal(l.cantidad).times(l.precio_unitario!)),
-        new Decimal(0),
-      );
-      if (nuevo != null && new Decimal(nuevo).greaterThan(bruto)) {
-        throw new BadRequestException(
-          `El descuento (${nuevo}) supera el total de la compra (${bruto.toString()})`,
         );
       }
 

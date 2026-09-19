@@ -907,6 +907,37 @@ describe('Compras — borrador (e2e)', () => {
       });
     });
 
+    it('el descuento al total se carga en el borrador y se reparte al confirmar (spec § 6)', async () => {
+      const sinPrecio = await intentar(
+        'post',
+        '/api/compras',
+        borrador({ descuentoTotal: '100' }),
+      );
+      expect(sinPrecio.status).toBe(400);
+      expect(sinPrecio.message).toContain('Falta el precio de alguna línea');
+
+      const itemId = await productoVacio();
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({
+          descuentoTotal: '1000',
+          lineas: [
+            {
+              itemId,
+              cantidad: '10',
+              unidadCodigo: 'unidad',
+              precioUnitario: '1000',
+            },
+          ],
+        }),
+      );
+      expect(new Decimal(compra.descuentoTotal!).toFixed(0)).toBe('1000');
+
+      await confirmar(compra.id);
+      // (10 × 1.000 − 1.000) / 10
+      expect(await costoActual(itemId)).toBe('900.0000');
+    });
+
     describe('corregir una confirmada (spec § 4.4)', () => {
       async function primeraLinea(compraId: string): Promise<string> {
         return (await get<CompraDetalle>(`/api/compras/${compraId}`)).lineas[0]

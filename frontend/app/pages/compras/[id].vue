@@ -75,7 +75,7 @@ const router = useRouter()
 const { formatMonto } = useFormatters()
 const { ubicaciones, cargar: cargarUbicaciones } = useUbicaciones()
 const unidadesMedidaStore = useUnidadesMedidaStore()
-const { totalLinea, subtotal, faltaAlgunPrecio, insigniaEstado } = useCompras()
+const { totalLinea, subtotal, totalConDescuento, faltaAlgunPrecio, insigniaEstado } = useCompras()
 const { puedeCrear } = usePermisosCrud('Compras')
 
 const esNueva = computed(() => route.params.id === 'nueva')
@@ -110,6 +110,7 @@ function emptyForm() {
     fechaDocumento: hoyLocal(),
     ubicacionId: '',
     observacion: '',
+    descuentoTotal: '',
   }
 }
 const form = ref(emptyForm())
@@ -181,6 +182,7 @@ function llenarDesde(c: CompraDetalle) {
     fechaDocumento: c.fechaDocumento,
     ubicacionId: c.ubicacionId,
     observacion: c.observacion ?? '',
+    descuentoTotal: c.descuentoTotal ?? '',
   }
   lineas.value = c.lineas.length ? c.lineas.map(lineaDesdeDetalle) : [nuevaLinea()]
 }
@@ -252,6 +254,19 @@ const subtotalMostrado = computed(() =>
 const faltanPrecios = computed(() =>
   faltaAlgunPrecio(lineasCargadas.value.map(l => ({ precioUnitario: l.precioUnitario || null }))),
 )
+// El descuento se reparte según el valor de cada línea: sin todos los precios
+// (o sin líneas) no hay cómo, y el backend lo rechaza (spec § 6).
+const descuentoHabilitado = computed(() =>
+  editable.value && lineasCargadas.value.length > 0 && !faltanPrecios.value,
+)
+// Si se borra un precio, el descuento cargado deja de poder existir: se vacía a
+// la vista, con el campo deshabilitado diciendo por qué.
+watch(faltanPrecios, (falta) => {
+  if (falta) form.value.descuentoTotal = ''
+})
+const totalMostrado = computed(() =>
+  totalConDescuento(subtotalMostrado.value, form.value.descuentoTotal || null),
+)
 
 // ── Guardar / descartar ────────────────────────────────────────────────────
 
@@ -271,6 +286,7 @@ function armarBody() {
     fechaDocumento: form.value.fechaDocumento,
     ubicacionId: form.value.ubicacionId,
     observacion: form.value.observacion.trim() || null,
+    descuentoTotal: form.value.descuentoTotal || null,
     lineas: lineasCargadas.value.map((l) => {
       const linea: Record<string, unknown> = {
         itemId: l.itemId,
@@ -585,11 +601,23 @@ const titulo = computed(() => {
               </span>
             </div>
             <UFormField label="Descuento al total" class="w-56">
-              <MoneyInput model-value="" oficial disabled class="w-full" />
+              <MoneyInput
+                v-model="form.descuentoTotal"
+                oficial
+                :disabled="!descuentoHabilitado"
+                class="w-full"
+                data-qa="compra-descuento"
+              />
             </UFormField>
-            <p class="text-xs text-muted" data-qa="compra-descuento-ayuda">
+            <p v-if="!descuentoHabilitado" class="text-xs text-muted" data-qa="compra-descuento-ayuda">
               Se carga cuando todas las líneas tienen precio.
             </p>
+            <div class="flex items-center gap-3 text-sm font-medium">
+              <span>Total</span>
+              <span class="tabular-nums" data-qa="compra-total">
+                {{ totalMostrado != null ? formatMonto(totalMostrado) : '—' }}
+              </span>
+            </div>
             <p v-if="faltanPrecios" class="text-xs text-muted">
               Hay líneas sin precio: entran igual y se completan cuando llegue la factura.
             </p>

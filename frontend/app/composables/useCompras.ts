@@ -56,6 +56,16 @@ export function useCompras() {
     return suma.toString()
   }
 
+  /**
+   * El total del pie: subtotal menos el descuento al total. Null si falta el
+   * subtotal (alguna línea sin precio); un descuento vacío no descuenta.
+   */
+  function totalConDescuento(subtotalCompra: string | null, descuento: string | null): string | null {
+    if (subtotalCompra == null) return null
+    const d = comoDecimal(descuento)
+    return new Decimal(subtotalCompra).minus(d ?? 0).toString()
+  }
+
   /** El 0 es un precio (el regalo); el vacío no. */
   function faltaAlgunPrecio(lineas: { precioUnitario: string | null }[]): boolean {
     return lineas.some(l => comoDecimal(l.precioUnitario) == null)
@@ -74,5 +84,5 @@ export function useCompras() {
     value,
   }))
 
-  return { totalLinea, subtotal, faltaAlgunPrecio, insigniaEstado, estadoOptions }
+  return { totalLinea, subtotal, totalConDescuento, faltaAlgunPrecio, insigniaEstado, estadoOptions }
 }

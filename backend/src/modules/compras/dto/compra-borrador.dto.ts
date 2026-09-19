@@ -16,7 +16,10 @@ import {
   IsDecimalNoNegativo,
   IsDecimalPositivo,
 } from '../../../common/decorators/decimal-signo.decorator';
-import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
+import {
+  EsCosto,
+  EsMontoCobrado,
+} from '../../../common/decorators/escala-moneda.decorator';
 
 export class SerieCompraDto {
   @IsString()
@@ -112,6 +115,18 @@ export class CompraBorradorDto {
   @IsString()
   @MaxLength(500)
   observacion?: string | null;
+
+  /**
+   * Descuento al total de la factura, en la moneda oficial. Se carga cuando
+   * todas las líneas tienen precio, porque se reparte según su valor (spec
+   * § 6). Opcional como el resto del encabezado: el PATCH del borrador
+   * reemplaza la compra entera, así que ausente es "sin descuento".
+   */
+  @IsOptional()
+  @IsNumberString()
+  @IsDecimalNoNegativo()
+  @EsMontoCobrado()
+  descuentoTotal?: string | null;
 
   // Un borrador puede estar vacío; confirmar exige al menos una línea.
   @IsArray()

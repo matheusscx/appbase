@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { useCompras } from './useCompras'
 
-const { totalLinea, subtotal, faltaAlgunPrecio, insigniaEstado, estadoOptions } = useCompras()
+const { totalLinea, subtotal, totalConDescuento, faltaAlgunPrecio, insigniaEstado, estadoOptions } = useCompras()
 
 describe('useCompras', () => {
   it('total de línea: 20,35 kg a $1.490 da 30321.5 (solo para comparar con el papel)', () => {
@@ -23,6 +23,13 @@ describe('useCompras', () => {
       { cantidad: '2', precioUnitario: '10' },
       { cantidad: '1', precioUnitario: '0' },
     ])).toBe('20')
+  })
+
+  it('el total resta el descuento; sin subtotal no hay total, y un descuento vacío no descuenta', () => {
+    // La lata del owner: 12 cajas de $30.000 con 5 % de descuento al total.
+    expect(totalConDescuento('360000', '18000')).toBe('342000')
+    expect(totalConDescuento('360000', '')).toBe('360000')
+    expect(totalConDescuento(null, '18000')).toBeNull()
   })
 
   it('faltaAlgunPrecio distingue el 0 (regalo) del vacío', () => {

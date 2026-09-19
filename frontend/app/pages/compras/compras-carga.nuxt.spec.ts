@@ -103,6 +103,13 @@ function precioInput(wrapper: Wrapper) {
   return money!
 }
 
+/** El `MoneyInput` del descuento: el último, porque el pie va debajo de las líneas. */
+function descuentoInput(wrapper: Wrapper) {
+  const money = wrapper.findAllComponents({ name: 'MoneyInput' }).at(-1)
+  expect(money, 'MoneyInput del descuento').toBeTruthy()
+  return money!
+}
+
 describe('compras/[id] — carga del borrador', () => {
   beforeEach(() => {
     enviados = []
@@ -158,6 +165,51 @@ describe('compras/[id] — carga del borrador', () => {
     expect(body.lineas).toEqual([
       { itemId: HARINA.id, cantidad: '20', unidadCodigo: 'kg', precioUnitario: null },
     ])
+    wrapper.unmount()
+  })
+
+  it('con todos los precios el descuento se habilita, resta en el total y viaja en el body', async () => {
+    const wrapper = await montar()
+    await emitir(selectConOpcion(wrapper, PROVEEDOR.id), PROVEEDOR.id)
+    await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
+    await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
+    await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
+    await emitir(selectConOpcion(wrapper, HARINA.id), HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+    await emitir(precioInput(wrapper), '1000')
+
+    const descuento = descuentoInput(wrapper)
+    expect(descuento.props('disabled')).toBe(false)
+    expect(wrapper.find('[data-qa="compra-descuento-ayuda"]').exists()).toBe(false)
+    await emitir(descuento, '2000')
+    // 20 × $1.000 − $2.000
+    expect(wrapper.find('[data-qa="compra-total"]').text()).toContain('18.000')
+
+    await wrapper.find('form').trigger('submit')
+    await new Promise(r => setTimeout(r, 20))
+    expect(enviados[0]!.body!.descuentoTotal).toBe('2000')
+    wrapper.unmount()
+  })
+
+  it('si se borra un precio, el descuento se vacía y no viaja', async () => {
+    const wrapper = await montar()
+    await emitir(selectConOpcion(wrapper, PROVEEDOR.id), PROVEEDOR.id)
+    await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
+    await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
+    await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
+    await emitir(selectConOpcion(wrapper, HARINA.id), HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+    const precio = precioInput(wrapper)
+    await emitir(precio, '1000')
+    await emitir(descuentoInput(wrapper), '2000')
+
+    await emitir(precio, '')
+    expect(descuentoInput(wrapper).props('disabled')).toBe(true)
+    expect(wrapper.find('[data-qa="compra-descuento-ayuda"]').exists()).toBe(true)
+
+    await wrapper.find('form').trigger('submit')
+    await new Promise(r => setTimeout(r, 20))
+    expect(enviados[0]!.body!.descuentoTotal).toBeNull()
     wrapper.unmount()
   })
 

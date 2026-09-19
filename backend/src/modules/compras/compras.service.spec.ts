@@ -186,6 +186,75 @@ describe('ComprasService (borrador)', () => {
     ).toHaveLength(1);
   });
 
+  describe('descuento al total en el borrador (spec § 6)', () => {
+    const CON_PRECIO = [
+      {
+        itemId: ITEM,
+        cantidad: '20',
+        unidadCodigo: 'kg',
+        precioUnitario: '1000',
+      },
+    ];
+
+    /** El último parámetro del INSERT de la compra: `descuento_total`. */
+    function descuentoInsertado(): unknown {
+      const db = (service as unknown as { db: { query: jest.Mock } }).db;
+      const insert = db.query.mock.calls.find(([sql]) =>
+        /INSERT INTO compras/.test(sql as string),
+      )!;
+      expect(insert[0] as string).toMatch(/descuento_total\)\s+VALUES/);
+      return (insert[1] as unknown[]).at(-1);
+    }
+
+    it('se guarda cuando todas las líneas tienen precio', async () => {
+      await service.crearBorrador(
+        TENANT,
+        USUARIO,
+        dto({ lineas: CON_PRECIO, descuentoTotal: '2000' }),
+      );
+      expect(descuentoInsertado()).toBe('2000');
+    });
+
+    it('un 0 se guarda como sin descuento', async () => {
+      await service.crearBorrador(
+        TENANT,
+        USUARIO,
+        dto({ lineas: CON_PRECIO, descuentoTotal: '0' }),
+      );
+      expect(descuentoInsertado()).toBeNull();
+    });
+
+    it('con una línea sin precio es 400', async () => {
+      await expect(
+        service.crearBorrador(TENANT, USUARIO, dto({ descuentoTotal: '100' })),
+      ).rejects.toThrow('Falta el precio de alguna línea');
+    });
+
+    it('mayor que el total es 400', async () => {
+      await expect(
+        service.crearBorrador(
+          TENANT,
+          USUARIO,
+          dto({ lineas: CON_PRECIO, descuentoTotal: '20001' }),
+        ),
+      ).rejects.toThrow('supera el total de la compra (20000)');
+    });
+
+    it('editar el borrador también lo guarda', async () => {
+      await service.actualizarBorrador(
+        TENANT,
+        COMPRA,
+        dto({ lineas: CON_PRECIO, descuentoTotal: '500' }),
+      );
+      const db = (service as unknown as { db: { query: jest.Mock } }).db;
+      const update = db.query.mock.calls.find(([sql]) =>
+        /UPDATE compras\s+SET proveedor_id/.test(sql as string),
+      )!;
+      expect(update[0] as string).toContain('descuento_total = $9');
+      expect((update[1] as unknown[])[8]).toBe('500');
+    });
+  });
+
   it('un proveedor de otro tenant da el mismo 400 que uno inexistente', async () => {
     pisar(/FROM terceros\s+WHERE tercero_id/, []);
     await expect(service.crearBorrador(TENANT, USUARIO, dto())).rejects.toThrow(
