@@ -1335,6 +1335,52 @@ seq scan igual —o casi—, así que un `EXPLAIN` sobre ella no distingue el pl
 
 ---
 
+## 18. Operación idempotente (un cobro por intento)
+
+Todo endpoint que **cobra** —crea una venta, cierra una cuenta, registra un abono— exige
+`Idempotency-Key` y corre su operación dentro de `IdempotenciaService.ejecutar`
+([ADR-026](../adr/026-idempotencia-de-cobros.md)). El reintento del cajero después de un corte
+reproduce la respuesta en vez de cobrar dos veces.
+
+```ts
+// controller
+@Post()
+@ApiHeader({ name: 'Idempotency-Key', required: true, description: '…' })
+crear(@Req() req: Request, @Body(EscalaMonedaPipe) dto: XDto,
+      @ClaveIdempotencia() clave: string) { … }
+
+// service
+const cobrar = () => this.db.transaccion(async (manager) => { /* la operación de siempre */ });
+return this.idempotencia.ejecutar(
+  { tenantId, usuarioId, clave, operacion: 'x.y', huella: huellaDe('x.y', { /* a mano */ }) },
+  cobrar,
+  (r) => r.ventaId,
+);
+```
+
+- **El reclamo va PRIMERO.** `ejecutar` abre su `db.transaccion`, reclama la clave y recién
+  ahí llama a `operar`, cuya transacción se suma a la misma (ADR-020). Nada de la operación
+  —ni un `FOR UPDATE`, ni un chequeo de estado— puede ir antes: si el cierre de mesa chequeara
+  *"La cuenta no está abierta"* antes de reclamar, el reintento rebotaría en vez de reproducir.
+- **La credencial va ANTES del reclamo**, fuera de `ejecutar`: reproducir no es un atajo que
+  saltee el PIN. **El estado va DESPUÉS**, dentro de `operar`, aunque sea una lectura sin
+  lock: el turno abierto del garzón es condición para escribir, y un reintento que reproduce
+  no escribe. Chequearlo afuera hace que el reintento rebote si el turno se cerró en el medio.
+- **La huella se arma a mano, campo por campo, sin datos sensibles.** El PIN nunca entra: su
+  hash se revierte por fuerza bruta. Un campo nuevo del DTO se decide en el llamador; no entra
+  solo. Un DTO sin credenciales puede ir entero (`huellaDe('pago.abono', dto)`).
+- **La operación agrega su valor a `OperacionIdempotente`** (`modules/idempotencia/huella.ts`).
+- **Un llamador interno sin HTTP no pasa clave** (el callback de Webpay, las suscripciones):
+  ya tienen su propia idempotencia o no hay nadie que reintente. Por eso el parámetro del
+  service es opcional solo en `VentasService.crear`.
+- **Tests:** el unitario mockea `ejecutar` como pasa-manos (`(_s, operar) => operar()`) y
+  afirma sobre la solicitud que recibe (la huella, sin el PIN). Lo que importa de verdad
+  —reclamo atómico, duplicado concurrente, rollback que suelta la clave— solo se prueba contra
+  Postgres: `test/idempotencia-venta.e2e-spec.ts`. Todo `POST` de un e2e a estos endpoints
+  lleva `.set('Idempotency-Key', randomUUID())`, una clave nueva por llamada.
+
+---
+
 ## 12. Docs vivas a tocar en el mismo commit
 
 - `startup-pos.sql` — agregar las tablas nuevas.

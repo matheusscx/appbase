@@ -7,6 +7,7 @@ import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
+import { randomUUID } from 'node:crypto';
 
 // Seed PARIS (docs/features/liquidacion-propinas-motor.md + seeder.service.ts):
 // config de distribución 0.10 con un único grupo "Garzones" (tipo_garzon=garzon,
@@ -111,6 +112,7 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
   async function crearVentaSinPropina(): Promise<string> {
     const res = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -123,6 +125,7 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
   async function crearVentaConPropina(monto: string): Promise<string> {
     const res = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -685,6 +688,7 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -704,6 +708,7 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -727,6 +732,7 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -749,6 +755,7 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           canal: 'online',

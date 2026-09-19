@@ -23,6 +23,72 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Idempotencia en la creación de venta (cerrada 2026-09-19)
+
+Sale de [`pendientes.md` § *Endurecimiento para producción*](pendientes.md). La entrada, verbatim:
+
+- [x] **Idempotencia en la creación de venta** (backend + frontend) — decidido 2026-07-27:
+  va acá y no antes, porque hoy no hay usuarios que puedan sufrir el doble cobro y es una
+  feature con superficie propia (contrato HTTP, tabla, cliente), no un fix. **El problema:**
+  no existe clave de idempotencia en ningún endpoint; un doble clic en "cobrar" o un
+  reintento del cliente tras un timeout crea **dos ventas completas** — doble descuento de
+  stock y doble cobro. El `FOR UPDATE` de inventario evita stock negativo, no la venta
+  duplicada, y deshabilitar el botón en el frontend no sobrevive a un timeout de red.
+  **Forma:** `Idempotency-Key` generada por el cliente **por intento de cobro** (no por
+  carrito), tabla que guarda clave → respuesta, y reproducción de la respuesta original en
+  el reintento en vez de recrear.
+  ⛔ **La opción barata es la incorrecta:** deduplicar por hash del carrito en una ventana
+  de segundos rompe el caso real de dos clientes comprando lo mismo con segundos de
+  diferencia — cotidiano en un minimarket o una cafetería. No es un atajo aceptable.
+  📌 **En curso desde el 2026-09-19**, con spec
+  `2026-09-19-idempotencia-venta-design.md` y plan `2026-09-19-idempotencia-venta.md`
+  (borrados al cerrar, como todo plan terminado; lo durable quedó en ADR-026).
+  Lo que decidió el owner ese día: el reintento **con otros datos** se frena con un aviso y un
+  link a la venta, nunca crea otra; el reintento **igual** muestra el éxito con el aviso *"ya
+  había entrado"* e imprime la boleta; el cobro en duda queda atado al carrito **hasta que sale
+  bien o se vacía**, sin vencimiento por tiempo; entran también el **cobro de mesa** y el
+  **abono**. Costo asumido: vaciar el carrito después de un corte y volver a armarlo es una
+  venta nueva. La nota de crédito tiene el mismo hueco, pero es fiscal y va aparte (§ 6).
+
+**Cierre (2026-09-19).** Diseño y porqué en [ADR-026](../adr/026-idempotencia-de-cobros.md);
+patrones en [`patterns/backend.md` § 18](../patterns/backend.md) y
+[`patterns/frontend.md` § 18](../patterns/frontend.md).
+
+- **Qué se hizo.** `POST /ventas`, `POST /cuentas/:id/cerrar` y `POST /pagos` exigen
+  `Idempotency-Key` (UUID; 400 sin ella). `IdempotenciaService.ejecutar` reclama la clave en
+  `solicitudes_idempotentes` como **primera sentencia** de la transacción del cobro y guarda la
+  respuesta en la misma transacción. Con la misma huella reproduce más `repetida: true`; con
+  otra, responde 422 con el `ventaId`. En el frontend, `useIntentoCobro` guarda la clave por
+  ámbito (POS, pasarela de la tienda, cuenta del salón, venta abonada).
+- **Una decisión más del owner, tomada durante la ejecución:** el aviso de "otros datos"
+  **cierra el intento**. El Confirmar siguiente es una venta nueva, sin rearmar el carrito.
+- **Qué lo fija.** `test/idempotencia-venta.e2e-spec.ts` contra Postgres real: reproducción,
+  422, 400 sin cabecera, rechazo que no deja rastro, alcance por usuario, dos requests
+  simultáneos con la misma clave y el nivel `READ COMMITTED` del que depende ese caso.
+  Mutantes medidos el 2026-09-19:
+  - quitar el reclamo (la conducta de antes) → mueren **8** de los 15 tests del spec: los de
+    reproducción y 422 de las tres operaciones;
+  - chequear el estado de la cuenta **antes** del reclamo → mueren los **3** del salón que
+    reintentan un cierre ya hecho;
+  - la huella sin ordenar claves la mata el unitario (`huella.spec.ts`), no el e2e: el mismo
+    cliente manda siempre el mismo orden;
+  - meter el PIN en la huella → lo mata `salones.service.spec.ts`;
+  - chequear el turno del garzón **antes** del reclamo → lo matan el e2e *"si el garzón marcó
+    salida entre el cierre y el reintento, igual reproduce"* y su unitario. Ese orden lo levantó
+    la revisión independiente de dominio: la primera versión chequeaba el turno afuera, y el
+    reintento rebotaba con *"no tiene una sesión de trabajo abierta"* sobre una mesa ya cobrada.
+  - En el frontend mueren los cuatro de las pantallas: el `watch` del carrito vacío en el
+    POS, el `terminar` del éxito en POS y salón, y el `onUnmounted` de la pasarela.
+  - Smoke de navegador: `frontend/e2e/ventas/cobro-repetido.spec.ts` deja pasar el primer
+    cobro al backend, le corta la respuesta al navegador, y verifica que la caja espere UN
+    cobro.
+- **Qué quedó afuera.** La nota de crédito, que tiene el mismo hueco y va en su propio frente
+  fiscal ([`pendientes.md` § 6](pendientes.md)). Y los costos que asumió el owner, escritos en
+  el ADR: vaciar el carrito empieza un intento nuevo, recargar la pestaña pierde la clave, y dos
+  pestañas del POS no se protegen entre sí.
+
+---
+
 ## Borrar una bodega mientras otro movimiento escribe stock en ella (cerrada 2026-09-18)
 
 Sale de [`pendientes.md` § 5](pendientes.md). La entrada, verbatim:

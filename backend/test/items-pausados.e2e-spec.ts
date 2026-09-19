@@ -6,6 +6,7 @@ import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
+import { randomUUID } from 'node:crypto';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
@@ -410,6 +411,7 @@ describe('Ítem pausado según el canal (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           tipoDocumentoId: BOLETA_ID,
@@ -450,6 +452,7 @@ describe('Ítem pausado según el canal (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post(`/api/cuentas/${cuentaSalonId}/cerrar`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           garzonId: garzon.id,
@@ -518,6 +521,7 @@ describe('Categoría y tercero pausados: el backend rechaza la asignación nueva
   const venderCon = (customer: Record<string, unknown>) =>
     request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         canal: 'fisico',

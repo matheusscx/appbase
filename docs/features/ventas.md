@@ -59,6 +59,7 @@ Crea una venta completa.
 ```
 POST /api/ventas
 Authorization: Bearer <token-con-tenant_id>
+Idempotency-Key: <uuid por intento de cobro>
 
 Request:
 {
@@ -100,6 +101,19 @@ Response (201):
 - `400` — excedente de pago sin método con `permite_vuelto = true`
 - `400` — `metodoPagoId` no habilitado para el tenant (rollback completo)
 - `400` — stock insuficiente (rollback completo)
+- `400` — falta la cabecera `Idempotency-Key` o no es un UUID
+- `422` — la misma `Idempotency-Key` con otros datos (body con `ventaId`)
+
+**Un cobro que se repite no se registra dos veces** (2026-09-19,
+[ADR-026](../adr/026-idempotencia-de-cobros.md)). La cabecera `Idempotency-Key` es
+obligatoria y la genera el cliente **por intento de cobro**. Con la misma clave, el reintento
+—el cajero que vuelve a confirmar después de un corte— **no crea otra venta**: devuelve la
+respuesta del primer intento, boleta incluida, más `repetida: true`, y la pantalla la imprime
+con el aviso *"Este cobro ya había entrado"*. Con la misma clave y **otros datos** (cambió
+tarjeta por efectivo) responde 422 con el `ventaId` de la venta que sí entró, y la pantalla
+ofrece *Ver venta*. Un primer intento rechazado no deja rastro, así que el reintento corregido
+corre como nuevo. La clave es por usuario: la de otro no reproduce nada.
+El callback de Webpay llama al service sin clave; ya es idempotente por orden (ADR-009).
 
 **Una línea no lleva precio (2026-08-30).** El precio sale de `item.precioBase` —más lo
 que agregue la personalización— y lo calcula el servidor. Hasta esa fecha había un
@@ -400,7 +414,7 @@ detalle necesita para mostrar "2,5 kg" en vez de "2,5". Ver también el congelad
 3. Convertir precios a moneda oficial (`precioOrigen × tasa_cambio`)
 4. Llamar `calculoPreciosService.calcular` → importes autoritativos
 5. Calcular excedente; validar `permite_vuelto` si hay excedente; determinar estado
-6. `dataSource.transaction`: guardar cabecera → detalles → trazas de reglas → customer → inventario (`salida/venta` por producto) → pagos → movimientos de caja (efectivo)
+6. `db.transaccion`: **reclamar la `Idempotency-Key`** (primera sentencia; si ya estaba, reproducir y cortar acá) → guardar cabecera → detalles → trazas de reglas → customer → inventario (`salida/venta` por producto) → pagos → movimientos de caja (efectivo) → guardar la respuesta junto a la clave
 
 ### Dependencias reutilizadas
 

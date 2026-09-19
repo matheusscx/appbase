@@ -98,6 +98,9 @@ describe('Vigencia por fecha — el instante lo decide el pedido (e2e)', () => {
   ): Promise<T> {
     const res = await request(app.getHttpServer())
       .post(url)
+      // Una clave nueva por llamada: cada POST de este spec es un cobro distinto,
+      // y los endpoints que cobran la exigen (Idempotency-Key).
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send(body);
     expect(res.status).toBe(esperado);

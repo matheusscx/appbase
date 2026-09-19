@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Anular un plato ya despachado a cocina (spec
@@ -210,6 +211,7 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
   ): Promise<{ ventaId: string; cuenta: CuentaDetalle }> {
     const res = await request(app.getHttpServer())
       .post(`/api/cuentas/${cuentaId}/cerrar`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${tokenAdmin}`)
       .send({ garzonId: garzon.id, pin: garzon.pin, pagos: [] });
     expect(res.status).toBe(201);

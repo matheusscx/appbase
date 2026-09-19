@@ -37,6 +37,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [023](./023-promociones-familia-propia-del-motor.md) | Promociones: evaluador puro afuera del motor, aplicación y conflicto adentro, familia propia de traza y congelado | Accepted | 2026-08-27 |
 | [024](./024-decimales-redondeo-y-unidades-de-cuenta.md) | Decimales y redondeo: un criterio con el número puesto por la moneda, el nivel lo fija el país, la UF solo cotiza | ⚠️ Accepted en parte — el nivel por país y la UF **reabiertos** por el owner | 2026-09-03 |
 | [025](./025-decimales-estado-actual.md) | Estado actual de los decimales — línea base medida contra la que se mide ADR-024, con las cinco preguntas contestadas desde el código | Accepted | 2026-09-03 |
+| [026](./026-idempotencia-de-cobros.md) | Idempotencia de cobros: una `Idempotency-Key` por intento, reclamada como primera sentencia de la transacción del cobro; el reintento reproduce, con otros datos da 422 | Accepted | 2026-09-19 |
 
 ## Creating a New ADR
 

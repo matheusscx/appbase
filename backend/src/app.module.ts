@@ -144,6 +144,8 @@ import { MotivosDiferenciaInventarioModule } from './modules/motivos-diferencia-
 import { MotivoTraslado } from './modules/motivos-traslado/entities/motivo-traslado.entity';
 import { MotivosTrasladoModule } from './modules/motivos-traslado/motivos-traslado.module';
 import { ResumenNegocioModule } from './modules/resumen-negocio/resumen-negocio.module';
+import { IdempotenciaModule } from './modules/idempotencia/idempotencia.module';
+import { SolicitudIdempotente } from './modules/idempotencia/entities/solicitud-idempotente.entity';
 import { Impresora } from './modules/impresoras/entities/impresora.entity';
 import { GrupoModificador } from './modules/grupos-modificadores/entities/grupo-modificador.entity';
 import { GrupoModificadorOpcion } from './modules/grupos-modificadores/entities/grupo-modificador-opcion.entity';
@@ -242,6 +244,7 @@ import { UbicacionesModule } from './modules/ubicaciones/ubicaciones.module';
           MovimientoCaja,
           CajaArqueoMedio,
           CajaIntentoRechazado,
+          SolicitudIdempotente,
           Venta,
           VentaDetalle,
           VentaDescuento,
@@ -344,6 +347,7 @@ import { UbicacionesModule } from './modules/ubicaciones/ubicaciones.module';
     UbicacionesModule,
     TrasladosModule,
     ResumenNegocioModule,
+    IdempotenciaModule,
   ],
   controllers: [AppController],
   providers: [AppService],

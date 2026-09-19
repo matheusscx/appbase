@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { randomUUID } from 'node:crypto';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 
@@ -649,6 +650,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({
           tipoDocumentoId: BOLETA_ID,
@@ -692,6 +694,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       // queda informativa, no bloquea el cierre.
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({
           tipoDocumentoId: BOLETA_ID,
@@ -722,6 +725,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({
           tipoDocumentoId: BOLETA_ID,
@@ -791,6 +795,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({
           tipoDocumentoId: BOLETA_ID,
@@ -916,6 +921,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         // Venta con tarjeta (informativa: es_efectivo=false, requiere_conteo=false).
         const venta = await request(app.getHttpServer())
           .post('/api/ventas')
+          .set('Idempotency-Key', randomUUID())
           .set('Authorization', `Bearer ${tokenSupervisor}`)
           .send({
             tipoDocumentoId: BOLETA_ID,
@@ -1290,6 +1296,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({
           lineas: [{ itemId: itemEstadoId, cantidad: '1' }],

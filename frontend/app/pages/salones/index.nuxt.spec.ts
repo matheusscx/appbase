@@ -21,6 +21,7 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } 
 import { markRaw } from 'vue'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Salones from './index.vue'
+import { AVISO_COBRO_REPETIDO, useIntentoCobro } from '~/composables/useIntentoCobro'
 
 /**
  * Para poder CERRAR un drawer real en un test —el panel de personalización de una receta, en
@@ -291,6 +292,14 @@ let estacionesReclamadas: unknown[] = []
 let cierresDeCuenta: string[] = []
 /** El body de cada uno: con qué propina se cerró. Ver el test de la propina. */
 let bodiesDeCierre: Record<string, unknown>[] = []
+/** La `Idempotency-Key` de cada `POST /cuentas/:id/cerrar`, en orden. */
+let clavesDeCierre: (string | undefined)[] = []
+/**
+ * Lo que contesta cada `POST /cuentas/:id/cerrar`, en orden, para los tests de
+ * idempotencia: un `Error` lo rechaza (el corte de red, el 422), un objeto se
+ * mezcla sobre la respuesta de éxito. Vacía = el comportamiento de siempre.
+ */
+let respuestasCierre: (Error | Record<string, unknown>)[] = []
 /**
  * Retiene la respuesta del `POST /cuentas/:id/cerrar`, igual que sus hermanos. Es
  * lo único que abre la ventana **"el cierre ya salió"**: el `push` de
@@ -448,7 +457,7 @@ mockNuxtImport('onBeforeRouteLeave', () => {
 mockNuxtImport('useApiFetch', () => {
   return (
     url: string,
-    opts?: { method?: string, body?: Record<string, unknown> },
+    opts?: { method?: string, body?: Record<string, unknown>, headers?: Record<string, string> },
   ) => {
     if (typeof url !== 'string') return Promise.resolve([])
     const method = opts?.method ?? 'GET'
@@ -812,6 +821,9 @@ mockNuxtImport('useApiFetch', () => {
     if (cerrarMatch) {
       cierresDeCuenta.push(cerrarMatch[1] ?? '')
       bodiesDeCierre.push(opts?.body ?? {})
+      clavesDeCierre.push(opts?.headers?.['Idempotency-Key'])
+      const respuestaCierre = respuestasCierre.shift()
+      if (respuestaCierre instanceof Error) return Promise.reject(respuestaCierre)
       if (cierreFallaSesion) {
         // Solo el primero: un segundo saldría bien, así que si algo lo repitiera
         // el test lo vería.
@@ -830,6 +842,7 @@ mockNuxtImport('useApiFetch', () => {
         cuenta: null,
         ventaId: 'venta-1',
         boleta: cierreBoletaOverride ?? boletaCierreDefault(),
+        ...respuestaCierre,
       }
       return cierreRetenido ? cierreRetenido.then(() => cerrado) : Promise.resolve(cerrado)
     }
@@ -911,6 +924,8 @@ function reiniciarMock() {
   estacionesReclamadas = []
   cierresDeCuenta = []
   bodiesDeCierre = []
+  clavesDeCierre = []
+  respuestasCierre = []
   cierreRetenido = null
   cierreFallaSesion = false
   cierreBoletaOverride = null
@@ -6563,6 +6578,93 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     // en el detalle.
     expect(botonEn(drawerMesa(), 'Cuentas')).toBeTruthy()
     expect(drawerMesa()?.textContent).toContain('Cuenta 1')
+  })
+
+  describe('un cobro que se repite no se registra dos veces', () => {
+    /** El 422 de "otros datos" tal como lo arma `IdempotenciaService` (backend). */
+    function errorOtrosDatos() {
+      const err = new Error('x') as Error & { status?: number, data?: unknown }
+      err.status = 422
+      err.data = {
+        statusCode: 422,
+        message: 'Este cobro ya se había registrado con otros datos. Revisá la venta antes de cobrar de nuevo.',
+        ventaId: 'venta-1',
+      }
+      return err
+    }
+
+    beforeEach(() => {
+      useIntentoCobro().terminar('cuenta:cuenta-9')
+    })
+
+    async function cobrarConPin(wrapper: Awaited<ReturnType<typeof montar>>) {
+      await abrirYConfirmarElCobro(wrapper)
+      await esperar(20)
+      await tipearPin()
+      await esperar(100)
+    }
+
+    it('un corte y un reintento sobre la misma cuenta mandan la MISMA clave', async () => {
+      catalogoItemsMock = [producto('3.0000', '1.0000')]
+      cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+      respuestasCierre = [new Error('fetch failed')]
+
+      const wrapper = await montar()
+      await abrirLaCuenta(wrapper)
+      await esperar(400)
+
+      await cobrarConPin(wrapper)
+      await cobrarConPin(wrapper)
+
+      expect(cierresDeCuenta).toEqual(['cuenta-9', 'cuenta-9'])
+      expect(clavesDeCierre[0]).toBeTruthy()
+      expect(clavesDeCierre[1], 'el reintento es el mismo intento').toBe(clavesDeCierre[0])
+    })
+
+    it('un cierre que salió bien cierra el intento de esa cuenta', async () => {
+      catalogoItemsMock = [producto('3.0000', '1.0000')]
+      cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+      const wrapper = await montar()
+      await abrirLaCuenta(wrapper)
+      await esperar(400)
+      await cobrarConPin(wrapper)
+
+      expect(clavesDeCierre).toHaveLength(1)
+      // El estado vive a nivel de módulo, por pestaña: si la pantalla no lo
+      // hubiera terminado, esta sería la misma clave.
+      expect(useIntentoCobro().cabecera('cuenta:cuenta-9')['Idempotency-Key'])
+        .not.toBe(clavesDeCierre[0])
+    })
+
+    it('un cierre reproducido sigue el flujo de éxito y avisa que ya había entrado', async () => {
+      catalogoItemsMock = [producto('3.0000', '1.0000')]
+      cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+      respuestasCierre = [{ repetida: true }]
+
+      const wrapper = await montar()
+      await abrirLaCuenta(wrapper)
+      await esperar(400)
+      await cobrarConPin(wrapper)
+
+      expect(toasts.some(t => (t.title ?? '').startsWith('Cuenta cerrada')), 'el éxito de siempre').toBe(true)
+      expect(toasts.some(t => t.title === AVISO_COBRO_REPETIDO), 'más el aviso').toBe(true)
+    })
+
+    it('el 422 de otros datos: "Ver venta" en vez del error genérico', async () => {
+      catalogoItemsMock = [producto('3.0000', '1.0000')]
+      cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+      respuestasCierre = [errorOtrosDatos()]
+
+      const wrapper = await montar()
+      await abrirLaCuenta(wrapper)
+      await esperar(400)
+      await cobrarConPin(wrapper)
+
+      const aviso = toasts.find(t => (t.title ?? '').includes('otros datos'))
+      expect(aviso?.actions?.map(a => a.label)).toEqual(['Ver venta'])
+      expect(toasts.some(t => (t.title ?? '').startsWith('Error al cerrar la cuenta'))).toBe(false)
+    })
   })
 })
 

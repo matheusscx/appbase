@@ -31,6 +31,8 @@ import {
   resolvePagination,
 } from '../../common/utils/pagination.util';
 import type { QueryPagosDto } from './dto/query-pagos.dto';
+import { IdempotenciaService } from '../idempotencia/idempotencia.service';
+import { huellaDe } from '../idempotencia/huella';
 
 // ─── helper puro (exportado para tests) ──────────────────────────────────────
 
@@ -95,6 +97,7 @@ export class PagosService {
   constructor(
     private readonly db: Db,
     private readonly cajaService: CajaService,
+    private readonly idempotencia: IdempotenciaService,
   ) {}
 
   /**
@@ -319,115 +322,135 @@ export class PagosService {
     tenantId: string,
     usuarioId: string,
     dto: CreatePagoDto,
+    /**
+     * La `Idempotency-Key` del intento de cobro: el reintento de un abono que
+     * sí entró reproduce su respuesta en vez de registrar otro pago (ADR-026). El reclamo va antes del `FOR UPDATE`
+     * sobre la venta. El DTO no trae credenciales, así que entra entero en la
+     * huella.
+     */
+    clave: string,
   ): Promise<{
     pagos: Pago[];
     venta: { id: string; estado: EstadoVenta; saldo: string };
+    repetida?: true;
   }> {
-    return this.db.transaccion(async (manager) => {
-      // Cargar venta
-      const ventaRows: {
-        venta_id: string;
-        total_final: string;
-        estado: string;
-        moneda_id: string;
-      }[] = await manager.query(
-        // FOR UPDATE: serializa los abonos sobre la MISMA venta hasta el commit.
-        // Sin el lock, dos abonos concurrentes leen el mismo saldo y ambos lo
-        // aplican — sobre-pago que ninguno de los dos ve, porque cada uno
-        // comparó contra un saldo que el otro ya invalidó. La suma de
-        // `pago_aplicaciones` de más abajo también queda bajo este lock.
-        `SELECT venta_id, total_final, estado, moneda_id
+    const abonar = () =>
+      this.db.transaccion(async (manager) => {
+        // Cargar venta
+        const ventaRows: {
+          venta_id: string;
+          total_final: string;
+          estado: string;
+          moneda_id: string;
+        }[] = await manager.query(
+          // FOR UPDATE: serializa los abonos sobre la MISMA venta hasta el commit.
+          // Sin el lock, dos abonos concurrentes leen el mismo saldo y ambos lo
+          // aplican — sobre-pago que ninguno de los dos ve, porque cada uno
+          // comparó contra un saldo que el otro ya invalidó. La suma de
+          // `pago_aplicaciones` de más abajo también queda bajo este lock.
+          `SELECT venta_id, total_final, estado, moneda_id
          FROM ventas
          WHERE venta_id = $1
            AND tenant_id = $2
            AND eliminado_el IS NULL
          FOR UPDATE`,
-        [dto.ventaId, tenantId],
-      );
-
-      if (!ventaRows.length) {
-        throw new NotFoundException('Venta no encontrada');
-      }
-
-      const venta = ventaRows[0];
-
-      if (!['pendiente', 'pagada_parcial'].includes(venta.estado)) {
-        throw new BadRequestException(
-          'Solo se puede abonar a ventas pendientes o pagadas parcialmente',
+          [dto.ventaId, tenantId],
         );
-      }
 
-      // Verificar caja abierta
-      const caja = await this.cajaService.findActiva(tenantId, usuarioId);
-      if (!caja) {
-        throw new BadRequestException('No tienes una caja abierta');
-      }
-      if (caja.estado !== 'abierta') {
-        throw new BadRequestException(
-          'La caja está en conciliación y no admite pagos',
-        );
-      }
-      // Mismo lock que en la creación de venta: `findActiva` lee fuera de la
-      // transacción, así que sin esto el estado 'abierta' no se sostiene hasta el
-      // INSERT del movimiento de caja. El abono siempre opera sobre caja física.
-      await this.cajaService.bloquearCajaAbierta(manager, caja.id, tenantId);
+        if (!ventaRows.length) {
+          throw new NotFoundException('Venta no encontrada');
+        }
 
-      // Lo ya aplicado A LA VENTA sale de `pago_aplicaciones` con tipo='venta',
-      // no de `monto - vuelto`: un pago puede repartirse entre venta y propina,
-      // y la suma bruta contaría la propina como si fuera pago de la venta —
-      // dejando la venta en `pagada` con parte del total sin cobrar. Mismo
-      // criterio que `listar()` y `resumen()` en VentasService.
-      const pagosAplicadosRows: { monto_aplicado: string }[] =
-        await manager.query(
-          `SELECT COALESCE(SUM(pa.monto), 0) AS monto_aplicado
+        const venta = ventaRows[0];
+
+        if (!['pendiente', 'pagada_parcial'].includes(venta.estado)) {
+          throw new BadRequestException(
+            'Solo se puede abonar a ventas pendientes o pagadas parcialmente',
+          );
+        }
+
+        // Verificar caja abierta
+        const caja = await this.cajaService.findActiva(tenantId, usuarioId);
+        if (!caja) {
+          throw new BadRequestException('No tienes una caja abierta');
+        }
+        if (caja.estado !== 'abierta') {
+          throw new BadRequestException(
+            'La caja está en conciliación y no admite pagos',
+          );
+        }
+        // Mismo lock que en la creación de venta: `findActiva` lee fuera de la
+        // transacción, así que sin esto el estado 'abierta' no se sostiene hasta el
+        // INSERT del movimiento de caja. El abono siempre opera sobre caja física.
+        await this.cajaService.bloquearCajaAbierta(manager, caja.id, tenantId);
+
+        // Lo ya aplicado A LA VENTA sale de `pago_aplicaciones` con tipo='venta',
+        // no de `monto - vuelto`: un pago puede repartirse entre venta y propina,
+        // y la suma bruta contaría la propina como si fuera pago de la venta —
+        // dejando la venta en `pagada` con parte del total sin cobrar. Mismo
+        // criterio que `listar()` y `resumen()` en VentasService.
+        const pagosAplicadosRows: { monto_aplicado: string }[] =
+          await manager.query(
+            `SELECT COALESCE(SUM(pa.monto), 0) AS monto_aplicado
              FROM pagos p
              JOIN pago_aplicaciones pa ON pa.pago_id = p.pago_id
                   AND pa.eliminado_el IS NULL AND pa.tipo = 'venta'
             WHERE p.venta_id = $1
               AND p.eliminado_el IS NULL`,
-          [dto.ventaId],
+            [dto.ventaId],
+          );
+
+        const montoAplicado = new Decimal(
+          pagosAplicadosRows[0]?.monto_aplicado ?? '0',
+        );
+        const totalFinal = new Decimal(venta.total_final);
+        const saldo = Decimal.max(0, totalFinal.minus(montoAplicado));
+
+        // Registrar los nuevos pagos
+        const { pagos: savedPagos, montoAplicadoVenta: montoNuevosVenta } =
+          await this.registrar(manager, {
+            tenantId,
+            ventaId: dto.ventaId,
+            pagos: dto.pagos,
+            cajaId: caja.id,
+            monedaOficialId: venta.moneda_id,
+            target: saldo.toFixed(4),
+            propinaMonto: '0',
+          });
+
+        // Recalcular monto total aplicado y nuevo estado (solo aplicaciones venta)
+        const newMontoAplicado = montoAplicado.plus(montoNuevosVenta);
+        const newEstado = calcularEstadoVenta(
+          venta.total_final,
+          newMontoAplicado.toFixed(4),
+        );
+        const newSaldo = Decimal.max(
+          0,
+          totalFinal.minus(newMontoAplicado),
+        ).toFixed(4);
+
+        // Actualizar estado de la venta
+        await manager.query(
+          `UPDATE ventas SET estado = $1, actualizado_el = NOW() WHERE venta_id = $2`,
+          [newEstado, dto.ventaId],
         );
 
-      const montoAplicado = new Decimal(
-        pagosAplicadosRows[0]?.monto_aplicado ?? '0',
-      );
-      const totalFinal = new Decimal(venta.total_final);
-      const saldo = Decimal.max(0, totalFinal.minus(montoAplicado));
-
-      // Registrar los nuevos pagos
-      const { pagos: savedPagos, montoAplicadoVenta: montoNuevosVenta } =
-        await this.registrar(manager, {
-          tenantId,
-          ventaId: dto.ventaId,
-          pagos: dto.pagos,
-          cajaId: caja.id,
-          monedaOficialId: venta.moneda_id,
-          target: saldo.toFixed(4),
-          propinaMonto: '0',
-        });
-
-      // Recalcular monto total aplicado y nuevo estado (solo aplicaciones venta)
-      const newMontoAplicado = montoAplicado.plus(montoNuevosVenta);
-      const newEstado = calcularEstadoVenta(
-        venta.total_final,
-        newMontoAplicado.toFixed(4),
-      );
-      const newSaldo = Decimal.max(
-        0,
-        totalFinal.minus(newMontoAplicado),
-      ).toFixed(4);
-
-      // Actualizar estado de la venta
-      await manager.query(
-        `UPDATE ventas SET estado = $1, actualizado_el = NOW() WHERE venta_id = $2`,
-        [newEstado, dto.ventaId],
-      );
-
-      return {
-        pagos: savedPagos,
-        venta: { id: dto.ventaId, estado: newEstado, saldo: newSaldo },
-      };
-    });
+        return {
+          pagos: savedPagos,
+          venta: { id: dto.ventaId, estado: newEstado, saldo: newSaldo },
+        };
+      });
+    return this.idempotencia.ejecutar(
+      {
+        tenantId,
+        usuarioId,
+        clave,
+        operacion: 'pago.abono',
+        huella: huellaDe('pago.abono', dto),
+      },
+      abonar,
+      (r) => r.venta.id,
+    );
   }
 
   /**

@@ -33,6 +33,7 @@ Registra un abono a una venta pendiente o parcialmente pagada.
 ```
 POST /api/pagos
 Authorization: Bearer <token-con-tenant_id>
+Idempotency-Key: <uuid por intento de abono>
 
 Request:
 {
@@ -52,6 +53,16 @@ Response (201):
 - `400` — excedente sin método con `permite_vuelto = true`
 - `400` — `metodoPagoId` no habilitado para el tenant
 - `400` — sin caja abierta para el usuario
+- `400` — falta la cabecera `Idempotency-Key` o no es un UUID
+- `422` — la misma `Idempotency-Key` con otro abono (body con `ventaId`)
+
+**Un abono que se repite no se registra dos veces** (2026-09-19,
+[ADR-026](../adr/026-idempotencia-de-cobros.md)). Con la misma clave, el reintento después de
+un corte devuelve el abono que ya entró, más `repetida: true`, en vez de registrar un segundo
+pago. El `AbonoModal` guarda la clave **por venta** (`abono:<ventaId>`) a nivel de pestaña, así
+que cerrar y reabrir el modal sigue siendo el mismo intento. La clave muere con el éxito.
+⚠️ Recargar la página la pierde: un segundo abono ahí sale si a la venta le queda saldo, y el
+listado recargado ya muestra el primero.
 
 ### GET /api/pagos
 

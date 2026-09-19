@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { randomUUID } from 'node:crypto';
 
 /**
  * E2E del motor de promociones (`docs/features/motor-promociones.md`).
@@ -188,6 +189,9 @@ describe('Motor de promociones (e2e)', () => {
   ): Promise<T> {
     const res = await request(app.getHttpServer())
       .post(url)
+      // Una clave nueva por llamada: cada POST de este spec es un cobro distinto,
+      // y los endpoints que cobran la exigen (Idempotency-Key).
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send(body);
     expect(res.status).toBe(esperado);
@@ -235,6 +239,7 @@ describe('Motor de promociones (e2e)', () => {
   const crearVenta = (body: Record<string, unknown>, token = tokenAdmin) =>
     request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({ tipoDocumentoId: BOLETA_ID, ...body });
 

@@ -22,6 +22,7 @@ import { MonedasModule } from '../monedas/monedas.module';
 import { CalculoPreciosModule } from '../calculo-precios/calculo-precios.module';
 import { MotivosBajaModule } from '../motivos-baja/motivos-baja.module';
 import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
+import { IdempotenciaModule } from '../idempotencia/idempotencia.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
     // `anularLinea` resuelve `UbicacionesService.localDe` para el
     // `ubicacionLocalId` que le pasa a `ItemsService.consumirLineaAnulada`.
     UbicacionesModule,
+    IdempotenciaModule,
   ],
   controllers: [SalonesController, MesasController, CuentasController],
   providers: [

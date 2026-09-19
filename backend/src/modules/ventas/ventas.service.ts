@@ -62,6 +62,8 @@ import {
   detallePersonalizacion,
   type PersonalizacionRecetaSnapshot,
 } from '../../common/utils/personalizacion-receta.util';
+import { IdempotenciaService } from '../idempotencia/idempotencia.service';
+import { huellaDe } from '../idempotencia/huella';
 
 /**
  * Ítem/cantidad que se acredita en una nota de crédito. Ya NO es "ítem a
@@ -227,6 +229,7 @@ export class VentasService {
     private readonly catalogService: CatalogService,
     private readonly garzonesService: GarzonesService,
     private readonly ubicacionesService: UbicacionesService,
+    private readonly idempotencia: IdempotenciaService,
   ) {}
 
   /**
@@ -243,8 +246,10 @@ export class VentasService {
    * Reintentar es seguro **porque el deadlock aborta la transacción entera**:
    * Postgres revierte todo lo escrito antes de devolver el error, así que no
    * hay venta, ni movimientos, ni pagos, ni movimiento de caja a medio hacer.
-   * No es idempotencia —eso es otro tema, ver `pendientes.md`—: acá no hay
-   * nada que deduplicar porque no quedó nada.
+   * No es idempotencia: acá no hay nada que deduplicar porque no quedó nada.
+   * La idempotencia es `clave` (abajo), y convive con este loop: el rollback de
+   * un intento con deadlock suelta también el reclamo de la clave, así que el
+   * siguiente intento la vuelve a reclamar como si fuera el primero.
    *
    * Cubre además los ciclos que no vienen de la expansión (series, lotes,
    * caja). Solo `40P01`: cualquier otro error se propaga sin reintentar, para
@@ -263,30 +268,57 @@ export class VentasService {
    * llamar a `crearEnTransaccion(manager, …)` directamente, saltándose este
    * loop — exactamente lo que hacen hoy.
    */
-  async crear(tenantId: string, usuarioId: string, dto: CreateVentaDto) {
+  async crear(
+    tenantId: string,
+    usuarioId: string,
+    dto: CreateVentaDto,
+    /**
+     * La `Idempotency-Key` del intento de cobro: con la misma clave, el
+     * reintento reproduce la venta ya creada en vez de crear otra
+     * (`IdempotenciaService.ejecutar`). La ruta HTTP la exige siempre; es
+     * opcional acá solo por `OnlineCallbackHandler` (Webpay), que no pasa por
+     * HTTP y ya es idempotente por orden (ADR-009).
+     */
+    clave?: string,
+  ) {
     for (let intento = 0; ; intento++) {
       try {
         return await this.db.transaccion(async (manager) => {
-          const venta = await this.crearEnTransaccion(
-            manager,
-            tenantId,
-            usuarioId,
-            dto,
-          );
-          // `verTodas: true`, mismo porqué que `SalonesService.cerrarCuenta`:
-          // el alcance por caja de `armarBoleta` (`filtroDeMisCajas`) existe
-          // para que nadie navegue ventas de una caja ajena, no para
-          // esconderle a quien la creó la venta que esta misma request acaba
-          // de cobrar. Se arma con el `manager` de la transacción para leer
-          // la venta recién insertada, todavía sin commitear.
-          const boleta = await this.armarBoleta(
-            manager,
-            tenantId,
-            venta.id,
-            usuarioId,
-            true,
-          );
-          return { ...venta, boleta };
+          const cobrar = async () => {
+            const venta = await this.crearEnTransaccion(
+              manager,
+              tenantId,
+              usuarioId,
+              dto,
+            );
+            // `verTodas: true`, mismo porqué que `SalonesService.cerrarCuenta`:
+            // el alcance por caja de `armarBoleta` (`filtroDeMisCajas`) existe
+            // para que nadie navegue ventas de una caja ajena, no para
+            // esconderle a quien la creó la venta que esta misma request acaba
+            // de cobrar. Se arma con el `manager` de la transacción para leer
+            // la venta recién insertada, todavía sin commitear.
+            const boleta = await this.armarBoleta(
+              manager,
+              tenantId,
+              venta.id,
+              usuarioId,
+              true,
+            );
+            return { ...venta, boleta };
+          };
+          return clave
+            ? this.idempotencia.ejecutar(
+                {
+                  tenantId,
+                  usuarioId,
+                  clave,
+                  operacion: 'venta.crear',
+                  huella: huellaDe('venta.crear', dto),
+                },
+                cobrar,
+                (r) => r.id,
+              )
+            : cobrar();
         });
       } catch (error) {
         if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))

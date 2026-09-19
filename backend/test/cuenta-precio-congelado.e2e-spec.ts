@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
+import { randomUUID } from 'node:crypto';
 
 /**
  * **Lo pedido se cobra como se pidió** (decisión del owner, 2026-08-30).
@@ -277,6 +278,7 @@ describe('Lo pedido se cobra como se pidió — precio congelado (e2e)', () => {
   async function cerrar(cuentaId: string): Promise<string> {
     const res = await request(app.getHttpServer())
       .post(`/api/cuentas/${cuentaId}/cerrar`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({ garzonId: garzon.id, pin: garzon.pin, pagos: [] });
     expect(res.status).toBe(201);

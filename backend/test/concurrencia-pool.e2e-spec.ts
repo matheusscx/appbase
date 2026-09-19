@@ -4,6 +4,7 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { Server, AddressInfo } from 'net';
 import { AppModule } from '../src/app.module';
+import { randomUUID } from 'node:crypto';
 
 // Seed (IDs fijos, ver seeder.service.ts)
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
@@ -126,6 +127,8 @@ describe('Concurrencia: el pool de conexiones no se deadlockea (e2e)', () => {
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
+            // Una clave por venta: son diez cobros distintos, no un reintento.
+            'Idempotency-Key': randomUUID(),
           },
           body: JSON.stringify({
             canal: 'online', // caja virtual: sin depender de una caja abierta

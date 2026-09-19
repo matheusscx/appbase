@@ -9,13 +9,14 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
+import { ClaveIdempotencia } from '../../common/decorators/clave-idempotencia.decorator';
 import { RbacService } from '../rbac/rbac.service';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { VentasService } from './ventas.service';
@@ -36,12 +37,19 @@ export class VentasController {
 
   @Post()
   @RequiresPermiso('Ventas', 'Crear')
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description:
+      'UUID por intento de cobro. El reintento con la misma clave reproduce la venta ya creada.',
+  })
   async crear(
     @Req() req: Request,
     @Body(EscalaMonedaPipe) dto: CreateVentaDto,
+    @ClaveIdempotencia() clave: string,
   ) {
     const u = req.user as JwtUser;
-    return this.ventasService.crear(u.tenantId ?? '', u.id, dto);
+    return this.ventasService.crear(u.tenantId ?? '', u.id, dto, clave);
   }
 
   @Post(':id/notas-credito')

@@ -4,6 +4,7 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Una venta de total $0 —el caso real de una promoción que descuenta el 100%—
@@ -122,6 +123,7 @@ describe('Venta de total $0 (e2e)', () => {
   it('sin pagos y con total 0, la venta nace PAGADA', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         canal: 'online',
@@ -145,6 +147,7 @@ describe('Venta de total $0 (e2e)', () => {
     // estado se calcula, no quién puede crear una venta sin pagar.
     const res = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         canal: 'online',

@@ -6,6 +6,7 @@ import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
+import { randomUUID } from 'node:crypto';
 
 /**
  * `GET /api/ventas/:id/boleta` — reimprimir la boleta de una venta ya cobrada
@@ -134,6 +135,9 @@ describe('GET /ventas/:id/boleta — reimprimir boleta (e2e)', () => {
   ): Promise<T> {
     const res = await request(app.getHttpServer())
       .post(url)
+      // Una clave nueva por llamada: cada POST de este spec es un cobro distinto,
+      // y los endpoints que cobran la exigen (Idempotency-Key).
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send(body);
     expect(res.status).toBe(esperado);

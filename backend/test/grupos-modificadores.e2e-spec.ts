@@ -6,6 +6,7 @@ import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
+import { randomUUID } from 'node:crypto';
 
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -188,6 +189,7 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
   it('5-6-7. vende 1 combo eligiendo la Bebida del grupo: descuenta stock del componente fijo Y de la Bebida, cobra precioBase + precioExtra', async () => {
     const resVenta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [
@@ -263,6 +265,7 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
   it('8. (negativo) vender el combo sin elegir opción del grupo obligatorio → 400', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [{ itemId: comboId, cantidad: '1' }],

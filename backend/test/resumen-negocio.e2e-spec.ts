@@ -9,6 +9,7 @@ import { TokensAccesoService } from '../src/modules/auth/tokens-acceso.service';
 import { TipoTokenAcceso } from '../src/modules/auth/entities/token-acceso.entity';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 import { loginSegundoTenant } from './helpers/segundo-tenant';
+import { randomUUID } from 'node:crypto';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const SEGUNDO_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
@@ -187,6 +188,9 @@ describe('Resumen del negocio (e2e)', () => {
   ): Promise<T> {
     const res = await request(app.getHttpServer())
       .post(url)
+      // Una clave nueva por llamada: cada POST de este spec es un cobro distinto,
+      // y los endpoints que cobran la exigen (Idempotency-Key).
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send(body);
     expect(res.status).toBe(esperado);
@@ -327,6 +331,7 @@ describe('Resumen del negocio (e2e)', () => {
       // respuesta de la creación antes de armar el pago.
       const resA = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({ lineas: [{ itemId, cantidad: '1' }] });
       expect(resA.status).toBe(201);
@@ -335,6 +340,7 @@ describe('Resumen del negocio (e2e)', () => {
 
       const pagoA = await request(app.getHttpServer())
         .post('/api/pagos')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({
           ventaId: ventaA.id,
@@ -347,6 +353,7 @@ describe('Resumen del negocio (e2e)', () => {
       // los dos totales.
       const resB = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({ lineas: [{ itemId, cantidad: '3' }] });
       expect(resB.status).toBe(201);
@@ -363,6 +370,7 @@ describe('Resumen del negocio (e2e)', () => {
 
       const pagoB = await request(app.getHttpServer())
         .post('/api/pagos')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({
           ventaId: ventaB.id,
@@ -410,6 +418,7 @@ describe('Resumen del negocio (e2e)', () => {
       // sin `tipoDocumentoId` (`docs/features/ventas.md` ~L133).
       const resC = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({ lineas: [{ itemId, cantidad: '2' }] });
       expect(resC.status).toBe(201);

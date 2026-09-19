@@ -500,10 +500,20 @@ export function useSalones() {
       { method: 'POST', body },
     )
 
-  const cerrarCuenta = (cuentaId: string, body: CerrarCuentaBody) =>
-    useApiFetch<{ cuenta: CuentaDetalle, ventaId: string, boleta: BoletaVenta }>(
+  /**
+   * `cabecera` es la `Idempotency-Key` del intento de cobro
+   * (`useIntentoCobro`): con la misma clave, el reintento de un cierre que sí
+   * entró reproduce la venta (`repetida: true`) en vez de rebotar con "La
+   * cuenta no está abierta".
+   */
+  const cerrarCuenta = (
+    cuentaId: string,
+    body: CerrarCuentaBody,
+    cabecera: Record<string, string>,
+  ) =>
+    useApiFetch<{ cuenta: CuentaDetalle, ventaId: string, boleta: BoletaVenta, repetida?: boolean }>(
       `${apiUrl}/cuentas/${cuentaId}/cerrar`,
-      { method: 'POST', body },
+      { method: 'POST', body, headers: cabecera },
     )
 
   const transferirCuenta = (cuentaId: string, garzonId: string, pin: string) =>

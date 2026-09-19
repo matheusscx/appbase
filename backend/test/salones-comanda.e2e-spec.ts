@@ -4,6 +4,7 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { randomUUID } from 'node:crypto';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
@@ -85,6 +86,9 @@ describe('Salones — comanda a cocina (e2e)', () => {
   ): Promise<T> {
     const res = await request(app.getHttpServer())
       .post(url)
+      // Una clave nueva por llamada: cada POST de este spec es un cobro distinto,
+      // y los endpoints que cobran la exigen (Idempotency-Key).
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send(body);
     expect(res.status).toBe(esperado);

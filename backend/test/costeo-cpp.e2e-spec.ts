@@ -6,6 +6,7 @@ import type { App } from 'supertest/types';
 import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
+import { randomUUID } from 'node:crypto';
 
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -198,6 +199,7 @@ describe('Costeo CPP (e2e)', () => {
     // valorizado en $450. La salida congela en el kardex el costo $50.
     const resVenta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [{ itemId: anulacionItemId, cantidad: '1' }],

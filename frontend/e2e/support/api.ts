@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { APIRequestContext } from '@playwright/test'
 
 /**
@@ -33,7 +34,12 @@ export async function api<T>(
   opts: { token?: string; data?: unknown } = {},
 ): Promise<T> {
   const res = await request[metodo](`${API}${ruta}`, {
-    headers: opts.token ? { Authorization: `Bearer ${opts.token}` } : {},
+    headers: {
+      ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
+      // Una clave nueva por POST: cada precondición es un cobro distinto, y los
+      // endpoints que cobran la exigen (`Idempotency-Key`). Los demás la ignoran.
+      ...(metodo === 'post' ? { 'Idempotency-Key': randomUUID() } : {}),
+    },
     ...(opts.data ? { data: opts.data } : {}),
   })
   if (!res.ok()) {

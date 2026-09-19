@@ -7,6 +7,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { loginSegundoTenant } from './helpers/segundo-tenant';
 import { unwrap } from '../src/common/utils/pg-returning.util';
+import { randomUUID } from 'node:crypto';
 
 // Frente de la papelera (`docs/features/papelera.md`): categorías es la entidad
 // de referencia — familia TypeORM, sin nombre único, sin colaterales. Este
@@ -909,6 +910,7 @@ describe('Papelera (e2e) — items, restaurar INACTIVO + colateral acotado por t
     // restaurar el ítem no debería tocar ese histórico ya emitido.
     const resVenta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${tokenAdmin}`)
       .send({
         canal: 'online', // evita depender de una caja abierta
@@ -2312,6 +2314,7 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
     // directa lo crea desde cero (id random, no un id fijo del seed).
     const resVenta1 = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${tokenAdmin}`)
       .send({
         lineas: [{ itemId, cantidad: '1' }],
@@ -2342,6 +2345,7 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
 
       const resVenta2 = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({
           lineas: [{ itemId, cantidad: '1' }],

@@ -7,6 +7,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import type { PersonalizacionRecetaSnapshot } from '../src/common/dto/personalizacion-receta.dto';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
+import { randomUUID } from 'node:crypto';
 
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -223,6 +224,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
   it('4-5-6. vende 1 combo, descuenta stock de papas y de pan (vía receta), cobra el precio del combo', async () => {
     const resVenta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [{ itemId: comboId, cantidad: '1' }],
@@ -320,6 +322,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
   it('8. vende el "Combo Especial" eligiendo chuleta en la unidad 1 de la Hamburguesa Especial → total = precioBase (4300) + precioExtra chuleta (1500), descuenta 150 g de chuleta', async () => {
     const resVenta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [
@@ -381,6 +384,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
 
     const res = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [
@@ -469,6 +473,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
   it('12. vende el combo doble eligiendo chuleta en la unidad 1 y carne molida en la unidad 2 → total = precioBase(5000) + chuleta(1500) + carne(0), persiste dos entradas de snapshot (una por unidad, cada una con su propia proteína) y descuenta stock por separado de AMBAS proteínas', async () => {
     const resVenta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [
@@ -623,6 +628,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
     // perdía al mapear la línea persistida → CreateVentaDto.
     const resCerrar = await request(app.getHttpServer())
       .post(`/api/cuentas/${cuentaId}/cerrar`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         garzonId: BRUNO_ID,

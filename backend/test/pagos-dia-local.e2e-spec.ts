@@ -7,6 +7,7 @@ import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
+import { randomUUID } from 'node:crypto';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
@@ -61,6 +62,7 @@ describe('Pagos: el día es el día local del tenant (e2e)', () => {
   async function venderEnEfectivo(): Promise<string> {
     const venta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         tipoDocumentoId: BOLETA_ID,
@@ -71,6 +73,7 @@ describe('Pagos: el día es el día local del tenant (e2e)', () => {
 
     const pago = await request(app.getHttpServer())
       .post('/api/pagos')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         ventaId: id,

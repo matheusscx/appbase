@@ -100,7 +100,18 @@ aplicaba en el carrito local.
 `{ pin, pagos?, tipoDocumentoId?, customer?, propinaMonto?, propinaSugerida?, propinaPorcentajeSugerido? }`
 (reusa DTOs de ventas; `propina*` son `@IsNumberString` opcionales, y **los tres se
 rechazan si vienen negativos** — `@IsNumberString` acepta el signo menos). Respuesta:
-`{ cuenta: CuentaDetalle, ventaId }`.
+`{ cuenta: CuentaDetalle, ventaId, boleta }`.
+
+**Cobrar de nuevo una mesa que ya se cobró reproduce el cierre** (2026-09-19,
+[ADR-026](../adr/026-idempotencia-de-cobros.md)). Exige la cabecera `Idempotency-Key`
+(400 sin ella). Si el primer cierre entró pero la respuesta se perdió, el reintento con la
+misma clave devuelve el cierre original, boleta incluida, más `repetida: true`, **en vez de
+*"La cuenta no está abierta"***. La pantalla lo imprime con el aviso *"Este cobro ya había
+entrado"*. El reclamo de la clave va antes del `FOR UPDATE` de la cuenta y antes de chequear
+que el garzón siga en turno —si marcó salida en el medio, el reintento reproduce igual—; la
+credencial del garzón, en cambio, se sigue validando **antes** del reclamo, así que el
+reintento vuelve a pedir el PIN. El PIN no entra en la huella de la clave. En pantalla la clave va por cuenta
+(`cuenta:<id>`, la del cobro congelado), no por la que se esté mirando.
 
 **Propina en el cierre (subproyecto D):**
 - La propina **no** entra en `total_final` ni en IVA; se persiste en `venta_propina`

@@ -7,6 +7,7 @@ import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
+import { randomUUID } from 'node:crypto';
 
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -303,6 +304,7 @@ describe('Recetas — flujo completo (e2e)', () => {
     async function venderUna() {
       return request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: recetaId, cantidad: '1' }],
@@ -389,6 +391,7 @@ describe('Recetas — flujo completo (e2e)', () => {
 
     const resVenta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [
@@ -702,6 +705,7 @@ describe('Recetas — flujo completo (e2e)', () => {
     // Sin pagos: `pendiente` es el único estado anulable.
     const resVenta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({ lineas: [{ itemId: recetaId, cantidad: '2' }], pagos: [] });
     expect(resVenta.status).toBe(201);
@@ -791,6 +795,7 @@ describe('Recetas — flujo completo (e2e)', () => {
 
     const resVenta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({ lineas: [{ itemId: recetaId, cantidad: '1' }], pagos: [] });
     expect(resVenta.status).toBe(201);
@@ -1153,6 +1158,7 @@ describe('Recetas — flujo completo (e2e)', () => {
     // decimales, y así el test no depende del `modo_redondeo` del tenant.
     const resVenta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [
@@ -1272,6 +1278,7 @@ describe('Recetas — flujo completo (e2e)', () => {
 
     const resVenta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [linea],

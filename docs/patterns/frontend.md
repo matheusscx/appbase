@@ -1157,3 +1157,42 @@ handler del botón).
 Referencia: `app/composables/useRefrescoPeriodico.ts` +
 `useRefrescoPeriodico.spec.ts`; consumido por `app/components/inicio/InicioSalon.vue`,
 `InicioCajas.vue`, `InicioCierres.vue` (`docs/features/dashboard-inicio.md`).
+
+---
+
+## 18. Cobrar con clave de idempotencia (`useIntentoCobro`)
+
+Toda pantalla que llama a un endpoint que cobra (`POST /ventas`, `POST /cuentas/:id/cerrar`,
+`POST /pagos`) manda la cabecera `Idempotency-Key` de `useIntentoCobro`
+([ADR-026](../adr/026-idempotencia-de-cobros.md)).
+
+```ts
+const intentoCobro = useIntentoCobro()   // en el setup: usa useToast
+const AMBITO = 'pos'                      // o `cuenta:${id}` / `abono:${ventaId}`
+
+try {
+  const res = await useApiFetch(url, { method: 'POST', body, headers: intentoCobro.cabecera(AMBITO) })
+  intentoCobro.terminar(AMBITO)           // entró (o ya había entrado): el intento terminó
+  toast.add({ title: 'Venta pagada', color: 'success' })
+  intentoCobro.avisarSiRepetido(res)      // "Este cobro ya había entrado…"
+} catch (e) {
+  if (intentoCobro.mostrarSiCobroConOtrosDatos(e, AMBITO)) return   // 422 + "Ver venta"
+  // …el manejo de error de siempre
+}
+```
+
+- **La clave NO se regenera al editar** el carrito ni los pagos. Si se regenerara, cambiar
+  tarjeta por efectivo después de un corte sacaría una segunda venta en vez del 422.
+- **Muere con `terminar`:** con el éxito, cuando el carrito queda vacío (el POS lo mira con un
+  `watch` sobre `lineas.length`) o al salir de la página (la pasarela, en `onUnmounted`). El
+  422 de "otros datos" también la mata: el Confirmar siguiente es una venta nueva (owner,
+  2026-09-19).
+- **El ámbito sale de la foto, no de un `ref` vivo.** En el salón es la cuenta que congeló el
+  cobro (`cuenta:${cuentaCerrada.id}`), leída antes del `await`.
+- **`useIntentoCobro()` se llama en el setup**, nunca después de un `await`: usa `useToast`,
+  que hace `inject` + `useState`.
+- **Sin reintento automático.** El que vuelve a confirmar es el cajero.
+- **Tests:** el mock de `useApiFetch` guarda `opts.headers['Idempotency-Key']` por request, y
+  el spec afirma "misma clave tras un error" y "otra clave tras el éxito". Como el estado vive
+  a nivel de módulo, el `beforeEach` llama a `useIntentoCobro().terminar(<ámbito>)`.
+

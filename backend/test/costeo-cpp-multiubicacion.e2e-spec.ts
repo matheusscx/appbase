@@ -6,6 +6,7 @@ import type { App } from 'supertest/types';
 import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
+import { randomUUID } from 'node:crypto';
 
 /**
  * El CPP de `item_producto.costo_actual` es UNO SOLO por producto para todo el
@@ -255,6 +256,7 @@ describe('Costeo CPP multi-ubicación (e2e)', () => {
       // La salida congela en el kardex el costo vigente al vender: $1.000.
       const resVenta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId, cantidad: '1' }],

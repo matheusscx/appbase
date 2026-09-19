@@ -8,6 +8,7 @@ import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import { VentasService } from '../src/modules/ventas/ventas.service';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
+import { randomUUID } from 'node:crypto';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris
@@ -191,6 +192,7 @@ describe('Ventas (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           tipoDocumentoId: BOLETA_ID,
@@ -255,6 +257,7 @@ describe('Ventas (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [
@@ -287,6 +290,7 @@ describe('Ventas (e2e)', () => {
     it('crea venta con pago menor y queda en estado pagada_parcial', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -325,6 +329,7 @@ describe('Ventas (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenConTenant}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -344,6 +349,7 @@ describe('Ventas (e2e)', () => {
       const TARJETA_ID = '550e8400-e29b-41d4-a716-446655440107';
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -381,6 +387,7 @@ describe('Ventas (e2e)', () => {
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: servicioId, cantidad: '1' }],
@@ -433,6 +440,7 @@ describe('Ventas (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [
@@ -450,6 +458,7 @@ describe('Ventas (e2e)', () => {
     it('retorna 400 con payload vacío (validación DTO)', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({});
 
@@ -484,6 +493,7 @@ describe('Ventas (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: servicioId, cantidad: '1' }],
@@ -520,6 +530,7 @@ describe('Ventas (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: servicioId, cantidad: '1' }],
@@ -560,6 +571,7 @@ describe('Ventas (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -596,6 +608,7 @@ describe('Ventas (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: servicioUsdId, cantidad: '1' }],
@@ -660,6 +673,7 @@ describe('Ventas (e2e)', () => {
     beforeAll(async () => {
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -754,6 +768,7 @@ describe('Ventas (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: cantidadExcesiva }],
@@ -774,6 +789,7 @@ describe('Ventas (e2e)', () => {
     it('crea venta_propina en el Mostrador con atribución neutra', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -816,6 +832,7 @@ describe('Ventas (e2e)', () => {
     it('rechaza combinar propinaDirecta con propinaCierreMesa', async () => {
       await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -838,6 +855,7 @@ describe('Ventas (e2e)', () => {
     it('descuenta del saldo solo lo aplicado a la venta, nunca la propina', async () => {
       const resVenta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -861,6 +879,7 @@ describe('Ventas (e2e)', () => {
 
       const resAbono = await request(app.getHttpServer())
         .post('/api/pagos')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           ventaId: venta.id,
@@ -901,6 +920,7 @@ describe('Ventas (e2e)', () => {
       async (monto) => {
         const resVenta = await request(app.getHttpServer())
           .post('/api/ventas')
+          .set('Idempotency-Key', randomUUID())
           .set('Authorization', `Bearer ${token}`)
           .send({
             lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -911,6 +931,7 @@ describe('Ventas (e2e)', () => {
 
         await request(app.getHttpServer())
           .post('/api/pagos')
+          .set('Idempotency-Key', randomUUID())
           .set('Authorization', `Bearer ${token}`)
           .send({ ventaId, pagos: [{ metodoPagoId: EFECTIVO_ID, monto }] })
           .expect(400);
@@ -933,6 +954,7 @@ describe('Ventas (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -963,6 +985,7 @@ describe('Ventas (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -995,6 +1018,7 @@ describe('Ventas (e2e)', () => {
     async function crearPendiente(): Promise<string> {
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({ lineas: [{ itemId: ITEM_ID, cantidad: '2' }], pagos: [] })
         .expect(201);
@@ -1094,6 +1118,7 @@ describe('Ventas (e2e)', () => {
     it('rechaza anular una venta ya pagada', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -1163,6 +1188,7 @@ describe('Ventas (e2e)', () => {
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [
@@ -1246,6 +1272,7 @@ describe('Ventas (e2e)', () => {
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [
@@ -1279,6 +1306,7 @@ describe('Ventas (e2e)', () => {
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [
@@ -1310,6 +1338,7 @@ describe('Ventas (e2e)', () => {
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [
@@ -1356,6 +1385,7 @@ describe('Ventas (e2e)', () => {
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: servicioId, cantidad: '1' }],
@@ -1416,6 +1446,7 @@ describe('Ventas (e2e)', () => {
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId, cantidad: '2' }],
@@ -1465,6 +1496,7 @@ describe('Ventas (e2e)', () => {
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [
@@ -1487,6 +1519,7 @@ describe('Ventas (e2e)', () => {
     it('congela la config del cálculo con la que se cobró', async () => {
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -1531,6 +1564,7 @@ describe('Ventas (e2e)', () => {
     it('el config congelado incluye el nivel y los decimales de la moneda', async () => {
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -1602,6 +1636,7 @@ describe('Ventas (e2e)', () => {
       const itemId = await crearItemGranel('1234.5678');
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId, cantidad: '1.5' }],
@@ -1614,6 +1649,7 @@ describe('Ventas (e2e)', () => {
     const crearVentaSimple = async (): Promise<string> => {
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
@@ -1797,6 +1833,7 @@ describe('Ventas (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId, cantidad: '1' }],

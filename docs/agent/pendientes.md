@@ -822,8 +822,8 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   operador emiten **dos** notas por el mismo monto. Con `devolverDinero` sale también **dos
   veces** el efectivo de la caja. Lo acota solo el tope de la serie: la segunda rebota si la
   primera ya agotó lo acreditable, y pasa si quedaba saldo. El mecanismo ya existe desde el
-  frente de la idempotencia del cobro (spec
-  [`2026-09-19-idempotencia-venta-design.md`](../superpowers/specs/2026-09-19-idempotencia-venta-design.md)).
+  frente de la idempotencia del cobro ([ADR-026](../adr/026-idempotencia-de-cobros.md)):
+  es una operación más en `IdempotenciaService.ejecutar` (`docs/patterns/backend.md` § 18).
   Lo que falta es decidir, **en su propia sesión** (`CLAUDE.md`, ADR-010), qué ve el operador
   cuando la segunda nota se frena, y verificarlo contra la serie de notas, no contra una sola.
 - [ ] **La cortesía como retiro gravado con IVA** (fiscal — **frente propio, con su propia
@@ -1345,28 +1345,6 @@ para producción**: un CI rojo hoy es inofensivo porque `main` no despliega, per
 que `main` auto-despliegue significaría subir código roto a prod y enterarse tarde. Esta
 sección se abre al encarar el paso a producción. Orden = prioridad.
 
-- [ ] **Idempotencia en la creación de venta** (backend + frontend) — decidido 2026-07-27:
-  va acá y no antes, porque hoy no hay usuarios que puedan sufrir el doble cobro y es una
-  feature con superficie propia (contrato HTTP, tabla, cliente), no un fix. **El problema:**
-  no existe clave de idempotencia en ningún endpoint; un doble clic en "cobrar" o un
-  reintento del cliente tras un timeout crea **dos ventas completas** — doble descuento de
-  stock y doble cobro. El `FOR UPDATE` de inventario evita stock negativo, no la venta
-  duplicada, y deshabilitar el botón en el frontend no sobrevive a un timeout de red.
-  **Forma:** `Idempotency-Key` generada por el cliente **por intento de cobro** (no por
-  carrito), tabla que guarda clave → respuesta, y reproducción de la respuesta original en
-  el reintento en vez de recrear.
-  ⛔ **La opción barata es la incorrecta:** deduplicar por hash del carrito en una ventana
-  de segundos rompe el caso real de dos clientes comprando lo mismo con segundos de
-  diferencia — cotidiano en un minimarket o una cafetería. No es un atajo aceptable.
-  📌 **En curso desde el 2026-09-19**, con spec
-  [`2026-09-19-idempotencia-venta-design.md`](../superpowers/specs/2026-09-19-idempotencia-venta-design.md)
-  y plan [`2026-09-19-idempotencia-venta.md`](../superpowers/plans/2026-09-19-idempotencia-venta.md).
-  Lo que decidió el owner ese día: el reintento **con otros datos** se frena con un aviso y un
-  link a la venta, nunca crea otra; el reintento **igual** muestra el éxito con el aviso *"ya
-  había entrado"* e imprime la boleta; el cobro en duda queda atado al carrito **hasta que sale
-  bien o se vacía**, sin vencimiento por tiempo; entran también el **cobro de mesa** y el
-  **abono**. Costo asumido: vaciar el carrito después de un corte y volver a armarlo es una
-  venta nueva. La nota de crédito tiene el mismo hueco, pero es fiscal y va aparte (§ 6).
 - [ ] **`synchronize: true` → migraciones (CRÍTICO, bloqueante de prod)** (backend) —
   hoy el esquema lo crea `synchronize` al bootstrap (dev + CI, porque `NODE_ENV != production`).
   En prod `synchronize` **puede dropear columnas y perder datos** al arrancar tras un cambio

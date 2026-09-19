@@ -4,6 +4,7 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { randomUUID } from 'node:crypto';
 
 /**
  * **Frente de bodegas y traslados: el rechazo por falta de stock dice dónde
@@ -164,6 +165,7 @@ describe('El 400 de stock insuficiente dice dónde está la mercadería (e2e)', 
   ): Promise<{ status: number; body: ErrorStockBody }> {
     const res = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({ lineas: [{ itemId, cantidad }] });
     // Mismo criterio que `intentarLinea`: el único llamador prueba el

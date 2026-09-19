@@ -24,6 +24,8 @@ export interface AbonoSuccessPayload {
     referencia: string | null
   }>
   venta: { id: string, estado: string, saldo: string }
+  /** El abono ya había entrado y el backend lo reprodujo (`useIntentoCobro`). */
+  repetida?: boolean
 }
 
 const emit = defineEmits<{ success: [AbonoSuccessPayload] }>()
@@ -36,6 +38,10 @@ const apiUrl = config.public.apiUrl
 
 const pagos = ref<PagoInput[]>([])
 const submitting = ref(false)
+// Una clave por venta abonada (`abono:<ventaId>`), a nivel de pestaña: cerrar
+// y reabrir el modal después de un corte sigue siendo el mismo intento, así
+// que el reintento no registra un segundo pago (ADR-026).
+const intentoCobro = useIntentoCobro()
 
 const metodosHabilitados = computed(() => props.metodos.filter((m) => m.habilitada))
 const metodoItems = computed(() =>
@@ -86,17 +92,22 @@ const puedeConfirmar = computed(
 )
 
 async function confirmar() {
+  const ambitoCobro = `abono:${props.ventaId}`
   submitting.value = true
   try {
     const res = await useApiFetch<AbonoSuccessPayload>(`${apiUrl}/pagos`, {
       method: 'POST',
       body: { ventaId: props.ventaId, pagos: pagosValidos.value },
+      headers: intentoCobro.cabecera(ambitoCobro),
     })
+    intentoCobro.terminar(ambitoCobro)
     toast.add({ title: 'Pago registrado', color: 'success' })
+    intentoCobro.avisarSiRepetido(res)
     open.value = false
     emit('success', res)
   } catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al registrar pago'), color: 'error' })
+    if (!intentoCobro.mostrarSiCobroConOtrosDatos(e, ambitoCobro))
+      toast.add({ title: apiErrorMsg(e, 'Error al registrar pago'), color: 'error' })
   } finally {
     submitting.value = false
   }

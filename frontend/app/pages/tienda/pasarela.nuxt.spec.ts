@@ -16,25 +16,35 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Pasarela from './pasarela.vue'
+import { AVISO_COBRO_REPETIDO, useIntentoCobro } from '~/composables/useIntentoCobro'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 
 const REF = 'ref-e2e'
 const METODO_DEL_BACKEND = 'mp-backend'
 
-interface PostVenta { url: string, body: Record<string, unknown> }
+interface PostVenta { url: string, body: Record<string, unknown>, clave?: string }
 let urlsPedidas: string[] = []
 let ventas: PostVenta[] = []
+/** Lo que contesta cada `POST /ventas`: un `Error` lo rechaza; vacía = éxito. */
+let respuestasVenta: (Error | Record<string, unknown>)[] = []
+let toasts: { title?: string }[] = []
+
+mockNuxtImport('useToast', () => {
+  return () => ({ add: (t: { title?: string }) => { toasts.push(t) } })
+})
 
 mockNuxtImport('useRoute', () => {
   return () => ({ query: { ref: REF } })
 })
 
 mockNuxtImport('useApiFetch', () => {
-  return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
+  return (url: string, opts?: { method?: string, body?: Record<string, unknown>, headers?: Record<string, string> }) => {
     urlsPedidas.push(url)
     if (url.includes('/ventas') && opts?.method === 'POST') {
-      ventas.push({ url, body: opts.body ?? {} })
-      return Promise.resolve({ id: 'venta-1', estado: 'pagada' })
+      ventas.push({ url, body: opts.body ?? {}, clave: opts.headers?.['Idempotency-Key'] })
+      const respuesta = respuestasVenta.shift()
+      if (respuesta instanceof Error) return Promise.reject(respuesta)
+      return Promise.resolve({ id: 'venta-1', estado: 'pagada', ...respuesta })
     }
     // El comprador SÍ tiene una tarjeta preferida, y eso no es relleno: con la
     // lista vacía, la pantalla vieja renderizaba "No tenés tarjetas
@@ -83,6 +93,9 @@ afterEach(() => {
 beforeEach(() => {
   urlsPedidas = []
   ventas = []
+  respuestasVenta = []
+  toasts = []
+  useIntentoCobro().terminar('tienda')
 })
 
 async function montarCon(totalFinal: string, metodoPagoId: string | null) {
@@ -176,5 +189,45 @@ describe('tienda/pasarela — la pantalla no promete un cobro que no hace', () =
     const texto = wrapper.text()
     expect(texto).toContain('Confirmar pedido')
     expect(texto).not.toContain('No se cobra a ninguna tarjeta')
+  })
+})
+
+describe('tienda/pasarela — un pedido que se reintenta no se registra dos veces', () => {
+  type Vm = { aprobar: () => Promise<void> }
+
+  it('un corte y un reintento mandan la MISMA clave', async () => {
+    respuestasVenta = [new Error('fetch failed')]
+    const wrapper = await montarCon('45000', METODO_DEL_BACKEND)
+
+    await (wrapper.vm as unknown as Vm).aprobar()
+    await (wrapper.vm as unknown as Vm).aprobar()
+
+    expect(ventas).toHaveLength(2)
+    expect(ventas[0]!.clave).toBeTruthy()
+    expect(ventas[1]!.clave).toBe(ventas[0]!.clave)
+  })
+
+  it('un pedido reproducido queda aprobado y avisa que ya había entrado', async () => {
+    respuestasVenta = [{ repetida: true }]
+    const wrapper = await montarCon('45000', METODO_DEL_BACKEND)
+
+    await (wrapper.vm as unknown as Vm).aprobar()
+
+    expect(wrapper.text()).toContain('Pago aprobado')
+    expect(toasts.some(t => t.title === AVISO_COBRO_REPETIDO)).toBe(true)
+  })
+
+  it('salir de la página cierra el intento: la próxima visita lleva otra clave', async () => {
+    respuestasVenta = [new Error('fetch failed')]
+    const primera = await montarCon('45000', METODO_DEL_BACKEND)
+    await (primera.vm as unknown as Vm).aprobar()
+    primera.unmount()
+    montado = null
+
+    const segunda = await montarCon('45000', METODO_DEL_BACKEND)
+    await (segunda.vm as unknown as Vm).aprobar()
+
+    expect(ventas).toHaveLength(2)
+    expect(ventas[1]!.clave).not.toBe(ventas[0]!.clave)
   })
 })

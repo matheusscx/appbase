@@ -4,6 +4,9 @@ import type { EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import { PagosService, calcularEstadoVenta } from './pagos.service';
+import { IdempotenciaService } from '../idempotencia/idempotencia.service';
+
+const CLAVE = '2f1c8a3e-6a1b-4d8e-9a55-0c7b1f7d2e10';
 import { CajaService } from '../caja/caja.service';
 import { EstadoVenta } from '../ventas/entities/venta.entity';
 
@@ -136,6 +139,14 @@ describe('PagosService', () => {
         {
           provide: Db,
           useValue: dbMock,
+        },
+        // Pasa derecho a la operación: el reclamo y la reproducción se prueban
+        // en `idempotencia.service.spec.ts` y contra Postgres en el e2e.
+        {
+          provide: IdempotenciaService,
+          useValue: {
+            ejecutar: (_s: unknown, operar: () => Promise<unknown>) => operar(),
+          },
         },
       ],
     }).compile();
@@ -519,10 +530,15 @@ describe('PagosService', () => {
       const svc = module.get<PagosService>(PagosService);
 
       await expect(
-        svc.registrarAbono(TENANT_ID, USUARIO_ID, {
-          ventaId: VENTA_ID,
-          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
-        }),
+        svc.registrarAbono(
+          TENANT_ID,
+          USUARIO_ID,
+          {
+            ventaId: VENTA_ID,
+            pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
+          },
+          CLAVE,
+        ),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -532,10 +548,15 @@ describe('PagosService', () => {
       const svc = module.get<PagosService>(PagosService);
 
       await expect(
-        svc.registrarAbono(TENANT_ID, USUARIO_ID, {
-          ventaId: VENTA_ID,
-          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
-        }),
+        svc.registrarAbono(
+          TENANT_ID,
+          USUARIO_ID,
+          {
+            ventaId: VENTA_ID,
+            pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
+          },
+          CLAVE,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -545,10 +566,15 @@ describe('PagosService', () => {
       const svc = module.get<PagosService>(PagosService);
 
       await expect(
-        svc.registrarAbono(TENANT_ID, USUARIO_ID, {
-          ventaId: VENTA_ID,
-          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
-        }),
+        svc.registrarAbono(
+          TENANT_ID,
+          USUARIO_ID,
+          {
+            ventaId: VENTA_ID,
+            pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
+          },
+          CLAVE,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -558,10 +584,15 @@ describe('PagosService', () => {
       const svc = module.get<PagosService>(PagosService);
 
       await expect(
-        svc.registrarAbono(TENANT_ID, USUARIO_ID, {
-          ventaId: VENTA_ID,
-          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
-        }),
+        svc.registrarAbono(
+          TENANT_ID,
+          USUARIO_ID,
+          {
+            ventaId: VENTA_ID,
+            pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
+          },
+          CLAVE,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -578,10 +609,15 @@ describe('PagosService', () => {
       const cajaSvc = module.get<jest.Mocked<CajaService>>(CajaService);
 
       await expect(
-        svc.registrarAbono(TENANT_ID, USUARIO_ID, {
-          ventaId: VENTA_ID,
-          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
-        }),
+        svc.registrarAbono(
+          TENANT_ID,
+          USUARIO_ID,
+          {
+            ventaId: VENTA_ID,
+            pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
+          },
+          CLAVE,
+        ),
       ).rejects.toThrow('La caja está en conciliación y no admite pagos');
 
       expect(cajaSvc.bloquearCajaAbierta).not.toHaveBeenCalled();
@@ -598,10 +634,15 @@ describe('PagosService', () => {
       const module: TestingModule = await setupModule(manager);
       const svc = module.get<PagosService>(PagosService);
 
-      const result = await svc.registrarAbono(TENANT_ID, USUARIO_ID, {
-        ventaId: VENTA_ID,
-        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
-      });
+      const result = await svc.registrarAbono(
+        TENANT_ID,
+        USUARIO_ID,
+        {
+          ventaId: VENTA_ID,
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
+        },
+        CLAVE,
+      );
 
       expect(result.venta.estado).toBe(EstadoVenta.PAGADA_PARCIAL);
       expect(new Decimal(result.venta.saldo).toNumber()).toBeLessThan(100);
@@ -618,10 +659,15 @@ describe('PagosService', () => {
       const svc = module.get<PagosService>(PagosService);
       const cajaSvc = module.get<jest.Mocked<CajaService>>(CajaService);
 
-      await svc.registrarAbono(TENANT_ID, USUARIO_ID, {
-        ventaId: VENTA_ID,
-        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
-      });
+      await svc.registrarAbono(
+        TENANT_ID,
+        USUARIO_ID,
+        {
+          ventaId: VENTA_ID,
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
+        },
+        CLAVE,
+      );
 
       expect(cajaSvc.bloquearCajaAbierta).toHaveBeenCalledWith(
         manager,
@@ -638,10 +684,15 @@ describe('PagosService', () => {
       const module: TestingModule = await setupModule(manager);
       const svc = module.get<PagosService>(PagosService);
 
-      const result = await svc.registrarAbono(TENANT_ID, USUARIO_ID, {
-        ventaId: VENTA_ID,
-        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100.0000' }],
-      });
+      const result = await svc.registrarAbono(
+        TENANT_ID,
+        USUARIO_ID,
+        {
+          ventaId: VENTA_ID,
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100.0000' }],
+        },
+        CLAVE,
+      );
 
       expect(result.venta.estado).toBe(EstadoVenta.PAGADA);
       expect(result.venta.saldo).toBe('0.0000');

@@ -62,6 +62,9 @@ const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
 const cajaStore = useCajaStore()
 const salonesApi = useSalones()
+// La clave del cobro va por cuenta (`cuenta:<id>`) y sale de la cuenta que
+// congeló el cobro, no de la que esté en pantalla (ADR-026).
+const intentoCobro = useIntentoCobro()
 const garzonesApi = useGarzones()
 const turnosApi = useTurnos()
 const sesionesApi = useSesionesGarzon()
@@ -2718,6 +2721,9 @@ async function cerrarCuentaConPin(
   const { cuenta: cuentaCerrada, mesa: mesaCerrada, pagos } = cobro
   const tipMonto = cobro.propinaMonto
   const tipSugerida = cobro.propinaSugerida
+  // De la foto, no de un `ref`: el intento es el de ESTA cuenta aunque el
+  // garzón ya esté en otra cuando el `POST` vuelve.
+  const ambitoCobro = `cuenta:${cuentaCerrada.id}`
   try {
     // ⛔ **Si la fusión se llevó puesta esta cuenta durante las esperas de
     // arriba (el teclado del PIN, `flushPendientes`), el `POST` no sale.**
@@ -2766,20 +2772,28 @@ async function cerrarCuentaConPin(
       })
       return
     }
-    const { boleta } = await salonesApi.cerrarCuenta(cuentaCerrada.id, {
-      ...credencialGarzon(garzonId, pin),
-      pagos,
-      tipoDocumentoId: tiposDocumento.value[0]?.id,
-      propinaMonto: tipMonto,
-      propinaSugerida: tipSugerida,
-      propinaPorcentajeSugerido: propinaPorcentaje.value,
-    })
+    const { boleta, repetida } = await salonesApi.cerrarCuenta(
+      cuentaCerrada.id,
+      {
+        ...credencialGarzon(garzonId, pin),
+        pagos,
+        tipoDocumentoId: tiposDocumento.value[0]?.id,
+        propinaMonto: tipMonto,
+        propinaSugerida: tipSugerida,
+        propinaPorcentajeSugerido: propinaPorcentaje.value,
+      },
+      intentoCobro.cabecera(ambitoCobro),
+    )
+    // El cierre entró (o ya había entrado y el backend lo reprodujo, y
+    // entonces la boleta que no salió la primera vez sale ahora).
+    intentoCobro.terminar(ambitoCobro)
     toast.add({
       title: new Decimal(tipMonto).gt(0)
         ? 'Cuenta cerrada — propina registrada'
         : 'Cuenta cerrada — venta generada',
       color: 'success',
     })
+    intentoCobro.avisarSiRepetido({ repetida })
 
     try {
       await impresorasApi.imprimirBoleta({
@@ -2849,7 +2863,8 @@ async function cerrarCuentaConPin(
     if (activeCuenta.value?.id === cuentaCerrada.id) volverACuentas()
   }
   catch (e: unknown) {
-    toastErrorOperativo(e, 'Error al cerrar la cuenta')
+    if (!intentoCobro.mostrarSiCobroConOtrosDatos(e, ambitoCobro))
+      toastErrorOperativo(e, 'Error al cerrar la cuenta')
   }
   finally {
     submitting.value = false

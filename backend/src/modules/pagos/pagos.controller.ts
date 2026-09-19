@@ -7,13 +7,14 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiHeader, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
+import { ClaveIdempotencia } from '../../common/decorators/clave-idempotencia.decorator';
 import { RbacService } from '../rbac/rbac.service';
 import { PagosService } from './pagos.service';
 import { CreatePagoDto } from './dto/create-pago.dto';
@@ -62,11 +63,23 @@ export class PagosController {
 
   @Post()
   @RequiresPermiso('Pagos', 'Crear')
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description:
+      'UUID por intento de cobro. El reintento con la misma clave reproduce el abono ya registrado.',
+  })
   registrarAbono(
     @Req() req: Request,
     @Body(EscalaMonedaPipe) dto: CreatePagoDto,
+    @ClaveIdempotencia() clave: string,
   ) {
     const user = req.user as JwtUser;
-    return this.pagosService.registrarAbono(user.tenantId!, user.id, dto);
+    return this.pagosService.registrarAbono(
+      user.tenantId!,
+      user.id,
+      dto,
+      clave,
+    );
   }
 }

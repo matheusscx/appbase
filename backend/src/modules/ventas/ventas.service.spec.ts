@@ -23,6 +23,7 @@ import { VentaDescuento } from './entities/venta-descuento.entity';
 import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { VentaPromocion } from './entities/venta-promocion.entity';
+import { IdempotenciaService } from '../idempotencia/idempotencia.service';
 
 /**
  * El tipo "nota de crédito" que el service resuelve por país. Antes era una
@@ -412,6 +413,9 @@ describe('VentasService', () => {
             localDe: jest.fn().mockResolvedValue(UBICACION_LOCAL_ID),
           },
         },
+        // `crear` sin clave (el camino de Webpay) no lo toca; la idempotencia
+        // se prueba en su propio spec y en el e2e contra Postgres real.
+        { provide: IdempotenciaService, useValue: { ejecutar: jest.fn() } },
         {
           provide: Db,
           useValue: dbMock,

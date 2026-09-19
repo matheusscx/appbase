@@ -60,6 +60,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
   const crearVentaMixta = async (): Promise<string> => {
     const venta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         // `'online'` para no depender de una caja física abierta: acá lo que se
@@ -88,6 +89,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
   const crearVentaConReceta = async (): Promise<string> => {
     const venta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         canal: 'online',

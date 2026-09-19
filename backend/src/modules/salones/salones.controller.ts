@@ -11,13 +11,14 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
+import { ClaveIdempotencia } from '../../common/decorators/clave-idempotencia.decorator';
 import { QueryIncluirEliminadosDto } from '../../common/dto/query-incluir-eliminados.dto';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { SalonesService } from './salones.service';
@@ -339,13 +340,26 @@ export class CuentasController {
 
   @Post(':id/cerrar')
   @RequiresPermiso('Salones', 'Operar')
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description:
+      'UUID por intento de cobro. El reintento con la misma clave reproduce el cierre ya hecho.',
+  })
   cerrar(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
     @Body(EscalaMonedaPipe) dto: CerrarCuentaDto,
+    @ClaveIdempotencia() clave: string,
   ) {
     const u = req.user as JwtUser;
-    return this.salonesService.cerrarCuenta(u.tenantId ?? '', u.id, id, dto);
+    return this.salonesService.cerrarCuenta(
+      u.tenantId ?? '',
+      u.id,
+      id,
+      dto,
+      clave,
+    );
   }
 
   @Post(':id/transferir')

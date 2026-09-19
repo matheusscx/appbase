@@ -134,6 +134,7 @@ filtro **no** vive en `ItemsService.cargarBasePorIds`, que comparten los tres.
 
 ```
 POST /ventas
+Idempotency-Key: <uuid por checkout>
 
 Request:
 {
@@ -145,6 +146,11 @@ Request:
 
 Response (201): venta en estado "pagada" (canal online exige pago completo).
 ```
+
+La página de la pasarela simulada manda una clave por checkout (2026-09-19,
+[ADR-026](../adr/026-idempotencia-de-cobros.md)): si *Aprobar* falla por un corte, el
+reintento es el mismo intento y no puede crear un segundo pedido. La clave muere con el éxito
+o al salir de la página.
 
 ### Suscripciones
 

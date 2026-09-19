@@ -4,6 +4,7 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { randomUUID } from 'node:crypto';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
@@ -177,6 +178,7 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
 
     const venta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         tipoDocumentoId: BOLETA_ID,
@@ -187,6 +189,7 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
 
     const pago = await request(app.getHttpServer())
       .post('/api/pagos')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         ventaId: id,

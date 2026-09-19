@@ -6,6 +6,7 @@ import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
+import { randomUUID } from 'node:crypto';
 
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const USD_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440005';
@@ -268,6 +269,7 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
   it('5. vende 1 Clásica eligiendo Carne → movimiento de salida de 150 g', async () => {
     const resVenta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [
@@ -308,6 +310,7 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
   it('6. vende 1 XL eligiendo la MISMA Carne → movimiento de salida de 250 g', async () => {
     const resVenta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [
@@ -394,6 +397,7 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
     // (negativo) vender esa receta eligiendo la opción pendiente → 400
     const resVenta = await request(app.getHttpServer())
       .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [

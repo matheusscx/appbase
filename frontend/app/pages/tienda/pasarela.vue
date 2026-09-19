@@ -22,6 +22,13 @@ const lineasSnapshot = ref<{ itemId: string, cantidad: string }[]>([])
 const estado = ref<'revisando' | 'procesando' | 'aprobada' | 'rechazada'>('revisando')
 const ventaId = ref<string | null>(null)
 
+// Una clave por checkout: si aprobar falla por un corte, el reintento es el
+// mismo intento y no puede crear un segundo pedido. Muere con el éxito o al
+// salir de la página (ADR-026).
+const intentoCobro = useIntentoCobro()
+const AMBITO_COBRO = 'tienda'
+onUnmounted(() => intentoCobro.terminar(AMBITO_COBRO))
+
 onMounted(async () => {
   if (!checkout.value || checkout.value.checkoutRef !== route.query.ref) {
     await navigateTo('/tienda')
@@ -55,8 +62,9 @@ async function aprobar() {
 
   estado.value = 'procesando'
   try {
-    const venta = await useApiFetch<{ id: string, estado: string }>(`${apiUrl}/ventas`, {
+    const venta = await useApiFetch<{ id: string, estado: string, repetida?: boolean }>(`${apiUrl}/ventas`, {
       method: 'POST',
+      headers: intentoCobro.cabecera(AMBITO_COBRO),
       body: {
         canal: 'online',
         lineas: lineasSnapshot.value,
@@ -71,10 +79,16 @@ async function aprobar() {
         customer: { nombre: authStore.user?.nombre ?? 'Cliente online' },
       },
     })
+    intentoCobro.terminar(AMBITO_COBRO)
+    intentoCobro.avisarSiRepetido(venta)
     ventaId.value = venta.id
     limpiar()
     estado.value = 'aprobada'
   } catch (e: unknown) {
+    if (intentoCobro.mostrarSiCobroConOtrosDatos(e, AMBITO_COBRO)) {
+      estado.value = 'rechazada'
+      return
+    }
     const msg = apiErrorMsg(e, 'El pago fue rechazado')
     toast.add({ title: msg, color: 'error' })
     estado.value = 'rechazada'

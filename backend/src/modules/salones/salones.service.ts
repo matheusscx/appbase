@@ -52,6 +52,8 @@ import {
   type UnidadCat,
 } from '../../common/utils/cantidad-presentacion.util';
 import type { PersonalizacionRecetaSnapshot } from '../../common/dto/personalizacion-receta.dto';
+import { IdempotenciaService } from '../idempotencia/idempotencia.service';
+import { huellaDe } from '../idempotencia/huella';
 import {
   detallePersonalizacion,
   hashPersonalizacion,
@@ -298,6 +300,7 @@ export class SalonesService {
     private readonly calculoPreciosService: CalculoPreciosService,
     private readonly motivosBajaService: MotivosBajaService,
     private readonly ubicacionesService: UbicacionesService,
+    private readonly idempotencia: IdempotenciaService,
   ) {}
 
   // ── Administración: salones ──────────────────────────────────────────────
@@ -1918,7 +1921,14 @@ export class SalonesService {
     usuarioId: string,
     cuentaId: string,
     dto: CerrarCuentaDto,
-  ): Promise<{ cuenta: CuentaDetalle; ventaId: string; boleta: BoletaVenta }> {
+    /** La `Idempotency-Key` del intento de cobro (ADR-026). */
+    clave: string,
+  ): Promise<{
+    cuenta: CuentaDetalle;
+    ventaId: string;
+    boleta: BoletaVenta;
+    repetida?: true;
+  }> {
     // Quién cierra: del JWT en tablet personal, del PIN en dispositivo
     // compartido (400 si no hay ninguno de los dos).
     const garzon = await this.garzonesService.resolverGarzonActuante(
@@ -1926,168 +1936,200 @@ export class SalonesService {
       usuarioId,
       dto,
     );
-    await this.sesionesGarzonService.assertSesionAbierta(tenantId, garzon.id);
-    return this.db.transaccion(async (manager) => {
-      // Lock pesimista: evita doble cierre / doble venta concurrente.
-      const cuenta = await manager.findOne(Cuenta, {
-        where: { id: cuentaId, tenantId },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!cuenta)
-        throw new NotFoundException(`Cuenta ${cuentaId} no encontrada`);
-      if (cuenta.estado !== EstadoCuenta.ABIERTA) {
-        throw new BadRequestException('La cuenta no está abierta');
-      }
-      const lineas = await manager.find(CuentaLinea, {
-        where: { tenantId, cuentaId },
-        // El orden de las líneas del cobro es CONTRATO, no cosmética: el motor
-        // de precios cruza cada línea de la venta con su fila de
-        // `cuenta_lineas` por ítem + consumo POR ORDEN para saber en qué
-        // instante se pidió (es lo que decide si una promo de happy hour
-        // aplica). Sin `order`, Postgres devuelve el heap order, que cambia con
-        // cualquier `UPDATE` de una fila —marcar cantidad enviada a cocina, sin
-        // ir más lejos— y el cruce empezaría a asignar el instante equivocado
-        // en silencio. `creadoEl` es además el orden en que el cliente pidió,
-        // que es el que el ticket imprime.
-        order: { creadoEl: 'ASC' },
-      });
-      if (lineas.length === 0) {
-        throw new BadRequestException('La cuenta no tiene productos');
-      }
-      if (!cuenta.garzonResponsableId) {
-        throw new BadRequestException(
-          'La cuenta no tiene garzón responsable asignado',
-        );
-      }
-
-      // El responsable, no el que cobra: la propina se atribuye a su turno. Si
-      // marcó salida con la mesa abierta, la cuenta no se puede cobrar hasta
-      // transferirla — el mensaje lo dice, porque el genérico de
-      // `assertSesionAbierta` habla del garzón que está operando y mandaba al
-      // cajero a "entrar a turno" cuando su turno no era el problema.
-      const sesionResponsable =
-        await this.sesionesGarzonService.buscarSesionAbierta(
+    // La credencial va ARRIBA, fuera del reclamo: un reintento vuelve a
+    // autenticar al garzón, y reproducir no es un atajo que saltee el PIN.
+    //
+    // El reclamo, en cambio, va ANTES de todo lo que es ESTADO: el turno
+    // abierto del garzón, el `FOR UPDATE` de la cuenta y "La cuenta no está
+    // abierta". Es lo que hace que el reintento de un cierre que sí entró
+    // reproduzca la venta en vez de rebotar, también si el garzón marcó salida
+    // entre el cierre y el reintento (revisión independiente, 2026-09-19): el
+    // PIN prueba quién es; el turno es una condición para ESCRIBIR, y
+    // reproducir no escribe nada (ADR-026).
+    //
+    // La huella se arma campo por campo y SIN el PIN: su hash se revierte por
+    // fuerza bruta. Un campo nuevo del DTO se decide acá, no entra solo.
+    const huella = huellaDe('cuenta.cerrar', {
+      cuentaId,
+      garzonId: dto.garzonId,
+      pagos: dto.pagos,
+      tipoDocumentoId: dto.tipoDocumentoId,
+      customer: dto.customer,
+      propinaMonto: dto.propinaMonto,
+      propinaSugerida: dto.propinaSugerida,
+      propinaPorcentajeSugerido: dto.propinaPorcentajeSugerido,
+    });
+    const cerrar = () =>
+      this.db.transaccion(async (manager) => {
+        await this.sesionesGarzonService.assertSesionAbierta(
           tenantId,
-          cuenta.garzonResponsableId,
+          garzon.id,
         );
-      if (!sesionResponsable) {
-        throw new BadRequestException(
-          'El garzón responsable de la cuenta ya no está en turno. ' +
-            'Transferí la cuenta a alguien en turno para poder cobrarla.',
-        );
-      }
+        // Lock pesimista: evita doble cierre / doble venta concurrente.
+        const cuenta = await manager.findOne(Cuenta, {
+          where: { id: cuentaId, tenantId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!cuenta)
+          throw new NotFoundException(`Cuenta ${cuentaId} no encontrada`);
+        if (cuenta.estado !== EstadoCuenta.ABIERTA) {
+          throw new BadRequestException('La cuenta no está abierta');
+        }
+        const lineas = await manager.find(CuentaLinea, {
+          where: { tenantId, cuentaId },
+          // El orden de las líneas del cobro es CONTRATO, no cosmética: el motor
+          // de precios cruza cada línea de la venta con su fila de
+          // `cuenta_lineas` por ítem + consumo POR ORDEN para saber en qué
+          // instante se pidió (es lo que decide si una promo de happy hour
+          // aplica). Sin `order`, Postgres devuelve el heap order, que cambia con
+          // cualquier `UPDATE` de una fila —marcar cantidad enviada a cocina, sin
+          // ir más lejos— y el cruce empezaría a asignar el instante equivocado
+          // en silencio. `creadoEl` es además el orden en que el cliente pidió,
+          // que es el que el ticket imprime.
+          order: { creadoEl: 'ASC' },
+        });
+        if (lineas.length === 0) {
+          throw new BadRequestException('La cuenta no tiene productos');
+        }
+        if (!cuenta.garzonResponsableId) {
+          throw new BadRequestException(
+            'La cuenta no tiene garzón responsable asignado',
+          );
+        }
 
-      // Los tres, no solo el que se cobra: `@IsNumberString()` acepta el signo
-      // menos, y aunque `targetCobro` use únicamente `propinaMonto` —así que un
-      // negativo en los otros dos no cobra de más—, se persisten en
-      // `venta_propina` y corrompen los reportes con signos incoherentes.
-      const propinaMonto = dto.propinaMonto ?? '0';
-      const negativa = [
-        propinaMonto,
-        dto.propinaSugerida,
-        dto.propinaPorcentajeSugerido,
-      ].some((v) => v !== undefined && new Decimal(v).lt(0));
-      if (negativa) {
-        throw new BadRequestException('Propina inválida');
-      }
+        // El responsable, no el que cobra: la propina se atribuye a su turno. Si
+        // marcó salida con la mesa abierta, la cuenta no se puede cobrar hasta
+        // transferirla — el mensaje lo dice, porque el genérico de
+        // `assertSesionAbierta` habla del garzón que está operando y mandaba al
+        // cajero a "entrar a turno" cuando su turno no era el problema.
+        const sesionResponsable =
+          await this.sesionesGarzonService.buscarSesionAbierta(
+            tenantId,
+            cuenta.garzonResponsableId,
+          );
+        if (!sesionResponsable) {
+          throw new BadRequestException(
+            'El garzón responsable de la cuenta ya no está en turno. ' +
+              'Transferí la cuenta a alguien en turno para poder cobrarla.',
+          );
+        }
 
-      // Va acá y no antes: las validaciones de arriba son gratis y este es el
-      // único chequeo que pega a la BD. `crearEnTransaccion` resolvería igual
-      // los ítems y explotaría con un "Item no encontrado" que no dice cuál ni
-      // deja hacer nada; con el nombre, el garzón sabe qué línea quitar (el
-      // detalle ahora se la muestra marcada en vez de esconderla).
-      const eliminados: { nombre: string }[] = await manager.query(
-        `SELECT nombre FROM items
+        // Los tres, no solo el que se cobra: `@IsNumberString()` acepta el signo
+        // menos, y aunque `targetCobro` use únicamente `propinaMonto` —así que un
+        // negativo en los otros dos no cobra de más—, se persisten en
+        // `venta_propina` y corrompen los reportes con signos incoherentes.
+        const propinaMonto = dto.propinaMonto ?? '0';
+        const negativa = [
+          propinaMonto,
+          dto.propinaSugerida,
+          dto.propinaPorcentajeSugerido,
+        ].some((v) => v !== undefined && new Decimal(v).lt(0));
+        if (negativa) {
+          throw new BadRequestException('Propina inválida');
+        }
+
+        // Va acá y no antes: las validaciones de arriba son gratis y este es el
+        // único chequeo que pega a la BD. `crearEnTransaccion` resolvería igual
+        // los ítems y explotaría con un "Item no encontrado" que no dice cuál ni
+        // deja hacer nada; con el nombre, el garzón sabe qué línea quitar (el
+        // detalle ahora se la muestra marcada en vez de esconderla).
+        const eliminados: { nombre: string }[] = await manager.query(
+          `SELECT nombre FROM items
           WHERE item_id = ANY($1) AND tenant_id = $2
             AND eliminado_el IS NOT NULL
           ORDER BY nombre`,
-        [lineas.map((l) => l.itemId), tenantId],
-      );
-      if (eliminados.length > 0) {
-        throw new BadRequestException(
-          `No se puede cobrar: ${eliminados.map((e) => e.nombre).join(', ')} ` +
-            `se eliminó del catálogo. Quitá esa línea de la cuenta para cerrarla.`,
+          [lineas.map((l) => l.itemId), tenantId],
         );
-      }
+        if (eliminados.length > 0) {
+          throw new BadRequestException(
+            `No se puede cobrar: ${eliminados.map((e) => e.nombre).join(', ')} ` +
+              `se eliminó del catálogo. Quitá esa línea de la cuenta para cerrarla.`,
+          );
+        }
 
-      const ventaDto: CreateVentaDto = {
-        lineas: lineas.map((l) => ({
-          itemId: l.itemId,
-          cantidad: l.cantidad,
-          ...(l.cantidadPresentacion && l.unidadCodigoPresentacion
-            ? {
-                cantidadPresentacion: l.cantidadPresentacion,
-                unidadCodigoPresentacion: l.unidadCodigoPresentacion,
-              }
-            : {}),
-          // ⚠️ **La personalización NO viaja en el DTO** desde el 2026-08-31.
-          // Hasta acá esta línea desarmaba el snapshot congelado en puros ids y
-          // `ventas.service` lo volvía a resolver contra el catálogo de hoy: de
-          // ahí salían las dos conductas que este frente arregla —la mesa que
-          // no se podía cobrar porque la carta cambió, y el precio que se movía
-          // sin avisar—. Ahora la foto entera va por `lineasCongeladas`, el
-          // canal interno de `crearEnTransaccion`, que no es un campo del body.
-        })),
-        pagos: dto.pagos,
-        tipoDocumentoId: dto.tipoDocumentoId,
-        customer: dto.customer,
-        canal: 'fisico',
-        propinaCierreMesa: {
-          montoPagado: propinaMonto,
-          montoSugerido: dto.propinaSugerida ?? propinaMonto,
-          porcentajeSugerido: dto.propinaPorcentajeSugerido ?? '0.10',
-          garzonId: cuenta.garzonResponsableId,
-          sesionGarzonId: sesionResponsable.id,
-          turnoId: sesionResponsable.turnoId,
-          tipoGarzon: sesionResponsable.tipoGarzon,
-          estrategia: EstrategiaAsignacionPropina.NO_VUELTO,
-        },
-      };
-      const venta = await this.ventasService.crearEnTransaccion(
-        manager,
-        tenantId,
-        usuarioId,
-        ventaDto,
-        cuentaId,
-        // La foto de cada línea, en el mismo orden que `ventaDto.lineas` —las
-        // dos salen del mismo `lineas`, ya ordenado por `creadoEl`—. Es el canal
-        // interno: lleva plata resuelta y por eso no puede ser un campo del body.
-        lineas.map((l) => ({
-          personalizacion: l.personalizacion,
-          precioUnitario: l.precioUnitario,
-          precioUnitarioOrigen: l.precioUnitarioOrigen,
-          tasaCambio: l.tasaCambio,
-          reglasCongeladas: l.reglasCongeladas,
-        })),
-      );
+        const ventaDto: CreateVentaDto = {
+          lineas: lineas.map((l) => ({
+            itemId: l.itemId,
+            cantidad: l.cantidad,
+            ...(l.cantidadPresentacion && l.unidadCodigoPresentacion
+              ? {
+                  cantidadPresentacion: l.cantidadPresentacion,
+                  unidadCodigoPresentacion: l.unidadCodigoPresentacion,
+                }
+              : {}),
+            // ⚠️ **La personalización NO viaja en el DTO** desde el 2026-08-31.
+            // Hasta acá esta línea desarmaba el snapshot congelado en puros ids y
+            // `ventas.service` lo volvía a resolver contra el catálogo de hoy: de
+            // ahí salían las dos conductas que este frente arregla —la mesa que
+            // no se podía cobrar porque la carta cambió, y el precio que se movía
+            // sin avisar—. Ahora la foto entera va por `lineasCongeladas`, el
+            // canal interno de `crearEnTransaccion`, que no es un campo del body.
+          })),
+          pagos: dto.pagos,
+          tipoDocumentoId: dto.tipoDocumentoId,
+          customer: dto.customer,
+          canal: 'fisico',
+          propinaCierreMesa: {
+            montoPagado: propinaMonto,
+            montoSugerido: dto.propinaSugerida ?? propinaMonto,
+            porcentajeSugerido: dto.propinaPorcentajeSugerido ?? '0.10',
+            garzonId: cuenta.garzonResponsableId,
+            sesionGarzonId: sesionResponsable.id,
+            turnoId: sesionResponsable.turnoId,
+            tipoGarzon: sesionResponsable.tipoGarzon,
+            estrategia: EstrategiaAsignacionPropina.NO_VUELTO,
+          },
+        };
+        const venta = await this.ventasService.crearEnTransaccion(
+          manager,
+          tenantId,
+          usuarioId,
+          ventaDto,
+          cuentaId,
+          // La foto de cada línea, en el mismo orden que `ventaDto.lineas` —las
+          // dos salen del mismo `lineas`, ya ordenado por `creadoEl`—. Es el canal
+          // interno: lleva plata resuelta y por eso no puede ser un campo del body.
+          lineas.map((l) => ({
+            personalizacion: l.personalizacion,
+            precioUnitario: l.precioUnitario,
+            precioUnitarioOrigen: l.precioUnitarioOrigen,
+            tasaCambio: l.tasaCambio,
+            reglasCongeladas: l.reglasCongeladas,
+          })),
+        );
 
-      cuenta.estado = EstadoCuenta.CERRADA;
-      cuenta.ventaId = venta.id;
-      cuenta.cerradaEl = new Date();
-      cuenta.garzonCierreId = garzon.id;
-      await this.cuentaAsignacionesService.cerrarTramoVigente(
-        manager,
-        tenantId,
-        cuenta.id,
-        cuenta.cerradaEl,
-      );
-      await manager.save(Cuenta, cuenta);
+        cuenta.estado = EstadoCuenta.CERRADA;
+        cuenta.ventaId = venta.id;
+        cuenta.cerradaEl = new Date();
+        cuenta.garzonCierreId = garzon.id;
+        await this.cuentaAsignacionesService.cerrarTramoVigente(
+          manager,
+          tenantId,
+          cuenta.id,
+          cuenta.cerradaEl,
+        );
+        await manager.save(Cuenta, cuenta);
 
-      const detalle = await this.armarDetalle(tenantId, cuenta, manager);
-      // `verTodas: true`: el alcance por caja de `armarBoleta` (`filtroDeMisCajas`)
-      // existe para que nadie navegue ventas de una caja ajena, no para esconderle
-      // a quien cierra la cuenta la boleta de la venta que acaba de cobrar en ESTA
-      // misma request. Se arma con el `manager` de la transacción para que la
-      // lectura vea la venta recién insertada, todavía sin commitear.
-      const boleta = await this.ventasService.armarBoleta(
-        manager,
-        tenantId,
-        venta.id,
-        usuarioId,
-        true,
-      );
-      return { cuenta: detalle, ventaId: venta.id, boleta };
-    });
+        const detalle = await this.armarDetalle(tenantId, cuenta, manager);
+        // `verTodas: true`: el alcance por caja de `armarBoleta` (`filtroDeMisCajas`)
+        // existe para que nadie navegue ventas de una caja ajena, no para esconderle
+        // a quien cierra la cuenta la boleta de la venta que acaba de cobrar en ESTA
+        // misma request. Se arma con el `manager` de la transacción para que la
+        // lectura vea la venta recién insertada, todavía sin commitear.
+        const boleta = await this.ventasService.armarBoleta(
+          manager,
+          tenantId,
+          venta.id,
+          usuarioId,
+          true,
+        );
+        return { cuenta: detalle, ventaId: venta.id, boleta };
+      });
+    return this.idempotencia.ejecutar(
+      { tenantId, usuarioId, clave, operacion: 'cuenta.cerrar', huella },
+      cerrar,
+      (r) => r.ventaId,
+    );
   }
 
   /**

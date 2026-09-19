@@ -39,6 +39,16 @@ const { formatMonto } = useFormatters()
 // igual que el garzón del salón.
 const { puedeCrear: puedeTrasladar } = usePermisosCrud('Inventario')
 const { mostrarRechazoPorStock } = useRechazoPorStock()
+// Una clave por intento de cobro: sobrevive a un corte y a cualquier edición
+// del carrito, y muere con el éxito o cuando el carrito queda vacío (ADR-026).
+const intentoCobro = useIntentoCobro()
+const AMBITO_COBRO = 'pos'
+watch(
+  () => lineas.value.length,
+  (n) => {
+    if (n === 0) intentoCobro.terminar(AMBITO_COBRO)
+  },
+)
 
 const items = ref<ItemCatalogo[]>([])
 const metodos = ref<MetodoPago[]>([])
@@ -235,11 +245,17 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
       estado: string
       advertencias?: string[]
       boleta: BoletaVenta
+      repetida?: boolean
     }>(`${apiUrl}/ventas`, {
       method: 'POST',
       body,
+      headers: intentoCobro.cabecera(AMBITO_COBRO),
     })
+    // El cobro entró (o ya había entrado y el backend lo reprodujo): el
+    // intento terminó, aunque después falle la impresión.
+    intentoCobro.terminar(AMBITO_COBRO)
     toast.add({ title: estadoToastTitle[venta.estado] ?? 'Venta registrada', color: 'success' })
+    intentoCobro.avisarSiRepetido(venta)
     for (const advertencia of venta.advertencias ?? []) {
       toast.add({ title: advertencia, color: 'warning' })
     }
@@ -297,6 +313,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     customerExpandido.value = false
     customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
   } catch (e: unknown) {
+    if (intentoCobro.mostrarSiCobroConOtrosDatos(e, AMBITO_COBRO)) return
     mostrarRechazoPorStock({ error: e, fallback: 'Error al registrar la venta', puedeTrasladar: puedeTrasladar.value })
   } finally {
     submitting.value = false

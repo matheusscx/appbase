@@ -10,6 +10,7 @@ import { CatalogModule } from '../catalog/catalog.module';
 import { GarzonesModule } from '../garzones/garzones.module';
 import { MonedasModule } from '../monedas/monedas.module';
 import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
+import { IdempotenciaModule } from '../idempotencia/idempotencia.module';
 import { VentasService } from './ventas.service';
 import {
   VentasController,
@@ -56,6 +57,7 @@ import { VentasReembolsoHandler } from './reembolso-callback.handler';
     // del tenant vía `UbicacionesService.localDe` una vez antes del loop de
     // líneas.
     UbicacionesModule,
+    IdempotenciaModule,
   ],
   controllers: [VentasController, TiposDocumentoController],
   providers: [VentasService, VentasReembolsoHandler],

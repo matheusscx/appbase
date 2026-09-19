@@ -29,6 +29,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Pos from './pos.vue'
+import { AVISO_COBRO_REPETIDO, useIntentoCobro } from '~/composables/useIntentoCobro'
 
 /**
  * Lo que efectivamente se mandó a imprimir, ticket por ticket. `imprimirEn()`
@@ -109,9 +110,17 @@ let cajaActivaMock: unknown = null
 let ventaBoletaMock: Record<string, unknown> | null = null
 /** Cada body de `POST /ventas` recibido. */
 let bodiesDeVenta: Record<string, unknown>[] = []
+/** La `Idempotency-Key` de cada `POST /ventas`, en orden. */
+let clavesDeVenta: (string | undefined)[] = []
+/**
+ * Lo que contesta cada `POST /ventas`, en orden: un `Error` lo rechaza (el
+ * corte de red, el 422), un objeto se mezcla sobre la respuesta de éxito.
+ * Vacía = éxito normal.
+ */
+let respuestasVenta: (Error | { status: number, data: unknown } | Record<string, unknown>)[] = []
 
 mockNuxtImport('useApiFetch', () => {
-  return (url: string, opts?: { method?: string, body?: unknown }) => {
+  return (url: string, opts?: { method?: string, body?: unknown, headers?: Record<string, string> }) => {
     if (typeof url !== 'string') return Promise.resolve([])
     const ruta = url.split('?')[0] ?? ''
 
@@ -127,10 +136,15 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (ruta.endsWith('/ventas') && opts?.method === 'POST') {
       bodiesDeVenta.push((opts.body ?? {}) as Record<string, unknown>)
+      clavesDeVenta.push(opts.headers?.['Idempotency-Key'])
+      const respuesta = respuestasVenta.shift()
+      if (respuesta instanceof Error || (respuesta && 'status' in respuesta))
+        return Promise.reject(respuesta)
       return Promise.resolve({
         estado: 'pagada',
         advertencias: [],
         boleta: ventaBoletaMock,
+        ...respuesta,
       })
     }
     // El resto del arranque (métodos de pago, tipos de documento, unidades de
@@ -140,10 +154,11 @@ mockNuxtImport('useApiFetch', () => {
   }
 })
 
-let toasts: { title?: string, color?: string }[] = []
+interface ToastPos { title?: string, color?: string, actions?: { label: string }[] }
+let toasts: ToastPos[] = []
 mockNuxtImport('useToast', () => {
   return () => ({
-    add: (t: { title?: string, color?: string }) => {
+    add: (t: ToastPos) => {
       toasts.push(t)
     },
   })
@@ -165,7 +180,12 @@ beforeEach(() => {
   cajaActivaMock = null
   ventaBoletaMock = null
   bodiesDeVenta = []
+  clavesDeVenta = []
+  respuestasVenta = []
   toasts = []
+  // La clave vive a nivel de módulo (sobrevive a cerrar y reabrir un modal):
+  // cada test arranca sin intento abierto.
+  useIntentoCobro().terminar('pos')
   impresionesQz.length = 0
 })
 
@@ -337,5 +357,111 @@ describe('ventas/pos — la boleta se imprime desde la respuesta de POST /ventas
     expect(texto, 'imprime el RUT que devolvió el servidor').toContain('99.999.999-9')
     expect(texto, 'NO imprime el nombre del formulario').not.toContain('Cliente Formulario')
     expect(texto, 'NO imprime el RUT del formulario').not.toContain('11.111.111-1')
+  })
+})
+
+describe('ventas/pos — un cobro que se repite no se registra dos veces', () => {
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+  const errorOtrosDatos = {
+    status: 422,
+    data: {
+      statusCode: 422,
+      message: 'Este cobro ya se había registrado con otros datos. Revisá la venta antes de cobrar de nuevo.',
+      ventaId: 'venta-1',
+    },
+  }
+
+  async function confirmar(
+    wrapper: Awaited<ReturnType<typeof montar>>,
+    pagos: { metodoPagoId: string, monto: string }[],
+  ) {
+    wrapper.findComponent({ name: 'VentasCobroModal' }).vm.$emit('confirmar', pagos, '0')
+    await esperar(50)
+  }
+
+  it('un corte y un reintento mandan la MISMA clave, aunque el cajero haya cambiado el medio de pago', async () => {
+    respuestasVenta = [new Error('fetch failed')]
+    const wrapper = await montar()
+
+    await confirmar(wrapper, [{ metodoPagoId: 'mp-tarjeta', monto: '1200' }])
+    await confirmar(wrapper, [{ metodoPagoId: 'mp-efectivo', monto: '1200' }])
+
+    expect(clavesDeVenta).toHaveLength(2)
+    expect(clavesDeVenta[0]).toMatch(UUID)
+    expect(clavesDeVenta[1], 'el reintento es el mismo intento').toBe(clavesDeVenta[0])
+    // El body cambió: si la primera entró, el backend contesta 422 en vez de
+    // crear otra venta. Con una clave nueva, saldría la segunda venta.
+    expect(bodiesDeVenta[1]!.pagos).not.toEqual(bodiesDeVenta[0]!.pagos)
+  })
+
+  it('después de un cobro que salió bien, el siguiente lleva otra clave', async () => {
+    const wrapper = await montar()
+
+    await confirmar(wrapper, [{ metodoPagoId: 'mp-efectivo', monto: '1200' }])
+    await confirmar(wrapper, [{ metodoPagoId: 'mp-efectivo', monto: '1200' }])
+
+    expect(clavesDeVenta).toHaveLength(2)
+    expect(clavesDeVenta[1]).not.toBe(clavesDeVenta[0])
+  })
+
+  it('una venta reproducida sigue el flujo de éxito y avisa que ya había entrado', async () => {
+    respuestasVenta = [{ repetida: true }]
+    const wrapper = await montar()
+
+    await confirmar(wrapper, [{ metodoPagoId: 'mp-efectivo', monto: '1200' }])
+
+    expect(toasts.some(t => t.title === 'Venta pagada'), 'el éxito de siempre').toBe(true)
+    expect(toasts.some(t => t.title === AVISO_COBRO_REPETIDO), 'más el aviso').toBe(true)
+  })
+
+  it('una venta nueva no avisa nada de repetición', async () => {
+    const wrapper = await montar()
+
+    await confirmar(wrapper, [{ metodoPagoId: 'mp-efectivo', monto: '1200' }])
+
+    expect(toasts.some(t => t.title === AVISO_COBRO_REPETIDO)).toBe(false)
+  })
+
+  it('el 422 de otros datos: toast con "Ver venta" en vez del rechazo genérico, y el Confirmar siguiente es una venta nueva', async () => {
+    respuestasVenta = [errorOtrosDatos]
+    const wrapper = await montar()
+
+    await confirmar(wrapper, [{ metodoPagoId: 'mp-efectivo', monto: '1200' }])
+    const aviso = toasts.find(t => t.title?.includes('otros datos'))
+    expect(aviso?.actions?.map(a => a.label)).toEqual(['Ver venta'])
+    expect(toasts.some(t => t.title === 'Error al registrar la venta')).toBe(false)
+
+    await confirmar(wrapper, [{ metodoPagoId: 'mp-efectivo', monto: '1200' }])
+    expect(clavesDeVenta[1], 'el aviso cerró el intento (owner, 2026-09-19)').not.toBe(clavesDeVenta[0])
+  })
+
+  it('vaciar el carrito entre dos intentos cierra el primero: el siguiente lleva otra clave', async () => {
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    respuestasVenta = [new Error('fetch failed')]
+    const wrapper = await montar()
+
+    await confirmar(wrapper, [{ metodoPagoId: 'mp-efectivo', monto: '1200' }])
+
+    // Una línea y "Vaciar todo": el carrito pasa por vacío.
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', {
+      id: 'item-1',
+      nombre: 'Palta',
+      descripcion: null,
+      precioBase: '1000',
+      monedaId: 'clp',
+      monedaSimbolo: '$',
+      stock: '10',
+      unidadMedida: 'unidad',
+      tipo: 'producto',
+      activo: true,
+    })
+    await esperar(0)
+    wrapper.findComponent({ name: 'VentasCarritoPanel' }).vm.$emit('limpiar-todo')
+    await esperar(0)
+
+    await confirmar(wrapper, [{ metodoPagoId: 'mp-efectivo', monto: '1200' }])
+
+    expect(clavesDeVenta).toHaveLength(2)
+    expect(clavesDeVenta[1]).not.toBe(clavesDeVenta[0])
   })
 })

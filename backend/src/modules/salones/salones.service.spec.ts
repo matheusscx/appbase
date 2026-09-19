@@ -4,6 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Db } from '../../common/db/db.service';
 import { SalonesService } from './salones.service';
+import { IdempotenciaService } from '../idempotencia/idempotencia.service';
 import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
 import { Salon } from './entities/salon.entity';
 import { Mesa } from './entities/mesa.entity';
@@ -112,12 +113,20 @@ function makeRepo(): Repo {
   };
 }
 
+const CLAVE = '2f1c8a3e-6a1b-4d8e-9a55-0c7b1f7d2e10';
+
 describe('SalonesService', () => {
   let service: SalonesService;
   let salonRepo: Repo;
   let mesaRepo: Repo;
   let cuentaRepo: Repo;
   let ventas: { crearEnTransaccion: jest.Mock; armarBoleta: jest.Mock };
+  /**
+   * Pasa derecho a la operación: el reclamo y la reproducción se prueban en
+   * `idempotencia.service.spec.ts` y contra Postgres en el e2e. Acá se mira
+   * solo QUÉ le pasa `cerrarCuenta` (la huella, sin el PIN).
+   */
+  let idempotencia: { ejecutar: jest.Mock };
   let garzones: { resolverGarzonActuante: jest.Mock };
   let sesiones: {
     assertSesionAbierta: jest.Mock;
@@ -282,6 +291,11 @@ describe('SalonesService', () => {
       sinTransaccion: (fn: () => unknown) => fn(),
     };
 
+    idempotencia = {
+      ejecutar: jest.fn((_s: unknown, operar: () => Promise<unknown>) =>
+        operar(),
+      ),
+    };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SalonesService,
@@ -299,6 +313,7 @@ describe('SalonesService', () => {
         { provide: CalculoPreciosService, useValue: calculoPrecios },
         { provide: MotivosBajaService, useValue: motivosBaja },
         { provide: UbicacionesService, useValue: ubicaciones },
+        { provide: IdempotenciaService, useValue: idempotencia },
       ],
     }).compile();
 
@@ -3063,11 +3078,17 @@ describe('SalonesService', () => {
       // Sin este chequeo, `crearEnTransaccion` explota con "Item no encontrado"
       // y el garzón no tiene cómo saber qué línea quitar.
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
-          garzonId: GARZON,
-          pin: PIN,
-          pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
-        }),
+        service.cerrarCuenta(
+          TENANT,
+          USUARIO,
+          CUENTA,
+          {
+            garzonId: GARZON,
+            pin: PIN,
+            pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
+          },
+          CLAVE,
+        ),
       ).rejects.toThrow(/No se puede cobrar: Pastel de choclo/);
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
@@ -3090,11 +3111,17 @@ describe('SalonesService', () => {
       manager.query.mockResolvedValue([]);
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
 
-      const result = await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
-        garzonId: GARZON,
-        pin: PIN,
-        pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
-      });
+      const result = await service.cerrarCuenta(
+        TENANT,
+        USUARIO,
+        CUENTA,
+        {
+          garzonId: GARZON,
+          pin: PIN,
+          pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
+        },
+        CLAVE,
+      );
 
       expect(manager.findOne).toHaveBeenCalledWith(
         Cuenta,
@@ -3169,11 +3196,17 @@ describe('SalonesService', () => {
       const boletaMock = { ventaId: 'venta-1', items: [] };
       ventas.armarBoleta.mockResolvedValue(boletaMock);
 
-      const result = await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
-        garzonId: GARZON,
-        pin: PIN,
-        pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
-      });
+      const result = await service.cerrarCuenta(
+        TENANT,
+        USUARIO,
+        CUENTA,
+        {
+          garzonId: GARZON,
+          pin: PIN,
+          pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
+        },
+        CLAVE,
+      );
 
       // `manager` y no `db`/`this.db`: la boleta se arma DENTRO de la misma
       // transacción, para leer la venta recién insertada sin esperar el commit.
@@ -3208,11 +3241,17 @@ describe('SalonesService', () => {
       manager.query.mockResolvedValue([]);
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
 
-      await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
-        garzonId: GARZON,
-        pin: PIN,
-        pagos: [{ metodoPagoId: 'mp-1', monto: '1500' }],
-      });
+      await service.cerrarCuenta(
+        TENANT,
+        USUARIO,
+        CUENTA,
+        {
+          garzonId: GARZON,
+          pin: PIN,
+          pagos: [{ metodoPagoId: 'mp-1', monto: '1500' }],
+        },
+        CLAVE,
+      );
 
       // El snapshot del combo viaja VERBATIM por el canal interno: no se
       // desarma ni se vuelve a resolver.
@@ -3248,11 +3287,17 @@ describe('SalonesService', () => {
       manager.query.mockResolvedValue([]);
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
 
-      await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
-        garzonId: GARZON,
-        pin: PIN,
-        pagos: [{ metodoPagoId: 'mp-1', monto: '500' }],
-      });
+      await service.cerrarCuenta(
+        TENANT,
+        USUARIO,
+        CUENTA,
+        {
+          garzonId: GARZON,
+          pin: PIN,
+          pagos: [{ metodoPagoId: 'mp-1', monto: '500' }],
+        },
+        CLAVE,
+      );
 
       // Las unidades del extra sobreviven porque el snapshot viaja entero, no
       // reconstruido: antes se re-armaba campo por campo y perderlas era un
@@ -3282,14 +3327,20 @@ describe('SalonesService', () => {
       manager.query.mockResolvedValue([]);
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-2' });
 
-      await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
-        garzonId: GARZON,
-        pin: PIN,
-        propinaMonto: '1500',
-        propinaSugerida: '1200',
-        propinaPorcentajeSugerido: '0.10',
-        pagos: [{ metodoPagoId: 'mp-1', monto: '11500' }],
-      });
+      await service.cerrarCuenta(
+        TENANT,
+        USUARIO,
+        CUENTA,
+        {
+          garzonId: GARZON,
+          pin: PIN,
+          propinaMonto: '1500',
+          propinaSugerida: '1200',
+          propinaPorcentajeSugerido: '0.10',
+          pagos: [{ metodoPagoId: 'mp-1', monto: '11500' }],
+        },
+        CLAVE,
+      );
 
       expect(ventas.crearEnTransaccion).toHaveBeenCalledWith(
         manager,
@@ -3334,12 +3385,18 @@ describe('SalonesService', () => {
         tipoGarzon: TipoGarzon.COCINA,
       });
 
-      await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
-        garzonId: GARZON,
-        pin: PIN,
-        propinaMonto: '500',
-        pagos: [{ metodoPagoId: 'mp-1', monto: '4000' }],
-      });
+      await service.cerrarCuenta(
+        TENANT,
+        USUARIO,
+        CUENTA,
+        {
+          garzonId: GARZON,
+          pin: PIN,
+          propinaMonto: '500',
+          pagos: [{ metodoPagoId: 'mp-1', monto: '4000' }],
+        },
+        CLAVE,
+      );
 
       expect(ventas.crearEnTransaccion).toHaveBeenCalledWith(
         manager,
@@ -3369,11 +3426,17 @@ describe('SalonesService', () => {
       manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
 
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
-          garzonId: GARZON,
-          pin: PIN,
-          propinaMonto: '-1',
-        }),
+        service.cerrarCuenta(
+          TENANT,
+          USUARIO,
+          CUENTA,
+          {
+            garzonId: GARZON,
+            pin: PIN,
+            propinaMonto: '-1',
+          },
+          CLAVE,
+        ),
       ).rejects.toThrow(BadRequestException);
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
@@ -3401,11 +3464,17 @@ describe('SalonesService', () => {
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
 
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
-          garzonId: GARZON,
-          pin: PIN,
-          ...extra,
-        }),
+        service.cerrarCuenta(
+          TENANT,
+          USUARIO,
+          CUENTA,
+          {
+            garzonId: GARZON,
+            pin: PIN,
+            ...extra,
+          },
+          CLAVE,
+        ),
       ).rejects.toThrow('Propina inválida');
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
@@ -3420,10 +3489,16 @@ describe('SalonesService', () => {
       manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
 
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
-          garzonId: GARZON,
-          pin: PIN,
-        }),
+        service.cerrarCuenta(
+          TENANT,
+          USUARIO,
+          CUENTA,
+          {
+            garzonId: GARZON,
+            pin: PIN,
+          },
+          CLAVE,
+        ),
       ).rejects.toThrow(BadRequestException);
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
@@ -3435,10 +3510,16 @@ describe('SalonesService', () => {
         ),
       );
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
-          garzonId: GARZON,
-          pin: PIN,
-        }),
+        service.cerrarCuenta(
+          TENANT,
+          USUARIO,
+          CUENTA,
+          {
+            garzonId: GARZON,
+            pin: PIN,
+          },
+          CLAVE,
+        ),
       ).rejects.toThrow(BadRequestException);
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
@@ -3458,7 +3539,13 @@ describe('SalonesService', () => {
       sesiones.buscarSesionAbierta.mockResolvedValue(null);
 
       const err = (await service
-        .cerrarCuenta(TENANT, USUARIO, CUENTA, { garzonId: GARZON, pin: PIN })
+        .cerrarCuenta(
+          TENANT,
+          USUARIO,
+          CUENTA,
+          { garzonId: GARZON, pin: PIN },
+          CLAVE,
+        )
         .catch((e: unknown) => e)) as Error;
 
       expect(err).toBeInstanceOf(BadRequestException);
@@ -3478,10 +3565,16 @@ describe('SalonesService', () => {
       manager.find.mockResolvedValue([]);
 
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
-          garzonId: GARZON,
-          pin: PIN,
-        }),
+        service.cerrarCuenta(
+          TENANT,
+          USUARIO,
+          CUENTA,
+          {
+            garzonId: GARZON,
+            pin: PIN,
+          },
+          CLAVE,
+        ),
       ).rejects.toThrow(BadRequestException);
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
@@ -3494,10 +3587,16 @@ describe('SalonesService', () => {
       });
 
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
-          garzonId: GARZON,
-          pin: PIN,
-        }),
+        service.cerrarCuenta(
+          TENANT,
+          USUARIO,
+          CUENTA,
+          {
+            garzonId: GARZON,
+            pin: PIN,
+          },
+          CLAVE,
+        ),
       ).rejects.toThrow(BadRequestException);
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
@@ -3782,11 +3881,17 @@ describe('SalonesService', () => {
       });
 
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
-          garzonId: GARZON,
-          pin: PIN,
-          pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
-        }),
+        service.cerrarCuenta(
+          TENANT,
+          USUARIO,
+          CUENTA,
+          {
+            garzonId: GARZON,
+            pin: PIN,
+            pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
+          },
+          CLAVE,
+        ),
       ).rejects.toThrow(BadRequestException);
 
       const sql = sqls.find((s) => s.includes('eliminado_el IS NOT NULL'));
@@ -4585,6 +4690,87 @@ describe('SalonesService', () => {
       await expect(
         service.confirmarComanda(TENANT, CUENTA, { lineas: [] }),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+  describe('cerrarCuenta — reclamo de idempotencia', () => {
+    const base = {
+      garzonId: GARZON,
+      pin: PIN,
+      pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
+    };
+
+    /** La solicitud con la que `cerrarCuenta` reclama la clave. */
+    async function solicitudDe(dto: typeof base) {
+      idempotencia.ejecutar.mockResolvedValueOnce({ ventaId: 'venta-1' });
+      await service.cerrarCuenta(TENANT, USUARIO, CUENTA, dto, CLAVE);
+      return idempotencia.ejecutar.mock.calls.at(-1)?.[0] as {
+        tenantId: string;
+        usuarioId: string;
+        clave: string;
+        operacion: string;
+        huella: string;
+      };
+    }
+
+    it('reclama con la clave, el usuario del request y la operación cuenta.cerrar', async () => {
+      expect(await solicitudDe(base)).toMatchObject({
+        tenantId: TENANT,
+        usuarioId: USUARIO,
+        clave: CLAVE,
+        operacion: 'cuenta.cerrar',
+      });
+    });
+
+    it('el PIN no mueve la huella: su hash se revertiría por fuerza bruta', async () => {
+      const { huella } = await solicitudDe(base);
+      expect((await solicitudDe({ ...base, pin: '999999' })).huella).toBe(
+        huella,
+      );
+    });
+
+    it('otro garzón u otros pagos son otro cobro', async () => {
+      const { huella } = await solicitudDe(base);
+      expect(
+        (await solicitudDe({ ...base, garzonId: 'otro-garzon' })).huella,
+      ).not.toBe(huella);
+      expect(
+        (
+          await solicitudDe({
+            ...base,
+            pagos: [{ metodoPagoId: 'mp-1', monto: '2000' }],
+          })
+        ).huella,
+      ).not.toBe(huella);
+    });
+
+    it('el turno del garzón se chequea DENTRO del reclamo: una reproducción no lo pide', async () => {
+      // Si el garzón marcó salida entre el cierre que entró y el reintento, el
+      // reintento tiene que reproducir la venta, no rebotar con "no tiene una
+      // sesión de trabajo abierta". Reproducir no escribe nada.
+      sesiones.assertSesionAbierta.mockRejectedValue(
+        new BadRequestException(
+          'El garzón no tiene una sesión de trabajo abierta',
+        ),
+      );
+      idempotencia.ejecutar.mockResolvedValueOnce({
+        ventaId: 'venta-1',
+        repetida: true,
+      });
+
+      await expect(
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, base, CLAVE),
+      ).resolves.toMatchObject({ repetida: true });
+      expect(sesiones.assertSesionAbierta).not.toHaveBeenCalled();
+    });
+
+    it('la credencial se valida ANTES del reclamo: un reintento vuelve a pedir el PIN', async () => {
+      garzones.resolverGarzonActuante.mockRejectedValueOnce(
+        new BadRequestException('PIN incorrecto'),
+      );
+      await expect(
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, base, CLAVE),
+      ).rejects.toThrow(BadRequestException);
+      expect(idempotencia.ejecutar).not.toHaveBeenCalled();
     });
   });
 });
