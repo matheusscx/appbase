@@ -8,7 +8,13 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Db } from '../../common/db/db.service';
-import { zonaHorariaTenant } from '../../common/utils/rango-fecha.util';
+import {
+  bordeFechaSql,
+  bordeHastaSql,
+  diaNegocioTenant,
+  empujarDiaNegocio,
+  type DiaNegocio,
+} from '../../common/utils/rango-fecha.util';
 import { GarzonesService } from '../garzones/garzones.service';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { TurnosService } from './turnos.service';
@@ -294,14 +300,15 @@ export class SesionesGarzonService {
     query: QuerySesionesDto,
   ): Promise<PaginatedResponse<SesionListaItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
-    // La zona solo se consulta si hay filtro de fecha: sin `desde`/`hasta` el
-    // historial no la necesita y sería una query de más en cada listado.
-    const zona =
-      query.desde || query.hasta ? await this.zonaHoraria(tenantId) : null;
+    // El día del negocio solo se consulta si hay filtro de fecha: sin
+    // `desde`/`hasta` el historial no lo necesita y sería una query de más en
+    // cada listado.
+    const dia =
+      query.desde || query.hasta ? await this.diaNegocio(tenantId) : null;
     const { filters, params } = this.buildHistorialFilters(
       tenantId,
       query,
-      zona,
+      dia,
     );
 
     const countRows: { total: number }[] = await this.db.query(
@@ -547,7 +554,8 @@ export class SesionesGarzonService {
   }
 
   /**
-   * Zona horaria del tenant, derivada del país de su provincia.
+   * Día del negocio del tenant (zona + hora de corte), derivado del país de
+   * su provincia.
    *
    * Duplica el JOIN de `propina-reportes.service.ts` (segunda copia; la
    * convención del repo acepta duplicar dos veces). El filtro `eliminado_el` de
@@ -555,12 +563,13 @@ export class SesionesGarzonService {
    * boilerplate, y es justo lo que la entrada de backlog sobre este JOIN
    * advierte que un módulo nuevo puede olvidar.
    */
-  private async zonaHoraria(tenantId: string): Promise<string> {
+  private async diaNegocio(tenantId: string): Promise<DiaNegocio> {
     // Antes esta consulta estaba copiada acá, byte a byte. Se colapsó contra
     // `zonaHorariaTenant` el 2026-08-23, al corregir que la zona sale de la
     // PROVINCIA y no del país: con tres copias, arreglar una sola dejaba
-    // módulos leyendo zonas distintas.
-    return zonaHorariaTenant(this.db, tenantId);
+    // módulos leyendo zonas distintas. Pasó a `diaNegocioTenant` el
+    // 2026-09-18 (Task 2 de `hora-de-corte`), al sumarle la hora de corte.
+    return diaNegocioTenant(this.db, tenantId);
   }
 
   /**
@@ -569,24 +578,27 @@ export class SesionesGarzonService {
    * castea la fecha a **medianoche**, así que `<= hasta` excluía el día entero:
    * "Desde hoy / Hasta hoy" no devolvía **ninguna** sesión.
    *
-   * Se interpretan en la **zona del tenant** y `hasta` es inclusivo del día
-   * completo (`< hasta + 1 día`). ⚠️ Esta frase decía hasta el 2026-08-22 que
-   * seguía "el patrón que `propina-reportes` ya usa": **no es cierto** —
-   * `propina-reportes` filtra `< hasta` sin sumar el día, y quien compensa es su
-   * llamador. El patrón bueno era éste, y desde el 2026-08-22 vive en
-   * `common/utils/rango-fecha.util.ts` → `bordeHastaSql`, que es lo que usan
-   * kardex, mermas y órdenes. Este método mantiene su SQL propio porque arma los
-   * params con otro esquema de índices. La zona importa acá más que en un reporte
-   * de oficina: con el cast en UTC, un tenant en Chile perdía las sesiones
-   * entre las 20:00 y la medianoche local, que es cuando trabaja un
-   * restaurante.
+   * Se interpretan en el **día del negocio del tenant** (zona + hora de
+   * corte) y `hasta` es inclusivo del día completo. Desde el 2026-09-18
+   * (Task 2 de `hora-de-corte`) el SQL propio que tenía este método se
+   * reemplazó por `bordeFechaSql`/`bordeHastaSql` de
+   * `common/utils/rango-fecha.util.ts` —las mismas que usan kardex, mermas y
+   * órdenes—, que ya entienden el corte; antes de esa fecha este método tenía
+   * su propio molde `$n::date::timestamp AT TIME ZONE $z` porque arma los
+   * params con otro esquema de índices, y esa diferencia de índices sigue
+   * viva. La zona importa acá más que en un reporte de oficina: con el cast
+   * en UTC, un tenant en Chile perdía las sesiones entre las 20:00 y la
+   * medianoche local, que es cuando trabaja un restaurante.
    *
-   * Si `zonaHoraria` es `null` es porque no hay filtro de fecha que resolver.
+   * Si `dia` es `null` es porque no hay filtro de fecha que resolver. Ya no
+   * hay un `throw` propio para el caso "filtro sin día resuelto": lo cubre
+   * `exigirIdx` dentro de `bordeFechaSql`/`bordeHastaSql` (el `null` solo
+   * puede llegar acá si `historial()` deja de resolverlo antes de llamar).
    */
   private buildHistorialFilters(
     tenantId: string,
     query: QuerySesionesDto,
-    zonaHoraria: string | null,
+    dia: DiaNegocio | null,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let paramIdx = 2;
@@ -605,24 +617,22 @@ export class SesionesGarzonService {
       params.push(query.estado);
     }
     if (query.desde || query.hasta) {
-      if (zonaHoraria === null) {
-        // Fail-fast: con `null` los filtros se descartarían en silencio y el
-        // endpoint devolvería MÁS filas de las pedidas. Hoy `historial()` no
-        // puede llegar acá; el assert es para que un refactor tampoco pueda.
-        throw new Error(
-          'buildHistorialFilters: hay filtro de fecha sin zona horaria resuelta',
-        );
-      }
-      const zonaIdx = paramIdx++;
-      params.push(zonaHoraria);
+      const idxDia = dia ? empujarDiaNegocio(params, dia) : null;
+      paramIdx = params.length + 1;
       if (query.desde) {
-        filters += ` AND s.inicio_el >= ($${paramIdx}::date::timestamp AT TIME ZONE $${zonaIdx})`;
         params.push(query.desde);
+        filters += bordeFechaSql(
+          's.inicio_el',
+          '>=',
+          query.desde,
+          paramIdx,
+          idxDia,
+        );
         paramIdx++;
       }
       if (query.hasta) {
-        filters += ` AND s.inicio_el < (($${paramIdx}::date + 1)::timestamp AT TIME ZONE $${zonaIdx})`;
         params.push(query.hasta);
+        filters += bordeHastaSql('s.inicio_el', query.hasta, paramIdx, idxDia);
         paramIdx++;
       }
     }

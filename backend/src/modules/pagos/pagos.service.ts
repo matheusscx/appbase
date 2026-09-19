@@ -9,8 +9,11 @@ import { Db } from '../../common/db/db.service';
 import {
   bordeFechaSql,
   bordeHastaSql,
-  requiereZonaTenant,
+  diaNegocioTenant,
+  empujarDiaNegocio,
+  requiereDiaNegocio,
   zonaHorariaTenant,
+  type DiaNegocio,
 } from '../../common/utils/rango-fecha.util';
 import { CajaService } from '../caja/caja.service';
 import { EstadoVenta } from '../ventas/entities/venta.entity';
@@ -569,15 +572,15 @@ export class PagosService {
   ): Promise<PaginatedResponse<PagoListItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
     // Solo si hay borde de fecha que expandir: ver `rango-fecha.util.ts`.
-    const zona = requiereZonaTenant(query.fechaDesde, query.fechaHasta)
-      ? await zonaHorariaTenant(this.db, tenantId)
+    const dia = requiereDiaNegocio(query.fechaDesde, query.fechaHasta)
+      ? await diaNegocioTenant(this.db, tenantId)
       : null;
     const { filters, params } = this.buildListarFilters(
       tenantId,
       query,
       usuarioId,
       verTodas,
-      zona,
+      dia,
     );
 
     const countRows: { total: number }[] = await this.db.query(
@@ -646,7 +649,7 @@ export class PagosService {
     query: QueryPagosDto,
     usuarioId: string,
     verTodas: boolean,
-    zona: string | null,
+    dia: DiaNegocio | null,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let paramIdx = 2;
@@ -660,14 +663,12 @@ export class PagosService {
       filters += this.filtroDeMisCajas(paramIdx++);
     }
 
-    // Fecha pura = medianoche LOCAL del tenant y `hasta` inclusivo del día;
-    // un timestamp se respeta tal cual. La zona solo viaja si algún borde la
-    // usa: Postgres rechaza un parámetro que la consulta no referencia.
-    let idxZona = 0;
-    if (zona != null) {
-      params.push(zona);
-      idxZona = paramIdx++;
-    }
+    // Fecha pura = inicio del día del negocio del tenant y `hasta` inclusivo
+    // del día; un timestamp se respeta tal cual. Zona y corte solo viajan si
+    // algún borde los usa: Postgres rechaza un parámetro que la consulta no
+    // referencia.
+    const idxDia = dia ? empujarDiaNegocio(params, dia) : null;
+    paramIdx = params.length + 1;
     if (query.fechaDesde) {
       params.push(query.fechaDesde);
       filters += bordeFechaSql(
@@ -675,17 +676,12 @@ export class PagosService {
         '>=',
         query.fechaDesde,
         paramIdx++,
-        idxZona,
+        idxDia,
       );
     }
     if (query.fechaHasta) {
       params.push(query.fechaHasta);
-      filters += bordeHastaSql(
-        'p.fecha',
-        query.fechaHasta,
-        paramIdx++,
-        idxZona,
-      );
+      filters += bordeHastaSql('p.fecha', query.fechaHasta, paramIdx++, idxDia);
     }
     if (query.metodoPagoId) {
       filters += ` AND p.metodo_pago_id = $${paramIdx++}`;

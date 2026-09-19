@@ -39,7 +39,9 @@ import {
 import {
   bordeFechaSql,
   bordeHastaSql,
-  requiereZonaTenant,
+  diaNegocioTenant,
+  empujarDiaNegocio,
+  requiereDiaNegocio,
   zonaHorariaTenant,
 } from '../../common/utils/rango-fecha.util';
 
@@ -1611,16 +1613,12 @@ export class CajaService {
     query: QueryTendenciaDescuadresDto,
   ): Promise<TendenciaDescuadresItem[]> {
     // Solo si hay borde de fecha que expandir: ver `rango-fecha.util.ts`.
-    const zona = requiereZonaTenant(query.desde, query.hasta)
-      ? await zonaHorariaTenant(this.db, tenantId)
+    const dia = requiereDiaNegocio(query.desde, query.hasta)
+      ? await diaNegocioTenant(this.db, tenantId)
       : null;
 
     const params: unknown[] = [tenantId];
-    let idxZona = 0;
-    if (zona != null) {
-      params.push(zona);
-      idxZona = params.length;
-    }
+    const idxDia = dia ? empujarDiaNegocio(params, dia) : null;
 
     let filtros = '';
     if (query.desde) {
@@ -1630,7 +1628,7 @@ export class CajaService {
         '>=',
         query.desde,
         params.length,
-        idxZona,
+        idxDia,
       );
     }
     if (query.hasta) {
@@ -1639,7 +1637,7 @@ export class CajaService {
         COLUMNA_VENTANA,
         query.hasta,
         params.length,
-        idxZona,
+        idxDia,
       );
     }
 

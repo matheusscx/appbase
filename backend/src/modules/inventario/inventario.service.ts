@@ -26,8 +26,10 @@ import type { AjusteCostoDto } from './dto/ajuste-costo.dto';
 import {
   bordeFechaSql,
   bordeHastaSql,
-  requiereZonaTenant,
-  zonaHorariaTenant,
+  diaNegocioTenant,
+  empujarDiaNegocio,
+  requiereDiaNegocio,
+  type DiaNegocio,
 } from '../../common/utils/rango-fecha.util';
 
 export interface SerieInput {
@@ -1512,15 +1514,15 @@ export class InventarioService {
     query: FindMovimientosDto,
   ): Promise<PaginatedResponse<MovimientoListItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
-    // La zona solo se consulta si hay filtro de fecha: sin bordes que expandir
-    // es una query de más en el listado más caliente del módulo.
-    const zona = requiereZonaTenant(query.desde, query.hasta)
-      ? await zonaHorariaTenant(this.db, tenantId)
+    // El día del negocio solo se consulta si hay filtro de fecha: sin bordes
+    // que expandir es una query de más en el listado más caliente del módulo.
+    const dia = requiereDiaNegocio(query.desde, query.hasta)
+      ? await diaNegocioTenant(this.db, tenantId)
       : null;
     const { filters, params } = this.buildMovimientosFilters(
       tenantId,
       query,
-      zona,
+      dia,
     );
 
     // Lo que está en el kardex queda en el kardex: el JOIN no filtra
@@ -1584,18 +1586,14 @@ export class InventarioService {
   private buildMovimientosFilters(
     tenantId: string,
     query: FindMovimientosDto,
-    zona: string | null,
+    dia: DiaNegocio | null,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let filters = '';
 
-    // La zona ocupa una posición fija apenas hay algún borde de fecha: los dos
-    // bordes la comparten.
-    let idxZona = 0;
-    if (zona != null) {
-      params.push(zona);
-      idxZona = params.length;
-    }
+    // La zona y el corte ocupan una posición fija apenas hay algún borde de
+    // fecha: los dos bordes la comparten.
+    const idxDia = dia ? empujarDiaNegocio(params, dia) : null;
 
     if (query.itemId) {
       params.push(query.itemId);
@@ -1616,7 +1614,7 @@ export class InventarioService {
         '>=',
         query.desde,
         params.length,
-        idxZona,
+        idxDia,
       );
     }
     if (query.hasta) {
@@ -1625,7 +1623,7 @@ export class InventarioService {
         'mv.creado_el',
         query.hasta,
         params.length,
-        idxZona,
+        idxDia,
       );
     }
 

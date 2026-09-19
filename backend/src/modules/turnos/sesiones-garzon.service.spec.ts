@@ -608,7 +608,9 @@ describe('SesionesGarzonService', () => {
   // nada explote.
   it('los filtros se numeran DESPUÉS del tenant, y sus valores viajan en orden', async () => {
     dataSource.query
-      .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+      .mockResolvedValueOnce([
+        { zona_horaria: 'America/Santiago', hora_corte: 0 },
+      ])
       .mockResolvedValueOnce([{ total: 0 }])
       .mockResolvedValueOnce([]);
 
@@ -620,7 +622,7 @@ describe('SesionesGarzonService', () => {
       hasta: '2026-08-31',
     });
 
-    // La primera query es la de la zona horaria; después van count y listado.
+    // La primera query es la del día del negocio; después van count y listado.
     const [countSql, countParams] = dataSource.query.mock.calls[1] as [
       string,
       unknown[],
@@ -628,12 +630,13 @@ describe('SesionesGarzonService', () => {
     expect(countSql).toContain('s.garzon_id = $2');
     expect(countSql).toContain('s.turno_id = $3');
     expect(countSql).toContain('s.estado = $4');
-    // $5 es la zona; las fechas van después y se castean a día del tenant.
+    // $5 es la zona y $6 el corte; las fechas van después y se castean al
+    // inicio del día del negocio.
     expect(countSql).toContain(
-      's.inicio_el >= ($6::date::timestamp AT TIME ZONE $5)',
+      's.inicio_el >= ((($7::date)::timestamp + make_interval(hours => $6::int)) AT TIME ZONE $5)',
     );
     expect(countSql).toContain(
-      's.inicio_el < (($7::date + 1)::timestamp AT TIME ZONE $5)',
+      's.inicio_el < ((($8::date + 1)::timestamp + make_interval(hours => $6::int)) AT TIME ZONE $5)',
     );
     expect(countParams).toEqual([
       TENANT,
@@ -641,6 +644,7 @@ describe('SesionesGarzonService', () => {
       TURNO_ID,
       EstadoSesionGarzon.CERRADA,
       'America/Santiago',
+      0, // hora_corte
       '2026-08-01',
       '2026-08-31',
     ]);
@@ -651,16 +655,18 @@ describe('SesionesGarzonService', () => {
       string,
       unknown[],
     ];
-    expect(listSql).toContain('LIMIT $8');
-    expect(listSql).toContain('OFFSET $9');
-    expect(listParams).toHaveLength(9);
+    expect(listSql).toContain('LIMIT $9');
+    expect(listSql).toContain('OFFSET $10');
+    expect(listParams).toHaveLength(10);
   });
 
   it('"Hasta hoy" incluye el día completo, no corta en medianoche', async () => {
     // El bug: `<= '2026-08-07'` castea a medianoche y excluye TODO el día, así
     // que "Desde hoy / Hasta hoy" devolvía la lista vacía.
     dataSource.query
-      .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+      .mockResolvedValueOnce([
+        { zona_horaria: 'America/Santiago', hora_corte: 0 },
+      ])
       .mockResolvedValueOnce([{ total: 0 }])
       .mockResolvedValueOnce([]);
 
@@ -670,7 +676,9 @@ describe('SesionesGarzonService', () => {
     });
 
     const [sql] = dataSource.query.mock.calls[1] as [string, unknown[]];
-    expect(sql).toContain('+ 1)::timestamp AT TIME ZONE');
+    expect(sql).toMatch(
+      /::date \+ 1\)::timestamp \+ make_interval\(hours => \$\d+::int\)\) AT TIME ZONE/,
+    );
     expect(sql).not.toMatch(/s\.inicio_el <= \$/);
   });
 
@@ -679,7 +687,9 @@ describe('SesionesGarzonService', () => {
     // los pinche, esa afirmación es más fuerte que su evidencia: el mutante que
     // los borra pasaba la suite entera.
     dataSource.query
-      .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+      .mockResolvedValueOnce([
+        { zona_horaria: 'America/Santiago', hora_corte: 0 },
+      ])
       .mockResolvedValueOnce([{ total: 0 }])
       .mockResolvedValueOnce([]);
 

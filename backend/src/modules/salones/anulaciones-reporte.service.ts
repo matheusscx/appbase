@@ -10,8 +10,10 @@ import {
 import {
   bordeFechaSql,
   bordeHastaSql,
-  requiereZonaTenant,
-  zonaHorariaTenant,
+  diaNegocioTenant,
+  empujarDiaNegocio,
+  requiereDiaNegocio,
+  type DiaNegocio,
 } from '../../common/utils/rango-fecha.util';
 import { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
 import { FindAnulacionesDto } from './dto/find-anulaciones.dto';
@@ -212,10 +214,10 @@ export class AnulacionesReporteService {
   ): Promise<PaginatedResponse<AnulacionReporteItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
     // Solo si hay borde de fecha que expandir: ver `rango-fecha.util.ts`.
-    const zona = requiereZonaTenant(query.desde, query.hasta)
-      ? await zonaHorariaTenant(this.db, tenantId)
+    const dia = requiereDiaNegocio(query.desde, query.hasta)
+      ? await diaNegocioTenant(this.db, tenantId)
       : null;
-    const { filters, params } = this.buildFilters(tenantId, query, zona);
+    const { filters, params } = this.buildFilters(tenantId, query, dia);
 
     const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total ${JOINS_BASE}
@@ -265,22 +267,18 @@ export class AnulacionesReporteService {
    * `JOINS_BASE`). Compartido por `findAll` (`FindAnulacionesDto`, rango
    * opcional) y `resumen` (`ResumenAnulacionesDto`, rango obligatorio, Task
    * 3) vía `FiltrosAnulacionesQuery` — el tipo de `query` acá es esa
-   * interfaz, no ninguno de los dos DTOs concretos. `zona` ya viene resuelta
+   * interfaz, no ninguno de los dos DTOs concretos. `dia` ya viene resuelto
    * por el llamador.
    */
   private buildFilters(
     tenantId: string,
     query: FiltrosAnulacionesQuery,
-    zona: string | null,
+    dia: DiaNegocio | null,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let filters = '';
 
-    let idxZona = 0;
-    if (zona != null) {
-      params.push(zona);
-      idxZona = params.length;
-    }
+    const idxDia = dia ? empujarDiaNegocio(params, dia) : null;
 
     if (query.tipo) {
       params.push(query.tipo);
@@ -301,7 +299,7 @@ export class AnulacionesReporteService {
         '>=',
         query.desde,
         params.length,
-        idxZona,
+        idxDia,
       );
     }
     if (query.hasta) {
@@ -310,7 +308,7 @@ export class AnulacionesReporteService {
         'cla.creado_el',
         query.hasta,
         params.length,
-        idxZona,
+        idxDia,
       );
     }
 
@@ -416,10 +414,10 @@ export class AnulacionesReporteService {
     // fix 1, hallazgo de la revisión de seguridad).
     this.validarRangoResumen(query.desde, query.hasta);
 
-    const zona = requiereZonaTenant(query.desde, query.hasta)
-      ? await zonaHorariaTenant(this.db, tenantId)
+    const dia = requiereDiaNegocio(query.desde, query.hasta)
+      ? await diaNegocioTenant(this.db, tenantId)
       : null;
-    const { filters, params } = this.buildFilters(tenantId, query, zona);
+    const { filters, params } = this.buildFilters(tenantId, query, dia);
 
     const rows: ResumenBaseRow[] = await this.db.query(
       `SELECT

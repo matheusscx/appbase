@@ -3,10 +3,13 @@ import { NotFoundException } from '@nestjs/common';
 import {
   bordeFechaSql,
   bordeHastaSql,
+  diaNegocioEnZona,
+  diaNegocioTenant,
+  empujarDiaNegocio,
   esFechaPura,
   fechaLocalTenant,
   instanteLocalTenant,
-  requiereZonaTenant,
+  requiereDiaNegocio,
   zonaHorariaTenant,
 } from './rango-fecha.util';
 
@@ -30,21 +33,21 @@ describe('rango-fecha.util', () => {
 
   // No es una optimización: Postgres rechaza el bind si se pasa un parámetro que
   // la consulta no referencia. Con los dos bordes en timestamp, el SQL no nombra
-  // la zona, así que pasarla igual tira un 500 — lo cazó el e2e.
-  describe('requiereZonaTenant', () => {
-    it('la pide si algún borde es fecha pura', () => {
-      expect(requiereZonaTenant('2026-08-01', undefined)).toBe(true);
-      expect(requiereZonaTenant(undefined, '2026-08-31')).toBe(true);
-      expect(requiereZonaTenant('2026-08-01T15:30:00Z', '2026-08-31')).toBe(
+  // ni la zona ni el corte, así que pasarlos igual tira un 500 — lo cazó el e2e.
+  describe('requiereDiaNegocio', () => {
+    it('lo pide si algún borde es fecha pura', () => {
+      expect(requiereDiaNegocio('2026-08-01', undefined)).toBe(true);
+      expect(requiereDiaNegocio(undefined, '2026-08-31')).toBe(true);
+      expect(requiereDiaNegocio('2026-08-01T15:30:00Z', '2026-08-31')).toBe(
         true,
       );
     });
 
-    it('NO la pide si no hay bordes o los dos traen hora', () => {
-      expect(requiereZonaTenant(undefined, undefined)).toBe(false);
-      expect(requiereZonaTenant('', null)).toBe(false);
+    it('NO lo pide si no hay bordes o los dos traen hora', () => {
+      expect(requiereDiaNegocio(undefined, undefined)).toBe(false);
+      expect(requiereDiaNegocio('', null)).toBe(false);
       expect(
-        requiereZonaTenant('2026-08-01T15:30:00Z', '2026-08-31T23:59:59Z'),
+        requiereDiaNegocio('2026-08-01T15:30:00Z', '2026-08-31T23:59:59Z'),
       ).toBe(false);
     });
   });
@@ -62,7 +65,9 @@ describe('rango-fecha.util', () => {
       // `Pacific/Easter`— y esta consulta pasaba POR la provincia para leer
       // `pais.zona_horaria_principal`, salteándose su columna. El nombre
       // "principal" del país ya decía que la provincia manda.
-      const { db, query } = dbConZona([{ zona_horaria: 'Pacific/Easter' }]);
+      const { db, query } = dbConZona([
+        { zona_horaria: 'Pacific/Easter', hora_corte: 0 },
+      ]);
 
       await expect(zonaHorariaTenant(db, TENANT)).resolves.toBe(
         'Pacific/Easter',
@@ -80,7 +85,9 @@ describe('rango-fecha.util', () => {
       // impide resolver la zona de un tenant cuyo país está dado de baja, y hay
       // un test gemelo en `sesiones-garzon.service.spec.ts` que lo exige —
       // nació porque el mutante que borraba estos filtros pasaba la suite.
-      const { db, query } = dbConZona([{ zona_horaria: 'America/Santiago' }]);
+      const { db, query } = dbConZona([
+        { zona_horaria: 'America/Santiago', hora_corte: 0 },
+      ]);
 
       await zonaHorariaTenant(db, TENANT);
 
@@ -97,12 +104,53 @@ describe('rango-fecha.util', () => {
     });
   });
 
+  describe('diaNegocioTenant', () => {
+    const TENANT = 'tenant-uuid';
+
+    function dbConFila(filas: unknown[]) {
+      const query = jest.fn().mockResolvedValue(filas);
+      return { db: { query } as unknown as DataSource, query };
+    }
+
+    it('devuelve { zona, horaCorte } a partir de la fila', async () => {
+      const { db } = dbConFila([
+        { zona_horaria: 'America/Santiago', hora_corte: 5 },
+      ]);
+      await expect(diaNegocioTenant(db, TENANT)).resolves.toEqual({
+        zona: 'America/Santiago',
+        horaCorte: 5,
+      });
+    });
+
+    it('lee t.hora_corte en la cláusula SELECT, no en una mención cualquiera', async () => {
+      // Sobre la cláusula que SELECCIONA, igual que el test de zona de arriba:
+      // un `toContain('t.hora_corte')` lo satisface hasta un comentario.
+      const { db, query } = dbConFila([
+        { zona_horaria: 'America/Santiago', hora_corte: 0 },
+      ]);
+      await diaNegocioTenant(db, TENANT);
+      const [sql] = query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toMatch(
+        /SELECT\s+pr\.zona_horaria\s+AS\s+zona_horaria,\s*\n?\s*t\.hora_corte\s+AS\s+hora_corte/,
+      );
+    });
+
+    it('sin fila es 404, no undefined que reviente más abajo', async () => {
+      const { db } = dbConFila([]);
+      await expect(diaNegocioTenant(db, TENANT)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
   describe('fechaLocalTenant', () => {
     const TENANT = 'tenant-uuid';
 
     function dbConZona(zona: string) {
       return {
-        query: jest.fn().mockResolvedValue([{ zona_horaria: zona }]),
+        query: jest
+          .fn()
+          .mockResolvedValue([{ zona_horaria: zona, hora_corte: 0 }]),
       } as unknown as DataSource;
     }
 
@@ -149,7 +197,9 @@ describe('rango-fecha.util', () => {
 
     function dbConZona(zona: string) {
       return {
-        query: jest.fn().mockResolvedValue([{ zona_horaria: zona }]),
+        query: jest
+          .fn()
+          .mockResolvedValue([{ zona_horaria: zona, hora_corte: 0 }]),
       } as unknown as DataSource;
     }
 
@@ -225,11 +275,19 @@ describe('rango-fecha.util', () => {
     });
   });
 
+  const IDX = { zona: 2, corte: 4 };
+
   describe('bordeFechaSql', () => {
-    it('expande la fecha pura a la medianoche del tenant', () => {
-      expect(bordeFechaSql('mv.creado_el', '>=', '2026-08-01', 3, 2)).toBe(
-        ' AND mv.creado_el >= ($3::date::timestamp AT TIME ZONE $2)',
+    it('expande la fecha pura al inicio del día del negocio: la fecha + el corte, en la zona', () => {
+      expect(bordeFechaSql('mv.creado_el', '>=', '2026-08-01', 3, IDX)).toBe(
+        ' AND mv.creado_el >= ((($3::date)::timestamp + make_interval(hours => $4::int)) AT TIME ZONE $2)',
       );
+    });
+
+    it('fecha pura sin zona ni corte resueltos es un error de programación, no $0', () => {
+      expect(() =>
+        bordeFechaSql('mv.creado_el', '>=', '2026-08-01', 3, null),
+      ).toThrow();
     });
 
     // El corazón de la entrada: `'2026-08-01T15:30:00Z'::date` devuelve
@@ -243,7 +301,7 @@ describe('rango-fecha.util', () => {
         '>=',
         '2026-08-01T15:30:00Z',
         3,
-        2,
+        IDX,
       );
       expect(sql).toBe(' AND mv.creado_el >= $3');
       expect(sql).not.toContain('::date');
@@ -251,8 +309,8 @@ describe('rango-fecha.util', () => {
     });
 
     it('respeta el operador y la columna que le pasan', () => {
-      expect(bordeFechaSql('o.creado_el', '<=', '2026-08-31', 5, 2)).toBe(
-        ' AND o.creado_el <= ($5::date::timestamp AT TIME ZONE $2)',
+      expect(bordeFechaSql('o.creado_el', '<=', '2026-08-31', 5, IDX)).toBe(
+        ' AND o.creado_el <= ((($5::date)::timestamp + make_interval(hours => $4::int)) AT TIME ZONE $2)',
       );
     });
   });
@@ -262,9 +320,9 @@ describe('rango-fecha.util', () => {
   // `<= hasta` dejaba fuera el día entero — "hasta el 16" no mostraba nada del
   // 16. El patrón es el mismo que `sesiones-garzon` ya tenía probado.
   describe('bordeHastaSql', () => {
-    it('la fecha pura incluye el día completo: < día siguiente', () => {
-      expect(bordeHastaSql('mv.creado_el', '2026-08-16', 3, 2)).toBe(
-        ' AND mv.creado_el < (($3::date + 1)::timestamp AT TIME ZONE $2)',
+    it('la fecha pura incluye su día del negocio completo: < inicio del día siguiente', () => {
+      expect(bordeHastaSql('mv.creado_el', '2026-08-16', 3, IDX)).toBe(
+        ' AND mv.creado_el < ((($3::date + 1)::timestamp + make_interval(hours => $4::int)) AT TIME ZONE $2)',
       );
     });
 
@@ -273,15 +331,15 @@ describe('rango-fecha.util', () => {
     // del día. Es la misma razón por la que `bordeFechaSql` no aplica `::date`
     // a un timestamp.
     it('el timestamp pasa tal cual y sigue siendo inclusivo del instante', () => {
-      const sql = bordeHastaSql('mv.creado_el', '2026-08-16T15:30:00Z', 3, 2);
+      const sql = bordeHastaSql('mv.creado_el', '2026-08-16T15:30:00Z', 3, IDX);
       expect(sql).toBe(' AND mv.creado_el <= $3');
       expect(sql).not.toContain('::date');
       expect(sql).not.toContain('+ 1');
     });
 
     it('respeta la columna y los índices de parámetro que le pasan', () => {
-      expect(bordeHastaSql('o.creado_el', '2026-12-31', 5, 4)).toBe(
-        ' AND o.creado_el < (($5::date + 1)::timestamp AT TIME ZONE $4)',
+      expect(bordeHastaSql('o.creado_el', '2026-12-31', 5, IDX)).toBe(
+        ' AND o.creado_el < ((($5::date + 1)::timestamp + make_interval(hours => $4::int)) AT TIME ZONE $2)',
       );
     });
 
@@ -289,9 +347,68 @@ describe('rango-fecha.util', () => {
     // JS. Se fija acá porque es la parte que un refactor podría querer
     // "simplificar" a `hasta 23:59:59`, que se come el último segundo.
     it('no usa el molde 23:59:59, que pierde el último segundo del día', () => {
-      const sql = bordeHastaSql('mv.creado_el', '2026-12-31', 3, 2);
+      const sql = bordeHastaSql('mv.creado_el', '2026-12-31', 3, IDX);
       expect(sql).not.toContain('23:59');
       expect(sql).toContain('::date + 1');
+    });
+  });
+
+  describe('empujarDiaNegocio', () => {
+    it('empuja zona y corte y devuelve sus posiciones 1-based', () => {
+      const params: unknown[] = ['tenant'];
+      expect(
+        empujarDiaNegocio(params, { zona: 'America/Santiago', horaCorte: 5 }),
+      ).toEqual({ zona: 2, corte: 3 });
+      expect(params).toEqual(['tenant', 'America/Santiago', 5]);
+    });
+  });
+
+  describe('diaNegocioEnZona', () => {
+    const SANTIAGO = 'America/Santiago';
+    it('antes del corte es el día anterior; en el corte, el día nuevo', () => {
+      // 2026-09-13 04:59 y 05:00 en Santiago (UTC-3 en septiembre, ya en verano)
+      expect(
+        diaNegocioEnZona(
+          { zona: SANTIAGO, horaCorte: 5 },
+          new Date('2026-09-13T07:59:00Z'),
+        ),
+      ).toBe('2026-09-12');
+      expect(
+        diaNegocioEnZona(
+          { zona: SANTIAGO, horaCorte: 5 },
+          new Date('2026-09-13T08:00:00Z'),
+        ),
+      ).toBe('2026-09-13');
+    });
+
+    it('corte 0 es el calendario local, igual que antes', () => {
+      expect(
+        diaNegocioEnZona(
+          { zona: SANTIAGO, horaCorte: 0 },
+          new Date('2026-09-13T04:30:00Z'),
+        ),
+      ).toBe('2026-09-13');
+    });
+
+    // La noche del salto (00:00 → 01:00 del domingo 2026-09-06). Restar el corte
+    // al INSTANTE y después colapsar daría el sábado; primero a hora local y
+    // después restar da el domingo, que es lo correcto (spec § 5).
+    it('la noche del cambio de horario: domingo 05:30 con corte 5 es domingo', () => {
+      expect(
+        diaNegocioEnZona(
+          { zona: SANTIAGO, horaCorte: 5 },
+          new Date('2026-09-06T08:30:00Z'),
+        ),
+      ).toBe('2026-09-06');
+    });
+
+    it('cruza mes y año con aritmética de calendario', () => {
+      expect(
+        diaNegocioEnZona(
+          { zona: SANTIAGO, horaCorte: 5 },
+          new Date('2027-01-01T05:00:00Z'),
+        ),
+      ).toBe('2026-12-31');
     });
   });
 });

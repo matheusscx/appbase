@@ -5,8 +5,10 @@ import { ESCALA_COSTO } from '../../common/constants/escalas';
 import {
   bordeFechaSql,
   bordeHastaSql,
-  instanteLocalEnZona,
-  zonaHorariaTenant,
+  diaNegocioEnZona,
+  diaNegocioTenant,
+  empujarDiaNegocio,
+  fechaMenosDias,
 } from '../../common/utils/rango-fecha.util';
 import {
   AnulacionesReporteService,
@@ -90,23 +92,6 @@ interface MasVendidoRow {
   monto: string;
 }
 
-/**
- * `fecha` (pura, `YYYY-MM-DD`) menos `dias`, en aritmética de CALENDARIO —no
- * de instante—: `Date.UTC` se usa acá como calculadora de fechas, nunca como
- * instante real. Restar sobre un `Date` construido desde la zona del PROCESO
- * (`new Date(fecha)` + `setDate`) movería el día en algún huso: mismo cuidado
- * que `bordeHastaSql` exige para el borde superior en SQL, llevado al lado
- * TypeScript. La resta se hace acá y no en cada query con `$n::date - 7`
- * porque el mismo valor hace falta como bind param en DOS consultas (ventas y
- * cobrado).
- */
-function fechaMenosDias(fecha: string, dias: number): string {
-  const [anio, mes, dia] = fecha.split('-').map(Number);
-  const d = new Date(Date.UTC(anio, mes - 1, dia));
-  d.setUTCDate(d.getUTCDate() - dias);
-  return d.toISOString().slice(0, 10);
-}
-
 /** `(hoy − semanaPasada) / semanaPasada`, `null` si `semanaPasada` es 0. */
 function calcularVariacion(hoy: Decimal, semanaPasada: Decimal): string | null {
   if (semanaPasada.isZero()) return null;
@@ -122,33 +107,40 @@ export class ResumenNegocioService {
   ) {}
 
   async hoy(tenantId: string): Promise<ResumenNegocioHoy> {
-    // La zona se resuelve UNA sola vez —una consulta— y de ahí salen `fecha` y
-    // la fecha de hace 7 días, las dos en TypeScript sobre la fecha PURA (no
-    // sobre un `Date` en UTC): mismo criterio que `instanteLocalEnZona`
-    // documenta para no repetir el viaje a `tenants` por cada instante que hay
-    // que colapsar. Llamar a `fechaLocalTenant` acá habría vuelto a consultar
-    // la zona por su cuenta, y además esta ruta necesita la zona SUELTA para
-    // pasarla como bind param de `bordeFechaSql`/`bordeHastaSql` en las dos
-    // consultas de abajo.
-    const zona = await zonaHorariaTenant(this.db, tenantId);
-    const fecha = instanteLocalEnZona(zona, new Date()).fecha;
+    // El día del negocio (zona + hora de corte) se resuelve UNA sola vez —una
+    // consulta— y de ahí salen `fecha` y la fecha de hace 7 días, las dos en
+    // TypeScript sobre la fecha PURA (no sobre un `Date` en UTC): mismo
+    // criterio que `diaNegocioEnZona` documenta para no repetir el viaje a
+    // `tenants` por cada instante que hay que colapsar. Llamar a
+    // `fechaLocalTenant` acá habría vuelto a consultar la zona por su cuenta,
+    // y además esta ruta necesita `dia` SUELTO para pasarlo como bind params
+    // de `bordeFechaSql`/`bordeHastaSql` en las dos consultas de abajo.
+    const dia = await diaNegocioTenant(this.db, tenantId);
+    const fecha = diaNegocioEnZona(dia, new Date());
     const fechaSemanaPasada = fechaMenosDias(fecha, 7);
 
     // Posiciones de parámetro compartidas por las dos consultas de rango
-    // (ventas y cobrado): mismo `[tenantId, fecha, zona, fechaSemanaPasada]`.
-    const params: unknown[] = [tenantId, fecha, zona, fechaSemanaPasada];
+    // (ventas y cobrado): mismo
+    // `[tenantId, fecha, dia.zona, fechaSemanaPasada, dia.horaCorte]`.
+    const params: unknown[] = [
+      tenantId,
+      fecha,
+      dia.zona,
+      fechaSemanaPasada,
+      dia.horaCorte,
+    ];
     const IDX_FECHA_HOY = 2;
-    const IDX_ZONA = 3;
+    const IDX_DIA = { zona: 3, corte: 5 };
     const IDX_FECHA_SEMANA_PASADA = 4;
 
     const condicion = (columna: string, idxFecha: number): string =>
       'TRUE' +
-      bordeFechaSql(columna, '>=', fecha, idxFecha, IDX_ZONA) +
-      bordeHastaSql(columna, fecha, idxFecha, IDX_ZONA);
+      bordeFechaSql(columna, '>=', fecha, idxFecha, IDX_DIA) +
+      bordeHastaSql(columna, fecha, idxFecha, IDX_DIA);
     const condicionSemanaPasada = (columna: string, idxFecha: number): string =>
       'TRUE' +
-      bordeFechaSql(columna, '>=', fechaSemanaPasada, idxFecha, IDX_ZONA) +
-      bordeHastaSql(columna, fechaSemanaPasada, idxFecha, IDX_ZONA);
+      bordeFechaSql(columna, '>=', fechaSemanaPasada, idxFecha, IDX_DIA) +
+      bordeHastaSql(columna, fechaSemanaPasada, idxFecha, IDX_DIA);
 
     const condHoyVenta = condicion('v.fecha', IDX_FECHA_HOY);
     const condSemanaPasadaVenta = condicionSemanaPasada(
@@ -282,11 +274,33 @@ export class ResumenNegocioService {
     const mermasHoy = await this.mermasService.resumen(tenantId, fecha, fecha);
 
     // Lo más vendido: los mismos filtros de venta que "vendido" arriba (sin
-    // canceladas, sin nota de crédito, rango de HOY — reusa `condHoyVenta` y
-    // sus mismos binds $2/$3), agregado por ítem. `ORDER BY` sobre la
-    // expresión SUM y no sobre el alias `monto`: el alias sale con `::text`
-    // (para no perder precisión de Decimal en el mapeo), y ordenar por un
-    // texto compararía "9990000" antes que "500" lexicográficamente.
+    // canceladas, sin nota de crédito, rango de HOY), agregado por ítem.
+    // `ORDER BY` sobre la expresión SUM y no sobre el alias `monto`: el alias
+    // sale con `::text` (para no perder precisión de Decimal en el mapeo), y
+    // ordenar por un texto compararía "9990000" antes que "500"
+    // lexicográficamente.
+    //
+    // ⚠️ Lista de params PROPIA, no `params` compartido con ventas/cobrado
+    // (medido 2026-09-19, `QueryFailedError 42P18: could not determine data
+    // type of parameter $4`). Esta consulta solo necesita el rango de HOY:
+    // nunca menciona `fechaSemanaPasada` (`$4` en la lista compartida). El
+    // protocolo extendido de Postgres infiere el tipo de cada parámetro
+    // mirando dónde se USA en el texto — un parámetro que la consulta no
+    // menciona en ningún lado no tiene de dónde inferirlo, y falla, sea la
+    // posición que sea (no solo "la más alta sin usar", como decía el
+    // comentario que esto reemplaza). La regla no es "alcanzar la posición
+    // más alta referenciada": es que CADA `$n` que se manda esté en el texto
+    // y CADA `$n` del texto tenga con qué bindear. `bordeFechaSql`/
+    // `bordeHastaSql` sí toleran huecos en el medio (ver su docblock), pero
+    // eso es sobre los índices que ELLAS arman, no sobre qué le pasás vos a
+    // `db.query` — acá el hueco lo abría `params` completo.
+    const paramsMasVendidos: unknown[] = [tenantId, fecha];
+    const idxDiaMasVendidos = empujarDiaNegocio(paramsMasVendidos, dia);
+    const condHoyVentaMasVendidos =
+      'TRUE' +
+      bordeFechaSql('v.fecha', '>=', fecha, 2, idxDiaMasVendidos) +
+      bordeHastaSql('v.fecha', fecha, 2, idxDiaMasVendidos);
+
     const masVendidosRows: MasVendidoRow[] = await this.db.query(
       `SELECT vd.item_id, i.nombre AS item_nombre,
               SUM(vd.total_linea)::text AS monto,
@@ -308,11 +322,11 @@ export class ResumenNegocioService {
           AND vd.eliminado_el IS NULL
           AND v.estado <> 'cancelada'
           AND COALESCE(td.es_nota_credito, false) = false
-          AND ${condHoyVenta}
+          AND ${condHoyVentaMasVendidos}
         GROUP BY vd.item_id, i.nombre
         ORDER BY SUM(vd.total_linea) DESC, vd.item_id
         LIMIT 5`,
-      [tenantId, fecha, zona],
+      paramsMasVendidos,
     );
 
     const vr = ventasRows[0];

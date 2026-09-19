@@ -2150,7 +2150,9 @@ describe('CajaService', () => {
 
     it('con fecha pura resuelve la zona del tenant y expande el borde superior', async () => {
       dataSource.query
-        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([
+          { zona_horaria: 'America/Santiago', hora_corte: 0 },
+        ])
         .mockResolvedValueOnce([]);
 
       await service.tendenciaDescuadres(TENANT_ID, {
@@ -2162,6 +2164,7 @@ describe('CajaService', () => {
       expect(params).toEqual([
         TENANT_ID,
         'America/Santiago',
+        0, // hora_corte
         '2026-08-01',
         '2026-08-16',
       ]);

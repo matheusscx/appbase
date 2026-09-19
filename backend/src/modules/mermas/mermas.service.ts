@@ -14,8 +14,10 @@ import {
 import {
   bordeFechaSql,
   bordeHastaSql,
-  requiereZonaTenant,
-  zonaHorariaTenant,
+  diaNegocioTenant,
+  empujarDiaNegocio,
+  requiereDiaNegocio,
+  type DiaNegocio,
 } from '../../common/utils/rango-fecha.util';
 import { InventarioService } from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
@@ -287,10 +289,10 @@ export class MermasService {
   ): Promise<PaginatedResponse<MermaListItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
     // Solo si hay borde de fecha que expandir: ver `rango-fecha.util.ts`.
-    const zona = requiereZonaTenant(query.desde, query.hasta)
-      ? await zonaHorariaTenant(this.db, tenantId)
+    const dia = requiereDiaNegocio(query.desde, query.hasta)
+      ? await diaNegocioTenant(this.db, tenantId)
       : null;
-    const { filters, params } = this.buildFilters(tenantId, query, zona);
+    const { filters, params } = this.buildFilters(tenantId, query, dia);
 
     // El `EXISTS` de acá abajo es la condición que EXCLUYE la cortesía, y va
     // en las DOS consultas (COUNT y página) para que el total no se mueva sin
@@ -357,16 +359,12 @@ export class MermasService {
   private buildFilters(
     tenantId: string,
     query: FindMermasDto,
-    zona: string | null,
+    dia: DiaNegocio | null,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let filters = '';
 
-    let idxZona = 0;
-    if (zona != null) {
-      params.push(zona);
-      idxZona = params.length;
-    }
+    const idxDia = dia ? empujarDiaNegocio(params, dia) : null;
 
     if (query.itemId) {
       params.push(query.itemId);
@@ -383,7 +381,7 @@ export class MermasService {
         '>=',
         query.desde,
         params.length,
-        idxZona,
+        idxDia,
       );
     }
     if (query.hasta) {
@@ -392,7 +390,7 @@ export class MermasService {
         'mv.creado_el',
         query.hasta,
         params.length,
-        idxZona,
+        idxDia,
       );
     }
 
@@ -432,32 +430,28 @@ export class MermasService {
     desde: string,
     hasta: string,
   ): Promise<ResumenMermas> {
-    // Mismo criterio que `buildFilters`: solo se resuelve la zona si hace
-    // falta expandir una fecha pura (`requiereZonaTenant`).
-    const zona = requiereZonaTenant(desde, hasta)
-      ? await zonaHorariaTenant(this.db, tenantId)
+    // Mismo criterio que `buildFilters`: solo se resuelve el día del negocio
+    // si hace falta expandir una fecha pura (`requiereDiaNegocio`).
+    const dia = requiereDiaNegocio(desde, hasta)
+      ? await diaNegocioTenant(this.db, tenantId)
       : null;
 
     const params: unknown[] = [tenantId];
-    let idxZona = 0;
-    if (zona != null) {
-      params.push(zona);
-      idxZona = params.length;
-    }
+    const idxDia = dia ? empujarDiaNegocio(params, dia) : null;
     params.push(desde);
     const bordeDesde = bordeFechaSql(
       'mv.creado_el',
       '>=',
       desde,
       params.length,
-      idxZona,
+      idxDia,
     );
     params.push(hasta);
     const bordeHasta = bordeHastaSql(
       'mv.creado_el',
       hasta,
       params.length,
-      idxZona,
+      idxDia,
     );
 
     const rows: ResumenMermaRow[] = await this.db.query(

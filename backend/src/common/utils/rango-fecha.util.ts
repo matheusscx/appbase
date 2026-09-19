@@ -35,40 +35,87 @@ export function esFechaPura(valor: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(valor);
 }
 
+/** Día del negocio del tenant: zona horaria + hora de corte (0-6). */
+export interface DiaNegocio {
+  zona: string;
+  horaCorte: number;
+}
+
+/** Posiciones ($n, 1-based) de zona y corte en la lista de params del llamador. */
+export interface IdxDiaNegocio {
+  zona: number;
+  corte: number;
+}
+
 /**
- * ¿Hay que resolver la zona del tenant para estos bordes?
+ * ¿Hay que resolver el día del negocio del tenant para estos bordes?
  *
  * Solo si alguno es fecha pura: el timestamp no la usa. **No es una
  * optimización, es corrección** — Postgres rechaza el bind con un parámetro que
  * la consulta no referencia (*"bind message supplies N parameters, but prepared
- * statement requires N-1"*), así que pasar la zona "por si acaso" cuando los dos
- * bordes vienen con hora tira un 500. Lo cazó el e2e al filtrar con un timestamp.
+ * statement requires N-1"*), así que pasar la zona/corte "por si acaso" cuando
+ * los dos bordes vienen con hora tira un 500. Lo cazó el e2e al filtrar con un
+ * timestamp.
  */
-export function requiereZonaTenant(
+export function requiereDiaNegocio(
   ...valores: (string | undefined | null)[]
 ): boolean {
   return valores.some((v) => v != null && v !== '' && esFechaPura(v));
 }
 
 /**
+ * Empuja `zona` y `horaCorte` a la lista de params del llamador y devuelve
+ * sus posiciones (`$n`, 1-based) para pasarlas a `bordeFechaSql`/
+ * `bordeHastaSql`/`inicioDiaNegocioSql`.
+ */
+export function empujarDiaNegocio(
+  params: unknown[],
+  dia: DiaNegocio,
+): IdxDiaNegocio {
+  params.push(dia.zona);
+  const zona = params.length;
+  params.push(dia.horaCorte);
+  return { zona, corte: params.length };
+}
+
+/** Instante en que empieza el día del negocio `fechaSql` (una expresión `date`). */
+export function inicioDiaNegocioSql(
+  fechaSql: string,
+  idx: IdxDiaNegocio,
+): string {
+  return `((${fechaSql})::timestamp + make_interval(hours => $${idx.corte}::int)) AT TIME ZONE $${idx.zona}`;
+}
+
+function exigirIdx(idx: IdxDiaNegocio | null): IdxDiaNegocio {
+  if (idx == null) {
+    throw new Error(
+      'rango-fecha: hay una fecha pura sin zona ni corte resueltos (requiereDiaNegocio)',
+    );
+  }
+  return idx;
+}
+
+/**
  * Fragmento SQL para un borde de rango, resolviendo fecha pura vs timestamp.
  *
- * - Fecha pura → `columna >= ($n::date::timestamp AT TIME ZONE $z)`, o sea la
- *   medianoche **local del tenant** de ese día.
+ * - Fecha pura → el inicio del **día del negocio** de esa fecha: la
+ *   medianoche local **más la hora de corte del tenant** (`inicioDiaNegocioSql`).
+ *   Con corte 0 es exactamente la medianoche local de siempre.
  * - Timestamp → `columna >= $n`, tal cual vino: ya trae su instante.
  *
- * `idxValor` e `idxZona` son posiciones de parámetro ya reservadas por el
- * llamador (`$1`-based), porque cada service arma su propia lista.
+ * `idxValor` es la posición de parámetro ya reservada por el llamador
+ * (`$1`-based); `idx` son las de zona/corte (`null` si ningún borde del
+ * llamador es fecha pura — ver `requiereDiaNegocio`).
  */
 export function bordeFechaSql(
   columna: string,
   operador: '>=' | '<=' | '<' | '>',
   valor: string,
   idxValor: number,
-  idxZona: number,
+  idx: IdxDiaNegocio | null,
 ): string {
   return esFechaPura(valor)
-    ? ` AND ${columna} ${operador} ($${idxValor}::date::timestamp AT TIME ZONE $${idxZona})`
+    ? ` AND ${columna} ${operador} (${inicioDiaNegocioSql(`$${idxValor}::date`, exigirIdx(idx))})`
     : ` AND ${columna} ${operador} $${idxValor}`;
 }
 
@@ -99,15 +146,19 @@ export function bordeFechaSql(
  * El precedente probado es `sesiones-garzon.service.ts` →
  * `buildHistorialFilters`, que ya tenía exactamente este SQL por el mismo
  * motivo ("Desde hoy / Hasta hoy" no devolvía ninguna sesión).
+ *
+ * Igual que `bordeFechaSql`, una fecha pura expande al **día del negocio**
+ * (medianoche local + hora de corte): "hasta el 16" incluye el 16 completo
+ * empezando donde el tenant corta su jornada, no a medianoche calendario.
  */
 export function bordeHastaSql(
   columna: string,
   valor: string,
   idxValor: number,
-  idxZona: number,
+  idx: IdxDiaNegocio | null,
 ): string {
   return esFechaPura(valor)
-    ? ` AND ${columna} < (($${idxValor}::date + 1)::timestamp AT TIME ZONE $${idxZona})`
+    ? ` AND ${columna} < (${inicioDiaNegocioSql(`$${idxValor}::date + 1`, exigirIdx(idx))})`
     : ` AND ${columna} <= $${idxValor}`;
 }
 
@@ -133,13 +184,20 @@ export function bordeHastaSql(
  * resolver la zona de un tenant cuyo país está dado de baja, y hay un test que
  * lo exige en `sesiones-garzon.service.spec.ts` —nació porque el mutante que
  * borraba estos filtros pasaba la suite entera—.
+ *
+ * Trae también `hora_corte` (0-6, Task 1 de `hora-de-corte`): la hora del
+ * tenant en que "cambia el día" para reportes y filtros. Vive en la misma
+ * fila de `tenants`, así que sale de la misma consulta y no de una segunda —
+ * ver `diaNegocioTenant`, que es la versión completa; `zonaHorariaTenant`
+ * queda como el subconjunto que solo necesita la zona.
  */
-export async function zonaHorariaTenant(
+export async function diaNegocioTenant(
   db: DataSource | EntityManager | Db,
   tenantId: string,
-): Promise<string> {
-  const rows: { zona_horaria: string }[] = await db.query(
-    `SELECT pr.zona_horaria AS zona_horaria
+): Promise<DiaNegocio> {
+  const rows: { zona_horaria: string; hora_corte: number }[] = await db.query(
+    `SELECT pr.zona_horaria AS zona_horaria,
+            t.hora_corte AS hora_corte
        FROM tenants t
        JOIN provincia pr
          ON pr.provincia_id = t.provincia_id
@@ -154,7 +212,20 @@ export async function zonaHorariaTenant(
   if (!rows[0]?.zona_horaria) {
     throw new NotFoundException('No se encontró la zona horaria del tenant');
   }
-  return rows[0].zona_horaria;
+  return { zona: rows[0].zona_horaria, horaCorte: Number(rows[0].hora_corte) };
+}
+
+/**
+ * La mitad de `diaNegocioTenant` que solo necesita la zona (sin corte): los
+ * llamadores que colapsan un instante a fecha/hora de calendario (`Intl`, más
+ * abajo) no usan el corte, así que no vale la pena que pidan el día del
+ * negocio completo.
+ */
+export async function zonaHorariaTenant(
+  db: DataSource | EntityManager | Db,
+  tenantId: string,
+): Promise<string> {
+  return (await diaNegocioTenant(db, tenantId)).zona;
 }
 
 /**
@@ -252,4 +323,46 @@ export function instanteLocalEnZona(
   }).format(instante);
 
   return { fecha, hora, diaIso: DIA_ISO_POR_WEEKDAY_CORTO[weekdayCorto] };
+}
+
+/**
+ * `fecha` (pura, `YYYY-MM-DD`) menos `dias`, en aritmética de CALENDARIO —no
+ * de instante—: `Date.UTC` se usa acá como calculadora de fechas, nunca como
+ * instante real. Restar sobre un `Date` construido desde la zona del PROCESO
+ * (`new Date(fecha)` + `setDate`) movería el día en algún huso: mismo cuidado
+ * que `bordeHastaSql` exige para el borde superior en SQL, llevado al lado
+ * TypeScript.
+ *
+ * Se movió acá desde `resumen-negocio.service.ts` (2026-09-18, Task 2 de
+ * `hora-de-corte`): `diaNegocioEnZona`, abajo, la necesita para el mismo
+ * cálculo ("hace 7 días" del día del negocio) y no tenía sentido duplicarla.
+ */
+export function fechaMenosDias(fecha: string, dias: number): string {
+  const [anio, mes, dia] = fecha.split('-').map(Number);
+  const d = new Date(Date.UTC(anio, mes - 1, dia));
+  d.setUTCDate(d.getUTCDate() - dias);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * El día del NEGOCIO —no el de calendario— en el que cae un instante, para el
+ * tenant cuyo `DiaNegocio` (zona + corte) ya se resolvió.
+ *
+ * Colapsa primero a hora LOCAL (`instanteLocalEnZona`, DST-correcto vía
+ * `Intl`) y recién ahí resta el corte **sobre la fecha**, no sobre el
+ * instante: restar horas al instante y colapsar después puede aterrizar en el
+ * día de calendario equivocado la noche del cambio de horario (spec § 5 —
+ * medido con el salto del 2026-09-06 en Santiago: restar 5h al instante da
+ * sábado, pero la hora local ya es domingo 00:xx-05:29, que tiene que seguir
+ * siendo domingo).
+ *
+ * Corte 0 es el caso trivial: nunca es menor que la hora, así que el día del
+ * negocio siempre es el de calendario — mismo comportamiento que antes de
+ * esta feature.
+ */
+export function diaNegocioEnZona(dia: DiaNegocio, instante: Date): string {
+  const { fecha, hora } = instanteLocalEnZona(dia.zona, instante);
+  return Number(hora.slice(0, 2)) < dia.horaCorte
+    ? fechaMenosDias(fecha, 1)
+    : fecha;
 }

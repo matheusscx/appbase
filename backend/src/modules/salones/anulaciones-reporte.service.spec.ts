@@ -174,7 +174,9 @@ describe('AnulacionesReporteService', () => {
   describe('findAll — filtros', () => {
     it('tipo, garzonId, motivoBajaId y desde (fecha pura) llegan como parámetros de la cláusula', async () => {
       dbQueryMock
-        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }]) // zonaHorariaTenant
+        .mockResolvedValueOnce([
+          { zona_horaria: 'America/Santiago', hora_corte: 0 },
+        ]) // diaNegocioTenant
         .mockResolvedValueOnce([{ total: 0 }]) // COUNT
         .mockResolvedValueOnce([]); // página (sin filas → sin consulta de costo)
 
@@ -185,22 +187,23 @@ describe('AnulacionesReporteService', () => {
         desde: '2026-09-01',
       });
 
-      // Llamada 0: zonaHorariaTenant. Llamada 1: el COUNT con el WHERE armado
+      // Llamada 0: diaNegocioTenant. Llamada 1: el COUNT con el WHERE armado
       // por `buildFilters` — se afirma sobre la cláusula exacta (no un
       // `toContain` suelto que matchee un comentario del SQL).
       const [countSql, countParams] = dbQueryMock.mock.calls[1] as [
         string,
         unknown[],
       ];
-      expect(countSql).toContain('AND mb.tipo = $3');
-      expect(countSql).toContain('AND cla.garzon_id = $4');
-      expect(countSql).toContain('AND cla.motivo_baja_id = $5');
+      expect(countSql).toContain('AND mb.tipo = $4');
+      expect(countSql).toContain('AND cla.garzon_id = $5');
+      expect(countSql).toContain('AND cla.motivo_baja_id = $6');
       expect(countSql).toContain(
-        'AND cla.creado_el >= ($6::date::timestamp AT TIME ZONE $2)',
+        'AND cla.creado_el >= ((($7::date)::timestamp + make_interval(hours => $3::int)) AT TIME ZONE $2)',
       );
       expect(countParams).toEqual([
         TENANT,
         'America/Santiago',
+        0, // hora_corte
         TipoMotivoBaja.CORTESIA,
         'garzon-uuid',
         'motivo-uuid',
@@ -212,8 +215,8 @@ describe('AnulacionesReporteService', () => {
         string,
         unknown[],
       ];
-      expect(pageSql).toContain('AND mb.tipo = $3');
-      expect(pageParams.slice(0, 6)).toEqual(countParams);
+      expect(pageSql).toContain('AND mb.tipo = $4');
+      expect(pageParams.slice(0, 7)).toEqual(countParams);
     });
   });
 

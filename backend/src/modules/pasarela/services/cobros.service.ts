@@ -32,8 +32,10 @@ import type { PaginatedResponse } from '../../../common/interfaces/paginated-res
 import {
   bordeFechaSql,
   bordeHastaSql,
-  requiereZonaTenant,
-  zonaHorariaTenant,
+  diaNegocioTenant,
+  empujarDiaNegocio,
+  requiereDiaNegocio,
+  type DiaNegocio,
 } from '../../../common/utils/rango-fecha.util';
 import {
   buildPaginationMeta,
@@ -576,13 +578,13 @@ export class CobrosService {
   ): Promise<PaginatedResponse<Record<string, unknown>>> {
     const { page, pageSize, offset } = resolvePagination(query);
     // Solo si hay borde de fecha que expandir: ver `rango-fecha.util.ts`.
-    const zona = requiereZonaTenant(query.fechaDesde, query.fechaHasta)
-      ? await zonaHorariaTenant(this.db, tenantId)
+    const dia = requiereDiaNegocio(query.fechaDesde, query.fechaHasta)
+      ? await diaNegocioTenant(this.db, tenantId)
       : null;
     const { filters, params } = this.buildListarOrdenesFilters(
       tenantId,
       query,
-      zona,
+      dia,
     );
 
     const countRows: { total: number }[] = await this.db.query(
@@ -618,16 +620,12 @@ export class CobrosService {
   private buildListarOrdenesFilters(
     tenantId: string,
     query: QueryOrdenesDto,
-    zona: string | null,
+    dia: DiaNegocio | null,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let filters = '';
 
-    let idxZona = 0;
-    if (zona != null) {
-      params.push(zona);
-      idxZona = params.length;
-    }
+    const idxDia = dia ? empujarDiaNegocio(params, dia) : null;
 
     if (query.estado) {
       params.push(query.estado);
@@ -644,7 +642,7 @@ export class CobrosService {
         '>=',
         query.fechaDesde,
         params.length,
-        idxZona,
+        idxDia,
       );
     }
     if (query.fechaHasta) {
@@ -653,7 +651,7 @@ export class CobrosService {
         'o.creado_el',
         query.fechaHasta,
         params.length,
-        idxZona,
+        idxDia,
       );
     }
     if (query.search) {

@@ -93,6 +93,7 @@ describe('ResumenNegocioService', () => {
    */
   function mockRespuestas(opts: {
     zona?: string;
+    horaCorte?: number;
     ventas?: Partial<VentasRowFixture>;
     cobrado?: Partial<CobradoRowFixture>;
     porCobrar?: Partial<PorCobrarRowFixture>;
@@ -102,7 +103,10 @@ describe('ResumenNegocioService', () => {
   }): void {
     queryMock
       .mockResolvedValueOnce([
-        { zona_horaria: opts.zona ?? 'America/Santiago' },
+        {
+          zona_horaria: opts.zona ?? 'America/Santiago',
+          hora_corte: opts.horaCorte ?? 0,
+        },
       ])
       .mockResolvedValueOnce([
         {
@@ -293,6 +297,7 @@ describe('ResumenNegocioService', () => {
       '2026-09-18',
       'America/Santiago',
       '2026-09-11',
+      0, // hora_corte, IDX_DIA.corte = 5
     ]);
   });
 
@@ -417,6 +422,45 @@ describe('ResumenNegocioService', () => {
       expect(masVendidosSql).toMatch(
         /ORDER BY SUM\(vd\.total_linea\) DESC, vd\.item_id/,
       );
+    });
+
+    // Regresión de `QueryFailedError 42P18: could not determine data type of
+    // parameter $4` (medido 2026-09-19): la consulta de más vendidos pasaba
+    // el `params` COMPARTIDO con ventas/cobrado (5 elementos, con
+    // `fechaSemanaPasada` en $4), pero su SQL nunca menciona `fechaSemanaPasada`
+    // — solo necesita el rango de HOY. Postgres infiere el tipo de cada
+    // parámetro por dónde se USA en el texto; uno que no aparece en ningún
+    // lado no tiene de dónde inferirlo y tira 42P18 en tiempo de ejecución.
+    // Ningún mock de `Db.query` (acá o en cualquier test unitario) ve ese
+    // error: el mock devuelve la fila que se le pida sin mirar los binds. Por
+    // eso esta aserción no compara contra Postgres — reconstruye la MISMA
+    // regla (todo `$n` del SQL tiene que tener un param, y todo param tiene
+    // que estar referenciado en el SQL) desde la string y el array que el
+    // service realmente le mandó a `db.query`, así que sí puede fallar si
+    // vuelve a abrirse un hueco.
+    it('la consulta de más vendidos: cada $n del SQL tiene param, y cada param está referenciado (evita 42P18)', async () => {
+      mockRespuestas({});
+
+      await service.hoy(TENANT);
+
+      const [masVendidosSql, masVendidosParams] = queryMock.mock.calls[4] as [
+        string,
+        unknown[],
+      ];
+      const referenciados = new Set(
+        Array.from(masVendidosSql.matchAll(/\$(\d+)/g)).map((m) =>
+          Number(m[1]),
+        ),
+      );
+      // Dirección 1: ningún `$n` del SQL apunta más allá de lo que se mandó.
+      expect(Math.max(...referenciados)).toBeLessThanOrEqual(
+        masVendidosParams.length,
+      );
+      // Dirección 2: cada posición 1..length aparece en el SQL — ninguna
+      // queda "de adorno" sin que Postgres pueda inferirle un tipo.
+      for (let i = 1; i <= masVendidosParams.length; i++) {
+        expect(referenciados.has(i)).toBe(true);
+      }
     });
   });
 });
