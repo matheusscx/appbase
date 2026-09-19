@@ -199,6 +199,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedItemsAjuste();
     await this.seedPromociones();
     await this.seedTiposDocumentoTributario();
+    await this.seedTiposDocumentoCompra();
     await this.seedRazonesSociales();
     await this.seedUsuarioAdmin();
     await this.seedUsuariosAdicionales();
@@ -212,6 +213,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedRolSupervisorCajas();
     await this.seedRolEncargadoCajas();
     await this.seedRolEncargadoSalon();
+    await this.seedRolEncargadoCompras();
     await this.seedRolSalon();
     await this.seedSalones();
     await this.seedMesas();
@@ -725,6 +727,17 @@ export class SeederService implements OnApplicationBootstrap {
         icono: 'mdi-view-dashboard-outline',
         tieneConfiguracion: false,
       },
+      // Compras (spec `compras-recepcion-design.md` § 5): módulo propio y no
+      // colgado de Inventario, porque el que recibe no es el que paga
+      // (pieza 3) y colgarlo daría compras a todo el que cuenta stock.
+      // Rango 420–440: ver `seedTiposDocumentoCompra`.
+      {
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440432',
+        nombre: 'Compras',
+        url: '/compras',
+        icono: 'mdi-truck',
+        tieneConfiguracion: false,
+      },
     ];
 
     for (const data of modulos) {
@@ -814,6 +827,7 @@ export class SeederService implements OnApplicationBootstrap {
     const ITEMS = '550e8400-e29b-41d4-a716-446655440182';
     const TERCEROS = '550e8400-e29b-41d4-a716-446655440183';
     const RESUMEN_NEGOCIO = '550e8400-e29b-41d4-a716-446655440407';
+    const COMPRAS = '550e8400-e29b-41d4-a716-446655440432';
 
     const entries: Partial<ModuloAppPermiso>[] = [
       {
@@ -1062,6 +1076,29 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppId: SALONES,
         permisoId: VER_TODAS,
       },
+      // Compras (spec `compras-recepcion-design.md` § 5): acciones que ya
+      // existen en el catálogo. `Crear` confirma, `Actualizar` corrige y
+      // `Anular` va aparte porque es la acción que más mueve.
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440433',
+        moduloAppId: COMPRAS,
+        permisoId: LEER,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440434',
+        moduloAppId: COMPRAS,
+        permisoId: CREAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440435',
+        moduloAppId: COMPRAS,
+        permisoId: ACTUALIZAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440436',
+        moduloAppId: COMPRAS,
+        permisoId: ANULAR,
+      },
       // Impresoras (config de impresión térmica: comandas, precuenta, boleta)
       {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440242',
@@ -1303,6 +1340,19 @@ export class SeederService implements OnApplicationBootstrap {
         apellido: 'Salon',
         telefono: '987654348',
         correo: 'encargado.salon@paris.cl',
+        esSuperadmin: false,
+      },
+      // Quien recibe las compras: las cuatro acciones de `Compras` y NO admin.
+      // Cuenta propia para que las suites de otros roles no cambien de
+      // conducta. Ver seedRolEncargadoCompras.
+      {
+        id: '550e8400-e29b-41d4-a716-446655440440',
+        nombreUsuario: 'encargado.compras',
+        contrasena: HASH,
+        nombre: 'Encargado',
+        apellido: 'Compras',
+        telefono: '987654440',
+        correo: 'encargado.compras@paris.cl',
         esSuperadmin: false,
       },
     ];
@@ -1992,6 +2042,20 @@ export class SeederService implements OnApplicationBootstrap {
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440437',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440432', // Paris → Compras
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440438',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440432', // Falabella → Compras
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
     ];
 
     for (const data of entries) {
@@ -2505,6 +2569,7 @@ export class SeederService implements OnApplicationBootstrap {
     const ENCARGADO_PARIS = '550e8400-e29b-41d4-a716-446655440344';
     const GARZON_PIN_PARIS = '550e8400-e29b-41d4-a716-446655440346';
     const ENCARGADO_SALON_PARIS = '550e8400-e29b-41d4-a716-446655440348';
+    const ENCARGADO_COMPRAS_PARIS = '550e8400-e29b-41d4-a716-446655440440';
     const pairs = [
       [ADMIN, PARIS], // superadmin → Paris
       [ADMIN, FALABELLA], // superadmin → Falabella
@@ -2518,6 +2583,7 @@ export class SeederService implements OnApplicationBootstrap {
       [ENCARGADO_PARIS, PARIS], // fuerza cierres, Cajas:Actualizar, no admin → Paris
       [GARZON_PIN_PARIS, PARIS], // fixture exclusiva de garzon-pin.e2e-spec.ts → Paris
       [ENCARGADO_SALON_PARIS, PARIS], // Salones:Actualizar sin ser admin → Paris
+      [ENCARGADO_COMPRAS_PARIS, PARIS], // las cuatro de Compras, no admin → Paris
     ];
 
     for (const [usuarioId, tenantId] of pairs) {
@@ -2907,6 +2973,54 @@ export class SeederService implements OnApplicationBootstrap {
       `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
        VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
       [ENCARGADO_SALON, PARIS, ROL_ID],
+    );
+  }
+
+  /**
+   * El rol de quien recibe mercadería: las cuatro acciones de `Compras`
+   * (spec `compras-recepcion-design.md` § 5) y NO admin del tenant.
+   *
+   * Rol propio y no uno de los "Encargado" que ya existen (`Encargado Cajas`,
+   * `Salones · Encargado`): darle compras a un rol de otro módulo cambiaría
+   * la conducta de las suites que lo usan.
+   */
+  private async seedRolEncargadoCompras(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const ENCARGADO_COMPRAS = '550e8400-e29b-41d4-a716-446655440440';
+    const ROL_ID = '550e8400-e29b-41d4-a716-446655440439';
+    // moduloTenantId para Paris → Compras (definido en seedTenantModulo)
+    const MODULO_TENANT_COMPRAS = '550e8400-e29b-41d4-a716-446655440437';
+    // moduloAppPermiso Compras/Leer, Crear, Actualizar y Anular
+    // (seedModuloAppPermisos)
+    const PERMISOS_COMPRAS = [
+      '550e8400-e29b-41d4-a716-446655440433',
+      '550e8400-e29b-41d4-a716-446655440434',
+      '550e8400-e29b-41d4-a716-446655440435',
+      '550e8400-e29b-41d4-a716-446655440436',
+    ];
+
+    await this.dataSource.query(
+      `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
+       VALUES ($1, $2, 'Compras · Encargado', 'Recibe, corrige y anula compras; no es admin del tenant', false, NOW(), NOW())
+       ON CONFLICT DO NOTHING`,
+      [ROL_ID, PARIS],
+    );
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [ROL_ID, MODULO_TENANT_COMPRAS],
+    );
+    for (const permisoId of PERMISOS_COMPRAS) {
+      await this.dataSource.query(
+        `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [ROL_ID, MODULO_TENANT_COMPRAS, permisoId],
+      );
+    }
+    await this.dataSource.query(
+      `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+       VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [ENCARGADO_COMPRAS, PARIS, ROL_ID],
     );
   }
 
@@ -4688,6 +4802,58 @@ export class SeederService implements OnApplicationBootstrap {
         await this.tipoDocumentoRepo.save({ ...existing, ...data });
       }
     }
+  }
+
+  /**
+   * Los documentos que un local recibe de un proveedor, por país (spec
+   * `compras-recepcion-design.md` § 3.3). Chile con sus códigos del SII; los
+   * demás países solo "Factura" y "Sin documento", sin código, para no
+   * inventar documentos de otro país (el mismo criterio que la nota de crédito
+   * interna de `seedTiposDocumentoTributario`).
+   *
+   * Rango 420–440, reservado por la sesión coordinadora el 2026-09-18: en main
+   * el máximo era 406, y la rama de KPIs (`claude/dashboard-inicio`) toma
+   * 407–409 con margen hasta 419. Medido con `docs/patterns/backend.md` § 8
+   * contra main y las ramas vivas. Lo usan también el módulo Compras (432),
+   * sus permisos (433–436), su contratación (437–438), el rol (439) y el
+   * usuario fixture (440).
+   */
+  private async seedTiposDocumentoCompra(): Promise<void> {
+    const CHILE = '550e8400-e29b-41d4-a716-446655440000';
+    const ARGENTINA = '550e8400-e29b-41d4-a716-446655440372';
+    const COLOMBIA = '550e8400-e29b-41d4-a716-446655440373';
+    const MEXICO = '550e8400-e29b-41d4-a716-446655440374';
+    const uuid = (n: number) =>
+      `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
+
+    const tipos: [string, string, string, string | null, boolean][] = [
+      [uuid(420), CHILE, 'Factura', '33', true],
+      [uuid(421), CHILE, 'Factura exenta', '34', true],
+      [uuid(422), CHILE, 'Factura de compra', '46', true],
+      [uuid(423), CHILE, 'Guía de despacho', '52', true],
+      [uuid(424), CHILE, 'Boleta', '39', true],
+      [uuid(425), CHILE, 'Sin documento', null, false],
+      [uuid(426), ARGENTINA, 'Factura', null, true],
+      [uuid(427), ARGENTINA, 'Sin documento', null, false],
+      [uuid(428), COLOMBIA, 'Factura', null, true],
+      [uuid(429), COLOMBIA, 'Sin documento', null, false],
+      [uuid(430), MEXICO, 'Factura', null, true],
+      [uuid(431), MEXICO, 'Sin documento', null, false],
+    ];
+
+    const valores = tipos
+      .map(
+        (_, i) =>
+          `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, true)`,
+      )
+      .join(', ');
+    await this.dataSource.query(
+      `INSERT INTO tipos_documento_compra
+         (tipo_documento_compra_id, pais_id, nombre, codigo, requiere_folio, activo)
+       VALUES ${valores}
+       ON CONFLICT (tipo_documento_compra_id) DO NOTHING`,
+      tipos.flat(),
+    );
   }
 
   private async seedRazonesSociales(): Promise<void> {

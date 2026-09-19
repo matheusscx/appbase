@@ -164,6 +164,11 @@ import { TrasladosModule } from './modules/traslados/traslados.module';
 import { StockUbicacion } from './modules/items/entities/stock-ubicacion.entity';
 import { LoteUbicacion } from './modules/items/entities/lote-ubicacion.entity';
 import { UbicacionesModule } from './modules/ubicaciones/ubicaciones.module';
+import { Compra } from './modules/compras/entities/compra.entity';
+import { CompraLinea } from './modules/compras/entities/compra-linea.entity';
+import { CompraLineaCambio } from './modules/compras/entities/compra-linea-cambio.entity';
+import { TipoDocumentoCompra } from './modules/compras/entities/tipo-documento-compra.entity';
+import { ComprasModule } from './modules/compras/compras.module';
 
 @Module({
   imports: [
@@ -298,6 +303,10 @@ import { UbicacionesModule } from './modules/ubicaciones/ubicaciones.module';
           StockUbicacion,
           LoteUbicacion,
           Traslado,
+          TipoDocumentoCompra,
+          Compra,
+          CompraLinea,
+          CompraLineaCambio,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -348,6 +357,7 @@ import { UbicacionesModule } from './modules/ubicaciones/ubicaciones.module';
     TrasladosModule,
     ResumenNegocioModule,
     IdempotenciaModule,
+    ComprasModule,
   ],
   controllers: [AppController],
   providers: [AppService],
