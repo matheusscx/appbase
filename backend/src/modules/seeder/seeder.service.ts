@@ -738,6 +738,21 @@ export class SeederService implements OnApplicationBootstrap {
         icono: 'mdi-truck',
         tieneConfiguracion: false,
       },
+      // Reporte de varianza (AVT), primer reporte del módulo de reportes
+      // (spec `2026-09-19-modulo-reportes-varianza-design.md` § 3.2 y § 7.3).
+      // Módulo propio y no un `Reportes` común para todos los reportes: el
+      // guard solo sabe hacer O, nunca Y, así que un permiso compartido haría
+      // que todo reporte futuro le aparezca a quien tiene éste sin que nadie
+      // lo decida. Mismo criterio con el que `Resumen del negocio` salió de
+      // Ventas el 2026-09-18.
+      // Rango 447–460 reservado a este frente.
+      {
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440447',
+        nombre: 'Varianza',
+        url: '/reportes/varianza',
+        icono: 'mdi-scale-balance',
+        tieneConfiguracion: false,
+      },
     ];
 
     for (const data of modulos) {
@@ -828,6 +843,7 @@ export class SeederService implements OnApplicationBootstrap {
     const TERCEROS = '550e8400-e29b-41d4-a716-446655440183';
     const RESUMEN_NEGOCIO = '550e8400-e29b-41d4-a716-446655440407';
     const COMPRAS = '550e8400-e29b-41d4-a716-446655440432';
+    const VARIANZA = '550e8400-e29b-41d4-a716-446655440447';
 
     const entries: Partial<ModuloAppPermiso>[] = [
       {
@@ -1162,6 +1178,14 @@ export class SeederService implements OnApplicationBootstrap {
       {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440408',
         moduloAppId: RESUMEN_NEGOCIO,
+        permisoId: LEER,
+      },
+      // Varianza: solo `Leer`, por el mismo motivo que `Resumen del negocio`
+      // arriba — un reporte se lee y nada más. Las acciones de escritura del
+      // dominio (contar, aplicar un recuento) siguen viviendo en `Inventario`.
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440448',
+        moduloAppId: VARIANZA,
         permisoId: LEER,
       },
     ];
@@ -1905,6 +1929,18 @@ export class SeederService implements OnApplicationBootstrap {
         moduloTenantId: '550e8400-e29b-41d4-a716-446655440409',
         tenantId: '550e8400-e29b-41d4-a716-446655440007',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440407', // Paris → Resumen del negocio
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        // Paris → Varianza (el reporte de AVT).
+        // ⛔ El SEGUNDO tenant NO lo contrata, y eso no es un olvido: es el caso
+        // de 403 de `reportes-varianza.e2e-spec.ts`. `userHasPermiso` mira
+        // `tenant_modulos` también para el rol fijo, así que sin esta asimetría
+        // no habría forma de probar que el borde comercial existe.
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440449',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440447', // Paris → Varianza
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
@@ -2741,14 +2777,20 @@ export class SeederService implements OnApplicationBootstrap {
     // (`GET /items`) para elegir qué contar y para filtrar el kardex. Sin este
     // permiso el rol no puede ni empezar un recuento.
     const MODULO_TENANT_ITEMS = '550e8400-e29b-41d4-a716-446655440202';
+    // moduloTenantId para Paris → Varianza (definido en seedTenantModulo). El
+    // reporte de varianza es lectura de SUPERVISIÓN de inventario: se lo lleva
+    // quien aprueba los recuentos, no quien los cuenta.
+    const MODULO_TENANT_VARIANZA = '550e8400-e29b-41d4-a716-446655440449';
     // moduloAppPermiso IDs (definidos en seedModuloAppPermisos)
     const INVENTARIO_LEER = '550e8400-e29b-41d4-a716-446655440189';
     const INVENTARIO_CREAR = '550e8400-e29b-41d4-a716-446655440190';
     const INVENTARIO_ACTUALIZAR = '550e8400-e29b-41d4-a716-446655440291';
     const ITEMS_LEER = '550e8400-e29b-41d4-a716-446655440192';
+    const VARIANZA_LEER = '550e8400-e29b-41d4-a716-446655440448';
 
     const INV = MODULO_TENANT_INVENTARIO;
     const ITEMS = MODULO_TENANT_ITEMS;
+    const VAR = MODULO_TENANT_VARIANZA;
 
     const roles = [
       {
@@ -2771,6 +2813,14 @@ export class SeederService implements OnApplicationBootstrap {
           { modulo: INV, permiso: INVENTARIO_LEER },
           { modulo: INV, permiso: INVENTARIO_ACTUALIZAR },
           { modulo: ITEMS, permiso: ITEMS_LEER },
+          // El reporte de varianza va a ESTE rol y no al de conteo: mide si lo
+          // contado cierra contra lo que las recetas dicen, o sea revisa el
+          // trabajo del que cuenta. Dárselo al contador lo dejaría
+          // revisándose a sí mismo — el mismo criterio con el que contar y
+          // aplicar ya están separados (`docs/features/recuento-inventario.md`).
+          // Es además el rol con el que corre el e2e de navegador de la
+          // pantalla: probarla como admin taparía un permiso faltante.
+          { modulo: VAR, permiso: VARIANZA_LEER },
         ],
       },
     ];

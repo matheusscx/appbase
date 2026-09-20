@@ -71,12 +71,18 @@ corresponde es que sus tarjetas enlacen al reporte que profundiza cada número, 
 ```
 backend/src/modules/reportes/
   reportes.module.ts              registra el controller y el service de cada reporte
-  dto/rango-reporte.dto.ts        base compartida: desde/hasta + tope de días
   varianza/
     varianza.controller.ts
     varianza.service.ts
     dto/query-varianza.dto.ts
 ```
+
+⚠️ **No hay un DTO base compartido de rango, y la primera versión de esta spec decía que sí**
+(corregido el 2026-09-19, al implementarlo). Con un solo reporte no tendría consumidores:
+`QueryVarianzaDto` no puede extenderlo —el `extends` ya lo ocupa `PaginationQueryDto`— y el
+`/resumen` no existe todavía. Un `extends` que nadie usa es código muerto, que el checklist de
+cierre prohíbe. `desde`/`hasta` suben a `reportes/dto/` cuando exista el **segundo** consumidor;
+hasta entonces cada reporte los declara, con las reglas de la tabla de abajo.
 
 | Aspecto | La regla que el próximo reporte copia | De dónde sale |
 |---|---|---|

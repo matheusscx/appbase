@@ -748,6 +748,46 @@ consultas de liquidación comparan **períodos guardados** (`fecha_desde`/
 
 ---
 
+## 10c. Dónde vive un reporte
+
+Un reporte **de negocio** vive en `src/modules/reportes/<slug>/`, una carpeta por reporte. Un
+listado filtrable que alguien usa mientras opera —buscar una boleta, ver qué se movió, aprobar un
+cierre— **no es un reporte** y se queda en su módulo, aunque tenga filtro de fecha. El criterio
+completo y la clasificación de los que ya existían: `docs/features/modulo-reportes.md`.
+
+```
+src/modules/reportes/
+  reportes.module.ts              registra el controller y el service de cada reporte
+  <slug>/{controller,service,dto/}
+```
+
+⚠️ **No hay —todavía— un DTO base compartido de rango.** Con un solo reporte no tendría
+consumidores, y un `extends` que nadie usa es código muerto. Cuando exista el segundo, `desde`/
+`hasta` suben a `reportes/dto/`; hasta entonces cada reporte los declara con las reglas de abajo.
+
+| Aspecto | La regla | De dónde sale |
+|---|---|---|
+| Rutas | `GET /reportes/<slug>` (listado paginado) y `/reportes/<slug>/resumen` (agregados, sin paginar) | § 10 |
+| Permiso | un `modulo_app` **propio por reporte** (`url: '/reportes/<slug>'`) con permiso `Leer` | `Resumen del negocio` |
+| El día | `diaNegocioTenant` → `requiereDiaNegocio` → `empujarDiaNegocio` → `bordeFechaSql`/**`bordeHastaSql`** | § 10b |
+| Rango | **opcional** en el listado (pagina); **obligatorio con tope de 366 días** en el resumen, que corre sin `LIMIT` | `FindAnulacionesDto` vs `ResumenAnulacionesDto` |
+| Paginación | `PaginationQueryDto` → `resolvePagination` → `COUNT(*)` → `LIMIT/OFFSET` → `PaginatedResponse<T>` | § 10 |
+| Plata | `SUM(ROUND(cantidad * costo_unitario, 4))` agrupado por `items.moneda_id`, **nunca convertida**, con `bool_or(costo_unitario IS NULL)` | `anulaciones-reporte.service.ts` |
+| Módulo Nest | sin entidad ni `forFeature`: los reportes solo **leen** tablas de otros módulos. `Db` y `RbacService` son globales | `ResumenNegocioModule` |
+
+⛔ **Un `modulo_app` sin su fila en `tenant_modulos` da 403 hasta al admin del tenant**
+(`RbacService.userHasPermiso` mira los módulos contratados también para el rol fijo). Es el paso
+que más fácil se olvida al agregar un reporte, y el síntoma —*"no me deja entrar a mí, que soy el
+dueño"*— no apunta al seed. Sembrar un reporte son **cuatro** lugares en `seeder.service.ts`:
+`seedModulosApp`, `seedModuloAppPermisos`, `seedTenantModulo` y el rol que lo va a usar.
+
+⚠️ **Un permiso por reporte, no un `Reportes:Leer` común.** El guard solo sabe hacer **O**, nunca
+**Y** (`requires-permiso.decorator.ts`), así que cada ruta elige un par. Con un permiso compartido,
+el reporte que se agregue dentro de seis meses le aparece a todo el que tenga los de hoy sin que
+nadie lo decida.
+
+---
+
 ## 11. Preferencias de usuario
 
 Preferencias **personales** (UX), distintas de las financieras del tenant.

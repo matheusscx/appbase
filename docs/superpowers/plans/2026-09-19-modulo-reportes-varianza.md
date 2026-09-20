@@ -45,8 +45,13 @@ Valen para **todas** las tareas. Salen de `CLAUDE.md` y de la spec.
   —otra sesión puede haberlo tomado entre que se planifica y que se escribe—:
 
   ```bash
-  grep -rn "550e8400-e29b-41d4-a716-4466554404[4-6][0-9]" backend/src frontend/app docs
+  grep -rn "550e8400-e29b-41d4-a716-4466554404[4-6][0-9]" backend/src backend/test frontend/app
   ```
+
+  ⚠️ **El grep va contra el código, no contra `docs/`.** Esta plan y la spec nombran `…447`–`…449`
+  en prosa, así que incluir `docs/` los devuelve como "ocupados" y el resultado se lee al revés:
+  un ID está tomado cuando lo usa el **seed**, no cuando lo menciona el documento que planea
+  usarlo (medido 2026-09-19, al correr este mismo paso).
 
 ### Entorno del worktree (una sola vez, antes de la Tarea 1)
 
@@ -69,6 +74,18 @@ npm --prefix /Users/m2pro/cmatheus/startup-app/.claude/worktrees/reportes-varian
 ⚠️ El `test:e2e` de la API va contra ese Postgres propio en el 5436, **sin pedir turno**. Cada
 `reset` deja base vacía y **la corrida que vale es la primera**. Playwright y el smoke manual sí
 usan el stack compartido de `docker-compose` y piden turno a la sesión orquestadora.
+
+⛔ **Para correr UNA sola suite, el patrón tiene que incluir `.e2e-spec`** — medido el 2026-09-19:
+
+```bash
+cd backend && npm run test:e2e -- reportes-varianza.e2e-spec
+```
+
+`npm run test:e2e -- reportes-varianza` **no filtra nada**: corre las 85 suites (~6 min). Y la
+causa no es jest, es el nombre del worktree. El patrón se matchea contra la **ruta absoluta**, y
+acá toda ruta empieza con `…/worktrees/reportes-varianza/backend/test/…`, así que el nombre del
+frente matchea todos los archivos. Vale para cualquier worktree bautizado como su feature — y el
+síntoma es engañoso, porque la suite igual pasa: solo tarda veinte veces más.
 
 ### Gate de cierre de cada tarea
 
@@ -150,7 +167,6 @@ completo, y nada más. Todo lo que sigue rellena el service.
 
 **Archivos:**
 - Crear: `backend/src/modules/reportes/reportes.module.ts`
-- Crear: `backend/src/modules/reportes/dto/rango-reporte.dto.ts`
 - Crear: `backend/src/modules/reportes/varianza/varianza.controller.ts`
 - Crear: `backend/src/modules/reportes/varianza/varianza.service.ts`
 - Crear: `backend/src/modules/reportes/varianza/dto/query-varianza.dto.ts`
@@ -163,7 +179,7 @@ completo, y nada más. Todo lo que sigue rellena el service.
 **Interfaces:**
 - Consume: nada.
 - Produce: `VarianzaService.findAll(tenantId, query): Promise<PaginatedResponse<VarianzaFila>>`,
-  la clase `RangoReporteDto` y la ruta `GET /api/reportes/varianza`.
+  los tipos de **Contratos compartidos** y la ruta `GET /api/reportes/varianza`.
 
 **IDs de seed** (consecutivos desde el primero libre):
 
@@ -210,31 +226,22 @@ cd backend && npm run test:e2e -- reportes-varianza
 
 Esperado: FAIL con 404 en los dos casos (la ruta todavía no existe).
 
-- [ ] **Paso 3: el DTO de rango compartido**
+- [ ] **Paso 3: ~~el DTO de rango compartido~~ — NO se crea acá**
 
-`backend/src/modules/reportes/dto/rango-reporte.dto.ts` — la base que **todo** reporte extiende:
+⚠️ **Corregido al ejecutar (2026-09-19), tras el hallazgo del revisor de dominio.** La primera
+versión de este plan creaba `reportes/dto/rango-reporte.dto.ts` como "la base que todo reporte
+extiende". **Nadie la extiende.** `QueryVarianzaDto` no puede —el `extends` ya lo ocupa
+`PaginationQueryDto`— y el `/resumen` no existe hasta la Tarea 6, así que el archivo quedaba
+**cinco tareas sin un solo consumidor**: código muerto, que el checklist de cierre prohíbe.
 
-```ts
-import { IsDateString, IsOptional } from 'class-validator';
+La base sube a `reportes/dto/` **cuando exista el segundo consumidor** (Tarea 6, con
+`ResumenVarianzaDto`). Mientras tanto cada reporte declara sus dos campos, y la convención que
+siguen vive en `docs/patterns/backend.md` § 10c — que es donde el próximo la va a buscar, no en un
+`extends`.
 
-/**
- * Bordes de rango de cualquier reporte del módulo.
- *
- * `@IsDateString()` y no `@Matches(/^\d{4}-\d{2}-\d{2}$/)`: acepta la fecha pura que emite
- * `AppDateInput` **y** un timestamp explícito, y `rango-fecha.util.ts` decide qué hacer con
- * cada forma (`docs/patterns/backend.md` § 10b). El tope de días NO va acá: el listado pagina
- * y no lo necesita; lo exige el DTO del `/resumen`, que corre sin `LIMIT`.
- */
-export class RangoReporteDto {
-  @IsOptional()
-  @IsDateString()
-  desde?: string;
-
-  @IsOptional()
-  @IsDateString()
-  hasta?: string;
-}
-```
+📌 La lección general, por si vuelve a aparecer: **un "scaffold para el futuro" que el plan crea
+por anticipado es código muerto con buena intención.** El plan lo tenía porque planificar invita a
+dibujar la estructura completa; ejecutar la desarma.
 
 - [ ] **Paso 4: el DTO de la query de varianza**
 
@@ -264,8 +271,8 @@ export class QueryVarianzaDto extends PaginationQueryDto {
 }
 ```
 
-⚠️ **No extiende `RangoReporteDto`**: TypeScript no tiene herencia múltiple y la paginación ya
-ocupa el `extends`. Los dos campos se repiten; `RangoReporteDto` queda como la base de los
+⚠️ **Declara `desde`/`hasta` acá, sin clase base**: TypeScript no tiene herencia múltiple y la
+paginación ya ocupa el `extends` (ver el Paso 3). La base compartida nacería como la de los
 reportes **sin** paginación (el `/resumen` de la Tarea 6 sí la extiende). Si un tercer reporte
 necesita las dos, ahí se evalúa un mixin — no antes.
 
@@ -775,7 +782,9 @@ cd backend && npm test -- varianza.service
 
 - [ ] **Paso 3: el DTO del resumen**
 
-`ResumenVarianzaDto extends RangoReporteDto` con `desde`/`hasta` **requeridos** (redeclararlos sin
+**Acá nace la base compartida** (Paso 3 de la Tarea 1 explica por qué no antes): crear
+`reportes/dto/rango-reporte.dto.ts` con `desde`/`hasta` opcionales y `@IsDateString()`, y después
+`ResumenVarianzaDto extends RangoReporteDto` con los dos **requeridos** (redeclararlos sin
 `@IsOptional()`) y la validación del tope de 366 días, con el mismo mensaje que
 `ResumenAnulacionesDto`.
 
