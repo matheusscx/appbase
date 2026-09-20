@@ -40,6 +40,19 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 El arreglo ya está decidido y escrito dentro de la propia entrada: **ninguna necesita una
 respuesta del owner.**
 
+- [ ] **`kardex-secuencia.e2e-spec.ts` cuenta los locks de todo el cluster, no los de su base**
+  (test, medido el 2026-09-20) — su sondeo es
+  `SELECT COUNT(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE
+  '%item_producto%'` (línea ~161), **sin `datname`**. Los otros siete specs que sondean locks
+  —`ajuste-borrado-ubicacion-concurrente`, `traslado-borrado-ubicacion-concurrente`,
+  `sobreventa-concurrente-ubicacion`, `borrado-item-concurrente`, `orden-locks-desfases`,
+  `traslados` y `caja`— ya filtran con `AND datname = current_database()`; este es el único que
+  no. **Por qué importa ahora:** desde `db-aislada.sh` (2026-09-19) cada worktree corre su e2e
+  en **su propio Postgres**, pero los contenedores comparten el daemon y nada impide levantar
+  dos bases en el mismo cluster; sin el filtro, la compuerta de un worktree puede contar los
+  esperadores de otro y dar un verde o un rojo que no son suyos. **El arreglo:** agregarle
+  `AND datname = current_database()`, igual que los otros siete.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sale de esta
