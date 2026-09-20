@@ -79,6 +79,31 @@ respuesta del owner.**
   30 s de Playwright en vez de decir "el primer cobro nunca llegó al servidor". Es la
   convención que ya usan los otros specs con `waitForResponse`, así que no es deuda nueva;
   un `Promise.race` con mensaje propio mejoraría el diagnóstico del día que falle.
+- [ ] **Fecha local armada con `toISOString()`: tercera aparición del mismo error, y
+  `anti-patterns.md` no tiene lugar** (doc, medido 2026-09-19 al cerrar
+  `2026-09-19-residuos-hora-de-corte`, fix round 1). `new Date(y, m, d).toISOString()`
+  pasa por UTC: en un huso POSITIVO la medianoche local cae la tarde anterior en UTC, así
+  que la fecha sale un día antes. Es la TERCERA vez que aparece en el repo, medido
+  archivo:línea:
+  - `frontend/app/composables/useVigenciaRegla.ts:24` — `hoyLocal()`, correcto (arma la
+    fecha por `getFullYear`/`getMonth`/`getDate`).
+  - `frontend/app/composables/usePromociones.ts:119` — `hoyLocal()` duplicado localmente,
+    también correcto.
+  - `frontend/app/composables/usePropinaResumen.ts:19` — `rangoMesActual()`, tenía el bug
+    (`fmt = (d) => d.toISOString().slice(0, 10)`); corregido en esta misma tarea al molde
+    de los otros dos (arma `desde`/`hasta` por componentes locales, con `ahora: Date` como
+    parámetro para que el test fije el "hoy"). Ningún código con el bug queda vivo.
+  El molde correcto ya existe en el repo dos veces antes de este fix: no hace falta
+  diseñar nada nuevo, solo escribirlo en `anti-patterns.md` como corresponde a un "bug de
+  patrón que se repitió" (`CLAUDE.md` § Documentación viva). **Por qué está acá y no
+  ahí:** `anti-patterns.md` mide hoy **24** entradas `### ❌`
+  (`grep -c "^### ❌" docs/agent/anti-patterns.md`), por encima de su propio tope de 20, y
+  su regla 3 exige podar (promover a `✅` lo automatizado, fusionar caras del mismo error,
+  recién entonces borrar la más antigua sin reincidencia) **antes** de sumar una entrada
+  nueva — es trabajo aparte, con criterio propio, no algo para hacer de arrastre en esta
+  tarea. **El arreglo:** cuando se pode a 20, agregar ahí una entrada `### ❌` con el
+  formato fijo del archivo (qué pasó → ❌ mal → ✅ bien → una línea de porqué) citando los
+  tres sitios de arriba.
 
 ## 2. Medir primero — no es una pregunta para el owner
 

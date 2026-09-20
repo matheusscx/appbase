@@ -1,4 +1,5 @@
 import type { Db } from '../../common/db/db.service';
+import { assertSinHuecos } from '../../common/db/db.spec-helper';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { PropinaReportesService } from './propina-reportes.service';
 
@@ -377,24 +378,14 @@ describe('PropinaReportesService', () => {
   // Regresión del mismo 42P18 que cerró resumen-negocio.service.ts (Task 2 de
   // `hora-de-corte`, medido 2026-09-19): un `$n` en el SQL sin bind, o un
   // bind sin `$n` que lo referencie, revienta en Postgres real aunque el mock
-  // de `Db.query` de estos tests no lo vea — reconstruye la MISMA regla desde
+  // de `Db.query` de estos tests no lo vea — `assertSinHuecos`
+  // (`../../common/db/db.spec-helper.ts`) reconstruye la MISMA regla desde
   // el string y el array que cada consulta migrada le mandó a `db.query`.
   // Task 3 tocó las nueve: `filtrosVenta` (y sus cuatro llamadoras:
   // cobranzaYEstado, tendencia, porTurno, porTipo, origenTrabajadores),
   // anulaciones, solapadas, asignacionTrabajadores y todosLosTurnosExcluidas
   // — esta última es la que corrió el booleano de `$5` a `$6`.
   describe('cada consulta migrada al día del negocio: $n↔params sin huecos', () => {
-    function assertSinHuecos(sql: string, params: unknown[] | undefined) {
-      const referenciados = new Set(
-        Array.from(sql.matchAll(/\$(\d+)/g)).map((m) => Number(m[1])),
-      );
-      const total = params?.length ?? 0;
-      expect(Math.max(0, ...referenciados)).toBeLessThanOrEqual(total);
-      for (let i = 1; i <= total; i++) {
-        expect(referenciados.has(i)).toBe(true);
-      }
-    }
-
     it('resumen(): las 6 consultas paralelas (cobranza, anulaciones, tendencia, porTurno, porTipo, solapadas)', async () => {
       prepararResumenVacio();
 

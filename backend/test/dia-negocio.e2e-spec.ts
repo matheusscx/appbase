@@ -662,8 +662,31 @@ describe('Día del negocio: hora de corte (e2e)', () => {
       );
     });
 
+    /**
+     * Este cierre deja estado COMPARTIDO en el tenant Paris (garzón + su
+     * sesión) si algo falla a mitad de camino: sin garantía de que cada paso
+     * corra, un garzón vivo con sesión abierta queda para la próxima suite
+     * que use `sesiones-garzon` en Paris. Por eso cada paso va en su propio
+     * `try/catch` — uno que revienta no aborta los siguientes — y los
+     * errores se juntan para un solo `throw` al final, que sí hace fallar el
+     * test aunque cada paso haya corrido. Medido 2026-09-19: antes, un
+     * `expect` fallido a mitad del `afterAll` original cortaba en seco y
+     * dejaba sin ejecutar el borrado del garzón y el cierre de su sesión.
+     */
     afterAll(async () => {
-      try {
+      const errores: string[] = [];
+
+      async function paso(nombre: string, fn: () => Promise<void>) {
+        try {
+          await fn();
+        } catch (e) {
+          errores.push(
+            `${nombre}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+
+      await paso('borrar la propina de prueba', async () => {
         if (tipId) {
           await ds.query(
             `UPDATE venta_propina SET eliminado_el = NOW()
@@ -671,24 +694,71 @@ describe('Día del negocio: hora de corte (e2e)', () => {
             [tipId],
           );
         }
+      });
+
+      await paso('cerrar la caja', async () => {
         if (caja) await cerrarCaja(app, token, caja);
+      });
+
+      await paso('borrar el ítem', async () => {
         if (itemId) {
-          await request(app.getHttpServer())
+          const res = await request(app.getHttpServer())
             .delete(`/api/items/${itemId}`)
             .set('Authorization', `Bearer ${token}`);
+          expect(res.status).toBe(200);
         }
+      });
+
+      await paso('cerrar la sesión del garzón', async () => {
         if (sesionGarzonId) {
-          await request(app.getHttpServer())
+          const res = await request(app.getHttpServer())
             .post(`/api/sesiones-garzon/${sesionGarzonId}/cerrar`)
             .set('Authorization', `Bearer ${token}`);
+          expect(res.status).toBe(201);
         }
+      });
+
+      await paso('borrar el garzón', async () => {
         if (garzonId) {
-          await request(app.getHttpServer())
+          const res = await request(app.getHttpServer())
             .delete(`/api/garzones/${garzonId}`)
             .set('Authorization', `Bearer ${token}`);
+          expect(res.status).toBe(200);
         }
-      } finally {
+      });
+
+      // No basta con que las llamadas hayan devuelto 200/201: el estado
+      // compartido que le importa a la próxima suite es el que queda en la
+      // fila, así que se verifica con una consulta directa (mismo criterio
+      // que el resto del archivo).
+      await paso(
+        'verificar que el garzón quedó borrado y su sesión cerrada',
+        async () => {
+          if (garzonId) {
+            const [fila]: { eliminado_el: Date | null }[] = await ds.query(
+              `SELECT eliminado_el FROM garzones WHERE garzon_id = $1`,
+              [garzonId],
+            );
+            expect(fila?.eliminado_el).not.toBeNull();
+          }
+          if (sesionGarzonId) {
+            const [fila]: { estado: string }[] = await ds.query(
+              `SELECT estado FROM sesiones_garzon WHERE sesion_garzon_id = $1`,
+              [sesionGarzonId],
+            );
+            expect(fila?.estado).toBe('cerrada');
+          }
+        },
+      );
+
+      await paso('devolver el corte a 0', async () => {
         await fijarCorte(0);
+      });
+
+      if (errores.length) {
+        throw new Error(
+          `afterAll dejó pasos sin verificar:\n${errores.join('\n')}`,
+        );
       }
     });
 

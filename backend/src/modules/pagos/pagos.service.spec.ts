@@ -3,6 +3,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import type { EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
+import { assertSinHuecos } from '../../common/db/db.spec-helper';
 import { PagosService, calcularEstadoVenta } from './pagos.service';
 import { IdempotenciaService } from '../idempotencia/idempotencia.service';
 
@@ -744,13 +745,29 @@ describe('PagosService', () => {
         string,
         unknown[],
       ];
-      const referenciados = new Set(
-        Array.from(sql.matchAll(/\$(\d+)/g)).map((m) => Number(m[1])),
-      );
-      expect(Math.max(...referenciados)).toBeLessThanOrEqual(params.length);
-      for (let i = 1; i <= params.length; i++) {
-        expect(referenciados.has(i)).toBe(true);
-      }
+      assertSinHuecos(sql, params);
+    });
+
+    // Ítem 3 de `2026-09-19-residuos-hora-de-corte/brief.md`: la misma
+    // afirmación de arriba, pero en la rama `verTodas = false` — la que
+    // agrega `usuarioId` a `params` y el `filtroDeMisCajas` al SQL, así que
+    // es la más fácil de correr un índice y dejar un `$n` de más o de menos
+    // (medido: el bug real que cerró `resumen-negocio.service.ts` fue
+    // exactamente eso). El test de arriba nunca la ejercitó: `verTodas` iba
+    // fijo en `true`.
+    it('rama verTodas = false: cada $n del SQL tiene bind, y cada bind está referenciado (evita 42P18)', async () => {
+      dataSourceMock.query.mockResolvedValueOnce([
+        { zona_horaria: 'America/Santiago', hora_corte: 5 },
+      ]);
+      dataSourceMock.query.mockResolvedValueOnce([{}]);
+
+      await service.resumen(TENANT_ID, USUARIO_ID, false);
+
+      const [sql, params] = dataSourceMock.query.mock.calls[1] as [
+        string,
+        unknown[],
+      ];
+      assertSinHuecos(sql, params);
     });
   });
 

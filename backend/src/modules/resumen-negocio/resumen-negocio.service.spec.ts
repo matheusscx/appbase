@@ -1,5 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { Db } from '../../common/db/db.service';
+import { assertSinHuecos } from '../../common/db/db.spec-helper';
 import { ResumenNegocioService } from './resumen-negocio.service';
 import {
   AnulacionesReporteService,
@@ -432,12 +433,9 @@ describe('ResumenNegocioService', () => {
     // parámetro por dónde se USA en el texto; uno que no aparece en ningún
     // lado no tiene de dónde inferirlo y tira 42P18 en tiempo de ejecución.
     // Ningún mock de `Db.query` (acá o en cualquier test unitario) ve ese
-    // error: el mock devuelve la fila que se le pida sin mirar los binds. Por
-    // eso esta aserción no compara contra Postgres — reconstruye la MISMA
-    // regla (todo `$n` del SQL tiene que tener un param, y todo param tiene
-    // que estar referenciado en el SQL) desde la string y el array que el
-    // service realmente le mandó a `db.query`, así que sí puede fallar si
-    // vuelve a abrirse un hueco.
+    // error — la aserción vive en `db.spec-helper.ts` (`assertSinHuecos`,
+    // ítem 3 de `2026-09-19-residuos-hora-de-corte`, fix round 1: extraída
+    // de acá y otras tres copias).
     it('la consulta de más vendidos: cada $n del SQL tiene param, y cada param está referenciado (evita 42P18)', async () => {
       mockRespuestas({});
 
@@ -447,20 +445,7 @@ describe('ResumenNegocioService', () => {
         string,
         unknown[],
       ];
-      const referenciados = new Set(
-        Array.from(masVendidosSql.matchAll(/\$(\d+)/g)).map((m) =>
-          Number(m[1]),
-        ),
-      );
-      // Dirección 1: ningún `$n` del SQL apunta más allá de lo que se mandó.
-      expect(Math.max(...referenciados)).toBeLessThanOrEqual(
-        masVendidosParams.length,
-      );
-      // Dirección 2: cada posición 1..length aparece en el SQL — ninguna
-      // queda "de adorno" sin que Postgres pueda inferirle un tipo.
-      for (let i = 1; i <= masVendidosParams.length; i++) {
-        expect(referenciados.has(i)).toBe(true);
-      }
+      assertSinHuecos(masVendidosSql, masVendidosParams);
     });
   });
 });

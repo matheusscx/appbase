@@ -9,6 +9,7 @@ import type {
 } from '~/composables/usePropinaLiquidaciones'
 import type { Turno } from '~/composables/useTurnos'
 import type { Garzon } from '~/composables/useGarzones'
+import { rangoMesActual } from '~/composables/usePropinaResumen'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -153,15 +154,6 @@ async function liquidar() {
   }
   finally {
     liquidando.value = false
-  }
-}
-
-function rangoMesActual(): { desde: string, hasta: string } {
-  const now = new Date()
-  const fmt = (d: Date) => d.toISOString().slice(0, 10)
-  return {
-    desde: fmt(new Date(now.getFullYear(), now.getMonth(), 1)),
-    hasta: fmt(new Date(now.getFullYear(), now.getMonth() + 1, 1)),
   }
 }
 

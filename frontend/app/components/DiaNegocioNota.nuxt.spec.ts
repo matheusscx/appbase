@@ -83,4 +83,31 @@ describe('DiaNegocioNota', () => {
     expect(wrapper.text()).toContain('Tu día va de 05:00 a 05:00')
     expect(fetchsATenantsMe).toBe(1)
   })
+
+  // Ítem 4 de `2026-09-19-residuos-hora-de-corte/brief.md`: el caso que
+  // distingue el diseño y que faltaba cubrir. `undefined` (prop no pasado) es
+  // "sin controlar, pedí lo tuyo"; `null` es "el dueño del dato TODAVÍA no
+  // resolvió su fetch" — a propósito no dibuja nada y tampoco dispara el
+  // fetch propio, porque ese `null` es transitorio: en cuanto el dueño
+  // resuelva, va a mandar un número real.
+  it('con el prop horaCorte en null, no renderiza y tampoco pide su propio /tenants/me', async () => {
+    horaCorteBackend = 5 // a propósito distinto de "sin nota": si ignorara el null y pidiera igual, se vería 05:00.
+    const wrapper = await mountSuspended(DiaNegocioNota, { props: { horaCorte: null } })
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(wrapper.text().trim()).toBe('')
+    expect(fetchsATenantsMe).toBe(0)
+  })
+
+  it('cuando el prop pasa de null a 5, la nota aparece', async () => {
+    const wrapper = await mountSuspended(DiaNegocioNota, { props: { horaCorte: null } })
+    await new Promise(r => setTimeout(r, 20))
+    expect(wrapper.text().trim()).toBe('')
+
+    await wrapper.setProps({ horaCorte: 5 })
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(wrapper.text()).toContain('Tu día va de 05:00 a 05:00')
+    expect(fetchsATenantsMe).toBe(0) // sigue sin pedir el propio: el dato lo mandó el dueño
+  })
 })

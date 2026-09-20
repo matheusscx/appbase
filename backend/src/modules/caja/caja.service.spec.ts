@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { In, IsNull, QueryFailedError } from 'typeorm';
 import { Db } from '../../common/db/db.service';
+import { assertSinHuecos } from '../../common/db/db.spec-helper';
 import { CajaService, calcularNivelDescuadre } from './caja.service';
 import type { LineaArqueo } from './caja.service';
 import { Caja } from './entities/caja.entity';
@@ -2240,7 +2241,9 @@ describe('CajaService', () => {
     // Regresión del mismo 42P18 que cerró resumen-negocio.service.ts (Task 2
     // de `hora-de-corte`): un `$n` sin bind, o un bind sin `$n` que lo
     // referencie, revienta en Postgres real aunque el mock de `Db.query` de
-    // este test no lo vea.
+    // este test no lo vea — la aserción vive en `db.spec-helper.ts`
+    // (`assertSinHuecos`, ítem 3 de `2026-09-19-residuos-hora-de-corte`, fix
+    // round 1: extraída de acá y otras tres copias).
     it('cada $n del SQL tiene bind, y cada bind está referenciado (evita 42P18)', async () => {
       dataSource.query
         .mockResolvedValueOnce([
@@ -2254,13 +2257,7 @@ describe('CajaService', () => {
         string,
         unknown[],
       ];
-      const referenciados = new Set(
-        Array.from(sql.matchAll(/\$(\d+)/g)).map((m) => Number(m[1])),
-      );
-      expect(Math.max(...referenciados)).toBeLessThanOrEqual(params.length);
-      for (let i = 1; i <= params.length; i++) {
-        expect(referenciados.has(i)).toBe(true);
-      }
+      assertSinHuecos(sql, params);
     });
   });
 
