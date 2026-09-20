@@ -793,12 +793,22 @@ prohíbe.
   ítem tiene stock mínimo (`grep -rniE "stock_minimo|punto_reorden" backend/src` no devuelve
   nada), así que no hay contra qué comparar el saldo de `stock_ubicacion`.
 
-  **Las preguntas, antes de diseñar:**
-  - El mínimo, **¿es por producto o por producto y lugar?** El saldo vive por (ítem,
-    ubicación): 3 cajas de cerveza en la bodega y 0 en el local, ¿es stock bajo?
-  - **¿Dónde avisa?** Un bloque en el dashboard (¿con qué permiso? `Inventario: Leer` es el
-    candidato), una marca en el listado de inventario, o las dos.
-  - Los productos en modo `serie` o `lote`, ¿cuentan unidades igual que los de `cantidad`?
+  ✅ **Las tres preguntas están contestadas (owner, 2026-09-20). Lo que falta es diseñarlo.**
+  - **El mínimo es por producto Y lugar**, no por producto. La razón es el caso que decide: 3
+    cajas de cerveza en la bodega y 0 en el local es **stock bajo**, porque el barman no tiene
+    qué servir; un mínimo por producto suma los dos y no avisa nada. El costo aceptado es que
+    hay que cargar un número por cada (producto, ubicación) donde importe.
+  - **Nace vacío y solo avisa donde se cargó.** No hay que llenar 400 números el primer día:
+    se le pone mínimo a lo que importa y el resto no molesta. Sin mínimo cargado, no hay aviso.
+  - **Avisa en los dos lugares:** bloque en el dashboard de inicio (para reponer antes de
+    abrir, y es el insumo natural del pedido al proveedor) **y** marca en el listado de
+    inventario (para quien ya está mirando stock). Permiso candidato: `Inventario: Leer`.
+  - **Cuenta unidades, igual para los tres modos** (`cantidad`, `serie`, `lote`). ⛔ **El
+    vencimiento NO entra**: 40 litros de leche con mínimo 20 no avisan nada aunque 30 venzan
+    mañana, y eso es correcto para esta feature. *"¿Me estoy quedando sin esto?"* y *"¿se me
+    está por vencer esto?"* son dos preguntas distintas; juntarlas hace que ninguna se
+    entienda. Lo del vencimiento ya está anotado aparte (hoy se guarda y no se compara con
+    nada en todo `backend/src`).
 
   Es una pregunta del tipo que los POS maduros ya resolvieron (punto de reorden): ofrecer la
   pasada de investigación de mercado antes de diseñar. **Compras ya existe** desde el
@@ -818,6 +828,17 @@ prohíbe.
   resolvió lo mismo para sí mismo congelando el garzón al anular —
   `cuenta_linea_anulaciones.garzon_id`—, pero eso fija quién anuló, no quién vendió). Sin esa
   regla, el % queda indefinido para cualquier mesa transferida, que no es un caso raro.
+  ✅ **CONTESTADO (owner, 2026-09-20): la venta se REPARTE entre los garzones que atendieron la
+  mesa.** El caso que lo decide: Ana abre la mesa, sirve entradas por $40.000 y termina turno;
+  Beto atiende postres y cobra, la cuenta cierra en $60.000 → $40.000 a Ana y $20.000 a Beto.
+  Las otras dos salidas se descartaron por cómo distorsionan el porcentaje, que es el número
+  que la entrada existe para producir: *del que abrió* le deja a Beto una mesa atendida con
+  venta cero —y si anuló algo, su % se dispara contra un denominador de cero—; *del que cerró*
+  es lo que el sistema ya sabe sin trabajo extra (guarda el garzón vigente) pero le borra a Ana
+  $40.000 que sí vendió. **El costo aceptado:** hay que guardar qué garzón tenía la mesa **en
+  cada línea** del pedido, que hoy no se guarda — `cuentas.garzon_responsable_id` solo tiene el
+  vigente. Quien lo tome: eso es lo primero, porque sin ese dato el reparto no se puede calcular
+  ni hacia atrás.
 - [ ] **Ingredientes, componentes u opciones borrados del catálogo se saltean sin
   movimiento al anular una receta o combo** (backend, heredado de la parte 2 del frente
   *"Anular un plato ya enviado a cocina"*, documentado como hueco conocido en
@@ -832,6 +853,30 @@ prohíbe.
   no existe (fuerza a `sin_valorizar` explícito), o se acepta el hueco y se documenta que el
   costo mostrado es un piso, no una cifra exacta? La primera es más segura y más trabajo; la
   segunda es lo que hay hoy, sin decirlo en ningún lado que el usuario vea.
+  ⛔ **NO SE CONTESTA TODAVÍA: la entrada necesita re-medirse, y el owner lo decidió así
+  (2026-09-20) después de que yo le planteara la pregunta sobre un caso falso.** Se la llevé
+  como *"alguien borró un ingrediente que la receta usa"*, y eso **no puede pasar**: medido en
+  `ItemsService.remove` → `obtenerUsoItem`, borrar un ítem se rechaza con 400 nombrando dónde se
+  usa si aparece en `receta_ingredientes`, `combo_componentes`, `grupo_modificador_opciones`,
+  `cuenta_lineas` o `receta_extras_permitidos`, y el chequeo va con `FOR UPDATE` sobre el ítem
+  para que no se cuele por una carrera (el comentario del lock explica el par con `FOR SHARE`).
+  Además la receta **se lee viva** al anular (`venderIngredientesReceta` consulta
+  `receta_ingredientes`, no un congelado), así que sus ingredientes base existen siempre.
+  **Entonces llegar al hueco necesita DOS pasos, no uno:** primero sacar el ítem de la receta o
+  del grupo —ahí deja de estar "en uso"— y recién entonces borrarlo; lo que queda apuntándolo es
+  **lo congelado en la línea** (un extra o una opción que el cliente eligió al pedir). El caso
+  real se parece a: *se pidió un risotto con extra de champiñones → después alguien sacó los
+  champiñones de los extras posibles y los borró → después se anula ese risotto viejo*. Mucho
+  más raro que lo que yo describí, y eso **cambia cuánto vale arreglarlo**.
+  **Lo que hay que medir antes de volver a preguntar:** por qué caminos exactos se llega (¿solo
+  extras y opciones congeladas, o hay otro?), si el hueco es el mismo al **vender** que al
+  anular (mismo código, la entrada lo afirma — verificarlo), y si en la práctica alguien puede
+  llegar ahí. ⚠️ **Y no vuelvas a plantearle la pregunta con mi escena:** hacerlo elegir entre
+  trabar una operación del salón y aceptar un número incompleto, para un caso que no se sabe
+  describir, es pedirle que decida sobre una ficción. La opción que yo iba a recomendar —**no
+  bloquear pero marcar la anulación como costo incompleto**, porque el daño no es que el número
+  sea bajo sino que es bajo y parece exacto— sigue sobre la mesa como candidata, no como
+  decidida.
 - [ ] **¿El vendido del día resta las notas de crédito?** (dashboard de inicio, bloque
   Ventas, `resumen-negocio.service.ts`) — hoy `GET /resumen-negocio/hoy` **excluye** las
   notas de crédito del vendido (no las resta: las saca del cálculo entero, igual que
