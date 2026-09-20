@@ -3,7 +3,7 @@
 > **Para agentes:** ejecutar con `superpowers:subagent-driven-development` o
 > `superpowers:executing-plans`, tarea por tarea, marcando los checkboxes.
 
-**Status:** Draft
+**Status:** In Progress
 **Date:** 2026-09-19
 **Owner:** Cesar Matheus
 **Spec:** [`../specs/2026-09-19-modulo-reportes-varianza-design.md`](../specs/2026-09-19-modulo-reportes-varianza-design.md)
@@ -189,7 +189,7 @@ completo, y nada más. Todo lo que sigue rellena el service.
 | `550e8400-e29b-41d4-a716-446655440448` | `modulos_app_permisos` → Varianza + Leer |
 | `550e8400-e29b-41d4-a716-446655440449` | `tenant_modulos` → Paris + Varianza |
 
-- [ ] **Paso 1: escribir el e2e que falla — los dos casos del permiso**
+- [x] **Paso 1: escribir el e2e que falla — los dos casos del permiso**
 
 En `backend/test/reportes-varianza.e2e-spec.ts`. El molde de login y bootstrap se copia de
 `backend/test/resumen-negocio.e2e-spec.ts`, que ya tiene exactamente el caso "módulo no
@@ -218,7 +218,7 @@ it('devuelve 403 al tenant que NO contrató el módulo Varianza', async () => {
 ⚠️ Cada `res.body` lleva su `expect(res.status)` **al lado**: el pre-commit lo exige sobre lo
 staged y bloquea si falta.
 
-- [ ] **Paso 2: correrlo y verificar que falla**
+- [x] **Paso 2: correrlo y verificar que falla**
 
 ```bash
 cd backend && npm run test:e2e -- reportes-varianza
@@ -226,7 +226,7 @@ cd backend && npm run test:e2e -- reportes-varianza
 
 Esperado: FAIL con 404 en los dos casos (la ruta todavía no existe).
 
-- [ ] **Paso 3: ~~el DTO de rango compartido~~ — NO se crea acá**
+- [x] **Paso 3: ~~el DTO de rango compartido~~ — NO se crea acá**
 
 ⚠️ **Corregido al ejecutar (2026-09-19), tras el hallazgo del revisor de dominio.** La primera
 versión de este plan creaba `reportes/dto/rango-reporte.dto.ts` como "la base que todo reporte
@@ -243,7 +243,7 @@ siguen vive en `docs/patterns/backend.md` § 10c — que es donde el próximo la
 por anticipado es código muerto con buena intención.** El plan lo tenía porque planificar invita a
 dibujar la estructura completa; ejecutar la desarma.
 
-- [ ] **Paso 4: el DTO de la query de varianza**
+- [x] **Paso 4: el DTO de la query de varianza**
 
 `backend/src/modules/reportes/varianza/dto/query-varianza.dto.ts`:
 
@@ -279,7 +279,7 @@ necesita las dos, ahí se evalúa un mixin — no antes.
 ⚠️ **`@IsUUID()` en todo id que entre del cliente** (`docs/patterns/backend.md` § 4): sin eso un
 id basura llega al SQL y vuelve como 500 en vez de 400.
 
-- [ ] **Paso 5: el service con la consulta vacía todavía**
+- [x] **Paso 5: el service con la consulta vacía todavía**
 
 `varianza.service.ts`: exportar los tipos del bloque **Contratos compartidos** (copiarlos tal
 cual) y un `findAll` que ya resuelve paginación y día del negocio, y devuelve `data: []`. Un
@@ -295,7 +295,7 @@ async findAll(
 }
 ```
 
-- [ ] **Paso 6: el controller**
+- [x] **Paso 6: el controller**
 
 Copiar la forma exacta de `propina-reportes.controller.ts` (guards, `ApiTags`, `ApiBearerAuth`,
 `tenantId` del token):
@@ -317,7 +317,7 @@ export class VarianzaController {
 }
 ```
 
-- [ ] **Paso 7: el módulo y su registro**
+- [x] **Paso 7: el módulo y su registro**
 
 `reportes.module.ts` con `controllers: [VarianzaController]`, `providers: [VarianzaService]`.
 Importarlo en `app.module.ts`.
@@ -326,7 +326,7 @@ Importarlo en `app.module.ts`.
 `entities` de `app.module.ts`** — el repo no usa `autoLoadEntities` y esa omisión es un error
 clásico, pero acá no aplica porque el reporte solo lee tablas que ya existen.
 
-- [ ] **Paso 8: el seed, las cuatro partes**
+- [x] **Paso 8: el seed, las cuatro partes**
 
 En `seeder.service.ts`, en este orden:
 
@@ -352,7 +352,7 @@ En `seeder.service.ts`, en este orden:
    rol con el que corre el Playwright de la Tarea 7 — probar la pantalla como admin taparía un
    permiso faltante.
 
-- [ ] **Paso 9: correr el e2e y verificar que pasa**
+- [x] **Paso 9: correr el e2e y verificar que pasa**
 
 ```bash
 /Users/m2pro/cmatheus/startup-app/scripts/db-aislada.sh reset 5436
@@ -364,13 +364,13 @@ cd backend && npm run test:e2e -- reportes-varianza
 
 Esperado: PASS los dos casos.
 
-- [ ] **Paso 10: documentar el patrón**
+- [x] **Paso 10: documentar el patrón**
 
 En `docs/patterns/backend.md`, sección nueva **"Dónde vive un reporte"**: la tabla de § 3.2 de la
 spec (rutas, permiso, el día, rango, paginación, plata, consultas) y el aviso de que un
 `modulo_app` sin su fila en `tenant_modulos` da 403 hasta al admin.
 
-- [ ] **Paso 11: gate completo y commit**
+- [x] **Paso 11: gate completo y commit**
 
 Correr el gate de cierre entero (ambos bloques) + `verify-feature` paso 7 con `domain-reviewer` y
 `api-security-reviewer` (esta tarea toca controller, DTOs y guards).
@@ -382,6 +382,18 @@ git add backend/src/modules/reportes backend/src/app.module.ts backend/src/modul
 ```bash
 git commit -m "feat(reportes): el módulo de reportes y el permiso Varianza"
 ```
+
+✅ **Cerrada el 2026-09-19 en `787518ca`.** Gate: lint 0 errores · typecheck OK · unit
+**2887/2887** · e2e **completo** 1045 pasan, 0 fallos. Revisión independiente: dominio y seguridad
+de API LIMPIO, más dos re-revisiones del diff corregido, también LIMPIO.
+
+Lo que salió distinto de lo planeado, y quedó escrito donde dura:
+- **El DTO base no entró** (Paso 3), y la razón está ahí arriba.
+- **El permiso quedó en `Inventario · Aprobación`**, confirmado por el owner el 2026-09-20.
+- **Dos hallazgos de ejecución se mudaron a `docs/patterns/backend.md`** —el filtro de jest que
+  choca con el nombre del worktree, y el grep de IDs que no puede incluir `docs/`—. Van ahí y no
+  acá porque **este plan se borra cuando el frente se completa** (`docs/superpowers/README.md`),
+  así que dejarlos en el plan era garantizar que se perdieran justo al terminar.
 
 ---
 
