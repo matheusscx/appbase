@@ -1416,7 +1416,7 @@ Depende de las tareas 8 y 9.
 - **El modal de corregir se monta ya abierto** (con `v-if` sobre la línea elegida), así que su
   `watch(open)` va con `immediate`. Sin eso abría vacío, y un test lo fija.
 - **Los tipos del detalle viven en `useCompras`** y la página y los componentes los comparten.
-- **El smoke de navegador** (`e2e/compras/compra-confirmada.spec.ts`: confirmar por API; completar,
+- **El smoke de navegador** (`e2e/compras/compras-por-pantalla.spec.ts`: confirmar por API; completar,
   descontar y anular por pantalla) encontró dos cosas que los specs de componente no veían:
   - la cantidad salía "10.0000", la columna `numeric(18,4)` cruda, también al recargar un borrador
     (tarea 4). Ahora se muestra con `cantidadConUnidad` y se edita con `cantidadParaEditar`;
@@ -1487,9 +1487,11 @@ cd .. && ./scripts/reset-db.sh --verificar
 - [ ] **Step 3: Smoke test en el navegador**, en el Chrome del owner vía devtools: nueva compra,
   confirmar con una línea sin precio, completarla, corregir una cantidad y anular otra.
 
-  ⛔ **Único paso que queda abierto, y lo cierra el owner, no el agente.** El paso a paso
-  quedó escrito en [`features/compras.md`](../../features/compras.md) § *Smoke manual*, para
-  seguir tal cual y **entrando como `encargado.compras`**. Tiene su entrada en
+  ⛔ **Único paso que queda abierto, y lo cierra el owner, no el agente.** Desde el
+  2026-09-20 los cinco pasos corren solos en `frontend/e2e/compras/compras-por-pantalla.spec.ts`
+  —qué asevera cada uno está en [`features/compras.md`](../../features/compras.md) § *El smoke,
+  automatizado*—, pero eso **no cierra este step**: falta el ojo del owner sobre la pantalla
+  real, **entrando como `encargado.compras`**. Tiene su entrada en
   [`pendientes.md`](../../agent/pendientes.md) § 7 para que no se pierda.
 - [x] **Step 4: Skill `verify-feature`**, incluida la revisión independiente (`domain-reviewer`)
   sobre el diff staged. **No correr la revisión y el e2e a la vez**: el revisor muta el working

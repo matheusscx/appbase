@@ -191,40 +191,66 @@ editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar
   anular, permisos y aislamiento) y `test/kardex-secuencia.e2e-spec.ts` (la secuencia sigue el
   orden de aplicación bajo concurrencia).
 - **Front:** los specs de componente de `components/compras/` y `compras-carga.nuxt.spec.ts`.
-- **Navegador:** `frontend/e2e/compras/compra-confirmada.spec.ts` (completar, descontar y anular
-  por pantalla).
+- **Navegador:** `frontend/e2e/compras/compras-por-pantalla.spec.ts` — los pasos del smoke,
+  como el encargado, más el test de que la lista de productos del formulario es la de Compras
+  y no el catálogo de ítems. Ver [El smoke, automatizado](#el-smoke-automatizado).
 
 ---
 
-## Smoke manual
+## El smoke, automatizado
 
-Para correr a mano en el navegador, con `docker-compose up` y la base recién sembrada
-(`./scripts/reset-db.sh`). **Se entra como `encargado.compras` / `admin`, no como admin del
-tenant**: el rol es lo que las suites no miran igual, y con admin un 403 en una ruta de otro
-módulo no se ve (pasó: el encargado no podía cargar una compra). El seed trae el proveedor
-*Distribuidora Andina* y los productos del tenant Paris.
+Los pasos que antes se recorrían a mano —los que enumera la tabla de abajo— viven en
+[`compras-por-pantalla.spec.ts`](../../frontend/e2e/compras/compras-por-pantalla.spec.ts).
+Piden el stack arriba (`docker-compose up`) y la base recién sembrada
+(`./scripts/reset-db.sh`), y desde `frontend/` se corren con:
 
-1. **Cargar una compra con una línea sin precio.** Compras → *Nueva*. Proveedor, Documento,
-   Fecha, *Entra a* (la ubicación), y dos líneas: una con precio y otra con **Precio unitario
-   vacío**. Guardar. → Queda **Borrador**, y en el listado aparece con la insignia **Falta
-   costo**.
-2. **Confirmar así, sin ese precio.** El modal resume lo que va a entrar. Al confirmar, el
-   stock de los dos productos sube. El de la línea sin precio **entra igual**: congela el
-   costo promedio que ya tenía, no lo ensucia con un cero.
-3. **Completar el precio que faltaba.** En la compra confirmada, corregir esa línea y poner el
-   precio de la factura. → El costo promedio del producto se recalcula, la insignia *Falta
-   costo* desaparece y el **historial** de la línea muestra el cambio.
-4. **Corregir una cantidad.** En una línea con precio, bajar la cantidad (llegaron menos). →
-   El stock baja, el costo se rehace y el historial lo anota. Si de ese producto ya salió
-   mercadería y no queda saldo, el rebote es 400 diciendo cuánto queda: eso también es un
-   resultado correcto.
-5. **Anular otra compra.** Cargar y confirmar una segunda compra, y anularla con un motivo. →
-   El stock vuelve a donde estaba, la compra queda **Anulada** con su motivo a la vista, y ya
-   no se puede corregir.
+```bash
+npm run e2e -- e2e/compras/
+```
 
-Lo que conviene mirar de reojo en cada paso: **Inventario → movimientos** del producto, que
-es donde se ve si la cuenta cierra —cada corrección deja su propia fila, no reescribe las
-anteriores—.
+**Entra como `encargado.compras` / `admin`, no como admin del tenant**, y eso no es
+decoración: con admin, que lo puede todo, un 403 en una ruta de otro módulo no se ve —pasó,
+la carga del borrador pedía `/items` y el encargado no podía cargar una compra—. El spec
+descarta la sesión de admin que deja `auth.setup.ts` y entra por la pantalla de login.
+
+| Paso | Qué asevera por pantalla | Test |
+|---|---|---|
+| 1 · Cargar con una línea sin precio | El formulario entero: proveedor, documento con folio, ubicación y dos líneas. Queda **Borrador**, y el listado **todavía no** dice *Falta costo* (ver abajo) | *cargar con una línea sin precio y confirmar* |
+| 2 · Confirmar así | El resumen dice cuántas líneas entran y adónde **antes** de mover stock. Entran las dos, la que va sin precio deja el costo promedio donde estaba, y **ahí sí** el listado marca *Falta costo* | *cargar con una línea sin precio y confirmar* |
+| 3 · Completar el precio | La insignia se apaga, el historial lo anota y recién ahí se ofrece el descuento | *completar el precio, cargar el descuento y anular* |
+| 4 · Bajar una cantidad | El historial lo anota **como cantidad con su unidad**, no como plata; el stock baja y el costo se rehace | *bajar una cantidad…* |
+| 4b · Bajar sin saldo | El 400 llega a la pantalla **con el número** («quedan 2»), el modal sigue abierto y la línea no se movió | *bajar por debajo de lo que queda…* |
+| 5 · Anular | Frena, resume lo que sale, exige motivo, y después lo deja a la vista sin dejar corregir | *completar el precio, cargar el descuento y anular* |
+
+⚠️ **Corrección al smoke viejo:** decía que un **borrador** sin precio aparece en el listado
+con la insignia *Falta costo*. No es así, y el código nunca lo hizo: `mapCabecera` la calcula
+como `estado === 'confirmada' && sinPrecio`, y el filtro *«Solo las que les falta costo»* usa
+la misma condición. Es coherente con lo que la insignia significa —mercadería que **ya entró**
+con un costo sin completar—: un borrador no movió stock ni costo, así que no le debe nada a
+nadie. El test lo afirma en las dos direcciones, y por eso el paso 1 y el 2 se leen juntos.
+
+El control transversal —**Inventario → movimientos**, donde cada corrección deja **su propia
+fila** en vez de reescribir las anteriores— lo asevera el test del paso 4, y lo mira **como
+admin, en un contexto aparte**: el encargado de compras no tiene el módulo Inventario, así
+que con su sesión eso sería probar un 403.
+
+**Qué no duplica, y por qué.** Las cuentas —el CPP, el reparto del descuento, y **qué número
+trae** el 400 cuando no queda saldo— las prueba `backend/test/compras.e2e-spec.ts`. Repetirlas
+por navegador costaría minutos y no atajaría ningún bug que la API deje pasar. ⚠️ **Ojo con la
+tentación de leer eso de más:** que ese mensaje **llegue a la pantalla** sí se asevera acá
+(fila 4b), y no es lo mismo — depende de que `apiErrorMsg` desenvuelva el error de `$fetch`, y
+si eso se rompe el encargado lee "Error al corregir la línea" a secas mientras el gate de la
+API sigue en verde. El *contenido* del mensaje es de la API; la *entrega*, del navegador. Por
+pantalla se asevera lo que **solo
+puede romperse del lado del cliente**: el cuerpo que arma el formulario (un precio vacío que
+viajara como `0` sería un precio de regalo perfectamente válido para la API, y ensuciaría el
+costo promedio sin que ningún test de API lo notara, porque la API nunca manda `''`), lo que
+la pantalla dice antes y después de mover plata, y que cada acción le llegue al rol que la
+ejecuta. Lo que el servidor decidió se lee una sola vez al final, por API.
+
+**Los datos los crea el propio spec** —productos, proveedor y stock previo, por API como
+admin—: del seed usa el usuario, el local del tenant y los tipos de documento. No depende de
+*Distribuidora Andina* ni del stock de los productos demo, que se agota entre corridas.
 
 ---
 

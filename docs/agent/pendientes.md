@@ -38,9 +38,69 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
 Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrada: ninguna
-necesita una respuesta del owner. **Hoy no hay ninguna abierta** — las cuatro últimas se
-cerraron el 2026-09-20 y están en [`resueltos.md`](resueltos.md), salvo la del primer deploy
-con `Idempotency-Key`, que no era código y se mudó a la § 7.
+necesita una respuesta del owner. Las que hay abiertas salieron de automatizar el smoke de
+compras (2026-09-20); las que había antes se cerraron ese mismo día y están en
+[`resueltos.md`](resueltos.md), salvo la del primer deploy con `Idempotency-Key`, que no era
+código y se mudó a la § 7.
+
+- [ ] **El resguardo de `reset-db.sh` mira el host y no el puerto, así que un worktree con base
+  aislada le borra el volumen al stack compartido** (tooling, medido el 2026-09-20 rompiéndolo).
+  El `case` de `scripts/reset-db.sh:142` acepta `*@postgres:*|*@localhost:*|*@127.0.0.1:*`, y
+  `db-aislada.sh` deja el `.env` del worktree en `@localhost:54xx` — que **pasa el filtro**. Como
+  el `COMPOSE_PROJECT_NAME` es el mismo para todos los worktrees, el `compose down -v` de la
+  línea 177 y el `up` posterior recrean los contenedores **compartidos** apuntando a un puerto
+  que dentro del contenedor no existe (`docker-compose.yml` le pasa el `DATABASE_URL` del `.env`
+  tal cual). Síntomas medidos: `Seed complete: 0`, `tecnica_backend` reintentando
+  `ECONNREFUSED 127.0.0.1:5438` —el 5438 era la base aislada de ese worktree, ya devuelta al
+  compose—, el backend sin responder en `/api/docs` y el volumen de la base
+  ya borrado. **El script no miente: falla a los gritos** —espera el seed 180 s y sale con
+  `exit 1` (`reset-db.sh:187-190`)—, pero para cuando avisa, el `down -v` ya corrió y el volumen
+  compartido no existe más. **El daño es la destrucción, no el silencio**, y eso cambia qué hay
+  que arreglar: no falta un chequeo de exit code, falta que el guard no lo deje llegar ahí. Se
+  repara con `db-aislada.sh borrar` (devuelve el `.env` al compose) + `reset-db.sh`.
+  **Por qué existe el agujero, que es mejor diagnóstico que "falta comparar el puerto":** el
+  guard se escribió cuando la única base local era la del compose, y `db-aislada.sh`
+  (2026-09-19) le cambió el supuesto de abajo sin que nadie lo tocara. Le puede pasar a
+  **cualquier worktree que haya corrido `db-aislada.sh reset` y todavía no `borrar`**, y el
+  proyecto compartido no es coincidencia: `COMPOSE_PROJECT_NAME=tecnica_fullstack` está en
+  **`.env.example:64`**, así que se propaga **por construcción** a todo worktree que copie el
+  ejemplo, que es lo que `CLAUDE.md` manda hacer. (Acá no va un censo de worktrees: escribí uno
+  y envejeció **el mismo día y en las dos direcciones** — tres al escribirlo, uno un rato
+  después, dos un rato más tarde. La explicación plausible es que otras sesiones corrieran
+  `reset` y `borrar` en el medio, pero eso es inferencia: lo medido son los tres números.
+  Para contar quiénes la tienen armada ahora mismo, **desde el checkout principal** —los
+  worktrees cuelgan de ahí, y desde adentro de uno el glob no matchea nada—:
+  `for d in .claude/worktrees/*/; do grep -H '^DATABASE_URL=' "$d/.env" 2>/dev/null; done`,
+  con `-H` y no `-h`: sin el nombre del archivo el conteo no dice a quién avisarle.) **El
+  arreglo:** que el `case` exija el puerto del compose (`5432`)
+  además del host, y que el mensaje de rechazo nombre `db-aislada.sh borrar` como la salida.
+  ⚠️ **Pero comparar el puerto no cierra el tema:** el guard valida el `.env`, y lo que se
+  destruye es el **proyecto**, que es compartido diga lo que diga el `.env`. Un worktree con
+  `DATABASE_URL` perfectamente válido igual le vuela el volumen a la sesión de al lado que esté
+  a mitad de un e2e; hoy eso lo tapa el turno manual que pide `CLAUDE.md`, no el script.
+  **Procedencia:** el incidente lo provoqué y lo medí en `clever-shtern-2a40b3`; la sesión de
+  los mecánicos verificó el guard en el código por su cuenta y aportó las citas de línea.
+- [ ] **El kardex ordena por `creado_el DESC` sin desempatar, y una corrección de compra
+  escribe dos movimientos en la misma transacción** (frontend, medido el 2026-09-20 al
+  automatizar el smoke de compras). `GET /inventario/movimientos` ordena
+  `ORDER BY mv.creado_el DESC` (`inventario.service.ts`, la query del listado) y nada más.
+  Bajar una cantidad de una compra escribe **dos** filas —la salida del stock y, aparte, el
+  ajuste de valor `correccion_compra`— dentro de una sola transacción, así que las dos llevan
+  el **mismo `creado_el` al microsegundo** (medido el 2026-09-20: `14:36:06.861137+00` en las
+  dos, sobre una base que después se reseteó — la corroboración que queda viva es el docstring
+  de `secuencia` en `movimiento-inventario.entity.ts`, que dice que `creado_el` es la hora en
+  que **empezó la transacción**, o sea el mecanismo exacto que produce el empate. Que el porqué
+  y el arreglo salgan del mismo docstring no es casualidad: `secuencia` **es** la columna que
+  esta entrada propone agregarle al `ORDER BY`). Con el
+  empate, cuál aparece arriba en *Inventario → movimientos* queda a criterio del plan de
+  Postgres y puede cambiar entre dos cargas de la misma pantalla. No corrompe nada —los
+  saldos de cada fila son correctos en cualquier orden— pero muestra el "antes → después" del
+  costo arriba o abajo del movimiento que lo causó, sin razón visible para quien mira.
+  **El arreglo:** agregar `, mv.secuencia DESC` al `ORDER BY`; la columna existe justamente
+  para eso (es el orden de aplicación, ver `docs/features/compras.md`) y ya la usan las dos
+  queries del recorrido del kardex. **Por qué no se hizo en el frente que lo encontró:** es
+  del módulo Inventario y el frente era de tests; el e2e de compras lo esquiva aseverando los
+  saldos como conjunto, sin depender del orden.
 
 ## 2. Medir primero — no es una pregunta para el owner
 
@@ -1363,10 +1423,14 @@ marcador interno, no un documento tributario.
 
 No se resuelve programando. Está acá para que tenga quién la reclame.
 
-- [ ] 🛒 **El smoke manual de compras, en el navegador del owner** — la pieza 1 salió el
-  2026-09-19 con el gate entero en verde (unitarios, e2e de API, Playwright, build), pero
-  **nadie la usó a mano todavía**. El paso a paso está escrito y listo para seguir en
-  [`features/compras.md`](../features/compras.md) § "Smoke manual"; se entra como
+- [ ] 🛒 **El smoke de compras, en el navegador del owner** — la pieza 1 salió el 2026-09-19
+  con el gate entero en verde, pero **nadie la usó a mano todavía**, y eso sigue pendiente
+  aunque desde el 2026-09-20 los cinco pasos corran solos en
+  [`compras-por-pantalla.spec.ts`](../../frontend/e2e/compras/compras-por-pantalla.spec.ts)
+  (qué cubre cada uno: [`features/compras.md`](../features/compras.md) § "El smoke,
+  automatizado"). **Automatizar no cierra esta entrada**: Playwright asevera lo que alguien
+  pensó en aseverar, y lo que falta acá es el ojo del owner sobre la pantalla real —que se
+  entienda, que no haya nada raro al lado de lo que el test mira—. Se entra como
   `encargado.compras` (contraseña `admin`), no como admin, porque el rol es justamente lo que
   el gate no mira igual —ya pasó una vez que el encargado no podía cargar una compra y todas
   las suites pasaban—. Si algo salta, vuelve como entrada acá.
