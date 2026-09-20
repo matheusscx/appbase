@@ -1253,6 +1253,25 @@ describe('Compras — borrador (e2e)', () => {
        * o abajo del movimiento que lo causó, y podía cambiar entre dos cargas de la
        * misma pantalla. `secuencia` es el orden real de aplicación
        * (`docs/features/compras.md`), así que desempata por él.
+       *
+       * ⚠️ **Qué garantiza este test y qué NO.** Garantiza que, CON el desempate, el
+       * orden es el correcto: eso es determinista y no depende del plan. **No**
+       * garantiza cazar la regresión el día que alguien saque `, mv.secuencia DESC`.
+       * Para eso hace falta que Postgres, ante el empate exacto y sin desempate,
+       * devuelva la salida antes que la `correccion_compra` — y eso Postgres no lo
+       * promete: el sort no es estable y el orden de entrada depende del plan. Se
+       * midió revirtiendo el `ORDER BY` y salió rojo, pero son dos corridas sobre un
+       * mismo plan, no una propiedad. Si el volumen crece y el planner cambia, este
+       * test puede volverse un verde silencioso.
+       *
+       * **Por qué no hay nada mejor:** no se puede escribir un test que falle
+       * determinísticamente sobre una conducta que es no-determinista por
+       * definición — el bug ES que el orden no está especificado. Armar los dos
+       * `creado_el` distintos a mano haría el test determinista y prueba otra cosa:
+       * que el `ORDER BY` ordena por fecha, que nunca estuvo en duda. Así que el
+       * test vale por lo que fija hacia adelante, y el mutante medido queda
+       * registrado en `docs/agent/resueltos.md` como la evidencia de que el arreglo
+       * era necesario.
        */
       it('bajar la cantidad empata el creado_el de sus dos movimientos, y el kardex igual pone arriba el último aplicado', async () => {
         const itemId = await productoVacio();

@@ -51,6 +51,16 @@ el desempate, verde. La premisa está adentro del test a propósito: si `creado_
 empatar, el desempate no estaría tapando nada y el test tiene que decirlo en vez de seguir
 pasando por otra razón.
 
+⚠️ **Lo que ese mutante prueba y lo que no, porque un verde se lee como guardián.** El test
+garantiza que CON el desempate el orden es el correcto: eso es determinista. **No** garantiza
+cazar la regresión el día que alguien saque `, mv.secuencia DESC`, porque para eso hace falta
+que Postgres devuelva las dos filas empatadas en un orden que **no promete** — el sort no es
+estable. El rojo se midió dos veces sobre un mismo plan; es una observación, no una propiedad.
+Y no hay nada mejor: **no se puede escribir un test que falle determinísticamente sobre una
+conducta que es no-determinista por definición** —el bug ES que el orden no está especificado—
+y armar los dos `creado_el` distintos a mano prueba otra cosa (que el `ORDER BY` ordena por
+fecha, que nunca estuvo en duda). La limitación quedó escrita al lado del test.
+
 **Que `secuencia DESC` es el orden correcto y no solo uno determinista** sale de
 [`compras.md`](../features/compras.md), no de lo que devuelve el sistema: `secuencia` es
 "el orden real de aplicación" y el recorrido de *rehacer la cuenta* ya la usa ascendente,
@@ -66,7 +76,9 @@ unidades y lotes de un producto) y **2 selecciones FIFO internas** (`SELECT … 
 cambie **cuál unidad o lote concreto se consume**. **No se arreglaron de arrastre**: salvo el de
 mermas —que es la misma tabla y tiene `secuencia` a mano— ninguno tiene columna de desempate
 más que una PK UUID aleatoria, así que cada uno es una decisión propia y no una línea mecánica.
-Su entrada en `pendientes.md` la abre el owner.
+**El censo vive como entrada abierta en [`pendientes.md`](pendientes.md) § 2**, con los dos
+grupos separados y lo que hay que medir antes de proponer nada — acá queda solo el hecho de que
+este cierre no los tocó.
 
 **Texto con el que estaba abierta, verbatim:**
 

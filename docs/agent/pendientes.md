@@ -48,8 +48,55 @@ la § 7.
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
-destapa una decisión que no es mía). **Hoy no hay ninguna abierta** — la última, la unicidad
-de `serie`, se cerró el 2026-09-19 y está en [`resueltos.md`](resueltos.md).
+destapa una decisión que no es mía).
+
+- [ ] **Hay otros 11 `ORDER BY` por `creado_el` sin desempate real sobre tablas que una sola
+  transacción escribe varias veces** (backend, censado el 2026-09-20 al cerrar el del kardex).
+  Es la misma causa que aquél —`creado_el` es la hora en que la transacción **empezó**, así que
+  las filas que nacen juntas empatan al microsegundo y el orden entre ellas lo elige el plan de
+  Postgres— pero **no es la misma consecuencia**, y por eso van separados abajo.
+
+  **Qué está verificado y qué no, para que nadie infle el número.** Un empate necesita **dos**
+  condiciones: (a) que el `ORDER BY` no desempate y (b) que algún camino escriba 2+ filas de esa
+  tabla en una transacción. La (a) está verificada en los 11, abriendo cada línea. La (b) está
+  verificada a mano en **dos** —el loop de `escribirCancelacionConMotivo` sobre las líneas
+  despachadas (`salones.service.ts:1639`), que deja una `merma` por línea, y el loop que guarda
+  un `Pago` por método (`pagos.service.ts:236`)—; en los otros nueve sale de la lectura de un
+  sub-agente y **hay que confirmarla antes de tocar nada**. Que un `ORDER BY` no desempate no
+  prueba que haya empate.
+
+  **Por qué está acá y no en la § 1:** salvo el de mermas —misma tabla que el kardex, con
+  `secuencia` a mano— ninguno tiene columna de desempate más que una PK UUID aleatoria, que no
+  ordena nada cronológicamente. Cada uno es una decisión de diseño, no una línea mecánica.
+
+  **Grupo A — 9 listados de pantalla. El síntoma es cosmético:** dos filas que se intercambian
+  entre cargas. Molesta, no corrompe.
+  `mermas.service.ts:348`, `ventas.service.ts:3218`, `:3235`, `:3833`, `pagos.service.ts:641`,
+  `salones.service.ts:2507`, `compras.service.ts:533`, `items.service.ts:3074` y `:3117`.
+
+  **Grupo B — 2 selecciones FIFO internas. Acá el empate no decide un orden de pantalla, decide
+  conducta**, y por eso pesan distinto:
+  - `inventario.service.ts:1389` — `SELECT … FROM item_unidad … ORDER BY u.creado_el ASC LIMIT n
+    FOR UPDATE`: elige **qué unidades serializadas concretas** se consumen. La trazabilidad por
+    número de serie es la razón de ser de [ADR-007](../adr/007-inventario-serie-lote.md).
+  - `inventario.service.ts:1746` — el mismo patrón sobre `item_lote`: elige **qué lote** se
+    descuenta. ⚠️ Y acá hay que tener cuidado con cómo se plantea: el criterio del código es
+    FIFO por **llegada** (`creado_el ASC`, "los lotes más antiguos"), **no** FEFO por
+    vencimiento; `item_lote.fecha_vencimiento` existe y la consulta no la mira. O sea que el
+    empate no "rompe" una promesa de vencimiento que el código nunca hizo — lo que rompe es la
+    propia promesa de llegada, y el lote consumido puede ser uno que vence más tarde. Si lo que
+    se quiere es FEFO, eso es otra entrada y otra decisión del owner.
+
+  **Qué medir antes de proponer nada**, en este orden: (1) confirmar la condición (b) en los
+  nueve que faltan, nombrando el camino concreto; (2) para el grupo B, si existe un camino real
+  que cree en **una** transacción dos unidades o dos lotes que **difieran en algo que importe**
+  (un vencimiento distinto, una procedencia distinta) — el candidato es una compra con dos
+  líneas del mismo ítem y distinto `codigo_lote`; si las filas empatadas son intercambiables, el
+  empate es inocuo y la entrada se achica sola. Recién con eso sale hacia la § 1 (si aparece un
+  desempate obvio) o hacia la § 4 (si hay que elegir criterio).
+
+📌 Antes había una nota acá diciendo que la sección estaba vacía: la última entrada previa, la
+unicidad de `serie`, se cerró el 2026-09-19 y está en [`resueltos.md`](resueltos.md).
 
 📌 **Lo que se evaluó el 2026-09-19 y NO es trabajo** (se anota para no redescubrirlo, que es
 lo que hace la sección de Vigilancia): *"devolver o anular la venta de un producto serializado
