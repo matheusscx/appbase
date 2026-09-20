@@ -1615,6 +1615,21 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
 
 ## Vigilancia — evaluado y descartado, no es trabajo
 
+- [ ] **El filtro de tipo de `GET /compras/productos` es redundante con su `JOIN`, y se deja a
+  propósito** (backend, medido el 2026-09-19 al cerrar la pieza 1 de compras) — sacar
+  `i.tipo = ANY($2::text[])` de la consulta (`compras.service.ts:374`) **no rompe ningún
+  test**, y el motivo no es un hueco de cobertura: el `JOIN item_producto` ya deja afuera
+  todo lo demás. Quien escribe esa fila es `ItemsService.create`, **dentro de un
+  `if (dto.tipo === 'producto' || dto.tipo === 'ingrediente')`**
+  (`items.service.ts:1655`), que son exactamente los dos tipos que el filtro nombra. O sea
+  que hoy el filtro no puede cambiar ninguna fila del resultado.
+  **Por qué se deja igual:** es el espejo de `validarLineas`, que valida contra la misma
+  constante `TIPOS_CON_STOCK` (`compras.service.ts:250`). Si mañana un tercer tipo llegara a
+  tener `item_producto`, la lista que se ofrece y la validación que acepta siguen diciendo lo
+  mismo; sin el filtro, la pantalla ofrecería algo que el backend después rechaza. **No es un
+  test que falte:** matarlo pediría un tipo con `item_producto` que hoy no se puede crear por
+  ninguna ruta. Se anota para no redescubrirlo como "mutante vivo" en la próxima pasada.
+
 - [ ] **Las suites del e2e se pisaban entre sí por el estado del seed: no reprodujo en 150
   corridas completas** (backend/tests; anotado 2026-08-22, **medido y pasado a vigilancia el
   2026-09-18**) — ⚠️ la primera versión se llamaba *"el `401` fantasma"* y mandó a buscar en `auth`
