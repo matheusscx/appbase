@@ -100,3 +100,7 @@ con el aviso de "otros datos".
   sale si a la venta le queda saldo); y dos pestañas del mismo POS tienen claves distintas.
 - **Webpay no pasa por acá.** `OnlineCallbackHandler` llama a `VentasService.crear` sin HTTP y
   sin clave: ya es idempotente por orden (ADR-009).
+- **El primer deploy tiene una ventana.** Backend y frontend son servicios separados en
+  Railway: entre los dos deploys —o con una pestaña abierta de antes— el bundle viejo manda el
+  cobro sin la cabecera y recibe 400. Se resuelve desplegando los dos juntos y recargando las
+  pantallas abiertas; queda anotado como paso operativo en `agent/pendientes.md` § 1.
