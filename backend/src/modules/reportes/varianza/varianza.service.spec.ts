@@ -59,12 +59,40 @@ describe('VarianzaService', () => {
     service = module.get<VarianzaService>(VarianzaService);
   });
 
-  /** Mockea, en orden: el COUNT de grupos y la página de grupos. */
-  function mockGrupos(filas: Record<string, unknown>[]): void {
+  /**
+   * Mockea, en orden: el COUNT de grupos, la página de grupos y la agregación
+   * de buckets del kardex.
+   *
+   * ⚠️ La tercera solo se dispara si hay algún grupo MEDIBLE: sin ventanas no
+   * hay nada que agregar, y pedirla igual sería una consulta al pedo. Por eso
+   * `buckets` es opcional y por defecto va vacío.
+   */
+  function mockGrupos(
+    filas: Record<string, unknown>[],
+    buckets: Record<string, unknown>[] = [],
+  ): void {
     dbQueryMock
       .mockResolvedValueOnce([{ total: filas.length }])
-      .mockResolvedValueOnce(filas);
+      .mockResolvedValueOnce(filas)
+      .mockResolvedValueOnce(buckets);
   }
+
+  /**
+   * Fila cruda de la agregación de buckets, ya sumada por (item, ubicación).
+   *
+   * Los valores de los tests son **primos y distintos entre sí** a propósito:
+   * con dos buckets en la misma cantidad, un bug que los sume al lado
+   * equivocado pasa el test sin que nadie lo note.
+   */
+  const bucketRow = (overrides: Record<string, unknown> = {}) => ({
+    item_id: HARINA,
+    ubicacion_id: LOCAL,
+    teorico: '0.0000',
+    merma: '0.0000',
+    cortesia: '0.0000',
+    sin_explicacion: '0.0000',
+    ...overrides,
+  });
 
   describe('la ventana de cada (producto, ubicación)', () => {
     it('con DOS recuentos aplicados en el rango, la fila es medible y usa el más viejo y el más nuevo', async () => {
@@ -204,6 +232,141 @@ describe('VarianzaService', () => {
       const total = sqlPagina.match(/ORDER BY r\.aplicado_el/g);
       expect(conDesempate).toHaveLength(total?.length ?? 0);
       expect(conDesempate?.length).toBe(6);
+    });
+  });
+
+  /**
+   * ⛔ **Lo que este bloque NO prueba, y conviene saberlo antes de confiar en
+   * él.** La **clasificación** de cada movimiento en su bucket vive entera en
+   * el SQL (`SQL_BUCKETS`), y con `Db` mockeado el mock devuelve los buckets
+   * **ya clasificados**. Medido el 2026-09-20: mutar el filtro de `merma` para
+   * que se coma también la cortesía dejó **los 18 tests en verde**.
+   *
+   * O sea: estos tests cubren el **mapeo y el formato** —que el número llegue a
+   * su columna, con su signo y a escala 4—, no que el movimiento haya caído en
+   * el bucket correcto. Eso solo lo puede probar el e2e contra Postgres real,
+   * donde el escenario se arma vendiendo, anulando y mermando de verdad.
+   *
+   * ⚠️ El plan original prometía "un mutante por bucket, cada uno mata solo su
+   * test". Con el mock eso es falso, y darlo por cierto habría dejado la
+   * clasificación sin ninguna cobertura.
+   */
+  describe('los cuatro números', () => {
+    /**
+     * Valores primos y distintos entre sí en todos los casos: con dos buckets
+     * en la misma cantidad, un bug que sume al lado equivocado pasa el test.
+     */
+    it('una salida de venta va al teórico', async () => {
+      mockGrupos([grupoRow()], [bucketRow({ teorico: '13.0000' })]);
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toMatchObject({
+        teorico: '13.0000',
+        merma: '0.0000',
+        cortesia: '0.0000',
+        sinExplicacion: '0.0000',
+      });
+    });
+
+    /**
+     * El teórico es **neto**: cancelar una venta repone los ingredientes al
+     * kardex (`motivo='anulacion'`), así que esa entrada tiene que restar del
+     * teórico y no sumar a ningún otro bucket. Acá la resta ya viene hecha por
+     * el SQL; lo que el unitario verifica es que el service no la vuelva a
+     * tocar ni la mande a otra columna.
+     */
+    it('el teórico llega neto de anulaciones y devoluciones', async () => {
+      mockGrupos([grupoRow()], [bucketRow({ teorico: '7.0000' })]);
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toMatchObject({ teorico: '7.0000' });
+    });
+
+    it('merma y cortesía viajan separadas, cada una en su columna', async () => {
+      mockGrupos(
+        [grupoRow()],
+        [bucketRow({ merma: '11.0000', cortesia: '3.0000' })],
+      );
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toMatchObject({
+        merma: '11.0000',
+        cortesia: '3.0000',
+      });
+    });
+
+    /**
+     * ⚠️ **El signo importa y es el caso que más fácil se escribe al revés.**
+     * Un recuento con SOBRANTE es una entrada: encontraste MÁS de lo que el
+     * sistema creía, así que el consumo real fue MENOR. `sinExplicacion` sale
+     * negativo, y un valor absoluto lo convertiría en una pérdida que no
+     * existió.
+     */
+    it('un sobrante deja sinExplicacion en negativo, no en valor absoluto', async () => {
+      mockGrupos([grupoRow()], [bucketRow({ sin_explicacion: '-3.0000' })]);
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toMatchObject({ sinExplicacion: '-3.0000' });
+    });
+
+    /**
+     * Un grupo medible cuya ventana no tuvo NINGÚN movimiento no vuelve en la
+     * agregación —no hay filas que sumar—, y aun así sus números tienen que ser
+     * ceros y no `null`: la ventana existe y la respuesta es "no se movió
+     * nada", que es distinto de "no se puede medir".
+     */
+    it('un grupo medible sin movimientos en la ventana da ceros, no null', async () => {
+      mockGrupos([grupoRow()], []);
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toMatchObject({
+        medible: true,
+        teorico: '0.0000',
+        merma: '0.0000',
+        cortesia: '0.0000',
+        sinExplicacion: '0.0000',
+      });
+    });
+
+    /**
+     * Los buckets se piden UNA vez para todas las ventanas de la página, no una
+     * consulta por fila. Con dos grupos, el total de llamadas sigue siendo tres:
+     * COUNT, página y buckets.
+     */
+    it('resuelve los buckets de TODAS las ventanas en una sola consulta', async () => {
+      const OTRO = 'item-aceite';
+      mockGrupos(
+        [grupoRow(), grupoRow({ item_id: OTRO, item_nombre: 'Aceite' })],
+        [
+          bucketRow({ teorico: '13.0000' }),
+          bucketRow({ item_id: OTRO, teorico: '17.0000' }),
+        ],
+      );
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(dbQueryMock.mock.calls).toHaveLength(3);
+      expect(res.data.find((f) => f.itemId === HARINA)?.teorico).toBe(
+        '13.0000',
+      );
+      expect(res.data.find((f) => f.itemId === OTRO)?.teorico).toBe('17.0000');
+    });
+
+    /**
+     * Sin ningún grupo medible no hay ventana que agregar: pedir la consulta de
+     * buckets igual sería un viaje a la base para nada.
+     */
+    it('no consulta el kardex si ninguna fila es medible', async () => {
+      mockGrupos([grupoRow({ recuentos: 1, recuento_final_id: null })]);
+
+      await service.findAll(TENANT, RANGO);
+
+      expect(dbQueryMock.mock.calls).toHaveLength(2);
     });
   });
 

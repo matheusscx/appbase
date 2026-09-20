@@ -546,7 +546,7 @@ git commit -m "feat(reportes): la ventana de varianza, anclada en la secuencia d
 - Produce: `teorico`, `merma`, `cortesia`, `sinExplicacion` poblados en `VarianzaFila`. `otros`
   sigue en `null` hasta la Tarea 4.
 
-- [ ] **Paso 1: escribir los tests unitarios que fallan**
+- [x] **Paso 1: escribir los tests unitarios que fallan**
 
 Cinco casos sobre el clasificador de movimientos:
 
@@ -564,13 +564,13 @@ Cinco casos sobre el clasificador de movimientos:
 misma cantidad: si merma y cortesía valen las dos 5, un bug que las sume al mismo lado pasa el
 test. Usar cantidades distintas y primas entre sí (7, 11, 13…).
 
-- [ ] **Paso 2: correrlos y verificar que fallan**
+- [x] **Paso 2: correrlos y verificar que fallan**
 
 ```bash
 cd backend && npm test -- varianza.service
 ```
 
-- [ ] **Paso 3: implementar la consulta agregada**
+- [x] **Paso 3: implementar la consulta agregada**
 
 Una sola consulta sobre `movimientos_inventario mv` para **todas** las ventanas, con
 `FILTER (WHERE …)` por bucket:
@@ -590,13 +590,41 @@ Una sola consulta sobre `movimientos_inventario mv` para **todas** las ventanas,
 (`unnest($2::uuid[], $3::uuid[], $4::bigint[], $5::bigint[])` y un `JOIN` contra eso). Una
 consulta por ventana es el N+1 que `docs/agent/anti-patterns.md` prohíbe.
 
-- [ ] **Paso 4: verificar que pasan**
+- [x] **Paso 4: verificar que pasan**
 
 ```bash
 cd backend && npm test -- varianza.service
 ```
 
-- [ ] **Paso 5: el mutante por bucket**
+- [x] **Paso 5: el mutante por bucket**
+
+⛔ **Lo que este paso prometía es FALSO, y medirlo fue lo más valioso de la tarea.** El plan decía
+"uno por bucket, y cada uno tiene que matar **solo** su test" sobre los **unitarios**. No mata
+ninguno: la clasificación vive entera en el SQL (`SQL_BUCKETS`) y con `Db` mockeado el mock
+devuelve los buckets **ya clasificados**. Medido el 2026-09-20 — los cuatro mutantes sobrevivieron
+a los 18 unitarios:
+
+| Mutante | 18 unitarios | E2E de buckets |
+|---|---|---|
+| `merma` se come la cortesía (`mb.tipo IN ('merma','cortesia')`) | **sobrevive** | muere, solo su test |
+| El sobrante suma en vez de restar (signo de `sin_explicacion`) | **sobrevive** | muere, solo su test |
+| La compra entra al teórico | **sobrevive** | muere, solo su test |
+| El teórico deja de restar anulaciones | **sobrevive** | muere, solo su test |
+
+Lo que los unitarios sí cubren es el **mapeo y el formato**: que el número llegue a su columna,
+con su signo y a escala 4. Que el movimiento haya caído en el bucket correcto solo lo puede
+probar Postgres real.
+
+📌 **Por eso la clasificación tiene archivo propio:** `backend/test/reportes-varianza-buckets.e2e-spec.ts`.
+Necesita el andamiaje completo de salones —impresora, categoría, garzón propio, salón, mesa y caja
+abierta— porque **la cortesía no se puede generar por `/api/mermas`**: ese endpoint rechaza a
+propósito todo motivo que no sea de tipo `merma`, así que el único camino real es anular una línea
+despachada en una mesa. Meter ese andamiaje en el e2e de la ventana sería peso muerto.
+
+⚠️ Y un detalle de dominio que el test destapó, verificado en el código y no supuesto: **anular
+una venta exige que NO tenga documento tributario**, no solo que esté pendiente. Con boleta
+devuelve 400 *"se revierte con nota de crédito, no se anula"* — emitido el documento hay hecho
+fiscal que compensar (ADR-010).
 
 Uno por bucket, y cada uno tiene que matar **solo** su test:
 - `motivo='venta'` → `motivo IN ('venta','merma')`: cae el caso 1, no los demás.
@@ -610,7 +638,7 @@ suponen nuevos. Si uno sobrevive, sospechar del control antes que de la línea.
 ⚠️ Si un `toContain` sobre el SQL matchea el **comentario** en vez de la cláusula, el test no
 prueba nada: acotar la aserción a la cláusula funcional.
 
-- [ ] **Paso 6: e2e con los cuatro buckets a la vez**
+- [x] **Paso 6: e2e con los cuatro buckets a la vez**
 
 Un producto, dos recuentos, y en el medio: ventas de una receta, una venta cancelada, una merma de
 bodega y una cortesía de mesa. Verificar los cuatro números, cada `res.body` con su
@@ -619,7 +647,7 @@ bodega y una cortesía de mesa. Verificar los cuatro números, cada `res.body` c
 ⚠️ Usar un **garzón propio** para la cortesía, no el del seed: la sesión es única por garzón y
 varias specs comparten el de Ana.
 
-- [ ] **Paso 7: gate y commit**
+- [x] **Paso 7: gate y commit**
 
 ```bash
 git add backend/src/modules/reportes backend/test/reportes-varianza.e2e-spec.ts
@@ -628,6 +656,35 @@ git add backend/src/modules/reportes backend/test/reportes-varianza.e2e-spec.ts
 ```bash
 git commit -m "feat(reportes): teórico, merma, cortesía y sin explicación"
 ```
+
+✅ **Cerrada el 2026-09-20.** Gate: lint 0 · typecheck OK · unit **2908/2908** · e2e completo
+**1063**, 0 fallos. Revisión independiente: **BLOQUEÓ** una vez, con razón, y el arreglo salió
+mejor que lo pedido (abajo).
+
+**Dos cosas que este paso enseñó y que no estaban en el plan:**
+
+⛔ **El gate completo cazó una regresión que el subset filtrado no veía.** El e2e nuevo abría una
+caja y el `afterAll` no podía cerrarla —cobraba en efectivo y `cerrarCaja` cuenta exactamente el
+saldo inicial, así que el descuadre hacía fallar el cierre—. Como solo puede haber **una caja
+abierta por tenant+usuario**, eso rompió **17 suites**: caja, ventas, salones, promociones,
+combos, propinas, costeo CPP. Mi archivo daba **6/6 en verde**; el daño estaba entero afuera, como
+409 y 400 crípticos que no apuntaban a varianza. Arreglado usando `test/helpers/caja.ts`, que
+existe exactamente para esto.
+
+⛔ **Una medición contaminada es peor que ninguna.** Corrí una suite suelta mientras mi propia
+corrida completa seguía viva, y encima le reseteé el Postgres por debajo. Salieron
+`index … does not exist`, reintentos de conexión y un test de concurrencia contando 3 y después 4
+esperas de lock en vez de 2 — estuve a punto de diagnosticar una regresión inexistente. Lo destapó
+`ps -ax | grep "[j]est --config"`, no el log. **Antes de correr el e2e, contar procesos.**
+
+**El bloqueo de la revisión, y por qué el resultado fue mejor que el arreglo pedido:** marcó que
+el `LEFT JOIN motivo_baja` no filtraba `tenant_id` ni `eliminado_el`, inconsistente con el docblock
+que este mismo diff escribe para las otras tablas. Al ir a redactar el porqué —que `CLAUDE.md`
+exige para que sea excepción y no olvido— **la justificación que iba a escribir resultó falsa**:
+`MotivosBajaService.remove` **impide borrar un motivo en uso** (400, mira `movimientos_inventario`
+y `cuenta_linea_anulaciones`). O sea que el escenario que la excepción defendía **no existe**.
+Quedó: `tenant_id` agregado, `eliminado_el` fuera con el motivo REAL escrito, y un test que ata esa
+garantía por si algún día se afloja el borrado.
 
 ---
 
@@ -822,8 +879,44 @@ export interface ResumenVarianza {
     platosSinReceta: { itemId: string; nombre: string; vecesVendido: number }[];
     ingredientesSinFichaDeStock: { itemId: string; nombre: string }[];
   };
+  /**
+   * Cuántos productos ACTIVOS no tuvieron ningún recuento aplicado en el rango,
+   * y cuáles. Decisión del owner, 2026-09-20 — ver abajo.
+   */
+  sinConteo: { total: number; items: { itemId: string; nombre: string }[] };
 }
 ```
+
+### El faltante de conteo — decisión del owner, 2026-09-20
+
+El reporte sigue listando **solo** las filas con al menos un recuento aplicado en el rango (§ 3.3
+de la spec). Encima de la tabla va **una línea con el faltante**: *"43 productos activos sin
+conteo en este período"*, con cómo ver cuáles son.
+
+⛔ **El universo son los ítems `activo = true`, no el catálogo entero**, y el porqué es del owner:
+si un producto ya no se vende, **lo correcto es archivarlo**, no inventar una regla en el reporte
+para esconderlo. El ruido lo saca él pausando, no el reporte filtrando.
+
+Eso se apoya en algo que ya existe y funciona, verificado el 2026-09-20:
+`items.activo` (`item.entity.ts:47`, default `true`), editable por `PATCH /items/:id`, y las
+cuatro pantallas de venta ya piden `activo=true` (`items.service.ts:660`). La UI que lo maneja es
+`frontend/app/pages/configuracion/items.vue`, que ya separa activos de pausados.
+
+Por qué gana a las dos alternativas: el catálogo entero da un número que nunca baja y mezcla lo
+que ya no se vende; "solo lo que tuvo movimiento" deja invisible al **producto activo sin un solo
+movimiento**, que es justo el caso del robo completo.
+
+Al implementarlo:
+- ⛔ **El faltante sale de una agregación**, no de traer el catálogo y restar en memoria: sería un
+  N+1 de manual sobre una tabla que crece.
+- ⛔ **El total y el detalle tienen que cerrar.** Si la línea dice 43, que 43 sea lo que aparece al
+  pedir la lista. Un total que no coincide con su detalle es peor que no mostrar nada — el owner
+  lo va a leer como tarea pendiente.
+
+⚠️ **Arista aceptada a sabiendas** (owner, 2026-09-20): pausar un ítem que **todavía tiene stock**
+lo saca del reporte con existencias adentro. Pausar es *"no lo vendo más"*, no *"no lo tengo
+más"*. No bloquea nada, no se arregla en este frente, y se documenta para que el próximo no lo
+lea como bug.
 
 - [ ] **Paso 1: escribir los tests que fallan**
 

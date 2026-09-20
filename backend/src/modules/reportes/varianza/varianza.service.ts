@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import Decimal from 'decimal.js';
+import { ESCALA_COSTO } from '../../../common/constants/escalas';
 import { Db } from '../../../common/db/db.service';
 import type { PaginatedResponse } from '../../../common/interfaces/paginated-response.interface';
 import {
@@ -222,8 +224,19 @@ const SELECT_GRUPOS = `
  * que es la diferencia entre *"no se perdió nada"* y *"todavía no se puede
  * medir"*.
  */
-function mapGrupo(r: GrupoRow): VarianzaFila {
+function mapGrupo(r: GrupoRow, bucket: BucketRow | undefined): VarianzaFila {
   const medible = r.recuentos >= 2;
+
+  /**
+   * ⚠️ **`toFixed(ESCALA_COSTO)` y no el string que devuelve Postgres.** Un
+   * `COALESCE(SUM(...), 0)` cae en el literal entero cuando no hay filas que
+   * sumar y vuelve `'0'`, no `'0.0000'` — el mismo detalle que ya mordió al
+   * listado de recuentos. Y un grupo medible **sin movimientos en la ventana**
+   * no vuelve en la agregación: sus números son ceros, no `null`. "No se movió
+   * nada" y "no se puede medir" son respuestas distintas.
+   */
+  const num = (valor: string | undefined): string =>
+    new Decimal(valor ?? 0).toFixed(ESCALA_COSTO);
 
   return {
     itemId: r.item_id,
@@ -236,14 +249,118 @@ function mapGrupo(r: GrupoRow): VarianzaFila {
     hastaEl: medible ? r.hasta_el : null,
     recuentoInicialId: medible ? r.recuento_inicial_id : null,
     recuentoFinalId: medible ? r.recuento_final_id : null,
-    teorico: null,
-    merma: null,
-    cortesia: null,
-    sinExplicacion: null,
+    teorico: medible ? num(bucket?.teorico) : null,
+    merma: medible ? num(bucket?.merma) : null,
+    cortesia: medible ? num(bucket?.cortesia) : null,
+    sinExplicacion: medible ? num(bucket?.sin_explicacion) : null,
     otros: null,
     costoSinExplicacion: [],
     faltaCosto: false,
   };
+}
+
+/** Fila cruda de la agregación de buckets, ya sumada por (item, ubicación). */
+interface BucketRow {
+  item_id: string;
+  ubicacion_id: string;
+  teorico: string;
+  merma: string;
+  cortesia: string;
+  sin_explicacion: string;
+}
+
+/**
+ * Los cuatro números, agregados en UNA consulta para **todas** las ventanas de
+ * la página. Las ventanas entran como arrays paralelos y se desarman con
+ * `unnest`: una consulta por fila sería el N+1 que `docs/agent/anti-patterns.md`
+ * prohíbe.
+ *
+ * ⛔ **El borde de cada ventana es `secuencia`, con `creado_el` como respaldo.**
+ * El `CASE` no es una comodidad: cuando el recuento del borde dio **delta cero**
+ * no escribió movimiento, así que no hay `secuencia` de la cual colgarse y la
+ * única referencia que queda es `aplicado_el` (spec § 5.2). En ese caso vuelve
+ * el riesgo de orden que el kardex documenta —dos transacciones sobre el mismo
+ * producto pueden aplicarse invertidas respecto de `creado_el`—, y lo detecta la
+ * columna «Otros» de la Tarea 4.
+ *
+ * ⚠️ **El intervalo es `(desde, hasta]`**: abierto al inicio y cerrado al final.
+ * Los movimientos del recuento inicial pertenecen a la ventana ANTERIOR —son la
+ * varianza que ESE conteo descubrió—, y contarlos acá los contaría dos veces.
+ *
+ * **Qué NO entra en ningún bucket, por criterio y no por lista:** todo lo que
+ * es **abastecimiento o logística** —`compra`, `correccion_compra`,
+ * `inventario_inicial`, `traslado`— y lo que **ni siquiera mueve stock**
+ * (`ajuste_costo`). Los dos conteos que cierran la ventana ya los absorben. Un
+ * traslado de bodega a local es **entrada del local**, y por eso medir por
+ * ubicación no ensucia ninguna de las dos cuentas.
+ *
+ * ⚠️ **Y lo que no encaje en ningún bucket queda SIN clasificar a propósito**,
+ * no se fuerza a ninguno: `ajuste_manual` es el caso que existe hoy en la
+ * entidad sin que nada lo escriba. El residuo de la Tarea 4 («Otros») es el que
+ * lo hace visible. Enumerar acá "los cinco motivos excluidos" envejecería mal:
+ * un `motivo` nuevo entraría en silencio y la lista seguiría pareciendo
+ * completa.
+ *
+ * 📌 **`motivo_baja` se lee sin filtro de `eliminado_el`, y el motivo es que el
+ * caso NO EXISTE** (medido el 2026-09-20, no razonado): `MotivosBajaService.remove`
+ * **impide borrar un motivo en uso** —mira `movimientos_inventario` y
+ * `cuenta_linea_anulaciones` y devuelve 400—, así que ningún movimiento puede
+ * quedar apuntando a un motivo borrado. Poner o no el filtro no tiene
+ * consecuencia observable.
+ *
+ * ⚠️ Si alguna vez se afloja ese borrado, **el filtro sería lo PEOR que se
+ * podría agregar acá**: `mb.tipo` saldría `NULL` y el movimiento desaparecería
+ * de merma y de cortesía **a la vez**, sin caer en ningún bucket. La pregunta de
+ * este `JOIN` es *"¿qué ERA esta merma cuando ocurrió?"*, y una pérdida pasada
+ * no se reclasifica porque después se borró una fila de catálogo. Mismo criterio
+ * que `MermasService.filtroTipoMerma`. (`anulaciones-reporte.service.ts` sí lo
+ * filtra, pero ahí el `JOIN` cuelga de `cuenta_linea_anulaciones`: otra
+ * pregunta.) El e2e deja esa garantía atada con un test.
+ *
+ * El `tenant_id` sí va: es defensa sin cambio de conducta, porque el motivo de
+ * un movimiento es siempre del mismo tenant.
+ */
+const SQL_BUCKETS = `
+  WITH v(item_id, ubicacion_id, seq_desde, seq_hasta, desde_el, hasta_el) AS (
+    SELECT * FROM unnest($2::uuid[], $3::uuid[], $4::bigint[], $5::bigint[],
+                         $6::timestamptz[], $7::timestamptz[])
+  )
+  SELECT v.item_id,
+         v.ubicacion_id,
+         COALESCE(SUM(mv.cantidad) FILTER (
+           WHERE mv.motivo = 'venta' AND mv.tipo = 'salida'), 0)
+         - COALESCE(SUM(mv.cantidad) FILTER (
+           WHERE mv.motivo IN ('anulacion', 'devolucion') AND mv.tipo = 'entrada'), 0)
+           AS teorico,
+         COALESCE(SUM(mv.cantidad) FILTER (
+           WHERE mv.motivo = 'merma' AND mv.tipo = 'salida'
+             AND mb.tipo = 'merma'), 0) AS merma,
+         COALESCE(SUM(mv.cantidad) FILTER (
+           WHERE mv.motivo = 'merma' AND mv.tipo = 'salida'
+             AND mb.tipo = 'cortesia'), 0) AS cortesia,
+         COALESCE(SUM(mv.cantidad) FILTER (
+           WHERE mv.motivo = 'recuento' AND mv.tipo = 'salida'), 0)
+         - COALESCE(SUM(mv.cantidad) FILTER (
+           WHERE mv.motivo = 'recuento' AND mv.tipo = 'entrada'), 0)
+           AS sin_explicacion
+    FROM v
+    JOIN movimientos_inventario mv
+      ON mv.item_id = v.item_id
+     AND mv.ubicacion_id = v.ubicacion_id
+     AND mv.tenant_id = $1
+     AND mv.eliminado_el IS NULL
+     AND (CASE WHEN v.seq_desde IS NOT NULL THEN mv.secuencia > v.seq_desde
+               ELSE mv.creado_el > v.desde_el END)
+     AND (CASE WHEN v.seq_hasta IS NOT NULL THEN mv.secuencia <= v.seq_hasta
+               ELSE mv.creado_el <= v.hasta_el END)
+    LEFT JOIN motivo_baja mb
+      ON mb.motivo_baja_id = mv.motivo_baja_id
+     AND mb.tenant_id = $1
+   GROUP BY v.item_id, v.ubicacion_id`;
+
+/** Clave de un grupo, para cruzar buckets contra filas sin recorrer arrays. */
+function claveGrupo(itemId: string, ubicacionId: string): string {
+  return `${itemId}|${ubicacionId}`;
 }
 
 /**
@@ -303,10 +420,46 @@ export class VarianzaService {
       listParams,
     );
 
+    const buckets = await this.cargarBuckets(tenantId, rows);
+
     return {
-      data: rows.map((r) => mapGrupo(r)),
+      data: rows.map((r) =>
+        mapGrupo(r, buckets.get(claveGrupo(r.item_id, r.ubicacion_id))),
+      ),
       meta: buildPaginationMeta(page, pageSize, total),
     };
+  }
+
+  /**
+   * Los cuatro números de todas las ventanas medibles de la página, en UNA
+   * consulta.
+   *
+   * ⚠️ **Si ninguna fila es medible, no consulta.** Sin ventanas no hay nada que
+   * agregar, y `unnest` de seis arrays vacíos sería un viaje a la base para
+   * devolver cero filas.
+   */
+  private async cargarBuckets(
+    tenantId: string,
+    rows: GrupoRow[],
+  ): Promise<Map<string, BucketRow>> {
+    const medibles = rows.filter((r) => r.recuentos >= 2);
+    const porGrupo = new Map<string, BucketRow>();
+    if (medibles.length === 0) return porGrupo;
+
+    const filas: BucketRow[] = await this.db.query(SQL_BUCKETS, [
+      tenantId,
+      medibles.map((r) => r.item_id),
+      medibles.map((r) => r.ubicacion_id),
+      medibles.map((r) => r.secuencia_desde),
+      medibles.map((r) => r.secuencia_hasta),
+      medibles.map((r) => r.desde_el),
+      medibles.map((r) => r.hasta_el),
+    ]);
+
+    for (const f of filas) {
+      porGrupo.set(claveGrupo(f.item_id, f.ubicacion_id), f);
+    }
+    return porGrupo;
   }
 
   /**

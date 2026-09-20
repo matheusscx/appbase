@@ -54,6 +54,7 @@ Todas del owner, 2026-09-19.
 | **La gráfica de varianza son barras apiladas de la varianza**, no teórico-contra-real | Medible: la varianza *es* la diferencia chica entre dos números grandes, y 51 contra 58 en dos barras se ven iguales. Apiladas muestran tamaño y composición a la vez (§ 8.2) |
 | **Va la columna "Otros"** | Un número que normalmente es cero y grita cuando no lo es. Sin ella, la identidad de § 5.4 solo se verifica en el test, y en producción una diferencia no tendría dónde aparecer |
 | **`Varianza:Leer` va al rol `Inventario · Aprobación`, no al de conteo** *(owner, 2026-09-20 — textual: "deja el permiso en aprobación")* | El reporte mide si lo contado cierra contra lo que dicen las recetas: **revisa el trabajo de quien cuenta**. Dárselo al contador lo dejaría revisándose a sí mismo, que es la misma asimetría que el recuento ya sostiene al separar contar de aplicar (`docs/features/recuento-inventario.md`) |
+| **El reporte lista solo lo contado, y arriba muestra el faltante: *"N productos activos sin conteo en este período"*** *(owner, 2026-09-20)* | Ver § 5.7. El universo son los ítems **activos**, no el catálogo: si un producto ya no se vende **se archiva**, no se esconde con una regla del reporte |
 
 ## 3. El módulo de reportes
 
@@ -328,6 +329,38 @@ ingrediente afectado**: si la receta no existe, el sistema no sabe que la hambur
 Solo se puede nombrar el **plato**. En el caso 2 sí se nombra el ingrediente.
 
 El caso 3 va al backlog como frente propio (§ 9).
+
+### 5.7 Lo que NO se contó, que también es una respuesta
+
+El reporte lista una fila por (producto, ubicación) con **al menos un** recuento aplicado en el
+rango. Un producto que nadie contó no genera fila — pero **sí se cuenta**, en una línea arriba de
+la tabla: *"43 productos activos sin conteo en este período"*, con cómo ver cuáles son.
+
+⛔ **El universo son los ítems `activo = true`, no el catálogo entero.** La razón la puso el owner
+y es de producto, no técnica: si un producto ya no se vende, **lo correcto es archivarlo**, no
+inventar una regla en el reporte para esconderlo. El ruido lo saca el dueño pausando; el reporte
+no lo disimula.
+
+Se apoya en algo que ya existe (verificado 2026-09-20): `items.activo` con default `true`
+(`item.entity.ts`), editable por `PATCH /items/:id`, y las cuatro pantallas de venta ya piden
+`activo=true` (`items.service.ts`). La pantalla que lo maneja —`configuracion/items.vue`— ya
+separa activos de pausados.
+
+Por qué no las dos alternativas obvias:
+
+| Alternativa | Por qué no |
+|---|---|
+| Contar el **catálogo entero** | Da un número que nunca baja y mezcla lo que el local ya no vende. Se vuelve paisaje y se deja de mirar |
+| Contar **solo lo que tuvo movimiento** | Deja invisible al producto **activo sin un solo movimiento** — que es exactamente el caso del robo completo, el que más importa ver |
+
+⚠️ **Arista aceptada a sabiendas** (owner, 2026-09-20): pausar un ítem que **todavía tiene stock**
+lo saca del reporte con existencias adentro. Pausar significa *"no lo vendo más"*, no *"no lo
+tengo más"*. Queda anotado, no arreglado: no bloquea nada y resolverlo es otro frente.
+
+📌 **El número tiene que ser falsable:** si la línea dice 43, que 43 sea lo que aparece al pedir el
+detalle. El owner lo va a leer como tarea pendiente, y un total que no cierra con su propia lista
+es peor que no mostrarlo. Y sale de una **agregación**, nunca de traer el catálogo y restar en
+memoria.
 
 ## 6. La plata
 
