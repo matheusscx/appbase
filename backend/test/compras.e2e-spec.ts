@@ -1242,6 +1242,85 @@ describe('Compras — borrador (e2e)', () => {
         expect(await stockEn(itemId, bodegaId)).toBe(2);
       });
 
+      /**
+       * **El kardex ordena por `secuencia`, no solo por `creado_el`.** Bajar una
+       * cantidad escribe DOS movimientos en una sola transacción —la salida del
+       * stock y, aparte, la `correccion_compra` del valor— y `creado_el` es la
+       * hora en que esa transacción EMPEZÓ (docstring de `secuencia` en
+       * `movimiento-inventario.entity.ts`), así que las dos llevan el mismo valor
+       * al microsegundo. Con `ORDER BY mv.creado_el DESC` a secas el desempate lo
+       * elegía el plan de Postgres: el "antes → después" del costo aparecía arriba
+       * o abajo del movimiento que lo causó, y podía cambiar entre dos cargas de la
+       * misma pantalla. `secuencia` es el orden real de aplicación
+       * (`docs/features/compras.md`), así que desempata por él.
+       */
+      it('bajar la cantidad empata el creado_el de sus dos movimientos, y el kardex igual pone arriba el último aplicado', async () => {
+        const itemId = await productoVacio();
+        // Stock previo a otro costo: sin él la cuenta rehecha da el mismo CPP,
+        // no hay `correccion_compra` y no hay empate que ordenar.
+        await ajustarStock(itemId, {
+          ubicacionId: localId,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+          costoUnitario: '2000',
+        });
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            lineas: [
+              {
+                itemId,
+                cantidad: '10',
+                unidadCodigo: 'unidad',
+                precioUnitario: '1000',
+              },
+            ],
+          }),
+        );
+        await confirmar(compra.id);
+
+        expect(
+          (
+            await corregirCantidad(compra.id, await primeraLinea(compra.id), {
+              cantidad: '6',
+            })
+          ).status,
+        ).toBe(200);
+
+        // `creado_el::text` y no el `Date` del driver: éste redondea a
+        // milisegundos y haría pasar por empate a dos horas distintas.
+        const enOrden: {
+          movimiento_id: string;
+          motivo: string;
+          creado_el: string;
+        }[] = await ds.query(
+          `SELECT movimiento_id, motivo, creado_el::text
+             FROM movimientos_inventario
+            WHERE item_id = $1 AND eliminado_el IS NULL
+              AND (motivo = 'correccion_compra' OR tipo = 'salida')
+            ORDER BY secuencia`,
+          [itemId],
+        );
+        expect(enOrden.map((m) => m.motivo)).toEqual([
+          'compra',
+          'correccion_compra',
+        ]);
+        // La premisa de todo esto. Si dejara de empatar, el desempate por
+        // `secuencia` no estaría tapando nada y esta prueba ya no prueba.
+        expect(enOrden[1].creado_el).toBe(enOrden[0].creado_el);
+
+        const kardex = await get<{ data: { id: string }[] }>(
+          `/api/inventario/movimientos?itemId=${itemId}`,
+        );
+        // La corrección de valor se aplicó DESPUÉS de la salida que la causó:
+        // va arriba de ella, y no a veces.
+        expect(kardex.data.slice(0, 2).map((m) => m.id)).toEqual([
+          enOrden[1].movimiento_id,
+          enOrden[0].movimiento_id,
+        ]);
+      });
+
       it('en serie, subir entra las series nuevas y bajar saca las elegidas', async () => {
         const itemId = await productoVacio({ modoInventario: 'serie' });
         const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;

@@ -2015,7 +2015,15 @@ export class InventarioService {
        LEFT JOIN ubicaciones ub ON ub.ubicacion_id = mv.ubicacion_id
        WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
          ${filters}
-       ORDER BY mv.creado_el DESC
+       -- El desempate por secuencia no es cosmético: una sola transacción
+       -- escribe VARIAS filas acá —bajar una cantidad de compra deja la salida
+       -- del stock y, aparte, su correccion_compra— y creado_el es la hora en
+       -- que esa transacción EMPEZÓ, igual al microsegundo en todas. Sin
+       -- desempate, cuál queda arriba lo elige el plan de Postgres y puede
+       -- cambiar entre dos cargas de la misma pantalla. secuencia es el orden
+       -- de aplicación (docs/features/compras.md), el mismo por el que recorre
+       -- el kardex "rehacer la cuenta".
+       ORDER BY mv.creado_el DESC, mv.secuencia DESC
        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
       listParams,
     );

@@ -38,33 +38,11 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
 Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrada: ninguna
-necesita una respuesta del owner. La que hay abierta salió de automatizar el smoke de compras
-(2026-09-20); las que había antes se cerraron ese mismo día y están en
-[`resueltos.md`](resueltos.md), salvo la del primer deploy con `Idempotency-Key`, que no era
-código y se mudó a la § 7. La del **resguardo de `reset-db.sh`** también se cerró ese día, con el
-frente de un stack por worktree, y está en `resueltos.md`.
-
-- [ ] **El kardex ordena por `creado_el DESC` sin desempatar, y una corrección de compra
-  escribe dos movimientos en la misma transacción** (frontend, medido el 2026-09-20 al
-  automatizar el smoke de compras). `GET /inventario/movimientos` ordena
-  `ORDER BY mv.creado_el DESC` (`inventario.service.ts`, la query del listado) y nada más.
-  Bajar una cantidad de una compra escribe **dos** filas —la salida del stock y, aparte, el
-  ajuste de valor `correccion_compra`— dentro de una sola transacción, así que las dos llevan
-  el **mismo `creado_el` al microsegundo** (medido el 2026-09-20: `14:36:06.861137+00` en las
-  dos, sobre una base que después se reseteó — la corroboración que queda viva es el docstring
-  de `secuencia` en `movimiento-inventario.entity.ts`, que dice que `creado_el` es la hora en
-  que **empezó la transacción**, o sea el mecanismo exacto que produce el empate. Que el porqué
-  y el arreglo salgan del mismo docstring no es casualidad: `secuencia` **es** la columna que
-  esta entrada propone agregarle al `ORDER BY`). Con el
-  empate, cuál aparece arriba en *Inventario → movimientos* queda a criterio del plan de
-  Postgres y puede cambiar entre dos cargas de la misma pantalla. No corrompe nada —los
-  saldos de cada fila son correctos en cualquier orden— pero muestra el "antes → después" del
-  costo arriba o abajo del movimiento que lo causó, sin razón visible para quien mira.
-  **El arreglo:** agregar `, mv.secuencia DESC` al `ORDER BY`; la columna existe justamente
-  para eso (es el orden de aplicación, ver `docs/features/compras.md`) y ya la usan las dos
-  queries del recorrido del kardex. **Por qué no se hizo en el frente que lo encontró:** es
-  del módulo Inventario y el frente era de tests; el e2e de compras lo esquiva aseverando los
-  saldos como conjunto, sin depender del orden.
+necesita una respuesta del owner. **Hoy no hay ninguna abierta.** La última —el kardex
+ordenando por `creado_el DESC` sin desempatar los dos movimientos que escribe una corrección
+de compra— se cerró el 2026-09-20 y está en [`resueltos.md`](resueltos.md), igual que las que
+había antes, salvo la del primer deploy con `Idempotency-Key`, que no era código y se mudó a
+la § 7.
 
 ## 2. Medir primero — no es una pregunta para el owner
 

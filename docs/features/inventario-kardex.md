@@ -593,7 +593,18 @@ Regla de negocio completa: [`PRODUCTO.md`](../PRODUCTO.md) § 8b. Dónde se hace
 
 - `async findMovimientos(tenantId: string, filtros?: { itemId?, motivo?, desde?, hasta?, skip?, take? }): Promise<{ data: MovimientoInventarioDto[], total: number, skip, take }>`
   
-  Consulta el kardex del tenant con JOINs a `items` y `usuarios` para enriquecer nombres. Retorna movimientos paginados, ordenados por `creado_el DESC`.
+  Consulta el kardex del tenant con JOINs a `items` y `usuarios` para enriquecer nombres. Retorna movimientos paginados, ordenados por `creado_el DESC, secuencia DESC`.
+
+  **El segundo criterio no es cosmético.** Una sola transacción escribe varias filas acá
+  —bajar una cantidad de compra deja la salida del stock y, aparte, su `correccion_compra`
+  ([`compras.md`](./compras.md))— y `creado_el` es la hora en que esa transacción **empezó**,
+  así que todas llevan el mismo valor al microsegundo (medido el 2026-09-20:
+  `20:29:10.817571+00` en las dos). Sin desempate, cuál queda arriba lo elige el plan de
+  Postgres y puede cambiar entre dos cargas de la misma pantalla: el "antes → después" del
+  costo aparece arriba o abajo del movimiento que lo causó. `secuencia` es el orden real de
+  aplicación —el mismo por el que recorre el kardex "rehacer la cuenta"— así que desempata
+  por él. Lo fija `compras.e2e-spec.ts`, en un test que afirma el empate **y** el orden: sin
+  el desempate se pone rojo.
 
 ---
 

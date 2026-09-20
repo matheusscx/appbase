@@ -23,6 +23,76 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El kardex desempata por `secuencia`, no solo por `creado_el` (cerrada 2026-09-20)
+
+Sale de [`pendientes.md`](pendientes.md) § 1. **El arreglo es el que la entrada proponía**
+—`, mv.secuencia DESC` en el `ORDER BY` del listado de
+`inventario.service.ts`— y lo que cuesta no es esa línea: es la prueba de que el orden dejó
+de ser azaroso.
+
+**El empate se reprodujo vivo antes de tocar nada**, porque la medición original era de una
+base que después se reseteó. Bajar de 10 a 6 la cantidad de una compra confirmada deja dos
+filas con el mismo `creado_el` al microsegundo y secuencias consecutivas:
+
+```
+ movimiento_id  | tipo   | motivo            | secuencia | creado_el
+ 0d676782-…     | salida | compra            |        18 | 2026-09-20 20:29:10.817571+00
+ 3270cf7a-…     | ajuste | correccion_compra |        19 | 2026-09-20 20:29:10.817571+00
+```
+
+**Qué lo fija.** Un test en `backend/test/compras.e2e-spec.ts` (*"bajar la cantidad empata el
+creado_el de sus dos movimientos, y el kardex igual pone arriba el último aplicado"*) que
+afirma las dos cosas por separado: que las dos filas **empatan** —con `creado_el::text`, no
+con el `Date` del driver, que redondea a milisegundos y haría pasar por empate a dos horas
+distintas— y que `GET /inventario/movimientos` devuelve arriba la `correccion_compra`, que
+es la que se aplicó después. **Mutante medido:** revertido el `ORDER BY` al anterior —solo
+esa línea, con el comentario en su lugar— el test se pone rojo con los dos ids al revés; con
+el desempate, verde. La premisa está adentro del test a propósito: si `creado_el` dejara de
+empatar, el desempate no estaría tapando nada y el test tiene que decirlo en vez de seguir
+pasando por otra razón.
+
+**Que `secuencia DESC` es el orden correcto y no solo uno determinista** sale de
+[`compras.md`](../features/compras.md), no de lo que devuelve el sistema: `secuencia` es
+"el orden real de aplicación" y el recorrido de *rehacer la cuenta* ya la usa ascendente,
+así que descendente pone arriba el último aplicado — que es lo que el listado promete con su
+`creado_el DESC`.
+
+**Lo que NO cierra, dicho para que no se lea como que sí:** el patrón se censó el mismo día y
+**sigue vivo en otros 11 sitios** que ordenan por `creado_el` sin desempate real sobre tablas
+que una sola transacción escribe varias veces — **9 listados que se ven en pantalla** (mermas,
+pagos ×3, aplicaciones de pago, anulaciones de línea de cuenta, historial de cambios de compra,
+unidades y lotes de un producto) y **2 selecciones FIFO internas** (`SELECT … FOR UPDATE` de
+`item_unidad` y de `item_lote`), donde el síntoma no es que la pantalla cambie de orden sino que
+cambie **cuál unidad o lote concreto se consume**. **No se arreglaron de arrastre**: salvo el de
+mermas —que es la misma tabla y tiene `secuencia` a mano— ninguno tiene columna de desempate
+más que una PK UUID aleatoria, así que cada uno es una decisión propia y no una línea mecánica.
+Su entrada en `pendientes.md` la abre el owner.
+
+**Texto con el que estaba abierta, verbatim:**
+
+- [ ] **El kardex ordena por `creado_el DESC` sin desempatar, y una corrección de compra
+  escribe dos movimientos en la misma transacción** (frontend, medido el 2026-09-20 al
+  automatizar el smoke de compras). `GET /inventario/movimientos` ordena
+  `ORDER BY mv.creado_el DESC` (`inventario.service.ts`, la query del listado) y nada más.
+  Bajar una cantidad de una compra escribe **dos** filas —la salida del stock y, aparte, el
+  ajuste de valor `correccion_compra`— dentro de una sola transacción, así que las dos llevan
+  el **mismo `creado_el` al microsegundo** (medido el 2026-09-20: `14:36:06.861137+00` en las
+  dos, sobre una base que después se reseteó — la corroboración que queda viva es el docstring
+  de `secuencia` en `movimiento-inventario.entity.ts`, que dice que `creado_el` es la hora en
+  que **empezó la transacción**, o sea el mecanismo exacto que produce el empate. Que el porqué
+  y el arreglo salgan del mismo docstring no es casualidad: `secuencia` **es** la columna que
+  esta entrada propone agregarle al `ORDER BY`). Con el
+  empate, cuál aparece arriba en *Inventario → movimientos* queda a criterio del plan de
+  Postgres y puede cambiar entre dos cargas de la misma pantalla. No corrompe nada —los
+  saldos de cada fila son correctos en cualquier orden— pero muestra el "antes → después" del
+  costo arriba o abajo del movimiento que lo causó, sin razón visible para quien mira.
+  **El arreglo:** agregar `, mv.secuencia DESC` al `ORDER BY`; la columna existe justamente
+  para eso (es el orden de aplicación, ver `docs/features/compras.md`) y ya la usan las dos
+  queries del recorrido del kardex. **Por qué no se hizo en el frente que lo encontró:** es
+  del módulo Inventario y el frente era de tests; el e2e de compras lo esquiva aseverando los
+
+---
+
 ## El resguardo de `reset-db.sh` miraba el host y no el objetivo (cerrada 2026-09-20)
 
 Sale de [`pendientes.md`](pendientes.md) § 1, donde se escribió el mismo día en que el bug
