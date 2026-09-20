@@ -699,7 +699,7 @@ garantía por si algún día se afloja el borrado.
 - Consume: los cuatro números de la Tarea 3.
 - Produce: `otros` poblado en `VarianzaFila`, y `private async saldosDeBorde(ventanas)`.
 
-- [ ] **Paso 1: escribir los tests que fallan**
+- [x] **Paso 1: escribir los tests que fallan**
 
 Tres casos:
 
@@ -716,13 +716,13 @@ caso 1 igual.
 ⚠️ El caso 3 es el más fácil de escribir mal: si el fixture aplica el recuento sin ventas en el
 medio, los dos números coinciden y el test no discrimina nada.
 
-- [ ] **Paso 2: correrlos y verificar que fallan**
+- [x] **Paso 2: correrlos y verificar que fallan**
 
 ```bash
 cd backend && npm test -- varianza.service
 ```
 
-- [ ] **Paso 3: implementar `saldosDeBorde` y el residuo**
+- [x] **Paso 3: implementar `saldosDeBorde` y el residuo**
 
 - Saldo en cada borde = `stock_resultante` del movimiento que apunta
   `recuento_inventario_linea.movimiento_id`. Sin `movimiento_id`, el último movimiento con
@@ -737,30 +737,54 @@ cd backend && npm test -- varianza.service
 lista solo caza un motivo nuevo; el residuo caza además un motivo conocido que cambie de
 comportamiento (spec § 5.4). Escribir ese porqué en el docblock.
 
-- [ ] **Paso 4: verificar que pasan**
+- [x] **Paso 4: verificar que pasan**
 
 ```bash
 cd backend && npm test -- varianza.service
 ```
 
-- [ ] **Paso 5: el mutante**
+- [x] **Paso 5: el mutante**
 
 Reemplazar el residuo por `new Decimal(0)`: **el caso 2 tiene que fallar** y el 1 tiene que seguir
 pasando. Si el caso 2 pasa con el mutante, el test no prueba nada. Revertir.
 
-- [ ] **Paso 6: el e2e de la identidad**
+- [x] **Paso 6: el e2e de la identidad**
 
-Escenario completo (compras, ventas de receta, merma, cortesía, traslado a bodega y vuelta, dos
-recuentos) y exigir `otros === '0.0000'`. Después, el control: insertar por SQL directo un
-movimiento con `motivo='ajuste_manual'` dentro de la ventana y exigir que `otros` valga esa
-cantidad.
+Escenario completo (compra, venta, venta cancelada, merma, cortesía y un faltante al contar) y
+exigir `otros === '0.0000'`. ✅ Hecho: la identidad cierra contra Postgres real con movimientos de
+todos los tipos.
 
-⚠️ **Acá el SQL directo es correcto y no un olor.** La regla del repo es sospechar del test que
-necesita SQL para montar su estado, porque suele significar que el caso real quedó sin cubrir. Acá
-el estado es inalcanzable **a propósito**: simula un `motivo` que el código de mañana va a escribir
-y el de hoy no. Dejarlo escrito en el test.
+⛔ **Escribí acá que ese control "no se puede montar" y lo etiqueté como "medido, no supuesto".
+Las dos cosas eran falsas.** Lo cazó la revisión independiente (2026-09-20) y es el peor error del
+frente, porque la etiqueta le daba autoridad a algo que no había verificado.
 
-- [ ] **Paso 7: gate y commit**
+**Lo que pasó:** el plan pedía falsear un movimiento `ajuste_manual` con SQL directo. Mi primer
+intento hizo eso, la invariante `costo-stock-choke-point` lo rechazó —correctamente: prohíbe
+escribir `stock_ubicacion` fuera de `inventario.service`, y barre también `backend/test`—, y de ahí
+concluí que **el caso era inalcanzable por la API**. No lo era.
+
+**`ajuste_manual` lo escribe la API**: `AjusteStockDto` lo acepta junto con `compra`, `devolucion`
+e `inventario_inicial`, y `ItemsService.ajustarStock` lo pasa tal cual al kardex, que actualiza
+`stock_ubicacion` **dentro** de su choke-point. Ninguna invariante se toca.
+
+⚠️ **Y el dato estaba a la vista, en mi propio archivo:** el e2e usa
+`PATCH /items/:id/stock` con `motivo: 'compra'` **dos líneas antes** del comentario donde afirmé
+que ese endpoint no podía producir el caso. Vi que la invariante rechazaba *mi manera* de montarlo
+y lo leí como que el caso era imposible, en vez de buscar otra manera.
+
+📌 **Lo que sí era cierto:** sin el `UPDATE` prohibido, *ese* test no probaba nada —el delta caía
+entero en "sin explicación"—. Pero eso solo invalidaba el camino del SQL directo, no el caso.
+
+**Cómo quedó:** el test existe, se monta por la API real, y el mutante que cablea `otros` a cero lo
+mata. Y destapó algo de producto que ahora está escrito en el código: **todo tenant que use
+"Ajustar stock" dentro de una ventana va a ver «Otros» distinto de cero.** Es la conducta correcta
+—el reporte avisa que hay algo que no sabe explicar— pero nadie lo había dicho.
+
+📌 Es la lección de la Tarea 3 al revés: allá el unitario no podía probar la clasificación; acá el
+e2e no puede probar el detector. Cada uno cubre lo que el otro no, y **decir cuál es cuál importa
+más que tener los dos**.
+
+- [x] **Paso 7: gate y commit**
 
 ```bash
 git add backend/src/modules/reportes backend/test/reportes-varianza.e2e-spec.ts
@@ -994,6 +1018,32 @@ git commit -m "feat(reportes): resumen de varianza con top 10 y aviso de teóric
 
 ## Hito de integración — al cerrar la Tarea 6
 
+- [ ] **Entrada nueva en `docs/agent/anti-patterns.md`: el mock de `Db` tapa el SQL.**
+  Encargo de la sesión orquestadora (2026-09-20), con el presupuesto de **30 líneas por entrada**
+  que ahora rige ese archivo.
+
+  Lo que tiene que decir, con los números medidos en este frente —**ya van dos veces, así que es
+  patrón del módulo y no accidente**—:
+  - Tarea 2: mutar `LEFT JOIN` → `JOIN` **sobrevivió a los 9 unitarios**. El `LEFT` era lo único
+    que mantenía en el reporte al recuento de delta cero.
+  - Tarea 3: **los cuatro** mutantes de clasificación sobrevivieron a los **18** unitarios. La
+    clasificación vive entera en el SQL y el mock devuelve los buckets **ya clasificados**.
+  - La trampa que lo esconde: un test que le **pasa la respuesta al mock** y después la afirma no
+    prueba nada sobre la consulta. El mío se llamaba *"secuencia en null → sigue siendo medible"*
+    y pasaba porque el fixture ya traía el `null`.
+  - La salida: **dos controles rotulados**, débil (aserción sobre el texto del SQL, para el ciclo
+    corto) y fuerte (e2e contra Postgres que monte el caso). Decir cuál es cuál en el propio test.
+
+- [ ] **Regla de commits, desde 2026-09-20:** si una decisión del owner llega **a mitad de una
+  tarea**, va en **su propio commit** aunque sean tres líneas. El commit de la Tarea 3 mezcló el
+  cierre con la decisión del faltante de conteo (§ 5.7, que es de la Tarea 4); la revisión lo
+  marcó con razón. No se deshace —ya está en main—, pero no se repite.
+
+- [ ] ⚠️ **El stack compartido va a tener cola en la Tarea 7.** A la sesión de compras se suma el
+  frente de los cuatro mecánicos (puerto 5439). **Pedir el turno con anticipación**, no al llegar.
+  Y ⛔ **no informarle a otra sesión sobre el estado del reparto**: ese dato lo tiene la
+  orquestadora y el mío ya estuvo desactualizado una vez.
+
 Decisión de la sesión orquestadora (2026-09-19): **no esperar a la Tarea 10 para integrar.** Main
 se mueve rápido —hoy hubo dos rebases seguidos por commits de docs de otras sesiones— y diez
 tareas afuera es mucha superficie de conflicto. Se mergea la mitad de backend y las tareas 7–10
@@ -1127,6 +1177,44 @@ cd frontend && npm test -- AppRangoFechas varianza
 ```
 
 - [ ] **Paso 7: el e2e de navegador, con el rol real**
+
+⛔⛔ **ANTES DE TOCAR `reset-db.sh`: si el `.env` apunta al Postgres aislado, ese script BORRA EL
+VOLUMEN DEL STACK COMPARTIDO de todas las sesiones — y termina diciendo que salió bien.**
+Verificado en el código el 2026-09-20 (aviso de la sesión orquestadora, confirmado línea por
+línea):
+
+- `scripts/reset-db.sh:142` — el resguardo acepta `*@postgres:*|*@localhost:*|*@127.0.0.1:*`
+  **sin mirar el puerto**, así que `@localhost:5436` (el aislado de este worktree) pasa el filtro
+  como si fuera el compose.
+- `scripts/reset-db.sh:176` — `compose down -v`, que borra el volumen. Y como el nombre del
+  proyecto de compose es el mismo para todas las sesiones, recrea los contenedores **compartidos**
+  leyendo este `.env`, o sea apuntando a una base que no es la de ellos.
+
+Ya le pasó a la sesión de compras hoy: dejó el stack con `Seed complete: 0` y el backend sin
+responder.
+
+**La secuencia correcta, con el turno ya concedido:**
+
+```bash
+/Users/m2pro/cmatheus/startup-app/scripts/db-aislada.sh borrar
+```
+
+```bash
+grep '^DATABASE_URL=' /Users/m2pro/cmatheus/startup-app/.claude/worktrees/reportes-varianza/.env
+```
+
+⚠️ **Ese `grep` no es ceremonia: es el único chequeo que el script NO hace.** Tiene que decir
+`@postgres:5432`. Recién ahí:
+
+```bash
+/Users/m2pro/cmatheus/startup-app/scripts/reset-db.sh
+```
+
+Y al terminar el Playwright, `db-aislada.sh reset 5436` para recuperar la base propia.
+
+⛔ **No arreglar el script**: no es alcance de este frente, es de la orquestadora, y hay otra
+sesión que quizá lo tome. ⚠️ **Y el turno se pide con anticipación**: hay cola (compras y el frente
+de los cuatro mecánicos).
 
 `frontend/e2e/reportes/varianza.spec.ts`, entrando con el usuario del rol **`Inventario ·
 Aprobación`** (el que la Tarea 1 sembró), **no** con el admin. El login no se tipea: se usa
@@ -1273,6 +1361,21 @@ Y `EXPLAIN (ANALYZE, BUFFERS)` de las consultas del listado y del resumen contra
 worktree (5436). Anotar el plan y los tiempos **antes** de tocar nada.
 
 - [ ] **Paso 3: decidir con el número en la mano**
+
+📌 **Candidato nuevo, levantado por la revisión de la Tarea 4 (2026-09-20): `SQL_SALDOS`.** Hace
+**dos subconsultas correlacionadas por fila** (`ORDER BY secuencia DESC LIMIT 1`), o sea 2 ×
+`pageSize` lookups dentro de una sola sentencia — cumple la letra de "sin N+1" pero no está
+medido.
+
+El punto fino: el único índice disponible es `idx_movimientos_inventario_item_secuencia`
+**`(item_id, secuencia)`, sin `ubicacion_id`**. Para un ítem con movimientos en varias ubicaciones
+—bodega más local, que es el caso que este reporte mira— el backward scan por `item_id` puede
+recorrer filas de **otras** ubicaciones antes de dar con la que matchea. Con un producto que se
+mueve mucho en el local y poco en la bodega, la consulta de la bodega paga el recorrido entero.
+
+⚠️ Y acá la **distribución del seed decide el resultado**: con todos los movimientos en una sola
+ubicación el índice parece perfecto y la conclusión sería falsa. El seed de medición tiene que
+repartir el mismo ítem entre local y bodega.
 
 ⚠️ **El candidato de la primera versión de este plan estaba mal elegido, y la corrección ya está
 medida** (2026-09-19). Decía `(tenant_id, creado_el)` sobre `movimientos_inventario`, pero **esa

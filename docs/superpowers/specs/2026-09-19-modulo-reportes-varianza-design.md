@@ -288,11 +288,26 @@ clasificó: es un bug, no un redondeo.
 Otros = consumo_real_por_saldos  −  (Teórico + Merma + Cortesía + Sin explicación)
 ```
 
-⚠️ **Se calcula como residuo a propósito, no como "la suma de los motivos que no conozco".** Un
-bucket por lista de motivos solo caza un `motivo` **nuevo** que alguien agregue sin leer este
-archivo. El residuo caza además el caso peor: un motivo **conocido** que empiece a comportarse
-distinto —un `ajuste_costo` que hoy no mueve stock y mañana sí, una `devolucion` que empiece a
-reponer ingredientes de receta—. Ese no cambia de nombre y una lista no lo vería.
+⛔ **Qué caza y qué NO — corregido el 2026-09-20, la primera versión de esta spec decía de más.**
+Afirmaba que el residuo caza además "un motivo **conocido** que empiece a comportarse distinto,
+como una `devolucion` que empiece a reponer ingredientes de receta". **Es falso por álgebra**, y lo
+levantó la revisión independiente midiéndolo con un test: todo movimiento que cae en un bucket
+existente mueve el consumo por saldos **y** el consumo por buckets en la misma cantidad, así que el
+residuo queda en cero **por construcción**. El residuo no puede ver nada que ya esté clasificado.
+
+**Lo que sí caza:** un movimiento que **mueve stock y no cae en ningún bucket ni en la lista de
+abastecimiento**. Hoy eso es `ajuste_manual`, que la API escribe por `PATCH /items/:id/stock`;
+mañana, cualquier `motivo` nuevo que alguien agregue sin leer esto. Sigue siendo mejor que un
+bucket por lista de motivos desconocidos —esa hay que acordarse de actualizarla— pero el alcance
+es ése y no más.
+
+📌 **Ese hallazgo destapó un bug real en el teórico, ya corregido.** El mismo endpoint acepta
+`motivo: 'devolucion'` **sin venta detrás**, y el teórico restaba toda entrada
+`devolucion`/`anulacion` sin mirar el origen: una devolución manual bajaba el consumo teórico —o lo
+ponía negativo— como si hubiera revertido una venta inexistente. La resta ahora exige
+`venta_id IS NOT NULL`; las tres escrituras que vienen de una venta lo llevan y el ajuste manual
+no. Con el filtro, esa devolución cae en «Otros», que es donde el reporte dice *"no sé explicar
+esto"*.
 
 Normalmente es **cero** y se muestra apagado; cuando no lo es, grita. Lo que cuesta: obliga a
 traer el saldo de los dos bordes (§ 5.4, `stock_resultante`), que sin esta columna se podría

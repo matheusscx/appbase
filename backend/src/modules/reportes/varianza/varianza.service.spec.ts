@@ -70,11 +70,13 @@ describe('VarianzaService', () => {
   function mockGrupos(
     filas: Record<string, unknown>[],
     buckets: Record<string, unknown>[] = [],
+    saldos: Record<string, unknown>[] = [],
   ): void {
     dbQueryMock
       .mockResolvedValueOnce([{ total: filas.length }])
       .mockResolvedValueOnce(filas)
-      .mockResolvedValueOnce(buckets);
+      .mockResolvedValueOnce(buckets)
+      .mockResolvedValueOnce(saldos);
   }
 
   /**
@@ -91,6 +93,16 @@ describe('VarianzaService', () => {
     merma: '0.0000',
     cortesia: '0.0000',
     sin_explicacion: '0.0000',
+    abastecimiento: '0.0000',
+    ...overrides,
+  });
+
+  /** Fila cruda de la consulta de saldos: el stock en cada borde de la ventana. */
+  const saldoRow = (overrides: Record<string, unknown> = {}) => ({
+    item_id: HARINA,
+    ubicacion_id: LOCAL,
+    saldo_desde: '0.0000',
+    saldo_hasta: '0.0000',
     ...overrides,
   });
 
@@ -350,11 +362,23 @@ describe('VarianzaService', () => {
 
       const res = await service.findAll(TENANT, RANGO);
 
-      expect(dbQueryMock.mock.calls).toHaveLength(3);
       expect(res.data.find((f) => f.itemId === HARINA)?.teorico).toBe(
         '13.0000',
       );
       expect(res.data.find((f) => f.itemId === OTRO)?.teorico).toBe('17.0000');
+
+      // ⚠️ La aserción que importa NO es un número fijo de llamadas: ése hay que
+      // corregirlo en cada tarea que sume una consulta, y entonces deja de
+      // proteger nada. Lo que define un N+1 es que las llamadas **crezcan con
+      // la cantidad de filas**, así que eso es lo que se compara: dos grupos
+      // tienen que costar lo mismo que uno.
+      const conDosGrupos = dbQueryMock.mock.calls.length;
+
+      dbQueryMock.mockReset();
+      mockGrupos([grupoRow()], [bucketRow()], [saldoRow()]);
+      await service.findAll(TENANT, RANGO);
+
+      expect(dbQueryMock.mock.calls).toHaveLength(conDosGrupos);
     });
 
     /**
@@ -362,6 +386,145 @@ describe('VarianzaService', () => {
      * buckets igual sería un viaje a la base para nada.
      */
     it('no consulta el kardex si ninguna fila es medible', async () => {
+      mockGrupos([grupoRow({ recuentos: 1, recuento_final_id: null })]);
+
+      await service.findAll(TENANT, RANGO);
+
+      expect(dbQueryMock.mock.calls).toHaveLength(2);
+    });
+  });
+
+  describe('la columna «Otros»', () => {
+    /**
+     * ⛔ **Lo que este bloque prueba y lo que no.** «Otros» es el **residuo**
+     * entre las dos formas de calcular el consumo real, y esa resta es
+     * aritmética en TypeScript: **acá sí se prueba de verdad**. Lo que NO se
+     * puede probar con `Db` mockeado es QUÉ movimientos cuentan como
+     * abastecimiento —eso vive en el `FILTER` del SQL— ni que los saldos de
+     * borde sean los correctos. Eso lo cubre el e2e (lección medida en la
+     * Tarea 3: los cuatro mutantes de clasificación sobrevivieron a los
+     * unitarios).
+     *
+     * La identidad que se verifica:
+     *   consumoPorSaldos = saldoDesde + abastecimiento − saldoHasta
+     *   otros            = consumoPorSaldos − (teórico + merma + cortesía + sinExpl.)
+     */
+    it('cuando la cuenta cierra, otros da exactamente cero', async () => {
+      // 100 al abrir, 40 de abastecimiento, 110 al cerrar → consumo real 30.
+      // Buckets: 21 de venta + 6 de merma + 3 sin explicación = 30. Cierra.
+      mockGrupos(
+        [grupoRow()],
+        [
+          bucketRow({
+            teorico: '21.0000',
+            merma: '6.0000',
+            sin_explicacion: '3.0000',
+            abastecimiento: '40.0000',
+          }),
+        ],
+        [saldoRow({ saldo_desde: '100.0000', saldo_hasta: '110.0000' })],
+      );
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toMatchObject({ otros: '0.0000' });
+    });
+
+    /**
+     * ⚠️ **El caso que distingue el detector del adorno.** Un `otros` cableado a
+     * `'0.0000'` pasa el test de arriba igual; solo falla si la cuenta NO cierra
+     * y el número tiene que valer la diferencia exacta.
+     *
+     * Acá el consumo por saldos es 30 y los buckets suman 23: hay 7 que ningún
+     * bucket clasificó — un `motivo` que el reporte no conoce.
+     */
+    it('cuando NO cierra, otros vale exactamente la diferencia', async () => {
+      mockGrupos(
+        [grupoRow()],
+        [
+          bucketRow({
+            teorico: '21.0000',
+            merma: '2.0000',
+            abastecimiento: '40.0000',
+          }),
+        ],
+        [saldoRow({ saldo_desde: '100.0000', saldo_hasta: '110.0000' })],
+      );
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toMatchObject({ otros: '7.0000' });
+    });
+
+    /**
+     * El residuo puede salir **negativo**: significa que los buckets explican
+     * MÁS consumo del que los saldos sostienen. Es tan anómalo como el positivo
+     * y no se puede tapar con un valor absoluto, que lo haría ver como una
+     * pérdida más.
+     */
+    it('un residuo negativo se muestra negativo, no en valor absoluto', async () => {
+      mockGrupos(
+        [grupoRow()],
+        [
+          bucketRow({
+            teorico: '35.0000',
+            abastecimiento: '40.0000',
+          }),
+        ],
+        [saldoRow({ saldo_desde: '100.0000', saldo_hasta: '110.0000' })],
+      );
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toMatchObject({ otros: '-5.0000' });
+    });
+
+    /**
+     * ⚠️ **`otros` viaja SIEMPRE, incluso en `'0.0000'`.** Omitirlo cuando es
+     * cero dejaría al consumidor sin poder distinguir "cerró perfecto" de "esta
+     * versión todavía no lo calcula", que es justo la ambigüedad que la columna
+     * existe para cerrar.
+     */
+    it('otros está presente en la respuesta aunque valga cero', async () => {
+      mockGrupos([grupoRow()], [bucketRow()], [saldoRow()]);
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toHaveProperty('otros', '0.0000');
+    });
+
+    it('en una fila no medible, otros es null como los demás números', async () => {
+      mockGrupos([grupoRow({ recuentos: 1, recuento_final_id: null })]);
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toMatchObject({ medible: false, otros: null });
+    });
+
+    /**
+     * Los saldos de TODAS las ventanas salen en una consulta, no una por fila.
+     * Con dos grupos medibles el total de llamadas sigue siendo cuatro: COUNT,
+     * página, buckets y saldos.
+     */
+    it('resuelve los saldos de todas las ventanas en una sola consulta', async () => {
+      const OTRO = 'item-aceite';
+      mockGrupos(
+        [grupoRow(), grupoRow({ item_id: OTRO, item_nombre: 'Aceite' })],
+        [bucketRow(), bucketRow({ item_id: OTRO })],
+        [saldoRow(), saldoRow({ item_id: OTRO })],
+      );
+
+      await service.findAll(TENANT, RANGO);
+      const conDosGrupos = dbQueryMock.mock.calls.length;
+
+      dbQueryMock.mockReset();
+      mockGrupos([grupoRow()], [bucketRow()], [saldoRow()]);
+      await service.findAll(TENANT, RANGO);
+
+      expect(dbQueryMock.mock.calls).toHaveLength(conDosGrupos);
+    });
+
+    it('no consulta saldos si ninguna fila es medible', async () => {
       mockGrupos([grupoRow({ recuentos: 1, recuento_final_id: null })]);
 
       await service.findAll(TENANT, RANGO);

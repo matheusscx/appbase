@@ -218,13 +218,82 @@ const SELECT_GRUPOS = `
          (array_agg(mv.secuencia   ORDER BY r.aplicado_el DESC, r.recuento_id DESC))[1] AS secuencia_hasta`;
 
 /**
+ * El **residuo** entre las dos formas de calcular el mismo consumo real:
+ *
+ * ```
+ * porSaldos  = saldoDesde + abastecimiento − saldoHasta
+ * porBuckets = teórico + merma + cortesía + sin explicación
+ * otros      = porSaldos − porBuckets
+ * ```
+ *
+ * ⛔ **Estructuralmente vale CERO, y por eso sirve.** Con los dos bordes
+ * apoyados en conteos aplicados —donde libro y realidad coinciden por
+ * construcción— las dos cuentas son la misma; la demostración está en la spec
+ * § 5.4. Que dé distinto de cero significa que hubo movimientos que el reporte
+ * **no supo clasificar**.
+ *
+ * ⛔ **QUÉ CAZA Y QUÉ NO, medido — y la primera versión de este docblock decía
+ * de más.** Afirmaba que el residuo caza "un motivo conocido que empiece a
+ * comportarse distinto, como una `devolucion` que empiece a reponer
+ * ingredientes de receta". **Es falso por álgebra**, y lo levantó la revisión
+ * independiente comprobándolo con un test: todo movimiento que cae en un bucket
+ * existente mueve `porSaldos` **y** `porBuckets` por la misma cantidad, así que
+ * el residuo queda en cero **por construcción**. El residuo no puede ver nada
+ * que ya esté clasificado.
+ *
+ * Lo que SÍ caza: un movimiento que **mueve stock y no cae en ningún bucket ni
+ * en `MOTIVOS_ABASTECIMIENTO`**. Hoy eso es `ajuste_manual`, escrito por
+ * `PATCH /items/:id/stock`; mañana, cualquier `motivo` nuevo que alguien
+ * agregue sin leer este archivo. Sigue siendo mejor que una lista de "motivos
+ * que no conozco" —esa hay que acordarse de actualizarla—, pero el alcance es
+ * ése y no más.
+ *
+ * 📌 **Y ese hallazgo destapó un bug real, ya corregido acá:** el mismo endpoint
+ * acepta `motivo: 'devolucion'` **sin venta**, y el teórico restaba toda entrada
+ * `devolucion`/`anulacion` sin mirar el origen — así que una devolución manual
+ * bajaba el consumo teórico (o lo hacía negativo) como si hubiera revertido una
+ * venta que nunca existió. Por eso esa resta ahora exige `venta_id IS NOT NULL`:
+ * las tres escrituras que vienen de una venta lo llevan
+ * (`VentasService.cancelarUnaVez` y las dos de nota de crédito) y
+ * `ItemsService.ajustarStock` no lo pasa nunca. Con el filtro, la devolución
+ * manual deja de ensuciar el teórico y cae donde corresponde: en «Otros».
+ *
+ * El precio es traer el saldo de los dos bordes (`SQL_SALDOS`), que sin esta
+ * columna se podría ahorrar. Es lo que hace que la identidad corra **en
+ * producción** y no solo en el test de e2e.
+ *
+ * Un saldo en `null` —un (item, ubicación) sin ningún movimiento hasta ese
+ * borde— se trata como cero: no hay stock del cual partir.
+ */
+function residuo(
+  bucket: BucketRow | undefined,
+  saldo: SaldoRow | undefined,
+): string {
+  const d = (valor: string | null | undefined) => new Decimal(valor ?? 0);
+
+  const porSaldos = d(saldo?.saldo_desde)
+    .plus(d(bucket?.abastecimiento))
+    .minus(d(saldo?.saldo_hasta));
+  const porBuckets = d(bucket?.teorico)
+    .plus(d(bucket?.merma))
+    .plus(d(bucket?.cortesia))
+    .plus(d(bucket?.sin_explicacion));
+
+  return porSaldos.minus(porBuckets).toFixed(ESCALA_COSTO);
+}
+
+/**
  * Una fila con **menos de dos** recuentos aplicados en el rango no se puede
  * medir: sin dos bordes no hay ventana. Aparece igual —alguien contó ese
  * producto y merece saber que no alcanza— pero con todos los números en `null`,
  * que es la diferencia entre *"no se perdió nada"* y *"todavía no se puede
  * medir"*.
  */
-function mapGrupo(r: GrupoRow, bucket: BucketRow | undefined): VarianzaFila {
+function mapGrupo(
+  r: GrupoRow,
+  bucket: BucketRow | undefined,
+  saldo: SaldoRow | undefined,
+): VarianzaFila {
   const medible = r.recuentos >= 2;
 
   /**
@@ -253,7 +322,7 @@ function mapGrupo(r: GrupoRow, bucket: BucketRow | undefined): VarianzaFila {
     merma: medible ? num(bucket?.merma) : null,
     cortesia: medible ? num(bucket?.cortesia) : null,
     sinExplicacion: medible ? num(bucket?.sin_explicacion) : null,
-    otros: null,
+    otros: medible ? num(residuo(bucket, saldo)) : null,
     costoSinExplicacion: [],
     faltaCosto: false,
   };
@@ -267,7 +336,91 @@ interface BucketRow {
   merma: string;
   cortesia: string;
   sin_explicacion: string;
+  /** Entradas menos salidas de los motivos de ABASTECIMIENTO. No es consumo. */
+  abastecimiento: string;
 }
+
+/** Fila cruda de la consulta de saldos: el stock en cada borde de la ventana. */
+interface SaldoRow {
+  item_id: string;
+  ubicacion_id: string;
+  saldo_desde: string | null;
+  saldo_hasta: string | null;
+}
+
+/**
+ * Los motivos que **abastecen** y por lo tanto no son consumo. Van como `text[]`
+ * bindeado y no inline en el SQL, para que la lista viva en un solo lugar.
+ *
+ * ⛔ **Lo que NO esté acá ni en un bucket de consumo cae en «Otros», y eso es
+ * exactamente lo que se quiere.** El caso vivo hoy es **`ajuste_manual`**, que
+ * la API escribe por `PATCH /items/:id/stock` (`AjusteStockDto` lo acepta junto
+ * con `compra`, `devolucion` e `inventario_inicial`). No es consumo ni
+ * abastecimiento, pero **mueve stock**, así que corre el saldo del borde y el
+ * residuo lo muestra por su cantidad exacta.
+ *
+ * 📌 **Consecuencia en producción, no solo en el test:** todo tenant que use
+ * "Ajustar stock" dentro de una ventana va a ver «Otros» distinto de cero. Es
+ * la conducta correcta —el reporte avisa que hay algo que no sabe explicar— y
+ * está fijada por un e2e que lo monta con ese endpoint real.
+ *
+ * `ajuste_costo` no entra porque **no mueve stock**: sumarlo correría los saldos
+ * sin que haya habido movimiento. `correccion_compra` tampoco mueve cantidad
+ * —se escribe siempre con `tipo:'ajuste'` y `cantidad: 0`
+ * (`inventario.service.ts`, `MOTIVOS_DE_VALOR`)—, así que su presencia en la
+ * lista no cambia ningún número; se deja nombrado porque es de la familia de
+ * abastecimiento y quien lea la lista lo va a buscar acá.
+ */
+const MOTIVOS_ABASTECIMIENTO = [
+  'compra',
+  'correccion_compra',
+  'inventario_inicial',
+  'traslado',
+];
+
+/**
+ * El saldo de stock en cada borde de la ventana: el `stock_resultante` del
+ * movimiento del recuento que la cierra, o —si ese recuento **dio justo** y no
+ * escribió movimiento— el del último movimiento anterior a `aplicado_el`.
+ *
+ * ⚠️ **NO es `cantidad_contada`, y confundirlos es el error natural.** El
+ * recuento aplica un **delta** sobre el stock vigente al aplicar, no setea el
+ * valor contado: si se contaron 11.800 a las 10:00 y se vendieron 500 antes de
+ * aplicar a las 14:00, el saldo al cerrar es 11.300
+ * (`docs/features/recuento-inventario.md`). Tomar lo contado metería esas 500
+ * en el residuo como si nadie las explicara.
+ *
+ * `<=` y no `<`: el saldo del borde es el de **después** de aplicar ese
+ * recuento — que es el mismo instante en que arranca la ventana siguiente.
+ */
+const SQL_SALDOS = `
+  WITH v(item_id, ubicacion_id, seq_desde, seq_hasta, desde_el, hasta_el) AS (
+    SELECT * FROM unnest($2::uuid[], $3::uuid[], $4::bigint[], $5::bigint[],
+                         $6::timestamptz[], $7::timestamptz[])
+  )
+  SELECT v.item_id,
+         v.ubicacion_id,
+         (SELECT m.stock_resultante
+            FROM movimientos_inventario m
+           WHERE m.item_id = v.item_id
+             AND m.ubicacion_id = v.ubicacion_id
+             AND m.tenant_id = $1
+             AND m.eliminado_el IS NULL
+             AND (CASE WHEN v.seq_desde IS NOT NULL THEN m.secuencia <= v.seq_desde
+                       ELSE m.creado_el <= v.desde_el END)
+           ORDER BY m.secuencia DESC
+           LIMIT 1) AS saldo_desde,
+         (SELECT m.stock_resultante
+            FROM movimientos_inventario m
+           WHERE m.item_id = v.item_id
+             AND m.ubicacion_id = v.ubicacion_id
+             AND m.tenant_id = $1
+             AND m.eliminado_el IS NULL
+             AND (CASE WHEN v.seq_hasta IS NOT NULL THEN m.secuencia <= v.seq_hasta
+                       ELSE m.creado_el <= v.hasta_el END)
+           ORDER BY m.secuencia DESC
+           LIMIT 1) AS saldo_hasta
+    FROM v`;
 
 /**
  * Los cuatro números, agregados en UNA consulta para **todas** las ventanas de
@@ -295,11 +448,10 @@ interface BucketRow {
  * ubicación no ensucia ninguna de las dos cuentas.
  *
  * ⚠️ **Y lo que no encaje en ningún bucket queda SIN clasificar a propósito**,
- * no se fuerza a ninguno: `ajuste_manual` es el caso que existe hoy en la
- * entidad sin que nada lo escriba. El residuo de la Tarea 4 («Otros») es el que
- * lo hace visible. Enumerar acá "los cinco motivos excluidos" envejecería mal:
- * un `motivo` nuevo entraría en silencio y la lista seguiría pareciendo
- * completa.
+ * no se fuerza a ninguno: `ajuste_manual` —que la API escribe por
+ * `PATCH /items/:id/stock`— es el caso vivo. El residuo («Otros») es el que lo
+ * hace visible. Enumerar acá "los motivos excluidos" envejecería mal: uno nuevo
+ * entraría en silencio y la lista seguiría pareciendo completa.
  *
  * 📌 **`motivo_baja` se lee sin filtro de `eliminado_el`, y el motivo es que el
  * caso NO EXISTE** (medido el 2026-09-20, no razonado): `MotivosBajaService.remove`
@@ -330,7 +482,8 @@ const SQL_BUCKETS = `
          COALESCE(SUM(mv.cantidad) FILTER (
            WHERE mv.motivo = 'venta' AND mv.tipo = 'salida'), 0)
          - COALESCE(SUM(mv.cantidad) FILTER (
-           WHERE mv.motivo IN ('anulacion', 'devolucion') AND mv.tipo = 'entrada'), 0)
+           WHERE mv.motivo IN ('anulacion', 'devolucion') AND mv.tipo = 'entrada'
+             AND mv.venta_id IS NOT NULL), 0)
            AS teorico,
          COALESCE(SUM(mv.cantidad) FILTER (
            WHERE mv.motivo = 'merma' AND mv.tipo = 'salida'
@@ -342,7 +495,12 @@ const SQL_BUCKETS = `
            WHERE mv.motivo = 'recuento' AND mv.tipo = 'salida'), 0)
          - COALESCE(SUM(mv.cantidad) FILTER (
            WHERE mv.motivo = 'recuento' AND mv.tipo = 'entrada'), 0)
-           AS sin_explicacion
+           AS sin_explicacion,
+         COALESCE(SUM(mv.cantidad) FILTER (
+           WHERE mv.motivo = ANY($8::text[]) AND mv.tipo = 'entrada'), 0)
+         - COALESCE(SUM(mv.cantidad) FILTER (
+           WHERE mv.motivo = ANY($8::text[]) AND mv.tipo = 'salida'), 0)
+           AS abastecimiento
     FROM v
     JOIN movimientos_inventario mv
       ON mv.item_id = v.item_id
@@ -421,11 +579,13 @@ export class VarianzaService {
     );
 
     const buckets = await this.cargarBuckets(tenantId, rows);
+    const saldos = await this.cargarSaldos(tenantId, rows);
 
     return {
-      data: rows.map((r) =>
-        mapGrupo(r, buckets.get(claveGrupo(r.item_id, r.ubicacion_id))),
-      ),
+      data: rows.map((r) => {
+        const clave = claveGrupo(r.item_id, r.ubicacion_id);
+        return mapGrupo(r, buckets.get(clave), saldos.get(clave));
+      }),
       meta: buildPaginationMeta(page, pageSize, total),
     };
   }
@@ -447,6 +607,36 @@ export class VarianzaService {
     if (medibles.length === 0) return porGrupo;
 
     const filas: BucketRow[] = await this.db.query(SQL_BUCKETS, [
+      tenantId,
+      medibles.map((r) => r.item_id),
+      medibles.map((r) => r.ubicacion_id),
+      medibles.map((r) => r.secuencia_desde),
+      medibles.map((r) => r.secuencia_hasta),
+      medibles.map((r) => r.desde_el),
+      medibles.map((r) => r.hasta_el),
+      MOTIVOS_ABASTECIMIENTO,
+    ]);
+
+    for (const f of filas) {
+      porGrupo.set(claveGrupo(f.item_id, f.ubicacion_id), f);
+    }
+    return porGrupo;
+  }
+
+  /**
+   * El saldo de stock en los dos bordes de cada ventana medible, en UNA
+   * consulta. Mismo corto-circuito que `cargarBuckets`: sin ventanas no hay
+   * bordes que buscar.
+   */
+  private async cargarSaldos(
+    tenantId: string,
+    rows: GrupoRow[],
+  ): Promise<Map<string, SaldoRow>> {
+    const medibles = rows.filter((r) => r.recuentos >= 2);
+    const porGrupo = new Map<string, SaldoRow>();
+    if (medibles.length === 0) return porGrupo;
+
+    const filas: SaldoRow[] = await this.db.query(SQL_SALDOS, [
       tenantId,
       medibles.map((r) => r.item_id),
       medibles.map((r) => r.ubicacion_id),

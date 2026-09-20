@@ -35,6 +35,7 @@ interface VarianzaFilaResp {
   merma: string | null;
   cortesia: string | null;
   sinExplicacion: string | null;
+  otros: string | null;
 }
 
 /**
@@ -393,6 +394,161 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
     expect(fila.medible).toBe(true);
     expect(fila.merma).toBe('3.0000');
     expect(fila.cortesia).toBe('7.0000');
+  });
+
+  /**
+   * ⛔ **La identidad de la spec § 5.4, corriendo contra Postgres real.** Con los
+   * dos bordes apoyados en conteos aplicados, el consumo calculado por SALDOS y
+   * el calculado por BUCKETS son la misma cuenta, así que «Otros» vale cero.
+   *
+   * El escenario mezcla de todo a propósito —compra, venta, venta cancelada,
+   * merma, cortesía y un faltante descubierto al contar—, porque un cero con un
+   * solo tipo de movimiento no prueba que la identidad cierre: prueba que casi
+   * no hay nada que sumar.
+   */
+  it('con movimientos de todos los tipos, la identidad cierra y Otros da cero', async () => {
+    const itemId = await crearProducto('200');
+    await contarYAplicar(itemId, '200');
+
+    await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'entrada',
+        motivo: 'compra',
+        ubicacionId: localId,
+        cantidad: '30',
+        costoUnitario: '100',
+      })
+      .expect(200);
+
+    await vender(itemId, '17');
+    const cancelable = await vender(itemId, '5');
+    await request(app.getHttpServer())
+      .post(`/api/ventas/${cancelable}/anular`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ motivo: 'E2E identidad' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/api/mermas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId,
+        ubicacionId: localId,
+        cantidad: '3',
+        motivoBajaId: motivoMermaId,
+        comentario: 'Merma E2E identidad',
+      })
+      .expect(201);
+
+    await anularEnMesa(itemId, '2', motivoCortesiaId);
+
+    // 200 + 30 − 17 − 3 − 2 = 208 en el libro; se cuentan 204 → faltan 4.
+    await contarYAplicar(itemId, '204');
+
+    const fila = await filaDe(itemId);
+
+    expect(fila.medible).toBe(true);
+    expect(fila.teorico).toBe('17.0000');
+    expect(fila.merma).toBe('3.0000');
+    expect(fila.cortesia).toBe('2.0000');
+    expect(fila.sinExplicacion).toBe('4.0000');
+    expect(fila.otros).toBe('0.0000');
+  });
+
+  /**
+   * ⛔ **El caso que «Otros» existe para detectar: un movimiento que ningún
+   * bucket clasifica.**
+   *
+   * `ajuste_manual` no es consumo —no lo captura teórico, merma, cortesía ni
+   * recuento— ni abastecimiento (no está en `MOTIVOS_ABASTECIMIENTO`). Mueve
+   * stock igual, así que corre el saldo del borde final y el residuo lo hace
+   * visible por su cantidad exacta.
+   *
+   * ⚠️ **Se monta por la API real**, con el mismo `PATCH /items/:id/stock` que
+   * este archivo ya usa para las compras: `AjusteStockDto` acepta
+   * `['compra','devolucion','ajuste_manual','inventario_inicial']` y
+   * `ItemsService.ajustarStock` pasa el motivo tal cual al kardex, que actualiza
+   * `stock_ubicacion` dentro de su choke-point. Nada de SQL directo, ninguna
+   * invariante tocada.
+   *
+   * 📌 Y esto importa en producción, no solo como test: **todo tenant que use
+   * "Ajustar stock" dentro de una ventana va a ver «Otros» distinto de cero**.
+   * Es la conducta correcta —el reporte avisa que hay algo que no sabe
+   * explicar— y este test es lo que la fija.
+   */
+  it('un ajuste manual no lo clasifica ningún bucket y aparece entero en Otros', async () => {
+    const itemId = await crearProducto('100');
+    await contarYAplicar(itemId, '100');
+
+    await vender(itemId, '10');
+
+    await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'salida',
+        motivo: 'ajuste_manual',
+        ubicacionId: localId,
+        cantidad: '6',
+        comentario: 'Ajuste que ningún bucket clasifica',
+      })
+      .expect(200);
+
+    await contarYAplicar(itemId, '84'); // 100 − 10 − 6, sin diferencia
+
+    const fila = await filaDe(itemId);
+
+    expect(fila.teorico).toBe('10.0000');
+    expect(fila.merma).toBe('0.0000');
+    expect(fila.cortesia).toBe('0.0000');
+    expect(fila.sinExplicacion).toBe('0.0000');
+    expect(fila.otros).toBe('6.0000');
+  });
+
+  /**
+   * ⛔ **Una `devolucion` MANUAL no es una venta revertida, y no puede bajar el
+   * teórico.** El mismo `PATCH /items/:id/stock` acepta `motivo: 'devolucion'`
+   * sin ninguna venta detrás. Antes de este arreglo, el teórico restaba **toda**
+   * entrada `devolucion`/`anulacion` sin mirar el origen, así que un ajuste
+   * manual hacía bajar el consumo teórico —o lo ponía en negativo— como si
+   * hubiera revertido una venta que nunca existió.
+   *
+   * El filtro es `venta_id IS NOT NULL`: las tres escrituras que vienen de una
+   * venta lo llevan (`cancelarUnaVez` y las dos de nota de crédito), y
+   * `ajustarStock` no lo pasa nunca. Con eso, la devolución manual deja de
+   * ensuciar el teórico y cae donde corresponde: en «Otros».
+   *
+   * Los números discriminan: se venden 12 y entran 4 por devolución manual. Con
+   * el filtro, teórico 12 y otros −4. Sin el filtro, teórico 8 y otros 0 — el
+   * bug pasaría inadvertido porque «Otros» seguiría en cero.
+   */
+  it('una devolución manual sin venta no baja el teórico: cae en Otros', async () => {
+    const itemId = await crearProducto('100');
+    await contarYAplicar(itemId, '100');
+
+    await vender(itemId, '12');
+
+    await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'entrada',
+        motivo: 'devolucion',
+        ubicacionId: localId,
+        cantidad: '4',
+        comentario: 'Devolución manual, sin venta detrás',
+      })
+      .expect(200);
+
+    await contarYAplicar(itemId, '92'); // 100 − 12 + 4
+
+    const fila = await filaDe(itemId);
+
+    expect(fila.teorico).toBe('12.0000');
+    expect(fila.sinExplicacion).toBe('0.0000');
+    expect(fila.otros).toBe('-4.0000');
   });
 
   /**
