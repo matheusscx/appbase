@@ -39,8 +39,14 @@ Valen para **todas** las tareas. Salen de `CLAUDE.md` y de la spec.
   (`npm run design:check` lo bloquea). `useApiFetch`/`$fetch`, nunca axios.
 - **Una sola dependencia nueva autorizada: Unovis.** Cualquier otra se pregunta al owner.
 - **Nunca `git commit --no-verify`.** Stagear siempre por ruta explícita, nunca `git add -A`.
-- **Rango de UUIDs de seed libre: desde `550e8400-e29b-41d4-a716-446655440447`** (compras usa
-  hasta `…446`). Cada tarea que tome IDs los toma consecutivos desde el último usado.
+- **Bloque de UUIDs de seed reservado para este frente: `…447` a `…460`.** ⛔ **No pasarse de
+  `…460` sin avisar a la sesión orquestadora**: `…461`–`…465` están asignados a la sesión "Serie
+  única por producto", que corre en paralelo. Verificar igual con un grep antes de fijar cada uno
+  —otra sesión puede haberlo tomado entre que se planifica y que se escribe—:
+
+  ```bash
+  grep -rn "550e8400-e29b-41d4-a716-4466554404[4-6][0-9]" backend/src frontend/app docs
+  ```
 
 ### Entorno del worktree (una sola vez, antes de la Tarea 1)
 
@@ -823,6 +829,57 @@ git commit -m "feat(reportes): resumen de varianza con top 10 y aviso de teóric
 
 ---
 
+## Hito de integración — al cerrar la Tarea 6
+
+Decisión de la sesión orquestadora (2026-09-19): **no esperar a la Tarea 10 para integrar.** Main
+se mueve rápido —hoy hubo dos rebases seguidos por commits de docs de otras sesiones— y diez
+tareas afuera es mucha superficie de conflicto. Se mergea la mitad de backend y las tareas 7–10
+siguen sobre main ya actualizado.
+
+- [ ] **Paso 1: que la mitad se sostenga sola en main**
+
+⚠️ Mergear las tareas 1–6 deja en main **dos rutas que ninguna pantalla llama todavía**. Eso por
+sí solo no molesta —el módulo está detrás de su permiso y solo un rol del seed lo tiene—, pero sí
+molesta que main quede con una feature **sin doc viva**, que es justo lo que `CLAUDE.md` pide
+evitar. Así que este hito **adelanta parte de la Tarea 10**:
+
+- Escribir ya `docs/features/reporte-varianza.md` con el modelo de la spec § 5 (la parte de
+  backend: ventana, los cuatro números, la identidad, «Otros», los tres agujeros del teórico).
+- Fila en `docs/ESTADO.md` marcada explícitamente como **backend listo, pantalla pendiente**, no
+  como feature terminada.
+- `docs/features/modulo-reportes.md` y el resto del backlog quedan para la Tarea 10, cuando el
+  patrón esté completo con su mitad de frontend.
+
+- [ ] **Paso 2: revisión de rama de las tareas 1–6**
+
+No alcanza con las revisiones por tarea: la de rama caza contradicciones **entre** tareas —un seed
+de la Tarea 6 que rompa el e2e de la Tarea 3, un nombre que derivó entre la 2 y la 5— que ninguna
+revisión por-tarea puede ver.
+
+- [ ] **Paso 3: gate completo de nuevo, sobre el conjunto**
+
+Los dos bloques enteros, no un subset. Un DTO requerido agregado tarde rompe specs que pasaban, y
+tocar el constructor de un service rompe unitarios que nadie estaba mirando.
+
+```bash
+/Users/m2pro/cmatheus/startup-app/scripts/db-aislada.sh reset 5436
+```
+
+- [ ] **Paso 4: avisar a la orquestadora**
+
+Rama, hash **copiado de `git log`**, gate con conteos y veredictos. ⛔ **No mergear ni pushear**:
+el fast-forward lo hace ella con el OK del owner.
+
+- [ ] **Paso 5: retomar sobre main actualizado**
+
+Después del merge, rebasar la rama sobre main antes de arrancar la Tarea 7.
+
+📌 **Si al llegar acá la mitad de backend no se sostiene sola** —por ejemplo si la doc de la
+feature no se puede escribir sin hablar de la pantalla—, **decírselo a la orquestadora y revisar
+el corte**. El criterio lo pone el owner, no esta tarea.
+
+---
+
 ## Tarea 7 — `AppRangoFechas` y la pantalla de varianza (tabla)
 
 La gráfica **no** entra acá: entra en la Tarea 8 sobre esta misma pantalla. Así ningún componente
@@ -1043,12 +1100,29 @@ worktree (5436). Anotar el plan y los tiempos **antes** de tocar nada.
 
 - [ ] **Paso 3: decidir con el número en la mano**
 
-Si el plan muestra un scan que duele, el candidato natural es `(tenant_id, creado_el)` sobre
-`movimientos_inventario` y uno sobre `recuento_inventario (tenant_id, aplicado_el)`. Medir **con y
-sin**, y quedarse con el que el número justifique.
+⚠️ **El candidato de la primera versión de este plan estaba mal elegido, y la corrección ya está
+medida** (2026-09-19). Decía `(tenant_id, creado_el)` sobre `movimientos_inventario`, pero **esa
+consulta no filtra por fecha**: filtra por `(item_id, secuencia)`, porque el ancla de la ventana
+es `recuento_inventario_linea.movimiento_id → secuencia` (Tarea 2). Y **ese índice ya existe**:
+`idx_movimientos_inventario_item_secuencia`, declarado en la entity por el frente de compras.
+Primero comprobar con el `EXPLAIN` si ya la cubre; lo más probable es que sí y que no haga falta
+nada sobre esa tabla.
+
+**El candidato real está en la otra tabla:** `resolverVentanas` sí filtra `recuento_inventario`
+por `tenant_id` + `estado` + rango de `aplicado_el`, y **esa tabla hoy no tiene ningún índice** —
+ni por `@Index` ni por SQL en el seeder (medido 2026-09-19; lo único que hay cerca es
+`uq_recuento_linea_item_vivo` sobre `recuento_inventario_linea (recuento_id, item_id)`, que sí
+sirve para bajar de recuento a líneas).
+
+Medir **con y sin** antes de fijar nada, y si el candidato correcto resulta ser otro, escribirlo
+con el número al lado.
 
 ⚠️ **Si no hace falta, no se agrega**, y se escribe por qué. Un índice de más se paga en toda
 venta.
+
+📌 Si entra un índice sobre `recuento_inventario`, decidir también **cómo** entra: la entity usa
+`@Index` y el seeder usa `CREATE INDEX IF NOT EXISTS` en SQL cruda para lo que `@Index` no puede
+expresar (parciales, `lower(...)`). Un índice simple va en la entity.
 
 - [ ] **Paso 4: dejar la medición escrita**
 
@@ -1089,10 +1163,12 @@ Desde `docs/features/TEMPLATE.md`. Lo que **no** puede faltar:
   `tenant_modulos` da 403 hasta al admin.
 - Los compartidos y su contrato (§ 4), y por qué viven en la raíz de `app/components/`.
 
-- [ ] **Paso 2: `docs/features/reporte-varianza.md`**
+- [ ] **Paso 2: completar `docs/features/reporte-varianza.md`**
 
-El modelo de § 5: la ventana anclada en `secuencia`, los cuatro números, la identidad, «Otros»
-como residuo, y **los tres agujeros del teórico** con cuál es medible y cuál no.
+⚠️ **Este archivo ya existe desde el hito de integración** (se escribió al cerrar la Tarea 6, con
+la mitad de backend). Acá se le suma la pantalla: la gráfica, la columna «Otros» en pantalla y el
+aviso de teórico incompleto. **No reescribirlo de cero** — y no anexar correcciones al final: si
+algo de lo que dice quedó viejo, se corrige en su lugar.
 
 - [ ] **Paso 3: el backlog**
 
@@ -1107,8 +1183,9 @@ En `docs/agent/pendientes.md`, dos entradas nuevas:
 
 - [ ] **Paso 4: `ESTADO.md` y `README.md`**
 
-Una fila para el módulo de reportes y otra para la varianza, con fecha y link a las dos features
-nuevas; y los dos links en `docs/README.md`.
+La fila de la varianza **ya existe** desde el hito de integración, marcada *backend listo, pantalla
+pendiente*: acá se actualiza a implementada, con fecha. Se agrega la fila del módulo de reportes, y
+los dos links en `docs/README.md`.
 
 - [ ] **Paso 5: verificar que ningún número quedó colgando**
 
