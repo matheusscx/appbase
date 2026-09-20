@@ -159,7 +159,9 @@ describe('Kardex — la secuencia sigue el orden de aplicación (e2e)', () => {
       for (;;) {
         const esperando: { n: string }[] = await ds.query(
           `SELECT COUNT(*) AS n FROM pg_stat_activity
-            WHERE wait_event_type = 'Lock' AND query LIKE '%item_producto%'`,
+            WHERE datname = current_database()
+              AND wait_event_type = 'Lock'
+              AND query LIKE '%item_producto%'`,
         );
         if (Number(esperando[0].n) >= CONCURRENTES) break;
         if (Date.now() > hasta) break;

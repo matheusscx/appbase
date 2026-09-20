@@ -509,6 +509,27 @@ describe('Idempotencia de cobros (e2e)', () => {
       expect(await pagosDe(ventaId)).toBe(1);
     });
 
+    it('una clave ya usada en una venta no se reusa para un abono: 422, y no se abona nada', async () => {
+      // La clave es de `(tenant, usuario, clave)` y NO de la operación: el
+      // abono cae en la MISMA fila que reclamó el cobro de mostrador. Lo que
+      // lo delata es el `ventaId` del 422 — es la venta de la primera
+      // operación, no la que el abono venía a pagar.
+      const clave = randomUUID();
+      const mostrador = await cobrar('/api/ventas', lineaVenta(), clave);
+      expect(mostrador.status).toBe(201);
+
+      const ventaId = await ventaPendiente();
+      const res = await cobrar('/api/pagos', abono(ventaId), clave);
+
+      expect(res.status).toBe(422);
+      expect(res.body as OtrosDatosRes).toEqual({
+        statusCode: 422,
+        message: MENSAJE_OTROS_DATOS,
+        ventaId: (mostrador.body as VentaRes).id,
+      });
+      expect(await pagosDe(ventaId)).toBe(0);
+    });
+
     it('sin cabecera: 400', async () => {
       const ventaId = await ventaPendiente();
       const res = await cobrar('/api/pagos', abono(ventaId));

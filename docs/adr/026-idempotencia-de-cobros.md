@@ -103,4 +103,5 @@ con el aviso de "otros datos".
 - **El primer deploy tiene una ventana.** Backend y frontend son servicios separados en
   Railway: entre los dos deploys —o con una pestaña abierta de antes— el bundle viejo manda el
   cobro sin la cabecera y recibe 400. Se resuelve desplegando los dos juntos y recargando las
-  pantallas abiertas; queda anotado como paso operativo en `agent/pendientes.md` § 1.
+  pantallas abiertas; queda anotado como paso operativo en `agent/pendientes.md` § 7
+  (*Acción del owner fuera del código*).

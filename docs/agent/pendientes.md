@@ -40,38 +40,6 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 El arreglo ya está decidido y escrito dentro de la propia entrada: **ninguna necesita una
 respuesta del owner.**
 
-- [ ] **`kardex-secuencia.e2e-spec.ts` cuenta los locks de todo el cluster, no los de su base**
-  (test, medido el 2026-09-20) — su sondeo es
-  `SELECT COUNT(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE
-  '%item_producto%'` (línea ~161), **sin `datname`**. Los otros siete specs que sondean locks
-  —`ajuste-borrado-ubicacion-concurrente`, `traslado-borrado-ubicacion-concurrente`,
-  `sobreventa-concurrente-ubicacion`, `borrado-item-concurrente`, `orden-locks-desfases`,
-  `traslados` y `caja`— ya filtran con `AND datname = current_database()`; este es el único que
-  no. **Por qué importa ahora:** desde `db-aislada.sh` (2026-09-19) cada worktree corre su e2e
-  en **su propio Postgres**, pero los contenedores comparten el daemon y nada impide levantar
-  dos bases en el mismo cluster; sin el filtro, la compuerta de un worktree puede contar los
-  esperadores de otro y dar un verde o un rojo que no son suyos. **El arreglo:** agregarle
-  `AND datname = current_database()`, igual que los otros siete.
-- [ ] **Primer deploy con `Idempotency-Key` obligatoria: la ventana entre los dos servicios**
-  (anotado 2026-09-19 al cerrar la idempotencia de cobros, [ADR-026](../adr/026-idempotencia-de-cobros.md)).
-  Railway despliega **backend y frontend como servicios separados**
-  (`railway deployment list --service backend`, ver la entrada del smoke post-deploy más
-  abajo), así que entre los dos deploys hay un rato con el backend nuevo y el bundle viejo
-  servido —o simplemente con una pestaña abierta de antes—. Ese bundle manda el cobro **sin
-  la cabecera** y el backend lo rechaza con `400 "Falta la cabecera Idempotency-Key, o no es
-  un UUID"`: el cajero no puede cobrar hasta recargar la pantalla. No es un bug a arreglar
-  —la cabecera es obligatoria a propósito— sino el paso operativo del primer deploy:
-  **desplegar frontend y backend juntos y recargar las pantallas abiertas**. Lo mismo vale
-  para el alta de la tabla `solicitudes_idempotentes`, que hoy la crea `synchronize` al
-  arrancar (ligado a la entrada CRÍTICA de migraciones, más abajo).
-- [ ] **El e2e no cruza la misma clave entre dos operaciones distintas** (backend, anotado
-  2026-09-19; lo levantó la revisión de seguridad al cerrar la idempotencia). Hoy
-  `backend/test/idempotencia-venta.e2e-spec.ts` prueba la reusada con otros datos **dentro**
-  de cada operación, pero no una clave de `venta.crear` reusada en `pago.abono`. La garantía
-  existe y es de diseño —`huellaDe` mete la `operacion` en el hash, así que la huella nunca
-  coincide y sale 422—, o sea que el hueco es de cobertura, no de conducta: hoy no hay
-  mutante que se cuele por ahí sin romper otros tests. Un `it` más en el bloque del abono lo
-  cierra.
 - [ ] **El helper del smoke de cobro repetido se cuelga sin decir por qué** (frontend e2e,
   anotado 2026-09-19; lo levantó la tercera ronda de revisión). Si el `POST` que
   `cortarLaPrimeraRespuesta` espera nunca llega
@@ -1408,6 +1376,24 @@ No se resuelve programando. Está acá para que tenga quién la reclame.
   `encargado.compras` (contraseña `admin`), no como admin, porque el rol es justamente lo que
   el gate no mira igual —ya pasó una vez que el encargado no podía cargar una compra y todas
   las suites pasaban—. Si algo salta, vuelve como entrada acá.
+
+- [ ] 🚢 **Primer deploy con `Idempotency-Key` obligatoria: la ventana entre los dos servicios**
+  (anotado 2026-09-19 al cerrar la idempotencia de cobros,
+  [ADR-026](../adr/026-idempotencia-de-cobros.md); mudado acá desde la § 1 el 2026-09-20).
+  **Estaba en "Mecánico" y no es código**: esa sección promete que el arreglo está escrito en la
+  entrada, y acá no hay arreglo que escribir —la cabecera es obligatoria a propósito—. La regla
+  ya vive en ADR-026 § Consequences; lo que falta es **que alguien ejecute el paso el día del
+  deploy**, que es para lo que existe esta sección.
+
+  Railway despliega **backend y frontend como servicios separados**
+  (`railway deployment list --service backend`, ver la entrada del smoke post-deploy más
+  abajo), así que entre los dos deploys hay un rato con el backend nuevo y el bundle viejo
+  servido —o simplemente con una pestaña abierta de antes—. Ese bundle manda el cobro **sin
+  la cabecera** y el backend lo rechaza con `400 "Falta la cabecera Idempotency-Key, o no es
+  un UUID"`: el cajero no puede cobrar hasta recargar la pantalla. **El paso:** desplegar
+  frontend y backend juntos y recargar las pantallas abiertas. Lo mismo vale para el alta de
+  la tabla `solicitudes_idempotentes`, que hoy la crea `synchronize` al arrancar (ligado a la
+  entrada CRÍTICA de migraciones, más abajo).
 
 - [ ] 🇨🇱 **Validar con un abogado el ángulo legal chileno del testigo** — quedó huérfano al
   cerrar la entrada del cierre forzado (2026-08-13): la fuente es doctrina de la DT **leída

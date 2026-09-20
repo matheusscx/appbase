@@ -23,6 +23,81 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El sondeo de locks del kardex cuenta solo su base (cerrada 2026-09-20)
+
+Sale de [`pendientes.md` § 1](pendientes.md), donde la entrada estaba escrita con su arreglo
+adentro. **Verificada contra el código antes de tocarla y salió exacta**: los siete specs que
+nombra filtran por `datname` y `kardex-secuencia` era el único que no.
+
+**Qué se hizo:** una línea. El sondeo de `backend/test/kardex-secuencia.e2e-spec.ts` pasó a
+filtrar `datname = current_database()`, como los otros siete.
+
+**Por qué no hay mutante.** No hay conducta nueva que fijar: el filtro no cambia lo que el
+spec prueba, cambia **a quién mira** la compuerta. Lo que lo haría fallar —otra base del
+mismo cluster con sesiones frenadas en un lock sobre `item_producto`— no se monta desde el
+propio spec, que es justamente la razón por la que el bug era invisible. La red que queda es
+la de siempre: la compuerta falla hacia el rojo, y ahora el rojo es suyo.
+
+**La entrada, como estaba en `pendientes.md` § 1:**
+
+> - [ ] **`kardex-secuencia.e2e-spec.ts` cuenta los locks de todo el cluster, no los de su base**
+>   (test, medido el 2026-09-20) — su sondeo es
+>   `SELECT COUNT(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE
+>   '%item_producto%'` (línea ~161), **sin `datname`**. Los otros siete specs que sondean locks
+>   —`ajuste-borrado-ubicacion-concurrente`, `traslado-borrado-ubicacion-concurrente`,
+>   `sobreventa-concurrente-ubicacion`, `borrado-item-concurrente`, `orden-locks-desfases`,
+>   `traslados` y `caja`— ya filtran con `AND datname = current_database()`; este es el único que
+>   no. **Por qué importa ahora:** desde `db-aislada.sh` (2026-09-19) cada worktree corre su e2e
+>   en **su propio Postgres**, pero los contenedores comparten el daemon y nada impide levantar
+>   dos bases en el mismo cluster; sin el filtro, la compuerta de un worktree puede contar los
+>   esperadores de otro y dar un verde o un rojo que no son suyos. **El arreglo:** agregarle
+>   `AND datname = current_database()`, igual que los otros siete.
+
+---
+
+## Una clave de cobro quemada en una operación no sirve para otra (cerrada 2026-09-20)
+
+Sale de [`pendientes.md` § 1](pendientes.md). **El hueco de cobertura que describía era real
+—ningún test cruzaba la clave entre dos operaciones—, pero el porqué que le atribuía no se
+sostuvo al medirlo.** Ver abajo.
+
+**Qué se hizo:** un `it` más en el bloque del abono de
+`backend/test/idempotencia-venta.e2e-spec.ts`. Una clave reclama un cobro de mostrador
+(`venta.crear`), y después se manda con la misma clave un abono (`pago.abono`) sobre otra
+venta: 422 con `MENSAJE_OTROS_DATOS`, y `pagos` de esa venta sigue en 0. **La aserción que lo
+hace discriminante es el `ventaId` del 422**: es la venta de la *primera* operación, no la que
+el abono venía a pagar, y eso es lo que prueba que las dos operaciones cayeron en la misma fila.
+
+**La corrección a la entrada, medida.** La entrada decía que la garantía es de diseño *"porque
+`huellaDe` mete la `operacion` en el hash, así que la huella nunca coincide"*. Se mutó
+exactamente eso —sacarle `operacion` a la huella— y **el spec entero quedó verde, el `it` nuevo
+incluido**. El término de la operación no es lo que produce el 422 en este caso: los `datos` ya
+difieren por forma y no pueden coincidir, porque un `CreateVentaDto` no tiene `ventaId` y un
+`CreatePagoDto` lo exige, y el `whitelist: true` del `ValidationPipe` saca lo que sobre. El
+término existe igual y está cubierto —ese mutante **sí** pone rojo a
+`src/modules/idempotencia/huella.spec.ts` → *"la operación es parte de la huella"*—, pero lo
+cubre el unitario, no este e2e.
+
+**Lo que el `it` nuevo fija de verdad** es lo otro: que el reclamo es de `(tenant, usuario,
+clave)` **sin la operación**, así que una clave quemada en un cobro no queda disponible para
+otro tipo de cobro. El mutante que lo prueba es el que revierte a ese diseño alternativo —
+agregarle `AND operacion = $4` al `SELECT` de `reproducir`—: con él la fila no se encuentra,
+sale 500 en vez de 422 y **cae ese `it` y ningún otro** (1 failed, 15 passed). Sin el mutante,
+16 passed.
+
+**La entrada, como estaba en `pendientes.md` § 1:**
+
+> - [ ] **El e2e no cruza la misma clave entre dos operaciones distintas** (backend, anotado
+>   2026-09-19; lo levantó la revisión de seguridad al cerrar la idempotencia). Hoy
+>   `backend/test/idempotencia-venta.e2e-spec.ts` prueba la reusada con otros datos **dentro**
+>   de cada operación, pero no una clave de `venta.crear` reusada en `pago.abono`. La garantía
+>   existe y es de diseño —`huellaDe` mete la `operacion` en el hash, así que la huella nunca
+>   coincide y sale 422—, o sea que el hueco es de cobertura, no de conducta: hoy no hay
+>   mutante que se cuele por ahí sin romper otros tests. Un `it` más en el bloque del abono lo
+>   cierra.
+
+---
+
 ## La serie se compara normalizada y se guarda literal (cerrada 2026-09-20)
 
 Sale de [`pendientes.md` § 4](pendientes.md), que la tenía como la entrada *"Un espacio de más
