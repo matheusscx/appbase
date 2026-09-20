@@ -466,10 +466,18 @@ no de estilo.
 
 ### ✅ Fecha local armada con `toISOString()` — AUTOMATIZADO
 
-Enforced por `frontend/app/invariants/fecha-local.invariant.spec.ts`: barre `app/**` (`.ts` y
-`.vue`), **ignora comentarios** y rechaza `toISOString()` recortado a `YYYY-MM-DD`
-(`slice`/`substring`/`split('T')[0]`). No cubre mandar un instante completo al backend, que es
-correcto; prohíbe quedarse con su parte de **fecha**.
+Enforced por `frontend/app/invariants/fecha-local.invariant.spec.ts` (corre en `npm test`, y
+CI lo corre en `frontend · unit`): barre `app/**` (`.ts` y `.vue`), **ignora comentarios** y
+rechaza `toISOString()`/`toJSON()` recortado a `YYYY-MM-DD` (`slice`/`substring`/`split('T')[0]`).
+No cubre mandar un instante completo al backend, que es correcto; prohíbe quedarse con su parte
+de **fecha**.
+
+⚠️ **Límite medido, y va escrito porque el chequeo cierra el idioma, no el concepto:** exige que
+el recorte esté **pegado** a la serialización. Partido en dos sentencias —`const iso =
+d.toISOString()` y más abajo `iso.slice(0, 10)`— **pasa limpio**. Cerrarlo necesita seguir el
+valor por la función, o sea un analizador, no un grep: ahí la red es la revisión, no el gate.
+Por eso esto es un `✅` con su hueco declarado y no un frente dado por cerrado — mismo criterio
+que la entrada de `timestamptz` y sus dos corolarios.
 
 **Lo que el chequeo no encodea, y por eso queda escrito: los dos idiomas fallan en hemisferios
 opuestos.** `new Date()` se corre un día **adelante** al oeste de Greenwich y sólo al final del

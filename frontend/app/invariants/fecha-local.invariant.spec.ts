@@ -56,19 +56,30 @@ function sinComentarios(fuente: string): string {
     .replace(/\/\/.*$/gm, '')
 }
 
-// `toISOString()` recortado a 'YYYY-MM-DD' por cualquiera de las tres vías que
-// el repo podría usar. Deliberadamente NO cubre todo uso de `toISOString()`:
-// mandar un instante completo al backend es correcto y frecuente — lo que la
-// regla prohíbe es quedarse con su parte de FECHA, que es donde UTC deja de
-// ser un detalle de transporte y pasa a ser un día distinto del que se leyó.
+// El instante serializado en UTC y recortado a 'YYYY-MM-DD'. `toJSON()` entra
+// junto a `toISOString()` porque en un `Date` son la misma función (hoy hay cero
+// usos en `app/`, así que no agrega falsos positivos; medido el 2026-09-20).
+//
+// Deliberadamente NO cubre todo uso de `toISOString()`: mandar un instante
+// completo al backend es correcto y frecuente — lo que la regla prohíbe es
+// quedarse con su parte de FECHA, que es donde UTC deja de ser un detalle de
+// transporte y pasa a ser un día distinto del que se leyó.
+//
+// ⚠️ LÍMITE MEDIDO, y por eso la entrada de `anti-patterns.md` lo declara en vez
+// de dar el patrón por cerrado: el chequeo exige que el recorte esté PEGADO a la
+// serialización. Partido en dos sentencias —`const iso = d.toISOString()` y más
+// abajo `iso.slice(0, 10)`— pasa limpio. Cerrar eso necesita seguir el valor por
+// la función, que es un analizador, no un grep: ahí la red es la revisión.
+const SERIALIZA = String.raw`(?:toISOString|toJSON)\(\)`
+
 const PATRONES: { nombre: string, regex: RegExp }[] = [
   {
-    nombre: 'toISOString().slice/substring(0, 10) — el día en UTC, no el local',
-    regex: /toISOString\(\)\s*\.\s*(?:slice|substring|substr)\s*\(\s*0\s*,\s*10\s*\)/,
+    nombre: 'toISOString()/toJSON() .slice|.substring(0, 10) — el día en UTC, no el local',
+    regex: new RegExp(`${SERIALIZA}\\s*\\.\\s*(?:slice|substring|substr)\\s*\\(\\s*0\\s*,\\s*10\\s*\\)`),
   },
   {
-    nombre: 'toISOString().split(\'T\')[0] — el día en UTC, no el local',
-    regex: /toISOString\(\)\s*\.\s*split\s*\(\s*['"`]T['"`]\s*\)\s*\[\s*0\s*\]/,
+    nombre: 'toISOString()/toJSON() .split(\'T\')[0] — el día en UTC, no el local',
+    regex: new RegExp(`${SERIALIZA}\\s*\\.\\s*split\\s*\\(\\s*['"\`]T['"\`]\\s*\\)\\s*\\[\\s*0\\s*\\]`),
   },
 ]
 
