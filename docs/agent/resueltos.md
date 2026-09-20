@@ -23,6 +23,147 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La serie se compara normalizada y se guarda literal (cerrada 2026-09-20)
+
+Sale de [`pendientes.md` § 4](pendientes.md), que la tenía como la entrada *"Un espacio de más
+hace que la misma serie entre dos veces"* — abierta un día, la anotó el frente de acá abajo al
+cerrarse y la contestó el owner.
+
+### La decisión del owner (2026-09-20)
+
+Textual: **"«ABC123» y «abc123 » sí son iguales, guardemos en la base de datos tal como tipea
+el usuario y la validación la hacemos con upper o lower case"**.
+
+O sea dos mitades que no se pueden separar: la unicidad **compara** sin los espacios de los
+bordes y sin distinguir mayúsculas, y la base **guarda** el texto tal como se tipeó.
+Normalizar es para comparar, nunca para escribir.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 4
+
+Medido por API el 2026-09-19: con la serie `X` ya viva en un producto, mandar `"X "` por
+`PATCH /items/:id/stock` devolvía **200** y dejaba **dos unidades vivas**, `["X ", "X"]`, con
+stock 2. Para Postgres son dos strings distintos, así que el índice las aceptaba: el mismo
+duplicado silencioso que el frente anterior vino a cerrar, entrando por el borde de los
+espacios. En la misma medición, **una serie de solo espacios (`"   "`) también entraba con
+200**: `@IsNotEmpty` no la distingue de contenido real.
+
+### Qué se hizo
+
+**El índice se mudó a la expresión, y por eso cambió de dueño.** Pasó a
+`(item_id, lower(btrim(serie)))` con `eliminado_el IS NULL`, y **lo crea el seeder**
+(`seedItemUnidadSerieIndex()`) en vez de la entity. Es el reverso exacto de la decisión que
+tomó el frente anterior —y por el mismo criterio que la justificó—: `@Index` sirve para
+columnas peladas, y **TypeORM no sabe expresar una función**, así que declararlo en
+`ItemUnidad` volvía a crear el índice sobre la columna pelada. La regla habría quedado escrita
+y la equivocada vigente, que es el modo de falla que ya había pasado con los nombres únicos.
+El criterio quedó escrito donde se busca antes de decidir:
+[`patterns/backend.md`](../patterns/backend.md).
+
+**La normalización la hace Postgres, de los dos lados.** El guard no normaliza en JavaScript:
+le pasa las series crudas y la consulta calcula `lower(btrim(...))` para la columna y para lo
+que entra. El motivo no es elegancia — `toLowerCase()` de JS y `lower()` de Postgres **no
+coinciden fuera de ASCII** (`lower()` depende de la collation), y cualquier discrepancia entre
+guard e índice vuelve como el 500 del índice que el guard existe para evitar. Así el gemelo es
+exacto por construcción, que era la razón por la que este frente no se cerró de arrastre en el
+anterior.
+
+**El mensaje nombra las dos series.** Cuando la mandada y la guardada difieren, el 400 dice
+*"«abc123 » ya existe como «ABC123»"*: ver solo una de las dos hace que el rechazo parezca un
+error del sistema. Cuando son idénticas, no repite el texto.
+
+**La serie en blanco rebota en las dos capas, y cada una tiene su texto.** Las tres DTO piden
+`@Matches(/\S/)` → *"La serie no puede ser solo espacios"*; el chokepoint la rechaza igual →
+*"Una serie no puede ser solo espacios"*. Los textos se escribieron distintos **a propósito**,
+y el porqué se midió: con un `toContain('solo espacios')` genérico, el mutante que saca el
+validador del borde **sobrevivía**, porque contestaba el chokepoint. Afirmar el texto del borde
+es lo que pincha cuál de las dos capas contestó.
+
+**El agujero que encontró la revisión de seguridad, y por qué la lista de blancos va
+explícita.** La primera versión de este cierre normalizaba con `btrim(serie)` a secas, y
+`btrim` **sin lista de caracteres recorta solo el espacio ASCII**. Medido contra Postgres:
+`lower(btrim(E'\tABC123\t')) = lower(btrim('ABC123'))` es **false**, y lo mismo con `\n`, `\r`
+y NBSP. O sea que `\tABC123\t` entraba como una segunda unidad viva junto a `ABC123` — el
+mismo duplicado silencioso del frente anterior, por un borde que no es el espacio, y ningún
+test lo cubría. Ahora la lista está enumerada (espacio, tab, LF, CR, FF, VT, NBSP) en
+`serieNormalizadaSql`, con una tabla de casos en el e2e para tab/newline/NBSP.
+
+Se descartó la alternativa obvia —`regexp_replace` con `[[:space:]]`, que cubre todo de una—
+porque **su semántica depende de la collation de la base**: un índice que compara distinto en
+el Postgres local y en el de Railway es peor que uno estrecho. La lista explícita es
+determinística, y su borde queda declarado: los espacios Unicode exóticos (U+2000–U+200A,
+U+3000…) no entran, no salen de un teclado ni de un lector, y una serie que sea solo blancos
+rebota igual porque el `\S` de JS los cubre todos.
+
+**La expresión vive en un solo lugar** (`serieNormalizadaSql`, en `item-unidad.entity.ts`), y
+es una excepción deliberada al *"duplicar dos veces es aceptable"* de `CLAUDE.md`: son dos SQL
+escritas a mano —seeder e service— que tienen que ser idénticas o el guard deja pasar lo que el
+índice rechaza, y eso no se ve al escribirlo: vuelve como un 500. El test unitario del guard
+compara contra el helper, no contra un string, así que un desvío lo rompe.
+
+**Los topes que faltaban** (mismo hallazgo de seguridad): `@MaxLength(100)` en la serie de las
+tres DTO y `@ArrayMaxSize(200)` en las dos que no lo tenían —compras ya lo tenía—. El de largo
+no es cosmético: la serie participa de un índice por expresión y btree corta en ~2,7 KB por
+entrada, así que sin tope una serie enorme rebota con un error de Postgres sin mapear, un 500,
+en el mismo chokepoint que da 400 para todo lo demás.
+
+**Los siete mutantes.** Cada uno revierte a la conducta anterior. La columna de la derecha
+nombra **los tests que mueren**, medidos de nuevo contra la suite de hoy: cinco de estas filas se
+midieron primero sobre una versión anterior de los tests y **tres habían quedado cortas** al
+agregarse la lista de blancos, el test de conducta y el `it.each` de la migración.
+
+⚠️ **Y el alcance de la medición, porque también fue una sobreafirmación:** cada mutante se corrió
+contra los archivos donde se esperaba el fallo —`serie-unica-por-producto`, `esquema`, el unit de
+inventario, y `compras` donde correspondía—, **no contra la suite entera**. La primera versión de
+esta tabla decía "medido contra la suite de hoy" habiendo corrido dos archivos, y la revisión
+encontró justo lo que ese atajo esconde: el primer mutante también rompe un caso de
+`compras.e2e-spec.ts`, que no estaba contado. O sea que estos números son un **piso** verificado,
+no un total: lo que la tabla garantiza es que cada chequeo tiene al menos un test que se cae si se
+lo saca.
+
+| Mutante | Qué mata (medido) |
+|---|---|
+| El guard compara crudo (conducta del 2026-09-19) | **7**: los 6 de `serie-unica-por-producto` (3 de mayúsculas/espacios, 3 de tab/newline/NBSP) **y 1 de `compras.e2e-spec.ts`** —*"subir con una serie que solo cambia mayúsculas o espacios"*—, que la primera medición no contó porque no corrió ese archivo. Todos **con 500, no con un 400 distinto**: el índice normalizado atajando lo que el guard dejó pasar, que es la prueba de que el índice enforcea de verdad. Ninguno de `esquema` |
+| Sin el rechazo de la serie en blanco en el chokepoint | su test unitario, y solo ese |
+| Sin el `@Matches(/\S/)` del borde | el e2e del alta con solo espacios — **recién después de arreglar el test**: con un `toContain('solo espacios')` genérico sobrevivía, porque contestaba el chokepoint. El fallo lo dice (`Una serie…` en vez de `La serie…`) |
+| El seeder crea el índice de columna pelada | **3** de `esquema`: el de la forma del índice y los **dos** de la migración. Ninguno de la API: el guard sigue dando 400 antes de llegar al índice, y esa es justamente la capa que el test de esquema cubre y la API no |
+| El `DROP` condicional nunca dispara | los **dos** casos de la migración, que es exactamente su trabajo |
+| `btrim` sin la lista de blancos | **7**: 4 de `esquema` (forma, conducta, y los dos de migración —el índice pierde el NBSP que esos tests buscan—) y los 3 de tab/newline/NBSP por la API |
+| Sin el `@MaxLength(100)` | el e2e de la serie de 101 caracteres |
+
+⚠️ **Dos de estas siete no midieron nada la primera vez, y quedó anotado porque es el error
+más fácil de repetir con un mutante:** uno se aplicó sobre el `DO $$` **de otra función** del
+seeder —`s.index('DO $$')` agarra el primero del archivo, que era el de `motivo_diferencia`— y
+sobrevivió por eso, no por falta de test; el otro salió rojo entero por un **timeout de 60 s en
+el arranque**, que tampoco es el mutante. Un mutante que sobrevive y una suite que se pone roja
+piden los dos la misma pregunta: *¿murió por lo que yo cambié?*
+
+**La migración tiene su propio test, y es el único que la cubre.** De este índice hubo **tres
+formas con el mismo nombre** —`(item_id, serie)` pelado, `lower(btrim(serie))` sin lista, y el
+de ahora—, y un `CREATE UNIQUE INDEX IF NOT EXISTS` no reemplaza ninguna: ve el nombre y no hace
+nada. De ahí el `DROP` condicional, que dispara por la **ausencia del NBSP** en la definición
+existente: es el único carácter de la lista que no puede aparecer por casualidad, y así cubre
+las dos formas viejas con una sola condición. El test las recorre a las dos: monta cada estado
+viejo con SQL directa —son estados **históricos**, que ningún camino de la app puede producir
+ya— y después ejercita el camino real, `onApplicationBootstrap()`.
+
+**Deploy, medido y no deducido.** Sobre base fresca el seed no crea unidades, así que el índice
+se crea sin problema. Sobre una base **con un choque nuevo** —dos unidades vivas del mismo
+producto cuyas series solo difieren en mayúsculas o bordes, que antes era legal— se midió el
+arranque: el seeder falla con `could not create unique index "uq_unidad_item_serie"` y la tabla
+**queda sin índice**. O sea que en Railway no es un warning: el backend no arranca. Se mide
+antes con
+`SELECT item_id, lower(btrim(serie)), COUNT(*) FROM item_unidad WHERE eliminado_el IS NULL
+GROUP BY 1,2 HAVING COUNT(*) > 1`. Sin backfill, por decisión ya vigente del proyecto: no hay
+datos productivos, se resetea.
+
+**Lo que NO cambió, y tiene test:** `corregirCantidad` cruza el JSON de
+`compra_lineas.series` contra `item_unidad` **por texto exacto**, y sigue andando porque los
+dos lados guardan literal lo tipeado —nacen del mismo string—. El test que lo fija usa una
+serie con espacios en los bordes: si alguien normalizara al escribir en un solo lado, cae.
+
+**Lo que sigue afuera:** `item_lote`, la carrera de `pendientes.md` § 5. No la toca este
+frente.
+
 ## La serie de una unidad es única por producto, y ahora el esquema lo sabe (cerrada 2026-09-19)
 
 Sale de [`pendientes.md` § 2](pendientes.md), que queda **sin entradas abiertas**.
@@ -105,14 +246,12 @@ antes con
 `SELECT item_id, serie, COUNT(*) FROM item_unidad WHERE eliminado_el IS NULL GROUP BY 1,2
 HAVING COUNT(*) > 1`.
 
-**Lo que queda afuera, y acota lo de arriba:** la unicidad es exacta sobre el string, así que
-**un espacio de más la esquiva**. Medido por API el mismo día: con la serie `X` ya viva,
-mandar `"X "` por `PATCH /items/:id/stock` devuelve 200 y deja dos unidades vivas —para
-Postgres son dos strings distintos, y el guard es su gemelo—; y una serie de solo espacios
-también entra. Ninguna de las tres DTO normaliza. No se arregló acá porque la normalización
-coherente va **al escribir**, en las tres DTO, y cruza el JSON de `compra_lineas.series` que
-`corregirCantidad` compara contra `item_unidad`; además trae una pregunta que es del owner
-(¿y las mayúsculas?). Entrada con las tres preguntas y la medición: `pendientes.md` § 4.
+~~**Lo que queda afuera, y acota lo de arriba:** la unicidad es exacta sobre el string, así que
+un espacio de más la esquiva.~~ ✅ **Cerrado el 2026-09-20**, un día después, con la respuesta
+del owner: la unicidad pasó a comparar normalizada. Lo que este frente dejó abierto —`"X "`
+entrando junto a `"X"`, y la serie de solo espacios— ya no pasa. El cierre, con la decisión
+textual del owner y los siete mutantes: *"La serie se compara normalizada y se guarda
+literal"*, más abajo en este archivo.
 
 **Y lo que queda afuera del todo:** `item_lote` está en la **misma situación de esquema** —su índice
 `(item_id, codigo_lote)` vive solo en `startup-pos.sql`, `ItemLote` no declara `@Index` y el

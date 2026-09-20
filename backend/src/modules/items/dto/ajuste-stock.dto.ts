@@ -1,13 +1,16 @@
 import {
-  IsIn,
-  IsOptional,
-  IsString,
+  ArrayMaxSize,
   IsArray,
-  IsUUID,
-  ValidateNested,
   IsDateString,
+  IsIn,
   IsNotEmpty,
   IsNumberString,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  MaxLength,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import {
@@ -19,8 +22,21 @@ import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 const MOTIVOS = ['compra', 'devolucion', 'ajuste_manual', 'inventario_inicial'];
 
 export class SerieAjusteInputDto {
+  // Una serie de solo espacios no identifica nada, y `@IsNotEmpty` no la
+  // distingue de contenido real (`"   "` no es `""`). `\S` pide al menos un
+  // caracter visible y **deja pasar los espacios internos** —`ABC 123` es una
+  // serie legítima—: lo que se rechaza es la que queda vacía al normalizar.
+  // La unicidad compara sin bordes ni mayúsculas (owner, 2026-09-20), pero se
+  // guarda tal como se tipeó, así que acá no se transforma el valor.
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, { message: 'La serie no puede ser solo espacios' })
+  // `@MaxLength` porque la serie participa de un índice único por expresión y
+  // btree tiene un tope de ~2,7 KB por entrada: sin límite, una serie enorme
+  // revienta el INSERT con un error de Postgres sin mapear —un 500 en el mismo
+  // chokepoint que da 400 para todo lo demás—. 100 es el valor que ya usan los
+  // códigos de este repo, y un IMEI son 15 caracteres.
+  @MaxLength(100)
   serie: string;
 
   @IsIn(['nuevo', 'usado', 'reacondicionado'])
@@ -98,6 +114,10 @@ export class AjusteStockDto {
 
   // Modo 'serie' — entrada: series a registrar
   @IsArray()
+  // `@ArrayMaxSize(200)`, el mismo tope que ya usa `LineaCompraDto.series`: sin
+  // él, una tanda de decenas de miles de series entra entera al `unnest` del
+  // guard y al loop de INSERT.
+  @ArrayMaxSize(200)
   @ValidateNested({ each: true })
   @Type(() => SerieAjusteInputDto)
   @IsOptional()

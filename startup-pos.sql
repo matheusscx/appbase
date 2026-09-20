@@ -1165,13 +1165,26 @@ CREATE TABLE "item_unidad" (
 -- La serie es única POR PRODUCTO, no por tenant (owner, 2026-09-19): cada proveedor
 -- numera como quiere, así que dos productos distintos del mismo tenant sí pueden
 -- repetir número. `item_id` ya determina el tenant.
--- Lo declara la entity `ItemUnidad` —columnas peladas, `@Index` las expresa— y lo crea
--- `synchronize`; este archivo es documentación. Hasta el 2026-09-19 el índice existía
--- SOLO acá y decía otra cosa —`uq_unidad_tenant_serie` sobre `(tenant_id, serie)`—,
--- así que la base real no lo tenía y dos unidades vivas del mismo producto podían
--- compartir serie en silencio.
+-- Y se compara NORMALIZADA —sin los blancos de los bordes y sin distinguir
+-- mayúsculas: `ABC123` y `abc123 ` son la misma serie— mientras la columna guarda el
+-- texto TAL COMO lo tipeó el usuario (owner, 2026-09-20). De ahí `lower(btrim(...))`.
+-- ⚠️ La LISTA de blancos va explícita (espacio, tab, LF, CR, FF, VT, NBSP): `btrim`
+-- sin lista recorta solo el espacio ASCII, y entonces `\tABC123\t` no colisiona con
+-- `ABC123`. La fuente de verdad de esa lista es `serieNormalizadaSql` en
+-- `item-unidad.entity.ts`, que usan el seeder y el guard del chokepoint.
+-- ⚠️ Lo crea `SeederService.seedItemUnidadSerieIndex()` con SQL cruda, NO la entity:
+-- TypeORM no sabe expresar una función en `@Index`, y declarado ahí `synchronize` creaba
+-- uno sobre la columna pelada, que acepta `ABC123` y `abc123` como dos. Este archivo es
+-- documentación del esquema, no lo ejecuta nadie.
+-- Historia de este índice, que son TRES formas con el mismo nombre: hasta el 2026-09-19
+-- vivía SOLO acá y con otras columnas (`uq_unidad_tenant_serie` sobre
+-- `(tenant_id, serie)`), así que la base real no lo tenía; del 2026-09-19 al 2026-09-20
+-- fue un `@Index` de columnas peladas, y un espacio de más esquivaba la unicidad; y la
+-- primera versión normalizada llamaba a `btrim` sin lista, que dejaba pasar el tab y el
+-- NBSP. Por eso el seeder lo precede de un DROP condicional.
 CREATE UNIQUE INDEX "uq_unidad_item_serie"
-  ON "item_unidad" ("item_id", "serie") WHERE "eliminado_el" IS NULL;
+  ON "item_unidad" ("item_id", lower(btrim("serie", E' \t\n\r\f\x0b\u00a0')))
+  WHERE "eliminado_el" IS NULL;
 
 -- Detalle del movimiento de inventario → qué unidades/lotes entraron o salieron
 CREATE TABLE "movimiento_inventario_detalle" (

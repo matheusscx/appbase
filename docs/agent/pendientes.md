@@ -801,45 +801,6 @@ Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no s
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
-- [ ] **Un espacio de más hace que la misma serie entre dos veces** (backend, medido por API
-  el 2026-09-19 al cerrar la unicidad de `serie`) — el índice `uq_unidad_item_serie` y el
-  guard de `InventarioService.assertSeriesLibres` comparan la serie **cruda**, y ninguna de
-  las tres DTO que la reciben la normaliza: `SerieInputDto`
-  (`items/dto/create-item.dto.ts`), `SerieAjusteInputDto` (`items/dto/ajuste-stock.dto.ts`)
-  y `SerieCompraDto` (`compras/dto/compra-borrador.dto.ts`) declaran solo `@IsString()` +
-  `@IsNotEmpty()`.
-
-  **Medido por la API, no deducido** (`PATCH /items/:id/stock` sobre un producto que ya
-  tenía la serie `TRIM-…`): mandar `"TRIM-… "` —un espacio al final— devuelve **200** y deja
-  **dos unidades vivas**, `["TRIM-… ", "TRIM-…"]`, con stock 2. Para Postgres son dos strings
-  distintos, así que el índice las acepta: es el mismo duplicado silencioso que el frente de
-  la serie vino a cerrar, entrando por el borde de los espacios. En el mismo movimiento se
-  midió que **una serie de solo espacios (`"   "`) también entra con 200**: `@IsNotEmpty` no
-  la distingue de contenido real.
-
-  Hoy hay **un solo lugar que normaliza, y solo para comparar**:
-  `ComprasService.validarTrazabilidad` arma su `Set` con `.trim()`, pero **guarda sin
-  trimear** y solo mira dentro de una línea del borrador. El camino del ajuste no pasa por
-  ahí.
-
-  **Las preguntas, antes de tocar nada:**
-  1. ¿Dos series que difieren **solo en espacios** son la misma serie? (Si sí, la
-     normalización va **al escribir**, no solo al comparar: ver el punto 3.)
-  2. ¿Y si difieren **solo en mayúsculas** —`ab12` vs `AB12`—? Son dos mecanismos distintos
-     en este repo: el `@Index` de columnas peladas que ya tiene `ItemUnidad`, o un índice
-     sobre `lower(serie)` creado por el seeder —lo que TypeORM no sabe declarar—, como ya se
-     hace con los nombres únicos. La respuesta decide cuál.
-  3. ¿Se rechaza con 400 la serie con espacios, o se trimea en silencio al guardar?
-
-  ⚠️ **Por qué no se arregló de arrastre en el frente de la serie** (y por qué no es una
-  línea): trimear **solo en el guard** lo volvería más estricto que el índice, justo la
-  asimetría que su comentario existe para evitar. Trimear **al escribir** es lo coherente,
-  pero `ComprasService.corregirCantidad` cruza las series guardadas en el JSON de
-  `compra_lineas.series` contra las de `item_unidad` para decidir qué unidades pueden salir
-  de una línea corregida: normalizar un lado y no el otro deja ese cruce sin matchear, en
-  silencio. O sea que la normalización va en las tres DTO —los dos lados nacen ahí— y eso
-  toca dos módulos.
-
 - [ ] **Aviso de stock bajo** (backend + frontend + producto, pedido por el owner el
   2026-09-18 en el brainstorm del dashboard de inicio) — que el sistema avise cuando un
   producto se está acabando. Quedó afuera del dashboard porque **no existe el dato**: ningún

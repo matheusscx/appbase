@@ -3,6 +3,8 @@ import { type INestApplication } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { SeederService } from '../src/modules/seeder/seeder.service';
+import { serieNormalizadaSql } from '../src/modules/items/entities/item-unidad.entity';
 
 /**
  * Invariantes del ESQUEMA, medidas contra la base real.
@@ -97,33 +99,142 @@ describe('Esquema (e2e) — invariantes medidas contra Postgres', () => {
   });
 
   /**
-   * La unicidad de `serie` existe **en la base**, no solo en el `.sql`.
+   * La unicidad de `serie` existe **en la base**, y con la normalización que
+   * manda la regla.
    *
-   * El bug que cierra: `startup-pos.sql` declaraba `uq_unidad_tenant_serie`,
-   * pero el esquema lo crea `synchronize` desde las entities y `ItemUnidad` no
-   * declaraba ningún `@Index`. Medido el 2026-09-19: `item_unidad` tenía solo su
-   * PK, así que dos unidades vivas podían compartir serie **en silencio**.
+   * El bug que cerró la primera versión de este test (2026-09-19):
+   * `startup-pos.sql` declaraba el índice pero el esquema lo crea `synchronize`
+   * desde las entities, y `ItemUnidad` no declaraba ninguno — `item_unidad` tenía
+   * solo su PK y dos unidades vivas podían compartir serie **en silencio**.
    *
-   * Por eso el test mira `pg_indexes` y no el `.sql`: la pregunta es qué índice
-   * hay, no cuál está escrito. Y afirma sobre las columnas y el `WHERE` —no solo
-   * sobre el nombre— porque la regla del owner es por PRODUCTO: un índice con el
-   * nombre correcto sobre `(tenant_id, serie)` prohibiría que dos productos
-   * repitan número, que es legítimo. El 400 que nombra la serie lo prueban
-   * `serie-unica-por-producto.e2e-spec.ts` y `compras.e2e-spec.ts` por la API.
+   * El segundo bug, que cierra esta versión (owner, 2026-09-20): con el índice
+   * sobre la **columna pelada**, `ABC123` y `abc123 ` eran dos series distintas y
+   * entraban las dos. La regla es que son la misma, así que el índice va sobre
+   * `lower(btrim(serie))`. Y como **TypeORM no sabe expresar una función en
+   * `@Index`**, declararlo en la entity volvía a crear el de la columna pelada:
+   * por eso hoy lo crea `SeederService.seedItemUnidadSerieIndex()`.
+   *
+   * Por eso el test mira `pg_indexes` y no el `.sql` ni la entity: la pregunta es
+   * qué índice **hay**, no cuál está escrito ni quién lo declara. Afirma sobre la
+   * expresión y el `WHERE`, no sobre el nombre, porque el nombre no cambió entre
+   * las dos reglas: un índice con el nombre correcto y la definición vieja es
+   * exactamente el caso que se escapó.
    */
-  it('item_unidad tiene el índice único de serie por producto vivo', async () => {
+  it('item_unidad tiene el índice único de serie normalizada por producto vivo', async () => {
     const indices: { indexname: string; indexdef: string }[] = await ds.query(
       `SELECT indexname, indexdef FROM pg_indexes
         WHERE tablename = 'item_unidad' AND indexdef ILIKE '%UNIQUE%'
           AND indexdef ILIKE '%serie%'`,
     );
 
+    // Uno, no dos: si además quedara el de la columna pelada, la regla estaría
+    // enforzada dos veces y la de más estricta no sería la normalizada.
     expect(indices).toHaveLength(1);
-    // `(item_id, serie)` en ese orden, y parcial por `eliminado_el IS NULL`:
-    // sin el WHERE, una unidad borrada dejaría su serie tomada para siempre.
-    expect(indices[0].indexdef).toMatch(/\(item_id, serie\)/);
+    // `item_id` + la serie normalizada, en ese orden. El match NO fija la lista
+    // de blancos carácter por carácter —Postgres la renderiza con los caracteres
+    // de verdad, tabs y newlines incluidos, así que un regex literal sería
+    // ilegible y frágil—: fija que estén las dos funciones y que `btrim` reciba
+    // su lista. Que la lista sea la correcta lo mide el test de conducta de acá
+    // abajo, que es lo que importa.
+    expect(indices[0].indexdef).toMatch(/\(item_id, lower\(btrim\(serie, '/);
+    // Y el NBSP está en la lista: es el blanco que no se puede confundir con
+    // otro y el que delata una lista incompleta (la primera versión de este
+    // índice llamaba a `btrim` sin lista, que recorta solo el espacio ASCII).
+    expect(indices[0].indexdef).toContain('\u00a0');
+    // Parcial: sin el WHERE, una unidad borrada dejaría su serie tomada para
+    // siempre.
     expect(indices[0].indexdef).toMatch(/WHERE \(eliminado_el IS NULL\)/);
   });
+
+  /**
+   * Y la normalización del índice es la MISMA que usa el guard del chokepoint.
+   *
+   * No es redundante con el test de arriba: ese mira la forma del índice, este
+   * mide la **conducta** contra Postgres, que es lo que decide si un duplicado
+   * entra. Se hace con SQL porque lo que se afirma es del motor —cómo compara
+   * `lower(btrim(...))`—, no de la API: los caminos de la app los cubre
+   * `serie-unica-por-producto.e2e-spec.ts`.
+   */
+  it('la normalización iguala mayúsculas y TODOS los blancos de borde, y no toca el de adentro', async () => {
+    // Se arma con `serieNormalizadaSql`, el mismo helper que usa el índice y el
+    // guard: así este test mide la expresión que está vigente, no una copia.
+    const norm = (v: string) => `${serieNormalizadaSql(`'${v}'`)}`;
+    const [fila]: {
+      mayus: boolean;
+      espacio: boolean;
+      tab: boolean;
+      nl: boolean;
+      nbsp: boolean;
+      adentro: boolean;
+    }[] = await ds.query(
+      `SELECT ${norm('ABC123')} = ${norm('abc123')} AS mayus,
+              ${norm('ABC123')} = ${norm(' ABC123 ')} AS espacio,
+              ${norm('ABC123')} = ${norm('\tABC123\t')} AS tab,
+              ${norm('ABC123')} = ${norm('\nABC123')} AS nl,
+              ${norm('ABC123')} = ${norm('\u00a0ABC123')} AS nbsp,
+              ${norm('ABC123')} = ${norm('ABC 123')} AS adentro`,
+    );
+    expect(fila.mayus).toBe(true);
+    expect(fila.espacio).toBe(true);
+    // Los tres que la primera versión dejaba pasar: `btrim` sin lista recorta
+    // solo el espacio ASCII, así que estos tres daban `false` y el duplicado
+    // entraba. Lo levantó la revisión de seguridad.
+    expect(fila.tab).toBe(true);
+    expect(fila.nl).toBe(true);
+    expect(fila.nbsp).toBe(true);
+    // Y el blanco de ADENTRO sigue distinguiendo: si esto fuera true, la
+    // normalización estaría borrando más de lo que la regla dice.
+    expect(fila.adentro).toBe(false);
+  });
+
+  /**
+   * Y una base creada **con el índice viejo** queda arreglada al arrancar.
+   *
+   * Es el único test que cubre la migración, y hacía falta: entre el 2026-09-19 y
+   * el 2026-09-20 las bases de dev —y la de Railway— quedaron con
+   * `uq_unidad_item_serie` sobre la **columna pelada**, o sea el mismo nombre con
+   * la definición vieja. Un `CREATE UNIQUE INDEX IF NOT EXISTS` no lo reemplaza:
+   * ve el nombre, no hace nada, y la base se queda con la regla anterior sin que
+   * nada avise. Por eso el seeder lo precede de un `DROP` condicional.
+   *
+   * ⚠️ El escenario se monta con SQL directa **a propósito**, y es la excepción
+   * que se explica sola: el estado "índice viejo" ya no lo puede producir ningún
+   * camino de la app —la entity dejó de declararlo—, así que es un estado
+   * HISTÓRICO, no uno inalcanzable por un hueco de cobertura. Lo que se ejercita
+   * después sí es el camino real: `onApplicationBootstrap()`, el mismo que corre
+   * al arrancar.
+   */
+  it.each([
+    ['columna pelada (2026-09-19)', '(item_id, serie)'],
+    [
+      'lower(btrim(serie)) sin lista de blancos',
+      '(item_id, lower(btrim(serie)))',
+    ],
+  ])(
+    'al arrancar, reemplaza el índice viejo —%s— por el normalizado',
+    async (_nombre, definicionVieja) => {
+      await ds.query('DROP INDEX IF EXISTS uq_unidad_item_serie');
+      await ds.query(`
+        CREATE UNIQUE INDEX uq_unidad_item_serie
+        ON item_unidad ${definicionVieja} WHERE eliminado_el IS NULL
+      `);
+      const [viejo]: { indexdef: string }[] = await ds.query(
+        `SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_unidad_item_serie'`,
+      );
+      // El escenario quedó montado: sin esto, el test podría pasar por no haber
+      // cambiado nada. El NBSP es la marca del índice nuevo, así que su AUSENCIA
+      // es la marca de los viejos.
+      expect(viejo.indexdef).not.toContain('\u00a0');
+
+      await app.get(SeederService).onApplicationBootstrap();
+
+      const [ahora]: { indexdef: string }[] = await ds.query(
+        `SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_unidad_item_serie'`,
+      );
+      expect(ahora.indexdef).toContain('\u00a0');
+    },
+    120000,
+  );
 
   /**
    * Toda columna de dinero es NUMERIC(18,4). Una moneda con más decimales

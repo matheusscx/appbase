@@ -6,15 +6,27 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 
 /**
- * La serie de una unidad es única **por producto vivo** — `(item_id, serie)`
- * con `eliminado_el IS NULL`, la regla que fijó el owner el 2026-09-19 — y NO
- * por tenant: cada proveedor numera como quiere y no hay estándar global, así
- * que dos productos distintos del mismo tenant sí pueden repetir número.
+ * La serie de una unidad es única **por producto vivo**, y se compara
+ * **normalizada**: sin los espacios de los bordes y sin distinguir mayúsculas —
+ * `ABC123` y `abc123 ` son la misma serie (owner, 2026-09-20)—. En la base se
+ * guarda **tal como la tipeó el usuario**: la normalización es para comparar, no
+ * para escribir. El índice es `(item_id, serieNormalizadaSql('serie'))` con
+ * `eliminado_el IS NULL` — `lower(btrim(...))` con la lista de blancos explícita,
+ * porque `btrim` a secas recorta solo el espacio ASCII.
  *
- * El bug que cierra: el índice único existía solo en `startup-pos.sql`, que es
- * documentación y no lo ejecuta nadie —el esquema lo crea `synchronize` desde
- * las entities—, y `ItemUnidad` no lo declaraba. Dos unidades vivas del mismo
- * producto podían compartir serie y entraban **en silencio**.
+ * Sigue siendo por producto y NO por tenant: cada proveedor numera como quiere y
+ * no hay estándar global, así que dos productos distintos del mismo tenant sí
+ * pueden repetir número.
+ *
+ * Los dos bugs que cierra, en orden. (1) El índice único existía solo en
+ * `startup-pos.sql`, que es documentación —el esquema lo crea `synchronize` desde
+ * las entities—, así que dos unidades vivas del mismo producto compartían serie
+ * en silencio. (2) Cerrado eso con un `@Index` de columnas peladas, **un espacio
+ * de más seguía esquivando la unicidad**: `"X "` entraba junto a `"X"`, y una
+ * serie de solo espacios también entraba. (3) Cerrado eso con `btrim` a secas,
+ * **un tab, un newline o un NBSP en el borde seguían esquivándola** —`btrim` sin
+ * lista de caracteres recorta solo el espacio ASCII—, que es lo que fija la tabla
+ * de casos de más abajo. Lo levantó la revisión de seguridad.
  *
  * Acá van los dos caminos de `ItemsService`; los dos de compras —`confirmar` y
  * `corregirCantidad`— viven en `compras.e2e-spec.ts`, con los helpers de ese
@@ -137,23 +149,36 @@ describe('serie única por producto (e2e)', () => {
 
   // --- Camino 1: alta de producto en modo serie con stock inicial ------------
 
-  it('el alta con stock inicial rechaza dos veces la misma serie, y la nombra', async () => {
+  it('el alta con stock inicial rechaza dos series que solo difieren en mayúsculas o espacios', async () => {
     const serie = serieUnica('IMEI-ALTA-REPE');
     const r = await intentar(
       'post',
       '/api/items',
-      altaSerie({ series: [{ serie }, { serie }] }),
+      altaSerie({ series: [{ serie }, { serie: `${serie.toLowerCase()} ` }] }),
     );
     expect(r.status).toBe(400);
-    expect(r.message).toContain(serie);
+    expect(r.message).toContain(serie.toLowerCase());
+  });
+
+  it('el alta rechaza una serie de solo espacios, y contesta el BORDE', async () => {
+    const r = await intentar(
+      'post',
+      '/api/items',
+      altaSerie({ series: [{ serie: '   ' }] }),
+    );
+    expect(r.status).toBe(400);
+    // ⚠️ Afirma el texto del DTO (`La serie…`) y no un `toContain('solo
+    // espacios')`, y la razón se midió: el chokepoint tiene su propio rechazo
+    // para lo mismo, con el texto `Una serie…`, así que un `toContain` genérico
+    // pasa igual **sin el validador del borde** —lo probó un mutante que
+    // sobrevivió—. Los dos textos se escribieron distintos a propósito: es lo que
+    // permite pinchar cuál de las dos capas contestó. El rechazo del chokepoint
+    // lo cubre su test unitario.
+    expect(r.message).toContain('La serie no puede ser solo espacios');
   });
 
   it('la misma serie entra en dos productos distintos: la regla es por producto, no por tenant', async () => {
-    // La regla del owner, medida: la MISMA serie entra dos veces si son dos
-    // productos distintos —cada proveedor numera como quiere—, y el rechazo
-    // llega recién cuando se repite DENTRO de un producto. Si el índice fuera
-    // el `(tenant_id, serie)` que arrastraba `startup-pos.sql`, este caso
-    // fallaría.
+    // Si el índice fuera por tenant, el segundo producto se caería con 500.
     const serie = serieUnica('IMEI-DOS-PRODUCTOS');
     const primero = await crearProductoSerie({ series: [{ serie }] });
     const segundo = await crearProductoSerie({ series: [{ serie }] });
@@ -163,8 +188,10 @@ describe('serie única por producto (e2e)', () => {
 
   // --- Camino 2: ajuste/entrada manual de stock ------------------------------
 
-  it('el ajuste de stock rechaza una serie que el producto ya tiene viva, y la nombra', async () => {
-    const serie = serieUnica('IMEI-AJUSTE-VIVA');
+  it('el ajuste rechaza la serie ya viva aunque cambie mayúsculas y espacios, y nombra las dos', async () => {
+    // El caso que reabrió el frente: hasta el 2026-09-20 esto devolvía 200 y
+    // dejaba DOS unidades vivas.
+    const serie = serieUnica('IMEI-Ajuste-Viva');
     const itemId = await crearProductoSerie({ series: [{ serie }] });
     const localId = await ubicacionLocal();
 
@@ -173,18 +200,28 @@ describe('serie única por producto (e2e)', () => {
       motivo: 'compra',
       ubicacionId: localId,
       cantidad: '1',
-      series: [{ serie }],
+      series: [{ serie: `  ${serie.toUpperCase()}  ` }],
     });
     expect(r.status).toBe(400);
+    // El mensaje nombra la mandada Y la guardada: cuando difieren solo en
+    // mayúsculas, ver una sola hace que parezca un error del sistema.
+    expect(r.message).toContain(serie.toUpperCase());
     expect(r.message).toContain(serie);
 
-    // Y no entró: la unidad repetida no quedó a medias.
+    // Y sigue habiendo UNA sola unidad, con el texto original intacto.
     expect(await seriesDe(itemId)).toEqual([serie]);
   });
 
-  it('el ajuste de stock rechaza dos series iguales en la misma tanda', async () => {
-    // El otro duplicado, el que ningún índice puede ver: las dos filas todavía
-    // no existen cuando se chequea.
+  it('la serie se guarda tal como se tipeó, con sus espacios y mayúsculas', async () => {
+    // La otra mitad de la decisión del owner: normalizar es para COMPARAR. Si
+    // alguien trimeara al escribir, este test cae.
+    const base = serieUnica('IMEI-Literal');
+    const conBordes = `  ${base}  `;
+    const itemId = await crearProductoSerie({ series: [{ serie: conBordes }] });
+    expect(await seriesDe(itemId)).toEqual([conBordes]);
+  });
+
+  it('el ajuste rechaza dos series que normalizan igual en la misma tanda', async () => {
     const serie = serieUnica('IMEI-AJUSTE-TANDA');
     const itemId = await crearProductoSerie();
     const localId = await ubicacionLocal();
@@ -194,16 +231,75 @@ describe('serie única por producto (e2e)', () => {
       motivo: 'compra',
       ubicacionId: localId,
       cantidad: '2',
-      series: [{ serie }, { serie }],
+      series: [{ serie }, { serie: `${serie.toLowerCase()} ` }],
     });
     expect(r.status).toBe(400);
-    expect(r.message).toContain(serie);
     expect(await seriesDe(itemId)).toEqual([]);
+  });
+
+  it.each([
+    ['tab', '\t'],
+    ['newline', '\n'],
+    ['NBSP', '\u00a0'],
+  ])(
+    'el ajuste rechaza la serie ya viva con un %s en el borde',
+    async (_nombre, blanco) => {
+      // El agujero que encontró la revisión de seguridad: `btrim(serie)` **sin
+      // lista de caracteres recorta solo el espacio ASCII**, así que con la
+      // primera versión de este frente `\tABC123\t` NO colisionaba con `ABC123`
+      // y entraba como una segunda unidad viva — el mismo duplicado silencioso,
+      // por un borde que no es el espacio. Por eso `serieNormalizadaSql` enumera
+      // los blancos.
+      const serie = serieUnica('IMEI-BLANCO');
+      const itemId = await crearProductoSerie({ series: [{ serie }] });
+      const localId = await ubicacionLocal();
+
+      const r = await intentar('patch', `/api/items/${itemId}/stock`, {
+        tipo: 'entrada',
+        motivo: 'compra',
+        ubicacionId: localId,
+        cantidad: '1',
+        series: [{ serie: `${blanco}${serie}${blanco}` }],
+      });
+      expect(r.status).toBe(400);
+      expect(await seriesDe(itemId)).toEqual([serie]);
+    },
+  );
+
+  it('rechaza la serie que pasa de 100 caracteres', async () => {
+    // Sin tope, una serie enorme participa del índice por expresión y btree
+    // corta en ~2,7 KB: el INSERT reventaría con un error de Postgres sin mapear
+    // —un 500— en el mismo chokepoint que da 400 para todo lo demás.
+    const r = await intentar(
+      'post',
+      '/api/items',
+      altaSerie({ series: [{ serie: 'A'.repeat(101) }] }),
+    );
+    expect(r.status).toBe(400);
+  });
+
+  it('el espacio de ADENTRO sí distingue: son dos series distintas', async () => {
+    // El control de la normalización: si `ABC 123` y `ABC123` colisionaran, la
+    // normalización estaría borrando más de lo que la regla dice.
+    const base = serieUnica('IMEI');
+    const itemId = await crearProductoSerie({ series: [{ serie: base }] });
+    const localId = await ubicacionLocal();
+
+    const conEspacioInterno = base.replace('IMEI-', 'IMEI ');
+    const r = await intentar('patch', `/api/items/${itemId}/stock`, {
+      tipo: 'entrada',
+      motivo: 'compra',
+      ubicacionId: localId,
+      cantidad: '1',
+      series: [{ serie: conEspacioInterno }],
+    });
+    expect(r.status).toBe(200);
+    expect(await seriesDe(itemId)).toEqual([base, conEspacioInterno].sort());
   });
 
   it('el ajuste sigue aceptando una serie nueva del mismo producto', async () => {
     // El control del guard: sin este caso, un chequeo que rechazara TODA serie
-    // pasaría los tres tests de arriba.
+    // pasaría los tests de arriba.
     const primera = serieUnica('IMEI-OK-A');
     const segunda = serieUnica('IMEI-OK-B');
     const itemId = await crearProductoSerie({ series: [{ serie: primera }] });

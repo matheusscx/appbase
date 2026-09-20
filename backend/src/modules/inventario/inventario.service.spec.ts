@@ -6,6 +6,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import { InventarioService } from './inventario.service';
+import { serieNormalizadaSql } from '../items/entities/item-unidad.entity';
 import { MovimientoInventario } from './entities/movimiento-inventario.entity';
 import { CatalogService } from '../catalog/catalog.service';
 import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
@@ -587,19 +588,37 @@ describe('InventarioService', () => {
     });
 
     /**
-     * La serie es única por producto vivo (`uq_unidad_item_serie`). Estos dos
-     * casos fijan el 400 y su mensaje; que el índice exista en la base y que los
-     * cuatro caminos de la API lo respeten lo miden `test/esquema.e2e-spec.ts`,
-     * `test/serie-unica-por-producto.e2e-spec.ts` y `test/compras.e2e-spec.ts`.
+     * La serie es única por producto vivo, comparada **sin espacios de los
+     * bordes y sin distinguir mayúsculas** (owner, 2026-09-20):
+     * `uq_unidad_item_serie` sobre `(item_id, serieNormalizadaSql('serie'))`.
+     *
+     * Estos casos fijan los tres rechazos y sus mensajes. Con el manager
+     * mockeado la base no normaliza nada —la normalización la hace Postgres, ver
+     * el docblock de `assertSeriesLibres`—, así que lo que se puede afirmar acá
+     * es **la forma de la consulta** y **qué hace el service con lo que vuelve**.
+     * Que `ABC123` y `abc123 ` colisionen de verdad lo mide
+     * `test/serie-unica-por-producto.e2e-spec.ts` contra Postgres; que el índice
+     * exista y tenga esa forma, `test/esquema.e2e-spec.ts`.
      */
-    it('entrada serie: rechaza la serie que el producto ya tiene viva, y la nombra', async () => {
+    it('entrada serie: la consulta del guard normaliza EN LA BASE, de los dos lados', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
         .mockResolvedValueOnce([{ stock: '1' }])
-        .mockResolvedValueOnce([{ serie: 'IMEI-001' }]); // la serie ya está viva
+        .mockResolvedValueOnce([
+          { cruda: 'IMEI-001', norm: 'imei-001', ya_viva: null },
+          { cruda: 'IMEI-002', norm: 'imei-002', ya_viva: null },
+        ])
+        .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }])
+        .mockResolvedValueOnce([{ unidad_id: UNIDAD_2 }])
+        .mockResolvedValueOnce([{ cnt: '2' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-norm' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined);
 
-      await expect(
-        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
           tenantId: TENANT,
           itemId: ITEM_ID,
           ubicacionId: UBICACION_ID,
@@ -608,32 +627,94 @@ describe('InventarioService', () => {
           cantidad: '2',
           usuarioId: USER_ID,
           series: [{ serie: 'IMEI-001' }, { serie: 'IMEI-002' }],
-        }),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Este producto ya tiene una unidad con la serie: IMEI-001',
-        ),
+        },
       );
 
-      // UNA consulta para las N series, y con la clave EXACTA del índice
-      // —`item_id` + `serie`, sin `tenant_id`—: un guard que mirara una columna
-      // de más dejaría pasar filas que el índice sí rechaza, y el 400 volvería a
-      // ser el 500 que este chequeo existe para evitar.
       const [sql, params] = managerMock.query.mock.calls[2] as [
         string,
         unknown[],
       ];
-      expect(sql).toContain('serie = ANY($2)');
-      expect(sql).toContain('item_id = $1');
-      expect(sql).toContain('eliminado_el IS NULL');
+      // Los dos lados de la comparación pasan por `lower(btrim(...))` de
+      // Postgres: el de la columna y el de lo que entra. Si uno solo normalizara,
+      // el guard y el índice discreparían y el caso que se escapa volvería como
+      // el 500 del índice.
+      // Se compara contra `serieNormalizadaSql`, no contra un string escrito a
+      // mano: es el mismo helper que usa el seeder para el índice, así que este
+      // assert falla si el guard y el índice dejan de ser gemelos.
+      expect(sql).toContain(serieNormalizadaSql('t.cruda'));
+      expect(sql).toContain(`${serieNormalizadaSql('u.serie')} = e.norm`);
+      expect(sql).toContain('u.item_id = $1');
+      expect(sql).toContain('u.eliminado_el IS NULL');
       expect(sql).not.toContain('tenant_id');
+      // Las series van CRUDAS: normalizarlas en JS antes de mandarlas es
+      // exactamente lo que este diseño evita.
       expect(params).toEqual([ITEM_ID, ['IMEI-001', 'IMEI-002']]);
     });
 
-    it('entrada serie: rechaza dos veces la misma serie en la misma tanda, sin consultar', async () => {
+    it('entrada serie: rechaza la serie ya viva nombrando la mandada Y la guardada', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
-        .mockResolvedValueOnce([{ stock: '0' }]);
+        .mockResolvedValueOnce([{ stock: '1' }])
+        // Lo que devuelve la base para `abc123 `: colisiona con `ABC123`.
+        .mockResolvedValueOnce([
+          { cruda: 'abc123 ', norm: 'abc123', ya_viva: 'ABC123' },
+        ]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '1',
+          usuarioId: USER_ID,
+          series: [{ serie: 'abc123 ' }],
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Este producto ya tiene una unidad con la serie: "abc123 " (ya existe como "ABC123")',
+        ),
+      );
+    });
+
+    it('entrada serie: cuando la mandada y la guardada son idénticas, no repite el texto', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '1' }])
+        .mockResolvedValueOnce([
+          { cruda: 'IMEI-001', norm: 'imei-001', ya_viva: 'IMEI-001' },
+        ]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '1',
+          usuarioId: USER_ID,
+          series: [{ serie: 'IMEI-001' }],
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Este producto ya tiene una unidad con la serie: "IMEI-001"',
+        ),
+      );
+    });
+
+    it('entrada serie: dos series que normalizan igual en la misma tanda rebotan', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '0' }])
+        // `ABC123` y `abc123 ` normalizan al mismo `abc123`: son la misma serie
+        // aunque las dos filas todavía no existan, así que ningún índice puede
+        // verlas y el rechazo es de acá.
+        .mockResolvedValueOnce([
+          { cruda: 'ABC123', norm: 'abc123', ya_viva: null },
+          { cruda: 'abc123 ', norm: 'abc123', ya_viva: null },
+        ]);
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -644,17 +725,38 @@ describe('InventarioService', () => {
           motivo: 'compra',
           cantidad: '2',
           usuarioId: USER_ID,
-          series: [{ serie: 'IMEI-007' }, { serie: 'IMEI-007' }],
+          series: [{ serie: 'ABC123' }, { serie: 'abc123 ' }],
         }),
       ).rejects.toThrow(
         new BadRequestException(
-          'Estas series vienen repetidas en la misma entrada: IMEI-007',
+          'Estas series vienen repetidas en la misma entrada: abc123 ',
         ),
       );
+    });
 
-      // Las dos filas todavía no existen, así que ningún índice puede verlas: es
-      // un chequeo en memoria y no gasta la consulta.
-      expect(managerMock.query).toHaveBeenCalledTimes(2);
+    it('entrada serie: la serie que normaliza a vacío rebota en el chokepoint', async () => {
+      // Por la API esto lo corta antes el `@Matches(/\S/)` de las tres DTO —lo
+      // mide el e2e—, así que este caso es el del chokepoint para un llamador
+      // que no venga de HTTP: el invariante no depende de la pantalla.
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([{ cruda: '   ', norm: '', ya_viva: null }]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '1',
+          usuarioId: USER_ID,
+          series: [{ serie: '   ' }],
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('Una serie no puede ser solo espacios'),
+      );
     });
 
     it('entrada serie: lanza BadRequest si cantidad != series.length', async () => {

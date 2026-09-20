@@ -1391,6 +1391,94 @@ describe('Compras — borrador (e2e)', () => {
         ).toEqual([`SN-REPE-${marca}`]);
       });
 
+      it('en serie, subir con una serie que solo cambia mayúsculas o espacios también rebota', async () => {
+        // La unicidad compara normalizada (owner, 2026-09-20), así que
+        // `sn-caso-…` con un espacio al final ES `SN-CASO-…`. Antes del
+        // 2026-09-20 esto entraba como una segunda unidad.
+        const itemId = await productoVacio({ modoInventario: 'serie' });
+        const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            lineas: [
+              {
+                itemId,
+                cantidad: '1',
+                unidadCodigo: 'unidad',
+                precioUnitario: '90000',
+                series: [{ serie: `SN-CASO-${marca}` }],
+              },
+            ],
+          }),
+        );
+        await confirmar(compra.id);
+        const lineaId = await primeraLinea(compra.id);
+
+        const r = await corregirCantidad(compra.id, lineaId, {
+          cantidad: '2',
+          series: [{ serie: `sn-caso-${marca} ` }],
+        });
+        expect(r.status).toBe(400);
+        expect(r.message).toContain(`sn-caso-${marca}`);
+        expect(
+          (
+            await get<{ serie: string }[]>(
+              `/api/items/${itemId}/unidades?estado=disponible`,
+            )
+          ).map((u) => u.serie),
+        ).toEqual([`SN-CASO-${marca}`]);
+      });
+
+      it('en serie, bajar la cantidad sigue cruzando bien una serie guardada con espacios', async () => {
+        // El cruce que hay que cuidar: `corregirCantidad` compara las series del
+        // JSON de `compra_lineas.series` contra las de `item_unidad`, **por texto
+        // exacto**. Se sostiene porque la decisión del owner es guardar tal como
+        // se tipeó en los DOS lados: la línea y la unidad nacen del mismo string,
+        // así que siguen siendo idénticas aunque tengan espacios de los bordes.
+        // Si alguien normalizara al escribir en un solo lado, este test cae — y
+        // eso es exactamente lo que vino a fijar.
+        const itemId = await productoVacio({ modoInventario: 'serie' });
+        const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+        const conBordes = `  SN-BORDES-${marca}  `;
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            lineas: [
+              {
+                itemId,
+                cantidad: '2',
+                unidadCodigo: 'unidad',
+                precioUnitario: '90000',
+                series: [{ serie: conBordes }, { serie: `SN-OTRA-${marca}` }],
+              },
+            ],
+          }),
+        );
+        await confirmar(compra.id);
+        const lineaId = await primeraLinea(compra.id);
+
+        // Se guardó literal, con los espacios.
+        const unidades = await get<{ id: string; serie: string }[]>(
+          `/api/items/${itemId}/unidades?estado=disponible`,
+        );
+        const conEspacios = unidades.find((u) => u.serie === conBordes);
+        expect(conEspacios).toBeDefined();
+
+        // Y sacarla por la corrección la reconoce como "de esta compra".
+        const r = await corregirCantidad(compra.id, lineaId, {
+          cantidad: '1',
+          unidadIds: [conEspacios!.id],
+        });
+        expect(r.status).toBe(200);
+        expect(
+          (
+            await get<{ serie: string }[]>(
+              `/api/items/${itemId}/unidades?estado=disponible`,
+            )
+          ).map((u) => u.serie),
+        ).toEqual([`SN-OTRA-${marca}`]);
+      });
+
       it('en lote, la diferencia va al mismo lote', async () => {
         const itemId = await productoVacio({ modoInventario: 'lote' });
         const codigoLote = `LT-CORR-${Date.now()}`;

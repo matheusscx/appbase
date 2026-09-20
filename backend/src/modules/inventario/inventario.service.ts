@@ -21,6 +21,7 @@ import {
 import { MovimientoInventario } from './entities/movimiento-inventario.entity';
 import { CatalogService } from '../catalog/catalog.service';
 import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
+import { serieNormalizadaSql } from '../items/entities/item-unidad.entity';
 import type { FindMovimientosDto } from './dto/find-movimientos.dto';
 import type { AjusteCostoDto } from './dto/ajuste-costo.dto';
 import {
@@ -1144,10 +1145,12 @@ export class InventarioService {
   }
 
   /**
-   * La serie es única **por producto vivo** — `uq_unidad_item_serie` en
-   * `ItemUnidad`, `(item_id, serie) WHERE eliminado_el IS NULL` (owner,
-   * 2026-09-19: por producto y no por tenant, porque cada proveedor numera como
-   * quiere).
+   * La serie es única **por producto vivo** y **comparada normalizada** —
+   * `uq_unidad_item_serie`, que lo crea `SeederService`, sobre
+   * `(item_id, serieNormalizadaSql('serie')) WHERE eliminado_el IS NULL`—: por
+   * producto y no por tenant, porque cada proveedor numera como quiere (owner,
+   * 2026-09-19), y sin los blancos de los bordes ni mayúsculas, guardando el
+   * texto tal como se tipeó (owner, 2026-09-20).
    *
    * El índice es la red de la base, pero solo: reventarlo da un 500 que no dice
    * cuál serie viene repetida, y el operador que acaba de tipear 30 IMEIs no
@@ -1160,53 +1163,103 @@ export class InventarioService {
    * `registrarMovimiento`. Mismo criterio que el resto de este método: el
    * chokepoint no confía en el llamador.
    *
-   * Dos chequeos, porque son dos duplicados distintos y el segundo cuesta una
-   * consulta: las repetidas **dentro de la misma tanda** (que ningún índice
-   * puede ver, porque son filas que todavía no existen) y las que **ya están
-   * vivas en la base**. `ComprasService.validarTrazabilidad` también rechaza
-   * repetidas, pero solo dentro de una línea del borrador: es un aviso temprano
-   * en la pantalla, no la red.
+   * Tres rechazos, porque son tres duplicados distintos: la serie que **no dice
+   * nada** (solo espacios), las repetidas **dentro de la misma tanda** —que
+   * ningún índice puede ver, porque son filas que todavía no existen— y las que
+   * **ya están vivas** en el producto.
+   *
+   * ⚠️ **La normalización la hace Postgres, no JavaScript**, y es deliberado: el
+   * `toLowerCase()` de JS y el `lower()` de Postgres **no coinciden fuera de
+   * ASCII** (`lower()` depende de la collation), así que normalizar acá en JS
+   * dejaría al guard y al índice discrepando en los bordes — y el caso que se
+   * escapa vuelve como el 500 del índice que este método existe para evitar. Por
+   * eso la consulta le pasa las series **crudas** y deja que la base calcule
+   * `lower(btrim(...))` de los dos lados: gemelo exacto por construcción.
+   *
+   * Es UNA consulta para las N series, no una por serie.
+   *
+   * `ComprasService.validarTrazabilidad` también rechaza repetidas, pero con
+   * `.trim()` y sensible a mayúsculas, y solo dentro de una línea del borrador:
+   * es un aviso temprano en la pantalla, no la red.
    */
   private async assertSeriesLibres(
     manager: EntityManager,
     itemId: string,
     series: string[],
   ): Promise<void> {
-    const vistas = new Set<string>();
-    const repetidasEnLaTanda = new Set<string>();
-    for (const serie of series) {
-      if (vistas.has(serie)) repetidasEnLaTanda.add(serie);
-      vistas.add(serie);
+    // Los filtros de la consulta son **exactamente** la clave y el predicado del
+    // índice `uq_unidad_item_serie` —`(item_id, serieNormalizadaSql('serie'))` con
+    // `eliminado_el IS NULL`, sin `tenant_id`, que `item_id` ya determina—: un
+    // guard que mire una columna de más o normalice distinto deja pasar filas
+    // que el índice sí rechaza.
+    //
+    // Vuelve una fila por serie entrante, con la forma normalizada que calculó
+    // la base (`norm`) y, si hay una unidad viva que colisiona, **la serie tal
+    // como está guardada** (`ya_viva`): el mensaje puede decir "`abc123 ` choca
+    // con `ABC123`", que es lo que el operador necesita para entender por qué su
+    // serie "nueva" no entra.
+    const filas: {
+      cruda: string;
+      norm: string;
+      ya_viva: string | null;
+    }[] = await manager.query(
+      `WITH entrantes AS (
+         SELECT t.cruda, ${serieNormalizadaSql('t.cruda')} AS norm
+           FROM unnest($2::text[]) AS t(cruda)
+       )
+       SELECT e.cruda,
+              e.norm,
+              (SELECT u.serie FROM item_unidad u
+                WHERE u.item_id = $1
+                  AND ${serieNormalizadaSql('u.serie')} = e.norm
+                  AND u.eliminado_el IS NULL
+                LIMIT 1) AS ya_viva
+         FROM entrantes e`,
+      [itemId, series],
+    );
+
+    // Una serie que normaliza a vacío no identifica nada. El borde ya la rechaza
+    // —las tres DTO piden `@Matches(/\S/)`—, así que por la API esto no se
+    // alcanza; vive acá igual porque es el invariante del chokepoint, no una
+    // regla de pantalla, y lo cubre un test unitario.
+    const enBlanco = filas.filter((f) => f.norm === '');
+    if (enBlanco.length > 0) {
+      throw new BadRequestException('Una serie no puede ser solo espacios');
     }
-    if (repetidasEnLaTanda.size > 0) {
+
+    const vistas = new Set<string>();
+    const repetidas: string[] = [];
+    for (const f of filas) {
+      if (vistas.has(f.norm)) repetidas.push(f.cruda);
+      vistas.add(f.norm);
+    }
+    if (repetidas.length > 0) {
       throw new BadRequestException(
         `Estas series vienen repetidas en la misma entrada: ${[
-          ...repetidasEnLaTanda,
+          ...new Set(repetidas),
         ]
           .sort()
           .join(', ')}`,
       );
     }
 
-    // UNA consulta para las N series (`= ANY($2)`), no una por serie.
-    //
-    // Los filtros son **exactamente** la clave y el predicado del índice —sin
-    // `tenant_id`—: si el guard mirara una columna de más, podría dejar pasar
-    // una fila que el índice sí rechaza, y el 400 se volvería el 500 que este
-    // método existe para evitar. `item_id` ya determina el tenant.
-    const ocupadas: { serie: string }[] = await manager.query(
-      `SELECT serie FROM item_unidad
-        WHERE item_id = $1 AND serie = ANY($2) AND eliminado_el IS NULL`,
-      [itemId, [...vistas]],
-    );
+    const ocupadas = filas.filter((f) => f.ya_viva != null);
     if (ocupadas.length > 0) {
+      // Nombra las dos: la que se mandó y la que ya está guardada. Cuando
+      // difieren solo en mayúsculas o en un espacio, ver solo una de las dos
+      // hace que el mensaje parezca un error del sistema.
+      const detalle = ocupadas
+        .map((o) =>
+          o.cruda === o.ya_viva
+            ? `"${o.cruda}"`
+            : `"${o.cruda}" (ya existe como "${o.ya_viva!}")`,
+        )
+        .sort()
+        .join(', ');
       throw new BadRequestException(
         `Este producto ya tiene una unidad con ${
           ocupadas.length === 1 ? 'la serie' : 'las series'
-        }: ${ocupadas
-          .map((o) => o.serie)
-          .sort()
-          .join(', ')}`,
+        }: ${detalle}`,
       );
     }
   }

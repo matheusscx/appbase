@@ -1392,6 +1392,44 @@ El índice va **en la entity** (`@Index('idx_<tabla>_<col>', ['prop'])`), que es
 en `startup-pos.sql`, que es el esquema documentado: si solo está en la entity, quien le
 pregunte al `.sql` si esa FK tiene índice recibe la respuesta equivocada.
 
+#### Entity o seeder: lo decide si el índice lleva una función
+
+**Columnas peladas → `@Index` en la entity. Expresión → SQL cruda en el seeder.** No es
+estilo: **TypeORM no sabe expresar una función en `@Index`**, así que un índice que tiene que
+ser sobre `lower(nombre)` o `lower(btrim(serie))`, declarado en la entity, se crea sobre la
+columna pelada — case-sensitive. Queda la regla escrita y **la equivocada vigente**, que es
+peor que no tenerla: nadie vuelve a mirar un índice que existe.
+
+Ya pasó dos veces, y las dos se arreglaron mudando el índice al seeder:
+`seedGruposModificadores()` (nombres únicos, 2026-09) y `seedItemUnidadSerieIndex()` (la serie
+de una unidad, 2026-09-20 — venía de un `@Index` de columnas peladas que dejaba entrar
+`ABC123` y `abc123` como dos series distintas).
+
+El molde es **el mayoritario** entre los índices únicos que crea el seeder, no una excepción;
+para verlos sin confiar en una lista que envejece:
+
+```bash
+grep -A2 "CREATE UNIQUE INDEX IF NOT EXISTS" backend/src/modules/seeder/seeder.service.ts
+```
+
+⚠️ **Y la vuelta NO vale:** que un índice esté en el seeder no significa que lleve una función.
+Ahí viven también algunos de **columnas peladas** —`uq_recuento_linea_item_vivo`,
+`uq_garzones_usuario_tenant`, `uq_garzones_mostrador_tenant`— que podrían haber ido a la
+entity y están ahí por su propia historia. O sea: la función **obliga** al seeder, pero el
+seeder no implica función. Antes de mover uno, mirá el suyo.
+
+⚠️ **La contrapartida del seeder, que se acepta a sabiendas:** en dev `synchronize` puede
+dejar la tabla **sin** el índice hasta que el seeder lo recree, así que la red del lado de la
+base pasa a depender de que el seeder corra y no falle. Y si el índice cambia de definición
+manteniendo el nombre, `CREATE UNIQUE INDEX IF NOT EXISTS` **no lo reemplaza** —ve el nombre y
+no hace nada—: hay que precederlo de un `DROP` condicional que dispare solo cuando el que
+existe no es el nuevo (molde en las dos funciones citadas). Sin eso, las bases creadas antes
+del cambio se quedan con la regla vieja sin que nada avise.
+
+Y **el índice que crea el seeder va igual en `startup-pos.sql`**, con un comentario que diga
+quién lo crea: por la misma razón que arriba, quien le pregunte al `.sql` merece la respuesta
+correcta, incluida la de quién es el dueño.
+
 ⚠️ **No es "indexá toda FK".** El índice se paga en cada `INSERT`, y una tabla paga **solo el
 suyo**: insertar 20.000 detalles pasa de 63–70 ms a 77–89 ms, o sea **~1 µs por fila** por
 `idx_venta_detalles_venta` (medido por la revisión independiente, seis iteraciones alternando el

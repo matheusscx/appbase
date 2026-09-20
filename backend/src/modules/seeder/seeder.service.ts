@@ -52,6 +52,7 @@ import { Pasarela } from '../pasarela/entities/pasarela.entity';
 import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
 import { CredencialesService } from '../pasarela/services/credenciales.service';
 import { ItemsService } from '../items/items.service';
+import { serieNormalizadaSql } from '../items/entities/item-unidad.entity';
 import { Salon } from '../salones/entities/salon.entity';
 import { Mesa, FormaMesa, TamanoMesa } from '../salones/entities/mesa.entity';
 import { MOTIVOS_BAJA_FIJOS } from '../motivos-baja/motivos-baja.defaults';
@@ -180,6 +181,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedMotivosTraslado();
     await this.seedRecuentoInventarioLineaIndex();
     await this.seedPromocionesIndices();
+    await this.seedItemUnidadSerieIndex();
     await this.seedCajasVirtuales();
     await this.seedCajones();
     await this.seedPropinaConfiguracion();
@@ -1760,6 +1762,65 @@ export class SeederService implements OnApplicationBootstrap {
     await this.dataSource.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS uq_recuento_linea_item_vivo
       ON recuento_inventario_linea (recuento_id, item_id) WHERE eliminado_el IS NULL
+    `);
+  }
+
+  /**
+   * Solo el índice: la unicidad de la **serie** de una unidad serializada.
+   *
+   * La regla (owner, 2026-09-20): única **por producto**, comparada **sin los
+   * espacios de los bordes y sin distinguir mayúsculas** — `ABC123` y `abc123 `
+   * son la misma serie—, y en la base **se guarda tal como la tipeó el
+   * usuario**. De ahí la forma: `(item_id, serieNormalizadaSql('serie'))` con
+   * `eliminado_el IS NULL`.
+   *
+   * Va acá y no en `@Index` de `ItemUnidad` por el mismo motivo que
+   * `seedPromocionesIndices()` y `seedGruposModificadores()`: **TypeORM no sabe
+   * expresar una función**, así que declarado en la entity `synchronize` crearía
+   * uno sobre la columna pelada —que acepta `ABC123` y `abc123` como dos— y la
+   * regla existiría escrita pero no vigente.
+   *
+   * `InventarioService.assertSeriesLibres` compara con esta MISMA normalización
+   * y es lo que da el 400 con la serie repetida; este índice es la red de la
+   * base. Que los dos usen `lower(btrim(...))` **de Postgres** —el guard también
+   * normaliza en SQL, no en JS— es a propósito: dos normalizaciones distintas
+   * (el `toLowerCase()` de JS y el `lower()` de Postgres difieren fuera de
+   * ASCII) devolverían el 500 del índice que el guard existe para evitar.
+   *
+   * El `DROP` condicional limpia las formas VIEJAS de este índice, que comparten
+   * su nombre: la de **columnas peladas** que vivió en la entity entre el
+   * 2026-09-19 y el 2026-09-20, y la primera normalizada, que llamaba a `btrim`
+   * sin lista de blancos. Un `CREATE ... IF NOT EXISTS` no reemplaza ninguna —ve
+   * el nombre y no hace nada—. Cómo decide cuál es cuál: el comentario de adentro.
+   * En una base ya correcta no dispara, así que no hay churn.
+   */
+  private async seedItemUnidadSerieIndex(): Promise<void> {
+    // El `DROP` dispara cuando el índice que existe **no es** el de ahora, y lo
+    // decide por la presencia del NBSP en su definición: Postgres renderiza la
+    // lista de blancos de `serieNormalizadaSql` con los caracteres de verdad, y
+    // el NBSP es el único que no puede aparecer por casualidad. Es más preciso
+    // que preguntar por `lower` o por `btrim`, porque de este índice ya hubo
+    // **tres** formas con el MISMO nombre: `(item_id, serie)` pelado
+    // (2026-09-19), `lower(btrim(serie))` sin lista —que recorta solo el espacio
+    // ASCII— y el de hoy. Las dos primeras hay que reemplazarlas, y un
+    // `CREATE ... IF NOT EXISTS` no lo hace: ve el nombre y no toca nada.
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM pg_indexes
+           WHERE schemaname = 'public'
+             AND indexname = 'uq_unidad_item_serie'
+             AND indexdef NOT LIKE '%' || chr(160) || '%'
+        ) THEN
+          EXECUTE 'DROP INDEX uq_unidad_item_serie';
+        END IF;
+      END $$;
+    `);
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_unidad_item_serie
+      ON item_unidad (item_id, ${serieNormalizadaSql('serie')})
+      WHERE eliminado_el IS NULL
     `);
   }
 

@@ -159,33 +159,76 @@ Response (200):
 | `tenant_id` | UUID | |
 | `item_id` | UUID FK → items | |
 | `lote_id` | UUID FK → item_lote, nullable | metadato opcional |
-| `serie` | TEXT | IMEI u otro código, único por producto |
+| `serie` | TEXT | IMEI u otro código; único por producto, comparado sin bordes ni mayúsculas. Se guarda tal como se tipeó |
 | `estado` | TEXT | `disponible / reservado / vendido / baja` |
 | `condicion` | TEXT | `nuevo / usado / reacondicionado` |
 | `garantia_hasta` | TIMESTAMPTZ nullable | |
 | `venta_id` | UUID nullable | FK futuro a ventas |
 
-Índice único: `uq_unidad_item_serie` sobre `(item_id, serie) WHERE eliminado_el IS NULL`,
-declarado en la entity `ItemUnidad`.
+Índice único: `uq_unidad_item_serie` sobre
+`(item_id, lower(btrim(serie, <blancos>))) WHERE eliminado_el IS NULL`, donde `<blancos>` es la
+lista explícita de `serieNormalizadaSql` (`item-unidad.entity.ts`).
 
 **Por producto, no por tenant** (owner, 2026-09-19): cada proveedor numera como quiere y no
 hay estándar global, así que dos productos distintos del mismo tenant **sí** pueden repetir
 número. `tenant_id` no entra en la clave porque `item_id` ya lo determina.
 
+**Se compara normalizada; se guarda literal** (owner, 2026-09-20). Textual: *"«ABC123» y
+«abc123 » sí son iguales, guardemos en la base de datos tal como tipea el usuario y la
+validación la hacemos con upper o lower case"*. O sea:
+
+- Para decidir si una serie ya existe, no cuentan **los blancos de los bordes** ni **las
+  mayúsculas**: `ABC123`, `abc123` y `abc123 ` son la misma serie.
+- **Blanco de borde** es espacio, tab, LF, CR, form feed, tab vertical y NBSP, enumerados uno
+  por uno en `serieNormalizadaSql`. ⚠️ No es cosmético: **`btrim(serie)` sin lista recorta solo
+  el espacio ASCII**, así que la primera versión de esta regla dejaba entrar `\tABC123\t` como
+  una segunda unidad junto a `ABC123` — el mismo duplicado silencioso, por otro borde. Lo
+  levantó la revisión de seguridad y lo fija una tabla de casos en el e2e. Los espacios Unicode
+  exóticos (U+2000–U+200A, U+3000…) quedan **fuera a propósito**: no salen de un teclado ni de
+  un lector, y una serie que sea solo blancos igual rebota porque el `\S` de JS los cubre.
+- Lo que se **guarda** es el texto tal como lo tipeó el operador, con sus mayúsculas y sus
+  espacios. Normalizar es para comparar, nunca para escribir.
+- El espacio **de adentro** sí distingue: `ABC 123` y `ABC123` son dos series distintas. La
+  normalización recorta los bordes, no el contenido.
+- Una serie que queda vacía al normalizar —solo blancos— se rechaza con 400. La piden las
+  tres DTO con `@Matches(/\S/)` (`@IsNotEmpty` no distingue `"   "` de contenido real), y el
+  chokepoint la vuelve a rechazar para cualquier llamador que no venga de HTTP.
+- La serie tiene tope de **100 caracteres** (`@MaxLength`) y la tanda de **200 series**
+  (`@ArrayMaxSize`, el mismo que ya usaba compras). El de largo no es cosmético: la serie
+  participa de un índice por expresión y btree corta en ~2,7 KB por entrada, así que sin tope
+  una serie enorme rebota con un error de Postgres sin mapear —un 500— en el mismo chokepoint
+  que da 400 para todo lo demás.
+
+⚠️ **El índice lo crea el seeder, no la entity** (`SeederService.seedItemUnidadSerieIndex()`).
+No es un detalle de estilo: **TypeORM no sabe expresar una función en `@Index`**, así que
+declarado en la entity `synchronize` crea uno sobre la columna pelada —que acepta `ABC123` y
+`abc123` como dos series distintas—, o sea la regla equivocada. Es el mismo molde que los
+índices de `lower(nombre)` (`seedPromocionesIndices()`, `seedGruposModificadores()`), con su
+misma contrapartida: en dev `synchronize` puede dejar la tabla sin el índice hasta que el
+seeder lo recree, así que la red de la base depende de que el seeder corra y no falle.
+Detalle del criterio entity-vs-seeder: [`../patterns/backend.md`](../patterns/backend.md).
+
 Los cuatro caminos que crean unidades —alta de producto en modo serie con stock inicial,
 ajuste/entrada manual de stock, confirmación de compra y corrección de cantidad de una
 compra— pasan todos por `InventarioService.moverSerie`, el único lugar que inserta en
-`item_unidad`. Ahí se rechaza con **400 nombrando la serie** repetida, tanto la que ya está
-viva en el producto como la que viene dos veces en la misma tanda; el índice queda como red
-de la base, no como el mensaje que ve el operador.
+`item_unidad`. Ahí se rechaza con **400 nombrando la serie** repetida —la mandada y, si
+difieren, también la que ya está guardada: *"«abc123 » ya existe como «ABC123»"*—, tanto para
+la que ya está viva como para dos que normalizan igual en la misma tanda. El índice es la red
+de la base, no el mensaje que ve el operador.
 
-⚠️ **La unicidad es exacta sobre el texto, y un espacio de más la esquiva.** Medido por API el
-2026-09-19: con la serie `X` ya viva, mandar `"X "` devuelve 200 y deja **dos unidades vivas**
-—para Postgres son dos strings distintos, y el guard es el gemelo exacto del índice—; una
-serie de solo espacios también entra, porque `@IsNotEmpty` no la distingue de contenido real.
-Ninguna de las tres DTO que reciben una serie la normaliza. Normalizar al escribir tiene
-preguntas que son del owner (¿y las mayúsculas?) y toca dos módulos: la entrada con la
-medición y las tres preguntas está en [`../agent/pendientes.md`](../agent/pendientes.md) § 4.
+📌 **La normalización la hace Postgres, de los dos lados de la comparación.** El guard no
+normaliza en JavaScript: le pasa las series crudas y deja que la base calcule
+`lower(btrim(...))` tanto para la columna como para lo que entra. El motivo es que
+`toLowerCase()` de JS y `lower()` de Postgres **no coinciden fuera de ASCII** (`lower()`
+depende de la collation), y una discrepancia ahí devuelve el 500 del índice que el guard
+existe para evitar.
+
+📌 **Qué NO cambió con la normalización, y hay un test que lo fija:** `corregirCantidad` cruza
+las series guardadas en el JSON de `compra_lineas.series` contra las de `item_unidad` **por
+texto exacto**, y sigue funcionando porque los dos lados guardan literal lo tipeado — nacen
+del mismo string. Si alguien normalizara al escribir en un solo lado, ese cruce dejaría de
+matchear en silencio; lo cubre *"bajar la cantidad sigue cruzando bien una serie guardada con
+espacios"* en `compras.e2e-spec.ts`.
 
 **`item_lote`** — un fila por lote
 
