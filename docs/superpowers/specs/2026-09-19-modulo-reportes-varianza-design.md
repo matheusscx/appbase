@@ -4,7 +4,7 @@
 **Frente:** *"Reporte de varianza (AVT) — después de compras"*, en
 [`docs/agent/pendientes.md`](../../agent/pendientes.md) § 3, más la arquitectura del módulo que lo
 aloja. El owner lo pidió el 2026-09-19, al cerrar la pieza 1 de compras.
-**Decisiones del owner:** las nueve del 2026-09-19, en § 2.
+**Decisiones del owner:** todas del 2026-09-19, en § 2.
 
 ---
 
@@ -43,7 +43,7 @@ Todas del owner, 2026-09-19.
 | Decisión | Por qué importa |
 |---|---|
 | **El módulo nace solo con los reportes nuevos. No se muda nada ahora.** | Mudar cuesta rutas, pantallas y riesgo sobre código que hoy funciona, y el patrón se puede fijar igual copiando el de anulaciones. El criterio se aplica **hacia adelante** |
-| **La línea es quién lo mira y para qué.** *"El módulo reporte es más de negocio que de operación"* (palabras del owner). **Operación:** lo mira quien está haciendo la tarea ahora, para actuar; listado filtrable, vive en su módulo. **Negocio:** lo mira el dueño o el encargado para entender cómo va el local y decidir; mira hacia atrás, agrega y compara períodos | Es el criterio que decide dónde nace cada reporte futuro, sin volver a discutirlo. La clasificación de los trece está en § 3.3 |
+| **La línea es quién lo mira y para qué.** *"El módulo reporte es más de negocio que de operación"* (palabras del owner). **Operación:** lo mira quien está haciendo la tarea ahora, para actuar; listado filtrable, vive en su módulo. **Negocio:** lo mira el dueño o el encargado para entender cómo va el local y decidir; mira hacia atrás, agrega y compara períodos | Es el criterio que decide dónde nace cada reporte futuro, sin volver a discutirlo. La clasificación de los que ya existen está en § 3.3 |
 | **Cada reporte es su propio `modulo_app` con permiso `Leer`**, agrupados bajo "Reportes" en el menú | El guard solo sabe hacer **O**, nunca **Y** (`requires-permiso.decorator.ts`), así que cada ruta elige un par. Un solo `Reportes:Leer` haría que el reporte de márgenes que se agregue en seis meses le aparezca solo al encargado de bodega que hoy ve la varianza. Es el precedente exacto de `Resumen del negocio`, sacado de Ventas el 2026-09-18 por este mismo motivo |
 | **Período: el usuario elige un rango como en todo el resto, pero cada fila se mide entre el PRIMER y el ÚLTIMO recuento aplicado dentro de ese rango**, y declara cuál ventana usó. Sin dos recuentos, la fila dice "falta contarlo" en vez de un número | La varianza vive entre conteos, no entre fechas. Con bordes de libro —lo que el sistema *creía*— la diferencia del período anterior se suma adentro de la de este sin avisar, y el reporte imprimiría 7 kilos con la misma cara con la que imprimiría 70. Es además lo que hacen Toast y xtraCHEF |
 | **Cuatro números por fila: Teórico · Merma · Cortesía · Sin explicación**, y el reporte ordena y pinta fuerte el último | Es el único sobre el que se puede actuar mañana. Sin separar, cada salto manda a investigar el saco mojado que el propio dueño cargó. Separar cortesía de merma es lo que el repo ya decidió el 2026-09-18 para Anulaciones: cocina tirando comida y salón regalando platos son dos problemas de dueños distintos |
@@ -51,6 +51,8 @@ Todas del owner, 2026-09-19.
 | **Aviso arriba cuando el teórico está incompleto**, con la lista de platos sin receta y de ingredientes sin ficha de stock | El número falso no se lee nunca sin el contexto que lo desarma, y el aviso lleva a la acción que lo arregla. Mismo criterio con el que el dashboard trata lo "sin valorizar" |
 | **Cantidad y plata en cada fila, ordenado por plata** | La cantidad dice qué revisar en la cocina (*"¿por qué se van cuatro kilos de harina?"*); la plata dice por dónde empezar (medio kilo de lomo cuesta el triple). Con 80 productos, sin orden por plata el que más cuesta queda en la fila 40 |
 | **Los reportes llevan gráfica, con Unovis** (`@unovis/vue` + `@unovis/ts`) — textual: *"vamos con unovis"*. Es la **única** dependencia nueva aprobada | La gráfica **acompaña** a la tabla, no la reemplaza: la tabla es lo que se lee con precisión y lo que algún día se exporta; la gráfica muestra de un vistazo dónde está el desvío |
+| **La gráfica de varianza son barras apiladas de la varianza**, no teórico-contra-real | Medible: la varianza *es* la diferencia chica entre dos números grandes, y 51 contra 58 en dos barras se ven iguales. Apiladas muestran tamaño y composición a la vez (§ 8.2) |
+| **Va la columna "Otros"** | Un número que normalmente es cero y grita cuando no lo es. Sin ella, la identidad de § 5.4 solo se verifica en el test, y en producción una diferencia no tendría dónde aparecer |
 
 ## 3. El módulo de reportes
 
@@ -193,7 +195,7 @@ línea sin contar y la de delta cero). Por eso los bordes de la ventana **se bus
 kardex, el conteo que salió perfecto es invisible — y es justamente el que confirma que el número
 es confiable.
 
-### 5.3 Los cuatro números
+### 5.3 Las columnas: cuatro números y un detector
 
 Todo sale de `movimientos_inventario` dentro de la ventana, en consultas agregadas:
 
@@ -203,6 +205,7 @@ Todo sale de `movimientos_inventario` dentro de la ventana, en consultas agregad
 | **Merma** | Σ salidas `motivo='merma'` cuyo `motivo_baja.tipo = 'merma'` |
 | **Cortesía** | Σ salidas `motivo='merma'` cuyo `motivo_baja.tipo = 'cortesia'` |
 | **Sin explicación** | Σ `motivo='recuento'`, **con signo**: salidas menos entradas. Un sobrante resta |
+| **Otros** | El **residuo** entre las dos formas de calcular el consumo real (§ 5.4). Estructuralmente **cero**; es un detector, no un bucket |
 
 📌 **Merma y cortesía escriben el mismo `motivo='merma'` en el kardex** (`items.service.ts`,
 `resolverContexto`) y se distinguen solo por `motivo_baja.tipo`. El listado de `/mermas` ya
@@ -213,14 +216,18 @@ ninguna columna.** Son abastecimiento (o, el último, ni siquiera mueve stock), 
 que cierran la ventana ya los absorben. Un traslado de bodega a local es **entrada del local**, y
 por eso medir por ubicación no ensucia ninguna de las dos cuentas.
 
-### 5.4 La identidad, que es el test
+### 5.4 La identidad, que es el test — y la columna "Otros"
 
 No es una aproximación. Con los dos bordes apoyados en conteos aplicados —donde libro y realidad
-coinciden por construcción— vale:
+coinciden por construcción— vale, **sin residuo**:
 
 ```
 consumo_real = Teórico + Merma + Cortesía + Sin explicación
 ```
+
+Se demuestra desarrollando la ecuación de libro sobre la ventana: los términos de
+abastecimiento (`compra`, `correccion_compra`, `inventario_inicial`, `traslado`) se cancelan
+contra los saldos de los bordes, y lo que queda son exactamente esos cuatro.
 
 y `consumo_real` se puede calcular **por el otro lado**, por saldos en vez de por buckets:
 
@@ -244,9 +251,24 @@ recorrido que el índice `idx_movimientos_inventario_item_secuencia` ya sirve.
 porque un delta cero no movió nada.
 
 **Las dos cuentas tienen que dar idéntico.** Si difieren, hay un movimiento que el reporte no
-clasificó: es un bug, no un redondeo. Esto se convierte en un test de e2e (§ 10) y es la red que
-protege al reporte de un `motivo` nuevo que alguien agregue más adelante sin acordarse de este
-archivo.
+clasificó: es un bug, no un redondeo.
+
+📌 **Y esa diferencia es la columna "Otros"** (decisión del owner, 2026-09-19):
+
+```
+Otros = consumo_real_por_saldos  −  (Teórico + Merma + Cortesía + Sin explicación)
+```
+
+⚠️ **Se calcula como residuo a propósito, no como "la suma de los motivos que no conozco".** Un
+bucket por lista de motivos solo caza un `motivo` **nuevo** que alguien agregue sin leer este
+archivo. El residuo caza además el caso peor: un motivo **conocido** que empiece a comportarse
+distinto —un `ajuste_costo` que hoy no mueve stock y mañana sí, una `devolucion` que empiece a
+reponer ingredientes de receta—. Ese no cambia de nombre y una lista no lo vería.
+
+Normalmente es **cero** y se muestra apagado; cuando no lo es, grita. Lo que cuesta: obliga a
+traer el saldo de los dos bordes (§ 5.4, `stock_resultante`), que sin esta columna se podría
+ahorrar. Es el precio de que la identidad corra **en producción y no solo en el test de e2e**
+(§ 10), que sigue existiendo para cazarlo antes de que llegue a una pantalla.
 
 ### 5.5 Rendimiento: hay que medirlo, no suponerlo
 
@@ -313,9 +335,13 @@ Listado paginado, una fila por (producto, ubicación).
 
 Respuesta: `PaginatedResponse<VarianzaFila>`, donde cada fila trae `itemId`, `itemNombre`,
 `unidadMedida`, `ubicacionId`, `ubicacionNombre`, la ventana (`desdeEl`, `hastaEl`,
-`recuentoInicialId`, `recuentoFinalId`), los cuatro números como string a escala 4, y
-`costoSinExplicacion: CostoPorMoneda[]` con su `faltaCosto`. Las filas sin dos recuentos vienen
-con `medible: false` y los números en `null`.
+`recuentoInicialId`, `recuentoFinalId`), los **cinco** números (`teorico`, `merma`, `cortesia`,
+`sinExplicacion`, `otros`) como string a escala 4, y `costoSinExplicacion: CostoPorMoneda[]` con
+su `faltaCosto`. Las filas sin dos recuentos vienen con `medible: false` y los números en `null`.
+
+⚠️ **`otros` viaja siempre, incluso en `'0.0000'`.** Omitirlo cuando es cero haría que el
+consumidor no pueda distinguir "cerró perfecto" de "esta versión de la API todavía no lo
+calcula" — que es justo la ambigüedad que la columna existe para cerrar.
 
 **Orden:** por plata sin explicación desc, con el nombre del producto como desempate estable.
 
@@ -324,7 +350,7 @@ con `medible: false` y los números en `null`.
 Los agregados y **los datos de la gráfica**, en una sola llamada. `desde`/`hasta`
 **obligatorios**, con tope de 366 días: corre sin `LIMIT` sobre todo el rango.
 
-Trae los totales por moneda de los cuatro buckets, el **top 10 de productos por plata perdida**
+Trae los totales por moneda de los cinco números (incluido `otros`), el **top 10 de productos por plata perdida**
 con su desglose (merma / cortesía / sin explicación) para la gráfica, el conteo de los que quedan
 afuera del top, y el **aviso de teórico incompleto**: platos vendidos sin receta (con cuántas
 veces se vendieron) e ingredientes sin ficha de stock.
@@ -354,16 +380,32 @@ teórico incompleto (si aplica) → tarjetas de total → `AppGrafica` → `Crud
 `usePaginatedList` + `UPagination`. Cantidades con `useFormatters.formatStock(cantidad, unidad)`;
 plata con `formatCostoPorMoneda`.
 
-### 8.1 Qué gráfica, y por qué
+### 8.1 La columna "Otros" en pantalla
+
+Normalmente vale cero y **no tiene que competir por la atención**: se pinta con el token
+apagado (`text-muted`), sin badge ni color de estado. Cuando **no** es cero, pasa a color de
+alerta y la fila muestra un `AppInfoButton` que explica qué significa en lenguaje del local —
+*"hay movimientos de stock que este reporte no supo clasificar; el número de al lado puede
+estar incompleto"*—, no en jerga de kardex.
+
+⛔ **No se esconde la columna cuando todas las filas son cero.** Una columna que aparece y
+desaparece entrena a no buscarla, y el día que aparezca va a parecer un error de la pantalla en
+vez de un aviso.
+
+### 8.2 Qué gráfica, y por qué
 
 **Barras horizontales apiladas, una por producto, en plata**, cada barra partida en merma /
-cortesía / sin explicación.
+cortesía / sin explicación. Decisión del owner, 2026-09-19.
 
 ⚠️ **Se descartó "teórico contra real por producto", que era la idea de partida.** El motivo es
 medible: la varianza *es* la diferencia chica entre dos números grandes, y **51 contra 58 en dos
 barras se ven iguales**. Dibujar los dos números esconde exactamente lo que el reporte existe para
 mostrar. Las barras apiladas, en cambio, muestran tamaño y composición a la vez — que es la misma
-decisión de cuatro números de § 2.
+decisión de columnas de § 2.
+
+📌 **"Otros" no entra en la gráfica.** Es un detector de que la cuenta no cerró, no una parte de
+la pérdida: apilarlo lo haría leer como una categoría más de plata perdida. Su lugar es la
+tabla, donde se puede explicar.
 
 - **Horizontal** porque los nombres de producto son largos y se leen enteros.
 - **En plata**, igual que el orden de la tabla, para que lo que se ve grande sea lo que duele.
@@ -395,8 +437,21 @@ decisión de cuatro números de § 2.
   `motivo_baja.tipo`; el signo del sobrante; la fila sin dos recuentos que sale `medible: false`.
 - **E2E de API — el test que vale:** montar un producto con dos recuentos, compras, ventas de una
   receta, una merma y una cortesía en el medio, y **verificar que las dos formas de calcular el
-  consumo real dan idéntico** (§ 5.4). Más: 403 sin el módulo contratado, `tenant_id` del token
-  (un `ubicacionId` de otro tenant no devuelve nada), y el tope de 366 días del resumen.
+  consumo real dan idéntico** — o sea que `otros` sale `'0.0000'` (§ 5.4). Más: 403 sin el módulo
+  contratado, `tenant_id` del token (un `ubicacionId` de otro tenant no devuelve nada), y el tope
+  de 366 días del resumen.
+- **El test que prueba que "Otros" sirve:** un `otros` que siempre da cero porque está cableado a
+  cero pasa el test de arriba igual. Hace falta el caso que lo hace **saltar**: insertar en el
+  kardex, dentro de la ventana, un movimiento con un `motivo` que el reporte no clasifica, y
+  exigir que `otros` valga exactamente esa cantidad. Es el único control que distingue el
+  detector del adorno.
+
+  ⚠️ **Este es el caso raro en que montar el escenario con SQL directo es correcto y no un olor.**
+  La regla del repo es sospechar del test que necesita SQL para llegar a su estado —suele
+  significar que el estado es inalcanzable por API y que el caso real quedó sin cubrir—. Acá el
+  estado es inalcanzable **a propósito**: el test simula un `motivo` que el código de mañana va a
+  escribir y el de hoy no. Si algún día se pudiera producir por API, el detector ya habría
+  fallado en producción.
 - **E2E de navegador (Playwright):** la pantalla con el rol real del encargado, **no admin** — un
   módulo nuevo es justo donde un permiso faltante no se nota probando como dueño.
 - **Render (vitest):** `AppRangoFechas` emitiendo `YYYY-MM-DD`; `AppGrafica` con sus estados de
@@ -417,13 +472,13 @@ decisión de cuatro números de § 2.
 
 ---
 
-## Puntos abiertos para la revisión de esta spec
+## 12. Los dos puntos que la revisión de esta spec cerró
 
-1. **La gráfica cambió respecto de la idea de partida** (§ 8.1): barras apiladas de la varianza en
-   vez de teórico-contra-real. El motivo está medido, pero es una decisión de presentación y la
-   pone el owner.
-2. **El bucket "otros movimientos".** § 5.3 afirma que `compra`, `traslado`, `inventario_inicial`,
-   `correccion_compra` y `ajuste_costo` se absorben en los bordes. La identidad de § 5.4 lo
-   verifica en tiempo de test, pero **en producción, si algún día no cierra, el reporte no tiene
-   dónde mostrar la diferencia.** ¿Se agrega una columna "otros" que normalmente es cero y que
-   grita cuando no lo es, o se confía en el test?
+El owner los contestó el 2026-09-19, y quedan acá porque la razón importa más que el resultado:
+
+1. **La gráfica: barras apiladas** (§ 8.2). Se había propuesto teórico-contra-real; se descartó
+   por medida, no por gusto.
+2. **Va la columna "Otros"** (§ 5.4). Se implementa como **residuo**, no como suma de motivos
+   desconocidos — la diferencia está en § 5.4 y es la que decide si el detector sirve o no.
+
+Sin puntos abiertos.
