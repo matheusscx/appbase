@@ -181,6 +181,27 @@ ventana = (A.aplicado_el , B.aplicado_el]      ← abierta al inicio, cerrada al
 ⚠️ **Abierta al inicio a propósito:** los movimientos que escribió el recuento A pertenecen a la
 ventana **anterior** —son la varianza que A descubrió—. Incluirlos la contaría dos veces.
 
+⛔ **El borde se ancla en `secuencia`, no en `aplicado_el`.** El kardex documenta que `creado_el`
+**no sirve para ordenar**: es la hora en que *empezó* la transacción, y dos que compiten por el
+lock del mismo producto pueden aplicarse en orden inverso (docblock de `secuencia` en
+`movimiento-inventario.entity.ts`). El ancla exacta la da
+`recuento_inventario_linea.movimiento_id` → la `secuencia` de ese movimiento, y entonces la
+ventana es `secuencia > ancla_A AND secuencia <= ancla_B`.
+
+📌 **Salvo cuando el recuento del borde dio justo**, que no escribió movimiento y por lo tanto no
+tiene `movimiento_id` del cual sacar la `secuencia`. Ahí el ancla cae de nuevo en `aplicado_el`, y
+con eso vuelve el riesgo de orden: una transacción concurrente sobre el mismo producto que cruce
+ese instante queda del lado equivocado. **Es el único caso en que la ventana puede correrse, y lo
+detecta la columna «Otros»** (§ 5.4) — el residuo sale distinto de cero. Vale la pena escribirlo
+acá porque el detector cubre su propio borde frágil, que no es obvio.
+
+⚠️ Por qué `creado_el <= aplicado_el` igual funciona para el caso con movimiento, y por qué no
+alcanza: `creado_el` no va en el `INSERT` del kardex —cae en el `DEFAULT now()` de la columna— y
+`aplicado_el` también es `NOW()`, así que **dentro de la transacción del aplicar los dos son el
+mismo instante** y el intervalo semiabierto separa bien. Es correcto y a la vez frágil: depende de
+un default de columna y de que `NOW()` sea constante en la transacción. Por eso manda `secuencia`
+y `creado_el` queda solo como respaldo del caso sin movimiento.
+
 Con menos de dos recuentos, la fila **no muestra números**: muestra *"falta contarlo"*. La columna
 de ventana muestra las dos fechas reales (*"del 1 al 20 de septiembre"*), que pueden ser más
 angostas que el rango pedido y distintas entre filas.
@@ -242,13 +263,13 @@ donde  abastecimiento = entradas `compra`, `correccion_compra`, `inventario_inic
 recuento aplica un **delta** sobre el stock vigente **al aplicar**, no setea el valor contado
 (`docs/features/recuento-inventario.md`, "Por qué la diferencia es un delta, no un absoluto"): si
 contaste 11.800 a las 10:00 y se vendieron 500 antes de aplicar a las 14:00, el saldo al cerrar es
-11.300, no 11.800. El saldo correcto es el **`stock_resultante` del último movimiento con
-`secuencia` ≤ la del movimiento de ese recuento**, por (item, ubicación) — que es justo el
-recorrido que el índice `idx_movimientos_inventario_item_secuencia` ya sirve.
+11.300, no 11.800. El saldo correcto es el **`stock_resultante` del propio movimiento del
+recuento** —el que apunta `recuento_inventario_linea.movimiento_id`—, que es el ancla de § 5.2 y
+el recorrido que el índice `idx_movimientos_inventario_item_secuencia` ya sirve.
 
-⚠️ **Y si el recuento dio justo, no hay movimiento propio del recuento del cual partir**
-(§ 5.2): el saldo se toma igual del último movimiento anterior a `aplicado_el`, que es correcto
-porque un delta cero no movió nada.
+⚠️ **Y si el recuento dio justo, no hay movimiento propio del cual partir** (§ 5.2): el saldo se
+toma del último movimiento anterior a `aplicado_el`, que es correcto porque un delta cero no movió
+nada — con la salvedad de orden que § 5.2 explica y que «Otros» detecta.
 
 **Las dos cuentas tienen que dar idéntico.** Si difieren, hay un movimiento que el reporte no
 clasificó: es un bug, no un redondeo.
