@@ -252,11 +252,16 @@ node scripts/check-docs-links.mjs && node scripts/check-aislamiento.mjs
 
 | Decisión | Quién |
 |---|---|
-| Opción A sobre back/front en el host | owner, 2026-09-20 |
-| El MCP de Postgres apunta a la base del worktree | owner, 2026-09-20 |
+| Opción A sobre back/front en el host | owner, 2026-09-20 — *"dale con A"* |
+| El MCP de Postgres apunta a la base del worktree | owner, 2026-09-20 — elegido entre cuatro opciones preguntadas antes de diseñar (ver spec §10) |
 | `db-aislada.sh` se absorbe y se borra | spec §3.3 |
 | El modo barato (solo Postgres) es el default para `test:e2e` | spec §2 |
 | La limpieza de los 138,7 GB va a backlog, no a este frente | spec §9 |
+
+**Cómo se lee la columna:** `owner, <fecha>` significa que **él lo eligió explícitamente**, y al
+lado va cómo lo eligió, para que sea auditable y no un "hecho congelado" sin dueño. Una
+referencia a `spec §X` significa que **lo decidió el diseño** y se puede discutir leyendo ese
+argumento.
 
 **Abiertas:**
 

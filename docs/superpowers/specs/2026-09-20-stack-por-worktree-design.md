@@ -248,10 +248,15 @@ este frente.
 
 | Decisión | Quién |
 |---|---|
-| Opción A (un proyecto de compose por worktree) sobre back/front en el host | owner, 2026-09-20 |
-| El MCP de Postgres apunta a la base del worktree | owner, 2026-09-20 |
+| Opción A (un proyecto de compose por worktree) sobre back/front en el host | owner, 2026-09-20 — *"dale con A"*, con B presentada y su ventaja en disco |
+| El MCP de Postgres apunta a la base del worktree | owner, 2026-09-20 — elegido entre cuatro opciones preguntadas antes de diseñar; las otras tres eran dejarlo apuntando a main, sacar el MCP de Postgres, y delegarlo al diseño |
 | `db-aislada.sh` se absorbe en `entorno.sh` y se borra | este diseño (§3.3) |
 | El modo barato es el default para `test:e2e` | este diseño (§2) |
+
+**Cómo se lee la columna:** `owner, <fecha>` significa que **él lo eligió explícitamente**, y al
+lado va cómo lo eligió, para que sea auditable y no un "hecho congelado" sin dueño. Una
+referencia a `spec §X` significa que **lo decidió el diseño** y se puede discutir leyendo ese
+argumento.
 
 **Abierta:** si el shadow del MCP de scope local no funciona como se espera (§3.6), la salida
 es sacar el `postgres` del `.mcp.json` trackeado — y eso cambia la conducta del checkout
