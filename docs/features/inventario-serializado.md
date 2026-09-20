@@ -159,13 +159,33 @@ Response (200):
 | `tenant_id` | UUID | |
 | `item_id` | UUID FK → items | |
 | `lote_id` | UUID FK → item_lote, nullable | metadato opcional |
-| `serie` | TEXT | IMEI u otro código único por tenant |
+| `serie` | TEXT | IMEI u otro código, único por producto |
 | `estado` | TEXT | `disponible / reservado / vendido / baja` |
 | `condicion` | TEXT | `nuevo / usado / reacondicionado` |
 | `garantia_hasta` | TIMESTAMPTZ nullable | |
 | `venta_id` | UUID nullable | FK futuro a ventas |
 
-Índice único: `(tenant_id, serie) WHERE eliminado_el IS NULL`
+Índice único: `uq_unidad_item_serie` sobre `(item_id, serie) WHERE eliminado_el IS NULL`,
+declarado en la entity `ItemUnidad`.
+
+**Por producto, no por tenant** (owner, 2026-09-19): cada proveedor numera como quiere y no
+hay estándar global, así que dos productos distintos del mismo tenant **sí** pueden repetir
+número. `tenant_id` no entra en la clave porque `item_id` ya lo determina.
+
+Los cuatro caminos que crean unidades —alta de producto en modo serie con stock inicial,
+ajuste/entrada manual de stock, confirmación de compra y corrección de cantidad de una
+compra— pasan todos por `InventarioService.moverSerie`, el único lugar que inserta en
+`item_unidad`. Ahí se rechaza con **400 nombrando la serie** repetida, tanto la que ya está
+viva en el producto como la que viene dos veces en la misma tanda; el índice queda como red
+de la base, no como el mensaje que ve el operador.
+
+⚠️ **La unicidad es exacta sobre el texto, y un espacio de más la esquiva.** Medido por API el
+2026-09-19: con la serie `X` ya viva, mandar `"X "` devuelve 200 y deja **dos unidades vivas**
+—para Postgres son dos strings distintos, y el guard es el gemelo exacto del índice—; una
+serie de solo espacios también entra, porque `@IsNotEmpty` no la distingue de contenido real.
+Ninguna de las tres DTO que reciben una serie la normaliza. Normalizar al escribir tiene
+preguntas que son del owner (¿y las mayúsculas?) y toca dos módulos: la entrada con la
+medición y las tres preguntas está en [`../agent/pendientes.md`](../agent/pendientes.md) § 4.
 
 **`item_lote`** — un fila por lote
 

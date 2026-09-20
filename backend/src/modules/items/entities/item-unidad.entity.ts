@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -8,6 +9,21 @@ import {
 } from 'typeorm';
 
 @Entity('item_unidad')
+// La serie es única **por producto**, no por tenant (owner, 2026-09-19): cada
+// proveedor numera como quiere y no hay estándar global, así que dos productos
+// distintos del mismo tenant sí pueden repetir número. `tenant_id` no entra en
+// la clave porque `item_id` ya lo determina.
+//
+// Va acá y no en el seeder porque son columnas peladas: `@Index` las expresa y
+// `synchronize` crea el índice. El seeder se usa para los índices que TypeORM
+// no sabe declarar —los de `lower(nombre)`, ver `seedGruposModificadores()`—.
+//
+// El índice es la red del lado de la base; el 400 que nombra la serie repetida
+// lo da `InventarioService.moverSerie`, el único lugar que inserta unidades.
+@Index('uq_unidad_item_serie', ['itemId', 'serie'], {
+  unique: true,
+  where: '"eliminado_el" IS NULL',
+})
 export class ItemUnidad {
   @PrimaryGeneratedColumn('uuid', { name: 'unidad_id' })
   unidadId: string;

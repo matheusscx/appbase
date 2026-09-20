@@ -1143,6 +1143,74 @@ export class InventarioService {
     return { stockResultante, cantidadMovida };
   }
 
+  /**
+   * La serie es única **por producto vivo** — `uq_unidad_item_serie` en
+   * `ItemUnidad`, `(item_id, serie) WHERE eliminado_el IS NULL` (owner,
+   * 2026-09-19: por producto y no por tenant, porque cada proveedor numera como
+   * quiere).
+   *
+   * El índice es la red de la base, pero solo: reventarlo da un 500 que no dice
+   * cuál serie viene repetida, y el operador que acaba de tipear 30 IMEIs no
+   * tiene con qué arreglarlo. Acá sale un 400 que la nombra.
+   *
+   * Va en `moverSerie` y no en los llamadores porque este es el **único** lugar
+   * que inserta en `item_unidad`: los cuatro caminos que crean unidades —alta de
+   * producto en modo serie con stock inicial, ajuste/entrada manual de stock,
+   * confirmación de compra y `corregirCantidad` de una compra— entran todos por
+   * `registrarMovimiento`. Mismo criterio que el resto de este método: el
+   * chokepoint no confía en el llamador.
+   *
+   * Dos chequeos, porque son dos duplicados distintos y el segundo cuesta una
+   * consulta: las repetidas **dentro de la misma tanda** (que ningún índice
+   * puede ver, porque son filas que todavía no existen) y las que **ya están
+   * vivas en la base**. `ComprasService.validarTrazabilidad` también rechaza
+   * repetidas, pero solo dentro de una línea del borrador: es un aviso temprano
+   * en la pantalla, no la red.
+   */
+  private async assertSeriesLibres(
+    manager: EntityManager,
+    itemId: string,
+    series: string[],
+  ): Promise<void> {
+    const vistas = new Set<string>();
+    const repetidasEnLaTanda = new Set<string>();
+    for (const serie of series) {
+      if (vistas.has(serie)) repetidasEnLaTanda.add(serie);
+      vistas.add(serie);
+    }
+    if (repetidasEnLaTanda.size > 0) {
+      throw new BadRequestException(
+        `Estas series vienen repetidas en la misma entrada: ${[
+          ...repetidasEnLaTanda,
+        ]
+          .sort()
+          .join(', ')}`,
+      );
+    }
+
+    // UNA consulta para las N series (`= ANY($2)`), no una por serie.
+    //
+    // Los filtros son **exactamente** la clave y el predicado del índice —sin
+    // `tenant_id`—: si el guard mirara una columna de más, podría dejar pasar
+    // una fila que el índice sí rechaza, y el 400 se volvería el 500 que este
+    // método existe para evitar. `item_id` ya determina el tenant.
+    const ocupadas: { serie: string }[] = await manager.query(
+      `SELECT serie FROM item_unidad
+        WHERE item_id = $1 AND serie = ANY($2) AND eliminado_el IS NULL`,
+      [itemId, [...vistas]],
+    );
+    if (ocupadas.length > 0) {
+      throw new BadRequestException(
+        `Este producto ya tiene una unidad con ${
+          ocupadas.length === 1 ? 'la serie' : 'las series'
+        }: ${ocupadas
+          .map((o) => o.serie)
+          .sort()
+          .join(', ')}`,
+      );
+    }
+  }
+
   private async moverSerie(
     manager: EntityManager,
     params: RegistrarMovimientoParams,
@@ -1218,6 +1286,12 @@ export class InventarioService {
           `La cantidad (${cantidad.toString()}) no coincide con el número de series (${series.length})`,
         );
       }
+
+      await this.assertSeriesLibres(
+        manager,
+        params.itemId,
+        series.map((s) => s.serie),
+      );
 
       const unidadIds: string[] = [];
       for (const s of series) {

@@ -1162,13 +1162,16 @@ CREATE TABLE "item_unidad" (
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ
 );
--- ⚠️ Este índice NO existe en la base real (medido 2026-09-19: `item_unidad` solo
--- tiene su PK). El esquema lo crea `synchronize` desde las entities y `ItemUnidad`
--- no lo declara, así que hoy dos unidades vivas pueden compartir serie. Queda
--- escrito porque es la regla querida, no porque esté vigente:
--- `docs/agent/pendientes.md` § 2.
-CREATE UNIQUE INDEX "uq_unidad_tenant_serie"
-  ON "item_unidad" ("tenant_id", "serie") WHERE "eliminado_el" IS NULL;
+-- La serie es única POR PRODUCTO, no por tenant (owner, 2026-09-19): cada proveedor
+-- numera como quiere, así que dos productos distintos del mismo tenant sí pueden
+-- repetir número. `item_id` ya determina el tenant.
+-- Lo declara la entity `ItemUnidad` —columnas peladas, `@Index` las expresa— y lo crea
+-- `synchronize`; este archivo es documentación. Hasta el 2026-09-19 el índice existía
+-- SOLO acá y decía otra cosa —`uq_unidad_tenant_serie` sobre `(tenant_id, serie)`—,
+-- así que la base real no lo tenía y dos unidades vivas del mismo producto podían
+-- compartir serie en silencio.
+CREATE UNIQUE INDEX "uq_unidad_item_serie"
+  ON "item_unidad" ("item_id", "serie") WHERE "eliminado_el" IS NULL;
 
 -- Detalle del movimiento de inventario → qué unidades/lotes entraron o salieron
 CREATE TABLE "movimiento_inventario_detalle" (

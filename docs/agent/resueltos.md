@@ -23,6 +23,106 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La serie de una unidad es única por producto, y ahora el esquema lo sabe (cerrada 2026-09-19)
+
+Sale de [`pendientes.md` § 2](pendientes.md), que queda **sin entradas abiertas**.
+
+### La unicidad de `serie` solo existe en `startup-pos.sql`: el esquema real no la tiene (medido 2026-09-19)
+
+(backend + BD, medido el 2026-09-19 al cerrar la pieza 1 de compras) —
+`startup-pos.sql:1170` declara `uq_unidad_tenant_serie` sobre `(tenant_id, serie)` con
+`eliminado_el IS NULL`, pero **el esquema lo crea `synchronize` desde las entities** —el
+`.sql` es documentación— y `ItemUnidad` no declara ningún `@Index`; el seeder, que para
+otras tablas sí crea índices únicos a mano, tampoco crea este. Medido contra la base del
+stack:
+`select indexname from pg_indexes where tablename='item_unidad'` devuelve **solo la PK**.
+**Consecuencia:** dos unidades vivas pueden compartir serie y nada lo impide — ni un 500
+del índice, que sería lo esperable: entran en silencio.
+
+**Los tres caminos que insertan series, y qué chequea cada uno:**
+- `ItemsService` al crear un producto en modo serie (stock inicial) — no chequea.
+- `ItemsService` en el ajuste/entrada manual de stock (`AjusteStockDto`, que acepta
+  `motivo='compra'`) — no chequea.
+- `ComprasService` — `validarTrazabilidad` rechaza con 400 las repetidas **dentro de una
+  misma línea del borrador**; no ve las de otra línea, ni las que ya existen en la base, y
+  la corrección de cantidad (`corregirCantidad`, que también crea unidades) no pasa por
+  ahí.
+
+**La regla ya está decidida (owner, 2026-09-19):** la serie es única **por producto**,
+`(item_id, serie)` con `eliminado_el IS NULL`. Dos productos distintos del mismo tenant
+**sí** pueden repetir número, porque cada proveedor numera como quiere y no hay un estándar
+global.
+
+### Qué se hizo
+
+**El índice, en la entity.** `uq_unidad_item_serie` sobre `(item_id, serie) WHERE
+eliminado_el IS NULL`, declarado con `@Index` en `ItemUnidad`. Va ahí y no en el seeder
+porque son **columnas peladas**: el seeder se usa para los índices que TypeORM no sabe
+expresar —los de `lower(nombre)`, ver `seedGruposModificadores()`—, y esos pagan la
+contrapartida de que la única red sea que el seeder corra. Acá no hace falta pagarla.
+`startup-pos.sql` quedó corregido al índice real (nombre y columnas: lo que tenía era el
+arrastre de `tenant_id`).
+
+**El 400, en un solo lugar.** La entrada decía "tres caminos"; **son cuatro**, y todos
+pasan por el mismo chokepoint. Enumerados por quién inserta en `item_unidad`: el único
+`INSERT` del repo está en `InventarioService.moverSerie`, y los cuatro llamadores que
+llegan ahí con `tipo: 'entrada'` y series son el alta de producto en modo serie con stock
+inicial, el ajuste/entrada manual de stock, `ComprasService.confirmar` y
+`ComprasService.corregirCantidad`. Por eso el chequeo se escribió **una vez, en
+`moverSerie`** —`assertSeriesLibres`— y no cuatro veces en los llamadores: es el mismo
+criterio que ya seguía ese método ("el chokepoint no confía en el llamador"). Los demás
+llamadores de `registrarMovimiento` no crean unidades: `recuentos` nunca manda series, y
+`ventas`, `mermas` y `traslados` tampoco —la entrada de un traslado mueve unidades que ya
+existen—.
+
+Son **dos** chequeos, porque son dos duplicados distintos:
+- las repetidas **dentro de la misma tanda**, que ningún índice puede ver porque esas filas
+  todavía no existen (chequeo en memoria, sin consulta);
+- las que **ya están vivas**, en **una** consulta para las N series (`serie = ANY($2)`,
+  nunca una por serie). Sus filtros son **exactamente** la clave y el predicado del índice,
+  sin `tenant_id`: un guard que mirara una columna de más podría dejar pasar una fila que el
+  índice sí rechaza, y el 400 volvería a ser el 500 que este chequeo existe para evitar.
+  `item_id` ya determina el tenant.
+
+`ComprasService.validarTrazabilidad` se dejó como estaba: sigue siendo el aviso temprano
+sobre el borrador, no la red.
+
+**Los cuatro mutantes que lo fijan** (cada uno revierte al código anterior, no rompe la
+línea al azar):
+
+| Mutante | Qué mata |
+|---|---|
+| Sin el chequeo de la tanda | el unit `rechaza dos veces la misma serie en la misma tanda` y **dos** e2e: el del alta y el del ajuste (los dos caminos que lo ejercen) |
+| Sin el chequeo de las ya vivas | el unit `rechaza la serie que el producto ya tiene viva` y **tres** e2e: ajuste, `confirmar` con la serie repartida en dos líneas, y `corregirCantidad`. Los tres pasaban de 400 a **500**: el índice reventando, que es el motivo del guard |
+| Entity sin `@Index` | `esquema.e2e-spec.ts`: `pg_indexes` devuelve **0** índices únicos de serie. Es el bug original reproducido — `synchronize` **borra** el índice cuando la entity deja de declararlo, así que el `.sql` no alcanza |
+| `@Index` sobre `(tenant_id, serie)` —el arrastre— | el e2e `la misma serie entra en dos productos distintos`: el segundo producto se cae con **500**. La app arranca bien; lo que rechaza es dato legítimo |
+
+**Deploy.** El seed no crea ninguna unidad (medido sobre base fresca: `SELECT COUNT(*) FROM
+item_unidad` = 0), así que el índice se crea sin problema en un despliegue limpio. Sobre una
+base con datos de uso —Railway— el `CREATE UNIQUE INDEX` de `synchronize` **falla si hay dos
+unidades vivas del mismo producto con la misma serie**, y el backend no arranca; se mide
+antes con
+`SELECT item_id, serie, COUNT(*) FROM item_unidad WHERE eliminado_el IS NULL GROUP BY 1,2
+HAVING COUNT(*) > 1`.
+
+**Lo que queda afuera, y acota lo de arriba:** la unicidad es exacta sobre el string, así que
+**un espacio de más la esquiva**. Medido por API el mismo día: con la serie `X` ya viva,
+mandar `"X "` por `PATCH /items/:id/stock` devuelve 200 y deja dos unidades vivas —para
+Postgres son dos strings distintos, y el guard es su gemelo—; y una serie de solo espacios
+también entra. Ninguna de las tres DTO normaliza. No se arregló acá porque la normalización
+coherente va **al escribir**, en las tres DTO, y cruza el JSON de `compra_lineas.series` que
+`corregirCantidad` compara contra `item_unidad`; además trae una pregunta que es del owner
+(¿y las mayúsculas?). Entrada con las tres preguntas y la medición: `pendientes.md` § 4.
+
+**Y lo que queda afuera del todo:** `item_lote` está en la **misma situación de esquema** —su índice
+`(item_id, codigo_lote)` vive solo en `startup-pos.sql`, `ItemLote` no declara `@Index` y el
+seeder no lo crea— pero **no es el mismo bug**, y la diferencia se midió antes de anotarla:
+`moverLote` busca el lote vivo por `(item_id, codigo_lote)` con `FOR UPDATE` y, si existe,
+**lo reusa** sumándole cantidad en vez de insertar otra fila. Duplicar un código de lote no
+crea un duplicado silencioso por el camino normal; lo que queda sin red es la **carrera**
+—dos transacciones que no encuentran nada y las dos insertan—, porque no hay fila que lockear.
+Eso es material de la § 5 de `pendientes.md`, donde quedó anotado, y no se tocó acá.
+
 ## Compras, pieza 1: recibir mercadería (cerrada 2026-09-19)
 
 Sale de [`pendientes.md` § 3, entrada *"Compras: carga manual, y el DTE del SII como

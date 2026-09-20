@@ -556,6 +556,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([]) // SELECT series ya vivas del producto: ninguna
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }]) // INSERT unidad 1
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_2 }]) // INSERT unidad 2
         .mockResolvedValueOnce([{ cnt: '2' }]) // COUNT disponibles
@@ -583,6 +584,77 @@ describe('InventarioService', () => {
 
       expect(res.stockResultante).toBe('2');
       expect(res.movimientoId).toBe('mov-s1');
+    });
+
+    /**
+     * La serie es única por producto vivo (`uq_unidad_item_serie`). Estos dos
+     * casos fijan el 400 y su mensaje; que el índice exista en la base y que los
+     * cuatro caminos de la API lo respeten lo miden `test/esquema.e2e-spec.ts`,
+     * `test/serie-unica-por-producto.e2e-spec.ts` y `test/compras.e2e-spec.ts`.
+     */
+    it('entrada serie: rechaza la serie que el producto ya tiene viva, y la nombra', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '1' }])
+        .mockResolvedValueOnce([{ serie: 'IMEI-001' }]); // la serie ya está viva
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '2',
+          usuarioId: USER_ID,
+          series: [{ serie: 'IMEI-001' }, { serie: 'IMEI-002' }],
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Este producto ya tiene una unidad con la serie: IMEI-001',
+        ),
+      );
+
+      // UNA consulta para las N series, y con la clave EXACTA del índice
+      // —`item_id` + `serie`, sin `tenant_id`—: un guard que mirara una columna
+      // de más dejaría pasar filas que el índice sí rechaza, y el 400 volvería a
+      // ser el 500 que este chequeo existe para evitar.
+      const [sql, params] = managerMock.query.mock.calls[2] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toContain('serie = ANY($2)');
+      expect(sql).toContain('item_id = $1');
+      expect(sql).toContain('eliminado_el IS NULL');
+      expect(sql).not.toContain('tenant_id');
+      expect(params).toEqual([ITEM_ID, ['IMEI-001', 'IMEI-002']]);
+    });
+
+    it('entrada serie: rechaza dos veces la misma serie en la misma tanda, sin consultar', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '0' }]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '2',
+          usuarioId: USER_ID,
+          series: [{ serie: 'IMEI-007' }, { serie: 'IMEI-007' }],
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Estas series vienen repetidas en la misma entrada: IMEI-007',
+        ),
+      );
+
+      // Las dos filas todavía no existen, así que ningún índice puede verlas: es
+      // un chequeo en memoria y no gasta la consulta.
+      expect(managerMock.query).toHaveBeenCalledTimes(2);
     });
 
     it('entrada serie: lanza BadRequest si cantidad != series.length', async () => {
@@ -826,6 +898,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([]) // SELECT series ya vivas del producto: ninguna
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }]) // INSERT unidad
         .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
@@ -908,6 +981,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
         .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([]) // SELECT series ya vivas del producto: ninguna
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }])
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_2 }])
         .mockResolvedValueOnce([{ unidad_id: 'unidad-uuid-3' }])

@@ -82,37 +82,24 @@ respuesta del owner.**
 
 ## 2. Medir primero — no es una pregunta para el owner
 
-Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sale de esta
-sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
-decisión que no es mía).
+Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
+sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
+destapa una decisión que no es mía). **Hoy no hay ninguna abierta** — la última, la unicidad
+de `serie`, se cerró el 2026-09-19 y está en [`resueltos.md`](resueltos.md).
 
-- [ ] **La unicidad de `serie` solo existe en `startup-pos.sql`: el esquema real no la tiene**
-  (backend + BD, medido el 2026-09-19 al cerrar la pieza 1 de compras) —
-  `startup-pos.sql:1170` declara `uq_unidad_tenant_serie` sobre `(tenant_id, serie)` con
-  `eliminado_el IS NULL`, pero **el esquema lo crea `synchronize` desde las entities** —el
-  `.sql` es documentación— y `ItemUnidad` no declara ningún `@Index`; el seeder, que para
-  otras tablas sí crea índices únicos a mano, tampoco crea este. Medido contra la base del
-  stack:
-  `select indexname from pg_indexes where tablename='item_unidad'` devuelve **solo la PK**.
-  **Consecuencia:** dos unidades vivas pueden compartir serie y nada lo impide — ni un 500
-  del índice, que sería lo esperable: entran en silencio.
-
-  **Los tres caminos que insertan series, y qué chequea cada uno:**
-  - `ItemsService` al crear un producto en modo serie (stock inicial) — no chequea.
-  - `ItemsService` en el ajuste/entrada manual de stock (`AjusteStockDto`, que acepta
-    `motivo='compra'`) — no chequea.
-  - `ComprasService` — `validarTrazabilidad` rechaza con 400 las repetidas **dentro de una
-    misma línea del borrador**; no ve las de otra línea, ni las que ya existen en la base, y
-    la corrección de cantidad (`corregirCantidad`, que también crea unidades) no pasa por
-    ahí.
-
-  **La regla ya está decidida (owner, 2026-09-19):** la serie es única **por producto**,
-  `(item_id, serie)` con `eliminado_el IS NULL`. Dos productos distintos del mismo tenant
-  **sí** pueden repetir número, porque cada proveedor numera como quiere y no hay un estándar
-  global. O sea que el `(tenant_id, serie)` de `startup-pos.sql:1170` es un arrastre y hay que
-  corregirlo ahí también. Falta: declarar el índice en `ItemUnidad`, y que los tres caminos
-  —alta con stock inicial, ajuste de stock y compras, incluida `corregirCantidad`— den 400
-  con la serie repetida en vez de dejar que reviente el índice.
+📌 **Lo que se evaluó el 2026-09-19 y NO es trabajo** (se anota para no redescubrirlo, que es
+lo que hace la sección de Vigilancia): *"devolver o anular la venta de un producto serializado
+rebota con 400"*. **Es falso, y quedó escrito porque yo mismo lo anoté mal y casi entra acá
+como entrada.** `VentasService` sí repone sin pasar `series`
+(`ventas.service.ts:1404` en la anulación, `:2083` en la nota de crédito), pero **nunca llega
+ahí con un producto serializado**: la anulación corta antes con un guard propio y un mensaje
+específico (`:1382-1386`, *"usa inventario por …: anulá sin reponer stock"*), y en la nota de
+crédito el filtro `reponeStock` del loop **es** el filtro por modo —`reponeStock =
+quiereReponer && puedeReponer` con `puedeReponer = modo_inventario === 'cantidad'`, `:2580`—,
+así que la línea por serie se acredita sin reponer en vez de romper. La lección, que vale más
+que el dato: **leer `.filter(l => l.reponeStock)` y concluir "no filtra por modo de
+inventario" es mirar el mecanismo y no la conducta** — el modo estaba adentro del booleano,
+calculado 500 líneas antes.
 
 ⚠️ **De la familia de "lo que la pantalla lee y escribe después del `await`" hay funciones con
 la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron una vez:
@@ -814,6 +801,45 @@ Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no s
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
+- [ ] **Un espacio de más hace que la misma serie entre dos veces** (backend, medido por API
+  el 2026-09-19 al cerrar la unicidad de `serie`) — el índice `uq_unidad_item_serie` y el
+  guard de `InventarioService.assertSeriesLibres` comparan la serie **cruda**, y ninguna de
+  las tres DTO que la reciben la normaliza: `SerieInputDto`
+  (`items/dto/create-item.dto.ts`), `SerieAjusteInputDto` (`items/dto/ajuste-stock.dto.ts`)
+  y `SerieCompraDto` (`compras/dto/compra-borrador.dto.ts`) declaran solo `@IsString()` +
+  `@IsNotEmpty()`.
+
+  **Medido por la API, no deducido** (`PATCH /items/:id/stock` sobre un producto que ya
+  tenía la serie `TRIM-…`): mandar `"TRIM-… "` —un espacio al final— devuelve **200** y deja
+  **dos unidades vivas**, `["TRIM-… ", "TRIM-…"]`, con stock 2. Para Postgres son dos strings
+  distintos, así que el índice las acepta: es el mismo duplicado silencioso que el frente de
+  la serie vino a cerrar, entrando por el borde de los espacios. En el mismo movimiento se
+  midió que **una serie de solo espacios (`"   "`) también entra con 200**: `@IsNotEmpty` no
+  la distingue de contenido real.
+
+  Hoy hay **un solo lugar que normaliza, y solo para comparar**:
+  `ComprasService.validarTrazabilidad` arma su `Set` con `.trim()`, pero **guarda sin
+  trimear** y solo mira dentro de una línea del borrador. El camino del ajuste no pasa por
+  ahí.
+
+  **Las preguntas, antes de tocar nada:**
+  1. ¿Dos series que difieren **solo en espacios** son la misma serie? (Si sí, la
+     normalización va **al escribir**, no solo al comparar: ver el punto 3.)
+  2. ¿Y si difieren **solo en mayúsculas** —`ab12` vs `AB12`—? Son dos mecanismos distintos
+     en este repo: el `@Index` de columnas peladas que ya tiene `ItemUnidad`, o un índice
+     sobre `lower(serie)` creado por el seeder —lo que TypeORM no sabe declarar—, como ya se
+     hace con los nombres únicos. La respuesta decide cuál.
+  3. ¿Se rechaza con 400 la serie con espacios, o se trimea en silencio al guardar?
+
+  ⚠️ **Por qué no se arregló de arrastre en el frente de la serie** (y por qué no es una
+  línea): trimear **solo en el guard** lo volvería más estricto que el índice, justo la
+  asimetría que su comentario existe para evitar. Trimear **al escribir** es lo coherente,
+  pero `ComprasService.corregirCantidad` cruza las series guardadas en el JSON de
+  `compra_lineas.series` contra las de `item_unidad` para decidir qué unidades pueden salir
+  de una línea corregida: normalizar un lado y no el otro deja ese cruce sin matchear, en
+  silencio. O sea que la normalización va en las tres DTO —los dos lados nacen ahí— y eso
+  toca dos módulos.
+
 - [ ] **Aviso de stock bajo** (backend + frontend + producto, pedido por el owner el
   2026-09-18 en el brainstorm del dashboard de inicio) — que el sistema avise cuando un
   producto se está acabando. Quedó afuera del dashboard porque **no existe el dato**: ningún
@@ -871,6 +897,23 @@ prohíbe.
 
 Van juntas porque el arreglo pide **un solo análisis de orden de locks** —qué fila se
 bloquea y en qué orden en cada camino—, no un parche por entrada.
+
+- [ ] **Dos entradas simultáneas del mismo código de lote pueden crear dos filas de
+  `item_lote`** (backend + BD, medido el 2026-09-19 al cerrar la unicidad de `serie`) —
+  `InventarioService.moverLote` busca el lote vivo por `(item_id, codigo_lote)` con
+  `FOR UPDATE` y, si existe, lo reusa sumándole cantidad; si no existe, inserta. **Por el
+  camino normal no hay duplicado**: el reuso lo evita, y por eso esto NO es el gemelo del
+  bug de `serie` —conviene no leerlo así—. Lo que no hay es red para la carrera: dos
+  transacciones que no encuentran nada **no tienen fila que lockear**, las dos insertan, y
+  el índice único que lo cortaría existe **solo en `startup-pos.sql`** (`ItemLote` no
+  declara `@Index` y el seeder no lo crea, igual que pasaba con `item_unidad`).
+  **Lo que falta:** decidir si alcanza con declarar el índice —que convierte la carrera en
+  un 500 del perdedor— o si el camino necesita además un `INSERT ... ON CONFLICT` o un lock
+  de advertencia por `(item_id, codigo_lote)`; es la misma pregunta de orden de locks que
+  comparten las demás entradas de esta sección. Antes de declararlo hay que medir
+  duplicados vivos, porque `synchronize` no puede crear el índice si ya los hay
+  (`SELECT item_id, codigo_lote, COUNT(*) FROM item_lote WHERE eliminado_el IS NULL
+  GROUP BY 1,2 HAVING COUNT(*) > 1`).
 
 ---
 

@@ -97,6 +97,35 @@ describe('Esquema (e2e) — invariantes medidas contra Postgres', () => {
   });
 
   /**
+   * La unicidad de `serie` existe **en la base**, no solo en el `.sql`.
+   *
+   * El bug que cierra: `startup-pos.sql` declaraba `uq_unidad_tenant_serie`,
+   * pero el esquema lo crea `synchronize` desde las entities y `ItemUnidad` no
+   * declaraba ningún `@Index`. Medido el 2026-09-19: `item_unidad` tenía solo su
+   * PK, así que dos unidades vivas podían compartir serie **en silencio**.
+   *
+   * Por eso el test mira `pg_indexes` y no el `.sql`: la pregunta es qué índice
+   * hay, no cuál está escrito. Y afirma sobre las columnas y el `WHERE` —no solo
+   * sobre el nombre— porque la regla del owner es por PRODUCTO: un índice con el
+   * nombre correcto sobre `(tenant_id, serie)` prohibiría que dos productos
+   * repitan número, que es legítimo. El 400 que nombra la serie lo prueban
+   * `serie-unica-por-producto.e2e-spec.ts` y `compras.e2e-spec.ts` por la API.
+   */
+  it('item_unidad tiene el índice único de serie por producto vivo', async () => {
+    const indices: { indexname: string; indexdef: string }[] = await ds.query(
+      `SELECT indexname, indexdef FROM pg_indexes
+        WHERE tablename = 'item_unidad' AND indexdef ILIKE '%UNIQUE%'
+          AND indexdef ILIKE '%serie%'`,
+    );
+
+    expect(indices).toHaveLength(1);
+    // `(item_id, serie)` en ese orden, y parcial por `eliminado_el IS NULL`:
+    // sin el WHERE, una unidad borrada dejaría su serie tomada para siempre.
+    expect(indices[0].indexdef).toMatch(/\(item_id, serie\)/);
+    expect(indices[0].indexdef).toMatch(/WHERE \(eliminado_el IS NULL\)/);
+  });
+
+  /**
    * Toda columna de dinero es NUMERIC(18,4). Una moneda con más decimales
    * devolvería el recorte final al cast de Postgres —su regla, fuera de
    * modo_redondeo—, que es justo lo que el frente de redondeo vino a cerrar.

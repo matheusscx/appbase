@@ -691,6 +691,45 @@ describe('Compras — borrador (e2e)', () => {
       expect(unidades.every((u) => u.ubicacionId === bodegaId)).toBe(true);
     });
 
+    it('modo serie: confirmar rechaza la misma serie repartida en dos líneas, y la nombra', async () => {
+      // `validarTrazabilidad` mira UNA línea a la vez —su `Set` es sobre
+      // `linea.series`—, así que el borrador con la serie repartida entre dos
+      // líneas se guarda sin chistar. Lo que lo frena es el guard del
+      // chokepoint, que ve la unidad que acaba de insertar la línea anterior
+      // dentro de la MISMA transacción; antes de él, esto reventaba el índice.
+      const itemId = await productoVacio({ modoInventario: 'serie' });
+      const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({
+          lineas: [
+            {
+              itemId,
+              cantidad: '1',
+              unidadCodigo: 'unidad',
+              precioUnitario: '90000',
+              series: [{ serie: `SN-DOS-LINEAS-${marca}` }],
+            },
+            {
+              itemId,
+              cantidad: '1',
+              unidadCodigo: 'unidad',
+              precioUnitario: '90000',
+              series: [{ serie: `SN-DOS-LINEAS-${marca}` }],
+            },
+          ],
+        }),
+      );
+
+      const r = await intentar('post', `/api/compras/${compra.id}/confirmar`);
+      expect(r.status).toBe(400);
+      expect(r.message).toContain(`SN-DOS-LINEAS-${marca}`);
+      // La confirmación entera se deshizo: ninguna unidad quedó de la línea 1.
+      expect(
+        await get<unknown[]>(`/api/items/${itemId}/unidades`),
+      ).toHaveLength(0);
+    });
+
     async function ajustarStock(itemId: string, body: Record<string, unknown>) {
       const res = await request(app.getHttpServer())
         .patch(`/api/items/${itemId}/stock`)
@@ -1309,6 +1348,47 @@ describe('Compras — borrador (e2e)', () => {
         expect((await disponibles()).map((u) => u.serie).sort()).toEqual(
           [`SN-B-${marca}`, `SN-C-${marca}`, `SN-D-${marca}`].sort(),
         );
+      });
+
+      it('en serie, subir con una serie que el producto ya tiene la rechaza nombrándola', async () => {
+        // La serie es única por producto vivo (`uq_unidad_item_serie`). Este es
+        // el cuarto camino que crea unidades y el que no pasa por
+        // `validarTrazabilidad`: la corrección de cantidad las inserta por su
+        // cuenta. Sin el guard del chokepoint, subir la cantidad repitiendo una
+        // serie ya viva reventaba el índice con un 500 que no decía cuál.
+        const itemId = await productoVacio({ modoInventario: 'serie' });
+        const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            lineas: [
+              {
+                itemId,
+                cantidad: '1',
+                unidadCodigo: 'unidad',
+                precioUnitario: '90000',
+                series: [{ serie: `SN-REPE-${marca}` }],
+              },
+            ],
+          }),
+        );
+        await confirmar(compra.id);
+        const lineaId = await primeraLinea(compra.id);
+
+        const r = await corregirCantidad(compra.id, lineaId, {
+          cantidad: '2',
+          series: [{ serie: `SN-REPE-${marca}` }],
+        });
+        expect(r.status).toBe(400);
+        expect(r.message).toContain(`SN-REPE-${marca}`);
+        // Y la corrección no dejó nada a medias: sigue habiendo UNA unidad.
+        expect(
+          (
+            await get<{ serie: string }[]>(
+              `/api/items/${itemId}/unidades?estado=disponible`,
+            )
+          ).map((u) => u.serie),
+        ).toEqual([`SN-REPE-${marca}`]);
       });
 
       it('en lote, la diferencia va al mismo lote', async () => {
