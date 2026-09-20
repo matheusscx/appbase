@@ -221,6 +221,15 @@ no agrega dependencia.
 El estático es el único que **no depende de que nadie se acuerde**; los otros dos hay que
 invocarlos. Por eso es el que no se negocia si hay que recortar alcance.
 
+⚠️ **Y su mitad de pre-commit quedó sin verificar al cerrar el frente, por una razón que vale para
+cualquier cambio futuro a `.githooks/`:** `core.hooksPath` es una ruta **absoluta** al `.githooks`
+del checkout principal, así que un worktree ejecuta **esa** copia del hook y no la suya. Medido: el
+guard nuevo no corrió y un mutante con un puerto clavado **entró** al commitear desde el worktree;
+el mismo hook invocado a mano (`sh .githooks/pre-commit`) bloqueaba con exit 1. Lo que lo disfraza
+es que los guards viejos sí imprimen. Queda vivo después del merge, y ahí hay que comprobarlo con
+un mutante. La mitad de **CI** no tiene ese problema: corre el chequeo sin `--staged` desde la
+raíz, verificado verde en limpio y exit 1 con mutante.
+
 ## 5. Qué deja de ser posible, y qué queda compartido
 
 El turno desaparece para los cuatro casos que lo pedían: e2e de API, e2e de navegador, smoke

@@ -167,7 +167,7 @@ owner) y el seed la reconstruye, pero se avisa igual y no se hace con un smoke a
 También correr el caso que **tiene** que fallar: un `.env` apuntando a otro puerto → el script se
 niega.
 
-### - [⛔] 4. MCP de Postgres por worktree — BLOQUEADA: el mecanismo no existe
+### - [x] 4. Acceso a la base del worktree — el MCP por worktree NO existe; se sacó la dependencia
 
 **Intención:** que el MCP conteste sobre la base de este worktree y no sobre la de main.
 
@@ -193,8 +193,15 @@ Lo que sí se midió y sirve para la decisión: el scope local **sí gana** sobr
 (quedó `Connected` contra 5433), y Claude Code avisa que el mismo nombre está definido en dos
 scopes. O sea que el shadow funciona; lo que no funciona es que sea **por worktree**.
 
-**Las dos salidas que quedaban son las que el owner ya había descartado** al elegir esta opción, así
-que la decisión vuelve a él con evidencia nueva. Propuesta de este frente, que no estaba en la mesa
+**Cómo se cerró:** el owner eligió acceso directo con `psql`, así que **la dependencia se sacó en vez
+de reemplazar el mecanismo**. `entorno.sh` imprime el `psql` que pega en la base de este worktree
+—host, puerto, usuario y base resueltos del `.env`, más la variante `docker exec` para quien no
+tenga el cliente— y avisa en la misma línea que el conector MCP apunta al 5432 del checkout
+principal y no a esta base. El `.mcp.json` trackeado no se tocó: cero cambio de conducta para main.
+
+**Lo que quedaba antes de eso, para que se lea el razonamiento completo:** las dos salidas
+restantes eran las que el owner ya había descartado al elegir esta opción, así que la decisión
+volvió a él con evidencia nueva. Propuesta de este frente, que no estaba en la mesa
 cuando decidió: dejar el `.mcp.json` intacto y que `entorno.sh` **avise en pantalla** que el MCP
 apunta al 5432 de main y no a la base de este worktree, imprimiendo el `psql` que sí pega en la
 propia. No cambia config global, no toca la herramienta de main, y pone la verdad donde la sesión

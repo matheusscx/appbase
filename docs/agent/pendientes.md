@@ -38,48 +38,12 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
 Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrada: ninguna
-necesita una respuesta del owner. Las que hay abiertas salieron de automatizar el smoke de
-compras (2026-09-20); las que había antes se cerraron ese mismo día y están en
+necesita una respuesta del owner. La que hay abierta salió de automatizar el smoke de compras
+(2026-09-20); las que había antes se cerraron ese mismo día y están en
 [`resueltos.md`](resueltos.md), salvo la del primer deploy con `Idempotency-Key`, que no era
-código y se mudó a la § 7.
+código y se mudó a la § 7. La del **resguardo de `reset-db.sh`** también se cerró ese día, con el
+frente de un stack por worktree, y está en `resueltos.md`.
 
-- [ ] **El resguardo de `reset-db.sh` mira el host y no el puerto, así que un worktree con base
-  aislada le borra el volumen al stack compartido** (tooling, medido el 2026-09-20 rompiéndolo).
-  El `case` de `scripts/reset-db.sh:142` acepta `*@postgres:*|*@localhost:*|*@127.0.0.1:*`, y
-  `db-aislada.sh` deja el `.env` del worktree en `@localhost:54xx` — que **pasa el filtro**. Como
-  el `COMPOSE_PROJECT_NAME` es el mismo para todos los worktrees, el `compose down -v` de la
-  línea 177 y el `up` posterior recrean los contenedores **compartidos** apuntando a un puerto
-  que dentro del contenedor no existe (`docker-compose.yml` le pasa el `DATABASE_URL` del `.env`
-  tal cual). Síntomas medidos: `Seed complete: 0`, `tecnica_backend` reintentando
-  `ECONNREFUSED 127.0.0.1:5438` —el 5438 era la base aislada de ese worktree, ya devuelta al
-  compose—, el backend sin responder en `/api/docs` y el volumen de la base
-  ya borrado. **El script no miente: falla a los gritos** —espera el seed 180 s y sale con
-  `exit 1` (`reset-db.sh:187-190`)—, pero para cuando avisa, el `down -v` ya corrió y el volumen
-  compartido no existe más. **El daño es la destrucción, no el silencio**, y eso cambia qué hay
-  que arreglar: no falta un chequeo de exit code, falta que el guard no lo deje llegar ahí. Se
-  repara con `db-aislada.sh borrar` (devuelve el `.env` al compose) + `reset-db.sh`.
-  **Por qué existe el agujero, que es mejor diagnóstico que "falta comparar el puerto":** el
-  guard se escribió cuando la única base local era la del compose, y `db-aislada.sh`
-  (2026-09-19) le cambió el supuesto de abajo sin que nadie lo tocara. Le puede pasar a
-  **cualquier worktree que haya corrido `db-aislada.sh reset` y todavía no `borrar`**, y el
-  proyecto compartido no es coincidencia: `COMPOSE_PROJECT_NAME=tecnica_fullstack` está en
-  **`.env.example:64`**, así que se propaga **por construcción** a todo worktree que copie el
-  ejemplo, que es lo que `CLAUDE.md` manda hacer. (Acá no va un censo de worktrees: escribí uno
-  y envejeció **el mismo día y en las dos direcciones** — tres al escribirlo, uno un rato
-  después, dos un rato más tarde. La explicación plausible es que otras sesiones corrieran
-  `reset` y `borrar` en el medio, pero eso es inferencia: lo medido son los tres números.
-  Para contar quiénes la tienen armada ahora mismo, **desde el checkout principal** —los
-  worktrees cuelgan de ahí, y desde adentro de uno el glob no matchea nada—:
-  `for d in .claude/worktrees/*/; do grep -H '^DATABASE_URL=' "$d/.env" 2>/dev/null; done`,
-  con `-H` y no `-h`: sin el nombre del archivo el conteo no dice a quién avisarle.) **El
-  arreglo:** que el `case` exija el puerto del compose (`5432`)
-  además del host, y que el mensaje de rechazo nombre `db-aislada.sh borrar` como la salida.
-  ⚠️ **Pero comparar el puerto no cierra el tema:** el guard valida el `.env`, y lo que se
-  destruye es el **proyecto**, que es compartido diga lo que diga el `.env`. Un worktree con
-  `DATABASE_URL` perfectamente válido igual le vuela el volumen a la sesión de al lado que esté
-  a mitad de un e2e; hoy eso lo tapa el turno manual que pide `CLAUDE.md`, no el script.
-  **Procedencia:** el incidente lo provoqué y lo medí en `clever-shtern-2a40b3`; la sesión de
-  los mecánicos verificó el guard en el código por su cuenta y aportó las citas de línea.
 - [ ] **El kardex ordena por `creado_el DESC` sin desempatar, y una corrección de compra
   escribe dos movimientos en la misma transacción** (frontend, medido el 2026-09-20 al
   automatizar el smoke de compras). `GET /inventario/movimientos` ordena

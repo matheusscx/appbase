@@ -189,6 +189,15 @@ puertos del checkout principal. Eso lo frenan el aborto de Playwright y `verific
 Queda compartido lo que no se puede partir: el daemon de Docker (disco, RAM, caché de
 build), el stack de `git stash` y el espacio de puertos.
 
+⚠️ **Un cambio al `pre-commit` NO se puede probar desde un worktree, y el falso verde es
+convincente.** `core.hooksPath` queda como ruta **absoluta** al `.githooks` del checkout
+principal, así que al commitear desde un worktree git ejecuta **esa** copia, no la del worktree.
+Medido el 2026-09-20: un guard nuevo agregado en un worktree no corrió, y un mutante que debía
+bloquearse **entró**. Lo que lo disfraza es que los guards **viejos** sí imprimen, así que la
+salida parece confirmar que corrió el archivo que tenés delante. Al tocar `.githooks/`: probar el
+script a mano (`sh .githooks/pre-commit; echo $?`) con un mutante, decir que la integración con
+git queda sin verificar, y comprobarla después del merge a `main`.
+
 **Git hook (una vez por clone):** `git config core.hooksPath .githooks` activa el
 pre-commit (`.githooks/pre-commit`), que bloquea sobre lo staged: casing malo de
 `tenant_id`, `DELETE` físico, errores de `lint:check` (backend), tokens de diseño

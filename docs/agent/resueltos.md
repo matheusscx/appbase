@@ -23,6 +23,76 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El resguardo de `reset-db.sh` miraba el host y no el objetivo (cerrada 2026-09-20)
+
+Sale de [`pendientes.md`](pendientes.md) § 1, donde se escribió el mismo día en que el bug
+destruyó el volumen compartido. **Su propia advertencia final anticipó el arreglo correcto y por
+eso no se hizo lo que proponía su párrafo "El arreglo":** exigirle el puerto `5432` al `case`
+habría tapado el incidente sin cerrar nada, porque el guard valida el `.env` y lo que se destruye
+es el **proyecto de compose**, compartido diga lo que diga el `.env`.
+
+**Qué se hizo** (commit del frente "un stack de compose por worktree"): cada worktree tiene su
+propio proyecto, sus puertos por offset y su `.env`, escrito por un único script
+(`scripts/entorno.sh`, que absorbe y reemplaza a `db-aislada.sh`). `reset-db.sh` **deriva** el
+proyecto del worktree, se lo pasa a compose con `-p` explícito —nunca lo hereda del `.env`— y
+exige que lo declarado coincida con lo derivado. La pregunta pasó de *"¿esta URL es local?"* a
+***"¿lo que estoy por destruir es mío?"***.
+
+**Qué lo fija.** `scripts/check-aislamiento.mjs` corre en CI y en el pre-commit y falla si el
+compose vuelve a clavar un puerto de host o un `container_name`, si `.env.example` vuelve a fijar
+`COMPOSE_PROJECT_NAME`, o si `reset-db.sh` nombra un contenedor compartido en código. Cuatro
+mutantes medidos: exit 1 cada uno por su propia regla, exit 0 al revertir. Y la prueba de la
+propiedad: con los dos stacks arriba, `reset-db.sh` corrido en un worktree dejó los tres Id de
+contenedor del checkout principal, su volumen, su contador de seeds y las 16 filas de
+`modulos_app` **idénticos**, mientras reseteaba el propio.
+
+**Lo que NO cierra, dicho para que no se lea como que sí:** el turno manual desaparece, pero el
+riesgo se muda —de "la persona que reparte turno se distrae" a "una sesión no corre el setup"— y
+eso lo frenan el aborto de `playwright.config.ts` y el chequeo estático. Siguen compartidos el
+daemon de Docker, el stack de `git stash` y el espacio de puertos. Diseño completo:
+[`../superpowers/specs/2026-09-20-stack-por-worktree-design.md`](../superpowers/specs/2026-09-20-stack-por-worktree-design.md).
+
+**Texto con el que estaba abierta, verbatim:**
+
+- [ ] **El resguardo de `reset-db.sh` mira el host y no el puerto, así que un worktree con base
+  aislada le borra el volumen al stack compartido** (tooling, medido el 2026-09-20 rompiéndolo).
+  El `case` de `scripts/reset-db.sh:142` acepta `*@postgres:*|*@localhost:*|*@127.0.0.1:*`, y
+  `db-aislada.sh` deja el `.env` del worktree en `@localhost:54xx` — que **pasa el filtro**. Como
+  el `COMPOSE_PROJECT_NAME` es el mismo para todos los worktrees, el `compose down -v` de la
+  línea 177 y el `up` posterior recrean los contenedores **compartidos** apuntando a un puerto
+  que dentro del contenedor no existe (`docker-compose.yml` le pasa el `DATABASE_URL` del `.env`
+  tal cual). Síntomas medidos: `Seed complete: 0`, `tecnica_backend` reintentando
+  `ECONNREFUSED 127.0.0.1:5438` —el 5438 era la base aislada de ese worktree, ya devuelta al
+  compose—, el backend sin responder en `/api/docs` y el volumen de la base
+  ya borrado. **El script no miente: falla a los gritos** —espera el seed 180 s y sale con
+  `exit 1` (`reset-db.sh:187-190`)—, pero para cuando avisa, el `down -v` ya corrió y el volumen
+  compartido no existe más. **El daño es la destrucción, no el silencio**, y eso cambia qué hay
+  que arreglar: no falta un chequeo de exit code, falta que el guard no lo deje llegar ahí. Se
+  repara con `db-aislada.sh borrar` (devuelve el `.env` al compose) + `reset-db.sh`.
+  **Por qué existe el agujero, que es mejor diagnóstico que "falta comparar el puerto":** el
+  guard se escribió cuando la única base local era la del compose, y `db-aislada.sh`
+  (2026-09-19) le cambió el supuesto de abajo sin que nadie lo tocara. Le puede pasar a
+  **cualquier worktree que haya corrido `db-aislada.sh reset` y todavía no `borrar`**, y el
+  proyecto compartido no es coincidencia: `COMPOSE_PROJECT_NAME=tecnica_fullstack` está en
+  **`.env.example:64`**, así que se propaga **por construcción** a todo worktree que copie el
+  ejemplo, que es lo que `CLAUDE.md` manda hacer. (Acá no va un censo de worktrees: escribí uno
+  y envejeció **el mismo día y en las dos direcciones** — tres al escribirlo, uno un rato
+  después, dos un rato más tarde. La explicación plausible es que otras sesiones corrieran
+  `reset` y `borrar` en el medio, pero eso es inferencia: lo medido son los tres números.
+  Para contar quiénes la tienen armada ahora mismo, **desde el checkout principal** —los
+  worktrees cuelgan de ahí, y desde adentro de uno el glob no matchea nada—:
+  `for d in .claude/worktrees/*/; do grep -H '^DATABASE_URL=' "$d/.env" 2>/dev/null; done`,
+  con `-H` y no `-h`: sin el nombre del archivo el conteo no dice a quién avisarle.) **El
+  arreglo:** que el `case` exija el puerto del compose (`5432`)
+  además del host, y que el mensaje de rechazo nombre `db-aislada.sh borrar` como la salida.
+  ⚠️ **Pero comparar el puerto no cierra el tema:** el guard valida el `.env`, y lo que se
+  destruye es el **proyecto**, que es compartido diga lo que diga el `.env`. Un worktree con
+  `DATABASE_URL` perfectamente válido igual le vuela el volumen a la sesión de al lado que esté
+  a mitad de un e2e; hoy eso lo tapa el turno manual que pide `CLAUDE.md`, no el script.
+  **Procedencia:** el incidente lo provoqué y lo medí en `clever-shtern-2a40b3`; la sesión de
+  los mecánicos verificó el guard en el código por su cuenta y aportó las citas de línea.
+
+---
 ## El helper del cobro repetido dice cuál fue el paso que no ocurrió (cerrada 2026-09-20)
 
 Sale de [`pendientes.md` § 1](pendientes.md). **La entrada estaba bien**: verificada contra el
