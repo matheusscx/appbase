@@ -383,7 +383,7 @@ git add backend/src/modules/reportes backend/src/app.module.ts backend/src/modul
 git commit -m "feat(reportes): el módulo de reportes y el permiso Varianza"
 ```
 
-✅ **Cerrada el 2026-09-19 en `787518ca`.** Gate: lint 0 errores · typecheck OK · unit
+✅ **Cerrada el 2026-09-19 en `e4eac506`.** Gate: lint 0 errores · typecheck OK · unit
 **2887/2887** · e2e **completo** 1045 pasan, 0 fallos. Revisión independiente: dominio y seguridad
 de API LIMPIO, más dos re-revisiones del diff corregido, también LIMPIO.
 
@@ -395,9 +395,25 @@ Lo que salió distinto de lo planeado, y quedó escrito donde dura:
   acá porque **este plan se borra cuando el frente se completa** (`docs/superpowers/README.md`),
   así que dejarlos en el plan era garantizar que se perdieran justo al terminar.
 
+⚠️ **Todo hash escrito en este plan vale hasta el próximo rebase.** La rama se rebasó sobre main
+`2ed4be9b` antes de la Tarea 2 (ver su cabecera), y eso reescribió los ocho hashes anteriores. Los
+definitivos se copian de `git log` en el **hito de integración**, no antes: cualquiera anotado
+mientras el frente vive afuera es provisorio por definición.
+
 ---
 
 ## Tarea 2 — La ventana: los dos recuentos de cada (producto, ubicación)
+
+📌 **La rama se rebasó sobre main `2ed4be9b` antes de arrancar esta tarea**, adelantando el rebase
+que estaba previsto para el hito de la Tarea 6. El motivo: main extrajo `assertSinHuecos` a
+`backend/src/common/db/db.spec-helper.ts` —la aserción que verifica que **todo `$n` del SQL tenga
+su bind y todo bind esté referenciado**, el bug `42P18` que un mock de `Db.query` **nunca** ve—, y
+`docs/patterns/backend.md` § 10b exige ese test en toda consulta de este frente. Esta tarea arma
+`$n` en posiciones dinámicas: es exactamente su caso. Sin rebasar, habría que escribir una
+**quinta** copia inline de algo que main acababa de deduplicar de cuatro.
+
+Se verificó antes de rebasar que **ningún archivo del frente coincide con los que main tocó**
+(cero solape), así que el replay fue sin conflictos.
 
 **Archivos:**
 - Modificar: `backend/src/modules/reportes/varianza/varianza.service.ts`
