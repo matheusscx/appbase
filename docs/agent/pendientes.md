@@ -79,21 +79,46 @@ respuesta del owner.**
   30 s de Playwright en vez de decir "el primer cobro nunca llegó al servidor". Es la
   convención que ya usan los otros specs con `waitForResponse`, así que no es deuda nueva;
   un `Promise.race` con mensaje propio mejoraría el diagnóstico del día que falle.
-- [ ] **Fecha local armada con `toISOString()`: tercera aparición del mismo error, y
-  `anti-patterns.md` no tiene lugar** (doc, medido 2026-09-19 al cerrar
-  `2026-09-19-residuos-hora-de-corte`, fix round 1). `new Date(y, m, d).toISOString()`
-  pasa por UTC: en un huso POSITIVO la medianoche local cae la tarde anterior en UTC, así
-  que la fecha sale un día antes. Es la TERCERA vez que aparece en el repo, medido
-  archivo:línea:
+- [ ] **El molde de fecha local vive en CINCO lugares del repo, pero el error solo se
+  cazó DOS veces — y `anti-patterns.md` no tiene lugar** (doc, medido 2026-09-19 al
+  cerrar `2026-09-19-residuos-hora-de-corte`, fix round 1). De los cinco sitios donde
+  aparece el molde `getFullYear`/`getMonth`/`getDate`, CUATRO llegaron correctos desde el
+  commit de feature que los originó (`a549debf`, `0ab3fbc3`, `20e4cbd9`, `f78398db` — no
+  son fixes, medido con `git log --follow`/`git log -S`); el bug solo existió una vez, en
+  `usePropinaResumen.ts`, y se cazó DOS veces:
+  - `9364a63b fix(propinas): reemplazar selector fecha+hora por fecha pura en el rango` —
+    primera vez, sobre `new Date(value).toISOString()` (fecha pura parseada como
+    medianoche UTC); introdujo `inicioDiaIso`/`finDiaExclusivoIso` en `date-value.ts`, que
+    este mismo frente borró como código muerto (ya no tenían consumidores).
+  - `7a319150 fix(propinas): el mes del reporte se corría un día en husos positivos` —
+    segunda vez, esta tarea, sobre `rangoMesActual()`.
+  El error tiene DOS direcciones, no una, y un test que solo fija el reloj de Chile ve
+  nomás la primera:
+  - `new Date()` + `toISOString()` falla en husos NEGATIVOS (oeste, ej. Chile), y solo
+    desde ~21:00 hora local en adelante — la fecha UTC queda un día ADELANTE de la local.
+  - `new Date(y, m, 1)` (medianoche local) + `toISOString()` falla en husos POSITIVOS
+    (este, ej. Europa), el día ENTERO — la medianoche local cae la tarde anterior en UTC,
+    así que la fecha sale un día antes.
+  Los cinco sitios donde vive el molde hoy, medido archivo:línea:
   - `frontend/app/composables/useVigenciaRegla.ts:24` — `hoyLocal()`, correcto (arma la
     fecha por `getFullYear`/`getMonth`/`getDate`).
   - `frontend/app/composables/usePromociones.ts:119` — `hoyLocal()` duplicado localmente,
     también correcto.
   - `frontend/app/composables/usePropinaResumen.ts:19` — `rangoMesActual()`, tenía el bug
-    (`fmt = (d) => d.toISOString().slice(0, 10)`); corregido en esta misma tarea al molde
-    de los otros dos (arma `desde`/`hasta` por componentes locales, con `ahora: Date` como
-    parámetro para que el test fije el "hoy"). Ningún código con el bug queda vivo.
-  El molde correcto ya existe en el repo dos veces antes de este fix: no hace falta
+    de la dirección POSITIVA (`fmt = (d) => d.toISOString().slice(0, 10)`); corregido en
+    esta misma tarea al molde de los otros dos (arma `desde`/`hasta` por componentes
+    locales, con `ahora: Date` como parámetro para que el test fije el "hoy"). El spec
+    (`usePropinaResumen.spec.ts`) fija `TZ=Europe/Madrid` — es la dirección POSITIVA la
+    que hay que fijar para cazar este bug, `America/Santiago` no lo hubiera visto. Ningún
+    código con el bug queda vivo.
+  - `frontend/app/components/caja/CajaTendencia.vue:13` — `fechaLocal()`, correcto.
+  - `frontend/app/pages/compras/[id].vue:76` — usa `hoyLocal()` importado de
+    `useVigenciaRegla`, correcto.
+  De paso, los dos docblocks que tenían la dirección invertida (decían "puede ir un día
+  atrás" cuando en huso negativo va un día ADELANTE) se corrigieron en esta misma tarea —
+  `useVigenciaRegla.ts:17-18` y `usePromociones.ts:116-117` — así que nadie tiene que
+  re-medirla.
+  El molde correcto ya existe en el repo varias veces antes de este fix: no hace falta
   diseñar nada nuevo, solo escribirlo en `anti-patterns.md` como corresponde a un "bug de
   patrón que se repitió" (`CLAUDE.md` § Documentación viva). **Por qué está acá y no
   ahí:** `anti-patterns.md` mide hoy **24** entradas `### ❌`
@@ -102,8 +127,8 @@ respuesta del owner.**
   recién entonces borrar la más antigua sin reincidencia) **antes** de sumar una entrada
   nueva — es trabajo aparte, con criterio propio, no algo para hacer de arrastre en esta
   tarea. **El arreglo:** cuando se pode a 20, agregar ahí una entrada `### ❌` con el
-  formato fijo del archivo (qué pasó → ❌ mal → ✅ bien → una línea de porqué) citando los
-  tres sitios de arriba.
+  formato fijo del archivo (qué pasó → ❌ mal → ✅ bien → una línea de porqué) citando las
+  DOS direcciones y los cinco sitios de arriba.
 
 ## 2. Medir primero — no es una pregunta para el owner
 

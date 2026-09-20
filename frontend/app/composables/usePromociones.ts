@@ -114,8 +114,8 @@ const ESTADO_COLOR: Record<EstadoPromocionConBadge, ColorBadgePromocion> = {
 }
 
 /** 'YYYY-MM-DD' del navegador. NO `toISOString().slice(0, 10)`: eso da la fecha
- *  en UTC, que en husos negativos (Chile) puede ir un día atrás de la fecha
- *  local real — mismo criterio que `useVigenciaRegla`. */
+ *  en UTC, que en husos negativos (Chile) va un día ADELANTE de la local desde
+ *  las ~21:00 — mismo criterio que `useVigenciaRegla`. */
 function hoyLocal(): string {
   const d = new Date()
   const mes = String(d.getMonth() + 1).padStart(2, '0')

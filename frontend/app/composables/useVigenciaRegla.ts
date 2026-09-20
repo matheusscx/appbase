@@ -15,8 +15,8 @@ const ETIQUETA: Record<EstadoVigenciaConBadge, string> = {
 }
 
 /** 'YYYY-MM-DD' del navegador. NO `toISOString().slice(0, 10)`: eso da la fecha
- *  en UTC, que en husos negativos (Chile) puede ir un día atrás de la fecha
- *  local real — arma la fecha por componentes (`getFullYear`/`getMonth`/
+ *  en UTC, que en husos negativos (Chile) va un día ADELANTE de la local desde
+ *  las ~21:00 — arma la fecha por componentes (`getFullYear`/`getMonth`/
  *  `getDate`) en vez de formatear el `Date` ya corrido a UTC.
  *  Exportada (spec `2026-09-18-reporte-anulaciones-design.md` § 6): la pantalla
  *  de Anulaciones arma su rango por defecto ("hoy") con esta misma función, en
