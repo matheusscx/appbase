@@ -511,10 +511,37 @@ Regla de negocio completa: [`PRODUCTO.md`](../PRODUCTO.md) § 8b. Dónde se hace
   cuenta de quien aprueba. Detalle funcional completo (catálogo de causas, permisos por
   ruta): [`recuento-inventario.md`](./recuento-inventario.md).
 
-**Índices (para performance):**
-- `(tenant_id, item_id)` — consultas por producto del tenant
-- `(tenant_id, motivo)` — filtrado por motivo
-- `(tenant_id, creado_el)` — ordenamiento temporal
+**Índices.** ⚠️ Hasta el 2026-09-20 este bloque listaba `(tenant_id, item_id)`,
+`(tenant_id, motivo)` y `(tenant_id, creado_el)` "(para performance)". **Los tres eran
+falsos: ninguno existe.** Quedaron del diseño original y nunca se crearon. Lo que la tabla
+tiene de verdad, medido sobre la base real:
+
+| Índice | Columnas | Para qué |
+|---|---|---|
+| PK | `movimiento_id` | — |
+| `idx_movimientos_inventario_item_secuencia` | `(item_id, secuencia)` | el recorrido de *rehacer la cuenta* (compras § 4.3) |
+| `idx_movimientos_inventario_compra_linea` | `compra_linea_id` | los movimientos de una línea de compra |
+| `idx_movimientos_inventario_traslado` | `traslado_id` | los movimientos de un traslado |
+| `idx_movimientos_inventario_venta` | `venta_id` | los movimientos de una venta |
+
+En vez de volver a dejar un listado que envejece solo, **el comando que lo mide**, contra la
+base que tengas levantada (en un worktree, `docker exec pg_<slug>` en lugar de `compose exec`):
+
+```bash
+docker compose exec -T postgres psql -U dev_user -d tecnica_db -c \
+  "SELECT indexname, indexdef FROM pg_indexes WHERE tablename='movimientos_inventario';"
+```
+
+La fuente de verdad son los `@Index` de `movimiento-inventario.entity.ts`, que `synchronize`
+aplica al arrancar; `startup-pos.sql` es documentación y puede desfasarse, aunque **en este
+caso no era el culpable**: declara los mismos cuatro (líneas 1016-1025). El listado falso vivía
+solo en este archivo, que es lo que hace más fácil que sobreviva — nada lo contrasta con nada.
+
+Consecuencia concreta, y por eso se corrige junto al orden: **no hay índice por `creado_el`**,
+así que el `ORDER BY` del listado siempre resolvió con un nodo `Sort`, y agregarle `secuencia`
+como segundo criterio no apagó ningún índice. Si alguna de las consultas de este módulo
+necesita un índice nuevo es una pregunta abierta que **se contesta midiendo con una
+distribución de datos realista**, no leyendo esta tabla.
 
 ### DTOs
 
