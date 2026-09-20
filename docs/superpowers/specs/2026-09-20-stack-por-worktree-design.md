@@ -39,6 +39,12 @@ worktree **sin `.env`**, y bajado después con `down -v`:
 | hasta `Seed complete` | 12 s |
 | **total, de cero a stack usable** | **73 s** |
 
+⚠️ **Los 73 s son con la caché de build caliente.** El 2026-09-20, después de esta medición, otra
+sesión borró la caché de build para recuperar espacio (§9), así que el **primer** build de cada
+worktree va a tardar más que 40 s hasta que la caché se vuelva a llenar. Re-medir al ejecutar la
+tarea 2 en vez de citar este número: lo que el diseño sostiene es que el costo es *un comando*, no
+que sean 73 s para siempre.
+
 | **Disco** — marginal por stack | medido |
 |---|---|
 | imágenes del proyecto | **+2,83 GB** |
@@ -238,7 +244,8 @@ Neto: **un paso humano menos y un comando de 73 s.**
 
 **Docker ocupa 141,2 GB y 138,7 GB son recuperables** (2026-09-20: imágenes 27,26 GB, 25,47
 recuperables · volúmenes 91,81 GB en 38 volúmenes, 91,08 recuperables, 35 sin usar · build cache
-22,13 GB, todo recuperable), de los worktrees que se fueron
+22,13 GB, todo recuperable) — **la orquestadora ejecutó esa limpieza el mismo día, a pedido del
+owner, así que el número de arriba es una foto y no el estado**. Vienen de los worktrees que se fueron
 borrando estos días. Este diseño **evita que siga creciendo** (`--purgar`), pero limpiar lo ya
 acumulado es una operación destructiva de una vez, con tres sesiones vivas, y la decide el
 owner. Va como entrada de `docs/agent/pendientes.md` con el número medido, no como tarea de

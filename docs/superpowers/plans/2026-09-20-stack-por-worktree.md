@@ -208,8 +208,12 @@ una de las cuatro cosas, una a la vez, y comprobar que el chequeo se pone rojo *
   compartido (daemon de Docker, stash, espacio de puertos) — la sección no puede quedar
   prometiendo que ahora es imposible equivocarse.
 - **`docs/ARCHITECTURE.md`:** los puertos fijos 3000/5173/5432 pasan a ser "los del offset 0".
-- **`docs/agent/pendientes.md`:** entrada nueva con los 138,7 GB recuperables medidos y los tres
-  desgloses (imágenes / volúmenes / build cache). Solo lo abierto, sin ✅.
+- **`docs/agent/pendientes.md`:** entrada nueva sobre la basura de Docker que el mecanismo viejo
+  acumulaba. ⚠️ **Medir el número al escribir la entrada y publicar el comando, no citar los
+  138,7 GB de este plan**: la sesión orquestadora limpió lo acumulado el 2026-09-20 (volúmenes sin
+  usar, caché de build e imágenes no referenciadas), así que ese número ya está viejo — y un conteo
+  de basura envejece por definición, así que la entrada lleva `docker system df` y la fecha de la
+  medición al lado del número. Solo lo abierto, sin ✅.
 - **`docs/agent/anti-patterns.md`:** ⛔ **no** agregar entrada. La regla 1 del archivo pide un bug
   ya cometido, y el de este frente (resguardo que valida una cosa y destruye otra) queda cerrado
   por el chequeo estático de la tarea 6 → si entra, entra como `✅` con su referencia, y solo si
