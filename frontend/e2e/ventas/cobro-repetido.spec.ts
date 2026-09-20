@@ -53,9 +53,23 @@ test.afterEach(async ({ request }) => {
 })
 
 /**
+ * Cuánto se espera al primer `POST` antes de dar el paso por no ocurrido.
+ * **Tiene que ser bastante menos que el timeout de test de Playwright** (30 s,
+ * el default: `playwright.config.ts` no lo toca). Si el genérico gana la
+ * carrera, el mensaje de abajo no se lee nunca y vuelve el diagnóstico que
+ * esto viene a arreglar. Diez segundos sobran: el `POST` sale del click que el
+ * test acaba de hacer.
+ */
+const ESPERA_DEL_PRIMER_POST = 10_000
+
+/**
  * El primer request a `patron` llega al backend y el navegador no ve la
  * respuesta. Devuelve el body que el servidor contestó, para comparar con el
  * del reintento.
+ *
+ * Si ese `POST` nunca llega, la espera corta sola diciendo cuál fue el paso que
+ * no ocurrió: sin esto el test moría en el timeout genérico de Playwright, que
+ * señala la línea del `await` y no el click que no disparó nada.
  */
 async function cortarLaPrimeraRespuesta(page: Page, patron: string) {
   let cortado = false
@@ -74,7 +88,26 @@ async function cortarLaPrimeraRespuesta(page: Page, patron: string) {
     await body
     await route.abort('internetdisconnected')
   })
-  return async () => await (await llegada)
+  return async () => {
+    let temporizador: ReturnType<typeof setTimeout>
+    const seColgo = new Promise<never>((_, rechazar) => {
+      temporizador = setTimeout(
+        () => rechazar(new Error(
+          `El primer POST a ${patron} nunca llegó al servidor `
+          + `(${ESPERA_DEL_PRIMER_POST} ms). El corte no se llegó a fabricar: `
+          + 'el paso que falló es el de antes —el click que tenía que disparar '
+          + 'el cobro—, no la idempotencia.',
+        )),
+        ESPERA_DEL_PRIMER_POST,
+      )
+    })
+    try {
+      return await Promise.race([llegada.then(body => body), seColgo])
+    }
+    finally {
+      clearTimeout(temporizador!)
+    }
+  }
 }
 
 test('POS: confirmar de nuevo después de un corte no crea otra venta', async ({ page, request }) => {

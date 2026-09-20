@@ -23,11 +23,71 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El helper del cobro repetido dice cuál fue el paso que no ocurrió (cerrada 2026-09-20)
+
+Sale de [`pendientes.md` § 1](pendientes.md). **La entrada estaba bien**: verificada contra el
+código antes de tocarla, `cortarLaPrimeraRespuesta` devolvía `async () => await (await
+llegada)`, y `llegada` solo resuelve desde el handler de `page.route`. Si el `POST` no pasaba
+por ahí, nada cortaba la espera.
+
+**Qué se hizo:** la espera del primer `POST` pasó a ser un `Promise.race` contra un
+temporizador de 10 s con mensaje propio, en `frontend/e2e/ventas/cobro-repetido.spec.ts`. Diez
+y no treinta porque **tiene que ganarle al timeout de test de Playwright** —30 s, el default,
+que `playwright.config.ts` no toca—: si gana el genérico, el mensaje no se lee nunca y vuelve
+el problema. El `clearTimeout` va en un `finally`, así que el camino feliz no deja el
+temporizador colgado.
+
+**Medido, y la medición es la comparación, no el mensaje.** Mismo mutante en los dos casos —
+apuntar el `page.route` a un patrón que no matchea nunca, así el `POST` sale sin pasar por el
+handler—, corriendo el test del POS contra el stack del compose:
+
+| Helper | Cómo muere |
+|---|---|
+| El de antes | **30,2 s**, `Test timeout of 30000ms exceeded.` Señala la línea del `await` y no dice qué paso faltó |
+| El de ahora | **12,2 s**, `El primer POST a … nunca llegó al servidor (10000 ms). El corte no se llegó a fabricar: el paso que falló es el de antes —el click que tenía que disparar el cobro—, no la idempotencia.` |
+
+Sin el mutante, los dos tests del spec pasan (3 passed contando el `setup`), antes y después
+del cambio.
+
+⚠️ **Los 10 s se cuentan desde que arranca la espera, no desde que arranca el test**, así que
+el margen contra el genérico es de 20 s *de lo que quede del presupuesto*. Si algún día los
+pasos previos —el `goto`, el login, el PIN— se comen casi los 30, el genérico vuelve a ganar y
+el mensaje no se lee. No es regresión (el helper viejo perdía siempre), pero es el supuesto
+bajo el que este arreglo funciona: si reaparece un `Test timeout of 30000ms exceeded` en este
+spec, lo que hay que mirar es cuánto tardó lo de antes, no el race.
+
+**La entrada, como estaba en `pendientes.md` § 1:**
+
+> - [ ] **El helper del smoke de cobro repetido se cuelga sin decir por qué** (frontend e2e,
+>   anotado 2026-09-19; lo levantó la tercera ronda de revisión). Si el `POST` que
+>   `cortarLaPrimeraRespuesta` espera nunca llega
+>   (`frontend/e2e/ventas/cobro-repetido.spec.ts`), el test muere con el timeout genérico de
+>   30 s de Playwright en vez de decir "el primer cobro nunca llegó al servidor". Es la
+>   convención que ya usan los otros specs con `waitForResponse`, así que no es deuda nueva;
+>   un `Promise.race` con mensaje propio mejoraría el diagnóstico del día que falle.
+
+---
+
 ## El sondeo de locks del kardex cuenta solo su base (cerrada 2026-09-20)
 
 Sale de [`pendientes.md` § 1](pendientes.md), donde la entrada estaba escrita con su arreglo
-adentro. **Verificada contra el código antes de tocarla y salió exacta**: los siete specs que
-nombra filtran por `datname` y `kardex-secuencia` era el único que no.
+adentro. **Verificada contra el código antes de tocarla y salió exacta**: se abrieron los siete
+specs que la entrada nombra —uno por uno, no un grep— y los siete filtraban por `datname`;
+`kardex-secuencia` era el único que no.
+
+El "siete" es de ese día y no hay que creerle: es el conteo de los que sondeaban locks en
+2026-09-20, y un spec nuevo lo mueve. **El criterio es lo que no envejece** —todo sondeo de
+`pg_stat_activity` filtra por su propia base— y se recuenta en el momento con:
+
+```bash
+grep -rl 'FROM pg_stat_activity' backend/test | xargs grep -L 'datname'
+```
+
+Lo que devuelva es la lista de los que sondean sin filtrar por su base; vacío es lo correcto,
+y el día que se cerró lo estaba (8 archivos consultan la vista, los 8 con `datname`).
+⚠️ **`FROM` y no `pg_stat_activity` a secas**: sin el `FROM`, `setup-pool.ts` sale en la lista
+por nombrar la vista en un comentario, y un falso positivo en un comando de verificación
+enseña a ignorar su salida.
 
 **Qué se hizo:** una línea. El sondeo de `backend/test/kardex-secuencia.e2e-spec.ts` pasó a
 filtrar `datname = current_database()`, como los otros siete.

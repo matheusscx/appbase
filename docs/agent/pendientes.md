@@ -37,16 +37,10 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
-El arreglo ya está decidido y escrito dentro de la propia entrada: **ninguna necesita una
-respuesta del owner.**
-
-- [ ] **El helper del smoke de cobro repetido se cuelga sin decir por qué** (frontend e2e,
-  anotado 2026-09-19; lo levantó la tercera ronda de revisión). Si el `POST` que
-  `cortarLaPrimeraRespuesta` espera nunca llega
-  (`frontend/e2e/ventas/cobro-repetido.spec.ts`), el test muere con el timeout genérico de
-  30 s de Playwright en vez de decir "el primer cobro nunca llegó al servidor". Es la
-  convención que ya usan los otros specs con `waitForResponse`, así que no es deuda nueva;
-  un `Promise.race` con mensaje propio mejoraría el diagnóstico del día que falle.
+Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrada: ninguna
+necesita una respuesta del owner. **Hoy no hay ninguna abierta** — las cuatro últimas se
+cerraron el 2026-09-20 y están en [`resueltos.md`](resueltos.md), salvo la del primer deploy
+con `Idempotency-Key`, que no era código y se mudó a la § 7.
 
 ## 2. Medir primero — no es una pregunta para el owner
 
