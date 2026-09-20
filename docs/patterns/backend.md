@@ -426,6 +426,34 @@ reabre el deadlock del pool. Prohibido por lint (`eslint.config.mjs`).
 
 Correr: `cd backend && npm test`. Antes de cerrar: `npm test`, `tsc` limpio, `npm run lint`.
 
+### E2E de API: correr UNA suite, cuando el worktree se llama como el frente (2026-09-19)
+
+El patrón de jest se matchea contra la **ruta absoluta**. En un worktree
+`.claude/worktrees/<frente>/`, **toda** ruta contiene `<frente>`, así que filtrar por el nombre
+del frente no filtra nada:
+
+```bash
+cd backend && npm run test:e2e -- <frente>.e2e-spec   # ✅ 1 suite
+```
+
+```bash
+cd backend && npm run test:e2e -- <frente>            # ❌ corre las 85 (~6 min)
+```
+
+⚠️ **El síntoma engaña porque la suite igual pasa en verde**, solo tarda veinte veces más — es
+fácil atribuirlo a "el e2e acá es lento" y convivir con ciclos de seis minutos todo un frente.
+Comprobarlo cuesta nada y es instantáneo:
+
+```bash
+npx jest --config ./test/jest-e2e.json --listTests <patrón> | grep -c e2e-spec
+```
+
+Si ese número es igual al total sin filtro, el problema es la **ruta**, no el patrón. ⛔ Y el
+gate de cierre igual corre la suite **entera**: esto es para el ciclo corto mientras se
+desarrolla, nunca para cerrar.
+
+---
+
 ### E2E de API: todo `.body` del que se saca un valor lleva su `expect(...status)` al lado
 
 En `test/*.e2e-spec.ts`, **leer un campo de una respuesta sin haber afirmado su status
@@ -540,6 +568,15 @@ Dos lugares, ambos en el **mismo commit**:
       + 1, y dejar un comentario en el código (como el de
       `seedMotivosDiferenciaInventario`) explicando qué rangos dinámicos ya estaban
       ocupados, para que el próximo no repita el grep ingenuo.
+   4. ⚠️ **El grep va contra el CÓDIGO, no contra `docs/`** (2026-09-19). Un plan o una spec
+      que *planea* tomar unos IDs los nombra en prosa, así que incluir `docs/` los devuelve
+      como "ocupados" y el resultado se lee al revés: un ID está tomado cuando lo usa el
+      **seed**, no cuando lo menciona el documento que planea usarlo. El falso positivo
+      empuja al siguiente rango y desperdicia el bloque reservado, en silencio.
+
+      ```bash
+      grep -rn "446655440[0-9]\{3\}" backend/src backend/test frontend/app
+      ```
 
 ---
 

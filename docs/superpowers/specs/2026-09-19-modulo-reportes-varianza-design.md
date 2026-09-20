@@ -53,6 +53,7 @@ Todas del owner, 2026-09-19.
 | **Los reportes llevan gráfica, con Unovis** (`@unovis/vue` + `@unovis/ts`) — textual: *"vamos con unovis"*. Es la **única** dependencia nueva aprobada | La gráfica **acompaña** a la tabla, no la reemplaza: la tabla es lo que se lee con precisión y lo que algún día se exporta; la gráfica muestra de un vistazo dónde está el desvío |
 | **La gráfica de varianza son barras apiladas de la varianza**, no teórico-contra-real | Medible: la varianza *es* la diferencia chica entre dos números grandes, y 51 contra 58 en dos barras se ven iguales. Apiladas muestran tamaño y composición a la vez (§ 8.2) |
 | **Va la columna "Otros"** | Un número que normalmente es cero y grita cuando no lo es. Sin ella, la identidad de § 5.4 solo se verifica en el test, y en producción una diferencia no tendría dónde aparecer |
+| **`Varianza:Leer` va al rol `Inventario · Aprobación`, no al de conteo** *(owner, 2026-09-20 — textual: "deja el permiso en aprobación")* | El reporte mide si lo contado cierra contra lo que dicen las recetas: **revisa el trabajo de quien cuenta**. Dárselo al contador lo dejaría revisándose a sí mismo, que es la misma asimetría que el recuento ya sostiene al separar contar de aplicar (`docs/features/recuento-inventario.md`) |
 
 ## 3. El módulo de reportes
 

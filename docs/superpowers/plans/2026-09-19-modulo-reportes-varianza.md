@@ -1181,11 +1181,18 @@ algo de lo que dice quedó viejo, se corrige en su lugar.
 
 - [ ] **Paso 3: el backlog**
 
-En `docs/agent/pendientes.md`, dos entradas nuevas:
+En `docs/agent/pendientes.md`, tres entradas nuevas:
 1. **Persistir la advertencia "se vendió sin ese insumo"** — el agujero del teórico que no es
    medible después. Nombrarla por la **causa**, no por el síntoma.
 2. **Candidatos a mudarse al módulo de reportes**: los cinco de negocio de § 3.3, con la regla de
    que se mudan de a uno y con una razón concreta.
+3. **El `ValidationPipe` global no usa `forbidNonWhitelisted`** (`main.ts:19`, medido el
+   2026-09-19 por la revisión de seguridad de la Tarea 1). Es **preexistente y global**, no algo
+   que este frente introduzca: hoy un campo de más en el body se descarta en silencio en vez de
+   dar 400. ⚠️ **Entra como entrada MEDIDA, no como sospecha**: antes de escribirla hay que
+   contar cuántas rutas cambiarían de conducta al activarlo y si algún cliente manda campos de
+   más hoy — el owner pidió que nada quede viviendo solo en un mensaje, y una entrada sin
+   número es justamente lo que hace frenar al próximo sin darle con qué decidir.
 
 ⛔ **Nada queda marcado ✅ en `pendientes.md`**: la entrada de la varianza se **muda** a
 `docs/agent/resueltos.md` con el detalle. Si su sección queda vacía, queda solo el encabezado.
