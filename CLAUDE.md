@@ -121,6 +121,9 @@ Node.js/PostgreSQL local):
 - **frontend/** — Nuxt 4 (Vue 3), SPA (`ssr: false`, ADR-017), puerto 5173
 - **PostgreSQL 15** — puerto 5432
 
+(Esos son los puertos del **checkout principal**. Cada worktree corre en su propio offset:
+`./scripts/entorno.sh`, más abajo.)
+
 Estructura de directorios, mapa de módulos y flujo de requests: `docs/ARCHITECTURE.md`.
 
 ## Comandos
@@ -131,7 +134,9 @@ docker-compose down -v       # Detener y borrar el volumen de la BD
 ./scripts/reset-db.sh        # Reset + espera del seed, ANTES de cada test:e2e (~30s)
 ./scripts/reset-db.sh --verificar   # DESPUÉS del e2e: ¿la base se movió abajo de la suite?
 ./scripts/smoke-produccion.sh       # El demo de Railway, ¿funciona? (correr con el deploy en SUCCESS)
-./scripts/db-aislada.sh reset <puerto>   # En un worktree: Postgres propio para test:e2e, sin turno
+./scripts/entorno.sh db      # En un worktree: Postgres propio para test:e2e (el default barato)
+./scripts/entorno.sh stack   # En un worktree: stack completo propio (hace falta para Playwright/smoke)
+./scripts/entorno.sh estado | verificar | borrar [--purgar]
 
 cd backend
 npm run start:dev            # Watch mode
@@ -139,13 +144,15 @@ npm run lint | npm test | npm run test:e2e   # test:e2e = API (Jest + supertest)
 
 cd frontend
 npm run dev | npm run build
-npm run e2e        # E2E de navegador (Playwright) — requiere `docker-compose up` (stack real)
+npm run e2e        # E2E de navegador (Playwright) — requiere el stack propio (entorno.sh stack)
 npm run e2e:smoke  # solo el subconjunto @smoke
 ```
 
 Config vía `.env` en la raíz (copiar `.env.example`). Backend lee `DATABASE_URL`,
 `JWT_SECRET`, `PORT`, `API_PREFIX`; el frontend lee `API_PROXY_TARGET` —el destino
-al que su servidor reenvía `/api`—. El navegador **no** tiene URL de backend: habla
+al que su servidor reenvía `/api`, que adentro de compose es la red interna y por eso
+**no** se pone en el `.env`—. En un worktree el `.env` lo escribe `entorno.sh` y su
+`DATABASE_URL` es la verdad **del host**: el backend del contenedor no la lee. El navegador **no** tiene URL de backend: habla
 solo con el origen del frontend (ADR-022).
 
 ⚠️ **No toques un `.ts` del backend con el e2e corriendo.** El compose usa
@@ -155,23 +162,40 @@ reinicia y **vuelve a sembrar** (medido: crear un `.ts` lleva el contador de
 fallos repartidos que **no son regresiones**. Ante un e2e que falla raro, la
 primera pregunta la contesta `./scripts/reset-db.sh --verificar`.
 
-🧪 **En un worktree, el e2e de la API va contra un Postgres propio.** El stack del
-compose es uno solo para todos los worktrees, y compartirlo costaba dos cosas: el
-`synchronize` de una rama le borraba columnas a la otra, y el watcher re-sembraba en
-medio de una suite ajena. Pero `test:e2e` no usa el backend del compose: levanta la
-app en proceso contra el `DATABASE_URL` del `.env` del worktree, y esa app crea el
-esquema y siembra al arrancar. `./scripts/db-aislada.sh reset <puerto>` (5433–5499,
-uno por worktree) crea ese Postgres y apunta el `.env` ahí; cada `reset` es una base
-vacía, y la corrida que vale es la primera. **El e2e de navegador (Playwright) y el
-smoke manual siguen en el stack del compose, con `reset-db.sh` y turno**: necesitan
-backend y frontend corriendo. `borrar` devuelve el `.env` al compose.
+🧪 **Cada worktree tiene su propio entorno, y ya no se pide turno** (2026-09-20). Hasta
+esa fecha `docker-compose` usaba **un** nombre de proyecto para todos los worktrees
+—`.env.example` lo fijaba y cada `.env` copió esa línea—, así que backend y frontend
+eran uno solo: había que repartir turno a mano para Playwright y para el smoke, y un
+`reset-db.sh` corrido en un worktree hacía `down -v` sobre los contenedores de **todas**
+las sesiones, informando éxito. Ahora lo reparte `./scripts/entorno.sh`, con un offset
+por worktree (1–49 → postgres `5432+N`, backend `3000+N`, frontend `5173+N`); el
+checkout principal es el offset 0 y no cambió.
+
+- **`entorno.sh db`** es el default: `test:e2e` no usa el backend del compose —levanta su
+  app en proceso contra el `DATABASE_URL` del `.env`— así que le alcanza Postgres. Son
+  35 MB contra los ~915 MB del stack completo, y segundos contra minutos.
+- **`entorno.sh stack`** cuando hace falta navegador (Playwright o smoke manual).
+  Playwright toma los puertos del `.env` sola, y **aborta** si el worktree no tiene
+  entorno propio en vez de correr contra el 5173 del checkout principal.
+- **`entorno.sh verificar`** dice si dos worktrees comparten offset, proyecto o puerto.
+  Lo que no depende de acordarse es `scripts/check-aislamiento.mjs`, que corre en CI y en
+  el pre-commit y falla si alguien vuelve a clavar un puerto o un `container_name`.
+- `borrar --purgar` saca también las imágenes del proyecto: `down -v` **no** las borra
+  (medido, 2,83 GB por stack), y un worktree abandonado las filtra en silencio.
+
+⚠️ **El riesgo se mudó, no desapareció.** Antes era que la persona que repartía turno se
+distrajera; ahora es que una sesión **no corra el setup** y sus comandos peguen en los
+puertos del checkout principal. Eso lo frenan el aborto de Playwright y `verificar`.
+Queda compartido lo que no se puede partir: el daemon de Docker (disco, RAM, caché de
+build), el stack de `git stash` y el espacio de puertos.
 
 **Git hook (una vez por clone):** `git config core.hooksPath .githooks` activa el
 pre-commit (`.githooks/pre-commit`), que bloquea sobre lo staged: casing malo de
 `tenant_id`, `DELETE` físico, errores de `lint:check` (backend), tokens de diseño
 hardcodeados (`.vue`), enlaces internos de docs rotos, tablas GFM partidas por un
-párrafo pegado (`.md`) y helpers de `backend/test/` que leen el body de una
-respuesta sin mirar su status. N+1 y el filtro de
+párrafo pegado (`.md`), helpers de `backend/test/` que leen el body de una
+respuesta sin mirar su status, y el entorno de desarrollo volviendo a ser compartido
+entre worktrees (`check-aislamiento.mjs`). N+1 y el filtro de
 borrado son juicio y un hook no los puede evaluar, pero **sí exige la revisión que
 los cubre**: si el diff toca services de backend o `.vue` de `pages`/`components`,
 bloquea hasta que exista el recibo de la revisión independiente de `verify-feature`

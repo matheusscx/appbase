@@ -3,7 +3,7 @@
 > **Para agentes:** ejecutar con `superpowers:executing-plans`, tarea por tarea, marcando los
 > checkboxes. **No empezar sin el `Status: Approved`.**
 
-**Status:** Draft
+**Status:** In Progress — aprobado por el owner el 2026-09-20 sobre el hash `48a150bf`
 **Date:** 2026-09-20
 **Owner:** Cesar Matheus
 **Spec:** [`../specs/2026-09-20-stack-por-worktree-design.md`](../specs/2026-09-20-stack-por-worktree-design.md)
@@ -54,7 +54,7 @@ Infraestructura de desarrollo: `docker-compose.yml`, `.env.example`, `scripts/`,
 
 ## Tareas
 
-### - [ ] 1. `docker-compose.yml` y `.env.example` parametrizados, con los defaults de hoy
+### - [x] 1. `docker-compose.yml` y `.env.example` parametrizados, con los defaults de hoy
 
 **Intención:** que el compose pueda describir un stack por worktree sin cambiar en nada el del
 checkout principal.
@@ -84,7 +84,7 @@ o sea que el chequeo se ensucia justo donde tiene que discriminar.
 ⚠️ El `diff` se corre **desde el checkout principal o con su `.env`**, que es el caso que tiene
 que quedar igual. Sin `.env` los defaults también deben dar los puertos de hoy.
 
-### - [ ] 2. `scripts/entorno.sh`: único dueño del `.env`, y `db-aislada.sh` se borra
+### - [x] 2. `scripts/entorno.sh`: único dueño del `.env`, y `db-aislada.sh` se borra
 
 **Intención:** un solo script que derive todo del worktree y sea el único que escribe el `.env`.
 
@@ -110,6 +110,17 @@ Modos:
 - **Dos consumidores, una sola derivación:** `reset-db.sh` no re-implementa nada, le pregunta a
   `entorno.sh derivar`. Sin archivo nuevo de helpers.
 
+**Desvío de alcance, decidido al ejecutar (2026-09-20).** Se tocó el `docker-compose.yml` una
+segunda vez, más allá de lo que describía la tarea 1: el `DATABASE_URL` del contenedor del backend
+**dejó de salir del `.env`** y se arma internamente contra el servicio `postgres`. El motivo
+apareció leyendo `backend/test/setup-env.ts:8`, que traduce `@postgres:` → `@localhost:` para el
+e2e del host **sin mover el puerto**: con un Postgres propio en 5433 esa traducción no alcanza, y
+la misma variable no puede significar `localhost:5433` afuera y algo alcanzable adentro del
+contenedor. Verificado que la config resuelta de main queda **byte a byte idéntica** (su `.env`
+declara los mismos `DB_USER`/`DB_PASSWORD`/`DB_NAME`). En el mismo movimiento, `API_PROXY_TARGET`
+pasó a estar comentado en `.env.example` y se borra del `.env`: copiado tal cual metía
+`localhost:3000` en el contenedor del frontend, que entonces **se proxea a sí mismo**.
+
 **Verificación:**
 - `entorno.sh stack` en este worktree: los tres servicios responden en **sus** puertos, y
   `curl <front>/api/docs` → 200 (el proxy pega en su propio backend, ADR-022).
@@ -119,7 +130,7 @@ Modos:
   a mano: rojo, nombrando los dos worktrees.
 - `entorno.sh` en el checkout principal: se niega.
 
-### - [ ] 3. `reset-db.sh`: el resguardo cambia de pregunta
+### - [x] 3. `reset-db.sh`: el resguardo cambia de pregunta
 
 **Intención:** que el script no pueda destruir un proyecto que no es de este worktree, y que lo
 que valide sea el objetivo real y no un string del `.env`.
@@ -156,7 +167,7 @@ owner) y el seed la reconstruye, pero se avisa igual y no se hace con un smoke a
 También correr el caso que **tiene** que fallar: un `.env` apuntando a otro puerto → el script se
 niega.
 
-### - [ ] 4. MCP de Postgres por worktree
+### - [⛔] 4. MCP de Postgres por worktree — BLOQUEADA: el mecanismo no existe
 
 **Intención:** que el MCP conteste sobre la base de este worktree y no sobre la de main.
 
@@ -167,7 +178,29 @@ niega.
 - Si el shadow **no** funciona: la salida es sacar el `postgres` del `.mcp.json` trackeado, lo que
   cambia la conducta de main → **detenerse y preguntar al owner**, no decidirlo acá.
 
-### - [ ] 5. Playwright: que no pueda correr contra el stack de otro
+⛔ **Medido el 2026-09-20, y el mecanismo quedó refutado, no postergado.** `claude mcp add --scope
+local` corrido **desde el worktree** no guardó la config bajo la ruta del worktree: la guardó bajo
+`projects["/Users/m2pro/cmatheus/startup-app"]`, o sea la clave del **checkout principal**. El
+scope local se llavea por raíz del repo, que todos los worktrees comparten, así que **un MCP de
+Postgres por worktree no se puede hacer por esta vía** — ni con otro nombre, porque el llaveado es
+el mismo.
+
+Efecto lateral que hubo que revertir: durante esos minutos el `postgres` de main apuntó a la base
+de este worktree (5433). Se revirtió con `claude mcp remove postgres -s local`, verificado que
+volvió a `localhost:5432` y que `~/.claude.json` no quedó con entradas colgadas.
+
+Lo que sí se midió y sirve para la decisión: el scope local **sí gana** sobre el del `.mcp.json`
+(quedó `Connected` contra 5433), y Claude Code avisa que el mismo nombre está definido en dos
+scopes. O sea que el shadow funciona; lo que no funciona es que sea **por worktree**.
+
+**Las dos salidas que quedaban son las que el owner ya había descartado** al elegir esta opción, así
+que la decisión vuelve a él con evidencia nueva. Propuesta de este frente, que no estaba en la mesa
+cuando decidió: dejar el `.mcp.json` intacto y que `entorno.sh` **avise en pantalla** que el MCP
+apunta al 5432 de main y no a la base de este worktree, imprimiendo el `psql` que sí pega en la
+propia. No cambia config global, no toca la herramienta de main, y pone la verdad donde la sesión
+la va a leer.
+
+### - [x] 5. Playwright: que no pueda correr contra el stack de otro
 
 **Intención:** cerrar el fallo que informa éxito — olvidarse de `E2E_BASE_URL` hoy hace que la
 suite corra contra el 5173 ajeno y **pase**.
@@ -183,7 +216,7 @@ suite corra contra el 5173 ajeno y **pase**.
 **Verificación:** `npm run e2e:smoke` contra el stack propio pasa; con el `.env` apuntando a otro
 offset, la config **aborta** en vez de correr; `CI=1` resuelve como hoy.
 
-### - [ ] 6. `scripts/check-aislamiento.mjs` — el chequeo que no depende de acordarse
+### - [x] 6. `scripts/check-aislamiento.mjs` — el chequeo que no depende de acordarse
 
 **Intención:** que volver a compartir algo ponga rojo un gate, no una revisión.
 
@@ -201,7 +234,7 @@ Engancharlo en **CI** (`.github/workflows/ci.yml`, junto a `docs · enlaces inte
 una de las cuatro cosas, una a la vez, y comprobar que el chequeo se pone rojo **por esa regla**
 —no por otra— y que al revertir vuelve a verde. Un mutante que sobrevive es un chequeo decorativo.
 
-### - [ ] 7. Documentación (mismo commit que el código)
+### - [x] 7. Documentación (mismo commit que el código)
 
 - **`CLAUDE.md` §Comandos:** hoy documenta `db-aislada.sh` y **el turno**. Reescribir: un stack por
   worktree, `entorno.sh`, y el turno **eliminado** para los cuatro casos. Nombrar qué queda

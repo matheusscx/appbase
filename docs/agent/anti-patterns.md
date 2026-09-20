@@ -84,6 +84,8 @@ función de formato dentro de un `.vue` · ✅ fecha local armada con `toISOStri
 fricciones de `vue-tsc` estricto · ❌ dependencia nueva sin `optimizeDeps.include` · ❌
 control con permiso propio anidado bajo el `v-if` de otro
 
+**Entorno de desarrollo** — ✅ resguardo que valida una cosa y destruye otra
+
 **Pruebas (unit)** — ❌ test verde que no ejerce lo que dice probar · ❌ leer el número de un
 mutante sin leer por qué murió · ❌ cambiar un vocabulario compartido y actualizar solo el
 módulo que tenés delante · ❌ escribir como medido algo que no se midió
@@ -562,6 +564,37 @@ se quedaba sin la acción que le corresponde, rompiendo la asimetría que el dis
 para sostener. Los dos computeds eran correctos por separado: el defecto vivía en el
 anidamiento, así que ningún unit test de la lógica lo habría visto. Regla completa y
 trampa: `docs/patterns/frontend.md` §1.1.
+
+## Entorno de desarrollo
+
+### ✅ Un resguardo que valida una cosa y destruye otra — AUTOMATIZADO
+
+`reset-db.sh` comprobaba que el `DATABASE_URL` del `.env` "pareciera local" y después hacía
+`down -v` sobre el **proyecto de compose**, que era **uno solo para todos los worktrees**
+(`.env.example` fijaba `COMPOSE_PROJECT_NAME` y cada `.env` copió esa línea). El 2026-09-20 un
+reset corrido en un worktree borró el volumen de todas las sesiones **informando éxito**.
+
+```bash
+# ❌ valida un proxy del objetivo (una URL) y destruye el objetivo (el proyecto)
+case "$url" in *@postgres:*|*@localhost:*) ;; *) exit 1 ;; esac
+compose down -v
+# ✅ derivar el objetivo, pasarlo explícito, y exigir que lo declarado coincida
+eval "$derivado"   # de: entorno.sh derivar
+[ "$ENTORNO_PROYECTO_DECLARADO" = "$ENTORNO_PROYECTO" ] || exit 1
+docker compose -p "$ENTORNO_PROYECTO" down -v
+```
+
+**Endurecer el proxy no cerraba nada**: el proyecto era compartido dijera lo que dijera el
+`.env`, así que exigirle el puerto a la URL habría tapado el incidente dejando vivo el mecanismo.
+La pregunta no era *"¿esta URL es local?"* sino ***"¿lo que estoy por destruir es mío?"***.
+
+→ *AUTOMATIZADO: `scripts/check-aislamiento.mjs` (CI y pre-commit) falla si el compose vuelve a
+clavar un puerto de host o un `container_name`, si `.env.example` vuelve a fijar el proyecto, o si
+`reset-db.sh` nombra un contenedor compartido en código. Cuatro mutantes: exit 1 por su regla, 0 al revertir.*
+
+📌 Lo que el chequeo no encodea: **antes de tocar un resguardo, escribir qué destruye la operación
+y qué mira el chequeo. Si no son lo mismo, el arreglo es cambiar la pregunta, no agregarle un campo
+al patrón.** Diseño: [`spec del frente`](../superpowers/specs/2026-09-20-stack-por-worktree-design.md).
 
 ## Pruebas (unit)
 

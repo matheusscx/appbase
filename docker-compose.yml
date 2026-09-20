@@ -1,18 +1,38 @@
 version: '3.9'
 
+# ─────────────────────────────────────────────────────────────────────────────
+# UN STACK POR WORKTREE. Los puertos publicados y el prefijo de los contenedores
+# salen de variables cuyos **defaults son los valores históricos**, así que el
+# checkout principal no distingue este archivo del anterior.
+#
+# Lo que NO va acá: `COMPOSE_PROJECT_NAME`. Fijarlo en `.env.example` fue la causa
+# raíz del incidente del 2026-09-20 —cada worktree copió el ejemplo, heredó el
+# mismo proyecto de compose, y un `reset-db.sh` hacía `down -v` sobre los
+# contenedores de todas las sesiones—. Sin esa línea, el default de compose es el
+# nombre del directorio: único por worktree por construcción.
+#
+# Y `container_name` sigue existiendo A PROPÓSITO. Sin nombre fijo, un worktree que
+# se olvide del setup adopta EN SILENCIO los contenedores de otro; con nombre fijo
+# ese caso choca ruidoso. De los dos, es el que falla en la dirección correcta.
+#
+# Los puertos los reparte `scripts/entorno.sh` con un offset por worktree; main es
+# el offset 0. `scripts/check-aislamiento.mjs` falla si vuelve a aparecer un puerto
+# o un nombre literal acá.
+# ─────────────────────────────────────────────────────────────────────────────
+
 services:
   # ========================================
   # POSTGRESQL DATABASE
   # ========================================
   postgres:
     image: postgres:15-alpine
-    container_name: tecnica_postgres
+    container_name: ${PREFIJO_CONTENEDOR:-tecnica}_postgres
     environment:
       POSTGRES_DB: ${DB_NAME:-tecnica_db}
       POSTGRES_USER: ${DB_USER:-dev_user}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-dev_password_123}
     ports:
-      - "5432:5432"
+      - "${PUERTO_POSTGRES:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -30,10 +50,18 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: tecnica_backend
+    container_name: ${PREFIJO_CONTENEDOR:-tecnica}_backend
     environment:
       NODE_ENV: ${NODE_ENV:-development}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://dev_user:dev_password_123@postgres:5432/tecnica_db}
+      # ⚠️ NO sale del `.env`, y es deliberado. El `DATABASE_URL` del `.env` es la
+      # verdad DEL HOST —`localhost:<PUERTO_POSTGRES>`, que es lo que usan los `npm`
+      # de backend/— y adentro del contenedor `localhost` es el contenedor mismo. Una
+      # variable con dos significados fue lo que hizo que `backend/test/setup-env.ts`
+      # necesite traducir `@postgres:` → `@localhost:`, traducción que **no mueve el
+      # puerto** y por lo tanto no sirve para un worktree con su Postgres en 54xx.
+      # Acá se arma la URL INTERNA contra el servicio `postgres`, que es lo único que
+      # el contenedor puede alcanzar. Resuelve idéntico a lo de antes para main.
+      DATABASE_URL: postgresql://${DB_USER:-dev_user}:${DB_PASSWORD:-dev_password_123}@postgres:5432/${DB_NAME:-tecnica_db}
       JWT_SECRET: ${JWT_SECRET:-your_super_secret_jwt_key}
       JWT_EXPIRATION: ${JWT_EXPIRATION:-7d}
       PORT: 3000
@@ -43,7 +71,7 @@ services:
       QZ_CERTIFICATE: ${QZ_CERTIFICATE:-}
       API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:3000}
     ports:
-      - "3000:3000"
+      - "${PUERTO_BACKEND:-3000}:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,9 +90,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: tecnica_frontend
+    container_name: ${PREFIJO_CONTENEDOR:-tecnica}_frontend
     ports:
-      - "5173:3000"
+      - "${PUERTO_FRONTEND:-5173}:3000"
     volumes:
       - ./frontend:/app
       - /app/node_modules

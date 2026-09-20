@@ -7,7 +7,9 @@
 # primera sobre una base recién sembrada.
 #
 # Qué hace, en orden:
-#   1. Verifica que apunta a la base del compose local (nunca a una remota).
+#   1. Verifica que el proyecto de compose que va a destruir es **el de este
+#      worktree** (ver el resguardo). Desde el 2026-09-20 cada worktree tiene su
+#      propio stack: éste resetea el propio y no puede tocar el de otra sesión.
 #   2. `down -v` — destruye el volumen. Es seguro acá: el proyecto no tiene
 #      datos productivos (decisión registrada del owner).
 #   3. `up -d` y espera el `Seed complete` del backend en los logs.
@@ -33,9 +35,31 @@
 #   ./scripts/reset-db.sh              reset completo (antes del e2e)
 #   ./scripts/reset-db.sh --verificar  NO resetea; dice si la corrida que acabás
 #                                      de hacer es válida o si algo re-sembró
+#
+# En un worktree exige el stack propio (`./scripts/entorno.sh stack`). Si el worktree
+# está en modo `db` —solo Postgres, que es el default para el e2e de la API— este
+# script se niega y manda a `entorno.sh db`, que es lo que da una base limpia ahí.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
+
+# Proyecto, prefijo y puertos salen de `entorno.sh derivar` y de ningún otro lado.
+# Dos scripts derivando el mismo dato por su cuenta es exactamente el bug que costó
+# el incidente del 2026-09-20, así que acá se pregunta en vez de recalcular.
+# Se asigna primero y se evalúa después, A PROPÓSITO: `eval "$(cmd)"` **no** aborta
+# aunque `cmd` falle —la falla se pierde al capturarla como string, y `eval ""` es un
+# éxito trivial— mientras que una asignación desde una sustitución sí la propaga con
+# `set -e` (medido en bash, 2026-09-20). Lo cazó la revisión independiente: hoy el
+# script moría igual por `set -u` en la línea siguiente, pero cualquier default futuro
+# sobre una de estas variables habría apagado la protección sin que nadie lo note.
+derivado="$(./scripts/entorno.sh derivar)"
+if [ -z "$derivado" ]; then
+  red "✖ 'entorno.sh derivar' no devolvió nada: no sé qué proyecto me toca."
+  ylw "  Sin eso no puedo saber si lo que voy a destruir es mío. No sigo."
+  exit 1
+fi
+eval "$derivado"
+CB="$ENTORNO_CONTENEDOR_BACKEND"
 
 red() { printf '\033[31m%s\033[0m\n' "$1"; }
 ylw() { printf '\033[33m%s\033[0m\n' "$1"; }
@@ -45,25 +69,27 @@ grn() { printf '\033[32m%s\033[0m\n' "$1"; }
 # script **sin imprimir nada** (contenedor caído, docker apagado, o
 # `NODE_ENV=production`, donde el seeder retorna antes de loguear). Devolver 0 y
 # diagnosticarlo arriba es la diferencia entre un mensaje y una terminal vacía.
-seeds() { docker logs tecnica_backend 2>&1 | grep -c 'Seed complete' || true; }
+seeds() { docker logs "$CB" 2>&1 | grep -c 'Seed complete' || true; }
 
 # Identidad de la INSTANCIA del contenedor, no del nombre. `docker logs` es por
 # instancia: si el contenedor se recrea (`--build`, `--force-recreate`, un
 # cambio de `.env`), el log arranca de cero y el contador vuelve a 1 aunque la
 # base haya sido re-sembrada encima del mismo volumen. Sin esto, `--verificar`
 # daba VERDE justo en el caso que existe para detectar (medido, 2026-08-06).
-cid() { docker inspect -f '{{.Id}}' tecnica_backend 2>/dev/null || true; }
+cid() { docker inspect -f '{{.Id}}' "$CB" 2>/dev/null || true; }
 
-# `--git-common-dir` y no `.git` a secas: en un **worktree enlazado** `.git` es un
-# ARCHIVO, no un directorio, así que escribir `.git/algo` falla con "Not a
-# directory" y —al ser la última línea del reset— mataba el script después de
-# haber hecho todo bien, sin registrar el Id y sin imprimir el verde. El
-# `--verificar` siguiente caía en "no hay registro": la detección de recreación
-# quedaba apagada **en silencio**, justo en el contexto que el proyecto usa para
-# verificar sin `git stash`.
-# Y es `--git-common-dir` y no `--git-dir` porque `tecnica_backend` es UNO SOLO
-# para todos los worktrees: el registro tiene que ser compartido.
-ESTADO="$(git rev-parse --git-common-dir)/reset-db.estado"
+# `--git-dir` y no `.git` a secas: en un **worktree enlazado** `.git` es un ARCHIVO,
+# no un directorio, así que escribir `.git/algo` falla con "Not a directory" y —al
+# ser la última línea del reset— mataba el script después de haber hecho todo bien,
+# sin registrar el Id y sin imprimir el verde. El `--verificar` siguiente caía en "no
+# hay registro": la detección de recreación quedaba apagada **en silencio**.
+#
+# ⚠️ Era `--git-common-dir` (compartido) hasta el 2026-09-20, y la razón que se daba
+# —"`tecnica_backend` es UNO SOLO para todos los worktrees"— **dejó de ser cierta** el
+# día que cada worktree pasó a tener su propio stack. Compartido, el registro de un
+# worktree sobrescribía el del otro y `--verificar` comparaba el Id de un contenedor
+# contra el de otro: un rojo inventado, o peor, un verde. Ahora es por worktree.
+ESTADO="$(git rev-parse --git-dir)/reset-db.estado"
 
 sin_docker() {
   if ! command -v docker >/dev/null 2>&1; then
@@ -71,8 +97,12 @@ sin_docker() {
     exit 1
   fi
   if [ -z "$(cid)" ]; then
-    red "✖ El contenedor 'tecnica_backend' no existe o docker no responde."
-    ylw "  Levantá el stack (docker-compose up -d) antes de verificar."
+    red "✖ El contenedor '${CB}' no existe o docker no responde."
+    if [ "$ENTORNO_ES_PRINCIPAL" = si ]; then
+      ylw "  Levantá el stack (docker-compose up -d) antes de verificar."
+    else
+      ylw "  Levantá el stack de este worktree: ./scripts/entorno.sh stack"
+    fi
     exit 1
   fi
 }
@@ -132,28 +162,63 @@ if [ -n "${1:-}" ]; then
   exit 1
 fi
 
-# ── 1. Resguardo: solo la base del compose local ─────────────────────────────
-# Si alguien apuntó .env a una base real, `down -v` no la tocaría (borra el
-# volumen de Docker, no la remota), pero el script mentiría sobre el estado.
-# Mejor negarse que dejar correr un e2e contra datos ajenos.
-if [ -f .env ] && grep -q '^DATABASE_URL=' .env; then
-  url=$(grep '^DATABASE_URL=' .env | head -1)
-  case "$url" in
-    *@postgres:*|*@localhost:*|*@127.0.0.1:*) ;;
-    *)
-      red "✖ DATABASE_URL no apunta al Postgres del compose local."
-      ylw "  $url"
-      ylw "  Este script borra volúmenes: no corre contra una base ajena."
-      exit 1
-      ;;
+# ── 1. Resguardo: lo que voy a destruir tiene que ser MÍO ────────────────────
+# El resguardo viejo miraba si el `DATABASE_URL` del `.env` "parecía local" y
+# después hacía `down -v` sobre el **proyecto de compose**. Son dos cosas
+# distintas, y ahí estuvo el incidente del 2026-09-20: el proyecto era compartido
+# dijera lo que dijera el `.env`, así que ningún patrón sobre esa URL —ni exigirle
+# el puerto— podía evitar que un worktree borrara el volumen de las demás sesiones.
+# Y el script terminaba informando éxito.
+#
+# La pregunta ahora no es "¿esta URL es local?" sino **"¿este proyecto es mío?"**, y
+# se contesta comparando lo DERIVADO del worktree contra lo DECLARADO en el `.env`.
+if [ "$ENTORNO_ES_PRINCIPAL" = si ]; then
+  # El checkout principal es el único con derecho a un proyecto que no empiece con
+  # `wt-`. Si acá aparece uno, alguien copió el `.env` de un worktree.
+  case "$ENTORNO_PROYECTO" in
+    wt-*)
+      red "✖ El checkout principal declara el proyecto de un worktree: ${ENTORNO_PROYECTO}"
+      ylw "  Eso destruiría el entorno de otra sesión. Arreglá COMPOSE_PROJECT_NAME en .env."
+      exit 1 ;;
   esac
+else
+  if [ "$ENTORNO_PROYECTO_DECLARADO" != "$ENTORNO_PROYECTO" ]; then
+    red "✖ Este worktree declara un proyecto de compose que no es el suyo."
+    ylw "  declarado en .env : ${ENTORNO_PROYECTO_DECLARADO:-(vacío)}"
+    ylw "  derivado del worktree: ${ENTORNO_PROYECTO}"
+    ylw "  Con el declarado, este 'down -v' borraría el volumen de OTRA sesión."
+    ylw "  Arreglalo con: ./scripts/entorno.sh stack"
+    exit 1
+  fi
+  if [ "$ENTORNO_MODO" != stack ]; then
+    red "✖ Este worktree no tiene stack propio (modo: ${ENTORNO_MODO})."
+    ylw "  reset-db.sh resetea el stack de compose; para una base limpia del e2e de API:"
+    ylw "    ./scripts/entorno.sh db"
+    exit 1
+  fi
+  # Y que el `.env` apunte al puerto que ESTE proyecto publica. Un `.env` que quedó
+  # con el puerto de otro entorno hace que la suite corra contra una base que este
+  # script no está reseteando: verde que no prueba nada.
+  # `|| true`: sin él, un `.env` sin línea `DATABASE_URL=` hace que el pipeline salga 1
+  # y `set -e` mate el script **acá**, perdiendo justo el mensaje que este bloque
+  # prepara para ese caso. Falla seguro, pero muda — y el mensaje es el punto.
+  puerto_env="$(grep '^DATABASE_URL=' .env 2>/dev/null | head -1 | sed -n 's/.*@[^:]*:\([0-9]*\)\/.*/\1/p' || true)"
+  if [ "$puerto_env" != "$ENTORNO_PUERTO_POSTGRES" ]; then
+    red "✖ El DATABASE_URL del .env no apunta al Postgres de este proyecto."
+    ylw "  puerto en .env        : ${puerto_env:-(no pude leerlo)}"
+    ylw "  puerto de este proyecto: ${ENTORNO_PUERTO_POSTGRES}"
+    exit 1
+  fi
 fi
 
 # ── 2. Elegir el binario de compose (v2 plugin o v1 standalone) ──────────────
+# `-p` explícito, SIEMPRE: el nombre del proyecto no se hereda del `.env` ni del
+# nombre del directorio. Es la línea que hace que el resguardo de arriba signifique
+# algo — validar un proyecto y destruir otro es el bug original.
 if docker compose version >/dev/null 2>&1; then
-  compose() { docker compose "$@"; }
+  compose() { docker compose -p "$ENTORNO_PROYECTO" "$@"; }
 elif command -v docker-compose >/dev/null 2>&1; then
-  compose() { docker-compose "$@"; }
+  compose() { docker-compose -p "$ENTORNO_PROYECTO" "$@"; }
 else
   red "✖ No encontré ni 'docker compose' ni 'docker-compose'."
   exit 1
@@ -186,7 +251,7 @@ elapsed=0
 until [ "$(seeds)" -ge 1 ]; do
   if [ "$elapsed" -ge "$timeout" ]; then
     red "✖ El backend no sembró en ${timeout}s. Últimas líneas:"
-    docker logs --tail 20 tecnica_backend 2>&1
+    docker logs --tail 20 "$CB" 2>&1
     exit 1
   fi
   sleep 2
@@ -210,7 +275,7 @@ espera=0
 espera_max=60
 # Misma protección que `seeds()`: con `pipefail`, un `docker logs` que falle a
 # mitad de la espera (contenedor removido) mataría el script mudo.
-lineas_log() { docker logs tecnica_backend 2>&1 | wc -l | tr -d ' ' || true; }
+lineas_log() { docker logs "$CB" 2>&1 | wc -l | tr -d ' ' || true; }
 lineas_prev=$(lineas_log)
 while [ "$quieto" -lt 6 ]; do
   # Timeout propio: `restart: unless-stopped` en el compose significa que un
@@ -220,7 +285,7 @@ while [ "$quieto" -lt 6 ]; do
   if [ "$espera" -ge "$espera_max" ]; then
     red "✖ El backend no se queda quieto (${espera_max}s de log continuo)."
     ylw "  Puede estar en crash-loop o recompilando sin parar. Últimas líneas:"
-    docker logs --tail 20 tecnica_backend 2>&1
+    docker logs --tail 20 "$CB" 2>&1
     exit 1
   fi
   sleep 2

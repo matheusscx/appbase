@@ -1435,6 +1435,33 @@ No se resuelve programando. Está acá para que tenga quién la reclame.
   el gate no mira igual —ya pasó una vez que el encargado no podía cargar una compra y todas
   las suites pasaban—. Si algo salta, vuelve como entrada acá.
 
+- [ ] 🧹 **La basura de Docker de los worktrees: el mecanismo está cerrado; lo que queda es de otro
+  proyecto** (anotado 2026-09-20 al cerrar "un stack por worktree"). Lo que acumulaba ya está
+  atendido: `entorno.sh borrar --purgar` saca las imágenes del proyecto, que `down -v` **no** borra
+  (medido: 2,83 GB por stack — eran las que quedaron colgadas de `intelligent-taussig-880ae6`, un
+  worktree que ya no existe), y `entorno.sh estado` las reporta mientras estén.
+
+  ⚠️ **Lo que sigue apareciendo como recuperable NO es nuestro, y confundirlo es caro.** Al medirlo
+  el 2026-09-20 quedaban ~55 GB de volúmenes sin usar, y **`webapp_dbdata` es 55,15 GB de eso**: un
+  volumen con 0 links, creado el 2025-09-04, de **otro proyecto del owner** (`colegium`, MySQL).
+  Un `docker volume prune` lo borra. O sea que el número grande que Docker ofrece recuperar es la
+  base de otro proyecto, no basura de este: eso lo decide el owner sobre ese proyecto, y lo sano ahí
+  es respaldo comprimido antes de borrar. **Este frente no lo toca.**
+
+  📌 **Y no copiar un número de acá: medirlo.** Un conteo de basura envejece por definición, y éste
+  ya envejeció dos veces el mismo día —141,2 GB ocupados al escribir la spec; ~70 GB después de una
+  limpieza de la sesión orquestadora—. El del día sale de:
+
+  ```bash
+  docker system df                                  # el total, por tipo
+  docker system df -v | sed -n '/VOLUME NAME/,$p'   # volumen por volumen, con LINKS y tamaño
+  ```
+
+  El segundo comando es el que importa: distingue **de quién** es cada volumen, que es justo lo que
+  el total esconde. Y ojo con `docker builder prune`: es recuperable sin pérdida de datos, pero
+  **la caché vacía encarece el primer `entorno.sh stack` de cada worktree** — medido, 40 s de build
+  con caché caliente contra pagar el `npm ci` entero sin ella.
+
 - [ ] 🚢 **Primer deploy con `Idempotency-Key` obligatoria: la ventana entre los dos servicios**
   (anotado 2026-09-19 al cerrar la idempotencia de cobros,
   [ADR-026](../adr/026-idempotencia-de-cobros.md); mudado acá desde la § 1 el 2026-09-20).

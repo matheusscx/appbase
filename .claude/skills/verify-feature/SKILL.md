@@ -38,11 +38,17 @@ punto: el contenedor levanta antes de que el seed termine, y una suite que
 arranca a mitad del seed falla con errores que no son regresiones. Tarda ~30s.
 No hay datos productivos que perder (decisión registrada del owner).
 
-**En un worktree, `./scripts/db-aislada.sh reset <puerto>` reemplaza a `reset-db.sh`
-para el `test:e2e`**: le da al worktree un Postgres propio y vacío, sin turno del stack
-compartido. La regla de la primera corrida vale igual —cada `reset` es la base vacía—,
-pero `--verificar` no aplica: ningún backend del compose apunta a esa base, así que no
-hay watcher que la re-siembre. El e2e de navegador sigue en el stack, con `reset-db.sh`.
+**En un worktree, `./scripts/entorno.sh db` reemplaza a `reset-db.sh` para el
+`test:e2e`**: le da al worktree un Postgres propio y vacío, sin turno. La regla de la
+primera corrida vale igual —cada corrida del comando es una base vacía—, pero
+`--verificar` no aplica en ese modo: ningún backend del compose apunta a esa base, así
+que no hay watcher que la re-siembre; `reset-db.sh` se niega y te manda acá.
+
+Para el e2e de **navegador** hace falta el stack: `./scripts/entorno.sh stack` le levanta
+uno propio a este worktree (backend y frontend en sus puertos), y ahí sí `reset-db.sh` y
+`--verificar` aplican, sobre el proyecto de este worktree y no sobre el de nadie más.
+Playwright toma esos puertos del `.env` sola. (Desde el 2026-09-20; antes era
+`db-aislada.sh` y el stack se pedía por turno.)
 
 **`typecheck:ratchet`**: `nuxt build` NO tipa-chequea, así que el frontend arrastra una
 deuda de errores de tipo (vue-tsc estricto) registrada en `frontend/typecheck-baseline.json`.

@@ -7,6 +7,7 @@
 #   · DELETE físico en SQL raw
 #   · lint:check (eslint sin --fix) sobre los .ts de backend staged
 #   · helpers de e2e que leen el body sin mirar el status de la respuesta
+#   · el entorno de desarrollo volviendo a ser compartido entre worktrees
 #
 # NO cubre el juicio (N+1, SELECT sin `eliminado_el IS NULL`): eso es la revisión
 # independiente por sub-agente del skill `verify-feature`, que un hook de shell no
@@ -95,7 +96,18 @@ if [ -n "$staged_md" ]; then
   fi
 fi
 
-# ── Guard 7: helpers de e2e que leen el body sin mirar el status ─────────────
+# ── Guard 7: el entorno de desarrollo volvió a ser compartido ────────────────
+# Un puerto o un nombre de contenedor clavado devuelve a todos los worktrees al
+# mismo stack, y el síntoma no aparece al commitear: aparece cuando otra sesión
+# corre reset-db.sh y se lleva tu base (pasó el 2026-09-20). De los tres niveles
+# de verificación del aislamiento, éste es el único que no depende de que alguien
+# se acuerde de invocarlo.
+if ! node scripts/check-aislamiento.mjs --staged ; then
+  red "✗ El entorno de desarrollo volvería a ser compartido (ver arriba)."
+  fail=1
+fi
+
+# ── Guard 8: helpers de e2e que leen el body sin mirar el status ─────────────
 # Un helper que hace `return (res.body as X).id` sin aseverar el status reparte
 # `undefined` a TODOS sus llamadores cuando la llamada falla, y el rojo aparece
 # lejos de su causa (una falla de inventario se leyó como `costoActual:

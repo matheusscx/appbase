@@ -2,6 +2,11 @@
 
 ## Stack
 
+> **Los puertos de abajo son los del checkout principal (offset 0).** Desde el 2026-09-20 cada
+> worktree corre su propio stack en su propio offset —`scripts/entorno.sh`, y el porqué en
+> `CLAUDE.md` § Comandos—, así que `5173`/`3000`/`5432` identifican al checkout principal, no
+> "el frontend" ni "la API".
+
 - **Backend**: NestJS (TypeScript) REST API, puerto 3000
 - **Frontend**: Nuxt 4 (Vue 3) SPA — `ssr: false`, ver [ADR-017](adr/017-spa-sin-ssr.md) —, puerto 5173
 - **Database**: PostgreSQL 15 con TypeORM, puerto 5432 (interno)
@@ -18,6 +23,9 @@ Todo el stack corre en contenedores — no se requiere Node.js ni PostgreSQL loc
 | API          | 3000/api      |
 | Swagger      | 3000/api/docs |
 | PostgreSQL   | 5432 (interno)|
+
+En un worktree, a cada uno se le suma su offset (1–49): postgres `5432+N`, backend `3000+N`,
+frontend `5173+N`. Los escribe `entorno.sh` en el `.env` y los lee el compose.
 
 ## Monorepo
 

@@ -173,15 +173,42 @@ suya. CI intacto: `process.env.CI` sigue mandando y ahí no hay `.env`.
 (El `storageState` no arrastra el origen viejo: `frontend/e2e/.auth` está en `.gitignore` y
 `auth.setup.ts` lo reescribe en cada corrida.)
 
-### 3.6 MCP de Postgres
+### 3.6 El acceso a la base de un worktree — MECANISMO REFUTADO, y por qué importa el razonamiento
 
-El `.mcp.json` trackeado **no se toca** (main sigue en 5432). `entorno.sh` registra un
-`postgres` de **scope local** para la ruta del worktree: `~/.claude.json` →
-`projects["<ruta>"].mcpServers`, mecanismo verificado (`startup-app` ya tiene `nuxt-ui` ahí).
-Untracked, no ensucia `git status` — que importa con tres sesiones vivas.
+**Lo que este diseño planeaba:** dejar el `.mcp.json` trackeado intacto (main sigue en 5432) y que
+`entorno.sh` registrara un `postgres` de **scope local** para la ruta del worktree, apoyándose en
+que `~/.claude.json` tiene una clave `projects["<ruta>"]` por worktree. La tarea 4 del plan decía
+**comprobar, no suponer**, y fue lo único que hizo falta.
 
-⚠️ **Va como tarea con comprobación, no como supuesto:** que el de scope local shadowee por
-nombre al de `.mcp.json`, y si hace falta reiniciar la sesión para que tome efecto.
+⛔ **Medido el 2026-09-20 y refutado.** `claude mcp add --scope local postgres …` corrido **desde el
+worktree** no escribió bajo la clave del worktree: escribió bajo
+`projects["/Users/m2pro/cmatheus/startup-app"]`, la del **checkout principal**. El scope local se
+llavea por **raíz del repo**, que todos los worktrees comparten. Así que:
+
+- **un MCP de Postgres por worktree no es implementable por esa vía** — ni con otro nombre, porque
+  el llaveado es el mismo, no el nombre;
+- durante esos minutos el `postgres` de main quedó apuntando a la base de **este** worktree (5433).
+  Se revirtió con `claude mcp remove postgres -s local`, verificado que volvió a `localhost:5432` y
+  que no quedaron entradas colgadas. Un efecto lateral sobre herramienta ajena, en lectura, dicho y
+  no tapado;
+- lo que sí funciona, medido: el scope local **gana** sobre el del `.mcp.json` (quedó `Connected`
+  contra 5433) y Claude Code avisa cuando el mismo nombre está en dos scopes. El shadow no es el
+  problema; que sea **por worktree** lo es.
+
+📌 **Cómo se salió, que es la parte que hay que leer y no el "no funcionó".** No se buscó otro
+mecanismo de config ni se fijó un número de ranuras: **se sacó la dependencia**. El conector era la
+única pieza del frente que no podía ser dinámica, así que dejarlo fuera del camino devuelve todo lo
+demás —bases y stacks— a ser dinámico y sin tope. El próximo que quiera un MCP por worktree tiene
+que encontrarse este razonamiento entero: el llaveado por raíz del repo es una propiedad de la
+herramienta, no un bug a rodear.
+
+**Propuesta, pendiente de que el owner la confirme** (modifica una tarea de un plan que él aprobó):
+el `.mcp.json` trackeado no se toca, y `entorno.sh` **imprime el `psql` que pega en la base de este
+worktree** —host, puerto, usuario y base resueltos del `.env`— y dice en la misma línea que el
+conector MCP apunta al 5432 y **no** a esta base. Eso último es lo que importa: un conector que
+contesta la base equivocada **en silencio** es el mismo error que el resguardo viejo con otra cara.
+Para quien no tenga el cliente en el host, `docker exec <contenedor> psql …` usa el de la imagen y
+no agrega dependencia.
 
 ## 4. Cómo se verifica que el aislamiento existe
 

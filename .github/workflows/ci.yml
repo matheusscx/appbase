@@ -73,6 +73,15 @@ jobs:
       - name: docs · enlaces internos
         run: node scripts/check-docs-links.mjs
 
+      # ── Aislamiento del entorno de desarrollo ────────────────────────────
+      # Backstop del frente "un stack por worktree" (2026-09-20). Que cada worktree
+      # tenga su propio proyecto de compose no se sostiene solo: alcanza con que
+      # alguien "simplifique" un `"5432:5432"` para volver al punto de partida, y el
+      # síntoma recién aparece cuando dos sesiones se pisan. Éste es el único de los
+      # tres niveles de verificación que no depende de invocarlo a mano.
+      - name: entorno · aislamiento por worktree
+        run: node scripts/check-aislamiento.mjs
+
       # ── Backend ──────────────────────────────────────────────────────────
       - name: backend · install
         working-directory: backend
