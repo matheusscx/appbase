@@ -9,6 +9,7 @@ import { loginSegundoTenant } from './helpers/segundo-tenant';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
+const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 
 interface TokenResponse {
   access_token: string;
@@ -142,6 +143,182 @@ describe('Reporte de varianza (e2e)', () => {
       );
 
       expect(res.status).toBe(200);
+    });
+  });
+
+  /**
+   * La ventana contra Postgres REAL. El unitario no puede probar esto: con `Db`
+   * mockeado, el mock devuelve las filas que se le piden sin importar qué JOIN
+   * arma la consulta (medido el 2026-09-20 — mutar `LEFT JOIN` a `JOIN` dejó los
+   * nueve unitarios en verde).
+   */
+  describe('la ventana entre dos recuentos', () => {
+    let localId: string;
+    let motivoId: string;
+
+    beforeAll(async () => {
+      const resUbic = await request(app.getHttpServer())
+        .get('/api/ubicaciones')
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resUbic.status).toBe(200);
+      localId = (resUbic.body as { id: string; tipo: string }[]).find(
+        (u) => u.tipo === 'local',
+      )!.id;
+
+      const resMotivos = await request(app.getHttpServer())
+        .get('/api/motivos-diferencia-inventario')
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resMotivos.status).toBe(200);
+      motivoId = (resMotivos.body as { id: string }[])[0].id;
+    });
+
+    async function crearProductoConStock(stock: string): Promise<string> {
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          nombre: `Varianza E2E ${Date.now()}-${Math.random()}`,
+          precioBase: '10000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'producto',
+        });
+      expect(resItem.status).toBe(201);
+      const itemId = (resItem.body as { id: string }).id;
+
+      const resStock = await request(app.getHttpServer())
+        .patch(`/api/items/${itemId}/stock`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          tipo: 'entrada',
+          motivo: 'compra',
+          ubicacionId: localId,
+          cantidad: stock,
+          costoUnitario: '1000',
+        });
+      expect(resStock.status).toBe(200);
+      return itemId;
+    }
+
+    /** Cuenta `cantidadContada` y aplica. Devuelve el id del recuento. */
+    async function contarYAplicar(
+      itemId: string,
+      cantidadContada: string,
+    ): Promise<string> {
+      const resCreate = await request(app.getHttpServer())
+        .post('/api/recuentos')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ ubicacionId: localId, itemIds: [itemId] });
+      expect(resCreate.status).toBe(201);
+      const recuentoId = (resCreate.body as { id: string }).id;
+
+      const resDetalle = await request(app.getHttpServer())
+        .get(`/api/recuentos/${recuentoId}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resDetalle.status).toBe(200);
+      const lineaId = (
+        resDetalle.body as { lineas: { lineaId: string; itemId: string }[] }
+      ).lineas.find((l) => l.itemId === itemId)!.lineaId;
+
+      const resConteo = await request(app.getHttpServer())
+        .patch(`/api/recuentos/${recuentoId}/lineas/${lineaId}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ cantidadContada, motivoDiferenciaId: motivoId });
+      expect(resConteo.status).toBe(200);
+
+      const resAplicar = await request(app.getHttpServer())
+        .post(`/api/recuentos/${recuentoId}/aplicar`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resAplicar.status).toBe(201);
+      return recuentoId;
+    }
+
+    function filaDe(
+      body: unknown,
+      itemId: string,
+    ): Record<string, unknown> | undefined {
+      return (body as { data: Record<string, unknown>[] }).data.find(
+        (f) => f.itemId === itemId,
+      );
+    }
+
+    it('con DOS recuentos aplicados, la fila es medible y nombra a los dos', async () => {
+      const itemId = await crearProductoConStock('100');
+      const recA = await contarYAplicar(itemId, '98');
+      const recB = await contarYAplicar(itemId, '95');
+
+      const res = await leer(tokenAdmin, `?itemId=${itemId}`);
+
+      expect(res.status).toBe(200);
+      const fila = filaDe(res.body, itemId);
+      expect(fila).toBeDefined();
+      expect(fila).toMatchObject({
+        medible: true,
+        recuentoInicialId: recA,
+        recuentoFinalId: recB,
+        ubicacionId: localId,
+      });
+    });
+
+    it('con UN solo recuento, la fila aparece pero no es medible', async () => {
+      const itemId = await crearProductoConStock('50');
+      await contarYAplicar(itemId, '48');
+
+      const res = await leer(tokenAdmin, `?itemId=${itemId}`);
+
+      expect(res.status).toBe(200);
+      const fila = filaDe(res.body, itemId);
+      expect(fila).toBeDefined();
+      expect(fila).toMatchObject({ medible: false, recuentoInicialId: null });
+    });
+
+    /**
+     * ⛔ **El caso que el unitario NO puede probar, y el que justifica el
+     * `LEFT JOIN`.** Un recuento cuya línea da **delta cero** no escribe
+     * movimiento (`recuentos.service.ts` saltea el delta cero), así que
+     * `recuento_inventario_linea.movimiento_id` queda en `NULL`. Con un `JOIN`
+     * normal ese grupo se caería del reporte entero — o sea, se perdería
+     * justamente el conteo que salió **perfecto**, que es el que confirma que el
+     * número es confiable.
+     *
+     * Acá el primer recuento cuenta EXACTAMENTE lo que hay (delta cero) y el
+     * segundo encuentra un faltante. La fila tiene que seguir siendo medible.
+     */
+    it('un recuento que dio justo no escribe movimiento y la fila sobrevive igual', async () => {
+      const itemId = await crearProductoConStock('40');
+      const recA = await contarYAplicar(itemId, '40'); // delta 0: sin movimiento
+      const recB = await contarYAplicar(itemId, '37'); // faltante de 3
+
+      const res = await leer(tokenAdmin, `?itemId=${itemId}`);
+
+      expect(res.status).toBe(200);
+      const fila = filaDe(res.body, itemId);
+      expect(fila).toBeDefined();
+      expect(fila).toMatchObject({
+        medible: true,
+        recuentoInicialId: recA,
+        recuentoFinalId: recB,
+      });
+    });
+
+    it('filtrar por otra ubicación no devuelve la fila del local', async () => {
+      const itemId = await crearProductoConStock('30');
+      await contarYAplicar(itemId, '29');
+      await contarYAplicar(itemId, '28');
+
+      const resBodega = await request(app.getHttpServer())
+        .post('/api/ubicaciones')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ nombre: `Bodega varianza ${Date.now()}`, tipo: 'bodega' });
+      expect(resBodega.status).toBe(201);
+      const bodegaId = (resBodega.body as { id: string }).id;
+
+      const res = await leer(
+        tokenAdmin,
+        `?itemId=${itemId}&ubicacionId=${bodegaId}`,
+      );
+
+      expect(res.status).toBe(200);
+      expect(filaDe(res.body, itemId)).toBeUndefined();
     });
   });
 });

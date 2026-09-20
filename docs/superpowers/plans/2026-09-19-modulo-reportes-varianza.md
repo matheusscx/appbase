@@ -426,7 +426,7 @@ Se verificó antes de rebasar que **ningún archivo del frente coincide con los 
   filas con `medible`, `desdeEl`, `hastaEl`, `recuentoInicialId`, `recuentoFinalId` ya pobladas.
   Los cinco números siguen en `null` hasta la Tarea 3.
 
-- [ ] **Paso 1: escribir los tests unitarios que fallan**
+- [x] **Paso 1: escribir los tests unitarios que fallan**
 
 Cuatro casos, todos sobre `resolverVentanas` con el `Db` mockeado:
 
@@ -437,7 +437,7 @@ Cuatro casos, todos sobre `resolverVentanas` con el `Db` mockeado:
 3. Con **un solo** recuento → **no** produce ventana; la fila sale `medible: false`.
 4. Un recuento en estado `borrador` o `cancelado` dentro del rango → **no cuenta como borde**.
 
-- [ ] **Paso 2: correrlos y verificar que fallan**
+- [x] **Paso 2: correrlos y verificar que fallan**
 
 ```bash
 cd backend && npm test -- varianza.service
@@ -445,7 +445,20 @@ cd backend && npm test -- varianza.service
 
 Esperado: FAIL, `resolverVentanas is not a function`.
 
-- [ ] **Paso 3: implementar `resolverVentanas`**
+- [x] **Paso 3: implementar `resolverVentanas`**
+
+⚠️ **Corregido al ejecutar (2026-09-20): NO va el `HAVING COUNT(DISTINCT …) >= 2`** que este plan
+pedía más abajo. Escondería las filas con **un solo** recuento en el rango — y ésas tienen que
+verse, como *"falta contarlo"*. La consulta **cuenta** los recuentos por grupo y **el service
+decide** con ese número (`mapGrupo`, `medible = recuentos >= 2`). Con el `HAVING`, el reporte
+sería invisible justo para quien recién empieza a contar, que es el que más lo necesita.
+
+El spec lo fija con un `expect(sql).not.toContain('HAVING')`, para que nadie lo "arregle" de
+vuelta leyendo la versión original de este plan.
+
+📌 **Y las filas se listan por (item, ubicación) con al menos UN recuento aplicado en el rango**,
+no sobre el catálogo entero: un producto que nadie contó no tiene nada que decir, y llenar la
+tabla de "falta contarlo" enterraría las filas que sí dicen algo.
 
 Una sola consulta agregada, nunca una por producto. La forma:
 
@@ -464,7 +477,7 @@ Una sola consulta agregada, nunca una por producto. La forma:
 documenta que `creado_el` no sirve para ordenar (spec § 5.2). Escribir ese porqué en el docblock
 de la consulta, no solo acá.
 
-- [ ] **Paso 4: verificar que los unitarios pasan**
+- [x] **Paso 4: verificar que los unitarios pasan**
 
 ```bash
 cd backend && npm test -- varianza.service
@@ -472,7 +485,27 @@ cd backend && npm test -- varianza.service
 
 Esperado: PASS los cuatro.
 
-- [ ] **Paso 5: el mutante que prueba que el test sirve**
+- [x] **Paso 5: el mutante que prueba que el test sirve**
+
+📌 **Medido el 2026-09-20, y el segundo mutante es el hallazgo de la tarea:**
+
+| Mutante | Resultado |
+|---|---|
+| `r.estado = 'aplicado'` → `<> 'cancelado'` | muere, y **solo** su test |
+| **`LEFT JOIN` → `JOIN`** | **sobrevivió** a los 9 unitarios |
+| `LEFT JOIN` → `JOIN`, con el control agregado | muere en el unitario **y** en el e2e, cada uno en su test |
+
+⛔ **Un mutante de JOIN no lo puede cazar un unitario con `Db` mockeado**, y la razón vale para
+todo este service: el mock devuelve las filas que el test le pide **sin importar qué consulta se
+armó**. El test de "secuencia en `null` → sigue siendo medible" pasaba porque el fixture *ya
+traía* el `null`; nunca probó que el SQL produjera esa fila.
+
+Quedaron **dos** controles, y no son intercambiables:
+1. **Unitario, prueba DÉBIL:** `expect(sql).toContain('LEFT JOIN movimientos_inventario mv')`.
+   Afirma sobre el texto del SQL, no sobre la conducta. Sirve para el ciclo corto.
+2. **E2E, prueba FUERTE:** un recuento que cuenta **exactamente** lo que hay (delta cero, sin
+   movimiento) seguido de uno con faltante; la fila tiene que seguir siendo medible. Verificado
+   que el mutante lo mata.
 
 Cambiar `HAVING COUNT(DISTINCT r.recuento_id) >= 2` por `>= 1` y correr los unitarios: **el caso 3
 tiene que fallar**. Después cambiar `r.estado = 'aplicado'` por `r.estado <> 'cancelado'`: **el
@@ -484,12 +517,12 @@ absurdo prueba que el test toca la línea, no que habría cazado el bug.
 ⚠️ Tras revertir, confirmar en los logs que el watcher del backend reinició: el fuente limpio no
 prueba que el proceso lo esté.
 
-- [ ] **Paso 6: e2e que arma el escenario real**
+- [x] **Paso 6: e2e que arma el escenario real**
 
 Un producto con dos recuentos aplicados y ventas en el medio; verificar que la fila trae
 `medible: true` y las dos fechas correctas, con su `expect(res.status)` al lado.
 
-- [ ] **Paso 7: gate y commit**
+- [x] **Paso 7: gate y commit**
 
 ```bash
 git add backend/src/modules/reportes backend/test/reportes-varianza.e2e-spec.ts
@@ -949,6 +982,17 @@ cd frontend && npm test -- AppRangoFechas
 ```
 
 - [ ] **Paso 3: implementar `AppRangoFechas`**
+
+⛔ **Hay una invariante que barre `frontend/app` y va a rechazar la forma fácil de armar la
+fecha** (`frontend/app/invariants/fecha-local.invariant.spec.ts`, entró a main el 2026-09-20).
+Falla si encuentra el día armado desde UTC, y cubre **tres** formas, no una:
+`toISOString().slice(0, 10)`, `.substring/.substr(0, 10)` y `toISOString().split('T')[0]`.
+Stripea comentarios, así que un docblock que nombre el patrón no la rompe.
+
+La fecha se arma **por componentes locales** (`getFullYear`/`getMonth`/`getDate`), que es lo que
+ya hace `hoyLocal()` en `useVigenciaRegla.ts` — importarlo, no reescribirlo. El porqué: un `Date`
+no lleva zona, la elige el formateador, y `toISOString()` elige UTC **siempre**; en husos
+negativos eso adelanta un día desde las ~21:00 local.
 
 Dos `AppDateInput` + `DiaNegocioNota`, con `hoyLocal()` importado de `useVigenciaRegla`.
 
