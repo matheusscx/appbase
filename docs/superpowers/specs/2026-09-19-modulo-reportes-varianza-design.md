@@ -406,7 +406,7 @@ Listado paginado, una fila por (producto, ubicación).
 | `desde` / `hasta` | `YYYY-MM-DD` o timestamp, **opcionales** | `@IsDateString()`. Fecha pura → día del negocio del tenant, `hasta` **inclusivo del día** |
 | `ubicacionId` | uuid, opcional | La pantalla lo manda con el local por defecto |
 | `itemId` | uuid, opcional | |
-| `soloConVarianza` | booleano, opcional | Esconde las filas cuyo "sin explicación" es cero |
+| `soloConVarianza` | booleano, opcional | Esconde las filas cuyo "sin explicación" es cero **y también las que no se pueden medir** (decisión del owner, 2026-09-20) |
 | `page` / `pageSize` | `PaginationQueryDto` | 1-based, default 15, máx 100 |
 
 Respuesta: `PaginatedResponse<VarianzaFila>`, donde cada fila trae `itemId`, `itemNombre`,
@@ -419,7 +419,18 @@ su `faltaCosto`. Las filas sin dos recuentos vienen con `medible: false` y los n
 consumidor no pueda distinguir "cerró perfecto" de "esta versión de la API todavía no lo
 calcula" — que es justo la ambigüedad que la columna existe para cerrar.
 
-**Orden:** por plata sin explicación desc, con el nombre del producto como desempate estable.
+⛔ **`soloConVarianza` esconde dos cosas distintas, y es deliberado.** Además de las filas que
+cerraron justas, esconde las que tienen **un solo recuento** en el rango —las que no se pueden
+medir—. El owner lo eligió así el 2026-09-20: prefiere la lista corta que va derecho a lo que
+perdió plata. El costo, que no tiene otro lugar donde pagarse: **un producto contado una sola vez,
+con el filtro tildado, no aparece en ninguna parte** — el `sinConteo` de § 5.7 cuenta los de cero
+recuentos, no los de uno. La pregunta quedó abierta en la Tarea 6 del plan, sobre su campo
+`sinConteo`: si molesta, se resuelve abriéndolo en "nunca contado" y "contado una sola vez".
+
+**Orden:** por plata sin explicación desc. El desempate **no puede ser el nombre**: `items.nombre`
+no es único por tenant, así que dos homónimos con el mismo monto empatan y la paginación puede
+repetir o saltear una fila. Cierra con los dos ids de la clave del grupo —`item_id` y
+`ubicacion_id`— detrás del nombre de producto y del de ubicación.
 
 ### 7.2 `GET /api/reportes/varianza/resumen`
 

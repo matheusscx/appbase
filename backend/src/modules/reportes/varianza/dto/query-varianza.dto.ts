@@ -41,7 +41,15 @@ export class QueryVarianzaDto extends PaginationQueryDto {
   itemId?: string;
 
   /**
-   * Esconde las filas cuyo "sin explicación" es cero.
+   * Esconde las filas cuyo "sin explicación" es cero **y también las que no se
+   * pueden medir** — las de un solo recuento en el rango, cuyo número es `null`.
+   *
+   * ⛔ **Las dos cosas las decidió el owner (2026-09-20), no son un efecto
+   * lateral.** Prefiere la lista corta que va derecho a lo que perdió plata. El
+   * costo, que desde acá no se ve: un producto contado una sola vez, con el
+   * filtro tildado, **no aparece en ninguna parte**. El porqué completo, con qué
+   * otro número lo cubre y cuál no, está en `VarianzaService.findAll`, donde vive
+   * la condición — acá repetirlo sería una segunda copia que puede derivar.
    *
    * El `@Transform` es necesario porque un query param llega **siempre como
    * string**: sin él, `@IsBoolean()` rechaza `?soloConVarianza=true` con un 400

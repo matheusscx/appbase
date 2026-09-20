@@ -6,6 +6,7 @@ import type { App } from 'supertest/types';
 import { randomUUID } from 'node:crypto';
 import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
+import { contarYAplicar } from './helpers/recuentos';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
@@ -215,32 +216,6 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
     return item.id;
   }
 
-  async function contarYAplicar(
-    itemId: string,
-    cantidadContada: string,
-  ): Promise<void> {
-    const recuento = await post<IdResponse>('/api/recuentos', {
-      ubicacionId: localId,
-      itemIds: [itemId],
-    });
-
-    const resDetalle = await request(app.getHttpServer())
-      .get(`/api/recuentos/${recuento.id}`)
-      .set('Authorization', `Bearer ${token}`);
-    expect(resDetalle.status).toBe(200);
-    const lineaId = (
-      resDetalle.body as { lineas: { lineaId: string; itemId: string }[] }
-    ).lineas.find((l) => l.itemId === itemId)!.lineaId;
-
-    const resConteo = await request(app.getHttpServer())
-      .patch(`/api/recuentos/${recuento.id}/lineas/${lineaId}`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ cantidadContada, motivoDiferenciaId });
-    expect(resConteo.status).toBe(200);
-
-    await post(`/api/recuentos/${recuento.id}/aplicar`, {});
-  }
-
   /**
    * Vende por el POS. **Siempre sin pagos**, o sea la venta queda `pendiente`.
    *
@@ -316,11 +291,21 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
    */
   it('una venta va al teórico y no a los otros buckets', async () => {
     const itemId = await crearProducto('300');
-    await contarYAplicar(itemId, '300');
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '300',
+      motivoDiferenciaId,
+    });
 
     await vender(itemId, '9');
 
-    await contarYAplicar(itemId, '291');
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '291',
+      motivoDiferenciaId,
+    });
 
     const fila = await filaDe(itemId);
 
@@ -342,7 +327,12 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
    */
   it('una venta cancelada resta del teórico, no suma', async () => {
     const itemId = await crearProducto('300');
-    await contarYAplicar(itemId, '300');
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '300',
+      motivoDiferenciaId,
+    });
 
     await vender(itemId, '11');
     const ventaCancelable = await vender(itemId, '4');
@@ -353,7 +343,12 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
       .send({ motivo: 'E2E varianza: teórico neto' });
     expect(resAnular.status).toBe(201);
 
-    await contarYAplicar(itemId, '289'); // 300 - 11
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '289',
+      motivoDiferenciaId,
+    }); // 300 - 11
 
     const fila = await filaDe(itemId);
 
@@ -371,7 +366,12 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
    */
   it('separa merma de cortesía aunque las dos sean motivo=merma en el kardex', async () => {
     const itemId = await crearProducto('200');
-    await contarYAplicar(itemId, '200'); // borde inicial, delta cero
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '200',
+      motivoDiferenciaId,
+    }); // borde inicial, delta cero
 
     await request(app.getHttpServer())
       .post('/api/mermas')
@@ -387,7 +387,12 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
 
     await anularEnMesa(itemId, '7', motivoCortesiaId);
 
-    await contarYAplicar(itemId, '190'); // borde final
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '190',
+      motivoDiferenciaId,
+    }); // borde final
 
     const fila = await filaDe(itemId);
 
@@ -408,7 +413,12 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
    */
   it('con movimientos de todos los tipos, la identidad cierra y Otros da cero', async () => {
     const itemId = await crearProducto('200');
-    await contarYAplicar(itemId, '200');
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '200',
+      motivoDiferenciaId,
+    });
 
     await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
@@ -445,7 +455,12 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
     await anularEnMesa(itemId, '2', motivoCortesiaId);
 
     // 200 + 30 − 17 − 3 − 2 = 208 en el libro; se cuentan 204 → faltan 4.
-    await contarYAplicar(itemId, '204');
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '204',
+      motivoDiferenciaId,
+    });
 
     const fila = await filaDe(itemId);
 
@@ -480,7 +495,12 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
    */
   it('un ajuste manual no lo clasifica ningún bucket y aparece entero en Otros', async () => {
     const itemId = await crearProducto('100');
-    await contarYAplicar(itemId, '100');
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '100',
+      motivoDiferenciaId,
+    });
 
     await vender(itemId, '10');
 
@@ -496,7 +516,12 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
       })
       .expect(200);
 
-    await contarYAplicar(itemId, '84'); // 100 − 10 − 6, sin diferencia
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '84',
+      motivoDiferenciaId,
+    }); // 100 − 10 − 6, sin diferencia
 
     const fila = await filaDe(itemId);
 
@@ -526,7 +551,12 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
    */
   it('una devolución manual sin venta no baja el teórico: cae en Otros', async () => {
     const itemId = await crearProducto('100');
-    await contarYAplicar(itemId, '100');
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '100',
+      motivoDiferenciaId,
+    });
 
     await vender(itemId, '12');
 
@@ -542,7 +572,12 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
       })
       .expect(200);
 
-    await contarYAplicar(itemId, '92'); // 100 − 12 + 4
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '92',
+      motivoDiferenciaId,
+    }); // 100 − 12 + 4
 
     const fila = await filaDe(itemId);
 
@@ -568,7 +603,12 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
    */
   it('el sistema impide borrar un motivo en uso, así que ninguna merma queda huérfana', async () => {
     const itemId = await crearProducto('120');
-    await contarYAplicar(itemId, '120');
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '120',
+      motivoDiferenciaId,
+    });
 
     const motivoPropio = await post<IdResponse>('/api/motivos-baja', {
       nombre: `Motivo borrable varianza ${Date.now()}`,
@@ -593,7 +633,12 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
     expect(resBorrar.status).toBe(400);
     expect(JSON.stringify(resBorrar.body)).toContain('en uso');
 
-    await contarYAplicar(itemId, '107');
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '107',
+      motivoDiferenciaId,
+    });
 
     const fila = await filaDe(itemId);
 
@@ -610,8 +655,18 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
    */
   it('un sobrante deja sinExplicacion negativo', async () => {
     const itemId = await crearProducto('100');
-    await contarYAplicar(itemId, '100'); // borde inicial, delta cero
-    await contarYAplicar(itemId, '105'); // sobrante de 5
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '100',
+      motivoDiferenciaId,
+    }); // borde inicial, delta cero
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '105',
+      motivoDiferenciaId,
+    }); // sobrante de 5
 
     const fila = await filaDe(itemId);
 
@@ -625,8 +680,18 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
    */
   it('un faltante va a sinExplicacion y no a merma', async () => {
     const itemId = await crearProducto('80');
-    await contarYAplicar(itemId, '80');
-    await contarYAplicar(itemId, '74'); // faltante de 6
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '80',
+      motivoDiferenciaId,
+    });
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '74',
+      motivoDiferenciaId,
+    }); // faltante de 6
 
     const fila = await filaDe(itemId);
 
@@ -643,7 +708,12 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
    */
   it('una compra dentro de la ventana no entra en ningún bucket', async () => {
     const itemId = await crearProducto('50');
-    await contarYAplicar(itemId, '50');
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '50',
+      motivoDiferenciaId,
+    });
 
     await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
@@ -657,7 +727,12 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
       })
       .expect(200);
 
-    await contarYAplicar(itemId, '70'); // 50 + 20, sin diferencia
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '70',
+      motivoDiferenciaId,
+    }); // 50 + 20, sin diferencia
 
     const fila = await filaDe(itemId);
 

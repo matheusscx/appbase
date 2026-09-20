@@ -4,6 +4,7 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { contarYAplicar } from './helpers/recuentos';
 import { loginSegundoTenant } from './helpers/segundo-tenant';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -199,39 +200,6 @@ describe('Reporte de varianza (e2e)', () => {
       return itemId;
     }
 
-    /** Cuenta `cantidadContada` y aplica. Devuelve el id del recuento. */
-    async function contarYAplicar(
-      itemId: string,
-      cantidadContada: string,
-    ): Promise<string> {
-      const resCreate = await request(app.getHttpServer())
-        .post('/api/recuentos')
-        .set('Authorization', `Bearer ${tokenAdmin}`)
-        .send({ ubicacionId: localId, itemIds: [itemId] });
-      expect(resCreate.status).toBe(201);
-      const recuentoId = (resCreate.body as { id: string }).id;
-
-      const resDetalle = await request(app.getHttpServer())
-        .get(`/api/recuentos/${recuentoId}`)
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-      expect(resDetalle.status).toBe(200);
-      const lineaId = (
-        resDetalle.body as { lineas: { lineaId: string; itemId: string }[] }
-      ).lineas.find((l) => l.itemId === itemId)!.lineaId;
-
-      const resConteo = await request(app.getHttpServer())
-        .patch(`/api/recuentos/${recuentoId}/lineas/${lineaId}`)
-        .set('Authorization', `Bearer ${tokenAdmin}`)
-        .send({ cantidadContada, motivoDiferenciaId: motivoId });
-      expect(resConteo.status).toBe(200);
-
-      const resAplicar = await request(app.getHttpServer())
-        .post(`/api/recuentos/${recuentoId}/aplicar`)
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-      expect(resAplicar.status).toBe(201);
-      return recuentoId;
-    }
-
     function filaDe(
       body: unknown,
       itemId: string,
@@ -243,8 +211,18 @@ describe('Reporte de varianza (e2e)', () => {
 
     it('con DOS recuentos aplicados, la fila es medible y nombra a los dos', async () => {
       const itemId = await crearProductoConStock('100');
-      const recA = await contarYAplicar(itemId, '98');
-      const recB = await contarYAplicar(itemId, '95');
+      const recA = await contarYAplicar(app, tokenAdmin, {
+        ubicacionId: localId,
+        itemId: itemId,
+        cantidadContada: '98',
+        motivoDiferenciaId: motivoId,
+      });
+      const recB = await contarYAplicar(app, tokenAdmin, {
+        ubicacionId: localId,
+        itemId: itemId,
+        cantidadContada: '95',
+        motivoDiferenciaId: motivoId,
+      });
 
       const res = await leer(tokenAdmin, `?itemId=${itemId}`);
 
@@ -261,7 +239,12 @@ describe('Reporte de varianza (e2e)', () => {
 
     it('con UN solo recuento, la fila aparece pero no es medible', async () => {
       const itemId = await crearProductoConStock('50');
-      await contarYAplicar(itemId, '48');
+      await contarYAplicar(app, tokenAdmin, {
+        ubicacionId: localId,
+        itemId: itemId,
+        cantidadContada: '48',
+        motivoDiferenciaId: motivoId,
+      });
 
       const res = await leer(tokenAdmin, `?itemId=${itemId}`);
 
@@ -285,8 +268,18 @@ describe('Reporte de varianza (e2e)', () => {
      */
     it('un recuento que dio justo no escribe movimiento y la fila sobrevive igual', async () => {
       const itemId = await crearProductoConStock('40');
-      const recA = await contarYAplicar(itemId, '40'); // delta 0: sin movimiento
-      const recB = await contarYAplicar(itemId, '37'); // faltante de 3
+      const recA = await contarYAplicar(app, tokenAdmin, {
+        ubicacionId: localId,
+        itemId: itemId,
+        cantidadContada: '40',
+        motivoDiferenciaId: motivoId,
+      }); // delta 0: sin movimiento
+      const recB = await contarYAplicar(app, tokenAdmin, {
+        ubicacionId: localId,
+        itemId: itemId,
+        cantidadContada: '37',
+        motivoDiferenciaId: motivoId,
+      }); // faltante de 3
 
       const res = await leer(tokenAdmin, `?itemId=${itemId}`);
 
@@ -302,8 +295,18 @@ describe('Reporte de varianza (e2e)', () => {
 
     it('filtrar por otra ubicación no devuelve la fila del local', async () => {
       const itemId = await crearProductoConStock('30');
-      await contarYAplicar(itemId, '29');
-      await contarYAplicar(itemId, '28');
+      await contarYAplicar(app, tokenAdmin, {
+        ubicacionId: localId,
+        itemId: itemId,
+        cantidadContada: '29',
+        motivoDiferenciaId: motivoId,
+      });
+      await contarYAplicar(app, tokenAdmin, {
+        ubicacionId: localId,
+        itemId: itemId,
+        cantidadContada: '28',
+        motivoDiferenciaId: motivoId,
+      });
 
       const resBodega = await request(app.getHttpServer())
         .post('/api/ubicaciones')

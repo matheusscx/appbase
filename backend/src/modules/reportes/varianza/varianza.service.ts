@@ -112,6 +112,14 @@ interface GrupoRow {
   hasta_el: Date | null;
   secuencia_desde: string | null;
   secuencia_hasta: string | null;
+  /** `items.moneda_id`. Una fila es un ítem, así que es una sola moneda. */
+  moneda_id: string;
+  /** Neto de recuento en cantidad. Lo calcula `SQL_COSTO_LATERAL`, que ordena. */
+  sin_explicacion: string;
+  /** La misma cantidad, valorizada. `'0'` cuando la ventana está vacía. */
+  monto: string;
+  /** `bool_or` sobre cero movimientos vuelve `NULL`: se lee con `=== true`. */
+  falta_costo: boolean | null;
 }
 
 /**
@@ -171,8 +179,15 @@ const FROM_GRUPOS = `
    AND mv.tenant_id = r.tenant_id
    AND mv.eliminado_el IS NULL`;
 
+/**
+ * `i.moneda_id` entra al `GROUP BY` sin agregar ni una fila: una fila del
+ * reporte es **un ítem**, y `items.moneda_id` es `NOT NULL`, así que el grupo ya
+ * tenía una sola moneda posible. Va acá para que la plata de la fila salga de la
+ * misma consulta —sin un `JOIN` extra ni una segunda vuelta a `items`— y para
+ * que `CostoPorMoneda[]` se arme con la moneda correcta y no con una supuesta.
+ */
 const GROUP_BY_GRUPOS = ` GROUP BY rl.item_id, i.nombre, ip.unidad_medida,
-                                   r.ubicacion_id, ub.nombre`;
+                                   r.ubicacion_id, ub.nombre, i.moneda_id`;
 
 /**
  * Los bordes de la ventana, resueltos en SQL con `DISTINCT ON`-equivalente vía
@@ -209,6 +224,7 @@ const SELECT_GRUPOS = `
          ip.unidad_medida,
          r.ubicacion_id,
          ub.nombre               AS ubicacion_nombre,
+         i.moneda_id,
          COUNT(DISTINCT r.recuento_id)::int AS recuentos,
          (array_agg(r.recuento_id  ORDER BY r.aplicado_el ASC, r.recuento_id ASC))[1]  AS recuento_inicial_id,
          (array_agg(r.aplicado_el  ORDER BY r.aplicado_el ASC, r.recuento_id ASC))[1]  AS desde_el,
@@ -268,6 +284,7 @@ const SELECT_GRUPOS = `
 function residuo(
   bucket: BucketRow | undefined,
   saldo: SaldoRow | undefined,
+  sinExplicacion: string | null | undefined,
 ): string {
   const d = (valor: string | null | undefined) => new Decimal(valor ?? 0);
 
@@ -277,7 +294,7 @@ function residuo(
   const porBuckets = d(bucket?.teorico)
     .plus(d(bucket?.merma))
     .plus(d(bucket?.cortesia))
-    .plus(d(bucket?.sin_explicacion));
+    .plus(d(sinExplicacion));
 
   return porSaldos.minus(porBuckets).toFixed(ESCALA_COSTO);
 }
@@ -297,6 +314,19 @@ function mapGrupo(
   const medible = r.recuentos >= 2;
 
   /**
+   * ⛔ **Con un solo movimiento sin costo, la fila va SIN cifra.** Es el criterio
+   * que el repo ya fijó en el reporte de anulaciones (`resolverCosto`): una suma
+   * parcial se lee como completa, y nadie tiene cómo saber que le falta un
+   * pedazo. El booleano dice que falta; la lista vacía evita el número que
+   * mentiría. La cantidad, en cambio, sigue viajando: esa no depende del costo.
+   *
+   * El caso llega por la API real —un producto creado sin costo queda con
+   * `costo_actual` en `NULL`, y el recuento congela ese `NULL`—, no es un estado
+   * que haya que montar por SQL.
+   */
+  const faltaCosto = medible && r.falta_costo === true;
+
+  /**
    * ⚠️ **`toFixed(ESCALA_COSTO)` y no el string que devuelve Postgres.** Un
    * `COALESCE(SUM(...), 0)` cae en el literal entero cuando no hay filas que
    * sumar y vuelve `'0'`, no `'0.0000'` — el mismo detalle que ya mordió al
@@ -304,7 +334,7 @@ function mapGrupo(
    * no vuelve en la agregación: sus números son ceros, no `null`. "No se movió
    * nada" y "no se puede medir" son respuestas distintas.
    */
-  const num = (valor: string | undefined): string =>
+  const num = (valor: string | null | undefined): string =>
     new Decimal(valor ?? 0).toFixed(ESCALA_COSTO);
 
   return {
@@ -321,10 +351,19 @@ function mapGrupo(
     teorico: medible ? num(bucket?.teorico) : null,
     merma: medible ? num(bucket?.merma) : null,
     cortesia: medible ? num(bucket?.cortesia) : null,
-    sinExplicacion: medible ? num(bucket?.sin_explicacion) : null,
-    otros: medible ? num(residuo(bucket, saldo)) : null,
-    costoSinExplicacion: [],
-    faltaCosto: false,
+    sinExplicacion: medible ? num(r.sin_explicacion) : null,
+    otros: medible ? num(residuo(bucket, saldo, r.sin_explicacion)) : null,
+    // ⚠️ Una fila medible que cerró justo viaja con `[{ moneda, '0.0000' }]`, no
+    // con `[]`. Diverge del molde de anulaciones —que devuelve lista vacía
+    // cuando no hay grupos— y es a propósito: acá el cero es un resultado
+    // medido ("no faltó nada"), no la ausencia de dato que la lista vacía
+    // significa en las otras dos ramas (no medible, o sin costo). El e2e lo
+    // fija para que no se "corrija" a `[]` por parecerse más al molde.
+    costoSinExplicacion:
+      medible && !faltaCosto
+        ? [{ monedaId: r.moneda_id, monto: num(r.monto) }]
+        : [],
+    faltaCosto,
   };
 }
 
@@ -335,7 +374,6 @@ interface BucketRow {
   teorico: string;
   merma: string;
   cortesia: string;
-  sin_explicacion: string;
   /** Entradas menos salidas de los motivos de ABASTECIMIENTO. No es consumo. */
   abastecimiento: string;
 }
@@ -379,6 +417,41 @@ const MOTIVOS_ABASTECIMIENTO = [
 ];
 
 /**
+ * El predicado de la ventana `(desde, hasta]`, **compartido** por la agregación
+ * de buckets y por el `LATERAL` que ordena la página.
+ *
+ * ⛔ **Se comparte porque las dos consultas TIENEN que mirar exactamente los
+ * mismos movimientos.** Si una tomara el borde inferior como `>=` y la otra como
+ * `>`, el reporte ordenaría por una plata calculada sobre una ventana y mostraría
+ * una cantidad calculada sobre otra: dos números que no se contradicen en ningún
+ * test porque cada uno, por separado, está bien.
+ *
+ * `alias` es la tabla que trae los bordes —la CTE `v` de los buckets o la
+ * subconsulta `g` de la página—; el movimiento siempre se llama `mv`.
+ */
+const ventanaSql = (alias: string): string => `
+     AND (CASE WHEN ${alias}.secuencia_desde IS NOT NULL THEN mv.secuencia > ${alias}.secuencia_desde
+               ELSE mv.creado_el > ${alias}.desde_el END)
+     AND (CASE WHEN ${alias}.secuencia_hasta IS NOT NULL THEN mv.secuencia <= ${alias}.secuencia_hasta
+               ELSE mv.creado_el <= ${alias}.hasta_el END)`;
+
+/**
+ * "Sin explicación" en cantidad: Σ `recuento` con signo, salidas menos entradas.
+ * Un sobrante entra como entrada y por eso **resta**.
+ *
+ * ⛔ **Vive en una sola constante y se usa en un solo lugar a la vez.** Hasta la
+ * Tarea 5 este número se calculaba en `SQL_BUCKETS`; ahora lo calcula el
+ * `LATERAL` de la página, porque es el que ordena y el que filtra
+ * `soloConVarianza`. Tenerlo en los dos lados —aunque fuera el mismo texto—
+ * dejaría dos caminos que pueden derivar, y el modo de falla sería silencioso:
+ * la fila mostraría un número y la página se habría ordenado por otro.
+ */
+const NETO_RECUENTO = `COALESCE(SUM(mv.cantidad) FILTER (
+           WHERE mv.motivo = 'recuento' AND mv.tipo = 'salida'), 0)
+         - COALESCE(SUM(mv.cantidad) FILTER (
+           WHERE mv.motivo = 'recuento' AND mv.tipo = 'entrada'), 0)`;
+
+/**
  * El saldo de stock en cada borde de la ventana: el `stock_resultante` del
  * movimiento del recuento que la cierra, o —si ese recuento **dio justo** y no
  * escribió movimiento— el del último movimiento anterior a `aplicado_el`.
@@ -394,7 +467,7 @@ const MOTIVOS_ABASTECIMIENTO = [
  * recuento — que es el mismo instante en que arranca la ventana siguiente.
  */
 const SQL_SALDOS = `
-  WITH v(item_id, ubicacion_id, seq_desde, seq_hasta, desde_el, hasta_el) AS (
+  WITH v(item_id, ubicacion_id, secuencia_desde, secuencia_hasta, desde_el, hasta_el) AS (
     SELECT * FROM unnest($2::uuid[], $3::uuid[], $4::bigint[], $5::bigint[],
                          $6::timestamptz[], $7::timestamptz[])
   )
@@ -406,7 +479,7 @@ const SQL_SALDOS = `
              AND m.ubicacion_id = v.ubicacion_id
              AND m.tenant_id = $1
              AND m.eliminado_el IS NULL
-             AND (CASE WHEN v.seq_desde IS NOT NULL THEN m.secuencia <= v.seq_desde
+             AND (CASE WHEN v.secuencia_desde IS NOT NULL THEN m.secuencia <= v.secuencia_desde
                        ELSE m.creado_el <= v.desde_el END)
            ORDER BY m.secuencia DESC
            LIMIT 1) AS saldo_desde,
@@ -416,7 +489,7 @@ const SQL_SALDOS = `
              AND m.ubicacion_id = v.ubicacion_id
              AND m.tenant_id = $1
              AND m.eliminado_el IS NULL
-             AND (CASE WHEN v.seq_hasta IS NOT NULL THEN m.secuencia <= v.seq_hasta
+             AND (CASE WHEN v.secuencia_hasta IS NOT NULL THEN m.secuencia <= v.secuencia_hasta
                        ELSE m.creado_el <= v.hasta_el END)
            ORDER BY m.secuencia DESC
            LIMIT 1) AS saldo_hasta
@@ -473,7 +546,7 @@ const SQL_SALDOS = `
  * un movimiento es siempre del mismo tenant.
  */
 const SQL_BUCKETS = `
-  WITH v(item_id, ubicacion_id, seq_desde, seq_hasta, desde_el, hasta_el) AS (
+  WITH v(item_id, ubicacion_id, secuencia_desde, secuencia_hasta, desde_el, hasta_el) AS (
     SELECT * FROM unnest($2::uuid[], $3::uuid[], $4::bigint[], $5::bigint[],
                          $6::timestamptz[], $7::timestamptz[])
   )
@@ -492,11 +565,6 @@ const SQL_BUCKETS = `
            WHERE mv.motivo = 'merma' AND mv.tipo = 'salida'
              AND mb.tipo = 'cortesia'), 0) AS cortesia,
          COALESCE(SUM(mv.cantidad) FILTER (
-           WHERE mv.motivo = 'recuento' AND mv.tipo = 'salida'), 0)
-         - COALESCE(SUM(mv.cantidad) FILTER (
-           WHERE mv.motivo = 'recuento' AND mv.tipo = 'entrada'), 0)
-           AS sin_explicacion,
-         COALESCE(SUM(mv.cantidad) FILTER (
            WHERE mv.motivo = ANY($8::text[]) AND mv.tipo = 'entrada'), 0)
          - COALESCE(SUM(mv.cantidad) FILTER (
            WHERE mv.motivo = ANY($8::text[]) AND mv.tipo = 'salida'), 0)
@@ -507,14 +575,129 @@ const SQL_BUCKETS = `
      AND mv.ubicacion_id = v.ubicacion_id
      AND mv.tenant_id = $1
      AND mv.eliminado_el IS NULL
-     AND (CASE WHEN v.seq_desde IS NOT NULL THEN mv.secuencia > v.seq_desde
-               ELSE mv.creado_el > v.desde_el END)
-     AND (CASE WHEN v.seq_hasta IS NOT NULL THEN mv.secuencia <= v.seq_hasta
-               ELSE mv.creado_el <= v.hasta_el END)
+     ${ventanaSql('v')}
     LEFT JOIN motivo_baja mb
       ON mb.motivo_baja_id = mv.motivo_baja_id
      AND mb.tenant_id = $1
    GROUP BY v.item_id, v.ubicacion_id`;
+
+/**
+ * La plata de "sin explicación" y su cantidad, por grupo, dentro de la consulta
+ * que pagina.
+ *
+ * ⛔ **Acá y no en una segunda consulta, porque esta plata ORDENA.** La spec
+ * § 7.1 pide la página ordenada por plata perdida desc. Una consulta que corre
+ * DESPUÉS de `LIMIT/OFFSET` solo puede ordenar las filas ya elegidas: la
+ * página 1 traería las 15 primeras alfabéticamente, ordenadas entre sí, y no las
+ * 15 que más plata perdieron — con el agravante de que la pantalla se vería
+ * perfectamente ordenada. Lo mismo vale para `soloConVarianza`, que filtra por
+ * una cantidad que antes solo existía en la agregación de buckets.
+ *
+ * ⛔ **`LATERAL` correlacionado y NO agregación de conjunto, y el porqué se mide
+ * con la tabla grande.** La forma de conjunto —un `CTE` con
+ * `GROUP BY`, como la que usa `SQL_BUCKETS`— parece la natural y con la base
+ * sembrada gana por buffers. Se probaron las dos con `EXPLAIN (ANALYZE, BUFFERS)`
+ * inflando el kardex a **198.293 movimientos** en la tabla (198.290 del tenant) (2026-09-20,
+ * dentro de una transacción revertida):
+ *
+ * | | plan | tiempo en esta máquina |
+ * |---|---|---|
+ * | conjunto, sin filtros (30 grupos) | `Seq Scan` de 198.290 filas | ~37 ms |
+ * | conjunto, filtrando un `itemId` (1 grupo) | `Bitmap Index Scan` | ~0,5 ms |
+ * | `LATERAL`, sin filtros | `Bitmap Index Scan`, `loops=30` | ~7 ms |
+ *
+ * ⚠️ **Los milisegundos dependen de la máquina y del caché; lo que reproduce es
+ * la FORMA del plan y la relación** (~5× entre la primera fila y la tercera, que
+ * son las dos que se comparan: conjunto contra `LATERAL`, las dos sin filtros).
+ * Si al remedir salen otros dígitos no hay nada roto: lo que hay que mirar es si
+ * apareció un `Seq Scan` donde antes había índice.
+ *
+ * ⚠️ **El motivo NO es que la clave del `CTE` no se pueda empujar a un índice**
+ * —se puede, y la segunda fila lo muestra—: es que **la forma de conjunto cambia
+ * de plan según cuántos grupos sobrevivan**. Con uno, Postgres arma un nested
+ * loop y entra por el índice; con treinta, estima que le conviene barrer la
+ * tabla y barre 198.290 filas. Y la vista por defecto del reporte —sin filtrar
+ * un producto— es justamente el caso de muchos grupos. El `LATERAL` no cambia de
+ * forma: entra por `idx_movimientos_inventario_item_secuencia` una vez por
+ * grupo, con filtros o sin ellos.
+ *
+ * ⚠️ **Y `SQL_BUCKETS` no es el precedente que parece.** Aquel agrega sobre las
+ * ventanas de **la página** —15, pasadas como arrays a `unnest`—; este tiene que
+ * cubrir **todos** los grupos del rango para poder ordenar. Es otro problema, y
+ * por eso la respuesta es otra forma.
+ *
+ * ⛔ **`Σ ROUND(...)`, nunca `ROUND(Σ ...)`** — la regla que ya fijó el reporte
+ * de anulaciones: se redondea el costo de cada movimiento y después se suman,
+ * porque es cada movimiento el que tiene un costo, no la suma.
+ *
+ * El signo sigue al de la cantidad: un **sobrante** entra como `entrada` y resta,
+ * igual que en `NETO_RECUENTO`. El costo de un movimiento de recuento es el CPP
+ * congelado en el momento —lo que valía ese kilo cuando se descubrió que
+ * faltaba—, porque el recuento no trae costo propio y el kardex le pone
+ * `costoActualPrevio` (`inventario.service.ts`).
+ *
+ * 📌 **No agrupa por moneda y no le hace falta:** corre por grupo, un grupo es un
+ * ítem y `items.moneda_id` es `NOT NULL`. La moneda viaja con el grupo
+ * (`GROUP_BY_GRUPOS`). El array de `CostoPorMoneda` existe porque el `/resumen`
+ * sí suma monedas distintas, no porque una fila pueda tener dos.
+ *
+ * ⚠️ **Un agregado sin `GROUP BY` devuelve SIEMPRE una fila**, también cuando la
+ * ventana está vacía o la fila no es medible. Por eso `sin_explicacion` vuelve
+ * `0` y nunca `NULL` —y el `WHERE` de `soloConVarianza` no necesita guarda—,
+ * mientras que `falta_costo` es `bool_or` sobre cero filas y sí vuelve `NULL`:
+ * el mapeo lo lee con `=== true`.
+ *
+ * ⚠️ **Lo que la Tarea 9 tiene que medir, y el índice que NO es la respuesta.**
+ * Ordenar por un agregado obliga a evaluarlo en **todos** los grupos del rango
+ * —no se puede saber cuáles son los 15 que más perdieron sin calcularlos a
+ * todos—, así que la página paga ese barrido siempre, con filtro o sin él, y con
+ * `soloConVarianza` se paga dos veces (el `COUNT` hace el suyo).
+ *
+ * Cada vuelta lee `rows=678` del kardex de ese ítem y el `Filter` descarta 677.
+ * El candidato obvio, `(item_id, ubicacion_id, secuencia)`, **se creó y se midió:
+ * 7,28 ms → 8,20 ms, o sea nada** (mismos `Heap Blocks`). Motivo: de las 677
+ * filas descartadas, `ubicacion_id` saca 34; las otras las sacan los bordes de la
+ * ventana, que van adentro de un `CASE` y **ningún índice puede servir un `CASE`
+ * como `Index Cond`**.
+ *
+ * ⚠️ **La palanca es ese `CASE`, y los dos aplanados posibles NO son lo mismo**
+ * (medido). El **equivalente** —`OR` con guarda de `IS NOT NULL`— devuelve los
+ * mismos 30 resultados, pero su `Index Cond` **sigue siendo solo `item_id`**: no
+ * desbloquea nada, y la diferencia de tiempo contra el `CASE` queda dentro del
+ * ruido entre corridas. El **no equivalente** —comparar `secuencia` a secas—
+ * mete los dos bordes en el `Index Cond` y la consulta pasa de ~7 ms a menos de
+ * 1, pero **cambia el resultado de 9 de los 30 grupos**, que caen a cero porque
+ * pierden el respaldo por `creado_el` del recuento de delta cero. La mejora
+ * existe y su precio es exactamente ese: decisión de la Tarea 9, no un arreglo
+ * gratis.
+ *
+ * 📌 **Cómo se infló el kardex, para que esto se pueda repetir:** copiando los
+ * movimientos del tenant ×250 dentro de una transacción revertida. Se probaron
+ * las dos variantes —copias con `creado_el` corrido unos segundos y copias en
+ * `now()`— y dan lo mismo: 678 filas leídas y 677 descartadas por vuelta. O sea
+ * que el número **no** depende de esa elección.
+ *
+ * ⚠️ **Y la distribución del seed es parte de esta medición:** de los 30 grupos,
+ * **17 tienen `secuencia_desde` en `NULL`** y 8 `secuencia_hasta`, o sea que
+ * buena parte de lo medido arriba pasa por la rama de respaldo `creado_el` y no
+ * por la de `secuencia`. Un seed donde todos los recuentos escriban movimiento
+ * ejercita la otra rama y puede dar otro número.
+ */
+const SQL_COSTO_LATERAL = `
+      SELECT ${NETO_RECUENTO} AS sin_explicacion,
+             COALESCE(SUM(ROUND(mv.cantidad * mv.costo_unitario, ${ESCALA_COSTO})) FILTER (
+               WHERE mv.motivo = 'recuento' AND mv.tipo = 'salida'), 0)
+             - COALESCE(SUM(ROUND(mv.cantidad * mv.costo_unitario, ${ESCALA_COSTO})) FILTER (
+               WHERE mv.motivo = 'recuento' AND mv.tipo = 'entrada'), 0)
+               AS monto,
+             bool_or(mv.costo_unitario IS NULL) FILTER (
+               WHERE mv.motivo = 'recuento')                        AS falta_costo
+        FROM movimientos_inventario mv
+       WHERE mv.item_id = g.item_id
+         AND mv.ubicacion_id = g.ubicacion_id
+         AND mv.tenant_id = $1
+         AND mv.eliminado_el IS NULL
+         ${ventanaSql('g')}`;
 
 /** Clave de un grupo, para cruzar buckets contra filas sin recorrer arrays. */
 function claveGrupo(itemId: string, ubicacionId: string): string {
@@ -535,12 +718,15 @@ function claveGrupo(itemId: string, ubicacionId: string): string {
  * ya depende de esto para reponer stock al cancelar una venta
  * (`VentasService.cancelarUnaVez`, que lee el kardex y no las recetas).
  *
- * ⚠️ **Este service está a medio construir a propósito.** Las tareas 3 a 5 del
- * plan completan los cuatro números, «Otros» y la plata
- * (`docs/superpowers/plans/2026-09-19-modulo-reportes-varianza.md`). La Tarea 2
- * resuelve la **ventana** de cada fila; hasta que llegue la 3, los números
- * viajan en `null` incluso en las filas medibles, que es una respuesta honesta
- * —todavía no se calcularon— y no un placeholder con datos inventados.
+ * 📌 **Este service resuelve el LISTADO paginado y nada más.** El `/resumen`
+ * —totales, top 10 y aviso de teórico incompleto— y la pantalla son otras tareas
+ * del plan `docs/superpowers/plans/2026-09-19-modulo-reportes-varianza.md`, que
+ * es donde está al día qué falta; enumerarlo acá sería un conteo que envejece
+ * solo y que hace que el próximo deje de mirar el plan.
+ *
+ * ⚠️ **Un `null` en los números NO es un placeholder**: sale cuando la fila no es
+ * medible, y es la diferencia entre *"no se perdió nada"* y *"todavía no se puede
+ * medir"* — que es justo lo que el reporte existe para distinguir.
  */
 @Injectable()
 export class VarianzaService {
@@ -559,10 +745,54 @@ export class VarianzaService {
       : null;
     const { filtros, params } = this.buildFiltros(tenantId, query, dia);
 
+    const soloConVarianza = query.soloConVarianza === true;
+    const grupos = `${SELECT_GRUPOS} ${FROM_GRUPOS} ${filtros} ${GROUP_BY_GRUPOS}`;
+    const uneCosto = ` FROM (${grupos}) g
+         LEFT JOIN LATERAL (${SQL_COSTO_LATERAL}) c ON TRUE`;
+
+    /**
+     * ⛔ **`soloConVarianza` esconde TAMBIÉN las filas que no se pueden medir, y
+     * es una decisión del owner (2026-09-20), no un efecto del `COALESCE`.**
+     *
+     * Una fila con un solo recuento en el rango tiene ventana vacía, así que su
+     * `sin_explicacion` agrega a `0` — cae por el mismo lado que la que cerró
+     * justa. (Con un solo recuento los dos bordes son el mismo: el predicado
+     * queda `> S AND <= S`, que no deja pasar nada.) La escena que se decidió: el encargado
+     * tilda "mostrar solo lo que tiene diferencia" sobre 40 productos, de los
+     * cuales 12 tienen diferencia, 20 cerraron justos y 8 se contaron una sola
+     * vez. **Ve los 12.** Prefiere la lista corta que va derecho a lo que perdió
+     * plata, y lo que falta contar no es una diferencia.
+     *
+     * ⚠️ **El precio, y no hay otro lugar donde se pague.** Quien tilde el filtro
+     * no se entera de esos 8 — y **no los cubre ningún otro número del módulo**:
+     * el `sinConteo` del `/resumen` (Tarea 6) y la spec § 5.7 cuentan los
+     * productos con **cero** recuentos en el rango, no los que se contaron una
+     * sola vez. Un producto contado una vez, con el filtro tildado, no aparece en
+     * ninguna parte. El owner decidió con ese costo a la vista, y la pregunta
+     * quedó escrita en el docblock del campo `sinConteo` de la Tarea 6 del plan,
+     * que es donde se decide si ese conteo se abre en "nunca contado" y "contado
+     * una sola vez".
+     *
+     * Si algún día se quiere que aparezcan marcados, el cambio es en esta
+     * condición, agregándole `g.recuentos >= 2` como discriminante. El e2e lo
+     * fija.
+     */
+    const dondeVarianza = soloConVarianza
+      ? ' WHERE c.sin_explicacion <> 0'
+      : '';
+
+    // Sin `soloConVarianza` el COUNT usa la forma barata —`SELECT 1` y el
+    // `GROUP BY`—, que cuenta exactamente los mismos grupos: un agregado sin
+    // `GROUP BY` devuelve siempre una fila, así que el `LATERAL` no puede sumar
+    // ni restar ninguna. Con el filtro puesto hay que pagar la agregación,
+    // porque es ella la que decide quién entra. Las dos formas tienen que contar
+    // lo mismo que trae la página, y eso lo fija el e2e con un mutante propio.
     const countRows: { total: number }[] = await this.db.query(
-      `SELECT COUNT(*)::int AS total FROM (
-         SELECT 1 ${FROM_GRUPOS} ${filtros} ${GROUP_BY_GRUPOS}
-       ) g`,
+      soloConVarianza
+        ? `SELECT COUNT(*)::int AS total ${uneCosto} ${dondeVarianza}`
+        : `SELECT COUNT(*)::int AS total FROM (
+             SELECT 1 ${FROM_GRUPOS} ${filtros} ${GROUP_BY_GRUPOS}
+           ) g`,
       params,
     );
     const total = countRows[0]?.total ?? 0;
@@ -571,10 +801,50 @@ export class VarianzaService {
     const limitIdx = params.length + 1;
     const offsetIdx = params.length + 2;
 
+    /**
+     * ⛔ **El orden sale de esta consulta, antes del `LIMIT`.** Ordenar por plata
+     * después de elegir la página ordena solo esas 15 filas — y se ve igual de
+     * prolijo en pantalla, que es lo que lo vuelve peligroso.
+     *
+     * ⚠️ **Entre monedas distintas, `monto` se compara como número y eso NO es
+     * una comparación de valor.** No se convierte —la invariante lo prohíbe y
+     * convertir con la tasa de hoy reescribiría el pasado—, así que cualquier
+     * orden total entre monedas es una convención. Esta es la que acierta en el
+     * caso real (todas las filas en la moneda del local) y es determinista en el
+     * otro.
+     *
+     * ⛔ **El orden cierra con los dos IDs, y sin ellos la paginación puede
+     * repetir o saltear una fila.** Una fila de este reporte es un
+     * **(ítem, ubicación)**, y los nombres no identifican a ninguno de los dos:
+     * `items.nombre` no es único por tenant —no hay índice ni validación que lo
+     * impida—, y el de `ubicaciones` hoy sí lo es, pero por un índice único que
+     * vive en el seeder y no en la entidad, así que no es algo en lo que este
+     * `ORDER BY` deba apoyarse. Con `item_id` y `ubicacion_id` al final, el orden
+     * es total **por la clave del grupo**, sin depender de ningún índice de otro
+     * módulo. (Es el mismo desempate que ya llevan los `array_agg` de
+     * `SELECT_GRUPOS`, y por el mismo motivo.)
+     *
+     * `monto` nunca es `NULL` —los `COALESCE` de adentro del `LATERAL` lo
+     * garantizan—, así que no lleva `NULLS LAST`: un grupo sin movimientos en su
+     * ventana ordena con `0`, entre los que no perdieron nada.
+     *
+     * ⚠️ **Una fila con `faltaCosto` se ordena por una suma que NO muestra.**
+     * `SUM` ignora los `NULL`, así que el `monto` de esa fila es solo la parte
+     * que tenía costo — y si ningún movimiento lo tenía, es `0` y la fila queda
+     * entre las que no perdieron nada (por encima de los sobrantes, que tienen
+     * monto negativo). Es justo el producto al que le falta cargar el precio. Se
+     * deja así porque la alternativa —inventarle una posición— sería peor, pero
+     * está anotado como cuarta entrada del backlog en el Paso 3 de la Tarea 10: la
+     * salida candidata es que la pantalla lo marque, no que el orden lo simule,
+     * pero eso lo decide el owner.
+     */
     const rows: GrupoRow[] = await this.db.query(
-      `${SELECT_GRUPOS} ${FROM_GRUPOS} ${filtros} ${GROUP_BY_GRUPOS}
-       ORDER BY i.nombre ASC, ub.nombre ASC
-       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      `SELECT g.*, c.sin_explicacion, c.monto, c.falta_costo
+         ${uneCosto}
+        ${dondeVarianza}
+        ORDER BY c.monto DESC, g.item_nombre ASC,
+                 g.ubicacion_nombre ASC, g.item_id ASC, g.ubicacion_id ASC
+        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
       listParams,
     );
 

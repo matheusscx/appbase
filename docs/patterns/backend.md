@@ -818,6 +818,38 @@ que más fácil se olvida al agregar un reporte, y el síntoma —*"no me deja e
 dueño"*— no apunta al seed. Sembrar un reporte son **cuatro** lugares en `seeder.service.ts`:
 `seedModulosApp`, `seedModuloAppPermisos`, `seedTenantModulo` y el rol que lo va a usar.
 
+⛔ **Lo que ordena o filtra la página tiene que calcularse EN la consulta que pagina.** Un reporte
+que ordena por plata perdida, o que esconde las filas sin diferencia, no puede resolver ese número
+en una segunda consulta sobre las filas ya elegidas: eso ordena *dentro* de la página y filtra
+después de contar. El modo de falla es silencioso —la pantalla se ve perfectamente ordenada—, y el
+`COUNT` miente distinto que el `LIMIT`. La forma que resolvió esto en varianza: la agregación de
+grupos va a una subconsulta y el número colgado de un `LEFT JOIN LATERAL`, con el `ORDER BY` y el
+`WHERE` ahí.
+
+⚠️ **El precio, que conviene saber antes de elegir ese orden.** El `ORDER BY` queda por encima del
+`LIMIT`, así que se evalúan **todos** los grupos del rango, no los 15 de la página: no se puede
+saber cuáles son los 15 más caros sin calcularlos todos. La pregunta no es cómo evitarlo sino si el
+reporte lo aguanta al escalar. Con filtro, el `COUNT` agrega su propio barrido: dos por request.
+
+⛔ **Y la forma se elige midiendo con la tabla GRANDE y en el caso SIN filtros.** En varianza se
+probaron las dos —`LATERAL` correlacionado contra agregación de conjunto (`CTE` + `GROUP BY`)— con
+el kardex inflado a 198.293 movimientos: sin filtros, la de conjunto da **36,9 ms** (`Seq Scan` de
+la tabla entera) contra **7,3 ms** del `LATERAL`; filtrando un solo producto, la de conjunto da
+**0,5 ms**, porque ahí el planner sí empuja la clave al índice. No es que una forma no pueda usar
+índices: es que **la de conjunto cambia de plan según cuántos grupos sobrevivan**, y la vista por
+defecto de un reporte es la de muchos grupos. Dos trampas de medición, entonces: medir con datos de
+seed (la tabla chica hace barato el `Seq Scan`) y medir con el filtro puesto (esconde el caso que
+la pantalla abre primero).
+
+⚠️ Esos milisegundos son **de una máquina y un caché**, no una constante: al remedir van a salir
+otros dígitos. Lo que tiene que reproducir es la **forma del plan** —índice contra `Seq Scan`— y el
+orden de magnitud entre las dos formas. Si aparece un `Seq Scan` donde había índice, eso sí es una
+regresión.
+
+⚠️ **Y si ese número queda calculado en dos consultas, va a una constante compartida.** Dos textos
+SQL iguales hoy derivan mañana, y entonces la fila muestra un número y la página se ordenó por
+otro: ninguno de los dos test falla, porque cada uno por separado está bien.
+
 ⚠️ **Un permiso por reporte, no un `Reportes:Leer` común.** El guard solo sabe hacer **O**, nunca
 **Y** (`requires-permiso.decorator.ts`), así que cada ruta elige un par. Con un permiso compartido,
 el reporte que se agregue dentro de seis meses le aparece a todo el que tenga los de hoy sin que

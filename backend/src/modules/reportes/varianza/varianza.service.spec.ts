@@ -21,6 +21,7 @@ const RANGO = {
 
 const HARINA = 'item-harina';
 const LOCAL = 'ubic-local';
+const CLP = 'moneda-clp';
 
 /**
  * Fila cruda de la consulta de ventanas: un (item, ubicación) con los dos
@@ -39,6 +40,15 @@ const grupoRow = (overrides: Record<string, unknown> = {}) => ({
   hasta_el: new Date('2026-09-20T12:00:00Z'),
   secuencia_desde: '1000',
   secuencia_hasta: '2000',
+  // Lo que la consulta que pagina agrega al grupo: la moneda —que sale del
+  // `GROUP BY`, no del `LATERAL`— más la cantidad sin explicación, su plata y si
+  // algún movimiento vino sin costo, que esos tres sí los calcula
+  // `SQL_COSTO_LATERAL`. Van acá y no en el bucket porque son la misma consulta
+  // que elige y ordena la página.
+  moneda_id: CLP,
+  sin_explicacion: '0.0000',
+  monto: '0.0000',
+  falta_costo: false,
   ...overrides,
 });
 
@@ -92,7 +102,6 @@ describe('VarianzaService', () => {
     teorico: '0.0000',
     merma: '0.0000',
     cortesia: '0.0000',
-    sin_explicacion: '0.0000',
     abastecimiento: '0.0000',
     ...overrides,
   });
@@ -318,7 +327,7 @@ describe('VarianzaService', () => {
      * existió.
      */
     it('un sobrante deja sinExplicacion en negativo, no en valor absoluto', async () => {
-      mockGrupos([grupoRow()], [bucketRow({ sin_explicacion: '-3.0000' })]);
+      mockGrupos([grupoRow({ sin_explicacion: '-3.0000' })]);
 
       const res = await service.findAll(TENANT, RANGO);
 
@@ -413,12 +422,11 @@ describe('VarianzaService', () => {
       // 100 al abrir, 40 de abastecimiento, 110 al cerrar → consumo real 30.
       // Buckets: 21 de venta + 6 de merma + 3 sin explicación = 30. Cierra.
       mockGrupos(
-        [grupoRow()],
+        [grupoRow({ sin_explicacion: '3.0000' })],
         [
           bucketRow({
             teorico: '21.0000',
             merma: '6.0000',
-            sin_explicacion: '3.0000',
             abastecimiento: '40.0000',
           }),
         ],
@@ -530,6 +538,123 @@ describe('VarianzaService', () => {
       await service.findAll(TENANT, RANGO);
 
       expect(dbQueryMock.mock.calls).toHaveLength(2);
+    });
+  });
+
+  describe('la plata de la varianza', () => {
+    /**
+     * ⚠️ **Lo que estos unitarios NO prueban, y hay que decirlo:** el `Db`
+     * mockeado devuelve las filas que el test le dicta, así que no ve la suma,
+     * ni el `ROUND`, ni el orden de la página, ni el filtro. Todo eso es SQL y
+     * vive en `reportes-varianza-plata.e2e-spec.ts`, contra Postgres real. Acá
+     * solo se prueba el **mapeo**: qué hace el service con lo que le llega.
+     * (Es la lección medida de la Tarea 3: los cuatro mutantes de clasificación
+     * sobrevivieron a 18 unitarios con `Db` mockeado.)
+     */
+    it('la plata sale con la moneda del ítem, sin inventarla', async () => {
+      mockGrupos([
+        grupoRow({ sin_explicacion: '4.0000', monto: '12400.0000' }),
+      ]);
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toMatchObject({
+        sinExplicacion: '4.0000',
+        costoSinExplicacion: [{ monedaId: CLP, monto: '12400.0000' }],
+        faltaCosto: false,
+      });
+    });
+
+    /**
+     * Dos monedas distintas **no se suman ni se convierten**. Y son dos FILAS:
+     * `items.moneda_id` es `NOT NULL` y una fila es un ítem, así que una sola
+     * fila nunca puede traer dos monedas. Un test que lo intentara estaría
+     * probando un caso que el esquema no permite.
+     */
+    it('dos productos en monedas distintas quedan separados, cada uno con la suya', async () => {
+      const USD = 'moneda-usd';
+      mockGrupos([
+        grupoRow({ sin_explicacion: '4.0000', monto: '12400.0000' }),
+        grupoRow({
+          item_id: 'item-vino',
+          item_nombre: 'Vino',
+          moneda_id: USD,
+          sin_explicacion: '2.0000',
+          monto: '31.0000',
+        }),
+      ]);
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0].costoSinExplicacion).toEqual([
+        { monedaId: CLP, monto: '12400.0000' },
+      ]);
+      expect(res.data[1].costoSinExplicacion).toEqual([
+        { monedaId: USD, monto: '31.0000' },
+      ]);
+    });
+
+    /**
+     * ⛔ **Sin un costo, la fila va sin cifra — no con la cifra de los que sí lo
+     * tenían.** Es el criterio de `anulaciones-reporte.service.ts`: una suma
+     * parcial se lee como completa. La CANTIDAD sí sigue viajando: esa no
+     * depende del costo, y es justo lo que el encargado necesita ver para
+     * entender que le falta cargar un precio.
+     */
+    it('si algún movimiento vino sin costo, la fila va sin cifra pero con la cantidad', async () => {
+      mockGrupos([
+        grupoRow({
+          sin_explicacion: '4.0000',
+          monto: '3100.0000',
+          falta_costo: true,
+        }),
+      ]);
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toMatchObject({
+        sinExplicacion: '4.0000',
+        costoSinExplicacion: [],
+        faltaCosto: true,
+      });
+    });
+
+    /**
+     * `bool_or` sobre cero movimientos vuelve `NULL`, no `false`. Leerlo como
+     * booleano a secas marcaría `faltaCosto` en una fila que no tiene ningún
+     * movimiento del cual falte nada.
+     */
+    it('un falta_costo en null no marca la fila', async () => {
+      mockGrupos([grupoRow({ falta_costo: null })]);
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0].faltaCosto).toBe(false);
+    });
+
+    /**
+     * Una fila que no se puede medir no tiene plata que mostrar: sin dos
+     * conteos no hay ventana, y un `'0.0000'` ahí se leería como "no perdiste
+     * nada" cuando lo cierto es "todavía no se puede saber".
+     */
+    it('una fila no medible va sin plata, no con plata en cero', async () => {
+      mockGrupos([
+        grupoRow({
+          recuentos: 1,
+          recuento_final_id: null,
+          monto: '12400.0000',
+          falta_costo: true,
+        }),
+      ]);
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toMatchObject({
+        medible: false,
+        sinExplicacion: null,
+        costoSinExplicacion: [],
+        faltaCosto: false,
+      });
     });
   });
 
