@@ -856,11 +856,21 @@ prohíbe.
   *informa* dónde está la mercadería, sin acción. Copiar la acción sin copiar esa distinción le
   pone un botón al garzón que va a rebotar con 403 — el frente original ya resolvió esto y la
   razón está escrita ahí.
-  📌 Sigue **sin decidir** la única pregunta que la investigación dejó abierta y que no es de
-  esta etapa: el día que haya historial de ventas suficiente, ¿el sistema **sugiere** un mínimo
-  calculado (a la Bsale "por Días" / Lightspeed Analytics) que el usuario acepta o edita, o el
-  campo queda 100% manual para siempre? No frena el diseño de hoy —el campo nace manual—, pero
-  cambia si el diseño tiene que dejarle lugar a un valor sugerido al lado del cargado.
+  ✅ **DECIDIDO (owner, 2026-09-20): el diseño le deja LUGAR a un valor sugerido.** El día que
+  haya historial de ventas suficiente, el sistema va a poder ofrecer un mínimo calculado (patrón
+  validado: Bsale "por Días", Lightspeed Analytics) que el usuario **acepta o edita** — no queda
+  100% manual para siempre.
+  ⛔ **Pero eso NO se construye en esta etapa, y quien tome la entrada no tiene que calcular
+  nada.** Lo decidido es que el modelo de datos y la pantalla **no cierren la puerta**: que el
+  mínimo cargado y un eventual sugerido puedan convivir sin migrar nada después, y que se
+  distinga **quién puso el número** —lo cargó una persona o lo propuso el sistema— porque un
+  sugerido que se guarda indistinguible del cargado no se puede recalcular sin pisar lo que
+  alguien decidió a mano. Esa distinción es lo único que hay que resolver hoy; el cálculo, la
+  ventana de días y la UI de aceptar/editar son segunda etapa.
+  📌 Lo que sigue sin definirse, y **no hace falta para diseñar**: la fórmula, cuántas semanas de
+  historia se necesitan y con qué frecuencia se recalcula. Se contesta cuando exista el historial,
+  no antes — hoy el sistema no tiene datos con los que la respuesta sería distinta de una
+  suposición.
 
 - [ ] **% de anulaciones y cortesías sobre lo vendido por garzón** (backend + frontend,
   fuera de alcance de
