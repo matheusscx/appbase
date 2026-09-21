@@ -2,7 +2,10 @@ import {
   Body,
   Controller,
   Get,
+  Param,
+  ParseUUIDPipe,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -17,6 +20,7 @@ import { InventarioService } from './inventario.service';
 import { FindMovimientosDto } from './dto/find-movimientos.dto';
 import { AjusteCostoDto } from './dto/ajuste-costo.dto';
 import { FindStockMinimoDto } from './dto/find-stock-minimo.dto';
+import { SetStockMinimoDto } from './dto/set-stock-minimo.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('inventario')
@@ -40,6 +44,29 @@ export class InventarioController {
   findStockMinimo(@Req() req: Request, @Query() query: FindStockMinimoDto) {
     const { tenantId } = req.user as { tenantId: string };
     return this.inventarioService.findStockMinimo(tenantId, query);
+  }
+
+  /**
+   * Carga (o, con `minimo: null`, limpia) el mínimo de un producto en una
+   * ubicación. `Inventario:Actualizar` y no `Items:Actualizar`: es política de
+   * reabastecimiento, como `ajustes-costo` —quien edita el catálogo no es
+   * necesariamente quien decide cuánto stock hace falta— (spec § 4).
+   */
+  @Put('stock-minimo/:itemId/:ubicacionId')
+  @RequiresPermiso('Inventario', 'Actualizar')
+  setStockMinimo(
+    @Req() req: Request,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Param('ubicacionId', ParseUUIDPipe) ubicacionId: string,
+    @Body() dto: SetStockMinimoDto,
+  ) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.inventarioService.setMinimo(
+      tenantId,
+      itemId,
+      ubicacionId,
+      dto.minimo,
+    );
   }
 
   @Post('ajustes-costo')

@@ -144,16 +144,17 @@ test `backend/test/stock-minimo.e2e-spec.ts`.
 
 **Archivos:** el mismo controller y service; crear `dto/set-stock-minimo.dto.ts`; el mismo e2e.
 
-- [ ] **Paso 1: e2e que falla** — 200 cargando un mínimo nuevo; 200 limpiándolo y el listado deja
+- [x] **Paso 1: e2e que falla** — 200 cargando un mínimo nuevo; 200 limpiándolo y el listado deja
       de marcarlo; **200 recargando el mismo par después de limpiarlo** (este es el caso que se
-      rompe sin el revivir-no-reinsertar de la spec § 1); 400 si el ítem no es producto; 400 con
-      una ubicación de otro tenant; 403 con un rol real que tiene `Leer` pero no `Actualizar`.
-- [ ] **Paso 2: correrlo y confirmar que falla.**
-- [ ] **Paso 3: el DTO** (`minimo: string | null`, `>= 0`).
-- [ ] **Paso 4: implementar** con el `upsertMinimo` de la Tarea 1.
-- [ ] **Paso 5: la ruta** con `@RequiresPermiso('Inventario', 'Actualizar')`.
-- [ ] **Paso 6: confirmar verde.**
-- [ ] **Paso 7: gate y commit** — `feat(inventario): cargar y limpiar el mínimo por ubicación`.
+      rompe sin el revivir-no-reinsertar de la spec § 1); 400 si el ítem no es producto; ~~400~~ **404** con
+      una ubicación de otro tenant (mismo status y mensaje que `TrasladosService`: ajena =
+      inexistente); 403 con un rol real que tiene `Leer` pero no `Actualizar`.
+- [x] **Paso 2: correrlo y confirmar que falla.**
+- [x] **Paso 3: el DTO** (`minimo: string | null`, `>= 0`).
+- [x] **Paso 4: implementar** con el `upsertMinimo` de la Tarea 1.
+- [x] **Paso 5: la ruta** con `@RequiresPermiso('Inventario', 'Actualizar')`.
+- [x] **Paso 6: confirmar verde.**
+- [x] **Paso 7: gate y commit** — `feat(inventario): cargar y limpiar el mínimo por ubicación`.
 
 ---
 
@@ -260,6 +261,7 @@ Necesita `./scripts/entorno.sh stack`.
 | `destinoId` opcional y retrocompatible en traslados | spec § 5 |
 | El listado trae **todo** producto × ubicación activa, con `minimo`/`origen` nulos donde no se cargó (desvío del contrato de arriba, que los tipaba siempre presentes) | ejecución, Tarea 2 — ver abajo |
 | La fila lleva `origenSugerido` (la otra ubicación con más stock) y `unidadMedida` | ejecución, Tarea 2 — ver abajo |
+| `PUT` devuelve la fila recalculada (o `null` si el par no se lista); ubicación ajena es 404 | ejecución, Tarea 3 |
 | El universo es **producto e ingrediente**, los dos tipos con fila en `item_producto` | ejecución, Tarea 1 — ver abajo |
 
 | El ciclo de vida del mínimo (las tres de la spec § 9) | owner, 2026-09-21 |

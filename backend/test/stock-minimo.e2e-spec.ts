@@ -9,6 +9,7 @@ import { AppModule } from '../src/app.module';
 import { TokensAccesoService } from '../src/modules/auth/tokens-acceso.service';
 import { TipoTokenAcceso } from '../src/modules/auth/entities/token-acceso.entity';
 import { InventarioService } from '../src/modules/inventario/inventario.service';
+import { localDelSegundoTenant } from './helpers/segundo-tenant';
 
 /**
  * **Aviso de stock bajo — el listado**: `GET /inventario/stock-minimo` lista
@@ -518,6 +519,143 @@ describe('Stock mínimo — listado (e2e)', () => {
         .set('Authorization', `Bearer ${token}`);
       expect(res.status).toBe(200);
       expect(await fila(itemId, localId)).toBeUndefined();
+    });
+  });
+
+  describe('PUT /inventario/stock-minimo/:itemId/:ubicacionId', () => {
+    function put(
+      itemId: string,
+      ubicacionId: string,
+      body: Record<string, unknown>,
+      conToken = token,
+    ) {
+      return request(app.getHttpServer())
+        .put(`/api/inventario/stock-minimo/${itemId}/${ubicacionId}`)
+        .set('Authorization', `Bearer ${conToken}`)
+        .send(body);
+    }
+
+    it('403 con un rol real que tiene Inventario:Leer pero no Actualizar', async () => {
+      const soloLeer = await usuarioCon([
+        { modulo: 'Inventario', acciones: ['Leer'] },
+      ]);
+      const itemId = await producto('Sin permiso de carga', { stock: '1' });
+      const res = await put(itemId, localId, { minimo: '5' }, soloLeer);
+      expect(res.status).toBe(403);
+      expect((await fila(itemId, localId))!.minimo).toBeNull();
+    });
+
+    it('con Inventario:Actualizar carga, limpia y vuelve a cargar el mismo par', async () => {
+      const carga = await usuarioCon([
+        { modulo: 'Inventario', acciones: ['Leer', 'Actualizar'] },
+      ]);
+      const itemId = await producto('Ida y vuelta', { stock: '2' });
+
+      const cargado = await put(itemId, localId, { minimo: '5' }, carga);
+      expect(cargado.status).toBe(200);
+      expect(cargado.body as StockMinimoFila).toMatchObject({
+        itemId,
+        ubicacionId: localId,
+        origen: 'manual',
+        bajoMinimo: true,
+      });
+
+      const limpio = await put(itemId, localId, { minimo: null }, carga);
+      expect(limpio.status).toBe(200);
+      expect(limpio.body as StockMinimoFila).toMatchObject({
+        minimo: null,
+        bajoMinimo: false,
+      });
+
+      // El caso que se rompe sin el upsert que revive (§ 14b): la fila existe
+      // apagada, y un INSERT a secas chocaría o la dejaría muerta con 200.
+      const devuelta = await put(itemId, localId, { minimo: '1' }, carga);
+      expect(devuelta.status).toBe(200);
+      const f = await fila(itemId, localId);
+      expect(new Decimal(f!.minimo!).toFixed(4)).toBe('1.0000');
+      expect(f!.bajoMinimo).toBe(false);
+    });
+
+    it('en una bodega desactivada acepta el mínimo sin listarlo; reactivada, aparece con ese número', async () => {
+      const b = await bodega('Bodega apagada');
+      const itemId = await producto('Apagada');
+      await patch(`/api/ubicaciones/${b}`, { activo: false });
+
+      const res = await put(itemId, b, { minimo: '4' });
+      expect(res.status).toBe(200);
+      // Sin fila que devolver: el par no se evalúa mientras la bodega esté apagada.
+      expect(res.text).toBe('');
+
+      await patch(`/api/ubicaciones/${b}`, { activo: true });
+      const f = await fila(itemId, b);
+      expect(new Decimal(f!.minimo!).toFixed(4)).toBe('4.0000');
+      expect(f!.bajoMinimo).toBe(true);
+    });
+
+    it('un mínimo de 0 queda cargado y es distinto de no tenerlo', async () => {
+      const itemId = await producto('Cero a propósito');
+      const res = await put(itemId, localId, { minimo: '0' });
+      expect(res.status).toBe(200);
+      const f = await fila(itemId, localId);
+      expect(f!.minimo).not.toBeNull();
+      expect(new Decimal(f!.minimo!).isZero()).toBe(true);
+      expect(f!.bajoMinimo).toBe(false);
+    });
+
+    it('un origen en el body se ignora: todo lo que entra por acá es manual', async () => {
+      const itemId = await producto('Origen colado');
+      const res = await put(itemId, localId, {
+        minimo: '3',
+        origen: 'sistema',
+      });
+      expect(res.status).toBe(200);
+      expect((await fila(itemId, localId))!.origen).toBe('manual');
+    });
+
+    it('400 si el ítem no tiene stock (un servicio), con el mensaje del módulo', async () => {
+      const servicio = (
+        await post<IdResponse>('/api/items', {
+          nombre: `${SELLO} Servicio`,
+          precioBase: '1000',
+          precioIncluyeImpuesto: true,
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+        })
+      ).id;
+      const res = await put(servicio, localId, { minimo: '1' });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toBe(
+        'El item no tiene control de stock',
+      );
+    });
+
+    it('404 con una ubicación de otro tenant, igual que una que no existe', async () => {
+      const { localId: ajena } = await localDelSegundoTenant(app);
+      const itemId = await producto('Ubicación ajena');
+      const res = await put(itemId, ajena, { minimo: '1' });
+      expect(res.status).toBe(404);
+      expect((res.body as { message: string }).message).toBe(
+        'Ubicación no encontrada',
+      );
+    });
+
+    it('400 —no 500— con un id que no es UUID', async () => {
+      const itemId = await producto('Id malo');
+      const res = await put(itemId, 'no-es-uuid', { minimo: '1' });
+      expect(res.status).toBe(400);
+    });
+
+    it.each([
+      ['negativo', { minimo: '-1' }],
+      ['con cinco decimales', { minimo: '1.12345' }],
+      ['que desborda la columna', { minimo: '123456789012345' }],
+      ['como número y no string', { minimo: 5 }],
+      ['ausente', {}],
+    ])('400 con un mínimo %s', async (_caso, body) => {
+      const itemId = await producto('Mínimo inválido');
+      const res = await put(itemId, localId, body);
+      expect(res.status).toBe(400);
+      expect((await fila(itemId, localId))!.minimo).toBeNull();
     });
   });
 });

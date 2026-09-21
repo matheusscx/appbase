@@ -2065,24 +2065,72 @@ export class InventarioService {
     query: FindStockMinimoDto,
   ): Promise<PaginatedResponse<StockMinimoFila>> {
     const { page, pageSize, offset } = resolvePagination(query);
+    const { from, params } = this.fromStockMinimo(tenantId, query);
+
+    const [{ total }]: { total: number }[] = await this.db.query(
+      `SELECT COUNT(*)::int AS total ${from}`,
+      params,
+    );
+    const data = await this.filasStockMinimo(
+      tenantId,
+      from,
+      params,
+      pageSize,
+      offset,
+    );
+    return { data, meta: buildPaginationMeta(page, pageSize, total) };
+  }
+
+  /**
+   * Carga o limpia el mínimo y devuelve la fila del listado ya recalculada,
+   * para que la pantalla la repinte sin volver a pedir la página ni derivar
+   * `bajoMinimo` en el cliente. `null` si el par no se lista —una bodega
+   * desactivada acepta el mínimo pero no se evalúa (spec § 9)—.
+   */
+  async setMinimo(
+    tenantId: string,
+    itemId: string,
+    ubicacionId: string,
+    minimo: string | null,
+  ): Promise<StockMinimoFila | null> {
+    await this.upsertMinimo(tenantId, itemId, ubicacionId, minimo);
+    const { from, params } = this.fromStockMinimo(tenantId, {
+      ubicacionId,
+      itemId,
+    });
+    const [fila] = await this.filasStockMinimo(tenantId, from, params, 1, 0);
+    return fila ?? null;
+  }
+
+  /**
+   * El `FROM`/`WHERE` compartido por el `COUNT`, la página y la fila suelta.
+   *
+   * El JOIN a `item_producto` es el corte de "tiene stock" (producto e
+   * ingrediente). Una ubicación desactivada no se lista (spec § 9): "acá ya no
+   * repongo". `stock_minimo` y `stock_ubicacion` van por LEFT JOIN: sin fila de
+   * mínimo el par se lista sin marca, y sin fila de saldo el stock es 0.
+   */
+  private fromStockMinimo(
+    tenantId: string,
+    filtro: FindStockMinimoDto & { itemId?: string },
+  ): { from: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let filtros = '';
-    if (query.ubicacionId) {
-      params.push(query.ubicacionId);
+    if (filtro.itemId) {
+      params.push(filtro.itemId);
+      filtros += ` AND i.item_id = $${params.length}`;
+    }
+    if (filtro.ubicacionId) {
+      params.push(filtro.ubicacionId);
       filtros += ` AND u.ubicacion_id = $${params.length}`;
     }
-    if (query.search) {
-      params.push(`%${query.search}%`);
+    if (filtro.search) {
+      params.push(`%${filtro.search}%`);
       filtros += ` AND i.nombre ILIKE $${params.length}`;
     }
-    if (query.soloBajoMinimo) {
+    if (filtro.soloBajoMinimo) {
       filtros += ` AND ${BAJO_MINIMO_SQL}`;
     }
-
-    // Solo `tipo='producto'` tiene stock: el JOIN a item_producto es el corte.
-    // Una ubicación desactivada no se lista (spec § 9): "acá ya no repongo".
-    // `stock_minimo` y `stock_ubicacion` van por LEFT JOIN: sin fila de mínimo
-    // el par se lista sin marca, y sin fila de saldo el stock es 0.
     const from = `
       FROM items i
       JOIN item_producto ip ON ip.item_id = i.item_id
@@ -2095,12 +2143,16 @@ export class InventarioService {
                                   AND su.ubicacion_id = u.ubicacion_id
       WHERE i.tenant_id = $1 AND i.eliminado_el IS NULL
         ${filtros}`;
+    return { from, params };
+  }
 
-    const [{ total }]: { total: number }[] = await this.db.query(
-      `SELECT COUNT(*)::int AS total ${from}`,
-      params,
-    );
-
+  private async filasStockMinimo(
+    tenantId: string,
+    from: string,
+    params: unknown[],
+    limit: number,
+    offset: number,
+  ): Promise<StockMinimoFila[]> {
     const limitIdx = params.length + 1;
     const offsetIdx = params.length + 2;
     const rows: StockMinimoRow[] = await this.db.query(
@@ -2114,7 +2166,7 @@ export class InventarioService {
         ORDER BY bajo_minimo DESC, en_camino ASC, i.nombre ASC, u.nombre ASC,
                  i.item_id, u.ubicacion_id
         LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
-      [...params, pageSize, offset],
+      [...params, limit, offset],
     );
 
     const origenes = await this.origenesDeTraslado(
@@ -2122,24 +2174,21 @@ export class InventarioService {
       rows.filter((r) => r.bajo_minimo).map((r) => r.item_id),
     );
 
-    return {
-      data: rows.map((r) => ({
-        itemId: r.item_id,
-        itemNombre: r.item_nombre,
-        ubicacionId: r.ubicacion_id,
-        ubicacionNombre: r.ubicacion_nombre,
-        unidadMedida: r.unidad_medida,
-        minimo: r.minimo,
-        origen: r.origen,
-        stock: r.stock,
-        bajoMinimo: r.bajo_minimo,
-        enCamino: r.en_camino,
-        origenSugerido: r.bajo_minimo
-          ? this.mejorOrigen(origenes, r.item_id, r.ubicacion_id)
-          : null,
-      })),
-      meta: buildPaginationMeta(page, pageSize, total),
-    };
+    return rows.map((r) => ({
+      itemId: r.item_id,
+      itemNombre: r.item_nombre,
+      ubicacionId: r.ubicacion_id,
+      ubicacionNombre: r.ubicacion_nombre,
+      unidadMedida: r.unidad_medida,
+      minimo: r.minimo,
+      origen: r.origen,
+      stock: r.stock,
+      bajoMinimo: r.bajo_minimo,
+      enCamino: r.en_camino,
+      origenSugerido: r.bajo_minimo
+        ? this.mejorOrigen(origenes, r.item_id, r.ubicacion_id)
+        : null,
+    }));
   }
 
   /**
