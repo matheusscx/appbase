@@ -126,17 +126,17 @@ Fija el modelo de datos. No expone ningún endpoint.
 `dto/find-stock-minimo.dto.ts` (extiende el DTO de paginación, filtro opcional `soloBajoMinimo`);
 test `backend/test/stock-minimo.e2e-spec.ts`.
 
-- [ ] **Paso 1: e2e que falla** — 200 con `Inventario:Leer` y 403 con un rol real sin el permiso
+- [x] **Paso 1: e2e que falla** — 200 con `Inventario:Leer` y 403 con un rol real sin el permiso
       (no admin); un ítem con mínimo y stock por debajo sale con `bajoMinimo: true`; el mismo con
       una compra `borrador` sale con `enCamino: true`; un ítem con mínimo pero **sin fila** en
       `stock_ubicacion` sale con stock 0 y `bajoMinimo: true`; los tres modos comparan igual.
-- [ ] **Paso 2: correrlo y confirmar que falla.**
-- [ ] **Paso 3: el DTO de query.**
-- [ ] **Paso 4: implementar el service** — `WHERE` compartido → `COUNT(*)` → página, con el
+- [x] **Paso 2: correrlo y confirmar que falla.**
+- [x] **Paso 3: el DTO de query.**
+- [x] **Paso 4: implementar el service** — `WHERE` compartido → `COUNT(*)` → página, con el
       `LEFT JOIN` a `stock_ubicacion` y el `EXISTS` de compras de la spec § 3.2.
-- [ ] **Paso 5: la ruta** con `@RequiresPermiso('Inventario', 'Leer')`.
-- [ ] **Paso 6: confirmar verde.**
-- [ ] **Paso 7: gate y commit** — `feat(inventario): listado de stock por ubicación con marca de mínimo`.
+- [x] **Paso 5: la ruta** con `@RequiresPermiso('Inventario', 'Leer')`.
+- [x] **Paso 6: confirmar verde.**
+- [x] **Paso 7: gate y commit** — `feat(inventario): listado de stock por ubicación con marca de mínimo`.
 
 ---
 
@@ -258,8 +258,27 @@ Necesita `./scripts/entorno.sh stack`.
 | Pantalla nueva en vez de embeberla en el catálogo de Items | spec § 3.2 |
 | Cargar el mínimo pide `Inventario:Actualizar` | spec § 4 |
 | `destinoId` opcional y retrocompatible en traslados | spec § 5 |
+| El listado trae **todo** producto × ubicación activa, con `minimo`/`origen` nulos donde no se cargó (desvío del contrato de arriba, que los tipaba siempre presentes) | ejecución, Tarea 2 — ver abajo |
+| La fila lleva `origenSugerido` (la otra ubicación con más stock) y `unidadMedida` | ejecución, Tarea 2 — ver abajo |
+| El universo es **producto e ingrediente**, los dos tipos con fila en `item_producto` | ejecución, Tarea 1 — ver abajo |
 
 | El ciclo de vida del mínimo (las tres de la spec § 9) | owner, 2026-09-21 |
+
+📌 **Tres desvíos del plan, tomados al ejecutar y con su porqué** (ninguno cambia una decisión
+del owner):
+
+- **El listado lista todos los pares, no solo los que tienen mínimo.** Con el contrato original
+  (`minimo: string`) la pantalla solo mostraría pares que *ya* tienen mínimo, y entonces no hay
+  dónde cargar el primero — pero la spec § 3.2 dice que esta pantalla es también donde se carga
+  (§ 4), y la entrada de `pendientes.md` dice que el listado es "la lista completa". Por eso
+  `minimo` y `origen` son `null` donde no se cargó, y la marca sale solo donde hay mínimo.
+- **`origenSugerido` en la fila.** El traslado precargado necesita un origen, y el contrato no
+  lo traía. Se resuelve en una consulta batch para toda la página, sin filtrar `activo`: una
+  bodega desactivada sigue siendo origen válido (spec § 9).
+- **Producto e ingrediente.** La revisión de la Tarea 1 midió que `item_producto` —el corte de
+  "tiene stock"— también lo tienen los ingredientes (`items.service.ts`, el único INSERT). Un
+  ingrediente es justo lo que se acaba en una cocina, así que el aviso lo cubre igual; decirlo
+  "solo producto" era una frase del repo, no una regla.
 
 **No quedan preguntas abiertas.** El ciclo de vida del mínimo se cerró el 2026-09-21 con una sola
 regla: **el mínimo nunca se borra por cascada; lo que cambia es si se evalúa, no si existe.** Ítem

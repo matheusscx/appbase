@@ -16,6 +16,7 @@ import { RequiresPermiso } from '../../common/decorators/requires-permiso.decora
 import { InventarioService } from './inventario.service';
 import { FindMovimientosDto } from './dto/find-movimientos.dto';
 import { AjusteCostoDto } from './dto/ajuste-costo.dto';
+import { FindStockMinimoDto } from './dto/find-stock-minimo.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('inventario')
@@ -27,6 +28,18 @@ export class InventarioController {
   findMovimientos(@Req() req: Request, @Query() query: FindMovimientosDto) {
     const { tenantId } = req.user as { tenantId: string };
     return this.inventarioService.findMovimientos(tenantId, query);
+  }
+
+  /**
+   * El listado del aviso de stock bajo. `Inventario:Leer` y no `Items:Leer`:
+   * la marca es información de inventario, y viaja sola en su propia ruta
+   * para que el catálogo no la exponga a quien no tiene este permiso.
+   */
+  @Get('stock-minimo')
+  @RequiresPermiso('Inventario', 'Leer')
+  findStockMinimo(@Req() req: Request, @Query() query: FindStockMinimoDto) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.inventarioService.findStockMinimo(tenantId, query);
   }
 
   @Post('ajustes-costo')

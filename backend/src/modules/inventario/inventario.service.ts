@@ -24,6 +24,8 @@ import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import { serieNormalizadaSql } from '../items/entities/item-unidad.entity';
 import type { FindMovimientosDto } from './dto/find-movimientos.dto';
 import type { AjusteCostoDto } from './dto/ajuste-costo.dto';
+import type { FindStockMinimoDto } from './dto/find-stock-minimo.dto';
+import type { OrigenStockMinimo } from './entities/stock-minimo.entity';
 import {
   bordeFechaSql,
   bordeHastaSql,
@@ -213,6 +215,33 @@ const MOTIVOS_QUE_RECALCULAN_CPP = ['compra', 'anulacion', 'devolucion'];
  * default de esa allowlist).
  */
 const MOTIVOS_DE_VALOR = ['ajuste_costo', 'correccion_compra'];
+
+/**
+ * El par está bajo su mínimo: hay mínimo cargado y el saldo —0 si nunca se
+ * movió ahí— es estrictamente menor. Igual al mínimo no avisa. Cuenta unidades
+ * del saldo materializado, igual para los modos `cantidad`, `serie` y `lote`.
+ * Supone los alias `sm` (stock_minimo) y `su` (stock_ubicacion).
+ */
+const BAJO_MINIMO_SQL = `(sm.minimo IS NOT NULL AND COALESCE(su.stock, 0) < sm.minimo)`;
+
+/**
+ * Ya hay mercadería pedida para ese par: una compra en `borrador` con una
+ * línea del ítem, que entra a esa misma ubicación. Solo `borrador`: una
+ * `confirmada` ya movió el stock (si igual está abajo, lo que llegó no
+ * alcanzó y es urgencia real) y una `anulada` no trae nada. Se evalúa en vivo,
+ * así que sacar la línea o descartar el borrador lo devuelve al aviso.
+ * ⚠️ Una compra acá es "cargar lo que llegó", no una orden a proveedor
+ * (`docs/features/compras.md`): el borrador es lo más parecido a "en camino"
+ * que el sistema tiene hoy. Supone los alias `i` y `u`, y el tenant en `$1`.
+ */
+const EN_CAMINO_SQL = `EXISTS (
+  SELECT 1
+    FROM compra_lineas cl
+    JOIN compras c ON c.compra_id = cl.compra_id
+   WHERE cl.item_id = i.item_id AND c.ubicacion_id = u.ubicacion_id
+     AND c.tenant_id = $1 AND c.estado = 'borrador'
+     AND c.eliminado_el IS NULL AND cl.eliminado_el IS NULL
+)`;
 
 @Injectable()
 export class InventarioService {
@@ -1968,8 +1997,9 @@ export class InventarioService {
     minimo: string | null,
   ): Promise<void> {
     // Las dos validaciones en una consulta. El ítem se exige con fila en
-    // `item_producto` (solo `tipo='producto'` tiene stock) y vivo: un mínimo
-    // sobre un ítem en la papelera no se puede cargar ni limpiar.
+    // `item_producto` —la tienen `producto` e `ingrediente`, los dos tipos con
+    // stock— y vivo: un mínimo sobre un ítem en la papelera no se puede cargar
+    // ni limpiar.
     const [v]: { item_ok: boolean; ubicacion_ok: boolean }[] =
       await this.db.query(
         `SELECT
@@ -2016,6 +2046,146 @@ export class InventarioService {
                      eliminado_el = NULL, actualizado_el = NOW()`,
       [itemId, ubicacionId, minimo],
     );
+  }
+
+  /**
+   * El listado del aviso de stock bajo: cada producto en cada ubicación activa
+   * del tenant, con su mínimo si se cargó y la marca por fila
+   * (`docs/features/aviso-stock-bajo.md`). Es la lista completa —el usuario
+   * vino a buscarla—, a diferencia del bloque del inicio, que no crece.
+   *
+   * Lista también los pares SIN mínimo: esta pantalla es donde se carga, y un
+   * mínimo nace vacío.
+   *
+   * Tres consultas fijas, ninguna por fila: `COUNT`, la página, y el origen
+   * sugerido para el traslado en batch sobre los ítems de la página.
+   */
+  async findStockMinimo(
+    tenantId: string,
+    query: FindStockMinimoDto,
+  ): Promise<PaginatedResponse<StockMinimoFila>> {
+    const { page, pageSize, offset } = resolvePagination(query);
+    const params: unknown[] = [tenantId];
+    let filtros = '';
+    if (query.ubicacionId) {
+      params.push(query.ubicacionId);
+      filtros += ` AND u.ubicacion_id = $${params.length}`;
+    }
+    if (query.search) {
+      params.push(`%${query.search}%`);
+      filtros += ` AND i.nombre ILIKE $${params.length}`;
+    }
+    if (query.soloBajoMinimo) {
+      filtros += ` AND ${BAJO_MINIMO_SQL}`;
+    }
+
+    // Solo `tipo='producto'` tiene stock: el JOIN a item_producto es el corte.
+    // Una ubicación desactivada no se lista (spec § 9): "acá ya no repongo".
+    // `stock_minimo` y `stock_ubicacion` van por LEFT JOIN: sin fila de mínimo
+    // el par se lista sin marca, y sin fila de saldo el stock es 0.
+    const from = `
+      FROM items i
+      JOIN item_producto ip ON ip.item_id = i.item_id
+      JOIN ubicaciones u ON u.tenant_id = i.tenant_id
+                        AND u.eliminado_el IS NULL AND u.activo = true
+      LEFT JOIN stock_minimo sm ON sm.item_id = i.item_id
+                               AND sm.ubicacion_id = u.ubicacion_id
+                               AND sm.eliminado_el IS NULL
+      LEFT JOIN stock_ubicacion su ON su.item_id = i.item_id
+                                  AND su.ubicacion_id = u.ubicacion_id
+      WHERE i.tenant_id = $1 AND i.eliminado_el IS NULL
+        ${filtros}`;
+
+    const [{ total }]: { total: number }[] = await this.db.query(
+      `SELECT COUNT(*)::int AS total ${from}`,
+      params,
+    );
+
+    const limitIdx = params.length + 1;
+    const offsetIdx = params.length + 2;
+    const rows: StockMinimoRow[] = await this.db.query(
+      `SELECT i.item_id, i.nombre AS item_nombre, ip.unidad_medida,
+              u.ubicacion_id, u.nombre AS ubicacion_nombre,
+              sm.minimo, sm.origen,
+              COALESCE(su.stock, 0)::numeric(18,4) AS stock,
+              ${BAJO_MINIMO_SQL} AS bajo_minimo,
+              ${EN_CAMINO_SQL} AS en_camino
+         ${from}
+        ORDER BY bajo_minimo DESC, en_camino ASC, i.nombre ASC, u.nombre ASC,
+                 i.item_id, u.ubicacion_id
+        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      [...params, pageSize, offset],
+    );
+
+    const origenes = await this.origenesDeTraslado(
+      tenantId,
+      rows.filter((r) => r.bajo_minimo).map((r) => r.item_id),
+    );
+
+    return {
+      data: rows.map((r) => ({
+        itemId: r.item_id,
+        itemNombre: r.item_nombre,
+        ubicacionId: r.ubicacion_id,
+        ubicacionNombre: r.ubicacion_nombre,
+        unidadMedida: r.unidad_medida,
+        minimo: r.minimo,
+        origen: r.origen,
+        stock: r.stock,
+        bajoMinimo: r.bajo_minimo,
+        enCamino: r.en_camino,
+        origenSugerido: r.bajo_minimo
+          ? this.mejorOrigen(origenes, r.item_id, r.ubicacion_id)
+          : null,
+      })),
+      meta: buildPaginationMeta(page, pageSize, total),
+    };
+  }
+
+  /**
+   * Para cada ítem, las ubicaciones del tenant donde tiene stock: de ahí sale
+   * el origen del traslado precargado. Una consulta para toda la página.
+   *
+   * Sin `u.activo = true`, a propósito: una bodega desactivada sigue sirviendo
+   * de ORIGEN de traslado (`docs/features/bodegas-y-traslados.md`, la asimetría
+   * de `TrasladosService`); lo que deja de hacer es ser evaluada como destino.
+   */
+  private async origenesDeTraslado(
+    tenantId: string,
+    itemIds: string[],
+  ): Promise<OrigenRow[]> {
+    if (!itemIds.length) return [];
+    return this.db.query(
+      `SELECT su.item_id, su.ubicacion_id, u.nombre AS ubicacion_nombre, su.stock
+         FROM stock_ubicacion su
+         JOIN ubicaciones u ON u.ubicacion_id = su.ubicacion_id
+                           AND u.tenant_id = $1 AND u.eliminado_el IS NULL
+        WHERE su.item_id = ANY($2::uuid[]) AND su.stock > 0`,
+      [tenantId, itemIds],
+    );
+  }
+
+  /** La otra ubicación con más stock del ítem; desempata por nombre. */
+  private mejorOrigen(
+    origenes: OrigenRow[],
+    itemId: string,
+    destinoId: string,
+  ): StockMinimoFila['origenSugerido'] {
+    const candidatos = origenes
+      .filter((o) => o.item_id === itemId && o.ubicacion_id !== destinoId)
+      .sort(
+        (a, b) =>
+          new Decimal(b.stock).comparedTo(a.stock) ||
+          a.ubicacion_nombre.localeCompare(b.ubicacion_nombre),
+      );
+    const o = candidatos[0];
+    return o
+      ? {
+          ubicacionId: o.ubicacion_id,
+          ubicacionNombre: o.ubicacion_nombre,
+          stock: o.stock,
+        }
+      : null;
   }
 
   async findMovimientos(
@@ -2247,4 +2417,51 @@ interface MovimientoRow {
   item_eliminado: boolean;
   ubicacion_id: string;
   ubicacion_nombre: string | null;
+}
+
+/** Una fila del listado del aviso de stock bajo: un producto en una ubicación. */
+export interface StockMinimoFila {
+  itemId: string;
+  itemNombre: string;
+  ubicacionId: string;
+  ubicacionNombre: string;
+  unidadMedida: string;
+  /** `null` = nunca se cargó mínimo para este par: no hay aviso posible. */
+  minimo: string | null;
+  origen: OrigenStockMinimo | null;
+  /** Saldo en esta ubicación; 0 si el producto nunca se movió acá. */
+  stock: string;
+  bajoMinimo: boolean;
+  /** Hay una compra en borrador con este producto para esta ubicación. */
+  enCamino: boolean;
+  /**
+   * Dónde hay stock para cubrirlo con un traslado: la otra ubicación con más
+   * saldo. Solo en las filas bajo el mínimo; `null` si no hay stock en ningún
+   * otro lado.
+   */
+  origenSugerido: {
+    ubicacionId: string;
+    ubicacionNombre: string;
+    stock: string;
+  } | null;
+}
+
+interface StockMinimoRow {
+  item_id: string;
+  item_nombre: string;
+  unidad_medida: string;
+  ubicacion_id: string;
+  ubicacion_nombre: string;
+  minimo: string | null;
+  origen: OrigenStockMinimo | null;
+  stock: string;
+  bajo_minimo: boolean;
+  en_camino: boolean;
+}
+
+interface OrigenRow {
+  item_id: string;
+  ubicacion_id: string;
+  ubicacion_nombre: string;
+  stock: string;
 }
