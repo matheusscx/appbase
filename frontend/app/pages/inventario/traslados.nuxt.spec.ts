@@ -14,6 +14,9 @@ import Traslados from './traslados.vue'
 
 const LOCAL = { id: 'local-1', nombre: 'Local', tipo: 'local', activo: true }
 const BODEGA = { id: 'bodega-1', nombre: 'Bodega centro', tipo: 'bodega', activo: true }
+// Destino del aviso de stock bajo, que puede disparar sobre una bodega y no
+// solo sobre el local.
+const BODEGA_BARRA = { id: 'bodega-2', nombre: 'Bodega barra', tipo: 'bodega', activo: true }
 
 const PRODUCTO = {
   id: 'item-1',
@@ -63,7 +66,7 @@ mockNuxtImport('usePermissionsStore', () => {
 mockNuxtImport('useApiFetch', () => {
   return (url: string, _opts?: { method?: string, body?: Record<string, unknown> }) => {
     if (typeof url !== 'string') return Promise.resolve({ data: [], meta: {} })
-    if (url.includes('/ubicaciones')) return Promise.resolve([LOCAL, BODEGA])
+    if (url.includes('/ubicaciones')) return Promise.resolve([LOCAL, BODEGA, BODEGA_BARRA])
     if (url.includes('/motivos-traslado')) return Promise.resolve([MOTIVO])
     if (url.includes('/items?tipo=producto')) {
       return Promise.resolve({ data: [PRODUCTO], meta: { page: 1, pageSize: 100, total: 1, totalPages: 1 } })
@@ -245,6 +248,42 @@ describe('traslados — el traslado precargado desde el toast de "no hay stock"'
     // `onSeleccionarItem` de más.
     const cantidadInput = wrapper.find('input[inputmode="decimal"]')
     expect((cantidadInput.element as HTMLInputElement).value).toBe('3')
+
+    wrapper.unmount()
+  })
+
+  it('con ?destinoId (el aviso de stock bajo), el destino es ESE y no el local', async () => {
+    routeQuery = {
+      itemId: PRODUCTO.id,
+      origenId: BODEGA.id,
+      destinoId: BODEGA_BARRA.id,
+      cantidad: '4',
+    }
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 60))
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+    const [, destinoSelect] = selectsConOpcion(wrapper, BODEGA_BARRA.id)
+    expect(destinoSelect, 'select de destino').toBeTruthy()
+    expect(destinoSelect!.props('modelValue')).toBe(BODEGA_BARRA.id)
+    const disponible = wrapper.find('[data-qa="linea-disponible"]')
+    expect(disponible.text()).toContain('Bodega centro')
+
+    wrapper.unmount()
+  })
+
+  it('un ?destinoId que no es un destino posible (desactivado, inexistente) cae al local', async () => {
+    routeQuery = {
+      itemId: PRODUCTO.id,
+      origenId: BODEGA.id,
+      destinoId: 'bodega-que-ya-no-esta',
+      cantidad: '4',
+    }
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 60))
+
+    const [, destinoSelect] = selectsConOpcion(wrapper, LOCAL.id)
+    expect(destinoSelect!.props('modelValue')).toBe(LOCAL.id)
 
     wrapper.unmount()
   })

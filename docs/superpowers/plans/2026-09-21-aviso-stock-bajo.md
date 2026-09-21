@@ -184,15 +184,15 @@ test `backend/test/stock-minimo.e2e-spec.ts`.
 
 **Archivos:** `frontend/app/pages/inventario/traslados.vue` (la lectura de la query) y su spec.
 
-- [ ] **Paso 1: spec que falla** — con `destinoId` en la query, el drawer abre con ese destino y no
+- [x] **Paso 1: spec que falla** — con `destinoId` en la query, el drawer abre con ese destino y no
       con el local; **sin** `destinoId` (el caso del toast de rechazo de venta, que no cambia),
       sigue cayendo al local. El segundo es un test de regresión explícito para no romper el caller
       existente.
-- [ ] **Paso 2: correrlo y confirmar que falla.**
-- [ ] **Paso 3: implementar** el default en cascada, y limpiar también `destinoId` de la query al
+- [x] **Paso 2: correrlo y confirmar que falla.**
+- [x] **Paso 3: implementar** el default en cascada, y limpiar también `destinoId` de la query al
       cerrar el drawer.
-- [ ] **Paso 4: confirmar verde.**
-- [ ] **Paso 5: gate y commit** — `fix(inventario): el traslado precargado acepta un destino explícito`.
+- [x] **Paso 4: confirmar verde.**
+- [x] **Paso 5: gate y commit** — `fix(inventario): el traslado precargado acepta un destino explícito`.
 
 ---
 

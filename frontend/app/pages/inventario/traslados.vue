@@ -300,21 +300,29 @@ async function onSeleccionarItem(linea: LineaForm, itemId: string) {
  * frente — en vez de una pantalla vacía que hay que volver a completar a mano.
  * Mismo patrón de precarga por query que `ventas/index.vue` usa para `?venta=`.
  *
- * `destinoId` no viaja en la URL —el toast solo conoce el origen, no a dónde
- * el garzón/cajero prefiere mandarlo— y se completa acá con el LOCAL del
- * tenant: es a donde tiene sentido que vaya la mercadería que faltó ahí. Las
- * dos, origen y destino, siguen siendo editables: esto es un punto de
- * partida, no una decisión tomada por la pantalla.
+ * `destinoId` es opcional. El toast no lo manda —solo conoce el origen, no a
+ * dónde el garzón/cajero prefiere mandarlo— y ahí se completa con el LOCAL del
+ * tenant: toda venta rechaza en el local, así que es a donde tiene sentido que
+ * vaya lo que faltó. El aviso de stock bajo sí lo manda, porque el mínimo es
+ * por ubicación y la que está abajo puede ser una bodega
+ * (`docs/features/aviso-stock-bajo.md`). Las dos, origen y destino, siguen
+ * siendo editables: esto es un punto de partida, no una decisión tomada por
+ * la pantalla.
  */
 async function abrirDesdeQuery() {
-  const { itemId, origenId, cantidad } = route.query
+  const { itemId, origenId, destinoId, cantidad } = route.query
   if (typeof itemId !== 'string' || !itemId) return
 
   if (!catalogosCargados.value) await cargarCatalogos()
 
   form.value = emptyForm()
   form.value.origenId = typeof origenId === 'string' ? origenId : ''
-  form.value.destinoId = local.value?.id ?? ''
+  // Solo si es un destino posible: una bodega que se desactivó entre que se
+  // armó el link y el clic (o una URL escrita a mano) dejaría el select
+  // mostrando el id crudo y el botón habilitado, para rebotar con 400.
+  const destinoValido = typeof destinoId === 'string'
+    && destinoOpts.value.some(o => o.value === destinoId)
+  form.value.destinoId = destinoValido ? destinoId : local.value?.id ?? ''
   lineas.value = [nuevaLinea()]
   drawerOpen.value = true
 
@@ -330,9 +338,16 @@ async function abrirDesdeQuery() {
 // con `?venta=`.
 watch(drawerOpen, (abierto) => {
   if (abierto) return
-  if (!route.query.itemId && !route.query.origenId && !route.query.cantidad) return
+  const { itemId, origenId, destinoId, cantidad } = route.query
+  if (!itemId && !origenId && !destinoId && !cantidad) return
   void router.replace({
-    query: { ...route.query, itemId: undefined, origenId: undefined, cantidad: undefined },
+    query: {
+      ...route.query,
+      itemId: undefined,
+      origenId: undefined,
+      destinoId: undefined,
+      cantidad: undefined,
+    },
   })
 })
 
