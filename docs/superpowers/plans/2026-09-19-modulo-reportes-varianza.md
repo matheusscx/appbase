@@ -1019,6 +1019,14 @@ git commit -m "feat(reportes): la varianza valorizada por moneda, sin convertir"
 - Modificar: `varianza.service.ts`, `varianza.controller.ts`
 - Test: `varianza.service.spec.ts`, `backend/test/reportes-varianza.e2e-spec.ts`
 
+📌 **Patrón del frente, para no volver a discutirlo en la 7 y la 8: las bases compartidas de este
+plan se crean cuando hay DOS consumidores, no antes.** Ya pasó dos veces. La Tarea 1 creó
+`RangoReporteDto` "para que los reportes lo extiendan" y hubo que sacarlo: nadie lo extendía,
+porque `QueryVarianzaDto` ya ocupa su `extends` con la paginación. Esta tarea volvía a pedirlo, y
+el único hijo sería el DTO del resumen — una base con un hijo es la misma deuda con mejor
+intención. El molde del repo va igual: `ResumenAnulacionesDto` declara sus dos fechas y no hereda
+de nada.
+
 **Interfaces:**
 - Consume: todo lo anterior.
 - Produce: `GET /api/reportes/varianza/resumen` → `ResumenVarianza`:
@@ -1047,22 +1055,37 @@ export interface ResumenVarianza {
   // harina con los litros del aceite no significa nada. La cantidad se lee
   // por fila, en la tabla; la plata es lo único comparable entre productos,
   // y por eso es también lo que ordena el reporte.
-  teoricoIncompleto: {
-    platosSinReceta: { itemId: string; nombre: string; vecesVendido: number }[];
-    ingredientesSinFichaDeStock: { itemId: string; nombre: string }[];
-  };
   /**
-   * Cuántos productos ACTIVOS no tuvieron ningún recuento aplicado en el rango,
-   * y cuáles. Decisión del owner, 2026-09-20 — ver abajo.
-   *
-   * ⚠️ **Pregunta abierta que le deja la Tarea 5: ¿esto tiene que abrirse en
-   * dos?** Hoy cuenta los de **cero** recuentos. Los de **uno** —que tampoco se
-   * pueden medir— no entran acá, y con `soloConVarianza` tildado tampoco salen
-   * en la tabla: no aparecen en ninguna parte. Si se abre, son
-   * `nuncaContado` y `contadoUnaSolaVez`. Decidirlo ACÁ, que es donde se
-   * implementa; la Tarea 5 solo dejó el hueco medido.
+   * ⛔ **Este campo NO se implementó.** Decisión del owner del 2026-09-20 sobre
+   * una medición: los dos casos que iba a avisar no los deja producir la API
+   * (una receta exige un ingrediente al crearse y al editarse; un ingrediente
+   * de receta es `tipo='ingrediente'`, y ese tipo siempre recibe ficha en
+   * `item_producto`). Habría sido una consulta que devuelve vacío siempre.
+   * El detalle y lo que se pierde al sacarlo: spec § 5.6.
    */
-  sinConteo: { total: number; items: { itemId: string; nombre: string }[] };
+  // teoricoIncompleto: …
+  /**
+   * Lo que NO se puede medir en el rango, **abierto en dos** — decisión del
+   * owner del 2026-09-20, respondiendo la pregunta que dejó la Tarea 5.
+   *
+   * ⛔ **Son dos problemas distintos y por eso van separados:** al primero le
+   * falta **empezar** a contarse, al segundo le falta **cerrar** el conteo. Un
+   * solo número sumado (51) diría cuánto falta pero no qué hacer sin abrirlo, y
+   * dejar solo el primero escondía a los de uno: con `soloConVarianza` tildado
+   * tampoco salen en la tabla, así que no aparecían en ninguna parte.
+   *
+   * Universo de los dos: ítems con `activo = true` (ver abajo por qué no el
+   * catálogo entero). `contadoUnaSolaVez` son los que tienen **exactamente un**
+   * recuento aplicado en el rango — los mismos que la tabla muestra con
+   * `medible: false`.
+   */
+  sinConteo: {
+    nuncaContado: { total: number; items: { itemId: string; nombre: string }[] };
+    contadoUnaSolaVez: {
+      total: number;
+      items: { itemId: string; nombre: string }[];
+    };
+  };
 }
 ```
 
@@ -1088,9 +1111,12 @@ movimiento**, que es justo el caso del robo completo.
 Al implementarlo:
 - ⛔ **El faltante sale de una agregación**, no de traer el catálogo y restar en memoria: sería un
   N+1 de manual sobre una tabla que crece.
-- ⛔ **El total y el detalle tienen que cerrar.** Si la línea dice 43, que 43 sea lo que aparece al
-  pedir la lista. Un total que no coincide con su detalle es peor que no mostrar nada — el owner
-  lo va a leer como tarea pendiente.
+- ⛔ **El total y el detalle tienen que cerrar, y ahora son DOS pares.** Si la línea dice 43 y 8,
+  que 43 y 8 sean lo que aparece al pedir cada lista. Un total que no coincide con su detalle es
+  peor que no mostrar nada — el owner lo va a leer como tarea pendiente.
+- ⛔ **Los dos conjuntos son disjuntos por construcción** (cero recuentos contra exactamente uno),
+  así que ningún ítem puede aparecer en los dos. Va un test que lo fije: si alguna vez se cambia
+  el criterio de uno, el solapamiento sería silencioso.
 
 ⚠️ **Arista aceptada a sabiendas** (owner, 2026-09-20): pausar un ítem que **todavía tiene stock**
 lo saca del reporte con existencias adentro. Pausar es *"no lo vendo más"*, no *"no lo tengo
@@ -1102,10 +1128,12 @@ lea como bug.
 1. `desde`/`hasta` ausentes → **400** (son obligatorios acá, a diferencia del listado).
 2. Rango de 400 días → **400** con el mensaje del tope.
 3. Con 14 productos con varianza → `top` trae 10 y `fueraDelTop` vale 4.
-4. Un ítem `tipo='receta'` vendido 12 veces **sin filas en `receta_ingredientes`** → aparece en
-   `platosSinReceta` con `vecesVendido: 12`.
-5. Un ingrediente que está en `receta_ingredientes` y **no** en `item_producto` → aparece en
-   `ingredientesSinFichaDeStock`.
+4. ~~Un ítem `tipo='receta'` vendido 12 veces sin filas en `receta_ingredientes`.~~ **No se puede
+   montar: la API lo rechaza.** Fue el test que destapó que el aviso sobraba.
+5. ~~Un ingrediente en `receta_ingredientes` y no en `item_producto`.~~ **Tampoco.**
+6. El faltante de conteo **abierto en dos**: uno nunca contado y otro contado una sola vez, cada
+   total cerrando con su lista, y **ninguno de los dos en la lista del otro**.
+7. El que se contó **dos** veces no está en ninguna de las dos listas: ese sí se puede medir.
 
 - [ ] **Paso 2: correrlos y verificar que fallan**
 
@@ -1130,10 +1158,22 @@ anulaciones cerró.
 Los totales y el top salen de la misma agregación de las tareas 3–5, sin `LIMIT`. El aviso son
 **dos consultas agregadas más** (no una por plato):
 
-- `platosSinReceta`: ventas del rango de ítems `i.tipo='receta'` que **no** tienen filas vivas en
-  `receta_ingredientes`, agrupadas por ítem con `COUNT(*)`.
-- `ingredientesSinFichaDeStock`: `receta_ingredientes ri LEFT JOIN item_producto ip` donde
-  `ip.item_id IS NULL`, de recetas efectivamente vendidas en el rango.
+⛔ **El aviso no se construyó, y las dos consultas de abajo quedaron sin escribir.** Al montar el
+test del primer caso, la API devolvió `400 Las recetas requieren al menos un ingrediente`: el
+estado que el aviso iba a detectar **no se puede producir**. Medido también el segundo (el tipo
+`ingrediente` siempre recibe ficha de stock). Decisión del owner: sacarlo y dejar escrito por qué,
+en spec § 5.6 y en el docblock de `resumen()`.
+
+📌 **La lección de método, que es la que vale para las tareas que siguen:** el test no falló por
+estar mal escrito — falló porque el caso no existe. Cuando montar un escenario por la API devuelve
+400, la primera hipótesis no es "me falta un campo" sino **"el sistema no deja que esto pase, así
+que ¿para quién es esta función?"**. Es la misma señal que ya está anotada como
+"test de estado inalcanzable", cobrada del lado contrario al de la Tarea 4.
+
+~~- `platosSinReceta`: ventas del rango de ítems `i.tipo='receta'` que no tienen filas vivas en
+`receta_ingredientes`.~~
+~~- `ingredientesSinFichaDeStock`: `receta_ingredientes ri LEFT JOIN item_producto ip` donde
+`ip.item_id IS NULL`.~~
 
 - [ ] **Paso 5: la ruta**
 

@@ -339,11 +339,28 @@ reporte; la tercera no lo es, y es un límite conocido:
 | 2 | **Ingrediente sin ficha de stock.** El `JOIN item_producto` lo deja afuera y nunca entra a la lista a descontar | **Sí** — está en `receta_ingredientes` y no en `item_producto` |
 | 3 | **Ingrediente no bloqueante sin stock.** Se vende sin él, el movimiento **no se escribe**, y el aviso *"se vendió sin ese insumo"* viaja en la respuesta HTTP y **no se persiste** (`items.service.ts`, `moverConsumoOSaltear`) | **No.** El dato se perdió |
 
-El aviso de la pantalla nombra los casos 1 y 2. ⚠️ **En el caso 1 no se puede marcar la fila del
-ingrediente afectado**: si la receta no existe, el sistema no sabe que la hamburguesa lleva pan.
-Solo se puede nombrar el **plato**. En el caso 2 sí se nombra el ingrediente.
+⛔ **El aviso NO se construye. Decisión del owner del 2026-09-20, sobre una medición hecha al
+implementar la Tarea 6: los casos 1 y 2 no los deja producir la API.**
 
-El caso 3 va al backlog como frente propio (§ 9).
+| Caso | Qué lo impide | Dónde |
+|---|---|---|
+| 1 | una receta exige **al menos un ingrediente**, al crearse y al editarse | `ItemsService`, las dos guardas *"Las recetas requieren al menos un ingrediente"* |
+| 2 | un ingrediente de receta tiene que ser `tipo='ingrediente'`, y **ese tipo siempre recibe fila en `item_producto`** al crearse | `ItemsService`, la validación de ingredientes y la rama de alta `producto \| ingrediente` |
+
+O sea que el aviso habría sido **una consulta que devuelve vacío siempre y un cartel que no se ve
+nunca**, y sin forma honesta de probarlo: montar el caso pide escribir en la base a mano, que es
+justo lo que el repo prohíbe y lo que hace que un test así no pruebe nada real.
+
+⚠️ **Lo que se pierde al sacarlo, dicho para que nadie lo descubra tarde:** si alguna vez se
+afloja cualquiera de esas dos guardas, **el reporte deja de avisar que sus números están cortos** y
+no va a haber nada que lo señale. Quien toque esas validaciones tiene que volver acá.
+
+⚠️ **Y el caso que sí ocurre es el 3**, que no es medible después porque el aviso *"se vendió sin
+ese insumo"* viaja en la respuesta HTTP y no se persiste. Va al backlog como frente propio (§ 9):
+**empieza por persistir el dato**, no por consultarlo.
+
+📌 Si el caso 1 alguna vez existiera, no se podría marcar la fila del ingrediente afectado: sin
+receta, el sistema no sabe que la hamburguesa lleva pan. Solo se podría nombrar el plato.
 
 ### 5.7 Lo que NO se contó, que también es una respuesta
 
