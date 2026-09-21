@@ -38,6 +38,13 @@ Pantallas CRUD simples pueden usar `app/components/crud/` (`CrudPageHeader`,
 `CrudTable`, `CrudListItem`, `CrudModal`) — ver `DESIGN-SYSTEM.md` § Componentes CRUD
 y `configuracion/categorias.vue`.
 
+**Un reporte nuevo** no va al menú a mano: se agrega al catálogo de
+`composables/useReportes.ts` (título, ruta y el permiso que lo gatea). Esa lista
+alimenta a la vez la entrada "Reportes" de `layouts/dashboard.vue` —visible si el
+usuario puede ver al menos uno— y las tarjetas del índice `/reportes`, así los dos
+no pueden desincronizarse. La pantalla del reporte igual declara su propio
+`middleware: ['auth', 'permiso']` (§ 1.2).
+
 ### 1.1 Gatear los controles de escritura por permiso
 
 Una pantalla se abre casi siempre con el permiso de **lectura** del módulo, pero
@@ -380,6 +387,29 @@ El payload va directo, sin `String(...)` (el valor ya es string); defaults tipo
 > **Excepción — enteros reales** (`@IsInt`, p. ej. `duracionEstimada`): el backend
 > espera `number`, ahí **sí** se usa `type="number"`. La regla `inputmode` aplica
 > solo a los `@IsNumberString`.
+
+### 7.1 Rango de fechas → `AppRangoFechas`
+
+Un filtro `desde`/`hasta` nuevo usa `AppRangoFechas`, no dos `AppDateInput` sueltos:
+
+```vue
+<AppRangoFechas v-model:desde="filtroDesde" v-model:hasta="filtroHasta" qa="varianza-rango" />
+```
+
+Contrato: los dos `v-model` son `string | null` en `YYYY-MM-DD` (limpiar una punta
+emite `null`, nunca `''`); `qa` se sufija `-desde` / `-hasta` / `-aviso`. Trae
+`DiaNegocioNota` adentro —el rango se lee en días del negocio— y valida el cruce:
+con `desde` posterior a `hasta` avisa y **no emite**, así ninguna pantalla manda un
+rango invertido que el backend contestaría con 400 o con una tabla vacía.
+
+⚠️ **No arma fechas.** El default de la pantalla ("este mes") se arma en la página
+con `hoyLocal()`, nunca con `toISOString()` (lo rechaza
+`invariants/fecha-local.invariant.spec.ts`).
+
+📌 **Lo compartido vive en la raíz de `app/components/`**, no en la carpeta de un
+módulo: una pantalla vieja tiene que poder usarlo sin mudarse. Hoy lo usa solo
+`reportes/varianza.vue`; las pantallas con dos `AppDateInput` sueltos **no se
+migraron** (decisión del owner: nada se muda de arrastre).
 
 ---
 

@@ -1308,18 +1308,18 @@ queda muerto esperando a su consumidor.
 - Produce: `AppRangoFechas` con `v-model:desde` / `v-model:hasta` (`string | null`, `YYYY-MM-DD`)
   y prop `qa`, disponible para **cualquier** pantalla.
 
-- [ ] **Paso 1: el spec de render de `AppRangoFechas` que falla**
+- [x] **Paso 1: el spec de render de `AppRangoFechas` que falla**
 
 Tres aserciones: emite `YYYY-MM-DD` (no un `Date` ni un timestamp) en los dos `update:`; monta
 `DiaNegocioNota` debajo; y con `desde` posterior a `hasta` muestra el aviso y **no** emite.
 
-- [ ] **Paso 2: correrlo y verificar que falla**
+- [x] **Paso 2: correrlo y verificar que falla**
 
 ```bash
 cd frontend && npm test -- AppRangoFechas
 ```
 
-- [ ] **Paso 3: implementar `AppRangoFechas`**
+- [x] **Paso 3: implementar `AppRangoFechas`**
 
 ⛔ **Hay una invariante que barre `frontend/app` y va a rechazar la forma fácil de armar la
 fecha** (`frontend/app/invariants/fecha-local.invariant.spec.ts`, entró a main el 2026-09-20).
@@ -1339,7 +1339,7 @@ justamente lo que este componente viene a cerrar. Y ⛔ **no tocar `CajaTendenci
 tres pantallas** para que lo usen — es refactor fuera de alcance; el owner decidió no mudar nada
 ahora. El componente queda disponible, nada más.
 
-- [ ] **Paso 4: la pantalla de varianza**
+- [x] **Paso 4: la pantalla de varianza**
 
 `CrudPageHeader` → `AppRangoFechas` → aviso de teórico incompleto (`UAlert`, solo si viene) →
 tarjetas de total → `CrudTable` con `usePaginatedList<VarianzaFila>` → `UPagination` si
@@ -1359,19 +1359,19 @@ $ sin explicación · **Otros**.
 - Gate: `definePageMeta({ middleware: ['auth','permiso'], permiso: 'Varianza:Leer' })` — el
   declarativo, **no** el chequeo manual en `onMounted` de `propinas/index.vue`.
 
-- [ ] **Paso 5: el índice y el menú**
+- [x] **Paso 5: el índice y el menú**
 
 `pages/reportes/index.vue`: una tarjeta por reporte que el usuario puede ver (hoy, una).
 `layouts/dashboard.vue`: grupo "Reportes" con la misma forma
 `permissionsStore.esAdmin || permissionsStore.can('Varianza','Leer')` que usan los demás ítems.
 
-- [ ] **Paso 6: los specs de render pasan**
+- [x] **Paso 6: los specs de render pasan**
 
 ```bash
 cd frontend && npm test -- AppRangoFechas varianza
 ```
 
-- [ ] **Paso 7: el e2e de navegador, con el rol real**
+- [x] **Paso 7: el e2e de navegador, con el rol real**
 
 ⛔⛔ **ANTES DE TOCAR `reset-db.sh`: si el `.env` apunta al Postgres aislado, ese script BORRA EL
 VOLUMEN DEL STACK COMPARTIDO de todas las sesiones — y termina diciendo que salió bien.**
@@ -1422,13 +1422,25 @@ orquestadora y avisar la hora al soltarlo**.
 cd frontend && npm run e2e -- reportes/varianza
 ```
 
-- [ ] **Paso 8: documentar**
+- [x] **Paso 8: documentar**
 
 En `docs/patterns/frontend.md`: `AppRangoFechas` con su contrato, y la regla de que **lo
 compartido vive en la raíz de `app/components/`** para que una pantalla vieja lo use sin mudarse
 de módulo.
 
-- [ ] **Paso 9: gate y commit**
+📌 **Cómo se ejecutó (2026-09-21), donde se apartó de lo escrito:**
+- **El menú no tiene grupos**: es una lista plana. "Reportes" entró como **una** entrada hacia
+  `/reportes`, y el catálogo de reportes —con su permiso— vive en `composables/useReportes.ts`,
+  compartido por el menú y el índice para que no se desincronicen.
+- **Sin aviso de teórico incompleto**: se quitó en la Tarea 6 (decisión del owner).
+- **El Paso 7 ya no aplica como está escrito**: `reset-db.sh` y el turno se reemplazaron por
+  `scripts/entorno.sh stack` (stack propio del worktree). El Playwright corrió contra el 5176 de
+  este worktree —verificado en su base: los productos del test aparecen ahí— como
+  `aprobador@paris.cl`.
+- **El resumen no recibe `soloConVarianza`** — y el motivo no es un 400: medido contra el backend
+  real, el pipe global (`whitelist` sin `forbidNonWhitelisted`) lo borra y contesta 200.
+
+- [x] **Paso 9: gate y commit**
 
 ```bash
 git add frontend/app/components/AppRangoFechas.vue frontend/app/components/AppRangoFechas.nuxt.spec.ts frontend/app/pages/reportes frontend/app/layouts/dashboard.vue frontend/e2e/reportes docs/patterns/frontend.md

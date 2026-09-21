@@ -6,6 +6,7 @@ const authStore = useAuthStore()
 const tenantStore = useTenantStore()
 const permissionsStore = usePermissionsStore()
 const monedasStore = useMonedasStore()
+const { visibles: reportesVisibles } = useReportes()
 
 // Tras F5 o reapertura del navegador, Pinia pierde permisos en memoria.
 // Cargarlos al montar el layout (solo cliente) para poblar el menú lateral.
@@ -164,6 +165,15 @@ const items = computed<NavigationMenuItem[]>(() => {
       label: 'Órdenes',
       icon: 'i-lucide-receipt',
       to: '/ordenes',
+    })
+  }
+  // Visible si el usuario puede ver al menos un reporte: el catálogo y el
+  // chequeo viven en `useReportes`, compartidos con el índice `/reportes`.
+  if (reportesVisibles.value.length > 0) {
+    base.push({
+      label: 'Reportes',
+      icon: 'i-lucide-chart-column',
+      to: '/reportes',
     })
   }
   if (authStore.isSuperadmin) {

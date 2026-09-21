@@ -1,6 +1,6 @@
 # Feature: Reporte de varianza (AVT)
 
-> **Estado:** backend listo, pantalla pendiente (tareas 7 y 8 del plan).
+> **Estado:** backend y pantalla (tabla) listos; la gráfica es la tarea 8 del plan.
 > Spec de diseño: [`docs/superpowers/specs/2026-09-19-modulo-reportes-varianza-design.md`](../superpowers/specs/2026-09-19-modulo-reportes-varianza-design.md).
 
 ## Qué contesta
@@ -105,6 +105,24 @@ muestra.
 **Permiso:** módulo propio `Varianza`, permiso `Leer`, en las dos rutas. Un módulo sin su fila en
 `tenant_modulos` da 403 **hasta al admin del tenant**.
 
+## Pantalla
+
+`/reportes/varianza`, detrás de `middleware: ['auth', 'permiso']` con `Varianza:Leer`, y
+alcanzable por la entrada "Reportes" del menú (catálogo en `composables/useReportes.ts`).
+
+- Arranca en **este mes** y, si el tenant tiene bodegas, **en el local**: es donde se vende y de
+  donde sale el teórico. Sin bodegas el selector de ubicación no se dibuja.
+- **«Solo con diferencia» arranca prendido.** ⚠️ El owner decidió qué esconde (2026-09-20), no
+  el default: el default lo eligió el agente al implementar, a partir de esa misma preferencia por
+  la lista corta. Si el owner lo quiere apagado, es cambiar un `ref`. Va solo al listado: el
+  resumen no lo declara y el pipe global lo borraría callado (`whitelist` sin
+  `forbidNonWhitelisted`, medido: 200), así que mandarlo haría creer que los totales lo siguen.
+- Una fila no medible dice *"falta contarlo"* y **no muestra ningún número**: un cero ahí se
+  leería como "cerró perfecto".
+- «Otros» se pinta apagado en cero y en alerta, con explicación, cuando no; **la columna no se
+  esconde nunca**.
+- El faltante de conteo sale en una línea con los dos números, y cada uno abre su lista.
+
 ## Aristas aceptadas a sabiendas
 
 - **Pausar un ítem que todavía tiene stock** lo saca del reporte con existencias adentro. Pausar es
@@ -123,4 +141,6 @@ el orden **solo** los cubre el e2e contra Postgres. Medido tres veces en este fr
 números y la regla de los dos controles: [`anti-patterns.md`](../agent/anti-patterns.md).
 
 Specs: `varianza.service.spec.ts` (mapeo, validación del rango) y cuatro e2e —ventana, baldes,
-plata y resumen—.
+plata y resumen—. Pantalla: `varianza.nuxt.spec.ts` (render) y el Playwright
+`frontend/e2e/reportes/varianza.spec.ts`, que entra **como el aprobador de inventario** y falla si
+cualquier llamada de la carga le devuelve un error.
