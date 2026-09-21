@@ -790,7 +790,9 @@ consultas de liquidación comparan **períodos guardados** (`fecha_desde`/
 Un reporte **de negocio** vive en `src/modules/reportes/<slug>/`, una carpeta por reporte. Un
 listado filtrable que alguien usa mientras opera —buscar una boleta, ver qué se movió, aprobar un
 cierre— **no es un reporte** y se queda en su módulo, aunque tenga filtro de fecha. El criterio
-completo y la clasificación de los que ya existían: `docs/features/modulo-reportes.md`.
+completo y la clasificación de los que ya existían viven, por ahora, en la spec del frente
+(`docs/superpowers/specs/2026-09-19-modulo-reportes-varianza-design.md` § 3); se mudan a
+`docs/features/modulo-reportes.md` cuando ese archivo exista.
 
 ```
 src/modules/reportes/

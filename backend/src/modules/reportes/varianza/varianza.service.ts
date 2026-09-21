@@ -439,8 +439,9 @@ const ventanaSql = (alias: string): string => `
 /**
  * **Qué movimiento cae en cada balde, en un solo lugar.**
  *
- * ⛔ **Se comparten entre la agregación de CANTIDADES (`SQL_BUCKETS`, la tabla) y
- * la de PLATA (`SQL_MONTOS`, el resumen), y ese es todo el punto.** Declarar los
+ * ⛔ **Las comparten las TRES consultas que clasifican: la de cantidades de la
+ * tabla (`SQL_BUCKETS`), la de plata de la fila (`SQL_COSTO_LATERAL`) y la de
+ * plata del resumen (`sqlMontosPorGrupo`). Ese es todo el punto.** Declarar los
  * mismos criterios dos veces deja que un balde signifique una cosa en la tabla y
  * otra en el total de arriba: los dos números serían internamente consistentes,
  * ninguno de los dos tests fallaría, y la pantalla mostraría una merma de 6 kilos
@@ -461,6 +462,16 @@ const P = {
   RECUENTO_SALIDA: `mv.motivo = 'recuento' AND mv.tipo = 'salida'`,
   RECUENTO_ENTRADA: `mv.motivo = 'recuento' AND mv.tipo = 'entrada'`,
 } as const;
+
+/**
+ * La plata de UN movimiento: cantidad por su costo congelado, **ya redondeada**.
+ *
+ * ⛔ **`Σ ROUND(...)`, nunca `ROUND(Σ ...)`** — la regla que fijó el reporte de
+ * anulaciones: el costo lo tiene cada movimiento, no la suma. Vive en una
+ * constante para que las dos agregaciones que la usan no puedan redondear en
+ * momentos distintos.
+ */
+const MONTO = `ROUND(mv.cantidad * mv.costo_unitario, ${ESCALA_COSTO})`;
 
 /**
  * El predicado de abastecimiento es **función del número de bind**, no una
@@ -669,6 +680,12 @@ const SQL_BUCKETS = `
  * (`GROUP_BY_GRUPOS`). El array de `CostoPorMoneda` existe porque el `/resumen`
  * sí suma monedas distintas, no porque una fila pueda tener dos.
  *
+ * ⚠️ **El `FILTER` de `falta_costo` es a propósito más chico que el del resumen,
+ * y no es una copia que derivó.** Acá la bandera acompaña a la plata de "sin
+ * explicación", así que mira solo los movimientos de `recuento`; en el resumen
+ * marca que los totales **enteros** están cortos, y por eso no filtra nada. Son
+ * dos preguntas distintas sobre el mismo dato.
+ *
  * ⚠️ **Un agregado sin `GROUP BY` devuelve SIEMPRE una fila**, también cuando la
  * ventana está vacía o la fila no es medible. Por eso `sin_explicacion` vuelve
  * `0` y nunca `NULL` —y el `WHERE` de `soloConVarianza` no necesita guarda—,
@@ -713,10 +730,8 @@ const SQL_BUCKETS = `
  */
 const SQL_COSTO_LATERAL = `
       SELECT ${NETO_RECUENTO} AS sin_explicacion,
-             COALESCE(SUM(ROUND(mv.cantidad * mv.costo_unitario, ${ESCALA_COSTO})) FILTER (
-               WHERE mv.motivo = 'recuento' AND mv.tipo = 'salida'), 0)
-             - COALESCE(SUM(ROUND(mv.cantidad * mv.costo_unitario, ${ESCALA_COSTO})) FILTER (
-               WHERE mv.motivo = 'recuento' AND mv.tipo = 'entrada'), 0)
+             COALESCE(SUM(${MONTO}) FILTER (WHERE ${P.RECUENTO_SALIDA}), 0)
+             - COALESCE(SUM(${MONTO}) FILTER (WHERE ${P.RECUENTO_ENTRADA}), 0)
                AS monto,
              bool_or(mv.costo_unitario IS NULL) FILTER (
                WHERE mv.motivo = 'recuento')                        AS falta_costo
@@ -726,16 +741,6 @@ const SQL_COSTO_LATERAL = `
          AND mv.tenant_id = $1
          AND mv.eliminado_el IS NULL
          ${ventanaSql('g')}`;
-
-/**
- * La plata de UN movimiento: cantidad por su costo congelado, **ya redondeada**.
- *
- * ⛔ **`Σ ROUND(...)`, nunca `ROUND(Σ ...)`** — la regla que fijó el reporte de
- * anulaciones: el costo lo tiene cada movimiento, no la suma. Vive en una
- * constante para que las dos agregaciones que la usan no puedan redondear en
- * momentos distintos.
- */
-const MONTO = `ROUND(mv.cantidad * mv.costo_unitario, ${ESCALA_COSTO})`;
 
 /** Un producto nombrado, para las listas del aviso y del faltante de conteo. */
 export interface ItemBreve {

@@ -65,6 +65,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [liquidacion-propinas-config.md](./features/liquidacion-propinas-config.md) | Liquidación propinas E2: configuración versionada de distribución por grupos |
 | [liquidacion-propinas-motor.md](./features/liquidacion-propinas-motor.md) | Liquidación propinas E3: motor por período, confirmación/anulación y UI |
 | [reportes-propinas.md](./features/reportes-propinas.md) | Reportes F: resumen del ciclo completo y agregados auditables por trabajador |
+| [reporte-varianza.md](./features/reporte-varianza.md) | Varianza (AVT): consumo teórico —el que el kardex ya escribió al vender— contra el real entre dos conteos, con «Otros» como detector de lo que no encaja |
 | [impresion-termica.md](./features/impresion-termica.md) | Impresión térmica vía QZ Tray: comandas de cocina/barra ruteadas por categoría (envío en dos fases), precuenta y boleta desde Salones y el POS |
 | [impuestos.md](./features/impuestos.md) | Catálogo de impuestos del sistema por país + personalizados por tenant, clasificación tributaria afecto/exento en items congelada por línea de venta |
 | [combos.md](./features/combos.md) | Combos (paquetes con precio propio): componentes fijos producto/receta/servicio, una línea de venta, disponibilidad conservadora |

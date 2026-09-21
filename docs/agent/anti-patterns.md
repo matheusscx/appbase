@@ -714,6 +714,35 @@ la afirmación falsa ya circuló, **anotarla como refutada, no borrarla en silen
 
 ## Pruebas E2E (API)
 
+### ❌ Probar con `Db` mockeado lo que solo existe en el SQL
+
+Tres veces en el mismo frente, así que es la forma del módulo y no un descuido: **con `Db`
+mockeado la consulta no se ejecuta**. El mock devuelve las filas que el test le dicta, así que el
+tipo de `JOIN`, los `FILTER`, el `GROUP BY` y el orden no se ejercen nunca. Medido mutando cada
+uno y corriendo solo los unitarios:
+
+| Qué se mutó | Unitarios | Qué lo cazó |
+|---|---|---|
+| `LEFT JOIN` → `JOIN` (perdía el conteo de delta cero) | **9/9 en verde** | e2e con un recuento sin movimiento |
+| los cuatro `FILTER` de clasificación | **18/18 en verde** | un e2e por balde |
+| `GROUP BY` del faltante (sumaba las ubicaciones de un ítem) | **43/43 en verde** | e2e con un conteo en cada bodega |
+
+⚠️ **La trampa que lo esconde:** el test le pasa la respuesta al mock y después la afirma. El mío
+se llamaba *"secuencia en null → sigue siendo medible"* y pasaba porque el fixture ya traía el
+`null`: el `LEFT JOIN` que lo produce podía no existir.
+
+**Regla: dos controles, y decir en el propio test cuál es cuál.** Débil = aserción sobre el texto
+del SQL, sirve para el ciclo corto. Fuerte = e2e contra Postgres que monte el caso. Un control
+débil rotulado como fuerte es peor que no tener ninguno, porque cierra la pregunta.
+
+📌 **Un mock que despacha por el TEXTO del SQL avisa cuando la consulta cambia.** Al mover el
+`GROUP BY`, nueve unitarios fallaron con *"consulta inesperada en el resumen"* en vez de seguir
+contestando en silencio a una consulta que ya no existía. No reemplaza al e2e —no ejecuta nada—,
+pero convierte "el mock quedó viejo" en un rojo inmediato.
+
+Cómo se construye un test que no prueba nada, que es la cara de al lado:
+[Test verde que no ejerce lo que dice probar](#-test-verde-que-no-ejerce-lo-que-dice-probar).
+
 ### ❌ Tomar "el primero" de un listado que comparten todas las suites
 
 ```ts

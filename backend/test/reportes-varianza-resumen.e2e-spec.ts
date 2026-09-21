@@ -426,6 +426,57 @@ describe('Reporte de varianza — el resumen (e2e)', () => {
   }, 60000);
 
   /**
+   * ⛔ **La plata de la fila y la del total tienen que ser el mismo número, y
+   * hasta ahora nadie los cruzaba.** Son dos consultas distintas —el `LATERAL`
+   * de la fila y la agregación del resumen— que clasifican con los mismos
+   * predicados compartidos. Si alguien toca uno y no el otro, **los dos
+   * resultados siguen siendo internamente consistentes** y ningún test por
+   * separado falla: la tabla muestra una cifra y el cartel de arriba otra.
+   *
+   * ⚠️ Lo encontró la revisión de rama, no las seis revisiones por tarea: cada
+   * una miraba su propio diff, y el criterio duplicado había quedado escrito en
+   * una tarea anterior a la que creó las constantes compartidas.
+   */
+  it('la plata sin explicación de la fila es la misma que la del total', async () => {
+    const itemId = await crearProducto({
+      nombre: 'Resumen cruce fila-total',
+      stock: '40',
+      costo: '250',
+    });
+    // ⚠️ Hace falta una salida Y una entrada dentro de la ventana: con solo
+    // salidas, una consulta que se "olvide" de restar los sobrantes da el mismo
+    // número y la deriva pasa desapercibida. Medido: con el fixture anterior
+    // —dos conteos a la baja— el mutante sobrevivía.
+    await contar(itemId, '39'); // abre la ventana; su propio movimiento queda fuera
+    await contar(itemId, '36'); // falta 3
+    await contar(itemId, '38'); // sobran 2 → neto 1
+
+    const hoy = rangoDeHoy();
+
+    const resLista = await request(app.getHttpServer())
+      .get(`/api/reportes/varianza?itemId=${itemId}&ubicacionId=${bodegaId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resLista.status).toBe(200);
+    const fila = (
+      resLista.body as {
+        data: {
+          itemId: string;
+          costoSinExplicacion: { monedaId: string; monto: string }[];
+        }[];
+      }
+    ).data.find((f) => f.itemId === itemId)!;
+
+    const res = await resumen(
+      `${hoy}&itemId=${itemId}&ubicacionId=${bodegaId}`,
+    );
+
+    expect(fila.costoSinExplicacion).toEqual([
+      { monedaId: CLP_MONEDA_ID, monto: '250.0000' },
+    ]);
+    expect(res.totales.sinExplicacion).toEqual(fila.costoSinExplicacion);
+  }, 60000);
+
+  /**
    * ⛔ **«Otros» se despeja, y acá se ve contra datos reales.** El ajuste manual
    * no es consumo ni abastecimiento, así que no cae en ningún balde: aparece en
    * «Otros» **sin que ningún motivo esté nombrado en la consulta**.
