@@ -272,19 +272,38 @@ implementación la respeta.
 
 ---
 
-## 9. Preguntas abiertas para el owner
+## 9. El ciclo de vida del mínimo — contestado
 
 Ninguna de las seis decisiones resultó no-implementable: las seis cruzan limpio contra el código
-medido acá. Lo que sigue **no está decidido** ni en la entrada ni en la investigación:
+medido acá. Las tres preguntas que esta spec abrió **están contestadas (owner, 2026-09-21)**, y las
+tres comparten una misma regla: **el mínimo nunca se borra por cascada. Lo que cambia es si se
+evalúa, no si existe.**
 
-1. **Ítem eliminado (papelera) con un mínimo cargado** — ¿el aviso se apaga solo, o el mínimo sigue
-   vivo? El soft-delete filtra la mayoría de las lecturas, pero el kardex es una excepción
-   deliberada, así que no hay un precedente que decida por analogía.
-2. **Ubicación (bodega) eliminada con un mínimo cargado ahí** — ¿el mínimo se soft-borra con la
-   ubicación, o queda huérfano? El local del tenant nunca se elimina, así que solo aplica a bodegas.
-3. **Ubicación desactivada (`activo=false`, no eliminada) con un mínimo cargado** — una bodega
-   desactivada sigue sirviendo de **origen** de traslado pero deja de ser destino válido. ¿El aviso
-   sigue avisando sobre ella, o eso implica que ya no se repone ahí?
+**El porqué de esa regla, una sola vez:** el mínimo es un número que una persona decidió. Borrarlo
+"para limpiar" cuando desaparece el ítem o la ubicación pierde ese trabajo, y al restaurar deja al
+producto **sin vigilancia y en silencio**, que es peor que una fila que nadie lee.
+
+1. **Ítem eliminado (papelera) con un mínimo cargado → el aviso se apaga solo, y no hay nada que
+   construir.** El `JOIN items ... AND i.eliminado_el IS NULL` de § 3.1 y § 3.2 ya lo saca de las
+   dos lecturas. La fila de `stock_minimo` **se conserva**: restaurar el ítem devuelve su mínimo
+   con el valor que tenía. ⛔ **No agregar una cascada** que soft-borre `stock_minimo`: sería
+   trabajo extra para perder el dato.
+2. **Ubicación (bodega) eliminada con un mínimo cargado ahí → idéntico**, por el `JOIN ubicaciones
+   ... AND u.eliminado_el IS NULL`. El local del tenant no se elimina
+   (`ubicaciones/entities/ubicacion.entity.ts:20`, *"No se elimina ni se desactiva"*), así que esto
+   solo aplica a bodegas.
+3. **Bodega desactivada (`activo = false`, no eliminada) → DEJA de avisar.** Esta sí es una regla
+   nueva y hay que implementarla: las dos lecturas filtran también `u.activo = true`. Desactivar
+   una bodega significa *"acá ya no repongo"*, y un aviso que insiste sobre una ubicación que el
+   owner apagó a propósito no se puede callar salvo borrando el mínimo — o sea, perdiendo el dato.
+   El mínimo **queda guardado**: reactivar la bodega la vuelve a vigilar con el número de antes.
+   📌 **Y eso le da al owner una palanca contra el ruido que no cuesta nada**: desactivar una bodega
+   de temporada apaga sus avisos **sin perder un solo mínimo cargado**. Vale anotarlo en la doc de
+   la feature, porque es una propiedad útil que no se deduce de la pantalla.
+   ⚠️ Ojo con el asimétrico: una bodega desactivada **sigue sirviendo de origen** de traslado
+   (`docs/features/bodegas-y-traslados.md`), así que puede seguir apareciendo como el lugar
+   *desde donde* se ofrece mover mercadería para cubrir a otra ubicación. Lo que deja de hacer es
+   ser evaluada **como destino** de un aviso propio.
 
 ---
 

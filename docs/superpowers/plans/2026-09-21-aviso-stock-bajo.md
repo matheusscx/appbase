@@ -3,7 +3,7 @@
 > **Para agentes:** ejecutar con `superpowers:subagent-driven-development` o
 > `superpowers:executing-plans`, tarea por tarea, marcando los checkboxes.
 
-**Status:** Draft
+**Status:** Approved (owner, 2026-09-21)
 **Date:** 2026-09-21
 **Owner:** Cesar Matheus
 **Spec:** [`../specs/2026-09-21-aviso-stock-bajo-design.md`](../specs/2026-09-21-aviso-stock-bajo-design.md)
@@ -259,7 +259,24 @@ Necesita `./scripts/entorno.sh stack`.
 | Cargar el mínimo pide `Inventario:Actualizar` | spec § 4 |
 | `destinoId` opcional y retrocompatible en traslados | spec § 5 |
 
-**Abiertas** — las tres de la spec § 9, todas sobre qué pasa con un mínimo cargado cuando se borra
-el ítem, se borra la bodega o se desactiva la bodega. **No frenan la Tarea 1**: la columna
-`eliminado_el` alcanza para las dos primeras sin fijar la conducta fina. Confirmarlo antes de
-escribir el DTO de limpieza si el owner contesta antes.
+| El ciclo de vida del mínimo (las tres de la spec § 9) | owner, 2026-09-21 |
+
+**No quedan preguntas abiertas.** El ciclo de vida del mínimo se cerró el 2026-09-21 con una sola
+regla: **el mínimo nunca se borra por cascada; lo que cambia es si se evalúa, no si existe.** Ítem
+o bodega eliminados apagan el aviso **solos**, por los filtros de soft-delete que las dos lecturas
+ya llevan — ⛔ **no agregar ninguna cascada**. Una bodega **desactivada** también deja de avisar, y
+eso **sí hay que implementarlo**: las dos lecturas filtran además `u.activo = true`. Ver spec § 9
+para el porqué de cada una y para la asimetría de la bodega desactivada, que sigue sirviendo de
+origen de traslado.
+
+⚠️ **Eso agrega dos cosas a las tareas 2 y 4**, y no son opcionales:
+
+- El filtro `AND u.activo = true` en la base de las dos lecturas.
+- Dos casos más en la matriz de test: **bodega desactivada con mínimo cargado → no aparece** en el
+  listado ni en el resumen, y **reactivarla → vuelve a aparecer con el mínimo que tenía** (este
+  segundo es el que prueba que no hubo cascada; sin él, borrar el mínimo "para limpiar" pasaría
+  desapercibido).
+
+Y un caso más para la Tarea 8 y la doc de la feature: **desactivar una bodega apaga sus avisos sin
+perder los mínimos cargados**. Es una palanca contra el ruido que no cuesta nada y que no se deduce
+mirando la pantalla, así que va escrita.
