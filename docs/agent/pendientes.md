@@ -841,6 +841,27 @@ prohíbe.
   su insumo natural, y quien tome esta entrada debería mirar si conviene diseñar el mínimo
   pensando en que después alimente un pedido al proveedor.
 
+  ✅ **La investigación se corrió el 2026-09-20 y no contradijo ninguna de las cuatro
+  decisiones**: [`investigaciones/2026-09-20-aviso-stock-bajo-punto-reorden.md`](investigaciones/2026-09-20-aviso-stock-bajo-punto-reorden.md).
+  El nombre de industria es **reorder point** (un gatillo), no *par level* (Toast pide mínimo y
+  máximo; acá solo el gatillo), y el modelo de un número por (producto, ubicación) es el que
+  declaran Lightspeed y Odoo. Los dos huecos del mercado quedaron en `DIFERENCIADORES.md`.
+
+  ✅ **DECIDIDO (owner, 2026-09-20): cuando el local está bajo el mínimo y hay stock en otra
+  ubicación del tenant, el aviso ofrece el TRASLADO PRECARGADO a un clic**, no solo los dos
+  números. Es reuso, no invención: el mismo patrón ya existe en el rechazo de venta por falta de
+  stock (`frontend/app/pages/ventas/pos.vue:36-37`, frente de bodegas y traslados).
+  ⚠️ **Y arrastra el matiz de permiso de ese patrón, que no es opcional:** el traslado se le
+  ofrece **solo a quien puede crearlo** (`Inventario/Crear`); a quien no lo tiene se le
+  *informa* dónde está la mercadería, sin acción. Copiar la acción sin copiar esa distinción le
+  pone un botón al garzón que va a rebotar con 403 — el frente original ya resolvió esto y la
+  razón está escrita ahí.
+  📌 Sigue **sin decidir** la única pregunta que la investigación dejó abierta y que no es de
+  esta etapa: el día que haya historial de ventas suficiente, ¿el sistema **sugiere** un mínimo
+  calculado (a la Bsale "por Días" / Lightspeed Analytics) que el usuario acepta o edita, o el
+  campo queda 100% manual para siempre? No frena el diseño de hoy —el campo nace manual—, pero
+  cambia si el diseño tiene que dejarle lugar a un valor sugerido al lado del cargado.
+
 - [ ] **% de anulaciones y cortesías sobre lo vendido por garzón** (backend + frontend,
   fuera de alcance de
   [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md)
