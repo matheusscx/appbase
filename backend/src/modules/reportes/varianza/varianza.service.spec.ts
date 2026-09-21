@@ -19,6 +19,12 @@ const RANGO = {
   hasta: '2026-09-30T00:00:00.000Z',
 };
 
+/** Rango del resumen: con HORA, para no disparar la consulta del día del negocio. */
+const RANGO_RESUMEN = {
+  desde: '2026-09-01T00:00:00.000Z',
+  hasta: '2026-09-30T00:00:00.000Z',
+};
+
 const HARINA = 'item-harina';
 const LOCAL = 'ubic-local';
 const CLP = 'moneda-clp';
@@ -713,6 +719,274 @@ describe('VarianzaService', () => {
     expect(dbQueryMock.mock.calls.length).toBeGreaterThan(0);
   }
 
+  describe('el resumen', () => {
+    const USD = 'moneda-usd';
+
+    /**
+     * ⚠️ El mock despacha **por el texto del SQL**, no por orden de llamada. Hoy
+     * el resumen consulta en secuencia, así que un mock posicional también
+     * andaría — pero se rompería en silencio al agregar, sacar o reordenar una
+     * consulta, que es justo lo que pasó al quitar el aviso de teórico
+     * incompleto. Despachar por contenido además deja en evidencia si una
+     * consulta deja de existir: su mock nunca se usa y el test falla por el lado
+     * correcto.
+     */
+    function mockResumen(datos: {
+      montos?: Record<string, unknown>[];
+      conteo?: Record<string, unknown>[];
+    }): void {
+      dbQueryMock.mockImplementation((sql: string) => {
+        // El día del negocio: lo pide `diaNegocioTenant` cuando el rango viene en
+        // fecha PURA. Con zona vacía el util no expande nada, que es lo que estos
+        // tests quieren — lo que hace el `AT TIME ZONE` se prueba en el e2e.
+        if (sql.includes('zona_horaria'))
+          return Promise.resolve([{ zona_horaria: 'UTC', hora_corte: null }]);
+        if (sql.includes('consumo_total'))
+          return Promise.resolve(datos.montos ?? []);
+        if (sql.includes('MAX(q.recuentos)'))
+          return Promise.resolve(datos.conteo ?? []);
+        throw new Error(
+          `consulta inesperada en el resumen: ${sql.slice(0, 80)}`,
+        );
+      });
+    }
+
+    const montoRow = (overrides: Record<string, unknown> = {}) => ({
+      item_id: HARINA,
+      item_nombre: 'Harina',
+      moneda_id: CLP,
+      teorico: '0',
+      merma: '0',
+      cortesia: '0',
+      sin_explicacion: '0',
+      consumo_total: '0',
+      abastecimiento: '0',
+      falta_costo: false,
+      ...overrides,
+    });
+
+    describe('el rango, que acá es obligatorio y tiene tope', () => {
+      it('rechaza un hasta anterior al desde', async () => {
+        mockResumen({});
+        await expect(
+          service.resumen(TENANT, { desde: '2026-09-30', hasta: '2026-09-01' }),
+        ).rejects.toThrow('hasta no puede ser anterior a desde');
+      });
+
+      /**
+       * ⛔ El tope no es cosmético: el resumen corre sin `LIMIT` sobre todo el
+       * rango, así que sin piso un pedido con dos años traería a memoria el
+       * historial entero del tenant. Es el bug que la ronda de fix de anulaciones
+       * cerró, con este mismo mensaje.
+       */
+      it('rechaza un rango de más de 366 días', async () => {
+        mockResumen({});
+        await expect(
+          service.resumen(TENANT, { desde: '2025-01-01', hasta: '2026-06-01' }),
+        ).rejects.toThrow('no puede superar 366 días');
+      });
+
+      /** 366 justos entran: el tope es "más de", no "desde". */
+      it('acepta exactamente 366 días', async () => {
+        mockResumen({});
+        await expect(
+          service.resumen(TENANT, { desde: '2026-01-01', hasta: '2027-01-02' }),
+        ).resolves.toBeDefined();
+      });
+
+      /**
+       * ⛔ **La validación corre ANTES de cualquier consulta.** Si corriera
+       * después, el rango sin tope ya habría hecho el trabajo que el tope viene a
+       * evitar.
+       */
+      it('no consulta nada si el rango es inválido', async () => {
+        mockResumen({});
+        await expect(
+          service.resumen(TENANT, { desde: '2020-01-01', hasta: '2026-01-01' }),
+        ).rejects.toThrow();
+        expect(dbQueryMock).not.toHaveBeenCalled();
+      });
+    });
+
+    it('los totales van por moneda y no se suman entre sí', async () => {
+      mockResumen({
+        montos: [
+          montoRow({ merma: '1200.0000', consumo_total: '1200.0000' }),
+          montoRow({
+            item_id: 'item-vino',
+            item_nombre: 'Vino',
+            moneda_id: USD,
+            merma: '7.0000',
+            consumo_total: '7.0000',
+          }),
+        ],
+      });
+
+      const res = await service.resumen(TENANT, RANGO_RESUMEN);
+
+      expect(res.totales.merma).toEqual([
+        { monedaId: CLP, monto: '1200.0000' },
+        { monedaId: USD, monto: '7.0000' },
+      ]);
+    });
+
+    /**
+     * ⛔ **«Otros» se DESPEJA, no se enumera.** El movimiento que no cae en
+     * ningún balde —acá 5 de ajuste manual— aparece en «Otros» sin que nadie lo
+     * haya nombrado: es lo que hace que un motivo nuevo no quede invisible.
+     *
+     * consumo_total 30 = teórico 21 + merma 6 + sin explicación 3 + otros 5 − abastecimiento 5
+     */
+    it('otros sale de la resta, sin que ningún motivo esté nombrado', async () => {
+      mockResumen({
+        montos: [
+          montoRow({
+            teorico: '21.0000',
+            merma: '6.0000',
+            sin_explicacion: '3.0000',
+            abastecimiento: '5.0000',
+            consumo_total: '30.0000',
+          }),
+        ],
+      });
+
+      const res = await service.resumen(TENANT, RANGO_RESUMEN);
+
+      expect(res.totales.otros).toEqual([{ monedaId: CLP, monto: '5.0000' }]);
+    });
+
+    /**
+     * ⚠️ **El ranking es por plata PERDIDA, sin el teórico.** El teórico es lo
+     * que el local gastó cocinando, no lo que perdió: meterlo pondría primeros a
+     * los productos que más se venden. Acá el que más teórico tiene es el que
+     * menos perdió, justamente para que el test lo distinga.
+     */
+    it('el top ordena por pérdida y no por consumo', async () => {
+      mockResumen({
+        montos: [
+          montoRow({
+            item_id: 'item-vende-mucho',
+            item_nombre: 'Vende mucho',
+            teorico: '900.0000',
+            merma: '1.0000',
+            consumo_total: '901.0000',
+          }),
+          montoRow({
+            item_id: 'item-pierde',
+            item_nombre: 'Pierde',
+            teorico: '10.0000',
+            sin_explicacion: '80.0000',
+            consumo_total: '90.0000',
+          }),
+        ],
+      });
+
+      const res = await service.resumen(TENANT, RANGO_RESUMEN);
+
+      expect(res.top.map((t) => t.itemId)).toEqual([
+        'item-pierde',
+        'item-vende-mucho',
+      ]);
+      expect(res.fueraDelTop).toBe(0);
+    });
+
+    it('con más de diez productos con pérdida, el resto se cuenta aparte', async () => {
+      mockResumen({
+        montos: Array.from({ length: 14 }, (_, n) =>
+          montoRow({
+            item_id: `item-${n}`,
+            item_nombre: `Producto ${n}`,
+            merma: `${n + 1}.0000`,
+            consumo_total: `${n + 1}.0000`,
+          }),
+        ),
+      });
+
+      const res = await service.resumen(TENANT, RANGO_RESUMEN);
+
+      expect(res.top).toHaveLength(10);
+      expect(res.fueraDelTop).toBe(4);
+      expect(res.top[0].itemId).toBe('item-13');
+    });
+
+    /** Un producto que no perdió nada no ocupa lugar en la gráfica ni se cuenta. */
+    it('los que no perdieron nada no entran al top ni a fueraDelTop', async () => {
+      mockResumen({
+        montos: [
+          montoRow({ teorico: '50.0000', consumo_total: '50.0000' }),
+          montoRow({
+            item_id: 'item-pierde',
+            item_nombre: 'Pierde',
+            merma: '2.0000',
+            consumo_total: '2.0000',
+          }),
+        ],
+      });
+
+      const res = await service.resumen(TENANT, RANGO_RESUMEN);
+
+      expect(res.top).toHaveLength(1);
+      expect(res.fueraDelTop).toBe(0);
+    });
+
+    /**
+     * El mismo ítem en dos ubicaciones es UNA fila del ranking: al encargado le
+     * importa qué producto pierde plata, no en qué depósito.
+     */
+    it('el mismo ítem en dos ubicaciones suma en una sola fila del top', async () => {
+      mockResumen({
+        montos: [
+          montoRow({ merma: '3.0000', consumo_total: '3.0000' }),
+          montoRow({ merma: '4.0000', consumo_total: '4.0000' }),
+        ],
+      });
+
+      const res = await service.resumen(TENANT, RANGO_RESUMEN);
+
+      expect(res.top).toHaveLength(1);
+      expect(res.top[0].merma).toBe('7.0000');
+    });
+
+    it('si algún movimiento vino sin costo, el resumen lo declara', async () => {
+      mockResumen({ montos: [montoRow({ falta_costo: true })] });
+
+      const res = await service.resumen(TENANT, RANGO_RESUMEN);
+
+      expect(res.faltaCosto).toBe(true);
+    });
+
+    /**
+     * ⛔ **Los dos conjuntos del faltante son disjuntos por construcción** —cero
+     * recuentos contra exactamente uno— y el total de cada uno tiene que ser el
+     * largo de su propia lista: si la línea dice 2, que 2 sea lo que aparece al
+     * abrirla.
+     */
+    it('el faltante de conteo se abre en dos, y cada total cierra con su lista', async () => {
+      mockResumen({
+        conteo: [
+          { item_id: 'i1', nombre: 'Aceite', recuentos: 0 },
+          { item_id: 'i2', nombre: 'Harina', recuentos: 1 },
+          { item_id: 'i3', nombre: 'Sal', recuentos: 0 },
+        ],
+      });
+
+      const res = await service.resumen(TENANT, RANGO_RESUMEN);
+
+      expect(res.sinConteo.nuncaContado.total).toBe(2);
+      expect(res.sinConteo.nuncaContado.items).toHaveLength(2);
+      expect(res.sinConteo.contadoUnaSolaVez.total).toBe(1);
+      expect(res.sinConteo.contadoUnaSolaVez.items).toEqual([
+        { itemId: 'i2', nombre: 'Harina' },
+      ]);
+      const enLosDos = res.sinConteo.nuncaContado.items.filter((n) =>
+        res.sinConteo.contadoUnaSolaVez.items.some(
+          (u) => u.itemId === n.itemId,
+        ),
+      );
+      expect(enLosDos).toEqual([]);
+    });
+  });
+
   describe('binds', () => {
     /**
      * Todo `$n` del SQL tiene su bind y todo bind está referenciado. Un hueco
@@ -736,6 +1010,30 @@ describe('VarianzaService', () => {
         unknown[] | undefined,
       ][]) {
         assertSinHuecos(sql, params);
+      }
+    });
+
+    /**
+     * ⛔ **El resumen arma sus binds por caminos distintos del listado**: el
+     * faltante de conteo no pasa por `buildFiltros` —arranca en `items` para
+     * poder encontrar a los que nunca se contaron— y la plata agrega un bind más
+     * al final, para la lista de motivos. Son justamente las dos formas donde un
+     * `$n` desalineado no lo ve nadie hasta que Postgres tira `42P18`.
+     */
+    it('el resumen tampoco tiene huecos, con filtros y sin ellos', async () => {
+      for (const extra of [{}, { ubicacionId: LOCAL, itemId: HARINA }]) {
+        dbQueryMock.mockReset();
+        dbQueryMock.mockResolvedValue([]);
+
+        await service.resumen(TENANT, { ...RANGO_RESUMEN, ...extra });
+
+        expect(dbQueryMock.mock.calls.length).toBeGreaterThan(0);
+        for (const [sql, params] of dbQueryMock.mock.calls as [
+          string,
+          unknown[] | undefined,
+        ][]) {
+          assertSinHuecos(sql, params);
+        }
       }
     });
 

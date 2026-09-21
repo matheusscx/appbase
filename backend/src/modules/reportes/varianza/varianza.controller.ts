@@ -7,6 +7,7 @@ import { TenantGuard } from '../../../common/guards/tenant.guard';
 import type { JwtUser } from '../../../common/interfaces/jwt-user.interface';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { QueryVarianzaDto } from './dto/query-varianza.dto';
+import { ResumenVarianzaDto } from './dto/resumen-varianza.dto';
 import { VarianzaService } from './varianza.service';
 
 @ApiTags('reportes')
@@ -33,5 +34,22 @@ export class VarianzaController {
   findAll(@Req() req: Request, @Query() query: QueryVarianzaDto) {
     const user = req.user as JwtUser;
     return this.varianza.findAll(user.tenantId!, query);
+  }
+
+  /**
+   * Los agregados y los datos de la gráfica, en una sola llamada (spec § 7.2).
+   *
+   * ⚠️ **Ruta estática.** Este controller no tiene ninguna ruta con `:param`,
+   * así que hoy nada se la puede comer — pero va declarada igual con el
+   * criterio del repo, estáticas antes que paramétricas, para que agregar un
+   * `:id` más adelante no la rompa en silencio.
+   *
+   * ⛔ Mismo par (módulo, permiso) que el listado, y `tenantId` del token.
+   */
+  @Get('resumen')
+  @RequiresPermiso('Varianza', 'Leer')
+  resumen(@Req() req: Request, @Query() query: ResumenVarianzaDto) {
+    const user = req.user as JwtUser;
+    return this.varianza.resumen(user.tenantId!, query);
   }
 }
