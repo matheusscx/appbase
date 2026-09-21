@@ -3,7 +3,7 @@
 > **Para agentes:** ejecutar con `superpowers:subagent-driven-development` o
 > `superpowers:executing-plans`, tarea por tarea, marcando los checkboxes.
 
-**Status:** Approved (owner, 2026-09-21)
+**Status:** In progress — aprobado por el owner el 2026-09-21
 **Date:** 2026-09-21
 **Owner:** Cesar Matheus
 **Spec:** [`../specs/2026-09-21-aviso-stock-bajo-design.md`](../specs/2026-09-21-aviso-stock-bajo-design.md)
@@ -108,15 +108,15 @@ Fija el modelo de datos. No expone ningún endpoint.
 `backend/src/app.module.ts` (agregar la entidad al array, igual que `StockUbicacion`); test en
 `backend/src/modules/inventario/inventario.service.spec.ts`.
 
-- [ ] **Paso 1: unit test que falla** — `upsertMinimo(tenantId, itemId, ubicacionId, minimo)`:
+- [x] **Paso 1: unit test que falla** — `upsertMinimo(tenantId, itemId, ubicacionId, minimo)`:
       rechaza si el ítem no es `tipo='producto'` con el mensaje existente *"El item no tiene control
       de stock"*; rechaza si la ubicación no es del tenant; hace el `ON CONFLICT ... DO UPDATE` con
       `eliminado_el = NULL`. Afirmar sobre el SQL, no sobre un mock que ya devuelve el resultado.
       Test propio para `minimo = null` → soft-delete.
-- [ ] **Paso 2: correrlo y confirmar que falla.**
-- [ ] **Paso 3: implementar** la entidad y el método.
-- [ ] **Paso 4: confirmar verde** más `typecheck`.
-- [ ] **Paso 5: gate y commit** — `feat(inventario): la tabla de mínimo por ubicación, sin endpoint todavía`.
+- [x] **Paso 2: correrlo y confirmar que falla.**
+- [x] **Paso 3: implementar** la entidad y el método.
+- [x] **Paso 4: confirmar verde** más `typecheck`.
+- [x] **Paso 5: gate y commit** — `feat(inventario): la tabla de mínimo por ubicación, sin endpoint todavía`.
 
 ---
 

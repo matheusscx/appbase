@@ -1952,6 +1952,72 @@ export class InventarioService {
   // Lectura
   // ---------------------------------------------------------------------------
 
+  /**
+   * Carga (o, con `null`, limpia) el mínimo de un producto en una ubicación
+   * (`docs/features/aviso-stock-bajo.md`). `origen` queda siempre en
+   * `'manual'`: ningún camino de este endpoint puede declarar `'sistema'`.
+   *
+   * No toma locks: el mínimo no es saldo ni lo cuenta el borrado de una
+   * ubicación, y si la ubicación o el ítem se borran justo después, las
+   * lecturas del aviso ya los filtran.
+   */
+  async upsertMinimo(
+    tenantId: string,
+    itemId: string,
+    ubicacionId: string,
+    minimo: string | null,
+  ): Promise<void> {
+    // Las dos validaciones en una consulta. El ítem se exige con fila en
+    // `item_producto` (solo `tipo='producto'` tiene stock) y vivo: un mínimo
+    // sobre un ítem en la papelera no se puede cargar ni limpiar.
+    const [v]: { item_ok: boolean; ubicacion_ok: boolean }[] =
+      await this.db.query(
+        `SELECT
+           EXISTS (
+             SELECT 1
+               FROM item_producto ip
+               JOIN items i ON i.item_id = ip.item_id
+              WHERE ip.item_id = $1 AND i.tenant_id = $3 AND i.eliminado_el IS NULL
+           ) AS item_ok,
+           EXISTS (
+             SELECT 1
+               FROM ubicaciones
+              WHERE ubicacion_id = $2 AND tenant_id = $3 AND eliminado_el IS NULL
+           ) AS ubicacion_ok`,
+        [itemId, ubicacionId, tenantId],
+      );
+    if (!v?.item_ok) {
+      throw new BadRequestException('El item no tiene control de stock');
+    }
+    // Mismo criterio y mensaje que `TrasladosService`: una ubicación de otro
+    // tenant es indistinguible de una inexistente. Una bodega desactivada sí
+    // acepta mínimo: no se evalúa mientras esté apagada, pero el número queda.
+    if (!v.ubicacion_ok) {
+      throw new NotFoundException('Ubicación no encontrada');
+    }
+
+    if (minimo === null) {
+      await this.db.query(
+        `UPDATE stock_minimo
+            SET eliminado_el = NOW(), actualizado_el = NOW()
+          WHERE item_id = $1 AND ubicacion_id = $2 AND eliminado_el IS NULL`,
+        [itemId, ubicacionId],
+      );
+      return;
+    }
+
+    // Upsert que revive: limpiar y volver a cargar el mismo par encuentra la
+    // fila apagada por su PK (docs/patterns/backend.md § 14b).
+    await this.db.query(
+      `INSERT INTO stock_minimo (item_id, ubicacion_id, minimo, origen, creado_el, actualizado_el)
+       VALUES ($1, $2, $3, 'manual', NOW(), NOW())
+       ON CONFLICT (item_id, ubicacion_id)
+       DO UPDATE SET minimo = EXCLUDED.minimo, origen = 'manual',
+                     eliminado_el = NULL, actualizado_el = NOW()`,
+      [itemId, ubicacionId, minimo],
+    );
+  }
+
   async findMovimientos(
     tenantId: string,
     query: FindMovimientosDto,

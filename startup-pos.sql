@@ -702,6 +702,26 @@ CREATE TABLE "stock_ubicacion" (
 );
 CREATE INDEX "idx_stock_ubicacion_ubicacion" ON "stock_ubicacion" ("ubicacion_id");
 
+-- Mínimo de stock por (producto, ubicación): bajo este número el aviso de stock
+-- bajo lo marca (docs/features/aviso-stock-bajo.md). Tabla propia y no columna
+-- de "stock_ubicacion", que tiene un solo escritor (el chokepoint de
+-- movimientos). Sin fila = nunca se cargó mínimo = sin aviso. Limpiar es
+-- soft-delete y volver a cargar revive la fila (upsert). Nada la borra en
+-- cascada: borrar o desactivar el ítem o la ubicación solo deja de evaluarla.
+-- `origen` hoy es siempre 'manual'; 'sistema' queda para un mínimo sugerido.
+CREATE TABLE "stock_minimo" (
+  "item_id"        UUID          NOT NULL REFERENCES "items" ("item_id"),
+  "ubicacion_id"   UUID          NOT NULL REFERENCES "ubicaciones" ("ubicacion_id"),
+  "minimo"         NUMERIC(18,4) NOT NULL,
+  "origen"         TEXT          NOT NULL DEFAULT 'manual',
+  "creado_el"      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "eliminado_el"   TIMESTAMPTZ,
+  PRIMARY KEY ("item_id", "ubicacion_id"),
+  CONSTRAINT "chk_stock_minimo_origen" CHECK ("origen" IN ('manual', 'sistema')),
+  CONSTRAINT "chk_stock_minimo_no_negativo" CHECK ("minimo" >= 0)
+);
+
 -- Extensión 1:1 para tipo 'servicio'
 CREATE TABLE "item_servicio" (
   "item_id"           UUID    PRIMARY KEY REFERENCES "items" ("item_id"),

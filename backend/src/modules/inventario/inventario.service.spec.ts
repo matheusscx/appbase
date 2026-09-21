@@ -3307,4 +3307,98 @@ describe('InventarioService', () => {
       );
     });
   });
+
+  describe('upsertMinimo', () => {
+    const BODEGA_ID = 'ubicacion-bodega-uuid';
+
+    function validacion(itemOk: boolean, ubicacionOk: boolean) {
+      dataSource.query.mockResolvedValueOnce([
+        { item_ok: itemOk, ubicacion_ok: ubicacionOk },
+      ]);
+    }
+
+    it('valida ítem y ubicación contra el tenant del token en UNA consulta', async () => {
+      validacion(true, true);
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.upsertMinimo(TENANT, ITEM_ID, BODEGA_ID, '5');
+
+      const [sql, params] = dataSource.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      // El ítem tiene que tener fila en item_producto (tipo='producto') y
+      // estar vivo en el tenant; la ubicación, viva en el mismo tenant.
+      expect(sql).toMatch(
+        /FROM item_producto ip\s+JOIN items i ON i\.item_id = ip\.item_id\s+WHERE ip\.item_id = \$1 AND i\.tenant_id = \$3 AND i\.eliminado_el IS NULL/,
+      );
+      expect(sql).toMatch(
+        /FROM ubicaciones\s+WHERE ubicacion_id = \$2 AND tenant_id = \$3 AND eliminado_el IS NULL/,
+      );
+      expect(params).toEqual([ITEM_ID, BODEGA_ID, TENANT]);
+    });
+
+    it('rechaza un ítem que no es producto con el mensaje existente del módulo', async () => {
+      validacion(false, true);
+
+      await expect(
+        service.upsertMinimo(TENANT, ITEM_ID, BODEGA_ID, '5'),
+      ).rejects.toThrow(
+        new BadRequestException('El item no tiene control de stock'),
+      );
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('rechaza una ubicación que no es del tenant', async () => {
+      validacion(true, false);
+
+      await expect(
+        service.upsertMinimo(TENANT, ITEM_ID, BODEGA_ID, '5'),
+      ).rejects.toThrow(NotFoundException);
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('carga con un upsert que revive la fila apagada y fija origen manual', async () => {
+      validacion(true, true);
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.upsertMinimo(TENANT, ITEM_ID, BODEGA_ID, '5.5');
+
+      const [sql, params] = dataSource.query.mock.calls[1] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toMatch(/INSERT INTO stock_minimo/);
+      expect(sql).toMatch(
+        /ON CONFLICT \(item_id, ubicacion_id\)\s+DO UPDATE SET/,
+      );
+      // Sin esto, limpiar y volver a cargar el mismo par deja la fila muerta
+      // con 200 (docs/patterns/backend.md § 14b).
+      expect(sql).toMatch(/DO UPDATE SET[\s\S]*eliminado_el = NULL/);
+      expect(sql).toMatch(/DO UPDATE SET[\s\S]*minimo = EXCLUDED\.minimo/);
+      expect(sql).toMatch(/DO UPDATE SET[\s\S]*origen = 'manual'/);
+      expect(params).toEqual([ITEM_ID, BODEGA_ID, '5.5']);
+    });
+
+    it('con minimo null soft-borra la fila en vez de escribir un mínimo', async () => {
+      validacion(true, true);
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.upsertMinimo(TENANT, ITEM_ID, BODEGA_ID, null);
+
+      const [sql, params] = dataSource.query.mock.calls[1] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toMatch(
+        /^\s*UPDATE stock_minimo\s+SET eliminado_el = NOW\(\)/,
+      );
+      expect(sql).toMatch(
+        /WHERE item_id = \$1 AND ubicacion_id = \$2 AND eliminado_el IS NULL/,
+      );
+      expect(sql).not.toMatch(/INSERT/);
+      expect(sql).not.toMatch(/DELETE/);
+      expect(params).toEqual([ITEM_ID, BODEGA_ID]);
+    });
+  });
 });

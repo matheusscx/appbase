@@ -162,6 +162,7 @@ import { Ubicacion } from './modules/ubicaciones/entities/ubicacion.entity';
 import { Traslado } from './modules/traslados/entities/traslado.entity';
 import { TrasladosModule } from './modules/traslados/traslados.module';
 import { StockUbicacion } from './modules/items/entities/stock-ubicacion.entity';
+import { StockMinimo } from './modules/inventario/entities/stock-minimo.entity';
 import { LoteUbicacion } from './modules/items/entities/lote-ubicacion.entity';
 import { UbicacionesModule } from './modules/ubicaciones/ubicaciones.module';
 import { Compra } from './modules/compras/entities/compra.entity';
@@ -304,6 +305,7 @@ import { ReportesModule } from './modules/reportes/reportes.module';
           VentaPromocion,
           Ubicacion,
           StockUbicacion,
+          StockMinimo,
           LoteUbicacion,
           Traslado,
           TipoDocumentoCompra,
