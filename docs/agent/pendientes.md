@@ -825,9 +825,34 @@ prohíbe.
     hay que cargar un número por cada (producto, ubicación) donde importe.
   - **Nace vacío y solo avisa donde se cargó.** No hay que llenar 400 números el primer día:
     se le pone mínimo a lo que importa y el resto no molesta. Sin mínimo cargado, no hay aviso.
-  - **Avisa en los dos lugares:** bloque en el dashboard de inicio (para reponer antes de
-    abrir, y es el insumo natural del pedido al proveedor) **y** marca en el listado de
-    inventario (para quien ya está mirando stock). Permiso candidato: `Inventario: Leer`.
+  - **Avisa en los dos lugares, pero cada uno con un trabajo DISTINTO** (afinado por el owner
+    el 2026-09-20 sobre el riesgo que levantó la investigación). Permiso candidato:
+    `Inventario: Leer`.
+    - **El bloque del inicio contesta *"¿tengo que hacer algo antes de abrir?"*, así que NO es
+      una lista:** es **un número y los 3-4 peores, agrupados por ubicación** ("6 bajo el
+      mínimo — 4 en la barra, 2 en bodega"). La propiedad que hay que sostener es que **no
+      crezca**: si un día hay 40 productos bajo el mínimo, el bloque sigue ocupando lo mismo.
+      Agrupar por ubicación es lo que Square y Bsale ya hacen en sus resúmenes.
+    - **La marca en el listado de inventario da contexto, no alerta:** por fila, y ahí sí la
+      lista completa, porque el usuario fue a buscarla.
+    ⚠️ **El riesgo que esto evita, y por qué no alcanza con "avisar en dos lados":** el
+    problema no son dos lugares, es **la misma lista dos veces** — ahí uno de los dos sobra y
+    el que sobra se vuelve ruido de fondo. La investigación lo midió: todos los POS relevados
+    bajan el ruido sobre notificaciones que llegan y se pueden ignorar (digest diario de
+    Square y Bsale, colchón sobre el par de Toast), y **ninguno documenta cómo bajarle el
+    ruido a una marca fija y siempre visible**, que es el formato elegido acá. Es la única de
+    las decisiones de esta entrada que hay que **medir después de construida**: si el primer
+    día el bloque muestra 40 productos, es ruido y hay que ajustar.
+  - **Lo que ya se pidió deja de urgir, y sale gratis porque compras ya existe** (owner,
+    2026-09-20). Si hay una compra cargada con ese producto, baja de urgencia o sale del
+    bloque — es lo que hace Lightspeed restando lo que está en camino. **El estado del pedido
+    es la señal**: no hace falta un "silenciar por N días" ni nada que guardar aparte. Cubre el
+    caso que más ruido produce, que es el mismo producto gritando cinco días seguidos mientras
+    la mercadería viene en camino.
+    ⛔ **Descartado explícitamente: un botón de "descartar este aviso".** Suena barato y es lo
+    peor de las tres opciones — le da a cada usuario una forma de apagar la señal sin resolver
+    nada, y a los dos meses nadie sabe por qué un producto dejó de avisar. Si alguien lo
+    propone de nuevo, esto es el porqué.
   - **Cuenta unidades, igual para los tres modos** (`cantidad`, `serie`, `lote`). ⛔ **El
     vencimiento NO entra**: 40 litros de leche con mínimo 20 no avisan nada aunque 30 venzan
     mañana, y eso es correcto para esta feature. *"¿Me estoy quedando sin esto?"* y *"¿se me
