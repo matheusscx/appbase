@@ -2192,6 +2192,54 @@ export class InventarioService {
   }
 
   /**
+   * El bloque del inicio: cuántos pares están bajo el mínimo y las 4
+   * ubicaciones con más, nunca la lista (`docs/features/aviso-stock-bajo.md`).
+   * La propiedad es que no crezca: 40 productos abajo ocupan lo mismo que 6.
+   *
+   * No cuenta lo que ya está en camino (una compra en borrador): "baja de
+   * urgencia o sale del bloque" se implementa como salir (spec § 2).
+   *
+   * Una sola consulta, fija: agrupa por ubicación y saca el total con una
+   * ventana sobre TODOS los grupos, que se evalúa antes del `LIMIT` — así el
+   * total sigue contando las ubicaciones que no se detallan.
+   */
+  async resumenStockBajo(tenantId: string): Promise<StockBajoResumen> {
+    const rows: {
+      ubicacion_id: string;
+      ubicacion_nombre: string;
+      cantidad: number;
+      total: number;
+    }[] = await this.db.query(
+      `SELECT u.ubicacion_id, u.nombre AS ubicacion_nombre,
+              COUNT(*)::int AS cantidad,
+              (SUM(COUNT(*)) OVER ())::int AS total
+         FROM stock_minimo sm
+         JOIN items i ON i.item_id = sm.item_id
+                     AND i.tenant_id = $1 AND i.eliminado_el IS NULL
+         JOIN ubicaciones u ON u.ubicacion_id = sm.ubicacion_id
+                           AND u.tenant_id = $1 AND u.eliminado_el IS NULL
+                           AND u.activo = true
+         LEFT JOIN stock_ubicacion su ON su.item_id = sm.item_id
+                                     AND su.ubicacion_id = sm.ubicacion_id
+        WHERE sm.eliminado_el IS NULL
+          AND ${BAJO_MINIMO_SQL}
+          AND NOT ${EN_CAMINO_SQL}
+        GROUP BY u.ubicacion_id, u.nombre
+        ORDER BY cantidad DESC, u.nombre ASC, u.ubicacion_id
+        LIMIT 4`,
+      [tenantId],
+    );
+    return {
+      total: rows[0]?.total ?? 0,
+      porUbicacion: rows.map((r) => ({
+        ubicacionId: r.ubicacion_id,
+        ubicacionNombre: r.ubicacion_nombre,
+        cantidad: r.cantidad,
+      })),
+    };
+  }
+
+  /**
    * Para cada ítem, las ubicaciones del tenant donde tiene stock: de ahí sale
    * el origen del traslado precargado. Una consulta para toda la página.
    *
@@ -2493,6 +2541,17 @@ export interface StockMinimoFila {
     ubicacionNombre: string;
     stock: string;
   } | null;
+}
+
+/** El bloque del inicio: un número y hasta 4 ubicaciones, nunca la lista. */
+export interface StockBajoResumen {
+  /** Todos los pares bajo el mínimo del tenant, no solo los de las 4 filas. */
+  total: number;
+  porUbicacion: {
+    ubicacionId: string;
+    ubicacionNombre: string;
+    cantidad: number;
+  }[];
 }
 
 interface StockMinimoRow {

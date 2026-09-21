@@ -47,6 +47,19 @@ export class InventarioController {
   }
 
   /**
+   * El bloque "Stock bajo" del inicio. Ruta propia y no un campo de
+   * `/resumen-negocio/hoy`, que pide otro permiso (`Resumen del negocio:Leer`):
+   * juntarlos le daría el dato a quien no debe verlo, o se lo escondería a
+   * quien sí (spec § 3.1).
+   */
+  @Get('stock-bajo/resumen')
+  @RequiresPermiso('Inventario', 'Leer')
+  resumenStockBajo(@Req() req: Request) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.inventarioService.resumenStockBajo(tenantId);
+  }
+
+  /**
    * Carga (o, con `minimo: null`, limpia) el mínimo de un producto en una
    * ubicación. `Inventario:Actualizar` y no `Items:Actualizar`: es política de
    * reabastecimiento, como `ajustes-costo` —quien edita el catálogo no es

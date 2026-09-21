@@ -162,17 +162,21 @@ test `backend/test/stock-minimo.e2e-spec.ts`.
 
 **Archivos:** el mismo controller y service; test `backend/test/stock-bajo-resumen.e2e-spec.ts`.
 
-- [ ] **Paso 1: e2e que falla** — 200 con el permiso y 403 sin él; con nada bajo el mínimo,
+- [x] **Paso 1: e2e que falla** — 200 con el permiso y 403 sin él; con nada bajo el mínimo,
       `{ total: 0, porUbicacion: [] }`; con dos ubicaciones afectadas, las dos ordenadas por
       cantidad descendente; **la prueba del ruido** (spec § 8): sembrar pares bajo el mínimo en más
       de 4 ubicaciones y afirmar `porUbicacion.length <= 4` con `total` igual a la cuenta real,
       mayor que la suma de las 4 filas mostradas; una compra `borrador` saca el par, una
       `confirmada` que no alcanza **no** lo saca, una `anulada` lo devuelve.
-- [ ] **Paso 2: correrlo y confirmar que falla.**
-- [ ] **Paso 3: implementar** las dos consultas fijas de la spec § 3.1.
-- [ ] **Paso 4: la ruta.**
-- [ ] **Paso 5: confirmar verde.**
-- [ ] **Paso 6: gate y commit** — `feat(inventario): el resumen de stock bajo, agrupado por ubicación`.
+- [x] **Paso 2: correrlo y confirmar que falla.**
+- [x] **Paso 3: implementar** ~~las dos consultas fijas de la spec § 3.1~~ **una** consulta fija:
+      agrupa por ubicación y el total sale de una ventana sobre todos los grupos, evaluada antes
+      del `LIMIT 4`. Mismo costo fijo y el total sigue contando las ubicaciones no detalladas.
+      El e2e corre en el **segundo tenant sembrado**: el resumen cuenta todo el tenant, y la suite
+      del listado deja pares bajo el mínimo en Paris.
+- [x] **Paso 4: la ruta.**
+- [x] **Paso 5: confirmar verde.**
+- [x] **Paso 6: gate y commit** — `feat(inventario): el resumen de stock bajo, agrupado por ubicación`.
 
 ---
 
