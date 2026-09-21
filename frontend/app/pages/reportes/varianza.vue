@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
+import Decimal from 'decimal.js'
+import type { SerieGrafica } from '~/components/AppGrafica.vue'
 
 /**
  * Reporte de varianza (AVT): lo que el kardex dice que se consumió contra lo que
@@ -36,7 +38,18 @@ interface VarianzaFila {
   faltaCosto: boolean
 }
 
+interface TopVarianza {
+  itemId: string
+  itemNombre: string
+  merma: string
+  cortesia: string
+  sinExplicacion: string
+  monedaId: string
+}
+
 interface ResumenVarianza {
+  top: TopVarianza[]
+  fueraDelTop: number
   totales: {
     teorico: CostoPorMoneda[]
     merma: CostoPorMoneda[]
@@ -61,7 +74,8 @@ const OTROS_EXPLICACION =
 
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
-const { formatFecha, formatStock, formatCostoPorMoneda } = useFormatters()
+const { formatFecha, formatMonto, formatStock, formatCostoPorMoneda } = useFormatters()
+const monedasStore = useMonedasStore()
 const { pageSize } = useUserPreferences()
 const { ubicaciones, local, hayBodegas, cargar: cargarUbicaciones } = useUbicaciones()
 
@@ -102,6 +116,8 @@ const { items: filas, meta, page, loading } = usePaginatedList<VarianzaFila>({
 
 const resumen = ref<ResumenVarianza | null>(null)
 const loadingResumen = ref(false)
+// Distinto de "no hay datos": la gráfica dice que no pudo cargar, no que no hay pérdidas.
+const resumenFallo = ref(false)
 
 // El resumen EXIGE desde/hasta (400 si falta uno): sin rango completo no se pide.
 const rangoCompleto = computed(() => !!filtroDesde.value && !!filtroHasta.value)
@@ -112,6 +128,7 @@ async function cargarResumen() {
     return
   }
   loadingResumen.value = true
+  resumenFallo.value = false
   try {
     // Solo los filtros comunes: `ResumenVarianzaDto` no declara
     // `soloConVarianza`, y el pipe global (`whitelist` sin
@@ -126,6 +143,7 @@ async function cargarResumen() {
     )
   }
   catch (e: unknown) {
+    resumenFallo.value = true
     toast.add({ title: apiErrorMsg(e, 'Error al cargar el resumen'), color: 'error' })
   }
   finally {
@@ -155,6 +173,9 @@ async function prepararUbicaciones() {
 // las ubicaciones y la tabla mostraba solo el local. Si prepararUbicaciones
 // cambió el filtro, el `watch` ya pidió el resumen; si no, se pide acá.
 onMounted(async () => {
+  // El layout ya lo pide al montar; se repite acá (es idempotente) para que
+  // entrar a la pantalla reintente si aquella carga falló.
+  monedasStore.ensureLoaded()
   const antes = filtroUbicacion.value
   await prepararUbicaciones()
   if (filtroUbicacion.value === antes) cargarResumen()
@@ -171,6 +192,51 @@ const tarjetas = computed(() => {
 })
 
 const sinConteo = computed(() => resumen.value?.sinConteo ?? null)
+
+/**
+ * El top viene ordenado por magnitud cruda y puede mezclar monedas: una barra
+ * en pesos y otra en dólares no se comparan por largo. Se grafica solo la
+ * moneda oficial —conserva el orden— y el resto se cuenta al pie; la tabla
+ * los tiene a todos.
+ */
+const monedasListas = computed(() => !!monedasStore.monedaOficial)
+// ⚠️ "Todavía no" y "no va a llegar" son dos estados: si `/monedas` falló, esperar
+// dejaba el esqueleto de carga para siempre. Con error es un fallo; cargado sin
+// moneda oficial, `topGraficado` vacío y la gráfica dice que no hay nada.
+const monedasCargando = computed(() => !monedasStore.isLoaded && !monedasStore.error)
+const topGraficado = computed(() => {
+  const oficial = monedasStore.monedaOficial?.monedaId
+  // Sin la moneda oficial todavía (el store carga en paralelo con el resumen)
+  // no se grafica nada: caer al top entero mezclaba monedas hasta que llegaba.
+  if (!oficial) return []
+  return (resumen.value?.top ?? []).filter(t => t.monedaId === oficial)
+})
+const topEnOtraMoneda = computed(() =>
+  monedasListas.value ? (resumen.value?.top.length ?? 0) - topGraficado.value.length : 0)
+
+// ⛔ «Otros» no entra: es un detector de que la cuenta no cerró, no una parte
+// de la pérdida. Apilarlo lo haría leer como una categoría más de plata perdida.
+// ⚠️ Un sobrante llega con `sinExplicacion` negativo. Apilado, se superpone con
+// la merma y acorta la barra; y no es plata perdida. Se dibuja en cero y el pie
+// lo cuenta —la tabla tiene el número—.
+const esSobrante = (t: TopVarianza) => new Decimal(t.sinExplicacion).isNegative()
+const conSobrante = computed(() => topGraficado.value.filter(esSobrante).length)
+
+const seriesGrafica = computed<SerieGrafica[]>(() => [
+  { nombre: 'Sin explicación', color: 'error', valores: topGraficado.value.map(t => (esSobrante(t) ? '0' : t.sinExplicacion)) },
+  { nombre: 'Merma', color: 'warning', valores: topGraficado.value.map(t => t.merma) },
+  { nombre: 'Cortesía', color: 'info', valores: topGraficado.value.map(t => t.cortesia) },
+])
+const categoriasGrafica = computed(() => topGraficado.value.map(t => t.itemNombre))
+
+function formatoGrafica(valor: string, i: number): string {
+  return formatMonto(valor, topGraficado.value[i]?.monedaId)
+}
+
+// El eje solo tiene barras de la moneda oficial (ver `topGraficado`).
+function formatoEjeGrafica(valor: number): string {
+  return formatMonto(String(valor), monedasStore.monedaOficial?.monedaId)
+}
 
 function productos(n: number): string {
   return `${n} ${n === 1 ? 'producto' : 'productos'}`
@@ -253,6 +319,37 @@ const columns: TableColumn<VarianzaFila>[] = [
               </p>
             </div>
           </div>
+
+          <UCard>
+            <template #header>
+              <span class="font-medium text-default">Dónde se va la plata — los 10 que más perdieron</span>
+            </template>
+            <AppGrafica
+              :series="seriesGrafica"
+              :categorias="categoriasGrafica"
+              :formato="formatoGrafica"
+              :formato-eje="formatoEjeGrafica"
+              :cargando="loadingResumen || monedasCargando"
+              :fallo="resumenFallo || !!monedasStore.error"
+              :vacio="topGraficado.length === 0"
+            />
+            <p
+              v-if="resumen && (resumen.fueraDelTop > 0 || topEnOtraMoneda > 0 || conSobrante > 0)"
+              class="text-xs text-muted mt-3"
+              data-qa="varianza-grafica-pie"
+            >
+              <template v-if="resumen.fueraDelTop > 0">
+                Y {{ productos(resumen.fueraDelTop) }} más.
+              </template>
+              <template v-if="topEnOtraMoneda > 0">
+                {{ topEnOtraMoneda }} en otra moneda no se {{ topEnOtraMoneda === 1 ? 'grafica' : 'grafican' }}.
+              </template>
+              <template v-if="conSobrante > 0">
+                {{ conSobrante }} con sobrante: el sobrante no es pérdida y no se dibuja.
+              </template>
+              La tabla los tiene todos.
+            </p>
+          </UCard>
 
           <UAlert
             v-if="resumen?.faltaCosto"

@@ -411,6 +411,31 @@ módulo: una pantalla vieja tiene que poder usarlo sin mudarse. Hoy lo usa solo
 `reportes/varianza.vue`; las pantallas con dos `AppDateInput` sueltos **no se
 migraron** (decisión del owner: nada se muda de arrastre).
 
+### 7.2 Gráficas → `AppGrafica` (ADR-027)
+
+Toda gráfica pasa por `AppGrafica`, que envuelve Unovis. Hoy: barras horizontales apiladas.
+
+```vue
+<AppGrafica
+  :series="[{ nombre: 'Merma', color: 'warning', valores: top.map(t => t.merma) }]"
+  :categorias="top.map(t => t.itemNombre)"
+  :formato="(valor, i) => formatMonto(valor, top[i].monedaId)"
+  :formato-eje="v => formatMonto(String(v), monedaOficialId)"
+  :cargando="loading" :fallo="fallo" :vacio="top.length === 0"
+/>
+```
+
+- **El color es un token** (`error`, `warning`, `info`…), nunca un literal: se pinta con
+  `var(--ui-<token>)` y el modo oscuro sale solo.
+- **Los valores van como string**; la gráfica los pasa a `number` solo para el largo de la barra.
+  El texto lo arma el llamador con `formato`.
+- **Una serie, una moneda.** Si los datos mezclan monedas, graficar una sola y contar el resto al
+  pie: el largo de una barra en pesos y otra en dólares no se compara.
+- **Siempre al lado de una tabla** que tiene el número exacto; la gráfica va en `<ClientOnly>`.
+- En el spec de render, mockear `@unovis/vue` con `vi.mock` —sus componentes se registran todos
+  como `index` y un stub por nombre no los encuentra— y aseverar sobre lo que se le pasa. **El
+  orden y los rótulos se miran además en el navegador**: happy-dom no dibuja.
+
 ---
 
 ## 8. Monedas — store, formato (Intl) e inputs (maska)

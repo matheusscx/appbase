@@ -12,9 +12,27 @@
 //      medido contra el backend real, 200). Mandarlo haría creer que los
 //      totales siguen la llave.
 //   6. Con bodegas, el primer resumen sale una sola vez y ya filtrado al local.
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Varianza from './varianza.vue'
+
+// La gráfica se mockea igual que en `AppGrafica.nuxt.spec.ts`: happy-dom no
+// calcula layout. Acá importa qué le pasa la pantalla, no cómo se dibuja.
+vi.mock('@unovis/vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  const stub = (name: string) => defineComponent({
+    name,
+    inheritAttrs: false,
+    props: ['data', 'x', 'y', 'color', 'orientation', 'type', 'tickFormat', 'tickValues', 'triggers', 'numTicks', 'height', 'roundedCorners', 'gridLine'],
+    setup(_, { slots }) { return () => h('div', { 'data-stub': name }, slots.default?.()) },
+  })
+  return {
+    VisXYContainer: stub('VisXYContainer'),
+    VisStackedBar: stub('VisStackedBar'),
+    VisAxis: stub('VisAxis'),
+    VisTooltip: stub('VisTooltip'),
+  }
+})
 
 const CLP = {
   monedaId: 'clp-1',
@@ -55,7 +73,13 @@ function fila(over: Record<string, unknown>) {
 
 let listado: ReturnType<typeof fila>[] = []
 
-const RESUMEN = {
+const USD = { ...CLP, monedaId: 'usd-1', nombre: 'Dólar', codigoIso: 'USD', simbolo: 'US$', decimales: 2, esOficial: false }
+
+function top(itemNombre: string, monedaId: string, sinExplicacion: string) {
+  return { itemId: itemNombre, itemNombre, merma: '100.0000', cortesia: '0.0000', sinExplicacion, monedaId }
+}
+
+const RESUMEN_BASE = {
   totales: {
     teorico: [{ monedaId: 'clp-1', monto: '5000.0000' }],
     merma: [{ monedaId: 'clp-1', monto: '400.0000' }],
@@ -63,8 +87,8 @@ const RESUMEN = {
     sinExplicacion: [{ monedaId: 'clp-1', monto: '750.0000' }],
     otros: [],
   },
-  top: [],
-  fueraDelTop: 0,
+  top: [top('Harina', 'clp-1', '750.0000'), top('Vino importado', 'usd-1', '40.0000')],
+  fueraDelTop: 7,
   faltaCosto: false,
   sinConteo: {
     nuncaContado: { total: 2, items: [{ itemId: 'a', nombre: 'Aceite' }, { itemId: 'b', nombre: 'Azúcar' }] },
@@ -72,6 +96,7 @@ const RESUMEN = {
   },
 }
 
+let RESUMEN: typeof RESUMEN_BASE = RESUMEN_BASE
 let llamadas: string[] = []
 const LOCAL = { id: 'ub-local', nombre: 'Local', tipo: 'local', activo: true }
 const BODEGA = { id: 'ub-bodega', nombre: 'Bodega', tipo: 'bodega', activo: true }
@@ -108,7 +133,7 @@ mockNuxtImport('useApiFetch', () => {
 
 async function montar() {
   const wrapper = await mountSuspended(Varianza, { attachTo: document.body })
-  useMonedasStore().hydrate([CLP], 'tenant-1')
+  useMonedasStore().hydrate([CLP, USD], 'tenant-1')
   await new Promise(r => setTimeout(r, 30))
   return wrapper
 }
@@ -124,6 +149,7 @@ function filaDe(wrapper: Wrapper, nombre: string) {
 beforeEach(() => {
   llamadas = []
   ubicacionesBackend = [LOCAL]
+  RESUMEN = RESUMEN_BASE
   listado = [
     fila({ itemId: 'harina', itemNombre: 'Harina' }),
     fila({ itemId: 'queso', itemNombre: 'Queso', otros: '2.0000' }),
@@ -210,6 +236,87 @@ describe('varianza — resumen', () => {
     expect(resumen).not.toContain('soloConVarianza')
     expect(resumen).toMatch(/desde=\d{4}-\d{2}-\d{2}/)
     expect(resumen).toMatch(/hasta=\d{4}-\d{2}-\d{2}/)
+    wrapper.unmount()
+  })
+})
+
+describe('varianza — gráfica', () => {
+  /**
+   * El top viene ordenado por magnitud cruda, mezclando monedas. En una misma
+   * gráfica el largo de una barra en pesos y otra en dólares no se compara:
+   * se grafica solo la moneda oficial y el resto se cuenta aparte.
+   */
+  it('grafica solo la moneda oficial, sin «Otros», y dice cuántos quedaron afuera', async () => {
+    const wrapper = await montar()
+    const grafica = wrapper.findComponent({ name: 'AppGrafica' })
+    expect(grafica.exists()).toBe(true)
+    expect(grafica.props('categorias')).toEqual(['Harina'])
+    const nombres = (grafica.props('series') as { nombre: string }[]).map(s => s.nombre)
+    expect(nombres).toEqual(['Sin explicación', 'Merma', 'Cortesía'])
+    expect(nombres).not.toContain('Otros')
+
+    const pie = wrapper.find('[data-qa="varianza-grafica-pie"]').text()
+    expect(pie).toContain('Y 7 productos más')
+    expect(pie).toContain('1 en otra moneda no se grafica.')
+    wrapper.unmount()
+  })
+
+  it('el valor se escribe con la moneda de su producto', async () => {
+    const wrapper = await montar()
+    const formato = wrapper.findComponent({ name: 'AppGrafica' }).props('formato') as
+      (v: string, i: number) => string
+    expect(formato('750.0000', 0)).toBe('$750')
+    wrapper.unmount()
+  })
+
+  /**
+   * Un sobrante entra con `sinExplicacion` negativo. Apilado junto a la merma se
+   * superpondría con ella y acortaría la barra: no es plata perdida, así que no
+   * se dibuja —la tabla lo tiene— y el pie lo dice.
+   */
+  it('un sobrante no se apila con las pérdidas: se grafica en cero y se avisa', async () => {
+    RESUMEN = { ...RESUMEN_BASE, top: [top('Harina', 'clp-1', '750.0000'), top('Azúcar', 'clp-1', '-300.0000')] }
+    const wrapper = await montar()
+    const series = wrapper.findComponent({ name: 'AppGrafica' }).props('series') as
+      { nombre: string, valores: string[] }[]
+    expect(series.find(s => s.nombre === 'Sin explicación')!.valores).toEqual(['750.0000', '0'])
+    expect(wrapper.find('[data-qa="varianza-grafica-pie"]').text()).toContain('1 con sobrante')
+    wrapper.unmount()
+  })
+
+  /** El store de monedas carga en paralelo con el resumen; sin él, no se adivina. */
+  it('sin la moneda oficial todavía, la gráfica espera en vez de mezclar monedas', async () => {
+    const wrapper = await montar()
+    useMonedasStore().hydrate([], 'tenant-1')
+    await new Promise(r => setTimeout(r, 10))
+    const grafica = wrapper.findComponent({ name: 'AppGrafica' })
+    expect(grafica.props('cargando')).toBe(true)
+    expect(grafica.props('categorias')).toEqual([])
+    expect(wrapper.find('[data-qa="varianza-grafica-pie"]').text()).not.toContain('otra moneda')
+    wrapper.unmount()
+  })
+
+  /**
+   * Si `/monedas` falló, la moneda oficial no llega nunca: esperarla dejaba el
+   * esqueleto de carga para siempre. Es un fallo y se dice como fallo.
+   */
+  it('si las monedas no cargaron, la gráfica muestra el fallo, no un esqueleto eterno', async () => {
+    const wrapper = await montar()
+    const monedas = useMonedasStore()
+    monedas.reset()
+    monedas.error = 'Error al cargar monedas'
+    await new Promise(r => setTimeout(r, 10))
+    const grafica = wrapper.findComponent({ name: 'AppGrafica' })
+    expect(grafica.props('fallo')).toBe(true)
+    expect(grafica.props('cargando')).toBe(false)
+    monedas.error = null
+    wrapper.unmount()
+  })
+
+  it('sin top, la gráfica muestra su estado vacío', async () => {
+    RESUMEN = { ...RESUMEN_BASE, top: [], fueraDelTop: 0 }
+    const wrapper = await montar()
+    expect(wrapper.findComponent({ name: 'AppGrafica' }).props('vacio')).toBe(true)
     wrapper.unmount()
   })
 })

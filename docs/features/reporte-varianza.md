@@ -1,6 +1,6 @@
 # Feature: Reporte de varianza (AVT)
 
-> **Estado:** backend y pantalla (tabla) listos; la gráfica es la tarea 8 del plan.
+> **Estado:** implementado — backend, tabla y gráfica (2026-09-21).
 > Spec de diseño: [`docs/superpowers/specs/2026-09-19-modulo-reportes-varianza-design.md`](../superpowers/specs/2026-09-19-modulo-reportes-varianza-design.md).
 
 ## Qué contesta
@@ -122,6 +122,15 @@ alcanzable por la entrada "Reportes" del menú (catálogo en `composables/useRep
 - «Otros» se pinta apagado en cero y en alerta, con explicación, cuando no; **la columna no se
   esconde nunca**.
 - El faltante de conteo sale en una línea con los dos números, y cada uno abre su lista.
+- **La gráfica** son barras apiladas del top 10 por plata perdida —sin explicación, merma,
+  cortesía—, con *"y N productos más"* al pie. Sale del mismo `/resumen`, sin ruta aparte.
+  ⛔ **«Otros» no entra**: es un detector de que la cuenta no cerró, no una parte de la pérdida.
+  ⚠️ **Grafica solo la moneda oficial.** El top viene ordenado por magnitud cruda y puede mezclar
+  monedas, y una barra en pesos al lado de otra en dólares no se compara por largo; los de otra
+  moneda se cuentan al pie y están en la tabla. **Un sobrante no se dibuja**: llega con
+  `sinExplicacion` negativo, no es plata perdida, y apilado se superpondría con la merma; se
+  grafica en cero y el pie lo cuenta. Mientras no cargó la moneda oficial, la gráfica espera; si la carga falló, lo dice como fallo.
+  Detalle de la gráfica: ADR-027.
 
 ## Aristas aceptadas a sabiendas
 

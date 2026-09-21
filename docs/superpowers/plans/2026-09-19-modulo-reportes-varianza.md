@@ -1466,7 +1466,7 @@ git commit -m "feat(reportes): el selector de rango compartido y la pantalla de 
 - Consume: `ResumenVarianza.top` de la Tarea 6 y la pantalla de la Tarea 7.
 - Produce: `AppGrafica` con props `series`, `categorias`, `formato`, `cargando`, `vacio`.
 
-- [ ] **Paso 1: instalar la dependencia**
+- [x] **Paso 1: instalar la dependencia**
 
 ```bash
 npm --prefix /Users/m2pro/cmatheus/startup-app/.claude/worktrees/reportes-varianza/frontend install @unovis/vue @unovis/ts
@@ -1475,20 +1475,20 @@ npm --prefix /Users/m2pro/cmatheus/startup-app/.claude/worktrees/reportes-varian
 ⚠️ **Es la única dependencia nueva autorizada.** Si al implementar hiciera falta otra (un plugin,
 un polyfill), **parar y preguntarle al owner** — no instalarla.
 
-- [ ] **Paso 2: el spec de render que falla**
+- [x] **Paso 2: el spec de render que falla**
 
 Cuatro aserciones: con `cargando` muestra el esqueleto y no la gráfica; con `vacio` muestra el
 estado vacío; con series muestra una barra por categoría; y **los colores salen de variables CSS**,
 no de literales en el JS (aserción sobre el atributo, no sobre el color computado — happy-dom no
 calcula layout).
 
-- [ ] **Paso 3: correrlo y verificar que falla**
+- [x] **Paso 3: correrlo y verificar que falla**
 
 ```bash
 cd frontend && npm test -- AppGrafica
 ```
 
-- [ ] **Paso 4: implementar `AppGrafica`**
+- [x] **Paso 4: implementar `AppGrafica`**
 
 Envuelve Unovis. Reglas, que son el patrón que el próximo reporte copia:
 
@@ -1501,7 +1501,7 @@ Envuelve Unovis. Reglas, que son el patrón que el próximo reporte copia:
 - **`<ClientOnly>`**: la app es SPA (ADR-017) y la pantalla **tiene que seguir andando si la
   gráfica no monta** — el número vive en la tabla.
 
-- [ ] **Paso 5: la gráfica en la pantalla**
+- [x] **Paso 5: la gráfica en la pantalla**
 
 Top 10 por plata perdida, desc, con *"y N productos más — la tabla los tiene todos"* debajo
 (`fueraDelTop`). Los datos salen de `/resumen`, **sin ruta aparte**.
@@ -1509,7 +1509,7 @@ Top 10 por plata perdida, desc, con *"y N productos más — la tabla los tiene 
 ⛔ **«Otros» no entra en la gráfica**: es un detector de que la cuenta no cerró, no una parte de la
 pérdida; apilarlo lo haría leer como una categoría más de plata perdida. Su lugar es la tabla.
 
-- [ ] **Paso 6: verificar, incluido el modo oscuro**
+- [x] **Paso 6: verificar, incluido el modo oscuro**
 
 ```bash
 cd frontend && npm test -- AppGrafica varianza && npm run design:check
@@ -1518,7 +1518,7 @@ cd frontend && npm test -- AppGrafica varianza && npm run design:check
 Más una pasada en el navegador en modo oscuro (stack compartido, con turno): que los colores de
 las barras y los ejes se lean.
 
-- [ ] **Paso 7: el ADR**
+- [x] **Paso 7: el ADR**
 
 `docs/adr/027-graficas-con-unovis.md`: la dependencia y su decisión textual del owner; por qué SVG
 + variables CSS y no colores en JS; y la regla de que la gráfica acompaña a la tabla y nunca es la
@@ -1526,7 +1526,25 @@ fuente de verdad. Agregar la fila en `docs/adr/README.md`.
 
 ⚠️ Verificar que **027 sigue libre** antes de escribirlo: otra sesión pudo haber tomado el número.
 
-- [ ] **Paso 8: gate y commit**
+📌 **Cómo se ejecutó (2026-09-21), donde se apartó de lo escrito:**
+- **Props de más:** `fallo` (el estado de error que el Paso 4 pide distinguir no tenía prop) y
+  `formatoEje` (el eje de valores mostraba el número pelado).
+- **Solo la moneda oficial** en la gráfica: el top viene ordenado por magnitud cruda y mezcla
+  monedas; el resto se cuenta al pie.
+- **El navegador cazó dos cosas que los specs no veían**: el top dibujado al revés (Unovis pone la
+  posición 0 abajo) y los nombres largos partidos en tres renglones. Los dos quedaron en el spec.
+  El modo oscuro se verificó con captura: la app arranca en `light` y re-aplica la preferencia del
+  perfil, así que se forzó la clase `dark` en `<html>` después de cargar.
+- **La revisión cazó dos más, arreglados en la tarea:** un sobrante (`sinExplicacion` negativo)
+  se apilaba superpuesto con la merma —ahora se dibuja en cero y el pie lo cuenta—, y con el store
+  de monedas sin cargar la gráfica caía a mezclar monedas —ahora espera, y si `/monedas` falló muestra el fallo en vez de un esqueleto eterno (lo encontró la re-revisión del arreglo)—.
+- **Costo medido de la dependencia:** 161 paquetes transitivos; en el bundle, 63 KB gzip solo en
+  el chunk perezoso de la pantalla (ADR-027).
+- ⚠️ **El contenedor del frontend trae su propio `node_modules`**: tras el `npm install` en el host
+  hubo que correrlo también adentro (`docker exec … npm install`), o Vite no resuelve
+  `@unovis/vue`. Un stack levantado antes de este commit necesita lo mismo o un `--build`.
+
+- [x] **Paso 8: gate y commit**
 
 ```bash
 git add frontend/package.json frontend/package-lock.json frontend/app/components/AppGrafica.vue frontend/app/components/AppGrafica.nuxt.spec.ts frontend/app/pages/reportes/varianza.vue docs/adr/027-graficas-con-unovis.md docs/adr/README.md docs/patterns/frontend.md
