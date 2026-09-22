@@ -1023,6 +1023,11 @@ CREATE INDEX "idx_movimientos_inventario_compra_linea" ON "movimientos_inventari
 -- El recorrido de "rehacer la cuenta": los movimientos de UN producto desde
 -- una secuencia en adelante, en orden.
 CREATE INDEX "idx_movimientos_inventario_item_secuencia" ON "movimientos_inventario" ("item_id", "secuencia");
+-- El reporte de varianza: los movimientos de UN producto en UNA ubicación, entre
+-- dos recuentos. No reemplaza al de arriba: "rehacer la cuenta" recorre el
+-- producto en todas las ubicaciones por secuencia, y este no sirve ese orden.
+-- Medición en la entity y en docs/features/reporte-varianza.md.
+CREATE INDEX "idx_movimientos_inventario_item_ubicacion_secuencia" ON "movimientos_inventario" ("item_id", "ubicacion_id", "secuencia");
 
 -- ─── Compras (pieza 1: recibir mercadería) ──────────────────────────────────
 -- docs/features/compras.md

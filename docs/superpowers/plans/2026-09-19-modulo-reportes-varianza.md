@@ -1583,7 +1583,7 @@ o sea que buena parte de lo medido pasó por la rama de respaldo `creado_el` y n
 `secuencia`. Un seed donde todos los recuentos escriban movimiento ejercita la otra rama y puede
 dar otro número — es el mismo punto del Paso 1 de esta tarea, cobrado en carne propia.
 
-- [ ] **Paso 1: conseguir un volumen que se pueda medir**
+- [x] **Paso 1: conseguir un volumen que se pueda medir**
 
 El seed base no alcanza. Generar movimientos hasta un orden realista (decenas de miles) **con
 distribución realista**: variedad de `motivo`, de `item_id` y de fechas.
@@ -1592,7 +1592,7 @@ distribución realista**: variedad de `motivo`, de `item_id` y de fechas.
 índice parcial "no sirve" y la conclusión es falsa — ya pasó en este repo y está documentado en el
 docblock de `idx_movimientos_inventario_venta`.
 
-- [ ] **Paso 2: medir**
+- [x] **Paso 2: medir**
 
 ```bash
 cd backend && npm run test:e2e -- reportes-varianza
@@ -1601,7 +1601,7 @@ cd backend && npm run test:e2e -- reportes-varianza
 Y `EXPLAIN (ANALYZE, BUFFERS)` de las consultas del listado y del resumen contra el Postgres del
 worktree (5436). Anotar el plan y los tiempos **antes** de tocar nada.
 
-- [ ] **Paso 3: decidir con el número en la mano**
+- [x] **Paso 3: decidir con el número en la mano**
 
 📌 **Candidato nuevo, levantado por la revisión de la Tarea 4 (2026-09-20): `SQL_SALDOS`.** Hace
 **dos subconsultas correlacionadas por fila** (`ORDER BY secuencia DESC LIMIT 1`), o sea 2 ×
@@ -1642,12 +1642,23 @@ venta.
 `@Index` y el seeder usa `CREATE INDEX IF NOT EXISTS` en SQL cruda para lo que `@Index` no puede
 expresar (parciales, `lower(...)`). Un índice simple va en la entity.
 
-- [ ] **Paso 4: dejar la medición escrita**
+- [x] **Paso 4: dejar la medición escrita**
 
 Si entra un índice, su docblock lleva el antes/después medido, como los cuatro que ya tiene la
 entidad. Si no entra, la medición va en `docs/features/reporte-varianza.md`.
 
-- [ ] **Paso 5: gate y commit**
+📌 **Resultado (2026-09-21): entra el índice `(item_id, ubicacion_id, secuencia)`**, en la entity.
+Con 92 mil movimientos y cada producto en local **y** bodega: listado de un año 587 → 140 ms,
+resumen de un año 688 → 119 ms, con el JIT en su default. La mayor parte de la mejora es que el
+índice baja el costo estimado por debajo de `jit_above_cost` y el JIT deja de compilar (431 de
+562 ms). Escribir no cuesta más (medido). La Tarea 5 había medido "no sirve" con un seed donde
+cada producto vivía en una sola ubicación. ⚠️ La primera corrida de esta tarea también midió mal:
+`synchronize` borró al arrancar el índice creado a mano, y lo encontró la revisión. Tabla completa
+en `docs/features/reporte-varianza.md` § Rendimiento. El Paso 2 no corrió contra el 5436 (ese
+Postgres aislado ya no existe): corrió contra una base `medicion` copiada dentro del Postgres del
+stack del worktree, para no ensuciar la del e2e.
+
+- [x] **Paso 5: gate y commit**
 
 Stagear solo lo que la medición justificó — si no entró índice, esta tarea commitea **únicamente**
 la doc con el número medido.
