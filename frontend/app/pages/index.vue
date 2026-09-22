@@ -46,6 +46,9 @@ const permissionsStore = usePermissionsStore()
             <InicioSalon v-if="permissionsStore.esAdmin || permissionsStore.can('Salones', 'Ver todas')" />
             <InicioCajas v-if="permissionsStore.esAdmin || permissionsStore.can('Cajas', 'Leer')" />
             <InicioCierres v-if="permissionsStore.esAdmin || permissionsStore.can('Cajas', 'Leer')" />
+            <!-- En "Ahora" y no en "Hoy": el stock cambia todo el turno con cada
+                 venta, igual que salón y cajas. -->
+            <InicioStockBajo v-if="permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Leer')" />
           </div>
         </section>
 

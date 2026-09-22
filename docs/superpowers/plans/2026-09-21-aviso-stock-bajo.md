@@ -226,14 +226,15 @@ del dashboard (el link va dentro del bloque ya gateado por `Inventario:Leer`).
 **Archivos:** crear `frontend/app/components/inicio/InicioStockBajo.vue` y su spec; modificar
 `frontend/app/pages/index.vue` (la grilla de "Ahora").
 
-- [ ] **Paso 1: spec que falla** — sin `Inventario:Leer` no se pide la ruta; con el permiso se pide
-      una vez y se refresca con `useRefrescoPeriodico` (timers falsos); con `total: 0` el bloque
+- [x] **Paso 1: spec que falla** — sin `Inventario:Leer` no se pide la ruta; con el permiso se pide
+      una vez ~~y se refresca con `useRefrescoPeriodico` (timers falsos)~~ — la cadencia es del
+      composable, que ya tiene su spec con timers falsos; acá se afirma una llamada al montar; con `total: 0` el bloque
       dice que no hay nada bajo el mínimo; con `total > 0` muestra el número y hasta 4 filas; un 403
       oculta el bloque sin toast, igual que `InicioCajas`.
-- [ ] **Paso 2: correrlo y confirmar que falla.**
-- [ ] **Paso 3: implementar** el componente y montarlo.
-- [ ] **Paso 4: confirmar verde.**
-- [ ] **Paso 5: gate y commit** — `feat(inicio): bloque de stock bajo, agrupado por ubicación`.
+- [x] **Paso 2: correrlo y confirmar que falla.**
+- [x] **Paso 3: implementar** el componente y montarlo.
+- [x] **Paso 4: confirmar verde.**
+- [x] **Paso 5: gate y commit** — `feat(inicio): bloque de stock bajo, agrupado por ubicación`.
 
 ---
 
