@@ -400,15 +400,16 @@ caso de "hoy hay en bodega, conviene traslado". **Bsale** documenta el traslado 
 sucursales como un flujo separado (guía de despacho interna); no se encontró que se dispare o
 sugiera desde una alerta de stock.
 **Por qué nos toca justo a nosotros:** el caso que decidió la forma del mínimo —3 cajas de
-cerveza en bodega y 0 en el local (`pendientes.md` § 4, owner 2026-09-20)— es exactamente el
+cerveza en bodega y 0 en el local ([`resueltos.md`](agent/resueltos.md), entrada "Aviso de stock bajo", owner 2026-09-20)— es exactamente el
 caso donde la respuesta correcta es un traslado, no una compra. Y `startup-app` **ya
 construyó este patrón en otro punto del sistema**: cuando una venta rechaza por falta de stock
 en el local, el 400 ya nombra dónde está la mercadería y ofrece el traslado precargado a un
 clic a quien tiene el permiso (`docs/features/bodegas-y-traslados.md`, "El rechazo dice dónde
 está la mercadería"). El mercado no ofrece el patrón, pero el código ya lo resolvió para el
 caso hermano.
-**Estado: 💡 hallazgo, sin diseño y sin decisión.** El aviso de stock bajo en sí todavía no
-está construido.
+**Estado: ✅ construido (2026-09-21).** La fila bajo el mínimo ofrece el traslado desde la
+ubicación con más stock, a quien tiene `Inventario:Crear`; a quien no, le dice dónde está
+([feature](features/aviso-stock-bajo.md)).
 **Evidencia:** [investigación 2026-09-20 § 5](agent/investigaciones/2026-09-20-aviso-stock-bajo-punto-reorden.md#5-multi-ubicación-traslado-antes-que-compra) ·
 [ParallelPOS — Clover multi-location limits](https://parallelpos.com/blog/clover-multi-location-inventory) ·
 [Odoo — Resupply from Warehouse](https://www.odoo.com/documentation/16.0/applications/inventory_and_mrp/inventory/warehouses_storage/replenishment/resupply_warehouses.html) ·
@@ -424,11 +425,13 @@ lo que está en camino, así que un pedido ya hecho baja su urgencia)— actúan
 **Ninguno de los relevados documenta** un mecanismo de silenciar o marcar "ya lo pedí" sobre
 una **marca fija y siempre visible** en una pantalla.
 **Por qué nos toca:** el owner decidió avisar en **dos lugares fijos** —bloque del dashboard y
-marca en el listado de inventario (`pendientes.md` § 4)— sin ningún mecanismo de agrupar o
+marca en el listado de inventario ([`resueltos.md`](agent/resueltos.md), misma entrada)— sin ningún mecanismo de agrupar o
 silenciar todavía decidido. Es exactamente el formato para el que el mercado relevado no
 ofrece un patrón directo.
-**Estado: 💡 hallazgo, sin diseño.** No es una decisión tomada que haya que revertir — el
-owner no decidió nada sobre esto todavía; queda como pregunta abierta.
+**Estado: 🟡 construido con una propiedad, falta medir.** El owner decidió (2026-09-20) que el
+bloque del inicio sea un número agrupado por ubicación que **no crece**, y que lo ya pedido deje
+de urgir; descartó el botón de descartar. Si el primer día de uso real muestra 40, es ruido: las
+palancas conocidas están en [`features/aviso-stock-bajo.md`](features/aviso-stock-bajo.md).
 ⚠️ Regla 3 de este archivo: ausencia de documentación pública no prueba ausencia de la
 función.
 **Evidencia:** [investigación 2026-09-20 § 3](agent/investigaciones/2026-09-20-aviso-stock-bajo-punto-reorden.md#3-cómo-evitan-el-ruido).

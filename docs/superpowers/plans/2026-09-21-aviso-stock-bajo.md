@@ -3,7 +3,7 @@
 > **Para agentes:** ejecutar con `superpowers:subagent-driven-development` o
 > `superpowers:executing-plans`, tarea por tarea, marcando los checkboxes.
 
-**Status:** In progress — aprobado por el owner el 2026-09-21
+**Status:** Complete (2026-09-21) — aprobado por el owner el 2026-09-21
 **Date:** 2026-09-21
 **Owner:** Cesar Matheus
 **Spec:** [`../specs/2026-09-21-aviso-stock-bajo-design.md`](../specs/2026-09-21-aviso-stock-bajo-design.md)
@@ -245,15 +245,21 @@ Necesita `./scripts/entorno.sh stack`.
 **Archivos:** crear `frontend/e2e/inventario/stock-minimo.spec.ts` y
 `docs/features/aviso-stock-bajo.md`; modificar `docs/README.md` y `docs/ESTADO.md`.
 
-- [ ] **Paso 1: el smoke por pantalla**, entrando con un **rol real** de `Inventario` y no con
+- [x] **Paso 1: el smoke por pantalla**, entrando con un **rol real** de `Inventario` y no con
       admin: cargar un mínimo, ver la marca, ver el bloque del dashboard con el número correcto,
       disparar el traslado precargado y verificar que abre con el destino correcto cuando la
       ubicación baja es una bodega, y que un rol sin `Inventario:Crear` ve el aviso **sin** botón.
-- [ ] **Paso 2: correrlo.**
-- [ ] **Paso 3: documentar** la feature, el link y la fila de estado. Una línea densa, sin
+- [x] **Paso 2: correrlo.**
+      Verde, y los dos mutantes de navegador que importan mueren: el botón gateado con
+      `Actualizar` en vez de `Crear` (lo ve el aprobador) y la ruta sin `destinoId`.
+      ⚠️ En la suite completa fallan `ventas/pos.spec` y `salones/cuenta-hasta-cobro` en esta
+      máquina, también solos y sobre base limpia: los dos esperan la impresión de la boleta, y acá
+      corre QZ Tray (8181/8182) — sus plazos están medidos para cuando no está. CI, sin QZ Tray, los
+      pasa en `main` antes de este frente, y el diff no toca ventas, salones, caja ni impresión.
+- [x] **Paso 3: documentar** la feature, el link y la fila de estado. Una línea densa, sin
       superlativos ni conteos de completitud: describir el criterio.
-- [ ] **Paso 4: gate completo** sobre el conjunto de las ocho tareas.
-- [ ] **Paso 5: avisar a la orquestadora** que el frente está listo para la revisión de rama.
+- [x] **Paso 4: gate completo** sobre el conjunto de las ocho tareas.
+- [x] **Paso 5: avisar a la orquestadora** que el frente está listo para la revisión de rama.
 
 ---
 

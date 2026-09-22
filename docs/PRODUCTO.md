@@ -361,6 +361,13 @@ Extensiones futuras contempladas: combos con grupos de modificadores (elección,
 
 **Alertas útiles:** stock bajo, productos próximos a vencer.
 
+**Stock bajo** (implementado, [`features/aviso-stock-bajo.md`](features/aviso-stock-bajo.md)): el
+mínimo es por producto **y** ubicación, nace vacío y sin mínimo no hay aviso. Cuenta unidades del
+saldo, igual en los tres modos de inventario; el vencimiento no entra. Una compra en borrador para
+ese producto y ubicación lo saca del aviso del inicio; una confirmada que no alcanzó, no. El mínimo
+no se borra al eliminar o desactivar el producto o la bodega: deja de evaluarse, y vuelve al
+restaurar o reactivar.
+
 ---
 
 ### 8b. Inventario (kardex de movimientos de stock)

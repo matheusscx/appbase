@@ -1,6 +1,6 @@
 # Spec: Aviso de stock bajo (punto de reorden)
 
-**Status**: Draft
+**Status**: Implemented (2026-09-21) — desvíos al ejecutar anotados en la tabla de decisiones del plan
 **Date**: 2026-09-21
 **Owner**: Cesar Matheus
 
