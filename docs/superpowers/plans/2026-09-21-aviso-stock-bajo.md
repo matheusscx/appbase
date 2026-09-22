@@ -201,19 +201,23 @@ test `backend/test/stock-minimo.e2e-spec.ts`.
 **Archivos:** crear `frontend/app/pages/inventario/stock-minimo.vue` y su spec; modificar el layout
 del dashboard (el link va dentro del bloque ya gateado por `Inventario:Leer`).
 
-- [ ] **Paso 1: verificar los fixtures de permiso** en el seeder. Si no existe un rol con **solo**
+- [x] **Paso 1: verificar los fixtures de permiso** en el seeder. Si no existe un rol con **solo**
       `Inventario:Leer`, agregarlo con IDs del bloque reservado (grep de verificación primero).
-- [ ] **Paso 2: specs de componente que fallan** — sin `Inventario:Leer` la página no monta ninguna
+      **Resuelto sin IDs nuevos:** `aprobador@paris.cl` (Leer + Actualizar) y `contador@paris.cl`
+      (Leer + Crear) ya separan las dos escrituras; el bloque reservado queda sin usar.
+      "Sin `Leer` no monta ninguna llamada" lo cubre el middleware `permiso` de la ruta, que
+      corre antes de montar y tiene su propio spec.
+- [x] **Paso 2: specs de componente que fallan** — sin `Inventario:Leer` la página no monta ninguna
       llamada; con `Leer` pero sin `Actualizar`, la tabla se ve y el input de mínimo no está
       disponible; con `Actualizar`, guarda con `PUT`; el botón de traslado aparece solo con
       `Inventario:Crear` **real** y navega con el destino de la fila.
-- [ ] **Paso 3: correrlos y confirmar que fallan.**
-- [ ] **Paso 4: implementar la página** — tabla paginada del servidor, columna de mínimo editable
+- [x] **Paso 3: correrlos y confirmar que fallan.**
+- [x] **Paso 4: implementar la página** — tabla paginada del servidor, columna de mínimo editable
       gateada por `usePermisosCrud('Inventario').puedeActualizar`, columna de estado
       (`bajoMinimo`/`enCamino`), y la acción de traslado gateada por `.puedeCrear`.
-- [ ] **Paso 5: el link del nav.**
-- [ ] **Paso 6: confirmar verde.**
-- [ ] **Paso 7: gate y commit** — `feat(inventario): pantalla de mínimo por ubicación, con marca y traslado`.
+- [x] **Paso 5: el link del nav.**
+- [x] **Paso 6: confirmar verde.**
+- [x] **Paso 7: gate y commit** — `feat(inventario): pantalla de mínimo por ubicación, con marca y traslado`.
 
 ---
 

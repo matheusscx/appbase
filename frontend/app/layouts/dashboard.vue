@@ -144,6 +144,11 @@ const items = computed<NavigationMenuItem[]>(() => {
       icon: 'i-lucide-arrow-left-right',
       to: '/inventario/traslados',
     })
+    base.push({
+      label: 'Stock mínimo',
+      icon: 'i-lucide-package-minus',
+      to: '/inventario/stock-minimo',
+    })
   }
   if (permissionsStore.esAdmin || permissionsStore.can('Compras', 'Leer')) {
     base.push({
