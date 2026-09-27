@@ -22,6 +22,7 @@ import {
   EsCosto,
   EsMontoCobrado,
 } from '../../../common/decorators/escala-moneda.decorator';
+import { LARGO_MAXIMO_RUT, PATRON_RUT } from './lectura-dte.dto';
 
 export class SerieCompraDto {
   // Una serie de solo espacios no identifica nada, y `@IsNotEmpty` no la
@@ -107,6 +108,46 @@ export class LineaCompraDto {
   @ValidateNested()
   @Type(() => LoteCompraDto)
   lote?: LoteCompraDto;
+
+  /**
+   * La clave de la línea del XML (spec compras-xml-dte § 3.2). Solo las que
+   * vinieron del XML. Viaja siempre con `descripcionProveedor`: el
+   * `ValidateIf` de las dos se dispara si **cualquiera** llegó, así que una
+   * descripción sin clave (o al revés) es 400 sin código en el service.
+   */
+  @ValidateIf(
+    (o: LineaCompraDto) =>
+      o.claveProveedor !== undefined || o.descripcionProveedor !== undefined,
+  )
+  @IsString()
+  @IsNotEmpty()
+  // `@IsNotEmpty` no distingue `"   "` de contenido real (mismo caso que
+  // `SerieCompraDto.serie`, más arriba): `normalizarClave` la deja en `''` y
+  // quedaría una clave vacía aprendida.
+  @Matches(/\S/, { message: 'La clave no puede ser solo espacios' })
+  @MaxLength(160)
+  claveProveedor?: string;
+
+  @ValidateIf((o: LineaCompraDto) => o.claveProveedor !== undefined)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  descripcionProveedor?: string;
+}
+
+/** Una línea del XML marcada "no es mercadería" (spec compras-xml-dte § 5.2). */
+export class ApartadaDteDto {
+  @IsString()
+  @IsNotEmpty()
+  // Mismo caso que `LineaCompraDto.claveProveedor`, más arriba.
+  @Matches(/\S/, { message: 'La clave no puede ser solo espacios' })
+  @MaxLength(160)
+  clave: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  descripcion: string;
 }
 
 /**
@@ -156,4 +197,27 @@ export class CompraBorradorDto {
   @ValidateNested({ each: true })
   @Type(() => LineaCompraDto)
   lineas: LineaCompraDto[];
+
+  /**
+   * Líneas del XML marcadas "no es mercadería": se aprenden con
+   * `no_mercaderia = true`, no se cargan como línea (spec compras-xml-dte
+   * § 5.2).
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(60)
+  @ValidateNested({ each: true })
+  @Type(() => ApartadaDteDto)
+  apartadas?: ApartadaDteDto[];
+
+  /**
+   * El RUT del emisor, cuando el proveedor se eligió a mano porque el RUT del
+   * XML no calzó con ninguno (spec § 3.1 y § 5.2, decisión 3). Se guarda en
+   * `rut_fiscal` si el proveedor no tenía ninguno de los dos.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(LARGO_MAXIMO_RUT)
+  @Matches(PATRON_RUT)
+  rutProveedor?: string;
 }

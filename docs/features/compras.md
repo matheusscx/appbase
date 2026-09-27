@@ -204,31 +204,53 @@ Spec: [`2026-09-27-compras-unidad-de-compra-design.md`](../superpowers/specs/202
 
 ---
 
-## La lectura del XML (en construcción)
+## La lectura del XML y el aprendizaje (en construcción)
 
-Pieza 3 (spec `docs/superpowers/specs/2026-09-27-compras-xml-dte-design.md`): el encargado sube
-el XML de la factura electrónica (DTE) del SII y el borrador de siempre queda pre-llenado. El
-XML se lee en el **navegador** (`DOMParser`); el servidor solo recibe los datos ya planos, nunca
-el archivo.
+Spec `docs/superpowers/specs/2026-09-27-compras-xml-dte-design.md`: el encargado sube el XML de
+la factura electrónica (DTE) del SII y el borrador de siempre queda pre-llenado. El XML se lee
+en el **navegador** (`DOMParser`); el servidor solo recibe los datos ya planos, nunca el archivo.
 
-**Tarea 1 (esta), backend de solo lectura:**
+**Tarea 1, backend de solo lectura:**
 
 - **`codigos_proveedor`** (nueva): lo que el sistema aprendió de la factura de un proveedor —
   "su código CC350-12 es la Coca-Cola en Caja (12)", o "su FLETE no es mercadería". Reaprender no
-  pisa: marca la fila vieja con `eliminado_el` e inserta otra (el owner pide reversibilidad). Hoy
-  está siempre vacía: la escritura (aprender al guardar el borrador) es la tarea 2.
+  pisa: marca la fila vieja con `eliminado_el` e inserta otra (el owner pide reversibilidad).
 - **`POST /compras/dte/lectura`** resuelve, en consultas fijas (ninguna por línea): si el RUT
   receptor es una razón social viva del tenant; el proveedor por `RUTEmisor` (uno solo → elegido;
   ninguno o varios → el encargado elige, con `proveedorId`); el tipo de documento por su código
   SII (`null` si es nota de crédito/débito — `56`/`61` no se cargan acá — o si el código no tiene
   fila); si el folio ya está cargado (borrador o confirmada; una anulada libera el suyo); y las
-  asociaciones aprendidas por clave (hoy siempre `destino: null`, sin escritura todavía).
+  asociaciones aprendidas por clave (`destino` es `{itemId, presentacionId}`, `{itemId,
+  unidadCodigo}`, `'no_mercaderia'` o `null` — con una nota si apuntaba a algo retirado o
+  borrado).
 - **RUT del emisor no calza con ningún proveedor:** el encargado elige uno con `proveedorId`; si
   ese proveedor ya tiene un RUT guardado y no es el del emisor, 400. Con los dos RUT vacíos, pasa
-  (la tarea 2 lo guarda al confirmar el borrador).
+  (la tarea 2 lo guarda al guardar el borrador).
 
-Frontend (lector del XML, pantalla, aprendizaje al guardar): tareas 2 a 4, todavía sin
-implementar.
+**Tarea 2, aprender al guardar (`POST /compras` y `PATCH /compras/:id`):**
+
+- Cada **línea** con `claveProveedor` (+ `descripcionProveedor`) enseña su destino: el
+  `itemId` de la línea, con su `presentacionId` o su `unidadCodigo` (los dos ya validados como
+  del proveedor y del producto antes de aprender). Una línea tipeada a mano, sin clave, no toca
+  la tabla.
+- El body puede traer **`apartadas: [{ clave, descripcion }]`** (hasta 60): las líneas del XML
+  marcadas "no es mercadería" se aprenden con `no_mercaderia = true`, no se cargan como línea.
+- **`rutProveedor`** (cuando el proveedor se eligió a mano porque el RUT del XML no calzó): si el
+  proveedor tenía `rut` y `rut_fiscal` vacíos, se guarda en `rut_fiscal` tal como vino en el XML;
+  si tenía alguno y ninguno calza, 400 (el mismo mensaje de la lectura) y el borrador no se
+  guarda — todo en la misma transacción.
+- **Reaprender no pisa:** con la misma clave y un destino distinto (el proveedor cambió de código
+  o el encargado corrigió una asociación mala), la fila vieja se marca con `eliminado_el` y se
+  inserta la nueva. Con el **mismo** destino, no se escribe nada. La misma clave usada dos veces
+  en la misma factura para destinos distintos (una línea y una apartada, por ejemplo) es 400 que
+  nombra la clave: es un error de captura, no algo que el sistema pueda decidir por su cuenta.
+- Tres statements fijos por guardado (`SELECT … FOR UPDATE` de las vivas que la factura toca,
+  `UPDATE` de las que cambian de destino, `INSERT` de las nuevas), nunca uno por línea. Sin
+  claves ni apartadas, no consulta nada.
+- **Confirmar, el kardex y el CPP no cambian:** el borrador guardado es el mismo de siempre; el
+  aprendizaje no altera qué se recibe ni cómo se costea.
+
+Frontend (lector del XML, pantalla): tareas 3 y 4, todavía sin implementar.
 
 ---
 

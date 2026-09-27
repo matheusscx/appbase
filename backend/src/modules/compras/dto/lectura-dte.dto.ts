@@ -17,7 +17,7 @@ export const PATRON_RUT = /^[0-9.\s]{1,12}-?[0-9kK]\s*$/;
  * `@MaxLength` aparte. 20 alcanza de sobra para un RUT con puntos y guion
  * (máximo 12 dígitos de cuerpo en el patrón).
  */
-const LARGO_MAXIMO_RUT = 20;
+export const LARGO_MAXIMO_RUT = 20;
 
 /**
  * Body de `POST /compras/dte/lectura` (spec compras-xml-dte § 7). Lo arma el

@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Db } from '../../common/db/db.service';
 import type { LecturaDteDto } from './dto/lectura-dte.dto';
@@ -5,6 +6,9 @@ import {
   LecturaDteService,
   normalizarClave,
   normalizarRut,
+  planAprendizaje,
+  type CodigoVivo,
+  type EntradaAprendizaje,
 } from './lectura-dte.service';
 
 describe('normalizarRut', () => {
@@ -26,6 +30,124 @@ describe('normalizarClave', () => {
     expect(normalizarClave('NOMBRE:Fanta   350ml  CJ12')).toBe(
       'NOMBRE:FANTA 350ML CJ12',
     );
+  });
+});
+
+/**
+ * `planAprendizaje`: puro, sin `Db` (spec compras-xml-dte § 5.2, tarea 2
+ * § "Step 2"). Un test por regla.
+ */
+describe('planAprendizaje', () => {
+  const ITEM = 'item-1';
+  const OTRO_ITEM = 'item-2';
+  const PRESENTACION = 'presentacion-1';
+
+  function entrada(
+    clave: string,
+    destino: EntradaAprendizaje['destino'],
+    descripcion = 'Descripción',
+  ): EntradaAprendizaje {
+    return { clave, descripcion, destino };
+  }
+
+  function viva(
+    id: string,
+    clave: string,
+    destino: EntradaAprendizaje['destino'],
+  ): CodigoVivo {
+    return { id, clave, descripcion: 'Descripción vieja', destino };
+  }
+
+  it('clave sin viva: va a insertar, nada que marcar', () => {
+    const e = entrada('CJ12', { itemId: ITEM, unidadCodigo: 'unidad' });
+    expect(planAprendizaje([e], [])).toEqual({ marcar: [], insertar: [e] });
+  });
+
+  it('viva con el mismo destino: no marca ni inserta, la descripción no se toca', () => {
+    const destino = { itemId: ITEM, unidadCodigo: 'unidad' };
+    const e = entrada('CJ12', destino, 'Descripción nueva de la factura');
+    const v = viva('viva-1', 'CJ12', destino);
+    expect(planAprendizaje([e], [v])).toEqual({ marcar: [], insertar: [] });
+  });
+
+  it('viva con otro destino: marca la vieja e inserta la nueva', () => {
+    const e = entrada('CJ12', { itemId: ITEM, unidadCodigo: 'unidad' });
+    const v = viva('viva-1', 'CJ12', {
+      itemId: OTRO_ITEM,
+      unidadCodigo: 'unidad',
+    });
+    expect(planAprendizaje([e], [v])).toEqual({
+      marcar: ['viva-1'],
+      insertar: [e],
+    });
+  });
+
+  it('la misma clave dos veces con el mismo destino (línea bonificada a $0): una sola entrada', () => {
+    const destino = { itemId: ITEM, presentacionId: PRESENTACION };
+    const a = entrada('CJ12', destino, 'Primera vez');
+    const b = entrada('CJ12', destino, 'Bonificada a $0, mismo código');
+    const { marcar, insertar } = planAprendizaje([a, b], []);
+    expect(marcar).toEqual([]);
+    expect(insertar).toHaveLength(1);
+    expect(insertar[0].clave).toBe('CJ12');
+  });
+
+  it('la misma clave con destinos distintos: 400 que nombra la clave', () => {
+    const a = entrada('CJ12', { itemId: ITEM, unidadCodigo: 'unidad' });
+    const b = entrada('CJ12', { itemId: OTRO_ITEM, unidadCodigo: 'unidad' });
+    expect(() => planAprendizaje([a, b], [])).toThrow(BadRequestException);
+    expect(() => planAprendizaje([a, b], [])).toThrow(/CJ12/);
+  });
+
+  it('mercadería y no_mercaderia para la misma clave: la misma excepción', () => {
+    const a = entrada('FLETE', { itemId: ITEM, unidadCodigo: 'unidad' });
+    const b = entrada('FLETE', 'no_mercaderia');
+    expect(() => planAprendizaje([a, b], [])).toThrow(BadRequestException);
+    expect(() => planAprendizaje([a, b], [])).toThrow(/FLETE/);
+  });
+});
+
+/**
+ * `resolverAsociaciones`: el filtro de `eliminado_el` sobre `codigos_proveedor`
+ * (spec § 5.3, mutante Step 6 #2). Reaprender deja dos filas con la MISMA
+ * clave (la vieja marcada, la nueva viva); un e2e de comportamiento sobre eso
+ * es no determinístico —`porClave` es un `Map` que se queda con la ÚLTIMA
+ * fila del array, y sin `ORDER BY` ese orden lo decide el heap de Postgres,
+ * no el código—. Medido: quitar el filtro NO tumbó el e2e de reaprendizaje en
+ * este entorno porque la fila nueva salió última igual. Por eso, como en el
+ * `ORDER BY` de bloqueo de filas (`docs/patterns/backend.md` §15), el que caza
+ * esto de verdad es un unitario que afirma sobre el SQL, con `Db` mockeado.
+ */
+describe('resolverAsociaciones: la consulta de codigos_proveedor filtra eliminado_el', () => {
+  it('el SQL de `FROM codigos_proveedor` incluye `cp.eliminado_el IS NULL`', async () => {
+    const queries: string[] = [];
+    const query = jest.fn((sql: string) => {
+      queries.push(sql);
+      if (/FROM terceros/.test(sql)) {
+        return Promise.resolve([
+          { tercero_id: 'proveedor-1', nombre: 'Proveedor X' },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    const moduleRef = await Test.createTestingModule({
+      providers: [LecturaDteService, { provide: Db, useValue: { query } }],
+    }).compile();
+    const service = moduleRef.get(LecturaDteService);
+
+    await service.leer('tenant-1', {
+      emisorRut: '12.345.678-9',
+      receptorRut: '12.345.678-9',
+      tipoDte: '33',
+      folio: 'F1',
+      claves: ['CLAVE-1'],
+    });
+
+    const sqlAsociaciones = queries.find((q) =>
+      q.includes('FROM codigos_proveedor'),
+    );
+    expect(sqlAsociaciones).toBeDefined();
+    expect(sqlAsociaciones).toMatch(/cp\.eliminado_el IS NULL/);
   });
 });
 

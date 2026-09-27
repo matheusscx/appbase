@@ -35,6 +35,7 @@ import {
   PresentacionesCompraService,
   TIPOS_CON_STOCK,
 } from './presentaciones-compra.service';
+import { LecturaDteService } from './lectura-dte.service';
 import type { EstadoCompra } from './entities/compra.entity';
 import type {
   LoteCompraInput,
@@ -356,6 +357,7 @@ export class ComprasService {
     private readonly calculoPreciosService: CalculoPreciosService,
     private readonly monedasService: MonedasService,
     private readonly presentacionesService: PresentacionesCompraService,
+    private readonly lecturaDteService: LecturaDteService,
   ) {}
 
   // ───────────────────────────────────────────────────────────────────────
@@ -660,6 +662,19 @@ export class ComprasService {
     return this.db.transaccion(async () => {
       const enc = await this.validarEncabezado(tenantId, dto);
       await this.validarLineas(tenantId, dto.proveedorId, dto.lineas);
+      if (dto.rutProveedor) {
+        await this.lecturaDteService.completarRutProveedor(
+          tenantId,
+          dto.proveedorId,
+          dto.rutProveedor,
+        );
+      }
+      await this.lecturaDteService.aprender(
+        tenantId,
+        dto.proveedorId,
+        dto.lineas,
+        dto.apartadas ?? [],
+      );
       const descuento = validarDescuento(dto.lineas, dto.descuentoTotal);
       await this.assertFolioLibre(
         tenantId,
@@ -707,6 +722,19 @@ export class ComprasService {
       await this.bloquearBorrador(tenantId, id);
       const enc = await this.validarEncabezado(tenantId, dto);
       await this.validarLineas(tenantId, dto.proveedorId, dto.lineas);
+      if (dto.rutProveedor) {
+        await this.lecturaDteService.completarRutProveedor(
+          tenantId,
+          dto.proveedorId,
+          dto.rutProveedor,
+        );
+      }
+      await this.lecturaDteService.aprender(
+        tenantId,
+        dto.proveedorId,
+        dto.lineas,
+        dto.apartadas ?? [],
+      );
       const descuento = validarDescuento(dto.lineas, dto.descuentoTotal);
       await this.assertFolioLibre(
         tenantId,

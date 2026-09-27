@@ -9,6 +9,7 @@ import { CalculoPreciosService } from '../calculo-precios/calculo-precios.servic
 import { MonedasService } from '../monedas/monedas.service';
 import type { ConfigCalculo } from '../calculo-precios/calculo-precios.engine';
 import { PresentacionesCompraService } from './presentaciones-compra.service';
+import { LecturaDteService } from './lectura-dte.service';
 import {
   cantidadEnBase,
   ComprasService,
@@ -142,6 +143,13 @@ describe('ComprasService (borrador)', () => {
   const recalcularCostoDesdeCompra = jest.fn();
   /** Sin presentaciones citadas por defecto: cada test que las necesite la pisa. */
   const vivasPorIds = jest.fn();
+  /**
+   * `LecturaDteService.aprender`/`completarRutProveedor` (tarea 2 de
+   * compras-xml-dte): esta suite prueba el borrador, no el aprendizaje —eso
+   * lo cubre `lectura-dte.service.spec.ts` y el e2e—, así que van mockeados.
+   */
+  const aprender = jest.fn();
+  const completarRutProveedor = jest.fn();
 
   function pisar(regex: RegExp, respuesta: Respuesta) {
     rutas.unshift([regex, respuesta]);
@@ -182,6 +190,10 @@ describe('ComprasService (borrador)', () => {
     });
     vivasPorIds.mockReset();
     vivasPorIds.mockResolvedValue(new Map());
+    aprender.mockReset();
+    aprender.mockResolvedValue(undefined);
+    completarRutProveedor.mockReset();
+    completarRutProveedor.mockResolvedValue(undefined);
     const query = jest.fn((sql: string) => {
       queries.push(sql);
       if (/FOR UPDATE OF ip/.test(sql)) eventos.push('lock productos');
@@ -222,6 +234,10 @@ describe('ComprasService (borrador)', () => {
           provide: PresentacionesCompraService,
           useValue: { vivasPorIds },
         },
+        {
+          provide: LecturaDteService,
+          useValue: { aprender, completarRutProveedor },
+        },
       ],
     }).compile();
     service = moduleRef.get(ComprasService);
@@ -235,6 +251,70 @@ describe('ComprasService (borrador)', () => {
     expect(
       queries.filter((q) => /INSERT INTO compra_lineas/.test(q)),
     ).toHaveLength(1);
+  });
+
+  describe('aprendizaje del DTE al guardar (tarea 2, spec compras-xml-dte § 5.2)', () => {
+    it('crearBorrador llama a aprender con las líneas y las apartadas (vacío si no vino ninguna)', async () => {
+      const lineas = [
+        {
+          itemId: ITEM,
+          cantidad: '20',
+          unidadCodigo: 'kg',
+          claveProveedor: 'CODIGO:X',
+          descripcionProveedor: 'Harina',
+        },
+      ];
+      await service.crearBorrador(TENANT, USUARIO, dto({ lineas }));
+      expect(aprender).toHaveBeenCalledWith(TENANT, PROVEEDOR, lineas, []);
+    });
+
+    it('crearBorrador pasa las `apartadas` del body a aprender', async () => {
+      const apartadas = [{ clave: 'NOMBRE:FLETE', descripcion: 'Flete' }];
+      await service.crearBorrador(TENANT, USUARIO, dto({ apartadas }));
+      expect(aprender).toHaveBeenCalledWith(
+        TENANT,
+        PROVEEDOR,
+        dto().lineas,
+        apartadas,
+      );
+    });
+
+    it('sin `rutProveedor`, no llama a completarRutProveedor', async () => {
+      await service.crearBorrador(TENANT, USUARIO, dto());
+      expect(completarRutProveedor).not.toHaveBeenCalled();
+    });
+
+    it('con `rutProveedor`, llama a completarRutProveedor con el proveedor y el RUT', async () => {
+      await service.crearBorrador(
+        TENANT,
+        USUARIO,
+        dto({ rutProveedor: '76.543.210-3' }),
+      );
+      expect(completarRutProveedor).toHaveBeenCalledWith(
+        TENANT,
+        PROVEEDOR,
+        '76.543.210-3',
+      );
+    });
+
+    it('actualizarBorrador también aprende y completa el RUT', async () => {
+      await service.actualizarBorrador(
+        TENANT,
+        COMPRA,
+        dto({ rutProveedor: '76.543.210-3' }),
+      );
+      expect(aprender).toHaveBeenCalledWith(
+        TENANT,
+        PROVEEDOR,
+        dto().lineas,
+        [],
+      );
+      expect(completarRutProveedor).toHaveBeenCalledWith(
+        TENANT,
+        PROVEEDOR,
+        '76.543.210-3',
+      );
+    });
   });
 
   describe('descuento al total en el borrador (spec § 6)', () => {

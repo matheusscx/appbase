@@ -4,15 +4,17 @@ import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
+import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { loginSegundoTenant } from './helpers/segundo-tenant';
 
 /**
- * **Compras — la lectura del XML del DTE, tarea 1** (spec
+ * **Compras — el XML del DTE** (spec
  * `docs/superpowers/specs/2026-09-27-compras-xml-dte-design.md` § 5.3 y § 7):
- * `POST /compras/dte/lectura`. Solo lectura, no escribe nada — la tabla
- * `codigos_proveedor` la llena la tarea 2, así que acá toda clave sale sin
- * asociar.
+ * `POST /compras/dte/lectura` (tarea 1, solo lectura) y el aprendizaje al
+ * guardar el borrador, `POST /compras` y `PATCH /compras/:id` (tarea 2,
+ * § 5.2). La tarea 1 dejó todo test de "toda clave sale sin asociar" porque
+ * nada podía escribir todavía; la tarea 2 agrega el describe de más abajo.
  *
  * Proveedores, ítems y compras son **propios** del archivo, con RUT y folio
  * aleatorios: no depende de lo que dejaron otras suites.
@@ -90,6 +92,7 @@ function rutEnDosFormatos(): { sinFormato: string; conFormato: string } {
 
 describe('lectura del XML del DTE (spec compras-xml-dte § 5.3 y § 7)', () => {
   let app: INestApplication<App>;
+  let ds: DataSource;
   let token: string;
   let bodegaId: string;
   let productoId: string;
@@ -188,6 +191,80 @@ describe('lectura del XML del DTE (spec compras-xml-dte § 5.3 y § 7)', () => {
     return { id, nombre };
   }
 
+  /** Un producto propio, con nombre único, base "unidad" (para el aprendizaje). */
+  async function productoNuevo(
+    extra: Record<string, unknown> = {},
+  ): Promise<string> {
+    return (
+      await post<IdResponse>('/api/items', {
+        nombre: nombreUnico('Producto DTE Aprender E2E'),
+        precioBase: '1000',
+        precioIncluyeImpuesto: true,
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'unidad',
+        ...extra,
+      })
+    ).id;
+  }
+
+  interface PresentacionVista {
+    id: string;
+    proveedorId: string;
+    itemId: string;
+    nombre: string;
+    contenido: string;
+    unidadCodigo: string;
+  }
+
+  const crearPresentacion = (body: Record<string, unknown>) =>
+    post<PresentacionVista>('/api/compras/presentaciones', body);
+
+  /** El encabezado de un borrador, con folio propio; `extra` pisa lo que haga falta. */
+  function cuerpoCompra(
+    proveedorId: string,
+    lineas: Record<string, unknown>[],
+    extra: Record<string, unknown> = {},
+  ) {
+    return {
+      proveedorId,
+      tipoDocumentoCompraId: factura.id,
+      folio: folioUnico(),
+      fechaDocumento: '2026-09-27',
+      ubicacionId: bodegaId,
+      lineas,
+      ...extra,
+    };
+  }
+
+  /** El intento crudo de guardar un borrador: status y mensaje. */
+  async function intentarGuardar(
+    body: Record<string, unknown>,
+    conToken = token,
+  ): Promise<{ status: number; message: string }> {
+    const res = await request(app.getHttpServer())
+      .post('/api/compras')
+      .set('Authorization', `Bearer ${conToken}`)
+      .send(body);
+    const message = (res.body as { message?: string | string[] }).message;
+    return {
+      status: res.status,
+      message: Array.isArray(message) ? message.join(' ') : (message ?? ''),
+    };
+  }
+
+  /** Cuántas filas vivas o borradas tiene una clave, para afirmar el reaprendizaje. */
+  async function filasDeClave(
+    proveedorId: string,
+    clave: string,
+  ): Promise<{ eliminado_el: string | null }[]> {
+    return ds.query(
+      `SELECT eliminado_el FROM codigos_proveedor
+        WHERE tenant_id = $1 AND proveedor_id = $2 AND clave = $3`,
+      [PARIS_TENANT_ID, proveedorId, clave],
+    );
+  }
+
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -197,6 +274,7 @@ describe('lectura del XML del DTE (spec compras-xml-dte § 5.3 y § 7)', () => {
     app.use(cookieParser());
     app.useGlobalPipes(validacionGlobal());
     await app.init();
+    ds = app.get(DataSource);
 
     token = await login(ADMIN_EMAIL);
 
@@ -461,5 +539,375 @@ describe('lectura del XML del DTE (spec compras-xml-dte § 5.3 y § 7)', () => {
     expect((await intentar(cuerpoBase({ emisorRut: rutDe21 }))).status).toBe(
       400,
     );
+  });
+
+  /**
+   * **Aprender al guardar el borrador (tarea 2, spec § 5.2).** Todo por API:
+   * proveedor, producto y presentación propios de cada test; `ds.query` solo
+   * para LEER lo que quedó en `codigos_proveedor`/`compras` (permitido por la
+   * regla del repo — nunca para armar el escenario).
+   */
+  describe('aprender al guardar el borrador (tarea 2, spec § 5.2)', () => {
+    it('una línea con claveProveedor en una presentación: la lectura la resuelve', async () => {
+      const rut = rutAleatorio();
+      const prov = await proveedorNuevo({ rut });
+      const item = await productoNuevo();
+      const caja = await crearPresentacion({
+        proveedorId: prov.id,
+        itemId: item,
+        nombre: 'Caja',
+        contenido: '12',
+        unidadCodigo: 'unidad',
+      });
+      const clave = 'CODIGO:INT1:CC350-12';
+      await post(
+        '/api/compras',
+        cuerpoCompra(prov.id, [
+          {
+            itemId: item,
+            cantidad: '10',
+            presentacionId: caja.id,
+            precioUnitario: '9600',
+            claveProveedor: clave,
+            descripcionProveedor: 'Coca-Cola 350ml CJ12',
+          },
+        ]),
+      );
+      const r = await leer(cuerpoBase({ emisorRut: rut, claves: [clave] }));
+      expect(r.asociaciones).toEqual([
+        { clave, destino: { itemId: item, presentacionId: caja.id } },
+      ]);
+    });
+
+    it('reaprender: la misma clave en unidadCodigo calza distinto, y deja la fila vieja con eliminado_el', async () => {
+      const rut = rutAleatorio();
+      const prov = await proveedorNuevo({ rut });
+      const item = await productoNuevo();
+      const caja = await crearPresentacion({
+        proveedorId: prov.id,
+        itemId: item,
+        nombre: 'Caja',
+        contenido: '12',
+        unidadCodigo: 'unidad',
+      });
+      const clave = 'CODIGO:INT1:REAPRENDER';
+      await post(
+        '/api/compras',
+        cuerpoCompra(prov.id, [
+          {
+            itemId: item,
+            cantidad: '10',
+            presentacionId: caja.id,
+            precioUnitario: '9600',
+            claveProveedor: clave,
+            descripcionProveedor: 'Primera vez',
+          },
+        ]),
+      );
+      await post(
+        '/api/compras',
+        cuerpoCompra(prov.id, [
+          {
+            itemId: item,
+            cantidad: '5',
+            unidadCodigo: 'unidad',
+            precioUnitario: '800',
+            claveProveedor: clave,
+            descripcionProveedor: 'Reaprendida por unidad',
+          },
+        ]),
+      );
+      const r = await leer(cuerpoBase({ emisorRut: rut, claves: [clave] }));
+      expect(r.asociaciones).toEqual([
+        { clave, destino: { itemId: item, unidadCodigo: 'unidad' } },
+      ]);
+
+      const filas = await filasDeClave(prov.id, clave);
+      expect(filas).toHaveLength(2);
+      expect(filas.filter((f) => f.eliminado_el !== null)).toHaveLength(1);
+    });
+
+    it('apartadas: se aprenden con no_mercaderia y la lectura las resuelve', async () => {
+      const rut = rutAleatorio();
+      const prov = await proveedorNuevo({ rut });
+      const item = await productoNuevo();
+      const clave = 'NOMBRE:FLETE-APRENDER';
+      await post(
+        '/api/compras',
+        cuerpoCompra(
+          prov.id,
+          [
+            {
+              itemId: item,
+              cantidad: '10',
+              unidadCodigo: 'unidad',
+              precioUnitario: '100',
+            },
+          ],
+          { apartadas: [{ clave, descripcion: 'Flete' }] },
+        ),
+      );
+      const r = await leer(cuerpoBase({ emisorRut: rut, claves: [clave] }));
+      expect(r.asociaciones).toEqual([{ clave, destino: 'no_mercaderia' }]);
+    });
+
+    it('la misma clave en una línea y en apartadas: 400 que la nombra', async () => {
+      const prov = await proveedorNuevo();
+      const item = await productoNuevo();
+      const clave = 'CODIGO:CHOQUE-LINEA-APARTADA';
+      const r = await intentarGuardar(
+        cuerpoCompra(
+          prov.id,
+          [
+            {
+              itemId: item,
+              cantidad: '10',
+              unidadCodigo: 'unidad',
+              precioUnitario: '100',
+              claveProveedor: clave,
+              descripcionProveedor: 'Mercadería',
+            },
+          ],
+          { apartadas: [{ clave, descripcion: 'También flete' }] },
+        ),
+      );
+      expect(r.status).toBe(400);
+      expect(r.message).toContain(clave);
+    });
+
+    it('retirar la presentación aprendida: la lectura da null con su nota; borrar el producto da la del producto', async () => {
+      const rut = rutAleatorio();
+      const prov = await proveedorNuevo({ rut });
+      const item = await productoNuevo();
+      const caja = await crearPresentacion({
+        proveedorId: prov.id,
+        itemId: item,
+        nombre: 'Caja',
+        contenido: '12',
+        unidadCodigo: 'unidad',
+      });
+      const clave = 'CODIGO:RETIRAR-PRESENTACION';
+      await post(
+        '/api/compras',
+        cuerpoCompra(prov.id, [
+          {
+            itemId: item,
+            cantidad: '10',
+            presentacionId: caja.id,
+            precioUnitario: '9600',
+            claveProveedor: clave,
+            descripcionProveedor: 'X',
+          },
+        ]),
+      );
+
+      await request(app.getHttpServer())
+        .delete(`/api/compras/presentaciones/${caja.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(204);
+      const r1 = await leer(cuerpoBase({ emisorRut: rut, claves: [clave] }));
+      expect(r1.asociaciones).toEqual([
+        {
+          clave,
+          destino: null,
+          nota: 'la presentación a la que apuntaba fue retirada',
+        },
+      ]);
+
+      const resDelete = await request(app.getHttpServer())
+        .delete(`/api/items/${item}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect([200, 204]).toContain(resDelete.status);
+      const r2 = await leer(cuerpoBase({ emisorRut: rut, claves: [clave] }));
+      expect(r2.asociaciones).toEqual([
+        {
+          clave,
+          destino: null,
+          nota: 'el producto al que apuntaba ya no está',
+        },
+      ]);
+    });
+
+    it('una línea sin claveProveedor no crea fila en codigos_proveedor', async () => {
+      const prov = await proveedorNuevo();
+      const item = await productoNuevo();
+      const contar = async () => {
+        const filas: { total: string }[] = await ds.query(
+          `SELECT COUNT(*)::text AS total FROM codigos_proveedor WHERE tenant_id = $1 AND proveedor_id = $2`,
+          [PARIS_TENANT_ID, prov.id],
+        );
+        return filas[0].total;
+      };
+      const antes = await contar();
+      await post(
+        '/api/compras',
+        cuerpoCompra(prov.id, [
+          {
+            itemId: item,
+            cantidad: '10',
+            unidadCodigo: 'unidad',
+            precioUnitario: '100',
+          },
+        ]),
+      );
+      expect(antes).toBe('0');
+      expect(await contar()).toBe(antes);
+    });
+
+    it('rutProveedor: proveedor sin RUT lo guarda en rut_fiscal; la siguiente lectura lo resuelve sin proveedorId', async () => {
+      const prov = await proveedorNuevo();
+      const item = await productoNuevo();
+      const rutEmisor = rutAleatorio();
+      await post(
+        '/api/compras',
+        cuerpoCompra(
+          prov.id,
+          [
+            {
+              itemId: item,
+              cantidad: '10',
+              unidadCodigo: 'unidad',
+              precioUnitario: '100',
+            },
+          ],
+          { rutProveedor: rutEmisor },
+        ),
+      );
+      const r = await leer(cuerpoBase({ emisorRut: rutEmisor }));
+      expect(r.proveedor).toEqual({ id: prov.id, nombre: prov.nombre });
+    });
+
+    it('rutProveedor: con otro RUT ya guardado, 400 y la compra no se crea', async () => {
+      const rut = rutAleatorio();
+      const prov = await proveedorNuevo({ rut });
+      const item = await productoNuevo();
+      const otroRut = rutAleatorio();
+      const folio = folioUnico();
+      const r = await intentarGuardar(
+        cuerpoCompra(
+          prov.id,
+          [
+            {
+              itemId: item,
+              cantidad: '10',
+              unidadCodigo: 'unidad',
+              precioUnitario: '100',
+            },
+          ],
+          { folio, rutProveedor: otroRut },
+        ),
+      );
+      expect(r.status).toBe(400);
+      const existe = await ds.query(
+        `SELECT 1 FROM compras WHERE tenant_id = $1 AND proveedor_id = $2 AND folio = $3`,
+        [PARIS_TENANT_ID, prov.id, folio],
+      );
+      expect(existe).toEqual([]);
+    });
+
+    it('descripcionProveedor sin claveProveedor: 400; apartadas con 61: 400', async () => {
+      const prov = await proveedorNuevo();
+      const item = await productoNuevo();
+      const rSinClave = await intentarGuardar(
+        cuerpoCompra(prov.id, [
+          {
+            itemId: item,
+            cantidad: '10',
+            unidadCodigo: 'unidad',
+            precioUnitario: '100',
+            descripcionProveedor: 'Sin clave',
+          },
+        ]),
+      );
+      expect(rSinClave.status).toBe(400);
+
+      const rApartadas61 = await intentarGuardar(
+        cuerpoCompra(
+          prov.id,
+          [
+            {
+              itemId: item,
+              cantidad: '10',
+              unidadCodigo: 'unidad',
+              precioUnitario: '100',
+            },
+          ],
+          {
+            apartadas: Array.from({ length: 61 }, (_, i) => ({
+              clave: `C${i}`,
+              descripcion: 'X',
+            })),
+          },
+        ),
+      );
+      expect(rApartadas61.status).toBe(400);
+    });
+
+    it('claveProveedor o apartadas.clave de solo espacios: 400 (fix round 1)', async () => {
+      const prov = await proveedorNuevo();
+      const item = await productoNuevo();
+      const rLineaEspacios = await intentarGuardar(
+        cuerpoCompra(prov.id, [
+          {
+            itemId: item,
+            cantidad: '10',
+            unidadCodigo: 'unidad',
+            precioUnitario: '100',
+            claveProveedor: '   ',
+            descripcionProveedor: 'X',
+          },
+        ]),
+      );
+      expect(rLineaEspacios.status).toBe(400);
+
+      const rApartadaEspacios = await intentarGuardar(
+        cuerpoCompra(
+          prov.id,
+          [
+            {
+              itemId: item,
+              cantidad: '10',
+              unidadCodigo: 'unidad',
+              precioUnitario: '100',
+            },
+          ],
+          { apartadas: [{ clave: '   ', descripcion: 'X' }] },
+        ),
+      );
+      expect(rApartadaEspacios.status).toBe(400);
+    });
+
+    it('aislamiento: la clave aprendida en un tenant no calza en el otro para el mismo RUT', async () => {
+      const rut = rutAleatorio();
+      const prov = await proveedorNuevo({ rut });
+      const item = await productoNuevo();
+      const clave = 'CODIGO:AISLAMIENTO-TENANT';
+      await post(
+        '/api/compras',
+        cuerpoCompra(prov.id, [
+          {
+            itemId: item,
+            cantidad: '10',
+            unidadCodigo: 'unidad',
+            precioUnitario: '100',
+            claveProveedor: clave,
+            descripcionProveedor: 'X',
+          },
+        ]),
+      );
+
+      const otro = await loginSegundoTenant(app);
+      await post(
+        '/api/terceros',
+        { tipo: 'proveedor', nombre: nombreUnico('Prov aislamiento DTE'), rut },
+        201,
+        otro,
+      );
+      const r = await leer(
+        cuerpoBase({ emisorRut: rut, claves: [clave] }),
+        otro,
+      );
+      expect(r.asociaciones).toEqual([{ clave, destino: null }]);
+    });
   });
 });

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { Db } from '../../common/db/db.service';
 import { TIPOS_CON_STOCK } from './presentaciones-compra.service';
 import type { LecturaDteDto } from './dto/lectura-dte.dto';
+import type { ApartadaDteDto, LineaCompraDto } from './dto/compra-borrador.dto';
 
 /**
  * RUT chileno normalizado: sin puntos ni espacios, `K` mayúscula, guion antes
@@ -55,6 +56,78 @@ export interface LecturaDteRespuesta {
 
 /** Códigos de tipo de documento que son notas de crédito o débito: nunca se cargan acá. */
 const CODIGOS_NOTA = ['56', '61'];
+
+/** Lo que una línea o una apartada del borrador enseña (spec § 5.2). */
+export interface EntradaAprendizaje {
+  clave: string; // ya normalizada
+  descripcion: string;
+  destino: DestinoCodigo;
+}
+
+/** Una entrada, más el id de la fila viva que ya tenía esa clave. */
+export interface CodigoVivo extends EntradaAprendizaje {
+  id: string;
+}
+
+/**
+ * `destino` "igual", para decidir si reaprender tiene algo que hacer:
+ * `no_mercaderia` con `no_mercaderia`, o mismo `itemId` **y** misma
+ * `presentacionId`/`unidadCodigo` (spec § 5.2).
+ */
+function mismoDestino(a: DestinoCodigo, b: DestinoCodigo): boolean {
+  if (a === 'no_mercaderia' || b === 'no_mercaderia') return a === b;
+  if (a.itemId !== b.itemId) return false;
+  if ('presentacionId' in a && 'presentacionId' in b) {
+    return a.presentacionId === b.presentacionId;
+  }
+  if ('unidadCodigo' in a && 'unidadCodigo' in b) {
+    return a.unidadCodigo === b.unidadCodigo;
+  }
+  return false;
+}
+
+/**
+ * Puro: sin `Db`, sin `async` (spec § 5.2, tarea 2 § "Step 2"). Decide, para
+ * cada clave que la factura enseña, si hay que marcar la fila viva (cambió de
+ * destino) e insertar la nueva, insertar sin marcar (clave nueva) o no hacer
+ * nada (mismo destino de siempre).
+ *
+ * Dentro de la MISMA factura, una clave con dos destinos distintos es un
+ * error de captura (la línea y una apartada compartiendo código, o dos
+ * líneas que no debieran calzar igual): 400 antes de tocar la base. Dos
+ * entradas con el MISMO destino se deduplican en una sola (la línea
+ * bonificada a $0 repite el código del proveedor).
+ */
+export function planAprendizaje(
+  entradas: EntradaAprendizaje[],
+  vivas: CodigoVivo[],
+): { marcar: string[]; insertar: EntradaAprendizaje[] } {
+  const porClave = new Map<string, EntradaAprendizaje>();
+  for (const entrada of entradas) {
+    const previa = porClave.get(entrada.clave);
+    if (previa && !mismoDestino(previa.destino, entrada.destino)) {
+      throw new BadRequestException(
+        `La clave "${entrada.clave}" se usa para dos cosas distintas en esta factura`,
+      );
+    }
+    porClave.set(entrada.clave, entrada);
+  }
+
+  const vivaPorClave = new Map(vivas.map((v) => [v.clave, v]));
+  const marcar: string[] = [];
+  const insertar: EntradaAprendizaje[] = [];
+  for (const entrada of porClave.values()) {
+    const viva = vivaPorClave.get(entrada.clave);
+    if (!viva) {
+      insertar.push(entrada);
+      continue;
+    }
+    if (mismoDestino(viva.destino, entrada.destino)) continue;
+    marcar.push(viva.id);
+    insertar.push(entrada);
+  }
+  return { marcar, insertar };
+}
 
 interface FilaAsociacion {
   clave: string;
@@ -163,6 +236,157 @@ export class LecturaDteService {
         `"${nombre}" tiene el RUT ${guardados[0]}; esta factura es del RUT ${rutEmisor}`,
       );
     }
+  }
+
+  /**
+   * Aprende las claves del proveedor que trajo el borrador: cada línea con
+   * `claveProveedor` (destino = su presentación o su unidad, ya validados por
+   * `ComprasService.validarLineas`) y cada `apartadas` (`no_mercaderia`).
+   * Corre en la transacción ambiente (`this.db.query` la reusa, ADR-020).
+   *
+   * Tres statements fijos, nunca uno por línea: el `SELECT … FOR UPDATE` de
+   * las vivas que la factura toca, el `UPDATE` que marca las que cambian de
+   * destino y el `INSERT` de las nuevas — los dos últimos solo si
+   * `planAprendizaje` tiene algo que hacer. Sin entradas, no consulta nada.
+   */
+  async aprender(
+    tenantId: string,
+    proveedorId: string,
+    lineas: LineaCompraDto[],
+    apartadas: ApartadaDteDto[],
+  ): Promise<void> {
+    const entradas: EntradaAprendizaje[] = [
+      ...lineas
+        .filter((l) => l.claveProveedor != null)
+        .map((l) => ({
+          clave: normalizarClave(l.claveProveedor!),
+          descripcion: l.descripcionProveedor!,
+          destino: l.presentacionId
+            ? { itemId: l.itemId, presentacionId: l.presentacionId }
+            : {
+                itemId: l.itemId,
+                unidadCodigo: l.unidadCodigo!,
+              },
+        })),
+      ...apartadas.map((a) => ({
+        clave: normalizarClave(a.clave),
+        descripcion: a.descripcion,
+        destino: 'no_mercaderia' as const,
+      })),
+    ];
+    if (!entradas.length) return;
+
+    const claves = entradas.map((e) => e.clave);
+    const vivasRows: {
+      codigo_proveedor_id: string;
+      clave: string;
+      descripcion: string;
+      no_mercaderia: boolean;
+      item_id: string | null;
+      presentacion_compra_id: string | null;
+      unidad_codigo: string | null;
+    }[] = await this.db.query(
+      `SELECT codigo_proveedor_id, clave, descripcion, no_mercaderia, item_id, presentacion_compra_id, unidad_codigo
+         FROM codigos_proveedor
+        WHERE tenant_id = $1 AND proveedor_id = $2 AND clave = ANY($3::text[]) AND eliminado_el IS NULL
+        FOR UPDATE`,
+      [tenantId, proveedorId, claves],
+    );
+    const vivas: CodigoVivo[] = vivasRows.map((r) => ({
+      id: r.codigo_proveedor_id,
+      clave: r.clave,
+      descripcion: r.descripcion,
+      destino: r.no_mercaderia
+        ? 'no_mercaderia'
+        : r.presentacion_compra_id
+          ? { itemId: r.item_id!, presentacionId: r.presentacion_compra_id }
+          : { itemId: r.item_id!, unidadCodigo: r.unidad_codigo! },
+    }));
+
+    const { marcar, insertar } = planAprendizaje(entradas, vivas);
+
+    if (marcar.length) {
+      await this.db.query(
+        `UPDATE codigos_proveedor SET eliminado_el = NOW(), actualizado_el = NOW()
+          WHERE tenant_id = $1 AND codigo_proveedor_id = ANY($2::uuid[]) AND eliminado_el IS NULL`,
+        [tenantId, marcar],
+      );
+    }
+    if (insertar.length) {
+      await this.db.query(
+        `INSERT INTO codigos_proveedor
+           (tenant_id, proveedor_id, clave, descripcion, no_mercaderia, item_id, presentacion_compra_id, unidad_codigo)
+         SELECT $1, $2, x.clave, x.descripcion, x.no_mercaderia, x.item_id, x.presentacion_compra_id, x.unidad_codigo
+           FROM unnest($3::text[], $4::text[], $5::boolean[], $6::uuid[], $7::uuid[], $8::text[])
+                AS x(clave, descripcion, no_mercaderia, item_id, presentacion_compra_id, unidad_codigo)
+         ON CONFLICT (tenant_id, proveedor_id, clave) WHERE eliminado_el IS NULL DO NOTHING`,
+        [
+          tenantId,
+          proveedorId,
+          insertar.map((e) => e.clave),
+          insertar.map((e) => e.descripcion),
+          insertar.map((e) => e.destino === 'no_mercaderia'),
+          insertar.map((e) =>
+            e.destino === 'no_mercaderia' ? null : e.destino.itemId,
+          ),
+          insertar.map((e) =>
+            e.destino !== 'no_mercaderia' && 'presentacionId' in e.destino
+              ? e.destino.presentacionId
+              : null,
+          ),
+          insertar.map((e) =>
+            e.destino !== 'no_mercaderia' && 'unidadCodigo' in e.destino
+              ? e.destino.unidadCodigo
+              : null,
+          ),
+        ],
+      );
+    }
+  }
+
+  /**
+   * Completa el RUT del proveedor cuando se eligió a mano (spec § 3.1 y
+   * § 5.2, decisión 3): si `rut` y `rut_fiscal` están vacíos, guarda el del
+   * emisor tal como vino en el XML, sin normalizar. Si alguno normaliza
+   * igual, no hace nada. Si tiene alguno y ninguno calza, el mismo 400 de
+   * `assertRutDelProveedor` (la reusa, no duplica el mensaje).
+   *
+   * `FOR UPDATE`: entre leer y escribir nadie más puede completar el mismo
+   * RUT con un valor distinto.
+   */
+  async completarRutProveedor(
+    tenantId: string,
+    proveedorId: string,
+    rutEmisor: string,
+  ): Promise<void> {
+    const rows: { rut: string | null; rut_fiscal: string | null }[] =
+      await this.db.query(
+        `SELECT rut, rut_fiscal FROM terceros
+            WHERE tenant_id = $1 AND tercero_id = $2
+              AND tipo = 'proveedor' AND activo AND eliminado_el IS NULL
+            FOR UPDATE`,
+        [tenantId, proveedorId],
+      );
+    if (!rows.length) {
+      throw new BadRequestException('Proveedor no encontrado');
+    }
+    const { rut, rut_fiscal: rutFiscal } = rows[0];
+    const guardados = [rut, rutFiscal].filter(
+      (r): r is string => !!r && r.trim() !== '',
+    );
+    if (!guardados.length) {
+      await this.db.query(
+        `UPDATE terceros SET rut_fiscal = $3, actualizado_el = NOW()
+          WHERE tenant_id = $1 AND tercero_id = $2 AND eliminado_el IS NULL`,
+        [tenantId, proveedorId, rutEmisor],
+      );
+      return;
+    }
+
+    const emisorNormalizado = normalizarRut(rutEmisor);
+    const calza = guardados.some((r) => normalizarRut(r) === emisorNormalizado);
+    if (calza) return;
+    await this.assertRutDelProveedor(tenantId, proveedorId, rutEmisor);
   }
 
   private async esReceptorDelTenant(
