@@ -662,8 +662,21 @@ Eran tres: la tercera —el reporte de varianza— se construyó y está en [`re
   **Las piezas que faltan, cada una con su spec y en este orden:**
   - **Pieza 3:** la deuda con el proveedor y sus pagos, con la salida de caja automática.
   - **Pieza 4:** los gastos sin stock, con la categoría que define el tenant.
-  - **La lectura del XML del DTE** (§ fuera de la pieza 2): el código del proveedor por
-    presentación, y el mapeo proveedor→ítem — ver el bloque de arriba.
+  - **La lectura del XML del DTE: diseñada el 2026-09-27, en construcción.** El encargado sube
+    el XML y el borrador de siempre queda pre-llenado; el código del proveedor se aprende en
+    una tabla propia (`codigos_proveedor`, no en la presentación como anticipaba la pieza 2 §
+    9). Spec con las seis decisiones del owner:
+    [`2026-09-27-compras-xml-dte-design.md`](../superpowers/specs/2026-09-27-compras-xml-dte-design.md).
+    Quedaron **fuera, por decisión del owner** (2026-09-27, eligiendo en un selector con el
+    costo de cada opción):
+    - **Completar los precios de una compra ya confirmada con el XML** — la escena del lunes
+      sin factura y el XML del miércoles. Hoy el XML solo llena una compra nueva; si el folio
+      existe, ofrece abrirla y el precio se completa a mano. Costo de tomarlo: emparejar las
+      líneas del XML con las ya cargadas (la factura dice 20, llegaron 17) y pasar por el
+      recálculo del CPP.
+    - **Una pantalla de códigos por proveedor** (qué código apunta a qué producto, y cuáles son
+      "no es mercadería"). Hoy una asociación mala se ve y se corrige en la línea cuando llega
+      una factura con ese código.
 
   **Bordes de la pieza 1 que quedaron abiertos** (los tres verificados contra el código el
   2026-09-19):
