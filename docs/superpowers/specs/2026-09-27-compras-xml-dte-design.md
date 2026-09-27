@@ -288,6 +288,15 @@ código, compra existente, claves con `ANY`. Todas filtran `eliminado_el IS NULL
 - en la línea: `claveProveedor` (≤ 160), `descripcionProveedor` (≤ 80);
 - en el body: `apartadas: [{ clave, descripcion }]` (≤ 60) y `rutProveedor`.
 
+⚠️ **El front manda exactamente lo que el DTO declara.** Se va a prender `forbidNonWhitelisted`
+(aviso de la sesión orquestadora, 2026-09-27): un campo que el DTO no declare pasa a ser 400 en
+vez de borrarse en silencio. El documento leído tiene muchos más campos que los que viajan
+(cantidades, precios, textos de cada línea): `useDte.ts` arma el body de la lectura con **solo**
+los campos de arriba, nunca esparciendo el documento, y los specs de componente verifican ese
+body contra el DTO (el mock de `useApiFetch` contesta 200 a cualquier cosa). Los e2e nuevos usan
+`validacionGlobal()` de `src/common/pipes/validacion-global.pipe`, no un `ValidationPipe`
+propio.
+
 ## 8. Pruebas
 
 Con valores que discriminen: ni factor 1 ni divisiones exactas.
