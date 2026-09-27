@@ -1174,6 +1174,37 @@ CREATE TABLE "compra_linea_cambios" (
 );
 CREATE INDEX "idx_compra_linea_cambios_linea" ON "compra_linea_cambios" ("compra_linea_id");
 
+-- Lo que el sistema aprendió de la factura de un proveedor: "su código
+-- CC350-12 es la Coca-Cola en Caja (12)", o "su FLETE no es mercadería"
+-- (spec compras-xml-dte § 5.1). Tabla propia y no una columna de
+-- presentaciones_compra: un código también apunta a un producto en su unidad
+-- base y a "no es mercadería", que no tienen presentación. Reaprender NO pisa:
+-- marca la fila vieja con eliminado_el e inserta otra (el owner pide
+-- reversibilidad).
+CREATE TABLE "codigos_proveedor" (
+  "codigo_proveedor_id"     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"               UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "proveedor_id"            UUID          NOT NULL REFERENCES "terceros" ("tercero_id"),
+  "clave"                   VARCHAR(160)  NOT NULL,   -- "TpoCodigo · VlrCodigo", o el NmbItem normalizado
+  "descripcion"             VARCHAR(80)   NOT NULL,   -- el NmbItem de cuando se aprendió
+  "no_mercaderia"           BOOLEAN       NOT NULL DEFAULT false,
+  "item_id"                 UUID          REFERENCES "items" ("item_id"),
+  "presentacion_compra_id"  UUID          REFERENCES "presentaciones_compra" ("presentacion_compra_id"),
+  "unidad_codigo"           TEXT,
+  "creado_el"               TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"          TIMESTAMPTZ,
+  "eliminado_el"            TIMESTAMPTZ,
+  CONSTRAINT "chk_codigos_proveedor_destino" CHECK (
+    ("no_mercaderia" AND "item_id" IS NULL AND "presentacion_compra_id" IS NULL AND "unidad_codigo" IS NULL)
+    OR (NOT "no_mercaderia" AND "item_id" IS NOT NULL
+        AND ("presentacion_compra_id" IS NULL) <> ("unidad_codigo" IS NULL))
+  )
+);
+-- Una sola viva por clave del proveedor.
+CREATE UNIQUE INDEX "uq_codigos_proveedor_clave"
+  ON "codigos_proveedor" ("tenant_id", "proveedor_id", "clave")
+  WHERE "eliminado_el" IS NULL;
+
 -- Lotes: identidad del lote (código, elaboración, vencimiento), una sola vez
 -- por lote — no varía por ubicación. `cantidad_inicial` es acumulado
 -- histórico (todo lo que entró); el saldo VIGENTE vive partido en

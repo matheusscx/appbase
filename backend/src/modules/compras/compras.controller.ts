@@ -20,6 +20,7 @@ import { RequiresPermiso } from '../../common/decorators/requires-permiso.decora
 import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { ComprasService } from './compras.service';
 import { PresentacionesCompraService } from './presentaciones-compra.service';
+import { LecturaDteService } from './lectura-dte.service';
 import { CompraBorradorDto } from './dto/compra-borrador.dto';
 import { FindComprasDto } from './dto/find-compras.dto';
 import { AnularCompraDto } from './dto/anular-compra.dto';
@@ -32,6 +33,7 @@ import {
   EditarPresentacionCompraDto,
   ListarPresentacionesCompraDto,
 } from './dto/presentacion-compra.dto';
+import { LecturaDteDto } from './dto/lectura-dte.dto';
 
 /**
  * Módulo propio `Compras` (spec compras-recepcion § 5): el que recibe no es
@@ -47,6 +49,7 @@ export class ComprasController {
   constructor(
     private readonly comprasService: ComprasService,
     private readonly presentacionesService: PresentacionesCompraService,
+    private readonly lecturaDteService: LecturaDteService,
   ) {}
 
   @Get('tipos-documento')
@@ -128,6 +131,19 @@ export class ComprasController {
   findAll(@Req() req: Request, @Query() query: FindComprasDto) {
     const { tenantId } = req.user as { tenantId: string };
     return this.comprasService.findAll(tenantId, query);
+  }
+
+  /**
+   * Lo que el sistema sabe de una factura leída en el navegador (spec
+   * compras-xml-dte § 7). POST por el tamaño del body; no escribe nada.
+   * `Crear`: es el primer paso de cargar una compra.
+   */
+  @Post('dte/lectura')
+  @HttpCode(200)
+  @RequiresPermiso('Compras', 'Crear')
+  leerDte(@Req() req: Request, @Body() dto: LecturaDteDto) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.lecturaDteService.leer(tenantId, dto);
   }
 
   @Get(':id')

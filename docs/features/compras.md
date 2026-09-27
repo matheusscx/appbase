@@ -204,6 +204,34 @@ Spec: [`2026-09-27-compras-unidad-de-compra-design.md`](../superpowers/specs/202
 
 ---
 
+## La lectura del XML (en construcción)
+
+Pieza 3 (spec `docs/superpowers/specs/2026-09-27-compras-xml-dte-design.md`): el encargado sube
+el XML de la factura electrónica (DTE) del SII y el borrador de siempre queda pre-llenado. El
+XML se lee en el **navegador** (`DOMParser`); el servidor solo recibe los datos ya planos, nunca
+el archivo.
+
+**Tarea 1 (esta), backend de solo lectura:**
+
+- **`codigos_proveedor`** (nueva): lo que el sistema aprendió de la factura de un proveedor —
+  "su código CC350-12 es la Coca-Cola en Caja (12)", o "su FLETE no es mercadería". Reaprender no
+  pisa: marca la fila vieja con `eliminado_el` e inserta otra (el owner pide reversibilidad). Hoy
+  está siempre vacía: la escritura (aprender al guardar el borrador) es la tarea 2.
+- **`POST /compras/dte/lectura`** resuelve, en consultas fijas (ninguna por línea): si el RUT
+  receptor es una razón social viva del tenant; el proveedor por `RUTEmisor` (uno solo → elegido;
+  ninguno o varios → el encargado elige, con `proveedorId`); el tipo de documento por su código
+  SII (`null` si es nota de crédito/débito — `56`/`61` no se cargan acá — o si el código no tiene
+  fila); si el folio ya está cargado (borrador o confirmada; una anulada libera el suyo); y las
+  asociaciones aprendidas por clave (hoy siempre `destino: null`, sin escritura todavía).
+- **RUT del emisor no calza con ningún proveedor:** el encargado elige uno con `proveedorId`; si
+  ese proveedor ya tiene un RUT guardado y no es el del emisor, 400. Con los dos RUT vacíos, pasa
+  (la tarea 2 lo guarda al confirmar el borrador).
+
+Frontend (lector del XML, pantalla, aprendizaje al guardar): tareas 2 a 4, todavía sin
+implementar.
+
+---
+
 ## El orden de bloqueo
 
 Todo lo que mueve stock en compras bloquea en el orden de `docs/patterns/backend.md` §15:
@@ -250,6 +278,7 @@ Todas bajo `JwtAuthGuard + TenantGuard + PermisosGuard`, con el `tenant_id` del 
 | `POST /compras/presentaciones` con `{ proveedorId, itemId, nombre, contenido, unidadCodigo }` | Crear |
 | `PATCH /compras/presentaciones/:id` con `{ nombre?, contenido?, unidadCodigo? }` (ausente no toca; `null` es 400) | Crear |
 | `DELETE /compras/presentaciones/:id` (204; retira, marca `eliminado_el`) | Crear |
+| `POST /compras/dte/lectura` con `{ emisorRut, receptorRut, tipoDte, folio, proveedorId?, claves }`: lo que el sistema sabe de una factura leída en el navegador (en construcción, ver abajo) | Crear |
 
 **Las cuatro rutas de `presentaciones` son pieza 2** (spec compras-unidad-de-compra § 5): cómo le
 viene un producto a un proveedor ("Caja (12)", "Saco (25 kg)"), por (proveedor, producto). `Crear`
