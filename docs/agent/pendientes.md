@@ -831,13 +831,24 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   agrega al catálogo de `frontend/app/composables/useReportes.ts` con su propio `modulo_app`
   (`docs/features/modulo-reportes.md`).
 
-## 4. Necesita que el owner conteste
+- [ ] **Varianza: avisar arriba de la tabla cuántos productos no tienen costo** ✅ *(owner,
+  2026-09-27, eligiendo entre tres opciones que le planteó la orquestadora; antes era una pregunta
+  de la § 4)* — el problema: cuando algún movimiento del grupo no tiene `costo_unitario`, la fila
+  manda `costoSinExplicacion: []` pero el `ORDER BY` usa el `monto` parcial (`SUM` ignora los
+  `NULL`); si **ningún** movimiento tenía costo, el monto es `0` y la fila queda entre las que no
+  perdieron nada, aunque sea el producto al que falta cargarle el precio (medido en la Tarea 5 del
+  plan de la varianza, alcanzable por la API real, cubierto por un e2e; docblock del `ORDER BY` en
+  `backend/src/modules/reportes/varianza/varianza.service.ts`).
+  **Lo decidido (opción B):** una línea arriba de la tabla —*"3 productos no tienen costo y pueden
+  estar perdiendo plata"*— con un link que los filtra. **El orden no cambia.** Mismo formato que
+  el faltante de conteo, que ya vive en esa pantalla.
+  **Descartadas:** (A) subir los sin costo arriba de todo —obliga a ocuparse, pero el primer lugar
+  deja de ser el que más plata perdió—; (C) dejar solo el badge de la celda, que puede quedar en
+  la página 5. Hoy el `/resumen` trae `faltaCosto` como **booleano**, no un conteo, y el listado
+  no tiene filtro por eso: las dos cosas faltan.
 
-Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
-elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
-prohíbe.
-
-- [ ] **% de anulaciones y cortesías sobre lo vendido por garzón** (backend + frontend,
+- [ ] **% de anulaciones y cortesías sobre lo vendido por garzón** ✅ *(contestado 2026-09-20; se mudó
+  de la § 4 el 2026-09-27)* (backend + frontend,
   fuera de alcance de
   [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md)
   § 7) — el resumen del reporte de anulaciones (`GET /salones/anulaciones/resumen`) ya trae
@@ -860,6 +871,13 @@ prohíbe.
   cada línea** del pedido, que hoy no se guarda — `cuentas.garzon_responsable_id` solo tiene el
   vigente. Quien lo tome: eso es lo primero, porque sin ese dato el reparto no se puede calcular
   ni hacia atrás.
+
+## 4. Necesita que el owner conteste
+
+Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
+elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
+prohíbe.
+
 - [ ] **Ingredientes, componentes u opciones borrados del catálogo se saltean sin
   movimiento al anular una receta o combo** (backend, heredado de la parte 2 del frente
   *"Anular un plato ya enviado a cocina"*, documentado como hueco conocido en
@@ -905,17 +923,6 @@ prohíbe.
   pregunta **fiscal** y no se decidió en el diseño (spec `2026-09-18-dashboard-inicio-design.md`
   § 4.1): va en su propio frente, con su propia sesión y su propia verificación — no se toma
   de arrastre de otra tarea (`CLAUDE.md`, ADR-010).
-
-- [ ] **En la varianza, una fila sin costo se ordena por una suma que no muestra.** ¿La pantalla
-  la marca, o se deja así? Cuando algún movimiento del grupo no tiene `costo_unitario`, la fila
-  manda `costoSinExplicacion: []` —nunca una cifra parcial— pero el `ORDER BY` usa el `monto`
-  parcial (`SUM` ignora los `NULL`); si **ningún** movimiento tenía costo, el monto es `0` y la fila
-  queda entre las que no perdieron nada. Es justo el producto al que falta cargarle el precio.
-  **Medido y alcanzable por la API real** (Tarea 5 del plan, 2026-09-20): producto creado sin
-  `costo` → `costo_actual` en `NULL` → el recuento congela ese `NULL`; lo cubre un e2e. Inventarle
-  una posición en el orden sería peor que el problema; la candidata es que la pantalla lo señale
-  (hoy muestra un badge "Sin costo" en la celda, pero la fila puede quedar en la página 5). Lo
-  decide el owner. Docblock del `ORDER BY` en `backend/src/modules/reportes/varianza/varianza.service.ts`.
 
 ## 5. Carreras de concurrencia
 
