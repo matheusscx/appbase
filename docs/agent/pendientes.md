@@ -148,6 +148,19 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   rojo. **Lo que falta medir:** si se reproduce corriendo la suite en loop, y qué log del spec (o
   del componente que monta) queda sin esperar al terminar el test.
 
+- [ ] **Specs de Playwright que fallan con el código limpio en el stack de un worktree** (frontend,
+  e2e de navegador). Medido el 2026-09-27 por la sesión que prendió `forbidNonWhitelisted`, en su
+  stack propio con la base reseteada. **Sin el flag** fallaron `reportes/varianza.spec.ts:68`,
+  `reportes/varianza.spec.ts:130`, `inicio/dashboard.spec.ts:73` y `ventas/pos.spec.ts:115`; **con
+  el flag**, `varianza:68` y `salones/cuenta-hasta-cobro.spec.ts:245` (este último, corrido solo,
+  pasó 2 de 2). Una medición anterior del mismo día, en otro worktree, dio `varianza:68`,
+  `cuenta-hasta-cobro:245` y `pos:115`. **En CI pasan** (`e2e-navegador` verde en los pushes del
+  2026-09-27). `varianza:68` falló en **todas** las corridas locales, así que no es azar: es algo
+  que el stack de un worktree tiene distinto de CI (datos del seed, zona horaria, fecha del día,
+  orden de specs). El riesgo es que una sesión tome una regresión real por "la intermitencia
+  conocida". **Lo que falta medir:** correr `varianza:68` solo en un stack de worktree, leer por
+  qué falla, y comparar el entorno con el de `ci.yml`.
+
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
