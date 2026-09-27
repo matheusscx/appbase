@@ -80,6 +80,8 @@ export async function crearProducto(
     /** Omitir = afecto (el default del tenant). `exento` para el otro caso. */
     clasificacionTributaria?: string
     stock?: string
+    /** Omitir = `400`. Pasarlo cuando el spec asevera plata valorizada. */
+    costo?: string
   },
 ): Promise<{ id: string }> {
   return api<{ id: string }>(request, 'post', '/items', {
