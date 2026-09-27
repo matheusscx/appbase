@@ -154,7 +154,7 @@ porGarzon: [{
 ```
 
 - **Filas:** todo garzón con algo vendido en el rango, o con anulaciones en el rango (pasen o no los
-  filtros). Un garzón sin anulaciones que pasen los filtros va con `platos: '0'`, `precioCarta` en 0,
+  filtros). Un garzón sin anulaciones que pasen los filtros va con `platos` y `precioCarta` en 0 (`'0.0000'`),
   `costo: []`, `sinValorizar: 0` y `porcentaje` en 0. Con `garzonId`, solo esa fila.
 - **Orden:** por nombre, *Sin garzón* al final (hoy el orden no está definido).
 - **Consultas:** un número fijo. Se suman **dos agregaciones con `GROUP BY garzon_id`** —lo vendido
