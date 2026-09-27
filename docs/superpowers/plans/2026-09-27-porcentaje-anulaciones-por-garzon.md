@@ -42,6 +42,8 @@ Se lee junto con este plan: las decisiones del owner y su porqué están ahí (�
 - Sin backfill: no hay datos productivos. Se cambia el esquema y se resetea.
 - E2E: pipe con `validacionGlobal()` (`docs/patterns/backend.md` § 7); garzones, salón, mesa, ítems y
   caja **propios del spec**, **nunca Ana del seed**; todo `.body` leído lleva su `expect(status)`.
+- Los bodies de los tests llevan **solo campos que el DTO declara**: otra sesión va a prender
+  `forbidNonWhitelisted`, y un campo de más pasa a dar 400. Rebase sobre `main` antes de escribir specs e2e.
 - Gate completo por tarea (`CLAUDE.md`): `./scripts/entorno.sh db`, `./scripts/reset-db.sh` **antes**
   de `test:e2e` y `./scripts/reset-db.sh --verificar` **después**. No tocar un `.ts` del backend con el
   e2e corriendo.
