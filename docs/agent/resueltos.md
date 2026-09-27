@@ -23,6 +23,51 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Varianza: el aviso de productos sin costo (cerrada 2026-09-27)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. **Qué se hizo:** el `/resumen` trae
+`perdiendoSinCosto` —cuántas **filas** (producto, ubicación) perdieron mercadería sin costo
+cargado— y el listado acepta `soloSinCosto`, que muestra exactamente esas. La pantalla dibuja la
+línea en el formato del faltante de conteo, con un link que prende y apaga el filtro. El orden no
+cambió. Detalle: [`features/reporte-varianza.md`](../features/reporte-varianza.md).
+
+**Lo que se resolvió midiendo, sin volver al owner:**
+- **Qué cuenta:** fila sin costo en sus recuentos **y** con faltante (`sin_explicacion > 0`).
+  Queda afuera el sobrante sin costo, que no está perdiendo plata y no se hunde (queda en `0`,
+  **arriba** de los sobrantes con costo), y la que se compensó —faltaron 2 y después
+  aparecieron—: cerró justa. Es lo que el texto elegido afirma, y es la fila que el `ORDER BY`
+  entierra.
+- **Mismo criterio en los dos lados:** un solo predicado (`perdiendoSinCostoSql`) sobre el mismo
+  `LATERAL` de la fila, usado por el `WHERE` del listado y por el conteo del resumen. El resumen
+  **no** usa su propio `faltaCosto`, que mira todos los movimientos y avisa otra cosa (los
+  totales cortos).
+- **Con «Solo con diferencia»:** el conjunto queda dentro del de `soloConVarianza` (`<> 0`), así
+  que la llave no mueve ni el número ni las filas.
+
+**Qué lo fija:** el e2e *"el aviso de sin costo cuenta exactamente las filas que su filtro
+muestra"* (`reportes-varianza-plata.e2e-spec.ts`): seis productos, cada uno descarta una lectura
+del criterio. Mata seis mutantes —`> 0`→`<> 0`, `> 0`→`>= 1` (por eso el que cuenta pierde
+medio kilo y no uno entero), sin la bandera, el resumen contando con su propia bandera, el campo
+sin decorar en el DTO (el pipe lo borra callado) y el listado ignorando el filtro—.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **Varianza: avisar arriba de la tabla cuántos productos no tienen costo** ✅ *(owner,
+  2026-09-27, eligiendo entre tres opciones que le planteó la orquestadora; antes era una pregunta
+  de la § 4)* — el problema: cuando algún movimiento del grupo no tiene `costo_unitario`, la fila
+  manda `costoSinExplicacion: []` pero el `ORDER BY` usa el `monto` parcial (`SUM` ignora los
+  `NULL`); si **ningún** movimiento tenía costo, el monto es `0` y la fila queda entre las que no
+  perdieron nada, aunque sea el producto al que falta cargarle el precio (medido en la Tarea 5 del
+  plan de la varianza, alcanzable por la API real, cubierto por un e2e; docblock del `ORDER BY` en
+  `backend/src/modules/reportes/varianza/varianza.service.ts`).
+  **Lo decidido (opción B):** una línea arriba de la tabla —*"3 productos no tienen costo y pueden
+  estar perdiendo plata"*— con un link que los filtra. **El orden no cambia.** Mismo formato que
+  el faltante de conteo, que ya vive en esa pantalla.
+  **Descartadas:** (A) subir los sin costo arriba de todo —obliga a ocuparse, pero el primer lugar
+  deja de ser el que más plata perdió—; (C) dejar solo el badge de la celda, que puede quedar en
+  la página 5. Hoy el `/resumen` trae `faltaCosto` como **booleano**, no un conteo, y el listado
+  no tiene filtro por eso: las dos cosas faltan.
+
 ## Aviso de stock bajo (cerrada 2026-09-21)
 
 Sale de [`pendientes.md`](pendientes.md) § 4. **Qué se construyó:** un mínimo por (producto,

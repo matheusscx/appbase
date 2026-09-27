@@ -742,6 +742,37 @@ const SQL_COSTO_LATERAL = `
          AND mv.eliminado_el IS NULL
          ${ventanaSql('g')}`;
 
+/**
+ * **Qué fila entra en el aviso de "sin costo"**: medible, sin costo en sus
+ * recuentos (la misma bandera que la fila muestra) y con **faltante** de
+ * mercadería. Recibe el alias del `SQL_COSTO_LATERAL`.
+ *
+ * ⛔ **Lo comparten el `WHERE` de `soloSinCosto` en el listado y el conteo
+ * `perdiendoSinCosto` del `/resumen`, y ese es todo el punto**: el aviso dice
+ * "3 productos" y su link abre el listado filtrado; si cada lado tuviera su
+ * criterio, el número y las filas que aparecen al hacer clic podrían no
+ * coincidir sin que ningún test por separado lo viera. Por eso el resumen no
+ * usa su propio `falta_costo` —que mira **todos** los movimientos, porque avisa
+ * que los totales están cortos— sino el mismo `LATERAL` que la fila.
+ *
+ * ⚠️ **`> 0` y no `<> 0`, a propósito.** El aviso existe porque una fila sin
+ * costo se ordena por un monto parcial —`0` si no tenía ninguno— y **se hunde**
+ * entre las que no perdieron nada (docblock del `ORDER BY` de `findAll`). Solo
+ * se hunde la que perdió: un sobrante sin costo queda en `0`, **por encima** de
+ * los sobrantes con costo, y no está perdiendo plata, que es lo que el aviso
+ * dice. Tampoco entra la que se compensó —faltaron 2 y después aparecieron—:
+ * cerró justa. De paso, el conjunto queda **dentro** del de `soloConVarianza`
+ * (`<> 0`), así que la llave «Solo con diferencia» no cambia ni el número ni
+ * las filas que el link muestra.
+ *
+ * 📌 **No lleva `g.recuentos >= 2`, y no le falta**: una fila no medible tiene
+ * ventana vacía —con un solo recuento el predicado de `ventanaSql` queda
+ * `> S AND <= S`—, así que su `sin_explicacion` es `0` y no pasa el `> 0`.
+ * Agregarlo se midió como mutante que ningún caso puede matar.
+ */
+const perdiendoSinCostoSql = (alias: string): string =>
+  `(${alias}.falta_costo AND ${alias}.sin_explicacion > 0)`;
+
 /** Un producto nombrado, para las listas del aviso y del faltante de conteo. */
 export interface ItemBreve {
   itemId: string;
@@ -777,6 +808,13 @@ export interface ResumenVarianza {
   /** `true` si algún movimiento del rango no tenía costo: los totales están cortos. */
   faltaCosto: boolean;
   /**
+   * Cuántas filas del listado perdieron mercadería sin costo cargado: las que
+   * trae `soloSinCosto`, ni una más ni una menos (`perdiendoSinCostoSql`).
+   * Cuenta **filas** —(producto, ubicación)—, no productos: es el `meta.total`
+   * que el link va a mostrar.
+   */
+  perdiendoSinCosto: number;
+  /**
    * Lo que **no se puede medir**, abierto en dos por decisión del owner
    * (2026-09-20): al primero le falta **empezar** a contarse, al segundo le falta
    * **cerrar** el conteo. Los dos conjuntos son disjuntos por construcción —cero
@@ -801,6 +839,8 @@ interface MontoRow {
   consumo_total: string;
   abastecimiento: string;
   falta_costo: boolean | null;
+  /** `perdiendoSinCostoSql` sobre el mismo `LATERAL` que la fila del listado. */
+  perdiendo_sin_costo: boolean | null;
 }
 
 /**
@@ -1089,18 +1129,25 @@ export class VarianzaService {
      * condición, agregándole `g.recuentos >= 2` como discriminante. El e2e lo
      * fija.
      */
-    const dondeVarianza = soloConVarianza
-      ? ' WHERE c.sin_explicacion <> 0'
+    const condiciones: string[] = [];
+    if (soloConVarianza) condiciones.push('c.sin_explicacion <> 0');
+    // El link del aviso de "sin costo": mismo predicado que su conteo en el
+    // `/resumen` (`perdiendoSinCostoSql`, donde está el porqué).
+    if (query.soloSinCosto === true) {
+      condiciones.push(perdiendoSinCostoSql('c'));
+    }
+    const dondeVarianza = condiciones.length
+      ? ` WHERE ${condiciones.join(' AND ')}`
       : '';
 
-    // Sin `soloConVarianza` el COUNT usa la forma barata —`SELECT 1` y el
-    // `GROUP BY`—, que cuenta exactamente los mismos grupos: un agregado sin
+    // Sin filtros sobre el `LATERAL` el COUNT usa la forma barata —`SELECT 1` y
+    // el `GROUP BY`—, que cuenta exactamente los mismos grupos: un agregado sin
     // `GROUP BY` devuelve siempre una fila, así que el `LATERAL` no puede sumar
-    // ni restar ninguna. Con el filtro puesto hay que pagar la agregación,
+    // ni restar ninguna. Con un filtro puesto hay que pagar la agregación,
     // porque es ella la que decide quién entra. Las dos formas tienen que contar
     // lo mismo que trae la página, y eso lo fija el e2e con un mutante propio.
     const countRows: { total: number }[] = await this.db.query(
-      soloConVarianza
+      dondeVarianza
         ? `SELECT COUNT(*)::int AS total ${uneCosto} ${dondeVarianza}`
         : `SELECT COUNT(*)::int AS total FROM (
              SELECT 1 ${FROM_GRUPOS} ${filtros} ${GROUP_BY_GRUPOS}
@@ -1144,11 +1191,11 @@ export class VarianzaService {
      * `SUM` ignora los `NULL`, así que el `monto` de esa fila es solo la parte
      * que tenía costo — y si ningún movimiento lo tenía, es `0` y la fila queda
      * entre las que no perdieron nada (por encima de los sobrantes, que tienen
-     * monto negativo). Es justo el producto al que le falta cargar el precio. Se
-     * deja así porque la alternativa —inventarle una posición— sería peor, pero
-     * está anotado como cuarta entrada del backlog en el Paso 3 de la Tarea 10: la
-     * salida candidata es que la pantalla lo marque, no que el orden lo simule,
-     * pero eso lo decide el owner.
+     * monto negativo). Es justo el producto al que le falta cargar el precio.
+     * **El orden no cambia, por decisión del owner (2026-09-27)**: subirlo
+     * arriba de todo le quitaba el primer lugar al que más plata perdió. Lo
+     * que lo compensa es el aviso de arriba de la tabla —el `perdiendoSinCosto`
+     * del `/resumen`— y su link, que es `soloSinCosto`.
      */
     const rows: GrupoRow[] = await this.db.query(
       `SELECT g.*, c.sin_explicacion, c.monto, c.falta_costo
@@ -1207,18 +1254,29 @@ export class VarianzaService {
       : null;
     const { filtros, params } = this.buildFiltros(tenantId, query, dia);
 
+    // ⚠️ El segundo `LATERAL` (`k`) es el MISMO de la fila del listado, no una
+    // columna más de `c`: el aviso tiene que contar con la bandera y la cantidad
+    // que el link filtra (`perdiendoSinCostoSql`). Va en esta consulta y no en
+    // una aparte para no volver a agregar los grupos.
     const montos: MontoRow[] = await this.db.query(
       `SELECT g.item_id, g.item_nombre, g.moneda_id,
               c.teorico, c.merma, c.cortesia, c.sin_explicacion,
-              c.consumo_total, c.abastecimiento, c.falta_costo
+              c.consumo_total, c.abastecimiento, c.falta_costo,
+              ${perdiendoSinCostoSql('k')} AS perdiendo_sin_costo
          FROM (${SELECT_GRUPOS} ${FROM_GRUPOS} ${filtros} ${GROUP_BY_GRUPOS}) g
-         LEFT JOIN LATERAL (${sqlMontosPorGrupo(params.length + 1)}) c ON TRUE`,
+         LEFT JOIN LATERAL (${sqlMontosPorGrupo(params.length + 1)}) c ON TRUE
+         LEFT JOIN LATERAL (${SQL_COSTO_LATERAL}) k ON TRUE`,
       [...params, MOTIVOS_ABASTECIMIENTO],
     );
 
     const sinConteo = await this.cargarSinConteo(tenantId, query, dia);
 
-    return { ...agregarMontos(montos), sinConteo };
+    return {
+      ...agregarMontos(montos),
+      perdiendoSinCosto: montos.filter((m) => m.perdiendo_sin_costo === true)
+        .length,
+      sinConteo,
+    };
   }
 
   /**

@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
-import { api, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/api'
+import { api, CLP, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/api'
 
 /**
  * La pantalla de varianza **como el aprobador de inventario** (`aprobador@paris.cl`,
@@ -114,6 +114,74 @@ test('el aprobador llega por el menú y ve lo que falta, en cantidad y en plata'
   // mal armado, permiso faltante) la tarjeta diría `—`. No se asevera el monto
   // exacto: el total cubre todo el tenant, no solo el producto de este test.
   await expect(page.locator('[data-qa="varianza-total-sinExplicacion"]')).toContainText('$')
+
+  expect(errores, 'ninguna llamada de la carga debe fallar para este rol').toEqual([])
+})
+
+/**
+ * El aviso de "sin costo" y su link, contra el backend real: que `soloSinCosto`
+ * pase el pipe (un campo que el DTO no declare se borra callado y la tabla
+ * volvería entera con 200) y que la fila hundida aparezca al filtrar.
+ *
+ * No se asevera el número exacto: el local del seed puede traer otras filas sin
+ * costo. Que el número y las filas coincidan lo fija el e2e de la API
+ * (`reportes-varianza-plata.e2e-spec.ts`).
+ */
+test('el aviso de sin costo filtra la tabla a los que perdieron sin costo', async ({ page, request }) => {
+  const token = escenario.token!
+  const nombre = `E2E varianza sin costo ${Date.now()}`
+
+  const ubicaciones = await api<{ id: string, tipo: string }[]>(request, 'get', '/ubicaciones', { token })
+  const local = ubicaciones.find(u => u.tipo === 'local')!
+  const motivos = await api<{ id: string }[]>(request, 'get', '/motivos-diferencia-inventario', { token })
+
+  // Sin `costo`: `crearProducto` pone uno por defecto, y acá es justo lo que falta.
+  const { id: itemId } = await api<{ id: string }>(request, 'post', '/items', {
+    token,
+    data: { nombre, tipo: 'producto', monedaId: CLP, unidadMedida: 'unidad', precioBase: '1000', stock: '40' },
+  })
+  escenario.itemIds.push(itemId)
+
+  const conteo = { ubicacionId: local.id, itemId, motivoDiferenciaId: motivos[0]!.id }
+  await contarYAplicar(request, token, { ...conteo, cantidadContada: '40' })
+  await contarYAplicar(request, token, { ...conteo, cantidadContada: '37' })
+
+  const errores: string[] = []
+  let avisoDelResumen: number | null = null
+  page.on('response', async (res) => {
+    if (res.url().includes('/api/') && res.status() >= 400) {
+      errores.push(`${res.status()} ${res.url()}`)
+    }
+    if (res.url().includes('/api/reportes/varianza/resumen?') && res.ok()) {
+      avisoDelResumen = ((await res.json()) as { perdiendoSinCosto: number }).perdiendoSinCosto
+    }
+  })
+
+  await entrarComoAprobador(page)
+  await page.goto('/reportes/varianza', { waitUntil: 'networkidle' })
+
+  const aviso = page.locator('[data-qa="varianza-sin-costo"]')
+  await expect(aviso).toContainText(/no tienen? costo y pueden? estar perdiendo plata/)
+  const link = page.locator('[data-qa="varianza-sin-costo-link"]')
+
+  // Se espera la RESPUESTA del listado filtrado: la fila ya se veía sin filtrar,
+  // así que afirmar sobre la tabla sin esperarla pasaba antes de que llegara.
+  const filtrada = page.waitForResponse(r =>
+    r.url().includes('/api/reportes/varianza?') && r.url().includes('soloSinCosto=true'))
+  await link.click()
+  const res = await filtrada
+  expect(res.status()).toBe(200)
+  const cuerpo = await res.json() as { data: { itemId: string, faltaCosto: boolean }[], meta: { total: number } }
+
+  // Si el pipe hubiera borrado el campo, vendría la tabla entera.
+  expect(cuerpo.data.every(f => f.faltaCosto)).toBe(true)
+  expect(cuerpo.data.some(f => f.itemId === itemId)).toBe(true)
+  // El número del aviso es el total que abre su link, con los datos que haya.
+  await expect.poll(() => avisoDelResumen).toBe(cuerpo.meta.total)
+  await expect(aviso).toContainText(`${cuerpo.meta.total} producto`)
+
+  await expect(link).toHaveText('Ver todos')
+  await expect(page.locator('tbody tr', { hasText: nombre })).toContainText('Sin costo')
 
   expect(errores, 'ninguna llamada de la carga debe fallar para este rol').toEqual([])
 })

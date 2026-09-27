@@ -12,6 +12,9 @@
 //      medido contra el backend real, 200). Mandarlo haría creer que los
 //      totales siguen la llave.
 //   6. Con bodegas, el primer resumen sale una sola vez y ya filtrado al local.
+//   7. El aviso de "sin costo" dice el número del resumen y su link filtra el
+//      LISTADO (nunca el resumen); con el filtro puesto, la línea queda para
+//      poder sacarlo aunque el número baje a cero.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Varianza from './varianza.vue'
@@ -90,6 +93,7 @@ const RESUMEN_BASE = {
   top: [top('Harina', 'clp-1', '750.0000'), top('Vino importado', 'usd-1', '40.0000')],
   fueraDelTop: 7,
   faltaCosto: false,
+  perdiendoSinCosto: 0,
   sinConteo: {
     nuncaContado: { total: 2, items: [{ itemId: 'a', nombre: 'Aceite' }, { itemId: 'b', nombre: 'Azúcar' }] },
     contadoUnaSolaVez: { total: 1, items: [{ itemId: 'c', nombre: 'Café' }] },
@@ -236,6 +240,53 @@ describe('varianza — resumen', () => {
     expect(resumen).not.toContain('soloConVarianza')
     expect(resumen).toMatch(/desde=\d{4}-\d{2}-\d{2}/)
     expect(resumen).toMatch(/hasta=\d{4}-\d{2}-\d{2}/)
+    wrapper.unmount()
+  })
+})
+
+describe('varianza — aviso de sin costo', () => {
+  it('sin filas que pierdan sin costo, no hay línea', async () => {
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="varianza-sin-costo"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('dice cuántos, y su link filtra el listado y no el resumen', async () => {
+    RESUMEN = { ...RESUMEN_BASE, perdiendoSinCosto: 3 }
+    const wrapper = await montar()
+    const linea = wrapper.find('[data-qa="varianza-sin-costo"]')
+    expect(linea.text()).toContain('3 productos no tienen costo y pueden estar perdiendo plata.')
+    expect(llamadas.some(u => u.includes('soloSinCosto'))).toBe(false)
+
+    llamadas = []
+    await wrapper.find('[data-qa="varianza-sin-costo-link"]').trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+
+    const lista = llamadas.find(u => u.includes('/reportes/varianza?'))
+    expect(lista).toContain('soloSinCosto=true')
+    // «Solo con diferencia» sigue como estaba: el conjunto del aviso ya está adentro.
+    expect(lista).toContain('soloConVarianza=true')
+    expect(llamadas.some(u => u.includes('/resumen?') && u.includes('soloSinCosto'))).toBe(false)
+    expect(wrapper.find('[data-qa="varianza-sin-costo-link"]').text()).toBe('Ver todos')
+    wrapper.unmount()
+  })
+
+  it('con el filtro puesto, la línea queda aunque el número baje a cero', async () => {
+    RESUMEN = { ...RESUMEN_BASE, perdiendoSinCosto: 1 }
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="varianza-sin-costo"]').text())
+      .toContain('1 producto no tiene costo y puede estar perdiendo plata.')
+    await wrapper.find('[data-qa="varianza-sin-costo-link"]').trigger('click')
+
+    RESUMEN = { ...RESUMEN_BASE, perdiendoSinCosto: 0 }
+    // Otro rango: el resumen se vuelve a pedir y ya no hay ninguno.
+    wrapper.findComponent({ name: 'AppRangoFechas' }).vm.$emit('update:desde', '2026-09-10')
+    await new Promise(r => setTimeout(r, 30))
+
+    const linea = wrapper.find('[data-qa="varianza-sin-costo"]')
+    expect(linea.exists()).toBe(true)
+    expect(linea.text()).toContain('Ningún producto sin costo está perdiendo plata.')
+    expect(wrapper.find('[data-qa="varianza-sin-costo-link"]').text()).toBe('Ver todos')
     wrapper.unmount()
   })
 })

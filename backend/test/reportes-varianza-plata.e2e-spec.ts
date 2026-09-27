@@ -464,4 +464,172 @@ describe('Reporte de varianza — la plata, el orden y el filtro (e2e)', () => {
     ).toEqual([{ monedaId: USD_MONEDA_ID, monto: '20.0000' }]);
     expect(data[0].itemId).toBe(enPesos);
   }, 60000);
+
+  /** El rango que cubre "hoy": el `/resumen` exige `desde` y `hasta`. */
+  function rangoDeHoy(): string {
+    const hoy = new Date();
+    const y = hoy.getFullYear();
+    const m = `${hoy.getMonth() + 1}`.padStart(2, '0');
+    const d = `${hoy.getDate()}`.padStart(2, '0');
+    return `desde=${y}-${m}-${d}&hasta=${y}-${m}-${d}`;
+  }
+
+  async function ajustarStock(
+    itemId: string,
+    bodegaId: string,
+    body: object,
+  ): Promise<void> {
+    const res = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ubicacionId: bodegaId, ...body });
+    expect(res.status).toBe(200);
+  }
+
+  /**
+   * ⛔ **El número del aviso y las filas que abre su link salen del MISMO
+   * criterio**: el `perdiendoSinCosto` del `/resumen` tiene que ser el
+   * `meta.total` del listado con `soloSinCosto`, y esas filas, las que se ven.
+   *
+   * Cada producto de la bodega descarta UNA lectura distinta del criterio, así
+   * que si alguien la cambia en un lado —o en los dos— el número exacto cae:
+   * - `perdio`: sin costo y le falta medio kilo. **El único que cuenta.** Medio
+   *   y no uno entero: con diferencias enteras, un umbral `>= 1` pasaba igual.
+   * - `sobrante`: sin costo, pero sobró. No está perdiendo plata; cae si el
+   *   criterio se afloja a "tiene diferencia".
+   * - `vaYVuelve`: sin costo, y la diferencia se compensó (faltaron 2, después
+   *   aparecieron). Cerró justo; cae si el criterio es "toda fila sin costo".
+   * - `conCosto`: perdió, pero tiene costo: su plata se ve y ordena bien.
+   * - `costoTardio`: perdió y **su recuento tiene costo**, pero en la ventana hay
+   *   un ajuste sin costo. Es el caso que separa las dos banderas: el `faltaCosto`
+   *   de la fila mira solo los recuentos (la plata que se muestra), el del
+   *   `/resumen` mira todo (los totales). Cae si el resumen contara con su propia
+   *   bandera en vez de con la de la fila.
+   * - `unaVez`: sin costo y contado una sola vez: no se puede medir.
+   */
+  it('el aviso de sin costo cuenta exactamente las filas que su filtro muestra', async () => {
+    const bodegaId = await crearBodega();
+    const perdio = await crearProductoEnBodega(bodegaId, {
+      nombre: 'Varianza sin costo perdio',
+      stock: '50',
+    });
+    const sobrante = await crearProductoEnBodega(bodegaId, {
+      nombre: 'Varianza sin costo sobrante',
+      stock: '50',
+    });
+    const vaYVuelve = await crearProductoEnBodega(bodegaId, {
+      nombre: 'Varianza sin costo va y vuelve',
+      stock: '50',
+    });
+    const conCosto = await crearProductoEnBodega(bodegaId, {
+      nombre: 'Varianza con costo perdio',
+      stock: '50',
+      costo: '10',
+    });
+    const costoTardio = await crearProductoEnBodega(bodegaId, {
+      nombre: 'Varianza costo tardio',
+      stock: '50',
+    });
+    const unaVez = await crearProductoEnBodega(bodegaId, {
+      nombre: 'Varianza sin costo una vez',
+      stock: '50',
+    });
+
+    const contar = (itemId: string, cantidadContada: string) =>
+      contarYAplicar(app, token, {
+        ubicacionId: bodegaId,
+        itemId,
+        cantidadContada,
+        motivoDiferenciaId,
+      });
+
+    // El primer conteo abre la ventana; su propio movimiento queda afuera.
+    for (const itemId of [perdio, sobrante, vaYVuelve, conCosto, costoTardio]) {
+      await contar(itemId, '50');
+    }
+    await contar(unaVez, '48');
+
+    await contar(perdio, '49.5');
+    await contar(sobrante, '53');
+    await contar(vaYVuelve, '48');
+    await contar(vaYVuelve, '50');
+    await contar(conCosto, '45');
+
+    // Un ajuste sin costo (el producto todavía no tiene) y después una compra
+    // que sí lo trae: el recuento que cierra ya congela un costo.
+    await ajustarStock(costoTardio, bodegaId, {
+      cantidad: '1',
+      tipo: 'entrada',
+      motivo: 'ajuste_manual',
+    });
+    await ajustarStock(costoTardio, bodegaId, {
+      cantidad: '10',
+      tipo: 'entrada',
+      motivo: 'compra',
+      costoUnitario: '10',
+    });
+    await contar(costoTardio, '58');
+
+    // El escenario es el que dice el docblock, no otro: se verifica antes de
+    // afirmar sobre el aviso.
+    const todas = await reporte(bodegaId, `&${rangoDeHoy()}`);
+    const de = (id: string) => todas.data.find((f) => f.itemId === id)!;
+    expect(todas.meta.total).toBe(6);
+    expect(de(perdio)).toMatchObject({
+      sinExplicacion: '0.5000',
+      faltaCosto: true,
+    });
+    expect(de(sobrante)).toMatchObject({
+      sinExplicacion: '-3.0000',
+      faltaCosto: true,
+    });
+    expect(de(vaYVuelve)).toMatchObject({
+      sinExplicacion: '0.0000',
+      faltaCosto: true,
+    });
+    expect(de(conCosto)).toMatchObject({
+      sinExplicacion: '5.0000',
+      faltaCosto: false,
+    });
+    expect(de(costoTardio)).toMatchObject({
+      sinExplicacion: '3.0000',
+      faltaCosto: false,
+    });
+    expect(de(unaVez)).toMatchObject({ medible: false, faltaCosto: false });
+
+    const resResumen = await request(app.getHttpServer())
+      .get(
+        `/api/reportes/varianza/resumen?${rangoDeHoy()}&ubicacionId=${bodegaId}`,
+      )
+      .set('Authorization', `Bearer ${token}`);
+    expect(resResumen.status).toBe(200);
+    const aviso = (resResumen.body as { perdiendoSinCosto: number })
+      .perdiendoSinCosto;
+    // Control del `costoTardio`: la bandera de los totales sí lo ve.
+    expect((resResumen.body as { faltaCosto: boolean }).faltaCosto).toBe(true);
+
+    const filtrado = await reporte(
+      bodegaId,
+      `&${rangoDeHoy()}&soloSinCosto=true`,
+    );
+    expect(aviso).toBe(1);
+    expect(filtrado.meta.total).toBe(aviso);
+    expect(filtrado.data.map((f) => f.itemId)).toEqual([perdio]);
+
+    // La pantalla arranca con «Solo con diferencia» prendido: el link no puede
+    // depender de apagarlo, ni el número cambiar con él.
+    const conLosDos = await reporte(
+      bodegaId,
+      `&${rangoDeHoy()}&soloSinCosto=true&soloConVarianza=true`,
+    );
+    expect(conLosDos.meta.total).toBe(aviso);
+    expect(conLosDos.data.map((f) => f.itemId)).toEqual([perdio]);
+
+    // Un query param llega como string: `'false'` no puede filtrar.
+    const apagado = await reporte(
+      bodegaId,
+      `&${rangoDeHoy()}&soloSinCosto=false`,
+    );
+    expect(apagado.meta.total).toBe(6);
+  }, 90000);
 });

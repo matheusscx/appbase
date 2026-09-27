@@ -58,6 +58,7 @@ interface ResumenVarianza {
     otros: CostoPorMoneda[]
   }
   faltaCosto: boolean
+  perdiendoSinCosto: number
   sinConteo: {
     nuncaContado: { total: number, items: ItemBreve[] }
     contadoUnaSolaVez: { total: number, items: ItemBreve[] }
@@ -90,6 +91,8 @@ const filtroUbicacion = ref(TODAS)
 // misma respuesta —prefiere la lista corta que va derecho a lo que perdió
 // plata—. Qué esconde, en `QueryVarianzaDto`.
 const soloConVarianza = ref(true)
+// El link del aviso de "sin costo". Arranca apagado: lo prende el aviso.
+const soloSinCosto = ref(false)
 
 const ubicacionOpts = computed<Opt[]>(() => [
   { label: 'Todas las ubicaciones', value: TODAS },
@@ -103,9 +106,16 @@ const filtrosComunes = computed(() => ({
   ubicacionId: filtroUbicacion.value !== TODAS ? filtroUbicacion.value : undefined,
 }))
 
+// El resumen EXIGE desde/hasta (400 si falta uno): sin rango completo no se pide.
+const rangoCompleto = computed(() => !!filtroDesde.value && !!filtroHasta.value)
+
 const listFilters = computed(() => ({
   ...filtrosComunes.value,
   soloConVarianza: soloConVarianza.value ? 'true' : undefined,
+  // ⚠️ Solo con rango completo: el aviso que lo prende y lo apaga vive en el
+  // resumen, y sin rango no se dibuja. Filtrar sin él dejaría la tabla recortada
+  // sin nada en pantalla que lo diga ni lo deshaga.
+  soloSinCosto: soloSinCosto.value && rangoCompleto.value ? 'true' : undefined,
 }))
 
 const { items: filas, meta, page, loading } = usePaginatedList<VarianzaFila>({
@@ -118,9 +128,6 @@ const resumen = ref<ResumenVarianza | null>(null)
 const loadingResumen = ref(false)
 // Distinto de "no hay datos": la gráfica dice que no pudo cargar, no que no hay pérdidas.
 const resumenFallo = ref(false)
-
-// El resumen EXIGE desde/hasta (400 si falta uno): sin rango completo no se pide.
-const rangoCompleto = computed(() => !!filtroDesde.value && !!filtroHasta.value)
 
 async function cargarResumen() {
   if (!rangoCompleto.value) {
@@ -192,6 +199,28 @@ const tarjetas = computed(() => {
 })
 
 const sinConteo = computed(() => resumen.value?.sinConteo ?? null)
+
+/**
+ * Las filas que perdieron mercadería sin costo cargado. El orden de la tabla va
+ * por plata y a estas no la conoce, así que se hunden entre las que no perdieron
+ * nada; el orden no se toca (owner, 2026-09-27) y las rescata esta línea. El
+ * número es exactamente el total que trae el listado con `soloSinCosto`: los dos
+ * salen del mismo predicado en el backend.
+ */
+const perdiendoSinCosto = computed(() => resumen.value?.perdiendoSinCosto ?? 0)
+// Con el filtro puesto la línea queda aunque el número baje a cero (cambió el
+// rango o la ubicación): es lo único que lo deshace.
+const avisoSinCosto = computed(() => perdiendoSinCosto.value > 0 || soloSinCosto.value)
+function alternarSinCosto() {
+  soloSinCosto.value = !soloSinCosto.value
+}
+const textoSinCosto = computed(() => {
+  const n = perdiendoSinCosto.value
+  if (n === 0) return 'Ningún producto sin costo está perdiendo plata.'
+  return n === 1
+    ? '1 producto no tiene costo y puede estar perdiendo plata.'
+    : `${n} productos no tienen costo y pueden estar perdiendo plata.`
+})
 
 /**
  * El top viene ordenado por magnitud cruda y puede mezclar monedas: una barra
@@ -397,6 +426,24 @@ const columns: TableColumn<VarianzaFila>[] = [
               </AppInfoButton>
             </span>
           </p>
+
+          <p
+            v-if="avisoSinCosto"
+            class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted"
+            data-qa="varianza-sin-costo"
+          >
+            <span class="inline-flex items-center gap-1">
+              {{ textoSinCosto }}
+              <UButton
+                :label="soloSinCosto ? 'Ver todos' : 'Ver cuáles'"
+                variant="link"
+                size="xs"
+                class="px-0"
+                data-qa="varianza-sin-costo-link"
+                @click="alternarSinCosto"
+              />
+            </span>
+          </p>
         </template>
 
         <CrudTable
@@ -461,9 +508,11 @@ const columns: TableColumn<VarianzaFila>[] = [
                 name="i-lucide-scale"
                 class="w-8 h-8 mx-auto mb-2 opacity-40"
               />
-              {{ soloConVarianza
-                ? 'Ningún producto con diferencia en el rango filtrado.'
-                : 'Ningún producto con recuentos en el rango filtrado.' }}
+              {{ listFilters.soloSinCosto
+                ? 'Ningún producto sin costo con faltante en el rango filtrado.'
+                : soloConVarianza
+                  ? 'Ningún producto con diferencia en el rango filtrado.'
+                  : 'Ningún producto con recuentos en el rango filtrado.' }}
             </div>
           </template>
         </CrudTable>

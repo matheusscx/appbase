@@ -75,20 +75,38 @@ kilo cuando se descubrió que faltaba.
 ## API
 
 `GET /api/reportes/varianza` — listado paginado. `desde`/`hasta` opcionales (fecha pura → día del
-negocio del tenant, `hasta` inclusivo), `ubicacionId`, `itemId`, `soloConVarianza`.
+negocio del tenant, `hasta` inclusivo), `ubicacionId`, `itemId`, `soloConVarianza`, `soloSinCosto`.
 
 **Orden: por plata perdida desc**, y cierra con los dos ids de la clave del grupo. El desempate no
 puede ser el nombre: `items.nombre` no es único por tenant, así que dos homónimos con el mismo
 monto pueden repetirse o saltearse entre páginas.
 
+⚠️ **Una fila sin costo se ordena por una suma que no muestra**: `SUM` ignora los `NULL`, así que
+si ningún recuento tenía costo el monto es `0` y la fila se hunde entre las que no perdieron nada.
+**El orden no se cambia** (owner, 2026-09-27): subirlas arriba le quitaba el primer lugar al que
+más plata perdió. Las rescata el aviso de `perdiendoSinCosto`.
+
 ⛔ **`soloConVarianza` esconde dos cosas** (decisión del owner, 2026-09-20): las filas que cerraron
 justas **y** las que no se pueden medir. El costo, que no se paga en ningún otro lado: un producto
 contado una sola vez, con el filtro tildado, no aparece en ninguna parte.
 
+⛔ **`soloSinCosto` trae exactamente las filas que cuenta `perdiendoSinCosto`**: sin costo en sus
+recuentos **y** con faltante (`sin explicación > 0`). Un predicado, sobre el mismo `LATERAL` de la
+fila, en los dos lados. Queda afuera el **sobrante** sin costo —no está perdiendo plata, y no se
+hunde: queda en `0`, arriba de los sobrantes con costo— y la fila que **se compensó** (faltaron 2
+y después aparecieron): cerró justa. Por eso el conjunto cae dentro del de `soloConVarianza`, y
+esa llave no cambia ni el número ni las filas.
+
 `GET /api/reportes/varianza/resumen` — agregados y datos de la gráfica. `desde`/`hasta`
 **obligatorios**, con tope de 366 días de diferencia: corre sin `LIMIT` sobre todo el rango.
 Trae totales por moneda de los cinco números, el top 10 por plata perdida, `fueraDelTop`,
-`faltaCosto` y el **faltante de conteo**.
+`faltaCosto`, `perdiendoSinCosto` y el **faltante de conteo**.
+
+⚠️ **`faltaCosto` y `perdiendoSinCosto` contestan cosas distintas.** El primero mira **todos** los
+movimientos del rango: dice que los totales en plata están cortos. El segundo mira la misma
+bandera que la fila —solo los recuentos, la plata de "sin explicación"— y cuenta **filas**
+(producto, ubicación), no productos, porque es el total que el link va a mostrar. Un ajuste sin
+costo dentro de la ventana prende el primero y no el segundo.
 
 ⛔ **El faltante va abierto en dos** (owner, 2026-09-20): `nuncaContado` y `contadoUnaSolaVez`. Al
 primero le falta **empezar** a contarse, al segundo le falta **cerrar**. Universo: ítems con
@@ -122,6 +140,10 @@ alcanzable por la entrada "Reportes" del menú (catálogo en `composables/useRep
 - «Otros» se pinta apagado en cero y en alerta, con explicación, cuando no; **la columna no se
   esconde nunca**.
 - El faltante de conteo sale en una línea con los dos números, y cada uno abre su lista.
+- Debajo, en el mismo formato, *"3 productos no tienen costo y pueden estar perdiendo plata"* con
+  un link que filtra la tabla (`soloSinCosto`) y, puesto, dice «Ver todos». Solo filtra con rango
+  completo: la línea vive en el resumen, y sin ella nada en pantalla diría que la tabla está
+  recortada. Por lo mismo, con el filtro puesto **la línea queda aunque el número baje a cero**.
 - **La gráfica** son barras apiladas del top 10 por plata perdida —sin explicación, merma,
   cortesía—, con *"y N productos más"* al pie. Sale del mismo `/resumen`, sin ruta aparte.
   ⛔ **«Otros» no entra**: es un detector de que la cuenta no cerró, no una parte de la pérdida.
@@ -200,6 +222,9 @@ el orden **solo** los cubre el e2e contra Postgres. Medido tres veces en este fr
 números y la regla de los dos controles: [`anti-patterns.md`](../agent/anti-patterns.md).
 
 Specs: `varianza.service.spec.ts` (mapeo, validación del rango) y cuatro e2e —ventana, baldes,
-plata y resumen—. Pantalla: `varianza.nuxt.spec.ts` (render) y el Playwright
-`frontend/e2e/reportes/varianza.spec.ts`, que entra **como el aprobador de inventario** y falla si
-cualquier llamada de la carga le devuelve un error.
+plata y resumen—. Que el número del aviso y las filas del link coincidan lo fija un e2e de la
+plata con un producto por lectura del criterio que se descarta. Pantalla: `varianza.nuxt.spec.ts`
+(render) y el Playwright `frontend/e2e/reportes/varianza.spec.ts`, que entra **como el aprobador
+de inventario**, falla si cualquier llamada de la carga le devuelve un error, y hace clic en el
+link del aviso: el listado filtrado tiene que venir solo con filas sin costo y con el total que
+dijo el resumen.

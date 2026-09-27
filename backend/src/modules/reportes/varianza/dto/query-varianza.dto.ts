@@ -59,4 +59,19 @@ export class QueryVarianzaDto extends PaginationQueryDto {
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   soloConVarianza?: boolean;
+
+  /**
+   * Solo las filas que perdieron mercadería sin costo cargado: el link del aviso
+   * que el `/resumen` cuenta en `perdiendoSinCosto`. El criterio vive en
+   * `perdiendoSinCostoSql`, compartido con ese conteo.
+   *
+   * ⚠️ **Tiene que estar declarado acá**: el pipe global tiene `whitelist` sin
+   * `forbidNonWhitelisted`, así que un campo que el DTO no nombre se borra
+   * callado y el listado vuelve entero con 200. Mismo `@Transform` que
+   * `soloConVarianza`, por el mismo motivo.
+   */
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  soloSinCosto?: boolean;
 }

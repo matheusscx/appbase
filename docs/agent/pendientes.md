@@ -831,22 +831,6 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   agrega al catálogo de `frontend/app/composables/useReportes.ts` con su propio `modulo_app`
   (`docs/features/modulo-reportes.md`).
 
-- [ ] **Varianza: avisar arriba de la tabla cuántos productos no tienen costo** ✅ *(owner,
-  2026-09-27, eligiendo entre tres opciones que le planteó la orquestadora; antes era una pregunta
-  de la § 4)* — el problema: cuando algún movimiento del grupo no tiene `costo_unitario`, la fila
-  manda `costoSinExplicacion: []` pero el `ORDER BY` usa el `monto` parcial (`SUM` ignora los
-  `NULL`); si **ningún** movimiento tenía costo, el monto es `0` y la fila queda entre las que no
-  perdieron nada, aunque sea el producto al que falta cargarle el precio (medido en la Tarea 5 del
-  plan de la varianza, alcanzable por la API real, cubierto por un e2e; docblock del `ORDER BY` en
-  `backend/src/modules/reportes/varianza/varianza.service.ts`).
-  **Lo decidido (opción B):** una línea arriba de la tabla —*"3 productos no tienen costo y pueden
-  estar perdiendo plata"*— con un link que los filtra. **El orden no cambia.** Mismo formato que
-  el faltante de conteo, que ya vive en esa pantalla.
-  **Descartadas:** (A) subir los sin costo arriba de todo —obliga a ocuparse, pero el primer lugar
-  deja de ser el que más plata perdió—; (C) dejar solo el badge de la celda, que puede quedar en
-  la página 5. Hoy el `/resumen` trae `faltaCosto` como **booleano**, no un conteo, y el listado
-  no tiene filtro por eso: las dos cosas faltan.
-
 - [ ] **% de anulaciones y cortesías sobre lo vendido por garzón** ✅ *(contestado 2026-09-20; se mudó
   de la § 4 el 2026-09-27)* (backend + frontend,
   fuera de alcance de

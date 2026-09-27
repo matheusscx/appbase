@@ -762,6 +762,7 @@ describe('VarianzaService', () => {
       consumo_total: '0',
       abastecimiento: '0',
       falta_costo: false,
+      perdiendo_sin_costo: false,
       ...overrides,
     });
 
@@ -956,6 +957,28 @@ describe('VarianzaService', () => {
     });
 
     /**
+     * El conteo del aviso cuenta filas, y un `NULL` no cuenta: el criterio es
+     * SQL (`perdiendoSinCostoSql`) y lo prueba el e2e contra el listado; acá
+     * solo que el número sale de esa columna y no de `falta_costo`, que avisa
+     * otra cosa.
+     */
+    it('perdiendoSinCosto cuenta las filas marcadas, no las que tienen falta_costo', async () => {
+      mockResumen({
+        montos: [
+          montoRow({ perdiendo_sin_costo: true }),
+          montoRow({ item_id: 'i2', perdiendo_sin_costo: true }),
+          montoRow({ item_id: 'i3', perdiendo_sin_costo: null }),
+          montoRow({ item_id: 'i4', falta_costo: true }),
+        ],
+      });
+
+      const res = await service.resumen(TENANT, RANGO_RESUMEN);
+
+      expect(res.perdiendoSinCosto).toBe(2);
+      expect(res.faltaCosto).toBe(true);
+    });
+
+    /**
      * ⛔ **Los dos conjuntos del faltante son disjuntos por construcción** —cero
      * recuentos contra exactamente uno— y el total de cada uno tiene que ser el
      * largo de su propia lista: si la línea dice 2, que 2 sea lo que aparece al
@@ -1002,6 +1025,8 @@ describe('VarianzaService', () => {
         ...RANGO,
         ubicacionId: LOCAL,
         itemId: HARINA,
+        soloConVarianza: true,
+        soloSinCosto: true,
       });
 
       exigirQueConsulto();
