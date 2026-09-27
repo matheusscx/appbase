@@ -129,6 +129,7 @@ import { Mesa } from './modules/salones/entities/mesa.entity';
 import { Cuenta } from './modules/salones/entities/cuenta.entity';
 import { CuentaLinea } from './modules/salones/entities/cuenta-linea.entity';
 import { CuentaLineaAnulacion } from './modules/salones/entities/cuenta-linea-anulacion.entity';
+import { CuentaLineaReparto } from './modules/salones/entities/cuenta-linea-reparto.entity';
 import { CuentaAsignacion } from './modules/salones/entities/cuenta-asignacion.entity';
 import { GarzonesModule } from './modules/garzones/garzones.module';
 import { Garzon } from './modules/garzones/entities/garzon.entity';
@@ -290,6 +291,7 @@ import { ReportesModule } from './modules/reportes/reportes.module';
           CuentaAsignacion,
           CuentaLinea,
           CuentaLineaAnulacion,
+          CuentaLineaReparto,
           Garzon,
           GarzonPinEvento,
           Turno,

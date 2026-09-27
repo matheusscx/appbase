@@ -1321,7 +1321,11 @@ describe('SalonesService', () => {
         cantidad: '2',
       });
 
-      expect(orden).toEqual(['lock-cuenta', 'tope-stock', 'save']);
+      // El segundo 'save' es la fila de `cuenta_linea_reparto` que
+      // `sumarAlReparto` crea después de guardar la línea (Task 1, spec
+      // § 3.3): el UPDATE que intenta primero pasa por `manager.query`, no
+      // por este mock, así que acá solo se ve el alta que sigue.
+      expect(orden).toEqual(['lock-cuenta', 'tope-stock', 'save', 'save']);
       // Y con lo que la línea REALMENTE va a escribir: la cantidad canónica,
       // no la de presentación.
       expect(items.validarStockAlPedir).toHaveBeenCalledWith(TENANT, [
@@ -1548,6 +1552,9 @@ describe('SalonesService', () => {
       manager.find.mockResolvedValue([]);
       manager.query
         .mockResolvedValueOnce([{ item_id: ITEM }]) // FOR SHARE del ítem
+        // Reparto de la línea nueva (Task 1): el UPDATE de `sumarAlReparto` no
+        // encuentra fila (línea recién creada) → cae al alta por `manager.save`.
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([
           {
             cuenta_id: CUENTA,
@@ -1766,7 +1773,14 @@ describe('SalonesService', () => {
         CuentaLinea,
         expect.objectContaining({ cantidad: '3' }),
       );
-      expect(manager.create).not.toHaveBeenCalled();
+      // No crea una CuentaLinea nueva (el merge es lo que se está probando).
+      // `sumarAlReparto` sí crea una fila de `CuentaLineaReparto` acá (Task
+      // 1): esta línea no tenía reparto previo en el mock, así que cae en el
+      // alta — es la conducta esperada, no un efecto colateral a silenciar.
+      expect(manager.create).not.toHaveBeenCalledWith(
+        CuentaLinea,
+        expect.anything(),
+      );
 
       manager.find.mockResolvedValue([
         {
@@ -1868,6 +1882,19 @@ describe('SalonesService', () => {
               // query de nombres de ingredientes: es la tercera lectura que se
               // escapaba por la conexión global.
               personalizacion: { omitidos: [ING], extras: [] },
+            },
+          ]);
+        // El reparto de la línea (Task 1, spec § 3.3): una fila de sobra para
+        // que `descontarDelReparto` no reviente cuando el delta baja. El QUIÉN
+        // se descuenta ya está cubierto por `reparto-linea.spec.ts` y por el
+        // e2e; acá solo hace falta que la escritura no reviente.
+        if (sql.includes('FROM cuenta_linea_reparto'))
+          return Promise.resolve([
+            {
+              id: 'reparto-1',
+              garzon_id: null,
+              cantidad: '999999.0000',
+              creado_el: new Date(),
             },
           ]);
         return Promise.resolve([]);
@@ -2116,7 +2143,9 @@ describe('SalonesService', () => {
         cantidad: '3',
       });
 
-      expect(orden).toEqual(['lock-cuenta', 'tope-stock', 'save']);
+      // El segundo 'save' es la fila de `cuenta_linea_reparto` que
+      // `sumarAlReparto` crea con el delta que sube (Task 1, spec § 3.3).
+      expect(orden).toEqual(['lock-cuenta', 'tope-stock', 'save', 'save']);
       // **Las dos cantidades, no su resta.** El tope compara
       // `consumo(3) − consumo(1)`; pasarle un `'2'` ya restado hace que la
       // expansión convierta la resta, y ahí el redondeo de unidades cambia la
@@ -2352,6 +2381,23 @@ describe('SalonesService', () => {
         if (sql.includes('i.tipo, i.nombre, ip.unidad_medida')) {
           return Promise.resolve([
             { item_id: ITEM, tipo, nombre: 'Lomo', unidad_medida: 'unidad' },
+          ]);
+        }
+        // El reparto de la línea (Task 1, spec § 3.3): una sola fila sin
+        // garzón, con cantidad de sobra para cualquier `dto.cantidad` que
+        // este describe anule — `descontarDelReparto` necesita ALGO que
+        // descontar o revienta con "no alcanza". El QUIÉN se descuenta ya
+        // está cubierto por `reparto-linea.spec.ts` (unitario de la función
+        // pura) y por `salones-reparto-linea.e2e-spec.ts` (contra Postgres);
+        // acá solo hace falta que la escritura no reviente.
+        if (sql.includes('FROM cuenta_linea_reparto')) {
+          return Promise.resolve([
+            {
+              id: 'reparto-1',
+              garzon_id: null,
+              cantidad: '999999.0000',
+              creado_el: new Date(),
+            },
           ]);
         }
         return Promise.resolve([]);
@@ -2726,6 +2772,18 @@ describe('SalonesService', () => {
             },
           ]);
         }
+        // El reparto de la línea (Task 1): una fila de sobra para que
+        // `descontarDelReparto` no reviente (mismo motivo que `mockItemQuery`).
+        if (sql.includes('FROM cuenta_linea_reparto')) {
+          return Promise.resolve([
+            {
+              id: 'reparto-1',
+              garzon_id: null,
+              cantidad: '999999.0000',
+              creado_el: new Date(),
+            },
+          ]);
+        }
         return Promise.resolve([]);
       });
 
@@ -2851,6 +2909,10 @@ describe('SalonesService', () => {
               .map((id) => ({ item_id: id, ...items[id] })),
           );
         }
+        // A diferencia de `anularLinea`, este camino NO toca
+        // `cuenta_linea_reparto` (ronda de fix 1, N+1): no hace falta una
+        // fila de sobra acá, y de hecho el test de abajo afirma que esta
+        // consulta nunca se ve.
         return Promise.resolve([]);
       });
     }
@@ -2920,6 +2982,40 @@ describe('SalonesService', () => {
         Cuenta,
         expect.objectContaining({ estado: EstadoCuenta.CANCELADA }),
       );
+    });
+
+    /**
+     * Ronda de fix 1 (domain review): `escribirAnulacionEnLinea` corre una
+     * vez POR LÍNEA acá adentro, así que si tocara `cuenta_linea_reparto`
+     * (un SELECT + un UPDATE) sería un N+1. La decisión fue sacarlo: la
+     * cuenta queda cancelada y todas sus líneas se borran unas líneas más
+     * abajo, y el reparto de una línea de una cuenta cancelada no lo lee
+     * nadie. La aserción mira el SQL de cada llamada a `manager.query`, no
+     * un `toContain` sobre texto libre — un comentario que mencionara la
+     * tabla no debería poder colarse como falso positivo.
+     */
+    it('con varias líneas despachadas, ninguna consulta toca `cuenta_linea_reparto` (no hay N+1)', async () => {
+      manager.find.mockResolvedValue([
+        lineaViva({ id: 'l1', itemId: ITEM, cantidadEnviada: '1' }),
+        lineaViva({ id: 'l2', itemId: ITEM_2, cantidadEnviada: '1' }),
+      ]);
+      mockItemsQuery({
+        [ITEM]: { tipo: 'producto', nombre: 'Lomo', unidad_medida: 'unidad' },
+        [ITEM_2]: {
+          tipo: 'producto',
+          nombre: 'Papas',
+          unidad_medida: 'unidad',
+        },
+      });
+
+      await service.cancelarConMotivo(TENANT, USUARIO_ACTOR, CUENTA, {
+        motivoBajaId: MOTIVO,
+      });
+
+      const llamadasAReparto = manager.query.mock.calls.filter(([sql]) =>
+        (sql as string).includes('cuenta_linea_reparto'),
+      );
+      expect(llamadasAReparto).toEqual([]);
     });
 
     it('una línea 2/0: no genera fila de anulación ni consumo de stock', async () => {

@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-09-16 (cancelar con motivo, y la fusión que no pierde anulaciones)
+**Last Updated**: 2026-09-27 (el reparto de cada línea entre los garzones que la sirvieron)
 
 ---
 
@@ -249,6 +249,11 @@ filas.
 
 **`cuenta_lineas`**: `cuenta_linea_id` PK, `tenant_id`, `cuenta_id`, `item_id`,
 `cantidad numeric(18,4)`. El precio se resuelve al cerrar (igual que ventas).
+
+**`cuenta_linea_reparto`** (2026-09-27): `cuenta_linea_reparto_id` PK, `tenant_id`,
+`cuenta_linea_id`, `garzon_id` (`uuid` NULL), `cantidad numeric(18,4)` + soft delete
+estándar. Detalle y porqué: sección "Quién sirvió cada unidad: el reparto de la
+línea" más abajo.
 
 ### Responsable vigente y transferencias
 
@@ -629,6 +634,54 @@ escritor aunque corra una vez por línea.
 **Fuera de esta parte:** deshacer una anulación (decidido que no existe: se vuelve a pedir el
 plato). El reporte de anulaciones con merma y cortesía separadas es la parte 3, construida —
 ver la sección siguiente.
+
+### Quién sirvió cada unidad: el reparto de la línea (2026-09-27)
+
+Spec `docs/superpowers/specs/2026-09-27-porcentaje-anulaciones-por-garzon-design.md` § 3.
+El pedido del owner fue *"guardar qué garzón tenía la mesa en cada línea"* —insumo de la
+Task 2, un % de anulaciones y cortesías por garzón—, y una columna
+`cuenta_lineas.garzon_id` no alcanza por cómo el salón edita las cantidades: **sumar
+desde el catálogo** (`POST /cuentas/:id/lineas`) junta el pedido con una línea igual que
+ya estaba, y **el "+" del stepper** (`PATCH /cuentas/:id/lineas/:lineaId`) manda la
+cantidad **absoluta** sobre la misma línea. Escena: Ana sirve 2 cervezas, transfiere; la
+mesa pide otra ronda y Beto aprieta "+" — con una columna, la tercera cerveza sería de
+Ana. `cuenta_linea_reparto` hace que sea de Beto **sin que la pantalla del salón cambie**:
+guarda cuántas unidades de cada línea entraron con cada responsable vigente de la cuenta.
+
+**Invariante**: para toda línea viva, Σ `cantidad` del reparto vivo = `cuenta_lineas.cantidad`.
+La sostiene `SalonesService` (único escritor), siempre bajo el mismo `FOR UPDATE` de la
+cuenta que ya toma cada camino que mueve la cantidad de una línea —no agrega un orden de
+bloqueo nuevo—, y la fijan los tests, no una restricción de la base. Índice único parcial
+`uq_cuenta_linea_reparto_garzon` sobre `(cuenta_linea_id, garzon_id) WHERE eliminado_el IS
+NULL`: a lo sumo una fila viva por línea y garzón; con `garzon_id` null no cubre (Postgres
+trata los null como distintos), ahí lo sostiene el código. Una fila que baja a 0 no se
+borra, queda en 0 — nada la lee distinto de una fila que no existe.
+
+**Quién escribe** (spec § 3.3):
+
+| Camino | Qué le pasa al reparto |
+|---|---|
+| `agregarLinea`, línea nueva | Una fila: responsable vigente × cantidad |
+| `agregarLinea`, se junta con una existente | La cantidad agregada suma a la fila del responsable vigente en esa línea (la crea si no tiene) |
+| `actualizarLinea`, sube | La diferencia suma a la fila del responsable vigente |
+| `actualizarLinea`, baja | La diferencia se descuenta (regla de abajo) |
+| `anularLinea` | La cantidad anulada se descuenta (regla de abajo) |
+| `cancelarConMotivo` | **No** descuenta: corre por varias líneas despachadas y el escritor común (`escribirAnulacionEnLinea`) se llama una vez por línea, así que descontar ahí adentro sería un SELECT + UPDATE de más por línea (N+1, domain review ronda de fix 1). No hace falta: la cuenta queda cancelada y todas sus líneas se borran en la misma operación, y el reparto de una línea de una cuenta cancelada no lo lee nadie |
+| `quitarLinea` | Nada: la línea se borra y su reparto deja de leerse con ella |
+| `fusionarCuentas`, la línea se mueve entera a la cuenta destino | Nada: el reparto cuelga de la línea, no de la cuenta |
+| `fusionarCuentas`, la línea se junta con una del destino | Cada fila del origen suma a la fila del mismo garzón en la línea destino, o se re-apunta a esa línea si no tiene; las filas absorbidas se marcan borradas. Por lotes (una lectura + tres escrituras), no una consulta por línea |
+| `cerrarCuenta` | Nada: la cuenta cerrada ya no se edita, el reparto queda congelado |
+
+El responsable se lee de la cuenta **ya bloqueada** (`cuenta.garzonResponsableId`), nunca
+del body ni recalculado por línea. Las funciones puras que deciden QUÉ fila cambia y a
+cuánto viven en `reparto-linea.ts` (`descontarReparto`, `fusionarRepartos`), separadas del
+service para poder probarlas sin mocks de transacción.
+
+**Regla de descuento** (bajar la cantidad o anular): primero sale de la fila del
+**responsable vigente**; si no alcanza, de las demás filas en orden de `creado_el`
+descendente (la más reciente primero, desempate por id). Es regla técnica, no de negocio.
+Que el reparto no alcance para descontar es un **error**, no un caso: significa que la
+invariante ya se había roto antes de esta escritura.
 
 ### El reporte de anulaciones, con merma y cortesía separadas (2026-09-18)
 

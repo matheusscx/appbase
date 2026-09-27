@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, IsNull, Repository } from 'typeorm';
 import { Db } from '../../common/db/db.service';
+import { ESCALA_COSTO } from '../../common/constants/escalas';
 import {
   MAX_REINTENTOS_DEADLOCK,
   esDeadlock,
@@ -17,6 +18,8 @@ import { Mesa, FormaMesa, TamanoMesa } from './entities/mesa.entity';
 import { Cuenta, EstadoCuenta } from './entities/cuenta.entity';
 import { CuentaLinea } from './entities/cuenta-linea.entity';
 import { CuentaLineaAnulacion } from './entities/cuenta-linea-anulacion.entity';
+import { CuentaLineaReparto } from './entities/cuenta-linea-reparto.entity';
+import { descontarReparto, fusionarRepartos } from './reparto-linea';
 import { CreateSalonDto } from './dto/create-salon.dto';
 import { UpdateSalonDto } from './dto/update-salon.dto';
 import { CreateMesaDto } from './dto/create-mesa.dto';
@@ -959,8 +962,18 @@ export class SalonesService {
             // canónica ya sumada, en la unidad que esa línea ya mostraba.
             this.sincronizarPresentacion(match, item, catalogo);
             await manager.save(CuentaLinea, match);
+            // El responsable VIGENTE de la cuenta, no el que creó la línea
+            // (spec § 3.1/§ 3.3): es lo que hace que el "+" de otro garzón
+            // sobre un plato ajeno sea suyo.
+            await this.sumarAlReparto(
+              manager,
+              tenantId,
+              match.id,
+              cuenta.garzonResponsableId,
+              resuelta.cantidadCanonica,
+            );
           } else {
-            await manager.save(
+            const nueva = await manager.save(
               CuentaLinea,
               manager.create(CuentaLinea, {
                 tenantId,
@@ -975,6 +988,13 @@ export class SalonesService {
                 tasaCambio,
                 reglasCongeladas,
               }),
+            );
+            await this.sumarAlReparto(
+              manager,
+              tenantId,
+              nueva.id,
+              cuenta.garzonResponsableId,
+              resuelta.cantidadCanonica,
             );
           }
           return this.armarDetalle(tenantId, cuenta, manager);
@@ -1113,6 +1133,30 @@ export class SalonesService {
                   personalizacion,
                 },
               ],
+            );
+          }
+
+          // El reparto sigue el delta de la cantidad ABSOLUTA que llega, ANTES
+          // de pisar `linea.cantidad` (spec § 3.3): sube → suma al responsable
+          // vigente; baja → descuenta con la prioridad de `descontarReparto`.
+          const delta = new Decimal(resuelta.cantidadCanonica).minus(
+            linea.cantidad,
+          );
+          if (delta.gt(0)) {
+            await this.sumarAlReparto(
+              manager,
+              tenantId,
+              linea.id,
+              cuenta.garzonResponsableId,
+              delta.toFixed(ESCALA_COSTO),
+            );
+          } else if (delta.lt(0)) {
+            await this.descontarDelReparto(
+              manager,
+              tenantId,
+              linea.id,
+              cuenta.garzonResponsableId,
+              delta.abs().toFixed(ESCALA_COSTO),
             );
           }
 
@@ -1357,6 +1401,20 @@ export class SalonesService {
       stockCtx,
     );
 
+    // El reparto baja lo mismo que la línea (spec § 3.3), acá y no dentro de
+    // `escribirAnulacionEnLinea`: este camino anula UNA sola línea, así que
+    // una consulta más acá no es un N+1 (a diferencia de
+    // `escribirCancelacionConMotivo`, que corre por varias líneas — ver su
+    // comentario). `garzonId` es el responsable VIGENTE de la cuenta, no el de
+    // la fila que efectivamente baja — eso lo decide `descontarReparto` adentro.
+    await this.descontarDelReparto(
+      manager,
+      tenantId,
+      linea.id,
+      cuenta.garzonResponsableId,
+      cantidad.toString(),
+    );
+
     // Si esta anulación deja la cuenta sin líneas vivas, se cancela en la
     // MISMA operación (spec § 7): `cerrarCuenta` rechaza una cuenta sin
     // líneas con "La cuenta no tiene productos", así que no hay otro camino
@@ -1453,6 +1511,14 @@ export class SalonesService {
       await manager.save(CuentaLinea, linea);
     }
 
+    // El reparto NO se descuenta acá: `escribirAnulacionEnLinea` corre una vez
+    // POR LÍNEA dentro del bucle de `escribirCancelacionConMotivo`, y
+    // `descontarDelReparto` es un SELECT + UPDATE — meterlo acá adentro sería
+    // un N+1 (domain review, ronda de fix 1). El único llamador que SÍ
+    // necesita el descuento (`anularLinea`, vía `escribirAnulacionDeLinea`) lo
+    // hace afuera, después de que este método vuelve — ver esa función y el
+    // comentario en `escribirCancelacionConMotivo`.
+
     // Solo `merma` y `cortesía` descuentan (spec § 4.3); `no_elaborado` no
     // tiene movimiento porque ese stock nunca salió. Y solo si el ÍTEM
     // tiene stock que descontar: `servicio` y `suscripcion` no lo tienen —
@@ -1484,6 +1550,83 @@ export class SalonesService {
       });
     }
     return [];
+  }
+
+  /**
+   * Suma `delta` a la fila de `garzonId` en la línea, creándola si no tiene
+   * (spec § 3.3). Solo bajo el `FOR UPDATE` de la cuenta: por eso no bloquea
+   * nada propio y no agrega un orden de bloqueo.
+   */
+  private async sumarAlReparto(
+    manager: EntityManager,
+    tenantId: string,
+    cuentaLineaId: string,
+    garzonId: string | null,
+    delta: string,
+  ): Promise<void> {
+    // `UPDATE ... RETURNING` llega como `[rows, rowCount]`, no como `rows`
+    // (`pg-returning.util.ts`): sin `unwrap`, `actualizadas.length` es 2 (o 0
+    // si `rows` viniera plano) y esta rama nunca ve el caso "no actualizó
+    // nada", así que la fila nueva no se crea nunca.
+    const actualizadas = unwrap<{ cuenta_linea_reparto_id: string }>(
+      await manager.query(
+        `UPDATE cuenta_linea_reparto SET cantidad = cantidad + $4, actualizado_el = NOW()
+          WHERE tenant_id = $1 AND cuenta_linea_id = $2
+            AND garzon_id IS NOT DISTINCT FROM $3::uuid AND eliminado_el IS NULL
+          RETURNING cuenta_linea_reparto_id`,
+        [tenantId, cuentaLineaId, garzonId, delta],
+      ),
+    );
+    if (actualizadas.length === 0) {
+      await manager.save(
+        CuentaLineaReparto,
+        manager.create(CuentaLineaReparto, {
+          tenantId,
+          cuentaLineaId,
+          garzonId,
+          cantidad: delta,
+        }),
+      );
+    }
+  }
+
+  /** Descuenta `cantidad` del reparto de la línea con `descontarReparto` (spec § 3.3). */
+  private async descontarDelReparto(
+    manager: EntityManager,
+    tenantId: string,
+    cuentaLineaId: string,
+    responsableId: string | null,
+    cantidad: string,
+  ): Promise<void> {
+    const filas: {
+      id: string;
+      garzon_id: string | null;
+      cantidad: string;
+      creado_el: Date;
+    }[] = await manager.query(
+      `SELECT cuenta_linea_reparto_id AS id, garzon_id, cantidad::text AS cantidad, creado_el
+           FROM cuenta_linea_reparto
+          WHERE tenant_id = $1 AND cuenta_linea_id = $2 AND eliminado_el IS NULL`,
+      [tenantId, cuentaLineaId],
+    );
+    const cambios = descontarReparto(
+      filas.map((f) => ({
+        id: f.id,
+        garzonId: f.garzon_id,
+        cantidad: f.cantidad,
+        creadoEl: new Date(f.creado_el),
+      })),
+      responsableId,
+      cantidad,
+    );
+    if (cambios.length === 0) return;
+    // Una sola escritura para todas las filas que bajan, no una por fila.
+    await manager.query(
+      `UPDATE cuenta_linea_reparto r SET cantidad = c.cantidad::numeric, actualizado_el = NOW()
+         FROM unnest($2::uuid[], $3::text[]) AS c(id, cantidad)
+        WHERE r.cuenta_linea_reparto_id = c.id AND r.tenant_id = $1`,
+      [tenantId, cambios.map((c) => c.id), cambios.map((c) => c.cantidad)],
+    );
   }
 
   /**
@@ -1656,6 +1799,13 @@ export class SalonesService {
       );
       advertencias.push(...nuevas);
     }
+
+    // El reparto de estas líneas NO se descuenta (a diferencia de
+    // `anularLinea`): todas se borran acá abajo y la cuenta queda cancelada,
+    // así que nadie vuelve a leer el reparto de una línea de una cuenta
+    // cancelada (lo vendido solo lee líneas vivas de cuentas cerradas).
+    // Descontarlo sería una lectura + escritura por línea sin ningún lector
+    // que la necesite (N+1 innecesario, domain review ronda de fix 1).
 
     // Todas las líneas vivas se borran, hayan generado anulación o no (spec
     // § 6): lo pendiente sin despachar de una línea parcial y las líneas sin
@@ -1852,10 +2002,16 @@ export class SalonesService {
         }
       }
 
+      // Línea de origen que se JUNTA con una del destino → línea destino (spec
+      // § 3.3): el reparto de esa línea de origen se mueve con ella, después
+      // del bucle. Las que se MUEVEN enteras (rama `else`) no entran acá: su
+      // reparto cuelga de la línea, no de la cuenta, y no necesita tocarse.
+      const destinoDe = new Map<string, string>();
       for (const origen of origenes) {
         for (const linea of porOrigen.get(origen.id) ?? []) {
           const existente = enDestino.get(claveFusion(linea));
           if (existente) {
+            destinoDe.set(linea.id, existente.id);
             existente.cantidad = new Decimal(existente.cantidad)
               .plus(linea.cantidad)
               .toString();
@@ -1892,6 +2048,71 @@ export class SalonesService {
           origen.cerradaEl,
         );
         await manager.save(Cuenta, origen);
+      }
+
+      // El reparto de las líneas que se juntaron (spec § 3.3): una lectura y tres
+      // escrituras por lotes, sin importar cuántas líneas. Las que se movieron
+      // enteras se llevan su reparto solas: cuelga de la línea, no de la cuenta.
+      if (destinoDe.size > 0) {
+        const filasReparto: {
+          id: string;
+          cuenta_linea_id: string;
+          garzon_id: string | null;
+          cantidad: string;
+          creado_el: Date;
+        }[] = await manager.query(
+          `SELECT cuenta_linea_reparto_id AS id, cuenta_linea_id, garzon_id, cantidad::text AS cantidad, creado_el
+             FROM cuenta_linea_reparto
+            WHERE tenant_id = $1 AND eliminado_el IS NULL AND cuenta_linea_id = ANY($2::uuid[])`,
+          [tenantId, [...destinoDe.keys(), ...destinoDe.values()]],
+        );
+        const aFila = (f: (typeof filasReparto)[number]) => ({
+          id: f.id,
+          cuentaLineaId: f.cuenta_linea_id,
+          garzonId: f.garzon_id,
+          cantidad: f.cantidad,
+          creadoEl: new Date(f.creado_el),
+        });
+        const { actualizar, reapuntar, borrar } = fusionarRepartos(
+          filasReparto
+            .filter((f) => destinoDe.has(f.cuenta_linea_id))
+            .map(aFila),
+          filasReparto
+            .filter((f) => !destinoDe.has(f.cuenta_linea_id))
+            .map(aFila),
+          destinoDe,
+        );
+        if (borrar.length) {
+          await manager.query(
+            `UPDATE cuenta_linea_reparto SET eliminado_el = NOW()
+              WHERE tenant_id = $1 AND cuenta_linea_reparto_id = ANY($2::uuid[])`,
+            [tenantId, borrar],
+          );
+        }
+        if (reapuntar.length) {
+          await manager.query(
+            `UPDATE cuenta_linea_reparto r SET cuenta_linea_id = c.linea, actualizado_el = NOW()
+               FROM unnest($2::uuid[], $3::uuid[]) AS c(id, linea)
+              WHERE r.cuenta_linea_reparto_id = c.id AND r.tenant_id = $1`,
+            [
+              tenantId,
+              reapuntar.map((r) => r.id),
+              reapuntar.map((r) => r.cuentaLineaId),
+            ],
+          );
+        }
+        if (actualizar.length) {
+          await manager.query(
+            `UPDATE cuenta_linea_reparto r SET cantidad = c.cantidad::numeric, actualizado_el = NOW()
+               FROM unnest($2::uuid[], $3::text[]) AS c(id, cantidad)
+              WHERE r.cuenta_linea_reparto_id = c.id AND r.tenant_id = $1`,
+            [
+              tenantId,
+              actualizar.map((a) => a.id),
+              actualizar.map((a) => a.cantidad),
+            ],
+          );
+        }
       }
 
       // Las anulaciones de las cuentas de ORIGEN se mudan al destino en una

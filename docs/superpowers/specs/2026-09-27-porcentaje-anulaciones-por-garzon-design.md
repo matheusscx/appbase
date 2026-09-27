@@ -84,7 +84,8 @@ cuenta ya bloqueada (`cuenta.garzonResponsableId`), nunca del body.
 | `agregarLinea`, se junta con una existente | La cantidad agregada suma a la fila del responsable vigente en esa línea (la crea si no tiene) |
 | `actualizarLinea`, **sube** | La diferencia suma a la fila del responsable vigente |
 | `actualizarLinea`, **baja** | La diferencia **se descuenta** (regla de abajo) |
-| `escribirAnulacionEnLinea` (anular y cancelar con motivo) | La cantidad anulada se descuenta (regla de abajo) |
+| `anularLinea` (vía `escribirAnulacionDeLinea`) | La cantidad anulada se descuenta (regla de abajo) |
+| `cancelarConMotivo` | **No** descuenta: corre por N líneas despachadas y `escribirAnulacionEnLinea` se llama una vez por línea, así que descontar ahí adentro sería un SELECT + UPDATE de más por línea (N+1); la cuenta queda cancelada y todas sus líneas se borran en la misma operación, y nadie vuelve a leer el reparto de una línea de una cuenta cancelada (ronda de fix 1, domain review) |
 | `quitarLinea` | Nada: la línea se borra y su reparto deja de leerse con ella |
 | `fusionarCuentas`, la línea se **mueve** a la cuenta destino | Nada: el reparto cuelga de la línea, no de la cuenta |
 | `fusionarCuentas`, la línea **se junta** con una del destino | Cada fila del origen suma a la fila del mismo garzón en la línea destino, o se re-apunta a la línea destino si no tiene; las filas absorbidas se marcan borradas. Por lotes, no una consulta por fila |

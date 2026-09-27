@@ -2630,6 +2630,28 @@ CREATE INDEX idx_cuenta_linea_anulaciones_cuenta ON cuenta_linea_anulaciones (te
 -- FK diferida de movimientos_inventario (depende de cuenta_linea_anulaciones)
 ALTER TABLE "movimientos_inventario" ADD FOREIGN KEY ("cuenta_linea_anulacion_id") REFERENCES "cuenta_linea_anulaciones" ("cuenta_linea_anulacion_id");
 
+-- Cuántas unidades de una línea de la cuenta entraron con cada responsable
+-- vigente (spec 2026-09-27-porcentaje-anulaciones-por-garzon-design.md § 3):
+-- permite repartir la venta de una mesa transferida entre los garzones que la
+-- atendieron. Invariante: para toda línea viva, SUM(cantidad) de sus filas
+-- vivas = cuenta_lineas.cantidad; la sostiene SalonesService (único
+-- escritor), siempre bajo el FOR UPDATE de la cuenta. Sin backfill: entidad
+-- nueva, sin datos productivos.
+CREATE TABLE cuenta_linea_reparto (
+    cuenta_linea_reparto_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    cuenta_linea_id UUID NOT NULL REFERENCES cuenta_lineas(cuenta_linea_id),
+    garzon_id UUID REFERENCES garzones(garzon_id), -- responsable vigente de la cuenta cuando esas unidades entraron; null solo si la cuenta no tenía responsable
+    cantidad NUMERIC(18,4) NOT NULL, -- unidad canónica, igual que cuenta_lineas.cantidad
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+-- A lo sumo una fila viva por (línea, garzón); con garzon_id null el índice no
+-- cubre (Postgres trata los null como distintos), ahí lo sostiene el código.
+-- También es el índice por el que se leen las filas de una línea.
+CREATE UNIQUE INDEX uq_cuenta_linea_reparto_garzon ON cuenta_linea_reparto (cuenta_linea_id, garzon_id) WHERE eliminado_el IS NULL;
+
 
 -- =============================================================
 -- IMPRESORAS TÉRMICAS (comandas, precuenta, boleta)

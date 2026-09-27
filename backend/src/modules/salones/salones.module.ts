@@ -13,6 +13,7 @@ import { Mesa } from './entities/mesa.entity';
 import { Cuenta } from './entities/cuenta.entity';
 import { CuentaAsignacion } from './entities/cuenta-asignacion.entity';
 import { CuentaLineaAnulacion } from './entities/cuenta-linea-anulacion.entity';
+import { CuentaLineaReparto } from './entities/cuenta-linea-reparto.entity';
 import { VentasModule } from '../ventas/ventas.module';
 import { GarzonesModule } from '../garzones/garzones.module';
 import { ItemsModule } from '../items/items.module';
@@ -32,6 +33,7 @@ import { IdempotenciaModule } from '../idempotencia/idempotencia.module';
       Cuenta,
       CuentaAsignacion,
       CuentaLineaAnulacion,
+      CuentaLineaReparto,
     ]),
     VentasModule,
     GarzonesModule,
