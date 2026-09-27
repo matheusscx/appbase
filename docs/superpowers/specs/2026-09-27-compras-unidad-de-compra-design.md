@@ -77,8 +77,9 @@ de cada una; en las cuatro eligió la opción recomendada):
 
 - **Índice único parcial:** `(tenant_id, proveedor_id, item_id, lower(nombre))` **WHERE
   `eliminado_el IS NULL`**. Dos "Caja" vivas del mismo par no se distinguen en el selector, pero
-  una retirada no bloquea el nombre. El índice va declarado **en la entidad**, porque el esquema
-  sale de `synchronize` y no del `.sql`.
+  una retirada no bloquea el nombre. El índice lo crea **el seeder con SQL cruda**, no la
+  entidad: TypeORM no sabe expresar `lower(nombre)` en `@Index`, y declarado ahí crearía un índice
+  case-sensitive sobre la columna pelada (`docs/patterns/backend.md`, "Entity o seeder").
 - **El contenido se guarda como se tipeó** ("25 kg"), no convertido. Así un saco de 25 kg sigue
   valiendo 25 kg aunque la unidad base del producto sea g. La conversión a la unidad base se
   hace al usarla, con el conversor del catálogo, igual que las unidades de la línea.
@@ -176,8 +177,9 @@ se lea como un id.
 **Validaciones de crear y editar (400):** proveedor que no es un proveedor vivo del tenant;
 producto que no lleva stock, que va por serie o que está en la papelera; unidad desconocida o no
 compatible con la base; contenido que no es `> 0` o que convertido a la base cae bajo la
-precisión de stock; nombre vacío o de solo espacios; nombre repetido entre las vivas del par (el
-índice único, mapeado a 400 y no a 500). Una presentación de otro tenant da 404.
+precisión de stock; nombre vacío o de solo espacios. **Nombre repetido** entre las vivas del par:
+**409**, el mismo código que el folio repetido (el índice único, mapeado a 409 y no a 500). Una
+presentación de otro tenant da 404.
 
 `contenido` va como string decimal (`@IsNumberString` + `@IsDecimalPositivo`), igual que toda
 cantidad de kardex.
@@ -229,7 +231,7 @@ Con valores que discriminen: ni factor 1 ni divisiones que siempre den exactas.
   unidades. Es el test que caza a quien use el contenido vivo.
 - Retirada entre el borrador y confirmar → 400. Presentación de otro proveedor o de otro
   producto → 400. Las dos, `unidadCodigo` y `presentacionId`, o ninguna → 400. Nombre repetido
-  vivo → 400; repetido con la anterior retirada → 201.
+  vivo → 409; repetido con la anterior retirada → 201.
 - **Aislamiento:** una presentación de otro tenant da 404 al editarla y 400 al usarla en una
   línea. **Permisos:** sin Crear → 403 en los cuatro endpoints.
 - **Mutantes que revierten al código anterior, no solo rompen:** confirmar leyendo solo
