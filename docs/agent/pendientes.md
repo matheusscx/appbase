@@ -139,6 +139,15 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
 
 ---
 
+- [ ] **`npm test` del frontend salió con código 1 con los 1462 tests en verde** (frontend,
+  intermitente, visto una vez el 2026-09-27 en el gate de main sobre `0357a777`). Vitest reportó
+  un *unhandled error* de cierre —`EnvironmentTeardownError: [vitest-worker]: Closing rpc while
+  "onUserConsoleLog" was pending`— atribuido a `app/pages/configuracion/empresa.nuxt.spec.ts`:
+  un `console.log` que llega cuando el worker ya se está cerrando. La corrida siguiente de la
+  suite entera y la del spec solo dieron 0. El riesgo es que en CI tumbe el gate sin ningún test
+  rojo. **Lo que falta medir:** si se reproduce corriendo la suite en loop, y qué log del spec (o
+  del componente que monta) queda sin esperar al terminar el test.
+
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
