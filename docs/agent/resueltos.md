@@ -23,6 +23,49 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Reporte de varianza (AVT) — construido, con el módulo de reportes que lo aloja (cerrada 2026-09-21)
+
+Sale de [`pendientes.md`](pendientes.md) § 3 («Tres que el owner decidió el 2026-09-03»).
+
+### La entrada que cierra, como estaba
+
+- [ ] **Reporte de varianza (AVT) — después de compras** ✅ *(owner, 2026-09-03)* —
+  *"Según tus recetas debías usar 40 kilos y usaste 47"*: consumo **teórico** (lo que las
+  recetas dicen que se consumió, dado lo vendido) contra consumo **real**
+  (`inicial + compras − final`).
+  📌 **El repo ya lo declaraba como el próximo sub-proyecto desde julio**: la fila del recuento
+  en [`../ESTADO.md`](../ESTADO.md) dice *"Insumo que faltaba para el reporte de varianza (AVT),
+  sub-proyecto siguiente"*.
+  **Las piezas existen**: recuento implementado el 2026-07-26 (da inicial y final) y el motivo
+  `compra` en `movimientos_inventario` (da las entradas). **Técnicamente se podría hacer ya** —
+  el owner decidió esperar a compras **para que el insumo sea confiable**, no porque falte
+  maquinaria.
+  📌 **Desde el 2026-09-19 el insumo existe**: la pieza 1 de compras registra las entradas con
+  proveedor, documento y costo. **Falta que el owner diga si eso alcanza** o si la varianza
+  espera también a las piezas 2 a 4 —la unidad de compra ("caja de 12") es la que más pesa
+  acá, porque la varianza compara cantidades y una caja mal convertida las corre todas—.
+
+### Qué se hizo
+
+**La pregunta abierta la contestó el owner al lanzar el frente** (2026-09-19, al cerrar la
+pieza 1 de compras): la varianza no esperó a las piezas 2 a 4. Spec
+[`2026-09-19-modulo-reportes-varianza-design.md`](../superpowers/specs/2026-09-19-modulo-reportes-varianza-design.md),
+plan [`2026-09-19-modulo-reportes-varianza.md`](../superpowers/plans/2026-09-19-modulo-reportes-varianza.md).
+
+- **El teórico no se recalcula desde las recetas**: ya está escrito en el kardex, porque vender
+  una receta descuenta sus ingredientes con la receta vigente en ese momento. Cada fila es un
+  (producto, ubicación) medido **entre su primer y su último recuento aplicado** del rango, y dice
+  "falta contarlo" cuando no tiene dos.
+- Cuatro números —teórico, merma, cortesía, sin explicación— más «Otros», un detector que vale
+  cero por construcción. Plata por moneda, nunca convertida. Ordena por plata perdida.
+- Nació con él **el módulo de reportes** (`backend/src/modules/reportes/`,
+  `frontend/app/pages/reportes/`) y dos compartidos: `AppRangoFechas` y `AppGrafica` (Unovis,
+  ADR-027).
+- Detalle: [`../features/reporte-varianza.md`](../features/reporte-varianza.md) y
+  [`../features/modulo-reportes.md`](../features/modulo-reportes.md). Lo que el frente dejó
+  afuera quedó como entradas propias en `pendientes.md` (el `ValidationPipe`, los candidatos a
+  mudarse, la fila sin costo y la venta sin insumo).
+
 ## El kardex desempata por `secuencia`, no solo por `creado_el` (cerrada 2026-09-20)
 
 Sale de [`pendientes.md`](pendientes.md) § 1. **El arreglo es el que la entrada proponía**

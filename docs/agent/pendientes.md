@@ -119,6 +119,30 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
+- [ ] **El `ValidationPipe` global borra en silencio lo que un DTO no declara, en vez de dar 400**
+  (`backend/src/main.ts:19`: `whitelist: true` sin `forbidNonWhitelisted`). Preexistente y global;
+  lo levantó la revisión de seguridad de la Tarea 1 del reporte de varianza (2026-09-19) y lo
+  **midió** la pantalla (2026-09-21): `GET /reportes/varianza/resumen?…&soloConVarianza=true`
+  contesta **200** y el filtro, que ese DTO no declara, se descarta sin aviso. El riesgo es de
+  conducta, no de seguridad: un cliente que manda un campo mal escrito cree que lo guardó.
+  **Lo medido:** activarlo cambia la conducta de los **149 parámetros validados por clase**
+  —110 `@Body()` y 39 `@Query()` con DTO, en 43 controllers—. **No** afecta a los parámetros con
+  nombre (`@Body('TBK_TOKEN')`, `@Query('nombre')`…): los callbacks de Webpay, que reciben campos
+  que no controlamos, pasan por esa vía. **Lo que falta medir antes de tomarla:** cuántos
+  clientes mandan hoy campos de más —la pantalla que arma el body con el objeto entero de un
+  form, por ejemplo— y que pasarían de 200 a 400. Eso sale de correr el e2e de la API y el de
+  navegador con la opción prendida y contar los 400 nuevos.
+
+- [ ] **Un cambio de tenant que falla deja el store de monedas vacío y nadie lo recarga.**
+  `switchTenant()` (`frontend/app/stores/tenant.ts`) llama `useMonedasStore().reset()` **antes**
+  del `POST /auth/switch-tenant`; si ese pedido o `fetchPermisos()` fallan, el `catch` no navega
+  y la pantalla montada se queda con el store reseteado —`isLoaded` en `false`, `error` en
+  `null`—, que para quien lo lee es "todavía cargando". Lo encontró la revisión de la gráfica de
+  varianza (2026-09-21): ahí se ve como el esqueleto de carga de la gráfica hasta navegar a otra
+  pantalla. Preexistente y transversal a toda pantalla que lea `monedasStore`. **Lo que falta
+  medir:** cuántas pantallas quedan en un estado sin salida por esto, y si el arreglo es
+  recargar en el `catch` o resetear recién después del éxito.
+
 ---
 
 ## 3. Ya decidido, falta construir
@@ -520,7 +544,9 @@ pantalla muestra lo que se puede pedir*). Contexto del frente:
   del lado del comprometido gracias a los índices de este frente. Lo que sí cambia es la
   latencia percibida y el tráfico de una tablet con wifi de restaurante.
 
-### Tres que el owner decidió el 2026-09-03: acumulación de descuentos, compras y reporte de varianza
+### Dos que el owner decidió el 2026-09-03: acumulación de descuentos y compras
+
+Eran tres: la tercera —el reporte de varianza— se construyó y está en [`resueltos.md`](resueltos.md) (2026-09-21).
 
 - [ ] **Descuentos: un flag de acumulación por regla** ✅ *(decidido por el owner el
   2026-09-03; antes era "¿en qué orden se apilan?" en la § 4)* —
@@ -646,22 +672,6 @@ pantalla muestra lo que se puede pedir*). Contexto del frente:
   ([`investigaciones/2026-09-18-compras.md`](investigaciones/2026-09-18-compras.md) §5). La
   pieza 1 puso el flujo en pie, pero "en uso real" es el smoke del owner y lo que venga
   después, no el merge: la revisión sigue esperando.
-
-- [ ] **Reporte de varianza (AVT) — después de compras** ✅ *(owner, 2026-09-03)* —
-  *"Según tus recetas debías usar 40 kilos y usaste 47"*: consumo **teórico** (lo que las
-  recetas dicen que se consumió, dado lo vendido) contra consumo **real**
-  (`inicial + compras − final`).
-  📌 **El repo ya lo declaraba como el próximo sub-proyecto desde julio**: la fila del recuento
-  en [`../ESTADO.md`](../ESTADO.md) dice *"Insumo que faltaba para el reporte de varianza (AVT),
-  sub-proyecto siguiente"*.
-  **Las piezas existen**: recuento implementado el 2026-07-26 (da inicial y final) y el motivo
-  `compra` en `movimientos_inventario` (da las entradas). **Técnicamente se podría hacer ya** —
-  el owner decidió esperar a compras **para que el insumo sea confiable**, no porque falte
-  maquinaria.
-  📌 **Desde el 2026-09-19 el insumo existe**: la pieza 1 de compras registra las entradas con
-  proveedor, documento y costo. **Falta que el owner diga si eso alcanza** o si la varianza
-  espera también a las piezas 2 a 4 —la unidad de compra ("caja de 12") es la que más pesa
-  acá, porque la varianza compara cantidades y una caja mal convertida las corre todas—.
 
 ### Un descuento o recargo de monto fijo declara su propia moneda (owner, 2026-09-09)
 
@@ -805,6 +815,16 @@ hereda), que es lo que carga el formulario de ítems.
 📌 **Va en su propio frente.** Toca DTO y service de items, dos pantallas y una regla de qué es
 un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya está construido
 (2026-09-09) y es el que la API tiene que espejar, no contradecir.
+
+- [ ] **Candidatos a mudarse al módulo de reportes** (spec
+  [`2026-09-19-modulo-reportes-varianza-design.md`](../superpowers/specs/2026-09-19-modulo-reportes-varianza-design.md)
+  § 3.3, owner 2026-09-19). Los cinco de **negocio** que hoy viven en su módulo:
+  `/propinas/reportes/resumen` y `/trabajadores`, `/caja/tendencia`,
+  `/salones/anulaciones/resumen` y `/ventas/resumen`. ⛔ **Se mudan de a uno y con una razón
+  concreta** —que alguien pida compararlos, exportarlos o verlos juntos en el menú—, **nunca en una
+  tanda**: mudar cuesta rutas, pantallas y riesgo sobre código que funciona. Al mudar uno, se
+  agrega al catálogo de `frontend/app/composables/useReportes.ts` con su propio `modulo_app`
+  (`docs/features/modulo-reportes.md`).
 
 ## 4. Necesita que el owner conteste
 
@@ -965,6 +985,17 @@ prohíbe.
   pregunta **fiscal** y no se decidió en el diseño (spec `2026-09-18-dashboard-inicio-design.md`
   § 4.1): va en su propio frente, con su propia sesión y su propia verificación — no se toma
   de arrastre de otra tarea (`CLAUDE.md`, ADR-010).
+
+- [ ] **En la varianza, una fila sin costo se ordena por una suma que no muestra.** ¿La pantalla
+  la marca, o se deja así? Cuando algún movimiento del grupo no tiene `costo_unitario`, la fila
+  manda `costoSinExplicacion: []` —nunca una cifra parcial— pero el `ORDER BY` usa el `monto`
+  parcial (`SUM` ignora los `NULL`); si **ningún** movimiento tenía costo, el monto es `0` y la fila
+  queda entre las que no perdieron nada. Es justo el producto al que falta cargarle el precio.
+  **Medido y alcanzable por la API real** (Tarea 5 del plan, 2026-09-20): producto creado sin
+  `costo` → `costo_actual` en `NULL` → el recuento congela ese `NULL`; lo cubre un e2e. Inventarle
+  una posición en el orden sería peor que el problema; la candidata es que la pantalla lo señale
+  (hoy muestra un badge "Sin costo" en la celda, pero la fila puede quedar en la página 5). Lo
+  decide el owner. Docblock del `ORDER BY` en `backend/src/modules/reportes/varianza/varianza.service.ts`.
 
 ## 5. Carreras de concurrencia
 
@@ -1506,6 +1537,14 @@ será progresivo"*. Lo que cambia:
 propia feature del redondeo por país, y el tenant vende, cobra y ahora también reembolsa con el
 documento de su país. Lo que **no** se puede decir es que "ya emite": lo que tiene es un
 marcador interno, no un documento tributario.
+
+- [ ] **Persistir que una venta salió sin un insumo** — el teórico de la varianza queda corto sin
+  que nada lo registre. Cuando un ingrediente **no bloqueante** no tiene stock, la venta sale igual,
+  el movimiento de kardex **no se escribe** (`ItemsService.moverConsumoOSaltear`) y el aviso *"se
+  vendió sin ese insumo"* viaja solo en la respuesta HTTP. Después no hay forma de saber que pasó:
+  el reporte de varianza calcula el teórico desde el kardex, así que ese consumo aparece como
+  "sin explicación" y ningún aviso lo puede desarmar (spec de la varianza § 5.6, caso 3). Va
+  **solo**: toca el camino caliente de la venta.
 
 ---
 
