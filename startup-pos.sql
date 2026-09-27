@@ -1095,7 +1095,8 @@ CREATE UNIQUE INDEX "uq_compra_folio"
   ON "compras" ("tenant_id", "proveedor_id", "tipo_documento_compra_id", "folio")
   WHERE "folio" IS NOT NULL AND "estado" <> 'anulada' AND "eliminado_el" IS NULL;
 
--- Las líneas, en la unidad de la factura. Lo "congelado al confirmar" es el
+-- Las líneas, en la unidad de la factura o en una presentación del proveedor
+-- (spec compras-unidad-de-compra § 3.2). Lo "congelado al confirmar" es el
 -- punto de partida de "rehacer la cuenta".
 CREATE TABLE "compra_lineas" (
   "compra_linea_id"         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1104,19 +1105,27 @@ CREATE TABLE "compra_lineas" (
   "item_id"                 UUID          NOT NULL REFERENCES "items" ("item_id"),  -- producto o ingrediente
   "orden"                   INT           NOT NULL,   -- el de la factura
   "cantidad"                NUMERIC(18,4) NOT NULL,   -- como se tipeó, > 0
-  "unidad_codigo"           TEXT          NOT NULL,
+  -- NULL cuando la línea va en una presentación (CHECK más abajo): a
+  -- propósito, para que un camino que se olvide de la presentación reviente
+  -- en la conversión en vez de leer "10 cajas" como 10 unidades.
+  "unidad_codigo"           TEXT,
+  "presentacion_compra_id"  UUID,  -- la elegida en el borrador; FK diferida (presentaciones_compra se crea después)
   "precio_unitario"         NUMERIC(18,4),            -- por unidad TIPEADA; NULL = falta costo; 0 = regalo
   "series"                  JSONB,
   "lote"                    JSONB,
   -- congelado al confirmar
   "cantidad_base"           NUMERIC(18,4),            -- en la unidad del producto
   "costo_unitario_base"     NUMERIC(18,4),            -- convertido y con su parte del descuento; NULL sin precio
+  "presentacion_nombre"     VARCHAR(40),              -- el nombre de la presentación al confirmar: el detalle no lee una retirada
+  "contenido_base"          NUMERIC(18,4),            -- cuántas unidades base trae UNA presentación, al confirmar
   "movimiento_id"           UUID REFERENCES "movimientos_inventario" ("movimiento_id"),  -- la entrada original
   "stock_total_anterior"    NUMERIC(18,4),            -- del producto, justo antes de la entrada
   "costo_producto_anterior" NUMERIC(18,4),            -- el CPP, justo antes de la entrada
   "creado_el"               TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"          TIMESTAMPTZ,
-  "eliminado_el"            TIMESTAMPTZ               -- solo las de un borrador reemplazado o descartado
+  "eliminado_el"            TIMESTAMPTZ,              -- solo las de un borrador reemplazado o descartado
+  CONSTRAINT "chk_compra_lineas_unidad_o_presentacion"
+    CHECK (("unidad_codigo" IS NULL) <> ("presentacion_compra_id" IS NULL))
 );
 CREATE INDEX "idx_compra_lineas_compra" ON "compra_lineas" ("compra_id");
 
@@ -1147,6 +1156,8 @@ CREATE UNIQUE INDEX "uq_presentaciones_compra_nombre"
 
 -- FK diferida de movimientos_inventario (depende de compra_lineas)
 ALTER TABLE "movimientos_inventario" ADD FOREIGN KEY ("compra_linea_id") REFERENCES "compra_lineas" ("compra_linea_id");
+-- FK diferida de compra_lineas (depende de presentaciones_compra, creada arriba)
+ALTER TABLE "compra_lineas" ADD FOREIGN KEY ("presentacion_compra_id") REFERENCES "presentaciones_compra" ("presentacion_compra_id");
 
 -- Historial de correcciones de una línea confirmada. Append-only: un cambio
 -- hecho no se deshace borrándolo, se corrige con otro.

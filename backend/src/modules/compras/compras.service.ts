@@ -28,10 +28,13 @@ import { CalculoPreciosService } from '../calculo-precios/calculo-precios.servic
 import { MonedasService } from '../monedas/monedas.service';
 import { costearLineas } from './reparto-descuento';
 // `TIPOS_CON_STOCK` nació acá y se movió a `presentaciones-compra.service.ts`
-// (Tarea 1 de compras-unidad-de-compra): esta clase va a importar
-// `PresentacionesCompraService` en la Tarea 2, y si la constante siguiera acá
-// ese import sería circular.
-import { TIPOS_CON_STOCK } from './presentaciones-compra.service';
+// (Tarea 1 de compras-unidad-de-compra) porque esta clase importa
+// `PresentacionesCompraService` (Tarea 2): si la constante siguiera acá ese
+// import sería circular.
+import {
+  PresentacionesCompraService,
+  TIPOS_CON_STOCK,
+} from './presentaciones-compra.service';
 import type { EstadoCompra } from './entities/compra.entity';
 import type {
   LoteCompraInput,
@@ -86,6 +89,15 @@ export interface CompraListItem {
   total: string | null;
 }
 
+/** La presentación de una línea, para el detalle (spec pieza 2 § 5). */
+export interface PresentacionLinea {
+  id: string;
+  nombre: string;
+  /** Borrador: como está hoy, en `unidadCodigo`. Confirmada: el congelado, en la unidad base. */
+  contenido: string;
+  unidadCodigo: string;
+}
+
 export interface CompraLineaDetalle {
   id: string;
   orden: number;
@@ -94,10 +106,12 @@ export interface CompraLineaDetalle {
   modoInventario: string | null;
   unidadMedidaBase: string | null;
   cantidad: string;
-  unidadCodigo: string;
+  /** Null si la línea va en una presentación. */
+  unidadCodigo: string | null;
   precioUnitario: string | null;
   series: SerieCompraInput[] | null;
   lote: LoteCompraInput | null;
+  presentacion: PresentacionLinea | null;
 }
 
 export interface CompraCambio {
@@ -144,10 +158,17 @@ interface LineaRow {
   modo_inventario: string | null;
   unidad_medida: string | null;
   cantidad: string;
-  unidad_codigo: string;
+  unidad_codigo: string | null;
   precio_unitario: string | null;
   series: SerieCompraInput[] | null;
   lote: LoteCompraInput | null;
+  presentacion_compra_id: string | null;
+  presentacion_nombre: string | null;
+  contenido_base: string | null;
+  /** La presentación VIVA, si la línea sigue en borrador y no fue retirada. */
+  pc_nombre: string | null;
+  pc_contenido: string | null;
+  pc_unidad: string | null;
 }
 
 interface CambioRow {
@@ -179,11 +200,15 @@ interface LineaConfirmada {
   item_eliminado: boolean;
   modo_inventario: string;
   unidad_base: string;
-  unidad_codigo: string;
+  /** Null si la línea va en una presentación. */
+  unidad_codigo: string | null;
   cantidad: string;
   precio_unitario: string | null;
   cantidad_base: string;
   costo_unitario_base: string | null;
+  /** El congelado al confirmar (null sin presentación): corregir la cantidad usa este, no el vivo. */
+  contenido_base: string | null;
+  presentacion_nombre: string | null;
   series: SerieCompraInput[] | null;
   lote: LoteCompraInput | null;
 }
@@ -245,6 +270,45 @@ interface EncabezadoValidado {
   tipoDocumentoNombre: string;
 }
 
+type Conversor = (cantidad: string, desde: string, hacia: string) => string;
+
+/**
+ * La cantidad de una línea en la unidad base del producto: el ÚNICO lugar que
+ * la calcula (spec compras-unidad-de-compra § 4.2). Lo llaman la validación del
+ * borrador, confirmar y la corrección de cantidad. Si alguno convirtiera por su
+ * cuenta, ese sería el camino que lee "10 cajas" como 10 unidades.
+ *
+ * `conversor` es perezoso: una factura toda en la unidad base, o toda en
+ * presentaciones con contenido ya en base, no consulta el catálogo.
+ */
+export async function cantidadEnBase(
+  cantidad: string,
+  unidad: { contenidoBase: string } | { unidadCodigo: string },
+  unidadBase: string,
+  conversor: () => Promise<Conversor>,
+): Promise<string> {
+  if ('contenidoBase' in unidad) {
+    const base = new Decimal(cantidad)
+      .times(unidad.contenidoBase)
+      .toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+    if (base.isZero()) {
+      throw new BadRequestException(
+        `La cantidad (${cantidad} × ${unidad.contenidoBase}) es menor a la precisión de stock (4 decimales)`,
+      );
+    }
+    return base.toString();
+  }
+  if (unidad.unidadCodigo === unidadBase) return cantidad;
+  return (await conversor())(cantidad, unidad.unidadCodigo, unidadBase);
+}
+
+/** Por índice de línea: con qué se convierte a la unidad base. */
+interface UnidadResuelta {
+  unidadBase: string;
+  /** Null si la línea va en una unidad del catálogo. */
+  presentacion: { id: string; nombre: string; contenidoBase: string } | null;
+}
+
 /**
  * `SELECT` de la cabecera, común al listado y al detalle para que no se
  * desincronicen.
@@ -291,6 +355,7 @@ export class ComprasService {
     private readonly ubicacionesService: UbicacionesService,
     private readonly calculoPreciosService: CalculoPreciosService,
     private readonly monedasService: MonedasService,
+    private readonly presentacionesService: PresentacionesCompraService,
   ) {}
 
   // ───────────────────────────────────────────────────────────────────────
@@ -507,10 +572,16 @@ export class ComprasService {
     const lineas: LineaRow[] = await this.db.query(
       `SELECT cl.compra_linea_id, cl.orden, cl.item_id, i.nombre AS item_nombre,
               ip.modo_inventario, ip.unidad_medida, cl.cantidad, cl.unidad_codigo,
-              cl.precio_unitario, cl.series, cl.lote
+              cl.precio_unitario, cl.series, cl.lote,
+              cl.presentacion_compra_id, cl.presentacion_nombre, cl.contenido_base,
+              pc.nombre AS pc_nombre, pc.contenido AS pc_contenido,
+              pc.unidad_codigo AS pc_unidad
          FROM compra_lineas cl
          LEFT JOIN items i ON i.item_id = cl.item_id
          LEFT JOIN item_producto ip ON ip.item_id = cl.item_id
+         LEFT JOIN presentaciones_compra pc
+                ON pc.presentacion_compra_id = cl.presentacion_compra_id
+               AND pc.eliminado_el IS NULL
         WHERE cl.tenant_id = $1 AND cl.compra_id = $2 AND cl.eliminado_el IS NULL
         ORDER BY cl.orden`,
       [tenantId, id],
@@ -547,6 +618,24 @@ export class ComprasService {
         precioUnitario: l.precio_unitario,
         series: l.series,
         lote: l.lote,
+        // Confirmada: lo congelado. Borrador: la presentación viva (o null si
+        // fue retirada — no se lee la fila borrada).
+        presentacion:
+          l.contenido_base != null
+            ? {
+                id: l.presentacion_compra_id!,
+                nombre: l.presentacion_nombre!,
+                contenido: l.contenido_base,
+                unidadCodigo: l.unidad_medida ?? 'unidad',
+              }
+            : l.pc_nombre != null
+              ? {
+                  id: l.presentacion_compra_id!,
+                  nombre: l.pc_nombre,
+                  contenido: l.pc_contenido!,
+                  unidadCodigo: l.pc_unidad!,
+                }
+              : null,
       })),
       cambios: cambios.map((c) => ({
         compraLineaId: c.compra_linea_id,
@@ -570,7 +659,7 @@ export class ComprasService {
   ): Promise<CompraDetalle> {
     return this.db.transaccion(async () => {
       const enc = await this.validarEncabezado(tenantId, dto);
-      await this.validarLineas(tenantId, dto.lineas);
+      await this.validarLineas(tenantId, dto.proveedorId, dto.lineas);
       const descuento = validarDescuento(dto.lineas, dto.descuentoTotal);
       await this.assertFolioLibre(
         tenantId,
@@ -617,7 +706,7 @@ export class ComprasService {
     return this.db.transaccion(async () => {
       await this.bloquearBorrador(tenantId, id);
       const enc = await this.validarEncabezado(tenantId, dto);
-      await this.validarLineas(tenantId, dto.lineas);
+      await this.validarLineas(tenantId, dto.proveedorId, dto.lineas);
       const descuento = validarDescuento(dto.lineas, dto.descuentoTotal);
       await this.assertFolioLibre(
         tenantId,
@@ -730,13 +819,14 @@ export class ComprasService {
       compra_linea_id: string;
       item_id: string;
       cantidad: string;
-      unidad_codigo: string;
+      unidad_codigo: string | null;
+      presentacion_compra_id: string | null;
       precio_unitario: string | null;
       series: SerieCompraInput[] | null;
       lote: LoteCompraInput | null;
     }[] = await this.db.query(
       `SELECT compra_linea_id, item_id, cantidad, unidad_codigo,
-              precio_unitario, series, lote
+              presentacion_compra_id, precio_unitario, series, lote
          FROM compra_lineas
         WHERE tenant_id = $1 AND compra_id = $2 AND eliminado_el IS NULL
         ORDER BY orden`,
@@ -749,8 +839,13 @@ export class ComprasService {
     }
 
     // 2. Las mismas validaciones que el borrador, otra vez: entre guardar y
-    // confirmar pudo pausarse el proveedor, desactivarse la bodega o
-    // cargarse el mismo folio en otra compra.
+    // confirmar pudo pausarse el proveedor, desactivarse la bodega, cargarse
+    // el mismo folio en otra compra o retirarse una presentación.
+    //
+    // Sin lock sobre la presentación, a propósito: si alguien la edita
+    // mientras se confirma, la compra entra con el valor que leyó y la
+    // edición vale para las siguientes — el mismo resultado que si la edición
+    // hubiera llegado un segundo después.
     const dto: CompraBorradorDto = {
       proveedorId: c.proveedor_id,
       tipoDocumentoCompraId: c.tipo_documento_compra_id,
@@ -761,14 +856,19 @@ export class ComprasService {
       lineas: lineas.map((l) => ({
         itemId: l.item_id,
         cantidad: l.cantidad,
-        unidadCodigo: l.unidad_codigo,
+        unidadCodigo: l.unidad_codigo ?? undefined,
+        presentacionId: l.presentacion_compra_id ?? undefined,
         precioUnitario: l.precio_unitario,
         series: l.series ?? undefined,
         lote: l.lote ?? undefined,
       })),
     };
     const enc = await this.validarEncabezado(tenantId, dto);
-    const items = await this.validarLineas(tenantId, dto.lineas);
+    const { unidades } = await this.validarLineas(
+      tenantId,
+      c.proveedor_id,
+      dto.lineas,
+    );
     validarDescuento(dto.lineas, c.descuento_total);
     await this.assertFolioLibre(
       tenantId,
@@ -811,25 +911,29 @@ export class ComprasService {
 
     // 5. Cantidad y costo por unidad base. El descuento al total se reparte
     // entre las líneas con precio (si falta alguno, no se pudo cargar).
-    const necesitaConversion = lineas.some(
-      (l) => l.unidad_codigo !== items.get(l.item_id)!.unidadBase,
+    // `conversorPerezoso`: una carga del catálogo para toda la compra, ninguna
+    // query por línea (Promise.all sobre funciones que solo esperan el
+    // conversor memoizado).
+    const conversor = this.conversorPerezoso();
+    const bases = await Promise.all(
+      lineas.map((l, i) =>
+        cantidadEnBase(
+          l.cantidad,
+          unidades[i].presentacion
+            ? { contenidoBase: unidades[i].presentacion.contenidoBase }
+            : { unidadCodigo: l.unidad_codigo! },
+          unidades[i].unidadBase,
+          conversor,
+        ),
+      ),
     );
-    const convertir = necesitaConversion
-      ? await this.catalogService.crearConversor()
-      : null;
-    const bases = lineas.map((l) => {
-      const base = items.get(l.item_id)!.unidadBase;
-      return l.unidad_codigo === base
-        ? l.cantidad
-        : convertir!(l.cantidad, l.unidad_codigo, base);
-    });
     const costosBase = await this.costearCompra(
       tenantId,
       lineas.map((l, i) => ({
         cantidad: l.cantidad,
         precioUnitario: l.precio_unitario,
         cantidadBase: bases[i],
-        unidadBase: items.get(l.item_id)!.unidadBase,
+        unidadBase: unidades[i].unidadBase,
       })),
       c.descuento_total,
     );
@@ -854,6 +958,8 @@ export class ComprasService {
       movimientoId: string;
       stockTotalAnterior: string;
       costoProductoAnterior: string | null;
+      presentacionNombre: string | null;
+      contenidoBase: string | null;
     }[] = [];
     const comentario = comentarioDeCompra(
       enc.tipoDocumentoNombre,
@@ -885,16 +991,18 @@ export class ComprasService {
         movimientoId: mov.movimientoId,
         stockTotalAnterior: anterior.toString(),
         costoProductoAnterior: mov.costoActualPrevio,
+        presentacionNombre: unidades[i].presentacion?.nombre ?? null,
+        contenidoBase: unidades[i].presentacion?.contenidoBase ?? null,
       });
       acumulado.set(l.item_id, anterior.plus(bases[i]));
     }
 
     // 7. Lo congelado, en UN update para todas las líneas.
-    const COLUMNAS = 6;
+    const COLUMNAS = 8;
     const valores = congelados
       .map((_, k) => {
         const p = k * COLUMNAS + 2;
-        return `($${p}::uuid, $${p + 1}::numeric, $${p + 2}::numeric, $${p + 3}::uuid, $${p + 4}::numeric, $${p + 5}::numeric)`;
+        return `($${p}::uuid, $${p + 1}::numeric, $${p + 2}::numeric, $${p + 3}::uuid, $${p + 4}::numeric, $${p + 5}::numeric, $${p + 6}::varchar, $${p + 7}::numeric)`;
       })
       .join(', ');
     await this.db.query(
@@ -904,10 +1012,12 @@ export class ComprasService {
               movimiento_id = v.movimiento_id,
               stock_total_anterior = v.stock_total_anterior,
               costo_producto_anterior = v.costo_producto_anterior,
+              presentacion_nombre = v.presentacion_nombre,
+              contenido_base = v.contenido_base,
               actualizado_el = NOW()
          FROM (VALUES ${valores}) AS v(compra_linea_id, cantidad_base,
               costo_unitario_base, movimiento_id, stock_total_anterior,
-              costo_producto_anterior)
+              costo_producto_anterior, presentacion_nombre, contenido_base)
         WHERE cl.compra_linea_id = v.compra_linea_id AND cl.tenant_id = $1`,
       [
         tenantId,
@@ -918,6 +1028,8 @@ export class ComprasService {
           g.movimientoId,
           g.stockTotalAnterior,
           g.costoProductoAnterior,
+          g.presentacionNombre,
+          g.contenidoBase,
         ]),
       ],
     );
@@ -1076,14 +1188,16 @@ export class ComprasService {
         `La ubicación de la compra (${compra.ubicacion_nombre}) fue eliminada: la cantidad no se puede corregir`,
       );
     }
-    const nuevaBase =
-      linea.unidad_codigo === linea.unidad_base
-        ? dto.cantidad!
-        : (await this.catalogService.crearConversor())(
-            dto.cantidad!,
-            linea.unidad_codigo,
-            linea.unidad_base,
-          );
+    // El congelado, nunca el vivo: con la presentación ya editada, corregir
+    // tiene que seguir usando el contenido que se congeló al confirmar.
+    const nuevaBase = await cantidadEnBase(
+      dto.cantidad!,
+      linea.contenido_base != null
+        ? { contenidoBase: linea.contenido_base }
+        : { unidadCodigo: linea.unidad_codigo! },
+      linea.unidad_base,
+      this.conversorPerezoso(),
+    );
     const diferencia = new Decimal(nuevaBase).minus(linea.cantidad_base);
     if (diferencia.isZero()) {
       throw new BadRequestException(
@@ -1610,7 +1724,8 @@ export class ComprasService {
               ip.modo_inventario,
               COALESCE(ip.unidad_medida, 'unidad') AS unidad_base,
               cl.unidad_codigo, cl.cantidad, cl.precio_unitario,
-              cl.cantidad_base, cl.costo_unitario_base, cl.series, cl.lote
+              cl.cantidad_base, cl.costo_unitario_base, cl.contenido_base,
+              cl.presentacion_nombre, cl.series, cl.lote
          FROM compra_lineas cl
          JOIN items i ON i.item_id = cl.item_id
          JOIN item_producto ip ON ip.item_id = cl.item_id
@@ -1942,16 +2057,28 @@ export class ComprasService {
     };
   }
 
+  /** El conversor del catálogo, cargado la primera vez que se pide y no antes. */
+  private conversorPerezoso(): () => Promise<Conversor> {
+    let cargado: Promise<Conversor> | null = null;
+    return () => (cargado ??= this.catalogService.crearConversor());
+  }
+
   /**
-   * Una consulta para todos los ítems y una para el catálogo de unidades
-   * (`crearConversor`), no una por línea. El conversor valida cada línea en
-   * memoria y en su lugar del loop, así que el orden de los 400 no cambia.
+   * Una consulta para todos los ítems, una para las presentaciones citadas
+   * (`presentacionesService.vivasPorIds`) y una para el catálogo de unidades
+   * (`crearConversor`, perezoso), no una por línea. El conversor valida cada
+   * línea en memoria y en su lugar del loop, así que el orden de los 400 no
+   * cambia (spec pieza 2 § 4.1).
    */
   private async validarLineas(
     tenantId: string,
+    proveedorId: string,
     lineas: LineaCompraDto[],
-  ): Promise<Map<string, { unidadBase: string }>> {
-    if (!lineas.length) return new Map();
+  ): Promise<{
+    items: Map<string, { unidadBase: string }>;
+    unidades: UnidadResuelta[];
+  }> {
+    if (!lineas.length) return { items: new Map(), unidades: [] };
 
     const itemIds = [...new Set(lineas.map((l) => l.itemId))];
     const items: {
@@ -1970,9 +2097,18 @@ export class ComprasService {
     );
     const porId = new Map(items.map((i) => [i.item_id, i]));
 
-    let convertir:
-      | ((cantidad: string, desde: string, hacia: string) => string)
-      | null = null;
+    const presentacionIds = [
+      ...new Set(
+        lineas.filter((l) => l.presentacionId).map((l) => l.presentacionId!),
+      ),
+    ];
+    const presentaciones = await this.presentacionesService.vivasPorIds(
+      tenantId,
+      presentacionIds,
+    );
+
+    const conversor = this.conversorPerezoso();
+    const unidades: UnidadResuelta[] = [];
     for (const linea of lineas) {
       const item = porId.get(linea.itemId);
       if (!item) {
@@ -1981,10 +2117,53 @@ export class ComprasService {
       if (!TIPOS_CON_STOCK.includes(item.tipo) || !item.modo_inventario) {
         throw new BadRequestException(`"${item.nombre}" no lleva stock`);
       }
+      if ((linea.unidadCodigo != null) === (linea.presentacionId != null)) {
+        throw new BadRequestException(
+          linea.unidadCodigo != null
+            ? `"${item.nombre}": elegí una unidad o una presentación, no las dos`
+            : `"${item.nombre}": falta la unidad`,
+        );
+      }
 
       const base = item.unidad_medida ?? 'unidad';
-      if (linea.unidadCodigo !== base) {
-        if (item.modo_inventario !== 'cantidad') {
+      let presentacion: UnidadResuelta['presentacion'] = null;
+      if (linea.presentacionId) {
+        const p = presentaciones.get(linea.presentacionId);
+        // Un solo mensaje para no existe, es de otro tenant o fue retirada:
+        // distinguirlos obligaría a leer una fila borrada, y un id ajeno no
+        // tiene que distinguirse de uno inexistente.
+        if (!p) {
+          throw new BadRequestException(
+            `La presentación de "${item.nombre}" ya no existe o fue retirada: elegí otra unidad`,
+          );
+        }
+        if (p.proveedorId !== proveedorId) {
+          throw new BadRequestException(
+            `La presentación de "${item.nombre}" es de otro proveedor`,
+          );
+        }
+        if (p.itemId !== linea.itemId) {
+          throw new BadRequestException(
+            `La presentación elegida no es de "${item.nombre}"`,
+          );
+        }
+        if (item.modo_inventario === 'serie') {
+          throw new BadRequestException(
+            `"${item.nombre}" va por serie: no admite presentación`,
+          );
+        }
+        const contenidoBase = await cantidadEnBase(
+          p.contenido,
+          { unidadCodigo: p.unidadCodigo },
+          base,
+          conversor,
+        );
+        presentacion = { id: p.id, nombre: p.nombre, contenidoBase };
+      } else {
+        if (
+          linea.unidadCodigo !== base &&
+          item.modo_inventario !== 'cantidad'
+        ) {
           // El mismo mensaje que `ItemsService.ajustarStock`.
           throw new BadRequestException(
             'Los productos por serie o lote solo admiten su unidad base',
@@ -1993,19 +2172,27 @@ export class ComprasService {
         // El catálogo se carga la primera vez que hace falta, no antes: una
         // factura toda en la unidad base no lo consulta. Tira con el mensaje
         // del catálogo, sin reescribirlo.
-        convertir ??= await this.catalogService.crearConversor();
-        convertir(linea.cantidad, linea.unidadCodigo, base);
+        await cantidadEnBase(
+          linea.cantidad,
+          { unidadCodigo: linea.unidadCodigo! },
+          base,
+          conversor,
+        );
       }
 
       this.validarTrazabilidad(linea, item.nombre, item.modo_inventario);
+      unidades.push({ unidadBase: base, presentacion });
     }
 
-    return new Map(
-      items.map((i) => [
-        i.item_id,
-        { unidadBase: i.unidad_medida ?? 'unidad' },
-      ]),
-    );
+    return {
+      items: new Map(
+        items.map((i) => [
+          i.item_id,
+          { unidadBase: i.unidad_medida ?? 'unidad' },
+        ]),
+      ),
+      unidades,
+    };
   }
 
   private validarTrazabilidad(
@@ -2075,11 +2262,11 @@ export class ComprasService {
     lineas: LineaCompraDto[],
   ): Promise<void> {
     if (!lineas.length) return;
-    const COLUMNAS = 9;
+    const COLUMNAS = 10;
     const valores = lineas
       .map((_, i) => {
         const p = i * COLUMNAS;
-        return `($${p + 1}, $${p + 2}, $${p + 3}, $${p + 4}, $${p + 5}, $${p + 6}, $${p + 7}, $${p + 8}::jsonb, $${p + 9}::jsonb)`;
+        return `($${p + 1}, $${p + 2}, $${p + 3}, $${p + 4}, $${p + 5}, $${p + 6}, $${p + 7}::uuid, $${p + 8}, $${p + 9}::jsonb, $${p + 10}::jsonb)`;
       })
       .join(', ');
     const params = lineas.flatMap((l, i) => [
@@ -2088,7 +2275,8 @@ export class ComprasService {
       l.itemId,
       i + 1,
       l.cantidad,
-      l.unidadCodigo,
+      l.unidadCodigo ?? null,
+      l.presentacionId ?? null,
       l.precioUnitario ?? null,
       l.series?.length ? JSON.stringify(l.series) : null,
       l.lote ? JSON.stringify(l.lote) : null,
@@ -2096,7 +2284,7 @@ export class ComprasService {
     await this.db.query(
       `INSERT INTO compra_lineas
          (compra_id, tenant_id, item_id, orden, cantidad, unidad_codigo,
-          precio_unitario, series, lote)
+          presentacion_compra_id, precio_unitario, series, lote)
        VALUES ${valores}`,
       params,
     );

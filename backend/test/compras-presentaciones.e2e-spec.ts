@@ -3,6 +3,8 @@ import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
+import { DataSource } from 'typeorm';
+import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import { loginSegundoTenant } from './helpers/segundo-tenant';
 
@@ -479,5 +481,511 @@ describe('presentaciones de compra (spec pieza 2 § 5)', () => {
         ['Caja', '10.0000', 'kg'],
       ]),
     );
+  });
+
+  /**
+   * La línea que consume la presentación (Tarea 2, spec § 4.1, § 4.2 y § 4.3):
+   * borrador, confirmar (con lo congelado) y corregir una confirmada (con el
+   * contenido congelado, nunca el vivo). Helpers `stockEn`, `costoActual` y
+   * `confirmar` copiados de `compras.e2e-spec.ts:447-493`; `borrador` y la
+   * bodega son propios de este describe.
+   */
+  describe('la línea con presentación (spec pieza 2 § 4.1, § 4.2 y § 4.3)', () => {
+    let ds: DataSource;
+    let bodegaId: string;
+    let factura: { id: string };
+
+    interface CompraDetalle {
+      id: string;
+      estado: string;
+      lineas: {
+        id: string;
+        unidadCodigo: string | null;
+        presentacion: {
+          id: string;
+          nombre: string;
+          contenido: string;
+          unidadCodigo: string;
+        } | null;
+      }[];
+      cambios: {
+        campo: string;
+        valorAnterior: string | null;
+        valorNuevo: string | null;
+      }[];
+    }
+
+    const folioUnico = () =>
+      `PZ2-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+
+    function borrador(lineas: Record<string, unknown>[]) {
+      return {
+        proveedorId,
+        tipoDocumentoCompraId: factura.id,
+        folio: folioUnico(),
+        fechaDocumento: '2026-09-27',
+        ubicacionId: bodegaId,
+        lineas,
+      };
+    }
+
+    async function stockEn(itemId: string, ubicacionId: string) {
+      const filas: { stock: string }[] = await ds.query(
+        `SELECT stock FROM stock_ubicacion WHERE item_id = $1 AND ubicacion_id = $2`,
+        [itemId, ubicacionId],
+      );
+      return filas.length ? Number(filas[0].stock) : 0;
+    }
+
+    async function costoActual(itemId: string): Promise<string | null> {
+      const item = await get<{ costoActual: string | null }>(
+        `/api/items/${itemId}`,
+      );
+      return item.costoActual == null
+        ? null
+        : new Decimal(item.costoActual).toFixed(4);
+    }
+
+    async function confirmar(
+      compraId: string,
+      esperado = 201,
+      conToken = token,
+    ) {
+      return post<CompraDetalle>(
+        `/api/compras/${compraId}/confirmar`,
+        {},
+        esperado,
+        conToken,
+      );
+    }
+
+    beforeAll(async () => {
+      ds = app.get(DataSource);
+      bodegaId = (
+        await post<IdResponse>('/api/ubicaciones', {
+          nombre: nombreUnico('Bodega presentaciones E2E'),
+          tipo: 'bodega',
+        })
+      ).id;
+      const tipos = await get<{ id: string; codigo: string | null }[]>(
+        '/api/compras/tipos-documento',
+      );
+      factura = tipos.find((t) => t.codigo === '33')!;
+    });
+
+    it('10 cajas de 12 a $9.600 → 120 unidades a $800; el detalle congela "Caja" y 12', async () => {
+      const item = await productoNuevo('unidad');
+      const caja = await crear({
+        proveedorId,
+        itemId: item,
+        nombre: 'Caja',
+        contenido: '12',
+        unidadCodigo: 'unidad',
+      });
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador([
+          {
+            itemId: item,
+            cantidad: '10',
+            presentacionId: caja.id,
+            precioUnitario: '9600',
+          },
+        ]),
+      );
+      expect(compra.lineas[0]).toMatchObject({
+        unidadCodigo: null,
+        presentacion: {
+          id: caja.id,
+          nombre: 'Caja',
+          contenido: '12.0000',
+          unidadCodigo: 'unidad',
+        },
+      });
+      await confirmar(compra.id);
+      expect(await stockEn(item, bodegaId)).toBe(120);
+      expect(await costoActual(item)).toBe('800.0000');
+      const [linea] = await ds.query(
+        `SELECT cantidad_base, costo_unitario_base, presentacion_nombre, contenido_base
+           FROM compra_lineas WHERE compra_id = $1`,
+        [compra.id],
+      );
+      expect(linea).toEqual({
+        cantidad_base: '120.0000',
+        costo_unitario_base: '800.0000',
+        presentacion_nombre: 'Caja',
+        contenido_base: '12.0000',
+      });
+    });
+
+    it('3 cajas de 12 a $10.000 → 36 unidades a $833,3333 (no da exacto)', async () => {
+      const item = await productoNuevo('unidad');
+      const caja = await crear({
+        proveedorId,
+        itemId: item,
+        nombre: 'Caja',
+        contenido: '12',
+        unidadCodigo: 'unidad',
+      });
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador([
+          {
+            itemId: item,
+            cantidad: '3',
+            presentacionId: caja.id,
+            precioUnitario: '10000',
+          },
+        ]),
+      );
+      await confirmar(compra.id);
+      expect(await stockEn(item, bodegaId)).toBe(36);
+      expect(await costoActual(item)).toBe('833.3333');
+    });
+
+    it('2 "Saco (25 kg)" de un producto en gramos → 50.000 g', async () => {
+      const item = await productoNuevo('g');
+      const saco = await crear({
+        proveedorId,
+        itemId: item,
+        nombre: 'Saco',
+        contenido: '25',
+        unidadCodigo: 'kg',
+      });
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador([
+          {
+            itemId: item,
+            cantidad: '2',
+            presentacionId: saco.id,
+            precioUnitario: '2000',
+          },
+        ]),
+      );
+      await confirmar(compra.id);
+      expect(await stockEn(item, bodegaId)).toBe(50000);
+    });
+
+    it('lote: 10 cajas de 12 del lote L123 → 120 en ese lote', async () => {
+      const item = await productoNuevo('unidad', { modoInventario: 'lote' });
+      const caja = await crear({
+        proveedorId,
+        itemId: item,
+        nombre: 'Caja',
+        contenido: '12',
+        unidadCodigo: 'unidad',
+      });
+      const codigoLote = `L123-${Date.now()}`;
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador([
+          {
+            itemId: item,
+            cantidad: '10',
+            presentacionId: caja.id,
+            precioUnitario: '9600',
+            lote: { codigoLote },
+          },
+        ]),
+      );
+      await confirmar(compra.id);
+      const lotes = await get<
+        {
+          codigoLote: string;
+          desglosePorUbicacion: { ubicacionId: string; cantidad: string }[];
+        }[]
+      >(`/api/items/${item}/lotes`);
+      const lote = lotes.find((l) => l.codigoLote === codigoLote)!;
+      expect(
+        Number(
+          lote.desglosePorUbicacion.find((d) => d.ubicacionId === bodegaId)!
+            .cantidad,
+        ),
+      ).toBe(120);
+    });
+
+    it('el borrador toma la caja del día: creada con 24, editada a 12 antes de confirmar → 120', async () => {
+      const item = await productoNuevo('unidad');
+      const caja = await crear({
+        proveedorId,
+        itemId: item,
+        nombre: 'Caja',
+        contenido: '24',
+        unidadCodigo: 'unidad',
+      });
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador([
+          {
+            itemId: item,
+            cantidad: '10',
+            presentacionId: caja.id,
+            precioUnitario: '9600',
+          },
+        ]),
+      );
+      await request(app.getHttpServer())
+        .patch(`/api/compras/presentaciones/${caja.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ contenido: '12' })
+        .expect(200);
+      await confirmar(compra.id);
+      expect(await stockEn(item, bodegaId)).toBe(120);
+    });
+
+    it('retirada entre el borrador y confirmar: 400 que la nombra, y no entra nada', async () => {
+      const nombreItem = nombreUnico('Retirada presentación E2E');
+      const item = (
+        await post<IdResponse>('/api/items', {
+          nombre: nombreItem,
+          precioBase: '1000',
+          precioIncluyeImpuesto: true,
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'producto',
+          unidadMedida: 'unidad',
+        })
+      ).id;
+      const caja = await crear({
+        proveedorId,
+        itemId: item,
+        nombre: 'Caja',
+        contenido: '12',
+        unidadCodigo: 'unidad',
+      });
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador([
+          {
+            itemId: item,
+            cantidad: '10',
+            presentacionId: caja.id,
+            precioUnitario: '9600',
+          },
+        ]),
+      );
+      await intentar('delete', `/api/compras/presentaciones/${caja.id}`);
+      const r = await intentar('post', `/api/compras/${compra.id}/confirmar`);
+      expect(r.status).toBe(400);
+      expect(r.message).toContain(nombreItem);
+      expect(r.message).toContain('retirada');
+      expect(await stockEn(item, bodegaId)).toBe(0);
+      const detalle = await get<CompraDetalle>(`/api/compras/${compra.id}`);
+      expect(detalle.estado).toBe('borrador');
+    });
+
+    it('presentación de otro proveedor o de otro producto: 400 al guardar', async () => {
+      const item1 = await productoNuevo('unidad');
+      const item2 = await productoNuevo('unidad');
+      const cajaDeOtroProveedor = await crear({
+        proveedorId: otroProveedorId,
+        itemId: item1,
+        nombre: nombreUnico('Caja'),
+        contenido: '12',
+        unidadCodigo: 'unidad',
+      });
+      const rProveedor = await intentar(
+        'post',
+        '/api/compras',
+        borrador([
+          {
+            itemId: item1,
+            cantidad: '10',
+            presentacionId: cajaDeOtroProveedor.id,
+            precioUnitario: '9600',
+          },
+        ]),
+      );
+      expect(rProveedor.status).toBe(400);
+      expect(rProveedor.message).toContain('otro proveedor');
+
+      const cajaDeItem2 = await crear({
+        proveedorId,
+        itemId: item2,
+        nombre: nombreUnico('Caja'),
+        contenido: '12',
+        unidadCodigo: 'unidad',
+      });
+      const rProducto = await intentar(
+        'post',
+        '/api/compras',
+        borrador([
+          {
+            itemId: item1,
+            cantidad: '10',
+            presentacionId: cajaDeItem2.id,
+            precioUnitario: '9600',
+          },
+        ]),
+      );
+      expect(rProducto.status).toBe(400);
+      expect(rProducto.message).toContain('no es de');
+    });
+
+    it('las dos (unidadCodigo y presentacionId) o ninguna: 400', async () => {
+      const item = await productoNuevo('unidad');
+      const caja = await crear({
+        proveedorId,
+        itemId: item,
+        nombre: nombreUnico('Caja'),
+        contenido: '12',
+        unidadCodigo: 'unidad',
+      });
+      const rAmbas = await intentar(
+        'post',
+        '/api/compras',
+        borrador([
+          {
+            itemId: item,
+            cantidad: '10',
+            unidadCodigo: 'unidad',
+            presentacionId: caja.id,
+            precioUnitario: '9600',
+          },
+        ]),
+      );
+      expect(rAmbas.status).toBe(400);
+      const rNinguna = await intentar(
+        'post',
+        '/api/compras',
+        borrador([{ itemId: item, cantidad: '10', precioUnitario: '9600' }]),
+      );
+      expect(rNinguna.status).toBe(400);
+    });
+
+    it('presentación de otro tenant en la línea: 400, igual que una que no existe', async () => {
+      const otro = await loginSegundoTenant(app);
+      const monedas = await get<{ monedaId: string; esOficial: boolean }[]>(
+        '/api/monedas',
+        200,
+        otro,
+      );
+      const monedaOtro = monedas.find((m) => m.esOficial)!.monedaId;
+      const provOtro = (
+        await post<IdResponse>(
+          '/api/terceros',
+          { tipo: 'proveedor', nombre: nombreUnico('Prov otro tenant') },
+          201,
+          otro,
+        )
+      ).id;
+      const itemOtro = (
+        await post<IdResponse>(
+          '/api/items',
+          {
+            nombre: nombreUnico('Item otro tenant'),
+            precioBase: '1000',
+            precioIncluyeImpuesto: true,
+            monedaId: monedaOtro,
+            tipo: 'producto',
+            unidadMedida: 'unidad',
+          },
+          201,
+          otro,
+        )
+      ).id;
+      const cajaOtroTenant = await crear(
+        {
+          proveedorId: provOtro,
+          itemId: itemOtro,
+          nombre: 'Caja',
+          contenido: '12',
+          unidadCodigo: 'unidad',
+        },
+        201,
+        otro,
+      );
+
+      const item = await productoNuevo('unidad');
+      const r = await intentar(
+        'post',
+        '/api/compras',
+        borrador([
+          {
+            itemId: item,
+            cantidad: '10',
+            presentacionId: cajaOtroTenant.id,
+            precioUnitario: '9600',
+          },
+        ]),
+      );
+      expect(r.status).toBe(400);
+      expect(r.message).toContain('ya no existe o fue retirada');
+    });
+
+    it('confirmada con 12, la caja pasa a 6, bajar a 8 cajas saca 24 unidades (usa el congelado)', async () => {
+      const item = await productoNuevo('unidad');
+      const caja = await crear({
+        proveedorId,
+        itemId: item,
+        nombre: 'Caja',
+        contenido: '12',
+        unidadCodigo: 'unidad',
+      });
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador([
+          {
+            itemId: item,
+            cantidad: '10',
+            presentacionId: caja.id,
+            precioUnitario: '9600',
+          },
+        ]),
+      );
+      await confirmar(compra.id);
+      await request(app.getHttpServer())
+        .patch(`/api/compras/presentaciones/${caja.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ contenido: '6' })
+        .expect(200);
+      const lineaId = (await get<CompraDetalle>(`/api/compras/${compra.id}`))
+        .lineas[0].id;
+      const r = await intentar(
+        'patch',
+        `/api/compras/${compra.id}/lineas/${lineaId}`,
+        { cantidad: '8' },
+      );
+      expect(r.status).toBe(200);
+      expect(await stockEn(item, bodegaId)).toBe(96); // 120 − 2 × 12, no 120 − 2 × 6
+      const detalle = await get<CompraDetalle>(`/api/compras/${compra.id}`);
+      expect(detalle.lineas[0].presentacion).toMatchObject({
+        nombre: 'Caja',
+        contenido: '12.0000',
+      });
+      // `valorAnterior` sale de `cl.cantidad` leído de Postgres (NUMERIC(18,4)
+      // → '10.0000'), no del string tipeado; `valorNuevo` es `dto.cantidad!`
+      // tal como lo mandó el cliente ('8'). Medido con este mismo e2e: el
+      // molde de `compras.e2e-spec.ts:~1216` solo afirma `valorNuevo`.
+      expect(
+        detalle.cambios.map((c) => [c.campo, c.valorAnterior, c.valorNuevo]),
+      ).toEqual([['cantidad', '10.0000', '8']]);
+    });
+
+    it('retirar la presentación no cambia el detalle de una confirmada', async () => {
+      const item = await productoNuevo('unidad');
+      const caja = await crear({
+        proveedorId,
+        itemId: item,
+        nombre: 'Caja',
+        contenido: '12',
+        unidadCodigo: 'unidad',
+      });
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador([
+          {
+            itemId: item,
+            cantidad: '10',
+            presentacionId: caja.id,
+            precioUnitario: '9600',
+          },
+        ]),
+      );
+      await confirmar(compra.id);
+      await intentar('delete', `/api/compras/presentaciones/${caja.id}`);
+      const detalle = await get<CompraDetalle>(`/api/compras/${compra.id}`);
+      expect(detalle.lineas[0].presentacion).toMatchObject({ nombre: 'Caja' });
+    });
   });
 });

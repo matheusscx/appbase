@@ -751,12 +751,21 @@ el food-cost y las mermas valorizadas.
 - **Recibir no exige permiso sobre el catálogo de ítems.** El encargado de compras elige el
   producto desde una lista propia del módulo: el catálogo muestra precios de venta y deja
   editarlos, y eso no es asunto de quien recibe mercadería.
+- **Un producto le viene a cada proveedor en su propia presentación** (*"Caja (12)"*, *"Saco
+  (25 kg)"*): es por (proveedor, producto), nunca una equivalencia única del producto, porque
+  otro proveedor puede traerlo en pack de 6. Una línea va en una unidad del catálogo **o** en
+  una presentación, nunca las dos. **Se congela al confirmar**: una compra confirmada con
+  "Caja (12)" sigue valiendo 12 aunque la caja se edite después a 6, y corregir su cantidad usa
+  siempre lo congelado. Admite productos por cantidad y por lote; **por serie no**, porque
+  igual hay que tipear cada serie y la caja no ahorra nada. Retirar una presentación no toca
+  las compras que ya la usaron, solo saca la opción para las siguientes. Spec:
+  [`2026-09-27-compras-unidad-de-compra-design.md`](./superpowers/specs/2026-09-27-compras-unidad-de-compra-design.md).
 
-**Fuera de alcance (piezas siguientes, cada una con su spec):** la unidad de compra por
-proveedor (*"caja de 12"*), la deuda con el proveedor y sus pagos con salida de caja, los
-gastos sin stock, y la lectura del DTE. También quedan afuera la orden de compra, la
-devolución al proveedor, la moneda extranjera y el flete. ⛔ La pregunta fiscal —IVA no
-recuperable e ILA dentro del costo— **es frente propio** (ADR-010).
+**Fuera de alcance (piezas siguientes, cada una con su spec):** el código del proveedor y la
+lectura del DTE (la presentación es donde se va a guardar ese código), la deuda con el
+proveedor y sus pagos con salida de caja, y los gastos sin stock. También quedan afuera la
+orden de compra, la devolución al proveedor, la moneda extranjera y el flete. ⛔ La pregunta
+fiscal —IVA no recuperable e ILA dentro del costo— **es frente propio** (ADR-010).
 
 Detalle completo: [`docs/features/compras.md`](./features/compras.md).
 

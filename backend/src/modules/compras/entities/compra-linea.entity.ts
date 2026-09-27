@@ -1,4 +1,5 @@
 import {
+  Check,
   Column,
   CreateDateColumn,
   DeleteDateColumn,
@@ -27,6 +28,10 @@ export interface LoteCompraInput {
  */
 @Entity('compra_lineas')
 @Index('idx_compra_lineas_compra', ['compraId'])
+@Check(
+  'chk_compra_lineas_unidad_o_presentacion',
+  `("unidad_codigo" IS NULL) <> ("presentacion_compra_id" IS NULL)`,
+)
 export class CompraLinea {
   @PrimaryGeneratedColumn('uuid', { name: 'compra_linea_id' })
   id: string;
@@ -47,8 +52,13 @@ export class CompraLinea {
   @Column({ type: 'numeric', precision: 18, scale: 4 })
   cantidad: string;
 
-  @Column({ name: 'unidad_codigo', type: 'text' })
-  unidadCodigo: string;
+  /** Null cuando la línea va en una presentación: exactamente una de las dos (CHECK). */
+  @Column({ name: 'unidad_codigo', type: 'text', nullable: true })
+  unidadCodigo: string | null;
+
+  /** La presentación elegida en el borrador (spec pieza 2 § 3.2). */
+  @Column({ name: 'presentacion_compra_id', type: 'uuid', nullable: true })
+  presentacionCompraId: string | null;
 
   /** Por unidad TIPEADA. Null = falta costo. `>= 0`: el 0 es el regalo. */
   @Column({
@@ -86,6 +96,25 @@ export class CompraLinea {
     nullable: true,
   })
   costoUnitarioBase: string | null;
+
+  /** El nombre de la presentación al confirmar: el detalle no lee una retirada. */
+  @Column({
+    name: 'presentacion_nombre',
+    type: 'varchar',
+    length: 40,
+    nullable: true,
+  })
+  presentacionNombre: string | null;
+
+  /** Cuántas unidades base trae UNA presentación, al confirmar. Corregir la cantidad usa este, no el vivo. */
+  @Column({
+    name: 'contenido_base',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  contenidoBase: string | null;
 
   /** La entrada original en el kardex. */
   @Column({ name: 'movimiento_id', type: 'uuid', nullable: true })

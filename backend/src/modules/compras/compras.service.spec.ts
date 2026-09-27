@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { InventarioService } from '../inventario/inventario.service';
@@ -7,7 +8,12 @@ import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import { MonedasService } from '../monedas/monedas.service';
 import type { ConfigCalculo } from '../calculo-precios/calculo-precios.engine';
-import { ComprasService, type CompraDetalle } from './compras.service';
+import { PresentacionesCompraService } from './presentaciones-compra.service';
+import {
+  cantidadEnBase,
+  ComprasService,
+  type CompraDetalle,
+} from './compras.service';
 import type { CompraBorradorDto } from './dto/compra-borrador.dto';
 
 const CFG_CLP = {
@@ -84,6 +90,43 @@ function dto(extra: Partial<CompraBorradorDto> = {}): CompraBorradorDto {
   };
 }
 
+describe('cantidadEnBase (spec pieza 2 § 4.2)', () => {
+  const conversor = async () => (c: string, desde: string, hacia: string) => {
+    if (desde === 'kg' && hacia === 'g')
+      return new Decimal(c).times(1000).toString();
+    throw new BadRequestException(
+      `No se puede convertir de ${desde} a ${hacia}`,
+    );
+  };
+  it('con presentación multiplica por el contenido en base', async () => {
+    expect(
+      await cantidadEnBase('10', { contenidoBase: '12' }, 'unidad', conversor),
+    ).toBe('120');
+    expect(
+      await cantidadEnBase('3', { contenidoBase: '12' }, 'unidad', conversor),
+    ).toBe('36');
+    expect(
+      await cantidadEnBase('2', { contenidoBase: '25000' }, 'g', conversor),
+    ).toBe('50000');
+  });
+  it('cuantiza a 4 decimales y rechaza lo que cae a 0', async () => {
+    expect(
+      await cantidadEnBase('1.5', { contenidoBase: '0.3333' }, 'kg', conversor),
+    ).toBe('0.5');
+    await expect(
+      cantidadEnBase('0.0001', { contenidoBase: '0.0001' }, 'kg', conversor),
+    ).rejects.toThrow(BadRequestException);
+  });
+  it('sin presentación convierte con el catálogo, y en la base no convierte', async () => {
+    expect(
+      await cantidadEnBase('3', { unidadCodigo: 'kg' }, 'g', conversor),
+    ).toBe('3000');
+    expect(
+      await cantidadEnBase('7', { unidadCodigo: 'g' }, 'g', conversor),
+    ).toBe('7');
+  });
+});
+
 describe('ComprasService (borrador)', () => {
   let service: ComprasService;
   let rutas: Ruta[];
@@ -97,6 +140,8 @@ describe('ComprasService (borrador)', () => {
   const stockTotalPorProducto = jest.fn();
   const bloquearContraBorrado = jest.fn();
   const recalcularCostoDesdeCompra = jest.fn();
+  /** Sin presentaciones citadas por defecto: cada test que las necesite la pisa. */
+  const vivasPorIds = jest.fn();
 
   function pisar(regex: RegExp, respuesta: Respuesta) {
     rutas.unshift([regex, respuesta]);
@@ -135,6 +180,8 @@ describe('ComprasService (borrador)', () => {
       eventos.push('bloquearContraBorrado');
       return Promise.resolve();
     });
+    vivasPorIds.mockReset();
+    vivasPorIds.mockResolvedValue(new Map());
     const query = jest.fn((sql: string) => {
       queries.push(sql);
       if (/FOR UPDATE OF ip/.test(sql)) eventos.push('lock productos');
@@ -170,6 +217,10 @@ describe('ComprasService (borrador)', () => {
         {
           provide: MonedasService,
           useValue: { decimalesOficiales: () => Promise.resolve(0) },
+        },
+        {
+          provide: PresentacionesCompraService,
+          useValue: { vivasPorIds },
         },
       ],
     }).compile();
@@ -635,9 +686,11 @@ describe('ComprasService (borrador)', () => {
       const params = db.query.mock.calls.find(([sql]) =>
         /UPDATE compra_lineas cl/.test(sql as string),
       )![1] as unknown[];
-      // [tenant, l1: id, base, costo, mov, stockAnterior, costoAnterior, l2: …]
+      // [tenant, l1: id, base, costo, mov, stockAnterior, costoAnterior,
+      //  presentacionNombre, contenidoBase, l2: …] — 8 columnas por línea
+      // desde la pieza 2 (antes 6): stockTotalAnterior sigue siendo la 5ta.
       expect(params[5]).toBe('5'); // antes de la compra
-      expect(params[11]).toBe('15'); // 5 + los 10 de la primera línea
+      expect(params[13]).toBe('15'); // 5 + los 10 de la primera línea
     });
 
     it('un precio que se pierde al convertir a la unidad base es 400', async () => {

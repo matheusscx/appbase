@@ -11,6 +11,7 @@ import {
   IsUUID,
   Matches,
   MaxLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import {
@@ -72,9 +73,16 @@ export class LineaCompraDto {
   @IsDecimalPositivo()
   cantidad: string;
 
+  /** En una unidad del catálogo. Exactamente una de `unidadCodigo` o `presentacionId` (lo exige el service). */
+  @ValidateIf((_o, v) => v !== undefined)
   @IsString()
   @IsNotEmpty()
-  unidadCodigo: string;
+  unidadCodigo?: string;
+
+  /** Una presentación del proveedor de la compra para este producto (spec pieza 2 § 4.1). */
+  @ValidateIf((_o, v) => v !== undefined)
+  @IsUUID()
+  presentacionId?: string;
 
   /**
    * Por unidad TIPEADA. Ausente o null = falta costo, que se completa cuando

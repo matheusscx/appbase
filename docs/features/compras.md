@@ -36,8 +36,10 @@ compras.
   permisos.
 - **Pieza 2 (en construcción):** la unidad de compra por proveedor ("Caja (12)", "Saco (25 kg)"):
   tabla `presentaciones_compra`, su CRUD (`GET/POST/PATCH/DELETE /compras/presentaciones`) y el
-  seed. Deja endpoints que la pantalla todavía no usa — la línea con presentación (validación del
-  borrador, confirmar con lo congelado) y la pantalla vienen en las tareas 2 y 3. Spec:
+  seed (tarea 1); la línea con presentación —validación del borrador, el helper único de cantidad
+  base, confirmar con lo congelado, corregir con lo congelado y el detalle— (tarea 2, esta
+  sección: [La unidad de compra por proveedor](#la-unidad-de-compra-por-proveedor-pieza-2)). Falta
+  la pantalla (tarea 3). Spec:
   [`2026-09-27-compras-unidad-de-compra-design.md`](../superpowers/specs/2026-09-27-compras-unidad-de-compra-design.md).
 - **Piezas siguientes, cada una con su spec:** la deuda con el proveedor y sus pagos, y los gastos
   sin stock.
@@ -106,6 +108,66 @@ Si el resultado difiere del vigente, lo escribe con una **`correccion_compra`** 
 cantidad 0). **Ningún movimiento pasado cambia su costo congelado.** Tomate: 5 kg a $1.000,
 entran 20 kg sin precio, se venden 8 y la factura llega a $1.500 → **$1.400**, y lo vendido queda
 a $1.000.
+
+---
+
+## La unidad de compra por proveedor (pieza 2)
+
+Una línea puede ir en una unidad del catálogo (`unidadCodigo`) o en una **presentación** del
+proveedor para ese producto (`presentacionId`) — nunca las dos, nunca ninguna (400). El CRUD de
+presentaciones vive en `PresentacionesCompraService` (los cuatro endpoints `/compras/presentaciones`
+de la tabla de arriba, spec pieza 2 § 5); esta sección es la línea que las consume
+(`ComprasService`, spec pieza 2 § 3.2 y § 4).
+
+**Qué se congela al confirmar, y por qué.** `presentacion_nombre` y `contenido_base` (cuántas
+unidades base trae UNA presentación) se copian a la línea. Sin esto, el detalle de una compra
+confirmada tendría que leer una presentación que después se editó o se retiró — una lectura sin
+el filtro de `eliminado_el` que además cambiaría un número ya confirmado. Con lo congelado: una
+compra confirmada con "Caja (12)" sigue diciendo 12 aunque la caja pase a 6, y **corregir la
+cantidad usa el congelado, nunca el vivo** (bajar de 10 a 8 cajas saca 24 unidades, no 12, si la
+caja cambió a 6 después de confirmar).
+
+**`unidad_codigo` queda NULL en vez de rellenarse con la unidad base** cuando la línea va en
+presentación (`CHECK chk_compra_lineas_unidad_o_presentacion`: exactamente una de las dos). Es a
+propósito: un camino que se olvidara de la presentación y asumiera `unidad_codigo` revienta en la
+conversión (con `null`) en vez de leer "10 cajas" como 10 unidades sin aviso.
+
+**El único lugar que calcula la cantidad base de una línea** es `cantidadEnBase`
+(`compras.service.ts`, función pura y exportada, junto a sus tres llamadores): la validación del
+borrador, confirmar y la corrección de cantidad pasan por ahí. Si alguno convirtiera por su
+cuenta, ese sería el camino que lee cajas como unidades.
+
+| Situación | Resultado |
+|---|---|
+| Presentación retirada entre el borrador y confirmar | 400 al confirmar, nombra el producto (`"<nombre>" ya no existe o fue retirada: elegí otra unidad`); no entra nada, la compra sigue en borrador |
+| Presentación de otro proveedor | 400 al guardar el borrador |
+| Presentación de otro producto (de la línea) | 400 al guardar el borrador |
+| Producto por serie | 400 al crear la presentación y al usarla en una línea: igual hay que tipear cada serie, así que la caja no ahorra nada |
+| Producto por lote | Se acepta: el lote entero entra en una línea (10 cajas de 12 del lote L123 → 120 en ese lote) |
+| Presentación editada antes de confirmar (el borrador la usa) | El borrador toma la que esté "ese día": creada con 24, editada a 12 antes de confirmar → entran 120 |
+| Retirar una presentación de una compra ya confirmada | No cambia el detalle: lo congelado no se mueve |
+
+**El body de la línea** (`POST /compras`, `PATCH /compras/:id`):
+
+```
+{ itemId, cantidad, precioUnitario?, series?, lote?, unidadCodigo?, presentacionId? }
+```
+
+con exactamente una de `unidadCodigo` / `presentacionId`.
+
+**El detalle de la compra** (`GET /compras/:id`), por línea, suma:
+
+```ts
+unidadCodigo: string | null;          // null si va en presentación
+presentacion: { id, nombre, contenido, unidadCodigo } | null;
+```
+
+En un borrador, `presentacion` sale de la presentación viva (o `null` si fue retirada — la
+pantalla la muestra sin unidad y pide elegir otra; no se lee la fila borrada). En una confirmada
+sale de lo congelado, con `contenido` y `unidadCodigo` en la unidad base del producto.
+
+Spec: [`2026-09-27-compras-unidad-de-compra-design.md`](../superpowers/specs/2026-09-27-compras-unidad-de-compra-design.md)
+§ 3.2, § 4 y § 5.
 
 ---
 
