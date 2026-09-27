@@ -587,6 +587,11 @@ Eran tres: la tercera —el reporte de varianza— se construyó y está en [`re
   cliente del SII, ni mapeo proveedor→ítem. Lo que sí existe desde el 2026-09-19 es el
   módulo de compras con la **carga manual**, o sea el formulario que el DTE va a pre-llenar
   ([`features/compras.md`](../features/compras.md), pieza 1 en [`resueltos.md`](resueltos.md)).
+  📌 **Investigación de la lectura (2026-09-27, un cliente la pidió):**
+  [`investigaciones/2026-09-27-carga-stock-por-factura.md`](investigaciones/2026-09-27-carga-stock-por-factura.md).
+  Lo que más pesa: el Registro de Compras del SII trae **una línea por documento**, sin productos
+  (formato IECV del SII), así que las líneas salen solo del **XML** del DTE; y sin la pieza 2 el
+  XML pre-llena "3 CJ" donde el stock cuenta unidades.
 
   ⛔ **La carga manual NO es un plan B: es el camino base** (owner, 2026-09-03, agregado el
   mismo día que la decisión de leer del SII). Leer la factura **no puede ser el único camino**.
