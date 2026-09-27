@@ -601,13 +601,22 @@ describe('Stock mínimo — listado (e2e)', () => {
       expect(f!.bajoMinimo).toBe(false);
     });
 
-    it('un origen en el body se ignora: todo lo que entra por acá es manual', async () => {
+    it('un origen en el body se rechaza: todo lo que entra por acá es manual', async () => {
+      // El DTO no declara `origen`, y desde el 2026-09-27 el pipe global
+      // rechaza lo no declarado: el cliente no puede firmar un mínimo como
+      // `'sistema'`. Antes el campo se descartaba en silencio con 200.
       const itemId = await producto('Origen colado');
       const res = await put(itemId, localId, {
         minimo: '3',
         origen: 'sistema',
       });
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain(
+        'property origen should not exist',
+      );
+
+      // El control: sin el campo, el mismo mínimo entra y queda manual.
+      expect((await put(itemId, localId, { minimo: '3' })).status).toBe(200);
       expect((await fila(itemId, localId))!.origen).toBe('manual');
     });
 

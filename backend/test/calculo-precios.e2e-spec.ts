@@ -155,19 +155,13 @@ describe('Cálculo de precios (e2e)', () => {
    * ya no existe**, así que no hay signo ni cero que validar. Lo que hay que
    * proteger es que su desaparición sea real y no cosmética.
    *
-   * ⚠️ El `ValidationPipe` corre con `whitelist: true` y **sin**
-   * `forbidNonWhitelisted` (`main.ts`), o sea que un cliente viejo que lo siga
-   * mandando NO recibe un 400: se le ignora en silencio. El test fija esa
-   * conducta —201 en las dos— porque es la que hay; lo que de verdad protege es
-   * la igualdad de los totales, que es lo que se rompe si el número del cliente
-   * vuelve a decidir la plata.
-   *
-   * Si algún día se activa `forbidNonWhitelisted`, este test se cae por el
-   * `conCampo.status` y **hay que actualizarlo a 400, no relajarlo**: rechazar
-   * también es una conducta correcta, pero es otra, y el test tiene que decir
-   * cuál rige.
+   * Hasta el 2026-09-27 el pipe corría sin `forbidNonWhitelisted` y el campo se
+   * ignoraba en silencio (201 en las dos, mismos totales). Desde entonces un
+   * cliente viejo que lo siga mandando recibe 400 nombrando el campo: el número
+   * del cliente no llega nunca al motor. El control es el mismo pedido sin el
+   * campo, que calcula: el 400 es por el campo y no por otra cosa.
    */
-  it('ignora un precioUnitario en el body: el precio sale del catálogo', async () => {
+  it('rechaza un precioUnitario en el body: el precio sale del catálogo', async () => {
     const pedir = (linea: Record<string, unknown>) =>
       request(app.getHttpServer())
         .post('/api/calculo-precios/calcular')
@@ -178,10 +172,10 @@ describe('Cálculo de precios (e2e)', () => {
     const conCampo = await pedir({ precioUnitario: '999999' });
 
     expect(sinCampo.status).toBe(201);
-    expect(conCampo.status).toBe(201);
-    const a = (sinCampo.body as ResultadoVentaResponse).totales.totalFinal;
-    const b = (conCampo.body as ResultadoVentaResponse).totales.totalFinal;
-    expect(b).toBe(a);
+    expect(conCampo.status).toBe(400);
+    expect(JSON.stringify(conCampo.body)).toContain(
+      'property precioUnitario should not exist',
+    );
   });
 
   /**

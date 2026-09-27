@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication } from '@nestjs/common';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
+import { bodyPreferencias } from './helpers/preferencias';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
@@ -783,7 +784,7 @@ describe('Motor de promociones (e2e)', () => {
       request(app.getHttpServer())
         .put('/api/tenants/preferencias-financieras')
         .set('Authorization', `Bearer ${tokenAdmin}`)
-        .send({ ...original, promosAcumulanDescuentos });
+        .send({ ...bodyPreferencias(original), promosAcumulanDescuentos });
 
     beforeAll(async () => {
       original = await getPrefs();

@@ -138,7 +138,9 @@ prohibidos por lint fuera de la fachada, el seeder y los specs — ver
 1. **CORS** — origen `FRONTEND_URL` (dev: `http://localhost:5173`). Desde ADR-022 **ya no
    está en el camino del navegador**, que llega por el proxy del frontend; sigue puesto
    para clientes que peguen directo a la API.
-2. **ValidationPipe** — global, valida todos los DTOs con `class-validator`
+2. **ValidationPipe** — global, valida todos los DTOs con `class-validator` y **rechaza con 400
+   lo que el DTO no declara** (`forbidNonWhitelisted`, desde 2026-09-27; antes lo borraba en
+   silencio). Se construye en `src/common/pipes/validacion-global.pipe.ts`, que también usa el e2e
 3. **ClassSerializerInterceptor** — excluye campos anotados con `@Exclude()`
 4. **Swagger** — docs en `/api/docs` con soporte Bearer
 5. **Prefijo global** `/api`

@@ -97,8 +97,17 @@ fiscal a no olvidar: el **IVA no se pausa**, lo gobierna afecto/exento
 
 ## 3. DTO
 
-`class-validator` con `ValidationPipe` global (`main.ts`). Campos opcionales en
-update con `@IsOptional()`. Campos `numeric` con `@IsNumberString()`.
+`class-validator` con `ValidationPipe` global (`validacionGlobal()`, en `main.ts`). Campos
+opcionales en update con `@IsOptional()`. Campos `numeric` con `@IsNumberString()`.
+
+**Lo que el DTO no declara es un 400** que nombra el campo (`property x should not exist`),
+en el body y en la querystring: el pipe corre con `forbidNonWhitelisted` desde el 2026-09-27.
+Hasta esa fecha lo borraba callado y contestaba 200, y un filtro mal escrito o un campo que
+el DTO olvidó se veían como "guardado". Dos consecuencias al escribir un DTO: **todo lo que
+la pantalla manda tiene que estar declarado**, y un campo que se retira del contrato se
+**borra** del DTO —ya no hace falta dejarlo con un validador que siempre rechaza—. Lo que el
+flag no mira: los parámetros con nombre (`@Body('x')`, `@Query('x')`, sin DTO) y el interior
+de un `@IsObject()` libre.
 
 > **Contrato con el frontend:** `@IsNumberString` exige un **string** (`"10.50"`), no
 > un `number`. El cliente lo maneja string de punta a punta con `UInput`

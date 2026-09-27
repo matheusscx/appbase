@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication } from '@nestjs/common';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
+import { bodyPreferencias } from './helpers/preferencias';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
@@ -282,7 +283,7 @@ describe('Redondeo por país (e2e)', () => {
       const res = await request(app.getHttpServer())
         .put('/api/tenants/preferencias-financieras')
         .set('Authorization', `Bearer ${tokenMX}`)
-        .send(actual.body as Record<string, unknown>);
+        .send(bodyPreferencias(actual.body as object));
       expect(res.status).toBe(200);
     });
 
@@ -411,7 +412,7 @@ describe('Redondeo por país (e2e)', () => {
       const tenant = await crearTenantEn(PROV_CABA);
       const tokenAR = await entrarA(tenant.id);
       const res = await guardar(tokenAR, {
-        ...(await prefs(tokenAR)),
+        ...bodyPreferencias(await prefs(tokenAR)),
         modoRedondeo: 'HALF_UP',
       });
       expect(res.status).toBe(400);
@@ -429,7 +430,7 @@ describe('Redondeo por país (e2e)', () => {
       const tenant = await crearTenantEn(PROV_CABA);
       const tokenAR = await entrarA(tenant.id);
       const res = await guardar(tokenAR, {
-        ...(await prefs(tokenAR)),
+        ...bodyPreferencias(await prefs(tokenAR)),
         modoRedondeo: 'HALF_EVEN',
         montoTolerancia: '10',
       });
@@ -443,7 +444,7 @@ describe('Redondeo por país (e2e)', () => {
       const tenant = await crearTenantEn(PROV_RM);
       const tokenCL = await entrarA(tenant.id);
       const res = await guardar(tokenCL, {
-        ...(await prefs(tokenCL)),
+        ...bodyPreferencias(await prefs(tokenCL)),
         modoRedondeo: 'FLOOR',
       });
       expect(res.status).toBe(200);
@@ -454,7 +455,7 @@ describe('Redondeo por país (e2e)', () => {
       // candado es por perilla: con un guard por país, la segunda daría 400.
       const tenant = await crearTenantEn(PROV_CDMX);
       const tokenMX = await entrarA(tenant.id);
-      const base = await prefs(tokenMX);
+      const base = bodyPreferencias(await prefs(tokenMX));
 
       const cerrada = await guardar(tokenMX, {
         ...base,

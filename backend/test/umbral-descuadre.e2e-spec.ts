@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication } from '@nestjs/common';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
+import { bodyPreferencias } from './helpers/preferencias';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
@@ -237,7 +238,7 @@ describe('Umbral de descuadre al cierre (e2e)', () => {
       .put('/api/tenants/preferencias-financieras')
       .set('Authorization', `Bearer ${tokenAdmin}`)
       .send({
-        ...prefsOriginales,
+        ...bodyPreferencias(prefsOriginales),
         umbralDescuadreAviso: aviso,
         umbralDescuadreAlto: alto,
       });
@@ -292,7 +293,7 @@ describe('Umbral de descuadre al cierre (e2e)', () => {
       await request(app.getHttpServer())
         .put('/api/tenants/preferencias-financieras')
         .set('Authorization', `Bearer ${tokenAdmin}`)
-        .send(prefsOriginales);
+        .send(bodyPreferencias(prefsOriginales));
       await request(app.getHttpServer())
         .delete(`/api/cajones/${cajonId}`)
         .set('Authorization', `Bearer ${tokenAdmin}`);
@@ -575,7 +576,7 @@ describe('Umbral de descuadre al cierre (e2e)', () => {
         .put('/api/tenants/preferencias-financieras')
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({
-          ...prefsOriginales,
+          ...bodyPreferencias(prefsOriginales),
           umbralDescuadreAviso: '10000',
           umbralDescuadreAlto: '2000',
         });
@@ -587,7 +588,10 @@ describe('Umbral de descuadre al cierre (e2e)', () => {
       const res = await request(app.getHttpServer())
         .put('/api/tenants/preferencias-financieras')
         .set('Authorization', `Bearer ${tokenAdmin}`)
-        .send({ ...prefsOriginales, umbralDescuadreAviso: '1000.50' });
+        .send({
+          ...bodyPreferencias(prefsOriginales),
+          umbralDescuadreAviso: '1000.50',
+        });
       expect(res.status).toBe(400);
     });
 
@@ -595,7 +599,10 @@ describe('Umbral de descuadre al cierre (e2e)', () => {
       const res = await request(app.getHttpServer())
         .put('/api/tenants/preferencias-financieras')
         .set('Authorization', `Bearer ${tokenCajero}`)
-        .send({ ...prefsOriginales, umbralDescuadreAviso: '1' });
+        .send({
+          ...bodyPreferencias(prefsOriginales),
+          umbralDescuadreAviso: '1',
+        });
       expect(res.status).toBe(403);
     });
   });

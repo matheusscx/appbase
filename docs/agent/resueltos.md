@@ -23,6 +23,137 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `forbidNonWhitelisted` prendido en el `ValidationPipe` global (cerrada 2026-09-27)
+
+Sale de [`pendientes.md`](pendientes.md) § 4. **Qué cambió para quien llama a la API:** un
+campo que el DTO no declara —en el body o en la querystring— es un **400 que lo nombra**
+(`property x should not exist`), en vez de borrarse en silencio con 200. Ninguna pantalla
+cambia: la medición de abajo no encontró ninguna que mande campos de más.
+
+### La decisión del owner (2026-09-27)
+
+La tomó César, contestándole a la sesión orquestadora ("Listado de sesiones activas") **después
+de ver la medición** de abajo (commit `961794e6`). La pregunta fue *"¿se prende, en un frente
+propio?"* y la respuesta, **sí**. No hubo dato nuevo entre la medición y la decisión: se decidió
+sobre esos números —cero pantallas, el costo son tests— y el frente se abrió en su propia sesión.
+
+### Qué se hizo
+
+1. **El pipe en un solo lugar** (`b20551f7`). `src/common/pipes/validacion-global.pipe.ts`
+   exporta `validacionGlobal()`; lo usan `main.ts` y los 88 specs que tenían las 112 copias
+   (la entrada contaba 111 en 87: entró una más entre la medición y el cierre). Sin cambio de
+   conducta: el e2e dio los mismos números antes y después (1159 pasan, 6 skipped, 1165). Que
+   nadie vuelva a copiarlo lo frena `src/common/invariants/validacion-global.invariant.spec.ts`
+   (cuatro mutantes, cada test mata al menos uno propio).
+2. **El flag prendido, y los tests que lo reciben.** Prendido solo, sin tocar specs, cayeron
+   **35 de 1165 en las mismas 8 suites** que decía la medición. Se arreglaron así:
+   - **Los 31 que reenviaban el `GET` de preferencias** mandan ahora lo que el DTO declara, con
+     `bodyPreferencias()` (`test/helpers/preferencias.ts`). Sus claves las fija el tipo: un
+     `satisfies Record<keyof UpdatePreferenciasFinancierasDto, true>` que no compila si al DTO
+     le falta o le sobra una.
+   - **Los 4 de "se ignora"** esperan el 400 nombrando el campo, cada uno con su control: el
+     mismo request sin el campo pasa. Con el flag apagado caen exactamente esos 4.
+   - **"Una tolerancia negativa sigue siendo 400"** afirma ahora el mensaje
+     (`montoTolerancia no puede ser negativo`). Medido: sacándole `@IsDecimalNoNegativo` al DTO,
+     el test nuevo cae (el `-500` se guardaba con 200) y **el viejo, con el flag prendido,
+     pasaba en verde** — el 400 lo ponía el campo de más.
+3. **Un spec del pipe mismo**, `test/validacion-global.e2e-spec.ts`: el 400 en el body y en la
+   querystring (`soloConVarianza`, el caso que abrió la entrada), y lo que el flag no toca
+   —el login y los tres retornos de Webpay—, verificado con test y no por lectura. Mutantes:
+   apagar el flag mata los dos primeros; pasar el `POST` del retorno de pago a `@Body() dto`
+   mata el suyo, y darle un `@Body() dto` al login mata el suyo.
+4. **Navegador** (Playwright, stack propio del worktree, base reseteada antes de cada corrida):
+   con el flag, 51 pasan y fallan `reportes/varianza.spec.ts:68` y
+   `salones/cuenta-hasta-cobro.spec.ts:245`; sin el flag, 49 pasan y fallan `varianza.spec.ts:68`
+   y `:130`, `inicio/dashboard.spec.ts:73` y `ventas/pos.spec.ts:115`. Lo único que cae con el
+   flag y no sin él es `cuenta-hasta-cobro:245`, de los que la medición ya daba por
+   intermitentes: con el flag, sola y sobre base limpia, pasó dos veces seguidas.
+
+**Lo que queda, y va en el commit siguiente del mismo frente:** el código y las docs escritos
+alrededor del borrado silencioso (los campos "trampa" de `update-item.dto.ts`, los comentarios
+que describen la conducta vieja y los docs de la entrada).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 4
+
+- [ ] **¿Se prende `forbidNonWhitelisted` en el `ValidationPipe` global?** (backend,
+  `backend/src/main.ts:19`: `whitelist: true` sin `forbidNonWhitelisted`). Hoy un campo que el
+  DTO no declara **se borra en silencio** y el request contesta 200: un cliente que manda un
+  campo mal escrito cree que lo guardó. Lo levantó la revisión de seguridad del reporte de
+  varianza (2026-09-19) y lo midió la pantalla (2026-09-21): `soloConVarianza` en
+  `GET /reportes/varianza/resumen`, que ese DTO no declara, se descartaba con 200.
+  **La pregunta que frena:** ¿se prende, sabiendo que no rompe ninguna pantalla y que el costo
+  son tests? Cambia la conducta de toda la API, por eso no se prende de arrastre.
+
+  **Lo medido el 2026-09-27** (el número que importa es cuántas **pantallas** mandan hoy campos
+  de más, no cuántos tests):
+  - **Pantallas: ninguna.** En el e2e de navegador (Playwright, 50 tests) no apareció **ni un**
+    campo de más, ni en modo censo ni con el flag prendido (control positivo en el mismo proceso:
+    un campo inventado sí dio 400). Y como ningún test cubre todas las pantallas, se buscó además
+    por conducta en todo `frontend/app`: los ~32 sitios que mandan un objeto entero o un spread
+    (incluido `usePaginatedList`, que vuelca `filters` entero a la querystring en 15 pantallas),
+    y los literales campo por campo, 120 llamadas validadas por clase en `pages/` y 76 en
+    `components/`, `composables/` y `stores/`. **0 claves que el DTO no declare.** O sea: hoy
+    ninguna pantalla pierde datos en silencio por esto.
+  - **e2e de la API: 26 de 3836 validaciones** llevaban campos de más, todas de tests. Con el
+    flag caen **35 de 1142 tests, en 8 suites**, y los 35 se explican por el log de rechazos.
+    Son dos formas:
+    - **31 tests — reenviar la respuesta entera de un GET.** Los specs hacen
+      `GET /tenants/preferencias-financieras` y mandan `{ ...lo_leído, campo }` al `PUT`: la
+      respuesta trae 6 campos de solo lectura (`modoRedondeoBloqueado`, `modoRedondeoNorma`,
+      `modoRedondeoImpuesto` y los tres `nivelRedondeo…`) que `UpdatePreferenciasFinancierasDto`
+      no declara. `umbral-descuadre.e2e-spec.ts:239` está en un `beforeAll` y se lleva la suite
+      entera (20); después `redondeo-por-pais` (5), `monto-tolerancia` (3), `promociones` (2) y
+      `ventas` (1, la nota de crédito). La pantalla de preferencias **no** hace esto: arma el
+      body campo por campo (`preferencias-financieras.vue:226`).
+    - **4 tests — el campo prohibido a propósito.** Afirman que un campo se **ignora**:
+      `precioUnitario` en `POST /ventas` y en `POST /calculo-precios/calcular`, `ubicacionId` en
+      el `PATCH` de un recuento, `origen` en el `PUT` de stock mínimo. Con el flag contestan 400:
+      lo que protegen (el precio lo pone el servidor, la sesión no cambia de lugar) queda **más**
+      firme, y el test se reescribe para esperar el 400.
+  - ⚠️ **Lo que el flag esconde si se prende sin arreglar esos specs:** un test que esperaba un
+    400 por otro motivo lo recibe igual, por el campo de más. Tres de los 35 se ven porque
+    además miran el mensaje; uno **no se ve**: "una tolerancia negativa sigue siendo 400"
+    (`monto-tolerancia`) pasa con el flag sin llegar a validar el negativo.
+
+  **Qué no se afecta:** los parámetros con nombre (`@Body('TBK_TOKEN')`, `@Query('nombre')`: los
+  callbacks de Webpay, que reciben campos que no controlamos, entran por ahí) y `POST /auth/login`
+  (el `LocalAuthGuard` lee el body sin pasar por el pipe).
+
+  **Lo que cuesta prenderlo, además de la línea de `main.ts`:** el pipe está **copiado 111 veces
+  en 87 specs** del e2e (`new ValidationPipe({ whitelist: true, transform: true })`). Si se
+  cambia solo `main.ts`, el e2e sigue probando el pipe viejo y la API de verdad es otra. Hay que
+  tocar las 111 o que los specs lo tomen de un solo lugar. Y arreglar los 5 specs que reenvían
+  las preferencias (mandar solo lo que el DTO declara) y reescribir los 4 tests de "se ignora".
+  Además hay código y docs **escritos alrededor** del borrado silencioso, que el mismo frente
+  revisa: `grep -rn whitelist backend/src` los lista (el caso más visible, `update-item.dto.ts:110`
+  y `:134`, conserva campos "trampa" con un validador que siempre rechaza porque borrarlos los
+  descartaba callados; con el flag se podrían sacar), y en docs `features/ventas.md:128`,
+  `agent/anti-patterns.md:382`, `features/reporte-varianza.md` (el filtro que el resumen no
+  sigue) y `agent/auditoria-codigo.md:127` describen la conducta de hoy. Y un límite de lo que se gana:
+  el flag no mira **adentro** de un `@IsObject()` libre, igual que `whitelist` no lo limpia
+  (`escala-moneda.pipe.ts:190`).
+
+  **Recomendación:** prenderlo, en un frente propio, con las copias del pipe en un solo lugar
+  del lado de los tests. El costo es solo de tests —ninguna pantalla cambia—, y lo que se gana es
+  que el próximo `soloConVarianza` sea un 400 al escribirlo en vez de un filtro que no filtra.
+  El que más lo necesita es `usePaginatedList`: hoy las 15 pantallas le pasan filtros con las
+  claves del DTO, pero nada impide que una le pase un objeto más ancho.
+
+  **Cómo reproducir el conteo de tests** (base limpia; no commitear el resultado):
+  `sed -i '' 's/whitelist: true, transform: true/whitelist: true, forbidNonWhitelisted: true, transform: true/' backend/src/main.ts backend/test/*.e2e-spec.ts`,
+  después `./scripts/reset-db.sh` y `npm run test:e2e`, y `git checkout` de esos archivos al
+  terminar. Para el e2e de navegador alcanza con `main.ts` (el stack corre ese) y `npm run e2e`;
+  ahí comparar contra una corrida sin el flag, porque tres tests fallan igual con el código
+  limpio (`reportes/varianza.spec.ts:68`, `salones/cuenta-hasta-cobro.spec.ts:245`,
+  `ventas/pos.spec.ts:115`, medido el 2026-09-27 en el stack del worktree) y otros de salones y
+  del inicio fallan en una corrida sí y en otra no. **El censo** (qué campo sobra en qué
+  request, sin cortar el flujo en el primer 400) salió de un `setupFilesAfterEnv` temporal que
+  envolvía `ValidationPipe.prototype.validate`: validaba una segunda vez con
+  `forbidNonWhitelisted: true`, anotaba cada `whitelistValidation` con el test y el DTO, y
+  seguía con la conducta de siempre.
+
+---
+
 ## Varianza: el aviso de productos sin costo (cerrada 2026-09-27)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. **Qué se hizo:** el `/resumen` trae

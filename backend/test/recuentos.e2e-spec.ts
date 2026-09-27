@@ -1556,14 +1556,24 @@ describe('Recuentos — por ubicación', () => {
     expect(resCrear.status).toBe(201);
     const recuentoId = (resCrear.body as RecuentoCreateResponse).id;
 
-    // `whitelist: true` sin `forbidNonWhitelisted`: el campo se descarta en
-    // silencio, no rebota con 400 — mismo contrato que el resto de la API
-    // (ver `update-recuento.dto.ts`).
+    // El DTO no declara `ubicacionId`, y desde el 2026-09-27 el pipe global
+    // rechaza lo no declarado (`forbidNonWhitelisted`): 400 nombrando el campo.
     const resPatch = await request(app.getHttpServer())
       .patch(`/api/recuentos/${recuentoId}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ ubicacionId: localId, comentario: 'intento de mover la sesión' });
-    expect(resPatch.status).toBe(200);
+    expect(resPatch.status).toBe(400);
+    expect(JSON.stringify(resPatch.body)).toContain(
+      'property ubicacionId should not exist',
+    );
+
+    // El control: el mismo PATCH sin el campo pasa, así que el 400 de arriba
+    // es por `ubicacionId` y no por el comentario.
+    const resControl = await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ comentario: 'intento de mover la sesión' });
+    expect(resControl.status).toBe(200);
 
     const resDetalle = await request(app.getHttpServer())
       .get(`/api/recuentos/${recuentoId}`)

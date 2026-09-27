@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication } from '@nestjs/common';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
+import { bodyPreferencias } from './helpers/preferencias';
 import Decimal from 'decimal.js';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
@@ -101,7 +102,7 @@ describe('montoTolerancia (e2e) — el único monto sobre NUMERIC(18,6)', () => 
           await request(app.getHttpServer())
             .put('/api/tenants/preferencias-financieras')
             .set('Authorization', `Bearer ${token}`)
-            .send(originales)
+            .send(bodyPreferencias(originales))
         ).status;
       }
     } catch (e) {
@@ -117,7 +118,7 @@ describe('montoTolerancia (e2e) — el único monto sobre NUMERIC(18,6)', () => 
     request(app.getHttpServer())
       .put('/api/tenants/preferencias-financieras')
       .set('Authorization', `Bearer ${token}`)
-      .send({ ...originales, montoTolerancia });
+      .send({ ...bodyPreferencias(originales), montoTolerancia });
 
   const leer = async (): Promise<Preferencias> => {
     const res = await request(app.getHttpServer())
@@ -161,7 +162,13 @@ describe('montoTolerancia (e2e) — el único monto sobre NUMERIC(18,6)', () => 
   it('una tolerancia negativa sigue siendo 400', async () => {
     // No es del pipe sino de `@IsDecimalNoNegativo`, y va acá porque es la otra
     // puerta de la misma ruta: que el pipe nuevo no la haya desplazado.
+    // El mensaje es parte de la prueba: un 400 por cualquier otra causa —con
+    // `forbidNonWhitelisted`, un campo de más en el body— pasaba igual sin
+    // haber llegado a validar el signo.
     const res = await guardarTolerancia('-500');
     expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toContain(
+      'montoTolerancia no puede ser negativo',
+    );
   });
 });

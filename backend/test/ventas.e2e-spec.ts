@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication } from '@nestjs/common';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
+import { bodyPreferencias } from './helpers/preferencias';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
@@ -415,15 +416,14 @@ describe('Ventas (e2e)', () => {
      * el servidor. Este e2e reemplaza al describe `LineaVentaDto` de
      * `create-venta.dto.spec.ts`, que afirmaba sobre el signo de ese campo — y
      * que además no podía probar esto: `plainToInstance` + `validate` no corre
-     * el `ValidationPipe`, así que el strip del whitelist solo se ve por HTTP.
+     * el `ValidationPipe`, así que el rechazo del campo solo se ve por HTTP.
      *
-     * ⚠️ El pipe corre con `whitelist: true` **sin** `forbidNonWhitelisted`
-     * (`main.ts`), así que un cliente viejo NO recibe 400: se le ignora en
-     * silencio y se le cobra el precio de catálogo. Si algún día se activa
-     * `forbidNonWhitelisted`, este test se cae por el `status` y hay que
-     * actualizarlo a 400, no relajarlo.
+     * Desde el 2026-09-27 el pipe corre con `forbidNonWhitelisted`: un cliente
+     * viejo que lo siga mandando recibe 400 nombrando el campo, en vez de que se
+     * le ignore en silencio. El control es la misma venta sin el campo: cobra
+     * el precio de catálogo, así que el 400 es por el campo y no por otra cosa.
      */
-    it('ignora un precioUnitario en el body de la venta: cobra el precio de catálogo', async () => {
+    it('rechaza un precioUnitario en el body de la venta: el precio no lo pone el cliente', async () => {
       const resItem = await request(app.getHttpServer())
         .post('/api/items')
         .set('Authorization', `Bearer ${token}`)
@@ -437,17 +437,23 @@ describe('Ventas (e2e)', () => {
       expect(resItem.status).toBe(201);
       const servicioId = (resItem.body as { id: string }).id;
 
-      const res = await request(app.getHttpServer())
-        .post('/api/ventas')
-        .set('Idempotency-Key', randomUUID())
-        .set('Authorization', `Bearer ${token}`)
-        .send({
-          lineas: [
-            { itemId: servicioId, cantidad: '1', precioUnitario: '999999' },
-          ],
-          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '595.0000' }],
-        });
+      const vender = (linea: Record<string, unknown>) =>
+        request(app.getHttpServer())
+          .post('/api/ventas')
+          .set('Idempotency-Key', randomUUID())
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            lineas: [{ itemId: servicioId, cantidad: '1', ...linea }],
+            pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '595.0000' }],
+          });
 
+      const conCampo = await vender({ precioUnitario: '999999' });
+      expect(conCampo.status).toBe(400);
+      expect(JSON.stringify(conCampo.body)).toContain(
+        'property precioUnitario should not exist',
+      );
+
+      const res = await vender({});
       expect(res.status).toBe(201);
       const venta = res.body as VentaResponse & { totalFinal: string };
       expect(venta.totalFinal).toBe('595.0000');
@@ -1683,7 +1689,7 @@ describe('Ventas (e2e)', () => {
         .get('/api/tenants/preferencias-financieras')
         .set('Authorization', `Bearer ${token}`);
 
-    const putPreferenciasFinancieras = (body: PreferenciasFinancieras) =>
+    const putPreferenciasFinancieras = (body: object) =>
       request(app.getHttpServer())
         .put('/api/tenants/preferencias-financieras')
         .set('Authorization', `Bearer ${token}`)
@@ -1729,7 +1735,7 @@ describe('Ventas (e2e)', () => {
       const ventaId = await crearVentaSimple();
       try {
         const putRes = await putPreferenciasFinancieras({
-          ...originalBody,
+          ...bodyPreferencias(originalBody),
           modoRedondeo: 'FLOOR',
         });
         expect(putRes.status).toBe(200);
@@ -1744,7 +1750,9 @@ describe('Ventas (e2e)', () => {
       } finally {
         // El tenant es compartido por toda la suite: sin este restore, los
         // tests que corren después heredan FLOOR en silencio.
-        const restore = await putPreferenciasFinancieras(originalBody);
+        const restore = await putPreferenciasFinancieras(
+          bodyPreferencias(originalBody),
+        );
         expect(restore.status).toBe(200);
       }
     });
