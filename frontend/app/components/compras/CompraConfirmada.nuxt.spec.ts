@@ -36,7 +36,7 @@ function compra(o: Partial<CompraDetalle> = {}): CompraDetalle {
     lineas: [{
       id: 'l1', orden: 0, itemId: 'i1', itemNombre: 'Tomate', modoInventario: 'cantidad',
       unidadMedidaBase: 'kg', cantidad: '20', unidadCodigo: 'kg', precioUnitario: '1500',
-      series: null, lote: null,
+      series: null, lote: null, presentacion: null,
     }],
     cambios: [],
     ...o,
@@ -98,6 +98,23 @@ describe('CompraConfirmada — acciones por permiso', () => {
     expect(w.find('[data-qa="compra-anulada-motivo"]').text()).toContain('Factura equivocada')
     expect(hay(w, 'compra-corregir-')).toBe(false)
     expect(hay(w, 'compra-anular-abrir')).toBe(false)
+  })
+})
+
+describe('CompraConfirmada — presentación (pieza 2 § 6)', () => {
+  it('una línea en presentación muestra la etiqueta y la cantidad en la unidad base', async () => {
+    permisos = new Set(['Compras:Leer'])
+    const c = compra({
+      lineas: [{
+        id: 'l1', orden: 0, itemId: 'i1', itemNombre: 'Coca-Cola lata', modoInventario: 'cantidad',
+        unidadMedidaBase: 'unidad', cantidad: '10', unidadCodigo: null, precioUnitario: '9600',
+        series: null, lote: null,
+        presentacion: { id: 'pres-1', nombre: 'Caja', contenido: '12', unidadCodigo: 'unidad' },
+      }],
+    })
+    const w = await montar(c)
+    expect(w.find('[data-qa="compra-confirmada"]').text()).toContain('Caja (12)')
+    expect(w.find('[data-qa="compra-confirmada"]').text()).toContain('120 unidad')
   })
 })
 

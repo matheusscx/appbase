@@ -18,7 +18,7 @@ const open = defineModel<boolean>('open', { required: true })
 
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
-const { cantidadConUnidad } = useCompras()
+const { cantidadConUnidad, unidadDeLinea } = useCompras()
 
 const motivo = ref('')
 const enviando = ref(false)
@@ -60,7 +60,7 @@ async function enviar() {
           </p>
           <ul class="mt-1 list-disc pl-5">
             <li v-for="l in lineas" :key="l.id">
-              {{ cantidadConUnidad(l.cantidad, l.unidadCodigo) }} de {{ l.itemNombre || '—' }}
+              {{ cantidadConUnidad(l.cantidad, unidadDeLinea(l)) }} de {{ l.itemNombre || '—' }}
             </li>
           </ul>
         </div>

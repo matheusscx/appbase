@@ -38,6 +38,7 @@ function linea(o: Partial<LineaCompra> = {}): LineaCompra {
     precioUnitario: '1000.0000',
     series: null,
     lote: null,
+    presentacion: null,
     ...o,
   }
 }
@@ -132,6 +133,17 @@ describe('CorregirLineaModal', () => {
     await enviar()
 
     expect(llamadas[0]!.body).toEqual({ cantidad: '3', series: [{ serie: 'SN-3' }] })
+  })
+
+  it('una línea en presentación muestra su etiqueta en el label y en el "Actual"', async () => {
+    const wrapper = await abrir(linea({
+      unidadCodigo: null,
+      cantidad: '10',
+      presentacion: { id: 'pres-1', nombre: 'Caja', contenido: '12', unidadCodigo: 'unidad' },
+    }))
+    expect(document.body.textContent).toContain('Cantidad (Caja (12))')
+    expect(document.body.textContent).toContain('Actual: 10 Caja (12)')
+    wrapper.unmount()
   })
 
   it('en serie, bajar ofrece las unidades de esta línea que da Compras, y manda las elegidas', async () => {

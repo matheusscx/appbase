@@ -840,6 +840,60 @@ decisiones del owner, en
 admin, que es la parte que el gate no miraba. Gate completo en verde al integrar
 (`51570245`).
 
+## Compras, pieza 2: la unidad de compra por proveedor, "caja de 12" (cerrada 2026-09-27)
+
+Sale de [`pendientes.md` § 3, entrada *"Compras: carga manual, y el DTE del SII como
+atajo encima"*](pendientes.md), que **sigue abierta**: esto cierra la segunda pieza, no el
+frente. Quedan la pieza 3 (deuda y pagos), la pieza 4 (gastos sin stock) y la lectura del
+XML del DTE — para la que esta pieza es la dependencia dura, porque el XML trae la cantidad
+como la tipeó el proveedor ("3 CJ") y sin esto no había dónde guardar esa equivalencia.
+
+**Qué se construyó:** una tabla por (proveedor, producto) — `presentaciones_compra` — para que
+"a este proveedor la Coca-Cola le viene en caja de 12" se cargue una vez, desde la misma línea
+de la compra, y desde ahí se tipee en cajas. Detalle funcional y reglas:
+[`features/compras.md`](../features/compras.md) § *"La unidad de compra por proveedor"*; el
+diseño y las decisiones del owner, en
+[`superpowers/specs/2026-09-27-compras-unidad-de-compra-design.md`](../superpowers/specs/2026-09-27-compras-unidad-de-compra-design.md).
+
+**Las tres decisiones que más forma le dieron, todas del owner (2026-09-27):**
+
+1. **Se crea desde la misma línea de la compra**, con "+ Nueva presentación…" en el selector
+   de unidad — no una pantalla aparte, que con el camión esperando obligaría a salir de la
+   compra.
+2. **`unidad_codigo` queda NULL, no rellenado con la base**, cuando la línea va en
+   presentación (`CHECK chk_compra_lineas_unidad_o_presentacion`). Es a propósito: un camino
+   que se olvidara de la presentación revienta en la conversión (con `null`) en vez de leer
+   "10 cajas" como 10 unidades sin aviso.
+3. **La línea confirmada congela su presentación** (`presentacion_nombre`, `contenido_base`):
+   una compra confirmada con "Caja (12)" sigue diciendo 12 aunque la caja pase a 6 después, y
+   corregir la cantidad usa siempre el congelado, nunca el vivo.
+
+**Las tres tareas, cada una con su commit:**
+
+1. **Backend: las presentaciones** — entidad, índice único parcial (creado por el seeder, no
+   por la entity: `lower(nombre)` no se expresa en `@Index`), los cuatro endpoints
+   `/compras/presentaciones` y el seed (`8ddeebea`).
+2. **Backend: la línea con presentación** — DTO, validación del borrador (exactamente una de
+   `unidadCodigo`/`presentacionId`), `cantidadEnBase` como único punto que convierte, confirmar
+   con lo congelado, corregir la cantidad y el detalle (`0357a777`).
+3. **Frontend y cierre** — el selector combinado, `PresentacionModal.vue`, el lápiz, la cuenta
+   a la vista (`useCompras.ts`: `etiquetaPresentacion`, `unidadDeLinea`, `cuentaPresentacion`,
+   `cantidadLineaConfirmada`), la confirmada y corregir en cajas, y
+   `frontend/e2e/compras/compras-presentacion.spec.ts` como `encargado.compras`. Commit
+   pendiente al integrar esta tarea.
+
+⚠️ **La revisión independiente de dominio de la tarea 3 bloqueó, en la primera ronda:** la
+cuenta a la vista (`cuentaPresentacion`) formateaba la plata a mano —`$`, punto de miles y coma
+decimal fijos, `toFixed(2)`— en vez de con la moneda del tenant, así que un tenant en otra
+moneda (símbolo, decimales y separadores distintos, ya sembrados en el seed) habría visto el
+costo por unidad en un formato que no era el suyo. Se corrigió antes del commit: `useCompras.ts`
+recibe la config de la moneda oficial como parámetro (`MonedaDisplayConfig`, no el store — sigue
+sin depender de Pinia) y formatea con `formatCostoDisplay` (`utils/currency-format.ts`), el
+mismo helper que ya usa el costo por unidad elegida del ajuste de stock. El resto del gate
+(unitarios, `test:e2e` de la API, Playwright de los dos archivos de `e2e/compras/`, build,
+typecheck ratchet, design tokens) corrió en verde en las dos rondas. Detalle de lo verificado a
+mano, el hallazgo y la corrección: `task-3-report.md` del frente.
+
 ## Idempotencia en la creación de venta (cerrada 2026-09-19)
 
 Sale de [`pendientes.md` § *Endurecimiento para producción*](pendientes.md). La entrada, verbatim:

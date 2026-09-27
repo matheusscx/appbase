@@ -3,7 +3,7 @@
 > **Para agentes:** sub-skill obligatoria: `superpowers:subagent-driven-development` (recomendada) o
 > `superpowers:executing-plans`, tarea por tarea. Los pasos usan checkboxes (`- [ ]`).
 
-- **Status:** Draft
+- **Status:** Done
 - **Date:** 2026-09-27
 - **Owner:** César (owner) · redacta la sesión del frente, en el worktree `awesome-faraday-e413a9`
   (rama `claude/silly-wu-dd82b1`)

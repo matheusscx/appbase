@@ -1,4 +1,7 @@
+import Decimal from 'decimal.js'
 import { describe, expect, it } from 'vitest'
+import { formatCostoDisplay } from '~/utils/currency-format'
+import type { MonedaDisplayConfig } from '~/types/moneda'
 import { useCompras } from './useCompras'
 
 const {
@@ -14,6 +17,9 @@ const {
   cantidadConUnidad,
   cantidadParaEditar,
   etiquetaCambio,
+  etiquetaPresentacion,
+  unidadDeLinea,
+  cuentaPresentacion,
 } = useCompras()
 
 describe('useCompras', () => {
@@ -112,5 +118,53 @@ describe('useCompras', () => {
 
   it('las opciones del filtro salen del mismo mapa que las etiquetas', () => {
     expect(estadoOptions.map(o => o.value)).toEqual(['borrador', 'confirmada', 'anulada'])
+  })
+})
+
+describe('presentaciones (spec pieza 2 § 6)', () => {
+  it('etiqueta: en unidad sin la unidad, en otra con la unidad, sin ceros de más', () => {
+    expect(etiquetaPresentacion({ nombre: 'Caja', contenido: '12.0000', unidadCodigo: 'unidad' })).toBe('Caja (12)')
+    expect(etiquetaPresentacion({ nombre: 'Saco', contenido: '25.0000', unidadCodigo: 'kg' })).toBe('Saco (25 kg)')
+    expect(etiquetaPresentacion({ nombre: 'Bolsa', contenido: '1.5000', unidadCodigo: 'kg' })).toBe('Bolsa (1,5 kg)')
+  })
+
+  it('unidad de la línea: presentación, unidad o vacío', () => {
+    expect(unidadDeLinea({ unidadCodigo: null, presentacion: { nombre: 'Caja', contenido: '12', unidadCodigo: 'unidad' } })).toBe('Caja (12)')
+    expect(unidadDeLinea({ unidadCodigo: 'kg', presentacion: null })).toBe('kg')
+    expect(unidadDeLinea({ unidadCodigo: null, presentacion: null })).toBe('')
+  })
+
+  // Dos monedas con separadores DISTINTOS a propósito: si `cuentaPresentacion` formateara la
+  // plata a mano (un '$'/',' fijos, como antes de esta corrección) las dos darían el mismo
+  // texto sin importar la moneda del tenant, y ninguna de las dos aserciones lo notaría.
+  const CLP: MonedaDisplayConfig = {
+    monedaId: 'clp-1', codigoIso: 'CLP', nombre: 'Peso Chileno', locale: 'es-CL',
+    prefix: '$', thousands: '.', decimal: ',', decimals: 0, habilitada: true, esOficial: true, valorDelDia: null,
+  }
+  const USD: MonedaDisplayConfig = {
+    monedaId: 'usd-1', codigoIso: 'USD', nombre: 'Dólar', locale: 'en-US',
+    prefix: 'US$', thousands: ',', decimal: '.', decimals: 2, habilitada: true, esOficial: true, valorDelDia: null,
+  }
+
+  it('la cuenta a la vista: 10 × Caja (12) = 120 unidad, y el costo por unidad en la moneda del tenant', () => {
+    expect(cuentaPresentacion('10', '12', 'unidad', '9600', CLP))
+      .toBe(`= 120 unidad · ${formatCostoDisplay('800', CLP)} c/u`)
+    // 10.000 / 12 no da exacto: el costo por unidad lleva más decimales que los de la moneda
+    // (`formatCostoDisplay`, hasta 4 — los decimales son el piso, no el techo).
+    expect(cuentaPresentacion('3', '12', 'unidad', '10000', CLP))
+      .toBe(`= 36 unidad · ${formatCostoDisplay(new Decimal('10000').div('12'), CLP)} c/u`)
+    // Misma cuenta, moneda con otro símbolo y otros separadores: el resultado cambia con ella.
+    expect(cuentaPresentacion('3', '12', 'unidad', '10000', USD))
+      .toBe(`= 36 unidad · ${formatCostoDisplay(new Decimal('10000').div('12'), USD)} c/u`)
+    expect(cuentaPresentacion('10', '12', 'unidad', '9600', CLP)).not.toBe(cuentaPresentacion('10', '12', 'unidad', '9600', USD))
+  })
+
+  it('sin precio, o sin la moneda oficial todavía cargada, la cuenta no lleva costo', () => {
+    expect(cuentaPresentacion('10', '12', 'unidad', null, CLP)).toBe('= 120 unidad')
+    expect(cuentaPresentacion('10', '12', 'unidad', '9600', null)).toBe('= 120 unidad')
+  })
+
+  it('cantidad no numérica: sin cuenta', () => {
+    expect(cuentaPresentacion('', '12', 'unidad', null, CLP)).toBeNull()
   })
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CompraDetalle, LineaCompra as LineaDetalle } from '~/composables/useCompras'
+import type { CompraDetalle, LineaCompra as LineaDetalle, PresentacionCompra } from '~/composables/useCompras'
 import { hoyLocal } from '~/composables/useVigenciaRegla'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -22,6 +22,9 @@ interface LineaForm {
   unidadMedida: string | null
   cantidad: string
   unidadCodigo: string
+  /** Una presentación del proveedor de la compra (pieza 2 § 4.1). Vacío =
+   *  ninguna. Exactamente uno de `unidadCodigo`/`presentacionId` viaja. */
+  presentacionId: string
   /** String vacío = falta costo: se completa cuando llega la factura. */
   precioUnitario: string
   /** Modo serie: una serie por renglón. */
@@ -41,7 +44,11 @@ const router = useRouter()
 const { formatMonto } = useFormatters()
 const { ubicaciones, cargar: cargarUbicaciones } = useUbicaciones()
 const unidadesMedidaStore = useUnidadesMedidaStore()
-const { totalLinea, subtotal, totalConDescuento, faltaAlgunPrecio, insigniaEstado, cantidadParaEditar } = useCompras()
+const monedasStore = useMonedasStore()
+const {
+  totalLinea, subtotal, totalConDescuento, faltaAlgunPrecio, insigniaEstado, cantidadParaEditar,
+  etiquetaPresentacion, cuentaPresentacion,
+} = useCompras()
 const { puedeCrear } = usePermisosCrud('Compras')
 
 const esNueva = computed(() => route.params.id === 'nueva')
@@ -91,6 +98,7 @@ function nuevaLinea(): LineaForm {
     unidadMedida: null,
     cantidad: '',
     unidadCodigo: '',
+    presentacionId: '',
     precioUnitario: '',
     seriesTexto: '',
     codigoLote: '',
@@ -98,6 +106,131 @@ function nuevaLinea(): LineaForm {
   }
 }
 const lineas = ref<LineaForm[]>([nuevaLinea()])
+
+// ── Presentaciones (pieza 2 § 3.1 y § 6) ────────────────────────────────────
+
+/** Las presentaciones vivas del proveedor elegido, de todos sus productos:
+ *  una llamada por proveedor, nunca por línea. */
+const presentaciones = ref<PresentacionCompra[]>([])
+
+watch(() => form.value.proveedorId, async (proveedorId) => {
+  presentaciones.value = proveedorId
+    ? await useApiFetch<PresentacionCompra[]>(`${apiUrl}/compras/presentaciones?proveedorId=${proveedorId}`)
+    : []
+}, { immediate: true })
+
+/**
+ * Cambiar de proveedor: gesto explícito, no un `watch` de `proveedorId`
+ * (mismo criterio que limpiar un costo al cambiar de unidad —
+ * `docs/patterns/frontend.md` § 8—). Si fuera un `watch`, cargar un borrador
+ * existente (que asigna `form.value.proveedorId` con el guardado) dispararía
+ * el mismo revert sobre líneas que legítimamente ya venían en presentación de
+ * ESE proveedor.
+ */
+function onSeleccionarProveedor(id: string) {
+  const proveedorAnterior = form.value.proveedorId
+  form.value.proveedorId = id
+  if (!proveedorAnterior || proveedorAnterior === id) return
+  const conPresentacion = lineas.value.filter(l => l.presentacionId)
+  if (!conPresentacion.length) return
+  for (const l of conPresentacion) {
+    l.presentacionId = ''
+    l.unidadCodigo = l.unidadMedida ?? ''
+  }
+  toast.add({
+    title: `${conPresentacion.length} ${conPresentacion.length === 1 ? 'línea volvió' : 'líneas volvieron'} a la unidad base`,
+    color: 'warning',
+  })
+}
+
+/** `u:<codigo>` / `p:<id>` / `''`: la traducción es propia de esta pantalla
+ *  (no del composable), que es la única que arma el selector combinado. */
+function valorUnidad(linea: LineaForm): string {
+  if (linea.presentacionId) return `p:${linea.presentacionId}`
+  if (linea.unidadCodigo) return `u:${linea.unidadCodigo}`
+  return ''
+}
+
+function onCambiarUnidad(linea: LineaForm, valor: string) {
+  if (valor === 'nueva') {
+    abrirNuevaPresentacion(linea)
+    return
+  }
+  if (valor.startsWith('p:')) {
+    linea.presentacionId = valor.slice(2)
+    linea.unidadCodigo = ''
+    return
+  }
+  if (valor.startsWith('u:')) {
+    linea.presentacionId = ''
+    linea.unidadCodigo = valor.slice(2)
+  }
+}
+
+/** Las presentaciones de ESTE producto, ya elegidas por el proveedor vigente
+ *  (`presentaciones` solo trae las del proveedor de la compra). */
+function presentacionesDeLinea(linea: LineaForm): PresentacionCompra[] {
+  return presentaciones.value.filter(p => p.itemId === linea.itemId)
+}
+
+function presentacionDe(linea: LineaForm): PresentacionCompra | undefined {
+  return presentaciones.value.find(p => p.id === linea.presentacionId)
+}
+
+/** La cuenta a la vista bajo la línea (spec § 6), o null sin presentación o
+ *  sin una cantidad tipeable. */
+function cuentaDeLinea(linea: LineaForm): string | null {
+  const p = presentacionDe(linea)
+  if (!p) return null
+  return cuentaPresentacion(
+    linea.cantidad, p.contenido, p.unidadCodigo, linea.precioUnitario || null,
+    monedasStore.monedaOficial,
+  )
+}
+
+// ── El modal de presentación ─────────────────────────────────────────────
+
+const presentacionModalOpen = ref(false)
+const lineaEnPresentacion = ref<LineaForm | null>(null)
+const presentacionEnEdicion = ref<PresentacionCompra | null>(null)
+
+function itemDeLinea(linea: LineaForm) {
+  const producto = productos.value.find(p => p.id === linea.itemId)
+  return { id: linea.itemId, nombre: producto?.nombre ?? '', unidadMedida: linea.unidadMedida }
+}
+
+function abrirNuevaPresentacion(linea: LineaForm) {
+  lineaEnPresentacion.value = linea
+  presentacionEnEdicion.value = null
+  presentacionModalOpen.value = true
+}
+
+function abrirEditarPresentacion(linea: LineaForm) {
+  lineaEnPresentacion.value = linea
+  presentacionEnEdicion.value = presentacionDe(linea) ?? null
+  presentacionModalOpen.value = true
+}
+
+function onPresentacionGuardada(p: PresentacionCompra) {
+  const i = presentaciones.value.findIndex(x => x.id === p.id)
+  if (i >= 0) presentaciones.value[i] = p
+  else presentaciones.value.push(p)
+  if (lineaEnPresentacion.value) {
+    lineaEnPresentacion.value.presentacionId = p.id
+    lineaEnPresentacion.value.unidadCodigo = ''
+  }
+}
+
+/** Retirada: toda línea que la tenía elegida (no solo la que abrió el modal)
+ *  vuelve a la unidad base. */
+function onPresentacionRetirada(id: string) {
+  presentaciones.value = presentaciones.value.filter(p => p.id !== id)
+  for (const l of lineas.value) {
+    if (l.presentacionId !== id) continue
+    l.presentacionId = ''
+    l.unidadCodigo = l.unidadMedida ?? ''
+  }
+}
 
 const tipoSeleccionado = computed(() =>
   tipos.value.find(t => t.id === form.value.tipoDocumentoCompraId) ?? null,
@@ -129,7 +262,8 @@ function lineaDesdeDetalle(l: LineaDetalle): LineaForm {
     modoInventario: l.modoInventario,
     unidadMedida: l.unidadMedidaBase,
     cantidad: cantidadParaEditar(l.cantidad),
-    unidadCodigo: l.unidadCodigo,
+    unidadCodigo: l.unidadCodigo ?? '',
+    presentacionId: l.presentacion?.id ?? '',
     precioUnitario: l.precioUnitario ?? '',
     seriesTexto: (l.series ?? []).map(s => s.serie).join('\n'),
     codigoLote: l.lote?.codigoLote ?? '',
@@ -178,12 +312,33 @@ function unidadesCompatibles(linea: LineaForm): Opt[] {
     .map(u => ({ label: u.codigo, value: u.codigo }))
 }
 
+/**
+ * El selector combinado (spec § 6): las unidades del catálogo, las
+ * presentaciones de este proveedor para este producto, y "+ Nueva
+ * presentación…" al final — deshabilitada sin proveedor o producto, ausente
+ * en serie (ahí tampoco hay unidades del catálogo más que la base).
+ */
+function opcionesUnidad(linea: LineaForm): (Opt & { disabled?: boolean })[] {
+  const items: (Opt & { disabled?: boolean })[] = [
+    ...unidadesCompatibles(linea).map(u => ({ label: u.label, value: `u:${u.value}` })),
+    ...presentacionesDeLinea(linea).map(p => ({ label: etiquetaPresentacion(p), value: `p:${p.id}` })),
+  ]
+  if (linea.modoInventario === 'serie') return items
+  items.push({
+    label: '+ Nueva presentación…',
+    value: 'nueva',
+    disabled: !form.value.proveedorId || !linea.itemId,
+  })
+  return items
+}
+
 function onSeleccionarItem(linea: LineaForm, itemId: string) {
   const producto = productos.value.find(p => p.id === itemId)
   linea.itemId = itemId
   linea.modoInventario = producto?.modoInventario ?? 'cantidad'
   linea.unidadMedida = producto?.unidadMedida ?? null
   linea.unidadCodigo = producto?.unidadMedida ?? ''
+  linea.presentacionId = ''
   linea.seriesTexto = ''
   linea.codigoLote = ''
   linea.fechaVencimiento = ''
@@ -239,7 +394,10 @@ const puedeGuardar = computed(() =>
   && !!form.value.tipoDocumentoCompraId
   && !!form.value.ubicacionId
   && !!form.value.fechaDocumento
-  && (!pideFolio.value || !!form.value.folio.trim()),
+  && (!pideFolio.value || !!form.value.folio.trim())
+  // Cada línea cargada necesita unidad O presentación (spec pieza 2 § 6): un
+  // borrador cuya presentación fue retirada no se puede guardar tal cual.
+  && lineasCargadas.value.every(l => !!l.presentacionId || !!l.unidadCodigo),
 )
 
 function armarBody() {
@@ -255,7 +413,9 @@ function armarBody() {
       const linea: Record<string, unknown> = {
         itemId: l.itemId,
         cantidad: l.cantidad,
-        unidadCodigo: l.unidadCodigo,
+        // Exactamente una de las dos claves (spec pieza 2 § 4.1): nunca las
+        // dos, nunca en `null`.
+        ...(l.presentacionId ? { presentacionId: l.presentacionId } : { unidadCodigo: l.unidadCodigo }),
         // Vacío viaja como null explícito: "falta costo".
         precioUnitario: l.precioUnitario || null,
       }
@@ -410,12 +570,13 @@ const titulo = computed(() => {
           <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
             <UFormField label="Proveedor" required>
               <USelectMenu
-                v-model="form.proveedorId"
+                :model-value="form.proveedorId"
                 :items="proveedorOpts"
                 value-key="value"
                 searchable
                 placeholder="A quién se le compró"
                 class="w-full"
+                @update:model-value="onSeleccionarProveedor"
               />
             </UFormField>
             <UFormField label="Documento" required>
@@ -495,12 +656,23 @@ const titulo = computed(() => {
                   />
                 </UFormField>
                 <UFormField label="Unidad" class="md:col-span-2">
-                  <USelect
-                    v-model="linea.unidadCodigo"
-                    :items="unidadesCompatibles(linea)"
-                    :disabled="!linea.itemId"
-                    class="w-full"
-                  />
+                  <div class="flex items-center gap-1">
+                    <USelect
+                      :model-value="valorUnidad(linea)"
+                      :items="opcionesUnidad(linea)"
+                      :disabled="!linea.itemId"
+                      class="w-full"
+                      @update:model-value="(v: string) => onCambiarUnidad(linea, v)"
+                    />
+                    <UButton
+                      v-if="linea.presentacionId"
+                      icon="i-lucide-pencil"
+                      variant="ghost"
+                      size="sm"
+                      :data-qa="`compra-presentacion-editar-${linea.key}`"
+                      @click="abrirEditarPresentacion(linea)"
+                    />
+                  </div>
                 </UFormField>
                 <UFormField label="Precio unitario" class="md:col-span-2">
                   <MoneyInput
@@ -526,6 +698,14 @@ const titulo = computed(() => {
                   />
                 </div>
               </div>
+
+              <p
+                v-if="cuentaDeLinea(linea)"
+                class="text-xs text-muted"
+                data-qa="compra-cuenta-presentacion"
+              >
+                {{ cuentaDeLinea(linea) }}
+              </p>
 
               <UFormField
                 v-if="linea.modoInventario === 'serie'"
@@ -668,6 +848,16 @@ const titulo = computed(() => {
             </div>
           </template>
         </UModal>
+
+        <ComprasPresentacionModal
+          v-if="lineaEnPresentacion"
+          v-model:open="presentacionModalOpen"
+          :proveedor-id="form.proveedorId"
+          :item="itemDeLinea(lineaEnPresentacion)"
+          :presentacion="presentacionEnEdicion"
+          @guardada="onPresentacionGuardada"
+          @retirada="onPresentacionRetirada"
+        />
       </div>
     </template>
   </UDashboardPanel>

@@ -629,13 +629,15 @@ Eran tres: la tercera —el reporte de varianza— se construyó y está en [`re
   integración**, así que la lectura del DTE queda como **segunda fase**. La varianza —que espera
   a compras— deja de esperar además a que funcione una integración con el SII.
 
-  📌 **La pieza 1 —recibir mercadería— salió el 2026-09-19** y su detalle está en
-  [`resueltos.md`](resueltos.md). Lo que sigue abierto de este frente:
+  📌 **La pieza 1 —recibir mercadería— salió el 2026-09-19, y la pieza 2 —la unidad de compra
+  por proveedor— el 2026-09-27**; el detalle de las dos está en [`resueltos.md`](resueltos.md).
+  Lo que sigue abierto de este frente:
 
   **Las piezas que faltan, cada una con su spec y en este orden:**
-  - **Pieza 2:** la unidad de compra por proveedor ("caja de 12").
   - **Pieza 3:** la deuda con el proveedor y sus pagos, con la salida de caja automática.
   - **Pieza 4:** los gastos sin stock, con la categoría que define el tenant.
+  - **La lectura del XML del DTE** (§ fuera de la pieza 2): el código del proveedor por
+    presentación, y el mapeo proveedor→ítem — ver el bloque de arriba.
 
   **Bordes de la pieza 1 que quedaron abiertos** (los tres verificados contra el código el
   2026-09-19):

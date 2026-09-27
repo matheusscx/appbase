@@ -12,7 +12,7 @@ const props = defineProps<{ compra: CompraDetalle }>()
 const emit = defineEmits<{ actualizada: [CompraDetalle] }>()
 
 const { formatMonto, formatFecha } = useFormatters()
-const { faltaAlgunPrecio, etiquetaCambio, cantidadConUnidad } = useCompras()
+const { faltaAlgunPrecio, etiquetaCambio, cantidadConUnidad, unidadDeLinea, cantidadLineaConfirmada } = useCompras()
 const { puedeActualizar } = usePermisosCrud('Compras')
 const permissionsStore = usePermissionsStore()
 
@@ -56,7 +56,8 @@ const lineaPorId = computed(() =>
 function valorCambio(c: CambioCompra, valor: string | null): string {
   if (valor == null) return '—'
   if (c.campo !== 'cantidad') return formatMonto(valor)
-  return cantidadConUnidad(valor, lineaPorId.value.get(c.compraLineaId)?.unidadCodigo ?? '').trim()
+  const linea = lineaPorId.value.get(c.compraLineaId)
+  return cantidadConUnidad(valor, linea ? unidadDeLinea(linea) : '').trim()
 }
 
 const columnsHistorial: TableColumn<CambioCompra>[] = [
@@ -91,7 +92,7 @@ const columnsHistorial: TableColumn<CambioCompra>[] = [
         {{ row.original.itemNombre || '—' }}
       </template>
       <template #cantidad-cell="{ row }">
-        <span class="tabular-nums">{{ cantidadConUnidad(row.original.cantidad, row.original.unidadCodigo) }}</span>
+        <span class="tabular-nums">{{ cantidadLineaConfirmada(row.original) }}</span>
       </template>
       <template #precioUnitario-cell="{ row }">
         <span v-if="row.original.precioUnitario != null" class="tabular-nums">

@@ -16,10 +16,22 @@ import CompraCarga from './[id].vue'
 const FACTURA = { id: 'tipo-33', nombre: 'Factura', codigo: '33', requiereFolio: true }
 const SIN_DOC = { id: 'tipo-sin', nombre: 'Sin documento', codigo: null, requiereFolio: false }
 const PROVEEDOR = { id: 'prov-1', nombre: 'Distribuidora X', rut: null }
+const PROVEEDOR2 = { id: 'prov-2', nombre: 'Distribuidora Y', rut: null }
 const BODEGA = { id: 'bodega-1', nombre: 'Bodega', tipo: 'bodega', activo: true }
 const HARINA = { id: 'item-harina', nombre: 'Harina', modoInventario: 'cantidad', unidadMedida: 'kg' }
+const LATAS = { id: 'item-latas', nombre: 'Coca-Cola lata', modoInventario: 'cantidad', unidadMedida: 'unidad' }
+const BOTELLA_SERIE = { id: 'item-botella', nombre: 'Botella premium', modoInventario: 'serie', unidadMedida: 'unidad' }
+const CAJA = { id: 'pres-caja', itemId: LATAS.id, nombre: 'Caja', contenido: '12.0000', unidadCodigo: 'unidad' }
+const UNIDADES_CATALOGO = [
+  { unidadMedidaId: 'u1', codigo: 'unidad', nombre: 'Unidad', magnitud: 'conteo', factorBase: '1' },
+  { unidadMedidaId: 'u2', codigo: 'kg', nombre: 'Kilogramo', magnitud: 'peso', factorBase: '1000' },
+  { unidadMedidaId: 'u3', codigo: 'g', nombre: 'Gramo', magnitud: 'peso', factorBase: '1' },
+]
 
 let enviados: { method?: string, body?: Record<string, unknown> }[] = []
+let avisos: { title: string, color?: string }[] = []
+/** `'nueva'` (default) o el id de un borrador existente, para el caso del § 8. */
+let routeId = 'nueva'
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -29,7 +41,11 @@ mockNuxtImport('usePermissionsStore', () => {
 })
 
 mockNuxtImport('useRoute', () => {
-  return () => ({ params: { id: 'nueva' }, query: {} })
+  return () => ({ params: { id: routeId }, query: {} })
+})
+
+mockNuxtImport('useToast', () => {
+  return () => ({ add: (t: { title: string, color?: string }) => avisos.push(t) })
 })
 
 mockNuxtImport('useApiFetch', () => {
@@ -55,13 +71,33 @@ mockNuxtImport('useApiFetch', () => {
         descuentoTotal: null, total: null, lineas: [],
       })
     }
+    if (url.includes('/compras/presentaciones')) {
+      return Promise.resolve(url.includes(`proveedorId=${PROVEEDOR.id}`) ? [CAJA] : [])
+    }
     if (url.includes('/compras/tipos-documento')) return Promise.resolve([FACTURA, SIN_DOC])
-    if (url.includes('/compras/proveedores')) return Promise.resolve([PROVEEDOR])
+    if (url.includes('/compras/proveedores')) return Promise.resolve([PROVEEDOR, PROVEEDOR2])
     if (url.includes('/ubicaciones')) return Promise.resolve([BODEGA])
     // La lista de Compras, no `/items`: el encargado no tiene permiso de Ítems.
-    if (url.includes('/compras/productos')) return Promise.resolve([HARINA])
+    if (url.includes('/compras/productos')) return Promise.resolve([HARINA, LATAS, BOTELLA_SERIE])
     if (url.includes('/items')) throw new Error('la carga de compras no debe pedir /items')
-    if (url.includes('/catalog/unidades-medida')) return Promise.resolve([])
+    if (url.includes('/catalog/unidades-medida')) return Promise.resolve(UNIDADES_CATALOGO)
+    // Un borrador existente (§ 8, caso "presentación retirada"): la línea llega
+    // sin unidad ni presentación.
+    if (url.includes(`/compras/${routeId}`) && routeId !== 'nueva') {
+      return Promise.resolve({
+        id: routeId, estado: 'borrador', faltaCosto: false, fechaDocumento: '2026-09-15',
+        proveedorId: PROVEEDOR.id, proveedorNombre: PROVEEDOR.nombre,
+        tipoDocumentoCompraId: FACTURA.id, tipoDocumentoNombre: 'Factura', folio: '4521',
+        ubicacionId: BODEGA.id, ubicacionNombre: BODEGA.nombre, observacion: null,
+        descuentoTotal: null, total: null,
+        lineas: [{
+          id: 'l1', orden: 0, itemId: LATAS.id, itemNombre: LATAS.nombre, modoInventario: 'cantidad',
+          unidadMedidaBase: 'unidad', cantidad: '10', unidadCodigo: null, precioUnitario: '9600',
+          series: null, lote: null, presentacion: null,
+        }],
+        cambios: [],
+      })
+    }
     return Promise.resolve([])
   }
 })
@@ -110,6 +146,8 @@ function descuentoInput(wrapper: Wrapper) {
 describe('compras/[id] — carga del borrador', () => {
   beforeEach(() => {
     enviados = []
+    avisos = []
+    routeId = 'nueva'
   })
 
   it('muestra el total de la línea al lado, para comparar con el papel', async () => {
@@ -234,6 +272,102 @@ describe('compras/[id] — carga del borrador', () => {
 
     // Primero se guarda lo que está en pantalla, después se confirma esa compra.
     expect(enviados.map(e => e.method)).toEqual(['POST', 'POST /compras/compra-1/confirmar'])
+    wrapper.unmount()
+  })
+})
+
+/** El `USelect` de unidad de la línea `index` (0-based: solo hay uno por línea). */
+function unidadSelect(wrapper: Wrapper, index = 0) {
+  const selects = wrapper.findAllComponents({ name: 'USelect' })
+  expect(selects.length, 'USelect de unidad').toBeGreaterThan(index)
+  return selects[index]!
+}
+
+async function elegirProveedorYProducto(wrapper: Wrapper, proveedorId: string, itemId: string) {
+  await emitir(selectConOpcion(wrapper, proveedorId), proveedorId)
+  // `presentaciones` se piden por `watch(proveedorId)`: darle una vuelta al loop.
+  await new Promise(r => setTimeout(r, 20))
+  await emitir(selectConOpcion(wrapper, itemId), itemId)
+}
+
+describe('compras/[id] — la unidad de compra por proveedor (pieza 2 § 6)', () => {
+  beforeEach(() => {
+    enviados = []
+    avisos = []
+    routeId = 'nueva'
+  })
+
+  it('con proveedor y producto elegidos, el selector de unidad ofrece unidad y Caja (12)', async () => {
+    const wrapper = await montar()
+    await elegirProveedorYProducto(wrapper, PROVEEDOR.id, LATAS.id)
+
+    const items = (unidadSelect(wrapper).props('items') ?? []) as { label: string, value: string }[]
+    expect(items.map(i => i.value)).toContain('u:unidad')
+    expect(items).toContainEqual({ label: 'Caja (12)', value: 'p:pres-caja' })
+    wrapper.unmount()
+  })
+
+  it('elegida la caja, con cantidad 10 y precio 9600, la línea muestra la cuenta en unidad base', async () => {
+    const wrapper = await montar()
+    await elegirProveedorYProducto(wrapper, PROVEEDOR.id, LATAS.id)
+    await emitir(unidadSelect(wrapper), 'p:pres-caja')
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('10')
+    await emitir(precioInput(wrapper), '9600')
+
+    expect(wrapper.find('[data-qa="compra-cuenta-presentacion"]').text())
+      .toBe('= 120 unidad · $800 c/u')
+    wrapper.unmount()
+  })
+
+  it('guardar manda la línea con presentacionId y sin la clave unidadCodigo', async () => {
+    const wrapper = await montar()
+    await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
+    await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
+    await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
+    await elegirProveedorYProducto(wrapper, PROVEEDOR.id, LATAS.id)
+    await emitir(unidadSelect(wrapper), 'p:pres-caja')
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('10')
+
+    await wrapper.find('form').trigger('submit')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(enviados).toHaveLength(1)
+    const linea = enviados[0]!.body!.lineas as Record<string, unknown>[]
+    expect(linea).toEqual([
+      { itemId: LATAS.id, cantidad: '10', presentacionId: 'pres-caja', precioUnitario: null },
+    ])
+    wrapper.unmount()
+  })
+
+  it('cambiar de proveedor deja la línea en unidad y avisa cuántas volvieron', async () => {
+    const wrapper = await montar()
+    await elegirProveedorYProducto(wrapper, PROVEEDOR.id, LATAS.id)
+    await emitir(unidadSelect(wrapper), 'p:pres-caja')
+    expect(unidadSelect(wrapper).props('modelValue')).toBe('p:pres-caja')
+
+    await emitir(selectConOpcion(wrapper, PROVEEDOR2.id), PROVEEDOR2.id)
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(unidadSelect(wrapper).props('modelValue')).toBe('u:unidad')
+    expect(avisos.map(a => a.title)).toContain('1 línea volvió a la unidad base')
+    wrapper.unmount()
+  })
+
+  it('un producto por serie no ofrece "+ Nueva presentación…"', async () => {
+    const wrapper = await montar()
+    await elegirProveedorYProducto(wrapper, PROVEEDOR.id, BOTELLA_SERIE.id)
+
+    const items = (unidadSelect(wrapper).props('items') ?? []) as { value: string }[]
+    expect(items.map(i => i.value)).not.toContain('nueva')
+    wrapper.unmount()
+  })
+
+  it('un borrador con una presentación retirada muestra la unidad vacía y Guardar deshabilitado', async () => {
+    routeId = 'compra-existente-1'
+    const wrapper = await montar()
+
+    expect(unidadSelect(wrapper).props('modelValue')).toBe('')
+    expect(wrapper.find('[data-qa="compra-guardar"]').attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
 })

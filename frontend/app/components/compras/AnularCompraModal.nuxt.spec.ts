@@ -19,12 +19,18 @@ const LINEAS: LineaCompra[] = [
   {
     id: 'l1', orden: 0, itemId: 'i1', itemNombre: 'Tomate', modoInventario: 'cantidad',
     unidadMedidaBase: 'kg', cantidad: '20.0000', unidadCodigo: 'kg', precioUnitario: '1500',
-    series: null, lote: null,
+    series: null, lote: null, presentacion: null,
   },
   {
     id: 'l2', orden: 1, itemId: 'i2', itemNombre: 'Harina', modoInventario: 'cantidad',
     unidadMedidaBase: 'kg', cantidad: '5', unidadCodigo: 'kg', precioUnitario: '900',
+    series: null, lote: null, presentacion: null,
+  },
+  {
+    id: 'l3', orden: 2, itemId: 'i3', itemNombre: 'Coca-Cola lata', modoInventario: 'cantidad',
+    unidadMedidaBase: 'unidad', cantidad: '10', unidadCodigo: null, precioUnitario: '9600',
     series: null, lote: null,
+    presentacion: { id: 'pres-1', nombre: 'Caja', contenido: '12', unidadCodigo: 'unidad' },
   },
 ]
 
@@ -58,6 +64,8 @@ describe('AnularCompraModal', () => {
     expect(resumen).toContain('Bodega')
     expect(resumen).toContain('20 kg de Tomate')
     expect(resumen).toContain('5 kg de Harina')
+    // Una línea en presentación (pieza 2 § 6): la etiqueta, no la unidad base.
+    expect(resumen).toContain('10 Caja (12) de Coca-Cola lata')
     expect(llamadas).toHaveLength(0)
   })
 

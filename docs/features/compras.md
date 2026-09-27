@@ -1,7 +1,7 @@
 # Feature: Compras — recibir mercadería (pieza 1)
 
-**Status**: Complete (pieza 1 de 4)
-**Last Updated**: 2026-09-19
+**Status**: Complete (piezas 1 y 2 de 4)
+**Last Updated**: 2026-09-27
 
 Spec: [`2026-09-18-compras-recepcion-design.md`](../superpowers/specs/2026-09-18-compras-recepcion-design.md) ·
 plan: [`2026-09-18-compras-recepcion.md`](../superpowers/plans/2026-09-18-compras-recepcion.md) ·
@@ -169,6 +169,36 @@ sale de lo congelado, con `contenido` y `unidadCodigo` en la unidad base del pro
 Spec: [`2026-09-27-compras-unidad-de-compra-design.md`](../superpowers/specs/2026-09-27-compras-unidad-de-compra-design.md)
 § 3.2, § 4 y § 5.
 
+### La pantalla (`pages/compras/[id].vue`)
+
+- **El selector de unidad**, en cada línea, combina las unidades del catálogo con las
+  presentaciones del proveedor para ese producto ("Caja (12)") y, al final, **"+ Nueva
+  presentación…"** — deshabilitada sin proveedor o producto, ausente en serie (igual hay que
+  tipear cada serie). Los tres valores se distinguen por prefijo (`u:<codigo>`, `p:<id>`,
+  `nueva`); la traducción es de la página, no del composable, porque solo la usa ella.
+- **"+ Nueva presentación…"** abre `PresentacionModal.vue` (molde: `DescuentoModal.vue`) para
+  crear una: nombre, contenido y unidad (solo las compatibles con la base del producto; fija
+  si la base es `unidad`). Al guardar, la línea la toma sola.
+- **El lápiz** (junto al selector, solo si la línea tiene una presentación elegida) abre el
+  mismo modal para corregirla o retirarla. Retirar pide confirmar **en el mismo modal** (un
+  segundo botón *Sí, retirar*) y deja en la unidad base **toda línea que la usaba**, no solo
+  la que abrió el modal.
+- **La cuenta a la vista**, debajo de la línea (`cuentaPresentacion` en `useCompras.ts`):
+  *"= 120 unidad · $800 c/u"*. No es el costo —el servidor lo calcula al confirmar, con la
+  conversión de unidad y el descuento repartido— así que no cuantiza a la escala de la moneda
+  ni depende de su store: hasta 2 decimales, solo para comparar con el papel.
+- **Cambiar de proveedor** devuelve a la unidad base las líneas con presentación, con un
+  toast que dice cuántas. Es un gesto explícito del `@update:model-value` del selector de
+  proveedor, no un `watch` sobre `proveedorId` — un `watch` dispararía el mismo revert al
+  **cargar** un borrador existente, que asigna `proveedorId` con el mismo mecanismo (mismo
+  criterio que "cambiar el selector de unidad limpia el costo": `docs/patterns/frontend.md`
+  § 8). Las presentaciones del proveedor sí se piden con un `watch` — ahí no hay side effect
+  que distinga cargar de elegir, y es una sola llamada por proveedor, nunca por línea.
+- **La compra confirmada** (`CompraConfirmada.vue`): la línea se lee *"10 Caja (12) · 120
+  unidad"* (`cantidadLineaConfirmada`); el historial y `AnularCompraModal` muestran la unidad
+  o la presentación con `unidadDeLinea`. `CorregirLineaModal` pide la cantidad en la unidad de
+  la línea ("Cantidad (Caja (12))").
+
 ---
 
 ## El orden de bloqueo
@@ -253,12 +283,16 @@ editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar
 
 - `pages/compras/index.vue`: el listado, con las insignias *Borrador*, *Confirmada*, *Anulada* y
   **Falta costo**, y sus filtros.
-- `pages/compras/[id].vue`: la carga del borrador, y el modal de confirmar con el resumen.
+- `pages/compras/[id].vue`: la carga del borrador —selector de unidad y presentación, el lápiz,
+  la cuenta a la vista (pieza 2 § 6, ver arriba)— y el modal de confirmar con el resumen.
+- `components/compras/PresentacionModal.vue`: crear, corregir y retirar una presentación
+  (pieza 2). `presentacion: null` crea; con una, edita.
 - `components/compras/CompraConfirmada.vue`: el detalle de una confirmada, con
   `CorregirLineaModal`, `DescuentoModal` y `AnularCompraModal`. Cada acción aparece solo con su
   permiso.
 - `composables/useCompras.ts`: los tipos del detalle y lo que se manda (`cuerpoCorreccion`,
-  `cuerpoDescuento`), fuera de los `.vue`.
+  `cuerpoDescuento`), fuera de los `.vue`. De la pieza 2: `etiquetaPresentacion`,
+  `unidadDeLinea`, `cuentaPresentacion` y `cantidadLineaConfirmada`.
 
 ---
 
@@ -269,10 +303,13 @@ editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar
 - **E2E de la API:** `test/compras.e2e-spec.ts` (borrador, confirmar, rehacer la cuenta, corregir,
   anular, permisos y aislamiento) y `test/kardex-secuencia.e2e-spec.ts` (la secuencia sigue el
   orden de aplicación bajo concurrencia).
-- **Front:** los specs de componente de `components/compras/` y `compras-carga.nuxt.spec.ts`.
+- **Front:** los specs de componente de `components/compras/` (incluido
+  `PresentacionModal.nuxt.spec.ts`) y `compras-carga.nuxt.spec.ts`.
 - **Navegador:** `frontend/e2e/compras/compras-por-pantalla.spec.ts` — los pasos del smoke,
   como el encargado, más el test de que la lista de productos del formulario es la de Compras
-  y no el catálogo de ítems. Ver [El smoke, automatizado](#el-smoke-automatizado).
+  y no el catálogo de ítems — y `compras-presentacion.spec.ts` (pieza 2): crear una
+  presentación desde la línea, confirmar y corregir en cajas, y el lápiz corrigiendo el
+  contenido antes de confirmar. Ver [El smoke, automatizado](#el-smoke-automatizado).
 
 ---
 
@@ -300,6 +337,8 @@ descarta la sesión de admin que deja `auth.setup.ts` y entra por la pantalla de
 | 4 · Bajar una cantidad | El historial lo anota **como cantidad con su unidad**, no como plata; el stock baja y el costo se rehace | *bajar una cantidad…* |
 | 4b · Bajar sin saldo | El 400 llega a la pantalla **con el número** («quedan 2»), el modal sigue abierto y la línea no se movió | *bajar por debajo de lo que queda…* |
 | 5 · Anular | Frena, resume lo que sale, exige motivo, y después lo deja a la vista sin dejar corregir | *completar el precio, cargar el descuento y anular* |
+| 6 · Crear una presentación desde la línea, confirmar y corregir en cajas (pieza 2) | El selector queda en "Caja (12)" tras crearla; la línea muestra "= 120 unidad"; la confirmada dice "10 Caja (12) · 120 unidad"; corregir pide la cantidad en cajas y el historial la anota así; por API, el stock y el costo quedan en la unidad base | `compras-presentacion.spec.ts` |
+| 7 · El lápiz corrige la presentación antes de confirmar (pieza 2) | Creada con 24 por API, el lápiz la corrige a 12 en pantalla; la cuenta pasa a "= 120 unidad"; el borrador confirmado entra con 120, no con 240 | `compras-presentacion.spec.ts` |
 
 ⚠️ **Corrección al smoke viejo:** decía que un **borrador** sin precio aparece en el listado
 con la insignia *Falta costo*. No es así, y el código nunca lo hizo: `mapCabecera` la calcula

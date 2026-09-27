@@ -1,5 +1,7 @@
 import Decimal from 'decimal.js'
 import { formatStockCantidad } from '~/utils/stock-format'
+import { formatCostoDisplay } from '~/utils/currency-format'
+import type { MonedaDisplayConfig } from '~/types/moneda'
 
 /** Los tres estados de `compras.estado`: espejo de `EstadoCompra` del backend
  *  (`backend/src/modules/compras/entities/compra.entity.ts`). */
@@ -19,6 +21,26 @@ const COLOR: Record<EstadoCompra, ColorInsignia> = {
   anulada: 'error',
 }
 
+/** La presentación de una línea del detalle: espejo de `PresentacionLinea` del
+ *  backend (pieza 2 § 5). Borrador: la viva, en su unidad. Confirmada: lo
+ *  congelado, en la unidad base. */
+export interface PresentacionLinea {
+  id: string
+  nombre: string
+  contenido: string
+  unidadCodigo: string
+}
+
+/** Una presentación de compra (pieza 2 § 3.1): "Caja" de 12 unidad, por
+ *  (proveedor, producto). Espejo de `PresentacionCompraVista` del backend. */
+export interface PresentacionCompra {
+  id: string
+  itemId: string
+  nombre: string
+  contenido: string
+  unidadCodigo: string
+}
+
 /** Una línea del detalle: espejo de `CompraLineaDetalle` del backend. */
 export interface LineaCompra {
   id: string
@@ -28,10 +50,12 @@ export interface LineaCompra {
   modoInventario: string | null
   unidadMedidaBase: string | null
   cantidad: string
-  unidadCodigo: string
+  /** Null si la línea va en una presentación (pieza 2 § 3.2). */
+  unidadCodigo: string | null
   precioUnitario: string | null
   series: { serie: string }[] | null
   lote: { codigoLote: string, fechaVencimiento?: string } | null
+  presentacion: PresentacionLinea | null
 }
 
 /** Una fila del historial de correcciones (spec § 3.5). */
@@ -188,6 +212,84 @@ export function useCompras() {
     return c ? c.toString() : cantidad
   }
 
+  /**
+   * La etiqueta que ve el encargado (pieza 2 § 3.1): "Caja (12)" si la unidad
+   * es `unidad` (no tiene sentido repetirla), "Saco (25 kg)" si no. El
+   * contenido se muestra sin ceros de más, con coma — mismo formato que
+   * `cantidadConUnidad`.
+   */
+  function etiquetaPresentacion(p: { nombre: string, contenido: string, unidadCodigo: string }): string {
+    const contenido = formatStockCantidad(p.contenido, true)
+    return p.unidadCodigo === 'unidad'
+      ? `${p.nombre} (${contenido})`
+      : `${p.nombre} (${contenido} ${p.unidadCodigo})`
+  }
+
+  /**
+   * La unidad de una línea, para mostrar: la etiqueta de su presentación si
+   * tiene una, si no su `unidadCodigo`, y vacío si no tiene ninguna (un
+   * borrador cuya presentación fue retirada — pieza 2 § 4.4).
+   */
+  function unidadDeLinea(l: {
+    unidadCodigo: string | null
+    presentacion: { nombre: string, contenido: string, unidadCodigo: string } | null
+  }): string {
+    if (l.presentacion) return etiquetaPresentacion(l.presentacion)
+    return l.unidadCodigo ?? ''
+  }
+
+  /**
+   * La cuenta a la vista bajo una línea en presentación (pieza 2 § 6): cuánto
+   * entra en la unidad base y cuánto cuesta cada una. ⚠️ NO es el costo — lo
+   * calcula el servidor al confirmar, con la conversión de unidad y el
+   * descuento repartido —, así que esto no cuantiza a la escala de la moneda:
+   * es un costo por unidad (una tasa de solo lectura), y sus decimales son el
+   * piso, no el techo (`formatCostoDisplay`, mismo criterio que el costo por
+   * unidad elegida del ajuste de stock). `monedaOficial` viaja como
+   * parámetro —la config, no el store— para que este composable siga sin
+   * depender de Pinia: sin ella (todavía no cargó) se omite el costo, igual
+   * que sin precio. Null si la cantidad no es un número.
+   */
+  function cuentaPresentacion(
+    cantidad: string,
+    contenido: string,
+    unidad: string,
+    precio: string | null,
+    monedaOficial: MonedaDisplayConfig | null,
+  ): string | null {
+    const c = comoDecimal(cantidad)
+    const cont = comoDecimal(contenido)
+    if (!c || !cont) return null
+    const totalBase = c.times(cont)
+    let texto = `= ${cantidadConUnidad(totalBase.toString(), unidad)}`
+    const p = comoDecimal(precio)
+    if (p && monedaOficial) {
+      const costoUnidad = p.div(cont)
+      texto += ` · ${formatCostoDisplay(costoUnidad, monedaOficial)} c/u`
+    }
+    return texto
+  }
+
+  /**
+   * La cantidad de una línea confirmada, para leer (pieza 2 § 6): "10 Caja
+   * (12) · 120 unidad" si va en presentación (lo congelado ya está en la
+   * unidad base, así que solo hace falta multiplicar), o "20,35 kg" si va en
+   * una unidad simple.
+   */
+  function cantidadLineaConfirmada(l: {
+    cantidad: string
+    unidadCodigo: string | null
+    presentacion: { nombre: string, contenido: string, unidadCodigo: string } | null
+    unidadMedidaBase: string | null
+  }): string {
+    const base = cantidadConUnidad(l.cantidad, unidadDeLinea(l))
+    if (!l.presentacion || !l.unidadMedidaBase) return base
+    const c = comoDecimal(l.cantidad)
+    const cont = comoDecimal(l.presentacion.contenido)
+    if (!c || !cont) return base
+    return `${base} · ${cantidadConUnidad(c.times(cont).toString(), l.unidadMedidaBase)}`
+  }
+
   /** "Precio", "Cantidad" o "Descuento al total", para el historial. */
   function etiquetaCambio(campo: string): string {
     return ETIQUETA_CAMBIO[campo] ?? campo
@@ -224,5 +326,9 @@ export function useCompras() {
     cantidadConUnidad,
     cantidadParaEditar,
     etiquetaCambio,
+    etiquetaPresentacion,
+    unidadDeLinea,
+    cuentaPresentacion,
+    cantidadLineaConfirmada,
   }
 }

@@ -1,6 +1,6 @@
 # Compras, pieza 2: la unidad de compra por proveedor ("caja de 12")
 
-**Fecha:** 2026-09-27 · **Tipo:** spec de diseño
+**Fecha:** 2026-09-27 · **Tipo:** spec de diseño · **Status:** Done (2026-09-27, las tres tareas)
 **Frente:** *"Compras: carga manual, y el DTE del SII como atajo encima"*, en
 [`docs/agent/pendientes.md`](../../agent/pendientes.md). Es la **pieza 2 de 4**; la pieza 1 es
 [`2026-09-18-compras-recepcion-design.md`](2026-09-18-compras-recepcion-design.md) y lo que hace
