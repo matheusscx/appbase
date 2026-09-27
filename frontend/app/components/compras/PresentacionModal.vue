@@ -173,7 +173,9 @@ async function retirar() {
 
         <div v-if="retirarOpen" class="flex flex-col gap-2 rounded-md border border-error/50 bg-error/5 p-3">
           <p class="text-sm text-default">
-            Se retira del selector. Los borradores que la usan pasan a la unidad base al confirmar.
+            Deja de ofrecerse para las próximas líneas. Las de esta compra que la usaban pasan
+            ahora a la unidad base. Un borrador guardado que la use va a pedir otra unidad al
+            confirmar; las compras ya recibidas no cambian.
           </p>
           <div class="flex justify-end gap-2">
             <UButton label="Cancelar" color="neutral" variant="ghost" size="sm" @click="() => { retirarOpen = false }" />

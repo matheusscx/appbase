@@ -130,6 +130,15 @@ describe('PresentacionModal — retirar', () => {
     boton('presentacion-retirar').click()
     await new Promise(r => setTimeout(r, 0))
     expect(llamadas).toHaveLength(0)
+    // La confirmación dice la verdad: retirar no toca los borradores GUARDADOS de otras
+    // compras (esos fallan al confirmar y piden otra unidad); solo revierte las líneas de
+    // ESTA compra, y lo hace ahora mismo, no "al confirmar" (eso era lo que decía antes y
+    // era falso: `presentaciones-compra.service.ts#retirar` solo marca `eliminado_el`).
+    expect(document.body.textContent).toContain(
+      'Deja de ofrecerse para las próximas líneas. Las de esta compra que la usaban pasan '
+      + 'ahora a la unidad base. Un borrador guardado que la use va a pedir otra unidad al '
+      + 'confirmar; las compras ya recibidas no cambian.',
+    )
 
     boton('presentacion-retirar-si').click()
     await new Promise(r => setTimeout(r, 20))

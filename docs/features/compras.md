@@ -185,8 +185,11 @@ Spec: [`2026-09-27-compras-unidad-de-compra-design.md`](../superpowers/specs/202
   la que abrió el modal.
 - **La cuenta a la vista**, debajo de la línea (`cuentaPresentacion` en `useCompras.ts`):
   *"= 120 unidad · $800 c/u"*. No es el costo —el servidor lo calcula al confirmar, con la
-  conversión de unidad y el descuento repartido— así que no cuantiza a la escala de la moneda
-  ni depende de su store: hasta 2 decimales, solo para comparar con el papel.
+  conversión de unidad y el descuento repartido— así que el costo por unidad se formatea con
+  `formatCostoDisplay` (mismo criterio que el costo por unidad elegida del ajuste de stock,
+  `docs/patterns/frontend.md` § 8): los decimales de la moneda oficial son el piso, no el
+  techo, hasta `ESCALA_COSTO`. La función recibe la config de la moneda oficial como
+  parámetro, no el store: `useCompras` sigue sin depender de Pinia.
 - **Cambiar de proveedor** devuelve a la unidad base las líneas con presentación, con un
   toast que dice cuántas. Es un gesto explícito del `@update:model-value` del selector de
   proveedor, no un `watch` sobre `proveedorId` — un `watch` dispararía el mismo revert al
