@@ -3,7 +3,7 @@
 > **Para agentes:** ejecutar con `superpowers:subagent-driven-development` o
 > `superpowers:executing-plans`, tarea por tarea, marcando los checkboxes.
 
-**Status:** In Progress
+**Status:** Complete (2026-09-27)
 **Date:** 2026-09-19
 **Owner:** Cesar Matheus
 **Spec:** [`../specs/2026-09-19-modulo-reportes-varianza-design.md`](../specs/2026-09-19-modulo-reportes-varianza-design.md)
@@ -1000,7 +1000,7 @@ una fila es un ítem y un ítem tiene una sola moneda. Borrar ese `GROUP BY` hoy
 número mal: produce un error de Postgres. Lo reemplaza el mutante del `ORDER BY`, que es el que
 ejerce la conducta que aquel quería proteger.
 
-- [ ] **Paso 6: gate y commit**
+- [x] **Paso 6: gate y commit**
 
 ```bash
 git add backend/src/modules/reportes backend/test/reportes-varianza.e2e-spec.ts
@@ -1123,7 +1123,7 @@ lo saca del reporte con existencias adentro. Pausar es *"no lo vendo más"*, no 
 más"*. No bloquea nada, no se arregla en este frente, y se documenta para que el próximo no lo
 lea como bug.
 
-- [ ] **Paso 1: escribir los tests que fallan**
+- [x] **Paso 1: escribir los tests que fallan**
 
 1. `desde`/`hasta` ausentes → **400** (son obligatorios acá, a diferencia del listado).
 2. Rango de 400 días → **400** con el mensaje del tope.
@@ -1135,13 +1135,13 @@ lea como bug.
    total cerrando con su lista, y **ninguno de los dos en la lista del otro**.
 7. El que se contó **dos** veces no está en ninguna de las dos listas: ese sí se puede medir.
 
-- [ ] **Paso 2: correrlos y verificar que fallan**
+- [x] **Paso 2: correrlos y verificar que fallan**
 
 ```bash
 cd backend && npm test -- varianza.service
 ```
 
-- [ ] **Paso 3: el DTO del resumen**
+- [x] **Paso 3: el DTO del resumen**
 
 **Acá nace la base compartida** (Paso 3 de la Tarea 1 explica por qué no antes): crear
 `reportes/dto/rango-reporte.dto.ts` con `desde`/`hasta` opcionales y `@IsDateString()`, y después
@@ -1153,7 +1153,7 @@ cd backend && npm test -- varianza.service
 `{}` traía a memoria el historial entero del tenant — es el bug exacto que la ronda de fix de
 anulaciones cerró.
 
-- [ ] **Paso 4: implementar el resumen y el aviso**
+- [x] **Paso 4: implementar el resumen y el aviso**
 
 Los totales y el top salen de la misma agregación de las tareas 3–5, sin `LIMIT`. El aviso son
 **dos consultas agregadas más** (no una por plato):
@@ -1175,7 +1175,7 @@ que ¿para quién es esta función?"**. Es la misma señal que ya está anotada 
 ~~- `ingredientesSinFichaDeStock`: `receta_ingredientes ri LEFT JOIN item_producto ip` donde
 `ip.item_id IS NULL`.~~
 
-- [ ] **Paso 5: la ruta**
+- [x] **Paso 5: la ruta**
 
 ```ts
 // ⚠️ Ruta ESTÁTICA: va declarada en este controller que no tiene ninguna
@@ -1189,7 +1189,7 @@ resumen(@Req() req: Request, @Query() query: ResumenVarianzaDto) {
 }
 ```
 
-- [ ] **Paso 6: verificar que pasan, más el e2e**
+- [x] **Paso 6: verificar que pasan, más el e2e**
 
 ```bash
 cd backend && npm test -- varianza.service
@@ -1199,7 +1199,7 @@ cd backend && npm test -- varianza.service
 cd backend && npm run test:e2e -- reportes-varianza
 ```
 
-- [ ] **Paso 7: gate y commit**
+- [x] **Paso 7: gate y commit**
 
 ```bash
 git add backend/src/modules/reportes backend/test/reportes-varianza.e2e-spec.ts
@@ -1213,7 +1213,7 @@ git commit -m "feat(reportes): resumen de varianza con top 10 y aviso de teóric
 
 ## Hito de integración — al cerrar la Tarea 6
 
-- [ ] **Entrada nueva en `docs/agent/anti-patterns.md`: el mock de `Db` tapa el SQL.**
+- [x] **Entrada nueva en `docs/agent/anti-patterns.md`: el mock de `Db` tapa el SQL.**
   Encargo de la sesión orquestadora (2026-09-20), con el presupuesto de **30 líneas por entrada**
   que ahora rige ese archivo.
 
@@ -1229,22 +1229,24 @@ git commit -m "feat(reportes): resumen de varianza con top 10 y aviso de teóric
   - La salida: **dos controles rotulados**, débil (aserción sobre el texto del SQL, para el ciclo
     corto) y fuerte (e2e contra Postgres que monte el caso). Decir cuál es cuál en el propio test.
 
-- [ ] **Regla de commits, desde 2026-09-20:** si una decisión del owner llega **a mitad de una
+- [x] **Regla de commits, desde 2026-09-20:** si una decisión del owner llega **a mitad de una
   tarea**, va en **su propio commit** aunque sean tres líneas. El commit de la Tarea 3 mezcló el
   cierre con la decisión del faltante de conteo (§ 5.7, que es de la Tarea 4); la revisión lo
   marcó con razón. No se deshace —ya está en main—, pero no se repite.
 
-- [ ] ⚠️ **El stack compartido va a tener cola en la Tarea 7.** A la sesión de compras se suma el
+- [x] ⚠️ **El stack compartido va a tener cola en la Tarea 7.** A la sesión de compras se suma el
   frente de los cuatro mecánicos (puerto 5439). **Pedir el turno con anticipación**, no al llegar.
   Y ⛔ **no informarle a otra sesión sobre el estado del reparto**: ese dato lo tiene la
   orquestadora y el mío ya estuvo desactualizado una vez.
+  📌 **Superado el 2026-09-20:** `scripts/entorno.sh` le da a cada worktree su propio stack y
+  ya no se pide turno.
 
 Decisión de la sesión orquestadora (2026-09-19): **no esperar a la Tarea 10 para integrar.** Main
 se mueve rápido —hoy hubo dos rebases seguidos por commits de docs de otras sesiones— y diez
 tareas afuera es mucha superficie de conflicto. Se mergea la mitad de backend y las tareas 7–10
 siguen sobre main ya actualizado.
 
-- [ ] **Paso 1: que la mitad se sostenga sola en main**
+- [x] **Paso 1: que la mitad se sostenga sola en main**
 
 ⚠️ Mergear las tareas 1–6 deja en main **dos rutas que ninguna pantalla llama todavía**. Eso por
 sí solo no molesta —el módulo está detrás de su permiso y solo un rol del seed lo tiene—, pero sí
@@ -1258,13 +1260,13 @@ evitar. Así que este hito **adelanta parte de la Tarea 10**:
 - `docs/features/modulo-reportes.md` y el resto del backlog quedan para la Tarea 10, cuando el
   patrón esté completo con su mitad de frontend.
 
-- [ ] **Paso 2: revisión de rama de las tareas 1–6**
+- [x] **Paso 2: revisión de rama de las tareas 1–6**
 
 No alcanza con las revisiones por tarea: la de rama caza contradicciones **entre** tareas —un seed
 de la Tarea 6 que rompa el e2e de la Tarea 3, un nombre que derivó entre la 2 y la 5— que ninguna
 revisión por-tarea puede ver.
 
-- [ ] **Paso 3: gate completo de nuevo, sobre el conjunto**
+- [x] **Paso 3: gate completo de nuevo, sobre el conjunto**
 
 Los dos bloques enteros, no un subset. Un DTO requerido agregado tarde rompe specs que pasaban, y
 tocar el constructor de un service rompe unitarios que nadie estaba mirando.
@@ -1273,12 +1275,12 @@ tocar el constructor de un service rompe unitarios que nadie estaba mirando.
 /Users/m2pro/cmatheus/startup-app/scripts/db-aislada.sh reset 5436
 ```
 
-- [ ] **Paso 4: avisar a la orquestadora**
+- [x] **Paso 4: avisar a la orquestadora**
 
 Rama, hash **copiado de `git log`**, gate con conteos y veredictos. ⛔ **No mergear ni pushear**:
 el fast-forward lo hace ella con el OK del owner.
 
-- [ ] **Paso 5: retomar sobre main actualizado**
+- [x] **Paso 5: retomar sobre main actualizado**
 
 Después del merge, rebasar la rama sobre main antes de arrancar la Tarea 7.
 
@@ -1583,7 +1585,7 @@ o sea que buena parte de lo medido pasó por la rama de respaldo `creado_el` y n
 `secuencia`. Un seed donde todos los recuentos escriban movimiento ejercita la otra rama y puede
 dar otro número — es el mismo punto del Paso 1 de esta tarea, cobrado en carne propia.
 
-- [ ] **Paso 1: conseguir un volumen que se pueda medir**
+- [x] **Paso 1: conseguir un volumen que se pueda medir**
 
 El seed base no alcanza. Generar movimientos hasta un orden realista (decenas de miles) **con
 distribución realista**: variedad de `motivo`, de `item_id` y de fechas.
@@ -1592,7 +1594,7 @@ distribución realista**: variedad de `motivo`, de `item_id` y de fechas.
 índice parcial "no sirve" y la conclusión es falsa — ya pasó en este repo y está documentado en el
 docblock de `idx_movimientos_inventario_venta`.
 
-- [ ] **Paso 2: medir**
+- [x] **Paso 2: medir**
 
 ```bash
 cd backend && npm run test:e2e -- reportes-varianza
@@ -1601,7 +1603,7 @@ cd backend && npm run test:e2e -- reportes-varianza
 Y `EXPLAIN (ANALYZE, BUFFERS)` de las consultas del listado y del resumen contra el Postgres del
 worktree (5436). Anotar el plan y los tiempos **antes** de tocar nada.
 
-- [ ] **Paso 3: decidir con el número en la mano**
+- [x] **Paso 3: decidir con el número en la mano**
 
 📌 **Candidato nuevo, levantado por la revisión de la Tarea 4 (2026-09-20): `SQL_SALDOS`.** Hace
 **dos subconsultas correlacionadas por fila** (`ORDER BY secuencia DESC LIMIT 1`), o sea 2 ×
@@ -1642,12 +1644,23 @@ venta.
 `@Index` y el seeder usa `CREATE INDEX IF NOT EXISTS` en SQL cruda para lo que `@Index` no puede
 expresar (parciales, `lower(...)`). Un índice simple va en la entity.
 
-- [ ] **Paso 4: dejar la medición escrita**
+- [x] **Paso 4: dejar la medición escrita**
 
 Si entra un índice, su docblock lleva el antes/después medido, como los cuatro que ya tiene la
 entidad. Si no entra, la medición va en `docs/features/reporte-varianza.md`.
 
-- [ ] **Paso 5: gate y commit**
+📌 **Resultado (2026-09-21): entra el índice `(item_id, ubicacion_id, secuencia)`**, en la entity.
+Con 92 mil movimientos y cada producto en local **y** bodega: listado de un año 587 → 140 ms,
+resumen de un año 688 → 119 ms, con el JIT en su default. La mayor parte de la mejora es que el
+índice baja el costo estimado por debajo de `jit_above_cost` y el JIT deja de compilar (431 de
+562 ms). Escribir no cuesta más (medido). La Tarea 5 había medido "no sirve" con un seed donde
+cada producto vivía en una sola ubicación. ⚠️ La primera corrida de esta tarea también midió mal:
+`synchronize` borró al arrancar el índice creado a mano, y lo encontró la revisión. Tabla completa
+en `docs/features/reporte-varianza.md` § Rendimiento. El Paso 2 no corrió contra el 5436 (ese
+Postgres aislado ya no existe): corrió contra una base `medicion` copiada dentro del Postgres del
+stack del worktree, para no ensuciar la del e2e.
+
+- [x] **Paso 5: gate y commit**
 
 Stagear solo lo que la medición justificó — si no entró índice, esta tarea commitea **únicamente**
 la doc con el número medido.
@@ -1673,7 +1686,7 @@ inexistente aborta el comando y deja la tarea sin commitear.
 - Crear: `docs/features/modulo-reportes.md`, `docs/features/reporte-varianza.md`
 - Modificar: `docs/README.md`, `docs/ESTADO.md`, `docs/agent/pendientes.md`
 
-- [ ] **Paso 1: `docs/features/modulo-reportes.md`**
+- [x] **Paso 1: `docs/features/modulo-reportes.md`**
 
 Desde `docs/features/TEMPLATE.md`. Lo que **no** puede faltar:
 - **El criterio operación contra negocio** (spec § 3.1), con las palabras del owner.
@@ -1681,14 +1694,14 @@ Desde `docs/features/TEMPLATE.md`. Lo que **no** puede faltar:
   `tenant_modulos` da 403 hasta al admin.
 - Los compartidos y su contrato (§ 4), y por qué viven en la raíz de `app/components/`.
 
-- [ ] **Paso 2: completar `docs/features/reporte-varianza.md`**
+- [x] **Paso 2: completar `docs/features/reporte-varianza.md`**
 
 ⚠️ **Este archivo ya existe desde el hito de integración** (se escribió al cerrar la Tarea 6, con
 la mitad de backend). Acá se le suma la pantalla: la gráfica, la columna «Otros» en pantalla y el
 aviso de teórico incompleto. **No reescribirlo de cero** — y no anexar correcciones al final: si
 algo de lo que dice quedó viejo, se corrige en su lugar.
 
-- [ ] **Paso 3: el backlog**
+- [x] **Paso 3: el backlog**
 
 En `docs/agent/pendientes.md`, **cuatro** entradas nuevas (la cuarta la agregó la Tarea 5 al
 medirla; el docblock del `ORDER BY` en `varianza.service.ts` apunta a ella por ese número):
@@ -1717,13 +1730,13 @@ que la pantalla lo marque — y eso se decide con el owner, no acá.
 ⛔ **Nada queda marcado ✅ en `pendientes.md`**: la entrada de la varianza se **muda** a
 `docs/agent/resueltos.md` con el detalle. Si su sección queda vacía, queda solo el encabezado.
 
-- [ ] **Paso 4: `ESTADO.md` y `README.md`**
+- [x] **Paso 4: `ESTADO.md` y `README.md`**
 
 La fila de la varianza **ya existe** desde el hito de integración, marcada *backend listo, pantalla
 pendiente*: acá se actualiza a implementada, con fecha. Se agrega la fila del módulo de reportes, y
 los dos links en `docs/README.md`.
 
-- [ ] **Paso 5: verificar que ningún número quedó colgando**
+- [x] **Paso 5: verificar que ningún número quedó colgando**
 
 ```bash
 grep -rn "trece\|los 13\|siete módulos" docs/ | grep -i report
@@ -1732,7 +1745,7 @@ grep -rn "trece\|los 13\|siete módulos" docs/ | grep -i report
 Esperado: sin resultados. El mapa son **quince endpoints en nueve módulos** (§ 1 de la spec), y la
 clasificación suma 8 + 5 + 2. Si el plan o las features repiten un conteo, tiene que coincidir.
 
-- [ ] **Paso 6: gate y commit**
+- [x] **Paso 6: gate y commit**
 
 ```bash
 git add docs/features/modulo-reportes.md docs/features/reporte-varianza.md docs/README.md docs/ESTADO.md docs/agent/pendientes.md docs/agent/resueltos.md
@@ -1746,15 +1759,23 @@ git commit -m "docs(reportes): features, estado y backlog del módulo de reporte
 
 ## Cierre del frente
 
-- [ ] Revisión de **rama completa** (no solo por tarea): caza contradicciones **entre** tareas que
+- [x] Revisión de **rama completa** (no solo por tarea): caza contradicciones **entre** tareas que
   ninguna revisión por-tarea puede ver — un seed de la Tarea 8 que rompa el e2e de la Tarea 3, un
   nombre que derivó entre la Tarea 2 y la 6.
-- [ ] `./scripts/reset-db.sh --verificar` después del e2e: ¿la base se movió abajo de la suite?
-- [ ] Mensaje a la sesión orquestadora con rama, hash **copiado de `git log`**, gate con conteos y
+- [x] `./scripts/reset-db.sh --verificar` después del e2e: ¿la base se movió abajo de la suite?
+- [x] Mensaje a la sesión orquestadora con rama, hash **copiado de `git log`**, gate con conteos y
   veredictos.
-- [ ] ⛔ **No mergear ni pushear.** El fast-forward lo hace la orquestadora con el OK del owner; el
+- [x] ⛔ **No mergear ni pushear.** El fast-forward lo hace la orquestadora con el OK del owner; el
   push a Railway lo decide el owner. Ojo que un push a `main` despliega: si el frente tocara
   entidades, revisar el deployment además del CI.
+
+📌 **Cómo cerró (2026-09-27).** La sesión del frente se cortó por un error del servidor después
+de commitear la Tarea 9 y con la 10 en una rama WIP; el cierre lo hizo la orquestadora. La revisión
+de rama se hizo en dos mitades: tareas 1–6 en el hito (`ee26db39`) y 7–10 al cerrar, LIMPIO, con
+cuatro dudas delegadas (afirmaciones de los docs contra el código, que el índice de la Tarea 9 sirva
+a las cuatro consultas, nombres entre la API y la pantalla, y el puntero del `ORDER BY` al backlog).
+Gate entero en main con la Tarea 9, más `--verificar` en verde. El conteo de controllers de la
+entrada del `ValidationPipe` venía mal (47): medido de nuevo, son 43.
 
 ## Decisiones tomadas / preguntas abiertas
 

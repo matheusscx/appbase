@@ -45,6 +45,40 @@ import {
  * movimientos de UN producto desde una secuencia en adelante, en orden.
  */
 @Index('idx_movimientos_inventario_item_secuencia', ['itemId', 'secuencia'])
+/**
+ * El reporte de varianza (`reportes/varianza`): por cada (producto, ubicación),
+ * sus movimientos entre dos recuentos. El índice de arriba solo filtra por
+ * producto; este agrega la ubicación, que es la otra mitad de la clave del grupo.
+ * ⚠️ **No reemplaza al de arriba**: "rehacer la cuenta" (`inventario.service.ts`)
+ * recorre un producto en TODAS sus ubicaciones ordenado por `secuencia`, y dentro
+ * de este índice la secuencia solo está ordenada por ubicación.
+ *
+ * **Medido el 2026-09-21** con 92 mil movimientos —80 productos en local y
+ * bodega, un año, recuentos que siempre escriben movimiento—, endpoint entero,
+ * mediana de 5, con el JIT de Postgres en su default (prendido):
+ * listado de un año 587 → 140 ms, resumen de un año 688 → 119 ms, listado de
+ * 30 días 177 → 75 ms. ⚠️ **La mayor parte de la mejora no es la lectura: es
+ * el JIT.** Sin este índice el costo *estimado* del `LATERAL` (682 mil) supera
+ * `jit_above_cost` y Postgres gasta 431 de 562 ms compilando; con él baja a
+ * 54 mil, el JIT no se dispara y la misma consulta corre en 79 ms. Con el JIT
+ * apagado el índice igual gana (endpoint 159 → 116 ms), por los bloques leídos
+ * (174.875 → 89.692).
+ *
+ * **Escribir no cuesta más, medido:** 20.000 inserts de a uno, mediana 355 ms
+ * sin él y 342 ms con él — ruido. Pesa 12 MB a 92 mil filas.
+ *
+ * ⚠️ La Tarea 5 había medido "no sirve" con un seed donde cada producto vivía en
+ * una sola ubicación: con eso la ubicación no filtra nada. La distribución es
+ * parte de la medición. Y ⚠️ para medirlo a mano: `synchronize` **borra al
+ * arrancar** todo índice que las entities no declaren, así que uno creado con
+ * SQL antes de levantar la app no existe cuando se mide (le pasó a la primera
+ * corrida). Detalle en `docs/features/reporte-varianza.md` § Rendimiento.
+ */
+@Index('idx_movimientos_inventario_item_ubicacion_secuencia', [
+  'itemId',
+  'ubicacionId',
+  'secuencia',
+])
 @Entity('movimientos_inventario')
 export class MovimientoInventario {
   @PrimaryGeneratedColumn('uuid', { name: 'movimiento_id' })

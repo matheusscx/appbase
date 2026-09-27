@@ -132,6 +132,56 @@ alcanzable por la entrada "Reportes" del menú (catálogo en `composables/useRep
   grafica en cero y el pie lo cuenta. Mientras no cargó la moneda oficial, la gráfica espera; si la carga falló, lo dice como fallo.
   Detalle de la gráfica: ADR-027.
 
+## Rendimiento (medido 2026-09-21)
+
+**Lleva un índice nuevo, `(item_id, ubicacion_id, secuencia)`, y lo que más gana no es la
+lectura: es que el JIT de Postgres deja de dispararse.**
+
+Base de medición: copia de la base del worktree con **92.381 movimientos** (92.378 del tenant
+medido; `count(*)` sobre la base, no el estimado de un plan) —80 productos en el
+local **y** en la bodega, un año de ventas diarias, compras y traslados semanales, merma y
+cortesía cada ~10 días, y recuentos cada 14 días en el local y cada 30 en la bodega, **todos con
+movimiento escrito** (la medición de la Tarea 5 tenía 17 de 30 grupos por la rama de respaldo
+`aplicado_el`; esta ejercita la de `secuencia`)—, 106 recuentos aplicados, 192 grupos. Endpoint
+entero, app en proceso contra Postgres 15.18 local, mediana de 5 corridas después de calentar, en
+ms:
+
+| Escenario | Sin índice, JIT prendido (default) | Sin índice, JIT apagado | Con índice, JIT apagado | **Con índice, JIT prendido** |
+|---|---|---|---|---|
+| Listado, 30 días | 177 | 140 | 81 | **75** |
+| Listado, 30 días, «solo con diferencia» | 288 | 234 | 127 | **128** |
+| Listado, 365 días | 587 | 159 | 116 | **140** |
+| Listado, sin rango | 570 | 159 | 117 | **131** |
+| Resumen, 30 días | 179 | 118 | 69 | **66** |
+| Resumen, 365 días | 688 | 196 | 136 | **119** |
+
+- **Sin el índice, el JIT se come la mayor parte**: en el listado de un año, de 562 ms de
+  ejecución, **431 son compilación JIT**. Se dispara porque el costo *estimado* (682 mil) supera
+  `jit_above_cost` (100 mil): el `LATERAL` se estima a ~1.087 por grupo sobre 626 grupos
+  estimados, contra 192 reales. **Con el índice** la misma consulta se estima en 54 mil, el JIT no
+  se dispara y corre en 79 ms.
+- **Con el JIT apagado el índice igual gana**, por los bloques que lee: 174.875 → 89.692 en el
+  listado de un año. Los bordes de la ventana siguen dentro de un `CASE` que ningún índice sirve
+  como `Index Cond` —eso no cambió desde la Tarea 5—; lo que el índice agrega es la ubicación en el
+  `Index Cond` (`item_id = … AND ubicacion_id = …`).
+- **No reemplaza al índice `(item_id, secuencia)`**: "rehacer la cuenta" recorre un producto en
+  todas sus ubicaciones ordenado por `secuencia`, y en el índice nuevo esa secuencia solo está
+  ordenada dentro de cada ubicación.
+- **Escribir no cuesta más**: 20.000 inserts de a uno, como los escribe una venta, mediana 355 ms
+  sin el índice y 342 ms con él — ruido. Pesa 12 MB a 92 mil filas.
+- **«Solo con diferencia» sigue costando dos barridos**, como estaba previsto: el `COUNT` también
+  necesita el `LATERAL` para saber qué filas sobreviven.
+
+⚠️ **Por qué la Tarea 5 había medido "no sirve".** Su seed tenía cada producto en una sola
+ubicación, y así la ubicación no filtra nada. Acá el mismo producto se mueve en local y bodega, que
+es el caso que el reporte mira. La distribución es parte de la medición.
+
+⚠️ **Y la primera corrida de esta medición también mintió**, por otra causa: el índice se creó
+con SQL antes de levantar la app, y **`synchronize` lo borró al arrancar** —borra todo índice que
+las entities no declaran—. La columna "con índice" de esa corrida era una segunda medición sin
+índice. Lo encontró la revisión; las columnas de arriba son de la corrida con el índice creado
+después del arranque y verificado en `pg_indexes` al terminar.
+
 ## Aristas aceptadas a sabiendas
 
 - **Pausar un ítem que todavía tiene stock** lo saca del reporte con existencias adentro. Pausar es
