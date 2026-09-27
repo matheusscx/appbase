@@ -138,9 +138,8 @@ async function cargarResumen() {
   resumenFallo.value = false
   try {
     // Solo los filtros comunes: `ResumenVarianzaDto` no declara
-    // `soloConVarianza`, y el pipe global (`whitelist` sin
-    // `forbidNonWhitelisted`) lo borraría callado — medido: 200, no 400.
-    // Mandarlo haría creer que los totales siguen la llave, y no la siguen.
+    // `soloConVarianza` —los totales no siguen esa llave—, y el pipe global
+    // rechaza con 400 lo que el DTO no declara: mandarlo tumba el resumen.
     const params = new URLSearchParams()
     for (const [clave, valor] of Object.entries(filtrosComunes.value)) {
       if (valor) params.set(clave, valor)

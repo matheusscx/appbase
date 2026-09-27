@@ -76,7 +76,7 @@ bajo el `FOR UPDATE` que ese método toma sobre `item_producto`), no sobre el va
 
 `ubicacionId` es obligatorio al crear la sesión (`POST /recuentos`) y no se puede cambiar
 después: el `PATCH` de edición lo omite a propósito (`UpdateRecuentoDto` no lo declara, y el
-`ValidationPipe` global con `whitelist: true` lo descarta en silencio si llega igual), porque
+`ValidationPipe` global rechaza con 400 un `PATCH` que lo traiga), porque
 las líneas ya congelaron `stock_sistema` de lo que había **en esa ubicación**. `stock_sistema`
 se congela contra el saldo de `stock_ubicacion` de la ubicación elegida, nunca contra la suma
 de todas: local y bodega tienen saldos independientes, y el delta se aplica sobre la misma

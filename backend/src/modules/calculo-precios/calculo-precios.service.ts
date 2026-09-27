@@ -798,7 +798,7 @@ export class CalculoPreciosService {
    *
    * Por eso, con `cuentaId` presente, **las líneas del body se ignoran** y salen
    * de la base. No es defensa contra un cliente malicioso —para eso ya está que
-   * los campos internos no pasen el `whitelist`— sino contra el desfase: el
+   * el pipe global rechace los campos internos— sino contra el desfase: el
    * cliente no tiene con qué armar la línea congelada aunque quiera.
    *
    * `cantidad` sale de la línea, no del body, por lo mismo. Y el orden es

@@ -132,9 +132,9 @@ alcanzable por la entrada "Reportes" del menú (catálogo en `composables/useRep
   donde sale el teórico. Sin bodegas el selector de ubicación no se dibuja.
 - **«Solo con diferencia» arranca prendido.** ⚠️ El owner decidió qué esconde (2026-09-20), no
   el default: el default lo eligió el agente al implementar, a partir de esa misma preferencia por
-  la lista corta. Si el owner lo quiere apagado, es cambiar un `ref`. Va solo al listado: el
-  resumen no lo declara y el pipe global lo borraría callado (`whitelist` sin
-  `forbidNonWhitelisted`, medido: 200), así que mandarlo haría creer que los totales lo siguen.
+  la lista corta. Si el owner lo quiere apagado, es cambiar un `ref`. Va solo al listado: los
+  totales del resumen no siguen esa llave y su DTO no la declara, así que el pipe global
+  rechaza con 400 un resumen que la traiga.
 - Una fila no medible dice *"falta contarlo"* y **no muestra ningún número**: un cero ahí se
   leería como "cerró perfecto".
 - «Otros» se pinta apagado en cero y en alerta, con explicación, cuando no; **la columna no se

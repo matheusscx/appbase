@@ -379,9 +379,11 @@ if (dto.costo !== undefined) await repo.update(id, { costoActual: dto.costo });
 costo?: string;
 ```
 
-⚠️ **La trampa del `ValidationPipe`:** es `whitelist: true` **sin** `forbidNonWhitelisted`, así
-que *borrar* el campo del DTO lo descarta **en silencio** — 200 sin haber cambiado nada, un
-fallo callado peor que el bug. Hay que rechazarlo explícitamente.
+⚠️ **Por qué no alcanza con borrar el campo del DTO:** el pipe global lo rechazaría igual
+(`forbidNonWhitelisted`), pero con un `property costo should not exist` que no dice adónde ir;
+el validador explícito existe por el mensaje, y lo fija `costeo-cpp.e2e-spec.ts`. Hasta el
+2026-09-27 el motivo era más grave: sin ese flag, borrar el campo lo descartaba **en
+silencio** —200 sin haber cambiado nada, un fallo callado peor que el bug—.
 
 📌 El test de invariante que lo enforca es una **heurística de texto sobre SQL crudo**: no
 vería una escritura vía el `Repository<ItemProducto>` con la propiedad camelCase. Frena el

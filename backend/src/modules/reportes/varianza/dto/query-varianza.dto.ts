@@ -65,10 +65,9 @@ export class QueryVarianzaDto extends PaginationQueryDto {
    * que el `/resumen` cuenta en `perdiendoSinCosto`. El criterio vive en
    * `perdiendoSinCostoSql`, compartido con ese conteo.
    *
-   * ⚠️ **Tiene que estar declarado acá**: el pipe global tiene `whitelist` sin
-   * `forbidNonWhitelisted`, así que un campo que el DTO no nombre se borra
-   * callado y el listado vuelve entero con 200. Mismo `@Transform` que
-   * `soloConVarianza`, por el mismo motivo.
+   * ⚠️ **Tiene que estar declarado acá**: el pipe global rechaza con 400 un
+   * campo que el DTO no nombre. Mismo `@Transform` que `soloConVarianza`, por
+   * el mismo motivo.
    */
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)

@@ -7,10 +7,9 @@
 //      va en color de alerta con un `AppInfoButton` en lenguaje del local.
 //   3. La columna «Otros» NO se esconde aunque todas las filas den cero.
 //   4. Lo que no se pudo medir sale como dos números: sin contar y a medio contar.
-//   5. El resumen NO recibe `soloConVarianza`: su DTO no lo declara y el pipe
-//      global lo borraría callado (`whitelist` sin `forbidNonWhitelisted`:
-//      medido contra el backend real, 200). Mandarlo haría creer que los
-//      totales siguen la llave.
+//   5. El resumen NO recibe `soloConVarianza`: su DTO no lo declara —los
+//      totales no siguen esa llave— y el pipe global rechaza con 400 lo que el
+//      DTO no declara, así que mandarlo tumbaría el resumen.
 //   6. Con bodegas, el primer resumen sale una sola vez y ya filtrado al local.
 //   7. El aviso de "sin costo" dice el número del resumen y su link filtra el
 //      LISTADO (nunca el resumen); con el filtro puesto, la línea queda para

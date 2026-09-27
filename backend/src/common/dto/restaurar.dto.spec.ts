@@ -4,9 +4,8 @@ import { RestaurarDto } from './restaurar.dto';
 
 // `POST /<recurso>/:id/restaurar` no tenía body hasta la salida de colisión
 // (owner, 2026-08-01). Lo que este spec fija es que agregarlo NO cambió las
-// llamadas que ya existían: 12 pantallas y el e2e llaman sin body, y con
-// `ValidationPipe({ whitelist: true, transform: true })` un DTO mal declarado
-// las rompería a todas.
+// llamadas que ya existían: 12 pantallas y el e2e llaman sin body, y con el
+// pipe global (`validacionGlobal()`) un DTO mal declarado las rompería a todas.
 describe('RestaurarDto', () => {
   it('sin body es válido y deja `nombre` undefined (el caso de siempre)', async () => {
     const dto = plainToInstance(RestaurarDto, {});

@@ -106,10 +106,8 @@ export class UpdateItemDto {
 
   // El stock ya no se edita desde el item: es una consecuencia de mover
   // mercadería (ajuste de stock) o de un recuento de inventario auditado. El
-  // campo se conserva —en vez de borrarse— por la misma razón que `costo`:
-  // el ValidationPipe global usa whitelist sin forbidNonWhitelisted, así que
-  // borrarlo haría que la propiedad se descarte en silencio y el request
-  // devuelva 200 sin cambiar nada.
+  // campo se conserva —en vez de borrarse— por la misma razón que `costo`: el
+  // 400 dice dónde sí se edita.
   // @ValidateIf (no @IsOptional): ver la nota en `costo` — un `null` explícito
   // debe seguir cayendo en el validador que siempre rechaza.
   @ValidateIf((o: UpdateItemDto) => o.stock !== undefined)
@@ -130,9 +128,12 @@ export class UpdateItemDto {
 
   // El costo ya no se edita desde el item: es una consecuencia de mover
   // mercadería (compra) o de una corrección auditada (ajuste de costo).
-  // El campo se conserva —en vez de borrarse— porque el ValidationPipe global
-  // usa whitelist sin forbidNonWhitelisted: borrarlo haría que la propiedad se
-  // descarte en silencio y el request devuelva 200 sin cambiar nada.
+  // El campo se conserva —en vez de borrarse— por el mensaje: sin declararlo el
+  // pipe global igual lo rechaza (`forbidNonWhitelisted`), pero con un
+  // "property costo should not exist" que no dice adónde ir. Hasta el
+  // 2026-09-27 había además otro motivo, que ya no rige: sin
+  // `forbidNonWhitelisted`, borrarlo lo descartaba en silencio con 200. Lo
+  // fija `costeo-cpp.e2e-spec.ts` ("rechaza el costo con mensaje explícito").
   // @ValidateIf (no @IsOptional): @IsOptional también saltea la validación
   // cuando el valor es `null` explícito, no solo cuando falta la propiedad —
   // eso dejaría pasar `{ "costo": null }` con 200. @ValidateIf solo saltea

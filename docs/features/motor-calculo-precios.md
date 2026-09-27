@@ -232,7 +232,7 @@ cuenta—; lo que mentía era la previsualización.
 1. `precioUnitarioResuelto` — el **canal interno** que usa `ventas.service`, que
    ya resolvió la personalización (la necesita para el snapshot y para el stock) y
    ya convirtió con el mismo `modo_redondeo`. No está en `LineaDto`, así que el
-   `ValidationPipe` (`whitelist: true`) lo saca de cualquier body: no hay forma de
+   `ValidationPipe` global rechaza con 400 cualquier body que lo traiga: no hay forma de
    fijarlo desde afuera. Sin este canal, `POST /ventas` resolvería la
    personalización dos veces.
 2. `precioBase + precioExtraTotal`, convertido — la previsualización de una línea

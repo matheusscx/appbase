@@ -154,9 +154,19 @@ sobre esos números —cero pantallas, el costo son tests— y el frente se abri
    flag y no sin él es `cuenta-hasta-cobro:245`, de los que la medición ya daba por
    intermitentes: con el flag, sola y sobre base limpia, pasó dos veces seguidas.
 
-**Lo que queda, y va en el commit siguiente del mismo frente:** el código y las docs escritos
-alrededor del borrado silencioso (los campos "trampa" de `update-item.dto.ts`, los comentarios
-que describen la conducta vieja y los docs de la entrada).
+5. **Lo escrito alrededor del borrado silencioso**, reescrito en su lugar: los comentarios de
+   `backend/src`, de los specs y de la pantalla de varianza, y los docs que describían la
+   conducta vieja (`features/ventas.md`, `features/motor-calculo-precios.md`,
+   `features/recuento-inventario.md`, `features/reporte-varianza.md`, `agent/anti-patterns.md`
+   y `agent/auditoria-codigo.md`).
+
+   **Los campos "trampa" de `UpdateItemDto` (`costo`, `stock`) se quedan**, contra lo que
+   sugería la entrada. Se probó sacarlos y cayeron cuatro tests de `costeo-cpp.e2e-spec.ts`
+   que fijan a propósito el **mensaje** del 400 ("usá Inventario → Ajuste de costo", "usá
+   `PATCH /items/:id/stock`"): sin los campos, el 400 lo da el pipe y solo dice
+   `property costo should not exist`. El motivo que la entrada daba —el borrado silencioso—
+   murió con el flag; el del mensaje sigue vivo, y es el que ahora dice su comentario. Si se
+   prefiere el 400 genérico, es sacar los dos campos y reescribir esos cuatro tests.
 
 ### La entrada que cierra, como estaba en `pendientes.md` § 4
 

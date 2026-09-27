@@ -28,8 +28,8 @@ describe('CreateReembolsoDto', () => {
   });
 
   it('acepta reponerStock por línea, y lo rechaza si no es booleano', async () => {
-    // El campo tiene que estar declarado ACÁ o el pipe global lo descarta
-    // (`whitelist: true`) y la política del webhook queda inalcanzable.
+    // El campo tiene que estar declarado ACÁ o el pipe global rechaza el body
+    // con 400 y la política del webhook queda inalcanzable.
     const ok = await validar({
       monto: '1100',
       devoluciones: [

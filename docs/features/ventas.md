@@ -125,10 +125,10 @@ servidor— y era el segundo canal por el que un precio podía entrar desde afue
 gratis legítima sigue existiendo por los dos caminos de siempre: un ítem con
 `precio_base` 0, o un descuento, que queda en la traza del cálculo con su regla y su monto.
 
-⚠️ El `ValidationPipe` corre con `whitelist: true` y **sin** `forbidNonWhitelisted`, así
-que un cliente que todavía mande `precioUnitario` no recibe un 400: se le **ignora en
-silencio** y la venta se cobra al precio de catálogo. Mismo comportamiento en
-`POST /api/calculo-precios/calcular`, donde el campo también se fue.
+Un cliente que todavía mande `precioUnitario` recibe un **400 que nombra el campo**: el
+`ValidationPipe` global rechaza lo que el DTO no declara (`forbidNonWhitelisted`, desde el
+2026-09-27; antes se le ignoraba en silencio y la venta se cobraba al precio de catálogo). Mismo
+comportamiento en `POST /api/calculo-precios/calcular`, donde el campo también se fue.
 Ver `docs/features/motor-calculo-precios.md` § *El precio de una línea lo calcula el
 servidor*.
 

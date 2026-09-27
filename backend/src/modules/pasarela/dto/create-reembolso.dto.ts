@@ -17,9 +17,9 @@ export class DevolucionLineaDto {
 
   /**
    * ¿Vuelve al stock? Ausente = repone si el ítem puede. Va también acá —y no
-   * solo en el DTO de la nota de crédito manual— porque el pipe global usa
-   * `whitelist: true`: sin declararlo, el campo se descarta antes de llegar al
-   * service y la política del webhook queda inalcanzable.
+   * solo en el DTO de la nota de crédito manual— porque el pipe global rechaza
+   * con 400 lo que el DTO no declara: sin declararlo, un reembolso que lo mande
+   * no llega al service y la política del webhook queda inalcanzable.
    */
   @IsOptional()
   @IsBoolean()

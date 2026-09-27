@@ -124,7 +124,7 @@ Lentes base (ajustar al módulo):
 | **Multi-tenant y permisos** | `tenant_id` que no sale del token, guards faltantes, JOINs que cruzan tenants, permiso equivocado por ruta, **recursos indexados por `usuario_id` sin `tenant_id`** (ver abajo) |
 | **Soft delete y consultas** | `SELECT`/`JOIN` sin `eliminado_el IS NULL`, N+1, `SELECT *` en tablas anchas |
 | **Concurrencia y transacciones** | check-then-act, lecturas sin `FOR UPDATE` que luego escriben, orden de locks no determinista, atomicidad rota, **llamadas repo-bound adentro de una transacción** (ver abajo) |
-| **Contratos back↔front** | campos que un lado consume y el otro no expone; `whitelist: true` sin `forbidNonWhitelisted` descarta en silencio (200, no 400) |
+| **Contratos back↔front** | campos que un lado consume y el otro no expone; parámetros con nombre (`@Body('x')`, `@Query('x')`) y el interior de un `@IsObject()` libre, que el pipe global no valida (lo no declarado en un DTO sí es 400 desde 2026-09-27) |
 | **Tests que no prueban nada** | mocks que deciden el resultado, aserciones que no pueden fallar, comportamiento sin cobertura real |
 
 Para módulos de dominio, sumar la lente específica: motor de precios e impuestos, kardex

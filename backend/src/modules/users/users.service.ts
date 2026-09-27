@@ -40,7 +40,7 @@ export class UsersService {
    * `interno` va aparte del DTO **a propósito**: `correo_verificado_el` decide
    * si una cuenta puede entrar, así que no puede vivir en un objeto que
    * `class-validator` puebla desde un body. Hoy `CreateUserDto` no está atado a
-   * ninguna ruta y `whitelist: true` limpiaría el campo de todos modos, pero
+   * ninguna ruta y el pipe global rechazaría el campo de todos modos, pero
    * las dos cosas son ciertas *hoy*: el día que alguien exponga este DTO, un
    * `correoVerificadoEl` en el body sería auto-verificarse. Separado, no hay
    * ese día.

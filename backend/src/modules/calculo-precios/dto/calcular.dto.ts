@@ -42,7 +42,7 @@ export class LineaDto {
    * cuenta— se persistía en pesos. Se sacó entero; el canal interno que usa
    * `ventas.service` para no re-resolver lo que ya resolvió se llama
    * `precioUnitarioResuelto` y NO es parte de este DTO, así que el
-   * `ValidationPipe` (`whitelist: true`) lo saca de cualquier body.
+   * `ValidationPipe` global rechaza con 400 cualquier body que lo traiga.
    */
   @IsOptional()
   @ValidateNested()
@@ -133,8 +133,8 @@ export class CalcularVentaDto {
  * a resolverla y `POST /ventas` pagaría las consultas dos veces.
  *
  * ⛔ **No es un override y no puede llegar de afuera.** No está en `LineaDto`,
- * así que el `ValidationPipe` global (`whitelist: true`, `main.ts`) lo saca de
- * cualquier body antes de que el controller lo vea. Esa es toda la garantía que
+ * así que el `ValidationPipe` global rechaza con 400 cualquier body que lo
+ * traiga, antes de que el controller lo vea. Esa es toda la garantía que
  * necesita **este** endpoint.
  *
  * El otro canal que existía —`LineaVentaDto.precioUnitario`, en `POST /ventas`—

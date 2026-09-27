@@ -104,8 +104,9 @@ opcionales en update con `@IsOptional()`. Campos `numeric` con `@IsNumberString(
 en el body y en la querystring: el pipe corre con `forbidNonWhitelisted` desde el 2026-09-27.
 Hasta esa fecha lo borraba callado y contestaba 200, y un filtro mal escrito o un campo que
 el DTO olvidó se veían como "guardado". Dos consecuencias al escribir un DTO: **todo lo que
-la pantalla manda tiene que estar declarado**, y un campo que se retira del contrato se
-**borra** del DTO —ya no hace falta dejarlo con un validador que siempre rechaza—. Lo que el
+la pantalla manda tiene que estar declarado**, y un campo que se retira del contrato se puede
+**borrar** del DTO: el pipe ya lo rechaza. Se deja con un validador que siempre rechaza solo si
+el 400 tiene que decir adónde ir (`UpdateItemDto.costo` y `.stock`). Lo que el
 flag no mira: los parámetros con nombre (`@Body('x')`, `@Query('x')`, sin DTO) y el interior
 de un `@IsObject()` libre.
 

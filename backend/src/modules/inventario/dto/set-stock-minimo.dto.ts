@@ -2,7 +2,7 @@ import { IsNumberString, Matches, ValidateIf } from 'class-validator';
 
 /**
  * ⚠️ Sin `origen`: todo mínimo que entra por acá es `'manual'`, y un cliente
- * no puede declararlo `'sistema'` (el `whitelist` del pipe lo descarta).
+ * no puede declararlo `'sistema'` (el pipe global rechaza el campo con 400).
  */
 export class SetStockMinimoDto {
   /**

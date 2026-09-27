@@ -1350,8 +1350,8 @@ describe('Traslados entre ubicaciones (e2e)', () => {
   //
   // Son dos casos porque son dos campos, y cada uno lo mata su propio mutante
   // por el STATUS: sacarle el `@IsUUID()` a `destinoId` deja pasar el pipe
-  // —`whitelist: true` descarta la propiedad sin decoradores— y el caso «sin
-  // destinoId» termina en 404, en el `if (!origen || !destino)` que sigue al
+  // —el campo queda sin decoradores y, ausente del body, no hay nada que
+  // rechazar— y el caso «sin destinoId» termina en 404, en el `if (!origen || !destino)` que sigue al
   // `SELECT … FOR SHARE` de `create`. Medido el 2026-09-07. La aserción sobre
   // el mensaje compra otra cosa: que el caso no pase por la razón equivocada,
   // con un 400 que venga de otro campo del mismo body.
