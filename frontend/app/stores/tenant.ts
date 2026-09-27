@@ -39,14 +39,18 @@ export const useTenantStore = defineStore('tenant', () => {
     loading.value = true
     error.value = null
     try {
-      usePermissionsStore().reset()
-      useMonedasStore().reset()
       const auth = useAuthStore()
       const data = await useApiFetch<{ access_token: string }>(
         `${apiUrl}/auth/switch-tenant`,
         { method: 'POST', body: { tenantId } },
       )
+      // Se vacían recién acá, con el token nuevo ya puesto: si el POST falla, la
+      // sesión sigue en el tenant de antes y sus permisos y monedas siguen valiendo.
+      // Y van antes de `fetchPermisos`, que no lanza: si esa carga falla, lo que
+      // queda es "sin cargar" para el tenant nuevo, no los datos del viejo.
       auth.setToken(data.access_token)
+      usePermissionsStore().reset()
+      useMonedasStore().reset()
       await usePermissionsStore().fetchPermisos()
       await navigateTo('/')
     }

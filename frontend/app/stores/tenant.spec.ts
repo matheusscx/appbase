@@ -240,6 +240,7 @@ describe('useTenantStore — switchTenant', () => {
     mockNavigateTo.mockReset()
     mockFetchPermisos.mockClear()
     mockResetPermisos.mockClear()
+    mockResetMonedas.mockClear()
   })
 
   it('llama al endpoint con el tenantId correcto', async () => {
@@ -282,6 +283,30 @@ describe('useTenantStore — switchTenant', () => {
     expect(mockFetchPermisos).toHaveBeenCalled()
     expect(mockSetToken).toHaveBeenCalledBefore(mockFetchPermisos)
     expect(mockFetchPermisos).toHaveBeenCalledBefore(mockNavigateTo)
+  })
+
+  // Los stores se vacían recién con el token nuevo en la mano: vaciarlos antes
+  // del POST dejaba a la sesión, si el POST fallaba, con el token del tenant de
+  // siempre y sus permisos y monedas borrados sin motivo.
+  it('tras el POST exitoso vacía permisos y monedas antes de recargar permisos', async () => {
+    const store = useTenantStore()
+    mockApiFetch.mockResolvedValue({ access_token: 'tok' })
+
+    await store.switchTenant('tenant-aaa')
+
+    expect(mockResetPermisos).toHaveBeenCalledBefore(mockFetchPermisos)
+    expect(mockResetMonedas).toHaveBeenCalledBefore(mockFetchPermisos)
+  })
+
+  it('si el POST falla NO toca los stores del tenant que sigue vigente', async () => {
+    const store = useTenantStore()
+    mockApiFetch.mockRejectedValue({ data: { message: 'Forbidden' } })
+
+    await store.switchTenant('tenant-aaa')
+
+    expect(mockSetToken).not.toHaveBeenCalled()
+    expect(mockResetPermisos).not.toHaveBeenCalled()
+    expect(mockResetMonedas).not.toHaveBeenCalled()
   })
 
   it('en caso de error 403 setea error.value y NO navega', async () => {

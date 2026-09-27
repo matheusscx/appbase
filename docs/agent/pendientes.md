@@ -133,15 +133,23 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   form, por ejemplo— y que pasarían de 200 a 400. Eso sale de correr el e2e de la API y el de
   navegador con la opción prendida y contar los 400 nuevos.
 
-- [ ] **Un cambio de tenant que falla deja el store de monedas vacío y nadie lo recarga.**
-  `switchTenant()` (`frontend/app/stores/tenant.ts`) llama `useMonedasStore().reset()` **antes**
-  del `POST /auth/switch-tenant`; si ese pedido o `fetchPermisos()` fallan, el `catch` no navega
-  y la pantalla montada se queda con el store reseteado —`isLoaded` en `false`, `error` en
-  `null`—, que para quien lo lee es "todavía cargando". Lo encontró la revisión de la gráfica de
-  varianza (2026-09-21): ahí se ve como el esqueleto de carga de la gráfica hasta navegar a otra
-  pantalla. Preexistente y transversal a toda pantalla que lea `monedasStore`. **Lo que falta
-  medir:** cuántas pantallas quedan en un estado sin salida por esto, y si el arreglo es
-  recargar en el `catch` o resetear recién después del éxito.
+- [ ] **Con un solo tenant, si el `switch-tenant` automático del login falla, no se avisa nada**
+  (frontend, lo destapó la medición del 2026-09-27 que cerró el reset de stores en
+  `switchTenant`, ver [`resueltos.md`](resueltos.md)). `handlePostLogin` llama `switchTenant`
+  directo cuando el usuario tiene un tenant, y el error queda en `tenantStore.error`, que
+  **ninguna** de las dos pantallas que lo invocan lee:
+  - `login.vue` solo pinta `authStore.error`. **Medido en navegador** (`admin.paris@paris.cl`,
+    `POST /auth/switch-tenant` forzado a 500): el botón deja de girar, la URL sigue en `/login`
+    y no aparece ningún mensaje. El usuario puede volver a intentar, pero no sabe qué pasó.
+  - `auth/callback.vue` (entrada por Google) no tiene rama de error: por lectura del código,
+    queda en "Iniciando sesión…" sin salida. **No medido** (hace falta el flujo de OAuth).
+  - Y un tercero, **solo leído**: el middleware `auth` llama `handlePostLogin` cuando el token
+    no trae tenant y después **deja seguir la navegación** aunque el switch haya fallado, así
+    que la pantalla destino carga con un token sin tenant (monedas vacías sin error, y lo que
+    pida al backend va sin tenant). Hay que confirmar que se alcanza antes de tocarlo.
+
+  Sale hacia la § 1 si el arreglo es "mostrar `tenantStore.error` donde se invocó", o hacia la
+  § 4 si el mensaje o la salida (¿volver a `/login`?) necesita decisión.
 
 ---
 

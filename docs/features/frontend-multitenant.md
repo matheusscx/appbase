@@ -91,7 +91,7 @@ Ver [features/auth.md](./auth.md) para el módulo auth completo.
 - `tenants: TenantItem[]` — lista de tenants del usuario
 - `activeTenant` *(computed)* — cruza `activeTenantId` con la lista
 - `fetchMyTenants()` — carga la lista desde `GET /auth/my-tenants`
-- `switchTenant(id)` — POST + `setToken` + `navigateTo('/')`; error 403 → `error.value`
+- `switchTenant(id)` — POST + `setToken` + `reset()` de permisos y monedas + `navigateTo('/')`; error 403 → `error.value`, sin tocar los stores
 
 ### Pages
 
@@ -135,6 +135,9 @@ useTenantStore.switchTenant(tenantId)
   ↓ { access_token }
 authStore.setToken(access_token)
   ↓ token.value cambia → claims re-computed → activeTenantId actualizado
+permissionsStore.reset() + monedasStore.reset()
+  ↓ recién acá: si el POST falla, la sesión sigue en el tenant de antes y sus stores valen
+permissionsStore.fetchPermisos()
 navigateTo('/')
 ```
 

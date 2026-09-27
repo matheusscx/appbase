@@ -153,8 +153,8 @@ watch(
  * middleware de ruta, o sea con la página anterior todavía montada; da igual, porque ese
  * camino produce `moneda → null`, que el guard descarta—; **(b)**
  * repoblarlo exige un `ensureLoaded()`, que en los cuatro llamadores cuelga de un `onMounted`.
- * ⚠️ Lo que NO alcanza como argumento es el `navigateTo('/')` de `switchTenant`: está dentro
- * del `try`, después del `reset()`, así que un switch fallido deja el store vacío sin navegar.
+ * ⚠️ Lo que NO alcanza como argumento es el `navigateTo('/')` de `switchTenant`: el `reset()`
+ * corre antes que él, así que el vaciado no depende de que la navegación ocurra.
  * Y tampoco alcanza mirar esos cuatro `ensureLoaded()`: `hydrate()` está exportado, así que un
  * llamador nuevo fuera de un `onMounted` rompe (b) sin tocar ninguno de los cuatro.
  * Si mañana una pantalla repuebla el store con el panel abierto, ésta es la línea a revisar.

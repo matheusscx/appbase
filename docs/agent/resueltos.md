@@ -68,6 +68,70 @@ sin decorar en el DTO (el pipe lo borra callado) y el listado ignorando el filtr
   la página 5. Hoy el `/resumen` trae `faltaCosto` como **booleano**, no un conteo, y el listado
   no tiene filtro por eso: las dos cosas faltan.
 
+## Un cambio de tenant fallido ya no vacía los stores del tenant vigente (cerrada 2026-09-27)
+
+Sale de [`pendientes.md`](pendientes.md) § 2.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Un cambio de tenant que falla deja el store de monedas vacío y nadie lo recarga.**
+  `switchTenant()` (`frontend/app/stores/tenant.ts`) llama `useMonedasStore().reset()` **antes**
+  del `POST /auth/switch-tenant`; si ese pedido o `fetchPermisos()` fallan, el `catch` no navega
+  y la pantalla montada se queda con el store reseteado —`isLoaded` en `false`, `error` en
+  `null`—, que para quien lo lee es "todavía cargando". Lo encontró la revisión de la gráfica de
+  varianza (2026-09-21): ahí se ve como el esqueleto de carga de la gráfica hasta navegar a otra
+  pantalla. Preexistente y transversal a toda pantalla que lea `monedasStore`. **Lo que falta
+  medir:** cuántas pantallas quedan en un estado sin salida por esto, y si el arreglo es
+  recargar en el `catch` o resetear recién después del éxito.
+
+### Lo medido: el síntoma descrito no se alcanza, el orden igual estaba mal
+
+**Ninguna pantalla queda "cargando" por este `reset()`.** A `switchTenant` se entra por tres
+lugares y en ninguno hay un lector de `monedasStore` montado bajo un layout que no se vuelva a
+montar:
+
+- **`select-tenant.vue`** (`layout: false`, el único camino de "Cambiar Institución"): medido en
+  navegador con el `POST` forzado a 500. Se ve el error, y al volver atrás a
+  `/reportes/varianza` el layout `dashboard` se monta de nuevo y su `onMounted` recarga
+  permisos y monedas: la pantalla se ve entera, sin esqueleto. Tampoco hay pérdida visible de
+  permisos: el menú vuelve completo.
+- **`login.vue` y `auth/callback.vue`** vía `handlePostLogin` (usuario con un solo tenant): los
+  dos son `layout: false` y no leen monedas; el store ya estaba vacío.
+- **El middleware `auth`** vía `handlePostLogin`, solo con un token **sin** tenant: ahí el store
+  también está vacío por otra razón (`ensureLoaded` sale sin `activeTenantId`), así que el
+  orden del `reset()` no cambia nada.
+
+Y **`fetchPermisos()` nunca lanza**: atrapa su propio error y deja `permissionsStore.error`. O
+sea que "falla `fetchPermisos`" no llegaba al `catch`: `switchTenant` navega igual a `/`.
+
+Lo que sí estaba mal: con el `POST` fallido, la sesión **sigue en el tenant de antes** —el token
+no cambió— y el `reset()` le borraba permisos y monedas que seguían valiendo, forzando a
+recargarlos. Medido en navegador, al volver atrás: antes del arreglo la pantalla pedía
+`/rbac/mis-permisos`, `/rbac/es-admin` y `/monedas`; después no los pide, porque no los perdió.
+
+### Qué se hizo
+
+`switchTenant` vacía los dos stores **recién después de `setToken`**, y **antes** de
+`fetchPermisos`. Es lo que el owner prefirió frente a recargar en el `catch` (sin reintento
+automático). El caso intermedio —`POST` bien, `fetchPermisos` mal— se decidió así: el token ya
+es del tenant nuevo, así que los stores del viejo son **ajenos** y no pueden quedar. Vaciarlos
+antes de la carga deja "sin cargar" para el tenant nuevo, que es lo verdadero, y la
+navegación a `/` sigue: el middleware `permiso` no expulsa cuando `error` está puesto, y el
+layout carga lo que falta al montar, como siempre hizo. Mantener los permisos del tenant
+viejo en ese hueco sería mostrar un menú que el backend va a rechazar.
+
+**Qué lo fija:** dos casos nuevos en `app/stores/tenant.spec.ts`. El `POST` fallido no toca
+ningún store: es el que mata el orden viejo (medido, falla contra el código anterior). Y que los
+dos `reset()` ocurran antes de `fetchPermisos`: el código anterior ya lo cumplía, así que no
+prueba el arreglo sino que el arreglo no se pase de largo (mata bajarlos después de la carga y
+sacar el de monedas, medido). Si van antes o después de `setToken` no se fija: pasan en el mismo tick y los dos
+órdenes son correctos. No lleva
+e2e de navegador: la conducta visible es la misma antes y después, y un spec que afirmara
+"no se piden `/monedas`" probaría la implementación y no lo que el usuario ve.
+
+**Lo que la medición destapó aparte**, y quedó como entrada propia en `pendientes.md` § 2: con un
+solo tenant, si el `switch-tenant` automático del login falla, `login.vue` no muestra nada.
+
 ## Aviso de stock bajo (cerrada 2026-09-21)
 
 Sale de [`pendientes.md`](pendientes.md) § 4. **Qué se construyó:** un mínimo por (producto,
