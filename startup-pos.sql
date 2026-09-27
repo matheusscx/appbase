@@ -1120,6 +1120,31 @@ CREATE TABLE "compra_lineas" (
 );
 CREATE INDEX "idx_compra_lineas_compra" ON "compra_lineas" ("compra_id");
 
+-- Cómo le viene un producto a un proveedor: "Caja" de 12 unidad, "Saco" de 25
+-- kg (spec compras-unidad-de-compra § 3.1). Por (proveedor, producto): otro
+-- proveedor puede traerlo en pack de 6 (owner, decisión 4b). El contenido se
+-- guarda como se tipeó, no convertido.
+CREATE TABLE "presentaciones_compra" (
+  "presentacion_compra_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"              UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "proveedor_id"           UUID          NOT NULL REFERENCES "terceros" ("tercero_id"),
+  "item_id"                UUID          NOT NULL REFERENCES "items" ("item_id"),  -- producto o ingrediente, por cantidad o lote
+  "nombre"                 VARCHAR(40)   NOT NULL,   -- "Caja", "Pack", "Saco"
+  "contenido"              NUMERIC(18,4) NOT NULL,   -- cuánto trae, > 0
+  "unidad_codigo"          TEXT          NOT NULL,   -- compatible con la unidad base del producto
+  "creado_el"              TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"         TIMESTAMPTZ,
+  "eliminado_el"           TIMESTAMPTZ               -- retirar es marcar, nunca borrar
+);
+CREATE INDEX "idx_presentaciones_compra_proveedor" ON "presentaciones_compra" ("tenant_id", "proveedor_id");
+-- Sobre lower(nombre): dos "Caja" vivas del mismo par no se distinguen en el
+-- selector, pero una retirada no bloquea el nombre. La crea el SEEDER, no la
+-- entity (TypeORM no expresa una función en @Index) — ver
+-- `docs/patterns/backend.md`, "Entity o seeder".
+CREATE UNIQUE INDEX "uq_presentaciones_compra_nombre"
+  ON "presentaciones_compra" ("tenant_id", "proveedor_id", "item_id", lower("nombre"))
+  WHERE "eliminado_el" IS NULL;
+
 -- FK diferida de movimientos_inventario (depende de compra_lineas)
 ALTER TABLE "movimientos_inventario" ADD FOREIGN KEY ("compra_linea_id") REFERENCES "compra_lineas" ("compra_linea_id");
 

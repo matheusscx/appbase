@@ -9,8 +9,10 @@ import { Compra } from './entities/compra.entity';
 import { CompraLinea } from './entities/compra-linea.entity';
 import { CompraLineaCambio } from './entities/compra-linea-cambio.entity';
 import { TipoDocumentoCompra } from './entities/tipo-documento-compra.entity';
+import { PresentacionCompra } from './entities/presentacion-compra.entity';
 import { ComprasController } from './compras.controller';
 import { ComprasService } from './compras.service';
+import { PresentacionesCompraService } from './presentaciones-compra.service';
 
 @Module({
   imports: [
@@ -19,6 +21,7 @@ import { ComprasService } from './compras.service';
       CompraLinea,
       CompraLineaCambio,
       TipoDocumentoCompra,
+      PresentacionCompra,
     ]),
     // `crearConversor`: la unidad de cada línea tiene que ser compatible con
     // la base del producto.
@@ -38,7 +41,7 @@ import { ComprasService } from './compras.service';
     CalculoPreciosModule,
   ],
   controllers: [ComprasController],
-  providers: [ComprasService],
-  exports: [ComprasService],
+  providers: [ComprasService, PresentacionesCompraService],
+  exports: [ComprasService, PresentacionesCompraService],
 })
 export class ComprasModule {}

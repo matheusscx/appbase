@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -18,6 +19,7 @@ import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { ComprasService } from './compras.service';
+import { PresentacionesCompraService } from './presentaciones-compra.service';
 import { CompraBorradorDto } from './dto/compra-borrador.dto';
 import { FindComprasDto } from './dto/find-compras.dto';
 import { AnularCompraDto } from './dto/anular-compra.dto';
@@ -25,6 +27,11 @@ import {
   CorregirDescuentoDto,
   CorregirLineaDto,
 } from './dto/corregir-compra.dto';
+import {
+  CrearPresentacionCompraDto,
+  EditarPresentacionCompraDto,
+  ListarPresentacionesCompraDto,
+} from './dto/presentacion-compra.dto';
 
 /**
  * Módulo propio `Compras` (spec compras-recepcion § 5): el que recibe no es
@@ -37,7 +44,10 @@ import {
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('compras')
 export class ComprasController {
-  constructor(private readonly comprasService: ComprasService) {}
+  constructor(
+    private readonly comprasService: ComprasService,
+    private readonly presentacionesService: PresentacionesCompraService,
+  ) {}
 
   @Get('tipos-documento')
   @RequiresPermiso('Compras', 'Leer')
@@ -64,6 +74,53 @@ export class ComprasController {
   productos(@Req() req: Request) {
     const { tenantId } = req.user as { tenantId: string };
     return this.comprasService.productos(tenantId);
+  }
+
+  /**
+   * Cómo le viene cada producto a un proveedor (spec compras-unidad-de-compra
+   * § 5). `Crear`: se crean, corrigen y retiran en plena carga del borrador
+   * (owner, 2026-09-27), es operación del módulo y no configuración del admin.
+   */
+  @Get('presentaciones')
+  @RequiresPermiso('Compras', 'Crear')
+  presentaciones(
+    @Req() req: Request,
+    @Query() query: ListarPresentacionesCompraDto,
+  ) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.presentacionesService.listar(tenantId, query.proveedorId);
+  }
+
+  @Post('presentaciones')
+  @RequiresPermiso('Compras', 'Crear')
+  crearPresentacion(
+    @Req() req: Request,
+    @Body() dto: CrearPresentacionCompraDto,
+  ) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.presentacionesService.crear(tenantId, dto);
+  }
+
+  @Patch('presentaciones/:id')
+  @RequiresPermiso('Compras', 'Crear')
+  editarPresentacion(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: EditarPresentacionCompraDto,
+  ) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.presentacionesService.editar(tenantId, id, dto);
+  }
+
+  @Delete('presentaciones/:id')
+  @HttpCode(204)
+  @RequiresPermiso('Compras', 'Crear')
+  retirarPresentacion(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.presentacionesService.retirar(tenantId, id);
   }
 
   @Get()

@@ -4102,6 +4102,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedProductoDemoVentas();
     await this.seedSuscripcionDemo();
     await this.seedIngredientesBase();
+    await this.seedPresentacionesCompra();
     await this.seedPapasFritas();
     await this.seedGruposModificadores();
     await this.seedComboEspecial();
@@ -4451,6 +4452,39 @@ export class SeederService implements OnApplicationBootstrap {
         [ing.movIdBodega, PARIS, ing.id, ing.stockBodega, ing.costo, bodegaId],
       );
     }
+  }
+
+  /**
+   * Presentaciones de compra (spec compras-unidad-de-compra § 3.1). El índice
+   * va acá y no en la entity: es sobre `lower(nombre)` y TypeORM no sabe
+   * expresar una función en `@Index` (`docs/patterns/backend.md`, "Entity o
+   * seeder"). Se crea siempre, antes del early-return, porque `synchronize`
+   * no lo conoce.
+   *
+   * IDs 450-451: el máximo literal previo era 449 y `uuid(450)`/`uuid(451)`
+   * no aparecían en ningún generador dinámico del archivo (verificado
+   * 2026-09-27, `docs/patterns/backend.md` §8).
+   */
+  private async seedPresentacionesCompra(): Promise<void> {
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_presentaciones_compra_nombre
+      ON presentaciones_compra (tenant_id, proveedor_id, item_id, lower(nombre))
+      WHERE eliminado_el IS NULL
+    `);
+    const uuid = (suffix: number): string =>
+      `550e8400-e29b-41d4-a716-44665544${String(suffix).padStart(4, '0')}`;
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const ANDINA = '550e8400-e29b-41d4-a716-446655440147';
+    const PAN_ID = uuid(256); // Pan de hamburguesa, en unidad
+    const CARNE_ID = uuid(257); // Carne molida, en kg
+    await this.dataSource.query(
+      `INSERT INTO presentaciones_compra
+         (presentacion_compra_id, tenant_id, proveedor_id, item_id, nombre, contenido, unidad_codigo)
+       VALUES ($1, $2, $3, $4, 'Bolsa', '24', 'unidad'),
+              ($5, $2, $3, $6, 'Caja', '10', 'kg')
+       ON CONFLICT (presentacion_compra_id) DO NOTHING`,
+      [uuid(450), PARIS, ANDINA, PAN_ID, uuid(451), CARNE_ID],
+    );
   }
 
   /**

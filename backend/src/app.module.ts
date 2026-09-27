@@ -169,6 +169,7 @@ import { Compra } from './modules/compras/entities/compra.entity';
 import { CompraLinea } from './modules/compras/entities/compra-linea.entity';
 import { CompraLineaCambio } from './modules/compras/entities/compra-linea-cambio.entity';
 import { TipoDocumentoCompra } from './modules/compras/entities/tipo-documento-compra.entity';
+import { PresentacionCompra } from './modules/compras/entities/presentacion-compra.entity';
 import { ComprasModule } from './modules/compras/compras.module';
 // Reportes de negocio. Sin entidades que sumar al array `entities` de abajo:
 // los reportes solo LEEN tablas que ya registran sus módulos dueños.
@@ -312,6 +313,7 @@ import { ReportesModule } from './modules/reportes/reportes.module';
           Compra,
           CompraLinea,
           CompraLineaCambio,
+          PresentacionCompra,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),

@@ -31,10 +31,16 @@ compras.
 
 ### Scope
 
-- **Esta pieza:** borrador, confirmar, completar y corregir precio y cantidad, descuento al total,
-  anular, historial de correcciones y el módulo `Compras` con sus cuatro permisos.
-- **Piezas siguientes, cada una con su spec:** la unidad de compra por proveedor ("caja de 12"),
-  la deuda con el proveedor y sus pagos, y los gastos sin stock.
+- **Pieza 1 (esta sección):** borrador, confirmar, completar y corregir precio y cantidad,
+  descuento al total, anular, historial de correcciones y el módulo `Compras` con sus cuatro
+  permisos.
+- **Pieza 2 (en construcción):** la unidad de compra por proveedor ("Caja (12)", "Saco (25 kg)"):
+  tabla `presentaciones_compra`, su CRUD (`GET/POST/PATCH/DELETE /compras/presentaciones`) y el
+  seed. Deja endpoints que la pantalla todavía no usa — la línea con presentación (validación del
+  borrador, confirmar con lo congelado) y la pantalla vienen en las tareas 2 y 3. Spec:
+  [`2026-09-27-compras-unidad-de-compra-design.md`](../superpowers/specs/2026-09-27-compras-unidad-de-compra-design.md).
+- **Piezas siguientes, cada una con su spec:** la deuda con el proveedor y sus pagos, y los gastos
+  sin stock.
 - **Fuera:** orden de compra, devolución al proveedor, moneda extranjera, flete y la lectura del
   DTE del SII. ⛔ **Todo lo fiscal** va en su propio frente: mientras tanto, el costo es lo que
   dice la línea del documento.
@@ -145,6 +151,17 @@ Todas bajo `JwtAuthGuard + TenantGuard + PermisosGuard`, con el `tenant_id` del 
 | `PATCH /compras/:id/lineas/:lineaId` con `{ precioUnitario?, cantidad?, series?, unidadIds? }` | Actualizar |
 | `PATCH /compras/:id/descuento` con `{ descuentoTotal }` (clave obligatoria; `null` lo quita) | Actualizar |
 | `POST /compras/:id/anular` con `{ motivo }` | Anular |
+| `GET /compras/presentaciones?proveedorId=`: las vivas del proveedor | Crear |
+| `POST /compras/presentaciones` con `{ proveedorId, itemId, nombre, contenido, unidadCodigo }` | Crear |
+| `PATCH /compras/presentaciones/:id` con `{ nombre?, contenido?, unidadCodigo? }` (ausente no toca; `null` es 400) | Crear |
+| `DELETE /compras/presentaciones/:id` (204; retira, marca `eliminado_el`) | Crear |
+
+**Las cuatro rutas de `presentaciones` son pieza 2** (spec compras-unidad-de-compra § 5): cómo le
+viene un producto a un proveedor ("Caja (12)", "Saco (25 kg)"), por (proveedor, producto). `Crear`
+en las cuatro porque se crean, corrigen y retiran en plena carga del borrador — es operación del
+módulo, no configuración del admin. Nombre repetido entre las vivas del mismo par: 409. Proveedor
+que no es proveedor vivo, producto sin stock, por serie o contenido fuera de la unidad
+compatible/precisión: 400.
 
 **Las listas que usa la pantalla son de Compras, no de Ítems** (owner, 2026-09-19): quien recibe
 mercadería elige el producto sin permiso sobre el catálogo, que muestra precios de venta y deja

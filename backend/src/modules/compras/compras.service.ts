@@ -27,6 +27,11 @@ import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import { MonedasService } from '../monedas/monedas.service';
 import { costearLineas } from './reparto-descuento';
+// `TIPOS_CON_STOCK` nació acá y se movió a `presentaciones-compra.service.ts`
+// (Tarea 1 de compras-unidad-de-compra): esta clase va a importar
+// `PresentacionesCompraService` en la Tarea 2, y si la constante siguiera acá
+// ese import sería circular.
+import { TIPOS_CON_STOCK } from './presentaciones-compra.service';
 import type { EstadoCompra } from './entities/compra.entity';
 import type {
   LoteCompraInput,
@@ -239,15 +244,6 @@ interface EncabezadoValidado {
   proveedorNombre: string;
   tipoDocumentoNombre: string;
 }
-
-/**
- * Los tipos de ítem que llevan stock: los dos que tienen `item_producto`. Es
- * la misma pareja que aceptan mermas y el ajuste de stock
- * (`docs/features/tipo-ingrediente.md`): un restaurante compra sobre todo
- * ingredientes —la harina, el tomate—, así que dejarlos afuera dejaría el caso
- * principal sin camino.
- */
-const TIPOS_CON_STOCK = ['producto', 'ingrediente'];
 
 /**
  * `SELECT` de la cabecera, común al listado y al detalle para que no se
