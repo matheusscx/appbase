@@ -1,5 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { type INestApplication, ValidationPipe } from '@nestjs/common';
+import { type INestApplication } from '@nestjs/common';
+import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
@@ -283,9 +284,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     tokenCajero = await login(app, VENDEDOR_EMAIL, VENDEDOR_PASS);
@@ -1508,9 +1507,7 @@ describe('Caja (e2e) — modo ciego oculta resumen y movimientos del turno', () 
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
     ds = app.get(DataSource);
 
@@ -1646,9 +1643,7 @@ describe('Caja (e2e) — el modo ciego NO aplica al admin (ve en vivo)', () => {
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
     ds = app.get(DataSource);
 
@@ -1774,9 +1769,7 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al supervisor no-admin', () =>
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
     ds = app.get(DataSource);
 
@@ -1967,9 +1960,7 @@ describe('Caja (e2e) — aislamiento multi-tenant', () => {
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     tokenParis = await loginEn(PARIS_TENANT_ID);
@@ -2330,9 +2321,7 @@ describe('Caja (e2e) — el encargado (Cajas:Actualizar, no admin) fuerza el cie
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
@@ -2453,9 +2442,7 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al encargado que fuerza (no ad
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
     ds = app.get(DataSource);
 

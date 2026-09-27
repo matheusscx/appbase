@@ -1,5 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { type INestApplication, ValidationPipe } from '@nestjs/common';
+import { type INestApplication } from '@nestjs/common';
+import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
@@ -102,9 +103,7 @@ describe('Membresía (e2e): el tenant no se puede quedar sin administradores', (
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     const login = await request(app.getHttpServer())
@@ -354,9 +353,7 @@ describe('Membresía (e2e): la baja pregunta por el garzón vinculado', () => {
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     token = await entrar(

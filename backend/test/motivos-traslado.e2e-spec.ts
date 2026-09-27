@@ -1,5 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { type INestApplication, ValidationPipe } from '@nestjs/common';
+import { type INestApplication } from '@nestjs/common';
+import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
@@ -73,9 +74,7 @@ describe('Motivos de traslado (e2e) — CRUD admin-only + reglas de es_fijo', ()
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);

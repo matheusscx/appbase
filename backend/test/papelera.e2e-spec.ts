@@ -1,5 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { type INestApplication, ValidationPipe } from '@nestjs/common';
+import { type INestApplication } from '@nestjs/common';
+import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
@@ -102,9 +103,7 @@ describe('Papelera (e2e) — categorías, patrón de referencia', () => {
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
@@ -233,9 +232,7 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     ds = app.get(DataSource);
@@ -695,9 +692,7 @@ describe('Papelera (e2e) — motivos de baja, SQL cruda + colisión de nombre', 
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
@@ -859,9 +854,7 @@ describe('Papelera (e2e) — items, restaurar INACTIVO + colateral acotado por t
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
@@ -1142,9 +1135,7 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     ds = app.get(DataSource);
@@ -1411,9 +1402,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
@@ -2227,9 +2216,7 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     ds = app.get(DataSource);
@@ -2446,9 +2433,7 @@ describe('Papelera (e2e) — familia SQL cruda con nombre único: grupos-modific
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
@@ -2815,9 +2800,7 @@ describe('Papelera (e2e) — restaurar no revive una receta, un combo o un grupo
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
     ds = app.get(DataSource);
     token = await login(app, ADMIN_EMAIL, ADMIN_PASS);

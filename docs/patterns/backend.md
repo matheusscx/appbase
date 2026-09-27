@@ -454,6 +454,24 @@ desarrolla, nunca para cerrar.
 
 ---
 
+### E2E de API: el pipe global sale de `validacionGlobal()`, nunca de una copia (2026-09-27)
+
+El e2e no ejecuta `main.ts`: cada spec arma su app. El `ValidationPipe` se instala así, igual
+que en `main.ts`:
+
+```ts
+import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
+// …
+app.useGlobalPipes(validacionGlobal());
+```
+
+Hasta esta fecha estaba copiado a mano 112 veces en 88 specs, y cambiar la configuración en
+`main.ts` dejaba al e2e probando el pipe viejo: la suite en verde hablaba de una API que ya era
+otra. Construir un `ValidationPipe` propio, o instalar otro pipe junto al compartido, lo frena
+`src/common/invariants/validacion-global.invariant.spec.ts` (corre en `npm test`).
+
+---
+
 ### E2E de API: todo `.body` del que se saca un valor lleva su `expect(...status)` al lado
 
 En `test/*.e2e-spec.ts`, **leer un campo de una respuesta sin haber afirmado su status

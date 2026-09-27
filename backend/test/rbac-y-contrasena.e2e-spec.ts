@@ -1,5 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { type INestApplication, ValidationPipe } from '@nestjs/common';
+import { type INestApplication } from '@nestjs/common';
+import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import type { App } from 'supertest/types';
@@ -92,9 +93,7 @@ describe('RBAC y cambio de contraseña (e2e)', () => {
     // que el e2e no ejecuta. Sin esto el refresh da 401 siempre y el test de
     // abajo pasaría por el motivo equivocado.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
     dataSource = app.get(DataSource);
     tokens = app.get(TokensAccesoService);

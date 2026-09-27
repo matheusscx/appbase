@@ -1,5 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { type INestApplication, ValidationPipe } from '@nestjs/common';
+import { type INestApplication } from '@nestjs/common';
+import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
@@ -127,9 +128,7 @@ describe('Recuentos — catálogo de motivos de diferencia (e2e)', () => {
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     token = await login(app);
@@ -252,9 +251,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     token = await login(app);
@@ -710,9 +707,7 @@ describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () 
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     token = await login(app);
@@ -1026,9 +1021,7 @@ describe('Recuentos — aplicar (e2e)', () => {
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     token = await login(app);
@@ -1248,9 +1241,7 @@ describe('Recuentos — la asimetría contar/aprobar (e2e)', () => {
     // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     tokenContador = await loginParisComo(app, 'contador@paris.cl');
@@ -1393,9 +1384,7 @@ describe('Recuentos — por ubicación', () => {
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
     app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(validacionGlobal());
     await app.init();
 
     token = await login(app);
