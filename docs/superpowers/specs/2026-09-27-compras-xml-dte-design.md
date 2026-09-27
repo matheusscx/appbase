@@ -171,7 +171,7 @@ y al proveedor validado.
 | `tenant_id` | `uuid` NOT NULL | Del token |
 | `proveedor_id` | `uuid` NOT NULL | Un `tercero` proveedor vivo del tenant |
 | `clave` | `varchar(160)` NOT NULL | § 3.2. 160 alcanza para `TpoCodigo` (10) + `VlrCodigo` (35) y para `NmbItem` (80) |
-| `descripcion` | `varchar(80)` NOT NULL | El último `NmbItem` visto, para mostrar qué calzó |
+| `descripcion` | `varchar(80)` NOT NULL | El `NmbItem` de cuando se aprendió, para mostrar qué calzó |
 | `no_mercaderia` | `boolean` NOT NULL default false | |
 | `item_id` | `uuid` NULL | |
 | `presentacion_compra_id` | `uuid` NULL | |
@@ -209,8 +209,11 @@ borrador que después se borra ya enseñó; queda a la vista y se corrige en la 
 
 `POST /compras/dte/lectura` (§ 7) resuelve todas las claves de la factura **en una consulta**
 (`clave = ANY($1)`, vivas, con el producto y la presentación vivos por `JOIN`). Si el destino
-se retiró o se borró después, la línea llega **por asociar** con la nota "antes apuntaba a
-Caja (24), que fue retirada": nunca pre-llena algo que ya no existe.
+se retiró o se borró después, la línea llega **por asociar** con una nota genérica ("la
+presentación a la que apuntaba fue retirada" / "el producto al que apuntaba ya no está"): nunca
+pre-llena algo que ya no existe. La nota **no nombra** la presentación retirada a propósito:
+nombrarla obligaría a leer una fila borrada, una lectura sin el filtro de `eliminado_el`
+(invariante 3) para un texto de ayuda (corregido al planificar, 2026-09-27).
 
 ## 6. Pantalla
 
@@ -257,7 +260,7 @@ borrador). Es una lectura; va por POST por el tamaño del body.
 
 ```
 body: {
-  emisorRut, emisorRazonSocial, receptorRut, tipoDte, folio,
+  emisorRut, receptorRut, tipoDte, folio,  // la razón social no viaja: el servidor no la usa
   proveedorId?,                          // cuando el encargado lo eligió a mano
   claves: string[]                       // hasta 60, cada una ≤ 160
 }
@@ -270,7 +273,7 @@ respuesta: {
   asociaciones: {
     clave,
     destino: { itemId, presentacionId | unidadCodigo } | 'no_mercaderia' | null,
-    nota?: string                        // "antes apuntaba a Caja (24), que fue retirada"
+    nota?: string                        // "la presentación a la que apuntaba fue retirada"
   }[]
 }
 ```
