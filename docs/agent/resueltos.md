@@ -167,6 +167,9 @@ sobre esos números —cero pantallas, el costo son tests— y el frente se abri
    `property costo should not exist`. El motivo que la entrada daba —el borrado silencioso—
    murió con el flag; el del mensaje sigue vivo, y es el que ahora dice su comentario. Si se
    prefiere el 400 genérico, es sacar los dos campos y reescribir esos cuatro tests.
+   ✅ **Confirmado por el owner el 2026-09-27**: la sesión lo decidió y la orquestadora se lo
+   planteó ("¿los dejamos por el mensaje útil?", con la alternativa del 400 genérico); el owner
+   eligió dejarlos.
 
 ### La entrada que cierra, como estaba en `pendientes.md` § 4
 
