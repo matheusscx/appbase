@@ -125,8 +125,9 @@ login() / register() / googleCallback()
               └─ >1 tenants → navigateTo('/select-tenant')
 
 Con `false`, quien lo llamó vuelve a /login, que muestra authStore.error: el login
-se queda donde está, y el callback de Google y el middleware navegan ahí (owner,
-2026-09-27). Nada se reintenta solo: la persona vuelve a entrar.
+se queda donde está, y el callback de Google y el middleware navegan ahí. El aviso es
+propio, "No pudimos entrar a tu empresa. Intenta de nuevo.", y no el texto del servidor
+(owner, 2026-09-27). Nada se reintenta solo: la persona vuelve a entrar.
 
 /select-tenant
   └─ usuario elige → switchTenant(id) → navigateTo('/')

@@ -22,6 +22,9 @@ import { API } from '../support/api'
 test.use({ storageState: { cookies: [], origins: [] } })
 
 const EMAIL = 'admin.paris@paris.cl'
+// Texto propio, no el del servidor (owner, 2026-09-27). El 500 forzado trae otro
+// mensaje a propósito: si la pantalla mostrara el del servidor, esto falla.
+const AVISO = 'No pudimos entrar a tu empresa. Intenta de nuevo.'
 const PASSWORD = 'admin'
 
 async function fallar(page: Page, ruta: string) {
@@ -46,7 +49,7 @@ test('login: si falla el switch automático, avisa y se queda en /login', async 
   await fallar(page, 'switch-tenant')
   await entrar(page)
 
-  await expect(page.getByText('Internal server error')).toBeVisible()
+  await expect(page.getByText(AVISO)).toBeVisible()
   await expect(page).toHaveURL(/\/login$/)
 })
 
@@ -54,7 +57,7 @@ test('login: si falla my-tenants, avisa en vez de decir que no tiene empresa', a
   await fallar(page, 'my-tenants')
   await entrar(page)
 
-  await expect(page.getByText('Internal server error')).toBeVisible()
+  await expect(page.getByText(AVISO)).toBeVisible()
   await expect(page).toHaveURL(/\/login$/)
   await expect(page.getByText('Sin acceso a empresas')).toHaveCount(0)
 })
@@ -70,7 +73,7 @@ test('callback de Google: si falla el switch, vuelve al login con el aviso', asy
   await page.goto(`/auth/callback?token=${access_token}`)
 
   await expect(page).toHaveURL(/\/login$/)
-  await expect(page.getByText('Internal server error')).toBeVisible()
+  await expect(page.getByText(AVISO)).toBeVisible()
 })
 
 test('middleware: con un token sin tenant y el switch fallando, vuelve al login con el aviso', async ({ page, request }) => {
@@ -85,6 +88,6 @@ test('middleware: con un token sin tenant y el switch fallando, vuelve al login 
   await page.goto('/')
 
   await expect(page).toHaveURL(/\/login$/)
-  await expect(page.getByText('Internal server error')).toBeVisible()
+  await expect(page.getByText(AVISO)).toBeVisible()
   await expect(page.getByText('Trabajando en')).toHaveCount(0)
 })

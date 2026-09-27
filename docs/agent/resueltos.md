@@ -66,30 +66,38 @@ respuesta forzada a 500 desde el navegador:
 
 ### Qué se hizo
 
-`handlePostLogin` copia a `authStore.error` el error de `fetchMyTenants` o de `switchTenant`,
-devuelve `false` y no navega. Es el `error` que el login ya pintaba, así que el caso del login
-no necesitó tocar la pantalla. Además limpia `error` al empezar, para que un intento anterior
-no quede pegado sobre uno que salió bien.
+Si `fetchMyTenants` o `switchTenant` fallan, `handlePostLogin` deja un aviso en
+`authStore.error`, devuelve `false` y no navega. Es el `error` que el login ya pintaba, así que
+el caso del login no necesitó tocar la pantalla. Además limpia `error` al empezar, para que un
+intento anterior no quede pegado sobre uno que salió bien.
 
-**La salida de los otros dos la eligió el owner** (opción A, 2026-09-27): el callback y el
-middleware vuelven a `/login`, que muestra el aviso. En el middleware eso obliga a escribir la
-clave de nuevo. La alternativa descartada (B) era mandar a "¿En qué empresa vas a trabajar?"
-con el único local para tocar: no pedía la clave, pero mostraba una pantalla de elegir con una
-sola opción y eran dos toques. Nada se reintenta solo: la persona vuelve a entrar.
+**La decisión del owner** (César, 2026-09-27). La pregunta llegó en lenguaje de local, con la
+escena de la dueña de un café con un solo local, por la sesión orquestadora ("Listado de
+sesiones activas"). Contestó dos veces: "A" en la sesión del frente y "A y con el texto propio"
+a la orquestadora.
 
-**El texto no cambió:** es el mismo mecanismo que el resto de la app, `apiErrorMsg` sobre lo
-que manda el servidor. Con un 500 se lee *"Internal server error"*, en inglés. El dato se le
-pasó a la orquestadora para que llegara junto con la pregunta; la respuesta del owner fue solo
-"A", sin decir nada del texto.
+- **Salida (A):** el callback y el middleware vuelven a `/login`, que muestra el aviso. Los tres
+  caminos terminan igual. En el middleware eso obliga a escribir la clave de nuevo.
+- **Descartada (B):** mandar a "¿En qué empresa vas a trabajar?" con el único local para tocar.
+  No pedía la clave, pero mostraba una pantalla de elegir con una sola opción, que hoy nunca ve,
+  y su aviso trae "Reintentar", que recarga la lista antes de dejar tocar el local: dos toques.
+- **Por qué A:** la sesión la recomendó porque deja el error en un solo lugar e igual en los tres
+  casos. El owner la eligió sin agregar un motivo propio.
+- **Texto propio:** *"No pudimos entrar a tu empresa. Intenta de nuevo."*, para el switch y para
+  el gemelo de `my-tenants`, en vez del que manda el servidor (con un 500 se leía *"Internal
+  server error"*, en inglés). Va en tuteo porque así habla la pantalla de login (*"¿No tienes
+  cuenta?"*). El resto de la app sigue mostrando el texto del servidor: eso no entró acá.
+
+Nada se reintenta solo: la persona vuelve a entrar.
 
 ### Qué lo fija
 
 - `app/stores/auth.spec.ts`, 4 casos de `handlePostLogin`: falla el switch; falla
   `my-tenants`; sin tenants de verdad sigue yendo a `/no-tenant` (el control que deja pasar); y
-  el éxito limpia el error anterior. Mutantes medidos, cada uno mata solo su caso: sacar la
-  copia del error de `my-tenants` y sacar la del switch, las dos conservando el `return false`
-  para que muera la aserción del mensaje y no la del retorno; y sacar el `error.value = null`
-  inicial.
+  el éxito limpia el error anterior. El fixture manda un mensaje de servidor distinto del aviso,
+  así que mostrar el del servidor falla. Mutantes medidos, cada uno mata solo su caso: mostrar
+  el texto del servidor en la rama de `my-tenants`, y lo mismo en la del switch (las dos mueren
+  por la aserción del texto); y sacar el `error.value = null` inicial.
 - `app/middleware/auth.spec.ts`: `false` manda a `/login`, y `true` no. El mutante que vuelve
   al `await` sin mirar el resultado mata el primero.
 - `e2e/tenants/entrada-fallida.spec.ts`, uno por camino (login con el switch, login con

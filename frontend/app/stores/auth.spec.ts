@@ -238,8 +238,12 @@ describe('useAuthStore — handlePostLogin avisa cuando no pudo entrar al tenant
   // `auth`— leen `authStore.error`. El error de `my-tenants` o de
   // `switch-tenant` quedaba en `tenantStore.error`, que ninguna lee: medido en
   // navegador, el login se quedaba quieto sin mensaje y el callback, girando.
+  //
+  // El texto es propio y no el del servidor (owner, 2026-09-27): el fixture manda
+  // otro mensaje a propósito, para que mostrar el del servidor falle.
   const navigateToMock = vi.mocked(navigateTo)
   const TENANT = { tenantId: 't1', nombre: 'Café Central' }
+  const AVISO = 'No pudimos entrar a tu empresa. Intenta de nuevo.'
 
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -247,7 +251,7 @@ describe('useAuthStore — handlePostLogin avisa cuando no pudo entrar al tenant
     navigateToMock.mockReset()
   })
 
-  it('con un tenant, si el switch falla deja el mensaje en authStore.error', async () => {
+  it('con un tenant, si el switch falla deja el aviso en authStore.error', async () => {
     const store = useAuthStore()
     mockApiFetch
       .mockResolvedValueOnce([TENANT]) // my-tenants
@@ -256,7 +260,7 @@ describe('useAuthStore — handlePostLogin avisa cuando no pudo entrar al tenant
     const ok = await store.handlePostLogin()
 
     expect(ok).toBe(false)
-    expect(store.error).toBe('Internal server error')
+    expect(store.error).toBe(AVISO)
     expect(navigateToMock).not.toHaveBeenCalled()
   })
 
@@ -270,7 +274,7 @@ describe('useAuthStore — handlePostLogin avisa cuando no pudo entrar al tenant
     const ok = await store.handlePostLogin()
 
     expect(ok).toBe(false)
-    expect(store.error).toBe('Internal server error')
+    expect(store.error).toBe(AVISO)
     expect(navigateToMock).not.toHaveBeenCalledWith('/no-tenant')
   })
 
@@ -287,7 +291,7 @@ describe('useAuthStore — handlePostLogin avisa cuando no pudo entrar al tenant
 
   it('con un tenant y el switch exitoso entra a / y limpia un error anterior', async () => {
     const store = useAuthStore()
-    store.error = 'Internal server error' // de un intento anterior
+    store.error = AVISO // de un intento anterior
     const conTenant = makeToken({ sub: 'u1', email: 'a@b.com', tenant_id: 't1', es_superadmin: false, iat: 0, exp: 9999 })
     mockApiFetch.mockImplementation(async (url: string) => {
       if (url.endsWith('/auth/my-tenants')) return [TENANT]

@@ -14,6 +14,8 @@ export interface User {
   preferencias?: UsuarioPreferencias
 }
 
+const AVISO_SIN_EMPRESA = 'No pudimos entrar a tu empresa. Intenta de nuevo.'
+
 export const useAuthStore = defineStore('auth', () => {
   const apiUrl = useRuntimeConfig().public.apiUrl
 
@@ -138,15 +140,16 @@ export const useAuthStore = defineStore('auth', () => {
   // 1 tenant  → switch-tenant automático → /
   // >1 tenants → /select-tenant
   //
-  // Si `my-tenants` o el switch fallan, el mensaje se copia a `error` —el que
-  // leen las tres pantallas que llegan acá— y devuelve `false` sin navegar:
-  // una lista vacía por error no es "no pertenecés a ninguna empresa".
+  // Si `my-tenants` o el switch fallan, deja el aviso en `error` —el que lee el
+  // login, adonde vuelven las tres pantallas que llegan acá— y devuelve `false`
+  // sin navegar: una lista vacía por error no es "no pertenecés a ninguna
+  // empresa". El texto es propio y no el del servidor (owner, 2026-09-27).
   async function handlePostLogin(): Promise<boolean> {
     error.value = null
     const tenantStore = useTenantStore()
     await tenantStore.fetchMyTenants()
     if (tenantStore.error) {
-      error.value = tenantStore.error
+      error.value = AVISO_SIN_EMPRESA
       return false
     }
     const list = tenantStore.tenants
@@ -155,7 +158,7 @@ export const useAuthStore = defineStore('auth', () => {
     } else if (list.length === 1) {
       await tenantStore.switchTenant(list[0]!.tenantId)
       if (tenantStore.error) {
-        error.value = tenantStore.error
+        error.value = AVISO_SIN_EMPRESA
         return false
       }
     } else {
