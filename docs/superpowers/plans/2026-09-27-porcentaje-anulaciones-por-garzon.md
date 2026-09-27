@@ -3,7 +3,7 @@
 > **Para agentes:** sub-skill obligatoria: `superpowers:subagent-driven-development` (recomendada) o
 > `superpowers:executing-plans`, tarea por tarea. Los pasos usan checkboxes (`- [ ]`).
 
-- **Status:** Draft
+- **Status:** In Progress
 - **Date:** 2026-09-27
 - **Owner:** César (owner) · redacta la sesión del frente, en el worktree `agitated-shtern-e2ca3d`
   (rama `claude/agitated-shtern-e2ca3d`)
@@ -121,7 +121,7 @@ exportar, lo cobrado en vez de la carta, el día comercial.
 - Produces: `descontarReparto(filas: FilaReparto[], responsableId: string | null, cantidad: string):
   { id: string; cantidad: string }[]` y `fusionarRepartos(...)` en `reparto-linea.ts`.
 
-- [ ] **Step 1: Unitarios de las funciones puras (fallan)**
+- [x] **Step 1: Unitarios de las funciones puras (fallan)**
 
 `backend/src/modules/salones/reparto-linea.spec.ts`:
 
@@ -221,12 +221,12 @@ describe('fusionarRepartos (spec § 3.3, la línea que se junta)', () => {
 });
 ```
 
-- [ ] **Step 2: Correrlos y verlos fallar**
+- [x] **Step 2: Correrlos y verlos fallar**
 
 Run: `cd backend && npx jest src/modules/salones/reparto-linea.spec.ts`
 Expected: FAIL, `Cannot find module './reparto-linea'`.
 
-- [ ] **Step 3: Las funciones puras**
+- [x] **Step 3: Las funciones puras**
 
 `backend/src/modules/salones/reparto-linea.ts`:
 
@@ -334,12 +334,12 @@ export function fusionarRepartos(
 }
 ```
 
-- [ ] **Step 4: Correrlos y verlos pasar**
+- [x] **Step 4: Correrlos y verlos pasar**
 
 Run: `cd backend && npx jest src/modules/salones/reparto-linea.spec.ts`
 Expected: PASS (11 tests).
 
-- [ ] **Step 5: La entidad, registrada**
+- [x] **Step 5: La entidad, registrada**
 
 `backend/src/modules/salones/entities/cuenta-linea-reparto.entity.ts`, con el molde de
 `cuenta-linea-anulacion.entity.ts` (UUID explícito, `timestamptz` explícito: los dos los fuerza un test):
@@ -398,7 +398,7 @@ Registrarla en `RepositoriosModule.forFeature([...])` de `salones.module.ts` **y
 `entities` de `app.module.ts` (al lado de `CuentaLineaAnulacion`, línea ~291). Agregar la tabla a
 `startup-pos.sql` junto a `cuenta_linea_anulaciones`.
 
-- [ ] **Step 6: E2E del reparto (falla)**
+- [x] **Step 6: E2E del reparto (falla)**
 
 `backend/test/salones-reparto-linea.e2e-spec.ts`. Esqueleto: el `beforeAll`/`afterAll` de
 `salones-anulaciones-reporte.e2e-spec.ts` (login admin + encargado, impresora y categoría de cocina para
@@ -482,14 +482,14 @@ expect(colgadas).toEqual([]);
 (`POST /api/cuentas/:id/cancelar`, o `cancelar-con-motivo` si hay algo despachado) para no dejar stock
 apartado ni la mesa ocupada.
 
-- [ ] **Step 7: Correrlo y verlo fallar**
+- [x] **Step 7: Correrlo y verlo fallar**
 
 Run: `./scripts/entorno.sh db && ./scripts/reset-db.sh && cd backend && npx jest --config ./test/jest-e2e.json test/salones-reparto-linea.e2e-spec.ts`
 Expected: FAIL — la tabla existe (la entidad está registrada) pero `reparto()` vuelve vacío.
 ⚠️ Si el worktree se llama como el frente, el filtro puede matchear todas las rutas
 (`docs/patterns/backend.md` § 7): pasar la ruta completa como arriba.
 
-- [ ] **Step 8: Escribir el reparto en `SalonesService`**
+- [x] **Step 8: Escribir el reparto en `SalonesService`**
 
 Dos helpers privados en `salones.service.ts`, al lado de `escribirAnulacionEnLinea`. Los dos reciben el
 `manager` de la transacción que **ya** tiene la cuenta bloqueada:
@@ -620,7 +620,7 @@ una fila a un (línea, garzón) que ya tenga fila viva en el destino — en ese 
 ⚠️ Revisar que `fusionarCuentas` no haga ya alguna lectura por línea dentro del bucle que esto duplique;
 el bucle existente escribe N líneas (escritura, permitida) y este bloque va **afuera**.
 
-- [ ] **Step 9: Unitarios existentes de `salones.service.spec.ts`**
+- [x] **Step 9: Unitarios existentes de `salones.service.spec.ts`**
 
 Correr `cd backend && npx jest src/modules/salones/salones.service.spec.ts`. Los tests que mockean
 `manager.query`/`manager.save` por orden de llamada van a ver las consultas nuevas: ajustar los mocks
@@ -628,12 +628,12 @@ Correr `cd backend && npx jest src/modules/salones/salones.service.spec.ts`. Los
 `toHaveBeenCalledTimes` por un `toHaveBeenCalled`). Si alguno afirma "una sola escritura" y ahora hay dos,
 decir en el reporte cuál y por qué el número cambió.
 
-- [ ] **Step 10: El e2e pasa**
+- [x] **Step 10: El e2e pasa**
 
 Run: `./scripts/reset-db.sh && cd backend && npx jest --config ./test/jest-e2e.json test/salones-reparto-linea.e2e-spec.ts`
 Expected: PASS (7 tests).
 
-- [ ] **Step 11: Mutantes que revierten, medidos fila por fila**
+- [x] **Step 11: Mutantes que revierten, medidos fila por fila**
 
 Uno a la vez, correr la suite de arriba, anotar qué test muere, revertir y **mirar la hora del restart
 del watcher** si hay stack levantado:
@@ -646,7 +646,7 @@ del watcher** si hay stack levantado:
 | `escribirAnulacionEnLinea` no descuenta | test 5 (invariante) |
 | `fusionarCuentas` sin el bloque del reparto | test 7 |
 
-- [ ] **Step 12: Docs**
+- [x] **Step 12: Docs**
 
 `docs/features/salones-mesas.md`: en **Tablas**, la tabla nueva; una sección *"Quién sirvió cada
 unidad: el reparto de la línea (2026-09-27)"* con el porqué (el "+" sobre la línea de otro), la tabla de
@@ -654,7 +654,7 @@ quién escribe (spec § 3.3), la regla de descuento y la invariante. Actualizar 
 no anexar: si la sección de "Responsable vigente y transferencias" dice que el responsable se pierde al
 transferir, corregirla ahí.
 
-- [ ] **Step 13: Gate completo y cierre**
+- [x] **Step 13: Gate completo y cierre**
 
 ```bash
 cd backend  && npm run lint:check && npm run typecheck && npm test && npm run test:e2e
