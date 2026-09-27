@@ -147,6 +147,10 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   suite entera y la del spec solo dieron 0. El riesgo es que en CI tumbe el gate sin ningún test
   rojo. **Lo que falta medir:** si se reproduce corriendo la suite en loop, y qué log del spec (o
   del componente que monta) queda sin esperar al terminar el test.
+  **Segundo intermitente del frontend, mismo día:** `app/pages/salones/index.nuxt.spec.ts`, *"cuando
+  el servidor confirma la cantidad, el catálogo se vuelve a pedir"* (esperaba 9 llamadas, vio 6),
+  falló una vez en el worktree del frente del login tras un rebase; solo pasó 4 de 4 y la suite
+  siguiente dio verde. Ese test cuenta pedidos detrás de un debounce: sospechar del tiempo.
 
 - [ ] **Specs de Playwright que fallan con el código limpio en el stack de un worktree** (frontend,
   e2e de navegador). Medido el 2026-09-27 por la sesión que prendió `forbidNonWhitelisted`, en su
@@ -160,6 +164,17 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   orden de specs). El riesgo es que una sesión tome una regresión real por "la intermitencia
   conocida". **Lo que falta medir:** correr `varianza:68` solo en un stack de worktree, leer por
   qué falla, y comparar el entorno con el de `ci.yml`.
+
+- [ ] **El pre-commit rechaza un recibo de revisión escrito sobre el mismo diff** (harness). Dos
+  sesiones distintas lo reportaron el 2026-09-27 (el aviso sin costo de la varianza y el aviso del
+  login, las dos desde un worktree y con `.vue` staged): escribieron el recibo con el comando que
+  el propio hook imprime, no cambiaron ningún archivo staged (una lo verificó por mtime), y el hook
+  calculó otro hash. Las dos reescribieron el recibo sobre el mismo diff y el segundo commit pasó,
+  sin `--no-verify`. El mismo día, en el checkout principal, un recibo escrito durante un
+  cherry-pick coincidió a la primera. **Lo que falta medir:** si `git diff --cached` da otra salida
+  dentro del hook que en el shell de la sesión (variables que git exporta al hook como
+  `GIT_INDEX_FILE`, configuración de color o de diff), reproduciéndolo en un worktree con un `.vue`
+  staged. El riesgo es que la salida fácil —reescribir el recibo hasta que pase— vacíe el gate.
 
 ## 3. Ya decidido, falta construir
 
