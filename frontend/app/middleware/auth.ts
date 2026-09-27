@@ -31,8 +31,10 @@ export default defineNuxtRouteMiddleware(async (to) => {
   }
 
   // Necesita tenant activo
+  // Si no pudo entrar a la empresa, dejar seguir cargaría la pantalla con un
+  // token sin tenant y sin aviso: se vuelve al login, que muestra `store.error`.
   if (!activeTenantId.value) {
-    await store.handlePostLogin()
+    if (!(await store.handlePostLogin())) return navigateTo('/login')
     return
   }
 

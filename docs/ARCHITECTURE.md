@@ -264,7 +264,7 @@ Aplicado globalmente. Lógica en orden:
 3. Si `fetchMe` falló (token inválido) → `/login`
 4. Rutas exentas de tenant (`/select-tenant`, `/no-tenant`, `/login`, `/register`) → pasar
 5. Rutas `/admin/**` → verificar `isSuperadmin`; si false → `/`
-6. Sin `activeTenantId` → `handlePostLogin()` (resuelve tenant o redirige)
+6. Sin `activeTenantId` → `handlePostLogin()` (resuelve tenant o redirige); si no pudo entrar al tenant → `/login`, que muestra el error
 7. Con `activeTenantId` pero lista de tenants vacía → `fetchMyTenants()` (rehidratación tras refresh)
 
 ### Llamadas a la API

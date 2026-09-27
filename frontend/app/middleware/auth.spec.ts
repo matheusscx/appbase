@@ -89,7 +89,7 @@ describe('middleware/auth', () => {
     mockFetchMe.mockClear()
     mockFetchMe.mockResolvedValue(undefined)
     mockHandlePostLogin.mockClear()
-    mockHandlePostLogin.mockResolvedValue(undefined)
+    mockHandlePostLogin.mockResolvedValue(true)
     mockFetchMyTenants.mockClear()
     mockFetchMyTenants.mockResolvedValue(undefined)
     mockTryRefresh.mockClear()
@@ -125,6 +125,25 @@ describe('middleware/auth', () => {
     mockActiveTenantId = null
     await authMiddleware(makeContext('/'), makeContext('/'))
     expect(mockHandlePostLogin).toHaveBeenCalled()
+  })
+
+  it('con token y sin tenant activo, si handlePostLogin no pudo entrar → vuelve a /login', async () => {
+    // Dejar seguir cargaba la pantalla con un token sin tenant y sin aviso
+    // (medido 2026-09-27: "Trabajando en —"). El login muestra el error.
+    mockToken = 'some.token.here'
+    mockUser = { id: '1', nombre: 'Test' }
+    mockActiveTenantId = null
+    mockHandlePostLogin.mockResolvedValue(false)
+    await authMiddleware(makeContext('/'), makeContext('/'))
+    expect(mockNavigateTo).toHaveBeenCalledWith('/login')
+  })
+
+  it('con token y sin tenant activo, si handlePostLogin entró → no manda a /login', async () => {
+    mockToken = 'some.token.here'
+    mockUser = { id: '1', nombre: 'Test' }
+    mockActiveTenantId = null
+    await authMiddleware(makeContext('/'), makeContext('/'))
+    expect(mockNavigateTo).not.toHaveBeenCalledWith('/login')
   })
 
   it('con token y tenant activo → no redirige', async () => {

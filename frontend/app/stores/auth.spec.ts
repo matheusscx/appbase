@@ -33,6 +33,13 @@ vi.mock('#app/composables/router', () => ({
 
 vi.stubGlobal('$fetch', vi.fn())
 
+// `handlePostLogin` pasa por el store de tenants, que pide con `useApiFetch`.
+const mockApiFetch = vi.fn()
+vi.mock('~/composables/useApiFetch', () => ({
+  useApiFetch: (...args: unknown[]) => mockApiFetch(...args),
+}))
+
+import { navigateTo } from '#app/composables/router'
 import { useAuthStore } from './auth'
 
 // El tipo de rutas de `$fetch` (Nuxt) dispara TS2321 (recursión de tipos) al pasar por
@@ -223,5 +230,78 @@ describe('useAuthStore — restauración de sesión', () => {
     await store.fetchMe()
     expect(store.token).toBeNull()
     expect(store.user).toBeNull()
+  })
+})
+
+describe('useAuthStore — handlePostLogin avisa cuando no pudo entrar al tenant', () => {
+  // Las tres pantallas que lo invocan —login, callback de Google y el middleware
+  // `auth`— leen `authStore.error`. El error de `my-tenants` o de
+  // `switch-tenant` quedaba en `tenantStore.error`, que ninguna lee: medido en
+  // navegador, el login se quedaba quieto sin mensaje y el callback, girando.
+  const navigateToMock = vi.mocked(navigateTo)
+  const TENANT = { tenantId: 't1', nombre: 'Café Central' }
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mockApiFetch.mockReset()
+    navigateToMock.mockReset()
+  })
+
+  it('con un tenant, si el switch falla deja el mensaje en authStore.error', async () => {
+    const store = useAuthStore()
+    mockApiFetch
+      .mockResolvedValueOnce([TENANT]) // my-tenants
+      .mockRejectedValueOnce({ data: { message: 'Internal server error' } }) // switch-tenant
+
+    const ok = await store.handlePostLogin()
+
+    expect(ok).toBe(false)
+    expect(store.error).toBe('Internal server error')
+    expect(navigateToMock).not.toHaveBeenCalled()
+  })
+
+  it('si falla my-tenants no manda a /no-tenant: avisa el error', async () => {
+    // "Tu cuenta no pertenece a ninguna empresa" es falso si lo que falló fue
+    // la consulta: la lista vacía por error y la lista vacía de verdad no son
+    // lo mismo.
+    const store = useAuthStore()
+    mockApiFetch.mockRejectedValueOnce({ data: { message: 'Internal server error' } })
+
+    const ok = await store.handlePostLogin()
+
+    expect(ok).toBe(false)
+    expect(store.error).toBe('Internal server error')
+    expect(navigateToMock).not.toHaveBeenCalledWith('/no-tenant')
+  })
+
+  it('sin tenants de verdad sigue mandando a /no-tenant, sin error', async () => {
+    const store = useAuthStore()
+    mockApiFetch.mockResolvedValueOnce([])
+
+    const ok = await store.handlePostLogin()
+
+    expect(ok).toBe(true)
+    expect(store.error).toBeNull()
+    expect(navigateToMock).toHaveBeenCalledWith('/no-tenant')
+  })
+
+  it('con un tenant y el switch exitoso entra a / y limpia un error anterior', async () => {
+    const store = useAuthStore()
+    store.error = 'Internal server error' // de un intento anterior
+    const conTenant = makeToken({ sub: 'u1', email: 'a@b.com', tenant_id: 't1', es_superadmin: false, iat: 0, exp: 9999 })
+    mockApiFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith('/auth/my-tenants')) return [TENANT]
+      if (url.endsWith('/auth/switch-tenant')) return { access_token: conTenant }
+      if (url.endsWith('/rbac/mis-permisos')) return []
+      if (url.endsWith('/rbac/es-admin')) return { esAdmin: true }
+      throw new Error(`inesperado: ${url}`)
+    })
+
+    const ok = await store.handlePostLogin()
+
+    expect(ok).toBe(true)
+    expect(store.error).toBeNull()
+    expect(store.activeTenantId).toBe('t1')
+    expect(navigateToMock).toHaveBeenCalledWith('/')
   })
 })

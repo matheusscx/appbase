@@ -84,7 +84,7 @@ Ver [features/auth.md](./auth.md) para el módulo auth completo.
 - `claims` *(computed)* — `decodeJwt(token.value)`
 - `activeTenantId` *(computed)* — `claims.value?.tenant_id ?? null`
 - `isSuperadmin` *(computed)* — `claims.value?.es_superadmin ?? false`
-- `handlePostLogin()` — orquesta el flujo post-login completo
+- `handlePostLogin()` — orquesta el flujo post-login completo; devuelve `false` y deja el mensaje en `error` si no pudo entrar al tenant
 - `register(nombre, correo, contrasena)` — body actualizado a nombres en español
 
 **`app/stores/tenant.ts`** (nuevo)
@@ -116,11 +116,17 @@ Ver [features/auth.md](./auth.md) para el módulo auth completo.
 ```
 login() / register() / googleCallback()
   └─ setToken(access_token)  [tenant_id=null en el token]
-  └─ handlePostLogin()
+  └─ handlePostLogin()  → boolean
         └─ fetchMyTenants()
+              ├─ falla      → authStore.error, false (NO a /no-tenant: la lista no se sabe)
               ├─ 0 tenants → navigateTo('/no-tenant')
               ├─ 1 tenant  → switchTenant(id) → navigateTo('/')
+              │               └─ falla → authStore.error, false
               └─ >1 tenants → navigateTo('/select-tenant')
+
+Con `false`, quien lo llamó vuelve a /login, que muestra authStore.error: el login
+se queda donde está, y el callback de Google y el middleware navegan ahí (owner,
+2026-09-27). Nada se reintenta solo: la persona vuelve a entrar.
 
 /select-tenant
   └─ usuario elige → switchTenant(id) → navigateTo('/')

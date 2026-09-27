@@ -137,17 +137,31 @@ export const useAuthStore = defineStore('auth', () => {
   // 0 tenants → /no-tenant
   // 1 tenant  → switch-tenant automático → /
   // >1 tenants → /select-tenant
-  async function handlePostLogin(): Promise<void> {
+  //
+  // Si `my-tenants` o el switch fallan, el mensaje se copia a `error` —el que
+  // leen las tres pantallas que llegan acá— y devuelve `false` sin navegar:
+  // una lista vacía por error no es "no pertenecés a ninguna empresa".
+  async function handlePostLogin(): Promise<boolean> {
+    error.value = null
     const tenantStore = useTenantStore()
     await tenantStore.fetchMyTenants()
+    if (tenantStore.error) {
+      error.value = tenantStore.error
+      return false
+    }
     const list = tenantStore.tenants
     if (list.length === 0) {
       await navigateTo('/no-tenant')
     } else if (list.length === 1) {
       await tenantStore.switchTenant(list[0]!.tenantId)
+      if (tenantStore.error) {
+        error.value = tenantStore.error
+        return false
+      }
     } else {
       await navigateTo('/select-tenant')
     }
+    return true
   }
 
   function loginWithGoogle() {

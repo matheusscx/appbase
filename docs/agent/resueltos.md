@@ -23,6 +23,83 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Si el login no puede entrar a la empresa, lo avisa (cerrada 2026-09-27)
+
+Sale de [`pendientes.md`](pendientes.md) § 2.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Con un solo tenant, si el `switch-tenant` automático del login falla, no se avisa nada**
+  (frontend, lo destapó la medición del 2026-09-27 que cerró el reset de stores en
+  `switchTenant`, ver [`resueltos.md`](resueltos.md)). `handlePostLogin` llama `switchTenant`
+  directo cuando el usuario tiene un tenant, y el error queda en `tenantStore.error`, que
+  **ninguna** de las dos pantallas que lo invocan lee:
+  - `login.vue` solo pinta `authStore.error`. **Medido en navegador** (`admin.paris@paris.cl`,
+    `POST /auth/switch-tenant` forzado a 500): el botón deja de girar, la URL sigue en `/login`
+    y no aparece ningún mensaje. El usuario puede volver a intentar, pero no sabe qué pasó.
+  - `auth/callback.vue` (entrada por Google) no tiene rama de error: por lectura del código,
+    queda en "Iniciando sesión…" sin salida. **No medido** (hace falta el flujo de OAuth).
+  - Y un tercero, **solo leído**: el middleware `auth` llama `handlePostLogin` cuando el token
+    no trae tenant y después **deja seguir la navegación** aunque el switch haya fallado, así
+    que la pantalla destino carga con un token sin tenant (monedas vacías sin error, y lo que
+    pida al backend va sin tenant). Hay que confirmar que se alcanza antes de tocarlo.
+
+  Sale hacia la § 1 si el arreglo es "mostrar `tenantStore.error` donde se invocó", o hacia la
+  § 4 si el mensaje o la salida (¿volver a `/login`?) necesita decisión.
+
+### Lo medido: los tres caminos se alcanzan, y había un cuarto
+
+Medido con Playwright contra el stack del worktree, con `admin.paris` (un solo tenant) y la
+respuesta forzada a 500 desde el navegador:
+
+- **Login:** se quedaba en `/login` sin mensaje. Confirma lo que ya estaba medido.
+- **Callback de Google:** quedaba en "Iniciando sesión…" sin salida. Se entró con un token de
+  `/auth/login`, que tiene la misma forma que el que emite el callback (`tenant_id: null`):
+  así se mide la pantalla sin pasar por OAuth.
+- **Middleware:** **sí se alcanza.** Después de un login fallido, la cookie queda con un token
+  sin tenant, y el refresh token también, porque se emitió sin tenant. Recargar o volver más
+  tarde carga el panel con "Trabajando en —", el menú mínimo y ningún aviso.
+- **El gemelo que la entrada no nombraba:** si lo que falla es `GET /auth/my-tenants`, la lista
+  queda vacía y el login mandaba a `/no-tenant`, con *"Tu cuenta no pertenece a ninguna empresa
+  todavía"*. Es falso, y le pasa a cualquier usuario, no solo al de un tenant. Entró al frente
+  por la misma función y la misma causa (orquestadora, 2026-09-27).
+
+### Qué se hizo
+
+`handlePostLogin` copia a `authStore.error` el error de `fetchMyTenants` o de `switchTenant`,
+devuelve `false` y no navega. Es el `error` que el login ya pintaba, así que el caso del login
+no necesitó tocar la pantalla. Además limpia `error` al empezar, para que un intento anterior
+no quede pegado sobre uno que salió bien.
+
+**La salida de los otros dos la eligió el owner** (opción A, 2026-09-27): el callback y el
+middleware vuelven a `/login`, que muestra el aviso. En el middleware eso obliga a escribir la
+clave de nuevo. La alternativa descartada (B) era mandar a "¿En qué empresa vas a trabajar?"
+con el único local para tocar: no pedía la clave, pero mostraba una pantalla de elegir con una
+sola opción y eran dos toques. Nada se reintenta solo: la persona vuelve a entrar.
+
+**El texto no cambió:** es el mismo mecanismo que el resto de la app, `apiErrorMsg` sobre lo
+que manda el servidor. Con un 500 se lee *"Internal server error"*, en inglés. El dato se le
+pasó a la orquestadora para que llegara junto con la pregunta; la respuesta del owner fue solo
+"A", sin decir nada del texto.
+
+### Qué lo fija
+
+- `app/stores/auth.spec.ts`, 4 casos de `handlePostLogin`: falla el switch; falla
+  `my-tenants`; sin tenants de verdad sigue yendo a `/no-tenant` (el control que deja pasar); y
+  el éxito limpia el error anterior. Mutantes medidos, cada uno mata solo su caso: sacar la
+  copia del error de `my-tenants` y sacar la del switch, las dos conservando el `return false`
+  para que muera la aserción del mensaje y no la del retorno; y sacar el `error.value = null`
+  inicial.
+- `app/middleware/auth.spec.ts`: `false` manda a `/login`, y `true` no. El mutante que vuelve
+  al `await` sin mirar el resultado mata el primero.
+- `e2e/tenants/entrada-fallida.spec.ts`, uno por camino (login con el switch, login con
+  `my-tenants`, callback y middleware). Los cuatro fallan contra el código anterior. El del
+  callback y el del middleware fallan también revirtiendo **solo** su archivo. El del
+  middleware pone la cookie a mano en vez de pasar por el login: si no, contra el código viejo
+  moría en el aviso del login y no probaba el middleware.
+
+---
+
 ## `forbidNonWhitelisted` prendido en el `ValidationPipe` global (cerrada 2026-09-27)
 
 Sale de [`pendientes.md`](pendientes.md) § 4. **Qué cambió para quien llama a la API:** un
@@ -262,6 +339,7 @@ e2e de navegador: la conducta visible es la misma antes y después, y un spec qu
 
 **Lo que la medición destapó aparte**, y quedó como entrada propia en `pendientes.md` § 2: con un
 solo tenant, si el `switch-tenant` automático del login falla, `login.vue` no muestra nada.
+Cerrada el mismo día: *"Si el login no puede entrar a la empresa, lo avisa"*, en este archivo.
 
 ## Aviso de stock bajo (cerrada 2026-09-21)
 

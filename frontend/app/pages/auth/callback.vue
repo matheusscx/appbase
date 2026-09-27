@@ -10,7 +10,9 @@ onMounted(async () => {
   store.setToken(token)
   await store.fetchMe()
   if (!store.isAuthenticated) return navigateTo('/login')
-  await store.handlePostLogin()
+  // Si no pudo entrar a la empresa, el login muestra `store.error` y la persona
+  // vuelve a pedirlo desde ahí: esta pantalla no tiene nada que ofrecerle.
+  if (!(await store.handlePostLogin())) return navigateTo('/login')
 })
 </script>
 

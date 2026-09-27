@@ -119,26 +119,6 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
-- [ ] **Con un solo tenant, si el `switch-tenant` automático del login falla, no se avisa nada**
-  (frontend, lo destapó la medición del 2026-09-27 que cerró el reset de stores en
-  `switchTenant`, ver [`resueltos.md`](resueltos.md)). `handlePostLogin` llama `switchTenant`
-  directo cuando el usuario tiene un tenant, y el error queda en `tenantStore.error`, que
-  **ninguna** de las dos pantallas que lo invocan lee:
-  - `login.vue` solo pinta `authStore.error`. **Medido en navegador** (`admin.paris@paris.cl`,
-    `POST /auth/switch-tenant` forzado a 500): el botón deja de girar, la URL sigue en `/login`
-    y no aparece ningún mensaje. El usuario puede volver a intentar, pero no sabe qué pasó.
-  - `auth/callback.vue` (entrada por Google) no tiene rama de error: por lectura del código,
-    queda en "Iniciando sesión…" sin salida. **No medido** (hace falta el flujo de OAuth).
-  - Y un tercero, **solo leído**: el middleware `auth` llama `handlePostLogin` cuando el token
-    no trae tenant y después **deja seguir la navegación** aunque el switch haya fallado, así
-    que la pantalla destino carga con un token sin tenant (monedas vacías sin error, y lo que
-    pida al backend va sin tenant). Hay que confirmar que se alcanza antes de tocarlo.
-
-  Sale hacia la § 1 si el arreglo es "mostrar `tenantStore.error` donde se invocó", o hacia la
-  § 4 si el mensaje o la salida (¿volver a `/login`?) necesita decisión.
-
----
-
 - [ ] **`npm test` del frontend salió con código 1 con los 1462 tests en verde** (frontend,
   intermitente, visto una vez el 2026-09-27 en el gate de main sobre `0357a777`). Vitest reportó
   un *unhandled error* de cierre —`EnvironmentTeardownError: [vitest-worker]: Closing rpc while
@@ -175,6 +155,24 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   dentro del hook que en el shell de la sesión (variables que git exporta al hook como
   `GIT_INDEX_FILE`, configuración de color o de diff), reproduciéndolo en un worktree con un `.vue`
   staged. El riesgo es que la salida fácil —reescribir el recibo hasta que pase— vacíe el gate.
+
+- [ ] **El aviso de error del login aparece en el registro, y al revés** (frontend, medido el
+  2026-09-27; lo cazó la revisión independiente del cierre de *"Si el login no puede entrar a
+  la empresa, lo avisa"*, en [`resueltos.md`](resueltos.md)). `login.vue` y `register.vue` pintan
+  el mismo `authStore.error`, y nada lo limpia al cambiar de pantalla: `clearAuth()` no lo
+  toca, y `login()`/`register()` lo limpian recién al enviar. **Medido en navegador:** clave mala
+  en el login → "Crear cuenta" → el registro abre mostrando *"Credenciales inválidas"*. La
+  dirección contraria —un error del registro que aparece en el login— **solo está leída**, no
+  medida: es el mismo `ref`, y el registro tiene un link a "Iniciar sesión". Es
+  anterior a ese cierre, que le sumó una fuente más: el aviso de "no se pudo entrar a la
+  empresa" que dejan `handlePostLogin`, el callback de Google y el middleware también viaja al
+  registro.
+  **Lo que falta medir o decidir, y no es para el owner:** limpiar al montar el registro cierra
+  una dirección, pero no la otra. El login **no** se puede limpiar al montar, porque ahora es la
+  pantalla que muestra el aviso que le mandan el callback y el middleware. El arreglo probable es
+  separar el error de cada pantalla. Antes de elegir, volver a listar los lectores de
+  `authStore.error`: el 2026-09-27 eran solo esas dos pantallas. Los comentarios de
+  `auth/callback.vue` y `middleware/auth.ts` lo nombran porque navegan al login para que se vea.
 
 ## 3. Ya decidido, falta construir
 
