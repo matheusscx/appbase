@@ -74,9 +74,13 @@ pedir era un hueco del seed, no un diseño.
 - `anulaciones-porcentaje.spec.ts` sigue armando la escena por API —son precondiciones, no el
   flujo bajo prueba— y su docblock ya no da el 403 del catálogo como motivo.
 
-**Efecto lateral, el mismo que ya tiene `Vendedor`:** `Items:Leer` también muestra
-Configuración → Items (solo lectura) y *Costos desfasados* (`GET /desfases`, que por decisión
-deliberada pide solo `Items:Leer`).
+**Efecto lateral, el mismo que ya tiene `Vendedor` (ni más ni menos: mismos dos IDs):** el
+encargado **ahora ve costos y márgenes**. `Items:Leer` también muestra Configuración → Items
+(solo lectura: crear, editar y borrar piden su propio permiso), con el costo en la ficha y el
+simulador de impacto (`GET /items/:id/afectados`: costo actual y propuesto, margen, precio
+sugerido), y *Costos desfasados* (`GET /desfases`, mismos campos; por decisión deliberada pide
+solo `Items:Leer`). Ninguna escritura queda alcanzable con solo `Leer`. Barrido de la segunda
+revisión: fuera de `items.controller.ts` y `desfases.controller.ts` nada pide `Items:Leer`.
 
 ---
 
