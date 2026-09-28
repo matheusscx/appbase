@@ -687,7 +687,7 @@ una línea quedó sin escribir el reparto, y la fusión puede violar el índice 
   para garzones sin anulaciones que pasen los filtros. Orden: `garzonNombre` ascendente, `null` al final.
   La Task 3 los lee con esos nombres.
 
-- [ ] **Step 1: Unitarios del armado (fallan)**
+- [x] **Step 1: Unitarios del armado (fallan)**
 
 En `anulaciones-reporte.service.spec.ts`, un `describe('resumen — pedido y porcentaje')`. El `resumen`
 pasa a hacer **cuatro** consultas en este orden: base (existente), costos (existente, solo si hay ids con
@@ -730,12 +730,12 @@ Y un test de que la consulta de **anulado** no lleva el filtro de tipo: con `{ t
 SQL del cuarto `dbQueryMock.mock.calls` **no** contiene `mb.tipo =` y sus params no incluyen
 `'cortesia'`. ⚠️ Acotar la aserción a la cláusula, no a un `toContain('tipo')` que matchee un comentario.
 
-- [ ] **Step 2: Correrlos y verlos fallar**
+- [x] **Step 2: Correrlos y verlos fallar**
 
 Run: `cd backend && npx jest src/modules/salones/anulaciones-reporte.service.spec.ts`
 Expected: FAIL (`pedido` undefined).
 
-- [ ] **Step 3: Las dos consultas y el armado**
+- [x] **Step 3: Las dos consultas y el armado**
 
 En `resumen`, después de `costosPorAnulacion`:
 
@@ -805,12 +805,12 @@ acumulado), `vendidoRows` y `anuladoRows`. Para cada clave: el grupo existente, 
 Ordenar por `garzonNombre` con `localeCompare('es')`, `null` al final. `porTipo` y `porAutorizo` no cambian.
 Extender el tipo `ResumenAnulaciones['porGarzon']` con `pedido: string; porcentaje: string | null`.
 
-- [ ] **Step 4: Unitarios pasan**
+- [x] **Step 4: Unitarios pasan**
 
 Run: `cd backend && npx jest src/modules/salones/anulaciones-reporte.service.spec.ts`
 Expected: PASS, incluidos los tests viejos del resumen (ajustar sus mocks sumando las dos consultas nuevas).
 
-- [ ] **Step 5: E2E del % (falla primero, contra el código de la Task 1 sin el Step 3)**
+- [x] **Step 5: E2E del % (falla primero, contra el código de la Task 1 sin el Step 3)**
 
 `backend/test/salones-anulaciones-porcentaje.e2e-spec.ts`. Esqueleto: el de
 `salones-anulaciones-reporte.e2e-spec.ts` (login admin + encargado, cocina, garzones propios con sesión,
@@ -869,12 +869,12 @@ const cobrada: { total: string }[] = await ds.query(
 ⚠️ El orden de los tests importa (van acumulando sobre los mismos garzones): no usar `it.only` ni
 reordenar sin recalcular las constantes.
 
-- [ ] **Step 6: E2E pasa**
+- [x] **Step 6: E2E pasa**
 
 Run: `./scripts/reset-db.sh && cd backend && npx jest --config ./test/jest-e2e.json test/salones-anulaciones-porcentaje.e2e-spec.ts test/salones-anulaciones-reporte.e2e-spec.ts`
 Expected: PASS los dos archivos (el viejo también, con las filas nuevas en `porGarzon`).
 
-- [ ] **Step 7: ¿Hace falta un índice?**
+- [x] **Step 7: ¿Hace falta un índice?**
 
 Con el stack del worktree y datos bien repartidos (muchas cuentas cerradas en días distintos, no todas
 hoy: si hace falta, sembrarlas en la base del worktree con un script en el scratchpad, **nunca** en el
@@ -884,7 +884,7 @@ plan barre `cuentas` entera, probar `@Index('idx_cuentas_cerrada', ['tenantId', 
 agrega si cambia el plan; los números van en el docblock. Si no se agrega, decir en el reporte qué se
 midió.
 
-- [ ] **Step 8: Mutantes que revierten, medidos fila por fila**
+- [x] **Step 8: Mutantes que revierten, medidos fila por fila**
 
 | Mutante | Debe matar |
 |---|---|
@@ -895,7 +895,7 @@ midió.
 | sin `c.estado = 'cerrada'` | e2e 4 |
 | sin `v.estado <> 'cancelada'` | e2e 7 (o anotado como superviviente, con el porqué medido) |
 
-- [ ] **Step 9: Docs**
+- [x] **Step 9: Docs**
 
 - `docs/features/salones-mesas.md`, sección del reporte de anulaciones: el `%`, sus tres cifras, qué
   entra y qué no (spec § 4.2), y que los garzones sin anulaciones aparecen.
@@ -908,7 +908,7 @@ midió.
 - `docs/superpowers/specs/2026-09-18-reporte-anulaciones-design.md` § 7: el ítem del % apunta a la spec
   nueva en vez de decir que está fuera.
 
-- [ ] **Step 10: Gate completo y cierre**
+- [x] **Step 10: Gate completo y cierre**
 
 Mismo gate que la Task 1 (con `reset-db.sh` antes y `--verificar` después). `verify-feature` con
 `domain-reviewer` (duda concreta: *¿alguna lectura nueva sin `eliminado_el IS NULL` sin su porqué, y el
