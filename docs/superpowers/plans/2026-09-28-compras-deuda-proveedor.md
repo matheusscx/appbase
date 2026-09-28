@@ -121,25 +121,30 @@ Si al implementar una tarea la división de archivos no calza, se ajusta con el 
 ningún pago. Al terminar, una compra confirmada tiene `total_documento` (si su tipo lo lleva)
 y `fecha_vencimiento`, y un proveedor tiene plazo.
 
-- [ ] Entidades y columnas de spec § 3, registradas en `app.module.ts`; `CHECK`s de montos
-  > 0 y de `total_documento` en el catálogo; índices de las FKs nuevas.
-- [ ] Seed: `total_documento` por tipo (spec § 3), acción `Pagar` en `Compras`, el rol
+- [x] Columnas de spec § 3 en `compras`, `terceros` y `tipos_documento_compra`, con el `CHECK`
+  de `total_documento` en el catálogo. **Las tablas `pagos_proveedor` y
+  `pago_proveedor_aplicaciones` y `movimientos_caja.pago_proveedor_id` pasaron a la tarea 2**
+  (ruling del controlador, 2026-09-28: en esta tarea nada las lee ni las escribe).
+- [x] **Movido desde la tarea 4** (ruling del controlador, 2026-09-28): "Total del documento" y
+  "Vence el" en la carga del borrador (`[id].vue` + el body en `useCompras.ts`). Desde esta tarea
+  confirmar una factura sin total es 400, y sin el campo la pantalla no podía confirmar ninguna.
+- [x] Seed: `total_documento` por tipo (spec § 3), acción `Pagar` en `Compras`, el rol
   `Compras · Encargado` sin ella, y un fixture con `Pagar`. Ids: los siguientes libres.
-- [ ] `terceros`: `plazoPagoDias` en crear/actualizar (entero > 0 o `null`) y en la lectura.
+- [x] `terceros`: `plazoPagoDias` en crear/actualizar (entero > 0 o `null`) y en la lectura.
   Guard de Terceros sin cambios.
-- [ ] Borrador (`POST`/`PATCH /compras`): `totalDocumento` y `fechaVencimiento` opcionales;
+- [x] Borrador (`POST`/`PATCH /compras`): `totalDocumento` y `fechaVencimiento` opcionales;
   `totalDocumento` en un tipo `suma_lineas` es 400.
-- [ ] Confirmar: 400 "Falta el total del documento" en un tipo `obligatorio` sin total; fija
+- [x] Confirmar: 400 "Falta el total del documento" en un tipo `obligatorio` sin total; fija
   `fecha_vencimiento` (spec § 4.2). Nada de pago todavía.
-- [ ] `PATCH /compras/:id/documento` (`Actualizar`), con las reglas de spec § 6 salvo el
+- [x] `PATCH /compras/:id/documento` (`Actualizar`), con las reglas de spec § 6 salvo el
   recorte (llega en la tarea 3, cuando haya aplicaciones).
-- [ ] `deuda.ts`: `vencimiento(fechaDocumento, plazo, fechaTipeada)` y `totalCompra(...)` con
+- [x] `deuda.ts`: `vencimiento(fechaDocumento, plazo, fechaTipeada)` y `totalCompra(...)` con
   la cuantización única, con unitarios (el 1 de octubre + 15 = 16; `null` → 30; la tipeada
   manda; un total `suma_lineas` con decimales de más cuantizado una vez con el modo del tenant).
-- [ ] E2E: confirmar una factura sin total (400) y con total; guía sin total (pasa); boleta
+- [x] E2E: confirmar una factura sin total (400) y con total; guía sin total (pasa); boleta
   (el total es la suma); vencimiento con y sin plazo; `PATCH /documento` con permiso y sin él
   (403); montos fuera de escala (400).
-- [ ] Docs: `compras.md` (el modelo y el vencimiento).
+- [x] Docs: `compras.md` (el modelo y el vencimiento).
 
 **Duda concreta para el revisor:** ¿alguna lectura nueva o un `JOIN` a `terceros` perdió el
 filtro de `eliminado_el`? ¿El `CHECK` del catálogo acepta exactamente los tres valores?
@@ -150,6 +155,15 @@ filtro de `eliminado_el`? ¿El `CHECK` del catálogo acepta exactamente los tres
 que el efectivo salga de la caja de quien paga con la misma validación y el mismo rastro que
 la salida manual, y poder anularlo según las decisiones 6 y 6c.
 
+- [ ] **Movido desde la tarea 1** (ruling del controlador): las entidades `pagos_proveedor` y
+  `pago_proveedor_aplicaciones` y la columna `movimientos_caja.pago_proveedor_id` (spec § 3),
+  registradas en `app.module.ts` (array `entities`), con sus `CHECK`s de montos > 0, los
+  índices de sus FKs y su entrada en `startup-pos.sql`.
+- [ ] **Movido desde la tarea 3** (ruling del controlador): `GET /compras/pagos?proveedorId=`
+  (`Pagar`), con sus aplicaciones; y `POST /compras/pagos` devuelve el pago con sus
+  aplicaciones. Sin una lectura, los e2e de esta tarea solo podrían afirmar por SQL. El pago se
+  expone también como método que corre en una transacción dada, para que la tarea 3 lo reuse
+  al confirmar.
 - [ ] **Primer paso, un spike acotado:** cómo se componen `IdempotenciaService.ejecutar`,
   `db.transaccion` y `CajaService.conRastroDeRechazo` para que el 422 deje su fila en el rastro
   y el reintento con la misma clave reproduzca. Se decide mirando cómo lo hace
@@ -187,8 +201,8 @@ la deuda bien sin intervención; y todo lo que el dueño necesita leer.
 - [ ] El recorte (spec § 6) en: corregir línea, descuento, `PATCH /documento` y anular la
   compra. `recortar(...)` puro en `deuda.ts`, con unitarios (de la más nueva; baja a 0; el
   total sube y no toca nada).
-- [ ] Lecturas de spec § 8, todas con `Pagar`: `por-pagar`, `por-pagar/:proveedorId`,
-  `pagos`. Y los campos de pago de `GET /compras` y `GET /compras/:id` **solo** para quien
+- [ ] Lecturas de spec § 8, todas con `Pagar`: `por-pagar` y `por-pagar/:proveedorId` (`pagos`
+  ya llegó en la tarea 2). Y los campos de pago de `GET /compras` y `GET /compras/:id` **solo** para quien
   tiene `Pagar` (el controller resuelve el permiso; sin él no vienen en la respuesta y el
   filtro `estadoPago` es 403; decisión 12). Estado derivado con "hoy" del tenant
   (`rango-fecha.util.ts`). Una consulta por lectura, con el N+1 medido.
@@ -215,8 +229,8 @@ los traiga, y que quien tiene `Pagar` registre la compra al contado en un gesto.
 - [ ] `useDte.ts`: leer `MntTotal`, `FchVenc` y `FmaPago`, con fixtures reales; pre-llenar
   total y vencimiento. `FmaPago = 1` (contado) propone "Sí, la pagué" en el confirmar.
 - [ ] `pages/terceros.vue`: "Plazo de pago (días)".
-- [ ] `pages/compras/[id].vue`: "Total del documento" según el tipo y "Vence el" sugerido;
-  mandar solo lo que el DTO declara.
+- [x] `pages/compras/[id].vue`: "Total del documento" según el tipo y "Vence el" sugerido;
+  mandar solo lo que el DTO declara. **Hecho en la tarea 1** (ruling del controlador).
 - [ ] Modal de confirmar: "¿La pagaste ya?" solo con `Pagar`, medio y monto, clave con
   `useIntentoCobro`; el aviso de efectivo sin caja abierta.
 - [ ] `CompraConfirmada.vue`: total, vencimiento y "Corregir total o vencimiento"
