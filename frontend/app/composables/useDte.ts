@@ -271,6 +271,130 @@ export function textoLinea(linea: LineaDte, formatMonto: (v: string) => string):
   return partes.join(' · ')
 }
 
+/** Un `codigos_proveedor` que apunta a un producto (tarea 1 § 5.1), en la
+ *  forma mínima que necesita esta pantalla. */
+export interface ProductoDeDte {
+  modoInventario: string | null
+  unidadMedida: string | null
+}
+
+/** Lo que se agrega a cada `LineaForm` del XML (tarea 4 § 6): el texto de la
+ *  factura y por qué llegó calzada o por asociar. */
+export interface DteLineaInfo {
+  clave: string
+  descripcion: string
+  texto: string
+  calzo: boolean
+  nota: string | null
+  conAjusteDeLinea: boolean
+}
+
+/**
+ * Los campos de una `LineaForm` que salen de una línea del XML ya repartida
+ * (`repartirLineas`): la pantalla los mezcla con `nuevaLinea()` para
+ * completar el resto (key, series, lote…). Puro y testeable acá — la página
+ * solo resuelve `producto` desde su catálogo (`productos.value.find(...)`).
+ *
+ * ⚠️ **Un destino cuyo producto ya no está en el catálogo llega por asociar**,
+ * nunca con un `itemId` que la pantalla no puede resolver (tarea 4 § 3, `nota`
+ * de un destino retirado — spec § 5.3): por eso el chequeo es "¿existe el
+ * producto?", no solo "¿vino un destino?".
+ */
+export function lineaFormDesdeDte(
+  linea: LineaDte,
+  destino: Exclude<DestinoCodigo, 'no_mercaderia'> | null,
+  nota: string | null,
+  producto: ProductoDeDte | undefined,
+  formatMonto: (v: string) => string,
+): {
+  itemId: string
+  modoInventario: string | null
+  unidadMedida: string | null
+  cantidad: string
+  unidadCodigo: string
+  presentacionId: string
+  precioUnitario: string
+  dte: DteLineaInfo
+} {
+  const destinoValido = producto ? destino : null
+  return {
+    itemId: destinoValido ? destinoValido.itemId : '',
+    modoInventario: producto?.modoInventario ?? null,
+    unidadMedida: producto?.unidadMedida ?? null,
+    cantidad: linea.cantidad ?? '',
+    unidadCodigo: destinoValido && 'unidadCodigo' in destinoValido ? destinoValido.unidadCodigo : '',
+    presentacionId: destinoValido && 'presentacionId' in destinoValido ? destinoValido.presentacionId : '',
+    precioUnitario: linea.precioUnitario ?? '',
+    dte: {
+      clave: linea.clave,
+      descripcion: linea.descripcion,
+      texto: textoLinea(linea, formatMonto),
+      calzo: !!destinoValido,
+      nota,
+      conAjusteDeLinea: linea.conAjusteDeLinea,
+    },
+  }
+}
+
+/**
+ * El descuento a precargar (§ 3.3): con precios brutos no hay nada que
+ * cuantizar (aviso propio, "tipeá el neto"); con alguna línea sin precio la
+ * pieza 1 ya exige todas con precio para cargar un descuento, así que se
+ * avisa **solo si la factura de verdad trae uno** — si no trae, no hay nada
+ * que "no se cargó". Sin ninguno de los dos problemas, delega en
+ * `descuentoDeFactura`.
+ */
+export function precargaDescuento(
+  doc: DocumentoDte,
+  decimalesMoneda: number,
+  faltaAlgunPrecio: boolean,
+): { monto: string | null, avisos: string[] } {
+  if (doc.preciosConIva) {
+    return { monto: null, avisos: ['Esta factura trae los precios con IVA incluido: tipeá el neto'] }
+  }
+  if (faltaAlgunPrecio) {
+    return doc.descuentosGlobales.length
+      ? { monto: null, avisos: ['La factura trae un descuento, pero hay líneas sin precio: revisalas para que se cargue'] }
+      : { monto: null, avisos: [] }
+  }
+  return descuentoDeFactura(doc, decimalesMoneda)
+}
+
+/**
+ * Si corresponde llenar `descuentoTotal` con el monto recién calculado (F1,
+ * ronda 1 del fix): hay un monto para cargar, todavía no se llenó en esta
+ * lectura, y el campo sigue vacío. Si el encargado ya escribió algo a mano —o
+ * si ya se llenó antes y lo borró—, no se pisa: se llena **a lo sumo una vez
+ * por lectura**.
+ *
+ * Existe porque `precargaDescuento` se reevalúa cada vez que cambian las
+ * líneas que quedan en la compra (apartar el FLETE puede destrabarlo), y esa
+ * repetición no puede volver a escribir el campo cada vez que se recalcula.
+ */
+export function debeLlenarDescuentoDte(
+  monto: string | null,
+  yaLlenado: boolean,
+  descuentoActual: string,
+): boolean {
+  return monto != null && !yaLlenado && descuentoActual === ''
+}
+
+/** La franja superior de la pantalla (tarea 4 § 6). */
+export function fraseOrigenDte(tipoNombre: string, folio: string, proveedorNombre: string): string {
+  return `Cargado desde la factura ${tipoNombre} N° ${folio} · ${proveedorNombre} · `
+    + 'Aceptar o reclamar esta factura se sigue haciendo en el SII'
+}
+
+/** El bloqueo "ya está cargada" (spec § 3.1): con fecha si está confirmada,
+ *  sin nada más que el estado si sigue en borrador. */
+export function mensajeCompraExistente(
+  c: { id: string, estado: 'borrador' | 'confirmada', confirmadoEl: string | null },
+  formatFecha: (iso: string) => string,
+): string {
+  const detalle = c.estado === 'confirmada' && c.confirmadoEl ? `confirmada el ${formatFecha(c.confirmadoEl)}` : c.estado
+  return `Esta factura ya está cargada (${detalle})`
+}
+
 /**
  * Reparte las líneas de la factura según lo que ya se sabe de sus claves
  * (`asociaciones`, de `POST /compras/dte/lectura`): las marcadas "no es

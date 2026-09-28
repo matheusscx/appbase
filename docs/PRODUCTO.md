@@ -768,12 +768,28 @@ el food-cost y las mermas valorizadas.
   igual hay que tipear cada serie y la caja no ahorra nada. Retirar una presentación no toca
   las compras que ya la usaron, solo saca la opción para las siguientes. Spec:
   [`2026-09-27-compras-unidad-de-compra-design.md`](./superpowers/specs/2026-09-27-compras-unidad-de-compra-design.md).
+- **El XML de la factura electrónica (DTE) pre-llena el mismo borrador, nunca lo confirma.**
+  El encargado sube el archivo desde "Nueva compra" y el formulario de siempre queda con
+  proveedor, documento y líneas cargados; sigue siendo el mismo camino, no un segundo flujo, y
+  el encargado revisa y guarda como con la carga manual. **Lo que el sistema aprende** de la
+  primera asociación —a qué producto y presentación (o unidad) corresponde el código del
+  proveedor de una línea— queda guardado por proveedor, así que la próxima factura de ese mismo
+  proveedor llega ya calzada. **"No es mercadería"** es un estado igual de aprendido: un flete o
+  una garantía de envase se aparta la primera vez y las siguientes facturas llegan con esa línea
+  ya apartada, sin que nadie tenga que acordarse de sacarla cada vez. **Aceptar o reclamar la
+  factura ante el SII (Ley 19.983) se sigue haciendo en el SII**: leer el XML para pre-llenar no
+  es tomar posición sobre el documento, y el sistema lo dice en pantalla para que nadie confunda
+  cargar la compra con aceptarla. Spec:
+  [`2026-09-27-compras-xml-dte-design.md`](./superpowers/specs/2026-09-27-compras-xml-dte-design.md).
 
-**Fuera de alcance (piezas siguientes, cada una con su spec):** el código del proveedor y la
-lectura del DTE (la presentación es donde se va a guardar ese código), la deuda con el
-proveedor y sus pagos con salida de caja, y los gastos sin stock. También quedan afuera la
-orden de compra, la devolución al proveedor, la moneda extranjera y el flete. ⛔ La pregunta
-fiscal —IVA no recuperable e ILA dentro del costo— **es frente propio** (ADR-010).
+**Fuera de alcance (piezas siguientes, cada una con su spec):** conectarse al SII para traer el
+XML solo (Portal MIPYME, casilla de intercambio) en vez de subirlo a mano, aceptar o reclamar el
+DTE desde el sistema, verificar su firma digital, completar los precios de una compra ya
+confirmada con un XML que llega después, una pantalla para ver y corregir los códigos aprendidos
+por proveedor, la deuda con el proveedor y sus pagos con salida de caja, y los gastos sin stock.
+También quedan afuera la orden de compra, la devolución al proveedor, la moneda extranjera y el
+flete como concepto propio. ⛔ La pregunta fiscal —IVA no recuperable e ILA dentro del costo, y
+el IVA incluido en el precio del XML— **es frente propio** (ADR-010).
 
 Detalle completo: [`docs/features/compras.md`](./features/compras.md).
 

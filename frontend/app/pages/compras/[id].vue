@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { CompraDetalle, LineaCompra as LineaDetalle, PresentacionCompra } from '~/composables/useCompras'
 import { hoyLocal } from '~/composables/useVigenciaRegla'
+import type { DestinoCodigo, DocumentoDte, DteLineaInfo, LecturaDteRespuesta, LineaDte } from '~/composables/useDte'
+import { debeLlenarDescuentoDte, fraseOrigenDte, lineaFormDesdeDte, precargaDescuento, repartirLineas } from '~/composables/useDte'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -31,6 +33,18 @@ interface LineaForm {
   seriesTexto: string
   codigoLote: string
   fechaVencimiento: string
+  /** Presente solo en una línea que vino del XML de la factura (tarea 4).
+   *  `origen` es la línea cruda, para apartarla/traerla de vuelta sin perder
+   *  sus datos (monto, unidad de la factura…) — nunca viaja al backend. */
+  dte: (DteLineaInfo & { origen: LineaDte }) | null
+}
+
+/** Lo que trae el evento `cargar` de `CargarDteModal` (spec § 6). */
+interface CargaDte {
+  documento: DocumentoDte
+  lectura: LecturaDteRespuesta
+  proveedorId: string
+  rutProveedor: string | null
 }
 
 interface Opt { label: string, value: string }
@@ -103,9 +117,30 @@ function nuevaLinea(): LineaForm {
     seriesTexto: '',
     codigoLote: '',
     fechaVencimiento: '',
+    dte: null,
   }
 }
 const lineas = ref<LineaForm[]>([nuevaLinea()])
+
+// ── Carga desde el XML de la factura (tarea 4) ──────────────────────────────
+
+/** No-null solo mientras el borrador viene de un XML sin guardar: gatea la
+ *  franja superior y el guard de salida (spec § 6). */
+const origenDte = ref<{
+  documento: DocumentoDte
+  proveedorNombre: string
+  rutProveedor: string | null
+  /** Si ya se llenó `descuentoTotal` alguna vez en esta lectura (F1, ronda 1):
+   *  el descuento se reevalúa cada vez que cambian las líneas que quedan en
+   *  la compra (`descuentoDte`), y esa reevaluación no puede repetir el
+   *  llenado ni pisar lo que el encargado haya tipeado o borrado después. */
+  descuentoLlenado: boolean
+} | null>(null)
+/** Líneas de la factura marcadas "no es mercadería" (spec § 5.2, § 6): viajan
+ *  aparte de `lineas` para que `lineasCargadas`/`puedeGuardar` no las vean. */
+const apartadas = ref<LineaDte[]>([])
+const cargarDteModalOpen = ref(false)
+const reemplazarConfirmOpen = ref(false)
 
 // ── Presentaciones (pieza 2 § 3.1 y § 6) ────────────────────────────────────
 
@@ -337,7 +372,11 @@ function onSeleccionarItem(linea: LineaForm, itemId: string) {
   linea.itemId = itemId
   linea.modoInventario = producto?.modoInventario ?? 'cantidad'
   linea.unidadMedida = producto?.unidadMedida ?? null
-  linea.unidadCodigo = producto?.unidadMedida ?? ''
+  // Una línea del XML no hereda la unidad base (tarea 4 § 6): "3 CJ" no es "3
+  // unidad", y la real sale de que el encargado la asocie. Serie y lote solo
+  // admiten la base de todos modos, así que ahí sí se fija.
+  const dejarUnidadVacia = !!linea.dte && linea.modoInventario === 'cantidad'
+  linea.unidadCodigo = dejarUnidadVacia ? '' : (producto?.unidadMedida ?? '')
   linea.presentacionId = ''
   linea.seriesTexto = ''
   linea.codigoLote = ''
@@ -367,6 +406,95 @@ function quitarLinea(key: string) {
 /** Una línea a medio cargar (sin producto o sin cantidad) no viaja. */
 const lineasCargadas = computed(() => lineas.value.filter(l => l.itemId && l.cantidad))
 
+/** Una línea del XML todavía sin terminar de asociar: sin producto, sin
+ *  unidad/presentación, o sin cantidad. `lineasCargadas` las descarta en
+ *  silencio (le falta `itemId` o `cantidad`) — acá es donde `puedeGuardar`
+ *  las tiene que ver, para no guardar una factura a medio asociar. */
+const lineasPorAsociar = computed(() =>
+  lineas.value.filter(l => l.dte && (!l.itemId || !(l.presentacionId || l.unidadCodigo) || !l.cantidad)),
+)
+
+function onClickCargarDesdeXml() {
+  const tieneAlgoCargado = !!form.value.proveedorId || lineas.value.some(l => l.itemId)
+  if (tieneAlgoCargado) {
+    reemplazarConfirmOpen.value = true
+    return
+  }
+  cargarDteModalOpen.value = true
+}
+
+function confirmarReemplazo() {
+  reemplazarConfirmOpen.value = false
+  cargarDteModalOpen.value = true
+}
+
+/** Agrega una línea del XML, salvo que lo único que haya sea el placeholder
+ *  vacío que arranca el formulario — ahí la reemplaza. */
+function agregarLineaDte(nueva: LineaForm) {
+  const soloPlaceholder = lineas.value.length === 1 && !lineas.value[0]!.itemId && !lineas.value[0]!.dte
+  lineas.value = soloPlaceholder ? [nueva] : [...lineas.value, nueva]
+}
+
+function lineaDesdeDte(
+  linea: LineaDte,
+  destino: Exclude<DestinoCodigo, 'no_mercaderia'> | null,
+  nota: string | null,
+): LineaForm {
+  const producto = destino ? productos.value.find(p => p.id === destino.itemId) : undefined
+  const campos = lineaFormDesdeDte(linea, destino, nota, producto, formatMonto)
+  return { ...nuevaLinea(), ...campos, dte: { ...campos.dte, origen: linea } }
+}
+
+/**
+ * Al recibir `cargar` del modal (spec § 6): encabezado, líneas repartidas por
+ * `repartirLineas`, apartadas. El descuento NO se calcula acá — `descuentoDte`
+ * (más abajo) lo reevalúa cada vez que cambian las líneas que quedan en la
+ * compra, porque una línea sin precio (el FLETE, típicamente) puede seguir
+ * bloqueándolo en este mismo instante y destrabarse recién cuando se aparta
+ * (F1, ronda 1).
+ */
+function onCargarDte({ documento, lectura, proveedorId, rutProveedor }: CargaDte) {
+  const proveedor = proveedores.value.find(p => p.id === proveedorId)
+
+  form.value.proveedorId = proveedorId
+  form.value.tipoDocumentoCompraId = lectura.tipoDocumento!.id
+  form.value.folio = documento.folio
+  form.value.fechaDocumento = documento.fechaEmision
+  form.value.descuentoTotal = ''
+
+  const { lineas: repartidas, apartadas: apartadasIniciales } = repartirLineas(documento, lectura.asociaciones)
+  lineas.value = repartidas.length
+    ? repartidas.map(({ linea, destino, nota }) => lineaDesdeDte(linea, destino, nota))
+    : [nuevaLinea()]
+  apartadas.value = apartadasIniciales
+
+  origenDte.value = {
+    documento,
+    proveedorNombre: proveedor?.nombre ?? '',
+    rutProveedor,
+    descuentoLlenado: false,
+  }
+}
+
+/** "No es mercadería": todas las líneas con la misma clave (spec § 6), no
+ *  solo la que abrió el botón. */
+function apartarLinea(key: string) {
+  const objetivo = lineas.value.find(l => l.key === key)
+  if (!objetivo?.dte) return
+  const clave = objetivo.dte.clave
+  const aMover = lineas.value.filter(l => l.dte?.clave === clave)
+  apartadas.value = [...apartadas.value, ...aMover.map(l => l.dte!.origen)]
+  lineas.value = lineas.value.filter(l => l.dte?.clave !== clave)
+  if (!lineas.value.length) lineas.value.push(nuevaLinea())
+}
+
+/** "Traer de vuelta": vuelve siempre por asociar, nunca con el destino que
+ *  tenía antes de apartarse (spec § 6). */
+function traerDeVuelta(linea: LineaDte) {
+  apartadas.value = apartadas.value.filter(l => l !== linea)
+  agregarLineaDte(lineaDesdeDte(linea, null, null))
+}
+
 const subtotalMostrado = computed(() =>
   subtotal(lineasCargadas.value.map(l => ({ cantidad: l.cantidad, precioUnitario: l.precioUnitario || null }))),
 )
@@ -387,6 +515,34 @@ const totalMostrado = computed(() =>
   totalConDescuento(subtotalMostrado.value, form.value.descuentoTotal || null),
 )
 
+/**
+ * El descuento de la factura del XML (spec § 3.3, F1 ronda 1): se reevalúa
+ * cada vez que cambian las líneas que HOY quedan en la compra —no solo al
+ * leer— porque una línea sin precio (el FLETE, típicamente) sigue en
+ * `lineas` hasta que el encargado la aparta, y recién ahí deja de bloquear
+ * el descuento del resto. `null` sin una lectura activa (`origenDte`): un
+ * borrador cargado a mano nunca pasa por acá.
+ */
+const descuentoDte = computed(() => {
+  if (!origenDte.value) return null
+  const decimales = monedasStore.monedaOficial?.decimals ?? 0
+  const algunaSinPrecio = faltaAlgunPrecio(
+    lineas.value.filter(l => l.dte).map(l => ({ precioUnitario: l.precioUnitario || null })),
+  )
+  return precargaDescuento(origenDte.value.documento, decimales, algunaSinPrecio)
+})
+
+// Llena `descuentoTotal` apenas `descuentoDte` tiene un monto para dar, pero
+// nunca más de una vez por lectura (`debeLlenarDescuentoDte`): ni cuando el
+// encargado ya tipeó algo, ni de vuelta si lo borró después de que se llenara
+// solo.
+watch(descuentoDte, (estado) => {
+  if (!origenDte.value || !estado) return
+  if (!debeLlenarDescuentoDte(estado.monto, origenDte.value.descuentoLlenado, form.value.descuentoTotal)) return
+  form.value.descuentoTotal = estado.monto!
+  origenDte.value.descuentoLlenado = true
+})
+
 // ── Guardar / descartar ────────────────────────────────────────────────────
 
 const puedeGuardar = computed(() =>
@@ -397,11 +553,13 @@ const puedeGuardar = computed(() =>
   && (!pideFolio.value || !!form.value.folio.trim())
   // Cada línea cargada necesita unidad O presentación (spec pieza 2 § 6): un
   // borrador cuya presentación fue retirada no se puede guardar tal cual.
-  && lineasCargadas.value.every(l => !!l.presentacionId || !!l.unidadCodigo),
+  && lineasCargadas.value.every(l => !!l.presentacionId || !!l.unidadCodigo)
+  // Ninguna línea del XML puede quedar a medio asociar (tarea 4 § 6).
+  && lineasPorAsociar.value.length === 0,
 )
 
 function armarBody() {
-  return {
+  const body: Record<string, unknown> = {
     proveedorId: form.value.proveedorId,
     tipoDocumentoCompraId: form.value.tipoDocumentoCompraId,
     folio: pideFolio.value ? form.value.folio.trim() : null,
@@ -428,9 +586,23 @@ function armarBody() {
           ...(l.fechaVencimiento ? { fechaVencimiento: l.fechaVencimiento } : {}),
         }
       }
+      // Solo clave + descripción (tarea 4 § 7): nunca esparcir `l.dte`
+      // entero — el DTO del backend tiene `forbidNonWhitelisted` y `dte`
+      // trae campos (texto, calzo, nota…) que no existen ahí.
+      if (l.dte) {
+        linea.claveProveedor = l.dte.clave
+        linea.descripcionProveedor = l.dte.descripcion
+      }
       return linea
     }),
   }
+  if (apartadas.value.length) {
+    body.apartadas = apartadas.value.map(a => ({ clave: a.clave, descripcion: a.descripcion }))
+  }
+  if (origenDte.value?.rutProveedor) {
+    body.rutProveedor = origenDte.value.rutProveedor
+  }
+  return body
 }
 
 /**
@@ -448,6 +620,11 @@ async function persistirBorrador(): Promise<CompraDetalle | null> {
       ? await useApiFetch<CompraDetalle>(`${apiUrl}/compras`, { method: 'POST', body })
       : await useApiFetch<CompraDetalle>(`${apiUrl}/compras/${compra.value!.id}`, { method: 'PATCH', body })
     llenarDesde(res)
+    // Antes del replace: el guard de salida (§ 6) solo frena con `origenDte`
+    // puesto, y si no se limpia acá bloquearía esta misma navegación que el
+    // guardado dispara — la compra ya se guardó y no hay nada que perder.
+    origenDte.value = null
+    apartadas.value = []
     if (eraNueva) await router.replace(`/compras/${res.id}`)
     return res
   } catch (e: unknown) {
@@ -529,6 +706,24 @@ const titulo = computed(() => {
   if (!c) return 'Compra'
   return `${c.tipoDocumentoNombre ?? 'Compra'}${c.folio ? ` ${c.folio}` : ''}`
 })
+
+// ── Salir sin guardar la factura cargada (tarea 4 § 6) ──────────────────────
+// Solo mientras `origenDte` está puesto: guardar (§ arriba) lo limpia antes
+// de su propio `router.replace`, así esta misma navegación no se frena a sí
+// misma. Precedente: `pages/salones/index.vue:1079`.
+
+onBeforeRouteLeave(() => {
+  if (!origenDte.value) return true
+  return confirm('Vas a salir sin guardar la factura que cargaste desde el XML. ¿Seguro?')
+})
+
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (!origenDte.value) return
+  e.preventDefault()
+  e.returnValue = ''
+}
+onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
+onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
 </script>
 
 <template>
@@ -552,6 +747,34 @@ const titulo = computed(() => {
               variant="subtle"
             />
           </div>
+          <UButton
+            v-if="esNueva && editable"
+            variant="soft"
+            color="neutral"
+            icon="i-lucide-file-up"
+            data-qa="compra-cargar-dte"
+            @click="onClickCargarDesdeXml"
+          >
+            Cargar desde la factura (XML)
+          </UButton>
+        </div>
+
+        <div
+          v-if="origenDte"
+          class="rounded-md border border-default bg-elevated p-3 space-y-1"
+          data-qa="compra-dte-franja"
+        >
+          <p class="text-sm text-default">
+            {{ fraseOrigenDte(tipoSeleccionado?.nombre ?? '', form.folio, origenDte.proveedorNombre) }}
+          </p>
+          <p
+            v-for="(aviso, i) in descuentoDte?.avisos ?? []"
+            :key="i"
+            class="text-xs text-warning"
+            data-qa="compra-dte-aviso"
+          >
+            {{ aviso }}
+          </p>
         </div>
 
         <div v-if="cargando" class="flex items-center gap-2 text-sm text-muted">
@@ -707,6 +930,38 @@ const titulo = computed(() => {
                 {{ cuentaDeLinea(linea) }}
               </p>
 
+              <div v-if="linea.dte" class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-muted" data-qa="compra-dte-texto">{{ linea.dte.texto }}</span>
+                  <UBadge
+                    v-if="linea.dte.calzo"
+                    label="Calzó por código"
+                    color="neutral"
+                    variant="subtle"
+                    data-qa="compra-dte-calzo"
+                  />
+                  <UBadge
+                    v-else
+                    label="Por asociar"
+                    color="warning"
+                    variant="subtle"
+                    data-qa="compra-dte-por-asociar"
+                  />
+                </div>
+                <UButton
+                  size="xs"
+                  variant="ghost"
+                  color="neutral"
+                  data-qa="compra-dte-no-mercaderia"
+                  @click="apartarLinea(linea.key)"
+                >
+                  No es mercadería
+                </UButton>
+              </div>
+              <p v-if="linea.dte?.nota" class="text-xs text-muted" data-qa="compra-dte-nota">
+                {{ linea.dte.nota }}
+              </p>
+
               <UFormField
                 v-if="linea.modoInventario === 'serie'"
                 label="Series (una por renglón)"
@@ -727,6 +982,41 @@ const titulo = computed(() => {
                 </UFormField>
               </div>
             </div>
+
+            <UCollapsible v-if="apartadas.length" :unmount-on-hide="false" data-qa="compra-dte-apartadas">
+              <UButton
+                label="No se cargan (no es mercadería)"
+                color="neutral"
+                variant="ghost"
+                trailing-icon="i-lucide-chevron-down"
+              />
+              <template #content>
+                <ul class="divide-y divide-default">
+                  <li
+                    v-for="ap in apartadas"
+                    :key="ap.clave"
+                    class="flex items-center justify-between py-2 text-sm"
+                  >
+                    <span data-qa="compra-dte-apartada-texto">
+                      {{ ap.descripcion }} · {{ ap.montoItem != null ? formatMonto(ap.montoItem) : '—' }}
+                    </span>
+                    <UButton
+                      size="xs"
+                      variant="ghost"
+                      color="neutral"
+                      data-qa="compra-dte-traer-de-vuelta"
+                      @click="traerDeVuelta(ap)"
+                    >
+                      Traer de vuelta
+                    </UButton>
+                  </li>
+                </ul>
+              </template>
+            </UCollapsible>
+
+            <p v-if="lineasPorAsociar.length" class="text-xs text-warning" data-qa="compra-dte-por-asociar-pie">
+              Faltan {{ lineasPorAsociar.length }} {{ lineasPorAsociar.length === 1 ? 'línea' : 'líneas' }} por asociar
+            </p>
           </div>
 
           <div class="flex flex-col items-end gap-2 border-t border-default pt-4">
@@ -858,6 +1148,32 @@ const titulo = computed(() => {
           @guardada="onPresentacionGuardada"
           @retirada="onPresentacionRetirada"
         />
+
+        <ComprasCargarDteModal
+          v-if="esNueva && editable"
+          v-model:open="cargarDteModalOpen"
+          :proveedores="proveedores"
+          @cargar="onCargarDte"
+        />
+
+        <UModal v-model:open="reemplazarConfirmOpen" title="¿Reemplazar lo que ya tipeaste?">
+          <template #body>
+            <p class="text-sm text-default" data-qa="compra-reemplazar-resumen">
+              Ya hay un proveedor o una línea con producto: cargar el XML reemplaza todo lo que
+              tipeaste en el formulario.
+            </p>
+          </template>
+          <template #footer>
+            <div class="flex justify-end gap-2 w-full">
+              <UButton variant="ghost" color="neutral" @click="() => { reemplazarConfirmOpen = false }">
+                Cancelar
+              </UButton>
+              <UButton data-qa="compra-reemplazar-si" @click="confirmarReemplazo">
+                Reemplazar
+              </UButton>
+            </div>
+          </template>
+        </UModal>
       </div>
     </template>
   </UDashboardPanel>

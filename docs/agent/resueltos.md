@@ -1246,6 +1246,71 @@ mismo helper que ya usa el costo por unidad elegida del ajuste de stock. El rest
 typecheck ratchet, design tokens) corrió en verde en las dos rondas. Detalle de lo verificado a
 mano, el hallazgo y la corrección: `task-3-report.md` del frente.
 
+## Compras, piezas 3-4: leer el XML del DTE y aprender el código del proveedor (cerrada 2026-09-27)
+
+Sale de [`pendientes.md` § 3, entrada *"Compras: carga manual, y el DTE del SII como
+atajo encima"*](pendientes.md), que **sigue abierta** con lo que la spec § 10 dejó fuera
+(completar precios de una confirmada con el XML, la pantalla de códigos por proveedor, traer el
+XML desde el SII, aceptar/reclamar el DTE, verificar su firma, notas de crédito/débito). Esto
+cierra la lectura y el aprendizaje: el encargado sube el XML de la factura electrónica desde
+"Nueva compra" y el mismo borrador de siempre queda pre-llenado — nunca un segundo flujo.
+Detalle funcional: [`features/compras.md`](../features/compras.md) § *"La lectura del XML y el
+aprendizaje"*; el diseño y las decisiones del owner, en
+[`superpowers/specs/2026-09-27-compras-xml-dte-design.md`](../superpowers/specs/2026-09-27-compras-xml-dte-design.md).
+
+**Las decisiones que más forma le dieron, todas del owner (2026-09-27, eligiendo en un selector
+con una escena, montos y el costo de cada opción — en las seis eligió la recomendada):** una
+línea que el sistema no conoce llega **por asociar** (nunca se descarta ni se crea el producto
+sola); una línea que no es stock (flete, garantía de envase) se **aparta y se recuerda**, para
+que la próxima factura llegue con ella ya apartada; un RUT de emisor que no calza con ningún
+proveedor lo elige el encargado, y se guarda si estaba vacío; el XML que llega después de una
+compra ya confirmada sin precio queda **fuera de esta pieza** ("ya está cargada", con botón para
+abrirla); una asociación mala se corrige **en la línea**, no en una pantalla aparte; y una
+factura grande exige asociar todo antes de guardar, con confirmación al salir sin guardar.
+
+**Las cuatro tareas, cada una con su commit:**
+
+1. **Backend, solo lectura** — tabla `codigos_proveedor` (única viva por `(tenant_id,
+   proveedor_id, clave)`, `CHECK` de "una u otra" igual que la línea de la pieza 2) y
+   `POST /compras/dte/lectura`: resuelve el receptor, el proveedor por RUT (`rut`/`rut_fiscal`,
+   con o sin puntos), el tipo de documento (nunca notas de crédito/débito, 56/61), si el folio ya
+   está cargado y las asociaciones por clave — consultas fijas, ninguna por línea.
+2. **Backend, aprender al guardar** — `POST /compras`/`PATCH /compras/:id` suman
+   `claveProveedor`/`descripcionProveedor` por línea, `apartadas` y `rutProveedor` opcionales;
+   aprender corre en la misma transacción del guardado, con tres statements fijos
+   (`SELECT … FOR UPDATE`, `UPDATE`, `INSERT`), nunca uno por línea. Reaprender no pisa: marca la
+   fila vieja con `eliminado_el` e inserta la nueva (el owner pide reversibilidad). La misma clave
+   para dos destinos distintos en la misma factura es 400 que la nombra.
+3. **Frontend, el lector** — `composables/useDte.ts`, puro: `leerDte` decodifica el XML con el
+   encoding que declara (`TextDecoder`, nunca UTF-8 a la fuerza — un DTE en ISO-8859-1 con una
+   tilde se rompía si no), rechaza `<!DOCTYPE`/`<!ENTITY` antes de parsear (XXE y "billion
+   laughs" solo entran por ahí), y arma el body de la lectura campo por campo, nunca esparciendo
+   el documento (`forbidNonWhitelisted`, sesión orquestadora 2026-09-27).
+4. **Frontend, la pantalla y el cierre** — `CargarDteModal.vue` (el modal: archivo → documentos →
+   proveedor → bloqueado o `cargar`) y `pages/compras/[id].vue` (el pre-llenado, las insignias
+   "calzó por código"/"por asociar", "No es mercadería" con su sección plegable, el guard de
+   salida `onBeforeRouteLeave` + `beforeunload`), con `frontend/e2e/compras/compras-dte.spec.ts`
+   como `encargado.compras`: la primera factura se asocia a mano (incluida una "Caja (12)" creada
+   desde la línea), la segunda calza sola con el flete ya apartado, un 409 de folio repetido al
+   guardar no pierde el formulario ni suelta el guard, y subir de nuevo la primera factura avisa
+   "ya está cargada" con **Abrir**.
+
+⚠️ **Dos hallazgos de la tarea 4, verificados contra el código, no solo declarados:**
+
+- **La ubicación ("Entra a") nunca la precarga el XML**, ni con la carga manual ni con la lectura:
+  a qué local o bodega entra la mercadería es una decisión del encargado que la factura no dice.
+  Con codigos aprendidos, la segunda factura calza sola en todas sus líneas pero **igual pide
+  elegir la ubicación** antes de habilitar Guardar — no es un bug de esta pieza, es un campo que
+  el diseño (spec § 6, brief del Step 2) nunca listó entre lo que el XML pre-llena.
+- **Un `USelectMenu` buscable (Producto) y un `USelect` simple (Unidad) no exponen el mismo rol
+  de accesibilidad**: el primero es `button "Show popup"` (patrón `Combobox` de Reka), el segundo
+  sí es `role="combobox"`. Un helper de Playwright que contaba "el segundo combobox de la línea"
+  esperaba para siempre un elemento que no existía — se corrigió a "el único combobox de la
+  línea" antes de cerrar. Medido con el snapshot de accesibilidad de un fallo real, no en teoría.
+
+Detalle completo de las cuatro tareas, los mutantes que las verificaron y el gate de cada una:
+`task-4-report.md` del frente (partes A y B).
+
 ## Idempotencia en la creación de venta (cerrada 2026-09-19)
 
 Sale de [`pendientes.md` § *Endurecimiento para producción*](pendientes.md). La entrada, verbatim:

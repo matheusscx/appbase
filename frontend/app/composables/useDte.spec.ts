@@ -5,8 +5,13 @@ import type { DocumentoDte } from './useDte'
 import {
   TAMANO_MAXIMO_DTE,
   bodyLectura,
+  debeLlenarDescuentoDte,
   descuentoDeFactura,
+  fraseOrigenDte,
   leerDte,
+  lineaFormDesdeDte,
+  mensajeCompraExistente,
+  precargaDescuento,
   repartirLineas,
   textoLinea,
 } from './useDte'
@@ -240,5 +245,148 @@ describe('ajuste de línea por recargo (fix round 1, F2)', () => {
     // MontoItem = PrcItem(1000) × Qty(10) + Recargo(500) = 10.500 ÷ 10 = 1.050
     expect(linea.conAjusteDeLinea).toBe(true)
     expect(linea.precioUnitario).toBe('1050')
+  })
+})
+
+// Tarea 4 — lo que la pantalla de Nueva compra precarga desde el XML
+// (`pages/compras/[id].vue`), sacado del `.vue` para que quede puro y testeable acá.
+describe('lineaFormDesdeDte', () => {
+  const doc = documentoOk(leerDte(leerFixture('andina-33.xml')))
+  const coca = doc.lineas[0]! // CODIGO:INT1:CC350-12, 10 CJ, $9.120
+  const flete = doc.lineas[2]! // NOMBRE:FLETE, sin cantidad ni precio
+
+  const PRODUCTO_COCA = { modoInventario: 'cantidad', unidadMedida: 'unidad' }
+
+  it('con destino y el producto vivo en el catálogo: calzó por código, con su unidad', () => {
+    const r = lineaFormDesdeDte(
+      coca,
+      { itemId: 'item-coca', unidadCodigo: 'unidad' },
+      null,
+      PRODUCTO_COCA,
+      v => `$${v}`,
+    )
+    expect(r.itemId).toBe('item-coca')
+    expect(r.unidadCodigo).toBe('unidad')
+    expect(r.presentacionId).toBe('')
+    expect(r.cantidad).toBe('10')
+    expect(r.precioUnitario).toBe('9120')
+    expect(r.dte).toEqual({
+      clave: 'CODIGO:INT1:CC350-12',
+      descripcion: 'COCA COLA 350ML CJ12',
+      texto: textoLinea(coca, v => `$${v}`), // se delega en textoLinea, no se arma acá
+      calzo: true,
+      nota: null,
+      conAjusteDeLinea: true,
+    })
+  })
+
+  it('con destino pero el producto ya no está en el catálogo: llega por asociar, no con un producto fantasma', () => {
+    const r = lineaFormDesdeDte(
+      coca,
+      { itemId: 'item-borrado', unidadCodigo: 'unidad' },
+      'el producto al que apuntaba ya no está',
+      undefined,
+      v => v,
+    )
+    expect(r.itemId).toBe('')
+    expect(r.unidadCodigo).toBe('')
+    expect(r.dte!.calzo).toBe(false)
+    expect(r.dte!.nota).toBe('el producto al que apuntaba ya no está')
+  })
+
+  it('sin destino (por asociar): itemId y unidad vacíos, cantidad y precio del XML igual', () => {
+    const r = lineaFormDesdeDte(coca, null, null, undefined, v => v)
+    expect(r.itemId).toBe('')
+    expect(r.unidadCodigo).toBe('')
+    expect(r.presentacionId).toBe('')
+    expect(r.cantidad).toBe('10')
+    expect(r.precioUnitario).toBe('9120')
+    expect(r.dte!.calzo).toBe(false)
+  })
+
+  it('con presentación en el destino: unidadCodigo vacío, presentacionId puesto', () => {
+    const r = lineaFormDesdeDte(coca, { itemId: 'item-coca', presentacionId: 'pres-caja' }, null, PRODUCTO_COCA, v => v)
+    expect(r.presentacionId).toBe('pres-caja')
+    expect(r.unidadCodigo).toBe('')
+  })
+
+  it('una línea sin cantidad ni precio (FLETE): cantidad y precioUnitario vacíos, no null suelto', () => {
+    const r = lineaFormDesdeDte(flete, null, null, undefined, v => v)
+    expect(r.cantidad).toBe('')
+    expect(r.precioUnitario).toBe('')
+  })
+})
+
+describe('precargaDescuento', () => {
+  const doc = documentoOk(leerDte(leerFixture('andina-33.xml')))
+
+  it('sin líneas sin precio y sin precios brutos: carga el descuento de descuentoDeFactura (2.100)', () => {
+    expect(precargaDescuento(doc, 0, false)).toEqual({ monto: '2100', avisos: [] })
+  })
+
+  it('con precios brutos: no carga nada y avisa que hay que tipear el neto, sin llamar a descuentoDeFactura', () => {
+    const bruto = documentoOk(leerDte(leerFixture('precios-brutos.xml')))
+    expect(precargaDescuento(bruto, 0, false)).toEqual({
+      monto: null,
+      avisos: ['Esta factura trae los precios con IVA incluido: tipeá el neto'],
+    })
+  })
+
+  it('con alguna línea sin precio (y la factura sí trae un descuento global): no carga nada y avisa', () => {
+    const r = precargaDescuento(doc, 0, true)
+    expect(r.monto).toBeNull()
+    expect(r.avisos).toHaveLength(1)
+    expect(r.avisos[0]).toMatch(/sin precio/)
+  })
+
+  it('con alguna línea sin precio y SIN descuento global en la factura: no avisa nada (no hay nada que no se cargó)', () => {
+    const sinDescuento: DocumentoDte = { ...doc, descuentosGlobales: [] }
+    expect(precargaDescuento(sinDescuento, 0, true)).toEqual({ monto: null, avisos: [] })
+  })
+})
+
+describe('fraseOrigenDte', () => {
+  it('arma la franja superior con tipo, folio y proveedor', () => {
+    expect(fraseOrigenDte('Factura', '123', 'Distribuidora Andina')).toBe(
+      'Cargado desde la factura Factura N° 123 · Distribuidora Andina · '
+      + 'Aceptar o reclamar esta factura se sigue haciendo en el SII',
+    )
+  })
+})
+
+describe('mensajeCompraExistente', () => {
+  it('confirmada: nombra la fecha', () => {
+    expect(mensajeCompraExistente(
+      { id: 'c1', estado: 'confirmada', confirmadoEl: '2026-09-22' },
+      iso => iso,
+    )).toBe('Esta factura ya está cargada (confirmada el 2026-09-22)')
+  })
+
+  it('borrador: sin fecha', () => {
+    expect(mensajeCompraExistente(
+      { id: 'c1', estado: 'borrador', confirmadoEl: null },
+      iso => iso,
+    )).toBe('Esta factura ya está cargada (borrador)')
+  })
+})
+
+// F1, ronda 1: el descuento se recalcula cada vez que cambian las líneas que
+// quedan en la compra (apartar el FLETE puede destrabarlo), así que llenar el
+// campo no puede repetirse en cada recálculo.
+describe('debeLlenarDescuentoDte', () => {
+  it('con monto, sin llenar antes y el campo vacío: sí', () => {
+    expect(debeLlenarDescuentoDte('2100', false, '')).toBe(true)
+  })
+
+  it('sin monto (todavía bloqueado, o precios brutos): no', () => {
+    expect(debeLlenarDescuentoDte(null, false, '')).toBe(false)
+  })
+
+  it('ya se llenó antes en esta lectura: no, aunque el campo esté vacío de nuevo (lo borraron a mano)', () => {
+    expect(debeLlenarDescuentoDte('2100', true, '')).toBe(false)
+  })
+
+  it('el campo ya tiene algo tipeado (a mano, antes de que el monto estuviera listo): no lo pisa', () => {
+    expect(debeLlenarDescuentoDte('2100', false, '500')).toBe(false)
   })
 })

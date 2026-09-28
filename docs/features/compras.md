@@ -1,11 +1,12 @@
 # Feature: Compras — recibir mercadería (pieza 1)
 
-**Status**: Complete (piezas 1 y 2 de 4)
+**Status**: Complete (piezas 1 a 4)
 **Last Updated**: 2026-09-27
 
 Spec: [`2026-09-18-compras-recepcion-design.md`](../superpowers/specs/2026-09-18-compras-recepcion-design.md) ·
 plan: [`2026-09-18-compras-recepcion.md`](../superpowers/plans/2026-09-18-compras-recepcion.md) ·
 decisiones del owner: [`investigaciones/2026-09-18-compras.md`](../agent/investigaciones/2026-09-18-compras.md) § 5.
+Pieza 3-4 (lectura del XML): spec [`2026-09-27-compras-xml-dte-design.md`](../superpowers/specs/2026-09-27-compras-xml-dte-design.md).
 
 ---
 
@@ -34,18 +35,23 @@ compras.
 - **Pieza 1 (esta sección):** borrador, confirmar, completar y corregir precio y cantidad,
   descuento al total, anular, historial de correcciones y el módulo `Compras` con sus cuatro
   permisos.
-- **Pieza 2 (en construcción):** la unidad de compra por proveedor ("Caja (12)", "Saco (25 kg)"):
-  tabla `presentaciones_compra`, su CRUD (`GET/POST/PATCH/DELETE /compras/presentaciones`) y el
-  seed (tarea 1); la línea con presentación —validación del borrador, el helper único de cantidad
-  base, confirmar con lo congelado, corregir con lo congelado y el detalle— (tarea 2, esta
-  sección: [La unidad de compra por proveedor](#la-unidad-de-compra-por-proveedor-pieza-2)). Falta
-  la pantalla (tarea 3). Spec:
-  [`2026-09-27-compras-unidad-de-compra-design.md`](../superpowers/specs/2026-09-27-compras-unidad-de-compra-design.md).
+- **Pieza 2:** la unidad de compra por proveedor ("Caja (12)", "Saco (25 kg)"): tabla
+  `presentaciones_compra`, su CRUD (`GET/POST/PATCH/DELETE /compras/presentaciones`), la línea con
+  presentación —validación del borrador, el helper único de cantidad base, confirmar con lo
+  congelado, corregir con lo congelado y el detalle— y la pantalla (el selector combinado, el
+  lápiz, la cuenta a la vista). Sección: [La unidad de compra por proveedor](#la-unidad-de-compra-por-proveedor-pieza-2).
+  Spec: [`2026-09-27-compras-unidad-de-compra-design.md`](../superpowers/specs/2026-09-27-compras-unidad-de-compra-design.md).
+- **Piezas 3 y 4:** el encargado sube el XML de la factura electrónica (DTE) del SII y el mismo
+  borrador de siempre queda pre-llenado; la primera vez asocia cada línea a mano, y el sistema
+  aprende el código del proveedor para que la próxima factura calce sola. Sección:
+  [La lectura del XML y el aprendizaje](#la-lectura-del-xml-y-el-aprendizaje). Spec:
+  [`2026-09-27-compras-xml-dte-design.md`](../superpowers/specs/2026-09-27-compras-xml-dte-design.md).
 - **Piezas siguientes, cada una con su spec:** la deuda con el proveedor y sus pagos, y los gastos
   sin stock.
-- **Fuera:** orden de compra, devolución al proveedor, moneda extranjera, flete y la lectura del
-  DTE del SII. ⛔ **Todo lo fiscal** va en su propio frente: mientras tanto, el costo es lo que
-  dice la línea del documento.
+- **Fuera:** orden de compra, devolución al proveedor, moneda extranjera, conectarse al SII
+  (Portal MIPYME, casilla de intercambio) para traer el XML solo o para aceptar/reclamar un DTE, y
+  verificar su firma digital. ⛔ **Todo lo fiscal** va en su propio frente: mientras tanto, el
+  costo es lo que dice la línea del documento, y el IVA incluido o no recuperable no se decide acá.
 
 ---
 
@@ -204,53 +210,158 @@ Spec: [`2026-09-27-compras-unidad-de-compra-design.md`](../superpowers/specs/202
 
 ---
 
-## La lectura del XML y el aprendizaje (en construcción)
+## La lectura del XML y el aprendizaje
 
-Spec `docs/superpowers/specs/2026-09-27-compras-xml-dte-design.md`: el encargado sube el XML de
-la factura electrónica (DTE) del SII y el borrador de siempre queda pre-llenado. El XML se lee
-en el **navegador** (`DOMParser`); el servidor solo recibe los datos ya planos, nunca el archivo.
+Spec [`2026-09-27-compras-xml-dte-design.md`](../superpowers/specs/2026-09-27-compras-xml-dte-design.md):
+el encargado sube el XML de la factura electrónica (DTE) del SII, desde **Nueva compra**, y el
+borrador de siempre queda pre-llenado — nunca un segundo flujo. El XML se lee en el **navegador**
+(`DOMParser`, `composables/useDte.ts`); al servidor viaja el JSON ya plano (`bodyLectura`), nunca
+el archivo. Por eso el borrador sale tan confiable como uno tipeado a mano y pasa por las mismas
+validaciones de `POST /compras`: no verificamos la firma digital del DTE (backlog), así que el
+chequeo "la factura es para tu empresa" es un resguardo contra errores, no un control de
+seguridad.
 
-**Tarea 1, backend de solo lectura:**
+### El flujo
 
-- **`codigos_proveedor`** (nueva): lo que el sistema aprendió de la factura de un proveedor —
-  "su código CC350-12 es la Coca-Cola en Caja (12)", o "su FLETE no es mercadería". Reaprender no
-  pisa: marca la fila vieja con `eliminado_el` e inserta otra (el owner pide reversibilidad).
-- **`POST /compras/dte/lectura`** resuelve, en consultas fijas (ninguna por línea): si el RUT
-  receptor es una razón social viva del tenant; el proveedor por `RUTEmisor` (uno solo → elegido;
-  ninguno o varios → el encargado elige, con `proveedorId`); el tipo de documento por su código
-  SII (`null` si es nota de crédito/débito — `56`/`61` no se cargan acá — o si el código no tiene
-  fila); si el folio ya está cargado (borrador o confirmada; una anulada libera el suyo); y las
-  asociaciones aprendidas por clave (`destino` es `{itemId, presentacionId}`, `{itemId,
-  unidadCodigo}`, `'no_mercaderia'` o `null` — con una nota si apuntaba a algo retirado o
-  borrado).
-- **RUT del emisor no calza con ningún proveedor:** el encargado elige uno con `proveedorId`; si
-  ese proveedor ya tiene un RUT guardado y no es el del emisor, 400. Con los dos RUT vacíos, pasa
-  (la tarea 2 lo guarda al guardar el borrador).
+1. **El modal** (`components/compras/CargarDteModal.vue`) rechaza lo que no es un DTE: sin
+   `Documento/Encabezado/IdDoc/TipoDTE`, más de 2 MB, o con `<!DOCTYPE`/`<!ENTITY` — XXE y "billion
+   laughs" solo entran por ahí y un DTE nunca los trae. Si el envío trae varios documentos, el
+   encargado elige cuál.
+2. `POST /compras/dte/lectura` (abajo) resuelve el proveedor por RUT, el tipo de documento, si el
+   folio ya está cargado y qué asociaciones ya conoce `codigos_proveedor`.
+3. **Bloqueos**, con el mensaje exacto: el RUT receptor no es una razón social del tenant; el tipo
+   es nota de crédito/débito (56/61 — fiscal y deuda, van aparte) o no tiene fila; la factura ya
+   está cargada (con un botón **Abrir**, que navega a ella); el RUT del emisor no calza con ningún
+   proveedor — ahí el encargado elige uno (`proveedorId`), y "no encontramos el RUT…, pedile a
+   quien tenga el módulo Terceros que lo cree" si no hay candidatos.
+4. Sin bloqueo, el formulario de siempre se pre-llena: proveedor, tipo de documento, folio, fecha
+   del documento. **La ubicación ("Entra a") nunca se pre-llena** — ni con el XML ni con la carga
+   manual: a qué local o bodega entra la mercadería lo decide el encargado, la factura no lo dice.
+5. Cada línea del XML llega con su texto (*"COCA COLA 350ML CJ12 · 10 CJ · $9.600"*) y una
+   insignia: **"calzó por código"** si `codigos_proveedor` ya la conoce (producto y
+   unidad/presentación pre-llenados) o **"por asociar"** si no (producto y unidad vacíos, cantidad
+   y precio del XML). Elegir el producto en una línea del XML **no** hereda su unidad base
+   (`onSeleccionarItem`): "3 CJ" no es "3 unidad", y la real sale de elegirla — salvo serie/lote,
+   que solo admiten la base de todos modos.
+6. **"No es mercadería"** aparta una línea (flete, garantía de envase…) a una sección plegable,
+   con **"Traer de vuelta"**; aparta **todas** las líneas con la misma clave, no solo la que abrió
+   el botón, y "Traer de vuelta" siempre vuelve por asociar. Las ya aprendidas como
+   `no_mercaderia` llegan apartadas directamente, sin que nadie las toque.
+7. El descuento de la factura se precarga con `descuentoDeFactura` — en $ tal cual, en % sobre la
+   suma de `MontoItem` de las líneas con el mismo `IndExe` que el `IndExeDR` del descuento (afectas
+   si los dos están ausentes) — **solo si** ninguna línea que HOY queda en la compra está sin precio
+   y el documento no trae los precios con IVA incluido; si no, un aviso explica por qué no se cargó.
+   Esto se reevalúa cada vez que cambian las líneas de la compra, no solo al leer: una línea sin
+   precio (el flete, típicamente) puede seguir bloqueándolo hasta que se aparta con "No es
+   mercadería", y ahí se destraba solo, sin que nadie toque el campo — se llena **como mucho una
+   vez por lectura**, así que si el encargado ya tipeó o borró el descuento a mano no se pisa. Un
+   recargo global no se carga (la compra no tiene recargos): aviso con el monto.
+8. **Guardar** exige que toda línea del XML tenga producto y unidad o presentación, y cantidad
+   (*"Faltan N líneas por asociar"*). Al guardar, cada línea con `claveProveedor` y las
+   `apartadas` enseñan su destino — ver "Qué se aprende" abajo.
+9. **Salir sin guardar** después de leer un XML pide confirmación (`onBeforeRouteLeave`,
+   precedente `pages/salones/index.vue`, más `beforeunload` al cerrar la pestaña). Guardar limpia
+   ese estado **antes** de navegar, para no frenar su propio redirect; un 409 de folio repetido al
+   guardar no lo limpia, así que el guard sigue activo hasta que se corrija el folio. Solo aplica a
+   una compra que vino del XML: la carga manual no pide nada de esto.
 
-**Tarea 2, aprender al guardar (`POST /compras` y `PATCH /compras/:id`):**
+### `POST /compras/dte/lectura`
 
-- Cada **línea** con `claveProveedor` (+ `descripcionProveedor`) enseña su destino: el
-  `itemId` de la línea, con su `presentacionId` o su `unidadCodigo` (los dos ya validados como
-  del proveedor y del producto antes de aprender). Una línea tipeada a mano, sin clave, no toca
-  la tabla.
+Bajo `JwtAuthGuard + TenantGuard + PermisosGuard`, permiso **Compras · Crear** (el mismo de
+guardar el borrador) — es una lectura, pero va por POST por el tamaño del body.
+
+```
+body: { emisorRut, receptorRut, tipoDte, folio, proveedorId?, claves: string[] }
+respuesta: {
+  receptorEsDelTenant, proveedor, candidatos, tipoDocumento, compraExistente,
+  asociaciones: { clave, destino: {itemId, presentacionId|unidadCodigo} | 'no_mercaderia' | null, nota? }[]
+}
+```
+
+Consultas fijas, ninguna por línea: la razón social receptora, el proveedor por `rut`/`rut_fiscal`
+(con o sin puntos), el tipo por código, la compra existente por (proveedor, tipo, folio, no
+anulada), y las claves con `= ANY($1)`. `tenant_id` sale del token, nunca del body. Sin proveedor
+resuelto, `asociaciones` sale vacía y la pantalla vuelve a llamar con el `proveedorId` elegido; con
+`proveedorId`, un RUT que no calza con el guardado del proveedor es 400 — el mismo bloqueo que al
+guardar.
+
+### Qué se aprende, dónde y cuándo
+
+**`codigos_proveedor`** (nueva): lo que el sistema aprendió de la factura de un proveedor — "su
+código CC350-12 es la Coca-Cola en Caja (12)", o "su FLETE no es mercadería". Única viva por
+`(tenant_id, proveedor_id, clave)` (índice único parcial); **reaprender no pisa**: marca la fila
+vieja con `eliminado_el` e inserta otra (el owner pide reversibilidad), y con el **mismo** destino
+no escribe nada.
+
+Se aprende **al guardar el borrador** (`POST /compras` y `PATCH /compras/:id`), en la misma
+transacción — no al confirmar: con "se asocia todo antes de guardar" (decisión del owner),
+guardar es el primer momento en que todo está decidido.
+
+- Cada **línea** con `claveProveedor` (+ `descripcionProveedor`) enseña su destino: el `itemId` de
+  la línea, con su `presentacionId` o su `unidadCodigo` (los dos ya validados como del proveedor y
+  del producto). Una línea tipeada a mano, sin clave, no toca la tabla.
 - El body puede traer **`apartadas: [{ clave, descripcion }]`** (hasta 60): las líneas del XML
   marcadas "no es mercadería" se aprenden con `no_mercaderia = true`, no se cargan como línea.
-- **`rutProveedor`** (cuando el proveedor se eligió a mano porque el RUT del XML no calzó): si el
-  proveedor tenía `rut` y `rut_fiscal` vacíos, se guarda en `rut_fiscal` tal como vino en el XML;
-  si tenía alguno y ninguno calza, 400 (el mismo mensaje de la lectura) y el borrador no se
-  guarda — todo en la misma transacción.
-- **Reaprender no pisa:** con la misma clave y un destino distinto (el proveedor cambió de código
-  o el encargado corrigió una asociación mala), la fila vieja se marca con `eliminado_el` y se
-  inserta la nueva. Con el **mismo** destino, no se escribe nada. La misma clave usada dos veces
-  en la misma factura para destinos distintos (una línea y una apartada, por ejemplo) es 400 que
-  nombra la clave: es un error de captura, no algo que el sistema pueda decidir por su cuenta.
+- **`rutProveedor`** (proveedor elegido a mano porque el RUT del XML no calzó): si tenía `rut` y
+  `rut_fiscal` vacíos, se guarda en `rut_fiscal` tal como vino en el XML; si tenía alguno y
+  ninguno calza, 400 (el mismo mensaje de la lectura) y el borrador no se guarda.
+- La misma clave usada dos veces en la misma factura para destinos distintos (una línea y una
+  apartada, por ejemplo) es 400 que nombra la clave: es un error de captura, no algo que el sistema
+  pueda decidir por su cuenta.
 - Tres statements fijos por guardado (`SELECT … FOR UPDATE` de las vivas que la factura toca,
-  `UPDATE` de las que cambian de destino, `INSERT` de las nuevas), nunca uno por línea. Sin
-  claves ni apartadas, no consulta nada.
-- **Confirmar, el kardex y el CPP no cambian:** el borrador guardado es el mismo de siempre; el
-  aprendizaje no altera qué se recibe ni cómo se costea.
+  `UPDATE` de las que cambian de destino, `INSERT` de las nuevas), nunca uno por línea. Sin claves
+  ni apartadas, no consulta nada.
+- **Confirmar, el kardex y el CPP no cambian:** el aprendizaje no altera qué se recibe ni cómo se
+  costea.
 
-Frontend (lector del XML, pantalla): tareas 3 y 4, todavía sin implementar.
+Se **usa** al leer (`POST /compras/dte/lectura`, arriba): si el destino se retiró o se borró
+después, la línea llega **por asociar** con una nota genérica ("la presentación a la que apuntaba
+fue retirada" / "el producto al que apuntaba ya no está") — la nota no nombra la fila retirada a
+propósito: nombrarla obligaría a leerla sin el filtro de `eliminado_el` (invariante 3) para un
+texto de ayuda.
+
+### La pantalla
+
+`components/compras/CargarDteModal.vue` (el modal) y `pages/compras/[id].vue` (el formulario
+pre-llenado, con la franja *"Cargado desde la factura 33 N° 123 · Distribuidora Andina · Aceptar
+o reclamar esta factura se sigue haciendo en el SII"* y los avisos debajo). El lector (bytes →
+documento) y la aplicación de la respuesta del servidor a las líneas del formulario son funciones
+puras en `composables/useDte.ts` (`leerDte`, `bodyLectura`, `repartirLineas`,
+`lineaFormDesdeDte`, `descuentoDeFactura`, `precargaDescuento`, `debeLlenarDescuentoDte`,
+`textoLinea`, `mensajeCompraExistente`) — la página solo las cablea, sin lógica de negocio propia
+(`docs/patterns/frontend.md`). El descuento (`precargaDescuento`) se recalcula en un `computed`
+reactivo a las líneas que quedan en la compra, no una sola vez al leer (F1, ronda 1); llenar el
+campo solo una vez por lectura es `debeLlenarDescuentoDte`.
+
+**No cambia:** el listado, la compra confirmada, corregir, anular. Guardada, la compra no guarda
+que vino del XML.
+
+### Testing
+
+- **Unitario, el lector (`useDte.spec.ts`, con `happy-dom`):** tildes en ISO-8859-1; un envío con
+  varios documentos y un DTE suelto; `<!DOCTYPE` y un archivo que no es DTE, rechazados; el precio
+  con el descuento de la línea ($9.120, no $9.600); `MntBruto=1` sin precios; descuento global en
+  $ y en % (2% de $105.000 = $2.100); un recargo → aviso; una línea sin código → clave por texto.
+- **E2E de la API (`compras-dte.e2e-spec.ts`, y el guardado en `compras.e2e-spec.ts`):** proveedor
+  por `rut`/`rut_fiscal`, con y sin puntos; desconocido y dos con el mismo RUT → pregunta; receptor
+  de otra empresa → bloqueado; nota de crédito → sin tipo; folio en borrador/confirmada → ya
+  cargada, en anulada → libre; código hacia una presentación retirada → por asociar con nota;
+  reaprender deja la anterior con `eliminado_el`; el RUT se guarda solo si estaba vacío, otro RUT →
+  400; una línea manual no enseña; aislamiento por tenant y permisos (403 sin Crear).
+- **Front, componente:** `CargarDteModal.nuxt.spec.ts` (los cinco bloqueos; el body exacto de
+  `POST /compras/dte/lectura` contra lo que declara el DTO, porque el mock de `useApiFetch`
+  contesta 200 a cualquier cosa) y `compras-carga.nuxt.spec.ts` (el pre-llenado, las líneas por
+  asociar y apartadas, `armarBody` sin esparcir el documento entero, el guard de salida).
+- **Navegador (`compras-dte.spec.ts`):** como `encargado.compras`, con un XML de fixture propio
+  (`e2e/compras/fixtures/andina-dte.xml`, en ISO-8859-1, con una tilde) y RUT/folio generados por
+  corrida — así no depende del seed ni de una corrida anterior. Primera factura: la Coca (con su
+  "Caja (12)" ya creada por API) llega por asociar y se asocia; la Fanta se asocia a su producto y
+  a una Caja (12) creada desde la línea; el flete va a "No es mercadería"; confirmar sube el stock
+  (+120). Segunda factura, otro folio: las dos líneas llegan **calzadas por código**, con el flete
+  ya apartado, sin tocar nada salvo la ubicación (que el XML nunca precarga). Un 409 de folio
+  repetido al guardar no pierde el formulario ni suelta el guard de salida — se corrige el folio y
+  guarda igual. Subir otra vez la primera factura → "ya está cargada", con **Abrir**. Salir con el
+  XML leído sin guardar → pide confirmación.
 
 ---
 
@@ -300,7 +411,7 @@ Todas bajo `JwtAuthGuard + TenantGuard + PermisosGuard`, con el `tenant_id` del 
 | `POST /compras/presentaciones` con `{ proveedorId, itemId, nombre, contenido, unidadCodigo }` | Crear |
 | `PATCH /compras/presentaciones/:id` con `{ nombre?, contenido?, unidadCodigo? }` (ausente no toca; `null` es 400) | Crear |
 | `DELETE /compras/presentaciones/:id` (204; retira, marca `eliminado_el`) | Crear |
-| `POST /compras/dte/lectura` con `{ emisorRut, receptorRut, tipoDte, folio, proveedorId?, claves }`: lo que el sistema sabe de una factura leída en el navegador (en construcción, ver abajo) | Crear |
+| `POST /compras/dte/lectura` con `{ emisorRut, receptorRut, tipoDte, folio, proveedorId?, claves }`: lo que el sistema sabe de una factura leída en el navegador (ver [La lectura del XML y el aprendizaje](#la-lectura-del-xml-y-el-aprendizaje)) | Crear |
 
 **Las cuatro rutas de `presentaciones` son pieza 2** (spec compras-unidad-de-compra § 5): cómo le
 viene un producto a un proveedor ("Caja (12)", "Saco (25 kg)"), por (proveedor, producto). `Crear`
@@ -353,17 +464,20 @@ editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar
 ## Testing
 
 - **Unitarios:** `compras.service.spec.ts`, `inventario.service.spec.ts` (la cuenta rehecha, con
-  los números de la spec), `reparto-descuento.spec.ts`.
+  los números de la spec), `reparto-descuento.spec.ts`, `lectura-dte.service.spec.ts`
+  (`planAprendizaje`, `normalizarRut`) y `useDte.spec.ts` (el lector del XML, front).
 - **E2E de la API:** `test/compras.e2e-spec.ts` (borrador, confirmar, rehacer la cuenta, corregir,
-  anular, permisos y aislamiento) y `test/kardex-secuencia.e2e-spec.ts` (la secuencia sigue el
-  orden de aplicación bajo concurrencia).
+  anular, permisos y aislamiento), `test/kardex-secuencia.e2e-spec.ts` (la secuencia sigue el
+  orden de aplicación bajo concurrencia) y `test/compras-dte.e2e-spec.ts` (la lectura del XML y el
+  aprendizaje al guardar).
 - **Front:** los specs de componente de `components/compras/` (incluido
-  `PresentacionModal.nuxt.spec.ts`) y `compras-carga.nuxt.spec.ts`.
+  `PresentacionModal.nuxt.spec.ts` y `CargarDteModal.nuxt.spec.ts`) y `compras-carga.nuxt.spec.ts`.
 - **Navegador:** `frontend/e2e/compras/compras-por-pantalla.spec.ts` — los pasos del smoke,
   como el encargado, más el test de que la lista de productos del formulario es la de Compras
-  y no el catálogo de ítems — y `compras-presentacion.spec.ts` (pieza 2): crear una
+  y no el catálogo de ítems —, `compras-presentacion.spec.ts` (pieza 2): crear una
   presentación desde la línea, confirmar y corregir en cajas, y el lápiz corrigiendo el
-  contenido antes de confirmar. Ver [El smoke, automatizado](#el-smoke-automatizado).
+  contenido antes de confirmar; y `compras-dte.spec.ts` (piezas 3-4): cargar, aprender y calzar
+  solo desde el XML. Ver [El smoke, automatizado](#el-smoke-automatizado).
 
 ---
 
@@ -393,6 +507,8 @@ descarta la sesión de admin que deja `auth.setup.ts` y entra por la pantalla de
 | 5 · Anular | Frena, resume lo que sale, exige motivo, y después lo deja a la vista sin dejar corregir | *completar el precio, cargar el descuento y anular* |
 | 6 · Crear una presentación desde la línea, confirmar y corregir en cajas (pieza 2) | El selector queda en "Caja (12)" tras crearla; la línea muestra "= 120 unidad"; la confirmada dice "10 Caja (12) · 120 unidad"; corregir pide la cantidad en cajas y el historial la anota así; por API, el stock y el costo quedan en la unidad base | `compras-presentacion.spec.ts` |
 | 7 · El lápiz corrige la presentación antes de confirmar (pieza 2) | Creada con 24 por API, el lápiz la corrige a 12 en pantalla; la cuenta pasa a "= 120 unidad"; el borrador confirmado entra con 120, no con 240 | `compras-presentacion.spec.ts` |
+| 8 · Cargar la primera factura desde el XML (piezas 3-4) | La Coca (con su "Caja (12)" ya creada por API) llega **por asociar** y se asocia; la Fanta se asocia a su producto y a una Caja (12) creada desde la línea; el flete se aparta con "No es mercadería"; confirmar sube el stock (+120) | `compras-dte.spec.ts` |
+| 9 · La segunda factura calza sola, y el 409 de folio repetido no pierde el formulario | Otro folio, mismo proveedor: las dos líneas llegan **calzadas por código**, con el flete ya apartado, sin tocar nada salvo la ubicación; un folio repetido al guardar muestra el 409 sin perder lo tipeado y sin soltar el guard de salida; subir de nuevo la primera factura → "ya está cargada", con **Abrir**; salir con el XML leído sin guardar → pide confirmación | `compras-dte.spec.ts` |
 
 ⚠️ **Corrección al smoke viejo:** decía que un **borrador** sin precio aparece en el listado
 con la insignia *Falta costo*. No es así, y el código nunca lo hizo: `mapCabecera` la calcula

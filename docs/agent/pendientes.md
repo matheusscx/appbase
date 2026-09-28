@@ -181,6 +181,25 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   `authStore.error`: el 2026-09-27 eran solo esas dos pantallas. Los comentarios de
   `auth/callback.vue` y `middleware/auth.ts` lo nombran porque navegan al login para que se vea.
 
+- [ ] **`normalizarClave` existe dos veces, con el orden de operaciones invertido** (lectura del
+  XML del DTE, tarea 4, 2026-09-27). La del frontend
+  (`frontend/app/composables/useDte.ts:112-114`) hace `trim().replace(/\s+/g, ' ').toUpperCase()`
+  — primero colapsa los espacios, después pasa a mayúsculas—; la del backend
+  (`backend/src/modules/compras/lectura-dte.service.ts:24-26`) hace
+  `trim().toUpperCase().replace(/\s+/g, ' ')` — al revés. **Convergen hoy** (lo verificó el
+  revisor de dominio de la tarea 3 al auditar que la clave que arma el front calza con la que
+  busca el back): `toUpperCase()` no toca espacios y `replace(/\s+/g, ' ')` no distingue
+  mayúsculas de minúsculas, así que para el alfabeto y los espacios ASCII el orden no cambia el
+  resultado. **Lo que falta medir antes de decidir si hace falta un arreglo:** si existe algún
+  carácter donde `toUpperCase()` cambia si algo cuenta como espacio para `\s+` (o viceversa) —
+  candidato a mirar: caracteres cuyo `toUpperCase()` cambia de largo o de forma (la `ß` alemana →
+  `SS`) y espacios Unicode no-ASCII (NBSP ` `, espacios de ancho variable) que
+  `CdgItem`/`NmbItem` del XML podrían traer. Si no hay ninguno, la duplicación es inofensiva y el
+  arreglo es cosmético (extraer una función compartida); si hay alguno, hoy no hay ningún test que
+  lo cace — ninguno de los dos archivos de test (`useDte.spec.ts`,
+  `lectura-dte.service.spec.ts`) prueba que las dos funciones den la misma clave para la misma
+  entrada, cada una prueba la suya por separado.
+
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
@@ -669,13 +688,14 @@ Eran tres: la tercera —el reporte de varianza— se construyó y está en [`re
   **Las piezas que faltan, cada una con su spec y en este orden:**
   - **Pieza 3:** la deuda con el proveedor y sus pagos, con la salida de caja automática.
   - **Pieza 4:** los gastos sin stock, con la categoría que define el tenant.
-  - **La lectura del XML del DTE: diseñada el 2026-09-27, en construcción.** El encargado sube
-    el XML y el borrador de siempre queda pre-llenado; el código del proveedor se aprende en
-    una tabla propia (`codigos_proveedor`, no en la presentación como anticipaba la pieza 2 §
-    9). Spec con las seis decisiones del owner:
+  - **La lectura del XML del DTE: hecha (2026-09-27).** El encargado sube el XML y el borrador de
+    siempre queda pre-llenado; el código del proveedor se aprende en una tabla propia
+    (`codigos_proveedor`, no en la presentación como anticipaba la pieza 2 § 9), y la próxima
+    factura del mismo proveedor calza sola. Detalle:
+    [`features/compras.md`](../features/compras.md) § "La lectura del XML y el aprendizaje";
+    cierre en [`resueltos.md`](resueltos.md). Spec con las seis decisiones del owner:
     [`2026-09-27-compras-xml-dte-design.md`](../superpowers/specs/2026-09-27-compras-xml-dte-design.md).
-    Quedaron **fuera, por decisión del owner** (2026-09-27, eligiendo en un selector con el
-    costo de cada opción):
+    Lo que quedó **fuera** por decisión del owner (spec § 10):
     - **Completar los precios de una compra ya confirmada con el XML** — la escena del lunes
       sin factura y el XML del miércoles. Hoy el XML solo llena una compra nueva; si el folio
       existe, ofrece abrirla y el precio se completa a mano. Costo de tomarlo: emparejar las
@@ -684,6 +704,13 @@ Eran tres: la tercera —el reporte de varianza— se construyó y está en [`re
     - **Una pantalla de códigos por proveedor** (qué código apunta a qué producto, y cuáles son
       "no es mercadería"). Hoy una asociación mala se ve y se corrige en la línea cuando llega
       una factura con ese código.
+    - **Traer el XML desde el SII** (Portal MIPYME, casilla de intercambio) en vez de que el
+      encargado lo suba a mano.
+    - ⛔ **Aceptar o reclamar el DTE** (Ley 19.983) y **verificar su firma digital**: leer el XML
+      para pre-llenar no es tomar posición fiscal sobre el documento — la pantalla lo dice
+      ("Aceptar o reclamar esta factura se sigue haciendo en el SII").
+    - **Notas de crédito y débito del proveedor** (56, 61): fiscal y deuda, van en su propio
+      frente; hoy se rechazan con "Las notas de crédito y débito no se cargan acá".
 
   **Bordes de la pieza 1 que quedaron abiertos** (los tres verificados contra el código el
   2026-09-19):
@@ -1519,6 +1546,29 @@ marcador interno, no un documento tributario.
   el reporte de varianza calcula el teórico desde el kardex, así que ese consumo aparece como
   "sin explicación" y ningún aviso lo puede desarmar (spec de la varianza § 5.6, caso 3). Va
   **solo**: toca el camino caliente de la venta.
+
+- [ ] **El descuento global en % de una factura deja afuera de su base las líneas con `IndExe`
+  3, 4 o 5** (garantía de depósito por envases, entre otras) — hallazgo de la lectura del XML del
+  DTE (tarea 4, 2026-09-27), fuera de esa pieza porque decidir el tratamiento tributario de una
+  línea es materia fiscal (⛔ ADR-010, primer punto de "Detenerse y preguntar" de `CLAUDE.md`).
+  **Qué pasa hoy** (`descuentoDeFactura`,
+  `frontend/app/composables/useDte.ts:254`): un `DscRcgGlobal` con `TpoValor '%'` calcula su base
+  sumando el `MontoItem` de las líneas cuyo `IndExe` **calza exactamente** con el `IndExeDR` del
+  descuento — ausente con ausente (afectas), `'1'` (exentas), `'2'` (no facturables). Una línea con
+  `IndExe` `'3'` (garantía de envases), `'4'` o `'5'` **nunca entra en ninguna base**, porque
+  ningún `IndExeDR` vale eso: no hay descuento (ausente, exentas o no facturables) que la sume.
+  **Ejemplo con montos:** bebidas afectas por $50.000 + una línea de garantía de envases de
+  $6.000 con `IndExe='3'`, y un descuento del 2% sin `IndExeDR` (afectas) → la base es **$50.000**
+  (los envases quedan fuera) → **$1.000** de descuento, no $1.120 si el 2% también tomara los
+  $6.000. **Cómo lo ve el encargado hoy:** el monto del descuento llega precargado en el
+  formulario (ya con esa base acotada) y la línea de envases llega como una línea más del XML —
+  por asociar a un producto o apartada con "No es mercadería" — sin que la pantalla explique por
+  qué esa línea no pesó en el descuento. **Por qué va solo:** el estado fiscal por línea (qué es
+  "exento", qué es "no facturable", qué es una garantía que no tributa) es un invariante del
+  sistema — `CLAUDE.md` invariante 5, "exento es un estado fiscal explícito, nunca la ausencia de
+  impuesto", que sale de [ADR-011](../adr/011-catalogo-impuestos-sistema.md) — y una decisión con
+  implicancia tributaria que ADR-010 saca de cualquier tarea de arrastre: no se resuelve como
+  efecto colateral de leer un XML.
 
 ---
 

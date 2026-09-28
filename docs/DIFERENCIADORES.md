@@ -178,6 +178,27 @@ el id de la nota.
 aceptación con motivo, 2026-09-04. El relevamiento que lo respalda como diferenciador es del
 2026-09-04.
 
+### La factura del proveedor calza sola desde la segunda vez
+
+**Nosotros:** al subir el XML de la factura electrónica, cada línea se asocia la primera vez a
+un producto y a su presentación ("Caja (12)"), y el sistema recuerda el código del proveedor
+para ese proveedor. La próxima factura llega pre-llenada y calzada; el flete y la garantía de
+envase llegan ya apartados como "no es mercadería". Nada entra a stock sin que el encargado
+revise el borrador.
+**El mercado:** de los sistemas relevados que operan en Chile (Bsale, Nubox, Defontana, Toteat, Relbase,
+Laudus, Kame, Obuma, Fudo), **ninguno documenta recordar la asociación código del
+proveedor → producto** para la factura siguiente; Nubox tiene una pantalla para asociar factura
+por factura. Afuera, **Restaurant365 sí** calza por "Vendor Item Number" y deja lo que no calza
+para revisión manual: el diferenciador es local, no global.
+⚠️ Regla 3: ausencia de documentación pública ≠ ausencia de la función.
+**Por qué le importa a quien compra:** la primera factura de un proveedor cuesta unos clics por
+producto; las siguientes, revisar y confirmar. Y la caja de 12 viene resuelta, así que el stock
+entra en unidades y no en cajas.
+**Evidencia:** [investigación de carga de stock por factura § 3 y "Lo que el mercado NO hace"](agent/investigaciones/2026-09-27-carga-stock-por-factura.md) ·
+[spec](superpowers/specs/2026-09-27-compras-xml-dte-design.md) ·
+[feature](features/compras.md#la-lectura-del-xml-y-el-aprendizaje).
+**Estado:** ✅ Implementado 2026-09-27 ([ESTADO](ESTADO.md)).
+
 ---
 
 ## 📐 Diseñado, todavía no construido
@@ -224,26 +245,6 @@ que se puede explicar peso por peso, y dos cierres del mismo combo dan el mismo 
 **Evidencia:** [spec del motor de promociones §investigación](superpowers/specs/2026-08-27-motor-promociones-design.md#investigación-de-mercado-2026-08-27-y-su-cruce-contra-este-diseño) ·
 [Toast — effect of discounts on prices](https://doc.toasttab.com/doc/platformguide/adminDiscountPricing.html).
 **Estado:** 📐 Diseñado 2026-08-27, sin construir.
-
-### La factura del proveedor calza sola desde la segunda vez
-
-**Nosotros:** al subir el XML de la factura electrónica, cada línea se asocia la primera vez a
-un producto y a su presentación ("Caja (12)"), y el sistema recuerda el código del proveedor
-para ese proveedor. La próxima factura llega pre-llenada y calzada; el flete y la garantía de
-envase llegan ya apartados como "no es mercadería". Nada entra a stock sin que el encargado
-revise el borrador.
-**El mercado:** de los sistemas relevados que operan en Chile (Bsale, Nubox, Defontana, Toteat, Relbase,
-Laudus, Kame, Obuma, Fudo), **ninguno documenta recordar la asociación código del
-proveedor → producto** para la factura siguiente; Nubox tiene una pantalla para asociar factura
-por factura. Afuera, **Restaurant365 sí** calza por "Vendor Item Number" y deja lo que no calza
-para revisión manual: el diferenciador es local, no global.
-⚠️ Regla 3: ausencia de documentación pública ≠ ausencia de la función.
-**Por qué le importa a quien compra:** la primera factura de un proveedor cuesta unos clics por
-producto; las siguientes, revisar y confirmar. Y la caja de 12 viene resuelta, así que el stock
-entra en unidades y no en cajas.
-**Evidencia:** [investigación de carga de stock por factura § 3 y "Lo que el mercado NO hace"](agent/investigaciones/2026-09-27-carga-stock-por-factura.md) ·
-[spec](superpowers/specs/2026-09-27-compras-xml-dte-design.md).
-**Estado:** 📐 Diseñado 2026-09-27, sin construir. Anotado a pedido del owner.
 
 ---
 
