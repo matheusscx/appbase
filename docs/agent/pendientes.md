@@ -41,6 +41,32 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
+- [ ] **Siete listados de pantalla empatan en `creado_el`, y el orden de las filas empatadas
+  cambia entre cargas** (backend, medido el 2026-09-28; sale del censo que dejó el cierre del
+  kardex en la § 2). `creado_el` es la hora en que **empezó** la transacción: las filas que
+  nacen juntas empatan al microsegundo y el orden entre ellas lo elige el plan de Postgres. En
+  los siete están medidas las dos condiciones —el `ORDER BY` no desempata **y** hay un camino
+  que escribe 2+ filas de esa tabla en una transacción—, y ninguna pantalla vuelve a ordenar en
+  el cliente. Molesta, no corrompe. El octavo del censo, mermas, ya se arregló
+  ([`resueltos.md`](resueltos.md)); las dos selecciones FIFO del mismo censo están en la § 4.
+
+  | Listado (`ORDER BY`) | Quién escribe 2+ filas juntas | Desempate propuesto |
+  |---|---|---|
+  | `ventas.service.ts:3218` (`findOne`, pagos de la venta), `:3833` (`armarBoleta`: **la boleta reimpresa** puede listar los pagos en otro orden), `pagos.service.ts:641` (`listar`) | el loop que guarda un `Pago` por método en `PagosService.registrar` (`pagos.service.ts:236`) | `pago_id`. ⚠️ Estabiliza el orden, no reproduce el orden en que el cajero tipeó los medios: ese no se guarda en ningún lado. Si hiciera falta, es una columna nueva, no un desempate |
+  | `ventas.service.ts:3235` (`findOne`, aplicaciones de cada pago) | el loop de `aplicaciones` (`pagos.service.ts:276`): el reparto venta/propina deja dos filas para el mismo pago | `tipo` (la de venta antes que la de propina), con `pago_aplicacion_id` detrás |
+  | `salones.service.ts:2728` (`anulacionesPorCuenta`) | `escribirCancelacionConMotivo`: una anulación por línea despachada (`salones.service.ts:1782`) | `cla.cuenta_linea_anulacion_id`, **gemelo exacto** de lo que ya hace el reporte (`anulaciones-reporte.service.ts:263`) |
+  | `compras.service.ts:602` (historial de cambios de una compra) | `registrarCambios`: todas las filas en **un** `INSERT` multi-fila (`compras.service.ts:1931`) | `cc.campo`, con la PK detrás. **Esperar a que cierre el frente de compras en curso** |
+  | `items.service.ts:3074` (`findUnidades`) | la entrada en modo serie, un `INSERT` por serie en un loop (`inventario.service.ts:1379`): una línea de compra con N series, o un ajuste con N series | `u.serie` |
+  | `items.service.ts:3117` (`findLotes`) | confirmar una compra con dos líneas del mismo producto y distinto lote (loop de `compras.service.ts:997` → `INSERT INTO item_lote`, `inventario.service.ts:1722`). **Medido por la API**: los dos lotes quedan con `creado_el` idéntico al microsegundo | `l.codigo_lote` |
+
+  **Cómo se cierra cada fila:** la columna en el `ORDER BY`, con su porqué como comentario
+  dentro de la consulta, y un e2e que monte el empate **por la API** y afirme la premisa (que
+  empatan, con `creado_el::text`) además del orden. El molde es el test de mermas en
+  `mermas.e2e-spec.ts`. Con `Db` mockeado no se prueba: el orden vive en el SQL. ⚠️ El límite
+  de ese test es el mismo que se escribió para el kardex: el rojo del mutante es una
+  observación sobre un plan, no una propiedad. Por eso van 3+ filas empatadas, para que un
+  orden cualquiera acierte menos por azar.
+
 - [ ] **El % de anulaciones por garzón no tiene e2e entre tenants** (backend, test; lo dejó
   anotado la revisión de rama del frente, 2026-09-28). La consulta de lo vendido de
   `AnulacionesReporteService.resumen` filtra `tenant_id = $1` en el reparto, la línea y la
@@ -81,51 +107,6 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
-
-- [ ] **Hay otros 11 `ORDER BY` por `creado_el` sin desempate real sobre tablas que una sola
-  transacción escribe varias veces** (backend, censado el 2026-09-20 al cerrar el del kardex).
-  Es la misma causa que aquél —`creado_el` es la hora en que la transacción **empezó**, así que
-  las filas que nacen juntas empatan al microsegundo y el orden entre ellas lo elige el plan de
-  Postgres— pero **no es la misma consecuencia**, y por eso van separados abajo.
-
-  **Qué está verificado y qué no, para que nadie infle el número.** Un empate necesita **dos**
-  condiciones: (a) que el `ORDER BY` no desempate y (b) que algún camino escriba 2+ filas de esa
-  tabla en una transacción. La (a) está verificada en los 11, abriendo cada línea. La (b) está
-  verificada a mano en **dos** —el loop de `escribirCancelacionConMotivo` sobre las líneas
-  despachadas (`salones.service.ts:1639`), que deja una `merma` por línea, y el loop que guarda
-  un `Pago` por método (`pagos.service.ts:236`)—; en los otros nueve sale de la lectura de un
-  sub-agente y **hay que confirmarla antes de tocar nada**. Que un `ORDER BY` no desempate no
-  prueba que haya empate.
-
-  **Por qué está acá y no en la § 1:** salvo el de mermas —misma tabla que el kardex, con
-  `secuencia` a mano— ninguno tiene columna de desempate más que una PK UUID aleatoria, que no
-  ordena nada cronológicamente. Cada uno es una decisión de diseño, no una línea mecánica.
-
-  **Grupo A — 9 listados de pantalla. El síntoma es cosmético:** dos filas que se intercambian
-  entre cargas. Molesta, no corrompe.
-  `mermas.service.ts:348`, `ventas.service.ts:3218`, `:3235`, `:3833`, `pagos.service.ts:641`,
-  `salones.service.ts:2507`, `compras.service.ts:533`, `items.service.ts:3074` y `:3117`.
-
-  **Grupo B — 2 selecciones FIFO internas. Acá el empate no decide un orden de pantalla, decide
-  conducta**, y por eso pesan distinto:
-  - `inventario.service.ts:1389` — `SELECT … FROM item_unidad … ORDER BY u.creado_el ASC LIMIT n
-    FOR UPDATE`: elige **qué unidades serializadas concretas** se consumen. La trazabilidad por
-    número de serie es la razón de ser de [ADR-007](../adr/007-inventario-serie-lote.md).
-  - `inventario.service.ts:1746` — el mismo patrón sobre `item_lote`: elige **qué lote** se
-    descuenta. ⚠️ Y acá hay que tener cuidado con cómo se plantea: el criterio del código es
-    FIFO por **llegada** (`creado_el ASC`, "los lotes más antiguos"), **no** FEFO por
-    vencimiento; `item_lote.fecha_vencimiento` existe y la consulta no la mira. O sea que el
-    empate no "rompe" una promesa de vencimiento que el código nunca hizo — lo que rompe es la
-    propia promesa de llegada, y el lote consumido puede ser uno que vence más tarde. Si lo que
-    se quiere es FEFO, eso es otra entrada y otra decisión del owner.
-
-  **Qué medir antes de proponer nada**, en este orden: (1) confirmar la condición (b) en los
-  nueve que faltan, nombrando el camino concreto; (2) para el grupo B, si existe un camino real
-  que cree en **una** transacción dos unidades o dos lotes que **difieran en algo que importe**
-  (un vencimiento distinto, una procedencia distinta) — el candidato es una compra con dos
-  líneas del mismo ítem y distinto `codigo_lote`; si las filas empatadas son intercambiables, el
-  empate es inocuo y la entrada se achica sola. Recién con eso sale hacia la § 1 (si aparece un
-  desempate obvio) o hacia la § 4 (si hay que elegir criterio).
 
 📌 Antes había una nota acá diciendo que la sección estaba vacía: la última entrada previa, la
 unicidad de `serie`, se cerró el 2026-09-19 y está en [`resueltos.md`](resueltos.md).
@@ -1017,6 +998,33 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
+
+- [ ] **Cuando en la misma compra llegan dos lotes del mismo producto, ¿cuál se vende
+  primero?** (backend, `inventario.service.ts:1775`, y su gemelo de modo serie en
+  `inventario.service.ts:1418`; medido el 2026-09-28, sale del censo que dejó el cierre del
+  kardex.) **La escena:** en la misma factura llegan dos cajas de yogur del mismo producto, una
+  que vence en **enero** y otra en **junio**. Se vende uno. Hoy el sistema saca del lote "más
+  antiguo por llegada", y como llegaron juntos **no hay uno más antiguo**: saca de cualquiera.
+  Medido por la API: confirmada esa compra, una salida de 1 descontó del lote de **junio** y
+  dejó entero el de enero. La venta del POS **siempre** pasa por esta elección —no manda qué
+  lote ni qué unidad—, así que no es un caso de laboratorio.
+  - **A — el que vence antes, solo cuando llegaron juntos.** Arregla la escena sin tocar nada
+    más; pero entre lotes de compras distintas sigue saliendo el más viejo aunque venza después.
+  - **B — siempre el que vence antes** (lo que los POS llaman FEFO). Es probablemente lo que un
+    local de comida espera; cambia qué lote sale en casos que hoy salen "por llegada", y hay que
+    decidir qué pasa con los lotes sin fecha de vencimiento.
+  - **C — da lo mismo cuál.** Se deja como está y se anota que el empate es inocuo.
+
+  **Lo mismo en productos con número de serie, con otra diferencia en juego:** en una misma
+  compra pueden entrar un equipo **nuevo** y uno **usado** (o con garantías distintas), y al
+  vender el sistema elige cualquiera de los dos. La trazabilidad no se pierde —la venta guarda
+  qué unidad salió—, pero ¿debería el cajero elegir la unidad, o el sistema preferir alguna
+  condición? Esto pasa también entre compras distintas, no solo en el empate: la selección
+  nunca mira la condición.
+
+  ⛔ Mientras no se conteste no se toca: decide qué unidad o qué lote sale, y eso toca la
+  trazabilidad ([ADR-007](../adr/007-inventario-serie-lote.md) y "Detenerse y preguntar" de
+  `CLAUDE.md`).
 
 - [ ] **Ingredientes, componentes u opciones borrados del catálogo se saltean sin
   movimiento al anular una receta o combo** (backend, heredado de la parte 2 del frente

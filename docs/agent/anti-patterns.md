@@ -74,7 +74,8 @@ que no haya envejecido.
 **Backend** — ✅ columna UUID sin `type: 'uuid'` · ❌ id sin validar, y el frente cerrado
 barriendo un solo mecanismo · ✅ columna de fecha sin `timestamptz` · ❌ aislamiento
 multi-tenant roto · ❌ dinero: el tipo y el lugar del redondeo · ❌ borrado físico de filas ·
-❌ N+1 · ❌ `FOR UPDATE` en un orden que decide el cliente · ✅ llamada repo-bound en una
+❌ N+1 · ❌ un orden que no fija el sistema (dos caras: `FOR UPDATE` en un orden que
+decide el cliente · `ORDER BY creado_el` sin desempate) · ✅ llamada repo-bound en una
 transacción (deadlock del pool) · ❌ suponer qué conexión resuelve el repo proxy · ❌ campo
 que escribe estado derivado sin pasar por su choke point
 
@@ -279,10 +280,10 @@ sostiene un lock pesimista, la misma query repetida por unidad), el matiz post-A
 `Promise.all` dentro de una transacción, y cómo medirlo en las dos dimensiones:
 [`resueltos.md`](resueltos.md).
 
-### ❌ Tomar `FOR UPDATE` en un orden que decide el cliente (o el heap)
+### ❌ Un orden que no fija el sistema — dos caras: `FOR UPDATE` y `ORDER BY creado_el`
 
-Dos transacciones que bloquean las mismas filas en orden distinto se esperan en cruz y Postgres
-mata a una. El orden de bloqueo tiene que ser **una propiedad del sistema, no del payload**.
+**Locks.** Dos transacciones que bloquean las mismas filas en orden distinto se esperan en
+cruz. El orden de bloqueo es **una propiedad del sistema**, no del payload ni del heap.
 
 ```ts
 // ❌ el orden lo pone el cliente al armar el carrito
@@ -293,20 +294,22 @@ for (const linea of dto.lineas) await registrarMovimiento(linea.itemId)
 `… WHERE receta_item_id = $1 ORDER BY ingrediente_item_id`
 ```
 
-**Reapareció cuatro veces en el mismo camino de venta**: se arregló arriba y quedó vivo **un
-nivel adentro**, en los ids expandidos que ese fix no ve (ingredientes, componentes, opciones,
-extras). Al arreglar un orden de bloqueo, preguntar **qué se bloquea después de eso**.
+**Regla:** un `FOR UPDATE` **no es un cambio local**: listar los otros locks del método
+—incluidos los de cada `UPDATE`— y cruzarlos con los demás que tocan esas tablas. Reapareció
+un nivel más adentro cuatro veces; el cierre real es reintentar ante `40P01` ([`resueltos.md`](resueltos.md)).
 
-Ordenar cada nivel **no cierra el ciclo global** —el resultante es *(orden de línea) × (orden
-dentro de la línea)*—, así que el cierre real es **reintentar ante `40P01`**, que además cubre
-los ciclos que nadie enumeró. Sólo `40P01`: reintentar un error de negocio lo vuelve tres
-intentos silenciosos.
+**Empates en `creado_el`.** Es `now()`, la hora en que **empezó** la transacción: las filas que
+nacen juntas empatan al microsegundo y su orden lo elige el plan (kardex, mermas y siete
+listados más, 2026-09).
 
-**Regla:** agregar un `FOR UPDATE` **no es un cambio local**. Antes de ponerlo, listar qué otros
-locks toma ese método —incluidos los implícitos de cada `UPDATE`— y cruzarlo con los demás
-métodos que tocan esas tablas. La pregunta no es "¿qué protege esta línea?" sino "¿en qué orden
-quedan **todos** los locks de este camino?". Dos variantes más (el ciclo entre dos tablas, y el
-lock ordenado que vuelve peligroso al vecino): [`resueltos.md`](resueltos.md).
+```sql
+ORDER BY mv.creado_el DESC                     -- ❌ una merma por línea, todas empatadas
+ORDER BY mv.creado_el DESC, mv.secuencia DESC  -- ✅ orden de aplicación, o una columna con sentido
+```
+
+**Regla:** si algún camino inserta 2+ filas de esa tabla en una transacción, el `ORDER BY` lleva
+segundo criterio. En un listado es cosmético; en un `… LIMIT n FOR UPDATE` decide qué fila se
+consume, y ese criterio se pregunta. El test va por e2e: con `Db` mockeado no hay orden.
 
 ### ✅ Llamada repo-bound adentro de una transacción — deadlock del pool — AUTOMATIZADO
 

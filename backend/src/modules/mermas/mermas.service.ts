@@ -345,7 +345,12 @@ export class MermasService {
          AND mv.motivo = 'merma'
          ${filtroTipoMerma}
          ${filters}
-       ORDER BY mv.creado_el DESC
+       -- Desempate por secuencia, igual que el kardex: cancelar con motivo una
+       -- cuenta deja una merma por línea en UNA transacción, todas con el mismo
+       -- creado_el (la hora en que empezó). Sin desempate el orden entre ellas
+       -- lo elige el plan y cambia entre cargas; secuencia es el orden de
+       -- aplicación.
+       ORDER BY mv.creado_el DESC, mv.secuencia DESC
        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
       listParams,
     );

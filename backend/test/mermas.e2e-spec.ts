@@ -759,6 +759,8 @@ describe('Mermas — deja de listar cortesías, marca deAnulacion (Task 4, e2e)'
   let motivoMermaId: string;
   let motivoCortesiaId: string;
   let motivoMermaNombre: string;
+  let catCocinaId: string;
+  let ds: DataSource;
 
   async function post<T>(
     url: string,
@@ -837,6 +839,7 @@ describe('Mermas — deja de listar cortesías, marca deAnulacion (Task 4, e2e)'
     await app.init();
 
     tokenAdmin = await login(app);
+    ds = app.get(DataSource);
 
     const resUbic = await request(app.getHttpServer())
       .get('/api/ubicaciones')
@@ -874,7 +877,7 @@ describe('Mermas — deja de listar cortesías, marca deAnulacion (Task 4, e2e)'
         nombreCola: `cola-mermas-anulacion-e2e-${marca}`,
       })
     ).id;
-    const catCocinaId = (
+    catCocinaId = (
       await post<{ id: string }>('/api/categorias', {
         nombre: `Cocina mermas-anulacion E2E ${marca}`,
         impresoraId: cocinaId,
@@ -996,5 +999,79 @@ describe('Mermas — deja de listar cortesías, marca deAnulacion (Task 4, e2e)'
     expect(filaMesa?.deAnulacion).toBe(true);
     expect(filaMesa?.motivoBajaId).toBe(motivoMermaId);
     expect(filaMesa?.motivoBajaNombre).toBe(motivoMermaNombre);
+  });
+
+  /**
+   * Cancelar con motivo una cuenta con varios platos despachados deja una
+   * merma por línea en UNA transacción, así que todas llevan el mismo
+   * `creado_el` al microsegundo (es la hora en que empezó la transacción). El
+   * listado desempata por `secuencia`, el orden de aplicación — mismo arreglo
+   * que el kardex (`docs/agent/resueltos.md`).
+   *
+   * ⚠️ Lo que esto prueba y lo que no: CON el desempate el orden es
+   * determinista y correcto. Sin él, el orden de las empatadas no está
+   * especificado — el rojo del mutante es una observación sobre un plan, no
+   * una propiedad. Tres platos y no dos para que un orden cualquiera coincida
+   * con el esperado menos veces por azar. La premisa (que empatan) va
+   * afirmada: si dejaran de empatar, el desempate no estaría tapando nada.
+   */
+  it('cancelar con motivo tres platos empata sus mermas en creado_el, y el listado igual pone arriba la última aplicada', async () => {
+    const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    // Motivo propio: el filtro `motivoBajaId` deja en el listado solo las
+    // mermas de este test, sin depender de lo que dejaron otras suites.
+    const motivoPropioId = (
+      await post<{ id: string }>('/api/motivos-baja', {
+        nombre: `Caída en mesa E2E ${marca}`,
+        tipo: 'merma',
+      })
+    ).id;
+    const platos = [platoId];
+    for (const n of [2, 3]) {
+      platos.push(
+        (
+          await post<ItemResponse>('/api/items', {
+            nombre: `Plato ${n} mermas-anulacion E2E ${marca}`,
+            tipo: 'producto',
+            precioBase: '5000',
+            monedaId: CLP_MONEDA_ID,
+            unidadMedida: 'unidad',
+            stock: '10',
+            costo: '1000',
+            categoriaId: catCocinaId,
+          })
+        ).id,
+      );
+    }
+
+    const cuenta = await abrirCuentaCon(
+      platos.map((itemId) => ({ itemId, cantidad: '1' })),
+    );
+    await despachar(cuenta.id);
+    await post(`/api/cuentas/${cuenta.id}/cancelar-con-motivo`, {
+      motivoBajaId: motivoPropioId,
+    });
+
+    const escritas: {
+      movimiento_id: string;
+      creado_el: string;
+    }[] = await ds.query(
+      // `creado_el::text` y no el `Date` del driver, que redondea a
+      // milisegundos y haría pasar por empate a dos horas distintas.
+      `SELECT movimiento_id, creado_el::text AS creado_el
+         FROM movimientos_inventario
+        WHERE motivo_baja_id = $1 AND eliminado_el IS NULL
+        ORDER BY secuencia`,
+      [motivoPropioId],
+    );
+    expect(escritas).toHaveLength(3);
+    expect(new Set(escritas.map((e) => e.creado_el)).size).toBe(1);
+
+    const res = await request(app.getHttpServer())
+      .get(`/api/mermas?motivoBajaId=${motivoPropioId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(res.status).toBe(200);
+    expect((res.body as PaginatedMermas).data.map((m) => m.id)).toEqual(
+      escritas.map((e) => e.movimiento_id).reverse(),
+    );
   });
 });
