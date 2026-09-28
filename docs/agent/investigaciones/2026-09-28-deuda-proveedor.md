@@ -254,10 +254,13 @@ que el mercado imponga.
   si se paga antes, no hay conflicto **[NO VERIFICADO, inferido de que el resumen no lo menciona]**.
 - **Mora:** intereses corrientes desde el primer día de atraso, más 1% fijo de comisión
   de recupero sobre el saldo **[SECUNDARIA, vía Buk]**.
-- No se pudo leer directamente el texto en bcn.cl (la página no cargó en el fetch); la
-  cita se apoya en el resumen del estudio Carey, que cita artículos puntuales de la ley.
-  **Pendiente:** re-verificar contra bcn.cl si se necesita cita textual exacta de un
-  artículo.
+- **Verificado contra el texto legal (2026-09-28)**, en el
+  [texto publicado de la Ley 21.131](http://www.sice.oas.org/SME_CH/CHL/Ley_21131_s.pdf)
+  (generado por la BCN) **[PRIMARIA]**: el plazo, la excepción inscrita y el "se tendrán
+  por no escritas" dicen lo que resume Carey. Dos cosas que el resumen no traía: una
+  cláusula que cuente el plazo "desde una fecha distinta de la recepción de la factura" no
+  produce efecto, y si la factura no menciona plazo, la ley lo fija en treinta días corridos
+  desde la recepción.
 
 ### Campos del DTE para derivar el vencimiento
 
