@@ -81,6 +81,9 @@ simulador de impacto (`GET /items/:id/afectados`: costo actual y propuesto, marg
 sugerido), y *Costos desfasados* (`GET /desfases`, mismos campos; por decisión deliberada pide
 solo `Items:Leer`). Ninguna escritura queda alcanzable con solo `Leer`. Barrido de la segunda
 revisión: fuera de `items.controller.ts` y `desfases.controller.ts` nada pide `Items:Leer`.
+✅ **Aceptado por el owner el 2026-09-28**: la orquestadora le planteó que el encargado ahora
+ve costos y márgenes, igual que `Vendedor`, y que separar "ver el catálogo para vender" de "ver
+costos" sería un frente aparte; contestó "sí a todo". Queda así.
 
 ---
 
