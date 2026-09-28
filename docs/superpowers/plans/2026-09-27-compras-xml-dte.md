@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Draft · **Date:** 2026-09-27 · **Owner:** César (aprueba antes de codear)
+**Status:** Done (2026-09-28) · **Date:** 2026-09-27 · **Owner:** César (aprueba antes de codear)
 
 **Goal:** el encargado sube el XML del DTE en *Nueva compra* y el borrador de siempre queda
 pre-llenado; el código del proveedor se aprende al guardar y la próxima factura calza sola.

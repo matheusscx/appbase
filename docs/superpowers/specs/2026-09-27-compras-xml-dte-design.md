@@ -1,6 +1,6 @@
 # Compras: pre-llenar la compra con el XML de la factura electrónica (DTE)
 
-**Fecha:** 2026-09-27 · **Tipo:** spec de diseño · **Status:** Draft (pendiente de aprobación del owner)
+**Fecha:** 2026-09-27 · **Tipo:** spec de diseño · **Status:** Done (2026-09-28: las cuatro tareas y dos arreglos; aprobada por el owner el 2026-09-27)
 **Frente:** *"Compras: carga manual, y el DTE del SII como atajo encima"*, en
 [`docs/agent/pendientes.md`](../../agent/pendientes.md). Viene después de la pieza 1
 ([`2026-09-18-compras-recepcion-design.md`](2026-09-18-compras-recepcion-design.md)) y de la
