@@ -18,6 +18,15 @@ import { elegirEnSelector, rondaDePin, valorDelTotal } from '../support/ui'
  * de error sobre el que no se afirma; el despacho ya ocurrió igual, y la
  * pantalla lo refleja igual (`docs/features/salones-mesas.md` § *Lo despachado
  * se ve en el acto*).
+ *
+ * ⚠️ **Corre como admin, no como el encargado que nombraba la spec § *E2E de
+ * navegador*, y a sabiendas.** Como `encargado.salon` el pedido se carga
+ * (tiene `Items:Leer` desde el 2026-09-28), pero *Enviar a cocina* no llega a
+ * reclamar: `imprimirComanda` primero lista las impresoras (`GET /impresoras`,
+ * `Impresoras:Leer`) y al rol le rebota 403 (medido). El owner decidió que el
+ * arreglo es que enviar a cocina no dependa de ese permiso, no sembrárselo:
+ * frente propio en `docs/agent/pendientes.md` § 3 (*"Enviar a cocina exige
+ * `Impresoras:Leer`"*). Al cerrarlo, este spec pasa a correr como el encargado.
  */
 
 const PRECIO_BASE = '1000'

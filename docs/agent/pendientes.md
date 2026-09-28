@@ -985,34 +985,32 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   agrega al catálogo de `frontend/app/composables/useReportes.ts` con su propio `modulo_app`
   (`docs/features/modulo-reportes.md`).
 
+### Enviar a cocina exige `Impresoras:Leer` (owner, 2026-09-28)
+
+- [ ] **Que *Enviar a cocina* funcione con `Salones:Operar` a secas, sin leer la configuración
+  de impresoras** (frontend + probablemente un endpoint, decidido por el owner el 2026-09-28
+  entre sembrarle el permiso al rol o arreglar la pantalla: **se arregla la pantalla**, en
+  sesión propia porque toca el camino de impresión).
+  Medido con `encargado.salon@paris.cl` en Playwright, ya con `Items:Leer`: el pedido se carga,
+  pero `imprimirComanda` (`frontend/app/composables/useImpresoras.ts:206`) arranca con
+  `listar('comanda')` → `GET /impresoras`, que pide `Impresoras:Leer`; le rebota 403 y
+  `POST /cuentas/:id/comanda/reclamar` —que solo pide `Salones:Operar`— **nunca se llama**. La
+  pantalla no dice que falta un permiso de configuración. Lo tapaba que el único e2e de navegador
+  que aprieta *Enviar a cocina* (`anular-plato.spec.ts`) corre como admin (`es_fijo`
+  short-circuitea todo).
+  **Alcance a medir antes de diseñar, no supuesto:** `obtenerImpresoraBoleta` (misma
+  composable) lista con `listar('boleta')` y tiene la misma forma — sin medir si la precuenta o
+  la boleta de un rol sin ese permiso fallan igual. Y el rol sembrado del garzón (`Salón`,
+  `ana.torres`) tiene solo `Salones:Leer` + `Operar`: tampoco tiene `Items:Leer`, así que
+  tampoco puede cargar un pedido (medido en la base, no en la pantalla).
+  **Al cerrarlo:** `frontend/e2e/salones/anular-plato.spec.ts` pasa a correr como el encargado
+  —su docblock explica por qué hoy corre como admin—.
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
-
-- [ ] **El rol sembrado `Salones · Encargado` no puede ver el catálogo (`Items:Leer`),
-  así que no puede cargar un pedido** (permisos, hallazgo del smoke de la tarea 3 de
-  [`2026-09-27-porcentaje-anulaciones-por-garzon.md`](../superpowers/plans/2026-09-27-porcentaje-anulaciones-por-garzon.md)).
-  Medido con `encargado.salon@paris.cl` logueado de verdad (login + `switch-tenant`, no solo el
-  token sin tenant): `GET /api/items?tipo=producto` → 403 *"No tienes permiso para esta acción"*,
-  mientras que con el mismo token `GET /api/metodos-pago` y `GET /api/salones/operacion` resuelven
-  200. El rol tiene `Leer/Crear/Actualizar/Operar/Anular/Ver todas` del módulo `Salones`
-  (`seedRolEncargadoSalon`, `backend/src/modules/seeder/seeder.service.ts:3080`) y ningún permiso
-  de `Items`. `Operar` se sumó explícitamente **para que el encargado llegue a la mesa**
-  (docblock del mismo método, y `docs/superpowers/specs/2026-09-16-anular-plato-despachado-design.md`
-  § *E2E de navegador*, que decía probarlo con "el encargado") — pero sin `Items:Leer` no hay
-  forma de agregar un producto a una cuenta desde `/salones`: el catálogo (`VentasCatalogoGrid`,
-  alimentado por `refrescarItems()` en `pages/salones/index.vue`) queda vacío y el rol puede abrir
-  una mesa, transferirla y anular algo ya despachado, pero no puede empezar el pedido. Por esto el
-  spec de la tarea 3 (`frontend/e2e/salones/anulaciones-porcentaje.spec.ts`) arma pedido/despacho/
-  anulación/cierre por API y solo entra como este rol para ver el reporte — y
-  `frontend/e2e/salones/anular-plato.spec.ts` (que la spec del 2026-09-16 también decía probar con
-  el encargado) corre como admin, sin que nada lo explique en el archivo. **La pregunta:** ¿se le
-  agrega `Items:Leer` a `Salones · Encargado` (encaja con el resto del rol: administra garzones y
-  mesas, y hoy puede llegar a operar la mesa pero no pedir), o el rol está pensado a propósito para
-  no tomar pedidos —y entonces conviene que el docblock lo diga, y que `anular-plato.spec.ts`
-  documente por qué corre como admin en vez del encargado que la spec original nombraba?
 
 - [ ] **Ingredientes, componentes u opciones borrados del catálogo se saltean sin
   movimiento al anular una receta o combo** (backend, heredado de la parte 2 del frente

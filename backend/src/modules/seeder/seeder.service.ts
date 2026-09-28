@@ -1346,7 +1346,8 @@ export class SeederService implements OnApplicationBootstrap {
       // `Salones:Actualizar` + `Salones:Operar` + `Salones:Anular` (las dos
       // últimas desde el 2026-09-16, spec `anular-plato-despachado-design.md`
       // § 4.1: sin `Operar` no llegaba a `GET /salones/operacion` para anular
-      // nada), y **NO admin**.
+      // nada) + `Salones:Ver todas` + `Items:Leer` (el catálogo para cargar un
+      // pedido), y **NO admin**.
       // Es la combinación a la que se le muestra el aviso de "esa cuenta
       // todavía no puede operar el salón… hasta que se lo des", y por lo tanto
       // la única con la que se puede probar que ahora puede dárselo sin ser
@@ -3071,6 +3072,12 @@ export class SeederService implements OnApplicationBootstrap {
    * `ana.torres`, que se queda a propósito con `Leer` + `Operar`, sin `Ver
    * todas` — es justo el caso que motivó el permiso nuevo).
    *
+   * `Items:Leer` se suma desde el 2026-09-28 (decisión del owner): con
+   * `Operar` el encargado llegaba a la mesa pero no podía cargar un pedido,
+   * porque el catálogo de `/salones` (`refrescarItems()` → `GET /items`) le
+   * rebotaba 403 y quedaba vacío. Es el mismo permiso —y por la misma razón—
+   * que ya llevan `Vendedor` (el POS) y los roles de inventario.
+   *
    * No reusa `ana.torres` (tiene `Salones:Operar`, no `Actualizar`/`Ver
    * todas` — sirve justo para los `403`) ni `admin.paris`, que short-circuita
    * todo por `es_fijo` y probaría otra cosa.
@@ -3092,6 +3099,10 @@ export class SeederService implements OnApplicationBootstrap {
     const SALONES_OPERAR = '550e8400-e29b-41d4-a716-446655440227';
     const SALONES_ANULAR = '550e8400-e29b-41d4-a716-446655440405';
     const SALONES_VER_TODAS = '550e8400-e29b-41d4-a716-446655440406';
+    // moduloTenantId para Paris → Items y su permiso Leer: el catálogo que
+    // `/salones` muestra para cargar un pedido (ver el docblock de arriba).
+    const MODULO_TENANT_ITEMS = '550e8400-e29b-41d4-a716-446655440202';
+    const ITEMS_LEER = '550e8400-e29b-41d4-a716-446655440192';
 
     await this.dataSource.query(
       `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
@@ -3126,6 +3137,16 @@ export class SeederService implements OnApplicationBootstrap {
         [ROL_ID, MODULO_TENANT_SALONES, permisoId],
       );
     }
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [ROL_ID, MODULO_TENANT_ITEMS],
+    );
+    await this.dataSource.query(
+      `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+       VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [ROL_ID, MODULO_TENANT_ITEMS, ITEMS_LEER],
+    );
     await this.dataSource.query(
       `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
        VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,

@@ -23,6 +23,61 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El rol `Salones · Encargado` puede ver el catálogo (cerrada 2026-09-28)
+
+Sale de [`pendientes.md`](pendientes.md) § 4.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 4
+
+- [ ] **El rol sembrado `Salones · Encargado` no puede ver el catálogo (`Items:Leer`),
+  así que no puede cargar un pedido** (permisos, hallazgo del smoke de la tarea 3 de
+  [`2026-09-27-porcentaje-anulaciones-por-garzon.md`](../superpowers/plans/2026-09-27-porcentaje-anulaciones-por-garzon.md)).
+  Medido con `encargado.salon@paris.cl` logueado de verdad (login + `switch-tenant`, no solo el
+  token sin tenant): `GET /api/items?tipo=producto` → 403 *"No tienes permiso para esta acción"*,
+  mientras que con el mismo token `GET /api/metodos-pago` y `GET /api/salones/operacion` resuelven
+  200. El rol tiene `Leer/Crear/Actualizar/Operar/Anular/Ver todas` del módulo `Salones`
+  (`seedRolEncargadoSalon`, `backend/src/modules/seeder/seeder.service.ts:3080`) y ningún permiso
+  de `Items`. `Operar` se sumó explícitamente **para que el encargado llegue a la mesa**
+  (docblock del mismo método, y `docs/superpowers/specs/2026-09-16-anular-plato-despachado-design.md`
+  § *E2E de navegador*, que decía probarlo con "el encargado") — pero sin `Items:Leer` no hay
+  forma de agregar un producto a una cuenta desde `/salones`: el catálogo (`VentasCatalogoGrid`,
+  alimentado por `refrescarItems()` en `pages/salones/index.vue`) queda vacío y el rol puede abrir
+  una mesa, transferirla y anular algo ya despachado, pero no puede empezar el pedido. Por esto el
+  spec de la tarea 3 (`frontend/e2e/salones/anulaciones-porcentaje.spec.ts`) arma pedido/despacho/
+  anulación/cierre por API y solo entra como este rol para ver el reporte — y
+  `frontend/e2e/salones/anular-plato.spec.ts` (que la spec del 2026-09-16 también decía probar con
+  el encargado) corre como admin, sin que nada lo explique en el archivo. **La pregunta:** ¿se le
+  agrega `Items:Leer` a `Salones · Encargado` (encaja con el resto del rol: administra garzones y
+  mesas, y hoy puede llegar a operar la mesa pero no pedir), o el rol está pensado a propósito para
+  no tomar pedidos —y entonces conviene que el docblock lo diga, y que `anular-plato.spec.ts`
+  documente por qué corre como admin en vez del encargado que la spec original nombraba?
+
+### Cómo se cerró
+
+**Decisión del owner (2026-09-28), elegida entre las dos salidas de la entrada: se le agrega
+`Items:Leer`.** El rol administra garzones y mesas y ya llegaba a operar la mesa; que no pudiera
+pedir era un hueco del seed, no un diseño.
+
+- `seedRolEncargadoSalon` vincula el rol al módulo `Items` de Paris (`modulos_roles`) y le da
+  `Items:Leer` —los mismos IDs que ya usan `Vendedor` y los roles de inventario—. El docblock
+  cuenta el porqué y la fecha.
+- Lo fija `salones-anular-linea.e2e-spec.ts`: `GET /api/items?tipo=producto` con el token del
+  encargado da 200.
+- **Lo que el cierre destapó, y NO cerró:** con `Items:Leer`, `anular-plato.spec.ts` corrido
+  como `encargado.salon` carga el pedido pero se cuelga en *Enviar a cocina* —`imprimirComanda`
+  lista las impresoras (`GET /impresoras`, `Impresoras:Leer`) antes de reclamar, y le rebota
+  403—. El owner decidió (2026-09-28) arreglar la pantalla y no sembrar el permiso: entrada
+  nueva en `pendientes.md` § 3. Hasta entonces el spec corre como admin y su docblock dice por
+  qué — la otra mitad de la pregunta de la entrada.
+- `anulaciones-porcentaje.spec.ts` sigue armando la escena por API —son precondiciones, no el
+  flujo bajo prueba— y su docblock ya no da el 403 del catálogo como motivo.
+
+**Efecto lateral, el mismo que ya tiene `Vendedor`:** `Items:Leer` también muestra
+Configuración → Items (solo lectura) y *Costos desfasados* (`GET /desfases`, que por decisión
+deliberada pide solo `Items:Leer`).
+
+---
+
 ## Los dos textos de pantalla del XML del DTE: el owner los confirma tal cual (cerrada 2026-09-28)
 
 Sale de [`pendientes.md`](pendientes.md) § 4. **Se confirman sin cambios** (owner, 2026-09-28,
@@ -41,6 +96,8 @@ o los reescribía: *"Los dejamos así"*). No hay código que tocar: los dos ya e
   guardar — `'Vas a salir sin guardar la factura que cargaste desde el XML. ¿Seguro?'`
   (`frontend/app/pages/compras/[id].vue:759`) — los eligió quien implementó. **La pregunta:**
   ¿los confirma el owner tal cual, o los reescribe?
+
+---
 
 ## El % de anulaciones y cortesías sobre lo pedido, por garzón (cerrada 2026-09-27)
 
@@ -158,9 +215,9 @@ Tres tareas del mismo plan:
 ### Qué quedó afuera
 
 - **Las notas de crédito no restan de lo vendido** (fiscal, va solo — `pendientes.md` § 6).
-- **El rol `Salones · Encargado` no puede leer el catálogo de ítems** (`Items:Leer`), hallazgo
-  del smoke de la tarea 3: puede llegar a la mesa y anular, pero no puede empezar un pedido.
-  Va como pregunta al owner, `pendientes.md` § 4 — no se tocó el seeder sin confirmar.
+- ~~**El rol `Salones · Encargado` no puede leer el catálogo de ítems**~~ — cerrada el
+  2026-09-28: el owner eligió darle `Items:Leer` (ver *"El rol `Salones · Encargado` puede ver
+  el catálogo"*, arriba).
 
 ---
 

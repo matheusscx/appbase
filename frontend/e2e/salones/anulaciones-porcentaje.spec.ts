@@ -14,22 +14,11 @@ import { API, api, tokenDe, limpiarItems, abrirCaja, cerrarCaja, TENANTS, CLP } 
  * **Como encargado del salón** (`encargado.salon@paris.cl`: `Salones:Ver
  * todas`, no admin) — con admin el 403 de un permiso ajeno queda tapado.
  *
- * ⚠️ **Por qué el pedido/despacho/anulación van por API y no por clic, a
- * diferencia de `anular-plato.spec.ts`.** Se intentó primero por UI, con
- * `encargado.salon` logueado: `GET /api/items` (el catálogo de
- * `VentasCatalogoGrid`) le devuelve 403 — el rol sembrado `Salones ·
- * Encargado` tiene `Leer/Crear/Actualizar/Operar/Anular/Ver todas` de
- * `Salones`, pero ningún permiso de `Items` (medido: `metodos-pago` y
- * `salones/operacion` sí le resuelven 200 con ese mismo token; `items` no).
- * Con `Operar` agregado específicamente para que este rol "llegue a la mesa"
- * (docblock de `seedRolEncargadoSalon`), no poder ver el catálogo lo deja sin
- * forma de cargar un pedido — un hueco del seed, no de esta pantalla, y
- * `CLAUDE.md` prohíbe tocar el backend/seeder sin pedir permiso primero. Se
- * reporta aparte (ver el informe de la tarea) y este spec arma la escena por
- * API, como ya hacen `cuenta-hasta-cobro.spec.ts` y `anular-plato.spec.ts`
- * con el garzón, el turno, la caja o el ítem: son precondiciones, no el flujo
- * bajo prueba. Lo que SÍ se ejercita por navegador, con el rol real, es lo
- * que la Tarea 3 agrega: la pantalla del reporte.
+ * **El pedido/despacho/anulación van por API, no por clic**: son precondiciones,
+ * no el flujo bajo prueba — como el garzón, el turno, la caja o el ítem en
+ * `cuenta-hasta-cobro.spec.ts` (y como este rol *Enviar a cocina* todavía no
+ * anda: `anular-plato.spec.ts` explica por qué). Lo que SÍ se ejercita por navegador,
+ * con el rol real, es lo que la Tarea 3 agrega: la pantalla del reporte.
  *
  * Escena (mismos números que el test 2 del e2e de backend): 2 unidades
  * pedidas, 1 anulada como cortesía → pedido = 2, anulado = 1 → **50,00%**,

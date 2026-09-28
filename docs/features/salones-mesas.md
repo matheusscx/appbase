@@ -760,12 +760,13 @@ borrados del catálogo que se saltean sin movimiento al anular (el costo sale ba
 hueco heredado de la parte 2); y que una nota de crédito reste de lo vendido en este %
 (fiscal, va sola).
 
-⚠️ **El rol sembrado `Salones · Encargado` no puede leer el catálogo de ítems.** Tiene
-`Leer/Crear/Actualizar/Operar/Anular/Ver todas` de `Salones` y ningún permiso de `Items`, así
-que puede llegar a la mesa (`Operar`) y anular un plato despachado (`Anular`), pero
-`GET /items` —el catálogo de `VentasCatalogoGrid`— le rebota 403 y no puede cargar un pedido.
-Hallazgo del smoke de la tarea 3 (`frontend/e2e/salones/anulaciones-porcentaje.spec.ts`, que
-por eso arma el pedido por API); pregunta abierta al owner en `pendientes.md` § 4.
+**El rol sembrado `Salones · Encargado` lleva `Items:Leer`** (owner, 2026-09-28). Con
+`Operar` llegaba a la mesa y con `Anular` anulaba lo despachado, pero `GET /items` —el catálogo
+de `VentasCatalogoGrid`— le rebotaba 403 y no podía cargar un pedido. Lo encontró el smoke de
+la tarea 3. **Sigue sin poder mandar a cocina**: *Enviar a cocina* lista antes las impresoras
+(`GET /impresoras`, `Impresoras:Leer`) y le rebota 403 — el owner decidió arreglar la pantalla
+en vez de sembrar el permiso (`pendientes.md` § 3). Por eso `anular-plato.spec.ts` todavía
+corre como admin.
 
 ### Cancelar una cuenta con platos despachados (2026-09-16)
 
@@ -1196,9 +1197,10 @@ tiene `Actualizar` o `Eliminar`).
 
 **Las dos superficies piden permisos distintos, y `/salones` lo declara en su `definePageMeta`**
 (`middleware: ['auth', 'permiso'], permiso: 'Salones:Operar'`). Es lo que evita el callejón sin
-salida del rol *"Salones · Encargado"* del seed, que tiene `Leer`/`Crear`/`Actualizar` y **no**
-`Operar`: sin el middleware entraba a `/salones` por URL directa y veía una pantalla vacía —el
-listado que la puebla es `GET /salones/operacion`, que exige `Operar`—. Su pantalla es
+salida de un rol con `Leer`/`Crear`/`Actualizar` y **sin** `Operar` —como era *"Salones ·
+Encargado"* del seed hasta el 2026-09-16—: sin el middleware entraba a `/salones` por URL
+directa y veía una pantalla vacía —el listado que la puebla es `GET /salones/operacion`, que
+exige `Operar`—. Su pantalla es
 Configuración → Salones. Esconder no es seguridad (invariante 6): el candado real es el
 `@RequiresPermiso` del backend.
 

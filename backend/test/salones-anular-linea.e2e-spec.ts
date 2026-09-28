@@ -442,6 +442,15 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
     expect(aceptado.status).toBe(201);
   });
 
+  it('el encargado lee el catálogo (`Items:Leer`): sin él llegaba a la mesa pero no podía cargar un pedido', async () => {
+    // Hasta el 2026-09-28 el rol sembrado no tenía ningún permiso de `Items` y
+    // este `GET` —el que alimenta el catálogo de `/salones`— le daba 403.
+    const res = await request(app.getHttpServer())
+      .get('/api/items?tipo=producto')
+      .set('Authorization', `Bearer ${tokenEncargado}`);
+    expect(res.status).toBe(200);
+  });
+
   it('anula parcial (1 de una línea 3/3): baja cantidad y cantidad_enviada, y el aviso aparece en `anulaciones`', async () => {
     const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '3' }]);
     await despachar(cuenta.id);
