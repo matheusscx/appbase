@@ -97,9 +97,9 @@ const RESUMEN = {
     { tipo: 'no_elaborado', platos: '1.0000', precioCarta: '8500.0000', costo: [], sinValorizar: 0 },
   ],
   porGarzon: [
-    { garzonId: 'garzon-ana', garzonNombre: 'Ana', platos: '1.0000', precioCarta: '8500.0000', costo: [], sinValorizar: 0 },
-    { garzonId: null, garzonNombre: null, platos: '2.0000', precioCarta: '17000.0000', costo: [], sinValorizar: 1 },
-    { garzonId: 'garzon-beto', garzonNombre: 'Beto', platos: '3.0000', precioCarta: '9000.0000', costo: [{ monedaId: 'clp-1', monto: '1200.0000' }], sinValorizar: 0 },
+    { garzonId: 'garzon-ana', garzonNombre: 'Ana', platos: '1.0000', precioCarta: '8500.0000', costo: [], sinValorizar: 0, pedido: '170000.0000', porcentaje: '0.0500' },
+    { garzonId: null, garzonNombre: null, platos: '2.0000', precioCarta: '17000.0000', costo: [], sinValorizar: 1, pedido: '17000.0000', porcentaje: '1.0000' },
+    { garzonId: 'garzon-beto', garzonNombre: 'Beto', platos: '3.0000', precioCarta: '9000.0000', costo: [{ monedaId: 'clp-1', monto: '1200.0000' }], sinValorizar: 0, pedido: '0.0000', porcentaje: null },
   ],
   porAutorizo: [
     { usuarioId: 'user-carla', usuarioNombre: 'Carla Jefa', platos: '6.0000', precioCarta: '34500.0000', costo: [{ monedaId: 'clp-1', monto: '1200.0000' }], sinValorizar: 1 },
@@ -284,6 +284,29 @@ describe('anulaciones — tablas chicas (por garzón / por quién autorizó)', (
     const celdaPlatos = filaCarla!.findAll('td')[1]
     expect(celdaPlatos?.text().trim()).toBe('6')
     expect(celdaPlatos?.text()).not.toContain('6.0000')
+
+    wrapper.unmount()
+  })
+
+  // Tarea 3 (spec § 5.2): "Por garzón" suma la columna "% de lo pedido",
+  // formateada con `formatPorcentaje` (fracción decimal → "5,00%", `—` con
+  // `null`, mismo criterio que el resto de la pantalla).
+  it('"Por garzón" muestra "% de lo pedido": "5,00%" con porcentaje, "—" con null', async () => {
+    const wrapper = await montar()
+
+    expect(wrapper.text()).toContain('% de lo pedido')
+
+    const filaAna = wrapper.findAll('tbody tr').find(f => f.text().includes('Ana'))
+    const filaBeto = wrapper.findAll('tbody tr').find(f => f.text().includes('Beto'))
+    expect(filaAna, 'fila de Ana en "Por garzón"').toBeTruthy()
+    expect(filaBeto, 'fila de Beto en "Por garzón"').toBeTruthy()
+
+    // Orden de columnas tras la Tarea 3: garzón, platos, precio de carta,
+    // % de lo pedido, costo, sin valorizar.
+    const celdaPorcentajeAna = filaAna!.findAll('td')[3]
+    const celdaPorcentajeBeto = filaBeto!.findAll('td')[3]
+    expect(celdaPorcentajeAna?.text().trim()).toBe('5,00%')
+    expect(celdaPorcentajeBeto?.text().trim()).toBe('—')
 
     wrapper.unmount()
   })

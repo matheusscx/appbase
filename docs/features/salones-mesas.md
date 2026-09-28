@@ -720,10 +720,11 @@ detalle paginado; aviso fijo *"Las mermas de esta lista también están contadas
 `Mermas` (`frontend/app/pages/mermas.vue`) suma el badge *"Anulación en mesa"* en las filas
 con `deAnulacion: true` — ver [mermas-valorizadas.md](./mermas-valorizadas.md).
 
-**El % de anulaciones y cortesías sobre lo pedido, por garzón (2026-09-27) — backend.** Spec
+**El % de anulaciones y cortesías sobre lo pedido, por garzón (2026-09-27).** Spec
 [`2026-09-27-porcentaje-anulaciones-por-garzon-design.md`](../superpowers/specs/2026-09-27-porcentaje-anulaciones-por-garzon-design.md)
-§§ 4 y 5.1. `GET /salones/anulaciones/resumen` suma dos campos al `porGarzon` de su respuesta
-(la pantalla todavía no los muestra — ver el aviso al final de esta sección):
+§§ 4, 5.1 y 5.2. `GET /salones/anulaciones/resumen` suma dos campos al `porGarzon` de su
+respuesta, y la tabla "Por garzón" de `/salones/anulaciones` suma la columna **"% de lo
+pedido"** (`formatPorcentaje`, `—` con `null`):
 
 - **`pedido`**: Vendido + Anulado, a precio de carta, ESCALA_COSTO. **Vendido** es el reparto
   (`cuenta_linea_reparto`, sección anterior) de las líneas vivas de las cuentas **cerradas**
@@ -753,16 +754,18 @@ rango, también a los que no anularon nada** — van con `platos`/`precioCarta` 
 garzón sin anulaciones es el punto de comparación que hace sospechoso el % alto de otro.
 Orden: por `garzonNombre`, *Sin garzón* al final.
 
-⏳ **Pendiente (tarea 3 de [`2026-09-27-porcentaje-anulaciones-por-garzon.md`](../superpowers/plans/2026-09-27-porcentaje-anulaciones-por-garzon.md)):**
-la pantalla `/salones/anulaciones` todavía no tiene la columna "% de lo pedido" en la tabla
-"Por garzón" — hoy solo muestra `platos`/`precioCarta`/`costo` (spec § 5.2, que también deja
-para esa tarea el `—` con `porcentaje` null).
-
 **Fuera de este frente** (`pendientes.md`): la cortesía como retiro gravado con IVA (fiscal,
 frente propio); el día comercial que cruza la medianoche; los ingredientes/componentes
 borrados del catálogo que se saltean sin movimiento al anular (el costo sale bajo sin marca —
 hueco heredado de la parte 2); y que una nota de crédito reste de lo vendido en este %
 (fiscal, va sola).
+
+⚠️ **El rol sembrado `Salones · Encargado` no puede leer el catálogo de ítems.** Tiene
+`Leer/Crear/Actualizar/Operar/Anular/Ver todas` de `Salones` y ningún permiso de `Items`, así
+que puede llegar a la mesa (`Operar`) y anular un plato despachado (`Anular`), pero
+`GET /items` —el catálogo de `VentasCatalogoGrid`— le rebota 403 y no puede cargar un pedido.
+Hallazgo del smoke de la tarea 3 (`frontend/e2e/salones/anulaciones-porcentaje.spec.ts`, que
+por eso arma el pedido por API); pregunta abierta al owner en `pendientes.md` § 4.
 
 ### Cancelar una cuenta con platos despachados (2026-09-16)
 

@@ -201,9 +201,9 @@ lógica de negocio en la página. Tiene que andar a ancho de teléfono.
 
 Cada uno queda como entrada en `pendientes.md` en el mismo commit que cierre este frente:
 
-- ~~**% de anulaciones y cortesías sobre lo vendido por garzón**~~ — backend construido el
-  2026-09-27 (`pedido`/`porcentaje` en `GET /salones/anulaciones/resumen`); falta la columna en
-  la pantalla (tarea 3): ver
+- ~~**% de anulaciones y cortesías sobre lo vendido por garzón**~~ — cerrado el 2026-09-27:
+  `pedido`/`porcentaje` en `GET /salones/anulaciones/resumen` y su columna "% de lo pedido" en
+  la pantalla. Ver
   [`2026-09-27-porcentaje-anulaciones-por-garzon-design.md`](2026-09-27-porcentaje-anulaciones-por-garzon-design.md).
 - **La cortesía como retiro gravado con IVA** (DL 825, art. 8 d; § 8). Es **fiscal**: abre su propio
   frente con su propia sesión (`CLAUDE.md`, ADR-010) y no se cuelga de este.

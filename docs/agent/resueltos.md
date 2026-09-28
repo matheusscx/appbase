@@ -23,6 +23,128 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El % de anulaciones y cortesías sobre lo pedido, por garzón (cerrada 2026-09-27)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Spec
+[`2026-09-27-porcentaje-anulaciones-por-garzon-design.md`](../superpowers/specs/2026-09-27-porcentaje-anulaciones-por-garzon-design.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **% de anulaciones y cortesías sobre lo vendido por garzón** (backend + frontend, fuera
+  de alcance de
+  [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md)
+  § 7) — el resumen del reporte de anulaciones (`GET /salones/anulaciones/resumen`) ya trae
+  `platos`/`precioCarta`/`costo` por garzón; falta la venta con la que compararlos para armar
+  el porcentaje. **La pregunta que frena:** una mesa que se **transfiere** a mitad de servicio
+  (`POST /cuentas/:id/transferir`, `docs/features/salones-mesas.md`) — ¿la venta es del
+  garzón que la abrió, del que la cerró/cobró, o se reparte entre los dos? Hoy
+  `cuentas.garzon_responsable_id` solo guarda el **vigente** (el reporte de anulaciones
+  resolvió lo mismo para sí mismo congelando el garzón al anular —
+  `cuenta_linea_anulaciones.garzon_id`—, pero eso fija quién anuló, no quién vendió). Sin esa
+  regla, el % queda indefinido para cualquier mesa transferida, que no es un caso raro.
+  ✅ **CONTESTADO (owner, 2026-09-20): la venta se REPARTE entre los garzones que atendieron la
+  mesa.** El caso que lo decide: Ana abre la mesa, sirve entradas por $40.000 y termina turno;
+  Beto atiende postres y cobra, la cuenta cierra en $60.000 → $40.000 a Ana y $20.000 a Beto.
+  Las otras dos salidas se descartaron por cómo distorsionan el porcentaje, que es el número
+  que la entrada existe para producir: *del que abrió* le deja a Beto una mesa atendida con
+  venta cero —y si anuló algo, su % se dispara contra un denominador de cero—; *del que cerró*
+  es lo que el sistema ya sabe sin trabajo extra (guarda el garzón vigente) pero le borra a Ana
+  $40.000 que sí vendió. **El costo aceptado:** hay que guardar qué garzón tenía la mesa **en
+  cada línea** del pedido, que hoy no se guarda — `cuentas.garzon_responsable_id` solo tiene el
+  vigente. Quien lo tome: eso es lo primero, porque sin ese dato el reparto no se puede calcular
+  ni hacia atrás.
+
+### Qué se hizo
+
+Tres tareas del mismo plan:
+
+1. **El reparto de cada línea** (`cuenta_linea_reparto`, tabla nueva): cuántas unidades de cada
+   línea de la cuenta entraron con cada garzón responsable. Único escritor `SalonesService`,
+   siempre bajo el `FOR UPDATE` que cada camino que edita una línea ya toma. Regla de
+   descuento: primero la fila del responsable vigente, si no alcanza, las demás por
+   `creado_el` descendente. Detalle en `features/salones-mesas.md` § *"Quién sirvió cada
+   unidad"*.
+2. **`pedido` y `porcentaje` en el resumen del reporte** (`AnulacionesReporteService.resumen`):
+   `pedido` = Vendido (el reparto de las líneas vivas de cuentas **cerradas** cuya venta no
+   está cancelada, a precio de carta) + Anulado (**todas** las anulaciones del garzón en el
+   rango, sin los filtros de tipo/motivo — el denominador no se mueve con el filtro, o "% de
+   cortesías" dejaría de ser sobre lo pedido). `porcentaje` = `precioCarta` (con los filtros
+   que sí aplicaron) ÷ `pedido`, `null` si `pedido` es 0. La tabla "Por garzón" ahora también
+   trae a quien vendió sin anular nada, con 0%.
+
+   ⚠️ **Ronda de fix 1 (hallazgo del controlador):** la consulta de lo vendido llegaba acotada
+   por `tenant_id` solo a través de `cuenta_linea_reparto.tenant_id`, sin filtrar
+   `cuentas.tenant_id`/`cuenta_lineas.tenant_id` de forma directa en sus `JOIN`. Con datos de
+   un solo tenant eso no se notaba (nada de otro tenant para filtrar mal); midiéndolo con dos
+   tenants sí: sin `tenant_id` en esos dos `JOIN`, un índice `(tenantId, …)` no puede hacer un
+   seek real y en el peor caso barre TODO el rango de fecha de TODOS los tenants. Se agregó
+   `AND cl.tenant_id = $1` y `AND c.tenant_id = $1`. Índice `idx_cuentas_cerrada`
+   (`cuentas.tenant_id, cerrada_el`) medido **después** de ese fix, con 20.000 cuentas
+   cerradas — 2.000 (10%) del tenant consultado y 18.000 (90%) de otro tenant, intercaladas en
+   los mismos 200 días, no en bloques separados (sin ese reparto el problema no se ve):
+   `EXPLAIN (ANALYZE, BUFFERS)` sobre un rango de un día pasa de **cost 619,50..619,53, 1.519
+   buffers, 3,356 ms** (sin el índice, consulta ya corregida) a **cost 153,34..157,49, 1.006
+   buffers, 1,831 ms** (con el índice) — un `Index Scan` real por `tenant_id` y `cerrada_el`
+   contra el seek anterior por `idx_cuentas_responsable` con el resto filtrado después. El
+   plan mejora y el índice se queda; el docblock de `cuenta.entity.ts` tiene las tres corridas
+   completas, incluida la peor (índice puesto pero consulta vieja sin el filtro de tenant en
+   los `JOIN`: 5.314 ms, la prueba de que el fix de los `JOIN` es el que importa).
+3. **La columna "% de lo pedido" en la pantalla** `/salones/anulaciones` (frontend): la tabla
+   "Por garzón" suma la columna, con `formatPorcentaje` (`—` con `null`). Nada más cambia.
+
+### Qué lo fija
+
+- `backend/test/salones-reparto-linea.e2e-spec.ts` (tarea 1): línea nueva, el "+" después de
+  transferir, sumar desde el catálogo tras transferir, bajar cantidad y anular (con la regla
+  de descuento probada con el responsable vigente en la fila más vieja, no solo la más
+  reciente), y la fusión de dos cuentas de garzones distintos.
+- `backend/src/modules/salones/anulaciones-reporte.service.spec.ts`, `describe('resumen —
+  pedido y porcentaje')`: `pedido` = vendido + anulado y `porcentaje` a 4 decimales; un garzón
+  que vendió sin anular aparece con 0 y 0%; el filtro de tipo baja el numerador y no el
+  denominador; `pedido` 0 → `porcentaje` `null`; el orden por nombre con "Sin garzón" al
+  final; que la consulta de anulado no lleva el filtro de tipo ni su parámetro; y (ronda de
+  fix 1) que la consulta de vendido filtra el tenant en `cuenta_lineas` y en `cuentas`, no
+  solo en el reparto.
+- `backend/test/salones-anulaciones-porcentaje.e2e-spec.ts`, con tres garzones propios (G1,
+  G2, G3) y una caja propia: la escena del owner (G1 transfiere a G2, cada uno con lo suyo);
+  el % exacto con una cortesía; el filtro de tipo mueve el numerador y no el denominador; una
+  cuenta abierta no suma a lo vendido; `cancelar-con-motivo` suma solo a lo anulado; Σ `pedido`
+  = carta cobrada + carta anulada (medido contra la base, no copiado de la respuesta del
+  resumen); y (test 7, **ronda de fix 3**) que anular la venta de una mesa cerrada con
+  `pagos: []` sí es posible (201, medido) y esa línea deja de sumar al `pedido` de quien la
+  vendió — no es la vía de escape que el brief dejaba abierta para un caso incierto, el test
+  afirma sobre el resultado real.
+- `frontend/app/pages/salones/anulaciones.nuxt.spec.ts`: la columna "% de lo pedido" con
+  `formatPorcentaje` (`"5,00%"` con `porcentaje: '0.0500'`, `"—"` con `null`).
+- `frontend/e2e/salones/anulaciones-porcentaje.spec.ts` (Playwright, `@smoke`): como
+  `encargado.salon@paris.cl` (`Salones:Ver todas`, no admin), la fila del garzón en "Por
+  garzón" muestra el % esperado (2 unidades pedidas, 1 anulada como cortesía → 50,00%), y a
+  375 px la tabla no rompe el layout (sin scroll horizontal del documento). El pedido, el
+  despacho, la anulación y el cierre de la cuenta se arman por API, no por clic — ver el
+  docblock del archivo y la entrada nueva de `pendientes.md` § 4 sobre por qué (el rol no
+  puede leer el catálogo de ítems).
+- Mutantes medidos fila por fila: `pedido = vendido` (sin lo anulado) mata el e2e 2/3/5/6 y el
+  unitario 1; la consulta de anulado con el filtro de tipo puesto mata exactamente el e2e 3 y
+  el unitario de la forma del SQL; descartar las claves que solo vienen de lo vendido mata el
+  e2e 1 (Carla/G2 desaparecen) y el unitario 2; `vendido` leyendo
+  `cuentas.garzon_responsable_id` en vez del reparto mata el e2e 1; sin `v.estado <>
+  'cancelada'` mata exactamente el e2e 7. **Un superviviente medido:** quitar `c.estado =
+  'cerrada'` del JOIN a `cuentas` no cambia ningún resultado, porque `cuentas.venta_id` se
+  escribe **una sola vez en el código**, en la misma sentencia que `estado = 'cerrada'`
+  (`salones.service.ts`, `cerrarCuenta`) — el `INNER JOIN` a `ventas` ya excluye cualquier
+  cuenta sin `venta_id`, así que hoy esa condición es redundante con esa escritura única. Se
+  deja en la consulta como intención explícita (documenta la regla de negocio, spec § 4.2) y
+  como resguardo ante un futuro camino que set-ee `venta_id` antes de cerrar.
+
+### Qué quedó afuera
+
+- **Las notas de crédito no restan de lo vendido** (fiscal, va solo — `pendientes.md` § 6).
+- **El rol `Salones · Encargado` no puede leer el catálogo de ítems** (`Items:Leer`), hallazgo
+  del smoke de la tarea 3: puede llegar a la mesa y anular, pero no puede empezar un pedido.
+  Va como pregunta al owner, `pendientes.md` § 4 — no se tocó el seeder sin confirmar.
+
+---
+
 ## Si el login no puede entrar a la empresa, lo avisa (cerrada 2026-09-27)
 
 Sale de [`pendientes.md`](pendientes.md) § 2.

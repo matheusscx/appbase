@@ -18,6 +18,8 @@ interface GrupoResumen {
 interface GrupoPorGarzon extends GrupoResumen {
   garzonId: string | null
   garzonNombre: string | null
+  pedido: string
+  porcentaje: string | null
 }
 
 interface GrupoPorAutorizo extends GrupoResumen {
@@ -68,7 +70,7 @@ const TARJETAS: { tipo: TipoMotivoBaja, titulo: string }[] = [
 
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
-const { formatFecha, formatMonto, formatStock, formatCostoPorMoneda } = useFormatters()
+const { formatFecha, formatMonto, formatStock, formatCostoPorMoneda, formatPorcentaje } = useFormatters()
 const { pageSize } = useUserPreferences()
 
 const motivos = ref<MotivoOpt[]>([])
@@ -217,6 +219,7 @@ const columnasGarzon: TableColumn<GrupoPorGarzon>[] = [
   { accessorKey: 'garzonNombre', header: 'Garzón' },
   { accessorKey: 'platos', header: 'Platos', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'precioCarta', header: 'Precio de carta', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'porcentaje', header: '% de lo pedido', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'costo', header: 'Costo', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'sinValorizar', header: 'Sin valorizar', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
@@ -314,6 +317,9 @@ const columnasAutorizo: TableColumn<GrupoPorAutorizo>[] = [
               </template>
               <template #precioCarta-cell="{ row }">
                 {{ formatMonto(row.original.precioCarta) }}
+              </template>
+              <template #porcentaje-cell="{ row }">
+                {{ formatPorcentaje(row.original.porcentaje) }}
               </template>
               <template #costo-cell="{ row }">
                 {{ formatCostoPorMoneda(row.original.costo) }}

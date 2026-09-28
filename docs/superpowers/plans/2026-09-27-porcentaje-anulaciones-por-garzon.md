@@ -3,7 +3,7 @@
 > **Para agentes:** sub-skill obligatoria: `superpowers:subagent-driven-development` (recomendada) o
 > `superpowers:executing-plans`, tarea por tarea. Los pasos usan checkboxes (`- [ ]`).
 
-- **Status:** In Progress
+- **Status:** Done
 - **Date:** 2026-09-27
 - **Owner:** César (owner) · redacta la sesión del frente, en el worktree `agitated-shtern-e2ca3d`
   (rama `claude/agitated-shtern-e2ca3d`)
@@ -933,18 +933,18 @@ denominador puede contar dos veces una anulación?*). No toca controller ni DTO:
 **Interfaces:**
 - Consumes: `porGarzon[i].pedido: string`, `porGarzon[i].porcentaje: string | null` (Task 2).
 
-- [ ] **Step 1: Spec de la página (falla)**
+- [x] **Step 1: Spec de la página (falla)**
 
 En `anulaciones.nuxt.spec.ts`, con el mock de `useApiFetch` que ya usa el archivo: un resumen con dos
 filas en `porGarzon`, una con `porcentaje: '0.0500'` y otra con `porcentaje: null` → la tabla muestra
 el encabezado `% de lo pedido`, `5,00%` en la primera y `—` en la segunda.
 
-- [ ] **Step 2: Correrlo y verlo fallar**
+- [x] **Step 2: Correrlo y verlo fallar**
 
 Run: `cd frontend && npx vitest run app/pages/salones/anulaciones.nuxt.spec.ts`
 Expected: FAIL (no existe la columna).
 
-- [ ] **Step 3: La columna**
+- [x] **Step 3: La columna**
 
 En `anulaciones.vue`: sumar `pedido: string` y `porcentaje: string | null` a `GrupoPorGarzon`; en
 `columnasGarzon`, después de `precioCarta`:
@@ -964,12 +964,12 @@ y el slot, al lado de los otros de esa tabla:
 `formatPorcentaje` sale de `useFormatters` (ya devuelve `—` con null): sumarlo a la desestructuración
 existente de `useFormatters()` en la página. Nada de lógica en la página.
 
-- [ ] **Step 4: Spec pasa; build, typecheck, design**
+- [x] **Step 4: Spec pasa; build, typecheck, design**
 
 Run: `cd frontend && npx vitest run app/pages/salones/anulaciones.nuxt.spec.ts && npm run build && npm run typecheck:ratchet && npm run design:check`
 Expected: PASS.
 
-- [ ] **Step 5: Smoke en navegador**
+- [x] **Step 5: Smoke en navegador**
 
 `./scripts/entorno.sh stack`, `./scripts/reset-db.sh`. Con un spec de Playwright (entra por
 `auth.setup.ts`, no se tipean credenciales): como **encargado del salón** (el rol real con
@@ -978,7 +978,7 @@ cortesía, cerrar, ir a `/salones/anulaciones` → la fila del garzón muestra e
 teléfono (375 px) la tabla no rompe el layout. Si el spec queda útil, se conserva con `@smoke`; si no, se
 dice que fue desechable.
 
-- [ ] **Step 6: Gate completo y cierre**
+- [x] **Step 6: Gate completo y cierre**
 
 Gate completo, `verify-feature` con `domain-reviewer`. Commit
 `feat(salones): la columna % de lo pedido en el reporte de anulaciones (tarea 3)`.
