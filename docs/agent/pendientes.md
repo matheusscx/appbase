@@ -178,15 +178,44 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   qué falla, y comparar el entorno con el de `ci.yml`.
 
 - [ ] **El pre-commit rechaza un recibo de revisión escrito sobre el mismo diff** (harness). Dos
-  sesiones distintas lo reportaron el 2026-09-27 (el aviso sin costo de la varianza y el aviso del
-  login, las dos desde un worktree y con `.vue` staged): escribieron el recibo con el comando que
-  el propio hook imprime, no cambiaron ningún archivo staged (una lo verificó por mtime), y el hook
-  calculó otro hash. Las dos reescribieron el recibo sobre el mismo diff y el segundo commit pasó,
-  sin `--no-verify`. El mismo día, en el checkout principal, un recibo escrito durante un
-  cherry-pick coincidió a la primera. **Lo que falta medir:** si `git diff --cached` da otra salida
-  dentro del hook que en el shell de la sesión (variables que git exporta al hook como
-  `GIT_INDEX_FILE`, configuración de color o de diff), reproduciéndolo en un worktree con un `.vue`
-  staged. El riesgo es que la salida fácil —reescribir el recibo hasta que pase— vacíe el gate.
+  sesiones lo vieron el 2026-09-27, las dos desde un worktree (la del aviso sin costo de la
+  varianza y la del aviso del login). Escribieron el recibo con el comando que imprime el hook, en
+  el mismo comando que el `git commit`, y el commit se bloqueó. Lo reescribieron sobre el mismo
+  diff y el segundo commit pasó, sin `--no-verify`. El riesgo es que la salida fácil, reescribir
+  el recibo hasta que pase, vacíe el gate. **Medido el 2026-09-28, sin causa encontrada.**
+  - **El error estuvo en la escritura del recibo, no en el hook.** Según los transcripts, el
+    archivo quedó con un hash (`21445ec1…` en la varianza, `b23814af…` en el login; en el login,
+    con el mtime del comando que falló). Segundos después, `git diff --cached` en el shell daba
+    otro (`450de47c…`, `e23d8c2d…`), estable en tres corridas seguidas. Con ese otro hash el commit
+    pasó, y `450de47c` es exactamente el diff del commit `d6eb54d3`. Lo que cuesta explicar es
+    qué salida hasheó la primera escritura.
+  - **Descartado, cada uno medido:** las variables que git le exporta al hook (en un commit sin
+    rutas `GIT_INDEX_FILE` es el índice normal, y el diff dentro del hook es idéntico byte a
+    byte al del shell); la configuración de git (no hay color, diff ni textconv en global, local
+    ni worktree); la forma del comando (recibo + `git commit -q -F - <<'EOF'` encadenados pasa
+    a la primera); el `cd <worktree> &&` que el harness antepone a cada comando (lo lleva
+    cualquier comando, no solo el que falló); otro escritor (esos hashes no aparecen en ningún
+    otro transcript, los revisores ya habían terminado y solo leían, y ningún script del hook
+    escribe archivos); un índice que cambia solo (monitor de 5 min, 1313 muestras cada 0,2 s: ni
+    el hash ni el stat del índice se movieron).
+  - **Ninguna salida candidata da el hash escrito:** ni un prefijo byte a byte ni un subconjunto
+    de archivos del diff final; ni los estados staged previos, reconstruidos deshaciendo las
+    ediciones de la sesión; ni el mismo cambio con 1624 combinaciones de opciones de `git diff`
+    (color, algoritmo, prefijos, renames, contexto, `autocrlf`); ni el índice final contra cualquier
+    commit de esos días; ni un archivo leído a medio escribir (29.943 cortes por línea).
+  - **Un mecanismo que sí se reproduce, pero que no es el del 27:** `git commit <rutas>` y
+    `git commit -a` corren el hook contra un índice temporal (`next-index-*.lock` o `index.lock`).
+    Si hay algo más staged, o cambios sin stagear, el hook ve otro diff y el recibo que imprime no
+    coincide nunca, ni reescribiéndolo. Para reproducirlo: stagear un `.vue` y un `.md`, escribir
+    el recibo y hacer `git commit -m x <el .vue>`.
+  - **Para cerrarla hace falta el próximo caso con evidencia.** Hoy el hook solo compara dos
+    hashes. La propuesta es que, ante un rechazo, guarde el diff que vio en el git-dir, y que el
+    comando del recibo guarde también el diff. Con eso, un `diff` entre los dos muestra qué
+    cambió. Además, que el aviso diga cuándo el índice es temporal (commit con rutas o con `-a`).
+    Como toca `.githooks/`, no se puede probar commiteando desde un worktree.
+  - **Aparte, de la misma familia:** `.claude/skills/verify-feature/SKILL.md:204` todavía escribe
+    el recibo en `.git/verify-feature.receipt` literal. En un worktree `.git` es un archivo, así
+    que falla. El hook usa `$(git rev-parse --git-dir)` desde el 2026-08-27 (`f5e15588`).
 
 - [ ] **El aviso de error del login aparece en el registro, y al revés** (frontend, medido el
   2026-09-27; lo cazó la revisión independiente del cierre de *"Si el login no puede entrar a
