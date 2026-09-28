@@ -54,8 +54,10 @@ Sale de [`pendientes.md`](pendientes.md) § 4.
 
 ### Cómo se cerró
 
-**Decisión del owner (2026-09-28), elegida entre las dos salidas de la entrada: se le agrega
-`Items:Leer`.** El rol administra garzones y mesas y ya llegaba a operar la mesa; que no pudiera
+**Decisión del owner (César, 2026-09-28), entre las dos salidas de la entrada: A) darle
+`Items:Leer`, B) dejarlo a propósito y documentarlo. Eligió A, y solo `Leer`.** Procedencia:
+contestó A en el selector de la sesión que cerró esto y, textual, a la sesión coordinadora:
+*"Vamos con el permiso recomendado"*. El rol administra garzones y mesas y ya llegaba a operar la mesa; que no pudiera
 pedir era un hueco del seed, no un diseño.
 
 - `seedRolEncargadoSalon` vincula el rol al módulo `Items` de Paris (`modulos_roles`) y le da

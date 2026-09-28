@@ -988,12 +988,17 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
 ### Enviar a cocina exige `Impresoras:Leer` (owner, 2026-09-28)
 
 - [ ] **Que *Enviar a cocina* funcione con `Salones:Operar` a secas, sin leer la configuración
-  de impresoras** (frontend + probablemente un endpoint, decidido por el owner el 2026-09-28
-  entre sembrarle el permiso al rol o arreglar la pantalla: **se arregla la pantalla**, en
-  sesión propia porque toca el camino de impresión).
+  de impresoras** (frontend + probablemente un endpoint, sesión propia porque toca el camino
+  de impresión). **Decisión del owner, 2026-09-28**, entre tres opciones: A) arreglar la
+  pantalla en un frente aparte, B) sembrarle `Impresoras:Leer` al encargado, C) las dos.
+  **Eligió A.** Procedencia: contestó A en el selector de la sesión que lo encontró y, textual,
+  a la sesión coordinadora: *"A y dejar en pendientes arreglar la pantalla pra mandar a
+  cocina"*. El owner decidió el QUÉ; el cómo (qué endpoint le da las impresoras a quien opera)
+  queda para el frente.
   Medido con `encargado.salon@paris.cl` en Playwright, ya con `Items:Leer`: el pedido se carga,
   pero `imprimirComanda` (`frontend/app/composables/useImpresoras.ts:206`) arranca con
-  `listar('comanda')` → `GET /impresoras`, que pide `Impresoras:Leer`; le rebota 403 y
+  `listar('comanda')` → `GET /impresoras`, que pide `Impresoras:Leer`; le rebota
+  `403 {"message":"No tienes permiso para esta acción"}` (medido con curl, mismo token) y
   `POST /cuentas/:id/comanda/reclamar` —que solo pide `Salones:Operar`— **nunca se llama**. La
   pantalla no dice que falta un permiso de configuración. Lo tapaba que el único e2e de navegador
   que aprieta *Enviar a cocina* (`anular-plato.spec.ts`) corre como admin (`es_fijo`
@@ -1002,7 +1007,8 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   composable) lista con `listar('boleta')` y tiene la misma forma — sin medir si la precuenta o
   la boleta de un rol sin ese permiso fallan igual. Y el rol sembrado del garzón (`Salón`,
   `ana.torres`) tiene solo `Salones:Leer` + `Operar`: tampoco tiene `Items:Leer`, así que
-  tampoco puede cargar un pedido (medido en la base, no en la pantalla).
+  tampoco puede cargar un pedido (medido en la base, no en la pantalla). **Si se le agrega o
+  no, no está decidido**: es pregunta para el owner, no parte de este frente.
   **Al cerrarlo:** `frontend/e2e/salones/anular-plato.spec.ts` pasa a correr como el encargado
   —su docblock explica por qué hoy corre como admin—.
 
