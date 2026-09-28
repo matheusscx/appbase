@@ -1,4 +1,5 @@
 import {
+  Check,
   Column,
   CreateDateColumn,
   DeleteDateColumn,
@@ -7,6 +8,8 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+export type TotalDocumentoTipo = 'suma_lineas' | 'obligatorio' | 'opcional';
+
 /**
  * Los documentos que un local RECIBE de un proveedor, por país. Tabla y no
  * enum, por la misma regla que los de venta. Va aparte de
@@ -14,6 +17,10 @@ import {
  * (spec compras-recepcion § 3.3).
  */
 @Entity('tipos_documento_compra')
+@Check(
+  'chk_tipos_documento_compra_total_documento',
+  `"total_documento" IN ('suma_lineas', 'obligatorio', 'opcional')`,
+)
 export class TipoDocumentoCompra {
   @PrimaryGeneratedColumn('uuid', { name: 'tipo_documento_compra_id' })
   id: string;
@@ -31,6 +38,16 @@ export class TipoDocumentoCompra {
   /** "Sin documento" es el único que no lo pide. */
   @Column({ name: 'requiere_folio', type: 'boolean', default: true })
   requiereFolio: boolean;
+
+  /**
+   * Qué total lleva este documento (spec compras-deuda-proveedor § 3,
+   * decisión 10): `obligatorio` se tipea o sale del XML y el sistema no lo
+   * calcula ni lo valida contra el neto de las líneas; `opcional` (la guía
+   * de despacho) se recibe sin él y se completa después; `suma_lineas`
+   * (boleta, sin documento) es Σ cantidad × precio − descuento, como siempre.
+   */
+  @Column({ name: 'total_documento', type: 'text' })
+  totalDocumento: TotalDocumentoTipo;
 
   @Column({ type: 'boolean', default: true })
   activo: boolean;

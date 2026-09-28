@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CompraDetalle, LineaCompra as LineaDetalle, PresentacionCompra } from '~/composables/useCompras'
+import type { CompraDetalle, LineaCompra as LineaDetalle, PresentacionCompra, TotalDocumentoTipo } from '~/composables/useCompras'
 import { hoyLocal } from '~/composables/useVigenciaRegla'
 import type { DestinoCodigo, DocumentoDte, DteLineaInfo, LecturaDteRespuesta, LineaDte } from '~/composables/useDte'
 import { debeLlenarDescuentoDte, fraseOrigenDte, lineaFormDesdeDte, precargaDescuento, repartirLineas } from '~/composables/useDte'
@@ -8,8 +8,21 @@ definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 // ── Interfaces ─────────────────────────────────────────────────────────────
 
-interface TipoDocumento { id: string, nombre: string, codigo: string | null, requiereFolio: boolean }
-interface Proveedor { id: string, nombre: string, rut: string | null }
+interface TipoDocumento {
+  id: string
+  nombre: string
+  codigo: string | null
+  requiereFolio: boolean
+  /** Qué total lleva (spec compras-deuda-proveedor § 3, decisión 10). */
+  totalDocumento: TotalDocumentoTipo
+}
+interface Proveedor {
+  id: string
+  nombre: string
+  rut: string | null
+  /** Para sugerir "Vence el" (spec § 4.2). Null = 30 días. */
+  plazoPagoDias: number | null
+}
 interface ProductoOpt {
   id: string
   nombre: string
@@ -61,7 +74,7 @@ const unidadesMedidaStore = useUnidadesMedidaStore()
 const monedasStore = useMonedasStore()
 const {
   totalLinea, subtotal, totalConDescuento, faltaAlgunPrecio, insigniaEstado, cantidadParaEditar,
-  etiquetaPresentacion, cuentaPresentacion,
+  etiquetaPresentacion, cuentaPresentacion, cuerpoDocumento, fechaVencimientoSugerida,
 } = useCompras()
 const { puedeCrear } = usePermisosCrud('Compras')
 
@@ -98,6 +111,8 @@ function emptyForm() {
     ubicacionId: '',
     observacion: '',
     descuentoTotal: '',
+    totalDocumento: '',
+    fechaVencimiento: '',
   }
 }
 const form = ref(emptyForm())
@@ -272,6 +287,45 @@ const tipoSeleccionado = computed(() =>
 )
 const pideFolio = computed(() => tipoSeleccionado.value?.requiereFolio ?? true)
 
+/**
+ * Qué hace "Total del documento" (spec § 3 y § 10, decisión 10): obligatorio
+ * en una factura, opcional en una guía de despacho, oculto en un
+ * `suma_lineas` (boleta, sin documento) — ahí el total lo calcula el
+ * subtotal de las líneas, nunca se transcribe.
+ */
+const totalDocumentoTipo = computed<TotalDocumentoTipo>(() => tipoSeleccionado.value?.totalDocumento ?? 'suma_lineas')
+const totalDocumentoVisible = computed(() => totalDocumentoTipo.value !== 'suma_lineas')
+const totalDocumentoRequerido = computed(() => totalDocumentoTipo.value === 'obligatorio')
+
+const proveedorSeleccionado = computed(() =>
+  proveedores.value.find(p => p.id === form.value.proveedorId) ?? null,
+)
+
+// Un tipo `suma_lineas` no lleva total transcrito (400 si viaja): al
+// cambiar a uno, se limpia lo que haya quedado de un tipo anterior.
+watch(totalDocumentoVisible, (visible) => {
+  if (!visible) form.value.totalDocumento = ''
+})
+
+// La sugerencia de "Vence el" (spec § 4.2): se recalcula cada vez que cambia
+// el proveedor o la fecha del documento, pero SOLO mientras el campo siga
+// vacío o igual a la última sugerencia — el mismo criterio que `MoneyInput`
+// usa para no pisar el eco de su propio emit (`ultimoEmitido`). Así no se
+// pierde si el proveedor se elige antes que la fecha (la fecha por defecto
+// es "hoy", nunca vacía) y tampoco pisa lo que el encargado tipeó a mano ni
+// lo que trajo el detalle guardado.
+let ultimaVencimientoSugerida: string | null = null
+watch(
+  () => [form.value.proveedorId, form.value.fechaDocumento] as const,
+  ([proveedorId, fechaDocumento]) => {
+    if (!proveedorId || !fechaDocumento) return
+    if (form.value.fechaVencimiento && form.value.fechaVencimiento !== ultimaVencimientoSugerida) return
+    const sugerida = fechaVencimientoSugerida(fechaDocumento, proveedorSeleccionado.value?.plazoPagoDias ?? null)
+    ultimaVencimientoSugerida = sugerida
+    if (sugerida) form.value.fechaVencimiento = sugerida
+  },
+)
+
 // ── Carga ──────────────────────────────────────────────────────────────────
 
 async function cargarCatalogos() {
@@ -316,6 +370,8 @@ function llenarDesde(c: CompraDetalle) {
     ubicacionId: c.ubicacionId,
     observacion: c.observacion ?? '',
     descuentoTotal: c.descuentoTotal ?? '',
+    totalDocumento: c.totalDocumento ?? '',
+    fechaVencimiento: c.fechaVencimiento ?? '',
   }
   lineas.value = c.lineas.length ? c.lineas.map(lineaDesdeDetalle) : [nuevaLinea()]
 }
@@ -567,6 +623,7 @@ function armarBody() {
     ubicacionId: form.value.ubicacionId,
     observacion: form.value.observacion.trim() || null,
     descuentoTotal: form.value.descuentoTotal || null,
+    ...cuerpoDocumento(form.value),
     lineas: lineasCargadas.value.map((l) => {
       const linea: Record<string, unknown> = {
         itemId: l.itemId,
@@ -869,6 +926,22 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
             </UFormField>
             <UFormField label="Fecha del documento" required>
               <UInput v-model="form.fechaDocumento" type="date" class="w-full" />
+            </UFormField>
+            <UFormField
+              v-if="totalDocumentoVisible"
+              label="Total del documento"
+              :required="totalDocumentoRequerido"
+              data-qa="compra-total-documento-campo"
+            >
+              <MoneyInput
+                v-model="form.totalDocumento"
+                oficial
+                class="w-full"
+                data-qa="compra-total-documento"
+              />
+            </UFormField>
+            <UFormField label="Vence el">
+              <UInput v-model="form.fechaVencimiento" type="date" class="w-full" data-qa="compra-vencimiento" />
             </UFormField>
             <UFormField label="Entra a" required>
               <USelectMenu

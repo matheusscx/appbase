@@ -1,7 +1,8 @@
 # Feature: Compras — recibir mercadería (pieza 1)
 
-**Status**: Complete (piezas 1 a 4)
-**Last Updated**: 2026-09-27
+**Status**: Complete (piezas 1 a 4); pieza 5 (la deuda con el proveedor) en curso — tarea 1 de
+`docs/superpowers/plans/2026-09-28-compras-deuda-proveedor.md`
+**Last Updated**: 2026-09-28
 
 Spec: [`2026-09-18-compras-recepcion-design.md`](../superpowers/specs/2026-09-18-compras-recepcion-design.md) ·
 plan: [`2026-09-18-compras-recepcion.md`](../superpowers/plans/2026-09-18-compras-recepcion.md) ·
@@ -46,8 +47,12 @@ compras.
   aprende el código del proveedor para que la próxima factura calce sola. Sección:
   [La lectura del XML y el aprendizaje](#la-lectura-del-xml-y-el-aprendizaje). Spec:
   [`2026-09-27-compras-xml-dte-design.md`](../superpowers/specs/2026-09-27-compras-xml-dte-design.md).
-- **Piezas siguientes, cada una con su spec:** la deuda con el proveedor y sus pagos, y los gastos
-  sin stock.
+- **Pieza 5 (en curso):** cada compra confirmada deja deuda con su proveedor, con vencimiento; el
+  total del documento, cuando el tipo lo lleva, es el transcrito (nunca calculado). Sección:
+  [La deuda con el proveedor](#la-deuda-con-el-proveedor-pieza-5). Spec:
+  [`2026-09-28-compras-deuda-proveedor-design.md`](../superpowers/specs/2026-09-28-compras-deuda-proveedor-design.md).
+- **Piezas siguientes, cada una con su spec:** los pagos a proveedores (dentro de la pieza 5) y los
+  gastos sin stock.
 - **Fuera:** orden de compra, devolución al proveedor, moneda extranjera, conectarse al SII
   (Portal MIPYME, casilla de intercambio) para traer el XML solo o para aceptar/reclamar un DTE, y
   verificar su firma digital. ⛔ **Todo lo fiscal** va en su propio frente: mientras tanto, el
@@ -114,6 +119,64 @@ Si el resultado difiere del vigente, lo escribe con una **`correccion_compra`** 
 cantidad 0). **Ningún movimiento pasado cambia su costo congelado.** Tomate: 5 kg a $1.000,
 entran 20 kg sin precio, se venden 8 y la factura llega a $1.500 → **$1.400**, y lo vendido queda
 a $1.000.
+
+---
+
+## La deuda con el proveedor (pieza 5)
+
+Spec: [`2026-09-28-compras-deuda-proveedor-design.md`](../superpowers/specs/2026-09-28-compras-deuda-proveedor-design.md).
+**Solo la tarea 1: el modelo, el total y el vencimiento.** Los pagos (`pagos_proveedor`,
+`POST /compras/pagos`, "Por pagar") llegan en tareas siguientes del mismo frente.
+
+### El total, según el tipo de documento
+
+Cada `tipos_documento_compra` declara qué total lleva (`total_documento`):
+
+| Valor | Qué significa | Ejemplo (Chile) |
+|---|---|---|
+| `obligatorio` | El total **transcrito**: se tipea, o sale del XML (`MntTotal`, tarea 4). El sistema **no lo calcula ni lo valida** contra el neto de las líneas — la diferencia es el impuesto, y eso es del frente fiscal (⛔ fuera de esta pieza) | Factura, factura exenta, factura de compra |
+| `opcional` | Se recibe sin él y se completa cuando llega la factura que lo trae | Guía de despacho |
+| `suma_lineas` | Σ cantidad × precio − descuento, como siempre — cuantizado **una sola vez**, con `cuantizar` del motor de precios y el modo de redondeo del tenant, importada sin modificarla (`compras/deuda.ts → totalCompra`) | Boleta, sin documento |
+
+**Por qué transcrito y no calculado:** una factura con IVA (neto $100.000 + $19.000 = $119.000)
+haría que el sistema calculara $100.000 y mostrara $19.000 "a favor" falsos si sumara las líneas
+—que guardan el neto (spec compras-recepción § 9)—. El costo: un campo más al cargar una factura a
+mano, que puede no calzar con las líneas sin que el sistema lo note (deliberado: validarlo es
+fiscal).
+
+`compras.total_documento` (`numeric(18,4)`, `CHECK > 0`) es null en un `suma_lineas`, y en un
+`opcional` hasta que se carga. El borrador (`POST`/`PATCH /compras`) lo acepta opcional;
+**confirmar exige el total si el tipo es `obligatorio`** (400 "Falta el total del documento") y lo
+deja intacto en los demás. Corregirlo después de confirmar es `PATCH /compras/:id/documento`
+(mismo permiso que corregir un precio: `Actualizar`) — `totalDocumento: null` solo se acepta en un
+tipo `opcional`, y en un `suma_lineas` cualquier valor es 400.
+
+### El vencimiento
+
+Se fija al **confirmar** (`compras.fecha_vencimiento`, `date` nullable): la fecha tipeada en el
+borrador (o la que trajo el XML, `FchVenc`, tarea 4) manda; si no hay ninguna, es
+`fecha_documento` + el plazo de pago del proveedor (`terceros.plazo_pago_dias`, `int`,
+`CHECK > 0`), o **30 días** si el proveedor no tiene uno cargado. Se corrige después con el mismo
+`PATCH /compras/:id/documento`.
+
+**Por qué desde `fecha_documento` y no desde la recepción:** la compra no guarda cuándo llegó la
+factura (`fecha_documento` es la del papel; `confirmado_el` es cuándo llegó la *mercadería*, que
+puede ser antes). Y por qué 30 días es el default: es el de la propia ley (19.983, art. 2, texto de
+la ley 21.131) — si la factura no menciona plazo, se entiende pagadera a los 30 días corridos de
+la recepción. Como la recepción nunca es anterior a la emisión, el vencimiento calculado desde
+`fecha_documento` cae el mismo día o antes que el legal: nunca después.
+
+La aritmética vive en un solo lugar, `compras/deuda.ts` (`vencimiento`, `totalCompra`), con sus
+unitarios — el mismo criterio que `rango-fecha.util.ts` para el día del negocio.
+
+### Permisos de esta tarea
+
+`PATCH /compras/:id/documento` va con `Actualizar` (no con el `Pagar` nuevo): corregir lo
+transcrito es lo mismo que corregir un precio, y las dos tareas ya podían hacerlo. El permiso
+`Pagar` se siembra en esta tarea (acción del módulo `Compras`, y un fixture `compras.paga`) pero
+**ningún endpoint lo exige todavía** — lo usan `POST /compras/pagos`, `GET /compras/por-pagar` y
+los datos de pago del listado/detalle, en las tareas siguientes. El rol `Compras · Encargado`
+arranca **sin** `Pagar` a propósito (spec § 9, decisión 7b): "el bodeguero recibe, el dueño paga".
 
 ---
 
@@ -410,6 +473,7 @@ Todas bajo `JwtAuthGuard + TenantGuard + PermisosGuard`, con el `tenant_id` del 
 | `POST /compras/:id/confirmar` | Crear |
 | `PATCH /compras/:id/lineas/:lineaId` con `{ precioUnitario?, cantidad?, series?, unidadIds? }` | Actualizar |
 | `PATCH /compras/:id/descuento` con `{ descuentoTotal }` (clave obligatoria; `null` lo quita) | Actualizar |
+| `PATCH /compras/:id/documento` con `{ totalDocumento?, fechaVencimiento? }` (ausente no toca; ver [La deuda con el proveedor](#la-deuda-con-el-proveedor-pieza-5)) | Actualizar |
 | `POST /compras/:id/anular` con `{ motivo }` | Anular |
 | `GET /compras/presentaciones?proveedorId=`: las vivas del proveedor | Crear |
 | `POST /compras/presentaciones` con `{ proveedorId, itemId, nombre, contenido, unidadCodigo }` | Crear |
@@ -438,22 +502,29 @@ editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar
 
 - **Módulo:** `backend/src/modules/compras/` (`ComprasService`, `ComprasController`,
   `reparto-descuento.ts`).
-- **Tablas:** `compras` (encabezado; `folio` único por proveedor y tipo salvo anuladas),
-  `compra_lineas` (con lo congelado al confirmar: `cantidad_base`, `costo_unitario_base`,
-  `movimiento_id`, `stock_total_anterior`, `costo_producto_anterior`), `compra_linea_cambios`
-  (historial append-only) y `tipos_documento_compra` (catálogo por país).
+- **Tablas:** `compras` (encabezado; `folio` único por proveedor y tipo salvo anuladas;
+  `total_documento`/`fecha_vencimiento` de la pieza 5), `compra_lineas` (con lo congelado al
+  confirmar: `cantidad_base`, `costo_unitario_base`, `movimiento_id`, `stock_total_anterior`,
+  `costo_producto_anterior`), `compra_linea_cambios` (historial append-only) y
+  `tipos_documento_compra` (catálogo por país; `total_documento` clasifica el tipo, pieza 5).
+  `terceros.plazo_pago_dias` (pieza 5).
 - **Kardex:** `movimientos_inventario` gana `compra_linea_id`, `secuencia` (bigserial, el orden de
   aplicación) y `costo_informado`, y el motivo `correccion_compra`.
+- **`compras/deuda.ts`** (pieza 5): `vencimiento` y `totalCompra`, puras y con sus unitarios — ver
+  [La deuda con el proveedor](#la-deuda-con-el-proveedor-pieza-5).
 - **Seed:** módulo `Compras` y sus permisos, el rol `Compras · Encargado` y tres fixtures
   parciales para los 403 (`compras.lectura`, `compras.carga`, `compras.correccion`). Ids
-  420–446.
+  420–446. El permiso `Pagar`, su entrada en `Compras` y el rol/fixture `Compras · Paga` /
+  `compras.paga` (pieza 5, tarea 1): ids 452–455.
 
 ## Frontend
 
 - `pages/compras/index.vue`: el listado, con las insignias *Borrador*, *Confirmada*, *Anulada* y
   **Falta costo**, y sus filtros.
 - `pages/compras/[id].vue`: la carga del borrador —selector de unidad y presentación, el lápiz,
-  la cuenta a la vista (pieza 2 § 6, ver arriba)— y el modal de confirmar con el resumen.
+  la cuenta a la vista (pieza 2 § 6, ver arriba)— y el modal de confirmar con el resumen. De la
+  pieza 5: "Total del documento" (requerido/opcional/oculto según el tipo) y "Vence el" (sugerida
+  desde el plazo del proveedor, editable).
 - `components/compras/PresentacionModal.vue`: crear, corregir y retirar una presentación
   (pieza 2). `presentacion: null` crea; con una, edita.
 - `components/compras/CompraConfirmada.vue`: el detalle de una confirmada, con
@@ -461,7 +532,9 @@ editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar
   permiso.
 - `composables/useCompras.ts`: los tipos del detalle y lo que se manda (`cuerpoCorreccion`,
   `cuerpoDescuento`), fuera de los `.vue`. De la pieza 2: `etiquetaPresentacion`,
-  `unidadDeLinea`, `cuentaPresentacion` y `cantidadLineaConfirmada`.
+  `unidadDeLinea`, `cuentaPresentacion` y `cantidadLineaConfirmada`. De la pieza 5:
+  `cuerpoDocumento` (el pedazo del body de `totalDocumento`/`fechaVencimiento`) y
+  `fechaVencimientoSugerida` (espejo en JS de `deuda.ts → vencimiento`, sin la tipeada).
 
 ---
 

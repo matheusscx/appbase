@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsDateString,
   IsNumberString,
   IsOptional,
   IsUUID,
@@ -72,4 +73,26 @@ export class CorregirDescuentoDto {
   @IsDecimalNoNegativo()
   @EsMontoCobrado()
   descuentoTotal: string | null;
+}
+
+/**
+ * Body de `PATCH /compras/:id/documento` (spec § 6): corrige lo transcrito
+ * de una confirmada — corregirlo es lo mismo que corregir un precio.
+ *
+ * Ausente = no se toca (a diferencia de `CorregirDescuentoDto`, acá SÍ hay
+ * dos campos independientes y mandar los dos no siempre tiene sentido).
+ * `totalDocumento: null` solo se acepta en un tipo `opcional`, y en un
+ * `suma_lineas` cualquier valor (incluido null) es 400: el service lo valida
+ * contra el catálogo, no el DTO.
+ */
+export class ActualizarDocumentoDto {
+  @ValidateIf((_o, v) => v !== undefined && v !== null)
+  @IsNumberString()
+  @IsDecimalPositivo()
+  @EsMontoCobrado()
+  totalDocumento?: string | null;
+
+  @ValidateIf((_o, v) => v !== undefined)
+  @IsDateString()
+  fechaVencimiento?: string;
 }

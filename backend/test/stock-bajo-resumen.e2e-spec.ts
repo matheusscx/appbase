@@ -129,6 +129,10 @@ describe('Stock bajo — resumen del inicio (e2e)', () => {
       folio: `${Date.now()}${Math.floor(Math.random() * 1e6)}`.slice(-12),
       fechaDocumento: '2026-09-15',
       ubicacionId,
+      // Factura es `obligatorio` (spec compras-deuda-proveedor § 3): sin
+      // esto, confirmar es 400 desde esta pieza. Este archivo no prueba esa
+      // regla.
+      totalDocumento: '999999',
       lineas: [{ itemId, cantidad: '2', unidadCodigo: 'unidad' }],
     });
   }

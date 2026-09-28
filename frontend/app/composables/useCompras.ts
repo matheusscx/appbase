@@ -85,9 +85,16 @@ export interface CompraDetalle {
   descuentoTotal: string | null
   motivoAnulacion: string | null
   total: string | null
+  /** Lo transcrito, tal cual (null en un tipo `suma_lineas`, o si no se cargó). */
+  totalDocumento: string | null
+  /** Se fija al confirmar; null en un borrador. */
+  fechaVencimiento: string | null
   lineas: LineaCompra[]
   cambios: CambioCompra[]
 }
+
+/** Espejo de `TipoDocumentoCompraOpcion.totalDocumento` (spec compras-deuda-proveedor § 3, decisión 10). */
+export type TotalDocumentoTipo = 'suma_lineas' | 'obligatorio' | 'opcional'
 
 const ETIQUETA_CAMBIO: Record<string, string> = {
   precio: 'Precio',
@@ -177,6 +184,45 @@ export function useCompras() {
       if (serie.unidadIds?.length) body.unidadIds = serie.unidadIds
     }
     return Object.keys(body).length ? body : null
+  }
+
+  /**
+   * El pedazo del body de `POST`/`PATCH /compras` para `totalDocumento` y
+   * `fechaVencimiento` (spec compras-deuda-proveedor § 3 y § 4.2, Ruling 1).
+   * Vacío es "todavía no se sabe" / "se calcula al confirmar" — el 400 de un
+   * tipo `suma_lineas` con total lo da el backend, acá solo se arma lo que
+   * hay tipeado.
+   */
+  function cuerpoDocumento(form: {
+    totalDocumento: string
+    fechaVencimiento: string
+  }): { totalDocumento: string | null, fechaVencimiento: string | null } {
+    return {
+      totalDocumento: form.totalDocumento.trim() || null,
+      fechaVencimiento: form.fechaVencimiento || null,
+    }
+  }
+
+  /**
+   * La sugerencia de "Vence el" (spec § 4.2): `fechaDocumento` + el plazo del
+   * proveedor, o 30 días si no tiene uno cargado — espejo en JS de
+   * `backend/src/modules/compras/deuda.ts → vencimiento`, sin la fecha
+   * tipeada (acá es solo la sugerencia inicial; editarla después es cosa del
+   * encargado). Null si `fechaDocumento` no tiene forma de fecha.
+   *
+   * Por COMPONENTES locales, nunca `toISOString()` (invariante
+   * `fecha-local.invariant.spec.ts`): una fecha pura no lleva zona, así que
+   * se arma y se lee con `get*`/`set*` locales, igual que `hoyLocal`.
+   */
+  function fechaVencimientoSugerida(fechaDocumento: string, plazoPagoDias: number | null): string | null {
+    const partes = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fechaDocumento)
+    if (!partes) return null
+    const [, anio, mes, dia] = partes.map(Number)
+    const fecha = new Date(anio!, mes! - 1, dia!)
+    fecha.setDate(fecha.getDate() + (plazoPagoDias ?? 30))
+    const mesTexto = String(fecha.getMonth() + 1).padStart(2, '0')
+    const diaTexto = String(fecha.getDate()).padStart(2, '0')
+    return `${fecha.getFullYear()}-${mesTexto}-${diaTexto}`
   }
 
   /**
@@ -323,6 +369,8 @@ export function useCompras() {
     diferenciaCantidad,
     cuerpoCorreccion,
     cuerpoDescuento,
+    cuerpoDocumento,
+    fechaVencimientoSugerida,
     cantidadConUnidad,
     cantidadParaEditar,
     etiquetaCambio,

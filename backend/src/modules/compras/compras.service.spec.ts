@@ -327,14 +327,17 @@ describe('ComprasService (borrador)', () => {
       },
     ];
 
-    /** El último parámetro del INSERT de la compra: `descuento_total`. */
+    /** El parámetro `descuento_total` del INSERT de la compra (spec compras-deuda-proveedor § 3: ya no es el último). */
     function descuentoInsertado(): unknown {
       const db = (service as unknown as { db: { query: jest.Mock } }).db;
       const insert = db.query.mock.calls.find(([sql]) =>
         /INSERT INTO compras/.test(sql as string),
       )!;
-      expect(insert[0] as string).toMatch(/descuento_total\)\s+VALUES/);
-      return (insert[1] as unknown[]).at(-1);
+      expect(insert[0] as string).toMatch(
+        /descuento_total, total_documento, fecha_vencimiento\)\s+VALUES/,
+      );
+      // orden de columnas: …, creado_por(8), descuento_total(9), total_documento(10), fecha_vencimiento(11)
+      return (insert[1] as unknown[])[8];
     }
 
     it('se guarda cuando todas las líneas tienen precio', async () => {
@@ -799,6 +802,117 @@ describe('ComprasService (borrador)', () => {
         'El costo se pierde al convertirlo a "g"',
       );
       expect(registrarMovimiento).not.toHaveBeenCalled();
+    });
+
+    describe('la deuda (spec compras-deuda-proveedor § 4.1 y § 4.2)', () => {
+      const LINEA_CON_PRECIO = {
+        compra_linea_id: 'l1',
+        item_id: ITEM,
+        cantidad: '10',
+        unidad_codigo: 'kg',
+        precio_unitario: '1500',
+        series: null,
+        lote: null,
+      };
+
+      function tipoObligatorio() {
+        pisar(
+          /JOIN tipos_documento_compra td ON td\.pais_id[\s\S]*tipo_documento_compra_id = \$2/,
+          [
+            {
+              nombre: 'Factura',
+              requiere_folio: true,
+              total_documento: 'obligatorio',
+            },
+          ],
+        );
+      }
+
+      it('un tipo obligatorio sin total transcrito es 400: falta el total del documento', async () => {
+        tipoObligatorio();
+        pisar(/SELECT proveedor_id, tipo_documento_compra_id, folio/, [
+          { ...CABECERA, total_documento: null, fecha_vencimiento: null },
+        ]);
+        pisar(/SELECT compra_linea_id, item_id, cantidad/, [LINEA_CON_PRECIO]);
+        await expect(
+          service.confirmar(TENANT, USUARIO, COMPRA),
+        ).rejects.toThrow('Falta el total del documento');
+        expect(registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      it('un tipo obligatorio CON total transcrito confirma, y fija el vencimiento con el plazo del proveedor', async () => {
+        tipoObligatorio();
+        pisar(/FROM terceros\s+WHERE tercero_id/, [
+          {
+            nombre: 'Distribuidora X',
+            tipo: 'proveedor',
+            activo: true,
+            plazo_pago_dias: 15,
+          },
+        ]);
+        pisar(/SELECT proveedor_id, tipo_documento_compra_id, folio/, [
+          {
+            ...CABECERA,
+            total_documento: '119000',
+            fecha_vencimiento: null,
+          },
+        ]);
+        pisar(/SELECT compra_linea_id, item_id, cantidad/, [LINEA_CON_PRECIO]);
+        await service.confirmar(TENANT, USUARIO, COMPRA);
+
+        const db = (service as unknown as { db: { query: jest.Mock } }).db;
+        const params = db.query.mock.calls.find(([sql]) =>
+          /SET estado = 'confirmada'/.test(sql as string),
+        )![1] as unknown[];
+        // fecha_documento (2026-09-15) + 15 días de plazo.
+        expect(params).toEqual([TENANT, COMPRA, USUARIO, '2026-09-30']);
+      });
+
+      it('la fecha de vencimiento tipeada en el borrador manda sobre el plazo', async () => {
+        tipoObligatorio();
+        pisar(/FROM terceros\s+WHERE tercero_id/, [
+          {
+            nombre: 'Distribuidora X',
+            tipo: 'proveedor',
+            activo: true,
+            plazo_pago_dias: 15,
+          },
+        ]);
+        pisar(/SELECT proveedor_id, tipo_documento_compra_id, folio/, [
+          {
+            ...CABECERA,
+            total_documento: '119000',
+            fecha_vencimiento: '2026-12-25',
+          },
+        ]);
+        pisar(/SELECT compra_linea_id, item_id, cantidad/, [LINEA_CON_PRECIO]);
+        await service.confirmar(TENANT, USUARIO, COMPRA);
+
+        const db = (service as unknown as { db: { query: jest.Mock } }).db;
+        const params = db.query.mock.calls.find(([sql]) =>
+          /SET estado = 'confirmada'/.test(sql as string),
+        )![1] as unknown[];
+        expect(params[3]).toBe('2026-12-25');
+      });
+
+      it('sin plazo cargado (null), el vencimiento usa 30 días', async () => {
+        tipoObligatorio();
+        pisar(/SELECT proveedor_id, tipo_documento_compra_id, folio/, [
+          {
+            ...CABECERA,
+            total_documento: '119000',
+            fecha_vencimiento: null,
+          },
+        ]);
+        pisar(/SELECT compra_linea_id, item_id, cantidad/, [LINEA_CON_PRECIO]);
+        await service.confirmar(TENANT, USUARIO, COMPRA);
+
+        const db = (service as unknown as { db: { query: jest.Mock } }).db;
+        const params = db.query.mock.calls.find(([sql]) =>
+          /SET estado = 'confirmada'/.test(sql as string),
+        )![1] as unknown[];
+        expect(params[3]).toBe('2026-10-15');
+      });
     });
   });
 
@@ -1643,6 +1757,107 @@ describe('ComprasService (borrador)', () => {
           }),
         ).rejects.toThrow('El descuento es igual al vigente');
       });
+    });
+  });
+
+  describe('actualizarDocumento (PATCH /compras/:id/documento, spec compras-deuda-proveedor § 6)', () => {
+    function compraConfirmada(o: Record<string, unknown> = {}) {
+      pisar(/FROM compras c[\s\S]*FOR UPDATE OF c/, [
+        {
+          compra_id: COMPRA,
+          estado: 'confirmada',
+          descuento_total: null,
+          folio: '4521',
+          tipo_documento_nombre: 'Factura',
+          tipo_documento_total_documento: 'obligatorio',
+          proveedor_nombre: 'Distribuidora X',
+          ubicacion_id: UBICACION,
+          ubicacion_nombre: 'Bodega',
+          ubicacion_viva: true,
+          total_documento: '119000',
+          fecha_vencimiento: '2026-10-15',
+          ...o,
+        },
+      ]);
+    }
+
+    function actualizarUpdate(): unknown[] {
+      const db = (service as unknown as { db: { query: jest.Mock } }).db;
+      const llamada = db.query.mock.calls.find(([sql]) =>
+        /UPDATE compras\s+SET total_documento/.test(sql as string),
+      )!;
+      return llamada[1] as unknown[];
+    }
+
+    it('sin ningún campo es 400: no hay nada que corregir', async () => {
+      await expect(
+        service.actualizarDocumento(TENANT, COMPRA, {}),
+      ).rejects.toThrow('No hay nada que corregir');
+    });
+
+    it('corrige el total transcrito, y deja el vencimiento como estaba', async () => {
+      compraConfirmada();
+      await service.actualizarDocumento(TENANT, COMPRA, {
+        totalDocumento: '125000',
+      });
+      expect(actualizarUpdate()).toEqual([
+        TENANT,
+        COMPRA,
+        '125000',
+        '2026-10-15',
+      ]);
+    });
+
+    it('corrige el vencimiento, y deja el total como estaba', async () => {
+      compraConfirmada();
+      await service.actualizarDocumento(TENANT, COMPRA, {
+        fechaVencimiento: '2026-11-01',
+      });
+      expect(actualizarUpdate()).toEqual([
+        TENANT,
+        COMPRA,
+        '119000',
+        '2026-11-01',
+      ]);
+    });
+
+    it('en un tipo obligatorio, totalDocumento: null es 400', async () => {
+      compraConfirmada();
+      await expect(
+        service.actualizarDocumento(TENANT, COMPRA, { totalDocumento: null }),
+      ).rejects.toThrow('necesita el total del documento');
+    });
+
+    it('en un tipo opcional, totalDocumento: null se acepta (vuelve a "sin total")', async () => {
+      compraConfirmada({ tipo_documento_total_documento: 'opcional' });
+      await service.actualizarDocumento(TENANT, COMPRA, {
+        totalDocumento: null,
+      });
+      expect(actualizarUpdate()).toEqual([TENANT, COMPRA, null, '2026-10-15']);
+    });
+
+    it('en un tipo suma_lineas, cualquier totalDocumento es 400', async () => {
+      compraConfirmada({
+        tipo_documento_total_documento: 'suma_lineas',
+        total_documento: null,
+      });
+      await expect(
+        service.actualizarDocumento(TENANT, COMPRA, { totalDocumento: '100' }),
+      ).rejects.toThrow('no lleva total transcrito');
+    });
+
+    it('una compra de otro tenant, o inexistente, es 404', async () => {
+      pisar(/FROM compras c[\s\S]*FOR UPDATE OF c/, []);
+      await expect(
+        service.actualizarDocumento(TENANT, COMPRA, { totalDocumento: '100' }),
+      ).rejects.toThrow('Compra no encontrada');
+    });
+
+    it('un borrador es 409: se edita, no se corrige', async () => {
+      compraConfirmada({ estado: 'borrador' });
+      await expect(
+        service.actualizarDocumento(TENANT, COMPRA, { totalDocumento: '100' }),
+      ).rejects.toThrow('La compra es un borrador: se edita, no se corrige');
     });
   });
 });

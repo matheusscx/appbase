@@ -191,6 +191,29 @@ export class CompraBorradorDto {
   @EsMontoCobrado()
   descuentoTotal?: string | null;
 
+  /**
+   * Lo que dice el documento que hay que pagar (spec compras-deuda-proveedor
+   * § 3 y § 4.1, decisión 10): se tipea, o sale del XML (`MntTotal`). Solo
+   * los tipos `obligatorio`/`opcional` lo llevan — el service rechaza con
+   * 400 el que llegue en un tipo `suma_lineas`, cuyo total es la suma de las
+   * líneas. Opcional como el resto del encabezado: el PATCH del borrador
+   * reemplaza la compra entera, así que ausente es "sin total todavía".
+   */
+  @IsOptional()
+  @IsNumberString()
+  @IsDecimalPositivo()
+  @EsMontoCobrado()
+  totalDocumento?: string | null;
+
+  /**
+   * Tipeada, o del XML (`FchVenc`): manda sobre el plazo del proveedor al
+   * confirmar (spec § 4.2). Ausente = se calcula al confirmar con
+   * `fechaDocumento` + el plazo del proveedor (o 30 días).
+   */
+  @IsOptional()
+  @IsDateString()
+  fechaVencimiento?: string | null;
+
   // Un borrador puede estar vacío; confirmar exige al menos una línea.
   @IsArray()
   @ArrayMaxSize(200)

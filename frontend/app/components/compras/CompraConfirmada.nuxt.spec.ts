@@ -33,6 +33,8 @@ function compra(o: Partial<CompraDetalle> = {}): CompraDetalle {
     descuentoTotal: null,
     motivoAnulacion: null,
     total: '30000',
+    totalDocumento: null,
+    fechaVencimiento: null,
     lineas: [{
       id: 'l1', orden: 0, itemId: 'i1', itemNombre: 'Tomate', modoInventario: 'cantidad',
       unidadMedidaBase: 'kg', cantidad: '20', unidadCodigo: 'kg', precioUnitario: '1500',

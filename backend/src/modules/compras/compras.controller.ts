@@ -25,6 +25,7 @@ import { CompraBorradorDto } from './dto/compra-borrador.dto';
 import { FindComprasDto } from './dto/find-compras.dto';
 import { AnularCompraDto } from './dto/anular-compra.dto';
 import {
+  ActualizarDocumentoDto,
   CorregirDescuentoDto,
   CorregirLineaDto,
 } from './dto/corregir-compra.dto';
@@ -228,6 +229,22 @@ export class ComprasController {
       id: string;
     };
     return this.comprasService.corregirDescuento(tenantId, usuarioId, id, dto);
+  }
+
+  /**
+   * Corrige el total del documento o el vencimiento de una confirmada (spec
+   * compras-deuda-proveedor § 6). `Actualizar`, el mismo permiso que
+   * corregir un precio o el descuento.
+   */
+  @Patch(':id/documento')
+  @RequiresPermiso('Compras', 'Actualizar')
+  actualizarDocumento(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(EscalaMonedaPipe) dto: ActualizarDocumentoDto,
+  ) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.comprasService.actualizarDocumento(tenantId, id, dto);
   }
 
   /**

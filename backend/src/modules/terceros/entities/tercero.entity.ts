@@ -1,4 +1,5 @@
 import {
+  Check,
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -8,6 +9,10 @@ import {
 } from 'typeorm';
 
 @Entity('terceros')
+@Check(
+  'chk_terceros_plazo_pago_positivo',
+  `"plazo_pago_dias" IS NULL OR "plazo_pago_dias" > 0`,
+)
 export class Tercero {
   @PrimaryGeneratedColumn('uuid', { name: 'tercero_id' })
   id: string;
@@ -46,6 +51,14 @@ export class Tercero {
 
   @Column({ default: true })
   activo: boolean;
+
+  /**
+   * El plazo de pago en días, para un proveedor (spec
+   * compras-deuda-proveedor § 2, decisión 4). `null` = 30 días (el default
+   * de la ley 19.983, ver la spec). Se usa desde `deuda.ts → vencimiento`.
+   */
+  @Column({ name: 'plazo_pago_dias', type: 'int', nullable: true })
+  plazoPagoDias: number | null;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;

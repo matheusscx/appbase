@@ -524,6 +524,10 @@ describe('presentaciones de compra (spec pieza 2 § 5)', () => {
         folio: folioUnico(),
         fechaDocumento: '2026-09-27',
         ubicacionId: bodegaId,
+        // Factura es `obligatorio` (spec compras-deuda-proveedor § 3): sin
+        // esto, confirmar es 400 desde esta pieza. Este archivo no prueba
+        // esa regla.
+        totalDocumento: '999999',
         lineas,
       };
     }

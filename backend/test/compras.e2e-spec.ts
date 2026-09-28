@@ -51,6 +51,7 @@ interface TipoDocumento {
   nombre: string;
   codigo: string | null;
   requiereFolio: boolean;
+  totalDocumento: string;
 }
 interface Proveedor {
   id: string;
@@ -62,6 +63,8 @@ interface CompraDetalle {
   folio: string | null;
   proveedorNombre: string | null;
   total: string | null;
+  totalDocumento: string | null;
+  fechaVencimiento: string | null;
   faltaCosto: boolean;
   descuentoTotal: string | null;
   motivoAnulacion: string | null;
@@ -167,12 +170,19 @@ describe('Compras — borrador (e2e)', () => {
   }
 
   function borrador(extra: Record<string, unknown> = {}) {
+    // Factura es `obligatorio` (spec compras-deuda-proveedor § 3, decisión
+    // 10): confirmarla sin total es 400 desde esta pieza. Un default acá
+    // cubre casi toda la suite sin tocar cada test; se omite si `extra`
+    // cambia el tipo (p.ej. a `sinDocumento`, que es 400 si lo lleva).
+    const tipoId =
+      (extra.tipoDocumentoCompraId as string | undefined) ?? factura.id;
     return {
       proveedorId,
       tipoDocumentoCompraId: factura.id,
       folio: folioUnico(),
       fechaDocumento: '2026-09-15',
       ubicacionId: bodegaId,
+      ...(tipoId === factura.id ? { totalDocumento: '999999' } : {}),
       lineas: [
         {
           itemId: productoId,
@@ -266,25 +276,35 @@ describe('Compras — borrador (e2e)', () => {
   });
 
   it('crea un borrador con una línea sin precio, y el detalle lo muestra', async () => {
-    const creado = await post<CompraDetalle>('/api/compras', borrador());
+    // Factura es `obligatorio` (spec compras-deuda-proveedor § 3, decisión
+    // 10): sin `totalDocumento`, el total es desconocido — nunca se calcula
+    // de las líneas, así que el precio faltante no es la causa acá.
+    const creado = await post<CompraDetalle>(
+      '/api/compras',
+      borrador({ totalDocumento: undefined }),
+    );
     expect(creado.estado).toBe('borrador');
 
     const detalle = await get<CompraDetalle>(`/api/compras/${creado.id}`);
     expect(detalle.lineas).toHaveLength(2);
     expect(detalle.lineas[0].precioUnitario).toBe('1500.0000');
     expect(detalle.lineas[1].precioUnitario).toBeNull();
-    // Falta un precio: el total no se puede afirmar.
     expect(detalle.total).toBeNull();
   });
 
   it('editar reemplaza las líneas enteras', async () => {
-    const creado = await post<CompraDetalle>('/api/compras', borrador());
+    // `sinDocumento` (suma_lineas): el total sí es Σ cantidad × precio acá.
+    const creado = await post<CompraDetalle>(
+      '/api/compras',
+      borrador({ tipoDocumentoCompraId: sinDocumento.id, folio: undefined }),
+    );
     const res = await request(app.getHttpServer())
       .patch(`/api/compras/${creado.id}`)
       .set('Authorization', `Bearer ${token}`)
       .send(
         borrador({
-          folio: creado.folio,
+          tipoDocumentoCompraId: sinDocumento.id,
+          folio: undefined,
           lineas: [
             {
               itemId: productoId,
@@ -2037,6 +2057,289 @@ describe('Compras — borrador (e2e)', () => {
           ),
         ).toHaveLength(0);
         expect(await stockEn(lote, bodegaId)).toBe(0);
+      });
+    });
+  });
+
+  describe('la deuda con el proveedor (spec compras-deuda-proveedor § 3, 4 y 6)', () => {
+    let guiaDespacho: TipoDocumento;
+    let boleta: TipoDocumento;
+    let proveedorConPlazo: string;
+
+    beforeAll(async () => {
+      const tipos = await get<TipoDocumento[]>('/api/compras/tipos-documento');
+      guiaDespacho = tipos.find((t) => t.codigo === '52')!;
+      boleta = tipos.find((t) => t.codigo === '39')!;
+      proveedorConPlazo = (
+        await post<IdResponse>('/api/terceros', {
+          tipo: 'proveedor',
+          nombre: nombreUnico('Andina E2E'),
+          plazoPagoDias: 15,
+        })
+      ).id;
+    });
+
+    it('terceros: plazoPagoDias se crea, se lee y se corrige (o se limpia con null)', async () => {
+      const r = await request(app.getHttpServer())
+        .get(`/api/terceros`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(r.status).toBe(200);
+      const creado = (
+        r.body as { id: string; plazoPagoDias: number | null }[]
+      ).find((t) => t.id === proveedorConPlazo)!;
+      expect(creado.plazoPagoDias).toBe(15);
+
+      const patch1 = await request(app.getHttpServer())
+        .patch(`/api/terceros/${proveedorConPlazo}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ plazoPagoDias: 45 });
+      expect(patch1.status).toBe(200);
+      expect(
+        (patch1.body as { plazoPagoDias: number | null }).plazoPagoDias,
+      ).toBe(45);
+
+      const patch2 = await request(app.getHttpServer())
+        .patch(`/api/terceros/${proveedorConPlazo}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ plazoPagoDias: null });
+      expect(patch2.status).toBe(200);
+      expect(
+        (patch2.body as { plazoPagoDias: number | null }).plazoPagoDias,
+      ).toBeNull();
+
+      // Deja el fixture como lo esperan los tests de vencimiento de abajo.
+      await request(app.getHttpServer())
+        .patch(`/api/terceros/${proveedorConPlazo}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ plazoPagoDias: 15 });
+    });
+
+    it('terceros: plazoPagoDias en 0 o negativo es 400', async () => {
+      const r = await intentar('post', '/api/terceros', {
+        tipo: 'proveedor',
+        nombre: nombreUnico('Plazo inválido E2E'),
+        plazoPagoDias: 0,
+      });
+      expect(r.status).toBe(400);
+    });
+
+    // Sin el `@Max`, este valor pasa la validación y desborda el `int` de
+    // Postgres al guardar: un 500 sin mapear, no un 400 (fix round 1).
+    it('terceros: plazoPagoDias sobre el techo (3650 días) es 400, nunca 500 por desborde de int', async () => {
+      const r = await intentar('post', '/api/terceros', {
+        tipo: 'proveedor',
+        nombre: nombreUnico('Plazo fuera de rango E2E'),
+        plazoPagoDias: 99999999999,
+      });
+      expect(r.status).toBe(400);
+    });
+
+    async function confirmar(compraId: string, esperado = 201) {
+      return post<CompraDetalle>(
+        `/api/compras/${compraId}/confirmar`,
+        {},
+        esperado,
+      );
+    }
+
+    it('los tipos exponen `totalDocumento`: obligatorio (factura), opcional (guía) y suma_lineas (boleta, sin documento)', async () => {
+      expect(factura.totalDocumento).toBe('obligatorio');
+      expect(guiaDespacho.totalDocumento).toBe('opcional');
+      expect(boleta.totalDocumento).toBe('suma_lineas');
+      expect(sinDocumento.totalDocumento).toBe('suma_lineas');
+    });
+
+    it('un borrador de un tipo suma_lineas con totalDocumento es 400', async () => {
+      const r = await intentar(
+        'post',
+        '/api/compras',
+        borrador({
+          tipoDocumentoCompraId: sinDocumento.id,
+          folio: undefined,
+          totalDocumento: '1000',
+        }),
+      );
+      expect(r.status).toBe(400);
+      expect(r.message).toContain('no lleva total transcrito');
+    });
+
+    it('confirmar una factura (obligatorio) sin total es 400 "Falta el total del documento"', async () => {
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({ totalDocumento: undefined }),
+      );
+      const r = await intentar(
+        'post',
+        `/api/compras/${compra.id}/confirmar`,
+        {},
+      );
+      expect(r.status).toBe(400);
+      expect(r.message).toBe('Falta el total del documento');
+    });
+
+    it('confirmar una factura CON total: el detalle muestra el transcrito, no la suma de las líneas', async () => {
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({ totalDocumento: '500000' }),
+      );
+      const confirmada = await confirmar(compra.id);
+      // `total_documento` es `numeric(18,4)`: vuelve con la escala del
+      // motor, igual que `precioUnitario` ('1500.0000').
+      expect(confirmada.totalDocumento).toBe('500000.0000');
+      expect(confirmada.total).toBe('500000.0000');
+    });
+
+    it('una guía de despacho (opcional) confirma sin total, y muestra "desconocido"', async () => {
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({
+          tipoDocumentoCompraId: guiaDespacho.id,
+          totalDocumento: undefined,
+        }),
+      );
+      const confirmada = await confirmar(compra.id);
+      expect(confirmada.totalDocumento).toBeNull();
+      expect(confirmada.total).toBeNull();
+    });
+
+    it('una boleta (suma_lineas): el total es Σ cantidad × precio, no se le puede transcribir uno', async () => {
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({
+          tipoDocumentoCompraId: boleta.id,
+          totalDocumento: undefined,
+          lineas: [
+            {
+              itemId: productoId,
+              cantidad: '2',
+              unidadCodigo: 'kg',
+              precioUnitario: '1000',
+            },
+          ],
+        }),
+      );
+      const confirmada = await confirmar(compra.id);
+      expect(confirmada.total).toBe('2000');
+      expect(confirmada.totalDocumento).toBeNull();
+    });
+
+    it('vencimiento: sin plazo cargado, 30 días desde la fecha del documento', async () => {
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({
+          fechaDocumento: '2026-10-01',
+          totalDocumento: '1000',
+        }),
+      );
+      const confirmada = await confirmar(compra.id);
+      expect(confirmada.fechaVencimiento).toBe('2026-10-31');
+    });
+
+    it('vencimiento: con el plazo del proveedor cargado', async () => {
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({
+          proveedorId: proveedorConPlazo,
+          fechaDocumento: '2026-10-01',
+          totalDocumento: '1000',
+        }),
+      );
+      const confirmada = await confirmar(compra.id);
+      expect(confirmada.fechaVencimiento).toBe('2026-10-16');
+    });
+
+    it('vencimiento: la fecha tipeada en el borrador manda sobre el plazo', async () => {
+      const compra = await post<CompraDetalle>(
+        '/api/compras',
+        borrador({
+          proveedorId: proveedorConPlazo,
+          fechaDocumento: '2026-10-01',
+          totalDocumento: '1000',
+          fechaVencimiento: '2026-12-25',
+        }),
+      );
+      const confirmada = await confirmar(compra.id);
+      expect(confirmada.fechaVencimiento).toBe('2026-12-25');
+    });
+
+    describe('PATCH /compras/:id/documento (spec § 6)', () => {
+      async function compraConfirmada() {
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({ totalDocumento: '100000' }),
+        );
+        return confirmar(compra.id);
+      }
+
+      it('corrige el total transcrito', async () => {
+        const confirmada = await compraConfirmada();
+        const r = await request(app.getHttpServer())
+          .patch(`/api/compras/${confirmada.id}/documento`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ totalDocumento: '110000' });
+        expect(r.status).toBe(200);
+        expect((r.body as CompraDetalle).totalDocumento).toBe('110000.0000');
+      });
+
+      it('corrige el vencimiento', async () => {
+        const confirmada = await compraConfirmada();
+        const r = await request(app.getHttpServer())
+          .patch(`/api/compras/${confirmada.id}/documento`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ fechaVencimiento: '2026-12-01' });
+        expect(r.status).toBe(200);
+        expect((r.body as CompraDetalle).fechaVencimiento).toBe('2026-12-01');
+      });
+
+      it('con Compras:Actualizar (compras.correccion), corrige el total', async () => {
+        const confirmada = await compraConfirmada();
+        const conActualizar = await login(COMPRAS_CORRECCION_EMAIL);
+        const r = await request(app.getHttpServer())
+          .patch(`/api/compras/${confirmada.id}/documento`)
+          .set('Authorization', `Bearer ${conActualizar}`)
+          .send({ totalDocumento: '120000' });
+        expect(r.status).toBe(200);
+      });
+
+      it('sin Compras:Actualizar (compras.carga, solo Leer+Crear) es 403', async () => {
+        const confirmada = await compraConfirmada();
+        const sinActualizar = await login(COMPRAS_CARGA_EMAIL);
+        const r = await intentar(
+          'patch',
+          `/api/compras/${confirmada.id}/documento`,
+          { totalDocumento: '120000' },
+          sinActualizar,
+        );
+        expect(r.status).toBe(403);
+      });
+
+      it('un monto fuera de la escala de la moneda (CLP, 0 decimales) es 400', async () => {
+        const confirmada = await compraConfirmada();
+        const r = await intentar(
+          'patch',
+          `/api/compras/${confirmada.id}/documento`,
+          { totalDocumento: '110000.50' },
+        );
+        expect(r.status).toBe(400);
+      });
+
+      it('en un tipo suma_lineas, cualquier totalDocumento es 400', async () => {
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            tipoDocumentoCompraId: sinDocumento.id,
+            folio: undefined,
+            totalDocumento: undefined,
+          }),
+        );
+        const confirmada = await confirmar(compra.id);
+        const r = await intentar(
+          'patch',
+          `/api/compras/${confirmada.id}/documento`,
+          { totalDocumento: '5000' },
+        );
+        expect(r.status).toBe(400);
+        expect(r.message).toContain('no lleva total transcrito');
       });
     });
   });

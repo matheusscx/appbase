@@ -928,6 +928,14 @@ describe('compras/[id] — cargar desde el XML (tarea 4)', () => {
       ubicacionId: BODEGA.id,
       observacion: null,
       descuentoTotal: '2100',
+      // Factura es `obligatorio` en el backend real, pero el mock de tipos de
+      // este archivo no lleva `totalDocumento` (no es su objeto bajo test):
+      // sin ese dato la pantalla trata el tipo como oculto, así que el campo
+      // queda sin tocar. `fechaVencimiento` sí se autocompleta (spec § 4.2):
+      // 2026-09-20 + 30 días default, porque el proveedor mockeado no trae
+      // `plazoPagoDias`.
+      totalDocumento: null,
+      fechaVencimiento: '2026-10-20',
       lineas: [
         {
           itemId: COCA.id, cantidad: '10', unidadCodigo: 'unidad', precioUnitario: '9120',

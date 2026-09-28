@@ -220,7 +220,12 @@ describe('lectura del XML del DTE (spec compras-xml-dte § 5.3 y § 7)', () => {
   const crearPresentacion = (body: Record<string, unknown>) =>
     post<PresentacionVista>('/api/compras/presentaciones', body);
 
-  /** El encabezado de un borrador, con folio propio; `extra` pisa lo que haga falta. */
+  /**
+   * El encabezado de un borrador, con folio propio; `extra` pisa lo que haga
+   * falta. `totalDocumento` de relleno: Factura es `obligatorio` (spec
+   * compras-deuda-proveedor § 3), y este archivo no prueba esa regla, solo
+   * necesita borradores que puedan confirmarse.
+   */
   function cuerpoCompra(
     proveedorId: string,
     lineas: Record<string, unknown>[],
@@ -232,6 +237,7 @@ describe('lectura del XML del DTE (spec compras-xml-dte § 5.3 y § 7)', () => {
       folio: folioUnico(),
       fechaDocumento: '2026-09-27',
       ubicacionId: bodegaId,
+      totalDocumento: '999999',
       lineas,
       ...extra,
     };
@@ -385,6 +391,7 @@ describe('lectura del XML del DTE (spec compras-xml-dte § 5.3 y § 7)', () => {
         folio: folioPropio,
         fechaDocumento: '2026-09-27',
         ubicacionId: bodegaId,
+        totalDocumento: '999999',
         lineas: [
           {
             itemId: productoId,

@@ -2,9 +2,13 @@ import {
   IsBoolean,
   IsEmail,
   IsIn,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
+  Max,
+  Min,
+  ValidateIf,
 } from 'class-validator';
 
 export class UpdateTerceroDto {
@@ -44,4 +48,18 @@ export class UpdateTerceroDto {
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
+
+  /**
+   * Entero > 0, o `null` para volver al default de 30 días (spec
+   * compras-deuda-proveedor § 2, decisión 4). Ausente = no se toca.
+   *
+   * `@Max(3650)`: mismo techo y mismo motivo que `create-tercero.dto.ts` —
+   * sin él, un valor fuera del rango de `int` de Postgres desborda en el
+   * `UPDATE` y sale como 500 en vez de 400.
+   */
+  @ValidateIf((_o, v) => v !== undefined && v !== null)
+  @IsInt()
+  @Min(1)
+  @Max(3650)
+  plazoPagoDias?: number | null;
 }

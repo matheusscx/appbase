@@ -78,6 +78,7 @@ describe('TercerosService', () => {
         telefono: undefined,
         direccion: undefined,
         activo: true,
+        plazoPagoDias: null,
       });
       expect(result).toMatchObject({ nombre: 'Acme', tipo: 'proveedor' });
     });

@@ -64,6 +64,7 @@ export class TercerosService {
       telefono: dto.telefono,
       direccion: dto.direccion,
       activo: dto.activo ?? true,
+      plazoPagoDias: dto.plazoPagoDias ?? null,
     });
     return this.terceroRepo.save(tercero);
   }

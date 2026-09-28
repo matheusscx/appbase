@@ -810,6 +810,14 @@ export class SeederService implements OnApplicationBootstrap {
         permisoId: '550e8400-e29b-41d4-a716-446655440333',
         nombre: 'Anular',
       },
+      {
+        // Registrar pagos y anticipos a proveedores, y anularlos (spec
+        // compras-deuda-proveedor § 9, decisión 7). "El bodeguero recibe y
+        // el dueño paga": separado de `Actualizar` para que quien recibe y
+        // corrige compras no vea ni toque plata.
+        permisoId: '550e8400-e29b-41d4-a716-446655440452',
+        nombre: 'Pagar',
+      },
     ];
 
     for (const data of permisos) {
@@ -838,6 +846,7 @@ export class SeederService implements OnApplicationBootstrap {
     const CONFIGURAR = '550e8400-e29b-41d4-a716-446655440258';
     const LIQUIDAR = '550e8400-e29b-41d4-a716-446655440259';
     const ANULAR = '550e8400-e29b-41d4-a716-446655440333';
+    const PAGAR = '550e8400-e29b-41d4-a716-446655440452';
     const VENTAS = '550e8400-e29b-41d4-a716-446655440058';
     const PAGOS = '550e8400-e29b-41d4-a716-446655440180';
     const INVENTARIO = '550e8400-e29b-41d4-a716-446655440181';
@@ -1116,6 +1125,14 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440436',
         moduloAppId: COMPRAS,
         permisoId: ANULAR,
+      },
+      // `Pagar` (spec compras-deuda-proveedor § 9): registrar pagos y
+      // anularlos. El rol `Compras · Encargado` arranca SIN ella (decisión
+      // 7b, ver seedRolEncargadoCompras); id siguiente libre, 452-455.
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440453',
+        moduloAppId: COMPRAS,
+        permisoId: PAGAR,
       },
       // Impresoras (config de impresión térmica: comandas, precuenta, boleta)
       {
@@ -1420,6 +1437,20 @@ export class SeederService implements OnApplicationBootstrap {
         apellido: 'Compras',
         telefono: '987654446',
         correo: 'compras.correccion@paris.cl',
+        esSuperadmin: false,
+      },
+      // El dueño que paga: `Leer`, `Crear`, `Actualizar` y `Pagar` (spec
+      // compras-deuda-proveedor § 9, decisión 7 y 7b). Cuenta propia para el
+      // Playwright y los 403 de `encargado.compras`, que NO tiene `Pagar`.
+      // Ver seedRolEncargadoCompras.
+      {
+        id: '550e8400-e29b-41d4-a716-446655440455',
+        nombreUsuario: 'compras.paga',
+        contrasena: HASH,
+        nombre: 'Paga',
+        apellido: 'Compras',
+        telefono: '987654455',
+        correo: 'compras.paga@paris.cl',
         esSuperadmin: false,
       },
     ];
@@ -3289,6 +3320,39 @@ export class SeederService implements OnApplicationBootstrap {
        VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
       [COMPRAS_CORRECCION, PARIS, ROL_CORRECCION],
     );
+
+    // Rol "Compras · Paga" (454) + usuario `compras.paga` (455): las cuatro
+    // de siempre MÁS `Pagar` (spec compras-deuda-proveedor § 9, decisión 7 —
+    // "el dueño que paga"). El fixture para el Playwright y los 403 de
+    // `encargado.compras`, que a propósito NO la tiene (decisión 7b): el rol
+    // fijo (compras.encargado) sigue con las cuatro de PERMISOS_COMPRAS y
+    // nada más — el hueco es la prueba.
+    const ROL_PAGA = '550e8400-e29b-41d4-a716-446655440454';
+    const COMPRAS_PAGA = '550e8400-e29b-41d4-a716-446655440455';
+    const COMPRAS_PAGAR = '550e8400-e29b-41d4-a716-446655440453';
+    await this.dataSource.query(
+      `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
+       VALUES ($1, $2, 'Compras · Paga', 'Recibe, corrige y paga a los proveedores', false, NOW(), NOW())
+       ON CONFLICT DO NOTHING`,
+      [ROL_PAGA, PARIS],
+    );
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [ROL_PAGA, MODULO_TENANT_COMPRAS],
+    );
+    for (const permisoId of [...PERMISOS_COMPRAS, COMPRAS_PAGAR]) {
+      await this.dataSource.query(
+        `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [ROL_PAGA, MODULO_TENANT_COMPRAS, permisoId],
+      );
+    }
+    await this.dataSource.query(
+      `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+       VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [COMPRAS_PAGA, PARIS, ROL_PAGA],
+    );
   }
 
   private async seedMetodosPago(): Promise<void> {
@@ -5120,8 +5184,10 @@ export class SeederService implements OnApplicationBootstrap {
    * sus permisos (433–436), su contratación (437–438), el rol y usuario
    * `encargado.compras` (439–440), el rol y usuario `compras.lectura`
    * (441–442), el rol y usuario `compras.carga` (443–444) y el rol y
-   * usuario `compras.correccion`, sin `Anular` (445–446). El próximo frente
-   * arranca en 447.
+   * usuario `compras.correccion`, sin `Anular` (445–446). El máximo real
+   * medido al 2026-09-28 (`docs/patterns/backend.md` § 8, incluidos los
+   * `uuid(n)` dinámicos) era 451 (`seedPresentacionesCompra`): el permiso
+   * `Pagar` y su fixture (spec compras-deuda-proveedor § 9) toman 452–455.
    */
   private async seedTiposDocumentoCompra(): Promise<void> {
     const CHILE = '550e8400-e29b-41d4-a716-446655440000';
@@ -5131,30 +5197,37 @@ export class SeederService implements OnApplicationBootstrap {
     const uuid = (n: number) =>
       `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
 
-    const tipos: [string, string, string, string | null, boolean][] = [
-      [uuid(420), CHILE, 'Factura', '33', true],
-      [uuid(421), CHILE, 'Factura exenta', '34', true],
-      [uuid(422), CHILE, 'Factura de compra', '46', true],
-      [uuid(423), CHILE, 'Guía de despacho', '52', true],
-      [uuid(424), CHILE, 'Boleta', '39', true],
-      [uuid(425), CHILE, 'Sin documento', null, false],
-      [uuid(426), ARGENTINA, 'Factura', null, true],
-      [uuid(427), ARGENTINA, 'Sin documento', null, false],
-      [uuid(428), COLOMBIA, 'Factura', null, true],
-      [uuid(429), COLOMBIA, 'Sin documento', null, false],
-      [uuid(430), MEXICO, 'Factura', null, true],
-      [uuid(431), MEXICO, 'Sin documento', null, false],
+    // `total_documento` (spec compras-deuda-proveedor § 3, decisión 10): en
+    // Chile, las tres facturas llevan el total transcrito obligatorio, la
+    // guía de despacho lo lleva opcional (decisión 11), y boleta/sin
+    // documento siguen con la suma de las líneas. En los demás países, la
+    // única factura del seed es `obligatorio` y "sin documento" es
+    // `suma_lineas`, mismo criterio.
+    const tipos: [string, string, string, string | null, boolean, string][] = [
+      [uuid(420), CHILE, 'Factura', '33', true, 'obligatorio'],
+      [uuid(421), CHILE, 'Factura exenta', '34', true, 'obligatorio'],
+      [uuid(422), CHILE, 'Factura de compra', '46', true, 'obligatorio'],
+      [uuid(423), CHILE, 'Guía de despacho', '52', true, 'opcional'],
+      [uuid(424), CHILE, 'Boleta', '39', true, 'suma_lineas'],
+      [uuid(425), CHILE, 'Sin documento', null, false, 'suma_lineas'],
+      [uuid(426), ARGENTINA, 'Factura', null, true, 'obligatorio'],
+      [uuid(427), ARGENTINA, 'Sin documento', null, false, 'suma_lineas'],
+      [uuid(428), COLOMBIA, 'Factura', null, true, 'obligatorio'],
+      [uuid(429), COLOMBIA, 'Sin documento', null, false, 'suma_lineas'],
+      [uuid(430), MEXICO, 'Factura', null, true, 'obligatorio'],
+      [uuid(431), MEXICO, 'Sin documento', null, false, 'suma_lineas'],
     ];
 
     const valores = tipos
       .map(
         (_, i) =>
-          `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, true)`,
+          `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, true, $${i * 6 + 6})`,
       )
       .join(', ');
     await this.dataSource.query(
       `INSERT INTO tipos_documento_compra
-         (tipo_documento_compra_id, pais_id, nombre, codigo, requiere_folio, activo)
+         (tipo_documento_compra_id, pais_id, nombre, codigo, requiere_folio,
+          activo, total_documento)
        VALUES ${valores}
        ON CONFLICT (tipo_documento_compra_id) DO NOTHING`,
       tipos.flat(),

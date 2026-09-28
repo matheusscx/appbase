@@ -1,4 +1,5 @@
 import {
+  Check,
   Column,
   CreateDateColumn,
   DeleteDateColumn,
@@ -26,6 +27,10 @@ export type EstadoCompra = 'borrador' | 'confirmada' | 'anulada';
     unique: true,
     where: `"folio" IS NOT NULL AND "estado" <> 'anulada' AND "eliminado_el" IS NULL`,
   },
+)
+@Check(
+  'chk_compras_total_documento_positivo',
+  `"total_documento" IS NULL OR "total_documento" > 0`,
 )
 export class Compra {
   @PrimaryGeneratedColumn('uuid', { name: 'compra_id' })
@@ -71,6 +76,28 @@ export class Compra {
 
   @Column({ type: 'text', nullable: true })
   observacion: string | null;
+
+  /**
+   * Lo que el documento dice que hay que pagar, transcrito (spec
+   * compras-deuda-proveedor § 3 y § 4.1, decisión 10): null en un tipo
+   * `suma_lineas`, y en un `opcional` (la guía) hasta que se carga. El
+   * sistema no lo calcula ni lo valida contra el neto de las líneas.
+   */
+  @Column({
+    name: 'total_documento',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  totalDocumento: string | null;
+
+  /**
+   * Se fija al confirmar (spec § 4.2: la tipeada, o `fecha_documento` + el
+   * plazo del proveedor) y se corrige con `PATCH /compras/:id/documento`.
+   */
+  @Column({ name: 'fecha_vencimiento', type: 'date', nullable: true })
+  fechaVencimiento: string | null;
 
   @Column({ name: 'creado_por', type: 'uuid' })
   creadoPor: string;

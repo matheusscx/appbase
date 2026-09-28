@@ -25,8 +25,13 @@ import {
 } from '../inventario/inventario.service';
 import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
+import {
+  cuantizar,
+  type ConfigCalculo,
+} from '../calculo-precios/calculo-precios.engine';
 import { MonedasService } from '../monedas/monedas.service';
 import { costearLineas } from './reparto-descuento';
+import { vencimiento } from './deuda';
 // `TIPOS_CON_STOCK` nació acá y se movió a `presentaciones-compra.service.ts`
 // (Tarea 1 de compras-unidad-de-compra) porque esta clase importa
 // `PresentacionesCompraService` (Tarea 2): si la constante siguiera acá ese
@@ -48,6 +53,7 @@ import type {
 import type { FindComprasDto } from './dto/find-compras.dto';
 import type { AnularCompraDto } from './dto/anular-compra.dto';
 import type {
+  ActualizarDocumentoDto,
   CorregirDescuentoDto,
   CorregirLineaDto,
 } from './dto/corregir-compra.dto';
@@ -57,12 +63,16 @@ export interface TipoDocumentoCompraOpcion {
   nombre: string;
   codigo: string | null;
   requiereFolio: boolean;
+  /** Qué total lleva (spec § 3, decisión 10): gobierna el campo "Total del documento". */
+  totalDocumento: string;
 }
 
 export interface ProveedorOpcion {
   id: string;
   nombre: string;
   rut: string | null;
+  /** Para sugerir "Vence el" en el borrador (spec § 4.2). Null = 30 días. */
+  plazoPagoDias: number | null;
 }
 
 export interface ProductoCompraOpcion {
@@ -86,8 +96,17 @@ export interface CompraListItem {
   ubicacionId: string;
   ubicacionNombre: string | null;
   lineas: number;
-  /** Σ cantidad × precio − descuento; null si falta algún precio o no hay líneas. */
+  /**
+   * Lo que se sabe que hay que pagar (spec § 4.1, decisión 10): el total
+   * transcrito en un tipo `obligatorio`/`opcional`, o Σ cantidad × precio −
+   * descuento en un `suma_lineas`. Null si es desconocido (falta el
+   * transcrito, o falta el precio de alguna línea).
+   */
   total: string | null;
+  /** Lo transcrito, tal cual (null en un tipo `suma_lineas`, o si no se cargó). */
+  totalDocumento: string | null;
+  /** Se fija al confirmar; null en un borrador. */
+  fechaVencimiento: string | null;
 }
 
 /** La presentación de una línea, para el detalle (spec pieza 2 § 5). */
@@ -142,6 +161,7 @@ interface CabeceraRow {
   proveedor_nombre: string | null;
   tipo_documento_compra_id: string;
   tipo_documento_nombre: string | null;
+  tipo_documento_total_documento: string | null;
   ubicacion_id: string;
   ubicacion_nombre: string | null;
   descuento_total: string | null;
@@ -149,6 +169,8 @@ interface CabeceraRow {
   lineas: number;
   algun_sin_precio: boolean;
   bruto: string | null;
+  total_documento: string | null;
+  fecha_vencimiento: string | null;
 }
 
 interface LineaRow {
@@ -190,7 +212,11 @@ interface CompraConfirmada {
   descuento_total: string | null;
   folio: string | null;
   tipo_documento_nombre: string | null;
+  /** Qué total lleva el tipo de esta compra (spec § 6, decisión 10). */
+  tipo_documento_total_documento: string | null;
   proveedor_nombre: string | null;
+  total_documento: string | null;
+  fecha_vencimiento: string | null;
 }
 
 /** Una línea de una compra confirmada, con lo congelado al confirmar. */
@@ -269,6 +295,10 @@ interface EncabezadoValidado {
   folio: string | null;
   proveedorNombre: string;
   tipoDocumentoNombre: string;
+  /** Qué total lleva el tipo (spec § 3, decisión 10). */
+  tipoDocumentoTotalDocumento: string;
+  /** El plazo de pago del proveedor; null = usa el default (spec § 2). */
+  plazoPagoDias: number | null;
 }
 
 type Conversor = (cantidad: string, desde: string, hacia: string) => string;
@@ -320,6 +350,15 @@ interface UnidadResuelta {
  * entró, aunque el proveedor o la bodega se borren después. Mismo criterio que
  * la cabecera de `traslados`.
  *
+ * `td.total_documento` (spec compras-deuda-proveedor § 3, decisión 10) viaja
+ * por el mismo `LEFT JOIN` sin filtro, y por la misma razón: qué total lleva
+ * el tipo es un atributo **inmutable** de esa fila del catálogo —no cambia
+ * con el tiempo, a diferencia de `activo`—, así que leerlo sin filtrar
+ * `eliminado_el` no es distinto de leer `td.nombre`. Si el tipo se borra
+ * después, la compra sigue sabiendo si su total era transcrito o calculado, y
+ * `mapCabecera` (más abajo) lo necesita para decidir qué mostrar como
+ * `total`.
+ *
  * El agregado de líneas sí filtra: una línea reemplazada en un borrador queda
  * borrada y no cuenta.
  */
@@ -327,8 +366,10 @@ const SELECT_CABECERA = `
   c.compra_id, c.estado, c.fecha_documento::text AS fecha_documento, c.folio,
   c.proveedor_id, pr.nombre AS proveedor_nombre,
   c.tipo_documento_compra_id, td.nombre AS tipo_documento_nombre,
+  td.total_documento AS tipo_documento_total_documento,
   c.ubicacion_id, ub.nombre AS ubicacion_nombre,
   c.descuento_total, c.observacion,
+  c.total_documento, c.fecha_vencimiento::text AS fecha_vencimiento,
   COALESCE(ag.lineas, 0)::int AS lineas,
   COALESCE(ag.algun_sin_precio, false) AS algun_sin_precio,
   ag.bruto`;
@@ -371,8 +412,10 @@ export class ComprasService {
       nombre: string;
       codigo: string | null;
       requiere_folio: boolean;
+      total_documento: string;
     }[] = await this.db.query(
-      `SELECT td.tipo_documento_compra_id, td.nombre, td.codigo, td.requiere_folio
+      `SELECT td.tipo_documento_compra_id, td.nombre, td.codigo,
+              td.requiere_folio, td.total_documento
          FROM tenants t
          JOIN provincia prov ON prov.provincia_id = t.provincia_id
               AND prov.eliminado_el IS NULL
@@ -387,6 +430,7 @@ export class ComprasService {
       nombre: r.nombre,
       codigo: r.codigo,
       requiereFolio: r.requiere_folio,
+      totalDocumento: r.total_documento,
     }));
   }
 
@@ -396,19 +440,24 @@ export class ComprasService {
    * quién le compró (spec § 5).
    */
   async proveedores(tenantId: string): Promise<ProveedorOpcion[]> {
-    const rows: { tercero_id: string; nombre: string; rut: string | null }[] =
-      await this.db.query(
-        `SELECT tercero_id, nombre, rut
-           FROM terceros
-          WHERE tenant_id = $1 AND tipo = 'proveedor' AND activo
-            AND eliminado_el IS NULL
-          ORDER BY nombre`,
-        [tenantId],
-      );
+    const rows: {
+      tercero_id: string;
+      nombre: string;
+      rut: string | null;
+      plazo_pago_dias: number | null;
+    }[] = await this.db.query(
+      `SELECT tercero_id, nombre, rut, plazo_pago_dias
+         FROM terceros
+        WHERE tenant_id = $1 AND tipo = 'proveedor' AND activo
+          AND eliminado_el IS NULL
+        ORDER BY nombre`,
+      [tenantId],
+    );
     return rows.map((r) => ({
       id: r.tercero_id,
       nombre: r.nombre,
       rut: r.rut,
+      plazoPagoDias: r.plazo_pago_dias,
     }));
   }
 
@@ -503,6 +552,7 @@ export class ComprasService {
     query: FindComprasDto,
   ): Promise<PaginatedResponse<CompraListItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
+    const cfg = await this.cfgTenant(tenantId);
 
     const params: unknown[] = [tenantId];
     const filtros: string[] = ['c.tenant_id = $1', 'c.eliminado_el IS NULL'];
@@ -549,13 +599,14 @@ export class ComprasService {
     );
 
     return {
-      data: rows.map((r) => this.mapListItem(r)),
+      data: rows.map((r) => this.mapListItem(r, cfg)),
       meta: buildPaginationMeta(page, pageSize, total),
     };
   }
 
   /** Encabezado, líneas e historial: tres consultas fijas, sin importar el largo. */
   async findOne(tenantId: string, id: string): Promise<CompraDetalle> {
+    const cfg = await this.cfgTenant(tenantId);
     const cabecera: (CabeceraRow & { motivo_anulacion: string | null })[] =
       await this.db.query(
         `SELECT ${SELECT_CABECERA}, c.motivo_anulacion
@@ -604,7 +655,7 @@ export class ComprasService {
     );
 
     return {
-      ...this.mapCabecera(cabecera[0]),
+      ...this.mapCabecera(cabecera[0], cfg),
       observacion: cabecera[0].observacion,
       descuentoTotal: cabecera[0].descuento_total,
       motivoAnulacion: cabecera[0].motivo_anulacion,
@@ -689,8 +740,8 @@ export class ComprasService {
             `INSERT INTO compras
                (tenant_id, proveedor_id, tipo_documento_compra_id, folio,
                 fecha_documento, ubicacion_id, observacion, creado_por,
-                descuento_total)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                descuento_total, total_documento, fecha_vencimiento)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
              RETURNING compra_id`,
             [
               tenantId,
@@ -702,6 +753,8 @@ export class ComprasService {
               dto.observacion ?? null,
               usuarioId,
               descuento,
+              dto.totalDocumento ?? null,
+              dto.fechaVencimiento ?? null,
             ],
           ),
         ),
@@ -749,7 +802,8 @@ export class ComprasService {
           `UPDATE compras
               SET proveedor_id = $3, tipo_documento_compra_id = $4, folio = $5,
                   fecha_documento = $6, ubicacion_id = $7, observacion = $8,
-                  descuento_total = $9, actualizado_el = NOW()
+                  descuento_total = $9, total_documento = $10,
+                  fecha_vencimiento = $11, actualizado_el = NOW()
             WHERE tenant_id = $1 AND compra_id = $2`,
           [
             tenantId,
@@ -761,6 +815,8 @@ export class ComprasService {
             dto.ubicacionId,
             dto.observacion ?? null,
             descuento,
+            dto.totalDocumento ?? null,
+            dto.fechaVencimiento ?? null,
           ],
         ),
       );
@@ -834,10 +890,13 @@ export class ComprasService {
       ubicacion_id: string;
       observacion: string | null;
       descuento_total: string | null;
+      total_documento: string | null;
+      fecha_vencimiento: string | null;
     }[] = await this.db.query(
       `SELECT proveedor_id, tipo_documento_compra_id, folio,
               fecha_documento::text AS fecha_documento, ubicacion_id,
-              observacion, descuento_total
+              observacion, descuento_total, total_documento,
+              fecha_vencimiento::text AS fecha_vencimiento
          FROM compras
         WHERE tenant_id = $1 AND compra_id = $2 AND eliminado_el IS NULL`,
       [tenantId, id],
@@ -881,6 +940,8 @@ export class ComprasService {
       fechaDocumento: c.fecha_documento,
       ubicacionId: c.ubicacion_id,
       observacion: c.observacion,
+      totalDocumento: c.total_documento,
+      fechaVencimiento: c.fecha_vencimiento,
       lineas: lineas.map((l) => ({
         itemId: l.item_id,
         cantidad: l.cantidad,
@@ -904,6 +965,22 @@ export class ComprasService {
       c.tipo_documento_compra_id,
       enc,
       id,
+    );
+
+    // 2b. La deuda (spec § 4.1 y § 4.2, decisión 10): un tipo `obligatorio`
+    // no se confirma sin su total transcrito; el vencimiento se fija ahora
+    // (la tipeada del borrador manda, si no, fecha_documento + el plazo del
+    // proveedor).
+    if (
+      enc.tipoDocumentoTotalDocumento === 'obligatorio' &&
+      c.total_documento == null
+    ) {
+      throw new BadRequestException('Falta el total del documento');
+    }
+    const fechaVencimiento = vencimiento(
+      c.fecha_documento,
+      enc.plazoPagoDias,
+      c.fecha_vencimiento,
     );
 
     // 3. Los locks, en el orden de `docs/patterns/backend.md` §15: primero la
@@ -1062,13 +1139,14 @@ export class ComprasService {
       ],
     );
 
-    // 8. El estado.
+    // 8. El estado y el vencimiento (spec § 4.2).
     await this.db.query(
       `UPDATE compras
           SET estado = 'confirmada', confirmado_por = $3,
-              confirmado_el = NOW(), actualizado_el = NOW()
+              confirmado_el = NOW(), actualizado_el = NOW(),
+              fecha_vencimiento = $4
         WHERE tenant_id = $1 AND compra_id = $2`,
-      [tenantId, id, usuarioId],
+      [tenantId, id, usuarioId, fechaVencimiento],
     );
 
     return this.findOne(tenantId, id);
@@ -1436,6 +1514,61 @@ export class ComprasService {
     });
   }
 
+  /**
+   * Corrige lo transcrito de una confirmada: el total del documento, su
+   * vencimiento, o los dos (spec compras-deuda-proveedor § 6). Corregir lo
+   * transcrito es lo mismo que corregir un precio: mismo permiso
+   * (`Actualizar`) que `corregirLinea`/`corregirDescuento`. No toca el costo
+   * ni las líneas — el recorte de aplicaciones de pago llega en la tarea 3.
+   */
+  async actualizarDocumento(
+    tenantId: string,
+    id: string,
+    dto: ActualizarDocumentoDto,
+  ): Promise<CompraDetalle> {
+    if (
+      dto.totalDocumento === undefined &&
+      dto.fechaVencimiento === undefined
+    ) {
+      throw new BadRequestException(
+        'No hay nada que corregir: falta el total o el vencimiento',
+      );
+    }
+    return this.db.transaccion(async () => {
+      const compra = await this.bloquearConfirmada(tenantId, id);
+      let totalDocumento = compra.total_documento;
+      if (dto.totalDocumento !== undefined) {
+        if (compra.tipo_documento_total_documento === 'suma_lineas') {
+          throw new BadRequestException(
+            `"${compra.tipo_documento_nombre}" no lleva total transcrito: su total es la suma de las líneas`,
+          );
+        }
+        if (
+          dto.totalDocumento === null &&
+          compra.tipo_documento_total_documento !== 'opcional'
+        ) {
+          throw new BadRequestException(
+            `"${compra.tipo_documento_nombre}" necesita el total del documento`,
+          );
+        }
+        totalDocumento = dto.totalDocumento;
+      }
+      const fechaVencimiento =
+        dto.fechaVencimiento !== undefined
+          ? dto.fechaVencimiento
+          : compra.fecha_vencimiento;
+
+      await this.db.query(
+        `UPDATE compras
+            SET total_documento = $3, fecha_vencimiento = $4,
+                actualizado_el = NOW()
+          WHERE tenant_id = $1 AND compra_id = $2`,
+        [tenantId, id, totalDocumento, fechaVencimiento],
+      );
+      return this.findOne(tenantId, id);
+    });
+  }
+
   // ───────────────────────────────────────────────────────────────────────
   // Anular (spec § 4.5)
   // ───────────────────────────────────────────────────────────────────────
@@ -1703,6 +1836,11 @@ export class ComprasService {
    * que tiene que seguir nombrando a quién se le compró. El `JOIN` a la
    * ubicación tampoco filtra, porque lo que se pregunta es si sigue viva: una
    * corrección de cantidad mueve stock ahí y sobre una borrada no puede.
+   *
+   * `td.total_documento` viaja por el mismo `LEFT JOIN` sin filtro y por la
+   * misma razón que `SELECT_CABECERA`: es un atributo inmutable del tipo
+   * (spec compras-deuda-proveedor § 3), así que `actualizarDocumento` puede
+   * decidir con él aunque el tipo se haya borrado después de confirmar.
    */
   private async bloquearConfirmada(
     tenantId: string,
@@ -1713,9 +1851,12 @@ export class ComprasService {
       await this.db.query(
         `SELECT c.compra_id, c.estado, c.descuento_total, c.folio,
                 td.nombre AS tipo_documento_nombre,
+                td.total_documento AS tipo_documento_total_documento,
                 pr.nombre AS proveedor_nombre,
                 c.ubicacion_id, ub.nombre AS ubicacion_nombre,
-                (ub.eliminado_el IS NULL) AS ubicacion_viva
+                (ub.eliminado_el IS NULL) AS ubicacion_viva,
+                c.total_documento,
+                c.fecha_vencimiento::text AS fecha_vencimiento
            FROM compras c
            JOIN ubicaciones ub ON ub.ubicacion_id = c.ubicacion_id
            LEFT JOIN terceros pr ON pr.tercero_id = c.proveedor_id
@@ -2016,8 +2157,9 @@ export class ComprasService {
       nombre: string;
       tipo: string;
       activo: boolean;
+      plazo_pago_dias: number | null;
     }[] = await this.db.query(
-      `SELECT nombre, tipo, activo FROM terceros
+      `SELECT nombre, tipo, activo, plazo_pago_dias FROM terceros
         WHERE tercero_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
       [dto.proveedorId, tenantId],
     );
@@ -2038,18 +2180,21 @@ export class ComprasService {
     }
 
     // El tipo tiene que ser del país del tenant (tenant → provincia → país).
-    const tipos: { nombre: string; requiere_folio: boolean }[] =
-      await this.db.query(
-        `SELECT td.nombre, td.requiere_folio
-           FROM tenants t
-           JOIN provincia prov ON prov.provincia_id = t.provincia_id
-                AND prov.eliminado_el IS NULL
-           JOIN tipos_documento_compra td ON td.pais_id = prov.pais_id
-                AND td.activo AND td.eliminado_el IS NULL
-          WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL
-            AND td.tipo_documento_compra_id = $2`,
-        [tenantId, dto.tipoDocumentoCompraId],
-      );
+    const tipos: {
+      nombre: string;
+      requiere_folio: boolean;
+      total_documento: string;
+    }[] = await this.db.query(
+      `SELECT td.nombre, td.requiere_folio, td.total_documento
+         FROM tenants t
+         JOIN provincia prov ON prov.provincia_id = t.provincia_id
+              AND prov.eliminado_el IS NULL
+         JOIN tipos_documento_compra td ON td.pais_id = prov.pais_id
+              AND td.activo AND td.eliminado_el IS NULL
+        WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL
+          AND td.tipo_documento_compra_id = $2`,
+      [tenantId, dto.tipoDocumentoCompraId],
+    );
     if (!tipos.length) {
       throw new BadRequestException(
         'Tipo de documento no válido para el país del tenant',
@@ -2062,6 +2207,15 @@ export class ComprasService {
       throw new BadRequestException('Este documento necesita folio');
     }
     const folio = tipo.requiere_folio ? folioTipeado : null;
+
+    // El total transcrito solo lo llevan los tipos `obligatorio`/`opcional`
+    // (spec § 3, decisión 10): en un `suma_lineas` es 400, igual que un
+    // descuento sin precios.
+    if (dto.totalDocumento != null && tipo.total_documento === 'suma_lineas') {
+      throw new BadRequestException(
+        `"${tipo.nombre}" no lleva total transcrito: su total es la suma de las líneas`,
+      );
+    }
 
     const ubicaciones: { nombre: string; activo: boolean }[] =
       await this.db.query(
@@ -2082,6 +2236,8 @@ export class ComprasService {
       folio,
       proveedorNombre: proveedor.nombre,
       tipoDocumentoNombre: tipo.nombre,
+      tipoDocumentoTotalDocumento: tipo.total_documento,
+      plazoPagoDias: proveedor.plazo_pago_dias ?? null,
     };
   }
 
@@ -2337,16 +2493,41 @@ export class ComprasService {
     }
   }
 
-  private mapListItem(r: CabeceraRow): CompraListItem {
-    return { ...this.mapCabecera(r), lineas: r.lineas };
+  /**
+   * La config del motor de precios para cuantizar el total `suma_lineas`
+   * (spec § 4.1 y § 14): una consulta por request, nunca por fila — la
+   * misma para toda la lista o el detalle de un mismo tenant.
+   */
+  private async cfgTenant(tenantId: string): Promise<ConfigCalculo> {
+    return this.calculoPreciosService.cargarConfig(
+      tenantId,
+      await this.monedasService.decimalesOficiales(tenantId),
+    );
   }
 
-  private mapCabecera(r: CabeceraRow): Omit<CompraListItem, 'lineas'> {
+  private mapListItem(r: CabeceraRow, cfg: ConfigCalculo): CompraListItem {
+    return { ...this.mapCabecera(r, cfg), lineas: r.lineas };
+  }
+
+  private mapCabecera(
+    r: CabeceraRow,
+    cfg: ConfigCalculo,
+  ): Omit<CompraListItem, 'lineas'> {
     const sinPrecio = r.algun_sin_precio;
-    const total =
-      r.lineas > 0 && !sinPrecio && r.bruto != null
-        ? new Decimal(r.bruto).minus(r.descuento_total ?? 0).toString()
-        : null;
+    // Un tipo `obligatorio`/`opcional` no calcula: el total es lo transcrito
+    // (decisión 10). Un `suma_lineas` (o un tipo borrado, que ya no informa
+    // su clasificación) sigue con la cuenta de siempre, cuantizada una vez.
+    const esSumaLineas =
+      r.tipo_documento_total_documento !== 'obligatorio' &&
+      r.tipo_documento_total_documento !== 'opcional';
+    const total = esSumaLineas
+      ? r.lineas > 0 && !sinPrecio && r.bruto != null
+        ? cuantizar(
+            new Decimal(r.bruto).minus(r.descuento_total ?? 0),
+            cfg,
+          ).toString()
+        : null
+      : r.total_documento;
     return {
       id: r.compra_id,
       estado: r.estado,
@@ -2360,6 +2541,8 @@ export class ComprasService {
       ubicacionId: r.ubicacion_id,
       ubicacionNombre: r.ubicacion_nombre,
       total,
+      totalDocumento: r.total_documento,
+      fechaVencimiento: r.fecha_vencimiento,
     };
   }
 }
