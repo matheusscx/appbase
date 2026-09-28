@@ -23,6 +23,25 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los dos textos de pantalla del XML del DTE: el owner los confirma tal cual (cerrada 2026-09-28)
+
+Sale de [`pendientes.md`](pendientes.md) § 4. **Se confirman sin cambios** (owner, 2026-09-28,
+contestando a la orquestadora, que le mostró los dos textos literales y le preguntó si los dejaba
+o los reescribía: *"Los dejamos así"*). No hay código que tocar: los dos ya están en main.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 4
+
+- [ ] **Dos textos de pantalla del XML del DTE no tienen redacción en la spec de diseño**
+  (frontend, hallazgo de la revisión final del frente *"Compras: pre-llenar la compra con el
+  XML de la factura electrónica (DTE)"*, 2026-09-28;
+  `docs/superpowers/specs/2026-09-27-compras-xml-dte-design.md` no fija ninguno de los dos
+  literalmente, solo describe la conducta). El aviso de que el descuento no se carga porque hay
+  líneas sin precio — `'La factura trae un descuento, pero hay líneas sin precio: revisalas para
+  que se cargue'` (`frontend/app/composables/useDte.ts:357`) — y la confirmación de salir sin
+  guardar — `'Vas a salir sin guardar la factura que cargaste desde el XML. ¿Seguro?'`
+  (`frontend/app/pages/compras/[id].vue:759`) — los eligió quien implementó. **La pregunta:**
+  ¿los confirma el owner tal cual, o los reescribe?
+
 ## El % de anulaciones y cortesías sobre lo pedido, por garzón (cerrada 2026-09-27)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Spec
