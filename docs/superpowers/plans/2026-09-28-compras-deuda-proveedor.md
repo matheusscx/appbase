@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Draft · **Date:** 2026-09-28 · **Owner:** César (aprueba spec y plan antes de codear)
+**Status:** Approved (owner, 2026-09-28, con los cambios de la spec: decisiones 11 y 12) · **Date:** 2026-09-28 · **Owner:** César
 
 **Goal:** cada compra confirmada deja deuda con su proveedor, con vencimiento; un pago se
 reparte entre sus compras o queda a favor; el pago en efectivo sale de la caja de quien paga
@@ -187,19 +187,25 @@ la deuda bien sin intervención; y todo lo que el dueño necesita leer.
 - [ ] El recorte (spec § 6) en: corregir línea, descuento, `PATCH /documento` y anular la
   compra. `recortar(...)` puro en `deuda.ts`, con unitarios (de la más nueva; baja a 0; el
   total sube y no toca nada).
-- [ ] Lecturas de spec § 8: `por-pagar`, `por-pagar/:proveedorId`, `pagos`, y los campos
-  nuevos de `GET /compras` y `GET /compras/:id`. Estado derivado con "hoy" del tenant
+- [ ] Lecturas de spec § 8, todas con `Pagar`: `por-pagar`, `por-pagar/:proveedorId`,
+  `pagos`. Y los campos de pago de `GET /compras` y `GET /compras/:id` **solo** para quien
+  tiene `Pagar` (el controller resuelve el permiso; sin él no vienen en la respuesta y el
+  filtro `estadoPago` es 403; decisión 12). Estado derivado con "hoy" del tenant
   (`rango-fecha.util.ts`). Una consulta por lectura, con el N+1 medido.
-- [ ] E2E (spec § 12): Andina corregida a menos (a favor, usado en la próxima); queso sin
+- [ ] E2E (spec § 12): Andina con el total transcrito corregido a menos (a favor, usado en la
+  próxima) y una línea de factura corregida que no cambia la deuda; queso sin
   precio pagado de más; factura sin total pagable; anular la compra (a favor); confirmar con un
   pago que falla (nada confirmado); confirmar con `pago` sin `Pagar` (403); el orden y los
-  totales de `por-pagar` con la escena del lunes (Don Pedro, Andina, gas).
+  totales de `por-pagar` con la escena del lunes (Don Pedro, Andina, gas); **con el rol real
+  del bodeguero** (`Leer` sin `Pagar`): 403 en `por-pagar`, `por-pagar/:id`, `pagos` y el
+  filtro `estadoPago`, y el listado y el detalle **sin** los campos de pago en el body.
 - [ ] Docs: `compras.md` (el gesto, el recorte, las lecturas y la tabla de endpoints).
 
 **Duda concreta para el revisor:** ¿hay algún camino que cambie el total de una compra
 confirmada y no recorte las aplicaciones? (Listar todos los que escriben `precio_unitario`,
 `cantidad`, `descuento_total` o `total_documento`.) ¿La lectura de `por-pagar` puede contar
-una aplicación de un pago anulado o de una compra anulada?
+una aplicación de un pago anulado o de una compra anulada? ¿Hay alguna respuesta (listado,
+detalle, un error) por la que un usuario sin `Pagar` todavía reciba un dato de pago?
 
 ### Task 4: Frontend — el total, el vencimiento y "¿la pagaste ya?"
 
@@ -213,8 +219,8 @@ los traiga, y que quien tiene `Pagar` registre la compra al contado en un gesto.
   mandar solo lo que el DTO declara.
 - [ ] Modal de confirmar: "¿La pagaste ya?" solo con `Pagar`, medio y monto, clave con
   `useIntentoCobro`; el aviso de efectivo sin caja abierta.
-- [ ] `CompraConfirmada.vue`: total, pagado, deuda, vencimiento, sus pagos, "Corregir total o
-  vencimiento" (`Actualizar`).
+- [ ] `CompraConfirmada.vue`: total, vencimiento y "Corregir total o vencimiento"
+  (`Actualizar`); con `Pagar`, además pagado, deuda y sus pagos (spec § 10).
 - [ ] Vitest de cada pieza (el mock de `useApiFetch` guarda la clave; el body pasa el DTO).
 - [ ] Docs: `compras.md` (las pantallas).
 
@@ -226,11 +232,12 @@ de otro permiso? ¿Algún body manda un campo que el DTO no declara?
 **Intención:** la pantalla del dueño (decisión 9), el pago repartido con la propuesta desde
 la más vieja (decisión 2), y el frente cerrado con sus docs.
 
-- [ ] `pages/compras/por-pagar.vue` y su entrada en la navegación (con `Leer`).
+- [ ] `pages/compras/por-pagar.vue` detrás de `Pagar` con middleware de ruta (pattern
+  frontend § 1.2), y su entrada en la navegación solo con `Pagar`.
 - [ ] `PagarProveedorModal.vue`: la propuesta (saldo a favor primero, después la compra más
   vieja), editable, lo que queda a favor dicho en pantalla; `useIntentoCobro`.
 - [ ] Anular un pago con motivo, con el aviso de caja cerrada.
-- [ ] Insignia de pago y filtro en `pages/compras/index.vue`.
+- [ ] Insignia de pago y filtro en `pages/compras/index.vue`, solo con `Pagar`.
 - [ ] Utilidades de presentación en `useCompras.ts` (la propuesta de reparto va ahí, con
   Vitest).
 - [ ] Playwright con el rol real que paga y con el bodeguero sin `Pagar` (spec § 12).
@@ -254,6 +261,6 @@ que no muestra el estado que agregó la 5)?
 ## Decisions / Open questions
 
 - Todas las decisiones de producto están en la spec § 2, con quién, cuándo y cómo.
-- **Abierta, para el owner junto con la aprobación:** la guía de despacho lleva total
-  `opcional` y la factura que agrupa varias guías queda fuera (spec § 14).
+- Al aprobar, el owner confirmó la guía de despacho con total `opcional` (decisión 11) y pasó
+  lo que se debe a `Pagar` (decisión 12). No queda ninguna pregunta abierta.
 - Decisiones técnicas para la revisión: spec § 14.

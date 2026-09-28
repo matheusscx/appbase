@@ -1,6 +1,6 @@
 # Compras: la deuda con el proveedor y sus pagos, con la salida de caja automática
 
-**Fecha:** 2026-09-28 · **Tipo:** spec de diseño · **Status:** Draft — decisiones del owner completas; falta su aprobación de spec y plan
+**Fecha:** 2026-09-28 · **Tipo:** spec de diseño · **Status:** Approved (owner, 2026-09-28, por la sesión orquestadora: "Sí, aprobado con esos dos cambios" —decisiones 11 y 12— más una corrección de redacción en la 5)
 **Frente:** pieza 3 de *"Compras: carga manual, y el DTE del SII como atajo encima"*, en
 [`docs/agent/pendientes.md`](../../agent/pendientes.md). Viene después de las piezas 1 y 2 y
 de la lectura del XML; lo que hace hoy compras está en
@@ -47,7 +47,7 @@ confirmar; y una pantalla **"Por pagar"** muestra lo que se debe por proveedor.
 | 3 | **El efectivo sale solo de la caja abierta de quien paga.** Si no tiene caja abierta, la abre, o registra el pago alguien que sí la tiene (con el permiso de pagar). Ninguna regla de caja cambia: los movimientos siguen siendo solo del dueño del turno | Owner, 2026-09-28, por la sesión orquestadora ("Vamos con la A"), entre *A: solo la caja propia* (recomendada) y *B: elegir cualquier caja abierta, limitado a quien supervisa cajas*. Escena: Don Pedro cobra $80.000, el dueño sin caja y Marta con la suya abierta. Resolvía el choque entre "se elige de qué caja sale" y "queda en el turno de quien lo hizo" (18/09): manda el segundo | El dueño que no atiende caja no puede pagar en efectivo sin abrir una. Se descartó B porque el descuadre de un error del que paga caería en el cierre de otra persona. **B queda como posible suma futura** si se ve que el dueño nunca abre caja |
 | 4 | **El vencimiento sale del plazo en días de cada proveedor**, contado desde la fecha del documento, y se puede cambiar en cada compra. Si el XML de la factura trae `FchVenc`, manda esa fecha. Un proveedor sin plazo cargado usa **30 días** | Owner, 2026-09-28, por la sesión orquestadora ("A"), entre *A: plazo por proveedor, editable por compra* (recomendada) y *B: fecha tipeada en cada compra*. Escena: Don Pedro 30 días, Andina 15, factura de Andina del 1/10 vence el 16/10 | Un dato más en la ficha del proveedor; un plazo mal cargado hace vencer mal todas sus compras hasta corregirlo. Se descartó B porque la compra sin fecha tipeada nunca aparece como vencida |
 | 4b | **Una factura en cuotas queda con un solo vencimiento**, el de la fecha final. Las cuotas se pagan como pagos parciales | Tomada por esta sesión y planteada al owner junto con la 4 ("decido yo salvo que digas otra cosa"); **no la objetó** (2026-09-28) | Se pierde el aviso de cada cuota vencida. El XML puede traer hasta 30 pagos programados (`MntPagos`, Formato DTE v2.5) |
-| 5 | **Se puede pagar sin factura (anticipo).** El pago sale de la caja ese día y queda **a favor** con el proveedor; al pagar su próxima compra, la pantalla propone usar ese saldo. El mismo saldo a favor recibe lo pagado de más cuando una corrección baja el total de una compra ya pagada | Owner, 2026-09-28, por la sesión orquestadora ("Dale con A"), entre *A: se permite el pago sin factura* (recomendada) y *B: solo se paga contra una compra cargada*. Escenas: Andina corregida de $100.000 a $90.000 después de pagada (saldo a favor en las dos opciones), y $50.000 adelantados a Don Pedro sin factura | Una opción más en la pantalla de pago y un saldo a favor que puede quedar olvidado. Se descartó B porque el efectivo del adelanto sale del cajón sin registro: descuadra, o se paga dos veces al llegar la factura |
+| 5 | **Se puede pagar sin factura (anticipo).** El pago sale de la caja ese día y queda **a favor** con el proveedor; al pagar su próxima compra, la pantalla propone usar ese saldo. El mismo saldo a favor recibe lo pagado de más cuando una corrección baja el total de una compra ya pagada: corregir el total transcrito, o, en una compra sin documento o con boleta, corregir una línea (§ 6). En una factura, corregir una línea no cambia la deuda (decisión 10) | Owner, 2026-09-28, por la sesión orquestadora ("Dale con A"), entre *A: se permite el pago sin factura* (recomendada) y *B: solo se paga contra una compra cargada*. Escenas: una compra de Andina pagada por $100.000 que resulta ser de $90.000 (saldo a favor en las dos opciones), y $50.000 adelantados a Don Pedro sin factura. *Redacción corregida al aprobar la spec* (sesión orquestadora, 2026-09-28): la escena se planteó como "un precio mal tipeado", que con la decisión 10 ya no baja la deuda de una factura; el caso es un total transcrito mal | Una opción más en la pantalla de pago y un saldo a favor que puede quedar olvidado. Se descartó B porque el efectivo del adelanto sale del cajón sin registro: descuadra, o se paga dos veces al llegar la factura |
 | 6 | **Anular un pago en efectivo con su caja ya cerrada no toca ninguna caja.** La deuda vuelve y el cierre queda como quedó. Con la caja todavía abierta, la plata vuelve sola a esa caja, y solo su dueño puede anular (decisión 3) | Owner, 2026-09-28, por la sesión orquestadora ("A"), entre *A: no toca caja* (recomendada), *B: la plata entra a la caja abierta de quien anula* y *C: no se puede anular con la caja cerrada*. Escena: Marta registró por error $80.000 a Don Pedro, cerró con $80.000 de sobrante, y el jueves se anula | Si la plata sí había salido y el proveedor la devuelve, quien la recibe la anota como entrada manual en su caja. Se descartó B porque mete un descuadre en la caja de otro, y C porque deja la compra pagada cuando no lo está |
 | 6b | **Anular una compra que ya tenía pagos deja lo pagado a favor** con el proveedor (mecanismo de la decisión 5) | Tomada por esta sesión y mostrada al owner junto con la 6; **no la objetó** (2026-09-28) | — |
 | 6c | **Anular un pago por transferencia solo devuelve la deuda**; no toca caja | Tomada por esta sesión y mostrada al owner junto con la 6; **no la objetó** (2026-09-28) | — |
@@ -56,6 +56,8 @@ confirmar; y una pantalla **"Por pagar"** muestra lo que se debe por proveedor.
 | 8 | **Se puede pagar una compra a la que todavía no se le sabe el total.** Pasa en dos casos: una compra sin documento o con boleta a la que le falta el precio de una línea (su total es la suma de las líneas), o una compra con documento a la que todavía no se le cargó el total (decisión 10). Mientras tanto la compra muestra lo pagado y "falta el precio de N línea(s)" o "falta el total"; en el primer caso la deuda se muestra como "al menos $X". Al completarse, la cuenta se hace sola: lo que sobra queda a favor (decisión 5), lo que falta queda como "te faltan $X" | Owner, 2026-09-28, por la sesión orquestadora ("Dale A"), entre *A: se puede pagar* (recomendada) y *B: no acepta pagos hasta completar el precio; lo pagado antes va como anticipo*. Escena: Andina, bebidas $60.000 + queso sin precio, se pagan $90.000, el queso sale $28.000 → $2.000 a favor. **Reescrita el mismo día por la decisión 10**, que el owner eligió sabiendo que el "al menos $X" quedaba solo para las compras sin documento | Mientras falta, lo que se le debe al proveedor no es un número exacto. Se descartó B porque la compra pagada al contado sin precio tipeado figuraría impaga |
 | 9 | **Pantalla nueva "Por pagar"**: una fila por proveedor con lo que se le debe, lo vencido, lo que vence esta semana y el saldo a favor, ordenada por urgencia. Al tocar un proveedor, sus compras abiertas con su estado ("vencida", "te faltan $X", "falta precio") y el botón Pagar. El listado de compras suma la insignia de pago de cada compra. **Sin tabla de antigüedad** por tramos | Owner, 2026-09-28, por la sesión orquestadora ("Dale con A"), entre *A: pantalla por proveedor* (recomendada), *B: A + antigüedad 0-30/31-60/61-90/+90* y *C: solo insignia y filtro en el listado*. Escena: lunes 9:00, Don Pedro $50.000 vencido, Andina $88.000 vence el miércoles con $2.000 a favor, gas $40.000 en 20 días | Una pantalla nueva. Se descartó B porque con el tope legal de 30 días casi nunca hay números fuera del primer tramo, y C porque no muestra el total por proveedor ni el saldo a favor |
 | 10 | **La deuda de una compra con documento es el total que dice el documento**, transcrito: se tipea, o sale del XML (`MntTotal`). **El sistema no lo calcula, no calcula impuestos y no lo valida contra el neto de las líneas** (la diferencia es el impuesto, y decidirlo es del frente fiscal). Sin documento o con boleta, el total es la suma de las líneas, como hoy | Owner, 2026-09-28, por la sesión orquestadora, **como pregunta aparte de la ronda de producto y marcada como que roza lo fiscal** ("A"), entre *A: total del documento transcrito* (recomendada), *B: calcular el IVA sobre el neto* (frente fiscal) y *C: la suma de las líneas*. Escena: Andina, neto $100.000 + IVA $19.000 = $119.000; con C el sistema dice $100.000 y deja $19.000 "a favor" falsos | Un campo más al cargar una factura a mano, que puede no calzar con las líneas sin que el sistema lo note. Se descartó B por ser fiscal, y C porque queda mal en toda factura afecta |
+| 11 | **La guía de despacho lleva el total como opcional**: se recibe sin total y se completa cuando llega la factura. **La factura que agrupa varias guías queda fuera** (§ 13): su total se reparte a mano entre las compras | Propuesta de esta sesión en la spec (§ 14); **confirmada por el owner** al aprobarla (2026-09-28, por la sesión orquestadora: "Sí, aprobado con esos dos cambios") | La factura de tres guías se reparte a mano; entrada en `pendientes.md` |
+| 12 | **Lo que se debe lo ve solo quien tiene `Pagar`.** "Por pagar", el detalle por proveedor y los pagos van con `Pagar`, no con `Leer`; y a quien tiene `Leer` sin `Pagar`, el listado y el detalle de compras **no le mandan** los datos de pago (§ 8) | Hallazgo de la sesión orquestadora al revisar la spec, **aceptado por el owner** al aprobarla (2026-09-28): con `Leer`, el bodeguero veía lo que se le debe a cada proveedor, contra "el bodeguero recibe y el dueño paga". Qué pasa con los campos de pago del listado y el detalle lo decidió esta sesión, a pedido de la orquestadora (§ 8) | Quien carga compras no ve si una compra está pagada. Lo que él mismo transcribe (total, vencimiento) lo sigue viendo |
 
 **Los 30 días, verificados contra el texto legal.** Ley 19.983, art. 2, en el texto que le
 dio la Ley 21.131 ([texto publicado](http://www.sice.oas.org/SME_CH/CHL/Ley_21131_s.pdf),
@@ -214,16 +216,27 @@ corregir lo transcrito es lo mismo que corregir un precio. En un tipo `suma_line
 
 ## 8. Lo que ve el dueño
 
-- **`GET /compras/por-pagar`** (`Leer`): una fila por proveedor con la deuda conocida, lo
+Todo lo de esta sección es de **`Pagar`** (decisión 12): "el bodeguero recibe y el dueño
+paga", y lo que se le debe a cada proveedor es información del que paga.
+
+- **`GET /compras/por-pagar`** (`Pagar`): una fila por proveedor con la deuda conocida, lo
   vencido, lo que vence en los próximos 7 días, cuántas compras tienen el total desconocido y
   el saldo a favor; ordenada por vencido y después por lo que vence pronto. Una consulta con
   agregación, sin N+1. Sin deuda y sin saldo a favor, el proveedor no aparece.
-- **`GET /compras/por-pagar/:proveedorId`** (`Leer`): sus compras confirmadas con deuda o
+- **`GET /compras/por-pagar/:proveedorId`** (`Pagar`): sus compras confirmadas con deuda o
   total desconocido, con estado y vencimiento; sus pagos vigentes con saldo a favor.
-- **`GET /compras`** suma a cada fila `estadoPago`, `deuda` y `vencida`, y el filtro
-  `estadoPago`. **`GET /compras/:id`** suma total, aplicado, deuda, vencimiento y los pagos que
-  la cubren.
-- **`GET /compras/pagos?proveedorId=`** (`Leer`): los pagos, con su caja y sus aplicaciones.
+- **`GET /compras/pagos?proveedorId=`** (`Pagar`): los pagos, con su caja y sus aplicaciones.
+- **`GET /compras` y `GET /compras/:id`** siguen con `Leer`, y **solo a quien además tiene
+  `Pagar`** le suman los datos de pago: `estadoPago`, `deuda` y `vencida` en cada fila; total,
+  aplicado, deuda y los pagos que la cubren en el detalle. **A quien no tiene `Pagar` no se los
+  manda**: no vienen en la respuesta, y el filtro `estadoPago` es 403. El controller resuelve
+  el permiso y el service arma la consulta con o sin la parte de pagos. Lo que sí le llega es
+  lo que él mismo transcribe: `totalDocumento` y `fechaVencimiento`.
+  *Por qué omitir y no dejar solo la insignia* (decisión de esta sesión, a pedido de la
+  orquestadora): la insignia "Pagada · Te faltan $X · Vencida" **es** el dato de pago —dice
+  cuánto se debe y a quién—, así que dejarla reabre lo que la decisión 12 cierra. Y esconderla
+  solo en la pantalla no alcanza: el dato viajaría igual en la respuesta (invariante 6: el
+  permiso se hace cumplir en el backend).
 
 ## 9. Permisos y API
 
@@ -232,7 +245,8 @@ rutas con nombre van **antes** de `@Get(':id')`.
 
 | Endpoint | Permiso |
 |---|---|
-| `GET /compras/por-pagar` · `GET /compras/por-pagar/:proveedorId` · `GET /compras/pagos` | Leer |
+| `GET /compras/por-pagar` · `GET /compras/por-pagar/:proveedorId` · `GET /compras/pagos` | Pagar |
+| `GET /compras` · `GET /compras/:id` con los datos de pago (y el filtro `estadoPago`) | Leer + Pagar; con `Leer` solo, sin esos datos (§ 8) |
 | `GET /compras/medios-pago` | Pagar |
 | `POST /compras/pagos` (con `Idempotency-Key`) | Pagar |
 | `POST /compras/pagos/:id/anular` | Pagar |
@@ -252,17 +266,19 @@ paga) para el Playwright y los 403 del de carga. Ids: los siguientes libres del 
   los pre-llena.
 - **Confirmar:** con `Pagar`, el modal suma "¿La pagaste ya?" → No / Sí, con medio y monto
   (propuesto: el total). Efectivo sin caja abierta: el aviso antes de mandar, y el 400 igual.
-- **Detalle de una confirmada** (`CompraConfirmada.vue`): total, pagado, deuda, vencimiento,
-  sus pagos, "Corregir total o vencimiento" (`Actualizar`) y "Pagar" (`Pagar`).
-- **`pages/compras/por-pagar.vue`** (nueva): la lista por proveedor (decisión 9); al tocar
-  uno, sus compras abiertas y sus pagos con saldo a favor.
+- **Detalle de una confirmada** (`CompraConfirmada.vue`): total, vencimiento y "Corregir
+  total o vencimiento" (`Actualizar`); con `Pagar`, además pagado, deuda, sus pagos y "Pagar".
+- **`pages/compras/por-pagar.vue`** (nueva, detrás de `Pagar` con middleware de ruta, no un
+  `v-if` por botón): la lista por proveedor (decisión 9); al tocar uno, sus compras abiertas y
+  sus pagos con saldo a favor. Sin `Pagar`, la entrada no aparece en el menú **y** la ruta del
+  backend contesta 403.
 - **`PagarProveedorModal.vue`** (nuevo): monto, medio, referencia, el saldo a favor propuesto
   y el reparto propuesto (la más vieja primero), editable; lo que no se reparte queda a favor
   y la pantalla lo dice. Manda la clave con `useIntentoCobro` (pattern frontend § 18).
 - **Anular un pago:** desde el detalle del proveedor, con motivo; en efectivo con la caja
   cerrada, el modal avisa que no vuelve plata a ninguna caja.
-- **Listado de compras:** la insignia de pago (Pagada · Te faltan $X · Vencida · Falta total)
-  y su filtro.
+- **Listado de compras:** con `Pagar`, la insignia de pago (Pagada · Te faltan $X · Vencida ·
+  Falta total) y su filtro; sin `Pagar`, ni la insignia ni el filtro.
 - Utilidades de presentación en `composables/useCompras.ts`; los montos, strings de punta a
   punta.
 
@@ -283,20 +299,25 @@ en el primer lock, y el segundo ve la deuda ya bajada.
   total `suma_lineas`, y el SQL de los locks.
 - **E2E de API** (Postgres real, `validacionGlobal()`, `Idempotency-Key` nueva por POST):
   Don Pedro ($120.000 + $80.000, paga $150.000 → la del lunes pagada y $50.000 de la otra);
-  Andina ($100.000 corregida a $90.000 → $10.000 a favor, usados en la próxima); anticipo de
+  Andina (factura pagada por $100.000 cuyo total transcrito se corrige a $90.000 → $10.000 a
+  favor, usados en la próxima; y una línea de factura corregida que **no** cambia la deuda); anticipo de
   $50.000 usado en una de $80.000; queso sin precio pagado de más → $2.000 a favor al
   completar (sin documento); factura sin total → "falta total" y pagable; efectivo sin caja
   (400), sin plata (422, fila en el rastro, sin el esperado en el mensaje) y con caja (la
   salida baja el esperado); anular con la caja abierta (entrada), con la caja cerrada (nada)
   y la caja ajena abierta (403); anular la compra (a favor); confirmar con un pago que falla
   (nada confirmado); el reintento con la misma clave (un solo pago); **403 de `Pagar` con el
-  rol real del bodeguero**; montos fuera de escala (400); proveedor, compra o pago de otro
-  tenant (404).
+  rol real del bodeguero** en `POST /compras/pagos`, `por-pagar`, `por-pagar/:id`, `pagos` y
+  el filtro `estadoPago`; y con ese mismo rol, `GET /compras` y `GET /compras/:id` **sin** los
+  campos de pago en el body (decisión 12); montos fuera de escala (400); proveedor, compra o
+  pago de otro tenant (404).
 - **Vitest:** la propuesta de reparto y los rótulos del composable; el modal de pagar con la
   clave de idempotencia; la carga con total y vencimiento; confirmar con y sin `Pagar`.
 - **Playwright**, con el rol real que paga y con el bodeguero sin `Pagar`: recibir la feria y
   pagarla al contado en un gesto (el efectivo baja en la caja); pagar dos compras de un
-  proveedor desde "Por pagar"; el bodeguero no ve "¿la pagaste ya?".
+  proveedor desde "Por pagar"; el bodeguero no ve "¿la pagaste ya?", ni la entrada "Por
+  pagar", ni la insignia de pago, y al entrar por URL a `/compras/por-pagar` lo frena el
+  middleware; su llamada a la API da 403 (lo cubre el e2e).
 
 ## 13. Fuera de esta pieza
 
@@ -321,6 +342,7 @@ en el primer lock, y el segundo ve la deuda ya bajada.
 - La caja del pago en efectivo la resuelve el servidor, nunca el cliente.
 - Un tipo nuevo en el rastro de intentos rechazados (`pago_proveedor`), sin cambiar su regla.
 - El vencimiento se cuenta desde la fecha del documento (párrafo de la ley, § 2).
-- **Punto a confirmar por el owner junto con la aprobación:** la guía de despacho lleva el
-  total como `opcional`: se recibe sin total y se completa cuando llega la factura. La factura
-  que agrupa varias guías queda fuera (§ 13).
+- Los datos de pago del listado y el detalle se **omiten** de la respuesta para quien no
+  tiene `Pagar`, en vez de esconderse en la pantalla (§ 8, decisión 12).
+- La guía de despacho con total `opcional` se propuso acá y el owner la confirmó al aprobar
+  (decisión 11).
