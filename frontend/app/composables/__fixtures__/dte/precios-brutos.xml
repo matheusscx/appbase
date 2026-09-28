@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<DTE xmlns="http://www.sii.cl/SiiDte" version="1.0">
+  <Documento ID="F20T33">
+    <Encabezado>
+      <IdDoc>
+        <TipoDTE>33</TipoDTE>
+        <Folio>20</Folio>
+        <FchEmis>2026-09-23</FchEmis>
+      </IdDoc>
+      <Emisor>
+        <RUTEmisor>76543210-3</RUTEmisor>
+        <RznSoc>Distribuidora Andina Ltda</RznSoc>
+      </Emisor>
+      <Receptor>
+        <RUTRecep>76123456-7</RUTRecep>
+        <RznSocRecep>Resto Demo SpA</RznSocRecep>
+      </Receptor>
+      <Totales>
+        <MntBruto>1</MntBruto>
+        <MntTotal>11900</MntTotal>
+      </Totales>
+    </Encabezado>
+    <Detalle>
+      <NroLinDet>1</NroLinDet>
+      <NmbItem>QUESO GAUDA 1KG</NmbItem>
+      <QtyItem>10</QtyItem>
+      <UnmdItem>KG</UnmdItem>
+      <PrcItem>1190</PrcItem>
+      <MontoItem>11900</MontoItem>
+    </Detalle>
+  </Documento>
+</DTE>

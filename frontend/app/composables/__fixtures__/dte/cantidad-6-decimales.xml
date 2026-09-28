@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<DTE xmlns="http://www.sii.cl/SiiDte" version="1.0">
+  <Documento ID="F50T33">
+    <Encabezado>
+      <IdDoc>
+        <TipoDTE>33</TipoDTE>
+        <Folio>50</Folio>
+        <FchEmis>2026-09-26</FchEmis>
+      </IdDoc>
+      <Emisor>
+        <RUTEmisor>76543210-3</RUTEmisor>
+        <RznSoc>Distribuidora Andina Ltda</RznSoc>
+      </Emisor>
+      <Receptor>
+        <RUTRecep>76123456-7</RUTRecep>
+        <RznSocRecep>Resto Demo SpA</RznSocRecep>
+      </Receptor>
+      <Totales>
+        <MntNeto>10617</MntNeto>
+        <MntTotal>12634</MntTotal>
+      </Totales>
+    </Encabezado>
+    <Detalle>
+      <NroLinDet>1</NroLinDet>
+      <NmbItem>HARINA GRANEL CAFÉ</NmbItem>
+      <QtyItem>1.123456</QtyItem>
+      <UnmdItem>KG</UnmdItem>
+      <PrcItem>550</PrcItem>
+      <MontoItem>617</MontoItem>
+    </Detalle>
+    <Detalle>
+      <NroLinDet>2</NroLinDet>
+      <NmbItem>AZUCAR GRANEL</NmbItem>
+      <QtyItem>3</QtyItem>
+      <UnmdItem>KG</UnmdItem>
+      <PrcItem>3333</PrcItem>
+      <MontoItem>10000</MontoItem>
+    </Detalle>
+  </Documento>
+</DTE>

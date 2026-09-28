@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<DTE xmlns="http://www.sii.cl/SiiDte" version="1.0">
+  <Documento ID="F60T33">
+    <Encabezado>
+      <IdDoc>
+        <TipoDTE>33</TipoDTE>
+        <Folio>60</Folio>
+        <FchEmis>2026-09-27</FchEmis>
+      </IdDoc>
+      <Emisor>
+        <RUTEmisor>76543210-3</RUTEmisor>
+        <RznSoc>Distribuidora Andina Ltda</RznSoc>
+      </Emisor>
+      <Receptor>
+        <RUTRecep>76123456-7</RUTRecep>
+        <RznSocRecep>Resto Demo SpA</RznSocRecep>
+      </Receptor>
+      <Totales>
+        <MntNeto>2000</MntNeto>
+        <MntTotal>2380</MntTotal>
+      </Totales>
+    </Encabezado>
+    <Detalle>
+      <NroLinDet>1</NroLinDet>
+      <NmbItem>ITEM VALIDO</NmbItem>
+      <QtyItem>2</QtyItem>
+      <UnmdItem>UN</UnmdItem>
+      <PrcItem>1000</PrcItem>
+      <MontoItem>2000</MontoItem>
+    </Detalle>
+    <Detalle>
+      <NroLinDet>2</NroLinDet>
+      <NmbItem>ITEM CON MONTO ILEGIBLE CAFÉ</NmbItem>
+      <QtyItem>5</QtyItem>
+      <UnmdItem>UN</UnmdItem>
+      <PrcItem>1000</PrcItem>
+      <MontoItem>abc</MontoItem>
+    </Detalle>
+    <DscRcgGlobal>
+      <NroLinDR>1</NroLinDR>
+      <TpoMov>D</TpoMov>
+      <GlosaDR>Descuento con valor ilegible</GlosaDR>
+      <TpoValor>$</TpoValor>
+      <ValorDR>x</ValorDR>
+    </DscRcgGlobal>
+  </Documento>
+</DTE>

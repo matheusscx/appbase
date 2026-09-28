@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<EnvioDTE xmlns="http://www.sii.cl/SiiDte" version="1.0">
+  <SetDTE ID="SetDoc">
+    <DTE version="1.0">
+      <Documento ID="F10T33">
+        <Encabezado>
+          <IdDoc>
+            <TipoDTE>33</TipoDTE>
+            <Folio>10</Folio>
+            <FchEmis>2026-09-22</FchEmis>
+          </IdDoc>
+          <Emisor>
+            <RUTEmisor>76543210-3</RUTEmisor>
+            <RznSoc>Distribuidora Andina Ltda</RznSoc>
+          </Emisor>
+          <Receptor>
+            <RUTRecep>76123456-7</RUTRecep>
+            <RznSocRecep>Resto Demo SpA</RznSocRecep>
+          </Receptor>
+          <Totales>
+            <MntNeto>1000</MntNeto>
+            <MntTotal>1190</MntTotal>
+          </Totales>
+        </Encabezado>
+        <Detalle>
+          <NroLinDet>1</NroLinDet>
+          <NmbItem>ITEM UNO</NmbItem>
+          <QtyItem>1</QtyItem>
+          <UnmdItem>UN</UnmdItem>
+          <PrcItem>1000</PrcItem>
+          <MontoItem>1000</MontoItem>
+        </Detalle>
+      </Documento>
+    </DTE>
+    <DTE version="1.0">
+      <Documento ID="F11T33">
+        <Encabezado>
+          <IdDoc>
+            <TipoDTE>33</TipoDTE>
+            <Folio>11</Folio>
+            <FchEmis>2026-09-22</FchEmis>
+          </IdDoc>
+          <Emisor>
+            <RUTEmisor>76543210-3</RUTEmisor>
+            <RznSoc>Distribuidora Andina Ltda</RznSoc>
+          </Emisor>
+          <Receptor>
+            <RUTRecep>76123456-7</RUTRecep>
+            <RznSocRecep>Resto Demo SpA</RznSocRecep>
+          </Receptor>
+          <Totales>
+            <MntNeto>2000</MntNeto>
+            <MntTotal>2380</MntTotal>
+          </Totales>
+        </Encabezado>
+        <Detalle>
+          <NroLinDet>1</NroLinDet>
+          <NmbItem>ITEM DOS</NmbItem>
+          <QtyItem>2</QtyItem>
+          <UnmdItem>UN</UnmdItem>
+          <PrcItem>1000</PrcItem>
+          <MontoItem>2000</MontoItem>
+        </Detalle>
+      </Documento>
+    </DTE>
+    <DTE version="1.0">
+      <Documento ID="F12T33">
+        <Encabezado>
+          <IdDoc>
+            <TipoDTE>33</TipoDTE>
+            <Folio>12</Folio>
+            <FchEmis>2026-09-22</FchEmis>
+          </IdDoc>
+          <Emisor>
+            <RUTEmisor>76543210-3</RUTEmisor>
+            <RznSoc>Distribuidora Andina Ltda</RznSoc>
+          </Emisor>
+          <Receptor>
+            <RUTRecep>76123456-7</RUTRecep>
+            <RznSocRecep>Resto Demo SpA</RznSocRecep>
+          </Receptor>
+          <Totales>
+            <MntNeto>3000</MntNeto>
+            <MntTotal>3570</MntTotal>
+          </Totales>
+        </Encabezado>
+        <Detalle>
+          <NroLinDet>1</NroLinDet>
+          <NmbItem>ITEM TRES</NmbItem>
+          <QtyItem>3</QtyItem>
+          <UnmdItem>UN</UnmdItem>
+          <PrcItem>1000</PrcItem>
+          <MontoItem>3000</MontoItem>
+        </Detalle>
+      </Documento>
+    </DTE>
+  </SetDTE>
+</EnvioDTE>

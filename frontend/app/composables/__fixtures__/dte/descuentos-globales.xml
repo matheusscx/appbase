@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<DTE xmlns="http://www.sii.cl/SiiDte" version="1.0">
+  <Documento ID="F40T33">
+    <Encabezado>
+      <IdDoc>
+        <TipoDTE>33</TipoDTE>
+        <Folio>40</Folio>
+        <FchEmis>2026-09-25</FchEmis>
+      </IdDoc>
+      <Emisor>
+        <RUTEmisor>76543210-3</RUTEmisor>
+        <RznSoc>Distribuidora Andina Ltda</RznSoc>
+      </Emisor>
+      <Receptor>
+        <RUTRecep>76123456-7</RUTRecep>
+        <RznSocRecep>Resto Demo SpA</RznSocRecep>
+      </Receptor>
+      <Totales>
+        <MntExe>20000</MntExe>
+        <MntTotal>18500</MntTotal>
+      </Totales>
+    </Encabezado>
+    <Detalle>
+      <NroLinDet>1</NroLinDet>
+      <NmbItem>PAN AMASADO EXENTO CAFÉ</NmbItem>
+      <IndExe>1</IndExe>
+      <QtyItem>20</QtyItem>
+      <UnmdItem>KG</UnmdItem>
+      <PrcItem>1000</PrcItem>
+      <MontoItem>20000</MontoItem>
+    </Detalle>
+    <DscRcgGlobal>
+      <NroLinDR>1</NroLinDR>
+      <TpoMov>D</TpoMov>
+      <GlosaDR>Descuento fijo</GlosaDR>
+      <TpoValor>$</TpoValor>
+      <ValorDR>1500</ValorDR>
+    </DscRcgGlobal>
+    <DscRcgGlobal>
+      <NroLinDR>2</NroLinDR>
+      <TpoMov>D</TpoMov>
+      <GlosaDR>Descuento sobre exentos</GlosaDR>
+      <TpoValor>%</TpoValor>
+      <ValorDR>10</ValorDR>
+      <IndExeDR>1</IndExeDR>
+    </DscRcgGlobal>
+    <DscRcgGlobal>
+      <NroLinDR>3</NroLinDR>
+      <TpoMov>R</TpoMov>
+      <GlosaDR>Recargo por flete urgente</GlosaDR>
+      <TpoValor>$</TpoValor>
+      <ValorDR>800</ValorDR>
+    </DscRcgGlobal>
+  </Documento>
+</DTE>
