@@ -875,30 +875,17 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   agrega al catálogo de `frontend/app/composables/useReportes.ts` con su propio `modulo_app`
   (`docs/features/modulo-reportes.md`).
 
-- [ ] **% de anulaciones y cortesías sobre lo vendido por garzón** ✅ *(contestado 2026-09-20; se mudó
-  de la § 4 el 2026-09-27)* (backend + frontend,
-  fuera de alcance de
-  [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md)
-  § 7) — el resumen del reporte de anulaciones (`GET /salones/anulaciones/resumen`) ya trae
-  `platos`/`precioCarta`/`costo` por garzón; falta la venta con la que compararlos para armar
-  el porcentaje. **La pregunta que frena:** una mesa que se **transfiere** a mitad de servicio
-  (`POST /cuentas/:id/transferir`, `docs/features/salones-mesas.md`) — ¿la venta es del
-  garzón que la abrió, del que la cerró/cobró, o se reparte entre los dos? Hoy
-  `cuentas.garzon_responsable_id` solo guarda el **vigente** (el reporte de anulaciones
-  resolvió lo mismo para sí mismo congelando el garzón al anular —
-  `cuenta_linea_anulaciones.garzon_id`—, pero eso fija quién anuló, no quién vendió). Sin esa
-  regla, el % queda indefinido para cualquier mesa transferida, que no es un caso raro.
-  ✅ **CONTESTADO (owner, 2026-09-20): la venta se REPARTE entre los garzones que atendieron la
-  mesa.** El caso que lo decide: Ana abre la mesa, sirve entradas por $40.000 y termina turno;
-  Beto atiende postres y cobra, la cuenta cierra en $60.000 → $40.000 a Ana y $20.000 a Beto.
-  Las otras dos salidas se descartaron por cómo distorsionan el porcentaje, que es el número
-  que la entrada existe para producir: *del que abrió* le deja a Beto una mesa atendida con
-  venta cero —y si anuló algo, su % se dispara contra un denominador de cero—; *del que cerró*
-  es lo que el sistema ya sabe sin trabajo extra (guarda el garzón vigente) pero le borra a Ana
-  $40.000 que sí vendió. **El costo aceptado:** hay que guardar qué garzón tenía la mesa **en
-  cada línea** del pedido, que hoy no se guarda — `cuentas.garzon_responsable_id` solo tiene el
-  vigente. Quien lo tome: eso es lo primero, porque sin ese dato el reparto no se puede calcular
-  ni hacia atrás.
+- [ ] **Falta la columna "% de lo pedido" en la pantalla `/salones/anulaciones`** (frontend,
+  tarea 3 de [`2026-09-27-porcentaje-anulaciones-por-garzon.md`](../superpowers/plans/2026-09-27-porcentaje-anulaciones-por-garzon.md)).
+  El backend ya está: `GET /salones/anulaciones/resumen` trae `pedido` y `porcentaje` por
+  garzón (Vendido —el reparto de la línea por garzón, tarea 1, `cuenta_linea_reparto`— más
+  Anulado sin los filtros de tipo/motivo; `porcentaje` es lo anulado que sí pasa los filtros
+  sobre `pedido`, `null` si `pedido` es 0), con la regla del owner del 2026-09-20 (la venta se
+  reparte entre los garzones que atendieron la mesa, a precio de carta) ya implementada y
+  probada — spec
+  [`2026-09-27-porcentaje-anulaciones-por-garzon-design.md`](../superpowers/specs/2026-09-27-porcentaje-anulaciones-por-garzon-design.md)
+  §§ 4 y 5.1. Lo que falta es solo la pantalla: la tabla "Por garzón" de `/salones/anulaciones`
+  no muestra esos dos campos todavía (spec § 5.2).
 
 ## 4. Necesita que el owner conteste
 
@@ -1022,6 +1009,20 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   resolverlo junto con el resto de lo fiscal — es la misma pregunta que la regla de "congelar
   el hecho fiscal en la transacción, diferir lo que solo transmite o formatea" de ADR-010, y la
   regla la pone el owner, no el agente.
+
+- [ ] **Las notas de crédito no restan de lo vendido en el % de anulaciones por garzón**
+  (fiscal — **frente propio, con su propia sesión**: `CLAUDE.md` y ADR-010 lo sacan de
+  cualquier tanda de producto o de arrastre de otra tarea; anotado 2026-09-27 al construir el
+  % — spec
+  [`2026-09-27-porcentaje-anulaciones-por-garzon-design.md`](../superpowers/specs/2026-09-27-porcentaje-anulaciones-por-garzon-design.md)
+  § 6). `pedido`/`porcentaje` de `GET /salones/anulaciones/resumen` miden lo vendido como el
+  reparto de las líneas de cuentas **cerradas** cuya venta no está cancelada — una nota de
+  crédito emitida después (`POST /ventas/:id/notas-credito`) no lo toca: el garzón que sirvió
+  un plato devuelto por NC sigue mostrando esa venta como pedido, y su % no baja. Resolverlo
+  exige enlazar `venta_detalles`/`notas_credito` con `cuenta_lineas`/`cuenta_linea_reparto` —el
+  mismo cruce que § 6 de la spec descarta para "lo cobrado en vez de la carta"— y decidir si
+  una NC resta del garzón que vendió originalmente o de quien está en turno cuando se emite,
+  que es una pregunta de negocio, no solo de datos.
 
 - [ ] **Serie y lote están a medias, y cada camino decide por su cuenta si rechazar o aceptar y
   corromper** (backend + BD, auditoría `inventario` 2026-08-15) — tres caras del mismo hueco,

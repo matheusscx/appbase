@@ -720,10 +720,49 @@ detalle paginado; aviso fijo *"Las mermas de esta lista también están contadas
 `Mermas` (`frontend/app/pages/mermas.vue`) suma el badge *"Anulación en mesa"* en las filas
 con `deAnulacion: true` — ver [mermas-valorizadas.md](./mermas-valorizadas.md).
 
-**Fuera de esta parte** (`pendientes.md`): el % de anulaciones y cortesías sobre lo vendido
-por garzón; la cortesía como retiro gravado con IVA (fiscal, frente propio); el día comercial
-que cruza la medianoche; y los ingredientes/componentes borrados del catálogo que se saltean
-sin movimiento al anular (el costo sale bajo sin marca — hueco heredado de la parte 2).
+**El % de anulaciones y cortesías sobre lo pedido, por garzón (2026-09-27) — backend.** Spec
+[`2026-09-27-porcentaje-anulaciones-por-garzon-design.md`](../superpowers/specs/2026-09-27-porcentaje-anulaciones-por-garzon-design.md)
+§§ 4 y 5.1. `GET /salones/anulaciones/resumen` suma dos campos al `porGarzon` de su respuesta
+(la pantalla todavía no los muestra — ver el aviso al final de esta sección):
+
+- **`pedido`**: Vendido + Anulado, a precio de carta, ESCALA_COSTO. **Vendido** es el reparto
+  (`cuenta_linea_reparto`, sección anterior) de las líneas vivas de las cuentas **cerradas**
+  con `cerrada_el` en el rango, cuya venta **no está cancelada** — no lo que dice
+  `cuentas.garzon_responsable_id` hoy, que solo guarda el responsable vigente y pierde lo que
+  la mesa pidió antes de una transferencia. **Anulado** es la suma de **todas** las
+  anulaciones del garzón en el rango, **sin mirar los filtros de tipo ni de motivo**: con
+  *Tipo = Cortesía* puesto, `pedido` no se mueve, porque es el denominador — si se moviera, el
+  % de cortesías dejaría de ser "cortesías sobre lo pedido" y pasaría a ser "cortesías sobre
+  (vendido + cortesías)", y los tres tipos ya no sumarían el % total.
+- **`porcentaje`**: `precioCarta` del grupo (las anulaciones que **sí** pasan los filtros) ÷
+  `pedido`, fracción decimal a ESCALA_COSTO (`'0.0500'` = 5%). `null` si `pedido` es 0 (solo
+  pasa con ítems de precio 0). Nunca pasa de 100% y nunca divide por cero: una mesa cancelada
+  entera da 100%, no un número imposible.
+
+**Qué entra y qué no:** una cuenta abierta no suma a lo vendido hasta que se cierra (sus
+anulaciones ya hechas sí cuentan); una cuenta cancelada (con o sin motivo) no vendió nada,
+pero sus anulaciones sí anulan; una venta cancelada después de cerrar la cuenta saca esas
+líneas de lo vendido; una nota de crédito posterior **no** resta de lo vendido (es fiscal, va
+aparte — ver `pendientes.md`). Cuenta, línea y reparto filtran `eliminado_el IS NULL`; cuenta
+y garzón, cuando el JOIN mira algo que ya pasó, **no** (mismas excepciones deliberadas que el
+resto del reporte, con el porqué escrito en la consulta).
+
+**El arreglo `porGarzon` de la respuesta trae a todo garzón con algo vendido o anulado en el
+rango, también a los que no anularon nada** — van con `platos`/`precioCarta` en `'0.0000'` y
+`porcentaje` en `'0.0000'` (no `null`: `pedido` no es 0 si vendieron algo). El 0% de un
+garzón sin anulaciones es el punto de comparación que hace sospechoso el % alto de otro.
+Orden: por `garzonNombre`, *Sin garzón* al final.
+
+⏳ **Pendiente (tarea 3 de [`2026-09-27-porcentaje-anulaciones-por-garzon.md`](../superpowers/plans/2026-09-27-porcentaje-anulaciones-por-garzon.md)):**
+la pantalla `/salones/anulaciones` todavía no tiene la columna "% de lo pedido" en la tabla
+"Por garzón" — hoy solo muestra `platos`/`precioCarta`/`costo` (spec § 5.2, que también deja
+para esa tarea el `—` con `porcentaje` null).
+
+**Fuera de este frente** (`pendientes.md`): la cortesía como retiro gravado con IVA (fiscal,
+frente propio); el día comercial que cruza la medianoche; los ingredientes/componentes
+borrados del catálogo que se saltean sin movimiento al anular (el costo sale bajo sin marca —
+hueco heredado de la parte 2); y que una nota de crédito reste de lo vendido en este %
+(fiscal, va sola).
 
 ### Cancelar una cuenta con platos despachados (2026-09-16)
 

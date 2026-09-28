@@ -2526,6 +2526,17 @@ CREATE INDEX idx_cuentas_responsable
 CREATE INDEX idx_cuentas_venta
     ON cuentas (tenant_id, venta_id);
 
+-- Lo pide "lo vendido por garzón" del resumen de anulaciones (spec
+-- 2026-09-27-porcentaje-anulaciones-por-garzon-design.md § 5.1): filtra
+-- tenant_id = $1 AND estado='cerrada' AND cerrada_el entre un rango (el
+-- tenant_id de este JOIN es tan necesario como el índice: ronda de fix 1).
+-- Medido con EXPLAIN sobre datos de DOS tenants: sin el índice, acceso por
+-- tenant vía otro índice + filtro; con él, seek real por (tenant_id,
+-- cerrada_el) (docblock de idx_cuentas_cerrada en cuenta.entity.ts tiene las
+-- tres corridas y los números).
+CREATE INDEX idx_cuentas_cerrada
+    ON cuentas (tenant_id, cerrada_el);
+
 -- Historial de asignaciones de responsable por cuenta. La fila vigente tiene
 -- hasta_el IS NULL; el índice único parcial garantiza una sola vigente.
 CREATE TABLE cuenta_asignaciones (

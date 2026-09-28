@@ -507,9 +507,18 @@ dice cuántas anulaciones quedaron sin costo, sin que esa cifra parcial se sume 
 Mermas marca si vino de anular un plato en la mesa, para que se vea que ese movimiento
 también está contado en el otro reporte. Detalle en
 [`features/salones-mesas.md`](./features/salones-mesas.md) § *"El reporte de anulaciones"*.
-Lo que sigue sin existir: el % de anulaciones y cortesías sobre lo vendido por garzón, y la
-cortesía como retiro gravado con IVA (fiscal, frente propio) — `agent/pendientes.md` § 4 y
-§ 6.
+
+**El resumen por garzón trae además el % de anulaciones y cortesías sobre lo pedido
+(2026-09-27, backend).** La venta de un garzón se reparte por línea entre quien tenía la mesa
+cuando se pidió cada unidad (`cuenta_linea_reparto`), se mide a precio de carta, y el % es lo
+anulado sobre lo pedido (vendido + anulado) — nunca pasa de 100% ni divide por cero, y un
+garzón que no anuló nada igual aparece con 0%. Ya está en `GET /salones/anulaciones/resumen`;
+falta la columna en la pantalla `/salones/anulaciones` (tarea 3 de
+[`superpowers/plans/2026-09-27-porcentaje-anulaciones-por-garzon.md`](./superpowers/plans/2026-09-27-porcentaje-anulaciones-por-garzon.md)).
+Detalle en [`features/salones-mesas.md`](./features/salones-mesas.md) § *"El % de anulaciones y
+cortesías sobre lo pedido"*. Lo que sigue sin existir: la cortesía como retiro gravado con IVA
+(fiscal, frente propio) y que una nota de crédito reste de lo vendido en este % (también
+fiscal) — `agent/pendientes.md`.
 
 **Fuera de alcance (fases futuras):** FIFO o método de costeo elegible por tenant, y la
 emisión del **DTE 52** que legaliza un traslado en la vía pública —bodegas y traslados ya

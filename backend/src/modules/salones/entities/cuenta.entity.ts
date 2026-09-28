@@ -46,6 +46,49 @@ export enum EstadoCuenta {
  * de 8.031 cuentas del tenant, 31 están abiertas.
  */
 @Index('idx_cuentas_estado', ['tenantId', 'estado'])
+/**
+ * `idx_cuentas_cerrada`: lo pide "lo vendido por garzón" del resumen de
+ * anulaciones (`AnulacionesReporteService.resumen`, spec
+ * `2026-09-27-porcentaje-anulaciones-por-garzon-design.md` § 5.1), que filtra
+ * `tenant_id = $1 AND estado = 'cerrada' AND cerrada_el` entre un rango.
+ * Corre en cada `GET /salones/anulaciones/resumen`, o sea cada vez que se
+ * abre ese reporte.
+ *
+ * ⚠️ **Ronda de fix 1 (hallazgo del controlador):** la primera medición se
+ * hizo con datos de un solo tenant, que es justo la distribución donde no se
+ * nota que la consulta no filtraba `cuentas.tenant_id`/`cuenta_lineas.tenant_id`
+ * de forma directa (llegaba acotada solo por el `tenant_id` de
+ * `cuenta_linea_reparto`) — sin esa igualdad, un índice `(tenantId, …)` no
+ * puede hacer un seek real y como mucho recorre el índice entero. Se agregó
+ * `AND cl.tenant_id = $1` al JOIN de `cuenta_lineas` y `AND c.tenant_id = $1`
+ * al de `cuentas`, y se remidió con datos de DOS tenants: **20.000 cuentas
+ * cerradas, 2.000 (10%) del tenant consultado y 18.000 (90%) de otro tenant**,
+ * intercaladas en los mismos 200 días (no en bloques separados) — sin ese
+ * reparto, el problema tampoco se ve. `EXPLAIN (ANALYZE, BUFFERS)` sobre un
+ * rango de un día, tres corridas:
+ *
+ * 1. **Sin el índice** (con la consulta ya corregida, `tenant_id` en los dos
+ *    JOINs): la planificación usa `idx_cuentas_responsable` como acceso por
+ *    tenant y filtra `cerrada_el`/`estado` después — cost 619,50..619,53,
+ *    1.519 buffers, 3,356 ms.
+ * 2. **Con el índice, la consulta VIEJA** (sin `tenant_id` en `cuentas` ni en
+ *    `cuenta_lineas`): el índice se usa, pero solo por `cerrada_el` —recorre
+ *    TODO el rango de fecha de TODOS los tenants— y el JOIN a `cuenta_lineas`
+ *    cae a un seq scan completo (20.007 filas) porque tampoco tiene con qué
+ *    acotar por tenant ahí. Es el peor de los tres: cost 1.258,39..1.319,22,
+ *    1.090 buffers (1.069 hit + 21 read), 5,314 ms.
+ * 3. **Con el índice, la consulta NUEVA:** `Index Scan using idx_cuentas_cerrada`
+ *    con `Index Cond: (tenant_id = $1 AND cerrada_el >= … AND cerrada_el <= …)`
+ *    — un seek real por las dos columnas, y `cuenta_lineas` vuelve a resolver
+ *    por `idx_cuenta_lineas_cuenta (tenant_id, cuenta_id)`. cost
+ *    153,34..157,49, 1.006 buffers, 1,831 ms.
+ *
+ * El plan cambia y mejora yendo de (1) a (3) —cost 619→157, 3,356→1,831 ms—,
+ * así que el índice se queda. La ganancia más grande la da el filtro de
+ * tenant en los JOINs (arregla (2), que sin el índice sería aún peor); el
+ * índice suma una mejora real arriba de eso, no cosmética.
+ */
+@Index('idx_cuentas_cerrada', ['tenantId', 'cerradaEl'])
 @Entity('cuentas')
 export class Cuenta {
   @PrimaryGeneratedColumn('uuid', { name: 'cuenta_id' })

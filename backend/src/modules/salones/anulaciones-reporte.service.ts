@@ -57,6 +57,10 @@ export interface ResumenAnulaciones {
   porGarzon: (GrupoResumen & {
     garzonId: string | null;
     garzonNombre: string | null;
+    /** Vendido + Anulado (spec § 4.1), ESCALA_COSTO. Nunca 0 si el garzón anuló algo. */
+    pedido: string;
+    /** `precioCarta` (ya filtrado) ÷ `pedido`, fracción a ESCALA_COSTO. `null` si `pedido` es 0. */
+    porcentaje: string | null;
   })[];
   porAutorizo: (GrupoResumen & { usuarioId: string; usuarioNombre: string })[];
 }
@@ -118,6 +122,20 @@ interface AcumuladorGrupo {
   sinValorizar: number;
 }
 
+/** Fila cruda de "lo vendido por garzón" (spec § 4.1): el reparto de líneas vivas de cuentas cerradas. */
+interface VendidoRow {
+  garzon_id: string | null;
+  garzon_nombre: string | null;
+  vendido: string;
+}
+
+/** Fila cruda de "lo anulado por garzón" SIN los filtros de tipo/motivo (spec § 4.1: es el denominador). */
+interface AnuladoRow {
+  garzon_id: string | null;
+  garzon_nombre: string | null;
+  anulado: string;
+}
+
 interface CostoGrupoRow {
   cuenta_linea_anulacion_id: string;
   moneda_id: string;
@@ -158,6 +176,9 @@ export class AnulacionesReporteService {
    * puede llegar a cubrir — ver el docblock de `validarRangoResumen`.
    */
   private static readonly TOPE_RANGO_RESUMEN_MS = 366 * 24 * 60 * 60 * 1000;
+
+  /** Clave del grupo "Sin garzón" en `porGarzon` (fila con `garzon_id` null). */
+  private static readonly SIN_GARZON = '__sin_garzon__';
 
   constructor(private readonly db: Db) {}
 
@@ -395,15 +416,18 @@ export class AnulacionesReporteService {
 
   /**
    * `GET /salones/anulaciones/resumen` (spec § 5.1). Cubre TODO el rango
-   * filtrado, no una página: dos consultas fijas, sin importar cuántas filas
-   * haya en el rango —esta (sin `LIMIT`/`OFFSET`, mismos `JOINS_BASE` +
-   * `buildFilters` que `findAll`) y `cargarCostosPorAnulacion` reutilizada
-   * tal cual, con TODOS los ids del rango en vez de los de una página—. Se
-   * agrupa en memoria porque el costo de cada fila ya viene resuelto por
-   * `resolverCosto` (mismo criterio que el listado: una fila `sin_valorizar`
-   * no aporta a `costo`, y `no_aplica` no aporta a `sinValorizar`) y no hay
-   * forma de expresar eso en un solo `GROUP BY` de SQL sin duplicar esa
-   * lógica en la consulta.
+   * filtrado, no una página: cuatro consultas fijas, sin importar cuántas
+   * filas haya en el rango — la base (sin `LIMIT`/`OFFSET`, mismos
+   * `JOINS_BASE` + `buildFilters` que `findAll`), `cargarCostosPorAnulacion`
+   * reutilizada tal cual (con TODOS los ids del rango, y solo si hay ids con
+   * costo), **lo vendido por garzón** (el reparto de la Task 1, a precio de
+   * carta, de las cuentas cerradas en el rango) y **lo anulado por garzón SIN
+   * los filtros de tipo/motivo** (spec § 4.1: el denominador del % no se
+   * puede mover con esos filtros). Se agrupa en memoria porque el costo de
+   * cada fila ya viene resuelto por `resolverCosto` (mismo criterio que el
+   * listado: una fila `sin_valorizar` no aporta a `costo`, y `no_aplica` no
+   * aporta a `sinValorizar`) y no hay forma de expresar eso en un solo
+   * `GROUP BY` de SQL sin duplicar esa lógica en la consulta.
    */
   async resumen(
     tenantId: string,
@@ -438,10 +462,78 @@ export class AnulacionesReporteService {
       idsConCosto,
     );
 
+    // Lo VENDIDO por garzón (spec § 4.1): el reparto de las líneas vivas de
+    // las cuentas cerradas en el rango, a precio de carta congelado. Filtra
+    // por `cerrada_el`, no por la fecha de la anulación: es otra cosa que
+    // pasó.
+    const vendidoParams: unknown[] = [tenantId];
+    const idxDiaV = dia ? empujarDiaNegocio(vendidoParams, dia) : null;
+    let vendidoFiltros = '';
+    if (query.garzonId) {
+      vendidoParams.push(query.garzonId);
+      vendidoFiltros += ` AND r.garzon_id = $${vendidoParams.length}`;
+    }
+    vendidoParams.push(query.desde);
+    vendidoFiltros += bordeFechaSql(
+      'c.cerrada_el',
+      '>=',
+      query.desde,
+      vendidoParams.length,
+      idxDiaV,
+    );
+    vendidoParams.push(query.hasta);
+    vendidoFiltros += bordeHastaSql(
+      'c.cerrada_el',
+      query.hasta,
+      vendidoParams.length,
+      idxDiaV,
+    );
+
+    const vendidoRows: VendidoRow[] = await this.db.query(
+      `SELECT r.garzon_id, g.nombre AS garzon_nombre,
+              SUM(ROUND(r.cantidad * cl.precio_unitario, 4)) AS vendido
+         FROM cuenta_linea_reparto r
+         JOIN cuenta_lineas cl ON cl.cuenta_linea_id = r.cuenta_linea_id AND cl.tenant_id = $1 AND cl.eliminado_el IS NULL
+         -- Cuenta SIN filtro de borrado: la venta ya pasó, y borrar la cuenta
+         -- después no puede bajar lo vendido sin avisar (mismo porqué que JOINS_BASE).
+         -- c.tenant_id = $1 (ronda de fix 1, hallazgo del controlador): sin
+         -- esto, el índice idx_cuentas_cerrada (tenant_id, cerrada_el) no
+         -- puede buscar por cerrada_el sin la igualdad en su primera
+         -- columna, y recorre el índice entero en vez de saltar directo al
+         -- rango del tenant.
+         JOIN cuentas c ON c.cuenta_id = cl.cuenta_id AND c.tenant_id = $1 AND c.estado = 'cerrada'
+         -- Una venta cancelada no vendió (spec § 4.2).
+         JOIN ventas v ON v.venta_id = c.venta_id AND v.estado <> 'cancelada' AND v.eliminado_el IS NULL
+         -- Garzón SIN filtro de borrado: mismo porqué que JOINS_BASE.
+         LEFT JOIN garzones g ON g.garzon_id = r.garzon_id
+        WHERE r.tenant_id = $1 AND r.eliminado_el IS NULL
+          ${vendidoFiltros}
+        GROUP BY r.garzon_id, g.nombre`,
+      vendidoParams,
+    );
+
+    // Lo ANULADO por garzón SIN los filtros de tipo y motivo (spec § 4.1): el
+    // denominador no puede moverse con el filtro, o el % de cortesías dejaría
+    // de ser "sobre lo pedido". Mismos JOINS_BASE y mismo `buildFilters`, con
+    // solo rango y garzón.
+    const { filters: filtrosTotal, params: paramsTotal } = this.buildFilters(
+      tenantId,
+      { desde: query.desde, hasta: query.hasta, garzonId: query.garzonId },
+      dia,
+    );
+    const anuladoRows: AnuladoRow[] = await this.db.query(
+      `SELECT cla.garzon_id, g.nombre AS garzon_nombre,
+              SUM(ROUND(cla.cantidad * cla.precio_unitario, 4)) AS anulado
+         ${JOINS_BASE}
+           ${filtrosTotal}
+        GROUP BY cla.garzon_id, g.nombre`,
+      paramsTotal,
+    );
+
     const porTipo = new Map<string, AcumuladorGrupo>();
     const porGarzon = new Map<string, AcumuladorGrupo>();
     const porAutorizo = new Map<string, AcumuladorGrupo>();
-    const SIN_GARZON = '__sin_garzon__';
+    const SIN_GARZON = AnulacionesReporteService.SIN_GARZON;
 
     for (const r of rows) {
       const { costoEstado, costo } = this.resolverCosto(
@@ -487,16 +579,110 @@ export class AnulacionesReporteService {
       porTipo: [...porTipo.values()].map((a) =>
         this.cerrarGrupo<{ tipo: TipoMotivoBaja }>(a),
       ),
-      porGarzon: [...porGarzon.values()].map((a) =>
-        this.cerrarGrupo<{
-          garzonId: string | null;
-          garzonNombre: string | null;
-        }>(a),
-      ),
+      porGarzon: this.armarPorGarzon(porGarzon, vendidoRows, anuladoRows),
       porAutorizo: [...porAutorizo.values()].map((a) =>
         this.cerrarGrupo<{ usuarioId: string; usuarioNombre: string }>(a),
       ),
     };
+  }
+
+  /**
+   * Arma `porGarzon` final (spec § 4.1 y § 5.1): une las claves de tres
+   * orígenes — el acumulador de anulaciones YA filtradas (`porGarzon`),
+   * `vendidoRows` y `anuladoRows` (sin los filtros de tipo/motivo) — para que
+   * aparezca también un garzón que vendió sin anular nada, o cuyas
+   * anulaciones el filtro de tipo/motivo dejó todas afuera. Por cada clave:
+   * el grupo ya acumulado (con su `precioCarta` FILTRADO), o uno vacío en 0
+   * si esta clave solo viene de `vendidoRows`/`anuladoRows`.
+   *
+   * `pedido` = vendido + anulado **total** (nunca el filtrado): es el
+   * denominador, y no se mueve con el filtro de tipo (spec § 4.1). `0` si
+   * falta alguno de los dos. `porcentaje` = `precioCarta` (filtrado) ÷
+   * `pedido`, `null` si `pedido` es 0 (solo pasa con ítems de precio 0).
+   */
+  private armarPorGarzon(
+    porGarzon: Map<string, AcumuladorGrupo>,
+    vendidoRows: VendidoRow[],
+    anuladoRows: AnuladoRow[],
+  ): ResumenAnulaciones['porGarzon'] {
+    const SIN_GARZON = AnulacionesReporteService.SIN_GARZON;
+
+    const vendidoPorClave = new Map<string, Decimal>();
+    const anuladoPorClave = new Map<string, Decimal>();
+    const metaPorClave = new Map<
+      string,
+      { garzonId: string | null; garzonNombre: string | null }
+    >();
+
+    for (const v of vendidoRows) {
+      const clave = v.garzon_id ?? SIN_GARZON;
+      vendidoPorClave.set(clave, new Decimal(v.vendido ?? 0));
+      metaPorClave.set(clave, {
+        garzonId: v.garzon_id,
+        garzonNombre: v.garzon_nombre,
+      });
+    }
+    for (const a of anuladoRows) {
+      const clave = a.garzon_id ?? SIN_GARZON;
+      anuladoPorClave.set(clave, new Decimal(a.anulado ?? 0));
+      if (!metaPorClave.has(clave)) {
+        metaPorClave.set(clave, {
+          garzonId: a.garzon_id,
+          garzonNombre: a.garzon_nombre,
+        });
+      }
+    }
+
+    const claves = new Set<string>([
+      ...porGarzon.keys(),
+      ...vendidoPorClave.keys(),
+      ...anuladoPorClave.keys(),
+    ]);
+
+    const resultado: ResumenAnulaciones['porGarzon'] = [];
+    for (const clave of claves) {
+      const acc = porGarzon.get(clave);
+      const grupo: GrupoResumen & {
+        garzonId: string | null;
+        garzonNombre: string | null;
+      } = acc
+        ? this.cerrarGrupo<{
+            garzonId: string | null;
+            garzonNombre: string | null;
+          }>(acc)
+        : {
+            ...(metaPorClave.get(clave) ?? {
+              garzonId: null,
+              garzonNombre: null,
+            }),
+            platos: new Decimal(0).toFixed(ESCALA_COSTO),
+            precioCarta: new Decimal(0).toFixed(ESCALA_COSTO),
+            costo: [] as CostoPorMoneda[],
+            sinValorizar: 0,
+          };
+
+      const vendido = vendidoPorClave.get(clave) ?? new Decimal(0);
+      const anulado = anuladoPorClave.get(clave) ?? new Decimal(0);
+      const pedido = vendido.plus(anulado);
+      const porcentaje = pedido.isZero()
+        ? null
+        : new Decimal(grupo.precioCarta).div(pedido).toFixed(ESCALA_COSTO);
+
+      resultado.push({
+        ...grupo,
+        pedido: pedido.toFixed(ESCALA_COSTO),
+        porcentaje,
+      });
+    }
+
+    // Por nombre, "Sin garzón" (`garzonNombre` null) al final (spec § 5.1).
+    resultado.sort((a, b) => {
+      if (a.garzonNombre === null) return b.garzonNombre === null ? 0 : 1;
+      if (b.garzonNombre === null) return -1;
+      return a.garzonNombre.localeCompare(b.garzonNombre, 'es');
+    });
+
+    return resultado;
   }
 
   /** Acumula una fila del resumen en el grupo `clave` de `mapa`, creándolo si falta. */
