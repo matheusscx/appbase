@@ -38,11 +38,18 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
 Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrada: ninguna
-necesita una respuesta del owner. **Hoy no hay ninguna abierta.** La última —el kardex
-ordenando por `creado_el DESC` sin desempatar los dos movimientos que escribe una corrección
-de compra— se cerró el 2026-09-20 y está en [`resueltos.md`](resueltos.md), igual que las que
-había antes, salvo la del primer deploy con `Idempotency-Key`, que no era código y se mudó a
-la § 7.
+necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
+primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
+
+- [ ] **El % de anulaciones por garzón no tiene e2e entre tenants** (backend, test; lo dejó
+  anotado la revisión de rama del frente, 2026-09-28). La consulta de lo vendido de
+  `AnulacionesReporteService.resumen` filtra `tenant_id = $1` en el reparto, la línea y la
+  cuenta, pero ningún e2e lo afirma: ni `salones-anulaciones-porcentaje.e2e-spec.ts` ni
+  `salones-reparto-linea.e2e-spec.ts` arman datos en un segundo tenant. El arreglo: un test en
+  el primero, con el molde del test de aislamiento de `salones-anulaciones-reporte.e2e-spec.ts`
+  (una cuenta cerrada con su reparto en otro tenant, sembrada por SQL porque ninguna API cruza
+  tenants), que afirme que su venta no suma al `pedido` de ningún garzón de Paris. No es un
+  invariante roto: la cuenta ajena ya rebota con 404 al escribir (`getCuentaAbiertaConLock`).
 
 ## 2. Medir primero — no es una pregunta para el owner
 
