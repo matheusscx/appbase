@@ -79,10 +79,11 @@ transacción (deadlock del pool) · ❌ suponer qué conexión resuelve el repo 
 que escribe estado derivado sin pasar por su choke point
 
 **Frontend** — ❌ mutar y luego recargar la lista · ❌ leer una respuesta asíncrona sin
-comprobar que corresponde al estado actual · ✅ Tailwind hardcoded en vez de tokens · ❌
-función de formato dentro de un `.vue` · ✅ fecha local armada con `toISOString()` · ❌
-fricciones de `vue-tsc` estricto · ❌ dependencia nueva sin `optimizeDeps.include` · ❌
-control con permiso propio anidado bajo el `v-if` de otro
+comprobar que corresponde al estado actual (dos caras: cruce por índice stale ·
+navegación que remonta la página antes de que cierre el último paso) · ✅ Tailwind
+hardcoded en vez de tokens · ❌ función de formato dentro de un `.vue` · ✅ fecha local
+armada con `toISOString()` · ❌ fricciones de `vue-tsc` estricto · ❌ dependencia nueva
+sin `optimizeDeps.include` · ❌ control con permiso propio anidado bajo el `v-if` de otro
 
 **Entorno de desarrollo** — ✅ resguardo que valida una cosa y destruye otra
 
@@ -410,32 +411,102 @@ El backend devuelve la entidad o un patch mergeable. Recargar duplica el round-t
 parpadea la UI y pierde el estado local (scroll, filtros, selección).
 Detalle: `docs/patterns/frontend.md`.
 
-### ❌ Leer una respuesta asíncrona sin comprobar que corresponde al estado actual
+### ❌ Leer una respuesta asíncrona sin comprobar que corresponde al estado actual — dos caras
+
+**(a)** el resultado guardado ya no es del estado que se está mirando. **(b)** la
+navegación misma remonta la página y crea una instancia nueva que pide de vuelta lo
+que la instancia vieja todavía tiene en vuelo — y decidir esa navegación, o el método
+HTTP del paso siguiente, por la URL en vez de por lo que esta instancia YA tiene
+guardado es la misma trampa, dos capas más abajo.
 
 ```ts
-// MAL — el carrito cambió, la respuesta guardada es del carrito anterior
+// ❌ (a) el carrito cambió, la respuesta guardada es del carrito anterior
 watch(lineas, () => { setTimeout(() => { resultado.value = await calcular(...) }, 300) })
 // …y el template cruza por índice contra las líneas de AHORA
 <AdvertenciasPrecio :advertencias="resultado?.lineas[index]?.advertencias ?? []" />
 // …y el modal de cobro pide el total que salió de ahí
 @cobrar="cobroOpen = true"
 
-// BIEN — el resultado sabe a qué carrito pertenece
+// ✅ el resultado sabe a qué carrito pertenece
 const { resultado, vigente, asegurarVigente } = useResultadoCalculado(() => input())
 const calculoVigente = computed(() => vigente.value ? resultado.value : null)
 async function abrirCobro() { if (await asegurarVigente()) cobroOpen.value = true }
 ```
 
-Apareció en los tres carritos a la vez. El bug no es el cruce por índice —ese es el
-correcto— sino que **nadie garantizaba que el par índice↔línea siguiera siendo el
+**(a)** apareció en los tres carritos a la vez. El bug no es el cruce por índice —ese es
+el correcto— sino que **nadie garantizaba que el par índice↔línea siguiera siendo el
 mismo**: borrar la primera línea dibujaba su advertencia bajo la segunda, y hacer clic
 en Cobrar dentro de la ventana del debounce abría el modal con el total anterior.
 
-La regla general: si un dato se guarda desde un `await` y se cruza con estado que
-pudo cambiar mientras tanto, guardar **junto al dato la identidad del estado que lo
+La regla general de (a): si un dato se guarda desde un `await` y se cruza con estado
+que pudo cambiar mientras tanto, guardar **junto al dato la identidad del estado que lo
 produjo**. Un booleano "cargando" no alcanza: hay que poder responder *¿este
 resultado es de esto que estoy mirando?*, no solo *¿hay algo en vuelo?*.
 Detalle: `docs/patterns/frontend.md` §10.1.
+
+```ts
+// ❌ (b.1) compras/[id].vue — confirmarRecepcion(): persistirBorrador() navega
+// ANTES de que /confirmar responda
+const guardada = await persistirBorrador() // adentro: await router.replace(`/compras/${res.id}`)
+const res = await useApiFetch(`${apiUrl}/compras/${guardada.id}/confirmar`, { method: 'POST' })
+llenarDesde(res) // la instancia que muestra esto ya no es la que está en pantalla
+
+// ❌ (b.2) "arreglado" con `navegar: false` — pero seguía decidiendo el método
+// y CUÁNDO navegar por `esNueva` (la URL), no por si esta instancia YA tiene
+// una compra. Si `/confirmar` FALLA, nadie navega: la URL se queda en
+// `/compras/nueva` con la compra YA CREADA, y el próximo "Guardar" manda OTRO
+// `POST /compras` — un borrador duplicado (lo cazó la revisión independiente
+// de una ronda siguiente, ningún test lo tenía cubierto todavía)
+const eraNueva = esNueva.value
+const guardada = await persistirBorrador({ navegar: false }) // adentro: `eraNueva` de nuevo
+const res = await useApiFetch(`${apiUrl}/compras/${guardada.id}/confirmar`, { method: 'POST' })
+llenarDesde(res)
+if (eraNueva) await router.replace(`/compras/${res.id}`) // nunca corre si el POST de arriba tira
+
+// ✅ el método (POST/PATCH) y CUÁNDO navegar los decide si esta instancia YA
+// tiene la compra (`compra.value?.id`, lo que deja `llenarDesde`) — nunca la
+// URL — y se navega SIEMPRE que este guardado haya sido el que creó la fila,
+// pase lo que pase con el paso siguiente
+const creaAhora = !compra.value?.id
+const guardada = await persistirBorrador({ navegar: false }) // adentro: mismo `compra.value?.id`
+try {
+  const res = await useApiFetch(`${apiUrl}/compras/${guardada.id}/confirmar`, { method: 'POST' })
+  llenarDesde(res)
+} catch (e) {
+  toast.add({ title: apiErrorMsg(e, 'Error al confirmar la recepción'), color: 'error' })
+} finally {
+  if (creaAhora) await router.replace(`/compras/${guardada.id}`)
+}
+```
+
+**(b)**: `<NuxtPage>` sin `key` propio (`app.vue`) usa `route.path` como clave por
+defecto — pasar de `/compras/nueva` a `/compras/<id>` la cambia, así que Nuxt
+**remonta** la página: una instancia nueva, con su propio `onMounted` que pide
+`GET /compras/<id>`. Si el `router.replace` que dispara ese remonte ocurre antes de
+que responda un segundo pedido de la MISMA operación (acá, `POST /confirmar`), el GET
+de la instancia nueva puede llegar después y leer el estado de ANTES de ese segundo
+pedido — la instancia que de verdad se ve en pantalla nunca se entera de la
+confirmación, aunque el POST haya funcionado y la vieja (ya desmontada) sí la
+procesó. Medido: 3 de 8 corridas de `e2e/compras/compras-dte.spec.ts`, con la máquina
+libre — no es carga, es que el GET remontado gana la carrera seguido. Pre-existente
+desde `951333cd` (antes de la carga del XML), invisible en los otros e2e de compras
+porque ninguno confirma directo desde `/compras/nueva`: o guardan primero y navegan
+aparte (`compras-por-pantalla.spec.ts`), o confirman una sola línea, con un
+`POST /confirmar` lo bastante rápido para ganarle casi siempre al GET remontado
+(`compras-presentacion.spec.ts`).
+
+📌 El primer arreglo (b.2) movió CUÁNDO se navega pero siguió decidiendo QUÉ hacer
+—POST o PATCH, navegar o no— por `esNueva`/la URL, que solo es cierta DESPUÉS de que
+el replace corrió. Con `navegar: false` eso deja de estar garantizado apenas el paso
+siguiente puede fallar: el guardado que sí funcionó queda "invisible" para cualquier
+reintento, porque la señal que el código mira (la URL) todavía no se movió. La regla
+general de (b), completa: una página cuyo parámetro de ruta cambia a mitad de una
+operación de varios pasos (1) **no navega hasta que el ÚLTIMO paso cerró** —nunca
+antes, aunque cada paso individual haya sido exitoso— y (2) **navega SIEMPRE que el
+paso que crea la fila haya funcionado**, sin importar si los pasos siguientes fallan
+después: el paso que crea la fila tiene que dejar a la página sabiendo que ya existe
+—un dato de la instancia, `compra.value?.id`— y esa señal, no la URL, es la que decide
+qué hacer el resto de la operación.
 
 ### ✅ Tailwind hardcoded en vez de tokens semánticos — AUTOMATIZADO
 

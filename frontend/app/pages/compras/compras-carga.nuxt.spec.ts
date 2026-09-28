@@ -37,10 +37,32 @@ const UNIDADES_CATALOGO = [
   { unidadMedidaId: 'u3', codigo: 'g', nombre: 'Gramo', magnitud: 'peso', factorBase: '1' },
 ]
 
-let enviados: { method?: string, body?: Record<string, unknown> }[] = []
+let enviados: { method?: string, url?: string, body?: Record<string, unknown> }[] = []
 let avisos: { title: string, color?: string }[] = []
 /** `'nueva'` (default) o el id de un borrador existente, para el caso del § 8. */
 let routeId = 'nueva'
+
+/**
+ * Solo para el test de la raza del remonte (abajo, "confirmar desde nueva:
+ * no pierde la confirmación..."): cuando está seteado, el GET de un borrador
+ * existente y el POST /confirmar quedan colgados de promesas que el test
+ * resuelve a mano, en el orden que decide, en vez de resolver solos. `estado`
+ * es "lo que el backend ya sabe": lo lee el GET AL MOMENTO DE LA LLAMADA (no
+ * al resolver), igual que una lectura real contra la base — y lo escribe el
+ * POST /confirmar cuando su propia promesa se resuelve.
+ */
+let razaRemonte: {
+  estado: 'borrador' | 'confirmada'
+  confirmarListo: Promise<void>
+  getListo: Promise<void>
+} | null = null
+
+/**
+ * Solo para el test "si /confirmar falla después de crear la compra" (abajo):
+ * hace que el `POST .../confirmar` rechace con un 400, como un stock
+ * insuficiente real.
+ */
+let confirmarFalla = false
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -100,6 +122,22 @@ mockNuxtImport('useApiFetch', () => {
     if (typeof url !== 'string') return Promise.resolve([])
     if (opts?.method === 'POST' && url.endsWith('/confirmar')) {
       enviados.push({ method: `POST ${url.split('/api').pop()}` })
+      if (confirmarFalla) {
+        return Promise.reject({ status: 400, statusCode: 400, data: { message: 'Sin stock suficiente' } })
+      }
+      if (razaRemonte) {
+        const raza = razaRemonte
+        return raza.confirmarListo.then(() => {
+          raza.estado = 'confirmada'
+          return {
+            id: 'compra-1', estado: 'confirmada', faltaCosto: true, fechaDocumento: '2026-09-15',
+            proveedorId: PROVEEDOR.id, proveedorNombre: PROVEEDOR.nombre,
+            tipoDocumentoCompraId: FACTURA.id, tipoDocumentoNombre: 'Factura', folio: '4521',
+            ubicacionId: BODEGA.id, ubicacionNombre: BODEGA.nombre, observacion: null,
+            descuentoTotal: null, total: null, lineas: [], cambios: [],
+          }
+        })
+      }
       return Promise.resolve({
         id: 'compra-1', estado: 'confirmada', faltaCosto: true, fechaDocumento: '2026-09-15',
         proveedorId: PROVEEDOR.id, proveedorNombre: PROVEEDOR.nombre,
@@ -110,6 +148,20 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (opts?.method === 'POST' && url.endsWith('/compras')) {
       enviados.push({ method: opts.method, body: opts.body })
+      return Promise.resolve({
+        id: 'compra-1', estado: 'borrador', faltaCosto: false, fechaDocumento: '2026-09-15',
+        proveedorId: PROVEEDOR.id, proveedorNombre: PROVEEDOR.nombre,
+        tipoDocumentoCompraId: FACTURA.id, tipoDocumentoNombre: 'Factura', folio: '4521',
+        ubicacionId: BODEGA.id, ubicacionNombre: BODEGA.nombre, observacion: null,
+        descuentoTotal: null, total: null, lineas: [],
+      })
+    }
+    // El PATCH de un borrador que YA existe (`compra.value?.id`, no la URL —
+    // ver el comentario de `persistirBorrador`). Antes del método (chequeo
+    // explícito) para no depender de `routeId`, que en el test de "confirmar
+    // falla" queda congelado en 'nueva' a propósito.
+    if (opts?.method === 'PATCH') {
+      enviados.push({ method: 'PATCH', url, body: opts.body })
       return Promise.resolve({
         id: 'compra-1', estado: 'borrador', faltaCosto: false, fechaDocumento: '2026-09-15',
         proveedorId: PROVEEDOR.id, proveedorNombre: PROVEEDOR.nombre,
@@ -131,6 +183,20 @@ mockNuxtImport('useApiFetch', () => {
     // Un borrador existente (§ 8, caso "presentación retirada"): la línea llega
     // sin unidad ni presentación.
     if (url.includes(`/compras/${routeId}`) && routeId !== 'nueva') {
+      if (razaRemonte) {
+        const raza = razaRemonte
+        // Snapshot AHORA (cuando esta instancia nueva pide el id, como el
+        // navegador real): lo que el backend ya sabía en ese instante, no lo
+        // que sepa cuando la respuesta llegue.
+        const estadoAlLlamar = raza.estado
+        return raza.getListo.then(() => ({
+          id: routeId, estado: estadoAlLlamar, faltaCosto: false, fechaDocumento: '2026-09-15',
+          proveedorId: PROVEEDOR.id, proveedorNombre: PROVEEDOR.nombre,
+          tipoDocumentoCompraId: FACTURA.id, tipoDocumentoNombre: 'Factura', folio: '4521',
+          ubicacionId: BODEGA.id, ubicacionNombre: BODEGA.nombre, observacion: null,
+          descuentoTotal: null, total: null, lineas: [], cambios: [],
+        }))
+      }
       return Promise.resolve({
         id: routeId, estado: 'borrador', faltaCosto: false, fechaDocumento: '2026-09-15',
         proveedorId: PROVEEDOR.id, proveedorNombre: PROVEEDOR.nombre,
@@ -195,6 +261,8 @@ describe('compras/[id] — carga del borrador', () => {
     enviados = []
     avisos = []
     routeId = 'nueva'
+    razaRemonte = null
+    confirmarFalla = false
   })
 
   it('muestra el total de la línea al lado, para comparar con el papel', async () => {
@@ -320,6 +388,164 @@ describe('compras/[id] — carga del borrador', () => {
     // Primero se guarda lo que está en pantalla, después se confirma esa compra.
     expect(enviados.map(e => e.method)).toEqual(['POST', 'POST /compras/compra-1/confirmar'])
     wrapper.unmount()
+  })
+
+  /**
+   * `<NuxtPage>` no tiene `key` propio (`app.vue`): su clave por defecto es
+   * `route.path`, así que pasar de `/compras/nueva` a `/compras/<id>` la
+   * cambia y Nuxt REMONTA la página — una instancia nueva, con su propio
+   * `onMounted` que pide `GET /compras/<id>`. Si esa navegación (el
+   * `router.replace` de `persistirBorrador`) ocurre ANTES de que responda
+   * `POST /confirmar`, el GET de la instancia nueva puede llegar DESPUÉS: lee
+   * el borrador que el backend todavía tenía en ese momento, y esa es la
+   * ÚLTIMA escritura que gana en la instancia que de verdad se ve en
+   * pantalla — la vieja, que sí mostró "confirmada", ya no está montada.
+   * Mismo mecanismo que documenta `docs/agent/anti-patterns.md`.
+   *
+   * Esta instancia mounted-a-mano simula ese remonte: el `router.replace`
+   * real (espiado, igual que `espiarReplace`) monta una segunda `CompraCarga`
+   * con el id ya asignado, y las dos respuestas (`/confirmar` y el GET de la
+   * instancia nueva) quedan controladas a mano para que el test decida el
+   * orden en que llegan, sin depender de que la corrida real gane o pierda
+   * la raza.
+   */
+  it('confirmar desde nueva: la compra queda confirmada aunque el GET del id remontado llegue después', async () => {
+    let resolverConfirmar!: () => void
+    const confirmarListo = new Promise<void>((r) => { resolverConfirmar = r })
+    let resolverGet!: () => void
+    const getListo = new Promise<void>((r) => { resolverGet = r })
+    razaRemonte = { estado: 'borrador', confirmarListo, getListo }
+
+    const wrapper = await montar()
+    await emitir(selectConOpcion(wrapper, PROVEEDOR.id), PROVEEDOR.id)
+    await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
+    await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
+    await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
+    await emitir(selectConOpcion(wrapper, HARINA.id), HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+    await emitir(precioInput(wrapper), '1000')
+
+    // Espía el router REAL de la instancia montada (mismo mecanismo que
+    // `espiarReplace`), pero acá el reemplazo SIMULA el remonte de
+    // `<NuxtPage>`: desmonta la instancia vieja (como el navegador real, que
+    // NUNCA deja dos instancias de la misma página vivas a la vez) y monta
+    // una `CompraCarga` nueva con el id ya asignado, en vez de solo anotar la
+    // llamada. La promesa de `confirmarRecepcion` de la instancia vieja sigue
+    // corriendo igual — desmontar no cancela un `async function` en JS, ni en
+    // este test ni en el navegador real.
+    let wrapperRemontado: Wrapper | null = null
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const router = (wrapper.vm as any).$router
+    // `mockImplementationOnce`, no `mockImplementation`: montar la instancia
+    // nueva dispara su propia navegación interna contra este MISMO router
+    // real compartido (`espiarReplace` ya lo advierte), y un mock que
+    // reacciona a TODO `replace` futuro remonta de nuevo dentro de ese mismo
+    // remonte — recursión infinita (medido). Solo el PRIMER `replace` (el de
+    // `confirmarRecepcion`) simula el remonte; los que dispare Nuxt por su
+    // cuenta después pasan por el router real, sin efecto en el test.
+    vi.spyOn(router, 'replace').mockImplementationOnce(async (to: unknown) => {
+      routeId = String(to).split('/').pop()!
+      wrapper.unmount()
+      wrapperRemontado = await montar()
+    })
+
+    await wrapper.find('[data-qa="compra-confirmar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    ;(document.body.querySelector('[data-qa="compra-confirmar-si"]') as HTMLButtonElement).click()
+    // Suficiente para que, si el código navega ANTES de confirmar (HEAD), el
+    // replace ya haya remontado la instancia nueva y su GET ya haya quedado
+    // colgado de `getListo` — y para que, si navega DESPUÉS (fix), todavía
+    // NO haya remontado nada.
+    await new Promise(r => setTimeout(r, 150))
+
+    // Responde primero /confirmar, como en la corrida real que gatilla el
+    // bug: la instancia vieja (o, con el fix, la única instancia) se entera
+    // de la confirmación antes de que el GET remontado responda.
+    resolverConfirmar()
+    await new Promise(r => setTimeout(r, 150))
+    // Y recién ahora el GET remontado: con el bug de HEAD ya estaba colgado
+    // desde antes de confirmar (lee "borrador"); con el fix recién se pidió
+    // después de confirmar (lee "confirmada").
+    resolverGet()
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(wrapperRemontado, 'el replace debía remontar una instancia nueva').toBeTruthy()
+    expect(avisos.map(a => a.title)).toContain('Recepción confirmada: la mercadería ya entró al stock')
+    expect(wrapperRemontado!.find('[data-qa="compra-confirmada"]').exists()).toBe(true)
+
+    // `wrapper` ya se desmontó dentro del espía de `replace`, arriba.
+    wrapperRemontado!.unmount()
+    razaRemonte = null
+  })
+
+  /**
+   * Ronda 2 de revisión (BLOQUEA real): con `navegar: false`, el método
+   * (POST/PATCH) de `persistirBorrador` seguía decidiéndose por `esNueva`
+   * (la URL) — y la URL solo se actualiza cuando `router.replace` corre. Si
+   * `/confirmar` falla DESPUÉS de que el `POST /compras` ya creó el
+   * borrador, la URL se queda en `/compras/nueva` (con el borrador YA
+   * creado) y un "Guardar"/"Confirmar" siguiente volvía a mandar OTRO `POST
+   * /compras` — un borrador duplicado. "Sin documento" no tiene folio, así
+   * que el 409 de folio repetido tampoco lo frena (`compras.service.ts:1979`).
+   *
+   * El fix decide por `compra.value?.id` (lo que deja `llenarDesde`, no la
+   * URL) y, en `confirmarRecepcion`, hace el `router.replace` SIEMPRE que la
+   * compra se haya creado en esta operación — funcione o no `/confirmar` —
+   * para que la URL nunca quede desincronizada de lo que el backend ya
+   * tiene.
+   */
+  it('si /confirmar falla después de crear la compra, el siguiente "Guardar" hace PATCH (no otro POST) y la URL queda sincronizada', async () => {
+    confirmarFalla = true
+
+    const wrapper = await montar()
+    await emitir(selectConOpcion(wrapper, PROVEEDOR.id), PROVEEDOR.id)
+    await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
+    await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
+    await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
+    await emitir(selectConOpcion(wrapper, HARINA.id), HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+
+    // Espía el router REAL de la instancia (mismo mecanismo que
+    // `espiarReplace`), solo para anotar a dónde termina navegando —
+    // `mockImplementationOnce`: acá no hace falta más de una llamada, y
+    // dejar pasar cualquier llamada extra al router real es más seguro que
+    // reaccionar a todas (ver la nota de recursión en el test de arriba).
+    const replaceLlamadas: string[] = []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const router = (wrapper.vm as any).$router
+    vi.spyOn(router, 'replace').mockImplementationOnce(async (to: unknown) => {
+      replaceLlamadas.push(String(to))
+    })
+
+    await wrapper.find('[data-qa="compra-confirmar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    ;(document.body.querySelector('[data-qa="compra-confirmar-si"]') as HTMLButtonElement).click()
+    await new Promise(r => setTimeout(r, 30))
+
+    // Un solo POST /compras (la compra se creó), el intento de /confirmar,
+    // el error avisado, y la URL igual sincronizada aunque confirmar falló.
+    expect(enviados.filter(e => e.method === 'POST')).toHaveLength(1)
+    expect(enviados.map(e => e.method)).toContain('POST /compras/compra-1/confirmar')
+    expect(avisos.map(a => a.title)).toContain('Sin stock suficiente')
+    expect(replaceLlamadas).toEqual(['/compras/compra-1'])
+
+    // El siguiente "Guardar borrador" (no confirmar de nuevo): con la compra
+    // YA creada, tiene que ser un PATCH. El mock de `useRoute` de este
+    // archivo no seguiría un `router.replace` real aunque el código
+    // decidiera por la URL (queda "congelado" en `routeId`, como el
+    // navegador real durante la ventana entre que se llama el replace y
+    // `<NuxtPage>` termina de remontar) — así que decidir por `esNueva`
+    // acá mandaría OTRO POST y duplicaría el borrador.
+    await wrapper.find('form').trigger('submit')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(enviados.filter(e => e.method === 'POST')).toHaveLength(1)
+    const patch = enviados.find(e => e.method === 'PATCH')
+    expect(patch, 'el siguiente guardado debía ser un PATCH, no otro POST').toBeTruthy()
+    expect(patch!.url).toContain('/compras/compra-1')
+
+    wrapper.unmount()
+    confirmarFalla = false
   })
 })
 

@@ -606,26 +606,50 @@ function armarBody() {
 }
 
 /**
- * Guarda lo que está en pantalla (POST si es nueva, PATCH si no) y devuelve la
- * compra guardada, o `null` si falló, con el error ya mostrado. La usan
- * "Guardar borrador" y "Confirmar recepción": confirmar sin guardar primero
- * recibiría lo último guardado, no lo que el encargado ve.
+ * Guarda lo que está en pantalla (POST si esta instancia todavía no tiene una
+ * compra persistida, PATCH si no) y devuelve la compra guardada, o `null` si
+ * falló, con el error ya mostrado. La usan "Guardar borrador" y "Confirmar
+ * recepción": confirmar sin guardar primero recibiría lo último guardado, no
+ * lo que el encargado ve.
+ *
+ * El método lo decide `compra.value?.id` —lo que deja `llenarDesde` apenas el
+ * primer POST responde—, **nunca** `esNueva`/la URL: si `router.replace` no
+ * llegó a correr todavía (`navegar: false`, y `/confirmar` falló después —
+ * ver `confirmarRecepcion`), la URL puede seguir en `/compras/nueva` con la
+ * compra YA CREADA. Decidir por la URL ahí mandaría un segundo `POST` y
+ * dejaría un borrador duplicado (bug real, visto en revisión — antes de esto
+ * el replace siempre corría adentro de esta función, así que la URL y
+ * `compra.value` nunca se desincronizaban).
+ *
+ * `navegar` (default `true`): si esta instancia recién creó la compra, el
+ * `router.replace` de acá abajo cambia `route.params.id` y `<NuxtPage>` (sin
+ * `key` propio, `app.vue`) REMONTA la página — una instancia nueva que pide
+ * de nuevo `GET /compras/<id>`. "Guardar borrador" no manda nada más
+ * después, así que no importa. "Confirmar recepción" sí — un `POST
+ * /confirmar` — y si ese GET remontado responde después de ese POST, pisa la
+ * confirmación con el borrador que leyó antes (`docs/agent/anti-patterns.md`,
+ * "leer una respuesta asíncrona…", cara b). Por eso `confirmarRecepcion` pasa
+ * `navegar: false` acá y hace el replace ella misma, recién cuando el
+ * `/confirmar` ya cerró (haya funcionado o no).
  */
-async function persistirBorrador(): Promise<CompraDetalle | null> {
+async function persistirBorrador({ navegar = true } = {}): Promise<CompraDetalle | null> {
   folioError.value = null
   try {
     const body = armarBody()
-    const eraNueva = esNueva.value
-    const res = eraNueva
+    const creaAhora = !compra.value?.id
+    const res = creaAhora
       ? await useApiFetch<CompraDetalle>(`${apiUrl}/compras`, { method: 'POST', body })
       : await useApiFetch<CompraDetalle>(`${apiUrl}/compras/${compra.value!.id}`, { method: 'PATCH', body })
     llenarDesde(res)
     // Antes del replace: el guard de salida (§ 6) solo frena con `origenDte`
     // puesto, y si no se limpia acá bloquearía esta misma navegación que el
     // guardado dispara — la compra ya se guardó y no hay nada que perder.
+    // Se limpia SIEMPRE, no solo cuando `navegar` es `true`: el guard tiene
+    // que estar destrabado para el replace que `confirmarRecepcion` haga por
+    // su cuenta más tarde, aunque este guardado no navegue nada.
     origenDte.value = null
     apartadas.value = []
-    if (eraNueva) await router.replace(`/compras/${res.id}`)
+    if (creaAhora && navegar) await router.replace(`/compras/${res.id}`)
     return res
   } catch (e: unknown) {
     const status = (e as { status?: number, statusCode?: number }).status
@@ -670,16 +694,34 @@ async function confirmarRecepcion() {
   if (!puedeConfirmar.value || guardando.value) return
   guardando.value = true
   try {
-    const guardada = await persistirBorrador()
+    // Si esta instancia todavía no tiene una compra persistida, el guardado
+    // de abajo es el que la CREA — y la URL tiene que terminar apuntando a
+    // ella pase lo que pase con `/confirmar` después: si confirmar falla, la
+    // compra igual quedó guardada, y dejar la URL en `/compras/nueva` deja a
+    // un "Guardar"/"Confirmar" siguiente sin saber que ya existe (manda OTRO
+    // POST y duplica el borrador — ver `persistirBorrador`).
+    const creaAhora = !compra.value?.id
+    // `navegar: false`: acá abajo se decide cuándo, no `persistirBorrador`.
+    const guardada = await persistirBorrador({ navegar: false })
     if (!guardada) return
-    const res = await useApiFetch<CompraDetalle>(
-      `${apiUrl}/compras/${guardada.id}/confirmar`,
-      { method: 'POST' },
-    )
-    llenarDesde(res)
-    toast.add({ title: 'Recepción confirmada: la mercadería ya entró al stock', color: 'success' })
-  } catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al confirmar la recepción'), color: 'error' })
+    try {
+      const res = await useApiFetch<CompraDetalle>(
+        `${apiUrl}/compras/${guardada.id}/confirmar`,
+        { method: 'POST' },
+      )
+      llenarDesde(res)
+      toast.add({ title: 'Recepción confirmada: la mercadería ya entró al stock', color: 'success' })
+    } catch (e: unknown) {
+      toast.add({ title: apiErrorMsg(e, 'Error al confirmar la recepción'), color: 'error' })
+    } finally {
+      // Recién ACÁ, con `/confirmar` ya resuelto (haya funcionado o no): así
+      // ningún GET que el replace remonte puede quedar pisando una
+      // confirmación todavía en vuelo (el bug original), y si confirmar
+      // falló, la URL igual termina apuntando a la compra que SÍ se guardó
+      // — `origenDte` ya está en `null` desde `persistirBorrador`, así que el
+      // guard de salida no frena este replace.
+      if (creaAhora) await router.replace(`/compras/${guardada.id}`)
+    }
   } finally {
     guardando.value = false
     confirmarOpen.value = false
