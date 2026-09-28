@@ -208,14 +208,21 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
     Si hay algo más staged, o cambios sin stagear, el hook ve otro diff y el recibo que imprime no
     coincide nunca, ni reescribiéndolo. Para reproducirlo: stagear un `.vue` y un `.md`, escribir
     el recibo y hacer `git commit -m x <el .vue>`.
-  - **Para cerrarla hace falta el próximo caso con evidencia.** Hoy el hook solo compara dos
-    hashes. La propuesta es que, ante un rechazo, guarde el diff que vio en el git-dir, y que el
-    comando del recibo guarde también el diff. Con eso, un `diff` entre los dos muestra qué
-    cambió. Además, que el aviso diga cuándo el índice es temporal (commit con rutas o con `-a`).
-    Como toca `.githooks/`, no se puede probar commiteando desde un worktree.
-  - **Aparte, de la misma familia:** `.claude/skills/verify-feature/SKILL.md:204` todavía escribe
-    el recibo en `.git/verify-feature.receipt` literal. En un worktree `.git` es un archivo, así
-    que falla. El hook usa `$(git rev-parse --git-dir)` desde el 2026-08-27 (`f5e15588`).
+  - **Instrumentado el 2026-09-28, a pedido del owner; sigue abierta hasta el próximo caso.** El
+    comando del recibo (el mismo en el hook y en el skill `verify-feature`) guarda también el diff
+    del que sale, en `<git-dir>/verify-feature.receipt.diff`. Cada rechazo deja en
+    `<git-dir>/verify-feature-rechazos/<fecha>-<pid>/` tres archivos: `hook.diff` (lo que vio el
+    hook), `recibo.diff` (copia del diff del recibo en ese momento, antes de que una reescritura
+    lo pise) e `info.txt` (los dos hashes, `GIT_INDEX_FILE` y si el índice era temporal). Si el
+    índice es temporal, el aviso lo dice y pide stagear y commitear sin rutas ni `-a`. El
+    skill ya no escribe en `.git/` literal, que en un worktree falla.
+  - **Qué mirar la próxima vez que un recibo del mismo diff se rechace:** no reescribirlo
+    todavía. Correr el `diff` que imprime el hook entre `recibo.diff` y `hook.diff`:
+    - si **difieren**, el contenido cambió entre la escritura y el hook, y ese diff dice qué;
+    - si son **iguales** y los hashes no, lo que falló fue el hash y no el diff. Hay que volver a
+      hashear `recibo.diff` y compararlo con el `hash del recibo` de `info.txt`.
+    Anotar lo encontrado acá con la ruta de la evidencia. Ojo: la evidencia muere con el
+    worktree.
 
 - [ ] **El aviso de error del login aparece en el registro, y al revés** (frontend, medido el
   2026-09-27; lo cazó la revisión independiente del cierre de *"Si el login no puede entrar a

@@ -201,8 +201,14 @@ toca services de backend o `.vue` de `pages`/`components` y no hay un recibo par
 **ese diff exacto**:
 
 ```bash
-git diff --cached | git hash-object --stdin > .git/verify-feature.receipt
+d="$(git rev-parse --git-dir)" && git diff --cached > "$d/verify-feature.receipt.diff" && git hash-object --stdin < "$d/verify-feature.receipt.diff" > "$d/verify-feature.receipt"
 ```
+
+Va al git-dir y no a `.git/` literal: en un worktree `.git` es un archivo. Guarda también
+el diff del que sale, para que un rechazo se pueda comparar contra lo que vio el hook: el
+hook deja su evidencia en `<git-dir>/verify-feature-rechazos/` y dice con qué `diff` mirarla.
+Si el recibo era de este mismo diff y aun así se rechaza, **no reescribirlo hasta pasar**:
+comparar, reportarlo y anotarlo en `docs/agent/pendientes.md` § 2.
 
 El recibo se emite **después** de que los revisores devuelvan LIMPIO, nunca antes.
 Si después de revisar cambiás algo y lo stageás, el hash deja de coincidir y hay
