@@ -279,6 +279,9 @@ test('el XML pre-llena, aprende el código del proveedor y avisa cuando la factu
   const lineaCoca = lineas.nth(0)
   await expect(lineaCoca.locator('[data-qa="compra-dte-por-asociar"]')).toBeVisible()
   await expect(lineaCoca.locator('[data-qa="compra-dte-texto"]')).toContainText('COCA COLA 350ML CJ12')
+  // La Coca trae 5% de descuento de línea en el XML (PLANTILLA_XML): el precio
+  // ya lo incluye, y la línea lo dice.
+  await expect(lineaCoca.locator('[data-qa="compra-dte-ajuste"]')).toBeVisible()
   await elegirPorPlaceholder(lineaCoca, 'Selecciona un producto', coca.nombre, { buscar: true })
   await elegirUnidadDteLinea(lineaCoca, 'Caja (12)')
 

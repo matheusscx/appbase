@@ -1003,6 +1003,9 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
               <p v-if="linea.dte?.nota" class="text-xs text-muted" data-qa="compra-dte-nota">
                 {{ linea.dte.nota }}
               </p>
+              <p v-if="linea.dte?.conAjusteDeLinea" class="text-xs text-muted" data-qa="compra-dte-ajuste">
+                Incluye el descuento o recargo de la línea de la factura
+              </p>
 
               <UFormField
                 v-if="linea.modoInventario === 'serie'"

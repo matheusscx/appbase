@@ -237,10 +237,14 @@ seguridad.
 4. Sin bloqueo, el formulario de siempre se pre-llena: proveedor, tipo de documento, folio, fecha
    del documento. **La ubicación ("Entra a") nunca se pre-llena** — ni con el XML ni con la carga
    manual: a qué local o bodega entra la mercadería lo decide el encargado, la factura no lo dice.
-5. Cada línea del XML llega con su texto (*"COCA COLA 350ML CJ12 · 10 CJ · $9.600"*) y una
-   insignia: **"calzó por código"** si `codigos_proveedor` ya la conoce (producto y
-   unidad/presentación pre-llenados) o **"por asociar"** si no (producto y unidad vacíos, cantidad
-   y precio del XML). Elegir el producto en una línea del XML **no** hereda su unidad base
+5. Cada línea del XML llega con su texto (*"COCA COLA 350ML CJ12 · 10 CJ · $9.600"*, con el
+   `PrcItem` de la factura) y una insignia: **"calzó por código"** si `codigos_proveedor` ya la
+   conoce (producto y unidad/presentación pre-llenados) o **"por asociar"** si no (producto y
+   unidad vacíos, cantidad y precio del XML). **El precio unitario editable** es `MontoItem ÷
+   QtyItem`, que puede no ser igual al `PrcItem` del texto cuando la línea trae descuento o
+   recargo (`DescuentoMonto`/`RecargoMonto`, Formato DTE pág. 41): ahí la línea muestra además
+   "Incluye el descuento o recargo de la línea de la factura" para explicar la diferencia entre
+   los dos números. Elegir el producto en una línea del XML **no** hereda su unidad base
    (`onSeleccionarItem`): "3 CJ" no es "3 unidad", y la real sale de elegirla — salvo serie/lote,
    que solo admiten la base de todos modos.
 6. **"No es mercadería"** aparta una línea (flete, garantía de envase…) a una sección plegable,

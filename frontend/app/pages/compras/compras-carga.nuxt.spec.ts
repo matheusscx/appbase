@@ -774,6 +774,26 @@ describe('compras/[id] — cargar desde el XML (tarea 4)', () => {
     wrapper.unmount()
   })
 
+  it('la línea con descuento de línea (Coca, $9.600 → $9.120) avisa que el precio ya lo incluye; la Fanta (sin ajuste) no', async () => {
+    const wrapper = await montar()
+    await emitirCargar(wrapper, {
+      documento: documentoAndina(),
+      lectura: respuestaAndina(),
+      proveedorId: PROVEEDOR_ANDINA.id,
+      rutProveedor: null,
+    })
+
+    // Coca es la línea 0 (10 CJ12 a $9.600 con $4.800 de descuento de línea,
+    // fixture andina-33.xml: MontoItem 91.200 ÷ 10 = $9.120 c/u). Fanta (línea
+    // 1) no trae DescuentoMonto ni RecargoMonto.
+    const [lineaCoca, lineaFanta] = wrapper.findAll('[data-qa="compra-linea"]')
+    expect(lineaCoca!.find('[data-qa="compra-dte-ajuste"]').exists()).toBe(true)
+    expect(lineaCoca!.find('[data-qa="compra-dte-ajuste"]').text())
+      .toBe('Incluye el descuento o recargo de la línea de la factura')
+    expect(lineaFanta!.find('[data-qa="compra-dte-ajuste"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('F1: el FLETE sin aprender bloquea el descuento (vacío, con aviso) hasta que se aparta — recién ahí calza', async () => {
     const wrapper = await montar()
     await emitirCargar(wrapper, {

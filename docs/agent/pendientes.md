@@ -51,6 +51,31 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   tenants), que afirme que su venta no suma al `pedido` de ningún garzón de Paris. No es un
   invariante roto: la cuenta ajena ya rebota con 404 al escribir (`getCuentaAbiertaConLock`).
 
+- [ ] **`resolverProveedor` lee la misma fila de `terceros` dos veces cuando llega
+  `proveedorId`** (backend, hallazgo de la revisión final del frente *"Compras: pre-llenar la
+  compra con el XML de la factura electrónica (DTE)"*, 2026-09-28). Con `proveedorId` en el
+  body, `assertRutDelProveedor` hace `SELECT nombre, rut, rut_fiscal FROM terceros WHERE
+  tenant_id = $1 AND tercero_id = $2 …` (`backend/src/modules/compras/lectura-dte.service.ts:218`),
+  y `resolverProveedor` la llama y a continuación repite la consulta por el mismo `tercero_id` y
+  `tenant_id` (`:426`) solo para traer `nombre`. Son dos consultas fijas, no un N+1 (no crecen
+  con las líneas de la factura): mergeable en una sola que devuelva también lo que
+  `assertRutDelProveedor` necesita.
+
+- [ ] **`pages/compras/[id].vue` quedó en ~1225 líneas después de la pieza del XML** (frontend,
+  mismo hallazgo). La lógica ya vive en `useDte.ts` (spec § 6, "dónde vive la lógica"): lo que
+  creció fue el cableado — el modal, el reemplazo de lo cargado, las líneas por asociar/apartadas
+  y el guard de salida. Candidato: extraer ese bloque (franja + líneas del XML + apartadas) a un
+  componente propio, sin tocar la lógica de `useDte.ts`.
+
+- [ ] **Ningún test afirma el estado del formulario DESPUÉS de que `persistirBorrador`
+  resuelve** (frontend, mismo hallazgo). Hoy lo único que protege que el `descuentoTotal` que
+  devuelve el servidor gane sobre el que se precargó desde el XML es el orden síncrono dentro de
+  `persistirBorrador`: `llenarDesde(res)` (`frontend/app/pages/compras/[id].vue:643`) seguido de
+  `origenDte.value = null` (`:650`). Si alguien invierte ese orden o cambia qué pisa a qué, ningún
+  test de `compras-carga.nuxt.spec.ts` lo cacha. Falta un test que dispare `guardar()`, resuelva
+  el POST/PATCH mockeado con un `descuentoTotal` distinto del precargado, y afirme que el
+  formulario queda con el valor del servidor.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -199,6 +224,21 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   lo cace — ninguno de los dos archivos de test (`useDte.spec.ts`,
   `lectura-dte.service.spec.ts`) prueba que las dos funciones den la misma clave para la misma
   entrada, cada una prueba la suya por separado.
+
+- [ ] **El mutante "leer claves de `codigos_proveedor` sin `cp.eliminado_el IS NULL`" no tiene
+  e2e de comportamiento** (backend, hallazgo de la revisión final del frente *"Compras:
+  pre-llenar la compra con el XML de la factura electrónica (DTE)"*, 2026-09-28). El filtro está
+  en `resolverAsociaciones` (`backend/src/modules/compras/lectura-dte.service.ts:541`) y solo lo
+  cubre un test unitario sobre el SQL literal
+  (`backend/src/modules/compras/lectura-dte.service.spec.ts:150`,
+  `expect(sqlAsociaciones).toMatch(/cp\.eliminado_el IS NULL/)`). Un e2e de comportamiento
+  dependería de qué fila devuelve Postgres primero entre la viva y la borrada con la misma
+  clave — orden no determinístico sobre el heap, no algo que un `ORDER BY` arregle porque el
+  invariante es "la borrada no debería estar ni compitiendo". **Medir antes de proponer:** si
+  hay alguna forma de armar el caso de forma determinística (por ejemplo, con solo una fila viva
+  y una borrada bien separadas y verificando que la respuesta nunca trae el destino de la
+  borrada, sin depender del orden entre dos vivas); si no la hay, documentar por qué el test
+  unitario sobre el SQL es lo mejor disponible acá y cerrar la entrada con esa conclusión.
 
 ## 3. Ya decidido, falta construir
 
@@ -983,6 +1023,17 @@ prohíbe.
   pregunta **fiscal** y no se decidió en el diseño (spec `2026-09-18-dashboard-inicio-design.md`
   § 4.1): va en su propio frente, con su propia sesión y su propia verificación — no se toma
   de arrastre de otra tarea (`CLAUDE.md`, ADR-010).
+
+- [ ] **Dos textos de pantalla del XML del DTE no tienen redacción en la spec de diseño**
+  (frontend, hallazgo de la revisión final del frente *"Compras: pre-llenar la compra con el
+  XML de la factura electrónica (DTE)"*, 2026-09-28;
+  `docs/superpowers/specs/2026-09-27-compras-xml-dte-design.md` no fija ninguno de los dos
+  literalmente, solo describe la conducta). El aviso de que el descuento no se carga porque hay
+  líneas sin precio — `'La factura trae un descuento, pero hay líneas sin precio: revisalas para
+  que se cargue'` (`frontend/app/composables/useDte.ts:357`) — y la confirmación de salir sin
+  guardar — `'Vas a salir sin guardar la factura que cargaste desde el XML. ¿Seguro?'`
+  (`frontend/app/pages/compras/[id].vue:759`) — los eligió quien implementó. **La pregunta:**
+  ¿los confirma el owner tal cual, o los reescribe?
 
 ## 5. Carreras de concurrencia
 
