@@ -151,51 +151,56 @@ filtro de `eliminado_el`? ¿El `CHECK` del catálogo acepta exactamente los tres
 
 ### Task 2: Backend — pagar y anular un pago
 
-> **Estado al pausar (2026-09-29, pedido del owner):** implementada, **stageada sin commitear**
-> en el worktree `compras-deuda-proveedor` (20 archivos). Revisión independiente LIMPIO
-> (domain-reviewer tras una ronda de arreglo: la lectura de `terceros` al anular no filtraba
-> tenant; api-security LIMPIO). Backend unit 3039/3039; `compras-pagos.e2e-spec.ts` solo 13/13.
-> **El gate NO está verde:** en el e2e completo, 73 fallos en siete suites ajenas (409 al abrir
-> caja): `compras-pagos.e2e-spec.ts` abre una caja con un usuario del seed y nunca la cierra, y
-> su helper (`~línea 188-196`) reusa la caja ya abierta si `POST /caja/abrir` no da 201 y lee el
-> body sin mirar el status (el pre-commit lo bloquea). **Sigue:** que ese spec abra la caja con
-> un usuario propio o la cierre en `afterAll`, que su helper afirme el status, re-revisión
-> acotada, e2e completo y `npm test` del frontend en turno (el de salones falló dos veces por
-> carga), y commit. El arreglo del seed de `compras.paga` ya está commiteado aparte (8805e996).
+> **Hecha (2026-09-29), `d6d45c66`**, con el arreglo del seed aparte en `8805e996`. Gate: backend
+> unit 3039/3039, e2e completo 1243/0 (6 skipped); frontend 1563/1563. Revisión LIMPIO tras cinco
+> rondas. Lo que cambió en el camino, para el que siga: (1) el fixture `compras.paga` no tenía su
+> par usuario→tenant; (2) el spec de pagos abría una caja con `admin.paris` y nunca la cerraba
+> —73 fallos de 409 en siete suites ajenas—: ahora paga `compras.paga` desde su propia caja (el
+> rol `Compras · Paga` suma `MiCaja`) y el `afterAll` la cierra en `try`/`finally`; (3)
+> `items-pausados.e2e-spec.ts` listaba la primera página de 100 productos de todo el tenant y
+> se filtra por la marca de sus propios ítems. Dos fallos de concurrencia que aparecieron bajo
+> carga no se reprodujeron en la corrida del gate; el DDL que `synchronize` corre en cada
+> arranque es previo y ajeno (índices creados por el seeder), anotado por la orquestadora en
+> `pendientes.md` § 2.
 
 **Intención:** poder registrar un pago —repartido, parcial, anticipo o con saldo a favor—,
 que el efectivo salga de la caja de quien paga con la misma validación y el mismo rastro que
 la salida manual, y poder anularlo según las decisiones 6 y 6c.
 
-- [ ] **Movido desde la tarea 1** (ruling del controlador): las entidades `pagos_proveedor` y
+- [x] **Movido desde la tarea 1** (ruling del controlador): las entidades `pagos_proveedor` y
   `pago_proveedor_aplicaciones` y la columna `movimientos_caja.pago_proveedor_id` (spec § 3),
   registradas en `app.module.ts` (array `entities`), con sus `CHECK`s de montos > 0, los
   índices de sus FKs y su entrada en `startup-pos.sql`.
-- [ ] **Movido desde la tarea 3** (ruling del controlador): `GET /compras/pagos?proveedorId=`
+- [x] **Movido desde la tarea 3** (ruling del controlador): `GET /compras/pagos?proveedorId=`
   (`Pagar`), con sus aplicaciones; y `POST /compras/pagos` devuelve el pago con sus
   aplicaciones. Sin una lectura, los e2e de esta tarea solo podrían afirmar por SQL. El pago se
   expone también como método que corre en una transacción dada, para que la tarea 3 lo reuse
   al confirmar.
-- [ ] **Primer paso, un spike acotado:** cómo se componen `IdempotenciaService.ejecutar`,
+- [x] **Primer paso, un spike acotado:** cómo se componen `IdempotenciaService.ejecutar`,
   `db.transaccion` y `CajaService.conRastroDeRechazo` para que el 422 deje su fila en el rastro
   y el reintento con la misma clave reproduzca. Se decide mirando cómo lo hace
   `ventas.service.ts` (~1500) y se anota el orden elegido acá antes de seguir.
-- [ ] `OperacionIdempotente` suma `'compras.pago'`; la huella se arma a mano.
-- [ ] `GET /compras/medios-pago` (`Pagar`): los medios habilitados del tenant, con
+  **Elegido:** `conRastroDeRechazo( idempotencia.ejecutar( db.transaccion( pagarEnTransaccion ) ) )`.
+  El rastro va afuera de todo: cuando el 422 lo dispara, la transacción ya se deshizo (reclamo
+  de la clave incluido), así que la fila se escribe sin transacción viva y el reintento con la
+  misma clave corre de verdad. La tarea 3 llama a `pagarEnTransaccion(manager, tenantId,
+  usuarioId, dto)` dentro de la transacción de confirmar y decide ella el envoltorio.
+- [x] `OperacionIdempotente` suma `'compras.pago'`; la huella se arma a mano.
+- [x] `GET /compras/medios-pago` (`Pagar`): los medios habilitados del tenant, con
   `esEfectivo`.
-- [ ] `POST /compras/pagos` (`Pagar`, `Idempotency-Key`): validaciones, fondeo (saldo a favor
+- [x] `POST /compras/pagos` (`Pagar`, `Idempotency-Key`): validaciones, fondeo (saldo a favor
   primero, pagos más viejos primero, después el nuevo) y efectivo según spec § 5.1. Lo que
   `CajaService` tenga que exponer para esto se expone sin cambiar su conducta.
-- [ ] `POST /compras/pagos/:id/anular` (`Pagar`): spec § 5.2, con la entrada reversa solo con
+- [x] `POST /compras/pagos/:id/anular` (`Pagar`): spec § 5.2, con la entrada reversa solo con
   la caja abierta y solo para su dueño.
-- [ ] Locks en el orden de spec § 11, con unitarios sobre el `ORDER BY`.
-- [ ] `deuda.ts`: `fondear(...)` puro, con unitarios (saldo primero, más viejo primero, una
+- [x] Locks en el orden de spec § 11, con unitarios sobre el `ORDER BY`.
+- [x] `deuda.ts`: `fondear(...)` puro, con unitarios (saldo primero, más viejo primero, una
   aplicación partida en dos, el sobrante a favor).
-- [ ] E2E (spec § 12): Don Pedro; anticipo; usar saldo con `monto` 0; efectivo sin caja
+- [x] E2E (spec § 12): Don Pedro; anticipo; usar saldo con `monto` 0; efectivo sin caja
   (400), sin plata (422 + fila `pago_proveedor` en el rastro, sin el esperado en el mensaje),
   con caja (el esperado baja); anular con caja abierta, cerrada y ajena (403); reintento con
   la misma clave (un pago); **403 con el rol real del bodeguero**; otro tenant (404).
-- [ ] Docs: `compras.md` (pagar y anular) y `gestion-cajas.md` (el camino nuevo en la tabla
+- [x] Docs: `compras.md` (pagar y anular) y `gestion-cajas.md` (el camino nuevo en la tabla
   del rastro, y la salida que genera un pago a proveedor).
 
 **Duda concreta para el revisor:** ¿el pago en efectivo pasa por **exactamente** la misma
