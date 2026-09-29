@@ -429,8 +429,11 @@ revisión independiente no lo pudo reproducir, con razón.
   ✅ **La pregunta aparece SIEMPRE que haya stock de por medio**, no solo en recetas y combos:
   también en el producto suelto, porque la botella puede volver rota. Una sola regla, sin
   excepción que explicar.
-  ⚠️ **Al construir:** la merma ya existe y **pide causa**, así que hay que definir con qué
-  causa entra la que nace de una devolución —o si se crea una— antes de escribir el flujo.
+  ✅ **La causa de esa merma es una fija, "Devolución", que crea el sistema en cada tenant**
+  (owner, 2026-09-29, en el selector interactivo de la orquestadora: eligió *A: una causa fija
+  "Devolución"*, recomendada, por sobre *B: el cajero elige una causa*). Así las devoluciones se
+  ven aparte en el reporte de mermas sin que nadie elija nada. Al construir: sembrarla al crear el
+  tenant, como el rol admin, y decidir si el tenant puede renombrarla o borrarla.
   Y sigue en pie que toca `movimientos_inventario` y el camino del reembolso de pasarela.
 
 - [ ] **Lo que quedó del frente del modo ciego, ya cerrado** (backend + producto; la entrada
@@ -664,11 +667,13 @@ revisión independiente no lo pudo reproducir, con razón.
   Lo que cambia es de dónde lee el servidor —de la foto que él mismo congeló, no de la
   carta de hoy—.
 
-  ⚠️ **Lo que la decisión NO contesta, y es lo primero que tiene que resolver la spec:**
-  el `precioBase` del ítem. La pregunta se hizo sobre el extra; la misma lógica aplicada al
-  plato diría que una hamburguesa pedida a $5.000 se cobra a $5.000 aunque la carta ya diga
-  $6.000, pero `cuenta_lineas` **no** guardaba hasta hoy el precio base congelado, así que
-  no es "leer la foto" sino agregarle un campo. Preguntar antes de asumir.
+  ✅ **El precio del plato también está congelado, y ya está construido:**
+  `cuenta_lineas.precio_unitario` guarda `precioBase + Σ precioExtra` al pedir la línea
+  (`dd54f81d`, con la cita del owner del 2026-08-30 en el docblock de
+  `cuenta-linea.entity.ts`). Esta nota decía que era la pregunta pendiente, y ya no lo era: la
+  orquestadora se la volvió a hacer al owner el 2026-09-29 sin verificar, y contestó lo mismo que
+  ya estaba hecho (*A: $5.000, el precio de cuando pidió*). Queda anotado para que no se
+  pregunte una tercera vez.
 
   ⚠️ **Y va solo, con el sistema quieto** (`CLAUDE.md`, primer punto de "Detenerse y
   preguntar"): toca `resolverPersonalizacionReceta` / `resolverPersonalizacionCombo`, que
@@ -700,10 +705,11 @@ revisión independiente no lo pudo reproducir, con razón.
   recetas del seed, porque sacarles una pieza los rompe para las demás suites. Los tests 20 a 23
   de `cuenta-precio-congelado.e2e-spec.ts` arman su propio catálogo — copiar de ahí.
 
-  ❓ **Y lo de siempre, aparte:** `useCalculoPrecios` se traga el 400 a propósito y
-  `lineaSubtotal` dibuja `—` en todas las líneas sin decir por qué. Que el composable diga
-  **qué línea** lo causó es una decisión chica y barata, independiente de todo lo de
-  arriba.
+  ✅ **Y aparte, decidido (owner, 2026-09-29):** `useCalculoPrecios` se traga el 400 a
+  propósito y `lineaSubtotal` dibuja `—` en todas las líneas sin decir por qué. **La pantalla
+  tiene que marcar la línea que falló.** Cómo se decidió: en el selector interactivo de la
+  orquestadora eligió *A: que marque la línea que falló* (recomendada) por sobre *B: dejarlo
+  como está*. Es chico e independiente del resto de esta entrada.
 
 ### Los tres que dejó el frente del redondeo por país (2026-09-03)
 
@@ -1197,11 +1203,7 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   de turnos (Playwright es suite pesada). ⚠️ C no quedó descartada por el owner: se eligió A. Si
   alguna vez se abre el portón de CI de "Endurecimiento para producción", las dos conviven.
 
-## 4. Necesita que el owner conteste
-
-Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
-elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
-prohíbe.
+### Anular un plato devuelve lo que se consumió al venderlo (owner, 2026-09-29)
 
 - [ ] **Lo que se consume al anular un plato sale de lo que HOY dice el catálogo, no de lo que se
   pidió: un extra, una opción o un componente que ya no está se saltea sin movimiento, y el costo de
@@ -1241,10 +1243,18 @@ prohíbe.
     cambiado. Más trabajo; arregla la causa en vez de marcarla.
   - **C — aceptarlo** y escribirlo en `docs/features/` como límite conocido. Cero trabajo; el
     número sigue saliendo bajo sin aviso.
-  ⚠️ Recomendación de la orquestadora para cuando se pregunte: **B** si el owner quiere el número
-  exacto, **A** si alcanza con saber que está incompleto. El motor de precios y lo fiscal no se
-  tocan en ninguna de las tres. Escribe en `movimientos_inventario`: la opción que elija va en su
-  propio frente.
+  ✅ **DECIDIDO (owner, 2026-09-29): B, congelar al vender.** Cómo se decidió: en el selector
+  interactivo de la orquestadora, con la escena del risotto, eligió *B* (recomendada) por sobre A
+  y C. Al vender se guarda lo que el plato consumió (la receta, los extras y las opciones de ese
+  momento), y anular devuelve eso aunque el catálogo haya cambiado. Es la misma idea que el
+  precio congelado de la línea (`dd54f81d`). El motor de precios y lo fiscal no se tocan.
+  Escribe en `movimientos_inventario`: va en su propio frente.
+
+## 4. Necesita que el owner conteste
+
+Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
+elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
+prohíbe.
 
 - [ ] **¿El vendido del día resta las notas de crédito?** (dashboard de inicio, bloque
   Ventas, `resumen-negocio.service.ts`) — hoy `GET /resumen-negocio/hoy` **excluye** las
