@@ -102,6 +102,26 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   el POST/PATCH mockeado con un `descuentoTotal` distinto del precargado, y afirme que el
   formulario queda con el valor del servidor.
 
+- [ ] **Declarar el índice único de `item_lote (item_id, codigo_lote)` que hoy existe solo en
+  `startup-pos.sql`** (backend, re-medido el 2026-09-28; antes estaba en la § 5 como carrera de
+  concurrencia). **La carrera que describía la entrada no existe:** el único `INSERT INTO item_lote`
+  del sistema está en `InventarioService.moverLote`, que solo se llama desde `registrarMovimiento`,
+  y ese método toma primero `FOR UPDATE OF ip` sobre `item_producto` —el ancla de lock de todo
+  movimiento de stock (`docs/patterns/backend.md` §15)—. Dos entradas del mismo producto se
+  encolan ahí; la segunda, al despertar, corre su `SELECT … codigo_lote … FOR UPDATE` en un
+  statement nuevo, ve el lote que insertó la primera y lo reusa. Una compra con dos líneas del
+  mismo producto y lote también reusa (la transacción ve su propio insert). **Lo que sí es cierto:**
+  el índice `uq_lote_item_codigo` está declarado solo en `startup-pos.sql`, que es documentación;
+  `ItemLote` no lo declara y el seeder no lo crea, así que **no existe** (medido en producción el
+  2026-09-28: `item_lote` solo tiene su PK). Es la misma forma del bug de `serie`
+  (`resueltos.md`), sin su consecuencia: acá lo que falta es la red, no el invariante.
+  **Qué hacer (mecánico):** declararlo en la entity —`@Index(['itemId', 'codigoLote'], { unique:
+  true, where: '"eliminado_el" IS NULL' })`, índice parcial simple, cabe en `@Index`— con un e2e
+  que confirme que existe en `pg_indexes` después de arrancar. **Duplicados vivos que impedirían
+  crearlo:** ninguno en producción (0 lotes vivos, 2026-09-28); el seed y los e2e se verifican al
+  correr. Cuando el índice exista, una segunda fila por un camino futuro que no pase por el ancla
+  daría 500 en vez de un duplicado silencioso: si eso llegara a importar, es otra entrada.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -1080,26 +1100,6 @@ prohíbe.
   de arrastre de otra tarea (`CLAUDE.md`, ADR-010).
 
 ## 5. Carreras de concurrencia
-
-Van juntas porque el arreglo pide **un solo análisis de orden de locks** —qué fila se
-bloquea y en qué orden en cada camino—, no un parche por entrada.
-
-- [ ] **Dos entradas simultáneas del mismo código de lote pueden crear dos filas de
-  `item_lote`** (backend + BD, medido el 2026-09-19 al cerrar la unicidad de `serie`) —
-  `InventarioService.moverLote` busca el lote vivo por `(item_id, codigo_lote)` con
-  `FOR UPDATE` y, si existe, lo reusa sumándole cantidad; si no existe, inserta. **Por el
-  camino normal no hay duplicado**: el reuso lo evita, y por eso esto NO es el gemelo del
-  bug de `serie` —conviene no leerlo así—. Lo que no hay es red para la carrera: dos
-  transacciones que no encuentran nada **no tienen fila que lockear**, las dos insertan, y
-  el índice único que lo cortaría existe **solo en `startup-pos.sql`** (`ItemLote` no
-  declara `@Index` y el seeder no lo crea, igual que pasaba con `item_unidad`).
-  **Lo que falta:** decidir si alcanza con declarar el índice —que convierte la carrera en
-  un 500 del perdedor— o si el camino necesita además un `INSERT ... ON CONFLICT` o un lock
-  de advertencia por `(item_id, codigo_lote)`; es la misma pregunta de orden de locks que
-  comparten las demás entradas de esta sección. Antes de declararlo hay que medir
-  duplicados vivos, porque `synchronize` no puede crear el índice si ya los hay
-  (`SELECT item_id, codigo_lote, COUNT(*) FROM item_lote WHERE eliminado_el IS NULL
-  GROUP BY 1,2 HAVING COUNT(*) > 1`).
 
 ---
 
