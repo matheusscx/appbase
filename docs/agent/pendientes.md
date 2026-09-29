@@ -122,6 +122,25 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   correr. Cuando el índice exista, una segunda fila por un camino futuro que no pase por el ancla
   daría 500 en vez de un duplicado silencioso: si eso llegara a importar, es otra entrada.
 
+- [ ] **Atar con un test las dos `normalizarClave` (frontend y backend) de la lectura del DTE**
+  (frontend + backend, tests solamente; medido el 2026-09-28). La del frontend
+  (`frontend/app/composables/useDte.ts:112`) hace `trim().replace(/\s+/g, ' ').toUpperCase()` y la
+  del backend (`backend/src/modules/compras/lectura-dte.service.ts:24`) mayusculiza antes de
+  colapsar. **Medido que no divergen para ningún input:** los 25 code points que `trim()` toma
+  como espacio son exactamente los que matchea `\s`, ninguno cambia con `toUpperCase()` y ningún
+  carácter con mayúscula especial (ß→SS, ligaduras, İ, alfabetos astrales) produce ni consume
+  uno de ellos, así que el orden conmuta; un barrido de los ~1,1 M code points solos y combinados
+  con espacios (8 M de comparaciones) dio 0 diferencias. Además, los dos caminos —aprender
+  (`[id].vue` → `lectura-dte.service.ts:262`) y buscar (`useDte.ts:220` → `:528`)— aplican las
+  dos en el mismo orden (el frontend normaliza al leer el XML, `useDte.ts:120-121`, y el backend
+  vuelve a normalizar), así que aun divergiendo calzarían entre sí. **No es un bug de conducta.**
+  **El riesgo es de mantenimiento:** dos implementaciones que parecen poder divergir invitan a
+  corregir una sin la otra. No se pueden unificar en una función compartida (backend y frontend
+  no comparten código: memoria del owner sobre el workspace del monorepo), así que el arreglo es
+  **un test que las ate**: un fixture común de pares entrada→clave (con NBSP, tabs, `ß`, espacios
+  al borde y en el medio) que corran los dos specs (`useDte.spec.ts` y
+  `lectura-dte.service.spec.ts`), con un comentario en cada función que apunte a la otra.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -242,58 +261,6 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   separar el error de cada pantalla. Antes de elegir, volver a listar los lectores de
   `authStore.error`: el 2026-09-27 eran solo esas dos pantallas. Los comentarios de
   `auth/callback.vue` y `middleware/auth.ts` lo nombran porque navegan al login para que se vea.
-
-- [ ] **`normalizarClave` existe dos veces, con el orden de operaciones invertido** (lectura del
-  XML del DTE, tarea 4, 2026-09-27). La del frontend
-  (`frontend/app/composables/useDte.ts:112-114`) hace `trim().replace(/\s+/g, ' ').toUpperCase()`
-  — primero colapsa los espacios, después pasa a mayúsculas—; la del backend
-  (`backend/src/modules/compras/lectura-dte.service.ts:24-26`) hace
-  `trim().toUpperCase().replace(/\s+/g, ' ')` — al revés. **Convergen hoy** (lo verificó el
-  revisor de dominio de la tarea 3 al auditar que la clave que arma el front calza con la que
-  busca el back): `toUpperCase()` no toca espacios y `replace(/\s+/g, ' ')` no distingue
-  mayúsculas de minúsculas, así que para el alfabeto y los espacios ASCII el orden no cambia el
-  resultado. **Lo que falta medir antes de decidir si hace falta un arreglo:** si existe algún
-  carácter donde `toUpperCase()` cambia si algo cuenta como espacio para `\s+` (o viceversa) —
-  candidato a mirar: caracteres cuyo `toUpperCase()` cambia de largo o de forma (la `ß` alemana →
-  `SS`) y espacios Unicode no-ASCII (NBSP ` `, espacios de ancho variable) que
-  `CdgItem`/`NmbItem` del XML podrían traer. Si no hay ninguno, la duplicación es inofensiva y el
-  arreglo es cosmético (extraer una función compartida); si hay alguno, hoy no hay ningún test que
-  lo cace — ninguno de los dos archivos de test (`useDte.spec.ts`,
-  `lectura-dte.service.spec.ts`) prueba que las dos funciones den la misma clave para la misma
-  entrada, cada una prueba la suya por separado.
-
-## 3. Ya decidido, falta construir
-
-El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
-adentro, y alguna quedó a medias a propósito— pero nadie está esperando una respuesta para
-empezarlas.
-
-⚠️ **Esta sección no es una tanda que se "termine", y leerla como tal hace tomar malas
-decisiones.** **Varias de sus entradas son features de producto con su propia spec** —entre ellas el
-motor de promociones, la NC como documento, la UF como moneda oficial, `cashRounding`, el
-conteo por denominación, anular o reducir una línea ya enviada a cocina y el envío diario del
-resumen de descuadres—. Están acá porque se decidieron, no porque sean deuda: **son la cola de
-trabajo, y cada una abre su propio frente.**
-
-De la deuda chica que quedaba, el **2026-08-24 salieron tres**: la escala de la pasarela, el
-`minimo` de un tramo y el tramo en cero (las tres en [`resueltos.md`](resueltos.md)). **La
-única que sigue es el renombre de `moneda.decimales`** — y ojo, su entrada subestima el
-tamaño. Medido ese día:
-
-```bash
-grep -rn 'decimales' backend/src backend/test frontend/app frontend/server frontend/e2e | wc -l
-```
-
-**394 ocurrencias en código y tests** (155 backend sin specs · 115 specs de backend · 31 e2e ·
-93 frontend), más las de `docs/`. No son 394 renombres —el grep incluye la palabra suelta en
-comentarios— pero sí muestra que el nombre se **propagó a métodos y campos**
-(`decimalesOficiales`, `decimalesDeLaVenta`, `decimalesMoneda`, `ctx.decimales`), que es lo
-que lo convierte en un frente propio y no en un remate.
-
-⚠️ El comando va escrito porque la primera vez este dato se anotó como "459 ocurrencias en 5
-superficies" sumando conteos de código con un conteo de docs hecho con **otro patrón**. La
-revisión independiente no lo pudo reproducir, con razón.
-
 
 - [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
   medido 2026-08-22 al cerrar la anulación; el owner decidió que **va aparte**, no de
