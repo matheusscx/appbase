@@ -171,18 +171,19 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
-- [ ] **`npm test` del frontend salió con código 1 con los 1462 tests en verde** (frontend,
-  intermitente, visto una vez el 2026-09-27 en el gate de main sobre `0357a777`). Vitest reportó
-  un *unhandled error* de cierre —`EnvironmentTeardownError: [vitest-worker]: Closing rpc while
-  "onUserConsoleLog" was pending`— atribuido a `app/pages/configuracion/empresa.nuxt.spec.ts`:
-  un `console.log` que llega cuando el worker ya se está cerrando. La corrida siguiente de la
-  suite entera y la del spec solo dieron 0. El riesgo es que en CI tumbe el gate sin ningún test
-  rojo. **Lo que falta medir:** si se reproduce corriendo la suite en loop, y qué log del spec (o
-  del componente que monta) queda sin esperar al terminar el test.
-  **Segundo intermitente del frontend, mismo día:** `app/pages/salones/index.nuxt.spec.ts`, *"cuando
-  el servidor confirma la cantidad, el catálogo se vuelve a pedir"* (esperaba 9 llamadas, vio 6),
-  falló una vez en el worktree del frente del login tras un rebase; solo pasó 4 de 4 y la suite
-  siguiente dio verde. Ese test cuenta pedidos detrás de un debounce: sospechar del tiempo.
+- [ ] **Tests de pantalla que no terminan en 20 s con la máquina cargada** (frontend,
+  intermitente, medido el 2026-09-28). En 10 corridas de la suite entera, con otras sesiones
+  levantando stacks en paralelo (load average 15–22 en 12 núcleos), dos corridas salieron con
+  `Test timed out in 20000ms` en tres tests, y el resto de la suite en verde:
+  `app/pages/compras/compras-carga.nuxt.spec.ts` (*"con todos los precios el descuento se
+  habilita…"*, corrida de 253 s), `app/pages/configuracion/items.nuxt.spec.ts` (*"volver a elegir
+  la moneda que ya está puesta cancela el aviso"*) y `app/pages/salones/index.nuxt.spec.ts`
+  (*"el tap sobre una línea que no estaba pendiente al empezar el flush sale antes que la
+  comanda"*), los dos últimos en la misma corrida de 138 s. La suite sola tarda ~110 s. Cada uno
+  de esos tests tarda ~2 s: no llegar en 20 puede ser carga o un `await` que no vuelve nunca
+  cuando los `esperar(ms)` del test se corren. **Lo que falta medir:** correr cada uno en loop con
+  la máquina cargada y ver si el tiempo crece de a poco (carga) o salta al timeout (cuelgue); el
+  de salones depende de `esperar(20)`/`esperar(50)` alrededor de un PATCH retenido.
 
 - [ ] **Specs de Playwright que fallan con el código limpio en el stack de un worktree** (frontend,
   e2e de navegador). Medido el 2026-09-27 por la sesión que prendió `forbidNonWhitelisted`, en su

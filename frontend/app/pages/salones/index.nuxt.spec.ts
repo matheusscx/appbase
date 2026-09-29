@@ -2152,10 +2152,17 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
     const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
     input!.vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
-    await esperar(600)
+    // Se espera el refresco y no un reloj: son dos debounce en fila (300 ms del
+    // PATCH + 250 del catálogo) y medido llega a los 556-576 ms. Un `esperar(600)`
+    // dejaba 24-44 ms de margen, y en la suite entera una vez no alcanzó
+    // (2026-09-27: esperaba 9, vio 6).
+    await vi.waitFor(() => expect(urlsCatalogo.length).toBe(antesDeEditar + 3), { timeout: 3000 })
+    // Y fue UN refresco: el `waitFor` vuelve al primer +3, así que un segundo
+    // disparo (el debounce roto) solo se ve mirando otra vez después.
+    await esperar(300)
+    expect(urlsCatalogo.length).toBe(antesDeEditar + 3)
 
     expect(patchesDeCantidad).toHaveLength(1)
-    expect(urlsCatalogo.length).toBe(antesDeEditar + 3)
   })
 
   it('cambiar la cantidad de una línea MANDA el PATCH al servidor', async () => {

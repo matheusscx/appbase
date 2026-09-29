@@ -147,6 +147,70 @@ un plan, no una propiedad.
 
 ---
 
+## `npm test` del frontend ya no sale en 1 con todo verde (cerrada 2026-09-28)
+
+Sale de [`pendientes.md`](pendientes.md) § 2.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **`npm test` del frontend salió con código 1 con los 1462 tests en verde** (frontend,
+  intermitente, visto una vez el 2026-09-27 en el gate de main sobre `0357a777`). Vitest reportó
+  un *unhandled error* de cierre —`EnvironmentTeardownError: [vitest-worker]: Closing rpc while
+  "onUserConsoleLog" was pending`— atribuido a `app/pages/configuracion/empresa.nuxt.spec.ts`:
+  un `console.log` que llega cuando el worker ya se está cerrando. La corrida siguiente de la
+  suite entera y la del spec solo dieron 0. El riesgo es que en CI tumbe el gate sin ningún test
+  rojo. **Lo que falta medir:** si se reproduce corriendo la suite en loop, y qué log del spec (o
+  del componente que monta) queda sin esperar al terminar el test.
+  **Segundo intermitente del frontend, mismo día:** `app/pages/salones/index.nuxt.spec.ts`, *"cuando
+  el servidor confirma la cantidad, el catálogo se vuelve a pedir"* (esperaba 9 llamadas, vio 6),
+  falló una vez en el worktree del frente del login tras un rebase; solo pasó 4 de 4 y la suite
+  siguiente dio verde. Ese test cuenta pedidos detrás de un debounce: sospechar del tiempo.
+
+### Lo medido
+
+- **El log no era del spec de empresa, era de todos.** Sin servidor de íconos, cada `<UIcon>`
+  de un spec `nuxt` pedía su ícono por red, fallaba y `@nuxt/icon` avisaba
+  `[Icon] failed to load icon` en un `console.warn` **asíncrono**: 9738 por corrida de la suite,
+  en 81 íconos. En empresa, el `lucide:loader-circle` del botón de guardar llegaba **después**
+  del resumen de vitest. El que cae mientras el worker cierra es el `onUserConsoleLog`
+  pendiente; que la atribución dijera empresa fue la suerte de esa corrida. 30 corridas del spec
+  solo no lo reprodujeron; el mecanismo sí se reproduce a propósito: un spec `nuxt` que deja un
+  `console.warn` en un `setInterval` después del test da ese mismo error, con `1 passed` y exit 1
+  (2 de 3 corridas).
+- **El debounce de salones tenía 24–44 ms de margen.** Son dos debounce en fila (300 ms del
+  PATCH de la cantidad + 250 del refresco del catálogo) y el test miraba a los 600 ms. Medido
+  instrumentando el test: el refresco llega a los 556–576 ms, con o sin la CPU saturada (9 corridas).
+  Los gemelos del mismo archivo que cuentan el refresco tienen 130–170 ms de margen (abrir la
+  cuenta: llega a ~280 ms contra `esperar(400)`; tocar una tarjeta: ~266 contra 400) y no se tocaron.
+
+### Qué se hizo
+
+- `frontend/vitest.config.ts`: en el entorno `nuxt` de los tests, `@nuxt/icon` empaqueta los
+  íconos (`clientBundle.scan` más los cuatro que Nuxt UI pone por defecto y el scan no ve). Se
+  resuelven sin red y sin aviso: **0** avisos por corrida. Solo afecta a los tests, no al build.
+- `salones/index.nuxt.spec.ts`: el test espera el refresco con `vi.waitFor` (tope 3 s) en vez de
+  `esperar(600)`, y 300 ms después vuelve a mirar que siga siendo uno solo: el `waitFor` vuelve al
+  primer +3, y un doble refresco (el debounce roto) pasaría sin esa segunda mirada.
+
+### Qué quedó afuera
+
+- **La lista de íconos es mantenimiento a mano.** Los cuatro de `clientBundle.icons` los pone Nuxt
+  UI por dentro y el scan no los ve. Si un componente nuevo de Nuxt UI trae otro, vuelven los
+  avisos asíncronos, y con ellos el riesgo de este mismo error, sin que nada lo frene: ni CI ni el
+  pre-commit lo miran. Lo que lo detecta es el `grep` del comentario de `vitest.config.ts`.
+
+### Qué lo fija
+
+- **Mutante:** sacar las líneas de la fuente del `watch` del refresco (que quede solo
+  `activeCuenta.id`) → el test cae con `expected 6 to be 9`.
+- **10 corridas de la suite entera después del arreglo:** 0 `EnvironmentTeardownError`, 0 avisos
+  de íconos, y el test del debounce verde en las 10. Dos corridas salieron rojas por
+  `Test timed out in 20000ms` en otros tres tests, con la máquina cargada por otras sesiones: quedó
+  como entrada propia en [`pendientes.md`](pendientes.md) § 2 (*"Tests de pantalla que no
+  terminan en 20 s con la máquina cargada"*).
+
+---
+
 ## El rol `Salones · Encargado` puede ver el catálogo (cerrada 2026-09-28)
 
 Sale de [`pendientes.md`](pendientes.md) § 4.

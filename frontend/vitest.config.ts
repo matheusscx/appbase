@@ -24,5 +24,24 @@ export default defineVitestConfig({
     // esta exclusión vitest los levanta y `npm test` termina en rojo aunque
     // todos los unit pasen.
     exclude: [...configDefaults.exclude, '.output/**', 'e2e/**'],
+    // Sin servidor de íconos, cada `<UIcon>` los pedía por red, fallaba y avisaba
+    // `[Icon] failed to load icon` en un `console.warn` asíncrono: 9738 por
+    // corrida. El que llega con el worker ya cerrándose tumba `npm test` con todo
+    // verde (`EnvironmentTeardownError: Closing rpc while "onUserConsoleLog" was
+    // pending`, 2026-09-27). Empaquetados, se resuelven sin red y sin aviso.
+    // `icons` suma los que Nuxt UI pone por defecto y el scan no ve; uno nuevo
+    // aparece en `npx vitest run --reporter=verbose | grep 'failed to load icon'`.
+    environmentOptions: {
+      nuxt: {
+        overrides: {
+          icon: {
+            clientBundle: {
+              scan: true,
+              icons: ['lucide:panel-left-close', 'lucide:menu', 'lucide:minus', 'lucide:upload'],
+            },
+          },
+        },
+      },
+    },
   },
 })
