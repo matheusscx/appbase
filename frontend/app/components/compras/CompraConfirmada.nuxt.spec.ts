@@ -167,6 +167,21 @@ describe('CompraConfirmada — pago (spec § 8 y § 10, decisión 12)', () => {
     const w = await montar(compra({ estadoPago: 'parcial', deuda: '20000', aplicado: '99000', vencida: true }))
     expect(w.find('[data-qa="compra-pago"]').text()).toContain('Vencida')
   })
+
+  it('con deuda pendiente aparece "Pagar"; una compra ya pagada no lo ofrece', async () => {
+    permisos = new Set(['Compras:Leer', 'Compras:Pagar'])
+    const conDeuda = await montar(compra({ estadoPago: 'parcial', deuda: '20000', aplicado: '99000', vencida: false }))
+    expect(hay(conDeuda, 'compra-pagar-abrir')).toBe(true)
+
+    const pagada = await montar(compra({ estadoPago: 'pagada', deuda: '0', aplicado: '30000', vencida: false }))
+    expect(hay(pagada, 'compra-pagar-abrir')).toBe(false)
+  })
+
+  it('sin Pagar, "Pagar" tampoco aparece', async () => {
+    permisos = new Set(['Compras:Leer'])
+    const w = await montar(compra({ estadoPago: 'parcial', deuda: '20000', vencida: false }))
+    expect(hay(w, 'compra-pagar-abrir')).toBe(false)
+  })
 })
 
 describe('CompraConfirmada — presentación (pieza 2 § 6)', () => {

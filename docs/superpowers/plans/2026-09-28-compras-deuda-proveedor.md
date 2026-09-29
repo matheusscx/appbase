@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Approved (owner, 2026-09-28, con los cambios de la spec: decisiones 11 y 12) · **Date:** 2026-09-28 · **Owner:** César
+**Status:** Done (2026-09-29 — las cinco tareas hechas y verificadas) · **Date:** 2026-09-28 · **Owner:** César
 
 **Goal:** cada compra confirmada deja deuda con su proveedor, con vencimiento; un pago se
 reparte entre sus compras o queda a favor; el pago en efectivo sale de la caja de quien paga
@@ -275,19 +275,30 @@ de otro permiso? ¿Algún body manda un campo que el DTO no declara?
 
 ### Task 5: Frontend — "Por pagar", pagar, anular, Playwright y el cierre del frente
 
+> **Hecha (2026-09-29).** Gate: frontend `build`/`typecheck:ratchet`/`design:check` OK; los
+> archivos nuevos y tocados (`useCompras.spec.ts`, `CompraConfirmada.nuxt.spec.ts`,
+> `PagarProveedorModal.nuxt.spec.ts`, `AnularPagoModal.nuxt.spec.ts`,
+> `compras/index.nuxt.spec.ts`, `compras/por-pagar.nuxt.spec.ts`) corridos individualmente:
+> 67/67. Revisión de dominio: LIMPIO. **Fix round 1 (2026-09-29):** Playwright, corrido por el
+> controlador, tenía 3/6 fallos — los tres de test, no de producto (dos formularios que nunca
+> elegían tipo de documento y se colgaban con los botones deshabilitados; un `toHaveCount(0)`
+> contra la fila del estado vacío de `CrudTable`). Corregidos en 3 corridas de Playwright
+> (autorizadas para esa ronda): **7/7 verde**. Detalle completo en el reporte de la tarea, sección
+> "Fix round 1".
+
 **Intención:** la pantalla del dueño (decisión 9), el pago repartido con la propuesta desde
 la más vieja (decisión 2), y el frente cerrado con sus docs.
 
-- [ ] `pages/compras/por-pagar.vue` detrás de `Pagar` con middleware de ruta (pattern
+- [x] `pages/compras/por-pagar.vue` detrás de `Pagar` con middleware de ruta (pattern
   frontend § 1.2), y su entrada en la navegación solo con `Pagar`.
-- [ ] `PagarProveedorModal.vue`: la propuesta (saldo a favor primero, después la compra más
+- [x] `PagarProveedorModal.vue`: la propuesta (saldo a favor primero, después la compra más
   vieja), editable, lo que queda a favor dicho en pantalla; `useIntentoCobro`.
-- [ ] Anular un pago con motivo, con el aviso de caja cerrada.
-- [ ] Insignia de pago y filtro en `pages/compras/index.vue`, solo con `Pagar`.
-- [ ] Utilidades de presentación en `useCompras.ts` (la propuesta de reparto va ahí, con
+- [x] Anular un pago con motivo, con el aviso de caja cerrada.
+- [x] Insignia de pago y filtro en `pages/compras/index.vue`, solo con `Pagar`.
+- [x] Utilidades de presentación en `useCompras.ts` (la propuesta de reparto va ahí, con
   Vitest).
-- [ ] Playwright con el rol real que paga y con el bodeguero sin `Pagar` (spec § 12).
-- [ ] Docs de cierre: `compras.md` completo, `docs/ESTADO.md`, `docs/PRODUCTO.md` (las reglas
+- [x] Playwright con el rol real que paga y con el bodeguero sin `Pagar` (spec § 12).
+- [x] Docs de cierre: `compras.md` completo, `docs/ESTADO.md`, `docs/PRODUCTO.md` (las reglas
   de negocio de la deuda), `docs/agent/pendientes.md` (entradas de spec § 13: lo fiscal y la
   factura que agrupa guías, y la pieza 3 marcada en la lista de piezas), y el `Status` de esta
   spec y este plan.

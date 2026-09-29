@@ -47,6 +47,11 @@ const insignia = computed(() => muestraPago.value
     )
   : null,
 )
+// "Pagar" desde el detalle (spec § 10): solo si todavía se le debe algo (o
+// el total ni se sabe) — una `pagada` no tiene nada que repartir.
+const puedeIniciarPago = computed(() =>
+  muestraPago.value && props.compra.estadoPago !== 'pagada')
+const pagarOpen = ref(false)
 
 const corregirDocumentoOpen = ref(false)
 
@@ -63,6 +68,25 @@ const lineaEnEdicion = ref<LineaCompra | null>(null)
 const corregirOpen = ref(false)
 const descuentoOpen = ref(false)
 const anularOpen = ref(false)
+
+// ── Pagar desde el detalle (spec § 10) ───────────────────────────────────
+
+const { public: { apiUrl } } = useRuntimeConfig()
+
+/**
+ * `PagarProveedorModal` avisa "pagué algo" (spec § 8: puede no ser SOLO esta
+ * compra, el reparto es del proveedor entero), no la `CompraDetalle`
+ * actualizada — así que acá se recarga la propia compra y se reusa el mismo
+ * evento `actualizada` que ya escucha la página.
+ */
+async function recargarTrasPago() {
+  try {
+    const res = await useApiFetch<CompraDetalle>(`${apiUrl}/compras/${props.compra.id}`)
+    emit('actualizada', res)
+  } catch (e: unknown) {
+    useToast().add({ title: apiErrorMsg(e, 'Error al recargar la compra'), color: 'error' })
+  }
+}
 
 function abrirCorreccion(linea: LineaCompra) {
   lineaEnEdicion.value = linea
@@ -238,6 +262,16 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
           <dd><UBadge v-if="insignia" :label="insignia.label" :color="insignia.color" variant="subtle" /></dd>
         </div>
       </dl>
+      <div v-if="puedeIniciarPago" class="flex justify-end">
+        <UButton
+          size="xs"
+          variant="soft"
+          icon="i-lucide-hand-coins"
+          label="Pagar"
+          data-qa="compra-pagar-abrir"
+          @click="() => { pagarOpen = true }"
+        />
+      </div>
       <p v-if="!compra.pagos?.length" class="text-sm text-muted" data-qa="compra-pagos-vacio">
         Sin pagos registrados.
       </p>
@@ -302,6 +336,13 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
       :ubicacion-nombre="compra.ubicacionNombre"
       :lineas="compra.lineas"
       @success="(c: CompraDetalle) => emit('actualizada', c)"
+    />
+    <ComprasPagarProveedorModal
+      v-if="puedeIniciarPago"
+      v-model:open="pagarOpen"
+      :proveedor-id="compra.proveedorId"
+      :proveedor-nombre="compra.proveedorNombre || '—'"
+      @success="recargarTrasPago"
     />
   </div>
 </template>

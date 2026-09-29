@@ -1,6 +1,6 @@
 # Compras: la deuda con el proveedor y sus pagos, con la salida de caja automática
 
-**Fecha:** 2026-09-28 · **Tipo:** spec de diseño · **Status:** Approved (owner, 2026-09-28, por la sesión orquestadora: "Sí, aprobado con esos dos cambios" —decisiones 11 y 12— más una corrección de redacción en la 5)
+**Fecha:** 2026-09-28 · **Tipo:** spec de diseño · **Status:** Done (2026-09-29 — las cinco tareas del plan implementadas y verificadas; aprobada por el owner el 2026-09-28, por la sesión orquestadora: "Sí, aprobado con esos dos cambios" —decisiones 11 y 12— más una corrección de redacción en la 5)
 **Frente:** pieza 3 de *"Compras: carga manual, y el DTE del SII como atajo encima"*, en
 [`docs/agent/pendientes.md`](../../agent/pendientes.md). Viene después de las piezas 1 y 2 y
 de la lectura del XML; lo que hace hoy compras está en

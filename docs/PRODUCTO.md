@@ -786,12 +786,72 @@ el food-cost y las mermas valorizadas.
 XML solo (Portal MIPYME, casilla de intercambio) en vez de subirlo a mano, aceptar o reclamar el
 DTE desde el sistema, verificar su firma digital, completar los precios de una compra ya
 confirmada con un XML que llega después, una pantalla para ver y corregir los códigos aprendidos
-por proveedor, la deuda con el proveedor y sus pagos con salida de caja, y los gastos sin stock.
-También quedan afuera la orden de compra, la devolución al proveedor, la moneda extranjera y el
-flete como concepto propio. ⛔ La pregunta fiscal —IVA no recuperable e ILA dentro del costo, y
-el IVA incluido en el precio del XML— **es frente propio** (ADR-010).
+por proveedor, y los gastos sin stock. También quedan afuera la orden de compra, la devolución al
+proveedor, la moneda extranjera y el flete como concepto propio. ⛔ La pregunta fiscal —IVA no
+recuperable e ILA dentro del costo, y el IVA incluido en el precio del XML— **es frente propio**
+(ADR-010).
 
 Detalle completo: [`docs/features/compras.md`](./features/compras.md).
+
+---
+
+### 8g. Compras — la deuda con el proveedor y sus pagos
+
+Cada compra confirmada deja **deuda** con su proveedor, con vencimiento; un pago se reparte
+entre sus compras o queda a favor; el efectivo sale de la caja de quien paga en el mismo acto.
+Spec: [`2026-09-28-compras-deuda-proveedor-design.md`](./superpowers/specs/2026-09-28-compras-deuda-proveedor-design.md).
+
+**Las reglas de negocio que la definen:**
+
+- **La deuda es por compra, no una cuenta corriente sin rastro.** Cada compra confirmada sabe
+  cuánto de sí misma está pagado, cuánto le falta y desde cuándo vence — nunca un único número
+  "lo que le debo a este proveedor" sin decir qué factura está al día y cuál no.
+- **El total que se debe, en una compra con documento, es el que dice el documento, transcrito
+  — nunca calculado.** Se tipea, o lo trae el XML de la factura. El sistema no calcula
+  impuestos ni valida ese total contra la suma de las líneas: la diferencia entre los dos es el
+  impuesto, y decidir eso es del frente fiscal (⛔ fuera de acá). Una guía de despacho puede
+  recibirse sin total todavía y completarlo cuando llega la factura; sin documento (o con
+  boleta), el total es la suma de las líneas, como siempre.
+- **El vencimiento sale del plazo de pago del proveedor**, contado desde la fecha del
+  documento, y se puede corregir en cada compra. Un proveedor sin plazo cargado usa 30 días —el
+  mismo default que fija la ley (19.983, art. 2, modificado por la 21.131) cuando la factura no
+  lo menciona.
+- **Un pago se reparte entre las compras del proveedor.** Al pagar, la pantalla propone el
+  reparto —primero el saldo a favor que el proveedor ya tenía, después la compra más vieja— y
+  quien paga lo puede cambiar antes de mandarlo. Cada compra queda pagada, "te faltan $X" o
+  vencida, nunca solo "el proveedor debe $X en total" sin decir de qué factura.
+- **Se puede pagar sin factura (un anticipo), y queda a favor.** El pago sale de la caja ese
+  día igual y se usa cuando llega la próxima compra. El mismo saldo a favor recibe lo que sobra
+  cuando una corrección baja el total de una compra ya pagada.
+- **El efectivo de un pago sale de la caja física abierta de quien lo registra, en el mismo
+  acto** — la misma validación contra el efectivo real que cualquier salida manual de caja, y
+  el mismo rastro cuando no alcanza. Si quien paga no tiene caja abierta, la abre, o paga otra
+  persona con el permiso de pagar desde la suya. Ninguna regla de caja cambia: el movimiento
+  sigue siendo del dueño del turno.
+- **La compra al contado se registra en un solo gesto.** Al confirmar, "¿la pagaste ya?"
+  pregunta el medio y el monto; si el pago falla (sin caja, sin plata), no se confirma nada —es
+  un gesto, no dos pasos que puedan quedar a medio hacer.
+- **Anular un pago en efectivo con la caja ya cerrada no mueve ninguna caja**: la deuda vuelve,
+  y el cierre de ese día queda como quedó — no se reabre un cierre para corregir un error de
+  otro día. Con la caja todavía abierta, la plata vuelve sola a esa caja, y solo su dueño puede
+  anular. Anular una compra que ya tenía pagos deja lo pagado a favor del proveedor, no lo
+  pierde.
+- **Lo que se le debe a cada proveedor lo ve solo quien tiene el permiso de pagar** (permiso
+  nuevo `Compras:Pagar`), no quien solo puede leer o cargar compras: "el bodeguero recibe la
+  mercadería, el dueño paga". El rol que carga compras arranca sin ese permiso; el admin se lo
+  puede dar.
+- **"Por pagar"** muestra, por proveedor, lo que se debe, lo vencido, lo que vence pronto y el
+  saldo a favor — para decidir a quién pagarle primero sin tener que abrir cada compra una por
+  una.
+
+**Fuera de alcance:** calcular IVA o ILA sobre las líneas y validar el total contra ese cálculo
+(frente fiscal propio, ⛔ ADR-010), una factura que agrupa varias guías de despacho (su total se
+reparte a mano entre las guías), pagar desde la caja de otra persona que no sea quien registra
+el pago, un vencimiento por cuota (una factura en cuotas vence entera en la fecha final; las
+cuotas se pagan como pagos parciales), y la devolución de plata del proveedor como flujo propio
+(hoy: entrada manual en la caja de quien la recibe).
+
+Detalle completo: [`docs/features/compras.md`](./features/compras.md#la-deuda-con-el-proveedor-pieza-5).
 
 ---
 

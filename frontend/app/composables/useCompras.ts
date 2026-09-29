@@ -456,6 +456,76 @@ export function useCompras() {
     value,
   }))
 
+  /**
+   * ¿Este monto es mayor a cero? Con `Decimal`, no `Number()`: un texto que
+   * no parsea (o vacío) no es positivo. Presentación pura — la usan
+   * `por-pagar.vue` ("¿hay algo vencido?") y cualquier otra pantalla que
+   * necesite la misma pregunta sin reimplementarla con `Number(...)`, que
+   * pierde precisión en montos grandes y no es la regla del resto del
+   * composable.
+   */
+  function montoEsPositivo(valor: string | null | undefined): boolean {
+    return (comoDecimal(valor) ?? new Decimal(0)).greaterThan(0)
+  }
+
+  /**
+   * La más vieja primero (spec § 5.1 y § 10, decisión 2): por
+   * `fechaVencimiento` y, a igualdad —o sin vencimiento, contra otra sin
+   * vencimiento u otra fecha igual—, por `fechaDocumento`. Comparador de dos
+   * niveles: la clave primaria (`fechaVencimiento` con `fechaDocumento` de
+   * respaldo si falta) decide primero, y solo si empata se mira
+   * `fechaDocumento` — antes esto se resolvía comparando una sola cadena
+   * mezclada, que no desempataba dos compras con el MISMO vencimiento y
+   * `fechaDocumento` distinta (spec § 5.1: "por fecha_vencimiento y **después**
+   * fecha_documento").
+   */
+  function compararPorVencimiento(
+    a: { fechaVencimiento: string | null, fechaDocumento: string },
+    b: { fechaVencimiento: string | null, fechaDocumento: string },
+  ): number {
+    const claveA = a.fechaVencimiento ?? a.fechaDocumento
+    const claveB = b.fechaVencimiento ?? b.fechaDocumento
+    if (claveA !== claveB) return claveA.localeCompare(claveB)
+    return a.fechaDocumento.localeCompare(b.fechaDocumento)
+  }
+
+  /**
+   * La propuesta de reparto de `PagarProveedorModal.vue` (spec § 5.1 y § 10,
+   * decisión 2): primero el saldo a favor del proveedor, después la compra
+   * más vieja (`compararPorVencimiento`). **El servidor valida el reparto que
+   * llega, no lo decide** (spec § 5.1): esto es solo la sugerencia inicial
+   * que la pantalla ofrece, editable antes de mandar.
+   *
+   * `disponible` es saldo a favor + el `monto` que se está por pagar (en ese
+   * orden — decisión 2). Una compra sin deuda conocida (total desconocido,
+   * `deuda: null`) o ya sin deuda (`'0'`) no entra en la propuesta: no hay
+   * tope que proponer, y el usuario la agrega a mano si quiere adelantarle
+   * algo (spec § 2, decisión 8). Devuelve solo aplicaciones > 0 — el DTO
+   * exige `monto` positivo por línea.
+   */
+  function proponerReparto(
+    compras: { id: string, deuda: string | null, fechaVencimiento: string | null, fechaDocumento: string }[],
+    saldoAFavor: string,
+    monto: string,
+  ): { compraId: string, monto: string }[] {
+    let disponible = (comoDecimal(saldoAFavor) ?? new Decimal(0)).plus(comoDecimal(monto) ?? new Decimal(0))
+    if (disponible.lessThanOrEqualTo(0)) return []
+
+    const ordenadas = [...compras]
+      .filter(c => (comoDecimal(c.deuda) ?? new Decimal(0)).greaterThan(0))
+      .sort(compararPorVencimiento)
+
+    const reparto: { compraId: string, monto: string }[] = []
+    for (const c of ordenadas) {
+      if (disponible.lessThanOrEqualTo(0)) break
+      const deuda = comoDecimal(c.deuda)!
+      const aplicado = Decimal.min(deuda, disponible)
+      reparto.push({ compraId: c.id, monto: aplicado.toString() })
+      disponible = disponible.minus(aplicado)
+    }
+    return reparto
+  }
+
   return {
     totalLinea,
     subtotal,
@@ -477,5 +547,8 @@ export function useCompras() {
     unidadDeLinea,
     cuentaPresentacion,
     cantidadLineaConfirmada,
+    proponerReparto,
+    compararPorVencimiento,
+    montoEsPositivo,
   }
 }

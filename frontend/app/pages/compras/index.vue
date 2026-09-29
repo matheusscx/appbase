@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
-import type { EstadoCompra } from '~/composables/useCompras'
+import type { EstadoCompra, EstadoPagoCompra } from '~/composables/useCompras'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -17,6 +17,14 @@ interface CompraListItem {
   ubicacionNombre: string | null
   lineas: number
   total: string | null
+  /**
+   * Solo presentes con `Compras:Pagar` (spec compras-deuda-proveedor § 8,
+   * decisión 12): el backend los omite (`undefined`) para quien no tiene el
+   * permiso — nunca `null`. Se chequean con `!= undefined`, nunca se asumen.
+   */
+  estadoPago?: EstadoPagoCompra
+  deuda?: string | null
+  vencida?: boolean
 }
 
 interface Opt { label: string, value: string }
@@ -26,16 +34,23 @@ const toast = useToast()
 const router = useRouter()
 const { formatMonto } = useFormatters()
 const { pageSize } = useUserPreferences()
-const { insigniaEstado, estadoOptions } = useCompras()
+const { insigniaEstado, insigniaPago, estadoOptions } = useCompras()
+const permissionsStore = usePermissionsStore()
 
 // El nav abre esta página con Compras/Leer; crear exige Compras/Crear.
 const { puedeCrear } = usePermisosCrud('Compras')
+// `Pagar` no es uno de los cuatro CRUD: mismo molde que `CompraConfirmada.vue`
+// y `[id].vue`. La insignia y el filtro de pago son SOLO de quien tiene
+// `Compras:Pagar` (spec § 8, decisión 12) — sin él, el backend ni manda
+// `estadoPago` en las filas, y el filtro `estadoPago` es 403.
+const puedePagar = computed(() => permissionsStore.esAdmin || permissionsStore.can('Compras', 'Pagar'))
 
 // ── Filtros ────────────────────────────────────────────────────────────────
 
 const TODOS = 'todos'
 const filtroEstado = ref<string>(TODOS)
 const filtroProveedor = ref<string>(TODOS)
+const filtroEstadoPago = ref<string>(TODOS)
 const soloFaltaCosto = ref(false)
 const desde = ref('')
 const hasta = ref('')
@@ -43,6 +58,19 @@ const hasta = ref('')
 const estadoOpts = computed<Opt[]>(() => [
   { label: 'Todos los estados', value: TODOS },
   ...estadoOptions,
+])
+
+const ESTADO_PAGO_ETIQUETA: Record<string, string> = {
+  pagada: 'Pagada',
+  parcial: 'Parcial',
+  pendiente: 'Pendiente',
+  vencida: 'Vencida',
+  falta_total: 'Falta el total',
+  falta_precio: 'Falta el precio',
+}
+const estadoPagoOpts = computed<Opt[]>(() => [
+  { label: 'Todos los estados de pago', value: TODOS },
+  ...Object.entries(ESTADO_PAGO_ETIQUETA).map(([value, label]) => ({ label, value })),
 ])
 
 const proveedores = ref<Opt[]>([])
@@ -54,6 +82,7 @@ const proveedorOpts = computed<Opt[]>(() => [
 const filtros = computed(() => ({
   estado: filtroEstado.value === TODOS ? undefined : filtroEstado.value,
   proveedorId: filtroProveedor.value === TODOS ? undefined : filtroProveedor.value,
+  estadoPago: puedePagar.value && filtroEstadoPago.value !== TODOS ? filtroEstadoPago.value : undefined,
   faltaCosto: soloFaltaCosto.value ? 'true' : undefined,
   desde: desde.value || undefined,
   hasta: hasta.value || undefined,
@@ -75,7 +104,7 @@ function abrir(_e: Event, row: Row<CompraListItem>) {
   void router.push(`/compras/${row.original.id}`)
 }
 
-const columns: TableColumn<CompraListItem>[] = [
+const columns = computed<TableColumn<CompraListItem>[]>(() => [
   { accessorKey: 'fechaDocumento', header: 'Fecha' },
   { accessorKey: 'proveedorNombre', header: 'Proveedor' },
   { accessorKey: 'folio', header: 'Documento' },
@@ -83,7 +112,8 @@ const columns: TableColumn<CompraListItem>[] = [
   { accessorKey: 'lineas', header: 'Líneas', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'total', header: 'Total', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'estado', header: 'Estado' },
-]
+  ...(puedePagar.value ? [{ id: 'pago', header: 'Pago' } as TableColumn<CompraListItem>] : []),
+])
 </script>
 
 <template>
@@ -128,6 +158,9 @@ const columns: TableColumn<CompraListItem>[] = [
           <UFormField label="Hasta">
             <UInput v-model="hasta" type="date" />
           </UFormField>
+          <UFormField v-if="puedePagar" label="Estado de pago">
+            <USelect v-model="filtroEstadoPago" :items="estadoPagoOpts" class="w-48" data-qa="compras-filtro-estado-pago" />
+          </UFormField>
           <USwitch v-model="soloFaltaCosto" label="Solo las que les falta costo" />
         </div>
 
@@ -171,6 +204,21 @@ const columns: TableColumn<CompraListItem>[] = [
                 size="sm"
               />
             </div>
+          </template>
+          <template v-if="puedePagar" #pago-cell="{ row }">
+            <UBadge
+              v-if="row.original.estadoPago != null"
+              :label="insigniaPago(
+                { estadoPago: row.original.estadoPago, deuda: row.original.deuda ?? null, vencida: row.original.vencida ?? false },
+                formatMonto,
+              ).label"
+              :color="insigniaPago(
+                { estadoPago: row.original.estadoPago, deuda: row.original.deuda ?? null, vencida: row.original.vencida ?? false },
+                formatMonto,
+              ).color"
+              variant="subtle"
+              size="sm"
+            />
           </template>
           <template #empty>
             <div class="py-8 text-center text-sm text-muted">

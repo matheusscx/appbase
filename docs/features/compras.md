@@ -1,9 +1,10 @@
 # Feature: Compras — recibir mercadería (pieza 1)
 
-**Status**: Complete (piezas 1 a 4); pieza 5 (la deuda con el proveedor) en curso — tareas 1 y 2 de
-`docs/superpowers/plans/2026-09-28-compras-deuda-proveedor.md` (el modelo/total/vencimiento, y
-pagar/anular un pago). "Por pagar" y confirmar con `pago` siguen en las tareas 3 y 4.
-**Last Updated**: 2026-09-28
+**Status**: Complete (piezas 1 a 5). Pieza 5 (la deuda con el proveedor y sus pagos) cerró el
+2026-09-29 con las cinco tareas de
+`docs/superpowers/plans/2026-09-28-compras-deuda-proveedor.md`. Los gastos sin stock, la pieza
+que sigue, todavía no tiene spec (`docs/agent/pendientes.md`).
+**Last Updated**: 2026-09-29
 
 Spec: [`2026-09-18-compras-recepcion-design.md`](../superpowers/specs/2026-09-18-compras-recepcion-design.md) ·
 plan: [`2026-09-18-compras-recepcion.md`](../superpowers/plans/2026-09-18-compras-recepcion.md) ·
@@ -48,12 +49,13 @@ compras.
   aprende el código del proveedor para que la próxima factura calce sola. Sección:
   [La lectura del XML y el aprendizaje](#la-lectura-del-xml-y-el-aprendizaje). Spec:
   [`2026-09-27-compras-xml-dte-design.md`](../superpowers/specs/2026-09-27-compras-xml-dte-design.md).
-- **Pieza 5 (en curso):** cada compra confirmada deja deuda con su proveedor, con vencimiento; el
-  total del documento, cuando el tipo lo lleva, es el transcrito (nunca calculado). Sección:
-  [La deuda con el proveedor](#la-deuda-con-el-proveedor-pieza-5). Spec:
+- **Pieza 5:** cada compra confirmada deja deuda con su proveedor, con vencimiento; el total del
+  documento, cuando el tipo lo lleva, es el transcrito (nunca calculado); un pago se reparte
+  entre sus compras o queda a favor; el efectivo sale de la caja de quien paga en el mismo acto;
+  la compra al contado se registra en un solo gesto; y "Por pagar" muestra lo que se debe por
+  proveedor. Sección: [La deuda con el proveedor](#la-deuda-con-el-proveedor-pieza-5). Spec:
   [`2026-09-28-compras-deuda-proveedor-design.md`](../superpowers/specs/2026-09-28-compras-deuda-proveedor-design.md).
-- **Piezas siguientes, cada una con su spec:** los pagos a proveedores (dentro de la pieza 5) y los
-  gastos sin stock.
+- **Pieza siguiente, con su propia spec:** los gastos sin stock.
 - **Fuera:** orden de compra, devolución al proveedor, moneda extranjera, conectarse al SII
   (Portal MIPYME, casilla de intercambio) para traer el XML solo o para aceptar/reclamar un DTE, y
   verificar su firma digital. ⛔ **Todo lo fiscal** va en su propio frente: mientras tanto, el
@@ -125,9 +127,9 @@ a $1.000.
 
 ## La deuda con el proveedor (pieza 5)
 
-Spec: [`2026-09-28-compras-deuda-proveedor-design.md`](../superpowers/specs/2026-09-28-compras-deuda-proveedor-design.md).
-**Solo la tarea 1: el modelo, el total y el vencimiento.** Los pagos (`pagos_proveedor`,
-`POST /compras/pagos`, "Por pagar") llegan en tareas siguientes del mismo frente.
+Spec: [`2026-09-28-compras-deuda-proveedor-design.md`](../superpowers/specs/2026-09-28-compras-deuda-proveedor-design.md)
+(`Status: Done`). Esta sección es el modelo, el total y el vencimiento (tarea 1); pagar y anular
+un pago, confirmar con `pago`, el recorte, las lecturas y "Por pagar" están más abajo.
 
 ### El total, según el tipo de documento
 
@@ -182,7 +184,8 @@ arranca **sin** `Pagar` a propósito (spec § 9, decisión 7b): "el bodeguero re
 
 Spec [`2026-09-28-compras-deuda-proveedor-design.md`](../superpowers/specs/2026-09-28-compras-deuda-proveedor-design.md)
 § 5, § 8 (solo `GET /compras/pagos`), § 9 y § 11. "Por pagar" (`GET /compras/por-pagar`) y
-confirmar con `{ pago }` (spec § 7) llegan en la tarea 3, más abajo.
+confirmar con `{ pago }` (spec § 7) están en la sección de la tarea 3, más abajo; las pantallas
+(`por-pagar.vue`, `PagarProveedorModal.vue`, `AnularPagoModal.vue`), en la de la tarea 5, al final.
 
 ### El modelo
 
@@ -286,8 +289,9 @@ resto de la compra.
 
 ## Confirmar con pago, el recorte y las lecturas de deuda (pieza 5, tarea 3)
 
-Spec § 6, § 7, § 8, § 9, § 11 y § 12. Cierra la pieza: la compra al contado en un solo gesto, que
-corregir o anular una compra deje la deuda bien sola, y "Por pagar".
+Spec § 6, § 7, § 8, § 9, § 11 y § 12. La compra al contado en un solo gesto, que corregir o
+anular una compra deje la deuda bien sola, y las lecturas que alimentan "Por pagar" (la
+pantalla, en la sección de la tarea 5, al final).
 
 ### La compra al contado, en un gesto (`POST /compras/:id/confirmar`)
 
@@ -386,6 +390,14 @@ pago_proveedor_id` — con su unitario sobre el SQL (`compras.service.spec.ts`).
   lo justifica, la solución es una columna materializada del total (con su propio frente de
   sincronización), no una segunda cuantización en `WHERE`. No "arreglar" esto agregando una
   expresión de redondeo en SQL.
+  ⚠️ **Deuda conocida, cruzada con el backlog:** este `estadoPago` que trae TODO a memoria antes
+  de paginar es el mismo problema, en otra pantalla, que la entrada con prioridad de
+  [`pendientes.md`](../agent/pendientes.md) § 3 *"las pantallas de venta cargan solo los
+  primeros 100 ítems"* (owner, 2026-09-28: la grilla tiene que paginar y buscar en el
+  servidor) — acá el listado de compras filtrado por `estadoPago` tiene el mismo defecto de
+  fondo (paginar bien exige que el filtro nazca en el servidor, no que se aplique después de
+  traer la página). No se resuelve acá: cuando ese frente encare la paginación server-side en
+  serio, esta lectura de `GET /compras` es candidata al mismo arreglo.
 - **Las escrituras sobre una confirmada devuelven los mismos campos de pago que `GET
   /compras/:id`, sin un `GET` aparte.** `corregirLinea`, `corregirDescuento`,
   `actualizarDocumento`, `anular` y `confirmar` (con o sin `pago`) resuelven `Pagar` en su
@@ -476,6 +488,93 @@ vencimiento, el botón de corregir por permiso, la sección de pago por permiso 
 según el tipo); `compras-pago-al-confirmar.nuxt.spec.ts` (la precarga del XML, "¿la pagaste
 ya?" por permiso, `FmaPago`, el body y la `Idempotency-Key` de confirmar con pago);
 `terceros.nuxt.spec.ts` (`plazoPagoDias` al editar y al crear).
+
+---
+
+## "Por pagar", pagar, anular y el cierre del frente (pieza 5, tarea 5)
+
+Spec § 5.1, § 5.2, § 8 y § 10. La pantalla del dueño (decisión 9), el pago repartido con la
+propuesta desde la más vieja (decisión 2), y anular un pago (decisión 6).
+
+### `pages/compras/por-pagar.vue`
+
+Pantalla entera detrás de `Compras:Pagar` con **middleware de ruta** (`definePageMeta({
+middleware: ['auth', 'permiso'], permiso: 'Compras:Pagar' })`, `docs/patterns/frontend.md` §
+1.2) — no un `v-if` por control: "el bodeguero recibe y el dueño paga" (decisión 12) hace que
+sea la pantalla ENTERA la que es de quien paga, así que cubre también la URL escrita a mano. La
+entrada de navegación (`layouts/dashboard.vue`) se gatea con el mismo permiso, no con `Leer`
+como el resto de Compras — es la excepción a la regla de § 1 del pattern frontend ("el link se
+gatea con `Leer`"): acá la pregunta que importa es "¿puede pagar?", porque no hay nada más que
+esta pantalla ofrezca a quien solo puede leer.
+
+Una fila por proveedor (`GET /compras/por-pagar`), con lo que se debe, lo vencido, lo que vence
+en 7 días y el saldo a favor; al tocar uno, sus compras abiertas y sus pagos vigentes con saldo
+a favor (`GET /compras/por-pagar/:proveedorId`), y el botón **Pagar**. Pagar o anular un pago
+recarga los dos (`recargarTodo`): la deuda y el saldo a favor cambiaron en los dos lados.
+
+### `components/compras/PagarProveedorModal.vue`
+
+Monto, medio de pago (solo si el monto es positivo: `monto` 0 con aplicaciones es "usar el
+saldo a favor", decisión 5, y ahí no hace falta medio), referencia, y el **reparto propuesto**
+— editable —, con lo que no se reparte dicho en pantalla ("Lo que no se reparte queda a favor
+del proveedor: $X"). Se abre desde "Por pagar" (el proveedor entero) y también desde
+`CompraConfirmada.vue` (con deuda pendiente: recarga esa compra sola al cerrar, vía
+`recargarTrasPago`, porque el pago pudo repartirse a otras compras del mismo proveedor además
+de esta).
+
+**La propuesta** (`useCompras() → proponerReparto`, pura y testeada con Vitest): el saldo a
+favor primero, después la compra más vieja por `fechaVencimiento` y, a igualdad o sin
+vencimiento, por `fechaDocumento` — mismo criterio que fondea el servidor (spec § 5.1,
+decisión 2). Se regenera cada vez que cambia el monto tipeado, **hasta que alguien edita una
+fila a mano** (`repartoTocado`): desde ahí la pantalla no vuelve a pisar lo editado, y
+"Recalcular propuesta" es la única forma de volver a la sugerencia automática. Solo se mandan
+aplicaciones con monto > 0 — el DTO de `POST /compras/pagos` exige `monto` positivo por línea
+(spec § 5.1) — y el servidor **valida el reparto que llega, no lo recalcula**: la propuesta es
+enteramente de pantalla.
+
+La clave de idempotencia (`useIntentoCobro`, ámbito `pago-proveedor:<proveedorId>`) persiste
+entre aperturas del modal para el mismo proveedor: si el modal se cierra y se reabre tras un
+corte de red, el reintento con la misma clave reproduce el pago en vez de pagar dos veces.
+
+### `components/compras/AnularPagoModal.vue`
+
+Motivo obligatorio, `POST /compras/pagos/:id/anular`. El aviso de caja cerrada (decisión 6) es
+**estático, no un chequeo previo** — mismo criterio que el aviso de efectivo sin caja de "¿la
+pagaste ya?" (tarea 4): la pantalla no puede saber si la caja de ese día sigue abierta sin
+pedir un permiso de caja que quien tiene `Pagar` puede no tener, así que el `UAlert` siempre
+dice que, si el pago fue en efectivo y la caja ya cerró, anular no le devuelve plata a ninguna
+caja.
+
+### Insignia de pago y filtro en `pages/compras/index.vue`
+
+Con `Compras:Pagar` (mismo `computed` que `CompraConfirmada.vue`, no `usePermisosCrud`: `Pagar`
+no es uno de los cuatro CRUD), una columna **Pago** con la insignia de `useCompras() →
+insigniaPago`, y un `UFormField` "Estado de pago" que filtra `GET /compras?estadoPago=`. Sin
+`Pagar`, ni la columna se agrega (`columns` es un `computed` que la omite entera, no la oculta
+con CSS) ni el filtro aparece — y aunque alguien forzara el filtro por query string, el backend
+lo rechaza con 403 (decisión 12, ya cubierto por el e2e de la API).
+
+### Testing
+
+Vitest: `useCompras.spec.ts` (`proponerReparto`, la escena de Don Pedro y el resto de spec §
+12); `PagarProveedorModal.nuxt.spec.ts` (la propuesta, que editar una fila detiene la
+regeneración automática, "Recalcular propuesta", y el body exacto de `POST /compras/pagos`);
+`AnularPagoModal.nuxt.spec.ts` (motivo obligatorio, el body, el aviso siempre visible);
+`CompraConfirmada.nuxt.spec.ts` (el botón "Pagar" con deuda pendiente y su ausencia en una
+`pagada`); `compras/index.nuxt.spec.ts` (la insignia y el filtro, presentes solo con `Pagar`);
+`compras/por-pagar.nuxt.spec.ts` (la lista, y que tocar un proveedor carga su detalle y el
+botón Pagar).
+
+Navegador (`e2e/compras/compras-deuda-proveedor.spec.ts`, como `compras.paga`): recibir la
+feria y pagarla al contado en un gesto —el efectivo baja de verdad en la caja física de quien
+paga, verificado cerrando esa caja y comprobando que el arqueo cuadra con lo que debería quedar
+después del pago—; pagar dos compras de un proveedor desde "Por pagar", con la propuesta
+cubriéndolas enteras. Y como el bodeguero, sin `Pagar`
+(`e2e/compras/compras-deuda-proveedor-bodeguero.spec.ts`): la navegación no ofrece "Por pagar";
+entrar por URL a `/compras/por-pagar` lo frena el middleware (termina en `/ventas`); el listado
+de compras no lleva insignia ni filtro de pago; y confirmar una compra no ofrece "¿la pagaste
+ya?". El 403 de la API detrás de cada uno de estos escondites está en
+`backend/test/compras.e2e-spec.ts` y `backend/test/compras-pagos.e2e-spec.ts` (spec § 12).
 
 ---
 
@@ -835,21 +934,31 @@ editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar
 ## Frontend
 
 - `pages/compras/index.vue`: el listado, con las insignias *Borrador*, *Confirmada*, *Anulada* y
-  **Falta costo**, y sus filtros.
+  **Falta costo**, y sus filtros. De la pieza 5 (tarea 5): la columna **Pago** (insignia) y el
+  filtro "Estado de pago", solo con `Compras:Pagar`.
 - `pages/compras/[id].vue`: la carga del borrador —selector de unidad y presentación, el lápiz,
   la cuenta a la vista (pieza 2 § 6, ver arriba)— y el modal de confirmar con el resumen. De la
   pieza 5: "Total del documento" (requerido/opcional/oculto según el tipo) y "Vence el" (sugerida
   desde el plazo del proveedor, editable).
+- `pages/compras/por-pagar.vue` (pieza 5, tarea 5, nueva): la pantalla del dueño — ver
+  ["Por pagar", pagar, anular y el cierre del frente](#por-pagar-pagar-anular-y-el-cierre-del-frente-pieza-5-tarea-5).
 - `components/compras/PresentacionModal.vue`: crear, corregir y retirar una presentación
   (pieza 2). `presentacion: null` crea; con una, edita.
 - `components/compras/CompraConfirmada.vue`: el detalle de una confirmada, con
   `CorregirLineaModal`, `DescuentoModal` y `AnularCompraModal`. Cada acción aparece solo con su
-  permiso.
+  permiso. De la pieza 5 (tarea 5): el botón "Pagar" (con `PagarProveedorModal`) cuando queda
+  deuda y hay `Pagar`.
+- `components/compras/PagarProveedorModal.vue` y `AnularPagoModal.vue` (pieza 5, tarea 5,
+  nuevos): ver la sección de la tarea 5.
 - `composables/useCompras.ts`: los tipos del detalle y lo que se manda (`cuerpoCorreccion`,
   `cuerpoDescuento`), fuera de los `.vue`. De la pieza 2: `etiquetaPresentacion`,
   `unidadDeLinea`, `cuentaPresentacion` y `cantidadLineaConfirmada`. De la pieza 5:
-  `cuerpoDocumento` (el pedazo del body de `totalDocumento`/`fechaVencimiento`) y
-  `fechaVencimientoSugerida` (espejo en JS de `deuda.ts → vencimiento`, sin la tipeada).
+  `cuerpoDocumento` (el pedazo del body de `totalDocumento`/`fechaVencimiento`),
+  `fechaVencimientoSugerida` (espejo en JS de `deuda.ts → vencimiento`, sin la tipeada) y, de la
+  tarea 5, `proponerReparto` (la propuesta de reparto de `PagarProveedorModal`, pura).
+- `layouts/dashboard.vue` (pieza 5, tarea 5): la entrada "Por pagar" del menú, gateada con
+  `Compras:Pagar` (no con `Leer`, a diferencia del resto de Compras — ver la sección de la
+  tarea 5).
 
 ---
 
@@ -868,13 +977,20 @@ editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar
   (la secuencia sigue el orden de aplicación bajo concurrencia) y `test/compras-dte.e2e-spec.ts`
   (la lectura del XML y el aprendizaje al guardar).
 - **Front:** los specs de componente de `components/compras/` (incluido
-  `PresentacionModal.nuxt.spec.ts` y `CargarDteModal.nuxt.spec.ts`) y `compras-carga.nuxt.spec.ts`.
+  `PresentacionModal.nuxt.spec.ts`, `CargarDteModal.nuxt.spec.ts`, `PagarProveedorModal.nuxt.spec.ts`
+  y `AnularPagoModal.nuxt.spec.ts`), `compras-carga.nuxt.spec.ts`, `compras/index.nuxt.spec.ts` y
+  `compras/por-pagar.nuxt.spec.ts`.
 - **Navegador:** `frontend/e2e/compras/compras-por-pantalla.spec.ts` — los pasos del smoke,
   como el encargado, más el test de que la lista de productos del formulario es la de Compras
   y no el catálogo de ítems —, `compras-presentacion.spec.ts` (pieza 2): crear una
   presentación desde la línea, confirmar y corregir en cajas, y el lápiz corrigiendo el
-  contenido antes de confirmar; y `compras-dte.spec.ts` (piezas 3-4): cargar, aprender y calzar
-  solo desde el XML. Ver [El smoke, automatizado](#el-smoke-automatizado).
+  contenido antes de confirmar; `compras-dte.spec.ts` (piezas 3-4): cargar, aprender y calzar
+  solo desde el XML; `compras-deuda-proveedor.spec.ts` (pieza 5, tarea 5, como `compras.paga`):
+  pagar al confirmar con el efectivo bajando de verdad en su caja, y pagar dos compras desde
+  "Por pagar"; y `compras-deuda-proveedor-bodeguero.spec.ts` (como `encargado.compras`, sin
+  `Pagar`): sin "¿la pagaste ya?", sin "Por pagar" en la navegación ni en la insignia del
+  listado, y el middleware de ruta frenando la URL directa. Ver
+  [El smoke, automatizado](#el-smoke-automatizado).
 
 ---
 

@@ -158,6 +158,17 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/compras',
     })
   }
+  // "Por pagar" (spec compras-deuda-proveedor § 8 y § 10, decisión 12): "el
+  // bodeguero recibe y el dueño paga" — la entrada es de `Pagar`, no de
+  // `Leer` como el resto del módulo (§ 1 del pattern frontend: acá el link
+  // pregunta "¿puede pagar?", porque TODA la pantalla es de quien paga).
+  if (permissionsStore.esAdmin || permissionsStore.can('Compras', 'Pagar')) {
+    base.push({
+      label: 'Por pagar',
+      icon: 'i-lucide-hand-coins',
+      to: '/compras/por-pagar',
+    })
+  }
   if (permissionsStore.esAdmin || permissionsStore.can('Items', 'Leer')) {
     base.push({
       label: 'Costos desfasados',

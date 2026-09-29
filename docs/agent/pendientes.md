@@ -832,7 +832,13 @@ Eran tres: la tercera —el reporte de varianza— se construyó y está en [`re
   Lo que sigue abierto de este frente:
 
   **Las piezas que faltan, cada una con su spec y en este orden:**
-  - **Pieza 3:** la deuda con el proveedor y sus pagos, con la salida de caja automática.
+  - **Pieza 3: hecha (2026-09-29).** La deuda con el proveedor y sus pagos, con la salida de
+    caja automática. Detalle: [`features/compras.md`](../features/compras.md) § "La deuda con
+    el proveedor"; spec
+    [`2026-09-28-compras-deuda-proveedor-design.md`](../superpowers/specs/2026-09-28-compras-deuda-proveedor-design.md);
+    plan [`2026-09-28-compras-deuda-proveedor.md`](../superpowers/plans/2026-09-28-compras-deuda-proveedor.md).
+    Lo fiscal y la factura que agrupa varias guías quedaron fuera a propósito (spec § 13): sus
+    entradas están más abajo en esta misma sección.
   - **Pieza 4:** los gastos sin stock, con la categoría que define el tenant.
   - **La lectura del XML del DTE: hecha (2026-09-27).** El encargado sube el XML y el borrador de
     siempre queda pre-llenado; el código del proveedor se aprende en una tabla propia
@@ -1780,6 +1786,36 @@ marcador interno, no un documento tributario.
   impuesto", que sale de [ADR-011](../adr/011-catalogo-impuestos-sistema.md) — y una decisión con
   implicancia tributaria que ADR-010 saca de cualquier tarea de arrastre: no se resuelve como
   efecto colateral de leer un XML.
+
+- [ ] **Lo fiscal de la deuda con el proveedor: calcular IVA/ILA, validar el total contra el
+  neto, y la factura de compra (código 46) con retención** (fiscal — **frente propio, con su
+  propia sesión**: `CLAUDE.md` invariante 5 y ADR-010, § 13 de la spec de la pieza 3 de
+  compras). La pieza 3 (`2026-09-28-compras-deuda-proveedor-design.md`, decisión 10) dejó la
+  deuda de una compra con documento como el **total transcrito**, sin calcularlo ni validarlo
+  contra el neto de las líneas — "el sistema no lo calcula, no calcula impuestos y no lo valida
+  contra el neto de las líneas (la diferencia es el impuesto, y decidirlo es del frente fiscal)".
+  Lo que queda por decidir ahí, junto: si el sistema calcula el IVA (o el ILA, para bebidas
+  alcohólicas) sobre el neto de las líneas y lo compara con el total transcrito para avisar un
+  desajuste; y la factura de compra (DTE 46, con retención), que hoy ni se distingue de una
+  factura normal en el catálogo de tipos de documento del proveedor. Ninguna de las dos se
+  resuelve como parte de otra tarea: la regla la pone el owner.
+- [ ] **Una factura que agrupa varias guías de despacho, en compras** (spec § 13 de
+  `2026-09-28-compras-deuda-proveedor-design.md`). La pieza 3 dejó `total_documento`
+  `opcional` en la guía de despacho (decisión 11: se recibe sin total y se completa cuando
+  llega la factura) pero cada compra sigue con su propio total — si una factura cubre tres
+  guías, hoy su total se reparte **a mano** entre las tres compras, una por una. Una pantalla
+  que sepa "estas N compras corresponden a una sola factura" y reparta el total ella misma (por
+  ejemplo, proporcional a lo recibido en cada guía) queda para cuando aparezca el caso real: no
+  hay owner que lo haya pedido todavía, y repartir a mano las pocas veces que pasa es más barato
+  que construir el reparto automático de arrastre.
+- [ ] **Pagar desde la caja de otra persona, en compras** (spec § 2 decisión 3 y § 13 de
+  `2026-09-28-compras-deuda-proveedor-design.md`) — **posible suma futura, no decidida**. Hoy
+  el efectivo de un pago a proveedor sale **solo** de la caja física abierta de quien registra
+  el pago (`CajaService.findActiva`); si el dueño no atiende caja, no puede pagar en efectivo sin
+  abrir una. La opción descartada al diseñar la pieza 3 (elegir cualquier caja abierta, limitado
+  a quien supervisa cajas) metía el descuadre de un error del que paga en el cierre de otra
+  persona, así que quedó fuera. **Se retoma si se ve que el dueño nunca abre caja** (la condición
+  que la spec deja escrita) — no antes, y no como parte de otra tarea.
 
 ---
 

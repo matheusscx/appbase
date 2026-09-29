@@ -22,6 +22,7 @@ const {
   etiquetaPresentacion,
   unidadDeLinea,
   cuentaPresentacion,
+  proponerReparto,
 } = useCompras()
 
 const formatMontoStub = (v: string) => `$${v}`
@@ -257,5 +258,60 @@ describe('insigniaPago — spec § 4.1 y § 10', () => {
   it('pagada nunca es "Vencida" (estadoPagoCompra ya lo garantiza, esto no lo revalida)', () => {
     expect(insigniaPago({ estadoPago: 'pagada', deuda: '0', vencida: false }, formatMontoStub).label)
       .toBe('Pagada')
+  })
+})
+
+describe('proponerReparto — spec § 5.1 y § 10, decisión 2', () => {
+  const donPedroLunes = { id: 'c-lunes', deuda: '120000', fechaVencimiento: '2026-10-01', fechaDocumento: '2026-09-01' }
+  const donPedroMartes = { id: 'c-martes', deuda: '80000', fechaVencimiento: '2026-10-15', fechaDocumento: '2026-09-15' }
+
+  it('la escena de Don Pedro: $120.000 + $80.000, paga $150.000 → la del lunes entera y $30.000 de la otra', () => {
+    expect(proponerReparto([donPedroLunes, donPedroMartes], '0', '150000')).toEqual([
+      { compraId: 'c-lunes', monto: '120000' },
+      { compraId: 'c-martes', monto: '30000' },
+    ])
+  })
+
+  it('el saldo a favor se usa PRIMERO, y recién después el monto nuevo', () => {
+    // $50.000 a favor + $10.000 nuevo = $60.000 → alcanza para la del lunes,
+    // que solo debe $50.000... en esta escena la deuda es menor a propósito.
+    const compra = { id: 'c-1', deuda: '50000', fechaVencimiento: null, fechaDocumento: '2026-09-01' }
+    expect(proponerReparto([compra], '50000', '10000')).toEqual([{ compraId: 'c-1', monto: '50000' }])
+  })
+
+  it('ordena por fechaVencimiento; sin vencimiento, por fechaDocumento', () => {
+    const sinVenc = { id: 'sin-venc', deuda: '10000', fechaVencimiento: null, fechaDocumento: '2026-09-01' }
+    const conVencAntes = { id: 'con-venc', deuda: '10000', fechaVencimiento: '2026-09-05', fechaDocumento: '2026-09-10' }
+    // sinVenc ordena por su fechaDocumento (2026-09-01), antes que el vencimiento del otro (2026-09-05).
+    expect(proponerReparto([conVencAntes, sinVenc], '0', '10000').map(r => r.compraId)).toEqual(['sin-venc'])
+  })
+
+  it('con el MISMO vencimiento, desempata por fechaDocumento (spec § 5.1: "después fecha_documento")', () => {
+    // Antes se comparaba una sola cadena mezclada (fechaVencimiento ?? fechaDocumento) y,
+    // con el mismo vencimiento en las dos, el comparador daba 0 y no desempataba nada:
+    // el orden quedaba a merced de cómo llegaran del backend, no de fechaDocumento.
+    const nacidaAntes = { id: 'nacida-antes', deuda: '10000', fechaVencimiento: '2026-10-01', fechaDocumento: '2026-09-01' }
+    const nacidaDespues = { id: 'nacida-despues', deuda: '10000', fechaVencimiento: '2026-10-01', fechaDocumento: '2026-09-15' }
+    // Con $10.000 —justo la deuda de UNA— solo entra la que gana el desempate:
+    // si el comparador no mirara fechaDocumento con el vencimiento empatado, el
+    // orden de entrada (acá invertido a propósito) decidiría en su lugar y la
+    // elegida sería la del documento más nuevo, no la más vieja.
+    expect(proponerReparto([nacidaDespues, nacidaAntes], '0', '10000').map(r => r.compraId))
+      .toEqual(['nacida-antes'])
+  })
+
+  it('una compra sin deuda conocida (total desconocido) o ya pagada no entra en la propuesta', () => {
+    const sinTotal = { id: 'sin-total', deuda: null, fechaVencimiento: null, fechaDocumento: '2026-09-01' }
+    const pagada = { id: 'pagada', deuda: '0', fechaVencimiento: null, fechaDocumento: '2026-09-01' }
+    expect(proponerReparto([sinTotal, pagada], '0', '10000')).toEqual([])
+  })
+
+  it('sin nada disponible (monto y saldo en 0), no hay propuesta', () => {
+    expect(proponerReparto([donPedroLunes], '0', '0')).toEqual([])
+    expect(proponerReparto([donPedroLunes], '0', '')).toEqual([])
+  })
+
+  it('lo que sobra después de cubrir toda la deuda no se propone a ninguna compra (queda a favor)', () => {
+    expect(proponerReparto([donPedroLunes], '0', '200000')).toEqual([{ compraId: 'c-lunes', monto: '120000' }])
   })
 })
