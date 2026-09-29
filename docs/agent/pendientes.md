@@ -445,8 +445,10 @@ revisión independiente no lo pudo reproducir, con razón.
      tocó. Se anota para que nadie lo redescubra como fuga nueva.
   2. **El historial de cajas del cajero** (pedido del owner el 2026-08-22: bloquearlo): ya no
      está ordenado detrás de ninguna decisión —la salida (c) para la caja propia y el rastro
-     para los oráculos ya están—. Lo que falta es solo decidir si se construye; hoy el cajero
-     con `MiCaja` ve el acumulado de sus propios turnos, que es su propia plata.
+     para los oráculos ya están—. Hoy el cajero con `MiCaja` ve el acumulado de sus propios
+     turnos. ✅ **Se bloquea (owner, 2026-09-29, en el selector interactivo de la orquestadora):** eligió *A: sí, se bloquea*
+     (recomendada, porque era lo que había pedido en agosto) por sobre *B: que vea sus turnos*.
+     El cajero deja de ver su historial y el supervisor lo sigue viendo. Es chico.
 
 - [ ] **El envío diario del resumen de descuadres** (backend + producto; residuo del umbral
   de descuadre, construido el 2026-08-23 → [`resueltos.md`](resueltos.md) § *"El umbral de
@@ -498,6 +500,11 @@ revisión independiente no lo pudo reproducir, con razón.
   `crear`, sin mirar el estado), las salidas siguen siendo las tres de 2026-08-16: (a) un
   estado propio para el pedido sin cobrar, (b) que el backend distinga el caso por config del
   tenant, o (c) que ese medio no se ofrezca. Ninguna es una corrección: las tres son producto.
+  ✅ **DECIDIDO (owner, 2026-09-29): (a), un estado propio "por retirar".** Cómo se decidió: en el selector interactivo de la orquestadora
+  eligió *A* (recomendada, la de más trabajo) por sobre *B: cada local lo activa en su
+  configuración* y *C: no ofrecerlo*. El pedido aparta el stock, no cuenta como venta hasta que
+  se cobra en la caja, y el pago online con pasarela sigue exigiendo pago completo. Con eso no se
+  afloja el `400` de `ventas.service.ts:697` para ningún otro camino.
 
 - [ ] **La nota de crédito no es un documento todavía: es un monto libre con líneas
   informativas** (backend, decisión g) — lo medido, no una impresión: la cabecera toma el
@@ -803,6 +810,17 @@ Eran tres: la tercera —el reporte de varianza— se construyó y está en [`re
      ([ADR-023](../adr/023-promociones-familia-propia-del-motor.md)), no descuentos. Un
      descuento exclusivo sobre una línea que ya trae promo es un caso real —"2x1 más cupón"— y
      hoy nada lo impide.
+
+  ✅ **Las dos, decididas (owner, 2026-09-29, en el selector interactivo de la orquestadora):**
+  1. **Cruza niveles.** "No se combina" bloquea cualquier otro descuento, sea de la venta o de una
+     línea. Escena: un cupón de bienvenida del 10% sobre la venta, marcado "no se combina", y un
+     happy hour sobre la cerveza. Eligió *A: sí, bloquea todos* (recomendada) por sobre *B: solo
+     los de su mismo nivel*.
+  2. **Bloquea también las promociones.** Escena: 2x1 de cerveza los martes y un cupón que no se
+     combina. Eligió *A: sí, tampoco va con promos* (recomendada) por sobre *B: las promos van
+     siempre*. El cliente se queda con uno de los dos, y el sistema tiene que avisar cuál se
+     aplicó. ⚠️ Cuál gana cuando chocan (¿el que más descuenta?) no se preguntó: es lo primero
+     que tiene que resolver la spec, y si no sale del mercado, se le pregunta al owner.
 
 - [ ] **Compras: carga manual, y el DTE del SII como atajo encima** ✅ *(tres decisiones del
   owner el 2026-09-03: la varianza va **después** de compras; la recepción **puede leer la
