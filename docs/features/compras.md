@@ -363,8 +363,8 @@ pago_proveedor_id` — con su unitario sobre el SQL (`compras.service.spec.ts`).
   saldo a favor > 0.
 - **`GET /compras` y `GET /compras/:id`** siguen con `Leer`. El controller resuelve `Pagar` (sin
   bloquear la ruta) y se lo pasa al service, que arma la respuesta con o sin la parte de pago:
-  `estadoPago`, `deuda` y `vencida` en cada fila del listado; además `aplicado` y `pagos` (los
-  que cubren la compra) en el detalle. **Sin `Pagar` esas claves no viajan** (`undefined`, que
+  `estadoPago`, `deuda`, `deudaMinima` y `vencida` en cada fila del listado; además `aplicado` y
+  `pagos` (los que cubren la compra) en el detalle. **Sin `Pagar` esas claves no viajan** (`undefined`, que
   `JSON.stringify` omite) — nunca `null`: el dato no se esconde en la pantalla, se omite en la
   respuesta (invariante 6). El filtro `estadoPago` de `GET /compras` es 403 sin `Pagar`. Lo que
   el bodeguero transcribe (`total`, `totalDocumento`, `fechaVencimiento`) sigue llegando siempre.
@@ -376,6 +376,20 @@ pago_proveedor_id` — con su unitario sobre el SQL (`compras.service.spec.ts`).
   `diaNegocioEnZona`) — **no** `fechaLocalTenant` (hora de reloj sin corte): lo hace cumplir
   `dia-negocio.invariant.spec.ts`, que prohíbe ese import fuera de la allowlist del motor de
   precios y promociones.
+  - **`falta_precio` trae además `deudaMinima`** ("al menos $X", spec § 4.1 y decisión 8): Σ
+    cantidad × precio de las líneas que SÍ tienen precio, cuantizada una sola vez con el mismo
+    `cuantizar` que usa `totalCompra` (sin término de descuento — un descuento no puede existir
+    mientras falte el precio de una línea, lo exige `validarDescuento`), menos lo aplicado, nunca
+    negativa. El SQL de `SELECT_CABECERA`/`comprasConfirmadasParaDeuda` ya suma solo sobre las
+    líneas con precio: `cantidad * precio_unitario` da `NULL` en las que no lo tienen, y `SUM`
+    ignora los `NULL`. **Sin NINGUNA línea con precio no hay mínimo** (decisión 8b, owner
+    2026-09-29): `bruto` es `NULL` en ese caso, y `compras.service.ts → totalMinimoConocido`
+    devuelve `null` en vez de cuantizar 0 — la pantalla dice solo "falta el precio", nunca "al
+    menos $0". Una línea con precio `'0'` (el regalo) SÍ es un mínimo conocido: `bruto` ahí es
+    `'0'`, no `NULL`, y `deudaMinima` sale `'0'` de verdad. **`falta_total` no tiene mínimo**
+    (decisión 10: el neto de las líneas no es la deuda de una factura con documento) — ahí
+    `deudaMinima` siempre es `null`. En cualquier otro estado también es `null`: solo tiene valor
+    en `falta_precio`, y solo cuando al menos una línea tiene precio.
 - **Una consulta por lectura, sin N+1.** El total de un `suma_lineas` pasa por `cuantizar`
   (Decimal.js: no se reimplementa en SQL), así que `GET /compras/por-pagar` y
   `.../por-pagar/:proveedorId` agregan SQL crudo (compras confirmadas + saldo a favor por
@@ -469,10 +483,12 @@ condicionado a un estado que la pantalla no puede consultar sin pedir un permiso
 Total y vencimiento se muestran siempre (leyendo `compra.totalDocumento`/`fechaVencimiento`);
 "Corregir total o vencimiento" (nuevo `CorregirDocumentoModal.vue`, `PATCH
 /compras/:id/documento`) solo con `Actualizar`, el mismo permiso que corregir una línea. Con
-`Pagar` además: pagado (`compra.aplicado`), deuda, la insignia de estado (`useCompras() →
-insigniaPago`) y la tabla de pagos que aplicaron algo a esta compra (`compra.pagos`) — nada de
-esto se evalúa si `compra.estadoPago` no vino en la respuesta (decisión 12: el backend lo omite
-sin `Pagar`, nunca lo manda en `null`).
+`Pagar` además: pagado (`compra.aplicado`), deuda (`useCompras() → textoDeuda`: el monto exacto,
+o "Al menos $X" con `compra.deudaMinima` en `falta_precio`, o "falta el total" en `falta_total`
+— decisión 10, ahí no hay mínimo), la insignia de estado (`useCompras() → insigniaPago`, que en
+`falta_precio` también muestra "Al menos $X" cuando `deudaMinima` vino) y la tabla de pagos que
+aplicaron algo a esta compra (`compra.pagos`) — nada de esto se evalúa si `compra.estadoPago` no
+vino en la respuesta (decisión 12: el backend lo omite sin `Pagar`, nunca lo manda en `null`).
 
 `CorregirDocumentoModal.vue` arma el body con `useCompras() → cuerpoActualizarDocumento`: solo
 lo que cambió (comparado como `Decimal`, no como texto — lo que trae el `GET` es
@@ -482,7 +498,7 @@ lo que cambió (comparado como `Decimal`, no como texto — lo que trae el `GET`
 ### Testing
 
 Vitest: `useDte.spec.ts` (los tres campos nuevos, con los fixtures); `useCompras.spec.ts`
-(`cuerpoActualizarDocumento`, `insigniaPago`); `CompraConfirmada.nuxt.spec.ts` (total/
+(`cuerpoActualizarDocumento`, `insigniaPago`, `textoDeuda`); `CompraConfirmada.nuxt.spec.ts` (total/
 vencimiento, el botón de corregir por permiso, la sección de pago por permiso y por
 `estadoPago`); `CorregirDocumentoModal.nuxt.spec.ts` (solo lo que cambió, `null` vs sin body
 según el tipo); `compras-pago-al-confirmar.nuxt.spec.ts` (la precarga del XML, "¿la pagaste
@@ -510,14 +526,19 @@ esta pantalla ofrezca a quien solo puede leer.
 Una fila por proveedor (`GET /compras/por-pagar`), con lo que se debe, lo vencido, lo que vence
 en 7 días y el saldo a favor; al tocar uno, sus compras abiertas y sus pagos vigentes con saldo
 a favor (`GET /compras/por-pagar/:proveedorId`), y el botón **Pagar**. Pagar o anular un pago
-recarga los dos (`recargarTodo`): la deuda y el saldo a favor cambiaron en los dos lados.
+recarga los dos (`recargarTodo`): la deuda y el saldo a favor cambiaron en los dos lados. La
+columna **Debe** de las compras abiertas usa `useCompras() → textoDeuda`: el monto si se conoce,
+"Al menos $X" con la `deudaMinima` de una `falta_precio`, o "falta el total" en una `falta_total`.
 
 ### `components/compras/PagarProveedorModal.vue`
 
 Monto, medio de pago (solo si el monto es positivo: `monto` 0 con aplicaciones es "usar el
 saldo a favor", decisión 5, y ahí no hace falta medio), referencia, y el **reparto propuesto**
 — editable —, con lo que no se reparte dicho en pantalla ("Lo que no se reparte queda a favor
-del proveedor: $X"). Se abre desde "Por pagar" (el proveedor entero) y también desde
+del proveedor: $X"). Cada fila muestra "Debe $X" (`useCompras() → textoDeuda`): el monto exacto,
+o "Al menos $X" con la `deudaMinima` de la compra en `falta_precio` (spec § 4.1, decisión 8) —
+antes era un texto fijo sin monto ("al menos lo que se sepa del total"), reemplazado al sumar
+`deudaMinima` a la respuesta. Se abre desde "Por pagar" (el proveedor entero) y también desde
 `CompraConfirmada.vue` (con deuda pendiente: recarga esa compra sola al cerrar, vía
 `recargarTrasPago`, porque el pago pudo repartirse a otras compras del mismo proveedor además
 de esta).
@@ -549,7 +570,9 @@ caja.
 
 Con `Compras:Pagar` (mismo `computed` que `CompraConfirmada.vue`, no `usePermisosCrud`: `Pagar`
 no es uno de los cuatro CRUD), una columna **Pago** con la insignia de `useCompras() →
-insigniaPago`, y un `UFormField` "Estado de pago" que filtra `GET /compras?estadoPago=`. Sin
+insigniaPago` — en `falta_precio` con `deudaMinima`, la insignia lee "Al menos $X" en vez de
+"Falta el precio" a secas —, y un `UFormField` "Estado de pago" que filtra `GET
+/compras?estadoPago=`. Sin
 `Pagar`, ni la columna se agrega (`columns` es un `computed` que la omite entera, no la oculta
 con CSS) ni el filtro aparece — y aunque alguien forzara el filtro por query string, el backend
 lo rechaza con 403 (decisión 12, ya cubierto por el e2e de la API).

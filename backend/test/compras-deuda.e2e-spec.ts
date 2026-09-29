@@ -75,6 +75,8 @@ interface CompraDetalle {
   totalDocumento: string | null;
   estadoPago?: string;
   deuda?: string | null;
+  /** La deuda mínima conocida ("al menos $X"): solo en `falta_precio` (spec § 4.1, decisión 8). */
+  deudaMinima?: string | null;
   vencida?: boolean;
   aplicado?: string;
   pagos?: { id: string | null; estado: string | null }[];
@@ -91,7 +93,12 @@ interface PorPagarProveedorItem {
   comprasTotalDesconocido: number;
 }
 interface PorPagarDetalle {
-  compras: { id: string; estadoPago: string; deuda: string | null }[];
+  compras: {
+    id: string;
+    estadoPago: string;
+    deuda: string | null;
+    deudaMinima: string | null;
+  }[];
   pagos: unknown[];
 }
 
@@ -461,6 +468,7 @@ describe('Compras — confirmar con pago, el recorte y las lecturas de deuda (e2
       );
       expect(confirmadaSinPagar.estado).toBe('confirmada');
       expect(confirmadaSinPagar.deuda).toBeUndefined();
+      expect(confirmadaSinPagar.deudaMinima).toBeUndefined();
       expect(confirmadaSinPagar.estadoPago).toBeUndefined();
       expect(confirmadaSinPagar.vencida).toBeUndefined();
     });
@@ -793,6 +801,7 @@ describe('Compras — confirmar con pago, el recorte y las lecturas de deuda (e2
         tokenCorreccion,
       );
       expect(sinPagar.deuda).toBeUndefined();
+      expect(sinPagar.deudaMinima).toBeUndefined();
       expect(sinPagar.estadoPago).toBeUndefined();
       expect(sinPagar.vencida).toBeUndefined();
       expect(sinPagar.totalDocumento).toBe('70.0000');
@@ -914,6 +923,7 @@ describe('Compras — confirmar con pago, el recorte y las lecturas de deuda (e2
       );
       expect(detalle.estadoPago).toBeUndefined();
       expect(detalle.deuda).toBeUndefined();
+      expect(detalle.deudaMinima).toBeUndefined();
       expect(detalle.vencida).toBeUndefined();
       expect(detalle.aplicado).toBeUndefined();
       expect(detalle.pagos).toBeUndefined();
@@ -929,7 +939,148 @@ describe('Compras — confirmar con pago, el recorte y las lecturas de deuda (e2
       expect(fila).toBeDefined();
       expect(fila?.estadoPago).toBeUndefined();
       expect(fila?.deuda).toBeUndefined();
+      expect(fila?.deudaMinima).toBeUndefined();
       expect(fila?.vencida).toBeUndefined();
+    });
+
+    /**
+     * La escena de Andina (spec § 4.1 y decisión 8): bebidas $60.000 (con
+     * precio) + queso sin precio, en un tipo `sinDocumento` (suma_lineas).
+     * Se paga $50.000 parcial y, mientras falte el precio del queso, la
+     * deuda mínima conocida es "al menos $10.000" (60.000 − 50.000) — nunca
+     * el total exacto, que sigue `null` (`falta_precio`).
+     */
+    it('sin documento con una línea sin precio: falta_precio con deudaMinima "al menos $X"', async () => {
+      const propio = (
+        await post<IdResponse>('/api/terceros', {
+          tipo: 'proveedor',
+          nombre: nombreUnico('Andina queso E2E'),
+        })
+      ).id;
+      const quesoId = (
+        await post<IdResponse>('/api/items', {
+          nombre: nombreUnico('Queso E2E'),
+          precioBase: '1000',
+          precioIncluyeImpuesto: true,
+          monedaId: '550e8400-e29b-41d4-a716-446655440003',
+          tipo: 'producto',
+          unidadMedida: 'kg',
+          stock: '1',
+          costo: '500',
+        })
+      ).id;
+
+      const borrador = await post<IdResponse>(
+        '/api/compras',
+        {
+          proveedorId: propio,
+          tipoDocumentoCompraId: sinDocumento.id,
+          fechaDocumento: '2026-09-01',
+          ubicacionId,
+          lineas: [
+            {
+              itemId: productoId,
+              cantidad: '1',
+              unidadCodigo: 'kg',
+              precioUnitario: '60000',
+            },
+            { itemId: quesoId, cantidad: '1', unidadCodigo: 'kg' },
+          ],
+        },
+        201,
+        tokenPaga,
+      );
+      await post(`/api/compras/${borrador.id}/confirmar`, {}, 201, tokenPaga);
+      await post(
+        '/api/compras/pagos',
+        {
+          proveedorId: propio,
+          monto: '50000',
+          metodoPagoId: otroMedio.id,
+          aplicaciones: [{ compraId: borrador.id, monto: '50000' }],
+        },
+        201,
+        tokenPaga,
+        { 'Idempotency-Key': randomUUID() },
+      );
+
+      const detalle = await get<CompraDetalle>(
+        `/api/compras/${borrador.id}`,
+        200,
+        tokenPaga,
+      );
+      expect(detalle.estadoPago).toBe('falta_precio');
+      expect(detalle.deuda).toBeNull();
+      expect(Number(detalle.deudaMinima)).toBe(10000);
+
+      // Mismo dato en `por-pagar/:proveedorId` (§ 8).
+      const porPagarDetalle = await get<PorPagarDetalle>(
+        `/api/compras/por-pagar/${propio}`,
+        200,
+        tokenPaga,
+      );
+      const fila = porPagarDetalle.compras.find((c) => c.id === borrador.id);
+      expect(fila?.estadoPago).toBe('falta_precio');
+      expect(fila?.deuda).toBeNull();
+      expect(Number(fila?.deudaMinima)).toBe(10000);
+
+      // Sin `Pagar` (con `Leer`, el bodeguero): el campo ni viaja (decisión 12).
+      const sinPagar = await get<CompraDetalle>(
+        `/api/compras/${borrador.id}`,
+        200,
+        tokenBodeguero,
+      );
+      expect(sinPagar.estadoPago).toBeUndefined();
+      expect(sinPagar.deuda).toBeUndefined();
+      expect(sinPagar.deudaMinima).toBeUndefined();
+    });
+
+    /**
+     * Decisión 8b (owner, 2026-09-29, corrigiendo el round 1 del review):
+     * "sin ningún precio cargado no hay mínimo" — cuando NINGUNA línea tiene
+     * precio, `deudaMinima` es `null`, no `'0'`. La pantalla dice solo
+     * "falta el precio de N línea(s)", nunca "al menos $0".
+     */
+    it('sin documento con TODAS las líneas sin precio: falta_precio con deudaMinima null (decisión 8b)', async () => {
+      const propio = (
+        await post<IdResponse>('/api/terceros', {
+          tipo: 'proveedor',
+          nombre: nombreUnico('Sin ningún precio E2E'),
+        })
+      ).id;
+
+      const borrador = await post<IdResponse>(
+        '/api/compras',
+        {
+          proveedorId: propio,
+          tipoDocumentoCompraId: sinDocumento.id,
+          fechaDocumento: '2026-09-01',
+          ubicacionId,
+          lineas: [{ itemId: productoId, cantidad: '1', unidadCodigo: 'kg' }],
+        },
+        201,
+        tokenPaga,
+      );
+      await post(`/api/compras/${borrador.id}/confirmar`, {}, 201, tokenPaga);
+
+      const detalle = await get<CompraDetalle>(
+        `/api/compras/${borrador.id}`,
+        200,
+        tokenPaga,
+      );
+      expect(detalle.estadoPago).toBe('falta_precio');
+      expect(detalle.deuda).toBeNull();
+      expect(detalle.deudaMinima).toBeNull();
+
+      const porPagarDetalle = await get<PorPagarDetalle>(
+        `/api/compras/por-pagar/${propio}`,
+        200,
+        tokenPaga,
+      );
+      const fila = porPagarDetalle.compras.find((c) => c.id === borrador.id);
+      expect(fila?.estadoPago).toBe('falta_precio');
+      expect(fila?.deuda).toBeNull();
+      expect(fila?.deudaMinima).toBeNull();
     });
   });
 });

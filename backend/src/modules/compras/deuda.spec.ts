@@ -311,7 +311,12 @@ describe('estadoPagoCompra (spec § 4.1)', () => {
       aplicado: '100',
       fechaVencimiento: '2026-09-01',
     });
-    expect(r).toEqual({ estadoPago: 'pagada', deuda: '0', vencida: false });
+    expect(r).toEqual({
+      estadoPago: 'pagada',
+      deuda: '0',
+      deudaMinima: null,
+      vencida: false,
+    });
   });
 
   it('parcial: aplicado > 0 y deuda > 0', () => {
@@ -321,7 +326,12 @@ describe('estadoPagoCompra (spec § 4.1)', () => {
       aplicado: '40',
       fechaVencimiento: null,
     });
-    expect(r).toEqual({ estadoPago: 'parcial', deuda: '60', vencida: false });
+    expect(r).toEqual({
+      estadoPago: 'parcial',
+      deuda: '60',
+      deudaMinima: null,
+      vencida: false,
+    });
   });
 
   it('pendiente: sin aplicado', () => {
@@ -375,19 +385,90 @@ describe('estadoPagoCompra (spec § 4.1)', () => {
     expect(r).toEqual({
       estadoPago: 'falta_precio',
       deuda: null,
+      deudaMinima: null,
       vencida: false,
     });
   });
 
-  it('total desconocido en obligatorio/opcional: falta_total', () => {
+  it('sin totalMinimoConocido, falta_precio queda con deudaMinima null', () => {
+    const r = estadoPagoCompra({
+      ...base,
+      total: null,
+      aplicado: '0',
+      fechaVencimiento: null,
+    });
+    expect(r.deudaMinima).toBeNull();
+  });
+
+  it('falta_precio: deudaMinima = totalMinimoConocido − aplicado, nunca negativa', () => {
+    const r = estadoPagoCompra({
+      ...base,
+      total: null,
+      aplicado: '20000',
+      fechaVencimiento: null,
+      totalMinimoConocido: '60000',
+    });
+    expect(r).toEqual({
+      estadoPago: 'falta_precio',
+      deuda: null,
+      deudaMinima: '40000',
+      vencida: false,
+    });
+  });
+
+  it('falta_precio: pagado de más deja deudaMinima en 0, nunca negativa', () => {
+    const r = estadoPagoCompra({
+      ...base,
+      total: null,
+      aplicado: '90000',
+      fechaVencimiento: null,
+      totalMinimoConocido: '60000',
+    });
+    expect(r.deudaMinima).toBe('0');
+  });
+
+  it('falta_precio sin NINGUNA línea con precio: deudaMinima null, no "0" (decisión 8b, owner 2026-09-29)', () => {
+    // El caller (compras.service.ts → totalMinimoConocido) manda `null`
+    // cuando `bruto` es NULL — ninguna línea tiene precio, así que no hay
+    // mínimo que mostrar: la pantalla dice solo "falta el precio".
+    const r = estadoPagoCompra({
+      ...base,
+      total: null,
+      aplicado: '0',
+      fechaVencimiento: null,
+      totalMinimoConocido: null,
+    });
+    expect(r.deudaMinima).toBeNull();
+  });
+
+  it('falta_precio con UNA línea de precio $0 (el regalo) + una sin precio: deudaMinima "0", SÍ es un mínimo conocido', () => {
+    // Distinto del caso de arriba: acá SÍ hay una línea con precio (el
+    // regalo, `precioUnitario: '0'`), así que `bruto` es `'0'`, no `null` —
+    // `totalMinimoConocido` llega como `'0'`, y el mínimo conocido es real.
+    const r = estadoPagoCompra({
+      ...base,
+      total: null,
+      aplicado: '0',
+      fechaVencimiento: null,
+      totalMinimoConocido: '0',
+    });
+    expect(r.deudaMinima).toBe('0');
+  });
+
+  it('total desconocido en obligatorio/opcional: falta_total, sin deuda mínima (decisión 10)', () => {
     const r = estadoPagoCompra({
       hoy: '2026-09-29',
       esSumaLineas: false,
       total: null,
       aplicado: '0',
       fechaVencimiento: null,
+      // Un `falta_total` no tiene mínimo aunque el llamador mande el bruto
+      // de líneas: decisión 10, el neto de las líneas no es la deuda de una
+      // factura.
+      totalMinimoConocido: '60000',
     });
     expect(r.estadoPago).toBe('falta_total');
+    expect(r.deudaMinima).toBeNull();
   });
 
   it('total desconocido y vencida: sigue marcando vencida', () => {

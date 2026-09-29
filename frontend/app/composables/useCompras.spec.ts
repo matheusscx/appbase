@@ -23,6 +23,7 @@ const {
   unidadDeLinea,
   cuentaPresentacion,
   proponerReparto,
+  textoDeuda,
 } = useCompras()
 
 const formatMontoStub = (v: string) => `$${v}`
@@ -248,6 +249,20 @@ describe('insigniaPago — spec § 4.1 y § 10', () => {
       .toEqual({ label: 'Falta el precio', color: 'neutral' })
   })
 
+  it('falta_precio con deudaMinima: "Al menos $X" (decisión 8)', () => {
+    expect(insigniaPago(
+      { estadoPago: 'falta_precio', deuda: null, deudaMinima: '10000', vencida: false },
+      formatMontoStub,
+    )).toEqual({ label: 'Al menos $10000', color: 'neutral' })
+  })
+
+  it('falta_precio SIN ninguna línea con precio (deudaMinima null, no "0"): "Falta el precio" (decisión 8b, owner 2026-09-29)', () => {
+    expect(insigniaPago(
+      { estadoPago: 'falta_precio', deuda: null, deudaMinima: null, vencida: false },
+      formatMontoStub,
+    )).toEqual({ label: 'Falta el precio', color: 'neutral' })
+  })
+
   it('vencida pisa a las demás, aunque el estado sea "parcial" o "falta_total"', () => {
     expect(insigniaPago({ estadoPago: 'parcial', deuda: '20000', vencida: true }, formatMontoStub))
       .toEqual({ label: 'Vencida', color: 'error' })
@@ -258,6 +273,21 @@ describe('insigniaPago — spec § 4.1 y § 10', () => {
   it('pagada nunca es "Vencida" (estadoPagoCompra ya lo garantiza, esto no lo revalida)', () => {
     expect(insigniaPago({ estadoPago: 'pagada', deuda: '0', vencida: false }, formatMontoStub).label)
       .toBe('Pagada')
+  })
+})
+
+describe('textoDeuda — spec § 4.1 y decisión 8', () => {
+  it('con deuda conocida, el monto tal cual', () => {
+    expect(textoDeuda({ deuda: '20000' }, formatMontoStub)).toBe('$20000')
+  })
+
+  it('falta_precio: "Al menos $X" con la deuda mínima conocida', () => {
+    expect(textoDeuda({ deuda: null, deudaMinima: '10000' }, formatMontoStub)).toBe('Al menos $10000')
+  })
+
+  it('falta_total: sin deuda mínima, "falta el total" (decisión 10)', () => {
+    expect(textoDeuda({ deuda: null, deudaMinima: null }, formatMontoStub)).toBe('falta el total')
+    expect(textoDeuda({ deuda: null }, formatMontoStub)).toBe('falta el total')
   })
 })
 

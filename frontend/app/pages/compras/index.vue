@@ -24,6 +24,8 @@ interface CompraListItem {
    */
   estadoPago?: EstadoPagoCompra
   deuda?: string | null
+  /** La deuda mínima conocida ("al menos $X"): solo en `falta_precio` (spec § 4.1, decisión 8). */
+  deudaMinima?: string | null
   vencida?: boolean
 }
 
@@ -209,11 +211,11 @@ const columns = computed<TableColumn<CompraListItem>[]>(() => [
             <UBadge
               v-if="row.original.estadoPago != null"
               :label="insigniaPago(
-                { estadoPago: row.original.estadoPago, deuda: row.original.deuda ?? null, vencida: row.original.vencida ?? false },
+                { estadoPago: row.original.estadoPago, deuda: row.original.deuda ?? null, deudaMinima: row.original.deudaMinima, vencida: row.original.vencida ?? false },
                 formatMonto,
               ).label"
               :color="insigniaPago(
-                { estadoPago: row.original.estadoPago, deuda: row.original.deuda ?? null, vencida: row.original.vencida ?? false },
+                { estadoPago: row.original.estadoPago, deuda: row.original.deuda ?? null, deudaMinima: row.original.deudaMinima, vencida: row.original.vencida ?? false },
                 formatMonto,
               ).color"
               variant="subtle"

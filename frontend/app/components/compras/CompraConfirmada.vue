@@ -18,7 +18,7 @@ const emit = defineEmits<{ actualizada: [CompraDetalle] }>()
 
 const { formatMonto, formatFecha } = useFormatters()
 const {
-  faltaAlgunPrecio, etiquetaCambio, cantidadConUnidad, unidadDeLinea, cantidadLineaConfirmada, insigniaPago,
+  faltaAlgunPrecio, etiquetaCambio, cantidadConUnidad, unidadDeLinea, cantidadLineaConfirmada, insigniaPago, textoDeuda,
 } = useCompras()
 const { puedeActualizar } = usePermisosCrud('Compras')
 const permissionsStore = usePermissionsStore()
@@ -42,7 +42,12 @@ const puedeDescontar = computed(() =>
 const muestraPago = computed(() => confirmada.value && puedePagar.value && props.compra.estadoPago != null)
 const insignia = computed(() => muestraPago.value
   ? insigniaPago(
-      { estadoPago: props.compra.estadoPago!, deuda: props.compra.deuda ?? null, vencida: props.compra.vencida ?? false },
+      {
+        estadoPago: props.compra.estadoPago!,
+        deuda: props.compra.deuda ?? null,
+        deudaMinima: props.compra.deudaMinima,
+        vencida: props.compra.vencida ?? false,
+      },
       formatMonto,
     )
   : null,
@@ -255,7 +260,7 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
         </div>
         <div>
           <dt class="text-muted">Deuda</dt>
-          <dd class="tabular-nums">{{ compra.deuda != null ? formatMonto(compra.deuda) : '—' }}</dd>
+          <dd class="tabular-nums">{{ textoDeuda({ deuda: compra.deuda ?? null, deudaMinima: compra.deudaMinima }, formatMonto) }}</dd>
         </div>
         <div>
           <dt class="text-muted">Estado</dt>

@@ -20,6 +20,8 @@ interface CompraPorPagar {
   fechaVencimiento: string | null
   estadoPago: EstadoPagoCompra
   deuda: string | null
+  /** La deuda mínima conocida ("al menos $X"): solo en `falta_precio` (spec § 4.1, decisión 8). */
+  deudaMinima: string | null
   vencida: boolean
 }
 
@@ -46,7 +48,7 @@ const open = defineModel<boolean>('open', { required: true })
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatMonto, formatFecha } = useFormatters()
-const { proponerReparto, insigniaPago, compararPorVencimiento } = useCompras()
+const { proponerReparto, insigniaPago, textoDeuda, compararPorVencimiento } = useCompras()
 const intentoCobro = useIntentoCobro()
 
 const cargando = ref(false)
@@ -250,15 +252,15 @@ async function enviar() {
                       {{ c.tipoDocumentoNombre }}<template v-if="c.folio"> {{ c.folio }}</template>
                     </span>
                     <UBadge
-                      :label="insigniaPago({ estadoPago: c.estadoPago, deuda: c.deuda, vencida: c.vencida }, formatMonto).label"
-                      :color="insigniaPago({ estadoPago: c.estadoPago, deuda: c.deuda, vencida: c.vencida }, formatMonto).color"
+                      :label="insigniaPago({ estadoPago: c.estadoPago, deuda: c.deuda, deudaMinima: c.deudaMinima, vencida: c.vencida }, formatMonto).label"
+                      :color="insigniaPago({ estadoPago: c.estadoPago, deuda: c.deuda, deudaMinima: c.deudaMinima, vencida: c.vencida }, formatMonto).color"
                       variant="subtle"
                       size="sm"
                     />
                   </div>
                   <p class="text-xs text-muted">
                     Vence {{ c.fechaVencimiento ? formatFecha(c.fechaVencimiento) : '—' }}
-                    · Debe {{ c.deuda != null ? formatMonto(c.deuda) : 'al menos lo que se sepa del total' }}
+                    · Debe {{ textoDeuda(c, formatMonto) }}
                   </p>
                 </div>
                 <MoneyInput

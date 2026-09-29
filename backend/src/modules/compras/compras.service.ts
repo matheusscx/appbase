@@ -140,6 +140,8 @@ export interface CompraListItem {
    */
   estadoPago?: EstadoPagoCompra;
   deuda?: string | null;
+  /** La deuda mínima conocida ("al menos $X"): solo en `falta_precio` (spec § 4.1, decisión 8). */
+  deudaMinima?: string | null;
   vencida?: boolean;
 }
 
@@ -249,6 +251,8 @@ export interface PorPagarCompraItem {
   fechaVencimiento: string | null;
   estadoPago: EstadoPagoCompra;
   deuda: string | null;
+  /** La deuda mínima conocida ("al menos $X"): solo en `falta_precio` (spec § 4.1, decisión 8). */
+  deudaMinima: string | null;
   vencida: boolean;
 }
 
@@ -2593,6 +2597,9 @@ export class ComprasService {
           fechaVencimiento: f.fecha_vencimiento,
           hoy,
           esSumaLineas,
+          totalMinimoConocido: esSumaLineas
+            ? this.totalMinimoConocido(f.bruto, cfg)
+            : null,
         });
         return {
           id: f.compra_id,
@@ -2604,6 +2611,7 @@ export class ComprasService {
           fechaVencimiento: f.fecha_vencimiento,
           estadoPago: derivado.estadoPago,
           deuda: derivado.deuda,
+          deudaMinima: derivado.deudaMinima,
           vencida: derivado.vencida,
         };
       })
@@ -4062,6 +4070,9 @@ export class ComprasService {
             fechaVencimiento: r.fecha_vencimiento,
             hoy: pago.hoy,
             esSumaLineas,
+            totalMinimoConocido: esSumaLineas
+              ? this.totalMinimoConocido(r.bruto, cfg)
+              : null,
           })
         : null;
     return {
@@ -4083,9 +4094,31 @@ export class ComprasService {
         ? {
             estadoPago: datosDePago.estadoPago,
             deuda: datosDePago.deuda,
+            deudaMinima: datosDePago.deudaMinima,
             vencida: datosDePago.vencida,
           }
         : {}),
     };
+  }
+
+  /**
+   * Σ cantidad × precio de las líneas CON precio, cuantizado una vez con el
+   * modo del tenant (spec § 4.1, decisión 8) — el mismo `cuantizar` que
+   * `totalCompra`, sin descuento: un descuento no puede existir mientras
+   * falte el precio de una línea (`validarDescuento`). `bruto` ya viene
+   * sumado solo sobre las líneas con precio: `cantidad * precio_unitario` da
+   * `NULL` en las que no lo tienen, y `SUM` ignora los `NULL` (`JOINS_CABECERA`
+   * / `comprasConfirmadasParaDeuda`). **Sin NINGUNA línea con precio, `bruto`
+   * es `NULL` y no hay mínimo** (decisión 8b, owner 2026-09-29): la pantalla
+   * dice solo "falta el precio", nunca "al menos $0". Una línea con precio
+   * $0 (el regalo) SÍ es un mínimo conocido — `bruto` ahí es `'0'`, no
+   * `null`, y cuantiza a `'0'` como cualquier otro monto.
+   */
+  private totalMinimoConocido(
+    bruto: string | null,
+    cfg: ConfigCalculo,
+  ): string | null {
+    if (bruto == null) return null;
+    return cuantizar(new Decimal(bruto), cfg).toString();
   }
 }

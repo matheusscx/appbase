@@ -128,6 +128,8 @@ export interface CompraDetalle {
    */
   estadoPago?: EstadoPagoCompra
   deuda?: string | null
+  /** La deuda mínima conocida ("al menos $X"): solo en `falta_precio` (spec § 4.1, decisión 8). */
+  deudaMinima?: string | null
   vencida?: boolean
   /** Σ aplicaciones vivas de pagos vigentes a esta compra. */
   aplicado?: string
@@ -427,13 +429,29 @@ export function useCompras() {
   }
 
   /**
+   * Cuánto se debe, para leer (spec § 4.1 y decisión 8): el monto exacto si
+   * se conoce; en `falta_precio`, "Al menos $X" con la deuda mínima conocida
+   * (Σ de las líneas CON precio, decisión 8); "falta el total" si ni eso se
+   * sabe (`falta_total`, decisión 10: el neto de las líneas no es la deuda
+   * de una factura con documento, así que ahí no hay mínimo).
+   */
+  function textoDeuda(
+    c: { deuda: string | null, deudaMinima?: string | null },
+    formatMonto: (v: string) => string,
+  ): string {
+    if (c.deuda != null) return formatMonto(c.deuda)
+    if (c.deudaMinima != null) return `Al menos ${formatMonto(c.deudaMinima)}`
+    return 'falta el total'
+  }
+
+  /**
    * La insignia de pago (spec § 4.1 y § 10): "Vencida" pisa a las demás —
    * queda deuda (o el total ni se sabe) y ya pasó el vencimiento, así que es
    * lo más urgente. Solo tiene sentido con `Compras:Pagar` (decisión 12):
    * quien no lo tiene ni recibe `estadoPago` en la respuesta.
    */
   function insigniaPago(
-    c: { estadoPago: EstadoPagoCompra, deuda: string | null, vencida: boolean },
+    c: { estadoPago: EstadoPagoCompra, deuda: string | null, deudaMinima?: string | null, vencida: boolean },
     formatMonto: (v: string) => string,
   ): { label: string, color: ColorInsignia } {
     if (c.vencida) return { label: 'Vencida', color: 'error' }
@@ -445,7 +463,10 @@ export function useCompras() {
       case 'falta_total':
         return { label: 'Falta el total', color: 'neutral' }
       case 'falta_precio':
-        return { label: 'Falta el precio', color: 'neutral' }
+        return {
+          label: c.deudaMinima != null ? `Al menos ${formatMonto(c.deudaMinima)}` : 'Falta el precio',
+          color: 'neutral',
+        }
       default:
         return { label: 'Pendiente de pago', color: 'warning' }
     }
@@ -533,6 +554,7 @@ export function useCompras() {
     faltaAlgunPrecio,
     insigniaEstado,
     insigniaPago,
+    textoDeuda,
     estadoOptions,
     diferenciaCantidad,
     cuerpoCorreccion,

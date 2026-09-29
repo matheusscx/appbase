@@ -38,6 +38,8 @@ interface CompraPorPagar {
   fechaVencimiento: string | null
   estadoPago: EstadoPagoCompra
   deuda: string | null
+  /** La deuda mínima conocida ("al menos $X"): solo en `falta_precio` (spec § 4.1, decisión 8). */
+  deudaMinima: string | null
   vencida: boolean
 }
 
@@ -49,7 +51,7 @@ interface ProveedorDetalle {
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatMonto, formatFecha } = useFormatters()
-const { insigniaPago, montoEsPositivo } = useCompras()
+const { insigniaPago, textoDeuda, montoEsPositivo } = useCompras()
 
 const proveedores = ref<ProveedorPorPagar[]>([])
 const loading = ref(false)
@@ -223,7 +225,7 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
                   />
                 </template>
                 <template #deuda-cell="{ row }">
-                  <span class="tabular-nums">{{ row.original.deuda != null ? formatMonto(row.original.deuda) : '—' }}</span>
+                  <span class="tabular-nums">{{ textoDeuda(row.original, formatMonto) }}</span>
                 </template>
                 <template #empty>
                   <div class="py-6 text-center text-sm text-muted">

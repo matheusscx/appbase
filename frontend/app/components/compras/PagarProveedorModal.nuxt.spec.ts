@@ -23,6 +23,15 @@ const DETALLE = {
       total: '120000', totalDocumento: '120000', fechaVencimiento: '2026-10-01',
       estadoPago: 'pendiente', deuda: '120000', vencida: false,
     },
+    // Andina, bebidas $60.000 + queso sin precio (spec compras-deuda-proveedor
+    // § 4.1, decisión 8): total desconocido, sin deuda exacta — la deuda
+    // mínima conocida se muestra como "Al menos $X". Vence después que las
+    // otras dos para no correr el orden que `orden[0]` verifica más abajo.
+    {
+      id: 'queso', fechaDocumento: '2026-09-20', folio: '3', tipoDocumentoNombre: 'Sin documento',
+      total: null, totalDocumento: null, fechaVencimiento: '2026-11-01',
+      estadoPago: 'falta_precio', deuda: null, deudaMinima: '10000', vencida: false,
+    },
   ],
   pagos: [],
 }
@@ -97,6 +106,16 @@ describe('PagarProveedorModal — la propuesta (spec § 5.1 y § 10, decisión 2
     expect(filaMartes).toBeTruthy()
   })
 
+  it('una compra falta_precio muestra la deuda mínima como "Al menos $X" (spec § 4.1, decisión 8)', async () => {
+    await abrir()
+
+    const filaQueso = document.body.querySelector('[data-qa="pagar-fila-queso"]')!.textContent
+    expect(filaQueso).toContain('Al menos $10.000')
+    // Sin deuda conocida, no entra en la propuesta automática (spec § 2,
+    // decisión 8): el usuario la agrega a mano si quiere.
+    expect(valorFila('queso')).toBe('')
+  })
+
   it('el saldo a favor se muestra cuando hay pagos vigentes con sobrante', async () => {
     const wrapper = await abrir()
     void wrapper
@@ -134,9 +153,10 @@ describe('PagarProveedorModal — la propuesta (spec § 5.1 y § 10, decisión 2
     await tipearMonto(wrapper, '150000')
 
     // Los `MoneyInput` montados: [0] el monto a pagar, [1] la fila del lunes
-    // (más vieja, va primero), [2] la del martes.
+    // (más vieja, va primero), [2] la del martes, [3] la del queso (vence
+    // después, va última — sin deuda conocida, no entra en la propuesta).
     const inputs = wrapper.findAllComponents({ name: 'MoneyInput' })
-    expect(inputs).toHaveLength(3)
+    expect(inputs).toHaveLength(4)
     inputs[2]!.vm.$emit('update:modelValue', '5000')
     await new Promise(r => setTimeout(r, 0))
     expect(valorFila('martes')).toBe('5.000')

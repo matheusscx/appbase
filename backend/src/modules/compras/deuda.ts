@@ -240,6 +240,15 @@ export interface EstadoPagoResultado {
   estadoPago: EstadoPagoCompra;
   /** `total − aplicado`, nunca negativa; `null` si el total es desconocido. */
   deuda: string | null;
+  /**
+   * La deuda mínima conocida ("al menos $X", spec § 4.1 y decisión 8): solo
+   * en `falta_precio` — nunca en `falta_total`, que no tiene mínimo (decisión
+   * 10: el neto de las líneas no es la deuda de una factura). `null` en
+   * cualquier otro estado, y también en `falta_precio` cuando NINGUNA línea
+   * tiene precio (decisión 8b): ahí no hay mínimo que mostrar, solo "falta
+   * el precio".
+   */
+  deudaMinima: string | null;
   /** Con deuda (o total desconocido) Y `fechaVencimiento < hoy` (spec § 4.1). */
   vencida: boolean;
 }
@@ -266,14 +275,35 @@ export function estadoPagoCompra(params: {
   hoy: string;
   /** `false` en un tipo `obligatorio`/`opcional` (decisión 10). */
   esSumaLineas: boolean;
+  /**
+   * Σ cantidad × precio de las líneas CON precio, ya cuantizado a la escala
+   * de la moneda (spec § 4.1, decisión 8) — el mismo `cuantizar` que
+   * `totalCompra`, sin término de descuento: un descuento no puede existir
+   * mientras falte el precio de una línea (`validarDescuento`). Solo se usa
+   * cuando `total` es `null` y `esSumaLineas`; el llamador lo cuantiza
+   * porque acá no llega la config del tenant. **`null` cuando NINGUNA línea
+   * tiene precio** (decisión 8b, owner 2026-09-29: "sin ningún precio
+   * cargado no hay mínimo") — distinto de una línea con precio `'0'` (el
+   * regalo), que SÍ es un mínimo conocido y llega como `'0'`, no `null`.
+   */
+  totalMinimoConocido?: string | null;
 }): EstadoPagoResultado {
   const yaVencio =
     params.fechaVencimiento != null && params.fechaVencimiento < params.hoy;
 
   if (params.total == null) {
+    const esFaltaPrecio = params.esSumaLineas;
+    const deudaMinima =
+      esFaltaPrecio && params.totalMinimoConocido != null
+        ? Decimal.max(
+            0,
+            new Decimal(params.totalMinimoConocido).minus(params.aplicado),
+          ).toString()
+        : null;
     return {
-      estadoPago: params.esSumaLineas ? 'falta_precio' : 'falta_total',
+      estadoPago: esFaltaPrecio ? 'falta_precio' : 'falta_total',
       deuda: null,
+      deudaMinima,
       vencida: yaVencio,
     };
   }
@@ -290,6 +320,7 @@ export function estadoPagoCompra(params: {
   return {
     estadoPago,
     deuda: deuda.toString(),
+    deudaMinima: null,
     vencida: deuda.gt(0) && yaVencio,
   };
 }
