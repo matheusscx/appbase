@@ -1756,6 +1756,24 @@ Las tres preguntas que hay que contestar antes de escribir una línea:
 - **Con qué periodicidad capitaliza el compuesto**, que es lo único que lo distingue del
   simple.
 
+✅ **Dos de las tres, decididas (owner, 2026-09-29)**, después de una pasada de investigación
+de mercado que él eligió hacer primero
+([`investigaciones/2026-09-29-venta-a-credito.md`](investigaciones/2026-09-29-venta-a-credito.md)).
+Las dos las contestó en el selector interactivo de la orquestadora, con la opción recomendada:
+- **El plazo es del cliente, y cada venta lo puede cambiar**, igual que el plazo del proveedor en
+  compras (`terceros.plazo_pago_dias`, 30 días por defecto por la Ley 19.983, más el vencimiento
+  por compra). Escena: un catering de $300.000 a una empresa que paga a 30 días. Descartadas:
+  *un plazo único del local* y *se tipea en cada venta*.
+- **`interes_compuesto` se saca**: quedan el simple y la mora fija. La investigación no encontró
+  ningún POS ni ERP que capitalice interés por mora; es "no se encontró", no "el mercado lo
+  evita". Si un cliente lo pide, se reabre.
+⛔ **La tercera (al vender o al cobrar) queda para el frente fiscal**, porque es cómo se
+documenta la mora. Según la investigación [SECUNDARIA, sin verificar en sii.cl], el SII dejó de
+pedir factura o nota de débito por la mora de la Ley 19.983 en 2020 (Oficio N° 2011): se
+verifica contra la fuente primaria en esa sesión, no se da por cierto acá. La investigación
+también dice que el interés pactado sobre la TMC (CMF) anula el cobro entero: es techo legal,
+y un tenant no debería poder configurar una tasa por encima.
+
 ⚠️ **El motor sigue sin saber de tiempo, y ése es el trabajo de verdad.** La vigencia por
 fecha NO se lo enseñó: se resolvió en la capa de servicio, que le pasa un booleano ya
 calculado. Su magnitud sigue siendo `codigo === 'por_mayor' ? ctx.cantidad : ctx.monto`. Darle
