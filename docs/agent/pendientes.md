@@ -993,38 +993,40 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   **Al cerrarlo:** `frontend/e2e/salones/anular-plato.spec.ts` pasa a correr como el encargado
   —su docblock explica por qué hoy corre como admin—.
 
+- [ ] **El lote que vence antes sale primero (FEFO)** ✅ *(owner, 2026-09-28; antes era pregunta
+  de la § 4)* (backend, `inventario.service.ts`, la selección de `item_lote` … `ORDER BY creado_el
+  ASC LIMIT n FOR UPDATE`). **Cómo se decidió:** la orquestadora le planteó la escena medida —en
+  la misma factura llegan dos cajas de yogur, una vence en enero y otra en junio; se vende uno y
+  hoy el sistema sacó del de **junio** (medido por la API)— con tres opciones: *A: el que vence
+  antes solo cuando llegaron juntos*, *B: siempre el que vence antes* (recomendada: en comida es
+  lo que evita tirar mercadería) y *C: da lo mismo*. Contestó "vamos B".
+  **Lotes sin `fecha_vencimiento`:** salen **después** de los que tienen fecha, y entre ellos por
+  llegada. Lo propuso la orquestadora junto con la B y el owner no lo objetó; si al diseñar
+  aparece un caso que lo contradiga, se le vuelve a preguntar.
+  **Lo que falta al construirlo:** el desempate dentro de la misma fecha de vencimiento (llegada, y
+  después algo estable: `codigo_lote` o la PK); que la venta del POS, que nunca manda qué lote,
+  pase por el orden nuevo; y un e2e que monte el caso del yogur por la API real. ⚠️ Cruza con la
+  entrada de la § 6 *"Serie y lote están a medias"*, que pregunta si **un lote vencido se puede
+  vender o mermar**: FEFO lo pone primero en la fila, así que esa pregunta se vuelve más urgente —
+  llevársela al owner antes de construir esta. Decide qué lote sale: escribe en
+  `movimientos_inventario` y toca la trazabilidad ([ADR-007](../adr/007-inventario-serie-lote.md)),
+  así que va en su propio frente.
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
-- [ ] **Cuando en la misma compra llegan dos lotes del mismo producto, ¿cuál se vende
-  primero?** (backend, `inventario.service.ts:1775`, y su gemelo de modo serie en
-  `inventario.service.ts:1418`; medido el 2026-09-28, sale del censo que dejó el cierre del
-  kardex.) **La escena:** en la misma factura llegan dos cajas de yogur del mismo producto, una
-  que vence en **enero** y otra en **junio**. Se vende uno. Hoy el sistema saca del lote "más
-  antiguo por llegada", y como llegaron juntos **no hay uno más antiguo**: saca de cualquiera.
-  Medido por la API: confirmada esa compra, una salida de 1 descontó del lote de **junio** y
-  dejó entero el de enero. La venta del POS **siempre** pasa por esta elección —no manda qué
-  lote ni qué unidad—, así que no es un caso de laboratorio.
-  - **A — el que vence antes, solo cuando llegaron juntos.** Arregla la escena sin tocar nada
-    más; pero entre lotes de compras distintas sigue saliendo el más viejo aunque venza después.
-  - **B — siempre el que vence antes** (lo que los POS llaman FEFO). Es probablemente lo que un
-    local de comida espera; cambia qué lote sale en casos que hoy salen "por llegada", y hay que
-    decidir qué pasa con los lotes sin fecha de vencimiento.
-  - **C — da lo mismo cuál.** Se deja como está y se anota que el empate es inocuo.
-
-  **Lo mismo en productos con número de serie, con otra diferencia en juego:** en una misma
-  compra pueden entrar un equipo **nuevo** y uno **usado** (o con garantías distintas), y al
-  vender el sistema elige cualquiera de los dos. La trazabilidad no se pierde —la venta guarda
-  qué unidad salió—, pero ¿debería el cajero elegir la unidad, o el sistema preferir alguna
-  condición? Esto pasa también entre compras distintas, no solo en el empate: la selección
-  nunca mira la condición.
-
-  ⛔ Mientras no se conteste no se toca: decide qué unidad o qué lote sale, y eso toca la
-  trazabilidad ([ADR-007](../adr/007-inventario-serie-lote.md) y "Detenerse y preguntar" de
-  `CLAUDE.md`).
+- [ ] **En productos con número de serie, ¿elige el cajero la unidad, o el sistema prefiere
+  alguna condición?** (backend + frontend, `inventario.service.ts`, la selección de `item_unidad`;
+  medido el 2026-09-28 por el censo de los `ORDER BY` por `creado_el`.) En una misma compra pueden
+  entrar un equipo **nuevo** y uno **usado** (o con garantías distintas) del mismo producto, y al
+  vender el sistema elige cualquiera: la selección nunca mira la condición, y la venta del POS no
+  manda qué unidad. Pasa también entre compras distintas, no solo en el empate. La trazabilidad no
+  se pierde —la venta guarda qué unidad salió—. Era la gemela de la pregunta de lotes, que el owner
+  contestó el 2026-09-28 (§ 3, "El lote que vence antes sale primero").
+  ⛔ Mientras no se conteste no se toca ([ADR-007](../adr/007-inventario-serie-lote.md)).
 
 - [ ] **Ingredientes, componentes u opciones borrados del catálogo se saltean sin
   movimiento al anular una receta o combo** (backend, heredado de la parte 2 del frente
