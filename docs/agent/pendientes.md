@@ -171,6 +171,29 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
+- [ ] **`@IsDateString()` sin `strict` deja pasar `2026-02-31`, y la API contesta 500 en vez de
+  400** (backend, hallado por la sesión del frente de compras pieza 3 el 2026-09-29, en el DTO del
+  pago a proveedor; según ella es un patrón que se repite en todo el repo). **Sin medir por la
+  orquestadora:** ni el 500 ni el conteo de sitios. **Qué medir:** cuántos DTOs usan
+  `@IsDateString()` sin opciones; si `{ strict: true }` (validación ISO 8601 estricta de
+  class-validator) rechaza `2026-02-31` con 400 a través de `validacionGlobal()`, en un e2e y no en
+  un spec de DTO, porque `plainToInstance` + `validate` no corre el pipe; y dónde revienta hoy
+  la fecha imposible (¿Postgres al castear?). Si `strict` alcanza, pasa a la § 1 como cambio
+  mecánico en todos los sitios.
+
+- [ ] **~10 e2e leen la primera página de 100 de todo el tenant y buscan ahí su propio ítem**
+  (backend, test; hallado por la misma sesión el 2026-09-29, al arreglar `items-pausados`, que se
+  cayó cuando el spec de pagos agregó un producto). Los nombrados: combos, compras,
+  grupos-modificadores, costeo-cpp, nota-credito-composicion, recuentos, recetas, stock-minimo,
+  visibilidad-ventas-pagos y unidad-ingrediente-referenciado. **Hoy pasan**; se caen cuando el
+  tenant del seed pase de 100 productos, sin que nada del código haya cambiado. **Qué medir:**
+  confirmar la lista (grep de `pageSize=100` o del listado sin filtro en `backend/test/`) y cómo
+  resolvió `items-pausados` la sesión de compras, para copiar la forma: filtrar por el
+  nombre o el id del ítem propio en vez de recorrer la página. ⚠️ Cruza con la entrada con
+  prioridad de la § 3, *"las pantallas de venta cargan solo los primeros 100 ítems"*: si ese
+  frente cambia el contrato del listado (paginado y búsqueda en el servidor), estos specs se
+  tocan ahí mismo.
+
 - [ ] **Cada arranque de la app tira 17 índices únicos y el seeder los vuelve a crear** (backend,
   hallado por la sesión del frente de compras pieza 3 el 2026-09-29, midiendo por qué fallaban los
   specs de concurrencia; el texto literal de las 19 queries está en su reporte de la Tarea 2, §
