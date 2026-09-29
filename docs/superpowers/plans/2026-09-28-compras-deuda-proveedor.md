@@ -151,6 +151,18 @@ filtro de `eliminado_el`? ¿El `CHECK` del catálogo acepta exactamente los tres
 
 ### Task 2: Backend — pagar y anular un pago
 
+> **Estado al pausar (2026-09-29, pedido del owner):** implementada, **stageada sin commitear**
+> en el worktree `compras-deuda-proveedor` (20 archivos). Revisión independiente LIMPIO
+> (domain-reviewer tras una ronda de arreglo: la lectura de `terceros` al anular no filtraba
+> tenant; api-security LIMPIO). Backend unit 3039/3039; `compras-pagos.e2e-spec.ts` solo 13/13.
+> **El gate NO está verde:** en el e2e completo, 73 fallos en siete suites ajenas (409 al abrir
+> caja): `compras-pagos.e2e-spec.ts` abre una caja con un usuario del seed y nunca la cierra, y
+> su helper (`~línea 188-196`) reusa la caja ya abierta si `POST /caja/abrir` no da 201 y lee el
+> body sin mirar el status (el pre-commit lo bloquea). **Sigue:** que ese spec abra la caja con
+> un usuario propio o la cierre en `afterAll`, que su helper afirme el status, re-revisión
+> acotada, e2e completo y `npm test` del frontend en turno (el de salones falló dos veces por
+> carga), y commit. El arreglo del seed de `compras.paga` ya está commiteado aparte (8805e996).
+
 **Intención:** poder registrar un pago —repartido, parcial, anticipo o con saldo a favor—,
 que el efectivo salga de la caja de quien paga con la misma validación y el mismo rastro que
 la salida manual, y poder anularlo según las decisiones 6 y 6c.
