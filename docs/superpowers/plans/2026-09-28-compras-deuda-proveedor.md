@@ -248,20 +248,27 @@ detalle, un error) por la que un usuario sin `Pagar` todavía reciba un dato de 
 
 ### Task 4: Frontend — el total, el vencimiento y "¿la pagaste ya?"
 
+> **Hecha (2026-09-29), `52eb8c47`.** Gate: frontend `npm test` 1607/0, build, ratchet y design
+> OK; Playwright: los 10 specs de compras existentes pasan con la pregunta nueva, y la suite entera
+> en frío 60/0. Revisión LIMPIO. En el camino: vaciar el plazo del proveedor manda `null` (omitir
+> la clave conservaba el valor viejo con 200); el aviso de efectivo sin caja es texto fijo, porque
+> `GET /caja/activa` exige `MiCaja` y quien paga puede no tenerla; renombrada `facturaDeCompra`
+> en el e2e de deuda.
+
 **Intención:** que cargar y confirmar una compra lleve el total y el vencimiento, que el XML
 los traiga, y que quien tiene `Pagar` registre la compra al contado en un gesto.
 
-- [ ] `useDte.ts`: leer `MntTotal`, `FchVenc` y `FmaPago`, con fixtures reales; pre-llenar
+- [x] `useDte.ts`: leer `MntTotal`, `FchVenc` y `FmaPago`, con fixtures reales; pre-llenar
   total y vencimiento. `FmaPago = 1` (contado) propone "Sí, la pagué" en el confirmar.
-- [ ] `pages/terceros.vue`: "Plazo de pago (días)".
+- [x] `pages/terceros.vue`: "Plazo de pago (días)".
 - [x] `pages/compras/[id].vue`: "Total del documento" según el tipo y "Vence el" sugerido;
   mandar solo lo que el DTO declara. **Hecho en la tarea 1** (ruling del controlador).
-- [ ] Modal de confirmar: "¿La pagaste ya?" solo con `Pagar`, medio y monto, clave con
+- [x] Modal de confirmar: "¿La pagaste ya?" solo con `Pagar`, medio y monto, clave con
   `useIntentoCobro`; el aviso de efectivo sin caja abierta.
-- [ ] `CompraConfirmada.vue`: total, vencimiento y "Corregir total o vencimiento"
+- [x] `CompraConfirmada.vue`: total, vencimiento y "Corregir total o vencimiento"
   (`Actualizar`); con `Pagar`, además pagado, deuda y sus pagos (spec § 10).
-- [ ] Vitest de cada pieza (el mock de `useApiFetch` guarda la clave; el body pasa el DTO).
-- [ ] Docs: `compras.md` (las pantallas).
+- [x] Vitest de cada pieza (el mock de `useApiFetch` guarda la clave; el body pasa el DTO).
+- [x] Docs: `compras.md` (las pantallas).
 
 **Duda concreta para el revisor:** ¿algún control de escritura queda anidado bajo el `v-if`
 de otro permiso? ¿Algún body manda un campo que el DTO no declara?
