@@ -1678,6 +1678,27 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   distancia como piso en `online`. Construirlo plano permite que un tenant configure 12
   meses y la empresa se coma el IVA. Análisis completo y fuentes:
   `docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md` §6.
+  ✅ **Tres decisiones del owner (2026-09-29)**, después de una segunda pasada de investigación
+  que él eligió hacer primero
+  ([`investigaciones/2026-09-29-devolucion-por-medio-de-pago.md`](investigaciones/2026-09-29-devolucion-por-medio-de-pago.md)).
+  Las tres las contestó en el selector interactivo de la orquestadora, con la opción recomendada:
+  1. **Pago mixto: la devolución se reparte en proporción a cómo pagó**, en una sola operación.
+     Escena: $15.000 pagados con $10.000 de tarjeta y $5.000 en efectivo; vuelven $10.000 a la
+     tarjeta y $5.000 de la caja. Descartado: *como hoy, el cajero reparte*. Es lo que compone
+     las dos patas que esta entrada dice que no se conocen.
+  2. **Efectivo por una venta con tarjeta: solo si Transbank rechazó el reembolso** (por ejemplo,
+     tarjeta cerrada). El cajero no lo elige por comodidad. Descartadas: *con aprobación de
+     supervisor y un tope* (lo que hacen Toast y otros) y *nunca*. Hay que distinguir el rechazo
+     de Transbank, y el tope de hoy (efectivo devuelto ≤ efectivo cobrado en la venta, que no se
+     publica por el modo ciego) tiene que ceder solo en ese caso.
+  3. **Retracto online: el local declara su política antes de vender online**, sin valor por
+     defecto. Según la investigación [PRIMARIA: sernac.cl], la ley da 10 días, pero si el
+     comercio no informa que no acepta retracto el plazo sube a 90. Descartadas: *90 días por
+     defecto* y *10 días fijos por ahora*. ⛔ No está validado por un abogado: se suma a la
+     entrada del abogado de la § 7.
+  ⚠️ **Lo que sigue sin decidir:** el techo fiscal (plazo del SII para la NC) es fiscal y va en
+  su propia sesión. Webpay Plus y Oneclick no publican un tope de días para reembolsar (la
+  investigación no lo encontró): hay que pedírselo a Transbank, no suponerlo.
 
 - [ ] **Una persona cobrando en dos grupos de la misma liquidación** (backend + frontend,
   tema propio) — hoy el conflicto se corta con un 400 accionable que sugiere la fecha de
@@ -2009,6 +2030,9 @@ No se resuelve programando. Está acá para que tenga quién la reclame.
   próxima liquidación de propinas, lo ya pagado de una venta anulada. El owner lo decidió así
   (§ 6, *"Saldo en contra cuando se anula una venta cuya propina YA se liquidó"*), y choca con
   la (b) de arriba.
+  ➕ **Una cuarta (2026-09-29):** que un comercio que vende online sin informar que no acepta el
+  retracto queda con 90 días en vez de 10 (Ley 19.496, según sernac.cl). El owner decidió que el
+  local declare su política antes de vender online (§ 6, *"Devolución por medio de pago"*).
 
 ---
 
