@@ -302,7 +302,10 @@ la más vieja (decisión 2), y el frente cerrado con sus docs.
   de negocio de la deuda), `docs/agent/pendientes.md` (entradas de spec § 13: lo fiscal y la
   factura que agrupa guías, y la pieza 3 marcada en la lista de piezas), y el `Status` de esta
   spec y este plan.
-- [ ] **Revisión de la rama entera** (no solo del último diff), con la duda de abajo.
+- [x] **Revisión de la rama entera** (no solo del último diff), con la duda de abajo. Hecha el
+  2026-09-29 sobre las tareas 1–5 juntas: LIMPIO, con un hallazgo. La decisión 8 ("al menos
+  $X") nunca se había construido y no estaba anotada; se construyó en `56f23982`. Con ella entró
+  la decisión 8b del owner: sin ninguna línea con precio no hay mínimo.
 
 **Duda concreta para la revisión de la rama:** ¿alguna tarea asumió algo que otra cambió
 después (por ejemplo, una lectura de la tarea 3 que no ve el recorte, o una pantalla de la 4
