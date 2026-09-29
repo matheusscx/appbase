@@ -307,12 +307,20 @@ revisión independiente no lo pudo reproducir, con razón.
     `pages/inventario/traslados.vue`, `pages/inventario/recuentos/index.vue`.
   - **Configuran:** `pages/configuracion/items.vue` (4), `configuracion/promociones.vue`,
     `configuracion/grupos-modificadores.vue` — selectores donde el ítem 101 no se puede elegir.
-  **Lo que tiene que decidir el frente** (técnico, salvo lo marcado): traer todas las páginas
-  (simple, pero el POS y el salón bajan todo el catálogo, y el refresco del salón —§ 3, *"El
-  refresco del catálogo del salón baja ~133 KB"*— crece con él) o buscar en el servidor mientras
-  se tipea (escala, pero cambia cómo se elige un producto en el POS: **eso es de producto y se le
-  pregunta al owner**, con la escena de la grilla contra el buscador). Los selectores de
-  configuración y de inventario probablemente van con búsqueda en el servidor sin discusión.
+  ✅ **Decidido por el owner (2026-09-28, contestando a la orquestadora):** *"la grilla de
+  productos debe estar paginada en el backend"* y *"la grilla ya tiene buscador […] hay que hacer
+  que busque en el back"*. O sea: nada de traer todas las páginas; la grilla pide de a una
+  página al servidor y el buscador consulta al servidor. **Medido ese día:** el buscador de hoy
+  (`components/ventas/CatalogoGrid.vue`, `filtrados`) filtra **en el navegador** sobre los 100
+  que llegaron —`props.items.filter(i => i.nombre.includes(q))`—, así que buscar el producto 101
+  no lo encuentra nunca. La misma grilla la usan el POS y el salón.
+  **Lo que arrastra y hay que resolver en la spec (técnico):** el orden de la grilla (con stock
+  primero, después por nombre: `compararCatalogo`) hoy se hace en el navegador y tiene que pasar al
+  servidor, o el orden cambia entre páginas; el descuento de lo que ya está en el carrito
+  (`descontarStockCatalogo` en el POS) y la disponibilidad del salón se aplican sobre la página
+  visible; buscar por nombre necesita índice (`lower(nombre)` o trigram) y medirlo; y el refresco
+  del salón (§ 3) pasa a pedir solo la página visible, así que conviene diseñarlos juntos. Los
+  selectores de configuración y de inventario van con búsqueda en el servidor igual.
   Contexto: el filtro de pausados ya se movió a la query (resueltos, *"el pausado ocupaba uno
   de esos 100 lugares"*); esto es lo que quedó. Conviene hacerlo junto con el refresco del salón.
 
