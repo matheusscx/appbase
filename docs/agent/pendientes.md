@@ -1064,6 +1064,30 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   así que va en su propio frente. Va de la mano con "El lote que vence antes sale primero"
   (arriba) y con la entrada de la § 6 "Serie y lote están a medias".
 
+### Conectar con QZ Tray tiene el mismo techo que imprimir (owner, 2026-09-29)
+
+- [ ] **`qz.websocket.connect()` espera sin techo; que espere 5 s, como `qz.print`** (frontend,
+  `frontend/app/composables/useImpresoras.ts`, `imprimirEn`). Hoy el `connect()` (`:132`) va
+  sin límite y el `qz.print` de más abajo va envuelto en `conTimeout(…, PRINT_TIMEOUT_MS)`
+  (5 s, `:19`). **Cómo se encontró:** la sesión del frente de tests del frontend, midiendo los
+  dos Playwright que caían en la Mac del owner (`pos:115`, `cuenta-hasta-cobro:245`): con QZ
+  Tray corriendo (escucha en 8181/8182) y sin certificado, el handshake se queda esperando y
+  el carrito no se limpia a tiempo — `pos:115` cae 3 de 3; con los sockets a un puerto cerrado,
+  como en CI, pasa en 6,3 s. **Lo que no está medido:** la escena del local —QZ Tray abierto con
+  el diálogo de autorización sin contestar, la venta ya cobrada y el POS colgado— se deduce de
+  ese mecanismo, no se reprodujo en una caja.
+  **Decisión del owner, 2026-09-29.** Cómo se decidió: la orquestadora le planteó esa escena
+  (cliente paga $12.500, la venta queda pagada, la pantalla no se limpia, riesgo de cobrar dos
+  veces) con tres opciones: *A: el mismo techo de 5 s que ya tiene imprimir, y si no conecta la
+  venta queda cobrada, el carrito se limpia y se avisa "no se pudo imprimir, reimprimí desde la
+  venta"* (recomendada), *B: lo mismo con 15 s* y *C: dejarlo como está*. Contestó **"vamos con
+  A"** en el chat de la orquestadora. Sin reintento automático
+  (regla del owner: la app no repite sola lo que falló): el aviso, y el usuario reimprime.
+  **Lo que falta al construirlo:** medir qué camino limpia el carrito y si hoy espera a la
+  impresión (POS y cobro de salones); el mensaje exacto del aviso; y un test que falle sin el
+  techo. Toca el camino de impresión: sesión propia, igual que "Enviar a cocina exige
+  `Impresoras:Leer`" (arriba), con la que conviene ir junta.
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
