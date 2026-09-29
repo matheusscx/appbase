@@ -262,21 +262,6 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   `lectura-dte.service.spec.ts`) prueba que las dos funciones den la misma clave para la misma
   entrada, cada una prueba la suya por separado.
 
-- [ ] **El mutante "leer claves de `codigos_proveedor` sin `cp.eliminado_el IS NULL`" no tiene
-  e2e de comportamiento** (backend, hallazgo de la revisión final del frente *"Compras:
-  pre-llenar la compra con el XML de la factura electrónica (DTE)"*, 2026-09-28). El filtro está
-  en `resolverAsociaciones` (`backend/src/modules/compras/lectura-dte.service.ts:541`) y solo lo
-  cubre un test unitario sobre el SQL literal
-  (`backend/src/modules/compras/lectura-dte.service.spec.ts:150`,
-  `expect(sqlAsociaciones).toMatch(/cp\.eliminado_el IS NULL/)`). Un e2e de comportamiento
-  dependería de qué fila devuelve Postgres primero entre la viva y la borrada con la misma
-  clave — orden no determinístico sobre el heap, no algo que un `ORDER BY` arregle porque el
-  invariante es "la borrada no debería estar ni compitiendo". **Medir antes de proponer:** si
-  hay alguna forma de armar el caso de forma determinística (por ejemplo, con solo una fila viva
-  y una borrada bien separadas y verificando que la respuesta nunca trae el destino de la
-  borrada, sin depender del orden entre dos vivas); si no la hay, documentar por qué el test
-  unitario sobre el SQL es lo mejor disponible acá y cerrar la entrada con esa conclusión.
-
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño

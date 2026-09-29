@@ -23,6 +23,43 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El filtro de borrados de `codigos_proveedor` no admite un e2e de conducta: el unitario sobre el SQL es lo mejor disponible (cerrada 2026-09-28)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. **Medido** (sub-agente Sonnet, verificado por la
+orquestadora contra el código): `resolverAsociaciones` (`lectura-dte.service.ts`) arma
+`new Map(rows.map((r) => [r.clave, r]))` sin `ORDER BY`, así que con el mutante, entre una fila
+viva y una borrada de la misma clave gana la que Postgres devuelva última. El único escritor de
+la tabla es `aprender()` en el mismo archivo (`UPDATE … SET eliminado_el` e `INSERT`), y
+`planAprendizaje` **siempre** marca una fila junto con insertar su reemplazo, en la misma
+transacción: no existe ningún camino de la API que deje una clave con solo una fila borrada.
+Entonces los dos escenarios posibles fallan: *(a)* "solo la borrada" —el único donde el mutante
+cambiaría la respuesta siempre— es **inalcanzable**; *(b)* "reaprender a otro destino" es
+alcanzable (ya lo cubre `compras-dte.e2e-spec.ts`, del lado de la escritura), pero cuál gana en
+la lectura depende del orden físico entre la versión actualizada y la insertada: no es un
+contrato de SQL. **Conclusión:** el unitario que afirma `cp.eliminado_el IS NULL` sobre el SQL
+ejecutado es la mejor red disponible; no hay trabajo. Si mañana aparece un camino que borre una
+asociación sin reemplazarla ("desaprender"), ese camino sí habilita el e2e de conducta del caso
+*(a)*, y conviene escribirlo con él.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **El mutante "leer claves de `codigos_proveedor` sin `cp.eliminado_el IS NULL`" no tiene
+  e2e de comportamiento** (backend, hallazgo de la revisión final del frente *"Compras:
+  pre-llenar la compra con el XML de la factura electrónica (DTE)"*, 2026-09-28). El filtro está
+  en `resolverAsociaciones` (`backend/src/modules/compras/lectura-dte.service.ts:541`) y solo lo
+  cubre un test unitario sobre el SQL literal
+  (`backend/src/modules/compras/lectura-dte.service.spec.ts:150`,
+  `expect(sqlAsociaciones).toMatch(/cp\.eliminado_el IS NULL/)`). Un e2e de comportamiento
+  dependería de qué fila devuelve Postgres primero entre la viva y la borrada con la misma
+  clave — orden no determinístico sobre el heap, no algo que un `ORDER BY` arregle porque el
+  invariante es "la borrada no debería estar ni compitiendo". **Medir antes de proponer:** si
+  hay alguna forma de armar el caso de forma determinística (por ejemplo, con solo una fila viva
+  y una borrada bien separadas y verificando que la respuesta nunca trae el destino de la
+  borrada, sin depender del orden entre dos vivas); si no la hay, documentar por qué el test
+  unitario sobre el SQL es lo mejor disponible acá y cerrar la entrada con esa conclusión.
+
+---
+
 ## Mermas desempata por `secuencia`, y el censo de los 11 `ORDER BY` quedó medido (cerrada 2026-09-28)
 
 Sale de [`pendientes.md`](pendientes.md) § 2, la entrada del censo que dejó el cierre del
