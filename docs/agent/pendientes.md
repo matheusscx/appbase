@@ -171,6 +171,22 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
+- [ ] **El Postgres local ordena texto distinto que el de CI: un `ORDER BY nombre` da otro orden en
+  cada lado** (entorno, hallado por la sesión de compras pieza 3 el 2026-09-29, al explicar por qué
+  `compras-pagos.e2e-spec.ts` pasaba en local y caía en CI). **Medido:** el local es
+  `postgres:15-alpine` (`docker-compose.yml:28` y `scripts/entorno.sh:322`), compilado contra musl.
+  Aunque reporta `lc_collate = en_US.utf8`, ordena por bytes, mayúsculas antes que minúsculas:
+  `SELECT 'apagada' < 'Subsuelo'` da `f` (verificado por la orquestadora en `tecnica_postgres`).
+  CI usa `postgres:15` (glibc, `.github/workflows/ci.yml:29` y `:148`), que da `t` según la
+  sesión, y ella reprodujo los 11 fallos de CI levantando un `postgres:15` glibc. **Por qué
+  importa:** todo test que asuma el orden de un listado por nombre puede pasar en local y caer en
+  CI, o al revés, y el gate local no lo ve. Railway no está medido: si su Postgres es glibc, el
+  demo muestra los listados en el orden de CI y no en el de las pantallas que se prueban en local.
+  **Qué medir antes de proponer:** qué imagen corre Railway (el `version()` de su base); cuánto
+  pesa cambiar el local a `postgres:15` glibc (imagen, tiempo de `entorno.sh db`) y si algún test
+  de hoy depende del orden de musl y se cae con el cambio (correr el `test:e2e` completo sobre la
+  imagen nueva). Si alinear cuesta poco, pasa a la § 1 como cambio de imagen en los dos archivos.
+
 - [ ] **`@IsDateString()` sin `strict` deja pasar `2026-02-31`, y la API contesta 500 en vez de
   400** (backend, hallado por la sesión del frente de compras pieza 3 el 2026-09-29, en el DTO del
   pago a proveedor; según ella es un patrón que se repite en todo el repo). **Sin medir por la
