@@ -1200,9 +1200,10 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     — sin ellos se puede cargar el mismo IMEI dos veces, y eso hay que cerrarlo antes de que la
     merma dependa de elegir una serie concreta.
   - **`fecha_vencimiento`**: hoy se guarda, se expone y no se compara con nada; la salida
-    automática es FIFO por antigüedad, no FEFO por vencimiento. **¿Un lote vencido se puede
-    vender y mermar, o se bloquea?** Es regla de negocio y no está en `PRODUCTO.md` — la spec la
-    plantea, no la asume.
+    automática es FIFO por antigüedad, no FEFO por vencimiento (el owner eligió FEFO el
+    2026-09-28: § 3, "El lote que vence antes sale primero"). **¿Un lote vencido se puede
+    vender y mermar, o se bloquea?** ✅ **Mermar, sí** (owner, 2026-09-28, contestando a la
+    orquestadora: "se puede mermar un lote vencido"). **Vender, todavía sin contestar.**
   ⚠️ Y queda igual la corrección barata que da la mitad del beneficio si esto se demora: que la
   merma **rechace** serie/lote en vez de aceptar y descontar la unidad equivocada en silencio.
 
