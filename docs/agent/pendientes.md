@@ -1130,6 +1130,18 @@ Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no s
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
+- [ ] **Playwright no está en el gate local, y CI lo corre: un frente puede cerrar en verde y
+  romper main** (harness/proceso, 2026-09-29). **Lo que pasó:** el gate entero de `CLAUDE.md` dio
+  verde en local sobre `867d996d` (compras pieza 3, tareas 1 y 2), y el CI del push `479d8b56` dio
+  rojo en `frontend · e2e navegador`. Cuatro specs de `frontend/e2e/compras/` confirmaban una
+  Factura sin tipear el total del documento, que la tarea 1 hizo obligatorio, y recibían un 400
+  (lectura del log de CI por la sesión de compras). Nadie corrió Playwright sobre esas tareas,
+  porque el checklist no lo pide. **La pregunta para el owner:** ¿Playwright pasa a ser parte
+  del gate de cierre de un frente que toca pantallas o contratos de la API, con el costo de
+  levantar el stack propio (`entorno.sh stack`, ~915 MB y minutos) y de un turno más de suite
+  pesada? ¿O sigue fuera del gate, y lo que lo ataja es el CI después del push, con el deploy de
+  Railway ya disparado?
+
 - [ ] **Lo que se consume al anular un plato sale de lo que HOY dice el catálogo, no de lo que se
   pidió: un extra, una opción o un componente que ya no está se saltea sin movimiento, y el costo de
   la anulación queda bajo sin marca** (backend; heredado del frente *"Anular un plato ya enviado a
