@@ -404,6 +404,81 @@ con `pago`: **`Crear` + `Pagar`**, sin `pago`: solo `Crear` (como siempre). `GET
 
 ---
 
+## Las pantallas de la deuda: total, vencimiento y "¿la pagaste ya?" (pieza 5, tarea 4)
+
+### `pages/terceros.vue`
+
+"Plazo de pago (días)" en el drawer de alta/edición (`plazoPagoDias`, spec § 2 decisión 4):
+número entero, vacío = 30 días. Sigue la misma convención que el resto de los campos de texto
+del formulario (`|| undefined`): un campo ya cargado no se puede vaciar de vuelta a "sin
+plazo" desde acá — el mismo límite que tienen `rut`, `nombreLegal`, etc., no algo nuevo de
+esta tarea.
+
+### `useDte.ts`: `MntTotal`, `FchVenc` y `FmaPago`
+
+`DocumentoDte` suma `fechaVencimiento` (`FchVenc`, `IdDoc`) y `fmaPago` (`FmaPago`: `'1'`
+contado, `'2'` crédito, `'3'` sin costo). `montoTotal` (`MntTotal`) ya se leía desde la pieza
+de lectura del XML. Fixtures nuevos en `__fixtures__/dte/`: `contado-fma-pago-1.xml` (sin
+`FchVenc`) y `credito-fchvenc.xml` (con `FchVenc`).
+
+### `pages/compras/[id].vue`: la carga precarga el total y el vencimiento
+
+Al cargar desde el XML (`onCargarDte`), si el tipo elegido lleva total transcrito (no
+`suma_lineas`) se precarga `totalDocumento` con `MntTotal`; `fechaVencimiento` se precarga con
+`FchVenc` si vino, y si no, la sugerencia por plazo del proveedor la completa sola (el watch
+que ya existía desde la tarea 1). ⚠️ La visibilidad de "Total del documento" se resuelve
+DIRECTO contra el catálogo de tipos en ese instante (`tipos.value.find(...)`), no contra el
+`computed` `totalDocumentoVisible`: ese `computed` se limpia con un `watch` que solo dispara en
+la TRANSICIÓN visible→oculto, y si el tipo que trae el XML ya era `suma_lineas` desde antes (no
+hay transición), el total precargado quedaría puesto sin que nadie lo borre.
+
+### El modal de confirmar: "¿La pagaste ya?"
+
+Solo con `Compras:Pagar` (decisión 7 y 12): No / "Sí, la pagué", con medio de pago
+(`GET /compras/medios-pago`) y monto — propuesto en el total que se le va a deber (§ 4.1: lo
+transcrito, o la suma de las líneas). `FmaPago = 1` (contado) propone "Sí" al abrir el modal;
+cualquier otro valor (o su ausencia) deja "No". El body de `pago` (`{ monto, metodoPagoId,
+referencia? }`) viaja con la `Idempotency-Key` de `useIntentoCobro` (ámbito `compra:<id>`),
+solo cuando "Sí, la pagué" está elegido — sin `pago`, `POST /confirmar` no manda la cabecera
+(el backend no la exige en ese camino).
+
+**El aviso de efectivo sin caja abierta es estático, no un chequeo previo:** la pantalla NO
+llama a `GET /caja/activa` para saber si el que paga tiene su caja abierta, porque esa ruta
+exige `MiCaja:Leer` — un permiso que el que paga (`Compras:Pagar`) puede no tener (son ejes
+distintos: "el bodeguero recibe y el dueño paga" no dice nada de quién administra su propia
+caja). En vez de eso, eligiendo un medio con `esEfectivo` se muestra una frase fija ("Sale de
+tu caja física abierta…") y el 400 real del backend ("Para pagar en efectivo necesitás tu caja
+abierta") se maneja como cualquier otro error de confirmar, con el toast de siempre. Spec § 10
+pedía "el aviso antes de mandar, y el 400 igual" — acá el aviso es genérico en vez de
+condicionado a un estado que la pantalla no puede consultar sin pedir un permiso de más.
+
+### `CompraConfirmada.vue`
+
+Total y vencimiento se muestran siempre (leyendo `compra.totalDocumento`/`fechaVencimiento`);
+"Corregir total o vencimiento" (nuevo `CorregirDocumentoModal.vue`, `PATCH
+/compras/:id/documento`) solo con `Actualizar`, el mismo permiso que corregir una línea. Con
+`Pagar` además: pagado (`compra.aplicado`), deuda, la insignia de estado (`useCompras() →
+insigniaPago`) y la tabla de pagos que aplicaron algo a esta compra (`compra.pagos`) — nada de
+esto se evalúa si `compra.estadoPago` no vino en la respuesta (decisión 12: el backend lo omite
+sin `Pagar`, nunca lo manda en `null`).
+
+`CorregirDocumentoModal.vue` arma el body con `useCompras() → cuerpoActualizarDocumento`: solo
+lo que cambió (comparado como `Decimal`, no como texto — lo que trae el `GET` es
+`numeric(18,4)` y lo tipeado no), `totalDocumento: null` solo en un tipo `opcional`, y en un
+`obligatorio` vaciar el campo no manda nada (el backend lo exige).
+
+### Testing
+
+Vitest: `useDte.spec.ts` (los tres campos nuevos, con los fixtures); `useCompras.spec.ts`
+(`cuerpoActualizarDocumento`, `insigniaPago`); `CompraConfirmada.nuxt.spec.ts` (total/
+vencimiento, el botón de corregir por permiso, la sección de pago por permiso y por
+`estadoPago`); `CorregirDocumentoModal.nuxt.spec.ts` (solo lo que cambió, `null` vs sin body
+según el tipo); `compras-pago-al-confirmar.nuxt.spec.ts` (la precarga del XML, "¿la pagaste
+ya?" por permiso, `FmaPago`, el body y la `Idempotency-Key` de confirmar con pago);
+`terceros.nuxt.spec.ts` (`plazoPagoDias` al editar y al crear).
+
+---
+
 ## La unidad de compra por proveedor (pieza 2)
 
 Una línea puede ir en una unidad del catálogo (`unidadCodigo`) o en una **presentación** del

@@ -29,6 +29,8 @@ interface TerceroFake {
   correo: string | null
   telefono: string | null
   activo: boolean
+  /** El plazo de pago en días (spec compras-deuda-proveedor § 2, decisión 4). */
+  plazoPagoDias: number | null
   eliminadoEl: string | null
   eliminadoPorNombre: string | null
 }
@@ -44,6 +46,7 @@ function tercero(over: Partial<TerceroFake> = {}): TerceroFake {
     correo: null,
     telefono: null,
     activo: true,
+    plazoPagoDias: null,
     eliminadoEl: null,
     eliminadoPorNombre: null,
     ...over,
@@ -90,13 +93,24 @@ let overrideSinEliminados: Promise<unknown[]> | null = null
 let postsRestaurar: string[] = []
 /** Retiene la respuesta del restaurar para dejar el POST "en vuelo". */
 let restaurarRetenido: Promise<unknown> | null = null
+/** El body de cada crear/editar (spec compras-deuda-proveedor § 10, `plazoPagoDias`). */
+let guardados: { method: string, url: string, body?: Record<string, unknown> }[] = []
 
 mockNuxtImport('useApiFetch', () => {
-  return (url: string, opts?: { method?: string }) => {
+  return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     if (typeof url !== 'string' || !url.includes('/terceros')) {
       return Promise.resolve([])
     }
     const method = opts?.method ?? 'GET'
+    if (method === 'POST' && !url.endsWith('/restaurar')) {
+      guardados.push({ method, url, body: opts?.body })
+      return Promise.resolve({ id: 't-nuevo', ...opts?.body })
+    }
+    if (method === 'PATCH') {
+      guardados.push({ method, url, body: opts?.body })
+      const id = url.split('/').pop()
+      return Promise.resolve({ id, ...opts?.body })
+    }
     if (method === 'DELETE') {
       const id = url.split('/').pop()
       const t = tercerosBackend.find(x => x.id === id)
@@ -131,9 +145,34 @@ mockNuxtImport('useApiFetch', () => {
   }
 })
 
-/** Los botones de fila son solo icono: se identifican por su `title`/icono. */
+/**
+ * `AppDrawer` va stubeado con un `<div v-if="open">` (mismo patrón que
+ * `mermas.nuxt.spec.ts`): el `UDrawer` real de reka-ui deja una promesa de
+ * `Presence` sin resolver contra happy-dom cuando el drawer se cierra y el
+ * wrapper se desmonta poco después — no rompe la pantalla real, pero sí el
+ * runner de tests (`Unhandled Rejection`, exit code 1). Con el stub el
+ * contenido del drawer queda en el árbol del wrapper (sin teleport), así que
+ * los tests que lo abren usan `wrapper.find(...)`, no `document.body`.
+ */
 async function montar() {
-  const wrapper = await mountSuspended(Terceros)
+  const wrapper = await mountSuspended(Terceros, {
+    attachTo: document.body,
+    global: {
+      stubs: {
+        AppDrawer: {
+          name: 'AppDrawer',
+          props: ['open'],
+          template: `
+            <div v-if="open" role="dialog">
+              <slot name="header" />
+              <slot name="body" />
+              <slot name="actions" />
+            </div>
+          `,
+        },
+      },
+    },
+  })
   await new Promise(r => setTimeout(r, 0))
   return wrapper
 }
@@ -209,6 +248,7 @@ function reset() {
   overrideSinEliminados = null
   postsRestaurar = []
   restaurarRetenido = null
+  guardados = []
 }
 
 describe('terceros — cada control con el permiso de SU endpoint', () => {
@@ -479,6 +519,96 @@ describe('terceros — papelera: la carrera de `cargar()` bajo toggles rápidos'
     expect(wrapper.text()).toContain('Distribuidora Sur')
     expect(wrapper.text()).not.toContain('Tercero viejo')
 
+    wrapper.unmount()
+  })
+})
+
+describe('terceros — "Plazo de pago (días)" (spec compras-deuda-proveedor § 2 y § 10)', () => {
+  beforeEach(() => {
+    reset()
+    esAdmin = true
+  })
+
+  it('al editar, precarga el plazo actual', async () => {
+    tercerosBackend = [tercero({ plazoPagoDias: 15 })]
+    const wrapper = await montar()
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+
+    const input = document.body.querySelector('input[data-qa="tercero-plazo-pago-dias"]') as HTMLInputElement
+    expect(input.value).toBe('15')
+    wrapper.unmount()
+  })
+
+  it('al crear, un plazo tipeado viaja como número', async () => {
+    tercerosBackend = [tercero()]
+    const wrapper = await montar()
+    const nuevo = wrapper.findAll('button').find(b => b.text().includes('Nuevo tercero'))
+    expect(nuevo, 'botón "Nuevo tercero"').toBeTruthy()
+    await nuevo!.trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+
+    const nombre = document.body.querySelector('input[placeholder="Distribuidora Andina"]') as HTMLInputElement
+    nombre.value = 'Proveedor Nuevo'
+    nombre.dispatchEvent(new Event('input'))
+    const plazo = document.body.querySelector('input[data-qa="tercero-plazo-pago-dias"]') as HTMLInputElement
+    plazo.value = '45'
+    plazo.dispatchEvent(new Event('input'))
+    await new Promise(r => setTimeout(r, 0))
+
+    const form = document.body.querySelector('form#tercero-form') as HTMLFormElement
+    form.dispatchEvent(new Event('submit', { cancelable: true }))
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(guardados).toHaveLength(1)
+    expect(guardados[0]!.body!.plazoPagoDias).toBe(45)
+    wrapper.unmount()
+  })
+
+  it('al crear sin tipear el plazo, manda null (el backend lo trata como default de 30 días)', async () => {
+    tercerosBackend = [tercero()]
+    const wrapper = await montar()
+    const nuevo = wrapper.findAll('button').find(b => b.text().includes('Nuevo tercero'))
+    await nuevo!.trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+
+    const nombre = document.body.querySelector('input[placeholder="Distribuidora Andina"]') as HTMLInputElement
+    nombre.value = 'Proveedor Nuevo'
+    nombre.dispatchEvent(new Event('input'))
+    await new Promise(r => setTimeout(r, 0))
+
+    const form = document.body.querySelector('form#tercero-form') as HTMLFormElement
+    form.dispatchEvent(new Event('submit', { cancelable: true }))
+    await new Promise(r => setTimeout(r, 100))
+
+    expect(guardados).toHaveLength(1)
+    expect(guardados[0]!.body!.plazoPagoDias).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('al editar un proveedor con plazo 15 y vaciar el campo, manda plazoPagoDias: null (no ausente)', async () => {
+    // Bug real: un PATCH sin la clave es "no se toca" para el backend — con
+    // `undefined` el plazo viejo (15) sobrevivía y el 200 hacía creer que se
+    // había vuelto a 30 días. `null` sí lo resetea (spec § 2, decisión 4).
+    tercerosBackend = [tercero({ plazoPagoDias: 15 })]
+    const wrapper = await montar()
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+
+    const plazo = document.body.querySelector('input[data-qa="tercero-plazo-pago-dias"]') as HTMLInputElement
+    expect(plazo.value).toBe('15')
+    plazo.value = ''
+    plazo.dispatchEvent(new Event('input'))
+    await new Promise(r => setTimeout(r, 0))
+
+    const form = document.body.querySelector('form#tercero-form') as HTMLFormElement
+    form.dispatchEvent(new Event('submit', { cancelable: true }))
+    await new Promise(r => setTimeout(r, 100))
+
+    expect(guardados).toHaveLength(1)
+    expect(guardados[0]!.method).toBe('PATCH')
+    expect(guardados[0]!.body).toHaveProperty('plazoPagoDias')
+    expect(guardados[0]!.body!.plazoPagoDias).toBeNull()
     wrapper.unmount()
   })
 })

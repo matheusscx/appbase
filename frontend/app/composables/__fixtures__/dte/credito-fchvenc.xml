@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<DTE xmlns="http://www.sii.cl/SiiDte" version="1.0">
+  <Documento ID="F7T33">
+    <Encabezado>
+      <IdDoc>
+        <TipoDTE>33</TipoDTE>
+        <Folio>7</Folio>
+        <FchEmis>2026-10-01</FchEmis>
+        <FmaPago>2</FmaPago>
+        <FchVenc>2026-10-16</FchVenc>
+      </IdDoc>
+      <Emisor>
+        <RUTEmisor>76543210-3</RUTEmisor>
+        <RznSoc>Distribuidora Andina Ltda</RznSoc>
+      </Emisor>
+      <Receptor>
+        <RUTRecep>76123456-7</RUTRecep>
+        <RznSocRecep>Resto Demo SpA</RznSocRecep>
+      </Receptor>
+      <Totales>
+        <MntNeto>100000</MntNeto>
+        <IVA>19000</IVA>
+        <MntTotal>119000</MntTotal>
+      </Totales>
+    </Encabezado>
+    <Detalle>
+      <NroLinDet>1</NroLinDet>
+      <CdgItem>
+        <TpoCodigo>INT1</TpoCodigo>
+        <VlrCodigo>CC350-12</VlrCodigo>
+      </CdgItem>
+      <NmbItem>COCA COLA 350ML CJ12</NmbItem>
+      <QtyItem>10</QtyItem>
+      <UnmdItem>CJ</UnmdItem>
+      <PrcItem>10000</PrcItem>
+      <MontoItem>100000</MontoItem>
+    </Detalle>
+  </Documento>
+</DTE>

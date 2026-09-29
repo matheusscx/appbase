@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<DTE xmlns="http://www.sii.cl/SiiDte" version="1.0">
+  <Documento ID="F6T33">
+    <Encabezado>
+      <IdDoc>
+        <TipoDTE>33</TipoDTE>
+        <Folio>6</Folio>
+        <FchEmis>2026-09-22</FchEmis>
+        <FmaPago>1</FmaPago>
+      </IdDoc>
+      <Emisor>
+        <RUTEmisor>76543210-3</RUTEmisor>
+        <RznSoc>Distribuidora Andina Ltda</RznSoc>
+      </Emisor>
+      <Receptor>
+        <RUTRecep>76123456-7</RUTRecep>
+        <RznSocRecep>Resto Demo SpA</RznSocRecep>
+      </Receptor>
+      <Totales>
+        <MntNeto>3500</MntNeto>
+        <MntTotal>4165</MntTotal>
+      </Totales>
+    </Encabezado>
+    <Detalle>
+      <NroLinDet>1</NroLinDet>
+      <CdgItem>
+        <TpoCodigo>INT1</TpoCodigo>
+        <VlrCodigo>CAF-250</VlrCodigo>
+      </CdgItem>
+      <NmbItem>CAFE EN GRANO 250G</NmbItem>
+      <QtyItem>1</QtyItem>
+      <UnmdItem>UN</UnmdItem>
+      <PrcItem>3500</PrcItem>
+      <MontoItem>3500</MontoItem>
+    </Detalle>
+  </Documento>
+</DTE>

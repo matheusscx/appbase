@@ -68,6 +68,28 @@ describe('leerDte — andina-33.xml (la escena de la spec)', () => {
   })
 })
 
+describe('leerDte — MntTotal, FchVenc y FmaPago (tarea 4)', () => {
+  it('andina-33.xml: MntTotal viene, sin FchVenc ni FmaPago (no los trae)', () => {
+    const doc = documentoOk(leerDte(leerFixture('andina-33.xml')))
+    expect(doc.montoTotal).toBe('122451')
+    expect(doc.fechaVencimiento).toBeNull()
+    expect(doc.fmaPago).toBeNull()
+  })
+
+  it('contado (FmaPago 1): sin FchVenc', () => {
+    const doc = documentoOk(leerDte(leerFixture('contado-fma-pago-1.xml')))
+    expect(doc.fmaPago).toBe('1')
+    expect(doc.fechaVencimiento).toBeNull()
+  })
+
+  it('crédito (FmaPago 2): trae FchVenc, y esa fecha manda (spec § 4.2)', () => {
+    const doc = documentoOk(leerDte(leerFixture('credito-fchvenc.xml')))
+    expect(doc.fmaPago).toBe('2')
+    expect(doc.fechaVencimiento).toBe('2026-10-16')
+    expect(doc.montoTotal).toBe('119000')
+  })
+})
+
 describe('leerDte — encoding ISO-8859-1', () => {
   it('un NmbItem con CAFÉ se lee CAFÉ, no un mojibake de UTF-8', () => {
     const doc = documentoOk(leerDte(leerFixture('dte-suelto.xml')))
@@ -169,6 +191,8 @@ describe('bodyLectura', () => {
       emisorRazonSocial: 'Distribuidora Andina Ltda',
       receptorRut: '76123456-7',
       montoTotal: null,
+      fechaVencimiento: null,
+      fmaPago: null,
       preciosConIva: false,
       descuentosGlobales: [],
       lineas: [

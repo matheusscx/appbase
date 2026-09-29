@@ -1,20 +1,31 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import type { CambioCompra, CompraDetalle, LineaCompra } from '~/composables/useCompras'
+import type { CambioCompra, CompraDetalle, LineaCompra, PagoProveedorInfo, TotalDocumentoTipo } from '~/composables/useCompras'
 
 /**
  * El detalle de una compra confirmada o anulada (spec § 6): las líneas con
  * *Completar* o *Corregir*, el descuento, el historial a la vista y *Anular*.
  * Cada acción aparece solo con su permiso; el guard del backend es el que
  * manda igual.
+ *
+ * `totalDocumentoTipo` no viaja en `compra` (es del catálogo de tipos, no de
+ * la compra): lo resuelve la página con el mismo tipo que usó para cargar el
+ * borrador, y acá solo decide si "Total del documento" tiene sentido en
+ * "Corregir total o vencimiento" (spec compras-deuda-proveedor § 6 y § 10).
  */
-const props = defineProps<{ compra: CompraDetalle }>()
+const props = defineProps<{ compra: CompraDetalle, totalDocumentoTipo: TotalDocumentoTipo }>()
 const emit = defineEmits<{ actualizada: [CompraDetalle] }>()
 
 const { formatMonto, formatFecha } = useFormatters()
-const { faltaAlgunPrecio, etiquetaCambio, cantidadConUnidad, unidadDeLinea, cantidadLineaConfirmada } = useCompras()
+const {
+  faltaAlgunPrecio, etiquetaCambio, cantidadConUnidad, unidadDeLinea, cantidadLineaConfirmada, insigniaPago,
+} = useCompras()
 const { puedeActualizar } = usePermisosCrud('Compras')
 const permissionsStore = usePermissionsStore()
+// `Pagar` no es uno de los cuatro CRUD de `usePermisosCrud` (mismo molde que
+// `puedeAnular`, acá abajo): los datos de pago (spec § 8, decisión 12) son
+// SOLO de quien tiene `Compras:Pagar`, nunca de `Leer` a secas.
+const puedePagar = computed(() => permissionsStore.esAdmin || permissionsStore.can('Compras', 'Pagar'))
 
 const confirmada = computed(() => props.compra.estado === 'confirmada')
 const puedeCorregir = computed(() => confirmada.value && puedeActualizar.value)
@@ -26,6 +37,18 @@ const puedeAnular = computed(() =>
 const puedeDescontar = computed(() =>
   puedeCorregir.value && !faltaAlgunPrecio(props.compra.lineas),
 )
+// Los datos de pago solo existen con `Pagar` Y en una compra confirmada
+// (spec § 4.1: un borrador o una anulada no deben nada).
+const muestraPago = computed(() => confirmada.value && puedePagar.value && props.compra.estadoPago != null)
+const insignia = computed(() => muestraPago.value
+  ? insigniaPago(
+      { estadoPago: props.compra.estadoPago!, deuda: props.compra.deuda ?? null, vencida: props.compra.vencida ?? false },
+      formatMonto,
+    )
+  : null,
+)
+
+const corregirDocumentoOpen = ref(false)
 
 const columns = computed<TableColumn<LineaCompra>[]>(() => [
   { accessorKey: 'itemNombre', header: 'Producto' },
@@ -67,6 +90,16 @@ const columnsHistorial: TableColumn<CambioCompra>[] = [
   { id: 'valores', header: 'Antes → después' },
   { accessorKey: 'usuarioNombre', header: 'Quién' },
 ]
+
+// ── Pagos (spec § 8 y § 10, solo con `Pagar`) ───────────────────────────────
+
+const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
+  { accessorKey: 'fecha', header: 'Fecha' },
+  { accessorKey: 'monto', header: 'Monto', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'metodoPagoNombre', header: 'Medio' },
+  { accessorKey: 'referencia', header: 'Referencia' },
+  { accessorKey: 'estado', header: 'Estado' },
+]
 </script>
 
 <template>
@@ -75,7 +108,26 @@ const columnsHistorial: TableColumn<CambioCompra>[] = [
       <div><dt class="text-muted">Proveedor</dt><dd>{{ compra.proveedorNombre || '—' }}</dd></div>
       <div><dt class="text-muted">Fecha del documento</dt><dd>{{ formatFecha(compra.fechaDocumento) }}</dd></div>
       <div><dt class="text-muted">Entró a</dt><dd>{{ compra.ubicacionNombre || '—' }}</dd></div>
+      <div v-if="totalDocumentoTipo !== 'suma_lineas'" data-qa="compra-documento-total">
+        <dt class="text-muted">Total del documento</dt>
+        <dd>{{ compra.totalDocumento != null ? formatMonto(compra.totalDocumento) : '—' }}</dd>
+      </div>
+      <div data-qa="compra-documento-vencimiento">
+        <dt class="text-muted">Vence el</dt>
+        <dd>{{ compra.fechaVencimiento ? formatFecha(compra.fechaVencimiento) : '—' }}</dd>
+      </div>
     </dl>
+
+    <div v-if="puedeCorregir" class="flex justify-end">
+      <UButton
+        size="xs"
+        variant="soft"
+        color="neutral"
+        label="Corregir total o vencimiento"
+        data-qa="compra-documento-corregir-abrir"
+        @click="() => { corregirDocumentoOpen = true }"
+      />
+    </div>
 
     <UAlert
       v-if="compra.estado === 'anulada'"
@@ -166,6 +218,52 @@ const columnsHistorial: TableColumn<CambioCompra>[] = [
       </div>
     </div>
 
+    <!-- Solo con `Pagar` (spec § 8, decisión 12): quien no lo tiene no
+         recibe `estadoPago` en la respuesta, y esta sección ni se evalúa. -->
+    <div v-if="muestraPago" class="space-y-3" data-qa="compra-pago">
+      <h3 class="text-sm font-medium text-default">
+        Pago
+      </h3>
+      <dl class="grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
+        <div>
+          <dt class="text-muted">Pagado</dt>
+          <dd class="tabular-nums">{{ formatMonto(compra.aplicado ?? '0') }}</dd>
+        </div>
+        <div>
+          <dt class="text-muted">Deuda</dt>
+          <dd class="tabular-nums">{{ compra.deuda != null ? formatMonto(compra.deuda) : '—' }}</dd>
+        </div>
+        <div>
+          <dt class="text-muted">Estado</dt>
+          <dd><UBadge v-if="insignia" :label="insignia.label" :color="insignia.color" variant="subtle" /></dd>
+        </div>
+      </dl>
+      <p v-if="!compra.pagos?.length" class="text-sm text-muted" data-qa="compra-pagos-vacio">
+        Sin pagos registrados.
+      </p>
+      <CrudTable v-else :data="compra.pagos" :columns="columnsPagos" data-qa="compra-pagos-tabla">
+        <template #fecha-cell="{ row }">
+          {{ row.original.fecha ? formatFecha(row.original.fecha) : '—' }}
+        </template>
+        <template #monto-cell="{ row }">
+          <span class="tabular-nums">{{ formatMonto(row.original.monto) }}</span>
+        </template>
+        <template #metodoPagoNombre-cell="{ row }">
+          {{ row.original.metodoPagoNombre || '—' }}
+        </template>
+        <template #referencia-cell="{ row }">
+          {{ row.original.referencia || '—' }}
+        </template>
+        <template #estado-cell="{ row }">
+          <UBadge
+            :label="row.original.estado === 'anulado' ? 'Anulado' : 'Vigente'"
+            :color="row.original.estado === 'anulado' ? 'error' : 'success'"
+            variant="subtle"
+          />
+        </template>
+      </CrudTable>
+    </div>
+
     <div v-if="puedeAnular" class="flex justify-end">
       <UButton
         color="error"
@@ -177,6 +275,14 @@ const columnsHistorial: TableColumn<CambioCompra>[] = [
       />
     </div>
 
+    <ComprasCorregirDocumentoModal
+      v-model:open="corregirDocumentoOpen"
+      :compra-id="compra.id"
+      :total-documento-tipo="totalDocumentoTipo"
+      :total-documento-actual="compra.totalDocumento"
+      :fecha-vencimiento-actual="compra.fechaVencimiento"
+      @success="(c: CompraDetalle) => emit('actualizada', c)"
+    />
     <ComprasCorregirLineaModal
       v-if="lineaEnEdicion"
       v-model:open="corregirOpen"

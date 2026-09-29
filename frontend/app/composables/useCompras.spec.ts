@@ -10,10 +10,12 @@ const {
   totalConDescuento,
   faltaAlgunPrecio,
   insigniaEstado,
+  insigniaPago,
   estadoOptions,
   diferenciaCantidad,
   cuerpoCorreccion,
   cuerpoDescuento,
+  cuerpoActualizarDocumento,
   cantidadConUnidad,
   cantidadParaEditar,
   etiquetaCambio,
@@ -21,6 +23,8 @@ const {
   unidadDeLinea,
   cuentaPresentacion,
 } = useCompras()
+
+const formatMontoStub = (v: string) => `$${v}`
 
 describe('useCompras', () => {
   it('total de línea: 20,35 kg a $1.490 da 30321.5 (solo para comparar con el papel)', () => {
@@ -166,5 +170,92 @@ describe('presentaciones (spec pieza 2 § 6)', () => {
 
   it('cantidad no numérica: sin cuenta', () => {
     expect(cuentaPresentacion('', '12', 'unidad', null, CLP)).toBeNull()
+  })
+})
+
+describe('cuerpoActualizarDocumento — PATCH /compras/:id/documento (spec compras-deuda-proveedor § 6)', () => {
+  it('un total distinto, comparado como Decimal (no como texto), viaja', () => {
+    const body = cuerpoActualizarDocumento(
+      { totalDocumento: '119000.0000', fechaVencimiento: '2026-10-16' },
+      { totalDocumento: '129000', fechaVencimiento: '2026-10-16' },
+      false,
+    )
+    expect(body).toEqual({ totalDocumento: '129000' })
+  })
+
+  it('el mismo total con otro texto ("119000.00" vs "119000.0000") no manda nada', () => {
+    const body = cuerpoActualizarDocumento(
+      { totalDocumento: '119000.0000', fechaVencimiento: '2026-10-16' },
+      { totalDocumento: '119000.00', fechaVencimiento: '2026-10-16' },
+      false,
+    )
+    expect(body).toBeNull()
+  })
+
+  it('una fecha distinta viaja sola si el total no cambió', () => {
+    const body = cuerpoActualizarDocumento(
+      { totalDocumento: '119000.0000', fechaVencimiento: '2026-10-16' },
+      { totalDocumento: '119000', fechaVencimiento: '2026-11-01' },
+      false,
+    )
+    expect(body).toEqual({ fechaVencimiento: '2026-11-01' })
+  })
+
+  it('sin cambios, no hay body', () => {
+    const body = cuerpoActualizarDocumento(
+      { totalDocumento: '119000.0000', fechaVencimiento: '2026-10-16' },
+      { totalDocumento: '119000', fechaVencimiento: '2026-10-16' },
+      false,
+    )
+    expect(body).toBeNull()
+  })
+
+  it('tipo opcional: vaciar un total ya cargado lo manda en null', () => {
+    const body = cuerpoActualizarDocumento(
+      { totalDocumento: '50000.0000', fechaVencimiento: null },
+      { totalDocumento: '', fechaVencimiento: '' },
+      true,
+    )
+    expect(body).toEqual({ totalDocumento: null })
+  })
+
+  it('tipo obligatorio: vaciar un total ya cargado no manda nada (el backend lo exige)', () => {
+    const body = cuerpoActualizarDocumento(
+      { totalDocumento: '50000.0000', fechaVencimiento: null },
+      { totalDocumento: '', fechaVencimiento: '' },
+      false,
+    )
+    expect(body).toBeNull()
+  })
+})
+
+describe('insigniaPago — spec § 4.1 y § 10', () => {
+  it('pagada', () => {
+    expect(insigniaPago({ estadoPago: 'pagada', deuda: '0', vencida: false }, formatMontoStub))
+      .toEqual({ label: 'Pagada', color: 'success' })
+  })
+
+  it('parcial: "Te faltan $X"', () => {
+    expect(insigniaPago({ estadoPago: 'parcial', deuda: '20000', vencida: false }, formatMontoStub))
+      .toEqual({ label: 'Te faltan $20000', color: 'warning' })
+  })
+
+  it('falta_total y falta_precio', () => {
+    expect(insigniaPago({ estadoPago: 'falta_total', deuda: null, vencida: false }, formatMontoStub))
+      .toEqual({ label: 'Falta el total', color: 'neutral' })
+    expect(insigniaPago({ estadoPago: 'falta_precio', deuda: null, vencida: false }, formatMontoStub))
+      .toEqual({ label: 'Falta el precio', color: 'neutral' })
+  })
+
+  it('vencida pisa a las demás, aunque el estado sea "parcial" o "falta_total"', () => {
+    expect(insigniaPago({ estadoPago: 'parcial', deuda: '20000', vencida: true }, formatMontoStub))
+      .toEqual({ label: 'Vencida', color: 'error' })
+    expect(insigniaPago({ estadoPago: 'falta_total', deuda: null, vencida: true }, formatMontoStub))
+      .toEqual({ label: 'Vencida', color: 'error' })
+  })
+
+  it('pagada nunca es "Vencida" (estadoPagoCompra ya lo garantiza, esto no lo revalida)', () => {
+    expect(insigniaPago({ estadoPago: 'pagada', deuda: '0', vencida: false }, formatMontoStub).label)
+      .toBe('Pagada')
   })
 })

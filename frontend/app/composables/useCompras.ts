@@ -68,6 +68,35 @@ export interface CambioCompra {
   creadoEl: string
 }
 
+/** Espejo de `EstadoPagoCompra` del backend (`compras/deuda.ts`, spec § 4.1). */
+export type EstadoPagoCompra = 'pagada' | 'parcial' | 'pendiente' | 'falta_total' | 'falta_precio'
+
+/** Lo aplicado de un pago a una compra: espejo de `AplicacionPagoInfo`. */
+export interface AplicacionPagoInfo {
+  compraId: string
+  monto: string
+}
+
+/** Un pago a proveedor, con sus aplicaciones: espejo de `PagoProveedorInfo` (spec § 3 y § 8). */
+export interface PagoProveedorInfo {
+  /** `null` cuando el pago fue "usar el saldo a favor" (spec § 5.1): no se creó fila. */
+  id: string | null
+  proveedorId: string
+  fecha: string | null
+  monto: string
+  metodoPagoId: string | null
+  metodoPagoNombre: string | null
+  referencia: string | null
+  cajaId: string | null
+  estado: 'vigente' | 'anulado' | null
+  anuladoPor: string | null
+  anuladoEl: string | null
+  motivoAnulacion: string | null
+  aplicaciones: AplicacionPagoInfo[]
+  /** Lo que quedó a favor del proveedor DESPUÉS de este pago. */
+  sobranteAFavor: string
+}
+
 /** El detalle de `GET /compras/:id`: espejo de `CompraDetalle` del backend. */
 export interface CompraDetalle {
   id: string
@@ -91,6 +120,19 @@ export interface CompraDetalle {
   fechaVencimiento: string | null
   lineas: LineaCompra[]
   cambios: CambioCompra[]
+  /**
+   * Los datos de pago (spec § 8, decisión 12): presentes SOLO con
+   * `Compras:Pagar` — el backend los omite (`undefined`, nunca `null`) para
+   * quien no tiene el permiso, así que acá siempre se chequea con `!=
+   * undefined`/`v-if`, nunca se asume presente.
+   */
+  estadoPago?: EstadoPagoCompra
+  deuda?: string | null
+  vencida?: boolean
+  /** Σ aplicaciones vivas de pagos vigentes a esta compra. */
+  aplicado?: string
+  /** Los pagos vigentes que aplicaron algo a esta compra. */
+  pagos?: PagoProveedorInfo[]
 }
 
 /** Espejo de `TipoDocumentoCompraOpcion.totalDocumento` (spec compras-deuda-proveedor § 3, decisión 10). */
@@ -201,6 +243,36 @@ export function useCompras() {
       totalDocumento: form.totalDocumento.trim() || null,
       fechaVencimiento: form.fechaVencimiento || null,
     }
+  }
+
+  /**
+   * El body de `PATCH /compras/:id/documento` (spec § 6): solo lo que
+   * cambió — ausente es "no se toca" para el backend, así que mandar el
+   * mismo valor de nuevo (o nada) no tiene que viajar. Comparado en
+   * `Decimal`, no como string: lo que llega de `GET` es `numeric(18,4)`
+   * ("119000.0000") y lo que se tipea no lo es.
+   *
+   * `totalDocumento: null` solo cuando el tipo es `opcional` (decisión 10):
+   * es la única forma de "borrarlo" — en un tipo `obligatorio` vaciar el
+   * campo no manda nada, porque el backend lo exige.
+   */
+  function cuerpoActualizarDocumento(
+    actual: { totalDocumento: string | null, fechaVencimiento: string | null },
+    nuevo: { totalDocumento: string, fechaVencimiento: string },
+    totalDocumentoOpcional: boolean,
+  ): Record<string, unknown> | null {
+    const body: Record<string, unknown> = {}
+    const nuevoTotal = comoDecimal(nuevo.totalDocumento)
+    const actualTotal = comoDecimal(actual.totalDocumento)
+    if (nuevoTotal) {
+      if (!actualTotal || !nuevoTotal.equals(actualTotal)) body.totalDocumento = nuevo.totalDocumento.trim()
+    } else if (totalDocumentoOpcional && actual.totalDocumento != null && !nuevo.totalDocumento.trim()) {
+      body.totalDocumento = null
+    }
+    if (nuevo.fechaVencimiento && nuevo.fechaVencimiento !== (actual.fechaVencimiento ?? '')) {
+      body.fechaVencimiento = nuevo.fechaVencimiento
+    }
+    return Object.keys(body).length ? body : null
   }
 
   /**
@@ -354,6 +426,31 @@ export function useCompras() {
     return insignias
   }
 
+  /**
+   * La insignia de pago (spec § 4.1 y § 10): "Vencida" pisa a las demás —
+   * queda deuda (o el total ni se sabe) y ya pasó el vencimiento, así que es
+   * lo más urgente. Solo tiene sentido con `Compras:Pagar` (decisión 12):
+   * quien no lo tiene ni recibe `estadoPago` en la respuesta.
+   */
+  function insigniaPago(
+    c: { estadoPago: EstadoPagoCompra, deuda: string | null, vencida: boolean },
+    formatMonto: (v: string) => string,
+  ): { label: string, color: ColorInsignia } {
+    if (c.vencida) return { label: 'Vencida', color: 'error' }
+    switch (c.estadoPago) {
+      case 'pagada':
+        return { label: 'Pagada', color: 'success' }
+      case 'parcial':
+        return { label: `Te faltan ${formatMonto(c.deuda ?? '0')}`, color: 'warning' }
+      case 'falta_total':
+        return { label: 'Falta el total', color: 'neutral' }
+      case 'falta_precio':
+        return { label: 'Falta el precio', color: 'neutral' }
+      default:
+        return { label: 'Pendiente de pago', color: 'warning' }
+    }
+  }
+
   const estadoOptions = (Object.keys(ETIQUETA) as EstadoCompra[]).map(value => ({
     label: ETIQUETA[value],
     value,
@@ -365,11 +462,13 @@ export function useCompras() {
     totalConDescuento,
     faltaAlgunPrecio,
     insigniaEstado,
+    insigniaPago,
     estadoOptions,
     diferenciaCantidad,
     cuerpoCorreccion,
     cuerpoDescuento,
     cuerpoDocumento,
+    cuerpoActualizarDocumento,
     fechaVencimientoSugerida,
     cantidadConUnidad,
     cantidadParaEditar,

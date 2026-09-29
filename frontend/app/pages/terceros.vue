@@ -19,6 +19,9 @@ interface Tercero {
   telefono: string | null
   direccion: string | null
   activo: boolean
+  /** El plazo en días para vencer una compra suya (spec compras-deuda-proveedor
+   *  § 2, decisión 4). Null = 30 días. */
+  plazoPagoDias: number | null
   eliminadoEl?: string | null
   eliminadoPorNombre?: string | null
 }
@@ -57,6 +60,7 @@ const emptyForm = () => ({
   telefono: '',
   direccion: '',
   activo: true,
+  plazoPagoDias: '',
 })
 const form = ref(emptyForm())
 
@@ -148,6 +152,7 @@ function abrirEditar(tercero: Tercero) {
     telefono: tercero.telefono ?? '',
     direccion: tercero.direccion ?? '',
     activo: tercero.activo,
+    plazoPagoDias: tercero.plazoPagoDias != null ? String(tercero.plazoPagoDias) : '',
   }
   drawerOpen.value = true
 }
@@ -165,6 +170,14 @@ async function guardar() {
       telefono: form.value.telefono || undefined,
       direccion: form.value.direccion || undefined,
       activo: form.value.activo,
+      // Distinto del resto de los campos de este body (`|| undefined`, "no
+      // se toca"): `plazoPagoDias` vacío significa "volvé a 30 días" (spec
+      // § 2, decisión 4), así que viaja en `null` — nunca ausente, que en un
+      // PATCH el backend lee como "no cambies nada" y deja el plazo viejo
+      // con un 200 que parece haber funcionado. Los dos DTOs (crear y
+      // actualizar) aceptan `null` en este campo (`@IsOptional()` lo trata
+      // igual que ausente).
+      plazoPagoDias: form.value.plazoPagoDias ? Number(form.value.plazoPagoDias) : null,
     }
     const isNew = !editingId.value
     const saved = isNew
@@ -438,6 +451,16 @@ const columns: TableColumn<Tercero>[] = [
               </UFormField>
               <UFormField label="Dirección">
                 <UTextarea v-model="form.direccion" :rows="2" />
+              </UFormField>
+              <UFormField label="Plazo de pago (días)" help="Vacío = 30 días (spec compras-deuda-proveedor § 2)">
+                <UInput
+                  v-model="form.plazoPagoDias"
+                  type="number"
+                  min="1"
+                  max="3650"
+                  placeholder="30"
+                  data-qa="tercero-plazo-pago-dias"
+                />
               </UFormField>
               <UFormField label="Activo">
                 <USwitch v-model="form.activo" />

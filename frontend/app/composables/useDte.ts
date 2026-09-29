@@ -53,6 +53,11 @@ export interface DocumentoDte {
   emisorRazonSocial: string
   receptorRut: string
   montoTotal: string | null
+  /** `FchVenc` (Formato DTE v2.5, `IdDoc`): null si el documento no la trae
+   *  (el contado no la lleva; la manda una factura a crédito). */
+  fechaVencimiento: string | null
+  /** `FmaPago`: `'1'` contado, `'2'` crédito, `'3'` sin costo; null si no vino. */
+  fmaPago: string | null
   preciosConIva: boolean
   lineas: LineaDte[]
   descuentosGlobales: DescuentoGlobalDte[]
@@ -186,6 +191,8 @@ function leerDocumento(documentoEl: Element): DocumentoDte | null {
     emisorRazonSocial: texto(emisorEl, 'RznSoc') ?? '',
     receptorRut,
     montoTotal: texto(encabezado, 'MntTotal'),
+    fechaVencimiento: texto(idDoc, 'FchVenc'),
+    fmaPago: texto(idDoc, 'FmaPago'),
     preciosConIva,
     lineas: [...documentoEl.getElementsByTagName('Detalle')].map(el => leerLinea(el, preciosConIva)),
     descuentosGlobales: [...documentoEl.getElementsByTagName('DscRcgGlobal')].map(leerDescuentoGlobal),

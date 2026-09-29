@@ -106,7 +106,7 @@ describe('Compras — confirmar con pago, el recorte y las lecturas de deuda (e2
   let ubicacionId: string;
   let productoId: string;
   let sinDocumento: TipoDocumento;
-  let facturaDeCompra: TipoDocumento;
+  let factura: TipoDocumento;
   let efectivo: MedioPago;
   let otroMedio: MedioPago;
 
@@ -244,7 +244,7 @@ describe('Compras — confirmar con pago, el recorte y las lecturas de deuda (e2
       '/api/compras',
       {
         proveedorId: conProveedorId,
-        tipoDocumentoCompraId: facturaDeCompra.id,
+        tipoDocumentoCompraId: factura.id,
         folio: `F-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
         fechaDocumento: '2026-09-01',
         ubicacionId,
@@ -381,7 +381,7 @@ describe('Compras — confirmar con pago, el recorte y las lecturas de deuda (e2
 
     const tipos = await get<TipoDocumento[]>('/api/compras/tipos-documento');
     sinDocumento = tipos.find((t) => !t.requiereFolio)!;
-    facturaDeCompra = tipos.find((t) => t.totalDocumento === 'obligatorio')!;
+    factura = tipos.find((t) => t.totalDocumento === 'obligatorio')!;
 
     const medios = await get<MedioPago[]>(
       '/api/compras/medios-pago',

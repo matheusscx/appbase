@@ -29,6 +29,12 @@ interface ProductoOpt {
   modoInventario: string | null
   unidadMedida: string | null
 }
+/** Espejo de `MedioPagoOpcion` del backend (spec § 5.1, § 10). */
+interface MedioPagoOpcion {
+  id: string
+  nombre: string
+  esEfectivo: boolean
+}
 
 interface LineaForm {
   key: string
@@ -77,6 +83,11 @@ const {
   etiquetaPresentacion, cuentaPresentacion, cuerpoDocumento, fechaVencimientoSugerida,
 } = useCompras()
 const { puedeCrear } = usePermisosCrud('Compras')
+const permissionsStore = usePermissionsStore()
+// `Pagar` no es uno de los cuatro CRUD de `usePermisosCrud`: mismo molde que
+// `puedeAnular` en `CompraConfirmada.vue`.
+const puedePagar = computed(() => permissionsStore.esAdmin || permissionsStore.can('Compras', 'Pagar'))
+const intentoCobro = useIntentoCobro()
 
 const esNueva = computed(() => route.params.id === 'nueva')
 const compra = ref<CompraDetalle | null>(null)
@@ -91,10 +102,12 @@ const editable = computed(() =>
 const tipos = ref<TipoDocumento[]>([])
 const proveedores = ref<Proveedor[]>([])
 const productos = ref<ProductoOpt[]>([])
+const mediosPago = ref<MedioPagoOpcion[]>([])
 
 const tipoOpts = computed<Opt[]>(() => tipos.value.map(t => ({ label: t.nombre, value: t.id })))
 const proveedorOpts = computed<Opt[]>(() => proveedores.value.map(p => ({ label: p.nombre, value: p.id })))
 const productoOpts = computed<Opt[]>(() => productos.value.map(p => ({ label: p.nombre, value: p.id })))
+const medioPagoOpts = computed<Opt[]>(() => mediosPago.value.map(m => ({ label: m.nombre, value: m.id })))
 // Solo las activas: el backend rechaza recibir en una desactivada.
 const ubicacionOpts = computed<Opt[]>(() =>
   ubicaciones.value.filter(u => u.activo).map(u => ({ label: u.nombre, value: u.id })),
@@ -333,15 +346,19 @@ async function cargarCatalogos() {
   // La lista es de Compras y no `/items`: quien recibe mercadería no necesita
   // permiso sobre el catálogo de ítems (owner, 2026-09-19). Trae producto e
   // ingrediente, los dos con stock, ya ordenados.
-  const [tiposRes, provRes, prodRes] = await Promise.all([
+  const [tiposRes, provRes, prodRes, , mediosRes] = await Promise.all([
     useApiFetch<TipoDocumento[]>(`${apiUrl}/compras/tipos-documento`),
     useApiFetch<Proveedor[]>(`${apiUrl}/compras/proveedores`),
     useApiFetch<ProductoOpt[]>(`${apiUrl}/compras/productos`),
     cargarUbicaciones(),
+    // Solo con `Pagar` (spec § 5.1, decisión 12): sin el permiso el endpoint
+    // es 403, y el que carga sin pagar no necesita esta lista.
+    puedePagar.value ? useApiFetch<MedioPagoOpcion[]>(`${apiUrl}/compras/medios-pago`) : Promise.resolve([]),
   ])
   tipos.value = tiposRes
   proveedores.value = provRes
   productos.value = prodRes
+  mediosPago.value = mediosRes as MedioPagoOpcion[]
 }
 
 function lineaDesdeDetalle(l: LineaDetalle): LineaForm {
@@ -517,6 +534,21 @@ function onCargarDte({ documento, lectura, proveedorId, rutProveedor }: CargaDte
   form.value.folio = documento.folio
   form.value.fechaDocumento = documento.fechaEmision
   form.value.descuentoTotal = ''
+  // `MntTotal` y `FchVenc` (spec § 7 y § 10, decisión 4): si el XML no trae
+  // `FchVenc`, queda vacío y la sugerencia por plazo del proveedor la llena
+  // (el watch de `fechaVencimiento` de más abajo, que no pisa un valor ya
+  // puesto — acá llega antes que él en el mismo ciclo).
+  //
+  // `totalDocumentoVisible` NO sirve acá: es un `computed` sobre
+  // `tipoSeleccionado`, y el watch que lo limpia en un tipo `suma_lineas`
+  // solo corre en la TRANSICIÓN visible→oculto — si el tipo elegido por el
+  // XML ya era `suma_lineas` (nada cambia de estado), el watch no dispara y
+  // el total quedaría puesto igual. Por eso acá se resuelve el tipo elegido
+  // directo del catálogo, no del `computed`.
+  const tipoElegido = tipos.value.find(t => t.id === lectura.tipoDocumento!.id)
+  const llevaTotalTranscrito = (tipoElegido?.totalDocumento ?? 'suma_lineas') !== 'suma_lineas'
+  form.value.totalDocumento = llevaTotalTranscrito ? (documento.montoTotal ?? '') : ''
+  form.value.fechaVencimiento = documento.fechaVencimiento ?? ''
 
   const { lineas: repartidas, apartadas: apartadasIniciales } = repartirLineas(documento, lectura.asociaciones)
   lineas.value = repartidas.length
@@ -569,6 +601,16 @@ watch(faltanPrecios, (falta) => {
 })
 const totalMostrado = computed(() =>
   totalConDescuento(subtotalMostrado.value, form.value.descuentoTotal || null),
+)
+
+/**
+ * El total que se le va a deber al proveedor (spec § 4.1, decisión 10): lo
+ * transcrito en un tipo que lo lleva, o el de las líneas en `suma_lineas`.
+ * Es la propuesta de monto de "¿La pagaste ya?" — null si todavía no se sabe
+ * (el encargado igual puede tipear el monto a mano).
+ */
+const totalParaConfirmar = computed(() =>
+  totalDocumentoVisible.value ? (form.value.totalDocumento || null) : totalMostrado.value,
 )
 
 /**
@@ -743,12 +785,55 @@ const lineasSinPrecio = computed(() =>
   lineasCargadas.value.filter(l => !l.precioUnitario).length,
 )
 
+// ── "¿La pagaste ya?" (spec § 7 y § 10) ─────────────────────────────────────
+
+const pagoOpciones = [
+  { label: 'No', value: false },
+  { label: 'Sí, la pagué', value: true },
+]
+const pagarAhora = ref(false)
+const pagoMedioId = ref('')
+const pagoMonto = ref('')
+const pagoReferencia = ref('')
+
+const medioSeleccionado = computed(() => mediosPago.value.find(m => m.id === pagoMedioId.value) ?? null)
+const medioEsEfectivo = computed(() => medioSeleccionado.value?.esEfectivo ?? false)
+
+/**
+ * Al abrir el modal de confirmar: `FmaPago = 1` (contado) propone "Sí, la
+ * pagué" (spec § 10); el medio arranca en el primero de la lista y el monto
+ * propuesto es el total que se le va a deber (§ 4.1). Sin `Pagar`, esto no se
+ * usa — el control ni se muestra (§ 1.1: un control con permiso propio no va
+ * condicionado a otro).
+ */
+watch(confirmarOpen, (open) => {
+  if (!open || !puedePagar.value) return
+  pagarAhora.value = origenDte.value?.documento.fmaPago === '1'
+  pagoMedioId.value = mediosPago.value[0]?.id ?? ''
+  pagoMonto.value = totalParaConfirmar.value ?? ''
+  pagoReferencia.value = ''
+})
+
+/** El body de `pago` para `POST /compras/:id/confirmar` (spec § 7): solo lo
+ *  que el DTO declara — `monto`, `metodoPagoId` y `referencia` si se tipeó. */
+const cuerpoPago = computed(() => {
+  if (!puedePagar.value || !pagarAhora.value) return null
+  if (!pagoMonto.value.trim() || !pagoMedioId.value) return null
+  const pago: { monto: string, metodoPagoId: string, referencia?: string } = {
+    monto: pagoMonto.value.trim(),
+    metodoPagoId: pagoMedioId.value,
+  }
+  if (pagoReferencia.value.trim()) pago.referencia = pagoReferencia.value.trim()
+  return pago
+})
+const puedeEnviarConfirmar = computed(() => !pagarAhora.value || cuerpoPago.value != null)
+
 /**
  * Guarda y confirma. Confirmar mueve stock y costo: por eso pasa por un modal
  * que dice cuánto entra y adónde antes de mandar nada.
  */
 async function confirmarRecepcion() {
-  if (!puedeConfirmar.value || guardando.value) return
+  if (!puedeConfirmar.value || !puedeEnviarConfirmar.value || guardando.value) return
   guardando.value = true
   try {
     // Si esta instancia todavía no tiene una compra persistida, el guardado
@@ -761,13 +846,33 @@ async function confirmarRecepcion() {
     // `navegar: false`: acá abajo se decide cuándo, no `persistirBorrador`.
     const guardada = await persistirBorrador({ navegar: false })
     if (!guardada) return
+    // El body del pago se congela ACÁ: `cuerpoPago` puede seguir cambiando
+    // (el modal ya cerró) y la clave de idempotencia tiene que corresponder
+    // a lo que de verdad se mandó, no a lo que haya en pantalla después.
+    const pago = cuerpoPago.value
+    const ambitoCobro = `compra:${guardada.id}`
     try {
-      const res = await useApiFetch<CompraDetalle>(
+      const res = await useApiFetch<CompraDetalle & { repetida?: true }>(
         `${apiUrl}/compras/${guardada.id}/confirmar`,
-        { method: 'POST' },
+        {
+          method: 'POST',
+          body: pago ? { pago } : {},
+          // La `Idempotency-Key` (ADR-026, pattern § 18) solo cuando confirmar
+          // también cobra: sin `pago` el backend no la exige.
+          ...(pago ? { headers: intentoCobro.cabecera(ambitoCobro) } : {}),
+        },
       )
       llenarDesde(res)
-      toast.add({ title: 'Recepción confirmada: la mercadería ya entró al stock', color: 'success' })
+      if (pago) {
+        intentoCobro.terminar(ambitoCobro)
+        intentoCobro.avisarSiRepetido(res)
+      }
+      toast.add({
+        title: pago
+          ? 'Recepción confirmada y pagada: el stock y la caja ya se movieron'
+          : 'Recepción confirmada: la mercadería ya entró al stock',
+        color: 'success',
+      })
     } catch (e: unknown) {
       toast.add({ title: apiErrorMsg(e, 'Error al confirmar la recepción'), color: 'error' })
     } finally {
@@ -1203,6 +1308,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
         <ComprasCompraConfirmada
           v-else-if="compra"
           :compra="compra"
+          :total-documento-tipo="totalDocumentoTipo"
           @actualizada="llenarDesde"
         />
 
@@ -1221,6 +1327,42 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
                 Una compra confirmada ya no se edita como borrador.
               </p>
             </div>
+
+            <!-- Solo con `Pagar` (spec § 7, decisión 12): sin el permiso el
+                 backend rechaza `pago` con 403, así que acá no se pregunta. -->
+            <div v-if="puedePagar" class="mt-4 border-t border-default pt-4" data-qa="compra-pago-seccion">
+              <p class="text-sm font-medium mb-2">
+                ¿La pagaste ya?
+              </p>
+              <URadioGroup
+                v-model="pagarAhora"
+                :items="pagoOpciones"
+                value-key="value"
+                orientation="horizontal"
+                data-qa="compra-pago-si-no"
+              />
+              <div v-if="pagarAhora" class="mt-3 flex flex-col gap-3">
+                <UFormField label="Medio de pago">
+                  <USelectMenu
+                    v-model="pagoMedioId"
+                    :items="medioPagoOpts"
+                    value-key="value"
+                    label-key="label"
+                    class="w-full"
+                    data-qa="compra-pago-medio"
+                  />
+                </UFormField>
+                <UFormField label="Monto">
+                  <MoneyInput v-model="pagoMonto" oficial class="w-full" data-qa="compra-pago-monto" />
+                </UFormField>
+                <UFormField label="Referencia (opcional)">
+                  <UInput v-model="pagoReferencia" class="w-full" data-qa="compra-pago-referencia" />
+                </UFormField>
+                <p v-if="medioEsEfectivo" class="text-xs text-muted" data-qa="compra-pago-aviso-efectivo">
+                  Sale de tu caja física abierta: si no tenés una, abrila antes de confirmar.
+                </p>
+              </div>
+            </div>
           </template>
           <template #footer>
             <div class="flex justify-end gap-2 w-full">
@@ -1230,6 +1372,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
               <UButton
                 color="success"
                 :loading="guardando"
+                :disabled="!puedeEnviarConfirmar"
                 data-qa="compra-confirmar-si"
                 @click="confirmarRecepcion"
               >

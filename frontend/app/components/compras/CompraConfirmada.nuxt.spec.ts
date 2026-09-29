@@ -45,13 +45,13 @@ function compra(o: Partial<CompraDetalle> = {}): CompraDetalle {
   }
 }
 
-async function montar(c: CompraDetalle) {
+async function montar(c: CompraDetalle, totalDocumentoTipo: 'suma_lineas' | 'obligatorio' | 'opcional' = 'obligatorio') {
   useMonedasStore().hydrate([{
     monedaId: 'clp-1', nombre: 'Peso Chileno', codigoIso: 'CLP', simbolo: '$', decimales: 0,
     separadorDecimal: ',', separadorMiles: '.', locale: 'es-CL', habilitada: true,
     esOficial: true, valorDelDia: null,
   }], 'tenant-1')
-  return mountSuspended(CompraConfirmada, { props: { compra: c } })
+  return mountSuspended(CompraConfirmada, { props: { compra: c, totalDocumentoTipo } })
 }
 
 const hay = (w: Awaited<ReturnType<typeof montar>>, qa: string) =>
@@ -100,6 +100,72 @@ describe('CompraConfirmada — acciones por permiso', () => {
     expect(w.find('[data-qa="compra-anulada-motivo"]').text()).toContain('Factura equivocada')
     expect(hay(w, 'compra-corregir-')).toBe(false)
     expect(hay(w, 'compra-anular-abrir')).toBe(false)
+  })
+})
+
+describe('CompraConfirmada — total, vencimiento y su corrección (spec compras-deuda-proveedor § 6 y § 10)', () => {
+  it('muestra el total del documento y el vencimiento', async () => {
+    permisos = new Set(['Compras:Leer'])
+    const w = await montar(compra({ totalDocumento: '119000', fechaVencimiento: '2026-10-16' }))
+    expect(w.find('[data-qa="compra-documento-total"]').text()).toContain('119.000')
+    expect(w.find('[data-qa="compra-documento-vencimiento"]').text()).toContain('16')
+  })
+
+  it('un tipo suma_lineas no muestra "Total del documento" (no hay nada transcrito)', async () => {
+    permisos = new Set(['Compras:Leer'])
+    const w = await montar(compra({ totalDocumento: null }), 'suma_lineas')
+    expect(w.find('[data-qa="compra-documento-total"]').exists()).toBe(false)
+  })
+
+  it('con Actualizar aparece "Corregir total o vencimiento"; con solo Leer, no', async () => {
+    permisos = new Set(['Compras:Leer', 'Compras:Actualizar'])
+    const w = await montar(compra())
+    expect(hay(w, 'compra-documento-corregir-abrir')).toBe(true)
+
+    permisos = new Set(['Compras:Leer'])
+    const w2 = await montar(compra())
+    expect(hay(w2, 'compra-documento-corregir-abrir')).toBe(false)
+  })
+})
+
+describe('CompraConfirmada — pago (spec § 8 y § 10, decisión 12)', () => {
+  it('con Pagar y estadoPago presente, muestra pagado, deuda, insignia y pagos', async () => {
+    permisos = new Set(['Compras:Leer', 'Compras:Pagar'])
+    const w = await montar(compra({
+      estadoPago: 'parcial',
+      deuda: '20000',
+      aplicado: '99000',
+      vencida: false,
+      pagos: [{
+        id: 'pago-1', proveedorId: 'p1', fecha: '2026-09-20', monto: '99000',
+        metodoPagoId: 'm1', metodoPagoNombre: 'Efectivo', referencia: null, cajaId: 'caja-1',
+        estado: 'vigente', anuladoPor: null, anuladoEl: null, motivoAnulacion: null,
+        aplicaciones: [{ compraId: 'compra-1', monto: '99000' }], sobranteAFavor: '0',
+      }],
+    }))
+    const texto = w.find('[data-qa="compra-pago"]').text()
+    expect(texto).toContain('99.000')
+    expect(texto).toContain('20.000')
+    expect(texto).toContain('Te faltan')
+    expect(w.find('[data-qa="compra-pagos-tabla"]').text()).toContain('Efectivo')
+  })
+
+  it('sin Pagar, la sección de pago ni se muestra (aunque venga estadoPago)', async () => {
+    permisos = new Set(['Compras:Leer'])
+    const w = await montar(compra({ estadoPago: 'pagada', deuda: '0', vencida: false }))
+    expect(hay(w, 'compra-pago')).toBe(false)
+  })
+
+  it('sin estadoPago (sin Pagar en la respuesta del backend), tampoco se muestra', async () => {
+    permisos = new Set(['Compras:Leer', 'Compras:Pagar'])
+    const w = await montar(compra())
+    expect(hay(w, 'compra-pago')).toBe(false)
+  })
+
+  it('vencida pisa a las demás: la insignia dice "Vencida", no "Te faltan $X"', async () => {
+    permisos = new Set(['Compras:Leer', 'Compras:Pagar'])
+    const w = await montar(compra({ estadoPago: 'parcial', deuda: '20000', aplicado: '99000', vencida: true }))
+    expect(w.find('[data-qa="compra-pago"]').text()).toContain('Vencida')
   })
 })
 
