@@ -317,6 +317,14 @@ test('el XML pre-llena, aprende el código del proveedor y avisa cuando la factu
   await apartadas.getByRole('button', { name: 'No se cargan (no es mercadería)' }).click()
   await expect(page.locator('[data-qa="compra-dte-apartada-texto"]')).toContainText('FLETE CAFÉ')
 
+  // La Factura es `total_documento = 'obligatorio'`: sin este campo, confirmar
+  // es 400. El XML todavía no lo pre-llena (tarea aparte) — se tipea a mano,
+  // con el `MntTotal` del propio XML (`fixtures/andina-dte.xml`), que incluye
+  // el flete apartado como "no es mercadería".
+  const totalDocumentoInput = page.locator('input[data-qa="compra-total-documento"]')
+  await totalDocumentoInput.selectText()
+  await totalDocumentoInput.pressSequentially('122451')
+
   // Guardar y confirmar de una: el stock sube ahora.
   await expect(page.locator('[data-qa="compra-confirmar"]')).toBeEnabled()
   await page.locator('[data-qa="compra-confirmar"]').click()

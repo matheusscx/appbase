@@ -170,6 +170,10 @@ test('crear "Caja (12)" desde la línea, confirmar 10 cajas y corregir en cajas'
   await escribirEn(linea, 'compra-precio', '9600')
   await expect(linea.locator('[data-qa="compra-cuenta-presentacion"]')).toContainText('= 120 unidad')
 
+  // La Factura es `total_documento = 'obligatorio'`: sin este campo,
+  // confirmar es 400. 10 × $9.600.
+  await escribirEn(page, 'compra-total-documento', '96000')
+
   // Confirmar.
   await page.locator('[data-qa="compra-confirmar"]').click()
   const resumen = page.locator('[data-qa="compra-confirmar-resumen"]')
@@ -235,6 +239,10 @@ test('el lápiz corrige 24 → 12 antes de confirmar y el borrador toma el 12', 
 
   // La cuenta pasa a "= 120 unidad": el borrador toma el contenido del día, no el que tenía al elegirla.
   await expect(linea.locator('[data-qa="compra-cuenta-presentacion"]')).toContainText('= 120 unidad')
+
+  // La Factura es `total_documento = 'obligatorio'`: sin este campo,
+  // confirmar es 400. 10 × $9.600.
+  await escribirEn(page, 'compra-total-documento', '96000')
 
   await page.locator('[data-qa="compra-confirmar"]').click()
   await page.locator('[data-qa="compra-confirmar-si"]').click()

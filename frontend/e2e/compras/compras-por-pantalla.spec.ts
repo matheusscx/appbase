@@ -260,6 +260,10 @@ test('cargar con una línea sin precio y confirmar: entran las dos y el costo pr
   // `exacta`: Chile también tiene "Factura exenta" y "Factura de compra".
   await elegirPorPlaceholder(page, 'Factura, boleta, sin documento…', 'Factura', { exacta: true })
   await page.locator('input[data-qa="compra-folio"]').fill(`E2E-${sello}`)
+  // La Factura es `total_documento = 'obligatorio'`: sin este campo, confirmar
+  // más abajo es 400. $15.000 = las 10 unidades a $1.500 de la línea con
+  // precio; la línea sin precio no le agrega nada declarado.
+  await escribirEn(page, 'compra-total-documento', '15000')
   await elegirPorPlaceholder(page, 'Local o bodega', local.nombre, { exacta: true })
 
   // ── Las dos líneas ───────────────────────────────────────────────────────
