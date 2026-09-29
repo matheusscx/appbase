@@ -276,24 +276,6 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
     Anotar lo encontrado acá con la ruta de la evidencia. Ojo: la evidencia muere con el
     worktree.
 
-- [ ] **El aviso de error del login aparece en el registro, y al revés** (frontend, medido el
-  2026-09-27; lo cazó la revisión independiente del cierre de *"Si el login no puede entrar a
-  la empresa, lo avisa"*, en [`resueltos.md`](resueltos.md)). `login.vue` y `register.vue` pintan
-  el mismo `authStore.error`, y nada lo limpia al cambiar de pantalla: `clearAuth()` no lo
-  toca, y `login()`/`register()` lo limpian recién al enviar. **Medido en navegador:** clave mala
-  en el login → "Crear cuenta" → el registro abre mostrando *"Credenciales inválidas"*. La
-  dirección contraria —un error del registro que aparece en el login— **solo está leída**, no
-  medida: es el mismo `ref`, y el registro tiene un link a "Iniciar sesión". Es
-  anterior a ese cierre, que le sumó una fuente más: el aviso de "no se pudo entrar a la
-  empresa" que dejan `handlePostLogin`, el callback de Google y el middleware también viaja al
-  registro.
-  **Lo que falta medir o decidir, y no es para el owner:** limpiar al montar el registro cierra
-  una dirección, pero no la otra. El login **no** se puede limpiar al montar, porque ahora es la
-  pantalla que muestra el aviso que le mandan el callback y el middleware. El arreglo probable es
-  separar el error de cada pantalla. Antes de elegir, volver a listar los lectores de
-  `authStore.error`: el 2026-09-27 eran solo esas dos pantallas. Los comentarios de
-  `auth/callback.vue` y `middleware/auth.ts` lo nombran porque navegan al login para que se vea.
-
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño

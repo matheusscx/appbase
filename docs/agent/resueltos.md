@@ -23,6 +23,67 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El login y el registro, cada uno con su aviso de error (cerrada 2026-09-29)
+
+Sale de [`pendientes.md`](pendientes.md) § 2.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **El aviso de error del login aparece en el registro, y al revés** (frontend, medido el
+  2026-09-27; lo cazó la revisión independiente del cierre de *"Si el login no puede entrar a
+  la empresa, lo avisa"*, en [`resueltos.md`](resueltos.md)). `login.vue` y `register.vue` pintan
+  el mismo `authStore.error`, y nada lo limpia al cambiar de pantalla: `clearAuth()` no lo
+  toca, y `login()`/`register()` lo limpian recién al enviar. **Medido en navegador:** clave mala
+  en el login → "Crear cuenta" → el registro abre mostrando *"Credenciales inválidas"*. La
+  dirección contraria —un error del registro que aparece en el login— **solo está leída**, no
+  medida: es el mismo `ref`, y el registro tiene un link a "Iniciar sesión". Es
+  anterior a ese cierre, que le sumó una fuente más: el aviso de "no se pudo entrar a la
+  empresa" que dejan `handlePostLogin`, el callback de Google y el middleware también viaja al
+  registro.
+  **Lo que falta medir o decidir, y no es para el owner:** limpiar al montar el registro cierra
+  una dirección, pero no la otra. El login **no** se puede limpiar al montar, porque ahora es la
+  pantalla que muestra el aviso que le mandan el callback y el middleware. El arreglo probable es
+  separar el error de cada pantalla. Antes de elegir, volver a listar los lectores de
+  `authStore.error`: el 2026-09-27 eran solo esas dos pantallas. Los comentarios de
+  `auth/callback.vue` y `middleware/auth.ts` lo nombran porque navegan al login para que se vea.
+
+### Lo medido
+
+- **Lectores de `authStore.error`, vueltos a listar el 2026-09-28:** siguen siendo solo
+  `login.vue` y `register.vue`. Lo escriben `login()`, `register()` y `handlePostLogin` (el aviso
+  de "no pudimos entrar a tu empresa"); `auth/callback.vue` y `middleware/auth.ts` no lo leen,
+  navegan al login para que se vea.
+- **La dirección que solo estaba leída, medida en navegador** (stack del worktree): un registro
+  rechazado por el backend (*"contrasena must be longer than or equal to 6 characters"*) →
+  "Iniciar sesión" → el login abre mostrando ese mismo texto. Con el correo mal formado no se
+  llega a medir: el `type="email"` del navegador frena el envío antes del backend.
+
+### Qué se hizo
+
+- `register()` del store **ya no toca `error`**: devuelve `{ mensaje }` o `{ error }`, y el aviso
+  vive en un `ref` local de `register.vue`, que se limpia al volver a enviar y nace vacío en
+  cada montaje.
+- El login sigue leyendo `authStore.error` y **no** se limpia al montar: es adonde el callback,
+  el middleware y `handlePostLogin` mandan el aviso de entrada fallida.
+
+### Qué lo fija
+
+- `frontend/app/pages/auth-pantallas.nuxt.spec.ts`, montando las dos pantallas de verdad:
+  clave mala → el registro no la muestra; registro rechazado → el login no lo muestra; el
+  registro limpia su aviso al reenviar; y el aviso de entrada fallida (`my-tenants` que falla
+  después de un login bueno) sigue llegando al login. Cada test de dirección lleva su control:
+  la pantalla de origen sí muestra el error.
+- **Mutantes:** `auth.ts` y `register.vue` como estaban antes → caen los dos tests de dirección.
+  Limpiar `store.error` en el `onMounted` del login (el arreglo tentador) → cae el del aviso de
+  entrada fallida.
+- **En navegador, con el arreglo:** registro rechazado → el login abre sin aviso; clave mala →
+  el login muestra *"Credenciales inválidas"* y el registro abre sin aviso.
+  `e2e/tenants/entrada-fallida.spec.ts` verde en las dos corridas en frío de la suite entera del
+  2026-09-29 (el 3 de 5 del 2026-09-28 dio igual con el código de antes: era el entorno, no
+  este cambio; ver la entrada de Playwright en [`pendientes.md`](pendientes.md) § 2).
+
+---
+
 ## El filtro de borrados de `codigos_proveedor` no admite un e2e de conducta: el unitario sobre el SQL es lo mejor disponible (cerrada 2026-09-28)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. **Medido** (sub-agente Sonnet, verificado por la

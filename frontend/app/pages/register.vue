@@ -21,8 +21,18 @@ const showPassword = ref(false)
  */
 const enviado = ref<string | null>(null)
 
+/**
+ * El error de esta pantalla, y no `store.error`: ése es el del login, que
+ * también recibe el aviso de "no pudimos entrar a tu empresa". Compartido, el
+ * registro abría con el error del login y el login con el del registro.
+ */
+const errorRegistro = ref<string | null>(null)
+
 async function onRegister() {
-  enviado.value = await store.register(state.nombre, state.correo, state.password)
+  errorRegistro.value = null
+  const resultado = await store.register(state.nombre, state.correo, state.password)
+  if ('error' in resultado) errorRegistro.value = resultado.error
+  else enviado.value = resultado.mensaje
 }
 
 async function onGoogle() {
@@ -65,10 +75,10 @@ async function onGoogle() {
         <template v-else>
         <!-- Error -->
         <UAlert
-          v-if="store.error"
+          v-if="errorRegistro"
           color="error"
           variant="subtle"
-          :description="store.error"
+          :description="errorRegistro"
           icon="i-lucide-circle-alert"
         />
 

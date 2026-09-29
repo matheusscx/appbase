@@ -118,14 +118,14 @@ describe('useAuthStore — mensajes de error del login público', () => {
       new Error('[POST] "http://backend-interno:3000/api/auth/register": <no response> fetch failed'),
     )
 
-    const ok = await store.register('Ana', 'a@b.com', 'secreta')
+    const resultado = await store.register('Ana', 'a@b.com', 'secreta')
 
-    // `null` y no `false`: el registro devuelve el mensaje del backend, y ya
-    // no un booleano. No abre sesión — la cuenta no sirve hasta verificar el
+    // El registro devuelve el mensaje del backend o el error, y ya no un
+    // booleano. No abre sesión — la cuenta no sirve hasta verificar el
     // correo—, así que no hay nada que ramificar salvo "salió" o "falló".
-    expect(ok).toBeNull()
-    expect(store.error).toBe('Error al registrarse')
-    expect(store.error).not.toContain('http')
+    expect(resultado).toEqual({ error: 'Error al registrarse' })
+    // Y el error es del registro: el de `store.error` lo lee el login.
+    expect(store.error).toBeNull()
   })
 
   it('un registro exitoso NO abre sesión: devuelve el mensaje y nada más', async () => {
@@ -139,9 +139,9 @@ describe('useAuthStore — mensajes de error del login público', () => {
       message: 'Si ese correo no tenía cuenta, te llega un link para verificarlo y entrar.',
     })
 
-    const mensaje = await store.register('Ana', 'a@b.com', 'secreta')
+    const resultado = await store.register('Ana', 'a@b.com', 'secreta')
 
-    expect(mensaje).toContain('te llega un link')
+    expect(resultado).toEqual({ mensaje: expect.stringContaining('te llega un link') })
     expect(store.token).toBeNull()
     expect(store.user).toBeNull()
   })
@@ -161,9 +161,9 @@ describe('useAuthStore — mensajes de error del login público', () => {
       data: { message: ['email debe ser un correo', 'password es muy corta'] },
     })
 
-    await store.register('Ana', 'mal', '1')
+    const resultado = await store.register('Ana', 'mal', '1')
 
-    expect(store.error).toBe('email debe ser un correo, password es muy corta')
+    expect(resultado).toEqual({ error: 'email debe ser un correo, password es muy corta' })
   })
 })
 

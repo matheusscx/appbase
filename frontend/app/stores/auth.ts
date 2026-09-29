@@ -72,27 +72,32 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
-   * Registro público. **No abre sesión**, y devuelve el mensaje a mostrar en
-   * vez de un booleano.
+   * Registro público. **No abre sesión**, y devuelve el mensaje a mostrar o el
+   * error, en vez de un booleano.
    *
    * El backend responde lo mismo exista o no el correo —si distinguiera sería
    * un enumerador público de cuentas— así que acá tampoco hay nada que
    * ramificar: no se puede saber si la cuenta se creó. La sesión llega recién
    * después de verificar el correo desde el link del mail.
+   *
+   * **No toca `error`**: ése es el aviso del login, y compartirlo hacía que
+   * cada pantalla abriera mostrando el error de la otra (2026-09-27).
    */
-  async function register(nombre: string, correo: string, contrasena: string): Promise<string | null> {
+  async function register(
+    nombre: string,
+    correo: string,
+    contrasena: string,
+  ): Promise<{ mensaje: string } | { error: string }> {
     loading.value = true
-    error.value = null
     try {
       const data = await $fetch<{ message: string }>(
         `${apiUrl}/auth/register`,
         { method: 'POST', body: { nombre, correo, contrasena }, credentials: 'include' },
       )
-      return data.message
+      return { mensaje: data.message }
     } catch (e: unknown) {
       // Misma razón que en `login`: pantalla sin sesión.
-      error.value = apiErrorMsg(e, 'Error al registrarse', { detalleLocal: false })
-      return null
+      return { error: apiErrorMsg(e, 'Error al registrarse', { detalleLocal: false }) }
     } finally {
       loading.value = false
     }
