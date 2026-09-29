@@ -896,9 +896,12 @@ Eran tres: la tercera —el reporte de varianza— se construyó y está en [`re
   - **El pie muestra un total negativo mientras se tipea un descuento mayor al subtotal.**
     `totalConDescuento` (`frontend/app/composables/useCompras.ts:116`) resta sin piso y
     `puedeGuardar` (`frontend/app/pages/compras/[id].vue:237`) no mira el total, así que el
-    rebote llega recién al guardar, como toast del 400 de `validarDescuento`. Decidir al
-    tomarlo si el campo se marca en rojo en el momento o si el pie se queda en cero: el
-    backend ya es la red, esto es solo cuándo se entera quien tipea.
+    rebote llega recién al guardar, como toast del 400 de `validarDescuento`. ✅ **Decidido
+    (owner, 2026-09-29): el campo se marca en rojo al tipear**, y no se puede guardar hasta
+    corregirlo. Cómo se decidió: en el selector interactivo de la orquestadora, con la escena de
+    una compra de $50.000 y un descuento de $60.000 tipeado por error. Eligió *A: marcar el campo
+    en rojo al tipear* (recomendada) por sobre *B: el pie se queda en $0*. El backend sigue siendo
+    la red.
 
   ⚠️ **Cuatro cosas que hay que tener presentes, y la primera no es técnica:**
 
@@ -1104,8 +1107,11 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   composable) lista con `listar('boleta')` y tiene la misma forma — sin medir si la precuenta o
   la boleta de un rol sin ese permiso fallan igual. Y el rol sembrado del garzón (`Salón`,
   `ana.torres`) tiene solo `Salones:Leer` + `Operar`: tampoco tiene `Items:Leer`, así que
-  tampoco puede cargar un pedido (medido en la base, no en la pantalla). **Si se le agrega o
-  no, no está decidido**: es pregunta para el owner, no parte de este frente.
+  tampoco puede cargar un pedido (medido en la base, no en la pantalla). ✅ **Se le agrega
+  (owner, 2026-09-29)**, en el selector interactivo de la orquestadora: eligió *A: darle el
+  permiso* (recomendada) por sobre *B: dejarlo así*, con la condición que la propia opción
+  llevaba: **antes de sembrarlo, medir qué más ve el garzón con `Items:Leer`** (por ejemplo si ve
+  costos en la pantalla de productos). Si ve algo que no debería, se le vuelve a preguntar.
   **Al cerrarlo:** `frontend/e2e/salones/anular-plato.spec.ts` pasa a correr como el encargado
   —su docblock explica por qué hoy corre como admin—.
 
@@ -1136,9 +1142,13 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   lo que evita cobrar un usado como nuevo), *B: el sistema prefiere una condición* y *C: da lo
   mismo*. Contestó "vamos A".
   **Lo que falta al construirlo:** la pantalla de venta (POS y salones) pregunta qué unidad cuando
-  el producto es de modo serie, y la API recibe las `unidadIds` que hoy el POS nunca manda; qué
-  pasa con una venta que llega sin unidad (¿400, o el orden de hoy?) y con el ingrediente de una
-  receta en modo serie se deciden en la spec. Decide qué unidad sale: escribe en
+  el producto es de modo serie, y la API recibe las `unidadIds` que hoy el POS nunca manda; una venta
+  que llega sin unidad no tiene camino viejo que sostener: preguntado en el selector
+  interactivo de la orquestadora (2026-09-29) si se rechazaba o salía la más vieja *"por ejemplo
+  desde una pantalla vieja"*, el owner contestó *"no tenemos pantallas mas viejas ni tenemos
+  datos productivos"*. O sea que la API exige la unidad y el POS y el salón la mandan siempre; no
+  hay compatibilidad que diseñar. El ingrediente de una receta en modo serie sigue abierto y se
+  decide en la spec. Decide qué unidad sale: escribe en
   `movimientos_inventario` y toca la trazabilidad ([ADR-007](../adr/007-inventario-serie-lote.md)),
   así que va en su propio frente. Va de la mano con "El lote que vence antes sale primero"
   (arriba) y con la entrada de la § 6 "Serie y lote están a medias".
@@ -1351,8 +1361,10 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     vencido** y saca del siguiente (owner, 2026-09-28, "vamos A", entre *A: bloquear*
     —recomendada—, *B: avisar y dejar vender* y *C: vender sin decir nada*; escena: 3 yogures
     vencidos ayer y 20 que vencen en junio). **Costo aceptado:** si nadie merma los vencidos, el
-    stock muestra más de lo vendible; la orquestadora propuso un aviso de vencidos en el inicio,
-    como el de stock bajo, para la spec (no decidido).
+    stock muestra más de lo vendible; ✅ **va un aviso de lotes vencidos en el inicio**, como el
+    de stock bajo (owner, 2026-09-29, en el selector interactivo de la orquestadora: eligió *A:
+    sí, aviso en el inicio*, recomendada, por sobre *B: no, se ve en inventario*; escena: 3
+    yogures vencidos, el stock muestra 23 y se pueden vender 20).
   ⚠️ Y queda igual la corrección barata que da la mitad del beneficio si esto se demora: que la
   merma **rechace** serie/lote en vez de aceptar y descontar la unidad equivocada en silencio.
 
