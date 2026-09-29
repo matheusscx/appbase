@@ -141,6 +141,72 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   al borde y en el medio) que corran los dos specs (`useDte.spec.ts` y
   `lectura-dte.service.spec.ts`), con un comentario en cada función que apunte a la otra.
 
+- [ ] **42 campos de fecha de la API aceptan `2026-02-31`, y la respuesta es un 500** (backend;
+  lo levantó la sesión de compras pieza 3 y lo midieron un sub-agente Sonnet y la orquestadora el
+  2026-09-29; venía de la § 2). `grep -rn "^\s*@IsDateString(" backend/src` da 42 decoradores y
+  ninguno pasa `strict`. Con class-validator 0.15.1 y validator 13.15.35, `2026-02-31` y
+  `2026-02-31T10:00:00Z` pasan sin `strict` y los rechaza `strict: true`. El string llega crudo
+  al SQL (ningún campo lleva `@Type(() => Date)`) y ahí se castea: `$N::date` en
+  `compras.service.ts:702-708`, y dentro de `rango-fecha.util.ts:118` para mermas y pagos. En el
+  Postgres local, `'2026-02-31'::date` da *date/time field value out of range* (22008) y
+  `'2026-08'::date` da *invalid input syntax* (22007). No hay ningún `@Catch(` en `backend/src`,
+  así que los dos salen como 500.
+  **El arreglo ya existe en el repo:** `turnos/dto/query-sesiones.dto.ts:25-42` combina
+  `@Matches(/^\d{4}-\d{2}-\d{2}$/)` con `@IsISO8601({ strict: true })`, porque `strict` solo no
+  rechaza `2026-08` ni `20260807`, que también revientan en `::date` (su comentario lo midió).
+  ⚠️ **Antes de aplicarlo, clasificar campo por campo según lo que hace el SQL con el valor:** los
+  que van a `::date` llevan el molde de turnos; un campo que acepta timestamp completo lleva
+  `strict` sin el `@Matches`. Cierre: un e2e por cada forma (no un spec de DTO, que no corre el
+  pipe) que mande `2026-02-31` y espere 400.
+
+- [ ] **Que `synchronize` deje de tirar en cada arranque los 17 índices únicos que crea el
+  seeder** (backend; lo levantó la sesión de compras pieza 3 el 2026-09-29 con
+  `createSchemaBuilder().log()`, que dio 19 `upQueries` en una base recién sembrada; la causa la
+  midieron un sub-agente Sonnet y la orquestadora el mismo día; venía de la § 2).
+  `grep -rn "CREATE UNIQUE INDEX" backend/src` da exactamente 17, todos en `seeder.service.ts`, y
+  coinciden uno a uno con los 17 `DROP INDEX`. Ninguna entity los declara, y en typeorm 1.0.0
+  `RdbmsSchemaBuilder.shouldDropIndices` (`node_modules/typeorm/schema-builder/RdbmsSchemaBuilder.js:267`)
+  tira todo índice que no tenga metadata con su nombre, salvo que esa metadata diga
+  `synchronize: false`. **El arreglo, por forma:**
+  - **Los 14 de expresión** (13 sobre `lower(nombre)` y `uq_unidad_item_serie`, que usa
+    `serieNormalizadaSql`): declarar `@Index('<nombre>', { synchronize: false })` en su entity. El
+    seeder los sigue creando, y `synchronize` deja de tocarlos.
+  - **Los 3 de columnas** (`uq_recuento_linea_item_vivo`, `uq_garzones_mostrador_tenant` y
+    `uq_garzones_usuario_tenant`): declararlos en la entity con `@Index([...], { unique: true,
+    where })` y sacar su SQL del seeder. El comentario de `seeder.service.ts:2345-2347`, que dice
+    que `synchronize` no genera índices parciales, es falso para esta versión: corregirlo en el
+    mismo commit.
+  - **Los 2 `DEFAULT`:** `porcentaje_sugerido` declara `default: '0.10'` como string, y la lectura
+    del default de la base lo trae sin comillas. `payload` declara `default: () => "'{}'::jsonb"`,
+    y el lector le quita el cast. Ajustar la declaración hasta que el log dé vacío. Esto se dedujo
+    leyendo TypeORM y no se midió contra la base.
+  **Lo que la medición corrige de la entrada anterior:** la ventana sin unicidad existe, pero pasa
+  antes de que el puerto se abra (`app.listen()` corre `init()` y el `onApplicationBootstrap` del
+  seeder antes de escuchar), así que ningún pedido la ve. Lo que queda es DDL en cada arranque y
+  en cada deploy del demo, y que siga siendo candidato a explicar la fragilidad de los specs de
+  locks (sin medir). **Cierre:** un e2e que arranque la app y afirme que
+  `createSchemaBuilder().log()` no trae `upQueries`, para que no vuelva. Va junto con "Declarar el
+  índice único de `item_lote`" (arriba), que es la misma idea.
+
+- [ ] **Ocho specs e2e buscan su fila en la primera página de 100 sin un filtro que la acote**
+  (backend, test; lo levantó la sesión de compras pieza 3 y lo midió un sub-agente Sonnet el
+  2026-09-29; venía de la § 2). **Hoy pasan**, y se caen cuando la página se llene con filas de
+  otras suites. Confirmados, con el filtro que ya existe para acotarlos:
+  - `combos.e2e-spec.ts:213`, `grupos-modificadores.e2e-spec.ts:179`, `recetas.e2e-spec.ts:295`,
+    `unidad-ingrediente-referenciado.e2e-spec.ts:308` e `items-pausados.e2e-spec.ts:342` (el
+    describe *"el catálogo de venta"*, que el arreglo `0daa7dd9` no tocó): `GET /items` por tipo y
+    `.find` por id → `search=<marca de la corrida>`, el molde de `0daa7dd9`.
+  - `costeo-cpp.e2e-spec.ts:250`: movimientos por motivo → `itemId`, que existe y no se usa.
+  - `recuentos.e2e-spec.ts:515`: `GET /recuentos` no tiene filtro que acote → `GET /recuentos/:id`.
+  - `visibilidad-ventas-pagos.e2e-spec.ts:205` (`/pagos` → `ventaId`) y `:213` (`/ventas`, cuyo
+    DTO solo filtra por `estado` y `canal`: hay que agregarle un filtro o cambiar la aserción).
+  De la lista anterior sobraban `stock-minimo` (ya filtra por `SELLO`) y los de compras (filtran
+  por un proveedor creado en el propio spec). Hay dos del mismo riesgo que fallan distinto:
+  `nota-credito-composicion.e2e-spec.ts:313,324` afirma una ausencia, así que con la página llena
+  pasa en falso, y `venta-total-cero.e2e-spec.ts:163` afirma un invariante sobre una página que
+  puede quedar parcial. ⚠️ Cruza con la grilla paginada de la § 3: si ese frente cambia el
+  contrato del listado, estos se tocan ahí.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -186,60 +252,6 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   pesa cambiar el local a `postgres:15` glibc (imagen, tiempo de `entorno.sh db`) y si algún test
   de hoy depende del orden de musl y se cae con el cambio (correr el `test:e2e` completo sobre la
   imagen nueva). Si alinear cuesta poco, pasa a la § 1 como cambio de imagen en los dos archivos.
-
-- [ ] **`@IsDateString()` sin `strict` deja pasar `2026-02-31`, y la API contesta 500 en vez de
-  400** (backend, hallado por la sesión del frente de compras pieza 3 el 2026-09-29, en el DTO del
-  pago a proveedor; según ella es un patrón que se repite en todo el repo). **Sin medir por la
-  orquestadora:** ni el 500 ni el conteo de sitios. **Qué medir:** cuántos DTOs usan
-  `@IsDateString()` sin opciones; si `{ strict: true }` (validación ISO 8601 estricta de
-  class-validator) rechaza `2026-02-31` con 400 a través de `validacionGlobal()`, en un e2e y no en
-  un spec de DTO, porque `plainToInstance` + `validate` no corre el pipe; y dónde revienta hoy
-  la fecha imposible (¿Postgres al castear?). Si `strict` alcanza, pasa a la § 1 como cambio
-  mecánico en todos los sitios.
-
-- [ ] **~10 e2e leen la primera página de 100 de todo el tenant y buscan ahí su propio ítem**
-  (backend, test; hallado por la misma sesión el 2026-09-29, al arreglar `items-pausados`, que se
-  cayó cuando el spec de pagos agregó un producto). Los nombrados: combos, compras,
-  grupos-modificadores, costeo-cpp, nota-credito-composicion, recuentos, recetas, stock-minimo,
-  visibilidad-ventas-pagos y unidad-ingrediente-referenciado. **Hoy pasan**; se caen cuando el
-  tenant del seed pase de 100 productos, sin que nada del código haya cambiado. **Qué medir:**
-  confirmar la lista (grep de `pageSize=100` o del listado sin filtro en `backend/test/`) y cómo
-  resolvió `items-pausados` la sesión de compras, para copiar la forma: filtrar por el
-  nombre o el id del ítem propio en vez de recorrer la página. ⚠️ Cruza con la entrada con
-  prioridad de la § 3, *"las pantallas de venta cargan solo los primeros 100 ítems"*: si ese
-  frente cambia el contrato del listado (paginado y búsqueda en el servidor), estos specs se
-  tocan ahí mismo.
-
-- [ ] **Cada arranque de la app tira 17 índices únicos y el seeder los vuelve a crear** (backend,
-  hallado por la sesión del frente de compras pieza 3 el 2026-09-29, midiendo por qué fallaban los
-  specs de concurrencia; el texto literal de las 19 queries está en su reporte de la Tarea 2, §
-  12). **Medido:** booteada la app una vez sobre base nueva,
-  `dataSource.driver.createSchemaBuilder().log()` no da vacío: 19 `upQueries`, idénticas en dos
-  corridas. 17 son `DROP INDEX` de índices únicos parciales (`uq_garzones_mostrador_tenant`,
-  `uq_garzones_usuario_tenant`, `uq_unidad_item_serie`, `uq_ubicaciones_tenant_nombre`,
-  `uq_impuestos_tenant_nombre_vivo`, los de descuentos, recargos, turnos, promociones, cajones,
-  las cuatro tablas `motivo_*`, `uq_grupo_modificador_nombre_vivo`, `uq_recuento_linea_item_vivo`
-  y `uq_presentaciones_compra_nombre`). Las otras 2 son `ALTER COLUMN … SET DEFAULT` de
-  `propina_configuracion.porcentaje_sugerido` y `liquidacion_propinas_evento.payload`.
-  **Por qué pasa (verificado en dos de los 17, no en todos):** no están declarados en las
-  entities, los crea el seeder en SQL crudo con `CREATE UNIQUE INDEX IF NOT EXISTS`
-  (`seeder.service.ts:2310` el de garzones, `:3664` el de impuestos). `synchronize` ve un índice
-  que ninguna entity declara y lo tira, y el seeder lo recrea. Varios son sobre expresiones
-  (`lower(nombre)`, según el comentario de `impuestos.service.ts:117`), y el `downQuery` que arma
-  TypeORM los reconstruye sin la expresión: solo `("tenant_id")`.
-  **Consecuencias, deducidas y sin medir:** (1) entre el `synchronize` y el seeder hay una
-  ventana en que la base no tiene esas unicidades; (2) dos apps que arrancan a la vez contra la
-  misma base chocan en el `DROP`, que es el `index "…" does not exist` que aparece en el
-  `test:e2e` completo (cada suite crea su app); (3) el DDL de cada arranque es candidato a
-  explicar parte de la fragilidad de los specs que cuentan esperadores de lock
-  (`borrado-item-concurrente`, `ajuste-borrado-ubicacion-concurrente`). En Railway, cada deploy
-  corre ese ciclo contra la base del demo.
-  **Qué medir antes de proponer:** confirmar los 17 contra el seeder, uno por uno; si TypeORM puede
-  declarar cada uno en su entity (`@Index(…, { unique: true, where })` sirve para los que son de
-  columnas; los de `lower(…)` puede que no); y, para los que no, cómo se le dice a `synchronize`
-  que no los toque. Los dos `DEFAULT` son otra forma: normalización del texto del default
-  (`'0.10'` contra `0.10`). Cruza con "Declarar el índice único de `item_lote`" de la § 1, que
-  es la misma idea para un índice que hoy vive solo en `startup-pos.sql`.
 
 - [ ] **Tests de pantalla que no terminan en 20 s con la máquina cargada** (frontend,
   intermitente, medido el 2026-09-28). En 10 corridas de la suite entera, con otras sesiones
@@ -1894,12 +1906,14 @@ No se resuelve programando. Está acá para que tenga quién la reclame.
 
 ## Endurecimiento para producción (pre-lanzamiento — hoy no hay prod)
 
-El proyecto está en desarrollo y `main` no se despliega, así que nada de esto corre hoy.
-Pero el flujo actual (push directo a `main`; CI que corre **después** del push como
-detector, no como portón; sin ramas/PRs por decisión de la etapa de dev) **no es seguro
-para producción**: un CI rojo hoy es inofensivo porque `main` no despliega, pero el día
-que `main` auto-despliegue significaría subir código roto a prod y enterarse tarde. Esta
-sección se abre al encarar el paso a producción. Orden = prioridad.
+El proyecto está en desarrollo y no hay producción. ⚠️ **`main` sí despliega**: cada push
+despliega el demo de Railway, sin esperar al CI (corregido el 2026-09-29; antes este párrafo
+decía que `main` no se desplegaba). El flujo actual (push directo a `main`, CI que corre
+**después** del push como detector y no como portón, sin ramas ni PRs por decisión de la
+etapa de dev) **no es seguro para producción**. Hoy un CI rojo rompe solo el demo, que no
+tiene datos reales: el 2026-09-29 un push con CI rojo llegó al demo, y un cambio de entidad lo
+dejó en FAILED hasta resetear su base. Con producción, eso sería subir código roto y
+enterarse tarde. Esta sección se abre al encarar el paso a producción. Orden = prioridad.
 
 - [ ] **`synchronize: true` → migraciones (CRÍTICO, bloqueante de prod)** (backend) —
   hoy el esquema lo crea `synchronize` al bootstrap (dev + CI, porque `NODE_ENV != production`).
