@@ -1,8 +1,5 @@
-import {
-  test,
-  expect,
-  type APIRequestContext,
-} from '@playwright/test'
+import type { APIRequestContext } from '@playwright/test'
+import { test, expect } from '../support/sin-qz-tray'
 import { elegirEnSelector, rondaDePin, valorDelTotal } from '../support/ui'
 
 /**

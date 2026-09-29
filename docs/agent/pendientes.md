@@ -216,18 +216,18 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   la máquina cargada y ver si el tiempo crece de a poco (carga) o salta al timeout (cuelgue); el
   de salones depende de `esperar(20)`/`esperar(50)` alrededor de un PATCH retenido.
 
-- [ ] **Specs de Playwright que fallan con el código limpio en el stack de un worktree** (frontend,
-  e2e de navegador). Medido el 2026-09-27 por la sesión que prendió `forbidNonWhitelisted`, en su
-  stack propio con la base reseteada. **Sin el flag** fallaron `reportes/varianza.spec.ts:68`,
-  `reportes/varianza.spec.ts:130`, `inicio/dashboard.spec.ts:73` y `ventas/pos.spec.ts:115`; **con
-  el flag**, `varianza:68` y `salones/cuenta-hasta-cobro.spec.ts:245` (este último, corrido solo,
-  pasó 2 de 2). Una medición anterior del mismo día, en otro worktree, dio `varianza:68`,
-  `cuenta-hasta-cobro:245` y `pos:115`. **En CI pasan** (`e2e-navegador` verde en los pushes del
-  2026-09-27). `varianza:68` falló en **todas** las corridas locales, así que no es azar: es algo
-  que el stack de un worktree tiene distinto de CI (datos del seed, zona horaria, fecha del día,
-  orden de specs). El riesgo es que una sesión tome una regresión real por "la intermitencia
-  conocida". **Lo que falta medir:** correr `varianza:68` solo en un stack de worktree, leer por
-  qué falla, y comparar el entorno con el de `ci.yml`.
+- [ ] **El arqueo de `caja/apertura-cierre.spec.ts:107` vio la diferencia de otro monto**
+  (frontend, e2e de navegador, visto una vez el 2026-09-29). En una corrida entera en frío en el
+  stack de un worktree (load 3,7–5,4), la fila de efectivo del cierre mostró `-$10.000` donde el
+  test espera `-$1.000`. En las otras dos corridas en frío del mismo día pasó, y corrido solo pasó
+  3 de 3. La diferencia es contado menos esperado: el test abre con `$10.000` y cuenta `$9.000`.
+  **Dos lecturas, ninguna medida:** (a) el contado quedó en `$0`, porque `escribirMonto` tipeó
+  antes de que el input terminara de hidratar; (b) lo esperado era `$19.000`, porque entró otro
+  movimiento de `$9.000` a la misma caja. **Descartado por aritmética**, aunque `-$10.000` sea justo
+  ×10 de `-$1.000`: el ×10 del separador de miles anotado en `MoneyInput.vue:157-175` convertiría
+  el contado en `$90.000`, y la diferencia daría `+$80.000`. **Lo que falta medir:** correrlo en
+  loop en frío con la base recién reseteada, y en el rojo leer por API lo esperado y lo contado de
+  esa caja, que es lo que separa (a) de (b).
 
 - [ ] **El pre-commit rechaza un recibo de revisión escrito sobre el mismo diff** (harness). Dos
   sesiones lo vieron el 2026-09-27, las dos desde un worktree (la del aviso sin costo de la

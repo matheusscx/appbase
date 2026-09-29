@@ -23,6 +23,78 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Playwright en el stack de un worktree: las dos causas, cerradas (cerrada 2026-09-29)
+
+Sale de [`pendientes.md`](pendientes.md) § 2.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Specs de Playwright que fallan con el código limpio en el stack de un worktree** (frontend,
+  e2e de navegador). Medido el 2026-09-27 por la sesión que prendió `forbidNonWhitelisted`, en su
+  stack propio con la base reseteada. **Sin el flag** fallaron `reportes/varianza.spec.ts:68`,
+  `reportes/varianza.spec.ts:130`, `inicio/dashboard.spec.ts:73` y `ventas/pos.spec.ts:115`; **con
+  el flag**, `varianza:68` y `salones/cuenta-hasta-cobro.spec.ts:245` (este último, corrido solo,
+  pasó 2 de 2). Una medición anterior del mismo día, en otro worktree, dio `varianza:68`,
+  `cuenta-hasta-cobro:245` y `pos:115`. **En CI pasan** (`e2e-navegador` verde en los pushes del
+  2026-09-27). `varianza:68` falló en **todas** las corridas locales, así que no es azar: es algo
+  que el stack de un worktree tiene distinto de CI (datos del seed, zona horaria, fecha del día,
+  orden de specs). El riesgo es que una sesión tome una regresión real por "la intermitencia
+  conocida". **Lo que falta medir:** correr `varianza:68` solo en un stack de worktree, leer por
+  qué falla, y comparar el entorno con el de `ci.yml`.
+
+### Lo medido: dos causas, ninguna es azar
+
+- **La recarga de Vite tumbaba `varianza:68`.** `@unovis` (lo usa solo la varianza, entró el
+  2026-09-21 en `f2eed17c`) no estaba en `vite.optimizeDeps.include`. El dev server lo descubría
+  al abrir la varianza y recargaba la página (`navigated to /reportes` cuatro veces), y el click
+  del test se perdía. Pasaba en **cada** corrida local porque `reset-db.sh` hace `down -v` y con
+  el volumen de `/app/node_modules` se va la caché de Vite; CI corre el build de producción, que
+  no tiene optimizador. Con el servidor ya caliente el test pasaba en 2,4 s.
+- **El QZ Tray de la máquina tumbaba `pos:115` y `cuenta-hasta-cobro:245`.** En la Mac del owner
+  QZ Tray corre (escucha en 8181/8182); en CI no hay ninguno. Al cobrar, `imprimirEn` hace
+  `qz.websocket.connect()` sin techo, y contra un QZ Tray sin certificado (el `.env` deja
+  `QZ_CERTIFICATE` vacío) el handshake no vuelve, así que el carrito no se limpia. `pos:115` solo:
+  3 de 3 rojos con QZ Tray, verde en 6,3 s simulando que no está. `cuenta-hasta-cobro:245` solo:
+  19,8 s con QZ Tray contra 8,8 s sin él, y en la suite entera se pasa de los 15 s del test.
+  ⚠️ `page.routeWebSocket` con `ws.close()` **no** simula la ausencia: el socket de la página abre
+  igual, qz-tray entra al handshake y se cuelga, y el test cae por el mock.
+- **Suite entera en frío, con el mismo reset antes de cada una:** 57/60 sin ningún cambio (load
+  4,0–4,6); 58/60 con `optimizeDeps` (load 3,4–5,0; quedan los dos de QZ); 59/60 con los dos
+  cambios y el QZ Tray de la Mac abierto (load 3,7–5,4). El rojo de esa última es otro: queda
+  como entrada propia en [`pendientes.md`](pendientes.md) § 2 (*"El arqueo de
+  `caja/apertura-cierre.spec.ts:107`…"*). `inicio/dashboard.spec.ts:73` y `varianza:130` no
+  fallaron en ninguna de las tres.
+
+### Qué se hizo
+
+- `frontend/nuxt.config.ts`: `@unovis/ts` y `@unovis/vue` en `vite.optimizeDeps.include`, con
+  el porqué y cómo ver la próxima que falte ("Vite discovered new dependencies at runtime" en el
+  log del frontend). Solo afecta al dev server.
+- `frontend/e2e/support/sin-qz-tray.ts`: un `test` con un fixture automático que manda los
+  puertos de QZ Tray a uno cerrado, así el socket falla con error como en CI. Lo importan los seis
+  specs que imprimen (cobrar en el POS o en salones, mandar a cocina, pedir la precuenta):
+  `ventas/pos`, `ventas/cobro-repetido`, `salones/cuenta-hasta-cobro`, `salones/boleta-al-cobrar`,
+  `salones/anular-plato` y `salones/anulaciones-porcentaje`. **Decisión del owner** (2026-09-29,
+  eligió en el chat la opción que le llevó la sesión coordinadora, la recomendada, entre
+  simularlo, abortar si QZ Tray está abierto o solo documentarlo).
+
+### Qué lo fija
+
+- **Mutante:** el fixture sin el init script → `pos.spec.ts:116` vuelve a caer igual (el carrito
+  no se limpia) con el QZ Tray de la Mac abierto; restaurado, verde en 5,4 s.
+- La suite entera en frío con QZ Tray abierto: los tres que caían, verdes, y 0 dependencias
+  descubiertas en runtime.
+
+### Qué quedó afuera
+
+- Un spec nuevo que imprima tiene que importar `test` de `../support/sin-qz-tray`; si importa el
+  de `@playwright/test`, en una máquina con QZ Tray abierto vuelve a colgarse, y en CI pasa igual.
+- El `connect()` sin techo es de producto y va aparte: el owner eligió darle el mismo techo que
+  a imprimir (entrada *"Conectar con QZ Tray tiene el mismo techo que imprimir"*, § 3 de
+  [`pendientes.md`](pendientes.md)).
+
+---
+
 ## El login y el registro, cada uno con su aviso de error (cerrada 2026-09-29)
 
 Sale de [`pendientes.md`](pendientes.md) § 2.

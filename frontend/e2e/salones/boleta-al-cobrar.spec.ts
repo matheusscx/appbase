@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../support/sin-qz-tray'
 import { API, api, tokenDe, limpiarItems, abrirCaja, cerrarCaja, TENANTS, CLP } from '../support/api'
 import { elegirEnSelector, rondaDePin, valorDelTotal } from '../support/ui'
 

@@ -14,9 +14,15 @@ export default defineNuxtConfig({
     preference: 'light',
     fallback: 'light',
   },
+  // Solo el dev server: una dependencia que Vite descubre al abrir una pantalla
+  // lo hace recargar la página, y un Playwright que navegaba en ese momento
+  // pierde el click. `reset-db.sh` borra esta caché con el volumen, así que en
+  // un stack de worktree pasaba en cada corrida (2026-09-29: `@unovis`, que solo
+  // usa la varianza, tumbaba `reportes/varianza.spec.ts`). Una que falte aparece
+  // en el log del frontend como "Vite discovered new dependencies at runtime".
   vite: {
     optimizeDeps: {
-      include: ['@internationalized/date', '@vue/devtools-core', '@vue/devtools-kit', 'decimal.js', 'maska/vue', 'qz-tray'],
+      include: ['@internationalized/date', '@unovis/ts', '@unovis/vue', '@vue/devtools-core', '@vue/devtools-kit', 'decimal.js', 'maska/vue', 'qz-tray'],
     },
   },
   runtimeConfig: {
