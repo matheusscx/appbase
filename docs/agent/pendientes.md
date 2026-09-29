@@ -611,22 +611,24 @@ en la § 4 porque **ninguno espera una respuesta del owner**: la decisión que l
 pantalla muestra lo que se puede pedir*). Contexto del frente:
 [`resueltos.md`](resueltos.md).
 
-- [ ] **El refresco del catálogo del salón cuesta tres `GET /items` y podría costar cero**
-  (backend + frontend; **lo introdujo este frente**, `c6489ecd` / Tarea 8, y lo señaló su propia
-  revisión) — hoy cada mutación de una cuenta agenda `refrescarItems()`, que vuelve a pedir el
-  catálogo entero **tres veces** (uno por tipo: producto, receta, combo), con un debounce de
-  250 ms y un guard de secuencia que descarta la respuesta que llega tarde
-  (`frontend/app/pages/salones/index.vue`). **Antes de `c6489ecd` esos tres GET salían solo en
-  la carga inicial de la pantalla**: lo que la Tarea 8 agregó es colgarlos de cada mutación,
-  porque el número pasó a calcularlo el servidor.
-  **Eso es el estado de esa tarea, no el diseño final**, y conviene que quede escrito para que
-  el próximo no lo lea como la forma elegida. **El destino:** las respuestas de mutación de
-  salones ya devuelven `CuentaDetalle`; si además cargaran la disponibilidad **del ítem
-  afectado**, el refresco costaría **0 GET** y el número sería exacto en vez de eventual.
-  ⚠️ Antes de tomarlo hay que medir si el problema existe: el debounce ya colapsa la ráfaga
-  —tres ítems seguidos son una sola tanda— y el costo por `GET /items` está medido en 0,36 ms
-  del lado del comprometido gracias a los índices de este frente. Lo que sí cambia es la
-  latencia percibida y el tráfico de una tablet con wifi de restaurante.
+- [ ] **El refresco del catálogo del salón baja ~133 KB para actualizar 3 campos: achicarlo a un
+  pedido de disponibilidad** (frontend + backend; lo introdujo `c6489ecd` / Tarea 8 del frente de la
+  reserva de stock). **Medido el 2026-09-28** (sub-agente Sonnet, leyendo el código): el único
+  disparador es el `watch` de `pages/salones/index.vue` (~:1735) sobre la firma de la cuenta abierta
+  —cualquier mutación de líneas, y también al entrar a una cuenta—, con debounce de 250 ms que
+  colapsa una ráfaga solo si los toques vienen a menos de 250 ms. Cada refresco son **3 `GET
+  /items`** en paralelo (producto, receta, combo) con `pageSize=100`, ~24 campos por ítem, **~740
+  bytes por ítem**: con 100 productos + 60 recetas + 20 combos, **~133 KB sin comprimir por
+  toque** (no hay `compression()` en `main.ts`). Y de todo eso solo cambian `disponible`,
+  `stockDisponible` y `disponibleCondicional`. El cómputo del servidor ya está medido en 0,36 ms:
+  el costo es de bytes y de requests en la tablet, no de la base.
+  **Se descarta el "0 GET" que proponía la entrada** (que las respuestas de mutación traigan la
+  disponibilidad): hay que tocar los 4 métodos de mutación y definir "ítem afectado", que no es
+  solo el de la línea sino todo lo que comparte ingrediente o stock; y no arregla que otra tablet
+  se entere tarde, que sigue igual. **Qué hacer:** un solo pedido liviano —`GET` de solo `{id,
+  disponible, stockDisponible, disponibleCondicional}` para los ítems ya cargados— en vez de los
+  3 del catálogo entero: 3 requests → 1 y ~90 % menos de bytes, sin tocar las mutaciones. La ruta
+  nueva o el parámetro los define quien lo tome, con `calcularDisponibilidadBatch` (sin N+1).
 
 ### Dos que el owner decidió el 2026-09-03: acumulación de descuentos y compras
 
