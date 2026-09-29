@@ -171,6 +171,37 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
+- [ ] **Cada arranque de la app tira 17 índices únicos y el seeder los vuelve a crear** (backend,
+  hallado por la sesión del frente de compras pieza 3 el 2026-09-29, midiendo por qué fallaban los
+  specs de concurrencia; el texto literal de las 19 queries está en su reporte de la Tarea 2, §
+  12). **Medido:** booteada la app una vez sobre base nueva,
+  `dataSource.driver.createSchemaBuilder().log()` no da vacío: 19 `upQueries`, idénticas en dos
+  corridas. 17 son `DROP INDEX` de índices únicos parciales (`uq_garzones_mostrador_tenant`,
+  `uq_garzones_usuario_tenant`, `uq_unidad_item_serie`, `uq_ubicaciones_tenant_nombre`,
+  `uq_impuestos_tenant_nombre_vivo`, los de descuentos, recargos, turnos, promociones, cajones,
+  las cuatro tablas `motivo_*`, `uq_grupo_modificador_nombre_vivo`, `uq_recuento_linea_item_vivo`
+  y `uq_presentaciones_compra_nombre`). Las otras 2 son `ALTER COLUMN … SET DEFAULT` de
+  `propina_configuracion.porcentaje_sugerido` y `liquidacion_propinas_evento.payload`.
+  **Por qué pasa (verificado en dos de los 17, no en todos):** no están declarados en las
+  entities, los crea el seeder en SQL crudo con `CREATE UNIQUE INDEX IF NOT EXISTS`
+  (`seeder.service.ts:2310` el de garzones, `:3664` el de impuestos). `synchronize` ve un índice
+  que ninguna entity declara y lo tira, y el seeder lo recrea. Varios son sobre expresiones
+  (`lower(nombre)`, según el comentario de `impuestos.service.ts:117`), y el `downQuery` que arma
+  TypeORM los reconstruye sin la expresión: solo `("tenant_id")`.
+  **Consecuencias, deducidas y sin medir:** (1) entre el `synchronize` y el seeder hay una
+  ventana en que la base no tiene esas unicidades; (2) dos apps que arrancan a la vez contra la
+  misma base chocan en el `DROP`, que es el `index "…" does not exist` que aparece en el
+  `test:e2e` completo (cada suite crea su app); (3) el DDL de cada arranque es candidato a
+  explicar parte de la fragilidad de los specs que cuentan esperadores de lock
+  (`borrado-item-concurrente`, `ajuste-borrado-ubicacion-concurrente`). En Railway, cada deploy
+  corre ese ciclo contra la base del demo.
+  **Qué medir antes de proponer:** confirmar los 17 contra el seeder, uno por uno; si TypeORM puede
+  declarar cada uno en su entity (`@Index(…, { unique: true, where })` sirve para los que son de
+  columnas; los de `lower(…)` puede que no); y, para los que no, cómo se le dice a `synchronize`
+  que no los toque. Los dos `DEFAULT` son otra forma: normalización del texto del default
+  (`'0.10'` contra `0.10`). Cruza con "Declarar el índice único de `item_lote`" de la § 1, que
+  es la misma idea para un índice que hoy vive solo en `startup-pos.sql`.
+
 - [ ] **Tests de pantalla que no terminan en 20 s con la máquina cargada** (frontend,
   intermitente, medido el 2026-09-28). En 10 corridas de la suite entera, con otras sesiones
   levantando stacks en paralelo (load average 15–22 en 12 núcleos), dos corridas salieron con
