@@ -460,6 +460,17 @@ revisión independiente no lo pudo reproducir, con razón.
   infraestructura. Es frente propio porque abre preguntas que no estaban contestadas: a quién
   llega, a qué hora del tenant, qué pasa si falla, y si un tenant sin descuadres recibe un
   correo vacío. Mientras tanto el control es rastro, no alarma — asumido explícitamente.
+  ✅ **Las cuatro, decididas (owner, 2026-09-29, en el selector interactivo de la orquestadora,
+  las cuatro con la opción recomendada):**
+  - **A quién:** a todos los usuarios con el permiso de supervisar cajas, no solo al admin ni a
+    una lista que el local escribe.
+  - **A qué hora:** 8:00 del día siguiente, en la zona del tenant. Cubre los cierres de madrugada.
+  - **Si falla el envío:** queda anotado y la bandeja de descuadres muestra que el resumen de ayer
+    no salió. Sin reintento automático (regla del owner).
+  - **Día sin descuadres:** sale igual, con "sin descuadres ayer", para que un día sin correo
+    signifique que el envío falló.
+  ⚠️ "Día" y "8:00" dependen de la zona del tenant, que es el tema de fechas de la § 6: el job
+  tiene que usar la regla que ese frente deje, no una copia más del helper.
 
 - [ ] **Conteo por denominación** (§5/§8.3 de la investigación) — los motivos categorizados
   de diferencia de §5 quedaron **resueltos** por el sub-proyecto C; lo que sigue
