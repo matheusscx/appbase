@@ -1005,44 +1005,49 @@ Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no s
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
-- [ ] **Ingredientes, componentes u opciones borrados del catálogo se saltean sin
-  movimiento al anular una receta o combo** (backend, heredado de la parte 2 del frente
-  *"Anular un plato ya enviado a cocina"*, documentado como hueco conocido en
-  [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md)
-  § 4 y § 7) — `ItemsService.consumirLineaAnulada` (`backend/src/modules/items/items.service.ts:4590`)
-  delega en `venderIngredientesReceta`/`venderComponentesCombo` para descontar stock; un
-  ingrediente que ya no está en el catálogo al momento de anular no genera ningún
-  `movimiento_inventario`, igual que al **vender** (mismo camino, mismo hueco). El costo de
-  ese plato en el reporte de anulaciones y en Mermas sale más bajo y **nada lo marca**: desde
-  el kardex no se distingue "la receta no tenía ese ingrediente" de "se lo saltearon". **La
-  pregunta antes de diseñar:** ¿se bloquea la anulación si algún ingrediente del snapshot ya
-  no existe (fuerza a `sin_valorizar` explícito), o se acepta el hueco y se documenta que el
-  costo mostrado es un piso, no una cifra exacta? La primera es más segura y más trabajo; la
-  segunda es lo que hay hoy, sin decirlo en ningún lado que el usuario vea.
-  ⛔ **NO SE CONTESTA TODAVÍA: la entrada necesita re-medirse, y el owner lo decidió así
-  (2026-09-20) después de que yo le planteara la pregunta sobre un caso falso.** Se la llevé
-  como *"alguien borró un ingrediente que la receta usa"*, y eso **no puede pasar**: medido en
-  `ItemsService.remove` → `obtenerUsoItem`, borrar un ítem se rechaza con 400 nombrando dónde se
-  usa si aparece en `receta_ingredientes`, `combo_componentes`, `grupo_modificador_opciones`,
-  `cuenta_lineas` o `receta_extras_permitidos`, y el chequeo va con `FOR UPDATE` sobre el ítem
-  para que no se cuele por una carrera (el comentario del lock explica el par con `FOR SHARE`).
-  Además la receta **se lee viva** al anular (`venderIngredientesReceta` consulta
-  `receta_ingredientes`, no un congelado), así que sus ingredientes base existen siempre.
-  **Entonces llegar al hueco necesita DOS pasos, no uno:** primero sacar el ítem de la receta o
-  del grupo —ahí deja de estar "en uso"— y recién entonces borrarlo; lo que queda apuntándolo es
-  **lo congelado en la línea** (un extra o una opción que el cliente eligió al pedir). El caso
-  real se parece a: *se pidió un risotto con extra de champiñones → después alguien sacó los
-  champiñones de los extras posibles y los borró → después se anula ese risotto viejo*. Mucho
-  más raro que lo que yo describí, y eso **cambia cuánto vale arreglarlo**.
-  **Lo que hay que medir antes de volver a preguntar:** por qué caminos exactos se llega (¿solo
-  extras y opciones congeladas, o hay otro?), si el hueco es el mismo al **vender** que al
-  anular (mismo código, la entrada lo afirma — verificarlo), y si en la práctica alguien puede
-  llegar ahí. ⚠️ **Y no vuelvas a plantearle la pregunta con mi escena:** hacerlo elegir entre
-  trabar una operación del salón y aceptar un número incompleto, para un caso que no se sabe
-  describir, es pedirle que decida sobre una ficción. La opción que yo iba a recomendar —**no
-  bloquear pero marcar la anulación como costo incompleto**, porque el daño no es que el número
-  sea bajo sino que es bajo y parece exacto— sigue sobre la mesa como candidata, no como
-  decidida.
+- [ ] **Lo que se consume al anular un plato sale de lo que HOY dice el catálogo, no de lo que se
+  pidió: un extra, una opción o un componente que ya no está se saltea sin movimiento, y el costo de
+  la anulación queda bajo sin marca** (backend; heredado del frente *"Anular un plato ya enviado a
+  cocina"*, [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md)
+  § 4 y § 7). **Re-medido el 2026-09-28** (sub-agente Sonnet; la orquestadora verificó contra el
+  código lo que la corrige): la versión anterior de esta entrada decía que llegar al hueco
+  necesitaba dos pasos y era muy raro. **Es más fácil de alcanzar:**
+  - **Un extra se borra en un paso.** `obtenerUsoItem` (`items.service.ts`, ~:2627) pone
+    `receta_extras_permitidos` en **advertencias**, no en bloqueos: `DELETE /items/:id` del
+    champiñón funciona directo, y `remove()` además da de baja sus filas de extras. Al anular, el
+    extra congelado en la línea no encuentra su ingrediente y se saltea — con una advertencia en la
+    respuesta HTTP que **no se guarda en ningún lado**.
+  - **Una opción de grupo** necesita dos pasos (la opción sí bloquea el borrado: primero `PATCH
+    /grupos-modificadores/:id` sin esa opción, después el `DELETE`), y se saltea **sin ninguna
+    advertencia** (`venderOpcionesGrupos`).
+  - **Receta o combo editados, sin borrar nada:** `receta_ingredientes` y `combo_componentes` se
+    leen **en vivo** al anular (`obtenerIngredientesRecetaPorIds`, `venderComponentesCombo`). Si
+    entre la venta y la anulación alguien edita la receta o el combo (`PATCH /items/:id`), la
+    anulación consume la receta **nueva**, no la que se cocinó. Sin aviso.
+  - **Vender y anular comparten el hueco** (mismo código; lo dice el docblock de
+    `consumirLineaAnulada`). Pausar un ítem (en vez de borrarlo) **no** lo dispara: las consultas
+    filtran solo `eliminado_el`.
+  **Qué ve el usuario:** el reporte de anulaciones marca `sin_valorizar` solo si **ningún**
+  movimiento tuvo costo; si una parte se movió y otra se salteó, la fila sale `valorizado` con la
+  suma parcial — **más baja que la real y sin marca**, indistinguible de un plato barato
+  (`anulaciones-reporte.service.ts`, `resolverCosto`). Mermas hereda el mismo sesgo.
+  **La pregunta para el owner, en lenguaje de local** (escena real, medida): *un mesero pide un
+  risotto con extra de champiñones; el encargado borra "champiñones" del catálogo; más tarde
+  se anula ese risotto. Los champiñones no se descuentan del inventario, y el costo de esa
+  anulación aparece completo cuando no lo es. Lo mismo si el que cambió fue la receta.*
+  - **A — no bloquear, pero marcar el costo como incompleto** en el reporte y en mermas. Trabajo
+    medio: la advertencia hoy es transitoria y hay que guardarla para que el reporte la lea.
+    (Era la candidata de la orquestadora el 2026-09-20.)
+  - **B — congelar al vender** lo que el plato consumió (la receta y los extras de ese momento) y
+    anular contra eso: la anulación siempre devuelve lo que se pidió, aunque el catálogo haya
+    cambiado. Más trabajo; arregla la causa en vez de marcarla.
+  - **C — aceptarlo** y escribirlo en `docs/features/` como límite conocido. Cero trabajo; el
+    número sigue saliendo bajo sin aviso.
+  ⚠️ Recomendación de la orquestadora para cuando se pregunte: **B** si el owner quiere el número
+  exacto, **A** si alcanza con saber que está incompleto. El motor de precios y lo fiscal no se
+  tocan en ninguna de las tres. Escribe en `movimientos_inventario`: la opción que elija va en su
+  propio frente.
+
 - [ ] **¿El vendido del día resta las notas de crédito?** (dashboard de inicio, bloque
   Ventas, `resumen-negocio.service.ts`) — hoy `GET /resumen-negocio/hoy` **excluye** las
   notas de crédito del vendido (no las resta: las saca del cálculo entero, igual que
