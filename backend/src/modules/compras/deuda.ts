@@ -18,7 +18,7 @@ export const PLAZO_PAGO_DIAS_DEFAULT = 30;
  * fecha pura `YYYY-MM-DD`, no un instante). `Date.UTC` evita que la resta de
  * huso horario del entorno corra la fecha un día.
  */
-function sumarDias(fecha: string, dias: number): string {
+export function sumarDias(fecha: string, dias: number): string {
   const [anio, mes, dia] = fecha.split('-').map(Number);
   const d = new Date(Date.UTC(anio, mes - 1, dia));
   d.setUTCDate(d.getUTCDate() + dias);
@@ -149,4 +149,147 @@ export function fondear(
 
   const nuevo = fuentes[fuentes.length - 1];
   return { partes, sobranteNuevo: nuevo.disponible.toString() };
+}
+
+/** Una aplicación viva de un pago a la compra que se está recortando. */
+export interface AplicacionViva {
+  aplicacionId: string;
+  pagoId: string;
+  monto: string;
+  /** Para ordenar "de la más nueva a la más vieja" (spec § 6). */
+  creadoEl: Date;
+}
+
+/**
+ * Lo que hay que escribir para dejar el aplicado de una compra en
+ * `totalNuevo` (spec § 6). Nunca `UPDATE` del monto (Global Constraints,
+ * plan): `aBorrar` son aplicaciones que se borran enteras, `aReducir` son
+ * las que se borran y se reinsertan por el resto — el caller hace las dos
+ * cosas con `eliminado_el` + `INSERT`, esta función solo decide los montos.
+ */
+export interface RecorteResultado {
+  aBorrar: string[];
+  aReducir: { aplicacionId: string; pagoId: string; montoNuevo: string }[];
+}
+
+/**
+ * Recorta las aplicaciones vivas de una compra hasta que lo aplicado no
+ * supere `totalNuevo` (spec § 6): de la MÁS NUEVA a la más vieja — la
+ * primera pagada es la que menos se toca, porque es la que el proveedor
+ * espera ver liquidada. El sobrante de cada aplicación tocada vuelve a su
+ * pago como saldo a favor (decisiones 5 y 8): esta función no lo escribe
+ * directamente, alcanza con dejar de contarlo como aplicado —
+ * `saldoAFavorLockeado` ya lo calcula solo como `monto − aplicaciones vivas`.
+ *
+ * `anular` reusa esta misma función con `totalNuevo = '0'` (decisión 6b):
+ * anular dice "esta compra no debe nada", y recortar hasta 0 es EXACTAMENTE
+ * "toda aplicación viva se borra, todo vuelve a favor" — no hace falta un
+ * camino aparte.
+ *
+ * Función PURA: no toca la base ni valida nada de negocio. Si el aplicado ya
+ * no supera `totalNuevo` (el total subió, o nunca hubo pagos), no hay nada
+ * que tocar y devuelve las dos listas vacías.
+ */
+export function recortar(
+  aplicacionesVivas: AplicacionViva[],
+  totalNuevo: string,
+): RecorteResultado {
+  const total = new Decimal(totalNuevo);
+  const ordenadas = [...aplicacionesVivas].sort(
+    (a, b) => b.creadoEl.getTime() - a.creadoEl.getTime(),
+  );
+  let aplicado = ordenadas.reduce(
+    (acc, a) => acc.plus(a.monto),
+    new Decimal(0),
+  );
+
+  const aBorrar: string[] = [];
+  const aReducir: {
+    aplicacionId: string;
+    pagoId: string;
+    montoNuevo: string;
+  }[] = [];
+  for (const a of ordenadas) {
+    if (aplicado.lte(total)) break;
+    const exceso = aplicado.minus(total);
+    const monto = new Decimal(a.monto);
+    if (exceso.gte(monto)) {
+      aBorrar.push(a.aplicacionId);
+      aplicado = aplicado.minus(monto);
+    } else {
+      aReducir.push({
+        aplicacionId: a.aplicacionId,
+        pagoId: a.pagoId,
+        montoNuevo: monto.minus(exceso).toString(),
+      });
+      aplicado = aplicado.minus(exceso);
+    }
+  }
+  return { aBorrar, aReducir };
+}
+
+/** Spec § 4.1: los cinco estados derivados (nunca guardados). */
+export type EstadoPagoCompra =
+  | 'pagada'
+  | 'parcial'
+  | 'pendiente'
+  | 'falta_total'
+  | 'falta_precio';
+
+export interface EstadoPagoResultado {
+  estadoPago: EstadoPagoCompra;
+  /** `total − aplicado`, nunca negativa; `null` si el total es desconocido. */
+  deuda: string | null;
+  /** Con deuda (o total desconocido) Y `fechaVencimiento < hoy` (spec § 4.1). */
+  vencida: boolean;
+}
+
+/**
+ * El estado de pago de UNA compra confirmada (spec § 4.1): `pagada` (deuda
+ * 0), `parcial` (aplicado > 0 y deuda > 0), `pendiente` (sin aplicado); con
+ * total desconocido, `falta_total` (`obligatorio`/`opcional` sin transcribir)
+ * o `falta_precio` (`suma_lineas` con alguna línea sin precio) — encima,
+ * `vencida` si queda deuda (o el total ni se sabe) y ya pasó el vencimiento.
+ *
+ * `hoy` y `fechaVencimiento` llegan como fecha pura (`YYYY-MM-DD`): comparar
+ * como STRING alcanza porque el formato es fijo-ancho y ordena igual que la
+ * fecha (mismo truco que el resto del módulo evita reimplementar con `Date`).
+ *
+ * Función PURA: el llamador ya filtró que la compra esté `confirmada` (spec
+ * § 4.1: "solo cuentan las compras confirmada") y ya resolvió `hoy` con la
+ * zona del tenant (`rango-fecha.util.ts`).
+ */
+export function estadoPagoCompra(params: {
+  total: string | null;
+  aplicado: string;
+  fechaVencimiento: string | null;
+  hoy: string;
+  /** `false` en un tipo `obligatorio`/`opcional` (decisión 10). */
+  esSumaLineas: boolean;
+}): EstadoPagoResultado {
+  const yaVencio =
+    params.fechaVencimiento != null && params.fechaVencimiento < params.hoy;
+
+  if (params.total == null) {
+    return {
+      estadoPago: params.esSumaLineas ? 'falta_precio' : 'falta_total',
+      deuda: null,
+      vencida: yaVencio,
+    };
+  }
+
+  const deuda = Decimal.max(
+    0,
+    new Decimal(params.total).minus(params.aplicado),
+  );
+  const estadoPago: EstadoPagoCompra = deuda.isZero()
+    ? 'pagada'
+    : new Decimal(params.aplicado).gt(0)
+      ? 'parcial'
+      : 'pendiente';
+  return {
+    estadoPago,
+    deuda: deuda.toString(),
+    vencida: deuda.gt(0) && yaVencio,
+  };
 }

@@ -2,7 +2,9 @@ import Decimal from 'decimal.js';
 import type { ConfigCalculo } from '../calculo-precios/calculo-precios.engine';
 import {
   PLAZO_PAGO_DIAS_DEFAULT,
+  estadoPagoCompra,
   fondear,
+  recortar,
   totalCompra,
   vencimiento,
 } from './deuda';
@@ -218,5 +220,183 @@ describe('fondear (spec § 5.1 y § 11): saldo primero, más viejo primero, part
         PAGO_NUEVO,
       ),
     ).toThrow();
+  });
+});
+
+describe('recortar (spec § 6)', () => {
+  const hace = (dias: number) => new Date(Date.now() - dias * 86_400_000);
+
+  it('el total sube y no toca nada: las dos listas vuelven vacías', () => {
+    const r = recortar(
+      [{ aplicacionId: 'a1', pagoId: 'p1', monto: '100', creadoEl: hace(1) }],
+      '150',
+    );
+    expect(r).toEqual({ aBorrar: [], aReducir: [] });
+  });
+
+  it('el aplicado es igual al total nuevo: tampoco toca nada (el borde no es "supera")', () => {
+    const r = recortar(
+      [{ aplicacionId: 'a1', pagoId: 'p1', monto: '100', creadoEl: hace(1) }],
+      '100',
+    );
+    expect(r).toEqual({ aBorrar: [], aReducir: [] });
+  });
+
+  it('recorta de la MÁS NUEVA primero', () => {
+    const r = recortar(
+      [
+        {
+          aplicacionId: 'vieja',
+          pagoId: 'p1',
+          monto: '100',
+          creadoEl: hace(10),
+        },
+        {
+          aplicacionId: 'nueva',
+          pagoId: 'p2',
+          monto: '100',
+          creadoEl: hace(1),
+        },
+      ],
+      '150',
+    );
+    // Solo hay que sacar 50, y la nueva sola alcanza: la vieja no se toca.
+    expect(r.aBorrar).toEqual([]);
+    expect(r.aReducir).toEqual([
+      { aplicacionId: 'nueva', pagoId: 'p2', montoNuevo: '50' },
+    ]);
+  });
+
+  it('baja a 0: todas las aplicaciones vivas se borran (decisión 6b, vía anular)', () => {
+    const r = recortar(
+      [
+        { aplicacionId: 'a1', pagoId: 'p1', monto: '40', creadoEl: hace(5) },
+        { aplicacionId: 'a2', pagoId: 'p2', monto: '60', creadoEl: hace(1) },
+      ],
+      '0',
+    );
+    expect(r.aBorrar.sort()).toEqual(['a1', 'a2']);
+    expect(r.aReducir).toEqual([]);
+  });
+
+  it('recorta varias aplicaciones enteras antes de partir la última que toca', () => {
+    const r = recortar(
+      [
+        { aplicacionId: 'a1', pagoId: 'p1', monto: '30', creadoEl: hace(30) },
+        { aplicacionId: 'a2', pagoId: 'p2', monto: '40', creadoEl: hace(20) },
+        { aplicacionId: 'a3', pagoId: 'p3', monto: '50', creadoEl: hace(10) },
+      ],
+      // Aplicado 120, total nuevo 45: hay que sacar 75. La más nueva (a3, 50)
+      // se borra entera (50 <= 75), quedan 25 por sacar de a2 (40 -> 15).
+      '45',
+    );
+    expect(r.aBorrar).toEqual(['a3']);
+    expect(r.aReducir).toEqual([
+      { aplicacionId: 'a2', pagoId: 'p2', montoNuevo: '15' },
+    ]);
+  });
+
+  it('sin aplicaciones vivas, no hay nada que recortar', () => {
+    expect(recortar([], '0')).toEqual({ aBorrar: [], aReducir: [] });
+  });
+});
+
+describe('estadoPagoCompra (spec § 4.1)', () => {
+  const base = { hoy: '2026-09-29', esSumaLineas: true };
+
+  it('pagada: deuda 0', () => {
+    const r = estadoPagoCompra({
+      ...base,
+      total: '100',
+      aplicado: '100',
+      fechaVencimiento: '2026-09-01',
+    });
+    expect(r).toEqual({ estadoPago: 'pagada', deuda: '0', vencida: false });
+  });
+
+  it('parcial: aplicado > 0 y deuda > 0', () => {
+    const r = estadoPagoCompra({
+      ...base,
+      total: '100',
+      aplicado: '40',
+      fechaVencimiento: null,
+    });
+    expect(r).toEqual({ estadoPago: 'parcial', deuda: '60', vencida: false });
+  });
+
+  it('pendiente: sin aplicado', () => {
+    const r = estadoPagoCompra({
+      ...base,
+      total: '100',
+      aplicado: '0',
+      fechaVencimiento: null,
+    });
+    expect(r.estadoPago).toBe('pendiente');
+    expect(r.deuda).toBe('100');
+  });
+
+  it('vencida: queda deuda y ya pasó el vencimiento', () => {
+    const r = estadoPagoCompra({
+      ...base,
+      total: '100',
+      aplicado: '0',
+      fechaVencimiento: '2026-09-01',
+    });
+    expect(r.vencida).toBe(true);
+  });
+
+  it('pagada nunca es vencida, aunque la fecha ya haya pasado', () => {
+    const r = estadoPagoCompra({
+      ...base,
+      total: '100',
+      aplicado: '100',
+      fechaVencimiento: '2026-01-01',
+    });
+    expect(r.vencida).toBe(false);
+  });
+
+  it('el mismo día del vencimiento no es vencida (el borde es "<", no "<=")', () => {
+    const r = estadoPagoCompra({
+      ...base,
+      total: '100',
+      aplicado: '0',
+      fechaVencimiento: '2026-09-29',
+    });
+    expect(r.vencida).toBe(false);
+  });
+
+  it('total desconocido en suma_lineas: falta_precio, deuda null', () => {
+    const r = estadoPagoCompra({
+      ...base,
+      total: null,
+      aplicado: '0',
+      fechaVencimiento: null,
+    });
+    expect(r).toEqual({
+      estadoPago: 'falta_precio',
+      deuda: null,
+      vencida: false,
+    });
+  });
+
+  it('total desconocido en obligatorio/opcional: falta_total', () => {
+    const r = estadoPagoCompra({
+      hoy: '2026-09-29',
+      esSumaLineas: false,
+      total: null,
+      aplicado: '0',
+      fechaVencimiento: null,
+    });
+    expect(r.estadoPago).toBe('falta_total');
+  });
+
+  it('total desconocido y vencida: sigue marcando vencida', () => {
+    const r = estadoPagoCompra({
+      ...base,
+      total: null,
+      aplicado: '0',
+      fechaVencimiento: '2026-01-01',
+    });
+    expect(r.vencida).toBe(true);
   });
 });

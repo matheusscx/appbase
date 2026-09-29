@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   Param,
@@ -18,7 +19,12 @@ import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
-import { ClaveIdempotencia } from '../../common/decorators/clave-idempotencia.decorator';
+import {
+  ClaveIdempotencia,
+  resolverClaveIdempotencia,
+} from '../../common/decorators/clave-idempotencia.decorator';
+import { RbacService } from '../rbac/rbac.service';
+import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { ComprasService } from './compras.service';
 import { PresentacionesCompraService } from './presentaciones-compra.service';
 import { LecturaDteService } from './lectura-dte.service';
@@ -38,6 +44,7 @@ import {
 import { LecturaDteDto } from './dto/lectura-dte.dto';
 import {
   AnularPagoProveedorDto,
+  ConfirmarCompraDto,
   CrearPagoProveedorDto,
   FindPagosProveedorDto,
 } from './dto/pago-proveedor.dto';
@@ -57,7 +64,25 @@ export class ComprasController {
     private readonly comprasService: ComprasService,
     private readonly presentacionesService: PresentacionesCompraService,
     private readonly lecturaDteService: LecturaDteService,
+    private readonly rbacService: RbacService,
   ) {}
+
+  /**
+   * ¿El llamador tiene `Compras:Pagar`? Resuelto a mano (no
+   * `@RequiresPermiso`) porque hace falta condicional: `confirmar` solo lo
+   * exige cuando el body trae `pago` (spec § 7), y las lecturas de compras
+   * (`findAll`/`findOne`) lo usan para decidir qué campos devolver, no para
+   * rechazar la ruta entera (decisión 12) — mismo molde que
+   * `resolverEscrituraCompartida` en `caja.controller.ts`.
+   */
+  private tienePermisoPagar(u: JwtUser): Promise<boolean> {
+    return this.rbacService.userHasPermiso(
+      u.id,
+      u.tenantId!,
+      'Compras',
+      'Pagar',
+    );
+  }
 
   @Get('tipos-documento')
   @RequiresPermiso('Compras', 'Leer')
@@ -135,9 +160,13 @@ export class ComprasController {
 
   @Get()
   @RequiresPermiso('Compras', 'Leer')
-  findAll(@Req() req: Request, @Query() query: FindComprasDto) {
-    const { tenantId } = req.user as { tenantId: string };
-    return this.comprasService.findAll(tenantId, query);
+  async findAll(@Req() req: Request, @Query() query: FindComprasDto) {
+    const u = req.user as JwtUser;
+    const tienePagar = await this.tienePermisoPagar(u);
+    if (query.estadoPago && !tienePagar) {
+      throw new ForbiddenException('No tienes permiso para esta acción');
+    }
+    return this.comprasService.findAll(u.tenantId!, query, tienePagar);
   }
 
   /**
@@ -177,11 +206,34 @@ export class ComprasController {
     return this.comprasService.listarPagos(tenantId, query.proveedorId);
   }
 
+  /**
+   * Lo que se debe, por proveedor (spec § 8): "el bodeguero recibe y el
+   * dueño paga" (decisión 12). `Pagar`, ANTES de `@Get(':id')`.
+   */
+  @Get('por-pagar')
+  @RequiresPermiso('Compras', 'Pagar')
+  porPagar(@Req() req: Request) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.comprasService.porPagar(tenantId);
+  }
+
+  /** El detalle de un proveedor en "Por pagar" (spec § 8). `Pagar`, ANTES de `@Get(':id')`. */
+  @Get('por-pagar/:proveedorId')
+  @RequiresPermiso('Compras', 'Pagar')
+  porPagarProveedor(
+    @Req() req: Request,
+    @Param('proveedorId', ParseUUIDPipe) proveedorId: string,
+  ) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.comprasService.porPagarProveedor(tenantId, proveedorId);
+  }
+
   @Get(':id')
   @RequiresPermiso('Compras', 'Leer')
-  findOne(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
-    const { tenantId } = req.user as { tenantId: string };
-    return this.comprasService.findOne(tenantId, id);
+  async findOne(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
+    const u = req.user as JwtUser;
+    const tienePagar = await this.tienePermisoPagar(u);
+    return this.comprasService.findOne(u.tenantId!, id, tienePagar);
   }
 
   @Post()
@@ -209,15 +261,48 @@ export class ComprasController {
    * Mueve stock y costo: una entrada por línea. `Crear` y no un permiso
    * aparte, porque recibir la mercadería es el mismo trabajo que cargarla
    * (spec compras-recepcion § 5).
+   *
+   * Con `pago` (spec § 7, "compra al contado en un solo gesto"): exige
+   * `Compras:Pagar` además de `Crear` — resuelto ACÁ, a mano, porque
+   * `@RequiresPermiso` no puede condicionar por el body — y `Idempotency-Key`
+   * (es un cobro, ADR-026). Sin `pago`, ninguno de los dos aplica: la
+   * cabecera es opcional y un bodeguero sin `Pagar` sigue pudiendo confirmar
+   * sin pagar.
    */
   @Post(':id/confirmar')
   @RequiresPermiso('Compras', 'Crear')
-  confirmar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
-    const { tenantId, id: usuarioId } = req.user as {
-      tenantId: string;
-      id: string;
-    };
-    return this.comprasService.confirmar(tenantId, usuarioId, id);
+  async confirmar(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(EscalaMonedaPipe) dto: ConfirmarCompraDto,
+  ) {
+    const u = req.user as JwtUser;
+    // Se resuelve SIEMPRE, con o sin `pago`: la respuesta de confirmar trae
+    // los campos de pago (spec § 8) igual que un `GET /compras/:id`
+    // posterior — el dueño que confirma sin pagar todavía tiene `Pagar`.
+    const tienePagar = await this.tienePermisoPagar(u);
+    if (!dto.pago) {
+      return this.comprasService.confirmar(
+        u.tenantId!,
+        u.id,
+        id,
+        undefined,
+        undefined,
+        tienePagar,
+      );
+    }
+    if (!tienePagar) {
+      throw new ForbiddenException('No tienes permiso para esta acción');
+    }
+    const clave = resolverClaveIdempotencia(req.headers['idempotency-key']);
+    return this.comprasService.confirmar(
+      u.tenantId!,
+      u.id,
+      id,
+      dto.pago,
+      clave,
+      tienePagar,
+    );
   }
 
   /**
@@ -227,38 +312,41 @@ export class ComprasController {
    */
   @Patch(':id/lineas/:lineaId')
   @RequiresPermiso('Compras', 'Actualizar')
-  corregirLinea(
+  async corregirLinea(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
     @Param('lineaId', ParseUUIDPipe) lineaId: string,
     @Body(EscalaMonedaPipe) dto: CorregirLineaDto,
   ) {
-    const { tenantId, id: usuarioId } = req.user as {
-      tenantId: string;
-      id: string;
-    };
+    const u = req.user as JwtUser;
+    const tienePagar = await this.tienePermisoPagar(u);
     return this.comprasService.corregirLinea(
-      tenantId,
-      usuarioId,
+      u.tenantId!,
+      u.id,
       id,
       lineaId,
       dto,
+      tienePagar,
     );
   }
 
   /** El descuento al total de una confirmada. Mismo permiso que la línea. */
   @Patch(':id/descuento')
   @RequiresPermiso('Compras', 'Actualizar')
-  corregirDescuento(
+  async corregirDescuento(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
     @Body(EscalaMonedaPipe) dto: CorregirDescuentoDto,
   ) {
-    const { tenantId, id: usuarioId } = req.user as {
-      tenantId: string;
-      id: string;
-    };
-    return this.comprasService.corregirDescuento(tenantId, usuarioId, id, dto);
+    const u = req.user as JwtUser;
+    const tienePagar = await this.tienePermisoPagar(u);
+    return this.comprasService.corregirDescuento(
+      u.tenantId!,
+      u.id,
+      id,
+      dto,
+      tienePagar,
+    );
   }
 
   /**
@@ -268,13 +356,19 @@ export class ComprasController {
    */
   @Patch(':id/documento')
   @RequiresPermiso('Compras', 'Actualizar')
-  actualizarDocumento(
+  async actualizarDocumento(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
     @Body(EscalaMonedaPipe) dto: ActualizarDocumentoDto,
   ) {
-    const { tenantId } = req.user as { tenantId: string };
-    return this.comprasService.actualizarDocumento(tenantId, id, dto);
+    const u = req.user as JwtUser;
+    const tienePagar = await this.tienePermisoPagar(u);
+    return this.comprasService.actualizarDocumento(
+      u.tenantId!,
+      id,
+      dto,
+      tienePagar,
+    );
   }
 
   /**
@@ -321,16 +415,14 @@ export class ComprasController {
    */
   @Post(':id/anular')
   @RequiresPermiso('Compras', 'Anular')
-  anular(
+  async anular(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AnularCompraDto,
   ) {
-    const { tenantId, id: usuarioId } = req.user as {
-      tenantId: string;
-      id: string;
-    };
-    return this.comprasService.anular(tenantId, usuarioId, id, dto);
+    const u = req.user as JwtUser;
+    const tienePagar = await this.tienePermisoPagar(u);
+    return this.comprasService.anular(u.tenantId!, u.id, id, dto, tienePagar);
   }
 
   /**

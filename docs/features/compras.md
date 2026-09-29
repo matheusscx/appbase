@@ -182,7 +182,7 @@ arranca **sin** `Pagar` a propósito (spec § 9, decisión 7b): "el bodeguero re
 
 Spec [`2026-09-28-compras-deuda-proveedor-design.md`](../superpowers/specs/2026-09-28-compras-deuda-proveedor-design.md)
 § 5, § 8 (solo `GET /compras/pagos`), § 9 y § 11. "Por pagar" (`GET /compras/por-pagar`) y
-confirmar con `{ pago }` (spec § 7) siguen en las tareas 3 y 4.
+confirmar con `{ pago }` (spec § 7) llegan en la tarea 3, más abajo.
 
 ### El modelo
 
@@ -281,6 +281,126 @@ Cada `ORDER BY` tiene su unitario que afirma sobre el SQL (`compras.service.spec
 `POST /compras/pagos/:id/anular`: **`Pagar`**, no `Actualizar` ni `Anular` (el de la compra) — spec
 § 9, decisión 7: quien se equivoca de monto lo deshace desde su propia caja, sin permiso sobre el
 resto de la compra.
+
+---
+
+## Confirmar con pago, el recorte y las lecturas de deuda (pieza 5, tarea 3)
+
+Spec § 6, § 7, § 8, § 9, § 11 y § 12. Cierra la pieza: la compra al contado en un solo gesto, que
+corregir o anular una compra deje la deuda bien sola, y "Por pagar".
+
+### La compra al contado, en un gesto (`POST /compras/:id/confirmar`)
+
+`{ pago?: { monto, metodoPagoId, referencia? } }`, opcional. Sin `pago`, confirmar sigue exactamente
+igual que antes (nadie necesita `Pagar` para confirmar una compra sin pagarla). Con `pago`:
+
+- El controller resuelve `Compras:Pagar` A MANO (`@RequiresPermiso` no puede condicionar por el
+  body) — sin el permiso, 403 **antes** de tocar nada. Y exige `Idempotency-Key` (es un cobro).
+- `confirmarEnTransaccion` arma, al final (después de mover el stock y fijar el estado
+  `confirmada`), una única aplicación a **esta** compra por `min(monto, total)` — o por `monto`
+  entero si el total todavía es desconocido (decisión 8) — y llama a `pagarEnTransaccion`
+  (tarea 2) **en la misma transacción**. Si el pago revienta (sin caja, sin plata), la excepción
+  se lleva puesto TODO: el estado, el stock movido, el reclamo de la clave — "confirmar con un
+  pago que falla no confirma nada" sale gratis de compartir una sola transacción.
+- **La composición cambia respecto de `registrarPago`:** `conRastroDeRechazo` sigue siendo el
+  borde más externo, pero el reintento de deadlock (`conReintentoGenerico`, NO atado a
+  `db.transaccion`) pasa a envolver a `idempotencia.ejecutar(...)` **entero**, en vez de ir
+  adentro como el `conReintento` de siempre. Por qué: `ejecutar` abre su PROPIA transacción cada
+  vez que se lo llama; si un `40P01` la aborta, se lleva puesto el reclamo de la clave —nada
+  quedó comprometido—, así que reintentar el `ejecutar()` completo es un intento limpio. Ponerlo
+  adentro (como confirmar sin pago) no serviría: ahí `db.transaccion` REUSA el manager activo de
+  `ejecutar`, y un `40P01` deja esa transacción abortada — el "reintento" fallaría de nuevo contra
+  la misma conexión rota. Operación nueva en `huella.ts`: `'compras.confirmar'`.
+
+### El recorte (spec § 6)
+
+Cuando el total de una compra confirmada **baja o pasa a conocerse**, sus aplicaciones de pago se
+recortan en la misma transacción hasta que el aplicado no supere el total nuevo — **de la más
+nueva a la más vieja** (la primera pagada es la que menos se toca). El sobrante de cada aplicación
+tocada vuelve a su pago como saldo a favor (decisiones 5 y 8): `recortar` (`compras/deuda.ts`) es
+pura y solo decide los montos; el service (`recortarAplicaciones`) hace la escritura — nunca
+`UPDATE` del monto: borra (`eliminado_el`) y, si queda un resto, inserta otra fila.
+
+**Todo lo que puede escribir `precio_unitario`, `cantidad`, `descuento_total`, `total_documento` o
+`estado = 'anulada'` de una compra confirmada, y dónde engancha el recorte:**
+
+| Método | Qué escribe | Recorta cuándo |
+|---|---|---|
+| `corregirLinea` / `corregirCantidad` | `precio_unitario`, `cantidad` | Solo en `suma_lineas` (en `obligatorio`/`opcional` la deuda es el total transcrito, decisión 10: una línea no la toca) — con el total resultante conocido |
+| `corregirDescuento` | `descuento_total` | Solo en `suma_lineas`, igual que arriba |
+| `actualizarDocumento` | `total_documento` | Si el nuevo valor no es `null` (bajar a `null` en un `opcional` vuelve el total desconocido, no lo baja: nada que recortar) |
+| `anular` | `estado = 'anulada'` | Siempre, con `totalNuevo = '0'` — decisión 6b: "esta compra no debe nada" es EXACTAMENTE recortar hasta 0, mismo camino, sin un `if` aparte |
+
+No hay otro método que toque esas columnas de una compra `confirmada`: `crearBorrador` /
+`actualizarBorrador` / `confirmar` (sin `pago`) operan sobre un borrador, que no tiene
+aplicaciones.
+
+**Duda del revisor, contestada:** una aplicación de un pago anulado, o de una compra anulada, NO
+se cuenta en ninguna lectura de deuda — `anularPago` marca `eliminado_el` en TODAS las
+aplicaciones del pago, y `anular` (vía `recortarAplicaciones(..., '0')`) marca `eliminado_el` en
+TODAS las de la compra. Toda lectura de "aplicado" (`SELECT ... WHERE eliminado_el IS NULL`) ya
+excluye los dos casos: no hace falta filtrar por el estado de `pagos_proveedor` además, porque
+"vigente" y "aplicación viva" coinciden por construcción.
+
+Orden de locks: las compras que el recorte toca ya están lockeadas por el llamador (primero, spec
+§ 11); `recortarAplicaciones` toma los pagos que fondean esa compra `FOR UPDATE ORDER BY
+pago_proveedor_id` — con su unitario sobre el SQL (`compras.service.spec.ts`).
+
+### Lo que ve el dueño (spec § 8, decisión 12)
+
+"El bodeguero recibe y el dueño paga": lo que se debe lo ve solo quien tiene `Pagar`.
+
+- **`GET /compras/por-pagar`** (`Pagar`): una fila por proveedor con la deuda conocida, lo
+  vencido, lo que vence en 7 días, cuántas compras tienen el total desconocido y el saldo a
+  favor — ordenada por vencido y después por lo que vence pronto. Sin deuda y sin saldo a favor,
+  el proveedor no aparece.
+- **`GET /compras/por-pagar/:proveedorId`** (`Pagar`): sus compras confirmadas con deuda o total
+  desconocido (una `pagada` no entra), con estado derivado y vencimiento; sus pagos vigentes con
+  saldo a favor > 0.
+- **`GET /compras` y `GET /compras/:id`** siguen con `Leer`. El controller resuelve `Pagar` (sin
+  bloquear la ruta) y se lo pasa al service, que arma la respuesta con o sin la parte de pago:
+  `estadoPago`, `deuda` y `vencida` en cada fila del listado; además `aplicado` y `pagos` (los
+  que cubren la compra) en el detalle. **Sin `Pagar` esas claves no viajan** (`undefined`, que
+  `JSON.stringify` omite) — nunca `null`: el dato no se esconde en la pantalla, se omite en la
+  respuesta (invariante 6). El filtro `estadoPago` de `GET /compras` es 403 sin `Pagar`. Lo que
+  el bodeguero transcribe (`total`, `totalDocumento`, `fechaVencimiento`) sigue llegando siempre.
+- **Estado derivado** (`compras/deuda.ts → estadoPagoCompra`, pura): `pagada` (deuda 0), `parcial`
+  (aplicado > 0 y deuda > 0), `pendiente` (sin aplicado); con total desconocido, `falta_total`
+  (`obligatorio`/`opcional` sin transcribir) o `falta_precio` (`suma_lineas` con alguna línea sin
+  precio); encima, `vencida` si queda deuda (o el total ni se sabe) y ya pasó el vencimiento. "Hoy"
+  es el día del NEGOCIO del tenant (`rango-fecha.util.ts → diaNegocioTenant` +
+  `diaNegocioEnZona`) — **no** `fechaLocalTenant` (hora de reloj sin corte): lo hace cumplir
+  `dia-negocio.invariant.spec.ts`, que prohíbe ese import fuera de la allowlist del motor de
+  precios y promociones.
+- **Una consulta por lectura, sin N+1.** El total de un `suma_lineas` pasa por `cuantizar`
+  (Decimal.js: no se reimplementa en SQL), así que `GET /compras/por-pagar` y
+  `.../por-pagar/:proveedorId` agregan SQL crudo (compras confirmadas + saldo a favor por
+  proveedor) y terminan la cuenta en memoria. `GET /compras`/`:id` hacen lo mismo salvo que,
+  además, el filtro `estadoPago` no se puede empujar a `WHERE`: con ese filtro presente se trae
+  TODO lo que cumple el resto de los filtros (sigue siendo una consulta) y se pagina en memoria
+  en vez de `LIMIT`/`OFFSET` — costo aceptado dado el volumen de compras de un tenant.
+  **Decisión técnica de la sesión que implementó la pieza (2026-09-29), no consultada al
+  owner:** la alternativa sería reimplementar `cuantizar` —con su modo de redondeo por
+  tenant— en SQL, exactamente lo que las Global Constraints del plan prohíben ("importando
+  `cuantizar` del motor **sin modificarlo**"). Si el volumen de compras de un tenant algún día
+  lo justifica, la solución es una columna materializada del total (con su propio frente de
+  sincronización), no una segunda cuantización en `WHERE`. No "arreglar" esto agregando una
+  expresión de redondeo en SQL.
+- **Las escrituras sobre una confirmada devuelven los mismos campos de pago que `GET
+  /compras/:id`, sin un `GET` aparte.** `corregirLinea`, `corregirDescuento`,
+  `actualizarDocumento`, `anular` y `confirmar` (con o sin `pago`) resuelven `Pagar` en su
+  propio controller — el mismo `tienePermisoPagar(u)` que usan las lecturas — y se lo pasan al
+  `findOne` final. El body de, por ejemplo, `POST /compras/:id/confirmar` sin `pago` ya trae
+  `estadoPago`/`deuda`/`vencida` si quien confirmó tiene `Pagar` (el dueño confirmando sin pagar
+  es el caso común, no uno raro): no hace falta un `GET /compras/:id` posterior para verlos.
+  `findOne`'s `tienePagar = false` por default queda solo para `crearBorrador`/
+  `actualizarBorrador`, que operan sobre un borrador sin aplicaciones.
+
+### Permisos de la tarea 3
+
+`GET /compras/por-pagar` · `.../por-pagar/:proveedorId`: **`Pagar`**. `POST /compras/:id/confirmar`
+con `pago`: **`Crear` + `Pagar`**, sin `pago`: solo `Crear` (como siempre). `GET /compras` ·
+`GET /compras/:id`: **`Leer`**, con los campos de pago solo si además hay `Pagar`.
 
 ---
 
@@ -568,18 +688,20 @@ Todas bajo `JwtAuthGuard + TenantGuard + PermisosGuard`, con el `tenant_id` del 
 
 | Endpoint | Permiso |
 |---|---|
-| `GET /compras` (paginado; filtros `estado`, `proveedorId`, `faltaCosto`, `desde`, `hasta`) | Leer |
-| `GET /compras/:id`: encabezado, líneas, historial y motivo de anulación | Leer |
+| `GET /compras` (paginado; filtros `estado`, `proveedorId`, `faltaCosto`, `desde`, `hasta`, `estadoPago`) — con `Pagar` suma `estadoPago`/`deuda`/`vencida` por fila (ver [Confirmar con pago, el recorte y las lecturas de deuda](#confirmar-con-pago-el-recorte-y-las-lecturas-de-deuda-pieza-5-tarea-3)); `estadoPago` es 403 sin `Pagar` | Leer |
+| `GET /compras/:id`: encabezado, líneas, historial y motivo de anulación — con `Pagar` suma `aplicado` y `pagos` | Leer |
 | `GET /compras/tipos-documento` · `GET /compras/proveedores` | Leer |
 | `GET /compras/productos`: productos e ingredientes con stock, lo que se puede comprar | Crear |
 | `GET /compras/:id/lineas/:lineaId/unidades`: las series de la línea, disponibles en su ubicación | Actualizar |
 | `POST /compras` · `PATCH /compras/:id` (reemplaza el borrador entero) · `DELETE /compras/:id` | Crear |
-| `POST /compras/:id/confirmar` | Crear |
+| `POST /compras/:id/confirmar` con `{ pago? }` opcional (con `Idempotency-Key` solo si viene `pago`) | Crear (+ `Pagar` si viene `pago`) |
 | `PATCH /compras/:id/lineas/:lineaId` con `{ precioUnitario?, cantidad?, series?, unidadIds? }` | Actualizar |
 | `PATCH /compras/:id/descuento` con `{ descuentoTotal }` (clave obligatoria; `null` lo quita) | Actualizar |
 | `PATCH /compras/:id/documento` con `{ totalDocumento?, fechaVencimiento? }` (ausente no toca; ver [La deuda con el proveedor](#la-deuda-con-el-proveedor-pieza-5)) | Actualizar |
 | `POST /compras/:id/anular` con `{ motivo }` | Anular |
 | `GET /compras/medios-pago`: los medios habilitados del tenant, con `esEfectivo` | Pagar |
+| `GET /compras/por-pagar`: una fila por proveedor con lo que se debe (ver [Confirmar con pago, el recorte y las lecturas de deuda](#confirmar-con-pago-el-recorte-y-las-lecturas-de-deuda-pieza-5-tarea-3)) | Pagar |
+| `GET /compras/por-pagar/:proveedorId`: sus compras con deuda y sus pagos con saldo a favor | Pagar |
 | `GET /compras/pagos?proveedorId=`: los pagos del proveedor, con sus aplicaciones | Pagar |
 | `POST /compras/pagos` (con `Idempotency-Key`) con `{ proveedorId, monto, metodoPagoId?, referencia?, aplicaciones }` (ver [Pagar y anular un pago](#pagar-y-anular-un-pago-pieza-5-tarea-2)) | Pagar |
 | `POST /compras/pagos/:id/anular` con `{ motivo }` | Pagar |
@@ -620,9 +742,13 @@ editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar
   `movimientos_caja.pago_proveedor_id` (tarea 2, en `backend/src/modules/caja/`).
 - **Kardex:** `movimientos_inventario` gana `compra_linea_id`, `secuencia` (bigserial, el orden de
   aplicación) y `costo_informado`, y el motivo `correccion_compra`.
-- **`compras/deuda.ts`** (pieza 5): `vencimiento` y `totalCompra` (tarea 1), y `fondear` (tarea
-  2) — todas puras y con sus unitarios. Ver [La deuda con el proveedor](#la-deuda-con-el-proveedor-pieza-5)
-  y [Pagar y anular un pago](#pagar-y-anular-un-pago-pieza-5-tarea-2).
+- **`compras/deuda.ts`** (pieza 5): `vencimiento` y `totalCompra` (tarea 1), `fondear` (tarea
+  2), y `recortar` + `estadoPagoCompra` (tarea 3) — todas puras y con sus unitarios. Ver
+  [La deuda con el proveedor](#la-deuda-con-el-proveedor-pieza-5),
+  [Pagar y anular un pago](#pagar-y-anular-un-pago-pieza-5-tarea-2) y
+  [Confirmar con pago, el recorte y las lecturas de deuda](#confirmar-con-pago-el-recorte-y-las-lecturas-de-deuda-pieza-5-tarea-3).
+  `huella.ts` suma la operación `'compras.confirmar'` (confirmar con `pago`, distinta de
+  `'compras.pago'` de `POST /compras/pagos`).
 - **Seed:** módulo `Compras` y sus permisos, el rol `Compras · Encargado` y tres fixtures
   parciales para los 403 (`compras.lectura`, `compras.carga`, `compras.correccion`). Ids
   420–446. El permiso `Pagar`, su entrada en `Compras` y el rol/fixture `Compras · Paga` /

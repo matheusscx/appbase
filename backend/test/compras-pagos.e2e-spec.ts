@@ -69,6 +69,20 @@ interface ArqueoLinea {
   esperado: string | null;
   diferencia?: string | null;
 }
+interface CompraConDeuda {
+  id: string;
+  estado: string;
+  deuda?: string | null;
+}
+interface MovimientoCaja {
+  id: string;
+  tipo: string;
+  concepto: string;
+}
+interface PaginadoMovimientos {
+  data: MovimientoCaja[];
+  meta: { total: number };
+}
 
 describe('Compras — pagar y anular un pago (e2e)', () => {
   let app: INestApplication<App>;
@@ -632,6 +646,80 @@ describe('Compras — pagar y anular un pago (e2e)', () => {
         token,
       );
       expect(r.status).toBe(403);
+    });
+
+    it('con la caja ya CERRADA: no toca ninguna caja, y la deuda vuelve (decisión 6)', async () => {
+      const cajaId = await abrirOReusarCaja(tokenPaga);
+      const compraId = await compraConfirmada('75', tokenPaga);
+      const pago = await post<PagoProveedorInfo>(
+        '/api/compras/pagos',
+        {
+          proveedorId,
+          monto: '75',
+          metodoPagoId: efectivo.id,
+          aplicaciones: [{ compraId, monto: '75' }],
+        },
+        201,
+        tokenPaga,
+        { 'Idempotency-Key': randomUUID() },
+      );
+      expect(pago.cajaId).toBe(cajaId);
+
+      // Cierre COMPLETO de dos fases (conteo exacto + cerrar), reusando el
+      // mismo helper de higiene de `afterAll`: es el único lugar del archivo
+      // que ya sabe contar el esperado exacto y cerrar limpio.
+      await cerrarCajaSiQuedoAbierta(tokenPaga);
+      const cajaCerrada = await get<CajaResponse>(
+        `/api/caja/${cajaId}`,
+        200,
+        token,
+      );
+      expect(cajaCerrada.estado).toBe('cerrada');
+
+      // El total de movimientos de la caja YA cerrada, ANTES de anular —
+      // con `token` (admin) para no toparse con el ciego.
+      const antes = await get<PaginadoMovimientos>(
+        `/api/caja/${cajaId}/movimientos?pageSize=100`,
+        200,
+        token,
+      );
+
+      const anulado = await post<PagoProveedorInfo>(
+        `/api/compras/pagos/${pago.id}/anular`,
+        { motivo: 'Se pagó de más, la caja ya cerró' },
+        201,
+        tokenPaga,
+      );
+      expect(anulado.estado).toBe('anulado');
+
+      // La deuda volvió: se lee por la API (GET /compras/:id, con Pagar).
+      const compra = await get<CompraConDeuda>(
+        `/api/compras/${compraId}`,
+        200,
+        tokenPaga,
+      );
+      expect(Number(compra.deuda)).toBe(75);
+
+      // Ninguna caja se tocó: mismo total y mismos ids de movimientos que
+      // antes de anular (decisión 6 — "no toca ninguna caja").
+      const despues = await get<PaginadoMovimientos>(
+        `/api/caja/${cajaId}/movimientos?pageSize=100`,
+        200,
+        token,
+      );
+      expect(despues.meta.total).toBe(antes.meta.total);
+      expect(despues.data.map((m) => m.id).sort()).toEqual(
+        antes.data.map((m) => m.id).sort(),
+      );
+
+      // `compras.paga` no tiene caja abierta después de esto: `afterAll` no
+      // tiene nada que reabrir ni volver a cerrar.
+      const activaTrasAnular = await request(app.getHttpServer())
+        .get('/api/caja/activa')
+        .set('Authorization', `Bearer ${tokenPaga}`);
+      expect(activaTrasAnular.status).toBe(200);
+      const cuerpoActiva = activaTrasAnular.body as { id?: string } | null;
+      expect(cuerpoActiva?.id).toBeFalsy();
     });
   });
 

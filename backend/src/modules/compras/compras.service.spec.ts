@@ -1876,6 +1876,62 @@ describe('ComprasService (borrador)', () => {
         service.actualizarDocumento(TENANT, COMPRA, { totalDocumento: '100' }),
       ).rejects.toThrow('La compra es un borrador: se edita, no se corrige');
     });
+
+    describe('recortarAplicaciones (spec § 6 y § 11): el lock de los pagos que fondean', () => {
+      it('toma los pagos que fondean la compra FOR UPDATE ORDER BY pago_proveedor_id, DESPUÉS del lock de la compra', async () => {
+        compraConfirmada({ total_documento: '119000' });
+        // Dos aplicaciones vivas: el total baja a 50000, así que el recorte
+        // tiene trabajo (no hace falta para disparar el lock — el lock se
+        // toma en cuanto HAY aplicaciones vivas, spec § 11 — pero así el
+        // camino completo, con INSERT/UPDATE de sobra, queda ejercitado).
+        pisar(
+          /FROM pago_proveedor_aplicaciones\s+WHERE tenant_id = \$1 AND compra_id = \$2 AND eliminado_el IS NULL/,
+          [
+            {
+              pago_proveedor_aplicacion_id: 'apl-1',
+              pago_proveedor_id: 'pago-2',
+              monto: '80000',
+              creado_el: new Date('2026-09-01'),
+            },
+            {
+              pago_proveedor_aplicacion_id: 'apl-2',
+              pago_proveedor_id: 'pago-1',
+              monto: '20000',
+              creado_el: new Date('2026-09-02'),
+            },
+          ],
+        );
+
+        await service.actualizarDocumento(TENANT, COMPRA, {
+          totalDocumento: '50000',
+        });
+
+        const idxCompra = queries.findIndex((sql) =>
+          /FROM compras c[\s\S]*FOR UPDATE OF c/.test(sql),
+        );
+        const idxPagos = queries.findIndex((sql) =>
+          /FROM pagos_proveedor\s+WHERE tenant_id = \$1 AND pago_proveedor_id = ANY\(\$2::uuid\[\]\)\s+ORDER BY pago_proveedor_id\s+FOR UPDATE/.test(
+            sql,
+          ),
+        );
+        expect(idxCompra).toBeGreaterThanOrEqual(0);
+        expect(idxPagos).toBeGreaterThan(idxCompra);
+      });
+
+      it('sin aplicaciones vivas, no toma ningún lock de pagos_proveedor', async () => {
+        compraConfirmada({ total_documento: '119000' });
+        // Sin `pisar`: la ruta cae en el catch-all `[/./, []]` → sin vivas.
+        await service.actualizarDocumento(TENANT, COMPRA, {
+          totalDocumento: '50000',
+        });
+        const tomoLock = queries.some((sql) =>
+          /FROM pagos_proveedor\s+WHERE tenant_id = \$1 AND pago_proveedor_id = ANY\(\$2::uuid\[\]\)\s+ORDER BY pago_proveedor_id\s+FOR UPDATE/.test(
+            sql,
+          ),
+        );
+        expect(tomoLock).toBe(false);
+      });
+    });
   });
 });
 

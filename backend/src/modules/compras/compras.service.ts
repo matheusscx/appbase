@@ -20,6 +20,10 @@ import {
   esDeadlock,
 } from '../../common/db/reintento-deadlock';
 import { assertCostoNoColapsaACero } from '../../common/utils/costo-conversion-unidad.util';
+import {
+  diaNegocioTenant,
+  diaNegocioEnZona,
+} from '../../common/utils/rango-fecha.util';
 import { CatalogService } from '../catalog/catalog.service';
 import {
   InventarioService,
@@ -36,7 +40,15 @@ import { CajaService, IntentoRechazadoError } from '../caja/caja.service';
 import { IdempotenciaService } from '../idempotencia/idempotencia.service';
 import { huellaDe } from '../idempotencia/huella';
 import { costearLineas } from './reparto-descuento';
-import { vencimiento, fondear } from './deuda';
+import {
+  vencimiento,
+  fondear,
+  recortar,
+  totalCompra,
+  estadoPagoCompra,
+  sumarDias,
+  type EstadoPagoCompra,
+} from './deuda';
 // `TIPOS_CON_STOCK` nació acá y se movió a `presentaciones-compra.service.ts`
 // (Tarea 1 de compras-unidad-de-compra) porque esta clase importa
 // `PresentacionesCompraService` (Tarea 2): si la constante siguiera acá ese
@@ -65,6 +77,7 @@ import type {
 import type {
   AnularPagoProveedorDto,
   CrearPagoProveedorDto,
+  PagoAlConfirmarDto,
 } from './dto/pago-proveedor.dto';
 import type { EstadoPagoProveedor } from './entities/pago-proveedor.entity';
 
@@ -117,6 +130,17 @@ export interface CompraListItem {
   totalDocumento: string | null;
   /** Se fija al confirmar; null en un borrador. */
   fechaVencimiento: string | null;
+  /**
+   * Los datos de pago (spec § 8, decisión 12): SOLO presentes cuando el
+   * caller tiene `Compras:Pagar` — el controller resuelve el permiso, el
+   * service arma la consulta con o sin esta parte, y sin `Pagar` la clave ni
+   * viaja en la respuesta (nunca `null`: `undefined`, que `JSON.stringify`
+   * omite). Solo tiene sentido en una `confirmada`: un borrador o una
+   * anulada no deben nada (spec § 4.1).
+   */
+  estadoPago?: EstadoPagoCompra;
+  deuda?: string | null;
+  vencida?: boolean;
 }
 
 /** La presentación de una línea, para el detalle (spec pieza 2 § 5). */
@@ -160,6 +184,10 @@ export interface CompraDetalle extends Omit<CompraListItem, 'lineas'> {
   motivoAnulacion: string | null;
   lineas: CompraLineaDetalle[];
   cambios: CompraCambio[];
+  /** Solo con `Pagar` (spec § 8): Σ aplicaciones vivas. */
+  aplicado?: string;
+  /** Solo con `Pagar`: los pagos vigentes que aplicaron algo a esta compra. */
+  pagos?: PagoProveedorInfo[];
 }
 
 /** Medio de pago habilitado del tenant, para `PagarProveedorModal` (spec § 5.1). */
@@ -195,6 +223,41 @@ export interface PagoProveedorInfo {
   sobranteAFavor: string;
 }
 
+/** Una fila de `GET /compras/por-pagar` (spec § 8): un proveedor. */
+export interface PorPagarProveedorItem {
+  proveedorId: string;
+  proveedorNombre: string | null;
+  /** Σ deuda conocida de sus compras confirmadas. */
+  deuda: string;
+  /** De esa deuda, la que ya venció. */
+  vencido: string;
+  /** De esa deuda, la que vence dentro de los próximos 7 días (sin contar la ya vencida). */
+  venceProximos7Dias: string;
+  /** Compras confirmadas cuyo total todavía no se sabe (decisión 8). */
+  comprasTotalDesconocido: number;
+  saldoAFavor: string;
+}
+
+/** Una compra de `GET /compras/por-pagar/:proveedorId` (spec § 8). */
+export interface PorPagarCompraItem {
+  id: string;
+  fechaDocumento: string;
+  folio: string | null;
+  tipoDocumentoNombre: string | null;
+  total: string | null;
+  totalDocumento: string | null;
+  fechaVencimiento: string | null;
+  estadoPago: EstadoPagoCompra;
+  deuda: string | null;
+  vencida: boolean;
+}
+
+export interface PorPagarProveedorDetalle {
+  compras: PorPagarCompraItem[];
+  /** Sus pagos vigentes con saldo a favor > 0. */
+  pagos: PagoProveedorInfo[];
+}
+
 interface CabeceraRow {
   compra_id: string;
   estado: EstadoCompra;
@@ -214,6 +277,8 @@ interface CabeceraRow {
   bruto: string | null;
   total_documento: string | null;
   fecha_vencimiento: string | null;
+  /** Σ aplicaciones vivas de pagos vigentes (spec § 4.1). Solo se USA con `Pagar`. */
+  aplicado: string;
 }
 
 interface LineaRow {
@@ -415,7 +480,8 @@ const SELECT_CABECERA = `
   c.total_documento, c.fecha_vencimiento::text AS fecha_vencimiento,
   COALESCE(ag.lineas, 0)::int AS lineas,
   COALESCE(ag.algun_sin_precio, false) AS algun_sin_precio,
-  ag.bruto`;
+  ag.bruto,
+  COALESCE(pagoag.aplicado, 0)::text AS aplicado`;
 
 const JOINS_CABECERA = `
   LEFT JOIN (
@@ -429,7 +495,19 @@ const JOINS_CABECERA = `
   LEFT JOIN terceros pr ON pr.tercero_id = c.proveedor_id
   LEFT JOIN tipos_documento_compra td
          ON td.tipo_documento_compra_id = c.tipo_documento_compra_id
-  LEFT JOIN ubicaciones ub ON ub.ubicacion_id = c.ubicacion_id`;
+  LEFT JOIN ubicaciones ub ON ub.ubicacion_id = c.ubicacion_id
+  -- Aplicado (spec § 4.1): SUM de aplicaciones VIVAS. Sin filtrar por el
+  -- estado de pagos_proveedor: anular un pago (spec § 5.2) ya marca
+  -- eliminado_el en TODAS sus aplicaciones, y anular una compra (§ 6,
+  -- decisión 6b) también -- así que "vigente" y "aplicación viva" coinciden
+  -- acá, y agregar el JOIN a pagos_proveedor solo para repetir el mismo
+  -- filtro sería una vuelta de más.
+  LEFT JOIN (
+    SELECT compra_id, SUM(monto) AS aplicado
+      FROM pago_proveedor_aplicaciones
+     WHERE tenant_id = $1 AND eliminado_el IS NULL
+     GROUP BY compra_id
+  ) pagoag ON pagoag.compra_id = c.compra_id`;
 
 @Injectable()
 export class ComprasService {
@@ -595,9 +673,17 @@ export class ComprasService {
   async findAll(
     tenantId: string,
     query: FindComprasDto,
+    /** `Compras:Pagar`, resuelto por el controller (spec § 8, decisión 12). */
+    tienePagar: boolean,
   ): Promise<PaginatedResponse<CompraListItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
     const cfg = await this.cfgTenant(tenantId);
+    const pago = tienePagar
+      ? {
+          tienePagar: true,
+          hoy: await this.hoyNegocio(tenantId),
+        }
+      : null;
 
     const params: unknown[] = [tenantId];
     const filtros: string[] = ['c.tenant_id = $1', 'c.eliminado_el IS NULL'];
@@ -624,6 +710,34 @@ export class ComprasService {
     }
     const where = filtros.join(' AND ');
 
+    // El filtro `estadoPago` (spec § 8, decisión 12 — el controller ya
+    // verificó `Pagar` antes de llegar acá) no se puede resolver en SQL: el
+    // total de un `suma_lineas` pasa por `cuantizar` (Decimal.js, Global
+    // Constraints — no se reimplementa en SQL). Se trae TODO lo que cumple
+    // el resto de los filtros —sigue siendo UNA consulta, sin N+1— y la
+    // paginación se resuelve en memoria en vez de `LIMIT`/`OFFSET`.
+    if (query.estadoPago) {
+      const todas: CabeceraRow[] = await this.db.query(
+        `SELECT ${SELECT_CABECERA}
+           FROM compras c
+           ${JOINS_CABECERA}
+          WHERE ${where}
+          ORDER BY c.fecha_documento DESC, c.creado_el DESC`,
+        params,
+      );
+      const filtradas = todas
+        .map((r) => this.mapListItem(r, cfg, pago))
+        .filter((m) =>
+          query.estadoPago === 'vencida'
+            ? m.vencida === true
+            : m.estadoPago === query.estadoPago,
+        );
+      return {
+        data: filtradas.slice(offset, offset + pageSize),
+        meta: buildPaginationMeta(page, pageSize, filtradas.length),
+      };
+    }
+
     const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total
          FROM compras c
@@ -644,13 +758,28 @@ export class ComprasService {
     );
 
     return {
-      data: rows.map((r) => this.mapListItem(r, cfg)),
+      data: rows.map((r) => this.mapListItem(r, cfg, pago)),
       meta: buildPaginationMeta(page, pageSize, total),
     };
   }
 
-  /** Encabezado, líneas e historial: tres consultas fijas, sin importar el largo. */
-  async findOne(tenantId: string, id: string): Promise<CompraDetalle> {
+  /** Encabezado, líneas e historial: tres consultas fijas, sin importar el largo (más una cuarta con `Pagar`). */
+  async findOne(
+    tenantId: string,
+    id: string,
+    /**
+     * `Compras:Pagar`, resuelto por el controller (spec § 8, decisión 12).
+     * Default `false` SOLO para el caller que no lo resuelve (`crearBorrador`/
+     * `actualizarBorrador`, que operan sobre un borrador — sin aplicaciones,
+     * no hay nada que traer de todos modos). Los caminos que devuelven una
+     * `CompraDetalle` después de escribir sobre una confirmada
+     * (`corregirLinea`, `corregirDescuento`, `actualizarDocumento`, `anular`,
+     * `confirmar` con `pago`) reciben el `tienePagar` de SU controller y lo
+     * reenvían acá: la opción segura (omitir) solo aplica cuando de verdad no
+     * hay con qué resolverlo.
+     */
+    tienePagar = false,
+  ): Promise<CompraDetalle> {
     const cfg = await this.cfgTenant(tenantId);
     const cabecera: (CabeceraRow & { motivo_anulacion: string | null })[] =
       await this.db.query(
@@ -699,11 +828,24 @@ export class ComprasService {
       [tenantId, id],
     );
 
+    // Con `Pagar` (spec § 8): los pagos vigentes que cubren ESTA compra, con
+    // el mismo shape que `listarPagos`. Solo en `confirmada` (un borrador o
+    // una anulada no tienen aplicaciones vivas: § 4.1 y decisión 6b).
+    const pago =
+      tienePagar && cabecera[0].estado === 'confirmada'
+        ? {
+            tienePagar: true,
+            hoy: await this.hoyNegocio(tenantId),
+          }
+        : null;
+    const pagos = pago ? await this.pagosQueCubren(tenantId, id) : undefined;
+
     return {
-      ...this.mapCabecera(cabecera[0], cfg),
+      ...this.mapCabecera(cabecera[0], cfg, pago),
       observacion: cabecera[0].observacion,
       descuentoTotal: cabecera[0].descuento_total,
       motivoAnulacion: cabecera[0].motivo_anulacion,
+      ...(pago ? { aplicado: cabecera[0].aplicado, pagos } : {}),
       lineas: lineas.map((l) => ({
         id: l.compra_linea_id,
         orden: l.orden,
@@ -905,17 +1047,94 @@ export class ComprasService {
    * stock de la ubicación de la compra por el chokepoint del kardex, con su
    * costo por unidad base (o sin costo, si todavía no llegó la factura).
    *
-   * El reintento es el de siempre (`MAX_REINTENTOS_DEADLOCK`), y vale porque el
-   * único llamador es el controller: sin transacción envolvente, un `40P01`
-   * reintenta limpio (mismo razonamiento que `TrasladosService.crear`).
+   * **Sin `pago`:** el reintento es el de siempre (`MAX_REINTENTOS_DEADLOCK`),
+   * y vale porque el único llamador es el controller: sin transacción
+   * envolvente, un `40P01` reintenta limpio (mismo razonamiento que
+   * `TrasladosService.crear`).
+   *
+   * **Con `pago`** (spec § 7, "la compra al contado en un solo gesto"): la
+   * composición cambia porque ahora hay un cobro adentro, y tiene que valer
+   * la MISMA garantía que `registrarPago` (task-2-report): un reintento con
+   * la misma clave no paga dos veces, y si el pago falla no se confirma nada.
+   *
+   * - `conRastroDeRechazo` sigue siendo el borde MÁS externo, por la misma
+   *   razón que en `registrarPago`: su `catch` necesita que
+   *   `IdempotenciaService.ejecutar` ya haya hecho rollback —reclamo de la
+   *   clave incluido— antes de escribir el rastro con `db.sinTransaccion`.
+   * - El reintento de deadlock (`conReintentoGenerico`, genérico y no atado a
+   *   `db.transaccion`) pasa a envolver a `idempotencia.ejecutar` ENTERO, en
+   *   vez de ir adentro como en la confirmación sin pago. `ejecutar` abre su
+   *   propia transacción NUEVA cada vez que se lo llama; si un `40P01` la
+   *   aborta, se lleva puesto el reclamo de la clave —nada quedó comprometido—
+   *   así que reintentar el `ejecutar()` completo es un intento limpio, no
+   *   una segunda escritura bajo la misma clave. Ponerlo ADENTRO (como
+   *   `conReintento` de siempre) no serviría: ahí `db.transaccion` REUSA el
+   *   manager activo de `ejecutar` (no abre uno propio), así que un
+   *   `40P01` deja esa transacción abortada y el "reintento" fallaría de
+   *   nuevo contra la misma conexión rota.
+   * - `confirmarEnTransaccion` corre dentro de esa transacción y, al final,
+   *   llama a `pagarEnTransaccion` (Tarea 2) con una única aplicación a esta
+   *   compra: si el pago revienta (sin caja, sin plata), la excepción
+   *   propaga y TODO —el estado `confirmada`, el stock movido, el reclamo de
+   *   la clave— se revierte. "Confirmar con un pago que falla no confirma
+   *   nada" sale gratis de que las dos cosas viven en la misma transacción.
    */
   async confirmar(
     tenantId: string,
     usuarioId: string,
     id: string,
-  ): Promise<CompraDetalle> {
-    return this.conReintento((manager) =>
-      this.confirmarEnTransaccion(manager, tenantId, usuarioId, id),
+    pago?: PagoAlConfirmarDto,
+    clave?: string,
+    /**
+     * `Compras:Pagar`, resuelto por el controller (spec § 8, decisión 12).
+     * Con `pago`, el controller ya lo exigió (403 si no) así que este valor
+     * siempre es `true` en ese camino — pero el que PASA `pago` es el
+     * controller, no un default acá: sin `pago`, confirmar es el camino
+     * común (el bodeguero confirma sin pagar) y el dueño que SÍ tiene
+     * `Pagar` también pasa por acá — su respuesta tiene que traer
+     * `estadoPago`/`deuda`/etc. igual que un `GET /compras/:id` posterior.
+     */
+    tienePagar = false,
+  ): Promise<CompraDetalle & { repetida?: true }> {
+    if (!pago) {
+      return this.conReintento((manager) =>
+        this.confirmarEnTransaccion(
+          manager,
+          tenantId,
+          usuarioId,
+          id,
+          null,
+          tienePagar,
+        ),
+      );
+    }
+    return this.cajaService.conRastroDeRechazo(tenantId, () =>
+      this.conReintentoGenerico(() =>
+        this.idempotencia.ejecutar(
+          {
+            tenantId,
+            usuarioId,
+            clave: clave!,
+            operacion: 'compras.confirmar',
+            huella: huellaDe('compras.confirmar', { id, pago }),
+          },
+          () =>
+            this.db.transaccion((manager) =>
+              // `pago` presente ya significa `Pagar` (el controller lo exigió
+              // antes de llamar acá): la respuesta trae sus propios datos de
+              // pago (spec § 8), no hace falta resolverlo dos veces.
+              this.confirmarEnTransaccion(
+                manager,
+                tenantId,
+                usuarioId,
+                id,
+                pago,
+                true,
+              ),
+            ),
+          () => null,
+        ),
+      ),
     );
   }
 
@@ -924,6 +1143,8 @@ export class ComprasService {
     tenantId: string,
     usuarioId: string,
     id: string,
+    pago: PagoAlConfirmarDto | null,
+    tienePagar: boolean,
   ): Promise<CompraDetalle> {
     // 1. El encabezado, bajo lock: nadie más lo edita ni lo confirma a la vez.
     await this.bloquearBorrador(tenantId, id);
@@ -1194,7 +1415,41 @@ export class ComprasService {
       [tenantId, id, usuarioId, fechaVencimiento],
     );
 
-    return this.findOne(tenantId, id);
+    // 9. El pago, si vino (spec § 7): una única aplicación a ESTA compra por
+    // `min(monto, total)` — o por `monto` entero si el total todavía es
+    // desconocido (decisión 8: la compra puede pagarse antes de saberse el
+    // total exacto). `pagarEnTransaccion` (Tarea 2) hace TODO lo suyo en esta
+    // misma transacción: sus propios locks siguen el orden de spec § 11
+    // (compras → pagos del proveedor → caja), que acá cae DESPUÉS del stock
+    // ya movido arriba — el orden global completo queda respetado.
+    if (pago) {
+      const esSumaLineas =
+        enc.tipoDocumentoTotalDocumento !== 'obligatorio' &&
+        enc.tipoDocumentoTotalDocumento !== 'opcional';
+      const totalConocido = esSumaLineas
+        ? totalCompra(
+            lineas.map((l) => ({
+              cantidad: l.cantidad,
+              precioUnitario: l.precio_unitario,
+            })),
+            c.descuento_total,
+            await this.cfgTenant(tenantId),
+          )
+        : c.total_documento;
+      const montoAplicado =
+        totalConocido != null
+          ? Decimal.min(pago.monto, totalConocido).toString()
+          : pago.monto;
+      await this.pagarEnTransaccion(manager, tenantId, usuarioId, {
+        proveedorId: c.proveedor_id,
+        monto: pago.monto,
+        metodoPagoId: pago.metodoPagoId,
+        referencia: pago.referencia,
+        aplicaciones: [{ compraId: id, monto: montoAplicado }],
+      });
+    }
+
+    return this.findOne(tenantId, id, tienePagar);
   }
 
   // ───────────────────────────────────────────────────────────────────────
@@ -1216,6 +1471,8 @@ export class ComprasService {
     id: string,
     lineaId: string,
     dto: CorregirLineaDto,
+    /** `Compras:Pagar`, resuelto por el controller (spec § 8, decisión 12). */
+    tienePagar = false,
   ): Promise<CompraDetalle> {
     if (dto.precioUnitario == null && dto.cantidad == null) {
       throw new BadRequestException(
@@ -1308,7 +1565,31 @@ export class ComprasService {
             ]
           : []),
       ]);
-      return this.findOne(tenantId, id);
+
+      // El recorte (spec § 6): en un tipo `suma_lineas` corregir una línea
+      // puede bajar el total o completarlo (el "queso sin precio", decisión
+      // 8) — en un `obligatorio`/`opcional` NO, porque ahí la deuda es el
+      // total transcrito y una línea no lo toca (decisión 10, duda del
+      // revisor). Si el total sigue desconocido (otra línea sin precio),
+      // `totalCompra` devuelve `null` y no hay nada que recortar todavía.
+      const esSumaLineas =
+        compra.tipo_documento_total_documento !== 'obligatorio' &&
+        compra.tipo_documento_total_documento !== 'opcional';
+      if (esSumaLineas) {
+        const cfg = await this.cfgTenant(tenantId);
+        const totalNuevo = totalCompra(
+          lineas.map((l) => ({
+            cantidad: l.cantidad,
+            precioUnitario: l.precio_unitario,
+          })),
+          compra.descuento_total,
+          cfg,
+        );
+        if (totalNuevo != null) {
+          await this.recortarAplicaciones(manager, tenantId, id, totalNuevo);
+        }
+      }
+      return this.findOne(tenantId, id, tienePagar);
     });
   }
 
@@ -1512,6 +1793,8 @@ export class ComprasService {
     usuarioId: string,
     id: string,
     dto: CorregirDescuentoDto,
+    /** `Compras:Pagar`, resuelto por el controller (spec § 8, decisión 12). */
+    tienePagar = false,
   ): Promise<CompraDetalle> {
     return this.conReintento(async (manager) => {
       const compra = await this.bloquearConfirmada(tenantId, id);
@@ -1555,7 +1838,30 @@ export class ComprasService {
           movimientoId: movimientos.get(l.item_id) ?? null,
         })),
       );
-      return this.findOne(tenantId, id);
+
+      // El recorte (spec § 6): el descuento solo mueve la deuda en un tipo
+      // `suma_lineas` — en un `obligatorio`/`opcional` la deuda es el total
+      // transcrito, que el descuento no toca (decisión 10). `validarDescuento`
+      // ya exigió que todas las líneas tengan precio, así que el total sale
+      // conocido siempre que sea `suma_lineas`.
+      const esSumaLineas =
+        compra.tipo_documento_total_documento !== 'obligatorio' &&
+        compra.tipo_documento_total_documento !== 'opcional';
+      if (esSumaLineas) {
+        const cfg = await this.cfgTenant(tenantId);
+        const totalNuevo = totalCompra(
+          lineas.map((l) => ({
+            cantidad: l.cantidad,
+            precioUnitario: l.precio_unitario,
+          })),
+          nuevo,
+          cfg,
+        );
+        if (totalNuevo != null) {
+          await this.recortarAplicaciones(manager, tenantId, id, totalNuevo);
+        }
+      }
+      return this.findOne(tenantId, id, tienePagar);
     });
   }
 
@@ -1570,6 +1876,8 @@ export class ComprasService {
     tenantId: string,
     id: string,
     dto: ActualizarDocumentoDto,
+    /** `Compras:Pagar`, resuelto por el controller (spec § 8, decisión 12). */
+    tienePagar = false,
   ): Promise<CompraDetalle> {
     if (
       dto.totalDocumento === undefined &&
@@ -1579,7 +1887,7 @@ export class ComprasService {
         'No hay nada que corregir: falta el total o el vencimiento',
       );
     }
-    return this.db.transaccion(async () => {
+    return this.db.transaccion(async (manager) => {
       const compra = await this.bloquearConfirmada(tenantId, id);
       let totalDocumento = compra.total_documento;
       if (dto.totalDocumento !== undefined) {
@@ -1610,7 +1918,16 @@ export class ComprasService {
           WHERE tenant_id = $1 AND compra_id = $2`,
         [tenantId, id, totalDocumento, fechaVencimiento],
       );
-      return this.findOne(tenantId, id);
+
+      // El recorte (spec § 6): corregir lo transcrito es lo mismo que
+      // corregir un precio. Si baja, o si pasa de `null` a conocido (un
+      // `opcional` recién completado), lo aplicado puede superarlo. Si queda
+      // `null` (se vacía un `opcional`), no hay nada que recortar: la deuda
+      // vuelve a ser desconocida, no baja.
+      if (totalDocumento != null) {
+        await this.recortarAplicaciones(manager, tenantId, id, totalDocumento);
+      }
+      return this.findOne(tenantId, id, tienePagar);
     });
   }
 
@@ -1634,6 +1951,8 @@ export class ComprasService {
     usuarioId: string,
     id: string,
     dto: AnularCompraDto,
+    /** `Compras:Pagar`, resuelto por el controller (spec § 8, decisión 12). */
+    tienePagar = false,
   ): Promise<CompraDetalle> {
     const motivo = dto.motivo.trim();
     if (!motivo) {
@@ -1728,7 +2047,14 @@ export class ComprasService {
           comentario,
         });
       }
-      return this.findOne(tenantId, id);
+
+      // El recorte (spec § 6, decisión 6b): anular deja lo pagado a favor —
+      // `recortar(..., '0')` borra TODA aplicación viva, que es exactamente
+      // "esta compra ya no debe nada". Va DESPUÉS del stock (spec § 11: las
+      // compras primero, después lo que mueve stock, recién ahí los pagos)
+      // y la compra no toca caja, así que acá termina el orden de locks.
+      await this.recortarAplicaciones(manager, tenantId, id, '0');
+      return this.findOne(tenantId, id, tienePagar);
     });
   }
 
@@ -1917,6 +2243,96 @@ export class ComprasService {
    * (spec § 8). Dos consultas fijas (pagos, después sus aplicaciones en
    * lote por `ANY`), nunca una por pago.
    */
+  /**
+   * Los pagos vigentes que aplicaron algo a UNA compra (spec § 8, detalle de
+   * `GET /compras/:id` con `Pagar`), con el mismo shape que `listarPagos`.
+   * Dos consultas fijas (los pagos que la tocan, y TODAS sus aplicaciones —
+   * no solo las de esta compra, porque `PagoProveedorInfo.aplicaciones` es
+   * el reparto completo del pago): nunca una por pago.
+   */
+  private async pagosQueCubren(
+    tenantId: string,
+    compraId: string,
+  ): Promise<PagoProveedorInfo[]> {
+    const pagos: {
+      pago_proveedor_id: string;
+      proveedor_id: string;
+      fecha: Date;
+      monto: string;
+      metodo_pago_id: string;
+      metodo_pago_nombre: string | null;
+      referencia: string | null;
+      caja_id: string | null;
+      estado: EstadoPagoProveedor;
+      anulado_por: string | null;
+      anulado_el: Date | null;
+      motivo_anulacion: string | null;
+    }[] = await this.db.query(
+      `SELECT DISTINCT pp.pago_proveedor_id, pp.proveedor_id, pp.fecha,
+              pp.monto, pp.metodo_pago_id, mp.nombre AS metodo_pago_nombre,
+              pp.referencia, pp.caja_id, pp.estado, pp.anulado_por,
+              pp.anulado_el, pp.motivo_anulacion
+         FROM pago_proveedor_aplicaciones a
+         JOIN pagos_proveedor pp ON pp.pago_proveedor_id = a.pago_proveedor_id
+              AND pp.tenant_id = a.tenant_id
+         -- Sin "mp.eliminado_el IS NULL": mismo criterio que listarPagos,
+         -- el método con el que se pagó es un dato histórico.
+         LEFT JOIN metodos_pago mp ON mp.metodo_pago_id = pp.metodo_pago_id
+        WHERE a.tenant_id = $1 AND a.compra_id = $2 AND a.eliminado_el IS NULL
+          AND pp.eliminado_el IS NULL
+        ORDER BY pp.fecha DESC, pp.pago_proveedor_id DESC`,
+      [tenantId, compraId],
+    );
+    if (!pagos.length) return [];
+
+    const aplicaciones: {
+      pago_proveedor_id: string;
+      compra_id: string;
+      monto: string;
+    }[] = await this.db.query(
+      `SELECT pago_proveedor_id, compra_id, monto
+         FROM pago_proveedor_aplicaciones
+        WHERE tenant_id = $1
+          AND pago_proveedor_id = ANY($2::uuid[])
+          AND eliminado_el IS NULL
+        ORDER BY creado_el`,
+      [tenantId, pagos.map((p) => p.pago_proveedor_id)],
+    );
+    const porPago = new Map<string, AplicacionPagoInfo[]>();
+    for (const a of aplicaciones) {
+      const lista = porPago.get(a.pago_proveedor_id) ?? [];
+      lista.push({ compraId: a.compra_id, monto: a.monto });
+      porPago.set(a.pago_proveedor_id, lista);
+    }
+
+    return pagos.map((p) => {
+      const propias = porPago.get(p.pago_proveedor_id) ?? [];
+      const aplicado = propias.reduce(
+        (acc, a) => acc.plus(a.monto),
+        new Decimal(0),
+      );
+      return {
+        id: p.pago_proveedor_id,
+        proveedorId: p.proveedor_id,
+        fecha: p.fecha?.toISOString?.() ?? null,
+        monto: p.monto,
+        metodoPagoId: p.metodo_pago_id,
+        metodoPagoNombre: p.metodo_pago_nombre,
+        referencia: p.referencia,
+        cajaId: p.caja_id,
+        estado: p.estado,
+        anuladoPor: p.anulado_por,
+        anuladoEl: p.anulado_el,
+        motivoAnulacion: p.motivo_anulacion,
+        aplicaciones: propias,
+        sobranteAFavor:
+          p.estado === 'vigente'
+            ? new Decimal(p.monto).minus(aplicado).toFixed(4)
+            : '0.0000',
+      };
+    });
+  }
+
   async listarPagos(
     tenantId: string,
     proveedorId: string,
@@ -1996,6 +2412,253 @@ export class ComprasService {
             : '0.0000',
       };
     });
+  }
+
+  /**
+   * Fila cruda de una compra confirmada para las lecturas de deuda (spec §
+   * 8): compartida por `porPagar`, `porPagarProveedor` y `findOne`/`findAll`
+   * no la usan porque ya tienen su propio `CabeceraRow`. Una consulta, sin
+   * `LIMIT`: el universo es "compras confirmadas", acotado como mucho por
+   * `proveedorId`.
+   */
+  private async comprasConfirmadasParaDeuda(
+    tenantId: string,
+    proveedorId?: string,
+  ): Promise<
+    {
+      compra_id: string;
+      proveedor_id: string;
+      proveedor_nombre: string | null;
+      fecha_documento: string;
+      folio: string | null;
+      tipo_documento_nombre: string | null;
+      descuento_total: string | null;
+      total_documento: string | null;
+      tipo_total_documento: string | null;
+      fecha_vencimiento: string | null;
+      algun_sin_precio: boolean;
+      bruto: string | null;
+      aplicado: string;
+    }[]
+  > {
+    return this.db.query(
+      `SELECT c.compra_id, c.proveedor_id, pr.nombre AS proveedor_nombre,
+              c.fecha_documento::text AS fecha_documento, c.folio,
+              td.nombre AS tipo_documento_nombre,
+              c.descuento_total, c.total_documento,
+              td.total_documento AS tipo_total_documento,
+              c.fecha_vencimiento::text AS fecha_vencimiento,
+              COALESCE(ag.algun_sin_precio, false) AS algun_sin_precio,
+              ag.bruto,
+              COALESCE(pagoag.aplicado, 0)::text AS aplicado
+         FROM compras c
+         -- Sin filtro de borrado en terceros/tipos_documento: mismo criterio
+         -- que SELECT_CABECERA — un proveedor o tipo retirado después sigue
+         -- nombrando la deuda que dejó.
+         LEFT JOIN terceros pr ON pr.tercero_id = c.proveedor_id
+         LEFT JOIN tipos_documento_compra td
+                ON td.tipo_documento_compra_id = c.tipo_documento_compra_id
+         LEFT JOIN (
+           SELECT cl.compra_id,
+                  bool_or(cl.precio_unitario IS NULL) AS algun_sin_precio,
+                  SUM(cl.cantidad * cl.precio_unitario) AS bruto
+             FROM compra_lineas cl
+            WHERE cl.tenant_id = $1 AND cl.eliminado_el IS NULL
+            GROUP BY cl.compra_id
+         ) ag ON ag.compra_id = c.compra_id
+         LEFT JOIN (
+           SELECT compra_id, SUM(monto) AS aplicado
+             FROM pago_proveedor_aplicaciones
+            WHERE tenant_id = $1 AND eliminado_el IS NULL
+            GROUP BY compra_id
+         ) pagoag ON pagoag.compra_id = c.compra_id
+        WHERE c.tenant_id = $1 AND c.estado = 'confirmada'
+          AND c.eliminado_el IS NULL
+          AND ($2::uuid IS NULL OR c.proveedor_id = $2::uuid)`,
+      [tenantId, proveedorId ?? null],
+    );
+  }
+
+  /**
+   * `GET /compras/por-pagar` (spec § 8, `Pagar`): una fila por proveedor con
+   * la deuda conocida, lo vencido, lo que vence en 7 días, cuántas compras
+   * tienen el total desconocido y el saldo a favor. Dos consultas fijas (las
+   * compras confirmadas y los pagos vigentes), agregadas en memoria — el
+   * total `suma_lineas` pasa por `cuantizar` (Decimal.js), así que la cuenta
+   * no se puede empujar entera a SQL. Sin deuda y sin saldo a favor, el
+   * proveedor no aparece.
+   */
+  async porPagar(tenantId: string): Promise<PorPagarProveedorItem[]> {
+    const cfg = await this.cfgTenant(tenantId);
+    const hoy = await this.hoyNegocio(tenantId);
+    const en7Dias = sumarDias(hoy, 7);
+    const filas = await this.comprasConfirmadasParaDeuda(tenantId);
+
+    interface Acc {
+      proveedorNombre: string | null;
+      deuda: Decimal;
+      vencido: Decimal;
+      venceProximos7Dias: Decimal;
+      comprasTotalDesconocido: number;
+    }
+    const porProveedor = new Map<string, Acc>();
+    for (const f of filas) {
+      const total = this.totalDeFila(f, cfg);
+      const acc = porProveedor.get(f.proveedor_id) ?? {
+        proveedorNombre: f.proveedor_nombre,
+        deuda: new Decimal(0),
+        vencido: new Decimal(0),
+        venceProximos7Dias: new Decimal(0),
+        comprasTotalDesconocido: 0,
+      };
+      if (total == null) {
+        acc.comprasTotalDesconocido += 1;
+      } else {
+        const deuda = Decimal.max(0, new Decimal(total).minus(f.aplicado));
+        if (deuda.gt(0)) {
+          acc.deuda = acc.deuda.plus(deuda);
+          const vencimientoF = f.fecha_vencimiento;
+          if (vencimientoF != null && vencimientoF < hoy) {
+            acc.vencido = acc.vencido.plus(deuda);
+          } else if (vencimientoF != null && vencimientoF <= en7Dias) {
+            acc.venceProximos7Dias = acc.venceProximos7Dias.plus(deuda);
+          }
+        }
+      }
+      porProveedor.set(f.proveedor_id, acc);
+    }
+
+    const saldos = await this.saldoAFavorPorProveedor(tenantId);
+
+    const resultado: PorPagarProveedorItem[] = [];
+    const proveedorIds = new Set([...porProveedor.keys(), ...saldos.keys()]);
+    for (const proveedorId of proveedorIds) {
+      const acc = porProveedor.get(proveedorId);
+      const saldoAFavor = saldos.get(proveedorId) ?? new Decimal(0);
+      const deuda = acc?.deuda ?? new Decimal(0);
+      const comprasTotalDesconocido = acc?.comprasTotalDesconocido ?? 0;
+      if (
+        deuda.isZero() &&
+        comprasTotalDesconocido === 0 &&
+        saldoAFavor.isZero()
+      ) {
+        continue;
+      }
+      resultado.push({
+        proveedorId,
+        proveedorNombre: acc?.proveedorNombre ?? null,
+        deuda: deuda.toString(),
+        vencido: (acc?.vencido ?? new Decimal(0)).toString(),
+        venceProximos7Dias: (
+          acc?.venceProximos7Dias ?? new Decimal(0)
+        ).toString(),
+        comprasTotalDesconocido,
+        saldoAFavor: saldoAFavor.toString(),
+      });
+    }
+
+    // Ordenada por vencido y después por lo que vence pronto (spec § 8).
+    resultado.sort((a, b) => {
+      const porVencido = new Decimal(b.vencido).minus(a.vencido).toNumber();
+      if (porVencido !== 0) return porVencido;
+      return new Decimal(b.venceProximos7Dias)
+        .minus(a.venceProximos7Dias)
+        .toNumber();
+    });
+    return resultado;
+  }
+
+  /**
+   * `GET /compras/por-pagar/:proveedorId` (spec § 8, `Pagar`): sus compras
+   * confirmadas con deuda o total desconocido, con estado y vencimiento; sus
+   * pagos vigentes con saldo a favor.
+   */
+  async porPagarProveedor(
+    tenantId: string,
+    proveedorId: string,
+  ): Promise<PorPagarProveedorDetalle> {
+    const cfg = await this.cfgTenant(tenantId);
+    const hoy = await this.hoyNegocio(tenantId);
+    const filas = await this.comprasConfirmadasParaDeuda(tenantId, proveedorId);
+
+    const compras: PorPagarCompraItem[] = filas
+      .map((f) => {
+        const total = this.totalDeFila(f, cfg);
+        const esSumaLineas =
+          f.tipo_total_documento !== 'obligatorio' &&
+          f.tipo_total_documento !== 'opcional';
+        const derivado = estadoPagoCompra({
+          total,
+          aplicado: f.aplicado,
+          fechaVencimiento: f.fecha_vencimiento,
+          hoy,
+          esSumaLineas,
+        });
+        return {
+          id: f.compra_id,
+          fechaDocumento: f.fecha_documento,
+          folio: f.folio,
+          tipoDocumentoNombre: f.tipo_documento_nombre,
+          total,
+          totalDocumento: f.total_documento,
+          fechaVencimiento: f.fecha_vencimiento,
+          estadoPago: derivado.estadoPago,
+          deuda: derivado.deuda,
+          vencida: derivado.vencida,
+        };
+      })
+      // Solo con deuda o total desconocido (spec § 8): una `pagada` no entra.
+      .filter((c) => c.deuda == null || new Decimal(c.deuda).gt(0));
+
+    const pagos = (await this.listarPagos(tenantId, proveedorId)).filter(
+      (p) => p.estado === 'vigente' && new Decimal(p.sobranteAFavor).gt(0),
+    );
+
+    return { compras, pagos };
+  }
+
+  /** El total de una fila de `comprasConfirmadasParaDeuda`, con la misma regla que `mapCabecera` (decisión 10). */
+  private totalDeFila(
+    f: {
+      tipo_total_documento: string | null;
+      total_documento: string | null;
+      algun_sin_precio: boolean;
+      bruto: string | null;
+      descuento_total: string | null;
+    },
+    cfg: ConfigCalculo,
+  ): string | null {
+    const esSumaLineas =
+      f.tipo_total_documento !== 'obligatorio' &&
+      f.tipo_total_documento !== 'opcional';
+    if (!esSumaLineas) return f.total_documento;
+    if (f.algun_sin_precio || f.bruto == null) return null;
+    return cuantizar(
+      new Decimal(f.bruto).minus(f.descuento_total ?? 0),
+      cfg,
+    ).toString();
+  }
+
+  /** Saldo a favor vigente por proveedor: Σ (monto − aplicado) de sus pagos vigentes. */
+  private async saldoAFavorPorProveedor(
+    tenantId: string,
+  ): Promise<Map<string, Decimal>> {
+    const rows: { proveedor_id: string; saldo: string }[] = await this.db.query(
+      `SELECT pp.proveedor_id,
+              SUM(pp.monto - COALESCE(ap.aplicado, 0))::text AS saldo
+         FROM pagos_proveedor pp
+         LEFT JOIN (
+           SELECT pago_proveedor_id, SUM(monto) AS aplicado
+             FROM pago_proveedor_aplicaciones
+            WHERE tenant_id = $1 AND eliminado_el IS NULL
+            GROUP BY pago_proveedor_id
+         ) ap ON ap.pago_proveedor_id = pp.pago_proveedor_id
+        WHERE pp.tenant_id = $1 AND pp.estado = 'vigente'
+          AND pp.eliminado_el IS NULL
+        GROUP BY pp.proveedor_id`,
+      [tenantId],
+    );
+    return new Map(rows.map((r) => [r.proveedor_id, new Decimal(r.saldo)]));
   }
 
   /**
@@ -2413,6 +3076,92 @@ export class ComprasService {
       .filter((f) => f.disponible.gt(0))
       .sort((a, b) => a.fecha.getTime() - b.fecha.getTime())
       .map((f) => ({ pagoId: f.pagoId, disponible: f.disponible.toString() }));
+  }
+
+  /**
+   * El recorte de aplicaciones de una compra cuyo total bajó o recién se
+   * conoce (spec § 6, `deuda.ts#recortar`): de la más nueva a la más vieja,
+   * hasta que lo aplicado no supere `totalNuevo`. El sobrante de cada
+   * aplicación tocada vuelve a su pago como saldo a favor SOLO: no hace
+   * falta escribirlo aparte, `saldoAFavorLockeado` ya lo deriva de
+   * `monto − aplicaciones vivas`.
+   *
+   * `anular` reusa este mismo camino con `totalNuevo = '0'` (decisión 6b):
+   * "esta compra no debe nada" es exactamente recortar hasta 0.
+   *
+   * Orden de locks (spec § 11, tercero — la compra ya está lockeada por el
+   * llamador ANTES de esto): los pagos que fondean la compra,
+   * `FOR UPDATE ORDER BY pago_proveedor_id`. Las aplicaciones no llevan lock
+   * propio: con la compra y sus pagos ya tomados, nadie puede insertarles ni
+   * borrarlas por debajo (mismo razonamiento que `anularPagoEnTransaccion`).
+   *
+   * Nunca `UPDATE` del monto (Global Constraints del plan): una aplicación
+   * tocada se marca `eliminado_el` y, si queda un resto, se reinserta como
+   * fila NUEVA — mismo molde que `pagarEnTransaccion` al insertar las partes.
+   */
+  private async recortarAplicaciones(
+    manager: EntityManager,
+    tenantId: string,
+    compraId: string,
+    totalNuevo: string,
+  ): Promise<void> {
+    const vivas: {
+      pago_proveedor_aplicacion_id: string;
+      pago_proveedor_id: string;
+      monto: string;
+      creado_el: Date;
+    }[] = await manager.query(
+      `SELECT pago_proveedor_aplicacion_id, pago_proveedor_id, monto, creado_el
+         FROM pago_proveedor_aplicaciones
+        WHERE tenant_id = $1 AND compra_id = $2 AND eliminado_el IS NULL`,
+      [tenantId, compraId],
+    );
+    if (!vivas.length) return;
+
+    const pagoIds = [...new Set(vivas.map((v) => v.pago_proveedor_id))].sort(
+      (a, b) => a.localeCompare(b),
+    );
+    await manager.query(
+      `SELECT pago_proveedor_id FROM pagos_proveedor
+        WHERE tenant_id = $1 AND pago_proveedor_id = ANY($2::uuid[])
+        ORDER BY pago_proveedor_id
+        FOR UPDATE`,
+      [tenantId, pagoIds],
+    );
+
+    const { aBorrar, aReducir } = recortar(
+      vivas.map((v) => ({
+        aplicacionId: v.pago_proveedor_aplicacion_id,
+        pagoId: v.pago_proveedor_id,
+        monto: v.monto,
+        creadoEl: v.creado_el,
+      })),
+      totalNuevo,
+    );
+    if (!aBorrar.length && !aReducir.length) return;
+
+    const todos = [...aBorrar, ...aReducir.map((r) => r.aplicacionId)];
+    await manager.query(
+      `UPDATE pago_proveedor_aplicaciones
+          SET eliminado_el = NOW(), actualizado_el = NOW()
+        WHERE tenant_id = $1 AND pago_proveedor_aplicacion_id = ANY($2::uuid[])`,
+      [tenantId, todos],
+    );
+    if (aReducir.length) {
+      await manager.query(
+        `INSERT INTO pago_proveedor_aplicaciones
+           (pago_proveedor_aplicacion_id, tenant_id, pago_proveedor_id,
+            compra_id, monto, creado_el, actualizado_el)
+         SELECT gen_random_uuid(), $1, x.pago_id, $2, x.monto, NOW(), NOW()
+           FROM unnest($3::uuid[], $4::numeric[]) AS x(pago_id, monto)`,
+        [
+          tenantId,
+          compraId,
+          aReducir.map((r) => r.pagoId),
+          aReducir.map((r) => r.montoNuevo),
+        ],
+      );
+    }
   }
 
   /**
@@ -2838,6 +3587,27 @@ export class ComprasService {
   }
 
   /**
+   * La misma política de reintento de `conReintento`, pero sobre una
+   * función SIN manager: para envolver `idempotencia.ejecutar(...)` entero
+   * (confirmar con `pago`, spec § 7), que abre su PROPIA `db.transaccion` en
+   * vez de recibir una. `conReintento` no sirve ahí: reusa el manager activo
+   * si ya hay uno, y adentro de `ejecutar` SIEMPRE lo hay — un `40P01`
+   * dejaría esa transacción abortada y el "reintento" fallaría de nuevo
+   * contra la misma conexión rota. Con esto, cada intento vuelve a llamar a
+   * `ejecutar()` de cero, que abre transacción nueva.
+   */
+  private async conReintentoGenerico<T>(fn: () => Promise<T>): Promise<T> {
+    for (let intento = 0; ; intento++) {
+      try {
+        return await fn();
+      } catch (error) {
+        if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
+          throw error;
+      }
+    }
+  }
+
+  /**
    * El folio repetido es 409, y el mensaje nombra la compra que ya lo tiene.
    * Por ley el folio es único por emisor y tipo de documento (owner,
    * 2026-09-18). "Sin documento" no tiene folio y no entra; una anulada
@@ -3238,13 +4008,32 @@ export class ComprasService {
     );
   }
 
-  private mapListItem(r: CabeceraRow, cfg: ConfigCalculo): CompraListItem {
-    return { ...this.mapCabecera(r, cfg), lineas: r.lineas };
+  /**
+   * "Hoy" para marcar `vencida` (spec § 4.1 y § 8): el día del NEGOCIO del
+   * tenant (zona + hora de corte), no el día de calendario de la hora de
+   * reloj — mismo mecanismo que el resto del proyecto usa para "hoy"
+   * (`docs/patterns/backend.md` § 10b; lo hace cumplir
+   * `dia-negocio.invariant.spec.ts`, que prohíbe `fechaLocalTenant` fuera de
+   * la allowlist del motor de precios/promociones).
+   */
+  private async hoyNegocio(tenantId: string): Promise<string> {
+    const dia = await diaNegocioTenant(this.db, tenantId);
+    return diaNegocioEnZona(dia, new Date());
+  }
+
+  private mapListItem(
+    r: CabeceraRow,
+    cfg: ConfigCalculo,
+    pago: { tienePagar: boolean; hoy: string } | null,
+  ): CompraListItem {
+    return { ...this.mapCabecera(r, cfg, pago), lineas: r.lineas };
   }
 
   private mapCabecera(
     r: CabeceraRow,
     cfg: ConfigCalculo,
+    /** `null` = no calcular nada de pago (llamador sin `Pagar`, spec § 8). */
+    pago: { tienePagar: boolean; hoy: string } | null,
   ): Omit<CompraListItem, 'lineas'> {
     const sinPrecio = r.algun_sin_precio;
     // Un tipo `obligatorio`/`opcional` no calcula: el total es lo transcrito
@@ -3261,6 +4050,20 @@ export class ComprasService {
           ).toString()
         : null
       : r.total_documento;
+    // El estado de pago solo tiene sentido en una compra CONFIRMADA (spec §
+    // 4.1: "solo cuentan las compras confirmada"; un borrador o una anulada
+    // no deben nada, aunque tengan aplicaciones vivas de antes de anularse
+    // — que `anular` ya recortó a 0, decisión 6b).
+    const datosDePago =
+      pago?.tienePagar && r.estado === 'confirmada'
+        ? estadoPagoCompra({
+            total,
+            aplicado: r.aplicado,
+            fechaVencimiento: r.fecha_vencimiento,
+            hoy: pago.hoy,
+            esSumaLineas,
+          })
+        : null;
     return {
       id: r.compra_id,
       estado: r.estado,
@@ -3276,6 +4079,13 @@ export class ComprasService {
       total,
       totalDocumento: r.total_documento,
       fechaVencimiento: r.fecha_vencimiento,
+      ...(datosDePago
+        ? {
+            estadoPago: datosDePago.estadoPago,
+            deuda: datosDePago.deuda,
+            vencida: datosDePago.vencida,
+          }
+        : {}),
     };
   }
 }

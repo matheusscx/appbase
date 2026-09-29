@@ -18,6 +18,28 @@ export class FindComprasDto extends PaginationQueryDto {
   @IsUUID()
   proveedorId?: string;
 
+  /**
+   * Spec § 4.1 y § 8 (decisión 12): filtra por el estado de pago derivado.
+   * `Compras:Pagar`, no `Leer` — sin él, esta clave es 403 (el controller lo
+   * resuelve; sin `Pagar` ni siquiera se computa el estado de pago).
+   */
+  @IsOptional()
+  @IsIn([
+    'pagada',
+    'parcial',
+    'pendiente',
+    'falta_total',
+    'falta_precio',
+    'vencida',
+  ])
+  estadoPago?:
+    | 'pagada'
+    | 'parcial'
+    | 'pendiente'
+    | 'falta_total'
+    | 'falta_precio'
+    | 'vencida';
+
   /** Solo las confirmadas con alguna línea sin precio. */
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)

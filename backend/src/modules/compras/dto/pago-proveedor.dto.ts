@@ -87,3 +87,35 @@ export class FindPagosProveedorDto {
   @IsUUID()
   proveedorId: string;
 }
+
+/**
+ * El `pago` opcional de `POST /compras/:id/confirmar` (spec § 7, "la compra
+ * al contado en un solo gesto"): sin `aplicaciones` ni `proveedorId` —van
+ * implícitos, el confirmar arma una única aplicación a ESTA compra por
+ * `min(monto, total)` (o por `monto` si el total todavía es desconocido).
+ * `metodoPagoId` siempre obligatorio acá: a diferencia de `POST
+ * /compras/pagos`, confirmar con `pago` es siempre pagar algo, nunca "usar
+ * el saldo a favor" (eso ya lo cubre `POST /compras/pagos` con `monto: 0`).
+ */
+export class PagoAlConfirmarDto {
+  @IsNumberString()
+  @IsDecimalPositivo()
+  @EsMontoCobrado()
+  monto: string;
+
+  @IsUUID()
+  metodoPagoId: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  referencia?: string;
+}
+
+/** Body de `POST /compras/:id/confirmar` (spec § 7): el `pago` es opcional. */
+export class ConfirmarCompraDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PagoAlConfirmarDto)
+  pago?: PagoAlConfirmarDto;
+}

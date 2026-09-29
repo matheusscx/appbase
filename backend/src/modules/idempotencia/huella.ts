@@ -4,7 +4,8 @@ export type OperacionIdempotente =
   | 'venta.crear'
   | 'cuenta.cerrar'
   | 'pago.abono'
-  | 'compras.pago';
+  | 'compras.pago'
+  | 'compras.confirmar';
 
 /**
  * Lo que distingue "el mismo cobro reintentado" de "otro cobro con la misma
