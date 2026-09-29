@@ -541,6 +541,13 @@ revisión independiente no lo pudo reproducir, con razón.
   ⚠️ Ese redondeo **no toca el documento tributario ni el impuesto**: es una diferencia de
   caja aparte, así que su lugar en el modelo no es el mismo y hay que decidir dónde se
   contabiliza.
+  ✅ **DECIDIDO (owner, 2026-09-29, en el selector interactivo de la orquestadora): la diferencia queda como "redondeo" en la
+  caja.** Escena: cuenta de $12.347 pagada en efectivo, redondeada por ley a $12.350. Eligió *A*
+  (recomendada) por sobre *B: como ajuste dentro de la venta*, que cambiaba el documento y lo
+  volvía fiscal, y *C: no hacerlo todavía*. La venta y la boleta no cambian; el arqueo espera la
+  diferencia y la muestra como redondeo, así que la caja cuadra. ⚠️ La regla exacta de la ley
+  (1 a 5 baja, 6 a 9 sube, solo el pago en efectivo) se verifica contra la fuente al construir,
+  no contra este párrafo.
 
 - [ ] **Renombrar `moneda.decimales`** (backend + frontend, decisión explícita de dejarlo
   afuera, 2026-08-21) — el nombre es ambiguo: **es lo que causó que el propio owner leyera
@@ -1649,6 +1656,10 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   eso un minimarket ya puede tener testigos y la limitación de la
   [spec del testigo](../superpowers/specs/2026-08-11-testigo-cierre-forzado-design.md)
   desaparece.
+  ✅ **DECIDIDO (owner, 2026-09-29, en el selector interactivo de la orquestadora): el atajo, no el rename.** Eligió *B: cambiar
+  solo lo que ve el usuario* (recomendada) por sobre *A: renombrar todo*. La pantalla dice
+  "Personal" y se agrega un `tipo` para el personal que no es de salón. El rename completo queda
+  sin fecha: si algún día se hace, sigue yendo solo.
 
   ⚠️ **El día que se haga el rename completo, va solo.** Un rename es mecánico pero se
   contamina fácil: mezclado con una feature, cualquier bug queda escondido entre 3.000 líneas
@@ -1698,6 +1709,13 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   se muestra en la impresión y el reporte; y cómo se audita (evento propio, como el resto de
   la liquidación). La mitad barata —que la propina de una venta anulada no entre a
   liquidaciones **futuras**— ya está cerrada ([`resueltos.md`](resueltos.md)).
+  ✅ **Dos de esas preguntas, decididas (owner, 2026-09-29, en el selector interactivo de la orquestadora, las dos con la
+  recomendada):** el saldo **no vence** (queda a la vista del supervisor hasta descontarse, o
+  hasta que alguien lo perdone a mano, con registro de quién), y si la próxima liquidación es
+  menor, **se descuenta todo lo que alcance** y el resto pasa a la siguiente. ⛔ **Antes de
+  construirlo:** descontarle a un trabajador tiene un ángulo legal chileno sin validar, el mismo
+  de la entrada del abogado en la § 7 (ORD. N°4229). Se le avisó al owner en la pregunta. Esto se
+  suma a lo que tiene que validar el abogado.
 
 - [ ] **Recuento de inventario en modos `serie` y `lote`** (backend + frontend) — el recuento
   (`docs/features/recuento-inventario.md`) cubre solo `modo_inventario='cantidad'`; los
@@ -1969,6 +1987,10 @@ No se resuelve programando. Está acá para que tenga quién la reclame.
   sueldo (ORD. N°4229). `docs/DIFERENCIADORES.md` lo marca "sin validar por un abogado" y
   **no se puede comunicar el ángulo legal hasta que lo esté** — esta entrada existe para que
   esa validación tenga quién la reclame, ahora que la entrada que la contenía se archivó.
+  ➕ **Una tercera afirmación para la misma consulta (2026-09-29):** descontarle al garzón, de su
+  próxima liquidación de propinas, lo ya pagado de una venta anulada. El owner lo decidió así
+  (§ 6, *"Saldo en contra cuando se anula una venta cuya propina YA se liquidó"*), y choca con
+  la (b) de arriba.
 
 ---
 
