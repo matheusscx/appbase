@@ -1201,11 +1201,27 @@ plata** es además un oráculo sobre el esperado del turno:
 | `POST /caja/:id/movimientos` con `tipo:'salida'` y saldo insuficiente | `tipo:'retiro'`, `motivo:'saldo_insuficiente'` |
 | Nota de crédito con devolución en efectivo por encima de lo que esa venta cobró en efectivo | `tipo:'devolucion_nc'`, `motivo:'supera_efectivo_de_la_venta'` |
 | Nota de crédito con devolución en efectivo y la caja sin saldo | `tipo:'devolucion_nc'`, `motivo:'saldo_insuficiente'` |
+| `POST /compras/pagos` con un pago a proveedor en efectivo y la caja sin saldo (spec compras-deuda-proveedor § 5.3, tarea 2) | `tipo:'pago_proveedor'`, `motivo:'saldo_insuficiente'` |
 
 Guarda **quién, cuándo, qué caja, cuánto pidió** y —en la NC— sobre qué venta. **No guarda
 el monto disponible**: ese es justo el dato que el rechazo filtraba, y persistirlo lo
 dejaría a un endpoint de distancia del cajero. Lo que el supervisor necesita para leer un
 barrido binario es la **secuencia de montos pedidos**, no el resultado.
+
+**El camino de `pago_proveedor` no cambia la regla de arriba, solo le suma un tercer
+oráculo.** `ComprasService.pagarEnTransaccion` usa el mismo `calcularEsperadoEfectivo` y el
+mismo `IntentoRechazadoError`, envuelto por el mismo `CajaService.conRastroDeRechazo` — no
+hay un segundo mecanismo de rastro, ni un segundo criterio de qué se guarda. El 422 no
+interpola el esperado (modo ciego), igual que los otros dos caminos.
+
+**La salida (o, al anular, la entrada reversa) que un pago a proveedor genera** usa
+`registrarMovimientoEnTransaccion` como cualquier otro egreso de caja (`tipo: 'salida'`,
+concepto `"Pago a proveedor · <nombre>"`), con `pagoProveedorId` en vez de `ventaId`/`pagoId`
+(`movimientos_caja.pago_proveedor_id`, columna simple sin `@ManyToOne` — mismo patrón que
+las otras dos). Ninguna regla de caja cambia: el efectivo sale de la caja abierta de quien
+paga (nunca del body — invariante 1), y la salida pasa por el mismo cálculo de esperado que
+un retiro manual. Detalle completo: [`compras.md` → Pagar y anular un
+pago](./compras.md#pagar-y-anular-un-pago-pieza-5-tarea-2).
 
 ⚠️ **El rastro tiene que sobrevivir al rollback, y eso condiciona cómo se escribe.** El 422
 aborta la transacción que lo produjo; un registro escrito adentro se va con ella. La

@@ -125,9 +125,11 @@ export interface TendenciaDescuadres {
 }
 
 /**
- * Un intento RECHAZADO contra la plata de una caja (retiro sin saldo, o
- * devolución en efectivo por encima de lo que la venta cobró en efectivo).
- * Lectura de supervisión: `Cajas:Leer`, nunca del cajero.
+ * Un intento RECHAZADO contra la plata de una caja (retiro sin saldo,
+ * devolución en efectivo por encima de lo que la venta cobró en efectivo, o
+ * un pago a proveedor en efectivo sin plata en la caja — spec
+ * compras-deuda-proveedor § 5.3, tarea 2). Lectura de supervisión:
+ * `Cajas:Leer`, nunca del cajero.
  */
 export interface IntentoRechazado {
   id: string
@@ -135,7 +137,7 @@ export interface IntentoRechazado {
   cajonNombre: string | null
   usuarioId: string
   usuarioNombre: string
-  /** `'retiro'` | `'devolucion_nc'`. */
+  /** `'retiro'` | `'devolucion_nc'` | `'pago_proveedor'`. */
   tipo: string
   /** `'saldo_insuficiente'` | `'supera_efectivo_de_la_venta'`. */
   motivo: string

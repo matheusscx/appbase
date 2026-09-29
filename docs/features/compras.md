@@ -1,7 +1,8 @@
 # Feature: Compras — recibir mercadería (pieza 1)
 
-**Status**: Complete (piezas 1 a 4); pieza 5 (la deuda con el proveedor) en curso — tarea 1 de
-`docs/superpowers/plans/2026-09-28-compras-deuda-proveedor.md`
+**Status**: Complete (piezas 1 a 4); pieza 5 (la deuda con el proveedor) en curso — tareas 1 y 2 de
+`docs/superpowers/plans/2026-09-28-compras-deuda-proveedor.md` (el modelo/total/vencimiento, y
+pagar/anular un pago). "Por pagar" y confirmar con `pago` siguen en las tareas 3 y 4.
 **Last Updated**: 2026-09-28
 
 Spec: [`2026-09-18-compras-recepcion-design.md`](../superpowers/specs/2026-09-18-compras-recepcion-design.md) ·
@@ -169,14 +170,117 @@ la recepción. Como la recepción nunca es anterior a la emisión, el vencimient
 La aritmética vive en un solo lugar, `compras/deuda.ts` (`vencimiento`, `totalCompra`), con sus
 unitarios — el mismo criterio que `rango-fecha.util.ts` para el día del negocio.
 
-### Permisos de esta tarea
+### Permisos de la tarea 1
 
-`PATCH /compras/:id/documento` va con `Actualizar` (no con el `Pagar` nuevo): corregir lo
-transcrito es lo mismo que corregir un precio, y las dos tareas ya podían hacerlo. El permiso
-`Pagar` se siembra en esta tarea (acción del módulo `Compras`, y un fixture `compras.paga`) pero
-**ningún endpoint lo exige todavía** — lo usan `POST /compras/pagos`, `GET /compras/por-pagar` y
-los datos de pago del listado/detalle, en las tareas siguientes. El rol `Compras · Encargado`
+`PATCH /compras/:id/documento` va con `Actualizar` (no con `Pagar`): corregir lo transcrito es lo
+mismo que corregir un precio, y las dos tareas ya podían hacerlo. El rol `Compras · Encargado`
 arranca **sin** `Pagar` a propósito (spec § 9, decisión 7b): "el bodeguero recibe, el dueño paga".
+
+---
+
+## Pagar y anular un pago (pieza 5, tarea 2)
+
+Spec [`2026-09-28-compras-deuda-proveedor-design.md`](../superpowers/specs/2026-09-28-compras-deuda-proveedor-design.md)
+§ 5, § 8 (solo `GET /compras/pagos`), § 9 y § 11. "Por pagar" (`GET /compras/por-pagar`) y
+confirmar con `{ pago }` (spec § 7) siguen en las tareas 3 y 4.
+
+### El modelo
+
+`pagos_proveedor` (un pago real: plata que salió, por un medio, un día) y
+`pago_proveedor_aplicaciones` (cuánto de ese pago cubre cada compra). **La deuda se deriva al
+leer** (total − aplicaciones vivas), nunca se guarda: no hay columna de saldo que desincronizar.
+**Las aplicaciones no se editan**: un ajuste futuro (§ 6, recorte por corrección) marcará
+`eliminado_el` e insertará otra fila por el resto — esta tarea solo las crea. `pagos_proveedor.id`
+se pre-genera con `randomUUID()` (`@PrimaryColumn`, no `@PrimaryGeneratedColumn`): el fondeo
+(`compras/deuda.ts → fondear`) necesita poder nombrarlo como fuente ANTES del `INSERT`, para que
+una aplicación pueda salir partida entre el saldo a favor y el pago nuevo en la misma pasada.
+`movimientos_caja.pago_proveedor_id` (nullable, sin `@ManyToOne`, mismo patrón que `venta_id` y
+`pago_id`) es la salida — o, al anular, la entrada reversa — de un pago en efectivo.
+
+### `fondear` (`compras/deuda.ts`)
+
+Función pura: reparte las aplicaciones pedidas contra las fuentes de plata disponibles, **el
+saldo a favor primero** (sus pagos más viejos primero — el llamador arma ese orden por `fecha`
+ASC) **y recién después el pago nuevo** (spec § 5.1). Procesa las aplicaciones en el orden en que
+llegan (la pantalla decide la propuesta; el servidor valida el reparto, no lo decide) y puede
+partir una sola aplicación en varias filas si ninguna fuente sola la cubre. No valida topes de
+negocio (eso lo hace el service con lo que leyó bajo lock, antes de llamarla): si las fuentes no
+alcanzan para lo pedido, revierte con un error genérico — señal de que el caller no validó.
+
+### `POST /compras/pagos`
+
+```
+{ proveedorId, monto, metodoPagoId?, referencia?,
+  aplicaciones: [{ compraId, monto }] }        // vacía = anticipo
+```
+
+- `monto` ≥ 0. **`monto` = 0 con aplicaciones** usa el saldo a favor (decisión 5): no crea fila
+  en `pagos_proveedor` ni toca caja — la respuesta trae `id: null`.
+- 400 si: el proveedor no existe (**404** si es de otro tenant) o no está activo; una compra no
+  existe (**404** otro tenant) o no es del proveedor / no está `confirmada` / se repite en el
+  reparto; una aplicación supera la deuda **conocida** de su compra (sin tope si el total es
+  desconocido, decisión 8 — llega a la tarea 4); el reparto pedido supera lo disponible (saldo a
+  favor + `monto`).
+- **Efectivo** (`metodos_pago.es_efectivo`): la caja la resuelve el servidor
+  (`CajaService.findActiva(tenantId, usuarioId)`), nunca el body (invariante 1, decisión 3). Sin
+  caja abierta: 400. Con caja: la **misma** validación que la salida manual
+  (`calcularEsperadoEfectivo` + `IntentoRechazadoError('Saldo insuficiente en caja', { tipo:
+  'pago_proveedor', motivo: 'saldo_insuficiente', … })`) y la salida con
+  `registrarMovimientoEnTransaccion` (`tipo: 'salida'`, `pagoProveedorId`), en la MISMA
+  transacción que el pago.
+- **Idempotencia:** exige `Idempotency-Key`, operación `'compras.pago'` (`huellaDe`), huella del
+  DTO entero (sin datos sensibles).
+
+### `POST /compras/pagos/:id/anular` con `{ motivo }`
+
+Marca el pago `anulado` y `eliminado_el` en sus aplicaciones vivas: las compras vuelven a deber.
+**Efectivo con su caja todavía abierta:** solo el dueño de esa caja puede anular (403 si no), y se
+genera la **entrada** reversa en esa misma caja. **Con la caja ya cerrada (o en conciliación):** no
+toca ninguna caja (decisión 6) — la deuda vuelve igual. Sin `Idempotency-Key`: no cobra, no le
+aplica ADR-026.
+
+### La composición del spike (por qué el 422 deja rastro Y el reintento reproduce)
+
+```
+cajaService.conRastroDeRechazo(tenantId, () =>
+  idempotencia.ejecutar({ ... , operacion: 'compras.pago' }, () =>
+    db.transaccion((manager) => pagarEnTransaccion(manager, ...))
+  , () => null)
+)
+```
+
+`conRastroDeRechazo` es el borde MÁS externo, fuera de cualquier transacción. `ejecutar` abre su
+PROPIA `db.transaccion`, reclama la clave PRIMERO y recién ahí corre `pagarEnTransaccion` (que
+reusa esa misma transacción vía ALS, `docs/patterns/backend.md` § 9). Si `pagarEnTransaccion`
+tira `IntentoRechazadoError` (sin plata en caja), **toda** la transacción de `ejecutar` revierte
+—el reclamo de la clave incluido— porque el throw sale de su callback antes del `UPDATE …
+respuesta`; es la garantía que `idempotencia.service.ts` ya documenta ("un rechazo… no deja
+rastro, y el reintento con la misma clave corre de verdad"). Recién ahí, con la transacción ya
+deshecha, `conRastroDeRechazado` escribe la fila del rastro con `db.sinTransaccion` — nunca
+compite por el lock que la transacción revertida soltó.
+
+`pagarEnTransaccion(manager, tenantId, usuarioId, dto)` se expone aparte de `registrarPago`
+(el método público que arma la composición de arriba) **para que la tarea 3 lo reuse desde
+`confirmar`** (spec § 7: confirmar y pagar en la MISMA transacción, sin una `IdempotenciaService`
+anidada — `confirmar` decide su propia idempotencia y rastro para su operación compuesta).
+
+### Orden de locks (spec § 11)
+
+Las compras del reparto (`FOR UPDATE OF c`, `ORDER BY compra_id`) → los pagos vigentes del
+proveedor que pueden fondear (`FOR UPDATE`, `ORDER BY pago_proveedor_id`) → la caja
+(`bloquearCajaAbierta`, al final, solo si el medio es efectivo). Pagar no toca stock: salta del
+primer lock al segundo. `anularPago` sigue el mismo orden: primero lockea las compras que sus
+aplicaciones tocan (leídas sin lock antes, porque cambiarlas exige lockear primero ESE mismo pago
+— ver el comentario en `anularPagoEnTransaccion`), después el pago, después la caja si corresponde.
+Cada `ORDER BY` tiene su unitario que afirma sobre el SQL (`compras.service.spec.ts`, describe
+"orden de locks").
+
+### Permisos
+
+`GET /compras/medios-pago` · `GET /compras/pagos` · `POST /compras/pagos` ·
+`POST /compras/pagos/:id/anular`: **`Pagar`**, no `Actualizar` ni `Anular` (el de la compra) — spec
+§ 9, decisión 7: quien se equivoca de monto lo deshace desde su propia caja, sin permiso sobre el
+resto de la compra.
 
 ---
 
@@ -475,6 +579,10 @@ Todas bajo `JwtAuthGuard + TenantGuard + PermisosGuard`, con el `tenant_id` del 
 | `PATCH /compras/:id/descuento` con `{ descuentoTotal }` (clave obligatoria; `null` lo quita) | Actualizar |
 | `PATCH /compras/:id/documento` con `{ totalDocumento?, fechaVencimiento? }` (ausente no toca; ver [La deuda con el proveedor](#la-deuda-con-el-proveedor-pieza-5)) | Actualizar |
 | `POST /compras/:id/anular` con `{ motivo }` | Anular |
+| `GET /compras/medios-pago`: los medios habilitados del tenant, con `esEfectivo` | Pagar |
+| `GET /compras/pagos?proveedorId=`: los pagos del proveedor, con sus aplicaciones | Pagar |
+| `POST /compras/pagos` (con `Idempotency-Key`) con `{ proveedorId, monto, metodoPagoId?, referencia?, aplicaciones }` (ver [Pagar y anular un pago](#pagar-y-anular-un-pago-pieza-5-tarea-2)) | Pagar |
+| `POST /compras/pagos/:id/anular` con `{ motivo }` | Pagar |
 | `GET /compras/presentaciones?proveedorId=`: las vivas del proveedor | Crear |
 | `POST /compras/presentaciones` con `{ proveedorId, itemId, nombre, contenido, unidadCodigo }` | Crear |
 | `PATCH /compras/presentaciones/:id` con `{ nombre?, contenido?, unidadCodigo? }` (ausente no toca; `null` es 400) | Crear |
@@ -507,15 +615,21 @@ editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar
   confirmar: `cantidad_base`, `costo_unitario_base`, `movimiento_id`, `stock_total_anterior`,
   `costo_producto_anterior`), `compra_linea_cambios` (historial append-only) y
   `tipos_documento_compra` (catálogo por país; `total_documento` clasifica el tipo, pieza 5).
-  `terceros.plazo_pago_dias` (pieza 5).
+  `terceros.plazo_pago_dias` (pieza 5). `pagos_proveedor` y `pago_proveedor_aplicaciones` (tarea
+  2, ver [Pagar y anular un pago](#pagar-y-anular-un-pago-pieza-5-tarea-2)).
+  `movimientos_caja.pago_proveedor_id` (tarea 2, en `backend/src/modules/caja/`).
 - **Kardex:** `movimientos_inventario` gana `compra_linea_id`, `secuencia` (bigserial, el orden de
   aplicación) y `costo_informado`, y el motivo `correccion_compra`.
-- **`compras/deuda.ts`** (pieza 5): `vencimiento` y `totalCompra`, puras y con sus unitarios — ver
-  [La deuda con el proveedor](#la-deuda-con-el-proveedor-pieza-5).
+- **`compras/deuda.ts`** (pieza 5): `vencimiento` y `totalCompra` (tarea 1), y `fondear` (tarea
+  2) — todas puras y con sus unitarios. Ver [La deuda con el proveedor](#la-deuda-con-el-proveedor-pieza-5)
+  y [Pagar y anular un pago](#pagar-y-anular-un-pago-pieza-5-tarea-2).
 - **Seed:** módulo `Compras` y sus permisos, el rol `Compras · Encargado` y tres fixtures
   parciales para los 403 (`compras.lectura`, `compras.carga`, `compras.correccion`). Ids
   420–446. El permiso `Pagar`, su entrada en `Compras` y el rol/fixture `Compras · Paga` /
-  `compras.paga` (pieza 5, tarea 1): ids 452–455.
+  `compras.paga` (pieza 5, tarea 1): ids 452–455. **Bug de la tarea 1, cerrado en la tarea 2:**
+  `compras.paga` tenía rol y permisos pero le faltaba la fila en `usuarios_tenants` — sin ella,
+  `switch-tenant` daba 403 antes de llegar a ningún guard. El fixture no tenía consumidor hasta
+  el e2e de pagar (`compras-pagos.e2e-spec.ts`), que fue quien lo encontró.
 
 ## Frontend
 
@@ -540,13 +654,18 @@ editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar
 
 ## Testing
 
-- **Unitarios:** `compras.service.spec.ts`, `inventario.service.spec.ts` (la cuenta rehecha, con
-  los números de la spec), `reparto-descuento.spec.ts`, `lectura-dte.service.spec.ts`
-  (`planAprendizaje`, `normalizarRut`) y `useDte.spec.ts` (el lector del XML, front).
+- **Unitarios:** `compras.service.spec.ts` (incluye el orden de locks de pagar/anular y las
+  validaciones de la tarea 2), `deuda.spec.ts` (`vencimiento`, `totalCompra`, `fondear`),
+  `inventario.service.spec.ts` (la cuenta rehecha, con los números de la spec),
+  `reparto-descuento.spec.ts`, `lectura-dte.service.spec.ts` (`planAprendizaje`, `normalizarRut`)
+  y `useDte.spec.ts` (el lector del XML, front).
 - **E2E de la API:** `test/compras.e2e-spec.ts` (borrador, confirmar, rehacer la cuenta, corregir,
-  anular, permisos y aislamiento), `test/kardex-secuencia.e2e-spec.ts` (la secuencia sigue el
-  orden de aplicación bajo concurrencia) y `test/compras-dte.e2e-spec.ts` (la lectura del XML y el
-  aprendizaje al guardar).
+  anular, permisos y aislamiento — incluye el fixture `compras.paga` como primer consumidor de
+  `usuarios_tenants`), `test/compras-pagos.e2e-spec.ts` (tarea 2: fondeo, anticipo, usar el saldo
+  con `monto` 0, efectivo con y sin caja, el rastro de un rechazo, anular con la caja abierta/
+  cerrada/ajena, la idempotencia, los permisos y el aislamiento), `test/kardex-secuencia.e2e-spec.ts`
+  (la secuencia sigue el orden de aplicación bajo concurrencia) y `test/compras-dte.e2e-spec.ts`
+  (la lectura del XML y el aprendizaje al guardar).
 - **Front:** los specs de componente de `components/compras/` (incluido
   `PresentacionModal.nuxt.spec.ts` y `CargarDteModal.nuxt.spec.ts`) y `compras-carga.nuxt.spec.ts`.
 - **Navegador:** `frontend/e2e/compras/compras-por-pantalla.spec.ts` — los pasos del smoke,

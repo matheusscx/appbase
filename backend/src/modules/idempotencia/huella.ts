@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 export type OperacionIdempotente =
   | 'venta.crear'
   | 'cuenta.cerrar'
-  | 'pago.abono';
+  | 'pago.abono'
+  | 'compras.pago';
 
 /**
  * Lo que distingue "el mismo cobro reintentado" de "otro cobro con la misma

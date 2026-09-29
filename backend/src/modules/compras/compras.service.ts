@@ -1,10 +1,12 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import type { EntityManager } from 'typeorm';
+import { randomUUID } from 'crypto';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
@@ -30,8 +32,11 @@ import {
   type ConfigCalculo,
 } from '../calculo-precios/calculo-precios.engine';
 import { MonedasService } from '../monedas/monedas.service';
+import { CajaService, IntentoRechazadoError } from '../caja/caja.service';
+import { IdempotenciaService } from '../idempotencia/idempotencia.service';
+import { huellaDe } from '../idempotencia/huella';
 import { costearLineas } from './reparto-descuento';
-import { vencimiento } from './deuda';
+import { vencimiento, fondear } from './deuda';
 // `TIPOS_CON_STOCK` nació acá y se movió a `presentaciones-compra.service.ts`
 // (Tarea 1 de compras-unidad-de-compra) porque esta clase importa
 // `PresentacionesCompraService` (Tarea 2): si la constante siguiera acá ese
@@ -57,6 +62,11 @@ import type {
   CorregirDescuentoDto,
   CorregirLineaDto,
 } from './dto/corregir-compra.dto';
+import type {
+  AnularPagoProveedorDto,
+  CrearPagoProveedorDto,
+} from './dto/pago-proveedor.dto';
+import type { EstadoPagoProveedor } from './entities/pago-proveedor.entity';
 
 export interface TipoDocumentoCompraOpcion {
   id: string;
@@ -150,6 +160,39 @@ export interface CompraDetalle extends Omit<CompraListItem, 'lineas'> {
   motivoAnulacion: string | null;
   lineas: CompraLineaDetalle[];
   cambios: CompraCambio[];
+}
+
+/** Medio de pago habilitado del tenant, para `PagarProveedorModal` (spec § 5.1). */
+export interface MedioPagoOpcion {
+  id: string;
+  nombre: string;
+  esEfectivo: boolean;
+}
+
+/** Lo aplicado de un pago (o de este pago recién hecho) a una compra. */
+export interface AplicacionPagoInfo {
+  compraId: string;
+  monto: string;
+}
+
+/** Un pago a proveedor, con sus aplicaciones (spec § 3 y § 8). */
+export interface PagoProveedorInfo {
+  /** `null` cuando el pago fue "usar el saldo a favor" (monto 0, spec § 5.1): no se creó fila. */
+  id: string | null;
+  proveedorId: string;
+  fecha: string | null;
+  monto: string;
+  metodoPagoId: string | null;
+  metodoPagoNombre: string | null;
+  referencia: string | null;
+  cajaId: string | null;
+  estado: 'vigente' | 'anulado' | null;
+  anuladoPor: string | null;
+  anuladoEl: Date | null;
+  motivoAnulacion: string | null;
+  aplicaciones: AplicacionPagoInfo[];
+  /** Lo que quedó a favor del proveedor DESPUÉS de este pago (spec § 5.1). */
+  sobranteAFavor: string;
 }
 
 interface CabeceraRow {
@@ -399,6 +442,8 @@ export class ComprasService {
     private readonly monedasService: MonedasService,
     private readonly presentacionesService: PresentacionesCompraService,
     private readonly lecturaDteService: LecturaDteService,
+    private readonly cajaService: CajaService,
+    private readonly idempotencia: IdempotenciaService,
   ) {}
 
   // ───────────────────────────────────────────────────────────────────────
@@ -1825,6 +1870,694 @@ export class ComprasService {
     }
 
     return porLinea;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Pagar (spec compras-deuda-proveedor § 5)
+  // ───────────────────────────────────────────────────────────────────────
+
+  /**
+   * Los medios habilitados del tenant, con `esEfectivo` (spec § 5.1).
+   * Consulta propia de Compras (pattern backend § 19: "la pantalla de un
+   * módulo lee de listas propias") — mismo `JOIN` país→método que
+   * `MetodosPagoService.findMetodosPago`, leído desde acá para no sumarle a
+   * ESE servicio una columna que solo esta pantalla necesita.
+   */
+  async mediosPago(tenantId: string): Promise<MedioPagoOpcion[]> {
+    const rows: {
+      metodo_pago_id: string;
+      nombre: string;
+      es_efectivo: boolean;
+    }[] = await this.db.query(
+      `SELECT mp.metodo_pago_id, mp.nombre, mp.es_efectivo
+         FROM tenants t
+         JOIN provincia prov ON prov.provincia_id = t.provincia_id
+              AND prov.eliminado_el IS NULL
+         JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
+         JOIN metodo_pago_pais mpp ON mpp.pais_id = p.pais_id
+              AND mpp.eliminado_el IS NULL
+         JOIN metodos_pago mp ON mp.metodo_pago_id = mpp.metodo_pago_id
+              AND mp.eliminado_el IS NULL
+         JOIN tenant_metodo_pago tmp ON tmp.tenant_id = t.tenant_id
+              AND tmp.metodo_pago_id = mp.metodo_pago_id
+              AND tmp.eliminado_el IS NULL AND tmp.habilitada = true
+        WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL
+        ORDER BY mp.nombre ASC`,
+      [tenantId],
+    );
+    return rows.map((r) => ({
+      id: r.metodo_pago_id,
+      nombre: r.nombre,
+      esEfectivo: r.es_efectivo,
+    }));
+  }
+
+  /**
+   * Los pagos vigentes y anulados de un proveedor, con sus aplicaciones
+   * (spec § 8). Dos consultas fijas (pagos, después sus aplicaciones en
+   * lote por `ANY`), nunca una por pago.
+   */
+  async listarPagos(
+    tenantId: string,
+    proveedorId: string,
+  ): Promise<PagoProveedorInfo[]> {
+    const pagos: {
+      pago_proveedor_id: string;
+      fecha: Date;
+      monto: string;
+      metodo_pago_id: string;
+      metodo_pago_nombre: string | null;
+      referencia: string | null;
+      caja_id: string | null;
+      estado: EstadoPagoProveedor;
+      anulado_por: string | null;
+      anulado_el: Date | null;
+      motivo_anulacion: string | null;
+    }[] = await this.db.query(
+      `SELECT pp.pago_proveedor_id, pp.fecha, pp.monto, pp.metodo_pago_id,
+              mp.nombre AS metodo_pago_nombre, pp.referencia, pp.caja_id,
+              pp.estado, pp.anulado_por, pp.anulado_el, pp.motivo_anulacion
+         FROM pagos_proveedor pp
+         -- Sin "mp.eliminado_el IS NULL" a propósito: el método con el que
+         -- se pagó es un dato HISTÓRICO del pago, y tiene que seguir
+         -- nombrándolo aunque el método se retire después — mismo criterio
+         -- que calcularEsperadoEfectivo/calcularArqueo en caja.service.ts.
+         LEFT JOIN metodos_pago mp ON mp.metodo_pago_id = pp.metodo_pago_id
+        WHERE pp.tenant_id = $1 AND pp.proveedor_id = $2
+          AND pp.eliminado_el IS NULL
+        ORDER BY pp.fecha DESC, pp.pago_proveedor_id DESC`,
+      [tenantId, proveedorId],
+    );
+    if (!pagos.length) return [];
+
+    const aplicaciones: {
+      pago_proveedor_id: string;
+      compra_id: string;
+      monto: string;
+    }[] = await this.db.query(
+      `SELECT pago_proveedor_id, compra_id, monto
+         FROM pago_proveedor_aplicaciones
+        WHERE tenant_id = $1
+          AND pago_proveedor_id = ANY($2::uuid[])
+          AND eliminado_el IS NULL
+        ORDER BY creado_el`,
+      [tenantId, pagos.map((p) => p.pago_proveedor_id)],
+    );
+    const porPago = new Map<string, AplicacionPagoInfo[]>();
+    for (const a of aplicaciones) {
+      const lista = porPago.get(a.pago_proveedor_id) ?? [];
+      lista.push({ compraId: a.compra_id, monto: a.monto });
+      porPago.set(a.pago_proveedor_id, lista);
+    }
+
+    return pagos.map((p) => {
+      const propias = porPago.get(p.pago_proveedor_id) ?? [];
+      const aplicado = propias.reduce(
+        (acc, a) => acc.plus(a.monto),
+        new Decimal(0),
+      );
+      return {
+        id: p.pago_proveedor_id,
+        proveedorId,
+        fecha: p.fecha?.toISOString?.() ?? null,
+        monto: p.monto,
+        metodoPagoId: p.metodo_pago_id,
+        metodoPagoNombre: p.metodo_pago_nombre,
+        referencia: p.referencia,
+        cajaId: p.caja_id,
+        estado: p.estado,
+        anuladoPor: p.anulado_por,
+        anuladoEl: p.anulado_el,
+        motivoAnulacion: p.motivo_anulacion,
+        aplicaciones: propias,
+        sobranteAFavor:
+          p.estado === 'vigente'
+            ? new Decimal(p.monto).minus(aplicado).toFixed(4)
+            : '0.0000',
+      };
+    });
+  }
+
+  /**
+   * `POST /compras/pagos` (spec § 5.1). Orden de composición del spike
+   * (ver `task-2-report.md`): `conRastroDeRechazo` es el borde MÁS externo
+   * —fuera de cualquier transacción—, porque su `catch` necesita que
+   * `IdempotenciaService.ejecutar` ya haya hecho rollback (incluido el
+   * reclamo de la clave) antes de escribir el rastro con `db.sinTransaccion`.
+   * `ejecutar` abre su propia `db.transaccion` (reclama la clave primero) y
+   * llama a `pagarEnTransaccion` con el manager activo: si el 422 de "sin
+   * plata en caja" sale de ahí adentro, TODA la transacción de `ejecutar`
+   * revierte —el reclamo incluido—, así que el reintento con la misma clave
+   * vuelve a intentar de verdad (`idempotencia.service.ts`, doc de
+   * `ejecutar`), y recién ahí `conRastroDeRechazo` escribe la fila del
+   * rastro, ya sin ninguna transacción viva.
+   */
+  async registrarPago(
+    tenantId: string,
+    usuarioId: string,
+    dto: CrearPagoProveedorDto,
+    clave: string,
+  ): Promise<PagoProveedorInfo & { repetida?: true }> {
+    return this.cajaService.conRastroDeRechazo(tenantId, () =>
+      this.idempotencia.ejecutar(
+        {
+          tenantId,
+          usuarioId,
+          clave,
+          operacion: 'compras.pago',
+          huella: huellaDe('compras.pago', dto),
+        },
+        () =>
+          this.db.transaccion((manager) =>
+            this.pagarEnTransaccion(manager, tenantId, usuarioId, dto),
+          ),
+        () => null,
+      ),
+    );
+  }
+
+  /**
+   * El pago en sí, corriendo en la transacción de `manager` (spec § 5.1). Se
+   * expone aparte de `registrarPago` para que la Tarea 3 lo reuse desde
+   * `confirmar` (spec § 7): confirmar y pagar en la MISMA transacción, sin
+   * un segundo `IdempotenciaService.ejecutar` anidado. El llamador de
+   * `confirmar` es quien decide idempotencia y rastro para SU propia
+   * operación (`compras.confirmar` o la que corresponda).
+   *
+   * Orden de locks (spec § 11): las compras del reparto (`FOR UPDATE OF c`,
+   * `ORDER BY compra_id`) → los pagos vigentes del proveedor que pueden
+   * fondear (`FOR UPDATE`, `ORDER BY pago_proveedor_id`) → la caja
+   * (`bloquearCajaAbierta`, al final, solo si el medio es efectivo).
+   */
+  async pagarEnTransaccion(
+    manager: EntityManager,
+    tenantId: string,
+    usuarioId: string,
+    dto: CrearPagoProveedorDto,
+  ): Promise<PagoProveedorInfo> {
+    const proveedorRows: { nombre: string; activo: boolean }[] =
+      await manager.query(
+        `SELECT nombre, activo FROM terceros
+          WHERE tenant_id = $1 AND tercero_id = $2 AND tipo = 'proveedor'
+            AND eliminado_el IS NULL`,
+        [tenantId, dto.proveedorId],
+      );
+    if (!proveedorRows.length) {
+      throw new NotFoundException('Proveedor no encontrado');
+    }
+    if (!proveedorRows[0].activo) {
+      throw new BadRequestException('El proveedor no está activo');
+    }
+    const proveedorNombre = proveedorRows[0].nombre;
+
+    const compraIds = dto.aplicaciones.map((a) => a.compraId);
+    if (new Set(compraIds).size !== compraIds.length) {
+      throw new BadRequestException(
+        'Una misma compra no puede repetirse en el reparto',
+      );
+    }
+
+    // 1. Las compras involucradas (spec § 11, PRIMERO).
+    const deudaPorCompra = compraIds.length
+      ? await this.deudaDeComprasLockeadas(
+          manager,
+          tenantId,
+          dto.proveedorId,
+          compraIds,
+        )
+      : new Map<string, string | null>();
+
+    for (const a of dto.aplicaciones) {
+      const deuda = deudaPorCompra.get(a.compraId);
+      if (deuda != null && new Decimal(a.monto).gt(deuda)) {
+        throw new BadRequestException(
+          `La aplicación a la compra ${a.compraId} (${a.monto}) supera su deuda conocida (${deuda})`,
+        );
+      }
+    }
+
+    // 2. Los pagos del proveedor que pueden fondear (spec § 11, SEGUNDO).
+    const saldoAFavor = await this.saldoAFavorLockeado(
+      manager,
+      tenantId,
+      dto.proveedorId,
+    );
+
+    const montoNuevo = new Decimal(dto.monto);
+    const totalSolicitado = dto.aplicaciones.reduce(
+      (acc, a) => acc.plus(a.monto),
+      new Decimal(0),
+    );
+    const totalDisponible = saldoAFavor
+      .reduce((acc, f) => acc.plus(f.disponible), new Decimal(0))
+      .plus(montoNuevo);
+    if (totalSolicitado.gt(totalDisponible)) {
+      throw new BadRequestException(
+        `El reparto (${totalSolicitado.toString()}) supera lo disponible entre saldo a favor y el pago (${totalDisponible.toString()})`,
+      );
+    }
+
+    // 3. El medio y, si es efectivo, la caja (spec § 11, la caja va AL FINAL).
+    let cajaId: string | null = null;
+    if (montoNuevo.gt(0)) {
+      if (!dto.metodoPagoId) {
+        throw new BadRequestException(
+          'metodoPagoId es obligatorio cuando el monto es mayor a cero',
+        );
+      }
+      const metodoRows: { es_efectivo: boolean }[] = await manager.query(
+        `SELECT mp.es_efectivo
+           FROM tenants t
+           JOIN provincia prov ON prov.provincia_id = t.provincia_id
+                AND prov.eliminado_el IS NULL
+           JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
+           JOIN metodo_pago_pais mpp ON mpp.pais_id = p.pais_id
+                AND mpp.eliminado_el IS NULL
+           JOIN metodos_pago mp ON mp.metodo_pago_id = mpp.metodo_pago_id
+                AND mp.eliminado_el IS NULL
+           JOIN tenant_metodo_pago tmp ON tmp.tenant_id = t.tenant_id
+                AND tmp.metodo_pago_id = mp.metodo_pago_id
+                AND tmp.eliminado_el IS NULL AND tmp.habilitada = true
+          WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL
+            AND mp.metodo_pago_id = $2`,
+        [tenantId, dto.metodoPagoId],
+      );
+      if (!metodoRows.length) {
+        throw new BadRequestException('Método de pago no habilitado');
+      }
+      if (metodoRows[0].es_efectivo) {
+        // La caja SIEMPRE la resuelve el servidor (invariante 1 y spec § 2,
+        // decisión 3): nunca viene del body.
+        const caja = await this.cajaService.findActiva(tenantId, usuarioId);
+        if (!caja) {
+          throw new BadRequestException(
+            'Para pagar en efectivo necesitás tu caja abierta',
+          );
+        }
+        await this.cajaService.bloquearCajaAbierta(manager, caja.id, tenantId);
+        const esperado = await this.cajaService.calcularEsperadoEfectivo(
+          caja.id,
+          manager,
+        );
+        if (new Decimal(esperado).minus(montoNuevo).lt(0)) {
+          // El chequeo NO se toca (mismo cálculo que la salida manual, spec §
+          // 2 y § 5.3): existe para impedir retirar plata que no está. El
+          // rechazo deja rastro vía `conRastroDeRechazo`, en el borde.
+          throw new IntentoRechazadoError('Saldo insuficiente en caja', {
+            cajaId: caja.id,
+            usuarioId,
+            tipo: 'pago_proveedor',
+            motivo: 'saldo_insuficiente',
+            montoSolicitado: montoNuevo.toFixed(4),
+          });
+        }
+        cajaId = caja.id;
+      }
+    }
+
+    const pagoProveedorId = randomUUID();
+    if (montoNuevo.gt(0)) {
+      await manager.query(
+        `INSERT INTO pagos_proveedor
+           (pago_proveedor_id, tenant_id, proveedor_id, fecha, monto,
+            metodo_pago_id, referencia, caja_id, creado_por, estado,
+            creado_el, actualizado_el)
+         VALUES ($1, $2, $3, NOW(), $4, $5, $6, $7, $8, 'vigente', NOW(), NOW())`,
+        [
+          pagoProveedorId,
+          tenantId,
+          dto.proveedorId,
+          montoNuevo.toFixed(4),
+          dto.metodoPagoId,
+          dto.referencia ?? null,
+          cajaId,
+          usuarioId,
+        ],
+      );
+    }
+
+    // El fondeo en sí (deuda.ts): saldo a favor primero (más viejo primero,
+    // ya ordenado), después el pago nuevo — spec § 5.1.
+    const { partes, sobranteNuevo } = fondear(
+      dto.aplicaciones.map((a) => ({ compraId: a.compraId, monto: a.monto })),
+      saldoAFavor,
+      montoNuevo.toFixed(4),
+      pagoProveedorId,
+    );
+
+    if (partes.length) {
+      await manager.query(
+        `INSERT INTO pago_proveedor_aplicaciones
+           (pago_proveedor_aplicacion_id, tenant_id, pago_proveedor_id,
+            compra_id, monto, creado_el, actualizado_el)
+         SELECT gen_random_uuid(), $1, x.pago_id, x.compra_id, x.monto, NOW(), NOW()
+           FROM unnest($2::uuid[], $3::uuid[], $4::numeric[])
+                AS x(pago_id, compra_id, monto)`,
+        [
+          tenantId,
+          partes.map((p) => p.pagoId),
+          partes.map((p) => p.compraId),
+          partes.map((p) => p.monto),
+        ],
+      );
+    }
+
+    if (cajaId && montoNuevo.gt(0)) {
+      await this.cajaService.registrarMovimientoEnTransaccion(manager, {
+        cajaId,
+        tipo: 'salida',
+        concepto: `Pago a proveedor · ${proveedorNombre}`,
+        monto: montoNuevo.toFixed(4),
+        metodoPagoId: dto.metodoPagoId,
+        pagoProveedorId,
+      });
+    }
+
+    const aplicadoPorCompra = new Map<string, Decimal>();
+    for (const p of partes) {
+      aplicadoPorCompra.set(
+        p.compraId,
+        (aplicadoPorCompra.get(p.compraId) ?? new Decimal(0)).plus(p.monto),
+      );
+    }
+
+    return {
+      id: montoNuevo.gt(0) ? pagoProveedorId : null,
+      proveedorId: dto.proveedorId,
+      fecha: montoNuevo.gt(0) ? new Date().toISOString() : null,
+      monto: montoNuevo.toFixed(4),
+      metodoPagoId: montoNuevo.gt(0) ? (dto.metodoPagoId ?? null) : null,
+      metodoPagoNombre: null,
+      referencia: dto.referencia ?? null,
+      cajaId,
+      estado: montoNuevo.gt(0) ? 'vigente' : null,
+      anuladoPor: null,
+      anuladoEl: null,
+      motivoAnulacion: null,
+      aplicaciones: [...aplicadoPorCompra.entries()].map(
+        ([compraId, monto]) => ({ compraId, monto: monto.toFixed(4) }),
+      ),
+      sobranteAFavor: new Decimal(sobranteNuevo).toFixed(4),
+    };
+  }
+
+  /**
+   * Lock de las compras del reparto (spec § 11: primero) y la deuda conocida
+   * de cada una — `total − aplicado`, `null` si el total es desconocido
+   * (spec § 4.1). 404 si alguna no existe (u otro tenant); 400 si no es del
+   * proveedor o no está confirmada.
+   */
+  private async deudaDeComprasLockeadas(
+    manager: EntityManager,
+    tenantId: string,
+    proveedorId: string,
+    compraIds: string[],
+  ): Promise<Map<string, string | null>> {
+    const compras: {
+      compra_id: string;
+      estado: EstadoCompra;
+      proveedor_id: string;
+      descuento_total: string | null;
+      total_documento: string | null;
+      tipo_total_documento: string | null;
+    }[] = await manager.query(
+      `SELECT c.compra_id, c.estado, c.proveedor_id, c.descuento_total,
+              c.total_documento, td.total_documento AS tipo_total_documento
+         FROM compras c
+         LEFT JOIN tipos_documento_compra td
+                ON td.tipo_documento_compra_id = c.tipo_documento_compra_id
+        WHERE c.tenant_id = $1 AND c.compra_id = ANY($2::uuid[])
+          AND c.eliminado_el IS NULL
+        ORDER BY c.compra_id
+        FOR UPDATE OF c`,
+      [tenantId, compraIds],
+    );
+    if (compras.length !== compraIds.length) {
+      throw new NotFoundException('Alguna compra no existe');
+    }
+    for (const c of compras) {
+      if (c.proveedor_id !== proveedorId) {
+        throw new BadRequestException(
+          `La compra ${c.compra_id} no es de este proveedor`,
+        );
+      }
+      if (c.estado !== 'confirmada') {
+        throw new BadRequestException(
+          `La compra ${c.compra_id} no está confirmada`,
+        );
+      }
+    }
+
+    const cfg = await this.cfgTenant(tenantId);
+    const bruteRows: {
+      compra_id: string;
+      algun_sin_precio: boolean;
+      bruto: string | null;
+    }[] = await manager.query(
+      `SELECT compra_id, bool_or(precio_unitario IS NULL) AS algun_sin_precio,
+              SUM(cantidad * precio_unitario) AS bruto
+         FROM compra_lineas
+        WHERE tenant_id = $1 AND compra_id = ANY($2::uuid[])
+          AND eliminado_el IS NULL
+        GROUP BY compra_id`,
+      [tenantId, compraIds],
+    );
+    const bruteMap = new Map(bruteRows.map((r) => [r.compra_id, r]));
+
+    const aplicadoRows: { compra_id: string; aplicado: string }[] =
+      await manager.query(
+        `SELECT compra_id, COALESCE(SUM(monto), 0)::text AS aplicado
+           FROM pago_proveedor_aplicaciones
+          WHERE tenant_id = $1 AND compra_id = ANY($2::uuid[])
+            AND eliminado_el IS NULL
+          GROUP BY compra_id`,
+        [tenantId, compraIds],
+      );
+    const aplicadoMap = new Map(
+      aplicadoRows.map((r) => [r.compra_id, r.aplicado]),
+    );
+
+    const deudaPorCompra = new Map<string, string | null>();
+    for (const c of compras) {
+      const esSumaLineas =
+        c.tipo_total_documento !== 'obligatorio' &&
+        c.tipo_total_documento !== 'opcional';
+      const b = bruteMap.get(c.compra_id);
+      const total = esSumaLineas
+        ? b && !b.algun_sin_precio && b.bruto != null
+          ? cuantizar(
+              new Decimal(b.bruto).minus(c.descuento_total ?? 0),
+              cfg,
+            ).toString()
+          : null
+        : c.total_documento;
+      const aplicado = new Decimal(aplicadoMap.get(c.compra_id) ?? '0');
+      deudaPorCompra.set(
+        c.compra_id,
+        total == null
+          ? null
+          : Decimal.max(0, new Decimal(total).minus(aplicado)).toString(),
+      );
+    }
+    return deudaPorCompra;
+  }
+
+  /**
+   * Lock de los pagos vigentes del proveedor (spec § 11: segundo, después de
+   * las compras) y su saldo a favor — `monto − aplicado`, solo los que
+   * quedan con algo (> 0), ordenados por fecha ascendente (el más viejo
+   * primero, spec § 5.1) para que `fondear` los consuma en ese orden. El
+   * `ORDER BY` del `FOR UPDATE` es por `pago_proveedor_id` (orden de
+   * ADQUISICIÓN del lock, spec § 11) — distinto del orden de FONDEO, que es
+   * por fecha: son dos preguntas distintas y no tienen que coincidir.
+   */
+  private async saldoAFavorLockeado(
+    manager: EntityManager,
+    tenantId: string,
+    proveedorId: string,
+  ): Promise<{ pagoId: string; disponible: string }[]> {
+    const pagos: { pago_proveedor_id: string; fecha: Date; monto: string }[] =
+      await manager.query(
+        `SELECT pago_proveedor_id, fecha, monto
+           FROM pagos_proveedor
+          WHERE tenant_id = $1 AND proveedor_id = $2 AND estado = 'vigente'
+            AND eliminado_el IS NULL
+          ORDER BY pago_proveedor_id
+          FOR UPDATE`,
+        [tenantId, proveedorId],
+      );
+    if (!pagos.length) return [];
+
+    const aplicadoRows: { pago_proveedor_id: string; aplicado: string }[] =
+      await manager.query(
+        `SELECT pago_proveedor_id, COALESCE(SUM(monto), 0)::text AS aplicado
+           FROM pago_proveedor_aplicaciones
+          WHERE tenant_id = $1
+            AND pago_proveedor_id = ANY($2::uuid[])
+            AND eliminado_el IS NULL
+          GROUP BY pago_proveedor_id`,
+        [tenantId, pagos.map((p) => p.pago_proveedor_id)],
+      );
+    const aplicadoMap = new Map(
+      aplicadoRows.map((r) => [r.pago_proveedor_id, r.aplicado]),
+    );
+
+    return pagos
+      .map((p) => ({
+        pagoId: p.pago_proveedor_id,
+        fecha: p.fecha,
+        disponible: new Decimal(p.monto).minus(
+          aplicadoMap.get(p.pago_proveedor_id) ?? '0',
+        ),
+      }))
+      .filter((f) => f.disponible.gt(0))
+      .sort((a, b) => a.fecha.getTime() - b.fecha.getTime())
+      .map((f) => ({ pagoId: f.pagoId, disponible: f.disponible.toString() }));
+  }
+
+  /**
+   * `POST /compras/pagos/:id/anular` (spec § 5.2). Sin `Idempotency-Key`: no
+   * cobra, así que no le aplica ADR-026 (pattern backend § 18 es solo para
+   * lo que COBRA).
+   */
+  async anularPago(
+    tenantId: string,
+    usuarioId: string,
+    pagoId: string,
+    dto: AnularPagoProveedorDto,
+  ): Promise<PagoProveedorInfo> {
+    return this.db.transaccion((manager) =>
+      this.anularPagoEnTransaccion(manager, tenantId, usuarioId, pagoId, dto),
+    );
+  }
+
+  private async anularPagoEnTransaccion(
+    manager: EntityManager,
+    tenantId: string,
+    usuarioId: string,
+    pagoId: string,
+    dto: AnularPagoProveedorDto,
+  ): Promise<PagoProveedorInfo> {
+    // Qué compras toca esta anulación, ANTES de lockear nada (spec § 11: las
+    // compras van primero). Es una lectura sin lock: lo único que puede
+    // sumarle una aplicación NUEVA a este pago es fondear() de OTRO pago que
+    // lo use como saldo a favor, y ESE camino toma el lock de
+    // `pagos_proveedor` (abajo) antes de tocar sus aplicaciones — así que en
+    // cuanto lockeamos ese pago, la lista ya no puede cambiar por debajo.
+    const previas: { compra_id: string }[] = await manager.query(
+      `SELECT DISTINCT compra_id FROM pago_proveedor_aplicaciones
+        WHERE tenant_id = $1 AND pago_proveedor_id = $2 AND eliminado_el IS NULL`,
+      [tenantId, pagoId],
+    );
+    if (previas.length) {
+      await manager.query(
+        `SELECT compra_id FROM compras
+          WHERE tenant_id = $1 AND compra_id = ANY($2::uuid[])
+            AND eliminado_el IS NULL
+          ORDER BY compra_id
+          FOR UPDATE OF compras`,
+        [tenantId, previas.map((p) => p.compra_id)],
+      );
+    }
+
+    const pagos: {
+      pago_proveedor_id: string;
+      proveedor_id: string;
+      monto: string;
+      metodo_pago_id: string;
+      referencia: string | null;
+      caja_id: string | null;
+      estado: EstadoPagoProveedor;
+    }[] = await manager.query(
+      `SELECT pago_proveedor_id, proveedor_id, monto, metodo_pago_id,
+              referencia, caja_id, estado
+         FROM pagos_proveedor
+        WHERE tenant_id = $1 AND pago_proveedor_id = $2
+          AND eliminado_el IS NULL
+        ORDER BY pago_proveedor_id
+        FOR UPDATE`,
+      [tenantId, pagoId],
+    );
+    if (!pagos.length) {
+      throw new NotFoundException('Pago no encontrado');
+    }
+    const pago = pagos[0];
+    if (pago.estado === 'anulado') {
+      throw new ConflictException('El pago ya está anulado');
+    }
+
+    await manager.query(
+      `UPDATE pago_proveedor_aplicaciones
+          SET eliminado_el = NOW(), actualizado_el = NOW()
+        WHERE tenant_id = $1 AND pago_proveedor_id = $2 AND eliminado_el IS NULL`,
+      [tenantId, pagoId],
+    );
+    await manager.query(
+      `UPDATE pagos_proveedor
+          SET estado = 'anulado', anulado_por = $1, anulado_el = NOW(),
+              motivo_anulacion = $2, actualizado_el = NOW()
+        WHERE tenant_id = $3 AND pago_proveedor_id = $4`,
+      [usuarioId, dto.motivo, tenantId, pagoId],
+    );
+
+    if (pago.caja_id) {
+      // La caja va AL FINAL (spec § 11). Efectivo con la caja todavía
+      // abierta: solo su dueño puede anular (403), y la plata vuelve a ESA
+      // caja (decisión 6). Cerrada o en conciliación: no se toca ninguna.
+      const cajas: { estado: string; usuario_id: string | null }[] =
+        await manager.query(
+          `SELECT estado, usuario_id FROM cajas
+            WHERE tenant_id = $1 AND caja_id = $2 AND eliminado_el IS NULL`,
+          [tenantId, pago.caja_id],
+        );
+      const caja = cajas[0];
+      if (caja?.estado === 'abierta') {
+        if (caja.usuario_id !== usuarioId) {
+          throw new ForbiddenException(
+            'Solo el dueño de la caja puede anular este pago',
+          );
+        }
+        await this.cajaService.bloquearCajaAbierta(
+          manager,
+          pago.caja_id,
+          tenantId,
+        );
+        // Sin "eliminado_el IS NULL" a propósito: el concepto de esta
+        // reversa tiene que seguir nombrando al proveedor aunque se haya
+        // borrado DESPUÉS de este pago — mismo criterio que el resto del
+        // módulo (comentarioDeCompra, SELECT_CABECERA) para el nombre de un
+        // proveedor en un documento histórico.
+        const proveedorRows: { nombre: string }[] = await manager.query(
+          `SELECT nombre FROM terceros WHERE tercero_id = $1 AND tenant_id = $2`,
+          [pago.proveedor_id, tenantId],
+        );
+        await this.cajaService.registrarMovimientoEnTransaccion(manager, {
+          cajaId: pago.caja_id,
+          tipo: 'entrada',
+          concepto: `Reversa pago a proveedor · ${proveedorRows[0]?.nombre ?? ''}`,
+          monto: pago.monto,
+          metodoPagoId: pago.metodo_pago_id,
+          pagoProveedorId: pagoId,
+        });
+      }
+    }
+
+    return {
+      id: pago.pago_proveedor_id,
+      proveedorId: pago.proveedor_id,
+      fecha: null,
+      monto: pago.monto,
+      metodoPagoId: pago.metodo_pago_id,
+      metodoPagoNombre: null,
+      referencia: pago.referencia,
+      cajaId: pago.caja_id,
+      estado: 'anulado',
+      anuladoPor: usuarioId,
+      anuladoEl: new Date(),
+      motivoAnulacion: dto.motivo,
+      aplicaciones: [],
+      sobranteAFavor: '0.0000',
+    };
   }
 
   /**

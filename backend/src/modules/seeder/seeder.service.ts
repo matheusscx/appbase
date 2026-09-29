@@ -3329,12 +3329,29 @@ export class SeederService implements OnApplicationBootstrap {
     // `encargado.compras`, que a propósito NO la tiene (decisión 7b): el rol
     // fijo (compras.encargado) sigue con las cuatro de PERMISOS_COMPRAS y
     // nada más — el hueco es la prueba.
+    //
+    // También opera su PROPIA caja (spec § 2, decisión 3: "el efectivo sale
+    // solo de la caja abierta de quien paga"), así que suma `MiCaja` —Leer,
+    // Crear, Actualizar, mismo trío y mismo criterio que
+    // `seedVendedorPermisosCaja`— pero NO `Cajas` (supervisión: ver todas las
+    // cajas del tenant), que es un eje aparte. Sin esto, "el dueño que paga"
+    // no podía abrir su propio cajón para pagar en efectivo — hueco que
+    // encontró el e2e de la Tarea 2 (fix round 3) y que el Playwright de la
+    // Tarea 5 necesita cerrado.
     const ROL_PAGA = '550e8400-e29b-41d4-a716-446655440454';
     const COMPRAS_PAGA = '550e8400-e29b-41d4-a716-446655440455';
     const COMPRAS_PAGAR = '550e8400-e29b-41d4-a716-446655440453';
+    // moduloTenantId para Paris → MiCaja (definido en seedTenantModulo, mismo
+    // id que usa seedVendedorPermisosCaja).
+    const MODULO_TENANT_CAJA = '550e8400-e29b-41d4-a716-446655440023';
+    // moduloAppPermiso IDs de Caja (definidos en seedModuloAppPermisos, mismos
+    // que usa seedVendedorPermisosCaja).
+    const CAJA_LEER = '550e8400-e29b-41d4-a716-446655440034';
+    const CAJA_CREAR = '550e8400-e29b-41d4-a716-446655440035';
+    const CAJA_ACTUALIZAR = '550e8400-e29b-41d4-a716-446655440036';
     await this.dataSource.query(
       `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
-       VALUES ($1, $2, 'Compras · Paga', 'Recibe, corrige y paga a los proveedores', false, NOW(), NOW())
+       VALUES ($1, $2, 'Compras · Paga', 'Recibe, corrige y paga a los proveedores desde su propia caja', false, NOW(), NOW())
        ON CONFLICT DO NOTHING`,
       [ROL_PAGA, PARIS],
     );
@@ -3348,6 +3365,18 @@ export class SeederService implements OnApplicationBootstrap {
         `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
          VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
         [ROL_PAGA, MODULO_TENANT_COMPRAS, permisoId],
+      );
+    }
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [ROL_PAGA, MODULO_TENANT_CAJA],
+    );
+    for (const permisoId of [CAJA_LEER, CAJA_CREAR, CAJA_ACTUALIZAR]) {
+      await this.dataSource.query(
+        `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [ROL_PAGA, MODULO_TENANT_CAJA, permisoId],
       );
     }
     await this.dataSource.query(

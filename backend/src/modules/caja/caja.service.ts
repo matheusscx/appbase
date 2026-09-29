@@ -98,7 +98,13 @@ export interface LineaArqueo {
 export interface IntentoRechazadoData {
   cajaId: string;
   usuarioId: string;
-  tipo: 'retiro' | 'devolucion_nc';
+  /**
+   * `'pago_proveedor'` (spec compras-deuda-proveedor § 5.3): un pago a
+   * proveedor en efectivo sin plata en la caja. Mismo mecanismo que
+   * `'retiro'`, `tipo` libre (`varchar`) en la tabla — sumar un valor acá no
+   * cambia la regla del rastro.
+   */
+  tipo: 'retiro' | 'devolucion_nc' | 'pago_proveedor';
   motivo: 'saldo_insuficiente' | 'supera_efectivo_de_la_venta';
   /** Lo pedido, escala 4 (convención de dinero del proyecto). */
   montoSolicitado: string;
@@ -1161,6 +1167,8 @@ export class CajaService {
       ventaId?: string | null;
       pagoId?: string | null;
       metodoPagoId?: string | null;
+      /** La salida (o su reversa) de un pago a proveedor (spec compras-deuda-proveedor § 3). */
+      pagoProveedorId?: string | null;
     },
   ): Promise<MovimientoCaja> {
     // El signo lo codifica `tipo`, nunca `monto`: una "entrada" negativa RESTA
@@ -1186,6 +1194,7 @@ export class CajaService {
       ventaId: params.ventaId ?? null,
       pagoId: params.pagoId ?? null,
       metodoPagoId: params.metodoPagoId ?? null,
+      pagoProveedorId: params.pagoProveedorId ?? null,
     });
     return manager.save(MovimientoCaja, movimiento);
   }

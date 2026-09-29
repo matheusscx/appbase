@@ -18,6 +18,7 @@ import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
+import { ClaveIdempotencia } from '../../common/decorators/clave-idempotencia.decorator';
 import { ComprasService } from './compras.service';
 import { PresentacionesCompraService } from './presentaciones-compra.service';
 import { LecturaDteService } from './lectura-dte.service';
@@ -35,6 +36,11 @@ import {
   ListarPresentacionesCompraDto,
 } from './dto/presentacion-compra.dto';
 import { LecturaDteDto } from './dto/lectura-dte.dto';
+import {
+  AnularPagoProveedorDto,
+  CrearPagoProveedorDto,
+  FindPagosProveedorDto,
+} from './dto/pago-proveedor.dto';
 
 /**
  * Módulo propio `Compras` (spec compras-recepcion § 5): el que recibe no es
@@ -147,6 +153,30 @@ export class ComprasController {
     return this.lecturaDteService.leer(tenantId, dto);
   }
 
+  /**
+   * Los medios habilitados del tenant, para el modal de pago (spec § 5.1).
+   * `Pagar`: es información de quien paga (decisión 12), y va ANTES de
+   * `@Get(':id')` o "medios-pago" se lee como un id.
+   */
+  @Get('medios-pago')
+  @RequiresPermiso('Compras', 'Pagar')
+  mediosPago(@Req() req: Request) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.comprasService.mediosPago(tenantId);
+  }
+
+  /**
+   * Los pagos de un proveedor, con sus aplicaciones (spec § 8, movido desde
+   * la Tarea 3: sin esta lectura los e2e de pagar solo podrían afirmar por
+   * SQL). `Pagar`, ANTES de `@Get(':id')`.
+   */
+  @Get('pagos')
+  @RequiresPermiso('Compras', 'Pagar')
+  listarPagos(@Req() req: Request, @Query() query: FindPagosProveedorDto) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.comprasService.listarPagos(tenantId, query.proveedorId);
+  }
+
   @Get(':id')
   @RequiresPermiso('Compras', 'Leer')
   findOne(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
@@ -245,6 +275,44 @@ export class ComprasController {
   ) {
     const { tenantId } = req.user as { tenantId: string };
     return this.comprasService.actualizarDocumento(tenantId, id, dto);
+  }
+
+  /**
+   * Registra un pago a proveedor (spec § 5.1): `Pagar`, y es un cobro —exige
+   * `Idempotency-Key` (ADR-026, pattern backend § 18): el reintento del que
+   * paga después de un corte reproduce el pago en vez de pagar dos veces.
+   */
+  @Post('pagos')
+  @RequiresPermiso('Compras', 'Pagar')
+  registrarPago(
+    @Req() req: Request,
+    @Body(EscalaMonedaPipe) dto: CrearPagoProveedorDto,
+    @ClaveIdempotencia() clave: string,
+  ) {
+    const { tenantId, id: usuarioId } = req.user as {
+      tenantId: string;
+      id: string;
+    };
+    return this.comprasService.registrarPago(tenantId, usuarioId, dto, clave);
+  }
+
+  /**
+   * Anula un pago a proveedor (spec § 5.2). `Pagar`, no `Anular` (el de la
+   * compra): así quien se equivocó de monto lo deshace desde su propia caja
+   * (spec § 2, decisión 7).
+   */
+  @Post('pagos/:id/anular')
+  @RequiresPermiso('Compras', 'Pagar')
+  anularPago(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AnularPagoProveedorDto,
+  ) {
+    const { tenantId, id: usuarioId } = req.user as {
+      tenantId: string;
+      id: string;
+    };
+    return this.comprasService.anularPago(tenantId, usuarioId, id, dto);
   }
 
   /**

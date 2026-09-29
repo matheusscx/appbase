@@ -1205,6 +1205,52 @@ CREATE UNIQUE INDEX "uq_codigos_proveedor_clave"
   ON "codigos_proveedor" ("tenant_id", "proveedor_id", "clave")
   WHERE "eliminado_el" IS NULL;
 
+-- Un pago real a un proveedor (spec compras-deuda-proveedor § 3, tarea 2):
+-- plata que salió, por un medio, un día. Puede quedar sin aplicaciones
+-- (anticipo, decisión 5) o repartido entre varias compras (ver
+-- pago_proveedor_aplicaciones abajo). `caja_id` es NULL salvo que el medio
+-- sea efectivo (decisión 3); su FK es diferida (cajas se crea más abajo).
+CREATE TABLE "pagos_proveedor" (
+  "pago_proveedor_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"          UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "proveedor_id"       UUID          NOT NULL REFERENCES "terceros" ("tercero_id"),
+  "fecha"              TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "monto"              NUMERIC(18,4) NOT NULL,
+  "metodo_pago_id"     UUID          NOT NULL REFERENCES "metodos_pago" ("metodo_pago_id"),
+  "referencia"         TEXT,
+  "caja_id"            UUID,         -- FK diferida a "cajas"; NULL si no es efectivo
+  "creado_por"         UUID          NOT NULL REFERENCES "usuarios" ("usuario_id"),
+  "estado"             TEXT          NOT NULL DEFAULT 'vigente', -- 'vigente' | 'anulado'
+  "anulado_por"        UUID          REFERENCES "usuarios" ("usuario_id"),
+  "anulado_el"         TIMESTAMPTZ,
+  "motivo_anulacion"   TEXT,
+  "creado_el"          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"     TIMESTAMPTZ,
+  "eliminado_el"       TIMESTAMPTZ,
+  CONSTRAINT "chk_pagos_proveedor_monto_positivo" CHECK ("monto" > 0)
+);
+CREATE INDEX "idx_pagos_proveedor_proveedor" ON "pagos_proveedor" ("tenant_id", "proveedor_id");
+
+-- Cuánto de un pago cubre una compra (spec § 3, decisión 2). Lo no aplicado
+-- de un pago es saldo a favor (decisión 5). No se editan (§ 3): un ajuste
+-- marca eliminado_el acá e inserta otra fila por el resto, nunca UPDATE del
+-- monto.
+CREATE TABLE "pago_proveedor_aplicaciones" (
+  "pago_proveedor_aplicacion_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"                    UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "pago_proveedor_id"            UUID          NOT NULL REFERENCES "pagos_proveedor" ("pago_proveedor_id"),
+  "compra_id"                    UUID          NOT NULL REFERENCES "compras" ("compra_id"),
+  "monto"                        NUMERIC(18,4) NOT NULL,
+  "creado_el"                    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"               TIMESTAMPTZ,
+  "eliminado_el"                 TIMESTAMPTZ,
+  CONSTRAINT "chk_pago_prov_aplic_monto_positivo" CHECK ("monto" > 0)
+);
+CREATE INDEX "idx_pago_prov_aplic_pago" ON "pago_proveedor_aplicaciones" ("pago_proveedor_id")
+  WHERE "eliminado_el" IS NULL;
+CREATE INDEX "idx_pago_prov_aplic_compra" ON "pago_proveedor_aplicaciones" ("compra_id")
+  WHERE "eliminado_el" IS NULL;
+
 -- Lotes: identidad del lote (código, elaboración, vencimiento), una sola vez
 -- por lote — no varía por ubicación. `cantidad_inicial` es acumulado
 -- histórico (todo lo que entró); el saldo VIGENTE vive partido en
@@ -1550,6 +1596,11 @@ CREATE TABLE "movimientos_caja" (
   "fecha"          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
   "venta_id"       UUID,           -- FK definida después de crear ventas
   "pago_id"        UUID,           -- FK definida después de crear pagos
+  -- La salida (o, al anular, la entrada reversa) de un pago a proveedor en
+  -- efectivo (spec compras-deuda-proveedor § 3 y § 5, tarea 2). FK diferida
+  -- abajo, junto con la de "pagos_proveedor.caja_id" — mismo patrón que
+  -- venta_id/pago_id: se define después de crear "pagos_proveedor".
+  "pago_proveedor_id" UUID,
   "creado_el"      TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ,
@@ -1900,6 +1951,10 @@ WHERE p.eliminado_el IS NULL
 -- FKs diferidas de movimientos_caja (dependen de ventas y pagos)
 ALTER TABLE "movimientos_caja" ADD FOREIGN KEY ("venta_id") REFERENCES "ventas" ("venta_id");
 ALTER TABLE "movimientos_caja" ADD FOREIGN KEY ("pago_id")  REFERENCES "pagos" ("pago_id");
+-- FK diferida de movimientos_caja (depende de pagos_proveedor, tarea 2)
+ALTER TABLE "movimientos_caja" ADD FOREIGN KEY ("pago_proveedor_id") REFERENCES "pagos_proveedor" ("pago_proveedor_id");
+-- FK diferida de pagos_proveedor.caja_id (pagos_proveedor se crea antes que "cajas")
+ALTER TABLE "pagos_proveedor" ADD FOREIGN KEY ("caja_id") REFERENCES "cajas" ("caja_id");
 
 -- FK diferida de movimientos_inventario (depende de ventas)
 ALTER TABLE "movimientos_inventario" ADD FOREIGN KEY ("venta_id") REFERENCES "ventas" ("venta_id");

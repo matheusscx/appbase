@@ -18,6 +18,9 @@ const { items: intentos, meta, page, loading } = usePaginatedList<IntentoRechaza
 const TIPO_LABEL: Record<string, string> = {
   retiro: 'Retiro de caja',
   devolucion_nc: 'Devolución (nota de crédito)',
+  // spec compras-deuda-proveedor § 5.3 (tarea 2): un pago a proveedor en
+  // efectivo sin plata en la caja. Mismo mecanismo que 'retiro', rótulo propio.
+  pago_proveedor: 'Pago a proveedor',
 }
 
 const MOTIVO_LABEL: Record<string, string> = {

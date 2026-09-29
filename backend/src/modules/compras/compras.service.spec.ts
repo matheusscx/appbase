@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
@@ -8,6 +13,8 @@ import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import { MonedasService } from '../monedas/monedas.service';
 import type { ConfigCalculo } from '../calculo-precios/calculo-precios.engine';
+import { CajaService, IntentoRechazadoError } from '../caja/caja.service';
+import { IdempotenciaService } from '../idempotencia/idempotencia.service';
 import { PresentacionesCompraService } from './presentaciones-compra.service';
 import { LecturaDteService } from './lectura-dte.service';
 import {
@@ -237,6 +244,16 @@ describe('ComprasService (borrador)', () => {
         {
           provide: LecturaDteService,
           useValue: { aprender, completarRutProveedor },
+        },
+        // No lo usa ningún test de este archivo (los de Pagar viven en su
+        // propio describe, más abajo, con mocks propios más finos): alcanza
+        // con que Nest pueda resolver la dependencia del constructor.
+        { provide: CajaService, useValue: {} },
+        {
+          provide: IdempotenciaService,
+          useValue: {
+            ejecutar: (_s: unknown, operar: () => unknown) => operar(),
+          },
         },
       ],
     }).compile();
@@ -1858,6 +1875,646 @@ describe('ComprasService (borrador)', () => {
       await expect(
         service.actualizarDocumento(TENANT, COMPRA, { totalDocumento: '100' }),
       ).rejects.toThrow('La compra es un borrador: se edita, no se corrige');
+    });
+  });
+});
+
+describe('ComprasService (pagar, spec compras-deuda-proveedor § 5 y § 11)', () => {
+  let service: ComprasService;
+  let rutas: Ruta[];
+  let eventos: string[];
+  /** El manager que usó la ÚLTIMA `db.transaccion(...)`: para afirmar sobre el SQL que corrió. */
+  let managerActual: ReturnType<typeof crearManager>;
+  const findActiva = jest.fn();
+  const bloquearCajaAbierta = jest.fn();
+  const calcularEsperadoEfectivo = jest.fn();
+  const registrarMovimientoEnTransaccion = jest.fn();
+  const conRastroDeRechazo = jest.fn((_t: string, fn: () => unknown) => fn());
+  const idempotenciaEjecutar = jest.fn((_s: unknown, operar: () => unknown) =>
+    operar(),
+  );
+
+  function pisar(regex: RegExp, respuesta: Respuesta) {
+    rutas.unshift([regex, respuesta]);
+  }
+
+  function rutasPagarBase(): Ruta[] {
+    return [
+      [
+        /FROM terceros\s+WHERE tenant_id = \$1 AND tercero_id/,
+        [{ nombre: 'Distribuidora Andina', activo: true }],
+      ],
+      [
+        /FROM compras c[\s\S]*FOR UPDATE OF c/,
+        [
+          {
+            compra_id: COMPRA,
+            estado: 'confirmada',
+            proveedor_id: PROVEEDOR,
+            descuento_total: null,
+            total_documento: '1000',
+            tipo_total_documento: 'obligatorio',
+          },
+        ],
+      ],
+      [/FROM compra_lineas\s+WHERE tenant_id[\s\S]*GROUP BY compra_id/, []],
+      [
+        /FROM pago_proveedor_aplicaciones\s+WHERE tenant_id = \$1\s+AND compra_id = ANY[\s\S]*GROUP BY compra_id/,
+        [],
+      ],
+      [
+        /FROM pagos_proveedor\s+WHERE tenant_id = \$1 AND proveedor_id[\s\S]*FOR UPDATE/,
+        [],
+      ],
+      [
+        /FROM pago_proveedor_aplicaciones\s+WHERE tenant_id = \$1\s+AND pago_proveedor_id = ANY[\s\S]*GROUP BY pago_proveedor_id/,
+        [],
+      ],
+      [
+        /FROM tenants t[\s\S]*mp\.metodo_pago_id = \$2/,
+        [{ es_efectivo: false }],
+      ],
+      [/INSERT INTO pagos_proveedor/, []],
+      [/INSERT INTO pago_proveedor_aplicaciones/, []],
+      [/SELECT DISTINCT compra_id FROM pago_proveedor_aplicaciones/, []],
+      [
+        /FROM pagos_proveedor\s+WHERE tenant_id = \$1 AND pago_proveedor_id = \$2[\s\S]*FOR UPDATE/,
+        [],
+      ],
+      [/FROM cajas\s+WHERE tenant_id/, []],
+      [/./, []],
+    ];
+  }
+
+  function crearManager() {
+    const llamadas: { sql: string; params: unknown[] }[] = [];
+    const manager = {
+      llamadas,
+      query: jest.fn((sql: string, params: unknown[] = []) => {
+        llamadas.push({ sql, params });
+        if (/FROM compras c[\s\S]*FOR UPDATE OF c/.test(sql)) {
+          eventos.push('lock compras');
+        } else if (
+          /FROM pagos_proveedor\s+WHERE tenant_id = \$1 AND proveedor_id[\s\S]*FOR UPDATE/.test(
+            sql,
+          )
+        ) {
+          eventos.push('lock pagos_proveedor (fondeo)');
+        } else if (
+          /FROM pagos_proveedor\s+WHERE tenant_id = \$1 AND pago_proveedor_id = \$2[\s\S]*FOR UPDATE/.test(
+            sql,
+          )
+        ) {
+          eventos.push('lock pago_proveedor (anular)');
+        }
+        const ruta = rutas.find(([re]) => re.test(sql));
+        return Promise.resolve(ruta ? ruta[1] : []);
+      }),
+    };
+    return manager;
+  }
+
+  function dtoPago(
+    extra: Partial<{
+      proveedorId: string;
+      monto: string;
+      metodoPagoId?: string;
+      referencia?: string;
+      aplicaciones: { compraId: string; monto: string }[];
+    }> = {},
+  ) {
+    return {
+      proveedorId: PROVEEDOR,
+      monto: '1000',
+      metodoPagoId: '99999999-9999-4999-8999-999999999999',
+      aplicaciones: [{ compraId: COMPRA, monto: '1000' }],
+      ...extra,
+    };
+  }
+
+  beforeEach(async () => {
+    rutas = rutasPagarBase();
+    eventos = [];
+    findActiva.mockReset();
+    findActiva.mockResolvedValue({ id: 'caja-1', estado: 'abierta' });
+    bloquearCajaAbierta.mockReset();
+    bloquearCajaAbierta.mockImplementation(() => {
+      eventos.push('lock caja');
+      return Promise.resolve();
+    });
+    calcularEsperadoEfectivo.mockReset();
+    calcularEsperadoEfectivo.mockResolvedValue('999999');
+    registrarMovimientoEnTransaccion.mockReset();
+    conRastroDeRechazo.mockClear();
+    idempotenciaEjecutar.mockClear();
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        ComprasService,
+        {
+          provide: Db,
+          useValue: {
+            query: jest.fn(),
+            transaccion: jest.fn((cb: (m: unknown) => unknown) => {
+              managerActual = crearManager();
+              return cb(managerActual);
+            }),
+            sinTransaccion: (fn: () => Promise<unknown>) => fn(),
+          },
+        },
+        { provide: CatalogService, useValue: {} },
+        { provide: InventarioService, useValue: {} },
+        { provide: UbicacionesService, useValue: {} },
+        {
+          provide: CalculoPreciosService,
+          useValue: { cargarConfig: () => Promise.resolve(CFG_CLP) },
+        },
+        {
+          provide: MonedasService,
+          useValue: { decimalesOficiales: () => Promise.resolve(0) },
+        },
+        { provide: PresentacionesCompraService, useValue: {} },
+        { provide: LecturaDteService, useValue: {} },
+        {
+          provide: CajaService,
+          useValue: {
+            findActiva,
+            bloquearCajaAbierta,
+            calcularEsperadoEfectivo,
+            registrarMovimientoEnTransaccion,
+            conRastroDeRechazo,
+          },
+        },
+        {
+          provide: IdempotenciaService,
+          useValue: { ejecutar: idempotenciaEjecutar },
+        },
+      ],
+    }).compile();
+    service = moduleRef.get(ComprasService);
+  });
+
+  describe('orden de locks (spec § 11): compras → pagos_proveedor → caja', () => {
+    it('en un pago en efectivo, lockea compras, después el saldo del proveedor, y la caja AL FINAL', async () => {
+      const manager = crearManager();
+      await service.pagarEnTransaccion(
+        manager as never,
+        TENANT,
+        USUARIO,
+        dtoPago({
+          aplicaciones: [{ compraId: COMPRA, monto: '1000' }],
+        }),
+      );
+      pisar(/FROM tenants t[\s\S]*mp\.metodo_pago_id = \$2/, [
+        { es_efectivo: true },
+      ]);
+      const manager2 = crearManager();
+      eventos = [];
+      await service.pagarEnTransaccion(
+        manager2 as never,
+        TENANT,
+        USUARIO,
+        dtoPago({
+          aplicaciones: [{ compraId: COMPRA, monto: '1000' }],
+        }),
+      );
+      expect(eventos).toEqual([
+        'lock compras',
+        'lock pagos_proveedor (fondeo)',
+        'lock caja',
+      ]);
+    });
+
+    it('sin aplicaciones (anticipo), no lockea compras', async () => {
+      pisar(/FROM tenants t[\s\S]*mp\.metodo_pago_id = \$2/, [
+        { es_efectivo: false },
+      ]);
+      const manager = crearManager();
+      await service.pagarEnTransaccion(
+        manager as never,
+        TENANT,
+        USUARIO,
+        dtoPago({ aplicaciones: [] }),
+      );
+      expect(eventos).toEqual(['lock pagos_proveedor (fondeo)']);
+    });
+  });
+
+  describe('validaciones de POST /compras/pagos', () => {
+    it('proveedor de otro tenant (no aparece en la query) es 404', async () => {
+      pisar(/FROM terceros\s+WHERE tenant_id = \$1 AND tercero_id/, []);
+      const manager = crearManager();
+      await expect(
+        service.pagarEnTransaccion(
+          manager as never,
+          TENANT,
+          USUARIO,
+          dtoPago() as never,
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('proveedor inactivo es 400', async () => {
+      pisar(/FROM terceros\s+WHERE tenant_id = \$1 AND tercero_id/, [
+        { nombre: 'X', activo: false },
+      ]);
+      const manager = crearManager();
+      await expect(
+        service.pagarEnTransaccion(
+          manager as never,
+          TENANT,
+          USUARIO,
+          dtoPago() as never,
+        ),
+      ).rejects.toThrow('El proveedor no está activo');
+    });
+
+    it('una compra repetida en el reparto es 400', async () => {
+      const manager = crearManager();
+      await expect(
+        service.pagarEnTransaccion(
+          manager as never,
+          TENANT,
+          USUARIO,
+          dtoPago({
+            aplicaciones: [
+              { compraId: COMPRA, monto: '500' },
+              { compraId: COMPRA, monto: '500' },
+            ],
+          }) as never,
+        ),
+      ).rejects.toThrow('no puede repetirse');
+    });
+
+    it('una compra que no existe (otro tenant) es 404', async () => {
+      pisar(/FROM compras c[\s\S]*FOR UPDATE OF c/, []);
+      const manager = crearManager();
+      await expect(
+        service.pagarEnTransaccion(
+          manager as never,
+          TENANT,
+          USUARIO,
+          dtoPago() as never,
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('una compra de otro proveedor es 400', async () => {
+      pisar(/FROM compras c[\s\S]*FOR UPDATE OF c/, [
+        {
+          compra_id: COMPRA,
+          estado: 'confirmada',
+          proveedor_id: 'otro-proveedor',
+          descuento_total: null,
+          total_documento: '1000',
+          tipo_total_documento: 'obligatorio',
+        },
+      ]);
+      const manager = crearManager();
+      await expect(
+        service.pagarEnTransaccion(
+          manager as never,
+          TENANT,
+          USUARIO,
+          dtoPago() as never,
+        ),
+      ).rejects.toThrow('no es de este proveedor');
+    });
+
+    it('una compra sin confirmar es 400', async () => {
+      pisar(/FROM compras c[\s\S]*FOR UPDATE OF c/, [
+        {
+          compra_id: COMPRA,
+          estado: 'borrador',
+          proveedor_id: PROVEEDOR,
+          descuento_total: null,
+          total_documento: '1000',
+          tipo_total_documento: 'obligatorio',
+        },
+      ]);
+      const manager = crearManager();
+      await expect(
+        service.pagarEnTransaccion(
+          manager as never,
+          TENANT,
+          USUARIO,
+          dtoPago() as never,
+        ),
+      ).rejects.toThrow('no está confirmada');
+    });
+
+    it('una aplicación que supera la deuda conocida es 400', async () => {
+      pisar(
+        /FROM pago_proveedor_aplicaciones\s+WHERE tenant_id = \$1\s+AND compra_id = ANY[\s\S]*GROUP BY compra_id/,
+        [{ compra_id: COMPRA, aplicado: '600' }],
+      );
+      const manager = crearManager();
+      // Deuda = 1000 (total_documento) − 600 (aplicado) = 400; pedir 1000 se pasa.
+      await expect(
+        service.pagarEnTransaccion(
+          manager as never,
+          TENANT,
+          USUARIO,
+          dtoPago({
+            aplicaciones: [{ compraId: COMPRA, monto: '1000' }],
+          }) as never,
+        ),
+      ).rejects.toThrow('supera su deuda conocida');
+    });
+
+    it('con total desconocido, una aplicación NO tiene tope (decisión 8)', async () => {
+      pisar(/FROM compras c[\s\S]*FOR UPDATE OF c/, [
+        {
+          compra_id: COMPRA,
+          estado: 'confirmada',
+          proveedor_id: PROVEEDOR,
+          descuento_total: null,
+          total_documento: null,
+          tipo_total_documento: 'obligatorio',
+        },
+      ]);
+      const manager = crearManager();
+      await service.pagarEnTransaccion(
+        manager as never,
+        TENANT,
+        USUARIO,
+        dtoPago({
+          monto: '999999',
+          aplicaciones: [{ compraId: COMPRA, monto: '999999' }],
+        }),
+      );
+      // No revienta: sin tope, y el total solicitado calza con el monto nuevo.
+    });
+
+    it('el reparto pedido supera lo disponible (saldo a favor + monto) es 400', async () => {
+      pisar(/FROM compras c[\s\S]*FOR UPDATE OF c/, [
+        {
+          compra_id: COMPRA,
+          estado: 'confirmada',
+          proveedor_id: PROVEEDOR,
+          descuento_total: null,
+          total_documento: '5000',
+          tipo_total_documento: 'obligatorio',
+        },
+      ]);
+      const manager = crearManager();
+      await expect(
+        service.pagarEnTransaccion(
+          manager as never,
+          TENANT,
+          USUARIO,
+          dtoPago({
+            monto: '100',
+            aplicaciones: [{ compraId: COMPRA, monto: '2000' }],
+          }) as never,
+        ),
+      ).rejects.toThrow('supera lo disponible');
+    });
+
+    it('efectivo sin caja abierta es 400', async () => {
+      pisar(/FROM tenants t[\s\S]*mp\.metodo_pago_id = \$2/, [
+        { es_efectivo: true },
+      ]);
+      findActiva.mockResolvedValue(null);
+      const manager = crearManager();
+      await expect(
+        service.pagarEnTransaccion(
+          manager as never,
+          TENANT,
+          USUARIO,
+          dtoPago() as never,
+        ),
+      ).rejects.toThrow('necesitás tu caja abierta');
+    });
+
+    it('efectivo sin plata suficiente: IntentoRechazadoError con tipo pago_proveedor', async () => {
+      pisar(/FROM tenants t[\s\S]*mp\.metodo_pago_id = \$2/, [
+        { es_efectivo: true },
+      ]);
+      calcularEsperadoEfectivo.mockResolvedValue('100');
+      const manager = crearManager();
+      const intento = await service
+        .pagarEnTransaccion(
+          manager as never,
+          TENANT,
+          USUARIO,
+          dtoPago({ monto: '1000' }) as never,
+        )
+        .catch((e: unknown) => e);
+      expect(intento).toBeInstanceOf(IntentoRechazadoError);
+      expect((intento as IntentoRechazadoError).intento).toMatchObject({
+        tipo: 'pago_proveedor',
+        motivo: 'saldo_insuficiente',
+      });
+    });
+
+    it('monto 0 con aplicaciones (usar saldo a favor): no inserta pago ni toca caja', async () => {
+      pisar(
+        /FROM pago_proveedor_aplicaciones\s+WHERE tenant_id = \$1\s+AND pago_proveedor_id = ANY[\s\S]*GROUP BY pago_proveedor_id/,
+        [],
+      );
+      pisar(
+        /FROM pagos_proveedor\s+WHERE tenant_id = \$1 AND proveedor_id[\s\S]*FOR UPDATE/,
+        [{ pago_proveedor_id: 'pago-viejo', fecha: new Date(), monto: '2000' }],
+      );
+      const manager = crearManager();
+      const resultado = await service.pagarEnTransaccion(
+        manager as never,
+        TENANT,
+        USUARIO,
+        dtoPago({
+          monto: '0',
+          metodoPagoId: undefined,
+          aplicaciones: [{ compraId: COMPRA, monto: '500' }],
+        }),
+      );
+      expect(resultado.id).toBeNull();
+      expect(registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('anularPago (spec § 5.2)', () => {
+    function pagoEfectivo(extra: Record<string, unknown> = {}) {
+      return {
+        pago_proveedor_id: 'pago-1',
+        proveedor_id: PROVEEDOR,
+        monto: '1000',
+        metodo_pago_id: '99999999-9999-4999-8999-999999999999',
+        referencia: null,
+        caja_id: 'caja-1',
+        estado: 'vigente',
+        ...extra,
+      };
+    }
+
+    it('pago inexistente (u otro tenant) es 404', async () => {
+      pisar(
+        /FROM pagos_proveedor\s+WHERE tenant_id = \$1 AND pago_proveedor_id = \$2[\s\S]*FOR UPDATE/,
+        [],
+      );
+      await expect(
+        service.anularPago(TENANT, USUARIO, 'pago-1', {
+          motivo: 'Error de tipeo',
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('un pago ya anulado es 409', async () => {
+      pisar(
+        /FROM pagos_proveedor\s+WHERE tenant_id = \$1 AND pago_proveedor_id = \$2[\s\S]*FOR UPDATE/,
+        [pagoEfectivo({ estado: 'anulado' })],
+      );
+      await expect(
+        service.anularPago(TENANT, USUARIO, 'pago-1', {
+          motivo: 'Error de tipeo',
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('efectivo con la caja todavía abierta y ajena: 403, no genera movimiento', async () => {
+      pisar(
+        /FROM pagos_proveedor\s+WHERE tenant_id = \$1 AND pago_proveedor_id = \$2[\s\S]*FOR UPDATE/,
+        [pagoEfectivo()],
+      );
+      pisar(/FROM cajas\s+WHERE tenant_id/, [
+        { estado: 'abierta', usuario_id: 'otro-usuario' },
+      ]);
+      await expect(
+        service.anularPago(TENANT, USUARIO, 'pago-1', {
+          motivo: 'Error de tipeo',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
+    });
+
+    it('efectivo con la caja abierta del dueño: genera la entrada reversa con el nombre del proveedor, y la consulta filtra tenant_id', async () => {
+      pisar(
+        /FROM pagos_proveedor\s+WHERE tenant_id = \$1 AND pago_proveedor_id = \$2[\s\S]*FOR UPDATE/,
+        [pagoEfectivo()],
+      );
+      pisar(/FROM cajas\s+WHERE tenant_id/, [
+        { estado: 'abierta', usuario_id: USUARIO },
+      ]);
+      pisar(/FROM terceros WHERE tercero_id = \$1 AND tenant_id = \$2/, [
+        { nombre: 'Distribuidora Andina' },
+      ]);
+      await service.anularPago(TENANT, USUARIO, 'pago-1', {
+        motivo: 'Error de tipeo',
+      });
+      expect(registrarMovimientoEnTransaccion).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          tipo: 'entrada',
+          pagoProveedorId: 'pago-1',
+          concepto: 'Reversa pago a proveedor · Distribuidora Andina',
+        }),
+      );
+      // La consulta del nombre filtra tenant_id: sin eso, un tercero_id de
+      // otro tenant (imposible por PK compuesta, pero el punto es que la
+      // query lo DECLARE) quedaría fuera del alcance del tenant.
+      const llamada = managerActual.llamadas.find((l) =>
+        /FROM terceros WHERE tercero_id/.test(l.sql),
+      )!;
+      expect(llamada.sql).toMatch(/AND tenant_id = \$2/);
+      expect(llamada.params).toEqual([PROVEEDOR, TENANT]);
+    });
+
+    it('efectivo con la caja ya cerrada: no toca ninguna caja (decisión 6)', async () => {
+      pisar(
+        /FROM pagos_proveedor\s+WHERE tenant_id = \$1 AND pago_proveedor_id = \$2[\s\S]*FOR UPDATE/,
+        [pagoEfectivo()],
+      );
+      pisar(/FROM cajas\s+WHERE tenant_id/, [
+        { estado: 'cerrada', usuario_id: USUARIO },
+      ]);
+      await service.anularPago(TENANT, USUARIO, 'pago-1', {
+        motivo: 'Error de tipeo',
+      });
+      expect(registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
+      expect(bloquearCajaAbierta).not.toHaveBeenCalled();
+    });
+
+    it('sin caja (otro medio, decisión 6c): no toca caja', async () => {
+      pisar(
+        /FROM pagos_proveedor\s+WHERE tenant_id = \$1 AND pago_proveedor_id = \$2[\s\S]*FOR UPDATE/,
+        [pagoEfectivo({ caja_id: null })],
+      );
+      await service.anularPago(TENANT, USUARIO, 'pago-1', {
+        motivo: 'Error de tipeo',
+      });
+      expect(registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('composición registrarPago (spike): conRastroDeRechazo(idempotencia.ejecutar(db.transaccion))', () => {
+    it('llama conRastroDeRechazo, que envuelve idempotencia.ejecutar, con la operación "compras.pago"', async () => {
+      const manager = crearManager();
+      const dbTransaccion = jest.fn((cb: (m: unknown) => unknown) =>
+        cb(manager),
+      );
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ComprasService,
+          {
+            provide: Db,
+            useValue: {
+              query: jest.fn(),
+              transaccion: dbTransaccion,
+              sinTransaccion: (fn: () => Promise<unknown>) => fn(),
+            },
+          },
+          { provide: CatalogService, useValue: {} },
+          { provide: InventarioService, useValue: {} },
+          { provide: UbicacionesService, useValue: {} },
+          {
+            provide: CalculoPreciosService,
+            useValue: { cargarConfig: () => Promise.resolve(CFG_CLP) },
+          },
+          {
+            provide: MonedasService,
+            useValue: { decimalesOficiales: () => Promise.resolve(0) },
+          },
+          { provide: PresentacionesCompraService, useValue: {} },
+          { provide: LecturaDteService, useValue: {} },
+          {
+            provide: CajaService,
+            useValue: {
+              findActiva,
+              bloquearCajaAbierta,
+              calcularEsperadoEfectivo,
+              registrarMovimientoEnTransaccion,
+              conRastroDeRechazo,
+            },
+          },
+          {
+            provide: IdempotenciaService,
+            useValue: { ejecutar: idempotenciaEjecutar },
+          },
+        ],
+      }).compile();
+      const s = moduleRef.get(ComprasService);
+
+      await s.registrarPago(TENANT, USUARIO, dtoPago(), 'clave-1');
+
+      expect(conRastroDeRechazo).toHaveBeenCalledWith(
+        TENANT,
+        expect.any(Function),
+      );
+      expect(idempotenciaEjecutar).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: TENANT,
+          usuarioId: USUARIO,
+          clave: 'clave-1',
+          operacion: 'compras.pago',
+        }),
+        expect.any(Function),
+        expect.any(Function),
+      );
+      // conRastroDeRechazo corrió PRIMERO (es el borde externo): su callback
+      // es el que a su vez llama a ejecutar.
+      expect(conRastroDeRechazo.mock.invocationCallOrder[0]).toBeLessThan(
+        idempotenciaEjecutar.mock.invocationCallOrder[0],
+      );
     });
   });
 });

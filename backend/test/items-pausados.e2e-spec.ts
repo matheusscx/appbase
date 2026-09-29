@@ -722,6 +722,15 @@ describe('Filtro sinCosto en GET /items (e2e)', () => {
   let token: string;
   let itemSinCostoId: string;
   let itemConCostoId: string;
+  // Marca ÚNICA por corrida, compartida por los dos ítems: los tests de
+  // abajo la mandan en `search` para acotar el listado a estos dos, en vez
+  // de confiar en que entren en la primera página (pageSize 100) de TODO el
+  // catálogo del tenant. Sin esto, cualquier tarea que siembre productos de
+  // más empuja a estos dos fuera de la página — "tomar el primero de un
+  // listado que comparten todas las suites" (docs/agent/anti-patterns.md).
+  // Medido: la Tarea 2 de compras-deuda-proveedor (compras-pagos.e2e-spec.ts)
+  // fue la que lo hizo notar.
+  const marca = `E2E-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -741,7 +750,7 @@ describe('Filtro sinCosto en GET /items (e2e)', () => {
       .post('/api/items')
       .set('Authorization', `Bearer ${token}`)
       .send({
-        nombre: `Item sin costo E2E ${Date.now()}`,
+        nombre: `Item sin costo ${marca}`,
         precioBase: '1000',
         monedaId: CLP_MONEDA_ID,
         tipo: 'producto',
@@ -755,7 +764,7 @@ describe('Filtro sinCosto en GET /items (e2e)', () => {
       .post('/api/items')
       .set('Authorization', `Bearer ${token}`)
       .send({
-        nombre: `Item con costo E2E ${Date.now()}`,
+        nombre: `Item con costo ${marca}`,
         precioBase: '1000',
         monedaId: CLP_MONEDA_ID,
         tipo: 'producto',
@@ -786,7 +795,9 @@ describe('Filtro sinCosto en GET /items (e2e)', () => {
 
   it('devuelve 200 y solo trae ítems con costoActual null (ejercita el COUNT contra Postgres real)', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/items?tipo=producto&pageSize=100&sinCosto=true')
+      .get(
+        `/api/items?tipo=producto&pageSize=100&sinCosto=true&search=${marca}`,
+      )
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
@@ -800,7 +811,7 @@ describe('Filtro sinCosto en GET /items (e2e)', () => {
 
   it('sin sinCosto, el ítem con costo sigue apareciendo', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/items?tipo=producto&pageSize=100')
+      .get(`/api/items?tipo=producto&pageSize=100&search=${marca}`)
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);

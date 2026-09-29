@@ -48,6 +48,14 @@ export class MovimientoCaja {
   @Column({ name: 'metodo_pago_id', type: 'uuid', nullable: true })
   metodoPagoId: string | null;
 
+  /**
+   * La salida (o, al anular, su entrada reversa) de un pago a proveedor en
+   * efectivo (spec compras-deuda-proveedor § 3 y § 5). Mismo patrón que
+   * `venta_id` y `pago_id`: columna simple, sin `@ManyToOne`.
+   */
+  @Column({ name: 'pago_proveedor_id', type: 'uuid', nullable: true })
+  pagoProveedorId: string | null;
+
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
 

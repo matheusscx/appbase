@@ -69,3 +69,84 @@ export function totalCompra(
   const neto = bruto.minus(descuentoTotal ?? 0);
   return cuantizar(neto, cfg).toString();
 }
+
+/** El saldo a favor de un pago vigente, disponible para fondear otro. */
+export interface FuenteSaldo {
+  pagoId: string;
+  /** > 0: un pago sin saldo no se pasa acá. */
+  disponible: string;
+}
+
+/** Lo que el reparto pidió para una compra (spec § 5.1). */
+export interface AplicacionSolicitada {
+  compraId: string;
+  monto: string;
+}
+
+/**
+ * Una porción de una aplicación, financiada por UN pago. Una aplicación del
+ * request puede salir partida en varias partes si ninguna fuente sola la
+ * cubre entera (spec § 3: "las aplicaciones no se editan" — cada parte es la
+ * fila que se inserta en `pago_proveedor_aplicaciones`).
+ */
+export interface ParteAplicacion {
+  compraId: string;
+  pagoId: string;
+  monto: string;
+}
+
+/**
+ * Reparte las aplicaciones pedidas entre las fuentes de plata disponibles, en
+ * el orden que manda la spec § 5.1: **el saldo a favor primero** (sus pagos
+ * más viejos primero — `saldoAFavor` ya viene en ese orden, el llamador lo
+ * arma así), **y recién después el pago nuevo**. Las aplicaciones se procesan
+ * en el orden en que vienen (la propuesta de la pantalla, la más vieja
+ * primero — spec § 5.1), cada una consumiendo fuentes hasta completarse.
+ *
+ * Función PURA: no valida topes de negocio (que el total pedido no supere lo
+ * disponible, que una aplicación no supere la deuda de su compra) — eso lo
+ * hace el service ANTES de llamarla, con lo que lee de la base bajo lock.
+ * Acá solo se sostiene la aritmética: si las fuentes no alcanzan para lo
+ * pedido, revienta — señal de que el caller no validó, no un caso de negocio.
+ */
+export function fondear(
+  aplicaciones: AplicacionSolicitada[],
+  /** Más viejo primero. */
+  saldoAFavor: FuenteSaldo[],
+  montoNuevo: string,
+  /** El id (pre-generado) del pago que se está creando; `sobranteNuevo` es lo que le queda a favor. */
+  pagoNuevoId: string,
+): { partes: ParteAplicacion[]; sobranteNuevo: string } {
+  const fuentes = [
+    ...saldoAFavor.map((f) => ({
+      pagoId: f.pagoId,
+      disponible: new Decimal(f.disponible),
+    })),
+    { pagoId: pagoNuevoId, disponible: new Decimal(montoNuevo) },
+  ];
+
+  const partes: ParteAplicacion[] = [];
+  for (const aplicacion of aplicaciones) {
+    let faltante = new Decimal(aplicacion.monto);
+    for (const fuente of fuentes) {
+      if (faltante.lte(0)) break;
+      if (fuente.disponible.lte(0)) continue;
+      const toma = Decimal.min(faltante, fuente.disponible);
+      fuente.disponible = fuente.disponible.minus(toma);
+      faltante = faltante.minus(toma);
+      partes.push({
+        compraId: aplicacion.compraId,
+        pagoId: fuente.pagoId,
+        monto: toma.toString(),
+      });
+    }
+    if (faltante.gt(0)) {
+      throw new Error(
+        `fondear: falta ${faltante.toString()} para cubrir la aplicación de ${aplicacion.compraId} — el caller no validó el total disponible`,
+      );
+    }
+  }
+
+  const nuevo = fuentes[fuentes.length - 1];
+  return { partes, sobranteNuevo: nuevo.disponible.toString() };
+}

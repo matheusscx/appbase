@@ -5,12 +5,16 @@ import { MonedasModule } from '../monedas/monedas.module';
 import { InventarioModule } from '../inventario/inventario.module';
 import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
 import { CalculoPreciosModule } from '../calculo-precios/calculo-precios.module';
+import { CajaModule } from '../caja/caja.module';
+import { IdempotenciaModule } from '../idempotencia/idempotencia.module';
 import { Compra } from './entities/compra.entity';
 import { CompraLinea } from './entities/compra-linea.entity';
 import { CompraLineaCambio } from './entities/compra-linea-cambio.entity';
 import { TipoDocumentoCompra } from './entities/tipo-documento-compra.entity';
 import { PresentacionCompra } from './entities/presentacion-compra.entity';
 import { CodigoProveedor } from './entities/codigo-proveedor.entity';
+import { PagoProveedor } from './entities/pago-proveedor.entity';
+import { PagoProveedorAplicacion } from './entities/pago-proveedor-aplicacion.entity';
 import { ComprasController } from './compras.controller';
 import { ComprasService } from './compras.service';
 import { PresentacionesCompraService } from './presentaciones-compra.service';
@@ -25,6 +29,8 @@ import { LecturaDteService } from './lectura-dte.service';
       TipoDocumentoCompra,
       PresentacionCompra,
       CodigoProveedor,
+      PagoProveedor,
+      PagoProveedorAplicacion,
     ]),
     // `crearConversor`: la unidad de cada línea tiene que ser compatible con
     // la base del producto.
@@ -42,6 +48,12 @@ import { LecturaDteService } from './lectura-dte.service';
     // Confirmar: `cargarConfig` para repartir el descuento al total a la escala
     // de la moneda.
     CalculoPreciosModule,
+    // Pagar (spec compras-deuda-proveedor § 5): la caja del pago en efectivo,
+    // su validación y su rastro son los de `CajaService` — no se reimplementan.
+    CajaModule,
+    // `POST /compras/pagos` es un cobro: corre dentro de
+    // `IdempotenciaService.ejecutar` (ADR-026, pattern backend § 18).
+    IdempotenciaModule,
   ],
   controllers: [ComprasController],
   providers: [ComprasService, PresentacionesCompraService, LecturaDteService],
