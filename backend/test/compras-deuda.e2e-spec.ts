@@ -354,9 +354,17 @@ describe('Compras — confirmar con pago, el recorte y las lecturas de deuda (e2
       })
     ).id;
 
-    const ubicaciones =
-      await get<{ id: string; tipo: string }[]>('/api/ubicaciones');
-    ubicacionId = ubicaciones.find((u) => u.tipo === 'bodega')!.id;
+    // Bodega PROPIA del spec, no "la primera de la lista": `GET /ubicaciones`
+    // incluye las desactivadas y ordena por nombre con la collation real del
+    // servidor (no la de este host), así que una bodega apagada de otra
+    // suite puede colar primero (anti-patterns.md "Tomar 'el primero' de un
+    // listado que comparten todas las suites").
+    ubicacionId = (
+      await post<IdResponse>('/api/ubicaciones', {
+        nombre: nombreUnico('Bodega deuda E2E'),
+        tipo: 'bodega',
+      })
+    ).id;
 
     productoId = (
       await post<IdResponse>('/api/items', {
