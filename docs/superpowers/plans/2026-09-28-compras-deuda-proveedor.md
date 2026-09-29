@@ -210,27 +210,35 @@ de otro usuario?
 
 ### Task 3: Backend — el gesto de confirmar, el recorte y las lecturas
 
+> **Hecha (2026-09-29), `d47b75fd`.** Gate: backend unit 3056, e2e completo 1260/0 (6 skipped);
+> frontend 1567/0. Revisión LIMPIO (dominio bloqueó una vez: confirmar sin pago no devolvía la
+> deuda a quien tiene `Pagar`). Lo que cambió en el camino: las cuatro escrituras que devuelven el
+> detalle y confirmar también resuelven `Pagar` y devuelven los datos de pago; el filtro
+> `estadoPago` del listado pagina en memoria porque el total `suma_lineas` se cuantiza con el modo
+> del tenant (decisión técnica de esta sesión, no consultada al owner; escrita en `compras.md`);
+> suma el e2e de anular un pago con la caja ya cerrada, que la tarea 2 prometía y no tenía.
+
 **Intención:** la compra al contado en un solo gesto; que corregir o anular una compra deje
 la deuda bien sin intervención; y todo lo que el dueño necesita leer.
 
-- [ ] Confirmar con `pago` (spec § 7): `Pagar` resuelto en el controller, `Idempotency-Key`,
+- [x] Confirmar con `pago` (spec § 7): `Pagar` resuelto en el controller, `Idempotency-Key`,
   una sola transacción; si el pago falla no se confirma nada.
-- [ ] El recorte (spec § 6) en: corregir línea, descuento, `PATCH /documento` y anular la
+- [x] El recorte (spec § 6) en: corregir línea, descuento, `PATCH /documento` y anular la
   compra. `recortar(...)` puro en `deuda.ts`, con unitarios (de la más nueva; baja a 0; el
   total sube y no toca nada).
-- [ ] Lecturas de spec § 8, todas con `Pagar`: `por-pagar` y `por-pagar/:proveedorId` (`pagos`
+- [x] Lecturas de spec § 8, todas con `Pagar`: `por-pagar` y `por-pagar/:proveedorId` (`pagos`
   ya llegó en la tarea 2). Y los campos de pago de `GET /compras` y `GET /compras/:id` **solo** para quien
   tiene `Pagar` (el controller resuelve el permiso; sin él no vienen en la respuesta y el
   filtro `estadoPago` es 403; decisión 12). Estado derivado con "hoy" del tenant
   (`rango-fecha.util.ts`). Una consulta por lectura, con el N+1 medido.
-- [ ] E2E (spec § 12): Andina con el total transcrito corregido a menos (a favor, usado en la
+- [x] E2E (spec § 12): Andina con el total transcrito corregido a menos (a favor, usado en la
   próxima) y una línea de factura corregida que no cambia la deuda; queso sin
   precio pagado de más; factura sin total pagable; anular la compra (a favor); confirmar con un
   pago que falla (nada confirmado); confirmar con `pago` sin `Pagar` (403); el orden y los
   totales de `por-pagar` con la escena del lunes (Don Pedro, Andina, gas); **con el rol real
   del bodeguero** (`Leer` sin `Pagar`): 403 en `por-pagar`, `por-pagar/:id`, `pagos` y el
   filtro `estadoPago`, y el listado y el detalle **sin** los campos de pago en el body.
-- [ ] Docs: `compras.md` (el gesto, el recorte, las lecturas y la tabla de endpoints).
+- [x] Docs: `compras.md` (el gesto, el recorte, las lecturas y la tabla de endpoints).
 
 **Duda concreta para el revisor:** ¿hay algún camino que cambie el total de una compra
 confirmada y no recorte las aplicaciones? (Listar todos los que escriben `precio_unitario`,
