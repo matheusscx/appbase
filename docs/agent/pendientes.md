@@ -141,20 +141,40 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   al borde y en el medio) que corran los dos specs (`useDte.spec.ts` y
   `lectura-dte.service.spec.ts`), con un comentario en cada función que apunte a la otra.
 
-- [ ] **El Postgres local ordena texto distinto que el de CI y el del demo: cambiar la imagen
-  local a glibc** (entorno; lo levantó la sesión de compras pieza 3 el 2026-09-29, al explicar por
-  qué `compras-pagos.e2e-spec.ts` pasaba en local y caía en CI; lo midió la orquestadora el mismo
-  día; venía de la § 2). El local es `postgres:15-alpine`, compilado contra musl, y aunque
-  reporta `lc_collate = en_US.utf8` ordena por bytes: `SELECT 'apagada' < 'Subsuelo'` da `f`. Un
-  `postgres:15` glibc como el de CI da `t`, y el Postgres 18 del demo también es Debian glibc
-  (ver la entrada de versiones en la § 2). O sea que el local es el único que ordena distinto.
-  **Medido que alinear no rompe nada:** el `test:e2e` completo sobre un `postgres:15` glibc dio
-  96 suites y 1262 tests en verde, con 6 salteados, lo mismo que sobre musl en `cf3ea4a0`. Ningún
-  test de hoy depende del orden de musl. **Costo:** la imagen pesa 649 MB contra 408 MB, y ya está
-  descargada en la Mac del owner. **Qué hacer (mecánico):** `postgres:15-alpine` → `postgres:15`
-  en `docker-compose.yml:28` y `scripts/entorno.sh:322`. Es de entorno y lo mira
-  `check-aislamiento.mjs`: correrlo. El volumen del checkout principal se recrea con
-  `reset-db.sh`. Si la entrada de versiones termina en subir todo a 18, se hacen juntas.
+- [ ] **Alinear el Postgres local y el de CI con el del demo: `postgres:18` glibc** (entorno;
+  decidido por el owner el 2026-09-29 en el selector interactivo de la orquestadora, entre "todo a
+  18" y "recrear el demo con la 15"; juntó dos entradas que venían de la § 2). **Por qué:** el
+  demo de Railway corre `PostgreSQL 18.6 (Debian …)` (`select version()`, corrido por el owner),
+  CI prueba contra `postgres:15` y el local contra `postgres:15-alpine`. Un deploy nunca se había
+  probado contra la versión que lo recibe. Además el local es el único que ordena texto distinto:
+  la alpine está compilada contra musl, y aunque reporta `lc_collate = en_US.utf8` ordena por
+  bytes (`SELECT 'apagada' < 'Subsuelo'` da `f`, en glibc da `t`). Así se explicó que
+  `compras-pagos.e2e-spec.ts` pasara en local y cayera en CI (lo levantó la sesión de compras
+  pieza 3). **Medido que alinear no rompe nada:** el `test:e2e` completo dio 96 suites y 1262 tests
+  en verde, con 6 salteados, tanto sobre `postgres:15` glibc como sobre `postgres:18` (18.6 Debian,
+  la misma del demo, 478 s), igual que sobre musl en `cf3ea4a0`. **Bajar el demo a 15 se
+  descartó:** en Railway la versión es la etiqueta de la imagen del servicio, y no hay camino para
+  bajar de versión mayor: la 15 no lee el directorio de la 18, así que habría que recrear la base.
+  **Qué hacer (mecánico, pero no es solo la etiqueta):**
+  - `postgres:15-alpine` → `postgres:18` en `docker-compose.yml:28` y `scripts/entorno.sh:322`, y
+    `postgres:15` → `postgres:18` en los dos `services` de `.github/workflows/ci.yml` (29 y 148).
+  - **Cambiar también dónde se monta la base.** La imagen 18 guarda los datos en
+    `PGDATA=/var/lib/postgresql/18/docker` y declara el volumen en `/var/lib/postgresql`. El
+    compose monta `postgres_data:/var/lib/postgresql/data` y `entorno.sh` hace
+    `--tmpfs /var/lib/postgresql/data`: con solo la etiqueta nueva, la base queda afuera del
+    volumen nombrado y afuera del tmpfs (a disco, en un volumen anónimo), sin error. Los dos pasan
+    a `/var/lib/postgresql`. Y si el entrypoint encuentra datos en el `…/data` viejo, se niega a
+    arrancar (`Error: in 18+, these Docker images are configured to store database data…`, en
+    `docker-entrypoint.sh` de la imagen): el volumen del checkout principal se recrea con
+    `reset-db.sh`, y cada worktree con `entorno.sh db`/`stack`. No hay datos que perder.
+  - Correr `check-aislamiento.mjs`, que mira el compose y `entorno.sh`.
+  - Verificar con el tmpfs puesto: `docker exec <contenedor> df -h /var/lib/postgresql` debe decir
+    `tmpfs`, y el `test:e2e` completo en verde.
+  - Corregir el "PostgreSQL 15" de `CLAUDE.md` (sección Visión), `README.md:9` y
+    `docs/ARCHITECTURE.md:12`. Los planes viejos y los comentarios fechados ("medido contra el
+    Postgres 15 del compose") quedan: son fotos de su día.
+  - **Costo:** la imagen pesa 666 MB (la alpine 15, 408 MB) y ya está descargada en la Mac del
+    owner.
 
 - [ ] **42 campos de fecha de la API aceptan `2026-02-31`, y la respuesta es un 500** (backend;
   lo levantó la sesión de compras pieza 3 y lo midieron un sub-agente Sonnet y la orquestadora el
@@ -251,16 +271,6 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 `cargarPendientesTestigo` y `abrirEntrarTurno` no están atadas a una cuenta. Lo **cerrado** de
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
-
-- [ ] **El demo corre Postgres 18, y el gate y CI prueban contra el 15** (entorno; medido el
-  2026-09-29 al cerrar la entrada del orden de texto, hoy en la § 1). `select version()` en la
-  base de Railway da `PostgreSQL 18.6 (Debian …)`, corrido por el owner. El local es
-  `postgres:15-alpine` y CI es `postgres:15`. Lo que pasa los tests puede portarse distinto en el
-  demo, y un deploy nunca se probó contra la versión que lo recibe. **Qué medir:** si Railway deja
-  fijar la versión del servicio Postgres (el demo no tiene datos reales, así que se puede
-  recrear), o si conviene subir el local y CI a 18 y correr el `test:e2e` completo sobre esa
-  imagen. Si una de las dos es barata, pasa a la § 1. Va junto con el cambio de imagen de la § 1:
-  conviene tocar las cuatro líneas de imagen una sola vez.
 
 - [ ] **Tests de pantalla que no terminan en 20 s con la máquina cargada** (frontend,
   intermitente, medido el 2026-09-28). En 10 corridas de la suite entera, con otras sesiones
