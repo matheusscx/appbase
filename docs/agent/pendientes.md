@@ -262,6 +262,60 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   `authStore.error`: el 2026-09-27 eran solo esas dos pantallas. Los comentarios de
   `auth/callback.vue` y `middleware/auth.ts` lo nombran porque navegan al login para que se vea.
 
+## 3. Ya decidido, falta construir
+
+El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
+adentro, y alguna quedó a medias a propósito— pero nadie está esperando una respuesta para
+empezarlas.
+
+⚠️ **Esta sección no es una tanda que se "termine", y leerla como tal hace tomar malas
+decisiones.** **Varias de sus entradas son features de producto con su propia spec** —entre ellas el
+motor de promociones, la NC como documento, la UF como moneda oficial, `cashRounding`, el
+conteo por denominación, anular o reducir una línea ya enviada a cocina y el envío diario del
+resumen de descuadres—. Están acá porque se decidieron, no porque sean deuda: **son la cola de
+trabajo, y cada una abre su propio frente.**
+
+De la deuda chica que quedaba, el **2026-08-24 salieron tres**: la escala de la pasarela, el
+`minimo` de un tramo y el tramo en cero (las tres en [`resueltos.md`](resueltos.md)). **La
+única que sigue es el renombre de `moneda.decimales`** — y ojo, su entrada subestima el
+tamaño. Medido ese día:
+
+```bash
+grep -rn 'decimales' backend/src backend/test frontend/app frontend/server frontend/e2e | wc -l
+```
+
+**394 ocurrencias en código y tests** (155 backend sin specs · 115 specs de backend · 31 e2e ·
+93 frontend), más las de `docs/`. No son 394 renombres —el grep incluye la palabra suelta en
+comentarios— pero sí muestra que el nombre se **propagó a métodos y campos**
+(`decimalesOficiales`, `decimalesDeLaVenta`, `decimalesMoneda`, `ctx.decimales`), que es lo
+que lo convierte en un frente propio y no en un remate.
+
+⚠️ El comando va escrito porque la primera vez este dato se anotó como "459 ocurrencias en 5
+superficies" sumando conteos de código con un conteo de docs hecho con **otro patrón**. La
+revisión independiente no lo pudo reproducir, con razón.
+
+- [ ] 🔺 **PRIORIDAD (owner, 2026-09-28): las pantallas de venta cargan solo los primeros 100
+  ítems de cada tipo, y un producto 101 no se puede vender** (frontend + backend). Pasa de nota de
+  vigilancia a entrada de trabajo por pedido del owner, porque un minimarket con más de 100
+  productos es el caso normal, no el raro. **El mecanismo:** `MAX_PAGE_SIZE = 100`
+  (`backend/src/common/utils/pagination.util.ts`) y las pantallas piden `pageSize=100` **sin
+  paginar**: el resto no llega y nada lo avisa. **Dónde (medido el 2026-09-28, 22 llamadas en 11
+  pantallas, `grep -rn "pageSize=100\|pageSize: 100" frontend/app`):**
+  - **Venden:** `pages/ventas/pos.vue` (producto, receta, combo), `pages/salones/index.vue` (los
+    mismos tres), `pages/tienda/index.vue`, `pages/tienda/suscripciones.vue`.
+  - **Mueven stock:** `pages/mermas.vue` (producto, ingrediente), `pages/inventario/index.vue`,
+    `pages/inventario/traslados.vue`, `pages/inventario/recuentos/index.vue`.
+  - **Configuran:** `pages/configuracion/items.vue` (4), `configuracion/promociones.vue`,
+    `configuracion/grupos-modificadores.vue` — selectores donde el ítem 101 no se puede elegir.
+  **Lo que tiene que decidir el frente** (técnico, salvo lo marcado): traer todas las páginas
+  (simple, pero el POS y el salón bajan todo el catálogo, y el refresco del salón —§ 3, *"El
+  refresco del catálogo del salón baja ~133 KB"*— crece con él) o buscar en el servidor mientras
+  se tipea (escala, pero cambia cómo se elige un producto en el POS: **eso es de producto y se le
+  pregunta al owner**, con la escena de la grilla contra el buscador). Los selectores de
+  configuración y de inventario probablemente van con búsqueda en el servidor sin discusión.
+  Contexto: el filtro de pausados ya se movió a la query (resueltos, *"el pausado ocupaba uno
+  de esos 100 lugares"*); esto es lo que quedó. Conviene hacerlo junto con el refresco del salón.
+
 - [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
   medido 2026-08-22 al cerrar la anulación; el owner decidió que **va aparte**, no de
   arrastre) — el camino de la NC usa `LEFT JOIN item_producto` (en
@@ -2197,14 +2251,6 @@ La que tiene condición de reapertura la dice adentro.
   escritura, el chequeo pasó a correr **después** de los pipes. Un usuario sin ningún permiso y
   con body inválido recibía 403 y ahora recibe **400**. No filtra nada (el DTO está en Swagger),
   pero es un cambio de contrato.
-
-- ℹ️ **El tope de 100 sigue vivo, y ahora es el único truncamiento que queda** (frontend).
-  Las cuatro superficies de venta piden `pageSize=100` y no paginan, con
-  `MAX_PAGE_SIZE = 100` en `common/utils/pagination.util.ts`. Mover el filtro de pausados a
-  la query sacó una causa de pérdida —el pausado ya no le roba el lugar a un vendible— pero
-  un tenant con más de 100 ítems vendibles sigue sin verlos todos en el POS. Preexistente y
-  sin caso reportado; se anota para no perderlo, porque la nota anterior vivía pegada a la
-  entrada del filtro que se cerró.
 
 - ℹ️ **`mermas.controller.ts` sigue aplicando `@Body(EscalaMonedaPipe)` sobre un
   `CreateMermaDto` que ya no tiene ningún campo `@EsCosto()`** (backend, residuo del
