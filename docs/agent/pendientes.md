@@ -141,6 +141,21 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   al borde y en el medio) que corran los dos specs (`useDte.spec.ts` y
   `lectura-dte.service.spec.ts`), con un comentario en cada función que apunte a la otra.
 
+- [ ] **El Postgres local ordena texto distinto que el de CI y el del demo: cambiar la imagen
+  local a glibc** (entorno; lo levantó la sesión de compras pieza 3 el 2026-09-29, al explicar por
+  qué `compras-pagos.e2e-spec.ts` pasaba en local y caía en CI; lo midió la orquestadora el mismo
+  día; venía de la § 2). El local es `postgres:15-alpine`, compilado contra musl, y aunque
+  reporta `lc_collate = en_US.utf8` ordena por bytes: `SELECT 'apagada' < 'Subsuelo'` da `f`. Un
+  `postgres:15` glibc como el de CI da `t`, y el Postgres 18 del demo también es Debian glibc
+  (ver la entrada de versiones en la § 2). O sea que el local es el único que ordena distinto.
+  **Medido que alinear no rompe nada:** el `test:e2e` completo sobre un `postgres:15` glibc dio
+  96 suites y 1262 tests en verde, con 6 salteados, lo mismo que sobre musl en `cf3ea4a0`. Ningún
+  test de hoy depende del orden de musl. **Costo:** la imagen pesa 649 MB contra 408 MB, y ya está
+  descargada en la Mac del owner. **Qué hacer (mecánico):** `postgres:15-alpine` → `postgres:15`
+  en `docker-compose.yml:28` y `scripts/entorno.sh:322`. Es de entorno y lo mira
+  `check-aislamiento.mjs`: correrlo. El volumen del checkout principal se recrea con
+  `reset-db.sh`. Si la entrada de versiones termina en subir todo a 18, se hacen juntas.
+
 - [ ] **42 campos de fecha de la API aceptan `2026-02-31`, y la respuesta es un 500** (backend;
   lo levantó la sesión de compras pieza 3 y lo midieron un sub-agente Sonnet y la orquestadora el
   2026-09-29; venía de la § 2). `grep -rn "^\s*@IsDateString(" backend/src` da 42 decoradores y
@@ -237,21 +252,15 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
-- [ ] **El Postgres local ordena texto distinto que el de CI: un `ORDER BY nombre` da otro orden en
-  cada lado** (entorno, hallado por la sesión de compras pieza 3 el 2026-09-29, al explicar por qué
-  `compras-pagos.e2e-spec.ts` pasaba en local y caía en CI). **Medido:** el local es
-  `postgres:15-alpine` (`docker-compose.yml:28` y `scripts/entorno.sh:322`), compilado contra musl.
-  Aunque reporta `lc_collate = en_US.utf8`, ordena por bytes, mayúsculas antes que minúsculas:
-  `SELECT 'apagada' < 'Subsuelo'` da `f` (verificado por la orquestadora en `tecnica_postgres`).
-  CI usa `postgres:15` (glibc, `.github/workflows/ci.yml:29` y `:148`), que da `t` según la
-  sesión, y ella reprodujo los 11 fallos de CI levantando un `postgres:15` glibc. **Por qué
-  importa:** todo test que asuma el orden de un listado por nombre puede pasar en local y caer en
-  CI, o al revés, y el gate local no lo ve. Railway no está medido: si su Postgres es glibc, el
-  demo muestra los listados en el orden de CI y no en el de las pantallas que se prueban en local.
-  **Qué medir antes de proponer:** qué imagen corre Railway (el `version()` de su base); cuánto
-  pesa cambiar el local a `postgres:15` glibc (imagen, tiempo de `entorno.sh db`) y si algún test
-  de hoy depende del orden de musl y se cae con el cambio (correr el `test:e2e` completo sobre la
-  imagen nueva). Si alinear cuesta poco, pasa a la § 1 como cambio de imagen en los dos archivos.
+- [ ] **El demo corre Postgres 18, y el gate y CI prueban contra el 15** (entorno; medido el
+  2026-09-29 al cerrar la entrada del orden de texto, hoy en la § 1). `select version()` en la
+  base de Railway da `PostgreSQL 18.6 (Debian …)`, corrido por el owner. El local es
+  `postgres:15-alpine` y CI es `postgres:15`. Lo que pasa los tests puede portarse distinto en el
+  demo, y un deploy nunca se probó contra la versión que lo recibe. **Qué medir:** si Railway deja
+  fijar la versión del servicio Postgres (el demo no tiene datos reales, así que se puede
+  recrear), o si conviene subir el local y CI a 18 y correr el `test:e2e` completo sobre esa
+  imagen. Si una de las dos es barata, pasa a la § 1. Va junto con el cambio de imagen de la § 1:
+  conviene tocar las cuatro líneas de imagen una sola vez.
 
 - [ ] **Tests de pantalla que no terminan en 20 s con la máquina cargada** (frontend,
   intermitente, medido el 2026-09-28). En 10 corridas de la suite entera, con otras sesiones
@@ -1158,23 +1167,31 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   techo. Toca el camino de impresión: sesión propia, igual que "Enviar a cocina exige
   `Impresoras:Leer`" (arriba), con la que conviene ir junta.
 
+### Playwright entra al gate de cierre (owner, 2026-09-29)
+
+- [ ] **Un frente que toca pantallas o contratos de la API corre Playwright en local antes de
+  integrarse** (harness/proceso; antes era pregunta de la § 4). **Lo que pasó:** el gate entero
+  de `CLAUDE.md` dio verde en local sobre `867d996d` (compras pieza 3, tareas 1 y 2), y el CI del
+  push `479d8b56` dio rojo en `frontend · e2e navegador`. Cuatro specs de `frontend/e2e/compras/`
+  confirmaban una Factura sin el total del documento, que la tarea 1 hizo obligatorio, y
+  recibían un 400. Nadie corrió Playwright, porque el checklist no lo pide, y el demo de Railway
+  ya tenía el código.
+  **Cómo se decidió:** la orquestadora le planteó esa escena con tres opciones. *A: correrlo en
+  local antes de integrar*, con el costo de unos 5 minutos por cierre (el job de CI tardó 5 min 19 s
+  en `36610126257`) más levantar el stack propio. Era la recomendada, por ser la única que ataja
+  la rotura antes de `main`. *B: dejarlo como está.* *C: que Railway espere al CI*, que no ataja
+  la rotura en `main`. Contestó **"vamos con A"** en el chat de la orquestadora.
+  **Lo que falta al construirlo:** el paso en el checklist de `CLAUDE.md` y en `verify-feature`
+  (paso 1), con el criterio de cuándo aplica ("toca pantallas o contratos de la API") escrito de
+  forma que se pueda decidir sin preguntar; `entorno.sh stack` antes de `npm run e2e`; y la regla
+  de turnos (Playwright es suite pesada). ⚠️ C no quedó descartada por el owner: se eligió A. Si
+  alguna vez se abre el portón de CI de "Endurecimiento para producción", las dos conviven.
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
-
-- [ ] **Playwright no está en el gate local, y CI lo corre: un frente puede cerrar en verde y
-  romper main** (harness/proceso, 2026-09-29). **Lo que pasó:** el gate entero de `CLAUDE.md` dio
-  verde en local sobre `867d996d` (compras pieza 3, tareas 1 y 2), y el CI del push `479d8b56` dio
-  rojo en `frontend · e2e navegador`. Cuatro specs de `frontend/e2e/compras/` confirmaban una
-  Factura sin tipear el total del documento, que la tarea 1 hizo obligatorio, y recibían un 400
-  (lectura del log de CI por la sesión de compras). Nadie corrió Playwright sobre esas tareas,
-  porque el checklist no lo pide. **La pregunta para el owner:** ¿Playwright pasa a ser parte
-  del gate de cierre de un frente que toca pantallas o contratos de la API, con el costo de
-  levantar el stack propio (`entorno.sh stack`, ~915 MB y minutos) y de un turno más de suite
-  pesada? ¿O sigue fuera del gate, y lo que lo ataja es el CI después del push, con el deploy de
-  Railway ya disparado?
 
 - [ ] **Lo que se consume al anular un plato sale de lo que HOY dice el catálogo, no de lo que se
   pidió: un extra, una opción o un componente que ya no está se saltea sin movimiento, y el costo de
