@@ -1006,9 +1006,8 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   **Lo que falta al construirlo:** el desempate dentro de la misma fecha de vencimiento (llegada, y
   después algo estable: `codigo_lote` o la PK); que la venta del POS, que nunca manda qué lote,
   pase por el orden nuevo; y un e2e que monte el caso del yogur por la API real. ⚠️ Cruza con la
-  entrada de la § 6 *"Serie y lote están a medias"*, que pregunta si **un lote vencido se puede
-  vender o mermar**: FEFO lo pone primero en la fila, así que esa pregunta se vuelve más urgente —
-  llevársela al owner antes de construir esta. Decide qué lote sale: escribe en
+  entrada de la § 6 *"Serie y lote están a medias"*: el owner ya contestó que un lote vencido
+  **se merma pero no se vende** (la venta lo salta), así que FEFO ordena solo entre los no vencidos. Decide qué lote sale: escribe en
   `movimientos_inventario` y toca la trazabilidad ([ADR-007](../adr/007-inventario-serie-lote.md)),
   así que va en su propio frente.
 
@@ -1203,7 +1202,12 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     automática es FIFO por antigüedad, no FEFO por vencimiento (el owner eligió FEFO el
     2026-09-28: § 3, "El lote que vence antes sale primero"). **¿Un lote vencido se puede
     vender y mermar, o se bloquea?** ✅ **Mermar, sí** (owner, 2026-09-28, contestando a la
-    orquestadora: "se puede mermar un lote vencido"). **Vender, todavía sin contestar.**
+    orquestadora: "se puede mermar un lote vencido"). ✅ **Vender, no: la venta salta el lote
+    vencido** y saca del siguiente (owner, 2026-09-28, "vamos A", entre *A: bloquear*
+    —recomendada—, *B: avisar y dejar vender* y *C: vender sin decir nada*; escena: 3 yogures
+    vencidos ayer y 20 que vencen en junio). **Costo aceptado:** si nadie merma los vencidos, el
+    stock muestra más de lo vendible; la orquestadora propuso un aviso de vencidos en el inicio,
+    como el de stock bajo, para la spec (no decidido).
   ⚠️ Y queda igual la corrección barata que da la mitad del beneficio si esto se demora: que la
   merma **rechace** serie/lote en vez de aceptar y descontar la unidad equivocada en silencio.
 
