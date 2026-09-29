@@ -1012,21 +1012,27 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   `movimientos_inventario` y toca la trazabilidad ([ADR-007](../adr/007-inventario-serie-lote.md)),
   así que va en su propio frente.
 
+- [ ] **En productos con número de serie, el cajero elige qué unidad sale** ✅ *(owner,
+  2026-09-28; antes era pregunta de la § 4)* (backend + frontend, `inventario.service.ts`, la
+  selección de `item_unidad`; POS y salones). **Cómo se decidió:** la orquestadora le planteó la
+  escena medida —en una misma compra entran un equipo **nuevo** y uno **usado** del mismo
+  producto; al vender, el sistema elige cualquiera, porque la selección nunca mira la condición y
+  la venta del POS no manda qué unidad— con tres opciones: *A: elige el cajero* (recomendada: es
+  lo que evita cobrar un usado como nuevo), *B: el sistema prefiere una condición* y *C: da lo
+  mismo*. Contestó "vamos A".
+  **Lo que falta al construirlo:** la pantalla de venta (POS y salones) pregunta qué unidad cuando
+  el producto es de modo serie, y la API recibe las `unidadIds` que hoy el POS nunca manda; qué
+  pasa con una venta que llega sin unidad (¿400, o el orden de hoy?) y con el ingrediente de una
+  receta en modo serie se deciden en la spec. Decide qué unidad sale: escribe en
+  `movimientos_inventario` y toca la trazabilidad ([ADR-007](../adr/007-inventario-serie-lote.md)),
+  así que va en su propio frente. Va de la mano con "El lote que vence antes sale primero"
+  (arriba) y con la entrada de la § 6 "Serie y lote están a medias".
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
-
-- [ ] **En productos con número de serie, ¿elige el cajero la unidad, o el sistema prefiere
-  alguna condición?** (backend + frontend, `inventario.service.ts`, la selección de `item_unidad`;
-  medido el 2026-09-28 por el censo de los `ORDER BY` por `creado_el`.) En una misma compra pueden
-  entrar un equipo **nuevo** y uno **usado** (o con garantías distintas) del mismo producto, y al
-  vender el sistema elige cualquiera: la selección nunca mira la condición, y la venta del POS no
-  manda qué unidad. Pasa también entre compras distintas, no solo en el empate. La trazabilidad no
-  se pierde —la venta guarda qué unidad salió—. Era la gemela de la pregunta de lotes, que el owner
-  contestó el 2026-09-28 (§ 3, "El lote que vence antes sale primero").
-  ⛔ Mientras no se conteste no se toca ([ADR-007](../adr/007-inventario-serie-lote.md)).
 
 - [ ] **Ingredientes, componentes u opciones borrados del catálogo se saltean sin
   movimiento al anular una receta o combo** (backend, heredado de la parte 2 del frente
