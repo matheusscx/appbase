@@ -2742,6 +2742,7 @@ export class SeederService implements OnApplicationBootstrap {
     const COMPRAS_LECTURA_PARIS = '550e8400-e29b-41d4-a716-446655440442';
     const COMPRAS_CARGA_PARIS = '550e8400-e29b-41d4-a716-446655440444';
     const COMPRAS_CORRECCION_PARIS = '550e8400-e29b-41d4-a716-446655440446';
+    const COMPRAS_PAGA_PARIS = '550e8400-e29b-41d4-a716-446655440455';
     const pairs = [
       [ADMIN, PARIS], // superadmin → Paris
       [ADMIN, FALABELLA], // superadmin → Falabella
@@ -2759,6 +2760,7 @@ export class SeederService implements OnApplicationBootstrap {
       [COMPRAS_LECTURA_PARIS, PARIS], // solo Compras:Leer → Paris
       [COMPRAS_CARGA_PARIS, PARIS], // Compras:Leer y Crear, sin Actualizar → Paris
       [COMPRAS_CORRECCION_PARIS, PARIS], // Compras sin Anular → Paris
+      [COMPRAS_PAGA_PARIS, PARIS], // las cuatro de Compras + Pagar → Paris
     ];
 
     for (const [usuarioId, tenantId] of pairs) {

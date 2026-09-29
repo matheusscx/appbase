@@ -461,6 +461,16 @@ describe('Compras — borrador (e2e)', () => {
           .status,
       ).toBe(403);
     });
+
+    // El fixture `compras.paga` (spec compras-deuda-proveedor § 9, ids
+    // 452-455): tenía rol y permisos, pero le faltaba la fila en
+    // `usuarios_tenants` — sin ella, `switch-tenant` daba 403 antes de que la
+    // request llegara a ningún guard de permisos. Este test es su primer
+    // consumidor real (compras-pagos.e2e-spec.ts, tarea 2).
+    it('el fixture compras.paga entra a Paris y lee con Compras:Leer', async () => {
+      const paga = await login('compras.paga@paris.cl');
+      await get('/api/compras', 200, paga);
+    });
   });
 
   describe('confirmar (spec § 4.2)', () => {
