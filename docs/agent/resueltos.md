@@ -723,8 +723,8 @@ Sale de [`pendientes.md`](pendientes.md) § 2.
   igual, qz-tray entra al handshake y se cuelga, y el test cae por el mock.
 - **Suite entera en frío, con el mismo reset antes de cada una:** 57/60 sin ningún cambio (load
   4,0–4,6); 58/60 con `optimizeDeps` (load 3,4–5,0; quedan los dos de QZ); 59/60 con los dos
-  cambios y el QZ Tray de la Mac abierto (load 3,7–5,4). El rojo de esa última es otro: queda
-  como entrada propia en [`pendientes.md`](pendientes.md) § 2 (*"El arqueo de
+  cambios y el QZ Tray de la Mac abierto (load 3,7–5,4). El rojo de esa última es otro: quedó
+  como entrada propia en [`pendientes.md`](pendientes.md), hoy en Vigilancia (*"El arqueo de
   `caja/apertura-cierre.spec.ts:107`…"*). `inicio/dashboard.spec.ts:73` y `varianza:130` no
   fallaron en ninguna de las tres.
 

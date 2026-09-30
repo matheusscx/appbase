@@ -107,41 +107,6 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
-- [ ] **El arqueo de `caja/apertura-cierre.spec.ts:107` vio la diferencia de otro monto**
-  (frontend, e2e de navegador, visto una vez el 2026-09-29; medido el mismo día por la
-  orquestadora sin reproducirlo). En una corrida entera en frío en el stack de un worktree (load
-  3,7–5,4), la fila de efectivo mostró `-$10.000` donde el test espera `-$1.000`. En las otras dos
-  corridas en frío de ese día pasó, y corrido solo pasó 3 de 3. El test abre con `$10.000` y cuenta
-  `$9.000`.
-  **Dónde falló, leído del log original** (transcript de la sesión `frontend-tests-medir`): en el
-  paso 5, el `toHaveText` sobre `getByRole('dialog').filter({ hasText: 'Cerrar caja' })`, o sea la
-  diferencia **que calcula la pantalla** mientras se tipea, no la que devuelve el servidor en la
-  conciliación. El paso 4 ya había pasado con `Esperado $10.000` en esa misma fila.
-  **Lo que eso deja:** con el input vacío la pantalla muestra "—", no un monto
-  (`diferenciaDe`, `CajaCierreDrawer.vue:127-137`, corta en `if (!c) return null`). Para ver
-  `-$10.000` con lo esperado en `$10.000`, lo contado tiene que valer **exactamente 0**. La forma
-  natural es que se pierda solo la primera tecla de `pressSequentially('9000')` y entre `000`.
-  Es la lectura (a), afinada: no se perdió todo el tipeo, se perdió el 9. La (b), otro movimiento
-  de `$9.000` en la misma caja, pide además que lo esperado cambie en pantalla entre el paso 4 y el
-  5, y en ese tramo nada recarga el arqueo. El ×10 del separador (`MoneyInput.vue:157-175`) sigue
-  descartado: daría `+$80.000`. **Sin medir:** qué se come esa tecla. El candidato es el que ya
-  documenta `elegirEnSelector` en `e2e/support/ui.ts`: al cerrarse un popup de Reka, el foco vuelve
-  a su trigger y se come las teclas siguientes. Acá se tipea justo después de cerrar el menú
-  "Caja abierta" y con el drawer abriéndose.
-  **Lo medido, sin un solo rojo:** el spec solo con `--repeat-each=25`, 25 de 25 (más el setup de
-  login) con la máquina tranquila y 25 de 25 con load 14–23 (la suite de vitest en bucle más 8
-  procesos `yes`), cada tanda sobre una base recién reseteada. Y la suite de Playwright entera, 4 corridas en frío con
-  `reset-db.sh` antes de cada una: 66 de 66 las cuatro, en 214–228 s. En total, 54 pasadas del
-  test contra 1 rojo visto.
-  **Por qué el próximo rojo no va a traer más que este:** en local `retries` es 0 y el config pide
-  `trace: 'on-first-retry'` (`playwright.config.ts:147`), así que una corrida local nunca guarda
-  traza. Queda solo el screenshot, que vive en el `test-results/` del worktree y se va con él: el
-  de este rojo ya no existe. **Qué hacer si vuelve a pasar:** guardar la traza (`--trace
-  retain-on-failure` en la corrida, o `trace: 'retain-on-failure'` en el config) y leer en ella el
-  valor del input y el elemento con foco en cada tecla del paso 5. Si el foco estaba en otro lado
-  en el primer `9`, el arreglo es el mismo que `elegirEnSelector`: esperar a que el menú
-  desaparezca antes de `escribirMonto`.
-
 - [ ] **El pre-commit rechaza un recibo de revisión escrito sobre el mismo diff** (harness). Dos
   sesiones lo vieron el 2026-09-27, las dos desde un worktree (la del aviso sin costo de la
   varianza y la del aviso del login). Escribieron el recibo con el comando que imprime el hook, en
@@ -2063,6 +2028,21 @@ enterarse tarde. Esta sección se abre al encarar el paso a producción. Orden =
 ---
 
 ## Vigilancia — evaluado y descartado, no es trabajo
+
+- [ ] **El arqueo de `caja/apertura-cierre.spec.ts:107` mostró `-$10.000` una vez: se sacó
+  del backlog** (frontend, e2e de navegador; visto el 2026-09-29, medido el mismo día, **sacado
+  por el owner el 2026-09-30** porque salió una sola vez). El test abre con `$10.000`, cuenta
+  `$9.000` y espera `-$1.000` en la diferencia que calcula la pantalla (paso 5). Para ver
+  `-$10.000`, lo contado tiene que valer 0: la lectura es que se perdió el primer `9` de
+  `pressSequentially('9000')`. El candidato es el de `elegirEnSelector` (`e2e/support/ui.ts`):
+  al cerrarse un popup de Reka el foco vuelve a su trigger y se come teclas. El ×10 del
+  separador está descartado (daría `+$80.000`). **Medido sin un rojo:** 25/25 con
+  `--repeat-each` tranquila, 25/25 con load 14–23, y 4 suites enteras en frío con 66/66; 54
+  pasadas contra 1 rojo. **Si vuelve a pasar:** en local no se guarda traza (`retries` 0 y
+  `trace: 'on-first-retry'`), así que correr con `--trace retain-on-failure` y leer el foco en
+  cada tecla del paso 5. Si el foco estaba en otro lado, el arreglo es el de
+  `elegirEnSelector`: esperar a que el menú desaparezca antes de `escribirMonto`. Ahí vuelve a
+  la § 2.
 
 - [ ] **Tres tests de pantalla cortaron por timeout de 20 s una vez: se sacó del backlog**
   (frontend; visto el 2026-09-28, medido el 2026-09-29, **sacado por el owner el 2026-09-30**
