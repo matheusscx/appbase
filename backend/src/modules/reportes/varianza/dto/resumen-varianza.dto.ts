@@ -1,4 +1,5 @@
-import { IsDateString, IsOptional, IsUUID } from 'class-validator';
+import { IsOptional, IsUUID } from 'class-validator';
+import { EsFechaOTimestamp } from '../../../../common/decorators/fecha-pura.decorator';
 
 /**
  * Filtros de `GET /reportes/varianza/resumen` (spec § 7.2).
@@ -29,10 +30,10 @@ import { IsDateString, IsOptional, IsUUID } from 'class-validator';
  * tests de DTO no prueben lo que el pipe hace.
  */
 export class ResumenVarianzaDto {
-  @IsDateString()
+  @EsFechaOTimestamp()
   desde: string;
 
-  @IsDateString()
+  @EsFechaOTimestamp()
   hasta: string;
 
   /** La pantalla lo manda con el local por defecto, igual que el listado. */

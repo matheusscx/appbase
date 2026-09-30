@@ -3,7 +3,6 @@ import {
   ArrayUnique,
   IsArray,
   IsBoolean,
-  IsDateString,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -16,6 +15,7 @@ import {
 } from 'class-validator';
 import { NivelRegla } from '../../../common/enums/reglas.enums';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
+import { EsFechaPura } from '../../../common/decorators/fecha-pura.decorator';
 
 export class TramoDto {
   // El mínimo va en UNA de las dos, y cuál corresponde lo decide el TIPO de la
@@ -93,12 +93,14 @@ export class CreateDescuentoDto {
   @Min(0)
   diasVencimiento?: number;
 
+  // `descuentos.fecha_inicio`/`fecha_fin` son `date`: fecha pura estricta,
+  // no `@IsDateString` (que aceptaría un timestamp que la columna no guarda).
   @IsOptional()
-  @IsDateString()
+  @EsFechaPura()
   fechaInicio?: string | null;
 
   @IsOptional()
-  @IsDateString()
+  @EsFechaPura()
   fechaFin?: string | null;
 
   @IsOptional()

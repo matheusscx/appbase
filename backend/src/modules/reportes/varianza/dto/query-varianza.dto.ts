@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsDateString, IsOptional, IsUUID } from 'class-validator';
+import { IsBoolean, IsOptional, IsUUID } from 'class-validator';
 import { PaginationQueryDto } from '../../../../common/dto/pagination-query.dto';
+import { EsFechaOTimestamp } from '../../../../common/decorators/fecha-pura.decorator';
 
 /**
  * Filtros de `GET /reportes/varianza`, el listado paginado.
@@ -14,9 +15,9 @@ import { PaginationQueryDto } from '../../../../common/dto/pagination-query.dto'
  * las dos cosas a la vez, ahí se evalúa un mixin; para dos campos es más
  * maquinaria que la que ahorra.
  *
- * La convención que estos dos campos siguen —`@IsDateString()` para aceptar
- * fecha pura y timestamp, y `bordeHastaSql` inclusivo para el borde superior—
- * está en `docs/patterns/backend.md` § 10b y § 10c.
+ * La convención que estos dos campos siguen —`EsFechaOTimestamp()` para
+ * aceptar fecha pura y timestamp, y `bordeHastaSql` inclusivo para el borde
+ * superior— está en `docs/patterns/backend.md` § 10b y § 10c.
  *
  * ⚠️ **Todo id que entra del cliente se valida como UUID**
  * (`docs/patterns/backend.md` § 4): sin eso, un id basura llega al SQL y vuelve
@@ -24,11 +25,11 @@ import { PaginationQueryDto } from '../../../../common/dto/pagination-query.dto'
  */
 export class QueryVarianzaDto extends PaginationQueryDto {
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   desde?: string;
 
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   hasta?: string;
 
   /** La pantalla lo manda con el local por defecto; vacío = todas las ubicaciones. */

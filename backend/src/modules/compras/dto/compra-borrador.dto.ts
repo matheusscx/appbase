@@ -2,7 +2,6 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
-  IsDateString,
   IsIn,
   IsNotEmpty,
   IsNumberString,
@@ -22,6 +21,10 @@ import {
   EsCosto,
   EsMontoCobrado,
 } from '../../../common/decorators/escala-moneda.decorator';
+import {
+  EsFechaOTimestamp,
+  EsFechaPura,
+} from '../../../common/decorators/fecha-pura.decorator';
 import { LARGO_MAXIMO_RUT, PATRON_RUT } from './lectura-dte.dto';
 
 export class SerieCompraDto {
@@ -46,8 +49,12 @@ export class SerieCompraDto {
   @IsIn(['nuevo', 'usado', 'reacondicionado'])
   condicion?: 'nuevo' | 'usado' | 'reacondicionado';
 
+  // `item_unidad.garantia_hasta` es `timestamptz` sin `::date` (mismo campo
+  // que `items/dto/create-item.dto.ts SerieInputDto.garantiaHasta`): acepta
+  // fecha pura y timestamp completo, `strict` alcanza para el 500 de
+  // `2026-02-31`.
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   garantiaHasta?: string;
 }
 
@@ -56,12 +63,15 @@ export class LoteCompraDto {
   @IsNotEmpty()
   codigoLote: string;
 
+  // `item_lote.fecha_elaboracion`/`fecha_vencimiento` son `timestamptz` sin
+  // `::date` (mismo campo que `create-item.dto.ts LoteInputDto`): acepta
+  // fecha pura y timestamp completo.
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   fechaElaboracion?: string;
 
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   fechaVencimiento?: string;
 }
 
@@ -168,7 +178,10 @@ export class CompraBorradorDto {
   @MaxLength(40)
   folio?: string | null;
 
-  @IsDateString()
+  // `compras.fecha_documento` es `date`, no `timestamptz`: fecha pura
+  // estricta, no `@IsDateString` (que aceptaría un timestamp que la columna
+  // no guarda).
+  @EsFechaPura()
   fechaDocumento: string;
 
   @IsUUID()
@@ -210,8 +223,10 @@ export class CompraBorradorDto {
    * confirmar (spec § 4.2). Ausente = se calcula al confirmar con
    * `fechaDocumento` + el plazo del proveedor (o 30 días).
    */
+  // `compras.fecha_vencimiento` también es `date`, mismo motivo que
+  // `fechaDocumento` arriba.
   @IsOptional()
-  @IsDateString()
+  @EsFechaPura()
   fechaVencimiento?: string | null;
 
   // Un borrador puede estar vacío; confirmar exige al menos una línea.

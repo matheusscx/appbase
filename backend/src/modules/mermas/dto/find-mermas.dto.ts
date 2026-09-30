@@ -1,4 +1,5 @@
-import { IsDateString, IsOptional, IsUUID } from 'class-validator';
+import { IsOptional, IsUUID } from 'class-validator';
+import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 export class FindMermasDto extends PaginationQueryDto {
@@ -11,10 +12,10 @@ export class FindMermasDto extends PaginationQueryDto {
   motivoBajaId?: string;
 
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   desde?: string;
 
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   hasta?: string;
 }

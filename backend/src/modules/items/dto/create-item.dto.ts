@@ -2,7 +2,6 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
-  IsDateString,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -19,6 +18,7 @@ import {
 import { Type } from 'class-transformer';
 import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
+import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
 
 export class SerieInputDto {
   // Una serie de solo espacios no identifica nada, y `@IsNotEmpty` no la
@@ -42,7 +42,7 @@ export class SerieInputDto {
   @IsOptional()
   condicion?: string;
 
-  @IsDateString()
+  @EsFechaOTimestamp()
   @IsOptional()
   garantiaHasta?: string;
 
@@ -56,11 +56,11 @@ export class LoteInputDto {
   @IsNotEmpty()
   codigoLote: string;
 
-  @IsDateString()
+  @EsFechaOTimestamp()
   @IsOptional()
   fechaElaboracion?: string;
 
-  @IsDateString()
+  @EsFechaOTimestamp()
   @IsOptional()
   fechaVencimiento?: string;
 }
@@ -236,11 +236,11 @@ export class CreateItemDto {
   @IsOptional()
   unidadMedida?: string;
 
-  @IsDateString()
+  @EsFechaOTimestamp()
   @IsOptional()
   fechaElaboracion?: string;
 
-  @IsDateString()
+  @EsFechaOTimestamp()
   @IsOptional()
   fechaVencimiento?: string;
 

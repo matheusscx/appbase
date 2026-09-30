@@ -108,24 +108,6 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   - **Costo:** la imagen pesa 666 MB (la alpine 15, 408 MB) y ya está descargada en la Mac del
     owner.
 
-- [ ] **42 campos de fecha de la API aceptan `2026-02-31`, y la respuesta es un 500** (backend;
-  lo levantó la sesión de compras pieza 3 y lo midieron un sub-agente Sonnet y la orquestadora el
-  2026-09-29; venía de la § 2). `grep -rn "^\s*@IsDateString(" backend/src` da 42 decoradores y
-  ninguno pasa `strict`. Con class-validator 0.15.1 y validator 13.15.35, `2026-02-31` y
-  `2026-02-31T10:00:00Z` pasan sin `strict` y los rechaza `strict: true`. El string llega crudo
-  al SQL (ningún campo lleva `@Type(() => Date)`) y ahí se castea: `$N::date` en
-  `compras.service.ts:702-708`, y dentro de `rango-fecha.util.ts:118` para mermas y pagos. En el
-  Postgres local, `'2026-02-31'::date` da *date/time field value out of range* (22008) y
-  `'2026-08'::date` da *invalid input syntax* (22007). No hay ningún `@Catch(` en `backend/src`,
-  así que los dos salen como 500.
-  **El arreglo ya existe en el repo:** `turnos/dto/query-sesiones.dto.ts:25-42` combina
-  `@Matches(/^\d{4}-\d{2}-\d{2}$/)` con `@IsISO8601({ strict: true })`, porque `strict` solo no
-  rechaza `2026-08` ni `20260807`, que también revientan en `::date` (su comentario lo midió).
-  ⚠️ **Antes de aplicarlo, clasificar campo por campo según lo que hace el SQL con el valor:** los
-  que van a `::date` llevan el molde de turnos; un campo que acepta timestamp completo lleva
-  `strict` sin el `@Matches`. Cierre: un e2e por cada forma (no un spec de DTO, que no corre el
-  pipe) que mande `2026-02-31` y espere 400.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:

@@ -1,14 +1,15 @@
-import { IsDateString, IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import { EstadoVenta } from '../../ventas/entities/venta.entity';
 
 export class QueryPagosDto extends PaginationQueryDto {
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   fechaDesde?: string;
 
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   fechaHasta?: string;
 
   @IsOptional()

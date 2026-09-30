@@ -1,4 +1,5 @@
-import { IsDateString, IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import { TipoMotivoBaja } from '../../motivos-baja/tipo-motivo-baja.enum';
 
@@ -19,11 +20,11 @@ import { TipoMotivoBaja } from '../../motivos-baja/tipo-motivo-baja.enum';
  */
 export class FindAnulacionesDto extends PaginationQueryDto {
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   desde?: string;
 
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   hasta?: string;
 
   @IsOptional()

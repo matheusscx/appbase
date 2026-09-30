@@ -1,4 +1,5 @@
-import { IsDateString, IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
 import { TipoMotivoBaja } from '../../motivos-baja/tipo-motivo-baja.enum';
 
 /**
@@ -25,10 +26,10 @@ import { TipoMotivoBaja } from '../../motivos-baja/tipo-motivo-baja.enum';
  * así se puede unit-testear sin pasar por el `ValidationPipe`.
  */
 export class ResumenAnulacionesDto {
-  @IsDateString()
+  @EsFechaOTimestamp()
   desde: string;
 
-  @IsDateString()
+  @EsFechaOTimestamp()
   hasta: string;
 
   @IsOptional()

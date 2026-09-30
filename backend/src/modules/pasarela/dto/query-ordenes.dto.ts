@@ -1,12 +1,7 @@
-import {
-  IsDateString,
-  IsIn,
-  IsOptional,
-  IsString,
-  MaxLength,
-} from 'class-validator';
+import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
+import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
 
 const ESTADOS_ORDEN = [
   'creada',
@@ -30,11 +25,11 @@ export class QueryOrdenesDto extends PaginationQueryDto {
   origen?: string;
 
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   fechaDesde?: string;
 
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   fechaHasta?: string;
 
   @IsOptional()

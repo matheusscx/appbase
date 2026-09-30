@@ -3,7 +3,6 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
-  IsDateString,
   IsIn,
   IsInt,
   IsNumberString,
@@ -18,6 +17,7 @@ import {
 } from 'class-validator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
+import { EsFechaPura } from '../../../common/decorators/fecha-pura.decorator';
 import type { TipoPromocion } from '../entities/promocion.entity';
 
 /**
@@ -74,11 +74,13 @@ export class CreatePromocionDto {
   tipo: TipoPromocion;
 
   // Los dos NOT NULL: el guardarraíl heredado de eliminar `promocional`. Una
-  // campaña sin fecha de fin no se acepta.
-  @IsDateString()
+  // campaña sin fecha de fin no se acepta. `promociones.fecha_inicio`/
+  // `fecha_fin` son `date`: fecha pura estricta, no `@IsDateString` (que
+  // aceptaría un timestamp que la columna no guarda).
+  @EsFechaPura()
   fechaInicio: string;
 
-  @IsDateString()
+  @EsFechaPura()
   fechaFin: string;
 
   // Franja en hora local del tenant; inicio > fin = cruza medianoche. Que las

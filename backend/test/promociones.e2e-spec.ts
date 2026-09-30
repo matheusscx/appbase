@@ -413,6 +413,44 @@ describe('Motor de promociones (e2e)', () => {
       expect(res.status).toBe(400);
     });
 
+    // `promociones.fecha_inicio`/`fecha_fin` son `date` (pendientes.md § 1,
+    // "42 campos de fecha… 2026-02-31, 500"): un 31 de febrero no existe en
+    // el calendario y sin `strict` llegaba crudo al `INSERT`, y Postgres
+    // devolvía 22008 → 500. `EsFechaPura` (`common/decorators/fecha-pura.decorator.ts`)
+    // lo rechaza acá, en el pipe, con 400.
+    it('fechaInicio 2026-02-31 (no existe en el calendario) → 400, no 500', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/promociones')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          nombre: `Promo fecha inválida E2E ${Date.now()}`,
+          tipo: 'porcentaje',
+          fechaInicio: '2026-02-31',
+          fechaFin: FECHA_FIN_AMPLIA,
+          valorPorcentaje: '0.10',
+          scopes: [{ tipoScope: 'categoria', categoriaId }],
+        });
+      expect(res.status).toBe(400);
+    });
+
+    // `EsFechaPura` exige el molde `YYYY-MM-DD` exacto: un año-mes solo
+    // (`2026-08`) es ISO 8601 válido pero no una fecha pura, y contra
+    // `fecha_inicio::date` da 22007 → 500 sin el `@Matches`.
+    it('fechaInicio 2026-08 (sin día) → 400, no 500', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/promociones')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          nombre: `Promo fecha sin dia E2E ${Date.now()}`,
+          tipo: 'porcentaje',
+          fechaInicio: '2026-08',
+          fechaFin: FECHA_FIN_AMPLIA,
+          valorPorcentaje: '0.10',
+          scopes: [{ tipoScope: 'categoria', categoriaId }],
+        });
+      expect(res.status).toBe(400);
+    });
+
     it('escritura con token no-admin → 403', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/promociones')

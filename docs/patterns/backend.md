@@ -745,10 +745,35 @@ Para listados grandes (pagos, ventas, kardex):
 ## 10b. El día se arma en un solo lugar: `rango-fecha.util.ts`
 
 `AppDateInput` emite **fecha pura** (`YYYY-MM-DD`) y los DTOs validan con
-`@IsDateString()`, que también acepta un timestamp. Contra una columna
-`timestamptz`, una fecha pura se castea a la **medianoche**, así que a qué rango
-—y a qué **día**— pertenece es una decisión del backend, nunca de Postgres ni de
-cada service por su cuenta.
+`EsFechaOTimestamp()` (`common/decorators/fecha-pura.decorator.ts`), que
+también acepta un timestamp. Contra una columna `timestamptz`, una fecha pura
+se castea a la **medianoche**, así que a qué rango —y a qué **día**—
+pertenece es una decisión del backend, nunca de Postgres ni de cada service
+por su cuenta.
+
+⚠️ **Ni `@IsDateString()` a secas ni `{ strict: true }` solo alcanzan**
+(`docs/agent/pendientes.md` § 1, cerrado 2026-09-30, medido contra Postgres
+real):
+- Sin `strict`, acepta `2026-02-31` —sintácticamente ISO 8601, pero no existe
+  en el calendario— y llega crudo hasta el bind, donde Postgres lo rechaza
+  con 22008 → 500.
+- Con `strict` pero sin el `@Matches` de `EsFechaOTimestamp()`, sigue
+  aceptando `2026-08` y `2026-W32-1` —también sintácticamente válidos, y
+  `strict` no los descarta porque no tienen día—. Como no son "fecha pura"
+  para `esFechaPura()`, `bordeFechaSql`/`bordeHastaSql` NO les aplica
+  `::date`: llegan crudos al bind contra `timestamptz`, y
+  `'2026-08'::timestamptz` da 22007 → 500 (`'2026-W32-1'` también; en cambio
+  `'20260807'::timestamptz` no falla —Postgres lo interpreta como
+  `2026-08-07`— pero tampoco es el molde que se quiere aceptar).
+
+`EsFechaOTimestamp()` exige el guion literal entre año, mes y día (con o sin
+la hora detrás) y valida el calendario real con `strict`, sin angostar el
+formato: sigue aceptando fecha pura Y timestamp completo, que es la razón de
+ser de este archivo. Para una columna `date` pura —sin `rango-fecha.util.ts`
+de por medio, un timestamp ahí perdería la hora en silencio— el decorador es
+otro: `EsFechaPura()`, en el mismo archivo, que combina
+`@Matches(/^\d{4}-\d{2}-\d{2}$/)` con `@IsISO8601({ strict: true })` para
+exigir el molde exacto, sin la hora.
 
 **No es el día calendario, es el día del NEGOCIO.** Cada tenant tiene una
 `hora_corte` (`tenants.hora_corte`, entero 0–6, default 0): la hora local en que

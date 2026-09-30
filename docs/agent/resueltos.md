@@ -23,6 +23,69 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los 42 campos de fecha de la API rechazan con 400 las fechas imposibles y los formatos que Postgres no lee (cerrada 2026-09-30)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **42 campos de fecha de la API aceptan `2026-02-31`, y la respuesta es un 500** (backend;
+  lo levantó la sesión de compras pieza 3 y lo midieron un sub-agente Sonnet y la orquestadora el
+  2026-09-29; venía de la § 2). `grep -rn "^\s*@IsDateString(" backend/src` da 42 decoradores y
+  ninguno pasa `strict`. Con class-validator 0.15.1 y validator 13.15.35, `2026-02-31` y
+  `2026-02-31T10:00:00Z` pasan sin `strict` y los rechaza `strict: true`. El string llega crudo
+  al SQL (ningún campo lleva `@Type(() => Date)`) y ahí se castea: `$N::date` en
+  `compras.service.ts:702-708`, y dentro de `rango-fecha.util.ts:118` para mermas y pagos. En el
+  Postgres local, `'2026-02-31'::date` da *date/time field value out of range* (22008) y
+  `'2026-08'::date` da *invalid input syntax* (22007). No hay ningún `@Catch(` en `backend/src`,
+  así que los dos salen como 500.
+  **El arreglo ya existe en el repo:** `turnos/dto/query-sesiones.dto.ts:25-42` combina
+  `@Matches(/^\d{4}-\d{2}-\d{2}$/)` con `@IsISO8601({ strict: true })`, porque `strict` solo no
+  rechaza `2026-08` ni `20260807`, que también revientan en `::date` (su comentario lo midió).
+  ⚠️ **Antes de aplicarlo, clasificar campo por campo según lo que hace el SQL con el valor:** los
+  que van a `::date` llevan el molde de turnos; un campo que acepta timestamp completo lleva
+  `strict` sin el `@Matches`. Cierre: un e2e por cada forma (no un spec de DTO, que no corre el
+  pipe) que mande `2026-02-31` y espere 400.
+
+### Lo medido
+
+Además de `2026-02-31`, que era lo que decía la entrada, `strict` solo no alcanza para los campos
+que aceptan fecha o timestamp. `2026-08` y `2026-W32-1` pasan `@IsDateString({ strict: true })` y
+no son fecha pura, así que ni `rango-fecha.util` ni el bind directo les aplican `::date`: llegan
+crudos a una columna `timestamptz` y Postgres los rechaza con 22007, y la API contestaba 500.
+`20260807` no rompe (Postgres lo lee como `2026-08-07`), pero tampoco es un formato que se quiera
+aceptar.
+
+### Qué se hizo
+
+Dos decoradores compuestos en `backend/src/common/decorators/fecha-pura.decorator.ts`, junto a los
+otros compuestos del repo. Cada campo se clasificó siguiendo el valor hasta el SQL:
+
+| Decorador | Qué valida | Campos |
+|---|---|---|
+| `EsFechaPura()` | `@Matches(YYYY-MM-DD)` + `@IsISO8601({ strict: true })`, el molde de `turnos/dto/query-sesiones.dto.ts` | 11, que van a una columna `date` o a `::date`: compras (filtro `desde`/`hasta`, `fechaDocumento`, `fechaVencimiento`), y `fechaInicio`/`fechaFin` de promociones, recargos y descuentos |
+| `EsFechaOTimestamp()` | `@Matches` de fecha con hora opcional + `@IsDateString({ strict: true })` | 31: los `desde`/`hasta` que pasan por `rango-fecha.util` (mermas, pasarela, varianza, caja, movimientos, pagos, anulaciones) y las columnas `timestamptz` de bind directo (garantía de serie, elaboración y vencimiento de lote o producto) |
+
+Los `Update*Dto` los heredan por `PartialType` (verificado con `validate()` real). El DTO de turnos,
+que fue el molde, pasó a usar `EsFechaPura()`, así que no quedan dos copias. Todos los consumidores
+del frontend pasan por `AppDateInput`, `AppRangoFechas` o `<UInput type="date">`, que emiten
+`YYYY-MM-DD`: ninguna pantalla manda un formato que ahora rebote. `docs/patterns/backend.md` § 10b
+dice cuál va dónde.
+
+### Qué lo fija
+
+- e2e por forma: `promociones.e2e-spec.ts` (`2026-02-31` y `2026-08` → 400), `reportes-varianza.e2e-spec.ts`
+  (`2026-02-31`, `2026-08`, `20260807` → 400) y `fecha-timestamptz-bind-directo.e2e-spec.ts` (`POST /items`
+  con `fechaVencimiento: '2026-08'` → 400).
+- `fecha-pura.decorator.spec.ts`: los casos de borde de los dos decoradores (bisiesto, semana ISO,
+  hora 25, offset `+99:99`, espacio en vez de `T`, salto de línea al final, arreglo, número).
+
+| Mutante | Resultado |
+|---|---|
+| `fechaInicio` de promociones vuelve a `@IsDateString()` sin `strict` | rojo: los 2 casos, 500 (22007) |
+| el campo de varianza vuelve a `@IsDateString({ strict: true })` sin `@Matches` | rojo: `2026-08` da 500, `20260807` da 200 |
+| el regex de `EsFechaOTimestamp` pasa a `/.*/` | rojo: 5 de los 27 casos del unitario |
+
 ## Los ocho specs e2e que buscaban su fila en la primera página de 100 la acotan con un filtro que ya existe (cerrada 2026-09-30)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.

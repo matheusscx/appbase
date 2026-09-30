@@ -2,7 +2,6 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
-  IsDateString,
   IsNumberString,
   IsOptional,
   IsUUID,
@@ -17,6 +16,7 @@ import {
   EsCosto,
   EsMontoCobrado,
 } from '../../../common/decorators/escala-moneda.decorator';
+import { EsFechaPura } from '../../../common/decorators/fecha-pura.decorator';
 import { SerieCompraDto } from './compra-borrador.dto';
 
 /**
@@ -92,7 +92,9 @@ export class ActualizarDocumentoDto {
   @EsMontoCobrado()
   totalDocumento?: string | null;
 
+  // `compras.fecha_vencimiento` es `date`, mismo motivo que
+  // `CompraBorradorDto.fechaVencimiento`.
   @ValidateIf((_o, v) => v !== undefined)
-  @IsDateString()
+  @EsFechaPura()
   fechaVencimiento?: string;
 }

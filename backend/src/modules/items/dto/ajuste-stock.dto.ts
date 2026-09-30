@@ -1,7 +1,6 @@
 import {
   ArrayMaxSize,
   IsArray,
-  IsDateString,
   IsIn,
   IsNotEmpty,
   IsNumberString,
@@ -18,6 +17,7 @@ import {
   IsDecimalPositivo,
 } from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
+import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
 
 const MOTIVOS = ['compra', 'devolucion', 'ajuste_manual', 'inventario_inicial'];
 
@@ -43,7 +43,7 @@ export class SerieAjusteInputDto {
   @IsOptional()
   condicion?: string;
 
-  @IsDateString()
+  @EsFechaOTimestamp()
   @IsOptional()
   garantiaHasta?: string;
 
@@ -57,11 +57,11 @@ export class LoteAjusteInputDto {
   @IsNotEmpty()
   codigoLote: string;
 
-  @IsDateString()
+  @EsFechaOTimestamp()
   @IsOptional()
   fechaElaboracion?: string;
 
-  @IsDateString()
+  @EsFechaOTimestamp()
   @IsOptional()
   fechaVencimiento?: string;
 }

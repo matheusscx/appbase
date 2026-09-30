@@ -1,4 +1,5 @@
-import { IsOptional, IsUUID, IsIn, IsDateString } from 'class-validator';
+import { IsOptional, IsUUID, IsIn } from 'class-validator';
+import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 const MOTIVOS = [
@@ -40,10 +41,10 @@ export class FindMovimientosDto extends PaginationQueryDto {
   motivo?: string;
 
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   desde?: string;
 
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   hasta?: string;
 }

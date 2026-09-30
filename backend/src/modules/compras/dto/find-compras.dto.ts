@@ -1,12 +1,7 @@
 import { Transform } from 'class-transformer';
-import {
-  IsBoolean,
-  IsDateString,
-  IsIn,
-  IsOptional,
-  IsUUID,
-} from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsUUID } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
+import { EsFechaPura } from '../../../common/decorators/fecha-pura.decorator';
 import type { EstadoCompra } from '../entities/compra.entity';
 
 export class FindComprasDto extends PaginationQueryDto {
@@ -49,12 +44,14 @@ export class FindComprasDto extends PaginationQueryDto {
   /**
    * Sobre `fecha_documento`, que es `date`: se compara directo, no hay zona
    * que convertir (`docs/patterns/backend.md` § 10b vale para `timestamptz`).
+   * Fecha pura estricta (`EsFechaPura`), no `@IsDateString`: la comparación
+   * es un `::date` literal en `compras.service.ts`, que no acepta timestamp.
    */
   @IsOptional()
-  @IsDateString()
+  @EsFechaPura()
   desde?: string;
 
   @IsOptional()
-  @IsDateString()
+  @EsFechaPura()
   hasta?: string;
 }

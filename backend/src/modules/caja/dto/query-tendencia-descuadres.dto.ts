@@ -1,4 +1,5 @@
-import { IsDateString, IsOptional } from 'class-validator';
+import { IsOptional } from 'class-validator';
+import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
 
 /**
  * Ventana de la tendencia de descuadres. Sin paginación a propósito: la fila es
@@ -11,10 +12,10 @@ import { IsDateString, IsOptional } from 'class-validator';
  */
 export class QueryTendenciaDescuadresDto {
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   desde?: string;
 
   @IsOptional()
-  @IsDateString()
+  @EsFechaOTimestamp()
   hasta?: string;
 }

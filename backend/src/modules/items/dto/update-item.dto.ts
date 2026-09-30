@@ -5,7 +5,6 @@ import {
   IsUUID,
   IsBoolean,
   IsOptional,
-  IsDateString,
   IsInt,
   IsIn,
   Min,
@@ -25,6 +24,7 @@ import {
 } from './create-item.dto';
 import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
+import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
 
 @ValidatorConstraint({ name: 'costoNoEditable', async: false })
 export class CostoNoEditableConstraint implements ValidatorConstraintInterface {
@@ -118,11 +118,11 @@ export class UpdateItemDto {
   @IsOptional()
   unidadMedida?: string;
 
-  @IsDateString()
+  @EsFechaOTimestamp()
   @IsOptional()
   fechaElaboracion?: string;
 
-  @IsDateString()
+  @EsFechaOTimestamp()
   @IsOptional()
   fechaVencimiento?: string;
 

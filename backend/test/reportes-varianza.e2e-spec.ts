@@ -144,6 +144,47 @@ describe('Reporte de varianza (e2e)', () => {
 
       expect(res.status).toBe(200);
     });
+
+    /**
+     * 31 de febrero no existe en el calendario: es sintácticamente ISO 8601
+     * pero `isValidDate` (dentro de `strict`) lo rechaza. Sin `strict` en
+     * `@IsDateString()` (pendientes.md § 1, "42 campos de fecha…"), llegaba
+     * crudo hasta `bordeFechaSql`/`::date` y Postgres respondía 22008 → 500.
+     */
+    it('400 con 2026-02-31 (no existe en el calendario), no 500', async () => {
+      const res = await leer(tokenAdmin, '?desde=2026-02-31');
+
+      expect(res.status).toBe(400);
+    });
+
+    /**
+     * Medido contra Postgres real (`docs/agent/pendientes.md` § 1): con
+     * `strict:true` sin `@Matches`, `@IsDateString()` deja pasar `2026-08`
+     * —sintácticamente ISO 8601 válido, `isISO8601('2026-08', {strict:true})`
+     * da `true`— y como no es fecha pura (`esFechaPura`), `bordeFechaSql` NO
+     * le aplica `::date`: llega crudo al bind contra `timestamptz`, y
+     * `'2026-08'::timestamptz` da *invalid input syntax* (22007) → 500.
+     * `EsFechaOTimestamp()` lo rechaza acá, en el pipe, con 400.
+     */
+    it('400 con 2026-08 (sin día), no 500', async () => {
+      const res = await leer(tokenAdmin, '?desde=2026-08');
+
+      expect(res.status).toBe(400);
+    });
+
+    /**
+     * `20260807` también pasa `@IsDateString({strict:true})` sola, pero a
+     * diferencia de `2026-08`, Postgres SÍ lo acepta como timestamptz —lo
+     * interpreta como `2026-08-07`— así que no era la causa de un 500. Igual
+     * lo exigimos con guion (`EsFechaOTimestamp` pide `YYYY-MM-DD` literal):
+     * es el molde que emite `AppDateInput`, y aceptar un ISO básico sin
+     * separadores no es un caso que la pantalla necesite.
+     */
+    it('400 con 20260807 (ISO básico sin guiones, no es el molde), no 500', async () => {
+      const res = await leer(tokenAdmin, '?desde=20260807');
+
+      expect(res.status).toBe(400);
+    });
   });
 
   /**
