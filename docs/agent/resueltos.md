@@ -23,6 +23,44 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El % de anulaciones por garzón tiene su e2e entre tenants (cerrada 2026-09-30)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **El % de anulaciones por garzón no tiene e2e entre tenants** (backend, test; lo dejó
+  anotado la revisión de rama del frente, 2026-09-28). La consulta de lo vendido de
+  `AnulacionesReporteService.resumen` filtra `tenant_id = $1` en el reparto, la línea y la
+  cuenta, pero ningún e2e lo afirma: ni `salones-anulaciones-porcentaje.e2e-spec.ts` ni
+  `salones-reparto-linea.e2e-spec.ts` arman datos en un segundo tenant. El arreglo: un test en
+  el primero, con el molde del test de aislamiento de `salones-anulaciones-reporte.e2e-spec.ts`
+  (una cuenta cerrada con su reparto en otro tenant, sembrada por SQL porque ninguna API cruza
+  tenants), que afirme que su venta no suma al `pedido` de ningún garzón de Paris. No es un
+  invariante roto: la cuenta ajena ya rebota con 404 al escribir (`getCuentaAbiertaConLock`).
+
+### Qué se hizo
+
+Un test más en `salones-anulaciones-porcentaje.e2e-spec.ts` (el 8), con el molde del de
+aislamiento de `salones-anulaciones-reporte.e2e-spec.ts`: siembra por SQL, en Demo Bodega, una
+venta pagada con su cuenta cerrada, una línea de 5 × $99.999 y su reparto, y afirma que la suma
+de `pedido` de los garzones de Paris no cambia y que no aparece un grupo sin garzón. Antes afirma
+la premisa: que Paris ya tiene lo vendido de los tests de arriba (total mayor que cero), porque
+con 0 de los dos lados la comparación pasaría igual. La fila ajena queda sin limpiar, como en
+`boleta-reimpresion.e2e-spec.ts`; ningún spec suma hoy agregados de Demo Bodega sin su propia marca.
+
+### Qué lo fija
+
+| Mutante en la consulta de lo vendido de `resumen()` | Resultado |
+|---|---|
+| sacar solo uno de los tres `tenant_id = $1` (reparto, línea o cuenta) | verde: los otros dos alcanzan |
+| neutralizar los tres (`… OR TRUE`) | rojo: el total de Paris sube exactamente 499.995 |
+
+Los tres filtros se cubren entre sí: una fila ajena lleva el mismo tenant en el reparto, la línea
+y la cuenta, así que cualquiera de ellos la excluye. El test caza la fuga cuando no queda ninguno.
+El caso de un reparto de Paris que apunte a una línea de otro tenant no se probó: la app no lo
+produce y solo se armaría con SQL inconsistente.
+
 ## Los dos e2e de la varianza leen "hoy" en la zona del tenant, y ya no caen en CI de 21:00 a 24:00 de Chile (cerrada 2026-09-30)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.

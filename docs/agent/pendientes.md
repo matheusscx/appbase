@@ -67,16 +67,6 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   observación sobre un plan, no una propiedad. Por eso van 3+ filas empatadas, para que un
   orden cualquiera acierte menos por azar.
 
-- [ ] **El % de anulaciones por garzón no tiene e2e entre tenants** (backend, test; lo dejó
-  anotado la revisión de rama del frente, 2026-09-28). La consulta de lo vendido de
-  `AnulacionesReporteService.resumen` filtra `tenant_id = $1` en el reparto, la línea y la
-  cuenta, pero ningún e2e lo afirma: ni `salones-anulaciones-porcentaje.e2e-spec.ts` ni
-  `salones-reparto-linea.e2e-spec.ts` arman datos en un segundo tenant. El arreglo: un test en
-  el primero, con el molde del test de aislamiento de `salones-anulaciones-reporte.e2e-spec.ts`
-  (una cuenta cerrada con su reparto en otro tenant, sembrada por SQL porque ninguna API cruza
-  tenants), que afirme que su venta no suma al `pedido` de ningún garzón de Paris. No es un
-  invariante roto: la cuenta ajena ya rebota con 404 al escribir (`getCuentaAbiertaConLock`).
-
 - [ ] **`pages/compras/[id].vue` quedó en ~1225 líneas después de la pieza del XML** (frontend,
   mismo hallazgo). La lógica ya vive en `useDte.ts` (spec § 6, "dónde vive la lógica"): lo que
   creció fue el cableado — el modal, el reemplazo de lo cargado, las líneas por asociar/apartadas

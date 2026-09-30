@@ -608,4 +608,97 @@ describe('Salones — % de anulaciones sobre lo pedido, por garzón (e2e)', () =
     const despues = fila(await resumen(), garzon1);
     expect(despues.pedido).toBe(antes.pedido);
   });
+
+  /**
+   * Aislamiento por tenant de "lo vendido por garzón" (spec § 4.1 y
+   * `docs/agent/pendientes.md` § 1: "El % de anulaciones por garzón no tiene
+   * e2e entre tenants"). La consulta de `resumen()` filtra `tenant_id = $1` en
+   * el reparto, la línea y la cuenta (`AnulacionesReporteService.resumen`,
+   * comentario sobre `idx_cuentas_cerrada` en `cuenta.entity.ts`); ningún test
+   * de este archivo ni de `salones-anulaciones-reporte.e2e-spec.ts` arma datos
+   * en un SEGUNDO tenant para probarlo.
+   *
+   * Mismo criterio que el test de aislamiento de
+   * `salones-anulaciones-reporte.e2e-spec.ts`: una cuenta CERRADA con su venta
+   * y su reparto, sembradas por SQL directo en Demo Bodega —ninguna API cruza
+   * tenants—, porque no hay forma de generar un reparto ajeno desde este
+   * token. `cantidad × precio_unitario` = 5 × 99.999 = 499.995, muy por encima
+   * de cualquier `pedido` acumulado en este archivo (máximo 180.000, test 6):
+   * si se colara, el total de después no podría coincidir con el de antes.
+   *
+   * Va AL FINAL (test 8): no toca ninguna tabla de Paris, así que no altera el
+   * acumulado de G1/G2/G3 que los tests 1-7 dejaron armado.
+   */
+  it('8. aislamiento: una venta cerrada de OTRO tenant, con su reparto, no suma al pedido de ningún garzón de Paris', async () => {
+    const OTRO_TENANT = '550e8400-e29b-41d4-a716-446655440040'; // Demo Bodega
+    const marcaAjena = `Ajena porcentaje E2E ${marca}`;
+
+    const itemAjeno: { item_id: string }[] = await ds.query(
+      `SELECT item_id FROM items WHERE tenant_id = $1 AND eliminado_el IS NULL LIMIT 1`,
+      [OTRO_TENANT],
+    );
+    expect(itemAjeno[0]).toBeDefined();
+
+    const antes = await resumen();
+    const pedidoTotalAntes = antes.porGarzon.reduce(
+      (acc, f) => acc.plus(f.pedido),
+      new Decimal(0),
+    );
+    // Premisa: Paris ya tiene lo vendido por los tests de arriba. Con 0 de los dos lados, la
+    // comparación de abajo pasaría igual aunque la consulta no devolviera nada.
+    expect(pedidoTotalAntes.greaterThan(0)).toBe(true);
+
+    const insertado: { cuenta_linea_reparto_id: string }[] = await ds.query(
+      `WITH s AS (
+         INSERT INTO salones (tenant_id, nombre) VALUES ($1, $2)
+         RETURNING salon_id
+       ), m AS (
+         INSERT INTO mesas (tenant_id, salon_id, nombre)
+         SELECT $1, salon_id, $2 FROM s
+         RETURNING mesa_id
+       ), v AS (
+         INSERT INTO ventas (tenant_id, moneda_id, estado)
+         VALUES ($1, $4, 'pagada')
+         RETURNING venta_id
+       ), c AS (
+         INSERT INTO cuentas (tenant_id, mesa_id, numero, estado, venta_id, cerrada_el)
+         SELECT $1, m.mesa_id, 1, 'cerrada', v.venta_id, NOW() FROM m, v
+         RETURNING cuenta_id
+       ), cl AS (
+         INSERT INTO cuenta_lineas (
+           tenant_id, cuenta_id, item_id, cantidad, cantidad_enviada,
+           precio_unitario, precio_unitario_origen, tasa_cambio, reglas_congeladas
+         )
+         SELECT $1, c.cuenta_id, $3, '5', '5', '99999', '99999', '1', '{}'::jsonb FROM c
+         RETURNING cuenta_linea_id
+       )
+       INSERT INTO cuenta_linea_reparto (tenant_id, cuenta_linea_id, garzon_id, cantidad)
+       SELECT $1, cl.cuenta_linea_id, NULL, '5' FROM cl
+       RETURNING cuenta_linea_reparto_id`,
+      [OTRO_TENANT, marcaAjena, itemAjeno[0].item_id, CLP_MONEDA_ID],
+    );
+    expect(insertado).toHaveLength(1);
+    const repartoAjenoId = insertado[0].cuenta_linea_reparto_id;
+
+    // Confirma la premisa contra la base: la fila ajena sembrada por ESTE
+    // test existe de verdad (por id propio, no por un conteo global que
+    // acumularía filas de corridas anteriores del mismo item ajeno).
+    const existeAjeno: { total: string }[] = await ds.query(
+      `SELECT COUNT(*)::text AS total FROM cuenta_linea_reparto
+        WHERE cuenta_linea_reparto_id = $1 AND tenant_id = $2`,
+      [repartoAjenoId, OTRO_TENANT],
+    );
+    expect(existeAjeno[0].total).toBe('1');
+
+    const despues = await resumen();
+    const pedidoTotalDespues = despues.porGarzon.reduce(
+      (acc, f) => acc.plus(f.pedido),
+      new Decimal(0),
+    );
+    expect(pedidoTotalDespues.toFixed(4)).toBe(pedidoTotalAntes.toFixed(4));
+
+    // Y tampoco aparece como un garzón fantasma "Sin garzón" (garzonId null):
+    // ningún test de este archivo deja reparto de Paris sin garzón.
+    expect(despues.porGarzon.some((f) => f.garzonId === null)).toBe(false);
+  });
 });
