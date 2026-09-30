@@ -58,6 +58,11 @@ describe('Unidad de un ingrediente referenciado (e2e)', () => {
   let ingredienteLibreId: string;
   let ingredienteEnRecetaId: string;
   let recetaId: string;
+  // Marca ÚNICA por corrida: el test de la fila rota busca `recetaId` en la
+  // primera página (pageSize 100) de `GET /items?tipo=receta`, compartida
+  // por todas las suites que corren en paralelo. Sin acotar por `search`,
+  // un catálogo con más de 100 recetas la empuja fuera. Molde: `0daa7dd9`.
+  const marca = `E2E-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -95,7 +100,7 @@ describe('Unidad de un ingrediente referenciado (e2e)', () => {
       .post('/api/items')
       .set('Authorization', `Bearer ${token}`)
       .send({
-        nombre: `Receta unidad E2E ${Date.now()}`,
+        nombre: `Receta unidad ${marca}`,
         precioBase: '5000',
         monedaId: CLP_MONEDA_ID,
         tipo: 'receta',
@@ -305,7 +310,7 @@ describe('Unidad de un ingrediente referenciado (e2e)', () => {
     );
 
     const res = await request(app.getHttpServer())
-      .get('/api/items?tipo=receta&pageSize=100')
+      .get(`/api/items?tipo=receta&pageSize=100&search=${marca}`)
       .set('Authorization', `Bearer ${token}`);
     // Lo esencial: NO es 500. Antes, una sola fila así tumbaba `GET /items`
     // para todo el tenant, con el menú del POS adentro.

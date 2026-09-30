@@ -23,6 +23,53 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los ocho specs e2e que buscaban su fila en la primera página de 100 la acotan con un filtro que ya existe (cerrada 2026-09-30)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Ocho specs e2e buscan su fila en la primera página de 100 sin un filtro que la acote**
+  (backend, test; lo levantó la sesión de compras pieza 3 y lo midió un sub-agente Sonnet el
+  2026-09-29; venía de la § 2). **Hoy pasan**, y se caen cuando la página se llene con filas de
+  otras suites. Confirmados, con el filtro que ya existe para acotarlos:
+  - `combos.e2e-spec.ts:213`, `grupos-modificadores.e2e-spec.ts:179`, `recetas.e2e-spec.ts:295`,
+    `unidad-ingrediente-referenciado.e2e-spec.ts:308` e `items-pausados.e2e-spec.ts:342` (el
+    describe *"el catálogo de venta"*, que el arreglo `0daa7dd9` no tocó): `GET /items` por tipo y
+    `.find` por id → `search=<marca de la corrida>`, el molde de `0daa7dd9`.
+  - `costeo-cpp.e2e-spec.ts:250`: movimientos por motivo → `itemId`, que existe y no se usa.
+  - `recuentos.e2e-spec.ts:515`: `GET /recuentos` no tiene filtro que acote → `GET /recuentos/:id`.
+  - `visibilidad-ventas-pagos.e2e-spec.ts:205` (`/pagos` → `ventaId`) y `:213` (`/ventas`, cuyo
+    DTO solo filtra por `estado` y `canal`: hay que agregarle un filtro o cambiar la aserción).
+  De la lista anterior sobraban `stock-minimo` (ya filtra por `SELLO`) y los de compras (filtran
+  por un proveedor creado en el propio spec). Hay dos del mismo riesgo que fallan distinto:
+  `nota-credito-composicion.e2e-spec.ts:313,324` afirma una ausencia, así que con la página llena
+  pasa en falso, y `venta-total-cero.e2e-spec.ts:163` afirma un invariante sobre una página que
+  puede quedar parcial. ⚠️ Cruza con la grilla paginada de la § 3: si ese frente cambia el
+  contrato del listado, estos se tocan ahí.
+
+### Qué se hizo
+
+| Spec | Qué cambió |
+|---|---|
+| `combos`, `grupos-modificadores`, `recetas`, `unidad-ingrediente-referenciado` | el ítem lleva una marca única por corrida en el nombre, y el `GET /items` que lo busca pasa `search=<marca>` (molde de `0daa7dd9`) |
+| `items-pausados` (*"el catálogo de venta"*) | la marca se usa **solo** para buscar la presencia del ítem. Las invariantes (`every(!activo)` con `activo=false`, y la suma de `meta.total`) siguen sobre el listado ancho: acotadas por la marca quedaban en una sola fila, pausada por construcción, y pasaban sin probar el filtro (lo levantó la revisión) |
+| `costeo-cpp` | los movimientos por motivo se filtran por `itemId` |
+| `recuentos` | `GET /recuentos/:id` en vez de buscar en el listado. Que el listado filtre por `estado` lo sigue cubriendo otro test del mismo spec |
+| `visibilidad-ventas-pagos` | `/pagos` del admin filtra por `ventaId`. `/ventas` del cajero filtra por `canal=fisico` (las dos ventas del spec son físicas y de cajas distintas), así que el listado queda acotado a su caja sin las online del tenant, y el test conserva el control positivo (ve la propia) además de la ausencia (no ve la ajena). Los dos filtros se agregan con `AND` después del alcance por caja, así que no lo pueden tapar |
+
+La API no se tocó.
+
+### Qué lo fija
+
+Los 8 specs juntos, 122 de 122. Medido con las filas que ya había en la base que cada filtro excluye
+las ajenas (combos 4 → 1, movimientos por motivo 6 → 1–2, pagos 58 → 2–3). En `items-pausados`,
+el mutante que ignora `activo=false` (`if (query.activo === true)`) pone rojos 2 tests. **No se
+reprodujo** el rojo original con la página llena de verdad.
+
+Los dos del mismo riesgo que fallan distinto (`nota-credito-composicion` y `venta-total-cero`) no
+se tocaron y siguen en la § 2.
+
 ## `synchronize` ya no tira en cada arranque los índices únicos del seeder, y el de `item_lote` existe (cerrada 2026-09-30)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.

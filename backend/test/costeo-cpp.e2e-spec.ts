@@ -247,7 +247,9 @@ describe('Costeo CPP (e2e)', () => {
     // Y el kardex congela el costo REAL de esa reposición, que es el dato que
     // ya existía ligado a la venta y no se leía.
     const { body: movs } = await request(app.getHttpServer())
-      .get('/api/inventario/movimientos?motivo=anulacion&pageSize=100')
+      .get(
+        `/api/inventario/movimientos?motivo=anulacion&pageSize=100&itemId=${anulacionItemId}`,
+      )
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     const delItem = (movs as PaginatedMovimientos).data.filter(

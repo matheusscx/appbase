@@ -510,15 +510,17 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     expect(mensaje).toContain(primeraId);
     expect(mensaje).toContain('Producto doble recuento E2E');
 
-    // Y la segunda sesión NO se creó a medias.
-    const listado = await request(app.getHttpServer())
-      .get('/api/recuentos?estado=borrador&pageSize=100')
+    // Y la segunda sesión NO se creó a medias: sigue existiendo, en borrador.
+    // `GET /recuentos` solo filtra por `estado` (sin id ni marca que acote),
+    // así que buscar `primeraId` en la primera página (pageSize 100) de
+    // TODOS los borradores del tenant arriesga la misma "fila fuera de la
+    // página" que este frente corrige en otros specs — acá se resuelve yendo
+    // directo al detalle en vez de al listado.
+    const detalle = await request(app.getHttpServer())
+      .get(`/api/recuentos/${primeraId}`)
       .set('Authorization', `Bearer ${token}`);
-    expect(listado.status).toBe(200);
-    const conEseItem = (listado.body as { data: { id: string }[] }).data.filter(
-      (r) => r.id === primeraId,
-    );
-    expect(conEseItem).toHaveLength(1);
+    expect(detalle.status).toBe(200);
+    expect((detalle.body as { estado: string }).estado).toBe('borrador');
 
     // Cancelada la primera, el producto vuelve a estar disponible: el bloqueo es
     // por sesión ABIERTA, no un veto permanente.

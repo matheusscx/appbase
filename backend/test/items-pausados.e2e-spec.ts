@@ -120,6 +120,12 @@ describe('Ítem pausado según el canal (e2e)', () => {
   /** Cuenta de salón con el ítem YA cargado, abierta mientras seguía activo. */
   let cuentaSalonId: string;
   let garzon: { id: string; pin: string };
+  // Marca ÚNICA por corrida, solo para buscar la PRESENCIA de `itemId` en "el
+  // catálogo de venta": la primera página (pageSize 100) es de todo el tenant y
+  // otras suites la llenan. Molde: `0daa7dd9`. Las invariantes (`every`, la suma
+  // de `meta.total`) siguen sobre el listado ancho: acotadas por la marca
+  // quedarían en una sola fila y pasarían sin probar el filtro.
+  const marca = `E2E-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 
   const listarProductos = (query: string) =>
     request(app.getHttpServer())
@@ -157,7 +163,7 @@ describe('Ítem pausado según el canal (e2e)', () => {
       comentario: 'Apertura E2E ítems pausados',
     });
 
-    nombreItem = `Item pausable canal E2E ${Date.now()}`;
+    nombreItem = `Item pausable canal ${marca}`;
     const resItem = await request(app.getHttpServer())
       .post('/api/items')
       .set('Authorization', `Bearer ${token}`)
@@ -321,26 +327,43 @@ describe('Ítem pausado según el canal (e2e)', () => {
       });
 
       it('con `activo=false` trae solo los pausados, y el ítem está entre ellos', async () => {
-        const res = await listarProductos('&activo=false');
+        // Dos lecturas: la invariante corre sobre la página ancha, que trae pausados de
+        // otras suites y del seed; acotada por la marca quedaría una sola fila, pausada
+        // por construcción, y el `every` pasaría aunque el filtro no existiera. La
+        // presencia se busca con la marca, para no depender de la página.
+        const [ancho, propio] = await Promise.all([
+          listarProductos('&activo=false'),
+          listarProductos(`&activo=false&search=${marca}`),
+        ]);
 
-        expect(res.status).toBe(200);
-        const body = res.body as CatalogoResponse;
-        expect(body.data.some((i) => i.id === itemId)).toBe(true);
-        expect(body.data.every((i) => !i.activo)).toBe(true);
+        expect(ancho.status).toBe(200);
+        expect(propio.status).toBe(200);
+        expect(
+          (ancho.body as CatalogoResponse).data.every((i) => !i.activo),
+        ).toBe(true);
+        expect(
+          (propio.body as CatalogoResponse).data.some((i) => i.id === itemId),
+        ).toBe(true);
       });
 
       it('sin el parámetro sigue trayendo todo: la pantalla de configuración depende de eso', async () => {
         // El contrato viejo no se movió. Si esto empezara a filtrar, el admin
         // dejaría de ver —y de poder reactivar— lo que él mismo pausó.
-        const [todos, vendibles, pausados] = await Promise.all([
+        // La suma de `meta.total` no depende de la página y va sobre el catálogo entero;
+        // solo la presencia del ítem se busca con la marca.
+        const [todos, vendibles, pausados, propio] = await Promise.all([
           listarProductos(''),
           listarProductos('&activo=true'),
           listarProductos('&activo=false'),
+          listarProductos(`&search=${marca}`),
         ]);
 
         expect(todos.status).toBe(200);
+        expect(propio.status).toBe(200);
         const body = todos.body as CatalogoResponse;
-        expect(body.data.some((i) => i.id === itemId)).toBe(true);
+        expect(
+          (propio.body as CatalogoResponse).data.some((i) => i.id === itemId),
+        ).toBe(true);
         // Sin filtrar = la suma exacta de las dos mitades. Comparar contra un
         // número fijo no serviría: la base de dev arrastra pausados de otras
         // corridas, y en CI arranca solo con los del seed.

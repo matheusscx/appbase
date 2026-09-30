@@ -200,17 +200,35 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
     return id;
   }
 
-  const pagosDe = async (token: string): Promise<PagoFila[]> => {
+  // `ventaId` es opcional: sin él, mantiene el listado general que usan las
+  // dos pruebas de alcance por caja (no buscan una fila puntual, así que no
+  // arriesgan la página). Con él, acota a UNA venta puntual — lo que evita
+  // que la fila buscada quede fuera de la primera página (pageSize 100) de
+  // TODOS los pagos del tenant, compartida por las suites en paralelo.
+  const pagosDe = async (
+    token: string,
+    ventaId?: string,
+  ): Promise<PagoFila[]> => {
+    const filtro = ventaId ? `&ventaId=${ventaId}` : '';
     const res = await request(app.getHttpServer())
-      .get('/api/pagos?pageSize=100')
+      .get(`/api/pagos?pageSize=100${filtro}`)
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     return (res.body as { data: PagoFila[] }).data;
   };
 
-  const ventasDe = async (token: string): Promise<VentaFila[]> => {
+  // `canal` es opcional: sin él, mantiene el listado general que usa la
+  // prueba del admin (`verTodas`, no busca una fila puntual del cajero). Con
+  // `canal=fisico`, acota el listado del cajero a sus propias cajas físicas
+  // —el `EXISTS` de `filtroDeMisCajas`— sin el ruido de TODAS las ventas
+  // online del tenant, que ese mismo alcance deja pasar sin scope de caja.
+  const ventasDe = async (
+    token: string,
+    canal?: 'fisico' | 'online',
+  ): Promise<VentaFila[]> => {
+    const filtro = canal ? `&canal=${canal}` : '';
     const res = await request(app.getHttpServer())
-      .get('/api/ventas?pageSize=100')
+      .get(`/api/ventas?pageSize=100${filtro}`)
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     return (res.body as { data: VentaFila[] }).data;
@@ -295,7 +313,7 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
   // del tenant y con eso reconstruía el esperado de cualquier caja.
   it('el cajero NO ve los pagos de la caja de otro', async () => {
     const pagosDelCajero = await pagosDe(tokenCajero);
-    const pagosDelAdmin = await pagosDe(tokenAdmin);
+    const pagosDelAdmin = await pagosDe(tokenAdmin, ventaDelAdminId);
 
     expect(pagosDelCajero.length).toBeGreaterThan(0); // ve los suyos
 
@@ -318,7 +336,17 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
   });
 
   it('el cajero no ve la venta ajena en el listado', async () => {
-    const ventas = await ventasDe(tokenCajero);
+    // Las dos ventas de esta suite nacen `canal: 'fisico'` (default de
+    // `crear()` sin `dto.canal`, en cajones DISTINTOS). `GET /ventas` sin
+    // filtrar deja pasar TODAS las online del tenant sin scope de caja
+    // (`filtroDeMisCajas`: `v.canal = 'online' OR EXISTS(caja del usuario)`),
+    // así que buscar la propia venta en la primera página (pageSize 100) sin
+    // acotar arriesgaba la misma "fila fuera de la página" que este frente
+    // corrige en otros specs. Acá SÍ hay un filtro que ya existe (`canal`,
+    // en `QueryVentasDto`) y no cambia el contrato: con `canal=fisico` el
+    // listado del cajero queda acotado a sus propias cajas físicas, sin el
+    // ruido online — medido en la base del worktree: 1 fila, lejos de 100.
+    const ventas = await ventasDe(tokenCajero, 'fisico');
     const ids = ventas.map((v) => v.id);
     expect(ids).toContain(ventaDelCajeroId);
     expect(ids).not.toContain(ventaDelAdminId);

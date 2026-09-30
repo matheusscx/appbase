@@ -130,6 +130,13 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
   let hamburguesaId: string;
   let comboId: string;
   let comboDobleId: string;
+  // Marca ÚNICA por corrida: el test 3 busca `comboId` en la primera página
+  // (pageSize 100) de `GET /items?tipo=combo`, y esa página es de TODO el
+  // tenant, compartida por todas las suites que corren en paralelo. Sin
+  // acotar por `search`, un catálogo con más de 100 combos empuja el propio
+  // fuera de la página — `Tomar "el primero" de un listado que comparten
+  // todas las suites` (docs/agent/anti-patterns.md). Molde: `0daa7dd9`.
+  const marca = `E2E-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -194,7 +201,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
       .post('/api/items')
       .set('Authorization', `Bearer ${token}`)
       .send({
-        nombre: `Combo Papas + Hamburguesa E2E ${Date.now()}`,
+        nombre: `Combo Papas + Hamburguesa ${marca}`,
         precioBase: '4000',
         monedaId: CLP_MONEDA_ID,
         tipo: 'combo',
@@ -210,7 +217,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
 
   it('3. disponible = mínimo entre componentes bloqueantes (papas 20, hamburguesa limitada por pan=10)', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/items?tipo=combo&pageSize=100')
+      .get(`/api/items?tipo=combo&pageSize=100&search=${marca}`)
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     const combo = (res.body as { data: ItemResponse[] }).data.find(

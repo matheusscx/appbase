@@ -257,11 +257,17 @@ describe('Recetas — flujo completo (e2e)', () => {
       '6000',
     );
 
+    // Marca ÚNICA por corrida: el listado de abajo busca esta receta en la
+    // primera página (pageSize 100) de TODO el tenant, compartida por todas
+    // las suites que corren en paralelo. Sin acotar por `search`, un
+    // catálogo con más de 100 recetas la empuja fuera. Molde: `0daa7dd9`.
+    const marca = `E2E-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+
     const resReceta = await request(app.getHttpServer())
       .post('/api/items')
       .set('Authorization', `Bearer ${token}`)
       .send({
-        nombre: `Hamburguesa local ${Date.now()}`,
+        nombre: `Hamburguesa local ${marca}`,
         precioBase: '3500',
         monedaId: CLP_MONEDA_ID,
         tipo: 'receta',
@@ -292,7 +298,7 @@ describe('Recetas — flujo completo (e2e)', () => {
     // 5. Disponible: pan floor(10/1)=10, carne floor(1000g/150g)=6 → mínimo 6.
     // Queso no cuenta (no bloqueante), aunque ya sepamos que solo alcanza para 1 venta.
     const resListado = await request(app.getHttpServer())
-      .get('/api/items?tipo=receta&pageSize=100')
+      .get(`/api/items?tipo=receta&pageSize=100&search=${marca}`)
       .set('Authorization', `Bearer ${token}`);
     expect(resListado.status).toBe(200);
     const recetaListada = (

@@ -92,6 +92,11 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
   let bebidaId: string;
   let grupoBebidaId: string;
   let comboId: string;
+  // Marca ÚNICA por corrida: el test 4 busca `comboId` en la primera página
+  // (pageSize 100) de `GET /items?tipo=combo`, compartida por todas las
+  // suites que corren en paralelo. Sin acotar por `search`, un catálogo con
+  // más de 100 combos empuja el propio fuera de la página. Molde: `0daa7dd9`.
+  const marca = `E2E-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -154,7 +159,7 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
       .post('/api/items')
       .set('Authorization', `Bearer ${token}`)
       .send({
-        nombre: `Combo GM E2E ${Date.now()}`,
+        nombre: `Combo GM ${marca}`,
         precioBase: '3000',
         monedaId: CLP_MONEDA_ID,
         tipo: 'combo',
@@ -176,7 +181,7 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
 
   it('4. GET /items?tipo=combo → disponibleCondicional: true', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/items?tipo=combo&pageSize=100')
+      .get(`/api/items?tipo=combo&pageSize=100&search=${marca}`)
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     const combo = (res.body as { data: ItemResponse[] }).data.find(

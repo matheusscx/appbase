@@ -126,25 +126,6 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   `strict` sin el `@Matches`. Cierre: un e2e por cada forma (no un spec de DTO, que no corre el
   pipe) que mande `2026-02-31` y espere 400.
 
-- [ ] **Ocho specs e2e buscan su fila en la primera página de 100 sin un filtro que la acote**
-  (backend, test; lo levantó la sesión de compras pieza 3 y lo midió un sub-agente Sonnet el
-  2026-09-29; venía de la § 2). **Hoy pasan**, y se caen cuando la página se llene con filas de
-  otras suites. Confirmados, con el filtro que ya existe para acotarlos:
-  - `combos.e2e-spec.ts:213`, `grupos-modificadores.e2e-spec.ts:179`, `recetas.e2e-spec.ts:295`,
-    `unidad-ingrediente-referenciado.e2e-spec.ts:308` e `items-pausados.e2e-spec.ts:342` (el
-    describe *"el catálogo de venta"*, que el arreglo `0daa7dd9` no tocó): `GET /items` por tipo y
-    `.find` por id → `search=<marca de la corrida>`, el molde de `0daa7dd9`.
-  - `costeo-cpp.e2e-spec.ts:250`: movimientos por motivo → `itemId`, que existe y no se usa.
-  - `recuentos.e2e-spec.ts:515`: `GET /recuentos` no tiene filtro que acote → `GET /recuentos/:id`.
-  - `visibilidad-ventas-pagos.e2e-spec.ts:205` (`/pagos` → `ventaId`) y `:213` (`/ventas`, cuyo
-    DTO solo filtra por `estado` y `canal`: hay que agregarle un filtro o cambiar la aserción).
-  De la lista anterior sobraban `stock-minimo` (ya filtra por `SELLO`) y los de compras (filtran
-  por un proveedor creado en el propio spec). Hay dos del mismo riesgo que fallan distinto:
-  `nota-credito-composicion.e2e-spec.ts:313,324` afirma una ausencia, así que con la página llena
-  pasa en falso, y `venta-total-cero.e2e-spec.ts:163` afirma un invariante sobre una página que
-  puede quedar parcial. ⚠️ Cruza con la grilla paginada de la § 3: si ese frente cambia el
-  contrato del listado, estos se tocan ahí.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -174,6 +155,19 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 `cargarPendientesTestigo` y `abrirEntrarTurno` no están atadas a una cuenta. Lo **cerrado** de
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
+
+- [ ] **Dos e2e afirman una ausencia o un invariante sobre la primera página de 100, y ningún
+  filtro existente los acota sin cambiar qué prueban** (backend, test; quedaron del cierre de
+  los ocho specs de la página, 2026-09-30, en [`resueltos.md`](resueltos.md)).
+  `nota-credito-composicion.e2e-spec.ts` (~313, ~324) afirma que el ítem "Ajuste" no aparece en
+  ningún listado del catálogo: con la página llena pasa en falso. Acotarlo por `search=Ajuste`
+  cambia la prueba de "el listado que usan los selectores nunca lo trae" a "un listado angosto no
+  lo trae", y el nombre lo genera el servidor, así que no admite marca.
+  `venta-total-cero.e2e-spec.ts` (~163) afirma que ninguna venta pendiente tiene total 0 sobre una
+  página que puede quedar parcial, y no hay filtro que la acote sin sacar ventas pendientes del
+  chequeo. **Qué medir:** si cada uno se puede reescribir sin depender de la página, por ejemplo
+  recorriendo todas las páginas o contando con `meta.total` y un filtro que ya exista. Si no se
+  puede sin tocar la API, cruza con la grilla paginada de la § 3.
 
 - [ ] **Tests de pantalla que no terminan en 20 s con la máquina cargada** (frontend,
   intermitente, visto el 2026-09-28; medido el 2026-09-29 por la orquestadora sin reproducirlo).
