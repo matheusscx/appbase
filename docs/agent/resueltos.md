@@ -23,6 +23,132 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Quien opera imprime sin leer la configuración, conectar con QZ Tray tiene techo, y la cajera reimprime lo suyo (cerrada 2026-09-30)
+
+Sale de [`pendientes.md`](pendientes.md) § 3.
+
+### Las entradas que cierra, como estaban en `pendientes.md` § 3
+
+- [ ] **Que *Enviar a cocina* funcione con `Salones:Operar` a secas, sin leer la configuración
+  de impresoras** (frontend + probablemente un endpoint, sesión propia porque toca el camino
+  de impresión). **Decisión del owner, 2026-09-28**, entre tres opciones: A) arreglar la
+  pantalla en un frente aparte, B) sembrarle `Impresoras:Leer` al encargado, C) las dos.
+  **Eligió A.** Procedencia: contestó A en el selector de la sesión que lo encontró y, textual,
+  a la sesión coordinadora: *"A y dejar en pendientes arreglar la pantalla pra mandar a
+  cocina"*. El owner decidió el QUÉ; el cómo (qué endpoint le da las impresoras a quien opera)
+  queda para el frente.
+  Medido con `encargado.salon@paris.cl` en Playwright, ya con `Items:Leer`: el pedido se carga,
+  pero `imprimirComanda` (`frontend/app/composables/useImpresoras.ts:206`) arranca con
+  `listar('comanda')` → `GET /impresoras`, que pide `Impresoras:Leer`; le rebota
+  `403 {"message":"No tienes permiso para esta acción"}` (medido con curl, mismo token) y
+  `POST /cuentas/:id/comanda/reclamar` —que solo pide `Salones:Operar`— **nunca se llama**. La
+  pantalla no dice que falta un permiso de configuración. Lo tapaba que el único e2e de navegador
+  que aprieta *Enviar a cocina* (`anular-plato.spec.ts`) corre como admin (`es_fijo`
+  short-circuitea todo).
+  **Alcance a medir antes de diseñar, no supuesto:** `obtenerImpresoraBoleta` (misma
+  composable) lista con `listar('boleta')` y tiene la misma forma — sin medir si la precuenta o
+  la boleta de un rol sin ese permiso fallan igual. Y el rol sembrado del garzón (`Salón`,
+  `ana.torres`) tiene solo `Salones:Leer` + `Operar`: tampoco tiene `Items:Leer`, así que
+  tampoco puede cargar un pedido (medido en la base, no en la pantalla). ✅ **Se le agrega
+  (owner, 2026-09-29)**, en el selector interactivo de la orquestadora: eligió *A: darle el
+  permiso* (recomendada) por sobre *B: dejarlo así*, con la condición que la propia opción
+  llevaba: **antes de sembrarlo, medir qué más ve el garzón con `Items:Leer`** (por ejemplo si ve
+  costos en la pantalla de productos). Si ve algo que no debería, se le vuelve a preguntar.
+  **Medido y re-preguntado (owner, 2026-09-30):** con `Items:Leer`, el garzón ve el `costoActual`
+  de cada producto en `GET /items` y en la pantalla de productos, el stock por ubicación y, en
+  `GET /desfases`, costo propuesto y margen %. La orquestadora se lo planteó en el selector
+  interactivo, con el dato de que la cajera del POS (`Vendedor`) ya tiene ese permiso y ve lo mismo,
+  entre *dárselo igual* (recomendada: cuando la grilla arme el catálogo de venta sin costos, se les
+  puede sacar a los dos), *un catálogo de venta sin costos ya, en este frente* y *esconder los costos
+  detrás de un permiso nuevo*. **Eligió dárselo igual.** Y al medir apareció que no es solo la
+  comanda: la boleta y la precuenta leen el mismo `GET /impresoras`, y **ningún rol sembrado tiene
+  `Impresoras:Leer`** (solo imprime el admin, por el atajo de `es_fijo`).
+  **Al cerrarlo:** `frontend/e2e/salones/anular-plato.spec.ts` pasa a correr como el encargado
+  —su docblock explica por qué hoy corre como admin—.
+
+- [ ] **`qz.websocket.connect()` espera sin techo; que espere 5 s, como `qz.print`** (frontend,
+  `frontend/app/composables/useImpresoras.ts`, `imprimirEn`). Hoy el `connect()` (`:132`) va
+  sin límite y el `qz.print` de más abajo va envuelto en `conTimeout(…, PRINT_TIMEOUT_MS)`
+  (5 s, `:19`). **Cómo se encontró:** la sesión del frente de tests del frontend, midiendo los
+  dos Playwright que caían en la Mac del owner (`pos:115`, `cuenta-hasta-cobro:245`): con QZ
+  Tray corriendo (escucha en 8181/8182) y sin certificado, el handshake se queda esperando y
+  el carrito no se limpia a tiempo — `pos:115` cae 3 de 3; con los sockets a un puerto cerrado,
+  como en CI, pasa en 6,3 s. **Lo que no está medido:** la escena del local —QZ Tray abierto con
+  el diálogo de autorización sin contestar, la venta ya cobrada y el POS colgado— se deduce de
+  ese mecanismo, no se reprodujo en una caja.
+  **Decisión del owner, 2026-09-29.** Cómo se decidió: la orquestadora le planteó esa escena
+  (cliente paga $12.500, la venta queda pagada, la pantalla no se limpia, riesgo de cobrar dos
+  veces) con tres opciones: *A: el mismo techo de 5 s que ya tiene imprimir, y si no conecta la
+  venta queda cobrada, el carrito se limpia y se avisa "no se pudo imprimir, reimprimí desde la
+  venta"* (recomendada), *B: lo mismo con 15 s* y *C: dejarlo como está*. Contestó **"vamos con
+  A"** en el chat de la orquestadora. Sin reintento automático
+  (regla del owner: la app no repite sola lo que falló): el aviso, y el usuario reimprime.
+  **Medido el 2026-09-30:** los cinco caminos que imprimen (boleta del POS, comanda, precuenta,
+  cobro de salón, reimpresión) esperan la impresión antes de limpiar la pantalla, así que sin techo
+  se cuelgan con la venta ya cobrada. Si `connect()` vence el techo, el intento sigue vivo dentro de
+  `qz` (singleton de la pestaña) y el siguiente falla al instante con un mensaje en inglés de qz-tray.
+  Los dos Playwright que caían ya no caen: los arregló el fixture `sin-qz-tray.ts` (`resueltos.md`).
+  **El aviso chocaba con otra decisión:** reimprimir exige `Ventas:Anular`, el del encargado (spec
+  `2026-09-17-boleta-desde-la-venta-design.md` § 2), y la cajera no lo tiene. La orquestadora se lo
+  planteó al owner en el selector interactivo, con la escena de la venta de $12.500: *pedírselo al
+  encargado* (recomendada), *la cajera reimprime lo suyo* o *un aviso genérico*. **Eligió que la
+  cajera reimprima lo suyo (owner, 2026-09-30):** las ventas de su propia caja abierta, y nada más;
+  el encargado sigue reimprimiendo cualquiera, con el alcance de siempre. Reabre la decisión del
+  17/9 en ese punto, a sabiendas.
+  **Lo que falta al construirlo:** el techo en `connect()` que además suelta la conexión colgada; el
+  mensaje exacto del aviso; y un test que falle sin el techo. Toca el camino de impresión: sesión propia, igual que "Enviar a cocina exige
+  `Impresoras:Leer`" (arriba), con la que conviene ir junta.
+
+### Lo medido antes de construir
+
+- No era solo la comanda: la boleta y la precuenta leían el mismo `GET /impresoras`, y **ningún rol
+  sembrado tenía `Impresoras:Leer`**. Solo imprimía el admin, por el atajo de `es_fijo`.
+- Los cinco caminos que imprimen (boleta del POS, comanda, precuenta, cobro de salón, reimpresión)
+  esperaban la impresión antes de limpiar la pantalla: sin techo en `connect()`, la venta quedaba
+  cobrada y la pantalla colgada. Si el `connect()` vencía, el intento quedaba vivo en el singleton `qz`
+  y el siguiente fallaba al instante con un mensaje en inglés.
+- El aviso decidido ("reimprimí desde la venta") chocaba con que reimprimir exigía `Ventas:Anular`.
+  El owner lo resolvió: la cajera reimprime lo suyo (la escena y las opciones están en la entrada).
+- Con `Items:Leer`, el garzón ve costos, stock por ubicación y márgenes. El owner lo aceptó,
+  sabiendo que la cajera ya los ve.
+
+### Qué se hizo
+
+| Pieza | Qué |
+|---|---|
+| `GET /impresoras/operacion?rol=comanda\|boleta` | solo `id`, `tipoConexion`, `host`, `puerto`, `nombreCola`, `activo` de las activas, para quien tenga `Ventas:Crear`, `Salones:Operar` o `Ventas:Anular`. `GET /impresoras` no cambió. El personal de piso ve la IP y el puerto de las impresoras del local: QZ Tray los necesita en el navegador |
+| `GET /ventas/:id/boleta` | con `Ventas:Anular`, igual que antes. Con `Ventas:Leer`, primero el alcance de siempre (404 si no la ve) y después caja propia y `abierta` (403 con el mensaje del encargado si la ve pero no cumple) |
+| `useImpresoras` | lee del endpoint nuevo; `connect()` vence a los 5 s y suelta la conexión colgada con `qz.websocket.disconnect()`; los errores de QZ llegan en castellano. Los techos de conectar e imprimir son de 5 s cada uno, y se suman |
+| Al cobrar sin boleta | la venta queda cobrada, la pantalla se limpia y el aviso dice que se reimprime desde la venta |
+| Detalle de venta | el botón "Reimprimir boleta" es gemelo de la regla del backend, y la página de Ventas carga la caja activa (antes no la cargaba, y la cajera que entraba directo no veía el botón) |
+| Seed | el rol `Salón` suma `Items:Leer` |
+
+### Qué lo fija
+
+- e2e de la API: `impresoras.e2e-spec.ts` (los tres roles que operan con 200 y los campos exactos, 403 sin
+  permiso, borradas, inactivas y de otro tenant afuera), `boleta-reimpresion.e2e-spec.ts` (su caja abierta
+  200; otra caja 404; su caja cerrada 403; una online 403) y `salon-items-permiso.e2e-spec.ts`.
+- vitest: `useImpresoras.nuxt.spec.ts` (vencimiento con mensaje en castellano; el segundo intento vuelve a
+  conectar), el drawer (los cuatro casos del botón) y la página de Ventas (carga la caja al montar).
+- Playwright: `anular-plato.spec.ts` corre como el encargado y afirma que *Enviar a cocina* lee
+  `/impresoras/operacion` y nunca `/impresoras`; `reimprimir-boleta-cajera.spec.ts` entra como la cajera
+  directo a Ventas y reimprime.
+
+| Mutante | Resultado |
+|---|---|
+| el endpoint nuevo exige `Impresoras:Leer` | rojo: 7 de 8 del e2e de impresoras |
+| la reimpresión propia no mira `estado = 'abierta'` | rojo: su caja cerrada pasa a 200 |
+| la reimpresión propia deja de pasar por el alcance (`verTodas=true`) | rojo: otra caja pasa de 404 a 403 |
+| `connect()` sin techo | rojo: el test de vencimiento se cuelga |
+| sin soltar la conexión | rojo: el segundo intento no vuelve a conectar |
+| el botón no mira `estado === 'abierta'` | rojo: aparece con la caja en conciliación |
+| Ventas no carga la caja | rojo: el spec de la página |
+| sin `Items:Leer` en el seed | rojo: el garzón vuelve a 403 en `/items` |
+
+**Sin verificar:** un QZ Tray real con el diálogo de autorización sin contestar. El test del segundo intento
+modela el `disconnect()` con un mock; en qz-tray real hay además un estado `CLOSING` breve en el que
+`connect()` rechaza con otro mensaje, y ese caso cae en el aviso genérico.
+
 ## El Postgres local y el de CI son `postgres:18` glibc, la misma versión mayor que el demo (cerrada 2026-09-30)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.

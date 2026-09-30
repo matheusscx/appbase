@@ -4,7 +4,7 @@
 > usan checkboxes (`- [ ]`). El implementador **no commitea**: stagea por ruta; revisión, recibo y
 > commit los hace la orquestadora.
 
-- **Status:** In progress
+- **Status:** Done
 - **Date:** 2026-09-30
 - **Owner:** César (owner) · redacta la orquestadora, en el worktree `impresion` (rama `impresion`)
 
@@ -28,51 +28,51 @@ imprimir"*. No se repiten acá.
 
 ## Tarea 1 — Backend: la impresora para imprimir, sin leer la configuración
 
-- [ ] Un endpoint de lectura mínima que devuelve las impresoras activas de un rol (`comanda` o `boleta`)
+- [x] Un endpoint de lectura mínima que devuelve las impresoras activas de un rol (`comanda` o `boleta`)
   con solo los campos que usa el camino de impresión (`id`, `tipoConexion`, `host`, `puerto`,
   `nombreCola`, `activo`). El `GET /impresoras` de configuración no cambia.
-- [ ] Guard: lo alcanza quien puede llegar a alguno de los caminos que imprimen. **Antes de elegir el
+- [x] Guard: lo alcanza quien puede llegar a alguno de los caminos que imprimen. **Antes de elegir el
   guard, listar el permiso de cada camino** (boleta del POS, comanda, precuenta, cobro de salón,
   reimpresión) leyendo sus endpoints, y escribir la tabla en el reporte. `RequiresAlgunPermiso`
   advierte en su docblock que no es un OR genérico: si se usa, el porqué va escrito al lado.
-- [ ] e2e: cada rol del seed que opera (vendedor, garzón, encargado de salón) obtiene 200 y los campos
+- [x] e2e: cada rol del seed que opera (vendedor, garzón, encargado de salón) obtiene 200 y los campos
   justos; un rol sin ninguno de esos permisos obtiene 403; filas de otro tenant y borradas no vienen.
 
 ## Tarea 2 — Backend: la cajera reimprime las ventas de su caja abierta
 
-- [ ] `GET /ventas/:id/boleta`: quien tiene `Ventas:Anular` sigue igual (con el alcance por caja de
+- [x] `GET /ventas/:id/boleta`: quien tiene `Ventas:Anular` sigue igual (con el alcance por caja de
   hoy). Quien no lo tiene puede reimprimir **solo** si la venta es de su propia caja y esa caja está
   abierta; si no, 403 con un mensaje que diga que la reimprime el encargado.
-- [ ] e2e: la cajera reimprime una venta de su caja abierta (200); una de otra caja (403); una de su
+- [x] e2e: la cajera reimprime una venta de su caja abierta (200); una de otra caja (403); una de su
   caja ya cerrada (403); el encargado reimprime cualquiera dentro de su alcance, como hoy.
-- [ ] Docs: `docs/PRODUCTO.md` (la regla de quién reimprime; hoy dice que alcanza `Ventas:Leer`, y
+- [x] Docs: `docs/PRODUCTO.md` (la regla de quién reimprime; hoy dice que alcanza `Ventas:Leer`, y
   `docs/features/dashboard-inicio.md:133` también), y una nota en la spec
   `2026-09-17-boleta-desde-la-venta-design.md` § 2 de que el owner la reabrió el 2026-09-30.
 
 ## Tarea 3 — Frontend: imprimir con el endpoint nuevo, techo al conectar y el aviso
 
-- [ ] `useImpresoras.ts`: los tres caminos leen la impresora del endpoint de la tarea 1.
-- [ ] `imprimirEn`: `connect()` con el mismo techo que `qz.print`. Si vence, **soltar la conexión
+- [x] `useImpresoras.ts`: los tres caminos leen la impresora del endpoint de la tarea 1.
+- [x] `imprimirEn`: `connect()` con el mismo techo que `qz.print`. Si vence, **soltar la conexión
   colgada** (medido: si no, el siguiente intento falla al instante con un error en inglés de
   qz-tray). Todo mensaje de error que vea la persona, en castellano.
-- [ ] Boleta que no imprime al cobrar (POS y cobro de salón): la venta queda cobrada, la pantalla se
+- [x] Boleta que no imprime al cobrar (POS y cobro de salón): la venta queda cobrada, la pantalla se
   limpia, y el aviso dice que no se pudo imprimir y que se reimprime desde la venta.
-- [ ] `VentaDetalleDrawer.vue`: el botón "Reimprimir boleta" aparece para quien tiene `Ventas:Anular`
+- [x] `VentaDetalleDrawer.vue`: el botón "Reimprimir boleta" aparece para quien tiene `Ventas:Anular`
   y para la cajera en las ventas de su propia caja abierta (gemelo exacto de la regla de la tarea 2).
-- [ ] vitest: `qz-tray` mockeado, `connect` que nunca resuelve y timers falsos. Rojo sin el techo; y
+- [x] vitest: `qz-tray` mockeado, `connect` que nunca resuelve y timers falsos. Rojo sin el techo; y
   un segundo intento después del vencimiento que vuelve a intentar conectar en vez de fallar al
   instante.
 
 ## Tarea 4 — Seed y tests de navegador
 
-- [ ] El rol sembrado del garzón (`Salón`) recibe `Items:Leer` (decisión del owner, 2026-09-30).
-- [ ] `frontend/e2e/salones/anular-plato.spec.ts` corre como el encargado de salón, y su docblock
+- [x] El rol sembrado del garzón (`Salón`) recibe `Items:Leer` (decisión del owner, 2026-09-30).
+- [x] `frontend/e2e/salones/anular-plato.spec.ts` corre como el encargado de salón, y su docblock
   deja de explicar por qué corría como admin.
-- [ ] Playwright: *Enviar a cocina* como garzón (no admin) llama a `reclamar`; la cajera reimprime una
+- [x] Playwright: *Enviar a cocina* como garzón (no admin) llama a `reclamar`; la cajera reimprime una
   venta de su caja.
-- [ ] Gate completo + Playwright entero en el stack del worktree, antes de integrar.
+- [x] Gate completo + Playwright entero en el stack del worktree, antes de integrar.
 
 ## Cierre
 
-- [ ] `docs/features/impresion-termica.md` y `docs/ESTADO.md`.
-- [ ] Las dos entradas de `pendientes.md` § 3 se mudan a `resueltos.md` con lo que las fija.
+- [x] `docs/features/impresion-termica.md` y `docs/ESTADO.md`.
+- [x] Las dos entradas de `pendientes.md` § 3 se mudan a `resueltos.md` con lo que las fija.
