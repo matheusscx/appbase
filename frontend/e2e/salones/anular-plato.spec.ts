@@ -1,4 +1,4 @@
-import type { APIRequestContext } from '@playwright/test'
+import type { APIRequestContext, Page } from '@playwright/test'
 import { test, expect } from '../support/sin-qz-tray'
 import { API, api, tokenDe, limpiarItems, TENANTS, CLP } from '../support/api'
 import { elegirEnSelector, rondaDePin, valorDelTotal } from '../support/ui'
@@ -20,15 +20,16 @@ import { elegirEnSelector, rondaDePin, valorDelTotal } from '../support/ui'
  * pantalla lo refleja igual (`docs/features/salones-mesas.md` § *Lo despachado
  * se ve en el acto*).
  *
- * ⚠️ **Corre como admin, no como el encargado que nombraba la spec § *E2E de
- * navegador*, y a sabiendas.** Como `encargado.salon` el pedido se carga
- * (tiene `Items:Leer` desde el 2026-09-28), pero *Enviar a cocina* no llega a
- * reclamar: `imprimirComanda` primero lista las impresoras (`GET /impresoras`,
- * `Impresoras:Leer`) y al rol le rebota 403 (medido). El owner decidió que el
- * arreglo es que enviar a cocina no dependa de ese permiso, no sembrárselo:
- * frente propio en `docs/agent/pendientes.md` § 3 (*"Enviar a cocina exige
- * `Impresoras:Leer`"*). Al cerrarlo, este spec pasa a correr como el encargado.
+ * **Corre como `encargado.salon@paris.cl`** (`Salones:Leer/Crear/Actualizar/
+ * Operar/Anular/Ver todas` + `Items:Leer`, no admin) — molde de
+ * `anulaciones-porcentaje.spec.ts`: login por pantalla con
+ * `test.use({ storageState: ... })` vacío, precondiciones por API con el token
+ * de admin (`tokenDe`). Con admin el 403 de un permiso ajeno queda tapado.
  */
+
+test.use({ storageState: { cookies: [], origins: [] } })
+
+const ENCARGADO = { email: 'encargado.salon@paris.cl', password: 'admin' }
 
 const PRECIO_BASE = '1000'
 /** Afecto + IVA 19%: 1.000 × 1,19 = 1.190 por unidad. */
@@ -185,11 +186,23 @@ test.afterAll(async ({ request }) => {
 // tercer uso (este archivo era la segunda duplicación, junto con
 // `cuenta-hasta-cobro.spec.ts`; `boleta-al-cobrar.spec.ts` fue la tercera).
 
+/** Login por pantalla, como el encargado del salón. Un solo tenant: entra directo. */
+async function entrarComoEncargado(page: Page) {
+  await page.goto('/login', { waitUntil: 'networkidle' })
+  await page.getByPlaceholder('tu@email.com').fill(ENCARGADO.email)
+  await page.locator('input[type="password"]').first().fill(ENCARGADO.password)
+  const submit = page.locator('button[type="submit"]').first()
+  await expect(submit).toBeEnabled()
+  await submit.click()
+  await page.waitForURL(url => url.pathname === '/')
+}
+
 test('pide, manda a cocina, anula como cortesía y el aviso aparece con el total ya abajo', async ({
   page,
   request,
 }) => {
   const garzon = escenario.garzon!
+  await entrarComoEncargado(page)
   await page.goto('/salones')
 
   // 1. El salón propio. Explícito aunque la pantalla preseleccione uno: cuál
@@ -212,12 +225,30 @@ test('pide, manda a cocina, anula como cortesía y el aviso aparece con el total
 
   // 5. Mandar a cocina: espera la respuesta del claim (no el toast, que
   //    depende de si QZ Tray está arriba) para saber que el servidor ya
-  //    avanzó `cantidad_enviada`.
+  //    avanzó `cantidad_enviada`. Y la impresora sale de `GET
+  //    /impresoras/operacion?rol=comanda` (Tarea 1 del plan
+  //    `2026-09-30-impresion-quien-opera.md`), que a este rol lo alcanza
+  //    `Salones:Operar`: el `GET /impresoras` de configuración —el que pide
+  //    `Impresoras:Leer`, que este rol no tiene— nunca se llama.
+  const peticionesImpresoras: string[] = []
+  page.on('request', (req) => {
+    if (req.url().includes('/api/impresoras')) peticionesImpresoras.push(`${req.method()} ${req.url()}`)
+  })
+  const operacionComanda = page.waitForResponse(
+    res => res.url().includes('/impresoras/operacion') && res.url().includes('rol=comanda'),
+  )
   const reclamo = page.waitForResponse(
     res => res.url().includes('/comanda/reclamar') && res.request().method() === 'POST',
   )
   await page.getByRole('button', { name: 'Enviar a cocina' }).click()
-  await reclamo
+  const [resOperacionComanda] = await Promise.all([operacionComanda, reclamo])
+  expect(resOperacionComanda.status()).toBe(200)
+  // Ninguna de las peticiones a `/impresoras` durante el envío es la de
+  // configuración (bare, sin `/operacion`): todas traen ese segmento.
+  const configuracionImpresoras = peticionesImpresoras.filter(
+    p => !p.includes('/impresoras/operacion') && !p.includes('/impresoras/qz'),
+  )
+  expect(configuracionImpresoras).toEqual([])
 
   // 6. Anular 1 de las 2 unidades despachadas, como cortesía.
   await page
@@ -233,9 +264,13 @@ test('pide, manda a cocina, anula como cortesía y el aviso aparece con el total
   await expect(page.getByText('Plato anulado').first()).toBeVisible()
 
   // 8. …el aviso debajo de la cuenta, con la palabra del owner (spec § 5):
-  //    "{cantidad} {plato} anulado — {tipo}, autorizó {usuario}".
+  //    "{cantidad} {plato} anulado — {tipo}, autorizó {usuario}". `usuario` es
+  //    `u.nombre` de quien está logueado y anula (`autorizadoPor`,
+  //    `salones.service.ts` → `escribirAnulacionEnLinea`/`anulacionesPorCuenta`),
+  //    no el PIN del garzón: acá es el encargado, "Encargado" (seed
+  //    `encargado.salon@paris.cl`), no "Admin".
   await expect(
-    page.getByText(`1 ${escenario.itemNombre} anulado — Cortesía, autorizó Admin`),
+    page.getByText(`1 ${escenario.itemNombre} anulado — Cortesía, autorizó Encargado`),
   ).toBeVisible()
 
   // 9. Y el total bajó exactamente lo anulado: de 2 unidades a 1.

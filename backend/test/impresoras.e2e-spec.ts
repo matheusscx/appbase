@@ -189,10 +189,13 @@ describe('GET /impresoras/operacion (e2e)', () => {
   it('garzón (Salones:Operar): 200 con las dos impresoras de comanda del seed', async () => {
     const res = await operacion('comanda', tokenGarzon);
     expect(res.status).toBe(200);
-    const cuerpo = res.body as ImpresoraOperativa[];
-    expect(cuerpo.map((i) => i.id).sort()).toEqual(
-      [SEED_COCINA_ID, SEED_BARRA_ID].sort(),
+    const ids = (res.body as ImpresoraOperativa[]).map((i) => i.id);
+    // Contiene las del seed y no la de boleta; no se afirma el conteo exacto: otras
+    // suites del e2e crean impresoras de comanda en Paris y no todas las borran.
+    expect(ids).toEqual(
+      expect.arrayContaining([SEED_COCINA_ID, SEED_BARRA_ID]),
     );
+    expect(ids).not.toContain(SEED_CAJA_ID);
   });
 
   it('encargado de salón (Salones:Operar): 200', async () => {

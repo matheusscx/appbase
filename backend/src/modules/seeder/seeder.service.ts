@@ -5288,6 +5288,18 @@ export class SeederService implements OnApplicationBootstrap {
    *
    * `Leer` además de `Operar` porque la pantalla del salón necesita el plano;
    * el selector de garzones va por `Operar` justamente para no exigir `Leer`.
+   *
+   * `Items:Leer` se suma desde el 2026-09-30 (decisión del owner, `pendientes.md`
+   * § 3 "Enviar a cocina exige `Impresoras:Leer`"): sin él, `refrescarItems()`
+   * (`GET /items`, la pantalla de `/salones`) le rebotaba 403 y el garzón no
+   * podía cargar un pedido — el mismo hueco que ya se le cerró a
+   * `encargado.salon` (`seedRolEncargadoSalon`, 2026-09-28) y que ya tienen
+   * `Vendedor` y los roles de inventario. Medido antes de sembrarlo (owner,
+   * 2026-09-29/30): con este permiso el garzón ve `costoActual` de cada
+   * producto, stock por ubicación y, en `GET /desfases`, costo propuesto y
+   * margen % — igual que la cajera del POS, que ya lo tiene. El owner eligió
+   * dárselo igual (recomendada), en vez de recortar el catálogo o esconder
+   * los costos detrás de un permiso nuevo.
    */
   private async seedRolSalon(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
@@ -5295,6 +5307,11 @@ export class SeederService implements OnApplicationBootstrap {
     const MODULO_TENANT_SALONES = '550e8400-e29b-41d4-a716-446655440228';
     const SALONES_LEER = '550e8400-e29b-41d4-a716-446655440223';
     const SALONES_OPERAR = '550e8400-e29b-41d4-a716-446655440227';
+    // moduloTenantId para Paris → Items y su permiso Leer (definidos en
+    // seedTenantModulo / seedModuloAppPermisos; mismos IDs que reutiliza
+    // seedRolEncargadoSalon para el mismo motivo).
+    const MODULO_TENANT_ITEMS = '550e8400-e29b-41d4-a716-446655440202';
+    const ITEMS_LEER = '550e8400-e29b-41d4-a716-446655440192';
     const ANA_TORRES = '550e8400-e29b-41d4-a716-446655440341';
     const TOTEM_PARIS = '550e8400-e29b-41d4-a716-446655440342';
     // Fixture exclusiva de garzon-pin.e2e-spec.ts: necesita Salones:Operar
@@ -5321,6 +5338,16 @@ export class SeederService implements OnApplicationBootstrap {
         [ROL_SALON, MODULO_TENANT_SALONES, permisoId],
       );
     }
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [ROL_SALON, MODULO_TENANT_ITEMS],
+    );
+    await this.dataSource.query(
+      `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+       VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [ROL_SALON, MODULO_TENANT_ITEMS, ITEMS_LEER],
+    );
     for (const usuarioId of [ANA_TORRES, TOTEM_PARIS, GARZON_PIN_PARIS]) {
       await this.dataSource.query(
         `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
