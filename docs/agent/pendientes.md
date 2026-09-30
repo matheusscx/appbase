@@ -41,6 +41,17 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
+- [ ] **Una `QZ_PRIVATE_KEY` mal cargada no se nota al arrancar, solo al imprimir** (backend,
+  `impresoras/qz-firma.service.ts`; visto el 2026-09-30 en el demo, ver el cierre de QZ en
+  [`resueltos.md`](resueltos.md)). El constructor decodifica la clave con `Buffer.from(key, 'base64')`
+  y la guarda sin probarla. Con el nombre de la variable pegado adelante, el decodificador corta en el
+  `=` y deja 10 bytes: el backend arranca sano y cada `POST /impresoras/qz/firmar` falla, así que QZ
+  no firma y el certificado no sirve. **El arreglo:** al construir el service, si hay clave, probar
+  una firma (`createPrivateKey` o un `sign` de prueba) y, si falla, loguear un error claro que nombre
+  la variable, sin su valor. Decidir si además el service degrada a `null` (modo no firmado, como
+  cuando la variable está vacía) o deja el error como está: degradar es lo que ya hace la ausencia.
+  Test unitario con la clave rota del caso real (prefijo `QZ_PRIVATE_KEY=`).
+
 - [ ] **Dos e2e afirman sobre la primera página de 100: recorrer todas** (backend, test; medido
   el 2026-09-30, venía de la § 2). `nota-credito-composicion.e2e-spec.ts` (~312 y ~323) afirma
   que el ítem "Ajuste" no aparece en `GET /api/items`, y `venta-total-cero.e2e-spec.ts` (~163),

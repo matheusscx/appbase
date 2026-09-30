@@ -80,8 +80,14 @@ dando el genérico.
 
 **Sin verificar:** qué pasa al contestar el diálogo después del aviso (el `close()` pendiente debería
 terminar y el próximo intento abrir conexión nueva). Con el certificado confiado el diálogo no sale.
-Queda sin confirmar si el demo de Railway tiene cargadas `QZ_PRIVATE_KEY` y `QZ_CERTIFICATE`: es acción
-del owner.
+**El demo de Railway firmaba mal, y se arregló el mismo día.** `QZ_CERTIFICATE` era el mismo par (huella
+`0E:C2:82:…:2B:DB`), pero `QZ_PRIVATE_KEY` traía pegado adelante `QZ_PRIVATE_KEY=` y un salto de línea al
+final. `Buffer.from(…, 'base64')` corta en ese `=`: quedaban 10 bytes y `sign()` fallaba con
+`ERR_OSSL_UNSUPPORTED`, medido repitiendo la decodificación de `QzFirmaService` sin imprimir la clave. El
+owner la recargó por el CLI desde el `.env` local (el `set` desde la sesión lo bloqueó el control de
+permisos). Después: 2272 caracteres, firma y el certificado la verifica; deploy SUCCESS y smoke del demo en
+verde. Hoy una clave mal cargada no se nota al arrancar, solo al imprimir: quedó en
+[`pendientes.md`](pendientes.md) § 1.
 
 ## Quien opera imprime sin leer la configuración, conectar con QZ Tray tiene techo, y la cajera reimprime lo suyo (cerrada 2026-09-30)
 
