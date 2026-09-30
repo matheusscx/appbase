@@ -295,7 +295,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         formatMonto: (v: string) => formatMonto(v),
       })
     } catch (e: unknown) {
-      toast.add({ title: apiErrorMsg(e, 'Venta registrada, pero falló la impresión de la boleta'), color: 'warning' })
+      toast.add({ title: apiErrorMsg(e, 'Venta registrada, pero no se pudo imprimir la boleta — reimprimila desde la venta'), color: 'warning' })
     }
 
     // Persiste la venta en el catálogo base; el carrito se limpia después.

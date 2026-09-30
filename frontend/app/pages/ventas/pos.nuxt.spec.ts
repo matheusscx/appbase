@@ -95,7 +95,9 @@ async function esperar(ms: number) {
  * que este spec existe para sostener.
  */
 let urlsCatalogo: string[] = []
-/** Impresoras de rol `boleta` que devuelve `GET /impresoras?rol=boleta`. Vacío = no imprime nada. */
+/** Impresoras de rol `boleta` que devuelve `GET /impresoras/operacion?rol=boleta`
+ * —el endpoint que usa quien IMPRIME, sin `Impresoras:Leer` (Tarea 3 del frente
+ * de impresión). Vacío = no imprime nada. */
 let impresorasBoleta: unknown[] = []
 /**
  * Override de `GET /caja/activa`. `null` (default) es el caso que necesita el
@@ -131,7 +133,7 @@ mockNuxtImport('useApiFetch', () => {
       urlsCatalogo.push(url)
       return Promise.resolve({ data: [], meta: { total: 0, page: 1, pageSize: 100 } })
     }
-    if (ruta.endsWith('/impresoras')) {
+    if (ruta.endsWith('/impresoras/operacion')) {
       return Promise.resolve(impresorasBoleta)
     }
     if (ruta.endsWith('/ventas') && opts?.method === 'POST') {

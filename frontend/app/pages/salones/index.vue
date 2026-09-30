@@ -2828,7 +2828,7 @@ async function cerrarCuentaConPin(
       })
     }
     catch (e: unknown) {
-      toast.add({ title: apiErrorMsg(e, 'Venta generada, pero falló la impresión de la boleta'), color: 'warning' })
+      toast.add({ title: apiErrorMsg(e, 'Cuenta cerrada, pero no se pudo imprimir la boleta — reimprimila desde la venta'), color: 'warning' })
     }
 
     // El filtro va sin condicionar: si el garzón se cambió de mesa, `cuentas`

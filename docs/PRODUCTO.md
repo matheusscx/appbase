@@ -1019,15 +1019,16 @@ muestra un **modal informativo** con ambas fechas.
 quien solo tiene `Ventas:Leer` (la cajera) reimprime **solo** la de su propia caja, mientras
 esa caja siga abierta — decisión del owner del 2026-09-30
 ([`docs/agent/pendientes.md`](agent/pendientes.md) § 3), que reabre en este punto la del
-17/9; visible bajo su propio alcance (404 si no la ve, 403 si la ve pero no cumple). ⚠️ El
-backend ya aplica esta regla; el BOTÓN del detalle de venta todavía solo se muestra con
-`Ventas:Anular` — gemelo pendiente en el frontend (`docs/features/ventas.md`). Devuelve
+17/9; visible bajo su propio alcance (404 si no la ve, 403 si la ve pero no cumple). El BOTÓN
+del detalle de venta (`puedeReimprimir`, `VentaDetalleDrawer.vue`) espeja el mismo corte:
+gemelo exacto en el frontend (`docs/features/ventas.md`). Devuelve
 exactamente el mismo papel que se imprimió al cobrar, marcado `COPIA` con
 la fecha y hora de la reimpresión; el original no lleva esa marca. No reemplaza a la nota de
-crédito — es el mismo documento tal como se cobró, no un documento tributario nuevo. ⚠️ **No
-distingue el estado de la venta**: hoy reimprime igual una venta `pagada`, una `cancelada` o
-una `pendiente` (que sale con la sección de pagos vacía) — es un hueco anotado en
-`docs/agent/pendientes.md`, no una regla decidida.
+crédito — es el mismo documento tal como se cobró, no un documento tributario nuevo. **Sí
+distingue el estado de la venta (2026-09-18):** solo se reimprime una venta `pagada` o
+`cancelada` — la que todavía no se cobró del todo (`pendiente`, `pagada_parcial`) rebota con
+400 (`VentasService.reimprimirBoleta`), y el botón del detalle de venta (`puedeReimprimir`)
+ni siquiera se ofrece en esos casos.
 
 ---
 

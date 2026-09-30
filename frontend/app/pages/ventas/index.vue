@@ -28,6 +28,7 @@ const config = useRuntimeConfig()
 const toast = useToast()
 const { formatMonto, formatFecha } = useFormatters()
 const apiUrl = config.public.apiUrl
+const cajaStore = useCajaStore()
 
 const route = useRoute()
 const router = useRouter()
@@ -150,6 +151,15 @@ function abrirDesdeQuery() {
 onMounted(() => {
   cargarResumen()
   abrirDesdeQuery()
+  // `GET /caja/activa` pide `MiCaja:Leer` (`CajaController`), que esta
+  // pantalla no exige (solo `Ventas:Leer`) — sin el `.catch`, un rol que ve
+  // ventas pero no tiene caja propia (ninguna, o un `403`) rompería esta carga
+  // en silencio. Sin `cajaStore.activa`, el drawer nunca ve el camino angosto
+  // de `puedeReimprimir` (`VentaDetalleDrawer.vue`): una cajera que entra
+  // directo a `/ventas` (sin pasar por el POS o salones, que sí la cargan) no
+  // veía "Reimprimir boleta" aunque el backend ya se lo permitiera. Mismo
+  // molde que `salones/index.vue`.
+  cajaStore.cargarActiva().catch(() => null)
 })
 
 watch(() => route.query.venta, (id) => {

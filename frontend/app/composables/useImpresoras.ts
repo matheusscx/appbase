@@ -18,6 +18,14 @@ import { conTimeout } from '~/utils/con-timeout'
 /** Techo de espera de QZ Tray al imprimir (impresora apagada / host inalcanzable). */
 const PRINT_TIMEOUT_MS = 5_000
 const PRINT_TIMEOUT_MSG = 'La impresora no respondió (timeout 5 s)'
+/** Mismo techo para `qz.websocket.connect()` — docs/agent/pendientes.md § 3,
+ * "Conectar con QZ Tray tiene el mismo techo que imprimir" (owner, 2026-09-29). */
+const CONNECT_TIMEOUT_MSG = 'No se pudo conectar con QZ Tray (timeout 5 s)'
+/** Mensaje propio para cualquier rechazo de QZ Tray que no sea uno de los dos
+ * timeouts de arriba (p. ej. certificado inválido, versión incompatible): esos
+ * vienen en inglés desde `qz-tray` y no deben llegarle así a la persona
+ * (`apiErrorMsg` concatena el `message` del `Error` tal cual, ver `api-error.ts`). */
+const PRINT_ERROR_MSG = 'No se pudo imprimir. Revisá la impresora o QZ Tray.'
 const ESC_POS_CP850 = '\x1B\x74\x02'
 const ESC_POS_CORTE = '\x1B\x64\x04\x1D\x56\x00'
 
@@ -51,6 +59,22 @@ export interface Impresora {
   // (`imprimirComanda`, `obtenerImpresoraBoleta`) nunca los piden.
   eliminadoEl?: string | null
   eliminadoPorNombre?: string | null
+}
+
+/**
+ * Lo que devuelve `GET /impresoras/operacion` (`ImpresorasService.listarOperativas`
+ * en el backend) — solo los 6 campos que el navegador necesita para hablarle a QZ
+ * Tray, ya filtrado a `activo` y sin auditoría ni `tenantId`. La usan los tres
+ * caminos que IMPRIMEN (`imprimirComanda`, `obtenerImpresoraBoleta`); la pantalla
+ * de configuración sigue con `Impresora` vía `listar()`.
+ */
+export interface ImpresoraOperativa {
+  id: string
+  tipoConexion: TipoConexionImpresora
+  host: string | null
+  puerto: number | null
+  nombreCola: string | null
+  activo: boolean
 }
 
 export interface ImpresoraFormBody {
@@ -122,14 +146,36 @@ async function asegurarSeguridadQz(
 }
 
 async function imprimirEn(
-  impresora: Impresora,
+  impresora: ImpresoraOperativa,
   lineas: string[],
   apiUrl: string,
 ): Promise<void> {
   const qz = await getQz()
   await asegurarSeguridadQz(qz, apiUrl)
+  const destino = impresora.tipoConexion === 'red'
+    ? `${impresora.host}:${impresora.puerto}`
+    : impresora.nombreCola
   if (!qz.websocket.isActive()) {
-    await qz.websocket.connect()
+    try {
+      await conTimeout(qz.websocket.connect(), PRINT_TIMEOUT_MS, CONNECT_TIMEOUT_MSG)
+    }
+    catch (err) {
+      const vencioElTecho = err instanceof Error && err.message === CONNECT_TIMEOUT_MSG
+      if (vencioElTecho) {
+        // `conTimeout` solo rechaza, no cancela: el intento de `connect()`
+        // sigue vivo dentro de `qz` (singleton de la pestaña, `getQz()`), en
+        // CONNECTING o ya OPEN esperando el diálogo de autorización. Sin
+        // soltarlo acá, el siguiente intento falla al instante con el error
+        // de qz-tray "The current connection attempt has not returned yet"
+        // (medido, docs/agent/pendientes.md § 3). No se espera a que
+        // `disconnect()` termine de cerrar (sin reintento automático, regla
+        // del owner: alcanza con dispararlo para que el próximo `connect()`
+        // ya no vea la conexión vieja como activa).
+        void qz.websocket.disconnect().catch(() => {})
+      }
+      console.error(`[qz] connect falló → ${destino}`, err)
+      throw vencioElTecho ? err : new Error(PRINT_ERROR_MSG)
+    }
   }
   // "Red": QZ abre un socket raw a host:puerto (ESC/POS TCP 9100) y escribe los
   // bytes directamente, sin pasar por una cola del SO. Las líneas lógicas se unen
@@ -151,13 +197,11 @@ async function imprimirEn(
     )
   }
   catch (err) {
-    // Log del motivo real del rechazo de QZ Tray (apiErrorMsg lo resume a un
-    // fallback genérico en el toast); útil para diagnosticar la impresora.
-    const destino = impresora.tipoConexion === 'red'
-      ? `${impresora.host}:${impresora.puerto}`
-      : impresora.nombreCola
+    // Log del motivo real del rechazo de QZ Tray (el toast, río abajo, muestra
+    // PRINT_TIMEOUT_MSG o PRINT_ERROR_MSG); útil para diagnosticar la impresora.
     console.error(`[qz] print falló → ${destino}`, err)
-    throw err
+    const esTimeout = err instanceof Error && err.message === PRINT_TIMEOUT_MSG
+    throw esTimeout ? err : new Error(PRINT_ERROR_MSG)
   }
 }
 
@@ -165,12 +209,12 @@ export function useImpresoras() {
   const apiUrl = useRuntimeConfig().public.apiUrl
 
   /**
-   * `incluirEliminados` es opcional y por default `false`: esta misma función
-   * la usan los caminos de impresión —`imprimirComanda` → `listar('comanda')`,
-   * `obtenerImpresoraBoleta` → `listar('boleta')`— y NUNCA deben ver
-   * impresoras borradas, o el sistema intentaría imprimir en una que ya no
-   * existe. Solo la pantalla de papelera (`configuracion/impresoras.vue`) lo
-   * prende explícitamente.
+   * Listado de configuración — exige `Impresoras:Leer` en el backend. Los
+   * caminos que IMPRIMEN (`imprimirComanda`, `obtenerImpresoraBoleta`) ya NO
+   * pasan por acá: usan `listarOperativas()` → `GET /impresoras/operacion`,
+   * que solo alcanza con el permiso de cada camino y nunca trae borradas
+   * (el backend filtra `eliminado_el IS NULL` sin excepción). `incluirEliminados`
+   * lo prende solo la papelera (`configuracion/impresoras.vue`).
    */
   const listar = (rol?: RolImpresora, incluirEliminados = false) => {
     const params = new URLSearchParams()
@@ -179,6 +223,18 @@ export function useImpresoras() {
     const qs = params.toString()
     return useApiFetch<Impresora[]>(`${apiUrl}/impresoras${qs ? `?${qs}` : ''}`)
   }
+
+  /**
+   * `GET /impresoras/operacion` — para quien IMPRIME (`imprimirComanda`,
+   * `obtenerImpresoraBoleta`), no para quien administra la configuración.
+   * A diferencia de `listar()`, la alcanza con `Ventas:Crear`/`Salones:Operar`/
+   * `Ventas:Anular` (sin `Impresoras:Leer`, que hoy ningún rol operativo
+   * sembrado tiene — docs/agent/pendientes.md § 3, "Enviar a cocina exige
+   * Impresoras:Leer"). El backend ya filtra `activo: true` y `eliminado_el IS
+   * NULL`: acá no hace falta repetir ninguno de los dos filtros.
+   */
+  const listarOperativas = (rol: RolImpresora) =>
+    useApiFetch<ImpresoraOperativa[]>(`${apiUrl}/impresoras/operacion?rol=${rol}`)
 
   const crear = (body: ImpresoraFormBody) =>
     useApiFetch<Impresora>(`${apiUrl}/impresoras`, { method: 'POST', body })
@@ -208,7 +264,7 @@ export function useImpresoras() {
     contexto: { mesaNombre: string, cuentaNumero: number, garzonNombre: string | null },
     alReclamar?: (estaciones: ComandaEstacion[]) => void,
   ): Promise<ComandaEstacion[] | null> {
-    const impresoras = (await listar('comanda')).filter(i => i.activo)
+    const impresoras = await listarOperativas('comanda')
     if (impresoras.length === 0) return null
 
     const { estaciones } = await useApiFetch<ComandaPreviewResponse>(
@@ -235,9 +291,9 @@ export function useImpresoras() {
   }
 
   /** Primera impresora de boletas activa, o `null` si no hay ninguna (saltear print). */
-  async function obtenerImpresoraBoleta(): Promise<Impresora | null> {
-    const impresoras = await listar('boleta')
-    return impresoras.find(i => i.activo) ?? null
+  async function obtenerImpresoraBoleta(): Promise<ImpresoraOperativa | null> {
+    const impresoras = await listarOperativas('boleta')
+    return impresoras[0] ?? null
   }
 
   async function imprimirPrecuenta(input: {

@@ -256,16 +256,18 @@ let cuentasFusionadas: string[] = []
 /** Retiene el `POST /mesas/:id/cuentas/fusionar`: la fusión que aterriza tarde. */
 let fusionRetenida: Promise<void> | null = null
 /**
- * Lo que devuelve `GET /impresoras?rol=comanda`. Vacío por defecto: sin ninguna
- * activa, `imprimirComanda()` se saltea el flujo entero —ni reclama ni imprime—
- * y devuelve `null`, así que los tests que no hablan de comanda no se enteran.
+ * Lo que devuelve `GET /impresoras/operacion?rol=comanda` —el endpoint que usa
+ * quien IMPRIME, sin `Impresoras:Leer` (Tarea 3 del frente de impresión). Vacío
+ * por defecto: sin ninguna activa, `imprimirComanda()` se saltea el flujo
+ * entero —ni reclama ni imprime— y devuelve `null`, así que los tests que no
+ * hablan de comanda no se enteran.
  */
 let impresorasComanda: unknown[] = []
 /**
- * Lo que devuelve `GET /impresoras` para cualquier rol que **no** sea comanda —o
- * sea, lo que ve `obtenerImpresoraBoleta()`—. Vacío por defecto: sin impresora
- * activa, `imprimirPrecuenta` e `imprimirBoleta` cortan antes de armar el ticket
- * y los tests que no hablan de papel no se enteran.
+ * Lo que devuelve `GET /impresoras/operacion` para cualquier rol que **no** sea
+ * comanda —o sea, lo que ve `obtenerImpresoraBoleta()`—. Vacío por defecto: sin
+ * impresora activa, `imprimirPrecuenta` e `imprimirBoleta` cortan antes de
+ * armar el ticket y los tests que no hablan de papel no se enteran.
  */
 let impresorasBoleta: unknown[] = []
 /**
@@ -846,10 +848,10 @@ mockNuxtImport('useApiFetch', () => {
       }
       return cierreRetenido ? cierreRetenido.then(() => cerrado) : Promise.resolve(cerrado)
     }
-    if (ruta.endsWith('/impresoras')) {
-      // La URL **entera**, como en `/items`: `listar()` manda el rol por query
-      // y `obtenerImpresoraBoleta()` NO vuelve a filtrarlo del lado del
-      // cliente, así que un mock que ignore el `?rol=` haría pasar una
+    if (ruta.endsWith('/impresoras/operacion')) {
+      // La URL **entera**, como en `/items`: `listarOperativas()` manda el rol
+      // por query y `obtenerImpresoraBoleta()` NO vuelve a filtrarlo del lado
+      // del cliente, así que un mock que ignore el `?rol=` haría pasar una
       // impresora de comanda por impresora de boleta.
       return Promise.resolve(url.includes('rol=comanda') ? impresorasComanda : impresorasBoleta)
     }

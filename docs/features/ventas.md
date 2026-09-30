@@ -553,16 +553,16 @@ Implementado en 2026-06-30; rutas unificadas en 2026-07-01.
 | Detalle de venta | `/ventas?venta={uuid}` | Drawer lateral (`VentaDetalleDrawer`): líneas, totales, pagos, saldo; botón "Registrar pago" para `pendiente`/`pagada_parcial`; botón "Reimprimir boleta" (ver abajo) |
 | Punto de venta | `/ventas/pos` | Crear venta (ver sección POS arriba) |
 
-**Reimprimir boleta (2026-09-17):** visible con `Ventas:Anular` y en una venta `pagada` o
-`cancelada` (`puedeReimprimir`) — permiso y estado los enforcea la ruta, el `v-if` solo evita
-ofrecer lo que el backend va a rechazar.
-⚠️ **El backend ya acepta un segundo permiso; el botón todavía no (owner, 2026-09-30 —
-`docs/agent/pendientes.md` § 3).** `GET /ventas/:id/boleta` también reimprime para
-`Ventas:Leer` a secas (la cajera), solo la de su propia caja mientras siga abierta — 404 si
-no la ve, 403 si la ve pero no cumple (detalle en `GET /api/ventas/:id/boleta` más arriba).
-`puedeReimprimir` (`VentaDetalleDrawer.vue`) sigue mirando solo `Ventas:Anular`: la cajera con
-`Ventas:Leer` hoy no ve el botón aunque el backend ya la dejaría entrar — gemelo pendiente,
-Tarea 3 de `docs/superpowers/plans/2026-09-30-impresion-quien-opera.md`. Al apretarlo
+**Reimprimir boleta (2026-09-17; camino angosto de la cajera, 2026-09-30):** visible en una
+venta `pagada` o `cancelada` (`puedeReimprimir`) y con `Ventas:Anular` (el encargado, alcance
+de siempre) **o**, sin ese permiso, solo si la venta es de la caja FÍSICA propia y esa caja
+sigue `estado === 'abierta'` — `en_conciliacion` NO cuenta, mismo corte que
+`CajaService.bloquearCajaAbierta`. Gemelo exacto de `GET /ventas/:id/boleta`
+(`VentasService.reimprimirBoleta` / `reimprimirBoletaPropia`, detalle más arriba): permiso y
+estado los enforcea la ruta, el `v-if` solo evita ofrecer lo que el backend va a rechazar (404
+si la cajera no ve la venta, 403 si la ve pero no cumple la regla angosta — el toast muestra
+ese mensaje del backend tal cual). Una venta `online` cuelga de la caja virtual (sin dueño) y
+nunca matchea la caja activa del usuario, así que cae afuera sin chequeo aparte. Al apretarlo
 (no al abrir el drawer) pide `GET /ventas/:id/boleta` e imprime con `buildBoletaTicket`
 marcada `COPIA` (+ `ANULADA` si la venta se anuló) + la fecha/hora de la reimpresión
 (`ticket-builder.ts`, detalle en

@@ -111,6 +111,9 @@ interface NotaCredito {
 
 interface VentaDetalle {
   id: string
+  /** La caja con la que se cobró; `null` en una venta que nunca llegó a cobrarse
+   * como física. `puedeReimprimir` la usa para el camino angosto de la cajera. */
+  cajaId: string | null
   canal: string
   estado: string
   fecha: string
@@ -272,13 +275,33 @@ const puedeAnular = computed(() =>
 
 /**
  * Reimprimir: solo una venta pagada o anulada (owner, 2026-09-18). Espeja el
- * 400 de `GET /ventas/:id/boleta` (`VentasService.reimprimirBoleta`), que es el
- * que manda; esto evita ofrecer un botón que rebotaría.
+ * 400/403 de `GET /ventas/:id/boleta` (`VentasService.reimprimirBoleta` /
+ * `reimprimirBoletaPropia`), que es el que manda; esto evita ofrecer un botón
+ * que rebotaría.
+ *
+ * Dos caminos — gemelo exacto del backend (owner, 2026-09-30,
+ * `docs/agent/pendientes.md` § 3, "Conectar con QZ Tray tiene el mismo techo
+ * que imprimir", que reabrió la decisión del 17/9): `Ventas:Anular` (el
+ * encargado) siempre puede, igual que hoy. Sin ese permiso, solo si la venta
+ * es de la caja FÍSICA propia y esa caja sigue `estado === 'abierta'` —
+ * `en_conciliacion` NO cuenta, mismo corte literal que
+ * `CajaService.bloquearCajaAbierta` y que la capa angosta de
+ * `reimprimirBoletaPropia` en el backend. Una venta `online` cuelga de la caja
+ * virtual (sin dueño, `tipo: 'virtual'`) y `cajaStore.activa` solo trae cajas
+ * `fisica` (`CajaService.findActiva`): nunca matchean, así que cae afuera sin
+ * chequeo aparte.
  */
 const puedeReimprimir = computed(() =>
   !!venta.value
   && (venta.value.estado === 'pagada' || venta.value.estado === 'cancelada')
-  && permissionsStore.can('Ventas', 'Anular'),
+  && (
+    permissionsStore.can('Ventas', 'Anular')
+    || (
+      venta.value.cajaId !== null
+      && venta.value.cajaId === cajaStore.activa?.id
+      && cajaStore.activa?.estado === 'abierta'
+    )
+  ),
 )
 
 const totalReembolsado = computed(() => {

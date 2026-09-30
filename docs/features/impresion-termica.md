@@ -172,9 +172,10 @@ ticket no depende de que nadie lo use.
     exactamente igual que hoy — la reimpresión reusa el mismo builder, no uno
     aparte. `imprimirBoleta` (`useImpresoras.ts`) suma el mismo parámetro y lo
     pasa derecho. Único llamador: el botón "Reimprimir boleta" del detalle de
-    venta (`VentaDetalleDrawer.vue`, `puedeReimprimir` mira `Ventas:Anular` — el
-    backend también acepta `Ventas:Leer` a secas para la propia caja abierta desde
-    el 2026-09-30, el botón todavía no lo espeja, ver [`ventas.md`](./ventas.md)),
+    venta (`VentaDetalleDrawer.vue`, `puedeReimprimir`: `Ventas:Anular`, o sin
+    él, `Ventas:Leer` a secas con la venta de la caja física propia y esa caja
+    `abierta` — gemelo exacto del backend desde el 2026-09-30,
+    ver [`ventas.md`](./ventas.md)),
     que pide `GET /ventas/:id/boleta` — la boleta ya
     armada del lado del servidor, no un recálculo — al apretar el botón, no al
     abrir el drawer. El mapeo de `BoletaVenta.items[]` (`~/types/boleta.ts`) al

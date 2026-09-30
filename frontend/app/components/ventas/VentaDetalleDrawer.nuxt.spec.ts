@@ -16,7 +16,7 @@
 //   4. El total rotulado "Descuentos" incluye la plata de la promo — al revés
 //      que el ticket impreso, que la resta del agregado y la nombra aparte
 //      (`ticket-builder.ts`, `lineasTotalesConImpuestos`).
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import VentaDetalleDrawer from './VentaDetalleDrawer.vue'
 
@@ -93,6 +93,9 @@ const detalle = (
  */
 const VENTA = {
   id: 'v-1',
+  // La caja con la que se cobró — la usa `puedeReimprimir` en el camino sin
+  // `Ventas:Anular` (§ "reimprimir boleta (camino angosto...)" más abajo).
+  cajaId: 'caja-1',
   canal: 'fisico',
   estado: 'pagada',
   fecha: '2026-08-28T12:00:00.000Z',
@@ -292,7 +295,9 @@ mockNuxtImport('usePermissionsStore', () => {
 
 /** La boleta que devuelve `GET /ventas/:id/boleta`. Se cambia ANTES de montar. */
 let boletaActual: Record<string, unknown> | null = BOLETA_REIMPRESION
-/** Impresoras de rol `boleta`; vacío = `imprimirBoleta` no llama a QZ. */
+/** Impresoras de rol `boleta` que devuelve `GET /impresoras/operacion?rol=boleta`
+ * —el endpoint que usa quien IMPRIME, sin `Impresoras:Leer`. Vacío = `imprimirBoleta`
+ * no llama a QZ. */
 let impresorasBoleta: unknown[] = [IMPRESORA_BOLETA]
 
 /**
@@ -316,11 +321,18 @@ mockNuxtImport('useApiFetch', () => {
     // (destructurar `.certificado` de un array da `undefined`, que es el
     // camino "sin firmar" que `asegurarSeguridadQz` ya maneja), separarla deja
     // el mock diciendo la verdad sobre qué contesta cada ruta.
-    if (url.split('?')[0]!.endsWith('/impresoras')) return Promise.resolve(impresorasBoleta)
+    if (url.split('?')[0]!.endsWith('/impresoras/operacion')) return Promise.resolve(impresorasBoleta)
     if (url.includes('/tenants/razones-sociales')) return Promise.resolve([RAZON_SOCIAL])
     if (url.includes('/ventas/')) return Promise.resolve(structuredClone(documentoActual))
     return Promise.resolve([])
   }
+})
+
+// El Pinia se comparte entre los tests del archivo (mismo criterio que
+// `salones/index.nuxt.spec.ts`): sin este reset, la caja activa que deja
+// puesta un test del camino angosto (más abajo) sobrevive al siguiente.
+afterEach(() => {
+  useCajaStore().activa = null
 })
 
 /**
@@ -535,6 +547,85 @@ describe('VentaDetalleDrawer — reimprimir boleta', () => {
   it('aparece con el permiso Ventas:Anular — el mismo que exige la ruta', async () => {
     const wrapper = await montar()
     expect(botonReimprimir(wrapper)).toBeDefined()
+  })
+
+  /**
+   * Caja mínima para `cajaStore.activa` — solo los campos que
+   * `puedeReimprimir` y el tipo `Caja` (`~/stores/caja.ts`) exigen. `id` por
+   * default coincide con `VENTA.cajaId` ('caja-1'); un test de "otra caja" lo
+   * pisa.
+   */
+  function cajaActiva(estado: string, id = 'caja-1') {
+    return {
+      id,
+      tenantId: 'tenant-1',
+      usuarioId: 'user-1',
+      tipo: 'fisica',
+      estado,
+      saldoInicial: '10000.0000',
+      saldoFinal: null,
+      montoContado: null,
+      diferencia: null,
+      fechaApertura: '2026-09-30T12:00:00.000Z',
+      fechaCierre: null,
+      comentario: null,
+      cajonId: 'cajon-1',
+      cajonNombre: 'Caja 1',
+    }
+  }
+
+  /**
+   * Gemelo exacto del backend (`VentasService.exigirCajaPropiaAbierta`, owner
+   * 2026-09-30): sin `Ventas:Anular`, la cajera reimprime SOLO la boleta de su
+   * propia caja FÍSICA abierta. Los tres casos —propia y abierta, de otra
+   * caja, propia pero en conciliación— son el gemelo de los tres que fija el
+   * e2e del backend (`boleta-reimpresion.e2e-spec.ts`).
+   */
+  describe('camino angosto: sin Ventas:Anular, con la caja propia', () => {
+    it('aparece si la venta es de su caja y esa caja está abierta', async () => {
+      permisos = ['Ventas:Nota de crédito']
+      useCajaStore().activa = cajaActiva('abierta')
+      try {
+        const wrapper = await montar()
+        expect(botonReimprimir(wrapper)).toBeDefined()
+      }
+      finally {
+        permisos = ['Ventas:Anular', 'Ventas:Nota de crédito']
+      }
+    })
+
+    it('no aparece si la venta es de OTRA caja', async () => {
+      permisos = ['Ventas:Nota de crédito']
+      useCajaStore().activa = cajaActiva('abierta', 'caja-2')
+      try {
+        const wrapper = await montar()
+        expect(botonReimprimir(wrapper)).toBeUndefined()
+      }
+      finally {
+        permisos = ['Ventas:Anular', 'Ventas:Nota de crédito']
+      }
+    })
+
+    /**
+     * `en_conciliacion` sigue "ocupando" al cajero (`CajaService.findActiva`)
+     * pero NO cuenta como abierta para operar — mismo corte que
+     * `CajaService.bloquearCajaAbierta` y que la capa angosta del backend
+     * (`exigirCajaPropiaAbierta`). Mutante: sacar `cajaStore.activa?.estado
+     * === 'abierta'` de `puedeReimprimir` hace este test rojo (el botón
+     * aparecería igual, porque el resto de la condición — misma caja — sigue
+     * cumpliéndose).
+     */
+    it('no aparece si su propia caja está en conciliación', async () => {
+      permisos = ['Ventas:Nota de crédito']
+      useCajaStore().activa = cajaActiva('en_conciliacion')
+      try {
+        const wrapper = await montar()
+        expect(botonReimprimir(wrapper)).toBeUndefined()
+      }
+      finally {
+        permisos = ['Ventas:Anular', 'Ventas:Nota de crédito']
+      }
+    })
   })
 
   /**
