@@ -73,15 +73,6 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   y el guard de salida. Candidato: extraer ese bloque (franja + líneas del XML + apartadas) a un
   componente propio, sin tocar la lógica de `useDte.ts`.
 
-- [ ] **Ningún test afirma el estado del formulario DESPUÉS de que `persistirBorrador`
-  resuelve** (frontend, mismo hallazgo). Hoy lo único que protege que el `descuentoTotal` que
-  devuelve el servidor gane sobre el que se precargó desde el XML es el orden síncrono dentro de
-  `persistirBorrador`: `llenarDesde(res)` (`frontend/app/pages/compras/[id].vue:643`) seguido de
-  `origenDte.value = null` (`:650`). Si alguien invierte ese orden o cambia qué pisa a qué, ningún
-  test de `compras-carga.nuxt.spec.ts` lo cacha. Falta un test que dispare `guardar()`, resuelva
-  el POST/PATCH mockeado con un `descuentoTotal` distinto del precargado, y afirme que el
-  formulario queda con el valor del servidor.
-
 - [ ] **Declarar el índice único de `item_lote (item_id, codigo_lote)` que hoy existe solo en
   `startup-pos.sql`** (backend, re-medido el 2026-09-28; antes estaba en la § 5 como carrera de
   concurrencia). **La carrera que describía la entrada no existe:** el único `INSERT INTO item_lote`

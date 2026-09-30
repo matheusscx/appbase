@@ -1023,4 +1023,56 @@ describe('compras/[id] — cargar desde el XML (tarea 4)', () => {
     expect(confirmDuranteReplace).toBe(false)
     wrapper.unmount()
   })
+
+  it('el descuentoTotal que devuelve el servidor gana sobre el precargado del XML', async () => {
+    const wrapper = await montar()
+    await emitirCargar(wrapper, {
+      documento: documentoAndina(),
+      lectura: respuestaAndinaFleteSinAprender(),
+      proveedorId: PROVEEDOR_ANDINA.id,
+      rutProveedor: null,
+    })
+    await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
+
+    // Asocia la Fanta (obligatoria: `puedeGuardar` exige toda línea del XML asociada).
+    const fantaSelect = wrapper.findAllComponents({ name: 'USelectMenu' })
+      .filter(s => (s.props('items') as { value: string }[] | undefined)?.some(i => i?.value === FANTA.id))
+      .find(s => !s.props('modelValue'))
+    await emitir(fantaSelect!, FANTA.id)
+    await emitir(unidadSelect(wrapper, 1), 'u:unidad')
+
+    // El FLETE se asocia a CUALQUIER ítem (Harina) para destrabar "Guardar"
+    // —pero sigue sin precio en el XML—, así que `faltaAlgunPrecio` nunca se
+    // resuelve en esta lectura: el descuento de la factura ($2.100) no
+    // llega a autocompletarse (`origenDte.descuentoLlenado` queda en `false`).
+    const fleteSelect = wrapper.findAllComponents({ name: 'USelectMenu' })
+      .filter(s => (s.props('items') as { value: string }[] | undefined)?.some(i => i?.value === HARINA.id))
+      .find(s => !s.props('modelValue'))
+    await emitir(fleteSelect!, HARINA.id)
+    await emitir(unidadSelect(wrapper, 2), 'u:kg')
+    await wrapper.findAll('input[data-qa="compra-cantidad"]').at(2)!.setValue('5')
+    await new Promise(r => setTimeout(r, 10))
+    expect(descuentoInput(wrapper).props('modelValue')).toBe('')
+
+    await wrapper.find('form').trigger('submit')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(enviados).toHaveLength(1)
+    // El mock de `POST /compras` contesta `descuentoTotal: null` y `lineas: []`
+    // (servidor distinto del $2.100 precargado desde el XML). `llenarDesde`
+    // vacía `lineas.value` (sin `.dte`), lo que vuelve a destrabar
+    // `faltaAlgunPrecio` dentro de `descuentoDte` — el campo tiene que quedar
+    // en lo que dijo el servidor, no volver a los $2.100 de la factura.
+    //
+    // Por qué el servidor contesta `null` y no un monto propio distinto
+    // (p. ej. "1500"): `debeLlenarDescuentoDte` (`useDte.ts`) exige
+    // `descuentoActual === ''` para poder rellenar con el monto del XML — un
+    // valor no vacío ya bloquea el pisado SIN importar `origenDte`. Medido:
+    // con el servidor devolviendo "1500", el mutante que borra
+    // `origenDte.value = null` de `persistirBorrador` queda en VERDE — deja de
+    // discriminar. Con `null`, ese mutante da rojo (`expected '2100' to be ''`). Solo `null` (⇒ `descuentoActual` vuelve a `''`) deja pasar la
+    // condición y expone si `origenDte` se limpió a tiempo.
+    expect(descuentoInput(wrapper).props('modelValue')).toBe('')
+    wrapper.unmount()
+  })
 })

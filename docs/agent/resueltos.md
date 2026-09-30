@@ -23,6 +23,46 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Un test afirma el descuento del formulario después de que `persistirBorrador` resuelve (cerrada 2026-09-30)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Ningún test afirma el estado del formulario DESPUÉS de que `persistirBorrador`
+  resuelve** (frontend, mismo hallazgo). Hoy lo único que protege que el `descuentoTotal` que
+  devuelve el servidor gane sobre el que se precargó desde el XML es el orden síncrono dentro de
+  `persistirBorrador`: `llenarDesde(res)` (`frontend/app/pages/compras/[id].vue:643`) seguido de
+  `origenDte.value = null` (`:650`). Si alguien invierte ese orden o cambia qué pisa a qué, ningún
+  test de `compras-carga.nuxt.spec.ts` lo cacha. Falta un test que dispare `guardar()`, resuelva
+  el POST/PATCH mockeado con un `descuentoTotal` distinto del precargado, y afirme que el
+  formulario queda con el valor del servidor.
+
+### Lo medido: la premisa de la entrada era falsa
+
+La entrada decía que lo protegía el **orden** entre `llenarDesde(res)` y `origenDte.value = null`.
+No es así: invertir esas dos líneas no cambia nada. El `watch(descuentoDte)` usa el flush por
+defecto (`'pre'`), así que se encola y corre después de las dos asignaciones, que van en el mismo
+tick síncrono. Lo que protege es que `origenDte` se limpie **antes del próximo flush**, en
+cualquier orden. Y solo importa cuando el servidor contesta `descuentoTotal: null`: con un monto
+no vacío, `debeLlenarDescuentoDte` (`useDte.ts`) ya bloquea el pisado por sí sola, porque exige
+que el campo esté vacío.
+
+### Qué se hizo
+
+Un test en `compras-carga.nuxt.spec.ts`: precarga la factura de Andina con el FLETE asociado a un
+ítem sin precio (así el descuento de $2.100 del XML no llega a autocompletarse), guarda, el
+`POST /compras` mockeado contesta `descuentoTotal: null` con `lineas: []`, y afirma que el campo
+queda vacío en vez de volver a los $2.100. El porqué del `null` está escrito en el test.
+
+### Qué lo fija
+
+| Mutante en `persistirBorrador` | Resultado |
+|---|---|
+| borrar `origenDte.value = null` | rojo: `expected '2100' to be ''` |
+| invertir el orden de las dos líneas | verde: no es el mecanismo (ver arriba) |
+| (servidor con `"1500"` en vez de `null`, sin el mutante de arriba) | el mutante de borrar queda verde: por eso el test usa `null` |
+
 ## El % de anulaciones por garzón tiene su e2e entre tenants (cerrada 2026-09-30)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.
