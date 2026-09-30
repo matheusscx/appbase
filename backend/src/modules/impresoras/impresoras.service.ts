@@ -15,6 +15,13 @@ export type ImpresoraConAuditoria = Impresora & {
   eliminadoPorNombre?: string | null;
 };
 
+/** Lo que necesita el navegador para hablarle a QZ Tray — nada de auditoría
+ * ni de `tenantId`. Ver `ImpresorasService.listarOperativas`. */
+export type ImpresoraOperativa = Pick<
+  Impresora,
+  'id' | 'tipoConexion' | 'host' | 'puerto' | 'nombreCola' | 'activo'
+>;
+
 @Injectable()
 export class ImpresorasService {
   constructor(
@@ -59,6 +66,37 @@ export class ImpresorasService {
       ...impresora,
       eliminadoPorNombre: raw[i].i_eliminado_por_nombre,
     }));
+  }
+
+  /**
+   * Impresoras **activas** de un rol, para quien imprime — no para quien
+   * administra la configuración (`listar`, arriba, exige `Impresoras:Leer`).
+   * `select` proyecta solo los 6 campos que usa el camino de impresión
+   * (`frontend/app/composables/useImpresoras.ts`): sin `tenantId`, sin
+   * `nombre`, sin timestamps ni campos de auditoría. `activo: true` en el
+   * `where` (no un filtro después) porque una impresora apagada no es un dato
+   * operativo — nadie va a intentar imprimir en ella.
+   *
+   * `eliminado_el IS NULL` lo pone `@DeleteDateColumn` solo: `.find()` sin
+   * `withDeleted()` ya lo filtra (mismo comportamiento que `listar` arriba sin
+   * `incluirEliminados`).
+   */
+  async listarOperativas(
+    tenantId: string,
+    rol: RolImpresora,
+  ): Promise<ImpresoraOperativa[]> {
+    return this.impresoraRepo.find({
+      where: { tenantId, rol, activo: true },
+      select: {
+        id: true,
+        tipoConexion: true,
+        host: true,
+        puerto: true,
+        nombreCola: true,
+        activo: true,
+      },
+      order: { id: 'ASC' },
+    });
   }
 
   async crear(tenantId: string, dto: CreateImpresoraDto): Promise<Impresora> {
