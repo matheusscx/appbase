@@ -41,6 +41,42 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
+- [ ] **Dos e2e afirman sobre la primera página de 100: recorrer todas** (backend, test; medido
+  el 2026-09-30, venía de la § 2). `nota-credito-composicion.e2e-spec.ts` (~312 y ~323) afirma
+  que el ítem "Ajuste" no aparece en `GET /api/items`, y `venta-total-cero.e2e-spec.ts` (~163),
+  que ninguna venta de `GET /api/ventas?estado=pendiente` tiene total 0; los dos piden solo
+  `pageSize=100` sin `page`. **La API ya alcanza:** `page` + `pageSize` (máx. 100) y
+  `meta.totalPages` (`common/utils/pagination.util.ts`), en los dos endpoints. **El arreglo:**
+  un helper que recorra `page=1..meta.totalPages` y junte `data`, usado por los dos specs (no
+  existe uno en `backend/test`). Qué cambia en cada uno: en Ajuste la exclusión es un `WHERE`
+  (`items.service.ts:636`) que vale para todas las páginas, así que hoy no miente, pero si
+  alguien saca esa línea con más de 100 ítems alfabéticamente antes, el test deja de cazarlo.
+  En la venta de $0 el riesgo es actual: con más de 100 pendientes (`ORDER BY creado_el DESC`),
+  una vieja con total 0 queda fuera y el test pasa en falso. `search=Ajuste` no sirve: prueba
+  un listado angosto, no el que usan los selectores. Mutante: sacar el `WHERE` de `:636` y
+  sembrar más de 100 ítems antes de "Ajuste"; debe dar rojo.
+
+- [ ] **Sacar la fila de línea de `pages/compras/[id].vue` a un componente, con emits y sin
+  mutar la prop** (frontend; medido el 2026-09-30, venía de la § 2). La página tiene 1441
+  líneas; la fila es el `v-for="linea in lineas"` de ~1073-1207 (135 de template) más ~94 de
+  script que solo la sirve (`valorUnidad`, `onCambiarUnidad`, `presentacionesDeLinea`,
+  `cuentaDeLinea`, `unidadesCompatibles`, `opcionesUnidad`, `onSeleccionarItem`,
+  `onSeriesChange`): ~229 líneas. La franja del XML **no** se mueve: vive fuera de
+  `v-if="cargando"` (se puede cargar la factura con los catálogos en vuelo) y adentro de un
+  componente quedaría atada a `!cargando`. **El contrato sigue a `ventas/CarritoPanel.vue`**:
+  la línea entra como prop de solo lectura y cada cambio sale por un emit con su valor, y la
+  escritura la hace la página. No se toma la otra forma medida (`defineModel` o v-model sobre
+  campos de la prop): cabe con 4 props y 4 emits, pero es mutar la prop, y los dos precedentes
+  del repo (CarritoPanel y `compras/CorregirLineaModal.vue`) la evitan. **Lo que queda en la
+  página:** `quitarLinea` y `apartarLinea`, que reasignan `lineas` o tocan varias filas con la
+  misma `dte.clave`; y el modal único de presentación (`abrirNuevaPresentacion`,
+  `abrirEditarPresentacion`), fuera del `v-for`; a la fila bajan solo sus botones, como emit.
+  `onSeleccionarItem` resetea 6 campos de una vez, así que sube a la página como un solo emit
+  (`seleccionar-item`), no seis. Props: `linea`, `productoOpts`, `presentaciones`,
+  `proveedorId`. Nada sale de `useDte.ts`: la fila solo lee `linea.dte.*`. `persistirBorrador`
+  corre solo desde Guardar/Confirmar y no hay debounce, así que el orden que fija
+  `compras-carga.nuxt.spec.ts` no depende de la fila.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -70,34 +106,6 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 `cargarPendientesTestigo` y `abrirEntrarTurno` no están atadas a una cuenta. Lo **cerrado** de
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
-
-- [ ] **`pages/compras/[id].vue` tiene 1441 líneas, y el corte que proponía la entrada no lo
-  achica** (frontend; medido el 2026-09-30 en la tanda de chicos, venía de la § 1). La entrada
-  proponía extraer la franja del XML, las líneas por asociar y las apartadas a un componente. Una
-  sesión lo midió y lo intentó. **La franja no se puede mover sin cambiar conducta:** vive fuera del
-  `v-if="cargando"`, y el botón que abre el modal del XML tampoco depende de `cargando`, así que hoy
-  se puede cargar la factura con los catálogos todavía en vuelo. Meterla en un componente dentro del
-  bloque editable la ataría a `!cargando`. **Lo que sí se podía extraer** (las apartadas y el aviso
-  de "faltan N por asociar") bajaba la página 29 líneas y sumaba un archivo de 68. Se descartó: es el
-  2 % y no cambia el problema. **Lo que pesa de verdad** es la fila de cada línea, con la edición
-  (producto, cantidad, unidad, precio) entrelazada con las insignias del XML (calzó, por asociar,
-  nota, ajuste). Extraerla es diseñar el contrato de un componente de línea, no un refactor mecánico.
-  **Qué medir antes de tomarla:** qué estado de la página lee y escribe la fila, y si ese contrato
-  cabe en props y emits sin mover lógica fuera de `useDte.ts`. El orden síncrono de
-  `persistirBorrador` lo fija un test de `compras-carga.nuxt.spec.ts` y no se toca.
-
-- [ ] **Dos e2e afirman una ausencia o un invariante sobre la primera página de 100, y ningún
-  filtro existente los acota sin cambiar qué prueban** (backend, test; quedaron del cierre de
-  los ocho specs de la página, 2026-09-30, en [`resueltos.md`](resueltos.md)).
-  `nota-credito-composicion.e2e-spec.ts` (~313, ~324) afirma que el ítem "Ajuste" no aparece en
-  ningún listado del catálogo: con la página llena pasa en falso. Acotarlo por `search=Ajuste`
-  cambia la prueba de "el listado que usan los selectores nunca lo trae" a "un listado angosto no
-  lo trae", y el nombre lo genera el servidor, así que no admite marca.
-  `venta-total-cero.e2e-spec.ts` (~163) afirma que ninguna venta pendiente tiene total 0 sobre una
-  página que puede quedar parcial, y no hay filtro que la acote sin sacar ventas pendientes del
-  chequeo. **Qué medir:** si cada uno se puede reescribir sin depender de la página, por ejemplo
-  recorriendo todas las páginas o contando con `meta.total` y un filtro que ya exista. Si no se
-  puede sin tocar la API, cruza con la grilla paginada de la § 3.
 
 - [ ] **Tests de pantalla que no terminan en 20 s con la máquina cargada** (frontend,
   intermitente, visto el 2026-09-28; medido el 2026-09-29 por la orquestadora sin reproducirlo).
