@@ -145,9 +145,18 @@ Sale de [`pendientes.md`](pendientes.md) § 3.
 | Ventas no carga la caja | rojo: el spec de la página |
 | sin `Items:Leer` en el seed | rojo: el garzón vuelve a 403 en `/items` |
 
-**Sin verificar:** un QZ Tray real con el diálogo de autorización sin contestar. El test del segundo intento
-modela el `disconnect()` con un mock; en qz-tray real hay además un estado `CLOSING` breve en el que
-`connect()` rechaza con otro mensaje, y ese caso cae en el aviso genérico.
+**Verificado después del cierre (2026-09-30), en navegador y contra el QZ Tray real de la Mac del owner**
+(specs descartables en un worktree con stack propio, sin commitear):
+- **Ana (`ana.torres`, rol Salón) carga el catálogo y pide:** entra a su turno, abre una cuenta, las 6
+  lecturas de `/items` vuelven 200 y el plato suma `$1.190`. El mutante (sacar `Items:Leer` del seed y
+  resetear) no se pudo correr en el navegador: lo bloqueó el control de permisos del harness. El de la
+  API sí estaba corrido, arriba.
+- **El techo funciona:** sin certificado, QZ muestra *"An anonymous request wants to connect — Untrusted
+  website"*, el socket queda abierto esperando la respuesta y a los 5,4 s sale *"No se pudo conectar con
+  QZ Tray (timeout 5 s)"*.
+- **El segundo intento NO vuelve a conectar, al revés de lo que afirma el mock:** falla al instante con
+  el aviso genérico, porque qz-tray rechaza con *"Waiting for previous disconnect request to complete"*
+  mientras el diálogo siga sin contestar. Quedó como entrada en [`pendientes.md`](pendientes.md) § 1.
 
 ## El Postgres local y el de CI son `postgres:18` glibc, la misma versión mayor que el demo (cerrada 2026-09-30)
 

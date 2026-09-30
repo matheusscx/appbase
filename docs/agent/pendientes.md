@@ -41,6 +41,28 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
+- [ ] **Con QZ Tray esperando que autoricen la conexión, el segundo intento de imprimir falla al
+  instante con un aviso que culpa a la impresora** (frontend, `useImpresoras.ts`; medido el
+  2026-09-30 contra el QZ Tray real de la Mac del owner, sin certificado). **Lo que pasa:** el primer
+  intento abre el socket (`Established connection with QZ Tray on ws://localhost:8182`) y QZ muestra
+  su diálogo *"An anonymous request wants to connect — Untrusted website"*. A los 5 s el techo corta con
+  *"No se pudo conectar con QZ Tray (timeout 5 s)"* y dispara `qz.websocket.disconnect()`, pero ese
+  cierre no termina mientras el diálogo siga abierto: el socket nunca emitió `close`. El segundo
+  intento no abre socket nuevo; qz-tray rechaza al toque con *"Waiting for previous disconnect request
+  to complete"*, y la pantalla muestra *"No se pudo imprimir. Revisá la impresora o QZ Tray."*. Así
+  sigue en cada intento hasta que alguien conteste el diálogo. **Lo que queda falso:** el comentario del
+  catch (`useImpresoras.ts`, bloque `vencioElTecho`) y la fila *"sin soltar la conexión"* del cierre en
+  [`resueltos.md`](resueltos.md) dicen que el segundo intento vuelve a conectar; lo midió un mock de
+  `disconnect()` que cierra en el acto. **El arreglo:** reconocer ese rechazo de qz-tray (y el de
+  *"The current connection attempt has not returned yet"*, que el comentario ya nombra) y mostrar un
+  aviso que diga qué hacer, por ejemplo *"QZ Tray está esperando que autorices la conexión en su
+  ventana"*, en vez del genérico. Sin reintento automático (regla del owner). El test va con un mock
+  cuyo `disconnect()` quede pendiente, que es lo que hace el real. **Docs:** `impresion-termica.md`
+  dice que en modo no firmado el diálogo sale *"hasta que el usuario marca recordar"*; con una
+  petición anónima QZ **no deja** marcar recordar para *Allow* (visto por el owner). La salida real
+  al diálogo es el certificado (`QZ_PRIVATE_KEY`/`QZ_CERTIFICATE` más el cert confiado en cada
+  equipo), que ya está construido; corregir la frase.
+
 - [ ] **Dos e2e afirman sobre la primera página de 100: recorrer todas** (backend, test; medido
   el 2026-09-30, venía de la § 2). `nota-credito-composicion.e2e-spec.ts` (~312 y ~323) afirma
   que el ítem "Ajuste" no aparece en `GET /api/items`, y `venta-total-cero.e2e-spec.ts` (~163),
