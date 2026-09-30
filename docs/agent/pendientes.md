@@ -41,12 +41,6 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
-- [ ] **`pages/compras/[id].vue` quedó en ~1225 líneas después de la pieza del XML** (frontend,
-  mismo hallazgo). La lógica ya vive en `useDte.ts` (spec § 6, "dónde vive la lógica"): lo que
-  creció fue el cableado — el modal, el reemplazo de lo cargado, las líneas por asociar/apartadas
-  y el guard de salida. Candidato: extraer ese bloque (franja + líneas del XML + apartadas) a un
-  componente propio, sin tocar la lógica de `useDte.ts`.
-
 - [ ] **Alinear el Postgres local y el de CI con el del demo: `postgres:18` glibc** (entorno;
   decidido por el owner el 2026-09-29 en el selector interactivo de la orquestadora, entre "todo a
   18" y "recrear el demo con la 15"; juntó dos entradas que venían de la § 2). **Por qué:** el
@@ -111,6 +105,21 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 `cargarPendientesTestigo` y `abrirEntrarTurno` no están atadas a una cuenta. Lo **cerrado** de
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
+
+- [ ] **`pages/compras/[id].vue` tiene 1441 líneas, y el corte que proponía la entrada no lo
+  achica** (frontend; medido el 2026-09-30 en la tanda de chicos, venía de la § 1). La entrada
+  proponía extraer la franja del XML, las líneas por asociar y las apartadas a un componente. Una
+  sesión lo midió y lo intentó. **La franja no se puede mover sin cambiar conducta:** vive fuera del
+  `v-if="cargando"`, y el botón que abre el modal del XML tampoco depende de `cargando`, así que hoy
+  se puede cargar la factura con los catálogos todavía en vuelo. Meterla en un componente dentro del
+  bloque editable la ataría a `!cargando`. **Lo que sí se podía extraer** (las apartadas y el aviso
+  de "faltan N por asociar") bajaba la página 29 líneas y sumaba un archivo de 68. Se descartó: es el
+  2 % y no cambia el problema. **Lo que pesa de verdad** es la fila de cada línea, con la edición
+  (producto, cantidad, unidad, precio) entrelazada con las insignias del XML (calzó, por asociar,
+  nota, ajuste). Extraerla es diseñar el contrato de un componente de línea, no un refactor mecánico.
+  **Qué medir antes de tomarla:** qué estado de la página lee y escribe la fila, y si ese contrato
+  cabe en props y emits sin mover lógica fuera de `useDte.ts`. El orden síncrono de
+  `persistirBorrador` lo fija un test de `compras-carga.nuxt.spec.ts` y no se toca.
 
 - [ ] **Dos e2e afirman una ausencia o un invariante sobre la primera página de 100, y ningún
   filtro existente los acota sin cambiar qué prueban** (backend, test; quedaron del cierre de
