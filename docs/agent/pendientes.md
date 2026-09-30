@@ -41,41 +41,6 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
-- [ ] **Alinear el Postgres local y el de CI con el del demo: `postgres:18` glibc** (entorno;
-  decidido por el owner el 2026-09-29 en el selector interactivo de la orquestadora, entre "todo a
-  18" y "recrear el demo con la 15"; juntó dos entradas que venían de la § 2). **Por qué:** el
-  demo de Railway corre `PostgreSQL 18.6 (Debian …)` (`select version()`, corrido por el owner),
-  CI prueba contra `postgres:15` y el local contra `postgres:15-alpine`. Un deploy nunca se había
-  probado contra la versión que lo recibe. Además el local es el único que ordena texto distinto:
-  la alpine está compilada contra musl, y aunque reporta `lc_collate = en_US.utf8` ordena por
-  bytes (`SELECT 'apagada' < 'Subsuelo'` da `f`, en glibc da `t`). Así se explicó que
-  `compras-pagos.e2e-spec.ts` pasara en local y cayera en CI (lo levantó la sesión de compras
-  pieza 3). **Medido que alinear no rompe nada:** el `test:e2e` completo dio 96 suites y 1262 tests
-  en verde, con 6 salteados, tanto sobre `postgres:15` glibc como sobre `postgres:18` (18.6 Debian,
-  la misma del demo, 478 s), igual que sobre musl en `cf3ea4a0`. **Bajar el demo a 15 se
-  descartó:** en Railway la versión es la etiqueta de la imagen del servicio, y no hay camino para
-  bajar de versión mayor: la 15 no lee el directorio de la 18, así que habría que recrear la base.
-  **Qué hacer (mecánico, pero no es solo la etiqueta):**
-  - `postgres:15-alpine` → `postgres:18` en `docker-compose.yml:28` y `scripts/entorno.sh:322`, y
-    `postgres:15` → `postgres:18` en los dos `services` de `.github/workflows/ci.yml` (29 y 148).
-  - **Cambiar también dónde se monta la base.** La imagen 18 guarda los datos en
-    `PGDATA=/var/lib/postgresql/18/docker` y declara el volumen en `/var/lib/postgresql`. El
-    compose monta `postgres_data:/var/lib/postgresql/data` y `entorno.sh` hace
-    `--tmpfs /var/lib/postgresql/data`: con solo la etiqueta nueva, la base queda afuera del
-    volumen nombrado y afuera del tmpfs (a disco, en un volumen anónimo), sin error. Los dos pasan
-    a `/var/lib/postgresql`. Y si el entrypoint encuentra datos en el `…/data` viejo, se niega a
-    arrancar (`Error: in 18+, these Docker images are configured to store database data…`, en
-    `docker-entrypoint.sh` de la imagen): el volumen del checkout principal se recrea con
-    `reset-db.sh`, y cada worktree con `entorno.sh db`/`stack`. No hay datos que perder.
-  - Correr `check-aislamiento.mjs`, que mira el compose y `entorno.sh`.
-  - Verificar con el tmpfs puesto: `docker exec <contenedor> df -h /var/lib/postgresql` debe decir
-    `tmpfs`, y el `test:e2e` completo en verde.
-  - Corregir el "PostgreSQL 15" de `CLAUDE.md` (sección Visión), `README.md:9` y
-    `docs/ARCHITECTURE.md:12`. Los planes viejos y los comentarios fechados ("medido contra el
-    Postgres 15 del compose") quedan: son fotos de su día.
-  - **Costo:** la imagen pesa 666 MB (la alpine 15, 408 MB) y ya está descargada en la Mac del
-    owner.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:

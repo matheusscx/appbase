@@ -23,6 +23,74 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El Postgres local y el de CI son `postgres:18` glibc, la misma versión mayor que el demo (cerrada 2026-09-30)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Alinear el Postgres local y el de CI con el del demo: `postgres:18` glibc** (entorno;
+  decidido por el owner el 2026-09-29 en el selector interactivo de la orquestadora, entre "todo a
+  18" y "recrear el demo con la 15"; juntó dos entradas que venían de la § 2). **Por qué:** el
+  demo de Railway corre `PostgreSQL 18.6 (Debian …)` (`select version()`, corrido por el owner),
+  CI prueba contra `postgres:15` y el local contra `postgres:15-alpine`. Un deploy nunca se había
+  probado contra la versión que lo recibe. Además el local es el único que ordena texto distinto:
+  la alpine está compilada contra musl, y aunque reporta `lc_collate = en_US.utf8` ordena por
+  bytes (`SELECT 'apagada' < 'Subsuelo'` da `f`, en glibc da `t`). Así se explicó que
+  `compras-pagos.e2e-spec.ts` pasara en local y cayera en CI (lo levantó la sesión de compras
+  pieza 3). **Medido que alinear no rompe nada:** el `test:e2e` completo dio 96 suites y 1262 tests
+  en verde, con 6 salteados, tanto sobre `postgres:15` glibc como sobre `postgres:18` (18.6 Debian,
+  la misma del demo, 478 s), igual que sobre musl en `cf3ea4a0`. **Bajar el demo a 15 se
+  descartó:** en Railway la versión es la etiqueta de la imagen del servicio, y no hay camino para
+  bajar de versión mayor: la 15 no lee el directorio de la 18, así que habría que recrear la base.
+  **Qué hacer (mecánico, pero no es solo la etiqueta):**
+  - `postgres:15-alpine` → `postgres:18` en `docker-compose.yml:28` y `scripts/entorno.sh:322`, y
+    `postgres:15` → `postgres:18` en los dos `services` de `.github/workflows/ci.yml` (29 y 148).
+  - **Cambiar también dónde se monta la base.** La imagen 18 guarda los datos en
+    `PGDATA=/var/lib/postgresql/18/docker` y declara el volumen en `/var/lib/postgresql`. El
+    compose monta `postgres_data:/var/lib/postgresql/data` y `entorno.sh` hace
+    `--tmpfs /var/lib/postgresql/data`: con solo la etiqueta nueva, la base queda afuera del
+    volumen nombrado y afuera del tmpfs (a disco, en un volumen anónimo), sin error. Los dos pasan
+    a `/var/lib/postgresql`. Y si el entrypoint encuentra datos en el `…/data` viejo, se niega a
+    arrancar (`Error: in 18+, these Docker images are configured to store database data…`, en
+    `docker-entrypoint.sh` de la imagen): el volumen del checkout principal se recrea con
+    `reset-db.sh`, y cada worktree con `entorno.sh db`/`stack`. No hay datos que perder.
+  - Correr `check-aislamiento.mjs`, que mira el compose y `entorno.sh`.
+  - Verificar con el tmpfs puesto: `docker exec <contenedor> df -h /var/lib/postgresql` debe decir
+    `tmpfs`, y el `test:e2e` completo en verde.
+  - Corregir el "PostgreSQL 15" de `CLAUDE.md` (sección Visión), `README.md:9` y
+    `docs/ARCHITECTURE.md:12`. Los planes viejos y los comentarios fechados ("medido contra el
+    Postgres 15 del compose") quedan: son fotos de su día.
+  - **Costo:** la imagen pesa 666 MB (la alpine 15, 408 MB) y ya está descargada en la Mac del
+    owner.
+
+### Qué se hizo
+
+- `docker-compose.yml` y `scripts/entorno.sh`: `postgres:15-alpine` → `postgres:18`. Los dos `services`
+  de `.github/workflows/ci.yml`: `postgres:15` → `postgres:18`.
+- Dónde se monta la base: el volumen nombrado del compose y el tmpfs de `entorno.sh` pasan de
+  `/var/lib/postgresql/data` a `/var/lib/postgresql`, con el porqué en un comentario al lado.
+- "PostgreSQL 15" → "PostgreSQL 18" en `CLAUDE.md`, `README.md` y `docs/ARCHITECTURE.md`.
+
+### Qué lo fija
+
+Medido el 2026-09-30 en el worktree de la tanda:
+
+- `entorno.sh db`: `select version()` da `PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2)`, `data_directory`
+  es `/var/lib/postgresql/18/docker`, y `df -h /var/lib/postgresql` dice `tmpfs`.
+- Compose, con un proyecto desechable en otro puerto: el único montaje es el volumen nombrado en
+  `/var/lib/postgresql` (sin volumen anónimo) y los datos quedan adentro.
+- `SELECT 'apagada' < 'Subsuelo'` da `t`, como en CI y en el demo (la alpine daba `f`).
+- `check-aislamiento.mjs` en verde.
+- El gate completo de la rama corrió sobre esa base 18.
+
+⚠️ **El checkout principal y cada worktree con stack tienen que recrear su base una vez.** Medido:
+la 18 sobre un volumen creado por la `15-alpine` sale con `Exited (1)` y `mkdir: cannot create
+directory '/var/lib/postgresql': Permission denied` (el volumen es del usuario de la alpine, no del
+de Debian). No es el error `in 18+…` que anticipaba la entrada, pero el remedio es el mismo: en el
+checkout principal `reset-db.sh`, que hace `down -v`; en un worktree `entorno.sh db` o `stack`. El
+modo `db` usa tmpfs y no arrastra nada. No hay datos que perder.
+
 ## Los listados que empataban en `creado_el` desempatan con una columna estable (cerrada 2026-09-30)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.

@@ -9,7 +9,7 @@
 
 - **Backend**: NestJS (TypeScript) REST API, puerto 3000
 - **Frontend**: Nuxt 4 (Vue 3) SPA — `ssr: false`, ver [ADR-017](adr/017-spa-sin-ssr.md) —, puerto 5173
-- **Database**: PostgreSQL 15 con TypeORM, puerto 5432 (interno)
+- **Database**: PostgreSQL 18 con TypeORM, puerto 5432 (interno)
 - **Orchestration**: Docker Compose
 
 Todo el stack corre en contenedores — no se requiere Node.js ni PostgreSQL local.

@@ -119,7 +119,7 @@ Node.js/PostgreSQL local):
 
 - **backend/** — NestJS (TypeScript), API REST puerto 3000 (Swagger en `3000/api/docs`)
 - **frontend/** — Nuxt 4 (Vue 3), SPA (`ssr: false`, ADR-017), puerto 5173
-- **PostgreSQL 15** — puerto 5432
+- **PostgreSQL 18** — puerto 5432
 
 (Esos son los puertos del **checkout principal**. Cada worktree corre en su propio offset:
 `./scripts/entorno.sh`, más abajo.)

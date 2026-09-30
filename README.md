@@ -6,7 +6,7 @@ Sistema SaaS de punto de venta y facturación multi-tenant. Full-stack con NestJ
 
 - **Backend** — NestJS (TypeScript), REST API on port 3000
 - **Frontend** — Nuxt 4 (Vue 3), on port 5173
-- **Database** — PostgreSQL 15
+- **Database** — PostgreSQL 18
 
 ## Getting started
 

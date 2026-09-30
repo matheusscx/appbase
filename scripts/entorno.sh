@@ -313,13 +313,16 @@ cmd_db() {
   ylw "▶ Recreando ${contenedor_db} en el puerto ${pg} (offset ${off})…"
   docker rm -f "$contenedor_db" >/dev/null 2>&1 || true
   # tmpfs: la base vive en memoria. Es desechable a propósito —cada reset empieza
-  # de cero— y así la suite no paga disco.
+  # de cero— y así la suite no paga disco. Va en /var/lib/postgresql y no en
+  # …/data: desde la 18 la imagen guarda los datos en /var/lib/postgresql/18/docker,
+  # y un tmpfs en …/data dejaría la base en disco sin avisar. La imagen es la misma
+  # versión mayor que el demo de Railway y que CI (ver docker-compose.yml).
   docker run -d --name "$contenedor_db" \
     -p "${pg}:5432" \
     -e POSTGRES_DB="$DB_NAME" -e POSTGRES_USER="$DB_USER" -e POSTGRES_PASSWORD="$DB_PASSWORD" \
-    --tmpfs /var/lib/postgresql/data \
+    --tmpfs /var/lib/postgresql \
     --label startup-app.worktree="$raiz" \
-    postgres:15-alpine >/dev/null
+    postgres:18 >/dev/null
   esperar_pg "$contenedor_db"
   escribir_env "$off" db
   grn "✓ Postgres aislado listo: ${contenedor_db} en localhost:${pg}, base vacía."
