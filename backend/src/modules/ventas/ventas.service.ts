@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
@@ -3582,6 +3583,88 @@ export class VentasService {
         `Solo se reimprime la boleta de una venta pagada o anulada (esta está "${boleta.estado}").`,
       );
     return boleta;
+  }
+
+  /**
+   * Reimpresión de quien NO tiene `Ventas:Anular` — solo `Ventas:Leer` (la
+   * cajera). Decisión del owner, 2026-09-30 (`docs/agent/pendientes.md` § 3,
+   * "Conectar con QZ Tray tiene el mismo techo que imprimir"): reimprime la
+   * boleta de una venta SOLO si es de su propia caja y esa caja sigue
+   * `abierta`, y nada más — el encargado (`Ventas:Anular`) sigue con el
+   * alcance de siempre en `reimprimirBoleta`.
+   *
+   * Dos capas, no una — la revisión de seguridad del 2026-09-30 encontró que
+   * una sola tiraba 403 también para una venta que la cajera NUNCA pudo ver,
+   * confirmando por otra puerta que esa venta existe (mismo hueco que la
+   * auditoría del 2026-08-22 le cerró a `findOne`, "un 403 confirmaría que
+   * existe"):
+   *
+   * 1. **Visibilidad = el alcance de siempre.** `reimprimirBoleta(...,
+   *    verTodas: false)` reusa `filtroDeMisCajas` tal cual —su caja en
+   *    CUALQUIER estado, más las `online`— sin duplicarlo a mano. Lo que ese
+   *    filtro deja afuera (la venta física de OTRA caja) nunca llega:
+   *    `armarBoleta` la filtra de la cabecera y da su 404 de siempre, igual
+   *    que `findOne`/`listar`.
+   * 2. **De lo que sí ve, reimprime menos.** `exigirCajaPropiaAbierta`
+   *    aplica la regla angosta —su caja Y `estado = 'abierta'`— sobre lo que
+   *    la capa 1 ya confirmó visible: la online (sin dueño) y su propia caja
+   *    ya cerrada o en conciliación caen acá, con 403.
+   *
+   * ⚠️ Sin lock entre las dos capas: la caja podría cerrarse en el medio (dos
+   * requests casi simultáneos, cajera cerrando mientras reimprime). Se
+   * acepta a propósito — esto solo imprime un papel, no mueve plata ni
+   * stock; el peor caso es una copia de una caja que cerró hace un instante.
+   */
+  async reimprimirBoletaPropia(
+    tenantId: string,
+    ventaId: string,
+    usuarioId: string,
+  ): Promise<BoletaVenta> {
+    const boleta = await this.reimprimirBoleta(
+      tenantId,
+      ventaId,
+      usuarioId,
+      false,
+    );
+    await this.exigirCajaPropiaAbierta(tenantId, ventaId, usuarioId);
+    return boleta;
+  }
+
+  /**
+   * La capa angosta de `reimprimirBoletaPropia` (ver su docblock): sobre una
+   * venta que YA se sabe visible —esta función corre después de
+   * `reimprimirBoleta`, que ya la encontró—, exige que la caja sea la del
+   * usuario Y siga `estado = 'abierta'`. Mismo corte literal que
+   * `CajaService.bloquearCajaAbierta` (`en_conciliacion` NO cuenta como
+   * abierta acá, ni para operar sobre la caja). Una venta `online` cuelga de
+   * la caja virtual, sin `usuario_id` (`cajas.usuario_id IS NULL`), así que
+   * nunca pasa el chequeo — la cajera no la tiene como suya, aunque SÍ la ve.
+   *
+   * Si la fila no aparece (que no debería: la venta ya existía hace un
+   * instante) el fallo es CERRADO — 403, no un pase silencioso — porque acá
+   * ya no es una pregunta de existencia sino de la caja, y no hay forma
+   * segura de leer "no sé" como "sí".
+   */
+  private async exigirCajaPropiaAbierta(
+    tenantId: string,
+    ventaId: string,
+    usuarioId: string,
+  ): Promise<void> {
+    const rows: { usuario_id: string | null; estado: string | null }[] =
+      await this.db.query(
+        `SELECT cj.usuario_id, cj.estado
+           FROM ventas v
+           LEFT JOIN cajas cj ON cj.caja_id = v.caja_id
+                  AND cj.tenant_id = v.tenant_id AND cj.eliminado_el IS NULL
+          WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL`,
+        [ventaId, tenantId],
+      );
+    const fila = rows[0];
+    if (!fila || fila.usuario_id !== usuarioId || fila.estado !== 'abierta') {
+      throw new ForbiddenException(
+        'Esa boleta la reimprime el encargado: no es de tu caja, o tu caja ya no está abierta.',
+      );
+    }
   }
 
   /**

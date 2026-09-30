@@ -146,8 +146,9 @@ Modelo: `rol → módulo contratado → permisos`
   ven la plata entre ellos ([`features/ventas.md`](features/ventas.md)).
   📌 **`Resumen del negocio` se vende junto con `Ventas`** (spec
   `2026-09-18-dashboard-inicio-design.md` § 5.4): es el dashboard de plata del dueño —vendido,
-  cobrado, por cobrar— y separado de `Ventas` para que la cajera (que solo necesita
-  `Ventas:Leer` para reimprimir una boleta) no vea cuánto factura el local. Misma advertencia
+  cobrado, por cobrar— y separado de `Ventas` para que la cajera (que con `Ventas:Leer`
+  reimprime la boleta de una venta de su propia caja abierta — sin `Ventas:Anular`, ver
+  más abajo) no vea cuánto factura el local. Misma advertencia
   que arriba: **el código no lo obliga**, es una regla comercial que sostiene el seed
   ([`features/roles-permisos.md`](features/roles-permisos.md)).
 - **Admin del tenant** — crea roles personalizados, les asigna módulos contratados y permisos, y los asigna a usuarios del tenant.
@@ -1012,9 +1013,16 @@ muestra un **modal informativo** con ambas fechas.
 - Distingue reglas aplicadas por línea vs globales (`aplicado_en`)
 - CRUD básico por `venta_id + tenant_id`
 
-**Reimprimir la boleta de una venta ya cobrada (2026-09-17):** botón en el detalle de la
-venta, visible con el mismo permiso que anula una venta (`Ventas/Anular` — no se creó uno
-nuevo). Devuelve exactamente el mismo papel que se imprimió al cobrar, marcado `COPIA` con
+**Reimprimir la boleta de una venta ya cobrada (2026-09-17, permiso reabierto 2026-09-18 y
+2026-09-30):** botón en el detalle de la venta. Dos niveles, sin permiso nuevo: quien tiene
+`Ventas:Anular` (el encargado) reimprime cualquier venta dentro de su alcance de siempre;
+quien solo tiene `Ventas:Leer` (la cajera) reimprime **solo** la de su propia caja, mientras
+esa caja siga abierta — decisión del owner del 2026-09-30
+([`docs/agent/pendientes.md`](agent/pendientes.md) § 3), que reabre en este punto la del
+17/9; visible bajo su propio alcance (404 si no la ve, 403 si la ve pero no cumple). ⚠️ El
+backend ya aplica esta regla; el BOTÓN del detalle de venta todavía solo se muestra con
+`Ventas:Anular` — gemelo pendiente en el frontend (`docs/features/ventas.md`). Devuelve
+exactamente el mismo papel que se imprimió al cobrar, marcado `COPIA` con
 la fecha y hora de la reimpresión; el original no lleva esa marca. No reemplaza a la nota de
 crédito — es el mismo documento tal como se cobró, no un documento tributario nuevo. ⚠️ **No
 distingue el estado de la venta**: hoy reimprime igual una venta `pagada`, una `cancelada` o

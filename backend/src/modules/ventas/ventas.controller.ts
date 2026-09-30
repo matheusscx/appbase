@@ -15,7 +15,10 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
-import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
+import {
+  RequiresPermiso,
+  RequiresAlgunPermiso,
+} from '../../common/decorators/requires-permiso.decorator';
 import { ClaveIdempotencia } from '../../common/decorators/clave-idempotencia.decorator';
 import { RbacService } from '../rbac/rbac.service';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
@@ -91,26 +94,53 @@ export class VentasController {
 
   /**
    * Reimprimir la boleta de una venta pagada o anulada — la que todavía no se
-   * cobró del todo da 400 (`VentasService.reimprimirBoleta`). Mismo permiso que `anular`
-   * (`Ventas:Anular`, el del encargado): es la operación sensible del módulo
-   * y el owner eligió no crear un permiso nuevo
-   * (`docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md` § 2).
+   * cobró del todo da 400 (`VentasService.reimprimirBoleta`).
    *
    * `GET /ventas/:id` no alcanza para esto: su `SELECT` no trae
    * `venta_detalles.personalizacion`, así que un plato con ingredientes
    * sacados o extras saldría distinto al original.
    *
-   * ⚠️ El permiso NO alcanza solo: igual que `findOne` (ver su docblock más
-   * abajo), esto pasa por el alcance de `resolverAlcanceDerivadoDeCaja`
-   * (eje `Cajas:Leer`, no `Ventas:Anular`) porque la boleta trae pagos con
-   * monto, vuelto y cajero — el mismo dato por el que la auditoría del
-   * 2026-08-22 le puso alcance a `findOne`. Sin esto, un usuario con `Anular`
-   * pero caja acotada podría reimprimir la boleta de una venta de otra caja.
+   * Dos niveles de permiso (owner, 2026-09-30 —
+   * `docs/agent/pendientes.md` § 3, "Conectar con QZ Tray tiene el mismo
+   * techo que imprimir"— reabre en este punto la decisión del 17/9 de
+   * `docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md` § 2):
+   *
+   * - **`Ventas:Anular`** (el encargado): sigue igual que siempre. ⚠️ El
+   *   permiso NO alcanza solo: igual que `findOne` (ver su docblock más
+   *   abajo), esto pasa por el alcance de `resolverAlcanceDerivadoDeCaja`
+   *   (eje `Cajas:Leer`, no `Ventas:Anular`) porque la boleta trae pagos con
+   *   monto, vuelto y cajero — el mismo dato por el que la auditoría del
+   *   2026-08-22 le puso alcance a `findOne`. Sin esto, un usuario con
+   *   `Anular` pero caja acotada podría reimprimir la boleta de una venta de
+   *   otra caja.
+   * - **`Ventas:Leer`** a secas (la cajera): reimprime **solo** si la venta
+   *   es de su propia caja y esa caja sigue `abierta` —
+   *   `VentasService.reimprimirBoletaPropia` hace ese chequeo en dos capas:
+   *   404 si la venta no es ni de su caja (en cualquier estado) ni `online`
+   *   (mismo alcance de siempre, `filtroDeMisCajas` — ni se entera de que
+   *   existe); 403 si SÍ la ve así pero no cumple la regla angosta (su caja
+   *   ya cerrada/en conciliación, o la `online`, sin dueño).
    */
   @Get(':id/boleta')
-  @RequiresPermiso('Ventas', 'Anular')
+  @RequiresAlgunPermiso(
+    { modulo: 'Ventas', permiso: 'Anular' },
+    { modulo: 'Ventas', permiso: 'Leer' },
+  )
   async boleta(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
+    const tieneAnular = await this.rbacService.userHasPermiso(
+      u.id,
+      u.tenantId!,
+      'Ventas',
+      'Anular',
+    );
+    if (!tieneAnular) {
+      return this.ventasService.reimprimirBoletaPropia(
+        u.tenantId ?? '',
+        id,
+        u.id,
+      );
+    }
     const verTodas = await this.rbacService.resolverAlcanceDerivadoDeCaja(
       u.id,
       u.tenantId!,

@@ -273,6 +273,16 @@ y el original dan el mismo papel. `BoletaVenta.estado` viaja en el payload: una 
 que sigue abierta. El filtro vive en `reimprimirBoleta`, no en `armarBoleta`: el cobro del
 POS también arma la boleta de una venta que queda pendiente.
 
+**Permiso, en dos capas (owner, 2026-09-30 — `docs/agent/pendientes.md` § 3):**
+`Ventas:Anular` (el encargado) reimprime con el alcance de siempre
+(`resolverAlcanceDerivadoDeCaja`). `Ventas:Leer` a secas (la cajera) reimprime solo si la
+venta es visible bajo ESE MISMO alcance (`filtroDeMisCajas`: su caja en cualquier estado, más
+las `online`) — si no, **404**, ni se entera de que existe, igual que `findOne`— y, de las que
+sí ve, solo la de su propia caja mientras esa caja siga `abierta` — si no (su caja ya
+cerrada/en conciliación, o la `online`, sin dueño), **403** con un mensaje que dice que la
+reimprime el encargado. Sin lock entre el chequeo de caja y el armado: la caja podría
+cerrarse en el medio de las dos consultas; se acepta porque esto solo imprime un papel.
+
 Exige `@RequiresPermiso('Ventas', 'Anular')` — el del encargado, sin permiso nuevo — y
 hereda el **mismo alcance por caja** que `GET /ventas/:id` (§ "Quién ve qué" abajo): la
 boleta trae pagos con su monto, el vuelto y el cajero, el mismo dato con el que se
@@ -545,7 +555,14 @@ Implementado en 2026-06-30; rutas unificadas en 2026-07-01.
 
 **Reimprimir boleta (2026-09-17):** visible con `Ventas:Anular` y en una venta `pagada` o
 `cancelada` (`puedeReimprimir`) — permiso y estado los enforcea la ruta, el `v-if` solo evita
-ofrecer lo que el backend va a rechazar. Al apretarlo
+ofrecer lo que el backend va a rechazar.
+⚠️ **El backend ya acepta un segundo permiso; el botón todavía no (owner, 2026-09-30 —
+`docs/agent/pendientes.md` § 3).** `GET /ventas/:id/boleta` también reimprime para
+`Ventas:Leer` a secas (la cajera), solo la de su propia caja mientras siga abierta — 404 si
+no la ve, 403 si la ve pero no cumple (detalle en `GET /api/ventas/:id/boleta` más arriba).
+`puedeReimprimir` (`VentaDetalleDrawer.vue`) sigue mirando solo `Ventas:Anular`: la cajera con
+`Ventas:Leer` hoy no ve el botón aunque el backend ya la dejaría entrar — gemelo pendiente,
+Tarea 3 de `docs/superpowers/plans/2026-09-30-impresion-quien-opera.md`. Al apretarlo
 (no al abrir el drawer) pide `GET /ventas/:id/boleta` e imprime con `buildBoletaTicket`
 marcada `COPIA` (+ `ANULADA` si la venta se anuló) + la fecha/hora de la reimpresión
 (`ticket-builder.ts`, detalle en

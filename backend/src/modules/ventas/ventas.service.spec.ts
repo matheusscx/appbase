@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -4241,6 +4242,102 @@ describe('VentasService', () => {
         );
 
         expect(boleta.estado).toBe('pendiente');
+      });
+    });
+
+    /**
+     * `reimprimirBoletaPropia` — la cajera SIN `Ventas:Anular` (owner,
+     * 2026-09-30, `docs/agent/pendientes.md` § 3). Dos capas, en orden:
+     * 1) `reimprimirBoleta(..., verTodas: false)` — el mismo alcance de
+     *    siempre (`filtroDeMisCajas`, en la query de cabecera). Lo que ese
+     *    filtro EXCLUYE (una venta física de OTRA caja) nunca llega: cabecera
+     *    vacía → 404, mismo camino que la de otro tenant (arriba). El mock no
+     *    ejecuta el `WHERE` (despacha por tabla), así que "no visible" y
+     *    "realmente no existe" se simulan igual acá — la distinción real la
+     *    prueba el e2e contra Postgres.
+     * 2) `exigirCajaPropiaAbierta` — sobre lo que SÍ es visible, exige que
+     *    sea la caja del usuario Y siga `abierta`. Su query también hace
+     *    `FROM ventas v` (mismo texto que la cabecera de `armarBoleta`), así
+     *    que `mockReimprimirBoletaPropia` la distingue por una porción única
+     *    del SQL (`cj.usuario_id, cj.estado`) antes de delegar al despacho
+     *    por tabla de `mockArmarBoleta`.
+     */
+    describe('reimprimirBoletaPropia()', () => {
+      /** Cabecera (`filtroDeMisCajas` ya pasó) + fila de `exigirCajaPropiaAbierta`. */
+      const mockReimprimirBoletaPropia = (
+        fixture: BoletaFixture,
+        cajaRows: { usuario_id: string | null; estado: string | null }[],
+      ) => {
+        mockArmarBoleta(fixture);
+        const base = dataSourceMock.query.getMockImplementation()!;
+        dataSourceMock.query.mockImplementation(
+          (sql: string, params?: unknown[]) => {
+            if (sql.includes('cj.usuario_id, cj.estado'))
+              return Promise.resolve(cajaRows);
+            return base(sql, params) as Promise<unknown[]>;
+          },
+        );
+      };
+
+      it('caja propia y abierta: reimprime (200)', async () => {
+        mockReimprimirBoletaPropia(
+          { cabecera: cabeceraBase({ estado: 'pagada' }) },
+          [{ usuario_id: USUARIO_ID, estado: 'abierta' }],
+        );
+
+        const boleta = await service.reimprimirBoletaPropia(
+          TENANT_ID,
+          VENTA_ID,
+          USUARIO_ID,
+        );
+
+        expect(boleta.estado).toBe('pagada');
+      });
+
+      /**
+       * La venta NO es ni de su caja ni `online`: `filtroDeMisCajas` la deja
+       * afuera de la cabecera, así que ni se entera de que existe — 404, no
+       * 403. Antes de esta ronda esto daba 403 (revisión de seguridad,
+       * 2026-09-30): confirmaba por otra puerta que la venta existe, el mismo
+       * hueco que la auditoría del 2026-08-22 le cerró a `findOne`.
+       */
+      it('venta física de OTRA caja (no visible bajo el alcance de siempre): 404', async () => {
+        dataSourceMock.query.mockResolvedValueOnce([]); // cabecera: filtroDeMisCajas la excluye
+
+        await expect(
+          service.reimprimirBoletaPropia(TENANT_ID, VENTA_ID, USUARIO_ID),
+        ).rejects.toThrow(NotFoundException);
+      });
+
+      it.each(['cerrada', 'en_conciliacion'])(
+        'su caja, pero %s (no "abierta" a secas): 403 con el mensaje del encargado',
+        async (estado) => {
+          mockReimprimirBoletaPropia(
+            { cabecera: cabeceraBase({ estado: 'pagada' }) },
+            [{ usuario_id: USUARIO_ID, estado }],
+          );
+
+          await expect(
+            service.reimprimirBoletaPropia(TENANT_ID, VENTA_ID, USUARIO_ID),
+          ).rejects.toThrow(ForbiddenException);
+        },
+      );
+
+      /**
+       * `online` SÍ es visible (`filtroDeMisCajas` la deja pasar sin
+       * distinguir dueño) pero no la tiene como suya (`cajas.usuario_id`
+       * de la caja virtual es `NULL`) — 403, no 404: la vio, no la puede
+       * reimprimir.
+       */
+      it('venta online (visible, pero sin dueño): 403', async () => {
+        mockReimprimirBoletaPropia(
+          { cabecera: cabeceraBase({ estado: 'pagada', canal: 'online' }) },
+          [{ usuario_id: null, estado: 'abierta' }],
+        );
+
+        await expect(
+          service.reimprimirBoletaPropia(TENANT_ID, VENTA_ID, USUARIO_ID),
+        ).rejects.toThrow(ForbiddenException);
       });
     });
   });

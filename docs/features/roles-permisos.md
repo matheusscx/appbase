@@ -77,14 +77,14 @@ que compró. Como corolario, el admin de un tenant recién creado puede configur
 admin-only pasan por `TenantAdminGuard`, no por el motor de módulos— pero no operar ningún
 módulo hasta que se le contrate.
 
-### `Ventas:Anular` también habilita reimprimir una boleta (2026-09-17)
+### `Ventas:Anular` también habilita reimprimir una boleta — y `Ventas:Leer` reimprime lo suyo (2026-09-17, reabierto 2026-09-30)
 
 `GET /ventas/:id/boleta` (reimprimir la boleta de una venta pagada o anulada, spec
 [`2026-09-17-boleta-desde-la-venta-design.md`](../superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md))
-pide el mismo `Ventas:Anular` que anular una venta, no un permiso nuevo: es la operación
-sensible del módulo (reimprimir un comprobante ya emitido) y el owner eligió reusar el
-permiso del encargado en vez de crear uno a medida — mismo criterio que el ensanche de
-`Cajas:Actualizar` documentado más abajo. `GET /ventas/:id` (con solo `Ventas:Leer`) no
+pide `Ventas:Anular` o, desde el 2026-09-30, `Ventas:Leer` — sin permiso nuevo: es la
+operación sensible del módulo (reimprimir un comprobante ya emitido) y el owner eligió reusar
+los dos permisos que ya existen en vez de crear uno a medida — mismo criterio que el ensanche
+de `Cajas:Actualizar` documentado más abajo. `GET /ventas/:id` (con solo `Ventas:Leer`) no
 alcanza para reimprimir: su `SELECT` no trae `venta_detalles.personalizacion`, así que un
 plato con ingredientes sacados o extras saldría distinto al original.
 
@@ -98,6 +98,18 @@ acota es otro. El seed de hoy no tiene ningún usuario con `Ventas:Anular` fuera
 (que siempre ve todas las cajas por el short-circuit de `es_fijo`), así que el caso
 "`Anular` con caja acotada" queda medido —y cubierto por unit sobre el SQL de
 `armarBoleta`— pero sin un fixture real de ese usuario para ejercerlo en el e2e.
+
+📌 **`Ventas:Leer` a secas (la cajera): reimprime SOLO lo suyo, y en dos capas distintas
+(owner, 2026-09-30 — `docs/agent/pendientes.md` § 3).** Con `Ventas:Anular` no cambia nada de
+lo de arriba. Sin él, `VentasService.reimprimirBoletaPropia` primero reusa el MISMO alcance
+por caja que ya tenía `findOne` (`filtroDeMisCajas`: su caja en cualquier estado, más las
+`online`) — lo que ese alcance excluye da **404**, ni se entera de que la venta existe, mismo
+criterio que la auditoría del 2026-08-22 de arriba. Recién sobre lo que SÍ ve aplica una regla
+más angosta —su caja debe seguir `abierta`, ni cerrada/en conciliación ni la `online` (sin
+dueño)— que da **403** con un mensaje que dice que la reimprime el encargado. La primera
+versión de esta regla mezclaba las dos capas y daba 403 también para una venta que la cajera
+nunca pudo ver, reabriendo por otra puerta el mismo hueco del 2026-08-22 — lo cazó la revisión
+de seguridad del 2026-09-30, antes de integrar.
 
 ### Módulo `Salones`: tercera acción `Anular` (2026-09-16)
 

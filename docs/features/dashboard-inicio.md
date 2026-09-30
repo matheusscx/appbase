@@ -130,7 +130,8 @@ filtros — el detalle sigue viviendo en `/ventas`.
 
 ## Por qué el permiso propio, y no `Ventas:Leer`
 
-La cajera tiene `Ventas:Leer` para buscar una boleta y reimprimirla. Si el bloque de
+La cajera tiene `Ventas:Leer` para buscar una boleta y reimprimir la de su propia caja
+abierta (owner, 2026-09-30 — `docs/agent/pendientes.md` § 3). Si el bloque de
 plata del dashboard colgara de ese mismo permiso, la cajera vería también cuánto
 factura el local — y no habría forma de darle una cosa sin la otra. Por eso el módulo
 es propio, `Resumen del negocio`, con una sola acción (`Leer`, la que ya existe en el

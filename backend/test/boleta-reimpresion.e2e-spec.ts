@@ -12,9 +12,14 @@ import { randomUUID } from 'node:crypto';
 /**
  * `GET /api/ventas/:id/boleta` — reimprimir la boleta de una venta ya cobrada
  * (Task 2 de
- * `docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`).
- * Mismo permiso que anular (`Ventas:Anular`, el del encargado): el owner
- * eligió no crear un permiso nuevo para la operación sensible del módulo.
+ * `docs/superpowers/specs/2026-09-17-boleta-desde-la-venta-design.md`, Tarea 2
+ * de `docs/superpowers/plans/2026-09-30-impresion-quien-opera.md`).
+ *
+ * Dos niveles de permiso (owner, 2026-09-30 — reabre en este punto la
+ * decisión del 17/9): `Ventas:Anular` (el encargado) reimprime con el
+ * alcance de siempre (`resolverAlcanceDerivadoDeCaja`). `Ventas:Leer` a
+ * secas (la cajera) reimprime SOLO la de su propia caja, mientras siga
+ * `abierta` — describe más abajo, "la cajera con Ventas:Leer".
  *
  * Salón, mesa y garzón son PROPIOS de este archivo, no del seed: la sesión de
  * garzón es única y varias suites la comparten (`docs/agent/pendientes.md`).
@@ -334,9 +339,9 @@ describe('GET /ventas/:id/boleta — reimprimir boleta (e2e)', () => {
     expect(fallos).toEqual([]);
   });
 
-  it('un usuario con Ventas:Leer y sin Ventas:Anular recibe 403', async () => {
+  it('un usuario con Ventas:Leer y sin Ventas:Anular recibe 404 sobre la caja de OTRO (el admin): no es visible, ni se entera de que existe', async () => {
     // La primera aserción es la que hace hablar a la segunda: sin ella, este
-    // 403 saldría igual si el rol perdiera el módulo `Ventas` entero o el
+    // 404 saldría igual si el rol perdiera el módulo `Ventas` entero o el
     // token no sirviera, y el test seguiría en verde probando otra cosa.
     //
     // ⚠️ Ronda de corrección 1: acá había un `GET /api/ventas/:id` (findOne)
@@ -349,13 +354,26 @@ describe('GET /ventas/:id/boleta — reimprimir boleta (e2e)', () => {
     // puntual, así que el alcance por caja no lo tumba, y deja a la vista que
     // el vendedor SÍ atraviesa el guard del módulo — lo único que le falta es
     // `Ventas:Anular`.
+    //
+    // ⚠️ Ronda de corrección 2 (revisión de seguridad, 2026-09-30): acá había
+    // un 403. Lo tiraba `exigirCajaPropiaAbierta` sobre una venta que la
+    // cajera NUNCA pudo ver bajo su alcance de siempre (`filtroDeMisCajas`:
+    // su caja en cualquier estado, más las `online`) — confirmando por otra
+    // puerta que la venta existe, el mismo hueco que la auditoría del
+    // 2026-08-22 le cerró a `findOne` ("un 403 confirmaría que existe", ver
+    // el docblock de `boleta` en `ventas.controller.ts`). `ventaBasicaId` es
+    // física, de la caja del ADMIN (abierta en `beforeAll`): para la cajera
+    // no es ni suya ni `online`, así que hoy ni se entera de que existe —404,
+    // igual que `findOne`. El 403 (visible pero no reimprimible: su propia
+    // caja cerrada, o la `online`) tiene su propio describe más abajo, junto
+    // con el caso "cajera con su propia caja abierta".
     const listar = await request(app.getHttpServer())
       .get('/api/ventas')
       .set('Authorization', `Bearer ${tokenVendedor}`);
     expect(listar.status).toBe(200);
 
     const res = await boleta(ventaBasicaId, tokenVendedor);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it('el admin recibe 200 con líneas, totales, impuestos y pagos', async () => {
@@ -684,5 +702,88 @@ describe('GET /ventas/:id/boleta — reimprimir boleta (e2e)', () => {
     expect(linea.cantidadPresentacion).toBe('700.0000');
     expect(linea.unidadCodigoPresentacion).toBe('g');
     expect(linea.unidadCodigoBase).toBe('kg');
+  });
+
+  /**
+   * La cajera con `Ventas:Leer` (SIN `Ventas:Anular`) — Tarea 2 de
+   * `docs/superpowers/plans/2026-09-30-impresion-quien-opera.md`, decisión
+   * del owner en `docs/agent/pendientes.md` § 3 ("Conectar con QZ Tray tiene
+   * el mismo techo que imprimir"): reimprime SOLO la boleta de una venta de
+   * su propia caja, mientras esa caja siga `abierta`.
+   *
+   * Necesita un CAJÓN propio: el tenant Paris solo tiene uno sembrado
+   * (`Mostrador`), ocupado por la caja del admin (`beforeAll`, abierta hasta
+   * el `afterAll` de este archivo) — sin uno nuevo, `POST /api/caja/abrir`
+   * de la vendedora chocaría con `ux_cajas_cajon_abierta` (409) o, peor, con
+   * `GET /api/caja/cajones-disponibles` vacío. `POST /api/cajones` exige
+   * `Cajas:Crear`, que el admin tiene; la vendedora ni falta que le hace —
+   * un cajón nuevo nace sin allow-list, autorizado para cualquiera.
+   */
+  describe('la cajera con Ventas:Leer (sin Anular): reimprime lo suyo', () => {
+    let cajaVendedor: CajaAbierta;
+
+    beforeAll(async () => {
+      await post<{ id: string }>('/api/cajones', {
+        nombre: `Caja vendedora boleta E2E ${Date.now()}`,
+      });
+      cajaVendedor = await abrirCaja(app, tokenVendedor, {
+        comentario: 'Apertura vendedora E2E — boleta propia',
+      });
+    });
+
+    it('reimprime la boleta de una venta de su propia caja, mientras sigue abierta', async () => {
+      const venta = await post<VentaCreada>(
+        '/api/ventas',
+        {
+          lineas: [{ itemId: itemBasicoId, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100000.0000' }],
+        },
+        tokenVendedor,
+      );
+
+      const res = await boleta(venta.id, tokenVendedor);
+      expect(res.status).toBe(200);
+      expect((res.body as BoletaVentaRes).ventaId).toBe(venta.id);
+    });
+
+    it('la misma caja, después de cerrarla: 403 con el mensaje de "la reimprime el encargado"', async () => {
+      const venta = await post<VentaCreada>(
+        '/api/ventas',
+        {
+          lineas: [{ itemId: itemBasicoId, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100000.0000' }],
+        },
+        tokenVendedor,
+      );
+
+      await cerrarCaja(app, tokenVendedor, cajaVendedor);
+
+      const res = await boleta(venta.id, tokenVendedor);
+      expect(res.status).toBe(403);
+      expect((res.body as { message?: string }).message).toContain('encargado');
+    });
+
+    /**
+     * `online` cuelga de la caja VIRTUAL (`cajas.usuario_id IS NULL`), sin
+     * depender de una caja física abierta — barata de montar. `filtroDeMisCajas`
+     * SÍ la deja pasar (visible, 200 de cabecera puertas adentro), pero
+     * `exigirCajaPropiaAbierta` la rechaza: la cajera no la tiene como suya.
+     * 403, no 404 — la vio, no la puede reimprimir.
+     */
+    it('una venta online: 403 — la ve, pero no es suya', async () => {
+      const venta = await post<VentaCreada>(
+        '/api/ventas',
+        {
+          canal: 'online',
+          lineas: [{ itemId: itemBasicoId, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100000.0000' }],
+        },
+        tokenVendedor,
+      );
+
+      const res = await boleta(venta.id, tokenVendedor);
+      expect(res.status).toBe(403);
+      expect((res.body as { message?: string }).message).toContain('encargado');
+    });
   });
 });

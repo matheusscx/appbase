@@ -39,6 +39,11 @@ sin papel. No es un caso raro: basta con tocar otra mesa mientras el sistema gua
 2. **Se construye ahora el botón de reimprimir** una venta ya cobrada.
 3. **Reimprimir pide el mismo permiso que anular una venta** (`Ventas:Anular`), el del
    encargado. No se inventa un permiso nuevo.
+   > **Reabierto en este punto (owner, 2026-09-30):** con `Ventas:Anular` sigue igual que
+   > acá. Quien solo tiene `Ventas:Leer` (la cajera) también reimprime, pero SOLO la boleta
+   > de una venta de su propia caja mientras esa caja siga abierta — ver
+   > `docs/agent/pendientes.md` § 3, "Conectar con QZ Tray tiene el mismo techo que
+   > imprimir".
 4. **La reimpresión sale marcada `COPIA`**, con la fecha y hora de la reimpresión. El original
    no lleva marca.
 
