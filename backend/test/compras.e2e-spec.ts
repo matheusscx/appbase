@@ -1168,6 +1168,89 @@ describe('Compras — borrador (e2e)', () => {
         expect(await costoActual(itemId)).toBe('900.0000');
       });
 
+      /**
+       * `docs/agent/pendientes.md` § 1: el historial de cambios
+       * (`findOne`/`compras.service.ts`) ordena por `cc.creado_el` sin
+       * desempate real, y `registrarCambios` inserta TODO el historial de
+       * una corrección en un solo `INSERT` multi-fila — `corregirDescuento`
+       * reparte el cambio a cada línea afectada en esa única llamada, y
+       * `NOW()` es estable dentro de la transacción, así que esas filas
+       * quedan con el mismo `creado_el`. Se arma por la API real
+       * (3 líneas del mismo tamaño, para que el descuento cambie el costo de
+       * las tres), no con `Db` mockeado: el orden vive en el SQL.
+       */
+      it('el descuento repartido en tres líneas empata sus cambios en creado_el, y el detalle los devuelve en el mismo orden', async () => {
+        const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+        const itemA = await productoVacio({
+          nombre: `Descuento-empate A ${marca}`,
+        });
+        const itemB = await productoVacio({
+          nombre: `Descuento-empate B ${marca}`,
+        });
+        const itemC = await productoVacio({
+          nombre: `Descuento-empate C ${marca}`,
+        });
+
+        const compra = await post<CompraDetalle>(
+          '/api/compras',
+          borrador({
+            lineas: [
+              {
+                itemId: itemA,
+                cantidad: '10',
+                unidadCodigo: 'unidad',
+                precioUnitario: '1000',
+              },
+              {
+                itemId: itemB,
+                cantidad: '10',
+                unidadCodigo: 'unidad',
+                precioUnitario: '1000',
+              },
+              {
+                itemId: itemC,
+                cantidad: '10',
+                unidadCodigo: 'unidad',
+                precioUnitario: '1000',
+              },
+            ],
+          }),
+        );
+        await confirmar(compra.id);
+
+        expect((await corregirDescuento(compra.id, '3000')).status).toBe(200);
+
+        const detalle = await get<CompraDetalle>(`/api/compras/${compra.id}`);
+        expect(detalle.cambios).toHaveLength(3);
+        expect(detalle.cambios.every((c) => c.campo === 'descuento')).toBe(
+          true,
+        );
+
+        // Premisa: las tres filas nacieron en el mismo INSERT multi-fila y
+        // empatan en `creado_el`. `creado_el::text` y no el `Date` del
+        // driver, que redondea a milisegundos y haría pasar por empate a
+        // horas distintas.
+        const escritas: {
+          compra_linea_cambio_id: string;
+          compra_linea_id: string;
+          creado_el: string;
+        }[] = await ds.query(
+          `SELECT cc.compra_linea_cambio_id, cc.compra_linea_id,
+                  cc.creado_el::text AS creado_el
+             FROM compra_linea_cambios cc
+             JOIN compra_lineas cl ON cl.compra_linea_id = cc.compra_linea_id
+            WHERE cl.compra_id = $1
+            ORDER BY cc.creado_el, cc.campo, cc.compra_linea_cambio_id`,
+          [compra.id],
+        );
+        expect(escritas).toHaveLength(3);
+        expect(new Set(escritas.map((e) => e.creado_el)).size).toBe(1);
+
+        expect(detalle.cambios.map((c) => c.compraLineaId)).toEqual(
+          escritas.map((e) => e.compra_linea_id),
+        );
+      });
+
       it('la plata que no cabe en la moneda es 400: el descuento en pesos, el precio a 4 decimales', async () => {
         const itemId = await productoVacio();
         const compra = await post<CompraDetalle>(

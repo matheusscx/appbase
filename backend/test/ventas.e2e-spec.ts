@@ -786,6 +786,170 @@ describe('Ventas (e2e)', () => {
       const stockDespues = await getStock(ds, ITEM_ID);
       expect(stockDespues).toBe(stockActual);
     });
+
+    /**
+     * `docs/agent/pendientes.md` § 1: `findOne` (`ventas.service.ts`) ordena
+     * los pagos de la venta por `creado_el ASC` sin desempate real, y el loop
+     * de `PagosService.registrar` guarda un `Pago` por método dentro de UNA
+     * transacción — así que los pagos de una venta repartida en varios
+     * métodos empatan en `creado_el` al microsegundo. Se arma por la API real
+     * (`POST /ventas` con tres `pagos`), no con `Db` mockeado: el orden vive
+     * en el SQL.
+     */
+    it('una venta pagada con tres métodos empata sus pagos en creado_el, y findOne los desempata por pago_id', async () => {
+      const TARJETA_DEBITO_ID = '550e8400-e29b-41d4-a716-446655440106';
+      const TARJETA_CREDITO_ID = '550e8400-e29b-41d4-a716-446655440107';
+      const TRANSFERENCIA_ID = '550e8400-e29b-41d4-a716-446655440108';
+
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio pagos-empate E2E ${Date.now()}-${Math.random()}`,
+          precioBase: '300',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+          clasificacionTributaria: 'exento',
+        });
+      expect(resItem.status).toBe(201);
+      const servicioId = (resItem.body as { id: string }).id;
+
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: servicioId, cantidad: '1' }],
+          pagos: [
+            { metodoPagoId: TARJETA_DEBITO_ID, monto: '100.0000' },
+            { metodoPagoId: TARJETA_CREDITO_ID, monto: '100.0000' },
+            { metodoPagoId: TRANSFERENCIA_ID, monto: '100.0000' },
+          ],
+        });
+      expect(res.status).toBe(201);
+      const ventaIdPropio = (res.body as VentaResponse).id;
+
+      // Premisa: los tres pagos nacieron en la misma transacción y empatan en
+      // `creado_el` al microsegundo. `creado_el::text` y no el `Date` del
+      // driver, que redondea a milisegundos y haría pasar por empate a horas
+      // distintas.
+      const escritos: { pago_id: string; creado_el: string }[] = await ds.query(
+        `SELECT pago_id, creado_el::text AS creado_el
+             FROM pagos
+            WHERE venta_id = $1 AND eliminado_el IS NULL
+            ORDER BY pago_id ASC`,
+        [ventaIdPropio],
+      );
+      expect(escritos).toHaveLength(3);
+      expect(new Set(escritos.map((e) => e.creado_el)).size).toBe(1);
+
+      const resDetalle = await request(app.getHttpServer())
+        .get(`/api/ventas/${ventaIdPropio}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(resDetalle.status).toBe(200);
+      expect(
+        (resDetalle.body as VentaResponse).pagos.map(
+          (p) => (p as { id: string }).id,
+        ),
+      ).toEqual(escritos.map((e) => e.pago_id));
+    });
+
+    /**
+     * `docs/agent/pendientes.md` § 1: `findOne` ordena las aplicaciones de
+     * cada pago por `creado_el ASC` sin desempate real, y el reparto
+     * venta/propina de `PagosService.registrar` (`dispatchAsignacionPropina`)
+     * puede dejar más de una fila de `pago_aplicaciones` por pago, todas
+     * dentro de la misma transacción. Acá: dos métodos SIN vuelto
+     * (Tarjeta débito antes que Tarjeta crédito, por `metodoPagoId` — ver
+     * `calcularAplicacionesNoVuelto`) y una propina que la absorbe por
+     * completo el primero, dejando venta+propina en ese pago y solo venta en
+     * el segundo — tres filas, dos tipos, todas empatadas en `creado_el`.
+     */
+    it('un pago con débito+crédito y propina reparte la propina en el primer método sin vuelto: las aplicaciones empatan en creado_el, y findOne pone "venta" antes que "propina"', async () => {
+      const TARJETA_DEBITO_ID = '550e8400-e29b-41d4-a716-446655440106';
+      const TARJETA_CREDITO_ID = '550e8400-e29b-41d4-a716-446655440107';
+
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio aplicaciones-empate E2E ${Date.now()}-${Math.random()}`,
+          precioBase: '220',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+          clasificacionTributaria: 'exento',
+        });
+      expect(resItem.status).toBe(201);
+      const servicioId = (resItem.body as { id: string }).id;
+
+      // 50 (débito) + 200 (crédito) = 250 = 220 (venta) + 30 (propina).
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: servicioId, cantidad: '1' }],
+          pagos: [
+            { metodoPagoId: TARJETA_DEBITO_ID, monto: '50.0000' },
+            { metodoPagoId: TARJETA_CREDITO_ID, monto: '200.0000' },
+          ],
+          propinaDirecta: { montoPagado: '30' },
+        });
+      expect(res.status).toBe(201);
+      const ventaIdPropio = (res.body as VentaResponse).id;
+
+      const pagosRows: { pago_id: string; metodo_pago_id: string }[] =
+        await ds.query(
+          `SELECT pago_id, metodo_pago_id
+             FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL`,
+          [ventaIdPropio],
+        );
+      expect(pagosRows).toHaveLength(2);
+      const pagoDebitoId = pagosRows.find(
+        (p) => p.metodo_pago_id === TARJETA_DEBITO_ID,
+      )!.pago_id;
+
+      // Premisa: las tres aplicaciones (venta+propina del pago con débito,
+      // venta del pago con crédito) nacieron en la misma transacción y
+      // empatan en `creado_el` al microsegundo.
+      const escritas: {
+        pago_aplicacion_id: string;
+        pago_id: string;
+        tipo: string;
+        creado_el: string;
+      }[] = await ds.query(
+        `SELECT pago_aplicacion_id, pago_id, tipo, creado_el::text AS creado_el
+           FROM pago_aplicaciones
+          WHERE pago_id = ANY($1::uuid[]) AND eliminado_el IS NULL
+          ORDER BY creado_el ASC, tipo DESC, pago_aplicacion_id ASC`,
+        [pagosRows.map((p) => p.pago_id)],
+      );
+      expect(escritas).toHaveLength(3);
+      expect(new Set(escritas.map((e) => e.creado_el)).size).toBe(1);
+      // `tipo DESC` agrupa las dos 'venta' antes que la única 'propina'.
+      expect(escritas.map((e) => e.tipo)).toEqual([
+        'venta',
+        'venta',
+        'propina',
+      ]);
+
+      const resDetalle = await request(app.getHttpServer())
+        .get(`/api/ventas/${ventaIdPropio}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(resDetalle.status).toBe(200);
+      const pagoDebito = (
+        resDetalle.body as {
+          pagos: { id: string; aplicaciones: { tipo: string }[] }[];
+        }
+      ).pagos.find((p) => p.id === pagoDebitoId)!;
+      // El pago con débito quedó repartido venta+propina: `tipo DESC` pone
+      // 'venta' antes que 'propina' en la lista que expone la API, sin
+      // depender de qué `pago_aplicacion_id` le haya tocado a cada fila.
+      expect(pagoDebito.aplicaciones.map((a) => a.tipo)).toEqual([
+        'venta',
+        'propina',
+      ]);
+    });
   });
 
   describe('POST /ventas con propina directa (POS)', () => {

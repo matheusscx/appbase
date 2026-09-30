@@ -3215,7 +3215,13 @@ export class VentasService {
                    )
                    THEN caja_id
               END AS caja_id
-       FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL ORDER BY creado_el ASC`,
+       -- \`pago_id\` desempata: \`PagosService.registrar\` guarda un \`Pago\` por
+       -- método en un loop dentro de una sola transacción, y los que nacen
+       -- juntos empatan en \`creado_el\` al microsegundo. Solo estabiliza el
+       -- orden entre cargas — no reproduce el orden en que el cajero tipeó
+       -- los medios, que no se guarda en ningún lado.
+       FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL
+       ORDER BY creado_el ASC, pago_id ASC`,
       [ventaId, verTodas, usuarioId],
     );
 
@@ -3232,7 +3238,13 @@ export class VentasService {
             `SELECT pago_aplicacion_id, pago_id, tipo, referencia_id, monto
              FROM pago_aplicaciones
              WHERE pago_id = ANY($1::uuid[]) AND eliminado_el IS NULL
-             ORDER BY creado_el ASC`,
+             -- El reparto venta/propina de PagosService.registrar (aplicaciones)
+             -- deja dos filas del mismo pago con el mismo \`creado_el\`. \`tipo DESC\`
+             -- pone 'venta' antes que 'propina' (v > p alfabético) y
+             -- \`pago_aplicacion_id\` desempata lo que quede. Es alfabético, no una
+             -- prioridad: un tercer valor de \`TipoPagoAplicacion\` cae donde lo ponga
+             -- su letra, y ahí esto pasa a un CASE.
+             ORDER BY creado_el ASC, tipo DESC, pago_aplicacion_id ASC`,
             [pagoIds],
           )
         : [];
@@ -3830,7 +3842,11 @@ export class VentasService {
     }[] = await runner.query(
       `SELECT pago_id, metodo_pago_id, monto, vuelto
          FROM pagos WHERE venta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
-        ORDER BY creado_el ASC`,
+        -- \`pago_id\` desempata: mismo empate que \`findOne\` (arriba) por el
+        -- mismo loop de \`PagosService.registrar\`. Solo estabiliza el orden en
+        -- que la boleta reimpresa lista los pagos, no reproduce el orden en
+        -- que el cajero los tipeó (no se guarda en ningún lado).
+        ORDER BY creado_el ASC, pago_id ASC`,
       [ventaId, tenantId],
     );
     const metodoPagoIds = [...new Set(pagosRows.map((p) => p.metodo_pago_id))];

@@ -23,6 +23,80 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los listados que empataban en `creado_el` desempatan con una columna estable (cerrada 2026-09-30)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Siete listados de pantalla empatan en `creado_el`, y el orden de las filas empatadas
+  cambia entre cargas** (backend, medido el 2026-09-28; sale del censo que dejó el cierre del
+  kardex en la § 2). `creado_el` es la hora en que **empezó** la transacción: las filas que
+  nacen juntas empatan al microsegundo y el orden entre ellas lo elige el plan de Postgres. En
+  los siete están medidas las dos condiciones —el `ORDER BY` no desempata **y** hay un camino
+  que escribe 2+ filas de esa tabla en una transacción—, y ninguna pantalla vuelve a ordenar en
+  el cliente. Molesta, no corrompe. El octavo del censo, mermas, ya se arregló
+  ([`resueltos.md`](resueltos.md)); las dos selecciones FIFO del mismo censo están en la § 4.
+
+  | Listado (`ORDER BY`) | Quién escribe 2+ filas juntas | Desempate propuesto |
+  |---|---|---|
+  | `ventas.service.ts:3218` (`findOne`, pagos de la venta), `:3833` (`armarBoleta`: **la boleta reimpresa** puede listar los pagos en otro orden), `pagos.service.ts:641` (`listar`) | el loop que guarda un `Pago` por método en `PagosService.registrar` (`pagos.service.ts:236`) | `pago_id`. ⚠️ Estabiliza el orden, no reproduce el orden en que el cajero tipeó los medios: ese no se guarda en ningún lado. Si hiciera falta, es una columna nueva, no un desempate |
+  | `ventas.service.ts:3235` (`findOne`, aplicaciones de cada pago) | el loop de `aplicaciones` (`pagos.service.ts:276`): el reparto venta/propina deja dos filas para el mismo pago | `tipo` (la de venta antes que la de propina), con `pago_aplicacion_id` detrás |
+  | `salones.service.ts:2728` (`anulacionesPorCuenta`) | `escribirCancelacionConMotivo`: una anulación por línea despachada (`salones.service.ts:1782`) | `cla.cuenta_linea_anulacion_id`, **gemelo exacto** de lo que ya hace el reporte (`anulaciones-reporte.service.ts:263`) |
+  | `compras.service.ts:602` (historial de cambios de una compra) | `registrarCambios`: todas las filas en **un** `INSERT` multi-fila (`compras.service.ts:1931`) | `cc.campo`, con la PK detrás. **Esperar a que cierre el frente de compras en curso** |
+  | `items.service.ts:3074` (`findUnidades`) | la entrada en modo serie, un `INSERT` por serie en un loop (`inventario.service.ts:1379`): una línea de compra con N series, o un ajuste con N series | `u.serie` |
+  | `items.service.ts:3117` (`findLotes`) | confirmar una compra con dos líneas del mismo producto y distinto lote (loop de `compras.service.ts:997` → `INSERT INTO item_lote`, `inventario.service.ts:1722`). **Medido por la API**: los dos lotes quedan con `creado_el` idéntico al microsegundo | `l.codigo_lote` |
+
+  **Cómo se cierra cada fila:** la columna en el `ORDER BY`, con su porqué como comentario
+  dentro de la consulta, y un e2e que monte el empate **por la API** y afirme la premisa (que
+  empatan, con `creado_el::text`) además del orden. El molde es el test de mermas en
+  `mermas.e2e-spec.ts`. Con `Db` mockeado no se prueba: el orden vive en el SQL. ⚠️ El límite
+  de ese test es el mismo que se escribió para el kardex: el rojo del mutante es una
+  observación sobre un plan, no una propiedad. Por eso van 3+ filas empatadas, para que un
+  orden cualquiera acierte menos por azar.
+
+### Qué se hizo
+
+Cada `ORDER BY` suma su desempate, con el porqué como comentario dentro de la consulta:
+
+| Listado | Desempate |
+|---|---|
+| pagos de la venta: `findOne`, `armarBoleta` (la boleta reimpresa), `PagosService.listar` | `pago_id`, en la dirección de cada consulta. El comentario aclara que estabiliza el orden y no reproduce el orden en que el cajero tipeó los medios, que no se guarda |
+| aplicaciones de cada pago (`findOne`) | `tipo DESC` (venta antes que propina: es alfabético, y el comentario dice que un tercer valor lo pasa a un CASE), con `pago_aplicacion_id` detrás |
+| `anulacionesPorCuenta` | `cuenta_linea_anulacion_id`, la misma columna que el reporte; ASC porque el detalle de la cuenta es cronológico y el reporte, DESC, lista lo más nuevo primero |
+| historial de cambios de una compra (`findOne`) | `cc.campo`, con `compra_linea_cambio_id` detrás. La nota de la entrada, *"esperar a que cierre el frente de compras en curso"*, había quedado vieja: no había ningún frente abierto |
+| `findUnidades` | `u.serie` |
+| `findLotes` | `l.codigo_lote` |
+
+Las dos selecciones FIFO de `inventario.service.ts` que también ordenan por `creado_el` no se
+tocaron: deciden qué unidad o lote sale y son otra entrada (§ 3).
+
+### Qué lo fija
+
+Un e2e por listado que monta el empate por la API con 3 filas, afirma la premisa (`creado_el::text`
+igual en las 3) y después el orden. El esperado sale de una fuente independiente del `ORDER BY` del
+service: series y lotes se mandan fuera de orden (C, A, B) y se comparan con `[A, B, C]`; los de
+UUID se comparan con el tie-break solo. **La excepción es compras:** el esperado usa la misma
+cláusula que el service, y las 3 filas tienen el mismo `campo`, así que `cc.campo` queda sin
+ejercitar. El caso que lo ejercitaría es corregir cantidad y precio de la misma línea en una sola
+llamada.
+
+| Mutante: sacar el desempate | Rojos de 3 corridas |
+|---|---|
+| pagos, `findOne` | 2 |
+| pagos, `armarBoleta` | 2 |
+| pagos, `listar` | 1 |
+| aplicaciones | 0 |
+| `anulacionesPorCuenta` | 1 |
+| `findUnidades` | 3 |
+| `findLotes` | 1 |
+| compras | 2 |
+
+Es el mismo límite que se escribió en el cierre del kardex: sin el desempate, el orden lo elige el
+plan, y el rojo del mutante es una observación sobre ese plan, no una propiedad. En las
+aplicaciones el plan devolvió siempre el orden de inserción, que coincide con el esperado, así que
+ese test protege la premisa pero no caza el mutante.
+
 ## Los 42 campos de fecha de la API rechazan con 400 las fechas imposibles y los formatos que Postgres no lee (cerrada 2026-09-30)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.

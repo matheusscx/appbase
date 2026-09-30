@@ -1153,6 +1153,69 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
       expect(detalle.estado).toBe('abierta');
       expect(detalle.lineas).toHaveLength(1);
     });
+
+    /**
+     * `docs/agent/pendientes.md` § 1: `anulacionesPorCuenta`
+     * (`salones.service.ts`) ordena por `creado_el ASC` sin desempate real, y
+     * `escribirCancelacionConMotivo` deja una `cuenta_linea_anulacion` por
+     * línea despachada dentro de UNA transacción — así que empatan en
+     * `creado_el` al microsegundo. Se arma el escenario por la API real
+     * (`cancelar-con-motivo`), no con `Db` mockeado: el orden vive en el SQL.
+     */
+    it('cancelar con motivo tres platos despachados empata sus anulaciones en creado_el, y el detalle las devuelve en el mismo orden', async () => {
+      const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+      const platos = [platoId];
+      for (const n of [2, 3]) {
+        platos.push(
+          (
+            await post<IdResponse>('/api/items', {
+              nombre: `Plato ${n} anulaciones-empate E2E ${marca}`,
+              tipo: 'producto',
+              precioBase: '1000',
+              monedaId: CLP_MONEDA_ID,
+              unidadMedida: 'unidad',
+              stock: '10',
+              costo: '100',
+              categoriaId: catCocinaId,
+            })
+          ).id,
+        );
+      }
+
+      const cuenta = await abrirCuentaCon(
+        platos.map((itemId) => ({ itemId, cantidad: '1' })),
+      );
+      await despachar(cuenta.id);
+
+      const res = await cancelarConMotivo(cuenta.id, {
+        motivoBajaId: motivoMermaId,
+      });
+      expect(res.status).toBe(201);
+      const detalle = res.body as CuentaDetalle;
+      expect(detalle.estado).toBe('cancelada');
+      expect(detalle.anulaciones).toHaveLength(3);
+
+      // Premisa: las tres anulaciones nacieron en la misma transacción y
+      // empatan en `creado_el` al microsegundo. `creado_el::text` y no el
+      // `Date` del driver, que redondea a milisegundos y haría pasar por
+      // empate a horas distintas.
+      const escritas: {
+        cuenta_linea_anulacion_id: string;
+        creado_el: string;
+      }[] = await ds.query(
+        `SELECT cuenta_linea_anulacion_id, creado_el::text AS creado_el
+           FROM cuenta_linea_anulaciones
+          WHERE cuenta_id = $1 AND eliminado_el IS NULL
+          ORDER BY cuenta_linea_anulacion_id ASC`,
+        [cuenta.id],
+      );
+      expect(escritas).toHaveLength(3);
+      expect(new Set(escritas.map((e) => e.creado_el)).size).toBe(1);
+
+      expect(detalle.anulaciones.map((a) => a.id)).toEqual(
+        escritas.map((e) => e.cuenta_linea_anulacion_id),
+      );
+    });
   });
 
   /**

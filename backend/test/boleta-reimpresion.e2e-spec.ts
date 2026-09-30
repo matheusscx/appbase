@@ -380,6 +380,69 @@ describe('GET /ventas/:id/boleta — reimprimir boleta (e2e)', () => {
   });
 
   /**
+   * `docs/agent/pendientes.md` § 1: `armarBoleta` (`ventas.service.ts`)
+   * ordena los pagos por `creado_el ASC` sin desempate real, mismo empate que
+   * `findOne` — el loop de `PagosService.registrar` guarda un `Pago` por
+   * método dentro de UNA transacción. La boleta no expone `pago_id`, solo el
+   * `nombre` del método, así que con tres métodos DISTINTOS ese nombre alcanza
+   * para leer el orden desde la API.
+   */
+  it('una venta pagada con tres métodos: la boleta reimpresa lista los pagos en el mismo orden que findOne', async () => {
+    const TARJETA_DEBITO_ID = '550e8400-e29b-41d4-a716-446655440106';
+    const TARJETA_CREDITO_ID = '550e8400-e29b-41d4-a716-446655440107';
+    const TRANSFERENCIA_ID = '550e8400-e29b-41d4-a716-446655440108';
+    const nombrePorMetodo: Record<string, string> = {
+      [TARJETA_DEBITO_ID]: 'Tarjeta de débito',
+      [TARJETA_CREDITO_ID]: 'Tarjeta de crédito',
+      [TRANSFERENCIA_ID]: 'Transferencia bancaria',
+    };
+
+    const itemId = (
+      await post<ItemResponse>('/api/items', {
+        nombre: `Item boleta-pagos-empate E2E ${Date.now()}-${Math.random()}`,
+        tipo: 'servicio',
+        precioBase: '300',
+        monedaId: CLP_MONEDA_ID,
+        clasificacionTributaria: 'exento',
+      })
+    ).id;
+    const ventaId = (
+      await post<VentaCreada>('/api/ventas', {
+        lineas: [{ itemId, cantidad: '1' }],
+        pagos: [
+          { metodoPagoId: TARJETA_DEBITO_ID, monto: '100.0000' },
+          { metodoPagoId: TARJETA_CREDITO_ID, monto: '100.0000' },
+          { metodoPagoId: TRANSFERENCIA_ID, monto: '100.0000' },
+        ],
+      })
+    ).id;
+
+    // Premisa: los tres pagos nacieron en la misma transacción y empatan en
+    // `creado_el` al microsegundo. `creado_el::text` y no el `Date` del
+    // driver, que redondea a milisegundos y haría pasar por empate a horas
+    // distintas.
+    const escritos: {
+      pago_id: string;
+      metodo_pago_id: string;
+      creado_el: string;
+    }[] = await ds.query(
+      `SELECT pago_id, metodo_pago_id, creado_el::text AS creado_el
+         FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL
+        ORDER BY pago_id ASC`,
+      [ventaId],
+    );
+    expect(escritos).toHaveLength(3);
+    expect(new Set(escritos.map((e) => e.creado_el)).size).toBe(1);
+
+    const res = await boleta(ventaId, tokenAdmin);
+    expect(res.status).toBe(200);
+    const cuerpo = res.body as BoletaVentaRes;
+    expect(cuerpo.pagos.map((p) => p.nombre)).toEqual(
+      escritos.map((e) => nombrePorMetodo[e.metodo_pago_id]),
+    );
+  });
+
+  /**
    * Solo se reimprime una venta pagada o anulada (owner, 2026-09-18): la que
    * todavía no se cobró del todo saldría con los pagos incompletos y sin nada
    * que diga que sigue abierta. La anulada sí, y el papel la marca `ANULADA`

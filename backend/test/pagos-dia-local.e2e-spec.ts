@@ -249,6 +249,76 @@ describe('Pagos: el día es el día local del tenant (e2e)', () => {
     );
   });
 
+  /**
+   * `docs/agent/pendientes.md` § 1: `listar` (`pagos.service.ts`) ordena por
+   * `creado_el DESC` sin desempate real, y el loop de `PagosService.registrar`
+   * guarda un `Pago` por método dentro de UNA transacción — así que un abono
+   * repartido en varios métodos empata en `creado_el` al microsegundo. Venta y
+   * pagos propios de este test (no tocan `pagoIds` ni la caja compartida de la
+   * suite): se arman por la API real (`POST /pagos`), no con `Db` mockeado —
+   * el orden vive en el SQL.
+   */
+  it('un abono repartido en tres métodos empata sus pagos en creado_el, y el listado los desempata por pago_id', async () => {
+    const TARJETA_DEBITO_ID = '550e8400-e29b-41d4-a716-446655440106';
+    const TARJETA_CREDITO_ID = '550e8400-e29b-41d4-a716-446655440107';
+    const TRANSFERENCIA_ID = '550e8400-e29b-41d4-a716-446655440108';
+
+    const venta = await request(app.getHttpServer())
+      .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipoDocumentoId: BOLETA_ID,
+        lineas: [{ itemId, cantidad: '1' }],
+      });
+    expect(venta.status).toBe(201);
+    const { id: ventaId, totalFinal } = venta.body as {
+      id: string;
+      totalFinal: string;
+    };
+    const total = new Decimal(totalFinal);
+
+    const abono = await request(app.getHttpServer())
+      .post('/api/pagos')
+      .set('Idempotency-Key', randomUUID())
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        ventaId,
+        pagos: [
+          {
+            metodoPagoId: TARJETA_DEBITO_ID,
+            monto: total.minus('2').toFixed(4),
+          },
+          { metodoPagoId: TARJETA_CREDITO_ID, monto: '1.0000' },
+          { metodoPagoId: TRANSFERENCIA_ID, monto: '1.0000' },
+        ],
+      });
+    expect([200, 201]).toContain(abono.status);
+
+    // Premisa: los tres pagos nacieron en la misma transacción y empatan en
+    // `creado_el` al microsegundo. `creado_el::text` y no el `Date` del
+    // driver, que redondea a milisegundos y haría pasar por empate a horas
+    // distintas.
+    const escritos: { pago_id: string; creado_el: string }[] = await ds.query(
+      `SELECT pago_id, creado_el::text AS creado_el
+         FROM pagos
+        WHERE venta_id = $1 AND eliminado_el IS NULL
+        ORDER BY pago_id DESC`,
+      [ventaId],
+    );
+    expect(escritos).toHaveLength(3);
+    expect(new Set(escritos.map((e) => e.creado_el)).size).toBe(1);
+
+    const resListado = await request(app.getHttpServer())
+      .get('/api/pagos')
+      .query({ ventaId, pageSize: '100' })
+      .set('Authorization', `Bearer ${token}`);
+    expect(resListado.status).toBe(200);
+    expect(
+      (resListado.body as { data: { id: string }[] }).data.map((p) => p.id),
+    ).toEqual(escritos.map((e) => e.pago_id));
+  });
+
   describe('el listado filtra por el día local', () => {
     it('`fechaDesde` en fecha pura arranca a la medianoche local, no a la de UTC', async () => {
       await ubicarAlrededorDeMedianoche();

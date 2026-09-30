@@ -299,4 +299,61 @@ describe('inventario — unidades serializadas por ubicación (e2e)', () => {
       '3.0000',
     );
   });
+
+  /**
+   * `docs/agent/pendientes.md` § 1: `findUnidades` (`items.service.ts`)
+   * ordena por `creado_el DESC` sin desempate real, y una entrada en modo
+   * serie con varias series hace un INSERT por serie en un loop
+   * (`InventarioService.registrarMovimiento`, dentro de una sola
+   * transacción) — así que las unidades que nacen juntas empatan en
+   * `creado_el` al microsegundo. Se arma el escenario por la API real
+   * (`PATCH /items/:id/stock`), no con `Db` mockeado: el orden vive en el SQL.
+   */
+  it('una entrada con tres series empata sus item_unidad en creado_el, y el listado las desempata por serie', async () => {
+    const marca = `${Date.now()}-${Math.random()}`;
+    const itemId = await crearItemSerie(`Serie empate-creado_el E2E ${marca}`);
+
+    // Las tres series se mandan FUERA de orden alfabético (C, A, B): si el
+    // orden que expone el listado viniera de la posición de inserción o del
+    // plan de Postgres en vez del desempate por `serie`, este test lo notaría.
+    const serieC = `IMEI-C-${marca}`;
+    const serieA = `IMEI-A-${marca}`;
+    const serieB = `IMEI-B-${marca}`;
+
+    const resEntrada = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'entrada',
+        motivo: 'inventario_inicial',
+        ubicacionId: localId,
+        cantidad: '3',
+        series: [{ serie: serieC }, { serie: serieA }, { serie: serieB }],
+      });
+    expect(resEntrada.status).toBe(200);
+
+    // Premisa: las tres unidades nacieron en la misma transacción y empatan
+    // en `creado_el` al microsegundo. `creado_el::text` y no el `Date` del
+    // driver, que redondea a milisegundos y haría pasar por empate a horas
+    // distintas.
+    const escritas: { serie: string; creado_el: string }[] = await ds.query(
+      `SELECT serie, creado_el::text AS creado_el
+         FROM item_unidad
+        WHERE item_id = $1 AND eliminado_el IS NULL
+        ORDER BY serie`,
+      [itemId],
+    );
+    expect(escritas).toHaveLength(3);
+    expect(new Set(escritas.map((e) => e.creado_el)).size).toBe(1);
+
+    const resUnidades = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}/unidades`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUnidades.status).toBe(200);
+    expect((resUnidades.body as UnidadResponse[]).map((u) => u.serie)).toEqual([
+      serieA,
+      serieB,
+      serieC,
+    ]);
+  });
 });

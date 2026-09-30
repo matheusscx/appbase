@@ -355,4 +355,111 @@ describe('inventario — lotes por ubicación (e2e)', () => {
     const lote = (resLotes.body as LoteResponse[])[0];
     expect(lote.fechaVencimiento?.slice(0, 10)).toBe(vencimiento);
   });
+
+  /**
+   * `docs/agent/pendientes.md` § 1: `findLotes` (`items.service.ts`) ordena
+   * por `creado_el DESC` sin desempate real, y confirmar una compra con
+   * varias líneas del mismo producto y distinto lote las inserta todas en
+   * `item_lote` dentro de UNA transacción (`confirmarEnTransaccion`, loop de
+   * líneas) — así que empatan en `creado_el` al microsegundo. Se arma el
+   * escenario por la API real de compras (`POST /compras` +
+   * `POST /compras/:id/confirmar`), no con `Db` mockeado: el orden vive en
+   * el SQL.
+   */
+  it('confirmar una compra con tres líneas del mismo producto y distinto lote empata sus item_lote en creado_el, y el listado los desempata por codigo_lote', async () => {
+    const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+
+    const resProveedor = await request(app.getHttpServer())
+      .post('/api/terceros')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'proveedor',
+        nombre: `Proveedor lotes-empate E2E ${marca}`,
+      });
+    expect(resProveedor.status).toBe(201);
+    const proveedorId = (resProveedor.body as { id: string }).id;
+
+    const resTipos = await request(app.getHttpServer())
+      .get('/api/compras/tipos-documento')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resTipos.status).toBe(200);
+    // "Sin documento": no exige folio ni totalDocumento, y no aporta nada al
+    // escenario — lo único que hace falta es que la compra se pueda confirmar.
+    const sinDocumento = (
+      resTipos.body as { id: string; requiereFolio: boolean }[]
+    ).find((t) => !t.requiereFolio)!;
+
+    const itemId = await crearItemLote(`Lote empate-creado_el E2E ${marca}`);
+
+    // Los tres códigos se mandan FUERA de orden alfabético (C, A, B): si el
+    // orden que expone el listado viniera de la posición de inserción o del
+    // plan de Postgres en vez del desempate por `codigo_lote`, este test lo
+    // notaría.
+    const codigoC = `LT-C-${marca}`;
+    const codigoA = `LT-A-${marca}`;
+    const codigoB = `LT-B-${marca}`;
+
+    const resCompra = await request(app.getHttpServer())
+      .post('/api/compras')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        proveedorId,
+        tipoDocumentoCompraId: sinDocumento.id,
+        fechaDocumento: '2026-09-15',
+        ubicacionId: localId,
+        lineas: [
+          {
+            itemId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            lote: { codigoLote: codigoC },
+          },
+          {
+            itemId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            lote: { codigoLote: codigoA },
+          },
+          {
+            itemId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            lote: { codigoLote: codigoB },
+          },
+        ],
+      });
+    expect(resCompra.status).toBe(201);
+    const compraId = (resCompra.body as { id: string }).id;
+
+    const resConfirmar = await request(app.getHttpServer())
+      .post(`/api/compras/${compraId}/confirmar`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+    expect(resConfirmar.status).toBe(201);
+
+    // Premisa: las tres filas nacieron en la misma transacción y empatan en
+    // `creado_el` al microsegundo. `creado_el::text` y no el `Date` del
+    // driver, que redondea a milisegundos y haría pasar por empate a horas
+    // distintas.
+    const escritas: { codigo_lote: string; creado_el: string }[] =
+      await ds.query(
+        `SELECT codigo_lote, creado_el::text AS creado_el
+           FROM item_lote
+          WHERE item_id = $1 AND eliminado_el IS NULL
+          ORDER BY codigo_lote`,
+        [itemId],
+      );
+    expect(escritas).toHaveLength(3);
+    expect(new Set(escritas.map((e) => e.creado_el)).size).toBe(1);
+
+    const resLotes = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}/lotes`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resLotes.status).toBe(200);
+    expect((resLotes.body as LoteResponse[]).map((l) => l.codigoLote)).toEqual([
+      codigoA,
+      codigoB,
+      codigoC,
+    ]);
+  });
 });

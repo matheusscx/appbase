@@ -828,7 +828,12 @@ export class ComprasService {
          LEFT JOIN usuarios us ON us.usuario_id = cc.usuario_id
               AND us.eliminado_el IS NULL
         WHERE cc.tenant_id = $1 AND cl.compra_id = $2
-        ORDER BY cc.creado_el`,
+        -- \`cc.campo\` y \`cc.compra_linea_cambio_id\` desempatan: \`registrarCambios\`
+        -- inserta TODO el historial de una corrección en un solo INSERT
+        -- multi-fila (p.ej. \`corregirDescuento\` reparte el cambio a cada línea
+        -- afectada), y \`NOW()\` es estable dentro de la transacción — todas esas
+        -- filas quedan con el mismo \`creado_el\`.
+        ORDER BY cc.creado_el, cc.campo, cc.compra_linea_cambio_id`,
       [tenantId, id],
     );
 

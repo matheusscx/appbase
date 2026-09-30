@@ -2725,7 +2725,12 @@ export class SalonesService {
          JOIN usuarios u ON u.usuario_id = cla.autorizado_por
         WHERE cla.cuenta_id = ANY($1) AND cla.tenant_id = $2
           AND cla.eliminado_el IS NULL
-        ORDER BY cla.creado_el ASC`,
+        -- \`cuenta_linea_anulacion_id\` desempata: \`escribirCancelacionConMotivo\`
+        -- deja una anulación por línea despachada en una sola transacción, y
+        -- esas filas empatan en \`creado_el\` al microsegundo. Mismo desempate
+        -- (misma columna) que ya usa \`AnulacionesReporteService.findAll\`
+        -- (\`anulaciones-reporte.service.ts\`), en la dirección de esta consulta.
+        ORDER BY cla.creado_el ASC, cla.cuenta_linea_anulacion_id ASC`,
       [cuentaIds, tenantId],
     );
     const porCuenta = new Map<string, CuentaAnulacionDetalle[]>();

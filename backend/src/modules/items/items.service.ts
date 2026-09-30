@@ -3071,7 +3071,11 @@ export class ItemsService {
        LEFT JOIN item_lote l ON l.lote_id = u.lote_id AND l.eliminado_el IS NULL
        WHERE u.item_id = $1 AND u.tenant_id = $2 AND u.eliminado_el IS NULL
          ${estado ? 'AND u.estado = $3' : ''}
-       ORDER BY u.creado_el DESC`,
+       -- \`u.serie\` desempata: la entrada en modo serie hace un INSERT por
+       -- serie en un loop (\`InventarioService.registrarMovimiento\`), así que
+       -- una compra o un ajuste con N series deja N unidades con el mismo
+       -- \`creado_el\` al microsegundo.
+       ORDER BY u.creado_el DESC, u.serie ASC`,
       estado ? [itemId, tenantId, estado] : [itemId, tenantId],
     );
 
@@ -3114,7 +3118,12 @@ export class ItemsService {
        LEFT JOIN lote_ubicacion lu ON lu.lote_id = l.lote_id
        WHERE l.item_id = $1 AND l.tenant_id = $2 AND l.eliminado_el IS NULL
        GROUP BY l.lote_id
-       ORDER BY l.creado_el DESC`,
+       -- \`l.codigo_lote\` desempata: confirmar una compra con dos líneas del
+       -- mismo producto y distinto lote inserta los dos \`item_lote\` dentro de
+       -- una sola transacción (loop de \`compras.service.ts\` →
+       -- \`InventarioService.moverLote\`), con el mismo \`creado_el\` al
+       -- microsegundo (medido por la API).
+       ORDER BY l.creado_el DESC, l.codigo_lote ASC`,
       [itemId, tenantId],
     );
 

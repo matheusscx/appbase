@@ -638,7 +638,11 @@ export class PagosService {
        WHERE p.tenant_id = $1
          AND p.eliminado_el IS NULL
          ${filters}
-       ORDER BY p.creado_el DESC
+       -- \`p.pago_id\` desempata: mismo empate que \`VentasService.findOne\` por
+       -- el loop de \`PagosService.registrar\` (un \`Pago\` por método, en una
+       -- sola transacción). Solo estabiliza el orden entre cargas del
+       -- listado, no reproduce el orden en que el cajero tipeó los medios.
+       ORDER BY p.creado_el DESC, p.pago_id DESC
        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
       listParams,
     );
