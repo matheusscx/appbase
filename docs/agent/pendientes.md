@@ -117,6 +117,23 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
       hashear `recibo.diff` y compararlo con el `hash del recibo` de `info.txt`.
     Anotar lo encontrado acá con la ruta de la evidencia. Ojo: la evidencia muere con el
     worktree.
+  - **Medido el 2026-09-30: hubo un caso más y la instrumentación no lo capturó.** Fue el
+    2026-09-28 a las 19:31, en el worktree `heuristic-jepsen-4a8a7d`, con el recibo encadenado al
+    `git commit` en el mismo comando. El recibo tenía `9c160412…`. El hook vio `1c17f612…`, sobre
+    el índice normal del worktree, no uno temporal. Doce segundos después el shell dio
+    `1c17f612…` y la reescritura pasó. El revisor ya había terminado, y sus 40 llamadas no tocaron
+    el índice. No hay `recibo.diff` por dos razones: la sesión escribió el recibo con la forma
+    **vieja** (`git diff --cached | git hash-object --stdin > …`, sin guardar el diff), que traía
+    de su rama anterior a `66944c72`, y el worktree ya se borró con su `hook.diff`.
+    - **Recuento en los transcripts** (27 al 30 de septiembre, recibo y commit en un mismo comando):
+      la forma vieja, 24 intentos y 3 rechazos, que son los dos del 27 y este. La nueva, 12 y
+      ninguno. Todos los rechazos son de la forma con el pipe, pero con estos números la
+      diferencia puede ser azar (0 de 12 sale con probabilidad ~0,2 si la tasa fuera la vieja).
+      Queda como pista, no como causa. El comando que imprimen el hook y el skill ya es el nuevo.
+    - **Lo que falla en la instrumentación, y es mecánico:** la evidencia vive en
+      `git rev-parse --git-dir`, que en un worktree es `.git/worktrees/<nombre>/` y se borra con
+      él. Si fuera `--git-common-dir` sobreviviría. Además, un recibo en forma vieja no deja
+      `recibo.diff`, y el hook podría anotar en `info.txt` que no lo encontró.
 
 ## 3. Ya decidido, falta construir
 
