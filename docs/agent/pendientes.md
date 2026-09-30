@@ -1034,6 +1034,15 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   permiso* (recomendada) por sobre *B: dejarlo así*, con la condición que la propia opción
   llevaba: **antes de sembrarlo, medir qué más ve el garzón con `Items:Leer`** (por ejemplo si ve
   costos en la pantalla de productos). Si ve algo que no debería, se le vuelve a preguntar.
+  **Medido y re-preguntado (owner, 2026-09-30):** con `Items:Leer`, el garzón ve el `costoActual`
+  de cada producto en `GET /items` y en la pantalla de productos, el stock por ubicación y, en
+  `GET /desfases`, costo propuesto y margen %. La orquestadora se lo planteó en el selector
+  interactivo, con el dato de que la cajera del POS (`Vendedor`) ya tiene ese permiso y ve lo mismo,
+  entre *dárselo igual* (recomendada: cuando la grilla arme el catálogo de venta sin costos, se les
+  puede sacar a los dos), *un catálogo de venta sin costos ya, en este frente* y *esconder los costos
+  detrás de un permiso nuevo*. **Eligió dárselo igual.** Y al medir apareció que no es solo la
+  comanda: la boleta y la precuenta leen el mismo `GET /impresoras`, y **ningún rol sembrado tiene
+  `Impresoras:Leer`** (solo imprime el admin, por el atajo de `es_fijo`).
   **Al cerrarlo:** `frontend/e2e/salones/anular-plato.spec.ts` pasa a correr como el encargado
   —su docblock explica por qué hoy corre como admin—.
 
@@ -1094,9 +1103,20 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   venta"* (recomendada), *B: lo mismo con 15 s* y *C: dejarlo como está*. Contestó **"vamos con
   A"** en el chat de la orquestadora. Sin reintento automático
   (regla del owner: la app no repite sola lo que falló): el aviso, y el usuario reimprime.
-  **Lo que falta al construirlo:** medir qué camino limpia el carrito y si hoy espera a la
-  impresión (POS y cobro de salones); el mensaje exacto del aviso; y un test que falle sin el
-  techo. Toca el camino de impresión: sesión propia, igual que "Enviar a cocina exige
+  **Medido el 2026-09-30:** los cinco caminos que imprimen (boleta del POS, comanda, precuenta,
+  cobro de salón, reimpresión) esperan la impresión antes de limpiar la pantalla, así que sin techo
+  se cuelgan con la venta ya cobrada. Si `connect()` vence el techo, el intento sigue vivo dentro de
+  `qz` (singleton de la pestaña) y el siguiente falla al instante con un mensaje en inglés de qz-tray.
+  Los dos Playwright que caían ya no caen: los arregló el fixture `sin-qz-tray.ts` (`resueltos.md`).
+  **El aviso chocaba con otra decisión:** reimprimir exige `Ventas:Anular`, el del encargado (spec
+  `2026-09-17-boleta-desde-la-venta-design.md` § 2), y la cajera no lo tiene. La orquestadora se lo
+  planteó al owner en el selector interactivo, con la escena de la venta de $12.500: *pedírselo al
+  encargado* (recomendada), *la cajera reimprime lo suyo* o *un aviso genérico*. **Eligió que la
+  cajera reimprima lo suyo (owner, 2026-09-30):** las ventas de su propia caja abierta, y nada más;
+  el encargado sigue reimprimiendo cualquiera, con el alcance de siempre. Reabre la decisión del
+  17/9 en ese punto, a sabiendas.
+  **Lo que falta al construirlo:** el techo en `connect()` que además suelta la conexión colgada; el
+  mensaje exacto del aviso; y un test que falle sin el techo. Toca el camino de impresión: sesión propia, igual que "Enviar a cocina exige
   `Impresoras:Leer`" (arriba), con la que conviene ir junta.
 
 ### Playwright entra al gate de cierre (owner, 2026-09-29)
