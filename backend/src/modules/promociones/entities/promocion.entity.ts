@@ -4,6 +4,7 @@ import {
   CreateDateColumn,
   DeleteDateColumn,
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -17,6 +18,12 @@ export type TipoPromocion = 'porcentaje' | 'nxm' | 'precio_fijo';
  * Diseño: docs/superpowers/specs/2026-08-27-motor-promociones-design.md
  */
 @Entity('promociones')
+// `uq_promociones_tenant_nombre_vivo` es sobre `lower(nombre)`: TypeORM no
+// sabe expresar una función en `@Index`, así que acá solo se registra el
+// NOMBRE con `synchronize: false` para que `synchronize` no lo tire al
+// arrancar (pendientes.md, "synchronize no tira los 17 índices del seeder").
+// Lo sigue creando `SeederService.seedPromocionesIndices()` con SQL cruda.
+@Index('uq_promociones_tenant_nombre_vivo', { synchronize: false })
 @Check(
   'chk_promociones_horario_paridad',
   `("hora_inicio" IS NULL) = ("hora_fin" IS NULL)`,

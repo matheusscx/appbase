@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -7,7 +8,16 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 
+// Una sola línea viva por ítem dentro de un recuento: dos líneas del mismo
+// ítem en el mismo recuento serían dos deltas de stock compitiendo. Antes lo
+// creaba `SeederService.seedRecuentoInventarioLineaIndex()` con SQL cruda
+// (pendientes.md, "synchronize no tira los 17 índices del seeder"); columnas
+// peladas, sin expresión, así que `synchronize` la gestiona directamente.
 @Entity('recuento_inventario_linea')
+@Index('uq_recuento_linea_item_vivo', ['recuentoId', 'itemId'], {
+  unique: true,
+  where: '"eliminado_el" IS NULL',
+})
 export class RecuentoInventarioLinea {
   @PrimaryGeneratedColumn('uuid', { name: 'linea_id' })
   id: string;

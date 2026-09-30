@@ -179,7 +179,6 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedMotivosDiferencia();
     await this.seedMotivosDiferenciaInventario();
     await this.seedMotivosTraslado();
-    await this.seedRecuentoInventarioLineaIndex();
     await this.seedPromocionesIndices();
     await this.seedItemUnidadSerieIndex();
     await this.seedCajasVirtuales();
@@ -1787,16 +1786,6 @@ export class SeederService implements OnApplicationBootstrap {
     );
   }
 
-  // No hay filas fijas que sembrar (las sesiones las crean los usuarios): solo
-  // la defensa declarada en startup-pos.sql que faltaba en la BD real — una
-  // línea viva por item dentro de un mismo recuento.
-  private async seedRecuentoInventarioLineaIndex(): Promise<void> {
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_recuento_linea_item_vivo
-      ON recuento_inventario_linea (recuento_id, item_id) WHERE eliminado_el IS NULL
-    `);
-  }
-
   /**
    * Solo el índice: la unicidad de la **serie** de una unidad serializada.
    *
@@ -2337,21 +2326,11 @@ export class SeederService implements OnApplicationBootstrap {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
 
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_garzones_mostrador_tenant
-      ON garzones (tenant_id) WHERE es_placeholder = true AND eliminado_el IS NULL
-    `);
-
-    // Una cuenta no puede ser dos garzones vivos del mismo tenant: si lo fuera,
-    // `resolverGarzonActuante` elegiría uno al azar al resolver por JWT.
-    // Acá y no solo en `startup-pos.sql` porque los índices PARCIALES los crea
-    // el seeder: `synchronize` de TypeORM no los genera, y el .sql documenta el
-    // esquema pero no es lo que se aplica.
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_garzones_usuario_tenant
-      ON garzones (tenant_id, usuario_id)
-      WHERE usuario_id IS NOT NULL AND eliminado_el IS NULL
-    `);
+    // `uq_garzones_mostrador_tenant` y `uq_garzones_usuario_tenant` ya no se
+    // crean acá: son índices parciales sobre columnas peladas (sin expresión),
+    // que `synchronize` SÍ genera — a diferencia de un índice sobre una
+    // expresión como `lower(nombre)` o `serieNormalizadaSql`, que TypeORM no
+    // sabe declarar. Viven en `Garzon` (`garzon.entity.ts`) como `@Index`.
 
     // pinHash = bcrypt(PIN, 10). PINs de dev: Bruno=222222, Carla=333333. Ana
     // NO tiene PIN de dev: está vinculada desde el seed (ver más abajo), así

@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -7,6 +8,12 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 
+// `uq_motivo_dif_inv_tenant_nombre` es sobre `lower(nombre)`: TypeORM no sabe
+// expresar una función en `@Index`, así que acá solo se registra el NOMBRE
+// con `synchronize: false` para que `synchronize` no lo tire al arrancar
+// (pendientes.md, "synchronize no tira los 17 índices del seeder"). Lo sigue
+// creando `SeederService.seedMotivosDiferenciaInventario()` con SQL cruda.
+@Index('uq_motivo_dif_inv_tenant_nombre', { synchronize: false })
 @Entity('motivo_diferencia_inventario')
 export class MotivoDiferenciaInventario {
   @PrimaryGeneratedColumn('uuid', { name: 'motivo_diferencia_inventario_id' })

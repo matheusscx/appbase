@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -7,7 +8,17 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 
+// Único por producto sobre filas vivas: dos lotes del mismo `codigo_lote` para
+// el mismo ítem son el mismo lote. Existía solo en `startup-pos.sql`
+// (documentación); `ItemLote` no lo declaraba y el seeder no lo crea, así que
+// no existía en la base (pendientes.md, "Declarar el índice único de
+// item_lote"). Columnas peladas: no hace falta la SQL cruda del seeder, a
+// diferencia de `uq_unidad_item_serie` (`item-unidad.entity.ts`).
 @Entity('item_lote')
+@Index('uq_lote_item_codigo', ['itemId', 'codigoLote'], {
+  unique: true,
+  where: '"eliminado_el" IS NULL',
+})
 export class ItemLote {
   @PrimaryGeneratedColumn('uuid', { name: 'lote_id' })
   loteId: string;

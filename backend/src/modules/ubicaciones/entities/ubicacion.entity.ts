@@ -20,6 +20,12 @@ import {
  * No se elimina ni se desactiva.
  */
 @Index('idx_ubicaciones_tenant', ['tenantId'])
+// `uq_ubicaciones_tenant_nombre` es sobre `lower(nombre)`: TypeORM no sabe
+// expresar una función en `@Index`, así que acá solo se registra el NOMBRE
+// con `synchronize: false` para que `synchronize` no lo tire al arrancar
+// (pendientes.md, "synchronize no tira los 17 índices del seeder"). Lo sigue
+// creando `SeederService.seedUbicaciones()` con SQL cruda.
+@Index('uq_ubicaciones_tenant_nombre', { synchronize: false })
 @Entity('ubicaciones')
 export class Ubicacion {
   @PrimaryGeneratedColumn('uuid', { name: 'ubicacion_id' })

@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   Check,
@@ -11,6 +12,12 @@ import {
 @Entity('impuestos')
 // Sistema: (tenant_id NULL, pais_id set) · Personalizado: (tenant_id set, pais_id NULL)
 @Check('CHK_impuestos_scope', '("tenant_id" IS NULL) <> ("pais_id" IS NULL)')
+// `uq_impuestos_tenant_nombre_vivo` es sobre `lower(nombre)`: TypeORM no sabe
+// expresar una función en `@Index`, así que acá solo se registra el NOMBRE
+// con `synchronize: false` para que `synchronize` no lo tire al arrancar
+// (pendientes.md, "synchronize no tira los 17 índices del seeder"). Lo sigue
+// creando `SeederService.seedImpuestos()` con SQL cruda.
+@Index('uq_impuestos_tenant_nombre_vivo', { synchronize: false })
 export class Impuesto {
   @PrimaryGeneratedColumn('uuid', { name: 'impuesto_id' })
   id: string;

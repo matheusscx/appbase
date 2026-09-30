@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -19,6 +20,12 @@ import {
   `("modo" = 'monto_fijo' AND "valor_porcentaje" IS NULL)
    OR ("modo" = 'porcentaje' AND "valor_monto" IS NULL)`,
 )
+// `uq_recargos_tenant_nombre_vivo` es sobre `lower(nombre)`: TypeORM no sabe
+// expresar una función en `@Index`, así que acá solo se registra el NOMBRE
+// con `synchronize: false` para que `synchronize` no lo tire al arrancar
+// (pendientes.md, "synchronize no tira los 17 índices del seeder"). Lo sigue
+// creando `SeederService.seedRecargos()` con SQL cruda.
+@Index('uq_recargos_tenant_nombre_vivo', { synchronize: false })
 export class Recargo {
   @PrimaryGeneratedColumn('uuid', { name: 'recargo_id' })
   id: string;

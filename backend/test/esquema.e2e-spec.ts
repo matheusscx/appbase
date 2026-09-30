@@ -343,4 +343,58 @@ describe('Esquema (e2e) — invariantes medidas contra Postgres', () => {
     );
     expect(total).toBeGreaterThan(0);
   });
+
+  /**
+   * `item_lote (item_id, codigo_lote)` es único sobre filas vivas.
+   *
+   * Existía solo en `startup-pos.sql` (documentación); `ItemLote` no lo
+   * declaraba y el seeder no lo creaba, así que dos lotes con el mismo código
+   * para el mismo ítem entraban sin aviso (pendientes.md, "Declarar el
+   * índice único de item_lote"). Columnas peladas, sin expresión — a
+   * diferencia de `uq_unidad_item_serie` de acá arriba —, así que alcanza con
+   * el `@Index` de la entity.
+   */
+  it('item_lote tiene el índice único (item_id, codigo_lote) sobre filas vivas', async () => {
+    const [indice]: { indexdef: string }[] = await ds.query(
+      `SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_lote_item_codigo'`,
+    );
+    expect(indice).toBeDefined();
+    expect(indice.indexdef).toContain('UNIQUE');
+    expect(indice.indexdef).toMatch(/\(item_id, codigo_lote\)/);
+    expect(indice.indexdef).toMatch(/WHERE \(eliminado_el IS NULL\)/);
+  });
+
+  /**
+   * `synchronize` no tiene NADA que hacer al arrancar contra una base recién
+   * sembrada.
+   *
+   * Antes de este cierre, `createSchemaBuilder().log()` daba 19 `upQueries`
+   * en una base recién sembrada: 17 `DROP INDEX` de los 17 índices únicos que
+   * crea `SeederService` con SQL cruda —ninguna entity los declaraba, y
+   * `RdbmsSchemaBuilder.shouldDropIndices` tira todo índice sin metadata con
+   * su nombre— más 2 `DEFAULT` (pendientes.md, "synchronize no tira los 17
+   * índices del seeder"). Los 14 de expresión (13 `lower(nombre)` +
+   * `uq_unidad_item_serie`) ahora declaran solo su NOMBRE con
+   * `synchronize: false` en su entity; los 3 de columnas
+   * (`uq_recuento_linea_item_vivo`, `uq_garzones_mostrador_tenant`,
+   * `uq_garzones_usuario_tenant`) se declaran enteros y su SQL salió del
+   * seeder; los 2 `DEFAULT` (`porcentaje_sugerido`, `payload`) se ajustaron
+   * hasta que el log diera vacío.
+   *
+   * Esto corre DESPUÉS de que la app ya arrancó —`onApplicationBootstrap` del
+   * seeder ya corrió en `beforeAll`—, así que un `upQueries` acá es DDL que se
+   * repetiría en cada arranque y en cada deploy, no una ventana sin unicidad:
+   * `app.listen()` corre `init()` antes de escuchar, así que ningún pedido ve
+   * el estado intermedio.
+   */
+  it('createSchemaBuilder().log() no trae upQueries contra una base recién sembrada', async () => {
+    const { upQueries } = await ds.driver.createSchemaBuilder().log();
+    if (upQueries.length > 0) {
+      throw new Error(
+        `${upQueries.length} upQueries pendientes:\n` +
+          upQueries.map((q) => q.query).join('\n'),
+      );
+    }
+    expect(upQueries).toHaveLength(0);
+  });
 });

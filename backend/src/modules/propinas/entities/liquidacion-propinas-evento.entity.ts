@@ -27,7 +27,13 @@ export class LiquidacionPropinasEvento {
   @Column({ type: 'text' })
   tipo: TipoEventoLiquidacion;
 
-  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  // Sin `::jsonb`: TypeORM lee el default de la base SIN el cast —lo pela con
+  // una regex antes de comparar— así que declararlo acá con el cast quedaba
+  // comparando `'{}'::jsonb` contra `'{}'` y `synchronize` tiraba un
+  // `ALTER … SET DEFAULT` en cada arranque (pendientes.md, "synchronize no
+  // tira los 17 índices del seeder"). El cast no hace falta: Postgres castea
+  // el literal sin tipo a `jsonb` porque así lo pide la columna.
+  @Column({ type: 'jsonb', default: () => "'{}'" })
   payload: Record<string, unknown>;
 
   @Column({ name: 'usuario_id', type: 'uuid' })

@@ -16,12 +16,16 @@ import {
  * El contenido se guarda como se tipeó, no convertido: la conversión a la
  * unidad base la hace quien la usa, con el conversor del catálogo.
  *
- * ⚠️ `uq_presentaciones_compra_nombre` NO se declara acá: es sobre
- * `lower(nombre)` y TypeORM no sabe expresar una función en `@Index`. Lo crea
- * `seeder.service.ts` → `seedPresentacionesCompra()` con SQL cruda.
+ * ⚠️ `uq_presentaciones_compra_nombre` NO se declara acá CON SUS COLUMNAS: es
+ * sobre `lower(nombre)` y TypeORM no sabe expresar una función en `@Index`.
+ * Lo crea `seeder.service.ts` → `seedPresentacionesCompra()` con SQL cruda.
+ * Lo que sí se declara es solo el NOMBRE, con `synchronize: false`, para que
+ * `synchronize` no lo tire por huérfano en cada arranque (pendientes.md,
+ * "synchronize no tira los 17 índices del seeder").
  */
 @Entity('presentaciones_compra')
 @Index('idx_presentaciones_compra_proveedor', ['tenantId', 'proveedorId'])
+@Index('uq_presentaciones_compra_nombre', { synchronize: false })
 export class PresentacionCompra {
   @PrimaryGeneratedColumn('uuid', { name: 'presentacion_compra_id' })
   id: string;

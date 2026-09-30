@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -47,14 +48,14 @@ export const serieNormalizadaSql = (columna: string): string =>
   `lower(btrim(${columna}, ${BLANCOS_DE_BORDE}))`;
 
 @Entity('item_unidad')
-// ⚠️ **El índice único de `serie` NO se declara acá**, y la razón es la regla:
-// la serie es única por producto **comparada sin espacios de los bordes y sin
-// distinguir mayúsculas** —`ABC123` y `abc123 ` son la misma— (owner,
-// 2026-09-20). Eso es un índice **sobre una expresión**,
+// ⚠️ **La DEFINICIÓN del índice único de `serie` NO se declara acá**, y la
+// razón es la regla: la serie es única por producto **comparada sin espacios
+// de los bordes y sin distinguir mayúsculas** —`ABC123` y `abc123 ` son la
+// misma— (owner, 2026-09-20). Eso es un índice **sobre una expresión**,
 // `(item_id, lower(btrim(serie, <blancos>)))` —ver `serieNormalizadaSql` acá
-// arriba—, y **TypeORM no sabe expresar una función en
-// `@Index`**: declarado acá, `synchronize` crearía uno sobre la columna pelada,
-// que acepta `ABC123` y `abc123` como dos series distintas. O sea, el índice
+// arriba—, y **TypeORM no sabe expresar una función en `@Index`**: declarado
+// con columnas acá, `synchronize` crearía uno sobre la columna pelada, que
+// acepta `ABC123` y `abc123` como dos series distintas. O sea, el índice
 // equivocado, que es justo el modo de falla que ya pasó con los nombres únicos.
 //
 // Lo crea `SeederService.seedItemUnidadSerieIndex()` con SQL cruda, mismo molde
@@ -63,8 +64,15 @@ export const serieNormalizadaSql = (columna: string): string =>
 // SIN el índice hasta que el seeder lo recree, así que la red del lado de la
 // base depende de que el seeder corra y no falle.
 //
-// Entre el 2026-09-19 y el 2026-09-20 sí vivió acá, como `@Index` de columnas
-// peladas: era la regla anterior —unicidad exacta—, que el owner cambió.
+// Lo que SÍ se declara acá es solo el NOMBRE, con `synchronize: false`: sin
+// columnas, para que `RdbmsSchemaBuilder` no lo dé por huérfano y lo tire en
+// cada arranque (pendientes.md, "synchronize no tira los 17 índices del
+// seeder"). No es una declaración de la forma del índice —esa sigue siendo
+// SQL cruda del seeder—, es solo la marca que evita el DROP.
+@Index('uq_unidad_item_serie', { synchronize: false })
+//
+// Entre el 2026-09-19 y el 2026-09-20 sí vivió acá con columnas peladas: era
+// la regla anterior —unicidad exacta—, que el owner cambió.
 //
 // El 400 que nombra la serie repetida lo da `InventarioService.moverSerie`, el
 // único lugar que inserta unidades, comparando con la MISMA normalización.

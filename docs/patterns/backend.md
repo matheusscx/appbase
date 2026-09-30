@@ -1474,11 +1474,14 @@ para verlos sin confiar en una lista que envejece:
 grep -A2 "CREATE UNIQUE INDEX IF NOT EXISTS" backend/src/modules/seeder/seeder.service.ts
 ```
 
-⚠️ **Y la vuelta NO vale:** que un índice esté en el seeder no significa que lleve una función.
-Ahí viven también algunos de **columnas peladas** —`uq_recuento_linea_item_vivo`,
-`uq_garzones_usuario_tenant`, `uq_garzones_mostrador_tenant`— que podrían haber ido a la
-entity y están ahí por su propia historia. O sea: la función **obliga** al seeder, pero el
-seeder no implica función. Antes de mover uno, mirá el suyo.
+⚠️ **Y la vuelta NO vale, en el sentido inverso:** que un índice único lleve SQL cruda en el
+seeder no significa que no se pueda declarar nada en la entity. Hasta el 2026-09-30 el seeder
+también creaba tres de **columnas peladas** —`uq_recuento_linea_item_vivo`,
+`uq_garzones_usuario_tenant`, `uq_garzones_mostrador_tenant`— que no tenían ninguna razón para
+estar ahí: no llevan función, así que hoy son un `@Index([...], { unique: true, where })` común
+en la entity (`RecuentoInventarioLinea`, `Garzon`) y su SQL salió del seeder
+(el cierre, del 2026-09-30, está en `docs/agent/resueltos.md`). Antes de sumar
+uno nuevo al seeder por imitación, mirá si el que estás copiando lleva una función de verdad.
 
 ⚠️ **La contrapartida del seeder, que se acepta a sabiendas:** en dev `synchronize` puede
 dejar la tabla **sin** el índice hasta que el seeder lo recree, así que la red del lado de la
@@ -1487,6 +1490,26 @@ manteniendo el nombre, `CREATE UNIQUE INDEX IF NOT EXISTS` **no lo reemplaza** �
 no hace nada—: hay que precederlo de un `DROP` condicional que dispare solo cuando el que
 existe no es el nuevo (molde en las dos funciones citadas). Sin eso, las bases creadas antes
 del cambio se quedan con la regla vieja sin que nada avise.
+
+📌 **El índice de expresión SÍ va también en la entity, pero solo por el NOMBRE.** Sin ningún
+`@Index` que mencione `uq_promociones_tenant_nombre_vivo` (por ejemplo), TypeORM no tiene
+metadata con ese nombre — y `RdbmsSchemaBuilder.shouldDropIndices` tira **todo** índice de la
+tabla que no tenga metadata, sin importar quién lo creó. El resultado, medido en una base recién
+sembrada: 17 `DROP INDEX` en cada arranque, uno por cada índice único que crea el seeder — DDL
+real, no solo ruido de log, y candidato (sin medir) a explicar fragilidad bajo carga. La
+declaración que lo evita **no describe la forma del índice** —seguiría siendo la columna pelada,
+que es exactamente lo que no querés— sino que registra el nombre con `synchronize: false`:
+
+```ts
+@Index('uq_promociones_tenant_nombre_vivo', { synchronize: false })
+```
+
+`synchronize: false` hace que `IndexMetadata.build()` corte antes de tocar columnas —por eso
+alcanza con pasar el nombre solo, sin fields—, y `shouldDropIndices` encuentra metadata con ese
+nombre y no lo tira. El SQL que crea el índice de verdad sigue siendo el del seeder, sin
+cambios (el cierre, del 2026-09-30, está en
+`docs/agent/resueltos.md`): para ver todos los que llevan esta marca,
+`grep -rn "synchronize: false" backend/src/modules/*/entities`.
 
 Y **el índice que crea el seeder va igual en `startup-pos.sql`**, con un comentario que diga
 quién lo crea: por la misma razón que arriba, quien le pregunte al `.sql` merece la respuesta

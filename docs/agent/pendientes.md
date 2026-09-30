@@ -73,26 +73,6 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   y el guard de salida. Candidato: extraer ese bloque (franja + líneas del XML + apartadas) a un
   componente propio, sin tocar la lógica de `useDte.ts`.
 
-- [ ] **Declarar el índice único de `item_lote (item_id, codigo_lote)` que hoy existe solo en
-  `startup-pos.sql`** (backend, re-medido el 2026-09-28; antes estaba en la § 5 como carrera de
-  concurrencia). **La carrera que describía la entrada no existe:** el único `INSERT INTO item_lote`
-  del sistema está en `InventarioService.moverLote`, que solo se llama desde `registrarMovimiento`,
-  y ese método toma primero `FOR UPDATE OF ip` sobre `item_producto` —el ancla de lock de todo
-  movimiento de stock (`docs/patterns/backend.md` §15)—. Dos entradas del mismo producto se
-  encolan ahí; la segunda, al despertar, corre su `SELECT … codigo_lote … FOR UPDATE` en un
-  statement nuevo, ve el lote que insertó la primera y lo reusa. Una compra con dos líneas del
-  mismo producto y lote también reusa (la transacción ve su propio insert). **Lo que sí es cierto:**
-  el índice `uq_lote_item_codigo` está declarado solo en `startup-pos.sql`, que es documentación;
-  `ItemLote` no lo declara y el seeder no lo crea, así que **no existe** (medido en producción el
-  2026-09-28: `item_lote` solo tiene su PK). Es la misma forma del bug de `serie`
-  (`resueltos.md`), sin su consecuencia: acá lo que falta es la red, no el invariante.
-  **Qué hacer (mecánico):** declararlo en la entity —`@Index(['itemId', 'codigoLote'], { unique:
-  true, where: '"eliminado_el" IS NULL' })`, índice parcial simple, cabe en `@Index`— con un e2e
-  que confirme que existe en `pg_indexes` después de arrancar. **Duplicados vivos que impedirían
-  crearlo:** ninguno en producción (0 lotes vivos, 2026-09-28); el seed y los e2e se verifican al
-  correr. Cuando el índice exista, una segunda fila por un camino futuro que no pase por el ancla
-  daría 500 en vez de un duplicado silencioso: si eso llegara a importar, es otra entrada.
-
 - [ ] **Alinear el Postgres local y el de CI con el del demo: `postgres:18` glibc** (entorno;
   decidido por el owner el 2026-09-29 en el selector interactivo de la orquestadora, entre "todo a
   18" y "recrear el demo con la 15"; juntó dos entradas que venían de la § 2). **Por qué:** el
@@ -145,35 +125,6 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   que van a `::date` llevan el molde de turnos; un campo que acepta timestamp completo lleva
   `strict` sin el `@Matches`. Cierre: un e2e por cada forma (no un spec de DTO, que no corre el
   pipe) que mande `2026-02-31` y espere 400.
-
-- [ ] **Que `synchronize` deje de tirar en cada arranque los 17 índices únicos que crea el
-  seeder** (backend; lo levantó la sesión de compras pieza 3 el 2026-09-29 con
-  `createSchemaBuilder().log()`, que dio 19 `upQueries` en una base recién sembrada; la causa la
-  midieron un sub-agente Sonnet y la orquestadora el mismo día; venía de la § 2).
-  `grep -rn "CREATE UNIQUE INDEX" backend/src` da exactamente 17, todos en `seeder.service.ts`, y
-  coinciden uno a uno con los 17 `DROP INDEX`. Ninguna entity los declara, y en typeorm 1.0.0
-  `RdbmsSchemaBuilder.shouldDropIndices` (`node_modules/typeorm/schema-builder/RdbmsSchemaBuilder.js:267`)
-  tira todo índice que no tenga metadata con su nombre, salvo que esa metadata diga
-  `synchronize: false`. **El arreglo, por forma:**
-  - **Los 14 de expresión** (13 sobre `lower(nombre)` y `uq_unidad_item_serie`, que usa
-    `serieNormalizadaSql`): declarar `@Index('<nombre>', { synchronize: false })` en su entity. El
-    seeder los sigue creando, y `synchronize` deja de tocarlos.
-  - **Los 3 de columnas** (`uq_recuento_linea_item_vivo`, `uq_garzones_mostrador_tenant` y
-    `uq_garzones_usuario_tenant`): declararlos en la entity con `@Index([...], { unique: true,
-    where })` y sacar su SQL del seeder. El comentario de `seeder.service.ts:2345-2347`, que dice
-    que `synchronize` no genera índices parciales, es falso para esta versión: corregirlo en el
-    mismo commit.
-  - **Los 2 `DEFAULT`:** `porcentaje_sugerido` declara `default: '0.10'` como string, y la lectura
-    del default de la base lo trae sin comillas. `payload` declara `default: () => "'{}'::jsonb"`,
-    y el lector le quita el cast. Ajustar la declaración hasta que el log dé vacío. Esto se dedujo
-    leyendo TypeORM y no se midió contra la base.
-  **Lo que la medición corrige de la entrada anterior:** la ventana sin unicidad existe, pero pasa
-  antes de que el puerto se abra (`app.listen()` corre `init()` y el `onApplicationBootstrap` del
-  seeder antes de escuchar), así que ningún pedido la ve. Lo que queda es DDL en cada arranque y
-  en cada deploy del demo, y que siga siendo candidato a explicar la fragilidad de los specs de
-  locks (sin medir). **Cierre:** un e2e que arranque la app y afirme que
-  `createSchemaBuilder().log()` no trae `upQueries`, para que no vuelva. Va junto con "Declarar el
-  índice único de `item_lote`" (arriba), que es la misma idea.
 
 - [ ] **Ocho specs e2e buscan su fila en la primera página de 100 sin un filtro que la acote**
   (backend, test; lo levantó la sesión de compras pieza 3 y lo midió un sub-agente Sonnet el

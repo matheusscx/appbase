@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -15,6 +16,18 @@ import { TipoGarzon } from '../enums/tipo-garzon.enum';
  * cuenta en dispositivos compartidos. Ver docs/features/garzones.md.
  */
 @Entity('garzones')
+// Un solo garzón "Mostrador" (placeholder) vivo por tenant: es el destino
+// neutro de la propina del POS, y dos lo dejarían ambiguo.
+@Index('uq_garzones_mostrador_tenant', ['tenantId'], {
+  unique: true,
+  where: '"es_placeholder" = true AND "eliminado_el" IS NULL',
+})
+// Una cuenta no puede ser dos garzones vivos del mismo tenant: si lo fuera,
+// `resolverGarzonActuante` elegiría uno al azar al resolver por JWT.
+@Index('uq_garzones_usuario_tenant', ['tenantId', 'usuarioId'], {
+  unique: true,
+  where: '"usuario_id" IS NOT NULL AND "eliminado_el" IS NULL',
+})
 export class Garzon {
   @PrimaryGeneratedColumn('uuid', { name: 'garzon_id' })
   id: string;

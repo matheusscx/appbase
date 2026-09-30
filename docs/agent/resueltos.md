@@ -23,6 +23,100 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `synchronize` ya no tira en cada arranque los índices únicos del seeder, y el de `item_lote` existe (cerrada 2026-09-30)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### Las entradas que cierra, como estaban en `pendientes.md` § 1
+
+- [ ] **Declarar el índice único de `item_lote (item_id, codigo_lote)` que hoy existe solo en
+  `startup-pos.sql`** (backend, re-medido el 2026-09-28; antes estaba en la § 5 como carrera de
+  concurrencia). **La carrera que describía la entrada no existe:** el único `INSERT INTO item_lote`
+  del sistema está en `InventarioService.moverLote`, que solo se llama desde `registrarMovimiento`,
+  y ese método toma primero `FOR UPDATE OF ip` sobre `item_producto` —el ancla de lock de todo
+  movimiento de stock (`docs/patterns/backend.md` §15)—. Dos entradas del mismo producto se
+  encolan ahí; la segunda, al despertar, corre su `SELECT … codigo_lote … FOR UPDATE` en un
+  statement nuevo, ve el lote que insertó la primera y lo reusa. Una compra con dos líneas del
+  mismo producto y lote también reusa (la transacción ve su propio insert). **Lo que sí es cierto:**
+  el índice `uq_lote_item_codigo` está declarado solo en `startup-pos.sql`, que es documentación;
+  `ItemLote` no lo declara y el seeder no lo crea, así que **no existe** (medido en producción el
+  2026-09-28: `item_lote` solo tiene su PK). Es la misma forma del bug de `serie`
+  (`resueltos.md`), sin su consecuencia: acá lo que falta es la red, no el invariante.
+  **Qué hacer (mecánico):** declararlo en la entity —`@Index(['itemId', 'codigoLote'], { unique:
+  true, where: '"eliminado_el" IS NULL' })`, índice parcial simple, cabe en `@Index`— con un e2e
+  que confirme que existe en `pg_indexes` después de arrancar. **Duplicados vivos que impedirían
+  crearlo:** ninguno en producción (0 lotes vivos, 2026-09-28); el seed y los e2e se verifican al
+  correr. Cuando el índice exista, una segunda fila por un camino futuro que no pase por el ancla
+  daría 500 en vez de un duplicado silencioso: si eso llegara a importar, es otra entrada.
+
+- [ ] **Que `synchronize` deje de tirar en cada arranque los 17 índices únicos que crea el
+  seeder** (backend; lo levantó la sesión de compras pieza 3 el 2026-09-29 con
+  `createSchemaBuilder().log()`, que dio 19 `upQueries` en una base recién sembrada; la causa la
+  midieron un sub-agente Sonnet y la orquestadora el mismo día; venía de la § 2).
+  `grep -rn "CREATE UNIQUE INDEX" backend/src` da exactamente 17, todos en `seeder.service.ts`, y
+  coinciden uno a uno con los 17 `DROP INDEX`. Ninguna entity los declara, y en typeorm 1.0.0
+  `RdbmsSchemaBuilder.shouldDropIndices` (`node_modules/typeorm/schema-builder/RdbmsSchemaBuilder.js:267`)
+  tira todo índice que no tenga metadata con su nombre, salvo que esa metadata diga
+  `synchronize: false`. **El arreglo, por forma:**
+  - **Los 14 de expresión** (13 sobre `lower(nombre)` y `uq_unidad_item_serie`, que usa
+    `serieNormalizadaSql`): declarar `@Index('<nombre>', { synchronize: false })` en su entity. El
+    seeder los sigue creando, y `synchronize` deja de tocarlos.
+  - **Los 3 de columnas** (`uq_recuento_linea_item_vivo`, `uq_garzones_mostrador_tenant` y
+    `uq_garzones_usuario_tenant`): declararlos en la entity con `@Index([...], { unique: true,
+    where })` y sacar su SQL del seeder. El comentario de `seeder.service.ts:2345-2347`, que dice
+    que `synchronize` no genera índices parciales, es falso para esta versión: corregirlo en el
+    mismo commit.
+  - **Los 2 `DEFAULT`:** `porcentaje_sugerido` declara `default: '0.10'` como string, y la lectura
+    del default de la base lo trae sin comillas. `payload` declara `default: () => "'{}'::jsonb"`,
+    y el lector le quita el cast. Ajustar la declaración hasta que el log dé vacío. Esto se dedujo
+    leyendo TypeORM y no se midió contra la base.
+  **Lo que la medición corrige de la entrada anterior:** la ventana sin unicidad existe, pero pasa
+  antes de que el puerto se abra (`app.listen()` corre `init()` y el `onApplicationBootstrap` del
+  seeder antes de escuchar), así que ningún pedido la ve. Lo que queda es DDL en cada arranque y
+  en cada deploy del demo, y que siga siendo candidato a explicar la fragilidad de los specs de
+  locks (sin medir). **Cierre:** un e2e que arranque la app y afirme que
+  `createSchemaBuilder().log()` no trae `upQueries`, para que no vuelva. Va junto con "Declarar el
+  índice único de `item_lote`" (arriba), que es la misma idea.
+
+### Qué se hizo
+
+| Lo que daba `createSchemaBuilder().log()` | Qué se hizo |
+|---|---|
+| 14 `DROP INDEX` de índices de expresión (13 `lower(nombre)` y `uq_unidad_item_serie`) | `@Index('<nombre>', { synchronize: false })` en su entity. El seeder los sigue creando con el mismo SQL |
+| 3 `DROP INDEX` de índices de columnas (`uq_recuento_linea_item_vivo`, `uq_garzones_mostrador_tenant`, `uq_garzones_usuario_tenant`) | declarados en la entity (`RecuentoInventarioLinea`, `Garzon`) con `@Index([...], { unique: true, where })`. Su SQL salió del seeder |
+| `SET DEFAULT` de `porcentaje_sugerido` | `default: () => '0.10'`: con el string, TypeORM lo compara entre comillas y Postgres lo guarda sin ellas |
+| `SET DEFAULT` de `payload` | `default: () => "'{}'"`: Postgres le saca el `::jsonb` al leerlo |
+
+Además, `uq_lote_item_codigo` se declara en `ItemLote` (índice parcial sobre `item_id, codigo_lote`,
+igual al de `startup-pos.sql`); antes no existía en ninguna base. El comentario del seeder que decía
+que `synchronize` no genera índices parciales se corrigió, y `docs/patterns/backend.md` explica la
+marca `synchronize: false`. En una base vacía, el `log()` queda sin `upQueries`.
+
+**Medido que no cambia ninguna definición:** el `indexdef` de los tres movidos es el mismo antes y
+después, y los 14 nombres marcados calzan uno a uno con los `CREATE UNIQUE INDEX` que quedan en el
+seeder (comparado con un script). En el demo, que ya tiene los tres índices, `shouldDropIndices` los
+reconoce por nombre, unicidad y columnas, así que el primer deploy no los tira ni los recrea. Ningún
+`ON CONFLICT` del código infiere esos índices.
+
+**Objeción de la revisión de seguridad, refutada:** que los tres movidos quedan a merced de
+`synchronize`, que se apaga con `NODE_ENV=production`. Es cierto y no es nuevo: con `synchronize`
+apagado sobre una base vacía no existe ninguna tabla, porque el proyecto no tiene migraciones, y
+otras 37 entities ya declaran índices únicos que solo crea `synchronize`. En Railway `NODE_ENV` no es
+`production` (medido). El hueco de fondo es el de la § 7, *"`synchronize: true` → migraciones"*.
+
+### Qué lo fija
+
+Dos tests en `esquema.e2e-spec.ts`: que `log()` no trae `upQueries` (con las queries en el mensaje si
+falla) y que `uq_lote_item_codigo` está en `pg_indexes`.
+
+| Mutante | Resultado |
+|---|---|
+| sacar el `@Index(…, { synchronize: false })` de `Ubicacion` | rojo: `1 upQueries pendientes: DROP INDEX "public"."uq_ubicaciones_tenant_nombre"` |
+| sacar el `@Index` de `ItemLote` | rojo: el índice no está en `pg_indexes` |
+
+Un `@Index` con solo el nombre **exige** `synchronize: false`: con `true`, el arranque se cae
+(`this.givenColumnNames is not a function`).
+
 ## Un test afirma el descuento del formulario después de que `persistirBorrador` resuelve (cerrada 2026-09-30)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.

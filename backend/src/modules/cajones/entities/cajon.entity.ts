@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -11,13 +12,18 @@ import {
 // dura (bajo concurrencia el check de `count` del service podría saltearse); el
 // service igual valida primero para devolver un 409 con mensaje amable.
 //
-// ⚠️ `ux_cajones_tenant_nombre` NO se declara acá a propósito: tiene que ser sobre
-// `LOWER("nombre")` —la unicidad de nombre es case-insensitive en todo el
-// proyecto (docs/PRODUCTO.md)— y **TypeORM no sabe expresar una función en
-// `@Index`**. Mientras estuvo declarado acá, `synchronize` creaba en dev un
-// índice sobre `nombre` PELADO y la base enforzaba otra regla que el código.
+// ⚠️ `ux_cajones_tenant_nombre` NO se declara acá CON SUS COLUMNAS: tiene que
+// ser sobre `LOWER("nombre")` —la unicidad de nombre es case-insensitive en
+// todo el proyecto (docs/PRODUCTO.md)— y **TypeORM no sabe expresar una
+// función en `@Index`**. Declarado con columnas, `synchronize` creaba en dev
+// un índice sobre `nombre` PELADO y la base enforzaba otra regla que el código.
 // Lo crea `seeder.service.ts` → `seedCajones()` con SQL cruda, mismo patrón que
 // `grupos_modificadores`, `motivo_baja` y los dos `motivos_diferencia`.
+//
+// Lo que sí se declara acá es solo el NOMBRE, con `synchronize: false`: sin
+// columnas, para que `synchronize` no lo tire por huérfano en cada arranque
+// (pendientes.md, "synchronize no tira los 17 índices del seeder").
+@Index('ux_cajones_tenant_nombre', { synchronize: false })
 @Entity('cajones')
 export class Cajon {
   @PrimaryGeneratedColumn('uuid', { name: 'cajon_id' })
