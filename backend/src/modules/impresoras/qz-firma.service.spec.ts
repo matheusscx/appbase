@@ -1,5 +1,5 @@
 import { type ConfigService } from '@nestjs/config';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { generateKeyPairSync, createVerify } from 'crypto';
 import { QzFirmaService } from './qz-firma.service';
 
@@ -25,6 +25,27 @@ describe('QzFirmaService', () => {
     QZ_CERTIFICATE: Buffer.from(CERT_PEM).toString('base64'),
   };
 
+  // Caso real del demo (2026-09-30): a la variable de entorno le quedó pegado
+  // adelante el texto `QZ_PRIVATE_KEY=` (de un copy-paste de la línea entera del
+  // .env) y un salto de línea al final. El `=` corta la decodificación base64
+  // mucho antes de llegar al PEM real y quedan ~10 bytes de basura.
+  const claveRotaEnv = {
+    QZ_PRIVATE_KEY: `QZ_PRIVATE_KEY=${Buffer.from(privateKey).toString('base64')}\n`,
+    QZ_CERTIFICATE: Buffer.from(CERT_PEM).toString('base64'),
+  };
+
+  let loggerErrorSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    loggerErrorSpy = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    loggerErrorSpy.mockRestore();
+  });
+
   describe('getCertificado', () => {
     it('devuelve el certificado PEM decodificado cuando está configurado', () => {
       const service = buildService(configuredEnv);
@@ -34,6 +55,32 @@ describe('QzFirmaService', () => {
     it('devuelve null cuando QZ_CERTIFICATE no está', () => {
       const service = buildService({});
       expect(service.getCertificado()).toBeNull();
+    });
+
+    it('devuelve null cuando QZ_PRIVATE_KEY está mal cargada, aunque QZ_CERTIFICATE sí esté', () => {
+      const service = buildService(claveRotaEnv);
+      expect(service.getCertificado()).toBeNull();
+    });
+  });
+
+  describe('llave inválida al construir (QZ_PRIVATE_KEY mal cargada)', () => {
+    it('no tira al construir', () => {
+      expect(() => buildService(claveRotaEnv)).not.toThrow();
+    });
+
+    it('loguea el error nombrando la variable, sin el valor de la llave', () => {
+      buildService(claveRotaEnv);
+
+      expect(loggerErrorSpy).toHaveBeenCalledTimes(1);
+      const mensaje = loggerErrorSpy.mock.calls[0]?.[0] as string;
+      expect(mensaje).toContain('QZ_PRIVATE_KEY');
+      expect(mensaje).not.toContain(claveRotaEnv.QZ_PRIVATE_KEY);
+      expect(mensaje).not.toContain(privateKey);
+    });
+
+    it('firmar() falla igual que "no configurado" (BadRequest), no con el error OpenSSL crudo', () => {
+      const service = buildService(claveRotaEnv);
+      expect(() => service.firmar('x')).toThrow(BadRequestException);
     });
   });
 

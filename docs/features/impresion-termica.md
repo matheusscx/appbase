@@ -259,9 +259,12 @@ setear `authcert.override=<ruta>/qz-cert.pem` en `qz-tray.properties` (o importa
 vía QZ Tray → Advanced → Site Manager) para que QZ confíe en el certificado. Es el
 **mismo** cert en todos los equipos.
 
-**Degradación:** si `QZ_PRIVATE_KEY`/`QZ_CERTIFICATE` no están configuradas, el cert
-es `null` y la impresión degrada al modo **no-firmado** (QZ pide confirmación en cada
-impresión) sin romperse. Ver diseño en
+**Degradación:** si `QZ_PRIVATE_KEY`/`QZ_CERTIFICATE` no están configuradas —o
+`QZ_PRIVATE_KEY` no decodifica a un PEM válido (típico: un `=`/salto de línea
+pegado por error al copiarla al entorno)—, el backend loguea el error al arrancar
+nombrando la variable (nunca el valor) y `getCertificado()` devuelve `null`: la
+impresión degrada al modo **no-firmado** (QZ pide confirmación en cada conexión)
+sin romperse. Ver diseño en
 `docs/superpowers/specs/2026-07-13-impresion-termica-firmado-design.md`.
 
 ---

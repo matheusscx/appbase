@@ -23,6 +23,50 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Una `QZ_PRIVATE_KEY` mal cargada se avisa al arrancar y deja el sistema imprimiendo sin firma (cerrada 2026-09-30)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Una `QZ_PRIVATE_KEY` mal cargada no se nota al arrancar, solo al imprimir** (backend,
+  `impresoras/qz-firma.service.ts`; visto el 2026-09-30 en el demo, ver el cierre de QZ en
+  [`resueltos.md`](resueltos.md)). El constructor decodifica la clave con `Buffer.from(key, 'base64')`
+  y la guarda sin probarla. Con el nombre de la variable pegado adelante, el decodificador corta en el
+  `=` y deja 10 bytes: el backend arranca sano y cada `POST /impresoras/qz/firmar` falla, así que QZ
+  no firma y el certificado no sirve. **El arreglo:** al construir el service, si hay clave, probar
+  una firma (`createPrivateKey` o un `sign` de prueba) y, si falla, loguear un error claro que nombre
+  la variable, sin su valor. Decidir si además el service degrada a `null` (modo no firmado, como
+  cuando la variable está vacía) o deja el error como está: degradar es lo que ya hace la ausencia.
+  Test unitario con la clave rota del caso real (prefijo `QZ_PRIVATE_KEY=`).
+
+### Qué se hizo
+
+`QzFirmaService` prueba la clave al construirse (`createPrivateKey` sobre el PEM decodificado). Si no
+decodifica, loguea un error que nombra `QZ_PRIVATE_KEY` y dice que el firmado queda desactivado. El
+mensaje es fijo: no interpola la clave ni el error de OpenSSL.
+
+Además, sin clave utilizable `getCertificado()` devuelve `null`, aunque `QZ_CERTIFICATE` esté cargado.
+Eso cambia la conducta, y la razón está medida en el código. Con el cert servido, `asegurarSeguridadQz`
+(`useImpresoras.ts`) arma el modo firmado. Ahí cada llamada de QZ, `print` incluido, pasa por
+`POST /impresoras/qz/firmar`. Si esa firma falla, `qz-tray.js` rechaza la llamada entera ("Failed to
+sign request") y **no imprime**. Con cert `null` QZ va sin firmar: pide permiso en cada conexión, pero
+imprime. Antes, una clave rota con el cert cargado dejaba la impresión rota. Ahora queda en el mismo
+estado que "firmado no configurado". Pasa lo mismo si falta la clave y el cert está, y ningún otro lector
+del endpoint dependía de recibir el cert sin clave (grep del repo, hecho por la revisión).
+
+### Qué lo fija
+
+`qz-firma.service.spec.ts`, 8 tests (antes 4). El caso real es el base64 del PEM con `QZ_PRIVATE_KEY=`
+adelante y `\n` al final: construir no tira, el error se loguea una vez sin el valor, `getCertificado()`
+da `null` y `firmar()` tira el 400 de "no configurado". Mutante medido: sin la validación caen 3 de
+ellos. Uno lo hace con el mismo `error:1E08010C:DECODER routines::unsupported` del demo.
+
+**Límite conocido, fuera del caso real:** `createPrivateKey` acepta también una clave EC, y
+`createSign('RSA-SHA512')` firma igual con ella (ECDSA). QZ no podría verificar esa firma con el cert
+RSA, así que falla del lado de QZ. El código anterior tampoco validaba el tipo. Las claves salen de
+un par RSA generado para esto, así que no se agregó el chequeo de `asymmetricKeyType`.
+
 ## Con QZ Tray esperando el diálogo, el siguiente intento avisa que falta autorizar en vez de culpar a la impresora (cerrada 2026-09-30)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.
@@ -86,8 +130,7 @@ final. `Buffer.from(…, 'base64')` corta en ese `=`: quedaban 10 bytes y `sign(
 `ERR_OSSL_UNSUPPORTED`, medido repitiendo la decodificación de `QzFirmaService` sin imprimir la clave. El
 owner la recargó por el CLI desde el `.env` local (el `set` desde la sesión lo bloqueó el control de
 permisos). Después: 2272 caracteres, firma y el certificado la verifica; deploy SUCCESS y smoke del demo en
-verde. Hoy una clave mal cargada no se nota al arrancar, solo al imprimir: quedó en
-[`pendientes.md`](pendientes.md) § 1.
+verde. Que una clave mal cargada se avise al arrancar se cerró el mismo día: ver la entrada de arriba.
 
 ## Quien opera imprime sin leer la configuración, conectar con QZ Tray tiene techo, y la cajera reimprime lo suyo (cerrada 2026-09-30)
 
