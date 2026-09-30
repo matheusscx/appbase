@@ -23,6 +23,66 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Con QZ Tray esperando el diálogo, el siguiente intento avisa que falta autorizar en vez de culpar a la impresora (cerrada 2026-09-30)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Con QZ Tray esperando que autoricen la conexión, el segundo intento de imprimir falla al
+  instante con un aviso que culpa a la impresora** (frontend, `useImpresoras.ts`; medido el
+  2026-09-30 contra el QZ Tray real de la Mac del owner, sin certificado). **Lo que pasa:** el primer
+  intento abre el socket (`Established connection with QZ Tray on ws://localhost:8182`) y QZ muestra
+  su diálogo *"An anonymous request wants to connect — Untrusted website"*. A los 5 s el techo corta con
+  *"No se pudo conectar con QZ Tray (timeout 5 s)"* y dispara `qz.websocket.disconnect()`, pero ese
+  cierre no termina mientras el diálogo siga abierto: el socket nunca emitió `close`. El segundo
+  intento no abre socket nuevo; qz-tray rechaza al toque con *"Waiting for previous disconnect request
+  to complete"*, y la pantalla muestra *"No se pudo imprimir. Revisá la impresora o QZ Tray."*. Así
+  sigue en cada intento hasta que alguien conteste el diálogo. **Lo que queda falso:** el comentario del
+  catch (`useImpresoras.ts`, bloque `vencioElTecho`) y la fila *"sin soltar la conexión"* del cierre en
+  [`resueltos.md`](resueltos.md) dicen que el segundo intento vuelve a conectar; lo midió un mock de
+  `disconnect()` que cierra en el acto. **El arreglo:** reconocer ese rechazo de qz-tray (y el de
+  *"The current connection attempt has not returned yet"*, que el comentario ya nombra) y mostrar un
+  aviso que diga qué hacer, por ejemplo *"QZ Tray está esperando que autorices la conexión en su
+  ventana"*, en vez del genérico. Sin reintento automático (regla del owner). El test va con un mock
+  cuyo `disconnect()` quede pendiente, que es lo que hace el real. **Docs:** `impresion-termica.md`
+  dice que en modo no firmado el diálogo sale *"hasta que el usuario marca recordar"*; con una
+  petición anónima QZ **no deja** marcar recordar para *Allow* (visto por el owner). La salida real
+  al diálogo es el certificado (`QZ_PRIVATE_KEY`/`QZ_CERTIFICATE` más el cert confiado en cada
+  equipo), que ya está construido; corregir la frase.
+
+### Qué se hizo
+
+- `useImpresoras.ts`: el catch de `connect()` reconoce los dos rechazos de `qz-tray` que significan
+  "la conexión anterior no terminó" (`qz-tray.js`, `connect()`: CONNECTING → *"The current connection
+  attempt has not returned yet"*, CLOSING → *"Waiting for previous disconnect request to complete"*) y
+  tira *"QZ Tray está esperando que autorices la conexión en su ventana"*. Cualquier otro error sigue
+  siendo el genérico. Sin reintento (regla del owner).
+- El comentario del bloque del techo ya no afirma que disparar `disconnect()` alcanza: pone
+  `isActive()` en `false` al toque (`shutdown = true`), pero con el diálogo abierto el `close()` nunca
+  termina.
+- `impresion-termica.md`: sin certificado el diálogo sale en **cada** conexión (QZ no deja recordar
+  *Allow* para una petición anónima, visto por el owner); lo saca el firmado, que ya está construido.
+  En la Mac del owner está completo: el `.env` principal tiene el par y QZ Tray confía en el mismo
+  certificado (`override.crt`, huella SHA-256 `0E:C2:82:…:2B:DB`, vence 2036). La prueba del
+  2026-09-30 salió anónima porque el `.env` de un worktree nace sin `QZ_PRIVATE_KEY`/`QZ_CERTIFICATE`.
+
+### Qué lo fija
+
+`useImpresoras.nuxt.spec.ts`: un `disconnect()` que nunca resuelve más un segundo `connect()` que
+rechaza con el mensaje real da el aviso nuevo, con `connect` llamado 2 veces; un error cualquiera sigue
+dando el genérico.
+
+| Mutante | Resultado |
+|---|---|
+| no reconocer el mensaje | rojo: el segundo intento vuelve al genérico |
+| reconocer cualquier error | rojo: el error cualquiera pasa a "esperando que autorices" |
+
+**Sin verificar:** qué pasa al contestar el diálogo después del aviso (el `close()` pendiente debería
+terminar y el próximo intento abrir conexión nueva). Con el certificado confiado el diálogo no sale.
+Queda sin confirmar si el demo de Railway tiene cargadas `QZ_PRIVATE_KEY` y `QZ_CERTIFICATE`: es acción
+del owner.
+
 ## Quien opera imprime sin leer la configuración, conectar con QZ Tray tiene techo, y la cajera reimprime lo suyo (cerrada 2026-09-30)
 
 Sale de [`pendientes.md`](pendientes.md) § 3.
@@ -140,7 +200,7 @@ Sale de [`pendientes.md`](pendientes.md) § 3.
 | la reimpresión propia no mira `estado = 'abierta'` | rojo: su caja cerrada pasa a 200 |
 | la reimpresión propia deja de pasar por el alcance (`verTodas=true`) | rojo: otra caja pasa de 404 a 403 |
 | `connect()` sin techo | rojo: el test de vencimiento se cuelga |
-| sin soltar la conexión | rojo: el segundo intento no vuelve a conectar |
+| sin soltar la conexión | rojo: el segundo intento no vuelve a conectar (con un mock que cierra al instante; con el QZ real y el diálogo abierto no vuelve a conectar nunca, ver abajo) |
 | el botón no mira `estado === 'abierta'` | rojo: aparece con la caja en conciliación |
 | Ventas no carga la caja | rojo: el spec de la página |
 | sin `Items:Leer` en el seed | rojo: el garzón vuelve a 403 en `/items` |
@@ -156,7 +216,8 @@ Sale de [`pendientes.md`](pendientes.md) § 3.
   QZ Tray (timeout 5 s)"*.
 - **El segundo intento NO vuelve a conectar, al revés de lo que afirma el mock:** falla al instante con
   el aviso genérico, porque qz-tray rechaza con *"Waiting for previous disconnect request to complete"*
-  mientras el diálogo siga sin contestar. Quedó como entrada en [`pendientes.md`](pendientes.md) § 1.
+  mientras el diálogo siga sin contestar. Se arregló el mismo día: el cierre de arriba de todo (*"Con QZ
+  Tray esperando el diálogo…"*).
 
 ## El Postgres local y el de CI son `postgres:18` glibc, la misma versión mayor que el demo (cerrada 2026-09-30)
 

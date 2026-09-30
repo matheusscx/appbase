@@ -190,4 +190,62 @@ describe('useImpresoras — impresoras operativas (imprimir sin Impresoras:Leer)
 
     vi.useRealTimers()
   })
+
+  /**
+   * QZ Tray real (sin certificado, medido 2026-09-30): con el diálogo de
+   * autorización abierto, `disconnect()` NUNCA termina —el socket no emite
+   * `close`— y el segundo `connect()` rechaza al instante con el Error de
+   * `qz-tray.js` ("Waiting for previous disconnect request to complete",
+   * ver `node_modules/qz-tray/qz-tray.js`), no con otro timeout. El mock de
+   * arriba (`disconnect()` que resuelve en el acto) modela un QZ que no es
+   * el real; acá se simula el de verdad.
+   */
+  it('con un disconnect() que no termina, el segundo connect() rechaza con el mensaje real de qz-tray → aviso de autorización pendiente, sin reintento', async () => {
+    impresorasBoleta = [
+      { id: 'imp-b1', tipoConexion: 'red', host: '10.0.0.8', puerto: 9100, nombreCola: null, activo: true },
+    ]
+    qzMock.websocket.connect
+      .mockImplementationOnce(() => {
+        qzState.activo = true
+        return new Promise<void>(() => {}) // cuelga — el diálogo sigue sin respuesta
+      })
+      .mockImplementationOnce(() =>
+        Promise.reject(new Error('Waiting for previous disconnect request to complete')))
+    qzMock.websocket.disconnect.mockImplementationOnce(() => {
+      // Real: `shutdown = true` se settea síncrono (por eso `isActive()` ya
+      // da `false` para el próximo intento), pero el socket nunca emite
+      // `close` con el diálogo abierto — este mock nunca resuelve.
+      qzState.activo = false
+      return new Promise(() => {})
+    })
+    vi.useFakeTimers()
+
+    const primero = useImpresoras().imprimirPrecuenta(precuentaMinima()).catch(() => {})
+    await vi.advanceTimersByTimeAsync(5_000)
+    await primero
+    expect(qzMock.websocket.connect).toHaveBeenCalledTimes(1)
+    expect(qzMock.websocket.disconnect).toHaveBeenCalledTimes(1)
+
+    // El segundo `connect()` ya viene mockeado para rechazar al instante:
+    // no hace falta avanzar el reloj, y si hubiera un reintento automático
+    // `connect` se habría llamado una tercera vez.
+    await expect(useImpresoras().imprimirPrecuenta(precuentaMinima()))
+      .rejects.toThrow('QZ Tray está esperando que autorices la conexión en su ventana')
+    expect(qzMock.websocket.connect).toHaveBeenCalledTimes(2)
+
+    vi.useRealTimers()
+  })
+
+  it('un rechazo de connect() que no es ninguno de los dos mensajes conocidos sigue dando el error genérico de impresión', async () => {
+    impresorasBoleta = [
+      { id: 'imp-b1', tipoConexion: 'red', host: '10.0.0.8', puerto: 9100, nombreCola: null, activo: true },
+    ]
+    qzMock.websocket.connect.mockImplementationOnce(() =>
+      Promise.reject(new Error('Unable to establish connection with QZ')))
+
+    await expect(useImpresoras().imprimirPrecuenta(precuentaMinima()))
+      .rejects.toThrow('No se pudo imprimir. Revisá la impresora o QZ Tray.')
+    expect(qzMock.websocket.connect).toHaveBeenCalledTimes(1)
+    expect(qzMock.websocket.disconnect).not.toHaveBeenCalled()
+  })
 })

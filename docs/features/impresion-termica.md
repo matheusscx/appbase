@@ -200,10 +200,16 @@ ticket no depende de que nadie lo use.
 
 ### QZ Tray
 
-Requiere instalar QZ Tray una vez por dispositivo (tablet/PC del garzón o caja). En
-v1 usa el modo **no firmado**: QZ Tray muestra un diálogo "¿Confía en este sitio?" en
-cada impresión hasta que el usuario marca "recordar". Firmar la app con certificado
-pagado (evita el diálogo) queda como mejora futura opcional.
+Requiere instalar QZ Tray una vez por dispositivo (tablet/PC del garzón o caja). Sin
+certificado configurado (modo **no firmado**), QZ Tray muestra un diálogo "¿Confía en
+este sitio?" en **cada** conexión — sin certificado, una petición anónima no deja marcar "Remember
+this decision" para Allow (verificado contra QZ Tray real, 2026-09-30), así que el
+diálogo no se puede silenciar desde ese modo. Lo único que lo saca es firmar la app
+(ver "Firmado" más abajo). Mientras el diálogo sigue sin respuesta, un segundo intento
+de imprimir no reintenta la conexión ni cuelga: `useImpresoras` reconoce el rechazo de
+`qz-tray` ("esperando el diálogo" o "esperando que cierre la conexión anterior") y
+tira `'QZ Tray está esperando que autorices la conexión en su ventana'` en vez del
+error genérico de impresión.
 
 `qz-tray` se carga de forma **perezosa** (`await import('qz-tray')` dentro de la
 función) porque es una librería solo-navegador — así no entra al bundle de quien

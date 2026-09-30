@@ -26,6 +26,17 @@ const CONNECT_TIMEOUT_MSG = 'No se pudo conectar con QZ Tray (timeout 5 s)'
  * vienen en inglés desde `qz-tray` y no deben llegarle así a la persona
  * (`apiErrorMsg` concatena el `message` del `Error` tal cual, ver `api-error.ts`). */
 const PRINT_ERROR_MSG = 'No se pudo imprimir. Revisá la impresora o QZ Tray.'
+/** Cadenas exactas que `qz.websocket.connect()` rechaza (`node_modules/qz-tray/qz-tray.js`)
+ * cuando la conexión anterior todavía no terminó — CONNECTING, si ni llegamos a
+ * disparar `disconnect()`, o CLOSING, si ya lo disparamos y sigue sin cerrar (el
+ * caso medido acá: el diálogo de autorización abierto). Las dos significan lo
+ * mismo para la persona: QZ Tray está esperando que conteste su propio diálogo,
+ * no que la impresora falló. */
+const QZ_CONEXION_PENDIENTE_MSGS = [
+  'The current connection attempt has not returned yet',
+  'Waiting for previous disconnect request to complete',
+]
+const ESPERANDO_AUTORIZACION_MSG = 'QZ Tray está esperando que autorices la conexión en su ventana'
 const ESC_POS_CP850 = '\x1B\x74\x02'
 const ESC_POS_CORTE = '\x1B\x64\x04\x1D\x56\x00'
 
@@ -164,17 +175,30 @@ async function imprimirEn(
       if (vencioElTecho) {
         // `conTimeout` solo rechaza, no cancela: el intento de `connect()`
         // sigue vivo dentro de `qz` (singleton de la pestaña, `getQz()`), en
-        // CONNECTING o ya OPEN esperando el diálogo de autorización. Sin
-        // soltarlo acá, el siguiente intento falla al instante con el error
-        // de qz-tray "The current connection attempt has not returned yet"
-        // (medido, docs/agent/pendientes.md § 3). No se espera a que
-        // `disconnect()` termine de cerrar (sin reintento automático, regla
-        // del owner: alcanza con dispararlo para que el próximo `connect()`
-        // ya no vea la conexión vieja como activa).
+        // CONNECTING o ya OPEN esperando el diálogo de autorización (con el
+        // QZ real sin certificado se midió OPEN: "Established connection"
+        // antes del diálogo). Disparar
+        // `disconnect()` pone `isActive()` en `false` al toque (qz-tray
+        // settea `shutdown = true` antes de cerrar el socket), así el
+        // próximo intento entra a `connect()` en vez de saltarse directo a
+        // `qz.print`. Pero con el diálogo abierto el `close()` del socket
+        // nunca termina (medido contra el QZ Tray real, docs/agent/resueltos.md): el siguiente
+        // `connect()` encuentra la conexión vieja en CLOSING y rechaza al
+        // instante con "Waiting for previous disconnect request to
+        // complete" — o, si ni llegamos a disparar este `disconnect()`, la
+        // encuentra en CONNECTING y rechaza con "The current connection
+        // attempt has not returned yet". No se espera a que `disconnect()`
+        // termine de cerrar —nunca termina— ni se reintenta (sin reintento
+        // automático, regla del owner): alcanza con reconocer el mensaje de
+        // abajo y avisarle a la persona.
         void qz.websocket.disconnect().catch(() => {})
       }
       console.error(`[qz] connect falló → ${destino}`, err)
-      throw vencioElTecho ? err : new Error(PRINT_ERROR_MSG)
+      const esperandoAutorizacion = err instanceof Error
+        && QZ_CONEXION_PENDIENTE_MSGS.includes(err.message)
+      if (vencioElTecho) throw err
+      if (esperandoAutorizacion) throw new Error(ESPERANDO_AUTORIZACION_MSG)
+      throw new Error(PRINT_ERROR_MSG)
     }
   }
   // "Red": QZ abre un socket raw a host:puerto (ESC/POS TCP 9100) y escribe los
