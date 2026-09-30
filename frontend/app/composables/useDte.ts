@@ -114,6 +114,13 @@ function comoDecimal(valor: string | null): Decimal | null {
   }
 }
 
+/**
+ * Hermana de `normalizarClave` en
+ * `backend/src/modules/compras/lectura-dte.service.ts` (mismo resultado,
+ * orden de pasos distinto): medido que no divergen, atado por el fixture
+ * compartido en `useDte.spec.ts`/`lectura-dte.service.spec.ts`
+ * (docs/agent/pendientes.md § 1). Tocar una implica revisar la otra.
+ */
 export function normalizarClave(clave: string): string {
   return clave.trim().replace(/\s+/g, ' ').toUpperCase()
 }

@@ -34,6 +34,38 @@ describe('normalizarClave', () => {
 });
 
 /**
+ * Ata esta `normalizarClave` con la del frontend
+ * (`frontend/app/composables/useDte.ts`, describe homónimo en
+ * `useDte.spec.ts`) — mismos pares, mismo orden (docs/agent/pendientes.md
+ * § 1, "Atar con un test las dos `normalizarClave`"). Backend y frontend no
+ * comparten código (decisión del owner), así que el fixture está duplicado a
+ * mano en los dos specs: si uno cambia, el otro no se entera solo. Medido
+ * 2026-09-28 que las dos implementaciones no divergen para ningún code point
+ * combinado con espacios — este fixture cubre los casos de borde de esa
+ * medición (NBSP, tabs, `ß`, saltos de línea, espacios al borde y en medio).
+ */
+describe('normalizarClave — pares atados con el frontend (useDte.spec.ts)', () => {
+  const PARES: [entrada: string, clave: string][] = [
+    ['  codigo:int1:cc350-12 ', 'CODIGO:INT1:CC350-12'],
+    ['NOMBRE:Fanta   350ml  CJ12', 'NOMBRE:FANTA 350ML CJ12'],
+    [' CJ12 ', 'CJ12'],
+    ['CJ 12', 'CJ 12'],
+    ['\tCJ12\t', 'CJ12'],
+    ['CJ\t12', 'CJ 12'],
+    ['cj12\nabc', 'CJ12 ABC'],
+    ['\ncj12\n', 'CJ12'],
+    ['straße 350ml', 'STRASSE 350ML'],
+    ['ß', 'SS'],
+    ['  ß ml  ', 'SS ML'],
+    ['  Fanta 350ml\tCJ12\n', 'FANTA 350ML CJ12'],
+  ];
+
+  it.each(PARES)('%j → %j', (entrada, clave) => {
+    expect(normalizarClave(entrada)).toBe(clave);
+  });
+});
+
+/**
  * `planAprendizaje`: puro, sin `Db` (spec compras-xml-dte § 5.2, tarea 2
  * § "Step 2"). Un test por regla.
  */
@@ -199,5 +231,50 @@ describe('leer(): el corte de 56/61 nunca consulta tipos_documento_compra', () =
   it('tipoDte 33: sí consulta tipos_documento_compra', async () => {
     await service.leer('tenant-1', dto('33'));
     expect(consultoTipoDocumento()).toBe(true);
+  });
+});
+
+/**
+ * Con `proveedorId`, `assertRutDelProveedor` y `resolverProveedor` leían la
+ * misma fila de `terceros` dos veces: la primera para validar el RUT, la
+ * segunda solo por `nombre` (docs/agent/pendientes.md § 1, hallazgo
+ * 2026-09-28). `assertRutDelProveedor` ahora devuelve la fila que ya leyó y
+ * `resolverProveedor` la reusa en vez de repetir el `SELECT`.
+ */
+describe('leer() con proveedorId: una sola consulta a terceros', () => {
+  it('consulta `terceros` una sola vez y usa esa fila para el nombre', async () => {
+    const queries: string[] = [];
+    const query = jest.fn((sql: string) => {
+      queries.push(sql);
+      if (/FROM terceros/.test(sql)) {
+        return Promise.resolve([
+          { nombre: 'Proveedor X', rut: null, rut_fiscal: null },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    const moduleRef = await Test.createTestingModule({
+      providers: [LecturaDteService, { provide: Db, useValue: { query } }],
+    }).compile();
+    const service = moduleRef.get(LecturaDteService);
+    const proveedorId = '550e8400-e29b-41d4-a716-446655440001';
+
+    const respuesta = await service.leer('tenant-1', {
+      emisorRut: '12.345.678-9',
+      receptorRut: '12.345.678-9',
+      tipoDte: '33',
+      folio: 'F1',
+      proveedorId,
+      claves: [],
+    });
+
+    const consultasATerceros = queries.filter((sql) =>
+      /FROM terceros/.test(sql),
+    );
+    expect(consultasATerceros).toHaveLength(1);
+    expect(respuesta.proveedor).toEqual({
+      id: proveedorId,
+      nombre: 'Proveedor X',
+    });
   });
 });

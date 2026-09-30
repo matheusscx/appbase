@@ -77,16 +77,6 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   tenants), que afirme que su venta no suma al `pedido` de ningún garzón de Paris. No es un
   invariante roto: la cuenta ajena ya rebota con 404 al escribir (`getCuentaAbiertaConLock`).
 
-- [ ] **`resolverProveedor` lee la misma fila de `terceros` dos veces cuando llega
-  `proveedorId`** (backend, hallazgo de la revisión final del frente *"Compras: pre-llenar la
-  compra con el XML de la factura electrónica (DTE)"*, 2026-09-28). Con `proveedorId` en el
-  body, `assertRutDelProveedor` hace `SELECT nombre, rut, rut_fiscal FROM terceros WHERE
-  tenant_id = $1 AND tercero_id = $2 …` (`backend/src/modules/compras/lectura-dte.service.ts:218`),
-  y `resolverProveedor` la llama y a continuación repite la consulta por el mismo `tercero_id` y
-  `tenant_id` (`:426`) solo para traer `nombre`. Son dos consultas fijas, no un N+1 (no crecen
-  con las líneas de la factura): mergeable en una sola que devuelva también lo que
-  `assertRutDelProveedor` necesita.
-
 - [ ] **`pages/compras/[id].vue` quedó en ~1225 líneas después de la pieza del XML** (frontend,
   mismo hallazgo). La lógica ya vive en `useDte.ts` (spec § 6, "dónde vive la lógica"): lo que
   creció fue el cableado — el modal, el reemplazo de lo cargado, las líneas por asociar/apartadas
@@ -121,25 +111,6 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   crearlo:** ninguno en producción (0 lotes vivos, 2026-09-28); el seed y los e2e se verifican al
   correr. Cuando el índice exista, una segunda fila por un camino futuro que no pase por el ancla
   daría 500 en vez de un duplicado silencioso: si eso llegara a importar, es otra entrada.
-
-- [ ] **Atar con un test las dos `normalizarClave` (frontend y backend) de la lectura del DTE**
-  (frontend + backend, tests solamente; medido el 2026-09-28). La del frontend
-  (`frontend/app/composables/useDte.ts:112`) hace `trim().replace(/\s+/g, ' ').toUpperCase()` y la
-  del backend (`backend/src/modules/compras/lectura-dte.service.ts:24`) mayusculiza antes de
-  colapsar. **Medido que no divergen para ningún input:** los 25 code points que `trim()` toma
-  como espacio son exactamente los que matchea `\s`, ninguno cambia con `toUpperCase()` y ningún
-  carácter con mayúscula especial (ß→SS, ligaduras, İ, alfabetos astrales) produce ni consume
-  uno de ellos, así que el orden conmuta; un barrido de los ~1,1 M code points solos y combinados
-  con espacios (8 M de comparaciones) dio 0 diferencias. Además, los dos caminos —aprender
-  (`[id].vue` → `lectura-dte.service.ts:262`) y buscar (`useDte.ts:220` → `:528`)— aplican las
-  dos en el mismo orden (el frontend normaliza al leer el XML, `useDte.ts:120-121`, y el backend
-  vuelve a normalizar), así que aun divergiendo calzarían entre sí. **No es un bug de conducta.**
-  **El riesgo es de mantenimiento:** dos implementaciones que parecen poder divergir invitan a
-  corregir una sin la otra. No se pueden unificar en una función compartida (backend y frontend
-  no comparten código: memoria del owner sobre el workspace del monorepo), así que el arreglo es
-  **un test que las ate**: un fixture común de pares entrada→clave (con NBSP, tabs, `ß`, espacios
-  al borde y en el medio) que corran los dos specs (`useDte.spec.ts` y
-  `lectura-dte.service.spec.ts`), con un comentario en cada función que apunte a la otra.
 
 - [ ] **Los dos e2e de la varianza caen en CI entre las 21:00 y las 24:00 de Chile** (backend,
   tests; visto el 2026-09-30 a las 01:56 UTC en la corrida 36657454755, que era un push solo de

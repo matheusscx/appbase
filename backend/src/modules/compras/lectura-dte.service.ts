@@ -20,7 +20,13 @@ export function normalizarRut(rut: string): string {
   return `${cuerpo}-${dv}`;
 }
 
-/** `trim`, mayúsculas, espacios internos colapsados (spec § 3.2). */
+/**
+ * `trim`, mayúsculas, espacios internos colapsados (spec § 3.2). Hermana de
+ * `normalizarClave` en `frontend/app/composables/useDte.ts` (mismo resultado,
+ * orden de pasos distinto): medido que no divergen, atado por el fixture
+ * compartido en `lectura-dte.service.spec.ts`/`useDte.spec.ts`
+ * (docs/agent/pendientes.md § 1). Tocar una implica revisar la otra.
+ */
 export function normalizarClave(clave: string): string {
   return clave.trim().toUpperCase().replace(/\s+/g, ' ');
 }
@@ -197,19 +203,23 @@ export class LecturaDteService {
    * normaliza igual al del emisor. Con los dos vacíos, pasa: la tarea 2 lo
    * completa al guardar. La reusa `ComprasService` al guardar el borrador.
    *
+   * Devuelve `nombre`: es la misma fila que `resolverProveedor` necesitaba
+   * para armar la respuesta, así que evita una segunda `SELECT` por el mismo
+   * `tercero_id` (docs/agent/pendientes.md § 1, hallazgo 2026-09-28).
+   * `completarRutProveedor`, el otro llamador, ignora el valor de retorno.
+   *
    * ⚠️ El `SELECT` filtra `tipo = 'proveedor' AND activo`, no solo
    * `tenant_id`/`eliminado_el`: sin eso, un `proveedorId` que apunta a un
    * tercero del mismo tenant que no es un proveedor activo (una empresa, un
    * proveedor pausado) caía en la rama de RUT-no-calza y el 400 filtraba su
    * nombre y su RUT en el mensaje. Con el filtro, ese caso cae en el genérico
-   * "Proveedor no encontrado" — mismo criterio que la segunda consulta de
-   * `resolverProveedor`, más abajo.
+   * "Proveedor no encontrado".
    */
   async assertRutDelProveedor(
     tenantId: string,
     proveedorId: string,
     rutEmisor: string,
-  ): Promise<void> {
+  ): Promise<{ nombre: string }> {
     const rows: {
       nombre: string;
       rut: string | null;
@@ -227,15 +237,18 @@ export class LecturaDteService {
     const guardados = [rut, rutFiscal].filter(
       (r): r is string => !!r && r.trim() !== '',
     );
-    if (!guardados.length) return;
-
-    const emisorNormalizado = normalizarRut(rutEmisor);
-    const calza = guardados.some((r) => normalizarRut(r) === emisorNormalizado);
-    if (!calza) {
-      throw new BadRequestException(
-        `"${nombre}" tiene el RUT ${guardados[0]}; esta factura es del RUT ${rutEmisor}`,
+    if (guardados.length) {
+      const emisorNormalizado = normalizarRut(rutEmisor);
+      const calza = guardados.some(
+        (r) => normalizarRut(r) === emisorNormalizado,
       );
+      if (!calza) {
+        throw new BadRequestException(
+          `"${nombre}" tiene el RUT ${guardados[0]}; esta factura es del RUT ${rutEmisor}`,
+        );
+      }
     }
+    return { nombre };
   }
 
   /**
@@ -416,23 +429,13 @@ export class LecturaDteService {
     candidatos: { id: string; nombre: string }[];
   }> {
     if (dto.proveedorId) {
-      await this.assertRutDelProveedor(
+      const { nombre } = await this.assertRutDelProveedor(
         tenantId,
         dto.proveedorId,
         dto.emisorRut,
       );
-      const rows: { tercero_id: string; nombre: string }[] =
-        await this.db.query(
-          `SELECT tercero_id, nombre FROM terceros
-          WHERE tercero_id = $1 AND tenant_id = $2
-            AND tipo = 'proveedor' AND activo AND eliminado_el IS NULL`,
-          [dto.proveedorId, tenantId],
-        );
-      if (!rows.length) {
-        throw new BadRequestException('Proveedor no encontrado');
-      }
       return {
-        proveedor: { id: rows[0].tercero_id, nombre: rows[0].nombre },
+        proveedor: { id: dto.proveedorId, nombre },
         candidatos: [],
       };
     }

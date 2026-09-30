@@ -23,6 +23,65 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La lectura del DTE: una consulta a `terceros` en vez de dos, y las dos `normalizarClave` atadas por un test (cerrada 2026-09-30)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### Las entradas que cierra, como estaban en `pendientes.md` § 1
+
+- [ ] **`resolverProveedor` lee la misma fila de `terceros` dos veces cuando llega
+  `proveedorId`** (backend, hallazgo de la revisión final del frente *"Compras: pre-llenar la
+  compra con el XML de la factura electrónica (DTE)"*, 2026-09-28). Con `proveedorId` en el
+  body, `assertRutDelProveedor` hace `SELECT nombre, rut, rut_fiscal FROM terceros WHERE
+  tenant_id = $1 AND tercero_id = $2 …` (`backend/src/modules/compras/lectura-dte.service.ts:218`),
+  y `resolverProveedor` la llama y a continuación repite la consulta por el mismo `tercero_id` y
+  `tenant_id` (`:426`) solo para traer `nombre`. Son dos consultas fijas, no un N+1 (no crecen
+  con las líneas de la factura): mergeable en una sola que devuelva también lo que
+  `assertRutDelProveedor` necesita.
+
+- [ ] **Atar con un test las dos `normalizarClave` (frontend y backend) de la lectura del DTE**
+  (frontend + backend, tests solamente; medido el 2026-09-28). La del frontend
+  (`frontend/app/composables/useDte.ts:112`) hace `trim().replace(/\s+/g, ' ').toUpperCase()` y la
+  del backend (`backend/src/modules/compras/lectura-dte.service.ts:24`) mayusculiza antes de
+  colapsar. **Medido que no divergen para ningún input:** los 25 code points que `trim()` toma
+  como espacio son exactamente los que matchea `\s`, ninguno cambia con `toUpperCase()` y ningún
+  carácter con mayúscula especial (ß→SS, ligaduras, İ, alfabetos astrales) produce ni consume
+  uno de ellos, así que el orden conmuta; un barrido de los ~1,1 M code points solos y combinados
+  con espacios (8 M de comparaciones) dio 0 diferencias. Además, los dos caminos —aprender
+  (`[id].vue` → `lectura-dte.service.ts:262`) y buscar (`useDte.ts:220` → `:528`)— aplican las
+  dos en el mismo orden (el frontend normaliza al leer el XML, `useDte.ts:120-121`, y el backend
+  vuelve a normalizar), así que aun divergiendo calzarían entre sí. **No es un bug de conducta.**
+  **El riesgo es de mantenimiento:** dos implementaciones que parecen poder divergir invitan a
+  corregir una sin la otra. No se pueden unificar en una función compartida (backend y frontend
+  no comparten código: memoria del owner sobre el workspace del monorepo), así que el arreglo es
+  **un test que las ate**: un fixture común de pares entrada→clave (con NBSP, tabs, `ß`, espacios
+  al borde y en el medio) que corran los dos specs (`useDte.spec.ts` y
+  `lectura-dte.service.spec.ts`), con un comentario en cada función que apunte a la otra.
+
+### Qué se hizo
+
+- `assertRutDelProveedor` devuelve la fila que ya leyó (`{ nombre }`) y `resolverProveedor` la usa
+  en vez de repetir el `SELECT`. La consulta que se sacó tenía el mismo `WHERE` que la que queda
+  (`tenant_id`, `tercero_id`, `tipo = 'proveedor'`, `activo`, `eliminado_el IS NULL`), así que no
+  cambia qué tercero rebota. El otro llamador, `completarRutProveedor`, ignora el valor devuelto.
+- Una misma lista de 12 pares entrada→clave (NBSP, tabs y saltos de línea al borde y en el medio,
+  `ß` sola y con espacios) en `lectura-dte.service.spec.ts` y en `useDte.spec.ts`, y un comentario
+  en cada `normalizarClave` que apunta a la otra. La lista está copiada, no compartida: backend y
+  frontend no comparten código, y el repo no tenía precedente de un fixture que cruce los dos
+  paquetes. Las dos copias son idénticas byte por byte (comparadas con un script).
+
+### Qué lo fija
+
+| Mutante | Resultado |
+|---|---|
+| volver a meter el segundo `SELECT … FROM terceros` en `resolverProveedor` | rojo: el test cuenta 2 consultas a `terceros`, espera 1 |
+| backend: `normalizarClave` sin el colapso de espacios | rojo: 6 de los 12 pares |
+| frontend: `normalizarClave` sin el `trim()` | rojo: 6 de los 12 pares |
+
+⚠️ La lista copiada ata cada función a la lista, no una función a la otra: si alguien cambia una
+función **y** su copia de la lista, el otro lado no se entera. El comentario cruzado es lo que
+cubre ese caso.
+
 ## Playwright en el stack de un worktree: las dos causas, cerradas (cerrada 2026-09-29)
 
 Sale de [`pendientes.md`](pendientes.md) § 2.

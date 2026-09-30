@@ -11,6 +11,7 @@ import {
   leerDte,
   lineaFormDesdeDte,
   mensajeCompraExistente,
+  normalizarClave,
   precargaDescuento,
   repartirLineas,
   textoLinea,
@@ -153,6 +154,39 @@ describe('leerDte — cantidad con más de 4 decimales', () => {
 
   it('QtyItem 3 y MontoItem 10000 → precioUnitario 3333.3333 (no divide exacto)', () => {
     expect(doc.lineas[1]!.precioUnitario).toBe('3333.3333')
+  })
+})
+
+/**
+ * Ata esta `normalizarClave` con la del backend
+ * (`backend/src/modules/compras/lectura-dte.service.ts`, describe homónimo en
+ * `lectura-dte.service.spec.ts`) — mismos pares, mismo orden
+ * (docs/agent/pendientes.md § 1, "Atar con un test las dos `normalizarClave`").
+ * Backend y frontend no comparten código (decisión del owner), así que el
+ * fixture está duplicado a mano en los dos specs: si uno cambia, el otro no
+ * se entera solo. Medido 2026-09-28 que las dos implementaciones no divergen
+ * para ningún code point combinado con espacios — este fixture cubre los
+ * casos de borde de esa medición (NBSP, tabs, `ß`, saltos de línea, espacios
+ * al borde y en medio).
+ */
+describe('normalizarClave — pares atados con el backend (lectura-dte.service.spec.ts)', () => {
+  const PARES: [entrada: string, clave: string][] = [
+    ['  codigo:int1:cc350-12 ', 'CODIGO:INT1:CC350-12'],
+    ['NOMBRE:Fanta   350ml  CJ12', 'NOMBRE:FANTA 350ML CJ12'],
+    [' CJ12 ', 'CJ12'],
+    ['CJ 12', 'CJ 12'],
+    ['\tCJ12\t', 'CJ12'],
+    ['CJ\t12', 'CJ 12'],
+    ['cj12\nabc', 'CJ12 ABC'],
+    ['\ncj12\n', 'CJ12'],
+    ['straße 350ml', 'STRASSE 350ML'],
+    ['ß', 'SS'],
+    ['  ß ml  ', 'SS ML'],
+    ['  Fanta 350ml\tCJ12\n', 'FANTA 350ML CJ12'],
+  ]
+
+  it.each(PARES)('%j → %j', (entrada, clave) => {
+    expect(normalizarClave(entrada)).toBe(clave)
   })
 })
 
