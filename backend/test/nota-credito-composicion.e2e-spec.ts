@@ -8,6 +8,7 @@ import { DataSource } from 'typeorm';
 import { randomUUID } from 'crypto';
 import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
+import { todasLasPaginas } from './helpers/paginacion';
 
 const TENANT_DEMO = '550e8400-e29b-41d4-a716-446655440007'; // Paris (Chile)
 const CLP = '550e8400-e29b-41d4-a716-446655440003';
@@ -307,26 +308,30 @@ describe('Nota de crédito compuesta (e2e)', () => {
       const ajusteId = marcado[0].item_id;
 
       // `ORDER BY nombre ASC`: si no se excluyera, 'Ajuste' sería de las
-      // primeras filas de la primera página. La aserción sobre `length` es lo
-      // que impide que este test pase por una lista vacía.
-      const listado = await request(app.getHttpServer())
-        .get('/api/items?pageSize=100')
-        .set('Authorization', `Bearer ${token}`)
-        .expect(200);
-      const ids = (listado.body as { data: { id: string }[] }).data.map(
-        (i) => i.id,
-      );
+      // primeras filas de la primera página. Por eso el listado se recorre
+      // ENTERO (`todasLasPaginas`) y no solo la primera: mirar únicamente
+      // `pageSize=100` dejaría pasar una exclusión rota si algún día el
+      // catálogo tiene más de 100 ítems que ordenan antes de "Ajuste". La
+      // aserción sobre `length` es lo que impide que este test pase por una
+      // lista vacía.
+      const ids = (
+        await todasLasPaginas<{ id: string }>(
+          app,
+          token,
+          '/api/items?pageSize=100',
+        )
+      ).map((i) => i.id);
       expect(ids.length).toBeGreaterThan(0);
       expect(ids).not.toContain(ajusteId);
 
       // Tampoco por la papelera, que es el otro modo de este mismo listado.
-      const papelera = await request(app.getHttpServer())
-        .get('/api/items?pageSize=100&incluirEliminados=true')
-        .set('Authorization', `Bearer ${token}`)
-        .expect(200);
       const idsPapelera = (
-        papelera.body as { data: { id: string }[] }
-      ).data.map((i) => i.id);
+        await todasLasPaginas<{ id: string }>(
+          app,
+          token,
+          '/api/items?pageSize=100&incluirEliminados=true',
+        )
+      ).map((i) => i.id);
       expect(idsPapelera).not.toContain(ajusteId);
     });
 

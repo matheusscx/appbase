@@ -41,21 +41,6 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
-- [ ] **Dos e2e afirman sobre la primera página de 100: recorrer todas** (backend, test; medido
-  el 2026-09-30, venía de la § 2). `nota-credito-composicion.e2e-spec.ts` (~312 y ~323) afirma
-  que el ítem "Ajuste" no aparece en `GET /api/items`, y `venta-total-cero.e2e-spec.ts` (~163),
-  que ninguna venta de `GET /api/ventas?estado=pendiente` tiene total 0; los dos piden solo
-  `pageSize=100` sin `page`. **La API ya alcanza:** `page` + `pageSize` (máx. 100) y
-  `meta.totalPages` (`common/utils/pagination.util.ts`), en los dos endpoints. **El arreglo:**
-  un helper que recorra `page=1..meta.totalPages` y junte `data`, usado por los dos specs (no
-  existe uno en `backend/test`). Qué cambia en cada uno: en Ajuste la exclusión es un `WHERE`
-  (`items.service.ts:636`) que vale para todas las páginas, así que hoy no miente, pero si
-  alguien saca esa línea con más de 100 ítems alfabéticamente antes, el test deja de cazarlo.
-  En la venta de $0 el riesgo es actual: con más de 100 pendientes (`ORDER BY creado_el DESC`),
-  una vieja con total 0 queda fuera y el test pasa en falso. `search=Ajuste` no sirve: prueba
-  un listado angosto, no el que usan los selectores. Mutante: sacar el `WHERE` de `:636` y
-  sembrar más de 100 ítems antes de "Ajuste"; debe dar rojo.
-
 - [ ] **Sacar la fila de línea de `pages/compras/[id].vue` a un componente, con emits y sin
   mutar la prop** (frontend; medido el 2026-09-30, venía de la § 2). La página tiene 1441
   líneas; la fila es el `v-for="linea in lineas"` de ~1073-1207 (135 de template) más ~94 de

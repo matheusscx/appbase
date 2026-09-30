@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { randomUUID } from 'node:crypto';
+import { todasLasPaginas } from './helpers/paginacion';
 
 /**
  * Una venta de total $0 —el caso real de una promoción que descuenta el 100%—
@@ -159,12 +160,13 @@ describe('Venta de total $0 (e2e)', () => {
   });
 
   it('la venta de $0 no aparece como deuda en el listado de pendientes', async () => {
-    const res = await request(app.getHttpServer())
-      .get('/api/ventas?estado=pendiente&pageSize=100')
-      .set('Authorization', `Bearer ${token}`);
-    expect(res.status).toBe(200);
-
-    const pendientes = (res.body as { data: { totalFinal: string }[] }).data;
+    // Si el arrastre volviera, la pendiente de $0 más vieja quedaría fuera de
+    // la primera página (`ORDER BY v.creado_el DESC`) con más de `pageSize`
+    // pendientes, y mirar solo esa página pasaría en falso.
+    const pendientes = await todasLasPaginas<{
+      id: string;
+      totalFinal: string;
+    }>(app, token, '/api/ventas?estado=pendiente&pageSize=100');
     // Ninguna venta pendiente puede tener saldo cero: ese era exactamente el
     // arrastre que la decisión vino a sacar de los listados de deuda.
     expect(pendientes.every((v) => v.totalFinal !== '0.0000')).toBe(true);

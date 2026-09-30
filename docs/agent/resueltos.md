@@ -23,6 +23,58 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los dos e2e que afirmaban sobre la primera página de 100 recorren el listado entero (cerrada 2026-09-30)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Dos e2e afirman sobre la primera página de 100: recorrer todas** (backend, test; medido
+  el 2026-09-30, venía de la § 2). `nota-credito-composicion.e2e-spec.ts` (~312 y ~323) afirma
+  que el ítem "Ajuste" no aparece en `GET /api/items`, y `venta-total-cero.e2e-spec.ts` (~163),
+  que ninguna venta de `GET /api/ventas?estado=pendiente` tiene total 0; los dos piden solo
+  `pageSize=100` sin `page`. **La API ya alcanza:** `page` + `pageSize` (máx. 100) y
+  `meta.totalPages` (`common/utils/pagination.util.ts`), en los dos endpoints. **El arreglo:**
+  un helper que recorra `page=1..meta.totalPages` y junte `data`, usado por los dos specs (no
+  existe uno en `backend/test`). Qué cambia en cada uno: en Ajuste la exclusión es un `WHERE`
+  (`items.service.ts:636`) que vale para todas las páginas, así que hoy no miente, pero si
+  alguien saca esa línea con más de 100 ítems alfabéticamente antes, el test deja de cazarlo.
+  En la venta de $0 el riesgo es actual: con más de 100 pendientes (`ORDER BY creado_el DESC`),
+  una vieja con total 0 queda fuera y el test pasa en falso. `search=Ajuste` no sirve: prueba
+  un listado angosto, no el que usan los selectores. Mutante: sacar el `WHERE` de `:636` y
+  sembrar más de 100 ítems antes de "Ajuste"; debe dar rojo.
+
+### Qué se hizo
+
+`backend/test/helpers/paginacion.ts` (`todasLasPaginas`) pide `page=1..meta.totalPages` con
+`.expect(200)` en cada página y junta `data`. Lo usan `nota-credito-composicion.e2e-spec.ts` (el
+listado de ítems y su papelera, sin "Ajuste") y `venta-total-cero.e2e-spec.ts` (ninguna pendiente de
+$0). Los dos endpoints devuelven `{ data, meta: { total, totalPages } }`, seguido desde el controller
+hasta `buildPaginationMeta`.
+
+**Lo que la revisión agregó:** los dos listados paginan con OFFSET sobre un `ORDER BY` sin desempate
+(`i.nombre ASC`, `v.creado_el DESC`). Entre dos páginas, dos filas empatadas pueden cambiar de lugar y
+una quedar sin mirar. El helper cierra afirmando que vio `meta.total` ids distintos: eso detecta la
+fila salteada, aunque no la evita. El desempate en el service quedó fuera de alcance.
+
+**Una corrección a la entrada:** decía que en la venta de $0 "el riesgo es actual". No lo es. Con el
+código de hoy una pendiente de $0 no se puede crear por la API: `calcularEstadoVenta('0','0')` da
+`pagada` y `total_final` no se recalcula después. El helper cubre la regresión: que vuelva el arrastre
+que el propio spec documenta.
+
+### Qué lo fija
+
+Mutantes medidos, cada uno revertido:
+
+| Mutante | Con solo `pageSize=100` | Con el helper |
+|---|---|---|
+| Sacar el `WHERE i.es_ajuste_nota_credito = false` (`items.service.ts:636`) y sembrar 105 ítems que ordenan antes de "Ajuste" | verde en falso | rojo |
+| Volver al `saved.pagos.length > 0 ? … : PENDIENTE` de `ventas.service.ts` (el bug histórico), crear la de $0 y después 105 pendientes más nuevas | verde en falso | rojo |
+| En el helper, perder una fila de la primera página | — | rojo en `nota-credito-composicion` (22 esperados, 21 vistos) |
+
+El tercero sobrevive en `venta-total-cero` corrido solo sobre base fresca: no hay pendientes y el
+total es 0, así que no hay fila que perder.
+
 ## Una `QZ_PRIVATE_KEY` mal cargada se avisa al arrancar y deja el sistema imprimiendo sin firma (cerrada 2026-09-30)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.
