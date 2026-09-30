@@ -26,6 +26,7 @@ import { AppModule } from '../src/app.module';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
+const BODEGA_SUBSUELO_ID = '550e8400-e29b-41d4-a716-446655440383';
 
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
@@ -94,15 +95,16 @@ describe('inventario — unidades serializadas por ubicación (e2e)', () => {
     );
     localId = localRows[0].ubicacion_id;
 
-    // La bodega demo del seed (`seedUbicaciones`), no una creada por el spec:
-    // así este archivo no necesita el endpoint POST /ubicaciones para armar
-    // el escenario.
+    // La bodega demo del seed (`seedUbicaciones`), por su id fijo: así este
+    // archivo no necesita el endpoint POST /ubicaciones para armar el
+    // escenario. No "cualquier bodega del tenant": `traslados.e2e-spec` deja
+    // una desactivada (con stock, así que no se puede borrar), y un `LIMIT 1`
+    // sin orden la elegía según qué spec hubiera corrido antes.
     const bodegaRows: { ubicacion_id: string; nombre: string }[] =
       await ds.query(
         `SELECT ubicacion_id, nombre FROM ubicaciones
-          WHERE tenant_id = $1 AND tipo = 'bodega' AND eliminado_el IS NULL
-          LIMIT 1`,
-        [PARIS_TENANT_ID],
+          WHERE ubicacion_id = $1 AND eliminado_el IS NULL`,
+        [BODEGA_SUBSUELO_ID],
       );
     bodegaId = bodegaRows[0].ubicacion_id;
     bodegaNombre = bodegaRows[0].nombre;

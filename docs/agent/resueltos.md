@@ -23,6 +23,23 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Dos e2e de inventario elegían "cualquier bodega" y agarraban la que otro spec dejó apagada (cerrada 2026-09-30)
+
+No venía del backlog: salió en el gate del frente de la clave de QZ, con 3 fallos en
+`inventario-lote-ubicacion.e2e-spec.ts` que pasaban corriendo el archivo solo.
+
+**Causa, medida:** `inventario-lote-ubicacion` y `inventario-serie-ubicacion` tomaban la bodega de Paris
+con `WHERE tipo = 'bodega' … LIMIT 1`, sin orden y sin mirar `activo`. `traslados.e2e-spec.ts` ("no
+traslada HACIA una ubicación desactivada…") crea una "Bodega apagada E2E", le traslada stock y la
+desactiva. Con stock no se puede borrar, así que queda. Según el orden de la suite, el `LIMIT 1` la
+elegía y cada traslado hacia ella daba 400 ("está desactivada"). Reproducido sobre base fresca:
+`traslados` y después `inventario-lote-ubicacion` → 3 fallos de 4; `inventario-serie-ubicacion` → 2 de 4.
+En CI había pasado por orden.
+
+**Arreglo:** los dos specs apuntan a la bodega del seed por su id fijo (`BODEGA_SUBSUELO_ID`,
+`…440383`, `seedUbicaciones`), que ningún spec desactiva. Sobre la misma base contaminada pasan 4 de 4
+los dos. `traslados.e2e-spec` no cambió: dejar la bodega apagada es parte de lo que prueba.
+
 ## Los dos e2e que afirmaban sobre la primera página de 100 recorren el listado entero (cerrada 2026-09-30)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.
