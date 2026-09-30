@@ -107,41 +107,6 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
-- [ ] **Tests de pantalla que no terminan en 20 s con la máquina cargada** (frontend,
-  intermitente, visto el 2026-09-28; medido el 2026-09-29 por la orquestadora sin reproducirlo).
-  **Lo visto:** en 10 corridas de la suite entera, con otras sesiones levantando stacks en
-  paralelo (load average 15–22 en 12 núcleos), dos corridas salieron con
-  `Test timed out in 20000ms` en tres tests, y el resto de la suite en verde:
-  `app/pages/compras/compras-carga.nuxt.spec.ts` (*"con todos los precios el descuento se
-  habilita…"*, corrida de 253 s), `app/pages/configuracion/items.nuxt.spec.ts` (*"volver a elegir
-  la moneda que ya está puesta cancela el aviso"*) y `app/pages/salones/index.nuxt.spec.ts`
-  (*"el tap sobre una línea que no estaba pendiente al empezar el flush sale antes que la
-  comanda"*), los dos últimos en la misma corrida de 138 s.
-  **Lo medido: la CPU sola no lo explica.** Cada test corrido suelto (`vitest run <archivo> -t`),
-  10 vueltas por test, con reporte JSON para leer la duración del test y no la del arranque. Las
-  60 corridas pasaron:
-
-  | Test | Máquina tranquila (load ~5) | Cargada (load 14–23) |
-  |---|---|---|
-  | compras-carga | 450–483 ms | 733–1474 ms |
-  | items (moneda) | 521–546 ms | 755–1653 ms |
-  | salones (flush) | 878–927 ms | 1114–1675 ms |
-
-  La carga fue la suite entera de vitest en bucle más 8 procesos `yes`. Esa suite, en paralelo,
-  corrió 4 veces en 127–130 s con 1637 tests en verde y **0 timeouts**. El tiempo crece de a poco
-  con la carga, a lo sumo ×3, y el peor caso queda en 1,7 s contra un límite de 20: nada se acerca
-  al timeout. **El de salones no puede colgarse en su espera propia:** `patchesAlReclamarLaComanda`
-  corta a los 2 s y, si no llegó el reclamo, falla por aserción, no por timeout.
-  **Lo que queda sin medir es la memoria.** El 2026-09-28 lo que corría en paralelo eran stacks
-  de Docker, no quemadores de CPU. La Mac tiene 16 GB, la VM de Docker 3,8 GB, y en reposo el swap
-  ya estaba en 1 GB de 2. Un worker que swapea puede pasar de 2 s a más de 20 sin que lo explique
-  el load. No se forzó presión de memoria (`memory_pressure -l critical`) porque deja la Mac del
-  owner lenta mientras dura. **Qué hacer si vuelve a pasar:** en el momento del rojo, anotar
-  `sysctl vm.swapusage`, la última línea de `memory_pressure` y `docker stats --no-stream`, y el
-  tiempo de los otros tests de ese mismo archivo en esa corrida. Si el swap está lleno, es
-  memoria: la salida es el turno de suites pesadas, no el test. Si no, es un cuelgue del test, y
-  se corre ese test en loop con `--reporter=verbose` para ver en qué `await` se queda.
-
 - [ ] **El arqueo de `caja/apertura-cierre.spec.ts:107` vio la diferencia de otro monto**
   (frontend, e2e de navegador, visto una vez el 2026-09-29; medido el mismo día por la
   orquestadora sin reproducirlo). En una corrida entera en frío en el stack de un worktree (load
@@ -2098,6 +2063,19 @@ enterarse tarde. Esta sección se abre al encarar el paso a producción. Orden =
 ---
 
 ## Vigilancia — evaluado y descartado, no es trabajo
+
+- [ ] **Tres tests de pantalla cortaron por timeout de 20 s una vez: se sacó del backlog**
+  (frontend; visto el 2026-09-28, medido el 2026-09-29, **sacado por el owner el 2026-09-30**
+  porque salió una sola vez). En 2 de 10 corridas de vitest con otras sesiones levantando stacks
+  de Docker, cortaron `compras-carga` (*"con todos los precios el descuento se habilita…"*),
+  `items` (*"volver a elegir la moneda…"*) y `salones/index` (*"el tap sobre una línea que no
+  estaba pendiente…"*). **La CPU está descartada:** cada test suelto, 10 vueltas con la máquina
+  tranquila y 10 con load 14–23, pasó 60 de 60 con el peor en 1,7 s. **La memoria quedó sin
+  medir:** forzar la presión de memoria lo bloquea el control de permisos, y el owner prefirió
+  no insistir. **Si vuelve a pasar:** en el momento del rojo anotar `sysctl vm.swapusage`,
+  `memory_pressure | tail -1` y `docker stats --no-stream`. Swap lleno = memoria, y la salida
+  es el turno de suites pesadas; si no, es un cuelgue del test y se corre en loop con
+  `--reporter=verbose`. Ahí vuelve a la § 2.
 
 - [ ] **El filtro de tipo de `GET /compras/productos` es redundante con su `JOIN`, y se deja a
   propósito** (backend, medido el 2026-09-19 al cerrar la pieza 1 de compras) — sacar
