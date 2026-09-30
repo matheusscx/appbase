@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { CompraDetalle, LineaCompra as LineaDetalle, PresentacionCompra, TotalDocumentoTipo } from '~/composables/useCompras'
 import { hoyLocal } from '~/composables/useVigenciaRegla'
-import type { DestinoCodigo, DocumentoDte, DteLineaInfo, LecturaDteRespuesta, LineaDte } from '~/composables/useDte'
+import type { DestinoCodigo, DocumentoDte, LecturaDteRespuesta, LineaDte } from '~/composables/useDte'
 import { debeLlenarDescuentoDte, fraseOrigenDte, lineaFormDesdeDte, precargaDescuento, repartirLineas } from '~/composables/useDte'
+import type { LineaForm, ProductoOpt } from '~/components/compras/LineaCompraForm.vue'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -23,39 +24,11 @@ interface Proveedor {
   /** Para sugerir "Vence el" (spec § 4.2). Null = 30 días. */
   plazoPagoDias: number | null
 }
-interface ProductoOpt {
-  id: string
-  nombre: string
-  modoInventario: string | null
-  unidadMedida: string | null
-}
 /** Espejo de `MedioPagoOpcion` del backend (spec § 5.1, § 10). */
 interface MedioPagoOpcion {
   id: string
   nombre: string
   esEfectivo: boolean
-}
-
-interface LineaForm {
-  key: string
-  itemId: string
-  modoInventario: string | null
-  unidadMedida: string | null
-  cantidad: string
-  unidadCodigo: string
-  /** Una presentación del proveedor de la compra (pieza 2 § 4.1). Vacío =
-   *  ninguna. Exactamente uno de `unidadCodigo`/`presentacionId` viaja. */
-  presentacionId: string
-  /** String vacío = falta costo: se completa cuando llega la factura. */
-  precioUnitario: string
-  /** Modo serie: una serie por renglón. */
-  seriesTexto: string
-  codigoLote: string
-  fechaVencimiento: string
-  /** Presente solo en una línea que vino del XML de la factura (tarea 4).
-   *  `origen` es la línea cruda, para apartarla/traerla de vuelta sin perder
-   *  sus datos (monto, unidad de la factura…) — nunca viaja al backend. */
-  dte: (DteLineaInfo & { origen: LineaDte }) | null
 }
 
 /** Lo que trae el evento `cargar` de `CargarDteModal` (spec § 6). */
@@ -79,8 +52,8 @@ const { ubicaciones, cargar: cargarUbicaciones } = useUbicaciones()
 const unidadesMedidaStore = useUnidadesMedidaStore()
 const monedasStore = useMonedasStore()
 const {
-  totalLinea, subtotal, totalConDescuento, faltaAlgunPrecio, insigniaEstado, cantidadParaEditar,
-  etiquetaPresentacion, cuentaPresentacion, cuerpoDocumento, fechaVencimientoSugerida,
+  subtotal, totalConDescuento, faltaAlgunPrecio, insigniaEstado, cantidadParaEditar,
+  cuerpoDocumento, fechaVencimientoSugerida,
 } = useCompras()
 const { puedeCrear } = usePermisosCrud('Compras')
 const permissionsStore = usePermissionsStore()
@@ -106,7 +79,6 @@ const mediosPago = ref<MedioPagoOpcion[]>([])
 
 const tipoOpts = computed<Opt[]>(() => tipos.value.map(t => ({ label: t.nombre, value: t.id })))
 const proveedorOpts = computed<Opt[]>(() => proveedores.value.map(p => ({ label: p.nombre, value: p.id })))
-const productoOpts = computed<Opt[]>(() => productos.value.map(p => ({ label: p.nombre, value: p.id })))
 const medioPagoOpts = computed<Opt[]>(() => mediosPago.value.map(m => ({ label: m.nombre, value: m.id })))
 // Solo las activas: el backend rechaza recibir en una desactivada.
 const ubicacionOpts = computed<Opt[]>(() =>
@@ -206,49 +178,8 @@ function onSeleccionarProveedor(id: string) {
   })
 }
 
-/** `u:<codigo>` / `p:<id>` / `''`: la traducción es propia de esta pantalla
- *  (no del composable), que es la única que arma el selector combinado. */
-function valorUnidad(linea: LineaForm): string {
-  if (linea.presentacionId) return `p:${linea.presentacionId}`
-  if (linea.unidadCodigo) return `u:${linea.unidadCodigo}`
-  return ''
-}
-
-function onCambiarUnidad(linea: LineaForm, valor: string) {
-  if (valor === 'nueva') {
-    abrirNuevaPresentacion(linea)
-    return
-  }
-  if (valor.startsWith('p:')) {
-    linea.presentacionId = valor.slice(2)
-    linea.unidadCodigo = ''
-    return
-  }
-  if (valor.startsWith('u:')) {
-    linea.presentacionId = ''
-    linea.unidadCodigo = valor.slice(2)
-  }
-}
-
-/** Las presentaciones de ESTE producto, ya elegidas por el proveedor vigente
- *  (`presentaciones` solo trae las del proveedor de la compra). */
-function presentacionesDeLinea(linea: LineaForm): PresentacionCompra[] {
-  return presentaciones.value.filter(p => p.itemId === linea.itemId)
-}
-
 function presentacionDe(linea: LineaForm): PresentacionCompra | undefined {
   return presentaciones.value.find(p => p.id === linea.presentacionId)
-}
-
-/** La cuenta a la vista bajo la línea (spec § 6), o null sin presentación o
- *  sin una cantidad tipeable. */
-function cuentaDeLinea(linea: LineaForm): string | null {
-  const p = presentacionDe(linea)
-  if (!p) return null
-  return cuentaPresentacion(
-    linea.cantidad, p.contenido, p.unidadCodigo, linea.precioUnitario || null,
-    monedasStore.monedaOficial,
-  )
 }
 
 // ── El modal de presentación ─────────────────────────────────────────────
@@ -408,63 +339,8 @@ onMounted(async () => {
 
 // ── Líneas ─────────────────────────────────────────────────────────────────
 
-function unidadesCompatibles(linea: LineaForm): Opt[] {
-  // Serie y lote solo admiten su unidad base (el backend lo rechaza si no).
-  if (linea.modoInventario !== 'cantidad') {
-    return linea.unidadMedida ? [{ label: linea.unidadMedida, value: linea.unidadMedida }] : []
-  }
-  const magnitud = unidadesMedidaStore.magnitudDe(linea.unidadMedida)
-  if (!magnitud) return []
-  return unidadesMedidaStore.unidades
-    .filter(u => u.magnitud === magnitud)
-    .map(u => ({ label: u.codigo, value: u.codigo }))
-}
-
-/**
- * El selector combinado (spec § 6): las unidades del catálogo, las
- * presentaciones de este proveedor para este producto, y "+ Nueva
- * presentación…" al final — deshabilitada sin proveedor o producto, ausente
- * en serie (ahí tampoco hay unidades del catálogo más que la base).
- */
-function opcionesUnidad(linea: LineaForm): (Opt & { disabled?: boolean })[] {
-  const items: (Opt & { disabled?: boolean })[] = [
-    ...unidadesCompatibles(linea).map(u => ({ label: u.label, value: `u:${u.value}` })),
-    ...presentacionesDeLinea(linea).map(p => ({ label: etiquetaPresentacion(p), value: `p:${p.id}` })),
-  ]
-  if (linea.modoInventario === 'serie') return items
-  items.push({
-    label: '+ Nueva presentación…',
-    value: 'nueva',
-    disabled: !form.value.proveedorId || !linea.itemId,
-  })
-  return items
-}
-
-function onSeleccionarItem(linea: LineaForm, itemId: string) {
-  const producto = productos.value.find(p => p.id === itemId)
-  linea.itemId = itemId
-  linea.modoInventario = producto?.modoInventario ?? 'cantidad'
-  linea.unidadMedida = producto?.unidadMedida ?? null
-  // Una línea del XML no hereda la unidad base (tarea 4 § 6): "3 CJ" no es "3
-  // unidad", y la real sale de que el encargado la asocie. Serie y lote solo
-  // admiten la base de todos modos, así que ahí sí se fija.
-  const dejarUnidadVacia = !!linea.dte && linea.modoInventario === 'cantidad'
-  linea.unidadCodigo = dejarUnidadVacia ? '' : (producto?.unidadMedida ?? '')
-  linea.presentacionId = ''
-  linea.seriesTexto = ''
-  linea.codigoLote = ''
-  linea.fechaVencimiento = ''
-}
-
 function seriesDe(linea: LineaForm): string[] {
   return linea.seriesTexto.split('\n').map(s => s.trim()).filter(Boolean)
-}
-
-// En serie, la cantidad es la cuenta de las series, no un campo aparte que se
-// pueda desincronizar (mismo criterio que traslados).
-function onSeriesChange(linea: LineaForm, texto: string) {
-  linea.seriesTexto = texto
-  linea.cantidad = String(seriesDe(linea).length)
 }
 
 function agregarLinea() {
@@ -1070,141 +946,25 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
               </UButton>
             </div>
 
-            <div
+            <ComprasLineaCompraForm
               v-for="linea in lineas"
               :key="linea.key"
-              class="border border-default rounded-md p-4 space-y-3"
-              data-qa="compra-linea"
-            >
-              <div class="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-end">
-                <UFormField label="Producto" class="md:col-span-4">
-                  <USelectMenu
-                    :model-value="linea.itemId"
-                    :items="productoOpts"
-                    value-key="value"
-                    searchable
-                    placeholder="Selecciona un producto"
-                    class="w-full"
-                    @update:model-value="(v: string) => onSeleccionarItem(linea, v)"
-                  />
-                </UFormField>
-                <UFormField label="Cantidad" class="md:col-span-2">
-                  <UInput
-                    v-model="linea.cantidad"
-                    inputmode="decimal"
-                    placeholder="0"
-                    :disabled="linea.modoInventario === 'serie'"
-                    class="w-full"
-                    data-qa="compra-cantidad"
-                  />
-                </UFormField>
-                <UFormField label="Unidad" class="md:col-span-2">
-                  <div class="flex items-center gap-1">
-                    <USelect
-                      :model-value="valorUnidad(linea)"
-                      :items="opcionesUnidad(linea)"
-                      :disabled="!linea.itemId"
-                      class="w-full"
-                      @update:model-value="(v: string) => onCambiarUnidad(linea, v)"
-                    />
-                    <UButton
-                      v-if="linea.presentacionId"
-                      icon="i-lucide-pencil"
-                      variant="ghost"
-                      size="sm"
-                      :data-qa="`compra-presentacion-editar-${linea.key}`"
-                      @click="abrirEditarPresentacion(linea)"
-                    />
-                  </div>
-                </UFormField>
-                <UFormField label="Precio unitario" class="md:col-span-2">
-                  <MoneyInput
-                    v-model="linea.precioUnitario"
-                    oficial
-                    placeholder="Sin precio"
-                    class="w-full"
-                    data-qa="compra-precio"
-                  />
-                </UFormField>
-                <div class="md:col-span-2 flex items-center justify-between gap-2">
-                  <span class="text-sm tabular-nums text-muted" data-qa="compra-total-linea">
-                    {{ totalLinea(linea.cantidad, linea.precioUnitario || null) != null
-                      ? formatMonto(totalLinea(linea.cantidad, linea.precioUnitario || null))
-                      : '—' }}
-                  </span>
-                  <UButton
-                    color="error"
-                    variant="ghost"
-                    icon="i-lucide-trash-2"
-                    size="sm"
-                    @click="quitarLinea(linea.key)"
-                  />
-                </div>
-              </div>
-
-              <p
-                v-if="cuentaDeLinea(linea)"
-                class="text-xs text-muted"
-                data-qa="compra-cuenta-presentacion"
-              >
-                {{ cuentaDeLinea(linea) }}
-              </p>
-
-              <div v-if="linea.dte" class="flex flex-wrap items-center justify-between gap-2">
-                <div class="flex items-center gap-2">
-                  <span class="text-xs text-muted" data-qa="compra-dte-texto">{{ linea.dte.texto }}</span>
-                  <UBadge
-                    v-if="linea.dte.calzo"
-                    label="Calzó por código"
-                    color="neutral"
-                    variant="subtle"
-                    data-qa="compra-dte-calzo"
-                  />
-                  <UBadge
-                    v-else
-                    label="Por asociar"
-                    color="warning"
-                    variant="subtle"
-                    data-qa="compra-dte-por-asociar"
-                  />
-                </div>
-                <UButton
-                  size="xs"
-                  variant="ghost"
-                  color="neutral"
-                  data-qa="compra-dte-no-mercaderia"
-                  @click="apartarLinea(linea.key)"
-                >
-                  No es mercadería
-                </UButton>
-              </div>
-              <p v-if="linea.dte?.nota" class="text-xs text-muted" data-qa="compra-dte-nota">
-                {{ linea.dte.nota }}
-              </p>
-              <p v-if="linea.dte?.conAjusteDeLinea" class="text-xs text-muted" data-qa="compra-dte-ajuste">
-                Incluye el descuento o recargo de la línea de la factura
-              </p>
-
-              <UFormField
-                v-if="linea.modoInventario === 'serie'"
-                label="Series (una por renglón)"
-              >
-                <UTextarea
-                  :model-value="linea.seriesTexto"
-                  :rows="3"
-                  class="w-full"
-                  @update:model-value="(v: string) => onSeriesChange(linea, v)"
-                />
-              </UFormField>
-              <div v-if="linea.modoInventario === 'lote'" class="grid grid-cols-2 gap-3">
-                <UFormField label="Lote" required>
-                  <UInput v-model="linea.codigoLote" placeholder="Código del lote" class="w-full" />
-                </UFormField>
-                <UFormField label="Vence">
-                  <UInput v-model="linea.fechaVencimiento" type="date" class="w-full" />
-                </UFormField>
-              </div>
-            </div>
+              :linea="linea"
+              :productos="productos"
+              :presentaciones="presentaciones"
+              :proveedor-id="form.proveedorId"
+              @seleccionar-item="(cambios: Partial<LineaForm>) => Object.assign(linea, cambios)"
+              @cambiar-cantidad="(v: string) => { linea.cantidad = v }"
+              @cambiar-unidad="(cambios: Partial<LineaForm>) => Object.assign(linea, cambios)"
+              @nueva-presentacion="() => abrirNuevaPresentacion(linea)"
+              @editar-presentacion="() => abrirEditarPresentacion(linea)"
+              @cambiar-precio="(v: string) => { linea.precioUnitario = v }"
+              @cambiar-series="(cambios: Partial<LineaForm>) => Object.assign(linea, cambios)"
+              @cambiar-codigo-lote="(v: string) => { linea.codigoLote = v }"
+              @cambiar-fecha-vencimiento="(v: string) => { linea.fechaVencimiento = v }"
+              @quitar="quitarLinea(linea.key)"
+              @apartar="apartarLinea(linea.key)"
+            />
 
             <UCollapsible v-if="apartadas.length" :unmount-on-hide="false" data-qa="compra-dte-apartadas">
               <UButton

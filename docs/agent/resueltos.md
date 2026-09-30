@@ -23,6 +23,61 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La fila de línea de compras es un componente, con la línea de solo lectura y cada cambio por emit (cerrada 2026-09-30)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Sacar la fila de línea de `pages/compras/[id].vue` a un componente, con emits y sin
+  mutar la prop** (frontend; medido el 2026-09-30, venía de la § 2). La página tiene 1441
+  líneas; la fila es el `v-for="linea in lineas"` de ~1073-1207 (135 de template) más ~94 de
+  script que solo la sirve (`valorUnidad`, `onCambiarUnidad`, `presentacionesDeLinea`,
+  `cuentaDeLinea`, `unidadesCompatibles`, `opcionesUnidad`, `onSeleccionarItem`,
+  `onSeriesChange`): ~229 líneas. La franja del XML **no** se mueve: vive fuera de
+  `v-if="cargando"` (se puede cargar la factura con los catálogos en vuelo) y adentro de un
+  componente quedaría atada a `!cargando`. **El contrato sigue a `ventas/CarritoPanel.vue`**:
+  la línea entra como prop de solo lectura y cada cambio sale por un emit con su valor, y la
+  escritura la hace la página. No se toma la otra forma medida (`defineModel` o v-model sobre
+  campos de la prop): cabe con 4 props y 4 emits, pero es mutar la prop, y los dos precedentes
+  del repo (CarritoPanel y `compras/CorregirLineaModal.vue`) la evitan. **Lo que queda en la
+  página:** `quitarLinea` y `apartarLinea`, que reasignan `lineas` o tocan varias filas con la
+  misma `dte.clave`; y el modal único de presentación (`abrirNuevaPresentacion`,
+  `abrirEditarPresentacion`), fuera del `v-for`; a la fila bajan solo sus botones, como emit.
+  `onSeleccionarItem` resetea 6 campos de una vez, así que sube a la página como un solo emit
+  (`seleccionar-item`), no seis. Props: `linea`, `productoOpts`, `presentaciones`,
+  `proveedorId`. Nada sale de `useDte.ts`: la fila solo lee `linea.dte.*`. `persistirBorrador`
+  corre solo desde Guardar/Confirmar y no hay debounce, así que el orden que fija
+  `compras-carga.nuxt.spec.ts` no depende de la fila.
+
+### Qué se hizo
+
+`frontend/app/components/compras/LineaCompraForm.vue` es la fila del `v-for="linea in lineas"` de
+`pages/compras/[id].vue`, con el script que solo la servía. La página bajó de 1441 a 1201 líneas.
+Sigue el contrato de `ventas/CarritoPanel.vue`. La línea entra como prop y cada cambio sale por un
+emit con su valor: `seleccionar-item`, `cambiar-unidad` y `cambiar-series` con los campos que tocan,
+y los de cantidad, precio, lote y vencimiento con el suyo. La página escribe sobre la línea real con
+`Object.assign`. `onSeleccionarItem` resetea todo en **un** emit. Quedaron en la página `quitarLinea`,
+`apartarLinea`, el modal único de presentación (a la fila bajan sus botones como emit) y la franja del
+XML, fuera de `v-if="cargando"`.
+
+**Un desvío de la entrada, necesario:** la prop es `productos` (el catálogo), no `productoOpts`.
+`onSeleccionarItem`, que la entrada mandaba a la fila, lee `modoInventario` y `unidadMedida` de cada
+producto, y un `Opt` no los trae. El componente arma el `Opt[]` en un computed, con el mismo mapeo y
+orden que usaba la página. `LineaForm` y `ProductoOpt` se exportan desde el componente, como
+`CustomerForm` desde `ventas/ClienteForm.vue`.
+
+### Qué lo fija
+
+- `LineaCompraForm.nuxt.spec.ts`, 12 tests: cada interacción emite su valor, sobre una línea con
+  `Object.freeze`. Mutante medido: que `onCambiarUnidad` escriba en la prop en vez de emitir pone uno
+  en rojo. El `freeze` es superficial, y la revisión confirmó que ningún handler escribe un campo
+  anidado.
+- Los specs de la página (`compras-carga`, `compras-deuda`, `compras-pago-al-confirmar`) pasaron sin
+  tocarles una aserción.
+- Playwright de `e2e/compras` contra el stack del worktree: 16 de 16. Los `data-qa`, textos y clases
+  quedaron iguales, cotejados literal por la revisión.
+
 ## Dos e2e de inventario elegían "cualquier bodega" y agarraban la que otro spec dejó apagada (cerrada 2026-09-30)
 
 No venía del backlog: salió en el gate del frente de la clave de QZ, con 3 fallos en

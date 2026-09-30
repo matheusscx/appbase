@@ -41,27 +41,6 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
-- [ ] **Sacar la fila de línea de `pages/compras/[id].vue` a un componente, con emits y sin
-  mutar la prop** (frontend; medido el 2026-09-30, venía de la § 2). La página tiene 1441
-  líneas; la fila es el `v-for="linea in lineas"` de ~1073-1207 (135 de template) más ~94 de
-  script que solo la sirve (`valorUnidad`, `onCambiarUnidad`, `presentacionesDeLinea`,
-  `cuentaDeLinea`, `unidadesCompatibles`, `opcionesUnidad`, `onSeleccionarItem`,
-  `onSeriesChange`): ~229 líneas. La franja del XML **no** se mueve: vive fuera de
-  `v-if="cargando"` (se puede cargar la factura con los catálogos en vuelo) y adentro de un
-  componente quedaría atada a `!cargando`. **El contrato sigue a `ventas/CarritoPanel.vue`**:
-  la línea entra como prop de solo lectura y cada cambio sale por un emit con su valor, y la
-  escritura la hace la página. No se toma la otra forma medida (`defineModel` o v-model sobre
-  campos de la prop): cabe con 4 props y 4 emits, pero es mutar la prop, y los dos precedentes
-  del repo (CarritoPanel y `compras/CorregirLineaModal.vue`) la evitan. **Lo que queda en la
-  página:** `quitarLinea` y `apartarLinea`, que reasignan `lineas` o tocan varias filas con la
-  misma `dte.clave`; y el modal único de presentación (`abrirNuevaPresentacion`,
-  `abrirEditarPresentacion`), fuera del `v-for`; a la fila bajan solo sus botones, como emit.
-  `onSeleccionarItem` resetea 6 campos de una vez, así que sube a la página como un solo emit
-  (`seleccionar-item`), no seis. Props: `linea`, `productoOpts`, `presentaciones`,
-  `proveedorId`. Nada sale de `useDte.ts`: la fila solo lee `linea.dte.*`. `persistirBorrador`
-  corre solo desde Guardar/Confirmar y no hay debounce, así que el orden que fija
-  `compras-carga.nuxt.spec.ts` no depende de la fila.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
