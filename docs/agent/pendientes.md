@@ -105,18 +105,22 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   - **Instrumentado el 2026-09-28, a pedido del owner; sigue abierta hasta el próximo caso.** El
     comando del recibo (el mismo en el hook y en el skill `verify-feature`) guarda también el diff
     del que sale, en `<git-dir>/verify-feature.receipt.diff`. Cada rechazo deja en
-    `<git-dir>/verify-feature-rechazos/<fecha>-<pid>/` tres archivos: `hook.diff` (lo que vio el
-    hook), `recibo.diff` (copia del diff del recibo en ese momento, antes de que una reescritura
-    lo pise) e `info.txt` (los dos hashes, `GIT_INDEX_FILE` y si el índice era temporal). Si el
+    `.git/verify-feature-rechazos/<fecha>-<checkout>-<pid>/` del checkout principal (el git-dir
+    común desde el 2026-09-30, así que sobrevive al borrado del worktree) tres archivos:
+    `hook.diff` (lo que vio el hook), `recibo.diff` (copia del diff del recibo en ese momento,
+    antes de que una reescritura lo pise) e `info.txt` (el checkout, los hashes, `GIT_INDEX_FILE`,
+    si el índice era temporal, y si `recibo.diff` estaba con su hash o faltaba). Si el
     índice es temporal, el aviso lo dice y pide stagear y commitear sin rutas ni `-a`. El
     skill ya no escribe en `.git/` literal, que en un worktree falla.
   - **Qué mirar la próxima vez que un recibo del mismo diff se rechace:** no reescribirlo
     todavía. Correr el `diff` que imprime el hook entre `recibo.diff` y `hook.diff`:
+    - antes, mirar en `info.txt` si el hash de `recibo.diff` es el `hash del recibo`: si no lo
+      es, o `recibo.diff` es de un recibo anterior (el último se escribió con la forma vieja), o
+      el hash que se escribió no es el de su propio diff —que sería el fenómeno mismo, cazado—;
+      en los dos casos el `diff` de abajo no dice nada;
     - si **difieren**, el contenido cambió entre la escritura y el hook, y ese diff dice qué;
-    - si son **iguales** y los hashes no, lo que falló fue el hash y no el diff. Hay que volver a
-      hashear `recibo.diff` y compararlo con el `hash del recibo` de `info.txt`.
-    Anotar lo encontrado acá con la ruta de la evidencia. Ojo: la evidencia muere con el
-    worktree.
+    - si son **iguales** y los hashes no, lo que falló fue el hash y no el diff.
+    Anotar lo encontrado acá con la ruta de la evidencia.
   - **Medido el 2026-09-30: hubo un caso más y la instrumentación no lo capturó.** Fue el
     2026-09-28 a las 19:31, en el worktree `heuristic-jepsen-4a8a7d`, con el recibo encadenado al
     `git commit` en el mismo comando. El recibo tenía `9c160412…`. El hook vio `1c17f612…`, sobre
@@ -130,10 +134,11 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
       ninguno. Todos los rechazos son de la forma con el pipe, pero con estos números la
       diferencia puede ser azar (0 de 12 sale con probabilidad ~0,2 si la tasa fuera la vieja).
       Queda como pista, no como causa. El comando que imprimen el hook y el skill ya es el nuevo.
-    - **Lo que falla en la instrumentación, y es mecánico:** la evidencia vive en
-      `git rev-parse --git-dir`, que en un worktree es `.git/worktrees/<nombre>/` y se borra con
-      él. Si fuera `--git-common-dir` sobreviviría. Además, un recibo en forma vieja no deja
-      `recibo.diff`, y el hook podría anotar en `info.txt` que no lo encontró.
+    - **Lo que fallaba en la instrumentación, arreglado el mismo día:** la evidencia iba al
+      git-dir del worktree, que se borra con él. Ahora va al común, y `info.txt` dice si faltaba
+      `recibo.diff` (recibo en forma vieja o ausente) o trae su hash. Probado a mano con el
+      script, en cuatro casos y con el hook de `main` como control, que la dejaba en el
+      worktree.
 
 ## 3. Ya decidido, falta construir
 

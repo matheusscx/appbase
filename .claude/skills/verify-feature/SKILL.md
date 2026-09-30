@@ -206,7 +206,9 @@ d="$(git rev-parse --git-dir)" && git diff --cached > "$d/verify-feature.receipt
 
 Va al git-dir y no a `.git/` literal: en un worktree `.git` es un archivo. Guarda también
 el diff del que sale, para que un rechazo se pueda comparar contra lo que vio el hook: el
-hook deja su evidencia en `<git-dir>/verify-feature-rechazos/` y dice con qué `diff` mirarla.
+hook deja su evidencia en el git-dir común (`.git/verify-feature-rechazos/` del checkout
+principal, también desde un worktree, para que sobreviva a su borrado) y dice con qué `diff`
+mirarla.
 Si el recibo era de este mismo diff y aun así se rechaza, **no reescribirlo hasta pasar**:
 comparar, reportarlo y anotarlo en `docs/agent/pendientes.md` § 2.
 

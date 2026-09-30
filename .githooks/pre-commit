@@ -144,10 +144,12 @@ fi
 # del diff staged de ESE checkout.
 #
 # El recibo guarda también el diff del que sale (verify-feature.receipt.diff), y
-# un rechazo deja en el git-dir el diff que vio el hook. Existe porque el
-# 2026-09-27 dos sesiones escribieron un recibo que no coincidía con su propio
-# diff staged, y con solo dos hashes no se pudo saber qué habían hasheado
-# (docs/agent/pendientes.md § 2). La evidencia vive en el git-dir: nunca se
+# un rechazo deja el diff que vio el hook. Existe porque el 2026-09-27 dos
+# sesiones escribieron un recibo que no coincidía con su propio diff staged, y
+# con solo dos hashes no se pudo saber qué habían hasheado
+# (docs/agent/pendientes.md § 2). La evidencia va al git-dir COMÚN, no al del
+# worktree: el del worktree se borra con él, y así se perdió el caso del
+# 2026-09-28 (medido 2026-09-30). Vive fuera del árbol: nunca se
 # stagea ni se versiona.
 needs_review=$(git diff --cached --name-only --diff-filter=ACM \
                | grep -E 'backend/src/.*\.service\.ts$|frontend/app/(pages|components)/.*\.vue$' || true)
@@ -182,16 +184,30 @@ if [ -n "$needs_review" ]; then
     # La evidencia es lo último y no decide nada: si no se puede escribir, el
     # commit queda bloqueado igual. hook.diff se genera de nuevo; si su hash no
     # es el del veredicto, info.txt lo muestra y eso ya es un hallazgo.
-    rechazo="$git_dir/verify-feature-rechazos/$(date +%Y%m%d-%H%M%S)-$$"
+    checkout=$(git rev-parse --show-toplevel)
+    # --path-format es de git 2.31: con uno más viejo, el del worktree antes que "/".
+    comun=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+    rechazo="${comun:-$git_dir}/verify-feature-rechazos/$(date +%Y%m%d-%H%M%S)-$(basename "$checkout")-$$"
     if mkdir -p "$rechazo" 2>/dev/null && git diff --cached > "$rechazo/hook.diff" 2>/dev/null; then
-      cp "$git_dir/verify-feature.receipt.diff" "$rechazo/recibo.diff" 2>/dev/null
+      # Si su hash no es el del recibo, recibo.diff es de un recibo anterior (el
+      # último se escribió con la forma vieja, sin guardar el diff) o lo que
+      # falló fue el hash: los dos casos que pendientes.md § 2 manda distinguir.
+      if cp "$git_dir/verify-feature.receipt.diff" "$rechazo/recibo.diff" 2>/dev/null; then
+        recibo_diff="presente, hash $(git hash-object --stdin < "$rechazo/recibo.diff")"
+      elif [ -n "$recorded" ]; then
+        recibo_diff="ausente: el recibo se escribió sin guardar su diff (la forma vieja, con pipe)"
+      else
+        recibo_diff="ausente (no hay recibo)"
+      fi
       {
+        echo "checkout:          $checkout"
         echo "fecha:             $(date '+%Y-%m-%d %H:%M:%S %z')"
         echo "hash del hook:     $actual"
         echo "hash de hook.diff: $(git hash-object --stdin < "$rechazo/hook.diff")"
         echo "hash del recibo:   ${recorded:-(no hay recibo)}"
         echo "GIT_INDEX_FILE:    ${GIT_INDEX_FILE:-(sin definir)}"
         echo "índice temporal:   $indice_temporal"
+        echo "recibo.diff:       $recibo_diff"
       } > "$rechazo/info.txt" 2>/dev/null
       ylw "  Evidencia del rechazo: $rechazo"
       ylw "  Si el recibo era de este mismo diff, antes de reescribirlo compará y reportá:"
