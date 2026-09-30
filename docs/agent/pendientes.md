@@ -112,31 +112,6 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   correr. Cuando el índice exista, una segunda fila por un camino futuro que no pase por el ancla
   daría 500 en vez de un duplicado silencioso: si eso llegara a importar, es otra entrada.
 
-- [ ] **Los dos e2e de la varianza caen en CI entre las 21:00 y las 24:00 de Chile** (backend,
-  tests; visto el 2026-09-30 a las 01:56 UTC en la corrida 36657454755, que era un push solo de
-  docs). Cayeron 8 tests, todos de `reportes-varianza-plata.e2e-spec.ts` y
-  `reportes-varianza-resumen.e2e-spec.ts`: el reporte volvió `meta.total` 0 donde esperaba 6. La
-  causa es `rangoDeHoy()` (`plata:468`, `resumen:70`), que arma "hoy" con `getFullYear/getMonth/
-  getDate` en la zona del proceso. En CI el proceso corre en UTC, y el backend lee
-  `desde`/`hasta` como día de negocio del tenant (`America/Santiago`). Desde las 00:00 UTC, que en
-  Chile con horario de verano son las 21:00, el test pide el día de mañana y los movimientos que
-  acaba de crear quedan afuera. En la Mac del owner no puede fallar, porque el proceso ya corre en
-  hora de Chile. **Por qué recién ahora:** los dos specs son del 2026-09-20 (`aafe28a8`,
-  `39e83916`), y ninguna corrida de CI de main desde entonces había caído en esa ventana: la más
-  tardía fue a las 23:45 UTC. **Los otros specs que arman fechas en UTC no tienen el problema:**
-  `liquidacion-propinas:792` pide ±1 día, los dos de anulaciones piden ±3 días
-  (`salones-anulaciones-porcentaje:269`, `salones-anulaciones-reporte:254`),
-  `salones-anulaciones-reporte:419` solo prueba que `desde = hasta` no da 400, y los de
-  `fecha_vencimiento` comparan una columna `date`. **Qué hacer (mecánico):** que `rangoDeHoy` lea el
-  día en la zona del tenant, con el molde de `fechaLocal` en `filtros-fecha-zona.e2e-spec.ts:67`
-  (`Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' })`). Hay 6 usos en `plata` y 8 en
-  `resumen`, y ninguno cambia. **Reproducido en la Mac** el 2026-09-30 a las 02:09 UTC, contra la misma
-  base y en el mismo minuto: los dos specs con `TZ=UTC` dan 8 caídos y 8 en verde, los mismos 8 de
-  CI, y con `TZ=America/Santiago` dan 16 de 16. **Cómo probar que el arreglo lo caza:** correr los
-  dos specs con `TZ=UTC` entre las 00:00 y las 03:00 UTC. Fuera de esa ventana sirve
-  `TZ=Pacific/Kiritimati` (17 horas adelante de Chile), pero solo cuando en Chile son entre las
-  07:00 y las 24:00. Con el `rangoDeHoy` de hoy caen, con el arreglo pasan.
-
 - [ ] **Alinear el Postgres local y el de CI con el del demo: `postgres:18` glibc** (entorno;
   decidido por el owner el 2026-09-29 en el selector interactivo de la orquestadora, entre "todo a
   18" y "recrear el demo con la 15"; juntó dos entradas que venían de la § 2). **Por qué:** el

@@ -23,6 +23,60 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los dos e2e de la varianza leen "hoy" en la zona del tenant, y ya no caen en CI de 21:00 a 24:00 de Chile (cerrada 2026-09-30)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Los dos e2e de la varianza caen en CI entre las 21:00 y las 24:00 de Chile** (backend,
+  tests; visto el 2026-09-30 a las 01:56 UTC en la corrida 36657454755, que era un push solo de
+  docs). Cayeron 8 tests, todos de `reportes-varianza-plata.e2e-spec.ts` y
+  `reportes-varianza-resumen.e2e-spec.ts`: el reporte volvió `meta.total` 0 donde esperaba 6. La
+  causa es `rangoDeHoy()` (`plata:468`, `resumen:70`), que arma "hoy" con `getFullYear/getMonth/
+  getDate` en la zona del proceso. En CI el proceso corre en UTC, y el backend lee
+  `desde`/`hasta` como día de negocio del tenant (`America/Santiago`). Desde las 00:00 UTC, que en
+  Chile con horario de verano son las 21:00, el test pide el día de mañana y los movimientos que
+  acaba de crear quedan afuera. En la Mac del owner no puede fallar, porque el proceso ya corre en
+  hora de Chile. **Por qué recién ahora:** los dos specs son del 2026-09-20 (`aafe28a8`,
+  `39e83916`), y ninguna corrida de CI de main desde entonces había caído en esa ventana: la más
+  tardía fue a las 23:45 UTC. **Los otros specs que arman fechas en UTC no tienen el problema:**
+  `liquidacion-propinas:792` pide ±1 día, los dos de anulaciones piden ±3 días
+  (`salones-anulaciones-porcentaje:269`, `salones-anulaciones-reporte:254`),
+  `salones-anulaciones-reporte:419` solo prueba que `desde = hasta` no da 400, y los de
+  `fecha_vencimiento` comparan una columna `date`. **Qué hacer (mecánico):** que `rangoDeHoy` lea el
+  día en la zona del tenant, con el molde de `fechaLocal` en `filtros-fecha-zona.e2e-spec.ts:67`
+  (`Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' })`). Hay 6 usos en `plata` y 8 en
+  `resumen`, y ninguno cambia. **Reproducido en la Mac** el 2026-09-30 a las 02:09 UTC, contra la misma
+  base y en el mismo minuto: los dos specs con `TZ=UTC` dan 8 caídos y 8 en verde, los mismos 8 de
+  CI, y con `TZ=America/Santiago` dan 16 de 16. **Cómo probar que el arreglo lo caza:** correr los
+  dos specs con `TZ=UTC` entre las 00:00 y las 03:00 UTC. Fuera de esa ventana sirve
+  `TZ=Pacific/Kiritimati` (17 horas adelante de Chile), pero solo cuando en Chile son entre las
+  07:00 y las 24:00. Con el `rangoDeHoy` de hoy caen, con el arreglo pasan.
+
+### Qué se hizo
+
+`rangoDeHoy()`, en los dos specs, arma la fecha con `Intl.DateTimeFormat('en-CA', { timeZone:
+'America/Santiago' })`, el molde de `fechaLocal` en `filtros-fecha-zona.e2e-spec.ts`, con el
+porqué como comentario. La forma del string que devuelve no cambió (`plata` sin `?`, `resumen`
+con `?`), así que los 14 usos quedaron iguales. La zona sale de la provincia de Paris en el seed
+(Región Metropolitana, `America/Santiago`), y el backend lee una fecha pura como el inicio del
+día de negocio en esa zona (`rango-fecha.util.ts`). Los dos archivos no derivan ninguna otra
+fecha: los `Date.now()` que quedan son sufijos de nombres.
+
+### Qué lo fija
+
+Medido el 2026-09-30 a las 12:30 UTC, contra la base del worktree:
+
+| `TZ` del proceso | Antes | Después |
+|---|---|---|
+| `Pacific/Kiritimati` (17 h adelante de Chile) | 8 caídos, 8 en verde | 16 de 16 |
+| `UTC` | — | 16 de 16 |
+| `America/Santiago` | — | 16 de 16 |
+
+Con Kiritimati se reprodujo de día lo que CI ve de noche: esa zona ya está en "mañana" mientras
+en Chile son entre las 07:00 y las 24:00.
+
 ## La lectura del DTE: una consulta a `terceros` en vez de dos, y las dos `normalizarClave` atadas por un test (cerrada 2026-09-30)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.

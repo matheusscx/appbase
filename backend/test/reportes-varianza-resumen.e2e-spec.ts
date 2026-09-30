@@ -68,11 +68,16 @@ describe('Reporte de varianza — el resumen (e2e)', () => {
 
   /** El rango que cubre "hoy", para lo que este spec acaba de escribir. */
   function rangoDeHoy(): string {
-    const hoy = new Date();
-    const y = hoy.getFullYear();
-    const m = `${hoy.getMonth() + 1}`.padStart(2, '0');
-    const d = `${hoy.getDate()}`.padStart(2, '0');
-    return `?desde=${y}-${m}-${d}&hasta=${y}-${m}-${d}`;
+    // "Hoy" es el día de negocio del tenant (Paris, Chile), que es como el backend lee
+    // `desde`/`hasta`; leerlo en la zona del proceso pide mañana cuando el proceso corre en
+    // UTC (CI) entre las 21:00 y las 24:00 de Chile, y lo recién escrito queda afuera.
+    const hoy = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Santiago',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+    return `?desde=${hoy}&hasta=${hoy}`;
   }
 
   async function resumen(query: string): Promise<ResumenResp> {
