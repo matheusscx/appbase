@@ -1272,9 +1272,16 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   y, si aparece una regla nueva, se le pregunta al owner.
   **Cuarta tanda, desde la sesión del frente (owner, AskUserQuestion, 2026-10-01).** Al medir el
   código salieron tres reglas que no estaban escritas. Eligió la recomendada en las tres:
-  - **Lo no pagado tiene documento recién al pagarlo**, según el medio de ese cobro. Se descartó
-    que el sistema armara al cerrar la boleta por lo pendiente: si después pagaban con tarjeta,
-    la venta quedaba con dos documentos.
+  - ~~Lo no pagado tiene documento recién al pagarlo~~ — **reabierta y reemplazada el mismo día.**
+    El owner dudó ("hay empresas que dan factura y luego cobran"), y la investigación
+    (`docs/agent/investigaciones/2026-10-01-documento-de-lo-no-pagado.md`, Res. Ex. SII 58/2003
+    verificada en la fuente por la orquestadora) mostró que contradecía la ley: un restaurante
+    vende, y la boleta sale antes de que el cliente se retire. Regla nueva (owner, AskUserQuestion):
+    **lo entregado se documenta al entregarlo, se haya pagado o no**; lo no cubierto por el voucher
+    lleva boleta del sistema al cerrar, y el pago posterior de la deuda no genera documento. El
+    riesgo que había llevado a descartarla (deuda boleteada que se paga con tarjeta: el voucher
+    duplica) quedó así: **avisa y queda anotado, sin bloquear el cobro**, hasta que el contador o
+    el SII respondan. Detalle en `PRODUCTO.md` § 10.
   - **La factura la hace siempre el sistema**, se pague como se pague. La regla del medio decide
     solo las boletas, que es lo que cubre el modelo de emisión del SII.
   - **Un comercio nuevo trae "emite el sistema" en todos los medios**: es el error barato.

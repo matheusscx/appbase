@@ -963,9 +963,18 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
 - **una venta pendiente se puede anular mientras nadie haya emitido documento**, sin importar la
   etiqueta. Si alguien emitió, va por nota de crédito. Hoy se mira la etiqueta: ver `cancelada`
   abajo;
-- **lo que todavía no se pagó tiene su documento recién al pagarlo**, según el medio de ese pago.
-  Una mesa de $100.000 que paga $40.000 con tarjeta queda con el voucher por $40.000, y los
-  $60.000 tienen documento en el abono (owner, 2026-10-01);
+- **lo entregado se documenta al entregarlo, se haya pagado o no.** Para el SII un restaurante
+  vende, no presta un servicio: la boleta sale antes de que el cliente se retire (Res. Ex. SII
+  58/2003); en una tienda, al entregar (art. 55 DL 825). Una mesa de $100.000 que paga $40.000 con
+  tarjeta y se va debiendo $60.000 queda con el voucher por $40.000 y una boleta del sistema por los
+  $60.000, hecha al cerrar. El pago posterior de esa deuda **no** genera documento. Solo lo pagado
+  antes de entregar (un encargo) espera a la entrega. Reemplaza a "lo no pagado tiene su documento
+  al pagarlo", que contradecía la ley (owner, 2026-10-01, con
+  `docs/agent/investigaciones/2026-10-01-documento-de-lo-no-pagado.md`);
+- **una deuda ya documentada que se paga con tarjeta avisa y queda anotada**: el voucher de la
+  máquina también vale como boleta y duplicaría la del sistema. El SII no lo resuelve por escrito.
+  El cobro no se bloquea: la pantalla avisa y el pago queda marcado para que el contador lo
+  corrija (owner, 2026-10-01);
 - **la factura la hace siempre el sistema**, se pague como se pague y aunque no se pague al
   cerrar. La regla de cada medio decide solo quién emite las **boletas**, que es lo que el
   comercio declara ante el SII como modelo de emisión (owner, 2026-10-01);
