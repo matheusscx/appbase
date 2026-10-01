@@ -58,12 +58,14 @@ Las que salieron de este diseño:
 |---|---|---|
 | E1 | **Lo entregado se documenta al entregarlo, se haya pagado o no.** Un restaurante vende (Res. Ex. SII 58/2003) y una tienda documenta al entregar (art. 55 DL 825). Una mesa de $100.000 que paga $40.000 con tarjeta y se va debiendo $60.000 queda, al cerrar, con el voucher por $40.000 y una boleta del sistema por $60.000. El pago posterior de esa deuda **no** genera documento. Solo lo pagado antes de entregar (un encargo) espera a la entrega. Reemplaza a "lo no pagado se documenta al pagarlo", que contradecía la ley. | Owner, 2026-10-01 (`67c3789e`), con la investigación del documento de lo no pagado |
 | E1b | **Una deuda ya documentada que se paga con tarjeta avisa y queda anotada.** El voucher de la máquina también vale como boleta y duplica la del sistema; el SII no lo resuelve por escrito. El cobro no se bloquea: la pantalla avisa y el pago queda marcado para que el contador lo corrija. | Owner, 2026-10-01 (`67c3789e`) |
-| E2 | **La factura la hace siempre el sistema**, se pague como se pague. La regla de cada medio decide solo quién emite las **boletas**, que es lo que el comercio declara ante el SII como "modelo de emisión". | Owner, AskUserQuestion 2026-10-01 |
+| E2 | **Quién hace las facturas lo declara el comercio una vez: el sistema u otro facturador** (el facturador gratuito del SII, su software contable). Si es otro, la venta queda con "factura hecha por fuera" y su número, como el voucher de la máquina. **Lo que queda debiendo sigue la misma declaración**: boleta del sistema, o documento hecho por fuera con su número. La regla de cada medio decide solo las boletas de lo **pagado**. Reemplaza a "la factura la hace siempre el sistema". | Owner, AskUserQuestion 2026-10-01 (`ab13bcd0`, quinta tanda) |
 | E3 | Un comercio nuevo trae **"emite el sistema"** en todos los medios. Es el error barato: se corrige con NC. | Owner, AskUserQuestion 2026-10-01 |
 | E4 | La regla va en **`tenant_metodo_pago`**, no en `metodos_pago`. La decisión decía `metodos_pago`, pero esa tabla es global: la regla sería la misma para todos los comercios. La pantalla es la que se decidió. | Sesión del frente, por lo medido en § 1; aprobado con el diseño |
 | E5 | **La venta online la documenta el sistema**, sin mirar la regla del medio. Si la mirara, "Tarjeta de crédito → la máquina" la dejaría sin documento, porque en lo online no hay máquina. | Derivada de la decisión del owner sobre la venta online; aprobada con el diseño |
 | E6 | **Una venta de $0 no lleva documento**: el mínimo de la boleta es $1 (Res. Ex. SII N°60/2023). | Sesión del frente; aprobado con el diseño |
 | E7 | **Una corrección se reconoce por `venta_referencia_id`**, no por `es_nota_credito`. La devolución interna no es un documento tributario y no lleva ese tipo. | Sesión del frente; aprobado con el diseño |
+| E8 | **Una boleta del sistema solo armada, sin enviar al SII, no cuenta como emitida para anular.** La venta se anula y esa boleta queda descartada. Cuando el sistema envíe al SII, lo enviado va por NC. Que ninguna máquina haya emitido sigue siendo condición. | Owner, AskUserQuestion 2026-10-01 (`ab13bcd0`) |
+| E9 | **La declaración de E2 se guarda por comercio**, en `tenants.facturador` (`'sistema' \| 'externo'`, default `'sistema'`, que es la conducta de hoy), y se edita en la misma pantalla de métodos de pago. El documento hecho por fuera es un emisor más, **`externo`**, con el tipo del catálogo (factura o boleta) y su número; el de la deuda lleva el tipo de la venta. | Sesión del frente: el owner dejó el dónde y el cómo como diseño (orquestadora, `ab13bcd0`) |
 
 ## 3. Diseño
 
@@ -77,6 +79,11 @@ Las que salieron de este diseño:
 - `configuracion/metodos-pago.vue`: un selector por fila con "El sistema", "La máquina" y "Nadie",
   junto a los dos switches de hoy. Con "Nadie" la fila dice en una línea qué implica: las ventas
   con ese medio quedan sin documento y la responsabilidad es del comercio.
+- **La declaración del comercio (E2, E9):** `tenants.facturador`, `'sistema' | 'externo'`, no nulo,
+  default `'sistema'`. Va arriba de la tabla de medios, en la misma pantalla, como **"Facturas y lo
+  que queda debiendo: las hace el sistema / otro facturador"**, porque es la otra mitad de la misma
+  pregunta, quién documenta qué. Se guarda con el endpoint que ya edita las preferencias del tenant
+  (lo ubica la tarea 1), con su guard de admin.
 
 ### 3.2 Los documentos de una venta
 
@@ -87,11 +94,11 @@ Tabla nueva **`venta_documentos`**, una fila por documento:
 | `documento_id` | PK uuid |
 | `tenant_id` | el tenant |
 | `venta_id` | la fila de `ventas` a la que pertenece: la venta, o la corrección (§ 3.6) |
-| `emisor` | `'sistema' \| 'maquina' \| 'nadie'` |
-| `tipo_documento_id` | con `sistema`, el tipo (boleta, factura, NC). Nulo con `nadie` |
+| `emisor` | `'sistema' \| 'maquina' \| 'externo' \| 'nadie'` |
+| `tipo_documento_id` | con `sistema` y `externo`, el tipo (boleta, factura, NC). Nulo con `nadie` |
 | `clase_maquina` | con `maquina`: `'voucher' \| 'boleta'`. Nulo hasta que se sepa |
-| `numero` | con `maquina`: el número del voucher o el folio de la máquina. Nulo hasta que se tipee |
-| `estado_envio` | con `sistema`: `'armado'`. `'enviado'` queda reservado para la emisión (ADR-010) |
+| `numero` | con `maquina` y `externo`: el número del voucher, el folio de la máquina o el del otro facturador. Nulo hasta que se tipee |
+| `estado_envio` | con `sistema`: `'armado'` o `'descartado'` (E8). `'enviado'` queda reservado para la emisión (ADR-010) |
 | `monto` | lo que cubre, en moneda oficial, sin propina ni vuelto |
 | `monto_afecto`, `monto_exento`, `monto_impuestos` | con `sistema`: los baldes congelados del documento |
 | `pago_id` | con `maquina`: el pago que cubre (cada pasada de tarjeta es su voucher) |
@@ -123,15 +130,17 @@ registrar los pagos del cierre. El cliente nunca manda quién emitió.
    país, sin mirar el medio (E5). La venta online pasa a nacer con ese `tipo_documento_id`. Es un
    pago anterior a la entrega, y documentarlo antes es válido (Oficio SII 3.008/2016); el momento
    del **envío** lo decide el frente de la emisión.
-3. **Factura** (`tipos_documento_tributario.es_boleta = false` y no NC): un documento `sistema` /
-   `armado` por el **total**, se pague o no (E2).
+3. **Factura** (`tipos_documento_tributario.es_boleta = false` y no NC): un documento por el
+   **total**, se pague o no, según `tenants.facturador` (E2): `sistema` / `armado`, o `externo`
+   con el tipo factura y sin número hasta que se tipee.
 4. **Boleta**: los pagos del cierre se agrupan por el `emisor` de su medio, sobre lo aplicado a la
    venta (`pago_aplicaciones.tipo = 'venta'`):
    - cada pago con `maquina` da su documento, con su `pago_id`, y con número y clase si vinieron;
    - los pagos con `nadie` dan **una** fila `nadie` por su suma;
-   - los pagos con `sistema` **más lo que queda sin pagar** dan **una** boleta del sistema por esa
-     suma (E1). ⏸ **Abierto (P1, § 3.8):** qué pasa con lo no pagado si el comercio no tiene ningún
-     medio en `sistema`.
+   - los pagos con `sistema` dan **una** boleta del sistema por su suma;
+   - **lo que queda sin pagar** (`total − Σ aplicado`) se documenta al cerrar (E1), según
+     `tenants.facturador` (E2): con `sistema`, se suma a esa misma boleta del sistema; con
+     `externo`, va en un documento `externo` con el tipo boleta y sin número hasta que se tipee.
 
 **El abono** (`registrarAbono`, `POST /pagos`) **no genera documento** (E1): lo que paga ya estaba
 documentado. La excepción es E1b:
@@ -163,21 +172,25 @@ documentado. La excepción es E1b:
   'boleta'`). `CobroModal.vue` los muestra solo en los pagos cuyo medio emite con la máquina, y son
   opcionales. Llegan por `POST /ventas` y `POST /cuentas/:id/cerrar`. Por `POST /pagos`, solo sirven para el
   voucher duplicado de E1b.
-- **Después**: `PATCH /ventas/:id/documentos/:documentoId` con `{ numero, clase }`. Solo sobre
-  documentos `maquina` de esa venta. Permiso `Ventas:Crear`, con el mismo alcance de caja que
-  `findOne`. El `tenant_id` sale del token.
+- **Después**: `PATCH /ventas/:id/documentos/:documentoId` con `{ numero, clase? }`. Solo sobre
+  documentos `maquina` o `externo` de esa venta (`clase` solo con `maquina`). Permiso
+  `Ventas:Crear`, con el mismo alcance de caja que `findOne`. El `tenant_id` sale del token.
 - **El detalle de la venta** (`GET /ventas/:id`) devuelve `documentos[]`. El drawer los muestra en
-  una sección "Documentos", con "Completar número" en los de la máquina que no lo tienen.
+  una sección "Documentos", con "Completar número" en los de la máquina y los hechos por fuera que no
+  lo tienen.
 
 ### 3.5 Anular
 
-`cancelarUnaVez` deja de mirar `tipo_documento_id`. Rechaza si la venta tiene algún documento con
-emisor `sistema` o `maquina`. Siguen los otros dos rechazos (estado `pendiente`, sin pagos). El
-detalle expone `anulable` desde el backend, y el drawer deja de replicar la regla.
+`cancelarUnaVez` deja de mirar `tipo_documento_id`. Siguen los otros dos rechazos (estado
+`pendiente`, sin pagos). Lo nuevo (E8):
 
-⏸ **Abierto (P2, § 3.8):** con la E1 nueva, una venta pendiente sin pagos nace con la boleta del
-sistema por su total, así que **ninguna venta con total > 0 se puede anular**. "Anular mientras
-nadie emitió" se queda sin casos.
+- **Rechaza** si la venta tiene un documento `maquina`, `externo` (⏸ P3, § 3.8) o un `sistema` ya
+  `enviado` (hoy ninguno: no hay envío).
+- **Anula** si lo único que tiene son documentos `sistema` en `armado` (y filas `nadie`). Al anular,
+  esos documentos pasan a `estado_envio = 'descartado'` en la misma transacción. No se borran: queda
+  el registro de que existieron.
+
+El detalle expone `anulable` desde el backend, y el drawer deja de replicar la regla.
 
 ### 3.6 Devoluciones: todo reembolso deja registro
 
@@ -190,6 +203,7 @@ corrige**:
 |---|---|---|
 | el sistema | NC `sistema` / `armado` | el tipo NC del país |
 | la máquina | NC `maquina`, con número opcional (la hace la máquina o su portal; el sistema la anota) | el tipo NC del país |
+| otro facturador | NC `externo`, con número opcional (la hace el otro facturador; el sistema la anota) | el tipo NC del país |
 | nadie | **devolución interna**: fila `nadie` | nulo |
 
 - **Qué documento corrige lo decide por dónde vuelve la plata.** El modal de NC
@@ -201,11 +215,11 @@ corrige**:
     fuera, en la máquina o en el banco. Es por pago y no por "efectivo" porque hay máquinas que
     emiten también por efectivo, y porque una venta puede tener dos pagos en efectivo.
   - **No vuelve plata**: solo se ofrece si la venta tiene saldo, y lo rebaja. Corrige el documento
-    que cubre lo no pagado: la boleta del sistema o la factura (E1).
+    que cubre lo no pagado: la boleta del sistema, el documento hecho por fuera o la factura (E1, E2).
   El servidor recibe el pago elegido, o "no vuelve plata", y resuelve el documento. El cliente
   nunca manda el documento. En una venta con factura, el documento de todos sus pagos es la
   factura (E2). El documento de un pago de abono es el que documentó la deuda (la boleta del
-  sistema o la factura), nunca el voucher duplicado.
+  sistema, el documento hecho por fuera o la factura), nunca el voucher duplicado.
 - **Tope por documento**: lo corregido de un documento no pasa su `monto`. Se suma a los dos topes
   de hoy, bajo el mismo lock.
 - **Reembolso por pasarela**: se va `generarNotaCredito`, del modal, del DTO y del evento. Todo
@@ -228,22 +242,22 @@ corrige**:
 - ⚠️ **Dependencia:** el frente del vendido neto está reescribiendo esas consultas de
   `resumen-negocio` y `/ventas/resumen`. La parte del plan que las toca se implementa **después**
   de que ese frente esté en main. La orquestadora avisa.
-- **`/ventas` suma un filtro por quién emitió**: sistema, máquina, máquina sin número, sin
+- **`/ventas` suma un filtro por quién emitió**: sistema, máquina, hecho por fuera, sin número
+  (máquina o por fuera), sin
   documento (algún tramo en `nadie`) y **duplicado** (E1b, para el contador). Es lo que deja al
   comercio revisar sus ventas sin documento. Va como un `EXISTS` en `buildListarFilters`, sin N+1.
 
-### 3.8 Abierto — van a la orquestadora, no se deciden acá
+### 3.8 Abierto — va a la orquestadora, no se decide acá
 
-- **P1. Lo no pagado en un comercio sin ningún medio en `sistema`.** E1 dice "boleta del
-  sistema". Un comercio que marcó todos sus medios en `nadie` (porque documenta con otro
-  facturador) o en `maquina` igual recibiría una boleta armada por el sistema para lo que se va
-  debiendo, y si su facturador también la emite, duplica. La lectura literal de E1 es que sí, y la
-  tarea 4 queda escrita así hasta que llegue la respuesta.
-- **P2. Anular queda sin casos.** Con E1 toda venta con total > 0 nace documentada, así que la
-  regla "una venta pendiente se puede anular mientras nadie haya emitido" no aplica nunca:
-  `POST /ventas/:id/anular` queda inalcanzable. Hoy la pantalla ya no deja crear una venta sin
-  ningún pago (§ 1). Alternativas que no decido: dejarlo así y corregir siempre con NC; o que un
-  documento solo `armado` (no enviado al SII, que es todo hoy) no impida anular.
+P1 y P2 los contestó el owner (`ab13bcd0`): son E2, E8 y E9.
+
+- **P3. ¿Un documento hecho por fuera impide anular?** E8 dice que una boleta del sistema solo
+  armada no cuenta como emitida, y que la de la máquina sí. El documento `externo` queda en el
+  medio: al cerrar, el sistema sabe que **le toca** al otro facturador, pero no si ya se hizo. Una
+  factura a crédito de $500.000 hecha por fuera, que se anula una hora después: si el comercio ya la
+  hizo en el portal del SII, anular sin NC deja una factura viva; si no la hizo, exigir NC obliga a
+  corregir algo que no existe. **Mientras tanto queda escrita la lectura conservadora: impide
+  anular, igual que la máquina.** Una alternativa que no decido: que impida solo si ya tiene número.
 
 ## 4. Lo que el plan mide primero (tarea 1, antes de fijar código)
 
@@ -266,9 +280,12 @@ tienen que discriminar (ni 1 ni factores iguales).
 | Mesa de $100.000: $40.000 con tarjeta (máquina) y se va debiendo $60.000 | al cerrar, el voucher por 40.000 y la boleta del sistema por 60.000 (E1) |
 | Esa deuda se paga al día siguiente en efectivo | ningún documento nuevo (E1) |
 | Esa deuda se paga con tarjeta (máquina) | documento `maquina` con `es_duplicado`; el detalle avisaba `abonoConMaquinaDuplica`; el cobro pasa (E1b) |
-| Factura de $119.000 pagada con tarjeta, medio en `maquina` | un solo documento `sistema` por 119.000; ninguno de la máquina (E2) |
-| Factura sin pago, después anulada | rechaza anular: tiene documento |
-| Boleta pendiente sin pagos (por API) | nace con la boleta del sistema por el total; anular depende de P2 |
+| Factura de $119.000 pagada con tarjeta, medio en `maquina`, `facturador = 'sistema'` | un solo documento `sistema` por 119.000; ninguno de la máquina (E2) |
+| La misma factura con `facturador = 'externo'` | un solo documento `externo` con el tipo factura, sin número (E2, E9) |
+| Mesa que debe $60.000 con `facturador = 'externo'` | voucher por lo pagado con máquina + documento `externo` con el tipo boleta por 60.000 (E2) |
+| Factura sin pago del sistema, después anulada | se anula: la factura estaba solo armada (E8) |
+| Boleta pendiente sin pagos (por API) | nace con la boleta del sistema `armado` por el total; se anula y la boleta queda `descartado` (E8) |
+| Factura pendiente con `facturador = 'externo'` | no se anula (P3, lectura conservadora) |
 | Venta online con el método de crédito en `maquina` | documento `sistema` / `armado` por el total, con la boleta del país; el código de Webpay en `pagos.referencia` (E5) |
 | Medio en `nadie` | fila `nadie`; aparece en el filtro "sin documento" |
 | `tipoDocumentoId` de otro país, o el de la NC | 400 |

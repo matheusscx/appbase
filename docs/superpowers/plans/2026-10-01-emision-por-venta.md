@@ -6,7 +6,7 @@
 > verificó, más `api-security-reviewer` si la tarea toca controllers o DTOs), el recibo del
 > pre-commit y el commit los hace el controlador.
 
-- **Status:** Draft — vuelve al owner para aprobar; dos preguntas abiertas en la orquestadora (ver abajo)
+- **Status:** Draft — para aprobar por el owner; una pregunta abierta en la orquestadora (P3, ver abajo)
 - **Date:** 2026-10-01
 - **Owner:** César (owner) · redacta la sesión del frente de emisión (worktree `sad-dubinsky-6b3af5`)
 
@@ -27,20 +27,22 @@ por `venta_referencia_id IS NOT NULL`.
 **Tech Stack:** NestJS + TypeORM (`synchronize`, el esquema sale de las entities), PostgreSQL 18,
 Decimal.js, Nuxt 4 + Nuxt UI v4, Jest + supertest (e2e), Vitest, Playwright.
 
-## E1 corregida, y dos preguntas abiertas
+## Decisiones que llegaron después de la primera versión
 
-**E1 corregida por el owner** (`67c3789e`, con
-[`2026-10-01-documento-de-lo-no-pagado.md`](../../agent/investigaciones/2026-10-01-documento-de-lo-no-pagado.md)):
-lo entregado se documenta al entregarlo, se haya pagado o no. El pago posterior de una deuda no
-genera documento, salvo el voucher duplicado de **E1b**, que se registra marcado. Las tareas 4, 5,
-7, 8, 10 y 12 ya están reescritas con esa regla.
+- **E1 corregida** (`67c3789e`, con
+  [`2026-10-01-documento-de-lo-no-pagado.md`](../../agent/investigaciones/2026-10-01-documento-de-lo-no-pagado.md)):
+  lo entregado se documenta al entregarlo, se haya pagado o no. El pago posterior de una deuda no
+  genera documento, salvo el voucher duplicado de **E1b**, que se registra marcado.
+- **E2 reemplazada, E8 y E9** (`ab13bcd0`): quién hace las facturas y lo que queda debiendo lo
+  declara el comercio (`tenants.facturador`: el sistema u otro facturador, que se anota como
+  `externo` con su número). Una boleta del sistema solo `armado` no impide anular: queda
+  `descartado`.
 
-**Abiertas en la orquestadora** (spec § 3.8). No se deciden en el plan:
+**Abierta en la orquestadora** (spec § 3.8). No se decide en el plan:
 
 | # | Pregunta | Qué toca | Cómo queda escrito mientras tanto |
 |---|---|---|---|
-| P1 | Lo no pagado en un comercio sin ningún medio en `sistema`: ¿igual lleva la boleta del sistema? | tarea 4, regla 4 | literal de E1: sí, la boleta del sistema |
-| P2 | Con E1 toda venta con total > 0 nace documentada, así que "anular mientras nadie emitió" queda sin casos. ¿Se acepta, o un documento solo `armado` no impide anular? | tarea 5 y el `anulable` de la 6 y la 7 | la regla de la spec: rechaza si hay documento `sistema` o `maquina` |
+| P3 | ¿Un documento hecho por fuera (`externo`) impide anular? El sistema sabe que le toca al otro facturador, no si ya lo hizo | tarea 5 y el `anulable` de la 6 | conservadora: impide anular, igual que la máquina |
 
 ## Global Constraints
 
@@ -116,15 +118,19 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
   `dto/update-tenant-metodo-pago.dto.ts`, `metodos-pago.service.ts`.
 - Modificar: `backend/src/modules/tenants/tenants.service.ts:450-458` (alta de tenant) y
   `backend/src/modules/seeder/seeder.service.ts` (`seedTenantMetodosPago`).
+- Modificar: `backend/src/modules/tenants/entities/tenant.entity.ts` (`facturador`) y el DTO y
+  service del endpoint de preferencias del tenant (lo ubica la tarea 1).
 - Modificar: `frontend/app/pages/configuracion/metodos-pago.vue` y el tipo del front que espeja la
   respuesta.
 - Tests: `metodos-pago.service.spec.ts`; e2e en `backend/test/` junto al de métodos de pago (o uno
   nuevo, si no existe); vitest de la página si ya hay uno.
 
 **Interfaces:**
-- Produce: `type EmisorDocumento = 'sistema' | 'maquina' | 'nadie'` (exportado desde la entity de
-  la tarea 4, o desde esta si la tarea 1 lo ubica acá). `GET /metodos-pago` suma `emisor` y
-  `esEfectivo` por fila. `PATCH /metodos-pago/:id` acepta `emisor`.
+- Produce: `type EmisorMedio = 'sistema' | 'maquina' | 'nadie'` (lo que se declara por medio) y
+  `type Facturador = 'sistema' | 'externo'` (lo que se declara por comercio), exportados desde donde
+  los ubique la tarea 1. `GET /metodos-pago` suma `emisor` y `esEfectivo` por fila.
+  `PATCH /metodos-pago/:id` acepta `emisor`. `tenants.facturador` se lee y se escribe por el
+  endpoint de preferencias del tenant que ubique la tarea 1.
 
 - [ ] Columna `emisor` no nula, default `'sistema'` (E3), con la forma de la tarea 1.
 - [ ] `UpdateTenantMetodoPagoDto.emisor?` con `@IsIn(['sistema','maquina','nadie'])`. El
@@ -132,11 +138,16 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 - [ ] `findMetodosPago` devuelve `emisor` y `esEfectivo`; la tarea 7 necesita los dos para la
   pantalla de cobro.
 - [ ] El alta de tenant y el seed dejan `'sistema'` explícito.
+- [ ] `tenants.facturador`: `'sistema' | 'externo'`, no nulo, default `'sistema'` (E9), con la
+  forma de la tarea 1. Lo escribe solo el admin, con el guard del endpoint de preferencias.
+- [ ] Pantalla, arriba de la tabla: **"Facturas y lo que queda debiendo: las hace el sistema / otro
+  facturador"**. Con "otro facturador", una línea: *"El sistema las registra como hechas por fuera,
+  y su número se anota después."*
 - [ ] Pantalla: un `USelect` por fila ("El sistema" / "La máquina" / "Nadie"), con el mismo patrón
   optimista que los switches de esa página. Con "Nadie", una línea debajo: *"Las ventas con este medio
   quedan sin documento. Emitirlo es responsabilidad del comercio."* Solo tokens semánticos de Nuxt
   UI.
-- [ ] e2e: el admin cambia a `maquina` y el `GET` lo devuelve; un no-admin recibe 403; un valor
+- [ ] e2e: el admin cambia `facturador` a `externo` y se lee; un no-admin recibe 403. El admin cambia a `maquina` y el `GET` lo devuelve; un no-admin recibe 403; un valor
   fuera de la lista da 400; el tenant de otro no cambia.
 - [ ] Docs: `docs/features/pagos.md` (o el feature de métodos de pago, si existe): qué es el emisor y
   su default.
@@ -179,15 +190,16 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 - Tests: unit del servicio de documentos; e2e de ventas.
 
 **Interfaces:**
-- Consume: `EmisorDocumento` (tarea 2), `resolverTipoDocumento` (tarea 3), lo que devuelve
+- Consume: `EmisorMedio` y `Facturador` (tarea 2), `resolverTipoDocumento` (tarea 3), lo que devuelve
   `PagosService.registrar` por pago (tarea 1).
 - Produce:
   ```ts
   // venta-documento.entity.ts
   export type ClaseDocumentoMaquina = 'voucher' | 'boleta';
-  export type EstadoEnvio = 'armado' | 'enviado';
+  export type EstadoEnvio = 'armado' | 'descartado' | 'enviado';
   @Entity('venta_documentos') export class VentaDocumento {
     id; tenantId; ventaId; emisor: EmisorDocumento; tipoDocumentoId: string | null;
+    // EmisorDocumento = EmisorMedio | 'externo'
     claseMaquina: ClaseDocumentoMaquina | null; numero: string | null;
     estadoEnvio: EstadoEnvio | null; monto: string;
     montoAfecto: string | null; montoExento: string | null; montoImpuestos: string | null;
@@ -199,6 +211,7 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
     tenantId: string;
     venta: { id: string; tipoDocumentoId: string | null; esBoleta: boolean; canal: string;
              totalFinal: string; configCalculo: ConfigCalculo | null };
+    facturador: Facturador;
     pagos: { pagoId: string; metodoPagoId: string; aplicado: string;
              numeroDocumento?: string; claseDocumento?: ClaseDocumentoMaquina }[];
   }): Promise<VentaDocumento[]>
@@ -212,11 +225,17 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
   entrega, E1), con las reglas de la spec § 3.3 en este orden:
   1. total $0 → nada (E6);
   2. `canal = 'online'` → un `sistema`/`armado` por el total (E5);
-  3. factura (`!esBoleta` y hay tipo) → un `sistema`/`armado` por el total, se pague o no (E2);
+  3. factura (`!esBoleta` y hay tipo) → un documento por el total, se pague o no (E2): con
+     `facturador = 'sistema'`, `sistema`/`armado`; con `'externo'`, `externo` con el tipo factura y
+     sin número;
   4. boleta → un documento por pago `maquina` (con `pagoId`, número y clase si vinieron); uno
-     `nadie` por la suma de los pagos `nadie`; y **una** boleta `sistema`/`armado` por la suma de
-     los pagos `sistema` **más lo no pagado** (`totalFinal − Σ aplicado`). Si esa suma es 0, no
-     hay boleta del sistema. ⏸ P1: hoy queda escrita la lectura literal de E1.
+     `nadie` por la suma de los pagos `nadie`; y lo no pagado (`totalFinal − Σ aplicado`) según
+     `facturador` (E2): con `'sistema'`, **una** boleta `sistema`/`armado` por los pagos `sistema`
+     más lo no pagado; con `'externo'`, la boleta del sistema cubre solo los pagos `sistema`, y lo
+     no pagado va en un `externo` con el tipo boleta y sin número. Un documento de monto 0 no se
+     crea.
+- [ ] `facturador` se lee en la misma consulta que ya trae la configuración del tenant al crear la
+  venta, sin una lectura más por venta si se puede (lo mide la tarea 1).
 - [ ] Invariante, afirmado en un unit: la suma de los documentos no duplicados es el `totalFinal`
   de la venta (salvo $0).
 - [ ] Baldes congelados de los `sistema`: los de la venta si el documento cubre el total, y a
@@ -232,14 +251,18 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
   - mesa de $100.000: $40.000 con tarjeta en `maquina` y $60.000 sin pagar → voucher por 40.000 y
     boleta del sistema por 60.000 al cerrar (E1);
   - boleta pendiente sin pagos (por API) → boleta del sistema por el total;
-  - factura de $119.000 con tarjeta en `maquina` → un solo documento `sistema`;
+  - factura de $119.000 con tarjeta en `maquina` → un solo documento `sistema`; con
+    `facturador = 'externo'`, un solo documento `externo` con el tipo factura;
+  - la mesa que debe $60.000 con `facturador = 'externo'` → voucher + `externo` con el tipo boleta
+    por 60.000;
   - online con el crédito en `maquina` → `sistema` por el total, y el código en `referencia`;
   - medio en `nadie` → fila `nadie`;
   - venta de $0 → nada;
   - salones con pago mixto y propina → los montos de los documentos sin la propina.
 - [ ] ADR nuevo en `docs/adr/` (el siguiente número libre): la emisión registrada por venta, su
   tabla, por qué el documento nace con la entrega (E1, con la Res. 58/2003 y el art. 55), el
-  duplicado de E1b, y por qué una corrección se reconoce por `venta_referencia_id` (E7). Más el
+  duplicado de E1b, la declaración del comercio y el emisor `externo` (E2, E9), el `descartado` de
+  E8, y por qué una corrección se reconoce por `venta_referencia_id` (E7). Más el
   índice, y una nota en ADR-010 que lo enlace.
 - [ ] Docs: `docs/features/ventas.md` (qué documentos deja cada venta).
 
@@ -262,17 +285,21 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
   documentada (E1). Por cada pago cuyo medio es `maquina`, y solo si la venta tiene algún documento
   no duplicado (siempre, salvo $0), registra un documento `maquina` con `es_duplicado = true`, su
   `pagoId`, y número y clase si vinieron (E1b). El cobro **nunca** se rechaza por esto.
-- [ ] `cancelarUnaVez`: sale el `if (venta.tipo_documento_id)`. Entra: si hay algún
-  `venta_documentos` con emisor `sistema` o `maquina` en esa venta, 400 *"La venta ya tiene
-  documento: se revierte con nota de crédito, no se anula."* Los otros dos rechazos no cambian.
-  ⏸ P2: con E1 esto deja a toda venta con total > 0 sin poder anularse. Si la respuesta es que
-  `armado` no impide anular, cambia esta línea y el `anulable` de la tarea 6.
+- [ ] `cancelarUnaVez`: sale el `if (venta.tipo_documento_id)`. Los otros dos rechazos no cambian.
+  Entra (E8):
+  - 400 *"La venta ya tiene documento: se revierte con nota de crédito, no se anula."* si hay algún
+    documento `maquina`, `externo` (⏸ P3, lectura conservadora) o `sistema` en `enviado`;
+  - si lo único que hay son `sistema` en `armado` (y filas `nadie`), anula, y esos documentos pasan a
+    `estado_envio = 'descartado'` en la misma transacción. Sin borrar filas.
 - [ ] e2e:
   - la mesa que debe $60.000 paga al día siguiente en efectivo → ningún documento nuevo;
   - la misma deuda pagada con tarjeta en `maquina` → un documento `maquina` con `es_duplicado`, y
     el cobro pasa;
   - factura con abono en efectivo → ningún documento nuevo;
-  - factura sin pagos → no se anula;
+  - boleta pendiente sin pagos (por API) → se anula, y su boleta queda `descartado` (E8);
+  - factura del sistema sin pagos → se anula, y queda `descartado`;
+  - factura `externo` sin pagos → no se anula (P3);
+  - el mutante que deja de descartar la boleta al anular tiene que morir;
   - el mutante que vuelve a documentar el abono por su medio (la E1 vieja) tiene que morir.
 - [ ] Docs: `docs/features/ventas.md` § anular y `docs/features/pagos.md` § abono (el abono no
   documenta; el duplicado). `PRODUCTO.md` § 10: la regla de `cancelada` pasa a leerse contra lo
@@ -290,7 +317,7 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 **Interfaces:**
 - Produce:
   - `GET /ventas/:id` suma `documentos: { id, emisor, tipoDocumento: {id, codigo, nombre} | null, claseMaquina, numero, estadoEnvio, monto, pagoId, documentoCorregidoId, esDuplicado }[]`, `anulable: boolean` y `abonoConMaquinaDuplica: boolean`;
-  - `PATCH /ventas/:id/documentos/:documentoId` con body `{ numero: string; clase: ClaseDocumentoMaquina }`, que responde el documento actualizado.
+  - `PATCH /ventas/:id/documentos/:documentoId` con body `{ numero: string; clase?: ClaseDocumentoMaquina }`, que responde el documento actualizado.
 
 - [ ] `findOne` trae los documentos de la venta **y los de sus correcciones** en una sola consulta.
 - [ ] `anulable`, calculado en el backend con la misma regla que `cancelarUnaVez`. Es la única fuente
@@ -298,10 +325,10 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 - [ ] `abonoConMaquinaDuplica`: `true` si la venta tiene saldo y algún documento no duplicado (E1b).
   Es lo que la pantalla de abono usa para avisar, sin replicar la regla.
 - [ ] `PATCH`: `@RequiresPermiso('Ventas','Crear')`, con el alcance de caja de `findOne`
-  (`resolverAlcanceDerivadoDeCaja`). Solo documentos `maquina` de esa venta y de ese tenant: si no,
-  404. El `tenant_id` sale del token.
+  (`resolverAlcanceDerivadoDeCaja`). Solo documentos `maquina` o `externo` de esa venta y de ese
+  tenant: si no, 404. `clase` solo se acepta con `maquina`. El `tenant_id` sale del token.
 - [ ] El `PATCH` también sirve para el voucher duplicado de E1b: el contador necesita su número.
-- [ ] e2e: completar el número de un voucher → 200 y queda; un documento `sistema` → 404; uno de
+- [ ] e2e: completar el número de un voucher → 200 y queda; el de una factura `externo` → 200; un documento `sistema` → 404; uno de
   otro tenant → 404; un cajero de otra caja sin `Cajas:Leer` → 404; un número vacío → 400.
 - [ ] `api-security-reviewer` sobre el controller y el DTO.
 - [ ] Docs: `docs/features/ventas.md` § `GET /api/ventas/:id` y el endpoint nuevo.
@@ -332,7 +359,8 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
   número o "sin número", el monto, si es una corrección qué corrige, y si es duplicado, la marca
   "Duplicado — para el contador". Un documento `sistema` dice "Armado, sin enviar al SII". Una venta
   sin documentos dice "Sin documento".
-- [ ] "Completar número" en los documentos de la máquina sin número, con el `PATCH`.
+- [ ] "Completar número" en los documentos de la máquina y los hechos por fuera sin número, con el
+  `PATCH`. Un documento `externo` dice "Hecho por fuera"; uno `descartado`, "Descartado al anular".
 - [ ] `puedeAnular` usa `venta.anulable` del backend y deja de leer `tipoDocumento`.
 - [ ] Utilidades de presentación (etiquetas de emisor y clase) en un composable de
   `app/composables/`, no locales al `.vue`.
@@ -373,12 +401,13 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
     pago `es_efectivo`, la plata sale de la caja (la salida de hoy, con sus dos topes). Si no, no se
     mueve caja: la reversa se hace en la máquina o en el banco;
   - `sin_plata`: solo si la venta tiene saldo, y corrige el documento que cubre lo no pagado: la
-    boleta del sistema o la factura (E1);
+    boleta del sistema, el `externo` o la factura (E1, E2);
   - el `pagoId` de un abono: el documento que documentó la deuda (la boleta del sistema o la
     factura), nunca el voucher duplicado;
   - en una factura, la factura siempre.
 - [ ] El documento de la corrección: `sistema` → NC `sistema`/`armado` con el tipo NC; `maquina` → NC
-  `maquina` sin número, con el tipo NC; `nadie` → **devolución interna**: fila `nadie`, y la fila de
+  `maquina` sin número, con el tipo NC; `externo` → NC `externo` sin número, con el tipo NC;
+  `nadie` → **devolución interna**: fila `nadie`, y la fila de
   `ventas` de la corrección con `tipo_documento_id` **nulo**.
 - [ ] **Tope por documento**: lo corregido de un documento no pasa su `monto`, bajo el mismo lock y
   junto a los dos topes de hoy. El mensaje no revela el efectivo de la caja (la fuga 5 del modo
@@ -486,7 +515,8 @@ consultas: se verifica que la devolución interna entra.
 `dto/query-ventas.dto.ts`, `frontend/app/pages/ventas/index.vue`. Tests: e2e de listar y vitest de
 la página.
 
-- [ ] `QueryVentasDto.documento?`: `'sistema' | 'maquina' | 'maquina_sin_numero' | 'sin_documento' | 'duplicado'`.
+- [ ] `QueryVentasDto.documento?`: `'sistema' | 'maquina' | 'externo' | 'sin_numero' | 'sin_documento' | 'duplicado'`.
+  "Sin número" = algún documento `maquina` o `externo` sin `numero`. Los `descartado` no cuentan.
   Va como un `EXISTS` sobre `venta_documentos`, sin N+1. "Sin documento" = la venta tiene algún
   tramo en `nadie` (con E1 lo no pagado nunca queda sin documento). "Duplicado" = algún documento
   con `es_duplicado` (E1b, para el contador). Las correcciones quedan fuera de los filtros.
