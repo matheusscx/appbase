@@ -1214,6 +1214,14 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   Además, en Chile ninguna plataforma de e-commerce relevada usa esa vía: todas emiten boleta
   electrónica. El código de autorización solo no alcanza. El detalle está en la investigación,
   sección "El comprobante de Webpay en línea, ¿vale como boleta?".
+  **Tercera tanda con el owner (AskUserQuestion, 2026-10-01):**
+  - **NC de una venta cuyo voucher valió como boleta:** la hace el comercio, no Transbank, citando
+    el código de autorización. Mientras el sistema no emita al SII, el comercio la hace con su
+    facturador, y el sistema registra la devolución y anota el número. Cuando haya emisión, la hace
+    el sistema citando el voucher.
+  - **Devolución en un pago mixto: el documento sale de cómo se devuelve la plata.** Si se
+    devuelve en efectivo, corrige la boleta del efectivo. Si se reversa en la tarjeta, corrige el
+    voucher.
 
 - [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
   (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
