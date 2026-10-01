@@ -6,7 +6,7 @@
 > verificó, más `api-security-reviewer` si la tarea toca controllers o DTOs), el recibo del
 > pre-commit y el commit los hace el controlador.
 
-- **Status:** Draft
+- **Status:** Draft — en espera: la E1 está reabierta (ver abajo)
 - **Date:** 2026-10-01
 - **Owner:** César (owner) · redacta la sesión del frente de emisión (worktree `sad-dubinsky-6b3af5`)
 
@@ -26,6 +26,30 @@ por `venta_referencia_id IS NOT NULL`.
 
 **Tech Stack:** NestJS + TypeORM (`synchronize`, el esquema sale de las entities), PostgreSQL 18,
 Decimal.js, Nuxt 4 + Nuxt UI v4, Jest + supertest (e2e), Vitest, Playwright.
+
+## ⏸ La E1 está reabierta (orquestadora, 2026-10-01)
+
+El owner reabrió la E1, *"lo no pagado tiene su documento recién al pagarlo"*. El art. 55 del
+DL 825 pide que la factura y la boleta de mercadería salgan al **entregar**, no al cobrar. Solo la
+boleta de un servicio sale al cobrar. La orquestadora está investigando si una mesa de restaurante
+es venta o servicio. **El plan no se aprueba ni se ejecuta hasta que llegue la E1 corregida con su
+commit.**
+
+Qué depende de la E1 (marcado con ⏸ en cada tarea):
+
+| Tarea | Qué parte | Por qué |
+|---|---|---|
+| 4 | la regla 4 de `documentarCobro` (la boleta se agrupa **por cobro**) y sus e2e | es la E1 escrita en código: el documento nace con el pago, no con la entrega |
+| 5 | entera | que el abono documente lo suyo es la E1. Y si la boleta nace al entregar, una venta pendiente ya tiene documento y la regla de anular cambia de alcance |
+| 7 | los campos del número en `AbonoModal` | solo existen si el abono genera documentos |
+| 8 | `sin_plata` ("corrige el documento de la parte no pagada") | si lo no pagado ya tiene documento, deja de caer en devolución interna |
+| 10 | la línea que anticipa el registro de "No vuelve plata" | gemela de la 8 |
+| 12 | qué cuenta como "sin documento" | hoy excluye la parte pendiente de una venta |
+
+No dependen de la E1: la 1 (medir), la 2 (la regla por medio), la 3 (el catálogo y la validación
+del tipo), la 6 (el detalle y completar el número), la 9 (el reembolso por pasarela) y la 11
+(reportes). La 1, la 2 y la 3 podrían avanzar si el owner lo decide, pero el plan entero espera su
+aprobación.
 
 ## Global Constraints
 
@@ -153,7 +177,7 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 
 ---
 
-## Tarea 4 — `venta_documentos` y su resolución al crear la venta
+## ⏸ Tarea 4 — `venta_documentos` y su resolución al crear la venta
 
 **Archivos:**
 - Crear: la entity `venta-documento.entity.ts` y el servicio de documentos, donde los ubique la
@@ -224,7 +248,7 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 
 ---
 
-## Tarea 5 — Los abonos documentan lo suyo, y anular mira lo emitido
+## ⏸ Tarea 5 — Los abonos documentan lo suyo, y anular mira lo emitido
 
 **Archivos:**
 - Modificar: `backend/src/modules/pagos/pagos.service.ts` (`registrarAbono`, l.325-481) y
@@ -277,7 +301,7 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 
 ---
 
-## Tarea 7 — Pantallas: el número al cobrar y la sección Documentos
+## ⏸ Tarea 7 — Pantallas: el número al cobrar y la sección Documentos
 
 **Archivos:**
 - Modificar: `frontend/app/components/ventas/CobroModal.vue`, `frontend/app/composables/useVenta.ts`
@@ -307,7 +331,7 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 
 ---
 
-## Tarea 8 — Las correcciones llevan su documento según por dónde vuelve la plata
+## ⏸ Tarea 8 — Las correcciones llevan su documento según por dónde vuelve la plata
 
 **Archivos:**
 - Modificar: `ventas.service.ts` (`crearNotaCredito*`, l.1495-2230, y los lectores de la tabla de
@@ -395,7 +419,7 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 
 ---
 
-## Tarea 10 — Pantallas de la devolución
+## ⏸ Tarea 10 — Pantallas de la devolución
 
 **Archivos:**
 - Modificar: `frontend/app/components/ventas/NotaCreditoModal.vue`,
@@ -437,7 +461,7 @@ consultas: se verifica que la devolución interna entra.
 
 ---
 
-## Tarea 12 — `/ventas` filtra por quién emitió
+## ⏸ Tarea 12 — `/ventas` filtra por quién emitió
 
 **Archivos:** `ventas.service.ts` (`buildListarFilters`, l.2957-2985; `listar`),
 `dto/query-ventas.dto.ts`, `frontend/app/pages/ventas/index.vue`. Tests: e2e de listar y vitest de
