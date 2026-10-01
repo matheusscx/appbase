@@ -41,16 +41,6 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
-- [ ] **El resumen de anulaciones puede quedar en otro día que la tabla al corregirse por el día
-  de negocio** (frontend, `pages/salones/anulaciones.vue`, `cargarResumen()` y `onMounted`; visto el
-  2026-10-01 por la revisión del cierre de la varianza). `onMounted` pide el resumen con
-  `hoyLocal()` y enseguida `ajustarAlDiaDeNegocio()`; si corrige las fechas, el
-  `watch(listFilters, cargarResumen)` lo vuelve a pedir, con los dos pedidos en vuelo y sin cola.
-  Si el del día del navegador responde último, las tarjetas quedan en ese día y la tabla en el día
-  de negocio. El listado no corre riesgo (`usePaginatedList` ya serializa). **El arreglo ya existe
-  en el repo:** la cola `resumenEnCurso` de `pages/reportes/varianza.vue`. Test de pantalla con el
-  resumen optimista respondiendo después del corregido, como el de la varianza.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:

@@ -123,30 +123,45 @@ const loadingResumen = ref(false)
 // backend rechace con 400 (nota del controlador, spec § 5.1).
 const rangoCompleto = computed(() => !!filtroDesde.value && !!filtroHasta.value)
 
+// `ajustarAlDiaDeNegocio()` (sin `await`, ver `onMounted`) corre en paralelo
+// con `cargarResumen()`: si corrige desde/hasta, el `watch` de abajo pide el
+// resumen OTRA VEZ y las dos invocaciones quedan en vuelo a la vez — sin esto
+// gana la que RESPONDA última, no la que se LLAMÓ última. Mismo patrón que
+// `reportes/varianza.vue`: cada invocación encadena sobre la promesa de la
+// anterior y recién entonces lee los filtros y escribe `resumen`, así que
+// quedan en orden de invocación.
+let resumenEnCurso: Promise<void> | null = null
+
 async function cargarResumen() {
-  if (!rangoCompleto.value) {
-    resumen.value = null
-    return
-  }
-  loadingResumen.value = true
-  try {
-    const params = new URLSearchParams()
-    params.set('desde', filtroDesde.value)
-    params.set('hasta', filtroHasta.value)
-    const f = listFilters.value
-    if (f.tipo) params.set('tipo', f.tipo)
-    if (f.motivoBajaId) params.set('motivoBajaId', f.motivoBajaId)
-    if (f.garzonId) params.set('garzonId', f.garzonId)
-    resumen.value = await useApiFetch<ResumenAnulaciones>(
-      `${apiUrl}/salones/anulaciones/resumen?${params.toString()}`,
-    )
-  }
-  catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar el resumen'), color: 'error' })
-  }
-  finally {
-    loadingResumen.value = false
-  }
+  const previa = resumenEnCurso
+  const actual = (async () => {
+    await previa
+    if (!rangoCompleto.value) {
+      resumen.value = null
+      return
+    }
+    loadingResumen.value = true
+    try {
+      const params = new URLSearchParams()
+      params.set('desde', filtroDesde.value)
+      params.set('hasta', filtroHasta.value)
+      const f = listFilters.value
+      if (f.tipo) params.set('tipo', f.tipo)
+      if (f.motivoBajaId) params.set('motivoBajaId', f.motivoBajaId)
+      if (f.garzonId) params.set('garzonId', f.garzonId)
+      resumen.value = await useApiFetch<ResumenAnulaciones>(
+        `${apiUrl}/salones/anulaciones/resumen?${params.toString()}`,
+      )
+    }
+    catch (e: unknown) {
+      toast.add({ title: apiErrorMsg(e, 'Error al cargar el resumen'), color: 'error' })
+    }
+    finally {
+      loadingResumen.value = false
+    }
+  })()
+  resumenEnCurso = actual
+  await actual
 }
 
 // Mismos filtros que el listado (`usePaginatedList` ya los mira solo): cambiar

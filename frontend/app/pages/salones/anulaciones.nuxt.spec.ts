@@ -12,7 +12,11 @@
 //   4. El aviso fijo de que las mermas también están en Mermas.
 //   5. Cambiar el filtro de tipo vuelve a pedir LAS DOS rutas (listado y
 //      resumen) con `tipo=cortesia` — comparten filtros, spec § 5.1.
-import { describe, it, expect, beforeEach } from 'vitest'
+//   6. Entrada 1 de `docs/agent/pendientes.md`: el resumen pedido con el día
+//      del navegador y el pedido con el día de negocio ya corregido pueden
+//      quedar en vuelo a la vez; el que gana es el que se INVOCÓ último, no
+//      el que RESPONDE último (mismo mecanismo que `reportes/varianza.vue`).
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Anulaciones from './anulaciones.vue'
 
@@ -117,6 +121,18 @@ let diaNegocioHoyBackend = '2026-09-18'
 let tenantMePendiente = false
 let tenantMeResolver: ((v: { horaCorte: number, diaNegocioHoy: string }) => void) | null = null
 
+/** Solo para el test de la carrera del resumen: cuando está puesto, decide la
+ *  respuesta de `/salones/anulaciones/resumen` según el `desde` que trae la
+ *  URL (así una llamada puede quedar pendiente y la otra resolver al toque).
+ *  `null` = comportamiento normal (responde `RESUMEN`). */
+let resumenDispatcher: ((url: string) => Promise<unknown>) | null = null
+/** El resolver del resumen pedido con el día del navegador, que ese test
+ *  deja pendiente a mano. A nivel de módulo, como `tenantMeResolver`: una
+ *  `let` local `T | null = null` queda angostada a `null` en su función — TS
+ *  no ve la asignación que hace el callback del `Promise` — y la llamada no
+ *  tipa. Leída desde otra función (el `it`), usa el tipo declarado. */
+let resolverOptimista: ((v: typeof RESUMEN) => void) | null = null
+
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
     get esAdmin() { return true },
@@ -137,7 +153,7 @@ mockNuxtImport('useApiFetch', () => {
     // Ojo con el orden: '/salones/anulaciones/resumen' también matchea
     // '/salones/anulaciones', así que el resumen se chequea primero.
     if (url.includes('/salones/anulaciones/resumen')) {
-      return Promise.resolve(RESUMEN)
+      return resumenDispatcher ? resumenDispatcher(url) : Promise.resolve(RESUMEN)
     }
     if (url.includes('/salones/anulaciones')) {
       return Promise.resolve({
@@ -195,6 +211,8 @@ beforeEach(() => {
   diaNegocioHoyBackend = hoyLocalTest()
   tenantMePendiente = false
   tenantMeResolver = null
+  resumenDispatcher = null
+  resolverOptimista = null
 })
 
 describe('anulaciones — resumen', () => {
@@ -436,6 +454,55 @@ describe('anulaciones — arranca en el día de negocio', () => {
     // Sin reasignación, `watch(listFilters, cargarResumen)` y el refetch
     // interno de `usePaginatedList` no tienen motivo para disparar de nuevo.
     expect(llamadas.length).toBe(llamadasTrasMontar)
+    wrapper.unmount()
+  })
+})
+
+// Entrada 1 de `docs/agent/pendientes.md`: `cargarResumen()` se pide primero
+// con el día del navegador (arranque optimista) y `ajustarAlDiaDeNegocio()`
+// —sin `await`, ver `onMounted`— puede corregir desde/hasta, lo que dispara
+// el `watch` y encola un SEGUNDO `cargarResumen()`. Sin cola, gana el que
+// RESPONDE último; con ella, gana el que se INVOCÓ último — mismo mecanismo
+// que `reportes/varianza.nuxt.spec.ts`.
+describe('anulaciones — carrera del resumen', () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  it('si el resumen pedido con el día del navegador responde DESPUÉS que el del día de negocio corregido, el resumen final es igual el corregido', async () => {
+    // Reloj fijo en una fecha que NO es la de hoy (2026-10-01), para no
+    // confundir el día del navegador con el día de negocio corregido.
+    vi.setSystemTime(new Date(2026, 2, 1, 2, 0, 0))
+    horaCorteBackend = 5
+    diaNegocioHoyBackend = ayer() // '2026-02-28'
+
+    const RESUMEN_OPTIMISTA = { ...RESUMEN, porAutorizo: [{ ...RESUMEN.porAutorizo[0]!, usuarioNombre: 'Optimista' }] }
+    const RESUMEN_CORREGIDO = { ...RESUMEN, porAutorizo: [{ ...RESUMEN.porAutorizo[0]!, usuarioNombre: 'Corregido' }] }
+    resumenDispatcher = (url: string) => {
+      if (url.includes('desde=2026-03-01')) {
+        // El resumen con el día del navegador (marzo): queda pendiente a mano.
+        return new Promise<typeof RESUMEN>((res) => { resolverOptimista = res })
+      }
+      if (url.includes('desde=2026-02-28')) {
+        // El resumen ya con el día de negocio corregido (28 de febrero): responde al toque.
+        return Promise.resolve(RESUMEN_CORREGIDO)
+      }
+      return Promise.resolve(RESUMEN)
+    }
+
+    const wrapper = await mountSuspended(Anulaciones, { attachTo: document.body })
+    useMonedasStore().hydrate([CLP], 'tenant-1')
+    // Deja resolver /tenants/me y correr `ajustarAlDiaDeNegocio()`: corrige
+    // los filtros → el `watch` encola un SEGUNDO `cargarResumen()` (28 de
+    // febrero), detrás del primero (marzo), que queda pendiente a mano.
+    await new Promise(r => setTimeout(r, 20))
+
+    // Recién ahora responde el resumen pedido con el día del navegador —
+    // tarde, después de que el corregido ya estaba encolado.
+    resolverOptimista?.(RESUMEN_OPTIMISTA)
+    await new Promise(r => setTimeout(r, 30))
+
+    const vm = wrapper.vm as unknown as { resumen: typeof RESUMEN | null }
+    expect(vm.resumen?.porAutorizo[0]?.usuarioNombre).toBe('Corregido')
+
     wrapper.unmount()
   })
 })

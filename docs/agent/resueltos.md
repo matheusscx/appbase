@@ -23,6 +23,35 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El resumen de anulaciones se serializa, como el de la varianza (cerrada 2026-10-01)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **El resumen de anulaciones puede quedar en otro día que la tabla al corregirse por el día
+  de negocio** (frontend, `pages/salones/anulaciones.vue`, `cargarResumen()` y `onMounted`; visto el
+  2026-10-01 por la revisión del cierre de la varianza). `onMounted` pide el resumen con
+  `hoyLocal()` y enseguida `ajustarAlDiaDeNegocio()`; si corrige las fechas, el
+  `watch(listFilters, cargarResumen)` lo vuelve a pedir, con los dos pedidos en vuelo y sin cola.
+  Si el del día del navegador responde último, las tarjetas quedan en ese día y la tabla en el día
+  de negocio. El listado no corre riesgo (`usePaginatedList` ya serializa). **El arreglo ya existe
+  en el repo:** la cola `resumenEnCurso` de `pages/reportes/varianza.vue`. Test de pantalla con el
+  resumen optimista respondiendo después del corregido, como el de la varianza.
+
+### Qué se hizo
+
+`cargarResumen()` de `pages/salones/anulaciones.vue` pasa a la cola `resumenEnCurso`, copiada de
+`reportes/varianza.vue`: cada invocación espera a la anterior antes de leer los filtros y escribir
+`resumen`, así que la última invocada es la última que escribe. Los llamadores siguen siendo dos,
+`onMounted` y el `watch(listFilters, …)`, y `onMounted` no cambió.
+
+### Qué lo fija
+
+Test de pantalla en `anulaciones.nuxt.spec.ts`, con el reloj fijado el 1-mar-2026 y el día de
+negocio corregido al 28-feb: el resumen pedido con el día del navegador queda pendiente y responde
+después del corregido. Sacar la cola lo pone en rojo (`expected 'Optimista' to be 'Corregido'`).
+
 ## "Este mes" de la varianza sigue el día de negocio del tenant (cerrada 2026-10-01)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.
