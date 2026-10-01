@@ -204,6 +204,138 @@ Dos casos distintos, verificados por separado:
   documento de la venta en el punto de venta — y una nota de crédito sobre ese documento
   original si se requiere anularlo para no duplicar.
 
+## Cuando el sistema y la máquina no coinciden
+
+Pedido explícito del owner: los cinco escenarios de desacuerdo entre lo que emite el
+sistema y lo que emite la máquina de cobro. **Hallazgo que reencuadra el resto de esta
+sección (verificado, primario, [SII — Declarar modelo de emisión de boletas
+electrónicas](https://www.sii.cl/ayudas/boleta_electronica/declarar_modelo_emision_boletas_electronicas.pdf),
+guía oficial F13432025, junio 2025):** el propio SII dice por qué existe la declaración
+de modelo de emisión — **"permitirá registrar una sola vez sus ventas en el Registro de
+Compras y Ventas (RCV) del SII"**. No es una formalidad administrativa: es el mecanismo
+que el SII diseñó específicamente para que un pago con tarjeta no quede contado dos veces
+(voucher + boleta propia). Esto responde directo a la pregunta 1 del pedido ("¿hay doble
+débito fiscal?") — el riesgo que describe el owner es exactamente el que el SII nombra
+como motivo de la declaración, no una situación que la norma no haya previsto. La misma
+guía confirma, con texto literal de las dos opciones, que la declaración es **por RUT
+completo** (se autentica "con RUT y Clave Tributaria de la empresa", sin mención de
+sucursal, caja ni terminal) y que **solo se puede modificar una vez por día**, rigiendo
+desde el día en que se declara — el cambio recién aplica al día siguiente de solicitado.
+Esto corrige lo que la sección anterior dejaba apoyado solo en una fuente secundaria
+(SumUp): la declaración de modelo de emisión existe, con ese nombre y ese mecanismo,
+directamente en sii.cl.
+
+### 1. Los dos emiten — el costo es el IVA no recuperable, no una infracción
+
+- **Corrección, mecanismo verificado (primario, [SII — Anular una boleta electrónica
+  estando inscrito en Factura Electrónica](https://www.sii.cl/ayudas/boleta_electronica/anular_una_boleta_electronica_estando_inscrito_en_facturacion_electronica.pdf),
+  guía F13472025, junio 2025):** cualquier boleta —incluida una emitida de más o
+  duplicada— se anula con una Nota de Crédito Electrónica que la referencia por folio y
+  fecha. El trámite no distingue "por qué" se anula (duplicidad, error de monto, venta
+  caída): el mecanismo es el mismo. No hay plazo para **anular** (la guía no lo menciona,
+  consistente con la FAQ general del SII sobre boletas: "no existe un plazo para anular
+  una boleta de venta electrónica").
+- **Plazo para no perder el IVA (parcialmente verificado — no se abrió el texto de la Ley
+  N°21.398 ni el DL 825 directamente; coincide entre dos fuentes contables independientes
+  y una cita un Oficio SII específico):** si la Nota de Crédito se emite dentro de los
+  **6 meses** (plazo ampliado desde 3 por la Ley N°21.398, que modificó los arts. 21 y 70
+  del DL 825), el débito fiscal se reduce y no hay doble pago de IVA. Pasado ese plazo, el
+  débito fiscal del documento sobrante **ya no se puede rebajar** — ahí sí hay IVA pagado
+  dos veces sobre la misma venta, pero como costo no recuperado, no como sanción.
+- **¿Es infracción?** No se encontró ninguna fuente que trate "emitir de más y corregir
+  (o no corregir) con NC" como una conducta sancionada por el art. 97 N°10 del Código
+  Tributario — esa norma sanciona el **no otorgamiento** de boleta, no el otorgamiento de
+  más de una. Es una inferencia razonable a partir del texto de la infracción (confirmado
+  por jurisprudencia de Tribunales Tributarios y Aduaneros vía sii.cl, ver escenario 2),
+  no una fuente que lo diga para este caso específico.
+- **Caso no resuelto por ninguna fuente, construido sobre el hallazgo ya existente en este
+  documento (punto 4 de la sección anterior):** si los "dos documentos" vienen de **dos
+  emisores fiscales distintos** — boleta propia del sistema + boleta propia de la máquina
+  emitida por su propia plataforma de facturación (Getnet Appboleta, Klap, SumUp, Fudo),
+  no un voucher-válido-como-boleta — cada emisor anula lo suyo; no hay un mecanismo
+  encontrado para que uno anule el folio del otro. Corregir la duplicación completa
+  requeriría **dos** Notas de Crédito, una por cada emisor — inferencia, no verificado.
+
+### 2. Ninguno emite — la infracción del art. 97 N°10, con el riesgo repartido distinto por medio de pago
+
+- **Sanción, verificada (primaria, [SII — ¿Qué sanciones se aplican por incumplir estas
+  nuevas obligaciones?](https://www.sii.cl/preguntas_frecuentes/bol_electr_vtas_serv/001_380_8795.htm)
+  y jurisprudencia de Tribunales Tributarios y Aduaneros publicada en sii.cl):** el no
+  otorgamiento o no disponibilidad de la boleta electrónica (o su comprobante de pago) se
+  sanciona por el **art. 97 N°10 del Código Tributario** — multa del 50% al 500% del monto
+  de la operación (mínimo 2 UTM, máximo 40 UTA) y **clausura de hasta 20 días** del local.
+  La misma FAQ distingue dos sanciones más: otros incumplimientos de la Resolución
+  N°53/2025 (representación impresa/virtual) van por el art. 109 del Código Tributario; el
+  consumidor final que no exige su documento puede sancionarse por el art. 97 N°19 — esto
+  último no aplica al comercio, pero marca que la norma también mira al cliente.
+- **Regularización posterior:** no se encontró un procedimiento oficial para "emitir
+  tarde" una boleta que debió emitirse al momento de la venta — ni una boleta con fecha
+  retroactiva, ni una rectificación específica para este caso. El hueco entre la venta real
+  y la boleta (si se emite después, con la fecha real de emisión) queda como evidencia de
+  que no se emitió a tiempo. Sin verificar con fuente directa.
+- **Riesgo de detección, distinto por medio de pago (inferencia a partir de datos ya
+  verificados en este documento, reforzada por una fuente secundaria — [blog Tuu — el
+  algoritmo del SII](https://blog.tuu.cl/fiscalizacion-del-sii-por-que-el-algoritmo-ya-conoce-tu-negocio)):**
+  un pago con tarjeta queda reportado al SII por el emisor del voucher (Transbank, Getnet,
+  etc. — ya registrados y autorizados ante el SII, según lo verificado en la sección
+  anterior), así que una venta con tarjeta sin boleta ni voucher válido es, en principio,
+  cruzable. Un pago en efectivo no deja ese rastro de un tercero — el riesgo ahí depende de
+  arqueo de caja o fiscalización directa, no de un cruce automático. No se encontró una
+  fuente que confirme que el SII efectivamente hace ese cruce en la práctica, más allá de
+  notas de prensa/blog sobre "fiscalización con datos".
+
+### 3. Montos distintos — depende de si el documento es boleta o factura
+
+- **Verificado, primario ([SII — Anular una boleta electrónica estando inscrito en
+  Factura Electrónica](https://www.sii.cl/ayudas/boleta_electronica/anular_una_boleta_electronica_estando_inscrito_en_facturacion_electronica.pdf),
+  texto literal):** *"no existe la opción de modificar el monto de una boleta. Si necesita
+  disminuir el precio, debe anular la boleta mediante una nota de crédito y luego emitir
+  una nueva con el monto correcto. Si necesita aumentar el precio, debe emitir otra boleta
+  por el monto adicional."* Para boletas no hay Nota de Débito de corrección — la SII
+  resuelve el monto de menos con una boleta adicional, no con un documento que "suma"
+  sobre el original.
+- **Para facturas sí existe Nota de Débito de corrección de montos** (verificado,
+  observado en el flujo oficial de anulación de facturas — opción "Generar Nota de Débito
+  para Corregir Montos", normada junto con la NC general por el art. 57 del DL 825 y el
+  art. 71 del Reglamento de la Ley de IVA) — la distinción boleta/factura importa para el
+  diseño: el documento que haya que ajustar define si el camino es "NC + nueva boleta" o
+  "ND sobre la factura existente".
+  Este marco sirve igual para contexto chileno general (no es específico de pago
+  dividido/propina, que ya cubre la sección anterior, punto 6).
+- **Qué documento "manda":** no se encontró una fuente que compare explícitamente "lo que
+  registró el sistema" contra "lo que emitió la máquina" en términos de cuál prevalece
+  ante el SII. Es inferencia, pero se sostiene en lo ya verificado: el que tiene validez
+  tributaria es el DTE efectivamente emitido y recibido por el SII (folio, timbre) — un
+  monto distinto registrado solo internamente en el sistema no tiene, por sí mismo, ningún
+  efecto fiscal; es un problema de conciliación interna hasta que alguien emite el
+  documento de corrección (boleta adicional, NC, o ND) que sí llega al SII.
+
+### 4. Tipo distinto — boleta y factura no son intercambiables, hay que anular y re-emitir
+
+- **Verificado (mecanismo general, mismo trámite de anulación citado en el escenario 1):**
+  no existe un "cambiar tipo de documento" — cambiar una boleta por factura (o viceversa)
+  es anular la boleta con una NC y emitir la factura como documento nuevo e independiente.
+  Mismo plazo aplicable: sin límite para anular, 6 meses (DL 825, ver escenario 1) para que
+  la NC rebaje el débito fiscal de la boleta anulada.
+- **Si el documento original lo emitió la máquina (voucher-válido-como-boleta o boleta
+  propia de su plataforma de facturación), no el sistema:** esto ya está cubierto en el
+  punto 4 de la sección anterior y no se repite aquí — el emisor original es quien puede
+  anular, el sistema no puede emitir una NC sobre un folio que no es suyo.
+
+### 5. Modelo de emisión declarado vs. práctica — hallazgo sin resolver, igual que antes
+
+- Lo verificado en esta pasada (RUT completo, cambio 1x/día, propósito explícito de evitar
+  duplicar el registro en el RCV) ya está arriba, al inicio de esta sección.
+- **Lo que sigue sin encontrarse:** ninguna fuente —ni la guía oficial del SII, ni Nubox,
+  ni Fudo (que documenta el trámite para su propio POS pero no pasó de la tabla de
+  contenidos al abrir el artículo)— dice qué pasa si el contribuyente declaró un modelo y
+  en la práctica emite distinto (por ejemplo, declaró "no emito" pero el sistema sigue
+  emitiendo boleta propia para pagos con tarjeta). La hipótesis más simple, no verificada,
+  es que no hay una sanción *por la inconsistencia en sí* — el riesgo fiscal real sigue
+  siendo el que ya describen los escenarios 1 y 2 (doble registro en RCV, o no otorgamiento),
+  y el modelo declarado es la señal que el propio RCV usa para esperar un solo documento
+  por venta con tarjeta, no una regla con sanción propia.
+
 ## Opciones que aparecen, con su costo
 
 Ninguna es recomendación — las trae esta pasada para que el owner y el diseño las cruce.
@@ -247,17 +379,31 @@ Ninguna es recomendación — las trae esta pasada para que el owner y el diseñ
 - Si el SDK de Transbank POS Integrado tiene un endpoint separado (fuera de `SaleResponse`)
   para consultar el folio DTE de la boleta que generó — solo se leyó la página de
   documentación general, no el detalle completo del SDK.
-- Qué pasa, en términos de IVA, cuando el sistema y la máquina **no coinciden** en qué
-  documento corresponde a una venta (pregunta 4 del pedido) — no se encontró una fuente que
-  trate este escenario directamente.
 - Devolución de una venta con pago dividido entre tarjeta y efectivo donde solo una porción
   tiene voucher — no se encontró fuente, es inferencia.
 - Si el terminal emite un voucher por cada tarjeta en un pago dividido entre varias
   tarjetas, o uno consolidado.
-- Flujo exacto para cuando un cliente pide factura después de haber pagado y recibido
-  boleta/voucher — no se encontró una fuente dedicada a Chile vía terminal de pago.
+- Flujo exacto para cuando un cliente pide factura después de haber pagado con **voucher**
+  (no boleta del sistema) — el mecanismo general (anular con NC + emitir factura nueva) sí
+  quedó verificado en "Cuando el sistema y la máquina no coinciden" § 4, pero específico al
+  voucher-de-máquina-como-boleta no se encontró fuente dedicada.
 - Texto resolutivo definitivo y vigente de la Resolución N°12 tras la rectificación del
   SII (se leyeron solo notas de prensa, no el texto oficial final en sii.cl/normativa).
 - Si Fudo, Getnet Appboleta o Klap exponen alguna API pública hacia software de terceros
   (más allá de portales web de consulta) — no se encontró, pero tampoco se agotó la
   búsqueda en cada doc técnica particular.
+- Si dos documentos de **dos emisores fiscales distintos** (boleta propia del sistema +
+  boleta propia de la máquina) sobre la misma venta requieren dos Notas de Crédito
+  separadas, una de cada emisor, o existe algún mecanismo que las cruce — inferencia, sin
+  fuente.
+- Procedimiento oficial para regularizar una venta que no generó ningún documento (ni
+  boleta del sistema ni voucher/boleta de la máquina) — no se encontró un mecanismo de
+  "boleta tardía" o rectificación específica para este caso.
+- Si el SII efectivamente cruza, en la práctica y no solo como capacidad declarada, los
+  pagos con tarjeta reportados por los emisores de voucher contra las boletas electrónicas
+  recibidas, para detectar ventas sin documento — solo hay notas de prensa/blog
+  (secundarias) sobre "fiscalización con datos", no una fuente que describa el cruce
+  mismo.
+- Consecuencia de declarar un modelo de emisión y operar distinto en la práctica —
+  tampoco la trae la guía oficial del SII sobre la declaración (verificada esta pasada):
+  sigue sin encontrarse en ninguna fuente, oficial o secundaria.
