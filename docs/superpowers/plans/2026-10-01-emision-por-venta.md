@@ -6,7 +6,7 @@
 > verificó, más `api-security-reviewer` si la tarea toca controllers o DTOs), el recibo del
 > pre-commit y el commit los hace el controlador.
 
-- **Status:** Draft — en espera: la E1 está reabierta (ver abajo)
+- **Status:** Draft — vuelve al owner para aprobar; dos preguntas abiertas en la orquestadora (ver abajo)
 - **Date:** 2026-10-01
 - **Owner:** César (owner) · redacta la sesión del frente de emisión (worktree `sad-dubinsky-6b3af5`)
 
@@ -27,29 +27,20 @@ por `venta_referencia_id IS NOT NULL`.
 **Tech Stack:** NestJS + TypeORM (`synchronize`, el esquema sale de las entities), PostgreSQL 18,
 Decimal.js, Nuxt 4 + Nuxt UI v4, Jest + supertest (e2e), Vitest, Playwright.
 
-## ⏸ La E1 está reabierta (orquestadora, 2026-10-01)
+## E1 corregida, y dos preguntas abiertas
 
-El owner reabrió la E1, *"lo no pagado tiene su documento recién al pagarlo"*. El art. 55 del
-DL 825 pide que la factura y la boleta de mercadería salgan al **entregar**, no al cobrar. Solo la
-boleta de un servicio sale al cobrar. La orquestadora está investigando si una mesa de restaurante
-es venta o servicio. **El plan no se aprueba ni se ejecuta hasta que llegue la E1 corregida con su
-commit.**
+**E1 corregida por el owner** (`67c3789e`, con
+[`2026-10-01-documento-de-lo-no-pagado.md`](../../agent/investigaciones/2026-10-01-documento-de-lo-no-pagado.md)):
+lo entregado se documenta al entregarlo, se haya pagado o no. El pago posterior de una deuda no
+genera documento, salvo el voucher duplicado de **E1b**, que se registra marcado. Las tareas 4, 5,
+7, 8, 10 y 12 ya están reescritas con esa regla.
 
-Qué depende de la E1 (marcado con ⏸ en cada tarea):
+**Abiertas en la orquestadora** (spec § 3.8). No se deciden en el plan:
 
-| Tarea | Qué parte | Por qué |
-|---|---|---|
-| 4 | la regla 4 de `documentarCobro` (la boleta se agrupa **por cobro**) y sus e2e | es la E1 escrita en código: el documento nace con el pago, no con la entrega |
-| 5 | entera | que el abono documente lo suyo es la E1. Y si la boleta nace al entregar, una venta pendiente ya tiene documento y la regla de anular cambia de alcance |
-| 7 | los campos del número en `AbonoModal` | solo existen si el abono genera documentos |
-| 8 | `sin_plata` ("corrige el documento de la parte no pagada") | si lo no pagado ya tiene documento, deja de caer en devolución interna |
-| 10 | la línea que anticipa el registro de "No vuelve plata" | gemela de la 8 |
-| 12 | qué cuenta como "sin documento" | hoy excluye la parte pendiente de una venta |
-
-No dependen de la E1: la 1 (medir), la 2 (la regla por medio), la 3 (el catálogo y la validación
-del tipo), la 6 (el detalle y completar el número), la 9 (el reembolso por pasarela) y la 11
-(reportes). La 1, la 2 y la 3 podrían avanzar si el owner lo decide, pero el plan entero espera su
-aprobación.
+| # | Pregunta | Qué toca | Cómo queda escrito mientras tanto |
+|---|---|---|---|
+| P1 | Lo no pagado en un comercio sin ningún medio en `sistema`: ¿igual lleva la boleta del sistema? | tarea 4, regla 4 | literal de E1: sí, la boleta del sistema |
+| P2 | Con E1 toda venta con total > 0 nace documentada, así que "anular mientras nadie emitió" queda sin casos. ¿Se acepta, o un documento solo `armado` no impide anular? | tarea 5 y el `anulable` de la 6 y la 7 | la regla de la spec: rechaza si hay documento `sistema` o `maquina` |
 
 ## Global Constraints
 
@@ -177,7 +168,7 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 
 ---
 
-## ⏸ Tarea 4 — `venta_documentos` y su resolución al crear la venta
+## Tarea 4 — `venta_documentos` y su resolución al crear la venta
 
 **Archivos:**
 - Crear: la entity `venta-documento.entity.ts` y el servicio de documentos, donde los ubique la
@@ -200,55 +191,61 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
     claseMaquina: ClaseDocumentoMaquina | null; numero: string | null;
     estadoEnvio: EstadoEnvio | null; monto: string;
     montoAfecto: string | null; montoExento: string | null; montoImpuestos: string | null;
-    pagoId: string | null; documentoCorregidoId: string | null;
+    pagoId: string | null; documentoCorregidoId: string | null; esDuplicado: boolean;
     creadoEl; actualizadoEl; eliminadoEl;
   }
   // el servicio
-  documentarCobro(manager, params: {
+  documentarVenta(manager, params: {
     tenantId: string;
     venta: { id: string; tipoDocumentoId: string | null; esBoleta: boolean; canal: string;
              totalFinal: string; configCalculo: ConfigCalculo | null };
     pagos: { pagoId: string; metodoPagoId: string; aplicado: string;
              numeroDocumento?: string; claseDocumento?: ClaseDocumentoMaquina }[];
-    momento: 'cierre' | 'abono';
   }): Promise<VentaDocumento[]>
   ```
   Las columnas exactas (y si `monto_impuestos` es una o se parte por impuesto) las fija la tarea 1
-  contra lo que ya congela la venta.
+  contra lo que ya congela la venta. La tarea 5 suma `registrarDuplicadoDeAbono`.
 
 - [ ] Entity con índice por `venta_id` y por `documento_corregido_id`. Documentar la tabla en
   `startup-pos.sql`.
-- [ ] `documentarCobro`, las reglas de la spec § 3.3, en este orden:
+- [ ] `documentarVenta` corre **una vez, al crear la venta** (en POS y salones crear la venta es la
+  entrega, E1), con las reglas de la spec § 3.3 en este orden:
   1. total $0 → nada (E6);
-  2. `canal = 'online'` y `momento = 'cierre'` → un `sistema`/`armado` por el total (E5);
-  3. factura (`!esBoleta` y hay tipo) → `momento = 'cierre'`: un `sistema`/`armado` por el total,
-     se pague o no; `momento = 'abono'`: nada (E2);
-  4. boleta → los pagos agrupados por emisor: un documento por pago `maquina` (con `pagoId`,
-     número y clase si vinieron); uno `sistema` por la suma de los `sistema`; uno `nadie` por la
-     suma de los `nadie`.
+  2. `canal = 'online'` → un `sistema`/`armado` por el total (E5);
+  3. factura (`!esBoleta` y hay tipo) → un `sistema`/`armado` por el total, se pague o no (E2);
+  4. boleta → un documento por pago `maquina` (con `pagoId`, número y clase si vinieron); uno
+     `nadie` por la suma de los pagos `nadie`; y **una** boleta `sistema`/`armado` por la suma de
+     los pagos `sistema` **más lo no pagado** (`totalFinal − Σ aplicado`). Si esa suma es 0, no
+     hay boleta del sistema. ⏸ P1: hoy queda escrita la lectura literal de E1.
+- [ ] Invariante, afirmado en un unit: la suma de los documentos no duplicados es el `totalFinal`
+  de la venta (salvo $0).
 - [ ] Baldes congelados de los `sistema`: los de la venta si el documento cubre el total, y a
   prorrata de sus porciones si no, con la función que fijó la tarea 1.
 - [ ] El emisor de cada medio sale en la misma lectura de `tenant_metodo_pago` que ya hace
-  `registrar`, o en **una** consulta por cobro. Nunca por pago.
+  `registrar`, o en **una** consulta por venta. Nunca por pago.
 - [ ] `PagoVentaDto` suma `numeroDocumento?` (texto, máx. 40, trim) y `claseDocumento?`
   (`@IsIn(['voucher','boleta'])`). Si vienen en un pago cuyo medio no es `maquina`, se ignoran sin
   error: la pantalla de la tarea 7 no los muestra ahí, y el pago sigue siendo válido.
 - [ ] Online: `pagos.referencia` = el código de autorización de `orden.metadata.resultadoPago`.
 - [ ] e2e (los escenarios de la spec § 5 que caen acá):
   - boleta de $100.000: efectivo $60.000 + débito $40.000 en `maquina` con número;
+  - mesa de $100.000: $40.000 con tarjeta en `maquina` y $60.000 sin pagar → voucher por 40.000 y
+    boleta del sistema por 60.000 al cerrar (E1);
+  - boleta pendiente sin pagos (por API) → boleta del sistema por el total;
   - factura de $119.000 con tarjeta en `maquina` → un solo documento `sistema`;
   - online con el crédito en `maquina` → `sistema` por el total, y el código en `referencia`;
   - medio en `nadie` → fila `nadie`;
   - venta de $0 → nada;
   - salones con pago mixto y propina → los montos de los documentos sin la propina.
 - [ ] ADR nuevo en `docs/adr/` (el siguiente número libre): la emisión registrada por venta, su
-  tabla, por qué el documento sigue al pago (E1) y por qué una corrección se reconoce por
-  `venta_referencia_id` (E7). Más el índice, y una nota en ADR-010 que lo enlace.
+  tabla, por qué el documento nace con la entrega (E1, con la Res. 58/2003 y el art. 55), el
+  duplicado de E1b, y por qué una corrección se reconoce por `venta_referencia_id` (E7). Más el
+  índice, y una nota en ADR-010 que lo enlace.
 - [ ] Docs: `docs/features/ventas.md` (qué documentos deja cada venta).
 
 ---
 
-## ⏸ Tarea 5 — Los abonos documentan lo suyo, y anular mira lo emitido
+## Tarea 5 — El abono no documenta (salvo el duplicado), y anular mira lo emitido
 
 **Archivos:**
 - Modificar: `backend/src/modules/pagos/pagos.service.ts` (`registrarAbono`, l.325-481) y
@@ -257,22 +254,29 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 - Tests: e2e de pagos y de anular.
 
 **Interfaces:**
-- Consume: `documentarCobro(..., momento: 'abono')` (tarea 4).
+- Consume: `VentaDocumento` (tarea 4).
+- Produce: en el servicio de documentos,
+  `registrarDuplicadoDeAbono(manager, { tenantId, ventaId, pagos: { pagoId, metodoPagoId, aplicado, numeroDocumento?, claseDocumento? }[] }): Promise<VentaDocumento[]>`.
 
-- [ ] `registrarAbono` llama a `documentarCobro` dentro de su transacción, con la venta leída bajo el
-  lock que ya toma.
+- [ ] `registrarAbono` **no** crea documentos por los pagos `sistema` ni `nadie`: la deuda ya estaba
+  documentada (E1). Por cada pago cuyo medio es `maquina`, y solo si la venta tiene algún documento
+  no duplicado (siempre, salvo $0), registra un documento `maquina` con `es_duplicado = true`, su
+  `pagoId`, y número y clase si vinieron (E1b). El cobro **nunca** se rechaza por esto.
 - [ ] `cancelarUnaVez`: sale el `if (venta.tipo_documento_id)`. Entra: si hay algún
   `venta_documentos` con emisor `sistema` o `maquina` en esa venta, 400 *"La venta ya tiene
   documento: se revierte con nota de crédito, no se anula."* Los otros dos rechazos no cambian.
+  ⏸ P2: con E1 esto deja a toda venta con total > 0 sin poder anularse. Si la respuesta es que
+  `armado` no impide anular, cambia esta línea y el `anulable` de la tarea 6.
 - [ ] e2e:
-  - la mesa de $100.000: $40.000 con tarjeta al cerrar, abono de $60.000 en efectivo → el voucher
-    del cierre y la boleta del abono (E1);
-  - factura con abono → ningún documento nuevo;
-  - boleta pendiente sin pagos creada por API, con `tipoDocumentoId` → se anula;
-  - factura sin pagos → no se anula.
-- [ ] Docs: `docs/features/ventas.md` § anular y `docs/features/pagos.md` § abono. `PRODUCTO.md`
-  § 10: la regla de `cancelada` pasa a leerse contra lo emitido, y se va el párrafo que dice que
-  hoy se mira la etiqueta.
+  - la mesa que debe $60.000 paga al día siguiente en efectivo → ningún documento nuevo;
+  - la misma deuda pagada con tarjeta en `maquina` → un documento `maquina` con `es_duplicado`, y
+    el cobro pasa;
+  - factura con abono en efectivo → ningún documento nuevo;
+  - factura sin pagos → no se anula;
+  - el mutante que vuelve a documentar el abono por su medio (la E1 vieja) tiene que morir.
+- [ ] Docs: `docs/features/ventas.md` § anular y `docs/features/pagos.md` § abono (el abono no
+  documenta; el duplicado). `PRODUCTO.md` § 10: la regla de `cancelada` pasa a leerse contra lo
+  emitido, y se va el párrafo que dice que hoy se mira la etiqueta.
 
 ---
 
@@ -285,15 +289,18 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 
 **Interfaces:**
 - Produce:
-  - `GET /ventas/:id` suma `documentos: { id, emisor, tipoDocumento: {id, codigo, nombre} | null, claseMaquina, numero, estadoEnvio, monto, pagoId, documentoCorregidoId }[]` y `anulable: boolean`;
+  - `GET /ventas/:id` suma `documentos: { id, emisor, tipoDocumento: {id, codigo, nombre} | null, claseMaquina, numero, estadoEnvio, monto, pagoId, documentoCorregidoId, esDuplicado }[]`, `anulable: boolean` y `abonoConMaquinaDuplica: boolean`;
   - `PATCH /ventas/:id/documentos/:documentoId` con body `{ numero: string; clase: ClaseDocumentoMaquina }`, que responde el documento actualizado.
 
 - [ ] `findOne` trae los documentos de la venta **y los de sus correcciones** en una sola consulta.
 - [ ] `anulable`, calculado en el backend con la misma regla que `cancelarUnaVez`. Es la única fuente
   de verdad: el drawer deja de replicarla (tarea 7).
+- [ ] `abonoConMaquinaDuplica`: `true` si la venta tiene saldo y algún documento no duplicado (E1b).
+  Es lo que la pantalla de abono usa para avisar, sin replicar la regla.
 - [ ] `PATCH`: `@RequiresPermiso('Ventas','Crear')`, con el alcance de caja de `findOne`
   (`resolverAlcanceDerivadoDeCaja`). Solo documentos `maquina` de esa venta y de ese tenant: si no,
   404. El `tenant_id` sale del token.
+- [ ] El `PATCH` también sirve para el voucher duplicado de E1b: el contador necesita su número.
 - [ ] e2e: completar el número de un voucher → 200 y queda; un documento `sistema` → 404; uno de
   otro tenant → 404; un cajero de otra caja sin `Cajas:Leer` → 404; un número vacío → 400.
 - [ ] `api-security-reviewer` sobre el controller y el DTO.
@@ -301,37 +308,43 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 
 ---
 
-## ⏸ Tarea 7 — Pantallas: el número al cobrar y la sección Documentos
+## Tarea 7 — Pantallas: el número al cobrar, el aviso del abono y la sección Documentos
 
 **Archivos:**
 - Modificar: `frontend/app/components/ventas/CobroModal.vue`, `frontend/app/composables/useVenta.ts`
   (`PagoInput`), `frontend/app/pages/ventas/pos.vue`, `frontend/app/pages/salones/index.vue`,
   `frontend/app/composables/useSalones.ts`, `frontend/app/components/pagos/AbonoModal.vue`,
   `frontend/app/components/ventas/VentaDetalleDrawer.vue` y los tipos de `frontend/app/types/`.
-- Tests: vitest de `CobroModal` y del drawer.
+- Tests: vitest de `CobroModal`, `AbonoModal` y del drawer.
 
 **Interfaces:**
 - Consume: `emisor` de `GET /metodos-pago` (tarea 2), los campos de `PagoVentaDto` (tarea 4), los
-  `documentos` y `anulable` y el `PATCH` (tarea 6).
+  `documentos`, `anulable`, `abonoConMaquinaDuplica` y el `PATCH` (tarea 6).
 
-- [ ] `CobroModal` y `AbonoModal`: en un pago cuyo medio emite con la máquina, dos campos opcionales
-  debajo: "N° del comprobante" y "Es voucher / Es boleta de la máquina". Viajan en el body.
-  El cajero no elige quién emite: la pantalla no ofrece eso.
+- [ ] `CobroModal`: en un pago cuyo medio emite con la máquina, dos campos opcionales debajo: "N° del
+  comprobante" y "Es voucher / Es boleta de la máquina". Viajan en el body. El cajero no elige
+  quién emite: la pantalla no ofrece eso.
+- [ ] `AbonoModal`: si `abonoConMaquinaDuplica` y el cajero elige un medio que emite con la máquina,
+  un aviso antes de confirmar: *"Esta venta ya tiene su boleta. El voucher de este pago también vale
+  como boleta y la duplica. El cobro sigue, y queda marcado para que el contador lo corrija."* No
+  bloquea. Los dos campos del número también aparecen ahí.
 - [ ] Drawer: una sección "Documentos" que lista cada uno: quién lo emitió, el tipo o la clase, el
-  número o "sin número", el monto, y si es una corrección, qué corrige. Un documento `sistema` dice
-  "Armado, sin enviar al SII". Una venta sin documentos dice "Sin documento".
+  número o "sin número", el monto, si es una corrección qué corrige, y si es duplicado, la marca
+  "Duplicado — para el contador". Un documento `sistema` dice "Armado, sin enviar al SII". Una venta
+  sin documentos dice "Sin documento".
 - [ ] "Completar número" en los documentos de la máquina sin número, con el `PATCH`.
 - [ ] `puedeAnular` usa `venta.anulable` del backend y deja de leer `tipoDocumento`.
 - [ ] Utilidades de presentación (etiquetas de emisor y clase) en un composable de
   `app/composables/`, no locales al `.vue`.
-- [ ] vitest: los campos aparecen solo con medio `maquina`; el body los lleva; el drawer usa
-  `anulable` (con un mutante que vuelve a `!tipoDocumento`).
-- [ ] Smoke en navegador del cobro mixto y de completar el número, como un rol con los permisos del
-  módulo, no admin (los bugs de runtime del drawer no los ve el build).
+- [ ] vitest: los campos aparecen solo con medio `maquina`; el body los lleva; el aviso del abono
+  aparece solo con `abonoConMaquinaDuplica` y medio `maquina`, y no deshabilita confirmar; el drawer
+  usa `anulable` (con un mutante que vuelve a `!tipoDocumento`).
+- [ ] Smoke en navegador del cobro mixto, del abono con tarjeta y de completar el número, como un
+  rol con los permisos del módulo, no admin (los bugs de runtime del drawer no los ve el build).
 
 ---
 
-## ⏸ Tarea 8 — Las correcciones llevan su documento según por dónde vuelve la plata
+## Tarea 8 — Las correcciones llevan su documento según por dónde vuelve la plata
 
 **Archivos:**
 - Modificar: `ventas.service.ts` (`crearNotaCredito*`, l.1495-2230, y los lectores de la tabla de
@@ -348,7 +361,7 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
   via: { tipo: 'pago'; pagoId: string } | { tipo: 'sin_plata' }
      | { tipo: 'pasarela'; pagoId: string }   // solo la usa la tarea 9; no mueve caja
   // servicio de documentos:
-  documentoQueCorrige(manager, ventaId, via): Promise<VentaDocumento | null>  // null = parte sin documento
+  documentoQueCorrige(manager, ventaId, via): Promise<VentaDocumento>  // nunca un duplicado
   documentarCorreccion(manager, { tenantId, correccionVentaId, corregido: VentaDocumento | null,
                                   monto, tipoNotaCreditoId }): Promise<VentaDocumento>
   ```
@@ -359,11 +372,14 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
   - `pago`: el documento que cubre ese `pagoId`, que tiene que ser de esa venta. Si el medio de ese
     pago `es_efectivo`, la plata sale de la caja (la salida de hoy, con sus dos topes). Si no, no se
     mueve caja: la reversa se hace en la máquina o en el banco;
-  - `sin_plata`: solo si la venta tiene saldo, y corrige el de la parte no pagada;
+  - `sin_plata`: solo si la venta tiene saldo, y corrige el documento que cubre lo no pagado: la
+    boleta del sistema o la factura (E1);
+  - el `pagoId` de un abono: el documento que documentó la deuda (la boleta del sistema o la
+    factura), nunca el voucher duplicado;
   - en una factura, la factura siempre.
 - [ ] El documento de la corrección: `sistema` → NC `sistema`/`armado` con el tipo NC; `maquina` → NC
-  `maquina` sin número, con el tipo NC; ninguno o `nadie` → **devolución interna**: fila `nadie`, y
-  la fila de `ventas` de la corrección con `tipo_documento_id` **nulo**.
+  `maquina` sin número, con el tipo NC; `nadie` → **devolución interna**: fila `nadie`, y la fila de
+  `ventas` de la corrección con `tipo_documento_id` **nulo**.
 - [ ] **Tope por documento**: lo corregido de un documento no pasa su `monto`, bajo el mismo lock y
   junto a los dos topes de hoy. El mensaje no revela el efectivo de la caja (la fuga 5 del modo
   ciego sigue cerrada).
@@ -379,6 +395,9 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
     disponible;
   - el tope por documento rechaza el excedente;
   - `sin_plata` en una venta pagada → 400;
+  - `sin_plata` en la mesa que debe $60.000 → corrige la boleta del sistema, no es devolución
+    interna;
+  - NC por el pago de un abono con tarjeta (E1b) → corrige la boleta de la deuda, no el duplicado;
   - corregir una corrección → 400;
   - los tests de NC de hoy siguen en verde con el `pagoId` del pago en efectivo donde antes iba
     `devolverDinero: true`, y con `sinPlata` o el pago con tarjeta donde iba `false` (cuál, según
@@ -419,7 +438,7 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 
 ---
 
-## ⏸ Tarea 10 — Pantallas de la devolución
+## Tarea 10 — Pantallas de la devolución
 
 **Archivos:**
 - Modificar: `frontend/app/components/ventas/NotaCreditoModal.vue`,
@@ -430,7 +449,7 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
   plata?"**: una opción por cada pago de la venta (*"Efectivo de la caja · $60.000"*, *"Tarjeta de
   débito · $40.000"*) y "No vuelve plata", esta última solo si la venta tiene saldo. Debajo, en una
   línea, qué registro va a quedar: nota de crédito, nota de la máquina para anotar después o
-  devolución interna. Sale del documento corregido, que ya trae el detalle (tarea 6), con la misma
+  devolución interna. "No vuelve plata" siempre deja una nota de crédito (E1). Sale del documento corregido, que ya trae el detalle (tarea 6), con la misma
   regla que el servidor (gemelo exacto o nada).
 - [ ] `ReembolsoModal`: se va la casilla "Generar nota de crédito" (`ReembolsoModal.vue:36` y
   l.151-158). Las devoluciones de stock siguen. Se va `normalizarSoloStock`, que existía solo para
@@ -461,17 +480,18 @@ consultas: se verifica que la devolución interna entra.
 
 ---
 
-## ⏸ Tarea 12 — `/ventas` filtra por quién emitió
+## Tarea 12 — `/ventas` filtra por quién emitió
 
 **Archivos:** `ventas.service.ts` (`buildListarFilters`, l.2957-2985; `listar`),
 `dto/query-ventas.dto.ts`, `frontend/app/pages/ventas/index.vue`. Tests: e2e de listar y vitest de
 la página.
 
-- [ ] `QueryVentasDto.documento?`: `'sistema' | 'maquina' | 'maquina_sin_numero' | 'sin_documento'`.
-  Va como un `EXISTS` (o `NOT EXISTS` para "sin documento") sobre `venta_documentos`, sin N+1.
-  "Sin documento" = sin documentos `sistema` ni `maquina`, con total > 0 y sin ser una corrección.
-- [ ] El listado devuelve por fila un resumen chico (`emisores: EmisorDocumento[]`) en la misma
-  consulta, con una agregación.
+- [ ] `QueryVentasDto.documento?`: `'sistema' | 'maquina' | 'maquina_sin_numero' | 'sin_documento' | 'duplicado'`.
+  Va como un `EXISTS` sobre `venta_documentos`, sin N+1. "Sin documento" = la venta tiene algún
+  tramo en `nadie` (con E1 lo no pagado nunca queda sin documento). "Duplicado" = algún documento
+  con `es_duplicado` (E1b, para el contador). Las correcciones quedan fuera de los filtros.
+- [ ] El listado devuelve por fila un resumen chico (`emisores: EmisorDocumento[]`, `tieneDuplicado`)
+  en la misma consulta, con una agregación.
 - [ ] Página: un filtro "Documento" junto a los de estado y canal, y un badge por fila.
 - [ ] e2e: cada filtro trae exactamente sus ventas, con una de cada tipo sembrada en el test.
 - [ ] Docs: `docs/features/ventas.md` § `GET /api/ventas`.
