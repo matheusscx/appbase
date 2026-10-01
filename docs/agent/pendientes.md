@@ -1038,19 +1038,45 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   precio congelado de la línea (`dd54f81d`). El motor de precios y lo fiscal no se tocan.
   Escribe en `movimientos_inventario`: va en su propio frente.
 
+### El vendido del día resta las notas de crédito (owner, 2026-09-30)
+
+**Cómo se decidió:** venía de la § 4. El owner no lo tenía claro y pidió investigar
+([`2026-09-30-vendido-y-notas-credito.md`](investigaciones/2026-09-30-vendido-y-notas-credito.md)).
+Después contestó en el selector de la sesión orquestadora, con la escena "hoy vendiste $300.000,
+un cliente devuelve algo de ayer por $20.000". Eligió la opción recomendada en dos de las tres
+preguntas; en la de cobrado no había recomendación. Las opciones descartadas eran dejar el bruto
+con las notas aparte, y corregir el día de la venta original.
+
+- [ ] **El vendido, el cobrado y el "Total facturado" restan las notas de crédito del día en que se
+  emiten** (backend + frontend; **fiscal: frente propio, con su sesión y su verificación**, `CLAUDE.md`
+  y ADR-010). Lo decidido:
+  - **Vendido** (`resumen-negocio.service.ts`, `GET /resumen-negocio/hoy`): el número grande es lo
+    vendido menos las notas de crédito emitidas ese día, y debajo va el bruto y el monto de las
+    notas ("bruto $300.000 · notas de crédito −$20.000" → $280.000). La NC cuenta en **su** fecha,
+    aunque la venta original sea de otro día, como hacen Shopify y Toast y como el SII la imputa
+    al mes en que se emite. El rótulo "antes de notas de crédito" sale. La semana pasada se
+    calcula igual, para que la variación compare lo mismo.
+  - **Cobrado:** descuenta lo que se devolvió ese día. Hoy no ve la devolución: la NC no escribe
+    `pagos`, y el efectivo devuelto queda como `salida` de `movimientos_caja` con `venta_id` de la NC,
+    que sí resta en el arqueo. La intención es que cobrado y caja cuadren.
+  - **"Total facturado"** de `/ventas` (`GET /ventas/resumen`): el mismo criterio que el vendido y el
+    mismo rótulo. Hoy excluye las NC con otro mecanismo (`tipo_documento_id IS DISTINCT FROM` el
+    tipo del país) que el dashboard (`es_nota_credito` del catálogo). Conviene que queden en uno.
+  - **Lo que el diseño tiene que resolver, y puede volver al owner:**
+    - si **ticket promedio**, **cantidad de ventas** y **local/online** usan el neto, y cuántas
+      ventas es una NC;
+    - si **lo más vendido** resta por ítem lo devuelto con líneas, cuando la NC es por monto
+      libre, sin líneas, y es el caso más común;
+    - qué devolución de plata entra en el cobrado: solo el efectivo de `movimientos_caja`, o
+      también el reembolso por pasarela (webhook);
+    - cómo se ve un día con neto negativo en la comparación.
+  - Fuera de esta entrada: el % de anulaciones por garzón, que ya tiene la suya en la § 6.
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
-
-- [ ] **¿El vendido del día resta las notas de crédito?** (dashboard de inicio, bloque
-  Ventas, `resumen-negocio.service.ts`) — hoy `GET /resumen-negocio/hoy` **excluye** las
-  notas de crédito del vendido (no las resta: las saca del cálculo entero, igual que
-  `GET /ventas/resumen`), y la pantalla lo va a rotular "antes de notas de crédito". Es una
-  pregunta **fiscal** y no se decidió en el diseño (spec `2026-09-18-dashboard-inicio-design.md`
-  § 4.1): va en su propio frente, con su propia sesión y su propia verificación — no se toma
-  de arrastre de otra tarea (`CLAUDE.md`, ADR-010).
 
 ## 5. Carreras de concurrencia
 

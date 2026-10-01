@@ -45,7 +45,7 @@ filtros — el detalle sigue viviendo en `/ventas`.
 - Incluido en Task 5: el frontend de la zona "Hoy" (la plata del día, sin refresco
   periódico) — ver más abajo.
 - NO incluido (fuera de alcance de la spec): restar las notas de crédito del vendido
-  (pregunta fiscal, `pendientes.md` § 4), plata de cuentas abiertas, un total de pérdidas
+  (fiscal; el owner decidió restarlas el 2026-09-30 y es frente propio en `pendientes.md` § 3), plata de cuentas abiertas, un total de pérdidas
   (spec § 4.4 — ver más abajo), un reporte de mermas completo (`pendientes.md` § 3), y una
   biblioteca de gráficos (spec § 8). La hora de corte configurable, decidida como "fuera de
   alcance" al escribir esta spec, se construyó después (frente `hora-de-corte`, cerrado
