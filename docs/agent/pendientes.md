@@ -1156,6 +1156,12 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   venta pagada en parte por pasarela, con `REFUND` y NC, muestra de menos lo reembolsado. Lo
   decidió el owner: "lo vemos aparte". Pregunta para él: ¿un reembolso sin NC debería existir, o
   todo reembolso emite NC? Y si existe, ¿cómo se lo ve en el saldo?
+  **Queda en pausa (owner, 2026-10-01):** cuando se le pasó la pregunta contestó "no sé qué hacer con
+  esto", y la dejó pendiente. No se toma hasta que la retome. El contexto está en la spec del frente
+  que la destapó:
+  [`2026-10-01-vendido-neto-de-notas-credito-design.md`](../superpowers/specs/2026-10-01-vendido-neto-de-notas-credito-design.md)
+  (D10, D12 y § 6). Si se retoma, cabe ofrecerle una pasada de investigación de mercado: cómo tratan
+  Toast, Square y Shopify un reembolso sin documento, y qué exige el SII.
 
 - [ ] **Una nota de crédito que se reintenta se emite dos veces** (fiscal, **frente propio**,
   anotado 2026-09-19 al diseñar la idempotencia del cobro). `POST /ventas/:id/notas-credito`
