@@ -1249,6 +1249,44 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   Con esto **no queda ninguna regla de negocio abierta en este frente.** Lo que falte es de diseño
   y, si aparece una regla nueva, se le pregunta al owner.
 
+  **Cómo arrancarlo.** Esta es la solicitud que se pega en la sesión nueva (o se lanza desde la
+  orquestadora). Es la fuente: si cambia una decisión, se actualiza acá en el mismo commit.
+
+  ```text
+  Frente fiscal, va solo: "Emitir al SII: cada venta registra quién emitió, y la regla la declara cada método de pago".
+
+  **Quién manda.** La sesión orquestadora coordina todos los frentes del proyecto por encargo del owner (título "Listado de sesiones activas", id local_132a5b26-c5c7-40b0-807a-10105ce38ae0). Es la jefa de este frente después del owner: el owner decide, la orquestadora coordina, y vos diseñás y construís. Si te llega un mensaje suyo con una decisión del owner, va a citar el commit de main donde quedó escrita. Verificala ahí y seguila. Cuando termines una etapa (spec, plan, cada tarea mergeada) o te trabes, avisale con SendMessage a ese id. Si no podés mandarle mensajes, dejalo dicho en tu respuesta al owner.
+
+  Todas las reglas de negocio de este frente ya las decidió el owner, con tres investigaciones de por medio, y no queda ninguna abierta. Tu trabajo es diseñar y construir lo decidido, no volver a decidirlo. Si encontrás evidencia en el código o en la norma que contradiga una decisión, traela con el porqué antes de cambiar nada.
+
+  Antes de empezar, traé main a tu worktree: las últimas decisiones son de hoy. Leé esto antes que nada:
+  - docs/PRODUCTO.md § 10, el bloque "Emitir al SII es una elección de cada venta": las reglas.
+  - docs/agent/pendientes.md § 6, la entrada "Emitir al SII se elige al cerrar cada venta…": el objetivo confirmado, cada decisión con su procedencia y las correcciones. Leé también la entrada siguiente, la del reembolso sin nota de crédito, que ya está decidida y se construye dentro de este frente.
+  - docs/agent/investigaciones/2026-10-01-emision-por-venta-y-boleta-del-terminal.md (incluye "Cuando el sistema y la máquina no coinciden" y "El comprobante de Webpay en línea") y 2026-10-01-reembolso-sin-nota-credito.md.
+  - ADR-010, docs/features/ventas.md, docs/features/impuestos.md, CLAUDE.md, docs/patterns/ y docs/agent/anti-patterns.md.
+
+  En una frase: el sistema lleva bien la venta y la plata, y lo tributario queda en manos del comercio y registrado.
+
+  Alcance:
+  - Cada método de pago declara quién emite con ese medio: el sistema, la máquina o nadie (tabla metodos_pago, pantalla configuracion/metodos-pago.vue). Cada venta resuelve sola su documento según cómo se paga, y el cajero no elige nada. Un pago mixto queda con los dos documentos.
+  - Cada venta registra quién emitió: el sistema (armado o enviado), la máquina o nadie. Puede tener varios documentos.
+  - El número de la máquina es opcional, se tipea al cerrar o después, y se marca si es voucher o boleta de la máquina.
+  - La venta online deja su boleta armada y congelada, lista para emitir, igual que la nota de crédito de hoy. El código de Webpay queda como dato del pago.
+  - Devolución interna para las ventas sin documento. Todo reembolso deja registro según quién emitió, y se va la casilla "generar nota de crédito" del modal de reembolso.
+  - En un pago mixto, la devolución corrige el documento del medio por el que se devuelve la plata.
+  - Una venta pendiente se puede anular mientras nadie haya emitido, sin importar la etiqueta.
+
+  Fuera de alcance: enviar de verdad al SII (ADR-010: se diseña compatible, no se construye), un módulo para configurar las máquinas de cobro, el motor de precios y el % de anulaciones por garzón.
+
+  Dependencia: el frente "El vendido, el cobrado y el Total facturado restan las notas de crédito" está construyendo los reportes que restan las NC (spec docs/superpowers/specs/2026-10-01-vendido-neto-de-notas-credito-design.md). Este frente les tiene que sumar la devolución interna. Diseñá ya, pero no implementes sobre esos reportes hasta que ese frente esté en main; la orquestadora te avisa.
+
+  Cómo:
+  1. Primero diseño: brainstorm → spec en docs/superpowers/specs/ → plan en docs/superpowers/plans/. Nada de código antes de que el owner apruebe el plan.
+  2. Antes de proponer, medí contra el código qué hay hoy: tipo_documento_id, metodos_pago, cancelar, crearNotaCredito, el flujo de reembolso, pasarela_transacciones.codigo_autorizacion y el cierre en salones y POS. Si aparece una regla de negocio que no esté en esos documentos, preguntásela al owner con AskUserQuestion, en lenguaje de local: escena con montos, costo por opción y tandas de hasta 4. Las preguntas de "quién elige" ya se contestaron: no le preguntes de nuevo si elige el cajero.
+  3. Código solo en un worktree con ./scripts/entorno.sh. Implementación con subagentes Sonnet. domain-reviewer con las dudas que no verificaste, y api-security-reviewer si tocás controllers o DTOs. Gate completo de CLAUDE.md, recibo del pre-commit y docs vivas en el mismo commit.
+  4. No hagas push sin que el owner lo diga, porque main despliega en Railway.
+  ```
+
 - [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
   (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
   notas de crédito", § 3). Webpay permite reembolsar sin emitir NC (`generarNotaCredito` en el
