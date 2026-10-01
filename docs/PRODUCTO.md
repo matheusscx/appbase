@@ -931,6 +931,8 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   responsabilidad del comercio que usa el sistema, no del sistema. Eso incluye el riesgo de que
   no lo emita nadie, que es la infracción cara: art. 97 N°10 del Código Tributario, con multa y
   clausura. El sistema no bloquea cerrar una venta sin documento (owner, 2026-10-01).
+- **cada venta registra quién emitió su documento:** el sistema, la máquina (con el número), o
+  nadie. Así el comercio puede revisar sus ventas sin documento (owner, 2026-10-01).
 
 Hoy el sistema no emite nada (ADR-010), y el tipo de documento de la venta es solo una etiqueta: el
 POS y salones ponen Boleta por defecto, y la venta online nace sin tipo. La regla de `cancelada`
