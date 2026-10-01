@@ -923,8 +923,11 @@ La venta lleva un campo `canal` (`'fisico'` | `'online'`) que determina el flujo
 de una conversación con un posible cliente; todavía sin construir). En Chile la máquina de
 Transbank con que se cobra puede emitir ella misma la boleta o la factura, según cómo se
 configure. Si el sistema también emitiera, la venta llegaría dos veces al SII. Por eso:
-- al **cerrar la venta** se elige si el sistema emite boleta, factura o nada. No es una
-  configuración del local ni de la caja;
+- **cada venta resuelve sola quién emite su documento, según cómo se paga.** El comercio declara
+  una vez su regla, la misma que declara ante el SII como "modelo de emisión". Por ejemplo: con
+  tarjeta emite la máquina y con efectivo emite el sistema. El cajero no elige en cada venta.
+  Un pago mixto queda con los dos documentos (owner, 2026-10-01; reemplaza a "se elige al cerrar
+  la venta, no por configuración", que la sesión del frente leyó como que elige el cajero);
 - cuando el documento lo emitió la máquina, la venta guarda **el número** del documento (el
   folio que dio la máquina). Sirve para que una nota de crédito lo referencie después.
 - **el sistema es flexible y no impone la emisión.** Que la venta quede con su documento es

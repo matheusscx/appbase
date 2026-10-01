@@ -1231,6 +1231,15 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     se guarda como dato del pago, no como documento. No se arma el comprobante de 10 campos.
     Consecuencia para el diseño: "emitió el sistema" necesita distinguir **armado** de **enviado**,
     y vale para toda venta que el sistema documente, no solo la online.
+  - **Reabierta y corregida (owner, 2026-10-01, AskUserQuestion): quién emite lo decide el medio
+    de pago, no el cajero.** La sesión del frente preguntó qué documento aparece marcado al cobrar,
+    con la escena de un café con 200 ventas al día y la opción "el cajero elige siempre". El owner
+    contestó que no lo elige el cajero, y que eso reabría su respuesta anterior ("se elige al
+    cerrar la venta, no por configuración"). Elegido: el comercio declara una vez su regla, como su
+    "modelo de emisión" ante el SII (p.ej. con tarjeta emite la máquina, con efectivo el sistema), y
+    cada venta se resuelve sola por cómo se paga. Un pago mixto queda con los dos documentos. Sigue
+    siendo "por venta" en el sentido de que cada venta tiene su propio documento. Lo que cambió es
+    quién decide: una regla del comercio y no el cajero.
   Con esto **no queda ninguna regla de negocio abierta en este frente.** Lo que falte es de diseño
   y, si aparece una regla nueva, se le pregunta al owner.
 
