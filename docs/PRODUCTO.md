@@ -946,6 +946,13 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   - si no emitió nadie, una **devolución interna**, que no es un documento tributario.
 
   Un reembolso por pasarela también: ya no hay reembolso que no deje nada;
+- **la venta online deja su boleta lista para emitir**, igual que la nota de crédito de hoy: tipo,
+  montos e IVA congelados al cerrarse, sin enviar al SII hasta que exista la emisión. El código de
+  autorización de Webpay es un dato del pago, no el documento;
+- **el voucher que valió como boleta lo corrige el comercio**, citando el código de autorización.
+  Hasta que el sistema emita, la nota la hace el comercio por fuera y el sistema anota su número;
+- **en un pago mixto, la devolución corrige el documento del medio por el que se devuelve la
+  plata**: efectivo, la boleta del efectivo; tarjeta, el voucher;
 - **una venta pendiente se puede anular mientras nadie haya emitido documento**, sin importar la
   etiqueta. Si alguien emitió, va por nota de crédito. Hoy se mira la etiqueta: ver `cancelada`
   abajo.

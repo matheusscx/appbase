@@ -1152,7 +1152,8 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   del owner con un posible cliente: la máquina de Transbank ya puede emitir boleta o factura, y
   emitir también desde el sistema duplicaría la venta en el SII. Lo que decidió por
   AskUserQuestion: se elige **por venta, al cerrarla** (no por local ni por caja), y si emitió la
-  máquina, la venta guarda **el número**. Abre preguntas que hoy no tienen respuesta:
+  máquina, la venta guarda **el número**. Abría estas preguntas; **todas quedaron contestadas más
+  abajo**, en las tandas con el owner:
   - **Qué significa "venta documentada".** Hoy es la etiqueta `tipo_documento_id`, y el POS y
     salones ponen Boleta por defecto. La regla de que una venta documentada no se anula y va por
     NC se lee contra esa etiqueta, no contra lo emitido.
@@ -1222,6 +1223,16 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   - **Devolución en un pago mixto: el documento sale de cómo se devuelve la plata.** Si se
     devuelve en efectivo, corrige la boleta del efectivo. Si se reversa en la tarjeta, corrige el
     voucher.
+  - **La venta online queda lista para emitir, igual que hoy la NC.** Respuesta del owner: "dejar
+    todo listo para emitir, tal como funcionan hoy las notas de crédito". La orquestadora la
+    reformuló así y el owner confirmó con "sí": al cerrarse, el sistema arma la **boleta** de la
+    venta online con tipo, montos e IVA congelados, como arma hoy la NC, y no la envía al SII hasta
+    que exista la emisión. Queda como "emitió el sistema, pendiente de envío", y el código de Webpay
+    se guarda como dato del pago, no como documento. No se arma el comprobante de 10 campos.
+    Consecuencia para el diseño: "emitió el sistema" necesita distinguir **armado** de **enviado**,
+    y vale para toda venta que el sistema documente, no solo la online.
+  Con esto **no queda ninguna regla de negocio abierta en este frente.** Lo que falte es de diseño
+  y, si aparece una regla nueva, se le pregunta al owner.
 
 - [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
   (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
