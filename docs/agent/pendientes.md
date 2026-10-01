@@ -1193,6 +1193,14 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   - **Anular una venta pendiente se puede mientras nadie haya emitido documento**, sin importar la
     etiqueta. Si emitió alguien, va por nota de crédito. Cambia la regla de hoy (`cancelar` rechaza
     si hay `tipo_documento_id`) y la de [`PRODUCTO.md`](../PRODUCTO.md) § 10.
+  - **El número de la máquina lo tipea el cajero y es opcional.** Si lo deja vacío, la venta queda
+    como "máquina, sin número" y se completa después. Se marca si es un **voucher** o una **boleta
+    de la máquina**.
+  - **Todo reembolso deja registro** (NC, NC de la máquina anotada, o devolución interna, según
+    quién emitió). La pantalla elige cuál, y se va la casilla "generar nota de crédito" de
+    `ReembolsoModal.vue`. Esto resuelve la entrada de abajo del reembolso sin NC, que se construye
+    dentro de este frente.
+  Las reglas quedaron en [`PRODUCTO.md`](../PRODUCTO.md) § 10, "Emitir al SII es una elección".
 
 - [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
   (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
@@ -1205,7 +1213,9 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   venta pagada en parte por pasarela, con `REFUND` y NC, muestra de menos lo reembolsado. Lo
   decidió el owner: "lo vemos aparte". Pregunta para él: ¿un reembolso sin NC debería existir, o
   todo reembolso emite NC? Y si existe, ¿cómo se lo ve en el saldo?
-  **Queda en pausa (owner, 2026-10-01):** cuando se le pasó la pregunta contestó "no sé qué hacer con
+  ✅ **Decidida (owner, 2026-10-01): todo reembolso deja registro.** Se construye dentro del frente
+  de emisión, en la entrada de arriba. Lo que sigue es la historia de cómo se llegó.
+  **Quedó en pausa (owner, 2026-10-01):** cuando se le pasó la pregunta contestó "no sé qué hacer con
   esto", y la dejó pendiente. No se toma hasta que la retome. El contexto está en la spec del frente
   que la destapó:
   [`2026-10-01-vendido-neto-de-notas-credito-design.md`](../superpowers/specs/2026-10-01-vendido-neto-de-notas-credito-design.md)

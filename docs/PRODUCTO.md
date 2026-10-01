@@ -931,8 +931,27 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   responsabilidad del comercio que usa el sistema, no del sistema. Eso incluye el riesgo de que
   no lo emita nadie, que es la infracción cara: art. 97 N°10 del Código Tributario, con multa y
   clausura. El sistema no bloquea cerrar una venta sin documento (owner, 2026-10-01).
-- **cada venta registra quién emitió su documento:** el sistema, la máquina (con el número), o
-  nadie. Así el comercio puede revisar sus ventas sin documento (owner, 2026-10-01).
+- **cada venta registra quién emitió su documento:** el sistema, la máquina o nadie. Así el
+  comercio puede revisar sus ventas sin documento (owner, 2026-10-01). Si emitió la máquina, el
+  cajero **puede** tipear el número al cerrar, y si lo deja vacío lo completa después. Marca
+  también si es el código de un voucher que vale como boleta o el folio de una boleta de la
+  máquina, porque se corrigen distinto;
+- **una venta puede tener más de un documento**, como en el pago mixto: voucher por la parte con
+  tarjeta y boleta por la parte en efectivo;
+- **toda devolución deja registro, y siempre baja lo vendido, lo cobrado y el saldo.** Qué
+  registro depende de quién emitió:
+  - si emitió el sistema, una nota de crédito;
+  - si emitió la máquina, la nota de crédito la hace la máquina o su portal, y el sistema registra
+    la devolución y anota ese número;
+  - si no emitió nadie, una **devolución interna**, que no es un documento tributario.
+
+  Un reembolso por pasarela también: ya no hay reembolso que no deje nada;
+- **una venta pendiente se puede anular mientras nadie haya emitido documento**, sin importar la
+  etiqueta. Si alguien emitió, va por nota de crédito. Hoy se mira la etiqueta: ver `cancelada`
+  abajo.
+
+Todo esto lo decidió el owner el 2026-10-01 con las investigaciones de
+`docs/agent/investigaciones/2026-10-01-*`.
 
 Hoy el sistema no emite nada (ADR-010), y el tipo de documento de la venta es solo una etiqueta: el
 POS y salones ponen Boleta por defecto, y la venta online nace sin tipo. La regla de `cancelada`
