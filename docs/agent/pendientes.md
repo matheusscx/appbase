@@ -1100,9 +1100,25 @@ con las notas aparte, y corregir el día de la venta original.
       $60.000 restantes. Hoy esa venta sigue figurando con $60.000 por cobrar. Es la regla contable
       de siempre, la NC rebaja la cuenta por cobrar
       ([QuickBooks](https://quickbooks.intuit.com/learn-support/en-us/help-article/customer-refunds-credits/create-apply-credit-memos-delayed-credits-online/L5kne9EiI_US_en_US),
-      [Buk](https://www.buk.cl/novedades/finanzas/que-son-las-notas-de-credito-y-debito)). Devuelto
-      es lo mismo que resta el cobrado: el efectivo de `movimientos_caja` y los `REFUND` aprobados.
-      Las NC siguen fuera de la suma como ventas: sin pagos, cada una aparecería entera como deuda.
+      [Buk](https://www.buk.cl/novedades/finanzas/que-son-las-notas-de-credito-y-debito)).
+      Devuelto, en el saldo, es solo el efectivo de `movimientos_caja` con `venta_id` de una NC; los
+      `REFUND` de pasarela quedan afuera. La razón: el `REFUND` no guarda qué NC generó
+      (`aplicarPostReembolso` devuelve `notaCreditoId` pero no lo persiste), así que desde la base
+      no se distingue un reembolso con NC de uno sin NC. Con NC, la nota ya baja el saldo: $100.000
+      pagados por Webpay, `REFUND` + NC de $20.000 → 100 − 20 − 100, piso 0. Sin NC, el owner
+      eligió que el saldo no lo cuente (abajo). El único caso que sale mal es una venta pagada en
+      parte por pasarela, con saldo vivo, `REFUND` y NC: ahí el saldo muestra **de menos** lo
+      reembolsado. Con $100 de total, $60 pagados, `REFUND` y NC de $20, se deben $40 y la fórmula
+      da 20. Lo cubre la entrada del reembolso sin NC, en la § 6. Las NC siguen fuera de la suma
+      como ventas: sin pagos, cada una aparecería entera como deuda.
+    - **Ticket promedio con neto ≤ 0 o sin ventas: "—"**, igual que la variación. Lo decidió la
+      orquestadora en la misma pasada.
+  - **Lo que el owner contestó en la sesión del frente (AskUserQuestion, 2026-10-01):**
+    - **"Por cobrar" del inicio** (`resumen-negocio.service.ts`, `porCobrar.saldo`) entra en el
+      frente con la misma regla que "Saldo pendiente" de `/ventas`. Hoy hace la misma cuenta vieja
+      (total − pagado).
+    - **Reembolso por pasarela sin NC: "lo vemos aparte".** Va a entrada propia, en la § 6. Mientras
+      tanto el saldo no lo cuenta. En el cobrado del día sí resta, como ya estaba decidido.
   - Fuera de esta entrada: el % de anulaciones por garzón, que ya tiene la suya en la § 6.
 
 ## 4. Necesita que el owner conteste
@@ -1129,6 +1145,17 @@ y viaja con ella.
 transaccional nativo, con ALS — [ADR-020](../adr/020-contexto-transaccional-als.md));
 Prisma y Drizzle tienen el mismo modelo manual de transacciones que TypeORM. No es un
 pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evaluación.
+
+- [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
+  (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
+  notas de crédito", § 3). Webpay permite reembolsar sin emitir NC (`generarNotaCredito` en el
+  evento de `reembolso-callback.handler.ts`). La plata sale y el cobrado del día la resta, pero ni
+  el vendido ni el débito fiscal bajan, y el saldo de la venta no la ve. Además el `REFUND` no
+  guarda la NC que generó (`pasarela_transacciones` no tiene el id; `aplicarPostReembolso` solo
+  lo devuelve en la respuesta). Por eso el saldo pendiente no puede contar los reembolsos, y una
+  venta pagada en parte por pasarela, con `REFUND` y NC, muestra de menos lo reembolsado. Lo
+  decidió el owner: "lo vemos aparte". Pregunta para él: ¿un reembolso sin NC debería existir, o
+  todo reembolso emite NC? Y si existe, ¿cómo se lo ve en el saldo?
 
 - [ ] **Una nota de crédito que se reintenta se emite dos veces** (fiscal, **frente propio**,
   anotado 2026-09-19 al diseñar la idempotencia del cobro). `POST /ventas/:id/notas-credito`
