@@ -1163,6 +1163,11 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   [`2026-10-01-vendido-neto-de-notas-credito-design.md`](../superpowers/specs/2026-10-01-vendido-neto-de-notas-credito-design.md)
   (D10, D12 y § 6). La investigación de mercado ya está hecha:
   [`2026-10-01-reembolso-sin-nota-credito.md`](investigaciones/2026-10-01-reembolso-sin-nota-credito.md).
+  ⚠️ **"No facturamos todo"** (owner, 2026-10-01). Medido: la venta online nace sin tipo de
+  documento, y es justo la que se reembolsa por Webpay. El POS y salones mandan Boleta por
+  defecto. La pregunta no es solo NC sí o no: es qué registra una devolución sobre una venta **sin**
+  documento, donde una NC fiscal no corresponde, y cómo baja el vendido y el saldo sin ella.
+  Detalle en la investigación, sección "Qué hace hoy el sistema".
 
 - [ ] **Una nota de crédito que se reintenta se emite dos veces** (fiscal, **frente propio**,
   anotado 2026-09-19 al diseñar la idempotencia del cobro). `POST /ventas/:id/notas-credito`

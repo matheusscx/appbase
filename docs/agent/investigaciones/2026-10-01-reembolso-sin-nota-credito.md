@@ -17,6 +17,20 @@ investigación de mercado"). Contexto completo: la spec
   stock); si no, devuelve `{}`. No existe ningún camino que fuerce una NC — el flujo
   "reembolso sin documento" es una rama explícita, no un bug accidental de un `if` que
   faltó.
+- **No toda venta tiene documento tributario, y la que se reembolsa por pasarela casi nunca lo
+  tiene** (medido por la orquestadora el 2026-10-01, a partir de "no facturamos todo", dicho por el
+  owner). `ventas.tipo_documento_id` es nullable (`venta.entity.ts:45`). La venta online, que es la
+  que se cobra y se reembolsa por Webpay, nace **sin** tipo de documento: `online-callback.handler.ts`
+  arma el `CreateVentaDto` sin `tipoDocumentoId`. El POS y salones mandan por defecto el primero de
+  la lista, en Chile la Boleta (`pos.vue:174`, `salones/index.vue:2780`). Consecuencias:
+  - El argumento del SII de abajo vale solo cuando la venta tiene boleta o factura. Sobre una venta
+    sin documento no hay débito fiscal que corregir, y una NC (tipo 61) corregiría un documento
+    que no existe.
+  - Lo único que hoy baja el vendido y el saldo es la NC. Una venta sin documento que se devuelve
+    queda, en el sistema, sin forma de bajarlos sin emitir un documento fiscal.
+  - Las opciones del final se leen distinto. "Exigir NC siempre que haya venta" obligaría a emitir
+    un documento fiscal sobre ventas que nunca lo tuvieron. La pregunta pasa a ser si la NC depende
+    de que la venta tenga documento, y qué registra la devolución cuando no lo tiene.
 - **El camino sin NC es el que viene marcado.** En `frontend/app/components/ordenes/ReembolsoModal.vue:36`
   el modal arranca con `generarNotaCredito = ref(false)`: para que el reembolso emita NC, el
   operador tiene que tildarla. Agregado por la orquestadora al revisar el informe.
