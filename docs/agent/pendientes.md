@@ -1169,6 +1169,16 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   sistema, aunque la investigación mostró que es la infracción cara. Y cada venta registra
   **quién emitió**: el sistema, la máquina (con su número) o nadie, para que el comercio pueda
   revisar lo suyo (owner, 2026-10-01, a la pregunta de la orquestadora).
+  **El objetivo, confirmado por el owner (2026-10-01):** la orquestadora lo resumió y el owner
+  contestó "estás en lo correcto". En una frase: el sistema lleva bien la venta y la plata, y lo
+  tributario queda en manos del comercio y registrado.
+  1. La venta es lo que el sistema controla, y el documento es una opción de cada venta.
+  2. El sistema no impone la emisión, y el riesgo de no emitir es del comercio.
+  3. Cada venta registra quién emitió: el sistema, la máquina (con su número) o nadie.
+  4. Lo vendido, lo cobrado y el saldo bajan con una devolución aunque la venta no tenga
+     documento. Hoy solo los baja la NC: falta cómo se registra una devolución sin documento fiscal,
+     y eso destraba la entrada del reembolso sin NC.
+  5. Lo de hoy deja la emisión lista para cuando llegue (ADR-010), sin construirla antes.
 
 - [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
   (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
