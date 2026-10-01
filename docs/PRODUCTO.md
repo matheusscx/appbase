@@ -919,6 +919,20 @@ La venta lleva un campo `canal` (`'fisico'` | `'online'`) que determina el flujo
 
 **Tipos de documento tributario:** tabla propia `tipos_documento_tributario` vinculada a `pais` — cada país define sus documentos legales. Ejemplos Chile: Boleta, Factura, Nota de Crédito, Nota de Débito. No es un enum fijo.
 
+**Emitir al SII es una elección de cada venta, no algo automático** (owner, 2026-10-01, a partir
+de una conversación con un posible cliente; todavía sin construir). En Chile la máquina de
+Transbank con que se cobra puede emitir ella misma la boleta o la factura, según cómo se
+configure. Si el sistema también emitiera, la venta llegaría dos veces al SII. Por eso:
+- al **cerrar la venta** se elige si el sistema emite boleta, factura o nada. No es una
+  configuración del local ni de la caja;
+- cuando el documento lo emitió la máquina, la venta guarda **el número** del documento (el
+  folio que dio la máquina). Sirve para que una nota de crédito lo referencie después.
+
+Hoy el sistema no emite nada (ADR-010), y el tipo de documento de la venta es solo una etiqueta: el
+POS y salones ponen Boleta por defecto, y la venta online nace sin tipo. La regla de `cancelada`
+de abajo ("sin documento tributario") hoy se lee contra esa etiqueta; con la emisión tendrá que
+leerse contra lo emitido de verdad. Pendiente: `docs/agent/pendientes.md` § 6.
+
 **Estados de la venta:**
 - (sin `borrador`: la venta en construcción es la `cuenta` de salones)
 - `pendiente` — confirmada, esperando pago (canal físico)

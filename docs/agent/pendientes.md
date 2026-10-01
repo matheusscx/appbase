@@ -1146,6 +1146,23 @@ transaccional nativo, con ALS — [ADR-020](../adr/020-contexto-transaccional-al
 Prisma y Drizzle tienen el mismo modelo manual de transacciones que TypeORM. No es un
 pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evaluación.
 
+- [ ] **Emitir al SII se elige al cerrar cada venta, y lo emitido por la máquina se registra
+  con su número** (fiscal, **frente propio**; regla del owner del 2026-10-01, en
+  [`PRODUCTO.md`](../PRODUCTO.md) § 10, "Emitir al SII es una elección"). Salió de una conversación
+  del owner con un posible cliente: la máquina de Transbank ya puede emitir boleta o factura, y
+  emitir también desde el sistema duplicaría la venta en el SII. Lo que decidió por
+  AskUserQuestion: se elige **por venta, al cerrarla** (no por local ni por caja), y si emitió la
+  máquina, la venta guarda **el número**. Abre preguntas que hoy no tienen respuesta:
+  - **Qué significa "venta documentada".** Hoy es la etiqueta `tipo_documento_id`, y el POS y
+    salones ponen Boleta por defecto. La regla de que una venta documentada no se anula y va por
+    NC se lee contra esa etiqueta, no contra lo emitido.
+  - **La devolución de una venta sin documento:** qué la registra y cómo baja el vendido y el
+    saldo sin emitir una NC fiscal. Es la entrada de abajo (reembolso sin NC), que depende de esta.
+  - **La NC de una boleta que emitió la máquina:** ¿la emite el sistema referenciando ese número,
+    o la máquina o el portal? Y si la emite la máquina, ¿qué registra el sistema?
+  - Cómo entra el número que dio la máquina: tipeado o traído por la integración.
+  Cruza con ADR-010, que deja la emisión para el futuro. Se diseña junto con esa emisión, no antes.
+
 - [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
   (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
   notas de crédito", § 3). Webpay permite reembolsar sin emitir NC (`generarNotaCredito` en el
