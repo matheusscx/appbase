@@ -47,6 +47,14 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **El saldo de una venta no descuenta sus notas de crédito** (backend, `ventas.service.ts`:
+  `mapVentaListRow` → `saldo = total − pagado`; visto el 2026-10-01 al decidir el saldo pendiente
+  del frente "El vendido del día resta las notas de crédito", § 3). Una venta de $100.000 con
+  $40.000 pagados y una NC por $60.000 sigue mostrando $60.000 de saldo. Ese frente arregla solo
+  la tarjeta "Saldo pendiente" de `/ventas`. Falta medir el resto: el saldo por venta del listado,
+  el listado de deuda, y si se puede seguir cobrando esos $60.000. Si se puede, el cliente terminaría
+  pagando dos veces. Si eso pasa, es fiscal y va a la § 6 como frente propio.
+
 📌 Antes había una nota acá diciendo que la sección estaba vacía: la última entrada previa, la
 unicidad de `serie`, se cerró el 2026-09-19 y está en [`resueltos.md`](resueltos.md).
 
@@ -326,6 +334,10 @@ revisión independiente no lo pudo reproducir, con razón.
   monto que manda el cliente, `totalImpuestos: '0'` fijo (`ventas.service.ts:1023`), y las
   líneas no tienen relación exigida con ese monto. Falta el **desglose de IVA** y el
   **cuadre cabecera↔líneas**.
+  ⚠️ **Re-medir antes de tomarla (2026-10-01):** el cuadre cabecera↔líneas ya existe.
+  `crearNotaCredito` valoriza las líneas al precio de la venta, las escala al monto y deja el
+  resto en la línea de ajuste (`ajusteTotal`), y reparte por clasificación tributaria. Lo que
+  queda de esta entrada, si queda algo, sale de medir de nuevo.
   ⚠️ Quien lo tome tiene que contemplar que el camino **se dispara también por el webhook de
   reembolso** (`reembolso-callback.handler.ts`), no solo por un humano — y ahí rige la
   excepción del hecho consumado (no se rechaza, se cuantiza y se registra). Un guard nuevo
@@ -1070,6 +1082,27 @@ con las notas aparte, y corregir el día de la venta original.
     - qué devolución de plata entra en el cobrado: solo el efectivo de `movimientos_caja`, o
       también el reembolso por pasarela (webhook);
     - cómo se ve un día con neto negativo en la comparación.
+  - **Dos preguntas que salieron del diseño, decididas por la orquestadora (2026-10-01).** Cómo se
+    decidió: el owner pidió "investigá y decidí la 1 y la 2, no tengo idea"; las decidió la
+    orquestadora midiendo el código y con una búsqueda corta. Si aparece algo que las contradiga,
+    se reabren con el owner.
+    - **Lo más vendido resta las líneas de mercadería de la NC, con su cantidad y su monto.** La
+      duda era si esas líneas son confiables, porque la entrada "La nota de crédito no es un
+      documento todavía" dice que son informativas. Medido: ya no lo son. `crearNotaCredito`
+      valoriza cada línea al precio de la venta original, las escala para que no pasen el monto, y
+      el resto va a la línea de ajuste (`ajusteTotal = monto − líneas`). Así la cabecera es la suma
+      de las líneas, y lo que el ranking resta nunca supera lo que resta el vendido; la diferencia
+      es el ajuste. Una línea escalada ("2 lomitos acreditados por $5.000") resta 2 y $5.000.
+    - **El saldo pendiente descuenta las NC de cada venta.** Por venta: total − NC de esa venta −
+      (pagado − devuelto), con piso 0, porque lo que queda a favor del cliente no es plata por
+      cobrar. El caso es real: una NC manual solo exige que la venta esté `pagada` o
+      `pagada_parcial`, así que una venta de $100.000 con $40.000 pagados admite una NC por los
+      $60.000 restantes. Hoy esa venta sigue figurando con $60.000 por cobrar. Es la regla contable
+      de siempre, la NC rebaja la cuenta por cobrar
+      ([QuickBooks](https://quickbooks.intuit.com/learn-support/en-us/help-article/customer-refunds-credits/create-apply-credit-memos-delayed-credits-online/L5kne9EiI_US_en_US),
+      [Buk](https://www.buk.cl/novedades/finanzas/que-son-las-notas-de-credito-y-debito)). Devuelto
+      es lo mismo que resta el cobrado: el efectivo de `movimientos_caja` y los `REFUND` aprobados.
+      Las NC siguen fuera de la suma como ventas: sin pagos, cada una aparecería entera como deuda.
   - Fuera de esta entrada: el % de anulaciones por garzón, que ya tiene la suya en la § 6.
 
 ## 4. Necesita que el owner conteste
