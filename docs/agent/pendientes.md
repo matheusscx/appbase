@@ -1292,6 +1292,10 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     quién hace sus facturas (el sistema u otro facturador, que se anota con su número como el
     voucher), y **lo que queda debiendo sigue esa misma declaración**. Reemplaza a "la factura la
     hace siempre el sistema" de la cuarta tanda.
+  - **Un documento externo se pregunta al anular** (P3 de la spec, AskUserQuestion): "¿Ya hiciste
+    esta factura en tu facturador?". Sí → nota de crédito anotada; no → se anula, con quién lo
+    afirmó. Se descartaron "impide solo si tiene número" (el que no anotó el número deja una
+    factura viva) y "nunca se anula" (corrige una factura que puede no existir).
   - **La factura la hace siempre el sistema**, se pague como se pague. La regla del medio decide
     solo las boletas, que es lo que cubre el modelo de emisión del SII.
   - **Un comercio nuevo trae "emite el sistema" en todos los medios**: es el error barato.

@@ -966,6 +966,10 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   venta se anula y esa boleta queda descartada. Sin esto, con la regla de abajo toda venta nacería
   documentada y anular no aplicaría nunca. Cuando el sistema envíe al SII, lo enviado va por nota
   de crédito (owner, 2026-10-01);
+- **un documento hecho por fuera (otro facturador) se pregunta al anular**: el sistema sabe que le
+  tocaba al otro facturador, no si ya lo hizo. Al anular aparece "¿Ya hiciste esta factura en tu
+  facturador?". Si sí, va por nota de crédito, hecha por fuera y anotada con su número; si no, se
+  anula y queda registrado quién lo afirmó (owner, 2026-10-01);
 - **lo entregado se documenta al entregarlo, se haya pagado o no.** Para el SII un restaurante
   vende, no presta un servicio: la boleta sale antes de que el cliente se retire (Res. Ex. SII
   58/2003); en una tienda, al entregar (art. 55 DL 825). Una mesa de $100.000 que paga $40.000 con
