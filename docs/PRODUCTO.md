@@ -962,7 +962,17 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   plata**: efectivo, la boleta del efectivo; tarjeta, el voucher;
 - **una venta pendiente se puede anular mientras nadie haya emitido documento**, sin importar la
   etiqueta. Si alguien emitió, va por nota de crédito. Hoy se mira la etiqueta: ver `cancelada`
-  abajo.
+  abajo;
+- **lo que todavía no se pagó tiene su documento recién al pagarlo**, según el medio de ese pago.
+  Una mesa de $100.000 que paga $40.000 con tarjeta queda con el voucher por $40.000, y los
+  $60.000 tienen documento en el abono (owner, 2026-10-01);
+- **la factura la hace siempre el sistema**, se pague como se pague y aunque no se pague al
+  cerrar. La regla de cada medio decide solo quién emite las **boletas**, que es lo que el
+  comercio declara ante el SII como modelo de emisión (owner, 2026-10-01);
+- **un comercio nuevo trae "emite el sistema" en todos los medios** hasta que lo configure: si su
+  máquina también emite, sale un documento de más, que se corrige con nota de crédito. Es el error
+  barato (owner, 2026-10-01). La regla se guarda por comercio (`tenant_metodo_pago`), porque
+  `metodos_pago` es el catálogo común a todos.
 
 Todo esto lo decidió el owner el 2026-10-01 con las investigaciones de
 `docs/agent/investigaciones/2026-10-01-*`.

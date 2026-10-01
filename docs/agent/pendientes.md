@@ -1248,6 +1248,18 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     cerrar" y "al cerrar con valor por defecto".
   Con esto **no queda ninguna regla de negocio abierta en este frente.** Lo que falte es de diseño
   y, si aparece una regla nueva, se le pregunta al owner.
+  **Cuarta tanda, desde la sesión del frente (owner, AskUserQuestion, 2026-10-01).** Al medir el
+  código salieron tres reglas que no estaban escritas. Eligió la recomendada en las tres:
+  - **Lo no pagado tiene documento recién al pagarlo**, según el medio de ese cobro. Se descartó
+    que el sistema armara al cerrar la boleta por lo pendiente: si después pagaban con tarjeta,
+    la venta quedaba con dos documentos.
+  - **La factura la hace siempre el sistema**, se pague como se pague. La regla del medio decide
+    solo las boletas, que es lo que cubre el modelo de emisión del SII.
+  - **Un comercio nuevo trae "emite el sistema" en todos los medios**: es el error barato.
+  Y una corrección de lo medido: la regla no va en `metodos_pago`, que es el catálogo **global**,
+  sino en `tenant_metodo_pago`, que es la fila de cada comercio y la que ya edita esa pantalla.
+  El diseño aprobado está en la spec
+  [`2026-10-01-emision-por-venta-design.md`](../superpowers/specs/2026-10-01-emision-por-venta-design.md).
 
   **Cómo arrancarlo.** Esta es la solicitud que se pega en la sesión nueva (o se lanza desde la
   orquestadora). Es la fuente: si cambia una decisión, se actualiza acá en el mismo commit.
