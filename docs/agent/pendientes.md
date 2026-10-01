@@ -1120,6 +1120,28 @@ con las notas aparte, y corregir el día de la venta original.
     - **Reembolso por pasarela sin NC: "lo vemos aparte".** Va a entrada propia, en la § 6. Mientras
       tanto el saldo no lo cuenta. En el cobrado del día sí resta, como ya estaba decidido.
   - Fuera de esta entrada: el % de anulaciones por garzón, que ya tiene la suya en la § 6.
+  - **Una corrección se reconoce por `venta_referencia_id IS NOT NULL`, no por `es_nota_credito`**
+    (orquestadora, 2026-10-01). Lo pide el frente de emisión (E7 de su spec): la devolución interna
+    corrige una venta sin ser documento tributario, y así resta sola. Medido: hoy el único que
+    escribe esa columna es `crearNotaCredito`, así que el resultado es idéntico, y el frente de
+    emisión no tiene que reescribir estas consultas después. Deja también un solo mecanismo donde
+    hoy hay dos (`es_nota_credito` en el inicio, `IS DISTINCT FROM` el tipo en `/ventas/resumen`).
+  - **Cómo arrancarlo.** La sesión que escribió la spec desapareció el 2026-10-01 sin plan. Esta es
+    la solicitud para la sesión nueva:
+
+    > Sos la sesión del frente "El vendido, el cobrado y el Total facturado restan las notas de
+    > crédito". La orquestadora ("Listado de sesiones activas") coordina los frentes fiscales y es
+    > la jefa después del owner: lo que necesites decidir se lo mandás a ella. Trabajá en un
+    > worktree; arrancá con `git merge main` local. Todo lo decidido está en `docs/agent/pendientes.md`
+    > § 3, entrada "El vendido, el cobrado y el Total facturado restan las notas de crédito", y la
+    > spec ya está escrita: `docs/superpowers/specs/2026-10-01-vendido-neto-de-notas-credito-design.md`.
+    > Ajustala con lo único nuevo: una corrección se reconoce por `venta_referencia_id IS NOT NULL`
+    > (última viñeta de la entrada), porque el frente de emisión
+    > (`docs/superpowers/specs/2026-10-01-emision-por-venta-design.md` § 3.7) va a sumar la
+    > devolución interna, que no es NC. No hay decisiones de negocio abiertas. Siguiente paso: el
+    > plan en `docs/superpowers/plans/`, que pasa por el owner antes de escribir código. Es fiscal:
+    > frente solo, con su verificación (`verify-feature`). Al entrar a main avisá a la orquestadora,
+    > que destraba al frente de emisión.
 
 ## 4. Necesita que el owner conteste
 
