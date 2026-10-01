@@ -178,6 +178,11 @@ documentado. La excepción es E1b:
 - **Después**: `PATCH /ventas/:id/documentos/:documentoId` con `{ numero, clase? }`. Solo sobre
   documentos `maquina` o `externo` de esa venta (`clase` solo con `maquina`). Permiso
   `Ventas:Crear`, con el mismo alcance de caja que `findOne`. El `tenant_id` sale del token.
+- **La puerta a la integración queda abierta** (owner, `795f9bb5`). Este frente anota el número del
+  documento `externo` a mano. La integración con el facturador, que lo traería sola, es otra entrada
+  de la § 6 de `pendientes.md`. El diseño no la cierra: `numero` es nulo hasta que llega, y el
+  `PATCH` delega en un método del servicio de documentos que no depende de quién lo llame. Una
+  integración futura llama ese mismo método, y E10 ya trata igual un número llegue como llegue.
 - **El detalle de la venta** (`GET /ventas/:id`) devuelve `documentos[]`. El drawer los muestra en
   una sección "Documentos", con "Completar número" en los de la máquina y los hechos por fuera que no
   lo tienen.

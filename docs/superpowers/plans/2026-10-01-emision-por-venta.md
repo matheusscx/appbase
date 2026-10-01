@@ -340,6 +340,10 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
   (`resolverAlcanceDerivadoDeCaja`). Solo documentos `maquina` o `externo` de esa venta y de ese
   tenant: si no, 404. `clase` solo se acepta con `maquina`. El `tenant_id` sale del token.
 - [ ] El `PATCH` también sirve para el voucher duplicado de E1b: el contador necesita su número.
+- [ ] El `PATCH` delega en un método del servicio de documentos,
+  `completarNumero(manager, { tenantId, documentoId, numero, clase? })`, sin `usuarioId` ni nada del
+  request. Una integración futura con el facturador externo llama ese mismo método (spec § 3.4,
+  owner `795f9bb5`).
 - [ ] e2e: completar el número de un voucher → 200 y queda; el de una factura `externo` → 200; un documento `sistema` → 404; uno de
   otro tenant → 404; un cajero de otra caja sin `Cajas:Leer` → 404; un número vacío → 400.
 - [ ] `api-security-reviewer` sobre el controller y el DTO.
