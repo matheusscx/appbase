@@ -170,13 +170,14 @@ corrige**:
 - **Qué documento corrige lo decide por dónde vuelve la plata.** El modal de NC
   (`NotaCreditoModal.vue`) cambia la casilla "devolver dinero" por **"¿Por dónde vuelve la
   plata?"**:
-  - **Efectivo de la caja**: la salida de caja de hoy, con sus topes. Corrige el documento de los
-    pagos en efectivo.
-  - **Otro pago de la venta** (tarjeta, transferencia): no mueve caja, porque la reversa se hace
-    por fuera, en la máquina o en el banco. Corrige el documento de ese pago.
+  - **Uno de los pagos de la venta** (*"Efectivo de la caja · $60.000"*, *"Tarjeta de débito ·
+    $40.000"*). Corrige el documento de ese pago. Si el pago fue en efectivo, la plata sale de la
+    caja (la salida de hoy, con sus topes). Si no, no se mueve caja, porque la reversa se hace por
+    fuera, en la máquina o en el banco. Es por pago y no por "efectivo" porque hay máquinas que
+    emiten también por efectivo, y porque una venta puede tener dos pagos en efectivo.
   - **No vuelve plata**: solo se ofrece si la venta tiene saldo, y lo rebaja. Corrige el documento
     de la parte no pagada: la factura si la hay; si no, una devolución interna.
-  El servidor recibe la opción (y el pago, si es la segunda) y resuelve el documento. El cliente
+  El servidor recibe el pago elegido, o "no vuelve plata", y resuelve el documento. El cliente
   nunca manda el documento. En una venta con factura, el documento de todos sus pagos es la
   factura (E2).
 - **Tope por documento**: lo corregido de un documento no pasa su `monto`. Se suma a los dos topes
