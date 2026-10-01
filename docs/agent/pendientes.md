@@ -1240,6 +1240,12 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     cada venta se resuelve sola por cómo se paga. Un pago mixto queda con los dos documentos. Sigue
     siendo "por venta" en el sentido de que cada venta tiene su propio documento. Lo que cambió es
     quién decide: una regla del comercio y no el cajero.
+  - **Dónde se declara la regla: en cada método de pago** (owner, 2026-10-01, AskUserQuestion). El
+    owner notó que no hay un módulo para configurar las máquinas de cobro. No hace falta: la
+    máquina emite según como la dejó su proveedor, y el sistema solo necesita saber qué pasa con
+    cada medio. Se agrega a `metodos_pago` (pantalla `configuracion/metodos-pago.vue`) un dato:
+    con este medio emite el sistema, la máquina o nadie. Se descartaron "el cajero elige al
+    cerrar" y "al cerrar con valor por defecto".
   Con esto **no queda ninguna regla de negocio abierta en este frente.** Lo que falte es de diseño
   y, si aparece una regla nueva, se le pregunta al owner.
 

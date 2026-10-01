@@ -928,6 +928,10 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   tarjeta emite la máquina y con efectivo emite el sistema. El cajero no elige en cada venta.
   Un pago mixto queda con los dos documentos (owner, 2026-10-01; reemplaza a "se elige al cerrar
   la venta, no por configuración", que la sesión del frente leyó como que elige el cajero);
+- **la regla vive en cada método de pago.** En la pantalla de métodos de pago, que ya existe, el
+  comercio marca para cada uno quién emite: "Tarjeta → la máquina", "Efectivo → el sistema". No
+  hace falta un módulo para configurar las máquinas: la máquina emite según como la dejó su
+  proveedor, y el sistema solo necesita saber qué pasa con cada medio (owner, 2026-10-01);
 - cuando el documento lo emitió la máquina, la venta guarda **el número** del documento (el
   folio que dio la máquina). Sirve para que una nota de crédito lo referencie después.
 - **el sistema es flexible y no impone la emisión.** Que la venta quede con su documento es
