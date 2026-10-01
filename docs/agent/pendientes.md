@@ -1282,6 +1282,16 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     riesgo que había llevado a descartarla (deuda boleteada que se paga con tarjeta: el voucher
     duplica) quedó así: **avisa y queda anotado, sin bloquear el cobro**, hasta que el contador o
     el SII respondan. Detalle en `PRODUCTO.md` § 10.
+  **Quinta tanda, las dos preguntas que dejó la E1 nueva (owner, AskUserQuestion, 2026-10-01).**
+  - **Anular:** una boleta del sistema solo armada, sin enviar al SII, no cuenta como emitida; la
+    venta se anula y la boleta queda descartada. Sin esto, toda venta nacía documentada y
+    `POST /ventas/:id/anular` no aplicaba nunca.
+  - **La factura ya no la hace siempre el sistema.** El owner no tenía clara la pregunta original
+    (quién documenta la deuda de un comercio sin medios en "sistema") y la llevó a otro caso: boletas
+    por la máquina y facturas por otro facturador. Reformulada, eligió: el comercio declara una vez
+    quién hace sus facturas (el sistema u otro facturador, que se anota con su número como el
+    voucher), y **lo que queda debiendo sigue esa misma declaración**. Reemplaza a "la factura la
+    hace siempre el sistema" de la cuarta tanda.
   - **La factura la hace siempre el sistema**, se pague como se pague. La regla del medio decide
     solo las boletas, que es lo que cubre el modelo de emisión del SII.
   - **Un comercio nuevo trae "emite el sistema" en todos los medios**: es el error barato.

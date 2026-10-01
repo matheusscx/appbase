@@ -962,7 +962,10 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   plata**: efectivo, la boleta del efectivo; tarjeta, el voucher;
 - **una venta pendiente se puede anular mientras nadie haya emitido documento**, sin importar la
   etiqueta. Si alguien emitió, va por nota de crédito. Hoy se mira la etiqueta: ver `cancelada`
-  abajo;
+  abajo. Una boleta del sistema **solo armada, sin enviar al SII**, no cuenta como emitida: la
+  venta se anula y esa boleta queda descartada. Sin esto, con la regla de abajo toda venta nacería
+  documentada y anular no aplicaría nunca. Cuando el sistema envíe al SII, lo enviado va por nota
+  de crédito (owner, 2026-10-01);
 - **lo entregado se documenta al entregarlo, se haya pagado o no.** Para el SII un restaurante
   vende, no presta un servicio: la boleta sale antes de que el cliente se retire (Res. Ex. SII
   58/2003); en una tienda, al entregar (art. 55 DL 825). Una mesa de $100.000 que paga $40.000 con
@@ -975,9 +978,14 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   máquina también vale como boleta y duplicaría la del sistema. El SII no lo resuelve por escrito.
   El cobro no se bloquea: la pantalla avisa y el pago queda marcado para que el contador lo
   corrija (owner, 2026-10-01);
-- **la factura la hace siempre el sistema**, se pague como se pague y aunque no se pague al
-  cerrar. La regla de cada medio decide solo quién emite las **boletas**, que es lo que el
-  comercio declara ante el SII como modelo de emisión (owner, 2026-10-01);
+- **quién hace las facturas lo declara el comercio una vez: el sistema u otro facturador**
+  (el facturador gratuito del SII, su software contable). Si es otro, la venta queda con "factura
+  hecha por fuera" y su número, igual que el voucher de la máquina. **Lo que queda debiendo sigue la
+  misma declaración**: boleta del sistema, o documento hecho por fuera con su número. La regla de
+  cada medio de pago decide solo quién emite las **boletas** de lo pagado, que es lo que el
+  comercio declara ante el SII como modelo de emisión. Reemplaza a "la factura la hace siempre el
+  sistema", que dejaba con facturas duplicadas al comercio que factura por fuera (owner,
+  2026-10-01);
 - **un comercio nuevo trae "emite el sistema" en todos los medios** hasta que lo configure: si su
   máquina también emite, sale un documento de más, que se corrige con nota de crédito. Es el error
   barato (owner, 2026-10-01). La regla se guarda por comercio (`tenant_metodo_pago`), porque
