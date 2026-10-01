@@ -1179,6 +1179,20 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
      documento. Hoy solo los baja la NC: falta cómo se registra una devolución sin documento fiscal,
      y eso destraba la entrada del reembolso sin NC.
   5. Lo de hoy deja la emisión lista para cuando llegue (ADR-010), sin construirla antes.
+  **Afinado con el owner (AskUserQuestion, 2026-10-01; eligió la opción recomendada en las cuatro):**
+  - **Devolución sobre una venta sin documento → "devolución interna".** No es un documento
+    tributario, pero baja lo vendido, lo cobrado y el saldo igual que una NC. Los reportes del
+    frente del vendido neto suman las NC; cuando exista la devolución interna, tienen que sumarla
+    también.
+  - **Devolución de una venta cuya boleta emitió la máquina:** la NC se hace en la máquina o en su
+    portal, porque corrige quien emitió. El sistema registra la devolución, baja lo vendido y anota
+    el número de esa NC.
+  - **Una venta puede tener más de un documento.** Ejemplo: pago mixto con voucher que vale como
+    boleta por la parte con tarjeta y boleta del sistema por la parte en efectivo. Las devoluciones
+    tienen que saber de qué parte salen.
+  - **Anular una venta pendiente se puede mientras nadie haya emitido documento**, sin importar la
+    etiqueta. Si emitió alguien, va por nota de crédito. Cambia la regla de hoy (`cancelar` rechaza
+    si hay `tipo_documento_id`) y la de [`PRODUCTO.md`](../PRODUCTO.md) § 10.
 
 - [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
   (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
