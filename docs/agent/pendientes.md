@@ -41,16 +41,6 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
-- [ ] **"Este mes" de la varianza sale del reloj del navegador, no del día de negocio del
-  tenant** (frontend, `pages/reportes/varianza.vue` ~83-87; visto el 2026-09-30 por un fallo de CI,
-  ver el cierre en [`resueltos.md`](resueltos.md)). La página arranca el rango en `hoyLocal()`, del 1
-  del mes a hoy, y la API lee esas fechas en la zona y la hora de corte del tenant. El día 1, entre la
-  medianoche y la hora de corte (0 a 6), o con el navegador en otra zona, pide un mes que el tenant
-  todavía no empezó y la tabla sale vacía. **El arreglo ya existe en el repo:**
-  `pages/salones/anulaciones.vue` arranca con `hoyLocal()` y se corrige con `useDiaNegocio()` cuando
-  resuelve, sin pisar un filtro que el usuario ya tocó. Hacer lo mismo en varianza, con el inicio del
-  mes tomado del día de negocio. Test de pantalla con `diaNegocioHoy` en un mes distinto del reloj.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:

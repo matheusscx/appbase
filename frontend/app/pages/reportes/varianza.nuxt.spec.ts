@@ -14,7 +14,11 @@
 //   7. El aviso de "sin costo" dice el número del resumen y su link filtra el
 //      LISTADO (nunca el resumen); con el filtro puesto, la línea queda para
 //      poder sacarlo aunque el número baje a cero.
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+//   8. Arranque optimista "este mes" (entrada 1 de `docs/agent/pendientes.md`):
+//      se corrige contra `diaNegocioHoy` (`GET /tenants/me`) con el mismo
+//      criterio que `salones/anulaciones.vue` — ver su spec para el porqué del
+//      mecanismo (comparar contra el valor de arranque, sin flag ni watch).
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Varianza from './varianza.vue'
 
@@ -105,6 +109,39 @@ const LOCAL = { id: 'ub-local', nombre: 'Local', tipo: 'local', activo: true }
 const BODEGA = { id: 'ub-bodega', nombre: 'Bodega', tipo: 'bodega', activo: true }
 let ubicacionesBackend: typeof LOCAL[] = [LOCAL]
 
+/** 'YYYY-MM-DD' de HOY, mismo criterio que `hoyLocal()` (fecha LOCAL, no
+ *  `toISOString()` que da UTC) — mismo helper que `anulaciones.nuxt.spec.ts`. */
+function hoyLocalTest(): string {
+  const d = new Date()
+  const mes = String(d.getMonth() + 1).padStart(2, '0')
+  const dia = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${mes}-${dia}`
+}
+
+/** Task 1 de `docs/agent/pendientes.md`: corte y día de negocio que devuelve
+ *  `GET /tenants/me`. Default = HOY (sin `vi.setSystemTime`, el reloj real):
+ *  así ningún test preexistente —que no sabe nada de día de negocio— dispara
+ *  el ajuste automático sin querer. */
+let horaCorteBackend = 0
+let diaNegocioHoyBackend = hoyLocalTest()
+/** Con esto en `true`, `/tenants/me` NO resuelve solo — el test dispara
+ *  `tenantMeResolver` cuando quiere, para tocar un filtro ANTES de que el día
+ *  de negocio llegue y comprobar que el ajuste automático no lo pisa. */
+let tenantMePendiente = false
+let tenantMeResolver: ((v: { horaCorte: number, diaNegocioHoy: string }) => void) | null = null
+
+/** Solo para el test de la carrera del resumen: cuando está puesto, decide la
+ *  respuesta de `/reportes/varianza/resumen` según el `desde` que trae la URL
+ *  (así una llamada puede quedar pendiente y la otra resolver al toque). `null`
+ *  = comportamiento normal (responde `RESUMEN`). */
+let resumenDispatcher: ((url: string) => Promise<unknown>) | null = null
+/** El resolver del resumen "optimista" que ese test deja pendiente a mano.
+ *  A nivel de módulo, como `tenantMeResolver`: una `let` local `T | null = null`
+ *  queda angostada a `null` en su función —TS no ve la asignación que hace el
+ *  callback del `Promise`— y la llamada no tipa. Leída desde otra función
+ *  (el `it`), usa el tipo declarado. */
+let resolverOptimista: ((v: typeof RESUMEN_BASE) => void) | null = null
+
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
     get esAdmin() { return true },
@@ -117,13 +154,18 @@ mockNuxtImport('useApiFetch', () => {
     if (typeof url !== 'string') return Promise.resolve({})
     llamadas.push(url)
     if (url.includes('/tenants/me')) {
-      return Promise.resolve({ horaCorte: 0, diaNegocioHoy: '2026-09-21' })
+      if (tenantMePendiente) {
+        return new Promise((res) => { tenantMeResolver = res })
+      }
+      return Promise.resolve({ horaCorte: horaCorteBackend, diaNegocioHoy: diaNegocioHoyBackend })
     }
     if (url.includes('/ubicaciones')) {
       return Promise.resolve(ubicacionesBackend)
     }
     // '/reportes/varianza/resumen' también matchea '/reportes/varianza': primero el resumen.
-    if (url.includes('/reportes/varianza/resumen')) return Promise.resolve(RESUMEN)
+    if (url.includes('/reportes/varianza/resumen')) {
+      return resumenDispatcher ? resumenDispatcher(url) : Promise.resolve(RESUMEN)
+    }
     if (url.includes('/reportes/varianza')) {
       return Promise.resolve({
         data: listado,
@@ -153,6 +195,12 @@ beforeEach(() => {
   llamadas = []
   ubicacionesBackend = [LOCAL]
   RESUMEN = RESUMEN_BASE
+  horaCorteBackend = 0
+  diaNegocioHoyBackend = hoyLocalTest()
+  tenantMePendiente = false
+  tenantMeResolver = null
+  resumenDispatcher = null
+  resolverOptimista = null
   listado = [
     fila({ itemId: 'harina', itemNombre: 'Harina' }),
     fila({ itemId: 'queso', itemNombre: 'Queso', otros: '2.0000' }),
@@ -367,6 +415,151 @@ describe('varianza — gráfica', () => {
     RESUMEN = { ...RESUMEN_BASE, top: [], fueraDelTop: 0 }
     const wrapper = await montar()
     expect(wrapper.findComponent({ name: 'AppGrafica' }).props('vacio')).toBe(true)
+    wrapper.unmount()
+  })
+})
+
+// Entrada 1 de `docs/agent/pendientes.md`: el arranque "este mes" con
+// `hoyLocal()` (reloj del navegador) puede pedir un mes que el tenant no
+// empezó — entre las 00:00 y la hora de corte, o con el navegador en otra
+// zona. Mismo mecanismo que `anulaciones.vue` § "arranca en el día de
+// negocio": comparar el valor ACTUAL contra el de arranque, sin flag ni watch.
+//
+// El reloj fijo de estos tests es 1-mar-2026 (NO "hoy" del runner): si la
+// fecha fija coincidiera con la fecha real, el mutante del punto 1 fallaría
+// igual aunque `vi.setSystemTime` no hiciera nada, y el test no probaría lo
+// que dice probar.
+describe('varianza — arranca en el mes del día de negocio', () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  it('con diaNegocioHoy en el mes ANTERIOR al del reloj, desde y hasta terminan ahí', async () => {
+    // Reloj del navegador: 1 de marzo de 2026, tempranito, antes de la hora
+    // de corte — el caso de riesgo real. `vi.setSystemTime` sin
+    // `useFakeTimers` solo fija `Date`; `setTimeout` sigue siendo real.
+    vi.setSystemTime(new Date(2026, 2, 1, 2, 0, 0))
+    horaCorteBackend = 5
+    diaNegocioHoyBackend = '2026-02-28' // el tenant todavía no cerró febrero
+
+    const wrapper = await montar()
+    const vm = wrapper.vm as unknown as { filtroDesde: string | null, filtroHasta: string | null }
+
+    expect(vm.filtroDesde).toBe('2026-02-01')
+    expect(vm.filtroHasta).toBe('2026-02-28')
+
+    // La corrección llega DESPUÉS del fetch inicial (que salió con el rango
+    // optimista): la llamada que importa es la ÚLTIMA de cada ruta, no la primera.
+    const lista = llamadas.filter(u => u.includes('/reportes/varianza?')).pop()
+    const resumen = llamadas.filter(u => u.includes('/reportes/varianza/resumen?')).pop()
+    expect(lista).toContain('desde=2026-02-01')
+    expect(lista).toContain('hasta=2026-02-28')
+    expect(resumen).toContain('desde=2026-02-01')
+    expect(resumen).toContain('hasta=2026-02-28')
+
+    wrapper.unmount()
+  })
+
+  // Punto 2 de la ronda de revisión: sin esto, nada en el archivo comprueba
+  // que `vi.useRealTimers()` de verdad revierte un `setSystemTime` que se usó
+  // SIN `useFakeTimers` (según el código fuente de la versión instalada,
+  // `setSystemTime` sin fake timers solo llama a `mockDate`, y `useRealTimers`
+  // lo revierte con `resetDate` — pero el código fuente no es el test). Corre
+  // JUSTO DESPUÉS del test de arriba, que fijó el reloj a 1-mar-2026.
+  it('el afterEach del test anterior ya restauró el reloj real', () => {
+    const real = new Date()
+    // Si `useRealTimers()` no hubiera revertido el `setSystemTime` del test
+    // de arriba, acá seguiría viéndose el 1-mar-2026 (año 2026, mes de marzo
+    // = índice 2) en vez de la fecha real de la corrida.
+    expect(real.getFullYear() === 2026 && real.getMonth() === 2).toBe(false)
+  })
+
+  it('si el usuario ya tocó un filtro antes de que resuelva /tenants/me, no se pisa', async () => {
+    vi.setSystemTime(new Date(2026, 2, 1, 2, 0, 0))
+    tenantMePendiente = true
+    horaCorteBackend = 5
+
+    const wrapper = await mountSuspended(Varianza, { attachTo: document.body })
+    useMonedasStore().hydrate([CLP, USD], 'tenant-1')
+    const vm = wrapper.vm as unknown as { filtroDesde: string | null, filtroHasta: string | null }
+    vm.filtroDesde = '2026-01-01'
+
+    tenantMeResolver?.({ horaCorte: 5, diaNegocioHoy: '2026-02-28' })
+    await new Promise(r => setTimeout(r, 40))
+
+    expect(vm.filtroDesde).toBe('2026-01-01')
+    // "hasta" tampoco se toca: el ajuste es de a dos, y "desde" ya cambió.
+    expect(vm.filtroHasta).not.toBe('2026-02-28')
+
+    wrapper.unmount()
+  })
+
+  /**
+   * Ronda de revisión: `ajustarAlDiaDeNegocio()` (sin `await`) corre en
+   * paralelo con `prepararUbicaciones()`, y las dos pueden invocar
+   * `cargarResumen()`. Sin serializar, gana quien RESPONDA último — acá se
+   * fuerza justo ese orden adverso (el optimista responde después que el
+   * corregido) para comprobar que, de todas formas, gana quien se INVOCÓ
+   * último.
+   */
+  it('si la respuesta del resumen optimista llega DESPUÉS que la del corregido, el resumen final es igual el corregido', async () => {
+    vi.setSystemTime(new Date(2026, 2, 1, 2, 0, 0))
+    horaCorteBackend = 5
+    tenantMePendiente = true // retiene /tenants/me para que ubicaciones resuelva primero
+
+    const RESUMEN_OPTIMISTA = { ...RESUMEN_BASE, fueraDelTop: 111 }
+    const RESUMEN_CORREGIDO = { ...RESUMEN_BASE, fueraDelTop: 222 }
+    resumenDispatcher = (url: string) => {
+      if (url.includes('desde=2026-03-01')) {
+        // El resumen con el rango optimista (marzo): queda pendiente a mano.
+        return new Promise<typeof RESUMEN_BASE>((res) => { resolverOptimista = res })
+      }
+      if (url.includes('desde=2026-02-01')) {
+        // El resumen ya corregido (febrero): responde al toque.
+        return Promise.resolve(RESUMEN_CORREGIDO)
+      }
+      return Promise.resolve(RESUMEN_BASE)
+    }
+
+    const wrapper = await mountSuspended(Varianza, { attachTo: document.body })
+    useMonedasStore().hydrate([CLP, USD], 'tenant-1')
+    // Deja resolver ubicaciones: dispara el `cargarResumen()` explícito de
+    // `onMounted` con el rango optimista (marzo) — y lo deja pendiente.
+    await new Promise(r => setTimeout(r, 20))
+
+    // Ahora llega /tenants/me: corrige los filtros → el `watch` encola un
+    // SEGUNDO `cargarResumen()` (febrero), detrás del primero.
+    tenantMeResolver?.({ horaCorte: 5, diaNegocioHoy: '2026-02-28' })
+    await new Promise(r => setTimeout(r, 20))
+
+    // Recién ahora responde el optimista — tarde, después de que el
+    // corregido ya estaba encolado.
+    resolverOptimista?.(RESUMEN_OPTIMISTA)
+    await new Promise(r => setTimeout(r, 30))
+
+    const vm = wrapper.vm as unknown as { resumen: typeof RESUMEN_BASE | null }
+    expect(vm.resumen?.fueraDelTop).toBe(222)
+
+    wrapper.unmount()
+  })
+
+  it('con diaNegocioHoy igual a hoyLocal(), no reasigna ni dispara una recarga extra', async () => {
+    // `diaNegocioHoyBackend` por defecto (`beforeEach`) ya es `hoyLocalTest()`
+    // — el corte no mueve el día de negocio del que ve el navegador, así que
+    // no hay nada que corregir.
+    horaCorteBackend = 5
+
+    const wrapper = await montar()
+    const vm = wrapper.vm as unknown as { filtroDesde: string | null, filtroHasta: string | null }
+    const hoy = hoyLocalTest()
+    expect(vm.filtroDesde).toBe(`${hoy.slice(0, 8)}01`)
+    expect(vm.filtroHasta).toBe(hoy)
+
+    const llamadasTrasMontar = llamadas.length
+    await new Promise(r => setTimeout(r, 40))
+
+    // Sin reasignación, `watch(filtrosComunes, cargarResumen)` y el refetch
+    // interno de `usePaginatedList` no tienen motivo para disparar de nuevo.
+    expect(llamadas.length).toBe(llamadasTrasMontar)
+
     wrapper.unmount()
   })
 })

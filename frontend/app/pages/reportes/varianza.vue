@@ -80,11 +80,19 @@ const monedasStore = useMonedasStore()
 const { pageSize } = useUserPreferences()
 const { ubicaciones, local, hayBodegas, cargar: cargarUbicaciones } = useUbicaciones()
 
-// Arranca en "este mes": del 1 a hoy. La fecha sale de `hoyLocal()`, que la arma
-// por componentes locales —recortar un string ya local no pasa por UTC—.
-const hoy = hoyLocal()
-const filtroDesde = ref<string | null>(`${hoy.slice(0, 8)}01`)
-const filtroHasta = ref<string | null>(hoy)
+// Arranca optimista en "este mes" con el reloj del navegador (`hoyLocal()`,
+// por componentes locales: recortar un string ya local no pasa por UTC) y se
+// corrige cuando resuelve el día de negocio del servidor — mismo patrón que
+// `salones/anulaciones.vue`. Entre las 00:00 y la hora de corte del tenant (o
+// con el navegador en otro huso) el día 1 local todavía no es el día 1 del
+// tenant, y pedir "este mes" con esa fecha deja la tabla vacía. `hoyLocalInicial`
+// y `desdeInicial` congelan los valores de arranque: si al resolver los dos
+// filtros siguen en ellos, se ajustan a `[1 del mes de diaNegocioHoy,
+// diaNegocioHoy]`; si el usuario ya tocó cualquiera de los dos, no se pisa.
+const hoyLocalInicial = hoyLocal()
+const desdeInicial = `${hoyLocalInicial.slice(0, 8)}01`
+const filtroDesde = ref<string | null>(desdeInicial)
+const filtroHasta = ref<string | null>(hoyLocalInicial)
 const filtroUbicacion = ref(TODAS)
 // Arranca prendido. ⚠️ El owner decidió QUÉ esconde el filtro (2026-09-20),
 // no su default: el default lo eligió el agente al implementar, leyendo esa
@@ -93,6 +101,17 @@ const filtroUbicacion = ref(TODAS)
 const soloConVarianza = ref(true)
 // El link del aviso de "sin costo". Arranca apagado: lo prende el aviso.
 const soloSinCosto = ref(false)
+
+const { diaNegocioHoy, cargar: cargarDiaNegocio } = useDiaNegocio()
+
+/** Corrige el arranque optimista de arriba contra el día de negocio real. */
+async function ajustarAlDiaDeNegocio() {
+  await cargarDiaNegocio()
+  if (!diaNegocioHoy.value || diaNegocioHoy.value === hoyLocalInicial) return
+  if (filtroDesde.value !== desdeInicial || filtroHasta.value !== hoyLocalInicial) return
+  filtroDesde.value = `${diaNegocioHoy.value.slice(0, 8)}01`
+  filtroHasta.value = diaNegocioHoy.value
+}
 
 const ubicacionOpts = computed<Opt[]>(() => [
   { label: 'Todas las ubicaciones', value: TODAS },
@@ -129,32 +148,47 @@ const loadingResumen = ref(false)
 // Distinto de "no hay datos": la gráfica dice que no pudo cargar, no que no hay pérdidas.
 const resumenFallo = ref(false)
 
+// `ajustarAlDiaDeNegocio()` (sin `await`, ver `onMounted`) corre en paralelo
+// con `prepararUbicaciones()`, así que dos invocaciones de `cargarResumen()`
+// pueden quedar en vuelo a la vez: sin esto gana la que RESPONDA última, no
+// la que se LLAMÓ última. Mismo patrón que `usePaginatedList.fetch` /
+// `configuracion/categorias.vue` → `cargar()`: cada invocación encadena sobre
+// la promesa de la anterior y recién entonces lee los filtros y escribe
+// `resumen`, así que quedan en orden de invocación.
+let resumenEnCurso: Promise<void> | null = null
+
 async function cargarResumen() {
-  if (!rangoCompleto.value) {
-    resumen.value = null
-    return
-  }
-  loadingResumen.value = true
-  resumenFallo.value = false
-  try {
-    // Solo los filtros comunes: `ResumenVarianzaDto` no declara
-    // `soloConVarianza` —los totales no siguen esa llave—, y el pipe global
-    // rechaza con 400 lo que el DTO no declara: mandarlo tumba el resumen.
-    const params = new URLSearchParams()
-    for (const [clave, valor] of Object.entries(filtrosComunes.value)) {
-      if (valor) params.set(clave, valor)
+  const previa = resumenEnCurso
+  const actual = (async () => {
+    await previa
+    if (!rangoCompleto.value) {
+      resumen.value = null
+      return
     }
-    resumen.value = await useApiFetch<ResumenVarianza>(
-      `${apiUrl}/reportes/varianza/resumen?${params.toString()}`,
-    )
-  }
-  catch (e: unknown) {
-    resumenFallo.value = true
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar el resumen'), color: 'error' })
-  }
-  finally {
-    loadingResumen.value = false
-  }
+    loadingResumen.value = true
+    resumenFallo.value = false
+    try {
+      // Solo los filtros comunes: `ResumenVarianzaDto` no declara
+      // `soloConVarianza` —los totales no siguen esa llave—, y el pipe global
+      // rechaza con 400 lo que el DTO no declara: mandarlo tumba el resumen.
+      const params = new URLSearchParams()
+      for (const [clave, valor] of Object.entries(filtrosComunes.value)) {
+        if (valor) params.set(clave, valor)
+      }
+      resumen.value = await useApiFetch<ResumenVarianza>(
+        `${apiUrl}/reportes/varianza/resumen?${params.toString()}`,
+      )
+    }
+    catch (e: unknown) {
+      resumenFallo.value = true
+      toast.add({ title: apiErrorMsg(e, 'Error al cargar el resumen'), color: 'error' })
+    }
+    finally {
+      loadingResumen.value = false
+    }
+  })()
+  resumenEnCurso = actual
+  await actual
 }
 
 watch(filtrosComunes, cargarResumen, { deep: true })
@@ -173,15 +207,22 @@ async function prepararUbicaciones() {
   }
 }
 
-// ⚠️ El primer resumen espera a las ubicaciones. Pedirlo en paralelo lanzaba
-// dos —"todas" y, al llegar las ubicaciones, "el local"— sin nada que
-// descartara la vieja: si "todas" volvía última, las tarjetas sumaban todas
-// las ubicaciones y la tabla mostraba solo el local. Si prepararUbicaciones
-// cambió el filtro, el `watch` ya pidió el resumen; si no, se pide acá.
+// ⚠️ El resumen explícito de acá abajo espera a las ubicaciones, para no
+// pedirlo dos veces cuando `prepararUbicaciones` cambia el filtro (ese cambio
+// ya dispara el `watch(filtrosComunes, …)`). `ajustarAlDiaDeNegocio()` corre
+// SIN esperar esto, así que puede terminar antes, después o en medio —y si
+// corrige desde/hasta dispara el mismo `watch`—: dos invocaciones de
+// `cargarResumen()` pueden quedar en vuelo a la vez. No hace falta
+// coordinarlas DESDE ACÁ porque `cargarResumen()` ya se serializa sola
+// (`resumenEnCurso`, arriba): la que se invoca última es la que escribe
+// última, sin importar en qué orden responda la red.
 onMounted(async () => {
   // El layout ya lo pide al montar; se repite acá (es idempotente) para que
   // entrar a la pantalla reintente si aquella carga falló.
   monedasStore.ensureLoaded()
+  // Sin await: si corrige desde/hasta, el `watch(filtrosComunes, …)` de abajo
+  // y el refetch interno de `usePaginatedList` ya reaccionan solos.
+  ajustarAlDiaDeNegocio()
   const antes = filtroUbicacion.value
   await prepararUbicaciones()
   if (filtroUbicacion.value === antes) cargarResumen()
