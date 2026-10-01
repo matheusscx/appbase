@@ -2004,6 +2004,16 @@ marcador interno, no un documento tributario.
 
 ---
 
+- [ ] **Integración con un facturador externo (emitir de verdad)** (backend; **fiscal: frente
+  propio**, ADR-010). El frente de emisión por venta construye el facturador externo **sin
+  integración**: el comercio hace el documento en su facturador, acá se anota el número a mano, y
+  al anular se le pregunta si ya lo hizo (`PRODUCTO.md` § 10). Con integración, el sistema le manda
+  la venta al facturador (Bsale, OpenFactura u otro) y recibe el número solo; la pregunta al anular
+  deja de hacer falta porque el sistema sabe si el documento existe. Es la misma pieza que la
+  emisión real del "emite el sistema", así que van juntas. El diseño de hoy deja el lugar: el
+  número que hoy se tipea, mañana lo llena la integración. Decidido por el owner el 2026-10-01
+  (AskUserQuestion: "anotado para después"); sin fecha.
+
 ## 7. Acción del owner fuera del código
 
 No se resuelve programando. Está acá para que tenga quién la reclame.
