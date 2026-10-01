@@ -1149,8 +1149,9 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
 - [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
   (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
   notas de crédito", § 3). Webpay permite reembolsar sin emitir NC (`generarNotaCredito` en el
-  evento de `reembolso-callback.handler.ts`). La plata sale y el cobrado del día la resta, pero ni
-  el vendido ni el débito fiscal bajan, y el saldo de la venta no la ve. Además el `REFUND` no
+  evento de `reembolso-callback.handler.ts`), y es lo que viene marcado: `ReembolsoModal.vue` arranca con
+  la nota destildada. La plata sale, pero ni el vendido ni el débito fiscal bajan, y el saldo de la
+  venta no la ve. Hoy el cobrado tampoco la ve; restarla es la D6 del frente del vendido neto. Además el `REFUND` no
   guarda la NC que generó (`pasarela_transacciones` no tiene el id; `aplicarPostReembolso` solo
   lo devuelve en la respuesta). Por eso el saldo pendiente no puede contar los reembolsos, y una
   venta pagada en parte por pasarela, con `REFUND` y NC, muestra de menos lo reembolsado. Lo
@@ -1160,8 +1161,8 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   esto", y la dejó pendiente. No se toma hasta que la retome. El contexto está en la spec del frente
   que la destapó:
   [`2026-10-01-vendido-neto-de-notas-credito-design.md`](../superpowers/specs/2026-10-01-vendido-neto-de-notas-credito-design.md)
-  (D10, D12 y § 6). Si se retoma, cabe ofrecerle una pasada de investigación de mercado: cómo tratan
-  Toast, Square y Shopify un reembolso sin documento, y qué exige el SII.
+  (D10, D12 y § 6). La investigación de mercado ya está hecha:
+  [`2026-10-01-reembolso-sin-nota-credito.md`](investigaciones/2026-10-01-reembolso-sin-nota-credito.md).
 
 - [ ] **Una nota de crédito que se reintenta se emite dos veces** (fiscal, **frente propio**,
   anotado 2026-09-19 al diseñar la idempotencia del cobro). `POST /ventas/:id/notas-credito`
