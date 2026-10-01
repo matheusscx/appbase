@@ -1164,6 +1164,11 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   Cruza con ADR-010, que deja la emisión para el futuro. Se diseña junto con esa emisión, no antes.
   Investigación general (2026-10-01):
   [`2026-10-01-emision-por-venta-y-boleta-del-terminal.md`](investigaciones/2026-10-01-emision-por-venta-y-boleta-del-terminal.md).
+  **Decidido después de la investigación (owner, 2026-10-01):** el sistema es flexible y no
+  obliga a emitir. El riesgo de que una venta quede sin documento es del comercio cliente, no del
+  sistema, aunque la investigación mostró que es la infracción cara. Queda para el diseño, sin
+  decidir: si la elección de cada venta se guarda de forma explícita ("emitió el sistema",
+  "emitió la máquina, folio N", "sin documento"), para que el comercio pueda revisar lo suyo.
 
 - [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
   (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las

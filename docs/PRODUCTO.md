@@ -927,6 +927,10 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   configuración del local ni de la caja;
 - cuando el documento lo emitió la máquina, la venta guarda **el número** del documento (el
   folio que dio la máquina). Sirve para que una nota de crédito lo referencie después.
+- **el sistema es flexible y no impone la emisión.** Que la venta quede con su documento es
+  responsabilidad del comercio que usa el sistema, no del sistema. Eso incluye el riesgo de que
+  no lo emita nadie, que es la infracción cara: art. 97 N°10 del Código Tributario, con multa y
+  clausura. El sistema no bloquea cerrar una venta sin documento (owner, 2026-10-01).
 
 Hoy el sistema no emite nada (ADR-010), y el tipo de documento de la venta es solo una etiqueta: el
 POS y salones ponen Boleta por defecto, y la venta online nace sin tipo. La regla de `cancelada`
