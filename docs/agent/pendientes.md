@@ -1201,6 +1201,14 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     `ReembolsoModal.vue`. Esto resuelve la entrada de abajo del reembolso sin NC, que se construye
     dentro de este frente.
   Las reglas quedaron en [`PRODUCTO.md`](../PRODUCTO.md) § 10, "Emitir al SII es una elección".
+  **El número de Webpay ya está en la base** (lo señaló el owner; medido 2026-10-01). El cobro por
+  pasarela guarda el código de autorización en `pasarela_transacciones.codigo_autorizacion`
+  (`pasarela-transaccion.entity.ts:55`, escrito en `cobros.service.ts` y en
+  `pagos-redirect.service.ts`). La orden lo liga a la venta (`pasarela_ordenes.venta_id`). En una
+  venta cobrada por Webpay, el sistema podría anotar solo "voucher, código X" sin que nadie tipee.
+  ⚠️ **Sin verificar:** si el comprobante de un pago Webpay en línea vale como boleta igual que el
+  voucher de una máquina presencial. La regla del SII habla de pagos electrónicos, y la
+  investigación solo miró máquinas presenciales. Medirlo antes de diseñar con eso.
 
 - [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
   (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
