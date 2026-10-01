@@ -126,11 +126,14 @@ describe('compras/[id] — el total del documento y el vencimiento (spec compras
     const wrapper = await montar()
     await emitir(selectConOpcion(wrapper, PROVEEDOR_CON_PLAZO.id), PROVEEDOR_CON_PLAZO.id)
     await wrapper.find('input[data-qa="compra-vencimiento"]').setValue('')
+    // Una fecha del pasado, no una cercana: la fecha del documento arranca en
+    // hoy, y si la que se tipea ES hoy el valor no cambia, la sugerencia no se
+    // recalcula y el test falla ese día (pasó en CI el 2026-10-01).
     const fecha = wrapper.find('input[type="date"]:not([data-qa="compra-vencimiento"])')
-    await fecha.setValue('2026-10-01')
+    await fecha.setValue('2020-03-01')
     await new Promise(r => setTimeout(r, 10))
     expect((wrapper.find('input[data-qa="compra-vencimiento"]').element as HTMLInputElement).value)
-      .toBe('2026-10-16')
+      .toBe('2020-03-16')
     wrapper.unmount()
   })
 
@@ -138,10 +141,11 @@ describe('compras/[id] — el total del documento y el vencimiento (spec compras
     const wrapper = await montar()
     await emitir(selectConOpcion(wrapper, PROVEEDOR_SIN_PLAZO.id), PROVEEDOR_SIN_PLAZO.id)
     const fecha = wrapper.find('input[type="date"]:not([data-qa="compra-vencimiento"])')
-    await fecha.setValue('2026-10-01')
+    // Del pasado por lo mismo que el test de arriba.
+    await fecha.setValue('2020-03-01')
     await new Promise(r => setTimeout(r, 10))
     expect((wrapper.find('input[data-qa="compra-vencimiento"]').element as HTMLInputElement).value)
-      .toBe('2026-10-31')
+      .toBe('2020-03-31')
     wrapper.unmount()
   })
 

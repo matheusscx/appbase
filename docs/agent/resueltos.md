@@ -23,6 +23,27 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El CI rojo del 2026-10-01 a las 00:23 UTC: dos tests que dependían del día del runner (cerrada 2026-09-30)
+
+No venía del backlog: el push `11ca7e68`, solo docs, dio rojo en los dos jobs. Ninguno de los dos
+fallos lo causó ese commit; los dos dependían de la hora en que corrió CI.
+
+- **`compras-deuda.nuxt.spec.ts`, "Vence el se sugiere…":** tipeaba `2026-10-01` como fecha del
+  documento, que arranca en hoy. El runner, en UTC, ya estaba en el 1 de octubre: el valor no
+  cambió, la sugerencia no se recalculó y el vencimiento quedó vacío. Reproducido con `TZ=UTC`
+  (falla) contra la hora de Chile (pasa). Los dos tests de la sugerencia usan ahora `2020-03-01`.
+- **`e2e/reportes/varianza.spec.ts` (2 tests):** el navegador de CI, en UTC, ya estaba en octubre,
+  y "este mes" pedía del 1 al 1 de octubre. La API lo leyó en la zona del tenant (Chile, todavía
+  30 de septiembre), así que el recuento recién aplicado no entraba. Reproducido con `TZ=UTC`.
+  `playwright.config.ts` fija `timezoneId: 'America/Santiago'`, la zona del tenant del seed.
+  Después, dentro de la misma ventana (21:48 a 22:00 de Chile), corrí la suite completa de
+  Playwright con `TZ=UTC`: Node en UTC y el navegador en Chile, para descartar specs que comparen
+  una fecha calculada en Node contra la pantalla. Dio 66 de 67. El que cayó fue
+  `caja/apertura-cierre`, que quedó en el spinner por compilación en frío por ser el primer spec;
+  solo, con `TZ=UTC`, pasó 2 de 2.
+- **Lo que queda abierto, de producto:** la varianza toma "hoy" del navegador en vez del día de
+  negocio. Está en la § 1 de [`pendientes.md`](pendientes.md).
+
 ## La fila de línea de compras es un componente, con la línea de solo lectura y cada cambio por emit (cerrada 2026-09-30)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.

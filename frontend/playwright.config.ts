@@ -144,6 +144,12 @@ export default defineConfig({
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : [['list']],
   use: {
     baseURL,
+    // La zona del tenant del seed (Paris, Chile). Las pantallas arman "hoy" con
+    // el reloj del navegador y la API lee las fechas en la zona del tenant; con
+    // el navegador en UTC, como en el runner de CI, de 21:00 a 00:00 de Chile
+    // las dos están en días distintos y un reporte de "este mes" pide un mes que
+    // el tenant todavía no empezó (varianza falló así el 2026-10-01 00:23 UTC).
+    timezoneId: 'America/Santiago',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
