@@ -6,7 +6,7 @@
 > verificó, más `api-security-reviewer` si la tarea toca controllers o DTOs), el recibo del
 > pre-commit y el commit los hace el controlador.
 
-- **Status:** Draft — para aprobar por el owner; una pregunta abierta en la orquestadora (P3, ver abajo)
+- **Status:** Draft — listo para que lo apruebe el owner
 - **Date:** 2026-10-01
 - **Owner:** César (owner) · redacta la sesión del frente de emisión (worktree `sad-dubinsky-6b3af5`)
 
@@ -36,13 +36,11 @@ Decimal.js, Nuxt 4 + Nuxt UI v4, Jest + supertest (e2e), Vitest, Playwright.
 - **E2 reemplazada, E8 y E9** (`ab13bcd0`): quién hace las facturas y lo que queda debiendo lo
   declara el comercio (`tenants.facturador`: el sistema u otro facturador, que se anota como
   `externo` con su número). Una boleta del sistema solo `armado` no impide anular: queda
-  `descartado`.
+  descartada.
+- **E10** (`8d4071f1`): un documento `externo` se pregunta al anular. Si ya está hecho, va por NC;
+  si no, se anula y queda registrado quién lo afirmó.
 
-**Abierta en la orquestadora** (spec § 3.8). No se decide en el plan:
-
-| # | Pregunta | Qué toca | Cómo queda escrito mientras tanto |
-|---|---|---|---|
-| P3 | ¿Un documento hecho por fuera (`externo`) impide anular? El sistema sabe que le toca al otro facturador, no si ya lo hizo | tarea 5 y el `anulable` de la 6 | conservadora: impide anular, igual que la máquina |
+No queda ninguna pregunta abierta.
 
 ## Global Constraints
 
@@ -196,7 +194,8 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
   ```ts
   // venta-documento.entity.ts
   export type ClaseDocumentoMaquina = 'voucher' | 'boleta';
-  export type EstadoEnvio = 'armado' | 'descartado' | 'enviado';
+  export type EstadoEnvio = 'armado' | 'enviado';
+  export type Descarte = 'armado_sin_enviar' | 'afirmado_no_hecho';
   @Entity('venta_documentos') export class VentaDocumento {
     id; tenantId; ventaId; emisor: EmisorDocumento; tipoDocumentoId: string | null;
     // EmisorDocumento = EmisorMedio | 'externo'
@@ -204,6 +203,7 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
     estadoEnvio: EstadoEnvio | null; monto: string;
     montoAfecto: string | null; montoExento: string | null; montoImpuestos: string | null;
     pagoId: string | null; documentoCorregidoId: string | null; esDuplicado: boolean;
+    descarte: Descarte | null; descartadoEl: Date | null; descartadoPorUsuarioId: string | null;
     creadoEl; actualizadoEl; eliminadoEl;
   }
   // el servicio
@@ -261,8 +261,8 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
   - salones con pago mixto y propina → los montos de los documentos sin la propina.
 - [ ] ADR nuevo en `docs/adr/` (el siguiente número libre): la emisión registrada por venta, su
   tabla, por qué el documento nace con la entrega (E1, con la Res. 58/2003 y el art. 55), el
-  duplicado de E1b, la declaración del comercio y el emisor `externo` (E2, E9), el `descartado` de
-  E8, y por qué una corrección se reconoce por `venta_referencia_id` (E7). Más el
+  duplicado de E1b, la declaración del comercio y el emisor `externo` (E2, E9), el descarte de E8 y
+  E10, y por qué una corrección se reconoce por `venta_referencia_id` (E7). Más el
   índice, y una nota en ADR-010 que lo enlace.
 - [ ] Docs: `docs/features/ventas.md` (qué documentos deja cada venta).
 
@@ -273,7 +273,8 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 **Archivos:**
 - Modificar: `backend/src/modules/pagos/pagos.service.ts` (`registrarAbono`, l.325-481) y
   `create-pago.dto.ts` (`PagoItemDto` con los mismos dos campos de la tarea 4).
-- Modificar: `ventas.service.ts` (`cancelarUnaVez`, l.1325-1342).
+- Modificar: `ventas.service.ts` (`cancelarUnaVez`, l.1325-1342), `dto/cancelar-venta.dto.ts`
+  (`externoHecho?`), `ventas.controller.ts` (`anular`, que lo pasa).
 - Tests: e2e de pagos y de anular.
 
 **Interfaces:**
@@ -286,20 +287,28 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
   no duplicado (siempre, salvo $0), registra un documento `maquina` con `es_duplicado = true`, su
   `pagoId`, y número y clase si vinieron (E1b). El cobro **nunca** se rechaza por esto.
 - [ ] `cancelarUnaVez`: sale el `if (venta.tipo_documento_id)`. Los otros dos rechazos no cambian.
-  Entra (E8):
-  - 400 *"La venta ya tiene documento: se revierte con nota de crédito, no se anula."* si hay algún
-    documento `maquina`, `externo` (⏸ P3, lectura conservadora) o `sistema` en `enviado`;
-  - si lo único que hay son `sistema` en `armado` (y filas `nadie`), anula, y esos documentos pasan a
-    `estado_envio = 'descartado'` en la misma transacción. Sin borrar filas.
+  Entra (E8, E10; los mensajes exactos están en la spec § 3.5). Solo cuentan los documentos
+  vigentes (`descarte IS NULL`):
+  - 400 si hay algún documento `maquina` o `sistema` en `enviado`;
+  - con un `externo` vigente: con número → 400 (va por NC, sin preguntar); sin número y
+    `externoHecho` ausente → 400 que pide la respuesta; `true` → 400 (va por NC); `false` → sigue;
+  - si sigue, anula y en la misma transacción descarta: los `sistema` en `armado` con
+    `'armado_sin_enviar'`, y los `externo` con `'afirmado_no_hecho'`; los dos con
+    `descartado_el = NOW()` y `descartado_por_usuario_id` = el usuario del token. Sin borrar filas.
+- [ ] `CancelarVentaDto.externoHecho?`: `@IsOptional() @IsBoolean()`. El controller lo pasa tal cual:
+  `undefined` y `false` son dos conductas distintas, y no se colapsan con un default.
 - [ ] e2e:
   - la mesa que debe $60.000 paga al día siguiente en efectivo → ningún documento nuevo;
   - la misma deuda pagada con tarjeta en `maquina` → un documento `maquina` con `es_duplicado`, y
     el cobro pasa;
   - factura con abono en efectivo → ningún documento nuevo;
   - boleta pendiente sin pagos (por API) → se anula, y su boleta queda `descartado` (E8);
-  - factura del sistema sin pagos → se anula, y queda `descartado`;
-  - factura `externo` sin pagos → no se anula (P3);
-  - el mutante que deja de descartar la boleta al anular tiene que morir;
+  - factura del sistema sin pagos → se anula, y queda descartada;
+  - factura `externo` sin pagos: sin `externoHecho` → 400; `true` → 400; `false` → se anula, y el
+    `externo` queda con `'afirmado_no_hecho'`, el usuario y la hora; con número anotado → 400 aunque
+    venga `false`;
+  - los mutantes que dejan de descartar al anular, y que tratan `externoHecho` ausente como `false`,
+    tienen que morir;
   - el mutante que vuelve a documentar el abono por su medio (la E1 vieja) tiene que morir.
 - [ ] Docs: `docs/features/ventas.md` § anular y `docs/features/pagos.md` § abono (el abono no
   documenta; el duplicado). `PRODUCTO.md` § 10: la regla de `cancelada` pasa a leerse contra lo
@@ -316,12 +325,15 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 
 **Interfaces:**
 - Produce:
-  - `GET /ventas/:id` suma `documentos: { id, emisor, tipoDocumento: {id, codigo, nombre} | null, claseMaquina, numero, estadoEnvio, monto, pagoId, documentoCorregidoId, esDuplicado }[]`, `anulable: boolean` y `abonoConMaquinaDuplica: boolean`;
+  - `GET /ventas/:id` suma `documentos: { id, emisor, tipoDocumento: {id, codigo, nombre} | null, claseMaquina, numero, estadoEnvio, monto, pagoId, documentoCorregidoId, esDuplicado }[]`, `anulable: boolean`, `anularPreguntaExterno: boolean` y `abonoConMaquinaDuplica: boolean`;
+    `documentos[]` suma `descarte`, `descartadoEl` y quién descartó (nombre del usuario, en la misma
+    consulta);
   - `PATCH /ventas/:id/documentos/:documentoId` con body `{ numero: string; clase?: ClaseDocumentoMaquina }`, que responde el documento actualizado.
 
 - [ ] `findOne` trae los documentos de la venta **y los de sus correcciones** en una sola consulta.
 - [ ] `anulable`, calculado en el backend con la misma regla que `cancelarUnaVez`. Es la única fuente
   de verdad: el drawer deja de replicarla (tarea 7).
+- [ ] `anularPreguntaExterno`: `true` si es anulable y tiene un `externo` vigente sin número (E10).
 - [ ] `abonoConMaquinaDuplica`: `true` si la venta tiene saldo y algún documento no duplicado (E1b).
   Es lo que la pantalla de abono usa para avisar, sin replicar la regla.
 - [ ] `PATCH`: `@RequiresPermiso('Ventas','Crear')`, con el alcance de caja de `findOne`
@@ -360,13 +372,19 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
   "Duplicado — para el contador". Un documento `sistema` dice "Armado, sin enviar al SII". Una venta
   sin documentos dice "Sin documento".
 - [ ] "Completar número" en los documentos de la máquina y los hechos por fuera sin número, con el
-  `PATCH`. Un documento `externo` dice "Hecho por fuera"; uno `descartado`, "Descartado al anular".
+  `PATCH`. Un documento `externo` dice "Hecho por fuera". Uno descartado dice "Descartado al anular"
+  y, si fue `'afirmado_no_hecho'`, "<usuario> dijo que no estaba hecho, <fecha>".
 - [ ] `puedeAnular` usa `venta.anulable` del backend y deja de leer `tipoDocumento`.
+- [ ] `AnularVentaModal`: con `anularPreguntaExterno`, pregunta *"¿Ya hiciste esta factura en tu
+  facturador?"* (o "este documento", si el tipo es boleta). Con "Sí", no anula: explica que va por
+  nota de crédito, hecha por fuera y anotada con su número. Con "No", anula mandando
+  `externoHecho: false`. El botón de anular no se habilita hasta que conteste.
 - [ ] Utilidades de presentación (etiquetas de emisor y clase) en un composable de
   `app/composables/`, no locales al `.vue`.
 - [ ] vitest: los campos aparecen solo con medio `maquina`; el body los lleva; el aviso del abono
   aparece solo con `abonoConMaquinaDuplica` y medio `maquina`, y no deshabilita confirmar; el drawer
-  usa `anulable` (con un mutante que vuelve a `!tipoDocumento`).
+  usa `anulable` (con un mutante que vuelve a `!tipoDocumento`).; `AnularVentaModal` no habilita anular sin
+  respuesta, manda `externoHecho: false` con "No" y no llama al endpoint con "Sí".
 - [ ] Smoke en navegador del cobro mixto, del abono con tarjeta y de completar el número, como un
   rol con los permisos del módulo, no admin (los bugs de runtime del drawer no los ve el build).
 
@@ -516,7 +534,7 @@ consultas: se verifica que la devolución interna entra.
 la página.
 
 - [ ] `QueryVentasDto.documento?`: `'sistema' | 'maquina' | 'externo' | 'sin_numero' | 'sin_documento' | 'duplicado'`.
-  "Sin número" = algún documento `maquina` o `externo` sin `numero`. Los `descartado` no cuentan.
+  "Sin número" = algún documento `maquina` o `externo` sin `numero`. Los descartados no cuentan.
   Va como un `EXISTS` sobre `venta_documentos`, sin N+1. "Sin documento" = la venta tiene algún
   tramo en `nadie` (con E1 lo no pagado nunca queda sin documento). "Duplicado" = algún documento
   con `es_duplicado` (E1b, para el contador). Las correcciones quedan fuera de los filtros.

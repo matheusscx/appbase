@@ -66,6 +66,7 @@ Las que salieron de este diseño:
 | E7 | **Una corrección se reconoce por `venta_referencia_id`**, no por `es_nota_credito`. La devolución interna no es un documento tributario y no lleva ese tipo. | Sesión del frente; aprobado con el diseño |
 | E8 | **Una boleta del sistema solo armada, sin enviar al SII, no cuenta como emitida para anular.** La venta se anula y esa boleta queda descartada. Cuando el sistema envíe al SII, lo enviado va por NC. Que ninguna máquina haya emitido sigue siendo condición. | Owner, AskUserQuestion 2026-10-01 (`ab13bcd0`) |
 | E9 | **La declaración de E2 se guarda por comercio**, en `tenants.facturador` (`'sistema' \| 'externo'`, default `'sistema'`, que es la conducta de hoy), y se edita en la misma pantalla de métodos de pago. El documento hecho por fuera es un emisor más, **`externo`**, con el tipo del catálogo (factura o boleta) y su número; el de la deuda lleva el tipo de la venta. | Sesión del frente: el owner dejó el dónde y el cómo como diseño (orquestadora, `ab13bcd0`) |
+| E10 | **Un documento hecho por fuera se pregunta al anular**: "¿Ya hiciste esta factura en tu facturador?". Si sí, va por NC, hecha por fuera y anotada con su número. Si no, se anula y queda registrado quién lo afirmó y cuándo. Se descartaron "impide solo si tiene número" y "nunca se anula". | Owner, 2026-10-01 (`8d4071f1`) |
 
 ## 3. Diseño
 
@@ -98,7 +99,9 @@ Tabla nueva **`venta_documentos`**, una fila por documento:
 | `tipo_documento_id` | con `sistema` y `externo`, el tipo (boleta, factura, NC). Nulo con `nadie` |
 | `clase_maquina` | con `maquina`: `'voucher' \| 'boleta'`. Nulo hasta que se sepa |
 | `numero` | con `maquina` y `externo`: el número del voucher, el folio de la máquina o el del otro facturador. Nulo hasta que se tipee |
-| `estado_envio` | con `sistema`: `'armado'` o `'descartado'` (E8). `'enviado'` queda reservado para la emisión (ADR-010) |
+| `estado_envio` | con `sistema`: `'armado'`. `'enviado'` queda reservado para la emisión (ADR-010) |
+| `descarte` | nulo mientras el documento vale. Al anular: `'armado_sin_enviar'` (un `sistema` solo armado, E8) o `'afirmado_no_hecho'` (un `externo` que el usuario dijo no haber hecho, E10) |
+| `descartado_el`, `descartado_por_usuario_id` | cuándo y quién. En `'afirmado_no_hecho'` es el registro de quién lo afirmó (E10) |
 | `monto` | lo que cubre, en moneda oficial, sin propina ni vuelto |
 | `monto_afecto`, `monto_exento`, `monto_impuestos` | con `sistema`: los baldes congelados del documento |
 | `pago_id` | con `maquina`: el pago que cubre (cada pasada de tarjeta es su voucher) |
@@ -184,13 +187,25 @@ documentado. La excepción es E1b:
 `cancelarUnaVez` deja de mirar `tipo_documento_id`. Siguen los otros dos rechazos (estado
 `pendiente`, sin pagos). Lo nuevo (E8):
 
-- **Rechaza** si la venta tiene un documento `maquina`, `externo` (⏸ P3, § 3.8) o un `sistema` ya
-  `enviado` (hoy ninguno: no hay envío).
-- **Anula** si lo único que tiene son documentos `sistema` en `armado` (y filas `nadie`). Al anular,
-  esos documentos pasan a `estado_envio = 'descartado'` en la misma transacción. No se borran: queda
-  el registro de que existieron.
+- **Rechaza** si la venta tiene un documento `maquina` o un `sistema` ya `enviado` (hoy ninguno: no
+  hay envío).
+- **Un documento `externo` se pregunta** (E10). `CancelarVentaDto` suma `externoHecho?: boolean`, y
+  el servidor lo exige, porque la pregunta de la pantalla sola no alcanza:
+  - si hay un `externo` vigente y `externoHecho` no viene: 400 *"Esta venta tiene un documento
+    hecho por fuera: falta decir si ya lo hiciste en tu facturador."*;
+  - `externoHecho: true`: 400 *"Ya está hecho: se revierte con una nota de crédito, hecha por fuera
+    y anotada con su número."*;
+  - `externoHecho: false`: anula, y el `externo` queda descartado con `'afirmado_no_hecho'`, el
+    usuario y la hora. Ese es el registro de quién lo afirmó;
+  - un `externo` que **ya tiene número** no se pregunta: el número salió del otro facturador, así
+    que el documento existe. Va por NC (400 como el de `true`). Es consecuencia del dato, no una
+    regla nueva: contestar "no" ahí contradiría lo anotado.
+- **Anula** si lo que queda son documentos `sistema` en `armado` (y filas `nadie`), más los
+  `externo` contestados con "no". Los `sistema` quedan descartados con `'armado_sin_enviar'` en la
+  misma transacción. Nada se borra: queda el registro de que existieron.
 
-El detalle expone `anulable` desde el backend, y el drawer deja de replicar la regla.
+El detalle expone `anulable` y `anularPreguntaExterno` desde el backend, y la pantalla no replica
+la regla.
 
 ### 3.6 Devoluciones: todo reembolso deja registro
 
@@ -247,17 +262,10 @@ corrige**:
   documento (algún tramo en `nadie`) y **duplicado** (E1b, para el contador). Es lo que deja al
   comercio revisar sus ventas sin documento. Va como un `EXISTS` en `buildListarFilters`, sin N+1.
 
-### 3.8 Abierto — va a la orquestadora, no se decide acá
+### 3.8 Preguntas que surgieron del diseño
 
-P1 y P2 los contestó el owner (`ab13bcd0`): son E2, E8 y E9.
-
-- **P3. ¿Un documento hecho por fuera impide anular?** E8 dice que una boleta del sistema solo
-  armada no cuenta como emitida, y que la de la máquina sí. El documento `externo` queda en el
-  medio: al cerrar, el sistema sabe que **le toca** al otro facturador, pero no si ya se hizo. Una
-  factura a crédito de $500.000 hecha por fuera, que se anula una hora después: si el comercio ya la
-  hizo en el portal del SII, anular sin NC deja una factura viva; si no la hizo, exigir NC obliga a
-  corregir algo que no existe. **Mientras tanto queda escrita la lectura conservadora: impide
-  anular, igual que la máquina.** Una alternativa que no decido: que impida solo si ya tiene número.
+Ya no queda ninguna abierta. P1 y P2 los contestó el owner en `ab13bcd0` (E2, E8 y E9), y P3 en
+`8d4071f1` (E10).
 
 ## 4. Lo que el plan mide primero (tarea 1, antes de fijar código)
 
@@ -284,8 +292,11 @@ tienen que discriminar (ni 1 ni factores iguales).
 | La misma factura con `facturador = 'externo'` | un solo documento `externo` con el tipo factura, sin número (E2, E9) |
 | Mesa que debe $60.000 con `facturador = 'externo'` | voucher por lo pagado con máquina + documento `externo` con el tipo boleta por 60.000 (E2) |
 | Factura sin pago del sistema, después anulada | se anula: la factura estaba solo armada (E8) |
-| Boleta pendiente sin pagos (por API) | nace con la boleta del sistema `armado` por el total; se anula y la boleta queda `descartado` (E8) |
-| Factura pendiente con `facturador = 'externo'` | no se anula (P3, lectura conservadora) |
+| Boleta pendiente sin pagos (por API) | nace con la boleta del sistema `armado` por el total; se anula y la boleta queda descartada con `'armado_sin_enviar'` (E8) |
+| Factura pendiente con `facturador = 'externo'`, anular sin respuesta | 400: falta la respuesta (E10) |
+| La misma, `externoHecho: true` | 400: va por NC |
+| La misma, `externoHecho: false` | se anula; el `externo` queda con `'afirmado_no_hecho'`, el usuario y la hora |
+| La misma, con número anotado | 400 sin preguntar: va por NC |
 | Venta online con el método de crédito en `maquina` | documento `sistema` / `armado` por el total, con la boleta del país; el código de Webpay en `pagos.referencia` (E5) |
 | Medio en `nadie` | fila `nadie`; aparece en el filtro "sin documento" |
 | `tipoDocumentoId` de otro país, o el de la NC | 400 |
