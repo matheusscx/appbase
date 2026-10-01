@@ -1162,6 +1162,8 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     o la máquina o el portal? Y si la emite la máquina, ¿qué registra el sistema?
   - Cómo entra el número que dio la máquina: tipeado o traído por la integración.
   Cruza con ADR-010, que deja la emisión para el futuro. Se diseña junto con esa emisión, no antes.
+  Investigación general (2026-10-01):
+  [`2026-10-01-emision-por-venta-y-boleta-del-terminal.md`](investigaciones/2026-10-01-emision-por-venta-y-boleta-del-terminal.md).
 
 - [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
   (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
