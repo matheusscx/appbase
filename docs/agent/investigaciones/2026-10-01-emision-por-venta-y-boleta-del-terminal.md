@@ -336,6 +336,162 @@ directamente en sii.cl.
   y el modelo declarado es la señal que el propio RCV usa para esperar un solo documento
   por venta con tarjeta, no una regla con sanción propia.
 
+## El comprobante de Webpay en línea, ¿vale como boleta?
+
+Pedido explícito del owner: todo lo anterior miró terminales presenciales. Falta la venta
+a distancia / e-commerce pagada con Webpay Plus, donde el cliente paga en la web y no hay
+máquina.
+
+### 1. Sí — el texto vigente de la Resolución N°176 incluye "ventas por Internet", no solo POS físico
+
+- **Verificado, primario, texto literal leído directamente del PDF de la Resolución Exenta
+  SII N°176 (31-dic-2020,
+  [sii.cl/normativa_legislacion/resoluciones/2020/reso176.pdf](https://www.sii.cl/normativa_legislacion/resoluciones/2020/reso176.pdf)):**
+  define "Terminal Transaccional de Ventas" como *"Equipos o dispositivos, tales como POS,
+  o sistemas provistos por el administrador de medios de pago electrónicos que permiten
+  gestionar pagos por tarjeta de débito, crédito u otros medios de pago electrónicos
+  relativos a transacciones presenciales o **ventas por internet**."* La norma vigente no
+  distingue por canal: incluye la venta online por definición, no por extensión.
+- **Verificado, primario, texto literal de la página destacada del SII
+  ([sii.cl/destacados/boleta_electronica_voucher](https://www.sii.cl/destacados/boleta_electronica_voucher/index.html),
+  leída directamente, no vía resumen):** *"El Comprobante de pago electrónico (voucher) es
+  el recibo generado por pagos a través de tarjetas de débito o crédito que entrega la
+  máquina de pago (POS) o **en ventas por Internet**, el cual tiene validez como boleta
+  electrónica."*
+- **Corrección de una confusión que repiten varias fuentes secundarias (verificado contra
+  el propio histórico de resoluciones citado por el SII, cruzado con
+  [Laudus — SII, Nuevas Boletas y Vales Transbank](https://www.laudus.cl/blog/boleta-electronica-y-vales-de-tarjetas-de-debito-credito/),
+  publicado 05-ene-2021):** varias fuentes (Facto, Bsale, resúmenes de búsqueda) afirman que
+  "las compras por Webpay no están contempladas en la Resolución N°176". Esa afirmación
+  describe la regla **anterior**, la Resolución N°5 de 2015, que en efecto solo cubría el
+  terminal físico en el punto de venta y excluía expresamente los pagos vía Internet. Laudus
+  documenta el cambio posterior: *"En las ventas por internet, el pago con tarjeta también
+  sustituye a la Boleta Electrónica. Antes los Vales de tarjeta solo sustituían a la Boleta
+  si eran de un terminal POS físico. Pero desde la Resolución Exenta 13 de febrero-2018 las
+  ventas por internet también cuentan."* La Resolución 176 —vigente desde 2021— **deja sin
+  efecto** las Resoluciones N°5 y N°55 de 2015 y N°13 de 2018 (texto literal, visto más
+  arriba en este documento), y consolida la extensión a internet que la 13/2018 ya había
+  hecho. Las fuentes que dicen "Webpay no cuenta" citan la norma vieja sin actualizar —el
+  mismo tipo de error que la orquestadora ya corrigió en la sección "Qué hace el mercado"
+  de este documento.
+- **Calificador verificado (misma fuente Laudus):** la regla exige que la pasarela sea de un
+  **operador chileno registrado y autorizado ante el SII** como "Administrador u Operador de
+  Medios de Pagos Electrónicos" — *"los pagos a través de PayPal, o pasarelas extranjeras
+  como Stripe, no son parte de esta operativa, y en estas ventas hay que emitir Boleta
+  Electrónica."* Transbank (Webpay Plus) es justamente ese tipo de operador chileno
+  registrado, y la propia Resolución 176 lo incluye por definición ("sistemas provistos por
+  el administrador... para ventas por internet"); Webpay Plus específicamente cae dentro de
+  la regla, a diferencia de una pasarela extranjera.
+
+### 2. Pero ojo: la "Boleta Electrónica" que vende Transbank como producto aparte NO cubre Webpay Plus
+
+- **Verificado, primario ([Transbank — ¿Qué es Transbank Boleta Electrónica?](https://ayuda.transbank.cl/boleta-electronica-digital)):**
+  *"La generación automática de la boleta está disponible por el momento solamente para la
+  solución POS."* Para Webpay, Mobile POS, QR, etc., *"deberán emitir la boleta de forma
+  manual a través del portal privado Transbank."*
+- Esto es un producto **distinto** del mecanismo general de la Resolución 176: el add-on de
+  Transbank emite un DTE real (folio, timbre) por cuenta del comercio, y ese servicio solo
+  existe para POS físico. El mecanismo de la Resolución 176 (que el *comprobante en sí*
+  valga como boleta, sin que nadie emita un DTE aparte) es más general y, por texto, sí
+  incluye internet — pero Transbank no construye ni entrega al cliente ese comprobante
+  formateado para Webpay Plus: la documentación técnica dice *"ya no se debe mostrar el
+  voucher de Transbank, solo debe mostrarse desde el sitio del comercio"*
+  ([Documentación Webpay Plus — Transbank Developers](https://www.transbankdevelopers.cl/documentacion/webpay-plus)).
+  **Cruce de ambas fuentes (inferencia — ninguna lo dice así en conjunto):** construir y
+  entregar el comprobante-válido-como-boleta en una venta por Webpay Plus es responsabilidad
+  del **comercio**, no de Transbank; Transbank solo entrega los datos de la transacción
+  (ver punto 3).
+
+### 3. Requisitos del comprobante — los mismos 10 campos que para POS físico, y Webpay Plus no los devuelve pre-armados
+
+- **Verificado, primario, texto literal (Resolución 176, letra E):** el comprobante debe
+  (a) identificar el RUT del emisor, (b) nombre o razón social, (c) domicilio (ciudad,
+  calle, número), (d) distinguir montos afectos/exentos de otros montos (ej. propina),
+  (e) IVA separado del monto total a la tasa vigente, (f) un campo "Total", (g) valores en
+  pesos sin negativos, **(h) número de terminal, número de operación, código de
+  autorización y fecha de emisión completa (año, mes, día, hora, minuto, segundo)**,
+  (i) la leyenda "Válido como Boleta", (j) distinguir cada copia si hay más de una. Y debe
+  **entregarse al cliente**, impreso o en representación virtual (encabezado de la letra
+  E) — para una venta online, la representación virtual (pantalla de confirmación / correo)
+  es la vía natural, no hay requisito de "impreso" cuando no existe un local físico.
+- **Hallazgo relevante para el modelo de datos, inferencia directa de comparar el requisito
+  (h) con los campos reales que devuelve la API (no hay una fuente que lo señale
+  explícitamente):** la respuesta de Webpay Plus —`authorizationCode`, `buyOrder`,
+  `sessionId`, `amount`, `status`, `transactionDate`, etc.
+  ([Documentación Webpay Plus](https://www.transbankdevelopers.cl/documentacion/webpay-plus),
+  verificada)— no tiene un campo equivalente a "número de terminal" (no hay terminal físico
+  en una venta online) ni un "número de operación" en el sentido POS; lo más cercano es
+  `buyOrder` (la orden de compra que define el propio comercio) o `sessionId`. El sistema
+  tendría que decidir qué dato llena cada campo exigido por la letra (h), porque Webpay Plus
+  no entrega un comprobante pre-armado con esos nombres de campo.
+
+### 4. El "número" que identifica el comprobante ante el SII no es solo el código de autorización
+
+- La Resolución 176 exige los **cuatro** datos de la letra (h) juntos para identificar el
+  comprobante, no solo el código de autorización —el dato que la sección anterior de este
+  documento ya señalaba como el relevante para la NC, a partir de Facto, pero sin citar la
+  norma completa. Para una venta por Webpay Plus, lo más directo a guardar sería la
+  combinación `buyOrder` + `authorizationCode` + `transactionDate` (los tres que la API sí
+  devuelve), más lo que el sistema decida usar como sustituto de "número de terminal" y
+  "número de operación" — sin verificar que exista una guía oficial que mapee esos cuatro
+  requisitos a los campos específicos de Webpay Plus.
+
+### 5. Reembolso parcial de una venta web — mismo régimen de boleta, pero el refund de Webpay no es el mecanismo tributario
+
+- **Verificado, primario (Resolución 176, letra B, texto ya citado en este documento):**
+  para anular una venta bajo este régimen, "se deberá utilizar el procedimiento provisto por
+  el mismo terminal transaccional de ventas habilitado. En caso que no sea posible anular el
+  comprobante, se deberá emitir una Nota de Crédito Electrónica, identificando el
+  comprobante asociado a la transacción." La resolución no menciona "reembolso parcial" en
+  ningún punto — solo anulación (total) y duplicación errónea.
+- **Verificado (Transbank, `refund()` de Webpay Plus, vía documentación/SDK — no se abrió el
+  endpoint REST exacto, solo la descripción del método y sus respuestas):** admite
+  devolución **parcial** para tarjetas de crédito (cualquier monto igual o menor al total) y
+  solo **total** para débito/prepago. La respuesta trae código de autorización, fecha y el
+  saldo/monto anulado — **no hay mención de boleta ni nota de crédito en esta API**: es un
+  mecanismo de devolución de dinero, no de corrección tributaria.
+- **Cruce, inferencia — ninguna fuente lo dice en estos términos:** el `refund()` de Webpay
+  Plus no es "el procedimiento provisto por el terminal" en el sentido tributario que exige
+  la letra B — ese refund mueve plata, no anula ni corrige el comprobante ante el SII. Por
+  lo tanto, para un reembolso (parcial o total) de una venta cuyo comprobante valió como
+  boleta, el camino coincide con lo que este documento ya estableció para boletas en general
+  (sección "Montos distintos", punto 3): como una boleta no admite modificar el monto,
+  correspondería **anular por NC el comprobante-boleta completo** (referenciándolo por los
+  datos de la letra h) **y emitir una boleta electrónica nueva** por el monto corregido —y
+  esa boleta nueva ya no podría ser "otro voucher" (no hay una segunda transacción de
+  tarjeta): tendría que ser una boleta DTE real, emitida por el propio sistema del comercio.
+  Es una inferencia que combina dos reglas ya verificadas en este documento, no una fuente
+  que lo diga para este caso específico.
+- **Verificado (ya citado en este documento, sección "Corrección posterior"):** quien emite
+  esa NC es el **comercio** (el contribuyente), nunca Transbank — el rol de Transbank en
+  todo este flujo es procesar el pago y, si corresponde, reembolsarlo; nunca emitir ni
+  anular documentos tributarios por cuenta del comercio.
+- **Sin resolver:** qué campo exacto debe llevar esa NC como referencia para un comprobante
+  de Webpay Plus (¿`buyOrder`? ¿`authorizationCode` + fecha? ¿los cuatro de la letra h?) — la
+  Resolución 176 solo dice "identificando el comprobante asociado a la transacción", sin
+  especificar el campo.
+
+### 6. En la práctica, el ecosistema de e-commerce chileno no usa la ruta del voucher — emite boleta DTE siempre
+
+- **Verificado (directo, [webfactura.cl — integración Jumpseller](https://www.webfactura.cl/integraciones/jumpseller/)):**
+  *"Cada venta genera automáticamente su documento tributario electrónico ante el SII"* —
+  boleta o factura según el tipo de cliente. No menciona el mecanismo de voucher en ningún
+  momento.
+- **Verificado (directo, [klevo.cl — facturación electrónica SII para sitios web](https://klevo.cl/blog/facturacion-electronica-sii-integracion-sitio-web-chile/)):**
+  *"cualquier venta —online u offline— requiere emitir un Documento Tributario Electrónico
+  (DTE)."* Tampoco menciona el mecanismo de voucher como alternativa para ventas online;
+  solo distingue boleta (consumidor final) de factura (empresa). Documenta a Shopify como la
+  plataforma con peor soporte nativo chileno ("Shopify NO tiene apps nativas chilenas
+  robustas"), frente a Jumpseller/WooCommerce con plugins (OpenFactura, Bsale).
+- **Lectura que cruza esto con los puntos 1-2 (inferencia, no una fuente que lo diga así):**
+  la ley permite la ruta del voucher-vale-como-boleta también para ventas por internet, pero
+  el mercado de plataformas de e-commerce en Chile no la ofrece como opción — todas emiten
+  un DTE real por cada venta. Es coherente con el punto 2: nadie (ni Transbank ni las
+  plataformas de facturación para e-commerce) construyó la pieza que le faltaría al
+  mecanismo del voucher para una venta online —el comprobante formateado con los 10 campos
+  de la letra E, entregado al cliente—, así que en la práctica el camino que sí existe y se
+  vende es "DTE siempre", aunque la norma no lo exija.
+
 ## Opciones que aparecen, con su costo
 
 Ninguna es recomendación — las trae esta pasada para que el owner y el diseño las cruce.
@@ -407,3 +563,33 @@ Ninguna es recomendación — las trae esta pasada para que el owner y el diseñ
 - Consecuencia de declarar un modelo de emisión y operar distinto en la práctica —
   tampoco la trae la guía oficial del SII sobre la declaración (verificada esta pasada):
   sigue sin encontrarse en ninguna fuente, oficial o secundaria.
+- **Webpay en línea — qué campo exacto identifica el comprobante ante una Nota de Crédito:**
+  la Resolución 176 exige número de terminal + número de operación + código de autorización
+  + fecha completa (letra h) para el comprobante, pero no dice cuál de esos (o si todos)
+  debe llevar la NC como referencia cuando se anula. Tampoco se encontró una guía que mapee
+  esos cuatro campos a los que realmente devuelve la API de Webpay Plus (`buyOrder`,
+  `authorizationCode`, `transactionDate`) — no hay "número de terminal" ni "número de
+  operación" en el sentido POS para una venta online.
+- **Si Transbank está efectivamente registrado y reportando al SII las transacciones de
+  Webpay Plus bajo el mismo registro de "administrador de medios de pago electrónico" que
+  usa para sus POS físicos** (Resolución 176, letra D) — se infiere que sí, por texto de la
+  resolución y por ser el mismo operador, pero no se encontró una fuente que confirme el
+  hecho operativo (que Transbank efectivamente envía ese reporte diario para Webpay Plus
+  específicamente, no solo para POS).
+- **Quién construye y entrega el comprobante formateado (los 10 campos de la letra E) en
+  una venta por Webpay Plus:** no se encontró ningún proveedor, ni de Transbank ni de
+  e-commerce, que ofrezca esto como funcionalidad — se infiere que, de usarse esta ruta,
+  tendría que construirlo el propio sistema del comercio, pero no hay un caso de uso real
+  documentado que lo haga (el mercado relevado usa DTE siempre, ver punto 6 de la sección
+  nueva).
+- **Devolución/reembolso parcial de una venta web cuyo comprobante valió como boleta:** la
+  Resolución 176 solo cubre anulación total y duplicación errónea, no reembolso parcial. La
+  secuencia "anular por NC + emitir boleta DTE nueva por el monto corregido" es una
+  inferencia de este documento, no una fuente que la describa para este caso.
+- **Texto completo del endpoint REST de `refund()` de Webpay Plus** (parámetros exactos,
+  límites de tiempo, diferencias entre REVERSED y NULLIFIED) — solo se verificó la
+  descripción general vía documentación/SDK, no se abrió la referencia REST completa.
+- Si existe algún convenio o producto (de Transbank, Haulmer, Bsale u otro) que sí ofrezca
+  la ruta del voucher-vale-como-boleta para ventas por Webpay Plus, en vez de emitir DTE
+  siempre — no se encontró ninguno en esta pasada, pero tampoco se agotó la búsqueda de
+  cada proveedor particular.

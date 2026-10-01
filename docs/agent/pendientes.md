@@ -1206,9 +1206,14 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   (`pasarela-transaccion.entity.ts:55`, escrito en `cobros.service.ts` y en
   `pagos-redirect.service.ts`). La orden lo liga a la venta (`pasarela_ordenes.venta_id`). En una
   venta cobrada por Webpay, el sistema podría anotar solo "voucher, código X" sin que nadie tipee.
-  ⚠️ **Sin verificar:** si el comprobante de un pago Webpay en línea vale como boleta igual que el
-  voucher de una máquina presencial. La regla del SII habla de pagos electrónicos, y la
-  investigación solo miró máquinas presenciales. Medirlo antes de diseñar con eso.
+  **Investigado (2026-10-01):** la ley lo permite, pero nadie lo hace así. La Res. 176 incluye
+  las "ventas por internet" (cita verificada en el PDF). Para valer, el comprobante tiene que
+  llevar 10 campos, entre ellos el IVA desglosado, el número de terminal, el de operación, el
+  código de autorización, la fecha y la leyenda "Válido como Boleta". **Ese comprobante lo tendría
+  que armar el sistema**: Transbank no lo arma para Webpay, y su API no da número de terminal.
+  Además, en Chile ninguna plataforma de e-commerce relevada usa esa vía: todas emiten boleta
+  electrónica. El código de autorización solo no alcanza. El detalle está en la investigación,
+  sección "El comprobante de Webpay en línea, ¿vale como boleta?".
 
 - [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
   (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
