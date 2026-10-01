@@ -1259,7 +1259,7 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
 
   Todas las reglas de negocio de este frente ya las decidió el owner, con tres investigaciones de por medio, y no queda ninguna abierta. Tu trabajo es diseñar y construir lo decidido, no volver a decidirlo. Si encontrás evidencia en el código o en la norma que contradiga una decisión, traela con el porqué antes de cambiar nada.
 
-  Antes de empezar, traé main a tu worktree: las últimas decisiones son de hoy. Leé esto antes que nada:
+  Antes de empezar, traé a tu worktree la rama main LOCAL con `git merge main`: las últimas decisiones son de hoy y quizás no estén en origin. No uses sync_with_base_branch para esto. Leé esto antes que nada:
   - docs/PRODUCTO.md § 10, el bloque "Emitir al SII es una elección de cada venta": las reglas.
   - docs/agent/pendientes.md § 6, la entrada "Emitir al SII se elige al cerrar cada venta…": el objetivo confirmado, cada decisión con su procedencia y las correcciones. Leé también la entrada siguiente, la del reembolso sin nota de crédito, que ya está decidida y se construye dentro de este frente.
   - docs/agent/investigaciones/2026-10-01-emision-por-venta-y-boleta-del-terminal.md (incluye "Cuando el sistema y la máquina no coinciden" y "El comprobante de Webpay en línea") y 2026-10-01-reembolso-sin-nota-credito.md.
