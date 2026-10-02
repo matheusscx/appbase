@@ -9195,6 +9195,61 @@ describe('ItemsService', () => {
       expect(ins![1]).toEqual(expect.arrayContaining(['250', 'g']));
     });
 
+    // El mock contesta por el SQL, no por el orden: volver a la lectura por
+    // opción no agota ninguna cadena, solo cambia el conteo. Tres opciones en un
+    // grupo: con una sola, leer por opción también daría 1.
+    it('lee en lote si las opciones de un grupo le pertenecen: una consulta por grupo, no por opción', async () => {
+      const opciones = ['OP-1', 'OP-2', 'OP-3'];
+      managerMock.query.mockImplementation((sql: string) => {
+        if (/FROM grupos_modificadores/.test(sql))
+          return Promise.resolve([{ grupo_modificador_id: GRUPO_ID }]);
+        if (/INSERT INTO item_grupos_modificadores/.test(sql))
+          return Promise.resolve([{ item_grupo_id: 'IG-NEW' }]);
+        if (/FROM grupo_modificador_opciones/.test(sql))
+          return Promise.resolve(
+            opciones.map((id) => ({
+              grupo_opcion_id: id,
+              tipo: 'producto',
+              default_cantidad: null,
+              default_unidad: null,
+              unidad_medida: 'unidad',
+            })),
+          );
+        return Promise.resolve([]);
+      });
+      await (service as any).asociarGruposModificadores(
+        managerMock,
+        TENANT,
+        ITEM_ID,
+        [
+          {
+            grupoModificadorId: GRUPO_ID,
+            min: 1,
+            max: 1,
+            opciones: opciones.map((grupoOpcionId) => ({
+              grupoOpcionId,
+              precioExtra: '100',
+            })),
+          },
+        ],
+      );
+      const llamadas = managerMock.query.mock.calls as unknown as [
+        string,
+        unknown[],
+      ][];
+      const lecturas = llamadas.filter(([q]) =>
+        /FROM grupo_modificador_opciones/.test(q),
+      );
+      expect(lecturas).toHaveLength(1);
+      expect(lecturas[0][1]).toContainEqual(opciones);
+      // Las escrituras no cambian: una por opción, como antes.
+      expect(
+        llamadas.filter(([q]) =>
+          /INSERT INTO item_grupo_modificador_opciones/.test(q),
+        ),
+      ).toHaveLength(3);
+    });
+
     it('rechaza un override cuya opción no pertenece al grupo', async () => {
       managerMock.query
         .mockResolvedValueOnce([])

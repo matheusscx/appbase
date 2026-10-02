@@ -7463,27 +7463,36 @@ export class ItemsService {
     );
     const opcionesEntrantes = new Set<string>();
 
+    // Las opciones deben pertenecer a ESTE grupo (vivas). Se traen además tipo,
+    // default y unidad base para validar la unidad de ingrediente (abajo). Una
+    // lectura para todas las opciones del grupo, no una por opción; las
+    // escrituras de abajo siguen siendo una por opción y en el mismo orden.
+    const perteneceRows: {
+      grupo_opcion_id: string;
+      tipo: string;
+      default_cantidad: string | null;
+      default_unidad: string | null;
+      unidad_medida: string | null;
+    }[] = opciones.length
+      ? await manager.query(
+          `SELECT o.grupo_opcion_id, i.tipo, o.cantidad AS default_cantidad,
+                  o.unidad_codigo AS default_unidad, ip.unidad_medida
+           FROM grupo_modificador_opciones o
+           JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
+           LEFT JOIN item_producto ip ON ip.item_id = o.item_id
+           WHERE o.grupo_opcion_id = ANY($1::uuid[]) AND o.grupo_modificador_id = $2
+             AND o.tenant_id = $3 AND o.eliminado_el IS NULL`,
+          [opciones.map((o) => o.grupoOpcionId), grupoModificadorId, tenantId],
+        )
+      : [];
+    const pertenecePorOpcion = new Map(
+      perteneceRows.map((r) => [r.grupo_opcion_id, r]),
+    );
+
     for (const o of opciones) {
       opcionesEntrantes.add(o.grupoOpcionId);
-      // La opción debe pertenecer a ESTE grupo (viva). Se traen además tipo,
-      // default y unidad base para validar la unidad de ingrediente (abajo).
-      const perteneceRows: {
-        grupo_opcion_id: string;
-        tipo: string;
-        default_cantidad: string | null;
-        default_unidad: string | null;
-        unidad_medida: string | null;
-      }[] = await manager.query(
-        `SELECT o.grupo_opcion_id, i.tipo, o.cantidad AS default_cantidad,
-                o.unidad_codigo AS default_unidad, ip.unidad_medida
-         FROM grupo_modificador_opciones o
-         JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
-         LEFT JOIN item_producto ip ON ip.item_id = o.item_id
-         WHERE o.grupo_opcion_id = $1 AND o.grupo_modificador_id = $2 AND o.tenant_id = $3
-           AND o.eliminado_el IS NULL`,
-        [o.grupoOpcionId, grupoModificadorId, tenantId],
-      );
-      if (!perteneceRows.length) {
+      const pertenece = pertenecePorOpcion.get(o.grupoOpcionId);
+      if (!pertenece) {
         throw new BadRequestException(
           `La opción ${o.grupoOpcionId} no pertenece al grupo asociado`,
         );
@@ -7516,7 +7525,6 @@ export class ItemsService {
       // cantidad efectiva debe tener unidad efectiva convertible a su unidad
       // base, o el motor de inventario descontaría el número crudo como unidad
       // base (mis-medición silenciosa). Efectivas = override ?? default.
-      const pertenece = perteneceRows[0];
       const efectivaCantidad = cantidad ?? pertenece.default_cantidad;
       const efectivaUnidad = unidad ?? pertenece.default_unidad;
       if (pertenece.tipo === 'ingrediente' && efectivaCantidad != null) {
