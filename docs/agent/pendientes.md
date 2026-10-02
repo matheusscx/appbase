@@ -62,6 +62,16 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   cada campo y espere 400. Barrer los DTOs de `PATCH` vecinos buscando el gemelo, sin asumir que es
   el único. **Tomarlo después de que la emisión entre a main**, porque toca el mismo archivo.
 
+- [ ] **`POST /ventas/:id/notas-credito` no aplica el alcance de caja** (backend, invariante 6;
+  `ventas.controller.ts` ~L58). Solo exige `Ventas:Nota de crédito`. `findOne` y el `PATCH` de
+  documentos pasan por `resolverAlcanceDerivadoDeCaja` (eje `Cajas:Leer`); este no, así que un
+  cajero con el permiso de NC opera sobre ventas de otros cajeros del mismo comercio, aunque no
+  pueda verlas. Lo vio `api-security-reviewer` en la tarea 8 de la emisión (2026-10-02); verificado
+  por la orquestadora. **Arreglo:** el mismo alcance que `findOne`, con e2e del 404/403 sobre una
+  venta ajena y del caso que deja pasar. Barrer los otros `POST /ventas/:id/*` (abono, anular,
+  reembolso) buscando el gemelo. **Después de que la emisión entre a main**: toca el mismo
+  controller.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -79,15 +89,6 @@ destapa una decisión que no es mía).
   de dónde sale `fecha_vencimiento` al confirmar, y reproducir con el reloj fijado. Si es el
   código, es un bug de producto: una compra marcada vencida de madrugada. Si es el fixture, es un
   test que depende de la hora.
-
-- [ ] **El saldo de una venta no descuenta sus notas de crédito** (backend, `ventas.service.ts`:
-  `mapVentaListRow` → `saldo = total − pagado`; visto el 2026-10-01 al decidir el saldo pendiente
-  del frente "El vendido del día resta las notas de crédito", cerrado el 2026-10-01 y archivado en
-  [`resueltos.md`](resueltos.md)). Una venta de $100.000 con
-  $40.000 pagados y una NC por $60.000 sigue mostrando $60.000 de saldo. Ese frente arregló solo
-  la tarjeta "Saldo pendiente" de `/ventas` y el "Por cobrar" del inicio. Falta medir el resto: el saldo por venta del listado,
-  el listado de deuda, y si se puede seguir cobrando esos $60.000. Si se puede, el cliente terminaría
-  pagando dos veces. Si eso pasa, es fiscal y va a la § 6 como frente propio.
 
 📌 Antes había una nota acá diciendo que la sección estaba vacía: la última entrada previa, la
 unicidad de `serie`, se cerró el 2026-09-19 y está en [`resueltos.md`](resueltos.md).
@@ -1257,6 +1258,16 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     quién, cuándo y el valor anterior, y la anulación vuelve a preguntar. Se descartaron "solo
     dejar rastro" (el error queda a la vista pero sigue forzando la nota de crédito) y "dejarlo
     así".
+  - **El abono cobra solo lo que de verdad se debe** (AskUserQuestion, 2026-10-02). Venía de la § 2
+    ("el saldo de una venta no descuenta sus notas de crédito"), y la tarea 8 lo confirmó midiendo:
+    una NC "no vuelve plata" por la deuda deja la venta en `pagada_parcial`, el abono calcula
+    `total − aplicado` (`pagos.service.ts` ~L411) sin mirar las correcciones, y el detalle sigue
+    ofreciendo "Registrar pago": el cliente paga dos veces. Regla: el tope del abono es total −
+    correcciones − lo pagado, con la fórmula del saldo ya decidida en la § 3; si queda en cero,
+    "Registrar pago" desaparece y la venta pasa a `pagada`. **Va dentro del frente de emisión**,
+    que es el que construyó "no vuelve plata". Se descartaron "frente aparte" (el doble cobro sigue
+    posible mientras tanto) y "apagar no vuelve plata hasta entonces". Falta medir, dentro del
+    frente, el listado de deuda y el saldo por venta del listado, que nombraba la entrada vieja.
   - **La factura la hace siempre el sistema**, se pague como se pague. La regla del medio decide
     solo las boletas, que es lo que cubre el modelo de emisión del SII.
   - **Un comercio nuevo trae "emite el sistema" en todos los medios**: es el error barato.

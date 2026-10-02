@@ -975,6 +975,10 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   pregunta otra vez. Sin esto, un número anotado por error ("1" en una factura que no se hizo)
   obligaba a ir por nota de crédito, porque con número el documento se da por hecho (owner,
   2026-10-02);
+- **un abono cobra solo lo que de verdad se debe**: total − notas de crédito y devoluciones − lo
+  pagado. Si una nota de crédito "no vuelve plata" cubre la deuda, "Registrar pago" desaparece y la
+  venta pasa a pagada. Sin esto, el cliente podía pagar dos veces lo que ya se le había perdonado
+  (owner, 2026-10-02);
 - **lo entregado se documenta al entregarlo, se haya pagado o no.** Para el SII un restaurante
   vende, no presta un servicio: la boleta sale antes de que el cliente se retire (Res. Ex. SII
   58/2003); en una tienda, al entregar (art. 55 DL 825). Una mesa de $100.000 que paga $40.000 con
