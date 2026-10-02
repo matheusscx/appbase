@@ -20,7 +20,14 @@ import { bodyPreferencias } from './helpers/preferencias';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
+const PROV_CDMX = '550e8400-e29b-41d4-a716-446655440377';
+const MODULO_PASARELAS = '550e8400-e29b-41d4-a716-446655440208';
+const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
+const TIPO_DESCUENTO_PRONTO_PAGO = '550e8400-e29b-41d4-a716-446655440100';
+const TIPO_RECARGO_MORA = '550e8400-e29b-41d4-a716-446655440123';
+const TARJETA_CREDITO_ID = '550e8400-e29b-41d4-a716-446655440107';
 const ADMIN_PARIS = { email: 'admin.paris@paris.cl', pass: 'admin' };
+const SUPERADMIN = { email: 'admin@sistema.com', pass: 'admin' };
 
 interface TokenResponse {
   access_token: string;
@@ -164,6 +171,25 @@ describe('null explícito en PATCH/PUT → 400 (e2e)', () => {
         expect(control.status).toBe(200);
       },
     );
+  }
+
+  // Un PATCH de otro campo tiene que devolver la fila entera. Existe por un
+  // bug que el arreglo introdujo y la revisión cazó: un campo redeclarado en
+  // un Update que hereda de `PartialType` quedaba como propiedad propia en
+  // `undefined` en cada instancia del DTO (target ES2023), y el
+  // `Object.assign(entidad, dto)` del service lo copiaba a la respuesta, que
+  // salía sin `activo` ni `nivel`. Por eso se redeclaran con `declare`.
+  function conservaEnLaRespuesta(
+    ruta: () => string,
+    body: () => object,
+    esperado: () => Record<string, unknown>,
+    conToken: () => string = () => token,
+  ) {
+    it('un PATCH de otro campo devuelve los redeclarados con su valor', async () => {
+      const res = await enviar('patch', ruta(), body(), conToken());
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject(esperado());
+    });
   }
 
   describe('A — el null llegaba a una columna NOT NULL (500)', () => {
@@ -561,6 +587,248 @@ describe('null explícito en PATCH/PUT → 400 (e2e)', () => {
           );
           expect(control.status).toBe(200);
         },
+      );
+    });
+  });
+
+  describe('PartialType — heredaba @IsOptional en todos los campos', () => {
+    describe('PATCH /roles/:id', () => {
+      const alta = { nombre: `Rol null ${sufijo}` };
+      let ruta: string;
+      beforeAll(async () => {
+        ruta = `roles/${await crear('roles', alta)}`;
+      });
+
+      cadaCampoNull(
+        'patch',
+        () => ruta,
+        () => alta,
+        Object.keys(alta),
+      );
+
+      // `descripcion` es nullable: el `@IsOptional` propio de `CreateRolDto`
+      // tiene que sobrevivir, y `null` la borra.
+      it('descripcion null → 200 (nullable: null la borra)', async () => {
+        const res = await enviar('patch', ruta, { descripcion: null });
+        expect(res.status).toBe(200);
+      });
+    });
+
+    describe('PATCH /descuentos/:id', () => {
+      const alta = {
+        nombre: `Descuento null ${sufijo}`,
+        tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+        modo: 'porcentaje',
+        nivel: 'linea',
+        activo: false,
+      };
+      let ruta: string;
+      beforeAll(async () => {
+        ruta = `descuentos/${await crear('descuentos', {
+          ...alta,
+          valorPorcentaje: '0.05',
+        })}`;
+      });
+
+      cadaCampoNull(
+        'patch',
+        () => ruta,
+        () => ({ ...alta, metodoPagoIds: [TARJETA_CREDITO_ID], tramos: [] }),
+        [...Object.keys(alta), 'metodoPagoIds', 'tramos'],
+      );
+      conservaEnLaRespuesta(
+        () => ruta,
+        () => ({ nombre: alta.nombre }),
+        () => ({ modo: alta.modo, nivel: alta.nivel, activo: alta.activo }),
+      );
+    });
+
+    // `diasVencimiento` es de los tipos con días: en el directo no aplica. En
+    // pronto pago el `null` ya daba 400 antes del DTO, de casualidad: el
+    // service compara `null <= 0`, que en JS es `true`. El caso no mata al
+    // mutante del DTO; queda para que el 400 no dependa de esa coerción.
+    describe('PATCH /descuentos/:id (pronto pago)', () => {
+      const alta = { diasVencimiento: 10 };
+      let ruta: string;
+      beforeAll(async () => {
+        ruta = `descuentos/${await crear('descuentos', {
+          nombre: `Pronto pago null ${sufijo}`,
+          tipoReglaId: TIPO_DESCUENTO_PRONTO_PAGO,
+          valorPorcentaje: '0.02',
+          activo: false,
+          ...alta,
+        })}`;
+      });
+
+      cadaCampoNull(
+        'patch',
+        () => ruta,
+        () => alta,
+        ['diasVencimiento'],
+      );
+    });
+
+    describe('PATCH /recargos/:id', () => {
+      const alta = {
+        nombre: `Recargo null ${sufijo}`,
+        tipoReglaId: TIPO_RECARGO_MORA,
+        modo: 'porcentaje',
+        nivel: 'venta',
+        diasVencimiento: 30,
+        activo: false,
+      };
+      let ruta: string;
+      beforeAll(async () => {
+        ruta = `recargos/${await crear('recargos', {
+          ...alta,
+          valorPorcentaje: '0.02',
+        })}`;
+      });
+
+      cadaCampoNull(
+        'patch',
+        () => ruta,
+        () => ({ ...alta, metodoPagoIds: [TARJETA_CREDITO_ID], tramos: [] }),
+        [...Object.keys(alta), 'metodoPagoIds', 'tramos'],
+      );
+      conservaEnLaRespuesta(
+        () => ruta,
+        () => ({ nombre: alta.nombre }),
+        () => ({
+          modo: alta.modo,
+          nivel: alta.nivel,
+          activo: alta.activo,
+          diasVencimiento: alta.diasVencimiento,
+        }),
+      );
+    });
+
+    describe('PATCH /promociones/:id', () => {
+      let alta: Record<string, unknown>;
+      let ruta: string;
+      beforeAll(async () => {
+        const categoriaId = await crear('categorias', {
+          nombre: `Categoría promo null ${sufijo}`,
+        });
+        alta = {
+          nombre: `Promo null ${sufijo}`,
+          tipo: 'porcentaje',
+          activo: false,
+          fechaInicio: '2026-01-01',
+          fechaFin: '2026-12-31',
+          scopes: [{ tipoScope: 'categoria', categoriaId }],
+        };
+        ruta = `promociones/${await crear('promociones', {
+          ...alta,
+          valorPorcentaje: '0.10',
+        })}`;
+      });
+
+      cadaCampoNull(
+        'patch',
+        () => ruta,
+        () => alta,
+        ['nombre', 'tipo', 'activo', 'fechaInicio', 'fechaFin', 'scopes'],
+      );
+      conservaEnLaRespuesta(
+        () => ruta,
+        () => ({ nombre: alta.nombre }),
+        () => ({ activo: alta.activo }),
+      );
+    });
+
+    // Un tenant propio, dado de alta por el superadmin: el PATCH de tenants es
+    // de superadmin, y la pasarela y la razón social de Demo Restaurante las
+    // usan otras suites.
+    describe('tenant nuevo: PATCH /admin/tenants/:id, pasarela y razón social', () => {
+      const tenant = {
+        nombre: `Tenant null ${sufijo}`,
+        correo: `null-${sufijo}@e2e.test`,
+        provinciaId: PROV_CDMX,
+      };
+      const pasarela = {
+        ambiente: 'pruebas',
+        modoIntegracion: 'individual',
+        activo: false,
+        prioridad: 1,
+      };
+      const razon = {
+        nombre: `Razón null ${sufijo}`,
+        rut: `NULL${sufijo}`,
+        habilitado: true,
+      };
+      let tokenSuper: string;
+      let tokenTenant: string;
+      let tenantId: string;
+      let pasarelaId: string;
+      let razonId: string;
+      beforeAll(async () => {
+        tokenSuper = await entrar(SUPERADMIN.email, SUPERADMIN.pass);
+        tenantId = await crear('admin/tenants', tenant, 'id', tokenSuper);
+        const contratar = await enviar(
+          'post',
+          `admin/tenants/${tenantId}/modules`,
+          { moduloAppId: MODULO_PASARELAS },
+          tokenSuper,
+        );
+        expect(contratar.status).toBe(201);
+        tokenTenant = await entrar(SUPERADMIN.email, SUPERADMIN.pass, tenantId);
+        const catalogo = await enviar(
+          'get',
+          'pasarela/admin/pasarelas-disponibles',
+          undefined,
+          tokenTenant,
+        );
+        expect(catalogo.status).toBe(200);
+        const demo = (
+          catalogo.body as { pasarelaId: string; codigo: string }[]
+        ).find((p) => p.codigo === 'demo')!;
+        pasarelaId = await crear(
+          'pasarela/admin/config',
+          { pasarelaId: demo.pasarelaId, ...pasarela },
+          'tenantPasarelaId',
+          tokenTenant,
+        );
+        razonId = await crear(
+          'tenants/razones-sociales',
+          razon,
+          'id',
+          tokenTenant,
+        );
+      });
+
+      cadaCampoNull(
+        'patch',
+        () => `admin/tenants/${tenantId}`,
+        () => tenant,
+        Object.keys(tenant),
+        () => tokenSuper,
+      );
+      cadaCampoNull(
+        'patch',
+        () => `pasarela/admin/config/${pasarelaId}`,
+        () => pasarela,
+        Object.keys(pasarela),
+        () => tokenTenant,
+      );
+      cadaCampoNull(
+        'patch',
+        () => `tenants/razones-sociales/${razonId}`,
+        () => razon,
+        Object.keys(razon),
+        () => tokenTenant,
+      );
+      conservaEnLaRespuesta(
+        () => `pasarela/admin/config/${pasarelaId}`,
+        () => ({ ambiente: pasarela.ambiente }),
+        () => ({ activo: pasarela.activo, prioridad: pasarela.prioridad }),
+        () => tokenTenant,
+      );
+      conservaEnLaRespuesta(
+        () => `tenants/razones-sociales/${razonId}`,
+        () => ({ nombre: razon.nombre }),
+        () => ({ habilitado: razon.habilitado }),
+        () => tokenTenant,
       );
     });
   });

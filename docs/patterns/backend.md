@@ -98,7 +98,25 @@ fiscal a no olvidar: el **IVA no se pausa**, lo gobierna afecto/exento
 ## 3. DTO
 
 `class-validator` con `ValidationPipe` global (`validacionGlobal()`, en `main.ts`). Campos
-opcionales en update con `@IsOptional()`. Campos `numeric` con `@IsNumberString()`.
+`numeric` con `@IsNumberString()`.
+
+**Un campo opcional de un `PATCH`/`PUT` va con `@ValidateIf((_o, v) => v !== undefined)`,
+no con `@IsOptional()`, salvo que su columna sea nullable.** `@IsOptional()` trata `null`
+igual que ausente y saltea todos los validadores de abajo, así que un `null` explícito llega
+al service: a una columna NOT NULL (500 de Postgres), a un `.length`/`for…of` (TypeError,
+500), o a un `??`/`!= null` que lo ignora o lo cambia por el default (200 mintiendo). Con
+`@ValidateIf`, omitir el campo sigue siendo "no tocar" y `null` es un 400. `@IsOptional()`
+queda para las columnas nullables, donde `null` es la forma de **borrar** el dato. Se
+arregló DTO por DTO varias veces antes del barrido del 2026-10-02
+([`resueltos.md`](../agent/resueltos.md)); el e2e que lo fija es
+`backend/test/null-en-actualizaciones.e2e-spec.ts`.
+
+Con `PartialType(Create)`, la opción **`{ skipNullProperties: false }`** hace eso mismo en
+los campos que el alta exige. No alcanza para los que el alta ya marca `@IsOptional()` y van
+a una columna NOT NULL (un `activo` con default): esos se redeclaran en el Update **con
+`declare`** y solo `@ValidateIf`, que reemplaza la condición heredada y conserva los
+validadores. Sin `declare`, con target ES2023 el campo existe en cada instancia en `undefined` y
+un `Object.assign(entidad, dto)` lo copia a la respuesta. Modelo: `UpdateDescuentoDto`.
 
 **Lo que el DTO no declara es un 400** que nombra el campo (`property x should not exist`),
 en el body y en la querystring: el pipe corre con `forbidNonWhitelisted` desde el 2026-09-27.

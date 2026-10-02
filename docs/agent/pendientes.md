@@ -98,62 +98,6 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
     arreglo queda en un `UPDATE` a mano por soporte; mientras no se haga, esos pesos no se pueden
     devolver por el sistema.
 
-- [ ] **`@IsOptional()` deja pasar un `null` explícito en los `PATCH`/`PUT`, y el service lo
-  escribe o lo ignora** (backend, DTOs de actualización). `@IsOptional` de class-validator trata
-  `null` igual que ausente y saltea el validador de abajo; ni el pipe global
-  (`validacion-global.pipe.ts`) ni `EscalaMonedaPipe` lo convierten. Según qué haga el service
-  después, el mismo `null` da un 500, o un 200 que no cambia nada o que escribe el default. Ya se arregló DTO por DTO
-  varias veces —los cuatro de motivos, `UpdateUbicacionDto`, `UpdateMyTenantDto`, `UpdatePerfilDto`,
-  `emisor` en el frente de emisión y `habilitada`/`permiteVuelto` de métodos de pago
-  ([`resueltos.md`](resueltos.md), 2026-10-02)— y nunca en barrido. Lo encontró el barrido de
-  todas las rutas `@Patch`/`@Put` de esa última tarea.
-
-  **Medido** (2026-10-02, sonda por la API contra base local; 6 casos): `PATCH /turnos/:id`
-  `{nombre:null}`, `/categorias/:id` `{activo:null}`, `/terceros/:id` `{nombre:null}`, `/items/:id`
-  `{activo:null}` y `{impuestosIds:null}` → **500**; `/cajones/:id` `{nombre:null}` → **200 sin
-  cambiar nada**. **Clasificado por lectura** (sin correr): todo lo demás de las listas de abajo.
-
-  Cinco formas, con arreglos distintos:
-  - **A — el `null` llega a una columna NOT NULL → 500.** turnos (nombre, horaInicio, horaFin,
-    activo); monedas del comercio (habilitada); impresoras (nombre, rol, tipoConexion, activo);
-    categorias (nombre, aplicaA, activo); terceros (tipo, nombre, activo); garzones (nombre, activo,
-    tipo); salones (nombre); mesas (nombre, posX, posY, forma, tamano); impuestos (nombre, activo);
-    items (nombre, precioBase, monedaId, precioIncluyeImpuesto, activo, modoInventario,
-    requiereCita, frecuencia); grupos-modificadores (nombre); propinas: `PUT distribucion`
-    (habilitadoPos, habilitadoSalones) y la liquidación anidada (incluido, monto). **Arreglo:**
-    `@ValidateIf(v !== undefined)` en vez de `@IsOptional`, con e2e de `null` → 400.
-  - **A' — el `null` llega a un array y el service tira `TypeError` → 500.** descuentos y recargos
-    (tramos, metodoPagoIds); items (impuestosIds, recargosIds, descuentosIds, ingredientes,
-    componentes, extrasPermitidos, gruposModificadores); grupos-modificadores (opciones). Mismo
-    arreglo que A. En items, `impuestosIds` revienta **después** del `DELETE` de los vínculos: la
-    transacción hace rollback, pero es un 500.
-  - **B — el `null` se ignora → 200 sin cambiar nada.** cajones (nombre, activo: `!= null`);
-    descuentos y recargos (`modo` con `??`; `diasVencimiento` en `mora`). **Arreglo distinto:** el
-    `null` tiene que dar 400, no "no tocar"; omitir un campo y mandarlo en `null` son dos conductas.
-  - **PartialType — siete DTOs heredan `@IsOptional` en todos sus campos:** `UpdateTenantDto`
-    (nombre, correo; `PATCH /tenants/:id`, superadmin), `UpdateRazonSocialDto` (nombre, rut,
-    habilitado), `UpdateRolDto` (nombre), `UpdateTenantPasarelaDto` (ambiente, modoIntegracion,
-    activo, prioridad), `UpdateDescuentoDto` y `UpdateRecargoDto` (nombre, tipoReglaId, activo,
-    nivel), `UpdatePromocionDto` (nombre, activo, tipo). Casi todos escriben con
-    `Object.assign`/spread. **Arreglo:** dejar de heredar el `@IsOptional` que agrega `PartialType`,
-    no tocar un decorador.
-  - **C — B sobre un `PUT`: el `null` equivale a omitir, y omitir escribe el default.** propinas,
-    el grupo anidado de `PUT distribucion` (`baseVentas`, `activo`, `orden`: `??`/`!== false`; el
-    service reescribe todos los grupos); preferencias financieras (`promosAcumulanDescuentos ??
-    false`). El `null` → 400 es el mismo arreglo que B; lo propio de C es una decisión de producto
-    para los dos: si omitir el campo en esos `PUT` también resetea.
-
-  **Además, el `.sql` miente en tres columnas:** `tenant_moneda.habilitada`, `tenant_metodo_pago.habilitada`
-  y `razones_sociales.habilitado` figuran nullable en `startup-pos.sql` y la entidad las tiene NOT
-  NULL. Manda la entidad (`synchronize`): el frente corrige el `.sql`.
-
-  **Cómo tomarlo: por forma, una de cada forma primero** (A, A', B, C, PartialType), no los 18
-  endpoints de una. Con tres apariciones vale extraer un decorador propio en vez de repetir
-  `@ValidateIf` en ~60 campos, pero **antes de inventarlo, medirlo contra lo que ya usa el repo**:
-  hay decenas de `ValidateIf(` en `backend/src`, con más de una firma, y los DTOs ya arreglados
-  de arriba son el precedente a respetar. Cada campo arreglado lleva su
-  e2e de `null` → 400 y el control que deja pasar; los mutantes, por forma.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -1190,6 +1134,25 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
+
+- [ ] **En los `PUT` que reemplazan, ¿omitir un campo opcional tiene que volver al default?**
+  (backend; `PUT /propinas/distribucion` y `PUT /tenants/preferencias-financieras`). Desde el
+  cierre del `null` en `PATCH`/`PUT` (2026-10-02, [`resueltos.md`](resueltos.md)), mandar `null`
+  es 400. Pero **omitir** el campo sigue escribiendo el default y pisa lo guardado con un 200:
+  en la distribución, un grupo sin `baseVentas`, `activo`, `orden` o `pesos` vuelve a
+  `TOTAL_FINAL`, activo, orden 0 y sin pesos; en preferencias, sin `promosAcumulanDescuentos`
+  vuelve a `false`. **Pregunta:** si un cliente viejo guarda la distribución sin mandar
+  `activo`, ¿el grupo que estaba apagado tiene que volver a prenderse, o el `PUT` tiene que
+  exigir el campo (400 si falta)? Las pantallas de hoy mandan todos los campos. La pregunta
+  estaba dentro de la entrada que se cerró y no era de ese frente.
+
+- [ ] **`PATCH /me/preferencias` con `ui.colorMode` o `ui.pageSize` en `null` vuelve al
+  default** (backend, `me/dto/update-preferencias.dto.ts`, `@IsOptional()` en los dos). El merge
+  (`common/utils/usuario-preferencias.util.ts`, `...patch.ui`) guarda el `null` y la
+  normalización lo cambia por `light` / `15`: 200 y la preferencia reseteada. La columna es
+  `jsonb`, así que no hay 500. **Pregunta:** ¿`null` significa "volver al default" (y se
+  documenta y se testea así), o es un 400 como en el resto de los `PATCH`? Lo encontró el
+  barrido del cierre del `null` (2026-10-02), clasificado por lectura, sin correr.
 
 ## 5. Carreras de concurrencia
 
