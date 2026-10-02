@@ -43,6 +43,7 @@ const mockTenant: Tenant = {
   arqueoCiego: false,
   promosAcumulanDescuentos: false,
   horaCorte: 0,
+  facturador: 'sistema',
   creadoEl: new Date(),
   actualizadoEl: new Date(),
   eliminadoEl: null,
@@ -457,6 +458,25 @@ describe('TenantsService', () => {
 
       expect(result.nombre).toBe('Paris Updated');
       expect(tenantRepo.save).toHaveBeenCalled();
+    });
+
+    it('guarda el facturador que mandó el admin y, sin él, conserva el que había', async () => {
+      tenantRepo.findOne.mockResolvedValue({ ...mockTenant });
+      tenantRepo.save.mockImplementation((t: Tenant) => Promise.resolve(t));
+
+      const cambiado = await service.updateMine('tenant-uuid', {
+        facturador: 'externo',
+      });
+      expect(cambiado.facturador).toBe('externo');
+
+      tenantRepo.findOne.mockResolvedValue({
+        ...mockTenant,
+        facturador: 'externo',
+      });
+      const intacto = await service.updateMine('tenant-uuid', {
+        nombre: 'Otro',
+      });
+      expect(intacto.facturador).toBe('externo');
     });
 
     it('lanza NotFoundException si el tenant no existe', async () => {

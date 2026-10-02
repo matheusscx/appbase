@@ -12,11 +12,20 @@ import type {
   NivelRedondeo,
 } from '../../calculo-precios/calculo-precios.engine';
 
+/**
+ * Quién hace las facturas y documenta lo que queda debiendo (spec
+ * `2026-10-01-emision-por-venta`, E2/E9): `'sistema'` las arma el sistema;
+ * `'externo'` las hace otro facturador (el del SII, su software contable) y la
+ * venta queda con "hecho por fuera" y su número.
+ */
+export type Facturador = 'sistema' | 'externo';
+
 @Entity('tenants')
 @Check(
   'chk_tenants_nivel_redondeo',
   `"nivel_redondeo" IN ('linea','documento')`,
 )
+@Check('chk_tenants_facturador', `"facturador" IN ('sistema','externo')`)
 @Check('chk_tenants_hora_corte', '"hora_corte" BETWEEN 0 AND 6')
 export class Tenant {
   @PrimaryGeneratedColumn('uuid', { name: 'tenant_id' })
@@ -76,6 +85,14 @@ export class Tenant {
     default: 0,
   })
   montoTolerancia: string;
+
+  /**
+   * Declaración del comercio, no del medio de pago: es la otra mitad de la
+   * regla de `tenant_metodo_pago.emisor`. El default `'sistema'` es la conducta
+   * de hoy. `type: 'text'` explícito (misma razón que `nivelRedondeo`).
+   */
+  @Column({ type: 'text', default: 'sistema' })
+  facturador: Facturador;
 
   @Column({ name: 'arqueo_ciego', type: 'boolean', default: false })
   arqueoCiego: boolean;

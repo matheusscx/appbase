@@ -3602,6 +3602,7 @@ export class SeederService implements OnApplicationBootstrap {
               habilitada: true,
               permiteVuelto:
                 metodoPagoId === '550e8400-e29b-41d4-a716-446655440105', // solo efectivo
+              emisor: 'sistema',
             }),
           );
         }

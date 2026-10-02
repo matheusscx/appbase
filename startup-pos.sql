@@ -223,11 +223,16 @@ CREATE TABLE "tenants" (
   -- con corte 5 cuenta la venta del domingo a la 01:30 en el sábado. Se
   -- aplica solo en "common/utils/rango-fecha.util.ts".
   "hora_corte"         SMALLINT    NOT NULL DEFAULT 0,
+  -- Quién hace las facturas y documenta lo que queda debiendo: el sistema o otro
+  -- facturador (el del SII, su software contable). Es la otra mitad de
+  -- "tenant_metodo_pago"."emisor".
+  "facturador"         TEXT        NOT NULL DEFAULT 'sistema',
   "creado_el"          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"     TIMESTAMPTZ,
   "eliminado_el"       TIMESTAMPTZ,
   CONSTRAINT chk_tenants_nivel_redondeo CHECK ("nivel_redondeo" IN ('linea','documento')),
-  CONSTRAINT chk_tenants_hora_corte CHECK ("hora_corte" BETWEEN 0 AND 6)
+  CONSTRAINT chk_tenants_hora_corte CHECK ("hora_corte" BETWEEN 0 AND 6),
+  CONSTRAINT chk_tenants_facturador CHECK ("facturador" IN ('sistema','externo'))
 );
 
 CREATE TABLE "razones_sociales" (
@@ -402,10 +407,15 @@ CREATE TABLE "tenant_metodo_pago" (
   -- Política por tenant (no intrínseca al método): fuerza el conteo obligatorio de un
   -- método no-efectivo al cerrar. obligatorio = es_efectivo OR requiere_conteo.
   "requiere_conteo" BOOLEAN NOT NULL DEFAULT false,
+  -- Quién emite el documento de lo cobrado con este medio: el sistema (boleta
+  -- propia), la máquina de tarjeta (su voucher) o nadie (la venta queda sin
+  -- documento y emitirlo es del comercio). Un comercio nuevo trae 'sistema'.
+  "emisor"         TEXT    NOT NULL DEFAULT 'sistema',
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ,
-  PRIMARY KEY ("tenant_id", "metodo_pago_id")
+  PRIMARY KEY ("tenant_id", "metodo_pago_id"),
+  CONSTRAINT chk_tenant_metodo_pago_emisor CHECK ("emisor" IN ('sistema','maquina','nadie'))
 );
 
 -- Orden de aplicación de la fórmula de precio por tenant.

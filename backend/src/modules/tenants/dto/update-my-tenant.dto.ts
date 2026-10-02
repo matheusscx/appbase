@@ -1,5 +1,6 @@
 import {
   IsEmail,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -11,6 +12,7 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
+import type { Facturador } from '../entities/tenant.entity';
 
 export class UpdateMyTenantDto {
   // `nombre` es la identidad del tenant y sale en documentos: dejarlo sin
@@ -70,4 +72,12 @@ export class UpdateMyTenantDto {
   @Min(0)
   @Max(6)
   horaCorte?: number;
+
+  // Quién hace las facturas del comercio (E2/E9). `@ValidateIf` y no
+  // `@IsOptional()`, por lo mismo que `horaCorte`: la columna es NOT NULL y un
+  // `null` saltearía `@IsIn` hasta el 500 de Postgres. Omitirlo conserva el
+  // valor que tenía.
+  @ValidateIf((_o: unknown, v: unknown) => v !== undefined)
+  @IsIn(['sistema', 'externo'])
+  facturador?: Facturador;
 }

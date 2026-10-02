@@ -6,7 +6,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { Db } from '../../common/db/db.service';
-import { TenantMetodoPago } from './entities/tenant-metodo-pago.entity';
+import {
+  TenantMetodoPago,
+  type EmisorMedio,
+} from './entities/tenant-metodo-pago.entity';
 import { UpdateTenantMetodoPagoDto } from './dto/update-tenant-metodo-pago.dto';
 
 export interface MetodoPagoTenant {
@@ -15,6 +18,8 @@ export interface MetodoPagoTenant {
   abreviatura: string | null;
   habilitada: boolean;
   permiteVuelto: boolean;
+  emisor: EmisorMedio;
+  esEfectivo: boolean;
 }
 
 @Injectable()
@@ -36,12 +41,16 @@ export class MetodosPagoService {
       abreviatura: string | null;
       habilitada: boolean;
       permite_vuelto: boolean;
+      emisor: EmisorMedio;
+      es_efectivo: boolean;
     }[] = await this.db.query(
       `SELECT mp.metodo_pago_id,
               mp.nombre,
               mp.abreviatura,
               COALESCE(tmp.habilitada, false) AS habilitada,
-              COALESCE(tmp.permite_vuelto, false) AS permite_vuelto
+              COALESCE(tmp.permite_vuelto, false) AS permite_vuelto,
+              COALESCE(tmp.emisor, 'sistema') AS emisor,
+              mp.es_efectivo
        FROM tenants t
        JOIN provincia prov ON prov.provincia_id = t.provincia_id
             AND prov.eliminado_el IS NULL
@@ -64,6 +73,8 @@ export class MetodosPagoService {
       abreviatura: r.abreviatura,
       habilitada: r.habilitada === true,
       permiteVuelto: r.permite_vuelto === true,
+      emisor: r.emisor,
+      esEfectivo: r.es_efectivo === true,
     }));
   }
 
@@ -105,6 +116,7 @@ export class MetodosPagoService {
       if (dto.habilitada !== undefined) row.habilitada = dto.habilitada;
       if (dto.permiteVuelto !== undefined)
         row.permiteVuelto = dto.permiteVuelto;
+      if (dto.emisor !== undefined) row.emisor = dto.emisor;
 
       return manager.save(TenantMetodoPago, row);
     });
@@ -160,6 +172,7 @@ export class MetodosPagoService {
       metodoPagoId,
       habilitada: false,
       permiteVuelto: false,
+      emisor: 'sistema',
     });
   }
 }

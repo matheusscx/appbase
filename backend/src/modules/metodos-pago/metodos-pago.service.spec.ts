@@ -70,6 +70,8 @@ describe('MetodosPagoService', () => {
           abreviatura: 'EFE',
           habilitada: true,
           permite_vuelto: true,
+          emisor: 'nadie',
+          es_efectivo: true,
         },
         {
           metodo_pago_id: TARJETA,
@@ -77,6 +79,8 @@ describe('MetodosPagoService', () => {
           abreviatura: null,
           habilitada: false,
           permite_vuelto: false,
+          emisor: 'maquina',
+          es_efectivo: false,
         },
       ]);
 
@@ -88,6 +92,8 @@ describe('MetodosPagoService', () => {
         abreviatura: 'EFE',
         habilitada: true,
         permiteVuelto: true,
+        emisor: 'nadie',
+        esEfectivo: true,
       });
       expect(result[1]).toEqual({
         metodoPagoId: TARJETA,
@@ -95,6 +101,8 @@ describe('MetodosPagoService', () => {
         abreviatura: null,
         habilitada: false,
         permiteVuelto: false,
+        emisor: 'maquina',
+        esEfectivo: false,
       });
     });
   });
@@ -116,7 +124,10 @@ describe('MetodosPagoService', () => {
         permiteVuelto: true,
       });
 
-      expect(managerMock.create).toHaveBeenCalled();
+      expect(managerMock.create).toHaveBeenCalledWith(
+        TenantMetodoPago,
+        expect.objectContaining({ emisor: 'sistema' }),
+      );
       expect(result.habilitada).toBe(true);
       expect(result.permiteVuelto).toBe(true);
       expect(managerMock.save).toHaveBeenCalled();
@@ -144,6 +155,44 @@ describe('MetodosPagoService', () => {
       expect(result.eliminadoEl).toBeNull();
       expect(result.habilitada).toBe(true);
       expect(result.permiteVuelto).toBe(false);
+    });
+
+    it('guarda el emisor y no toca lo que el PATCH no mandó', async () => {
+      managerMock.query.mockResolvedValue([{ en_pais: true }]);
+      managerMock.findOne.mockResolvedValue({
+        tenantId: TENANT,
+        metodoPagoId: TARJETA,
+        habilitada: true,
+        permiteVuelto: true,
+        emisor: 'sistema',
+        eliminadoEl: null,
+      });
+
+      const result = await service.updateMetodoPago(TENANT, TARJETA, {
+        emisor: 'maquina',
+      });
+
+      expect(result.emisor).toBe('maquina');
+      expect(result.habilitada).toBe(true);
+      expect(result.permiteVuelto).toBe(true);
+    });
+
+    it('un PATCH sin emisor conserva el que tenía', async () => {
+      managerMock.query.mockResolvedValue([{ en_pais: true }]);
+      managerMock.findOne.mockResolvedValue({
+        tenantId: TENANT,
+        metodoPagoId: TARJETA,
+        habilitada: true,
+        permiteVuelto: false,
+        emisor: 'nadie',
+        eliminadoEl: null,
+      });
+
+      const result = await service.updateMetodoPago(TENANT, TARJETA, {
+        habilitada: false,
+      });
+
+      expect(result.emisor).toBe('nadie');
     });
   });
 });

@@ -127,3 +127,30 @@ describe('horaCorte', () => {
     expect(errores).toHaveLength(0);
   });
 });
+
+// `facturador` es NOT NULL con default 'sistema' (E9): igual que `horaCorte`,
+// `@ValidateIf` y no `@IsOptional()`, para que `null` dé 400 y no un 500 de
+// Postgres al llegar a `Object.assign` en `updateMine`.
+describe('facturador', () => {
+  it.each(['sistema', 'externo'])('acepta %p', async (facturador) => {
+    const errs = await validate(
+      plainToInstance(UpdateMyTenantDto, { facturador }),
+    );
+    expect(errs).toHaveLength(0);
+  });
+
+  it.each(['otro', '', 'SISTEMA', 1, null])(
+    'rechaza %p',
+    async (facturador) => {
+      const errs = await validate(
+        plainToInstance(UpdateMyTenantDto, { facturador }),
+      );
+      expect(errs.map((e) => e.property)).toEqual(['facturador']);
+    },
+  );
+
+  it('ausente no se valida: omitirlo conserva el valor', async () => {
+    const errs = await validate(plainToInstance(UpdateMyTenantDto, {}));
+    expect(errs).toHaveLength(0);
+  });
+});

@@ -347,6 +347,33 @@ igual, solo que sin fila `venta_propina`.
 
 ---
 
+## Quién emite el documento: `emisor` por medio y `facturador` por comercio
+
+Dos declaraciones que **solo se guardan y se editan** hoy; nada las lee todavía (las lee la
+emisión por venta, spec `docs/superpowers/specs/2026-10-01-emision-por-venta-design.md`).
+
+- **`tenant_metodo_pago.emisor`** — `'sistema' | 'maquina' | 'nadie'`, no nulo, default
+  `'sistema'`. Dice quién emite el documento de lo cobrado con ese medio: el sistema arma
+  la boleta, la máquina de tarjeta emite la suya, o nadie (la venta queda sin documento y
+  emitirlo es responsabilidad del comercio). Va en `tenant_metodo_pago` y no en
+  `metodos_pago` porque esa tabla es global: la regla sería la misma para todos los
+  comercios. Un comercio nuevo (alta y seed) trae `'sistema'` en todos los medios: es el
+  error barato, se corrige con una nota de crédito.
+  `GET /metodos-pago` lo devuelve junto con `esEfectivo` por fila; `PATCH /metodos-pago/:id`
+  lo acepta (`TenantAdminGuard`). Un valor fuera de la lista da 400, `null` también, y
+  omitirlo conserva el que había.
+- **`tenants.facturador`** — `'sistema' | 'externo'`, no nulo, default `'sistema'` (la
+  conducta de hoy). Dice quién hace las facturas y documenta lo que queda debiendo: el
+  sistema u otro facturador (el del SII, su software contable). Se lee por
+  `GET /tenants/me` y se escribe por `PATCH /tenants/me` (admin), con las mismas reglas que
+  `emisor`. No va por `preferencias-financieras`: ese `PUT` reemplaza toda la
+  configuración de precios.
+- Los dos tienen `CHECK` en la base (`chk_tenant_metodo_pago_emisor`,
+  `chk_tenants_facturador`). La pantalla es `configuracion/metodos-pago`: un selector
+  arriba de la tabla para el comercio y uno por fila para el medio.
+
+---
+
 ## Related Features
 
 - [ventas.md](./ventas.md) — Procesamiento de ventas y frontend POS

@@ -449,8 +449,8 @@ export class TenantsService {
       if (paisId) {
         await manager.query(
           `INSERT INTO tenant_metodo_pago
-             (tenant_id, metodo_pago_id, habilitada, permite_vuelto, creado_el, actualizado_el)
-           SELECT $1, mpp.metodo_pago_id, true, false, NOW(), NOW()
+             (tenant_id, metodo_pago_id, habilitada, permite_vuelto, emisor, creado_el, actualizado_el)
+           SELECT $1, mpp.metodo_pago_id, true, false, 'sistema', NOW(), NOW()
            FROM metodo_pago_pais mpp
            WHERE mpp.pais_id = $2 AND mpp.eliminado_el IS NULL
            ON CONFLICT (tenant_id, metodo_pago_id) DO NOTHING`,
