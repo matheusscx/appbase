@@ -56,9 +56,15 @@ export interface PerdidasHoy {
 export interface MasVendidoItem {
   itemId: string;
   itemNombre: string;
-  /** Σ en unidad base, `venta_detalles.cantidad`. */
+  /**
+   * Neto, en unidad base: Σ `venta_detalles.cantidad` de lo vendido hoy menos
+   * la de las líneas de las correcciones de hoy, sin la línea de ajuste.
+   */
   cantidad: string;
-  /** Σ `venta_detalles.total_linea`. */
+  /**
+   * Neto: Σ `venta_detalles.total_linea` de lo vendido hoy menos la de las
+   * líneas de las correcciones de hoy, sin la línea de ajuste.
+   */
   monto: string;
 }
 
@@ -68,7 +74,7 @@ export interface ResumenNegocioHoy {
   ventas: VentasHoy;
   porCobrar: PorCobrar;
   perdidas: PerdidasHoy;
-  /** Hasta 5, `ORDER BY monto DESC, itemId`. */
+  /** Hasta 5, `ORDER BY monto DESC, itemId`; solo entran ítems con neto > 0. */
   masVendidos: MasVendidoItem[];
 }
 
@@ -344,7 +350,10 @@ export class ResumenNegocioService {
     const mermasHoy = await this.mermasService.resumen(tenantId, fecha, fecha);
 
     // Lo más vendido: los mismos filtros de venta que "vendido" arriba (sin
-    // canceladas, sin nota de crédito, rango de HOY), agregado por ítem.
+    // canceladas, rango de HOY), agregado por ítem y NETO de las correcciones:
+    // una venta suma sus líneas y una nota de crédito (`venta_referencia_id`)
+    // las resta, en la cantidad y en el monto. Un ítem cuyo neto del día no es
+    // positivo no es "lo más vendido" y sale (`HAVING`).
     // `ORDER BY` sobre la expresión SUM y no sobre el alias `monto`: el alias
     // sale con `::text` (para no perder precisión de Decimal en el mapeo), y
     // ordenar por un texto compararía "9990000" antes que "500"
@@ -373,16 +382,12 @@ export class ResumenNegocioService {
 
     const masVendidosRows: MasVendidoRow[] = await this.db.query(
       `SELECT vd.item_id, i.nombre AS item_nombre,
-              SUM(vd.total_linea)::text AS monto,
-              SUM(vd.cantidad)::text AS cantidad
+              SUM(CASE WHEN v.venta_referencia_id IS NULL THEN vd.total_linea
+                       ELSE -vd.total_linea END)::text AS monto,
+              SUM(CASE WHEN v.venta_referencia_id IS NULL THEN vd.cantidad
+                       ELSE -vd.cantidad END)::text AS cantidad
          FROM venta_detalles vd
          JOIN ventas v ON v.venta_id = vd.venta_id
-         -- Mismo criterio que "vendido" (arriba): sin canceladas, sin nota de
-         -- crédito, JOIN a td SIN eliminado_el por el mismo porqué (un tipo
-         -- de documento dado de baja después no deja de marcar como NC a la
-         -- venta que ya lo usó).
-         LEFT JOIN tipos_documento_tributario td
-           ON td.tipo_documento_id = v.tipo_documento_id
          -- Nombre del ítem SIN filtro de borrado, a propósito: se vendió
          -- hoy, y darlo de baja después no lo saca de lo más vendido (spec
          -- 2026-09-18-dashboard-inicio § 4.4/§ 5.1).
@@ -391,10 +396,15 @@ export class ResumenNegocioService {
           AND v.eliminado_el IS NULL
           AND vd.eliminado_el IS NULL
           AND v.estado <> 'cancelada'
-          AND COALESCE(td.es_nota_credito, false) = false
+          -- La línea "Ajuste" es la parte de una NC que no corresponde a
+          -- ningún producto: resta del vendido, no de un ítem.
+          AND i.es_ajuste_nota_credito = false
           AND ${condHoyVentaMasVendidos}
         GROUP BY vd.item_id, i.nombre
-        ORDER BY SUM(vd.total_linea) DESC, vd.item_id
+       HAVING SUM(CASE WHEN v.venta_referencia_id IS NULL THEN vd.total_linea
+                       ELSE -vd.total_linea END) > 0
+        ORDER BY SUM(CASE WHEN v.venta_referencia_id IS NULL THEN vd.total_linea
+                          ELSE -vd.total_linea END) DESC, vd.item_id
         LIMIT 5`,
       paramsMasVendidos,
     );

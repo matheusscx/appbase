@@ -524,7 +524,7 @@ describe('ResumenNegocioService', () => {
       expect(res.masVendidos).toEqual([]);
     });
 
-    it('la consulta de más vendidos excluye canceladas y notas de crédito, y filtra venta_detalles.eliminado_el, afirmando sobre la cláusula', async () => {
+    it('la consulta de más vendidos excluye canceladas y el ítem de ajuste, resta las correcciones, y filtra venta_detalles.eliminado_el, afirmando sobre la cláusula', async () => {
       mockRespuestas({});
 
       await service.hoy(TENANT);
@@ -534,8 +534,23 @@ describe('ResumenNegocioService', () => {
       const [masVendidosSql] = queryMock.mock.calls[4] as [string];
       expect(masVendidosSql).toMatch(/FROM venta_detalles vd/);
       expect(masVendidosSql).toMatch(/v\.estado\s*<>\s*'cancelada'/);
+      // Ya no se lee el tipo de documento: la corrección se reconoce por
+      // `venta_referencia_id` y resta en la cantidad y en el monto.
+      expect(masVendidosSql).not.toMatch(/tipos_documento_tributario/);
       expect(masVendidosSql).toMatch(
-        /COALESCE\(td\.es_nota_credito,\s*false\)\s*=\s*false/,
+        /SUM\(CASE WHEN v\.venta_referencia_id IS NULL THEN vd\.total_linea\s+ELSE -vd\.total_linea END\)::text AS monto/,
+      );
+      expect(masVendidosSql).toMatch(
+        /SUM\(CASE WHEN v\.venta_referencia_id IS NULL THEN vd\.cantidad\s+ELSE -vd\.cantidad END\)::text AS cantidad/,
+      );
+      // La línea "Ajuste" no es un producto: el filtro vive en el WHERE,
+      // acotado antes del GROUP BY.
+      expect(masVendidosSql).toMatch(
+        /WHERE[\s\S]*?AND i\.es_ajuste_nota_credito = false[\s\S]*?GROUP BY/,
+      );
+      // Un ítem con neto <= 0 sale. Acotado entre GROUP BY y ORDER BY.
+      expect(masVendidosSql).toMatch(
+        /GROUP BY[\s\S]*?HAVING SUM\(CASE WHEN v\.venta_referencia_id IS NULL THEN vd\.total_linea\s+ELSE -vd\.total_linea END\) > 0[\s\S]*?ORDER BY/,
       );
       expect(masVendidosSql).toMatch(/vd\.eliminado_el IS NULL/);
       // `v\.eliminado_el` (la venta), no solo `vd\.eliminado_el` (el
@@ -552,7 +567,7 @@ describe('ResumenNegocioService', () => {
 
       const [masVendidosSql] = queryMock.mock.calls[4] as [string];
       expect(masVendidosSql).toMatch(
-        /ORDER BY SUM\(vd\.total_linea\) DESC, vd\.item_id/,
+        /ORDER BY SUM\(CASE WHEN v\.venta_referencia_id IS NULL THEN vd\.total_linea\s+ELSE -vd\.total_linea END\) DESC, vd\.item_id\s+LIMIT 5/,
       );
     });
 

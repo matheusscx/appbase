@@ -72,6 +72,11 @@ interface ResumenHoyResponse {
   };
   masVendidos: MasVendidoResp[];
 }
+interface LineaVentaResp {
+  itemId: string;
+  cantidad: string;
+  totalLinea: string;
+}
 interface ConfigPasarelaRow {
   tenantPasarelaId: string;
   codigo: string;
@@ -956,6 +961,130 @@ describe('Resumen del negocio (e2e)', () => {
         itemId: itemCaro.id,
         monto: venta.totalFinal,
       });
+    });
+
+    /** Las líneas de una venta o de una NC, tal como las lee el detalle. */
+    async function leerLineas(ventaId: string): Promise<LineaVentaResp[]> {
+      const res = await request(app.getHttpServer())
+        .get(`/api/ventas/${ventaId}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(res.status).toBe(200);
+      return (res.body as { detalles: LineaVentaResp[] }).detalles;
+    }
+
+    /** Venta de `cantidad` unidades de `itemId`, pagada entera en efectivo. */
+    async function ventaPagada(
+      itemId: string,
+      cantidad: string,
+    ): Promise<VentaCreadaResponse> {
+      const venta = await post<VentaCreadaResponse>('/api/ventas', {
+        lineas: [{ itemId, cantidad }],
+      });
+      await post('/api/pagos', {
+        ventaId: venta.id,
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: venta.totalFinal }],
+      });
+      return venta;
+    }
+
+    it('una NC con líneas resta su cantidad y su monto de la fila del ítem en masVendidos', async () => {
+      // Precio no redondo y alto, para entrar al top 5 del día aunque el seed
+      // y los demás tests también vendan. Sin `Date.now()` a propósito: el
+      // monto neto (2 unidades) queda muy por debajo del "carísimo" de arriba,
+      // así ese test sigue primero en cada corrida. Como contrapartida, este
+      // test asume la base reseteada (`entorno.sh db` antes del e2e): cada
+      // corrida repetida el mismo día suma otro "carísimo" que se lleva un
+      // lugar del top 5, y tras cuatro o cinco corridas la fila de acá no entra.
+      const marca = Date.now();
+      const item = await post<ItemResponse>('/api/items', {
+        nombre: `Ítem devuelto resumen-negocio E2E ${marca}`,
+        precioBase: '9870001',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'servicio',
+      });
+      const venta = await ventaPagada(item.id, '3');
+      // Un tercio del total, redondeado hacia abajo: una NC por UNA de las
+      // tres unidades, con un monto que no es el de la línea exacta.
+      const montoNC = new Decimal(venta.totalFinal)
+        .div(3)
+        .toDecimalPlaces(0, Decimal.ROUND_DOWN)
+        .toString();
+      const nc = await post<IdResponse>(
+        `/api/ventas/${venta.id}/notas-credito`,
+        {
+          monto: montoNC,
+          devoluciones: [{ itemId: item.id, cantidad: '1' }],
+        },
+      );
+
+      // Las dos líneas, leídas de la app: el monto esperado sale de lo que
+      // quedó persistido, no de una cuenta propia sobre el precio.
+      const lineaVenta = (await leerLineas(venta.id)).find(
+        (l) => l.itemId === item.id,
+      );
+      const lineasNC = (await leerLineas(nc.id)).filter(
+        (l) => l.itemId === item.id,
+      );
+      expect(lineaVenta).toBeDefined();
+      expect(lineasNC).toHaveLength(1);
+      const montoNeto = new Decimal(lineaVenta!.totalLinea).minus(
+        lineasNC[0].totalLinea,
+      );
+      // El mismo monto en la venta y en la NC no discrimina: la NC no es la
+      // línea entera.
+      expect(montoNeto.gt(0)).toBe(true);
+      expect(montoNeto.eq(lineaVenta!.totalLinea)).toBe(false);
+
+      const resumen = (await leerResumen(tokenAdmin))
+        .body as ResumenHoyResponse;
+      const fila = resumen.masVendidos.find((m) => m.itemId === item.id);
+      expect(fila).toBeDefined();
+      expect(new Decimal(fila!.cantidad).toString()).toBe('2');
+      expect(new Decimal(fila!.monto).toString()).toBe(montoNeto.toString());
+    });
+
+    it('una NC por monto libre no mete el ítem de ajuste en masVendidos', async () => {
+      const item = await post<ItemResponse>('/api/items', {
+        nombre: `Ítem ajuste resumen-negocio E2E ${Date.now()}`,
+        precioBase: '9870001',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'servicio',
+      });
+      const venta = await ventaPagada(item.id, '1');
+      const nc = await post<IdResponse>(
+        `/api/ventas/${venta.id}/notas-credito`,
+        {
+          monto: '4321',
+        },
+      );
+
+      // El ítem de ajuste no sale en `GET /api/items`: se toma de la base.
+      // Existe recién después de la primera NC, por eso se lee acá.
+      const ajuste: { item_id: string }[] = await ds.query(
+        `SELECT item_id FROM items
+          WHERE tenant_id = $1 AND es_ajuste_nota_credito = true
+            AND eliminado_el IS NULL`,
+        [PARIS_TENANT_ID],
+      );
+      expect(ajuste).toHaveLength(1);
+      const ajusteId = ajuste[0].item_id;
+      // Prueba de que la NC sí dejó una línea de ajuste: sin esto, "no
+      // aparece" valdría también si la NC no lo hubiera usado.
+      expect((await leerLineas(nc.id)).map((l) => l.itemId)).toContain(
+        ajusteId,
+      );
+
+      // Sin el `HAVING`, un ítem con neto <= 0 se ordena último y no entra al
+      // top 5 mientras haya cinco ítems con neto positivo, que en este e2e
+      // siempre hay: por eso esta aserción sobrevive a quitarlo. Quitar solo
+      // `es_ajuste_nota_credito = false` es equivalente en conducta mientras
+      // exista el `HAVING`, porque el ajuste que llega por una NC tiene
+      // siempre neto negativo. El filtro solo agrega algo si el ítem de ajuste
+      // se vendiera directo por `POST /ventas` con su id (la API no lo
+      // rechaza). Los dos los cubre el unitario sobre el texto del SQL.
+      const resumen = (await leerResumen(tokenAdmin))
+        .body as ResumenHoyResponse;
+      expect(resumen.masVendidos.map((m) => m.itemId)).not.toContain(ajusteId);
     });
   });
 });
