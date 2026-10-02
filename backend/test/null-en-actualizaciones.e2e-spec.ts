@@ -450,4 +450,21 @@ describe('null explícito en PATCH/PUT → 400 (e2e)', () => {
       );
     });
   });
+
+  describe('B — el null se ignoraba (200 sin cambiar nada)', () => {
+    describe('PATCH /cajones/:id', () => {
+      const alta = { nombre: `Cajón null ${sufijo}`, activo: true };
+      let ruta: string;
+      beforeAll(async () => {
+        ruta = `cajones/${await crear('cajones', { nombre: alta.nombre })}`;
+      });
+
+      cadaCampoNull(
+        'patch',
+        () => ruta,
+        () => alta,
+        Object.keys(alta),
+      );
+    });
+  });
 });
