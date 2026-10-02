@@ -14,19 +14,24 @@ import { TipoGarzon } from '../enums/tipo-garzon.enum';
  * Actualiza datos del garzón. El PIN NO se cambia aquí — se regenera con su
  * propio endpoint (`PATCH /garzones/:id/pin`), que crea uno nuevo y lo devuelve
  * una sola vez.
+ *
+ * `@ValidateIf` y no `@IsOptional()` en los campos de columnas NOT NULL:
+ * `IsOptional` trata `null` igual que ausente y saltea el validador de abajo,
+ * y el `null` llegaba a la columna como un 500 de Postgres en vez de un 400.
+ * Omitir un campo conserva el valor que tenía.
  */
 export class UpdateGarzonDto {
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
   nombre?: string;
 
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsBoolean()
   activo?: boolean;
 
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsIn(Object.values(TipoGarzon))
   tipo?: TipoGarzon;
 

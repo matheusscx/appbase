@@ -8,17 +8,21 @@ import {
   ValidateIf,
 } from 'class-validator';
 
+// `@ValidateIf` y no `@IsOptional()` en los campos de columnas NOT NULL:
+// `IsOptional` trata `null` igual que ausente y saltea el validador de abajo, y
+// el `null` llegaba a la columna como un 500 de Postgres en vez de un 400.
+// Omitir un campo conserva el valor que tenía.
 export class UpdateCategoriaDto {
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsString()
   @IsNotEmpty()
   nombre?: string;
 
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsIn(['productos', 'servicios', 'ambos'])
   aplicaA?: string;
 
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsBoolean()
   activo?: boolean;
 

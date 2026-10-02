@@ -250,7 +250,7 @@ CREATE TABLE "razones_sociales" (
   "rut"             VARCHAR(50) NOT NULL,
   "direccion"       VARCHAR(255),
   "telefono"        VARCHAR(50),
-  "habilitado"      BOOLEAN     DEFAULT false,
+  "habilitado"      BOOLEAN     NOT NULL DEFAULT false,
   "preferida"       BOOLEAN     NOT NULL DEFAULT false,
   "creado_el"       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"  TIMESTAMPTZ,
@@ -398,7 +398,7 @@ CREATE TABLE "roles_permisos_modulos" (
 CREATE TABLE "tenant_moneda" (
   "tenant_id"      UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "moneda_id"      UUID          NOT NULL REFERENCES "moneda" ("moneda_id"),
-  "habilitada"     BOOLEAN       DEFAULT false,
+  "habilitada"     BOOLEAN       NOT NULL DEFAULT false,
   "valor_del_dia"  NUMERIC(18,6),                 -- tasa de cambio a la moneda oficial; actualizable en cualquier momento
   "creado_el"      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
@@ -411,7 +411,7 @@ CREATE TABLE "tenant_metodo_pago" (
   "tenant_id"      UUID    NOT NULL REFERENCES "tenants" ("tenant_id"),
   "metodo_pago_id" UUID    NOT NULL REFERENCES "metodos_pago" ("metodo_pago_id"),
   "permite_vuelto" BOOLEAN NOT NULL DEFAULT false,
-  "habilitada"     BOOLEAN DEFAULT false,
+  "habilitada"     BOOLEAN NOT NULL DEFAULT false,
   -- Política por tenant (no intrínseca al método): fuerza el conteo obligatorio de un
   -- método no-efectivo al cerrar. obligatorio = es_efectivo OR requiere_conteo.
   "requiere_conteo" BOOLEAN NOT NULL DEFAULT false,

@@ -1,37 +1,41 @@
 import {
   IsEnum,
   IsNumber,
-  IsOptional,
   IsString,
   Max,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { FormaMesa, TamanoMesa } from '../entities/mesa.entity';
 
+// `@ValidateIf` y no `@IsOptional()` en los campos de columnas NOT NULL:
+// `IsOptional` trata `null` igual que ausente y saltea el validador de abajo, y
+// el `null` llegaba a la columna como un 500 de Postgres en vez de un 400.
+// Omitir un campo conserva el valor que tenía.
 export class UpdateMesaDto {
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsString()
   @MinLength(1)
   nombre?: string;
 
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsNumber()
   @Min(0)
   @Max(1)
   posX?: number;
 
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsNumber()
   @Min(0)
   @Max(1)
   posY?: number;
 
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsEnum(FormaMesa)
   forma?: FormaMesa;
 
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsEnum(TamanoMesa)
   tamano?: TamanoMesa;
 }
