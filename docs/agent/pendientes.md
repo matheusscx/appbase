@@ -41,11 +41,44 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
+- [ ] **El servidor no exige el customer de un tipo de documento con `customer_requerido`**
+  (backend; invariante 6). La Factura lo tiene en `true` en el seed, pero el backend solo lo
+  expone (`ventas.service.ts`, el listado de tipos, ~L2762) y nunca lo valida al crear la venta. Lo
+  controlan solo la pantalla (`useVenta.ts` ~L447, `CarritoPanel.vue`, `pos.vue`), así que un POST
+  directo crea una Factura sin receptor. Lo vio `api-security-reviewer` en la tarea 3 del frente de
+  emisión (2026-10-02); verificado por la orquestadora con grep. **Arreglo:** 400 cuando el tipo
+  pedido tiene `customer_requerido` y la venta no trae customer, en todo camino que fije el tipo
+  (POS, salones, online), con e2e por cada uno. **Tomarlo después de que el frente de emisión
+  entre a main**: su tarea 3 reescribió la validación del tipo en el servidor, y ese es el lugar.
+  Es fiscal y va solo, como frente corto.
+
+- [ ] **`PATCH` de un método de pago del comercio con `null` da 500** (backend,
+  `metodos-pago/dto/update-tenant-metodo-pago.dto.ts`). `habilitada` y `permiteVuelto` llevan
+  `@IsOptional()`, que deja pasar un `null` explícito, y las dos columnas son NOT NULL en la entidad
+  (`tenant-metodo-pago.entity.ts`). El patrón y su arreglo ya están en `anti-patterns.md` (~L381:
+  `@ValidateIf((o) => o.x !== undefined)` en vez de `@IsOptional()`). Es el mismo que el frente de
+  emisión corrigió para `emisor` en su tarea 2, sobre este mismo DTO. Lo vio su revisor el
+  2026-10-02; verificado por la orquestadora. **Arreglo:** el mismo, con un e2e que mande `null` a
+  cada campo y espere 400. Barrer los DTOs de `PATCH` vecinos buscando el gemelo, sin asumir que es
+  el único. **Tomarlo después de que la emisión entre a main**, porque toca el mismo archivo.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
+
+- [ ] **Un e2e de compras falla pasada la medianoche: `vencida` sale `true` en una compra recién
+  confirmada** (backend, test o `compras.service.ts`). `backend/test/compras-deuda.e2e-spec.ts`,
+  test "GET /compras y GET /compras/:id, con Pagar, traen estadoPago/deuda/vencida" (~L872):
+  `expect(detalle.vencida).toBe(false)` da `true`. Lo vio el frente de emisión el 2026-10-02 cerca
+  de las 00:30 (-03), y lo reprodujo en `c2739053`, sin sus cambios, así que no es de ese frente.
+  `vencida` es `fechaVencimiento < hoy` (`deuda.ts` ~L291), con `hoy = hoyNegocio(tenantId)`.
+  **Hipótesis sin medir:** la fecha de vencimiento de la compra y el `hoy` se calculan con relojes
+  distintos (UTC contra día de negocio del tenant), y a esa hora quedan en días diferentes. Medir
+  de dónde sale `fecha_vencimiento` al confirmar, y reproducir con el reloj fijado. Si es el
+  código, es un bug de producto: una compra marcada vencida de madrugada. Si es el fixture, es un
+  test que depende de la hora.
 
 - [ ] **El saldo de una venta no descuenta sus notas de crédito** (backend, `ventas.service.ts`:
   `mapVentaListRow` → `saldo = total − pagado`; visto el 2026-10-01 al decidir el saldo pendiente
@@ -1057,6 +1090,21 @@ Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no s
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
+- [ ] **El IVA de varios documentos de una misma venta puede no sumar el IVA de la venta, por 1–2
+  pesos** (backend, motor/documentos; **fiscal y toca cómo se reparte el IVA: frente propio**).
+  Cada documento cierra exacto a la escala de la moneda, y la suma se corre por redondeo. Pasa en
+  dos lugares:
+  - **la serie de notas de crédito** de una venta: hasta 2 minor units, ya escrito en
+    [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md) como "decisión del owner no tomada";
+  - **los varios documentos de una venta**, que suma el frente de emisión (2026-10-02). Medido
+    por ese frente: una venta afecta de $100.001 pagada 33.333 + 33.334 + 33.334 da Σ IVA 15.966
+    contra 15.967 de la venta.
+
+  **La pregunta, para cuando se tome:** ¿se acepta la diferencia de un peso, como hace cada
+  documento por separado ante el SII, o el último documento absorbe el residuo para que la suma
+  cuadre con la venta? Absorberlo exige calcular cada documento contra lo que queda de la venta, y
+  no contra su propio monto. Hoy no bloquea nada, porque no se emite al SII.
+
 ## 5. Carreras de concurrencia
 
 ---
@@ -1204,6 +1252,11 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     esta factura en tu facturador?". Sí → nota de crédito anotada; no → se anula, con quién lo
     afirmó. Se descartaron "impide solo si tiene número" (el que no anotó el número deja una
     factura viva) y "nunca se anula" (corrige una factura que puede no existir).
+  - **Un número externo mal anotado lo borra el encargado** (sesión del frente, tarea 6;
+    AskUserQuestion, 2026-10-02). Lo puede borrar quien tiene `Ventas:Anular`, queda registrado
+    quién, cuándo y el valor anterior, y la anulación vuelve a preguntar. Se descartaron "solo
+    dejar rastro" (el error queda a la vista pero sigue forzando la nota de crédito) y "dejarlo
+    así".
   - **La factura la hace siempre el sistema**, se pague como se pague. La regla del medio decide
     solo las boletas, que es lo que cubre el modelo de emisión del SII.
   - **Un comercio nuevo trae "emite el sistema" en todos los medios**: es el error barato.
