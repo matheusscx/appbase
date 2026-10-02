@@ -290,6 +290,13 @@ test('cargar con una línea sin precio y confirmar: entran las dos y el costo pr
   await page.waitForURL(/\/compras\/[0-9a-f-]{36}$/)
 
   await page.goto('/compras', { waitUntil: 'networkidle' })
+  // Filtrado por el proveedor del test, y no buscando en la primera página: el
+  // listado ordena por fecha del documento y trae 15 filas, así que cualquier
+  // compra con fecha posterior en la misma base —el e2e de la API de
+  // `compras-deuda` deja dos docenas con la fecha del día UTC— empuja esta
+  // afuera. El filtro no tiene placeholder: lo que muestra sin elegir es la
+  // opción "Todos los proveedores", y esa hace de pie igual.
+  await elegirPorPlaceholder(page, 'Todos los proveedores', proveedor.nombre, { buscar: true })
   // `locator('tr')` y no `getByRole('row')`: el listado abre la compra al
   // clickearla, y Nuxt UI le pone `role="button"` a la fila selectable, así que
   // para el árbol de accesibilidad deja de ser una fila.
@@ -326,6 +333,8 @@ test('cargar con una línea sin precio y confirmar: entran las dos y el costo pr
   // Ahora sí, en el listado: entró mercadería con un costo sin completar, y esa
   // es la compra que hay que ir a buscar cuando llegue la factura.
   await page.goto('/compras', { waitUntil: 'networkidle' })
+  // El filtro no sobrevive a la navegación: hay que volver a elegirlo.
+  await elegirPorPlaceholder(page, 'Todos los proveedores', proveedor.nombre, { buscar: true })
   const confirmada = page.locator('tr').filter({ hasText: proveedor.nombre })
   await expect(confirmada.getByText('Confirmada', { exact: true })).toBeVisible()
   await expect(confirmada.getByText('Falta costo', { exact: true })).toBeVisible()

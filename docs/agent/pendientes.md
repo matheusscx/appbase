@@ -41,18 +41,6 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
-- [ ] **El Playwright de compras busca su compra en la primera página del listado sin filtro**
-  (frontend, solo test: `frontend/e2e/compras/compras-por-pantalla.spec.ts` ~L292 y ~L328). Va a
-  `/compras` y busca la fila por el nombre del proveedor, sin filtrar. El listado ordena por
-  `fecha_documento DESC, creado_el DESC` y la primera página trae 15 filas. Desde el 2026-10-02 el
-  e2e de la API `compras-deuda` crea unas dos docenas de compras con fecha `HOY` del día UTC. Entre
-  las 21:00 y las 23:59 -03 esa fecha va un día por delante del `hoyLocal()` con que la pantalla
-  crea la suya, y empuja la compra del Playwright fuera de la primera página. Solo pasa en local,
-  si se corre Playwright sobre la misma base que el e2e de la API sin resetear; en CI el job de
-  navegador resiembra. Lo vio el revisor del cierre de esa fecha fija (2026-10-02); la cita está
-  verificada. **Arreglo:** que el spec abra el listado filtrado por su proveedor, o que vaya por
-  `/compras/:id`, como los otros tests del archivo.
-
 - [ ] **El servidor no exige el customer de un tipo de documento con `customer_requerido`**
   (backend; invariante 6). La Factura lo tiene en `true` en el seed, pero el backend solo lo
   expone (`ventas.service.ts`, el listado de tipos, ~L2762) y nunca lo valida al crear la venta. Lo
@@ -89,6 +77,19 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
+
+- [ ] **El Playwright de la varianza busca su fila en la primera página, ordenada por plata**
+  (frontend, solo test: `frontend/e2e/reportes/varianza.spec.ts` ~L103, ~L177 y ~L184). Mismo patrón que
+  el de compras que se cerró el 2026-10-02 (`resueltos.md`), con otro orden: el listado pagina de a
+  15 (`usePaginatedList`, `reportes/varianza.vue` ~L140) y ordena por `c.monto DESC`
+  (`varianza.service.ts` ~L1204). La fila del primer test pierde $750. Los e2e de la API
+  `reportes-varianza-plata` y `reportes-varianza-resumen` usan el mismo tenant (…007) y sus
+  `afterAll` solo cierran la app: los productos quedan vivos. Según el revisor de ese cierre, cada
+  corrida deja grupos de $1.000 a $19.000; eso **no se midió**. Solo pasaría en local, con Playwright
+  sobre la base que dejó el e2e de la API sin resetear. **Medir:** correr esos dos e2e de API unas
+  veces sin resetear y después este spec. Si se cae, va a la § 1. El reporte no filtra por nombre
+  de ítem, pero sí por ubicación: el revisor propone usar una ubicación propia, como hace el e2e de
+  la API con `crearBodega`.
 
 - [ ] **El pre-commit rechaza un recibo de revisión escrito sobre el mismo diff** (harness). Dos
   sesiones lo vieron el 2026-09-27, las dos desde un worktree (la del aviso sin costo de la
