@@ -1003,6 +1003,11 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   inicio, el "Saldo pendiente" de `/ventas`, el saldo de cada venta y el tope del abono. Una nota
   anterior al campo que anota por dónde volvió la plata cuenta como "con plata" si sacó efectivo de
   la caja y como "no vuelve plata" si no;
+- **una deuda de otra caja la cobra solo quien ve todas las cajas** (`Cajas:Leer`). El cajero
+  cobra las deudas de su caja; la de otra la cobra el encargado, o un cajero al que se le dio ese
+  permiso. Es lo que ya muestran las pantallas, y el servidor lo exige igual. En un negocio que cobra
+  deudas en cualquier caja (una distribuidora a 30 días), se le da ese permiso a quien cobra (owner,
+  2026-10-02);
 - **lo entregado se documenta al entregarlo, se haya pagado o no.** Para el SII un restaurante
   vende, no presta un servicio: la boleta sale antes de que el cliente se retire (Res. Ex. SII
   58/2003); en una tienda, al entregar (art. 55 DL 825). Una mesa de $100.000 que paga $40.000 con
