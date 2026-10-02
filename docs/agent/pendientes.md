@@ -78,6 +78,19 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **Si el vínculo entre un `REFUND` y su corrección falla, ese reembolso queda contado dos veces
+  contra su pago** (backend; anotado 2026-10-02 por la revisión de la tarea 16 del frente de emisión).
+  En una venta de un solo pago, el tope por pago de una devolución cuenta los `REFUND` aprobados
+  **sin** `correccion_venta_id` (la ventana antes del hook, y el hook caído) y, ya ligados, por su
+  corrección. Con más de un pago el `REFUND` sin corrección no se resta de ningún pago, así que el caso
+  no aplica. Si el hook crea la
+  corrección pero `vincularCorreccion` falla (`cobros.service.ts`, solo deja un `warning`), el
+  `REFUND` queda sin ligar **y** la corrección existe: el pago descuenta dos veces lo mismo y ofrece
+  menos de lo que de verdad puede devolver. Es el lado seguro —bloquea de más, nunca deja pasar de
+  más— pero no hay camino para volver a ligarlo. **Medir:** si `vincularCorreccion` puede fallar con
+  la corrección ya commiteada (es un `UPDATE` suelto después del hook), y si hace falta un re-ligado
+  (al próximo reembolso de la orden, o al abrir la venta) o alcanza con el `warning`.
+
 - [ ] **El Playwright de la varianza busca su fila en la primera página, ordenada por plata**
   (frontend, solo test: `frontend/e2e/reportes/varianza.spec.ts` ~L103, ~L177 y ~L184). Mismo patrón que
   el de compras que se cerró el 2026-10-02 (`resueltos.md`), con otro orden: el listado pagina de a
@@ -1083,6 +1096,19 @@ prohíbe.
   cuadre con la venta? Absorberlo exige calcular cada documento contra lo que queda de la venta, y
   no contra su propio monto. Hoy no bloquea nada, porque no se emite al SII.
 
+- [ ] **El filtro "Sin número" de `/ventas` no encuentra las notas de crédito de la máquina o hechas
+  por fuera que todavía no tienen número** (backend + frontend; anotado 2026-10-02 por la revisión
+  final del frente de emisión, y la orquestadora lo mandó acá). Una NC sobre un voucher o sobre un
+  documento externo nace **sin número**: la hace la máquina, su portal o el facturador del comercio, y
+  el sistema espera que alguien la anote. Pero `?documento=` deja afuera toda corrección (comentario
+  en `buildListarFilters`, `ventas.service.ts`, decisión E7 de la spec: una corrección no es una venta
+  que revisar), así que el contador no tiene desde `/ventas` cómo encontrar las notas que le faltan.
+  Se ven solo abriendo el detalle de la venta que corrigen.
+
+  **La pregunta:** ¿"Sin número" debe traer también las notas sin número (como filas propias, o
+  marcando la venta que corrigen), o se arma otro lugar para revisarlas? Lo primero cambia la regla de
+  que los filtros solo miran ventas; lo segundo es una pantalla más.
+
 - [ ] **En Pagos, "Total cobrado" no resta lo devuelto, y el inicio sí: el mismo día puede mostrar
   dos cobrados distintos** (backend + frontend; anotado 2026-10-02 por la tarea 15 del frente de
   emisión, la orquestadora lo mandó acá). `GET /pagos/resumen` (`pagos.service.ts`, `resumen`) suma
@@ -1119,198 +1145,6 @@ y viaja con ella.
 transaccional nativo, con ALS — [ADR-020](../adr/020-contexto-transaccional-als.md));
 Prisma y Drizzle tienen el mismo modelo manual de transacciones que TypeORM. No es un
 pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evaluación.
-
-- [ ] **Emitir al SII se elige al cerrar cada venta, y lo emitido por la máquina se registra
-  con su número** (fiscal, **frente propio**; regla del owner del 2026-10-01, en
-  [`PRODUCTO.md`](../PRODUCTO.md) § 10, "Emitir al SII es una elección"). Salió de una conversación
-  del owner con un posible cliente: la máquina de Transbank ya puede emitir boleta o factura, y
-  emitir también desde el sistema duplicaría la venta en el SII. Lo que decidió por
-  AskUserQuestion: se elige **por venta, al cerrarla** (no por local ni por caja), y si emitió la
-  máquina, la venta guarda **el número**. Abría estas preguntas; **todas quedaron contestadas más
-  abajo**, en las tandas con el owner:
-  - **Qué significa "venta documentada".** Hoy es la etiqueta `tipo_documento_id`, y el POS y
-    salones ponen Boleta por defecto. La regla de que una venta documentada no se anula y va por
-    NC se lee contra esa etiqueta, no contra lo emitido.
-  - **La devolución de una venta sin documento:** qué la registra y cómo baja el vendido y el
-    saldo sin emitir una NC fiscal. La resolvió este mismo frente (tarea 9): el reembolso por pasarela sin NC quedó archivado en [`resueltos.md`](resueltos.md).
-  - **La NC de una boleta que emitió la máquina:** ¿la emite el sistema referenciando ese número,
-    o la máquina o el portal? Y si la emite la máquina, ¿qué registra el sistema?
-  - Cómo entra el número que dio la máquina: tipeado o traído por la integración.
-  Cruza con ADR-010, que deja la emisión para el futuro. Se diseña junto con esa emisión, no antes.
-  Investigación general (2026-10-01):
-  [`2026-10-01-emision-por-venta-y-boleta-del-terminal.md`](investigaciones/2026-10-01-emision-por-venta-y-boleta-del-terminal.md).
-  **Decidido después de la investigación (owner, 2026-10-01):** el sistema es flexible y no
-  obliga a emitir. El riesgo de que una venta quede sin documento es del comercio cliente, no del
-  sistema, aunque la investigación mostró que es la infracción cara. Y cada venta registra
-  **quién emitió**: el sistema, la máquina (con su número) o nadie, para que el comercio pueda
-  revisar lo suyo (owner, 2026-10-01, a la pregunta de la orquestadora).
-  **El objetivo, confirmado por el owner (2026-10-01):** la orquestadora lo resumió y el owner
-  contestó "estás en lo correcto". En una frase: el sistema lleva bien la venta y la plata, y lo
-  tributario queda en manos del comercio y registrado.
-  1. La venta es lo que el sistema controla, y el documento es una opción de cada venta.
-  2. El sistema no impone la emisión, y el riesgo de no emitir es del comercio.
-  3. Cada venta registra quién emitió: el sistema, la máquina (con su número) o nadie.
-  4. Lo vendido, lo cobrado y el saldo bajan con una devolución aunque la venta no tenga
-     documento. Hoy solo los baja la NC: falta cómo se registra una devolución sin documento fiscal,
-     y eso lo resolvió este mismo frente (tarea 9; el reembolso sin NC está en [`resueltos.md`](resueltos.md)).
-  5. Lo de hoy deja la emisión lista para cuando llegue (ADR-010), sin construirla antes.
-  **Afinado con el owner (AskUserQuestion, 2026-10-01; eligió la opción recomendada en las cuatro):**
-  - **Devolución sobre una venta sin documento → "devolución interna".** No es un documento
-    tributario, pero baja lo vendido, lo cobrado y el saldo igual que una NC. Los reportes del
-    frente del vendido neto suman las NC; cuando exista la devolución interna, tienen que sumarla
-    también.
-  - **Devolución de una venta cuya boleta emitió la máquina:** la NC se hace en la máquina o en su
-    portal, porque corrige quien emitió. El sistema registra la devolución, baja lo vendido y anota
-    el número de esa NC.
-  - **Una venta puede tener más de un documento.** Ejemplo: pago mixto con voucher que vale como
-    boleta por la parte con tarjeta y boleta del sistema por la parte en efectivo. Las devoluciones
-    tienen que saber de qué parte salen.
-  - **Anular una venta pendiente se puede mientras nadie haya emitido documento**, sin importar la
-    etiqueta. Si emitió alguien, va por nota de crédito. Cambia la regla de hoy (`cancelar` rechaza
-    si hay `tipo_documento_id`) y la de [`PRODUCTO.md`](../PRODUCTO.md) § 10.
-  - **El número de la máquina lo tipea el cajero y es opcional.** Si lo deja vacío, la venta queda
-    como "máquina, sin número" y se completa después. Se marca si es un **voucher** o una **boleta
-    de la máquina**.
-  - **Todo reembolso deja registro** (NC, NC de la máquina anotada, o devolución interna, según
-    quién emitió). La pantalla elige cuál, y se va la casilla "generar nota de crédito" de
-    `ReembolsoModal.vue`. Esto resolvió, dentro de este frente (tarea 9), la entrada del reembolso sin NC, ya
-    archivada en [`resueltos.md`](resueltos.md).
-  Las reglas quedaron en [`PRODUCTO.md`](../PRODUCTO.md) § 10, "Emitir al SII es una elección".
-  **El número de Webpay ya está en la base** (lo señaló el owner; medido 2026-10-01). El cobro por
-  pasarela guarda el código de autorización en `pasarela_transacciones.codigo_autorizacion`
-  (`pasarela-transaccion.entity.ts:55`, escrito en `cobros.service.ts` y en
-  `pagos-redirect.service.ts`). La orden lo liga a la venta (`pasarela_ordenes.venta_id`). En una
-  venta cobrada por Webpay, el sistema podría anotar solo "voucher, código X" sin que nadie tipee.
-  **Investigado (2026-10-01):** la ley lo permite, pero nadie lo hace así. La Res. 176 incluye
-  las "ventas por internet" (cita verificada en el PDF). Para valer, el comprobante tiene que
-  llevar 10 campos, entre ellos el IVA desglosado, el número de terminal, el de operación, el
-  código de autorización, la fecha y la leyenda "Válido como Boleta". **Ese comprobante lo tendría
-  que armar el sistema**: Transbank no lo arma para Webpay, y su API no da número de terminal.
-  Además, en Chile ninguna plataforma de e-commerce relevada usa esa vía: todas emiten boleta
-  electrónica. El código de autorización solo no alcanza. El detalle está en la investigación,
-  sección "El comprobante de Webpay en línea, ¿vale como boleta?".
-  **Tercera tanda con el owner (AskUserQuestion, 2026-10-01):**
-  - **NC de una venta cuyo voucher valió como boleta:** la hace el comercio, no Transbank, citando
-    el código de autorización. Mientras el sistema no emita al SII, el comercio la hace con su
-    facturador, y el sistema registra la devolución y anota el número. Cuando haya emisión, la hace
-    el sistema citando el voucher.
-  - **Devolución en un pago mixto: el documento sale de cómo se devuelve la plata.** Si se
-    devuelve en efectivo, corrige la boleta del efectivo. Si se reversa en la tarjeta, corrige el
-    voucher.
-  - **La venta online queda lista para emitir, igual que hoy la NC.** Respuesta del owner: "dejar
-    todo listo para emitir, tal como funcionan hoy las notas de crédito". La orquestadora la
-    reformuló así y el owner confirmó con "sí": al cerrarse, el sistema arma la **boleta** de la
-    venta online con tipo, montos e IVA congelados, como arma hoy la NC, y no la envía al SII hasta
-    que exista la emisión. Queda como "emitió el sistema, pendiente de envío", y el código de Webpay
-    se guarda como dato del pago, no como documento. No se arma el comprobante de 10 campos.
-    Consecuencia para el diseño: "emitió el sistema" necesita distinguir **armado** de **enviado**,
-    y vale para toda venta que el sistema documente, no solo la online.
-  - **Reabierta y corregida (owner, 2026-10-01, AskUserQuestion): quién emite lo decide el medio
-    de pago, no el cajero.** La sesión del frente preguntó qué documento aparece marcado al cobrar,
-    con la escena de un café con 200 ventas al día y la opción "el cajero elige siempre". El owner
-    contestó que no lo elige el cajero, y que eso reabría su respuesta anterior ("se elige al
-    cerrar la venta, no por configuración"). Elegido: el comercio declara una vez su regla, como su
-    "modelo de emisión" ante el SII (p.ej. con tarjeta emite la máquina, con efectivo el sistema), y
-    cada venta se resuelve sola por cómo se paga. Un pago mixto queda con los dos documentos. Sigue
-    siendo "por venta" en el sentido de que cada venta tiene su propio documento. Lo que cambió es
-    quién decide: una regla del comercio y no el cajero.
-  - **Dónde se declara la regla: en cada método de pago** (owner, 2026-10-01, AskUserQuestion). El
-    owner notó que no hay un módulo para configurar las máquinas de cobro. No hace falta: la
-    máquina emite según como la dejó su proveedor, y el sistema solo necesita saber qué pasa con
-    cada medio. Se agrega a `metodos_pago` (pantalla `configuracion/metodos-pago.vue`) un dato:
-    con este medio emite el sistema, la máquina o nadie. Se descartaron "el cajero elige al
-    cerrar" y "al cerrar con valor por defecto".
-  Con esto **no queda ninguna regla de negocio abierta en este frente.** Lo que falte es de diseño
-  y, si aparece una regla nueva, se le pregunta al owner.
-  **Cuarta tanda, desde la sesión del frente (owner, AskUserQuestion, 2026-10-01).** Al medir el
-  código salieron tres reglas que no estaban escritas. Eligió la recomendada en las tres:
-  - ~~Lo no pagado tiene documento recién al pagarlo~~ — **reabierta y reemplazada el mismo día.**
-    El owner dudó ("hay empresas que dan factura y luego cobran"), y la investigación
-    (`docs/agent/investigaciones/2026-10-01-documento-de-lo-no-pagado.md`, Res. Ex. SII 58/2003
-    verificada en la fuente por la orquestadora) mostró que contradecía la ley: un restaurante
-    vende, y la boleta sale antes de que el cliente se retire. Regla nueva (owner, AskUserQuestion):
-    **lo entregado se documenta al entregarlo, se haya pagado o no**; lo no cubierto por el voucher
-    lleva boleta del sistema al cerrar, y el pago posterior de la deuda no genera documento. El
-    riesgo que había llevado a descartarla (deuda boleteada que se paga con tarjeta: el voucher
-    duplica) quedó así: **avisa y queda anotado, sin bloquear el cobro**, hasta que el contador o
-    el SII respondan. Detalle en `PRODUCTO.md` § 10.
-  **Quinta tanda, las dos preguntas que dejó la E1 nueva (owner, AskUserQuestion, 2026-10-01).**
-  - **Anular:** una boleta del sistema solo armada, sin enviar al SII, no cuenta como emitida; la
-    venta se anula y la boleta queda descartada. Sin esto, toda venta nacía documentada y
-    `POST /ventas/:id/anular` no aplicaba nunca.
-  - **La factura ya no la hace siempre el sistema.** El owner no tenía clara la pregunta original
-    (quién documenta la deuda de un comercio sin medios en "sistema") y la llevó a otro caso: boletas
-    por la máquina y facturas por otro facturador. Reformulada, eligió: el comercio declara una vez
-    quién hace sus facturas (el sistema u otro facturador, que se anota con su número como el
-    voucher), y **lo que queda debiendo sigue esa misma declaración**. Reemplaza a "la factura la
-    hace siempre el sistema" de la cuarta tanda.
-  - **Un documento externo se pregunta al anular** (P3 de la spec, AskUserQuestion): "¿Ya hiciste
-    esta factura en tu facturador?". Sí → nota de crédito anotada; no → se anula, con quién lo
-    afirmó. Se descartaron "impide solo si tiene número" (el que no anotó el número deja una
-    factura viva) y "nunca se anula" (corrige una factura que puede no existir).
-  - **Un número externo mal anotado lo borra el encargado** (sesión del frente, tarea 6;
-    AskUserQuestion, 2026-10-02). Lo puede borrar quien tiene `Ventas:Anular`, queda registrado
-    quién, cuándo y el valor anterior, y la anulación vuelve a preguntar. Se descartaron "solo
-    dejar rastro" (el error queda a la vista pero sigue forzando la nota de crédito) y "dejarlo
-    así".
-  - **El abono cobra solo lo que de verdad se debe** (AskUserQuestion, 2026-10-02). Venía de la § 2
-    ("el saldo de una venta no descuenta sus notas de crédito"), y la tarea 8 lo confirmó midiendo:
-    una NC "no vuelve plata" por la deuda deja la venta en `pagada_parcial`, el abono calcula
-    `total − aplicado` (`pagos.service.ts` ~L411) sin mirar las correcciones, y el detalle sigue
-    ofreciendo "Registrar pago": el cliente paga dos veces. Regla: el tope del abono es total −
-    correcciones − lo pagado, con la fórmula del saldo ya decidida en la § 3; si queda en cero,
-    "Registrar pago" desaparece y la venta pasa a `pagada`. **Va dentro del frente de emisión**,
-    que es el que construyó "no vuelve plata". Se descartaron "frente aparte" (el doble cobro sigue
-    posible mientras tanto) y "apagar no vuelve plata hasta entonces". **Hecho en la tarea 14
-    (2026-10-02):** el saldo es una sola expresión (`saldo-venta.ts`) que leen el listado, el
-    detalle, los dos resúmenes y el tope del abono; la venta pasa a `pagada` y "Registrar pago"
-    desaparece cuando queda en cero. Con ella se cerró también "El saldo pendiente no descuenta lo
-    reembolsado por pasarela" (nota en [`resueltos.md`](resueltos.md), al pie del vendido neto).
-  - **La factura la hace siempre el sistema**, se pague como se pague. La regla del medio decide
-    solo las boletas, que es lo que cubre el modelo de emisión del SII.
-  - **Un comercio nuevo trae "emite el sistema" en todos los medios**: es el error barato.
-  Y una corrección de lo medido: la regla no va en `metodos_pago`, que es el catálogo **global**,
-  sino en `tenant_metodo_pago`, que es la fila de cada comercio y la que ya edita esa pantalla.
-  El diseño aprobado está en la spec
-  [`2026-10-01-emision-por-venta-design.md`](../superpowers/specs/2026-10-01-emision-por-venta-design.md).
-
-  **Cómo arrancarlo.** Esta es la solicitud que se pega en la sesión nueva (o se lanza desde la
-  orquestadora). Es la fuente: si cambia una decisión, se actualiza acá en el mismo commit.
-
-  ```text
-  Frente fiscal, va solo: "Emitir al SII: cada venta registra quién emitió, y la regla la declara cada método de pago".
-
-  **Quién manda.** La sesión orquestadora coordina todos los frentes del proyecto por encargo del owner (título "Listado de sesiones activas", id local_132a5b26-c5c7-40b0-807a-10105ce38ae0). Es la jefa de este frente después del owner: el owner decide, la orquestadora coordina, y vos diseñás y construís. Si te llega un mensaje suyo con una decisión del owner, va a citar el commit de main donde quedó escrita. Verificala ahí y seguila. Cuando termines una etapa (spec, plan, cada tarea mergeada) o te trabes, avisale con SendMessage a ese id. Si no podés mandarle mensajes, dejalo dicho en tu respuesta al owner.
-
-  Todas las reglas de negocio de este frente ya las decidió el owner, con tres investigaciones de por medio, y no queda ninguna abierta. Tu trabajo es diseñar y construir lo decidido, no volver a decidirlo. Si encontrás evidencia en el código o en la norma que contradiga una decisión, traela con el porqué antes de cambiar nada.
-
-  Antes de empezar, traé a tu worktree la rama main LOCAL con `git merge main`: las últimas decisiones son de hoy y quizás no estén en origin. No uses sync_with_base_branch para esto. Leé esto antes que nada:
-  - docs/PRODUCTO.md § 10, el bloque "Emitir al SII es una elección de cada venta": las reglas.
-  - docs/agent/pendientes.md § 6, la entrada "Emitir al SII se elige al cerrar cada venta…": el objetivo confirmado, cada decisión con su procedencia y las correcciones. El reembolso por pasarela sin nota de crédito ya se construyó dentro de este frente (archivada en `resueltos.md`).
-  - docs/agent/investigaciones/2026-10-01-emision-por-venta-y-boleta-del-terminal.md (incluye "Cuando el sistema y la máquina no coinciden" y "El comprobante de Webpay en línea") y 2026-10-01-reembolso-sin-nota-credito.md.
-  - ADR-010, docs/features/ventas.md, docs/features/impuestos.md, CLAUDE.md, docs/patterns/ y docs/agent/anti-patterns.md.
-
-  En una frase: el sistema lleva bien la venta y la plata, y lo tributario queda en manos del comercio y registrado.
-
-  Alcance:
-  - Cada método de pago declara quién emite con ese medio: el sistema, la máquina o nadie (tabla metodos_pago, pantalla configuracion/metodos-pago.vue). Cada venta resuelve sola su documento según cómo se paga, y el cajero no elige nada. Un pago mixto queda con los dos documentos.
-  - Cada venta registra quién emitió: el sistema (armado o enviado), la máquina o nadie. Puede tener varios documentos.
-  - El número de la máquina es opcional, se tipea al cerrar o después, y se marca si es voucher o boleta de la máquina.
-  - La venta online deja su boleta armada y congelada, lista para emitir, igual que la nota de crédito de hoy. El código de Webpay queda como dato del pago.
-  - Devolución interna para las ventas sin documento. Todo reembolso deja registro según quién emitió, y se va la casilla "generar nota de crédito" del modal de reembolso.
-  - En un pago mixto, la devolución corrige el documento del medio por el que se devuelve la plata.
-  - Una venta pendiente se puede anular mientras nadie haya emitido, sin importar la etiqueta.
-
-  Fuera de alcance: enviar de verdad al SII (ADR-010: se diseña compatible, no se construye), un módulo para configurar las máquinas de cobro, el motor de precios y el % de anulaciones por garzón.
-
-  Dependencia (resuelta el 2026-10-02): el frente "El vendido, el cobrado y el Total facturado restan las notas de crédito" ya está en main (a6d07096). Sus reportes reconocen una corrección por venta_referencia_id, así que la devolución interna resta sola; a este frente le queda verificarlo (tarea 11).
-
-  Cómo:
-  1. Primero diseño: brainstorm → spec en docs/superpowers/specs/ → plan en docs/superpowers/plans/. Nada de código antes de que el owner apruebe el plan.
-  2. Antes de proponer, medí contra el código qué hay hoy: tipo_documento_id, metodos_pago, cancelar, crearNotaCredito, el flujo de reembolso, pasarela_transacciones.codigo_autorizacion y el cierre en salones y POS. Si aparece una regla de negocio que no esté en esos documentos, preguntásela al owner con AskUserQuestion, en lenguaje de local: escena con montos, costo por opción y tandas de hasta 4. Las preguntas de "quién elige" ya se contestaron: no le preguntes de nuevo si elige el cajero.
-  3. Código solo en un worktree con ./scripts/entorno.sh. Implementación con subagentes Sonnet. domain-reviewer con las dudas que no verificaste, y api-security-reviewer si tocás controllers o DTOs. Gate completo de CLAUDE.md, recibo del pre-commit y docs vivas en el mismo commit.
-  4. No hagas push sin que el owner lo diga, porque main despliega en Railway.
-  ```
 
 - [ ] **Una nota de crédito que se reintenta se emite dos veces** (fiscal, **frente propio**,
   anotado 2026-09-19 al diseñar la idempotencia del cobro). `POST /ventas/:id/notas-credito`

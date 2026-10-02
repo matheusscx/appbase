@@ -530,6 +530,7 @@ siguiente, que pasa aislado y falla en la corrida completa, lejos de la causa.
 | Sesión de garzón | una sesión abierta por garzón | garzón propio con `POST /garzones`, que devuelve el PIN una sola vez — `caja-testigo` (`crearGarzon`), `salones-fusion`, `items-pausados` |
 | Roles o permisos de un usuario | los hereda todo spec que se loguee con él | usuario propio con `POST /tenants/usuarios` — `permiso-operar-salon` |
 | Algo del tenant entero (el último admin, una preferencia) | lo lee el spec que viene después | `tenantPropio` con `POST /admin/tenants` — `membresia-ultimo-admin` |
+| Stock sembrado (el ítem demo `…440116` y el resto) | varias suites venden del mismo saldo sembrado: un spec nuevo que vende lo agota y el que falla es otro, aun sobre base fresca | producto con stock propio, o servicio (`tipo: 'servicio'`), en el `beforeAll` — `pasarela-reembolso`, `nota-credito-composicion` |
 
 ```ts
 // ❌ MAL — Ana del seed (…440238): si el spec cae antes de cerrar, su sesión queda abierta

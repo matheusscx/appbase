@@ -1,7 +1,8 @@
 # Emitir al SII por venta, y la boleta que ya emitió la máquina — investigación (2026-10-01)
 
 Insumo para la entrada de [`pendientes.md`](../pendientes.md) § 6 ("Emitir al SII se elige
-al cerrar cada venta, y lo emitido por la máquina se registra con su número"), a partir de
+al cerrar cada venta, y lo emitido por la máquina se registra con su número"; cerrada el
+2026-10-02 y archivada en [`resueltos.md`](../resueltos.md)), a partir de
 la regla del owner en [`PRODUCTO.md`](../../PRODUCTO.md) § 10 ("Emitir al SII es una
 elección de cada venta"). No es decisión — la trae un agente con WebSearch/WebFetch.
 Pedido explícito del owner: investigación **general**, no acotada a los referentes
@@ -105,7 +106,7 @@ sus documentos emitidos. La integración técnica documentada (Transbank POS Int
 devuelve datos de la transacción de pago (autorización, monto, tarjeta) pero no un folio
 DTE. Esto sugiere que, salvo que exista un convenio de integración directa no público, la
 carga del número al sistema **sería manual** (el cajero tipea el folio que imprimió la
-máquina) — coincide con lo que ya anticipa la entrada de `pendientes.md` ("cómo entra el
+máquina) — coincide con lo que ya anticipa la entrada de `pendientes.md` (hoy archivada en `resueltos.md`; "cómo entra el
 número que dio la máquina: tipeado o traído por la integración" — sigue sin resolverse
 con fuente pública).
 

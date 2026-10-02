@@ -2,8 +2,9 @@
 
 **Fecha:** 2026-10-01 · **Tipo:** spec de diseño
 **Frente:** *"Emitir al SII se elige al cerrar cada venta…"* y *"Un reembolso por pasarela sin nota
-de crédito…"*, en [`docs/agent/pendientes.md`](../../agent/pendientes.md) § 6. Es **fiscal y va
-solo** (`CLAUDE.md`, ADR-010).
+de crédito…"*, que estaban en [`docs/agent/pendientes.md`](../../agent/pendientes.md) § 6 y se
+cerraron con este frente (2026-10-02, archivadas en [`resueltos.md`](../../agent/resueltos.md)). Es
+**fiscal y va solo** (`CLAUDE.md`, ADR-010).
 **Reglas:** [`PRODUCTO.md`](../../PRODUCTO.md) § 10, "Emitir al SII es una elección de cada venta".
 **Investigaciones:**
 [`2026-10-01-emision-por-venta-y-boleta-del-terminal.md`](../../agent/investigaciones/2026-10-01-emision-por-venta-y-boleta-del-terminal.md)
@@ -51,7 +52,8 @@ y registrado.
 
 ## 2. Las decisiones
 
-Las de fondo están en `PRODUCTO.md` § 10 y en la entrada de `pendientes.md`, con su procedencia.
+Las de fondo están en `PRODUCTO.md` § 10 y en la entrada del frente (antes en `pendientes.md`, hoy
+archivada en `resueltos.md`), con su procedencia.
 Las que salieron de este diseño:
 
 | # | Decisión | Quién y cómo |
@@ -328,7 +330,8 @@ con los permisos del módulo y no como admin.
 - La NC que se emite dos veces al reintentar (§ 6 de `pendientes.md`).
 - El saldo por venta del listado (§ 2 de `pendientes.md`). El `correccion_venta_id` del `REFUND`
   le da al frente del vendido neto el dato que le faltaba para el caso de su D10, pero cambiar esa
-  fórmula es de ese frente.
+  fórmula es de ese frente. *(Superado: el owner lo metió en este frente, que lo construyó en la
+  tarea 14 del plan con `saldo-venta.ts`.)*
 
 ## 7. Docs vivas en el commit del código
 

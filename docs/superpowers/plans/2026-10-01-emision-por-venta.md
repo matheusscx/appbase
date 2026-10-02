@@ -6,7 +6,7 @@
 > verificó, más `api-security-reviewer` si la tarea toca controllers o DTOs), el recibo del
 > pre-commit y el commit los hace el controlador.
 
-- **Status:** Approved (owner, 2026-10-01) — In Progress
+- **Status:** Done (aprobado por el owner el 2026-10-01; cerrado el 2026-10-02)
 - **Date:** 2026-10-01
 - **Owner:** César (owner) · redacta la sesión del frente de emisión (worktree `sad-dubinsky-6b3af5`)
 
@@ -697,22 +697,48 @@ el saldo no contaba).
   neto marca el D10 cerrado por esta tarea; PRODUCTO si describe la fórmula.
 - [ ] Revisión con la duda: "¿queda algún lector del saldo de una venta que no use la expresión única?".
 
+### Tarea 15: lo que dejó la revisión final de la rama
+
+La revisión de la rama entera (Opus, 2026-10-02) encontró dos contradicciones entre tareas, alcanzables
+desde la pantalla, y el owner las decidió (AskUserQuestion, 2026-10-02, en la sesión del frente):
+
+- [x] **El cobrado baja con toda devolución que devolvió plata.** Una NC "por la tarjeta" (reversa en
+  la máquina) no salía de la caja ni era un `REFUND`, así que el cobrado no la restaba. Escena: débito
+  de $100.000, se devuelven $40.000 → cobrado $60.000. Sin contar dos veces el efectivo ni la pasarela.
+- [x] **Una venta pendiente admite NC "no vuelve plata"**, con tope en el saldo. Un comercio que
+  factura por fuera y vende a 30 días no podía anular ("va por NC") ni hacer la NC ("solo pagadas").
+- [x] Las docs que la revisión encontró falsas.
+- [x] En la revisión salió que anular una pendiente con una nota parcial reponía el stock dos veces:
+  el owner decidió que una venta con alguna nota de crédito no se anula.
+
+Las reglas quedan en `PRODUCTO.md` § 10 y § 11, en el mismo commit que el código.
+
+### Tarea 16: el `REFUND` de pasarela respeta el tope por pago
+
+Regla de la orquestadora (2026-10-02), gemela de la 14a al revés.
+
+- [x] Antes de llamar al proveedor, un `REFUND` de una orden con venta no pasa de lo que ese pago
+  todavía puede devolver (notas "por el pago" del POS incluidas), con el lock de la venta y un 400
+  sin cifras. Orden de bloqueo único orden → venta.
+- [x] Lo devuelto por un pago cuenta también los `REFUND` aprobados que todavía no tienen su
+  corrección (la ventana antes del hook, y el hook caído).
+
 ---
 
 ## Cierre
 
-- [ ] Playwright: el cobro mixto con número, completar el número después, la NC por tarjeta y el
+- [x] Playwright: el cobro mixto con número, completar el número después, la NC por tarjeta y el
   filtro "sin documento". Corre como el rol del módulo, en el stack propio del worktree.
-- [ ] Gate completo de `CLAUDE.md` (backend y frontend), con el exit code de cada comando y no la
+- [x] Gate completo de `CLAUDE.md` (backend y frontend), con el exit code de cada comando y no la
   última línea.
-- [ ] `docs/ESTADO.md`. Las dos entradas de la § 6 de `pendientes.md` se mudan a `resueltos.md`, con
+- [x] `docs/ESTADO.md`. Las dos entradas de la § 6 de `pendientes.md` se mudan a `resueltos.md`, con
   lo que las fija. La tarea 11 cierra la suya cuando entre.
-- [ ] Aviso a la orquestadora al mergear cada tarea.
+- [x] Aviso a la orquestadora al mergear cada tarea.
 
 ## Orden y paralelismo
 
 Hecho: `1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9`, más el merge del vendido neto (`33b66887`), que cubre
-la `11`. La `10` quedó absorbida por la 8 y la 9. Sigue: `13 → 12 → 14a → 14 → cierre` (la 13 y la 12 ya están), de a una, porque
+la `11`. La `10` quedó absorbida por la 8 y la 9. Hecho también: `13 → 12 → 14a → 14 → 15 → 16 → cierre`, de a una, porque
 las tres tocan `ventas.service.ts`, un archivo de 4.000 líneas que dos implementadores a la vez se
 pisan.
 
