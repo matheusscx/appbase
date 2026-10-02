@@ -5,6 +5,7 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import Decimal from 'decimal.js';
+import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { TokensAccesoService } from '../src/modules/auth/tokens-acceso.service';
 import { TipoTokenAcceso } from '../src/modules/auth/entities/token-acceso.entity';
@@ -50,6 +51,8 @@ interface ResumenHoyResponse {
   fecha: string;
   ventas: {
     vendido: { hoy: string; semanaPasada: string; variacion: string | null };
+    vendidoDesglose: { bruto: string; notasCredito: string };
+    cobradoDesglose: { cobrado: string; devuelto: string };
     cobrado: { hoy: string; semanaPasada: string; variacion: string | null };
     cantidad: { hoy: number; semanaPasada: number; variacion: string | null };
     ticketPromedio: {
@@ -142,6 +145,7 @@ describe('Resumen del negocio (e2e)', () => {
   let app: INestApplication<App>;
   let tokenAdmin: string;
   let caja: CajaAbierta;
+  let ds: DataSource;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -153,6 +157,7 @@ describe('Resumen del negocio (e2e)', () => {
     app.use(cookieParser());
     app.useGlobalPipes(validacionGlobal());
     await app.init();
+    ds = app.get(DataSource);
 
     tokenAdmin = await login(app);
     caja = await abrirCaja(app, tokenAdmin, {
@@ -408,6 +413,133 @@ describe('Resumen del negocio (e2e)', () => {
           .minus(antes.porCobrar.saldo)
           .toString(),
       ).toBe(saldoEsperado);
+    });
+
+    /** Venta de `cantidad` unidades del ítem propio, pagada entera en efectivo. El total lo calcula el servidor (puede llevar IVA): se lee de la respuesta. */
+    async function crearVentaPagada(
+      cantidad: string,
+    ): Promise<VentaCreadaResponse> {
+      const resV = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ lineas: [{ itemId, cantidad }] });
+      expect(resV.status).toBe(201);
+      const venta = resV.body as VentaCreadaResponse;
+      const pago = await request(app.getHttpServer())
+        .post('/api/pagos')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          ventaId: venta.id,
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: venta.totalFinal }],
+        });
+      expect(pago.status).toBe(201);
+      return venta;
+    }
+
+    const delta = (a: string, b: string) => new Decimal(b).minus(a).toString();
+
+    it('una NC de hoy sobre una venta de ayer resta del vendido de hoy, no de ayer, y no cuenta como venta', async () => {
+      const venta = await crearVentaPagada('7');
+
+      const conVentaHoy = (await leerResumen(tokenAdmin))
+        .body as ResumenHoyResponse;
+
+      // La venta pasa a ayer. No es un estado inventado: es el reloj. La app
+      // no deja fechar una venta, y lo que se prueba es justamente que la NC
+      // cuenta en SU día y no en el de la venta.
+      const [movidas] = await ds.query<[unknown[], number]>(
+        `UPDATE ventas SET fecha = fecha - interval '1 day'
+          WHERE venta_id = $1 RETURNING venta_id`,
+        [venta.id],
+      );
+      expect(movidas).toHaveLength(1);
+
+      // Prueba de que el UPDATE sacó la venta de hoy: sin esto, el -3150 de
+      // abajo saldría igual aunque el UPDATE no moviera nada, y el test no
+      // distinguiría "la NC resta en SU fecha" de "la NC resta en la de la
+      // venta que corrige".
+      const antes = (await leerResumen(tokenAdmin)).body as ResumenHoyResponse;
+      expect(
+        delta(
+          conVentaHoy.ventas.vendidoDesglose.bruto,
+          antes.ventas.vendidoDesglose.bruto,
+        ),
+      ).toBe(new Decimal(venta.totalFinal).negated().toString());
+      expect(
+        delta(conVentaHoy.ventas.vendido.hoy, antes.ventas.vendido.hoy),
+      ).toBe(new Decimal(venta.totalFinal).negated().toString());
+
+      const nc = await request(app.getHttpServer())
+        .post(`/api/ventas/${venta.id}/notas-credito`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ monto: '3150' });
+      expect(nc.status).toBe(201);
+      const despues = (await leerResumen(tokenAdmin))
+        .body as ResumenHoyResponse;
+
+      expect(delta(antes.ventas.vendido.hoy, despues.ventas.vendido.hoy)).toBe(
+        '-3150',
+      );
+      expect(
+        delta(
+          antes.ventas.vendidoDesglose.bruto,
+          despues.ventas.vendidoDesglose.bruto,
+        ),
+      ).toBe('0');
+      expect(
+        delta(
+          antes.ventas.vendidoDesglose.notasCredito,
+          despues.ventas.vendidoDesglose.notasCredito,
+        ),
+      ).toBe('3150');
+      expect(despues.ventas.cantidad.hoy).toBe(antes.ventas.cantidad.hoy);
+      expect(
+        delta(antes.ventas.porCanal.fisico, despues.ventas.porCanal.fisico),
+      ).toBe('-3150');
+    });
+
+    it('una venta y su NC de hace una semana: el vendido de la semana pasada es el neto y la cantidad cuenta la venta, no la NC', async () => {
+      const venta = await crearVentaPagada('7');
+      // 2870 no coincide con ningún otro monto del test ni con el total.
+      const nc = await request(app.getHttpServer())
+        .post(`/api/ventas/${venta.id}/notas-credito`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ monto: '2870' });
+      expect(nc.status).toBe(201);
+
+      const antes = (await leerResumen(tokenAdmin)).body as ResumenHoyResponse;
+
+      // La venta y su NC pasan a hace 7 días. No es un estado inventado: es el
+      // reloj. La app no deja fechar una venta, y lo que se prueba es la
+      // columna de la semana pasada, que ninguna venta de hoy alcanza.
+      const [movidas] = await ds.query<[unknown[], number]>(
+        `UPDATE ventas SET fecha = fecha - interval '7 days'
+          WHERE venta_id = $1 OR venta_referencia_id = $1
+      RETURNING venta_id`,
+        [venta.id],
+      );
+      expect(movidas).toHaveLength(2);
+
+      const despues = (await leerResumen(tokenAdmin))
+        .body as ResumenHoyResponse;
+
+      const neto = new Decimal(venta.totalFinal).minus('2870').toString();
+      expect(
+        delta(
+          antes.ventas.vendido.semanaPasada,
+          despues.ventas.vendido.semanaPasada,
+        ),
+      ).toBe(neto);
+      expect(
+        despues.ventas.cantidad.semanaPasada -
+          antes.ventas.cantidad.semanaPasada,
+      ).toBe(1);
+      // Y salió de hoy, entera: la venta no cuenta y la NC tampoco resta.
+      expect(delta(antes.ventas.vendido.hoy, despues.ventas.vendido.hoy)).toBe(
+        new Decimal(neto).negated().toString(),
+      );
     });
 
     it('una venta anulada no mueve el vendido', async () => {

@@ -19,15 +19,18 @@ import { MermasService, type ResumenMermas } from '../mermas/mermas.service';
 export interface Comparado<T = string> {
   hoy: T;
   semanaPasada: T;
-  /** `(hoy − semanaPasada) / semanaPasada`, `toFixed(4)`; `null` si semanaPasada = 0. */
+  /** `(hoy − semanaPasada) / semanaPasada`, `toFixed(4)`; `null` si semanaPasada ≤ 0. */
   variacion: string | null;
 }
 
 export interface VentasHoy {
+  /** NETO de notas de crédito: `vendidoDesglose.bruto − vendidoDesglose.notasCredito` en `hoy`. */
   vendido: Comparado;
+  /** De hoy: lo vendido sin descontar, y lo que restaron las notas de crédito de hoy (positivo). */
+  vendidoDesglose: { bruto: string; notasCredito: string };
   cobrado: Comparado;
   cantidad: Comparado<number>;
-  /** `null` cuando esa cantidad es 0: no hay ticket que promediar. */
+  /** `null` cuando esa cantidad es 0 o el neto no es positivo: no hay ticket que promediar. */
   ticketPromedio: Comparado<string | null>;
   /** Vendido de HOY por canal, no comparado contra la semana pasada. */
   porCanal: { fisico: string; online: string };
@@ -67,7 +70,9 @@ export interface ResumenNegocioHoy {
 }
 
 interface VentasRow {
-  vendido_hoy: string;
+  bruto_hoy: string;
+  notas_hoy: string;
+  neto_hoy: string;
   vendido_semana_pasada: string;
   cantidad_hoy: number;
   cantidad_semana_pasada: number;
@@ -92,9 +97,10 @@ interface MasVendidoRow {
   monto: string;
 }
 
-/** `(hoy − semanaPasada) / semanaPasada`, `null` si `semanaPasada` es 0. */
+/** `(hoy − semanaPasada) / semanaPasada`; `null` si `semanaPasada` ≤ 0: contra
+ *  un día negativo o vacío el porcentaje no dice nada (D7). */
 function calcularVariacion(hoy: Decimal, semanaPasada: Decimal): string | null {
-  if (semanaPasada.isZero()) return null;
+  if (semanaPasada.lte(0)) return null;
   return hoy.minus(semanaPasada).dividedBy(semanaPasada).toFixed(ESCALA_COSTO);
 }
 
@@ -148,40 +154,42 @@ export class ResumenNegocioService {
       IDX_FECHA_SEMANA_PASADA,
     );
 
+    // Una corrección (hoy, la nota de crédito) es la fila con
+    // `venta_referencia_id`: resta en SU fecha, aunque la venta que corrige sea
+    // de otro día (spec 2026-10-01-vendido-neto § 2 D1, § 3.1). Su total_final
+    // es positivo: el signo lo pone esta consulta.
+    const firmado =
+      'CASE WHEN v.venta_referencia_id IS NULL THEN v.total_final ELSE -v.total_final END';
+
     // Vendido, cantidad y por canal: hoy y la semana pasada en UNA consulta
-    // con `FILTER (WHERE …)`, sin importar cuántas ventas haya.
+    // con `FILTER (WHERE …)`, sin importar cuántas ventas haya. La NC copia el
+    // `canal` de la venta que corrige, así que resta en el mismo canal.
     const ventasRows: VentasRow[] = await this.db.query(
       `SELECT
-          COALESCE(SUM(v.total_final) FILTER (WHERE ${condHoyVenta}), 0)::text
-            AS vendido_hoy,
-          COALESCE(SUM(v.total_final) FILTER (WHERE ${condSemanaPasadaVenta}), 0)::text
-            AS vendido_semana_pasada,
-          COUNT(*) FILTER (WHERE ${condHoyVenta})::int AS cantidad_hoy,
-          COUNT(*) FILTER (WHERE ${condSemanaPasadaVenta})::int
-            AS cantidad_semana_pasada,
           COALESCE(SUM(v.total_final)
+            FILTER (WHERE ${condHoyVenta} AND v.venta_referencia_id IS NULL), 0)::text
+            AS bruto_hoy,
+          COALESCE(SUM(v.total_final)
+            FILTER (WHERE ${condHoyVenta} AND v.venta_referencia_id IS NOT NULL), 0)::text
+            AS notas_hoy,
+          COALESCE(SUM(${firmado}) FILTER (WHERE ${condHoyVenta}), 0)::text
+            AS neto_hoy,
+          COALESCE(SUM(${firmado}) FILTER (WHERE ${condSemanaPasadaVenta}), 0)::text
+            AS vendido_semana_pasada,
+          COUNT(*) FILTER (WHERE ${condHoyVenta} AND v.venta_referencia_id IS NULL)::int
+            AS cantidad_hoy,
+          COUNT(*) FILTER (WHERE ${condSemanaPasadaVenta} AND v.venta_referencia_id IS NULL)::int
+            AS cantidad_semana_pasada,
+          COALESCE(SUM(${firmado})
             FILTER (WHERE ${condHoyVenta} AND v.canal = 'fisico'), 0)::text
             AS vendido_fisico_hoy,
-          COALESCE(SUM(v.total_final)
+          COALESCE(SUM(${firmado})
             FILTER (WHERE ${condHoyVenta} AND v.canal = 'online'), 0)::text
             AS vendido_online_hoy
          FROM ventas v
-         -- Sin nota de crédito: mismo criterio que VentasService.resumen,
-         -- pero por es_nota_credito del tipo de documento (no por comparar
-         -- contra el id fijo de un país) — así no hace falta copiar
-         -- tipoNotaCreditoDelTenant ni su trampa documentada (un
-         -- IS DISTINCT FROM NULL que deja afuera las ventas sin tipo).
-         --
-         -- El JOIN va SIN td.eliminado_el IS NULL, a propósito: un tipo de
-         -- documento dado de baja DESPUÉS no deja de marcar como nota de
-         -- crédito a la venta que ya lo usó (spec 2026-09-18-dashboard-inicio
-         -- § 4.1).
-         LEFT JOIN tipos_documento_tributario td
-           ON td.tipo_documento_id = v.tipo_documento_id
         WHERE v.tenant_id = $1
           AND v.eliminado_el IS NULL
-          AND v.estado <> 'cancelada'
-          AND COALESCE(td.es_nota_credito, false) = false`,
+          AND v.estado <> 'cancelada'`,
       params,
     );
 
@@ -333,19 +341,21 @@ export class ResumenNegocioService {
     const cr = cobradoRows[0];
     const pc = porCobrarRows[0];
 
-    const vendidoHoy = new Decimal(vr?.vendido_hoy ?? '0');
+    const vendidoHoy = new Decimal(vr?.neto_hoy ?? '0');
     const vendidoSemanaPasada = new Decimal(vr?.vendido_semana_pasada ?? '0');
     const cobradoHoy = new Decimal(cr?.cobrado_hoy ?? '0');
     const cobradoSemanaPasada = new Decimal(cr?.cobrado_semana_pasada ?? '0');
     const cantidadHoy = vr?.cantidad_hoy ?? 0;
     const cantidadSemanaPasada = vr?.cantidad_semana_pasada ?? 0;
 
+    // Ticket: `neto / cantidad`, solo con cantidad > 0 Y neto > 0 (D8): un
+    // neto ≤ 0 no es un ticket que mostrar.
     const ticketHoy =
-      cantidadHoy > 0
+      cantidadHoy > 0 && vendidoHoy.gt(0)
         ? vendidoHoy.dividedBy(cantidadHoy).toFixed(ESCALA_COSTO)
         : null;
     const ticketSemanaPasada =
-      cantidadSemanaPasada > 0
+      cantidadSemanaPasada > 0 && vendidoSemanaPasada.gt(0)
         ? vendidoSemanaPasada
             .dividedBy(cantidadSemanaPasada)
             .toFixed(ESCALA_COSTO)
@@ -355,9 +365,13 @@ export class ResumenNegocioService {
       fecha,
       ventas: {
         vendido: {
-          hoy: vr?.vendido_hoy ?? '0',
+          hoy: vr?.neto_hoy ?? '0',
           semanaPasada: vr?.vendido_semana_pasada ?? '0',
           variacion: calcularVariacion(vendidoHoy, vendidoSemanaPasada),
+        },
+        vendidoDesglose: {
+          bruto: vr?.bruto_hoy ?? '0',
+          notasCredito: vr?.notas_hoy ?? '0',
         },
         cobrado: {
           hoy: cr?.cobrado_hoy ?? '0',

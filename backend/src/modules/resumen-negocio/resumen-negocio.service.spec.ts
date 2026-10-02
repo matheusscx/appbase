@@ -24,7 +24,9 @@ const RESUMEN_MERMAS_VACIO: ResumenMermas = {
 };
 
 interface VentasRowFixture {
-  vendido_hoy: string;
+  bruto_hoy: string;
+  notas_hoy: string;
+  neto_hoy: string;
   vendido_semana_pasada: string;
   cantidad_hoy: number;
   cantidad_semana_pasada: number;
@@ -111,7 +113,9 @@ describe('ResumenNegocioService', () => {
       ])
       .mockResolvedValueOnce([
         {
-          vendido_hoy: '0',
+          bruto_hoy: '0',
+          notas_hoy: '0',
+          neto_hoy: '0',
           vendido_semana_pasada: '0',
           cantidad_hoy: 0,
           cantidad_semana_pasada: 0,
@@ -136,7 +140,7 @@ describe('ResumenNegocioService', () => {
   it('vendido hoy 184500.0000 y semana pasada 150000.0000 → variación 0.2300', async () => {
     mockRespuestas({
       ventas: {
-        vendido_hoy: '184500.0000',
+        neto_hoy: '184500.0000',
         vendido_semana_pasada: '150000.0000',
         cantidad_hoy: 3,
         cantidad_semana_pasada: 3,
@@ -153,7 +157,7 @@ describe('ResumenNegocioService', () => {
   it('variación es null cuando la semana pasada vale 0', async () => {
     mockRespuestas({
       ventas: {
-        vendido_hoy: '50000.0000',
+        neto_hoy: '50000.0000',
         vendido_semana_pasada: '0',
         cantidad_hoy: 1,
       },
@@ -164,8 +168,47 @@ describe('ResumenNegocioService', () => {
     expect(res.ventas.vendido.variacion).toBeNull();
   });
 
+  it('vendidoDesglose sale de bruto_hoy y notas_hoy; vendido.hoy es el neto', async () => {
+    mockRespuestas({
+      ventas: {
+        bruto_hoy: '300000.0000',
+        notas_hoy: '20000.0000',
+        neto_hoy: '280000.0000',
+      },
+    });
+
+    const res = await service.hoy(TENANT);
+
+    expect(res.ventas.vendido.hoy).toBe('280000.0000');
+    expect(res.ventas.vendidoDesglose).toEqual({
+      bruto: '300000.0000',
+      notasCredito: '20000.0000',
+    });
+  });
+
+  it('variación es null cuando la semana pasada es negativa', async () => {
+    mockRespuestas({
+      ventas: {
+        neto_hoy: '50000.0000',
+        vendido_semana_pasada: '-12000.0000',
+      },
+    });
+
+    const res = await service.hoy(TENANT);
+
+    expect(res.ventas.vendido.variacion).toBeNull();
+  });
+
+  it('ticket es null con neto <= 0 aunque haya ventas', async () => {
+    mockRespuestas({ ventas: { neto_hoy: '-7000.0000', cantidad_hoy: 3 } });
+
+    const res = await service.hoy(TENANT);
+
+    expect(res.ventas.ticketPromedio.hoy).toBeNull();
+  });
+
   it('ticketPromedio.hoy es null cuando la cantidad de hoy es 0', async () => {
-    mockRespuestas({ ventas: { vendido_hoy: '0', cantidad_hoy: 0 } });
+    mockRespuestas({ ventas: { neto_hoy: '0', cantidad_hoy: 0 } });
 
     const res = await service.hoy(TENANT);
 
@@ -174,7 +217,7 @@ describe('ResumenNegocioService', () => {
 
   it('ticket con división no exacta: 100000.0000 / 3 → 33333.3333', async () => {
     mockRespuestas({
-      ventas: { vendido_hoy: '100000.0000', cantidad_hoy: 3 },
+      ventas: { neto_hoy: '100000.0000', cantidad_hoy: 3 },
     });
 
     const res = await service.hoy(TENANT);
@@ -182,23 +225,28 @@ describe('ResumenNegocioService', () => {
     expect(res.ventas.ticketPromedio.hoy).toBe('33333.3333');
   });
 
-  it('el SQL de ventas excluye canceladas y notas de crédito, afirmando sobre la cláusula', async () => {
+  it('el SQL de ventas excluye canceladas y resta las correcciones por venta_referencia_id, afirmando sobre la cláusula', async () => {
     mockRespuestas({});
 
     await service.hoy(TENANT);
 
     // Llamada #2: zona es la #1. Afirmar sobre la CLÁUSULA y no con un
-    // `toContain` suelto, que también matchearía el comentario que explica
-    // por qué el JOIN a `td` no filtra `eliminado_el`.
+    // `toContain` suelto.
     const [ventasSql] = queryMock.mock.calls[1] as [string];
     expect(ventasSql).toMatch(/v\.estado\s*<>\s*'cancelada'/);
+    // La corrección resta en el neto: el signo lo pone el CASE.
     expect(ventasSql).toMatch(
-      /COALESCE\(td\.es_nota_credito,\s*false\)\s*=\s*false/,
+      /CASE WHEN v\.venta_referencia_id IS NULL THEN v\.total_final ELSE -v\.total_final END/,
     );
-    // `v\.eliminado_el` (no `vd\.` ni `td\.`) acotado al WHERE de esta
-    // consulta: una venta soft-deleteada no puede nacer por API, así que el
-    // e2e no la puede probar — esta es la única red para el mutante
-    // "dropear el filtro" (task-6-mutantes.md, mutante #5).
+    // La cantidad cuenta solo ventas, no correcciones.
+    expect(ventasSql).toMatch(
+      /COUNT\(\*\) FILTER \(WHERE[\s\S]*?v\.venta_referencia_id IS NULL\)::int\s+AS cantidad_hoy/,
+    );
+    // Ya no se lee el tipo de documento para reconocer la NC.
+    expect(ventasSql).not.toMatch(/tipos_documento_tributario/);
+    // `v\.eliminado_el` acotado al WHERE de esta consulta: una venta
+    // soft-deleteada no puede nacer por API, así que el e2e no la puede
+    // probar — esta es la única red para el mutante "dropear el filtro".
     expect(ventasSql).toMatch(/WHERE[\s\S]*?v\.eliminado_el IS NULL/);
   });
 
