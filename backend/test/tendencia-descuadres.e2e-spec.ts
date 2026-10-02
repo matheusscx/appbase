@@ -4,9 +4,11 @@ import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
+import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
+const OTRO_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040'; // Demo Bodega
 
 // Admin del tenant: lee el arqueo sin que el modo ciego le retenga el esperado.
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
@@ -74,6 +76,7 @@ async function login(
 
 describe('Tendencia de descuadres (e2e)', () => {
   let app: INestApplication<App>;
+  let ds: DataSource;
   let tokenCajero: string;
   let tokenSupervisor: string;
   let tokenAdmin: string;
@@ -203,6 +206,7 @@ describe('Tendencia de descuadres (e2e)', () => {
     app.use(cookieParser());
     app.useGlobalPipes(validacionGlobal());
     await app.init();
+    ds = app.get(DataSource);
 
     tokenCajero = await login(app, VENDEDOR_EMAIL, VENDEDOR_PASS);
     tokenSupervisor = await login(app, SUPERVISOR_EMAIL, SUPERVISOR_PASS);
@@ -350,17 +354,52 @@ describe('Tendencia de descuadres (e2e)', () => {
     expect(filas.find((f) => f.usuarioId === cajeroId)).toBeDefined();
   });
 
+  // Control positivo, no un proxy: hasta el 2026-10-02 esto exigía que toda fila
+  // fuera de un miembro ACTIVO de Paris, y un cajero de Paris dado de baja
+  // —cuyos cierres siguen en el informe a propósito: la historia no se borra—
+  // lo rompía sin ninguna fuga. Ahora hay un cierre real de OTRO tenant, hoy y
+  // con descuadre, a nombre de un cajero que solo existe allá, y no tiene que
+  // aparecer. Por SQL porque no hay camino de API para crear una caja en un
+  // tenant al que este token no pertenece (mismo criterio que
+  // `salones-anulaciones-reporte.e2e-spec.ts`).
   it('solo devuelve cajeros de este tenant', async () => {
-    const filas = await tendencia(tokenSupervisor);
-    const resMiembros = await request(app.getHttpServer())
-      .get('/api/tenants/members')
-      .set('Authorization', `Bearer ${tokenAdmin}`);
-    expect(resMiembros.status).toBe(200);
-    const deParis = new Set(
-      (resMiembros.body as Member[]).map((m) => m.usuarioId),
+    const marca = `${Date.now()}.${Math.floor(Math.random() * 1e6)}`;
+    const usuarios: { usuario_id: string }[] = await ds.query(
+      `INSERT INTO usuarios (nombre, apellido, correo)
+       VALUES ('Cajero', 'ajeno E2E', $1)
+       RETURNING usuario_id`,
+      [`cajero-ajeno.${marca}@e2e.cl`],
     );
-    for (const f of filas) {
-      expect(deParis.has(f.usuarioId)).toBe(true);
+    const ajenoId = usuarios[0].usuario_id;
+    const cajas: { caja_id: string }[] = await ds.query(
+      `INSERT INTO cajas (tenant_id, usuario_id, tipo, estado, saldo_inicial,
+                          fecha_cierre, monto_contado, diferencia)
+       VALUES ($1, $2, 'fisica', 'cerrada', 0, NOW(), '-123.4500', '-123.4500')
+       RETURNING caja_id`,
+      [OTRO_TENANT_ID, ajenoId],
+    );
+    const cajaAjenaId = cajas[0].caja_id;
+
+    try {
+      const hoy = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Santiago',
+      }).format(new Date());
+      for (const qs of ['', `?desde=${hoy}&hasta=${hoy}`]) {
+        const filas = await tendencia(tokenSupervisor, qs);
+        // Lo que vuelve no está vacío: el cajero de Paris, que cerró arriba.
+        expect(filas.some((f) => f.usuarioId === cajeroId)).toBe(true);
+        expect(filas.some((f) => f.usuarioId === ajenoId)).toBe(false);
+      }
+    } finally {
+      // El e2e no borra: baja lógica, para no dejar la caja ajena viva en la base.
+      await ds.query(
+        `UPDATE cajas SET eliminado_el = NOW() WHERE caja_id = $1`,
+        [cajaAjenaId],
+      );
+      await ds.query(
+        `UPDATE usuarios SET eliminado_el = NOW() WHERE usuario_id = $1`,
+        [ajenoId],
+      );
     }
   });
 
