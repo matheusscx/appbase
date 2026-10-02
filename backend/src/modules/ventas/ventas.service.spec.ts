@@ -241,6 +241,10 @@ describe('VentasService', () => {
   let ventaDocumentosMock: {
     documentarVenta: jest.Mock;
     descartarAlAnular: jest.Mock;
+    listarParaDetalle: jest.Mock;
+    evaluarAnulacion: jest.Mock;
+    ventaDocumentada: jest.Mock;
+    completarNumero: jest.Mock;
   };
   let ventaPropinaServiceMock: { crearEnTransaccion: jest.Mock };
   let garzonesServiceMock: {
@@ -275,6 +279,12 @@ describe('VentasService', () => {
     ventaDocumentosMock = {
       documentarVenta: jest.fn().mockResolvedValue([]),
       descartarAlAnular: jest.fn().mockResolvedValue(undefined),
+      listarParaDetalle: jest.fn().mockResolvedValue([]),
+      evaluarAnulacion: jest
+        .fn()
+        .mockResolvedValue({ resultado: 'anulable', descartes: [] }),
+      ventaDocumentada: jest.fn().mockResolvedValue(false),
+      completarNumero: jest.fn(),
     };
     ventaPropinaServiceMock = {
       crearEnTransaccion: jest.fn().mockResolvedValue({
@@ -3505,6 +3515,110 @@ describe('VentasService', () => {
       });
     });
 
+    describe('completarNumeroDocumento()', () => {
+      const DOCUMENTO_ID = 'documento-uuid-1';
+      const params = (over: Record<string, unknown> = {}) => ({
+        tenantId: TENANT_ID,
+        usuarioId: USUARIO_ID,
+        verTodas: true,
+        ventaId: VENTA_ORIG_ID,
+        documentoId: DOCUMENTO_ID,
+        numero: '445566',
+        ...over,
+      });
+      let visible: unknown[];
+      let delaVenta: unknown[];
+      const orden = (patron: string) =>
+        ncManager.query.mock.calls.findIndex((c) =>
+          String(c[0]).includes(patron),
+        );
+
+      beforeEach(() => {
+        visible = [{ '?column?': 1 }];
+        delaVenta = [{ '?column?': 1 }];
+        ventaRows = [ventaOriginalRow];
+        ventaDocumentosMock.completarNumero.mockResolvedValue({
+          id: DOCUMENTO_ID,
+          numero: '445566',
+        });
+        ncManager.query.mockImplementation((sql: string) => {
+          if (sql.includes('FOR UPDATE')) return Promise.resolve(ventaRows);
+          if (sql.includes('FROM venta_documentos'))
+            return Promise.resolve(delaVenta);
+          if (sql.includes('FROM ventas v')) return Promise.resolve(visible);
+          return Promise.resolve([]);
+        });
+      });
+
+      it('toma el lock de la venta y delega la escritura con lo que tipeó, sin nada del request', async () => {
+        const res = await service.completarNumeroDocumento(
+          params({ clase: 'voucher' }),
+        );
+        expect(res).toEqual({ id: DOCUMENTO_ID, numero: '445566' });
+        expect(ventaDocumentosMock.completarNumero).toHaveBeenCalledWith(
+          ncManager,
+          {
+            tenantId: TENANT_ID,
+            documentoId: DOCUMENTO_ID,
+            numero: '445566',
+            clase: 'voucher',
+          },
+        );
+      });
+
+      it('el lock (FOR UPDATE) va antes de leer el documento y de escribir', async () => {
+        await service.completarNumeroDocumento(params());
+        const lock = orden('FOR UPDATE');
+        expect(lock).toBeGreaterThanOrEqual(0);
+        expect(lock).toBeLessThan(orden('FROM venta_documentos'));
+        expect(ncManager.query.mock.invocationCallOrder[lock]).toBeLessThan(
+          ventaDocumentosMock.completarNumero.mock.invocationCallOrder[0],
+        );
+      });
+
+      it('una venta que no es del cajero es 404, sin lock y sin escribir', async () => {
+        visible = [];
+        await expect(
+          service.completarNumeroDocumento(params({ verTodas: false })),
+        ).rejects.toThrow(NotFoundException);
+        expect(orden('FOR UPDATE')).toBe(-1);
+        expect(ventaDocumentosMock.completarNumero).not.toHaveBeenCalled();
+        const alcance = ncManager.query.mock.calls[0];
+        expect(String(alcance[0])).toContain('c.usuario_id =');
+        expect(alcance[1]).toEqual([VENTA_ORIG_ID, TENANT_ID, USUARIO_ID]);
+      });
+
+      it('con alcance sobre todas las cajas no filtra por usuario', async () => {
+        await service.completarNumeroDocumento(params({ verTodas: true }));
+        const alcance = ncManager.query.mock.calls[0];
+        expect(String(alcance[0])).not.toContain('c.usuario_id');
+        expect(alcance[1]).toEqual([VENTA_ORIG_ID, TENANT_ID]);
+      });
+
+      it('un documento que no es de esa venta es 404 y no escribe', async () => {
+        delaVenta = [];
+        await expect(
+          service.completarNumeroDocumento(params()),
+        ).rejects.toThrow(NotFoundException);
+        expect(ventaDocumentosMock.completarNumero).not.toHaveBeenCalled();
+        const lectura = ncManager.query.mock.calls.find((c) =>
+          String(c[0]).includes('FROM venta_documentos'),
+        )!;
+        expect(String(lectura[0])).toContain('venta_id = $2');
+        expect(String(lectura[0])).toContain('eliminado_el IS NULL');
+        expect(lectura[1]).toEqual([DOCUMENTO_ID, VENTA_ORIG_ID, TENANT_ID]);
+      });
+
+      it('lo que rechaza el servicio de documentos (400, 404) sale tal cual', async () => {
+        ventaDocumentosMock.completarNumero.mockRejectedValueOnce(
+          new BadRequestException('la clase solo con la máquina'),
+        );
+        await expect(
+          service.completarNumeroDocumento(params()),
+        ).rejects.toThrow('la clase solo con la máquina');
+      });
+    });
+
     describe('cancelar()', () => {
       const cancelarParams = {
         tenantId: TENANT_ID,
@@ -4279,6 +4393,246 @@ describe('VentasService', () => {
       await service.findOne(TENANT_ID, VENTA_ID, USUARIO, true);
 
       expect(sqlCabecera()).toContain('cta.tenant_id = v.tenant_id');
+    });
+  });
+
+  /**
+   * Lo que el detalle decide sobre los documentos (spec `2026-10-01-emision-por-venta`,
+   * § 3.4 y § 3.5): `anulable`, `anularPreguntaExterno` y `abonoConMaquinaDuplica`.
+   * La pantalla solo los muestra, así que cada uno se afirma contra la regla real
+   * (estado + pagos + lo emitido), no contra su valor por defecto.
+   */
+  describe('findOne() — documentos y banderas del detalle', () => {
+    const VENTA_ID = 'venta-uuid-documentos';
+    const USUARIO = 'usuario-uuid-documentos';
+
+    /**
+     * Una venta de $100.000. `aplicado` es lo aplicado A LA VENTA por sus pagos,
+     * y `propina` lo que quedó de propina (no baja el saldo). Cada pago existe
+     * solo si lo aplicado lo exige, porque `SELECT 1 FROM pagos` es la pregunta
+     * de "tiene pagos".
+     */
+    const responder = (
+      estado: string,
+      aplicado: string,
+      propina = '0',
+      tienePagos = aplicado !== '0' || propina !== '0',
+    ) => {
+      dataSourceMock.query.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT 1 FROM pagos'))
+          return Promise.resolve(tienePagos ? [{ '?column?': 1 }] : []);
+        if (sql.includes('FROM pago_aplicaciones'))
+          return Promise.resolve(
+            [
+              { tipo: 'venta', monto: aplicado },
+              { tipo: 'propina', monto: propina },
+            ]
+              .filter((a) => a.monto !== '0')
+              .map((a, i) => ({
+                pago_aplicacion_id: `pa-${i}`,
+                pago_id: 'pago-1',
+                tipo: a.tipo,
+                referencia_id: null,
+                monto: a.monto,
+              })),
+          );
+        if (sql.includes('FROM pagos '))
+          return Promise.resolve(
+            tienePagos
+              ? [
+                  {
+                    pago_id: 'pago-1',
+                    metodo_pago_id: EFECTIVO_ID,
+                    moneda_oficial_id: MONEDA_OFICIAL_ID,
+                    caja_id: CAJA_ID,
+                    monto: '1',
+                    vuelto: '0',
+                    fecha: new Date('2026-10-01'),
+                    referencia: null,
+                  },
+                ]
+              : [],
+          );
+        if (sql.includes('FROM ventas v'))
+          return Promise.resolve([
+            {
+              venta_id: VENTA_ID,
+              caja_id: CAJA_ID,
+              moneda_id: MONEDA_OFICIAL_ID,
+              tipo_documento_id: null,
+              canal: 'fisico',
+              estado,
+              total_bruto: '100000.0000',
+              total_descuentos: '0',
+              total_recargos: '0',
+              total_impuestos: '0',
+              total_final: '100000.0000',
+              comentario: null,
+              fecha: new Date('2026-10-01'),
+              creado_el: new Date('2026-10-01'),
+              venta_referencia_id: null,
+              tipo_documento_codigo: null,
+              tipo_documento_nombre: null,
+              tiene_lineas_despachadas: false,
+            },
+          ]);
+        return Promise.resolve([]);
+      });
+    };
+    const detalle = () => service.findOne(TENANT_ID, VENTA_ID, USUARIO, true);
+
+    describe('anulable y anularPreguntaExterno', () => {
+      it('pendiente, sin pagos y con lo emitido anulable: anulable, sin pregunta', async () => {
+        responder('pendiente', '0');
+        ventaDocumentosMock.evaluarAnulacion.mockResolvedValue({
+          resultado: 'anulable',
+          descartes: [],
+        });
+        const res = await detalle();
+        expect(res.anulable).toBe(true);
+        expect(res.anularPreguntaExterno).toBe(false);
+      });
+
+      it('con un externo sin número: anulable, y pregunta', async () => {
+        responder('pendiente', '0');
+        ventaDocumentosMock.evaluarAnulacion.mockResolvedValue({
+          resultado: 'pregunta_externo',
+          motivo: 'falta decir',
+        });
+        const res = await detalle();
+        expect(res.anulable).toBe(true);
+        expect(res.anularPreguntaExterno).toBe(true);
+      });
+
+      it('con algo ya emitido (bloqueada): ni anulable ni pregunta', async () => {
+        responder('pendiente', '0');
+        ventaDocumentosMock.evaluarAnulacion.mockResolvedValue({
+          resultado: 'bloqueada',
+          motivo: 'va por NC',
+        });
+        const res = await detalle();
+        expect(res.anulable).toBe(false);
+        expect(res.anularPreguntaExterno).toBe(false);
+      });
+
+      it('no repite la consulta de pagos: usa los que el detalle ya cargó', async () => {
+        responder('pendiente', '0');
+        await detalle();
+        expect(
+          dataSourceMock.query.mock.calls.some((c: unknown[]) =>
+            String(c[0]).includes('SELECT 1 FROM pagos'),
+          ),
+        ).toBe(false);
+      });
+
+      it('le pregunta a evaluarAnulacion sin externoHecho: pedir la respuesta no es un bloqueo', async () => {
+        responder('pendiente', '0');
+        await detalle();
+        expect(ventaDocumentosMock.evaluarAnulacion).toHaveBeenCalledTimes(1);
+        expect(ventaDocumentosMock.evaluarAnulacion.mock.calls[0][1]).toEqual({
+          tenantId: TENANT_ID,
+          ventaId: VENTA_ID,
+        });
+      });
+
+      it.each(['pagada', 'pagada_parcial', 'cancelada'])(
+        'una venta %s no es anulable, aunque lo emitido lo permita, y ni mira los documentos',
+        async (estado) => {
+          responder(estado, '0', '0', false);
+          ventaDocumentosMock.evaluarAnulacion.mockResolvedValue({
+            resultado: 'pregunta_externo',
+            motivo: 'falta decir',
+          });
+          const res = await detalle();
+          expect(res.anulable).toBe(false);
+          // Sin ser anulable no hay pregunta que hacer, aunque haya un externo.
+          expect(res.anularPreguntaExterno).toBe(false);
+          expect(ventaDocumentosMock.evaluarAnulacion).not.toHaveBeenCalled();
+        },
+      );
+
+      it('una venta pendiente con pagos no es anulable y ni mira los documentos', async () => {
+        responder('pendiente', '40000');
+        const res = await detalle();
+        expect(res.anulable).toBe(false);
+        expect(res.anularPreguntaExterno).toBe(false);
+        expect(ventaDocumentosMock.evaluarAnulacion).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('abonoConMaquinaDuplica', () => {
+      it('con saldo, abonable y ya documentada: true', async () => {
+        responder('pagada_parcial', '40000');
+        ventaDocumentosMock.ventaDocumentada.mockResolvedValue(true);
+        const res = await detalle();
+        expect(res.abonoConMaquinaDuplica).toBe(true);
+        expect(ventaDocumentosMock.ventaDocumentada).toHaveBeenCalledWith(
+          expect.anything(),
+          { tenantId: TENANT_ID, ventaId: VENTA_ID },
+        );
+      });
+
+      it('también con la venta pendiente sin pagar (hay deuda documentada)', async () => {
+        responder('pendiente', '0');
+        ventaDocumentosMock.ventaDocumentada.mockResolvedValue(true);
+        expect((await detalle()).abonoConMaquinaDuplica).toBe(true);
+      });
+
+      it('sin documentos que duplicar (de $0, de un país sin boleta, o solo nadie): false', async () => {
+        responder('pagada_parcial', '40000');
+        ventaDocumentosMock.ventaDocumentada.mockResolvedValue(false);
+        expect((await detalle()).abonoConMaquinaDuplica).toBe(false);
+      });
+
+      it('sin saldo (pagada) no hay deuda que duplicar, y ni consulta los documentos', async () => {
+        responder('pagada', '100000');
+        ventaDocumentosMock.ventaDocumentada.mockResolvedValue(true);
+        const res = await detalle();
+        expect(res.abonoConMaquinaDuplica).toBe(false);
+        expect(ventaDocumentosMock.ventaDocumentada).not.toHaveBeenCalled();
+      });
+
+      it('con el saldo en cero no hay deuda que duplicar, aunque el estado leído diga pagada_parcial', async () => {
+        // El saldo se mide solo, no se deduce del estado: dos fuentes que hoy
+        // coinciden y que este caso separa a propósito.
+        responder('pagada_parcial', '100000');
+        ventaDocumentosMock.ventaDocumentada.mockResolvedValue(true);
+        const res = await detalle();
+        expect(res.abonoConMaquinaDuplica).toBe(false);
+        expect(ventaDocumentosMock.ventaDocumentada).not.toHaveBeenCalled();
+      });
+
+      it('la propina no baja el saldo: pagó $100.000, $90.000 a la venta y $10.000 de propina, debe $10.000', async () => {
+        // Sumando también la propina el "saldo" daría 0 y diría false.
+        responder('pagada_parcial', '90000', '10000');
+        ventaDocumentosMock.ventaDocumentada.mockResolvedValue(true);
+        expect((await detalle()).abonoConMaquinaDuplica).toBe(true);
+      });
+
+      it.each(['pagada', 'cancelada'])(
+        'una venta %s no admite abonos: false aunque el saldo calculado sea positivo',
+        async (estado) => {
+          // Una venta cancelada no tiene pagos, y su "saldo" es el total entero.
+          responder(estado, '0', '0', false);
+          ventaDocumentosMock.ventaDocumentada.mockResolvedValue(true);
+          const res = await detalle();
+          expect(res.abonoConMaquinaDuplica).toBe(false);
+          expect(ventaDocumentosMock.ventaDocumentada).not.toHaveBeenCalled();
+        },
+      );
+    });
+
+    it('trae los documentos de la venta y de sus correcciones de una sola vez, por el tenant del token', async () => {
+      responder('pendiente', '0');
+      const doc = { id: 'doc-1', emisor: 'sistema' };
+      ventaDocumentosMock.listarParaDetalle.mockResolvedValue([doc]);
+      const res = await detalle();
+      expect(res.documentos).toEqual([doc]);
+      expect(ventaDocumentosMock.listarParaDetalle).toHaveBeenCalledTimes(1);
+      expect(ventaDocumentosMock.listarParaDetalle.mock.calls[0][1]).toEqual({
+        tenantId: TENANT_ID,
+        ventaId: VENTA_ID,
+      });
     });
   });
 

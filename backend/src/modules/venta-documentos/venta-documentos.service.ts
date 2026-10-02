@@ -2,9 +2,12 @@ import {
   BadRequestException,
   Injectable,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import type { EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
+import type { Db } from '../../common/db/db.service';
+import { unwrap } from '../../common/utils/pg-returning.util';
 import {
   cuantizar,
   type ConfigCalculo,
@@ -23,9 +26,14 @@ import {
   type ClaseDocumentoMaquina,
   type Descarte,
   type EmisorDocumento,
+  type EstadoEnvio,
 } from './entities/venta-documento.entity';
 
 const ZERO = new Decimal(0);
+/** Las mismas reglas que `numeroDocumento` en los DTO de cobro y de `CompletarDocumentoDto`. */
+const NUMERO_MAX = 40;
+// eslint-disable-next-line no-control-regex
+const CARACTERES_DE_CONTROL = /[\u0000-\u001F\u007F]/;
 
 /**
  * Los baldes congelados de un documento que cubre `monto` de una venta: neto
@@ -105,6 +113,54 @@ export interface RegistrarDuplicadoParams {
   tenantId: string;
   ventaId: string;
   pagos: AbonoParaDuplicado[];
+}
+
+/**
+ * Quien consulta: el `manager` de una transacción abierta, o el `Db` cuando el
+ * llamador lee fuera de una (el detalle de la venta). Las dos puertas resuelven
+ * `query` igual, y `Db` reusa la transacción en contexto si la hay (ADR-020).
+ */
+export type Lector = EntityManager | Db;
+
+export interface VentaDeLosDocumentosParams {
+  tenantId: string;
+  ventaId: string;
+}
+
+export interface ListarParaDetalleParams extends VentaDeLosDocumentosParams {
+  /** Acota a un documento (la respuesta del `PATCH`); sin él, todos. */
+  documentoId?: string;
+}
+
+export interface CompletarNumeroParams {
+  tenantId: string;
+  documentoId: string;
+  numero: string;
+  /** Solo con un documento de la máquina. Ausente conserva la que había. */
+  clase?: ClaseDocumentoMaquina;
+}
+
+/**
+ * Un documento tal como lo muestra el detalle de la venta y como responde el
+ * `PATCH`. `ventaId` dice a quién pertenece: la venta o una de sus
+ * correcciones, y es la ruta con la que se completa su número.
+ */
+export interface DocumentoDetalle {
+  id: string;
+  ventaId: string;
+  emisor: EmisorDocumento;
+  tipoDocumento: { id: string; codigo: string | null; nombre: string } | null;
+  claseMaquina: ClaseDocumentoMaquina | null;
+  numero: string | null;
+  estadoEnvio: EstadoEnvio | null;
+  monto: string;
+  pagoId: string | null;
+  documentoCorregidoId: string | null;
+  esDuplicado: boolean;
+  descarte: Descarte | null;
+  descartadoEl: Date | null;
+  /** Nombre de quien descartó: en `afirmado_no_hecho`, quién afirmó que no estaba hecho (E10). */
+  descartadoPorNombre: string | null;
 }
 
 export interface EvaluarAnulacionParams {
@@ -282,21 +338,7 @@ export class VentaDocumentosService {
     );
     if (!deLaMaquina.length) return [];
 
-    // `emisor <> 'nadie'`: una fila `nadie` nunca documenta una deuda (la deuda va
-    // siempre a `sistema` o `externo`, E1/E2), así que no cuenta como documentada.
-    const documentada: unknown[] = await manager.query(
-      `SELECT 1
-         FROM venta_documentos
-        WHERE venta_id = $1
-          AND tenant_id = $2
-          AND es_duplicado = false
-          AND emisor <> 'nadie'
-          AND descarte IS NULL
-          AND eliminado_el IS NULL
-        LIMIT 1`,
-      [params.ventaId, params.tenantId],
-    );
-    if (!documentada.length) return [];
+    if (!(await this.ventaDocumentada(manager, params))) return [];
 
     const filas = deLaMaquina.map((p) =>
       manager.create(VentaDocumento, {
@@ -338,7 +380,7 @@ export class VentaDocumentosService {
    * `nadie` (se dejan) y los `externo` contestados con "no" (se descartan).
    */
   async evaluarAnulacion(
-    manager: EntityManager,
+    manager: Lector,
     params: EvaluarAnulacionParams,
   ): Promise<EvaluacionAnulacion> {
     const docs: {
@@ -430,6 +472,203 @@ export class VentaDocumentosService {
         params.tenantId,
       ],
     );
+  }
+
+  /**
+   * ¿Esta venta ya tiene un documento que cubre su deuda? Es el predicado de
+   * "ya documentada" (E1) y **lo comparten dos lectores**, para que no se
+   * desalineen: `registrarDuplicadoDeAbono` (¿el voucher de este abono duplica?)
+   * y el `abonoConMaquinaDuplica` del detalle (¿lo duplicaría uno que todavía no
+   * se cobró?).
+   *
+   * Cuenta un documento vigente (`descarte IS NULL`), que no sea un duplicado y
+   * con `emisor <> 'nadie'`: una fila `nadie` nunca documenta una deuda (la
+   * deuda va siempre a `sistema` o `externo`, E1/E2), así que no cuenta.
+   */
+  async ventaDocumentada(
+    lector: Lector,
+    params: VentaDeLosDocumentosParams,
+  ): Promise<boolean> {
+    const filas: unknown[] = await lector.query(
+      `SELECT 1
+         FROM venta_documentos
+        WHERE venta_id = $1
+          AND tenant_id = $2
+          AND es_duplicado = false
+          AND emisor <> 'nadie'
+          AND descarte IS NULL
+          AND eliminado_el IS NULL
+        LIMIT 1`,
+      [params.ventaId, params.tenantId],
+    );
+    return filas.length > 0;
+  }
+
+  /**
+   * Los documentos de la venta **y los de sus correcciones** (`venta_referencia_id`),
+   * en una sola consulta, con el tipo y el nombre de quien descartó resueltos
+   * por JOIN (una consulta por fila sería N+1).
+   *
+   * Incluye los descartados: el detalle muestra qué pasó con cada uno. Lo que
+   * decide qué documento "vale" es `descarte`, no su presencia.
+   */
+  async listarParaDetalle(
+    lector: Lector,
+    params: ListarParaDetalleParams,
+  ): Promise<DocumentoDetalle[]> {
+    const filas: {
+      documento_id: string;
+      venta_id: string;
+      emisor: EmisorDocumento;
+      tipo_documento_id: string | null;
+      tipo_codigo: string | null;
+      tipo_nombre: string | null;
+      clase_maquina: ClaseDocumentoMaquina | null;
+      numero: string | null;
+      estado_envio: EstadoEnvio | null;
+      monto: string;
+      pago_id: string | null;
+      documento_corregido_id: string | null;
+      es_duplicado: boolean;
+      descarte: Descarte | null;
+      descartado_el: Date | null;
+      descartado_por_nombre: string | null;
+    }[] = await lector.query(
+      `SELECT vd.documento_id, vd.venta_id, vd.emisor, vd.tipo_documento_id,
+              td.codigo AS tipo_codigo, td.nombre AS tipo_nombre,
+              vd.clase_maquina, vd.numero, vd.estado_envio, vd.monto, vd.pago_id,
+              vd.documento_corregido_id, vd.es_duplicado, vd.descarte,
+              vd.descartado_el,
+              NULLIF(TRIM(CONCAT_WS(' ', u.nombre, u.apellido)), '') AS descartado_por_nombre
+         FROM venta_documentos vd
+         -- Sin filtrar \`eliminado_el\` del tipo ni del usuario, a propósito: un
+         -- documento ya emitido conserva su tipo y su historial aunque el catálogo
+         -- o la cuenta se hayan borrado después. Filtrarlos dejaba la fila sin
+         -- tipo (o sin quién afirmó que no estaba hecho, E10) por algo ajeno a ella.
+         LEFT JOIN tipos_documento_tributario td
+                ON td.tipo_documento_id = vd.tipo_documento_id
+         LEFT JOIN usuarios u ON u.usuario_id = vd.descartado_por_usuario_id
+        WHERE vd.tenant_id = $2
+          AND vd.eliminado_el IS NULL
+          -- Una sola lista (la venta y sus correcciones) y no \`= $1 OR IN (...)\`:
+          -- con el \`OR\` el planner abandona el índice de \`venta_id\`.
+          AND vd.venta_id IN (
+            SELECT venta_id FROM ventas
+             WHERE venta_referencia_id = $1
+               AND tenant_id = $2
+               AND eliminado_el IS NULL
+            UNION ALL
+            SELECT $1::uuid
+          )
+          AND ($3::uuid IS NULL OR vd.documento_id = $3::uuid)
+        ORDER BY vd.creado_el, vd.documento_id`,
+      [params.ventaId, params.tenantId, params.documentoId ?? null],
+    );
+    return filas.map((f) => ({
+      id: f.documento_id,
+      ventaId: f.venta_id,
+      emisor: f.emisor,
+      tipoDocumento: f.tipo_documento_id
+        ? {
+            id: f.tipo_documento_id,
+            codigo: f.tipo_codigo,
+            nombre: f.tipo_nombre ?? '',
+          }
+        : null,
+      claseMaquina: f.clase_maquina,
+      numero: f.numero,
+      estadoEnvio: f.estado_envio,
+      monto: f.monto,
+      pagoId: f.pago_id,
+      documentoCorregidoId: f.documento_corregido_id,
+      esDuplicado: f.es_duplicado,
+      descarte: f.descarte,
+      descartadoEl: f.descartado_el,
+      descartadoPorNombre: f.descartado_por_nombre,
+    }));
+  }
+
+  /**
+   * Anota el número de un documento de la máquina (el voucher, el folio) o de uno
+   * hecho por fuera, después de la venta (spec § 3.4). Es la puerta que usan el
+   * `PATCH` y, cuando exista, la integración con el facturador: **no recibe nada
+   * del request** más que lo que escribe (ni usuario ni venta), y E10 trata igual
+   * un número llegue como llegue.
+   *
+   * Valida el número por su cuenta (no vacío, hasta 40 caracteres, sin caracteres
+   * de control): las mismas reglas del DTO, porque quien llame sin pasar por él
+   * no las hereda.
+   *
+   * Aplica solo a un documento vigente (`descarte IS NULL`, no borrado), de la
+   * `maquina` o `externo` y de ese tenant; cualquier otra cosa es 404 y no se
+   * confirma que existe. La `clase` solo se acepta con la máquina (400 con un
+   * `externo`). Que el documento sea de **tal venta**, y el lock de esa venta,
+   * son del llamador: el lock evita que escribir el número de un `externo`
+   * corra contra una anulación que lo declara no hecho.
+   *
+   * Devuelve el documento como lo muestra el detalle.
+   */
+  async completarNumero(
+    manager: EntityManager,
+    params: CompletarNumeroParams,
+  ): Promise<DocumentoDetalle> {
+    // El DTO ya lo rechaza, pero esta es la puerta de la integración futura y no
+    // depende de que alguien la haya pasado por el pipe.
+    const numero = params.numero.trim();
+    if (!numero)
+      throw new BadRequestException('El número no puede quedar vacío.');
+    if (numero.length > NUMERO_MAX)
+      throw new BadRequestException(
+        `El número no puede pasar de ${NUMERO_MAX} caracteres.`,
+      );
+    if (CARACTERES_DE_CONTROL.test(numero))
+      throw new BadRequestException(
+        'El número no puede llevar caracteres de control.',
+      );
+
+    const vigente = `tenant_id = $2
+          AND emisor IN ('maquina', 'externo')
+          AND descarte IS NULL
+          AND eliminado_el IS NULL`;
+    const actuales: { emisor: EmisorDocumento }[] = await manager.query(
+      `SELECT emisor
+         FROM venta_documentos
+        WHERE documento_id = $1
+          AND ${vigente}`,
+      [params.documentoId, params.tenantId],
+    );
+    if (!actuales.length)
+      throw new NotFoundException('Documento no encontrado');
+    if (params.clase !== undefined && actuales[0].emisor !== 'maquina')
+      throw new BadRequestException(
+        'La clase solo se anota en un documento de la máquina de tarjeta.',
+      );
+
+    // `COALESCE`: omitir la clase la conserva. Mandar `null` no llega hasta acá
+    // (el DTO lo rechaza), y aunque llegara, tampoco la borraría.
+    const escritas = unwrap<{ documento_id: string; venta_id: string }>(
+      await manager.query(
+        `UPDATE venta_documentos
+            SET numero = $3,
+                clase_maquina = COALESCE($4, clase_maquina),
+                actualizado_el = NOW()
+          WHERE documento_id = $1
+            AND ${vigente}
+          RETURNING documento_id, venta_id`,
+        [params.documentoId, params.tenantId, numero, params.clase ?? null],
+      ),
+    );
+    // Sin el lock del llamador el documento pudo dejar de valer entre la lectura
+    // y esta sentencia: no se responde un éxito que no escribió nada.
+    if (!escritas.length)
+      throw new NotFoundException('Documento no encontrado');
+
+    const [documento] = await this.listarParaDetalle(manager, {
+      tenantId: params.tenantId,
+      ventaId: escritas[0].venta_id,
+      documentoId: params.documentoId,
+    });
+    return documento;
   }
 
   /**

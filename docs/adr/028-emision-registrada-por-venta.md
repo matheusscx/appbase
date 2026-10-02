@@ -77,7 +77,10 @@ lo resuelve por escrito; el cobro no se bloquea, el pago queda marcado (`es_dupl
 el contador lo corrija, y ese documento no cuenta para la cobertura ni para los topes de una
 corrección. Lo escribe `registrarDuplicadoDeAbono`, que `registrarAbono` llama por cada pago
 cuyo medio es `maquina` y solo si la venta tiene algún documento vigente que no sea duplicado
-(una venta de $0 o de un país sin boleta no tiene nada que duplicar).
+(una venta de $0 o de un país sin boleta no tiene nada que duplicar). Ese "¿ya está documentada?"
+es un predicado único, `VentaDocumentosService.ventaDocumentada` (vigente, no duplicado y con
+emisor distinto de `nadie`): lo comparte el abono con el `abonoConMaquinaDuplica` del detalle,
+para que el aviso de la pantalla y lo que el abono después escribe no puedan desalinearse.
 
 ### La tabla, y lo que decide su forma
 
@@ -120,10 +123,29 @@ cuyo medio es `maquina` y solo si la venta tiene algún documento vigente que no
   (`descarte IS NULL`): una `maquina` o un `sistema` `enviado` bloquean, y un `externo` con
   número bloquea sin preguntar (el número salió del otro facturador, así que el documento
   existe). `externoHecho` ausente y `false` son dos conductas distintas, por eso el DTO y el
-  controller no le ponen default.
+  controller no le ponen default. Lo previo a mirar los documentos —que la venta esté
+  `pendiente` y sin pagos— también es una sola regla (`motivoQueImpideAnular`, en ventas), y
+  `cancelarUnaVez` y el `anulable` del detalle llaman a las dos.
 - Las columnas cerradas (`emisor`, `clase_maquina`, `estado_envio`, `descarte`) siguen la forma
   de lo nuevo: `@Check` + `type: 'text'` explícito + una unión de TS exportada, no un `enum`
   nativo (cambiar los valores obligaría a `ALTER TYPE`).
+
+### El detalle decide, la pantalla muestra; y el número se completa después
+
+`GET /ventas/:id` devuelve `documentos[]` (los de la venta y los de sus correcciones, en una
+consulta) y tres banderas calculadas en el backend con las reglas de arriba, no replicadas en
+el cliente: `anulable`, `anularPreguntaExterno` (anulable **y** con un `externo` sin número) y
+`abonoConMaquinaDuplica` (admite abonos, tiene saldo —lo aplicado a la venta, sin propina— y la
+deuda ya está documentada). Los `JOIN` al tipo de documento y al usuario que descartó **no filtran
+borrados**, a propósito: un documento ya emitido conserva su tipo y su historial aunque el
+catálogo o la cuenta se hayan borrado después.
+
+El número del voucher o del documento hecho por fuera se completa con
+`PATCH /ventas/:id/documentos/:documentoId`. Delega en `VentaDocumentosService.completarNumero`,
+que no recibe nada del request (una integración futura con el facturador llama el mismo método) y
+solo escribe sobre un documento vigente de la `maquina` o `externo`. El endpoint toma el mismo
+`FOR UPDATE` de la venta que la anulación: sin él, anotar el número de un `externo` correría
+contra una anulación que lo declara no hecho (E10) y el documento quedaría descartado con número.
 
 ### Dónde vive
 

@@ -201,8 +201,10 @@ Response (201): { "id": "uuid", "estado": "cancelada", "stockRepuesto": true, "m
 la boleta del país. Lo que decide es `venta_documentos`, solo los documentos **vigentes**
 (`descarte IS NULL`), leídos y actualizados en la misma transacción y después del lock de la venta
 (`lockVentaOriginal`). La regla vive en **un solo lugar**, `VentaDocumentosService.evaluarAnulacion`
-(devuelve `anulable` / `bloqueada` con su motivo / `pregunta_externo`). Hoy la usa
-`cancelarUnaVez`; el `anulable` del detalle va a usar la misma regla (tarea 6), sin replicarla:
+(devuelve `anulable` / `bloqueada` con su motivo / `pregunta_externo`). Las dos preguntas previas
+—el estado y los pagos— también viven en un solo lugar (`motivoQueImpideAnular`). `cancelarUnaVez`
+y el `anulable` del detalle (`GET /ventas/:id`, abajo) llaman a las dos, así que la pantalla no
+replica la regla:
 
 | Documento vigente | Qué pasa |
 |---|---|
@@ -329,6 +331,59 @@ Response (200):
 ### GET /api/ventas/:id
 
 Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recargos`, `impuestos`, `customer`, `pagos`. Incluye `montoPagado` y `saldo`.
+
+**Los documentos y lo que el backend decide sobre ellos** (spec `emision-por-venta` § 3.4 y § 3.5,
+[ADR-028](../adr/028-emision-registrada-por-venta.md)). La pantalla solo los muestra:
+
+- **`documentos[]`**: los de la venta **y los de sus correcciones** (`venta_referencia_id`), en una
+  sola consulta. Cada uno trae `id`, `ventaId` (la venta o la corrección a la que pertenece: es el
+  id de la ruta del `PATCH`), `emisor`, `tipoDocumento` (`{ id, codigo, nombre }` o `null`),
+  `claseMaquina`, `numero`, `estadoEnvio`, `monto`, `pagoId`, `documentoCorregidoId`, `esDuplicado`,
+  y el descarte: `descarte`, `descartadoEl` y `descartadoPorNombre`. **Incluye los descartados**:
+  qué documento "vale" lo dice `descarte`, no su presencia. El tipo y quien descartó se resuelven
+  por `JOIN` **sin filtrar borrados**, a propósito: un documento ya emitido conserva su tipo y su
+  historial aunque el catálogo o la cuenta se borren después (el porqué está escrito en la consulta).
+- **`anulable`**: estado `pendiente`, sin pagos y `evaluarAnulacion` (sin `externoHecho`) en
+  `anulable` o `pregunta_externo`. Es la misma regla que `POST /anular`, no una copia.
+- **`anularPreguntaExterno`**: `anulable` **y** hay un `externo` vigente sin número (hay que
+  preguntar "¿ya lo hiciste en tu facturador?" antes de anular). Es `false` si la venta no es
+  anulable, aunque tenga un `externo`.
+- **`abonoConMaquinaDuplica`**: un abono pagado con la máquina **duplicaría** un documento. Es
+  `true` si la venta admite abonos (`pendiente` o `pagada_parcial`, el mismo corte de
+  `registrarAbono`), tiene saldo (total menos lo **aplicado a la venta**: la propina no lo baja) y su
+  deuda ya está documentada, con **el mismo predicado** que usa el abono para anotar el duplicado
+  (`VentaDocumentosService.ventaDocumentada`: algún documento vigente, no duplicado y que no sea
+  `nadie`). La pantalla de abono avisa con esto, sin bloquear.
+
+### PATCH /api/ventas/:id/documentos/:documentoId
+
+Anota **después** el número de un documento de la máquina (el voucher, el folio) o de uno hecho por
+fuera (spec § 3.4). Sirve también para el voucher duplicado del abono (E1b).
+
+```
+PATCH /api/ventas/{id}/documentos/{documentoId}
+Request: { "numero": "445566", "clase": "voucher" }   // clase es opcional, y solo con la máquina
+Response (200): el documento actualizado, con la forma de `documentos[]` del detalle
+```
+
+- **Permiso:** `Ventas:Crear`, con el mismo alcance de caja que `GET /ventas/:id`
+  (`resolverAlcanceDerivadoDeCaja`, eje `Cajas:Leer`): una venta que no es del cajero es **404**,
+  no 403. El `tenant_id` sale del token; el body solo trae lo tipeado.
+- **`numero`**: mismas reglas que `numeroDocumento` del cobro (sin espacios en los extremos, máx. 40,
+  sin caracteres de control) y **no vacío**: vacío o en blanco es 400. Reescribir un número ya
+  anotado se permite. **`clase`** ausente conserva la que había; `null` es 400; con un documento
+  `externo`, 400.
+- **Solo aplica a un documento vigente** (`descarte IS NULL`, no borrado), de emisor `maquina` o
+  `externo`, **de esa venta** y de ese tenant. Cualquier otro (del `sistema`, una fila `nadie`, uno
+  descartado, uno de otra venta, de una corrección o de otro tenant) es **404**.
+- **Concurrencia:** toma el mismo `FOR UPDATE` de la venta que `POST /anular`, dentro de una
+  transacción, antes de leer y escribir. Sin él, anotar el número de un `externo` correría contra
+  una anulación que lo declara no hecho (E10) y el documento quedaría descartado **con** número.
+- La escritura vive en `VentaDocumentosService.completarNumero(manager, { tenantId, documentoId,
+  numero, clase? })`, que **no recibe nada del request** (ni usuario ni venta) y **valida el número por
+  su cuenta** (no vacío, máx. 40, sin caracteres de control): una integración futura con el facturador
+  externo llama ese mismo método, sin pasar por el DTO. Anotar el número de un `externo`
+  cambia lo que decide `anulable`: con número, anular es 400 sin preguntar.
 
 `tieneLineasDespachadas` (booleano) dice si la venta salió de una **cuenta de salón con
 alguna línea ya enviada a cocina**. Es el único consumidor de ese puente hacia salones, y

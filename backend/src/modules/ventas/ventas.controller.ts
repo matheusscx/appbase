@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -27,6 +28,7 @@ import { CreateVentaDto } from './dto/create-venta.dto';
 import { QueryVentasDto } from './dto/query-ventas.dto';
 import { CreateNotaCreditoDto } from './dto/create-nota-credito.dto';
 import { CancelarVentaDto } from './dto/cancelar-venta.dto';
+import { CompletarDocumentoDto } from './dto/completar-documento.dto';
 
 @ApiTags('ventas')
 @ApiBearerAuth()
@@ -71,6 +73,37 @@ export class VentasController {
       comentario: dto.comentario,
       devoluciones: dto.devoluciones,
       devolverDinero: dto.devolverDinero === true,
+    });
+  }
+
+  /**
+   * Anota después el número de un documento de la máquina o hecho por fuera
+   * (spec `2026-10-01-emision-por-venta`, § 3.4). `Ventas:Crear` es el piso, y el
+   * eje **`Cajas:Leer`** dice sobre qué ventas: el mismo alcance que `findOne`
+   * (404, no 403, si la venta no es suya). El tenant sale del token; el body
+   * solo trae lo que se tipeó.
+   */
+  @Patch(':id/documentos/:documentoId')
+  @RequiresPermiso('Ventas', 'Crear')
+  async completarNumeroDocumento(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('documentoId', ParseUUIDPipe) documentoId: string,
+    @Body() dto: CompletarDocumentoDto,
+  ) {
+    const u = req.user as JwtUser;
+    const verTodas = await this.rbacService.resolverAlcanceDerivadoDeCaja(
+      u.id,
+      u.tenantId!,
+    );
+    return this.ventasService.completarNumeroDocumento({
+      tenantId: u.tenantId ?? '',
+      usuarioId: u.id,
+      verTodas,
+      ventaId: id,
+      documentoId,
+      numero: dto.numero,
+      clase: dto.clase,
     });
   }
 

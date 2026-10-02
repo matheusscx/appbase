@@ -42,6 +42,17 @@ import { huellaDe } from '../idempotencia/huella';
 
 // ─── helper puro (exportado para tests) ──────────────────────────────────────
 
+/**
+ * Los estados de una venta que admiten un abono (`registrarAbono`). Una sola
+ * lista: la usa también el `abonoConMaquinaDuplica` del detalle, para que el
+ * aviso de la pantalla no pueda desalinearse de lo que el cobro acepta.
+ * Strings y no `EstadoVenta`: el detalle lee la fila cruda.
+ */
+export const ESTADOS_QUE_ADMITEN_ABONO: readonly string[] = [
+  'pendiente',
+  'pagada_parcial',
+];
+
 export function calcularEstadoVenta(
   totalFinal: string,
   montoAplicadoTotal: string,
@@ -415,7 +426,7 @@ export class PagosService {
 
         const venta = ventaRows[0];
 
-        if (!['pendiente', 'pagada_parcial'].includes(venta.estado)) {
+        if (!ESTADOS_QUE_ADMITEN_ABONO.includes(venta.estado)) {
           throw new BadRequestException(
             'Solo se puede abonar a ventas pendientes o pagadas parcialmente',
           );

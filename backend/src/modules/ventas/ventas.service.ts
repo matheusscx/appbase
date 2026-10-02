@@ -33,8 +33,16 @@ import {
 import { CajaService, IntentoRechazadoError } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService, type ConvertirUnidad } from '../items/items.service';
-import { PagosService, calcularEstadoVenta } from '../pagos/pagos.service';
-import { VentaDocumentosService } from '../venta-documentos/venta-documentos.service';
+import {
+  PagosService,
+  calcularEstadoVenta,
+  ESTADOS_QUE_ADMITEN_ABONO,
+} from '../pagos/pagos.service';
+import {
+  VentaDocumentosService,
+  type DocumentoDetalle,
+} from '../venta-documentos/venta-documentos.service';
+import type { ClaseDocumentoMaquina } from '../venta-documentos/entities/venta-documento.entity';
 import type { Facturador } from '../tenants/entities/tenant.entity';
 import { VentaPropinaService } from '../propinas/venta-propina.service';
 import { EstrategiaAsignacionPropina } from '../propinas/enums/estrategia-asignacion-propina.enum';
@@ -1362,6 +1370,67 @@ export class VentasService {
   }
 
   /**
+   * Completa el número de un documento de la venta (`PATCH /ventas/:id/documentos/:documentoId`,
+   * spec § 3.4). Lo que hace este método es lo que `VentaDocumentosService.completarNumero`
+   * no sabe: **a quién pertenece** el documento y **quién puede tocarlo**.
+   *
+   * 1. El alcance de caja de `findOne` (`filtroDeMisCajas`): una venta que no es
+   *    suya es 404, igual que en el detalle, para no confirmar que existe. Va
+   *    **antes** del lock, para que quien no la ve no pueda retenerla.
+   * 2. El `FOR UPDATE` de la venta, el mismo de `cancelarUnaVez`: sin él, anotar
+   *    el número de un `externo` correría contra una anulación que lo declara no
+   *    hecho (E10), y el documento quedaría descartado **con** número.
+   * 3. Que el documento sea de esta venta. El `externo` o la máquina de otra
+   *    venta (del mismo tenant) es 404.
+   *
+   * Todo en una transacción. La escritura y sus reglas (solo `maquina`/`externo`
+   * vigentes, la `clase` solo con la máquina) son del servicio de documentos.
+   */
+  async completarNumeroDocumento(params: {
+    tenantId: string;
+    usuarioId: string;
+    verTodas: boolean;
+    ventaId: string;
+    documentoId: string;
+    numero: string;
+    clase?: ClaseDocumentoMaquina;
+  }): Promise<DocumentoDetalle> {
+    return this.db.transaccion(async (manager) => {
+      const bindsAlcance: unknown[] = [params.ventaId, params.tenantId];
+      let filtroPropio = '';
+      if (!params.verTodas) {
+        bindsAlcance.push(params.usuarioId);
+        filtroPropio = this.filtroDeMisCajas(bindsAlcance.length);
+      }
+      const visible: unknown[] = await manager.query(
+        `SELECT 1 FROM ventas v
+          WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL
+            ${filtroPropio}`,
+        bindsAlcance,
+      );
+      if (!visible.length) throw new NotFoundException('Venta no encontrada');
+
+      await this.lockVentaOriginal(manager, params.tenantId, params.ventaId);
+
+      const delaVenta: unknown[] = await manager.query(
+        `SELECT 1 FROM venta_documentos
+          WHERE documento_id = $1 AND venta_id = $2 AND tenant_id = $3
+            AND eliminado_el IS NULL`,
+        [params.documentoId, params.ventaId, params.tenantId],
+      );
+      if (!delaVenta.length)
+        throw new NotFoundException('Documento no encontrado');
+
+      return this.ventaDocumentosService.completarNumero(manager, {
+        tenantId: params.tenantId,
+        documentoId: params.documentoId,
+        numero: params.numero,
+        clase: params.clase,
+      });
+    });
+  }
+
+  /**
    * Un intento de anulación. Nombre aparte del sufijo `EnTransaccion`, que en
    * este código significa "recibe el `manager` de una transacción ya abierta"
    * (`crearEnTransaccion`): éste abre la suya, que es justo lo que el loop de
@@ -1391,26 +1460,16 @@ export class VentasService {
         params.ventaId,
       );
 
-      // Literal y no `EstadoVenta.PENDIENTE`: `lockVentaOriginal` devuelve la
-      // fila cruda, con `estado` como string (mismo criterio que `crearNotaCredito`).
-      if (venta.estado !== 'pendiente')
-        throw new BadRequestException(
-          `Solo se anula una venta pendiente (esta está "${venta.estado}"). Una venta cobrada se revierte con nota de crédito.`,
-        );
       // La etiqueta `tipo_documento_id` NO impide anular: toda venta nace con la
       // boleta del país, y rechazar por ella dejaría a ninguna anulable. Lo que
       // cuenta es lo **emitido**, y eso lo dice `venta_documentos` (E8, E10), más
-      // abajo. Acá impiden anular el estado y los pagos.
-      const conPagos: unknown[] = await manager.query(
-        `SELECT 1 FROM pagos
-          WHERE venta_id = $1 AND eliminado_el IS NULL
-          LIMIT 1`,
-        [params.ventaId],
-      );
-      if (conPagos.length)
-        throw new BadRequestException(
-          'La venta tiene pagos registrados: se revierte con nota de crédito, no se anula.',
-        );
+      // abajo. Acá impiden anular el estado y los pagos: la misma regla que
+      // el `anulable` del detalle (`motivoQueImpideAnular`).
+      const motivo = await this.motivoQueImpideAnular(manager, {
+        ventaId: params.ventaId,
+        estado: venta.estado,
+      });
+      if (motivo) throw new BadRequestException(motivo);
 
       // Lo emitido (E8, E10): una máquina o un envío bloquean; un `externo` se
       // pregunta; lo que solo está armado se descarta en esta misma transacción.
@@ -2508,6 +2567,49 @@ export class VentasService {
     }
   }
 
+  /**
+   * Lo que impide anular una venta **antes de mirar sus documentos**: el estado y
+   * los pagos. Devuelve el 400 que corresponde, o `null` si ninguno la impide.
+   *
+   * Es la regla **única** de las dos preguntas "¿se puede anular?": la responde
+   * `cancelarUnaVez` (que lanza el motivo) y el `anulable` del detalle (que solo
+   * mira si hay motivo). Lo emitido lo dice `VentaDocumentosService.evaluarAnulacion`
+   * después. Mira el estado antes que los pagos: si el estado ya la impide, no
+   * gasta la consulta (y el detalle, que ya cargó los pagos, ni siquiera la hace).
+   *
+   * `estado` es el de la fila cruda, un string: el literal y no `EstadoVenta.PENDIENTE`,
+   * como en `crearNotaCredito`.
+   */
+  private async motivoQueImpideAnular(
+    lector: EntityManager | Db,
+    params: {
+      ventaId: string;
+      estado: string;
+      /**
+       * Si el llamador ya sabe si la venta tiene pagos (el detalle los cargó),
+       * lo pasa y no se repite la consulta. `cancelarUnaVez` no lo pasa: lee
+       * bajo el lock de la venta, que es lo que la hace confiable.
+       */
+      tienePagos?: boolean;
+    },
+  ): Promise<string | null> {
+    if (params.estado !== 'pendiente')
+      return `Solo se anula una venta pendiente (esta está "${params.estado}"). Una venta cobrada se revierte con nota de crédito.`;
+    let conPagos = params.tienePagos;
+    if (conPagos === undefined) {
+      const filas: unknown[] = await lector.query(
+        `SELECT 1 FROM pagos
+          WHERE venta_id = $1 AND eliminado_el IS NULL
+          LIMIT 1`,
+        [params.ventaId],
+      );
+      conPagos = filas.length > 0;
+    }
+    if (conPagos)
+      return 'La venta tiene pagos registrados: se revierte con nota de crédito, no se anula.';
+    return null;
+  }
+
   /** Lock pesimista de la venta original: serializa NCs/devoluciones concurrentes. */
   private async lockVentaOriginal(
     manager: EntityManager,
@@ -3417,6 +3519,53 @@ export class VentasService {
       aplicacionesPorPago.set(a.pago_id, list);
     }
 
+    // Los documentos de la venta y de sus correcciones, y lo que el backend
+    // decide sobre ellos. **La pantalla solo muestra estas banderas**: la regla
+    // vive acá y en `VentaDocumentosService`, y replicarla en el cliente fue lo
+    // que este frente vino a cerrar.
+    const documentos = await this.ventaDocumentosService.listarParaDetalle(
+      this.db,
+      { tenantId, ventaId },
+    );
+
+    // `anulable`: la misma regla que `cancelarUnaVez` —el estado y los pagos
+    // (`motivoQueImpideAnular`) y después lo emitido (`evaluarAnulacion`)—,
+    // sin `externoHecho`: pedir la respuesta es parte del flujo, no un bloqueo.
+    const motivoNoAnula = await this.motivoQueImpideAnular(this.db, {
+      ventaId,
+      estado: v.estado,
+      // Ya cargados arriba: sin repetir la consulta.
+      tienePagos: pagos.length > 0,
+    });
+    const veredictoAnular =
+      motivoNoAnula === null
+        ? await this.ventaDocumentosService.evaluarAnulacion(this.db, {
+            tenantId,
+            ventaId,
+          })
+        : null;
+    const anulable =
+      veredictoAnular !== null && veredictoAnular.resultado !== 'bloqueada';
+    const anularPreguntaExterno =
+      veredictoAnular?.resultado === 'pregunta_externo';
+
+    // `abonoConMaquinaDuplica`: ¿un abono pagado con la máquina duplicaría un
+    // documento? Hace falta algo que abonar —la venta admite abonos (el mismo
+    // corte de `PagosService.registrarAbono`) y tiene saldo— y que la deuda ya
+    // esté documentada, con el predicado que usa `registrarDuplicadoDeAbono`.
+    // El saldo es lo aplicado a la venta, no lo cobrado: la propina no lo baja.
+    const aplicadoAVenta = aplicacionesRows
+      .filter((a) => a.tipo === 'venta')
+      .reduce((acc, a) => acc.plus(a.monto), new Decimal(0));
+    const conSaldo = new Decimal(v.total_final).minus(aplicadoAVenta).gt(0);
+    const abonoConMaquinaDuplica =
+      ESTADOS_QUE_ADMITEN_ABONO.includes(v.estado) &&
+      conSaldo &&
+      (await this.ventaDocumentosService.ventaDocumentada(this.db, {
+        tenantId,
+        ventaId,
+      }));
+
     const propinaRows: {
       venta_propina_id: string;
       porcentaje_sugerido: string;
@@ -3499,6 +3648,10 @@ export class VentasService {
       esNotaCredito:
         tipoNotaCredito !== null && v.tipo_documento_id === tipoNotaCredito,
       ventaReferenciaId: v.venta_referencia_id,
+      documentos,
+      anulable,
+      anularPreguntaExterno,
+      abonoConMaquinaDuplica,
       // La venta vino de una cuenta de salón con al menos una línea YA ENVIADA a
       // cocina. Lo consume el modal de anulación: reponer comida que ya se cocinó
       // mete al stock ingredientes que físicamente no existen, así que ahí el

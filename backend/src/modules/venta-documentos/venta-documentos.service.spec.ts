@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import type { EntityManager } from 'typeorm';
@@ -1126,4 +1127,303 @@ describe('VentaDocumentosService.descartarAlAnular', () => {
     ).rejects.toThrow(/Ya está hecho/);
     expect(m.query).toHaveBeenCalledTimes(1);
   });
+});
+
+describe('VentaDocumentosService.ventaDocumentada (el predicado que comparten el abono y el detalle)', () => {
+  it('es true si hay un documento vigente, no duplicado y que no sea de nadie', async () => {
+    const m = managerConLectura([{ '?column?': 1 }]);
+    await expect(
+      new VentaDocumentosService().ventaDocumentada(m.manager, {
+        tenantId: TENANT,
+        ventaId: VENTA,
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it('es false sin documentos que cumplan', async () => {
+    const m = managerConLectura([]);
+    await expect(
+      new VentaDocumentosService().ventaDocumentada(m.manager, {
+        tenantId: TENANT,
+        ventaId: VENTA,
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('lee solo documentos de ESA venta y ESE tenant, vigentes, no duplicados y con emisor distinto de nadie', async () => {
+    const m = managerConLectura([]);
+    await new VentaDocumentosService().ventaDocumentada(m.manager, {
+      tenantId: TENANT,
+      ventaId: VENTA,
+    });
+    const [sql, binds] = m.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/es_duplicado = false/);
+    expect(sql).toMatch(/emisor <> 'nadie'/);
+    expect(sql).toMatch(/descarte IS NULL/);
+    expect(sql).toMatch(/eliminado_el IS NULL/);
+    expect(binds).toEqual([VENTA, TENANT]);
+  });
+});
+
+describe('VentaDocumentosService.listarParaDetalle', () => {
+  const FILA = {
+    documento_id: 'doc-1',
+    venta_id: VENTA,
+    emisor: 'externo',
+    tipo_documento_id: FACTURA,
+    tipo_codigo: '33',
+    tipo_nombre: 'Factura electrónica',
+    clase_maquina: null,
+    numero: 'F-98123',
+    estado_envio: null,
+    monto: '119000.0000',
+    pago_id: null,
+    documento_corregido_id: null,
+    es_duplicado: false,
+    descarte: 'afirmado_no_hecho',
+    descartado_el: new Date('2026-10-01T12:00:00Z'),
+    descartado_por_nombre: 'Ana Pérez',
+  };
+
+  it('arma un solo SELECT con la venta y sus correcciones, y mapea la fila', async () => {
+    const m = managerConLectura([FILA]);
+    const docs = await new VentaDocumentosService().listarParaDetalle(
+      m.manager,
+      { tenantId: TENANT, ventaId: VENTA },
+    );
+    expect(m.query).toHaveBeenCalledTimes(1);
+    const [sql, binds] = m.query.mock.calls[0] as [string, unknown[]];
+    // La venta y sus correcciones en la misma consulta.
+    expect(sql).toMatch(/venta_referencia_id = \$1/);
+    expect(sql).toMatch(/vd\.eliminado_el IS NULL/);
+    expect(sql).toMatch(/vd\.tenant_id = \$2/);
+    expect(binds).toEqual([VENTA, TENANT, null]);
+    expect(docs).toEqual([
+      {
+        id: 'doc-1',
+        ventaId: VENTA,
+        emisor: 'externo',
+        tipoDocumento: {
+          id: FACTURA,
+          codigo: '33',
+          nombre: 'Factura electrónica',
+        },
+        claseMaquina: null,
+        numero: 'F-98123',
+        estadoEnvio: null,
+        monto: '119000.0000',
+        pagoId: null,
+        documentoCorregidoId: null,
+        esDuplicado: false,
+        descarte: 'afirmado_no_hecho',
+        descartadoEl: FILA.descartado_el,
+        descartadoPorNombre: 'Ana Pérez',
+      },
+    ]);
+  });
+
+  it('un documento sin tipo (máquina, nadie) devuelve tipoDocumento null', async () => {
+    const m = managerConLectura([
+      {
+        ...FILA,
+        emisor: 'maquina',
+        tipo_documento_id: null,
+        tipo_codigo: null,
+        tipo_nombre: null,
+        descarte: null,
+        descartado_el: null,
+        descartado_por_nombre: null,
+      },
+    ]);
+    const [doc] = await new VentaDocumentosService().listarParaDetalle(
+      m.manager,
+      { tenantId: TENANT, ventaId: VENTA },
+    );
+    expect(doc.tipoDocumento).toBeNull();
+    expect(doc.descarte).toBeNull();
+    expect(doc.descartadoPorNombre).toBeNull();
+  });
+
+  it('los joins de tipo y de usuario no filtran borrados, y lo dicen (excepción deliberada)', async () => {
+    const m = managerConLectura([]);
+    await new VentaDocumentosService().listarParaDetalle(m.manager, {
+      tenantId: TENANT,
+      ventaId: VENTA,
+    });
+    const [sql] = m.query.mock.calls[0] as [string];
+    const joinTipo =
+      /LEFT JOIN tipos_documento_tributario td[^\n]*(\n[^\n]*)?/.exec(sql)![0];
+    const joinUsuario = /LEFT JOIN usuarios u[^\n]*(\n[^\n]*)?/.exec(sql)![0];
+    expect(joinTipo).not.toMatch(/td\.eliminado_el/);
+    expect(joinUsuario).not.toMatch(/u\.eliminado_el/);
+    // El porqué está escrito en la consulta, junto al join.
+    expect(sql).toMatch(
+      /--[^\n]*eliminado_el[^\n]*\n(?:[^\n]*\n)*?\s*LEFT JOIN tipos_documento_tributario/,
+    );
+  });
+
+  it('con documentoId acota a ese documento', async () => {
+    const m = managerConLectura([]);
+    await new VentaDocumentosService().listarParaDetalle(m.manager, {
+      tenantId: TENANT,
+      ventaId: VENTA,
+      documentoId: 'doc-9',
+    });
+    const [sql, binds] = m.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/vd\.documento_id = \$3/);
+    expect(binds).toEqual([VENTA, TENANT, 'doc-9']);
+  });
+});
+
+describe('VentaDocumentosService.completarNumero', () => {
+  /** SELECT del emisor, UPDATE ... RETURNING y la relectura del detalle. */
+  function managerDeCompletar(emisor: string | null, actualizadas = 1) {
+    const query = jest.fn((sql: string) => {
+      if (/^\s*SELECT emisor/.test(sql))
+        return Promise.resolve(emisor ? [{ emisor }] : []);
+      if (/^\s*UPDATE venta_documentos/.test(sql))
+        return Promise.resolve([
+          Array.from({ length: actualizadas }, () => ({
+            documento_id: 'doc-1',
+            venta_id: VENTA,
+          })),
+          actualizadas,
+        ]);
+      return Promise.resolve([
+        {
+          documento_id: 'doc-1',
+          venta_id: VENTA,
+          emisor: emisor ?? 'maquina',
+          tipo_documento_id: null,
+          tipo_codigo: null,
+          tipo_nombre: null,
+          clase_maquina: 'voucher',
+          numero: '445566',
+          estado_envio: null,
+          monto: '40000.0000',
+          pago_id: 'pago-1',
+          documento_corregido_id: null,
+          es_duplicado: false,
+          descarte: null,
+          descartado_el: null,
+          descartado_por_nombre: null,
+        },
+      ]);
+    });
+    return { query, manager: { query } as unknown as EntityManager };
+  }
+  const completar = (
+    m: ReturnType<typeof managerDeCompletar>,
+    over: Partial<{ numero: string; clase: 'voucher' | 'boleta' }> = {},
+  ) =>
+    new VentaDocumentosService().completarNumero(m.manager, {
+      tenantId: TENANT,
+      documentoId: 'doc-1',
+      numero: '445566',
+      ...over,
+    });
+  const updateDe = (m: ReturnType<typeof managerDeCompletar>) =>
+    m.query.mock.calls.find((c) => /^\s*UPDATE venta_documentos/.test(c[0])) as
+      | [string, unknown[]]
+      | undefined;
+
+  it('escribe el número con el tenant y devuelve el documento actualizado', async () => {
+    const m = managerDeCompletar('maquina');
+    const doc = await completar(m, { numero: '  445566 ' });
+    const [sql, binds] = updateDe(m)!;
+    expect(binds.slice(0, 3)).toEqual(['doc-1', TENANT, '445566']);
+    expect(sql).not.toMatch(/DELETE/i);
+    expect(doc).toMatchObject({ id: 'doc-1', numero: '445566' });
+  });
+
+  it('solo toca documentos vigentes de la máquina o hechos por fuera, y de ese tenant', async () => {
+    const m = managerDeCompletar('externo');
+    await completar(m);
+    for (const [sql] of m.query.mock.calls.filter((c) =>
+      /^\s*(SELECT emisor|UPDATE)/.test(c[0]),
+    ) as [string][]) {
+      expect(sql).toMatch(/emisor IN \('maquina', 'externo'\)/);
+      expect(sql).toMatch(/descarte IS NULL/);
+      expect(sql).toMatch(/eliminado_el IS NULL/);
+      expect(sql).toMatch(/tenant_id = \$2/);
+    }
+  });
+
+  it('un documento que no es de la máquina ni externo, descartado o de otro tenant: 404 y no escribe', async () => {
+    const m = managerDeCompletar(null);
+    await expect(completar(m)).rejects.toBeInstanceOf(NotFoundException);
+    expect(updateDe(m)).toBeUndefined();
+  });
+
+  it('si entre la lectura y el UPDATE el documento dejó de valer: 404', async () => {
+    const m = managerDeCompletar('maquina', 0);
+    await expect(completar(m)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('la clase con un documento externo es 400 y no escribe', async () => {
+    const m = managerDeCompletar('externo');
+    await expect(completar(m, { clase: 'voucher' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(updateDe(m)).toBeUndefined();
+  });
+
+  it('la clase con la máquina se escribe', async () => {
+    const m = managerDeCompletar('maquina');
+    await completar(m, { clase: 'boleta' });
+    expect(updateDe(m)![1][3]).toBe('boleta');
+  });
+
+  it('sin clase la conserva: no se manda null (omitir no es borrar)', async () => {
+    const m = managerDeCompletar('maquina');
+    await completar(m);
+    const [sql, binds] = updateDe(m)!;
+    expect(binds[3]).toBeNull();
+    expect(sql).toMatch(/clase_maquina = COALESCE\(\$4, clase_maquina\)/);
+  });
+
+  it('un número de más de 40 caracteres es 400 y no toca la base; uno de exactamente 40 pasa', async () => {
+    const largo = managerDeCompletar('maquina');
+    await expect(
+      completar(largo, { numero: '9'.repeat(41) }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(largo.query).not.toHaveBeenCalled();
+
+    const justo = managerDeCompletar('maquina');
+    await completar(justo, { numero: '9'.repeat(40) });
+    expect(updateDe(justo)![1][2]).toBe('9'.repeat(40));
+  });
+
+  it.each([
+    ['un salto de línea', '12\n34'],
+    ['un NUL', '12\u000034'],
+    ['un tabulador', '12\t34'],
+    ['un DEL', '12\u007f34'],
+  ])(
+    'un número con %s es 400 y no toca la base: este método no depende del DTO',
+    async (_n, numero) => {
+      const m = managerDeCompletar('maquina');
+      await expect(completar(m, { numero })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(m.query).not.toHaveBeenCalled();
+    },
+  );
+
+  it('acepta letras, guiones, barras y espacios internos', async () => {
+    const m = managerDeCompletar('maquina');
+    await completar(m, { numero: 'A-12/34 B' });
+    expect(updateDe(m)![1][2]).toBe('A-12/34 B');
+  });
+
+  it.each(['', '   '])(
+    'un número en blanco (%j) es 400: este método no depende del DTO',
+    async (numero) => {
+      const m = managerDeCompletar('maquina');
+      await expect(completar(m, { numero })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(m.query).not.toHaveBeenCalled();
+    },
+  );
 });
