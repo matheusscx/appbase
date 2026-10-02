@@ -41,6 +41,63 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
+- [ ] **Si el vínculo entre un `REFUND` y su corrección falla, ese reembolso queda contado dos veces
+  contra su pago, y no hay camino para volver a ligarlo** (backend; anotado 2026-10-02 por la
+  revisión de la tarea 16 del frente de emisión; medido el 2026-10-02).
+  **Decidido (orquestadora, 2026-10-02): el vínculo se escribe con el `manager` de la NC, dentro
+  de su transacción** (la opción A de abajo). Es atomicidad, no regla de negocio. ⛔ **Es fiscal y
+  va sola**: toca la creación de la nota de crédito, así que se toma en una sesión propia, con su
+  propia verificación, nunca de arrastre en otra tarea.
+  - **Qué pasa.** En una venta de un solo pago, el tope por pago de una devolución
+    (`devolvibleDelPagoUnico`, `venta-documentos.service.ts`) resta lo devuelto por las correcciones
+    que anotan el pago y, aparte, los `REFUND` aprobados **sin** `correccion_venta_id`. El hook de
+    `cobros.service.ts` (`aplicarPostReembolso`) crea la corrección en su propia transacción
+    (`crearNotaCredito` → `db.transaccion`, ya commiteada) y recién después liga el `REFUND` con un
+    `UPDATE` suelto (`TransaccionesService.vincularCorreccion`). Si ese `UPDATE` falla, quedan la
+    corrección **y** el `REFUND` sin ligar: el pago descuenta dos veces lo mismo.
+  - **Reproducido** con un caso temporal en `backend/test/pasarela-reembolso.e2e-spec.ts` (no
+    commiteado): venta online de $100.000 con un pago, `jest.spyOn(app.get(TransaccionesService),
+    'vincularCorreccion').mockRejectedValueOnce(...)` y un `REFUND` de $70.000. Quedan $30.000 por
+    devolver; lo medido:
+    - el reembolso: `201` con `notaCreditoId` y el `warning` de "no se pudo ligar";
+    - `pasarela_transacciones`: `[{"correccion_venta_id":null,"estado":"aprobada"}]`, con la
+      corrección de $70.000 (vía `pasarela`) ya creada;
+    - `GET /ventas/:id`: el pago **no ofrece** ninguna devolución con plata (sin la falla ofrece
+      $30.000, el control que ya existe en ese archivo);
+    - la nota del POS por $30.000 por ese pago: `400` "El monto supera lo que queda por devolver por
+      ese pago…";
+    - un segundo `REFUND` de $30.000 por la pasarela: `400` "…parte de ese dinero ya se devolvió…".
+    El tope queda en 100.000 − 70.000 − 70.000 < 0. Es el lado seguro (bloquea de más, nunca deja
+    salir de más), pero los $30.000 quedan sin vía para devolverse: ni por el POS ni por la pasarela.
+  - **Qué no toca, leído en el SQL.** El "Cobrado" del inicio (`resumen-negocio.service.ts`) resta
+    todo `REFUND` aprobado esté ligado o no, y no cuenta las correcciones con vía `pasarela`; el
+    listado de ventas (`total_reembolsado`) tampoco mira el vínculo, y el saldo solo lo mueven las
+    "sin plata". Con más de un pago el `REFUND` sin corrección no se resta de ningún pago. El daño
+    es solo el tope de un pago único.
+  - **Cuándo falla el `UPDATE`.** Es por PK sobre una fila que se insertó en el mismo request, así
+    que el `affected = 0` no tiene camino real (nadie borra ni liga esa fila en el medio). Lo que
+    queda es infraestructura: la conexión que se cae, el pool agotado o el proceso que muere
+    (deploy, OOM) entre el commit de la corrección y el `UPDATE`. En ese último caso ni siquiera
+    hay `warning`: el request muere.
+  - **Por qué no hay re-ligado.** La corrección no guarda a qué `REFUND` corresponde: solo un
+    comentario libre ("NC por reembolso orden …"), y una orden puede tener varios `REFUND`
+    parciales. Reconstruir el vínculo al leer, o al próximo reembolso, sería adivinar por monto.
+  - **La decidida (A) — ligar dentro de la transacción de la corrección.** El handler recibe el
+    `transaccionId` del `REFUND` y el `UPDATE` corre con el mismo `manager` antes del commit. Si el
+    `UPDATE` falla, la corrección se revierte y el `REFUND` queda sin ligar y **sin** corrección: el
+    caso "el hook falló", que ya cuenta una sola vez y ya tiene test. El estado doble deja de existir
+    y la cuenta del tope no cambia. Costo: toca la creación de la nota de crédito (cruza de `ventas`
+    a `pasarela_transacciones`, la dirección permitida del borde).
+  - **Condición para cerrarla, además de "cuenta una sola vez".** Con A, si la transacción falla
+    queda un `REFUND` aprobado **sin** corrección, y el owner decidió que todo reembolso deje
+    registro. Quien la tome tiene que medir que ese estado quede **visible y reintentable**: que el
+    webhook reintente, o que el `warning` lleve el id de la orden y haya cómo volver a pedir la
+    corrección. Hoy el `warning` de "la nota de crédito falló" no trae la orden, y no hay camino
+    para pedir de nuevo la corrección de un `REFUND` ya aprobado.
+  - **Descartada (B) — dejar el `warning`.** Es el lado seguro y el log trae los dos ids, pero el
+    arreglo queda en un `UPDATE` a mano por soporte; mientras no se haga, esos pesos no se pueden
+    devolver por el sistema.
+
 - [ ] **`@IsOptional()` deja pasar un `null` explícito en los `PATCH`/`PUT`, y el service lo
   escribe o lo ignora** (backend, DTOs de actualización). `@IsOptional` de class-validator trata
   `null` igual que ausente y saltea el validador de abajo; ni el pipe global
@@ -114,32 +171,6 @@ destapa una decisión que no es mía).
   uno de esos países (`POST /admin/tenants` con una provincia AR/CO/MX, caja abierta, un ítem en el
   carrito). **Si se confirma**, no se arregla de oficio: la pregunta para el owner es **si esos
   países se soportan hoy** (hoy se opera solo en Chile). Lo fiscal va solo (`CLAUDE.md`).
-
-- [ ] **Si el vínculo entre un `REFUND` y su corrección falla, ese reembolso queda contado dos veces
-  contra su pago** (backend; anotado 2026-10-02 por la revisión de la tarea 16 del frente de emisión).
-  En una venta de un solo pago, el tope por pago de una devolución cuenta los `REFUND` aprobados
-  **sin** `correccion_venta_id` (la ventana antes del hook, y el hook caído) y, ya ligados, por su
-  corrección. Con más de un pago el `REFUND` sin corrección no se resta de ningún pago, así que el caso
-  no aplica. Si el hook crea la
-  corrección pero `vincularCorreccion` falla (`cobros.service.ts`, solo deja un `warning`), el
-  `REFUND` queda sin ligar **y** la corrección existe: el pago descuenta dos veces lo mismo y ofrece
-  menos de lo que de verdad puede devolver. Es el lado seguro —bloquea de más, nunca deja pasar de
-  más— pero no hay camino para volver a ligarlo. **Medir:** si `vincularCorreccion` puede fallar con
-  la corrección ya commiteada (es un `UPDATE` suelto después del hook), y si hace falta un re-ligado
-  (al próximo reembolso de la orden, o al abrir la venta) o alcanza con el `warning`.
-
-- [ ] **El Playwright de la varianza busca su fila en la primera página, ordenada por plata**
-  (frontend, solo test: `frontend/e2e/reportes/varianza.spec.ts` ~L103, ~L177 y ~L184). Mismo patrón que
-  el de compras que se cerró el 2026-10-02 (`resueltos.md`), con otro orden: el listado pagina de a
-  15 (`usePaginatedList`, `reportes/varianza.vue` ~L140) y ordena por `c.monto DESC`
-  (`varianza.service.ts` ~L1204). La fila del primer test pierde $750. Los e2e de la API
-  `reportes-varianza-plata` y `reportes-varianza-resumen` usan el mismo tenant (…007) y sus
-  `afterAll` solo cierran la app: los productos quedan vivos. Según el revisor de ese cierre, cada
-  corrida deja grupos de $1.000 a $19.000; eso **no se midió**. Solo pasaría en local, con Playwright
-  sobre la base que dejó el e2e de la API sin resetear. **Medir:** correr esos dos e2e de API unas
-  veces sin resetear y después este spec. Si se cae, va a la § 1. El reporte no filtra por nombre
-  de ítem, pero sí por ubicación: el revisor propone usar una ubicación propia, como hace el e2e de
-  la API con `crearBodega`.
 
 - [ ] **El pre-commit rechaza un recibo de revisión escrito sobre el mismo diff** (harness). Dos
   sesiones lo vieron el 2026-09-27, las dos desde un worktree (la del aviso sin costo de la

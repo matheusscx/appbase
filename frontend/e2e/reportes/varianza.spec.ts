@@ -13,8 +13,17 @@ import { api, CLP, crearProducto, limpiarItems, tokenDe, TENANTS } from '../supp
  * llamada de la carga le devuelva un error a este rol.
  *
  * Escenario, armado por API como admin (contar y aplicar no son de este rol):
- * un producto con 40 unidades a $250, contado en 40 y después en 37 en el
- * local. Son 3 unidades sin explicación, $750.
+ * un producto con 40 unidades a $250, contado en 40 y después en 37. Son 3
+ * unidades sin explicación, $750.
+ *
+ * 📌 **Se cuenta en una bodega del spec, y la pantalla se filtra por ella.** El
+ * listado pagina (15 filas), ordena por plata perdida y, con bodegas, arranca
+ * en el local: contando ahí, la fila de $750 dependía de cuántas filas de más
+ * plata dejaron en ese local otras suites que corrieron sobre la misma base. Es
+ * el mismo arreglo que el de compras, que filtra su listado por su proveedor.
+ * La bodega tiene un nombre fijo y se reusa entre corridas: los ítems de
+ * corridas viejas están dados de baja y el reporte no los lista, y una bodega
+ * nueva por corrida llenaría el selector de ubicaciones del tenant.
  */
 
 // Sin la sesión de admin que guarda `auth.setup.ts`: entra el aprobador.
@@ -25,6 +34,62 @@ const APROBADOR = { email: 'aprobador@paris.cl', password: 'admin' }
 let escenario: { token?: string, itemIds: string[] } = { itemIds: [] }
 
 interface Recuento { id: string, lineas: { lineaId: string, itemId: string }[] }
+
+const BODEGA = 'Bodega varianza Playwright'
+
+/** La bodega del spec, y el nombre del local: es lo que el selector muestra al arrancar. */
+async function ubicacionesDelSpec(
+  request: APIRequestContext,
+  token: string,
+): Promise<{ bodegaId: string, localNombre: string }> {
+  const ubicaciones = await api<{ id: string, nombre: string, tipo: string }[]>(request, 'get', '/ubicaciones', { token })
+  const localNombre = ubicaciones.find(u => u.tipo === 'local')!.nombre
+  const existente = ubicaciones.find(u => u.nombre === BODEGA)
+  if (existente) return { bodegaId: existente.id, localNombre }
+  const { id } = await api<{ id: string }>(request, 'post', '/ubicaciones', {
+    token,
+    data: { nombre: BODEGA, tipo: 'bodega' },
+  })
+  return { bodegaId: id, localNombre }
+}
+
+/** Las 40 unidades entran a la bodega con `inventario_inicial`, antes del primer conteo. */
+async function stockInicialEnBodega(
+  request: APIRequestContext,
+  token: string,
+  datos: { itemId: string, ubicacionId: string, costoUnitario?: string },
+) {
+  await api(request, 'patch', `/items/${datos.itemId}/stock`, {
+    token,
+    data: {
+      ubicacionId: datos.ubicacionId,
+      cantidad: '40',
+      tipo: 'entrada',
+      motivo: 'inventario_inicial',
+      ...(datos.costoUnitario ? { costoUnitario: datos.costoUnitario } : {}),
+    },
+  })
+}
+
+/**
+ * Filtra la pantalla por la bodega del spec y espera el listado y el resumen ya
+ * filtrados: sin esperarlos, una aserción sobre la tabla o los totales podría
+ * correr contra la carga del local, y un error del resumen de la bodega
+ * llegaría después de mirar `errores`. Con bodegas, el selector arranca en el
+ * local; su etiqueta no está ligada al botón, así que se lo encuentra por el
+ * valor que muestra.
+ */
+async function filtrarPorLaBodega(page: Page, ubicaciones: { bodegaId: string, localNombre: string }) {
+  const deLaBodega = (ruta: string) => page.waitForResponse(r =>
+    r.url().includes(ruta) && r.url().includes(`ubicacionId=${ubicaciones.bodegaId}`))
+  const listado = deLaBodega('/api/reportes/varianza?')
+  const resumen = deLaBodega('/api/reportes/varianza/resumen?')
+  await page.getByRole('button').filter({ hasText: new RegExp(`^${ubicaciones.localNombre}$`) }).click()
+  await page.keyboard.type(BODEGA)
+  await page.getByRole('option', { name: BODEGA, exact: true }).click()
+  expect((await listado).status()).toBe(200)
+  expect((await resumen).status()).toBe(200)
+}
 
 async function contarYAplicar(
   request: APIRequestContext,
@@ -69,19 +134,20 @@ test('el aprobador llega por el menú y ve lo que falta, en cantidad y en plata'
   const token = escenario.token!
   const nombre = `E2E varianza ${Date.now()}`
 
-  const ubicaciones = await api<{ id: string, tipo: string }[]>(request, 'get', '/ubicaciones', { token })
-  const local = ubicaciones.find(u => u.tipo === 'local')!
+  const ubicaciones = await ubicacionesDelSpec(request, token)
+  const { bodegaId } = ubicaciones
   const motivos = await api<{ id: string }[]>(request, 'get', '/motivos-diferencia-inventario', { token })
 
   const { id: itemId } = await crearProducto(request, token, {
     nombre,
     precioBase: '1000',
-    stock: '40',
+    stock: '0',
     costo: '250',
   })
   escenario.itemIds.push(itemId)
+  await stockInicialEnBodega(request, token, { itemId, ubicacionId: bodegaId, costoUnitario: '250' })
 
-  const conteo = { ubicacionId: local.id, itemId, motivoDiferenciaId: motivos[0]!.id }
+  const conteo = { ubicacionId: bodegaId, itemId, motivoDiferenciaId: motivos[0]!.id }
   await contarYAplicar(request, token, { ...conteo, cantidadContada: '40' })
   await contarYAplicar(request, token, { ...conteo, cantidadContada: '37' })
 
@@ -100,6 +166,7 @@ test('el aprobador llega por el menú y ve lo que falta, en cantidad y en plata'
   await page.waitForURL('**/reportes')
   await page.locator('[data-qa="reporte-/reportes/varianza"]').click()
   await page.waitForURL('**/reportes/varianza')
+  await filtrarPorLaBodega(page, ubicaciones)
 
   const fila = page.locator('tbody tr', { hasText: nombre })
   await expect(fila).toBeVisible()
@@ -112,7 +179,7 @@ test('el aprobador llega por el menú y ve lo que falta, en cantidad y en plata'
 
   // El total de arriba llegó con plata: si el resumen hubiera rebotado (rango
   // mal armado, permiso faltante) la tarjeta diría `—`. No se asevera el monto
-  // exacto: el total cubre todo el tenant, no solo el producto de este test.
+  // exacto: el total cubre la bodega entera, no solo el producto de este test.
   await expect(page.locator('[data-qa="varianza-total-sinExplicacion"]')).toContainText('$')
 
   expect(errores, 'ninguna llamada de la carga debe fallar para este rol').toEqual([])
@@ -123,26 +190,27 @@ test('el aprobador llega por el menú y ve lo que falta, en cantidad y en plata'
  * pase el pipe (un campo que el DTO no declare se borra callado y la tabla
  * volvería entera con 200) y que la fila hundida aparezca al filtrar.
  *
- * No se asevera el número exacto: el local del seed puede traer otras filas sin
- * costo. Que el número y las filas coincidan lo fija el e2e de la API
- * (`reportes-varianza-plata.e2e-spec.ts`).
+ * No se asevera el número exacto: la bodega del spec puede traer otras filas sin
+ * costo, de una corrida anterior que no llegó a limpiar. Que el número y las
+ * filas coincidan lo fija el e2e de la API (`reportes-varianza-plata.e2e-spec.ts`).
  */
 test('el aviso de sin costo filtra la tabla a los que perdieron sin costo', async ({ page, request }) => {
   const token = escenario.token!
   const nombre = `E2E varianza sin costo ${Date.now()}`
 
-  const ubicaciones = await api<{ id: string, tipo: string }[]>(request, 'get', '/ubicaciones', { token })
-  const local = ubicaciones.find(u => u.tipo === 'local')!
+  const ubicaciones = await ubicacionesDelSpec(request, token)
+  const { bodegaId } = ubicaciones
   const motivos = await api<{ id: string }[]>(request, 'get', '/motivos-diferencia-inventario', { token })
 
   // Sin `costo`: `crearProducto` pone uno por defecto, y acá es justo lo que falta.
   const { id: itemId } = await api<{ id: string }>(request, 'post', '/items', {
     token,
-    data: { nombre, tipo: 'producto', monedaId: CLP, unidadMedida: 'unidad', precioBase: '1000', stock: '40' },
+    data: { nombre, tipo: 'producto', monedaId: CLP, unidadMedida: 'unidad', precioBase: '1000', stock: '0' },
   })
   escenario.itemIds.push(itemId)
+  await stockInicialEnBodega(request, token, { itemId, ubicacionId: bodegaId })
 
-  const conteo = { ubicacionId: local.id, itemId, motivoDiferenciaId: motivos[0]!.id }
+  const conteo = { ubicacionId: bodegaId, itemId, motivoDiferenciaId: motivos[0]!.id }
   await contarYAplicar(request, token, { ...conteo, cantidadContada: '40' })
   await contarYAplicar(request, token, { ...conteo, cantidadContada: '37' })
 
@@ -159,6 +227,7 @@ test('el aviso de sin costo filtra la tabla a los que perdieron sin costo', asyn
 
   await entrarComoAprobador(page)
   await page.goto('/reportes/varianza', { waitUntil: 'networkidle' })
+  await filtrarPorLaBodega(page, ubicaciones)
 
   const aviso = page.locator('[data-qa="varianza-sin-costo"]')
   await expect(aviso).toContainText(/no tienen? costo y pueden? estar perdiendo plata/)
@@ -167,7 +236,8 @@ test('el aviso de sin costo filtra la tabla a los que perdieron sin costo', asyn
   // Se espera la RESPUESTA del listado filtrado: la fila ya se veía sin filtrar,
   // así que afirmar sobre la tabla sin esperarla pasaba antes de que llegara.
   const filtrada = page.waitForResponse(r =>
-    r.url().includes('/api/reportes/varianza?') && r.url().includes('soloSinCosto=true'))
+    r.url().includes('/api/reportes/varianza?') && r.url().includes('soloSinCosto=true')
+    && r.url().includes(`ubicacionId=${bodegaId}`))
   await link.click()
   const res = await filtrada
   expect(res.status()).toBe(200)

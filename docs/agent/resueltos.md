@@ -24,6 +24,63 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 ---
 
 
+## El Playwright de la varianza cuenta en su bodega y filtra la pantalla por ella (cerrada 2026-10-02)
+
+Sale de [`pendientes.md`](pendientes.md) § 2.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **El Playwright de la varianza busca su fila en la primera página, ordenada por plata**
+  (frontend, solo test: `frontend/e2e/reportes/varianza.spec.ts` ~L103, ~L177 y ~L184). Mismo patrón que
+  el de compras que se cerró el 2026-10-02 (`resueltos.md`), con otro orden: el listado pagina de a
+  15 (`usePaginatedList`, `reportes/varianza.vue` ~L140) y ordena por `c.monto DESC`
+  (`varianza.service.ts` ~L1204). La fila del primer test pierde $750. Los e2e de la API
+  `reportes-varianza-plata` y `reportes-varianza-resumen` usan el mismo tenant (…007) y sus
+  `afterAll` solo cierran la app: los productos quedan vivos. Según el revisor de ese cierre, cada
+  corrida deja grupos de $1.000 a $19.000; eso **no se midió**. Solo pasaría en local, con Playwright
+  sobre la base que dejó el e2e de la API sin resetear. **Medir:** correr esos dos e2e de API unas
+  veces sin resetear y después este spec. Si se cae, va a la § 1. El reporte no filtra por nombre
+  de ítem, pero sí por ubicación: el revisor propone usar una ubicación propia, como hace el e2e de
+  la API con `crearBodega`.
+
+### Qué se midió
+
+- **La premisa no se sostenía.** Con bodegas en el tenant, la pantalla arranca filtrada por el
+  **Local**, no en "Todas las ubicaciones" (`reportes/varianza.vue`, `prepararUbicaciones`, spec
+  § 7.1). Los e2e de la API `reportes-varianza-plata` y `reportes-varianza-resumen` cuentan en
+  bodegas propias (`crearBodega`), así que sus filas nunca compitieron con la del Playwright, que
+  contaba en el Local. El relleno de control en una bodega aparte lo confirmó: el spec viejo pasó.
+- **Tampoco el monto que citaba el revisor.** Tres rondas de esos dos e2e sin resetear, leídas con
+  el listado en "Todas" (una sonda temporal, sin commitear): cada ronda suma 15 filas al tenant 007,
+  y solo una pasa los $750 (la de $12.400). No hay "grupos de $1.000 a $19.000".
+- **Lo que sí la desplaza** es lo que se cuente en el Local del tenant 007 con más plata perdida:
+  la pantalla arranca ahí. Puede venir de cualquier suite que haga recuentos en el Local del seed;
+  cuáles lo hacen y con cuánta plata **no se midió**, porque el arreglo lo vuelve indiferente.
+
+### Qué se hizo
+
+Los dos tests de `frontend/e2e/reportes/varianza.spec.ts` ponen las 40 unidades por
+`inventario_inicial` en una bodega del spec, cuentan ahí, y antes de mirar la tabla eligen esa
+bodega en el selector de la pantalla y esperan el listado y el resumen ya filtrados. Es el mismo arreglo que el
+de compras (filtrar el listado por lo propio). La bodega tiene nombre fijo ("Bodega varianza
+Playwright") y se reusa: los ítems de corridas viejas están dados de baja y el reporte no los lista,
+y una bodega nueva por corrida llenaría el selector del tenant. El selector se encuentra por el
+valor que muestra (el nombre del local): su etiqueta "Ubicación" no está ligada al botón y
+`getByLabel` no lo ve. No se tocó código de producción.
+
+### Qué lo fija
+
+Contra el stack del worktree, con la base recién sembrada:
+
+- El spec viejo, sin relleno: 2/2.
+- Con 15 productos que perdieron $10.000 y 15 sin costo de nombre "AAA…", contados **en el Local**
+  por un spec temporal: el spec viejo cae en `expect(fila).toBeVisible()` (L105, la fila no está en
+  la página 1) y en `expect(cuerpo.data.some(f => f.itemId === itemId)).toBe(true)` (L178).
+- Con el arreglo y la misma base: 2/2, y 2/2 otra vez en una segunda corrida que reusa la bodega.
+- La revisión independiente señaló que el `$` del total podía salir del resumen del local, ya
+  cargado, y que un error del resumen de la bodega llegaría después de mirar `errores`. El filtro
+  espera ahora también ese resumen; sobre la misma base con relleno, 2/2.
+
 ## El tipo de documento por defecto de la pantalla es la boleta, no "el primero por nombre" (cerrada 2026-10-02)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.
