@@ -1420,6 +1420,8 @@ export class VentasService {
   async cancelar(params: {
     tenantId: string;
     usuarioId: string;
+    /** El alcance de caja de `findOne` (`exigirVentaVisible`). */
+    verTodas: boolean;
     ventaId: string;
     motivo: string;
     reponerStock: boolean;
@@ -1504,13 +1506,47 @@ export class VentasService {
   }
 
   /**
+   * El alcance de caja de `findOne` (`filtroDeMisCajas`) para una escritura sobre
+   * la venta: una venta que no es suya es 404, igual que en el detalle, para no
+   * confirmar que existe. Va **antes** del lock de la venta, para que quien no la
+   * ve no pueda retenerla.
+   *
+   * Lo usan las escrituras de la API que operan sobre una venta por su id: los
+   * documentos (`tomarDocumentoDeLaVenta`), la anulación (`cancelarUnaVez`) y la
+   * nota de crédito manual (`crearNotaCreditoDesdeVenta`). Sin esto, quien tiene
+   * el permiso de la escritura pero no `Cajas:Leer` operaba sobre ventas de otras
+   * cajas que no puede ni ver (invariante 6).
+   */
+  private async exigirVentaVisible(
+    lector: EntityManager | Db,
+    params: {
+      tenantId: string;
+      usuarioId: string;
+      verTodas: boolean;
+      ventaId: string;
+    },
+  ): Promise<void> {
+    const binds: unknown[] = [params.ventaId, params.tenantId];
+    let filtroPropio = '';
+    if (!params.verTodas) {
+      binds.push(params.usuarioId);
+      filtroPropio = this.filtroDeMisCajas(binds.length);
+    }
+    const visible: unknown[] = await lector.query(
+      `SELECT 1 FROM ventas v
+        WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL
+          ${filtroPropio}`,
+      binds,
+    );
+    if (!visible.length) throw new NotFoundException('Venta no encontrada');
+  }
+
+  /**
    * Lo que comparten las dos escrituras sobre un documento de la venta
    * (`completarNumeroDocumento`, `borrarNumeroDocumento`), en este orden y dentro
    * de la transacción del llamador:
    *
-   * 1. El alcance de caja de `findOne` (`filtroDeMisCajas`): una venta que no es
-   *    suya es 404, igual que en el detalle, para no confirmar que existe. Va
-   *    **antes** del lock, para que quien no la ve no pueda retenerla.
+   * 1. El alcance de caja (`exigirVentaVisible`), antes del lock.
    * 2. El `FOR UPDATE` de la venta, el mismo de `cancelarUnaVez`: sin él, tocar
    *    el número de un `externo` correría contra una anulación que lo declara no
    *    hecho (E10), y el documento quedaría descartado **con** número.
@@ -1527,19 +1563,7 @@ export class VentasService {
       documentoId: string;
     },
   ): Promise<void> {
-    const bindsAlcance: unknown[] = [params.ventaId, params.tenantId];
-    let filtroPropio = '';
-    if (!params.verTodas) {
-      bindsAlcance.push(params.usuarioId);
-      filtroPropio = this.filtroDeMisCajas(bindsAlcance.length);
-    }
-    const visible: unknown[] = await manager.query(
-      `SELECT 1 FROM ventas v
-        WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL
-          ${filtroPropio}`,
-      bindsAlcance,
-    );
-    if (!visible.length) throw new NotFoundException('Venta no encontrada');
+    await this.exigirVentaVisible(manager, params);
 
     await this.lockVentaOriginal(manager, params.tenantId, params.ventaId);
 
@@ -1562,6 +1586,7 @@ export class VentasService {
   private async cancelarUnaVez(params: {
     tenantId: string;
     usuarioId: string;
+    verTodas: boolean;
     ventaId: string;
     motivo: string;
     reponerStock: boolean;
@@ -1577,6 +1602,7 @@ export class VentasService {
     motivo: string;
   }> {
     return this.db.transaccion(async (manager) => {
+      await this.exigirVentaVisible(manager, params);
       const venta = await this.lockVentaOriginal(
         manager,
         params.tenantId,
@@ -2796,10 +2822,17 @@ export class VentasService {
    * pagada/pagada_parcial que no sea otra NC, y permite el egreso de caja
    * elegible. El flujo de reembolsos de pasarela usa `crearNotaCredito`
    * directo y NO pasa por estas reglas.
+   *
+   * Tampoco pasa por el alcance de caja, que va acá y no en `crearNotaCredito`:
+   * el reembolso de pasarela lo dispara el sistema, no un cajero. Acá se mira
+   * antes de abrir la transacción —la caja de una venta no cambia, así que no
+   * hay carrera— y sin `conRastroDeRechazo`: un 404 no es un rechazo por plata.
    */
   async crearNotaCreditoDesdeVenta(params: {
     tenantId: string;
     usuarioId: string;
+    /** El alcance de caja de `findOne` (`exigirVentaVisible`). */
+    verTodas: boolean;
     ventaOriginalId: string;
     monto: string;
     devoluciones?: DevolucionReembolso[];
@@ -2813,7 +2846,14 @@ export class VentasService {
     comentario: string | null;
     devoluciones: DevolucionReembolso[];
   }> {
-    return this.crearNotaCredito({ ...params, validarVentaElegible: true });
+    const { verTodas, ...nota } = params;
+    await this.exigirVentaVisible(this.db, {
+      tenantId: nota.tenantId,
+      usuarioId: nota.usuarioId,
+      verTodas,
+      ventaId: nota.ventaOriginalId,
+    });
+    return this.crearNotaCredito({ ...nota, validarVentaElegible: true });
   }
 
   /**
@@ -3767,12 +3807,12 @@ export class VentasService {
       [ventaId],
     );
     // `caja_id` se REDACTA cuando el pago no cayó en una caja del que consulta.
-    // Alcanzable hoy, sin ningún cambio de producto: el cajero A deja una venta
-    // como cuenta por cobrar, el cajero B la abona con SU caja abierta
-    // (`registrarAbono` resuelve la venta solo por tenant), y A abre el detalle
-    // de su PROPIA venta —así que el filtro de alcance de la cabecera no corta— y
-    // se lleva el triplete `caja_id` + `monto` + `vuelto` de la caja de B. Es
-    // exactamente el dato que este eje existe para proteger.
+    // El caso: el cajero A deja una venta como cuenta por cobrar, B la abona con
+    // SU caja abierta (`registrarAbono` deja cobrar la deuda de otra caja a quien
+    // tiene `Cajas:Leer`, PRODUCTO § 10), y A abre el detalle de su PROPIA
+    // venta —así que el filtro de alcance de la cabecera no corta— y se lleva el
+    // triplete `caja_id` + `monto` + `vuelto` de la caja de B. Es exactamente el
+    // dato que este eje existe para proteger.
     //
     // Se redacta el `caja_id` en vez de esconder la fila: el monto y el medio son
     // de SU venta y los necesita para entender que está pagada; lo que no es suyo

@@ -69,17 +69,24 @@ export class PagosController {
     description:
       'UUID por intento de cobro. El reintento con la misma clave reproduce el abono ya registrado.',
   })
-  registrarAbono(
+  async registrarAbono(
     @Req() req: Request,
     @Body(EscalaMonedaPipe) dto: CreatePagoDto,
     @ClaveIdempotencia() clave: string,
   ) {
     const user = req.user as JwtUser;
+    // El `ventaId` llega por el body, y el alcance es el del detalle: sin
+    // `Cajas:Leer`, la deuda de otra caja es 404 (PRODUCTO § 10, owner 2026-10-02).
+    const verTodas = await this.rbacService.resolverAlcanceDerivadoDeCaja(
+      user.id,
+      user.tenantId!,
+    );
     return this.pagosService.registrarAbono(
       user.tenantId!,
       user.id,
       dto,
       clave,
+      verTodas,
     );
   }
 }

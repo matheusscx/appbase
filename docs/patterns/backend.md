@@ -1413,6 +1413,12 @@ protege.
 ⚠️ **En el detalle de un recurso ajeno se responde `404`, no `403`:** un `403` confirma que
 existe.
 
+⚠️ **Una escritura sobre un recurso por su id lleva el mismo alcance que su detalle.** El
+permiso de la escritura es el piso, no el alcance: `POST /ventas/:id/notas-credito` y
+`/anular` pedían solo su permiso de Ventas, y quien lo tenía operaba sobre ventas que el
+detalle le ocultaba (2026-10-02). En ventas lo resuelve `exigirVentaVisible`, **antes** del
+`FOR UPDATE` para que quien no la ve no pueda retenerla.
+
 **De dónde salió** (2026-08-22): un cajero con `Pagos:Leer` listaba **todos** los pagos del
 tenant, y con eso reconstruía el esperado de **cualquier** caja. Medido después del arreglo: el
 admin ve 87 pagos de 18 cajas, el cajero 3 de las 2 suyas.

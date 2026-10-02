@@ -4354,6 +4354,7 @@ describe('VentasService', () => {
       const cancelarParams = {
         tenantId: TENANT_ID,
         usuarioId: USUARIO_ID,
+        verTodas: true,
         ventaId: VENTA_ORIG_ID,
         motivo: 'Cliente se arrepintió antes de pagar',
         reponerStock: true,
@@ -4366,6 +4367,8 @@ describe('VentasService', () => {
         tipo_documento_id: null,
       };
       let conPagos: unknown[];
+      // El alcance de caja (`exigirVentaVisible`): vacío = la venta no es suya.
+      let visible: unknown[];
       // Lo que el kardex dice que SALIÓ por esta venta. Es la fuente de la
       // reposición desde el 2026-08-22: las líneas de `venta_detalles` no
       // sirven porque una receta o un combo no tienen fila en `item_producto`.
@@ -4388,8 +4391,10 @@ describe('VentasService', () => {
         ];
         detallesVenta = [];
         ventaRows = [ventaAnulable];
+        visible = [{ '?column?': 1 }];
         ncManager.query.mockImplementation((sql: string) => {
           if (sql.includes('FOR UPDATE')) return Promise.resolve(ventaRows);
+          if (sql.includes('FROM ventas v')) return Promise.resolve(visible);
           if (sql.includes('FROM pagos')) return Promise.resolve(conPagos);
           if (sql.includes('movimientos_inventario'))
             return Promise.resolve(salidasKardex);
@@ -4727,11 +4732,60 @@ describe('VentasService', () => {
         );
         expect(dataSourceMock.transaction).toHaveBeenCalledTimes(1);
       });
+
+      it('una venta que no es del cajero es 404, sin lock y sin anular', async () => {
+        visible = [];
+        await expect(
+          service.cancelar({ ...cancelarParams, verTodas: false }),
+        ).rejects.toThrow(NotFoundException);
+        const llamadas = ncManager.query.mock.calls.map((c) => String(c[0]));
+        expect(llamadas.some((q) => q.includes('FOR UPDATE'))).toBe(false);
+        expect(llamadas.some((q) => q.includes('UPDATE ventas'))).toBe(false);
+        expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+        const alcance = ncManager.query.mock.calls[0];
+        expect(String(alcance[0])).toContain('c.usuario_id =');
+        expect(alcance[1]).toEqual([VENTA_ORIG_ID, TENANT_ID, USUARIO_ID]);
+      });
+
+      it('con alcance sobre todas las cajas no filtra por usuario', async () => {
+        await service.cancelar(cancelarParams);
+        const alcance = ncManager.query.mock.calls[0];
+        expect(String(alcance[0])).toContain('FROM ventas v');
+        expect(String(alcance[0])).not.toContain('c.usuario_id');
+        expect(alcance[1]).toEqual([VENTA_ORIG_ID, TENANT_ID]);
+      });
     });
 
     describe('crearNotaCreditoDesdeVenta()', () => {
+      const desdeVenta = { ...baseParams, verTodas: true };
+      const consultaDeAlcance = () =>
+        dataSourceMock.query.mock.calls.find((c) =>
+          String(c[0]).includes('FROM ventas v'),
+        );
+
+      it('una venta que no es del cajero es 404, sin abrir la transacción', async () => {
+        dataSourceMock.query.mockResolvedValueOnce([]);
+        await expect(
+          service.crearNotaCreditoDesdeVenta({
+            ...desdeVenta,
+            verTodas: false,
+          }),
+        ).rejects.toThrow(NotFoundException);
+        expect(dataSourceMock.transaction).not.toHaveBeenCalled();
+        const alcance = consultaDeAlcance()!;
+        expect(String(alcance[0])).toContain('c.usuario_id =');
+        expect(alcance[1]).toEqual([VENTA_ORIG_ID, TENANT_ID, USUARIO_ID]);
+      });
+
+      it('con alcance sobre todas las cajas no filtra por usuario', async () => {
+        await service.crearNotaCreditoDesdeVenta(desdeVenta);
+        const alcance = consultaDeAlcance()!;
+        expect(String(alcance[0])).not.toContain('c.usuario_id');
+        expect(alcance[1]).toEqual([VENTA_ORIG_ID, TENANT_ID]);
+      });
+
       it('feliz sin dinero: delega en crearNotaCredito y devuelve movimientoCajaId null', async () => {
-        const res = await service.crearNotaCreditoDesdeVenta(baseParams);
+        const res = await service.crearNotaCreditoDesdeVenta(desdeVenta);
         expect(res.totalFinal).toBe('1100.0000');
         expect(res.movimientoCajaId).toBeNull();
         // prettier-ignore
@@ -4746,7 +4800,7 @@ describe('VentasService', () => {
         // `ventas.service.ts` no rompía ningún test.
         ventaRows = [{ ...ventaOriginalRow, estado: 'pagada_parcial' }];
 
-        const res = await service.crearNotaCreditoDesdeVenta(baseParams);
+        const res = await service.crearNotaCreditoDesdeVenta(desdeVenta);
 
         expect(res.totalFinal).toBe('1100.0000');
       });
@@ -4755,7 +4809,7 @@ describe('VentasService', () => {
         ventaRows = [{ ...ventaOriginalRow, estado: 'cancelada' }];
         await expect(
           service.crearNotaCreditoDesdeVenta({
-            ...baseParams,
+            ...desdeVenta,
             via: { tipo: 'sin_plata' },
           }),
         ).rejects.toThrow(/Solo se puede emitir nota de crédito de ventas/);
@@ -4764,7 +4818,7 @@ describe('VentasService', () => {
       it('una venta pendiente rechaza la nota por un pago: todavía no tiene pagos', async () => {
         ventaRows = [{ ...ventaOriginalRow, estado: 'pendiente' }];
         await expect(
-          service.crearNotaCreditoDesdeVenta(baseParams),
+          service.crearNotaCreditoDesdeVenta(desdeVenta),
         ).rejects.toThrow(/todavía no tiene pagos/);
       });
 
@@ -4778,7 +4832,7 @@ describe('VentasService', () => {
         });
 
         const res = await service.crearNotaCreditoDesdeVenta({
-          ...baseParams,
+          ...desdeVenta,
           via: { tipo: 'sin_plata' },
         });
 
@@ -4793,7 +4847,7 @@ describe('VentasService', () => {
         efectivoCobrado = '200.0000';
 
         await expect(
-          service.crearNotaCreditoDesdeVenta(baseParams),
+          service.crearNotaCreditoDesdeVenta(desdeVenta),
         ).rejects.toThrow(/más de lo que esta venta cobró en efectivo/);
 
         expect(
@@ -4808,7 +4862,7 @@ describe('VentasService', () => {
         efectivoCobrado = '200.0000';
 
         const error = (await service
-          .crearNotaCreditoDesdeVenta(baseParams)
+          .crearNotaCreditoDesdeVenta(desdeVenta)
           .catch((e: Error) => e)) as Error;
 
         expect(error).toBeInstanceOf(IntentoRechazadoError);
@@ -4821,7 +4875,7 @@ describe('VentasService', () => {
         efectivoCobrado = '200.0000';
 
         const error = (await service
-          .crearNotaCreditoDesdeVenta(baseParams)
+          .crearNotaCreditoDesdeVenta(desdeVenta)
           .catch((e: Error) => e)) as IntentoRechazadoError;
 
         expect(error.intento).toEqual({
@@ -4846,7 +4900,7 @@ describe('VentasService', () => {
         cajaService.calcularEsperadoEfectivo.mockResolvedValueOnce('10.0000');
 
         const error = (await service
-          .crearNotaCreditoDesdeVenta(baseParams)
+          .crearNotaCreditoDesdeVenta(desdeVenta)
           .catch((e: Error) => e)) as IntentoRechazadoError;
 
         expect(error.message).toBe('Saldo insuficiente en caja');
@@ -4859,7 +4913,7 @@ describe('VentasService', () => {
         // (borra la cuenta por cobrar); devolver efectivo que nunca entró, no.
         efectivoCobrado = '0.0000';
 
-        const res = await service.crearNotaCreditoDesdeVenta(baseParams);
+        const res = await service.crearNotaCreditoDesdeVenta(desdeVenta);
 
         expect(res.totalFinal).toBe('1100.0000');
         expect(res.movimientoCajaId).toBeNull();
@@ -4871,14 +4925,14 @@ describe('VentasService', () => {
         efectivoDevuelto = '900.0000'; // disponible: 200
 
         await expect(
-          service.crearNotaCreditoDesdeVenta(baseParams),
+          service.crearNotaCreditoDesdeVenta(desdeVenta),
         ).rejects.toThrow(/más de lo que esta venta cobró en efectivo/);
       });
 
       it('el efectivo ya devuelto cuenta toda corrección que sacó plata de la caja, lleve o no el tipo NC', async () => {
         conSalidaDeCaja();
 
-        await service.crearNotaCreditoDesdeVenta(baseParams);
+        await service.crearNotaCreditoDesdeVenta(desdeVenta);
 
         const sqlEfectivo = ncManager.query.mock.calls
           .map((c: unknown[]) => String(c[0]))
@@ -4897,7 +4951,7 @@ describe('VentasService', () => {
           },
         ];
         await expect(
-          service.crearNotaCreditoDesdeVenta(baseParams),
+          service.crearNotaCreditoDesdeVenta(desdeVenta),
         ).rejects.toThrow(
           'No se puede emitir una nota de crédito sobre otra nota de crédito',
         );
@@ -4912,7 +4966,7 @@ describe('VentasService', () => {
           },
         ];
         await expect(
-          service.crearNotaCreditoDesdeVenta(baseParams),
+          service.crearNotaCreditoDesdeVenta(desdeVenta),
         ).rejects.toThrow(
           'No se puede emitir una nota de crédito sobre otra nota de crédito',
         );
@@ -4920,7 +4974,7 @@ describe('VentasService', () => {
 
       it('por el pago en efectivo: registra salida en la caja activa ligada a la NC', async () => {
         conSalidaDeCaja();
-        const res = await service.crearNotaCreditoDesdeVenta(baseParams);
+        const res = await service.crearNotaCreditoDesdeVenta(desdeVenta);
         expect(res.movimientoCajaId).toBe('mov-caja-nc-1');
 
         expect(cajaService.findActiva).toHaveBeenCalledWith(
@@ -4945,7 +4999,7 @@ describe('VentasService', () => {
         conSalidaDeCaja();
         cajaService.findActiva.mockResolvedValueOnce(null);
         await expect(
-          service.crearNotaCreditoDesdeVenta(baseParams),
+          service.crearNotaCreditoDesdeVenta(desdeVenta),
         ).rejects.toThrow(UnprocessableEntityException);
       });
 
@@ -4953,7 +5007,7 @@ describe('VentasService', () => {
         conSalidaDeCaja();
         cajaService.calcularEsperadoEfectivo.mockResolvedValueOnce('1000.0000');
         await expect(
-          service.crearNotaCreditoDesdeVenta(baseParams),
+          service.crearNotaCreditoDesdeVenta(desdeVenta),
         ).rejects.toThrow('Saldo insuficiente en caja');
         // prettier-ignore
 

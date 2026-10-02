@@ -48,7 +48,7 @@ Response (201):
 ```
 
 **Errores:**
-- `400` — venta no encontrada o no pertenece al tenant
+- `404` — venta no encontrada, de otro tenant, o de otra caja sin `Cajas:Leer` (ver [Quién ve qué](#quién-ve-qué-el-eje-cajasleer))
 - `400` — venta en estado `pagada` o `cancelada` (no se puede abonar), o sin saldo pendiente
 - `400` — excedente sin método con `permite_vuelto = true`
 - `400` — `metodoPagoId` no habilitado para el tenant
@@ -148,10 +148,14 @@ sus pagos por `GET /ventas/:id` pero no en `/pagos`, así que la exclusión no c
 seguridad y sí descuadraba `montoCobrado`/`montoHoy` contra `ventas/resumen`. Los pagos online
 viven en la caja **virtual**, cuyo `usuario_id` es NULL.
 
-⚠️ **Un borde conocido:** `registrarAbono` resuelve la venta **solo por tenant**, así que si el
-cajero B abona una venta que abrió el cajero A, el pago cae en la caja de B y **sí** aparece en
-su listado —es suyo—, mientras `GET /ventas/:id` de esa misma venta le responde 404. La fila
-derivada se ve y la de origen no. No filtra plata ajena, pero es una regla partida en dos.
+**El abono tiene el mismo alcance que el detalle de la venta** (owner, 2026-10-02;
+[`PRODUCTO.md`](../PRODUCTO.md) § 10): una deuda de otra caja la cobra solo quien ve todas las
+cajas (`Cajas:Leer`), y para el cajero sin ese permiso es **404**, como `GET /ventas/:id`. El
+`ventaId` llega por el body, así que el filtro va en el mismo `SELECT … FOR UPDATE` que carga la
+venta: lo que no se ve tampoco se bloquea. Antes, `registrarAbono` resolvía la venta solo por
+tenant y la regla quedaba partida: el cajero B cobraba una deuda de A que su detalle le ocultaba.
+En un negocio que cobra deudas en cualquier caja (la distribuidora a 30 días), se le da
+`Cajas:Leer` a quien cobra. Lo fija `visibilidad-ventas-pagos.e2e-spec.ts`.
 
 ## Backend
 
