@@ -102,6 +102,18 @@ describe('null explícito en PATCH/PUT → 400 (e2e)', () => {
     return (res.body as Record<string, string>)[clave];
   }
 
+  // Producto sin stock inicial: alcanza para ser opción de un grupo, y no
+  // escribe movimientos de inventario.
+  function crearProducto(nombre: string): Promise<string> {
+    return crear('items', {
+      nombre: `${nombre} ${sufijo}`,
+      precioBase: '1000',
+      monedaId: CLP_MONEDA_ID,
+      tipo: 'producto',
+      unidadMedida: 'unidad',
+    });
+  }
+
   // Un `it` por campo: el campo en `null` → 400, y el mismo campo con un valor
   // válido → 200. Un PATCH manda el campo solo; un PUT reemplaza el recurso
   // entero, así que manda todo `validos()` con ese campo pisado. `ruta`,
@@ -351,6 +363,90 @@ describe('null explícito en PATCH/PUT → 400 (e2e)', () => {
         () => ruta,
         () => ({ participantes: [], recalcular: false }),
         ['participantes', 'recalcular'],
+      );
+    });
+  });
+
+  describe("A' — el null llegaba a un array del service (TypeError, 500)", () => {
+    describe('PATCH /grupos-modificadores/:id', () => {
+      let ruta: string;
+      let opciones: object[];
+      beforeAll(async () => {
+        const itemId = await crearProducto('Opción grupo null');
+        opciones = [{ itemId, cantidad: '1', precioExtra: '0' }];
+        const id = await crear(
+          'grupos-modificadores',
+          { nombre: `Grupo null ${sufijo}`, opciones },
+          'grupoModificadorId',
+        );
+        ruta = `grupos-modificadores/${id}`;
+      });
+
+      cadaCampoNull(
+        'patch',
+        () => ruta,
+        () => ({ nombre: `Grupo null ${sufijo}`, opciones }),
+        ['nombre', 'opciones'],
+      );
+    });
+
+    describe('PATCH /items/:id', () => {
+      const base = { precioBase: '1000', monedaId: CLP_MONEDA_ID };
+      const producto = {
+        nombre: `Producto null ${sufijo}`,
+        ...base,
+        precioIncluyeImpuesto: true,
+        activo: true,
+        modoInventario: 'cantidad',
+        unidadMedida: 'unidad',
+        impuestosIds: [],
+        recargosIds: [],
+        descuentosIds: [],
+        ingredientes: [],
+        extrasPermitidos: [],
+        componentes: [],
+        gruposModificadores: [],
+      };
+      let rutaProducto: string;
+      let rutaServicio: string;
+      let rutaSuscripcion: string;
+      beforeAll(async () => {
+        rutaProducto = `items/${await crear('items', {
+          nombre: producto.nombre,
+          ...base,
+          tipo: 'producto',
+          unidadMedida: 'unidad',
+        })}`;
+        rutaServicio = `items/${await crear('items', {
+          nombre: `Servicio null ${sufijo}`,
+          ...base,
+          tipo: 'servicio',
+        })}`;
+        rutaSuscripcion = `items/${await crear('items', {
+          nombre: `Suscripción null ${sufijo}`,
+          ...base,
+          tipo: 'suscripcion',
+          frecuencia: 'mensual',
+        })}`;
+      });
+
+      cadaCampoNull(
+        'patch',
+        () => rutaProducto,
+        () => producto,
+        Object.keys(producto),
+      );
+      cadaCampoNull(
+        'patch',
+        () => rutaServicio,
+        () => ({ requiereCita: false }),
+        ['requiereCita'],
+      );
+      cadaCampoNull(
+        'patch',
+        () => rutaSuscripcion,
+        () => ({ frecuencia: 'mensual' }),
+        ['frecuencia'],
       );
     });
   });

@@ -48,10 +48,17 @@ export class StockNoEditableConstraint implements ValidatorConstraintInterface {
   }
 }
 
+// `@ValidateIf` y no `@IsOptional()` en todo campo cuya columna es NOT NULL y
+// en todas las listas, por lo mismo que `costo`/`stock` (ver su nota): un `null`
+// explícito saltaba el validador y llegaba al service, que lo escribía en la
+// columna o le pedía `.length`/`for…of` —500— o, en las listas que no aplican al
+// tipo del ítem, lo ignoraba con un 200. Omitir un campo conserva el valor.
+// Conservan `@IsOptional()` los de columna nullable, donde `null` borra el dato:
+// `descripcion`, `categoriaId`, las fechas del producto y `duracionEstimada`.
 export class UpdateItemDto {
   @IsString()
   @IsNotEmpty()
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   nombre?: string;
 
   @IsString()
@@ -67,11 +74,11 @@ export class UpdateItemDto {
   @IsNumberString()
   @IsDecimalNoNegativo()
   @EsCosto()
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   precioBase?: string;
 
   @IsUUID()
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   monedaId?: string;
 
   @IsUUID()
@@ -79,11 +86,11 @@ export class UpdateItemDto {
   categoriaId?: string;
 
   @IsBoolean()
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   precioIncluyeImpuesto?: boolean;
 
   @IsBoolean()
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   activo?: boolean;
 
   // @ValidateIf (no @IsOptional): mismo motivo que `costo`/`stock` arriba —
@@ -101,7 +108,7 @@ export class UpdateItemDto {
 
   // Extensión producto
   @IsIn(['cantidad', 'lote', 'serie'])
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   modoInventario?: string;
 
   // El stock ya no se edita desde el item: es una consecuencia de mover
@@ -115,7 +122,7 @@ export class UpdateItemDto {
   stock?: string;
 
   @IsString()
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   unidadMedida?: string;
 
   @EsFechaOTimestamp()
@@ -150,54 +157,54 @@ export class UpdateItemDto {
   duracionEstimada?: number;
 
   @IsBoolean()
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   requiereCita?: boolean;
 
   // Extensión suscripción
   @IsIn(['semanal', 'quincenal', 'mensual'])
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   frecuencia?: string;
 
   // Extensión receta (reemplazo total de la lista)
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => RecetaIngredienteInputDto)
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   ingredientes?: RecetaIngredienteInputDto[];
 
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => RecetaExtraInputDto)
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   extrasPermitidos?: RecetaExtraInputDto[];
 
   // Extensión combo (reemplazo total de la lista)
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ComboComponenteInputDto)
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   componentes?: ComboComponenteInputDto[];
 
   // Asociación de grupos de modificadores (combo | receta, reemplazo total)
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ItemGrupoModificadorInputDto)
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   gruposModificadores?: ItemGrupoModificadorInputDto[];
 
   // Reglas N:M (undefined = no tocar; [] = limpiar todas)
   @IsArray()
   @IsUUID('4', { each: true })
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   impuestosIds?: string[];
 
   @IsArray()
   @IsUUID('4', { each: true })
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   recargosIds?: string[];
 
   @IsArray()
   @IsUUID('4', { each: true })
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   descuentosIds?: string[];
 }
