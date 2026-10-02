@@ -109,16 +109,24 @@ test('una nota de crédito parcial queda atada a la venta que la originó', asyn
     'xpath=.//span[normalize-space(text())="Monto"]/following-sibling::*[1]',
   )
   await escribirMonto(campoMonto, MONTO_NC)
-  await modal
-    .getByRole('checkbox', {
-      name: 'Registrar devolución de dinero desde la caja',
-    })
-    .check()
+  // Por dónde vuelve la plata: la venta se cobró con un solo pago (efectivo), así
+  // que es la única forma de devolver y viene elegida. Dice qué registro deja.
+  await expect(modal.getByRole('radio', { name: /Efectivo/ })).toBeChecked()
+  await expect(modal.locator('[data-qa="registro-que-queda"]')).toContainText(
+    'Una nota de crédito, armada por el sistema.',
+  )
 
+  const pedido = page.waitForRequest(
+    (r) => r.url().includes('/notas-credito') && r.method() === 'POST',
+  )
   const respuesta = page.waitForResponse(
     (r) => r.url().includes('/notas-credito') && r.request().method() === 'POST',
   )
   await modal.getByRole('button', { name: 'Generar nota de crédito' }).click()
+  // El cliente manda el pago, nunca el documento ni la casilla de antes.
+  const cuerpo = (await pedido).postDataJSON() as Record<string, unknown>
+  expect(cuerpo.devolucion).toEqual({ pagoId: expect.any(String) })
+  expect(cuerpo).not.toHaveProperty('devolverDinero')
   const nc = (await (await respuesta).json()) as { id: string }
   await expect(
     page.getByText('Nota de crédito generada con devolución de dinero').first(),
@@ -128,10 +136,12 @@ test('una nota de crédito parcial queda atada a la venta que la originó', asyn
   // tributario, y APUNTA a la venta original.
   const documento = await api<{
     ventaReferenciaId: string | null
+    esCorreccion: boolean
     esNotaCredito: boolean
     totalFinal: string
     tipoDocumento: { codigo: string | null } | null
   }>(request, 'get', `/ventas/${nc.id}`, { token })
+  expect(documento.esCorreccion).toBe(true)
   expect(documento.esNotaCredito).toBe(true)
   expect(documento.tipoDocumento?.codigo).toBe(CODIGO_NC)
   expect(documento.totalFinal).toBe(MONTO_NC_API)

@@ -26,6 +26,7 @@ import {
  * solo el número de esta, para no tener el total copiado en ocho archivos.
  */
 @Index('idx_pagos_venta', ['ventaId'])
+@Index('idx_pagos_documento', ['documentoId'])
 @Entity('pagos')
 export class Pago {
   @PrimaryGeneratedColumn('uuid', { name: 'pago_id' })
@@ -39,6 +40,18 @@ export class Pago {
 
   @Column({ name: 'metodo_pago_id', type: 'uuid' })
   metodoPagoId: string;
+
+  /**
+   * El documento que cubre este pago (`venta_documentos`), escrito en la misma
+   * transacción que el pago: al cobrar, el voucher de la máquina o la boleta /
+   * factura / fila `nadie` del cierre; al abonar, el documento de la deuda (nunca
+   * el voucher duplicado). **Se enlaza y no se infiere** porque el emisor de un
+   * medio puede cambiar entre la venta y el reembolso, y la corrección tiene que
+   * seguir cayendo en el documento que de verdad cubrió ese pago. Nulo si la venta
+   * no tiene documentos ($0, país sin boleta) o el pago no cubrió nada de la venta.
+   */
+  @Column({ name: 'documento_id', type: 'uuid', nullable: true })
+  documentoId: string | null;
 
   @Column({ name: 'moneda_oficial_id', type: 'uuid' })
   monedaOficialId: string;

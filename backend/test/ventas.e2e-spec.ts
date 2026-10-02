@@ -1970,6 +1970,8 @@ describe('Ventas (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId, cantidad: '1.5' }],
+          // En efectivo (admite vuelto, así que cubre cualquier total): la nota va
+          // por este pago y saca su monto de la caja de la suite, que tiene saldo.
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000000.0000' }],
         });
       expect(venta.status).toBe(201);
@@ -1989,6 +1991,18 @@ describe('Ventas (e2e)', () => {
       return (venta.body as VentaResponse).id;
     };
 
+    // Por dónde vuelve la plata: el único pago de la venta (efectivo: sale de la caja).
+    const devolucionDe = async (
+      ventaId: string,
+    ): Promise<{ devolucion: { pagoId: string } }> => {
+      const pagos: { pago_id: string }[] = await ds.query(
+        `SELECT pago_id FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [ventaId],
+      );
+      expect(pagos).toHaveLength(1);
+      return { devolucion: { pagoId: pagos[0].pago_id } };
+    };
+
     const emitirNotaCredito = async (
       ventaId: string,
       body: {
@@ -1999,7 +2013,7 @@ describe('Ventas (e2e)', () => {
       const res = await request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
         .set('Authorization', `Bearer ${token}`)
-        .send(body);
+        .send({ ...(await devolucionDe(ventaId)), ...body });
       expect(res.status).toBe(201);
       return res.body as { id: string };
     };
@@ -2115,6 +2129,12 @@ describe('Ventas (e2e)', () => {
         usuarioId,
         ventaOriginalId: ventaId,
         monto: '1000.0000',
+        // Como el hook de la pasarela: el pago de la venta, sin mover caja.
+        via: await ventasService.viaDeReembolsoPasarela(
+          PARIS_TENANT_ID,
+          ventaId,
+          'orden-e2e',
+        ),
       });
       expect(nc.totalFinal).toBe('1000.0000');
 

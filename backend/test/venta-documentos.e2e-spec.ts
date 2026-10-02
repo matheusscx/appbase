@@ -1156,22 +1156,19 @@ describe('Documentos de la venta (e2e)', () => {
           lineas: lineas100k(),
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100000' }],
         });
+        // La corrección escribe su propio documento:
+        // por el pago en efectivo, corrige la boleta del sistema.
         const nc = await request(app.getHttpServer())
           .post(`/api/ventas/${venta.id}/notas-credito`)
           .set('Authorization', `Bearer ${token}`)
-          .send({ monto: '10000', comentario: 'devolución parcial' });
+          .send({
+            monto: '10000',
+            comentario: 'devolución parcial',
+            devolucion: { pagoId: await pagoDe(venta.id, EFECTIVO_ID) },
+          });
         expect(nc.status).toBe(201);
         const ncId = (nc.body as { id: string }).id;
-        // Las correcciones aún no escriben su documento (lo hace el frente de las
-        // correcciones): el dato se arma por SQL para fijar que el detalle lo lee.
         const original = await docIdDe(venta.id, 'sistema');
-        await ds.query(
-          `INSERT INTO venta_documentos
-             (tenant_id, venta_id, emisor, tipo_documento_id, estado_envio, monto,
-              documento_corregido_id)
-           VALUES ($1, $2, 'sistema', $3, 'armado', 10000, $4)`,
-          [TENANT_ID, ncId, BOLETA_ID, original],
-        );
 
         const { documentos } = await detalle(venta.id);
         expect(documentos).toHaveLength(2);
@@ -1640,7 +1637,11 @@ describe('Documentos de la venta (e2e)', () => {
       const nc = await request(app.getHttpServer())
         .post(`/api/ventas/${venta.id}/notas-credito`)
         .set('Authorization', `Bearer ${token}`)
-        .send({ monto: '10000', comentario: 'devolución parcial' });
+        .send({
+          monto: '10000',
+          comentario: 'devolución parcial',
+          devolucion: { pagoId: await pagoDe(venta.id, EFECTIVO_ID) },
+        });
       expect(nc.status).toBe(201);
       const inserted: { documento_id: string }[] = await ds.query(
         `INSERT INTO venta_documentos (tenant_id, venta_id, emisor, monto)

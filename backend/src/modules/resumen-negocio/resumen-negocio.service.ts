@@ -166,22 +166,13 @@ export class ResumenNegocioService {
             FILTER (WHERE ${condHoyVenta} AND v.canal = 'online'), 0)::text
             AS vendido_online_hoy
          FROM ventas v
-         -- Sin nota de crédito: mismo criterio que VentasService.resumen,
-         -- pero por es_nota_credito del tipo de documento (no por comparar
-         -- contra el id fijo de un país) — así no hace falta copiar
-         -- tipoNotaCreditoDelTenant ni su trampa documentada (un
-         -- IS DISTINCT FROM NULL que deja afuera las ventas sin tipo).
-         --
-         -- El JOIN va SIN td.eliminado_el IS NULL, a propósito: un tipo de
-         -- documento dado de baja DESPUÉS no deja de marcar como nota de
-         -- crédito a la venta que ya lo usó (spec 2026-09-18-dashboard-inicio
-         -- § 4.1).
-         LEFT JOIN tipos_documento_tributario td
-           ON td.tipo_documento_id = v.tipo_documento_id
+         -- Sin correcciones (notas de crédito y devoluciones internas): mismo
+         -- criterio que VentasService.resumen, por venta_referencia_id (E7) y no
+         -- por el tipo de documento, porque la devolución interna no lo lleva.
         WHERE v.tenant_id = $1
           AND v.eliminado_el IS NULL
           AND v.estado <> 'cancelada'
-          AND COALESCE(td.es_nota_credito, false) = false`,
+          AND v.venta_referencia_id IS NULL`,
       params,
     );
 
@@ -240,25 +231,19 @@ export class ResumenNegocioService {
                 ), 0)
               ), 0)::text AS saldo
          FROM ventas v
-         -- El JOIN va SIN td.eliminado_el IS NULL, a propósito: mismo porqué
-         -- que la consulta de vendido, de nuevo acá porque el porqué de una
-         -- excepción vive en la CONSULTA que la tiene, no en otra 40 líneas
-         -- más arriba — un tipo de documento dado de baja DESPUÉS no deja de
-         -- marcar como nota de crédito a la venta que ya lo usó.
+         -- Sin correcciones, por venta_referencia_id (E7).
          --
          -- Nota: hoy este filtro es cinturón-y-tirantes acá. Una nota de
          -- crédito nace con estado = PAGADA
          -- (crearNotaCreditoEnTransaccion, ventas.service.ts ~L1958), así que
          -- nunca matchea el estado IN ('pendiente', 'pagada_parcial') de
-         -- abajo, con o sin este JOIN. Se deja igual: es la misma forma que
+         -- abajo. Se deja igual: es la misma forma que
          -- vendido y que VentasService.resumen, y si el día de mañana una
          -- NC pudiera nacer pendiente, esta línea es la que ya la protege.
-         LEFT JOIN tipos_documento_tributario td
-           ON td.tipo_documento_id = v.tipo_documento_id
         WHERE v.tenant_id = $1
           AND v.eliminado_el IS NULL
           AND v.estado IN ('pendiente', 'pagada_parcial')
-          AND COALESCE(td.es_nota_credito, false) = false`,
+          AND v.venta_referencia_id IS NULL`,
       [tenantId],
     );
 
@@ -307,12 +292,8 @@ export class ResumenNegocioService {
               SUM(vd.cantidad)::text AS cantidad
          FROM venta_detalles vd
          JOIN ventas v ON v.venta_id = vd.venta_id
-         -- Mismo criterio que "vendido" (arriba): sin canceladas, sin nota de
-         -- crédito, JOIN a td SIN eliminado_el por el mismo porqué (un tipo
-         -- de documento dado de baja después no deja de marcar como NC a la
-         -- venta que ya lo usó).
-         LEFT JOIN tipos_documento_tributario td
-           ON td.tipo_documento_id = v.tipo_documento_id
+         -- Mismo criterio que "vendido" (arriba): sin canceladas, sin
+         -- correcciones (venta_referencia_id).
          -- Nombre del ítem SIN filtro de borrado, a propósito: se vendió
          -- hoy, y darlo de baja después no lo saca de lo más vendido (spec
          -- 2026-09-18-dashboard-inicio § 4.4/§ 5.1).
@@ -321,7 +302,7 @@ export class ResumenNegocioService {
           AND v.eliminado_el IS NULL
           AND vd.eliminado_el IS NULL
           AND v.estado <> 'cancelada'
-          AND COALESCE(td.es_nota_credito, false) = false
+          AND v.venta_referencia_id IS NULL
           AND ${condHoyVentaMasVendidos}
         GROUP BY vd.item_id, i.nombre
         ORDER BY SUM(vd.total_linea) DESC, vd.item_id

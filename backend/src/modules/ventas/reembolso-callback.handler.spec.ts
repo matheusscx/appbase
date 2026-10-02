@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { VentasReembolsoHandler } from './reembolso-callback.handler';
 import { ReembolsoCallbackRegistry } from '../pasarela/services/reembolso-callback.registry';
@@ -10,6 +11,7 @@ describe('VentasReembolsoHandler', () => {
   let ventasService: {
     crearNotaCredito: jest.Mock;
     registrarDevolucionesPorReembolso: jest.Mock;
+    viaDeReembolsoPasarela: jest.Mock;
   };
   let monedasService: { decimalesDeLaVenta: jest.Mock };
 
@@ -30,6 +32,9 @@ describe('VentasReembolsoHandler', () => {
         .fn()
         .mockResolvedValue({ id: 'nc-1', totalFinal: '1100.0000' }),
       registrarDevolucionesPorReembolso: jest.fn().mockResolvedValue(undefined),
+      viaDeReembolsoPasarela: jest
+        .fn()
+        .mockResolvedValue({ tipo: 'pasarela', documentoId: 'doc-boleta' }),
     };
     monedasService = {
       decimalesDeLaVenta: jest
@@ -67,7 +72,15 @@ describe('VentasReembolsoHandler', () => {
       monto: '1100.0000',
       devoluciones: [{ itemId: 'item-1', cantidad: '2' }],
       comentario: 'NC por reembolso orden O-1',
+      // La plata ya volvió por el proveedor: corrige el único documento válido
+      // de la venta y no mueve caja.
+      via: { tipo: 'pasarela', documentoId: 'doc-boleta' },
     });
+    expect(ventasService.viaDeReembolsoPasarela).toHaveBeenCalledWith(
+      't-1',
+      'venta-1',
+      'orden-1',
+    );
     expect(res).toEqual({ notaCreditoId: 'nc-1' });
     expect(
       ventasService.registrarDevolucionesPorReembolso,
@@ -106,6 +119,25 @@ describe('VentasReembolsoHandler', () => {
     await expect(
       handler.onReembolsoAprobado({ ...eventoBase, generarNotaCredito: true }),
     ).rejects.toThrow('boom');
+  });
+
+  it('una nota sobre una corrección (la orden quedó ligada a una nota) no se emite: el error llega con su motivo, para que la pasarela lo devuelva como warning', async () => {
+    ventasService.crearNotaCredito.mockRejectedValueOnce(
+      new BadRequestException(
+        'No se puede emitir una nota de crédito sobre otra nota de crédito',
+      ),
+    );
+
+    const resultado = handler.onReembolsoAprobado({
+      ...eventoBase,
+      generarNotaCredito: true,
+    });
+
+    await expect(resultado).rejects.toThrow(
+      'No se puede emitir una nota de crédito sobre otra nota de crédito',
+    );
+    // Y no devolvió ningún id: no hay corrección creada que anunciar.
+    await expect(resultado).rejects.not.toHaveProperty('notaCreditoId');
   });
 
   it('un reembolso con decimales de más se cuantiza y se registra, no se rechaza', async () => {

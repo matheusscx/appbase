@@ -1,12 +1,19 @@
 import { Type } from 'class-transformer';
 import {
+  Equals,
   IsArray,
   IsBoolean,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
+  Validate,
+  ValidateIf,
   ValidateNested,
+  ValidatorConstraint,
+  type ValidationArguments,
+  type ValidatorConstraintInterface,
 } from 'class-validator';
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
@@ -29,6 +36,42 @@ export class DevolucionNotaCreditoDto {
   reponerStock?: boolean;
 }
 
+/** Exactamente uno de `pagoId` / `sinPlata`: ni los dos, ni ninguno. */
+@ValidatorConstraint({ name: 'unaViaDeDevolucion', async: false })
+class UnaViaDeDevolucion implements ValidatorConstraintInterface {
+  validate(_valor: unknown, args: ValidationArguments): boolean {
+    const o = args.object as DevolucionViaDto;
+    return (o.pagoId !== undefined) !== (o.sinPlata !== undefined);
+  }
+
+  defaultMessage(): string {
+    return 'devolucion debe traer exactamente una: pagoId o sinPlata';
+  }
+}
+
+/**
+ * Por dónde vuelve la plata (spec `2026-10-01-emision-por-venta`, § 3.6): el pago
+ * de la venta que se devuelve, o "no vuelve plata". **El cliente nunca manda el
+ * documento que corrige**: el servidor lo resuelve desde esto.
+ *
+ * Los dos campos son opcionales cada uno por su lado y el 400 de "exactamente
+ * uno" lo da `UnaViaDeDevolucion`. `sinPlata: false` no es una respuesta
+ * válida: la ausencia de plata se dice con `true`, no se infiere de un `false`.
+ */
+export class DevolucionViaDto {
+  // Se valida si vino, o si no vino ninguno de los dos (para que ese caso falle).
+  @ValidateIf(
+    (o: DevolucionViaDto) => o.pagoId !== undefined || o.sinPlata === undefined,
+  )
+  @IsUUID()
+  @Validate(UnaViaDeDevolucion)
+  pagoId?: string;
+
+  @ValidateIf((o: DevolucionViaDto) => o.sinPlata !== undefined)
+  @Equals(true, { message: 'sinPlata solo puede ser true' })
+  sinPlata?: true;
+}
+
 export class CreateNotaCreditoDto {
   // El service ya rechaza monto <= 0 (crearNotaCredito); se refuerza en el DTO.
   @IsNumberString()
@@ -40,10 +83,16 @@ export class CreateNotaCreditoDto {
   @IsString()
   comentario?: string;
 
-  /** Registra un movimiento de salida en la caja física abierta del usuario. */
-  @IsOptional()
-  @IsBoolean()
-  devolverDinero?: boolean;
+  /**
+   * Por dónde vuelve la plata. Si es el pago en efectivo, la salida sale de la
+   * caja física abierta del usuario, en la misma transacción que la nota.
+   */
+  // `IsObject` y no solo `ValidateNested`: sin él, un body sin `devolucion` pasa
+  // la validación y el controller revienta con un 500.
+  @IsObject()
+  @ValidateNested()
+  @Type(() => DevolucionViaDto)
+  devolucion: DevolucionViaDto;
 
   /**
    * Ítems que se ACREDITAN en la nota, con su reposición como propiedad de cada

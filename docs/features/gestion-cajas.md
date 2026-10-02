@@ -476,7 +476,7 @@ tenga arqueo congelado (o sea, mientras está `abierta`), y el front muestra "�
 Antes de este sub-proyecto, el bloqueo de saldo insuficiente (`422`, ver
 [Bloqueo de salida por saldo insuficiente](#bloqueo-de-salida-por-saldo-insuficiente-contra-la-línea-de-efectivo)) y
 el egreso de la nota de crédito con devolución de dinero (`POST
-/ventas/:id/notas-credito` con `devolverDinero: true`, ver
+/ventas/:id/notas-credito` con `devolucion: { pagoId }` de un pago en efectivo, ver
 [`docs/features/ventas.md`](./ventas.md)) validaban contra el mismo saldo mezclado. Ambos
 ahora llaman `calcularEsperadoEfectivo` (la misma fórmula de la línea de efectivo) antes
 de descontar — ya no se puede egresar efectivo físico contra plata que en realidad entró

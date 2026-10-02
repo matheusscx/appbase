@@ -108,8 +108,22 @@ para que el aviso de la pantalla y lo que el abono después escribe no puedan de
 - **`estado_envio`** es `'armado'` para el sistema; `'enviado'` queda reservado a la emisión.
 - **Una corrección se reconoce por `venta_referencia_id`**, no por el tipo de documento (E7): la
   devolución interna no es un documento tributario y no lleva el tipo NC. La tabla guarda
-  `documento_corregido_id` para qué documento corrige cada una; lo escribe el frente de las
-  correcciones.
+  `documento_corregido_id` para qué documento corrige cada una; lo escribe
+  `VentaDocumentosService.documentarCorreccion`, y qué documento corrige lo decide **por dónde
+  vuelve la plata** (`documentoQueCorrige`; detalle y topes en
+  [reembolsos-nota-credito.md](../features/reembolsos-nota-credito.md#una-corrección-lleva-su-documento-según-por-dónde-vuelve-la-plata-2026-10-02)).
+  **Cada pago apunta al documento que lo cubre** (`pagos.documento_id`, escrito en la misma
+  transacción: al cobrar, su voucher o la boleta / factura / fila `nadie` del cierre; al abonar, el
+  documento de la deuda —el hecho por fuera si lo hay, si no el del sistema—, nunca el voucher
+  duplicado), y `documentoQueCorrige` lo lee en vez de inferirlo. Se enlaza porque el emisor de un
+  medio puede cambiar entre la venta y el reembolso: inferirlo del medio de hoy movía el pago a otro
+  documento. Un pago sin documento (venta de $0, país sin boleta, o que fue todo propina) queda en
+  `NULL`. Cada cobro y cada abono escriben todos sus enlaces con **un** `UPDATE`.
+  **Cada corrección registra por dónde volvió la plata** (`ventas.devolucion_via`: `'pago'`,
+  `'sin_plata'` o `'pasarela'`, y `devolucion_pago_id` con el pago): es la auditoría de ese dato
+  y lo que hace de "no vuelve plata" una **serie** —el saldo que queda por rebajar descuenta
+  lo ya rebajado sin plata—; las que volvieron por un pago devolvieron plata por fuera y no lo
+  tocan.
 - **El descarte** (`descarte`, `descartado_el`, `descartado_por_usuario_id`) deja registro al
   anular, sin borrar nada. Una boleta del sistema **solo armada, sin enviar al SII, no cuenta
   como emitida**: la venta se anula y esa boleta queda `'armado_sin_enviar'` (E8). Un documento

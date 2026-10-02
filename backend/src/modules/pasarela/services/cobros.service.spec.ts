@@ -370,6 +370,24 @@ describe('CobrosService', () => {
       );
     });
 
+    it('si la venta de la orden es una corrección, el warning lleva el motivo y no hay nota de crédito en la respuesta', async () => {
+      reembolsoHandler.onReembolsoAprobado.mockRejectedValueOnce(
+        new Error(
+          'No se puede emitir una nota de crédito sobre otra nota de crédito',
+        ),
+      );
+      const res = await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100', generarNotaCredito: true },
+        'user-1',
+      );
+      expect(res.warning).toContain(
+        'No se puede emitir una nota de crédito sobre otra nota de crédito',
+      );
+      expect(res.notaCreditoId).toBeUndefined();
+    });
+
     it('reembolso rechazado por el proveedor NO invoca el handler', async () => {
       provider.reembolsar.mockResolvedValueOnce({
         ...refundAprobado,

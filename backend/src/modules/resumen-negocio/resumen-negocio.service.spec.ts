@@ -182,7 +182,7 @@ describe('ResumenNegocioService', () => {
     expect(res.ventas.ticketPromedio.hoy).toBe('33333.3333');
   });
 
-  it('el SQL de ventas excluye canceladas y notas de crédito, afirmando sobre la cláusula', async () => {
+  it('el SQL de ventas excluye canceladas y correcciones, afirmando sobre la cláusula', async () => {
     mockRespuestas({});
 
     await service.hoy(TENANT);
@@ -192,14 +192,26 @@ describe('ResumenNegocioService', () => {
     // por qué el JOIN a `td` no filtra `eliminado_el`.
     const [ventasSql] = queryMock.mock.calls[1] as [string];
     expect(ventasSql).toMatch(/v\.estado\s*<>\s*'cancelada'/);
-    expect(ventasSql).toMatch(
-      /COALESCE\(td\.es_nota_credito,\s*false\)\s*=\s*false/,
-    );
+    // Sin correcciones por `venta_referencia_id` (E7), no por el tipo: la
+    // devolución interna no lo lleva.
+    expect(ventasSql).toMatch(/AND v\.venta_referencia_id IS NULL/);
+    expect(ventasSql).not.toMatch(/es_nota_credito/);
     // `v\.eliminado_el` (no `vd\.` ni `td\.`) acotado al WHERE de esta
     // consulta: una venta soft-deleteada no puede nacer por API, así que el
     // e2e no la puede probar — esta es la única red para el mutante
     // "dropear el filtro" (task-6-mutantes.md, mutante #5).
     expect(ventasSql).toMatch(/WHERE[\s\S]*?v\.eliminado_el IS NULL/);
+  });
+
+  it('el por cobrar tampoco cuenta las correcciones, por venta_referencia_id', async () => {
+    mockRespuestas({});
+
+    await service.hoy(TENANT);
+
+    // Orden de `Db.query`: zona(0), ventas(1), cobrado(2), porCobrar(3).
+    const [porCobrarSql] = queryMock.mock.calls[3] as [string];
+    expect(porCobrarSql).toMatch(/AND v\.venta_referencia_id IS NULL/);
+    expect(porCobrarSql).not.toMatch(/es_nota_credito/);
   });
 
   it('el cobrado lee pago_aplicaciones con tipo = venta, no pagos.monto (que trae el vuelto)', async () => {
@@ -393,7 +405,7 @@ describe('ResumenNegocioService', () => {
       expect(res.masVendidos).toEqual([]);
     });
 
-    it('la consulta de más vendidos excluye canceladas y notas de crédito, y filtra venta_detalles.eliminado_el, afirmando sobre la cláusula', async () => {
+    it('la consulta de más vendidos excluye canceladas y correcciones, y filtra venta_detalles.eliminado_el, afirmando sobre la cláusula', async () => {
       mockRespuestas({});
 
       await service.hoy(TENANT);
@@ -403,9 +415,8 @@ describe('ResumenNegocioService', () => {
       const [masVendidosSql] = queryMock.mock.calls[4] as [string];
       expect(masVendidosSql).toMatch(/FROM venta_detalles vd/);
       expect(masVendidosSql).toMatch(/v\.estado\s*<>\s*'cancelada'/);
-      expect(masVendidosSql).toMatch(
-        /COALESCE\(td\.es_nota_credito,\s*false\)\s*=\s*false/,
-      );
+      expect(masVendidosSql).toMatch(/AND v\.venta_referencia_id IS NULL/);
+      expect(masVendidosSql).not.toMatch(/es_nota_credito/);
       expect(masVendidosSql).toMatch(/vd\.eliminado_el IS NULL/);
       // `v\.eliminado_el` (la venta), no solo `vd\.eliminado_el` (el
       // detalle): son dos filas de soft-delete independientes.

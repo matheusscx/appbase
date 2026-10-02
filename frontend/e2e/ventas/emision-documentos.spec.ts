@@ -3,6 +3,7 @@ import { test, expect } from '../support/sin-qz-tray'
 import {
   abrirCaja,
   api,
+  API,
   cerrarCaja,
   crearProducto,
   limpiarItems,
@@ -55,6 +56,7 @@ interface DocumentoServidor {
   claseMaquina: string | null
   numero: string | null
   monto: string
+  pagoId: string | null
   esDuplicado: boolean
 }
 
@@ -330,4 +332,136 @@ test('completar el número de la máquina desde el detalle: el PATCH va con la v
   expect(await cerrarCaja(request, escenario.tokenVendedor!, escenario.cajaId!, '0'))
     .toBe('cerrada')
   escenario.cajaId = undefined
+})
+
+/**
+ * Un rol propio con `Ventas:Leer` + `Ventas:Nota de crédito`, asignado a la
+ * vendedora mientras dura el test. No existe en el seed: el rol `Vendedor` no
+ * puede emitir notas, y probar la pantalla como admin taparía el 403 de un
+ * control mal gateado. Devuelve cómo deshacerlo (se saca de la cuenta y se da de
+ * baja el rol), que va en el `finally`: la base del seed es compartida.
+ */
+async function darNotaDeCreditoALaVendedora(
+  request: APIRequestContext,
+  tokenAdmin: string,
+): Promise<() => Promise<void>> {
+  const modulos = await api<{
+    moduloTenantId: string
+    nombre: string
+    permisos: { moduloAppPermisoId: string, permisoNombre: string }[]
+  }[]>(request, 'get', '/roles/modulos-disponibles', { token: tokenAdmin })
+  const ventas = modulos.find(m => m.nombre === 'Ventas')!
+  const idsPermisos = ['Leer', 'Nota de crédito'].map(
+    nombre => ventas.permisos.find(p => p.permisoNombre === nombre)!.moduloAppPermisoId,
+  )
+  const rol = await api<{ id: string }>(request, 'post', '/roles', {
+    token: tokenAdmin,
+    data: { nombre: `E2E Ventas NC ${Date.now()}` },
+  })
+  const put = await request.put(
+    `${API}/roles/${rol.id}/modules/${ventas.moduloTenantId}/permissions`,
+    {
+      headers: { Authorization: `Bearer ${tokenAdmin}` },
+      data: { moduloAppPermisoIds: idsPermisos },
+    },
+  )
+  expect(put.ok()).toBe(true)
+  const miembros = await api<{ usuarioId: string, correo: string }[]>(
+    request, 'get', '/tenants/members', { token: tokenAdmin },
+  )
+  const usuarioId = miembros.find(m => m.correo === VENDEDOR.email)!.usuarioId
+  await api(request, 'post', `/roles/${rol.id}/users`, {
+    token: tokenAdmin,
+    data: { usuarioId },
+  })
+  return async () => {
+    const headers = { Authorization: `Bearer ${tokenAdmin}` }
+    await request.delete(`${API}/roles/${rol.id}/users/${usuarioId}`, { headers })
+    await request.delete(`${API}/roles/${rol.id}`, { headers })
+  }
+}
+
+test('nota de crédito por la tarjeta de un pago mixto, como un rol con Ventas:Nota de crédito: corrige el voucher y no saca plata de la caja', async ({
+  page,
+  request,
+}) => {
+  const quitarRol = await darNotaDeCreditoALaVendedora(request, escenario.tokenAdmin!)
+  try {
+    const producto = await sembrarProducto(request, 'Emisión NC tarjeta')
+    // $5.000 en efectivo (boleta del sistema) + $6.900 con la tarjeta (voucher).
+    const venta = await ventaPorApi(request, producto.id, [
+      { metodoPagoId: EFECTIVO, monto: EN_EFECTIVO },
+      { metodoPagoId: DEBITO, monto: CON_TARJETA },
+    ])
+    const voucher = venta.documentos.find(d => d.emisor === 'maquina')!
+
+    await entrarComoVendedor(page)
+    await page.goto(`/ventas?venta=${venta.id}`)
+    await detalleDe(page).getByRole('button', { name: 'Nota de crédito' }).click()
+    const modal = page.getByRole('dialog').filter({ hasText: 'Generar nota de crédito' })
+
+    // Una opción por pago, con el medio y lo que cubrió. Hay dos: no viene
+    // ninguna elegida (un default movería plata de la caja sin que se decida) y
+    // sin "No vuelve plata" porque la venta está pagada.
+    // El rótulo de cada opción (medio · lo que cubrió) es el nombre accesible del radio.
+    const efectivo = modal.getByRole('radio', { name: 'Efectivo · $5.000' })
+    const tarjeta = modal.getByRole('radio', { name: 'Tarjeta de débito · $6.900' })
+    await expect(efectivo).toHaveCount(1)
+    await expect(tarjeta).toHaveCount(1)
+    await expect(modal.getByRole('radio', { name: /No vuelve plata/ })).toHaveCount(0)
+    await expect(efectivo).not.toBeChecked()
+    await expect(tarjeta).not.toBeChecked()
+    const generar = modal.getByRole('button', { name: 'Generar nota de crédito' })
+    await expect(generar).toBeDisabled()
+
+    await tarjeta.check()
+    await expect(modal.locator('[data-qa="registro-que-queda"]')).toContainText(
+      'nota de crédito de la máquina',
+    )
+    await expect(generar).toBeEnabled()
+
+    const campoMonto = modal.locator(
+      'xpath=.//span[normalize-space(text())="Monto"]/following-sibling::*[1]',
+    )
+    await escribirMonto(campoMonto, '1500')
+    const pedido = page.waitForRequest(
+      r => r.url().includes('/notas-credito') && r.method() === 'POST',
+    )
+    const respuesta = page.waitForResponse(
+      r => r.url().includes('/notas-credito') && r.request().method() === 'POST',
+    )
+    await generar.click()
+    const cuerpo = (await pedido).postDataJSON() as Record<string, unknown>
+    // El pago de la tarjeta (el voucher cubre ese pago), y nada más.
+    expect(cuerpo.devolucion).toEqual({ pagoId: voucher.pagoId })
+    expect(cuerpo).not.toHaveProperty('devolverDinero')
+    const nc = (await (await respuesta).json()) as { id: string, movimientoCajaId: string | null }
+    expect(nc.movimientoCajaId).toBeNull()
+    await expect(page.getByText('Nota de crédito generada').first()).toBeVisible({ timeout: 15_000 })
+
+    // Del lado del servidor: la corrección lleva su propio documento, de la
+    // máquina y sin número, y apunta al voucher (no a la boleta del sistema).
+    const corregida = await api<{
+      esCorreccion: boolean
+      esNotaCredito: boolean
+      documentos: (DocumentoServidor & { documentoCorregidoId: string | null })[]
+    }>(request, 'get', `/ventas/${nc.id}`, { token: escenario.tokenVendedor })
+    expect(corregida.esCorreccion).toBe(true)
+    expect(corregida.esNotaCredito).toBe(true)
+    expect(corregida.documentos).toHaveLength(1)
+    expect(corregida.documentos[0]).toMatchObject({
+      emisor: 'maquina',
+      numero: null,
+      monto: '1500.0000',
+      documentoCorregidoId: voucher.id,
+    })
+
+    // Sin salida de caja: la caja cierra con lo cobrado en efectivo.
+    expect(await cerrarCaja(request, escenario.tokenVendedor!, escenario.cajaId!, EN_EFECTIVO))
+      .toBe('cerrada')
+    escenario.cajaId = undefined
+  }
+  finally {
+    await quitarRol()
+  }
 })

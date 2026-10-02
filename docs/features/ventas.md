@@ -239,8 +239,14 @@ Lo calcula el backend a propósito: el navegador no replica la cuantización del
   pagada/pagada parcial, no tiene `config_calculo` congelada, o el país del tenant no tiene tipo
   de documento NC. Prometer un monto sobre un documento que la emisión rechaza de plano es el
   mismo error que el campo vino a evitar, al revés.
-- ⚠️ Es el tope del **documento**. Con `devolverDinero` hay además un tope del efectivo que **no
+- ⚠️ Es el tope del **documento**. Con un pago en efectivo hay además un tope del efectivo que **no
   se publica**: exponerlo permitía sondear cuánto había en caja con un solo request rechazado.
+- **`opcionesDevolucion`, `esCorreccion` y `esNotaCredito`** (2026-10-02): las opciones de "¿por
+  dónde vuelve la plata?" —una por pago que puede recibir la devolución, y "no vuelve plata" solo
+  con saldo— las calcula el backend con la **misma** resolución que usa la nota al crearse
+  (`VentaDocumentosService.documentoQueCorrige`); una corrección es lo que tiene
+  `venta_referencia_id`, y `esNotaCredito` solo si además lleva el tipo NC (la devolución interna
+  no). Ver [reembolsos-nota-credito.md](reembolsos-nota-credito.md#una-corrección-lleva-su-documento-según-por-dónde-vuelve-la-plata-2026-10-02).
 
 - `motivo` obligatorio, mínimo 10 caracteres: una anulación sin explicación no sirve como
   auditoría. Queda en `ventas.motivo_cancelacion`, junto con `cancelada_el` y

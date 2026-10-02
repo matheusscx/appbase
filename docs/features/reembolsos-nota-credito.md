@@ -84,6 +84,16 @@ Response (200): orden pública + extras
 ### GET /ventas/:id (campos nuevos)
 
 - `ventaReferenciaId`, `tipoDocumento {id, codigo, nombre}`.
+- `esCorreccion` (la venta apunta a otra: una NC **o una devolución interna**) y
+  `esNotaCredito` (corrección **con el tipo NC**: falso en la devolución interna,
+  que lleva el tipo nulo). Los dos salen de `venta_referencia_id`, no del tipo de
+  documento — ver [Una corrección lleva su documento](#una-corrección-lleva-su-documento-según-por-dónde-vuelve-la-plata-2026-10-02).
+- `opcionesDevolucion[]`: "¿por dónde vuelve la plata?", una entrada por pago que
+  puede recibir la devolución y "no vuelve plata" solo si la venta tiene saldo
+  (`{ pagoId | null, sinPlata, metodo, monto, mueveCaja, registro }`). Salen de la
+  **misma resolución** que usa la nota al crearse, así que la pantalla ofrece lo
+  que el servidor acepta y no replica la regla. Vacío en una corrección o en una
+  venta que no admite nota.
 - `detalles[]`: + `itemId`, `modoInventario` (`null` = servicio), `cantidadDevuelta`.
 - `reembolsos[]`: REFUNDs de las órdenes de pasarela vinculadas
   (`{id, monto, estado, fecha, ordenId, codigoOrden}`).
@@ -95,18 +105,20 @@ Response (200): orden pública + extras
 
 ### GET /ventas (listado)
 
-- `totalReembolsado` (Σ REFUND aprobados de órdenes vinculadas) y `esNotaCredito`.
-- `GET /ventas/resumen` **excluye** las NCs de los KPIs.
+- `totalReembolsado` (Σ REFUND aprobados de órdenes vinculadas), `esCorreccion` y
+  `esNotaCredito`.
+- `GET /ventas/resumen` **excluye** las correcciones (NC y devoluciones internas) de los
+  KPIs, por `venta_referencia_id`.
 
 ---
 
 ## Backend
 
-- **Nota de crédito** = venta con `tipo_documento_id` = la fila "Nota de Crédito"
-  **del país del tenant** (`activo: false`, para que no aparezca en el selector
-  del POS), `venta_referencia_id` → venta original, estado `pagada`,
+- **Corrección** = venta con `venta_referencia_id` → venta original, estado `pagada`,
   caja/canal/moneda copiados de la original. **La venta original nunca cambia de
-  estado.**
+  estado.** Su `tipo_documento_id` es la fila "Nota de Crédito" **del país del tenant**
+  (`activo: false`, para que no aparezca en el selector del POS) **salvo en la devolución
+  interna**, que lo lleva nulo. Una corrección **no se corrige** (400).
 - **La NC se compone: tiene líneas, neto e IVA** (2026-09-04). Dejó de ser un
   monto suelto con los totales copiados. Sigue sin pasar por el motor de precios
   —no hay precio que calcular, hay plata que ya se devolvió— pero **todo se
@@ -261,8 +273,10 @@ Response (200): orden pública + extras
 
 `tipos_documento_tributario` lleva **`es_nota_credito`**, y el flujo de reembolso
 resuelve `tenant → provincia → país → la fila marcada de ese país`. Sin ese tipo,
-el reembolso se rechaza con 400: una NC sin marcar dejaría de encontrarse a sí
-misma, porque **el tope de reembolso la busca por ese id**.
+una corrección **con documento** se rechaza con 400 (la devolución interna no lo
+necesita: lleva el tipo nulo). El tipo **ya no sirve para reconocer** una corrección
+—los topes, el listado y los resúmenes miran `venta_referencia_id`—, solo para
+**escribirlo** en la fila de la NC.
 
 **El bug que esto cierra.** Hasta esa fecha el id salía de una constante
 `TIPO_DOCUMENTO_NC_ID` con la fila **chilena código 61**, y se usaba sin mirar el
@@ -278,10 +292,72 @@ países entra cuando abra el frente fiscal de cada uno, que el owner decidió qu
 a ser **progresivo** (2026-09-03). Relevamiento de las cuatro autoridades:
 [`agent/investigaciones/2026-09-03-facturacion-electronica-latam.md`](../agent/investigaciones/2026-09-03-facturacion-electronica-latam.md).
 
-⚠️ **El resumen de KPIs excluye las NC, y ese filtro se cae ENTERO si el país no
-tiene el tipo.** No se compara contra `null`: un `IS DISTINCT FROM NULL` dejaría
-afuera toda venta **sin** tipo de documento —que son la mayoría— y los KPIs darían
-casi cero. Hay un test que lo fija.
+⚠️ **Los resúmenes excluyen las correcciones por `venta_referencia_id IS NULL`**, no por
+el tipo: la devolución interna no lo lleva y, filtrando por tipo, se sumaría como una
+venta más con signo positivo. Sin tipo que comparar tampoco existe el caso "el país no
+lo tiene": el filtro nunca se cae (el hueco que tenía el `IS DISTINCT FROM NULL`, que
+dejaba afuera toda venta sin tipo, desapareció con él). Lo fijan `test/venta-correcciones.e2e-spec.ts`
+y el spec de `VentasService.resumen`.
+
+## Una corrección lleva su documento, según por dónde vuelve la plata (2026-10-02)
+
+Spec `emision-por-venta` § 3.6, [ADR-028](../adr/028-emision-registrada-por-venta.md). Una
+corrección sigue siendo una fila de `ventas` compuesta como siempre; lo nuevo es **su
+documento** (`venta_documentos`), que sale de **qué documento corrige**, y eso lo decide el
+usuario diciendo **por dónde vuelve la plata**: uno de los pagos de la venta, o "no vuelve
+plata". El cliente nunca manda el documento ni quién emitió.
+
+| El documento corregido lo emitió… | La corrección lleva | `tipo_documento_id` de la fila |
+|---|---|---|
+| el sistema | NC `sistema` / `armado`, con baldes de **sus propias líneas** | el tipo NC del país |
+| la máquina | NC `maquina` sin número (la hace la máquina y el sistema la anota) | el tipo NC |
+| otro facturador | NC `externo` sin número, con baldes | el tipo NC |
+| nadie | **devolución interna**: fila `nadie` | **nulo** |
+
+**Qué documento corrige cada vía** (`VentaDocumentosService.documentoQueCorrige`, una sola
+resolución que comparten la creación de la nota y las `opcionesDevolucion` del detalle):
+
+- **Un pago** (`devolucion: { pagoId }`): el documento al que **ese pago está enlazado**
+  (`pagos.documento_id`, que tiene que ser de **esa venta y de ese tenant**: un `pagoId` ajeno o
+  inexistente es el mismo 400). Se escribe en la misma transacción que el pago: al cobrar, el pago
+  de la máquina lleva su voucher, los del `sistema` la boleta (o la factura), los de `nadie` la fila
+  nadie, y en una factura u online todos el único documento; al abonar, **el pago del abono lleva
+  el documento de la deuda** (el hecho por fuera si lo hay, si no la boleta del sistema o la
+  factura), **nunca** el voucher duplicado (E1b). Se **enlaza y no se infiere** porque el emisor de
+  un medio puede cambiar entre la venta y el reembolso: el reembolso sigue corrigiendo el documento
+  que de verdad cubrió ese pago. Un pago sin enlace en una venta con documentos (el que fue todo
+  propina, o una venta anterior a este enlace) no se adivina: 400.
+- **"No vuelve plata"** (`devolucion: { sinPlata: true }`): solo con saldo (400 si no), y corrige
+  el documento de lo **no pagado**: la boleta del sistema, el hecho por fuera o la factura.
+  Nunca una devolución interna. **No pasa del saldo** que la venta todavía debe: total − lo
+  aplicado − **lo ya rebajado sin plata por correcciones anteriores** (`ventas.devolucion_via =
+  'sin_plata'`), bajo el mismo lock. Es una **serie**: con abonos el saldo puede ser menor que
+  el documento de lo debido, y sin restar lo rebajado dos notas "sin plata" rebajarían 60.000
+  sobre una deuda de 40.000. Las notas que volvieron por un pago (o por la pasarela) no lo
+  tocan: devolvieron plata por fuera y la deuda sigue igual. El 400 no dice ningún monto. Un solo
+  cálculo (`corregibles`) decide el tope y si el modal la ofrece. Cada corrección deja anotado
+  por dónde volvió la plata (`devolucion_via`, `devolucion_pago_id`), que además es la auditoría
+  de ese dato.
+- **Si el pago es en efectivo** (`metodos_pago.es_efectivo`) la plata sale de la caja física,
+  con sus dos topes de siempre; **si no**, no se mueve caja (la reversa se hace en la máquina o
+  en el banco). Es por **pago** y no por "efectivo": hay máquinas que emiten también el
+  efectivo, y una venta puede tener dos pagos en efectivo. La vía `pasarela` (el reembolso de
+  una orden) **nunca** mueve caja y **nunca rechaza**: la plata ya volvió por el proveedor y un
+  hecho consumado se registra. No mira los pagos de la venta (`CobrosService.vincularVenta` liga
+  una orden a cualquier venta): corrige el **único documento válido** de la venta (vigente y no
+  duplicado); con ninguno, o con más de uno (inalcanzable hoy: online y factura son un solo
+  documento, y queda un `warn` con la venta y la orden), la corrección sale sin fila de
+  documento, con el tipo NC, como siempre. Una orden ligada a una corrección sí falla (no se
+  corrige una corrección) y la pasarela lo devuelve como `warning`. Una venta que **nunca tuvo documentos** (país sin boleta) se corrige como siempre,
+  con el tipo NC y sin fila de documento.
+
+**Los topes.** Los dos de hoy (el total de la venta y el efectivo) más **uno por documento**: lo
+corregido de un documento no pasa su `monto`, bajo el mismo lock. Todos cuentan **toda corrección**
+(`venta_referencia_id`), la devolución interna incluida: la que sacó efectivo cuenta en el tope
+del efectivo, y la que acreditó una porción fiscal cuenta en la composición por porción. El
+mensaje del tope por documento no interpola ningún número (la fuga 5 del modo ciego sigue
+cerrada). `exigirTipoNotaCredito` ya no corre al abrir la transacción: solo si la corrección
+lleva el tipo.
 
 ## Redondeo: la NC hereda el criterio del documento que corrige (2026-08-21)
 
@@ -340,17 +416,25 @@ Dónde vive: `VentasReembolsoHandler.cuantizarMontoReembolso`
   reponer, la que no puede pierde la cantidad—: ese `false` quedaba invisible
   porque el switch desaparece del DOM, y su 400 llega **después** del commit del
   reembolso.
-- `ventas/VentaDetalleDrawer.vue`: badges "Nota de Crédito" y
-  "Reembolsada parcial/totalmente" (derivados); cards "Reembolsos" y
+- `ventas/VentaDetalleDrawer.vue`: badges "Nota de Crédito" / "Devolución interna" (según
+  `esNotaCredito`, dentro de `esCorreccion`) y "Reembolsada parcial/totalmente" (derivados); cards "Reembolsos" y
   "Documentos relacionados" (links venta original ↔ NCs vía `/ventas?venta=<id>`).
-  **Sobre una nota de crédito** (2026-09-04): el rótulo de la tabla dice "Líneas
-  de la nota" y cada línea muestra su **porción fiscal** (`afecto` / `exento`) en
+  **Sobre una corrección** (2026-09-04; `esCorreccion` desde 2026-10-02: una devolución
+  interna no lleva el tipo NC y antes se pintaba como una venta): el rótulo de la tabla dice
+  "Líneas de la nota" y cada línea muestra su **porción fiscal** (`afecto` / `exento`) en
   un badge. No es cosmética: las dos líneas de ajuste llevan la misma glosa —la
   que escribió el operador— y sin la porción el documento muestra dos filas
   idénticas con importes distintos. El resto del drawer ya servía sin tocarlo:
   la tabla de líneas con sus reglas congeladas y la fila "Impuestos" de los
   totales existían desde antes.
-- `ventas/NotaCreditoModal.vue` (2026-09-04; umbral exacto 2026-09-14): muestra el
+- `ventas/NotaCreditoModal.vue` (2026-09-04; umbral exacto 2026-09-14; **"¿Por dónde vuelve la
+  plata?" 2026-10-02**): la casilla "devolver dinero" se reemplazó por un selector con una opción
+  por pago (*"Efectivo · $60.000"*, *"Tarjeta de débito · $40.000"*) y "No vuelve plata" solo
+  si el backend la mandó (hay saldo), todo de `opcionesDevolucion`. Con varias opciones no viene
+  ninguna elegida (un default movería plata de la caja sin decisión); con una sola, sí. Debajo,
+  en una línea, **qué registro va a quedar** (`registro` del backend: nota de crédito del
+  sistema, de la máquina, hecha por fuera o devolución interna). La opción en efectivo no se
+  puede elegir sin caja física abierta. El body lleva `devolucion`, nunca el documento. Además muestra el
   **disponible por porción fiscal** debajo del total —solo si hay más de una: en
   una venta toda afecta repetir el total es ruido—, un **switch de reponer por
   fila** (deshabilitado con su nota en lo que no puede volver al stock) y **pide
@@ -370,8 +454,8 @@ Dónde vive: `VentasReembolsoHandler.cuantizarMontoReembolso`
   este modal fija `validarVentaElegible: true`, y con eso el backend rechaza
   cualquier nota manual sobre esa venta antes de llegar a valuar algo. Cierre
   medido en `docs/agent/resueltos.md`.
-- `pages/ventas/index.vue`: badges "NC" / "Reemb. parcial" / "Reembolsada" junto
-  al estado.
+- `pages/ventas/index.vue`: badges "NC" / "Dev. interna" (por `esCorreccion`/`esNotaCredito`)
+  / "Reemb. parcial" / "Reembolsada" junto al estado.
 
 ## NC manual desde el detalle de venta (2026-07-11)
 
@@ -379,19 +463,22 @@ Dónde vive: `VentasReembolsoHandler.cuantizarMontoReembolso`
 POST /api/ventas/:id/notas-credito
 Authorization: Bearer <JWT>   (permiso dedicado Ventas:Nota de crédito)
 
-Request:  { "monto": "5000", "comentario": "...", "devolverDinero": true,
+Request:  { "monto": "5000", "comentario": "...",
+            "devolucion": { "pagoId": "uuid" } | { "sinPlata": true },   // obligatoria, exactamente una
             "devoluciones": [{ "itemId": "uuid", "cantidad": "1" }] }
 Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
                 "movimientoCajaId": "<uuid>" | null }
 ```
 
 - Elegibilidad: venta `pagada`/`pagada_parcial` de cualquier canal, nunca sobre
-  otra NC. La venta original no cambia de estado.
-- `devolverDinero`: movimiento `salida` ("Devolución · Nota de crédito") en la
+  otra corrección (`venta_referencia_id`). La venta original no cambia de estado.
+- `devolucion` dice por dónde vuelve la plata (ver la sección de arriba): de ahí sale el
+  documento que corrige. Un body con `devolverDinero` (la casilla de antes) es 400.
+  Con un **pago en efectivo**: movimiento `salida` ("Devolución · Nota de crédito") en la
   caja física abierta del usuario, en la **misma transacción** que la NC
   (todo-o-nada; valida saldo suficiente). Sin caja o sin saldo → 422.
 - **Tope de la devolución en efectivo (2026-07-27):** `Σ(pagos en efectivo aplicados
-  a la venta) − Σ(ya devuelto en efectivo por NCs anteriores)`. El saldo global de la
+  a la venta) − Σ(ya devuelto en efectivo por correcciones anteriores)`. El saldo global de la
   caja no alcanza como control: viene de otras ventas, así que sin este tope se puede
   sacar plata que esta venta nunca ingresó, y dar billetes por una compra con tarjeta.
   Excederlo → 422.
@@ -403,11 +490,13 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
   operación es tema abierto:
   `docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md` §6.
 - Backend: `VentasService.crearNotaCreditoDesdeVenta` → `crearNotaCredito` con
-  flags `validarVentaElegible`/`devolverDinero`; el flujo de reembolsos de
-  pasarela llama sin flags y no cambia.
+  `validarVentaElegible` y `via` (`{ tipo: 'pago', pagoId }` | `{ tipo: 'sin_plata' }`); el
+  flujo de reembolsos de pasarela llama con `via: { tipo: 'pasarela', documentoId }` (ver
+  `viaDeReembolsoPasarela`, que nunca lanza) y no mueve caja.
 - Frontend: botón "Nota de crédito" en `VentaDetalleDrawer` +
-  `ventas/NotaCreditoModal.vue` (checkbox de dinero deshabilitado sin caja
-  abierta — `GET /caja/activa`; devolución de stock igual al `ReembolsoModal`).
+  `ventas/NotaCreditoModal.vue` (opciones de `opcionesDevolucion`; la de efectivo se
+  deshabilita sin caja abierta — `GET /caja/activa`; devolución de stock igual al
+  `ReembolsoModal`).
 - La lógica de devolución a inventario compartida entre `NotaCreditoModal` y
   `ReembolsoModal` vive en `composables/useDevolucionInventario.ts` (helpers
   puros con spec Vitest: agrupación por ítem, validación, payload) + el
@@ -416,6 +505,12 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
 
 ## Testing
 
+- `venta-correcciones.e2e-spec.ts` (2026-10-02): el documento de cada vía —el pago en
+  efectivo y el de tarjeta de un pago mixto, "no vuelve plata" sobre la mesa que debe, el pago
+  de un abono con tarjeta, la factura, el efectivo emitido por la máquina—, la devolución interna
+  (tipo nulo, cuenta en los tres topes, no suma a `/ventas/resumen` ni al dashboard), el tope por
+  documento, `opcionesDevolucion` y que cada opción crea la nota que anunció, y los 400 del
+  `devolucion` mal formado o con un `pagoId` ajeno.
 - `ventas.service.spec.ts`: crearNotaCredito (composición por monto libre y con
   devoluciones, validaciones de monto/cantidades/modo/tenant, la original no se
   toca), devoluciones sin NC, findOne/listar/resumen con los campos nuevos.

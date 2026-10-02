@@ -1767,6 +1767,12 @@ CREATE TABLE "ventas" (
   "base_ventas_total_final"   NUMERIC(18,4) NOT NULL DEFAULT 0,
   "base_ventas_sin_impuestos" NUMERIC(18,4) NOT NULL DEFAULT 0,
   "venta_referencia_id"   UUID          REFERENCES "ventas" ("venta_id"),  -- para notas de crédito
+  -- En una corrección: por dónde volvió la plata ('pago' por uno de los pagos de la
+  -- venta, 'sin_plata' rebajando lo que se debía, 'pasarela' el reembolso de una
+  -- orden). NULL en lo que no es corrección. Es la auditoría de ese dato y lo que
+  -- hace de "no vuelve plata" una serie: lo ya rebajado baja el saldo por rebajar.
+  "devolucion_via"        TEXT,
+  "devolucion_pago_id"    UUID,          -- con 'pago': el pago por el que volvió
   "comentario"            TEXT,
   -- Config financiera del tenant con la que se calculó: formula, calculoDescuentos,
   -- calculoRecargos, escalaCalculo, modoRedondeo. Sin ella el congelado de las
@@ -1779,7 +1785,8 @@ CREATE TABLE "ventas" (
   "motivo_cancelacion"        TEXT,
   "creado_el"             TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"        TIMESTAMPTZ,
-  "eliminado_el"          TIMESTAMPTZ
+  "eliminado_el"          TIMESTAMPTZ,
+  CONSTRAINT chk_ventas_devolucion_via CHECK ("devolucion_via" IN ('pago','sin_plata','pasarela'))
 );
 
 -- Las notas de crédito de una venta: se busca en cada lectura del detalle.
@@ -1927,12 +1934,20 @@ CREATE TABLE "pagos" (
   "numero_cuotas"     INT,
   "tipo_pago"         VARCHAR,       -- payment_type_code Transbank: VD/VN/VC/SI/S2/NC/VP
   "tarjeta_ultimos4"  VARCHAR(4),
+  -- El documento que cubre este pago ("venta_documentos"; sin FK declarada, como
+  -- la entity, porque esa tabla se define más abajo). Se ENLAZA en la misma
+  -- transacción que el pago —al cobrar, su voucher o la boleta/factura/fila
+  -- "nadie" del cierre; al abonar, el documento de la deuda, nunca el voucher
+  -- duplicado— y NO se infiere: el emisor de un medio puede cambiar entre la venta
+  -- y el reembolso. NULL si la venta no tiene documentos o el pago no cubrió nada.
+  "documento_id"      UUID,
   "creado_el"         TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"    TIMESTAMPTZ,
   "eliminado_el"      TIMESTAMPTZ
 );
 
 CREATE INDEX "idx_pagos_venta" ON "pagos" ("venta_id");
+CREATE INDEX "idx_pagos_documento" ON "pagos" ("documento_id");
 
 -- Split tipado venta/propina por pago (extensible a otros conceptos).
 CREATE TABLE "pago_aplicaciones" (

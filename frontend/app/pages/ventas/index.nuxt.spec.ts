@@ -16,6 +16,8 @@ import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import VentasIndex from './index.vue'
 
 const llamadas: string[] = []
+/** Las filas que devuelve `GET /ventas` (el listado). Se pisa en el caso que las necesita. */
+let filasListado: unknown[] = []
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
@@ -29,7 +31,10 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.reject({ data: { message: 'No tienes permiso para esta acción' } })
     }
     if (url.includes('/ventas')) {
-      return Promise.resolve({ data: [], meta: { page: 1, pageSize: 15, total: 0, totalPages: 0 } })
+      return Promise.resolve({
+        data: filasListado,
+        meta: { page: 1, pageSize: 15, total: filasListado.length, totalPages: 1 },
+      })
     }
     return Promise.resolve([])
   }
@@ -67,6 +72,7 @@ async function montar() {
 
 beforeEach(() => {
   llamadas.length = 0
+  filasListado = []
   document.body.innerHTML = ''
 })
 
@@ -79,5 +85,42 @@ describe('ventas/index — carga la caja activa al montar', () => {
   it('un 403 de /caja/activa (rol sin MiCaja:Leer) no rompe el resto del montaje', async () => {
     const wrapper = await montar()
     expect(wrapper.text()).toContain('Ventas registradas')
+  })
+})
+
+describe('ventas/index — el badge de corrección sale del flag del backend', () => {
+  const fila = (id: string, extra: Record<string, unknown>) => ({
+    id,
+    canal: 'fisico',
+    estado: 'pagada',
+    totalFinal: '10000.0000',
+    montoPagado: '10000.0000',
+    saldo: '0.0000',
+    fecha: '2026-10-02T12:00:00.000Z',
+    creadoEl: '2026-10-02T12:00:00.000Z',
+    totalReembolsado: '0.0000',
+    esCorreccion: false,
+    esNotaCredito: false,
+    ...extra,
+  })
+
+  it('una nota de crédito dice "NC" y una devolución interna "Dev. interna": las dos son correcciones, una venta no lleva ninguno', async () => {
+    filasListado = [
+      fila('venta', {}),
+      fila('nota', { esCorreccion: true, esNotaCredito: true }),
+      fila('interna', { esCorreccion: true, esNotaCredito: false }),
+    ]
+
+    const wrapper = await montar()
+    const filas = wrapper.findAll('tbody tr').map(tr => tr.text())
+
+    expect(filas).toHaveLength(3)
+    const [venta, nota, interna] = filas
+    expect(venta).not.toContain('NC')
+    expect(venta).not.toContain('Dev. interna')
+    expect(nota).toContain('NC')
+    expect(nota).not.toContain('Dev. interna')
+    expect(interna).toContain('Dev. interna')
+    expect(interna).not.toContain('NC')
   })
 })

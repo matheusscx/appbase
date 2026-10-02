@@ -17,6 +17,7 @@ import {
   type ClaseDocumentoMaquina,
   type DocumentoVenta,
   type EmisorMedio,
+  type OpcionDevolucion,
 } from '~/composables/useDocumentosVenta'
 
 interface PagoAplicacion {
@@ -145,8 +146,20 @@ interface VentaDetalle {
    */
   tieneLineasDespachadas: boolean
   tipoDocumento: { id: string, codigo: string | null, nombre: string | null, esBoleta: boolean } | null
-  /** Lo calcula el backend contra el id del tipo de documento, no contra `codigo`. */
+  /**
+   * Es una corrección: apunta a la venta que corrige (`venta_referencia_id`). Lo
+   * calcula el backend; es lo que decide el rótulo, las líneas y si se ofrece
+   * otra nota. Una devolución interna lo es sin ser una nota de crédito.
+   */
+  esCorreccion: boolean
+  /** Corrección que lleva el tipo NC: falso en la devolución interna (tipo nulo). */
   esNotaCredito: boolean
+  /**
+   * "¿Por dónde vuelve la plata?", del backend: una opción por pago que puede
+   * recibir la devolución, y "No vuelve plata" solo si la venta tiene saldo.
+   * Salen de la misma resolución que usa la nota al crearse.
+   */
+  opcionesDevolucion: OpcionDevolucion[]
   reembolsos: Reembolso[]
   notasCredito: NotaCredito[]
   /**
@@ -275,8 +288,10 @@ const puedeAbonar = computed(() =>
   !!venta.value && ['pendiente', 'pagada_parcial'].includes(venta.value.estado),
 )
 
-// Del backend: `codigo` es nullable y varía por país, así que reconstruirlo acá
-// daba un resultado distinto al del listado sobre la misma venta.
+// Del backend: una corrección es lo que apunta a la venta que corrige. No se
+// reconstruye comparando el tipo de documento: la devolución interna no lo lleva
+// y se pintaría como una venta.
+const esCorreccion = computed(() => venta.value?.esCorreccion === true)
 const esNotaCredito = computed(() => venta.value?.esNotaCredito === true)
 
 // Máximo emitible: lo dice el BACKEND (`disponibleNotaCredito.total`), que es
@@ -290,7 +305,7 @@ const disponibleNC = computed(() =>
 const puedeCrearNC = computed(() =>
   !!venta.value
   && ['pagada', 'pagada_parcial'].includes(venta.value.estado)
-  && !esNotaCredito.value
+  && !esCorreccion.value
   && new Decimal(disponibleNC.value).gt(0)
   && permissionsStore.can('Ventas', 'Nota de crédito'),
 )
@@ -628,7 +643,7 @@ const filasDetalle = computed<FilaDetalle[]>(() => {
       signo: '',
       recorte: null,
       sinEfecto: false,
-      clasificacion: esNotaCredito.value ? d.clasificacionTributaria : null,
+      clasificacion: esCorreccion.value ? d.clasificacionTributaria : null,
     }
     // Sin reglas no hay nada que expandir: el neto ya es el total.
     if (!reglas.length || !expandidas.value.has(d.id)) return [linea]
@@ -941,9 +956,9 @@ function onNcSuccess(payload: {
           size="xs"
         />
         <UBadge
-          v-if="esNotaCredito"
+          v-if="esCorreccion"
           color="info"
-          label="Nota de Crédito"
+          :label="esNotaCredito ? 'Nota de Crédito' : 'Devolución interna'"
           variant="subtle"
           size="xs"
         />
@@ -1003,7 +1018,7 @@ function onNcSuccess(payload: {
           <template #header>
             <div class="flex flex-wrap items-center justify-between gap-2">
               <h2 class="text-base font-semibold">
-                {{ esNotaCredito ? 'Líneas de la nota' : 'Líneas de venta' }}
+                {{ esCorreccion ? 'Líneas de la nota' : 'Líneas de venta' }}
               </h2>
               <span v-if="filasDetalle.some(f => f.tipoFila === 'regla')" class="text-xs text-muted">
                 Reglas del momento del cobro · orden: {{ ordenPasos.join(' → ') }}
@@ -1507,6 +1522,7 @@ function onNcSuccess(payload: {
     :por-porcion="venta.disponibleNotaCredito.porPorcion"
     :detalles="venta.detalles"
     :config-calculo="venta.configCalculo"
+    :opciones="venta.opcionesDevolucion"
     @success="onNcSuccess"
   />
 </template>

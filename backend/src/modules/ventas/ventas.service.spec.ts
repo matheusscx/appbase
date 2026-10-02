@@ -245,6 +245,10 @@ describe('VentasService', () => {
     evaluarAnulacion: jest.Mock;
     ventaDocumentada: jest.Mock;
     completarNumero: jest.Mock;
+    documentoQueCorrige: jest.Mock;
+    exigirTopeDelDocumento: jest.Mock;
+    documentarCorreccion: jest.Mock;
+    opcionesDevolucion: jest.Mock;
   };
   let ventaPropinaServiceMock: { crearEnTransaccion: jest.Mock };
   let garzonesServiceMock: {
@@ -285,6 +289,26 @@ describe('VentasService', () => {
         .mockResolvedValue({ resultado: 'anulable', descartes: [] }),
       ventaDocumentada: jest.fn().mockResolvedValue(false),
       completarNumero: jest.fn(),
+      // Por defecto la nota corrige la boleta del sistema y no mueve caja: los
+      // casos que prueban otra cosa lo pisan.
+      documentoQueCorrige: jest.fn().mockResolvedValue({
+        documento: { id: 'doc-boleta', emisor: 'sistema', monto: '11305.0000' },
+        saldo: null,
+        mueveCaja: false,
+      }),
+      exigirTopeDelDocumento: jest.fn().mockResolvedValue(undefined),
+      documentarCorreccion: jest.fn().mockResolvedValue({ id: 'doc-nc' }),
+      // Una opción: lo mínimo para que el detalle ofrezca acreditar.
+      opcionesDevolucion: jest.fn().mockResolvedValue([
+        {
+          pagoId: 'pago-1',
+          sinPlata: false,
+          metodo: 'Efectivo',
+          monto: '11305.0000',
+          mueveCaja: true,
+          registro: 'nota_credito_sistema',
+        },
+      ]),
     };
     ventaPropinaServiceMock = {
       crearEnTransaccion: jest.fn().mockResolvedValue({
@@ -2453,6 +2477,7 @@ describe('VentasService', () => {
       total_final: '11305.0000',
       estado: 'pagada',
       tipo_documento_id: 'tipo-doc-boleta-uuid',
+      venta_referencia_id: null,
       config_calculo: {
         formula: ['descuentos', 'recargos', 'impuestos'],
         calculoDescuentos: 'base',
@@ -2576,13 +2601,22 @@ describe('VentasService', () => {
       );
     });
 
+    const VIA_PAGO = { tipo: 'pago' as const, pagoId: 'pago-1' };
     const baseParams = {
       tenantId: TENANT_ID,
       usuarioId: USUARIO_ID,
       ventaOriginalId: VENTA_ORIG_ID,
       monto: '1100.0000',
       comentario: 'NC por reembolso orden O-1',
+      via: VIA_PAGO,
     };
+    /** El pago elegido es en efectivo: la plata sale de la caja. */
+    const conSalidaDeCaja = () =>
+      ventaDocumentosMock.documentoQueCorrige.mockResolvedValue({
+        documento: { id: 'doc-boleta', emisor: 'sistema', monto: '11305.0000' },
+        saldo: null,
+        mueveCaja: true,
+      });
 
     it('la NC se marca con el tipo de documento DEL PAÍS del tenant, no con una constante', async () => {
       // El bug que esto cierra: hasta el 2026-09-03 el tipo salía de una
@@ -2616,6 +2650,260 @@ describe('VentasService', () => {
         BadRequestException,
       );
       expect(ncManager.save).not.toHaveBeenCalled();
+    });
+
+    it('le pide el documento a corregir al servicio de documentos con el tenant del token, la venta y la vía elegida', async () => {
+      await service.crearNotaCredito(baseParams);
+
+      expect(ventaDocumentosMock.documentoQueCorrige).toHaveBeenCalledWith(
+        ncManager,
+        { tenantId: TENANT_ID, ventaId: VENTA_ORIG_ID, via: VIA_PAGO },
+      );
+    });
+
+    it('un pago rechazado por el servicio de documentos (de otra venta, sin saldo) corta antes de escribir nada', async () => {
+      ventaDocumentosMock.documentoQueCorrige.mockRejectedValueOnce(
+        new BadRequestException('El pago indicado no es de esta venta.'),
+      );
+
+      await expect(service.crearNotaCredito(baseParams)).rejects.toThrow(
+        'El pago indicado no es de esta venta.',
+      );
+      expect(ncManager.save).not.toHaveBeenCalled();
+      expect(ventaDocumentosMock.documentarCorreccion).not.toHaveBeenCalled();
+    });
+
+    it('el documento de la corrección se escribe DESPUÉS de sus líneas, con el tipo NC y el documento corregido', async () => {
+      await service.crearNotaCredito(baseParams);
+
+      expect(ventaDocumentosMock.documentarCorreccion).toHaveBeenCalledTimes(1);
+      expect(ventaDocumentosMock.documentarCorreccion).toHaveBeenCalledWith(
+        ncManager,
+        {
+          tenantId: TENANT_ID,
+          correccionVentaId: expect.any(String) as string,
+          corregido: {
+            id: 'doc-boleta',
+            emisor: 'sistema',
+            monto: '11305.0000',
+          },
+          monto: '1100.0000',
+          tipoNotaCreditoId: TIPO_DOCUMENTO_NC_ID,
+        },
+      );
+      // Sus baldes salen de las líneas de la corrección: tienen que existir ya.
+      const iLineas = ncManager.save.mock.calls.findIndex(
+        (c: unknown[]) => c[0] === VentaDetalle,
+      );
+      expect(iLineas).toBeGreaterThanOrEqual(0);
+      expect(
+        ventaDocumentosMock.documentarCorreccion.mock.invocationCallOrder[0],
+      ).toBeGreaterThan(ncManager.save.mock.invocationCallOrder[iLineas]);
+    });
+
+    it('el tope por documento corre bajo el mismo lock, con el documento y el monto de la nota', async () => {
+      await service.crearNotaCredito(baseParams);
+
+      expect(ventaDocumentosMock.exigirTopeDelDocumento).toHaveBeenCalledWith(
+        ncManager,
+        {
+          tenantId: TENANT_ID,
+          documento: {
+            id: 'doc-boleta',
+            emisor: 'sistema',
+            monto: '11305.0000',
+          },
+          monto: '1100.0000',
+        },
+      );
+    });
+
+    it('si el documento ya no admite ese monto, la nota no se escribe', async () => {
+      ventaDocumentosMock.exigirTopeDelDocumento.mockRejectedValueOnce(
+        new BadRequestException('El monto excede lo que queda por corregir'),
+      );
+
+      await expect(service.crearNotaCredito(baseParams)).rejects.toThrow(
+        'El monto excede lo que queda por corregir',
+      );
+      expect(ncManager.save).not.toHaveBeenCalled();
+    });
+
+    describe('la corrección registra por dónde volvió la plata', () => {
+      const guardada = () =>
+        ncManager.save.mock.calls
+          .map((c: unknown[]) => c[1] as Record<string, unknown>)
+          .find((d) => d['ventaReferenciaId'] === VENTA_ORIG_ID)!;
+
+      it('por un pago: la vía y el pago', async () => {
+        await service.crearNotaCredito(baseParams);
+
+        expect(guardada()).toMatchObject({
+          devolucionVia: 'pago',
+          devolucionPagoId: 'pago-1',
+        });
+      });
+
+      it('sin plata: la vía y ningún pago', async () => {
+        ventaDocumentosMock.documentoQueCorrige.mockResolvedValue({
+          documento: {
+            id: 'doc-deuda',
+            emisor: 'sistema',
+            monto: '11305.0000',
+          },
+          saldo: '5000.0000',
+          mueveCaja: false,
+        });
+
+        await service.crearNotaCredito({
+          ...baseParams,
+          via: { tipo: 'sin_plata' },
+        });
+
+        expect(guardada()).toMatchObject({
+          devolucionVia: 'sin_plata',
+          devolucionPagoId: null,
+        });
+      });
+
+      it('por la pasarela: la vía y ningún pago', async () => {
+        await service.crearNotaCredito({
+          ...baseParams,
+          via: { tipo: 'pasarela', documentoId: null },
+        });
+
+        expect(guardada()).toMatchObject({
+          devolucionVia: 'pasarela',
+          devolucionPagoId: null,
+        });
+      });
+    });
+
+    describe('"no vuelve plata" no pasa de lo que la venta todavía debe', () => {
+      const SIN_PLATA = { tipo: 'sin_plata' as const };
+      const conSaldo = (saldo: string) =>
+        ventaDocumentosMock.documentoQueCorrige.mockResolvedValue({
+          // El documento de la deuda es MAYOR que el saldo: hubo abonos. Solo el
+          // tope del saldo lo ve.
+          documento: {
+            id: 'doc-deuda',
+            emisor: 'sistema',
+            monto: '11305.0000',
+          },
+          saldo,
+          mueveCaja: false,
+        });
+
+      it('un monto por encima del saldo es un 400 corto que no dice ningún número, y no escribe nada', async () => {
+        conSaldo('1000.0000');
+
+        const error = (await service
+          .crearNotaCredito({
+            ...baseParams,
+            via: SIN_PLATA,
+            monto: '1000.0001',
+          })
+          .catch((e: Error) => e)) as BadRequestException;
+
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect(error.message).toMatch(/todavía debe/);
+        expect(error.message).not.toMatch(/\d/);
+        expect(ncManager.save).not.toHaveBeenCalled();
+        expect(ventaDocumentosMock.documentarCorreccion).not.toHaveBeenCalled();
+      });
+
+      it('un monto igual al saldo pasa', async () => {
+        conSaldo('1000.0000');
+
+        const res = await service.crearNotaCredito({
+          ...baseParams,
+          via: SIN_PLATA,
+          monto: '1000.0000',
+        });
+
+        expect(res.totalFinal).toBe('1000.0000');
+      });
+
+      it('con un pago el saldo no cuenta (viene nulo): la venta paga entera igual se corrige', async () => {
+        // Es el caso de siempre: `saldo: null` y un monto que nada tiene que ver con la deuda.
+        const res = await service.crearNotaCredito(baseParams);
+
+        expect(res.totalFinal).toBe('1100.0000');
+      });
+    });
+
+    describe('la devolución interna (el documento corregido es de "nadie")', () => {
+      beforeEach(() => {
+        ventaDocumentosMock.documentoQueCorrige.mockResolvedValue({
+          documento: { id: 'doc-nadie', emisor: 'nadie', monto: '11305.0000' },
+          saldo: null,
+          mueveCaja: false,
+        });
+      });
+
+      it('la fila de la corrección lleva el tipo nulo', async () => {
+        await service.crearNotaCredito(baseParams);
+
+        expect(ncManager.save).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            tipoDocumentoId: null,
+            ventaReferenciaId: VENTA_ORIG_ID,
+            estado: EstadoVenta.PAGADA,
+          }),
+        );
+        expect(ventaDocumentosMock.documentarCorreccion).toHaveBeenCalledWith(
+          ncManager,
+          expect.objectContaining({
+            corregido: expect.objectContaining({ emisor: 'nadie' }) as unknown,
+            tipoNotaCreditoId: null,
+          }),
+        );
+      });
+
+      it('un país sin nota de crédito sembrada no la frena (no necesita el tipo)', async () => {
+        dataSourceMock.query.mockImplementation((sql: string) =>
+          sql.includes('es_nota_credito')
+            ? Promise.resolve([])
+            : Promise.resolve(MONEDA_ROWS),
+        );
+
+        const res = await service.crearNotaCredito(baseParams);
+
+        expect(res.id).toBeDefined();
+        expect(ncManager.save).toHaveBeenCalled();
+      });
+    });
+
+    it('sin documentos que corregir (país sin boleta) la nota se emite como siempre: con el tipo NC y sin fila de documento', async () => {
+      ventaDocumentosMock.documentoQueCorrige.mockResolvedValue({
+        documento: null,
+        saldo: null,
+        mueveCaja: false,
+      });
+
+      await service.crearNotaCredito(baseParams);
+
+      expect(ncManager.save).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ tipoDocumentoId: TIPO_DOCUMENTO_NC_ID }),
+      );
+      expect(ventaDocumentosMock.exigirTopeDelDocumento).not.toHaveBeenCalled();
+      expect(ventaDocumentosMock.documentarCorreccion).not.toHaveBeenCalled();
+    });
+
+    it('el tope de la venta cuenta toda corrección (venta_referencia_id), sin mirar el tipo de documento', async () => {
+      await service.crearNotaCredito(baseParams);
+
+      const sqls = ncManager.query.mock.calls.map((c: unknown[]) =>
+        String(c[0]),
+      );
+      const previas = sqls.find((q) => q.includes('SUM(total_final)'))!;
+      const composicion = sqls.find((q) => q.includes('AS es_nc'))!;
+      expect(previas).toContain('venta_referencia_id = $1');
+      expect(previas).not.toContain('tipo_documento_id');
+      expect(composicion).toContain('venta_referencia_id = $1');
+      expect(composicion).not.toContain('tipo_documento_id');
     });
 
     it('NC por monto libre: sin devoluciones igual tiene líneas, una por porción fiscal del remanente', async () => {
@@ -3018,6 +3306,111 @@ describe('VentasService', () => {
       });
     });
 
+    describe('findOne: opcionesDevolucion y elegibilidad', () => {
+      const filaVenta = (extra: Record<string, unknown> = {}) => ({
+        venta_id: VENTA_ORIG_ID,
+        caja_id: CAJA_VIRTUAL_ID,
+        moneda_id: MONEDA_OFICIAL_ID,
+        tipo_documento_id: 'doc-boleta',
+        canal: 'fisico',
+        estado: 'pagada',
+        total_bruto: '100.0000',
+        total_descuentos: '0',
+        total_recargos: '0',
+        total_impuestos: '0',
+        total_final: '100.0000',
+        config_calculo: { decimalesMoneda: 4 },
+        comentario: null,
+        fecha: new Date('2026-07-10'),
+        creado_el: new Date('2026-07-10'),
+        venta_referencia_id: null,
+        tipo_documento_codigo: '39',
+        tipo_documento_nombre: 'Boleta',
+        tipo_documento_es_boleta: true,
+        ...extra,
+      });
+      const responder = (
+        venta: Record<string, unknown>,
+        tipoNc: string | null,
+      ) =>
+        dataSourceMock.query.mockImplementation((sql: string) => {
+          if (sql.includes('es_nota_credito'))
+            return Promise.resolve(
+              tipoNc ? [{ tipo_documento_id: tipoNc }] : [],
+            );
+          if (sql.includes('AS clasificacion'))
+            return Promise.resolve([
+              { clasificacion: 'afecto', monto: '100.0000' },
+            ]);
+          if (sql.includes('venta_referencia_id = $1'))
+            return Promise.resolve([]);
+          if (sql.includes('FROM ventas')) return Promise.resolve([venta]);
+          return Promise.resolve([]);
+        });
+      const opcion = (registro: string, pagoId: string) => ({
+        pagoId,
+        sinPlata: false,
+        metodo: 'Medio',
+        monto: '50.0000',
+        mueveCaja: false,
+        registro,
+      });
+
+      it('sin el tipo NC del país solo ofrece lo que no lo lleva (la devolución interna), y lo dice el disponible', async () => {
+        ventaDocumentosMock.opcionesDevolucion.mockResolvedValue([
+          opcion('nota_credito_sistema', 'p-1'),
+          opcion('devolucion_interna', 'p-2'),
+        ]);
+        responder(filaVenta(), null);
+
+        const res = await service.findOne(TENANT_ID, VENTA_ORIG_ID, 'u', true);
+
+        expect(res.opcionesDevolucion.map((o) => o.pagoId)).toEqual(['p-2']);
+        expect(res.disponibleNotaCredito.total).toBe('100.0000');
+      });
+
+      it('sin el tipo NC y sin ninguna opción interna no hay nada que acreditar: disponible en cero', async () => {
+        ventaDocumentosMock.opcionesDevolucion.mockResolvedValue([
+          opcion('nota_credito_sistema', 'p-1'),
+        ]);
+        responder(filaVenta(), null);
+
+        const res = await service.findOne(TENANT_ID, VENTA_ORIG_ID, 'u', true);
+
+        expect(res.opcionesDevolucion).toEqual([]);
+        expect(res.disponibleNotaCredito).toEqual({
+          total: '0.0000',
+          porPorcion: [],
+        });
+      });
+
+      it('una devolución interna es una corrección sin ser una NC, y no ofrece nada ni consulta las opciones', async () => {
+        responder(
+          filaVenta({ tipo_documento_id: null, venta_referencia_id: 'madre' }),
+          TIPO_DOCUMENTO_NC_ID,
+        );
+        ventaDocumentosMock.opcionesDevolucion.mockClear();
+
+        const res = await service.findOne(TENANT_ID, VENTA_ORIG_ID, 'u', true);
+
+        expect(res.esCorreccion).toBe(true);
+        expect(res.esNotaCredito).toBe(false);
+        expect(res.opcionesDevolucion).toEqual([]);
+        expect(ventaDocumentosMock.opcionesDevolucion).not.toHaveBeenCalled();
+        expect(res.disponibleNotaCredito.total).toBe('0.0000');
+      });
+
+      it('una venta que todavía no se pagó no ofrece opciones ni las consulta', async () => {
+        ventaDocumentosMock.opcionesDevolucion.mockClear();
+        responder(filaVenta({ estado: 'pendiente' }), TIPO_DOCUMENTO_NC_ID);
+
+        const res = await service.findOne(TENANT_ID, VENTA_ORIG_ID, 'u', true);
+
+        expect(res.opcionesDevolucion).toEqual([]);
+        expect(ventaDocumentosMock.opcionesDevolucion).not.toHaveBeenCalled();
+      });
+    });
+
     it('findOne expone referencia, tipo documento, modo/devuelto por detalle, reembolsos y NCs hijas', async () => {
       dataSourceMock.query.mockImplementation((sql: string) => {
         // Sin esta rama, `tipoNotaCreditoDelTenant` devuelve `null` y el caso
@@ -3173,6 +3566,19 @@ describe('VentasService', () => {
         esBoleta: true,
       });
       expect(res.esNotaCredito).toBe(false);
+      expect(res.esCorreccion).toBe(false);
+      // Las opciones de "¿por dónde vuelve la plata?" las calcula el servicio de
+      // documentos (la misma resolución que usa la nota), sobre esta venta.
+      expect(ventaDocumentosMock.opcionesDevolucion).toHaveBeenCalledWith(
+        expect.anything(),
+        { tenantId: TENANT_ID, ventaId: VENTA_ORIG_ID },
+      );
+      expect(res.opcionesDevolucion).toEqual([
+        expect.objectContaining({
+          pagoId: 'pago-1',
+          registro: 'nota_credito_sistema',
+        }),
+      ]);
       expect(res.detalles[0]).toEqual(
         expect.objectContaining({
           itemId: ITEM_ID,
@@ -3238,13 +3644,9 @@ describe('VentasService', () => {
       );
     });
 
-    it('listar mapea totalReembolsado y esNotaCredito', async () => {
+    it('listar mapea totalReembolsado y esCorreccion / esNotaCredito por venta_referencia_id', async () => {
       dataSourceMock.query.mockImplementation((sql: string) => {
-        // La resolución del tipo NC del país corre en el mismo `db.query`; sin
-        // esta rama devolvería las filas de abajo y el id saldría cualquiera.
-        if (sql.includes('es_nota_credito'))
-          return Promise.resolve([{ tipo_documento_id: TIPO_DOCUMENTO_NC_ID }]);
-        if (sql.includes('COUNT(*)')) return Promise.resolve([{ total: 2 }]);
+        if (sql.includes('COUNT(*)')) return Promise.resolve([{ total: 3 }]);
         return Promise.resolve([
           {
             venta_id: 'v-1',
@@ -3256,6 +3658,7 @@ describe('VentasService', () => {
             monto_pagado: '11305.0000',
             total_reembolsado: '1100.0000',
             tipo_documento_id: 'doc-boleta',
+            venta_referencia_id: null,
           },
           {
             venta_id: 'nc-1',
@@ -3267,6 +3670,20 @@ describe('VentasService', () => {
             monto_pagado: '0',
             total_reembolsado: '0',
             tipo_documento_id: TIPO_DOCUMENTO_NC_ID,
+            venta_referencia_id: 'v-1',
+          },
+          {
+            // La devolución interna: corrige una venta y no lleva tipo.
+            venta_id: 'di-1',
+            canal: 'online',
+            estado: 'pagada',
+            total_final: '500.0000',
+            fecha: new Date('2026-07-10'),
+            creado_el: new Date('2026-07-10'),
+            monto_pagado: '0',
+            total_reembolsado: '0',
+            tipo_documento_id: null,
+            venta_referencia_id: 'v-1',
           },
         ]);
       });
@@ -3280,57 +3697,104 @@ describe('VentasService', () => {
       )?.[0] as string;
       expect(listSql).toContain("pa.tipo = 'venta'");
       expect(listSql).toContain('pago_aplicaciones');
+      // El listado trae `venta_referencia_id`: de ahí sale el flag.
+      expect(listSql).toContain('v.venta_referencia_id');
       expect(res.data[0]).toEqual(
         expect.objectContaining({
           totalReembolsado: '1100.0000',
+          esCorreccion: false,
           esNotaCredito: false,
         }),
       );
       expect(res.data[1]).toEqual(
         expect.objectContaining({
           totalReembolsado: '0.0000',
+          esCorreccion: true,
           esNotaCredito: true,
         }),
       );
+      expect(res.data[2]).toEqual(
+        expect.objectContaining({ esCorreccion: true, esNotaCredito: false }),
+      );
     });
 
-    it('resumen excluye las notas de crédito de los KPIs', async () => {
-      // `resumen` resuelve primero el tipo NC del país y recién después arma
-      // los KPIs: la cola de mocks respeta ese orden.
-      dataSourceMock.query
-        .mockResolvedValueOnce([{ tipo_documento_id: TIPO_DOCUMENTO_NC_ID }])
-        .mockResolvedValueOnce([
-          { total_ventas: 5, total_facturado: '100', saldo_pendiente: '0' },
-        ]);
+    it('resumen excluye las correcciones de los KPIs por venta_referencia_id, sin resolver ningún tipo de documento', async () => {
+      dataSourceMock.query.mockResolvedValueOnce([
+        { total_ventas: 5, total_facturado: '100', saldo_pendiente: '0' },
+      ]);
       await service.resumen(TENANT_ID, 'u-test', true);
-      const [sql, params] = dataSourceMock.query.mock.calls[1] as [
+      expect(dataSourceMock.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = dataSourceMock.query.mock.calls[0] as [
         string,
         unknown[],
       ];
-      expect(sql).toContain('IS DISTINCT FROM');
+      // La devolución interna no lleva el tipo NC: filtrar por tipo la sumaría
+      // como venta. Y sin tipo que comparar no hay caso "el país no lo tiene".
+      expect(sql).toContain('v.venta_referencia_id IS NULL');
+      expect(sql).not.toContain('IS DISTINCT FROM');
       expect(sql).toContain("pa.tipo = 'venta'");
       expect(sql).toContain('pago_aplicaciones');
-      expect(params).toContain(TIPO_DOCUMENTO_NC_ID);
+      expect(params).toEqual([TENANT_ID]);
     });
 
-    it('resumen en un país sin nota de crédito no filtra por tipo de documento', async () => {
-      dataSourceMock.query
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([
-          { total_ventas: 1, total_facturado: '10', saldo_pendiente: '0' },
-        ]);
+    describe('viaDeReembolsoPasarela: un hecho consumado, nunca lanza', () => {
+      const via = (filas: { documento_id: string }[]) => {
+        dataSourceMock.query.mockResolvedValueOnce(filas);
+        return service.viaDeReembolsoPasarela(
+          TENANT_ID,
+          VENTA_ORIG_ID,
+          'orden-1',
+        );
+      };
+      let advertencia: jest.SpyInstance;
+      beforeEach(() => {
+        advertencia = jest
+          .spyOn(service['logger'], 'warn')
+          .mockImplementation(() => undefined);
+      });
 
-      await service.resumen(TENANT_ID, 'u-test', true);
+      it('un solo documento válido: la corrección lo corrige', async () => {
+        await expect(via([{ documento_id: 'doc-boleta' }])).resolves.toEqual({
+          tipo: 'pasarela',
+          documentoId: 'doc-boleta',
+        });
+        expect(advertencia).not.toHaveBeenCalled();
+      });
 
-      const [sql, params] = dataSourceMock.query.mock.calls[1] as [
-        string,
-        unknown[],
-      ];
-      // El filtro se cae ENTERO, no se compara contra null: un
-      // `IS DISTINCT FROM NULL` dejaría afuera toda venta SIN tipo de
-      // documento —que son la mayoría— y el resumen daría casi cero.
-      expect(sql).not.toContain('IS DISTINCT FROM');
-      expect(params).toEqual([TENANT_ID]);
+      it('ninguno: sin documento, como siempre (tipo NC), y sin advertencia', async () => {
+        await expect(via([])).resolves.toEqual({
+          tipo: 'pasarela',
+          documentoId: null,
+        });
+        expect(advertencia).not.toHaveBeenCalled();
+      });
+
+      it('más de uno (inalcanzable hoy): sin documento y una advertencia con la venta y la orden', async () => {
+        await expect(
+          via([{ documento_id: 'a' }, { documento_id: 'b' }]),
+        ).resolves.toEqual({ tipo: 'pasarela', documentoId: null });
+
+        expect(advertencia).toHaveBeenCalledTimes(1);
+        const mensaje = String(advertencia.mock.calls[0][0]);
+        expect(mensaje).toContain(VENTA_ORIG_ID);
+        expect(mensaje).toContain('orden-1');
+      });
+
+      it('mira solo los documentos válidos de esa venta y ese tenant, nada de sus pagos', async () => {
+        await via([]);
+
+        const [sql, params] = dataSourceMock.query.mock.calls[0] as [
+          string,
+          unknown[],
+        ];
+        expect(sql).toContain('FROM venta_documentos');
+        expect(sql).toContain('descarte IS NULL');
+        expect(sql).toContain('es_duplicado = false');
+        expect(sql).toContain('eliminado_el IS NULL');
+        expect(sql).toContain('tenant_id = $2');
+        expect(sql).not.toContain('pagos');
+        expect(params).toEqual([VENTA_ORIG_ID, TENANT_ID]);
+      });
     });
 
     it('registrarDevolucionesPorReembolso liga los movimientos a la venta original y no crea cabecera', async () => {
@@ -4024,16 +4488,14 @@ describe('VentasService', () => {
       );
 
       it('rechaza devolver en efectivo más de lo que la venta cobró en efectivo', async () => {
+        conSalidaDeCaja();
         // Venta de 1100 pagada con 200 en efectivo y el resto con tarjeta: el
         // saldo GLOBAL de la caja alcanza (viene de otras ventas), pero esta
         // venta solo ingresó 200 en billetes.
         efectivoCobrado = '200.0000';
 
         await expect(
-          service.crearNotaCreditoDesdeVenta({
-            ...baseParams,
-            devolverDinero: true,
-          }),
+          service.crearNotaCreditoDesdeVenta(baseParams),
         ).rejects.toThrow(/más de lo que esta venta cobró en efectivo/);
 
         expect(
@@ -4042,12 +4504,13 @@ describe('VentasService', () => {
       });
 
       it('el 422 NO imprime el efectivo disponible (fuga 5 del modo ciego)', async () => {
+        conSalidaDeCaja();
         // Era un oráculo de UN request: monto = techo + 1 y el mensaje
         // devolvía el efectivo cobrado de la venta, sin emitir ninguna NC.
         efectivoCobrado = '200.0000';
 
         const error = (await service
-          .crearNotaCreditoDesdeVenta({ ...baseParams, devolverDinero: true })
+          .crearNotaCreditoDesdeVenta(baseParams)
           .catch((e: Error) => e)) as Error;
 
         expect(error).toBeInstanceOf(IntentoRechazadoError);
@@ -4056,10 +4519,11 @@ describe('VentasService', () => {
       });
 
       it('el intento rechazado se entrega al rastro con quién, qué caja, cuánto pidió y sobre qué venta', async () => {
+        conSalidaDeCaja();
         efectivoCobrado = '200.0000';
 
         const error = (await service
-          .crearNotaCreditoDesdeVenta({ ...baseParams, devolverDinero: true })
+          .crearNotaCreditoDesdeVenta(baseParams)
           .catch((e: Error) => e)) as IntentoRechazadoError;
 
         expect(error.intento).toEqual({
@@ -4079,11 +4543,12 @@ describe('VentasService', () => {
       });
 
       it('el 422 de saldo insuficiente en la NC también deja intento, con su propio motivo', async () => {
+        conSalidaDeCaja();
         efectivoCobrado = '5000.0000';
         cajaService.calcularEsperadoEfectivo.mockResolvedValueOnce('10.0000');
 
         const error = (await service
-          .crearNotaCreditoDesdeVenta({ ...baseParams, devolverDinero: true })
+          .crearNotaCreditoDesdeVenta(baseParams)
           .catch((e: Error) => e)) as IntentoRechazadoError;
 
         expect(error.message).toBe('Saldo insuficiente en caja');
@@ -4103,20 +4568,35 @@ describe('VentasService', () => {
       });
 
       it('descuenta lo ya devuelto en efectivo por NCs anteriores', async () => {
+        conSalidaDeCaja();
         efectivoCobrado = '1100.0000';
         efectivoDevuelto = '900.0000'; // disponible: 200
 
         await expect(
-          service.crearNotaCreditoDesdeVenta({
-            ...baseParams,
-            devolverDinero: true,
-          }),
+          service.crearNotaCreditoDesdeVenta(baseParams),
         ).rejects.toThrow(/más de lo que esta venta cobró en efectivo/);
       });
 
+      it('el efectivo ya devuelto cuenta toda corrección que sacó plata de la caja, lleve o no el tipo NC', async () => {
+        conSalidaDeCaja();
+
+        await service.crearNotaCreditoDesdeVenta(baseParams);
+
+        const sqlEfectivo = ncManager.query.mock.calls
+          .map((c: unknown[]) => String(c[0]))
+          .find((q) => q.includes('es_efectivo'))!;
+        expect(sqlEfectivo).toContain('nc.venta_referencia_id = $1');
+        expect(sqlEfectivo).not.toContain('tipo_documento_id');
+      });
+
       it('rechaza NC sobre otra NC', async () => {
+        // Una corrección se reconoce por `venta_referencia_id`, no por el tipo.
         ventaRows = [
-          { ...ventaOriginalRow, tipo_documento_id: TIPO_DOCUMENTO_NC_ID },
+          {
+            ...ventaOriginalRow,
+            tipo_documento_id: TIPO_DOCUMENTO_NC_ID,
+            venta_referencia_id: 'venta-madre',
+          },
         ];
         await expect(
           service.crearNotaCreditoDesdeVenta(baseParams),
@@ -4125,11 +4605,24 @@ describe('VentasService', () => {
         );
       });
 
-      it('devolverDinero: registra salida en la caja activa ligada a la NC', async () => {
-        const res = await service.crearNotaCreditoDesdeVenta({
-          ...baseParams,
-          devolverDinero: true,
-        });
+      it('rechaza NC sobre una devolución interna (tipo nulo): también es una corrección', async () => {
+        ventaRows = [
+          {
+            ...ventaOriginalRow,
+            tipo_documento_id: null,
+            venta_referencia_id: 'venta-madre',
+          },
+        ];
+        await expect(
+          service.crearNotaCreditoDesdeVenta(baseParams),
+        ).rejects.toThrow(
+          'No se puede emitir una nota de crédito sobre otra nota de crédito',
+        );
+      });
+
+      it('por el pago en efectivo: registra salida en la caja activa ligada a la NC', async () => {
+        conSalidaDeCaja();
+        const res = await service.crearNotaCreditoDesdeVenta(baseParams);
         expect(res.movimientoCajaId).toBe('mov-caja-nc-1');
 
         expect(cajaService.findActiva).toHaveBeenCalledWith(
@@ -4150,23 +4643,19 @@ describe('VentasService', () => {
         );
       });
 
-      it('devolverDinero sin caja física abierta → 422', async () => {
+      it('por el pago en efectivo sin caja física abierta → 422', async () => {
+        conSalidaDeCaja();
         cajaService.findActiva.mockResolvedValueOnce(null);
         await expect(
-          service.crearNotaCreditoDesdeVenta({
-            ...baseParams,
-            devolverDinero: true,
-          }),
+          service.crearNotaCreditoDesdeVenta(baseParams),
         ).rejects.toThrow(UnprocessableEntityException);
       });
 
-      it('devolverDinero con saldo insuficiente → 422 y no registra movimiento', async () => {
+      it('por el pago en efectivo con saldo insuficiente → 422 y no registra movimiento', async () => {
+        conSalidaDeCaja();
         cajaService.calcularEsperadoEfectivo.mockResolvedValueOnce('1000.0000');
         await expect(
-          service.crearNotaCreditoDesdeVenta({
-            ...baseParams,
-            devolverDinero: true,
-          }),
+          service.crearNotaCreditoDesdeVenta(baseParams),
         ).rejects.toThrow('Saldo insuficiente en caja');
         // prettier-ignore
 

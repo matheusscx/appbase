@@ -56,9 +56,10 @@ filtros — el detalle sigue viviendo en `/ventas`.
 
 ## Las reglas de plata (spec § 4)
 
-- **Vendido:** `Σ ventas.total_final` de hoy, **sin las canceladas y sin las notas de
-  crédito** — por `tipos_documento_tributario.es_nota_credito`, no por comparar contra
-  un id fijo de país. Una venta `pendiente` o `pagada_parcial` SÍ cuenta: solo se
+- **Vendido:** `Σ ventas.total_final` de hoy, **sin las canceladas y sin las correcciones**
+  (notas de crédito y devoluciones internas) — por `venta_referencia_id IS NULL`, no por el
+  tipo de documento: la devolución interna no lleva el tipo NC y, filtrando por tipo, se
+  sumaría como venta (cambio del 2026-10-02, frente de emisión por venta). Una venta `pendiente` o `pagada_parcial` SÍ cuenta: solo se
   excluyen `cancelada` y las notas de crédito. La pantalla lo va a rotular "antes de
   notas de crédito" (frontend, tarea posterior).
 - **Cobrado:** `Σ pago_aplicaciones.monto` con `tipo = 'venta'` de los PAGOS

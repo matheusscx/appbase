@@ -12,7 +12,10 @@ import { todasLasPaginas } from './helpers/paginacion';
 
 const TENANT_DEMO = '550e8400-e29b-41d4-a716-446655440007'; // Paris (Chile)
 const CLP = '550e8400-e29b-41d4-a716-446655440003';
-const EFECTIVO = '550e8400-e29b-41d4-a716-446655440105';
+// Con tarjeta y no en efectivo: el cobro de estas ventas es de fondo y no se
+// prueba la caja, y una nota por el pago en efectivo sacaría plata de una caja
+// física que acá no hay (`canal: 'online'`).
+const DEBITO = '550e8400-e29b-41d4-a716-446655440106';
 
 /**
  * La venta mixta de todos los casos de abajo, con los números elegidos para que
@@ -72,7 +75,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
           { itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA },
           { itemId: itemExentoId, cantidad: '1' },
         ],
-        pagos: [{ metodoPagoId: EFECTIVO, monto: `${TOTAL_VENTA}.0000` }],
+        pagos: [{ metodoPagoId: DEBITO, monto: `${TOTAL_VENTA}.0000` }],
       });
     expect(venta.status).toBe(201);
     expect((venta.body as { totalFinal: string }).totalFinal).toBe(
@@ -99,9 +102,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
           { itemId: itemRecetaId, cantidad: '1' },
           { itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA },
         ],
-        pagos: [
-          { metodoPagoId: EFECTIVO, monto: `${TOTAL_VENTA_RECETA}.0000` },
-        ],
+        pagos: [{ metodoPagoId: DEBITO, monto: `${TOTAL_VENTA_RECETA}.0000` }],
       });
     expect(venta.status).toBe(201);
     expect((venta.body as { totalFinal: string }).totalFinal).toBe(
@@ -129,6 +130,21 @@ describe('Nota de crédito compuesta (e2e)', () => {
     baseVentasSinImpuestos: string;
   }
 
+  /**
+   * Por dónde vuelve la plata: el único pago de la venta. Estas ventas se cobran
+   * con un solo pago, así que "el pago de la venta" no es ambiguo.
+   */
+  const devolucionDe = async (
+    ventaId: string,
+  ): Promise<{ devolucion: { pagoId: string } }> => {
+    const pagos: { pago_id: string }[] = await ds.query(
+      `SELECT pago_id FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL`,
+      [ventaId],
+    );
+    expect(pagos).toHaveLength(1);
+    return { devolucion: { pagoId: pagos[0].pago_id } };
+  };
+
   const emitirNC = async (
     ventaId: string,
     body: Record<string, unknown>,
@@ -136,7 +152,11 @@ describe('Nota de crédito compuesta (e2e)', () => {
     const res = await request(app.getHttpServer())
       .post(`/api/ventas/${ventaId}/notas-credito`)
       .set('Authorization', `Bearer ${token}`)
-      .send(body);
+      .send({
+        ...(await devolucionDe(ventaId)),
+        ...(await devolucionDe(ventaId)),
+        ...body,
+      });
     expect(res.status).toBe(201);
     return res.body as { id: string };
   };
@@ -445,6 +465,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
         .post(`/api/ventas/${ventaId}/notas-credito`)
         .set('Authorization', `Bearer ${token}`)
         .send({
+          ...(await devolucionDe(ventaId)),
           monto: TOTAL_RECETA,
           devoluciones: [{ itemId: itemRecetaId, cantidad: '1' }],
         });
@@ -494,6 +515,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
         .post(`/api/ventas/${ventaId}/notas-credito`)
         .set('Authorization', `Bearer ${token}`)
         .send({
+          ...(await devolucionDe(ventaId)),
           monto: '3000',
           devoluciones: [
             { itemId: itemExentoId, cantidad: '1', reponerStock: true },
@@ -598,6 +620,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
         .post(`/api/ventas/${ventaId}/notas-credito`)
         .set('Authorization', `Bearer ${token}`)
         .send({
+          ...(await devolucionDe(ventaId)),
           monto: '500',
           devoluciones: [{ itemId: itemAfectoId, cantidad: '2' }],
         });
@@ -805,6 +828,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
         .post(`/api/ventas/${ventaId}/notas-credito`)
         .set('Authorization', `Bearer ${token}`)
         .send({
+          ...(await devolucionDe(ventaId)),
           monto: '8330',
           devoluciones: [{ itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA }],
         });
@@ -884,6 +908,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
         .post(`/api/ventas/${ventaId}/notas-credito`)
         .set('Authorization', `Bearer ${token}`)
         .send({
+          ...(await devolucionDe(ventaId)),
           monto: '4760',
           devoluciones: [
             { itemId: itemAfectoId, cantidad: '2' },

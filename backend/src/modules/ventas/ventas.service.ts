@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -41,6 +42,7 @@ import {
 import {
   VentaDocumentosService,
   type DocumentoDetalle,
+  type ViaCorreccion,
 } from '../venta-documentos/venta-documentos.service';
 import type { ClaseDocumentoMaquina } from '../venta-documentos/entities/venta-documento.entity';
 import type { Facturador } from '../tenants/entities/tenant.entity';
@@ -89,6 +91,23 @@ export interface DevolucionReembolso {
   reponerStock?: boolean;
 }
 
+/**
+ * Una corrección es lo que apunta a la venta que corrige (`venta_referencia_id`,
+ * E7). `esNotaCredito` es una corrección **con tipo NC**: falso en la
+ * devolución interna, que no es un documento tributario y lleva el tipo nulo.
+ * Un solo lugar para el listado y el detalle: que los dos digan lo mismo.
+ */
+function flagsDeCorreccion(r: {
+  venta_referencia_id: string | null;
+  tipo_documento_id: string | null;
+}): { esCorreccion: boolean; esNotaCredito: boolean } {
+  const esCorreccion = r.venta_referencia_id !== null;
+  return {
+    esCorreccion,
+    esNotaCredito: esCorreccion && r.tipo_documento_id !== null,
+  };
+}
+
 export interface VentaListItem {
   id: string;
   canal: string;
@@ -100,6 +119,9 @@ export interface VentaListItem {
   saldo: string;
   /** Σ REFUND aprobados de las órdenes de pasarela vinculadas (badge derivado). */
   totalReembolsado: string;
+  /** Es una corrección (`venta_referencia_id`): una NC o una devolución interna. */
+  esCorreccion: boolean;
+  /** Corrección que lleva el tipo NC: falso en la devolución interna (tipo nulo). */
   esNotaCredito: boolean;
 }
 
@@ -121,9 +143,13 @@ export interface CrearNotaCreditoParams {
   monto: string;
   devoluciones?: DevolucionReembolso[];
   comentario?: string;
-  /** Egreso de caja: movimiento 'salida' en la caja física abierta del usuario. */
-  devolverDinero?: boolean;
-  /** Solo el endpoint manual: exige venta pagada/pagada_parcial y no-NC. */
+  /**
+   * Por dónde vuelve la plata; de acá sale el documento que corrige la nota
+   * (`VentaDocumentosService.documentoQueCorrige`). Con un pago en efectivo hay
+   * un movimiento 'salida' en la caja física abierta del usuario.
+   */
+  via: ViaCorreccion;
+  /** Solo el endpoint manual: exige venta pagada/pagada_parcial. */
   validarVentaElegible?: boolean;
 }
 
@@ -229,6 +255,8 @@ export interface BoletaVenta {
 
 @Injectable()
 export class VentasService {
+  private readonly logger = new Logger(VentasService.name);
+
   constructor(
     private readonly db: Db,
     private readonly calculoPreciosService: CalculoPreciosService,
@@ -1675,9 +1703,10 @@ export class VentasService {
    * documento chileno (ADR-010: lo que se congela en la transacción es justo lo
    * que no se corrige después). Ahora sale del catálogo, por `es_nota_credito`.
    *
-   * `null` cuando el país todavía no la tiene sembrada. Los **lectores** tratan
-   * ese null como "ninguna venta es NC", que es lo correcto y no una degradación:
-   * sin ese tipo tampoco pudo crearse ninguna.
+   * `null` cuando el país todavía no la tiene sembrada. **Ya no sirve para
+   * reconocer** una corrección (E7: eso es `venta_referencia_id`): queda para
+   * **escribir** el tipo de una NC con documento y para decidir, en el detalle,
+   * si hay NC que ofrecer.
    */
   private async tipoNotaCreditoDelTenant(
     tenantId: string,
@@ -1746,18 +1775,20 @@ export class VentasService {
     params: CrearNotaCreditoParams,
   ): Promise<NotaCreditoCreada> {
     return this.db.transaccion(async (manager) => {
-      const tipoNotaCredito = await this.exigirTipoNotaCredito(params.tenantId);
       const original = await this.lockVentaOriginal(
         manager,
         params.tenantId,
         params.ventaOriginalId,
       );
 
+      // Una corrección no se corrige (E7): se reconoce por `venta_referencia_id`
+      // y no por el tipo de documento, porque una devolución interna no lo lleva.
+      if (original.venta_referencia_id !== null)
+        throw new BadRequestException(
+          'No se puede emitir una nota de crédito sobre otra nota de crédito',
+        );
+
       if (params.validarVentaElegible) {
-        if (original.tipo_documento_id === tipoNotaCredito)
-          throw new BadRequestException(
-            'No se puede emitir una nota de crédito sobre otra nota de crédito',
-          );
         if (!['pagada', 'pagada_parcial'].includes(original.estado))
           throw new BadRequestException(
             'Solo se puede emitir nota de crédito de ventas pagadas o pagadas parcialmente',
@@ -1779,14 +1810,34 @@ export class VentasService {
       }
       const cfgOriginal = original.config_calculo;
 
-      // Σ NCs previas bajo el lock: dos NCs concurrentes sobre la misma venta
-      // se serializan y no pueden exceder el total juntas.
+      // Qué documento corrige, según por dónde vuelve la plata (spec § 3.6).
+      // El servidor lo resuelve: el `pagoId` del body se valida contra ESTA
+      // venta y ESTE tenant, y un `pagoId` ajeno es un 400 sin más.
+      const destino = await this.ventaDocumentosService.documentoQueCorrige(
+        manager,
+        {
+          tenantId: params.tenantId,
+          ventaId: params.ventaOriginalId,
+          via: params.via,
+        },
+      );
+      // La corrección de un documento de `nadie` es una devolución interna: no
+      // es un documento tributario, no lleva tipo y un país sin nota de crédito
+      // sembrada no la frena. Todo lo demás exige el tipo NC del país.
+      const esInterna = destino.documento?.emisor === 'nadie';
+      const tipoNotaCredito = esInterna
+        ? null
+        : await this.exigirTipoNotaCredito(params.tenantId);
+
+      // Σ correcciones previas bajo el lock: dos NCs concurrentes sobre la misma
+      // venta se serializan y no pueden exceder el total juntas. Por
+      // `venta_referencia_id` y no por el tipo: la devolución interna cuenta.
       const previasRows: { total: string }[] = await manager.query(
         `SELECT COALESCE(SUM(total_final), 0) AS total
          FROM ventas
-         WHERE venta_referencia_id = $1 AND tipo_documento_id = $2
+         WHERE venta_referencia_id = $1
            AND eliminado_el IS NULL`,
-        [params.ventaOriginalId, tipoNotaCredito],
+        [params.ventaOriginalId],
       );
       const previas = new Decimal(previasRows[0]?.total ?? '0');
       const disponible = new Decimal(original.total_final).minus(previas);
@@ -1794,6 +1845,22 @@ export class VentasService {
         throw new BadRequestException(
           `El monto excede lo disponible para nota de crédito (${disponible.toString()})`,
         );
+      // "No vuelve plata" rebaja lo que la venta todavía debe (spec § 3.6): no
+      // puede pasar de ese saldo, que ya descuenta los abonos Y lo rebajado sin
+      // plata por correcciones anteriores (una serie), y puede ser menor que el
+      // documento de lo debido. Bajo el mismo lock. El mensaje no dice ningún monto.
+      if (destino.saldo !== null && new Decimal(params.monto).gt(destino.saldo))
+        throw new BadRequestException(
+          'El monto supera lo que la venta todavía debe: "no vuelve plata" solo rebaja el saldo pendiente.',
+        );
+      // Y el tope por documento, bajo el mismo lock: lo corregido de un
+      // documento no pasa su monto.
+      if (destino.documento)
+        await this.ventaDocumentosService.exigirTopeDelDocumento(manager, {
+          tenantId: params.tenantId,
+          documento: destino.documento,
+          monto: params.monto,
+        });
 
       const devueltas = await this.validarDevolucionesReembolso(
         manager,
@@ -1849,13 +1916,12 @@ export class VentasService {
             AND d.venta_id IN (
               SELECT venta_id FROM ventas
                WHERE venta_referencia_id = $1
-                 AND tipo_documento_id = $2
                  AND eliminado_el IS NULL
               UNION ALL
               SELECT $1::uuid
             )
           GROUP BY 1, 2`,
-        [params.ventaOriginalId, tipoNotaCredito],
+        [params.ventaOriginalId],
       );
       const porcionesOriginal = composicion.filter((r) => !r.es_nc);
       const yaAcreditado = new Map<string, Decimal>();
@@ -2206,8 +2272,19 @@ export class VentasService {
           cajaId: original.caja_id,
           monedaId: original.moneda_id,
           canal: original.canal,
+          // Nulo en la devolución interna (`nadie`): no es un documento tributario.
           tipoDocumentoId: tipoNotaCredito,
           ventaReferenciaId: params.ventaOriginalId,
+          // Por dónde volvió la plata: la auditoría de ese dato y lo que hace que
+          // "no vuelve plata" sea una serie (lo rebajado baja el saldo).
+          devolucionVia:
+            params.via.tipo === 'sin_plata'
+              ? 'sin_plata'
+              : params.via.tipo === 'pasarela'
+                ? 'pasarela'
+                : 'pago',
+          devolucionPagoId:
+            params.via.tipo === 'pago' ? params.via.pagoId : null,
           estado: EstadoVenta.PAGADA,
           totalBruto: sumaSubtotales.toFixed(4),
           totalDescuentos: '0',
@@ -2255,6 +2332,18 @@ export class VentasService {
           }),
         ),
       );
+
+      // El documento de la corrección (spec § 3.6), con los baldes de sus propias
+      // líneas, que acaban de guardarse. Sin documento corregido (venta sin
+      // documentos, país sin boleta) la nota se emite como siempre.
+      if (destino.documento)
+        await this.ventaDocumentosService.documentarCorreccion(manager, {
+          tenantId: params.tenantId,
+          correccionVentaId: nc.id,
+          corregido: destino.documento,
+          monto: params.monto,
+          tipoNotaCreditoId: tipoNotaCredito,
+        });
 
       // 8. Las filas de impuesto de la nota, derivadas de las del original.
       await this.escribirImpuestosNotaCredito(
@@ -2318,7 +2407,10 @@ export class VentasService {
       }
 
       let movimientoCajaId: string | null = null;
-      if (params.devolverDinero) {
+      // La plata sale de la caja solo si el pago elegido fue en efectivo. Con
+      // otro medio la reversa se hace por fuera (la máquina, el banco) y no se
+      // mueve caja.
+      if (destino.mueveCaja) {
         const caja = await this.cajaService.findActiva(
           params.tenantId,
           params.usuarioId,
@@ -2360,10 +2452,9 @@ export class VentasService {
                  JOIN movimientos_caja mc ON mc.venta_id = nc.venta_id
                       AND mc.tipo = 'salida' AND mc.eliminado_el IS NULL
                  WHERE nc.venta_referencia_id = $1
-                   AND nc.tipo_documento_id = $2
                    AND nc.eliminado_el IS NULL
                ), 0)::text AS devuelto`,
-            [params.ventaOriginalId, tipoNotaCredito],
+            [params.ventaOriginalId],
           );
         const devolvibleEfectivo = new Decimal(
           efectivoRows[0]?.cobrado ?? '0',
@@ -2422,6 +2513,44 @@ export class VentasService {
   }
 
   /**
+   * El documento que corrige un reembolso de pasarela. **Nunca lanza**: la plata
+   * ya volvió por el proveedor y un hecho consumado se registra, no se rechaza
+   * (P3). `CobrosService.vincularVenta` puede ligar una orden a cualquier venta,
+   * así que no se supone nada de sus pagos: se miran sus documentos válidos
+   * (vigentes y no duplicados).
+   * - uno solo (la boleta de la venta online, E5) → la corrección lo corrige;
+   * - ninguno → corrección sin fila de documento, como siempre (tipo NC);
+   * - más de uno (inalcanzable hoy: online y factura son un solo documento) →
+   *   también sin fila de documento, y queda un `warn` con la venta y la orden:
+   *   elegir uno sería adivinar.
+   * Lo llama el hook de reembolso, que corre fuera de toda transacción.
+   */
+  async viaDeReembolsoPasarela(
+    tenantId: string,
+    ventaId: string,
+    ordenId: string,
+  ): Promise<ViaCorreccion> {
+    const documentos: { documento_id: string }[] = await this.db.query(
+      `SELECT documento_id
+         FROM venta_documentos
+        WHERE venta_id = $1
+          AND tenant_id = $2
+          AND descarte IS NULL
+          AND es_duplicado = false
+          AND eliminado_el IS NULL`,
+      [ventaId, tenantId],
+    );
+    if (documentos.length > 1)
+      this.logger.warn(
+        `Reembolso de la orden ${ordenId}: la venta ${ventaId} tiene ${documentos.length} documentos válidos y la corrección no sabe cuál corregir; se emite sin documento.`,
+      );
+    return {
+      tipo: 'pasarela',
+      documentoId: documentos.length === 1 ? documentos[0].documento_id : null,
+    };
+  }
+
+  /**
    * NC creada manualmente desde el detalle de una venta (POS): exige venta
    * pagada/pagada_parcial que no sea otra NC, y permite el egreso de caja
    * elegible. El flujo de reembolsos de pasarela usa `crearNotaCredito`
@@ -2434,7 +2563,7 @@ export class VentasService {
     monto: string;
     devoluciones?: DevolucionReembolso[];
     comentario?: string;
-    devolverDinero?: boolean;
+    via: ViaCorreccion;
   }): Promise<{
     id: string;
     totalFinal: string;
@@ -2623,6 +2752,7 @@ export class VentasService {
     total_final: string;
     estado: string;
     tipo_documento_id: string | null;
+    venta_referencia_id: string | null;
     config_calculo: ConfigCalculo | null;
   }> {
     const rows: {
@@ -2633,10 +2763,11 @@ export class VentasService {
       total_final: string;
       estado: string;
       tipo_documento_id: string | null;
+      venta_referencia_id: string | null;
       config_calculo: ConfigCalculo | null;
     }[] = await manager.query(
       `SELECT venta_id, caja_id, moneda_id, canal, total_final, estado, tipo_documento_id,
-              config_calculo
+              venta_referencia_id, config_calculo
        FROM ventas
        WHERE venta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
        FOR UPDATE`,
@@ -3095,18 +3226,14 @@ export class VentasService {
     usuarioId: string,
     verTodas: boolean,
   ): Promise<VentasResumen> {
-    const tipoNotaCredito = await this.tipoNotaCreditoDelTenant(tenantId);
     const params: unknown[] = [tenantId];
 
-    // El resumen no cuenta las notas de crédito. Si el país todavía no tiene el
-    // tipo sembrado no hay ninguna que excluir y el filtro se cae ENTERO: un
-    // `IS DISTINCT FROM NULL` dejaría afuera las ventas sin tipo de documento,
-    // que son la mayoría, y el resumen daría casi cero.
-    let filtroNotaCredito = '';
-    if (tipoNotaCredito) {
-      params.push(tipoNotaCredito);
-      filtroNotaCredito = `AND v.tipo_documento_id IS DISTINCT FROM $${params.length}`;
-    }
+    // El resumen no cuenta las correcciones (notas de crédito y devoluciones
+    // internas): se reconocen por `venta_referencia_id` (E7) y no por el tipo de
+    // documento, porque la devolución interna no lo lleva y la sumaría como
+    // venta. Sin parámetro: no hay tipo que comparar, así que tampoco hay caso
+    // "el país no tiene el tipo".
+    const filtroNotaCredito = 'AND v.venta_referencia_id IS NULL';
 
     let filtroPropio = '';
     if (!verTodas) {
@@ -3183,9 +3310,10 @@ export class VentasService {
       monto_pagado: string;
       total_reembolsado: string;
       tipo_documento_id: string | null;
+      venta_referencia_id: string | null;
     }[] = await this.db.query(
       `SELECT v.venta_id, v.canal, v.estado, v.total_final, v.fecha, v.creado_el,
-              v.tipo_documento_id,
+              v.tipo_documento_id, v.venta_referencia_id,
               COALESCE((
                 SELECT SUM(pa.monto)
                 FROM pagos p
@@ -3209,10 +3337,8 @@ export class VentasService {
       listParams,
     );
 
-    const tipoNotaCredito = await this.tipoNotaCreditoDelTenant(tenantId);
-
     return {
-      data: rows.map((r) => this.mapVentaListRow(r, tipoNotaCredito)),
+      data: rows.map((r) => this.mapVentaListRow(r)),
       meta: buildPaginationMeta(page, pageSize, total),
     };
   }
@@ -3246,20 +3372,18 @@ export class VentasService {
     return { filters, params };
   }
 
-  private mapVentaListRow(
-    r: {
-      venta_id: string;
-      canal: string;
-      estado: string;
-      total_final: string;
-      fecha: Date;
-      creado_el: Date;
-      monto_pagado: string;
-      total_reembolsado: string;
-      tipo_documento_id: string | null;
-    },
-    tipoNotaCredito: string | null,
-  ): VentaListItem {
+  private mapVentaListRow(r: {
+    venta_id: string;
+    canal: string;
+    estado: string;
+    total_final: string;
+    fecha: Date;
+    creado_el: Date;
+    monto_pagado: string;
+    total_reembolsado: string;
+    tipo_documento_id: string | null;
+    venta_referencia_id: string | null;
+  }): VentaListItem {
     return {
       id: r.venta_id,
       canal: r.canal,
@@ -3272,8 +3396,7 @@ export class VentasService {
         .minus(new Decimal(r.monto_pagado))
         .toFixed(4),
       totalReembolsado: new Decimal(r.total_reembolsado).toFixed(4),
-      esNotaCredito:
-        tipoNotaCredito !== null && r.tipo_documento_id === tipoNotaCredito,
+      ...flagsDeCorreccion(r),
     };
   }
 
@@ -3598,12 +3721,10 @@ export class VentasService {
     const tipoNotaCredito = await this.tipoNotaCreditoDelTenant(tenantId);
 
     /**
-     * Gemelo de los CUATRO cortes de elegibilidad de
-     * `crearNotaCreditoEnTransaccion`: el país del tenant tiene un tipo de
-     * documento "nota de crédito" configurado (`exigirTipoNotaCredito`, que
-     * lanza antes que los otros tres), no se emite sobre otra nota de crédito,
-     * la venta está pagada o pagada parcialmente, y tiene `config_calculo`
-     * congelada.
+     * Gemelo de los cortes de elegibilidad de `crearNotaCreditoEnTransaccion`:
+     * no se emite sobre otra corrección (`venta_referencia_id`, no el tipo de
+     * documento: la devolución interna no lo lleva), la venta está pagada o
+     * pagada parcialmente, y tiene `config_calculo` congelada.
      *
      * Existe porque `disponibleNotaCredito` es una PROMESA: publicar un monto
      * acreditable sobre un documento que el POST rechaza de plano —medido: el
@@ -3612,22 +3733,38 @@ export class VentasService {
      * vino a cerrar, invertido.
      *
      * ⚠️ Es un gemelo, con todo lo que eso implica: si allá se agrega un
-     * cuarto guard, acá hay que agregarlo. No se comparte porque aquéllos
-     * lanzan (y el mensaje es parte del contrato de la emisión) y éste
-     * solamente decide si hay número que mostrar.
+     * guard, acá hay que agregarlo. No se comparte porque aquéllos lanzan (y el
+     * mensaje es parte del contrato de la emisión) y éste solamente decide si
+     * hay número que mostrar.
      */
-    const elegibleParaNotaCredito =
-      // Sin tipo de documento NC en el país, la emisión falla ANTES de mirar
-      // nada más. Hoy los cuatro países del seed lo tienen, así que es latente
-      // — pero es el caso que `tipoNotaCreditoDelTenant` nombra: agregar un
-      // país sin sembrarlo.
-      tipoNotaCredito !== null &&
-      v.tipo_documento_id !== tipoNotaCredito &&
+    const elegibleBase =
+      v.venta_referencia_id === null &&
       ['pagada', 'pagada_parcial'].includes(v.estado) &&
       // Literal al de la emisión (`!original.config_calculo`), no
       // `!== null`: con jsonb no difieren, pero un gemelo que no es literal
       // invita a que alguien "lo alinee" y mueva la conducta sin querer.
       !!v.config_calculo;
+
+    // "¿Por dónde vuelve la plata?": las opciones salen de la MISMA resolución
+    // que usa la nota al crearse (`documentoQueCorrige`), así que la pantalla
+    // ofrece exactamente lo que el servidor acepta y no replica la regla. Sin
+    // el tipo NC del país solo quedan las que no lo llevan (la devolución
+    // interna): es el gemelo de `exigirTipoNotaCredito`, que la devolución
+    // interna no necesita.
+    const opcionesDevolucion = elegibleBase
+      ? (
+          await this.ventaDocumentosService.opcionesDevolucion(this.db, {
+            tenantId,
+            ventaId,
+          })
+        ).filter(
+          (o) =>
+            o.registro === 'devolucion_interna' || tipoNotaCredito !== null,
+        )
+      : [];
+    // Sin ninguna forma de corregir no hay nada que acreditar.
+    const elegibleParaNotaCredito =
+      elegibleBase && opcionesDevolucion.length > 0;
 
     return {
       id: v.venta_id,
@@ -3645,15 +3782,13 @@ export class VentasService {
             esBoleta: v.tipo_documento_es_boleta === true,
           }
         : null,
-      // Mismo criterio que `listar()`: el id del tipo de documento, no su
-      // `codigo`. El frontend lo reconstruía comparando `codigo === '61'`, que
-      // es nullable y varía por país — con otro código, el drawer ofrecía
-      // "Nota de crédito" sobre una NC mientras el listado sí la marcaba.
-      // Y desde el 2026-09-03 el ID también varía por país: se resuelve desde
-      // el catálogo (`es_nota_credito`), ya no contra una constante chilena.
-      esNotaCredito:
-        tipoNotaCredito !== null && v.tipo_documento_id === tipoNotaCredito,
+      // Mismo criterio que `listar()` (`flagsDeCorreccion`): una corrección es
+      // lo que tiene `venta_referencia_id` (E7), no lo que lleva el tipo NC —la
+      // devolución interna no lo lleva—. El frontend lo reconstruía comparando
+      // `codigo === '61'`, que es nullable y varía por país.
+      ...flagsDeCorreccion(v),
       ventaReferenciaId: v.venta_referencia_id,
+      opcionesDevolucion,
       documentos,
       anulable,
       anularPreguntaExterno,

@@ -15,6 +15,9 @@ interface VentaResumen {
   fecha: string
   creadoEl: string
   totalReembolsado: string
+  /** Corrección: una NC o una devolución interna. Del backend (`venta_referencia_id`). */
+  esCorreccion: boolean
+  /** Corrección con el tipo NC: falso en la devolución interna. */
   esNotaCredito: boolean
 }
 
@@ -270,9 +273,9 @@ const columns: TableColumn<VentaResumen>[] = [
             <div class="flex flex-wrap items-center gap-1">
               <UBadge :color="estadoColor(row.original.estado)" :label="estadoLabel(row.original.estado)" variant="subtle" size="sm" />
               <UBadge
-                v-if="row.original.esNotaCredito"
+                v-if="row.original.esCorreccion"
                 color="info"
-                label="NC"
+                :label="row.original.esNotaCredito ? 'NC' : 'Dev. interna'"
                 variant="subtle"
                 size="sm"
               />

@@ -79,9 +79,21 @@ function params(
 }
 
 function managerFalso() {
-  const save = jest.fn((_entidad: unknown, filas: Record<string, unknown>[]) =>
-    Promise.resolve(filas),
+  // Como TypeORM, `save` devuelve las filas con su id: el enlace de cada pago
+  // a su documento lo necesita.
+  const save = jest.fn(
+    (
+      _entidad: unknown,
+      filas: Record<string, unknown> | Record<string, unknown>[],
+    ) =>
+      Promise.resolve(
+        Array.isArray(filas)
+          ? filas.map((f, i) => ({ id: `doc-${i + 1}`, ...f }))
+          : { id: 'doc-1', ...filas },
+      ),
   );
+  // El `UPDATE pagos` que enlaza cada pago a su documento.
+  const query = jest.fn().mockResolvedValue([]);
   const create = jest.fn(
     (_entidad: unknown, datos: Record<string, unknown>) => ({
       ...datos,
@@ -90,7 +102,8 @@ function managerFalso() {
   return {
     save,
     create,
-    manager: { save, create } as unknown as EntityManager,
+    queryEnlace: query,
+    manager: { save, create, query } as unknown as EntityManager,
   };
 }
 
@@ -703,6 +716,148 @@ function managerConLectura(filas: Record<string, unknown>[]) {
     } as unknown as EntityManager,
   };
 }
+
+describe('VentaDocumentosService.documentarVenta: cada pago queda enlazado a su documento', () => {
+  /** Lo que se escribió: `[pagoId → documentoId]`, en el orden de los pagos. */
+  async function enlaces(p: DocumentarVentaParams) {
+    const r = await documentar(p);
+    const llamadas = r.queryEnlace.mock.calls as [string, unknown[]][];
+    if (!llamadas.length) return { r, llamadas, pares: [] as string[][] };
+    const [, binds] = llamadas[0];
+    const pagos = binds[0] as string[];
+    const documentos = binds[1] as string[];
+    return {
+      r,
+      llamadas,
+      pares: pagos.map((pg, i) => [pg, documentos[i]]),
+    };
+  }
+
+  it('boleta: el pago de la máquina lleva su voucher y el del sistema la boleta', async () => {
+    // Los documentos salen en este orden: voucher (1) y boleta del sistema (2).
+    const { pares } = await enlaces(
+      params({
+        pagos: [pago('ef', 'sistema', 60000), pago('db', 'maquina', 40000)],
+      }),
+    );
+
+    expect(pares).toEqual([
+      ['pago-ef', 'doc-2'],
+      ['pago-db', 'doc-1'],
+    ]);
+  });
+
+  it('un solo UPDATE para todos los pagos, no uno por pago (sin N+1)', async () => {
+    const { llamadas, pares } = await enlaces(
+      params({
+        pagos: [
+          pago('a', 'maquina', 30000),
+          pago('b', 'maquina', 30000),
+          pago('c', 'sistema', 20000),
+          pago('d', 'nadie', 20000),
+        ],
+      }),
+    );
+
+    expect(llamadas).toHaveLength(1);
+    expect(pares).toHaveLength(4);
+    const [sql, binds] = llamadas[0];
+    expect(sql).toMatch(/UPDATE pagos/);
+    expect(sql).toMatch(/unnest\(\$1::uuid\[\], \$2::uuid\[\]\)/);
+    // Acotado al tenant del token y a pagos vivos.
+    expect(sql).toMatch(/p\.tenant_id = \$3/);
+    expect(sql).toMatch(/p\.eliminado_el IS NULL/);
+    expect(binds[2]).toBe(TENANT);
+  });
+
+  it('cada pago de la máquina lleva SU voucher, no el del otro', async () => {
+    const { pares } = await enlaces(
+      params({
+        pagos: [pago('a', 'maquina', 60000), pago('b', 'maquina', 40000)],
+      }),
+    );
+
+    expect(pares).toEqual([
+      ['pago-a', 'doc-1'],
+      ['pago-b', 'doc-2'],
+    ]);
+  });
+
+  it('el pago de nadie lleva la fila nadie y el del sistema la boleta (con deuda, la misma boleta)', async () => {
+    // Orden de los documentos: nadie (1) y sistema (2: lo del sistema + lo debido).
+    const { pares } = await enlaces(
+      params({
+        pagos: [pago('n', 'nadie', 30000), pago('s', 'sistema', 20000)],
+      }),
+    );
+
+    expect(pares).toEqual([
+      ['pago-n', 'doc-1'],
+      ['pago-s', 'doc-2'],
+    ]);
+  });
+
+  it('con facturador externo el pago del sistema lleva la boleta del sistema, no el documento de la deuda', async () => {
+    // Documentos: sistema (1, por lo cobrado) y externo (2, por lo debido).
+    const { pares, r } = await enlaces(
+      params({
+        facturador: 'externo',
+        pagos: [pago('s', 'sistema', 30000)],
+      }),
+    );
+
+    expect(r.docs.map((d) => d.emisor)).toEqual(['sistema', 'externo']);
+    expect(pares).toEqual([['pago-s', 'doc-1']]);
+  });
+
+  it.each([
+    ['factura del sistema', { esBoleta: false }, 'sistema' as const],
+    ['factura hecha por fuera', { esBoleta: false }, 'externo' as const],
+    ['venta online', { canal: 'online' }, 'sistema' as const],
+  ])(
+    '%s: todos los pagos caen en el único documento, sea cual sea su medio',
+    async (_nombre, venta, facturador) => {
+      const { pares } = await enlaces(
+        params({
+          venta,
+          facturador,
+          pagos: [
+            pago('a', 'sistema', 19000),
+            pago('b', 'maquina', 40000),
+            pago('c', 'nadie', 41000),
+          ],
+        }),
+      );
+
+      expect(pares).toEqual([
+        ['pago-a', 'doc-1'],
+        ['pago-b', 'doc-1'],
+        ['pago-c', 'doc-1'],
+      ]);
+    },
+  );
+
+  it('un pago de la máquina que fue todo propina no tiene voucher: queda sin enlace, y los demás sí', async () => {
+    const { pares } = await enlaces(
+      params({
+        pagos: [pago('propina', 'maquina', 0), pago('ef', 'sistema', 100000)],
+      }),
+    );
+
+    expect(pares).toEqual([['pago-ef', 'doc-1']]);
+  });
+
+  it.each([
+    ['venta de $0', { totalFinal: '0.0000' }],
+    ['país sin boleta', { tipoDocumentoId: null }],
+  ])('%s: sin documentos no hay nada que enlazar', async (_n, venta) => {
+    const { llamadas } = await enlaces(
+      params({ venta, pagos: [pago('a', 'sistema', 100000)] }),
+    );
+
+    expect(llamadas).toHaveLength(0);
+  });
+});
 
 describe('VentaDocumentosService.registrarDuplicadoDeAbono (E1b)', () => {
   const abono = (pagos: AbonoParaDuplicado[]) => ({
@@ -1426,4 +1581,728 @@ describe('VentaDocumentosService.completarNumero', () => {
       expect(m.query).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('VentaDocumentosService.enlazarPagosDeAbono', () => {
+  const enlazar = (
+    docs: { documento_id: string; emisor: string }[],
+    pagoIds: string[],
+  ) => {
+    const m = managerConLectura(docs);
+    return {
+      m,
+      run: () =>
+        new VentaDocumentosService().enlazarPagosDeAbono(m.manager, {
+          tenantId: TENANT,
+          ventaId: VENTA,
+          pagoIds,
+        }),
+    };
+  };
+
+  it('todos los pagos del abono al documento de la deuda, con UN solo UPDATE', async () => {
+    const e = enlazar(
+      [{ documento_id: 'd-sistema', emisor: 'sistema' }],
+      ['pago-a', 'pago-b'],
+    );
+    await e.run();
+
+    // Una lectura de documentos y un UPDATE.
+    expect(e.m.query).toHaveBeenCalledTimes(2);
+    const [sql, binds] = e.m.query.mock.calls[1] as [string, unknown[]];
+    expect(sql).toMatch(/UPDATE pagos/);
+    expect(binds).toEqual([
+      ['pago-a', 'pago-b'],
+      ['d-sistema', 'd-sistema'],
+      TENANT,
+    ]);
+  });
+
+  it('con facturador externo la deuda es el documento hecho por fuera, no la boleta del sistema', async () => {
+    const e = enlazar(
+      [
+        { documento_id: 'd-sistema', emisor: 'sistema' },
+        { documento_id: 'd-externo', emisor: 'externo' },
+      ],
+      ['pago-a'],
+    );
+    await e.run();
+
+    const binds = e.m.query.mock.calls[1][1] as unknown[];
+    expect(binds[1]).toEqual(['d-externo']);
+  });
+
+  it('la lectura excluye el voucher duplicado, lo descartado y lo borrado, y es de esa venta y ese tenant', async () => {
+    const e = enlazar([{ documento_id: 'd', emisor: 'sistema' }], ['p']);
+    await e.run();
+
+    const [sql, binds] = e.m.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/es_duplicado = false/);
+    expect(sql).toMatch(/emisor IN \('sistema', 'externo'\)/);
+    expect(sql).toMatch(/descarte IS NULL/);
+    expect(sql).toMatch(/eliminado_el IS NULL/);
+    expect(binds).toEqual([VENTA, TENANT]);
+  });
+
+  it('sin documento de la deuda (venta de $0, país sin boleta) no escribe nada', async () => {
+    const e = enlazar([], ['pago-a']);
+    await e.run();
+
+    expect(e.m.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('sin pagos no consulta nada', async () => {
+    const e = enlazar([{ documento_id: 'd', emisor: 'sistema' }], []);
+    await e.run();
+
+    expect(e.m.query).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Qué documento corrige una corrección (spec § 3.6). La forma del SQL la cubre
+ * `test/venta-correcciones.e2e-spec.ts`; acá, la resolución sobre lo que las
+ * tres lecturas devuelven. El documento de cada pago se **lee** de
+ * `pagos.documento_id`: no se infiere de nada más.
+ */
+describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () => {
+  interface DocFila {
+    documento_id: string;
+    emisor: string;
+    monto: string;
+    es_duplicado: boolean;
+  }
+  interface PagoFila {
+    pago_id: string;
+    metodo_nombre: string | null;
+    es_efectivo: boolean | null;
+    documento_id: string | null;
+    aplicado_venta: string;
+  }
+  const doc = (
+    id: string,
+    emisor: string,
+    monto: number,
+    extra: Partial<DocFila> = {},
+  ): DocFila => ({
+    documento_id: id,
+    emisor,
+    monto: monto.toFixed(4),
+    es_duplicado: false,
+    ...extra,
+  });
+  /** Un pago ya enlazado a su documento (`documento_id`). */
+  const pagoFila = (
+    id: string,
+    aplicado: number,
+    documentoId: string | null,
+    extra: Partial<PagoFila> = {},
+  ): PagoFila => ({
+    pago_id: id,
+    metodo_nombre: `Medio ${id}`,
+    es_efectivo: false,
+    documento_id: documentoId,
+    aplicado_venta: aplicado.toFixed(4),
+    ...extra,
+  });
+  /** Las tres lecturas, por el nombre de la tabla que cada una consulta. */
+  const lector = (
+    total: number,
+    docs: DocFila[],
+    pagos: PagoFila[],
+    /** Lo que las correcciones anteriores "sin plata" ya rebajaron. */
+    sinPlata = 0,
+  ): { query: jest.Mock } => ({
+    query: jest.fn((sql: string) => {
+      if (sql.includes('FROM venta_documentos')) return Promise.resolve(docs);
+      if (sql.includes('FROM pagos p')) return Promise.resolve(pagos);
+      return Promise.resolve([
+        { total_final: total.toFixed(4), sin_plata: sinPlata.toFixed(4) },
+      ]);
+    }),
+  });
+  const via = (pagoId: string) => ({ tipo: 'pago', pagoId }) as const;
+  const resolver = (
+    l: { query: jest.Mock },
+    v: Parameters<VentaDocumentosService['documentoQueCorrige']>[1]['via'],
+  ) =>
+    new VentaDocumentosService().documentoQueCorrige(
+      l as unknown as EntityManager,
+      { tenantId: TENANT, ventaId: VENTA, via: v },
+    );
+
+  // Mixta: 60.000 en efectivo (boleta del sistema) y 40.000 con la máquina (voucher).
+  const MIXTA_DOCS = [
+    doc('d-boleta', 'sistema', 60000),
+    doc('d-voucher', 'maquina', 40000),
+  ];
+  const MIXTA_PAGOS = [
+    pagoFila('p-efectivo', 60000, 'd-boleta', { es_efectivo: true }),
+    pagoFila('p-tarjeta', 40000, 'd-voucher'),
+  ];
+
+  it('el pago corrige el documento al que está enlazado (y solo el de efectivo saca plata de la caja)', async () => {
+    const l = lector(100000, MIXTA_DOCS, MIXTA_PAGOS);
+
+    await expect(resolver(l, via('p-tarjeta'))).resolves.toEqual({
+      documento: { id: 'd-voucher', emisor: 'maquina', monto: '40000.0000' },
+      saldo: null,
+      mueveCaja: false,
+    });
+    await expect(resolver(l, via('p-efectivo'))).resolves.toEqual({
+      documento: { id: 'd-boleta', emisor: 'sistema', monto: '60000.0000' },
+      saldo: null,
+      mueveCaja: true,
+    });
+  });
+
+  it('lee el enlace tal cual: dos pagos del mismo medio caen en documentos distintos si así quedaron enlazados', async () => {
+    // Nada del medio, ni de cuándo se creó el pago, decide: solo `documento_id`.
+    const l = lector(
+      100000,
+      [doc('d-1', 'sistema', 60000), doc('d-2', 'externo', 40000)],
+      [pagoFila('p-a', 60000, 'd-1'), pagoFila('p-b', 40000, 'd-2')],
+    );
+
+    expect((await resolver(l, via('p-a'))).documento?.id).toBe('d-1');
+    expect((await resolver(l, via('p-b'))).documento?.id).toBe('d-2');
+  });
+
+  describe('por pasarela (un hecho consumado: nunca rechaza ni mueve caja)', () => {
+    const pasarela = (l: { query: jest.Mock }, documentoId: string | null) =>
+      resolver(l, { tipo: 'pasarela', documentoId });
+
+    it('corrige el documento que trae, que sigue vigente, y no mueve caja', async () => {
+      const l = lector(100000, [], []);
+      l.query.mockResolvedValueOnce([
+        { documento_id: 'd-boleta', emisor: 'sistema', monto: '100000.0000' },
+      ]);
+
+      await expect(pasarela(l, 'd-boleta')).resolves.toEqual({
+        documento: { id: 'd-boleta', emisor: 'sistema', monto: '100000.0000' },
+        saldo: null,
+        mueveCaja: false,
+      });
+      // Solo ese documento, de esa venta y ese tenant, vigente.
+      const [sql, binds] = l.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toMatch(/descarte IS NULL/);
+      expect(sql).toMatch(/eliminado_el IS NULL/);
+      expect(binds).toEqual(['d-boleta', VENTA, TENANT]);
+    });
+
+    it('sin documento (null) no consulta nada y la corrección sale sin fila de documento', async () => {
+      const l = lector(100000, [], []);
+
+      await expect(pasarela(l, null)).resolves.toEqual({
+        documento: null,
+        saldo: null,
+        mueveCaja: false,
+      });
+      expect(l.query).not.toHaveBeenCalled();
+    });
+
+    it('si el documento ya no es vigente no lanza: la corrección sale sin fila de documento', async () => {
+      const l = { query: jest.fn().mockResolvedValue([]) };
+
+      await expect(pasarela(l, 'd-descartado')).resolves.toEqual({
+        documento: null,
+        saldo: null,
+        mueveCaja: false,
+      });
+    });
+  });
+
+  it('el efectivo en la máquina: el contrato es por pago, no por efectivo (corrige el voucher Y mueve caja)', async () => {
+    const l = lector(
+      100000,
+      [doc('d-v1', 'maquina', 60000), doc('d-v2', 'maquina', 40000)],
+      [
+        pagoFila('p-efectivo', 60000, 'd-v1', { es_efectivo: true }),
+        pagoFila('p-tarjeta', 40000, 'd-v2'),
+      ],
+    );
+
+    const r = await resolver(l, via('p-efectivo'));
+
+    expect(r.documento?.id).toBe('d-v1');
+    expect(r.mueveCaja).toBe(true);
+  });
+
+  it('el pago de un abono corrige el documento de la deuda al que se enlazó, nunca el voucher duplicado', async () => {
+    const l = lector(
+      100000,
+      [
+        doc('d-voucher', 'maquina', 40000),
+        doc('d-deuda', 'sistema', 60000),
+        doc('d-dup', 'maquina', 60000, { es_duplicado: true }),
+      ],
+      [
+        pagoFila('p-tarjeta', 40000, 'd-voucher'),
+        pagoFila('p-abono', 60000, 'd-deuda'),
+      ],
+    );
+
+    expect((await resolver(l, via('p-abono'))).documento?.id).toBe('d-deuda');
+  });
+
+  it('un pago sin enlace, en una venta con documentos, no se adivina: 400', async () => {
+    const l = lector(
+      100000,
+      [doc('d-sistema', 'sistema', 70000), doc('d-nadie', 'nadie', 30000)],
+      [pagoFila('p-1', 30000, null)],
+    );
+
+    await expect(resolver(l, via('p-1'))).rejects.toThrow(
+      'No se encontró el documento de ese pago.',
+    );
+  });
+
+  it('un enlace a un documento que ya no vale (descartado: no viene en la lectura de vigentes) tampoco resuelve', async () => {
+    const l = lector(
+      100000,
+      [doc('d-sistema', 'sistema', 100000)],
+      [pagoFila('p-1', 100000, 'd-descartado')],
+    );
+
+    await expect(resolver(l, via('p-1'))).rejects.toThrow(BadRequestException);
+  });
+
+  it('una devolución interna: el pago enlazado a la fila nadie corrige la fila nadie', async () => {
+    const l = lector(
+      100000,
+      [doc('d-nadie', 'nadie', 100000)],
+      [pagoFila('p-1', 100000, 'd-nadie')],
+    );
+
+    const r = await resolver(l, via('p-1'));
+
+    expect(r.documento).toEqual({
+      id: 'd-nadie',
+      emisor: 'nadie',
+      monto: '100000.0000',
+    });
+  });
+
+  describe('"no vuelve plata"', () => {
+    const MESA_DOCS = [
+      doc('d-voucher', 'maquina', 40000),
+      doc('d-deuda', 'sistema', 60000),
+    ];
+    const MESA_PAGOS = [pagoFila('p-tarjeta', 40000, 'd-voucher')];
+
+    it('con saldo corrige el documento de lo debido, y no mueve caja', async () => {
+      const l = lector(100000, MESA_DOCS, MESA_PAGOS);
+
+      await expect(resolver(l, { tipo: 'sin_plata' })).resolves.toEqual({
+        documento: { id: 'd-deuda', emisor: 'sistema', monto: '60000.0000' },
+        // Lo que la venta todavía debe: el tope de "no vuelve plata".
+        saldo: '60000.0000',
+        mueveCaja: false,
+      });
+    });
+
+    it('con facturador externo lo debido es el documento hecho por fuera', async () => {
+      const l = lector(
+        100000,
+        [
+          doc('d-voucher', 'maquina', 40000),
+          doc('d-externo', 'externo', 60000),
+        ],
+        MESA_PAGOS,
+      );
+
+      expect((await resolver(l, { tipo: 'sin_plata' })).documento?.id).toBe(
+        'd-externo',
+      );
+    });
+
+    describe('el saldo es de la serie: total − lo aplicado − lo ya rebajado sin plata', () => {
+      // Debe 60.000 (voucher de 40.000 pagado), con 20.000 abonados: debe 40.000.
+      const DOCS = [
+        doc('d-voucher', 'maquina', 40000),
+        doc('d-deuda', 'sistema', 60000),
+      ];
+      const PAGOS = [
+        pagoFila('p-tarjeta', 40000, 'd-voucher'),
+        pagoFila('p-abono', 20000, 'd-deuda', { es_efectivo: true }),
+      ];
+
+      it('sin correcciones anteriores el saldo es total − aplicado', async () => {
+        const l = lector(100000, DOCS, PAGOS, 0);
+
+        expect((await resolver(l, { tipo: 'sin_plata' })).saldo).toBe(
+          '40000.0000',
+        );
+      });
+
+      it('lo ya rebajado sin plata baja el saldo (y lo que queda es lo que se puede rebajar)', async () => {
+        const l = lector(100000, DOCS, PAGOS, 15000);
+
+        expect((await resolver(l, { tipo: 'sin_plata' })).saldo).toBe(
+          '25000.0000',
+        );
+      });
+
+      it('con todo rebajado no queda saldo: "no vuelve plata" es un 400', async () => {
+        const l = lector(100000, DOCS, PAGOS, 40000);
+
+        await expect(resolver(l, { tipo: 'sin_plata' })).rejects.toThrow(
+          /no tiene saldo/,
+        );
+      });
+
+      it('la opción "no vuelve plata" lleva ese mismo saldo y desaparece al agotarse', async () => {
+        const opciones = (sinPlata: number) =>
+          new VentaDocumentosService().opcionesDevolucion(
+            lector(100000, DOCS, PAGOS, sinPlata) as unknown as EntityManager,
+            { tenantId: TENANT, ventaId: VENTA },
+          );
+
+        expect((await opciones(15000)).find((o) => o.sinPlata)?.monto).toBe(
+          '25000.0000',
+        );
+        expect((await opciones(40000)).some((o) => o.sinPlata)).toBe(false);
+      });
+
+      it('solo cuentan las correcciones "sin plata" de esa venta y ese tenant, vivas', async () => {
+        const l = lector(100000, DOCS, PAGOS, 0);
+
+        await resolver(l, { tipo: 'sin_plata' });
+
+        const [sql, binds] = l.query.mock.calls.find(
+          ([q]: [string]) =>
+            !q.includes('FROM venta_documentos') && !q.includes('FROM pagos p'),
+        ) as [string, unknown[]];
+        // Las que volvieron por un pago o por la pasarela devolvieron plata por
+        // fuera: la deuda sigue igual.
+        expect(sql).toMatch(/c\.devolucion_via = 'sin_plata'/);
+        expect(sql).toMatch(/c\.venta_referencia_id = v\.venta_id/);
+        expect(sql).toMatch(/c\.tenant_id = v\.tenant_id/);
+        expect(sql).toMatch(/c\.eliminado_el IS NULL/);
+        expect(binds).toEqual([VENTA, TENANT]);
+      });
+    });
+
+    it('sin saldo es un 400', async () => {
+      const l = lector(100000, MIXTA_DOCS, MIXTA_PAGOS);
+
+      await expect(resolver(l, { tipo: 'sin_plata' })).rejects.toThrow(
+        /no tiene saldo/,
+      );
+    });
+
+    it('con saldo pero sin documento de lo debido es un 400, no una devolución interna', async () => {
+      const l = lector(
+        100000,
+        [doc('d-nadie', 'nadie', 40000)],
+        [pagoFila('p-1', 40000, 'd-nadie')],
+      );
+
+      await expect(resolver(l, { tipo: 'sin_plata' })).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+  });
+
+  describe('lo que rechaza', () => {
+    it('un pagoId que la lectura no trae (de otra venta o de otro tenant, o inexistente)', async () => {
+      const l = lector(100000, MIXTA_DOCS, MIXTA_PAGOS);
+
+      await expect(resolver(l, via('p-ajeno'))).rejects.toThrow(
+        'El pago indicado no es de esta venta.',
+      );
+    });
+
+    it('un pago que fue todo propina: no cubrió nada de la venta', async () => {
+      const l = lector(100000, MIXTA_DOCS, [
+        ...MIXTA_PAGOS,
+        pagoFila('p-propina', 0, null),
+      ]);
+
+      await expect(resolver(l, via('p-propina'))).rejects.toThrow(
+        /no cubrió nada/,
+      );
+    });
+
+    it('la venta no existe en ese tenant: 404', async () => {
+      const l = { query: jest.fn().mockResolvedValue([]) };
+
+      await expect(resolver(l, via('p-1'))).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  it('una venta que nunca tuvo documentos (país sin boleta) se corrige sin documento, pero el pago igual se valida', async () => {
+    const l = lector(100000, [], [pagoFila('p-1', 100000, null)]);
+
+    await expect(resolver(l, via('p-1'))).resolves.toEqual({
+      documento: null,
+      saldo: null,
+      mueveCaja: false,
+    });
+    await expect(resolver(l, via('p-ajeno'))).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('todas las lecturas son de ESA venta y ESE tenant, y solo de documentos vigentes', async () => {
+    const l = lector(100000, MIXTA_DOCS, MIXTA_PAGOS);
+
+    await resolver(l, via('p-tarjeta'));
+
+    expect(l.query).toHaveBeenCalledTimes(3);
+    for (const [sql, binds] of l.query.mock.calls as [string, unknown[]][]) {
+      expect(binds).toEqual([VENTA, TENANT]);
+      expect(sql).toMatch(/eliminado_el IS NULL/);
+    }
+    const sqlDocs = (l.query.mock.calls as [string][]).find(([q]) =>
+      q.includes('FROM venta_documentos'),
+    )![0];
+    expect(sqlDocs).toMatch(/descarte IS NULL/);
+    // El documento de cada pago sale de la columna enlazada, no del medio ni de
+    // cuándo se creó el pago.
+    const sqlPagos = (l.query.mock.calls as [string][]).find(([q]) =>
+      q.includes('FROM pagos p'),
+    )![0];
+    expect(sqlPagos).toMatch(/p\.documento_id/);
+    expect(sqlPagos).not.toMatch(/tenant_metodo_pago|emisor|creado_el >/);
+  });
+
+  describe('opcionesDevolucion', () => {
+    const opciones = (l: { query: jest.Mock }) =>
+      new VentaDocumentosService().opcionesDevolucion(
+        l as unknown as EntityManager,
+        { tenantId: TENANT, ventaId: VENTA },
+      );
+
+    it('una opción por pago con su método, su monto aplicado y el registro que va a quedar; sin "no vuelve plata" si no hay saldo', async () => {
+      const l = lector(100000, MIXTA_DOCS, MIXTA_PAGOS);
+
+      await expect(opciones(l)).resolves.toEqual([
+        {
+          pagoId: 'p-efectivo',
+          sinPlata: false,
+          metodo: 'Medio p-efectivo',
+          monto: '60000.0000',
+          mueveCaja: true,
+          registro: 'nota_credito_sistema',
+        },
+        {
+          pagoId: 'p-tarjeta',
+          sinPlata: false,
+          metodo: 'Medio p-tarjeta',
+          monto: '40000.0000',
+          mueveCaja: false,
+          registro: 'nota_maquina',
+        },
+      ]);
+    });
+
+    it('"no vuelve plata" aparece solo con saldo, por lo debido, con el registro del documento de la deuda', async () => {
+      const l = lector(
+        100000,
+        [
+          doc('d-voucher', 'maquina', 40000),
+          doc('d-externo', 'externo', 60000),
+        ],
+        [pagoFila('p-tarjeta', 40000, 'd-voucher')],
+      );
+
+      const o = await opciones(l);
+
+      expect(o).toHaveLength(2);
+      expect(o[1]).toEqual({
+        pagoId: null,
+        sinPlata: true,
+        metodo: null,
+        monto: '60000.0000',
+        mueveCaja: false,
+        registro: 'nota_externa',
+      });
+    });
+
+    it('el registro de cada documento: sistema, máquina, hecho por fuera, nadie y sin documento', async () => {
+      const casos: [string, string | null][] = [
+        ['sistema', 'nota_credito_sistema'],
+        ['maquina', 'nota_maquina'],
+        ['externo', 'nota_externa'],
+        ['nadie', 'devolucion_interna'],
+      ];
+      for (const [emisor, registro] of casos) {
+        const l = lector(
+          1000,
+          [doc('d-1', emisor, 1000)],
+          [pagoFila('p-1', 1000, 'd-1')],
+        );
+        expect((await opciones(l))[0].registro).toBe(registro);
+      }
+      const sinDocs = lector(1000, [], [pagoFila('p-1', 1000, null)]);
+      expect((await opciones(sinDocs))[0].registro).toBe('nota_credito');
+    });
+
+    it('no ofrece el pago que fue todo propina ni el que no tiene documento enlazado', async () => {
+      const l = lector(
+        30000,
+        [doc('d-nadie', 'nadie', 30000)],
+        [pagoFila('p-propina', 0, null), pagoFila('p-sin-doc', 30000, null)],
+      );
+
+      await expect(opciones(l)).resolves.toEqual([]);
+    });
+  });
+});
+
+describe('VentaDocumentosService.exigirTopeDelDocumento', () => {
+  const tope = (corregido: string, monto: string) => {
+    const m = managerConLectura([{ corregido }]);
+    return {
+      m,
+      run: () =>
+        new VentaDocumentosService().exigirTopeDelDocumento(m.manager, {
+          tenantId: TENANT,
+          documento: { id: 'd-1', emisor: 'maquina', monto: '40000.0000' },
+          monto,
+        }),
+    };
+  };
+
+  it('lo corregido más esta nota puede llegar justo al monto del documento', async () => {
+    await expect(
+      tope('30000.0000', '10000.0000').run(),
+    ).resolves.toBeUndefined();
+  });
+
+  it('pasarlo es un 400 que no dice ningún número', async () => {
+    const error = (await tope('30000.0000', '10000.0001')
+      .run()
+      .catch((e: Error) => e)) as BadRequestException;
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect(error.message).toMatch(/queda por corregir/);
+    expect(error.message).not.toMatch(/\d/);
+  });
+
+  it('cuenta toda corrección que apunte al documento de ese tenant, vigente y de una venta no borrada', async () => {
+    const t = tope('0', '1');
+    await t.run();
+
+    const [sql, binds] = t.m.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/documento_corregido_id = \$1/);
+    expect(sql).toMatch(/vd\.tenant_id = \$2/);
+    expect(sql).toMatch(/descarte IS NULL/);
+    expect(sql).toMatch(/v\.eliminado_el IS NULL/);
+    expect(sql).toMatch(/vd\.eliminado_el IS NULL/);
+    expect(binds).toEqual(['d-1', TENANT]);
+  });
+});
+
+describe('VentaDocumentosService.documentarCorreccion', () => {
+  const BALDES = [
+    { afecto: '19000.0000', exento: '4000.0000', impuestos: '3610.0000' },
+  ];
+  const documentar = (
+    emisor: 'sistema' | 'maquina' | 'externo' | 'nadie',
+    tipoNotaCreditoId: string | null,
+    filas: Record<string, unknown>[] = BALDES,
+  ) => {
+    const m = managerConLectura(filas);
+    return {
+      m,
+      run: () =>
+        new VentaDocumentosService().documentarCorreccion(m.manager, {
+          tenantId: TENANT,
+          correccionVentaId: 'nc-1',
+          corregido: { id: 'd-orig', emisor, monto: '60000.0000' },
+          monto: '26610',
+          tipoNotaCreditoId,
+        }),
+    };
+  };
+
+  it('sistema: NC armada con el tipo NC y los baldes de las líneas de la propia corrección', async () => {
+    const d = documentar('sistema', 'tipo-nc');
+    await d.run();
+
+    expect(d.m.save).toHaveBeenCalledTimes(1);
+    expect(d.m.create).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        tenantId: TENANT,
+        ventaId: 'nc-1',
+        emisor: 'sistema',
+        tipoDocumentoId: 'tipo-nc',
+        estadoEnvio: 'armado',
+        numero: null,
+        monto: '26610.0000',
+        montoAfecto: '19000.0000',
+        montoExento: '4000.0000',
+        montoImpuestos: '3610.0000',
+        documentoCorregidoId: 'd-orig',
+        esDuplicado: false,
+        pagoId: null,
+      }),
+    );
+    // Los baldes se leen de las líneas de ESA corrección.
+    const [sql, binds] = d.m.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/FROM venta_detalles/);
+    expect(sql).toMatch(/eliminado_el IS NULL/);
+    expect(binds).toEqual(['nc-1']);
+  });
+
+  it('externo: NC sin número y sin estado de envío, con el tipo NC y baldes', async () => {
+    const d = documentar('externo', 'tipo-nc');
+    await d.run();
+
+    expect(d.m.create).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        emisor: 'externo',
+        tipoDocumentoId: 'tipo-nc',
+        estadoEnvio: null,
+        numero: null,
+        montoAfecto: '19000.0000',
+      }),
+    );
+  });
+
+  it('máquina: NC sin número, con el tipo NC, sin baldes ni lectura de líneas', async () => {
+    const d = documentar('maquina', 'tipo-nc');
+    await d.run();
+
+    expect(d.m.query).not.toHaveBeenCalled();
+    expect(d.m.create).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        emisor: 'maquina',
+        tipoDocumentoId: 'tipo-nc',
+        estadoEnvio: null,
+        numero: null,
+        montoAfecto: null,
+        montoExento: null,
+        montoImpuestos: null,
+      }),
+    );
+  });
+
+  it('nadie: devolución interna, sin tipo (aunque el país tenga NC) y sin baldes', async () => {
+    const d = documentar('nadie', 'tipo-nc');
+    await d.run();
+
+    expect(d.m.query).not.toHaveBeenCalled();
+    expect(d.m.create).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        emisor: 'nadie',
+        tipoDocumentoId: null,
+        estadoEnvio: null,
+        montoAfecto: null,
+        documentoCorregidoId: 'd-orig',
+      }),
+    );
+  });
+
+  it('un documento con tipo y sin el tipo NC del país es un error, no una fila sin tipo', async () => {
+    await expect(documentar('sistema', null).run()).rejects.toThrow(
+      InternalServerErrorException,
+    );
+  });
 });

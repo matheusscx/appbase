@@ -1,4 +1,5 @@
 import {
+  Check,
   Entity,
   Index,
   PrimaryGeneratedColumn,
@@ -22,6 +23,9 @@ export enum EstadoVenta {
   CANCELADA = 'cancelada',
 }
 
+/** Por dónde volvió la plata de una corrección (spec § 3.6). */
+export type DevolucionVia = 'pago' | 'sin_plata' | 'pasarela';
+
 /**
  * Índice por venta referenciada: es la búsqueda *"¿qué notas de crédito tiene
  * esta venta?"*, que corre en cada lectura del detalle. Sin él, seq scan de
@@ -29,6 +33,10 @@ export enum EstadoVenta {
  */
 @Index('idx_ventas_venta_referencia', ['ventaReferenciaId'])
 @Entity('ventas')
+@Check(
+  'chk_ventas_devolucion_via',
+  `"devolucion_via" IN ('pago','sin_plata','pasarela')`,
+)
 export class Venta {
   @PrimaryGeneratedColumn('uuid', { name: 'venta_id' })
   id: string;
@@ -123,6 +131,20 @@ export class Venta {
 
   @Column({ name: 'venta_referencia_id', type: 'uuid', nullable: true })
   ventaReferenciaId: string | null;
+
+  /**
+   * En una corrección: por dónde volvió la plata (`'pago'` por uno de los pagos de
+   * la venta, `'sin_plata'` rebajando lo que se debía, `'pasarela'` el reembolso
+   * de una orden). Nulo en lo que no es corrección. Es la auditoría de ese dato y
+   * lo que hace que "no vuelve plata" sea una **serie**: lo ya rebajado sin plata
+   * baja el saldo que queda por rebajar.
+   */
+  @Column({ name: 'devolucion_via', type: 'text', nullable: true })
+  devolucionVia: DevolucionVia | null;
+
+  /** Con `devolucion_via = 'pago'`: el pago por el que volvió la plata. */
+  @Column({ name: 'devolucion_pago_id', type: 'uuid', nullable: true })
+  devolucionPagoId: string | null;
 
   @Column({ type: 'text', nullable: true })
   comentario: string | null;

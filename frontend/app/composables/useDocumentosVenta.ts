@@ -74,7 +74,9 @@ export function etiquetaClase(clase: string | null): string | null {
  * crédito). Una fila `nadie` no es un documento: es la constancia de que no hay.
  */
 export function etiquetaTipo(doc: DocumentoVenta): string {
-  if (doc.emisor === 'nadie') return 'Sin documento'
+  // La fila `nadie` de una corrección es la devolución interna: la constancia de
+  // que se devolvió sin documento tributario.
+  if (doc.emisor === 'nadie') return doc.documentoCorregidoId ? 'Devolución interna' : 'Sin documento'
   if (doc.emisor === 'maquina') return etiquetaClase(doc.claseMaquina) ?? 'Comprobante'
   return doc.tipoDocumento?.nombre ?? 'Documento'
 }
@@ -172,4 +174,64 @@ export function leyendaCorrige(doc: DocumentoVenta, todos: DocumentoVenta[]): st
   if (!corregido) return 'Corrige otro documento'
   const numero = corregido.numero ? ` · N° ${corregido.numero}` : ''
   return `Corrige: ${etiquetaEmisor(corregido.emisor)} · ${etiquetaTipo(corregido)}${numero}`
+}
+
+/**
+ * Lo que una corrección deja registrado según el documento que corrige (spec
+ * § 3.6). Espejo de `RegistroCorreccion` del backend: lo calcula el servidor.
+ */
+export type RegistroCorreccion
+  = | 'nota_credito_sistema'
+    | 'nota_maquina'
+    | 'nota_externa'
+    | 'devolucion_interna'
+    | 'nota_credito'
+
+/**
+ * Una forma de devolver la plata, tal como la publica `GET /ventas/:id`
+ * (`opcionesDevolucion`): una por pago que puede recibir la devolución, y "No
+ * vuelve plata" (`sinPlata`) solo si la venta tiene saldo. **La pantalla no
+ * decide qué documento corrige**: lo dice `registro`, que sale de la misma
+ * resolución que usa el servidor al crear la nota.
+ */
+export interface OpcionDevolucion {
+  /** El pago de la venta a corregir; `null` en "No vuelve plata". */
+  pagoId: string | null
+  sinPlata: boolean
+  /** Nombre del medio de pago; `null` en "No vuelve plata". */
+  metodo: string | null
+  /** Lo que ese pago cubrió de la venta, o el saldo en "No vuelve plata". */
+  monto: string
+  /** La plata sale de la caja física (el pago fue en efectivo). */
+  mueveCaja: boolean
+  registro: RegistroCorreccion
+}
+
+/** La clave de una opción en el selector: el pago, o la de "No vuelve plata". */
+export function claveOpcion(o: OpcionDevolucion): string {
+  return o.sinPlata ? 'sin-plata' : (o.pagoId ?? '')
+}
+
+const REGISTRO_QUE_QUEDA: Record<RegistroCorreccion, string> = {
+  nota_credito_sistema: 'Una nota de crédito, armada por el sistema.',
+  nota_maquina: 'Una nota de crédito de la máquina: se hace en la máquina y se anota después.',
+  nota_externa: 'Una nota de crédito hecha por fuera, en tu otro facturador: se anota después.',
+  devolucion_interna: 'Una devolución interna: queda anotada en el sistema, sin documento tributario.',
+  nota_credito: 'Una nota de crédito.',
+}
+
+/** "Va a quedar: …" — el registro que deja la opción elegida, en una línea. */
+export function registroQueQueda(registro: string): string {
+  return (REGISTRO_QUE_QUEDA as Record<string, string | undefined>)[registro] ?? 'Una corrección de la venta.'
+}
+
+/**
+ * El `devolucion` del body de la nota: el pago, o "no vuelve plata". Es lo único
+ * que el cliente manda sobre el documento: el servidor resuelve cuál corrige y
+ * valida que el pago sea de esa venta.
+ */
+export function cuerpoDevolucion(o: OpcionDevolucion): { pagoId: string } | { sinPlata: true } {
+  if (o.sinPlata) return { sinPlata: true }
+  if (!o.pagoId) throw new Error('Una opción de devolución sin pago ni "no vuelve plata"')
+  return { pagoId: o.pagoId }
 }

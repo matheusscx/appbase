@@ -49,6 +49,13 @@ export class VentasReembolsoHandler
         monto: await this.cuantizarMontoReembolso(evento),
         devoluciones: evento.devoluciones,
         comentario: `NC por reembolso orden ${evento.codigoOrden}`,
+        // La plata ya volvió por el proveedor: no mueve caja. Corrige el único
+        // documento válido de la venta, si lo hay (nunca rechaza el evento).
+        via: await this.ventasService.viaDeReembolsoPasarela(
+          evento.tenantId,
+          evento.ventaId,
+          evento.ordenId,
+        ),
       });
       return { notaCreditoId: nc.id };
     }

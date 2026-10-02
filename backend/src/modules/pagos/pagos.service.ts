@@ -502,6 +502,15 @@ export class PagosService {
           })),
         });
 
+        // Cada pago del abono queda enlazado al documento de la deuda (nunca al
+        // duplicado), de una sola vez: `pagos.documento_id` es lo que dice a qué
+        // documento va una devolución por ese pago.
+        await this.ventaDocumentos.enlazarPagosDeAbono(manager, {
+          tenantId,
+          ventaId: dto.ventaId,
+          pagoIds: porPago.map((p) => p.pagoId),
+        });
+
         // Recalcular monto total aplicado y nuevo estado (solo aplicaciones venta)
         const newMontoAplicado = montoAplicado.plus(montoNuevosVenta);
         const newEstado = calcularEstadoVenta(

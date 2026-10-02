@@ -109,7 +109,19 @@ const VENTA = {
   ventaReferenciaId: null,
   tieneLineasDespachadas: false,
   tipoDocumento: null,
+  esCorreccion: false,
   esNotaCredito: false,
+  // "¿Por dónde vuelve la plata?", del backend: el drawer solo se la pasa al modal.
+  opcionesDevolucion: [
+    {
+      pagoId: 'pago-efectivo',
+      sinPlata: false,
+      metodo: 'Efectivo',
+      monto: '7500.0000',
+      mueveCaja: true,
+      registro: 'nota_credito_sistema',
+    },
+  ],
   reembolsos: [],
   notasCredito: [],
   // Del backend. `total` NO es `totalFinal` a propósito: es el número que el
@@ -193,7 +205,9 @@ const VENTA = {
 const NOTA_CREDITO = {
   ...VENTA,
   id: 'nc-1',
+  esCorreccion: true,
   esNotaCredito: true,
+  opcionesDevolucion: [],
   totalBruto: '883.0000',
   totalDescuentos: '0.0000',
   totalImpuestos: '117.0000',
@@ -496,6 +510,75 @@ describe('VentaDetalleDrawer — nota de crédito compuesta', () => {
   })
 })
 
+describe('VentaDetalleDrawer — una devolución interna es una corrección, no una venta', () => {
+  // Corrige una venta y no lleva el tipo NC (tipo nulo): el backend la marca
+  // `esCorreccion` y NO `esNotaCredito`. Con el flag de antes (el tipo) se
+  // pintaba como una venta más.
+  const DEVOLUCION_INTERNA = {
+    ...NOTA_CREDITO,
+    id: 'di-1',
+    esCorreccion: true,
+    esNotaCredito: false,
+    tipoDocumento: null,
+    // Con disponible, para probar que lo que corta la oferta es `esCorreccion`.
+    disponibleNotaCredito: { total: '500.0000', porPorcion: [] },
+  }
+  const botonNc = (wrapper: Awaited<ReturnType<typeof montar>>) =>
+    wrapper.findAll('button').find(b => b.text().trim() === 'Nota de crédito')
+
+  it('rotula la tabla como la de una nota y el badge dice "Devolución interna"', async () => {
+    documentoActual = DEVOLUCION_INTERNA as unknown as typeof VENTA
+    try {
+      const wrapper = await montar()
+      const texto = wrapper.text()
+
+      expect(texto).toContain('Líneas de la nota')
+      expect(texto).not.toContain('Líneas de venta')
+      expect(texto).toContain('Devolución interna')
+      expect(texto).not.toContain('Nota de Crédito')
+      // Y sigue mostrando la porción fiscal de cada línea, como en una nota.
+      const lineas = filas(wrapper)
+      expect(lineas.some(f => f.includes('afecto'))).toBe(true)
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  })
+
+  it('no ofrece emitir otra nota sobre ella, aunque el backend diga que queda disponible', async () => {
+    documentoActual = DEVOLUCION_INTERNA as unknown as typeof VENTA
+    try {
+      const wrapper = await montar()
+
+      expect(botonNc(wrapper)).toBeUndefined()
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  })
+
+  it('una nota de crédito con tipo se sigue rotulando "Nota de Crédito"', async () => {
+    documentoActual = NOTA_CREDITO as unknown as typeof VENTA
+    try {
+      const wrapper = await montar()
+
+      expect(wrapper.text()).toContain('Nota de Crédito')
+      expect(wrapper.text()).not.toContain('Devolución interna')
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  })
+
+  it('una venta normal no lleva ningún badge de corrección', async () => {
+    const wrapper = await montar()
+
+    expect(wrapper.text()).not.toContain('Devolución interna')
+    expect(wrapper.text()).not.toContain('Nota de Crédito')
+    expect(botonNc(wrapper)).toBeDefined()
+  })
+})
+
 describe('VentaDetalleDrawer — el disponible sale del backend', () => {
   it('le pasa al modal el número del backend, no uno recalculado en el navegador', async () => {
     // El drawer restaba las notas previas por su cuenta. Con este fixture eso
@@ -510,6 +593,13 @@ describe('VentaDetalleDrawer — el disponible sale del backend', () => {
       { clasificacion: 'afecto', monto: '5000.0000' },
       { clasificacion: 'exento', monto: '1500.0000' },
     ])
+  })
+
+  it('le pasa al modal las opciones de "¿por dónde vuelve la plata?" tal como las calculó el backend', async () => {
+    const wrapper = await montar()
+    const modal = wrapper.findComponent({ name: 'VentasNotaCreditoModal' })
+
+    expect(modal.props('opciones')).toEqual(VENTA.opcionesDevolucion)
   })
 })
 

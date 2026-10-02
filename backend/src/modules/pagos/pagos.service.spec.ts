@@ -172,6 +172,9 @@ describe('PagosService', () => {
           provide: VentaDocumentosService,
           useValue: {
             registrarDuplicadoDeAbono: jest.fn().mockResolvedValue([]),
+            // El enlace de cada pago a su documento también se prueba allá: acá, que
+            // `registrarAbono` lo llama con lo que corresponde.
+            enlazarPagosDeAbono: jest.fn().mockResolvedValue(undefined),
           },
         },
         // Pasa derecho a la operación: el reclamo y la reproducción se prueban
@@ -843,6 +846,7 @@ describe('PagosService', () => {
         const svc = module.get<PagosService>(PagosService);
         const documentos = module.get<{
           registrarDuplicadoDeAbono: jest.Mock;
+          enlazarPagosDeAbono: jest.Mock;
         }>(VentaDocumentosService);
         const result = await svc.registrarAbono(
           TENANT_ID,
@@ -900,6 +904,29 @@ describe('PagosService', () => {
         ]);
         // El cobro pasa igual.
         expect(result.venta.estado).toBe(EstadoVenta.PAGADA_PARCIAL);
+      });
+
+      it('enlaza TODOS los pagos del abono al documento de la deuda en una sola llamada, dentro de la misma transacción', async () => {
+        const { manager, documentos } = await abonar(
+          [
+            { metodoPagoId: EFECTIVO_ID, monto: '20000' },
+            { metodoPagoId: TARJETA_ID, monto: '37500' },
+          ],
+          METODO_EFECTIVO_Y_TARJETA_ROWS,
+        );
+
+        expect(documentos.enlazarPagosDeAbono).toHaveBeenCalledTimes(1);
+        const [mgr, params] = documentos.enlazarPagosDeAbono.mock.calls[0] as [
+          unknown,
+          Record<string, unknown>,
+        ];
+        expect(mgr).toBe(manager);
+        expect(params).toEqual({
+          tenantId: TENANT_ID,
+          ventaId: VENTA_ID,
+          // Los dos, también el de la máquina: el duplicado no es el documento del pago.
+          pagoIds: ['pago-uuid-001', 'pago-uuid-001'],
+        });
       });
 
       it('el abono no crea documentos por su cuenta: solo delega en el duplicado', async () => {

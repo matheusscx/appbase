@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
+  claveOpcion,
   comprobanteDelPago,
+  cuerpoDevolucion,
   cuerpoCompletarNumero,
   documentoPreguntado,
   estadoDocumento,
@@ -9,7 +11,9 @@ import {
   leyendaCorrige,
   leyendaDescarte,
   puedeCompletarNumero,
+  registroQueQueda,
   type DocumentoVenta,
+  type OpcionDevolucion,
 } from './useDocumentosVenta'
 
 function doc(parcial: Partial<DocumentoVenta> = {}): DocumentoVenta {
@@ -153,5 +157,54 @@ describe('la pregunta de anular', () => {
   it('sin dato del backend, lo seguro es nombrarla factura', () => {
     expect(documentoPreguntado(null)).toBe('esta factura')
     expect(documentoPreguntado(undefined)).toBe('esta factura')
+  })
+})
+
+describe('la devolución interna se rotula como lo que es', () => {
+  it('la fila nadie que corrige algo es una "Devolución interna", no "Sin documento"', () => {
+    expect(etiquetaTipo(doc({ emisor: 'nadie', tipoDocumento: null, documentoCorregidoId: 'orig' })))
+      .toBe('Devolución interna')
+  })
+
+  it('la fila nadie de una venta sigue siendo "Sin documento"', () => {
+    expect(etiquetaTipo(doc({ emisor: 'nadie', tipoDocumento: null }))).toBe('Sin documento')
+  })
+})
+
+describe('por dónde vuelve la plata (opcionesDevolucion)', () => {
+  const opcion = (parcial: Partial<OpcionDevolucion> = {}): OpcionDevolucion => ({
+    pagoId: 'pago-1',
+    sinPlata: false,
+    metodo: 'Efectivo',
+    monto: '60000.0000',
+    mueveCaja: true,
+    registro: 'nota_credito_sistema',
+    ...parcial,
+  })
+
+  it('manda el pago elegido, o sinPlata: nunca el documento', () => {
+    expect(cuerpoDevolucion(opcion())).toEqual({ pagoId: 'pago-1' })
+    expect(cuerpoDevolucion(opcion({ pagoId: null, sinPlata: true, metodo: null }))).toEqual({ sinPlata: true })
+  })
+
+  it('una opción rota (ni pago ni sinPlata) no se manda', () => {
+    expect(() => cuerpoDevolucion(opcion({ pagoId: null }))).toThrow()
+  })
+
+  it('la clave distingue cada pago y "no vuelve plata"', () => {
+    expect(claveOpcion(opcion({ pagoId: 'a' }))).toBe('a')
+    expect(claveOpcion(opcion({ pagoId: null, sinPlata: true }))).toBe('sin-plata')
+  })
+
+  it('dice en una línea qué registro va a quedar, por cada tipo', () => {
+    expect(registroQueQueda('nota_credito_sistema')).toMatch(/armada por el sistema/)
+    expect(registroQueQueda('nota_maquina')).toMatch(/máquina.*después/)
+    expect(registroQueQueda('nota_externa')).toMatch(/hecha por fuera/)
+    expect(registroQueQueda('devolucion_interna')).toMatch(/sin documento tributario/)
+    expect(registroQueQueda('nota_credito')).toBe('Una nota de crédito.')
+  })
+
+  it('un registro que este front no conoce no rompe', () => {
+    expect(registroQueQueda('otro')).toBe('Una corrección de la venta.')
   })
 })

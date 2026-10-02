@@ -72,7 +72,12 @@ export class VentasController {
       monto: dto.monto,
       comentario: dto.comentario,
       devoluciones: dto.devoluciones,
-      devolverDinero: dto.devolverDinero === true,
+      // El cliente dice por dónde vuelve la plata; el servidor resuelve qué
+      // documento corrige y valida que el pago sea de ESTA venta y ESTE tenant.
+      via:
+        dto.devolucion.pagoId !== undefined
+          ? { tipo: 'pago', pagoId: dto.devolucion.pagoId }
+          : { tipo: 'sin_plata' },
     });
   }
 

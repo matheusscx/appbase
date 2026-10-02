@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import type { CriterioRedondeoCongelado, DetalleVentaDevolucion } from '~/composables/useDevolucionInventario'
+import {
+  claveOpcion,
+  cuerpoDevolucion,
+  registroQueQueda,
+  type OpcionDevolucion,
+} from '~/composables/useDocumentosVenta'
 
 const props = defineProps<{
   ventaId: string
@@ -20,6 +26,13 @@ const props = defineProps<{
    * umbral del motivo como el backend — ver `valorDevueltoCuantizado`.
    */
   configCalculo: CriterioRedondeoCongelado | null
+  /**
+   * "¿Por dónde vuelve la plata?", del backend (`opcionesDevolucion`): una por
+   * pago que puede recibir la devolución y "No vuelve plata" solo si la venta
+   * tiene saldo. Salen de la misma resolución que usa el servidor al crear la
+   * nota, así que el registro que anuncian es el que va a quedar.
+   */
+  opciones: OpcionDevolucion[]
 }>()
 export interface NotaCreditoSuccessPayload {
   id: string
@@ -41,7 +54,8 @@ const apiUrl = config.public.apiUrl
 
 const monto = ref('')
 const comentario = ref('')
-const devolverDinero = ref(false)
+/** La clave de la opción elegida (`claveOpcion`); `undefined` hasta que se elige. */
+const seleccion = ref<string | undefined>(undefined)
 const submitting = ref(false)
 const { filas, cargarDesdeDetalles, setCantidad, setReponer, filasValidas, devoluciones }
   = useDevolucionInventario()
@@ -50,13 +64,38 @@ watch(open, (v) => {
   if (!v) return
   monto.value = props.disponible
   comentario.value = ''
-  devolverDinero.value = false
+  // Con una sola forma de devolver no hay nada que elegir; con varias, el
+  // cajero elige: un default movería plata de la caja sin que lo decida.
+  seleccion.value = props.opciones.length === 1 ? claveOpcion(props.opciones[0]!) : undefined
   cargarDesdeDetalles(props.detalles)
-  // Habilita/deshabilita el checkbox de devolución de dinero
+  // Habilita/deshabilita las opciones que sacan plata de la caja
   cajaStore.cargarActiva()
 })
 
 const tieneCaja = computed(() => !!cajaStore.activa)
+
+const opcionElegida = computed(() =>
+  props.opciones.find(o => claveOpcion(o) === seleccion.value) ?? null,
+)
+
+/** Una opción en efectivo sin caja física abierta no se puede elegir. */
+const itemsOpciones = computed(() =>
+  props.opciones.map((o) => {
+    const sinCaja = o.mueveCaja && !tieneCaja.value
+    return {
+      value: claveOpcion(o),
+      label: o.sinPlata
+        ? `No vuelve plata · ${formatMonto(o.monto)} por cobrar`
+        : `${o.metodo ?? 'Pago'} · ${formatMonto(o.monto)}`,
+      description: sinCaja
+        ? 'Necesitás una caja física abierta para devolver efectivo.'
+        : o.mueveCaja
+          ? 'La plata sale de tu caja física abierta.'
+          : undefined,
+      disabled: sinCaja,
+    }
+  }),
+)
 
 const montoValido = computed(() => {
   const m = new Decimal(monto.value || '0')
@@ -68,7 +107,16 @@ const montoValido = computed(() => {
 // rechazo el 2026-09-04 —las líneas se escalan— y lo que el backend exige a
 // cambio, el motivo, este modal lo PIDE (abajo) sin bloquear: el único guard
 // sigue siendo el backend, aunque el umbral de abajo ya sea un gemelo exacto.
-const puedeConfirmar = computed(() => montoValido.value && filasValidas.value)
+// La opción elegida puede haber quedado bloqueada (venía elegida por ser la única
+// y el efectivo necesita una caja que no hay): no se confirma sobre ella.
+const opcionDisponible = computed(() => {
+  const o = opcionElegida.value
+  return o !== null && !(o.mueveCaja && !tieneCaja.value)
+})
+
+const puedeConfirmar = computed(() =>
+  montoValido.value && filasValidas.value && opcionDisponible.value,
+)
 
 // Solo si hay más de una: en una venta toda afecta, repetir el total al lado
 // del total es ruido.
@@ -98,7 +146,8 @@ async function confirmar() {
   try {
     const body: Record<string, unknown> = { monto: monto.value }
     if (comentario.value.trim()) body.comentario = comentario.value.trim()
-    if (devolverDinero.value) body.devolverDinero = true
+    // Por dónde vuelve la plata: el servidor resuelve qué documento corrige.
+    body.devolucion = cuerpoDevolucion(opcionElegida.value!)
     if (devoluciones.value.length) body.devoluciones = devoluciones.value
 
     const res = await useApiFetch<NotaCreditoSuccessPayload>(
@@ -171,14 +220,20 @@ async function confirmar() {
 
         <USeparator />
 
-        <UCheckbox
-          v-model="devolverDinero"
-          :disabled="!tieneCaja"
-          label="Registrar devolución de dinero desde la caja"
-          :description="tieneCaja
-            ? 'Crea un movimiento de salida en tu caja física abierta por el monto de la NC.'
-            : 'Necesitas una caja física abierta para devolver dinero.'"
-        />
+        <div class="flex flex-col gap-2" data-qa="por-donde-vuelve">
+          <URadioGroup
+            v-model="seleccion"
+            legend="¿Por dónde vuelve la plata?"
+            :items="itemsOpciones"
+          />
+          <p
+            v-if="opcionElegida"
+            class="text-xs text-muted"
+            data-qa="registro-que-queda"
+          >
+            Va a quedar: {{ registroQueQueda(opcionElegida.registro) }}
+          </p>
+        </div>
 
         <DevolucionInventarioLista
           :filas="filas"

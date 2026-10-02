@@ -1303,6 +1303,13 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         });
       expect(venta.status).toBe(201);
       const ventaId = (venta.body as { id: string }).id;
+      const pagos: { pago_id: string }[] = await app
+        .get(DataSource)
+        .query(
+          `SELECT pago_id FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL`,
+          [ventaId],
+        );
+      const pagoId = pagos[0].pago_id;
 
       // La caja pasa a conciliación: su arqueo quedó congelado.
       const conteo = await request(app.getHttpServer())
@@ -1320,7 +1327,8 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .send({
           monto: '5000.0000',
           comentario: 'devolución e2e',
-          devolverDinero: true,
+          // Por el pago en efectivo: la plata sale de la caja (en conciliación).
+          devolucion: { pagoId },
         });
       expect(nc.status).toBe(403);
 
