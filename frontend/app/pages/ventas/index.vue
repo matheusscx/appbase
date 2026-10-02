@@ -20,7 +20,10 @@ interface VentaResumen {
 
 interface VentasResumenKpi {
   totalVentas: number
+  /** NETO: `totalBruto − totalNotasCredito`, sin las canceladas. */
   totalFacturado: string
+  totalBruto: string
+  totalNotasCredito: string
   saldoPendiente: string
 }
 
@@ -52,6 +55,12 @@ const { items: ventas, meta, page, loading } =
 
 const resumen = ref<VentasResumenKpi | null>(null)
 const loadingResumen = ref(false)
+
+// Mostrar o no la línea es presentación, no una cuenta: el monto ya viene
+// calculado del backend.
+const hayNotas = computed(() =>
+  !!resumen.value && !new Decimal(resumen.value.totalNotasCredito).isZero(),
+)
 
 const drawerOpen = ref(false)
 const ventaSeleccionadaId = ref<string | null>(null)
@@ -91,17 +100,30 @@ function limpiarFiltros() {
   filtroCanal.value = undefined
 }
 
+// El "—" es solo de la carga inicial: una recarga (tras un cobro, una anulación
+// o una NC desde el drawer) deja a la vista los valores de antes hasta que llega
+// la respuesta nueva, igual que `InicioHoy.vue`.
+const cargandoInicial = computed(() => loadingResumen.value && !resumen.value)
+
+// Dos recargas pueden solaparse (dos cambios seguidos en el drawer) y la
+// respuesta más vieja puede llegar última: solo cuenta la de la última llamada.
+let pedidoResumen = 0
+
 async function cargarResumen() {
+  const pedido = ++pedidoResumen
   loadingResumen.value = true
   try {
-    resumen.value = await useApiFetch<VentasResumenKpi>(`${apiUrl}/ventas/resumen`)
+    const nuevo = await useApiFetch<VentasResumenKpi>(`${apiUrl}/ventas/resumen`)
+    if (pedido === pedidoResumen) resumen.value = nuevo
   }
   catch (e: unknown) {
-    const msg = apiErrorMsg(e, 'Error al cargar resumen')
-    toast.add({ title: msg, color: 'error' })
+    if (pedido === pedidoResumen) {
+      const msg = apiErrorMsg(e, 'Error al cargar resumen')
+      toast.add({ title: msg, color: 'error' })
+    }
   }
   finally {
-    loadingResumen.value = false
+    if (pedido === pedidoResumen) loadingResumen.value = false
   }
 }
 
@@ -120,18 +142,16 @@ function onDetalleUpdated(patch: {
   montoPagado: string
   saldo: string
 }) {
+  // El resumen se vuelve a pedir: ya no se puede parchar con el saldo de la
+  // fila. Una NC, una anulación o un cobro sobre una venta ya acreditada mueven
+  // el resumen (que descuenta las NC con piso 0 y saca las canceladas) distinto
+  // de lo que mueven el `saldo` de la fila, que sigue siendo total − pagado.
+  void cargarResumen()
   const row = ventas.value.find(v => v.id === patch.id)
   if (!row) return
-  const saldoAnterior = row.saldo
   row.estado = patch.estado
   row.montoPagado = patch.montoPagado
   row.saldo = patch.saldo
-  if (resumen.value) {
-    resumen.value.saldoPendiente = new Decimal(resumen.value.saldoPendiente)
-      .minus(saldoAnterior)
-      .plus(patch.saldo)
-      .toFixed(4)
-  }
 }
 
 watch(drawerOpen, (isOpen) => {
@@ -192,7 +212,7 @@ const columns: TableColumn<VentaResumen>[] = [
               Ventas registradas
             </p>
             <p class="text-lg font-semibold mt-1">
-              <template v-if="loadingResumen">
+              <template v-if="cargandoInicial">
                 —
               </template>
               <template v-else>
@@ -205,12 +225,16 @@ const columns: TableColumn<VentaResumen>[] = [
               Total facturado
             </p>
             <p class="text-lg font-semibold text-success mt-1">
-              <template v-if="loadingResumen">
+              <template v-if="cargandoInicial">
                 —
               </template>
               <template v-else>
                 {{ formatMonto(resumen?.totalFacturado ?? '0') }}
               </template>
+            </p>
+            <p v-if="hayNotas" class="text-xs text-success mt-1">
+              bruto {{ formatMonto(resumen!.totalBruto) }}
+              · notas de crédito −{{ formatMonto(resumen!.totalNotasCredito) }}
             </p>
           </div>
           <div class="rounded-lg bg-warning/10 p-3">
@@ -218,7 +242,7 @@ const columns: TableColumn<VentaResumen>[] = [
               Saldo pendiente
             </p>
             <p class="text-lg font-semibold text-warning mt-1">
-              <template v-if="loadingResumen">
+              <template v-if="cargandoInicial">
                 —
               </template>
               <template v-else>

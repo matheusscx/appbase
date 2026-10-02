@@ -9,18 +9,25 @@ import type { TipoMotivoBaja } from '~/composables/useSalones'
  * `InicioPorCobrar.vue`, `InicioPerdidas.vue`, `InicioMasVendidos.vue`).
  */
 
-/** Espejo de `Comparado<T>`: `variacion` la calcula el backend con Decimal, `null` si `semanaPasada` es 0. */
+/** Espejo de `Comparado<T>`. */
 export interface Comparado<T = string> {
   hoy: T
   semanaPasada: T
+  /** `(hoy − semanaPasada) / semanaPasada`, `toFixed(4)`; `null` si semanaPasada ≤ 0. */
   variacion: string | null
 }
 
 export interface VentasHoy {
+  /** NETO de notas de crédito: `vendidoDesglose.bruto − vendidoDesglose.notasCredito` en `hoy`. */
   vendido: Comparado
+  /** De hoy: lo vendido sin descontar, y lo que restaron las notas de crédito de hoy (positivo). */
+  vendidoDesglose: { bruto: string, notasCredito: string }
+  /** NETO de lo devuelto: `cobradoDesglose.cobrado − cobradoDesglose.devuelto` en `hoy`. */
   cobrado: Comparado
+  /** De hoy: lo cobrado sin descontar, y lo devuelto hoy (efectivo de las correcciones + REFUND aprobados), positivo. */
+  cobradoDesglose: { cobrado: string, devuelto: string }
   cantidad: Comparado<number>
-  /** `null` cuando esa cantidad es 0: no hay ticket que promediar. */
+  /** `null` cuando esa cantidad es 0 o el neto no es positivo: no hay ticket que promediar. */
   ticketPromedio: Comparado<string | null>
   /** Vendido de HOY por canal, no comparado contra la semana pasada. */
   porCanal: { fisico: string, online: string }
@@ -70,9 +77,15 @@ export interface PerdidasHoy {
 export interface MasVendidoItem {
   itemId: string
   itemNombre: string
-  /** Σ en unidad base, `venta_detalles.cantidad`. */
+  /**
+   * Neto, en unidad base: Σ `venta_detalles.cantidad` de lo vendido hoy menos
+   * la de las líneas de las correcciones de hoy, sin la línea de ajuste.
+   */
   cantidad: string
-  /** Σ `venta_detalles.total_linea`. */
+  /**
+   * Neto: Σ `venta_detalles.total_linea` de lo vendido hoy menos la de las
+   * líneas de las correcciones de hoy, sin la línea de ajuste.
+   */
   monto: string
 }
 
@@ -82,6 +95,6 @@ export interface ResumenNegocioHoy {
   ventas: VentasHoy
   porCobrar: PorCobrar
   perdidas: PerdidasHoy
-  /** Hasta 5, `ORDER BY monto DESC, itemId`. */
+  /** Hasta 5, `ORDER BY monto DESC, itemId`; solo entran ítems con neto > 0. */
   masVendidos: MasVendidoItem[]
 }
