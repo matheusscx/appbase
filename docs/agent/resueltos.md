@@ -23,6 +23,49 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El Playwright de compras filtra el listado por su proveedor (cerrada 2026-10-02)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **El Playwright de compras busca su compra en la primera página del listado sin filtro**
+  (frontend, solo test: `frontend/e2e/compras/compras-por-pantalla.spec.ts` ~L292 y ~L328). Va a
+  `/compras` y busca la fila por el nombre del proveedor, sin filtrar. El listado ordena por
+  `fecha_documento DESC, creado_el DESC` y la primera página trae 15 filas. Desde el 2026-10-02 el
+  e2e de la API `compras-deuda` crea unas dos docenas de compras con fecha `HOY` del día UTC. Entre
+  las 21:00 y las 23:59 -03 esa fecha va un día por delante del `hoyLocal()` con que la pantalla
+  crea la suya, y empuja la compra del Playwright fuera de la primera página. Solo pasa en local,
+  si se corre Playwright sobre la misma base que el e2e de la API sin resetear; en CI el job de
+  navegador resiembra. Lo vio el revisor del cierre de esa fecha fija (2026-10-02); la cita está
+  verificada. **Arreglo:** que el spec abra el listado filtrado por su proveedor, o que vaya por
+  `/compras/:id`, como los otros tests del archivo.
+
+### Qué se hizo
+
+El test "cargar con una línea sin precio y confirmar" de
+`frontend/e2e/compras/compras-por-pantalla.spec.ts` abre `/compras` y, antes de buscar su fila,
+elige su proveedor en el filtro del listado. Lo hace las dos veces que entra al listado: el filtro
+es estado local de la página y no sobrevive a la navegación. Usa el mismo `elegirPorPlaceholder`
+del archivo; ese selector no tiene placeholder, y lo que muestra sin elegir es la opción "Todos los
+proveedores", que sirve de pie igual.
+
+Se eligió el filtro y no ir por `/compras/:id`, como los otros tests del archivo, porque lo que
+este test mira es justamente el listado: que un borrador sin precio **todavía no** lleve la
+insignia "Falta costo" ahí, y que la confirmada sí. Por `/compras/:id` esas dos aserciones se
+perdían. No se tocó código de producción.
+
+### Qué lo fija
+
+- Control rojo, sin el arreglo: con 16 borradores con fecha 2026-12-31 sembrados por API en la base
+  del worktree (más que las 15 filas de la primera página), el test falla en
+  `expect(fila).toHaveCount(1)` con `Received: 0`. Es la falla de la entrada, reproducida.
+- Con el arreglo y la misma base, el archivo entero da 6/6.
+- El barrido de los demás Playwright (revisión independiente del cierre) encontró uno con el mismo
+  patrón y otro orden: `reportes/varianza.spec.ts`, ordenado por plata. Quedó en `pendientes.md`
+  § 2 porque no se midió que otra fila lo desplace. Los catálogos del POS y del salón, que cargan
+  100 ítems por nombre, son otro mecanismo y ya tienen su entrada.
+
 ## El e2e de `compras-deuda` ya no fija la fecha del documento (cerrada 2026-10-02)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.
