@@ -1344,6 +1344,11 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     esta factura en tu facturador?". Sí → nota de crédito anotada; no → se anula, con quién lo
     afirmó. Se descartaron "impide solo si tiene número" (el que no anotó el número deja una
     factura viva) y "nunca se anula" (corrige una factura que puede no existir).
+  - **Un número externo mal anotado lo borra el encargado** (sesión del frente, tarea 6;
+    AskUserQuestion, 2026-10-02). Lo puede borrar quien tiene `Ventas:Anular`, queda registrado
+    quién, cuándo y el valor anterior, y la anulación vuelve a preguntar. Se descartaron "solo
+    dejar rastro" (el error queda a la vista pero sigue forzando la nota de crédito) y "dejarlo
+    así".
   - **La factura la hace siempre el sistema**, se pague como se pague. La regla del medio decide
     solo las boletas, que es lo que cubre el modelo de emisión del SII.
   - **Un comercio nuevo trae "emite el sistema" en todos los medios**: es el error barato.
