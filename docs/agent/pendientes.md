@@ -41,6 +41,19 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
+- [ ] **🔴 El CI de main está rojo desde el 2026-10-02: un e2e de compras con fecha fija venció**
+  (backend, solo test: `backend/test/compras-deuda.e2e-spec.ts`). El test "GET /compras y GET
+  /compras/:id, con Pagar, traen estadoPago/deuda/vencida" (~L872) espera `vencida = false` en una
+  compra recién confirmada. Su fixture (`borradorSinDocumento`, ~L217) fija `fechaDocumento:
+  '2026-09-01'`, y el vencimiento por defecto es documento + `PLAZO_PAGO_DIAS_DEFAULT = 30`
+  (`compras/deuda.ts:14,44`): vence el 2026-10-01. Desde el 2026-10-02 sale vencida a cualquier
+  hora. Lo midió la orquestadora: falló en CI a las 08:43 (-03) del run 37002108852, así que
+  descarta la hipótesis anterior de la medianoche. **No es un bug del sistema.** **Arreglo:** que
+  la fecha del fixture salga de hoy, o fijar un plazo explícito en el test que lo necesite. Barrer
+  las otras fechas fijas del archivo (`'2026-09-01'` en ~L256, ~L978 y ~L1057) y de los demás e2e
+  que comparen contra el `hoy` real, sin asumir que esta es la única bomba de tiempo. Hasta que
+  entre, todo push a main sale con CI rojo por este test.
+
 - [ ] **El servidor no exige el customer de un tipo de documento con `customer_requerido`**
   (backend; invariante 6). La Factura lo tiene en `true` en el seed, pero el backend solo lo
   expone (`ventas.service.ts`, el listado de tipos, ~L2762) y nunca lo valida al crear la venta. Lo
@@ -77,42 +90,6 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
-
-- [ ] **Un e2e de compras falla pasada la medianoche: `vencida` sale `true` en una compra recién
-  confirmada** (backend, test o `compras.service.ts`). `backend/test/compras-deuda.e2e-spec.ts`,
-  test "GET /compras y GET /compras/:id, con Pagar, traen estadoPago/deuda/vencida" (~L872):
-  `expect(detalle.vencida).toBe(false)` da `true`. Lo vio el frente de emisión el 2026-10-02 cerca
-  de las 00:30 (-03), y lo reprodujo en `c2739053`, sin sus cambios, así que no es de ese frente.
-  `vencida` es `fechaVencimiento < hoy` (`deuda.ts` ~L291), con `hoy = hoyNegocio(tenantId)`.
-  **Hipótesis sin medir:** la fecha de vencimiento de la compra y el `hoy` se calculan con relojes
-  distintos (UTC contra día de negocio del tenant), y a esa hora quedan en días diferentes. Medir
-  de dónde sale `fecha_vencimiento` al confirmar, y reproducir con el reloj fijado. Si es el
-  código, es un bug de producto: una compra marcada vencida de madrugada. Si es el fixture, es un
-  test que depende de la hora.
-
-📌 Antes había una nota acá diciendo que la sección estaba vacía: la última entrada previa, la
-unicidad de `serie`, se cerró el 2026-09-19 y está en [`resueltos.md`](resueltos.md).
-
-📌 **Lo que se evaluó el 2026-09-19 y NO es trabajo** (se anota para no redescubrirlo, que es
-lo que hace la sección de Vigilancia): *"devolver o anular la venta de un producto serializado
-rebota con 400"*. **Es falso, y quedó escrito porque yo mismo lo anoté mal y casi entra acá
-como entrada.** `VentasService` sí repone sin pasar `series`
-(`ventas.service.ts:1404` en la anulación, `:2083` en la nota de crédito), pero **nunca llega
-ahí con un producto serializado**: la anulación corta antes con un guard propio y un mensaje
-específico (`:1382-1386`, *"usa inventario por …: anulá sin reponer stock"*), y en la nota de
-crédito el filtro `reponeStock` del loop **es** el filtro por modo —`reponeStock =
-quiereReponer && puedeReponer` con `puedeReponer = modo_inventario === 'cantidad'`, `:2580`—,
-así que la línea por serie se acredita sin reponer en vez de romper. La lección, que vale más
-que el dato: **leer `.filter(l => l.reponeStock)` y concluir "no filtra por modo de
-inventario" es mirar el mecanismo y no la conducta** — el modo estaba adentro del booleano,
-calculado 500 líneas antes.
-
-⚠️ **De la familia de "lo que la pantalla lee y escribe después del `await`" hay funciones con
-la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron una vez:
-`abrirHistorial` congela la cuenta y abre el modal **antes** del `await`;
-`cargarPendientesTestigo` y `abrirEntrarTurno` no están atadas a una cuenta. Lo **cerrado** de
-esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
-archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
 - [ ] **El pre-commit rechaza un recibo de revisión escrito sobre el mismo diff** (harness). Dos
   sesiones lo vieron el 2026-09-27, las dos desde un worktree (la del aviso sin costo de la
