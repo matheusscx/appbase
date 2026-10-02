@@ -1305,7 +1305,7 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
 
   Fuera de alcance: enviar de verdad al SII (ADR-010: se diseña compatible, no se construye), un módulo para configurar las máquinas de cobro, el motor de precios y el % de anulaciones por garzón.
 
-  Dependencia: el frente "El vendido, el cobrado y el Total facturado restan las notas de crédito" está construyendo los reportes que restan las NC (spec docs/superpowers/specs/2026-10-01-vendido-neto-de-notas-credito-design.md). Este frente les tiene que sumar la devolución interna. Diseñá ya, pero no implementes sobre esos reportes hasta que ese frente esté en main; la orquestadora te avisa.
+  Dependencia (resuelta el 2026-10-02): el frente "El vendido, el cobrado y el Total facturado restan las notas de crédito" ya está en main (a6d07096). Sus reportes reconocen una corrección por venta_referencia_id, así que la devolución interna resta sola; a este frente le queda verificarlo (tarea 11).
 
   Cómo:
   1. Primero diseño: brainstorm → spec en docs/superpowers/specs/ → plan en docs/superpowers/plans/. Nada de código antes de que el owner apruebe el plan.
