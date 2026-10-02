@@ -57,9 +57,11 @@ todo compatible con SII, sin integrarlo.
     siguiente la volvía a usar: cada documento cerraba bien y la **serie** acreditaba más IVA
     del que la venta cobró (medido: 1.447 contra 1.330). Hay un segundo tope, por porción.
   - **Queda un residuo de cuantización de hasta 2 minor units de IVA** en series de varias
-    notas, porque cada documento cierra a la escala de la moneda. **Sacarlo es decisión del
-    owner y no está tomada**: exigiría derivar el neto de cada nota contra el remanente de la
-    serie en vez de contra su propio bruto.
+    notas, porque cada documento cierra a la escala de la moneda. **Se acepta** (owner,
+    2026-10-02, con la escena de varias boletas de una venta; la orquestadora lo extendió a la
+    serie de notas por la misma razón): cada documento calcula su IVA sobre su propio monto, y
+    el SII suma documentos, no ventas. Sacarlo exigiría derivar el neto de cada nota contra el
+    remanente de la serie; no se hace. Detalle en `docs/agent/resueltos.md`.
 - **Tipo de documento tributario por venta**: ya existe `tipos_documento_tributario` por
   país (33 factura, 39 boleta, 61 NC); la venta debe guardar cuál fue.
 

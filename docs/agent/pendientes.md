@@ -225,6 +225,48 @@ El owner ya contestó lo que había que contestar. **No son mecánicas** —tien
 adentro, y alguna quedó a medias a propósito— pero nadie está esperando una respuesta para
 empezarlas.
 
+- [ ] **El filtro "Sin número" de `/ventas` no encuentra las notas de crédito de la máquina o hechas
+  por fuera que todavía no tienen número** (backend + frontend; anotado 2026-10-02 por la revisión
+  final del frente de emisión, y la orquestadora lo mandó acá). Una NC sobre un voucher o sobre un
+  documento externo nace **sin número**: la hace la máquina, su portal o el facturador del comercio, y
+  el sistema espera que alguien la anote. Pero `?documento=` deja afuera toda corrección (comentario
+  en `buildListarFilters`, `ventas.service.ts`, decisión E7 de la spec: una corrección no es una venta
+  que revisar), así que el contador no tiene desde `/ventas` cómo encontrar las notas que le faltan.
+  Se ven solo abriendo el detalle de la venta que corrigen.
+
+  **La pregunta:** ¿"Sin número" debe traer también las notas sin número (como filas propias, o
+  marcando la venta que corrigen), o se arma otro lugar para revisarlas? Lo primero cambia la regla de
+  que los filtros solo miran ventas; lo segundo es una pantalla más.
+
+  **✅ Contestada por el owner (AskUserQuestion, 2026-10-02): en el mismo filtro.** "Sin número"
+  trae también las notas de crédito sin número, como filas propias, para que el contador revise
+  todo lo que le falta en un solo lugar. La excepción a "los filtros solo miran ventas" vale solo
+  para este filtro. Se descartó "otra pantalla".
+
+- [ ] **En Pagos, "Total cobrado" no resta lo devuelto, y el inicio sí: el mismo día puede mostrar
+  dos cobrados distintos** (backend + frontend; anotado 2026-10-02 por la tarea 15 del frente de
+  emisión, la orquestadora lo mandó acá). `GET /pagos/resumen` (`pagos.service.ts`, `resumen`) suma
+  `Σ(monto − vuelto)` de los pagos y no resta ninguna devolución: ni el efectivo que salió de la caja,
+  ni la reversa en la máquina, ni el `REFUND` de pasarela. El "Cobrado" del inicio sí las resta desde
+  el 2026-10-02 (decisión del owner en el frente de emisión). Escena: un café cobra $100.000 con débito
+  y devuelve $40.000 en la máquina. El inicio dice "Cobrado $60.000"; Pagos dice "Total cobrado
+  $100.000" y "Cobrado hoy $100.000". No es nuevo: Pagos siempre midió los pagos registrados.
+
+  **La pregunta, en lenguaje de local:** en Pagos, ¿"Total cobrado" muestra lo que entró, o lo que
+  entró menos lo devuelto, como el inicio?
+  - **Lo que entró** (como hoy): Pagos es la lista de cobros, y cada devolución se ve en su nota. Costo:
+    las dos pantallas siguen mostrando números distintos para el mismo día, y hay que explicarlo en
+    la pantalla (p.ej. "sin restar devoluciones").
+  - **Lo que entró menos lo devuelto**: Pagos cuadra con el inicio. Costo: el resumen de Pagos pasa a
+    restar las tres devoluciones con la misma regla que el inicio (sin contarlas dos veces), y deja de
+    cuadrar con la suma de las filas de la lista, que son cobros.
+
+  **✅ Contestada por el owner (AskUserQuestion, 2026-10-02): el desglose.** Pagos muestra
+  "Cobrado $100.000 · devuelto −$40.000 → $60.000": cuadra con el inicio y con la suma de las filas,
+  que son cobros. El devuelto usa **la misma cuenta** que el "Cobrado" del inicio (efectivo de caja,
+  reversa en la máquina y `REFUND`, sin contar dos veces): se reusa, no se copia. Se descartaron "lo
+  que entró" (dos números distintos el mismo día) y "solo el neto" (deja de cuadrar con la lista).
+
 ⚠️ **Esta sección no es una tanda que se "termine", y leerla como tal hace tomar malas
 decisiones.** **Varias de sus entradas son features de producto con su propia spec** —entre ellas el
 motor de promociones, la NC como documento, la UF como moneda oficial, `cashRounding`, el
@@ -1126,52 +1168,6 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
-
-- [ ] **El IVA de varios documentos de una misma venta puede no sumar el IVA de la venta, por 1–2
-  pesos** (backend, motor/documentos; **fiscal y toca cómo se reparte el IVA: frente propio**).
-  Cada documento cierra exacto a la escala de la moneda, y la suma se corre por redondeo. Pasa en
-  dos lugares:
-  - **la serie de notas de crédito** de una venta: hasta 2 minor units, ya escrito en
-    [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md) como "decisión del owner no tomada";
-  - **los varios documentos de una venta**, que suma el frente de emisión (2026-10-02). Medido
-    por ese frente: una venta afecta de $100.001 pagada 33.333 + 33.334 + 33.334 da Σ IVA 15.966
-    contra 15.967 de la venta.
-
-  **La pregunta, para cuando se tome:** ¿se acepta la diferencia de un peso, como hace cada
-  documento por separado ante el SII, o el último documento absorbe el residuo para que la suma
-  cuadre con la venta? Absorberlo exige calcular cada documento contra lo que queda de la venta, y
-  no contra su propio monto. Hoy no bloquea nada, porque no se emite al SII.
-
-- [ ] **El filtro "Sin número" de `/ventas` no encuentra las notas de crédito de la máquina o hechas
-  por fuera que todavía no tienen número** (backend + frontend; anotado 2026-10-02 por la revisión
-  final del frente de emisión, y la orquestadora lo mandó acá). Una NC sobre un voucher o sobre un
-  documento externo nace **sin número**: la hace la máquina, su portal o el facturador del comercio, y
-  el sistema espera que alguien la anote. Pero `?documento=` deja afuera toda corrección (comentario
-  en `buildListarFilters`, `ventas.service.ts`, decisión E7 de la spec: una corrección no es una venta
-  que revisar), así que el contador no tiene desde `/ventas` cómo encontrar las notas que le faltan.
-  Se ven solo abriendo el detalle de la venta que corrigen.
-
-  **La pregunta:** ¿"Sin número" debe traer también las notas sin número (como filas propias, o
-  marcando la venta que corrigen), o se arma otro lugar para revisarlas? Lo primero cambia la regla de
-  que los filtros solo miran ventas; lo segundo es una pantalla más.
-
-- [ ] **En Pagos, "Total cobrado" no resta lo devuelto, y el inicio sí: el mismo día puede mostrar
-  dos cobrados distintos** (backend + frontend; anotado 2026-10-02 por la tarea 15 del frente de
-  emisión, la orquestadora lo mandó acá). `GET /pagos/resumen` (`pagos.service.ts`, `resumen`) suma
-  `Σ(monto − vuelto)` de los pagos y no resta ninguna devolución: ni el efectivo que salió de la caja,
-  ni la reversa en la máquina, ni el `REFUND` de pasarela. El "Cobrado" del inicio sí las resta desde
-  el 2026-10-02 (decisión del owner en el frente de emisión). Escena: un café cobra $100.000 con débito
-  y devuelve $40.000 en la máquina. El inicio dice "Cobrado $60.000"; Pagos dice "Total cobrado
-  $100.000" y "Cobrado hoy $100.000". No es nuevo: Pagos siempre midió los pagos registrados.
-
-  **La pregunta, en lenguaje de local:** en Pagos, ¿"Total cobrado" muestra lo que entró, o lo que
-  entró menos lo devuelto, como el inicio?
-  - **Lo que entró** (como hoy): Pagos es la lista de cobros, y cada devolución se ve en su nota. Costo:
-    las dos pantallas siguen mostrando números distintos para el mismo día, y hay que explicarlo en
-    la pantalla (p.ej. "sin restar devoluciones").
-  - **Lo que entró menos lo devuelto**: Pagos cuadra con el inicio. Costo: el resumen de Pagos pasa a
-    restar las tres devoluciones con la misma regla que el inicio (sin contarlas dos veces), y deja de
-    cuadrar con la suma de las filas de la lista, que son cobros.
 
 ## 5. Carreras de concurrencia
 

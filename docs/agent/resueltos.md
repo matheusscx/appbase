@@ -23,6 +23,32 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+
+## El IVA de varios documentos de una misma venta puede no sumar el IVA de la venta, por 1–2
+  pesos (cerrada 2026-10-02: se acepta)
+
+- El IVA de varios documentos de una misma venta puede no sumar el IVA de la venta, por 1–2
+  pesos** (backend, motor/documentos; **fiscal y toca cómo se reparte el IVA: frente propio**).
+  Cada documento cierra exacto a la escala de la moneda, y la suma se corre por redondeo. Pasa en
+  dos lugares:
+  - **la serie de notas de crédito** de una venta: hasta 2 minor units, ya escrito en
+    [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md) como "decisión del owner no tomada";
+  - **los varios documentos de una venta**, que suma el frente de emisión (2026-10-02). Medido
+    por ese frente: una venta afecta de $100.001 pagada 33.333 + 33.334 + 33.334 da Σ IVA 15.966
+    contra 15.967 de la venta.
+
+  **La pregunta, para cuando se tome:** ¿se acepta la diferencia de un peso, como hace cada
+  documento por separado ante el SII, o el último documento absorbe el residuo para que la suma
+  cuadre con la venta? Absorberlo exige calcular cada documento contra lo que queda de la venta, y
+  no contra su propio monto. Hoy no bloquea nada, porque no se emite al SII.
+
+  **Cierre (owner, AskUserQuestion, 2026-10-02): se acepta la diferencia.** Cada documento calcula
+  su IVA exacto sobre su propio monto, y así lo ve el SII, que suma documentos y no ventas; el peso
+  queda solo en la cuenta interna de la venta. No se construye nada. La pregunta se hizo con la escena
+  de varias boletas de una venta. **Extensión de la orquestadora:** se aplica igual a la serie de notas
+  de crédito de ADR-010, por la misma razón (cada nota es un documento por sí sola); si el owner la
+  quiere distinta para las NC, se reabre.
+
 ## El servidor exige el customer de un tipo con `customer_requerido` (cerrada 2026-10-02)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.
