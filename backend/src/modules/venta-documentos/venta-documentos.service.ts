@@ -1155,6 +1155,24 @@ export class VentaDocumentosService {
   }
 
   /**
+   * Lo que todavía puede devolver el pago de una venta que tiene **un único**
+   * pago, para el REFUND de la pasarela (que no sabe por cuál pago volvió la plata
+   * y, con más de uno, no adivina: es el mismo criterio de `viaDeReembolsoPasarela`,
+   * que anota ese pago en la corrección). Es el `devolvible` de `corregibles`: la
+   * MISMA cuenta que el tope de la nota manual y que lo que ofrece el detalle, no
+   * una copia. `null` con 0 o más de un pago: no hay tope por pago.
+   *
+   * Hay que llamarla bajo el `FOR UPDATE` de la venta, igual que el tope de la nota.
+   */
+  async devolvibleDelPagoUnico(
+    lector: Lector,
+    params: VentaDeLosDocumentosParams,
+  ): Promise<string | null> {
+    const { pagos } = await this.corregibles(lector, params);
+    return pagos.length === 1 ? pagos[0].devolvible.toFixed(4) : null;
+  }
+
+  /**
    * El tope por documento (spec § 3.6): lo corregido de un documento no pasa su
    * `monto`. Se suma a los dos topes de la nota, **bajo el mismo lock** (el
    * llamador ya tiene el `FOR UPDATE` de la venta). Cuenta toda corrección
@@ -1276,7 +1294,10 @@ export class VentaDocumentosService {
       metodoNombre: string | null;
       esEfectivo: boolean;
       aplicadoVenta: Decimal;
-      /** Lo que ese pago todavía puede devolver: `aplicadoVenta` − lo ya devuelto por él. */
+      /**
+       * Lo que ese pago todavía puede devolver: `aplicadoVenta` − lo ya devuelto por él
+       * (correcciones) − con un único pago, lo que la pasarela devolvió y aún no tiene corrección.
+       */
       devolvible: Decimal;
       documento: DocumentoCorregido | null;
     }[];
@@ -1316,6 +1337,7 @@ export class VentaDocumentosService {
       documento_id: string | null;
       aplicado_venta: string;
       devuelto: string;
+      reembolsado_sin_correccion: string;
     }[] = await lector.query(
       `SELECT p.pago_id,
               mp.nombre AS metodo_nombre,
@@ -1335,7 +1357,32 @@ export class VentaDocumentosService {
                    AND c.tenant_id = $2
                    AND c.devolucion_pago_id = p.pago_id
                    AND c.eliminado_el IS NULL
-              ), 0)::text AS devuelto
+              ), 0)::text AS devuelto,
+              -- Lo que la pasarela ya devolvió y todavía NO tiene su corrección: los
+              -- REFUND aprobados de las órdenes de la venta con \`correccion_venta_id\`
+              -- NULL. Hay dos razones: el hook de la corrección corre DESPUÉS del
+              -- commit del REFUND (en ese hueco una nota del POS veía el tope sin
+              -- esa plata y la devolvía dos veces), o el hook falló y la plata volvió
+              -- igual. Ligado el REFUND a su corrección deja de contar acá y cuenta
+              -- solo por ella (\`devolucion_pago_id\`, arriba): nunca por las dos. Es
+              -- por VENTA y no por pago; abajo solo se le resta al pago cuando la
+              -- venta tiene uno solo (el mismo criterio de \`viaDeReembolsoPasarela\`).
+              -- Escala 6 (\`pasarela_transacciones.monto\`) contra 4 de \`pagos\`: se
+              -- resta con Decimal, igual que el neto de \`resumen-negocio\`.
+              COALESCE((
+                SELECT SUM(t.monto)
+                  FROM pasarela_ordenes o
+                  JOIN pasarela_transacciones t
+                    ON t.orden_id = o.orden_id
+                   AND t.tenant_id = o.tenant_id
+                   AND t.tipo = 'REFUND'
+                   AND t.estado = 'aprobada'
+                   AND t.correccion_venta_id IS NULL
+                   AND t.eliminado_el IS NULL
+                 WHERE o.venta_id = $1
+                   AND o.tenant_id = $2
+                   AND o.eliminado_el IS NULL
+              ), 0)::text AS reembolsado_sin_correccion
          FROM pagos p
          JOIN ventas v ON v.venta_id = p.venta_id
                       AND v.tenant_id = p.tenant_id
@@ -1381,7 +1428,11 @@ export class VentaDocumentosService {
           metodoNombre: p.metodo_nombre,
           esEfectivo: p.es_efectivo === true,
           aplicadoVenta: new Decimal(p.aplicado_venta),
-          devolvible: new Decimal(p.aplicado_venta).minus(p.devuelto),
+          devolvible: new Decimal(p.aplicado_venta)
+            .minus(p.devuelto)
+            // Con un único pago, lo devuelto por la pasarela que aún no tiene su
+            // corrección también gasta su tope; con 0 o más de uno no se adivina.
+            .minus(pagos.length === 1 ? p.reembolsado_sin_correccion : 0),
           documento: enlazado ? doc(enlazado) : null,
         };
       }),

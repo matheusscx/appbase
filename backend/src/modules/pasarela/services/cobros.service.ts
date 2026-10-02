@@ -321,6 +321,25 @@ export class CobrosService {
             `El monto excede lo disponible para reembolso (${disponible.toString()})`,
           );
 
+        // El tope por pago, del lado de ventas: la nota "por el pago" de Webpay
+        // hecha desde el POS ya devolvió esa plata, y el proveedor la sacaría de
+        // nuevo. Va ANTES de llamar al proveedor (después ya no hay vuelta atrás) y
+        // bajo el lock de la orden que ya tenemos.
+        //
+        // ⚠️ Orden de bloqueo: orden → venta, siempre. Medido: ningún camino toma
+        // la venta y después la orden (la venta online se crea y COMMITEA antes de
+        // que el dispatcher o `vincularVenta` toquen la orden; ventas solo lee
+        // `pasarela_*` sin lock), así que no hay ciclo. Quien algún día toque la
+        // orden dentro de una transacción que ya tiene `FOR UPDATE` sobre la venta
+        // cierra el ciclo. Sin handler (ventas no registrado) no hay lado de ventas
+        // que topar: el aviso de `aplicarPostReembolso` ya lo dice.
+        if (orden.ventaId)
+          await this.reembolsoRegistry.get()?.exigirTopeDelReembolso(manager, {
+            tenantId,
+            ventaId: orden.ventaId,
+            monto: dto.monto,
+          });
+
         // Resolver el proveedor de la orden por la configuración con que se cobró
         // (la AUTHORIZATION original), no por la activa del tenant: reembolsa bajo
         // la misma pasarela aunque el tenant haya cambiado de activa. Sirve para

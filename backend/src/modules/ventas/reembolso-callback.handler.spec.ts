@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
+import type { EntityManager } from 'typeorm';
 import { VentasReembolsoHandler } from './reembolso-callback.handler';
 import { ReembolsoCallbackRegistry } from '../pasarela/services/reembolso-callback.registry';
 import { VentasService } from './ventas.service';
@@ -11,6 +12,7 @@ describe('VentasReembolsoHandler', () => {
   let ventasService: {
     crearNotaCredito: jest.Mock;
     viaDeReembolsoPasarela: jest.Mock;
+    exigirTopeDelReembolsoPasarela: jest.Mock;
   };
   let monedasService: { decimalesDeLaVenta: jest.Mock };
 
@@ -29,6 +31,7 @@ describe('VentasReembolsoHandler', () => {
       crearNotaCredito: jest
         .fn()
         .mockResolvedValue({ id: 'nc-1', totalFinal: '1100.0000' }),
+      exigirTopeDelReembolsoPasarela: jest.fn().mockResolvedValue(undefined),
       viaDeReembolsoPasarela: jest.fn().mockResolvedValue({
         tipo: 'pasarela',
         documentoId: 'doc-boleta',
@@ -51,6 +54,33 @@ describe('VentasReembolsoHandler', () => {
 
     handler = module.get(VentasReembolsoHandler);
     registry = module.get(ReembolsoCallbackRegistry);
+  });
+
+  it('el tope por pago del REFUND lo resuelve ventas, con la misma transacción y sin tocar nada más', async () => {
+    const manager = {} as EntityManager;
+    const params = { tenantId: 't-1', ventaId: 'venta-1', monto: '70000' };
+
+    await handler.exigirTopeDelReembolso(manager, params);
+
+    expect(ventasService.exigirTopeDelReembolsoPasarela).toHaveBeenCalledWith(
+      manager,
+      params,
+    );
+    expect(ventasService.crearNotaCredito).not.toHaveBeenCalled();
+  });
+
+  it('un 400 del tope se propaga tal cual (lo ve el cliente)', async () => {
+    ventasService.exigirTopeDelReembolsoPasarela.mockRejectedValueOnce(
+      new BadRequestException('tope'),
+    );
+
+    await expect(
+      handler.exigirTopeDelReembolso({} as EntityManager, {
+        tenantId: 't-1',
+        ventaId: 'venta-1',
+        monto: '70001',
+      }),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('se registra en el registry al iniciar el módulo', () => {

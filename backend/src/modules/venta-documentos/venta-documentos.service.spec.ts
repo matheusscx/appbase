@@ -1934,6 +1934,8 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
     aplicado_venta: string;
     /** Lo ya devuelto por este pago (`devolucion_pago_id`) en correcciones anteriores. */
     devuelto: string;
+    /** Lo que la pasarela devolvió y todavía no tiene su corrección (REFUND con `correccion_venta_id` NULL). */
+    reembolsado_sin_correccion: string;
   }
   const doc = (
     id: string,
@@ -1960,6 +1962,7 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
     documento_id: documentoId,
     aplicado_venta: aplicado.toFixed(4),
     devuelto: '0.0000',
+    reembolsado_sin_correccion: '0.0000',
     ...extra,
   });
   /** Las tres lecturas, por el nombre de la tabla que cada una consulta. */
@@ -2096,6 +2099,152 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
           })
         ).devolvibleDelPago,
       ).toBeNull();
+    });
+  });
+
+  describe('devolvibleDelPagoUnico: el tope por pago que usa el REFUND de la pasarela', () => {
+    const unico = (l: { query: jest.Mock }) =>
+      new VentaDocumentosService().devolvibleDelPagoUnico(
+        l as unknown as EntityManager,
+        { tenantId: TENANT, ventaId: VENTA },
+      );
+
+    it('con un único pago es lo que aplicó menos lo ya devuelto por él: la MISMA cuenta que el tope de la nota', async () => {
+      const l = lector(
+        100000,
+        [doc('d-voucher', 'maquina', 100000)],
+        [
+          pagoFila('p-tarjeta', 100000, 'd-voucher', {
+            devuelto: '30000.0000',
+          }),
+        ],
+      );
+
+      expect(await unico(l)).toBe('70000.0000');
+      // Y coincide con lo que la nota manual por ese pago ve: no hay dos cuentas.
+      expect((await resolver(l, via('p-tarjeta'))).devolvibleDelPago).toBe(
+        '70000.0000',
+      );
+    });
+
+    it('un pago ya devuelto por completo deja el tope en cero (no en nulo: ahí sí hay tope)', async () => {
+      const l = lector(
+        100000,
+        [doc('d-voucher', 'maquina', 100000)],
+        [
+          pagoFila('p-tarjeta', 100000, 'd-voucher', {
+            devuelto: '100000.0000',
+          }),
+        ],
+      );
+
+      expect(await unico(l)).toBe('0.0000');
+    });
+
+    describe('lo devuelto por la pasarela que todavía no tiene su corrección (el hueco entre el commit del REFUND y su hook)', () => {
+      const unPago = (extra: Partial<PagoFila>) =>
+        lector(
+          100000,
+          [doc('d-voucher', 'maquina', 100000)],
+          [pagoFila('p-tarjeta', 100000, 'd-voucher', extra)],
+        );
+
+      it('con un único pago resta ese REFUND además de lo ya devuelto por correcciones: 100.000 − 20.000 − 45.000 = 35.000', async () => {
+        const l = unPago({
+          devuelto: '20000.0000',
+          reembolsado_sin_correccion: '45000.000000',
+        });
+
+        expect(await unico(l)).toBe('35000.0000');
+        // Y la nota manual y la pantalla ven lo mismo: una sola cuenta.
+        expect((await resolver(l, via('p-tarjeta'))).devolvibleDelPago).toBe(
+          '35000.0000',
+        );
+        const opciones = await new VentaDocumentosService().opcionesDevolucion(
+          l as unknown as EntityManager,
+          { tenantId: TENANT, ventaId: VENTA },
+        );
+        expect(opciones.map((o) => o.monto)).toEqual(['35000.0000']);
+      });
+
+      it('un REFUND que agota el pago saca la opción de la pantalla', async () => {
+        const l = unPago({ reembolsado_sin_correccion: '100000.000000' });
+
+        const opciones = await new VentaDocumentosService().opcionesDevolucion(
+          l as unknown as EntityManager,
+          { tenantId: TENANT, ventaId: VENTA },
+        );
+        expect(opciones.filter((o) => !o.sinPlata)).toEqual([]);
+      });
+
+      it('con más de un pago no se le resta a ninguno: no se adivina a cuál pertenece', async () => {
+        const l = lector(100000, MIXTA_DOCS, [
+          pagoFila('p-efectivo', 60000, 'd-boleta', {
+            es_efectivo: true,
+            reembolsado_sin_correccion: '45000.000000',
+          }),
+          pagoFila('p-tarjeta', 40000, 'd-voucher', {
+            reembolsado_sin_correccion: '45000.000000',
+          }),
+        ]);
+
+        expect((await resolver(l, via('p-tarjeta'))).devolvibleDelPago).toBe(
+          '40000.0000',
+        );
+        expect((await resolver(l, via('p-efectivo'))).devolvibleDelPago).toBe(
+          '60000.0000',
+        );
+      });
+
+      it('lee solo REFUND aprobados SIN corrección, de órdenes vivas de esta venta y este tenant, en la misma consulta de los pagos', async () => {
+        const l = unPago({});
+
+        await unico(l);
+
+        const consultas = l.query.mock.calls.filter(([sql]) =>
+          (sql as string).includes('FROM pagos p'),
+        ) as [string, unknown[]][];
+        // Una consulta: sin una por pago ni una aparte para los REFUND.
+        expect(consultas).toHaveLength(1);
+        const [sql, binds] = consultas[0];
+        expect(sql).toMatch(/t\.tipo = 'REFUND'/);
+        expect(sql).toMatch(/t\.estado = 'aprobada'/);
+        expect(sql).toMatch(/t\.correccion_venta_id IS NULL/);
+        expect(sql).toMatch(/t\.eliminado_el IS NULL/);
+        expect(sql).toMatch(/o\.venta_id = \$1/);
+        expect(sql).toMatch(/o\.tenant_id = \$2/);
+        expect(sql).toMatch(/o\.eliminado_el IS NULL/);
+        expect(binds).toEqual([VENTA, TENANT]);
+      });
+
+      it('la corrección del propio REFUND no se frena a sí misma: la vía pasarela ni lee los pagos, así que su REFUND sin ligar no le cuenta', async () => {
+        const l = unPago({ reembolsado_sin_correccion: '100000.000000' });
+
+        const destino = await resolver(l, {
+          tipo: 'pasarela',
+          documentoId: null,
+          pagoId: 'p-tarjeta',
+        });
+
+        expect(destino.devolvibleDelPago).toBeNull();
+        expect(
+          l.query.mock.calls.filter(([sql]) =>
+            (sql as string).includes('FROM pagos p'),
+          ),
+        ).toHaveLength(0);
+      });
+    });
+
+    it('con más de un pago no hay tope: no se adivina por cuál volvió la plata', async () => {
+      const l = lector(100000, MIXTA_DOCS, MIXTA_PAGOS);
+
+      expect(await unico(l)).toBeNull();
+    });
+
+    it('sin pagos tampoco (una venta de $0)', async () => {
+      const l = lector(0, [], []);
+
+      expect(await unico(l)).toBeNull();
     });
   });
 

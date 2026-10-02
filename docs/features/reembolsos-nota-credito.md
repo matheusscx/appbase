@@ -384,8 +384,9 @@ resolución que comparten la creación de la nota y las `opcionesDevolucion` del
   con sus dos topes de siempre; **si no**, no se mueve caja (la reversa se hace en la máquina o
   en el banco). Es por **pago** y no por "efectivo": hay máquinas que emiten también el
   efectivo, y una venta puede tener dos pagos en efectivo. La vía `pasarela` (el reembolso de
-  una orden) **nunca** mueve caja y **no se topa por pago**: la plata ya volvió por el proveedor y
-  un hecho consumado se registra. Del pago solo mira cuántos hay (`CobrosService.vincularVenta`
+  una orden) **nunca** mueve caja y la **corrección** no se topa por pago: la plata ya volvió por el
+  proveedor y un hecho consumado se registra. (El tope se aplica **antes**, al pedir el REFUND:
+  ver "Tope por pago".) Del pago solo mira cuántos hay (`CobrosService.vincularVenta`
   liga una orden a cualquier venta): con **exactamente uno** lo anota en `devolucion_pago_id` para
   que lo devuelto gaste su tope; con 0 o más de uno, no anota ninguno. Corrige el **único
   documento válido** de la venta (vigente y no duplicado); con ninguno, o con más de uno
@@ -420,6 +421,31 @@ lleva el tipo.
     se topa, pero cuando la venta tiene **exactamente un pago** su corrección anota ese pago en
     `devolucion_pago_id` (la vía sigue siendo `'pasarela'`) y gasta su tope; con 0 o más de uno
     queda sin pago (elegir uno sería adivinar).
+  - **El REFUND de la pasarela también lo respeta, antes de llamar al proveedor (2026-10-02):**
+    el modal de la nota del POS ofrece el pago de Webpay de una venta online como "por la
+    tarjeta", así que esa nota gasta el tope de ese pago; sin este chequeo, un `REFUND` de la misma
+    orden devolvía la plata otra vez (el proveedor la saca y después la corrección falla por el tope
+    global, solo con un `warning`). `CobrosService.reembolsar` le pregunta a ventas (por el
+    `ReembolsoCallbackRegistry`, la pasarela no importa ventas) con la transacción del reembolso:
+    ventas toma el `FOR UPDATE` de la venta —el mismo de la nota— y usa **la misma cuenta** que el
+    tope de la nota (`devolvibleDelPagoUnico` sobre `corregibles`), no una copia. Con **un único**
+    pago es lo que ese pago puede devolver (incluidas las notas "por el pago" del POS); con 0 o más
+    de uno no hay tope (no se adivina por cuál volvió la plata, igual que `viaDeReembolsoPasarela`;
+    inalcanzable hoy: la venta online y la de una suscripción nacen con un solo pago), y una orden
+    sin venta, o con una venta que ya no existe, se reembolsa como siempre. 400 sin cifras; si no
+    alcanza **la pasarela no se llama** y no queda ningún REFUND. Orden de bloqueo: orden → venta
+    (la nota del POS toma solo la venta; ningún camino toma la venta y después la orden).
+    **Lo que el REFUND devolvió y aún no tiene su corrección también gasta el tope** (medido: el
+    lock cubría "la nota primero, el REFUND después", pero el REFUND libera el lock al commitear y
+    su corrección la crea el hook **después**; una nota del POS lanzada hasta ~5 ms detrás pasaba el
+    tope y la plata salía dos veces, y lo mismo si el hook fallaba). `corregibles` resta de
+    `devolvible`, con un **único** pago, los REFUND aprobados de las órdenes de la venta con
+    `correccion_venta_id IS NULL` (misma lectura de los pagos, sin consulta extra; escala 6 contra
+    4 resuelta con Decimal). Ligado el REFUND a su corrección deja de contar ahí y cuenta solo por ella
+    (`devolucion_pago_id`): nunca por las dos (entre la nota del hook y el vínculo hay un instante
+    de sobreconteo, del lado seguro). Como es la cuenta compartida, la ven la nota del POS, el tope
+    del REFUND y las opciones de la pantalla. La corrección del propio REFUND no se frena a sí misma:
+    la vía `pasarela` no pasa por `corregibles` (sus topes son el global y el del documento).
   - **La pantalla ofrece lo que el servidor acepta:** `opcionesDevolucion` trae en `monto` lo que
     cada pago todavía puede devolver y no ofrece el que ya devolvió todo; el modal propone y topa el
     monto con esa opción (`topeDeOpcion`, además del disponible de la venta).

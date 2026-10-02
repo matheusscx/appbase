@@ -98,6 +98,7 @@ describe('CobrosService', () => {
     }),
   };
   const reembolsoHandler = {
+    exigirTopeDelReembolso: jest.fn(),
     onReembolsoAprobado: jest.fn(),
   };
   const reembolsoRegistry = {
@@ -358,6 +359,46 @@ describe('CobrosService', () => {
       expect(res.warning).toBeUndefined();
     });
 
+    describe('el tope por pago del lado de ventas, ANTES de llamar al proveedor', () => {
+      it('con venta vinculada lo consulta con la transacción, el tenant del token, la venta de la orden y el monto, y recién después llama al proveedor', async () => {
+        await service.reembolsar('t-1', 'orden-1', { monto: '1100' }, 'user-1');
+
+        expect(reembolsoHandler.exigirTopeDelReembolso).toHaveBeenCalledWith(
+          manager,
+          { tenantId: 't-1', ventaId: 'venta-1', monto: '1100' },
+        );
+        expect(
+          reembolsoHandler.exigirTopeDelReembolso.mock.invocationCallOrder[0],
+        ).toBeLessThan(provider.reembolsar.mock.invocationCallOrder[0]);
+      });
+
+      it('si el tope no alcanza, el 400 corta ANTES de la pasarela: el proveedor no se llama y no se registra ningún REFUND', async () => {
+        reembolsoHandler.exigirTopeDelReembolso.mockRejectedValueOnce(
+          new BadRequestException('El monto supera lo que queda por devolver'),
+        );
+
+        await expect(
+          service.reembolsar('t-1', 'orden-1', { monto: '1100' }, 'user-1'),
+        ).rejects.toThrow(BadRequestException);
+
+        expect(provider.reembolsar).not.toHaveBeenCalled();
+        expect(deps.transacciones.registrar).not.toHaveBeenCalled();
+        expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+      });
+
+      it('una orden sin venta no tiene tope por pago: ni lo consulta (como hoy)', async () => {
+        ordenRepo.findOne.mockResolvedValue({
+          ...ordenConVenta,
+          ventaId: null,
+        });
+
+        await service.reembolsar('t-1', 'orden-1', { monto: '1100' }, 'user-1');
+
+        expect(reembolsoHandler.exigirTopeDelReembolso).not.toHaveBeenCalled();
+        expect(provider.reembolsar).toHaveBeenCalled();
+      });
+    });
+
     it('el reembolso sin devoluciones también deja su corrección (ya no hay casilla que la pida)', async () => {
       const res = await service.reembolsar(
         't-1',
@@ -520,7 +561,10 @@ describe('CobrosService', () => {
     });
 
     it('sin handler registrado el reembolso sigue y el warning lo dice', async () => {
-      reembolsoRegistry.get.mockReturnValueOnce(null as never);
+      // Dos lecturas del registro: la del tope por pago y la del hook de después.
+      reembolsoRegistry.get
+        .mockReturnValueOnce(null as never)
+        .mockReturnValueOnce(null as never);
       const res = await service.reembolsar(
         't-1',
         'orden-1',

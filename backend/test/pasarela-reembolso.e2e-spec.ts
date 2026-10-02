@@ -9,6 +9,7 @@ import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import { ProviderFactory } from '../src/modules/pasarela/providers/provider.factory';
+import { VentasReembolsoHandler } from '../src/modules/ventas/reembolso-callback.handler';
 import { PasarelaOrden } from '../src/modules/pasarela/entities/pasarela-orden.entity';
 import { PasarelaTransaccion } from '../src/modules/pasarela/entities/pasarela-transaccion.entity';
 
@@ -438,6 +439,202 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
       expect(
         await viaYPago((refund.body as RespuestaReembolso).notaCreditoId!),
       ).toEqual({ via: 'pasarela', pago_id: null });
+    });
+  });
+
+  // El tope por pago, al revés (tarea 16): el modal de la nota del POS ofrece el
+  // pago de Webpay de una venta online como "por la tarjeta", y esa nota gasta el
+  // tope por pago. Un REFUND de la misma orden que no lo mirara devolvería la plata
+  // dos veces: el proveedor la saca, y después la corrección falla por el tope.
+  describe('el REFUND respeta lo que las notas manuales ya devolvieron por el pago', () => {
+    let caja: CajaAbierta;
+    beforeAll(async () => {
+      caja = await abrirCaja(app, token);
+    });
+    afterAll(async () => {
+      await cerrarCaja(app, token, caja);
+    });
+    const pagoDe = async (ventaId: string): Promise<string> => {
+      const pagos: { pago_id: string }[] = await ds.query(
+        `SELECT pago_id FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [ventaId],
+      );
+      expect(pagos).toHaveLength(1);
+      return pagos[0].pago_id;
+    };
+    const notaPorElPago = (ventaId: string, monto: string, pagoId: string) =>
+      request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set(auth())
+        .send({ monto, devolucion: { pagoId }, comentario: 'desde el POS' });
+
+    it('la escena: la nota del POS devolvió los 100.000 por el pago de Webpay, y el REFUND de la misma orden da 400 SIN llamar a la pasarela', async () => {
+      const venta = await ventaOnline();
+      const ordenId = await ordenCobrada(venta.id);
+      const nota = await notaPorElPago(
+        venta.id,
+        '100000',
+        await pagoDe(venta.id),
+      );
+      expect(nota.status).toBe(201);
+
+      const res = await reembolsarAdmin(ordenId, { monto: '100000' });
+
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toMatch(/por devolver/);
+      // Sin cifras: ni el tope ni lo que cobró el pago.
+      expect(JSON.stringify(res.body)).not.toMatch(/\d{4}/);
+      expect(reembolsarEnElProveedor).not.toHaveBeenCalled();
+      expect(await refundsDe(ordenId)).toEqual([]);
+      expect(await correccionesDe(venta.id)).toHaveLength(1);
+    });
+
+    it('la API externa (llave de API) respeta el mismo tope', async () => {
+      const venta = await ventaOnline();
+      const ordenId = await ordenCobrada(venta.id);
+      expect(
+        (await notaPorElPago(venta.id, '100000', await pagoDe(venta.id)))
+          .status,
+      ).toBe(201);
+
+      const res = await reembolsarApi(ordenId, { monto: '100000' });
+
+      expect(res.status).toBe(400);
+      expect(reembolsarEnElProveedor).not.toHaveBeenCalled();
+      expect(await refundsDe(ordenId)).toEqual([]);
+    });
+
+    it('lo que deja pasar: con una nota de 30.000 quedan 70.000; 70.001 da 400 y 70.000 se aprueba', async () => {
+      const venta = await ventaOnline();
+      const ordenId = await ordenCobrada(venta.id);
+      expect(
+        (await notaPorElPago(venta.id, '30000', await pagoDe(venta.id))).status,
+      ).toBe(201);
+
+      const demasiado = await reembolsarAdmin(ordenId, { monto: '70001' });
+      expect(demasiado.status).toBe(400);
+      expect(reembolsarEnElProveedor).not.toHaveBeenCalled();
+      expect(await refundsDe(ordenId)).toEqual([]);
+
+      const justo = await reembolsarAdmin(ordenId, { monto: '70000' });
+      expect(justo.status).toBe(201);
+      const cuerpo = justo.body as RespuestaReembolso;
+      expect(cuerpo.reembolsoAprobado).toBe(true);
+      expect(cuerpo.warning).toBeUndefined();
+      expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(1);
+      // Y ahora el pago quedó en cero: el siguiente REFUND, por poco que sea, rebota.
+      const sobrante = await reembolsarAdmin(ordenId, { monto: '1500' });
+      expect(sobrante.status).toBe(400);
+      expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(1);
+    });
+
+    it('con dos pagos no hay a cuál atribuirlo: el REFUND de 80.000 (más que cualquiera de los dos) pasa, como hoy', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set(auth())
+        .send({
+          canal: 'online',
+          lineas: [
+            { itemId: itemAfecto60, cantidad: '1' },
+            { itemId: itemExento, cantidad: '1' },
+          ],
+          pagos: [
+            { metodoPagoId: DEBITO_ID, monto: '40000' },
+            { metodoPagoId: CREDITO_ID, monto: '60000' },
+          ],
+        });
+      expect(res.status).toBe(201);
+      const ordenId = await ordenCobrada((res.body as Venta).id);
+
+      const refund = await reembolsarAdmin(ordenId, { monto: '80000' });
+
+      expect(refund.status).toBe(201);
+      expect((refund.body as RespuestaReembolso).warning).toBeUndefined();
+    });
+
+    // El hueco entre el commit del REFUND y su hook (medido: una nota lanzada
+    // hasta ~5 ms detrás del REFUND pasaba el tope y la plata salía dos veces).
+    // Se reproduce sin demoras con un hook que FALLA: la plata ya volvió, el
+    // REFUND queda aprobado y sin corrección ligada — el mismo estado que hay
+    // entre el commit y el hook.
+    const opcionDelPago = async (
+      ventaId: string,
+    ): Promise<string | undefined> => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/ventas/${ventaId}`)
+        .set(auth());
+      expect(res.status).toBe(200);
+      return (
+        res.body as {
+          opcionesDevolucion: { sinPlata: boolean; monto: string }[];
+        }
+      ).opcionesDevolucion.find((o) => !o.sinPlata)?.monto;
+    };
+
+    it('un REFUND aprobado cuyo hook todavía no corrió (o falló) ya gasta el tope: la nota del POS por 30.001 da 400 sin cifras y por 30.000 pasa', async () => {
+      const venta = await ventaOnline();
+      const ordenId = await ordenCobrada(venta.id);
+      const pagoId = await pagoDe(venta.id);
+      const hook = jest
+        .spyOn(app.get(VentasReembolsoHandler), 'onReembolsoAprobado')
+        .mockRejectedValueOnce(new Error('el hook no llegó a crear la nota'));
+      let refund;
+      try {
+        refund = await reembolsarAdmin(ordenId, { monto: '70000' });
+      } finally {
+        hook.mockRestore();
+      }
+      expect(refund.status).toBe(201);
+      expect((refund.body as RespuestaReembolso).warning).toBeDefined();
+      expect(await refundsDe(ordenId)).toEqual([
+        { correccion_venta_id: null, estado: 'aprobada' },
+      ]);
+      expect(await correccionesDe(venta.id)).toEqual([]);
+      // La pantalla ya no ofrece lo que salió por el proveedor.
+      expect(await opcionDelPago(venta.id)).toBe('30000.0000');
+
+      const demasiado = await notaPorElPago(venta.id, '30001', pagoId);
+      expect(demasiado.status).toBe(400);
+      expect(JSON.stringify(demasiado.body)).toMatch(/por devolver/);
+      expect(JSON.stringify(demasiado.body)).not.toMatch(/\d{4}/);
+      expect(await correccionesDe(venta.id)).toEqual([]);
+
+      const resto = await notaPorElPago(venta.id, '30000', pagoId);
+      expect(resto.status).toBe(201);
+    });
+
+    it('control: con la corrección ya ligada el REFUND cuenta una sola vez (por la corrección): quedan 30.000, no 100.000−70.000−70.000', async () => {
+      const venta = await ventaOnline();
+      const ordenId = await ordenCobrada(venta.id);
+      const pagoId = await pagoDe(venta.id);
+
+      const refund = await reembolsarAdmin(ordenId, { monto: '70000' });
+      expect(refund.status).toBe(201);
+      expect((refund.body as RespuestaReembolso).warning).toBeUndefined();
+      // Ligado: la corrección del hook existe y el REFUND apunta a ella.
+      expect((await refundsDe(ordenId))[0].correccion_venta_id).toEqual(
+        expect.any(String),
+      );
+
+      expect(await opcionDelPago(venta.id)).toBe('30000.0000');
+      const demasiado = await notaPorElPago(venta.id, '30001', pagoId);
+      expect(demasiado.status).toBe(400);
+      const resto = await notaPorElPago(venta.id, '30000', pagoId);
+      expect(resto.status).toBe(201);
+    });
+
+    it('sin una nota previa, el REFUND total sigue pasando', async () => {
+      const venta = await ventaOnline();
+      const ordenId = await ordenCobrada(venta.id);
+
+      const res = await reembolsarAdmin(ordenId, { monto: '100000' });
+
+      expect(res.status).toBe(201);
+      const cuerpo = res.body as RespuestaReembolso;
+      expect(cuerpo.reembolsoAprobado).toBe(true);
+      expect(cuerpo.warning).toBeUndefined();
+      expect(cuerpo.notaCreditoId).toEqual(expect.any(String));
     });
   });
 

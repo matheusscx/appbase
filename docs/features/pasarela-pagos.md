@@ -78,7 +78,12 @@ admin acepta además `devoluciones?: [{itemId, cantidad}]` (opcional, ítems que
 en esa nota). **`generarNotaCredito` ya no existe**: mandarlo da 400, por esta ruta y por la
 de la API externa (mismo DTO). La respuesta puede traer `notaCreditoId` o `warning` (la
 corrección falló: el reembolso NO se revierte y el REFUND queda sin `correccion_venta_id`).
-Una orden sin venta se reembolsa sin corrección y sin aviso. Ver
+Una orden sin venta se reembolsa sin corrección y sin aviso. **Antes de llamar al proveedor**, un
+reembolso de una orden con venta respeta el tope por pago de las notas de crédito (2026-10-02): lo que
+el pago de la venta todavía puede devolver, descontadas las notas "por el pago" hechas desde el POS y los reembolsos aprobados que todavía no
+tienen su corrección;
+si no alcanza, 400 sin cifras y la pasarela no se llama (con más de un pago en la venta no hay tope).
+Ver
 [reembolsos-nota-credito.md](./reembolsos-nota-credito.md).
 
 ### API m2m (ApiKeyGuard — `Authorization: Bearer pk_...`)
@@ -374,7 +379,7 @@ Con el stack arriba (`docker-compose up -d`):
 |---|---|---|
 | Timeout del proveedor malinterpretado como rechazo | Cobro perdido / doble cobro | Orden queda `en_proceso`; endpoint `.../verificar` reconcilia contra el proveedor |
 | Doble retorno de Webpay (reintento) | Inscripción/medio duplicado | Claim atómico `pendiente→procesando`; compensación a `pendiente` si el provider falla |
-| Reembolsos concurrentes exceden el total | Sobre-reembolso | `reembolsar()` corre dentro de una transacción con lock pesimista (`SELECT … FOR UPDATE`) de la fila de la orden: dos reembolsos sobre la misma orden se serializan; el segundo ve el REFUND del primero y no puede exceder el saldo. La auditoría de un timeout se registra **fuera** de la transacción (tras el rollback que libera el lock) para no auto-bloquearse contra el `FOR UPDATE` vía la FK de `pasarela_transacciones` |
+| Reembolsos concurrentes exceden el total | Sobre-reembolso | `reembolsar()` corre dentro de una transacción con lock pesimista (`SELECT … FOR UPDATE`) de la fila de la orden: dos reembolsos sobre la misma orden se serializan; el segundo ve el REFUND del primero y no puede exceder el saldo. Con venta ligada, esa misma transacción toma después el `FOR UPDATE` de la venta para el tope por pago (orden → venta, el único orden: ningún camino toma la venta y luego la orden). La auditoría de un timeout se registra **fuera** de la transacción (tras el rollback que libera el lock) para no auto-bloquearse contra el `FOR UPDATE` vía la FK de `pasarela_transacciones` |
 | Orden con timeout marcada `expirada` por reloj (deja de ser reconciliable) | Cobro real dado por perdido | `obtenerOrden()` no expira perezosamente órdenes con una transacción `AUTHORIZATION 'error'` (hubo intento); `verificar()` además acepta órdenes `expirada`. Solo la reconciliación con el proveedor las cierra |
 | Credenciales expuestas | Fraude | Cifrado AES-256-GCM en reposo, API keys hasheadas, redacción de logs |
 

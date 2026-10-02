@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import Decimal from 'decimal.js';
+import type { EntityManager } from 'typeorm';
 import {
   MODO_REDONDEO_DEFAULT,
   modoToRounding,
@@ -37,6 +38,13 @@ export class VentasReembolsoHandler
 
   onModuleInit(): void {
     this.registry.register(this);
+  }
+
+  async exigirTopeDelReembolso(
+    manager: EntityManager,
+    params: { tenantId: string; ventaId: string; monto: string },
+  ): Promise<void> {
+    await this.ventasService.exigirTopeDelReembolsoPasarela(manager, params);
   }
 
   async onReembolsoAprobado(

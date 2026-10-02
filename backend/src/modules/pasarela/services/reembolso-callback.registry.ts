@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { EntityManager } from 'typeorm';
 
 /**
  * Evento emitido tras el COMMIT de un reembolso aprobado sobre una orden con
@@ -42,6 +43,22 @@ export interface ReembolsoAprobadoEvento {
  * `CobrosService`, dueño de esa tabla, lo liga al REFUND.
  */
 export interface ReembolsoCallbackHandler {
+  /**
+   * El tope por pago del lado de ventas, ANTES de llamar al proveedor: la plata
+   * que ese reembolso devolvería no puede pasar de lo que el pago de la venta
+   * todavía puede devolver (descontadas las notas "por el pago" del POS). Lanza un
+   * 400 sin cifras si no alcanza; con una venta sin un único pago, o que ya no
+   * existe, no hay tope y no lanza.
+   *
+   * Corre en la transacción del reembolso, con el `FOR UPDATE` de la orden ya
+   * tomado, y toma el de la venta: el orden orden → venta es el único que existe
+   * (ver `CobrosService.reembolsar`).
+   */
+  exigirTopeDelReembolso(
+    manager: EntityManager,
+    params: { tenantId: string; ventaId: string; monto: string },
+  ): Promise<void>;
+
   onReembolsoAprobado(
     evento: ReembolsoAprobadoEvento,
   ): Promise<{ correccionVentaId: string }>;

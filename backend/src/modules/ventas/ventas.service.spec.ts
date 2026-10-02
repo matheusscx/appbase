@@ -5,6 +5,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import Decimal from 'decimal.js';
+import type { EntityManager } from 'typeorm';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { Db } from '../../common/db/db.service';
 import { VentasService } from './ventas.service';
@@ -256,6 +257,7 @@ describe('VentasService', () => {
     exigirTopeDelDocumento: jest.Mock;
     documentarCorreccion: jest.Mock;
     opcionesDevolucion: jest.Mock;
+    devolvibleDelPagoUnico: jest.Mock;
   };
   let ventaPropinaServiceMock: { crearEnTransaccion: jest.Mock };
   let garzonesServiceMock: {
@@ -305,6 +307,7 @@ describe('VentasService', () => {
         devolvibleDelPago: null,
       }),
       exigirTopeDelDocumento: jest.fn().mockResolvedValue(undefined),
+      devolvibleDelPagoUnico: jest.fn().mockResolvedValue(null),
       documentarCorreccion: jest.fn().mockResolvedValue({ id: 'doc-nc' }),
       // Una opción: lo mínimo para que el detalle ofrezca acreditar.
       opcionesDevolucion: jest.fn().mockResolvedValue([
@@ -3923,6 +3926,88 @@ describe('VentasService', () => {
       expect(dataSourceMock.query).toHaveBeenCalledTimes(1);
       expect(sql).not.toContain('IS DISTINCT FROM');
       expect(params).toEqual([TENANT_ID]);
+    });
+
+    describe('exigirTopeDelReembolsoPasarela: el REFUND respeta el tope por pago antes de llamar al proveedor', () => {
+      let manager: ReturnType<typeof buildManagerMock>;
+      let ventaExiste: boolean;
+      const exigir = (monto: string) =>
+        service.exigirTopeDelReembolsoPasarela(
+          manager as unknown as EntityManager,
+          { tenantId: TENANT_ID, ventaId: VENTA_ORIG_ID, monto },
+        );
+      beforeEach(() => {
+        manager = buildManagerMock();
+        ventaExiste = true;
+        manager.query.mockImplementation((sql: string) =>
+          Promise.resolve(
+            sql.includes('FOR UPDATE') && ventaExiste
+              ? [{ venta_id: VENTA_ORIG_ID }]
+              : [],
+          ),
+        );
+      });
+
+      it('toma el FOR UPDATE de la venta (el mismo de la nota) ANTES de leer lo que el pago puede devolver', async () => {
+        ventaDocumentosMock.devolvibleDelPagoUnico.mockResolvedValue(
+          '70000.0000',
+        );
+
+        await exigir('70000');
+
+        const lock = manager.query.mock.calls.find(([sql]) =>
+          (sql as string).includes('FOR UPDATE'),
+        ) as [string, unknown[]];
+        expect(lock[0]).toMatch(/FROM ventas/);
+        expect(lock[0]).toMatch(/eliminado_el IS NULL/);
+        expect(lock[1]).toEqual([VENTA_ORIG_ID, TENANT_ID]);
+        // Leído sin el lock, una nota concurrente pasaría con el mismo saldo.
+        expect(manager.query.mock.invocationCallOrder[0]).toBeLessThan(
+          ventaDocumentosMock.devolvibleDelPagoUnico.mock
+            .invocationCallOrder[0],
+        );
+        expect(ventaDocumentosMock.devolvibleDelPagoUnico).toHaveBeenCalledWith(
+          manager,
+          { tenantId: TENANT_ID, ventaId: VENTA_ORIG_ID },
+        );
+      });
+
+      it('un monto por encima de lo que queda por devolver del pago es un 400 sin cifras', async () => {
+        ventaDocumentosMock.devolvibleDelPagoUnico.mockResolvedValue(
+          '70000.0000',
+        );
+
+        const error = (await exigir('70001').catch(
+          (e: Error) => e,
+        )) as BadRequestException;
+
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect(error.message).toMatch(/por devolver del pago/);
+        expect(error.message).not.toMatch(/\d/);
+      });
+
+      it('un monto igual a lo que queda por devolver pasa', async () => {
+        ventaDocumentosMock.devolvibleDelPagoUnico.mockResolvedValue(
+          '70000.0000',
+        );
+
+        await expect(exigir('70000')).resolves.toBeUndefined();
+      });
+
+      it('sin un único pago (nulo) no hay tope: elegir uno sería adivinar', async () => {
+        ventaDocumentosMock.devolvibleDelPagoUnico.mockResolvedValue(null);
+
+        await expect(exigir('999999')).resolves.toBeUndefined();
+      });
+
+      it('una venta que ya no existe no frena el reembolso: no hay a qué topar y no lee nada más', async () => {
+        ventaExiste = false;
+
+        await expect(exigir('70000')).resolves.toBeUndefined();
+        expect(
+          ventaDocumentosMock.devolvibleDelPagoUnico,
+        ).not.toHaveBeenCalled();
+      });
     });
 
     describe('viaDeReembolsoPasarela: un hecho consumado, nunca lanza', () => {

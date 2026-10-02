@@ -967,8 +967,10 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   `sistema` el documento de ese pago es la boleta de toda la venta, que no lo acota. Vale para
   cualquier medio, el efectivo incluido (donde se suma al tope de lo cobrado en efectivo). Lo que el
   comercio quiera acreditar de más va por "No vuelve plata", topada por lo que la venta todavía
-  debe. Lo devuelto por la pasarela cuenta contra su pago cuando la venta tiene uno solo; la
-  propina no cuenta. La pantalla ofrece solo lo que cada pago todavía puede devolver. El rechazo no
+  debe. Lo devuelto por la pasarela cuenta contra su pago cuando la venta tiene uno solo, y **un
+  reembolso por la pasarela tampoco pasa de ahí**: si la nota del POS o un reembolso anterior (aunque
+  todavía no tenga su nota) ya devolvió esa plata por la tarjeta, el reembolso se rechaza antes de
+  pedirle nada al proveedor; la propina no cuenta. La pantalla ofrece solo lo que cada pago todavía puede devolver. El rechazo no
   dice ninguna cifra (2026-10-02, gemelo del tope de efectivo);
 - **una venta pendiente admite una nota de crédito, pero solo "no vuelve plata"** (owner,
   2026-10-02). La distribuidora que factura en otro sistema vende $119.000 a 30 días y el cliente

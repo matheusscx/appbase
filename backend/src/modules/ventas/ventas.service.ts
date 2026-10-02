@@ -1875,11 +1875,50 @@ export class VentasService {
    * rechazado, lo que cobró cada pago (el mismo oráculo de la fuga 5, que ya se
    * cerró para el efectivo).
    */
-  private exigirTopeDelPago(devolvible: string | null, monto: string): void {
+  private exigirTopeDelPago(
+    devolvible: string | null,
+    monto: string,
+    mensaje = 'El monto supera lo que queda por devolver por ese pago. Elegí otro pago o, si la venta todavía tiene saldo, emití la nota sin devolución de dinero.',
+  ): void {
     if (devolvible !== null && new Decimal(monto).gt(devolvible))
-      throw new BadRequestException(
-        'El monto supera lo que queda por devolver por ese pago. Elegí otro pago o, si la venta todavía tiene saldo, emití la nota sin devolución de dinero.',
-      );
+      throw new BadRequestException(mensaje);
+  }
+
+  /**
+   * El tope por pago de un REFUND de la pasarela, **antes** de llamar al proveedor
+   * (el otro extremo del tope de la nota manual: el modal del POS ofrece el pago de
+   * Webpay de una venta online "por la tarjeta", y lo que esa nota devolvió no puede
+   * volver a salir por el proveedor). Lo llama `CobrosService.reembolsar` dentro de su
+   * transacción, con el `FOR UPDATE` de la orden ya tomado: acá se toma el de la
+   * venta, el mismo que toma la nota (`lockVentaOriginal`), y el cálculo es el de la
+   * nota (`devolvibleDelPagoUnico`).
+   *
+   * Orden de bloqueo: orden → venta. La nota del POS toma solo la venta, así que
+   * no cruza. Ver el comentario de `CobrosService.reembolsar`.
+   *
+   * Una venta que ya no existe no frena el reembolso (la plata de una orden ligada a
+   * una venta rota igual tiene que poder volver; el hook lo avisa después), ni una
+   * con más de un pago (no hay a cuál atribuirlo). El mensaje no lleva cifras.
+   */
+  async exigirTopeDelReembolsoPasarela(
+    manager: EntityManager,
+    params: { tenantId: string; ventaId: string; monto: string },
+  ): Promise<void> {
+    try {
+      await this.lockVentaOriginal(manager, params.tenantId, params.ventaId);
+    } catch (e) {
+      if (e instanceof NotFoundException) return;
+      throw e;
+    }
+    const devolvible = await this.ventaDocumentosService.devolvibleDelPagoUnico(
+      manager,
+      { tenantId: params.tenantId, ventaId: params.ventaId },
+    );
+    this.exigirTopeDelPago(
+      devolvible,
+      params.monto,
+      'El monto supera lo que queda por devolver del pago de esa venta: parte de ese dinero ya se devolvió, por una nota de crédito o por un reembolso anterior.',
+    );
   }
 
   private async crearNotaCreditoEnTransaccion(
