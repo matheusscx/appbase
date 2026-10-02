@@ -9,6 +9,10 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 
+// Por venta: el saldo por venta de `/ventas/resumen` y "Por cobrar" suma las
+// salidas de caja de las correcciones de cada venta; mismo criterio que
+// `idx_pagos_venta`.
+@Index('idx_movimientos_caja_venta', ['ventaId'])
 // Backstop duro del signo: el tipo del movimiento ('entrada'/'salida') es lo que
 // codifica la dirección, así que un monto NEGATIVO invierte el aporte al esperado.
 // El DTO cubre el endpoint HTTP (donde además exige > 0, porque un movimiento
@@ -16,10 +20,6 @@ import {
 // helper compartido que usan ventas y pagos.
 // `>= 0` y no `> 0`: un pago devuelto íntegro como vuelto deja neto 0, y esa
 // venta es legítima.
-// Por venta: el saldo por venta de `/ventas/resumen` y "Por cobrar" suma las
-// salidas de caja de las correcciones de cada venta; mismo criterio que
-// `idx_pagos_venta`.
-@Index('idx_movimientos_caja_venta', ['ventaId'])
 @Entity('movimientos_caja')
 @Check('chk_movimientos_caja_monto_no_negativo', '"monto" >= 0')
 export class MovimientoCaja {
