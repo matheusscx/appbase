@@ -385,7 +385,8 @@ Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recar
   sola consulta. Cada uno trae `id`, `ventaId` (la venta o la corrección a la que pertenece: es el
   id de la ruta del `PATCH`), `emisor`, `tipoDocumento` (`{ id, codigo, nombre }` o `null`),
   `claseMaquina`, `numero`, `estadoEnvio`, `monto`, `pagoId`, `documentoCorregidoId`, `esDuplicado`,
-  y el descarte: `descarte`, `descartadoEl` y `descartadoPorNombre`. **Incluye los descartados**:
+  el descarte: `descarte`, `descartadoEl` y `descartadoPorNombre`, y `numerosBorrados` (cada borrado
+  del número, el más nuevo primero; `[]` si nunca se borró). **Incluye los descartados**:
   qué documento "vale" lo dice `descarte`, no su presencia. El tipo y quien descartó se resuelven
   por `JOIN` **sin filtrar borrados**, a propósito: un documento ya emitido conserva su tipo y su
   historial aunque el catálogo o la cuenta se borren después (el porqué está escrito en la consulta).
@@ -434,6 +435,41 @@ Response (200): el documento actualizado, con la forma de `documentos[]` del det
   su cuenta** (no vacío, máx. 40, sin caracteres de control): una integración futura con el facturador
   externo llama ese mismo método, sin pasar por el DTO. Anotar el número de un `externo`
   cambia lo que decide `anulable`: con número, anular es 400 sin preguntar.
+
+### POST /api/ventas/:id/documentos/:documentoId/borrar-numero
+
+Borra el número de un documento **hecho por fuera** (`externo`), y deja registrado quién, cuándo y
+qué decía (PRODUCTO § 10, owner 2026-10-02). La venta vuelve a "sin número", así que anular **vuelve a
+preguntar** "¿ya lo hiciste en tu facturador?" (E10). Sin esto, un número anotado por error ("1" en
+una factura que no se hizo) obligaba a ir por nota de crédito, porque con número el documento se da
+por hecho.
+
+```
+POST /api/ventas/{id}/documentos/{documentoId}/borrar-numero     // sin body
+Response (201): el documento sin número, con la forma de `documentos[]` del detalle
+```
+
+- **Permiso:** `Ventas:Anular` (no `Crear`: quien puede anular puede corregir el número). Mismo
+  alcance de caja que `GET /ventas/:id` y que el `PATCH`: una venta que no es del cajero es **404**,
+  no 403. El usuario sale del token; el número que había lo lee el servidor.
+- **Es un `POST` y no un `DELETE`**: no se borra ninguna fila. El documento sigue y el borrado queda
+  como un hecho aparte.
+- **Solo un `externo` vigente (`descarte IS NULL`, no borrado), de esa venta y de ese tenant, y con
+  número.** Cualquier otro (máquina, sistema, `nadie`, descartado, de otra venta, de una corrección
+  o de otro tenant) es **404**; un `externo` sin número (o en blanco, el mismo criterio con que anular
+  lo da por no hecho) es **400**.
+- **Mismo `FOR UPDATE` de la venta** que `POST /anular` y que el `PATCH`, en una transacción y después
+  del alcance de caja (`VentasService.tomarDocumentoDeLaVenta`, compartido con el `PATCH`).
+- **El registro:** una fila por borrado en `venta_documento_numero_borrados` (`numero_anterior`,
+  `usuario_id`, `creado_el` = cuándo), escrita por `VentaDocumentosService.borrarNumero` en la misma
+  transacción. **Cada borrado es una fila nueva y las anteriores no se tocan**: anotar un número,
+  borrarlo, anotar otro y borrarlo deja dos filas. Por eso es una tabla de eventos (el patrón de
+  `garzon_pin_evento`) y no columnas en `venta_documentos`, que guardan solo el último. **Solo se
+  registra el borrado**: reescribir un número con el `PATCH` no deja nada.
+- El detalle los trae en `documentos[].numerosBorrados` (`numeroAnterior`, `borradoEl`,
+  `borradoPorNombre`), en **una** consulta por lote (`documento_id = ANY($2)`) para todos los
+  documentos. El `JOIN` al usuario **no filtra borrados**, a propósito: quién borró un número no se
+  pierde porque su cuenta se dé de baja después.
 
 `tieneLineasDespachadas` (booleano) dice si la venta salió de una **cuenta de salón con
 alguna línea ya enviada a cocina**. Es el único consumidor de ese puente hacia salones, y
@@ -784,7 +820,12 @@ no estaba hecho, <fecha>". Una venta sin documentos dice "Sin documento". **"Com
 (solo `maquina` y `externo` vigentes sin número, con `Ventas:Crear`) abre el campo en la fila y hace
 `PATCH /ventas/{ventaId del documento}/documentos/{id}`: el de una corrección lleva el id de la
 corrección. Después se vuelve a pedir el detalle, porque con número un documento externo cambia
-`anulable`.
+`anulable`. **"Borrar número"** (solo un `externo` vigente **con** número, y solo con
+`Ventas:Anular`) pregunta antes de llamar al backend ("¿Borrar el número?": qué número es y que queda
+registrado); al confirmar hace `POST …/borrar-numero` (también con el `ventaId` del documento), muestra
+el documento sin número —y entonces "Completar número" vuelve a ofrecerse— y vuelve a pedir el detalle:
+que anular pregunte otra vez lo dice `anularPreguntaExterno`. Bajo cada documento se lista el registro
+("<usuario> borró el número <anterior>, <fecha>"), el más nuevo primero.
 
 **Anular desde el drawer.** El botón sale solo con `anulable` del backend y `Ventas:Anular`: la
 pantalla no mira estado, pagos ni tipo. Con `anularPreguntaExterno`, `AnularVentaModal` pregunta

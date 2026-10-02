@@ -140,6 +140,22 @@ export interface CompletarNumeroParams {
   clase?: ClaseDocumentoMaquina;
 }
 
+export interface BorrarNumeroParams {
+  tenantId: string;
+  documentoId: string;
+  /** Quién lo borra: sale del token en el controller, nunca del body. */
+  usuarioId: string;
+}
+
+/** Un borrado del número de un documento hecho por fuera (PRODUCTO § 10). */
+export interface NumeroBorradoDetalle {
+  /** Lo que decía el documento antes de borrarlo. */
+  numeroAnterior: string;
+  borradoEl: Date;
+  /** Puede faltar si la cuenta se borró después. */
+  borradoPorNombre: string | null;
+}
+
 /**
  * Un documento tal como lo muestra el detalle de la venta y como responde el
  * `PATCH`. `ventaId` dice a quién pertenece: la venta o una de sus
@@ -161,6 +177,12 @@ export interface DocumentoDetalle {
   descartadoEl: Date | null;
   /** Nombre de quien descartó: en `afirmado_no_hecho`, quién afirmó que no estaba hecho (E10). */
   descartadoPorNombre: string | null;
+  /**
+   * Cada vez que alguien borró el número de este documento (solo el `externo`
+   * lo admite), el **más nuevo primero**. Vacío si nunca se borró. Reescribir el
+   * número con el `PATCH` no entra acá.
+   */
+  numerosBorrados: NumeroBorradoDetalle[];
 }
 
 export interface EvaluarAnulacionParams {
@@ -747,6 +769,11 @@ export class VentaDocumentosService {
         ORDER BY vd.creado_el, vd.documento_id`,
       [params.ventaId, params.tenantId, params.documentoId ?? null],
     );
+    const borradosPorDocumento = await this.numerosBorradosDe(
+      lector,
+      params.tenantId,
+      filas.map((f) => f.documento_id),
+    );
     return filas.map((f) => ({
       id: f.documento_id,
       ventaId: f.venta_id,
@@ -768,7 +795,51 @@ export class VentaDocumentosService {
       descarte: f.descarte,
       descartadoEl: f.descartado_el,
       descartadoPorNombre: f.descartado_por_nombre,
+      numerosBorrados: borradosPorDocumento.get(f.documento_id) ?? [],
     }));
+  }
+
+  /**
+   * Los borrados de número de **todos** los documentos del detalle, en una sola
+   * consulta (`= ANY`), con el nombre de quien borró resuelto por JOIN: una
+   * consulta por documento sería N+1. El más nuevo primero.
+   */
+  private async numerosBorradosDe(
+    lector: Lector,
+    tenantId: string,
+    documentoIds: string[],
+  ): Promise<Map<string, NumeroBorradoDetalle[]>> {
+    const porDocumento = new Map<string, NumeroBorradoDetalle[]>();
+    if (!documentoIds.length) return porDocumento;
+    const filas: {
+      documento_id: string;
+      numero_anterior: string;
+      creado_el: Date;
+      borrado_por_nombre: string | null;
+    }[] = await lector.query(
+      `SELECT b.documento_id, b.numero_anterior, b.creado_el,
+              NULLIF(TRIM(CONCAT_WS(' ', u.nombre, u.apellido)), '') AS borrado_por_nombre
+         FROM venta_documento_numero_borrados b
+         -- Sin filtrar \`eliminado_el\` del usuario, a propósito: quién borró un
+         -- número es parte del registro y no puede perderse porque su cuenta se
+         -- dio de baja después (mismo criterio que \`descartado_por_nombre\`).
+         LEFT JOIN usuarios u ON u.usuario_id = b.usuario_id
+        WHERE b.tenant_id = $1
+          AND b.documento_id = ANY($2::uuid[])
+          AND b.eliminado_el IS NULL
+        ORDER BY b.creado_el DESC, b.numero_borrado_id`,
+      [tenantId, documentoIds],
+    );
+    for (const f of filas) {
+      const lista = porDocumento.get(f.documento_id) ?? [];
+      lista.push({
+        numeroAnterior: f.numero_anterior,
+        borradoEl: f.creado_el,
+        borradoPorNombre: f.borrado_por_nombre,
+      });
+      porDocumento.set(f.documento_id, lista);
+    }
+    return porDocumento;
   }
 
   /**
@@ -845,6 +916,83 @@ export class VentaDocumentosService {
     // y esta sentencia: no se responde un éxito que no escribió nada.
     if (!escritas.length)
       throw new NotFoundException('Documento no encontrado');
+
+    const [documento] = await this.listarParaDetalle(manager, {
+      tenantId: params.tenantId,
+      ventaId: escritas[0].venta_id,
+      documentoId: params.documentoId,
+    });
+    return documento;
+  }
+
+  /**
+   * Borra el número de un documento hecho por fuera (`externo`) y deja registrado
+   * quién, cuándo y qué decía (PRODUCTO § 10, owner 2026-10-02). La venta vuelve a
+   * "sin número", así que anular otra vez pregunta (E10): sin esto, un número
+   * anotado por error obligaba a ir por nota de crédito, porque con número el
+   * documento se da por hecho (`evaluarAnulacion`).
+   *
+   * Solo un `externo` vigente (`descarte IS NULL`, no borrado) **con número** y de
+   * ese tenant: cualquier otro es 404 (no se confirma que existe) y uno sin número
+   * es 400, porque no hay nada que borrar ni que registrar. No recibe nada del
+   * request más que `usuarioId`, que el controller saca del token.
+   *
+   * Que el documento sea de **tal venta**, el alcance de caja y el lock de esa
+   * venta son del llamador, igual que en `completarNumero`: sin el lock, borrar el
+   * número correría contra una anulación que lo lee.
+   *
+   * Cada borrado es **una fila nueva** en `venta_documento_numero_borrados`: el
+   * anterior no se toca, aunque el número se vuelva a anotar y a borrar. Es lo
+   * único que se registra; reescribir un número con `completarNumero` no deja
+   * rastro. Devuelve el documento como lo muestra el detalle.
+   */
+  async borrarNumero(
+    manager: EntityManager,
+    params: BorrarNumeroParams,
+  ): Promise<DocumentoDetalle> {
+    const vigente = `tenant_id = $2
+          AND emisor = 'externo'
+          AND descarte IS NULL
+          AND eliminado_el IS NULL`;
+    const actuales: { numero: string | null }[] = await manager.query(
+      `SELECT numero
+         FROM venta_documentos
+        WHERE documento_id = $1
+          AND ${vigente}`,
+      [params.documentoId, params.tenantId],
+    );
+    if (!actuales.length)
+      throw new NotFoundException('Documento no encontrado');
+    // El mismo criterio de "tiene número" que `evaluarAnulacion`: uno en blanco no cuenta.
+    const anterior = actuales[0].numero;
+    if (anterior === null || anterior.trim() === '')
+      throw new BadRequestException(
+        'El documento no tiene número: no hay nada que borrar.',
+      );
+
+    // `numero = $3`: se borra exactamente lo que se leyó y se registra. Sin el
+    // lock del llamador pudo cambiar entre la lectura y acá.
+    const escritas = unwrap<{ documento_id: string; venta_id: string }>(
+      await manager.query(
+        `UPDATE venta_documentos
+            SET numero = NULL,
+                actualizado_el = NOW()
+          WHERE documento_id = $1
+            AND ${vigente}
+            AND numero = $3
+          RETURNING documento_id, venta_id`,
+        [params.documentoId, params.tenantId, anterior],
+      ),
+    );
+    if (!escritas.length)
+      throw new NotFoundException('Documento no encontrado');
+
+    await manager.query(
+      `INSERT INTO venta_documento_numero_borrados
+              (tenant_id, documento_id, numero_anterior, usuario_id)
+       VALUES ($1, $2, $3, $4)`,
+      [params.tenantId, params.documentoId, anterior, params.usuarioId],
+    );
 
     const [documento] = await this.listarParaDetalle(manager, {
       tenantId: params.tenantId,

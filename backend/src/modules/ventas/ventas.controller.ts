@@ -112,6 +112,38 @@ export class VentasController {
     });
   }
 
+  /**
+   * Borra el número de un documento hecho por fuera (PRODUCTO § 10, owner
+   * 2026-10-02): quien puede anular ventas (`Ventas:Anular`) puede corregir un
+   * número anotado por error, y queda registrado quién, cuándo y qué decía. La
+   * venta vuelve a "sin número", así que anular otra vez pregunta (E10).
+   *
+   * Es un `POST` y no un `DELETE`: no se borra ninguna fila, el documento sigue
+   * y el borrado queda como un hecho aparte. Sin body: el usuario sale del token
+   * y el número que había lo lee el servidor. El alcance de caja es el de
+   * `findOne` (404, no 403, si la venta no es suya), como el `PATCH` de arriba.
+   */
+  @Post(':id/documentos/:documentoId/borrar-numero')
+  @RequiresPermiso('Ventas', 'Anular')
+  async borrarNumeroDocumento(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('documentoId', ParseUUIDPipe) documentoId: string,
+  ) {
+    const u = req.user as JwtUser;
+    const verTodas = await this.rbacService.resolverAlcanceDerivadoDeCaja(
+      u.id,
+      u.tenantId!,
+    );
+    return this.ventasService.borrarNumeroDocumento({
+      tenantId: u.tenantId ?? '',
+      usuarioId: u.id,
+      verTodas,
+      ventaId: id,
+      documentoId,
+    });
+  }
+
   @Post(':id/anular')
   @RequiresPermiso('Ventas', 'Anular')
   async anular(

@@ -2022,6 +2022,26 @@ CREATE TABLE "venta_documentos" (
 CREATE INDEX "idx_venta_documentos_venta" ON "venta_documentos" ("venta_id");
 CREATE INDEX "idx_venta_documentos_corregido" ON "venta_documentos" ("documento_corregido_id");
 
+-- Cada vez que alguien con Ventas:Anular borra el número de un documento hecho por
+-- fuera ('externo') queda UNA fila acá: qué decía, quién lo borró y cuándo (creado_el).
+-- Hechos con hora: se insertan y nunca se editan (patrón de garzon_pin_evento). Una
+-- tabla y no columnas en venta_documentos: las columnas guardarían solo el último
+-- borrado. Solo se registra el borrado; reescribir el número no deja nada.
+-- PRODUCTO § 10, ADR-028. Sin FK declaradas en la entity (el esquema real sale de ella).
+CREATE TABLE "venta_documento_numero_borrados" (
+  "numero_borrado_id" UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"         UUID        NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "documento_id"      UUID        NOT NULL REFERENCES "venta_documentos" ("documento_id"),
+  "numero_anterior"   TEXT        NOT NULL,
+  "usuario_id"        UUID        NOT NULL REFERENCES "usuarios" ("usuario_id"),
+  "creado_el"         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el"    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "eliminado_el"      TIMESTAMPTZ
+);
+
+CREATE INDEX "idx_venta_documento_numero_borrados_documento"
+  ON "venta_documento_numero_borrados" ("tenant_id", "documento_id", "creado_el");
+
 -- FKs diferidas de movimientos_caja (dependen de ventas y pagos)
 ALTER TABLE "movimientos_caja" ADD FOREIGN KEY ("venta_id") REFERENCES "ventas" ("venta_id");
 ALTER TABLE "movimientos_caja" ADD FOREIGN KEY ("pago_id")  REFERENCES "pagos" ("pago_id");

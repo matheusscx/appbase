@@ -1071,6 +1071,7 @@ describe('Documentos de la venta (e2e)', () => {
       descarte: string | null;
       descartadoEl: string | null;
       descartadoPorNombre: string | null;
+      numerosBorrados: unknown[];
     }
     interface Detalle {
       documentos: DocumentoDetalle[];
@@ -1135,6 +1136,7 @@ describe('Documentos de la venta (e2e)', () => {
           descarte: null,
           descartadoEl: null,
           descartadoPorNombre: null,
+          numerosBorrados: [],
         });
         expect(sistema).toMatchObject({
           ventaId: venta.id,
@@ -1889,6 +1891,509 @@ describe('Documentos de la venta (e2e)', () => {
       const res = await pendiente;
       expect(res.status).toBe(404);
       expect((await numeroEnBase(docId)).numero).toBeNull();
+    });
+  });
+
+  describe('POST /ventas/:id/documentos/:documentoId/borrar-numero: el encargado borra el número de un documento hecho por fuera (PRODUCTO § 10)', () => {
+    interface NumeroBorrado {
+      numeroAnterior: string;
+      borradoEl: string;
+      borradoPorNombre: string | null;
+    }
+    interface DocumentoBorrado {
+      id: string;
+      numero: string | null;
+      numerosBorrados: NumeroBorrado[];
+    }
+    const borrar = (ventaId: string, documentoId: string, tok = token) =>
+      request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/documentos/${documentoId}/borrar-numero`)
+        .set('Authorization', `Bearer ${tok}`);
+    const anotar = (ventaId: string, documentoId: string, numero: string) =>
+      request(app.getHttpServer())
+        .patch(`/api/ventas/${ventaId}/documentos/${documentoId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ numero });
+    const detalleDe = async (ventaId: string) => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/ventas/${ventaId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      return res.body as {
+        anulable: boolean;
+        anularPreguntaExterno: boolean;
+        documentos: DocumentoBorrado[];
+      };
+    };
+    const numeroEnBase = async (documentoId: string) => {
+      const r: { numero: string | null }[] = await ds.query(
+        `SELECT numero FROM venta_documentos WHERE documento_id = $1`,
+        [documentoId],
+      );
+      return r[0].numero;
+    };
+    const borrados = (documentoId: string) =>
+      ds.query<
+        {
+          numero_anterior: string;
+          usuario_id: string;
+          tenant_id: string;
+          creado_el: Date;
+        }[]
+      >(
+        `SELECT numero_anterior, usuario_id, tenant_id, creado_el
+           FROM venta_documento_numero_borrados
+          WHERE documento_id = $1 AND eliminado_el IS NULL
+          ORDER BY creado_el, numero_borrado_id`,
+        [documentoId],
+      );
+    const facturaExterna = async () => {
+      await patchFacturador('externo');
+      return vender({
+        tipoDocumentoId: FACTURA_ID,
+        lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
+      });
+    };
+    /** Factura hecha por fuera con su número ya anotado. */
+    const externaConNumero = async (numero = 'F-4471') => {
+      const venta = await facturaExterna();
+      const docId = await docIdDe(venta.id, 'externo');
+      expect((await anotar(venta.id, docId, numero)).status).toBe(200);
+      return { venta, docId };
+    };
+
+    /**
+     * Usuarios propios con un rol propio y SOLO los permisos de Ventas que se
+     * piden: no hay uno así en el seed (el Vendedor tiene Leer y Crear, y el
+     * admin todo). Cuenta propia y no `vendedor@paris.cl`, que comparten ~20
+     * specs. `afterAll` los da de baja (soft delete).
+     */
+    const roles: string[] = [];
+    const usuarios: string[] = [];
+    const tokenConVentas = async (permisos: string[]): Promise<string> => {
+      const modulos = await request(app.getHttpServer())
+        .get('/api/roles/modulos-disponibles')
+        .set('Authorization', `Bearer ${token}`);
+      expect(modulos.status).toBe(200);
+      const ventas = (
+        modulos.body as {
+          moduloTenantId: string;
+          nombre: string;
+          permisos: { moduloAppPermisoId: string; permisoNombre: string }[];
+        }[]
+      ).find((m) => m.nombre === 'Ventas')!;
+      const ids = permisos.map(
+        (p) =>
+          ventas.permisos.find((x) => x.permisoNombre === p)!
+            .moduloAppPermisoId,
+      );
+
+      const rol = await request(app.getHttpServer())
+        .post('/api/roles')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `E2E borrar numero ${permisos.join('+')} ${Date.now()}`,
+        });
+      expect(rol.status).toBe(201);
+      const rolId = (rol.body as { id: string }).id;
+      roles.push(rolId);
+      const asignados = await request(app.getHttpServer())
+        .put(`/api/roles/${rolId}/modules/${ventas.moduloTenantId}/permissions`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ moduloAppPermisoIds: ids });
+      expect(asignados.status).toBe(200);
+
+      const correo = `borrar-numero.${Date.now()}.${Math.floor(Math.random() * 1e6)}@e2e.cl`;
+      const alta = await request(app.getHttpServer())
+        .post('/api/tenants/usuarios')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: 'Borra',
+          apellido: 'Numero',
+          correo,
+          rolIds: [rolId],
+        });
+      expect(alta.status).toBe(201);
+      const usuario = (alta.body as { usuarioId: string }).usuarioId;
+      usuarios.push(usuario);
+
+      const invitacion = await app
+        .get(TokensAccesoService)
+        .emitir(usuario, TipoTokenAcceso.INVITACION);
+      const contrasena = 'clave-e2e-borrar-numero-1234';
+      const elegir = await request(app.getHttpServer())
+        .post(`/api/auth/invitacion/${invitacion}`)
+        .send({ contrasena });
+      expect(elegir.status).toBe(200);
+
+      const loginRes = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: correo, password: contrasena });
+      expect(loginRes.status).toBe(200);
+      const enTenant = await request(app.getHttpServer())
+        .post('/api/auth/switch-tenant')
+        .set(
+          'Cookie',
+          (loginRes.headers['set-cookie'] as unknown as string[]) ?? [],
+        )
+        .set(
+          'Authorization',
+          `Bearer ${(loginRes.body as { access_token: string }).access_token}`,
+        )
+        .send({ tenantId: TENANT_ID });
+      expect(enTenant.status).toBe(200);
+      return (enTenant.body as { access_token: string }).access_token;
+    };
+    afterAll(async () => {
+      // Soft delete, nunca DELETE: los usuarios y roles de la prueba dejan de valer.
+      for (const id of usuarios)
+        await ds.query(
+          `UPDATE usuarios SET eliminado_el = NOW() WHERE usuario_id = $1`,
+          [id],
+        );
+      for (const id of roles)
+        await ds.query(
+          `UPDATE roles SET eliminado_el = NOW() WHERE rol_id = $1`,
+          [id],
+        );
+    });
+
+    it('con Ventas:Anular: 200, el número queda vacío y el borrado queda registrado con quién, cuándo y qué decía', async () => {
+      const { venta, docId } = await externaConNumero('F-4471');
+
+      const res = await borrar(venta.id, docId);
+      expect(res.status).toBe(201);
+      const doc = res.body as DocumentoBorrado;
+      expect(doc.id).toBe(docId);
+      expect(doc.numero).toBeNull();
+      expect(doc.numerosBorrados).toHaveLength(1);
+      expect(doc.numerosBorrados[0].numeroAnterior).toBe('F-4471');
+      expect(doc.numerosBorrados[0].borradoPorNombre).toEqual(
+        expect.any(String),
+      );
+      expect(
+        Date.now() - new Date(doc.numerosBorrados[0].borradoEl).getTime(),
+      ).toBeLessThan(60_000);
+
+      expect(await numeroEnBase(docId)).toBeNull();
+      const filas = await borrados(docId);
+      expect(filas).toHaveLength(1);
+      expect(filas[0]).toMatchObject({
+        numero_anterior: 'F-4471',
+        usuario_id: usuarioId,
+        tenant_id: TENANT_ID,
+      });
+    });
+
+    it('el detalle muestra el borrado, y un documento que nunca se borró trae la lista vacía', async () => {
+      const { venta, docId } = await externaConNumero('F-9102');
+      expect((await detalleDe(venta.id)).documentos[0].numerosBorrados).toEqual(
+        [],
+      );
+
+      expect((await borrar(venta.id, docId)).status).toBe(201);
+
+      const d = (await detalleDe(venta.id)).documentos.find(
+        (x) => x.id === docId,
+      )!;
+      expect(d.numero).toBeNull();
+      expect(d.numerosBorrados.map((n) => n.numeroAnterior)).toEqual([
+        'F-9102',
+      ]);
+    });
+
+    it('un registro de borrado dado de baja (eliminado_el) no se lista en el detalle', async () => {
+      const { venta, docId } = await externaConNumero('F-9103');
+      expect((await borrar(venta.id, docId)).status).toBe(201);
+      await ds.query(
+        `UPDATE venta_documento_numero_borrados SET eliminado_el = NOW() WHERE documento_id = $1`,
+        [docId],
+      );
+
+      const d = (await detalleDe(venta.id)).documentos.find(
+        (x) => x.id === docId,
+      )!;
+      expect(d.numerosBorrados).toEqual([]);
+    });
+
+    it('después de borrar la venta vuelve a "sin número": anular otra vez pregunta (E10) y con "no" anula', async () => {
+      const { venta, docId } = await externaConNumero('F-3318');
+      // Con número se da por hecho: no pregunta, va por NC.
+      let d = await detalleDe(venta.id);
+      expect(d.anulable).toBe(false);
+      expect(d.anularPreguntaExterno).toBe(false);
+
+      expect((await borrar(venta.id, docId)).status).toBe(201);
+
+      d = await detalleDe(venta.id);
+      expect(d.anulable).toBe(true);
+      expect(d.anularPreguntaExterno).toBe(true);
+      const sinRespuesta = await request(app.getHttpServer())
+        .post(`/api/ventas/${venta.id}/anular`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ motivo: 'Se anotó el número por error' });
+      expect(sinRespuesta.status).toBe(400);
+      const anulada = await request(app.getHttpServer())
+        .post(`/api/ventas/${venta.id}/anular`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ motivo: 'Se anotó el número por error', externoHecho: false });
+      expect(anulada.status).toBe(201);
+    });
+
+    it('dos borrados del mismo documento dejan dos registros y el primero queda intacto', async () => {
+      const { venta, docId } = await externaConNumero('A-111');
+      expect((await borrar(venta.id, docId)).status).toBe(201);
+      const primero = (await borrados(docId))[0];
+
+      expect((await anotar(venta.id, docId, 'B-222')).status).toBe(200);
+      const res = await borrar(venta.id, docId);
+      expect(res.status).toBe(201);
+
+      const filas = await borrados(docId);
+      expect(filas.map((f) => f.numero_anterior)).toEqual(['A-111', 'B-222']);
+      // El primero no se tocó: mismo valor, misma hora.
+      expect(filas[0].creado_el).toEqual(primero.creado_el);
+      // El detalle los lista a los dos, el más nuevo primero.
+      const d = (await detalleDe(venta.id)).documentos.find(
+        (x) => x.id === docId,
+      )!;
+      expect(d.numerosBorrados.map((n) => n.numeroAnterior)).toEqual([
+        'B-222',
+        'A-111',
+      ]);
+      expect(
+        (res.body as DocumentoBorrado).numerosBorrados.map(
+          (n) => n.numeroAnterior,
+        ),
+      ).toEqual(['B-222', 'A-111']);
+    });
+
+    it('reescribir un número con el PATCH no deja registro: solo el borrado', async () => {
+      const { venta, docId } = await externaConNumero('C-1');
+      expect((await anotar(venta.id, docId, 'C-2')).status).toBe(200);
+      expect((await anotar(venta.id, docId, 'C-3')).status).toBe(200);
+      expect(await borrados(docId)).toHaveLength(0);
+    });
+
+    it('sin Ventas:Anular: 403 y no se toca; con Leer y Crear tampoco. El admin, sobre el mismo documento, puede', async () => {
+      // Sin esta prueba nada cazaría que el `@RequiresPermiso` se saque de la
+      // ruta: el guard deja pasar lo que no lleva decorador.
+      const tokenSinAnular = await tokenConVentas(['Leer', 'Crear']);
+      const { venta, docId } = await externaConNumero('F-5050');
+
+      const res = await borrar(venta.id, docId, tokenSinAnular);
+      expect(res.status).toBe(403);
+      expect(await numeroEnBase(docId)).toBe('F-5050');
+      expect(await borrados(docId)).toHaveLength(0);
+
+      expect((await borrar(venta.id, docId)).status).toBe(201);
+      expect(await numeroEnBase(docId)).toBeNull();
+    });
+
+    it('con Ventas:Anular pero sin Cajas:Leer, sobre la venta de otra caja: 404 (no 403) y no se toca', async () => {
+      const tokenSoloAnular = await tokenConVentas(['Anular']);
+      const { venta, docId } = await externaConNumero('F-6060');
+
+      const res = await borrar(venta.id, docId, tokenSoloAnular);
+      expect(res.status).toBe(404);
+      expect((res.body as { message: string }).message).toBe(
+        'Venta no encontrada',
+      );
+      expect(await numeroEnBase(docId)).toBe('F-6060');
+      expect(await borrados(docId)).toHaveLength(0);
+    });
+
+    it('un documento que no es hecho por fuera (máquina, sistema, nadie): 404 y no se toca', async () => {
+      // Voucher de la máquina con número + boleta del sistema por lo debido.
+      await patchFacturador('sistema');
+      const mesa = await vender({
+        lineas: lineas100k(),
+        pagos: [{ metodoPagoId: DEBITO_ID, monto: '40000' }],
+      });
+      const voucher = await docIdDe(mesa.id, 'maquina');
+      expect((await anotar(mesa.id, voucher, 'V-77')).status).toBe(200);
+      const delSistema = await docIdDe(mesa.id, 'sistema');
+      await patchMetodo(DEBITO_ID, 'nadie');
+      const sinDoc = await vender({
+        lineas: lineas100k(),
+        pagos: [{ metodoPagoId: DEBITO_ID, monto: '100000' }],
+      });
+      const nadie = await docIdDe(sinDoc.id, 'nadie');
+
+      for (const [ventaId, docId] of [
+        [mesa.id, voucher],
+        [mesa.id, delSistema],
+        [sinDoc.id, nadie],
+      ]) {
+        const res = await borrar(ventaId, docId);
+        expect(res.status).toBe(404);
+        expect((res.body as { message: string }).message).toBe(
+          'Documento no encontrado',
+        );
+        expect(await borrados(docId)).toHaveLength(0);
+      }
+      expect(await numeroEnBase(voucher)).toBe('V-77');
+    });
+
+    it('un documento descartado o borrado: 404 y no se toca', async () => {
+      const { venta, docId } = await externaConNumero('F-7070');
+      await ds.query(
+        `UPDATE venta_documentos
+            SET descarte = 'afirmado_no_hecho', descartado_el = NOW(),
+                descartado_por_usuario_id = $2
+          WHERE documento_id = $1`,
+        [docId, usuarioId],
+      );
+      expect((await borrar(venta.id, docId)).status).toBe(404);
+
+      const otra = await externaConNumero('F-7071');
+      await ds.query(
+        `UPDATE venta_documentos SET eliminado_el = NOW() WHERE documento_id = $1`,
+        [otra.docId],
+      );
+      expect((await borrar(otra.venta.id, otra.docId)).status).toBe(404);
+      expect(await numeroEnBase(docId)).toBe('F-7070');
+      expect(await numeroEnBase(otra.docId)).toBe('F-7071');
+      expect(await borrados(docId)).toHaveLength(0);
+      expect(await borrados(otra.docId)).toHaveLength(0);
+    });
+
+    it('un documento hecho por fuera que no tiene número: 400 y no deja registro', async () => {
+      const venta = await facturaExterna();
+      const docId = await docIdDe(venta.id, 'externo');
+
+      const res = await borrar(venta.id, docId);
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toMatch(
+        /no tiene número/i,
+      );
+      expect(await borrados(docId)).toHaveLength(0);
+    });
+
+    it('un número de solo espacios es "sin número": 400 (el mismo criterio con el que anular lo da por no hecho)', async () => {
+      const venta = await facturaExterna();
+      const docId = await docIdDe(venta.id, 'externo');
+      await ds.query(
+        `UPDATE venta_documentos SET numero = '   ' WHERE documento_id = $1`,
+        [docId],
+      );
+      expect((await borrar(venta.id, docId)).status).toBe(400);
+      expect(await borrados(docId)).toHaveLength(0);
+    });
+
+    it('IDOR: la ruta de TU venta (que ves) con el documento de otra venta del mismo tenant: 404 por el documento, y no se toca', async () => {
+      const mia = await externaConNumero('F-8001');
+      const ajena = await externaConNumero('F-8002');
+
+      const res = await borrar(mia.venta.id, ajena.docId);
+      expect(res.status).toBe(404);
+      expect((res.body as { message: string }).message).toBe(
+        'Documento no encontrado',
+      );
+      expect(await numeroEnBase(ajena.docId)).toBe('F-8002');
+      expect(await borrados(ajena.docId)).toHaveLength(0);
+      // Control: la venta de la ruta SÍ es visible; el 404 no salió del alcance.
+      expect((await borrar(mia.venta.id, mia.docId)).status).toBe(201);
+    });
+
+    it('IDOR: la ruta de TU venta con un documento de OTRO TENANT: 404 y no se toca', async () => {
+      const mia = await externaConNumero('F-8101');
+      const ajeno: { documento_id: string }[] = await ds.query(
+        `INSERT INTO venta_documentos (tenant_id, venta_id, emisor, numero, monto)
+         VALUES ('550e8400-e29b-41d4-a716-446655440040', $1, 'externo', 'AJENO-1', 5000)
+         RETURNING documento_id`,
+        [mia.venta.id],
+      );
+
+      const res = await borrar(mia.venta.id, ajeno[0].documento_id);
+      expect(res.status).toBe(404);
+      expect((res.body as { message: string }).message).toBe(
+        'Documento no encontrado',
+      );
+      expect(await numeroEnBase(ajeno[0].documento_id)).toBe('AJENO-1');
+      expect(await borrados(ajeno[0].documento_id)).toHaveLength(0);
+      expect((await borrar(mia.venta.id, mia.docId)).status).toBe(201);
+    });
+
+    it('con el token del otro tenant la venta no existe: 404 y no se toca', async () => {
+      const { venta, docId } = await externaConNumero('F-8201');
+      const tokenAjeno = await loginSegundoTenant(app);
+
+      const res = await borrar(venta.id, docId, tokenAjeno);
+      expect(res.status).toBe(404);
+      expect(await numeroEnBase(docId)).toBe('F-8201');
+      expect(await borrados(docId)).toHaveLength(0);
+    });
+
+    it('el documento de una corrección no se borra por la venta original: 404', async () => {
+      const venta = await vender({
+        lineas: lineas100k(),
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100000' }],
+      });
+      const nc = await request(app.getHttpServer())
+        .post(`/api/ventas/${venta.id}/notas-credito`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          monto: '10000',
+          comentario: 'devolución parcial',
+          devolucion: { pagoId: await pagoDe(venta.id, EFECTIVO_ID) },
+        });
+      expect(nc.status).toBe(201);
+      const insertado: { documento_id: string }[] = await ds.query(
+        `INSERT INTO venta_documentos (tenant_id, venta_id, emisor, numero, monto)
+         VALUES ($1, $2, 'externo', 'NC-1', 10000) RETURNING documento_id`,
+        [TENANT_ID, (nc.body as { id: string }).id],
+      );
+      const docId = insertado[0].documento_id;
+
+      expect((await borrar(venta.id, docId)).status).toBe(404);
+      // Por la ruta de la corrección, que es la suya, sí se puede.
+      expect((await borrar((nc.body as { id: string }).id, docId)).status).toBe(
+        201,
+      );
+    });
+
+    it('ids que no son uuid: 400. Sin token: 401', async () => {
+      const { venta, docId } = await externaConNumero('F-8301');
+      expect((await borrar('no-es-uuid', docId)).status).toBe(400);
+      expect((await borrar(venta.id, 'no-es-uuid')).status).toBe(400);
+      const sinToken = await request(app.getHttpServer()).post(
+        `/api/ventas/${venta.id}/documentos/${docId}/borrar-numero`,
+      );
+      expect(sinToken.status).toBe(401);
+      expect(await numeroEnBase(docId)).toBe('F-8301');
+    });
+
+    it('toma el lock de la venta: no escribe mientras otra transacción la tiene tomada', async () => {
+      const { venta, docId } = await externaConNumero('F-8401');
+
+      let soltar!: () => void;
+      const retenida = new Promise<void>((r) => (soltar = r));
+      let tomado!: () => void;
+      const tomada = new Promise<void>((r) => (tomado = r));
+      // Hace de la anulación que está a medio commit: tiene la venta tomada.
+      const otraTransaccion = ds.transaction(async (m) => {
+        await m.query(`SELECT 1 FROM ventas WHERE venta_id = $1 FOR UPDATE`, [
+          venta.id,
+        ]);
+        tomado();
+        await retenida;
+      });
+      await tomada;
+
+      let termino = false;
+      const pendiente = borrar(venta.id, docId).then((r) => {
+        termino = true;
+        return r;
+      });
+      await new Promise((r) => setTimeout(r, 500));
+      expect(termino).toBe(false);
+      expect(await numeroEnBase(docId)).toBe('F-8401');
+
+      soltar();
+      await otraTransaccion;
+      expect((await pendiente).status).toBe(201);
+      expect(await numeroEnBase(docId)).toBeNull();
     });
   });
 

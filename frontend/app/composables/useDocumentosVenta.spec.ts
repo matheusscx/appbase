@@ -10,6 +10,8 @@ import {
   etiquetaTipo,
   leyendaCorrige,
   leyendaDescarte,
+  leyendaNumeroBorrado,
+  puedeBorrarNumero,
   puedeCompletarNumero,
   registroQueQueda,
   type DocumentoVenta,
@@ -32,6 +34,7 @@ function doc(parcial: Partial<DocumentoVenta> = {}): DocumentoVenta {
     descarte: null,
     descartadoEl: null,
     descartadoPorNombre: null,
+    numerosBorrados: [],
     ...parcial,
   }
 }
@@ -109,6 +112,34 @@ describe('Completar número', () => {
     expect(cuerpoCompletarNumero(maquina, '445566', undefined)).toEqual({ numero: '445566' })
     // Con un documento hecho por fuera el servidor responde 400 si llega `clase`.
     expect(cuerpoCompletarNumero(doc({ emisor: 'externo' }), '77', 'voucher')).toEqual({ numero: '77' })
+  })
+})
+
+describe('Borrar número', () => {
+  it('se ofrece solo en un documento hecho por fuera, vigente y con número', () => {
+    expect(puedeBorrarNumero(doc({ emisor: 'externo', numero: 'F-4471', estadoEnvio: null }))).toBe(true)
+  })
+
+  it('no en uno sin número: no hay nada que borrar (el backend responde 400)', () => {
+    expect(puedeBorrarNumero(doc({ emisor: 'externo', numero: null }))).toBe(false)
+    expect(puedeBorrarNumero(doc({ emisor: 'externo', numero: '   ' }))).toBe(false)
+  })
+
+  it('no en el de la máquina, el del sistema ni la fila "nadie": el backend responde 404', () => {
+    expect(puedeBorrarNumero(doc({ emisor: 'maquina', numero: '445566' }))).toBe(false)
+    expect(puedeBorrarNumero(doc({ emisor: 'sistema', numero: '1' }))).toBe(false)
+    expect(puedeBorrarNumero(doc({ emisor: 'nadie', numero: '1' }))).toBe(false)
+  })
+
+  it('no en uno descartado al anular (el backend responde 404)', () => {
+    expect(puedeBorrarNumero(doc({ emisor: 'externo', numero: 'F-1', descarte: 'afirmado_no_hecho' }))).toBe(false)
+  })
+
+  it('el registro dice quién lo borró, qué número era y cuándo', () => {
+    const borrado = { numeroAnterior: 'F-4471', borradoEl: '2026-10-02T15:00:00.000Z', borradoPorNombre: 'Ana Torres' }
+    expect(leyendaNumeroBorrado(borrado, '2 oct 2026')).toBe('Ana Torres borró el número F-4471, 2 oct 2026')
+    // La cuenta de quien lo borró puede haberse dado de baja: se dice igual.
+    expect(leyendaNumeroBorrado({ ...borrado, borradoPorNombre: null }, '2 oct 2026')).toBe('Alguien borró el número F-4471, 2 oct 2026')
   })
 })
 

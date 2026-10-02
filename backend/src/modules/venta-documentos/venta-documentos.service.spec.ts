@@ -1340,14 +1340,34 @@ describe('VentaDocumentosService.listarParaDetalle', () => {
     descartado_por_nombre: 'Ana Pérez',
   };
 
+  /**
+   * `listarParaDetalle` lee dos cosas: los documentos y, en una segunda consulta
+   * por lote, los borrados de número de esos documentos. Cada una responde lo suyo.
+   */
+  function managerDeDetalle(
+    filas: Record<string, unknown>[],
+    borrados: Record<string, unknown>[] = [],
+  ) {
+    const query = jest.fn<
+      Promise<Record<string, unknown>[]>,
+      [string, unknown[]]
+    >((sql) =>
+      Promise.resolve(
+        /FROM venta_documento_numero_borrados/.test(sql) ? borrados : filas,
+      ),
+    );
+    return { query, manager: { query } as unknown as EntityManager };
+  }
+
   it('arma un solo SELECT con la venta y sus correcciones, y mapea la fila', async () => {
-    const m = managerConLectura([FILA]);
+    const m = managerDeDetalle([FILA]);
     const docs = await new VentaDocumentosService().listarParaDetalle(
       m.manager,
       { tenantId: TENANT, ventaId: VENTA },
     );
-    expect(m.query).toHaveBeenCalledTimes(1);
-    const [sql, binds] = m.query.mock.calls[0] as [string, unknown[]];
+    // Los documentos y, aparte, UN lote con los borrados de número.
+    expect(m.query).toHaveBeenCalledTimes(2);
+    const [sql, binds] = m.query.mock.calls[0];
     // La venta y sus correcciones en la misma consulta.
     expect(sql).toMatch(/venta_referencia_id = \$1/);
     expect(sql).toMatch(/vd\.eliminado_el IS NULL/);
@@ -1373,8 +1393,93 @@ describe('VentaDocumentosService.listarParaDetalle', () => {
         descarte: 'afirmado_no_hecho',
         descartadoEl: FILA.descartado_el,
         descartadoPorNombre: 'Ana Pérez',
+        numerosBorrados: [],
       },
     ]);
+  });
+
+  describe('los borrados de número (PRODUCTO § 10)', () => {
+    const BORRADO = (doc: string, numero: string, nombre: string | null) => ({
+      documento_id: doc,
+      numero_anterior: numero,
+      creado_el: new Date('2026-10-02T15:00:00Z'),
+      borrado_por_nombre: nombre,
+    });
+
+    it('los trae en UNA consulta para todos los documentos, y cada uno recibe los suyos en el orden en que llegan (el más nuevo primero)', async () => {
+      const m = managerDeDetalle(
+        [
+          { ...FILA, documento_id: 'doc-1' },
+          { ...FILA, documento_id: 'doc-2' },
+          { ...FILA, documento_id: 'doc-3' },
+        ],
+        [
+          BORRADO('doc-2', 'B-222', 'Luis Soto'),
+          BORRADO('doc-1', 'A-2', null),
+          BORRADO('doc-2', 'A-111', 'Ana Pérez'),
+        ],
+      );
+      const docs = await new VentaDocumentosService().listarParaDetalle(
+        m.manager,
+        { tenantId: TENANT, ventaId: VENTA },
+      );
+
+      // Documentos + un lote, no una consulta por documento (N+1).
+      expect(m.query).toHaveBeenCalledTimes(2);
+      const [sql, binds] = m.query.mock.calls[1];
+      expect(sql).toMatch(/b\.documento_id = ANY\(\$2::uuid\[\]\)/);
+      expect(sql).toMatch(/b\.tenant_id = \$1/);
+      expect(sql).toMatch(/b\.eliminado_el IS NULL/);
+      expect(sql).toMatch(/ORDER BY b\.creado_el DESC/);
+      expect(binds).toEqual([TENANT, ['doc-1', 'doc-2', 'doc-3']]);
+
+      expect(docs.map((d) => d.numerosBorrados)).toEqual([
+        [
+          {
+            numeroAnterior: 'A-2',
+            borradoEl: new Date('2026-10-02T15:00:00Z'),
+            borradoPorNombre: null,
+          },
+        ],
+        [
+          {
+            numeroAnterior: 'B-222',
+            borradoEl: new Date('2026-10-02T15:00:00Z'),
+            borradoPorNombre: 'Luis Soto',
+          },
+          {
+            numeroAnterior: 'A-111',
+            borradoEl: new Date('2026-10-02T15:00:00Z'),
+            borradoPorNombre: 'Ana Pérez',
+          },
+        ],
+        [],
+      ]);
+    });
+
+    it('sin documentos no hace la consulta de borrados', async () => {
+      const m = managerDeDetalle([]);
+      await new VentaDocumentosService().listarParaDetalle(m.manager, {
+        tenantId: TENANT,
+        ventaId: VENTA,
+      });
+      expect(m.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('el join al usuario no filtra borrados, y lo dice junto al join (excepción deliberada)', async () => {
+      const m = managerDeDetalle([FILA]);
+      await new VentaDocumentosService().listarParaDetalle(m.manager, {
+        tenantId: TENANT,
+        ventaId: VENTA,
+      });
+      const [sql] = m.query.mock.calls[1];
+      expect(/LEFT JOIN usuarios u[^\n]*/.exec(sql)![0]).not.toMatch(
+        /u\.eliminado_el/,
+      );
+      expect(sql).toMatch(
+        /--[^\n]*eliminado_el[^\n]*\n(?:[^\n]*\n)*?\s*LEFT JOIN usuarios/,
+      );
+    });
   });
 
   it('un documento sin tipo (máquina, nadie) devuelve tipoDocumento null', async () => {
@@ -1436,6 +1541,8 @@ describe('VentaDocumentosService.completarNumero', () => {
     const query = jest.fn((sql: string) => {
       if (/^\s*SELECT emisor/.test(sql))
         return Promise.resolve(emisor ? [{ emisor }] : []);
+      if (/FROM venta_documento_numero_borrados/.test(sql))
+        return Promise.resolve([]);
       if (/^\s*UPDATE venta_documentos/.test(sql))
         return Promise.resolve([
           Array.from({ length: actualizadas }, () => ({
@@ -1581,6 +1688,153 @@ describe('VentaDocumentosService.completarNumero', () => {
       expect(m.query).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('VentaDocumentosService.borrarNumero (PRODUCTO § 10)', () => {
+  const USUARIO = 'usuario-que-borra';
+  /**
+   * SELECT del número, UPDATE ... RETURNING, INSERT del registro y la relectura
+   * del detalle. `numero` es lo que decía el documento (`undefined`: no hay
+   * documento vigente que cumpla).
+   */
+  function managerDeBorrar(
+    numero: string | null | undefined,
+    actualizadas = 1,
+  ) {
+    const query = jest.fn((sql: string) => {
+      if (/^\s*SELECT numero/.test(sql))
+        return Promise.resolve(numero === undefined ? [] : [{ numero }]);
+      if (/^\s*UPDATE venta_documentos/.test(sql))
+        return Promise.resolve([
+          Array.from({ length: actualizadas }, () => ({
+            documento_id: 'doc-1',
+            venta_id: VENTA,
+          })),
+          actualizadas,
+        ]);
+      if (/^\s*INSERT INTO venta_documento_numero_borrados/.test(sql))
+        return Promise.resolve([]);
+      if (/FROM venta_documento_numero_borrados/.test(sql))
+        return Promise.resolve([
+          {
+            documento_id: 'doc-1',
+            numero_anterior: 'F-4471',
+            creado_el: new Date('2026-10-02T15:00:00Z'),
+            borrado_por_nombre: 'Ana Pérez',
+          },
+        ]);
+      return Promise.resolve([
+        {
+          documento_id: 'doc-1',
+          venta_id: VENTA,
+          emisor: 'externo',
+          tipo_documento_id: null,
+          tipo_codigo: null,
+          tipo_nombre: null,
+          clase_maquina: null,
+          numero: null,
+          estado_envio: null,
+          monto: '119000.0000',
+          pago_id: null,
+          documento_corregido_id: null,
+          es_duplicado: false,
+          descarte: null,
+          descartado_el: null,
+          descartado_por_nombre: null,
+        },
+      ]);
+    });
+    return { query, manager: { query } as unknown as EntityManager };
+  }
+  const borrar = (m: ReturnType<typeof managerDeBorrar>) =>
+    new VentaDocumentosService().borrarNumero(m.manager, {
+      tenantId: TENANT,
+      documentoId: 'doc-1',
+      usuarioId: USUARIO,
+    });
+  const llamada = (m: ReturnType<typeof managerDeBorrar>, patron: RegExp) =>
+    m.query.mock.calls.find((c) => patron.test(c[0])) as
+      | [string, unknown[]]
+      | undefined;
+  const UPDATE = /^\s*UPDATE venta_documentos/;
+  const INSERT = /^\s*INSERT INTO venta_documento_numero_borrados/;
+
+  it('deja el número en NULL, registra quién lo borró y qué decía, y devuelve el documento con el borrado', async () => {
+    const m = managerDeBorrar('F-4471');
+    const doc = await borrar(m);
+
+    const [sqlUpdate, bindsUpdate] = llamada(m, UPDATE)!;
+    expect(sqlUpdate).toMatch(/SET numero = NULL/);
+    // Se borra exactamente lo que se leyó (y se registra).
+    expect(sqlUpdate).toMatch(/AND numero = \$3/);
+    expect(bindsUpdate).toEqual(['doc-1', TENANT, 'F-4471']);
+
+    const [sqlInsert, bindsInsert] = llamada(m, INSERT)!;
+    expect(sqlInsert).toMatch(
+      /\(tenant_id, documento_id, numero_anterior, usuario_id\)/,
+    );
+    expect(bindsInsert).toEqual([TENANT, 'doc-1', 'F-4471', USUARIO]);
+
+    expect(doc).toMatchObject({
+      id: 'doc-1',
+      numero: null,
+      numerosBorrados: [
+        {
+          numeroAnterior: 'F-4471',
+          borradoPorNombre: 'Ana Pérez',
+        },
+      ],
+    });
+  });
+
+  it('el registro se escribe DESPUÉS de borrar: sin la fila escrita no hay registro huérfano', async () => {
+    const m = managerDeBorrar('F-4471');
+    await borrar(m);
+    const orden = m.query.mock.calls.map((c) =>
+      UPDATE.test(c[0]) ? 'update' : INSERT.test(c[0]) ? 'insert' : '',
+    );
+    expect(orden.indexOf('update')).toBeGreaterThanOrEqual(0);
+    expect(orden.indexOf('insert')).toBeGreaterThan(orden.indexOf('update'));
+  });
+
+  it('solo toca un documento hecho por fuera, vigente y de ese tenant; y nunca borra filas', async () => {
+    const m = managerDeBorrar('F-4471');
+    await borrar(m);
+    for (const [sql] of m.query.mock.calls.filter((c) =>
+      /^\s*(SELECT numero|UPDATE)/.test(c[0]),
+    ) as [string][]) {
+      expect(sql).toMatch(/emisor = 'externo'/);
+      expect(sql).toMatch(/descarte IS NULL/);
+      expect(sql).toMatch(/eliminado_el IS NULL/);
+      expect(sql).toMatch(/tenant_id = \$2/);
+    }
+    for (const [sql] of m.query.mock.calls as [string][])
+      expect(sql).not.toMatch(/DELETE/i);
+  });
+
+  it('un documento que no es hecho por fuera, descartado, borrado o de otro tenant: 404 y no escribe ni registra', async () => {
+    const m = managerDeBorrar(undefined);
+    await expect(borrar(m)).rejects.toBeInstanceOf(NotFoundException);
+    expect(llamada(m, UPDATE)).toBeUndefined();
+    expect(llamada(m, INSERT)).toBeUndefined();
+  });
+
+  it.each([
+    ['sin número (NULL)', null],
+    ['un número vacío', ''],
+    ['un número en blanco', '   '],
+  ])('%s: 400 y no escribe ni registra', async (_n, numero) => {
+    const m = managerDeBorrar(numero);
+    await expect(borrar(m)).rejects.toBeInstanceOf(BadRequestException);
+    expect(llamada(m, UPDATE)).toBeUndefined();
+    expect(llamada(m, INSERT)).toBeUndefined();
+  });
+
+  it('si entre la lectura y el UPDATE el número cambió o el documento dejó de valer: 404 y no registra', async () => {
+    const m = managerDeBorrar('F-4471', 0);
+    await expect(borrar(m)).rejects.toBeInstanceOf(NotFoundException);
+    expect(llamada(m, INSERT)).toBeUndefined();
+  });
 });
 
 describe('VentaDocumentosService.enlazarPagosDeAbono', () => {

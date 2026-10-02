@@ -14,6 +14,14 @@ export type ClaseDocumentoMaquina = 'voucher' | 'boleta'
 /** Por qué un documento dejó de valer al anular la venta. */
 export type DescarteDocumento = 'armado_sin_enviar' | 'afirmado_no_hecho'
 
+/** Un borrado del número de un documento hecho por fuera: qué decía, quién lo borró y cuándo. */
+export interface NumeroBorradoVenta {
+  numeroAnterior: string
+  borradoEl: string
+  /** Puede faltar si la cuenta se dio de baja después. */
+  borradoPorNombre: string | null
+}
+
 export interface DocumentoVenta {
   id: string
   /**
@@ -34,6 +42,8 @@ export interface DocumentoVenta {
   descarte: DescarteDocumento | null
   descartadoEl: string | null
   descartadoPorNombre: string | null
+  /** Cada borrado del número, el más nuevo primero; vacío si nunca se borró. */
+  numerosBorrados: NumeroBorradoVenta[]
 }
 
 /** Mismo tope que `numeroDocumento` en los DTO de cobro y que `numero` del `PATCH`. */
@@ -115,11 +125,28 @@ export function leyendaDescarte(doc: DocumentoVenta, fecha: string): string | nu
  * lo tienen y siguen vigentes (el backend responde 404 a uno descartado). El
  * voucher duplicado del abono también: es de la máquina.
  *
- * Es el único lugar que lo decide: si el comercio pide más adelante poder
- * corregir o borrar un número ya anotado, la condición se cambia acá.
+ * Es el único lugar que lo decide. Borrar un número ya anotado es otra acción
+ * (`puedeBorrarNumero`, con su propio permiso).
  */
 export function puedeCompletarNumero(doc: DocumentoVenta): boolean {
   return llevaNumero(doc) && doc.descarte === null && !doc.numero
+}
+
+/**
+ * ¿Ofrece "Borrar número"? Solo el documento hecho por fuera que tiene número y
+ * sigue vigente: es lo que el backend acepta (404 con cualquier otro, 400 sin
+ * número). El permiso (`Ventas:Anular`) lo agrega quien lo pinta.
+ *
+ * Un número en blanco no cuenta como número: es el mismo criterio con el que el
+ * backend decide si anular pregunta o va por nota de crédito.
+ */
+export function puedeBorrarNumero(doc: DocumentoVenta): boolean {
+  return doc.emisor === 'externo' && doc.descarte === null && !!doc.numero?.trim()
+}
+
+/** "Ana Torres borró el número F-4471, 2 oct 2026": el registro de un borrado. `fecha` llega formateada. */
+export function leyendaNumeroBorrado(borrado: NumeroBorradoVenta, fecha: string): string {
+  return `${borrado.borradoPorNombre ?? 'Alguien'} borró el número ${borrado.numeroAnterior}, ${fecha}`
 }
 
 /** El body que el `PATCH` espera: la `clase` solo viaja con la máquina y si se eligió. */

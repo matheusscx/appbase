@@ -161,6 +161,26 @@ solo escribe sobre un documento vigente de la `maquina` o `externo`. El endpoint
 `FOR UPDATE` de la venta que la anulación: sin él, anotar el número de un `externo` correría
 contra una anulación que lo declara no hecho (E10) y el documento quedaría descartado con número.
 
+### Borrar el número de un documento hecho por fuera, y por qué cada borrado es una fila
+
+Con número, un documento `externo` se da por hecho y anular va por nota de crédito. Un número
+anotado por error ("1" en una factura que nunca se hizo) obligaba entonces a una nota de crédito
+que nadie debía emitir. El owner decidió (2026-10-02, PRODUCTO § 10) que **quien puede anular
+ventas puede borrar ese número**, que queda registrado quién, cuándo y qué decía, y que la venta
+vuelve a "sin número": al anular se pregunta otra vez (E10). Es
+`POST /ventas/:id/documentos/:documentoId/borrar-numero` (`Ventas:Anular`, mismo alcance de caja y
+mismo lock de la venta que el `PATCH`), y un `POST` porque no se borra ninguna fila.
+
+**El registro es una tabla de eventos, `venta_documento_numero_borrados`, con una fila por borrado,
+y no tres columnas en `venta_documentos`** (`numero_borrado`, `numero_borrado_el`,
+`numero_borrado_por_usuario_id`). Las columnas guardan solo el último borrado, y el caso que importa
+es justo el que las pisa: se anota un número, se borra, se anota otro, se borra. Se pierde quién borró
+el primero y qué decía, que es lo que el owner pidió conservar y lo que hace reversible la acción.
+Sigue el patrón de `garzon_pin_evento` (hechos con hora que se insertan y nunca se editan, `creado_el`
+es el momento, sin relaciones declaradas, índice en la entity). Solo se registra el **borrado**: reescribir
+un número con el `PATCH` no deja nada, porque el owner pidió el rastro de lo que se borra y no el de cada
+edición. El detalle trae los borrados de cada documento en `numerosBorrados`, en una consulta por lote.
+
 ### Dónde vive
 
 Un módulo propio, **`VentaDocumentosModule`**, que importan ventas y (desde que el abono escribe

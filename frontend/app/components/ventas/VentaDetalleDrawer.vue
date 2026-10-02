@@ -12,7 +12,9 @@ import {
   etiquetaTipo,
   leyendaCorrige,
   leyendaDescarte,
+  leyendaNumeroBorrado,
   llevaNumero,
+  puedeBorrarNumero,
   puedeCompletarNumero,
   type ClaseDocumentoMaquina,
   type DocumentoVenta,
@@ -267,6 +269,23 @@ const { puedeCrear: puedeCompletar } = usePermisosCrud('Ventas')
  */
 const completando = ref<{ id: string, numero: string, clase?: ClaseDocumentoMaquina } | null>(null)
 const guardandoNumero = ref(false)
+
+// `POST …/documentos/:id/borrar-numero` pide `Ventas:Anular` (no `Crear`): quien
+// puede anular ventas puede corregir un número anotado por error.
+const puedeBorrar = computed(() => permissionsStore.can('Ventas', 'Anular'))
+/**
+ * El documento cuyo número se está por borrar, esperando la confirmación. Una
+ * foto (`id`, `ventaId` y el número que se va a decir) y no el documento vivo: la
+ * recarga de la venta puede reemplazarlo mientras el modal está abierto.
+ */
+const borrandoNumero = ref<{ id: string, ventaId: string, numero: string } | null>(null)
+const confirmaBorrarOpen = computed({
+  get: () => borrandoNumero.value !== null,
+  set: (abierto: boolean) => {
+    if (!abierto) borrandoNumero.value = null
+  },
+})
+const borrandoEnCurso = ref(false)
 
 const montoPagado = computed(() => {
   if (!venta.value) return '0'
@@ -854,6 +873,46 @@ async function guardarNumero(doc: DocumentoVenta) {
   }
 }
 
+function pedirBorrarNumero(doc: DocumentoVenta) {
+  borrandoNumero.value = { id: doc.id, ventaId: doc.ventaId, numero: doc.numero ?? '' }
+}
+
+/**
+ * Borra el número de un documento hecho por fuera, ya confirmado. Igual que el
+ * `PATCH`, la ruta lleva el `ventaId` **del documento**. No manda body: el
+ * usuario sale del token y el número que había lo lee el servidor.
+ *
+ * Después se resincroniza, también si falló: que `anulable` y la pregunta por el
+ * documento hecho por fuera cambien con el número lo sabe solo el backend, y un
+ * fallo (otro lo borró antes, la venta se anuló) deja la pantalla desactualizada.
+ */
+async function confirmarBorrarNumero() {
+  const doc = borrandoNumero.value
+  if (!doc || borrandoEnCurso.value) return
+  const ventaMirada = venta.value?.id
+  borrandoEnCurso.value = true
+  try {
+    const actualizado = await useApiFetch<DocumentoVenta>(
+      `${apiUrl}/ventas/${doc.ventaId}/documentos/${doc.id}/borrar-numero`,
+      { method: 'POST' },
+    )
+    // Solo si el drawer sigue en la misma venta: cerrarlo mientras vuela no debe repoblarlo.
+    const visible = venta.value
+    if (visible && visible.id === ventaMirada) {
+      visible.documentos = visible.documentos.map(d => d.id === actualizado.id ? actualizado : d)
+    }
+    toast.add({ title: 'Número borrado', color: 'success' })
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al borrar el número'), color: 'error' })
+  }
+  finally {
+    borrandoEnCurso.value = false
+    borrandoNumero.value = null
+    if (venta.value?.id === ventaMirada) void resincronizar()
+  }
+}
+
 /**
  * Reimprime la boleta de una venta pagada o anulada, marcada `COPIA` (y
  * `ANULADA` si la venta se anuló). La boleta se pide acá, al apretar el
@@ -1341,6 +1400,11 @@ function onNcSuccess(payload: {
               <p v-if="leyendaDescarte(doc, formatFecha(doc.descartadoEl))" class="text-xs text-muted">
                 {{ leyendaDescarte(doc, formatFecha(doc.descartadoEl)) }}
               </p>
+              <ul v-if="doc.numerosBorrados.length" class="text-xs text-muted" data-qa="numeros-borrados">
+                <li v-for="(borrado, i) in doc.numerosBorrados" :key="i">
+                  {{ leyendaNumeroBorrado(borrado, formatFecha(borrado.borradoEl)) }}
+                </li>
+              </ul>
               <div v-if="doc.esDuplicado">
                 <UBadge color="warning" variant="subtle" size="xs" label="Duplicado — para el contador" />
               </div>
@@ -1383,6 +1447,18 @@ function onNcSuccess(payload: {
                   />
                 </div>
               </template>
+
+              <div v-if="puedeBorrar && puedeBorrarNumero(doc)">
+                <UButton
+                  label="Borrar número"
+                  icon="i-lucide-eraser"
+                  color="neutral"
+                  variant="outline"
+                  size="xs"
+                  data-qa="borrar-numero"
+                  @click="pedirBorrarNumero(doc)"
+                />
+              </div>
             </li>
           </ul>
         </UCard>
@@ -1493,6 +1569,39 @@ function onNcSuccess(payload: {
       />
     </template>
   </AppDrawer>
+
+  <UModal v-model:open="confirmaBorrarOpen" title="¿Borrar el número?" :ui="shellUi.modal">
+    <template #body>
+      <div class="flex flex-col gap-2 text-sm">
+        <p>
+          Vas a borrar el N° <strong>{{ borrandoNumero?.numero }}</strong> de este documento hecho por fuera.
+        </p>
+        <p class="text-muted">
+          Queda registrado quién lo borró, cuándo y qué decía. La venta vuelve a
+          "sin número": si se anula, se vuelve a preguntar si ya lo hiciste en tu
+          facturador.
+        </p>
+      </div>
+    </template>
+    <template #footer>
+      <div class="flex justify-end gap-2">
+        <UButton
+          label="Cancelar"
+          color="neutral"
+          variant="ghost"
+          data-qa="cancelar-borrar-numero"
+          @click="() => { confirmaBorrarOpen = false }"
+        />
+        <UButton
+          label="Borrar número"
+          color="error"
+          :loading="borrandoEnCurso"
+          data-qa="confirmar-borrar-numero"
+          @click="confirmarBorrarNumero"
+        />
+      </div>
+    </template>
+  </UModal>
 
   <PagosAbonoModal
     v-if="venta"

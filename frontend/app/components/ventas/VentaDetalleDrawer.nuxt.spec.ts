@@ -332,10 +332,17 @@ let impresorasBoleta: unknown[] = [IMPRESORA_BOLETA]
 /** Los `PATCH` que salieron (completar el número de un documento) y qué contestar. */
 let patches: { url: string, body: Record<string, unknown> }[] = []
 let respuestaPatch: Record<string, unknown> = {}
+/** Los `POST …/borrar-numero` que salieron y qué contestar. */
+let borrados: { url: string, body: unknown }[] = []
+let respuestaBorrar: Record<string, unknown> = {}
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     if (typeof url !== 'string') return Promise.resolve([])
+    if (opts?.method === 'POST' && url.endsWith('/borrar-numero')) {
+      borrados.push({ url, body: opts.body })
+      return Promise.resolve(structuredClone(respuestaBorrar))
+    }
     if (opts?.method === 'PATCH') {
       patches.push({ url, body: opts.body ?? {} })
       return Promise.resolve(structuredClone(respuestaPatch))
@@ -366,6 +373,7 @@ afterEach(() => {
   esAdmin = true
   permisos = ['Ventas:Anular', 'Ventas:Nota de crédito']
   patches = []
+  borrados = []
 })
 
 /**
@@ -653,6 +661,7 @@ function documento(parcial: Record<string, unknown> = {}) {
     descarte: null,
     descartadoEl: null,
     descartadoPorNombre: null,
+    numerosBorrados: [],
     ...parcial,
   }
 }
@@ -977,6 +986,176 @@ describe('VentaDetalleDrawer — documentos', () => {
 
       expect(wrapper.findComponent({ name: 'VentasAnularVentaModal' }).props('preguntaExterno')).toBe(false)
       expect(wrapper.findAll('button').find(b => b.text().trim() === 'Anular')).toBeUndefined()
+    })
+  })
+
+  describe('Borrar número (PRODUCTO § 10)', () => {
+    const botonBorrar = (wrapper: Awaited<ReturnType<typeof montar>>, id: string) =>
+      fila(wrapper, id).find('[data-qa="borrar-numero"]')
+    /** La confirmación la teletransporta `UModal` fuera del wrapper. */
+    const confirmacion = () => document.body.querySelector('[data-qa="confirmar-borrar-numero"]')
+    const esperar = () => new Promise(r => setTimeout(r, 40))
+
+    const CON_NUMERO = documento({
+      id: 'doc-ext',
+      emisor: 'externo',
+      tipoDocumento: { id: 'td-33', codigo: '33', nombre: 'Factura' },
+      estadoEnvio: null,
+      numero: 'F-4471',
+      monto: '119000.0000',
+    })
+
+    afterEach(() => {
+      document.body.innerHTML = ''
+    })
+
+    it('se ofrece solo en el hecho por fuera, vigente y con número', async () => {
+      const wrapper = await montarCon([
+        CON_NUMERO,
+        documento({ ...CON_NUMERO, id: 'doc-sin', numero: null }),
+        documento({ ...CON_NUMERO, id: 'doc-desc', descarte: 'afirmado_no_hecho' }),
+        documento({ id: 'doc-m', emisor: 'maquina', tipoDocumento: null, estadoEnvio: null, numero: '445566' }),
+        documento({ id: 'doc-s' }),
+      ])
+
+      expect(botonBorrar(wrapper, 'doc-ext').exists()).toBe(true)
+      expect(botonBorrar(wrapper, 'doc-sin').exists()).toBe(false)
+      expect(botonBorrar(wrapper, 'doc-desc').exists()).toBe(false)
+      expect(botonBorrar(wrapper, 'doc-m').exists()).toBe(false)
+      expect(botonBorrar(wrapper, 'doc-s').exists()).toBe(false)
+    })
+
+    it('sin Ventas:Anular no se ofrece aunque tenga Ventas:Crear: el POST daría 403', async () => {
+      esAdmin = false
+      permisos = ['Ventas:Crear', 'Ventas:Leer']
+      const wrapper = await montarCon([CON_NUMERO])
+
+      expect(botonBorrar(wrapper, 'doc-ext').exists()).toBe(false)
+    })
+
+    it('con Ventas:Anular y sin Ventas:Crear (un rol que no es admin) se ofrece', async () => {
+      esAdmin = false
+      permisos = ['Ventas:Anular']
+      const wrapper = await montarCon([CON_NUMERO])
+
+      expect(botonBorrar(wrapper, 'doc-ext').exists()).toBe(true)
+    })
+
+    it('pide confirmación antes de llamar al backend: apretar "Borrar número" no borra nada', async () => {
+      const wrapper = await montarCon([CON_NUMERO])
+
+      await botonBorrar(wrapper, 'doc-ext').trigger('click')
+      await esperar()
+
+      expect(borrados).toHaveLength(0)
+      expect(confirmacion(), 'la confirmación abierta').toBeTruthy()
+      // Dice qué número se va a borrar y qué pasa después.
+      expect(document.body.textContent).toContain('F-4471')
+      expect(document.body.textContent).toContain('Queda registrado quién lo borró')
+    })
+
+    it('cancelar la confirmación no llama al backend y deja el número', async () => {
+      const wrapper = await montarCon([CON_NUMERO])
+      await botonBorrar(wrapper, 'doc-ext').trigger('click')
+      await esperar()
+
+      ;(document.body.querySelector('[data-qa="cancelar-borrar-numero"]') as HTMLElement).click()
+      await esperar()
+
+      expect(borrados).toHaveLength(0)
+      expect(fila(wrapper, 'doc-ext').text()).toContain('N° F-4471')
+    })
+
+    it('confirmar llama al POST con la venta DEL DOCUMENTO, sin body, y muestra el documento sin número y el registro', async () => {
+      respuestaBorrar = {
+        ...CON_NUMERO,
+        numero: null,
+        numerosBorrados: [{ numeroAnterior: 'F-4471', borradoEl: '2026-10-02T15:00:00.000Z', borradoPorNombre: 'Ana Torres' }],
+      }
+      const wrapper = await montarCon([CON_NUMERO])
+      // Lo que el backend devolverá en la recarga posterior.
+      documentoActual = { ...VENTA, documentos: [respuestaBorrar] } as unknown as typeof VENTA
+      try {
+        await botonBorrar(wrapper, 'doc-ext').trigger('click')
+        await esperar()
+        ;(confirmacion() as HTMLElement).click()
+        await esperar()
+      }
+      finally {
+        documentoActual = VENTA
+      }
+
+      expect(borrados).toHaveLength(1)
+      expect(borrados[0]!.url).toContain('/ventas/v-1/documentos/doc-ext/borrar-numero')
+      // El usuario sale del token y el número lo lee el servidor: no viaja nada.
+      expect(borrados[0]!.body).toBeUndefined()
+      const texto = fila(wrapper, 'doc-ext').text()
+      expect(texto).toContain('Sin número')
+      expect(texto).toContain('Ana Torres borró el número F-4471,')
+      // Ya no tiene número: no se ofrece borrar otra vez, y sí anotar uno.
+      expect(botonBorrar(wrapper, 'doc-ext').exists()).toBe(false)
+      expect(fila(wrapper, 'doc-ext').find('[data-qa="completar-numero"]').exists()).toBe(true)
+    })
+
+    it('la ruta lleva la venta DEL DOCUMENTO: el de una corrección es de la corrección', async () => {
+      const deLaNota = documento({ ...CON_NUMERO, id: 'doc-nc', ventaId: 'nc-1', documentoCorregidoId: 'doc-ext' })
+      respuestaBorrar = { ...deLaNota, numero: null }
+      const wrapper = await montarCon([CON_NUMERO, deLaNota])
+
+      await botonBorrar(wrapper, 'doc-nc').trigger('click')
+      await esperar()
+      ;(confirmacion() as HTMLElement).click()
+      await esperar()
+
+      expect(borrados).toHaveLength(1)
+      expect(borrados[0]!.url).toContain('/ventas/nc-1/documentos/doc-nc/borrar-numero')
+      expect(borrados[0]!.url).not.toContain('/ventas/v-1/')
+    })
+
+    it('después de borrar se resincroniza: anular vuelve a preguntar, y eso lo dice el backend', async () => {
+      respuestaBorrar = { ...CON_NUMERO, numero: null }
+      const wrapper = await montarCon([CON_NUMERO], {
+        estado: 'pendiente', pagos: [], anulable: false, anularPreguntaExterno: false,
+      })
+      expect(wrapper.findComponent({ name: 'VentasAnularVentaModal' }).props('preguntaExterno')).toBe(false)
+
+      // Sin número, anular se pregunta (E10): lo que la recarga del backend trae.
+      documentoActual = {
+        ...VENTA,
+        estado: 'pendiente',
+        pagos: [],
+        anulable: true,
+        anularPreguntaExterno: true,
+        documentos: [{ ...CON_NUMERO, numero: null }],
+      } as unknown as typeof VENTA
+      try {
+        await botonBorrar(wrapper, 'doc-ext').trigger('click')
+        await esperar()
+        ;(confirmacion() as HTMLElement).click()
+        await esperar()
+      }
+      finally {
+        documentoActual = VENTA
+      }
+
+      expect(wrapper.findComponent({ name: 'VentasAnularVentaModal' }).props('preguntaExterno')).toBe(true)
+    })
+
+    it('el registro de los borrados se muestra aunque el documento ya tenga otro número, el más nuevo primero', async () => {
+      const wrapper = await montarCon([documento({
+        ...CON_NUMERO,
+        numero: 'F-5000',
+        numerosBorrados: [
+          { numeroAnterior: 'B-222', borradoEl: '2026-10-02T16:00:00.000Z', borradoPorNombre: 'Luis Soto' },
+          { numeroAnterior: 'A-111', borradoEl: '2026-10-02T15:00:00.000Z', borradoPorNombre: null },
+        ],
+      })])
+
+      const registro = fila(wrapper, 'doc-ext').find('[data-qa="numeros-borrados"]')
+      const lineas = registro.findAll('li').map(li => li.text())
+      expect(lineas).toHaveLength(2)
+      expect(lineas[0]).toContain('Luis Soto borró el número B-222,')
+      expect(lineas[1]).toContain('Alguien borró el número A-111,')
     })
   })
 

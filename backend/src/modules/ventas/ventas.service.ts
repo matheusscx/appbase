@@ -1410,16 +1410,9 @@ export class VentasService {
   /**
    * Completa el número de un documento de la venta (`PATCH /ventas/:id/documentos/:documentoId`,
    * spec § 3.4). Lo que hace este método es lo que `VentaDocumentosService.completarNumero`
-   * no sabe: **a quién pertenece** el documento y **quién puede tocarlo**.
-   *
-   * 1. El alcance de caja de `findOne` (`filtroDeMisCajas`): una venta que no es
-   *    suya es 404, igual que en el detalle, para no confirmar que existe. Va
-   *    **antes** del lock, para que quien no la ve no pueda retenerla.
-   * 2. El `FOR UPDATE` de la venta, el mismo de `cancelarUnaVez`: sin él, anotar
-   *    el número de un `externo` correría contra una anulación que lo declara no
-   *    hecho (E10), y el documento quedaría descartado **con** número.
-   * 3. Que el documento sea de esta venta. El `externo` o la máquina de otra
-   *    venta (del mismo tenant) es 404.
+   * no sabe: **a quién pertenece** el documento y **quién puede tocarlo**
+   * (`tomarDocumentoDeLaVenta`: alcance de caja, lock de la venta, documento de
+   * esta venta).
    *
    * Todo en una transacción. La escritura y sus reglas (solo `maquina`/`externo`
    * vigentes, la `clase` solo con la máquina) son del servicio de documentos.
@@ -1434,31 +1427,7 @@ export class VentasService {
     clase?: ClaseDocumentoMaquina;
   }): Promise<DocumentoDetalle> {
     return this.db.transaccion(async (manager) => {
-      const bindsAlcance: unknown[] = [params.ventaId, params.tenantId];
-      let filtroPropio = '';
-      if (!params.verTodas) {
-        bindsAlcance.push(params.usuarioId);
-        filtroPropio = this.filtroDeMisCajas(bindsAlcance.length);
-      }
-      const visible: unknown[] = await manager.query(
-        `SELECT 1 FROM ventas v
-          WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL
-            ${filtroPropio}`,
-        bindsAlcance,
-      );
-      if (!visible.length) throw new NotFoundException('Venta no encontrada');
-
-      await this.lockVentaOriginal(manager, params.tenantId, params.ventaId);
-
-      const delaVenta: unknown[] = await manager.query(
-        `SELECT 1 FROM venta_documentos
-          WHERE documento_id = $1 AND venta_id = $2 AND tenant_id = $3
-            AND eliminado_el IS NULL`,
-        [params.documentoId, params.ventaId, params.tenantId],
-      );
-      if (!delaVenta.length)
-        throw new NotFoundException('Documento no encontrado');
-
+      await this.tomarDocumentoDeLaVenta(manager, params);
       return this.ventaDocumentosService.completarNumero(manager, {
         tenantId: params.tenantId,
         documentoId: params.documentoId,
@@ -1466,6 +1435,80 @@ export class VentasService {
         clase: params.clase,
       });
     });
+  }
+
+  /**
+   * Borra el número de un documento hecho por fuera (`POST
+   * /ventas/:id/documentos/:documentoId/borrar-numero`, PRODUCTO § 10). Mismo
+   * andamio que `completarNumeroDocumento` —alcance de caja, lock de la venta,
+   * que el documento sea de esta venta—, y la escritura y su registro (quién,
+   * cuándo y qué decía) son de `VentaDocumentosService.borrarNumero`.
+   */
+  async borrarNumeroDocumento(params: {
+    tenantId: string;
+    usuarioId: string;
+    verTodas: boolean;
+    ventaId: string;
+    documentoId: string;
+  }): Promise<DocumentoDetalle> {
+    return this.db.transaccion(async (manager) => {
+      await this.tomarDocumentoDeLaVenta(manager, params);
+      return this.ventaDocumentosService.borrarNumero(manager, {
+        tenantId: params.tenantId,
+        usuarioId: params.usuarioId,
+        documentoId: params.documentoId,
+      });
+    });
+  }
+
+  /**
+   * Lo que comparten las dos escrituras sobre un documento de la venta
+   * (`completarNumeroDocumento`, `borrarNumeroDocumento`), en este orden y dentro
+   * de la transacción del llamador:
+   *
+   * 1. El alcance de caja de `findOne` (`filtroDeMisCajas`): una venta que no es
+   *    suya es 404, igual que en el detalle, para no confirmar que existe. Va
+   *    **antes** del lock, para que quien no la ve no pueda retenerla.
+   * 2. El `FOR UPDATE` de la venta, el mismo de `cancelarUnaVez`: sin él, tocar
+   *    el número de un `externo` correría contra una anulación que lo declara no
+   *    hecho (E10), y el documento quedaría descartado **con** número.
+   * 3. Que el documento sea de esta venta. El `externo` o la máquina de otra
+   *    venta (del mismo tenant) es 404.
+   */
+  private async tomarDocumentoDeLaVenta(
+    manager: EntityManager,
+    params: {
+      tenantId: string;
+      usuarioId: string;
+      verTodas: boolean;
+      ventaId: string;
+      documentoId: string;
+    },
+  ): Promise<void> {
+    const bindsAlcance: unknown[] = [params.ventaId, params.tenantId];
+    let filtroPropio = '';
+    if (!params.verTodas) {
+      bindsAlcance.push(params.usuarioId);
+      filtroPropio = this.filtroDeMisCajas(bindsAlcance.length);
+    }
+    const visible: unknown[] = await manager.query(
+      `SELECT 1 FROM ventas v
+        WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL
+          ${filtroPropio}`,
+      bindsAlcance,
+    );
+    if (!visible.length) throw new NotFoundException('Venta no encontrada');
+
+    await this.lockVentaOriginal(manager, params.tenantId, params.ventaId);
+
+    const delaVenta: unknown[] = await manager.query(
+      `SELECT 1 FROM venta_documentos
+        WHERE documento_id = $1 AND venta_id = $2 AND tenant_id = $3
+          AND eliminado_el IS NULL`,
+      [params.documentoId, params.ventaId, params.tenantId],
+    );
+    if (!delaVenta.length)
+      throw new NotFoundException('Documento no encontrado');
   }
 
   /**

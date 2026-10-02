@@ -95,6 +95,7 @@ import { VentaImpuesto } from './modules/ventas/entities/venta-impuesto.entity';
 import { VentaCustomer } from './modules/ventas/entities/venta-customer.entity';
 import { VentaDocumentosModule } from './modules/venta-documentos/venta-documentos.module';
 import { VentaDocumento } from './modules/venta-documentos/entities/venta-documento.entity';
+import { VentaDocumentoNumeroBorrado } from './modules/venta-documentos/entities/venta-documento-numero-borrado.entity';
 import { Pago } from './modules/pagos/entities/pago.entity';
 import { PagoAplicacion } from './modules/pagos/entities/pago-aplicacion.entity';
 import { PropinasModule } from './modules/propinas/propinas.module';
@@ -267,6 +268,7 @@ import { ReportesModule } from './modules/reportes/reportes.module';
           VentaRecargo,
           VentaImpuesto,
           VentaDocumento,
+          VentaDocumentoNumeroBorrado,
           VentaCustomer,
           Pago,
           PagoAplicacion,
