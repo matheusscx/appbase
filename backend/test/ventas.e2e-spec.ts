@@ -1192,6 +1192,10 @@ describe('Ventas (e2e)', () => {
     // lógica al final (el e2e no borra).
     const INACTIVO_CHILE_ID = '550e8400-e29b-41d4-a716-446655440999';
     const CHILE_ID = '550e8400-e29b-41d4-a716-446655440000';
+    // La Factura es `customer_requerido` en el seed: la venta tiene que traerlo.
+    const RECEPTOR = { nombre: 'Comercial Andes SpA', rut: '76.123.456-7' };
+    const MENSAJE_CUSTOMER_REQUERIDO =
+      'Este tipo de documento requiere los datos del cliente';
 
     // Un servicio gratis, y no `ITEM_ID`: ese producto tiene 50 unidades en el
     // local para TODAS las suites, y el reparto está al límite — estas ventas le
@@ -1265,7 +1269,10 @@ describe('Ventas (e2e)', () => {
     });
 
     it('un tipo del país, activo y que no es NC se respeta', async () => {
-      const res = await crear({ tipoDocumentoId: FACTURA_CHILE_ID });
+      const res = await crear({
+        tipoDocumentoId: FACTURA_CHILE_ID,
+        customer: RECEPTOR,
+      });
       expect(res.status).toBe(201);
       expect(await tipoDeLaVenta((res.body as VentaResponse).id)).toBe(
         FACTURA_CHILE_ID,
@@ -1274,7 +1281,10 @@ describe('Ventas (e2e)', () => {
 
     it('el detalle dice si el tipo es boleta (esBoleta del catálogo): la boleta sí, la factura no', async () => {
       const boleta = await crear({});
-      const factura = await crear({ tipoDocumentoId: FACTURA_CHILE_ID });
+      const factura = await crear({
+        tipoDocumentoId: FACTURA_CHILE_ID,
+        customer: RECEPTOR,
+      });
       expect(boleta.status).toBe(201);
       expect(factura.status).toBe(201);
 
@@ -1324,7 +1334,54 @@ describe('Ventas (e2e)', () => {
       expect(await ventasDelTenant()).toBe(antes);
     });
 
-    it('online: siempre la boleta, aunque el body traiga una factura', async () => {
+    it('la factura sin customer responde 400 y no crea la venta (customer_requerido)', async () => {
+      const antes = await ventasDelTenant();
+      const res = await crear({ tipoDocumentoId: FACTURA_CHILE_ID });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toBe(
+        MENSAJE_CUSTOMER_REQUERIDO,
+      );
+      expect(await ventasDelTenant()).toBe(antes);
+    });
+
+    it('la factura con un customer de nombre en blanco responde 400: no cuenta como customer', async () => {
+      const antes = await ventasDelTenant();
+      const res = await crear({
+        tipoDocumentoId: FACTURA_CHILE_ID,
+        customer: { nombre: '   ' },
+      });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toBe(
+        MENSAJE_CUSTOMER_REQUERIDO,
+      );
+      expect(await ventasDelTenant()).toBe(antes);
+    });
+
+    // `@ValidateNested` deja pasar un array: con la factura caía en un TypeError
+    // del chequeo (500), y con la boleta en el NOT NULL de `venta_customer.nombre`.
+    it('un customer que es un array responde 400 del pipe, con factura y con boleta', async () => {
+      const antes = await ventasDelTenant();
+      for (const tipoDocumentoId of [FACTURA_CHILE_ID, BOLETA_ID]) {
+        for (const customer of [[], [RECEPTOR]]) {
+          const res = await crear({ tipoDocumentoId, customer });
+          expect(res.status).toBe(400);
+          expect(JSON.stringify(res.body)).toContain('customer');
+        }
+      }
+      expect(await ventasDelTenant()).toBe(antes);
+    });
+
+    it('la boleta pedida explícitamente no exige customer', async () => {
+      const res = await crear({ tipoDocumentoId: BOLETA_ID });
+      expect(res.status).toBe(201);
+      expect(await tipoDeLaVenta((res.body as VentaResponse).id)).toBe(
+        BOLETA_ID,
+      );
+    });
+
+    // Sin customer a propósito: lo que se exige depende del tipo que la venta
+    // termina teniendo (la boleta), no del que pidió el body.
+    it('online: siempre la boleta, aunque el body traiga una factura y no traiga customer', async () => {
       const res = await crear({
         canal: 'online',
         tipoDocumentoId: FACTURA_CHILE_ID,

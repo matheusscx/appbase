@@ -18,6 +18,8 @@ const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
 const DEBITO_ID = '550e8400-e29b-41d4-a716-446655440106';
 const CREDITO_ID = '550e8400-e29b-41d4-a716-446655440107';
 const FACTURA_ID = '550e8400-e29b-41d4-a716-446655440146';
+// La Factura es `customer_requerido` en el seed: la venta tiene que traerlo.
+const RECEPTOR = { nombre: 'Comercial Andes SpA', rut: '76.123.456-7' };
 const ADMIN = { email: 'admin.paris@paris.cl', password: 'admin' };
 
 interface Venta {
@@ -437,6 +439,7 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
     it('en una factura, la factura siempre: el pago con tarjeta y el de efectivo corrigen la misma factura', async () => {
       const venta = await vender({
         tipoDocumentoId: FACTURA_ID,
+        customer: RECEPTOR,
         lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
         pagos: [
           { metodoPagoId: EFECTIVO_ID, monto: '19000' },
@@ -506,6 +509,7 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
       await patchFacturador('externo');
       const factura = await vender({
         tipoDocumentoId: FACTURA_ID,
+        customer: RECEPTOR,
         lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
         pagos: [
           { metodoPagoId: EFECTIVO_ID, monto: '19000' },

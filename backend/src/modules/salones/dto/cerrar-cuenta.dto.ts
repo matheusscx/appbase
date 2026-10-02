@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsUUID,
   ValidateNested,
@@ -24,7 +25,10 @@ export class CerrarCuentaDto extends CredencialGarzonOpcionalDto {
   @IsUUID()
   tipoDocumentoId?: string;
 
+  // `IsObject` además de `ValidateNested`: este deja pasar un array, que con una
+  // Factura revienta el chequeo de `customer_requerido` en un 500.
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => CustomerVentaDto)
   customer?: CustomerVentaDto;

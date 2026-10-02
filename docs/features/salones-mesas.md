@@ -100,7 +100,9 @@ aplicaba en el carrito local.
 `{ pin, pagos?, tipoDocumentoId?, customer?, propinaMonto?, propinaSugerida?, propinaPorcentajeSugerido? }`
 (reusa DTOs de ventas; `propina*` son `@IsNumberString` opcionales, y **los tres se
 rechazan si vienen negativos** — `@IsNumberString` acepta el signo menos). Respuesta:
-`{ cuenta: CuentaDetalle, ventaId, boleta }`.
+`{ cuenta: CuentaDetalle, ventaId, boleta }`. El tipo y el customer pasan por la misma
+validación que el POS (`resolverTipoDocumento`, ver [ventas](ventas.md)): una Factura sin
+`customer` es un 400 y la cuenta sigue abierta.
 
 **Cobrar de nuevo una mesa que ya se cobró reproduce el cierre** (2026-09-19,
 [ADR-026](../adr/026-idempotencia-de-cobros.md)). Exige la cabecera `Idempotency-Key`

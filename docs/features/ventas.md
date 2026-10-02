@@ -100,6 +100,8 @@ Response (201):
 **Errores:**
 - `400` — sin caja abierta para el usuario
 - `400` — `tipoDocumentoId` de otro país, inexistente, inactivo o la nota de crédito
+- `400` — el tipo de la venta es `customer_requerido` (la Factura) y no viene `customer`, o
+  viene con el nombre en blanco
 - `400` — excedente de pago sin método con `permite_vuelto = true`
 - `400` — `metodoPagoId` no habilitado para el tenant (rollback completo)
 - `400` — stock insuficiente (rollback completo)
@@ -116,6 +118,18 @@ boleta sembrada (AR/CO/MX) deja el tipo en `null`, como antes. Una venta **`onli
 boleta del país y el `tipoDocumentoId` del body ni se mira: el canal que se guarda en la
 venta decide. Todo sale de **una sola lectura** por venta (`resolverTipoDocumento`), sin
 importar cuántas líneas lleve.
+
+**`customer_requerido` lo exige el servidor** (2026-10-02). Si el tipo **resuelto** lo tiene (la
+Factura), la venta sin `customer` —o con el nombre en blanco: la pantalla hace `trim`— es un 400
+y no se escribe nada. Hasta esa fecha lo controlaba solo la pantalla, y un `POST` directo creaba
+una Factura sin receptor. Se mira el tipo resuelto y no el pedido, así que una venta online con
+una Factura en el body sigue naciendo boleta sin pedir nada. El chequeo vive en
+`resolverTipoDocumento`, por donde pasan **todos** los caminos que crean una venta desde un
+pedido: el POS, el cierre de cuenta de salones (`POST /cuentas/:id/cerrar`, que deja la cuenta
+abierta ante el 400), la tienda online y las suscripciones. La nota de crédito no pasa: su tipo lo
+fija el sistema y no es `customer_requerido`. Un `customer` que no es un objeto (un array) es 400
+del pipe (`@IsObject()`), en los dos DTO. Vale igual con `facturador = 'externo'`, como en la pantalla.
+Exige el customer, no su RUT: lo que la Factura necesita del receptor es materia del frente fiscal.
 
 Como toda venta nace con tipo, **el tipo ya no impide anular**: anular mira los documentos emitidos,
 ver `POST /ventas/:id/anular`.
@@ -803,7 +817,9 @@ con la regla del medio. Sin número se completa después desde el detalle de la 
 
 - **Boleta**: cliente opcional — se puede cobrar sin datos del comprador.
 - **Factura**: cliente obligatorio — campo de nombre debe estar completado para habilitar botón "Cobrar".
-- **Validación en cliente** vía `puedeCobrar()` y cambio de estado del botón Cobrar.
+- **Validación en cliente** vía `puedeCobrar()` y cambio de estado del botón Cobrar. Es
+  comodidad: el servidor rechaza con 400 la venta de un tipo `customer_requerido` sin cliente
+  (ver "El tipo de documento lo decide el servidor").
 
 ### Testing
 

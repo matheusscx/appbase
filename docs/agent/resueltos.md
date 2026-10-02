@@ -23,6 +23,81 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El servidor exige el customer de un tipo con `customer_requerido` (cerrada 2026-10-02)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **El servidor no exige el customer de un tipo de documento con `customer_requerido`**
+  (backend; invariante 6). La Factura lo tiene en `true` en el seed, pero el backend solo lo
+  expone (`ventas.service.ts`, el listado de tipos, ~L2762) y nunca lo valida al crear la venta. Lo
+  controlan solo la pantalla (`useVenta.ts` ~L447, `CarritoPanel.vue`, `pos.vue`), así que un POST
+  directo crea una Factura sin receptor. Lo vio `api-security-reviewer` en la tarea 3 del frente de
+  emisión (2026-10-02); verificado por la orquestadora con grep. **Arreglo:** 400 cuando el tipo
+  pedido tiene `customer_requerido` y la venta no trae customer, en todo camino que fije el tipo
+  (POS, salones, online), con e2e por cada uno. **Tomarlo después de que el frente de emisión
+  entre a main**: su tarea 3 reescribió la validación del tipo en el servidor, y ese es el lugar.
+  Es fiscal y va solo, como frente corto.
+
+### Qué se hizo
+
+El chequeo vive en `resolverTipoDocumento` (`ventas.service.ts`), el lugar que la tarea 3 de la
+emisión había reescrito. La lectura del tipo trae también `customer_requerido`, y sobre el tipo
+**resuelto** —no el pedido— la venta sin `customer`, o con el nombre en blanco, es un 400 antes de
+escribir nada. Un solo chequeo cubre los dos ramales (tipo pedido y boleta por defecto).
+
+Los caminos se enumeraron por mecanismo y no por un grep: los dos `manager.create(Venta, …)` del
+repo, los cinco llamadores de `crear`/`crearEnTransaccion`, y todo `UPDATE`/`PATCH` que pudiera
+tocar el tipo.
+
+- **POS** (`POST /ventas`, físico) y **salones** (`POST /cuentas/:id/cerrar`): el tipo sale del
+  body y los dos pasan por `crearEnTransaccion` → `resolverTipoDocumento`.
+- **Online** (`POST /ventas` con `canal: 'online'`, el callback de la tienda, las suscripciones):
+  resuelven siempre la boleta, que no es `customer_requerido` en ningún país sembrado, y la tienda y
+  las suscripciones mandan el customer igual. El 400 ahí es inalcanzable sin alterar el catálogo
+  por SQL —ningún endpoint lo edita—, así que su e2e cubre el caso que deja pasar. El porqué quedó
+  escrito junto al chequeo.
+- **Nota de crédito** (el segundo `create(Venta)`): el tipo lo fija el sistema y no es
+  `customer_requerido` en ningún país. Fuera.
+- **Cambiar el tipo después**: no existe. El `PATCH /ventas/:id/documentos/:id` solo toca número y
+  clase, y `venta_documentos` copia el tipo de la venta dentro de la misma transacción, después
+  del chequeo.
+
+Decidido por la orquestadora (2026-10-02), a pedido de esta sesión, porque no era regla nueva sino
+la conducta de la pantalla: el 400 vale también con `facturador = 'externo'`, "sin customer" es
+sin objeto o con el nombre vacío o solo espacios (la pantalla hace `trim`), y no se exige RUT. Lo
+que la Factura chilena pide del receptor (RUT, razón social, giro, dirección) quedó como entrada
+propia en `pendientes.md` § 6, con el hueco medido.
+
+El `api-security-reviewer` del cierre encontró que un `customer` **array** pasaba el pipe
+(`@ValidateNested` lo acepta) y con una Factura reventaba el chequeo en un 500; con la boleta el
+mismo body ya daba 500, por el NOT NULL de `venta_customer.nombre`. Medido en rojo (500 en POS y en
+salones) y cerrado con `@IsObject()` en el `customer` de `CreateVentaDto` y `CerrarCuentaDto`, el
+idioma de `create-nota-credito.dto.ts`.
+
+Se agregó el customer a las facturas que ya armaban otros e2e (`venta-documentos`,
+`venta-correcciones` y el bloque de tipo de documento de `ventas`). No se tocaron pantallas: la UI
+ya lo exigía, así que no corrió Playwright (acordado con la orquestadora).
+
+### Qué lo fija
+
+- E2e nuevos: POS sin customer → 400 sin venta; POS con nombre `'   '` → 400 sin venta; boleta
+  pedida sin customer → 201; salones: el 400 deja la cuenta abierta y la misma cuenta cierra con
+  la Factura cuando llega el customer; online con una Factura en el body y sin customer → 201 con
+  la boleta; en POS, `customer: []` o `[RECEPTOR]` → 400 del pipe con factura y con boleta, y en
+  salones `customer: []` con factura → 400 con la cuenta abierta (antes, 500 en los dos). Unitarios
+  gemelos en `ventas.service.spec.ts`.
+- Mutantes, cada uno sobre base fresca y con `ventas` + `venta-documentos`, medidos antes del
+  `@IsObject`: sacar el chequeo (`if (false)`) rompe exactamente los 3 e2e del 400; sacar el `trim`
+  rompe solo el del nombre en blanco. Control con el fuente restaurado: 246/246 con
+  `venta-correcciones` incluida. El `@IsObject` se fijó al revés: el e2e del array se escribió
+  primero y dio 500 en POS y en salones.
+- Gate final, con el `@IsObject`: `test:e2e` completo en base fresca, 1544 pasan y 6 saltados
+  preexistentes; unit 3488/3488; lint sin errores; typecheck limpio.
+
+---
+
 ## Cada venta registra quién emitió sus documentos, y la regla la declara cada medio de pago (cerrada 2026-10-02)
 
 Sale de [`pendientes.md`](pendientes.md) § 6.

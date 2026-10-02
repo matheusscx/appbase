@@ -41,16 +41,26 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
-- [ ] **El servidor no exige el customer de un tipo de documento con `customer_requerido`**
-  (backend; invariante 6). La Factura lo tiene en `true` en el seed, pero el backend solo lo
-  expone (`ventas.service.ts`, el listado de tipos, ~L2762) y nunca lo valida al crear la venta. Lo
-  controlan solo la pantalla (`useVenta.ts` ~L447, `CarritoPanel.vue`, `pos.vue`), así que un POST
-  directo crea una Factura sin receptor. Lo vio `api-security-reviewer` en la tarea 3 del frente de
-  emisión (2026-10-02); verificado por la orquestadora con grep. **Arreglo:** 400 cuando el tipo
-  pedido tiene `customer_requerido` y la venta no trae customer, en todo camino que fije el tipo
-  (POS, salones, online), con e2e por cada uno. **Tomarlo después de que el frente de emisión
-  entre a main**: su tarea 3 reescribió la validación del tipo en el servidor, y ese es el lugar.
-  Es fiscal y va solo, como frente corto.
+- [ ] **El tipo de documento por defecto de la pantalla es "el primero por nombre", no la boleta**
+  (frontend + contrato de `GET /tipos-documento`). La pantalla toma `tiposDocumento[0]`, y el
+  listado ordena por `nombre ASC` (`ventas.service.ts`, `findTiposDocumento`): hoy sale la Boleta
+  porque "Boleta…" ordena antes que "Factura…", no porque alguien la haya elegido. Lugares,
+  medidos el 2026-10-02:
+  - `frontend/app/pages/salones/index.vue` ~L2783: el cierre de cuenta **manda** `tiposDocumento[0]`,
+    y salones no tiene campo de cliente. Desde que el servidor exige el customer de un tipo
+    `customer_requerido` (cerrado el 2026-10-02, ver `resueltos.md`), un tipo así que ordene antes
+    que la Boleta hace rebotar **todo** cierre de mesa con 400.
+  - `frontend/app/pages/ventas/pos.vue` ~L177: el POS arranca con `tiposRes[0]`. Ahí no rebota —la
+    pantalla pide el cliente antes de habilitar Cobrar— pero el cajero arranca en otro documento.
+  - `frontend/app/components/ventas/CarritoPanel.vue` ~L117 y ~L124: "Vaciar todo" vuelve a
+    `tiposDocumento[0]`, y `hayAlgoQueLimpiar` compara contra ese mismo `[0]`.
+  - `frontend/e2e/ventas/nota-credito.spec.ts` ~L86: el Playwright arma su venta con `tipos[0]`.
+  `GET /tipos-documento` **no expone** `esBoleta` (`TipoDocumentoResponse`, `ventas.service.ts`
+  ~L220), aunque la columna `es_boleta` existe desde la emisión. **Arreglo** (orquestadora,
+  2026-10-02): que el default sea la boleta del catálogo —exponer `esBoleta` en la respuesta y
+  elegir por eso en los cuatro lugares—. En salones, omitir `tipoDocumentoId` también llega a la
+  boleta, porque el servidor la resuelve por defecto. Anotado al cerrar el `customer_requerido`;
+  lo vio su `domain-reviewer`.
 
 - [ ] **`PATCH` de un método de pago del comercio con `null` da 500** (backend,
   `metodos-pago/dto/update-tenant-metodo-pago.dto.ts`). `habilitada` y `permiteVuelto` llevan
@@ -1146,6 +1156,26 @@ transaccional nativo, con ALS — [ADR-020](../adr/020-contexto-transaccional-al
 Prisma y Drizzle tienen el mismo modelo manual de transacciones que TypeORM. No es un
 pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evaluación.
 
+- [ ] **La Factura exige receptor, pero el sistema solo le pide un nombre** (fiscal, **frente
+  propio**; anotado 2026-10-02 al cerrar "el servidor no exige el customer de un tipo
+  `customer_requerido`", a pedido de la orquestadora). Desde ese cierre el servidor rechaza una
+  Factura sin customer, y "customer" es **solo un nombre que no esté en blanco**: es lo que ya
+  exigía la pantalla. Según la orquestadora —dato a verificar contra la norma del SII al tomar la
+  entrada, no está en `PRODUCTO.md`—, una factura chilena exige del receptor **RUT, razón social,
+  giro y dirección**. Lo que hay hoy, medido el 2026-10-02:
+  - **`venta_customer`** guarda `nombre` (NOT NULL), `rut`, `direccion`, `telefono`, `email` y
+    `tercero_id`. **No hay columna de giro**, ni de comuna/ciudad; la razón social no es un campo
+    aparte (el único texto es `nombre`).
+  - **`CustomerVentaDto`** (`ventas/dto/create-venta.dto.ts`) exige `nombre` con `@MinLength(1)`
+    —sin `trim`; el servicio lo trimea al decidir `customer_requerido`— y deja `rut` y `direccion`
+    como `@IsString()` opcionales: **sin formato ni dígito verificador del RUT**, y sin exigirlos
+    para una Factura.
+  - Con `terceroId`, la venta guarda los datos **del body**, no los del tercero: `terceros` sí
+    tiene `nombre_legal` y `rut_fiscal`, pero `venta_customer` no los copia.
+  Decidir **en su propia sesión** (`CLAUDE.md`, ADR-010) qué campos exige cada tipo —¿una columna
+  por exigencia en `tipos_documento_tributario`, o un conjunto fijo para la Factura?—, si el giro
+  se congela en la venta y de dónde sale cuando hay tercero. El hecho fiscal se congela en la
+  transacción, así que lo que falte hoy no se completa después en una venta ya hecha.
 - [ ] **Una nota de crédito que se reintenta se emite dos veces** (fiscal, **frente propio**,
   anotado 2026-09-19 al diseñar la idempotencia del cobro). `POST /ventas/:id/notas-credito`
   no tiene clave de idempotencia: un corte de red después de emitir y un reintento del

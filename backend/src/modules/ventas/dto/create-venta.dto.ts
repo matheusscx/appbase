@@ -4,6 +4,7 @@ import {
   IsIn,
   IsInt,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -173,7 +174,10 @@ export class CreateVentaDto {
   @IsUUID(undefined, { each: true })
   recargosVentaIds?: string[];
 
+  // `IsObject` además de `ValidateNested`: este deja pasar un array, que con una
+  // Factura revienta el chequeo de `customer_requerido` en un 500.
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => CustomerVentaDto)
   customer?: CustomerVentaDto;

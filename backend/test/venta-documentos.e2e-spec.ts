@@ -21,6 +21,8 @@ const DEBITO_ID = '550e8400-e29b-41d4-a716-446655440106';
 const CREDITO_ID = '550e8400-e29b-41d4-a716-446655440107';
 const BOLETA_ID = '550e8400-e29b-41d4-a716-446655440145';
 const FACTURA_ID = '550e8400-e29b-41d4-a716-446655440146';
+// La Factura es `customer_requerido` en el seed: la venta tiene que traerlo.
+const RECEPTOR = { nombre: 'Comercial Andes SpA', rut: '76.123.456-7' };
 const ADMIN = { email: 'admin.paris@paris.cl', password: 'admin' };
 // `Ventas:Leer` + `Ventas:Crear` y sin `Cajas:Leer` (rol Vendedor): ve solo lo de su caja.
 const VENDEDOR = { email: 'vendedor@paris.cl', password: 'admin' };
@@ -460,12 +462,88 @@ describe('Documentos de la venta (e2e)', () => {
       });
       expect(suma(docs)).toBe(100000);
     });
+
+    // `customer_requerido` (Factura): el cierre fija el tipo por el body igual que
+    // el POS y pasa por la misma validación. El 400 deja la cuenta abierta, y la
+    // misma cuenta cierra cuando el customer llega.
+    it('factura sin customer: 400 y la cuenta sigue abierta; con customer cierra con la factura', async () => {
+      await request(app.getHttpServer())
+        .post('/api/sesiones-garzon/cerrar')
+        .set('Authorization', `Bearer ${token}`)
+        .send(BRUNO);
+      const sesion = await request(app.getHttpServer())
+        .post('/api/sesiones-garzon/iniciar')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...BRUNO, turnoId: TURNO_MANANA_ID });
+      expect(sesion.status).toBe(201);
+
+      const cuenta = await request(app.getHttpServer())
+        .post(`/api/mesas/${MESA_1_ID}/cuentas`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(BRUNO);
+      expect(cuenta.status).toBe(201);
+      const cuentaId = (cuenta.body as { id: string }).id;
+      const linea = await request(app.getHttpServer())
+        .post(`/api/cuentas/${cuentaId}/lineas`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ itemId: itemAfecto100, cantidad: '1' });
+      expect(linea.status).toBe(201);
+
+      const cerrar = (extra: Record<string, unknown>) =>
+        request(app.getHttpServer())
+          .post(`/api/cuentas/${cuentaId}/cerrar`)
+          .set('Idempotency-Key', randomUUID())
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            ...BRUNO,
+            tipoDocumentoId: FACTURA_ID,
+            pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '119000' }],
+            ...extra,
+          });
+      const estadoCuenta = async () => {
+        const rows: { estado: string; venta_id: string | null }[] =
+          await ds.query(
+            `SELECT estado, venta_id FROM cuentas WHERE cuenta_id = $1`,
+            [cuentaId],
+          );
+        return rows[0];
+      };
+
+      const sinCustomer = await cerrar({});
+      expect(sinCustomer.status).toBe(400);
+      expect((sinCustomer.body as { message: string }).message).toBe(
+        'Este tipo de documento requiere los datos del cliente',
+      );
+      expect(await estadoCuenta()).toEqual({
+        estado: 'abierta',
+        venta_id: null,
+      });
+
+      const comoArray = await cerrar({ customer: [] });
+      expect(comoArray.status).toBe(400);
+      expect(JSON.stringify(comoArray.body)).toContain('customer');
+      expect(await estadoCuenta()).toEqual({
+        estado: 'abierta',
+        venta_id: null,
+      });
+
+      const conCustomer = await cerrar({ customer: RECEPTOR });
+      expect(conCustomer.status).toBe(201);
+      const ventaId = (conCustomer.body as { ventaId: string }).ventaId;
+      const venta: { tipo_documento_id: string }[] = await ds.query(
+        `SELECT tipo_documento_id FROM ventas WHERE venta_id = $1`,
+        [ventaId],
+      );
+      expect(venta[0].tipo_documento_id).toBe(FACTURA_ID);
+      expect((await estadoCuenta()).venta_id).toBe(ventaId);
+    });
   });
 
   describe('factura', () => {
     it('de $119.000 pagada con tarjeta (máquina): un solo documento, del sistema', async () => {
       const venta = await vender({
         tipoDocumentoId: FACTURA_ID,
+        customer: RECEPTOR,
         lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
         pagos: [
           {
@@ -496,6 +574,7 @@ describe('Documentos de la venta (e2e)', () => {
       await patchFacturador('externo');
       const venta = await vender({
         tipoDocumentoId: FACTURA_ID,
+        customer: RECEPTOR,
         lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
         pagos: [{ metodoPagoId: DEBITO_ID, monto: '119000' }],
       });
@@ -515,6 +594,7 @@ describe('Documentos de la venta (e2e)', () => {
     it('una factura sin pagos igual lleva su documento por el total (E2)', async () => {
       const venta = await vender({
         tipoDocumentoId: FACTURA_ID,
+        customer: RECEPTOR,
         lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
       });
       const docs = await documentosDe(venta.id);
@@ -691,6 +771,7 @@ describe('Documentos de la venta (e2e)', () => {
             })
           : await vender({
               tipoDocumentoId: FACTURA_ID,
+              customer: RECEPTOR,
               lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
               pagos: [{ metodoPagoId: DEBITO_ID, monto: '19000' }],
             });
@@ -856,6 +937,7 @@ describe('Documentos de la venta (e2e)', () => {
     const pendienteDeFactura = () =>
       vender({
         tipoDocumentoId: FACTURA_ID,
+        customer: RECEPTOR,
         lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
       });
     const MENSAJE_PIDE_RESPUESTA =
@@ -1094,6 +1176,7 @@ describe('Documentos de la venta (e2e)', () => {
     const pendienteDeFactura = () =>
       vender({
         tipoDocumentoId: FACTURA_ID,
+        customer: RECEPTOR,
         lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
       });
     /** La mesa de $100.000: $40.000 con la máquina (sin número) y $60.000 debidos. */
@@ -1491,6 +1574,7 @@ describe('Documentos de la venta (e2e)', () => {
       await patchFacturador('externo');
       return vender({
         tipoDocumentoId: FACTURA_ID,
+        customer: RECEPTOR,
         lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
       });
     };
@@ -1951,6 +2035,7 @@ describe('Documentos de la venta (e2e)', () => {
       await patchFacturador('externo');
       return vender({
         tipoDocumentoId: FACTURA_ID,
+        customer: RECEPTOR,
         lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
       });
     };
@@ -2532,6 +2617,7 @@ describe('Documentos de la venta (e2e)', () => {
       v.externoConNumero = (
         await vender({
           tipoDocumentoId: FACTURA_ID,
+          customer: RECEPTOR,
           lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
           pagos: [{ metodoPagoId: DEBITO_ID, monto: '119000' }],
         })

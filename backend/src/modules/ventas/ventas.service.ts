@@ -62,7 +62,7 @@ import {
   resolverCantidadDesdePresentacion,
   resolverUnidadBaseDeItem,
 } from '../../common/utils/cantidad-presentacion.util';
-import type { CreateVentaDto } from './dto/create-venta.dto';
+import type { CreateVentaDto, CustomerVentaDto } from './dto/create-venta.dto';
 import type { FiltroDocumento, QueryVentasDto } from './dto/query-ventas.dto';
 import { Venta, EstadoVenta } from './entities/venta.entity';
 import { VentaDetalle } from './entities/venta-detalle.entity';
@@ -497,6 +497,7 @@ export class VentasService {
       tenantId,
       dto.tipoDocumentoId,
       canal,
+      dto.customer,
     );
 
     // 2. Cargar todos los items para obtener monedaId, tipo, nombre.
@@ -1724,6 +1725,14 @@ export class VentasService {
    *   es lo mismo y no se confirma qué ids existen en el catálogo.
    * - **Sin id**: la boleta del país. Un país sin boleta sembrada (AR/CO/MX)
    *   devuelve `null`, como hasta hoy: su frente fiscal es otro.
+   * - **`customer_requerido`** (la Factura): sin customer, 400. Hasta acá lo
+   *   exigía solo la pantalla, y un POST directo creaba una Factura sin receptor.
+   *   Se mira el tipo **resuelto**, no el pedido: online pide lo que quiera y
+   *   termina en la boleta. Un nombre en blanco no es un customer, como en la
+   *   pantalla (`puedeCobrar`, que hace `trim`); el DTO solo exige longitud 1.
+   *   Por acá pasan todos los caminos que crean una venta desde un pedido: POS,
+   *   el cierre de cuenta de salones, la tienda online y las suscripciones. La
+   *   nota de crédito no: su tipo lo fija el sistema y no es `customer_requerido`.
    *
    * **Una sola lectura**: trae, del país del tenant, el tipo pedido y la boleta
    * activa, y el resto se decide en memoria. La boleta es única por país
@@ -1741,6 +1750,7 @@ export class VentasService {
     tenantId: string,
     tipoDocumentoId: string | undefined,
     canal: string,
+    customer: CustomerVentaDto | undefined,
   ): Promise<{ id: string | null; esBoleta: boolean }> {
     const pedido = canal === 'online' ? null : (tipoDocumentoId ?? null);
     const filas: {
@@ -1748,8 +1758,10 @@ export class VentasService {
       es_boleta: boolean;
       es_nota_credito: boolean;
       activo: boolean;
+      customer_requerido: boolean;
     }[] = await manager.query(
-      `SELECT td.tipo_documento_id, td.es_boleta, td.es_nota_credito, td.activo
+      `SELECT td.tipo_documento_id, td.es_boleta, td.es_nota_credito, td.activo,
+              td.customer_requerido
          FROM tenants t
          JOIN provincia prov ON prov.provincia_id = t.provincia_id
               AND prov.eliminado_el IS NULL
@@ -1763,30 +1775,37 @@ export class VentasService {
       [tenantId, pedido],
     );
 
+    let tipo: (typeof filas)[number] | undefined;
     if (pedido !== null) {
-      const elegido = filas.find((f) => f.tipo_documento_id === pedido);
-      if (!elegido) {
+      tipo = filas.find((f) => f.tipo_documento_id === pedido);
+      if (!tipo) {
         throw new BadRequestException(
           'El tipo de documento no corresponde al país del comercio',
         );
       }
-      if (elegido.es_nota_credito) {
+      if (tipo.es_nota_credito) {
         throw new BadRequestException(
           'La nota de crédito no se elige: la genera el sistema al reembolsar',
         );
       }
-      if (!elegido.activo) {
+      if (!tipo.activo) {
         throw new BadRequestException('El tipo de documento no está activo');
       }
-      return { id: elegido.tipo_documento_id, esBoleta: elegido.es_boleta };
+    } else {
+      tipo = filas.find((f) => f.es_boleta && f.activo && !f.es_nota_credito);
+      if (!tipo) return { id: null, esBoleta: false };
     }
 
-    const boleta = filas.find(
-      (f) => f.es_boleta && f.activo && !f.es_nota_credito,
-    );
-    return boleta
-      ? { id: boleta.tipo_documento_id, esBoleta: true }
-      : { id: null, esBoleta: false };
+    // Online hoy no llega a este 400: resuelve siempre la boleta, que no es
+    // `customer_requerido` en ningún país sembrado, y la tienda y las
+    // suscripciones mandan el customer igual. Ningún endpoint edita el
+    // catálogo de tipos, así que su e2e cubre solo el caso que deja pasar.
+    if (tipo.customer_requerido && !customer?.nombre.trim()) {
+      throw new BadRequestException(
+        'Este tipo de documento requiere los datos del cliente',
+      );
+    }
+    return { id: tipo.tipo_documento_id, esBoleta: tipo.es_boleta };
   }
 
   /**

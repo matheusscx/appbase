@@ -1682,6 +1682,8 @@ describe('VentasService', () => {
     const FACTURA = '550e8400-e29b-41d4-a716-446655440146';
     const TIPO_INACTIVO = '550e8400-e29b-41d4-a716-446655440147';
     const NC_ARGENTINA = '550e8400-e29b-41d4-a716-446655440378';
+    const MENSAJE_CUSTOMER_REQUERIDO =
+      'Este tipo de documento requiere los datos del cliente';
     const tipo = (
       id: string,
       pais: string,
@@ -1689,6 +1691,7 @@ describe('VentasService', () => {
         es_boleta: boolean;
         es_nota_credito: boolean;
         activo: boolean;
+        customer_requerido: boolean;
       }> = {},
     ) => ({
       tipo_documento_id: id,
@@ -1696,11 +1699,12 @@ describe('VentasService', () => {
       es_boleta: false,
       es_nota_credito: false,
       activo: true,
+      customer_requerido: false,
       ...extra,
     });
     const CATALOGO = [
       tipo(BOLETA, 'CL', { es_boleta: true }),
-      tipo(FACTURA, 'CL'),
+      tipo(FACTURA, 'CL', { customer_requerido: true }),
       tipo(TIPO_DOCUMENTO_NC_ID, 'CL', {
         es_nota_credito: true,
         activo: false,
@@ -1740,6 +1744,7 @@ describe('VentasService', () => {
               es_boleta: t.es_boleta,
               es_nota_credito: t.es_nota_credito,
               activo: t.activo,
+              customer_requerido: t.customer_requerido,
             })),
           );
         }
@@ -1760,9 +1765,40 @@ describe('VentasService', () => {
       await service.crear(TENANT_ID, USUARIO_ID, {
         ...baseDto,
         tipoDocumentoId: FACTURA,
+        customer: { nombre: 'Comercial Andes SpA' },
       });
 
       expect(tipoGuardado()).toBe(FACTURA);
+    });
+
+    it('rechaza con 400 un tipo con customer_requerido sin customer, sin escribir la venta', async () => {
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, {
+          ...baseDto,
+          tipoDocumentoId: FACTURA,
+        }),
+      ).rejects.toThrow(new BadRequestException(MENSAJE_CUSTOMER_REQUERIDO));
+      expect(tipoGuardado()).toBeUndefined();
+    });
+
+    it('un customer con el nombre en blanco no cuenta como customer (la pantalla hace trim)', async () => {
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, {
+          ...baseDto,
+          tipoDocumentoId: FACTURA,
+          customer: { nombre: '   ' },
+        }),
+      ).rejects.toThrow(new BadRequestException(MENSAJE_CUSTOMER_REQUERIDO));
+      expect(tipoGuardado()).toBeUndefined();
+    });
+
+    it('la boleta no exige customer', async () => {
+      await service.crear(TENANT_ID, USUARIO_ID, {
+        ...baseDto,
+        tipoDocumentoId: BOLETA,
+      });
+
+      expect(tipoGuardado()).toBe(BOLETA);
     });
 
     it('rechaza con 400 un tipo de otro país, sin escribir la venta', async () => {
@@ -1816,6 +1852,8 @@ describe('VentasService', () => {
       expect(tipoGuardado()).toBeUndefined();
     });
 
+    // Sin customer a propósito: la factura del body no exige nada porque el
+    // tipo que se mira es el resuelto (la boleta), no el pedido.
     it('online: siempre la boleta, aunque el body traiga otro tipo, y ni lo consulta', async () => {
       await service.crear(TENANT_ID, USUARIO_ID, {
         ...baseDto,
@@ -1859,6 +1897,7 @@ describe('VentasService', () => {
       const dtoTresLineas = {
         ...baseDto,
         tipoDocumentoId: FACTURA,
+        customer: { nombre: 'Comercial Andes SpA' },
         lineas: [
           { itemId: 'item-a', cantidad: '1' },
           { itemId: 'item-b', cantidad: '2' },
@@ -1888,9 +1927,12 @@ describe('VentasService', () => {
               tenantId: string,
               id: string | undefined,
               canal: string,
+              customer: { nombre: string } | undefined,
             ) => Promise<{ id: string | null; esBoleta: boolean }>;
           }
-        ).resolverTipoDocumento(manager, TENANT_ID, id, canal);
+        ).resolverTipoDocumento(manager, TENANT_ID, id, canal, {
+          nombre: 'Comercial Andes SpA',
+        });
 
       it('la boleta del país es boleta', async () => {
         expect(await resolver(undefined, 'fisico')).toEqual({
