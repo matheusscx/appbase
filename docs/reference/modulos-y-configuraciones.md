@@ -1,0 +1,187 @@
+# Módulos y configuraciones
+
+Inventario de los módulos contratables del sistema y de todo lo que un tenant puede
+configurar. Foto del código al 2026-10-02: la fuente de verdad sigue siendo
+`backend/src/modules/seeder/seeder.service.ts` (`seedModulosApp`, `seedModuloAppPermisos`)
+y `frontend/app/pages/configuracion.vue` (el menú).
+
+**Leyenda de guards**
+
+- **Admin** — `TenantAdminGuard`: solo el rol `admin` del tenant.
+- **Abierto** — `JwtAuthGuard + TenantGuard`: cualquier miembro del tenant (típico en los `GET` de catálogos).
+- **`Módulo:Permiso`** — `PermisosGuard` con `@RequiresPermiso`.
+
+---
+
+## 1. Módulos contratables
+
+Un tenant contrata módulos (`tenant_modulos`); cada rol recibe permisos sobre los módulos
+contratados (`rol → módulo → permisos`). Permisos posibles: Leer, Crear, Actualizar,
+Eliminar, Ver todas, Reembolsar, Nota de crédito, Operar, Configurar, Liquidar, Anular, Pagar.
+
+| Módulo | Ruta | Permisos | Para qué |
+|---|---|---|---|
+| MiCaja | `/mi-caja` | Leer, Crear, Actualizar, Eliminar | Caja propia del usuario: apertura, cierre, arqueo |
+| Cajas | `/cajas` | Leer, Crear, Actualizar, Eliminar | Supervisión de cajas de todos, historial, tendencia, pendientes de revisión; cajones |
+| Ventas | `/ventas` | Leer, Crear, Actualizar, Eliminar, Ver todas, Anular, Nota de crédito | POS, historial y detalle de ventas, notas de crédito |
+| Tienda Online | `/tienda` | Leer, Crear | Storefront del cliente: catálogo, checkout, tarjetas |
+| Suscripciones | `/suscripciones` | Leer, Actualizar, Eliminar | Suscripciones recurrentes |
+| Pagos | `/pagos` | Leer, Crear | Registro de pagos |
+| Inventario | `/inventario` | Leer, Crear, Actualizar, Ver todas | Stock por ubicación, recuentos, traslados, stock mínimo, mermas |
+| Items | `/configuracion/items` | Leer, Crear, Actualizar, Eliminar | Catálogo: productos, ingredientes, servicios, recetas, combos, suscripciones |
+| Terceros | `/terceros` | Leer, Crear, Actualizar, Eliminar | Proveedores y entidades externas |
+| Pasarelas | `/configuracion/pasarelas` | Leer, Crear, Actualizar, Eliminar, Reembolsar | Pasarelas de pago online, API keys, órdenes y reembolsos |
+| Salones | `/salones` | Leer, Crear, Actualizar, Eliminar, Operar, Ver todas, Anular | Salones y mesas, cuentas, garzones, turnos, anulaciones |
+| Impresoras | `/configuracion/impresoras` | Leer, Crear, Actualizar, Eliminar | Impresoras térmicas de comanda y boleta |
+| Propinas | `/propinas` | Leer, Crear, Actualizar, Eliminar, Configurar, Liquidar | Pool de propinas, distribución y liquidaciones |
+| Resumen del negocio | `/` | Leer | Dashboard "Hoy" del dueño (separado de Ventas a propósito) |
+| Compras | `/compras` | Leer, Crear, Actualizar, Anular, Pagar | Recepción de compras y deuda con proveedores |
+| Varianza | `/reportes/varianza` | Leer | Reporte de varianza real vs. teórico (AVT) |
+
+Fuera de los módulos:
+
+- **Superadmin** (`es_superadmin`, rutas `/admin/*`, `SuperadminGuard`): CRUD de tenants y
+  asignación de módulos (`POST /admin/tenants/:id/modules`). Solo backend; `/admin` en el
+  frontend es un placeholder.
+- **Rol `admin` del tenant**: fijo y automático; ve todas las configuraciones marcadas "Admin".
+
+### Menú lateral
+
+El menú lateral (`frontend/app/layouts/dashboard.vue`) tiene **más entradas que módulos**:
+un mismo módulo abre varias pantallas. Cada entrada se muestra si el usuario es admin o tiene
+el permiso indicado (en orden de aparición):
+
+| Entrada | Ruta | Módulo · permiso que la muestra |
+|---|---|---|
+| Inicio | `/` | Siempre visible (el contenido lo filtra *Resumen del negocio*) |
+| Mi caja | `/mi-caja` | MiCaja · Leer |
+| Cajas | `/cajas` | Cajas · Leer |
+| Ventas | `/ventas` | Ventas · Leer |
+| Pagos | `/pagos` | Pagos · Leer |
+| Propinas | `/propinas` | Propinas · Leer |
+| Punto de venta | `/ventas/pos` | Ventas · Crear |
+| Salones | `/salones` | Salones · Operar |
+| Sesiones | `/sesiones-garzon` | Salones · Leer |
+| Anulaciones | `/salones/anulaciones` | Salones · Ver todas |
+| Tienda Online | `/tienda` | Tienda Online · Leer |
+| Mis suscripciones | `/tienda/suscripciones` | Tienda Online · Leer |
+| Medios de pago | `/tienda/medios-pago` | Tienda Online · Leer |
+| Suscripciones | `/suscripciones` | Suscripciones · Leer |
+| Terceros | `/terceros` | Terceros · Leer |
+| Inventario | `/inventario` | Inventario · Leer |
+| Mermas | `/mermas` | Inventario · Leer |
+| Recuentos | `/inventario/recuentos` | Inventario · Leer |
+| Traslados | `/inventario/traslados` | Inventario · Leer |
+| Stock mínimo | `/inventario/stock-minimo` | Inventario · Leer |
+| Compras | `/compras` | Compras · Leer |
+| Por pagar | `/compras/por-pagar` | Compras · Pagar |
+| Costos desfasados | `/desfases` | Items · Leer |
+| Órdenes | `/ordenes` | Pasarelas · Leer |
+| Reportes | `/reportes` | Algún reporte visible (hoy solo *Varianza* · Leer) |
+| Administración | `/admin` | Solo superadmin |
+| Configuración | `/configuracion/perfil` | Siempre visible (abre el menú de §3) |
+| Cerrar sesión | — | Siempre visible |
+
+*Items*, *Pasarelas* e *Impresoras* no tienen entrada propia en el menú lateral: sus pantallas
+principales viven dentro de Configuración (§3).
+
+---
+
+## 2. Configuración a nivel tenant (columnas de `tenants`)
+
+| Columna | Valores (default) | Qué hace | Pantalla |
+|---|---|---|---|
+| `calculo_descuentos` | `base` \| `compuesto` (`base`) | Base: todos sobre el precio neto. Compuesto: en cascada | Preferencias |
+| `calculo_recargos` | `base` \| `compuesto` (`base`) | Igual, para recargos | Preferencias |
+| `escala_calculo` | entero 0–12 (6) | Decimales de los cálculos intermedios; máx. 4 con `nivel_redondeo = documento` | Preferencias |
+| `modo_redondeo` | `HALF_UP` \| `HALF_EVEN` \| `FLOOR` \| `CEIL` (`HALF_UP`) | Cómo se cuantiza; puede venir bloqueado por la norma del país | Preferencias |
+| `nivel_redondeo` | `linea` \| `documento` (`linea`) | Cuantiza cada línea, o solo el total; puede venir bloqueado por el país | Preferencias |
+| `monto_tolerancia` | monto ≥ 0 (0) | Diferencia máxima tolerada (0 = ninguna) | Preferencias |
+| `promos_acumulan_descuentos` | bool (false) | Promo + descuento se suman, o aplica solo la rebaja mayor | Preferencias |
+| `umbral_descuadre_aviso` | monto ≥ 0 (0 = desactivado) | Al cerrar caja, advierte al cajero si un medio de pago descuadra más que esto | Preferencias |
+| `umbral_descuadre_alto` | monto ≥ 0 (0 = desactivado) | Marca el cierre como descuadre alto → "Pendientes de revisar"; debe ser ≥ aviso | Preferencias |
+| `arqueo_ciego` | bool (false) | El cajero cuenta sin ver el monto esperado | Cajas |
+| `hora_corte` | 0–6 (0) | Hora en que termina el "día del negocio" (se aplica al consultar reportes) | Empresa |
+| `facturador` | `sistema` \| `externo` (`sistema`) | Quién emite facturas y documentos de lo adeudado | Métodos de pago |
+
+Además, en `tenant_formula_precio`: el **orden de los pasos** del motor de precios
+(permutación de descuentos, recargos e impuestos, entre precio neto y total final).
+Se edita en Preferencias. Detalle: [motor-calculo-precios](../features/motor-calculo-precios.md).
+
+---
+
+## 3. Pantallas de configuración (`/configuracion/*`)
+
+### Cuenta y organización
+
+| Pantalla | Quién | Qué se configura |
+|---|---|---|
+| **Perfil** | Todo usuario | Nombre, apellido, teléfono, correo; tema (claro/oscuro) y filas por página (10/15/25/50); contraseña; PIN propio si está vinculado a un garzón |
+| **Roles y permisos** | Admin | Roles (nombre, descripción) y matriz de permisos por módulo contratado |
+| **Usuarios** | Admin | Alta por invitación, roles por miembro, flag "tótem compartido", baja (decidiendo qué pasa con el garzón vinculado) |
+| **Empresa** | Admin | Nombre, correo, teléfono, dirección, provincia, hora de corte |
+| **Razones sociales** | Admin | Entidades legales: nombre legal, RUT, dirección, teléfono, habilitada, preferida |
+| **Monedas** | Admin | Monedas habilitadas y valor del día (la oficial viene del país) |
+
+### Finanzas y precios
+
+| Pantalla | Quién | Qué se configura |
+|---|---|---|
+| **Preferencias** | Admin | Ver §2: cálculo de descuentos/recargos, fórmula, escala, redondeo, tolerancia, acumulación de promos, umbrales de descuadre |
+| **Impuestos** | Admin | Impuestos personalizados: nombre, porcentaje (decimal), activo. Los de sistema (IVA) no se crean acá |
+| **Descuentos** | Admin | Reglas: tipo (`directo`, `metodo_pago`, `pronto_pago`, `por_mayor`, `por_monto_venta`), nivel línea/venta, porcentaje o monto fijo, valor único o por tramos, métodos de pago, vigencia |
+| **Recargos** | Admin | Reglas: tipo (`general`, `mora`, `recargo_metodo_pago`, `interes_simple`, `interes_compuesto`, `recargo_por_monto_venta`), mismo esquema que descuentos |
+| **Promociones** | Admin | Tipo `porcentaje` / `nxm` / `precio_fijo`; fechas, horario, días de la semana, canal (físico/online/ambos), alcance (ítems, categoría, venta) |
+| **Métodos de pago** | Admin | Por método: habilitado, permite vuelto, quién emite el documento (`sistema`/`maquina`/`nadie`). Por tenant: `facturador` |
+| **Pasarelas** | `Pasarelas:*` | Pasarela, ambiente (pruebas/producción), modo (mall/individual), códigos de comercio, prioridad, activo; API keys |
+
+### Catálogo e inventario
+
+| Pantalla | Quién | Qué se configura |
+|---|---|---|
+| **Items** | `Items:*` | Catálogo completo (tipo, precio, moneda, categoría, impuestos, modo de inventario cantidad/serie/lote, recetas, combos, modificadores, frecuencia de suscripción) |
+| **Categorías** | Admin | Nombre, aplica a productos/servicios/ambos, impresora de comanda, activa |
+| **Grupos de modificadores** | Admin | Grupos reutilizables de opciones (ítem, cantidad, unidad, precio extra) y overrides por receta |
+| **Ubicaciones** | Admin | El local (único, predefinido) y las bodegas |
+| **Motivos de baja** | Admin | Nombre, tipo (`merma`/`cortesia`/`no_elaborado`), activo; los fijos no se editan |
+| **Motivos de diferencia (inventario)** | Admin | Motivos de descuadre de recuento |
+| **Motivos de traslado** | Admin | Motivos de traslado entre ubicaciones |
+| **Stock mínimo** (`/inventario/stock-minimo`) | `Inventario:Leer/Actualizar` | Mínimo por ítem y ubicación, para el aviso de stock bajo |
+
+### Caja
+
+| Pantalla | Quién | Qué se configura |
+|---|---|---|
+| **Cajas** | `Cajas:*` (arqueo ciego: Admin) | Cajones (nombre, activo, usuarios habilitados) y arqueo ciego |
+| **Motivos de diferencia** | Admin | Motivos de descuadre de caja: nombre, activo, requiere comentario |
+
+### Restaurante
+
+| Pantalla | Quién | Qué se configura |
+|---|---|---|
+| **Salones** | `Salones:*` | Salones y mesas: forma, tamaño, posición en el plano |
+| **Garzones** | `Salones:*` o `Propinas:*` | Nombre, tipo (garzón/cocina/barra), activo, usuario vinculado, PIN de 6 dígitos, permiso de operar |
+| **Turnos** | `Salones:*` | Nombre, hora de inicio y fin, activo |
+| **Impresoras** | `Impresoras:*` | Rol (comanda/boleta), conexión red (host, puerto) o sistema (cola), activo |
+| **Propinas** | `Propinas:Leer` / `Configurar` | % sugerido, habilitada en POS y en salones; grupos de reparto (tipo, %, criterio, base de ventas, miembros y pesos) |
+
+Los criterios de reparto de propinas son `PARTES_IGUALES`, `VENTAS_NETAS`,
+`HORAS_TRABAJADAS`, `CANTIDAD_CUENTAS` y `MANUAL` (por pesos o por montos).
+
+### Rutas que solo redirigen
+
+`/configuracion` → perfil · `/configuracion/inventario` → `/inventario` ·
+`/configuracion/mermas` → `/mermas` · `/configuracion/recetas-desfases` → `/desfases` ·
+`/configuracion/sesiones-garzon` → `/sesiones-garzon` · `/configuracion/roles/:id` → roles.
+
+---
+
+## 4. Lo que se siembra al crear un tenant
+
+Rol `admin`, fórmula de precio por defecto y caja virtual (CLAUDE.md § Convenciones).
+
+## Ver también
+
+- [ESTADO.md](../ESTADO.md) — qué está construido y qué falta.
+- [roles-permisos](../features/roles-permisos.md) — cómo se resuelven los permisos.
+- [preferencias-financieras](../features/preferencias-financieras.md) — detalle del motor y del redondeo.
