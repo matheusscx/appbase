@@ -81,10 +81,11 @@ const ventaSeleccionadaId = ref<string | null>(null)
 
 const { estadoColor, estadoLabel, estadoOptions } = useEstadoVenta()
 
-// Una corrección no se revisa por su documento: los filtros la dejan afuera y su
-// fila `nadie` es la devolución interna, que no es un faltante. Sin badge.
+// La devolución interna no lleva el badge de emisores: su fila `nadie` no es un
+// faltante. La nota de crédito sí lleva el de su documento: "Sin número" la trae
+// como fila propia (la NC que falta anotar) y el contador tiene que ver de quién es.
 function badgeEmisores(v: VentaResumen) {
-  return v.esCorreccion ? null : resumenEmisores(v.emisores)
+  return v.esCorreccion && !v.esNotaCredito ? null : resumenEmisores(v.emisores)
 }
 
 function canalColor(canal: string): 'primary' | 'neutral' {

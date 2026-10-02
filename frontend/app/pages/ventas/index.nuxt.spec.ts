@@ -266,7 +266,18 @@ describe('ventas/index — quién emitió: filtro "Documento" y badge por fila',
     expect(anulada).not.toMatch(/Sistema|Máquina|Sin documento|Duplicado/)
   })
 
-  it('una corrección no lleva badge de documento: su fila "nadie" es la devolución interna, no un faltante', async () => {
+  it('una nota de crédito lleva el badge de su documento: es lo que el contador ve en "Sin número"', async () => {
+    filasListado = [
+      fila('nota', { esCorreccion: true, esNotaCredito: true, emisores: ['maquina'] }),
+    ]
+    const wrapper = await montar()
+    const nota = wrapper.find('tbody tr').text()
+
+    expect(nota).toContain('NC')
+    expect(nota).toContain('Máquina')
+  })
+
+  it('la devolución interna no lleva badge de documento: su fila "nadie" no es un faltante', async () => {
     filasListado = [
       fila('interna', { esCorreccion: true, esNotaCredito: false, emisores: ['nadie'], tieneDuplicado: true }),
     ]

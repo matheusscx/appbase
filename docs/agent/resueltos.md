@@ -24,6 +24,62 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 ---
 
 
+## "Sin número" trae también las notas de crédito sin número (cerrada 2026-10-02)
+
+Sale de [`pendientes.md`](pendientes.md) § 3.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **El filtro "Sin número" de `/ventas` no encuentra las notas de crédito de la máquina o hechas
+  por fuera que todavía no tienen número** (backend + frontend; anotado 2026-10-02 por la revisión
+  final del frente de emisión, y la orquestadora lo mandó acá). Una NC sobre un voucher o sobre un
+  documento externo nace **sin número**: la hace la máquina, su portal o el facturador del comercio, y
+  el sistema espera que alguien la anote. Pero `?documento=` deja afuera toda corrección (comentario
+  en `buildListarFilters`, `ventas.service.ts`, decisión E7 de la spec: una corrección no es una venta
+  que revisar), así que el contador no tiene desde `/ventas` cómo encontrar las notas que le faltan.
+  Se ven solo abriendo el detalle de la venta que corrigen.
+
+  **La pregunta:** ¿"Sin número" debe traer también las notas sin número (como filas propias, o
+  marcando la venta que corrigen), o se arma otro lugar para revisarlas? Lo primero cambia la regla de
+  que los filtros solo miran ventas; lo segundo es una pantalla más.
+
+  **✅ Contestada por el owner (AskUserQuestion, 2026-10-02): en el mismo filtro.** "Sin número"
+  trae también las notas de crédito sin número, como filas propias, para que el contador revise
+  todo lo que le falta en un solo lugar. La excepción a "los filtros solo miran ventas" vale solo
+  para este filtro. Se descartó "otra pantalla".
+
+### Qué se hizo
+
+En `buildListarFilters` (`ventas.service.ts`) la exclusión de las correcciones
+(`v.venta_referencia_id IS NULL`) se aplica a todos los valores de `?documento=` **salvo
+`sin_numero`**, y el comentario lo dice con su porqué: la NC de la máquina o de afuera nace sin
+número y el contador la tiene que anotar. La condición sobre el documento no cambió
+(`emisor IN ('maquina', 'externo')` y sin número), así que una NC del sistema, la devolución
+interna (`nadie`) y una NC ya numerada no entran; las canceladas siguen fuera para todos.
+
+Una NC entra como fila propia, con su badge "NC" del listado. La revisión independiente vio que
+la columna "Documento" le quedaba vacía —`badgeEmisores` (`pages/ventas/index.vue`) no pintaba
+ningún badge en una corrección—, así que el contador veía la nota sin saber de quién era. Ahora
+la NC lleva el badge de su documento ("Máquina", "Por fuera", "Sistema") y la devolución interna
+sigue sin ninguno, porque su `nadie` no es un faltante. `docs/features/ventas.md` documenta la
+excepción y el badge.
+
+### Qué lo fija
+
+- E2e (`venta-documentos.e2e-spec.ts`, `GET /ventas?documento=`): `sin_numero` trae las NC sin
+  número de la máquina y de afuera (`correccionDeMaquina`, `correccionDeExterno`) además de las
+  ventas de siempre, y deja afuera la NC de la máquina ya numerada (fixture nuevo
+  `correccionDeMaquinaNumerada`, numerada por `PATCH /ventas/:id/documentos/:id`), la del sistema,
+  la de la boleta del duplicado y la interna. Los otros cinco valores siguen sin correcciones.
+- Mutante: volver a excluir las correcciones en todos los valores (`!== 'MUTANTE'`) rompe
+  exactamente ese test.
+- Pantalla: `pages/ventas/index.nuxt.spec.ts` fija que la NC lleva el badge de su documento y la
+  devolución interna ninguno; el mutante que vuelve a `v.esCorreccion ? null` rompe solo ese caso.
+- Gate, corrido una vez sobre el árbol con este frente y el del devuelto de Pagos: `test:e2e`
+  completo en base fresca, 1562 pasan y 6 saltados preexistentes, sin re-siembra; unit backend
+  3499/3499; vitest 1818/1818; Playwright 75/75 con el stack propio; lint, typecheck, build,
+  `typecheck:ratchet` y `design:check` limpios.
+
 ## Un `null` explícito en un `PATCH`/`PUT` da 400, no 500 ni un 200 que miente (cerrada 2026-10-02)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.
@@ -178,6 +234,7 @@ del service, salvo esa coerción. Los casos quedan para que el 400 no dependa de
   barrido independiente de las rutas `@Patch`/`@Put` que no estaban en la entrada. Ese barrido no
   encontró otra forma A ni A'.
 
+
 ---
 
 ## El Playwright de la varianza cuenta en su bodega y filtra la pantalla por ella (cerrada 2026-10-02)
@@ -291,6 +348,7 @@ al código anterior** (`[0]`) y muere: dos tests en `pos.nuxt.spec.ts` (arranca 
 sin boleta no elige ninguno), dos en `CarritoPanel.nuxt.spec.ts` (vaciar, y el botón
 deshabilitado con el panel vacío), y uno en `salones/index.nuxt.spec.ts` (el body del cierre
 lleva la boleta).
+
 
 ## El IVA de varios documentos de una misma venta puede no sumar el IVA de la venta, por 1–2
   pesos (cerrada 2026-10-02: se acepta)
@@ -756,8 +814,8 @@ Lo fijan, por la API real: `venta-documentos.e2e-spec.ts`, `venta-correcciones.e
 Lo que **no** cierra, y sigue en [`pendientes.md`](pendientes.md): enviar de verdad al SII o al
 facturador externo (§ 6, "Integración con un facturador externo"); la Factura sin receptor que el
 servidor todavía acepta (§ 1); el peso de IVA que se corre al partir una venta en varios
-documentos (§ 4); el filtro "Sin número", que no encuentra las notas de la máquina o hechas por
-fuera que esperan su número (§ 4); el "Total cobrado" de Pagos, que no resta devoluciones (§ 4); y
+documentos (§ 4); el filtro "Sin número", que no encontraba las notas de la máquina o hechas por
+fuera que esperan su número (cerrado el 2026-10-02, arriba); el "Total cobrado" de Pagos, que no resta devoluciones (§ 4); y
 el `REFUND` cuyo vínculo con su corrección falla, que queda contado dos veces (§ 2).
 
 ## El Playwright de compras filtra el listado por su proveedor (cerrada 2026-10-02)

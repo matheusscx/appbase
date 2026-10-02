@@ -3583,14 +3583,20 @@ export class VentasService {
     }
     if (query.documento) {
       // Una corrección lleva sus propios documentos (E7) y no es una venta que
-      // revisar: queda fuera de todos los valores. Una venta cancelada tampoco:
-      // no hay nada pendiente que documentar. Esto último es una DEFENSA, hoy
+      // revisar: queda fuera de todos los valores **salvo "Sin número"**
+      // (owner, 2026-10-02). La NC de la máquina o de afuera nace sin número y
+      // el contador la tiene que anotar: ahí entra como fila propia, para que
+      // revise todo lo que le falta en un solo lugar. La excepción es solo de
+      // ese valor: con cualquier otro, una corrección no es una venta que
+      // revisar. Una venta cancelada tampoco entra en ninguno: no hay nada
+      // pendiente que documentar. Esto último es una DEFENSA, hoy
       // inalcanzable: una fila `nadie` nace solo de un pago con un medio `nadie`
       // y anular exige que la venta no tenga pagos; los documentos del sistema y
       // del facturador de afuera ya se descartan al anular. La condición viene
       // de una tabla cerrada, no del texto del cliente: no lleva parámetro.
-      filters += ` AND v.venta_referencia_id IS NULL
-        AND v.estado <> 'cancelada'
+      if (query.documento !== 'sin_numero')
+        filters += ` AND v.venta_referencia_id IS NULL`;
+      filters += ` AND v.estado <> 'cancelada'
         AND EXISTS (
           SELECT 1 FROM venta_documentos d
           WHERE ${DOCUMENTO_VIGENTE} AND ${CONDICION_DOCUMENTO[query.documento]}

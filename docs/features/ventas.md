@@ -419,17 +419,24 @@ filtro". Cada valor es un `EXISTS` sobre `venta_documentos`, sobre los documento
 | `sistema` | del sistema |
 | `maquina` | de la máquina que **no** es el voucher duplicado |
 | `externo` | hecho por fuera |
-| `sin_numero` | de la máquina o hecho por fuera, sin número |
+| `sin_numero` | de la máquina o hecho por fuera, sin número — **también una NC** (ver abajo) |
 | `sin_documento` | `nadie`: un tramo que nadie documentó |
 | `duplicado` | `es_duplicado` (voucher de un abono sobre una deuda ya documentada, E1b) |
 
 - **Las correcciones y las ventas canceladas quedan fuera de todos los valores**
-  (`venta_referencia_id IS NOT NULL` o `estado = 'cancelada'`): las correcciones llevan sus
-  propios documentos y no son una venta que revisar (la fila `nadie` de una devolución interna
-  no es un faltante), y en una cancelada no hay nada pendiente que documentar. Lo de las
+  (`venta_referencia_id IS NOT NULL` o `estado = 'cancelada'`), salvo las NC sin número en
+  `sin_numero` (abajo): las correcciones llevan sus propios documentos y no son una venta que
+  revisar (la fila `nadie` de una devolución interna no es un faltante), y en una cancelada no
+  hay nada pendiente que documentar. Lo de las
   canceladas es una defensa: hoy no hay forma de que una conserve un documento vigente que el
   filtro encontraría (los del sistema y los de afuera se descartan al anular, y un `nadie`
   nace de un pago, que impide anular). Sin filtro, ambas siguen en el listado.
+- **La excepción es `sin_numero`, y solo él** (owner, 2026-10-02): trae también las notas de
+  crédito sin número, como filas propias. La NC sobre un voucher o sobre un documento de afuera
+  nace sin número (la hace la máquina, su portal o el facturador) y el sistema espera que alguien
+  la anote; sin esto el contador solo las encontraba abriendo la venta que corrigen. La NC del
+  sistema y la devolución interna (`nadie`) no entran: la condición del documento es la misma.
+  Las canceladas siguen fuera también acá.
 - **`sin_numero` ignora al sistema y a `nadie`**: el sistema todavía no folia (ADR-010) y una fila
   `nadie` no lleva número. El voucher duplicado **sí** cuenta si no tiene número: también se
   completa con `PATCH /documentos/:id`.
@@ -446,7 +453,8 @@ filtro". Cada valor es un `EXISTS` sobre `venta_documentos`, sobre los documento
 **Frontend (`pages/ventas/index.vue`):** un selector "Documento" junto a los de estado y canal
 (sus opciones y etiquetas viven en `useDocumentosVenta.ts`, derivadas de un solo mapa) y una
 columna "Documento" con un badge por fila: los emisores ("Máquina + Sistema"), en aviso si alguno
-es "Sin documento", más un badge "Duplicado". Las correcciones no llevan badge.
+es "Sin documento", más un badge "Duplicado". La nota de crédito lleva el badge de su documento
+(así se ve de quién es la NC que "Sin número" trae); la devolución interna no lleva ninguno.
 
 ### GET /api/ventas/:id
 

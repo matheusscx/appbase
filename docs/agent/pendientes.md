@@ -191,24 +191,6 @@ El owner ya contestó lo que había que contestar. **No son mecánicas** —tien
 adentro, y alguna quedó a medias a propósito— pero nadie está esperando una respuesta para
 empezarlas.
 
-- [ ] **El filtro "Sin número" de `/ventas` no encuentra las notas de crédito de la máquina o hechas
-  por fuera que todavía no tienen número** (backend + frontend; anotado 2026-10-02 por la revisión
-  final del frente de emisión, y la orquestadora lo mandó acá). Una NC sobre un voucher o sobre un
-  documento externo nace **sin número**: la hace la máquina, su portal o el facturador del comercio, y
-  el sistema espera que alguien la anote. Pero `?documento=` deja afuera toda corrección (comentario
-  en `buildListarFilters`, `ventas.service.ts`, decisión E7 de la spec: una corrección no es una venta
-  que revisar), así que el contador no tiene desde `/ventas` cómo encontrar las notas que le faltan.
-  Se ven solo abriendo el detalle de la venta que corrigen.
-
-  **La pregunta:** ¿"Sin número" debe traer también las notas sin número (como filas propias, o
-  marcando la venta que corrigen), o se arma otro lugar para revisarlas? Lo primero cambia la regla de
-  que los filtros solo miran ventas; lo segundo es una pantalla más.
-
-  **✅ Contestada por el owner (AskUserQuestion, 2026-10-02): en el mismo filtro.** "Sin número"
-  trae también las notas de crédito sin número, como filas propias, para que el contador revise
-  todo lo que le falta en un solo lugar. La excepción a "los filtros solo miran ventas" vale solo
-  para este filtro. Se descartó "otra pantalla".
-
 - [ ] **En Pagos, "Total cobrado" no resta lo devuelto, y el inicio sí: el mismo día puede mostrar
   dos cobrados distintos** (backend + frontend; anotado 2026-10-02 por la tarea 15 del frente de
   emisión, la orquestadora lo mandó acá). `GET /pagos/resumen` (`pagos.service.ts`, `resumen`) suma

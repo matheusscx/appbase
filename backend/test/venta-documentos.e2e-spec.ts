@@ -2607,6 +2607,19 @@ describe('Documentos de la venta (e2e)', () => {
 
       v.correccionDeSistema = await corregir(v.sistema, EFECTIVO_ID);
       v.correccionDeMaquina = await corregir(v.maquinaSinNumero, DEBITO_ID);
+      // La NC de la máquina nace sin número; ésta ya se anotó, así que no le
+      // falta nada y "Sin número" la deja afuera.
+      v.correccionDeMaquinaNumerada = await corregir(
+        v.maquinaConNumero,
+        DEBITO_ID,
+      );
+      const numerarNota = await request(app.getHttpServer())
+        .patch(
+          `/api/ventas/${v.correccionDeMaquinaNumerada}/documentos/${await docIdDe(v.correccionDeMaquinaNumerada, 'maquina')}`,
+        )
+        .set('Authorization', `Bearer ${token}`)
+        .send({ numero: 'NC-5501' });
+      expect(numerarNota.status).toBe(200);
 
       await patchFacturador('externo');
       v.externo = (await vender({ lineas: lineas100k() })).id;
@@ -2673,9 +2686,6 @@ describe('Documentos de la venta (e2e)', () => {
       ['sistema', ['duplicado', 'mixto', 'sistema']],
       ['maquina', ['maquinaConNumero', 'maquinaSinNumero', 'mixto']],
       ['externo', ['externo', 'externoConNumero']],
-      // Todo lo que tiene un documento de la máquina o por fuera sin número, el
-      // voucher duplicado incluido (también es de la máquina y se completa igual).
-      ['sin_numero', ['duplicado', 'externo', 'maquinaSinNumero']],
       ['sin_documento', ['nadie']],
       ['duplicado', ['duplicado']],
     ])(
@@ -2684,6 +2694,29 @@ describe('Documentos de la venta (e2e)', () => {
         expect(await traeDeLasMias(documento)).toEqual([...esperadas].sort());
       },
     );
+
+    it('documento=sin_numero trae también las notas de crédito sin número, como filas propias', async () => {
+      // Todo lo que tiene un documento de la máquina o por fuera sin número, el
+      // voucher duplicado incluido (también es de la máquina y se completa
+      // igual). Y, a diferencia de los otros valores, las NC de la máquina y de
+      // afuera que todavía no se anotaron: es lo que el contador tiene que
+      // completar. La NC ya numerada, la del sistema (no folia todavía), la
+      // devolución interna (`nadie`) y la que corrige por la boleta del
+      // sistema quedan afuera.
+      expect(await traeDeLasMias('sin_numero')).toEqual(
+        [
+          'correccionDeExterno',
+          'correccionDeMaquina',
+          'duplicado',
+          'externo',
+          'maquinaSinNumero',
+        ].sort(),
+      );
+      const filas = await listar('&documento=sin_numero');
+      const nota = filas.find((f) => f.id === v.correccionDeMaquina)!;
+      expect(nota.esCorreccion).toBe(true);
+      expect(nota.emisores).toEqual(['maquina']);
+    });
 
     it('meta.total cuenta lo filtrado: el mismo conjunto que trae la página', async () => {
       // Pocas ventas del tenant tienen un duplicado: cabe en una página, así
