@@ -2,7 +2,7 @@
 
 **Fecha:** 2026-10-01 · **Tipo:** spec de diseño
 **Frente:** *"El vendido, el cobrado y el 'Total facturado' restan las notas de crédito del día en que
-se emiten"*, en [`docs/agent/pendientes.md`](../../agent/pendientes.md) § 3. Es **fiscal y va solo**
+se emiten"*, en [`docs/agent/resueltos.md`](../../agent/resueltos.md) (salió de `pendientes.md` § 3 al cerrarse). Es **fiscal y va solo**
 (`CLAUDE.md`, ADR-010).
 **Investigación:** [`2026-09-30-vendido-y-notas-credito.md`](../../agent/investigaciones/2026-09-30-vendido-y-notas-credito.md).
 **Decisiones:** § 2. Cada una dice quién la tomó y cómo.
@@ -50,7 +50,7 @@ Hoy toda nota de crédito (NC) es invisible para los números del negocio:
 
 | # | Decisión | Quién y cómo |
 |---|---|---|
-| D1 | El vendido es lo vendido menos las NC con fecha de ese día, aunque la venta original sea de otro día. Debajo va "bruto $X · notas de crédito −$Y". Sale el rótulo "(antes de notas de crédito)". La semana pasada se calcula igual. | Owner, 2026-09-30 (§ 3 de `pendientes.md`) |
+| D1 | El vendido es lo vendido menos las NC con fecha de ese día, aunque la venta original sea de otro día. Debajo va "bruto $X · notas de crédito −$Y". Sale el rótulo "(antes de notas de crédito)". La semana pasada se calcula igual. | Owner, 2026-09-30 (entrada en [`resueltos.md`](../../agent/resueltos.md)) |
 | D2 | El cobrado descuenta lo devuelto ese día. | Owner, 2026-09-30 |
 | D3 | "Total facturado" usa el mismo criterio y el mismo rótulo, con **un solo** mecanismo para reconocer una NC. | Owner, 2026-09-30 |
 | D4 | La NC **no es una venta**: la cantidad no la cuenta. El ticket es el neto dividido por la cantidad. Local/Online van en neto, así que suman el número grande. | Owner, AskUserQuestion 2026-10-01 |
@@ -79,7 +79,7 @@ Un solo mecanismo, y no es ninguno de los dos de hoy: una venta que corrige a ot
 tipo del país (`/ventas/resumen`).
 
 - **Por qué esta columna** (orquestadora, 2026-10-01, última viñeta de la entrada en
-  `pendientes.md`): el frente de emisión (`2026-10-01-emision-por-venta-design.md` § 3.7, E7) suma la
+  [`resueltos.md`](../../agent/resueltos.md)): el frente de emisión (`2026-10-01-emision-por-venta-design.md` § 3.7, E7) suma la
   devolución interna, que corrige una venta sin ser documento tributario. Con esta columna resta
   sola, y ese frente no reescribe estas consultas.
 - **El resultado hoy es idéntico.** El único que escribe `venta_referencia_id` es

@@ -49,9 +49,10 @@ destapa una decisión que no es mía).
 
 - [ ] **El saldo de una venta no descuenta sus notas de crédito** (backend, `ventas.service.ts`:
   `mapVentaListRow` → `saldo = total − pagado`; visto el 2026-10-01 al decidir el saldo pendiente
-  del frente "El vendido del día resta las notas de crédito", § 3). Una venta de $100.000 con
-  $40.000 pagados y una NC por $60.000 sigue mostrando $60.000 de saldo. Ese frente arregla solo
-  la tarjeta "Saldo pendiente" de `/ventas`. Falta medir el resto: el saldo por venta del listado,
+  del frente "El vendido del día resta las notas de crédito", cerrado el 2026-10-01 y archivado en
+  [`resueltos.md`](resueltos.md)). Una venta de $100.000 con
+  $40.000 pagados y una NC por $60.000 sigue mostrando $60.000 de saldo. Ese frente arregló solo
+  la tarjeta "Saldo pendiente" de `/ventas` y el "Por cobrar" del inicio. Falta medir el resto: el saldo por venta del listado,
   el listado de deuda, y si se puede seguir cobrando esos $60.000. Si se puede, el cliente terminaría
   pagando dos veces. Si eso pasa, es fiscal y va a la § 6 como frente propio.
 
@@ -1050,99 +1051,6 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   precio congelado de la línea (`dd54f81d`). El motor de precios y lo fiscal no se tocan.
   Escribe en `movimientos_inventario`: va en su propio frente.
 
-### El vendido del día resta las notas de crédito (owner, 2026-09-30)
-
-**Cómo se decidió:** venía de la § 4. El owner no lo tenía claro y pidió investigar
-([`2026-09-30-vendido-y-notas-credito.md`](investigaciones/2026-09-30-vendido-y-notas-credito.md)).
-Después contestó en el selector de la sesión orquestadora, con la escena "hoy vendiste $300.000,
-un cliente devuelve algo de ayer por $20.000". Eligió la opción recomendada en dos de las tres
-preguntas; en la de cobrado no había recomendación. Las opciones descartadas eran dejar el bruto
-con las notas aparte, y corregir el día de la venta original.
-
-- [ ] **El vendido, el cobrado y el "Total facturado" restan las notas de crédito del día en que se
-  emiten** (backend + frontend; **fiscal: frente propio, con su sesión y su verificación**, `CLAUDE.md`
-  y ADR-010). Lo decidido:
-  - **Vendido** (`resumen-negocio.service.ts`, `GET /resumen-negocio/hoy`): el número grande es lo
-    vendido menos las notas de crédito emitidas ese día, y debajo va el bruto y el monto de las
-    notas ("bruto $300.000 · notas de crédito −$20.000" → $280.000). La NC cuenta en **su** fecha,
-    aunque la venta original sea de otro día, como hacen Shopify y Toast y como el SII la imputa
-    al mes en que se emite. El rótulo "antes de notas de crédito" sale. La semana pasada se
-    calcula igual, para que la variación compare lo mismo.
-  - **Cobrado:** descuenta lo que se devolvió ese día. Hoy no ve la devolución: la NC no escribe
-    `pagos`, y el efectivo devuelto queda como `salida` de `movimientos_caja` con `venta_id` de la NC,
-    que sí resta en el arqueo. La intención es que cobrado y caja cuadren.
-  - **"Total facturado"** de `/ventas` (`GET /ventas/resumen`): el mismo criterio que el vendido y el
-    mismo rótulo. Hoy excluye las NC con otro mecanismo (`tipo_documento_id IS DISTINCT FROM` el
-    tipo del país) que el dashboard (`es_nota_credito` del catálogo). Conviene que queden en uno.
-  - **Lo que el diseño tiene que resolver, y puede volver al owner:**
-    - si **ticket promedio**, **cantidad de ventas** y **local/online** usan el neto, y cuántas
-      ventas es una NC;
-    - si **lo más vendido** resta por ítem lo devuelto con líneas, cuando la NC es por monto
-      libre, sin líneas, y es el caso más común;
-    - qué devolución de plata entra en el cobrado: solo el efectivo de `movimientos_caja`, o
-      también el reembolso por pasarela (webhook);
-    - cómo se ve un día con neto negativo en la comparación.
-  - **Dos preguntas que salieron del diseño, decididas por la orquestadora (2026-10-01).** Cómo se
-    decidió: el owner pidió "investigá y decidí la 1 y la 2, no tengo idea"; las decidió la
-    orquestadora midiendo el código y con una búsqueda corta. Si aparece algo que las contradiga,
-    se reabren con el owner.
-    - **Lo más vendido resta las líneas de mercadería de la NC, con su cantidad y su monto.** La
-      duda era si esas líneas son confiables, porque la entrada "La nota de crédito no es un
-      documento todavía" dice que son informativas. Medido: ya no lo son. `crearNotaCredito`
-      valoriza cada línea al precio de la venta original, las escala para que no pasen el monto, y
-      el resto va a la línea de ajuste (`ajusteTotal = monto − líneas`). Así la cabecera es la suma
-      de las líneas, y lo que el ranking resta nunca supera lo que resta el vendido; la diferencia
-      es el ajuste. Una línea escalada ("2 lomitos acreditados por $5.000") resta 2 y $5.000.
-    - **El saldo pendiente descuenta las NC de cada venta.** Por venta: total − NC de esa venta −
-      (pagado − devuelto), con piso 0, porque lo que queda a favor del cliente no es plata por
-      cobrar. El caso es real: una NC manual solo exige que la venta esté `pagada` o
-      `pagada_parcial`, así que una venta de $100.000 con $40.000 pagados admite una NC por los
-      $60.000 restantes. Hoy esa venta sigue figurando con $60.000 por cobrar. Es la regla contable
-      de siempre, la NC rebaja la cuenta por cobrar
-      ([QuickBooks](https://quickbooks.intuit.com/learn-support/en-us/help-article/customer-refunds-credits/create-apply-credit-memos-delayed-credits-online/L5kne9EiI_US_en_US),
-      [Buk](https://www.buk.cl/novedades/finanzas/que-son-las-notas-de-credito-y-debito)).
-      Devuelto, en el saldo, es solo el efectivo de `movimientos_caja` con `venta_id` de una NC; los
-      `REFUND` de pasarela quedan afuera. La razón: el `REFUND` no guarda qué NC generó
-      (`aplicarPostReembolso` devuelve `notaCreditoId` pero no lo persiste), así que desde la base
-      no se distingue un reembolso con NC de uno sin NC. Con NC, la nota ya baja el saldo: $100.000
-      pagados por Webpay, `REFUND` + NC de $20.000 → 100 − 20 − 100, piso 0. Sin NC, el owner
-      eligió que el saldo no lo cuente (abajo). El único caso que sale mal es una venta pagada en
-      parte por pasarela, con saldo vivo, `REFUND` y NC: ahí el saldo muestra **de menos** lo
-      reembolsado. Con $100 de total, $60 pagados, `REFUND` y NC de $20, se deben $40 y la fórmula
-      da 20. Lo cubre la entrada del reembolso sin NC, en la § 6. Las NC siguen fuera de la suma
-      como ventas: sin pagos, cada una aparecería entera como deuda.
-    - **Ticket promedio con neto ≤ 0 o sin ventas: "—"**, igual que la variación. Lo decidió la
-      orquestadora en la misma pasada.
-  - **Lo que el owner contestó en la sesión del frente (AskUserQuestion, 2026-10-01):**
-    - **"Por cobrar" del inicio** (`resumen-negocio.service.ts`, `porCobrar.saldo`) entra en el
-      frente con la misma regla que "Saldo pendiente" de `/ventas`. Hoy hace la misma cuenta vieja
-      (total − pagado).
-    - **Reembolso por pasarela sin NC: "lo vemos aparte".** Va a entrada propia, en la § 6. Mientras
-      tanto el saldo no lo cuenta. En el cobrado del día sí resta, como ya estaba decidido.
-  - Fuera de esta entrada: el % de anulaciones por garzón, que ya tiene la suya en la § 6.
-  - **Una corrección se reconoce por `venta_referencia_id IS NOT NULL`, no por `es_nota_credito`**
-    (orquestadora, 2026-10-01). Lo pide el frente de emisión (E7 de su spec): la devolución interna
-    corrige una venta sin ser documento tributario, y así resta sola. Medido: hoy el único que
-    escribe esa columna es `crearNotaCredito`, así que el resultado es idéntico, y el frente de
-    emisión no tiene que reescribir estas consultas después. Deja también un solo mecanismo donde
-    hoy hay dos (`es_nota_credito` en el inicio, `IS DISTINCT FROM` el tipo en `/ventas/resumen`).
-  - **Cómo arrancarlo.** La sesión que escribió la spec desapareció el 2026-10-01 sin plan. Esta es
-    la solicitud para la sesión nueva:
-
-    > Sos la sesión del frente "El vendido, el cobrado y el Total facturado restan las notas de
-    > crédito". La orquestadora ("Listado de sesiones activas") coordina los frentes fiscales y es
-    > la jefa después del owner: lo que necesites decidir se lo mandás a ella. Trabajá en un
-    > worktree; arrancá con `git merge main` local. Todo lo decidido está en `docs/agent/pendientes.md`
-    > § 3, entrada "El vendido, el cobrado y el Total facturado restan las notas de crédito", y la
-    > spec ya está escrita: `docs/superpowers/specs/2026-10-01-vendido-neto-de-notas-credito-design.md`.
-    > Ajustala con lo único nuevo: una corrección se reconoce por `venta_referencia_id IS NOT NULL`
-    > (última viñeta de la entrada), porque el frente de emisión
-    > (`docs/superpowers/specs/2026-10-01-emision-por-venta-design.md` § 3.7) va a sumar la
-    > devolución interna, que no es NC. No hay decisiones de negocio abiertas. Siguiente paso: el
-    > plan en `docs/superpowers/plans/`, que pasa por el owner antes de escribir código. Es fiscal:
-    > frente solo, con su verificación (`verify-feature`). Al entrar a main avisá a la orquestadora,
-    > que destraba al frente de emisión.
-
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
@@ -1344,10 +1252,10 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
 
 - [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
   (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
-  notas de crédito", § 3). Webpay permite reembolsar sin emitir NC (`generarNotaCredito` en el
+  notas de crédito", cerrado ese día y archivado en [`resueltos.md`](resueltos.md)). Webpay permite reembolsar sin emitir NC (`generarNotaCredito` en el
   evento de `reembolso-callback.handler.ts`), y es lo que viene marcado: `ReembolsoModal.vue` arranca con
   la nota destildada. La plata sale, pero ni el vendido ni el débito fiscal bajan, y el saldo de la
-  venta no la ve. Hoy el cobrado tampoco la ve; restarla es la D6 del frente del vendido neto. Además el `REFUND` no
+  venta no la ve. El cobrado del día sí la resta desde el 2026-10-01 (D6 del frente del vendido neto, ya cerrado). Además el `REFUND` no
   guarda la NC que generó (`pasarela_transacciones` no tiene el id; `aplicarPostReembolso` solo
   lo devuelve en la respuesta). Por eso el saldo pendiente no puede contar los reembolsos, y una
   venta pagada en parte por pasarela, con `REFUND` y NC, muestra de menos lo reembolsado. Lo

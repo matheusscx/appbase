@@ -1097,6 +1097,17 @@ muestra un **modal informativo** con ambas fechas.
 - Distingue reglas aplicadas por línea vs globales (`aplicado_en`)
 - CRUD básico por `venta_id + tenant_id`
 
+**Los números de plata del negocio son netos de las notas de crédito (2026-10-01).** Una
+nota de crédito resta del vendido en **su** fecha —aunque la venta que corrige sea de otro
+día— y no cuenta como venta; el cobrado resta lo devuelto ese día (el efectivo que salió
+de la caja y los reembolsos por pasarela); lo que se debe descuenta las notas de cada venta
+y nunca baja de cero; y una venta cancelada no cuenta en ningún total de `/ventas`. La
+pantalla muestra el bruto y lo restado debajo del neto, solo si hay algo que restar. Una
+corrección se reconoce por `venta_referencia_id`, no por el tipo de documento, para que la
+devolución interna del frente de emisión reste igual. Detalle y límites conocidos:
+[`features/dashboard-inicio.md`](./features/dashboard-inicio.md) y
+[`features/ventas.md`](./features/ventas.md).
+
 **Reimprimir la boleta de una venta ya cobrada (2026-09-17, permiso reabierto 2026-09-18 y
 2026-09-30):** botón en el detalle de la venta. Dos niveles, sin permiso nuevo: quien tiene
 `Ventas:Anular` (el encargado) reimprime cualquier venta dentro de su alcance de siempre;

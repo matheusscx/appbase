@@ -211,7 +211,8 @@ Origen de la decisión: `docs/agent/investigaciones/2026-07-27-anulacion-y-notas
 
 ### GET /api/ventas/resumen
 
-KPIs globales del tenant (no dependen de la página actual del listado).
+KPIs globales del tenant (no dependen de la página actual del listado). Sin fecha: suma
+desde siempre. Respeta "solo mis cajas" como el listado (`filtroDeMisCajas`).
 
 ```
 GET /api/ventas/resumen
@@ -220,10 +221,47 @@ Authorization: Bearer <token-con-tenant_id>
 Response (200):
 {
   "totalVentas": 42,
-  "totalFacturado": "1250000.0000",
+  "totalFacturado": "1230000.0000",
+  "totalBruto": "1250000.0000",
+  "totalNotasCredito": "20000.0000",
   "saldoPendiente": "85000.0000"
 }
 ```
+
+Qué es cada número, y el porqué:
+
+- **Las canceladas no cuentan en ninguno** (owner, 2026-10-01): una mesa anulada no es
+  venta, no se factura y no se debe. Antes seguía sumando en los cuatro.
+- **`totalVentas`** cuenta ventas, no correcciones: una nota de crédito no es una venta.
+- **`totalFacturado` es el neto**: `totalBruto − totalNotasCredito`. Los dos campos
+  aparte son lo que la pantalla muestra debajo ("bruto $X · notas de crédito −$Y", solo si
+  hay notas). Mismo criterio que el vendido del dashboard
+  ([`dashboard-inicio.md`](./dashboard-inicio.md)), salvo que acá no hay fecha: es el
+  acumulado.
+- **`saldoPendiente`** es la suma del saldo **por venta**: `total − notas de esa venta −
+  (pagado − efectivo que salió de la caja por ellas)`, con piso en 0 (lo que queda a favor
+  del cliente no es plata por cobrar). Es la misma expresión que "Por cobrar" del
+  dashboard.
+  - Los `REFUND` de pasarela no entran: no guardan qué nota generaron. Una venta pagada en
+    parte por pasarela, con saldo vivo, `REFUND` y nota, muestra de menos lo reembolsado, y
+    un `REFUND` sin nota no baja el saldo. Es un límite conocido, con entrada propia en
+    [`pendientes.md`](../agent/pendientes.md) § 6.
+  - El saldo **por venta del listado** (`GET /api/ventas`, abajo) sigue siendo
+    `total − pagado`, sin notas: tiene su propia entrada en `pendientes.md` § 2.
+
+**Una corrección se reconoce por `ventas.venta_referencia_id IS NOT NULL`**, no por el tipo
+de documento. La nota hereda la caja de la venta que corrige, así que cae en el mismo
+alcance de "mis cajas". Que sea esa columna y no el tipo del país es deliberado: la
+devolución interna que construye el frente de emisión corrige una venta sin ser documento
+tributario, y así resta sola. Antes el resumen comparaba contra el id del tipo del país
+(`tipoNotaCreditoDelTenant`), un mecanismo distinto del que usaba el dashboard.
+
+**Frontend (`pages/ventas/index.vue`):** las tarjetas "Ventas registradas", "Total facturado"
+y "Saldo pendiente" muestran "—" solo en la primera carga. Después de un cobro, una
+anulación o una nota de crédito desde el drawer la página **vuelve a pedir el resumen**, en
+vez de parchar el saldo con el de la fila: el saldo de la fila es `total − pagado` y ya no
+es lo que esa venta aporta al resumen. Si dos recargas se solapan, solo cuenta la
+respuesta de la última.
 
 ### GET /api/ventas
 
@@ -469,7 +507,8 @@ cobrado: `saldo = total_final − Σ(pago_aplicaciones.monto WHERE tipo = 'venta
 La distinción no es cosmética: un pago puede repartirse entre venta y propina
 (`pago_aplicaciones` guarda el split), así que `Σ(pago.monto − pago.vuelto)` contaría la
 propina como si pagara la venta y la dejaría en `pagada` con parte del total sin cobrar.
-Misma fuente en `listar()`, `resumen()` y `registrarAbono()`.
+Misma fuente en `listar()`, `resumen()` y `registrarAbono()`. El `resumen()` además
+descuenta las notas de crédito de cada venta (ver `GET /api/ventas/resumen`).
 
 ---
 

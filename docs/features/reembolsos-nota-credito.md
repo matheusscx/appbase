@@ -96,7 +96,9 @@ Response (200): orden pública + extras
 ### GET /ventas (listado)
 
 - `totalReembolsado` (Σ REFUND aprobados de órdenes vinculadas) y `esNotaCredito`.
-- `GET /ventas/resumen` **excluye** las NCs de los KPIs.
+- `GET /ventas/resumen` **resta** las NCs: no las cuenta como ventas y las descuenta de
+  "Total facturado" y del saldo pendiente de la venta que corrigen (detalle en
+  [`ventas.md`](ventas.md)).
 
 ---
 
@@ -278,10 +280,13 @@ países entra cuando abra el frente fiscal de cada uno, que el owner decidió qu
 a ser **progresivo** (2026-09-03). Relevamiento de las cuatro autoridades:
 [`agent/investigaciones/2026-09-03-facturacion-electronica-latam.md`](../agent/investigaciones/2026-09-03-facturacion-electronica-latam.md).
 
-⚠️ **El resumen de KPIs excluye las NC, y ese filtro se cae ENTERO si el país no
-tiene el tipo.** No se compara contra `null`: un `IS DISTINCT FROM NULL` dejaría
-afuera toda venta **sin** tipo de documento —que son la mayoría— y los KPIs darían
-casi cero. Hay un test que lo fija.
+📌 **Los resúmenes ya no dependen de este tipo.** `GET /ventas/resumen` y el dashboard
+reconocen una corrección por `ventas.venta_referencia_id IS NOT NULL`, no por
+`es_nota_credito` ni por el id del tipo del país. Antes el resumen comparaba contra ese id
+y, si el país no tenía el tipo, el filtro había que **soltarlo entero** (un
+`IS DISTINCT FROM NULL` deja afuera toda venta sin tipo de documento, que son la mayoría,
+y los KPIs daban casi cero). Esa trampa ya no existe en esas consultas; el tope de
+reembolso y los demás lectores del tipo siguen como están.
 
 ## Redondeo: la NC hereda el criterio del documento que corrige (2026-08-21)
 

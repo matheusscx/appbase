@@ -23,6 +23,166 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El vendido, el cobrado y el "Total facturado" restan las notas de crédito del día en que se emiten (cerrada 2026-10-01)
+
+Sale de [`pendientes.md`](pendientes.md) § 3 (la entrada venía de una decisión del owner del
+2026-09-30, bajo el título *"El vendido del día resta las notas de crédito"*).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+**Cómo se decidió:** venía de la § 4. El owner no lo tenía claro y pidió investigar
+([`2026-09-30-vendido-y-notas-credito.md`](investigaciones/2026-09-30-vendido-y-notas-credito.md)).
+Después contestó en el selector de la sesión orquestadora, con la escena "hoy vendiste $300.000,
+un cliente devuelve algo de ayer por $20.000". Eligió la opción recomendada en dos de las tres
+preguntas; en la de cobrado no había recomendación. Las opciones descartadas eran dejar el bruto
+con las notas aparte, y corregir el día de la venta original.
+
+- [ ] **El vendido, el cobrado y el "Total facturado" restan las notas de crédito del día en que se
+  emiten** (backend + frontend; **fiscal: frente propio, con su sesión y su verificación**, `CLAUDE.md`
+  y ADR-010). Lo decidido:
+  - **Vendido** (`resumen-negocio.service.ts`, `GET /resumen-negocio/hoy`): el número grande es lo
+    vendido menos las notas de crédito emitidas ese día, y debajo va el bruto y el monto de las
+    notas ("bruto $300.000 · notas de crédito −$20.000" → $280.000). La NC cuenta en **su** fecha,
+    aunque la venta original sea de otro día, como hacen Shopify y Toast y como el SII la imputa
+    al mes en que se emite. El rótulo "antes de notas de crédito" sale. La semana pasada se
+    calcula igual, para que la variación compare lo mismo.
+  - **Cobrado:** descuenta lo que se devolvió ese día. Hoy no ve la devolución: la NC no escribe
+    `pagos`, y el efectivo devuelto queda como `salida` de `movimientos_caja` con `venta_id` de la NC,
+    que sí resta en el arqueo. La intención es que cobrado y caja cuadren.
+  - **"Total facturado"** de `/ventas` (`GET /ventas/resumen`): el mismo criterio que el vendido y el
+    mismo rótulo. Hoy excluye las NC con otro mecanismo (`tipo_documento_id IS DISTINCT FROM` el
+    tipo del país) que el dashboard (`es_nota_credito` del catálogo). Conviene que queden en uno.
+  - **Lo que el diseño tiene que resolver, y puede volver al owner:**
+    - si **ticket promedio**, **cantidad de ventas** y **local/online** usan el neto, y cuántas
+      ventas es una NC;
+    - si **lo más vendido** resta por ítem lo devuelto con líneas, cuando la NC es por monto
+      libre, sin líneas, y es el caso más común;
+    - qué devolución de plata entra en el cobrado: solo el efectivo de `movimientos_caja`, o
+      también el reembolso por pasarela (webhook);
+    - cómo se ve un día con neto negativo en la comparación.
+  - **Dos preguntas que salieron del diseño, decididas por la orquestadora (2026-10-01).** Cómo se
+    decidió: el owner pidió "investigá y decidí la 1 y la 2, no tengo idea"; las decidió la
+    orquestadora midiendo el código y con una búsqueda corta. Si aparece algo que las contradiga,
+    se reabren con el owner.
+    - **Lo más vendido resta las líneas de mercadería de la NC, con su cantidad y su monto.** La
+      duda era si esas líneas son confiables, porque la entrada "La nota de crédito no es un
+      documento todavía" dice que son informativas. Medido: ya no lo son. `crearNotaCredito`
+      valoriza cada línea al precio de la venta original, las escala para que no pasen el monto, y
+      el resto va a la línea de ajuste (`ajusteTotal = monto − líneas`). Así la cabecera es la suma
+      de las líneas, y lo que el ranking resta nunca supera lo que resta el vendido; la diferencia
+      es el ajuste. Una línea escalada ("2 lomitos acreditados por $5.000") resta 2 y $5.000.
+    - **El saldo pendiente descuenta las NC de cada venta.** Por venta: total − NC de esa venta −
+      (pagado − devuelto), con piso 0, porque lo que queda a favor del cliente no es plata por
+      cobrar. El caso es real: una NC manual solo exige que la venta esté `pagada` o
+      `pagada_parcial`, así que una venta de $100.000 con $40.000 pagados admite una NC por los
+      $60.000 restantes. Hoy esa venta sigue figurando con $60.000 por cobrar. Es la regla contable
+      de siempre, la NC rebaja la cuenta por cobrar
+      ([QuickBooks](https://quickbooks.intuit.com/learn-support/en-us/help-article/customer-refunds-credits/create-apply-credit-memos-delayed-credits-online/L5kne9EiI_US_en_US),
+      [Buk](https://www.buk.cl/novedades/finanzas/que-son-las-notas-de-credito-y-debito)).
+      Devuelto, en el saldo, es solo el efectivo de `movimientos_caja` con `venta_id` de una NC; los
+      `REFUND` de pasarela quedan afuera. La razón: el `REFUND` no guarda qué NC generó
+      (`aplicarPostReembolso` devuelve `notaCreditoId` pero no lo persiste), así que desde la base
+      no se distingue un reembolso con NC de uno sin NC. Con NC, la nota ya baja el saldo: $100.000
+      pagados por Webpay, `REFUND` + NC de $20.000 → 100 − 20 − 100, piso 0. Sin NC, el owner
+      eligió que el saldo no lo cuente (abajo). El único caso que sale mal es una venta pagada en
+      parte por pasarela, con saldo vivo, `REFUND` y NC: ahí el saldo muestra **de menos** lo
+      reembolsado. Con $100 de total, $60 pagados, `REFUND` y NC de $20, se deben $40 y la fórmula
+      da 20. Lo cubre la entrada del reembolso sin NC, en la § 6. Las NC siguen fuera de la suma
+      como ventas: sin pagos, cada una aparecería entera como deuda.
+    - **Ticket promedio con neto ≤ 0 o sin ventas: "—"**, igual que la variación. Lo decidió la
+      orquestadora en la misma pasada.
+  - **Lo que el owner contestó en la sesión del frente (AskUserQuestion, 2026-10-01):**
+    - **"Por cobrar" del inicio** (`resumen-negocio.service.ts`, `porCobrar.saldo`) entra en el
+      frente con la misma regla que "Saldo pendiente" de `/ventas`. Hoy hace la misma cuenta vieja
+      (total − pagado).
+    - **Reembolso por pasarela sin NC: "lo vemos aparte".** Va a entrada propia, en la § 6. Mientras
+      tanto el saldo no lo cuenta. En el cobrado del día sí resta, como ya estaba decidido.
+  - Fuera de esta entrada: el % de anulaciones por garzón, que ya tiene la suya en la § 6.
+  - **Una corrección se reconoce por `venta_referencia_id IS NOT NULL`, no por `es_nota_credito`**
+    (orquestadora, 2026-10-01). Lo pide el frente de emisión (E7 de su spec): la devolución interna
+    corrige una venta sin ser documento tributario, y así resta sola. Medido: hoy el único que
+    escribe esa columna es `crearNotaCredito`, así que el resultado es idéntico, y el frente de
+    emisión no tiene que reescribir estas consultas después. Deja también un solo mecanismo donde
+    hoy hay dos (`es_nota_credito` en el inicio, `IS DISTINCT FROM` el tipo en `/ventas/resumen`).
+  - **Cómo arrancarlo.** La sesión que escribió la spec desapareció el 2026-10-01 sin plan. Esta es
+    la solicitud para la sesión nueva:
+
+    > Sos la sesión del frente "El vendido, el cobrado y el Total facturado restan las notas de
+    > crédito". La orquestadora ("Listado de sesiones activas") coordina los frentes fiscales y es
+    > la jefa después del owner: lo que necesites decidir se lo mandás a ella. Trabajá en un
+    > worktree; arrancá con `git merge main` local. Todo lo decidido está en `docs/agent/pendientes.md`
+    > § 3, entrada "El vendido, el cobrado y el Total facturado restan las notas de crédito", y la
+    > spec ya está escrita: `docs/superpowers/specs/2026-10-01-vendido-neto-de-notas-credito-design.md`.
+    > Ajustala con lo único nuevo: una corrección se reconoce por `venta_referencia_id IS NOT NULL`
+    > (última viñeta de la entrada), porque el frente de emisión
+    > (`docs/superpowers/specs/2026-10-01-emision-por-venta-design.md` § 3.7) va a sumar la
+    > devolución interna, que no es NC. No hay decisiones de negocio abiertas. Siguiente paso: el
+    > plan en `docs/superpowers/plans/`, que pasa por el owner antes de escribir código. Es fiscal:
+    > frente solo, con su verificación (`verify-feature`). Al entrar a main avisá a la orquestadora,
+    > que destraba al frente de emisión.
+
+### Qué se hizo
+
+Cinco commits en `main`, uno por capa: `50d07a6c` (vendido), `370d8ae1` (cobrado), `40f38664`
+(lo más vendido), `52ac9a17` (saldo, `/ventas/resumen` e índice) y `51aa4a3d` (pantallas).
+
+- **Un solo mecanismo para reconocer una corrección:** `venta_referencia_id IS NOT NULL`. Salió
+  el `JOIN` a `tipos_documento_tributario` del inicio (con su excepción al filtro de borrado) y
+  `VentasService.resumen` dejó de llamar a `tipoNotaCreditoDelTenant`. Los demás lectores de ese
+  id (tope de reembolso, composición, listado, detalle) y la emisión no se tocaron.
+- **Vendido** (`50d07a6c`): el neto es lo vendido menos las notas con fecha de hoy, en la
+  consulta única con `FILTER` y con la misma cuenta para la semana pasada. Cantidad sin
+  correcciones; ticket `null` con neto ≤ 0; variación `null` con semana pasada ≤ 0; Local/Online
+  en neto. La respuesta suma `ventas.vendidoDesglose { bruto, notasCredito }`.
+- **Cobrado** (`370d8ae1`): pagos aplicados menos el efectivo que salió de la caja con el
+  `venta_id` de una corrección menos los `REFUND` aprobados de órdenes con venta. Una consulta con
+  tres agregados cruzados. La respuesta suma `ventas.cobradoDesglose { cobrado, devuelto }`.
+- **Lo más vendido** (`40f38664`): por ítem, lo vendido menos las líneas de las correcciones de
+  hoy, en cantidad y monto; la línea de ajuste no entra y solo quedan ítems con neto > 0.
+- **Saldo** (`52ac9a17`): por venta, `GREATEST(total − correcciones − (pagado − efectivo devuelto
+  por ellas), 0)`, escrita igual en "Por cobrar" del inicio y en `GET /ventas/resumen`. Ese
+  resumen además saca las canceladas, cuenta solo ventas en `totalVentas` y suma `totalBruto` y
+  `totalNotasCredito`; respeta "mis cajas" porque la nota hereda la caja de la original. Índice
+  nuevo `idx_movimientos_caja_venta` para la subconsulta del efectivo devuelto.
+- **Pantallas** (`51aa4a3d`): sale el rótulo "(antes de notas de crédito)"; debajo del vendido y
+  de "Total facturado" va "bruto · notas de crédito", y debajo del cobrado "cobrado · devuelto",
+  solo si hay algo que restar. `/ventas` vuelve a pedir el resumen tras un cambio en el drawer,
+  sin volver a "—" y descartando la respuesta vieja si se solapan dos.
+
+**Lo que queda mal a sabiendas (D10, D12 de la spec):** el saldo no cuenta los `REFUND` de
+pasarela, porque no guardan la nota que generaron. Una venta pagada en parte por pasarela, con
+saldo vivo, `REFUND` y nota, muestra de menos lo reembolsado; un `REFUND` sin nota no baja el
+saldo. Sigue abierto en la entrada del reembolso sin nota de crédito, en `pendientes.md` § 6. El
+saldo por venta del **listado** tampoco se tocó y tiene la suya en la § 2.
+
+### Qué lo fija
+
+Cada caso va por el e2e de la app (`resumen-negocio.e2e-spec.ts`, `ventas.e2e-spec.ts`,
+`visibilidad-ventas-pagos.e2e-spec.ts`). En cada tarea se corrió el mutante que **revierte** a
+la consulta anterior y los casos nuevos lo matan, salvo lo declarado abajo (el caso "lo
+devuelto en efectivo vuelve a deberse" lo mata el mutante que quita ese término, no el que
+revierte: la consulta vieja tampoco restaba la nota, así que el saldo no se movía). Los
+escenarios: una nota de hoy sobre una venta de ayer, y lo
+mismo una semana atrás; el efectivo devuelto contra un retiro de caja ajeno; el `REFUND` sin
+nota, con nota (una sola vez) y de una orden sin venta; una nota mayor que lo que se debe (piso
+en 0); lo devuelto en efectivo que vuelve a deberse; la cancelada fuera de los totales; y "mis
+cajas" con una nota de otra caja. En pantalla, `InicioHoy.nuxt.spec.ts`, `index.nuxt.spec.ts` de
+`/ventas` y un caso de Playwright con un rol que tiene `Resumen del negocio: Leer` sin ser admin.
+
+**Supervivientes declarados**, cada uno con su motivo medido:
+
+- sin el `HAVING` de lo más vendido y sin el filtro de la línea de ajuste el e2e sigue en verde:
+  un ítem con neto ≤ 0 se ordena último y no entra al top 5 mientras haya cinco ítems positivos
+  en la base compartida, y armar un día con menos de cinco no se puede por la app. Los mata la
+  aserción sobre el texto del SQL del unitario: es una red de forma, no de conducta. Por la
+  misma base compartida, el caso de lo más vendido asume `reset-db.sh` antes de la corrida;
+- el `eliminado_el IS NULL` de la subconsulta de correcciones del saldo: no hay camino de la app
+  que borre una nota;
+- el `firmado` del canal `online` del vendido: una venta online por la app exige pasarela, y es
+  el mismo `CASE` que el del canal físico;
+- el caso de un día con neto negativo, con el ticket y la variación en `null`, lo cubren los
+  unitarios: el e2e comparte la base con todo el día y no puede dejarlo negativo.
+
 ## El resumen de anulaciones se serializa, como el de la varianza (cerrada 2026-10-01)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.
