@@ -98,6 +98,17 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
     arreglo queda en un `UPDATE` a mano por soporte; mientras no se haga, esos pesos no se pueden
     devolver por el sistema.
 
+- [ ] **El índice único de los overrides de opción existe solo en `startup-pos.sql`, no en la
+  entidad** (backend; `items/entities/item-grupo-modificador-opcion.entity.ts`). `startup-pos.sql`
+  ~L879 declara `uq_item_grupo_opcion_vivo` (`item_grupo_id`, `grupo_opcion_id`) parcial con
+  `eliminado_el IS NULL`, pero la entidad no tiene `@Index`. El esquema sale de las entidades
+  (`synchronize`), así que en la base ese índice **no existe**, y dos "aplicar overrides"
+  concurrentes pueden duplicar un override vivo. Lo vio el revisor del N+1 de overrides
+  (2026-10-02, `4f3e3085`); verificado por la orquestadora con grep. Es así desde antes de ese
+  cambio. **Arreglo:** declarar el índice parcial en la entidad (con su `where`), con un e2e
+  concurrente que hoy duplica y después rebota, y barrer los demás `CREATE UNIQUE INDEX` del `.sql`
+  buscando gemelos sin `@Index` en su entidad.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
