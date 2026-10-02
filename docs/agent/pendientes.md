@@ -58,6 +58,18 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **Un e2e de compras falla pasada la medianoche: `vencida` sale `true` en una compra recién
+  confirmada** (backend, test o `compras.service.ts`). `backend/test/compras-deuda.e2e-spec.ts`,
+  test "GET /compras y GET /compras/:id, con Pagar, traen estadoPago/deuda/vencida" (~L872):
+  `expect(detalle.vencida).toBe(false)` da `true`. Lo vio el frente de emisión el 2026-10-02 cerca
+  de las 00:30 (-03), y lo reprodujo en `c2739053`, sin sus cambios, así que no es de ese frente.
+  `vencida` es `fechaVencimiento < hoy` (`deuda.ts` ~L291), con `hoy = hoyNegocio(tenantId)`.
+  **Hipótesis sin medir:** la fecha de vencimiento de la compra y el `hoy` se calculan con relojes
+  distintos (UTC contra día de negocio del tenant), y a esa hora quedan en días diferentes. Medir
+  de dónde sale `fecha_vencimiento` al confirmar, y reproducir con el reloj fijado. Si es el
+  código, es un bug de producto: una compra marcada vencida de madrugada. Si es el fixture, es un
+  test que depende de la hora.
+
 - [ ] **El saldo de una venta no descuenta sus notas de crédito** (backend, `ventas.service.ts`:
   `mapVentaListRow` → `saldo = total − pagado`; visto el 2026-10-01 al decidir el saldo pendiente
   del frente "El vendido del día resta las notas de crédito", § 3). Una venta de $100.000 con
