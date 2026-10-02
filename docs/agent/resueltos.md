@@ -23,6 +23,47 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `PATCH` de un método de pago del comercio con `null` da 400, no 500 (cerrada 2026-10-02)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **`PATCH` de un método de pago del comercio con `null` da 500** (backend,
+  `metodos-pago/dto/update-tenant-metodo-pago.dto.ts`). `habilitada` y `permiteVuelto` llevan
+  `@IsOptional()`, que deja pasar un `null` explícito, y las dos columnas son NOT NULL en la entidad
+  (`tenant-metodo-pago.entity.ts`). El patrón y su arreglo ya están en `anti-patterns.md` (~L381:
+  `@ValidateIf((o) => o.x !== undefined)` en vez de `@IsOptional()`). Es el mismo que el frente de
+  emisión corrigió para `emisor` en su tarea 2, sobre este mismo DTO. Lo vio su revisor el
+  2026-10-02; verificado por la orquestadora. **Arreglo:** el mismo, con un e2e que mande `null` a
+  cada campo y espere 400. Barrer los DTOs de `PATCH` vecinos buscando el gemelo, sin asumir que es
+  el único. **Tomarlo después de que la emisión entre a main**, porque toca el mismo archivo.
+
+### Qué se hizo
+
+`habilitada` y `permiteVuelto` pasaron de `@IsOptional()` a `@ValidateIf((_o, v) => v !== undefined)`,
+como `emisor` en el mismo DTO (`update-tenant-metodo-pago.dto.ts`), con un solo comentario para los
+tres. Omitir un campo sigue conservando su valor; mandarlo en `null` es 400.
+
+El barrido de los DTOs de `PATCH`/`PUT` vecinos encontró el mismo defecto en ~18 endpoints más:
+quedó como entrada propia en [`pendientes.md`](pendientes.md) § 1 ("`@IsOptional()` deja pasar un
+`null` explícito…"), con lo medido separado de lo clasificado por lectura.
+
+### Qué lo fija
+
+`emision-regla-por-medio.e2e-spec.ts`: para cada uno de los tres campos, `null` es 400 y la fila
+del medio no cambia, y el mismo campo con su valor actual es 200 (el control que deja pasar).
+Mutantes, medidos el 2026-10-02:
+
+| Mutante | Test que muere | Sin el guard |
+|---|---|---|
+| `habilitada` vuelve a `@IsOptional()` | un habilitada null es 400 | 500 |
+| `permiteVuelto` vuelve a `@IsOptional()` | un permiteVuelto null es 400 | 500 |
+
+El de `emisor` ya lo fijaba el `it.each` de valores fuera de la lista, que incluye `null`.
+
+---
+
 ## Las escrituras sobre una venta por su id, y el abono, respetan el alcance de caja (cerrada 2026-10-02)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.

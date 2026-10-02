@@ -21,6 +21,8 @@ interface MetodoFila {
   metodoPagoId: string;
   emisor: string;
   esEfectivo: boolean;
+  habilitada: boolean;
+  permiteVuelto: boolean;
 }
 
 async function login(
@@ -167,6 +169,26 @@ describe('Regla de emisión: emisor por medio y facturador del comercio (e2e)', 
         expect((await filaDe(tokenAdmin, TARJETA_CREDITO_ID)).emisor).toBe(
           'maquina',
         );
+      },
+    );
+
+    // Las tres columnas son NOT NULL: un `null` explícito llegaba a Postgres y
+    // daba 500. El control es el mismo campo con su valor de siempre: 200.
+    it.each(['habilitada', 'permiteVuelto', 'emisor'] as const)(
+      'un %s null es 400 y la fila no cambia; con su valor actual, 200',
+      async (campo) => {
+        const antes = await filaDe(tokenAdmin, TARJETA_CREDITO_ID);
+
+        const res = await patchMetodo(tokenAdmin, TARJETA_CREDITO_ID, {
+          [campo]: null,
+        });
+        expect(res.status).toBe(400);
+        expect(await filaDe(tokenAdmin, TARJETA_CREDITO_ID)).toEqual(antes);
+
+        const control = await patchMetodo(tokenAdmin, TARJETA_CREDITO_ID, {
+          [campo]: antes[campo],
+        });
+        expect(control.status).toBe(200);
       },
     );
 

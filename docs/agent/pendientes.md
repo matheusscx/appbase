@@ -52,15 +52,61 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   entre a main**: su tarea 3 reescribió la validación del tipo en el servidor, y ese es el lugar.
   Es fiscal y va solo, como frente corto.
 
-- [ ] **`PATCH` de un método de pago del comercio con `null` da 500** (backend,
-  `metodos-pago/dto/update-tenant-metodo-pago.dto.ts`). `habilitada` y `permiteVuelto` llevan
-  `@IsOptional()`, que deja pasar un `null` explícito, y las dos columnas son NOT NULL en la entidad
-  (`tenant-metodo-pago.entity.ts`). El patrón y su arreglo ya están en `anti-patterns.md` (~L381:
-  `@ValidateIf((o) => o.x !== undefined)` en vez de `@IsOptional()`). Es el mismo que el frente de
-  emisión corrigió para `emisor` en su tarea 2, sobre este mismo DTO. Lo vio su revisor el
-  2026-10-02; verificado por la orquestadora. **Arreglo:** el mismo, con un e2e que mande `null` a
-  cada campo y espere 400. Barrer los DTOs de `PATCH` vecinos buscando el gemelo, sin asumir que es
-  el único. **Tomarlo después de que la emisión entre a main**, porque toca el mismo archivo.
+- [ ] **`@IsOptional()` deja pasar un `null` explícito en los `PATCH`/`PUT`, y el service lo
+  escribe o lo ignora** (backend, DTOs de actualización). `@IsOptional` de class-validator trata
+  `null` igual que ausente y saltea el validador de abajo; ni el pipe global
+  (`validacion-global.pipe.ts`) ni `EscalaMonedaPipe` lo convierten. Según qué haga el service
+  después, el mismo `null` da un 500, o un 200 que no cambia nada o que escribe el default. Ya se arregló DTO por DTO
+  varias veces —los cuatro de motivos, `UpdateUbicacionDto`, `UpdateMyTenantDto`, `UpdatePerfilDto`,
+  `emisor` en el frente de emisión y `habilitada`/`permiteVuelto` de métodos de pago
+  ([`resueltos.md`](resueltos.md), 2026-10-02)— y nunca en barrido. Lo encontró el barrido de
+  todas las rutas `@Patch`/`@Put` de esa última tarea.
+
+  **Medido** (2026-10-02, sonda por la API contra base local; 6 casos): `PATCH /turnos/:id`
+  `{nombre:null}`, `/categorias/:id` `{activo:null}`, `/terceros/:id` `{nombre:null}`, `/items/:id`
+  `{activo:null}` y `{impuestosIds:null}` → **500**; `/cajones/:id` `{nombre:null}` → **200 sin
+  cambiar nada**. **Clasificado por lectura** (sin correr): todo lo demás de las listas de abajo.
+
+  Cinco formas, con arreglos distintos:
+  - **A — el `null` llega a una columna NOT NULL → 500.** turnos (nombre, horaInicio, horaFin,
+    activo); monedas del comercio (habilitada); impresoras (nombre, rol, tipoConexion, activo);
+    categorias (nombre, aplicaA, activo); terceros (tipo, nombre, activo); garzones (nombre, activo,
+    tipo); salones (nombre); mesas (nombre, posX, posY, forma, tamano); impuestos (nombre, activo);
+    items (nombre, precioBase, monedaId, precioIncluyeImpuesto, activo, modoInventario,
+    requiereCita, frecuencia); grupos-modificadores (nombre); propinas: `PUT distribucion`
+    (habilitadoPos, habilitadoSalones) y la liquidación anidada (incluido, monto). **Arreglo:**
+    `@ValidateIf(v !== undefined)` en vez de `@IsOptional`, con e2e de `null` → 400.
+  - **A' — el `null` llega a un array y el service tira `TypeError` → 500.** descuentos y recargos
+    (tramos, metodoPagoIds); items (impuestosIds, recargosIds, descuentosIds, ingredientes,
+    componentes, extrasPermitidos, gruposModificadores); grupos-modificadores (opciones). Mismo
+    arreglo que A. En items, `impuestosIds` revienta **después** del `DELETE` de los vínculos: la
+    transacción hace rollback, pero es un 500.
+  - **B — el `null` se ignora → 200 sin cambiar nada.** cajones (nombre, activo: `!= null`);
+    descuentos y recargos (`modo` con `??`; `diasVencimiento` en `mora`). **Arreglo distinto:** el
+    `null` tiene que dar 400, no "no tocar"; omitir un campo y mandarlo en `null` son dos conductas.
+  - **PartialType — siete DTOs heredan `@IsOptional` en todos sus campos:** `UpdateTenantDto`
+    (nombre, correo; `PATCH /tenants/:id`, superadmin), `UpdateRazonSocialDto` (nombre, rut,
+    habilitado), `UpdateRolDto` (nombre), `UpdateTenantPasarelaDto` (ambiente, modoIntegracion,
+    activo, prioridad), `UpdateDescuentoDto` y `UpdateRecargoDto` (nombre, tipoReglaId, activo,
+    nivel), `UpdatePromocionDto` (nombre, activo, tipo). Casi todos escriben con
+    `Object.assign`/spread. **Arreglo:** dejar de heredar el `@IsOptional` que agrega `PartialType`,
+    no tocar un decorador.
+  - **C — B sobre un `PUT`: el `null` equivale a omitir, y omitir escribe el default.** propinas,
+    el grupo anidado de `PUT distribucion` (`baseVentas`, `activo`, `orden`: `??`/`!== false`; el
+    service reescribe todos los grupos); preferencias financieras (`promosAcumulanDescuentos ??
+    false`). El `null` → 400 es el mismo arreglo que B; lo propio de C es una decisión de producto
+    para los dos: si omitir el campo en esos `PUT` también resetea.
+
+  **Además, el `.sql` miente en tres columnas:** `tenant_moneda.habilitada`, `tenant_metodo_pago.habilitada`
+  y `razones_sociales.habilitado` figuran nullable en `startup-pos.sql` y la entidad las tiene NOT
+  NULL. Manda la entidad (`synchronize`): el frente corrige el `.sql`.
+
+  **Cómo tomarlo: por forma, una de cada forma primero** (A, A', B, C, PartialType), no los 18
+  endpoints de una. Con tres apariciones vale extraer un decorador propio en vez de repetir
+  `@ValidateIf` en ~60 campos, pero **antes de inventarlo, medirlo contra lo que ya usa el repo**:
+  hay decenas de `ValidateIf(` en `backend/src`, con más de una firma, y los DTOs ya arreglados
+  de arriba son el precedente a respetar. Cada campo arreglado lleva su
+  e2e de `null` → 400 y el control que deja pasar; los mutantes, por forma.
 
 ## 2. Medir primero — no es una pregunta para el owner
 
