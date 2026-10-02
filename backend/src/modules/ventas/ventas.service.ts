@@ -94,8 +94,13 @@ export interface VentaListItem {
 }
 
 export interface VentasResumen {
+  /** Ventas, sin las correcciones ni las canceladas. */
   totalVentas: number;
+  /** `totalBruto − totalNotasCredito`. */
   totalFacturado: string;
+  totalBruto: string;
+  totalNotasCredito: string;
+  /** Σ del saldo de cada venta (descuenta sus correcciones, piso 0). */
   saldoPendiente: string;
 }
 
@@ -2832,18 +2837,7 @@ export class VentasService {
     usuarioId: string,
     verTodas: boolean,
   ): Promise<VentasResumen> {
-    const tipoNotaCredito = await this.tipoNotaCreditoDelTenant(tenantId);
     const params: unknown[] = [tenantId];
-
-    // El resumen no cuenta las notas de crédito. Si el país todavía no tiene el
-    // tipo sembrado no hay ninguna que excluir y el filtro se cae ENTERO: un
-    // `IS DISTINCT FROM NULL` dejaría afuera las ventas sin tipo de documento,
-    // que son la mayoría, y el resumen daría casi cero.
-    let filtroNotaCredito = '';
-    if (tipoNotaCredito) {
-      params.push(tipoNotaCredito);
-      filtroNotaCredito = `AND v.tipo_documento_id IS DISTINCT FROM $${params.length}`;
-    }
 
     let filtroPropio = '';
     if (!verTodas) {
@@ -2851,26 +2845,60 @@ export class VentasService {
       filtroPropio = this.filtroDeMisCajas(params.length);
     }
 
+    // Las correcciones (notas de crédito) son filas con `venta_referencia_id`:
+    // heredan la caja de la venta que corrigen y por eso `filtroPropio` las
+    // acota igual que a las ventas (spec 2026-10-01-vendido-neto § 3.3). Las
+    // canceladas salen de los cuatro números (D9).
     const rows: {
       total_ventas: number;
+      total_bruto: string;
+      total_notas_credito: string;
       total_facturado: string;
       saldo_pendiente: string;
     }[] = await this.db.query(
-      `SELECT COUNT(*)::int AS total_ventas,
-              COALESCE(SUM(v.total_final), 0)::text AS total_facturado,
+      `SELECT COUNT(*) FILTER (WHERE v.venta_referencia_id IS NULL)::int AS total_ventas,
+              COALESCE(SUM(v.total_final)
+                FILTER (WHERE v.venta_referencia_id IS NULL), 0)::text AS total_bruto,
+              COALESCE(SUM(v.total_final)
+                FILTER (WHERE v.venta_referencia_id IS NOT NULL), 0)::text AS total_notas_credito,
+              COALESCE(SUM(CASE WHEN v.venta_referencia_id IS NULL THEN v.total_final
+                                ELSE -v.total_final END), 0)::text AS total_facturado,
               COALESCE(SUM(
-                v.total_final - COALESCE((
-                  SELECT SUM(pa.monto)
-                  FROM pagos p
-                  JOIN pago_aplicaciones pa ON pa.pago_id = p.pago_id
-                       AND pa.eliminado_el IS NULL AND pa.tipo = 'venta'
-                  WHERE p.venta_id = v.venta_id AND p.eliminado_el IS NULL
-                ), 0)
-              ), 0)::text AS saldo_pendiente
-       FROM ventas v
-       WHERE v.tenant_id = $1 AND v.eliminado_el IS NULL
-         ${filtroNotaCredito}
-         ${filtroPropio}`,
+                -- Saldo de una venta: total − correcciones de esa venta − (pagado
+                -- − devuelto en efectivo), con piso 0: lo que queda a favor del
+                -- cliente no es plata por cobrar (spec 2026-10-01-vendido-neto
+                -- D10). Los REFUND de pasarela quedan afuera porque no guardan qué
+                -- NC generaron. MISMA expresión en ResumenNegocioService.hoy
+                -- (porCobrar) y VentasService.resumen: si cambia una, cambia la
+                -- otra.
+                GREATEST(
+                  v.total_final
+                  - COALESCE((
+                      SELECT SUM(nc.total_final) FROM ventas nc
+                       WHERE nc.venta_referencia_id = v.venta_id AND nc.eliminado_el IS NULL
+                    ), 0)
+                  - (
+                      COALESCE((
+                        SELECT SUM(pa.monto)
+                          FROM pagos p
+                          JOIN pago_aplicaciones pa
+                            ON pa.pago_id = p.pago_id AND pa.eliminado_el IS NULL AND pa.tipo = 'venta'
+                         WHERE p.venta_id = v.venta_id AND p.eliminado_el IS NULL
+                      ), 0)
+                      - COALESCE((
+                        SELECT SUM(mc.monto)
+                          FROM ventas nc
+                          JOIN movimientos_caja mc
+                            ON mc.venta_id = nc.venta_id AND mc.tipo = 'salida' AND mc.eliminado_el IS NULL
+                         WHERE nc.venta_referencia_id = v.venta_id AND nc.eliminado_el IS NULL
+                      ), 0)
+                    ),
+                  0)
+              ) FILTER (WHERE v.venta_referencia_id IS NULL), 0)::text AS saldo_pendiente
+         FROM ventas v
+        WHERE v.tenant_id = $1 AND v.eliminado_el IS NULL
+          AND v.estado <> 'cancelada'
+          ${filtroPropio}`,
       params,
     );
 
@@ -2878,6 +2906,8 @@ export class VentasService {
     return {
       totalVentas: row?.total_ventas ?? 0,
       totalFacturado: row?.total_facturado ?? '0',
+      totalBruto: row?.total_bruto ?? '0',
+      totalNotasCredito: row?.total_notas_credito ?? '0',
       saldoPendiente: row?.saldo_pendiente ?? '0',
     };
   }

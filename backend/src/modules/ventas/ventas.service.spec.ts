@@ -2691,41 +2691,38 @@ describe('VentasService', () => {
       );
     });
 
-    it('resumen excluye las notas de crédito de los KPIs', async () => {
-      // `resumen` resuelve primero el tipo NC del país y recién después arma
-      // los KPIs: la cola de mocks respeta ese orden.
-      dataSourceMock.query
-        .mockResolvedValueOnce([{ tipo_documento_id: TIPO_DOCUMENTO_NC_ID }])
-        .mockResolvedValueOnce([
-          { total_ventas: 5, total_facturado: '100', saldo_pendiente: '0' },
-        ]);
-      await service.resumen(TENANT_ID, 'u-test', true);
-      const [sql, params] = dataSourceMock.query.mock.calls[1] as [
+    it('resumen separa las correcciones por venta_referencia_id y las canceladas salen', async () => {
+      dataSourceMock.query.mockResolvedValueOnce([
+        {
+          total_ventas: 5,
+          total_bruto: '130',
+          total_notas_credito: '30',
+          total_facturado: '100',
+          saldo_pendiente: '0',
+        },
+      ]);
+
+      const res = await service.resumen(TENANT_ID, 'u-test', true);
+
+      const [sql, params] = dataSourceMock.query.mock.calls[0] as [
         string,
         unknown[],
       ];
-      expect(sql).toContain('IS DISTINCT FROM');
+      expect(sql).toContain('v.venta_referencia_id IS NULL');
+      expect(sql).toContain('v.venta_referencia_id IS NOT NULL');
+      expect(sql).toContain("v.estado <> 'cancelada'");
+      expect(sql).toContain('GREATEST(');
       expect(sql).toContain("pa.tipo = 'venta'");
       expect(sql).toContain('pago_aplicaciones');
-      expect(params).toContain(TIPO_DOCUMENTO_NC_ID);
-    });
-
-    it('resumen en un país sin nota de crédito no filtra por tipo de documento', async () => {
-      dataSourceMock.query
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([
-          { total_ventas: 1, total_facturado: '10', saldo_pendiente: '0' },
-        ]);
-
-      await service.resumen(TENANT_ID, 'u-test', true);
-
-      const [sql, params] = dataSourceMock.query.mock.calls[1] as [
-        string,
-        unknown[],
-      ];
-      // El filtro se cae ENTERO, no se compara contra null: un
-      // `IS DISTINCT FROM NULL` dejaría afuera toda venta SIN tipo de
-      // documento —que son la mayoría— y el resumen daría casi cero.
+      expect(res).toEqual({
+        totalVentas: 5,
+        totalBruto: '130',
+        totalNotasCredito: '30',
+        totalFacturado: '100',
+        saldoPendiente: '0',
+      });
+      // El tipo de documento ya no entra: una sola consulta, sin su parámetro.
+      expect(dataSourceMock.query).toHaveBeenCalledTimes(1);
       expect(sql).not.toContain('IS DISTINCT FROM');
       expect(params).toEqual([TENANT_ID]);
     });
@@ -3448,9 +3445,7 @@ describe('VentasService', () => {
 
     it('resumen acota igual, y con alcance completo no', async () => {
       const encolarResumen = () =>
-        dataSourceMock.query
-          .mockResolvedValueOnce([{ tipo_documento_id: 'tipo-nc' }])
-          .mockResolvedValueOnce([{}]);
+        dataSourceMock.query.mockResolvedValueOnce([{}]);
 
       encolarResumen();
       await service.resumen(TENANT_ID, USUARIO, false);

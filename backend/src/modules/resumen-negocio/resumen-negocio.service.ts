@@ -300,41 +300,52 @@ export class ResumenNegocioService {
     );
 
     // Por cobrar: ventas pendientes o parcialmente pagadas, de CUALQUIER
-    // fecha —es lo que se debe ahora, no lo que se vendió hoy—. Misma forma
-    // que `saldo_pendiente` de `VentasService.resumen`.
+    // fecha —es lo que se debe ahora, no lo que se vendió hoy—. Misma fórmula
+    // que `saldo_pendiente` de `VentasService.resumen`, con el saldo por venta
+    // de la spec 2026-10-01-vendido-neto (D10). Las correcciones no entran
+    // como filas (`venta_referencia_id IS NULL`): restan del saldo de la venta
+    // que corrigen.
     const porCobrarRows: PorCobrarRow[] = await this.db.query(
-      `SELECT COUNT(*)::int AS cantidad,
-              COALESCE(SUM(
-                v.total_final - COALESCE((
-                  SELECT SUM(pa.monto)
-                    FROM pagos p
-                    JOIN pago_aplicaciones pa
-                      ON pa.pago_id = p.pago_id
-                     AND pa.eliminado_el IS NULL
-                     AND pa.tipo = 'venta'
-                   WHERE p.venta_id = v.venta_id AND p.eliminado_el IS NULL
-                ), 0)
-              ), 0)::text AS saldo
-         FROM ventas v
-         -- El JOIN va SIN td.eliminado_el IS NULL, a propósito: mismo porqué
-         -- que la consulta de vendido, de nuevo acá porque el porqué de una
-         -- excepción vive en la CONSULTA que la tiene, no en otra 40 líneas
-         -- más arriba — un tipo de documento dado de baja DESPUÉS no deja de
-         -- marcar como nota de crédito a la venta que ya lo usó.
-         --
-         -- Nota: hoy este filtro es cinturón-y-tirantes acá. Una nota de
-         -- crédito nace con estado = PAGADA
-         -- (crearNotaCreditoEnTransaccion, ventas.service.ts ~L1958), así que
-         -- nunca matchea el estado IN ('pendiente', 'pagada_parcial') de
-         -- abajo, con o sin este JOIN. Se deja igual: es la misma forma que
-         -- vendido y que VentasService.resumen, y si el día de mañana una
-         -- NC pudiera nacer pendiente, esta línea es la que ya la protege.
-         LEFT JOIN tipos_documento_tributario td
-           ON td.tipo_documento_id = v.tipo_documento_id
-        WHERE v.tenant_id = $1
-          AND v.eliminado_el IS NULL
-          AND v.estado IN ('pendiente', 'pagada_parcial')
-          AND COALESCE(td.es_nota_credito, false) = false`,
+      `SELECT COUNT(*) FILTER (WHERE s.saldo > 0)::int AS cantidad,
+              COALESCE(SUM(s.saldo), 0)::text AS saldo
+         FROM (
+           SELECT
+             -- Saldo de una venta: total − correcciones de esa venta − (pagado
+             -- − devuelto en efectivo), con piso 0: lo que queda a favor del
+             -- cliente no es plata por cobrar (spec 2026-10-01-vendido-neto
+             -- D10). Los REFUND de pasarela quedan afuera porque no guardan qué
+             -- NC generaron. MISMA expresión en ResumenNegocioService.hoy
+             -- (porCobrar) y VentasService.resumen: si cambia una, cambia la
+             -- otra.
+             GREATEST(
+               v.total_final
+               - COALESCE((
+                   SELECT SUM(nc.total_final) FROM ventas nc
+                    WHERE nc.venta_referencia_id = v.venta_id AND nc.eliminado_el IS NULL
+                 ), 0)
+               - (
+                   COALESCE((
+                     SELECT SUM(pa.monto)
+                       FROM pagos p
+                       JOIN pago_aplicaciones pa
+                         ON pa.pago_id = p.pago_id AND pa.eliminado_el IS NULL AND pa.tipo = 'venta'
+                      WHERE p.venta_id = v.venta_id AND p.eliminado_el IS NULL
+                   ), 0)
+                   - COALESCE((
+                     SELECT SUM(mc.monto)
+                       FROM ventas nc
+                       JOIN movimientos_caja mc
+                         ON mc.venta_id = nc.venta_id AND mc.tipo = 'salida' AND mc.eliminado_el IS NULL
+                      WHERE nc.venta_referencia_id = v.venta_id AND nc.eliminado_el IS NULL
+                   ), 0)
+                 ),
+               0) AS saldo
+             FROM ventas v
+            WHERE v.tenant_id = $1
+              AND v.eliminado_el IS NULL
+              AND v.estado IN ('pendiente', 'pagada_parcial')
+              AND v.venta_referencia_id IS NULL
+         ) s`,
       [tenantId],
     );
 

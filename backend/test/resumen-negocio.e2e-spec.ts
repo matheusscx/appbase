@@ -737,6 +737,69 @@ describe('Resumen del negocio (e2e)', () => {
         );
       });
     });
+
+    describe('por cobrar descuenta las notas de crédito (saldo por venta, piso 0)', () => {
+      const leer = async () =>
+        (await leerResumen(tokenAdmin)).body as ResumenHoyResponse;
+
+      /** `⌊x⌋` en CLP: Decimal, hacia abajo, sin decimales. */
+      const piso = (x: Decimal.Value) =>
+        new Decimal(x).toFixed(0, Decimal.ROUND_DOWN);
+
+      /**
+       * Venta de 3 unidades del ítem propio con un abono en efectivo de
+       * `⌊fraccion·T⌋`, donde `T` es el `totalFinal` que calculó el servidor
+       * (puede llevar IVA): los montos salen de `T` para que ninguno coincida
+       * con otro.
+       */
+      async function ventaParcial(fraccion: string) {
+        const venta = await post<VentaCreadaResponse>('/api/ventas', {
+          lineas: [{ itemId, cantidad: '3' }],
+        });
+        const T = new Decimal(venta.totalFinal);
+        const P = piso(T.times(fraccion));
+        const pago = await post<AbonoResponse>('/api/pagos', {
+          ventaId: venta.id,
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: P }],
+        });
+        expect(pago.venta.estado).toBe('pagada_parcial');
+        return { venta, T, P };
+      }
+
+      it('una NC mayor que lo que se debe deja el saldo en cero, no en negativo, y la venta sale de la cuenta', async () => {
+        const { venta, T, P } = await ventaParcial('0.4');
+        const antes = await leer();
+
+        // N = T − ⌊0,1·T⌋: más que lo que se debe (T − P). Sin el piso, el
+        // saldo de esta venta sería T − N − P < 0 y restaría de más.
+        const N = T.minus(piso(T.times('0.1'))).toString();
+        expect(new Decimal(N).gt(T.minus(P))).toBe(true);
+        await post(`/api/ventas/${venta.id}/notas-credito`, { monto: N });
+        const despues = await leer();
+
+        expect(delta(antes.porCobrar.saldo, despues.porCobrar.saldo)).toBe(
+          T.minus(P).negated().toString(),
+        );
+        expect(despues.porCobrar.cantidad - antes.porCobrar.cantidad).toBe(-1);
+      });
+
+      it('lo devuelto en efectivo vuelve a deberse: la NC baja la deuda y la plata devuelta la sube', async () => {
+        const { venta, T } = await ventaParcial('0.6');
+        const antes = await leer();
+
+        const N = piso(T.times('0.25'));
+        await post(`/api/ventas/${venta.id}/notas-credito`, {
+          monto: N,
+          devolverDinero: true,
+        });
+        const despues = await leer();
+
+        // Antes T − P, después T − N − (P − N): lo mismo. Sin el término del
+        // efectivo devuelto el saldo bajaría N.
+        expect(delta(antes.porCobrar.saldo, despues.porCobrar.saldo)).toBe('0');
+        expect(despues.porCobrar.cantidad).toBe(antes.porCobrar.cantidad);
+      });
+    });
   });
 
   /**
