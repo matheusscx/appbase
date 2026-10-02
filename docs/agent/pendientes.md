@@ -52,6 +52,16 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   entre a main**: su tarea 3 reescribió la validación del tipo en el servidor, y ese es el lugar.
   Es fiscal y va solo, como frente corto.
 
+- [ ] **`PATCH` de un método de pago del comercio con `null` da 500** (backend,
+  `metodos-pago/dto/update-tenant-metodo-pago.dto.ts`). `habilitada` y `permiteVuelto` llevan
+  `@IsOptional()`, que deja pasar un `null` explícito, y las dos columnas son NOT NULL en la entidad
+  (`tenant-metodo-pago.entity.ts`). El patrón y su arreglo ya están en `anti-patterns.md` (~L381:
+  `@ValidateIf((o) => o.x !== undefined)` en vez de `@IsOptional()`). Es el mismo que el frente de
+  emisión corrigió para `emisor` en su tarea 2, sobre este mismo DTO. Lo vio su revisor el
+  2026-10-02; verificado por la orquestadora. **Arreglo:** el mismo, con un e2e que mande `null` a
+  cada campo y espere 400. Barrer los DTOs de `PATCH` vecinos buscando el gemelo, sin asumir que es
+  el único. **Tomarlo después de que la emisión entre a main**, porque toca el mismo archivo.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
