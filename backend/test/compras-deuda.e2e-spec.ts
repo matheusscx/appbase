@@ -33,6 +33,17 @@ const PAGA_EMAIL = 'compras.paga@paris.cl';
 /** `Leer, Crear, Actualizar`, SIN `Pagar` ni `Anular`. */
 const CORRECCION_EMAIL = 'compras.correccion@paris.cl';
 const PASS = 'admin';
+/**
+ * La fecha de documento de toda compra de este archivo: la de HOY, no una
+ * fija. Con el plazo por defecto (`PLAZO_PAGO_DIAS_DEFAULT`, 30 días) una
+ * fecha fija vence sola — `'2026-09-01'` dio `vencida = true` desde el
+ * 2026-10-02 y dejó el CI rojo. Es el día UTC, no el del negocio del tenant
+ * (`hoyNegocio`): puede diferir en uno, y no importa — el vencimiento cae a
+ * 30 días y el DTO no rechaza fechas futuras. Una sola para todo el archivo,
+ * como era la fija: las compras de un mismo proveedor siguen empatadas en
+ * fecha, así que el orden "la más vieja primero" del reparto no cambia.
+ */
+const HOY = new Date().toISOString().slice(0, 10);
 
 interface TokenResponse {
   access_token: string;
@@ -214,7 +225,7 @@ describe('Compras — confirmar con pago, el recorte y las lecturas de deuda (e2
       {
         proveedorId: conProveedorId,
         tipoDocumentoCompraId: sinDocumento.id,
-        fechaDocumento: '2026-09-01',
+        fechaDocumento: HOY,
         ubicacionId,
         lineas: [
           {
@@ -253,7 +264,7 @@ describe('Compras — confirmar con pago, el recorte y las lecturas de deuda (e2
         proveedorId: conProveedorId,
         tipoDocumentoCompraId: factura.id,
         folio: `F-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
-        fechaDocumento: '2026-09-01',
+        fechaDocumento: HOY,
         ubicacionId,
         totalDocumento,
         lineas: [
@@ -975,7 +986,7 @@ describe('Compras — confirmar con pago, el recorte y las lecturas de deuda (e2
         {
           proveedorId: propio,
           tipoDocumentoCompraId: sinDocumento.id,
-          fechaDocumento: '2026-09-01',
+          fechaDocumento: HOY,
           ubicacionId,
           lineas: [
             {
@@ -1054,7 +1065,7 @@ describe('Compras — confirmar con pago, el recorte y las lecturas de deuda (e2
         {
           proveedorId: propio,
           tipoDocumentoCompraId: sinDocumento.id,
-          fechaDocumento: '2026-09-01',
+          fechaDocumento: HOY,
           ubicacionId,
           lineas: [{ itemId: productoId, cantidad: '1', unidadCodigo: 'kg' }],
         },

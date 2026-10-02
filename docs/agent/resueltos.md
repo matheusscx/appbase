@@ -23,6 +23,62 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El e2e de `compras-deuda` ya no fija la fecha del documento (cerrada 2026-10-02)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **🔴 El CI de main está rojo desde el 2026-10-02: un e2e de compras con fecha fija venció**
+  (backend, solo test: `backend/test/compras-deuda.e2e-spec.ts`). El test "GET /compras y GET
+  /compras/:id, con Pagar, traen estadoPago/deuda/vencida" (~L872) espera `vencida = false` en una
+  compra recién confirmada. Su fixture (`borradorSinDocumento`, ~L217) fija `fechaDocumento:
+  '2026-09-01'`, y el vencimiento por defecto es documento + `PLAZO_PAGO_DIAS_DEFAULT = 30`
+  (`compras/deuda.ts:14,44`): vence el 2026-10-01. Desde el 2026-10-02 sale vencida a cualquier
+  hora. Lo midió la orquestadora: falló en CI a las 08:43 (-03) del run 37002108852, así que
+  descarta la hipótesis anterior de la medianoche. **No es un bug del sistema.** **Arreglo:** que
+  la fecha del fixture salga de hoy, o fijar un plazo explícito en el test que lo necesite. Barrer
+  las otras fechas fijas del archivo (`'2026-09-01'` en ~L256, ~L978 y ~L1057) y de los demás e2e
+  que comparen contra el `hoy` real, sin asumir que esta es la única bomba de tiempo. Hasta que
+  entre, todo push a main sale con CI rojo por este test.
+
+### Qué se hizo
+
+Las cuatro `fechaDocumento: '2026-09-01'` de `backend/test/compras-deuda.e2e-spec.ts` salen de una
+constante `HOY`, el día UTC al cargar el archivo. Puede diferir en uno del día de negocio del tenant
+(`hoyNegocio`) y no importa: el vencimiento cae a 30 días y el DTO no rechaza fechas futuras. Es
+una sola para todo el archivo, como la fija, así que las compras de un mismo proveedor siguen
+empatadas en fecha y el orden "la más vieja primero" del reparto no cambia. No se tocó código de
+producción.
+
+El barrido de los demás e2e del backend no encontró otra fecha fija que se compare contra el `hoy`
+real y que ya haya pasado o esté cerca. Las que hay son rangos de reportes en el pasado; ventanas
+de promociones vencidas a propósito (`vigencia-cuenta`) o lejanas (`promociones` hasta 2035,
+`vigencia-cuenta` hasta 2099), que sí se comparan con hoy; vencimientos de lote e ítem (el sistema
+no los compara con hoy); y `fechaDocumento` de compras en archivos que no leen `vencida` ni
+`por-pagar`. Mover las compras de este archivo a hoy tampoco cambia lo que leen los otros e2e: los
+que listan `GET /compras` sin filtrar por proveedor solo miran el status, y `fecha_documento` solo
+lo leen el vencimiento, el filtro y el orden del listado. El Playwright
+`compras-deuda-proveedor.spec.ts` también fija `'2026-09-01'` y `'2026-09-15'`, pero no afirma
+nada que dependa de `vencido`.
+
+El día UTC puede ir uno por delante del día de negocio del tenant, nunca más (`diaNegocioEnZona`:
+la hora UTC adelanta la fecha desde las 21:00 -03, y el corte, de 0 a 6, la atrasa de madrugada;
+las dos franjas no se solapan). Corrido con el reloj del proceso de jest fijado a las 22:30 -03
+—la app de `test:e2e` corre en el mismo proceso—, el archivo da 17/17. El control de que ese reloj
+llega a `hoyNegocio`: con la fecha vieja y el reloj en el 2026-09-20, también pasa.
+
+### Qué lo fija
+
+- Volver la constante a `'2026-09-01'` pone el test en rojo (`Expected: false, Received: true`): es
+  la falla del CI, reproducida.
+- El mutante `fechaVencimiento < hoy` → `>` en `estadoPagoCompra` (`compras/deuda.ts`) también lo
+  pone en rojo, con la fecha nueva: el test sigue discriminando el cálculo, no solo pasa.
+- El test afirma solo `vencida = false`, como antes. El `true` lo cubren los unitarios de
+  `deuda.spec.ts` (~L355 y ~L481); ningún e2e lo cubre por HTTP. La fecha fija, de paso, daba
+  rojo con un plazo mal calculado de menos de ~27 días; con `HOY` solo un plazo negativo lo pone en
+  rojo. El plazo lo cubren `deuda.spec.ts` y `compras.e2e-spec.ts` (~L2318).
+
 ## El vendido, el cobrado y el "Total facturado" restan las notas de crédito del día en que se emiten (cerrada 2026-10-01)
 
 Sale de [`pendientes.md`](pendientes.md) § 3 (la entrada venía de una decisión del owner del

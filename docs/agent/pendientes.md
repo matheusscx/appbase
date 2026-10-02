@@ -41,18 +41,17 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
-- [ ] **🔴 El CI de main está rojo desde el 2026-10-02: un e2e de compras con fecha fija venció**
-  (backend, solo test: `backend/test/compras-deuda.e2e-spec.ts`). El test "GET /compras y GET
-  /compras/:id, con Pagar, traen estadoPago/deuda/vencida" (~L872) espera `vencida = false` en una
-  compra recién confirmada. Su fixture (`borradorSinDocumento`, ~L217) fija `fechaDocumento:
-  '2026-09-01'`, y el vencimiento por defecto es documento + `PLAZO_PAGO_DIAS_DEFAULT = 30`
-  (`compras/deuda.ts:14,44`): vence el 2026-10-01. Desde el 2026-10-02 sale vencida a cualquier
-  hora. Lo midió la orquestadora: falló en CI a las 08:43 (-03) del run 37002108852, así que
-  descarta la hipótesis anterior de la medianoche. **No es un bug del sistema.** **Arreglo:** que
-  la fecha del fixture salga de hoy, o fijar un plazo explícito en el test que lo necesite. Barrer
-  las otras fechas fijas del archivo (`'2026-09-01'` en ~L256, ~L978 y ~L1057) y de los demás e2e
-  que comparen contra el `hoy` real, sin asumir que esta es la única bomba de tiempo. Hasta que
-  entre, todo push a main sale con CI rojo por este test.
+- [ ] **El Playwright de compras busca su compra en la primera página del listado sin filtro**
+  (frontend, solo test: `frontend/e2e/compras/compras-por-pantalla.spec.ts` ~L292 y ~L328). Va a
+  `/compras` y busca la fila por el nombre del proveedor, sin filtrar. El listado ordena por
+  `fecha_documento DESC, creado_el DESC` y la primera página trae 15 filas. Desde el 2026-10-02 el
+  e2e de la API `compras-deuda` crea unas dos docenas de compras con fecha `HOY` del día UTC. Entre
+  las 21:00 y las 23:59 -03 esa fecha va un día por delante del `hoyLocal()` con que la pantalla
+  crea la suya, y empuja la compra del Playwright fuera de la primera página. Solo pasa en local,
+  si se corre Playwright sobre la misma base que el e2e de la API sin resetear; en CI el job de
+  navegador resiembra. Lo vio el revisor del cierre de esa fecha fija (2026-10-02); la cita está
+  verificada. **Arreglo:** que el spec abra el listado filtrado por su proveedor, o que vaya por
+  `/compras/:id`, como los otros tests del archivo.
 
 - [ ] **El servidor no exige el customer de un tipo de documento con `customer_requerido`**
   (backend; invariante 6). La Factura lo tiene en `true` en el seed, pero el backend solo lo
