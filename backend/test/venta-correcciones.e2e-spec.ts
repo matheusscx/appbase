@@ -5,6 +5,7 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { randomUUID } from 'node:crypto';
+import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import { VentasReembolsoHandler } from '../src/modules/ventas/reembolso-callback.handler';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
@@ -57,6 +58,7 @@ interface Detalle {
   puedeAbonar: boolean;
   esCorreccion: boolean;
   esNotaCredito: boolean;
+  anulable: boolean;
   tipoDocumentoId: string | null;
   opcionesDevolucion: OpcionDevolucion[];
   disponibleNotaCredito: { total: string };
@@ -1154,6 +1156,231 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
           [venta.id],
         );
       }
+    });
+  });
+
+  describe('una venta pendiente admite solo la nota "no vuelve plata"', () => {
+    /**
+     * La distribuidora que factura en otro sistema (`facturador = 'externo'`) y
+     * vende $119.000 a 30 días: la venta queda pendiente con su documento externo.
+     * El cliente devuelve todo; anular no sirve (el documento ya está hecho) y
+     * antes la nota tampoco: callejón sin salida.
+     */
+    const ventaPendienteExterna = async (): Promise<Venta> => {
+      await patchFacturador('externo');
+      const venta = await vender({
+        lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
+      });
+      expect(venta.estado).toBe('pendiente');
+      expect(venta.totalFinal).toBe('119000.0000');
+      return venta;
+    };
+    const completarNumero = (ventaId: string, documentoId: string) =>
+      request(app.getHttpServer())
+        .patch(`/api/ventas/${ventaId}/documentos/${documentoId}`)
+        .set(auth())
+        .send({ numero: '48213' });
+    const estadoYSaldo = async (ventaId: string) => {
+      const d = await detalle(ventaId);
+      return { estado: d.estado, saldo: d.saldo };
+    };
+
+    it('devuelve todo: la nota sin plata deja la deuda en 0, la venta pagada, y su documento externo se completa con el número', async () => {
+      const venta = await ventaPendienteExterna();
+      const docVenta = await docId(venta.id, 'externo');
+
+      const creada = await nc(venta.id, {
+        monto: '119000',
+        devolucion: { sinPlata: true },
+      });
+
+      expect(creada.movimientoCajaId).toBeNull();
+      expect(await estadoYSaldo(venta.id)).toEqual({
+        estado: 'pagada',
+        saldo: '0.0000',
+      });
+      const docs = await docsDe(creada.id);
+      expect(docs).toHaveLength(1);
+      expect(docs[0]).toMatchObject({
+        emisor: 'externo',
+        numero: null,
+        documento_corregido_id: docVenta,
+        monto: '119000.0000',
+      });
+      const completado = await completarNumero(creada.id, docs[0].documento_id);
+      expect(completado.status).toBe(200);
+      expect((await docsDe(creada.id))[0].numero).toBe('48213');
+    });
+
+    it('devuelve una parte: la deuda baja lo devuelto y la venta sigue pendiente', async () => {
+      const venta = await ventaPendienteExterna();
+
+      await nc(venta.id, { monto: '59500', devolucion: { sinPlata: true } });
+
+      expect(await estadoYSaldo(venta.id)).toEqual({
+        estado: 'pendiente',
+        saldo: '59500.0000',
+      });
+      // Es una serie: lo que falta devolver es lo que se debe.
+      const arriba = await crearNc(venta.id, {
+        monto: '59501',
+        devolucion: { sinPlata: true },
+      });
+      expect(arriba.status).toBe(400);
+      expect(mensaje(arriba)).toMatch(/excede lo disponible|todavía debe/);
+    });
+
+    it('el detalle ofrece la nota en la pendiente, y solo "No vuelve plata"', async () => {
+      const venta = await ventaPendienteExterna();
+
+      const d = await detalle(venta.id);
+
+      expect(d.opcionesDevolucion).toEqual([
+        expect.objectContaining({
+          pagoId: null,
+          sinPlata: true,
+          monto: '119000.0000',
+          registro: 'nota_externa',
+        }),
+      ]);
+      expect(d.disponibleNotaCredito.total).toBe('119000.0000');
+    });
+
+    it('"por un pago" sobre una pendiente: 400 claro, y no crea nada', async () => {
+      const venta = await ventaPendienteExterna();
+
+      const res = await crearNc(venta.id, {
+        monto: '1000',
+        devolucion: { pagoId: randomUUID() },
+      });
+
+      expect(res.status).toBe(400);
+      expect(mensaje(res)).toMatch(/todavía no tiene pagos/);
+      expect(mensaje(res)).toMatch(/sin devolución de dinero/);
+      const corregidas: { n: number }[] = await ds.query(
+        `SELECT COUNT(*)::int AS n FROM ventas WHERE venta_referencia_id = $1`,
+        [venta.id],
+      );
+      expect(corregidas[0].n).toBe(0);
+    });
+
+    it('más que el total de la venta: 400, y no toca la deuda', async () => {
+      const venta = await ventaPendienteExterna();
+
+      const res = await crearNc(venta.id, {
+        monto: '119001',
+        devolucion: { sinPlata: true },
+      });
+
+      expect(res.status).toBe(400);
+      expect((await estadoYSaldo(venta.id)).saldo).toBe('119000.0000');
+    });
+
+    describe('una venta con una nota de crédito no se anula', () => {
+      /**
+       * Con el facturador en `sistema` (el default del `beforeEach`) la boleta de la
+       * pendiente es del sistema y sin enviar: sin la regla de la nota SÍ se
+       * anularía, así que el 400 de abajo solo puede venir de ella. Un producto
+       * propio con stock, para medir que la anulación no repone dos veces.
+       */
+      const stockDe = async (itemId: string): Promise<string> => {
+        const filas: { stock: string }[] = await ds.query(
+          `SELECT COALESCE(SUM(stock), 0)::text AS stock
+             FROM stock_ubicacion WHERE item_id = $1`,
+          [itemId],
+        );
+        return new Decimal(filas[0].stock).toString();
+      };
+      const anular = (ventaId: string) =>
+        request(app.getHttpServer())
+          .post(`/api/ventas/${ventaId}/anular`)
+          .set(auth())
+          .send({ motivo: 'Se ingresó por error en la caja' });
+      let itemProducto: string;
+
+      beforeAll(async () => {
+        const res = await request(app.getHttpServer())
+          .post('/api/items')
+          .set(auth())
+          .send({
+            nombre: `Corr producto NC pendiente E2E ${Date.now()}`,
+            precioBase: '100000',
+            monedaId: CLP,
+            tipo: 'producto',
+            unidadMedida: 'unidad',
+            stock: '10',
+            costo: '400',
+          });
+        expect(res.status).toBe(201);
+        itemProducto = (res.body as { id: string }).id;
+      });
+
+      it('pendiente 119.000 → nota sin plata 59.500 (devolviendo 1 al stock) → anular: 400, el stock no se repone dos veces y la nota sigue', async () => {
+        const venta = await vender({
+          lineas: [{ itemId: itemProducto, cantidad: '1' }],
+        });
+        expect(venta.estado).toBe('pendiente');
+        expect(venta.totalFinal).toBe('119000.0000');
+        expect(await stockDe(itemProducto)).toBe('9');
+        const creada = await nc(venta.id, {
+          monto: '59500',
+          devolucion: { sinPlata: true },
+          devoluciones: [{ itemId: itemProducto, cantidad: '1' }],
+        });
+        expect(await stockDe(itemProducto)).toBe('10');
+        expect((await detalle(venta.id)).anulable).toBe(false);
+
+        const res = await anular(venta.id);
+
+        expect(res.status).toBe(400);
+        expect(mensaje(res)).toMatch(/ya tiene una nota de crédito/);
+        expect(await stockDe(itemProducto)).toBe('10');
+        const estado: { estado: string }[] = await ds.query(
+          `SELECT estado FROM ventas WHERE venta_id = $1`,
+          [venta.id],
+        );
+        expect(estado[0].estado).toBe('pendiente');
+        const nota: { n: number }[] = await ds.query(
+          `SELECT COUNT(*)::int AS n FROM ventas
+            WHERE venta_id = $1 AND eliminado_el IS NULL`,
+          [creada.id],
+        );
+        expect(nota[0].n).toBe(1);
+        // Lo que queda se rebaja con otra nota: sigue ofrecida.
+        expect(
+          (await detalle(venta.id)).opcionesDevolucion.some((o) => o.sinPlata),
+        ).toBe(true);
+      });
+
+      it('control: una pendiente sin nota se anula, y el detalle dice anulable', async () => {
+        const venta = await vender({
+          lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
+        });
+        expect((await detalle(venta.id)).anulable).toBe(true);
+
+        const res = await anular(venta.id);
+
+        expect(res.status).toBe(201);
+      });
+    });
+
+    it('una venta cancelada sigue sin admitir ninguna nota', async () => {
+      const venta = await vender({
+        lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
+      });
+      const anulada = await request(app.getHttpServer())
+        .post(`/api/ventas/${venta.id}/anular`)
+        .set(auth())
+        .send({ motivo: 'Se ingresó por error en la caja' });
+      expect(anulada.status).toBe(201);
+
+      const res = await crearNc(venta.id, {
+        monto: '1000',
+        devolucion: { sinPlata: true },
+      });
+
+      expect(res.status).toBe(400);
+      expect(mensaje(res)).toMatch(/Solo se puede emitir nota de crédito/);
     });
   });
 

@@ -75,8 +75,8 @@ La única excepción es el **voucher duplicado** (E1b): una deuda ya documentada
 tarjeta de la máquina. El voucher también vale como boleta y duplica la del sistema, y el SII no
 lo resuelve por escrito; el cobro no se bloquea, el pago queda marcado (`es_duplicado`) para que
 el contador lo corrija, y ese documento no cuenta para la cobertura ni para los topes de una
-corrección. Lo escribe `registrarDuplicadoDeAbono`, que `registrarAbono` llama por cada pago
-cuyo medio es `maquina` y solo si la venta tiene algún documento vigente que no sea duplicado
+corrección. Lo escribe `registrarDuplicadoDeAbono`, que `registrarAbono` llama **una vez, con todos los
+pagos del abono**, y que escribe un duplicado por cada pago cuyo medio es `maquina` y solo si la venta tiene algún documento vigente que no sea duplicado
 (una venta de $0 o de un país sin boleta no tiene nada que duplicar). Ese "¿ya está documentada?"
 es un predicado único, `VentaDocumentosService.ventaDocumentada` (vigente, no duplicado y con
 emisor distinto de `nadie`): lo comparte el abono con el `abonoConMaquinaDuplica` del detalle,
@@ -138,7 +138,7 @@ para que el aviso de la pantalla y lo que el abono después escribe no puedan de
   número bloquea sin preguntar (el número salió del otro facturador, así que el documento
   existe). `externoHecho` ausente y `false` son dos conductas distintas, por eso el DTO y el
   controller no le ponen default. Lo previo a mirar los documentos —que la venta esté
-  `pendiente` y sin pagos— también es una sola regla (`motivoQueImpideAnular`, en ventas), y
+  `pendiente`, sin pagos y sin ninguna nota de crédito (tarea 15)— también es una sola regla (`motivoQueImpideAnular`, en ventas), y
   `cancelarUnaVez` y el `anulable` del detalle llaman a las dos.
 - Las columnas cerradas (`emisor`, `clase_maquina`, `estado_envio`, `descarte`) siguen la forma
   de lo nuevo: `@Check` + `type: 'text'` explícito + una unión de TS exportada, no un `enum`
@@ -189,8 +189,9 @@ el duplicado) pagos, y que **no importa a ninguno de los dos**. `PagosModule` es
 dueño de una tabla de ventas. No necesita imports: recibe por parámetro lo que ya está en
 memoria al crear la venta (las porciones salen de las líneas, el emisor de cada pago sale de la
 misma lectura de `tenant_metodo_pago` que ya hacía `PagosService.registrar`, y `facturador`, de
-la consulta de la moneda oficial). **Cero lecturas nuevas**, y los documentos se insertan con un
-solo `save` del array.
+la consulta de la moneda oficial). **`documentarVenta` no suma lecturas nuevas**, y los documentos
+se insertan con un solo `save` del array. El alta de la venta, en cambio, sí suma una:
+`resolverTipoDocumento` (el tipo pedido y la boleta activa del país, en una sola consulta).
 
 ## Consequences
 

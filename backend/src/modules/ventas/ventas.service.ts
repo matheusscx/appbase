@@ -204,7 +204,7 @@ export interface CrearNotaCreditoParams {
    * un movimiento 'salida' en la caja física abierta del usuario.
    */
   via: ViaCorreccion;
-  /** Solo el endpoint manual: exige venta pagada/pagada_parcial. */
+  /** Solo el endpoint manual: exige venta pagada/pagada_parcial, o pendiente con la vía `sin_plata`. */
   validarVentaElegible?: boolean;
 }
 
@@ -1585,7 +1585,7 @@ export class VentasService {
       // La etiqueta `tipo_documento_id` NO impide anular: toda venta nace con la
       // boleta del país, y rechazar por ella dejaría a ninguna anulable. Lo que
       // cuenta es lo **emitido**, y eso lo dice `venta_documentos` (E8, E10), más
-      // abajo. Acá impiden anular el estado y los pagos: la misma regla que
+      // abajo. Acá impiden anular el estado, los pagos y las correcciones: la misma regla que
       // el `anulable` del detalle (`motivoQueImpideAnular`).
       const motivo = await this.motivoQueImpideAnular(manager, {
         ventaId: params.ventaId,
@@ -1822,8 +1822,9 @@ export class VentasService {
 
   /**
    * Igual, para el flujo que la va a **escribir**. Acá el null no se puede
-   * tragar: sin tipo de documento la NC quedaría sin marcar y dejaría de
-   * encontrarse a sí misma (el tope de reembolso la busca por este id).
+   * tragar: sin tipo de documento la NC quedaría sin su marca de nota de
+   * crédito y su documento fiscal sin tipo (los topes de reembolso ya no la
+   * buscan por este id: desde E7 van por `venta_referencia_id`).
    */
   private async exigirTipoNotaCredito(tenantId: string): Promise<string> {
     const id = await this.tipoNotaCreditoDelTenant(tenantId);
@@ -1899,9 +1900,20 @@ export class VentasService {
         );
 
       if (params.validarVentaElegible) {
-        if (!['pagada', 'pagada_parcial'].includes(original.estado))
+        // Una venta PENDIENTE (nada pagado todavía) admite una sola nota: la que
+        // no devuelve plata. No hay pago por el que vuelva dinero, pero sí una
+        // deuda que el comercio ya corrigió en su facturador (la distribuidora
+        // que vende a 30 días y el cliente devuelve todo). La cancelada sigue
+        // afuera: se anuló, no se corrige.
+        if (original.estado === 'pendiente' && params.via.tipo !== 'sin_plata')
           throw new BadRequestException(
-            'Solo se puede emitir nota de crédito de ventas pagadas o pagadas parcialmente',
+            'Esta venta todavía no tiene pagos: la nota de crédito se emite sin devolución de dinero ("No vuelve plata").',
+          );
+        if (
+          !['pendiente', 'pagada', 'pagada_parcial'].includes(original.estado)
+        )
+          throw new BadRequestException(
+            'Solo se puede emitir nota de crédito de ventas pagadas, pagadas parcialmente o pendientes (estas últimas sin devolución de dinero)',
           );
         // La NC corrige aquel documento: hereda su criterio, no el vigente
         // (decisión g). Un null acá no es un caso histórico —después del
@@ -2784,8 +2796,8 @@ export class VentasService {
   }
 
   /**
-   * Lo que impide anular una venta **antes de mirar sus documentos**: el estado y
-   * los pagos. Devuelve el 400 que corresponde, o `null` si ninguno la impide.
+   * Lo que impide anular una venta **antes de mirar sus documentos**: el estado,
+   * los pagos y las correcciones. Devuelve el 400 que corresponde, o `null` si ninguno la impide.
    *
    * Es la regla **única** de las dos preguntas "¿se puede anular?": la responde
    * `cancelarUnaVez` (que lanza el motivo) y el `anulable` del detalle (que solo
@@ -2807,6 +2819,8 @@ export class VentasService {
        * bajo el lock de la venta, que es lo que la hace confiable.
        */
       tienePagos?: boolean;
+      /** Igual que `tienePagos`, para las correcciones (el detalle ya cargó sus notas). */
+      tieneCorrecciones?: boolean;
     },
   ): Promise<string | null> {
     if (params.estado !== 'pendiente')
@@ -2823,6 +2837,24 @@ export class VentasService {
     }
     if (conPagos)
       return 'La venta tiene pagos registrados: se revierte con nota de crédito, no se anula.';
+    // Una venta pendiente puede tener una corrección (la nota "no vuelve plata"
+    // parcial la deja pendiente y sin pagos). Anularla repondría el stock otra vez
+    // —la nota ya devolvió sus devoluciones— y dejaría una nota viva sobre una venta
+    // cancelada, que el vendido neto resta de más. Lo que queda por rebajar se
+    // rebaja con otra nota (owner, 2026-10-02). Cualquier corrección vigente cuenta,
+    // sin mirar su tipo: es `venta_referencia_id`, como en todo lo demás.
+    let conCorrecciones = params.tieneCorrecciones;
+    if (conCorrecciones === undefined) {
+      const filas: unknown[] = await lector.query(
+        `SELECT 1 FROM ventas
+          WHERE venta_referencia_id = $1 AND eliminado_el IS NULL
+          LIMIT 1`,
+        [params.ventaId],
+      );
+      conCorrecciones = filas.length > 0;
+    }
+    if (conCorrecciones)
+      return 'La venta ya tiene una nota de crédito: lo que queda se rebaja con otra nota, no se anula.';
     return null;
   }
 
@@ -3748,14 +3780,15 @@ export class VentasService {
       { tenantId, ventaId },
     );
 
-    // `anulable`: la misma regla que `cancelarUnaVez` —el estado y los pagos
-    // (`motivoQueImpideAnular`) y después lo emitido (`evaluarAnulacion`)—,
+    // `anulable`: la misma regla que `cancelarUnaVez` —el estado, los pagos y las
+    // correcciones (`motivoQueImpideAnular`) y después lo emitido (`evaluarAnulacion`)—,
     // sin `externoHecho`: pedir la respuesta es parte del flujo, no un bloqueo.
     const motivoNoAnula = await this.motivoQueImpideAnular(this.db, {
       ventaId,
       estado: v.estado,
-      // Ya cargados arriba: sin repetir la consulta.
+      // Ya cargados arriba: sin repetir las consultas.
       tienePagos: pagos.length > 0,
+      tieneCorrecciones: notasCredito.length > 0,
     });
     const veredictoAnular =
       motivoNoAnula === null
@@ -3823,8 +3856,10 @@ export class VentasService {
     /**
      * Gemelo de los cortes de elegibilidad de `crearNotaCreditoEnTransaccion`:
      * no se emite sobre otra corrección (`venta_referencia_id`, no el tipo de
-     * documento: la devolución interna no lo lleva), la venta está pagada o
-     * pagada parcialmente, y tiene `config_calculo` congelada.
+     * documento: la devolución interna no lo lleva), la venta está pagada,
+     * pagada parcialmente o pendiente (esta última solo con "No vuelve plata":
+     * `opcionesDevolucion` no tiene pagos que ofrecerle), y tiene
+     * `config_calculo` congelada.
      *
      * Existe porque `disponibleNotaCredito` es una PROMESA: publicar un monto
      * acreditable sobre un documento que el POST rechaza de plano —medido: el
@@ -3839,7 +3874,7 @@ export class VentasService {
      */
     const elegibleBase =
       v.venta_referencia_id === null &&
-      ['pagada', 'pagada_parcial'].includes(v.estado) &&
+      ['pagada', 'pagada_parcial', 'pendiente'].includes(v.estado) &&
       // Literal al de la emisión (`!original.config_calculo`), no
       // `!== null`: con jsonb no difieren, pero un gemelo que no es literal
       // invita a que alguien "lo alinee" y mueva la conducta sin querer.

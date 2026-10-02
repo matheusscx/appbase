@@ -945,8 +945,9 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   máquina, porque se corrigen distinto;
 - **una venta puede tener más de un documento**, como en el pago mixto: voucher por la parte con
   tarjeta y boleta por la parte en efectivo;
-- **toda devolución deja registro, y siempre baja lo vendido y lo cobrado; el saldo solo baja con
-  "no vuelve plata".** Qué
+- **toda devolución deja registro. Baja lo vendido; baja lo cobrado si devolvió plata (efectivo,
+  máquina o banco, o pasarela); y el saldo solo baja con "no vuelve plata".** Con $100.000
+  cobrados con débito y $40.000 reversados en la máquina, el cobrado del día dice $60.000. Qué
   registro depende de quién emitió:
   - si emitió el sistema, una nota de crédito;
   - si emitió la máquina, la nota de crédito la hace la máquina o su portal, y el sistema registra
@@ -969,9 +970,15 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   debe. Lo devuelto por la pasarela cuenta contra su pago cuando la venta tiene uno solo; la
   propina no cuenta. La pantalla ofrece solo lo que cada pago todavía puede devolver. El rechazo no
   dice ninguna cifra (2026-10-02, gemelo del tope de efectivo);
-- **una venta pendiente se puede anular mientras nadie haya emitido documento**, sin importar la
-  etiqueta. Si alguien emitió, va por nota de crédito. La etiqueta no impide anular: lo que cuenta
-  es lo registrado en `venta_documentos` (más el estado `pendiente` y los pagos). Una boleta del
+- **una venta pendiente admite una nota de crédito, pero solo "no vuelve plata"** (owner,
+  2026-10-02). La distribuidora que factura en otro sistema vende $119.000 a 30 días y el cliente
+  devuelve todo: anular no sirve (el documento ya está hecho), así que el comercio hace la nota en su
+  facturador y la anota acá con su número. La deuda baja, y si llega a cero la venta queda
+  pagada. "Por un pago" no se ofrece en una pendiente: no hay pago por el que vuelva plata;
+- **una venta pendiente, sin pagos y sin notas de crédito, se puede anular mientras nadie haya
+  emitido documento**, sin importar la etiqueta. Si alguien emitió, va por nota de crédito. La etiqueta no impide anular: lo que cuenta
+  es lo registrado en `venta_documentos` (más el estado `pendiente`, los pagos y que no tenga ninguna
+  nota de crédito). Una boleta del
   sistema **solo armada, sin enviar al SII**, no cuenta como emitida: la venta se anula y esa
   boleta queda descartada. Sin esto, con la regla de abajo toda venta nacería documentada y anular
   no aplicaría nunca. Cuando el sistema envíe al SII, lo enviado va por nota de crédito (owner,
@@ -1031,12 +1038,16 @@ salones y online; sin boleta sembrada, sin tipo y sin documentos). Pendiente:
 - (sin `borrador`: la venta en construcción es la `cuenta` de salones)
 - `pendiente` — confirmada, esperando pago (canal físico)
 - `pagada` — pago recibido y confirmado. Las ventas online llegan directamente aquí.
-- `cancelada` — anulada. **Solo desde `pendiente`, sin pagos y mirando lo emitido, no la
-  etiqueta** (`POST /ventas/:id/anular`, permiso propio `Ventas/Anular`, motivo obligatorio):
+- `cancelada` — anulada. **Solo desde `pendiente`, sin pagos, sin ninguna nota de crédito y
+  mirando lo emitido, no la etiqueta** (`POST /ventas/:id/anular`, permiso propio `Ventas/Anular`, motivo obligatorio):
   una boleta del sistema solo armada no bloquea y queda descartada; un documento de la máquina o
   uno ya enviado al SII bloquean; uno hecho por fuera se pregunta ("¿ya lo hiciste en tu
   facturador?"). Una venta cobrada no se anula: se revierte con nota de crédito, y lo que ya se
-  emitió tampoco, porque el SII no permite anular un DTE aceptado.
+  emitió tampoco, porque el SII no permite anular un DTE aceptado (una pendiente con el
+  documento ya hecho se revierte con la nota "no vuelve plata"). Una venta que **ya tiene una nota**
+  (cualquier corrección vigente) tampoco se anula, aunque siga pendiente y sin pagos: anularla repondría
+  el stock otra vez y dejaría una nota viva sobre una venta cancelada; lo que queda se rebaja con otra
+  nota "no vuelve plata" (owner, 2026-10-02).
   Al anular se elige si el stock vuelve. La pantalla lo ofrece **tildado**, salvo que la
   venta venga de una cuenta de salón con **alguna** línea ya enviada a cocina: ahí nace
   **destildado**, porque reponer comida ya cocinada suma al inventario ingredientes que no
@@ -1125,8 +1136,9 @@ muestra un **modal informativo** con ambas fechas.
 
 **Los números de plata del negocio son netos de las notas de crédito (2026-10-01).** Una
 nota de crédito resta del vendido en **su** fecha —aunque la venta que corrige sea de otro
-día— y no cuenta como venta; el cobrado resta lo devuelto ese día (el efectivo que salió
-de la caja y los reembolsos por pasarela); lo que se debe es una sola cuenta (§ 10: total − lo
+día— y no cuenta como venta; el cobrado resta lo devuelto ese día (toda devolución que
+devolvió plata: el efectivo que salió de la caja, lo reversado en la máquina o el banco y los
+reembolsos por pasarela); lo que se debe es una sola cuenta (§ 10: total − lo
 pagado − lo que una nota "no vuelve plata" perdonó, en `saldo-venta.ts`; una nota que devolvió plata
 no lo cambia) y nunca baja de cero; y una venta cancelada no cuenta en ningún total de `/ventas`. La
 pantalla muestra el bruto y lo restado debajo del neto, solo si hay algo que restar. Una

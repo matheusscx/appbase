@@ -117,16 +117,18 @@ Response (200): orden pública + extras
 - `totalReembolsado` (Σ REFUND aprobados de órdenes vinculadas), `esCorreccion` y
   `esNotaCredito`.
 - `GET /ventas/resumen` **resta** las correcciones (NCs y devoluciones internas, reconocidas
-  por `venta_referencia_id`): no las cuenta como ventas y las descuenta de "Total facturado"
-  y del saldo pendiente de la venta que corrigen (detalle en [`ventas.md`](ventas.md)).
+  por `venta_referencia_id`): no las cuenta como ventas y las descuenta de "Total facturado".
+  Del saldo pendiente solo descuenta las que **no devolvieron plata** ("No vuelve plata"): una
+  corrección que sí la devolvió no cambia lo que se debe (detalle en [`ventas.md`](ventas.md)).
 
 ---
 
 ## Backend
 
 - **Corrección** = venta con `venta_referencia_id` → venta original, estado `pagada`,
-  caja/canal/moneda copiados de la original. **La venta original nunca cambia de
-  estado.** Su `tipo_documento_id` es la fila "Nota de Crédito" **del país del tenant**
+  caja/canal/moneda copiados de la original. **La venta original no cambia de
+  estado por la corrección**, salvo "No vuelve plata", que si deja la deuda en 0 la pasa a
+  `pagada`. Su `tipo_documento_id` es la fila "Nota de Crédito" **del país del tenant**
   (`activo: false`, para que no aparezca en el selector del POS) **salvo en la devolución
   interna**, que lo lleva nulo. Una corrección **no se corrige** (400).
 - **La NC se compone: tiene líneas, neto e IVA** (2026-09-04). Dejó de ser un
@@ -330,8 +332,8 @@ a ser **progresivo** (2026-09-03). Relevamiento de las cuatro autoridades:
 📌 **Los resúmenes ya no dependen de este tipo, y las correcciones RESTAN.** `GET /ventas/resumen`
 y el dashboard reconocen una corrección por `ventas.venta_referencia_id IS NOT NULL`, no por
 `es_nota_credito` ni por el id del tipo del país: la devolución interna no lleva el tipo y,
-filtrando por tipo, no restaría. La corrección no cuenta como venta y **resta** del vendido, del
-facturado y del saldo de la venta que corrige. Antes el resumen comparaba contra ese id y, si el
+filtrando por tipo, no restaría. La corrección no cuenta como venta y **resta** del vendido y del
+facturado; del saldo de la venta que corrige resta solo si no devolvió plata ("No vuelve plata"). Antes el resumen comparaba contra ese id y, si el
 país no tenía el tipo, el filtro había que **soltarlo entero** (un `IS DISTINCT FROM NULL` deja
 afuera toda venta sin tipo de documento, que son la mayoría, y los KPIs daban casi cero). Esa
 trampa ya no existe: sin tipo que comparar el filtro nunca se cae. Los topes de la corrección
@@ -367,7 +369,8 @@ resolución que comparten la creación de la nota y las `opcionesDevolucion` del
   que de verdad cubrió ese pago. Un pago sin enlace en una venta con documentos (el que fue todo
   propina, o una venta anterior a este enlace) no se adivina: 400.
 - **"No vuelve plata"** (`devolucion: { sinPlata: true }`): solo con saldo (400 si no), y corrige
-  el documento de lo **no pagado**: la boleta del sistema, el hecho por fuera o la factura.
+  el documento de lo **no pagado**: la boleta del sistema, el hecho por fuera o la factura. Es la
+  única nota que admite una venta `pendiente` (sin pagos, el saldo es el total).
   Nunca una devolución interna. **No pasa del saldo** que la venta todavía debe: total − lo
   aplicado − **lo ya rebajado sin plata por correcciones anteriores** (`ventas.devolucion_via =
   'sin_plata'`), bajo el mismo lock. Es una **serie**: con abonos el saldo puede ser menor que
@@ -381,13 +384,18 @@ resolución que comparten la creación de la nota y las `opcionesDevolucion` del
   con sus dos topes de siempre; **si no**, no se mueve caja (la reversa se hace en la máquina o
   en el banco). Es por **pago** y no por "efectivo": hay máquinas que emiten también el
   efectivo, y una venta puede tener dos pagos en efectivo. La vía `pasarela` (el reembolso de
-  una orden) **nunca** mueve caja y **nunca rechaza**: la plata ya volvió por el proveedor y un
-  hecho consumado se registra. No mira los pagos de la venta (`CobrosService.vincularVenta` liga
-  una orden a cualquier venta): corrige el **único documento válido** de la venta (vigente y no
-  duplicado); con ninguno, o con más de uno (inalcanzable hoy: online y factura son un solo
-  documento, y queda un `warn` con la venta y la orden), la corrección sale sin fila de
-  documento, con el tipo NC, como siempre. Una orden ligada a una corrección sí falla (no se
-  corrige una corrección) y la pasarela lo devuelve como `warning`. Una venta que **nunca tuvo documentos** (país sin boleta) se corrige como siempre,
+  una orden) **nunca** mueve caja y **no se topa por pago**: la plata ya volvió por el proveedor y
+  un hecho consumado se registra. Del pago solo mira cuántos hay (`CobrosService.vincularVenta`
+  liga una orden a cualquier venta): con **exactamente uno** lo anota en `devolucion_pago_id` para
+  que lo devuelto gaste su tope; con 0 o más de uno, no anota ninguno. Corrige el **único
+  documento válido** de la venta (vigente y no duplicado); con ninguno, o con más de uno
+  (inalcanzable hoy: online y factura son un solo documento, y queda un `warn` con la venta y la
+  orden), la corrección sale sin fila de documento, con el tipo NC, como siempre. **Sí puede
+  rechazar**, por lo que no depende del pago: el tope global (la suma de las correcciones no pasa
+  el total de la venta), el tope por documento, o un país sin tipo de nota de crédito sembrado
+  (`exigirTipoNotaCredito`). Entonces la corrección **se pierde**: la pasarela degrada el error a
+  `warning` en la respuesta y al log, y el reembolso ya hecho queda sin nota. Una orden ligada a una
+  corrección también falla (no se corrige una corrección) y se devuelve igual como `warning`. Una venta que **nunca tuvo documentos** (país sin boleta) se corrige como siempre,
   con el tipo NC y sin fila de documento.
 
 **Los topes.** Los dos de hoy (el total de la venta y el efectivo) más **uno por documento**: lo
@@ -525,8 +533,13 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
                 "movimientoCajaId": "<uuid>" | null }
 ```
 
-- Elegibilidad: venta `pagada`/`pagada_parcial` de cualquier canal, nunca sobre
-  otra corrección (`venta_referencia_id`). La venta original no cambia de estado.
+- Elegibilidad: venta `pagada`/`pagada_parcial` de cualquier canal, o `pendiente` **solo con
+  "No vuelve plata"** (owner, 2026-10-02: la distribuidora que factura en otro sistema, vende a
+  30 días y el cliente devuelve todo; el comercio hace la nota en su facturador y la anota acá
+  con su número). Una `pendiente` no tiene pago por el que vuelva plata: una nota "por un pago"
+  sobre ella es 400 con el motivo. Nunca sobre una `cancelada` ni sobre otra corrección
+  (`venta_referencia_id`). La venta original no cambia de estado por la nota, salvo que "No
+  vuelve plata" deje la deuda en 0: entonces `recalcularEstadoDeLaVenta` la pasa a `pagada`.
 - `devolucion` dice por dónde vuelve la plata (ver la sección de arriba): de ahí sale el
   documento que corrige. Un body con `devolverDinero` (la casilla de antes) es 400.
   Con un **pago en efectivo**: movimiento `salida` ("Devolución · Nota de crédito") en la

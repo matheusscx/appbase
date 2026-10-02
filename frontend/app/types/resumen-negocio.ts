@@ -24,7 +24,7 @@ export interface VentasHoy {
   vendidoDesglose: { bruto: string, notasCredito: string }
   /** NETO de lo devuelto: `cobradoDesglose.cobrado − cobradoDesglose.devuelto` en `hoy`. */
   cobrado: Comparado
-  /** De hoy: lo cobrado sin descontar, y lo devuelto hoy (efectivo de las correcciones + REFUND aprobados), positivo. */
+  /** De hoy: lo cobrado sin descontar, y lo devuelto hoy (efectivo de las correcciones, devoluciones por la máquina o el banco y REFUND aprobados), positivo. */
   cobradoDesglose: { cobrado: string, devuelto: string }
   cantidad: Comparado<number>
   /** `null` cuando esa cantidad es 0 o el neto no es positivo: no hay ticket que promediar. */

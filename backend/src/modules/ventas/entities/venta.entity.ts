@@ -142,7 +142,11 @@ export class Venta {
   @Column({ name: 'devolucion_via', type: 'text', nullable: true })
   devolucionVia: DevolucionVia | null;
 
-  /** Con `devolucion_via = 'pago'`: el pago por el que volvió la plata. */
+  /**
+   * El pago por el que volvió la plata: con `devolucion_via = 'pago'`, el que eligió el usuario;
+   * con `'pasarela'`, el único pago de la venta (con 0 o más de uno queda nulo: elegir uno sería
+   * adivinar). En los dos casos lo devuelto gasta el tope de ese pago. Nulo con `'sin_plata'`.
+   */
   @Column({ name: 'devolucion_pago_id', type: 'uuid', nullable: true })
   devolucionPagoId: string | null;
 

@@ -85,18 +85,29 @@ decisiones D1–D12). Lo que sigue es lo que cuenta cada número y el porqué.
   backend con Decimal. `null` si la semana pasada es **cero o negativa**: contra un día
   vacío o negativo el porcentaje no dice nada. Vale para todas las comparaciones del bloque.
 - **Cobrado:** `Σ pago_aplicaciones.monto` con `tipo = 'venta'` de los PAGOS registrados
-  hoy (por `pagos.creado_el`), sean de ventas de hoy o de antes, **menos lo devuelto hoy**.
-  Dejar el vuelto afuera es la misma cuenta que usa `GET /ventas/resumen`. Lo devuelto son
-  dos cosas, y `cobradoDesglose` (`cobrado` y `devuelto`) las muestra juntas:
+  hoy (por `pagos.creado_el`), sean de ventas de hoy o de antes, **menos toda devolución que
+  devolvió plata hoy**: efectivo, máquina o banco, y pasarela. Dejar el vuelto afuera es la misma
+  cuenta que usa `GET /ventas/resumen`. Lo devuelto son tres cosas, y `cobradoDesglose`
+  (`cobrado` y `devuelto`) las muestra juntas:
   - **el efectivo que salió de la caja por una corrección:** la `salida` de
     `movimientos_caja` cuyo `venta_id` es el de una corrección, por la fecha del movimiento.
     Un retiro de caja no lleva `venta_id` y no entra;
+  - **lo devuelto por la máquina o el banco** (owner, 2026-10-02): la corrección con
+    `devolucion_via = 'pago'` de un medio que no es efectivo, por su `total_final` y la fecha de la
+    corrección. Se vendió $100.000 con débito y se reversan $40.000 en el terminal: el cobrado de
+    hoy dice $60.000, no $100.000. Esa devolución no deja salida de caja ni `REFUND`, así que
+    ninguno de los otros dos términos la ve;
   - **los `REFUND` aprobados de la pasarela**, de órdenes que tienen venta, **con o sin**
     nota de crédito (owner, 2026-10-01).
 
+  No se cuenta nada dos veces: el término de la máquina descarta la corrección `sin_plata` (no
+  devolvió nada), la `pasarela` (la cuenta su `REFUND`) y la que dejó una salida de caja (la cuenta
+  el efectivo), y una legacy con `devolucion_via` nulo solo cuenta por su salida de caja. Son
+  complementarios por construcción.
+
   El porqué: la corrección nunca escribe `pagos`, y el efectivo devuelto ya resta en el
   arqueo, así que sin esto el cobrado y la caja del mismo día contaban la devolución al
-  revés. Las dos partes no se pisan porque el reembolso del webhook no devuelve dinero por
+  revés. Las partes no se pisan porque el reembolso del webhook no devuelve dinero por
   caja, no deja salida. El `REFUND` de una orden **sin** venta no resta: ese cobro nunca
   entró a `pagos`.
   Medido: ni una corrección escribe `pagos`/`pago_aplicaciones`, ni una venta cancelada
@@ -119,8 +130,8 @@ decisiones D1–D12). Lo que sigue es lo que cuenta cada número y el porqué.
   sola consulta por request (`zonaHorariaTenant`); `fecha` y `fechaSemanaPasada` se
   derivan de ahí sin volver a consultarla.
 - **Consultas fijas por request**, sin importar cuántas ventas haya: la zona; las ventas
-  (vendido, cantidad y canal en una con `FILTER`); el cobrado (tres agregados cruzados:
-  pagos, efectivo devuelto y `REFUND`); por cobrar (el saldo por venta va en subconsultas
+  (vendido, cantidad y canal en una con `FILTER`); el cobrado (cuatro agregados cruzados:
+  pagos, efectivo devuelto, devuelto por la máquina y `REFUND`); por cobrar (el saldo por venta va en subconsultas
   correlacionadas dentro de **una** agregada, no una por venta); y lo más vendido.
 
 ---
@@ -409,7 +420,9 @@ pendiente con abono parcial (usando un ítem propio de precio no redondo, y leye
 `totalFinal` de la respuesta del servidor, nunca fijado en el test); que anular una
 venta no mueve el vendido; que una nota de crédito de hoy sobre una venta de ayer resta del
 vendido de hoy y no de ayer, y no cuenta como venta (y lo mismo una semana atrás); que el
-efectivo devuelto por una nota resta del cobrado y un retiro de caja ajeno no; que un
+efectivo devuelto por una nota resta del cobrado y un retiro de caja ajeno no; que lo
+devuelto por la máquina (débito) resta del cobrado aunque no deje salida de caja, que efectivo y
+máquina restan **cada uno una vez** y que una nota "no vuelve plata" no resta; que un
 `REFUND` aprobado resta del cobrado con o sin nota, **una sola vez**, y el de una orden sin
 venta no; que por cobrar usa la expresión única del saldo (`saldo-venta.ts`, con piso en 0): solo
 "no vuelve plata" lo rebaja, y una nota que devolvió plata (efectivo, tarjeta o pasarela) no lo cambia; que lo más vendido resta las líneas de una nota y no muestra la de ajuste; que

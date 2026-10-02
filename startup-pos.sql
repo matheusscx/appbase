@@ -1774,7 +1774,7 @@ CREATE TABLE "ventas" (
   -- orden). NULL en lo que no es corrección. Es la auditoría de ese dato y lo que
   -- hace de "no vuelve plata" una serie: lo ya rebajado baja el saldo por rebajar.
   "devolucion_via"        TEXT,
-  "devolucion_pago_id"    UUID,          -- con 'pago': el pago por el que volvió
+  "devolucion_pago_id"    UUID,          -- el pago por el que volvió: el elegido con 'pago', el único de la venta con 'pasarela'
   "comentario"            TEXT,
   -- Config financiera del tenant con la que se calculó: formula, calculoDescuentos,
   -- calculoRecargos, escalaCalculo, modoRedondeo. Sin ella el congelado de las

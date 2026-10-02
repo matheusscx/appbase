@@ -3538,14 +3538,34 @@ describe('VentasService', () => {
         expect(res.disponibleNotaCredito.total).toBe('0.0000');
       });
 
-      it('una venta que todavía no se pagó no ofrece opciones ni las consulta', async () => {
+      it('una venta cancelada no ofrece opciones ni las consulta', async () => {
         ventaDocumentosMock.opcionesDevolucion.mockClear();
-        responder(filaVenta({ estado: 'pendiente' }), TIPO_DOCUMENTO_NC_ID);
+        responder(filaVenta({ estado: 'cancelada' }), TIPO_DOCUMENTO_NC_ID);
 
         const res = await service.findOne(TENANT_ID, VENTA_ORIG_ID, 'u', true);
 
         expect(res.opcionesDevolucion).toEqual([]);
         expect(ventaDocumentosMock.opcionesDevolucion).not.toHaveBeenCalled();
+        expect(res.disponibleNotaCredito.total).toBe('0.0000');
+      });
+
+      it('una venta pendiente ofrece lo que la resolución dice (solo "No vuelve plata": no tiene pagos) y publica el disponible', async () => {
+        ventaDocumentosMock.opcionesDevolucion.mockResolvedValue([
+          {
+            pagoId: null,
+            sinPlata: true,
+            metodo: null,
+            monto: '100.0000',
+            mueveCaja: false,
+            registro: 'nota_externa',
+          },
+        ]);
+        responder(filaVenta({ estado: 'pendiente' }), TIPO_DOCUMENTO_NC_ID);
+
+        const res = await service.findOne(TENANT_ID, VENTA_ORIG_ID, 'u', true);
+
+        expect(res.opcionesDevolucion.map((o) => o.sinPlata)).toEqual([true]);
+        expect(res.disponibleNotaCredito.total).toBe('100.0000');
       });
     });
 
@@ -4385,6 +4405,21 @@ describe('VentasService', () => {
           expect(ventaDocumentosMock.descartarAlAnular).not.toHaveBeenCalled();
         });
 
+        it('una venta con una nota de crédito no se anula: ni repone stock ni mira los documentos', async () => {
+          const base = ncManager.query.getMockImplementation()!;
+          // La pendiente que una nota "no vuelve plata" parcial dejó pendiente y sin pagos.
+          ncManager.query.mockImplementation((sql: string) =>
+            sql.includes('venta_referencia_id = $1')
+              ? Promise.resolve([{ '?column?': 1 }])
+              : base(sql),
+          );
+          await expect(service.cancelar(cancelarParams)).rejects.toThrow(
+            /ya tiene una nota de crédito/,
+          );
+          expect(ventaDocumentosMock.descartarAlAnular).not.toHaveBeenCalled();
+          expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+        });
+
         it('descarta ANTES de reponer stock: lo que bloquea no deja movimientos a medias', async () => {
           await service.cancelar(cancelarParams);
           const ordenDescarte =
@@ -4589,17 +4624,39 @@ describe('VentasService', () => {
         expect(res.totalFinal).toBe('1100.0000');
       });
 
-      it.each(['pendiente', 'cancelada'])(
-        'rechaza ventas en estado %s',
-        async (estado) => {
-          ventaRows = [{ ...ventaOriginalRow, estado }];
-          await expect(
-            service.crearNotaCreditoDesdeVenta(baseParams),
-          ).rejects.toThrow(
-            'Solo se puede emitir nota de crédito de ventas pagadas o pagadas parcialmente',
-          );
-        },
-      );
+      it('rechaza una venta cancelada, aunque la nota sea "no vuelve plata"', async () => {
+        ventaRows = [{ ...ventaOriginalRow, estado: 'cancelada' }];
+        await expect(
+          service.crearNotaCreditoDesdeVenta({
+            ...baseParams,
+            via: { tipo: 'sin_plata' },
+          }),
+        ).rejects.toThrow(/Solo se puede emitir nota de crédito de ventas/);
+      });
+
+      it('una venta pendiente rechaza la nota por un pago: todavía no tiene pagos', async () => {
+        ventaRows = [{ ...ventaOriginalRow, estado: 'pendiente' }];
+        await expect(
+          service.crearNotaCreditoDesdeVenta(baseParams),
+        ).rejects.toThrow(/todavía no tiene pagos/);
+      });
+
+      it('una venta pendiente admite la nota "no vuelve plata"', async () => {
+        ventaRows = [{ ...ventaOriginalRow, estado: 'pendiente' }];
+        ventaDocumentosMock.documentoQueCorrige.mockResolvedValueOnce({
+          documento: null,
+          saldo: '1100.0000',
+          mueveCaja: false,
+          devolvibleDelPago: null,
+        });
+
+        const res = await service.crearNotaCreditoDesdeVenta({
+          ...baseParams,
+          via: { tipo: 'sin_plata' },
+        });
+
+        expect(res.totalFinal).toBe('1100.0000');
+      });
 
       it('rechaza devolver en efectivo más de lo que la venta cobró en efectivo', async () => {
         conSalidaDeCaja();
@@ -5126,6 +5183,29 @@ describe('VentasService', () => {
         const res = await detalle();
         expect(res.anulable).toBe(false);
         expect(res.anularPreguntaExterno).toBe(false);
+      });
+
+      it('con una nota de crédito (pendiente y sin pagos): no es anulable y ni mira los documentos', async () => {
+        responder('pendiente', '0');
+        const base = dataSourceMock.query.getMockImplementation()!;
+        dataSourceMock.query.mockImplementation((sql: string) =>
+          /FROM ventas\s+WHERE venta_referencia_id = \$1 AND tenant_id/.test(
+            sql,
+          )
+            ? Promise.resolve([
+                {
+                  venta_id: 'nc-1',
+                  total_final: '59500.0000',
+                  fecha: new Date('2026-10-02'),
+                  comentario: null,
+                },
+              ])
+            : base(sql),
+        );
+        ventaDocumentosMock.evaluarAnulacion.mockClear();
+        const res = await detalle();
+        expect(res.anulable).toBe(false);
+        expect(ventaDocumentosMock.evaluarAnulacion).not.toHaveBeenCalled();
       });
 
       it('no repite la consulta de pagos: usa los que el detalle ya cargó', async () => {

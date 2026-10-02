@@ -444,9 +444,10 @@ describe('Resumen del negocio (e2e)', () => {
       ).toBe(saldoEsperado);
     });
 
-    /** Venta de `cantidad` unidades del ítem propio, pagada entera en efectivo. El total lo calcula el servidor (puede llevar IVA): se lee de la respuesta. */
+    /** Venta de `cantidad` unidades del ítem propio, pagada entera (en efectivo si no se dice otro medio). El total lo calcula el servidor (puede llevar IVA): se lee de la respuesta. */
     async function crearVentaPagada(
       cantidad: string,
+      metodoPagoId: string = EFECTIVO_ID,
     ): Promise<VentaCreadaResponse> {
       const resV = await request(app.getHttpServer())
         .post('/api/ventas')
@@ -461,7 +462,7 @@ describe('Resumen del negocio (e2e)', () => {
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({
           ventaId: venta.id,
-          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: venta.totalFinal }],
+          pagos: [{ metodoPagoId, monto: venta.totalFinal }],
         });
       expect(pago.status).toBe(201);
       return venta;
@@ -689,6 +690,127 @@ describe('Resumen del negocio (e2e)', () => {
             despues.ventas.cobradoDesglose.cobrado,
           ),
         ).toBe('0');
+      });
+
+      it('una NC devuelta por la máquina (débito) resta del cobrado aunque no deje salida de caja', async () => {
+        // La escena del dueño: se cobró con débito y se devuelve reversando en la
+        // máquina. La plata volvió, pero ni la caja ni la pasarela dejan rastro.
+        const venta = await crearVentaPagada('5', DEBITO_ID);
+        const antes = await leer();
+
+        const nc = await post<IdResponse>(
+          `/api/ventas/${venta.id}/notas-credito`,
+          { monto: '2340', ...(await devolucionDe(venta.id)) },
+        );
+        const despues = await leer();
+
+        const salidas: { n: string }[] = await ds.query(
+          `SELECT COUNT(*)::text AS n FROM movimientos_caja WHERE venta_id = $1`,
+          [nc.id],
+        );
+        expect(salidas[0].n).toBe('0');
+        expect(
+          delta(antes.ventas.cobrado.hoy, despues.ventas.cobrado.hoy),
+        ).toBe('-2340');
+        expect(
+          delta(
+            antes.ventas.cobradoDesglose.devuelto,
+            despues.ventas.cobradoDesglose.devuelto,
+          ),
+        ).toBe('2340');
+        expect(
+          delta(
+            antes.ventas.cobradoDesglose.cobrado,
+            despues.ventas.cobradoDesglose.cobrado,
+          ),
+        ).toBe('0');
+      });
+
+      it('una devolución en efectivo y otra por la máquina restan cada una UNA vez', async () => {
+        const enEfectivo = await crearVentaPagada('5');
+        const enDebito = await crearVentaPagada('4', DEBITO_ID);
+        const antes = await leer();
+
+        await post(`/api/ventas/${enEfectivo.id}/notas-credito`, {
+          monto: '2340',
+          ...(await devolucionDe(enEfectivo.id)),
+        });
+        await post(`/api/ventas/${enDebito.id}/notas-credito`, {
+          monto: '1785',
+          ...(await devolucionDe(enDebito.id)),
+        });
+        const despues = await leer();
+
+        // 2340 + 1785. Si el efectivo entrara por la caja Y por la vía "pago",
+        // serían 2340 de más.
+        expect(
+          delta(antes.ventas.cobrado.hoy, despues.ventas.cobrado.hoy),
+        ).toBe('-4125');
+        expect(
+          delta(
+            antes.ventas.cobradoDesglose.devuelto,
+            despues.ventas.cobradoDesglose.devuelto,
+          ),
+        ).toBe('4125');
+      });
+
+      it('control: una NC "no vuelve plata" no devolvió nada y no resta del cobrado', async () => {
+        const venta = await post<VentaCreadaResponse>('/api/ventas', {
+          lineas: [{ itemId, cantidad: '3' }],
+        });
+        await post('/api/pagos', {
+          ventaId: venta.id,
+          pagos: [
+            {
+              metodoPagoId: DEBITO_ID,
+              monto: new Decimal(venta.totalFinal)
+                .times('0.7')
+                .toFixed(0, Decimal.ROUND_DOWN),
+            },
+          ],
+        });
+        const antes = await leer();
+
+        await post(`/api/ventas/${venta.id}/notas-credito`, {
+          monto: '515',
+          devolucion: { sinPlata: true },
+        });
+        const despues = await leer();
+
+        expect(despues.ventas.cobrado.hoy).toBe(antes.ventas.cobrado.hoy);
+        expect(despues.ventas.cobradoDesglose).toEqual(
+          antes.ventas.cobradoDesglose,
+        );
+      });
+
+      it('una devolución por la máquina de hace una semana resta del cobrado de la semana pasada, no del de hoy', async () => {
+        const venta = await crearVentaPagada('6', DEBITO_ID);
+        const nc = await post<IdResponse>(
+          `/api/ventas/${venta.id}/notas-credito`,
+          { monto: '2210', ...(await devolucionDe(venta.id)) },
+        );
+        const antes = await leer();
+
+        // Solo la corrección pasa a hace 7 días (el reloj, no un estado
+        // inventado: la app no deja fechar una nota).
+        const [movidas] = await ds.query<[unknown[], number]>(
+          `UPDATE ventas SET fecha = fecha - interval '7 days'
+            WHERE venta_id = $1
+        RETURNING venta_id`,
+          [nc.id],
+        );
+        expect(movidas).toHaveLength(1);
+        const despues = await leer();
+
+        expect(
+          delta(
+            antes.ventas.cobrado.semanaPasada,
+            despues.ventas.cobrado.semanaPasada,
+          ),
+        ).toBe('-2210');
+        expect(
+          delta(antes.ventas.cobrado.hoy, despues.ventas.cobrado.hoy),
+        ).toBe('2210');
       });
 
       it('un REFUND aprobado sin NC resta del cobrado y no toca lo vendido ni lo que se debe', async () => {

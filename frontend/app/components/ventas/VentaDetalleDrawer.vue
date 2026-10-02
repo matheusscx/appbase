@@ -327,9 +327,10 @@ const disponibleNC = computed(() =>
   venta.value ? venta.value.disponibleNotaCredito.total : '0',
 )
 
+// Sin lista de estados acá: qué venta admite nota (una pendiente solo "no vuelve
+// plata") lo decide el backend y llega en `disponibleNotaCredito`, que da 0 si no.
 const puedeCrearNC = computed(() =>
   !!venta.value
-  && ['pagada', 'pagada_parcial'].includes(venta.value.estado)
   && !esCorreccion.value
   && new Decimal(disponibleNC.value).gt(0)
   && permissionsStore.can('Ventas', 'Nota de crédito'),

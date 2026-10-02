@@ -1083,6 +1083,24 @@ prohíbe.
   cuadre con la venta? Absorberlo exige calcular cada documento contra lo que queda de la venta, y
   no contra su propio monto. Hoy no bloquea nada, porque no se emite al SII.
 
+- [ ] **En Pagos, "Total cobrado" no resta lo devuelto, y el inicio sí: el mismo día puede mostrar
+  dos cobrados distintos** (backend + frontend; anotado 2026-10-02 por la tarea 15 del frente de
+  emisión, la orquestadora lo mandó acá). `GET /pagos/resumen` (`pagos.service.ts`, `resumen`) suma
+  `Σ(monto − vuelto)` de los pagos y no resta ninguna devolución: ni el efectivo que salió de la caja,
+  ni la reversa en la máquina, ni el `REFUND` de pasarela. El "Cobrado" del inicio sí las resta desde
+  el 2026-10-02 (decisión del owner en el frente de emisión). Escena: un café cobra $100.000 con débito
+  y devuelve $40.000 en la máquina. El inicio dice "Cobrado $60.000"; Pagos dice "Total cobrado
+  $100.000" y "Cobrado hoy $100.000". No es nuevo: Pagos siempre midió los pagos registrados.
+
+  **La pregunta, en lenguaje de local:** en Pagos, ¿"Total cobrado" muestra lo que entró, o lo que
+  entró menos lo devuelto, como el inicio?
+  - **Lo que entró** (como hoy): Pagos es la lista de cobros, y cada devolución se ve en su nota. Costo:
+    las dos pantallas siguen mostrando números distintos para el mismo día, y hay que explicarlo en
+    la pantalla (p.ej. "sin restar devoluciones").
+  - **Lo que entró menos lo devuelto**: Pagos cuadra con el inicio. Costo: el resumen de Pagos pasa a
+    restar las tres devoluciones con la misma regla que el inicio (sin contarlas dos veces), y deja de
+    cuadrar con la suma de las filas de la lista, que son cobros.
+
 ## 5. Carreras de concurrencia
 
 ---

@@ -165,10 +165,10 @@ derivada se ve y la de origen no. No filtra plata ajena, pero es una regla parti
 
 1. Verificar caja abierta para el tenant+usuario.
 2. Cargar la venta y validar que pertenece al tenant y está en estado abonable (`pendiente` o `pagada_parcial`).
-3. Calcular el saldo pendiente: `total_final − Σ(pago_aplicaciones.monto WHERE tipo = 'venta')`.
+3. Calcular el saldo pendiente con la expresión única de `backend/src/modules/ventas/saldo-venta.ts`: `total_final` − lo aplicado a la venta (`pago_aplicaciones` con `tipo = 'venta'`) − lo rebajado por las correcciones "no vuelve plata", con piso en 0. No es `total − aplicado`: una nota que perdonó deuda ya la bajó.
 4. Rechazar todo `metodoPagoId` que no esté en `tenant_metodo_pago` del tenant.
 5. Calcular el excedente de pagos; validar `permite_vuelto` si hay excedente.
-6. En transacción: crear registros en `pagos` → anotar el voucher duplicado de la máquina, si corresponde (ver abajo) → recalcular saldo → actualizar `venta.estado` → registrar movimientos de caja (efectivo).
+6. En transacción: crear registros en `pagos` → anotar el voucher duplicado de la máquina, si corresponde (ver abajo) → enlazar cada pago al documento de la deuda (`enlazarPagosDeAbono`, `pagos.documento_id`) → recalcular saldo → actualizar `venta.estado` → registrar movimientos de caja (efectivo).
 
 ### El abono no documenta, salvo el voucher duplicado (2026-10-02, E1 y E1b)
 

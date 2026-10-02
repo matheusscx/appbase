@@ -196,13 +196,18 @@ Request: { "motivo": "Ingresada por error", "reponerStock": true, "externoHecho"
 Response (201): { "id": "uuid", "estado": "cancelada", "stockRepuesto": true, "motivo": "..." }
 ```
 
-**Solo aplica a una venta `pendiente` y sin pagos, y mira lo emitido, no la etiqueta** (spec
+**Solo aplica a una venta `pendiente`, sin pagos y sin ninguna corrección vigente, y mira lo emitido, no la etiqueta** (spec
 `emision-por-venta` § 3.5, E8 y E10). El `tipo_documento_id` no impide anular: toda venta nace con
 la boleta del país. Lo que decide es `venta_documentos`, solo los documentos **vigentes**
 (`descarte IS NULL`), leídos y actualizados en la misma transacción y después del lock de la venta
 (`lockVentaOriginal`). La regla vive en **un solo lugar**, `VentaDocumentosService.evaluarAnulacion`
-(devuelve `anulable` / `bloqueada` con su motivo / `pregunta_externo`). Las dos preguntas previas
-—el estado y los pagos— también viven en un solo lugar (`motivoQueImpideAnular`). `cancelarUnaVez`
+(devuelve `anulable` / `bloqueada` con su motivo / `pregunta_externo`). Las preguntas previas
+—el estado, los pagos y las correcciones— también viven en un solo lugar (`motivoQueImpideAnular`).
+Una venta con una nota de crédito (`venta_referencia_id` apuntando a ella, vigente) no se anula: la
+nota "no vuelve plata" parcial la deja `pendiente` y sin pagos, y anularla repondría el stock dos veces
+y dejaría una nota viva sobre una venta cancelada (400 *"La venta ya tiene una nota de crédito: lo que
+queda se rebaja con otra nota, no se anula."*; owner, 2026-10-02). Es una consulta (`LIMIT 1`), y el
+detalle reutiliza las notas que ya cargó. `cancelarUnaVez`
 y el `anulable` del detalle (`GET /ventas/:id`, abajo) llaman a las dos, así que la pantalla no
 replica la regla:
 
@@ -224,7 +229,9 @@ reponer stock, así que un 400 no deja movimientos a medias.
 
 `externoHecho?: boolean` en `CancelarVentaDto`: **ausente y `false` son dos conductas distintas**
 (el controller lo pasa tal cual, sin `?? false`). La pregunta de la pantalla sola no alcanza: el
-servidor la exige. Todo lo demás —una venta cobrada, ya enviada— se revierte con nota de crédito.
+servidor la exige. Todo lo demás —una venta cobrada, ya enviada— se revierte con nota de crédito;
+una venta pendiente cuyo documento ya está hecho, con la nota **"No vuelve plata"** (la única que
+admite una venta sin pagos: la deuda baja, y en 0 la venta queda `pagada`).
 
 **El detalle de la venta dice cuánto queda por acreditar** (2026-09-04). `GET /ventas/:id`
 devuelve `disponibleNotaCredito: { total, porPorcion: [{ clasificacion, monto }] }`, para que la
@@ -236,7 +243,8 @@ Lo calcula el backend a propósito: el navegador no replica la cuantización del
 - `porPorcion` es el remanente de cada porción fiscal, y es lo que decide si una devolución
   entra: la serie de notas no puede acreditar más IVA del que la venta cobró.
 - **En cero cuando el documento no admite nota de crédito** — es otra nota de crédito, no está
-  pagada/pagada parcial, no tiene `config_calculo` congelada, o el país del tenant no tiene tipo
+  pagada, pagada parcial ni pendiente (la pendiente admite solo "no vuelve plata", y por eso el
+  detalle le ofrece solo esa opción), no tiene `config_calculo` congelada, o el país del tenant no tiene tipo
   de documento NC. Prometer un monto sobre un documento que la emisión rechaza de plano es el
   mismo error que el campo vino a evitar, al revés.
 - ⚠️ Es el tope del **documento**. Con un pago en efectivo hay además un tope del efectivo que **no
@@ -438,7 +446,7 @@ Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recar
   (`tipos_documento_tributario.es_boleta`, en la misma consulta de la cabecera) y es lo que usa la
   pantalla de anular para decir "esta factura" o "este documento". No se deduce del nombre ni del
   código; `false` si el tipo se borró del catálogo.
-- **`anulable`**: estado `pendiente`, sin pagos y `evaluarAnulacion` (sin `externoHecho`) en
+- **`anulable`**: estado `pendiente`, sin pagos, sin notas de crédito y `evaluarAnulacion` (sin `externoHecho`) en
   `anulable` o `pregunta_externo`. Es la misma regla que `POST /anular`, no una copia.
 - **`anularPreguntaExterno`**: `anulable` **y** hay un `externo` vigente sin número (hay que
   preguntar "¿ya lo hiciste en tu facturador?" antes de anular). Es `false` si la venta no es
@@ -880,7 +888,8 @@ que anular pregunte otra vez lo dice `anularPreguntaExterno`. Bajo cada document
 pantalla no mira estado, pagos ni tipo. Con `anularPreguntaExterno`, `AnularVentaModal` pregunta
 "¿Ya hiciste esta factura en tu facturador?" ("este documento" si `tipoDocumento.esBoleta`). El
 botón no se habilita hasta contestar. "No" anula mandando `externoHecho: false`; "Sí" no anula:
-explica que va por nota de crédito, hecha por fuera y anotada con su número. Sin la pregunta no se
+explica que va por nota de crédito, hecha por fuera y anotada con su número (en el drawer: "Nota
+de crédito" → "No vuelve plata"). Sin la pregunta no se
 manda `externoHecho`.
 
 ### AbonoModal

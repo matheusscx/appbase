@@ -614,6 +614,43 @@ describe('VentaDetalleDrawer — el disponible sale del backend', () => {
   })
 })
 
+describe('VentaDetalleDrawer — una venta pendiente admite la nota "no vuelve plata"', () => {
+  // La distribuidora que vende a 30 días y factura en otro sistema: la venta
+  // sigue pendiente (nada pagado) y el cliente devuelve todo. El backend publica
+  // un disponible y una sola opción, "No vuelve plata"; la pantalla no replica
+  // la regla de qué estado admite nota.
+  const SIN_PLATA = {
+    pagoId: null,
+    sinPlata: true,
+    metodo: null,
+    monto: '7500.0000',
+    mueveCaja: false,
+    registro: 'nota_externa',
+  }
+
+  it('muestra "Nota de crédito" y le pasa al modal solo "No vuelve plata"', async () => {
+    documentoActual = {
+      ...VENTA,
+      estado: 'pendiente',
+      opcionesDevolucion: [SIN_PLATA],
+      disponibleNotaCredito: { total: '7500.0000', porPorcion: [] },
+    } as unknown as typeof VENTA
+    try {
+      const wrapper = await montar()
+
+      const boton = wrapper
+        .findAll('button')
+        .find(b => b.text().trim() === 'Nota de crédito')
+      expect(boton).toBeDefined()
+      const modal = wrapper.findComponent({ name: 'VentasNotaCreditoModal' })
+      expect(modal.props('opciones')).toEqual([SIN_PLATA])
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  })
+})
+
 describe('VentaDetalleDrawer — resincroniza lo que calcula el backend', () => {
   /**
    * Cobrar una venta pendiente CAMBIA su elegibilidad para nota de crédito, y
