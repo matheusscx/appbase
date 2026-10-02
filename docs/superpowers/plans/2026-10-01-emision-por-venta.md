@@ -653,6 +653,27 @@ reescritura: solo del borrado.
 
 ---
 
+## Tarea 14a — Una devolución por un pago no pasa lo que ese pago trajo
+
+**Lo frenó la medición de la tarea 14** y lo decidió la orquestadora (2026-10-02) como el gemelo
+del tope de efectivo, no como regla nueva: ninguna máquina ni banco reversa más de lo que cobró ese
+pago. Medido: venta de $100.000, débito $40.000 en emisor `sistema`, una NC de $90.000 "por el pago
+de débito" daba 201 sin movimiento de caja. Lo que el comercio quiera acreditar de más ya tiene su
+camino: "No vuelve plata", topada por el saldo.
+
+- [ ] Tope = lo que ese pago aplicó a la venta − lo ya devuelto por ese mismo pago
+  (`ventas.devolucion_pago_id`), bajo el mismo lock de la venta. Vale para toda corrección con
+  `devolucion_via = 'pago'`, efectivo incluido (se suma al tope de efectivo, no lo reemplaza).
+- [ ] 400 **sin cifras**, como su gemelo de efectivo (la fuga 5 del modo ciego).
+- [ ] e2e: la escena (NC $90.000 sobre el débito de $40.000 en `sistema` → 400); el caso que deja
+  pasar ($40.000 exactos); la serie (dos NC de $25.000 sobre el mismo pago: la segunda rebota). El
+  mutante que saca el tope rompe la escena.
+- [ ] PRODUCTO § 10: una línea junto a la regla del efectivo.
+- [ ] Revisión con la duda: "¿hay algún camino que cree una corrección con `devolucion_via = 'pago'`
+  sin pasar por este tope?" (el modal, la API directa, el reembolso de pasarela).
+
+---
+
 ## Tarea 14 — Un solo saldo exacto, y el abono cobra solo lo que se debe
 
 **Decisión del owner** (`0df86e11`, PRODUCTO § 10) y **fórmula de la orquestadora** (2026-10-02):
@@ -691,7 +712,7 @@ el saldo no contaba).
 ## Orden y paralelismo
 
 Hecho: `1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9`, más el merge del vendido neto (`33b66887`), que cubre
-la `11`. La `10` quedó absorbida por la 8 y la 9. Sigue: `13 → 14 → 12 → cierre`, de a una, porque
+la `11`. La `10` quedó absorbida por la 8 y la 9. Sigue: `13 → 12 → 14a → 14 → cierre` (la 13 y la 12 ya están), de a una, porque
 las tres tocan `ventas.service.ts`, un archivo de 4.000 líneas que dos implementadores a la vez se
 pisan.
 
