@@ -6,11 +6,8 @@ import {
   filasDevolucionValidas,
   devolucionesPayload,
   notaDevolucion,
-  filaDevolvible,
   filaAcreditable,
   setReponerFila,
-  normalizarParaSoloStock,
-  filaEditable,
   valorDevueltoCuantizado,
   type DetalleVentaDevolucion,
   type FilaDevolucion,
@@ -179,66 +176,12 @@ describe('setReponerFila', () => {
   })
 })
 
-describe('normalizarParaSoloStock', () => {
-  // El gesto: destildar "generar nota de crédito" en el modal de reembolso. Ese
-  // camino EXIGE que toda línea reponga, y su 400 llega después del commit del
-  // reembolso: la plata ya volvió y la mercadería no vuelve al stock.
-  it('la que el operador apagó con el switch vuelve a reponer, sin perder la cantidad', () => {
-    // ⚠️ Es el caso que un filtro por `puedeReponer` deja pasar: la fila PUEDE
-    // reponer, el operador la apagó, y al destildar el switch desaparece del
-    // DOM — así que ese `false` queda invisible y sale en el payload.
-    const filas = [fila('a', { cantidad: '2', reponerStock: false })]
-    const r = normalizarParaSoloStock(filas)
-    expect(r[0]!.reponerStock).toBe(true)
-    expect(r[0]!.cantidad).toBe('2')
-  })
-
-  it('la que no puede reponer pierde la cantidad', () => {
-    const filas = [
-      fila('s', { cantidad: '1', modoInventario: null, puedeReponer: false, reponerStock: false }),
-    ]
-    const r = normalizarParaSoloStock(filas)
-    expect(r[0]!.cantidad).toBe('')
-    expect(r[0]!.reponerStock).toBe(false)
-  })
-
-  it('ninguna fila queda con reponerStock false y cantidad tipeada', () => {
-    // El invariante que el camino de solo-stock necesita, sobre la mezcla.
-    const filas = [
-      fila('a', { cantidad: '2', reponerStock: false }),
-      fila('b', { cantidad: '5' }),
-      fila('s', { cantidad: '1', modoInventario: null, puedeReponer: false, reponerStock: false }),
-    ]
-    expect(
-      normalizarParaSoloStock(filas).filter(f => f.cantidad && !f.reponerStock),
-    ).toEqual([])
-  })
-})
-
-describe('filaEditable', () => {
-  it('en el camino que acredita entra cualquier ítem; en el de stock, solo el que repone', () => {
-    const servicio = fila('s', { modoInventario: null, puedeReponer: false, reponerStock: false })
-    const producto = fila('a')
-    expect(filaEditable(servicio, 'acredita')).toBe(true)
-    expect(filaEditable(servicio, 'solo-stock')).toBe(false)
-    expect(filaEditable(producto, 'acredita')).toBe(true)
-    expect(filaEditable(producto, 'solo-stock')).toBe(true)
-  })
-
-  it('sin disponible no se edita en ningún camino', () => {
-    const f = fila('a', { disponible: '0' })
-    expect(filaEditable(f, 'acredita')).toBe(false)
-    expect(filaEditable(f, 'solo-stock')).toBe(false)
-  })
-})
-
-describe('notaDevolucion / filaDevolvible / filaAcreditable', () => {
+describe('notaDevolucion / filaAcreditable', () => {
   it('servicio (modoInventario null): no vuelve al stock, pero SÍ se acredita', () => {
     // Es el cambio del 2026-09-04: acreditar dejó de exigir que el ítem pudiera
     // volver al inventario.
     const f = fila('s', { modoInventario: null, puedeReponer: false, reponerStock: false })
     expect(notaDevolucion(f)).toBe('Servicio: no vuelve al stock')
-    expect(filaDevolvible(f)).toBe(false)
     expect(filaAcreditable(f)).toBe(true)
   })
 
@@ -247,27 +190,23 @@ describe('notaDevolucion / filaDevolvible / filaAcreditable', () => {
     expect(notaDevolucion(f)).toBe(
       'Modo lote: la vuelta al stock se registra desde Inventario',
     )
-    expect(filaDevolvible(f)).toBe(false)
     expect(filaAcreditable(f)).toBe(true)
   })
 
-  it('modo cantidad con disponible > 0: sin nota, devolvible y acreditable', () => {
+  it('modo cantidad con disponible > 0: sin nota y acreditable', () => {
     const f = fila('a')
     expect(notaDevolucion(f)).toBeNull()
-    expect(filaDevolvible(f)).toBe(true)
     expect(filaAcreditable(f)).toBe(true)
   })
 
-  it('sin disponible no se acredita ni se devuelve, pueda o no reponer', () => {
+  it('sin disponible no se acredita, pueda o no reponer', () => {
     // Las dos mitades del título: una fila que puede reponer y otra que no.
     const producto = fila('a', { disponible: '0' })
     const servicio = fila('s', {
       disponible: '0', modoInventario: null, puedeReponer: false, reponerStock: false,
     })
-    for (const f of [producto, servicio]) {
-      expect(filaDevolvible(f)).toBe(false)
-      expect(filaAcreditable(f)).toBe(false)
-    }
+    expect(filaAcreditable(producto)).toBe(false)
+    expect(filaAcreditable(servicio)).toBe(false)
     expect(notaDevolucion(producto)).toBeNull()
   })
 })

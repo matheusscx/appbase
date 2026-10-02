@@ -1364,7 +1364,7 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
 
   Antes de empezar, traé a tu worktree la rama main LOCAL con `git merge main`: las últimas decisiones son de hoy y quizás no estén en origin. No uses sync_with_base_branch para esto. Leé esto antes que nada:
   - docs/PRODUCTO.md § 10, el bloque "Emitir al SII es una elección de cada venta": las reglas.
-  - docs/agent/pendientes.md § 6, la entrada "Emitir al SII se elige al cerrar cada venta…": el objetivo confirmado, cada decisión con su procedencia y las correcciones. Leé también la entrada siguiente, la del reembolso sin nota de crédito, que ya está decidida y se construye dentro de este frente.
+  - docs/agent/pendientes.md § 6, la entrada "Emitir al SII se elige al cerrar cada venta…": el objetivo confirmado, cada decisión con su procedencia y las correcciones. El reembolso por pasarela sin nota de crédito ya se construyó dentro de este frente (archivada en `resueltos.md`).
   - docs/agent/investigaciones/2026-10-01-emision-por-venta-y-boleta-del-terminal.md (incluye "Cuando el sistema y la máquina no coinciden" y "El comprobante de Webpay en línea") y 2026-10-01-reembolso-sin-nota-credito.md.
   - ADR-010, docs/features/ventas.md, docs/features/impuestos.md, CLAUDE.md, docs/patterns/ y docs/agent/anti-patterns.md.
 
@@ -1389,31 +1389,6 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   3. Código solo en un worktree con ./scripts/entorno.sh. Implementación con subagentes Sonnet. domain-reviewer con las dudas que no verificaste, y api-security-reviewer si tocás controllers o DTOs. Gate completo de CLAUDE.md, recibo del pre-commit y docs vivas en el mismo commit.
   4. No hagas push sin que el owner lo diga, porque main despliega en Railway.
   ```
-
-- [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
-  (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
-  notas de crédito", § 3). Webpay permite reembolsar sin emitir NC (`generarNotaCredito` en el
-  evento de `reembolso-callback.handler.ts`), y es lo que viene marcado: `ReembolsoModal.vue` arranca con
-  la nota destildada. La plata sale, pero ni el vendido ni el débito fiscal bajan, y el saldo de la
-  venta no la ve. Hoy el cobrado tampoco la ve; restarla es la D6 del frente del vendido neto. Además el `REFUND` no
-  guarda la NC que generó (`pasarela_transacciones` no tiene el id; `aplicarPostReembolso` solo
-  lo devuelve en la respuesta). Por eso el saldo pendiente no puede contar los reembolsos, y una
-  venta pagada en parte por pasarela, con `REFUND` y NC, muestra de menos lo reembolsado. Lo
-  decidió el owner: "lo vemos aparte". Pregunta para él: ¿un reembolso sin NC debería existir, o
-  todo reembolso emite NC? Y si existe, ¿cómo se lo ve en el saldo?
-  ✅ **Decidida (owner, 2026-10-01): todo reembolso deja registro.** Se construye dentro del frente
-  de emisión, en la entrada de arriba. Lo que sigue es la historia de cómo se llegó.
-  **Quedó en pausa (owner, 2026-10-01):** cuando se le pasó la pregunta contestó "no sé qué hacer con
-  esto", y la dejó pendiente. No se toma hasta que la retome. El contexto está en la spec del frente
-  que la destapó:
-  [`2026-10-01-vendido-neto-de-notas-credito-design.md`](../superpowers/specs/2026-10-01-vendido-neto-de-notas-credito-design.md)
-  (D10, D12 y § 6). La investigación de mercado ya está hecha:
-  [`2026-10-01-reembolso-sin-nota-credito.md`](investigaciones/2026-10-01-reembolso-sin-nota-credito.md).
-  ⚠️ **"No facturamos todo"** (owner, 2026-10-01). Medido: la venta online nace sin tipo de
-  documento, y es justo la que se reembolsa por Webpay. El POS y salones mandan Boleta por
-  defecto. La pregunta no es solo NC sí o no: es qué registra una devolución sobre una venta **sin**
-  documento, donde una NC fiscal no corresponde, y cómo baja el vendido y el saldo sin ella.
-  Detalle en la investigación, sección "Qué hace hoy el sistema".
 
 - [ ] **Una nota de crédito que se reintenta se emite dos veces** (fiscal, **frente propio**,
   anotado 2026-09-19 al diseñar la idempotencia del cobro). `POST /ventas/:id/notas-credito`

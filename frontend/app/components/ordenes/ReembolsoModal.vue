@@ -33,7 +33,6 @@ const { formatMonto } = useFormatters()
 const apiUrl = config.public.apiUrl
 
 const monto = ref('')
-const generarNotaCredito = ref(false)
 const cargandoVenta = ref(false)
 const submitting = ref(false)
 const {
@@ -42,28 +41,9 @@ const {
   limpiar,
   setCantidad,
   setReponer,
-  normalizarSoloStock,
   filasValidas,
   devoluciones,
 } = useDevolucionInventario()
-
-/**
- * Con nota de crédito, cualquier ítem vendido se acredita y volver al stock es
- * una elección por línea. **Sin** nota, estas líneas van por el camino que solo
- * mueve inventario, y ahí el backend rechaza lo que no puede reponer — así que
- * ni se ofrece.
- */
-const modoLista = computed<'acredita' | 'solo-stock'>(() =>
-  generarNotaCredito.value ? 'acredita' : 'solo-stock',
-)
-
-// Destildar la nota manda estas líneas al camino que solo mueve stock, y ahí el
-// backend exige que TODAS repongan. Son dos casos: la que no puede reponer
-// pierde la cantidad, y la que el operador apagó con el switch vuelve a
-// reponer — porque el switch ya no está en pantalla para arreglarlo.
-watch(generarNotaCredito, (v) => {
-  if (!v) normalizarSoloStock()
-})
 
 async function cargarLineasVenta(ventaId: string) {
   cargandoVenta.value = true
@@ -83,7 +63,6 @@ async function cargarLineasVenta(ventaId: string) {
 watch(open, (v) => {
   if (!v) return
   monto.value = props.disponible
-  generarNotaCredito.value = false
   limpiar()
   if (props.ventaId) cargarLineasVenta(props.ventaId)
 })
@@ -99,7 +78,6 @@ async function confirmar() {
   submitting.value = true
   try {
     const body: Record<string, unknown> = { monto: monto.value }
-    if (props.ventaId && generarNotaCredito.value) body.generarNotaCredito = true
     if (props.ventaId && devoluciones.value.length) body.devoluciones = devoluciones.value
 
     const res = await useApiFetch<ReembolsoSuccessPayload>(
@@ -151,17 +129,10 @@ async function confirmar() {
         <template v-if="ventaId">
           <USeparator />
 
-          <UCheckbox
-            v-model="generarNotaCredito"
-            label="Generar nota de crédito"
-            description="Documento interno por el monto reembolsado, sin emisión SII."
-          />
-
           <DevolucionInventarioLista
             :filas="filas"
             :valida="filasValidas"
             :cargando="cargandoVenta"
-            :modo="modoLista"
             @set-cantidad="setCantidad"
             @set-reponer="setReponer"
           />

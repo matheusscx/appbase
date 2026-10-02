@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   BadRequestException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -274,11 +275,14 @@ export class CobrosService {
     // Sin inicializador: TS conserva el tipo declarado para vars asignadas en
     // un closure (con `= null` lo estrecharía a `null` en el catch).
     let ctxTimeout: CtxAuditoriaReembolso | undefined;
-    // Orden y aprobación capturadas para el hook post-commit de NC/devoluciones:
-    // el hook corre DESPUÉS del commit (correrlo dentro alargaría el FOR UPDATE
-    // durante la transacción de ventas y, si la NC fallara, revertiría un
-    // reembolso que el proveedor ya ejecutó).
-    let ctxHook: { orden: PasarelaOrden; aprobada: boolean } | undefined;
+    // Orden, aprobación y REFUND capturados para el hook post-commit de la
+    // corrección: el hook corre DESPUÉS del commit (correrlo dentro alargaría el
+    // FOR UPDATE durante la transacción de ventas y, si la corrección fallara,
+    // revertiría un reembolso que el proveedor ya ejecutó). El id del REFUND es
+    // lo que el hook liga con la corrección que crea.
+    let ctxHook:
+      | { orden: PasarelaOrden; aprobada: boolean; transaccionId: string }
+      | undefined;
 
     try {
       const publico = await this.db.transaccion(async (manager) => {
@@ -378,7 +382,11 @@ export class CobrosService {
           orden.estado = 'reembolsada';
           await manager.save(orden);
         }
-        ctxHook = { orden, aprobada: resultado.aprobada };
+        ctxHook = {
+          orden,
+          aprobada: resultado.aprobada,
+          transaccionId: txRefund.transaccionId,
+        };
         return this.toPublico(orden, {
           reembolsoAprobado: resultado.aprobada,
           reembolso: {
@@ -421,64 +429,102 @@ export class CobrosService {
   }
 
   /**
-   * Hook post-commit del reembolso: notifica al handler registrado (ventas)
-   * para generar la NC y/o devoluciones de stock pedidas en el DTO. El REFUND
-   * ya está commiteado y la plata ya volvió al cliente, así que un fallo aquí
-   * NUNCA revierte el reembolso: se degrada a `warning` en la respuesta + log.
+   * Hook post-commit del reembolso: todo REFUND aprobado de una orden con venta
+   * deja su corrección en ventas (con las devoluciones de stock pedidas dentro)
+   * y el REFUND queda ligado a ella (`correccion_venta_id`). El REFUND ya está
+   * commiteado y la plata ya volvió al cliente, así que un fallo aquí NUNCA
+   * revierte el reembolso: se degrada a `warning` en la respuesta + log, y el
+   * REFUND queda sin corrección ligada.
    */
   private async aplicarPostReembolso(
     publico: Record<string, unknown>,
     dto: CreateReembolsoDto,
-    ctx: { orden: PasarelaOrden; aprobada: boolean } | undefined,
+    ctx:
+      | { orden: PasarelaOrden; aprobada: boolean; transaccionId: string }
+      | undefined,
     usuarioId?: string,
   ): Promise<Record<string, unknown>> {
-    const solicitado =
-      dto.generarNotaCredito === true || (dto.devoluciones?.length ?? 0) > 0;
-    if (!solicitado || !ctx?.aprobada) return publico;
+    if (!ctx?.aprobada) return publico;
 
+    // Una orden sin venta (cobro por la API externa, sin venta ligada) no tiene
+    // lado de ventas que corregir: es legítimo y no es un aviso. Solo avisa si
+    // se pidieron devoluciones de stock, que sin venta no se pueden aplicar.
     if (!ctx.orden.ventaId)
-      return {
-        ...publico,
-        warning:
-          'El reembolso fue procesado, pero la orden no tiene una venta vinculada: no se generó nota de crédito ni devoluciones',
-      };
+      return (dto.devoluciones?.length ?? 0) > 0
+        ? {
+            ...publico,
+            warning:
+              'El reembolso fue procesado, pero la orden no tiene una venta vinculada: no se generaron las devoluciones',
+          }
+        : publico;
 
     const handler = this.reembolsoRegistry.get();
     if (!handler) {
       this.logger.error(
-        `Reembolso con NC/devoluciones solicitadas pero sin handler registrado (orden ${ctx.orden.ordenId})`,
+        `Reembolso aprobado pero sin handler registrado (orden ${ctx.orden.ordenId})`,
       );
       return {
         ...publico,
         warning:
-          'El reembolso fue procesado, pero no hay un módulo de ventas registrado para generar la nota de crédito/devoluciones',
+          'El reembolso fue procesado, pero no hay un módulo de ventas registrado para generar la nota de crédito',
       };
     }
 
+    let correccionVentaId: string;
     try {
-      const resultado = await handler.onReembolsoAprobado({
+      ({ correccionVentaId } = await handler.onReembolsoAprobado({
         tenantId: ctx.orden.tenantId,
         ordenId: ctx.orden.ordenId,
         codigoOrden: ctx.orden.codigoOrden,
         ventaId: ctx.orden.ventaId,
         monto: dto.monto,
-        generarNotaCredito: dto.generarNotaCredito === true,
         devoluciones: dto.devoluciones ?? [],
-        usuarioId: usuarioId ?? '',
-      });
-      return resultado?.notaCreditoId
-        ? { ...publico, notaCreditoId: resultado.notaCreditoId }
-        : publico;
+        usuarioId: usuarioId ?? null,
+      }));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.logger.error(
-        `NC/devolución falló tras reembolso aprobado (orden ${ctx.orden.ordenId}): ${msg}`,
+        `La corrección falló tras reembolso aprobado (orden ${ctx.orden.ordenId}): ${msg}`,
+      );
+      // Al cliente (también el de la llave de API) solo llega un motivo de
+      // negocio —un 400/422 que el servicio lanzó para ser leído—; el texto de un
+      // error de base o de código es del log, no de la respuesta.
+      return {
+        ...publico,
+        warning:
+          e instanceof HttpException
+            ? `El reembolso fue procesado, pero la nota de crédito/devolución falló: ${msg}`
+            : 'El reembolso fue procesado, pero la nota de crédito/devolución falló por un error interno; el detalle quedó en el registro del servidor.',
+      };
+    }
+
+    const ligadoAlRefund = await this.transacciones
+      .vincularCorreccion(
+        ctx.orden.tenantId,
+        ctx.transaccionId,
+        correccionVentaId,
+      )
+      .catch((e: unknown) => {
+        this.logger.error(
+          `No se pudo ligar la corrección ${correccionVentaId} al REFUND ${ctx.transaccionId} (orden ${ctx.orden.ordenId}): ${e instanceof Error ? e.message : String(e)}`,
+        );
+        return false;
+      });
+    if (!ligadoAlRefund) {
+      // Un REFUND sin vínculo es la señal de "falta la corrección": que quede
+      // así no puede ser silencioso, ni por un error ni por un UPDATE que no
+      // tocó ninguna fila.
+      this.logger.error(
+        `La corrección ${correccionVentaId} no quedó ligada al REFUND ${ctx.transaccionId} (orden ${ctx.orden.ordenId})`,
       );
       return {
         ...publico,
-        warning: `El reembolso fue procesado, pero la nota de crédito/devolución falló: ${msg}`,
+        notaCreditoId: correccionVentaId,
+        warning:
+          'El reembolso fue procesado y la nota de crédito se generó, pero no se pudo ligar al reembolso; el detalle quedó en el registro del servidor.',
       };
     }
+    return { ...publico, notaCreditoId: correccionVentaId };
   }
 
   /**

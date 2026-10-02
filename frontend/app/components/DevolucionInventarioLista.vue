@@ -1,29 +1,12 @@
 <script setup lang="ts">
 import type { FilaDevolucion } from '~/composables/useDevolucionInventario'
 
-withDefaults(
-  defineProps<{
-    filas: FilaDevolucion[]
-    /** filasValidas del composable useDevolucionInventario */
-    valida: boolean
-    cargando?: boolean
-    /**
-     * Qué hace el camino que va a recibir estas líneas, que NO es lo mismo en
-     * los dos modales que usan esta lista:
-     *
-     * - `'acredita'` — hay nota de crédito de por medio: **cualquier ítem
-     *   vendido** entra, y volver al stock es una elección por línea.
-     * - `'solo-stock'` — no hay documento (reembolso sin nota): ahí una línea
-     *   que no repone no tiene nada que hacer y el backend la rechaza, así que
-     *   no se ofrece.
-     *
-     * ⚠️ En el modal de reembolso el modo NO es fijo: depende del checkbox
-     * "generar nota de crédito", así que cambia mientras el modal está abierto.
-     */
-    modo?: 'acredita' | 'solo-stock'
-  }>(),
-  { modo: 'solo-stock' },
-)
+defineProps<{
+  filas: FilaDevolucion[]
+  /** filasValidas del composable useDevolucionInventario */
+  valida: boolean
+  cargando?: boolean
+}>()
 const emit = defineEmits<{
   setCantidad: [itemId: string, valor: string]
   setReponer: [itemId: string, valor: boolean]
@@ -32,9 +15,7 @@ const emit = defineEmits<{
 
 <template>
   <div class="flex flex-col gap-2">
-    <span class="text-sm text-muted">{{
-      modo === 'acredita' ? 'Acreditar ítems de la venta (opcional)' : 'Devolver a inventario (opcional)'
-    }}</span>
+    <span class="text-sm text-muted">Acreditar ítems de la venta (opcional)</span>
     <div v-if="cargando" class="text-sm text-muted">
       Cargando líneas de la venta…
     </div>
@@ -50,17 +31,11 @@ const emit = defineEmits<{
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm">{{ fila.descripcion }}</p>
           <p class="text-xs text-muted">
-            <template v-if="modo === 'solo-stock' && notaDevolucion(fila)">
-              {{ notaDevolucion(fila) }}
-            </template>
-            <template v-else>Disponible: {{ fila.disponible }}</template>
+            Disponible: {{ fila.disponible }}
           </p>
         </div>
 
-        <!-- Solo con nota de crédito: sin documento no hay nada que elegir,
-             porque la línea que no repone directamente no va. -->
         <USwitch
-          v-if="modo === 'acredita'"
           :model-value="fila.reponerStock"
           :disabled="!fila.puedeReponer"
           :label="fila.puedeReponer ? 'Vuelve al stock' : notaDevolucion(fila) ?? 'No vuelve al stock'"
@@ -73,7 +48,7 @@ const emit = defineEmits<{
           inputmode="decimal"
           placeholder="0"
           class="w-24"
-          :disabled="!filaEditable(fila, modo)"
+          :disabled="!filaAcreditable(fila)"
           @update:model-value="emit('setCantidad', fila.itemId, String($event ?? ''))"
         />
       </div>

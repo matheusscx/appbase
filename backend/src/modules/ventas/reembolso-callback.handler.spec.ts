@@ -10,7 +10,6 @@ describe('VentasReembolsoHandler', () => {
   let registry: ReembolsoCallbackRegistry;
   let ventasService: {
     crearNotaCredito: jest.Mock;
-    registrarDevolucionesPorReembolso: jest.Mock;
     viaDeReembolsoPasarela: jest.Mock;
   };
   let monedasService: { decimalesDeLaVenta: jest.Mock };
@@ -21,7 +20,6 @@ describe('VentasReembolsoHandler', () => {
     codigoOrden: 'O-1',
     ventaId: 'venta-1',
     monto: '1100.0000',
-    generarNotaCredito: false,
     devoluciones: [] as { itemId: string; cantidad: string }[],
     usuarioId: 'user-1',
   };
@@ -31,7 +29,6 @@ describe('VentasReembolsoHandler', () => {
       crearNotaCredito: jest
         .fn()
         .mockResolvedValue({ id: 'nc-1', totalFinal: '1100.0000' }),
-      registrarDevolucionesPorReembolso: jest.fn().mockResolvedValue(undefined),
       viaDeReembolsoPasarela: jest
         .fn()
         .mockResolvedValue({ tipo: 'pasarela', documentoId: 'doc-boleta' }),
@@ -59,10 +56,9 @@ describe('VentasReembolsoHandler', () => {
     expect(registry.get()).toBe(handler);
   });
 
-  it('con generarNotaCredito delega a crearNotaCredito con comentario autodescriptivo y devuelve el id', async () => {
+  it('delega a crearNotaCredito con comentario autodescriptivo, las devoluciones dentro, y devuelve el id de la corrección', async () => {
     const res = await handler.onReembolsoAprobado({
       ...eventoBase,
-      generarNotaCredito: true,
       devoluciones: [{ itemId: 'item-1', cantidad: '2' }],
     });
     expect(ventasService.crearNotaCredito).toHaveBeenCalledWith({
@@ -81,44 +77,26 @@ describe('VentasReembolsoHandler', () => {
       'venta-1',
       'orden-1',
     );
-    expect(res).toEqual({ notaCreditoId: 'nc-1' });
-    expect(
-      ventasService.registrarDevolucionesPorReembolso,
-    ).not.toHaveBeenCalled();
+    expect(res).toEqual({ correccionVentaId: 'nc-1' });
   });
 
-  it('sin NC pero con devoluciones delega al método hermano ligado a la venta original', async () => {
-    const res = await handler.onReembolsoAprobado({
-      ...eventoBase,
-      devoluciones: [{ itemId: 'item-1', cantidad: '1' }],
-    });
-    expect(
-      ventasService.registrarDevolucionesPorReembolso,
-    ).toHaveBeenCalledWith({
-      tenantId: 't-1',
-      usuarioId: 'user-1',
-      ventaOriginalId: 'venta-1',
-      devoluciones: [{ itemId: 'item-1', cantidad: '1' }],
-      comentario: 'Devolución por reembolso orden O-1',
-    });
-    expect(res).toEqual({});
-    expect(ventasService.crearNotaCredito).not.toHaveBeenCalled();
-  });
-
-  it('sin NC ni devoluciones no hace nada', async () => {
+  it('todo reembolso deja su corrección, también el que no pide devolver ningún ítem', async () => {
+    // Antes la nota dependía de una casilla y, sin ella, un reembolso sin
+    // devoluciones no dejaba ningún registro del lado de ventas.
     const res = await handler.onReembolsoAprobado(eventoBase);
-    expect(res).toEqual({});
-    expect(ventasService.crearNotaCredito).not.toHaveBeenCalled();
-    expect(
-      ventasService.registrarDevolucionesPorReembolso,
-    ).not.toHaveBeenCalled();
+
+    expect(ventasService.crearNotaCredito).toHaveBeenCalledTimes(1);
+    expect(ventasService.crearNotaCredito).toHaveBeenCalledWith(
+      expect.objectContaining({ monto: '1100.0000', devoluciones: [] }),
+    );
+    expect(res).toEqual({ correccionVentaId: 'nc-1' });
   });
 
   it('propaga los errores (los captura pasarela, que responde con warning)', async () => {
     ventasService.crearNotaCredito.mockRejectedValueOnce(new Error('boom'));
-    await expect(
-      handler.onReembolsoAprobado({ ...eventoBase, generarNotaCredito: true }),
-    ).rejects.toThrow('boom');
+    await expect(handler.onReembolsoAprobado(eventoBase)).rejects.toThrow(
+      'boom',
+    );
   });
 
   it('una nota sobre una corrección (la orden quedó ligada a una nota) no se emite: el error llega con su motivo, para que la pasarela lo devuelva como warning', async () => {
@@ -130,14 +108,13 @@ describe('VentasReembolsoHandler', () => {
 
     const resultado = handler.onReembolsoAprobado({
       ...eventoBase,
-      generarNotaCredito: true,
     });
 
     await expect(resultado).rejects.toThrow(
       'No se puede emitir una nota de crédito sobre otra nota de crédito',
     );
     // Y no devolvió ningún id: no hay corrección creada que anunciar.
-    await expect(resultado).rejects.not.toHaveProperty('notaCreditoId');
+    await expect(resultado).rejects.not.toHaveProperty('correccionVentaId');
   });
 
   it('un reembolso con decimales de más se cuantiza y se registra, no se rechaza', async () => {
@@ -145,7 +122,6 @@ describe('VentasReembolsoHandler', () => {
 
     await handler.onReembolsoAprobado({
       ...eventoBase,
-      generarNotaCredito: true,
       monto: '1000.5000',
     });
 
@@ -162,7 +138,6 @@ describe('VentasReembolsoHandler', () => {
 
     await handler.onReembolsoAprobado({
       ...eventoBase,
-      generarNotaCredito: true,
       monto: '1000.5000',
     });
 
@@ -177,7 +152,6 @@ describe('VentasReembolsoHandler', () => {
 
     await handler.onReembolsoAprobado({
       ...eventoBase,
-      generarNotaCredito: true,
       monto: '1000',
     });
 
@@ -194,7 +168,6 @@ describe('VentasReembolsoHandler', () => {
     });
     await handler.onReembolsoAprobado({
       ...eventoBase,
-      generarNotaCredito: true,
       monto: '1000.5000',
     });
     const montoHalfUp = (
@@ -208,7 +181,6 @@ describe('VentasReembolsoHandler', () => {
     });
     await handler.onReembolsoAprobado({
       ...eventoBase,
-      generarNotaCredito: true,
       monto: '1000.5000',
     });
     const montoFloor = (
@@ -228,7 +200,6 @@ describe('VentasReembolsoHandler', () => {
 
     await handler.onReembolsoAprobado({
       ...eventoBase,
-      generarNotaCredito: true,
       monto: '1000.5000',
     });
 

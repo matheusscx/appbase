@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, IsNull, Repository } from 'typeorm';
 import { PasarelaTransaccion } from '../entities/pasarela-transaccion.entity';
 
 const CLAVES_SENSIBLES = new Set([
@@ -85,5 +85,30 @@ export class TransaccionesService {
       where: { tenantId, ordenId },
       order: { fechaTransaccion: 'ASC' },
     });
+  }
+
+  /**
+   * Liga un REFUND con la corrección que dejó en ventas. Es lo ÚNICO que se
+   * escribe sobre una fila ya registrada: el vínculo nace después del commit del
+   * REFUND (lo crea el hook post-commit), y no toca `estado` ni nada de lo que la
+   * pasarela informó. Escribe una sola vez (`correccion_venta_id IS NULL`) y
+   * acotado al tenant del token, no al id suelto. Devuelve si ligó una fila: `false`
+   * es que no había ninguna que ligar (otro tenant, ya ligada, borrada).
+   */
+  async vincularCorreccion(
+    tenantId: string,
+    transaccionId: string,
+    correccionVentaId: string,
+  ): Promise<boolean> {
+    const res = await this.repo.update(
+      {
+        transaccionId,
+        tenantId,
+        eliminadoEl: IsNull(),
+        correccionVentaId: IsNull(),
+      },
+      { correccionVentaId },
+    );
+    return res.affected === 1;
   }
 }

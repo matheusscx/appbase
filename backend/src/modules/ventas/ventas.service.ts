@@ -138,7 +138,12 @@ export interface VentasResumen {
  */
 export interface CrearNotaCreditoParams {
   tenantId: string;
-  usuarioId: string;
+  /**
+   * `null` solo en el reembolso por la API externa (llave de API, sin usuario).
+   * Sirve para el movimiento de stock (`usuario_id` nulo); mover caja exige
+   * usuario y esa rama nunca corre para la vía `pasarela`.
+   */
+  usuarioId: string | null;
   ventaOriginalId: string;
   monto: string;
   devoluciones?: DevolucionReembolso[];
@@ -2411,9 +2416,17 @@ export class VentasService {
       // otro medio la reversa se hace por fuera (la máquina, el banco) y no se
       // mueve caja.
       if (destino.mueveCaja) {
+        // `mueveCaja` solo sale de la vía `pago` (efectivo), que trae el usuario
+        // del token; la vía `pasarela` —la única que llega sin usuario— devuelve
+        // siempre `mueveCaja: false` (`documentoQueCorrige`).
+        const usuarioId = params.usuarioId;
+        if (usuarioId === null)
+          throw new UnprocessableEntityException(
+            'Mover caja requiere un usuario autenticado',
+          );
         const caja = await this.cajaService.findActiva(
           params.tenantId,
-          params.usuarioId,
+          usuarioId,
         );
         if (!caja)
           throw new UnprocessableEntityException(
@@ -2469,7 +2482,7 @@ export class VentasService {
             'No se puede devolver en efectivo más de lo que esta venta cobró en efectivo. Emití la nota de crédito sin devolución de dinero, o devolvé por el medio de pago original.',
             {
               cajaId: caja.id,
-              usuarioId: params.usuarioId,
+              usuarioId,
               tipo: 'devolucion_nc',
               motivo: 'supera_efectivo_de_la_venta',
               montoSolicitado: new Decimal(params.monto).toFixed(4),
@@ -2484,7 +2497,7 @@ export class VentasService {
         if (new Decimal(saldoEfectivo).minus(params.monto).lt(0))
           throw new IntentoRechazadoError('Saldo insuficiente en caja', {
             cajaId: caja.id,
-            usuarioId: params.usuarioId,
+            usuarioId,
             tipo: 'devolucion_nc',
             motivo: 'saldo_insuficiente',
             montoSolicitado: new Decimal(params.monto).toFixed(4),
@@ -2573,90 +2586,6 @@ export class VentasService {
     devoluciones: DevolucionReembolso[];
   }> {
     return this.crearNotaCredito({ ...params, validarVentaElegible: true });
-  }
-
-  /**
-   * Devoluciones de stock por reembolso SIN nota de crédito: mismos
-   * candados y validaciones, pero los movimientos quedan ligados a la venta
-   * original y no se crea documento.
-   */
-  async registrarDevolucionesPorReembolso(params: {
-    tenantId: string;
-    usuarioId: string;
-    ventaOriginalId: string;
-    devoluciones: DevolucionReembolso[];
-    comentario?: string;
-  }): Promise<void> {
-    if (!params.devoluciones.length) return;
-
-    // Mismo loop que `crearNotaCredito()`, por la misma razón y con la misma
-    // precondición: su único llamador es el hook post-commit del reembolso, sin
-    // transacción envolvente.
-    for (let intento = 0; ; intento++) {
-      try {
-        return await this.registrarDevolucionesPorReembolsoUnaVez(params);
-      } catch (error) {
-        if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
-          throw error;
-      }
-    }
-  }
-
-  /**
-   * Un intento de `registrarDevolucionesPorReembolso`: abre su propia
-   * transacción, que es lo que el loop de reintento necesita para que el
-   * segundo intento entre limpio (mismo criterio que `cancelarUnaVez`).
-   */
-  private async registrarDevolucionesPorReembolsoUnaVez(params: {
-    tenantId: string;
-    usuarioId: string;
-    ventaOriginalId: string;
-    devoluciones: DevolucionReembolso[];
-    comentario?: string;
-  }): Promise<void> {
-    await this.db.transaccion(async (manager) => {
-      await this.lockVentaOriginal(
-        manager,
-        params.tenantId,
-        params.ventaOriginalId,
-      );
-      // `'exigir'` aunque venga del webhook: este método existe SOLO para mover
-      // stock —no emite documento— así que una línea que no repone no tiene
-      // nada que hacer acá, y dejarla pasar en silencio la haría desaparecer
-      // sin que nada la acredite. Con esta política, TODAS las de abajo
-      // reponen.
-      const lineas = await this.validarDevolucionesReembolso(
-        manager,
-        params.ventaOriginalId,
-        params.devoluciones,
-        'exigir',
-      );
-      const costosOriginales = await this.costosDeSalidaPorItem(
-        manager,
-        params.ventaOriginalId,
-      );
-      // Resuelto UNA vez antes del loop: `localDe` por línea sería una
-      // consulta por línea devuelta, N+1.
-      const ubicacionLocalId = lineas.length
-        ? await this.ubicacionesService.localDe(params.tenantId)
-        : null;
-      // Mismo orden que `crearNotaCredito()`: por `itemId`, con `localeCompare`.
-      lineas.sort((a, b) => a.itemId.localeCompare(b.itemId));
-      for (const linea of lineas) {
-        await this.inventarioService.registrarMovimiento(manager, {
-          tenantId: params.tenantId,
-          itemId: linea.itemId,
-          ubicacionId: ubicacionLocalId!,
-          tipo: 'entrada',
-          motivo: 'devolucion',
-          cantidad: linea.cantidad,
-          costoUnitario: costosOriginales.get(linea.itemId) ?? null,
-          usuarioId: params.usuarioId,
-          ventaId: params.ventaOriginalId,
-          comentario: params.comentario,
-        });
-      }
-    });
   }
 
   /**
@@ -2795,10 +2724,8 @@ export class VentasService {
    * - los movimientos de devolución de esta venta o de sus notas (lo repuesto).
    *
    * `GREATEST` y no la suma porque la línea que repone deja las DOS huellas y
-   * sumarlas contaría doble. Los dos casos donde una sola huella existe son
-   * reales: `registrarDevolucionesPorReembolso` mueve stock sin emitir
-   * documento, y el webhook puede emitir la nota con las devoluciones fuera del
-   * documento.
+   * sumarlas contaría doble. El caso donde una sola huella existe es real: la
+   * línea que se acredita sin reponer deja solo la del documento.
    *
    * Filtra por `venta_referencia_id` sin mirar el tipo de documento porque esa
    * columna la escribe un solo lugar —la creación de la nota de crédito—, mismo
@@ -2869,8 +2796,8 @@ export class VentasService {
     ventaOriginalId: string,
     devoluciones: DevolucionReembolso[],
     /**
-     * Qué hacer con una línea que NO va a volver al stock. Son tres caminos con
-     * tres políticas, y por eso no alcanza un booleano:
+     * Qué hacer con una línea que NO va a volver al stock. Son dos caminos con
+     * dos políticas, y por eso no alcanza un booleano:
      *
      * - `'rechazar-imposible'` — nota de crédito manual. Solo rechaza si se
      *   PIDIÓ reponer algo que no puede; lo que no repone se acredita igual.
@@ -2878,12 +2805,8 @@ export class VentasService {
      *   rechaza: el hook corre después del commit y un throw pierde el evento
      *   (`cobros.service.ts` se lo traga como warning), así que se acredita y
      *   no se repone.
-     * - `'exigir'` — devolución de stock SIN documento. Ese camino existe solo
-     *   para mover inventario: una línea que no repone no tiene nada que hacer
-     *   ahí y se rechaza, venga de un `reponerStock: false` explícito o de un
-     *   ítem que no puede.
      */
-    politicaReposicion: 'rechazar-imposible' | 'ignorar' | 'exigir',
+    politicaReposicion: 'rechazar-imposible' | 'ignorar',
   ): Promise<
     {
       itemId: string;
@@ -2904,9 +2827,6 @@ export class VentasService {
        * descuento — y desde que las líneas de la NC tienen que sumar su
        * `total_final`, eso ya no es un número que nadie mira: descuadra el
        * documento.
-       *
-       * `registrarDevolucionesPorReembolso` —el otro llamador— lo ignora: solo
-       * mueve stock, no emite documento.
        */
       valorUnitarioBruto: string;
       /**
@@ -2981,22 +2901,10 @@ export class VentasService {
             ? `"${detalle.descripcion ?? dev.itemId}" no maneja stock (servicio): no admite devolución a inventario`
             : `"${detalle.descripcion ?? dev.itemId}" usa inventario por ${detalle.modo_inventario}: la devolución debe registrarse manualmente desde Inventario`,
         );
-      if (!reponeStock && politicaReposicion !== 'ignorar') {
-        if (politicaReposicion === 'exigir') {
-          // El `false` explícito manda sobre el motivo del ítem: si el operador
-          // lo escribió, lo que necesita saber es que ESTE camino no acredita
-          // nada, no que el ítem no maneja stock.
-          if (dev.reponerStock === false)
-            throw new BadRequestException(
-              `"${detalle.descripcion ?? dev.itemId}" se pidió sin volver al stock, y este camino ` +
-                `solo registra la vuelta a inventario. Para acreditar sin reponer, emití la nota de crédito.`,
-            );
-          throw noPuedeReponer();
-        }
-        // `'rechazar-imposible'`: lo que no puede reponer se acredita igual, y
-        // solo se corta si alguien PIDIÓ que repusiera.
-        if (quiereReponer) throw noPuedeReponer();
-      }
+      // Con `'rechazar-imposible'`, lo que no puede reponer se acredita igual y
+      // solo se corta si alguien PIDIÓ que repusiera.
+      if (!reponeStock && politicaReposicion !== 'ignorar' && quiereReponer)
+        throw noPuedeReponer();
       const vendida = filas.reduce(
         (acc, f) => acc.plus(f.cantidad),
         new Decimal(0),

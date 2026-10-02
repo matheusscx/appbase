@@ -2,7 +2,7 @@
 
 **Status**: Complete (v1)
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-07-10
+**Last Updated**: 2026-10-02
 
 ---
 
@@ -70,12 +70,15 @@ GET    /api/pasarela/admin/ordenes/:id             # detalle + transacciones (Le
 POST   /api/pasarela/admin/ordenes/:id/reembolsos  # reembolso parcial/total (Reembolsar)
 ```
 
-El reembolso admin acepta además `generarNotaCredito?: boolean` y
-`devoluciones?: [{itemId, cantidad}]` (opcionales, requieren orden con
-`venta_id`): tras el commit del REFUND, un hook post-commit (registry
-`ReembolsoCallbackRegistry` → handler del módulo ventas) crea la NC interna y/o
-las devoluciones de stock. La respuesta puede traer `notaCreditoId` o `warning`
-(la NC falló, el reembolso NO se revierte). Ver
+Todo reembolso aprobado de una orden con `venta_id` deja su corrección en ventas
+(2026-10-02): tras el commit del REFUND, un hook post-commit (registry
+`ReembolsoCallbackRegistry` → handler del módulo ventas) crea la nota de crédito, y el
+REFUND queda ligado a ella en `pasarela_transacciones.correccion_venta_id`. El reembolso
+admin acepta además `devoluciones?: [{itemId, cantidad}]` (opcional, ítems que se acreditan
+en esa nota). **`generarNotaCredito` ya no existe**: mandarlo da 400, por esta ruta y por la
+de la API externa (mismo DTO). La respuesta puede traer `notaCreditoId` o `warning` (la
+corrección falló: el reembolso NO se revierte y el REFUND queda sin `correccion_venta_id`).
+Una orden sin venta se reembolsa sin corrección y sin aviso. Ver
 [reembolsos-nota-credito.md](./reembolsos-nota-credito.md).
 
 ### API m2m (ApiKeyGuard — `Authorization: Bearer pk_...`)
@@ -211,7 +214,7 @@ e inyectan sus services públicos.
 | `pasarela_inscripciones` | inscripción del pagador; `identificador_externo` (tbkUser) **cifrado**; `pagador_ref` opaco |
 | `pasarela_medios_pago` | tarjetas registradas (marca, últimos 4) |
 | `pasarela_ordenes` | intención de pago; sin FK duras a ventas/pagos (`referencia_externa` opaca) |
-| `pasarela_transacciones` | historial **inmutable**; `request`/`response` **redactados**; único parcial por idempotencia |
+| `pasarela_transacciones` | historial **inmutable**; `request`/`response` **redactados**; único parcial por idempotencia. Única escritura posterior al registro: `correccion_venta_id` del REFUND (la corrección que dejó en ventas, sin FK), puesta una vez por el hook post-commit |
 
 Convenciones del repo: UUID PK/FK `type:'uuid'`, soft delete `eliminado_el`,
 `creado_el`/`actualizado_el`, `numeric` para dinero (Decimal.js).

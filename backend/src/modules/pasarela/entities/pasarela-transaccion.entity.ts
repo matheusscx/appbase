@@ -37,6 +37,17 @@ export class PasarelaTransaccion {
   @Column({ name: 'transaccion_padre_id', type: 'uuid', nullable: true })
   transaccionPadreId: string | null; // liga REFUND/REVERSAL a su AUTHORIZATION
 
+  /**
+   * Solo en un REFUND aprobado de una orden con venta: la fila de `ventas` (la
+   * corrección, con `venta_referencia_id`) que el reembolso dejó en el lado de
+   * ventas. Se escribe DESPUÉS del commit del REFUND —la corrección la crea el
+   * hook post-commit—, así que `NULL` en un REFUND aprobado con venta es la señal
+   * de que la corrección no se pudo crear (el reembolso respondió con
+   * `warning`). Sin FK, como el resto del dominio de pasarela.
+   */
+  @Column({ name: 'correccion_venta_id', type: 'uuid', nullable: true })
+  correccionVentaId: string | null;
+
   @Column()
   tipo: string; // 'INSCRIPTION' | 'AUTHORIZATION' | 'CAPTURE' | 'REVERSAL' | 'REFUND' | 'RECURRENT_PAYMENT'
 

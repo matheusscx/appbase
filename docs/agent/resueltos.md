@@ -23,6 +23,53 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Todo reembolso por pasarela deja su nota y el REFUND la guarda (cerrada 2026-10-02)
+
+Sale de [`pendientes.md`](pendientes.md) § 6.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 6
+
+- [ ] **Un reembolso por pasarela sin nota de crédito no queda en ningún documento ni en el saldo**
+  (fiscal, **frente propio**; anotado 2026-10-01 desde el frente "El vendido del día resta las
+  notas de crédito", § 3). Webpay permite reembolsar sin emitir NC (`generarNotaCredito` en el
+  evento de `reembolso-callback.handler.ts`), y es lo que viene marcado: `ReembolsoModal.vue` arranca con
+  la nota destildada. La plata sale, pero ni el vendido ni el débito fiscal bajan, y el saldo de la
+  venta no la ve. Hoy el cobrado tampoco la ve; restarla es la D6 del frente del vendido neto. Además el `REFUND` no
+  guarda la NC que generó (`pasarela_transacciones` no tiene el id; `aplicarPostReembolso` solo
+  lo devuelve en la respuesta). Por eso el saldo pendiente no puede contar los reembolsos, y una
+  venta pagada en parte por pasarela, con `REFUND` y NC, muestra de menos lo reembolsado. Lo
+  decidió el owner: "lo vemos aparte". Pregunta para él: ¿un reembolso sin NC debería existir, o
+  todo reembolso emite NC? Y si existe, ¿cómo se lo ve en el saldo?
+  ✅ **Decidida (owner, 2026-10-01): todo reembolso deja registro.** Se construye dentro del frente
+  de emisión, en la entrada de arriba. Lo que sigue es la historia de cómo se llegó.
+  **Quedó en pausa (owner, 2026-10-01):** cuando se le pasó la pregunta contestó "no sé qué hacer con
+  esto", y la dejó pendiente. No se toma hasta que la retome. El contexto está en la spec del frente
+  que la destapó:
+  [`2026-10-01-vendido-neto-de-notas-credito-design.md`](../superpowers/specs/2026-10-01-vendido-neto-de-notas-credito-design.md)
+  (D10, D12 y § 6). La investigación de mercado ya está hecha:
+  [`2026-10-01-reembolso-sin-nota-credito.md`](investigaciones/2026-10-01-reembolso-sin-nota-credito.md).
+  ⚠️ **"No facturamos todo"** (owner, 2026-10-01). Medido: la venta online nace sin tipo de
+  documento, y es justo la que se reembolsa por Webpay. El POS y salones mandan Boleta por
+  defecto. La pregunta no es solo NC sí o no: es qué registra una devolución sobre una venta **sin**
+  documento, donde una NC fiscal no corresponde, y cómo baja el vendido y el saldo sin ella.
+  Detalle en la investigación, sección "Qué hace hoy el sistema".
+
+### Qué se hizo
+
+Tarea 9 del frente de emisión por venta (spec `2026-10-01-emision-por-venta`, § 3.6; ADR-028).
+Se fue `generarNotaCredito` del modal, del DTO y del evento: **todo `REFUND` aprobado de una orden
+con venta crea la corrección** (la nota de crédito, con las devoluciones de stock dentro) y el
+`REFUND` guarda cuál es en `pasarela_transacciones.correccion_venta_id`, que escribe
+`CobrosService` tras crearla (`TransaccionesService.vincularCorreccion`). Si la corrección falla,
+la plata ya volvió: queda el `warning` y el `REFUND` sin vínculo, que es la señal de que falta.
+Se borró el camino que solo movía stock sin documento (`registrarDevolucionesPorReembolso`).
+Lo fijan `pasarela-reembolso.e2e-spec.ts` (por la API real, con las dos rutas) y los specs de
+`cobros.service`, `transacciones.service`, `reembolso-callback.handler` y `ReembolsoModal`.
+Detalle en [`reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md).
+
+Lo que **no** cierra: que el saldo pendiente y el cobrado resten lo reembolsado (D6 del frente
+del vendido neto) — esa parte sigue en su frente.
+
 ## El resumen de anulaciones se serializa, como el de la varianza (cerrada 2026-10-01)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.

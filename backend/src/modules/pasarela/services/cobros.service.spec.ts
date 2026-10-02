@@ -77,6 +77,7 @@ describe('CobrosService', () => {
     },
     transacciones: {
       registrar: jest.fn().mockResolvedValue({ transaccionId: 'tx-1' }),
+      vincularCorreccion: jest.fn().mockResolvedValue(true),
       listarPorOrden: jest.fn().mockResolvedValue([]),
       redactar: jest.fn((o: Record<string, unknown>) => o),
     },
@@ -286,7 +287,7 @@ describe('CobrosService', () => {
     expect(provider.reembolsar).toHaveBeenCalled();
   });
 
-  describe('reembolso — hook post-commit de NC/devoluciones', () => {
+  describe('reembolso — hook post-commit de la corrección', () => {
     const ordenConVenta = {
       ordenId: 'orden-1',
       tenantId: 't-1',
@@ -324,17 +325,15 @@ describe('CobrosService', () => {
       deps.transacciones.listarPorOrden.mockResolvedValue(authAprobada);
       provider.reembolsar.mockResolvedValue(refundAprobado);
       reembolsoHandler.onReembolsoAprobado.mockResolvedValue({
-        notaCreditoId: 'nc-1',
+        correccionVentaId: 'nc-1',
       });
     });
-
-    it('reembolso aprobado con generarNotaCredito invoca el handler con el evento completo y responde notaCreditoId', async () => {
+    it('todo reembolso aprobado de una orden con venta invoca el handler con el evento completo, liga la corrección al REFUND y responde notaCreditoId', async () => {
       const res = await service.reembolsar(
         't-1',
         'orden-1',
         {
           monto: '1100',
-          generarNotaCredito: true,
           devoluciones: [{ itemId: 'item-1', cantidad: '2' }],
         },
         'user-1',
@@ -345,22 +344,42 @@ describe('CobrosService', () => {
         codigoOrden: 'O-1',
         ventaId: 'venta-1',
         monto: '1100',
-        generarNotaCredito: true,
         devoluciones: [{ itemId: 'item-1', cantidad: '2' }],
         usuarioId: 'user-1',
       });
+      // El REFUND que se acaba de registrar ('tx-1') queda ligado a la
+      // corrección que el handler creó, bajo el tenant del token.
+      expect(deps.transacciones.vincularCorreccion).toHaveBeenCalledWith(
+        't-1',
+        'tx-1',
+        'nc-1',
+      );
       expect(res.notaCreditoId).toBe('nc-1');
       expect(res.warning).toBeUndefined();
     });
 
-    it('si el handler falla, el reembolso NO se revierte: responde con warning y el REFUND queda registrado', async () => {
+    it('el reembolso sin devoluciones también deja su corrección (ya no hay casilla que la pida)', async () => {
+      const res = await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100' },
+        'user-1',
+      );
+      expect(reembolsoHandler.onReembolsoAprobado).toHaveBeenCalledWith(
+        expect.objectContaining({ ventaId: 'venta-1', devoluciones: [] }),
+      );
+      expect(deps.transacciones.vincularCorreccion).toHaveBeenCalledTimes(1);
+      expect(res.notaCreditoId).toBe('nc-1');
+    });
+
+    it('si el handler falla, el reembolso NO se revierte: responde con warning, el REFUND queda registrado y sin corrección ligada', async () => {
       reembolsoHandler.onReembolsoAprobado.mockRejectedValueOnce(
         new Error('NC falló'),
       );
       const res = await service.reembolsar(
         't-1',
         'orden-1',
-        { monto: '1100', generarNotaCredito: true },
+        { monto: '1100' },
         'user-1',
       );
       expect(res.warning).toContain('reembolso fue procesado');
@@ -368,18 +387,19 @@ describe('CobrosService', () => {
         expect.objectContaining({ tipo: 'REFUND', estado: 'aprobada' }),
         manager,
       );
+      expect(deps.transacciones.vincularCorreccion).not.toHaveBeenCalled();
     });
 
     it('si la venta de la orden es una corrección, el warning lleva el motivo y no hay nota de crédito en la respuesta', async () => {
       reembolsoHandler.onReembolsoAprobado.mockRejectedValueOnce(
-        new Error(
+        new BadRequestException(
           'No se puede emitir una nota de crédito sobre otra nota de crédito',
         ),
       );
       const res = await service.reembolsar(
         't-1',
         'orden-1',
-        { monto: '1100', generarNotaCredito: true },
+        { monto: '1100' },
         'user-1',
       );
       expect(res.warning).toContain(
@@ -388,37 +408,91 @@ describe('CobrosService', () => {
       expect(res.notaCreditoId).toBeUndefined();
     });
 
+    it('un error que NO es de negocio (texto de la base, de código) no llega al cliente: warning fijo, y el detalle queda en el log', async () => {
+      const log = jest.spyOn(service['logger'], 'error').mockImplementation();
+      reembolsoHandler.onReembolsoAprobado.mockRejectedValueOnce(
+        new Error('invalid input syntax for type uuid: "" (tabla movimientos)'),
+      );
+      const res = await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100' },
+        'user-1',
+      );
+      expect(res.warning).toContain('reembolso fue procesado');
+      expect(res.warning).not.toContain('uuid');
+      expect(res.warning).not.toContain('movimientos');
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('uuid'));
+    });
+
+    it('un motivo de negocio (HttpException) SÍ se le muestra al cliente', async () => {
+      reembolsoHandler.onReembolsoAprobado.mockRejectedValueOnce(
+        new BadRequestException('Venta no elegible para esta nota'),
+      );
+      const res = await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100' },
+        'user-1',
+      );
+      expect(res.warning).toContain('Venta no elegible para esta nota');
+    });
+
+    it('si la corrección se creó pero el vínculo falla: sigue la respuesta con su id y un warning FIJO (sin el texto del error)', async () => {
+      const log = jest.spyOn(service['logger'], 'error').mockImplementation();
+      deps.transacciones.vincularCorreccion.mockRejectedValueOnce(
+        new Error('conexión caída a pg-interno'),
+      );
+      const res = await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100' },
+        'user-1',
+      );
+      expect(res.notaCreditoId).toBe('nc-1');
+      expect(res.warning).toContain('reembolso fue procesado');
+      expect(res.warning).toContain('no se pudo ligar');
+      expect(res.warning).not.toContain('pg-interno');
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('pg-interno'));
+    });
+
+    it('si el vínculo no tocó ninguna fila (affected != 1): no es silencioso, warning con la nota y log', async () => {
+      const log = jest.spyOn(service['logger'], 'error').mockImplementation();
+      deps.transacciones.vincularCorreccion.mockResolvedValueOnce(false);
+      const res = await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100' },
+        'user-1',
+      );
+      expect(res.notaCreditoId).toBe('nc-1');
+      expect(res.warning).toContain('no se pudo ligar');
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('tx-1'));
+    });
+
+    it('por la llave de API no hay usuario: el evento lleva null, no una cadena vacía', async () => {
+      await service.reembolsar('t-1', 'orden-1', { monto: '1100' });
+      expect(reembolsoHandler.onReembolsoAprobado).toHaveBeenCalledWith(
+        expect.objectContaining({ usuarioId: null }),
+      );
+    });
+
     it('reembolso rechazado por el proveedor NO invoca el handler', async () => {
       provider.reembolsar.mockResolvedValueOnce({
         ...refundAprobado,
         aprobada: false,
         codigoRespuesta: '-1',
       });
-      await service.reembolsar(
-        't-1',
-        'orden-1',
-        { monto: '1100', generarNotaCredito: true },
-        'user-1',
-      );
+      await service.reembolsar('t-1', 'orden-1', { monto: '1100' }, 'user-1');
       expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+      expect(deps.transacciones.vincularCorreccion).not.toHaveBeenCalled();
     });
 
-    it('flags sin venta vinculada: NO invoca el handler y responde warning informativo', async () => {
+    it('orden sin venta vinculada y sin devoluciones: no hay corrección que crear, y no es un aviso (es legítimo)', async () => {
       ordenRepo.findOne.mockResolvedValue({
         ...ordenConVenta,
         ventaId: null,
       });
-      const res = await service.reembolsar(
-        't-1',
-        'orden-1',
-        { monto: '1100', generarNotaCredito: true },
-        'user-1',
-      );
-      expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
-      expect(res.warning).toContain('venta vinculada');
-    });
-
-    it('regresión: reembolso sin flags no invoca el handler ni agrega warning', async () => {
       const res = await service.reembolsar(
         't-1',
         'orden-1',
@@ -428,6 +502,33 @@ describe('CobrosService', () => {
       expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
       expect(res.warning).toBeUndefined();
       expect(res.notaCreditoId).toBeUndefined();
+    });
+
+    it('orden sin venta vinculada pero con devoluciones pedidas: NO invoca el handler y avisa que no se pudieron aplicar', async () => {
+      ordenRepo.findOne.mockResolvedValue({
+        ...ordenConVenta,
+        ventaId: null,
+      });
+      const res = await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100', devoluciones: [{ itemId: 'item-1', cantidad: '1' }] },
+        'user-1',
+      );
+      expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+      expect(res.warning).toContain('venta vinculada');
+    });
+
+    it('sin handler registrado el reembolso sigue y el warning lo dice', async () => {
+      reembolsoRegistry.get.mockReturnValueOnce(null as never);
+      const res = await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100' },
+        'user-1',
+      );
+      expect(res.warning).toContain('no hay un módulo de ventas');
+      expect(deps.transacciones.vincularCorreccion).not.toHaveBeenCalled();
     });
   });
 

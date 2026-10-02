@@ -1173,7 +1173,6 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
         codigoOrden: 'O-E2E-CORR',
         ventaId,
         monto,
-        generarNotaCredito: true,
         devoluciones: [],
         usuarioId: await usuarioIdAdmin(),
       });
@@ -1197,19 +1196,19 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
       const boleta = await docId(venta.id, 'sistema');
       expect(await docsDe(venta.id)).toHaveLength(1);
 
-      const { notaCreditoId } = await reembolsar(venta.id, '5000');
+      const { correccionVentaId } = await reembolsar(venta.id, '5000');
 
-      expect(notaCreditoId).toBeDefined();
-      const docs = await docsDe(notaCreditoId!);
+      expect(correccionVentaId).toBeDefined();
+      const docs = await docsDe(correccionVentaId);
       expect(docs).toHaveLength(1);
       expect(docs[0]).toMatchObject({
         emisor: 'sistema',
         monto: '5000.0000',
         documento_corregido_id: boleta,
       });
-      expect(await tipoDeLaVenta(notaCreditoId!)).not.toBeNull();
+      expect(await tipoDeLaVenta(correccionVentaId)).not.toBeNull();
       // La plata ya volvió por el proveedor: no mueve caja.
-      expect(await salidasDeCaja(notaCreditoId!)).toBe(0);
+      expect(await salidasDeCaja(correccionVentaId)).toBe(0);
     });
 
     it('una venta sin documentos que corregir también se registra: nota con el tipo NC y sin fila de documento', async () => {
@@ -1226,11 +1225,11 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
         [venta.id],
       );
 
-      const { notaCreditoId } = await reembolsar(venta.id, '3000');
+      const { correccionVentaId } = await reembolsar(venta.id, '3000');
 
-      expect(notaCreditoId).toBeDefined();
-      expect(await docsDe(notaCreditoId!)).toHaveLength(0);
-      expect(await tipoDeLaVenta(notaCreditoId!)).not.toBeNull();
+      expect(correccionVentaId).toBeDefined();
+      expect(await docsDe(correccionVentaId)).toHaveLength(0);
+      expect(await tipoDeLaVenta(correccionVentaId)).not.toBeNull();
     });
 
     it('una orden ligada a una corrección: no se emite una nota sobre una nota, el error trae su motivo y no queda ninguna corrección nueva', async () => {

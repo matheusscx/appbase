@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-07-11
+**Last Updated**: 2026-10-02
 
 ---
 
@@ -10,16 +10,18 @@
 
 ### What is it?
 
-Al reembolsar una orden de pasarela (total o parcial) desde el drawer de Órdenes,
-el admin puede opcionalmente:
+Todo reembolso aprobado de una orden de pasarela (total o parcial) **ligada a una
+venta** deja su corrección en ventas (2026-10-02, spec `2026-10-01-emision-por-venta`
+§ 3.6, ADR-028): una nota de crédito por el monto reembolsado, que referencia la venta
+original y corrige el documento de esa venta. **No hay casilla ni campo que la pida.**
+El REFUND queda ligado a ella (`pasarela_transacciones.correccion_venta_id`).
 
-- **Generar una nota de crédito interna** (documento sin emisión SII) por el monto
-  reembolsado, que referencia la venta original.
-- **Devolver ítems a stock** (independiente de la NC): selecciona cantidades por
-  línea. Sin nota de crédito de por medio ese camino solo mueve inventario, así
-  que **exige que toda línea reponga** (`modo_inventario = 'cantidad'`); con nota
-  de crédito, en cambio, cualquier ítem vendido se acredita y la reposición es
-  una elección por línea (2026-09-04).
+Desde el drawer de Órdenes el admin puede además:
+
+- **Elegir ítems que se acreditan en esa nota** (`devoluciones`): cantidades por
+  línea. Cualquier ítem vendido se acredita y la reposición al stock es una
+  elección por línea (2026-09-04). Las devoluciones de stock viajan **dentro** de la
+  corrección: ya no existe el camino que solo mueve inventario sin documento.
 
 Además, el módulo de Ventas ahora **muestra los reembolsos siempre** (haya o no NC):
 sección "Reembolsos" y "Documentos relacionados" en el detalle de la venta, y badges
@@ -34,8 +36,9 @@ lista para el día en que se integre facturación electrónica.
 
 ### Scope
 
-- Incluido: NC interna elegible en el reembolso; devolución de stock elegible
-  (modo `cantidad`); **acreditación por línea de cualquier ítem vendido, reponga
+- Incluido: **todo reembolso aprobado de una orden con venta deja su nota de crédito
+  (2026-10-02; ya no es elegible) y el REFUND queda ligado a ella**; devolución de stock
+  elegible por línea, dentro de esa nota; **acreditación por línea de cualquier ítem vendido, reponga
   o no el stock (2026-09-04)**; visibilidad de reembolsos en detalle/listado de
   ventas;
   badges derivados (no son estados nuevos en BD); **NC manual desde el detalle
@@ -52,7 +55,7 @@ lista para el día en que se integre facturación electrónica.
 
 ## API Endpoints
 
-### Reembolso extendido (existente, campos nuevos opcionales)
+### Reembolso extendido (existente, campo nuevo opcional)
 
 ```
 POST /api/pasarela/admin/ordenes/:id/reembolsos
@@ -61,8 +64,7 @@ Authorization: Bearer <JWT>   (permiso Pasarelas:Reembolsar)
 Request:
 {
   "monto": "1100",
-  "generarNotaCredito": true,                          // opcional, default false
-  "devoluciones": [                                    // opcional, independiente de la NC
+  "devoluciones": [                                    // opcional: ítems que se acreditan en la nota
     { "itemId": "uuid", "cantidad": "2" }
   ]
 }
@@ -70,16 +72,23 @@ Request:
 Response (200): orden pública + extras
 {
   ..., "reembolsoAprobado": true,
-  "notaCreditoId": "uuid",        // si se generó NC
-  "warning": "..."                // si el reembolso se procesó pero la NC/devolución falló
+  "notaCreditoId": "uuid",        // la corrección que dejó el reembolso (= correccion_venta_id del REFUND)
+  "warning": "..."                // si el reembolso se procesó pero la corrección falló
 }
 ```
 
-- Si la NC/devolución falla después de un reembolso aprobado, **el reembolso NO se
-  revierte** (la plata ya volvió por el proveedor): la respuesta trae `warning` y
-  el error queda en logs.
-- Los flags sin venta vinculada (`orden.venta_id` null) responden `warning`
-  informativo y no hacen nada.
+- **El body ya no tiene `generarNotaCredito`**: mandarlo da 400 (el pipe global rechaza lo
+  que el DTO no declara, `forbidNonWhitelisted`). Vale igual para la API externa
+  (`POST /pasarela/api/cobros/:ordenId/reembolsos`), que usa el mismo DTO.
+- Si la corrección falla después de un reembolso aprobado, **el reembolso NO se
+  revierte** (la plata ya volvió por el proveedor): la respuesta trae `warning`, el
+  error queda en logs y el REFUND queda **sin** `correccion_venta_id`. Eso —un REFUND
+  aprobado de una orden con venta y ese campo nulo— es la señal de que falta la
+  corrección. Si la corrección se creó pero no se pudo ligar al REFUND, la respuesta
+  trae `notaCreditoId` **y** `warning`.
+- Una orden sin venta vinculada (`orden.venta_id` null) no tiene lado de ventas que
+  corregir: se reembolsa sin corrección y **sin aviso** (es legítimo). Solo si se pidieron
+  `devoluciones` responde `warning` (no hay venta donde aplicarlas).
 
 ### GET /ventas/:id (campos nuevos)
 
@@ -150,7 +159,9 @@ Response (200): orden pública + extras
   |---|---|
   | Nota manual (`POST /ventas/:id/notas-credito`) | rechaza **solo si se PIDIÓ** reponer algo que no puede; lo que no repone se acredita igual |
   | Nota por el webhook de reembolso | **nunca rechaza**: el hook corre después del commit y un throw pierde el evento (`cobros.service.ts` lo traga como warning). Se acredita y no se repone |
-  | Devolución sin documento (`registrarDevolucionesPorReembolso`) | **exige que toda línea reponga**: ese camino solo mueve inventario y no hay documento que acredite lo que no vuelve |
+
+  (Hubo una tercera fila, la devolución de stock **sin** documento, que exigía que toda línea
+  reponga. Se eliminó el 2026-10-02 con el camino: todo reembolso deja nota.)
 
   **Acreditar menos de lo que vale la mercadería se acepta, y las líneas se
   escalan** (2026-09-04). Es un caso real —cargo por reposición, producto que
@@ -250,22 +261,45 @@ Response (200): orden pública + extras
   ya consumado porque falte un dato de configuración.
 - La aritmética vive aparte, pura y testeable sin Postgres:
   `ventas/nota-credito-composicion.ts`.
-- `VentasService.crearNotaCredito` / `registrarDevolucionesPorReembolso`
+- `VentasService.crearNotaCredito`
   (`ventas.service.ts`): transacción propia con `FOR UPDATE` sobre la venta
   original (serializa NCs concurrentes). Validaciones: Σ(NCs) ≤ `total_final`;
   cantidad devuelta ≤ vendida − ya devuelta —contando lo acreditado por las notas
   hijas y no solo los movimientos de stock, porque desde el 2026-09-04 una línea
   se puede acreditar sin reponer—; y la política de reposición del camino
   (`validarDevolucionesReembolso`): la nota manual rechaza solo si se PIDE
-  reponer lo que no puede, la nota por webhook nunca rechaza (un throw pierde el
-  evento) y la devolución sin documento exige que toda línea reponga.
+  reponer lo que no puede y la nota por webhook nunca rechaza (un throw pierde el
+  evento).
 - **Borde de módulos**: `ReembolsoCallbackRegistry` en pasarela (mismo patrón §13
   que `PagoCallbackRegistry`); `VentasReembolsoHandler` (módulo ventas) se
   registra en `onModuleInit`. La pasarela nunca importa ventas.
 - **Hook post-commit**: `CobrosService.reembolsar` dispara el handler DESPUÉS del
   commit de la transacción del reembolso (dentro se auto-bloquearía con el
   `FOR UPDATE` de la orden y un fallo de la NC revertiría un reembolso ya
-  ejecutado por el proveedor).
+  ejecutado por el proveedor). Corre para **todo** REFUND aprobado de una orden con
+  venta, pida devoluciones o no.
+- **El vínculo REFUND → corrección** (2026-10-02): el handler **no** toca
+  `pasarela_transacciones`; devuelve `{ correccionVentaId }` y `CobrosService`, que es
+  dueño de esa tabla, lo escribe con `TransaccionesService.vincularCorreccion`: un
+  `UPDATE` chico, filtrado por `tenant_id` y por el `transaccion_id` del REFUND, que
+  escribe una sola vez (`correccion_venta_id IS NULL`) y no toca `estado` ni nada de lo
+  que informó la pasarela. Es lo único que se escribe sobre una fila ya registrada: el
+  vínculo nace **después** del commit del REFUND porque la corrección la crea el hook. El
+  evento (`ReembolsoAprobadoEvento`) no lleva el id del REFUND: el handler no lo necesita.
+  `vincularCorreccion` devuelve si ligó una fila: si no (error o `affected != 1`) la respuesta
+  trae `notaCreditoId` **y** `warning`, y queda en el log — un REFUND sin vínculo nunca es
+  silencioso.
+- **Usuario `null` por la llave de API**: la ruta m2m no tiene usuario, así que el evento y
+  `CrearNotaCreditoParams.usuarioId` son `string | null`. Solo lo consume el movimiento de
+  stock (`movimientos_inventario.usuario_id`, uuid nulo); mover caja exige usuario y esa rama
+  no corre para la vía `pasarela` (`documentoQueCorrige` devuelve `mueveCaja: false`; la rama
+  rechaza un usuario nulo por si acaso). Antes iba `''`: el INSERT fallaba (22P02) y la
+  corrección entera se perdía.
+- **El `warning` no filtra texto de la base**: al cliente —también el de la llave de API— solo
+  llega el mensaje de una `HttpException` (un motivo de negocio, p. ej. "no se puede emitir una
+  nota sobre otra nota"); cualquier otro error da un texto fijo y el detalle queda en el log.
+- `devoluciones` del DTO tiene tope de 200 líneas (`@ArrayMaxSize`), el mismo que las líneas
+  de una compra.
 - Índices nuevos: `pasarela_ordenes(venta_id)`, `pasarela_transacciones(orden_id)`
   (para el agregado de REFUNDs del listado de ventas).
 
@@ -403,19 +437,15 @@ Dónde vive: `VentasReembolsoHandler.cuantizarMontoReembolso`
 
 ## Frontend
 
-- `ordenes/ReembolsoModal.vue`: prop `ventaId`; con venta vinculada muestra
-  checkbox "Generar nota de crédito" y la lista de líneas (inputs decimales
-  string; máximo = vendida − ya devuelta). Respuesta con `warning` → toast
-  warning.
-  ⚠️ **La lista es compartida con la NC y su modo depende del checkbox**
-  (2026-09-04), porque el camino del backend depende de él: con la nota tildada
-  se acredita cualquier ítem y hay switch de reponer por fila; **sin** ella las
-  líneas van al camino que solo mueve stock, que exige que todas repongan, así
-  que las de serie/lote/servicio quedan deshabilitadas. Al destildarlo se
-  normalizan las filas —la que el operador había apagado con el switch vuelve a
-  reponer, la que no puede pierde la cantidad—: ese `false` quedaba invisible
-  porque el switch desaparece del DOM, y su 400 llega **después** del commit del
-  reembolso.
+- `ordenes/ReembolsoModal.vue`: prop `ventaId`; con venta vinculada muestra la lista
+  de líneas (inputs decimales string; máximo = vendida − ya devuelta). **Ya no tiene la
+  casilla "Generar nota de crédito"** (2026-10-02): el reembolso siempre deja la nota, y
+  el body nunca lleva `generarNotaCredito` (el backend lo rechazaría con 400). Respuesta
+  con `warning` → toast warning.
+  La lista (`DevolucionInventarioLista`) es compartida con la NC y desde el 2026-10-02 tiene
+  un solo modo —acredita cualquier ítem vendido, con switch de reponer por fila—: el modo
+  "solo stock" (líneas que no reponen deshabilitadas) y la normalización al destildar la casilla
+  existían solo para el camino sin documento, que se eliminó.
 - `ventas/VentaDetalleDrawer.vue`: badges "Nota de Crédito" / "Devolución interna" (según
   `esNotaCredito`, dentro de `esCorreccion`) y "Reembolsada parcial/totalmente" (derivados); cards "Reembolsos" y
   "Documentos relacionados" (links venta original ↔ NCs vía `/ventas?venta=<id>`).
@@ -513,7 +543,7 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
   `devolucion` mal formado o con un `pagoId` ajeno.
 - `ventas.service.spec.ts`: crearNotaCredito (composición por monto libre y con
   devoluciones, validaciones de monto/cantidades/modo/tenant, la original no se
-  toca), devoluciones sin NC, findOne/listar/resumen con los campos nuevos.
+  toca), findOne/listar/resumen con los campos nuevos.
 - `nota-credito-composicion.spec.ts`: la aritmética sola —tasa efectiva,
   descomposición por resta, reparto del ajuste y **el escalado de las líneas de
   devolución**— con `decimalesMoneda: 0`, que es la escala que más residuo
@@ -527,10 +557,24 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
   escribe, el tope por porción sobre las líneas ya escaladas, y el disponible por
   porción —también sobre un documento que no admite nota—.
 - `nota-credito-por-pais.e2e-spec.ts`: la forma del catálogo de documentos.
-- `reembolso-callback.handler.spec.ts`: registro en el registry y delegación.
-- `cobros.service.spec.ts`: hook post-commit (evento completo, warning sin
-  revertir, rechazado no dispara, sin venta vinculada, regresión sin flags).
-- `create-reembolso.dto.spec.ts`: validación anidada del DTO.
+- `reembolso-callback.handler.spec.ts`: registro en el registry y delegación; todo
+  reembolso crea la corrección, también el que no trae devoluciones.
+- `cobros.service.spec.ts`: hook post-commit (evento completo, la corrección se liga
+  al REFUND, warning sin revertir —con la corrección sin ligar—, rechazado no dispara,
+  orden sin venta sin aviso, sin handler, usuario `null` por la llave de API, el texto de un
+  error que no es de negocio no llega al cliente, un vínculo que no tocó fila no es silencioso).
+- `transacciones.service.spec.ts`: `vincularCorreccion` acotado al tenant, escribe una vez y
+  devuelve si ligó una fila.
+- `create-reembolso.dto.spec.ts`: validación anidada del DTO y el tope de 200 `devoluciones`.
+- `pasarela-reembolso.e2e-spec.ts` (2026-10-02): por la API real, con el proveedor doblado:
+  el REFUND aprobado sin devoluciones deja la nota sobre la boleta y `correccion_venta_id`;
+  dos reembolsos parciales, cada uno con su nota; `generarNotaCredito` da 400 por la ruta del
+  admin y por la de la llave de API; la orden sin venta se reembolsa sin nota ni aviso; y la
+  corrección que falla deja el REFUND aprobado, sin vínculo y con `warning`; y, por la llave de
+  API, una devolución que repone stock de un producto propio: la nota sale, el REFUND queda
+  ligado y el movimiento de stock queda con `usuario_id` NULL (por la ruta del admin lleva el
+  usuario del token).
+- `ReembolsoModal.nuxt.spec.ts`: sin casilla, y el body no lleva `generarNotaCredito`.
 
 ## Referencias
 

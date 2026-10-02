@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsNumberString,
@@ -38,22 +39,21 @@ export class CreateReembolsoDto {
   @IsNumberString()
   monto: string;
 
-  /** Genera una nota de crédito interna sobre la venta vinculada a la orden. */
-  @IsOptional()
-  @IsBoolean()
-  generarNotaCredito?: boolean;
-
   /**
-   * Ítems que se acreditan en la nota, con su reposición como propiedad de cada
-   * línea; independiente de la NC. Hasta el 2026-09-04 solo admitía
-   * `modo_inventario = 'cantidad'`.
+   * Ítems que se acreditan en la corrección que todo reembolso deja sobre la
+   * venta de la orden, con su reposición como propiedad de cada línea. Hasta
+   * el 2026-09-04 solo admitía `modo_inventario = 'cantidad'`.
    *
-   * ⚠️ Sin `generarNotaCredito`, estas líneas van por el camino que SOLO mueve
-   * stock: ahí una línea que no repone se rechaza, porque no habría documento
-   * que la acredite.
+   * ⚠️ No existe un campo que pida la corrección: la deja todo reembolso
+   * aprobado de una orden con venta. Mandar `generarNotaCredito` da 400 (el pipe
+   * global rechaza lo que el DTO no declara).
    */
   @IsOptional()
   @IsArray()
+  // Mismo tope que las líneas de una compra: la corrección hace trabajo por
+  // línea (validación y un movimiento de stock), y un array sin tope lo
+  // multiplica, sobre todo por la ruta de la llave de API.
+  @ArrayMaxSize(200)
   @ValidateNested({ each: true })
   @Type(() => DevolucionLineaDto)
   devoluciones?: DevolucionLineaDto[];

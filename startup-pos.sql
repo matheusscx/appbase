@@ -2170,6 +2170,7 @@ CREATE TABLE pasarela_transacciones (
     inscripcion_id UUID REFERENCES pasarela_inscripciones(inscripcion_id),
     medio_pago_id UUID REFERENCES pasarela_medios_pago(medio_pago_id),
     transaccion_padre_id UUID REFERENCES pasarela_transacciones(transaccion_id),
+    correccion_venta_id UUID, -- solo REFUND aprobado de una orden con venta: la corrección (ventas) que dejó; NULL = no se pudo crear. Sin FK, como pasarela_ordenes.venta_id
     tipo VARCHAR NOT NULL, -- INSCRIPTION|AUTHORIZATION|CAPTURE|REVERSAL|REFUND|RECURRENT_PAYMENT
     estado VARCHAR NOT NULL, -- iniciada|aprobada|rechazada|error (inmutable una vez terminal)
     monto NUMERIC(18,6),

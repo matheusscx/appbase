@@ -13,10 +13,9 @@ describe('CreateReembolsoDto', () => {
     expect(errores).toHaveLength(0);
   });
 
-  it('acepta NC y devoluciones válidas', async () => {
+  it('acepta devoluciones válidas', async () => {
     const errores = await validar({
       monto: '1100',
-      generarNotaCredito: true,
       devoluciones: [
         {
           itemId: '550e8400-e29b-41d4-a716-446655440116',
@@ -76,8 +75,20 @@ describe('CreateReembolsoDto', () => {
     expect(errores.length).toBeGreaterThan(0);
   });
 
-  it('rechaza generarNotaCredito no booleano', async () => {
-    const errores = await validar({ monto: '1100', generarNotaCredito: 'si' });
-    expect(errores.length).toBeGreaterThan(0);
+  it('acota el largo de devoluciones: 200 pasan, 201 no', async () => {
+    const linea = {
+      itemId: '550e8400-e29b-41d4-a716-446655440116',
+      cantidad: '1',
+    };
+    const ok = await validar({
+      monto: '1100',
+      devoluciones: Array.from({ length: 200 }, () => linea),
+    });
+    const mal = await validar({
+      monto: '1100',
+      devoluciones: Array.from({ length: 201 }, () => linea),
+    });
+    expect(ok).toHaveLength(0);
+    expect(mal.some((e) => e.property === 'devoluciones')).toBe(true);
   });
 });

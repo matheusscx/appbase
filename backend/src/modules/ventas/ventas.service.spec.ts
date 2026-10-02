@@ -2464,7 +2464,7 @@ describe('VentasService', () => {
     });
   });
 
-  describe('crearNotaCredito() / registrarDevolucionesPorReembolso()', () => {
+  describe('crearNotaCredito()', () => {
     const VENTA_ORIG_ID = 'venta-orig-uuid-001';
     const ITEM_SERIE_ID = 'item-serie-uuid-001';
     const SERVICIO_ID = 'item-servicio-uuid-001';
@@ -3088,23 +3088,6 @@ describe('VentasService', () => {
       expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
         ncManager,
         expect.objectContaining({ cantidad: '1', costoUnitario: '50.0000' }),
-      );
-    });
-
-    it('el reembolso sin NC también reingresa al costo de la salida', async () => {
-      await service.registrarDevolucionesPorReembolso({
-        tenantId: TENANT_ID,
-        usuarioId: USUARIO_ID,
-        ventaOriginalId: VENTA_ORIG_ID,
-        devoluciones: [{ itemId: ITEM_ID, cantidad: '1' }],
-      });
-
-      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
-        ncManager,
-        expect.objectContaining({
-          motivo: 'devolucion',
-          costoUnitario: '50.0000',
-        }),
       );
     });
 
@@ -3797,67 +3780,9 @@ describe('VentasService', () => {
       });
     });
 
-    it('registrarDevolucionesPorReembolso liga los movimientos a la venta original y no crea cabecera', async () => {
-      await service.registrarDevolucionesPorReembolso({
-        tenantId: TENANT_ID,
-        usuarioId: USUARIO_ID,
-        ventaOriginalId: VENTA_ORIG_ID,
-        devoluciones: [{ itemId: ITEM_ID, cantidad: '1' }],
-        comentario: 'Devolución por reembolso orden O-1',
-      });
-      expect(ncManager.save).not.toHaveBeenCalled();
-
-      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
-        ncManager,
-        expect.objectContaining({
-          tipo: 'entrada',
-          motivo: 'devolucion',
-          itemId: ITEM_ID,
-          cantidad: '1',
-          ventaId: VENTA_ORIG_ID,
-        }),
-      );
-    });
-
-    // El camino sin documento tiene su propia política: TODA línea tiene que
-    // reponer. Sin estos dos casos, abrir la validación de la nota de crédito
-    // abría también este camino, que no acredita nada: la línea desaparecía
-    // —repuesta contra lo pedido, o reventando adentro de `registrarMovimiento`
-    // después de haber escrito las anteriores del loop—.
-    it('registrarDevolucionesPorReembolso rechaza una línea con reponerStock false', async () => {
-      await expect(
-        service.registrarDevolucionesPorReembolso({
-          tenantId: TENANT_ID,
-          usuarioId: USUARIO_ID,
-          ventaOriginalId: VENTA_ORIG_ID,
-          devoluciones: [
-            { itemId: ITEM_ID, cantidad: '1', reponerStock: false },
-          ],
-        }),
-      ).rejects.toThrow(/solo registra la vuelta a inventario/);
-
-      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
-    });
-
-    it('registrarDevolucionesPorReembolso rechaza un servicio con su mensaje de negocio', async () => {
-      // Sin flag: `quiereReponer` es `false` y el corte de "pedir lo imposible"
-      // no dispara. El que corta es el de este camino, y con el mensaje viejo:
-      // el genérico de `registrarMovimiento` llegaría tarde y sin dominio.
-      await expect(
-        service.registrarDevolucionesPorReembolso({
-          tenantId: TENANT_ID,
-          usuarioId: USUARIO_ID,
-          ventaOriginalId: VENTA_ORIG_ID,
-          devoluciones: [{ itemId: SERVICIO_ID, cantidad: '1' }],
-        }),
-      ).rejects.toThrow(/no maneja stock/);
-
-      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
-    });
-
     /**
-     * Reponer toma un `FOR UPDATE` por ítem (`registrarMovimiento`), y la NC y las devoluciones por
-     * reembolso recorrían las líneas en el orden en que las mandó el cliente: dos devoluciones
+     * Reponer toma un `FOR UPDATE` por ítem (`registrarMovimiento`), y la NC recorría las líneas en
+     * el orden en que las mandó el cliente: dos devoluciones
      * cruzadas sobre los mismos productos podían bloquearse en cruz (auditoría `inventario`,
      * 2026-08-15). El arreglo es el de `crear()` y `cancelar()`: orden por `itemId` con el mismo
      * comparador, y reintento ante `40P01`.
@@ -3910,22 +3835,6 @@ describe('VentasService', () => {
         expect(itemsRepuestos()).toEqual([ITEM_ANTES_ID, ITEM_ID]);
       });
 
-      it('las devoluciones por reembolso reponen en orden de itemId', async () => {
-        conOtroProductoQueRepone();
-
-        await service.registrarDevolucionesPorReembolso({
-          tenantId: TENANT_ID,
-          usuarioId: USUARIO_ID,
-          ventaOriginalId: VENTA_ORIG_ID,
-          devoluciones: [
-            { itemId: ITEM_ID, cantidad: '1' },
-            { itemId: ITEM_ANTES_ID, cantidad: '1' },
-          ],
-        });
-
-        expect(itemsRepuestos()).toEqual([ITEM_ANTES_ID, ITEM_ID]);
-      });
-
       it('la NC reintenta ante un deadlock', async () => {
         dataSourceMock.transaction
           .mockRejectedValueOnce(deadlock)
@@ -3947,40 +3856,6 @@ describe('VentasService', () => {
         await expect(service.crearNotaCredito(baseParams)).rejects.toThrow(
           'Stock insuficiente para la salida',
         );
-        expect(dataSourceMock.transaction).toHaveBeenCalledTimes(1);
-      });
-
-      it('las devoluciones por reembolso reintentan ante un deadlock', async () => {
-        dataSourceMock.transaction
-          .mockRejectedValueOnce(deadlock)
-          .mockImplementationOnce((cb: (m: unknown) => unknown) =>
-            cb(ncManager),
-          );
-
-        await service.registrarDevolucionesPorReembolso({
-          tenantId: TENANT_ID,
-          usuarioId: USUARIO_ID,
-          ventaOriginalId: VENTA_ORIG_ID,
-          devoluciones: [{ itemId: ITEM_ID, cantidad: '1' }],
-        });
-
-        expect(dataSourceMock.transaction).toHaveBeenCalledTimes(2);
-        expect(itemsRepuestos()).toEqual([ITEM_ID]);
-      });
-
-      it('las devoluciones por reembolso no reintentan un error de negocio', async () => {
-        dataSourceMock.transaction.mockRejectedValueOnce(
-          new BadRequestException('Stock insuficiente para la salida'),
-        );
-
-        await expect(
-          service.registrarDevolucionesPorReembolso({
-            tenantId: TENANT_ID,
-            usuarioId: USUARIO_ID,
-            ventaOriginalId: VENTA_ORIG_ID,
-            devoluciones: [{ itemId: ITEM_ID, cantidad: '1' }],
-          }),
-        ).rejects.toThrow('Stock insuficiente para la salida');
         expect(dataSourceMock.transaction).toHaveBeenCalledTimes(1);
       });
     });

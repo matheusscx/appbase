@@ -238,7 +238,6 @@ async function confirmar() {
         <DevolucionInventarioLista
           :filas="filas"
           :valida="filasValidas"
-          modo="acredita"
           @set-cantidad="setCantidad"
           @set-reponer="setReponer"
         />

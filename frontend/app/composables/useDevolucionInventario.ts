@@ -97,49 +97,6 @@ export function setReponerFila(
 }
 
 /**
- * Deja las filas como las necesita el camino que SOLO mueve stock. Lo usa el
- * modal de reembolso cuando se destilda "generar nota de crédito": sin
- * documento que las acredite, esas líneas van a `registrarDevolucionesPorReembolso`,
- * que **exige que toda línea reponga** y rechaza con 400 lo que no.
- *
- * Ese 400 llega DESPUÉS del commit del reembolso —la plata ya volvió al
- * cliente— y se degrada a warning: quedaría un reembolso hecho, mercadería que
- * nunca vuelve al stock y ningún camino de reintento. Por eso se normaliza acá
- * y no se confía en que el operador lo note.
- *
- * ⚠️ Son DOS cosas, y filtrar solo por `puedeReponer` deja pasar la peor: una
- * fila que **puede** reponer pero que el operador apagó con el switch. Al
- * destildar, el switch desaparece del DOM, así que ese `false` quedaba
- * invisible e irrecuperable desde la pantalla.
- *
- * - La que puede reponer vuelve a reponer —en este camino no hay nada que
- *   elegir— y conserva la cantidad tipeada.
- * - La que no puede pierde la cantidad: no tiene nada que hacer acá.
- */
-export function normalizarParaSoloStock(
-  filas: FilaDevolucion[],
-): FilaDevolucion[] {
-  return filas.map(f =>
-    f.puedeReponer
-      ? { ...f, reponerStock: true }
-      : { ...f, cantidad: '', reponerStock: false },
-  )
-}
-
-/**
- * ¿La fila admite que se le tipee una cantidad, en el camino que la va a
- * recibir? Vive acá y no suelta en el `.vue` porque es la única decisión de
- * negocio del componente compartido: qué se puede acreditar no es lo mismo que
- * qué se puede devolver a stock.
- */
-export function filaEditable(
-  fila: FilaDevolucion,
-  modo: 'acredita' | 'solo-stock',
-): boolean {
-  return modo === 'acredita' ? filaAcreditable(fila) : filaDevolvible(fila)
-}
-
-/**
  * El criterio de redondeo CONGELADO de la venta (`venta.configCalculo`), el
  * subconjunto que hace falta para cuantizar como el motor. Nace acá y no en
  * `VentaDetalleDrawer.vue` porque es este composable el que lo consume.
@@ -257,15 +214,6 @@ export function filaAcreditable(fila: FilaDevolucion): boolean {
   return new Decimal(fila.disponible).gt(0)
 }
 
-/**
- * ¿La fila se puede mandar por el camino que SOLO mueve stock (reembolso sin
- * nota de crédito)? Ahí sigue haciendo falta que el ítem pueda reponer: no hay
- * documento que acredite lo que no vuelve.
- */
-export function filaDevolvible(fila: FilaDevolucion): boolean {
-  return fila.puedeReponer && new Decimal(fila.disponible).gt(0)
-}
-
 // ── Composable reactivo ──────────────────────────────────────────────────────
 
 export function useDevolucionInventario() {
@@ -287,10 +235,6 @@ export function useDevolucionInventario() {
     filas.value = setReponerFila(filas.value, itemId, valor)
   }
 
-  function normalizarSoloStock() {
-    filas.value = normalizarParaSoloStock(filas.value)
-  }
-
   const filasValidas = computed(() => filasDevolucionValidas(filas.value))
   const devoluciones = computed(() => devolucionesPayload(filas.value))
 
@@ -300,7 +244,6 @@ export function useDevolucionInventario() {
     limpiar,
     setCantidad,
     setReponer,
-    normalizarSoloStock,
     filasValidas,
     devoluciones,
   }
