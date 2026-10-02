@@ -430,6 +430,22 @@ export function setMontoPago(
 
 export type { CustomerForm }
 
+/**
+ * El tipo de documento con que arranca la venta: la boleta del catálogo
+ * (`esBoleta`), no `tipos[0]`. El listado ordena por nombre, y hasta el
+ * 2026-10-02 la boleta salía primera solo porque "Boleta…" ordena antes que
+ * "Factura…".
+ *
+ * Sin boleta en el catálogo (AR/CO/MX hoy) da `undefined`, igual que el
+ * servidor: `resolverTipoDocumento`, si la venta no trae tipo, busca la boleta
+ * del país y, si no hay, deja la venta sin tipo — nunca elige otro.
+ */
+export function tipoDocumentoPorDefecto(
+  tipos: { id: string, esBoleta: boolean }[],
+): string | undefined {
+  return tipos.find(t => t.esBoleta)?.id
+}
+
 export function tieneCustomerData(customer: CustomerForm): boolean {
   return Boolean(customer.nombre.trim() || customer.terceroId)
 }

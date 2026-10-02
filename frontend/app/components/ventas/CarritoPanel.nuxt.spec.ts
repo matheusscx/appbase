@@ -9,6 +9,7 @@
 // Se testea el carrito del POS porque es el que cobra. `CarritoOnline.vue`
 // (tienda) usa la misma expresión verbatim; si se tocan, se tocan juntos.
 import { describe, it, expect } from 'vitest'
+import { nextTick } from 'vue'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import CarritoPanel from './CarritoPanel.vue'
 import type { CarritoLinea, ItemCatalogo } from '~/composables/useVenta'
@@ -77,7 +78,7 @@ function montar(props: { lineas: CarritoLinea[], resultado: ResultadoVenta | nul
     global: { stubs },
     props: {
       ...props,
-      tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false }],
+      tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true }],
       tieneCaja: true,
       customer: { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null },
     },
@@ -122,5 +123,52 @@ describe('CarritoPanel — advertencias solo con el cálculo vigente', () => {
     })
 
     expect(wrapper.text()).toContain('Neto')
+  })
+})
+
+describe('CarritoPanel — "Vaciar todo" vuelve a la boleta, no al primero del catálogo', () => {
+  /**
+   * El catálogo llega ordenado por nombre, y la boleta no tiene por qué ser la
+   * primera: acá un tipo "Acta…" ordena antes. Hasta el 2026-10-02 el panel
+   * tomaba `tiposDocumento[0]` como "lo de por defecto", así que vaciar dejaba
+   * puesto el Acta —que pide cliente— y un panel vacío con la boleta elegida
+   * se veía como "algo que limpiar".
+   */
+  const catalogo = [
+    { id: 'doc-acta', nombre: 'Acta de Entrega', customerRequerido: true, esBoleta: false },
+    { id: 'doc-boleta', nombre: 'Boleta de Venta', customerRequerido: false, esBoleta: true },
+  ]
+
+  function montarConCatalogo(lineas: CarritoLinea[], tipoDocumentoId: string) {
+    return mountSuspended(CarritoPanel, {
+      global: { stubs },
+      props: {
+        lineas,
+        resultado: null,
+        vigente: false,
+        tiposDocumento: catalogo,
+        tieneCaja: true,
+        tipoDocumentoId,
+        customer: { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null },
+      },
+    })
+  }
+
+  it('vaciar deja la boleta elegida', async () => {
+    const wrapper = await montarConCatalogo([linea('item-0', 'Papas')], 'doc-acta')
+
+    wrapper.findComponent({ name: 'CrudModal' }).vm.$emit('confirm')
+    await nextTick()
+
+    expect(wrapper.emitted('update:tipoDocumentoId')?.at(-1)).toEqual(['doc-boleta'])
+  })
+
+  it('un panel vacío con la boleta elegida no tiene nada que limpiar', async () => {
+    const wrapper = await montarConCatalogo([], 'doc-boleta')
+
+    const vaciar = wrapper.findAllComponents({ name: 'UButton' })
+      .find(b => b.props('icon') === 'i-lucide-eraser')
+    expect(vaciar, 'el botón de vaciar').toBeDefined()
+    expect(vaciar!.props('disabled')).toBe(true)
   })
 })

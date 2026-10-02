@@ -646,6 +646,7 @@ describe('Ventas (e2e)', () => {
       nombre: string;
       codigo: string | null;
       customerRequerido: boolean;
+      esBoleta: boolean;
     }
 
     it('lista los tipos de documento del país del tenant con el flag customerRequerido', async () => {
@@ -662,6 +663,21 @@ describe('Ventas (e2e)', () => {
       const factura = tipos.find((t) => t.codigo === '33');
       expect(boleta?.customerRequerido).toBe(false);
       expect(factura?.customerRequerido).toBe(true);
+    });
+
+    it('marca cuál es la boleta del país (esBoleta), que es lo que la pantalla elige por defecto', async () => {
+      // La pantalla elegía `tipos[0]`, y el listado ordena por nombre: salía la
+      // boleta solo porque "Boleta…" ordena antes que "Factura…". Sin la marca
+      // no tiene cómo encontrarla.
+      const res = await request(app.getHttpServer())
+        .get('/api/tipos-documento')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).toBe(200);
+      const tipos = res.body as TipoDocResponse[];
+      const boletas = tipos.filter((t) => t.esBoleta === true);
+      expect(boletas.map((t) => t.codigo)).toEqual(['39']);
+      expect(tipos.find((t) => t.codigo === '33')?.esBoleta).toBe(false);
     });
 
     it('retorna 401 sin token', async () => {

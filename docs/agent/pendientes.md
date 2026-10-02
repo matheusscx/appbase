@@ -41,27 +41,6 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
-- [ ] **El tipo de documento por defecto de la pantalla es "el primero por nombre", no la boleta**
-  (frontend + contrato de `GET /tipos-documento`). La pantalla toma `tiposDocumento[0]`, y el
-  listado ordena por `nombre ASC` (`ventas.service.ts`, `findTiposDocumento`): hoy sale la Boleta
-  porque "Boleta…" ordena antes que "Factura…", no porque alguien la haya elegido. Lugares,
-  medidos el 2026-10-02:
-  - `frontend/app/pages/salones/index.vue` ~L2783: el cierre de cuenta **manda** `tiposDocumento[0]`,
-    y salones no tiene campo de cliente. Desde que el servidor exige el customer de un tipo
-    `customer_requerido` (cerrado el 2026-10-02, ver `resueltos.md`), un tipo así que ordene antes
-    que la Boleta hace rebotar **todo** cierre de mesa con 400.
-  - `frontend/app/pages/ventas/pos.vue` ~L177: el POS arranca con `tiposRes[0]`. Ahí no rebota —la
-    pantalla pide el cliente antes de habilitar Cobrar— pero el cajero arranca en otro documento.
-  - `frontend/app/components/ventas/CarritoPanel.vue` ~L117 y ~L124: "Vaciar todo" vuelve a
-    `tiposDocumento[0]`, y `hayAlgoQueLimpiar` compara contra ese mismo `[0]`.
-  - `frontend/e2e/ventas/nota-credito.spec.ts` ~L86: el Playwright arma su venta con `tipos[0]`.
-  `GET /tipos-documento` **no expone** `esBoleta` (`TipoDocumentoResponse`, `ventas.service.ts`
-  ~L220), aunque la columna `es_boleta` existe desde la emisión. **Arreglo** (orquestadora,
-  2026-10-02): que el default sea la boleta del catálogo —exponer `esBoleta` en la respuesta y
-  elegir por eso en los cuatro lugares—. En salones, omitir `tipoDocumentoId` también llega a la
-  boleta, porque el servidor la resuelve por defecto. Anotado al cerrar el `customer_requerido`;
-  lo vio su `domain-reviewer`.
-
 - [ ] **`@IsOptional()` deja pasar un `null` explícito en los `PATCH`/`PUT`, y el service lo
   escribe o lo ignora** (backend, DTOs de actualización). `@IsOptional` de class-validator trata
   `null` igual que ausente y saltea el validador de abajo; ni el pipe global
@@ -123,6 +102,18 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
+
+- [ ] **El POS de un tenant AR/CO/MX no puede cobrar: su catálogo de tipos de documento llega
+  vacío** (frontend + catálogo; **leído, no corrido**: anotado 2026-10-02 al cerrar el tipo por
+  defecto = boleta, ver [`resueltos.md`](resueltos.md)). De AR/CO/MX el seed solo trae la nota de
+  crédito interna, con `activo = false`, así que `GET /tipos-documento` les devuelve `[]`. La
+  pantalla arranca sin tipo —igual que el servidor, que sin boleta deja la venta sin tipo—, pero
+  `puedeCobrar` (`useVenta.ts`) devuelve `false` sin `tipoDocumentoId`: el botón Cobrar nunca se
+  habilita. Salones no pasa por `puedeCobrar` y sí cierra. Esto no lo causó el arreglo de la boleta:
+  antes, `[0]` de una lista vacía también daba `undefined`. **Medir:** reproducirlo con un tenant de
+  uno de esos países (`POST /admin/tenants` con una provincia AR/CO/MX, caja abierta, un ítem en el
+  carrito). **Si se confirma**, no se arregla de oficio: la pregunta para el owner es **si esos
+  países se soportan hoy** (hoy se opera solo en Chile). Lo fiscal va solo (`CLAUDE.md`).
 
 - [ ] **Si el vínculo entre un `REFUND` y su corrección falla, ese reembolso queda contado dos veces
   contra su pago** (backend; anotado 2026-10-02 por la revisión de la tarea 16 del frente de emisión).

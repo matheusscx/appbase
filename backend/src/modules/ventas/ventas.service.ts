@@ -222,6 +222,8 @@ export interface TipoDocumentoResponse {
   nombre: string;
   codigo: string | null;
   customerRequerido: boolean;
+  /** La boleta del país: lo que la pantalla elige por defecto. Ver `resolverTipoDocumento`. */
+  esBoleta: boolean;
 }
 
 /**
@@ -3350,11 +3352,13 @@ export class VentasService {
       nombre: string;
       codigo: string | null;
       customer_requerido: boolean;
+      es_boleta: boolean;
     }[] = await this.db.query(
       `SELECT td.tipo_documento_id,
               td.nombre,
               td.codigo,
-              td.customer_requerido
+              td.customer_requerido,
+              td.es_boleta
        FROM tenants t
        JOIN provincia prov ON prov.provincia_id = t.provincia_id
             AND prov.eliminado_el IS NULL
@@ -3371,6 +3375,7 @@ export class VentasService {
       nombre: r.nombre,
       codigo: r.codigo,
       customerRequerido: r.customer_requerido === true,
+      esBoleta: r.es_boleta === true,
     }));
   }
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
-import { type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
+import { tipoDocumentoPorDefecto, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import type { EmisorMedio } from '~/composables/useDocumentosVenta'
 import { sugerirPropina, fetchPorcentajeSugerido, PROPINA_PORCENTAJE_DEFAULT } from '~/composables/usePropina'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
@@ -50,7 +50,7 @@ definePageMeta({
   layout: 'dashboard',
 })
 
-interface TipoDoc { id: string, nombre: string, customerRequerido: boolean }
+interface TipoDoc { id: string, nombre: string, customerRequerido: boolean, esBoleta: boolean }
 interface MetodoPago {
   metodoPagoId: string
   nombre: string
@@ -2780,7 +2780,7 @@ async function cerrarCuentaConPin(
       {
         ...credencialGarzon(garzonId, pin),
         pagos,
-        tipoDocumentoId: tiposDocumento.value[0]?.id,
+        tipoDocumentoId: tipoDocumentoPorDefecto(tiposDocumento.value),
         propinaMonto: tipMonto,
         propinaSugerida: tipSugerida,
         propinaPorcentajeSugerido: propinaPorcentaje.value,

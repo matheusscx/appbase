@@ -24,6 +24,61 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 ---
 
 
+## El tipo de documento por defecto de la pantalla es la boleta, no "el primero por nombre" (cerrada 2026-10-02)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **El tipo de documento por defecto de la pantalla es "el primero por nombre", no la boleta**
+  (frontend + contrato de `GET /tipos-documento`). La pantalla toma `tiposDocumento[0]`, y el
+  listado ordena por `nombre ASC` (`ventas.service.ts`, `findTiposDocumento`): hoy sale la Boleta
+  porque "Boleta…" ordena antes que "Factura…", no porque alguien la haya elegido. Lugares,
+  medidos el 2026-10-02:
+  - `frontend/app/pages/salones/index.vue` ~L2783: el cierre de cuenta **manda** `tiposDocumento[0]`,
+    y salones no tiene campo de cliente. Desde que el servidor exige el customer de un tipo
+    `customer_requerido` (cerrado el 2026-10-02, ver `resueltos.md`), un tipo así que ordene antes
+    que la Boleta hace rebotar **todo** cierre de mesa con 400.
+  - `frontend/app/pages/ventas/pos.vue` ~L177: el POS arranca con `tiposRes[0]`. Ahí no rebota —la
+    pantalla pide el cliente antes de habilitar Cobrar— pero el cajero arranca en otro documento.
+  - `frontend/app/components/ventas/CarritoPanel.vue` ~L117 y ~L124: "Vaciar todo" vuelve a
+    `tiposDocumento[0]`, y `hayAlgoQueLimpiar` compara contra ese mismo `[0]`.
+  - `frontend/e2e/ventas/nota-credito.spec.ts` ~L86: el Playwright arma su venta con `tipos[0]`.
+  `GET /tipos-documento` **no expone** `esBoleta` (`TipoDocumentoResponse`, `ventas.service.ts`
+  ~L220), aunque la columna `es_boleta` existe desde la emisión. **Arreglo** (orquestadora,
+  2026-10-02): que el default sea la boleta del catálogo —exponer `esBoleta` en la respuesta y
+  elegir por eso en los cuatro lugares—. En salones, omitir `tipoDocumentoId` también llega a la
+  boleta, porque el servidor la resuelve por defecto. Anotado al cerrar el `customer_requerido`;
+  lo vio su `domain-reviewer`.
+
+### Qué se hizo
+
+`GET /tipos-documento` expone `esBoleta` (`findTiposDocumento`), y las pantallas eligen el
+default con una sola función, `tipoDocumentoPorDefecto` (`useVenta.ts`): el tipo marcado
+`esBoleta`, nunca una posición. La usan los tres lugares de pantalla de la entrada —el arranque
+del POS, "Vaciar todo" y `hayAlgoQueLimpiar` del carrito, y el cierre de cuenta de salones—, y el
+Playwright de la nota de crédito busca la boleta por la marca.
+
+**País sin boleta** (AR/CO/MX hoy, cuyo catálogo activo llega vacío): la pantalla no elige
+ninguno, `undefined`. No se cae a `[0]`, porque eso es justo lo que hace el servidor:
+`resolverTipoDocumento`, con la venta sin tipo, busca la boleta del país y, si no hay, deja la
+venta sin tipo; nunca elige otro documento. En salones, `undefined` omite el campo y el servidor
+resuelve lo mismo. Avisado a la orquestadora.
+
+**Barrido** de otros lugares que elijan un tipo por posición: los únicos consumidores de
+`GET /tipos-documento` son el POS, salones y el Playwright de la NC; los e2e de la API usan los
+IDs fijos del seed (`BOLETA_ID`/`FACTURA_ID`) o buscan por `codigo`. En el backend, el único `LIMIT 1` sobre el catálogo es la nota de crédito del país,
+única por índice (`uq_tipo_documento_nota_credito_pais`). `compras/tipos-documento` es otro
+catálogo, el de los documentos que recibe un local.
+
+**Lo que lo fija:** el e2e del endpoint (`ventas.e2e-spec.ts`, la boleta es la única con
+`esBoleta` y la factura no la tiene), y specs de pantalla con un catálogo donde un "Acta…" con
+`customerRequerido` ordena antes que la boleta. Cada uno se corrió contra un mutante que **vuelve
+al código anterior** (`[0]`) y muere: dos tests en `pos.nuxt.spec.ts` (arranca en la boleta, y
+sin boleta no elige ninguno), dos en `CarritoPanel.nuxt.spec.ts` (vaciar, y el botón
+deshabilitado con el panel vacío), y uno en `salones/index.nuxt.spec.ts` (el body del cierre
+lleva la boleta).
+
 ## El IVA de varios documentos de una misma venta puede no sumar el IVA de la venta, por 1–2
   pesos (cerrada 2026-10-02: se acepta)
 

@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import type { CarritoLinea } from '~/composables/useVenta'
-import { puedeCobrar, tieneCustomerData } from '~/composables/useVenta'
+import { puedeCobrar, tieneCustomerData, tipoDocumentoPorDefecto } from '~/composables/useVenta'
 import { unidadBaseItem } from '~/utils/cantidad-presentacion'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import type { CustomerForm } from './ClienteForm.vue'
 
-interface TipoDoc { id: string; nombre: string; customerRequerido: boolean }
+interface TipoDoc { id: string; nombre: string; customerRequerido: boolean; esBoleta: boolean }
 
 const props = defineProps<{
   lineas: CarritoLinea[]
@@ -114,14 +114,14 @@ const vaciarModalOpen = ref(false)
 const hayAlgoQueLimpiar = computed(() =>
   props.lineas.length > 0
   || hasCustomerData.value
-  || tipoDocumentoId.value !== props.tiposDocumento[0]?.id,
+  || tipoDocumentoId.value !== tipoDocumentoPorDefecto(props.tiposDocumento),
 )
 
 function confirmarVaciarTodo() {
   customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
   customerExpandido.value = false
   clienteDrawerOpen.value = false
-  tipoDocumentoId.value = props.tiposDocumento[0]?.id
+  tipoDocumentoId.value = tipoDocumentoPorDefecto(props.tiposDocumento)
   vaciarModalOpen.value = false
   emit('limpiar-todo')
 }

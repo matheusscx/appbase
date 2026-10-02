@@ -120,6 +120,8 @@ let clavesDeVenta: (string | undefined)[] = []
  * Vacía = éxito normal.
  */
 let respuestasVenta: (Error | { status: number, data: unknown } | Record<string, unknown>)[] = []
+/** Lo que devuelve `GET /tipos-documento`, en el orden del servidor (por nombre). */
+let tiposDocumentoMock: unknown[] = []
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: unknown, headers?: Record<string, string> }) => {
@@ -132,6 +134,9 @@ mockNuxtImport('useApiFetch', () => {
     if (ruta.includes('/items')) {
       urlsCatalogo.push(url)
       return Promise.resolve({ data: [], meta: { total: 0, page: 1, pageSize: 100 } })
+    }
+    if (ruta.endsWith('/tipos-documento')) {
+      return Promise.resolve(tiposDocumentoMock)
     }
     if (ruta.endsWith('/impresoras/operacion')) {
       return Promise.resolve(impresorasBoleta)
@@ -149,9 +154,9 @@ mockNuxtImport('useApiFetch', () => {
         ...respuesta,
       })
     }
-    // El resto del arranque (métodos de pago, tipos de documento, unidades de
-    // medida, razones sociales del emisor, propina sugerida, certificado QZ)
-    // no interviene en este flujo.
+    // El resto del arranque (métodos de pago, unidades de medida, razones
+    // sociales del emisor, propina sugerida, certificado QZ) no interviene en
+    // este flujo.
     return Promise.resolve([])
   }
 })
@@ -184,6 +189,7 @@ beforeEach(() => {
   bodiesDeVenta = []
   clavesDeVenta = []
   respuestasVenta = []
+  tiposDocumentoMock = []
   toasts = []
   // La clave vive a nivel de módulo (sobrevive a cerrar y reabrir un modal):
   // cada test arranca sin intento abierto.
@@ -220,6 +226,41 @@ describe('ventas/pos — el catálogo pide solo ítems vendibles', () => {
       'producto',
       'receta',
     ])
+  })
+})
+
+describe('ventas/pos — el documento con que arranca es la boleta, no el primero por nombre', () => {
+  /**
+   * `GET /tipos-documento` ordena por nombre, y hasta el 2026-10-02 el POS
+   * arrancaba con `tiposRes[0]`: salía la boleta solo porque "Boleta…" ordena
+   * antes que "Factura…". Con un tipo que ordene antes —acá un "Acta…" que pide
+   * cliente— el cajero arrancaba en ese documento.
+   */
+  it('elige el tipo marcado `esBoleta`, aunque no sea el primero de la lista', async () => {
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    tiposDocumentoMock = [
+      { id: 'doc-acta', nombre: 'Acta de Entrega', customerRequerido: true, esBoleta: false },
+      { id: 'doc-boleta', nombre: 'Boleta de Venta', customerRequerido: false, esBoleta: true },
+    ]
+    const wrapper = await montar()
+    await esperar(20)
+
+    const carrito = wrapper.findComponent({ name: 'VentasCarritoPanel' })
+    expect(carrito.exists(), 'el carrito, con la caja abierta').toBe(true)
+    expect(carrito.props('tipoDocumentoId')).toBe('doc-boleta')
+  })
+
+  it('sin boleta en el catálogo no elige ninguno, como el servidor', async () => {
+    // `resolverTipoDocumento`, con la venta sin tipo, busca la boleta del país y
+    // si no hay deja la venta sin tipo: nunca elige otro documento por su cuenta.
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    tiposDocumentoMock = [
+      { id: 'doc-acta', nombre: 'Acta de Entrega', customerRequerido: true, esBoleta: false },
+    ]
+    const wrapper = await montar()
+    await esperar(20)
+
+    expect(wrapper.findComponent({ name: 'VentasCarritoPanel' }).props('tipoDocumentoId')).toBeUndefined()
   })
 })
 

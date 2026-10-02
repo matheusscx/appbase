@@ -68,7 +68,7 @@ test('una nota de crédito parcial queda atada a la venta que la originó', asyn
   })
   escenario.itemIds.push(producto.id)
 
-  const tipos = await api<{ id: string; nombre: string }[]>(
+  const tipos = await api<{ id: string; nombre: string; esBoleta: boolean }[]>(
     request,
     'get',
     '/tipos-documento',
@@ -83,7 +83,8 @@ test('una nota de crédito parcial queda atada a la venta que la originó', asyn
       data: {
         lineas: [{ itemId: producto.id, cantidad: '1' }],
         pagos: [{ metodoPagoId: EFECTIVO, monto: TOTAL_VENTA_API }],
-        tipoDocumentoId: tipos[0]?.id,
+        // La boleta por su marca, no `tipos[0]`: el listado ordena por nombre.
+        tipoDocumentoId: tipos.find((t) => t.esBoleta)?.id,
       },
     },
   )

@@ -27,7 +27,7 @@ Es el corazón del POS: sin él no hay ventas registradas. Concentra en una sola
 
 ### GET /api/tipos-documento
 
-Lista tipos de documento tributarios del país del tenant.
+Lista los tipos de documento tributarios **activos** del país del tenant, ordenados por nombre.
 
 ```
 GET /api/tipos-documento
@@ -37,20 +37,27 @@ Response (200):
 [
   {
     "id": "uuid",
-    "nombre": "Boleta",
+    "nombre": "Boleta de Venta",
     "codigo": "39",
-    "requiereCustomer": false
+    "customerRequerido": false,
+    "esBoleta": true
   },
   {
     "id": "uuid",
-    "nombre": "Factura",
+    "nombre": "Factura Electrónica",
     "codigo": "33",
-    "requiereCustomer": true
+    "customerRequerido": true,
+    "esBoleta": false
   }
 ]
 ```
 
 Usada en el frontend para renderizar el selector de documento y aplicar fricción (cliente obligatorio en Factura, opcional en Boleta).
+
+**El documento por defecto de las pantallas es el marcado `esBoleta`, nunca el primero de la lista**
+(`tipoDocumentoPorDefecto`, `useVenta.ts`): el orden es por nombre y la boleta no tiene por qué
+salir primera. Si el país no tiene boleta (AR/CO/MX hoy), la pantalla no elige ninguno: es lo
+mismo que hace el servidor cuando la venta no trae tipo (`resolverTipoDocumento`).
 
 ### POST /api/ventas
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import type { EmisorMedio } from '~/composables/useDocumentosVenta'
-import { useVenta, descontarStockCatalogo, tieneCustomerData, toVentaLineasBody, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
+import { useVenta, descontarStockCatalogo, tieneCustomerData, tipoDocumentoPorDefecto, toVentaLineasBody, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
@@ -16,7 +16,7 @@ import type { BoletaVenta } from '~/types/boleta'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
-interface TipoDoc { id: string; nombre: string; customerRequerido: boolean }
+interface TipoDoc { id: string; nombre: string; customerRequerido: boolean; esBoleta: boolean }
 interface MetodoPago {
   metodoPagoId: string
   nombre: string
@@ -174,7 +174,7 @@ async function cargar() {
     items.value = [...productosRes.data, ...recetasRes.data, ...combosRes.data]
     metodos.value = metodosRes
     tiposDocumento.value = tiposRes
-    tipoDocumentoId.value = tiposRes[0]?.id
+    tipoDocumentoId.value = tipoDocumentoPorDefecto(tiposRes)
   } catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cargar el POS'), color: 'error' })
   } finally {

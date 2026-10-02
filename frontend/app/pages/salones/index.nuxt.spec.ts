@@ -323,6 +323,8 @@ let cierreFallaSesion = false
  * una cuenta sin mirar el papel no tienen que armar el payload a mano.
  */
 let cierreBoletaOverride: Record<string, unknown> | null = null
+/** Lo que devuelve `GET /tipos-documento`, en el orden del servidor (por nombre). */
+let tiposDocumentoMock: unknown[] = []
 /**
  * Retiene el `POST /cuentas/:id/lineas`, igual que `abrirCuentaRetenido`. Es lo
  * que abre la ventana "agregué un producto y me fui": sin esto el mock contesta
@@ -769,7 +771,7 @@ mockNuxtImport('useApiFetch', () => {
         err.data = { message: 'No tienes permiso para esta acción' }
         return Promise.reject(err)
       }
-      return Promise.resolve([{ id: 'tipo-1', nombre: 'Boleta', customerRequerido: false }])
+      return Promise.resolve(tiposDocumentoMock)
     }
     if (ruta.endsWith('/metodos-pago')) {
       if (metodosPagoRechaza) {
@@ -931,6 +933,7 @@ function reiniciarMock() {
   cierreRetenido = null
   cierreFallaSesion = false
   cierreBoletaOverride = null
+  tiposDocumentoMock = [{ id: 'tipo-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true }]
   agregarLineaRetenido = null
   quitarLineaRetenido = null
   cuentasPorMesa = {}
@@ -5015,6 +5018,37 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(cierresDeCuenta).toEqual(['cuenta-9'])
     expect(bodiesDeCierre).toHaveLength(1)
     expect(bodiesDeCierre[0]).toMatchObject({ propinaMonto: '0' })
+  })
+
+  it('el cierre manda la boleta del catálogo, no el primer tipo por nombre', async () => {
+    /**
+     * `GET /tipos-documento` ordena por nombre, y hasta el 2026-10-02 el cierre
+     * mandaba `tiposDocumento[0]`: salía la boleta solo porque "Boleta…" ordena
+     * antes que "Factura…". Salones no tiene campo de cliente, así que un tipo
+     * `customer_requerido` que ordene antes —acá un "Acta…"— hacía rebotar con
+     * 400 todo cierre de mesa.
+     */
+    tiposDocumentoMock = [
+      { id: 'doc-acta', nombre: 'Acta de Entrega', customerRequerido: true, esBoleta: false },
+      { id: 'doc-boleta', nombre: 'Boleta de Venta', customerRequerido: false, esBoleta: true },
+    ]
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(20)
+    wrapper.findComponent({ name: 'VentasCobroModal' }).vm
+      .$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5000' }], '0')
+    await esperar(20)
+    await tipearPin()
+    await esperar(300)
+
+    expect(bodiesDeCierre).toHaveLength(1)
+    expect(bodiesDeCierre[0]).toMatchObject({ tipoDocumentoId: 'doc-boleta' })
   })
 
   it('cerrar el teclado de PIN sin tipearlo devuelve el botón, no lo deja trabado', async () => {
