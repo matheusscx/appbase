@@ -917,6 +917,50 @@ describe('GruposModificadoresService', () => {
       expect(sql).toMatch(/ORDER BY item_grupo_id\s+FOR SHARE\s*$/);
     });
 
+    // El mock contesta por el SQL y no por el orden de llamada: con una cadena
+    // de `mockResolvedValueOnce`, volver al bucle agotaría el mock y el error no
+    // diría nada del conteo. Tres asociaciones —una con override y dos sin,
+    // una de ellas repetida— cubren las dos ramas del upsert: con una sola, una
+    // consulta por asociación también daría el mismo número.
+    it('aplicarOverrides lee y escribe en lote: el conteo de consultas no crece con las asociaciones', async () => {
+      managerMock.query.mockImplementation((sql: string) => {
+        if (/FROM grupos_modificadores/.test(sql))
+          return Promise.resolve([{ grupo_modificador_id: 'G1' }]);
+        if (/FROM grupo_modificador_opciones/.test(sql))
+          return Promise.resolve([{ grupo_opcion_id: OPCION_ID }]);
+        if (/FROM item_grupos_modificadores/.test(sql))
+          return Promise.resolve([
+            { item_grupo_id: 'IG1' },
+            { item_grupo_id: 'IG2' },
+            { item_grupo_id: 'IG3' },
+          ]);
+        if (/^\s*SELECT[\s\S]*FROM item_grupo_modificador_opciones/.test(sql))
+          return Promise.resolve([
+            { item_grupo_id: 'IG1', item_grupo_opcion_id: 'OV1' },
+          ]);
+        return Promise.resolve([]);
+      });
+
+      const res = await service.aplicarOverrides(TENANT_ID, 'G1', {
+        itemGrupoIds: ['IG1', 'IG2', 'IG3', 'IG3'],
+        grupoOpcionId: OPCION_ID,
+        cantidad: '150',
+        unidadCodigo: 'g',
+      });
+
+      expect(res.actualizados).toBe(4);
+      const llamadas = managerMock.query.mock.calls as unknown as [
+        string,
+        unknown[],
+      ][];
+      // grupo, opción, asociaciones, overrides vivos, un UPDATE y un INSERT.
+      expect(llamadas).toHaveLength(6);
+      const update = llamadas.find(([q]) => /^\s*UPDATE/.test(q))!;
+      expect(update[1]).toContainEqual(['OV1']);
+      const insert = llamadas.find(([q]) => /^\s*INSERT/.test(q))!;
+      expect(insert[1]).toContainEqual(['IG2', 'IG3']);
+    });
+
     it('rechaza aplicar a un item_grupo_id que no pertenece al grupo', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }])

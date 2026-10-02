@@ -548,4 +548,59 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
     expect(enElGrupo?.precioExtra).toBe('700.0000');
     expect(enElGrupo?.precioExtraDefault).toBe('0.0000');
   });
+
+  it('11. aplicar en lote pisa el override que ya había, crea el que faltaba y no toca el resto', async () => {
+    // El caso que mezcla las dos ramas del upsert en un mismo pedido: la Clásica
+    // ya tiene override (150 g, test 3) y la receta sin override no (test 8). La
+    // segunda va repetida: el pedido no las deduplica, y una fila de override de
+    // más por la misma asociación duplicaría la opción en el detalle.
+    const filasDelGrupo = async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/grupos-modificadores/${grupoProteinaId}/items`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      return res.body as {
+        itemId: string;
+        itemGrupoId: string;
+        opciones: ItemGrupoOpcionDetalle[];
+      }[];
+    };
+    const antes = await filasDelGrupo();
+    const igDe = (itemId: string) =>
+      antes.find((f) => f.itemId === itemId)!.itemGrupoId;
+    const igClasica = igDe(recetaClasicaId);
+    const igSinOverride = igDe(recetaSinOverrideId);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/grupos-modificadores/${grupoProteinaId}/overrides`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemGrupoIds: [igClasica, igSinOverride, igSinOverride],
+        grupoOpcionId: carneOpcionId,
+        cantidad: '200',
+        unidadCodigo: 'g',
+      });
+    expect(res.status).toBe(200);
+    expect((res.body as { actualizados: number }).actualizados).toBe(3);
+
+    const despues = await filasDelGrupo();
+    const carneDe = (itemId: string) =>
+      despues
+        .find((f) => f.itemId === itemId)!
+        .opciones.filter((o) => o.grupoOpcionId === carneOpcionId);
+    expect(carneDe(recetaClasicaId).map((o) => o.cantidad)).toEqual([
+      '200.0000',
+    ]);
+    expect(carneDe(recetaSinOverrideId).map((o) => o.cantidad)).toEqual([
+      '200.0000',
+    ]);
+    // La XL no estaba en el pedido: conserva su 250.
+    expect(carneDe(recetaXlId).map((o) => o.cantidad)).toEqual(['250.0000']);
+    const [{ n }] = await ds.query<{ n: number }[]>(
+      `SELECT COUNT(*)::int AS n FROM item_grupo_modificador_opciones
+        WHERE item_grupo_id = $1 AND grupo_opcion_id = $2 AND eliminado_el IS NULL`,
+      [igSinOverride, carneOpcionId],
+    );
+    expect(n).toBe(1);
+  });
 });

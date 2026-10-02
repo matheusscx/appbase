@@ -1033,38 +1033,47 @@ export class GruposModificadoresService {
         );
       }
 
-      let actualizados = 0;
-      for (const itemGrupoId of dto.itemGrupoIds) {
-        const vivos: { item_grupo_opcion_id: string }[] = await manager.query(
-          `SELECT item_grupo_opcion_id FROM item_grupo_modificador_opciones
-           WHERE item_grupo_id = $1 AND grupo_opcion_id = $2 AND eliminado_el IS NULL`,
-          [itemGrupoId, dto.grupoOpcionId],
+      // Una lectura para todas las asociaciones y a lo sumo dos escrituras: el
+      // UPDATE de las que ya tenían override y un INSERT de las que no. Antes era
+      // un SELECT más una escritura por asociación (N+1). Las repetidas del
+      // pedido se cuentan una vez: el bucle, al llegar a la segunda, ya veía el
+      // override que había insertado la primera y lo pisaba con el mismo valor.
+      const asociaciones = [...new Set(dto.itemGrupoIds)];
+      const vivos: { item_grupo_id: string; item_grupo_opcion_id: string }[] =
+        await manager.query(
+          `SELECT item_grupo_id, item_grupo_opcion_id FROM item_grupo_modificador_opciones
+           WHERE item_grupo_id = ANY($1::uuid[]) AND grupo_opcion_id = $2
+             AND eliminado_el IS NULL`,
+          [asociaciones, dto.grupoOpcionId],
         );
-        if (vivos.length) {
-          await manager.query(
-            `UPDATE item_grupo_modificador_opciones
-             SET cantidad = $1, unidad_codigo = $2, precio_extra = $3, actualizado_el = NOW()
-             WHERE item_grupo_opcion_id = $4`,
-            [cantidad, unidad, precio, vivos[0].item_grupo_opcion_id],
-          );
-        } else {
-          await manager.query(
-            `INSERT INTO item_grupo_modificador_opciones
-               (tenant_id, item_grupo_id, grupo_opcion_id, cantidad, unidad_codigo, precio_extra)
-             VALUES ($1,$2,$3,$4,$5,$6)`,
-            [
-              tenantId,
-              itemGrupoId,
-              dto.grupoOpcionId,
-              cantidad,
-              unidad,
-              precio,
-            ],
-          );
+      const overridePorAsociacion = new Map<string, string>();
+      for (const v of vivos) {
+        if (!overridePorAsociacion.has(v.item_grupo_id)) {
+          overridePorAsociacion.set(v.item_grupo_id, v.item_grupo_opcion_id);
         }
-        actualizados++;
       }
-      return { actualizados };
+      const aActualizar = [...overridePorAsociacion.values()];
+      const aCrear = asociaciones.filter(
+        (ig) => !overridePorAsociacion.has(ig),
+      );
+      if (aActualizar.length) {
+        await manager.query(
+          `UPDATE item_grupo_modificador_opciones
+           SET cantidad = $1, unidad_codigo = $2, precio_extra = $3, actualizado_el = NOW()
+           WHERE item_grupo_opcion_id = ANY($4::uuid[])`,
+          [cantidad, unidad, precio, aActualizar],
+        );
+      }
+      if (aCrear.length) {
+        await manager.query(
+          `INSERT INTO item_grupo_modificador_opciones
+             (tenant_id, item_grupo_id, grupo_opcion_id, cantidad, unidad_codigo, precio_extra)
+           SELECT $1::uuid, ig, $3::uuid, $4::numeric, $5::text, $6::numeric
+             FROM unnest($2::uuid[]) AS ig`,
+          [tenantId, aCrear, dto.grupoOpcionId, cantidad, unidad, precio],
+        );
+      }
+      return { actualizados: dto.itemGrupoIds.length };
     });
   }
   /**
