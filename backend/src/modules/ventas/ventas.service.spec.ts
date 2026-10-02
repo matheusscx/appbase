@@ -2994,6 +2994,7 @@ describe('VentasService', () => {
               venta_referencia_id: 'venta-madre',
               tipo_documento_codigo: '9999',
               tipo_documento_nombre: 'Nota de crédito (otro país)',
+              tipo_documento_es_boleta: false,
             },
           ]);
         return Promise.resolve([]);
@@ -3006,6 +3007,7 @@ describe('VentasService', () => {
         true,
       );
       expect(res.tipoDocumento?.codigo).toBe('9999');
+      expect(res.tipoDocumento?.esBoleta).toBe(false);
       expect(res.esNotaCredito).toBe(true);
       // Y no promete capacidad de acreditar sobre sí misma: sin este corte la
       // subconsulta no encuentra hijas y devuelve las líneas de la PROPIA nota
@@ -3149,6 +3151,9 @@ describe('VentasService', () => {
               venta_referencia_id: null,
               tipo_documento_codigo: '39',
               tipo_documento_nombre: 'Boleta de Venta',
+              // Lo manda la consulta (`td.es_boleta`): el flag es del catálogo,
+              // no se deduce del nombre ni del código.
+              tipo_documento_es_boleta: true,
             },
           ]);
         return Promise.resolve([]);
@@ -3165,6 +3170,7 @@ describe('VentasService', () => {
         id: 'doc-boleta',
         codigo: '39',
         nombre: 'Boleta de Venta',
+        esBoleta: true,
       });
       expect(res.esNotaCredito).toBe(false);
       expect(res.detalles[0]).toEqual(

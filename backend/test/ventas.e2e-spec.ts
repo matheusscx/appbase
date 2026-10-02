@@ -1271,6 +1271,28 @@ describe('Ventas (e2e)', () => {
       );
     });
 
+    it('el detalle dice si el tipo es boleta (esBoleta del catálogo): la boleta sí, la factura no', async () => {
+      const boleta = await crear({});
+      const factura = await crear({ tipoDocumentoId: FACTURA_CHILE_ID });
+      expect(boleta.status).toBe(201);
+      expect(factura.status).toBe(201);
+
+      const detalle = async (id: string) => {
+        const res = await request(app.getHttpServer())
+          .get(`/api/ventas/${id}`)
+          .set('Authorization', `Bearer ${token}`);
+        expect(res.status).toBe(200);
+        return (res.body as { tipoDocumento: { esBoleta: boolean } })
+          .tipoDocumento;
+      };
+      expect((await detalle((boleta.body as VentaResponse).id)).esBoleta).toBe(
+        true,
+      );
+      expect((await detalle((factura.body as VentaResponse).id)).esBoleta).toBe(
+        false,
+      );
+    });
+
     it('un tipo de otro país responde 400 y no crea la venta', async () => {
       const antes = await ventasDelTenant();
       const res = await crear({ tipoDocumentoId: NC_ARGENTINA_ID });

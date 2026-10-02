@@ -4,6 +4,20 @@ import type { TableColumn } from '@nuxt/ui'
 import { formatCantidadLinea } from '~/utils/cantidad-presentacion'
 import { itemsParaBoletaImpresion } from '~/utils/ticket-builder'
 import type { BoletaVenta } from '~/types/boleta'
+import {
+  NUMERO_DOCUMENTO_MAX,
+  cuerpoCompletarNumero,
+  estadoDocumento,
+  etiquetaEmisor,
+  etiquetaTipo,
+  leyendaCorrige,
+  leyendaDescarte,
+  llevaNumero,
+  puedeCompletarNumero,
+  type ClaseDocumentoMaquina,
+  type DocumentoVenta,
+  type EmisorMedio,
+} from '~/composables/useDocumentosVenta'
 
 interface PagoAplicacion {
   tipo: string
@@ -130,7 +144,7 @@ interface VentaDetalle {
    * el modal de anulación para el default del checkbox de reposición.
    */
   tieneLineasDespachadas: boolean
-  tipoDocumento: { id: string, codigo: string | null, nombre: string | null } | null
+  tipoDocumento: { id: string, codigo: string | null, nombre: string | null, esBoleta: boolean } | null
   /** Lo calcula el backend contra el id del tipo de documento, no contra `codigo`. */
   esNotaCredito: boolean
   reembolsos: Reembolso[]
@@ -179,6 +193,17 @@ interface VentaDetalle {
   pagos: Pago[]
   customer: { nombre: string; rut?: string } | null
   propina: PropinaVenta | null
+  /**
+   * Los documentos de la venta y de sus correcciones, y lo que el BACKEND decide
+   * sobre ellos. La pantalla solo los muestra: quién emitió, si se puede anular
+   * (`anulable`), si hay que preguntar por el documento hecho por fuera
+   * (`anularPreguntaExterno`) y si un abono con la máquina duplicaría
+   * (`abonoConMaquinaDuplica`) no se deciden acá.
+   */
+  documentos: DocumentoVenta[]
+  anulable: boolean
+  anularPreguntaExterno: boolean
+  abonoConMaquinaDuplica: boolean
 }
 
 interface MetodoPago {
@@ -186,6 +211,7 @@ interface MetodoPago {
   nombre: string
   permiteVuelto: boolean
   habilitada: boolean
+  emisor: EmisorMedio
 }
 
 const props = defineProps<{
@@ -219,6 +245,15 @@ const ncOpen = ref(false)
 const anularOpen = ref(false)
 const reimprimiendoBoleta = ref(false)
 const permissionsStore = usePermissionsStore()
+// `PATCH …/documentos/:id` pide `Ventas:Crear`: el mismo permiso gatea el botón.
+const { puedeCrear: puedeCompletar } = usePermisosCrud('Ventas')
+
+/**
+ * El número que se está tipeando para UN documento (uno a la vez). La clase solo
+ * se ofrece con un documento de la máquina; el hecho por fuera lleva solo número.
+ */
+const completando = ref<{ id: string, numero: string, clase?: ClaseDocumentoMaquina } | null>(null)
+const guardandoNumero = ref(false)
 
 const montoPagado = computed(() => {
   if (!venta.value) return '0'
@@ -261,15 +296,15 @@ const puedeCrearNC = computed(() =>
 )
 
 /**
- * Espeja lo que valida el backend: pendiente, sin pagos y permiso `Ventas:Anular`.
- * El tipo de documento ya no cuenta: toda venta nace con el de su país, así que
- * mirarlo ocultaría el botón siempre. El backend es el que manda (el guard vive
- * ahí); esto evita ofrecer un botón que siempre daría 400.
+ * Lo decide el backend (`anulable` de `GET /ventas/:id`): estado, pagos y lo que
+ * la venta tiene **emitido** (`venta_documentos`), la misma regla que `POST
+ * /anular`. La pantalla solo agrega el permiso `Ventas:Anular`, que es de UX: el
+ * guard de la ruta es el que manda. Replicar acá el estado o los pagos fue lo que
+ * dejó esta pantalla ofreciendo un botón que daba 400 (o escondiéndolo).
  */
 const puedeAnular = computed(() =>
   !!venta.value
-  && venta.value.estado === 'pendiente'
-  && venta.value.pagos.length === 0
+  && venta.value.anulable
   && permissionsStore.can('Ventas', 'Anular'),
 )
 
@@ -659,6 +694,7 @@ function familiaColor(familia: string | null): 'success' | 'warning' | 'neutral'
 async function cargar(id: string) {
   loading.value = true
   venta.value = null
+  completando.value = null
   expandidas.value = new Set()
   try {
     const [ventaData, metodosData] = await Promise.all([
@@ -689,6 +725,7 @@ watch(
       venta.value = null
       abonoOpen.value = false
       ncOpen.value = false
+      completando.value = null
     }
   },
 )
@@ -757,6 +794,49 @@ function onAnularSuccess(payload: { estado: string }) {
   if (!venta.value) return
   venta.value.estado = payload.estado
   emitPatch()
+  // Anular descarta los documentos que quedaban armados: la sección "Documentos"
+  // y `anulable` los calcula el backend, no se pintan acá.
+  void resincronizar()
+}
+
+function abrirCompletarNumero(doc: DocumentoVenta) {
+  completando.value = { id: doc.id, numero: '', clase: doc.claseMaquina ?? undefined }
+}
+
+/**
+ * Anota el número de un documento. La ruta lleva el `ventaId` **del documento**,
+ * no el de la venta que se está mirando: el de una nota de crédito es de la nota,
+ * y con el id de la original el servidor responde 404.
+ *
+ * Después se resincroniza: un documento hecho por fuera con número cambia lo que
+ * decide `anulable` (con número, anular ya no pregunta: va por nota de crédito), y
+ * eso solo lo sabe el backend.
+ */
+async function guardarNumero(doc: DocumentoVenta) {
+  const edicion = completando.value
+  if (!edicion || edicion.id !== doc.id || !edicion.numero.trim() || guardandoNumero.value) return
+  const ventaMirada = venta.value?.id
+  guardandoNumero.value = true
+  try {
+    const actualizado = await useApiFetch<DocumentoVenta>(
+      `${apiUrl}/ventas/${doc.ventaId}/documentos/${doc.id}`,
+      { method: 'PATCH', body: cuerpoCompletarNumero(doc, edicion.numero, edicion.clase) },
+    )
+    // Solo si el drawer sigue en la misma venta: cerrarlo mientras vuela no debe repoblarlo.
+    const visible = venta.value
+    if (visible && visible.id === ventaMirada) {
+      visible.documentos = visible.documentos.map(d => d.id === actualizado.id ? actualizado : d)
+      completando.value = null
+      void resincronizar()
+    }
+    toast.add({ title: 'Número anotado', color: 'success' })
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al anotar el número'), color: 'error' })
+  }
+  finally {
+    guardandoNumero.value = false
+  }
 }
 
 /**
@@ -1207,6 +1287,91 @@ function onNcSuccess(payload: {
           </UCard>
         </div>
 
+        <UCard data-qa="documentos">
+          <template #header>
+            <h2 class="text-base font-semibold">
+              Documentos
+            </h2>
+          </template>
+
+          <p v-if="!venta.documentos.length" class="py-2 text-sm text-muted" data-qa="sin-documento">
+            Sin documento
+          </p>
+          <ul v-else class="divide-y divide-default text-sm">
+            <li
+              v-for="doc in venta.documentos"
+              :key="doc.id"
+              class="flex flex-col gap-1 py-2"
+              :class="{ 'opacity-60': doc.descarte }"
+              :data-qa="`documento-${doc.id}`"
+            >
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <p class="font-medium">
+                    {{ etiquetaEmisor(doc.emisor) }} · {{ etiquetaTipo(doc) }}
+                  </p>
+                  <p v-if="llevaNumero(doc)" class="text-xs text-muted">
+                    {{ doc.numero ? `N° ${doc.numero}` : 'Sin número' }}
+                  </p>
+                </div>
+                <span class="shrink-0 font-mono">{{ formatMonto(doc.monto) }}</span>
+              </div>
+
+              <p v-if="leyendaCorrige(doc, venta.documentos)" class="text-xs text-muted">
+                {{ leyendaCorrige(doc, venta.documentos) }}
+              </p>
+              <p v-if="estadoDocumento(doc)" class="text-xs text-muted">
+                {{ estadoDocumento(doc) }}
+              </p>
+              <p v-if="leyendaDescarte(doc, formatFecha(doc.descartadoEl))" class="text-xs text-muted">
+                {{ leyendaDescarte(doc, formatFecha(doc.descartadoEl)) }}
+              </p>
+              <div v-if="doc.esDuplicado">
+                <UBadge color="warning" variant="subtle" size="xs" label="Duplicado — para el contador" />
+              </div>
+
+              <template v-if="puedeCompletar && puedeCompletarNumero(doc)">
+                <div v-if="completando && completando.id === doc.id" class="flex flex-col gap-2 pt-1">
+                  <VentasDocumentoNumeroCampos
+                    v-model:numero="completando.numero"
+                    v-model:clase="completando.clase"
+                    :sin-clase="doc.emisor !== 'maquina'"
+                    size="xs"
+                  />
+                  <div class="flex justify-end gap-2">
+                    <UButton
+                      label="Cancelar"
+                      color="neutral"
+                      variant="ghost"
+                      size="xs"
+                      @click="() => { completando = null }"
+                    />
+                    <UButton
+                      label="Guardar número"
+                      size="xs"
+                      :loading="guardandoNumero"
+                      :disabled="!completando.numero.trim() || completando.numero.trim().length > NUMERO_DOCUMENTO_MAX"
+                      data-qa="guardar-numero"
+                      @click="guardarNumero(doc)"
+                    />
+                  </div>
+                </div>
+                <div v-else>
+                  <UButton
+                    label="Completar número"
+                    icon="i-lucide-pencil"
+                    color="neutral"
+                    variant="outline"
+                    size="xs"
+                    data-qa="completar-numero"
+                    @click="abrirCompletarNumero(doc)"
+                  />
+                </div>
+              </template>
+            </li>
+          </ul>
+        </UCard>
+
         <UCard v-if="venta.reembolsos.length">
           <template #header>
             <h2 class="text-base font-semibold">
@@ -1320,6 +1485,7 @@ function onNcSuccess(payload: {
     :venta-id="venta.id"
     :saldo="saldo"
     :metodos="metodos"
+    :abono-con-maquina-duplica="venta.abonoConMaquinaDuplica"
     @success="onAbonoSuccess"
   />
 
@@ -1328,6 +1494,8 @@ function onNcSuccess(payload: {
     v-model:open="anularOpen"
     :venta-id="venta.id"
     :tiene-lineas-despachadas="venta.tieneLineasDespachadas"
+    :pregunta-externo="venta.anularPreguntaExterno"
+    :es-boleta="venta.tipoDocumento?.esBoleta === true"
     @success="onAnularSuccess"
   />
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import { type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
+import type { EmisorMedio } from '~/composables/useDocumentosVenta'
 import { sugerirPropina, fetchPorcentajeSugerido, PROPINA_PORCENTAJE_DEFAULT } from '~/composables/usePropina'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
@@ -55,6 +56,8 @@ interface MetodoPago {
   nombre: string
   permiteVuelto: boolean
   habilitada: boolean
+  /** Lo usa el modal de cobro para ofrecer el número del comprobante de la máquina. */
+  emisor: EmisorMedio
 }
 
 const toast = useToast()

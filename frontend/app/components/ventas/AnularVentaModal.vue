@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { documentoPreguntado } from '~/composables/useDocumentosVenta'
+
 const props = defineProps<{
   ventaId: string
   /**
@@ -8,6 +10,15 @@ const props = defineProps<{
    * si la mercadería sigue vendible.
    */
   tieneLineasDespachadas: boolean
+  /**
+   * Del backend (`anularPreguntaExterno`): la venta tiene un documento hecho por
+   * fuera sin número, y antes de anular hay que saber si ya existe en el otro
+   * facturador. Sin esta bandera el modal no pregunta: **y no manda
+   * `externoHecho`**, porque "ausente" es "no se preguntó" y `null` es un 400.
+   */
+  preguntaExterno?: boolean
+  /** `tipoDocumento.esBoleta` del detalle: "esta factura" o "este documento" en la pregunta. */
+  esBoleta?: boolean
 }>()
 
 export interface AnularVentaSuccessPayload {
@@ -34,6 +45,8 @@ const motivo = ref('')
  */
 const reponerStock = ref(!props.tieneLineasDespachadas)
 const submitting = ref(false)
+/** `null` hasta que el cajero contesta: sin respuesta no se puede anular. */
+const respuestaExterno = ref<'si' | 'no' | null>(null)
 
 const MOTIVO_MIN = 10
 
@@ -41,9 +54,19 @@ watch(open, (v) => {
   if (!v) return
   motivo.value = ''
   reponerStock.value = !props.tieneLineasDespachadas
+  respuestaExterno.value = null
 })
 
 const motivoValido = computed(() => motivo.value.trim().length >= MOTIVO_MIN)
+
+/**
+ * Con la pregunta abierta, solo el "No" deja anular. El "Sí" no anula: si el
+ * documento ya está hecho en el otro facturador, se revierte con una nota de
+ * crédito (el servidor también lo rechaza con 400, pero no hace falta mandarlo).
+ */
+const puedeConfirmar = computed(() =>
+  motivoValido.value && (!props.preguntaExterno || respuestaExterno.value === 'no'),
+)
 
 const ayudaReposicion = computed(() =>
   props.tieneLineasDespachadas
@@ -52,13 +75,19 @@ const ayudaReposicion = computed(() =>
 )
 
 async function confirmar() {
+  if (!puedeConfirmar.value) return
   submitting.value = true
   try {
     const res = await useApiFetch<AnularVentaSuccessPayload>(
       `${apiUrl}/ventas/${props.ventaId}/anular`,
       {
         method: 'POST',
-        body: { motivo: motivo.value.trim(), reponerStock: reponerStock.value },
+        body: {
+          motivo: motivo.value.trim(),
+          reponerStock: reponerStock.value,
+          // Solo si se preguntó, y solo puede ser `false` acá (con "Sí" no se llega).
+          ...(props.preguntaExterno ? { externoHecho: false } : {}),
+        },
       },
     )
     toast.add({
@@ -88,6 +117,38 @@ async function confirmar() {
           pendientes sin pagos: una venta cobrada se revierte con una nota de
           crédito.
         </p>
+
+        <div v-if="preguntaExterno" class="flex flex-col gap-2" data-qa="pregunta-externo">
+          <p class="text-sm font-medium text-default">
+            ¿Ya hiciste {{ documentoPreguntado(esBoleta) }} en tu facturador?
+          </p>
+          <div class="flex gap-2">
+            <UButton
+              label="Sí"
+              :variant="respuestaExterno === 'si' ? 'solid' : 'outline'"
+              color="neutral"
+              :aria-pressed="respuestaExterno === 'si'"
+              data-qa="externo-si"
+              @click="() => { respuestaExterno = 'si' }"
+            />
+            <UButton
+              label="No"
+              :variant="respuestaExterno === 'no' ? 'solid' : 'outline'"
+              color="neutral"
+              :aria-pressed="respuestaExterno === 'no'"
+              data-qa="externo-no"
+              @click="() => { respuestaExterno = 'no' }"
+            />
+          </div>
+          <UAlert
+            v-if="respuestaExterno === 'si'"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            data-qa="externo-si-explica"
+            description="Si ya está hecho, la venta no se anula: se revierte con una nota de crédito, hecha por fuera en tu facturador y anotada acá con su número."
+          />
+        </div>
 
         <div class="flex flex-col gap-1">
           <span class="text-sm text-muted">Motivo</span>
@@ -122,7 +183,7 @@ async function confirmar() {
           label="Anular venta"
           color="error"
           :loading="submitting"
-          :disabled="!motivoValido"
+          :disabled="!puedeConfirmar"
           @click="confirmar"
         />
       </div>

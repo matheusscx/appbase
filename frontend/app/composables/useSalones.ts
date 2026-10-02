@@ -1,5 +1,6 @@
 import { useApiFetch } from './useApiFetch'
 import type { CalcularVentaInput } from './useCalculoPrecios'
+import type { PagoInput } from './useVenta'
 import type {
   PersonalizacionGrupoPayload,
   PersonalizacionPayload,
@@ -251,7 +252,7 @@ export function credencialGarzon(garzonId: string, pin: string) {
 export interface CerrarCuentaBody {
   garzonId?: string
   pin?: string
-  pagos?: { metodoPagoId: string, monto: string, referencia?: string }[]
+  pagos?: PagoInput[]
   tipoDocumentoId?: string
   customer?: Record<string, unknown>
   propinaMonto?: string

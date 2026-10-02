@@ -1,18 +1,27 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import { resumenCobro, setMontoPago, sumaPagos, type PagoInput } from '~/composables/useVenta'
+import { comprobanteDelPago, type EmisorMedio } from '~/composables/useDocumentosVenta'
 
 interface MetodoPago {
   metodoPagoId: string
   nombre: string
   permiteVuelto: boolean
   habilitada: boolean
+  /** Quién emite lo cobrado con el medio; lo decide el comercio, no el cajero. */
+  emisor: EmisorMedio
 }
 
 const props = defineProps<{
   ventaId: string
   saldo: string
   metodos: MetodoPago[]
+  /**
+   * Del backend (`GET /ventas/:id`): un abono pagado con la máquina duplicaría un
+   * documento, porque la deuda ya tiene el suyo. La pantalla no replica la regla:
+   * solo avisa. El cobro sigue.
+   */
+  abonoConMaquinaDuplica: boolean
 }>()
 export interface AbonoSuccessPayload {
   pagos: Array<{
@@ -87,8 +96,26 @@ const pagosValidos = computed(() =>
   pagos.value.filter((p) => new Decimal(p.monto || '0').gt(0)),
 )
 
+// El aviso no entra en esta cuenta: no bloquea. Es un dato para el cajero y para
+// el contador, no una condición del cobro.
 const puedeConfirmar = computed(
   () => pagosValidos.value.length > 0 && !resumen.value.excedenteSinVuelto,
+)
+
+function emisorDe(metodoPagoId: string): EmisorMedio | undefined {
+  return props.metodos.find((m) => m.metodoPagoId === metodoPagoId)?.emisor
+}
+
+/**
+ * El número del comprobante solo sirve cuando el abono es el voucher duplicado:
+ * en cualquier otro abono el servidor lo ignora, así que no se pide.
+ */
+function pideComprobante(metodoPagoId: string): boolean {
+  return props.abonoConMaquinaDuplica && emisorDe(metodoPagoId) === 'maquina'
+}
+
+const avisaDuplicado = computed(() =>
+  pagosValidos.value.some((p) => pideComprobante(p.metodoPagoId)),
 )
 
 async function confirmar() {
@@ -97,7 +124,17 @@ async function confirmar() {
   try {
     const res = await useApiFetch<AbonoSuccessPayload>(`${apiUrl}/pagos`, {
       method: 'POST',
-      body: { ventaId: props.ventaId, pagos: pagosValidos.value },
+      body: {
+        ventaId: props.ventaId,
+        pagos: pagosValidos.value.map(({ numeroDocumento, claseDocumento, ...pago }) => ({
+          ...pago,
+          ...comprobanteDelPago(
+            props.abonoConMaquinaDuplica ? emisorDe(pago.metodoPagoId) : undefined,
+            numeroDocumento,
+            claseDocumento,
+          ),
+        })),
+      },
       headers: intentoCobro.cabecera(ambitoCobro),
     })
     intentoCobro.terminar(ambitoCobro)
@@ -123,28 +160,35 @@ async function confirmar() {
         </div>
 
         <div class="flex flex-col gap-2">
-          <div v-for="(pago, i) in pagos" :key="i" class="flex items-center gap-2">
-            <USelectMenu
-              v-model="pago.metodoPagoId"
-              :items="metodoItems"
-              value-key="value"
-              label-key="label"
-              class="flex-1"
-            />
-            <MoneyInput
-              :model-value="pago.monto"
-              oficial
-              class="w-32"
-              size="sm"
-              @update:model-value="setMonto(i, $event)"
-            />
-            <UButton
-              icon="i-lucide-trash-2"
-              color="error"
-              variant="ghost"
-              size="xs"
-              :disabled="pagos.length <= 1"
-              @click="quitarPago(i)"
+          <div v-for="(pago, i) in pagos" :key="i" class="flex flex-col gap-2">
+            <div class="flex items-center gap-2">
+              <USelectMenu
+                v-model="pago.metodoPagoId"
+                :items="metodoItems"
+                value-key="value"
+                label-key="label"
+                class="flex-1"
+              />
+              <MoneyInput
+                :model-value="pago.monto"
+                oficial
+                class="w-32"
+                size="sm"
+                @update:model-value="setMonto(i, $event)"
+              />
+              <UButton
+                icon="i-lucide-trash-2"
+                color="error"
+                variant="ghost"
+                size="xs"
+                :disabled="pagos.length <= 1"
+                @click="quitarPago(i)"
+              />
+            </div>
+            <VentasDocumentoNumeroCampos
+              v-if="pideComprobante(pago.metodoPagoId)"
+              v-model:numero="pago.numeroDocumento"
+              v-model:clase="pago.claseDocumento"
             />
           </div>
           <UButton
@@ -155,6 +199,15 @@ async function confirmar() {
             @click="agregarPago"
           />
         </div>
+
+        <UAlert
+          v-if="avisaDuplicado"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-triangle-alert"
+          data-qa="aviso-voucher-duplicado"
+          description="Esta venta ya tiene su boleta. El voucher de este pago también vale como boleta y la duplica. El cobro sigue, y queda marcado para que el contador lo corrija."
+        />
 
         <div class="text-sm space-y-1 border-t border-default pt-2">
           <div class="flex justify-between text-muted">

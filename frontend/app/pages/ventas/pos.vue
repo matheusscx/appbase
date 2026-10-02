@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
+import type { EmisorMedio } from '~/composables/useDocumentosVenta'
 import { useVenta, descontarStockCatalogo, tieneCustomerData, toVentaLineasBody, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
@@ -21,6 +22,8 @@ interface MetodoPago {
   nombre: string
   permiteVuelto: boolean
   habilitada: boolean
+  /** Lo usa el modal de cobro para ofrecer el número del comprobante de la máquina. */
+  emisor: EmisorMedio
 }
 
 const config = useRuntimeConfig()

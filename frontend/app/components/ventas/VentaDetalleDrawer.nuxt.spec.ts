@@ -177,6 +177,12 @@ const VENTA = {
   pagos: [],
   customer: null,
   propina: null,
+  // Lo que el BACKEND decide sobre los documentos (spec emisión por venta § 3.4
+  // y § 3.5): la pantalla solo lo muestra. Una venta pagada no se anula.
+  documentos: [] as unknown[],
+  anulable: false,
+  anularPreguntaExterno: false,
+  abonoConMaquinaDuplica: false,
 }
 
 /**
@@ -285,10 +291,12 @@ let documentoActual: typeof VENTA = VENTA
  * y `Ventas:Nota de crédito` para `puedeCrearNC`).
  */
 let permisos = ['Ventas:Anular', 'Ventas:Nota de crédito']
+/** `false` para probar un rol con permisos sueltos: con `esAdmin` el bypass lo tapa todo. */
+let esAdmin = true
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
-    get esAdmin() { return true },
+    get esAdmin() { return esAdmin },
     can: (modulo: string, permiso: string) => permisos.includes(`${modulo}:${permiso}`),
   })
 })
@@ -307,9 +315,17 @@ let impresorasBoleta: unknown[] = [IMPRESORA_BOLETA]
  * unhandled rejection. Medido: `vitest run` sale con **exit 1** y los 4 tests
  * en rojo por una URL que a este spec ni le importa.
  */
+/** Los `PATCH` que salieron (completar el número de un documento) y qué contestar. */
+let patches: { url: string, body: Record<string, unknown> }[] = []
+let respuestaPatch: Record<string, unknown> = {}
+
 mockNuxtImport('useApiFetch', () => {
-  return (url: string) => {
+  return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     if (typeof url !== 'string') return Promise.resolve([])
+    if (opts?.method === 'PATCH') {
+      patches.push({ url, body: opts.body ?? {} })
+      return Promise.resolve(structuredClone(respuestaPatch))
+    }
     if (url.includes('/metodos-pago')) return Promise.resolve([])
     // Antes del chequeo genérico de `/ventas/`: las dos rutas comparten el
     // substring y `/ventas/:id/boleta` necesita SU PROPIA respuesta, no la
@@ -333,6 +349,9 @@ mockNuxtImport('useApiFetch', () => {
 // puesta un test del camino angosto (más abajo) sobrevive al siguiente.
 afterEach(() => {
   useCajaStore().activa = null
+  esAdmin = true
+  permisos = ['Ventas:Anular', 'Ventas:Nota de crédito']
+  patches = []
 })
 
 /**
@@ -527,43 +546,378 @@ describe('VentaDetalleDrawer — resincroniza lo que calcula el backend', () => 
   })
 })
 
+/** Un documento tal como lo devuelve `GET /ventas/:id` en `documentos[]`. */
+function documento(parcial: Record<string, unknown> = {}) {
+  return {
+    id: 'doc-1',
+    ventaId: 'v-1',
+    emisor: 'sistema',
+    tipoDocumento: { id: 'td-39', codigo: '39', nombre: 'Boleta de Venta' },
+    claseMaquina: null,
+    numero: null,
+    estadoEnvio: 'armado',
+    monto: '60000.0000',
+    pagoId: null,
+    documentoCorregidoId: null,
+    esDuplicado: false,
+    descarte: null,
+    descartadoEl: null,
+    descartadoPorNombre: null,
+    ...parcial,
+  }
+}
+
 describe('VentaDetalleDrawer — anular', () => {
   const botonAnular = (wrapper: Awaited<ReturnType<typeof montar>>) =>
     wrapper.findAll('button').find(b => b.text().trim() === 'Anular')
 
-  it('una venta pendiente sin pagos se puede anular aunque tenga tipo de documento', async () => {
-    // Toda venta nace con la boleta del país: el tipo no impide anular (el
-    // backend ya no lo mira). Con `tipoDocumento` null el caso no distinguiría
-    // el botón viejo del nuevo.
-    documentoActual = {
-      ...VENTA,
-      estado: 'pendiente',
-      pagos: [],
-      tipoDocumento: { id: 'td-1', codigo: '39', nombre: 'Boleta de Venta' },
-    } as unknown as typeof VENTA
+  /** El detalle que contesta el backend: la bandera es SUYA, el resto del fixture es de relleno. */
+  async function montarCon(parcial: Record<string, unknown>) {
+    documentoActual = { ...VENTA, ...parcial } as unknown as typeof VENTA
     try {
-      const wrapper = await montar()
-      expect(botonAnular(wrapper)).toBeDefined()
+      return await montar()
     }
     finally {
       documentoActual = VENTA
     }
+  }
+
+  it('se ofrece cuando el backend dice `anulable` y el usuario tiene Ventas:Anular', async () => {
+    const wrapper = await montarCon({ estado: 'pendiente', pagos: [], anulable: true })
+    expect(botonAnular(wrapper)).toBeDefined()
   })
 
-  it('con pagos no se ofrece', async () => {
-    documentoActual = {
-      ...VENTA,
-      estado: 'pendiente',
+  it('el backend manda: una venta pendiente sin pagos que NO es anulable no ofrece el botón', async () => {
+    // Una máquina ya emitió el voucher: el estado y los pagos darían "sí" y el
+    // servidor respondería 400. Decidirlo acá con la regla de antes ofrecía el
+    // botón de todos modos.
+    const wrapper = await montarCon({ estado: 'pendiente', pagos: [], anulable: false })
+    expect(botonAnular(wrapper)).toBeUndefined()
+  })
+
+  it('el backend manda también hacia el otro lado: `anulable` aunque el fixture traiga pagos', async () => {
+    // Prueba que no se lee `pagos` ni `estado` ni `tipoDocumento` para decidir.
+    const wrapper = await montarCon({
+      estado: 'pagada',
       pagos: [{ nombre: 'Efectivo', monto: '7500' }],
       tipoDocumento: { id: 'td-1', codigo: '39', nombre: 'Boleta de Venta' },
-    } as unknown as typeof VENTA
+      anulable: true,
+    })
+    expect(botonAnular(wrapper)).toBeDefined()
+  })
+
+  it('sin el permiso Ventas:Anular no se ofrece, aunque el backend diga `anulable`', async () => {
+    permisos = ['Ventas:Nota de crédito']
+    const wrapper = await montarCon({ estado: 'pendiente', pagos: [], anulable: true })
+    expect(botonAnular(wrapper)).toBeUndefined()
+  })
+
+  it('le pasa al modal lo que el backend dijo de la pregunta por el documento hecho por fuera', async () => {
+    const wrapper = await montarCon({
+      estado: 'pendiente',
+      pagos: [],
+      anulable: true,
+      anularPreguntaExterno: true,
+      tipoDocumento: { id: 'td-33', codigo: '33', nombre: 'Factura', esBoleta: false },
+      documentos: [documento({
+        id: 'doc-ext',
+        emisor: 'externo',
+        tipoDocumento: { id: 'td-33', codigo: '33', nombre: 'Factura' },
+        estadoEnvio: null,
+      })],
+    })
+    const modal = wrapper.findComponent({ name: 'VentasAnularVentaModal' })
+    expect(modal.props('preguntaExterno')).toBe(true)
+    expect(modal.props('esBoleta')).toBe(false)
+  })
+
+  it('el sustantivo de la pregunta sale de `esBoleta` del backend, no del nombre del tipo', async () => {
+    // Un tipo llamado "Factura" que el catálogo marca boleta: manda el flag.
+    const wrapper = await montarCon({
+      estado: 'pendiente',
+      pagos: [],
+      anulable: true,
+      anularPreguntaExterno: true,
+      tipoDocumento: { id: 'td-x', codigo: '39', nombre: 'Factura', esBoleta: true },
+    })
+    expect(wrapper.findComponent({ name: 'VentasAnularVentaModal' }).props('esBoleta')).toBe(true)
+  })
+})
+
+describe('VentaDetalleDrawer — documentos', () => {
+  async function montarCon(documentos: unknown[], extra: Record<string, unknown> = {}) {
+    documentoActual = { ...VENTA, documentos, ...extra } as unknown as typeof VENTA
     try {
-      const wrapper = await montar()
-      expect(botonAnular(wrapper)).toBeUndefined()
+      return await montar()
     }
     finally {
       documentoActual = VENTA
     }
+  }
+
+  const seccion = (wrapper: Awaited<ReturnType<typeof montar>>) => wrapper.find('[data-qa="documentos"]')
+  const fila = (wrapper: Awaited<ReturnType<typeof montar>>, id: string) => wrapper.find(`[data-qa="documento-${id}"]`)
+  const botonCompletar = (wrapper: Awaited<ReturnType<typeof montar>>, id: string) =>
+    fila(wrapper, id).find('[data-qa="completar-numero"]')
+
+  const VOUCHER = documento({
+    id: 'doc-m',
+    emisor: 'maquina',
+    tipoDocumento: null,
+    claseMaquina: 'voucher',
+    numero: '445566',
+    estadoEnvio: null,
+    monto: '40000.0000',
+  })
+  const SIN_NUMERO = documento({
+    id: 'doc-m2',
+    emisor: 'maquina',
+    tipoDocumento: null,
+    claseMaquina: null,
+    estadoEnvio: null,
+    monto: '25000.0000',
+  })
+  const POR_FUERA = documento({
+    id: 'doc-ext',
+    emisor: 'externo',
+    tipoDocumento: { id: 'td-33', codigo: '33', nombre: 'Factura' },
+    estadoEnvio: null,
+    monto: '119000.0000',
+  })
+
+  it('una venta sin documentos dice "Sin documento"', async () => {
+    const wrapper = await montarCon([])
+
+    expect(seccion(wrapper).text()).toContain('Sin documento')
+  })
+
+  it('cada documento dice quién lo emitió, el tipo o la clase, el número y el monto', async () => {
+    const wrapper = await montarCon([VOUCHER, POR_FUERA, documento({ id: 'doc-s' })])
+
+    const voucher = fila(wrapper, 'doc-m').text()
+    expect(voucher).toContain('La máquina · Voucher')
+    expect(voucher).toContain('N° 445566')
+    expect(voucher).toContain('40.000')
+    const fuera = fila(wrapper, 'doc-ext').text()
+    expect(fuera).toContain('Hecho por fuera · Factura')
+    expect(fuera).toContain('Sin número')
+    expect(fuera).toContain('119.000')
+    expect(fila(wrapper, 'doc-s').text()).toContain('El sistema · Boleta de Venta')
+  })
+
+  it('un documento del sistema dice que está armado y no salió al SII', async () => {
+    const wrapper = await montarCon([documento({ id: 'doc-s' })])
+
+    expect(fila(wrapper, 'doc-s').text()).toContain('Armado, sin enviar al SII')
+  })
+
+  it('el voucher duplicado lleva la marca para el contador', async () => {
+    const wrapper = await montarCon([
+      VOUCHER,
+      documento({ ...SIN_NUMERO, id: 'doc-dup', esDuplicado: true }),
+    ])
+
+    expect(fila(wrapper, 'doc-dup').text()).toContain('Duplicado — para el contador')
+    expect(fila(wrapper, 'doc-m').text()).not.toContain('Duplicado')
+  })
+
+  it('un descartado al anular lo dice, y quien afirmó que no estaba hecho queda anotado', async () => {
+    const wrapper = await montarCon([
+      documento({ id: 'doc-s', descarte: 'armado_sin_enviar', descartadoEl: '2026-10-02T15:00:00.000Z' }),
+      documento({
+        ...POR_FUERA,
+        id: 'doc-ext',
+        descarte: 'afirmado_no_hecho',
+        descartadoEl: '2026-10-02T15:00:00.000Z',
+        descartadoPorNombre: 'Ana Torres',
+      }),
+    ])
+
+    expect(fila(wrapper, 'doc-s').text()).toContain('Descartado al anular')
+    // El de armado nunca dice "dijo que no estaba hecho": nadie lo afirmó.
+    expect(fila(wrapper, 'doc-s').text()).not.toContain('dijo que no estaba hecho')
+    const fuera = fila(wrapper, 'doc-ext').text()
+    expect(fuera).toContain('Descartado al anular')
+    expect(fuera).toContain('Ana Torres dijo que no estaba hecho,')
+  })
+
+  it('una corrección dice qué documento corrige', async () => {
+    const wrapper = await montarCon([
+      VOUCHER,
+      documento({
+        id: 'doc-nc',
+        ventaId: 'nc-1',
+        emisor: 'maquina',
+        tipoDocumento: null,
+        claseMaquina: null,
+        estadoEnvio: null,
+        documentoCorregidoId: 'doc-m',
+        monto: '10000.0000',
+      }),
+    ])
+
+    expect(fila(wrapper, 'doc-nc').text()).toContain('Corrige: La máquina · Voucher · N° 445566')
+  })
+
+  describe('Completar número', () => {
+    it('se ofrece en el de la máquina y en el hecho por fuera sin número, no en el resto', async () => {
+      const wrapper = await montarCon([
+        VOUCHER,
+        SIN_NUMERO,
+        POR_FUERA,
+        documento({ id: 'doc-s' }),
+        documento({ ...POR_FUERA, id: 'doc-desc', descarte: 'afirmado_no_hecho' }),
+      ])
+
+      expect(botonCompletar(wrapper, 'doc-m2').exists()).toBe(true)
+      expect(botonCompletar(wrapper, 'doc-ext').exists()).toBe(true)
+      // Ya tiene número, es del sistema, o fue descartado (el backend daría 404).
+      expect(botonCompletar(wrapper, 'doc-m').exists()).toBe(false)
+      expect(botonCompletar(wrapper, 'doc-s').exists()).toBe(false)
+      expect(botonCompletar(wrapper, 'doc-desc').exists()).toBe(false)
+    })
+
+    it('sin Ventas:Crear no se ofrece: el PATCH daría 403', async () => {
+      esAdmin = false
+      permisos = ['Ventas:Anular']
+      const wrapper = await montarCon([SIN_NUMERO])
+
+      expect(botonCompletar(wrapper, 'doc-m2').exists()).toBe(false)
+    })
+
+    it('con Ventas:Crear (un rol que no es admin) se ofrece', async () => {
+      esAdmin = false
+      permisos = ['Ventas:Crear']
+      const wrapper = await montarCon([SIN_NUMERO])
+
+      expect(botonCompletar(wrapper, 'doc-m2').exists()).toBe(true)
+    })
+
+    async function completar(
+      wrapper: Awaited<ReturnType<typeof montar>>,
+      id: string,
+      numero: string,
+    ) {
+      await botonCompletar(wrapper, id).trigger('click')
+      await new Promise(r => setTimeout(r, 20))
+      const input = fila(wrapper, id).find('[data-qa="comprobante-numero"]')
+      expect(input.exists(), 'el campo del número').toBe(true)
+      await input.setValue(numero)
+      await fila(wrapper, id).find('[data-qa="guardar-numero"]').trigger('click')
+      await new Promise(r => setTimeout(r, 30))
+    }
+
+    it('anota el número con el PATCH y el documento queda con él', async () => {
+      respuestaPatch = { ...SIN_NUMERO, numero: '778899' }
+      const wrapper = await montarCon([VOUCHER, SIN_NUMERO])
+      // Lo que el backend devolverá en la recarga posterior.
+      documentoActual = { ...VENTA, documentos: [VOUCHER, { ...SIN_NUMERO, numero: '778899' }] } as unknown as typeof VENTA
+      try {
+        await completar(wrapper, 'doc-m2', '  778899  ')
+      }
+      finally {
+        documentoActual = VENTA
+      }
+
+      expect(patches).toHaveLength(1)
+      expect(patches[0]!.url).toContain('/ventas/v-1/documentos/doc-m2')
+      // Sin clase: el cajero no la eligió, no se manda `null`.
+      expect(patches[0]!.body).toEqual({ numero: '778899' })
+      expect(fila(wrapper, 'doc-m2').text()).toContain('N° 778899')
+      expect(botonCompletar(wrapper, 'doc-m2').exists()).toBe(false)
+    })
+
+    it('la ruta lleva la venta DEL DOCUMENTO: el de una corrección es de la corrección', async () => {
+      const deLaNota = documento({
+        id: 'doc-nc',
+        ventaId: 'nc-1',
+        emisor: 'externo',
+        tipoDocumento: { id: 'td-61', codigo: '61', nombre: 'Nota de crédito' },
+        estadoEnvio: null,
+        documentoCorregidoId: 'doc-ext',
+      })
+      respuestaPatch = { ...deLaNota, numero: '9' }
+      const wrapper = await montarCon([POR_FUERA, deLaNota])
+
+      await completar(wrapper, 'doc-nc', '9')
+
+      expect(patches).toHaveLength(1)
+      // Con el id de la venta que se mira (`v-1`) el servidor respondería 404.
+      expect(patches[0]!.url).toContain('/ventas/nc-1/documentos/doc-nc')
+      expect(patches[0]!.url).not.toContain('/ventas/v-1/')
+    })
+
+    it('un documento hecho por fuera no ofrece la clase: el servidor respondería 400', async () => {
+      const wrapper = await montarCon([POR_FUERA, SIN_NUMERO])
+
+      // Se edita un documento a la vez: abrir el segundo cierra el primero.
+      await botonCompletar(wrapper, 'doc-ext').trigger('click')
+      await new Promise(r => setTimeout(r, 20))
+      expect(fila(wrapper, 'doc-ext').find('[data-qa="comprobante-numero"]').exists()).toBe(true)
+      expect(fila(wrapper, 'doc-ext').find('[data-qa="comprobante-clase"]').exists()).toBe(false)
+
+      // El de la máquina sí: la clase se puede indicar acá también.
+      await botonCompletar(wrapper, 'doc-m2').trigger('click')
+      await new Promise(r => setTimeout(r, 20))
+      expect(fila(wrapper, 'doc-m2').find('[data-qa="comprobante-clase"]').exists()).toBe(true)
+    })
+
+    it('después de anotar el número se resincroniza: lo que decide `anulable` lo dice el backend', async () => {
+      respuestaPatch = { ...POR_FUERA, numero: '77' }
+      const wrapper = await montarCon([POR_FUERA], {
+        estado: 'pendiente', pagos: [], anulable: true, anularPreguntaExterno: true,
+      })
+      expect(wrapper.findComponent({ name: 'VentasAnularVentaModal' }).props('preguntaExterno')).toBe(true)
+
+      // Con número, anular ya no pregunta: va por nota de crédito.
+      documentoActual = {
+        ...VENTA,
+        estado: 'pendiente',
+        pagos: [],
+        anulable: false,
+        anularPreguntaExterno: false,
+        documentos: [{ ...POR_FUERA, numero: '77' }],
+      } as unknown as typeof VENTA
+      try {
+        await completar(wrapper, 'doc-ext', '77')
+      }
+      finally {
+        documentoActual = VENTA
+      }
+
+      expect(wrapper.findComponent({ name: 'VentasAnularVentaModal' }).props('preguntaExterno')).toBe(false)
+      expect(wrapper.findAll('button').find(b => b.text().trim() === 'Anular')).toBeUndefined()
+    })
+  })
+
+  it('al anular, los documentos se vuelven a pedir: el descarte lo escribe el backend', async () => {
+    const wrapper = await montarCon(
+      [documento({ id: 'doc-s' })],
+      { estado: 'pendiente', pagos: [], anulable: true },
+    )
+    expect(fila(wrapper, 'doc-s').text()).not.toContain('Descartado al anular')
+
+    // Lo que el backend devuelve después de anular: el armado quedó descartado.
+    documentoActual = {
+      ...VENTA,
+      estado: 'cancelada',
+      documentos: [documento({ id: 'doc-s', descarte: 'armado_sin_enviar', descartadoEl: '2026-10-02T15:00:00.000Z' })],
+    } as unknown as typeof VENTA
+    try {
+      wrapper.findComponent({ name: 'VentasAnularVentaModal' }).vm.$emit('success', { estado: 'cancelada' })
+      await new Promise(r => setTimeout(r, 30))
+    }
+    finally {
+      documentoActual = VENTA
+    }
+
+    expect(fila(wrapper, 'doc-s').text()).toContain('Descartado al anular')
+  })
+
+  it('le pasa al abono lo que el backend dijo sobre el voucher duplicado', async () => {
+    const wrapper = await montarCon([], { abonoConMaquinaDuplica: true })
+
+    expect(wrapper.findComponent({ name: 'PagosAbonoModal' }).props('abonoConMaquinaDuplica')).toBe(true)
   })
 })
 

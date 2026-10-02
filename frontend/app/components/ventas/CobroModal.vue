@@ -2,12 +2,15 @@
 import Decimal from 'decimal.js'
 import { resumenCobro, setMontoPago, sumaPagos, type PagoInput } from '~/composables/useVenta'
 import { sugerirPropina } from '~/composables/usePropina'
+import { comprobanteDelPago, type EmisorMedio } from '~/composables/useDocumentosVenta'
 
 interface MetodoPago {
   metodoPagoId: string
   nombre: string
   permiteVuelto: boolean
   habilitada: boolean
+  /** Quién emite lo cobrado con el medio; lo decide el comercio, no el cajero. */
+  emisor: EmisorMedio
 }
 
 const props = withDefaults(
@@ -125,8 +128,23 @@ const puedeConfirmar = computed(
     !resumen.value.excedenteSinVuelto,
 )
 
+function emisorDe(metodoPagoId: string): EmisorMedio | undefined {
+  return props.metodos.find((m) => m.metodoPagoId === metodoPagoId)?.emisor
+}
+
+/** El número y la clase solo existen en un pago cuyo medio emite con la máquina. */
+function emiteLaMaquina(metodoPagoId: string): boolean {
+  return emisorDe(metodoPagoId) === 'maquina'
+}
+
 function confirmar() {
-  emit('confirmar', pagosValidos.value, resumen.value.vuelto)
+  // Lo tipeado antes de cambiar de medio no viaja: `comprobanteDelPago` lo suelta
+  // si el medio de este pago ya no es de la máquina.
+  const aEmitir = pagosValidos.value.map(({ numeroDocumento, claseDocumento, ...pago }) => ({
+    ...pago,
+    ...comprobanteDelPago(emisorDe(pago.metodoPagoId), numeroDocumento, claseDocumento),
+  }))
+  emit('confirmar', aEmitir, resumen.value.vuelto)
 }
 </script>
 
@@ -169,29 +187,38 @@ function confirmar() {
             v-for="(pago, i) in pagos"
             :key="i"
             :data-qa="`pago-${i}`"
-            class="flex items-center gap-2"
+            class="flex flex-col gap-2"
           >
-            <USelectMenu
-              v-model="pago.metodoPagoId"
-              :items="metodoItems"
-              value-key="value"
-              label-key="label"
-              class="flex-1"
-            />
-            <MoneyInput
-              :model-value="pago.monto"
-              oficial
-              class="w-32"
-              size="sm"
-              @update:model-value="setMonto(i, $event)"
-            />
-            <UButton
-              icon="i-lucide-trash-2"
-              color="error"
-              variant="ghost"
-              size="xs"
-              :disabled="pagos.length <= 1"
-              @click="quitarPago(i)"
+            <div class="flex items-center gap-2">
+              <USelectMenu
+                v-model="pago.metodoPagoId"
+                :items="metodoItems"
+                value-key="value"
+                label-key="label"
+                class="flex-1"
+              />
+              <MoneyInput
+                :model-value="pago.monto"
+                oficial
+                class="w-32"
+                size="sm"
+                @update:model-value="setMonto(i, $event)"
+              />
+              <UButton
+                icon="i-lucide-trash-2"
+                color="error"
+                variant="ghost"
+                size="xs"
+                :disabled="pagos.length <= 1"
+                @click="quitarPago(i)"
+              />
+            </div>
+            <!-- Solo con un medio que emite la máquina, y opcional: el voucher se
+                 puede completar después desde el detalle de la venta. -->
+            <VentasDocumentoNumeroCampos
+              v-if="emiteLaMaquina(pago.metodoPagoId)"
+              v-model:numero="pago.numeroDocumento"
+              v-model:clase="pago.claseDocumento"
             />
           </div>
           <UButton

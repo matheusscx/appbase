@@ -35,9 +35,17 @@ mockNuxtImport('useApiFetch', () => {
   }
 })
 
-const METODOS = [
-  { metodoPagoId: 'mp-efectivo', nombre: 'Efectivo', permiteVuelto: true, habilitada: true },
-]
+interface Metodo {
+  metodoPagoId: string
+  nombre: string
+  permiteVuelto: boolean
+  habilitada: boolean
+  emisor: 'sistema' | 'maquina' | 'nadie'
+}
+
+const EFECTIVO: Metodo = { metodoPagoId: 'mp-efectivo', nombre: 'Efectivo', permiteVuelto: true, habilitada: true, emisor: 'sistema' }
+const TARJETA: Metodo = { metodoPagoId: 'mp-tarjeta', nombre: 'Tarjeta de débito', permiteVuelto: false, habilitada: true, emisor: 'maquina' }
+const METODOS = [EFECTIVO]
 
 function dialogo(): HTMLElement | null {
   return document.body.querySelector('[role="dialog"]')
@@ -51,9 +59,12 @@ async function esperar(ms = 50) {
  * Monta cerrado y lo abre: el `watch(open)` que precarga el pago con el saldo
  * solo corre al abrir de verdad (mismo criterio que `AnularVentaModal`).
  */
-async function montar(ventaId = 'venta-1') {
+async function montar(
+  ventaId = 'venta-1',
+  { metodos = METODOS, abonoConMaquinaDuplica = false }: { metodos?: Metodo[], abonoConMaquinaDuplica?: boolean } = {},
+) {
   const wrapper = await mountSuspended(AbonoModal, {
-    props: { ventaId, saldo: '1000', metodos: METODOS, open: false },
+    props: { ventaId, saldo: '1000', metodos, abonoConMaquinaDuplica, open: false },
   })
   await wrapper.setProps({ open: true })
   await esperar()
@@ -140,5 +151,65 @@ describe('AbonoModal — un abono que se repite no se registra dos veces', () =>
     const aviso = toasts.find(t => (t.title ?? '').includes('otros datos'))
     expect(aviso?.actions?.map(a => a.label)).toEqual(['Ver venta'])
     expect(toasts.some(t => t.title === 'Error al registrar pago')).toBe(false)
+  })
+})
+
+describe('AbonoModal — el voucher que duplica la boleta (E1b)', () => {
+  const AVISO = 'Esta venta ya tiene su boleta. El voucher de este pago también vale como boleta y la duplica. El cobro sigue, y queda marcado para que el contador lo corrija.'
+
+  const avisoVisible = () => dialogo()?.querySelector('[data-qa="aviso-voucher-duplicado"]') ?? null
+
+  function escribirNumero(valor: string) {
+    const input = dialogo()!.querySelector<HTMLInputElement>('[data-qa="comprobante-numero"]')
+    expect(input, 'el campo de número').toBeTruthy()
+    input!.value = valor
+    input!.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+
+  it('con la bandera del backend y un medio de la máquina: avisa antes de confirmar', async () => {
+    await montar('venta-1', { metodos: [TARJETA, EFECTIVO], abonoConMaquinaDuplica: true })
+
+    expect(avisoVisible()).toBeTruthy()
+    expect(dialogo()!.textContent).toContain(AVISO)
+  })
+
+  it('el aviso no bloquea: confirmar sigue habilitado y el pago sale con el número', async () => {
+    const wrapper = await montar('venta-1', { metodos: [TARJETA, EFECTIVO], abonoConMaquinaDuplica: true })
+
+    escribirNumero('  445566  ')
+    wrapper.findComponent({ name: 'VentasDocumentoNumeroCampos' }).vm.$emit('update:clase', 'voucher')
+    await esperar()
+    await confirmar()
+
+    expect(abonos).toHaveLength(1)
+    expect(abonos[0]!.body.pagos).toEqual([
+      { metodoPagoId: 'mp-tarjeta', monto: '1000', numeroDocumento: '445566', claseDocumento: 'voucher' },
+    ])
+  })
+
+  it('sin la bandera del backend no avisa ni pide número, aunque el medio sea de la máquina', async () => {
+    await montar('venta-1', { metodos: [TARJETA, EFECTIVO], abonoConMaquinaDuplica: false })
+
+    expect(avisoVisible()).toBeNull()
+    expect(dialogo()!.querySelector('[data-qa="comprobante-numero"]')).toBeNull()
+    await confirmar()
+    expect(abonos[0]!.body.pagos).toEqual([{ metodoPagoId: 'mp-tarjeta', monto: '1000' }])
+  })
+
+  it('sin la bandera el número que hubiera quedado en el pago tampoco viaja', async () => {
+    // La bandera puede cambiar con el modal abierto (el detalle se resincroniza):
+    // un número tipeado antes no debe llegar como si fuera el voucher duplicado.
+    const wrapper = await montar('venta-1', { metodos: [TARJETA, EFECTIVO], abonoConMaquinaDuplica: false })
+    ;(wrapper.vm as unknown as { pagos: { numeroDocumento?: string }[] }).pagos[0]!.numeroDocumento = '445566'
+    await confirmar()
+
+    expect(abonos[0]!.body.pagos).toEqual([{ metodoPagoId: 'mp-tarjeta', monto: '1000' }])
+  })
+
+  it('con la bandera pero un medio que no es de la máquina: no avisa', async () => {
+    await montar('venta-1', { metodos: [EFECTIVO, TARJETA], abonoConMaquinaDuplica: true })
+
+    expect(avisoVisible()).toBeNull()
+    expect(dialogo()!.querySelector('[data-qa="comprobante-numero"]')).toBeNull()
   })
 })

@@ -3311,6 +3311,7 @@ export class VentasService {
       venta_referencia_id: string | null;
       tipo_documento_codigo: string | null;
       tipo_documento_nombre: string | null;
+      tipo_documento_es_boleta: boolean | null;
       tiene_lineas_despachadas: boolean;
     }[] = await this.db.query(
       `SELECT v.venta_id, v.caja_id, v.moneda_id, v.tipo_documento_id, v.canal, v.estado,
@@ -3319,6 +3320,7 @@ export class VentasService {
               v.config_calculo,
               v.comentario, v.fecha, v.creado_el, v.venta_referencia_id,
               td.codigo AS tipo_documento_codigo, td.nombre AS tipo_documento_nombre,
+              td.es_boleta AS tipo_documento_es_boleta,
               EXISTS (
                 SELECT 1 FROM cuentas cta
                   JOIN cuenta_lineas cl ON cl.cuenta_id = cta.cuenta_id
@@ -3637,6 +3639,10 @@ export class VentasService {
             id: v.tipo_documento_id,
             codigo: v.tipo_documento_codigo,
             nombre: v.tipo_documento_nombre,
+            // Del catálogo (`es_boleta`), no del nombre: la pantalla de anular
+            // dice "esta factura" o "este documento" según esto. Nulo si el tipo
+            // se borró del catálogo (el JOIN no lo trae): ahí no es boleta.
+            esBoleta: v.tipo_documento_es_boleta === true,
           }
         : null,
       // Mismo criterio que `listar()`: el id del tipo de documento, no su

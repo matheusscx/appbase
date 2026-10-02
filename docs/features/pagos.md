@@ -251,9 +251,11 @@ sin caracteres de control; en un medio que no es de la máquina se ignoran sin e
 Props:
 - `ventaId: string` — ID de la venta a abonar
 - `saldo: string` — Monto pendiente (se usa como límite de cobro)
-- `metodos: MetodoPago[]` — Métodos habilitados del tenant
+- `metodos: MetodoPago[]` — Métodos habilitados del tenant (con su `emisor`)
+- `abonoConMaquinaDuplica: boolean` — del detalle de la venta (`GET /ventas/:id`); la pantalla no replica la regla
 
 Comportamiento:
+- **Voucher duplicado (E1b):** con la bandera y un pago cuyo medio emite con la máquina, avisa antes de confirmar: *"Esta venta ya tiene su boleta. El voucher de este pago también vale como boleta y la duplica. El cobro sigue, y queda marcado para que el contador lo corrija."* No bloquea. Ahí mismo pide el número y la clase del voucher (opcionales; `numeroDocumento` / `claseDocumento` en el pago). Sin la bandera no avisa ni los pide: el servidor los ignoraría. Después del abono el drawer vuelve a pedir el detalle y el documento aparece marcado "Duplicado — para el contador".
 - Usa `v-model:open` para controlar visibilidad
 - Emite `success` al registrar el pago con éxito (la página recarga la venta)
 - Reutiliza helpers puros de `useVenta.ts`: `resumenCobro`, `sumaPagos`

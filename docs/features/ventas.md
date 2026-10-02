@@ -343,6 +343,10 @@ Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recar
   qué documento "vale" lo dice `descarte`, no su presencia. El tipo y quien descartó se resuelven
   por `JOIN` **sin filtrar borrados**, a propósito: un documento ya emitido conserva su tipo y su
   historial aunque el catálogo o la cuenta se borren después (el porqué está escrito en la consulta).
+- **`tipoDocumento`**: `{ id, codigo, nombre, esBoleta }` o `null`. `esBoleta` sale del catálogo
+  (`tipos_documento_tributario.es_boleta`, en la misma consulta de la cabecera) y es lo que usa la
+  pantalla de anular para decir "esta factura" o "este documento". No se deduce del nombre ni del
+  código; `false` si el tipo se borró del catálogo.
 - **`anulable`**: estado `pendiente`, sin pagos y `evaluarAnulacion` (sin `externoHecho`) en
   `anulable` o `pregunta_externo`. Es la misma regla que `POST /anular`, no una copia.
 - **`anularPreguntaExterno`**: `anulable` **y** hay un `externo` vigente sin número (hay que
@@ -623,8 +627,16 @@ Interfaz de punto de venta para crear una venta desde el catálogo hasta el cobr
 | `ClienteForm` | `app/components/ventas/ClienteForm.vue` | Datos del cliente (nombre, RUT, dirección, teléfono, email); exporta tipo `CustomerForm` |
 | `CarritoPanel` | `app/components/ventas/CarritoPanel.vue` | Líneas del carrito con `AppCantidadInput` (±, selector de unidad de la misma magnitud), selector de tipo de documento, desglose, botón Cobrar |
 | `CobroModal` | `app/components/ventas/CobroModal.vue` | Modal de pagos múltiples con distintos métodos, cálculo de vuelto, confirmación y emisión de POST /api/ventas |
+| `DocumentoNumeroCampos` | `app/components/ventas/DocumentoNumeroCampos.vue` | "N° del comprobante" + selector opcional "Es voucher / Es boleta de la máquina"; lo usan el cobro, el abono y "Completar número" |
 
 | `AppCantidadInput` | `app/components/AppCantidadInput.vue` | Stepper + selector de unidad (misma magnitud); emite cantidad canónica y presentación |
+
+**Número del comprobante al cobrar (2026-10-02, emisión por venta).** Bajo un pago cuyo medio
+emite con la máquina (`emisor === 'maquina'` en `GET /metodos-pago`), `CobroModal` muestra dos
+campos opcionales: "N° del comprobante" y "Es voucher / Es boleta de la máquina". Viajan en el pago
+(`numeroDocumento`, `claseDocumento`) por `POST /ventas` y `POST /cuentas/:id/cerrar`; lo tipeado
+antes de cambiar a otro medio no viaja. El cajero **no elige quién emite**: lo resuelve el servidor
+con la regla del medio. Sin número se completa después desde el detalle de la venta.
 
 ### Cantidad con unidad de presentación
 
@@ -682,7 +694,7 @@ Implementado en 2026-06-30; rutas unificadas en 2026-07-01.
 | Página | Ruta | Descripción |
 |--------|------|-------------|
 | Historial de ventas | `/ventas` | Tabla con filtros, KPIs; fila clickeable abre detalle |
-| Detalle de venta | `/ventas?venta={uuid}` | Drawer lateral (`VentaDetalleDrawer`): líneas, totales, pagos, saldo; botón "Registrar pago" para `pendiente`/`pagada_parcial`; botón "Reimprimir boleta" (ver abajo) |
+| Detalle de venta | `/ventas?venta={uuid}` | Drawer lateral (`VentaDetalleDrawer`): líneas, totales, pagos, saldo; botón "Registrar pago" para `pendiente`/`pagada_parcial`; sección "Documentos"; botón "Reimprimir boleta" (ver abajo) |
 | Punto de venta | `/ventas/pos` | Crear venta (ver sección POS arriba) |
 
 **Reimprimir boleta (2026-09-17; camino angosto de la cajera, 2026-09-30):** visible en una
@@ -715,10 +727,30 @@ compartido con `useSalones.ts` y `pos.vue` desde `~/types/boleta.ts`.
 | `VentaDetalleDrawer` | `app/components/ventas/VentaDetalleDrawer.vue` | Detalle expandible, pagos, abono |
 | `AbonoModal` | `app/components/pagos/AbonoModal.vue` | Abono a venta pendiente/parcial |
 
+**Sección "Documentos" del drawer (2026-10-02, emisión por venta).** Lista los documentos de la
+venta y de sus correcciones (`documentos[]` del detalle): quién lo emitió ("El sistema", "La
+máquina", "Hecho por fuera", "Nadie"), el tipo o la clase (voucher / boleta de la máquina), el
+número o "Sin número", el monto, qué documento corrige si es una corrección, y "Duplicado — para el
+contador" si es el voucher duplicado del abono. Un documento del sistema dice "Armado, sin enviar
+al SII"; uno descartado, "Descartado al anular" y, si fue `afirmado_no_hecho`, "<usuario> dijo que
+no estaba hecho, <fecha>". Una venta sin documentos dice "Sin documento". **"Completar número"**
+(solo `maquina` y `externo` vigentes sin número, con `Ventas:Crear`) abre el campo en la fila y hace
+`PATCH /ventas/{ventaId del documento}/documentos/{id}`: el de una corrección lleva el id de la
+corrección. Después se vuelve a pedir el detalle, porque con número un documento externo cambia
+`anulable`.
+
+**Anular desde el drawer.** El botón sale solo con `anulable` del backend y `Ventas:Anular`: la
+pantalla no mira estado, pagos ni tipo. Con `anularPreguntaExterno`, `AnularVentaModal` pregunta
+"¿Ya hiciste esta factura en tu facturador?" ("este documento" si `tipoDocumento.esBoleta`). El
+botón no se habilita hasta contestar. "No" anula mandando `externoHecho: false`; "Sí" no anula:
+explica que va por nota de crédito, hecha por fuera y anotada con su número. Sin la pregunta no se
+manda `externoHecho`.
+
 ### AbonoModal
 
 `app/components/pagos/AbonoModal.vue` — modal para registrar abonos a ventas pendientes:
-- Props: `ventaId`, `saldo` (monto pendiente), `metodos` (métodos de pago del tenant)
+- Props: `ventaId`, `saldo` (monto pendiente), `metodos` (métodos de pago del tenant), `abonoConMaquinaDuplica` (del detalle)
+- Con `abonoConMaquinaDuplica` y un pago con un medio de la máquina avisa antes de confirmar: *"Esta venta ya tiene su boleta. El voucher de este pago también vale como boleta y la duplica. El cobro sigue, y queda marcado para que el contador lo corrija."* No bloquea, y ahí mismo ofrece el número y la clase del voucher (sin la bandera no avisa ni los pide: el servidor los ignoraría)
 - Reutiliza helpers de `useVenta.ts`: `resumenCobro`, `setMontoPago`, `sumaPagos`, `PagoInput`
 - Al confirmar: `POST /pagos` con `{ ventaId, pagos: [...] }`; emite `success` para que la página recargue
 

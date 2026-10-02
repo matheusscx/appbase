@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import Decimal from 'decimal.js'
 import { useResultadoCalculado, type CalcularVentaInput } from './useCalculoPrecios'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
+import type { ClaseDocumentoMaquina } from './useDocumentosVenta'
 import {
   personalizacionVacia,
   type PersonalizacionPayload,
@@ -88,6 +89,14 @@ export interface PagoInput {
   metodoPagoId: string
   monto: string
   referencia?: string
+  /**
+   * Lo que el cajero tiene en la mano si el medio emite con la máquina: el número
+   * del comprobante y si es voucher o boleta. Opcionales y solo en el body
+   * (`comprobanteDelPago` los arma). Quién emitió no se manda nunca: lo resuelve
+   * el servidor con la regla del medio.
+   */
+  numeroDocumento?: string
+  claseDocumento?: ClaseDocumentoMaquina
 }
 
 // ── Helpers de carrito (puros, inmutables) ──────────────────────────────────
