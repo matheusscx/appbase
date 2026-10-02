@@ -41,6 +41,17 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
+- [ ] **El servidor no exige el customer de un tipo de documento con `customer_requerido`**
+  (backend; invariante 6). La Factura lo tiene en `true` en el seed, pero el backend solo lo
+  expone (`ventas.service.ts`, el listado de tipos, ~L2762) y nunca lo valida al crear la venta. Lo
+  controlan solo la pantalla (`useVenta.ts` ~L447, `CarritoPanel.vue`, `pos.vue`), así que un POST
+  directo crea una Factura sin receptor. Lo vio `api-security-reviewer` en la tarea 3 del frente de
+  emisión (2026-10-02); verificado por la orquestadora con grep. **Arreglo:** 400 cuando el tipo
+  pedido tiene `customer_requerido` y la venta no trae customer, en todo camino que fije el tipo
+  (POS, salones, online), con e2e por cada uno. **Tomarlo después de que el frente de emisión
+  entre a main**: su tarea 3 reescribió la validación del tipo en el servidor, y ese es el lugar.
+  Es fiscal y va solo, como frente corto.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
