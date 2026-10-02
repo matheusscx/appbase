@@ -7,7 +7,6 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumberString,
-  IsOptional,
   IsString,
   IsUUID,
   Min,
@@ -27,6 +26,11 @@ export class PesoManualDto {
   peso: string;
 }
 
+// `@ValidateIf` y no `@IsOptional()` en `baseVentas`, `activo`, `orden` y
+// `pesos`: `IsOptional` trata `null` igual que ausente, y como el PUT reescribe
+// todos los grupos, un `null` caía en el default (`TOTAL_FINAL`, activo, orden 0,
+// sin pesos) y pisaba lo guardado con un 200. Omitirlos sigue escribiendo el
+// default; mandarlos en `null` es un 400.
 export class GrupoDistribucionDto {
   @IsIn(Object.values(TipoGarzon))
   tipoGarzon: TipoGarzon;
@@ -41,7 +45,7 @@ export class GrupoDistribucionDto {
   @IsIn(Object.values(CriterioDistribucion))
   criterio: CriterioDistribucion;
 
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsIn(Object.values(BaseVentasGrupo))
   baseVentas?: BaseVentasGrupo;
 
@@ -51,22 +55,26 @@ export class GrupoDistribucionDto {
   @IsIn(Object.values(ManualModo))
   manualModo?: ManualModo | null;
 
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsBoolean()
   activo?: boolean;
 
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsInt()
   @Min(0)
   orden?: number;
 
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => PesoManualDto)
   pesos?: PesoManualDto[];
 }
 
+// `@ValidateIf` y no `@IsOptional()`: las dos columnas son NOT NULL e
+// `IsOptional` trata `null` igual que ausente y saltea `@IsBoolean`; el `null`
+// llegaba a la columna como un 500 de Postgres en vez de un 400. Omitirlos
+// conserva el valor que tenían.
 export class UpdateDistribucionDto {
   @IsNumberString()
   porcentajeSugerido: string;
@@ -77,11 +85,11 @@ export class UpdateDistribucionDto {
   @Type(() => GrupoDistribucionDto)
   grupos: GrupoDistribucionDto[];
 
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsBoolean()
   habilitadoPos?: boolean;
 
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @IsBoolean()
   habilitadoSalones?: boolean;
 }

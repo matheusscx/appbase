@@ -5,6 +5,7 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { bodyPreferencias } from './helpers/preferencias';
 
 // `@IsOptional()` trata `null` igual que ausente y saltea los validadores de
 // abajo, así que un `null` explícito en un PATCH/PUT llegaba al service: a una
@@ -32,6 +33,23 @@ interface Detalle {
   id: string;
   grupos: { id: string }[];
   participantes: Participante[];
+}
+interface GrupoDistribucion {
+  tipoGarzon: string;
+  nombre: string;
+  porcentaje: string;
+  criterio: string;
+  baseVentas: string;
+  manualModo: string | null;
+  activo: boolean;
+  orden: number;
+  pesos: { garzonId: string; peso: string }[];
+}
+interface Distribucion {
+  porcentajeSugerido: string;
+  habilitadoPos: boolean;
+  habilitadoSalones: boolean;
+  grupos: GrupoDistribucion[];
 }
 
 const sufijo = Date.now().toString(36);
@@ -464,6 +482,85 @@ describe('null explícito en PATCH/PUT → 400 (e2e)', () => {
         () => ruta,
         () => alta,
         Object.keys(alta),
+      );
+    });
+  });
+
+  describe('C — un PUT: el null equivalía a omitir, y omitir escribe el default', () => {
+    describe('PUT /tenants/preferencias-financieras', () => {
+      // El PUT reemplaza la config entera: mandar la actual sin cambios no
+      // mueve nada, y el control del 200 no deja estado sucio.
+      let actuales: Record<string, unknown>;
+      beforeAll(async () => {
+        const res = await enviar('get', 'tenants/preferencias-financieras');
+        expect(res.status).toBe(200);
+        actuales = bodyPreferencias(res.body as object);
+      });
+
+      cadaCampoNull(
+        'put',
+        () => 'tenants/preferencias-financieras',
+        () => actuales,
+        ['promosAcumulanDescuentos'],
+      );
+    });
+
+    // Igual que preferencias: se reenvía la config actual, así que el control
+    // no la cambia. `habilitadoPos`/`habilitadoSalones` son de la forma A (van
+    // a una columna NOT NULL); los del grupo, de la C.
+    describe('PUT /propinas/distribucion', () => {
+      let actual: Distribucion;
+      beforeAll(async () => {
+        const res = await enviar('get', 'propinas/distribucion');
+        expect(res.status).toBe(200);
+        const leida = res.body as Distribucion;
+        actual = {
+          porcentajeSugerido: leida.porcentajeSugerido,
+          habilitadoPos: leida.habilitadoPos,
+          habilitadoSalones: leida.habilitadoSalones,
+          grupos: leida.grupos.map((g) => ({
+            tipoGarzon: g.tipoGarzon,
+            nombre: g.nombre,
+            porcentaje: g.porcentaje,
+            criterio: g.criterio,
+            baseVentas: g.baseVentas,
+            manualModo: g.manualModo,
+            activo: g.activo,
+            orden: g.orden,
+            pesos: g.pesos,
+          })),
+        };
+      });
+
+      cadaCampoNull(
+        'put',
+        () => 'propinas/distribucion',
+        () => ({ ...actual }),
+        ['habilitadoPos', 'habilitadoSalones'],
+      );
+
+      it.each(['baseVentas', 'activo', 'orden', 'pesos'] as const)(
+        'grupos[].%s null → 400; con su valor actual → 200',
+        async (campo) => {
+          const conGrupo = (v: unknown) => ({
+            ...actual,
+            grupos: actual.grupos.map((g, i) =>
+              i === 0 ? { ...g, [campo]: v } : g,
+            ),
+          });
+          const res = await enviar(
+            'put',
+            'propinas/distribucion',
+            conGrupo(null),
+          );
+          expect(res.status).toBe(400);
+          const control = await enviar(
+            'put',
+            'propinas/distribucion',
+            conGrupo(actual.grupos[0][campo]),
+          );
+          expect(control.status).toBe(200);
+        },
       );
     });
   });
