@@ -130,10 +130,18 @@ CREATE TABLE "tipos_documento_tributario" (
   "descripcion"       TEXT,
   "activo"            BOOLEAN     NOT NULL DEFAULT true,
   "customer_requerido" BOOLEAN     NOT NULL DEFAULT false,
+  -- La boleta del país (al consumidor final): el tipo que se usa cuando la venta no trae uno
+  -- y el único que admite una venta online. Sembrada true solo en la Boleta chilena (39).
+  "es_boleta"         BOOLEAN     NOT NULL DEFAULT false,
   "creado_el"         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"    TIMESTAMPTZ,
   "eliminado_el"      TIMESTAMPTZ
 );
+
+-- Una sola boleta por país (la entity lo declara con @Index, como el de la nota de crédito).
+CREATE UNIQUE INDEX "uq_tipo_documento_boleta_pais"
+  ON "tipos_documento_tributario" ("pais_id")
+  WHERE "es_boleta" = true AND "eliminado_el" IS NULL;
 
 CREATE TABLE "metodos_pago" (
   "metodo_pago_id" UUID        PRIMARY KEY DEFAULT gen_random_uuid(),

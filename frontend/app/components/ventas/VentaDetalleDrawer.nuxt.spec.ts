@@ -527,6 +527,46 @@ describe('VentaDetalleDrawer — resincroniza lo que calcula el backend', () => 
   })
 })
 
+describe('VentaDetalleDrawer — anular', () => {
+  const botonAnular = (wrapper: Awaited<ReturnType<typeof montar>>) =>
+    wrapper.findAll('button').find(b => b.text().trim() === 'Anular')
+
+  it('una venta pendiente sin pagos se puede anular aunque tenga tipo de documento', async () => {
+    // Toda venta nace con la boleta del país: el tipo no impide anular (el
+    // backend ya no lo mira). Con `tipoDocumento` null el caso no distinguiría
+    // el botón viejo del nuevo.
+    documentoActual = {
+      ...VENTA,
+      estado: 'pendiente',
+      pagos: [],
+      tipoDocumento: { id: 'td-1', codigo: '39', nombre: 'Boleta de Venta' },
+    } as unknown as typeof VENTA
+    try {
+      const wrapper = await montar()
+      expect(botonAnular(wrapper)).toBeDefined()
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  })
+
+  it('con pagos no se ofrece', async () => {
+    documentoActual = {
+      ...VENTA,
+      estado: 'pendiente',
+      pagos: [{ nombre: 'Efectivo', monto: '7500' }],
+      tipoDocumento: { id: 'td-1', codigo: '39', nombre: 'Boleta de Venta' },
+    } as unknown as typeof VENTA
+    try {
+      const wrapper = await montar()
+      expect(botonAnular(wrapper)).toBeUndefined()
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  })
+})
+
 describe('VentaDetalleDrawer — reimprimir boleta', () => {
   /** El botón de "Reimprimir boleta", si está presente. */
   function botonReimprimir(wrapper: Awaited<ReturnType<typeof montar>>) {

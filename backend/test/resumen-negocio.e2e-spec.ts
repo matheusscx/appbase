@@ -413,8 +413,8 @@ describe('Resumen del negocio (e2e)', () => {
     it('una venta anulada no mueve el vendido', async () => {
       const antes = (await leerResumen(tokenAdmin)).body as ResumenHoyResponse;
 
-      // Lo único que `POST /ventas/:id/anular` acepta: pendiente, sin pagos y
-      // sin `tipoDocumentoId` (`docs/features/ventas.md` ~L133).
+      // Lo único que `POST /ventas/:id/anular` acepta: pendiente y sin pagos
+      // (el tipo de documento ya no cuenta: `docs/features/ventas.md`).
       const resC = await request(app.getHttpServer())
         .post('/api/ventas')
         .set('Idempotency-Key', randomUUID())

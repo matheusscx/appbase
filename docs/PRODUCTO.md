@@ -961,11 +961,11 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
 - **en un pago mixto, la devolución corrige el documento del medio por el que se devuelve la
   plata**: efectivo, la boleta del efectivo; tarjeta, el voucher;
 - **una venta pendiente se puede anular mientras nadie haya emitido documento**, sin importar la
-  etiqueta. Si alguien emitió, va por nota de crédito. Hoy se mira la etiqueta: ver `cancelada`
-  abajo. Una boleta del sistema **solo armada, sin enviar al SII**, no cuenta como emitida: la
-  venta se anula y esa boleta queda descartada. Sin esto, con la regla de abajo toda venta nacería
-  documentada y anular no aplicaría nunca. Cuando el sistema envíe al SII, lo enviado va por nota
-  de crédito (owner, 2026-10-01);
+  etiqueta. Si alguien emitió, va por nota de crédito. Hoy la etiqueta ya no impide anular
+  (solo el estado `pendiente` y los pagos). Una boleta del sistema **solo armada, sin enviar al
+  SII**, no cuenta como emitida: la venta se anula y esa boleta queda descartada. Sin esto, con
+  la regla de abajo toda venta nacería documentada y anular no aplicaría nunca. Cuando el sistema
+  envíe al SII, lo enviado va por nota de crédito (owner, 2026-10-01);
 - **un documento hecho por fuera (otro facturador) se pregunta al anular**: el sistema sabe que le
   tocaba al otro facturador, no si ya lo hizo. Al anular aparece "¿Ya hiciste esta factura en tu
   facturador?". Si sí, va por nota de crédito, hecha por fuera y anotada con su número; si no, se
@@ -998,19 +998,20 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
 Todo esto lo decidió el owner el 2026-10-01 con las investigaciones de
 `docs/agent/investigaciones/2026-10-01-*`.
 
-Hoy el sistema no emite nada (ADR-010), y el tipo de documento de la venta es solo una etiqueta: el
-POS y salones ponen Boleta por defecto, y la venta online nace sin tipo. La regla de `cancelada`
-de abajo ("sin documento tributario") hoy se lee contra esa etiqueta; con la emisión tendrá que
-leerse contra lo emitido de verdad. Pendiente: `docs/agent/pendientes.md` § 6.
+Hoy el sistema no emite nada (ADR-010), y el tipo de documento de la venta es solo una etiqueta:
+toda venta nace con la boleta del país (POS, salones y online; sin boleta sembrada, sin tipo).
+La regla de `cancelada` de abajo ya no se lee contra esa etiqueta. Pendiente:
+`docs/agent/pendientes.md` § 6.
 
 **Estados de la venta:**
 - (sin `borrador`: la venta en construcción es la `cuenta` de salones)
 - `pendiente` — confirmada, esperando pago (canal físico)
 - `pagada` — pago recibido y confirmado. Las ventas online llegan directamente aquí.
-- `cancelada` — anulada. **Solo desde `pendiente`, sin pagos y sin documento tributario**
+- `cancelada` — anulada. **Solo desde `pendiente` y sin pagos**; el tipo de documento de la
+  venta (la etiqueta) no impide anular, porque toda venta nace con la boleta del país
   (`POST /ventas/:id/anular`, permiso propio `Ventas/Anular`, motivo obligatorio). Una
-  venta cobrada o ya documentada no se anula: se revierte con nota de crédito, porque el
-  SII no permite anular un DTE aceptado.
+  venta cobrada no se anula: se revierte con nota de crédito, y lo que ya se envió al SII
+  tampoco, porque el SII no permite anular un DTE aceptado.
   Al anular se elige si el stock vuelve. La pantalla lo ofrece **tildado**, salvo que la
   venta venga de una cuenta de salón con **alguna** línea ya enviada a cocina: ahí nace
   **destildado**, porque reponer comida ya cocinada suma al inventario ingredientes que no

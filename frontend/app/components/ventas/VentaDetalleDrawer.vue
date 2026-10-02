@@ -261,15 +261,15 @@ const puedeCrearNC = computed(() =>
 )
 
 /**
- * Espeja el subconjunto seguro que valida el backend: pendiente, sin pagos y sin
- * documento tributario. El backend es el que manda (el guard vive ahí); esto
- * evita ofrecer un botón que siempre daría 400.
+ * Espeja lo que valida el backend: pendiente, sin pagos y permiso `Ventas:Anular`.
+ * El tipo de documento ya no cuenta: toda venta nace con el de su país, así que
+ * mirarlo ocultaría el botón siempre. El backend es el que manda (el guard vive
+ * ahí); esto evita ofrecer un botón que siempre daría 400.
  */
 const puedeAnular = computed(() =>
   !!venta.value
   && venta.value.estado === 'pendiente'
   && venta.value.pagos.length === 0
-  && !venta.value.tipoDocumento
   && permissionsStore.can('Ventas', 'Anular'),
 )
 

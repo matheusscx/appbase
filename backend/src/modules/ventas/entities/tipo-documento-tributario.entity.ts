@@ -18,6 +18,16 @@ import {
   unique: true,
   where: `"es_nota_credito" = true AND "eliminado_el" IS NULL`,
 })
+/**
+ * Una sola boleta por país: "la boleta del país" es lo que se pone cuando la
+ * venta no trae tipo y lo único que admite una venta online. Con dos filas
+ * marcadas, la elegida dependería del orden que devuelva el planner. Gemelo del
+ * índice de la nota de crédito, de arriba.
+ */
+@Index('uq_tipo_documento_boleta_pais', ['paisId'], {
+  unique: true,
+  where: `"es_boleta" = true AND "eliminado_el" IS NULL`,
+})
 export class TipoDocumentoTributario {
   @PrimaryGeneratedColumn('uuid', { name: 'tipo_documento_id' })
   id: string;
@@ -56,6 +66,20 @@ export class TipoDocumentoTributario {
    */
   @Column({ name: 'es_nota_credito', default: false })
   esNotaCredito: boolean;
+
+  /**
+   * Marca cuál fila de este país es la boleta: el documento al consumidor final.
+   * Es lo que separa "el documento sigue la regla del medio de pago" de "lo hace
+   * siempre el sistema", y lo que resuelve "la boleta del país" cuando la venta
+   * no trae tipo (o es online y no puede traer otro). Hasta acá la única forma
+   * de encontrarla era el orden alfabético del selector.
+   *
+   * Sembrada `true` solo en la Boleta chilena (código 39). AR/CO/MX no tienen
+   * boleta sembrada: el tipo de la venta queda en `null`, como hoy, hasta que
+   * abra el frente fiscal de cada país.
+   */
+  @Column({ name: 'es_boleta', type: 'boolean', default: false })
+  esBoleta: boolean;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;

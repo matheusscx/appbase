@@ -5116,6 +5116,7 @@ export class SeederService implements OnApplicationBootstrap {
       activo: false,
       customerRequerido: false,
       esNotaCredito: true,
+      esBoleta: false,
     });
 
     const tipos: Partial<TipoDocumentoTributario>[] = [
@@ -5128,6 +5129,7 @@ export class SeederService implements OnApplicationBootstrap {
         activo: true,
         customerRequerido: false,
         esNotaCredito: false,
+        esBoleta: true,
       },
       {
         id: '550e8400-e29b-41d4-a716-446655440146',
@@ -5138,6 +5140,7 @@ export class SeederService implements OnApplicationBootstrap {
         activo: true,
         customerRequerido: true,
         esNotaCredito: false,
+        esBoleta: false,
       },
       {
         // activo:false — no aparece en el selector del POS; solo la usa el
@@ -5150,6 +5153,7 @@ export class SeederService implements OnApplicationBootstrap {
         activo: false,
         customerRequerido: false,
         esNotaCredito: true,
+        esBoleta: false,
       },
       notaCreditoInterna(
         '550e8400-e29b-41d4-a716-446655440378',

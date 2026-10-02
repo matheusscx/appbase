@@ -84,9 +84,9 @@ async function confirmar() {
     <template #body>
       <div class="flex flex-col gap-4">
         <p class="text-sm text-muted">
-          La anulación deshace la venta por completo. Solo aplica a ventas
-          pendientes sin pagos ni documento tributario: una venta cobrada o ya
-          documentada se revierte con una nota de crédito.
+          La anulación deshace la venta por completo. Solo se anulan las ventas
+          pendientes sin pagos: una venta cobrada se revierte con una nota de
+          crédito.
         </p>
 
         <div class="flex flex-col gap-1">

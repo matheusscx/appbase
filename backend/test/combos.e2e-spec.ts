@@ -656,11 +656,18 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
     // deja la cuenta "cerrada" igual (el cierre no exige saldo cero), así que
     // sin esta aserción un monto desactualizado (p.ej. el pretax de antes del
     // fix de IVA) pasa en silencio con la venta en `pagada_parcial`.
-    const ventaRows: { estado: string }[] = await ds.query(
-      `SELECT estado FROM ventas WHERE venta_id = $1 AND eliminado_el IS NULL`,
-      [cierre.ventaId],
-    );
+    const ventaRows: { estado: string; tipo_documento_id: string | null }[] =
+      await ds.query(
+        `SELECT estado, tipo_documento_id FROM ventas
+          WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [cierre.ventaId],
+      );
     expect(ventaRows[0]?.estado).toBe('pagada');
+    // El cierre no manda `tipoDocumentoId`: el servidor pone la boleta del país
+    // (Boleta de Venta, código 39) en vez de dejar la venta sin tipo.
+    expect(ventaRows[0]?.tipo_documento_id).toBe(
+      '550e8400-e29b-41d4-a716-446655440145',
+    );
 
     // El snapshot congelado en la venta conserva la elección por componente.
     const detalleRows: {

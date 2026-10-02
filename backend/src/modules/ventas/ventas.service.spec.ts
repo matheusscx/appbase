@@ -1552,6 +1552,255 @@ describe('VentasService', () => {
     });
   });
 
+  describe('crear() — el tipo de documento lo resuelve el servidor', () => {
+    // Catálogo mínimo de dos países, con las formas que importan: la boleta, una
+    // factura, la NC (inactiva, como en el seed), un tipo inactivo y los de otro
+    // país. El fake de `manager.query` aplica sobre él la misma regla que el SQL
+    // de `resolverTipoDocumento` (país del tenant; el id pedido o la boleta
+    // activa), así el test no trae la respuesta ya hecha: la consulta real la
+    // cubre el e2e.
+    const BOLETA = '550e8400-e29b-41d4-a716-446655440145';
+    const FACTURA = '550e8400-e29b-41d4-a716-446655440146';
+    const TIPO_INACTIVO = '550e8400-e29b-41d4-a716-446655440147';
+    const NC_ARGENTINA = '550e8400-e29b-41d4-a716-446655440378';
+    const tipo = (
+      id: string,
+      pais: string,
+      extra: Partial<{
+        es_boleta: boolean;
+        es_nota_credito: boolean;
+        activo: boolean;
+      }> = {},
+    ) => ({
+      tipo_documento_id: id,
+      pais,
+      es_boleta: false,
+      es_nota_credito: false,
+      activo: true,
+      ...extra,
+    });
+    const CATALOGO = [
+      tipo(BOLETA, 'CL', { es_boleta: true }),
+      tipo(FACTURA, 'CL'),
+      tipo(TIPO_DOCUMENTO_NC_ID, 'CL', {
+        es_nota_credito: true,
+        activo: false,
+      }),
+      tipo(TIPO_INACTIVO, 'CL', { activo: false }),
+      tipo(NC_ARGENTINA, 'AR', { es_nota_credito: true, activo: false }),
+    ];
+
+    let paisDelTenant: string;
+    let manager: ReturnType<typeof buildManagerMock>;
+
+    const consultasDeTipo = () =>
+      manager.query.mock.calls.filter(
+        (c) => typeof c[0] === 'string' && c[0].includes('es_boleta'),
+      );
+    const tipoGuardado = () => {
+      const ventas = manager.save.mock.calls.filter((c) => c[0] === Venta);
+      return (ventas[0]?.[1] as { tipoDocumentoId: string | null } | undefined)
+        ?.tipoDocumentoId;
+    };
+
+    beforeEach(() => {
+      paisDelTenant = 'CL';
+      manager = buildManagerMock();
+      const queryBase = manager.query.getMockImplementation()!;
+      manager.query.mockImplementation((sql: string, params?: unknown[]) => {
+        if (typeof sql === 'string' && sql.includes('es_boleta')) {
+          const pedido = params?.[1] ?? null;
+          return Promise.resolve(
+            CATALOGO.filter(
+              (t) =>
+                t.pais === paisDelTenant &&
+                (t.tipo_documento_id === pedido ||
+                  (t.es_boleta && t.activo && !t.es_nota_credito)),
+            ).map((t) => ({
+              tipo_documento_id: t.tipo_documento_id,
+              es_boleta: t.es_boleta,
+              es_nota_credito: t.es_nota_credito,
+              activo: t.activo,
+            })),
+          );
+        }
+        return queryBase(sql);
+      });
+      dataSourceMock.transaction.mockImplementation(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+    });
+
+    it('sin tipoDocumentoId la venta nace con la boleta del país', async () => {
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      expect(tipoGuardado()).toBe(BOLETA);
+    });
+
+    it('un tipo del país, activo y que no es NC se respeta', async () => {
+      await service.crear(TENANT_ID, USUARIO_ID, {
+        ...baseDto,
+        tipoDocumentoId: FACTURA,
+      });
+
+      expect(tipoGuardado()).toBe(FACTURA);
+    });
+
+    it('rechaza con 400 un tipo de otro país, sin escribir la venta', async () => {
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, {
+          ...baseDto,
+          tipoDocumentoId: NC_ARGENTINA,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'El tipo de documento no corresponde al país del comercio',
+        ),
+      );
+      expect(tipoGuardado()).toBeUndefined();
+    });
+
+    it('rechaza con 400 un id que no existe en el catálogo', async () => {
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, {
+          ...baseDto,
+          tipoDocumentoId: '550e8400-e29b-41d4-a716-446655449999',
+        }),
+      ).rejects.toThrow(
+        'El tipo de documento no corresponde al país del comercio',
+      );
+    });
+
+    it('rechaza con 400 la nota de crédito: nace de un reembolso, no de una venta', async () => {
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, {
+          ...baseDto,
+          tipoDocumentoId: TIPO_DOCUMENTO_NC_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'La nota de crédito no se elige: la genera el sistema al reembolsar',
+        ),
+      );
+      expect(tipoGuardado()).toBeUndefined();
+    });
+
+    it('rechaza con 400 un tipo inactivo', async () => {
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, {
+          ...baseDto,
+          tipoDocumentoId: TIPO_INACTIVO,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('El tipo de documento no está activo'),
+      );
+      expect(tipoGuardado()).toBeUndefined();
+    });
+
+    it('online: siempre la boleta, aunque el body traiga otro tipo, y ni lo consulta', async () => {
+      await service.crear(TENANT_ID, USUARIO_ID, {
+        ...baseDto,
+        canal: 'online',
+        tipoDocumentoId: FACTURA,
+      });
+
+      expect(tipoGuardado()).toBe(BOLETA);
+      // El `canal` guardado decide: el id del body no llega a la consulta.
+      expect(consultasDeTipo()[0]![1]).toEqual([TENANT_ID, null]);
+    });
+
+    it('online con un tipo inválido en el body no falla: se ignora', async () => {
+      await service.crear(TENANT_ID, USUARIO_ID, {
+        ...baseDto,
+        canal: 'online',
+        tipoDocumentoId: TIPO_DOCUMENTO_NC_ID,
+      });
+
+      expect(tipoGuardado()).toBe(BOLETA);
+    });
+
+    it('un país sin boleta sembrada deja el tipo en null, como hoy', async () => {
+      paisDelTenant = 'AR';
+
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+      expect(tipoGuardado()).toBeNull();
+    });
+
+    it('un país sin boleta: online tampoco inventa un tipo', async () => {
+      paisDelTenant = 'AR';
+
+      await service.crear(TENANT_ID, USUARIO_ID, {
+        ...baseDto,
+        canal: 'online',
+      });
+      expect(tipoGuardado()).toBeNull();
+    });
+
+    it('una sola lectura por venta, sin importar cuántas líneas lleva', async () => {
+      const dtoTresLineas = {
+        ...baseDto,
+        tipoDocumentoId: FACTURA,
+        lineas: [
+          { itemId: 'item-a', cantidad: '1' },
+          { itemId: 'item-b', cantidad: '2' },
+          { itemId: 'item-c', cantidad: '1' },
+        ],
+      };
+      calculoPreciosService.calcular.mockResolvedValueOnce({
+        ...mockResultadoVenta,
+        lineas: dtoTresLineas.lineas.map((l) => ({
+          ...mockResultadoVenta.lineas[0],
+          itemId: l.itemId,
+        })),
+      });
+
+      await service.crear(TENANT_ID, USUARIO_ID, dtoTresLineas);
+
+      expect(consultasDeTipo()).toHaveLength(1);
+    });
+
+    describe('resolverTipoDocumento()', () => {
+      // Lo consume la emisión (tarea 4): cuál es el tipo y si es boleta.
+      const resolver = (id: string | undefined, canal: 'fisico' | 'online') =>
+        (
+          service as unknown as {
+            resolverTipoDocumento: (
+              m: typeof manager,
+              tenantId: string,
+              id: string | undefined,
+              canal: string,
+            ) => Promise<{ id: string | null; esBoleta: boolean }>;
+          }
+        ).resolverTipoDocumento(manager, TENANT_ID, id, canal);
+
+      it('la boleta del país es boleta', async () => {
+        expect(await resolver(undefined, 'fisico')).toEqual({
+          id: BOLETA,
+          esBoleta: true,
+        });
+        expect(await resolver(BOLETA, 'fisico')).toEqual({
+          id: BOLETA,
+          esBoleta: true,
+        });
+      });
+
+      it('una factura no es boleta', async () => {
+        expect(await resolver(FACTURA, 'fisico')).toEqual({
+          id: FACTURA,
+          esBoleta: false,
+        });
+      });
+
+      it('sin boleta en el país no hay tipo ni es boleta', async () => {
+        paisDelTenant = 'AR';
+        expect(await resolver(undefined, 'fisico')).toEqual({
+          id: null,
+          esBoleta: false,
+        });
+      });
+    });
+  });
+
   describe('crear() — recetas', () => {
     const mockReceta = {
       id: 'receta-uuid',
@@ -3012,10 +3261,35 @@ describe('VentasService', () => {
         expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
       });
 
-      it('rechaza una venta que ya tiene documento tributario', async () => {
+      it('anula una venta pendiente sin pagos aunque tenga tipo de documento', async () => {
+        // La etiqueta ya no impide anular: desde que toda venta nace con la
+        // boleta del país, mirarla dejaría a ninguna venta anulable. Un documento
+        // solo armado y sin enviar no cuenta como emitido (E8), y hoy no se
+        // envía nada.
         ventaRows = [{ ...ventaAnulable, tipo_documento_id: 'doc-uuid' }];
+
+        const res = await service.cancelar(cancelarParams);
+
+        expect(res.estado).toBe(EstadoVenta.CANCELADA);
+        expect(res.stockRepuesto).toBe(true);
+      });
+
+      it('con tipo de documento sigue rechazando una venta con pagos o ya pagada', async () => {
+        ventaRows = [{ ...ventaAnulable, tipo_documento_id: 'doc-uuid' }];
+        conPagos = [{ '1': 1 }];
         await expect(service.cancelar(cancelarParams)).rejects.toThrow(
-          /documento tributario: se revierte con nota de crédito/,
+          /pagos registrados: se revierte con nota de crédito/,
+        );
+
+        ventaRows = [
+          {
+            ...ventaAnulable,
+            tipo_documento_id: 'doc-uuid',
+            estado: 'pagada',
+          },
+        ];
+        await expect(service.cancelar(cancelarParams)).rejects.toThrow(
+          /Solo se anula una venta pendiente/,
         );
       });
 

@@ -63,7 +63,7 @@ Idempotency-Key: <uuid por intento de cobro>
 
 Request:
 {
-  "tipoDocumentoId": "uuid",                    // opcional
+  "tipoDocumentoId": "uuid",                    // opcional: sin él, la boleta del país
   "lineas": [
     {
       "itemId": "uuid",
@@ -98,11 +98,26 @@ Response (201):
 
 **Errores:**
 - `400` — sin caja abierta para el usuario
+- `400` — `tipoDocumentoId` de otro país, inexistente, inactivo o la nota de crédito
 - `400` — excedente de pago sin método con `permite_vuelto = true`
 - `400` — `metodoPagoId` no habilitado para el tenant (rollback completo)
 - `400` — stock insuficiente (rollback completo)
 - `400` — falta la cabecera `Idempotency-Key` o no es un UUID
 - `422` — la misma `Idempotency-Key` con otros datos (body con `ventaId`)
+
+**El tipo de documento lo decide el servidor** (2026-10-01, spec
+[`emision-por-venta`](../superpowers/specs/2026-10-01-emision-por-venta-design.md) § 3.3).
+`tipoDocumentoId` ya no se copia a ciegas del body: tiene que ser del **país del tenant**,
+estar **activo** y **no** ser la nota de crédito (esa nace de un reembolso); si no, 400 con
+el motivo en español. Sin `tipoDocumentoId`, la venta nace con **la boleta del país**
+(`tipos_documento_tributario.es_boleta`, sembrada en la Boleta chilena, código 39). Un país sin
+boleta sembrada (AR/CO/MX) deja el tipo en `null`, como antes. Una venta **`online`** lleva siempre la
+boleta del país y el `tipoDocumentoId` del body ni se mira: el canal que se guarda en la
+venta decide. Todo sale de **una sola lectura** por venta (`resolverTipoDocumento`), sin
+importar cuántas líneas lleve.
+
+Como toda venta nace con tipo, **el tipo ya no impide anular**: ver `POST /ventas/:id/anular`.
+La boleta es única por país (`uq_tipo_documento_boleta_pais`, gemelo del índice de la NC).
 
 **Un cobro que se repite no se registra dos veces** (2026-09-19,
 [ADR-026](../adr/026-idempotencia-de-cobros.md)). La cabecera `Idempotency-Key` es
@@ -144,10 +159,14 @@ Request: { "motivo": "Ingresada por error", "reponerStock": true }
 Response (201): { "id": "uuid", "estado": "cancelada", "stockRepuesto": true, "motivo": "..." }
 ```
 
-**Solo aplica a una venta `pendiente`, sin pagos y sin documento tributario.** Ahí no hay
-hecho fiscal que compensar ni dinero que devolver, así que se puede deshacer de verdad —
-y sigue siendo válido después de integrar el SII, que no permite anular un DTE aceptado.
-Todo lo demás se revierte con nota de crédito.
+**Solo aplica a una venta `pendiente` y sin pagos.** Ahí no hay dinero que devolver y, mientras
+nada se haya enviado al SII, tampoco hecho fiscal que compensar, así que se puede deshacer de
+verdad. **El tipo de documento de la venta ya no impide anular** (2026-10-01): toda venta nace
+con la boleta del país, y un documento solo armado, sin enviar, no cuenta como emitido (que el
+SII no permita anular un DTE aceptado vale para lo que se *envió*, y hoy no se envía nada). Las
+reglas que miran los documentos de la venta —una boleta de máquina ya emitida, una factura hecha
+en otro facturador— llegan con la emisión por venta. Todo lo demás se revierte con nota de
+crédito.
 
 **El detalle de la venta dice cuánto queda por acreditar** (2026-09-04). `GET /ventas/:id`
 devuelve `disponibleNotaCredito: { total, porPorcion: [{ clasificacion, monto }] }`, para que la

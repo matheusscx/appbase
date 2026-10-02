@@ -12,7 +12,6 @@ import { VentasService } from '../src/modules/ventas/ventas.service';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 import { randomUUID } from 'node:crypto';
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris
 const ITEM_ID = '550e8400-e29b-41d4-a716-446655440116'; // Smartphone (stock = 10)
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
@@ -1179,6 +1178,146 @@ describe('Ventas (e2e)', () => {
       expect(propinas).toHaveLength(0);
       // ...y la transacción revirtió entera.
       expect(await getStock(ds, ITEM_ID)).toBe(stockAntes);
+    });
+  });
+
+  describe('POST /ventas — tipo de documento', () => {
+    // Argentina no tiene boleta ni tipos activos sembrados: su NC interna es la
+    // única fila de otro país que trae el seed, y alcanza para "otro país".
+    const NC_CHILE_ID = '550e8400-e29b-41d4-a716-446655440218';
+    const NC_ARGENTINA_ID = '550e8400-e29b-41d4-a716-446655440378';
+    const FACTURA_CHILE_ID = '550e8400-e29b-41d4-a716-446655440146';
+    // Un tipo chileno inactivo, que el seed no trae: se inserta y se da de baja
+    // lógica al final (el e2e no borra).
+    const INACTIVO_CHILE_ID = '550e8400-e29b-41d4-a716-446655440999';
+    const CHILE_ID = '550e8400-e29b-41d4-a716-446655440000';
+
+    // Un servicio gratis, y no `ITEM_ID`: ese producto tiene 50 unidades en el
+    // local para TODAS las suites, y el reparto está al límite — estas ventas le
+    // quitaban 4 y la suite entera de `liquidacion-propinas` se quedaba sin
+    // stock. Un servicio no mueve inventario, y de total $0 no hace falta
+    // pagarlo (ni en `online`: el pago completo de $0 es no pagar).
+    let itemServicioId: string;
+
+    beforeAll(async () => {
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio gratis tipo documento E2E ${Date.now()}`,
+          precioBase: '0',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+        });
+      expect(resItem.status).toBe(201);
+      itemServicioId = (resItem.body as { id: string }).id;
+
+      await ds.query(
+        `INSERT INTO tipos_documento_tributario
+           (tipo_documento_id, pais_id, nombre, activo, customer_requerido,
+            es_nota_credito, es_boleta)
+         VALUES ($1, $2, 'Tipo inactivo e2e', false, false, false, false)
+         ON CONFLICT (tipo_documento_id) DO UPDATE SET eliminado_el = NULL`,
+        [INACTIVO_CHILE_ID, CHILE_ID],
+      );
+    });
+
+    afterAll(async () => {
+      await ds.query(
+        `UPDATE tipos_documento_tributario SET eliminado_el = NOW()
+          WHERE tipo_documento_id = $1`,
+        [INACTIVO_CHILE_ID],
+      );
+    });
+
+    async function crear(extra: Record<string, unknown>) {
+      return request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: itemServicioId, cantidad: '1' }],
+          ...extra,
+        });
+    }
+    async function tipoDeLaVenta(ventaId: string): Promise<string | null> {
+      const rows: { tipo_documento_id: string | null }[] = await ds.query(
+        `SELECT tipo_documento_id FROM ventas WHERE venta_id = $1`,
+        [ventaId],
+      );
+      return rows[0].tipo_documento_id;
+    }
+    async function ventasDelTenant(): Promise<number> {
+      const rows: { n: string }[] = await ds.query(
+        `SELECT COUNT(*) AS n FROM ventas WHERE tenant_id = $1`,
+        [TENANT_ID],
+      );
+      return Number(rows[0].n);
+    }
+
+    it('sin tipoDocumentoId, la venta nace con la boleta del país', async () => {
+      const res = await crear({});
+      expect(res.status).toBe(201);
+      expect(await tipoDeLaVenta((res.body as VentaResponse).id)).toBe(
+        BOLETA_ID,
+      );
+    });
+
+    it('un tipo del país, activo y que no es NC se respeta', async () => {
+      const res = await crear({ tipoDocumentoId: FACTURA_CHILE_ID });
+      expect(res.status).toBe(201);
+      expect(await tipoDeLaVenta((res.body as VentaResponse).id)).toBe(
+        FACTURA_CHILE_ID,
+      );
+    });
+
+    it('un tipo de otro país responde 400 y no crea la venta', async () => {
+      const antes = await ventasDelTenant();
+      const res = await crear({ tipoDocumentoId: NC_ARGENTINA_ID });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toBe(
+        'El tipo de documento no corresponde al país del comercio',
+      );
+      expect(await ventasDelTenant()).toBe(antes);
+    });
+
+    it('la nota de crédito responde 400: no se elige al vender', async () => {
+      const antes = await ventasDelTenant();
+      const res = await crear({ tipoDocumentoId: NC_CHILE_ID });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toContain(
+        'La nota de crédito no se elige',
+      );
+      expect(await ventasDelTenant()).toBe(antes);
+    });
+
+    it('un tipo inactivo responde 400 y no crea la venta', async () => {
+      const antes = await ventasDelTenant();
+      const res = await crear({ tipoDocumentoId: INACTIVO_CHILE_ID });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toBe(
+        'El tipo de documento no está activo',
+      );
+      expect(await ventasDelTenant()).toBe(antes);
+    });
+
+    it('online: siempre la boleta, aunque el body traiga una factura', async () => {
+      const res = await crear({
+        canal: 'online',
+        tipoDocumentoId: FACTURA_CHILE_ID,
+      });
+      expect(res.status).toBe(201);
+      expect(await tipoDeLaVenta((res.body as VentaResponse).id)).toBe(
+        BOLETA_ID,
+      );
+    });
+
+    it('online sin tipoDocumentoId también nace con la boleta', async () => {
+      const res = await crear({ canal: 'online' });
+      expect(res.status).toBe(201);
+      expect(await tipoDeLaVenta((res.body as VentaResponse).id)).toBe(
+        BOLETA_ID,
+      );
     });
   });
 

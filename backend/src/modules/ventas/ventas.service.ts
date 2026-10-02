@@ -395,6 +395,16 @@ export class VentasService {
       await this.cajaService.bloquearCajaAbierta(manager, caja.id, tenantId);
     }
 
+    // 1b. El tipo de documento de la venta lo decide el servidor, y se resuelve
+    //     acá —antes de cargar ítems y calcular— para que un tipo inválido falle
+    //     sin haber hecho trabajo. `esBoleta` lo consume la emisión.
+    const tipoDocumento = await this.resolverTipoDocumento(
+      manager,
+      tenantId,
+      dto.tipoDocumentoId,
+      canal,
+    );
+
     // 2. Cargar todos los items para obtener monedaId, tipo, nombre.
     // UNA query para todo el carrito: `findOne` por línea disparaba 4+ queries
     // por ítem construyendo impuestos, recargos, descuentos, ingredientes y
@@ -714,7 +724,7 @@ export class VentasService {
         tenantId,
         cajaId: caja.id,
         monedaId: monedaOficialId,
-        tipoDocumentoId: dto.tipoDocumentoId ?? null,
+        tipoDocumentoId: tipoDocumento.id,
         canal,
         estado: EstadoVenta.PENDIENTE,
         totalBruto: resultado.totales.subtotalNeto,
@@ -1326,10 +1336,12 @@ export class VentasService {
         throw new BadRequestException(
           `Solo se anula una venta pendiente (esta está "${venta.estado}"). Una venta cobrada se revierte con nota de crédito.`,
         );
-      if (venta.tipo_documento_id)
-        throw new BadRequestException(
-          'La venta ya tiene documento tributario: se revierte con nota de crédito, no se anula.',
-        );
+      // El tipo de documento NO impide anular. Mirarlo era válido mientras era
+      // una etiqueta que solo alguien ponía a mano; desde que toda venta nace con
+      // la boleta del país, rechazar por él dejaría a ninguna anulable. Un
+      // documento solo armado y sin enviar al SII no cuenta como emitido (E8) y
+      // hoy el sistema no envía nada. Lo que sí impide anular: el estado y los
+      // pagos, justo abajo.
       const conPagos: unknown[] = await manager.query(
         `SELECT 1 FROM pagos
           WHERE venta_id = $1 AND eliminado_el IS NULL
@@ -1445,6 +1457,85 @@ export class VentasService {
         motivo: params.motivo,
       };
     });
+  }
+
+  /**
+   * El tipo de documento de una venta, resuelto por el servidor (spec
+   * `emision-por-venta` § 3.3). Antes `crearEnTransaccion` copiaba el
+   * `tipoDocumentoId` del body sin mirarlo: un tipo de otro país, la nota de
+   * crédito o un id al azar quedaban congelados en la venta (ADR-010).
+   *
+   * - **`online`**: siempre la boleta del país. El `canal` que se va a guardar en
+   *   la venta decide, y el id del body ni se consulta: una venta online no tiene
+   *   a nadie que elija entre boleta y factura.
+   * - **Con id** (físico): tiene que ser del país del tenant, activo y no NC; si
+   *   no, 400. No se distingue "no existe" de "es de otro país": para el cliente
+   *   es lo mismo y no se confirma qué ids existen en el catálogo.
+   * - **Sin id**: la boleta del país. Un país sin boleta sembrada (AR/CO/MX)
+   *   devuelve `null`, como hasta hoy: su frente fiscal es otro.
+   *
+   * **Una sola lectura**: trae, del país del tenant, el tipo pedido y la boleta
+   * activa, y el resto se decide en memoria. La boleta es única por país
+   * (`uq_tipo_documento_boleta_pais`), así que no hay empate que ordenar.
+   * `esBoleta` es lo que la emisión usa para separar "sigue la regla del medio"
+   * de "la hace el sistema".
+   *
+   * ⚠️ `{ id: null, esBoleta: false }` significa **que la venta no tiene tipo de
+   * documento** (un país sin boleta sembrada). **No** significa que sea una
+   * factura: `esBoleta: false` solo se lee con un `id` presente. Quien consuma
+   * esto tiene que mirar `id` antes de `esBoleta`.
+   */
+  private async resolverTipoDocumento(
+    manager: EntityManager,
+    tenantId: string,
+    tipoDocumentoId: string | undefined,
+    canal: string,
+  ): Promise<{ id: string | null; esBoleta: boolean }> {
+    const pedido = canal === 'online' ? null : (tipoDocumentoId ?? null);
+    const filas: {
+      tipo_documento_id: string;
+      es_boleta: boolean;
+      es_nota_credito: boolean;
+      activo: boolean;
+    }[] = await manager.query(
+      `SELECT td.tipo_documento_id, td.es_boleta, td.es_nota_credito, td.activo
+         FROM tenants t
+         JOIN provincia prov ON prov.provincia_id = t.provincia_id
+              AND prov.eliminado_el IS NULL
+         JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
+         JOIN tipos_documento_tributario td ON td.pais_id = p.pais_id
+              AND td.eliminado_el IS NULL
+              AND (td.tipo_documento_id = $2::uuid
+                   OR (td.es_boleta = true AND td.activo = true
+                       AND td.es_nota_credito = false))
+        WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL`,
+      [tenantId, pedido],
+    );
+
+    if (pedido !== null) {
+      const elegido = filas.find((f) => f.tipo_documento_id === pedido);
+      if (!elegido) {
+        throw new BadRequestException(
+          'El tipo de documento no corresponde al país del comercio',
+        );
+      }
+      if (elegido.es_nota_credito) {
+        throw new BadRequestException(
+          'La nota de crédito no se elige: la genera el sistema al reembolsar',
+        );
+      }
+      if (!elegido.activo) {
+        throw new BadRequestException('El tipo de documento no está activo');
+      }
+      return { id: elegido.tipo_documento_id, esBoleta: elegido.es_boleta };
+    }
+
+    const boleta = filas.find(
+      (f) => f.es_boleta && f.activo && !f.es_nota_credito,
+    );
+    return boleta
+      ? { id: boleta.tipo_documento_id, esBoleta: true }
+      : { id: null, esBoleta: false };
   }
 
   /**
