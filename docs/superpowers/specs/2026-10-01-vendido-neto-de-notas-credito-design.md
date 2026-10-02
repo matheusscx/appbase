@@ -72,13 +72,26 @@ y la fórmula da 20: el saldo muestra **de menos** lo reembolsado. Lo cubre la e
 No hace falta una arquitectura nueva. Cambian las consultas de los dos servicios que ya existen, los
 tipos de respuesta y los dos componentes que las muestran.
 
-### 3.1 Cómo se reconoce una NC (D3)
+### 3.1 Cómo se reconoce una corrección (D3)
 
-Un solo mecanismo, el del dashboard: `LEFT JOIN tipos_documento_tributario td ON td.tipo_documento_id
-= v.tipo_documento_id` y `COALESCE(td.es_nota_credito, false)`. El JOIN va **sin**
-`td.eliminado_el IS NULL`, por el porqué ya escrito en esas consultas. `VentasService.resumen` deja
-de llamar a `tipoNotaCreditoDelTenant`. La emisión de la NC (`crearNotaCreditoEnTransaccion`) lo
-sigue usando para **escribir**, y eso no se toca.
+Un solo mecanismo, y no es ninguno de los dos de hoy: una venta que corrige a otra se reconoce por
+**`v.venta_referencia_id IS NOT NULL`**. Ni `es_nota_credito` del catálogo (el inicio) ni el id del
+tipo del país (`/ventas/resumen`).
+
+- **Por qué esta columna** (orquestadora, 2026-10-01, última viñeta de la entrada en
+  `pendientes.md`): el frente de emisión (`2026-10-01-emision-por-venta-design.md` § 3.7, E7) suma la
+  devolución interna, que corrige una venta sin ser documento tributario. Con esta columna resta
+  sola, y ese frente no reescribe estas consultas.
+- **El resultado hoy es idéntico.** El único que escribe `venta_referencia_id` es
+  `crearNotaCreditoEnTransaccion` (`ventas.service.ts`, `ventaReferenciaId: params.ventaOriginalId`);
+  el seed no la escribe. Medido el 2026-10-01 con un grep de `venta_referencia_id` y
+  `ventaReferenciaId` sobre `backend/src`.
+- **Lo que sale con el mecanismo viejo.** Las consultas de este frente dejan de cruzar
+  `tipos_documento_tributario`, así que también sale el `LEFT JOIN` sin `td.eliminado_el IS NULL` y
+  el comentario que justificaba esa excepción: no queda lectura sin filtro que justificar.
+  `VentasService.resumen` deja de llamar a `tipoNotaCreditoDelTenant`. La emisión
+  (`crearNotaCreditoEnTransaccion`) y los demás lectores del id del tipo (tope, composición, listado,
+  detalle) no se tocan: el inventario completo es la tarea 1 del plan de emisión.
 
 ### 3.2 `GET /resumen-negocio/hoy`
 
@@ -152,15 +165,35 @@ tiene su propia entrada en la § 2 de `pendientes.md`.
 - **Moneda:** el formateo de montos negativos se verifica con `formatMonto`. Si no lo soporta, el
   ajuste va en el composable y no en el `.vue`.
 
-## 4. Lo que el plan mide primero (tarea 1, antes de fijar SQL)
+## 4. Lo medido al escribir el plan (2026-10-01)
 
-1. **Moneda del `REFUND`:** si `pasarela_transacciones.monto` está en la moneda oficial y en la
-   misma escala que `pagos`. Si no, vuelve al owner.
-2. **`REVERSAL`:** si una anulación de Webpay deja `pagos` vivos y un `REVERSAL` aprobado. En ese
-   caso también tendría que restar, y vuelve al owner.
-3. **Fecha del reembolso:** `fecha_transaccion` o `creado_el`, contra la fecha que usa el pago.
-4. **Doble cuenta:** que ningún camino deje a la vez una salida de caja y un `REFUND` por la misma
-   devolución. Hoy no pasa, porque el webhook no manda `devolverDinero`, y lo afirma un e2e.
+Esta sección eran cuatro preguntas para la tarea 1. Se midieron al escribir el plan, y ninguna
+vuelve al owner:
+
+1. **Moneda del `REFUND`:** es la oficial y en la misma escala que `pagos`. La transacción copia
+   `orden.moneda`, que sale de la constante `MONEDA_ORDEN_V1 = 'CLP'` (`pasarela-orden.entity.ts`), y
+   el monto se valida con la escala de CLP antes de abrir la transacción (`CobrosService.reembolsar`,
+   `validarEscalaDeMoneda`). Oneclick y Webpay Plus solo se configuran en un tenant chileno
+   (`pasarela-solo-chile.e2e-spec.ts`), así que CLP es su moneda oficial.
+2. **`REVERSAL`:** ningún código lo escribe. El tipo solo aparece en el comentario de la entity. No
+   resta nada, y el día que alguien lo escriba es un frente nuevo.
+3. **Fecha del reembolso:** `pasarela_transacciones.fecha_transaccion`. Hoy es `new Date()` al
+   registrar (`TransaccionesService.registrar`), así que coincide con `creado_el`, pero es la columna
+   que lleva la fecha de la operación. La salida de caja usa `movimientos_caja.fecha`, que es la que
+   tiene el movimiento.
+4. **Doble cuenta:** el webhook (`VentasReembolsoHandler.onReembolsoAprobado`) llama a
+   `crearNotaCredito` sin `devolverDinero`, así que no deja salida de caja. Lo afirma el e2e del
+   `REFUND` con NC.
+
+Tres datos más, que fijan la forma de las consultas y de las pruebas:
+
+- **`movimientos_caja` no tiene `tenant_id`.** El alcance del efectivo devuelto va por la NC
+  (`nc.tenant_id = $1`).
+- **Las líneas de la NC son positivas** (`totalLinea: l.bruto`), igual que su `total_final`. El neto
+  se arma con signo en la consulta.
+- **El `REFUND` no se alcanza por la app en el e2e.** `ProviderFactory.getReembolsable` solo conoce
+  `oneclick` y `webpay_plus`, que hablan con Transbank, y la pasarela demo no reembolsa. El plan
+  arma lo que deja el proveedor (orden y `REFUND` aprobado) y de ahí en adelante usa el camino real.
 
 ## 5. Pruebas
 
