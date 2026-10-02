@@ -105,21 +105,14 @@ decisiones D1–D12). Lo que sigue es lo que cuenta cada número y el porqué.
   aparte.
 - **Por cobrar:** ventas `pendiente` o `pagada_parcial`, de **cualquier fecha** —es lo que
   se debe ahora, no lo que se vendió hoy—, sin las correcciones como filas. El saldo se
-  calcula **por venta**: `total − correcciones de esa venta − (pagado − efectivo devuelto
-  por ellas)`, con **piso en 0**, porque lo que queda a favor del cliente no es plata por
-  cobrar. El caso es real: una nota de crédito manual solo exige que la venta esté
-  `pagada` o `pagada_parcial`, y una venta de $100.000 con $40.000 pagados admite una por
-  los $60.000 restantes, que antes seguía figurando como deuda. `cantidad` cuenta las
-  ventas con saldo mayor que 0: una venta que la nota dejó en cero deja de ser deuda. Es la
-  misma expresión que el "Saldo pendiente" de `/ventas`, escrita en las dos consultas
-  (se extrae a la tercera copia).
-  ⚠️ **Límite conocido (D10, D12):** los `REFUND` de pasarela **no** entran al saldo: la
-  expresión solo cuenta como "devuelto" las salidas de caja de las notas, y el reembolso por
-  pasarela no mueve caja. La nota que genera sí baja el saldo. Lo que sale mal es una venta
-  pagada **en parte** por pasarela, con saldo vivo, `REFUND` y nota: con $100 de total, $60
-  pagados y $20 de `REFUND` y de nota, se deben $40 y el saldo da $20. Sigue abierto en
-  [`pendientes.md`](../agent/pendientes.md) § 6, entrada "El saldo pendiente no descuenta lo
-  reembolsado por pasarela".
+  calcula **por venta** con la expresión única de `saldo-venta.ts` (`total − Σ aplicado − Σ
+  correcciones "no vuelve plata"`, con **piso en 0**: lo que queda a favor del cliente no es
+  plata por cobrar), la misma que el "Saldo pendiente" de `/ventas`, el saldo del listado y del
+  detalle y el tope del abono. Una corrección que **devolvió plata** (efectivo, tarjeta o
+  pasarela) no cambia lo que se debe; solo "no vuelve plata" lo rebaja. `cantidad` cuenta las
+  ventas con saldo mayor que 0: una venta que la nota dejó en cero pasa a `pagada` y deja de ser
+  deuda. Con $100 de total, $60 pagados y `REFUND` y nota de $20 se deben $40 (el límite D10 de
+  la spec del vendido neto se cerró en la tarea 14 del frente de emisión, 2026-10-02).
 - **"Hoy" y "la semana pasada"** salen de `fechaLocalTenant`/`bordeFechaSql`/
   `bordeHastaSql` (`rango-fecha.util.ts`), con la zona de la PROVINCIA del tenant — el
   mismo corte a medianoche local que usan reportes y mermas. La zona se resuelve UNA
@@ -252,7 +245,7 @@ backend trata el módulo contratado como borde duro también para `es_fijo`).
   con SQL raw sobre tablas de otros módulos (`ventas`, `pagos`, `pago_aplicaciones`,
   `movimientos_caja`, `pasarela_transacciones`, `pasarela_ordenes`, `venta_detalles`,
   `items`). `movimientos_caja` tiene un índice por `venta_id` (`idx_movimientos_caja_venta`)
-  porque el saldo por venta suma las salidas de las correcciones de cada una. Importa `SalonesModule` (para
+  porque se buscan las salidas de caja de las correcciones: el efectivo devuelto del día y, en el saldo (`saldo-venta.ts`), la de cada corrección legacy sin `devolucion_via`. Importa `SalonesModule` (para
   `AnulacionesReporteService`, ahora exportado) y `MermasModule` (para `MermasService`) —
   ninguno de los dos importa `ResumenNegocioModule`, así que no hay ciclo.
 - **Controller**: `resumen-negocio.controller.ts` — valida el guard y delega.
@@ -418,8 +411,8 @@ venta no mueve el vendido; que una nota de crédito de hoy sobre una venta de ay
 vendido de hoy y no de ayer, y no cuenta como venta (y lo mismo una semana atrás); que el
 efectivo devuelto por una nota resta del cobrado y un retiro de caja ajeno no; que un
 `REFUND` aprobado resta del cobrado con o sin nota, **una sola vez**, y el de una orden sin
-venta no; que por cobrar descuenta las notas con piso en 0 y vuelve a deber lo devuelto en
-efectivo; que lo más vendido resta las líneas de una nota y no muestra la de ajuste; que
+venta no; que por cobrar usa la expresión única del saldo (`saldo-venta.ts`, con piso en 0): solo
+"no vuelve plata" lo rebaja, y una nota que devolvió plata (efectivo, tarjeta o pasarela) no lo cambia; que lo más vendido resta las líneas de una nota y no muestra la de ajuste; que
 `?tenantId=<otro>` no cambia la respuesta; y, en
 `describe('pérdidas y lo más vendido (delta)')` (Task 2, salón/mesa/garzón propios,
 molde `salones-anular-linea.e2e-spec.ts`): anular un plato despachado como cortesía

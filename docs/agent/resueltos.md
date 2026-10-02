@@ -290,6 +290,20 @@ cajas" con una nota de otra caja. En pantalla, `InicioHoy.nuxt.spec.ts`, `index.
 - el caso de un día con neto negativo, con el ticket y la variación en `null`, lo cubren los
   unitarios: el e2e comparte la base con todo el día y no puede dejarlo negativo.
 
+**Nota del 2026-10-02 (tarea 14 del frente de emisión): la regla del "devuelto" de arriba ya no
+es la vigente.** El saldo de una venta pasó a ser `total − Σ aplicado − Σ correcciones "sin
+plata"`, escrito **una sola vez** (`backend/src/modules/ventas/saldo-venta.ts`) y leído por
+"Por cobrar", `/ventas/resumen`, el saldo del listado y del detalle, el tope del abono y el "no
+vuelve plata" de las correcciones. Una corrección que devolvió plata (efectivo, tarjeta o
+pasarela) **no** cambia lo que se debe; solo "no vuelve plata" lo rebaja. Con eso se cierra el D10
+(el `REFUND` de pasarela que el saldo no contaba: $100 de total, $60 pagados, `REFUND` y nota de
+$20 deben $40, no $20) y la entrada de `pendientes.md` § 6 "El saldo pendiente no descuenta lo
+reembolsado por pasarela", así como el saldo por venta del listado, que seguía en `total − pagado`.
+Cambia también lo que dicen los casos de acá arriba: "una nota mayor que lo que se debe deja el
+saldo en cero" y "lo devuelto en efectivo vuelve a deberse" ahora son "una nota por un pago no
+mueve el saldo" (ver `resumen-negocio.e2e-spec.ts`). La regla vigente y sus casos:
+`venta-correcciones.e2e-spec.ts`, bloque "el saldo de una venta es uno solo".
+
 ## El resumen de anulaciones se serializa, como el de la varianza (cerrada 2026-10-01)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.

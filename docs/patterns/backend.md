@@ -1673,6 +1673,28 @@ productos(@Req() req: Request) {
   `encargado.compras`). Listar cada `useApiFetch` de la pantalla con el guard de su ruta, al
   cerrar, es lo que lo encuentra antes que el usuario.
 
+## 20. Una cuenta que muchos leen se escribe una vez: el saldo de una venta
+
+Cuando el mismo número lo muestran, lo topan y lo deciden varios lugares (el saldo de una venta
+lo leían el inicio, `/ventas/resumen`, el listado, el detalle, el abono y las correcciones), cada
+copia envejece por su lado: la regla cambia en dos y la tercera sigue cobrando de más.
+
+**La regla: la cuenta vive en un solo archivo y los demás la incluyen, nunca la reescriben.**
+`modules/ventas/saldo-venta.ts` exporta `saldoDeVentaSql(alias)` —un fragmento SQL de
+subconsultas correlacionadas, que se mete dentro de la consulta que ya lee las ventas— y
+`recalcularEstadoDeLaVenta(manager, tenantId, ventaId)`, que deriva el estado de ese mismo
+saldo. Un fragmento y no una función de la base, porque el esquema sale de las entities.
+
+- **Los alias internos llevan prefijo (`sv_`)**: el fragmento se incrusta en consultas ajenas y
+  no puede pisar sus alias.
+- **No es N+1**: es una subconsulta correlacionada dentro de la **misma** consulta, no una por
+  fila. Se agrega en el `SELECT` del listado y en el `SUM(...)` de los resúmenes.
+- **El tope de una operación lee el saldo bajo el lock de la operación** (el `FOR UPDATE` de la
+  venta en el abono y en la nota), y cada operación que lo mueve vuelve a derivar el estado con
+  la misma regla: un estado calculado en dos sitios se desalinea.
+- **Los unit tests con `Db` mockeado no ven el SQL**: el fake devuelve el número ya hecho. La
+  prueba de la cuenta es el e2e, con un mutante que vuelve a la expresión anterior.
+
 ---
 
 ## 12. Docs vivas a tocar en el mismo commit

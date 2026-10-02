@@ -1242,8 +1242,11 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     correcciones − lo pagado, con la fórmula del saldo ya decidida en la § 3; si queda en cero,
     "Registrar pago" desaparece y la venta pasa a `pagada`. **Va dentro del frente de emisión**,
     que es el que construyó "no vuelve plata". Se descartaron "frente aparte" (el doble cobro sigue
-    posible mientras tanto) y "apagar no vuelve plata hasta entonces". Falta medir, dentro del
-    frente, el listado de deuda y el saldo por venta del listado, que nombraba la entrada vieja.
+    posible mientras tanto) y "apagar no vuelve plata hasta entonces". **Hecho en la tarea 14
+    (2026-10-02):** el saldo es una sola expresión (`saldo-venta.ts`) que leen el listado, el
+    detalle, los dos resúmenes y el tope del abono; la venta pasa a `pagada` y "Registrar pago"
+    desaparece cuando queda en cero. Con ella se cerró también "El saldo pendiente no descuenta lo
+    reembolsado por pasarela" (nota en [`resueltos.md`](resueltos.md), al pie del vendido neto).
   - **La factura la hace siempre el sistema**, se pague como se pague. La regla del medio decide
     solo las boletas, que es lo que cubre el modelo de emisión del SII.
   - **Un comercio nuevo trae "emite el sistema" en todos los medios**: es el error barato.
@@ -1289,18 +1292,6 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   3. Código solo en un worktree con ./scripts/entorno.sh. Implementación con subagentes Sonnet. domain-reviewer con las dudas que no verificaste, y api-security-reviewer si tocás controllers o DTOs. Gate completo de CLAUDE.md, recibo del pre-commit y docs vivas en el mismo commit.
   4. No hagas push sin que el owner lo diga, porque main despliega en Railway.
   ```
-
-- [ ] **El saldo pendiente no descuenta lo reembolsado por pasarela** (fiscal, **frente propio**;
-  límite conocido D10 de la spec del vendido neto, 2026-10-01). La fórmula del saldo cuenta como
-  "devuelto" solo las salidas de caja de las correcciones, y el reembolso de pasarela no mueve
-  caja. Una venta pagada **en parte** por pasarela, con saldo vivo, `REFUND` y nota: con $100 de
-  total, $60 pagados, `REFUND` de $20 y nota de $20, se deben $40 y el saldo da $20. Ya se puede arreglar:
-  el frente de emisión dejó el vínculo (`pasarela_transacciones.correccion_venta_id`) y
-  `ventas.devolucion_via` anota por dónde volvió la plata. El tope del abono del frente de
-  emisión va a reemplazar esa expresión: tomarlo después de él o junto con él. La expresión
-  está escrita en dos consultas (el "por cobrar" del dashboard y `VentasService.resumen`,
-  [`dashboard-inicio.md`](../features/dashboard-inicio.md)); el saldo por venta del listado
-  sigue en `total − pagado` y tiene su propia entrada en la § 2.
 
 - [ ] **Una nota de crédito que se reintenta se emite dos veces** (fiscal, **frente propio**,
   anotado 2026-09-19 al diseñar la idempotencia del cobro). `POST /ventas/:id/notas-credito`

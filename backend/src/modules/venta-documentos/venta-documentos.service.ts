@@ -21,6 +21,7 @@ import {
 } from '../ventas/nota-credito-composicion';
 import type { EmisorMedio } from '../metodos-pago/entities/tenant-metodo-pago.entity';
 import type { Facturador } from '../tenants/entities/tenant.entity';
+import { saldoDeVentaSql } from '../ventas/saldo-venta';
 import {
   VentaDocumento,
   type ClaseDocumentoMaquina,
@@ -1280,24 +1281,16 @@ export class VentaDocumentosService {
       documento: DocumentoCorregido | null;
     }[];
   }> {
-    const ventas: { total_final: string; sin_plata: string }[] =
-      await lector.query(
-        // \`sin_plata\`: lo que las correcciones anteriores "sin plata" ya rebajaron
-        // de lo que se debía. Solo esas: las que volvieron por un pago (o por la
-        // pasarela) devolvieron plata por fuera y la deuda sigue igual.
-        `SELECT v.total_final::text AS total_final,
-                COALESCE((
-                  SELECT SUM(c.total_final)
-                    FROM ventas c
-                   WHERE c.venta_referencia_id = v.venta_id
-                     AND c.tenant_id = v.tenant_id
-                     AND c.devolucion_via = 'sin_plata'
-                     AND c.eliminado_el IS NULL
-                ), 0)::text AS sin_plata
-           FROM ventas v
-          WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL`,
-        [params.ventaId, params.tenantId],
-      );
+    // El saldo es la expresión ÚNICA de `saldo-venta.ts`: la misma que ven el
+    // listado, el detalle, los resúmenes y el tope del abono. Total − lo aplicado −
+    // lo rebajado "sin plata": las correcciones que devolvieron plata (por un pago
+    // o por la pasarela) no cambian lo que se debe.
+    const ventas: { saldo: string }[] = await lector.query(
+      `SELECT ${saldoDeVentaSql('v')}::text AS saldo
+         FROM ventas v
+        WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL`,
+      [params.ventaId, params.tenantId],
+    );
     if (!ventas.length) throw new NotFoundException('Venta no encontrada');
 
     const docs: {
@@ -1372,17 +1365,11 @@ export class VentaDocumentosService {
       docs.filter((d) => d.emisor !== 'maquina' && !d.es_duplicado),
     );
 
-    const aplicadoTotal = pagos.reduce(
-      (a, p) => a.plus(p.aplicado_venta),
-      ZERO,
-    );
     return {
-      // Lo que la venta todavía debe: total − lo aplicado − lo ya rebajado sin
-      // plata. UNA sola cuenta para el tope de "no vuelve plata" y para ofrecerla
-      // (`opcionesDevolucion`): la pantalla nunca ofrece lo que no queda por rebajar.
-      saldo: new Decimal(ventas[0].total_final)
-        .minus(aplicadoTotal)
-        .minus(ventas[0].sin_plata),
+      // Lo que la venta todavía debe. UNA sola cuenta para el tope de "no vuelve
+      // plata" y para ofrecerla (`opcionesDevolucion`): la pantalla nunca ofrece lo
+      // que no queda por rebajar.
+      saldo: new Decimal(ventas[0].saldo),
       hayDocumentos: docs.length > 0,
       deuda: deudaDoc ? doc(deudaDoc) : null,
       pagos: pagos.map((p) => {

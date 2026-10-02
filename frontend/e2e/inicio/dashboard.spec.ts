@@ -336,13 +336,14 @@ test.describe('quien no es admin pero tiene "Resumen del negocio: Leer"', () => 
         data: { lineas: [{ itemId: item.id, cantidad: '2' }] },
       })
       totalVenta = venta.totalFinal
-      await api(request, 'post', '/pagos', {
+      const abono = await api<{ pagos: { id: string }[] }>(request, 'post', '/pagos', {
         token: adminToken,
         data: { ventaId: venta.id, pagos: [{ metodoPagoId: EFECTIVO, monto: venta.totalFinal }] },
       })
+      // Toda nota declara por dónde vuelve la plata: acá, por el efectivo cobrado.
       await api(request, 'post', `/ventas/${venta.id}/notas-credito`, {
         token: adminToken,
-        data: { monto: MONTO_NC },
+        data: { monto: MONTO_NC, devolucion: { pagoId: abono.pagos[0].id } },
       })
 
       const despues = await notasDeHoy()

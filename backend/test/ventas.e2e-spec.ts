@@ -2408,13 +2408,12 @@ describe('Ventas (e2e)', () => {
       expect(delta(antes.saldoPendiente, despues.saldoPendiente)).toBe('0');
     });
 
-    it('una NC mayor que lo que se debe deja el saldo de esa venta en cero, no en negativo', async () => {
+    it('una NC por un pago mayor que lo que se debe NO mueve el saldo: lo devuelto salió de lo pagado, no de la deuda', async () => {
       // El abono es con débito: la devolución vuelve por la máquina y no toca
-      // la caja. Con efectivo, una nota mayor que lo cobrado en efectivo la frena
-      // el tope del efectivo, y sin plata la frena el saldo. Y ninguna nota por un
-      // pago pasa de lo que ese pago trajo (P): la nota más grande que se puede
-      // emitir por la tarjeta es N ≤ P, así que este caso exige que el abono (P)
-      // supere lo que falta (T − P), para que N pueda ser mayor que lo que se debe.
+      // la caja. Ninguna nota por un pago pasa de lo que ese pago trajo (P): la
+      // nota más grande que se puede emitir por la tarjeta es N ≤ P, así que este
+      // caso exige que el abono (P) supere lo que falta (T − P), para que N pueda
+      // ser mayor que lo que se debe.
       const { venta, total, abonado } = await crearVenta(
         '3',
         (t) => piso(t.times('0.7')),
@@ -2422,8 +2421,8 @@ describe('Ventas (e2e)', () => {
       );
       const antes = await leerResumen();
 
-      // T − P < N ≤ P: sin el piso, el saldo de la venta sería T − N − P < 0 y
-      // `saldoPendiente` bajaría N en vez de T − P.
+      // T − P < N ≤ P: con la regla anterior la nota rebajaba la deuda y
+      // `saldoPendiente` bajaba T − P; ahora el cliente sigue debiendo T − P.
       const N = piso(total.times('0.5')).toString();
       expect(new Decimal(N).gt(total.minus(abonado))).toBe(true);
       expect(new Decimal(N).lte(abonado)).toBe(true);
@@ -2433,21 +2432,42 @@ describe('Ventas (e2e)', () => {
       });
       const despues = await leerResumen();
 
-      expect(delta(antes.saldoPendiente, despues.saldoPendiente)).toBe(
-        total.minus(abonado).negated().toString(),
-      );
+      expect(delta(antes.saldoPendiente, despues.saldoPendiente)).toBe('0');
       expect(delta(antes.totalNotasCredito, despues.totalNotasCredito)).toBe(N);
     });
 
-    it('lo devuelto en efectivo vuelve a deberse: el saldo de /ventas/resumen no cambia', async () => {
+    it('"no vuelve plata" por todo lo que se debe deja el saldo de esa venta en cero', async () => {
+      const { venta, total, abonado } = await crearVenta(
+        '3',
+        (t) => piso(t.times('0.7')),
+        DEBITO_ID,
+      );
+      const antes = await leerResumen();
+
+      const debe = total.minus(abonado).toString();
+      await post(`/api/ventas/${venta.id}/notas-credito`, {
+        monto: debe,
+        devolucion: { sinPlata: true },
+      });
+      const despues = await leerResumen();
+
+      expect(delta(antes.saldoPendiente, despues.saldoPendiente)).toBe(
+        new Decimal(debe).negated().toString(),
+      );
+      expect(delta(antes.totalNotasCredito, despues.totalNotasCredito)).toBe(
+        debe,
+      );
+    });
+
+    it('lo devuelto en efectivo no cambia lo que se debe: el saldo de /ventas/resumen no cambia', async () => {
       const { venta, total } = await crearVenta('3', (t) =>
         piso(t.times('0.6')),
       );
       const antes = await leerResumen();
 
-      // Antes T − P, después T − N − (P − N): lo mismo. Misma expresión que el
-      // "por cobrar" del inicio: sin el término del efectivo devuelto el saldo
-      // bajaría N.
+      // Antes T − P, después T − P: la expresión única del saldo (la misma que el
+      // "por cobrar" del inicio) no resta una nota que devolvió plata. Si la
+      // rebajara, el saldo bajaría N.
       const N = piso(total.times('0.25'));
       await post(`/api/ventas/${venta.id}/notas-credito`, {
         monto: N,

@@ -153,6 +153,10 @@ const MONEDA_ROWS = [
 
 function buildManagerMock() {
   const venta = { id: 'venta-uuid-001' };
+  // Lo que devuelve `recalcularEstadoDeLaVenta` (la regla única del estado, que es
+  // SQL y un mock de `query` no la ve: la corre el e2e). Los casos que prueban otro
+  // estado lo pisan.
+  const recalculo = { estado: 'pagada', saldo: '0.0000' };
   // Cada detalle recibe un id DISTINTO por posición: con un id compartido, un
   // bug que atribuyera todas las reglas a la misma línea sería invisible.
   const idDetalle = (i: number) => `detalle-uuid-00${i + 1}`;
@@ -192,7 +196,10 @@ function buildManagerMock() {
     // boleta (detalles, impuestos, pagos…) se queda en `[]`: nadie en este
     // describe mira `result.boleta.items`, eso lo cubre `armarBoleta()` en el
     // suyo, más abajo, con su propio dispatcher completo.
+    recalculo,
     query: jest.fn().mockImplementation((sql: string) => {
+      if (typeof sql === 'string' && sql.includes('WITH s AS'))
+        return Promise.resolve([{ ...recalculo }]);
       if (typeof sql === 'string' && sql.includes('FROM ventas v')) {
         return Promise.resolve([
           {
@@ -543,6 +550,26 @@ describe('VentasService', () => {
       expect(calculoPreciosService.calcular).toHaveBeenCalled();
       expect(dataSourceMock.transaction).toHaveBeenCalled();
       expect(result.estado).toBe(EstadoVenta.PAGADA);
+    });
+
+    it('el estado de la venta nueva es el que dice la regla única del estado, bajo el tenant del token', async () => {
+      // La regla (sin saldo → pagada; con saldo y algo aplicado → pagada_parcial;
+      // si no, pendiente) es SQL compartido con el abono y las correcciones
+      // ("saldo-venta.ts"): un mock no la ve y la cubre el e2e. Acá se afirma que
+      // `crear` NO decide el estado por su cuenta: devuelve el que ella calculó.
+      const manager = buildManagerMock();
+      manager.recalculo.estado = 'pendiente';
+      dataSourceMock.transaction.mockImplementationOnce(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+
+      const result = await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      expect(result.estado).toBe(EstadoVenta.PENDIENTE);
+      const llamada = manager.query.mock.calls.find(
+        (c) => typeof c[0] === 'string' && c[0].includes('WITH s AS'),
+      );
+      expect(llamada?.[1]).toEqual(['venta-uuid-001', TENANT_ID]);
     });
 
     it('rechaza la venta si la caja existe pero está en conciliación', async () => {
@@ -2128,7 +2155,7 @@ describe('VentasService', () => {
         orden(pagosServiceMock.registrar),
       );
       const update = manager.query.mock.calls.findIndex(
-        (c) => typeof c[0] === 'string' && c[0].includes('UPDATE ventas SET'),
+        (c) => typeof c[0] === 'string' && c[0].includes('WITH s AS'),
       );
       expect(update).toBeGreaterThanOrEqual(0);
       expect(orden(ventaDocumentosMock.documentarVenta)).toBeGreaterThan(
@@ -2579,6 +2606,8 @@ describe('VentasService', () => {
       efectivoDevuelto = '0';
       costosCongelados = [{ item_id: ITEM_ID, costo_unitario: '50.0000' }];
       ncManager.query.mockImplementation((sql: string) => {
+        if (sql.includes('WITH s AS'))
+          return Promise.resolve([{ ...ncManager.recalculo }]);
         if (sql.includes('FOR UPDATE')) return Promise.resolve(ventaRows);
         if (sql.includes('SUM(total_final)'))
           return Promise.resolve([{ total: ncPreviasTotal }]);
@@ -2838,6 +2867,37 @@ describe('VentasService', () => {
         });
 
         expect(res.totalFinal).toBe('1000.0000');
+      });
+
+      const recalculos = () =>
+        ncManager.query.mock.calls.filter(
+          (c: unknown[]) =>
+            typeof c[0] === 'string' && c[0].includes('WITH s AS'),
+        );
+
+      it('"no vuelve plata" recalcula el estado de la venta que corrige, con la regla única y bajo su tenant', async () => {
+        conSaldo('1000.0000');
+
+        await service.crearNotaCredito({
+          ...baseParams,
+          via: SIN_PLATA,
+          monto: '1000.0000',
+        });
+
+        expect(recalculos()).toHaveLength(1);
+        expect(recalculos()[0][1]).toEqual([VENTA_ORIG_ID, TENANT_ID]);
+        // Después de guardar la corrección: si no, el saldo todavía no la cuenta.
+        expect(
+          ncManager.query.mock.invocationCallOrder[
+            ncManager.query.mock.calls.indexOf(recalculos()[0])
+          ],
+        ).toBeGreaterThan(ncManager.save.mock.invocationCallOrder[0]);
+      });
+
+      it('una corrección que devolvió plata no mueve el saldo: no hay nada que recalcular', async () => {
+        await service.crearNotaCredito(baseParams);
+
+        expect(recalculos()).toHaveLength(0);
       });
 
       it('con un pago el saldo no cuenta (viene nulo): la venta paga entera igual se corrige', async () => {
@@ -3734,6 +3794,7 @@ describe('VentasService', () => {
             fecha: new Date('2026-07-10'),
             creado_el: new Date('2026-07-10'),
             monto_pagado: '11305.0000',
+            saldo: '0.0000',
             total_reembolsado: '1100.0000',
             tipo_documento_id: 'doc-boleta',
             venta_referencia_id: null,
@@ -3750,6 +3811,7 @@ describe('VentasService', () => {
             fecha: new Date('2026-07-10'),
             creado_el: new Date('2026-07-10'),
             monto_pagado: '0',
+            saldo: '0',
             total_reembolsado: '0',
             tipo_documento_id: TIPO_DOCUMENTO_NC_ID,
             venta_referencia_id: 'v-1',
@@ -3764,6 +3826,7 @@ describe('VentasService', () => {
             fecha: new Date('2026-07-10'),
             creado_el: new Date('2026-07-10'),
             monto_pagado: '0',
+            saldo: '0',
             total_reembolsado: '0',
             tipo_documento_id: null,
             venta_referencia_id: 'v-1',
@@ -3779,6 +3842,8 @@ describe('VentasService', () => {
           c[0].includes('FROM ventas v') &&
           c[0].includes('LIMIT'),
       )?.[0] as string;
+      // El saldo por venta sale de la expresión única, no de `total − pagado`.
+      expect(listSql).toContain('sv_c.venta_referencia_id');
       expect(listSql).toContain("pa.tipo = 'venta'");
       expect(listSql).toContain('pago_aplicaciones');
       // El listado trae `venta_referencia_id`: de ahí sale el flag.
@@ -4947,8 +5012,14 @@ describe('VentasService', () => {
       aplicado: string,
       propina = '0',
       tienePagos = aplicado !== '0' || propina !== '0',
+      // El saldo lo calcula la expresión única del SQL (`saldo-venta.ts`), que un mock
+      // no ve: por defecto es el total menos lo aplicado, y un caso con una nota "sin
+      // plata" lo fija a mano.
+      saldo: string = Math.max(0, 100000 - Number(aplicado)).toString(),
     ) => {
       dataSourceMock.query.mockImplementation((sql: string) => {
+        if (sql.includes('sv_c.venta_referencia_id'))
+          return Promise.resolve([{ saldo }]);
         if (sql.includes('SELECT 1 FROM pagos'))
           return Promise.resolve(tienePagos ? [{ '?column?': 1 }] : []);
         if (sql.includes('FROM pago_aplicaciones'))
@@ -5088,6 +5159,32 @@ describe('VentasService', () => {
         expect(res.anularPreguntaExterno).toBe(false);
         expect(ventaDocumentosMock.evaluarAnulacion).not.toHaveBeenCalled();
       });
+    });
+
+    describe('saldo y puedeAbonar: los decide el backend con la expresión única', () => {
+      it('devuelve el saldo que calculó la consulta y puedeAbonar con estado abonable y saldo', async () => {
+        responder('pagada_parcial', '60000', '0', true, '40000.0000');
+        const res = await detalle();
+        expect(res.saldo).toBe('40000.0000');
+        expect(res.puedeAbonar).toBe(true);
+      });
+
+      it('una nota "sin plata" que cubrió la deuda: saldo 0 y nada que abonar, aunque el estado leído diga pendiente', async () => {
+        responder('pendiente', '0', '0', false, '0.0000');
+        const res = await detalle();
+        expect(res.saldo).toBe('0.0000');
+        expect(res.puedeAbonar).toBe(false);
+        expect(res.abonoConMaquinaDuplica).toBe(false);
+        expect(ventaDocumentosMock.ventaDocumentada).not.toHaveBeenCalled();
+      });
+
+      it.each(['pagada', 'cancelada'])(
+        'una venta %s no admite abonos aunque el saldo sea positivo',
+        async (estado) => {
+          responder(estado, '0', '0', false, '100000.0000');
+          expect((await detalle()).puedeAbonar).toBe(false);
+        },
+      );
     });
 
     describe('abonoConMaquinaDuplica', () => {

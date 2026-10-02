@@ -29,7 +29,7 @@ mockNuxtImport('useApiFetch', () => {
     if (respuesta instanceof Error) return Promise.reject(respuesta)
     return Promise.resolve({
       pagos: [],
-      venta: { id: 'venta-1', estado: 'pagada_parcial', saldo: '500' },
+      venta: { id: 'venta-1', estado: 'pagada_parcial', saldo: '500', puedeAbonar: true },
       ...respuesta,
     })
   }

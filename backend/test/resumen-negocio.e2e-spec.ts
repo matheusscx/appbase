@@ -756,7 +756,7 @@ describe('Resumen del negocio (e2e)', () => {
       });
     });
 
-    describe('por cobrar descuenta las notas de crédito (saldo por venta, piso 0)', () => {
+    describe('por cobrar descuenta solo las notas "no vuelve plata" (saldo por venta, piso 0)', () => {
       const leer = async () =>
         (await leerResumen(tokenAdmin)).body as ResumenHoyResponse;
 
@@ -787,18 +787,17 @@ describe('Resumen del negocio (e2e)', () => {
         return { venta, T, P };
       }
 
-      it('una NC mayor que lo que se debe deja el saldo en cero, no en negativo, y la venta sale de la cuenta', async () => {
+      it('una NC por un pago mayor que lo que se debe NO mueve el saldo: lo devuelto salió de lo pagado, no de la deuda', async () => {
         // El abono es con débito: la devolución vuelve por la máquina y no
-        // toca la caja. Con efectivo, una nota mayor que lo cobrado en
-        // efectivo la frena el tope del efectivo, y sin plata la frena el
-        // saldo. Y ninguna nota por un pago pasa de lo que ese pago trajo (P):
+        // toca la caja. Ninguna nota por un pago pasa de lo que ese pago trajo (P):
         // por eso el abono (P) tiene que superar lo que falta (T − P), para
         // que una nota N ≤ P pueda ser mayor que lo que se debe.
         const { venta, T, P } = await ventaParcial('0.7', DEBITO_ID);
         const antes = await leer();
 
-        // T − P < N ≤ P: sin el piso, el saldo de esta venta sería T − N − P < 0
-        // y restaría de más.
+        // T − P < N ≤ P: con la regla vieja (la nota rebajaba la deuda) el saldo
+        // de esta venta caía a cero y la venta salía de la cuenta; con la actual,
+        // el cliente sigue debiendo T − P.
         const N = piso(T.times('0.5')).toString();
         expect(new Decimal(N).gt(T.minus(P))).toBe(true);
         expect(new Decimal(N).lte(P)).toBe(true);
@@ -808,13 +807,27 @@ describe('Resumen del negocio (e2e)', () => {
         });
         const despues = await leer();
 
+        expect(delta(antes.porCobrar.saldo, despues.porCobrar.saldo)).toBe('0');
+        expect(despues.porCobrar.cantidad).toBe(antes.porCobrar.cantidad);
+      });
+
+      it('"no vuelve plata" por todo lo que se debe deja el saldo en cero, y la venta sale de la cuenta', async () => {
+        const { venta, T, P } = await ventaParcial('0.7', DEBITO_ID);
+        const antes = await leer();
+
+        await post(`/api/ventas/${venta.id}/notas-credito`, {
+          monto: T.minus(P).toString(),
+          devolucion: { sinPlata: true },
+        });
+        const despues = await leer();
+
         expect(delta(antes.porCobrar.saldo, despues.porCobrar.saldo)).toBe(
           T.minus(P).negated().toString(),
         );
         expect(despues.porCobrar.cantidad - antes.porCobrar.cantidad).toBe(-1);
       });
 
-      it('lo devuelto en efectivo vuelve a deberse: la NC baja la deuda y la plata devuelta la sube', async () => {
+      it('lo devuelto en efectivo no cambia lo que se debe', async () => {
         const { venta, T } = await ventaParcial('0.6');
         const antes = await leer();
 
@@ -825,8 +838,8 @@ describe('Resumen del negocio (e2e)', () => {
         });
         const despues = await leer();
 
-        // Antes T − P, después T − N − (P − N): lo mismo. Sin el término del
-        // efectivo devuelto el saldo bajaría N.
+        // Antes T − P, después T − P: lo devuelto en efectivo no cambia lo que
+        // se debe. Si la nota rebajara la deuda, el saldo bajaría N.
         expect(delta(antes.porCobrar.saldo, despues.porCobrar.saldo)).toBe('0');
         expect(despues.porCobrar.cantidad).toBe(antes.porCobrar.cantidad);
       });

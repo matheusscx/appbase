@@ -52,6 +52,9 @@ interface OpcionDevolucion {
   registro: string;
 }
 interface Detalle {
+  estado: string;
+  saldo: string;
+  puedeAbonar: boolean;
   esCorreccion: boolean;
   esNotaCredito: boolean;
   tipoDocumentoId: string | null;
@@ -1113,9 +1116,11 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
         );
         expect(topAntes?.monto).toBe(`${precioUnico}.0000`);
 
+        // "No vuelve plata": es la corrección que rebaja la deuda (una que devolvió
+        // plata por un pago no la toca: ver "el saldo de una venta es uno solo").
         await nc(venta.id, {
           monto: mitad,
-          devolucion: { pagoId: await pagoDe(venta.id, DEBITO_ID) },
+          devolucion: { sinPlata: true },
           devoluciones: [{ itemId: itemUnico, cantidad: '1' }],
         });
 
@@ -1444,6 +1449,210 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
         esCorreccion: true,
         esNotaCredito: false,
       });
+    });
+  });
+  describe('el saldo de una venta es uno solo: total − lo aplicado − lo rebajado "sin plata"', () => {
+    // Una corrección que devolvió plata (efectivo, tarjeta, pasarela) no cambia lo
+    // que se debe: el cliente ya recibió esa plata de vuelta. Solo "no vuelve plata"
+    // rebaja la deuda. El mismo número tiene que salir de TODOS los lectores.
+    const entero = (monto: string) => BigInt(monto.split('.')[0]);
+    const saldoEnListado = async (ventaId: string): Promise<string> => {
+      const res = await request(app.getHttpServer())
+        .get('/api/ventas?pageSize=100')
+        .set(auth());
+      expect(res.status).toBe(200);
+      const fila = (
+        res.body as { data: { id: string; saldo: string }[] }
+      ).data.find((f) => f.id === ventaId);
+      expect(fila).toBeDefined();
+      return fila!.saldo;
+    };
+    const porCobrar = async (): Promise<{
+      cantidad: number;
+      saldo: string;
+    }> => {
+      const res = await request(app.getHttpServer())
+        .get('/api/resumen-negocio/hoy')
+        .set(auth());
+      expect(res.status).toBe(200);
+      return (res.body as { porCobrar: { cantidad: number; saldo: string } })
+        .porCobrar;
+    };
+    /** Los cuatro lectores de la venta, para compararlos entre sí. */
+    const lectores = async (ventaId: string) => {
+      const d = await detalle(ventaId);
+      return {
+        listado: entero(await saldoEnListado(ventaId)),
+        detalle: entero(d.saldo),
+        estado: d.estado,
+        puedeAbonar: d.puedeAbonar,
+        resumenVentas: entero((await resumenVentas()).saldoPendiente),
+        porCobrar: entero((await porCobrar()).saldo),
+        porCobrarCantidad: (await porCobrar()).cantidad,
+      };
+    };
+    const reembolsar = async (ventaId: string, monto: string) =>
+      app.get(VentasReembolsoHandler).onReembolsoAprobado({
+        tenantId: TENANT_ID,
+        ordenId: randomUUID(),
+        codigoOrden: 'O-E2E-SALDO',
+        ventaId,
+        monto,
+        devoluciones: [],
+        usuarioId: (
+          await ds.query(
+            `SELECT usuario_id FROM usuarios WHERE correo = $1 AND eliminado_el IS NULL`,
+            [ADMIN.email],
+          )
+        )[0].usuario_id,
+      });
+    const ventaDe = async (pagos: { metodoPagoId: string; monto: string }[]) =>
+      vender({ lineas: lineas100k(), pagos });
+    const abonoRes = (ventaId: string, monto: string) =>
+      request(app.getHttpServer())
+        .post('/api/pagos')
+        .set('Idempotency-Key', randomUUID())
+        .set(auth())
+        .send({ ventaId, pagos: [{ metodoPagoId: DEBITO_ID, monto }] });
+
+    it('REEMBOLSO de pasarela + nota de 20.000 sobre 60.000 pagados de 100.000: se deben 40.000 en todos los lectores (la fórmula vieja daba 20.000)', async () => {
+      const venta = await ventaDe([
+        { metodoPagoId: DEBITO_ID, monto: '60000' },
+      ]);
+      const antes = await lectores(venta.id);
+      expect(antes.listado).toBe(40000n);
+
+      await reembolsar(venta.id, '20000');
+
+      const despues = await lectores(venta.id);
+      // Lo que ya volvió por la pasarela no es deuda que desaparezca.
+      expect(despues.listado).toBe(40000n);
+      expect(despues.detalle).toBe(40000n);
+      expect(despues.resumenVentas - antes.resumenVentas).toBe(0n);
+      expect(despues.porCobrar - antes.porCobrar).toBe(0n);
+      expect(despues.estado).toBe('pagada_parcial');
+      expect(despues.puedeAbonar).toBe(true);
+    });
+
+    it('"no vuelve plata" de 40.000 sobre una deuda de 40.000: el saldo es 0 en todos lados, la venta pasa a pagada y ya no se abona (el cliente no paga dos veces lo perdonado)', async () => {
+      const venta = await ventaDe([
+        { metodoPagoId: DEBITO_ID, monto: '60000' },
+      ]);
+      const antes = await lectores(venta.id);
+      expect(antes.puedeAbonar).toBe(true);
+
+      await nc(venta.id, { monto: '40000', devolucion: { sinPlata: true } });
+
+      const despues = await lectores(venta.id);
+      expect(despues.listado).toBe(0n);
+      expect(despues.detalle).toBe(0n);
+      expect(despues.resumenVentas - antes.resumenVentas).toBe(-40000n);
+      expect(despues.porCobrar - antes.porCobrar).toBe(-40000n);
+      expect(despues.porCobrarCantidad - antes.porCobrarCantidad).toBe(-1);
+      expect(despues.estado).toBe('pagada');
+      expect(despues.puedeAbonar).toBe(false);
+
+      const abono = await abonoRes(venta.id, '400');
+      expect(abono.status).toBe(400);
+      expect(
+        await ds.query(`SELECT estado FROM ventas WHERE venta_id = $1`, [
+          venta.id,
+        ]),
+      ).toEqual([{ estado: 'pagada' }]);
+    });
+
+    it('nota con efectivo de 20.000 sobre 60.000 pagados en efectivo: se siguen debiendo 40.000', async () => {
+      const venta = await ventaDe([
+        { metodoPagoId: EFECTIVO_ID, monto: '60000' },
+      ]);
+      const antes = await lectores(venta.id);
+
+      const creada = await nc(venta.id, {
+        monto: '20000',
+        devolucion: { pagoId: await pagoDe(venta.id, EFECTIVO_ID) },
+      });
+      expect(await salidasDeCaja(creada.id)).toBe(1);
+
+      const despues = await lectores(venta.id);
+      expect(despues.listado).toBe(40000n);
+      expect(despues.detalle).toBe(40000n);
+      expect(despues.resumenVentas - antes.resumenVentas).toBe(0n);
+      expect(despues.porCobrar - antes.porCobrar).toBe(0n);
+      expect(despues.estado).toBe('pagada_parcial');
+    });
+
+    it('el abono cobra solo lo que se debe después de rebajar: 60.000 de deuda − 25.000 sin plata = 35.000 (35.001 no, 35.000 sí y la venta queda pagada)', async () => {
+      const venta = await ventaDe([
+        { metodoPagoId: DEBITO_ID, monto: '40000' },
+      ]);
+      await nc(venta.id, { monto: '25000', devolucion: { sinPlata: true } });
+      const medio = await lectores(venta.id);
+      expect(medio.listado).toBe(35000n);
+      expect(medio.estado).toBe('pagada_parcial');
+      expect(medio.puedeAbonar).toBe(true);
+
+      expect((await abonoRes(venta.id, '35001')).status).toBe(400);
+      const ok = await abonoRes(venta.id, '35000');
+      expect(ok.status).toBe(201);
+      expect(
+        (ok.body as { venta: { estado: string; saldo: string } }).venta,
+      ).toMatchObject({ estado: 'pagada', saldo: '0.0000' });
+
+      const fin = await lectores(venta.id);
+      expect(fin.listado).toBe(0n);
+      expect(fin.puedeAbonar).toBe(false);
+    });
+
+    it('una nota por un pago, antes y después de un abono: el saldo solo baja con lo abonado', async () => {
+      const venta = await ventaDe([
+        { metodoPagoId: DEBITO_ID, monto: '60000' },
+      ]);
+      await nc(venta.id, {
+        monto: '10000',
+        devolucion: { pagoId: await pagoDe(venta.id, DEBITO_ID) },
+      });
+      await abonar(venta.id, { metodoPagoId: EFECTIVO_ID, monto: '15000' });
+      expect((await lectores(venta.id)).listado).toBe(25000n);
+    });
+
+    it('una corrección vieja sin devolucion_via (anterior a la tarea 8): con salida de caja cuenta como con plata; sin salida, como "sin plata"', async () => {
+      // Con efectivo: la plata salió de la caja, no se perdonó nada.
+      const conCaja = await ventaDe([
+        { metodoPagoId: EFECTIVO_ID, monto: '60000' },
+      ]);
+      const ncCaja = await nc(conCaja.id, {
+        monto: '20000',
+        devolucion: { pagoId: await pagoDe(conCaja.id, EFECTIVO_ID) },
+      });
+      // Sin caja: el único rastro de que bajó la deuda es la propia corrección.
+      const sinCaja = await ventaDe([
+        { metodoPagoId: DEBITO_ID, monto: '60000' },
+      ]);
+      const ncSinCaja = await nc(sinCaja.id, {
+        monto: '20000',
+        devolucion: { pagoId: await pagoDe(sinCaja.id, DEBITO_ID) },
+      });
+      await ds.query(
+        `UPDATE ventas SET devolucion_via = NULL, devolucion_pago_id = NULL
+          WHERE venta_id = ANY($1::uuid[])`,
+        [[ncCaja.id, ncSinCaja.id]],
+      );
+
+      expect(entero(await saldoEnListado(conCaja.id))).toBe(40000n);
+      expect(entero(await saldoEnListado(sinCaja.id))).toBe(20000n);
+      expect(entero((await detalle(conCaja.id)).saldo)).toBe(40000n);
+      expect(entero((await detalle(sinCaja.id)).saldo)).toBe(20000n);
+    });
+
+    it('una corrección no es una venta que se deba: su fila del listado no tiene saldo', async () => {
+      const venta = await ventaDe([
+        { metodoPagoId: DEBITO_ID, monto: '60000' },
+      ]);
+      const creada = await nc(venta.id, {
+        monto: '10000',
+        devolucion: { pagoId: await pagoDe(venta.id, DEBITO_ID) },
+      });
+      expect(entero(await saldoEnListado(creada.id))).toBe(0n);
     });
   });
 });

@@ -32,7 +32,7 @@ export interface AbonoSuccessPayload {
     fecha: string
     referencia: string | null
   }>
-  venta: { id: string, estado: string, saldo: string }
+  venta: { id: string, estado: string, saldo: string, puedeAbonar: boolean }
   /** El abono ya había entrado y el backend lo reprodujo (`useIntentoCobro`). */
   repetida?: boolean
 }

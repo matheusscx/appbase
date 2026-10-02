@@ -4,7 +4,7 @@ import type { EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import { assertSinHuecos } from '../../common/db/db.spec-helper';
-import { PagosService, calcularEstadoVenta } from './pagos.service';
+import { PagosService } from './pagos.service';
 import { IdempotenciaService } from '../idempotencia/idempotencia.service';
 
 const CLAVE = '2f1c8a3e-6a1b-4d8e-9a55-0c7b1f7d2e10';
@@ -100,30 +100,6 @@ function buildManagerMock(metodoRows = METODO_EFECTIVO_ROWS) {
     query: jest.fn().mockResolvedValue(metodoRows),
   };
 }
-
-describe('calcularEstadoVenta (helper puro)', () => {
-  it('retorna PENDIENTE cuando monto aplicado es 0', () => {
-    expect(calcularEstadoVenta('100.0000', '0')).toBe(EstadoVenta.PENDIENTE);
-  });
-
-  it('retorna PAGADA_PARCIAL cuando monto aplicado > 0 y < total', () => {
-    expect(calcularEstadoVenta('100.0000', '50.0000')).toBe(
-      EstadoVenta.PAGADA_PARCIAL,
-    );
-  });
-
-  it('retorna PAGADA cuando monto aplicado es igual al total', () => {
-    expect(calcularEstadoVenta('100.0000', '100.0000')).toBe(
-      EstadoVenta.PAGADA,
-    );
-  });
-
-  it('retorna PAGADA cuando monto aplicado supera el total', () => {
-    expect(calcularEstadoVenta('100.0000', '150.0000')).toBe(
-      EstadoVenta.PAGADA,
-    );
-  });
-});
 
 describe('PagosService', () => {
   let service: PagosService;
@@ -640,31 +616,28 @@ describe('PagosService', () => {
   // ────────────────────────────────────────────────────────────────────
 
   describe('registrarAbono()', () => {
-    function makeVentaRows(estado: string, totalFinal = '100.0000') {
-      return [
-        {
-          venta_id: VENTA_ID,
-          total_final: totalFinal,
-          estado,
-          moneda_id: MONEDA_ID,
-        },
-      ];
+    function makeVentaRows(estado: string) {
+      return [{ venta_id: VENTA_ID, estado, moneda_id: MONEDA_ID }];
     }
 
-    function makePagosAplicadosRows(montoAplicado = '0') {
-      return [{ monto_aplicado: montoAplicado }];
+    // El saldo lo calcula la expresión ÚNICA de `saldo-venta.ts` (total − aplicado −
+    // rebajado "sin plata"), que es SQL: un mock no la ve y la cubre el e2e. Acá solo
+    // se afirma que el abono cobra CONTRA lo que esa consulta devolvió.
+    function makeSaldoRows(saldo = '100.0000') {
+      return [{ saldo }];
     }
 
-    function buildAbonableManager(
-      estado: string,
-      totalFinal = '100.0000',
-      montoAplicado = '0',
-    ) {
-      // manager.query: 1ª llamada = venta, 2ª llamada = pagos aplicados
+    /** Lo que devuelve la regla única del estado tras el abono (también SQL). */
+    function makeRecalculo(estado: string, saldo: string) {
+      return [{ estado, saldo }];
+    }
+
+    function buildAbonableManager(estado: string, saldo = '100.0000') {
+      // manager.query: 1ª llamada = venta (con lock), 2ª llamada = saldo
       const manager = buildManagerMock(METODO_EFECTIVO_ROWS);
       manager.query
-        .mockResolvedValueOnce(makeVentaRows(estado, totalFinal))
-        .mockResolvedValueOnce(makePagosAplicadosRows(montoAplicado));
+        .mockResolvedValueOnce(makeVentaRows(estado))
+        .mockResolvedValueOnce(makeSaldoRows(saldo));
       return manager;
     }
 
@@ -672,7 +645,7 @@ describe('PagosService', () => {
       const manager = buildManagerMock();
       manager.query
         .mockResolvedValueOnce([]) // venta not found
-        .mockResolvedValueOnce([{ monto_aplicado: '0' }]);
+        .mockResolvedValueOnce(makeSaldoRows());
 
       const module: TestingModule = await setupModule(manager);
       const svc = module.get<PagosService>(PagosService);
@@ -773,11 +746,13 @@ describe('PagosService', () => {
     });
 
     it('retorna estado=pagada_parcial y saldo reducido con abono parcial', async () => {
-      const manager = buildAbonableManager('pendiente', '100.0000', '0');
+      const manager = buildAbonableManager('pendiente', '100.0000');
       // 3ª llamada de manager.query = metodos-pago (dentro de registrar)
       manager.query.mockResolvedValueOnce(METODO_EFECTIVO_ROWS);
-      // 4ª llamada = UPDATE ventas
-      manager.query.mockResolvedValueOnce([]);
+      // 4ª llamada = el recálculo del estado (la regla única, SQL)
+      manager.query.mockResolvedValueOnce(
+        makeRecalculo('pagada_parcial', '50.0000'),
+      );
 
       const module: TestingModule = await setupModule(manager);
       const svc = module.get<PagosService>(PagosService);
@@ -792,16 +767,22 @@ describe('PagosService', () => {
         CLAVE,
       );
 
-      expect(result.venta.estado).toBe(EstadoVenta.PAGADA_PARCIAL);
-      expect(new Decimal(result.venta.saldo).toNumber()).toBeLessThan(100);
+      expect(result.venta).toEqual({
+        id: VENTA_ID,
+        estado: EstadoVenta.PAGADA_PARCIAL,
+        saldo: '50.0000',
+        puedeAbonar: true,
+      });
     });
 
     it('toma el lock de la caja dentro de la transacción antes de escribir', async () => {
       // `findActiva` lee por repositorio, fuera de la transacción: sin este lock
       // un cierre concurrente puede commitear antes del movimiento de caja.
-      const manager = buildAbonableManager('pendiente', '100.0000', '0');
+      const manager = buildAbonableManager('pendiente', '100.0000');
       manager.query.mockResolvedValueOnce(METODO_EFECTIVO_ROWS);
-      manager.query.mockResolvedValueOnce([]);
+      manager.query.mockResolvedValueOnce(
+        makeRecalculo('pagada_parcial', '50.0000'),
+      );
 
       const module: TestingModule = await setupModule(manager);
       const svc = module.get<PagosService>(PagosService);
@@ -839,9 +820,11 @@ describe('PagosService', () => {
         }[],
         metodoRows: typeof METODO_EFECTIVO_Y_TARJETA_ROWS,
       ) {
-        const manager = buildAbonableManager('pendiente', '100000.0000', '0');
+        const manager = buildAbonableManager('pendiente', '100000.0000');
         manager.query.mockResolvedValueOnce(metodoRows); // métodos (en registrar)
-        manager.query.mockResolvedValueOnce([]); // UPDATE ventas
+        manager.query.mockResolvedValueOnce(
+          makeRecalculo('pagada_parcial', '42500.0000'),
+        ); // el recálculo del estado
         const module: TestingModule = await setupModule(manager);
         const svc = module.get<PagosService>(PagosService);
         const documentos = module.get<{
@@ -942,9 +925,9 @@ describe('PagosService', () => {
     });
 
     it('retorna estado=pagada y saldo=0 cuando abono completa el pago', async () => {
-      const manager = buildAbonableManager('pendiente', '100.0000', '0');
+      const manager = buildAbonableManager('pendiente', '100.0000');
       manager.query.mockResolvedValueOnce(METODO_EFECTIVO_ROWS);
-      manager.query.mockResolvedValueOnce([]);
+      manager.query.mockResolvedValueOnce(makeRecalculo('pagada', '0.0000'));
 
       const module: TestingModule = await setupModule(manager);
       const svc = module.get<PagosService>(PagosService);
@@ -961,6 +944,79 @@ describe('PagosService', () => {
 
       expect(result.venta.estado).toBe(EstadoVenta.PAGADA);
       expect(result.venta.saldo).toBe('0.0000');
+      // Sin saldo no hay "Registrar pago": lo dice el backend, no la pantalla.
+      expect(result.venta.puedeAbonar).toBe(false);
+    });
+
+    describe('cobra solo lo que de verdad se debe (la expresión única del saldo)', () => {
+      it('lee el saldo bajo el lock de la venta, con la expresión única y por el tenant del token', async () => {
+        const manager = buildAbonableManager('pagada_parcial', '35000.0000');
+        manager.query.mockResolvedValueOnce(METODO_EFECTIVO_ROWS);
+        manager.query.mockResolvedValueOnce(makeRecalculo('pagada', '0.0000'));
+        const module: TestingModule = await setupModule(manager);
+        const svc = module.get<PagosService>(PagosService);
+
+        await svc.registrarAbono(
+          TENANT_ID,
+          USUARIO_ID,
+          {
+            ventaId: VENTA_ID,
+            pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '35000.0000' }],
+          },
+          CLAVE,
+        );
+
+        const [lock, lectura, , recalculo] = manager.query.mock.calls as [
+          string,
+          unknown[],
+        ][];
+        expect(lock[0]).toContain('FOR UPDATE');
+        // El saldo cuenta lo rebajado "sin plata": no es `total − aplicado`.
+        expect(lectura[0]).toContain('sv_c.venta_referencia_id');
+        expect(lectura[1]).toEqual([VENTA_ID, TENANT_ID]);
+        expect(recalculo[1]).toEqual([VENTA_ID, TENANT_ID]);
+      });
+
+      it('con el saldo en cero no hay nada que cobrar: 400 y no escribe ningún pago', async () => {
+        // Estado leído `pendiente` pero deuda rebajada por completo: el estado y el
+        // saldo son dos lecturas, y manda el saldo.
+        const manager = buildAbonableManager('pendiente', '0.0000');
+        const module: TestingModule = await setupModule(manager);
+        const svc = module.get<PagosService>(PagosService);
+
+        await expect(
+          svc.registrarAbono(
+            TENANT_ID,
+            USUARIO_ID,
+            {
+              ventaId: VENTA_ID,
+              pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '400.0000' }],
+            },
+            CLAVE,
+          ),
+        ).rejects.toThrow('La venta no tiene saldo pendiente');
+        expect(manager.save).not.toHaveBeenCalled();
+      });
+
+      it('un medio sin vuelto no cobra más que ese saldo: 35.001 contra 35.000 es 400', async () => {
+        const manager = buildAbonableManager('pagada_parcial', '35000.0000');
+        manager.query.mockResolvedValueOnce(METODO_TARJETA_ROWS);
+        const module: TestingModule = await setupModule(manager);
+        const svc = module.get<PagosService>(PagosService);
+
+        await expect(
+          svc.registrarAbono(
+            TENANT_ID,
+            USUARIO_ID,
+            {
+              ventaId: VENTA_ID,
+              pagos: [{ metodoPagoId: TARJETA_ID, monto: '35001.0000' }],
+            },
+            CLAVE,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expect(manager.save).not.toHaveBeenCalled();
+      });
     });
   });
 

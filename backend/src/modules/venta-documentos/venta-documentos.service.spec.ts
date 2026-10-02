@@ -1973,8 +1973,12 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
     query: jest.fn((sql: string) => {
       if (sql.includes('FROM venta_documentos')) return Promise.resolve(docs);
       if (sql.includes('FROM pagos p')) return Promise.resolve(pagos);
+      // El saldo es la expresión ÚNICA de `saldo-venta.ts` (SQL, que un mock no
+      // ve y cubre el e2e): este fake la reproduce para que cada caso afirme contra
+      // lo que `corregibles` hace con ella —total − aplicado − rebajado sin plata—.
+      const aplicado = pagos.reduce((a, p) => a + Number(p.aplicado_venta), 0);
       return Promise.resolve([
-        { total_final: total.toFixed(4), sin_plata: sinPlata.toFixed(4) },
+        { saldo: Math.max(0, total - aplicado - sinPlata).toFixed(4) },
       ]);
     }),
   });
@@ -2306,10 +2310,11 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
         ) as [string, unknown[]];
         // Las que volvieron por un pago o por la pasarela devolvieron plata por
         // fuera: la deuda sigue igual.
-        expect(sql).toMatch(/c\.devolucion_via = 'sin_plata'/);
-        expect(sql).toMatch(/c\.venta_referencia_id = v\.venta_id/);
-        expect(sql).toMatch(/c\.tenant_id = v\.tenant_id/);
-        expect(sql).toMatch(/c\.eliminado_el IS NULL/);
+        // La cuenta es la expresión única de `saldo-venta.ts`, no una propia.
+        expect(sql).toMatch(/sv_c\.devolucion_via = 'sin_plata'/);
+        expect(sql).toMatch(/sv_c\.venta_referencia_id = v\.venta_id/);
+        expect(sql).toMatch(/sv_c\.tenant_id = v\.tenant_id/);
+        expect(sql).toMatch(/sv_c\.eliminado_el IS NULL/);
         expect(binds).toEqual([VENTA, TENANT]);
       });
     });

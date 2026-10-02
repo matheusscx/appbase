@@ -195,6 +195,9 @@ const VENTA = {
   anulable: false,
   anularPreguntaExterno: false,
   abonoConMaquinaDuplica: false,
+  // Lo que la venta debe y si admite un pago: del backend, una sola cuenta.
+  saldo: '0.0000',
+  puedeAbonar: false,
 }
 
 /**
@@ -635,7 +638,7 @@ describe('VentaDetalleDrawer — resincroniza lo que calcula el backend', () => 
       .findComponent({ name: 'PagosAbonoModal' })
       .vm.$emit('success', {
         pagos: [],
-        venta: { id: 'v-1', estado: 'pagada', saldo: '0.0000' },
+        venta: { id: 'v-1', estado: 'pagada', saldo: '0.0000', puedeAbonar: false },
       })
     await new Promise(r => setTimeout(r, 20))
 
@@ -1187,6 +1190,36 @@ describe('VentaDetalleDrawer — documentos', () => {
     const wrapper = await montarCon([], { abonoConMaquinaDuplica: true })
 
     expect(wrapper.findComponent({ name: 'PagosAbonoModal' }).props('abonoConMaquinaDuplica')).toBe(true)
+  })
+})
+
+describe('VentaDetalleDrawer — registrar pago y saldo: los decide el backend', () => {
+  async function montarCon(parcial: Record<string, unknown>) {
+    documentoActual = { ...VENTA, ...parcial } as unknown as typeof VENTA
+    try {
+      return await montar()
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  }
+  const botonPago = (wrapper: Awaited<ReturnType<typeof montar>>) =>
+    wrapper.findAll('button').find(b => b.text().trim() === 'Registrar pago')
+
+  it('se ofrece cuando el backend dice `puedeAbonar` y el saldo es el que dijo el backend', async () => {
+    // Pagos vacíos con total 7.500: restar acá daría 7.500; el backend dice 3.000
+    // porque una nota "sin plata" ya rebajó lo demás.
+    const wrapper = await montarCon({ estado: 'pagada_parcial', pagos: [], saldo: '3000.0000', puedeAbonar: true })
+
+    expect(botonPago(wrapper)).toBeDefined()
+    expect(wrapper.findComponent({ name: 'PagosAbonoModal' }).props('saldo')).toBe('3000')
+  })
+
+  it('con el saldo en cero no se ofrece, aunque el estado leído sea pendiente y no haya pagos', async () => {
+    // Una nota "sin plata" cubrió toda la deuda: el estado y los pagos darían "sí".
+    const wrapper = await montarCon({ estado: 'pendiente', pagos: [], saldo: '0.0000', puedeAbonar: false })
+
+    expect(botonPago(wrapper)).toBeUndefined()
   })
 })
 

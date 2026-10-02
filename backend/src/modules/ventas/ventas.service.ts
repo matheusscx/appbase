@@ -34,11 +34,13 @@ import {
 import { CajaService, IntentoRechazadoError } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService, type ConvertirUnidad } from '../items/items.service';
+import { PagosService } from '../pagos/pagos.service';
 import {
-  PagosService,
-  calcularEstadoVenta,
-  ESTADOS_QUE_ADMITEN_ABONO,
-} from '../pagos/pagos.service';
+  aplicadoDeVentaSql,
+  puedeAbonar,
+  recalcularEstadoDeLaVenta,
+  saldoDeVentaSql,
+} from './saldo-venta';
 import {
   VentaDocumentosService,
   type DocumentoDetalle,
@@ -1235,24 +1237,20 @@ export class VentasService {
       estrategia: estrategiaPropina,
     });
 
-    // 7i. Actualizar estado de la venta según montos aplicados a la venta
+    // 7i. El estado de la venta sale de su saldo, con la misma regla que todas las
+    //     operaciones que mueven lo que se debe (`recalcularEstadoDeLaVenta`).
     //
-    // Sin el `if (saved.pagos.length > 0)` que tenía antes: una venta de total
-    // $0 —una promoción que descuenta el 100%— es una venta **pagada**, y no
-    // lleva línea de pago porque no hay nada que cobrar. Con el guard quedaba
-    // `pendiente` con saldo $0 y se arrastraba en los listados de deuda.
-    // `calcularEstadoVenta('0', '0')` ya devolvía `pagada` (aplicado ≥ total);
-    // lo que faltaba era llamarla.
+    // Se corre SIEMPRE, sin condicionarlo a que existan pagos: una venta de total
+    // $0 —una promoción que descuenta el 100%— es una venta **pagada**, y no lleva
+    // línea de pago porque no hay nada que cobrar. Condicionarlo la dejaba
+    // `pendiente` con saldo $0, arrastrándose en los listados de deuda.
     //
-    // Para el resto no cambia nada: sin pagos y con total > 0, `aplicado ≤ 0`
-    // da `pendiente`, que es el estado con el que la venta ya nacía.
-    const estadoFinal = calcularEstadoVenta(
-      resultado.totales.totalFinal,
-      saved.montoAplicadoVenta,
-    );
-    await manager.query(
-      `UPDATE ventas SET estado=$1, actualizado_el=NOW() WHERE venta_id=$2`,
-      [estadoFinal, venta.id],
+    // Para el resto no cambia nada: sin pagos y con total > 0 sigue `pendiente`, el
+    // estado con el que la venta ya nacía.
+    const { estado: estadoFinal } = await recalcularEstadoDeLaVenta(
+      manager,
+      tenantId,
+      venta.id,
     );
     venta.estado = estadoFinal;
 
@@ -2468,6 +2466,18 @@ export class VentasService {
           tipoNotaCreditoId: tipoNotaCredito,
         });
 
+      // "No vuelve plata" rebaja lo que la venta debe, así que puede dejarla sin
+      // saldo: el estado se recalcula con la regla de siempre (bajo el lock de la
+      // venta que tomó `lockVentaOriginal`) y una venta que ya no debe nada pasa a
+      // `pagada`, sin "Registrar pago". Las demás vías devolvieron plata y no
+      // mueven el saldo: no hay nada que recalcular.
+      if (params.via.tipo === 'sin_plata')
+        await recalcularEstadoDeLaVenta(
+          manager,
+          params.tenantId,
+          params.ventaOriginalId,
+        );
+
       // 8. Las filas de impuesto de la nota, derivadas de las del original.
       await this.escribirImpuestosNotaCredito(
         manager,
@@ -3298,38 +3308,11 @@ export class VentasService {
                 FILTER (WHERE v.venta_referencia_id IS NOT NULL), 0)::text AS total_notas_credito,
               COALESCE(SUM(CASE WHEN v.venta_referencia_id IS NULL THEN v.total_final
                                 ELSE -v.total_final END), 0)::text AS total_facturado,
+              -- La expresión ÚNICA del saldo (\`saldo-venta.ts\`): total − lo aplicado −
+              -- lo rebajado "sin plata", con piso 0. La misma que el saldo del
+              -- listado y del detalle, el tope del abono y "Por cobrar" del inicio.
               COALESCE(SUM(
-                -- Saldo de una venta: total − correcciones de esa venta − (pagado
-                -- − devuelto en efectivo), con piso 0: lo que queda a favor del
-                -- cliente no es plata por cobrar (spec 2026-10-01-vendido-neto
-                -- D10). Los REFUND de pasarela quedan afuera: "devuelto" cuenta solo
-                -- las salidas de caja, y el reembolso por pasarela no mueve caja
-                -- (límite abierto en pendientes.md § 6). MISMA expresión en
-                -- ResumenNegocioService.hoy (porCobrar) y VentasService.resumen: si
-                -- cambia una, cambia la otra.
-                GREATEST(
-                  v.total_final
-                  - COALESCE((
-                      SELECT SUM(nc.total_final) FROM ventas nc
-                       WHERE nc.venta_referencia_id = v.venta_id AND nc.eliminado_el IS NULL
-                    ), 0)
-                  - (
-                      COALESCE((
-                        SELECT SUM(pa.monto)
-                          FROM pagos p
-                          JOIN pago_aplicaciones pa
-                            ON pa.pago_id = p.pago_id AND pa.eliminado_el IS NULL AND pa.tipo = 'venta'
-                         WHERE p.venta_id = v.venta_id AND p.eliminado_el IS NULL
-                      ), 0)
-                      - COALESCE((
-                        SELECT SUM(mc.monto)
-                          FROM ventas nc
-                          JOIN movimientos_caja mc
-                            ON mc.venta_id = nc.venta_id AND mc.tipo = 'salida' AND mc.eliminado_el IS NULL
-                         WHERE nc.venta_referencia_id = v.venta_id AND nc.eliminado_el IS NULL
-                      ), 0)
-                    ),
-                  0)
+                ${saldoDeVentaSql('v')}
               ) FILTER (WHERE v.venta_referencia_id IS NULL), 0)::text AS saldo_pendiente
          FROM ventas v
         WHERE v.tenant_id = $1 AND v.eliminado_el IS NULL
@@ -3384,6 +3367,7 @@ export class VentasService {
       fecha: Date;
       creado_el: Date;
       monto_pagado: string;
+      saldo: string;
       total_reembolsado: string;
       tipo_documento_id: string | null;
       venta_referencia_id: string | null;
@@ -3401,13 +3385,10 @@ export class VentasService {
                 FROM venta_documentos d
                 WHERE ${DOCUMENTO_VIGENTE}
               ) AS documentos_resumen,
-              COALESCE((
-                SELECT SUM(pa.monto)
-                FROM pagos p
-                JOIN pago_aplicaciones pa ON pa.pago_id = p.pago_id
-                     AND pa.eliminado_el IS NULL AND pa.tipo = 'venta'
-                WHERE p.venta_id = v.venta_id AND p.eliminado_el IS NULL
-              ), 0) AS monto_pagado,
+              -- Lo aplicado a la venta: el mismo término que resta la expresión del saldo.
+              ${aplicadoDeVentaSql('v')} AS monto_pagado,
+              -- La expresión ÚNICA del saldo (\`saldo-venta.ts\`), no \`total − pagado\`.
+              ${saldoDeVentaSql('v')}::text AS saldo,
               COALESCE((
                 SELECT SUM(t.monto)
                 FROM pasarela_ordenes o
@@ -3482,6 +3463,7 @@ export class VentasService {
     fecha: Date;
     creado_el: Date;
     monto_pagado: string;
+    saldo: string;
     total_reembolsado: string;
     tipo_documento_id: string | null;
     venta_referencia_id: string | null;
@@ -3495,9 +3477,7 @@ export class VentasService {
       fecha: r.fecha,
       creadoEl: r.creado_el,
       montoPagado: new Decimal(r.monto_pagado).toFixed(4),
-      saldo: new Decimal(r.total_final)
-        .minus(new Decimal(r.monto_pagado))
-        .toFixed(4),
+      saldo: new Decimal(r.saldo).toFixed(4),
       totalReembolsado: new Decimal(r.total_reembolsado).toFixed(4),
       ...flagsDeCorreccion(r),
       emisores: r.documentos_resumen.emisores,
@@ -3779,18 +3759,23 @@ export class VentasService {
     const anularPreguntaExterno =
       veredictoAnular?.resultado === 'pregunta_externo';
 
+    // El saldo y si se puede abonar los decide el BACKEND con la expresión ÚNICA del
+    // saldo (`saldo-venta.ts`): la pantalla no resta nada ni replica el estado.
+    const saldoRows: { saldo: string }[] = await this.db.query(
+      `SELECT ${saldoDeVentaSql('v')}::text AS saldo
+         FROM ventas v
+        WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL`,
+      [ventaId, tenantId],
+    );
+    const saldo = new Decimal(saldoRows[0]?.saldo ?? '0').toFixed(4);
+    const admiteAbono = puedeAbonar(v.estado, saldo);
+
     // `abonoConMaquinaDuplica`: ¿un abono pagado con la máquina duplicaría un
-    // documento? Hace falta algo que abonar —la venta admite abonos (el mismo
-    // corte de `PagosService.registrarAbono`) y tiene saldo— y que la deuda ya
-    // esté documentada, con el predicado que usa `registrarDuplicadoDeAbono`.
-    // El saldo es lo aplicado a la venta, no lo cobrado: la propina no lo baja.
-    const aplicadoAVenta = aplicacionesRows
-      .filter((a) => a.tipo === 'venta')
-      .reduce((acc, a) => acc.plus(a.monto), new Decimal(0));
-    const conSaldo = new Decimal(v.total_final).minus(aplicadoAVenta).gt(0);
+    // documento? Hace falta algo que abonar (`puedeAbonar`: el mismo corte de
+    // `PagosService.registrarAbono`) y que la deuda ya esté documentada, con el
+    // predicado que usa `registrarDuplicadoDeAbono`.
     const abonoConMaquinaDuplica =
-      ESTADOS_QUE_ADMITEN_ABONO.includes(v.estado) &&
-      conSaldo &&
+      admiteAbono &&
       (await this.ventaDocumentosService.ventaDocumentada(this.db, {
         tenantId,
         ventaId,
@@ -3898,6 +3883,8 @@ export class VentasService {
       anulable,
       anularPreguntaExterno,
       abonoConMaquinaDuplica,
+      saldo,
+      puedeAbonar: admiteAbono,
       // La venta vino de una cuenta de salón con al menos una línea YA ENVIADA a
       // cocina. Lo consume el modal de anulación: reponer comida que ya se cocinó
       // mete al stock ingredientes que físicamente no existen, así que ahí el

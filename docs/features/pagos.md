@@ -49,7 +49,7 @@ Response (201):
 
 **Errores:**
 - `400` — venta no encontrada o no pertenece al tenant
-- `400` — venta en estado `pagada` o `cancelada` (no se puede abonar)
+- `400` — venta en estado `pagada` o `cancelada` (no se puede abonar), o sin saldo pendiente
 - `400` — excedente sin método con `permite_vuelto = true`
 - `400` — `metodoPagoId` no habilitado para el tenant
 - `400` — sin caja abierta para el usuario
@@ -201,9 +201,16 @@ sin caracteres de control; en un medio que no es de la máquina se ignoran sin e
   La FK apunta al catálogo global, así que la base no lo frena: sin ese gate el pago se
   persiste y luego no aparece en `GET /pagos`, que hace INNER JOIN contra la tabla del
   tenant.
-- El estado de la venta se actualiza automáticamente tras cada abono:
+- **Un abono cobra solo lo que de verdad se debe** (2026-10-02, tarea 14 del frente de emisión):
+  el tope es el saldo de la **expresión única** (`saldo-venta.ts`: `total − Σ aplicado a la venta −
+  Σ correcciones "no vuelve plata"`), leído bajo el `FOR UPDATE` de la venta. Con saldo 0 → `400`
+  ("La venta no tiene saldo pendiente"). Una nota "no vuelve plata" que cubrió la deuda ya dejó la
+  venta en `pagada` y el abono se rechaza por estado: el cliente no paga dos veces lo perdonado.
+- El estado de la venta se re-deriva tras cada abono con la regla única (`recalcularEstadoDeLaVenta`):
   - Saldo = 0 → `pagada`
-  - 0 < saldo < total_final → `pagada_parcial`
+  - saldo > 0 con algo aplicado → `pagada_parcial`
+  - La respuesta trae `venta: { id, estado, saldo, puedeAbonar }`; `puedeAbonar` (estado que admite
+    abono y saldo > 0) la decide el backend y la pantalla no replica la regla.
 - `vuelto` se genera solo si algún método tiene `permite_vuelto = true` y la suma supera el saldo.
 - **El vuelto se reparte entre los pagos que lo permiten, acotado al monto de cada uno**
   (orden determinista por `metodoPagoId`, mismo criterio que el split de propina). Ningún
@@ -250,7 +257,7 @@ sin caracteres de control; en un medio que no es de la máquina se ignoran sin e
 
 Props:
 - `ventaId: string` — ID de la venta a abonar
-- `saldo: string` — Monto pendiente (se usa como límite de cobro)
+- `saldo: string` — Monto pendiente, **del backend** (`GET /ventas/:id` → `saldo`; se usa como límite de cobro). El botón "Registrar pago" sale de `puedeAbonar`, del mismo detalle.
 - `metodos: MetodoPago[]` — Métodos habilitados del tenant (con su `emisor`)
 - `abonoConMaquinaDuplica: boolean` — del detalle de la venta (`GET /ventas/:id`); la pantalla no replica la regla
 

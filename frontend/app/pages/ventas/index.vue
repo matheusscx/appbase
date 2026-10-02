@@ -164,9 +164,8 @@ function onDetalleUpdated(patch: {
   saldo: string
 }) {
   // El resumen se vuelve a pedir: ya no se puede parchar con el saldo de la
-  // fila. Una NC, una anulación o un cobro sobre una venta ya acreditada mueven
-  // el resumen (que descuenta las NC con piso 0 y saca las canceladas) distinto
-  // de lo que mueven el `saldo` de la fila, que sigue siendo total − pagado.
+  // fila. Una anulación o un cobro mueven el resumen (que saca las canceladas)
+  // distinto de lo que mueven el `saldo` de la fila.
   void cargarResumen()
   const row = ventas.value.find(v => v.id === patch.id)
   if (!row) return

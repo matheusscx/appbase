@@ -945,7 +945,8 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   máquina, porque se corrigen distinto;
 - **una venta puede tener más de un documento**, como en el pago mixto: voucher por la parte con
   tarjeta y boleta por la parte en efectivo;
-- **toda devolución deja registro, y siempre baja lo vendido, lo cobrado y el saldo.** Qué
+- **toda devolución deja registro, y siempre baja lo vendido y lo cobrado; el saldo solo baja con
+  "no vuelve plata".** Qué
   registro depende de quién emitió:
   - si emitió el sistema, una nota de crédito;
   - si emitió la máquina, la nota de crédito la hace la máquina o su portal, y el sistema registra
@@ -984,10 +985,15 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   pregunta otra vez. Sin esto, un número anotado por error ("1" en una factura que no se hizo)
   obligaba a ir por nota de crédito, porque con número el documento se da por hecho (owner,
   2026-10-02);
-- **un abono cobra solo lo que de verdad se debe**: total − notas de crédito y devoluciones − lo
-  pagado. Si una nota de crédito "no vuelve plata" cubre la deuda, "Registrar pago" desaparece y la
-  venta pasa a pagada. Sin esto, el cliente podía pagar dos veces lo que ya se le había perdonado
-  (owner, 2026-10-02);
+- **un abono cobra solo lo que de verdad se debe**: lo que se debe es el total, menos lo pagado,
+  menos lo que una nota de crédito "no vuelve plata" perdonó. **Una devolución que devolvió plata
+  (efectivo, tarjeta o pasarela) no cambia lo que se debe**: el cliente ya la recibió de vuelta y
+  esa plata sale de lo pagado, no de la deuda. Si "no vuelve plata" cubre la deuda, "Registrar
+  pago" desaparece y la venta pasa a pagada. Sin esto, el cliente podía pagar dos veces lo que ya
+  se le había perdonado (owner, 2026-10-02). Es **una sola cuenta**, la misma en "Por cobrar" del
+  inicio, el "Saldo pendiente" de `/ventas`, el saldo de cada venta y el tope del abono. Una nota
+  anterior al campo que anota por dónde volvió la plata cuenta como "con plata" si sacó efectivo de
+  la caja y como "no vuelve plata" si no;
 - **lo entregado se documenta al entregarlo, se haya pagado o no.** Para el SII un restaurante
   vende, no presta un servicio: la boleta sale antes de que el cliente se retire (Res. Ex. SII
   58/2003); en una tienda, al entregar (art. 55 DL 825). Una mesa de $100.000 que paga $40.000 con
@@ -1120,8 +1126,9 @@ muestra un **modal informativo** con ambas fechas.
 **Los números de plata del negocio son netos de las notas de crédito (2026-10-01).** Una
 nota de crédito resta del vendido en **su** fecha —aunque la venta que corrige sea de otro
 día— y no cuenta como venta; el cobrado resta lo devuelto ese día (el efectivo que salió
-de la caja y los reembolsos por pasarela); lo que se debe descuenta las notas de cada venta
-y nunca baja de cero; y una venta cancelada no cuenta en ningún total de `/ventas`. La
+de la caja y los reembolsos por pasarela); lo que se debe es una sola cuenta (§ 10: total − lo
+pagado − lo que una nota "no vuelve plata" perdonó, en `saldo-venta.ts`; una nota que devolvió plata
+no lo cambia) y nunca baja de cero; y una venta cancelada no cuenta en ningún total de `/ventas`. La
 pantalla muestra el bruto y lo restado debajo del neto, solo si hay algo que restar. Una
 corrección se reconoce por `venta_referencia_id`, no por el tipo de documento, para que la
 devolución interna del frente de emisión reste igual. Detalle y límites conocidos:

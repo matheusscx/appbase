@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import { ESCALA_COSTO } from '../../common/constants/escalas';
+import { saldoDeVentaSql } from '../ventas/saldo-venta';
 import {
   bordeFechaSql,
   bordeHastaSql,
@@ -300,47 +301,22 @@ export class ResumenNegocioService {
     );
 
     // Por cobrar: ventas pendientes o parcialmente pagadas, de CUALQUIER
-    // fecha —es lo que se debe ahora, no lo que se vendió hoy—. Misma fórmula
-    // que `saldo_pendiente` de `VentasService.resumen`, con el saldo por venta
-    // de la spec 2026-10-01-vendido-neto (D10). Las correcciones no entran
-    // como filas (`venta_referencia_id IS NULL`): restan del saldo de la venta
-    // que corrigen.
+    // fecha —es lo que se debe ahora, no lo que se vendió hoy—. El saldo por
+    // venta es la expresión ÚNICA (`saldo-venta.ts`), la misma que usa
+    // `saldo_pendiente` de `VentasService.resumen`. Las correcciones no entran
+    // como filas (`venta_referencia_id IS NULL`): las "sin plata" restan del
+    // saldo de la venta que corrigen.
     const porCobrarRows: PorCobrarRow[] = await this.db.query(
       `SELECT COUNT(*) FILTER (WHERE s.saldo > 0)::int AS cantidad,
               COALESCE(SUM(s.saldo), 0)::text AS saldo
          FROM (
            SELECT
-             -- Saldo de una venta: total − correcciones de esa venta − (pagado
-             -- − devuelto en efectivo), con piso 0: lo que queda a favor del
-             -- cliente no es plata por cobrar (spec 2026-10-01-vendido-neto
-             -- D10). Los REFUND de pasarela quedan afuera: "devuelto" cuenta solo
-             -- las salidas de caja, y el reembolso por pasarela no mueve caja
-             -- (límite abierto en pendientes.md § 6). MISMA expresión en
-             -- ResumenNegocioService.hoy (porCobrar) y VentasService.resumen: si
-             -- cambia una, cambia la otra.
-             GREATEST(
-               v.total_final
-               - COALESCE((
-                   SELECT SUM(nc.total_final) FROM ventas nc
-                    WHERE nc.venta_referencia_id = v.venta_id AND nc.eliminado_el IS NULL
-                 ), 0)
-               - (
-                   COALESCE((
-                     SELECT SUM(pa.monto)
-                       FROM pagos p
-                       JOIN pago_aplicaciones pa
-                         ON pa.pago_id = p.pago_id AND pa.eliminado_el IS NULL AND pa.tipo = 'venta'
-                      WHERE p.venta_id = v.venta_id AND p.eliminado_el IS NULL
-                   ), 0)
-                   - COALESCE((
-                     SELECT SUM(mc.monto)
-                       FROM ventas nc
-                       JOIN movimientos_caja mc
-                         ON mc.venta_id = nc.venta_id AND mc.tipo = 'salida' AND mc.eliminado_el IS NULL
-                      WHERE nc.venta_referencia_id = v.venta_id AND nc.eliminado_el IS NULL
-                   ), 0)
-                 ),
-               0) AS saldo
+             -- La expresión ÚNICA del saldo (\`saldo-venta.ts\`): total − lo aplicado −
+             -- lo rebajado "sin plata", con piso 0. La misma que el saldo del
+             -- listado y del detalle de ventas, \`/ventas/resumen\` y el tope del
+             -- abono. Una corrección que devolvió plata (efectivo, tarjeta,
+             -- pasarela) no cambia lo que se debe.
+             ${saldoDeVentaSql('v')} AS saldo
              FROM ventas v
             WHERE v.tenant_id = $1
               AND v.eliminado_el IS NULL

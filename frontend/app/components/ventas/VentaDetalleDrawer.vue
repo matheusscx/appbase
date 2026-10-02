@@ -219,6 +219,13 @@ interface VentaDetalle {
   anulable: boolean
   anularPreguntaExterno: boolean
   abonoConMaquinaDuplica: boolean
+  /**
+   * Lo que la venta todavía debe y si se puede registrar un pago: los decide el
+   * BACKEND con una sola expresión (total − lo aplicado − lo rebajado "sin plata").
+   * La pantalla no resta nada ni replica el estado.
+   */
+  saldo: string
+  puedeAbonar: boolean
 }
 
 interface MetodoPago {
@@ -298,14 +305,13 @@ const montoPagado = computed(() => {
   }, '0')
 })
 
-const saldo = computed(() => {
-  if (!venta.value) return '0'
-  return Decimal.max(0, new Decimal(venta.value.totalFinal).minus(new Decimal(montoPagado.value))).toString()
-})
-
-const puedeAbonar = computed(() =>
-  !!venta.value && ['pendiente', 'pagada_parcial'].includes(venta.value.estado),
-)
+// Lo que la venta debe y si admite un pago salen del backend (`saldo`, `puedeAbonar`):
+// restar el pagado del total acá daba un número distinto cuando una nota "sin plata"
+// ya había rebajado la deuda.
+// `new Decimal(...).toString()` solo quita los ceros de la cola ('6900.0000' → '6900'):
+// es el formato que el modal de abono precarga y manda, no una cuenta.
+const saldo = computed(() => new Decimal(venta.value?.saldo ?? '0').toString())
+const puedeAbonar = computed(() => venta.value?.puedeAbonar === true)
 
 // Del backend: una corrección es lo que apunta a la venta que corrige. No se
 // reconstruye comparando el tipo de documento: la devolución interna no lo lleva
@@ -792,7 +798,12 @@ async function resincronizar() {
     const datos = await useApiFetch<VentaDetalle>(`${apiUrl}/ventas/${id}`)
     // Solo si el drawer sigue mostrando la misma venta: cerrarlo (o abrir otra)
     // mientras esta request vuela no debe repoblarlo.
-    if (venta.value?.id === id) venta.value = datos
+    if (venta.value?.id === id) {
+      venta.value = datos
+      // El estado y el saldo los recalcula el backend (una nota "sin plata" puede
+      // dejar la venta pagada): la fila del listado se entera acá.
+      emitPatch()
+    }
   }
   catch {
     // Se queda con el número viejo hasta la próxima apertura. El backend sigue
@@ -803,12 +814,14 @@ async function resincronizar() {
 
 function onAbonoSuccess(payload: {
   pagos: Pago[]
-  venta: { id: string, estado: string, saldo: string }
+  venta: { id: string, estado: string, saldo: string, puedeAbonar: boolean }
 }) {
   abonoOpen.value = false
   if (!venta.value) return
   venta.value.pagos = [...venta.value.pagos, ...payload.pagos]
   venta.value.estado = payload.venta.estado
+  venta.value.saldo = payload.venta.saldo
+  venta.value.puedeAbonar = payload.venta.puedeAbonar
   const neto = payload.pagos.reduce(
     (acc, p) => acc.plus(p.monto).minus(p.vuelto ?? '0'),
     new Decimal(0),

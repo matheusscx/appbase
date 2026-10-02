@@ -322,18 +322,20 @@ Qué es cada número, y el porqué:
   hay notas). Mismo criterio que el vendido del dashboard
   ([`dashboard-inicio.md`](./dashboard-inicio.md)), salvo que acá no hay fecha: es el
   acumulado.
-- **`saldoPendiente`** es la suma del saldo **por venta**: `total − notas de esa venta −
-  (pagado − efectivo que salió de la caja por ellas)`, con piso en 0 (lo que queda a favor
-  del cliente no es plata por cobrar). Es la misma expresión que "Por cobrar" del
-  dashboard.
-  - Los `REFUND` de pasarela no entran como "devuelto": todo `REFUND` de una orden con venta
-    crea su corrección y guarda `correccion_venta_id`, pero el saldo solo cuenta como devuelto
-    las salidas de caja y la pasarela no mueve caja. Una venta pagada en parte por pasarela, con
-    saldo vivo, `REFUND` y nota, muestra de menos lo reembolsado. Es un límite conocido, abierto
-    en [`pendientes.md`](../agent/pendientes.md) § 6, entrada "El saldo pendiente no descuenta lo
-    reembolsado por pasarela".
-  - El saldo **por venta del listado** (`GET /api/ventas`, abajo) sigue siendo
-    `total − pagado`, sin notas: tiene su propia entrada en `pendientes.md` § 2.
+- **`saldoPendiente`** es la suma del saldo **por venta**, y el saldo por venta es **una sola
+  expresión** escrita una vez (`backend/src/modules/ventas/saldo-venta.ts`):
+  `total − Σ aplicado a la venta − Σ correcciones "no vuelve plata"`, con piso en 0 (lo que
+  queda a favor del cliente no es plata por cobrar). La leen "Por cobrar" del dashboard, este
+  resumen, el saldo de cada fila del listado y del detalle, el tope del abono y el "no vuelve
+  plata" de las correcciones: ninguno la recalcula.
+  - **Una corrección que devolvió plata no cambia lo que se debe**: ni la de efectivo (sale de la
+    caja), ni la de un medio que se reversa por fuera (tarjeta), ni el `REFUND` de pasarela. Con
+    $100 de total, $60 pagados, `REFUND` y nota de $20, se deben $40. Solo "no vuelve plata"
+    rebaja la deuda (2026-10-02, tarea 14 del frente de emisión; cierra el D10 de la spec del
+    vendido neto).
+  - Una corrección sin `devolucion_via` (anterior al campo; hoy ni el seed ni los tests las
+    crean) cuenta como "con plata" si tiene salida de caja y como "no vuelve plata" si no, que es
+    lo que hacía la fórmula anterior.
 
 **Una corrección se reconoce por `ventas.venta_referencia_id IS NOT NULL`**, no por el tipo
 de documento. La nota hereda la caja de la venta que corrige, así que cae en el mismo
@@ -345,13 +347,13 @@ tributario, y así resta sola. Antes el resumen comparaba contra el id del tipo 
 **Frontend (`pages/ventas/index.vue`):** las tarjetas "Ventas registradas", "Total facturado"
 y "Saldo pendiente" muestran "—" solo en la primera carga. Después de un cobro, una
 anulación o una nota de crédito desde el drawer la página **vuelve a pedir el resumen**, en
-vez de parchar el saldo con el de la fila: el saldo de la fila es `total − pagado` y ya no
-es lo que esa venta aporta al resumen. Si dos recargas se solapan, solo cuenta la
+vez de parchar el saldo con el de la fila: el saldo de la fila lo recalcula el backend (cambia el estado y
+el saldo, y el resumen saca las canceladas). Si dos recargas se solapan, solo cuenta la
 respuesta de la última.
 
 ### GET /api/ventas
 
-Lista paginada de ventas del tenant autenticado. Query params: `page` (default 1), `pageSize` (default 15, max 100), `estado`, `canal`, `documento`. La respuesta incluye campos enriquecidos por fila: `montoPagado` (suma de pagos menos vuelto), `saldo` (total_final − montoPagado) y el resumen de quién emitió (`emisores`, `tieneDuplicado`).
+Lista paginada de ventas del tenant autenticado. Query params: `page` (default 1), `pageSize` (default 15, max 100), `estado`, `canal`, `documento`. La respuesta incluye campos enriquecidos por fila: `montoPagado` (suma de pagos menos vuelto), `saldo` (la expresión única del saldo, no `total − montoPagado`; una corrección da 0) y el resumen de quién emitió (`emisores`, `tieneDuplicado`).
 
 ```
 GET /api/ventas?page=1&pageSize=15&estado=pendiente&canal=fisico&documento=sin_numero
@@ -418,7 +420,7 @@ es "Sin documento", más un badge "Duplicado". Las correcciones no llevan badge.
 
 ### GET /api/ventas/:id
 
-Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recargos`, `impuestos`, `customer`, `pagos`. Incluye `montoPagado` y `saldo`.
+Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recargos`, `impuestos`, `customer`, `pagos`. Incluye `montoPagado`, `saldo` (la expresión única) y `puedeAbonar` (estado que admite abono **y** saldo > 0): la pantalla no resta ni replica el estado.
 
 **Los documentos y lo que el backend decide sobre ellos** (spec `emision-por-venta` § 3.4 y § 3.5,
 [ADR-028](../adr/028-emision-registrada-por-venta.md)). La pantalla solo los muestra:
@@ -442,8 +444,9 @@ Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recar
   preguntar "¿ya lo hiciste en tu facturador?" antes de anular). Es `false` si la venta no es
   anulable, aunque tenga un `externo`.
 - **`abonoConMaquinaDuplica`**: un abono pagado con la máquina **duplicaría** un documento. Es
-  `true` si la venta admite abonos (`pendiente` o `pagada_parcial`, el mismo corte de
-  `registrarAbono`), tiene saldo (total menos lo **aplicado a la venta**: la propina no lo baja) y su
+  `true` si la venta puede abonarse (`puedeAbonar`: `pendiente` o `pagada_parcial`, el mismo corte
+  de `registrarAbono`, y con saldo según la expresión única: la propina no lo baja y lo que una
+  nota "no vuelve plata" perdonó tampoco se debe) y su
   deuda ya está documentada, con **el mismo predicado** que usa el abono para anotar el duplicado
   (`VentaDocumentosService.ventaDocumentada`: algún documento vigente, no duplicado y que no sea
   `nadie`). La pantalla de abono avisa con esto, sin bloquear.
@@ -702,14 +705,14 @@ detalle necesita para mostrar "2,5 kg" en vez de "2,5". Ver también el congelad
 | Estado | Cuándo se asigna |
 |--------|-----------------|
 | `pendiente` | La venta se crea sin pagos y con total > 0 |
-| `pagada_parcial` | Al registrar un abono parcial: saldo > 0 pero < total_final |
-| `pagada` | El saldo llega a 0 (lo aplicado a la venta ≥ total_final), **incluido el caso de total $0 sin ninguna línea de pago** |
+| `pagada_parcial` | Hay algo aplicado y todavía hay saldo |
+| `pagada` | El saldo llega a 0 —con un abono, o porque una nota "no vuelve plata" perdonó lo que se debía—, **incluido el caso de total $0 sin ninguna línea de pago** |
 | `cancelada` | Anulación explícita |
 
 **Una venta de total $0 es una venta PAGADA, sin línea de pago.** Es el caso real de una
 promoción que descuenta el 100%: la venta existió, descuenta stock, emite su documento y
-**no** aparece como deuda. El estado se deriva siempre de lo aplicado
-(`calcularEstadoVenta`), sin condicionarlo a que existan pagos — condicionarlo dejaba esa
+**no** aparece como deuda. El estado se deriva siempre del saldo
+(`recalcularEstadoDeLaVenta`), sin condicionarlo a que existan pagos — condicionarlo dejaba esa
 venta en `pendiente` con saldo $0, arrastrándose en los listados de deuda. Ni el POS ni la
 tienda registran un pago de $0 con un método elegido a dedo: simplemente no mandan pagos.
 
@@ -723,14 +726,18 @@ paralelo en `ventas` sería una segunda forma de resolver lo mismo.
 
 `cancelada` la asigna `POST /ventas/:id/anular` (ver abajo), acotada al subconjunto seguro.
 
-El saldo se recalcula en cada abono sobre **lo aplicado a la venta**, no sobre el bruto
-cobrado: `saldo = total_final − Σ(pago_aplicaciones.monto WHERE tipo = 'venta')`.
+El saldo es `total_final − Σ(pago_aplicaciones.monto WHERE tipo = 'venta') − Σ correcciones "no
+vuelve plata"`, sobre **lo aplicado a la venta** y no sobre el bruto cobrado. Y el estado se
+**re-deriva de ese saldo en un solo lugar** (`recalcularEstadoDeLaVenta`, `saldo-venta.ts`) cada
+vez que algo mueve lo que se debe: crear la venta, un abono y una corrección "no vuelve plata"
+(que puede dejar la venta en `pagada`).
 
 La distinción no es cosmética: un pago puede repartirse entre venta y propina
 (`pago_aplicaciones` guarda el split), así que `Σ(pago.monto − pago.vuelto)` contaría la
 propina como si pagara la venta y la dejaría en `pagada` con parte del total sin cobrar.
-Misma fuente en `listar()`, `resumen()` y `registrarAbono()`. El `resumen()` además
-descuenta las notas de crédito de cada venta (ver `GET /api/ventas/resumen`).
+Misma fuente en `listar()`, `resumen()` y `registrarAbono()`: todos incluyen la expresión única
+del saldo (`saldo-venta.ts`), que además resta lo que las notas "no vuelve plata" perdonaron (ver
+`GET /api/ventas/resumen` y PRODUCTO § 10).
 
 ---
 

@@ -18,6 +18,12 @@ import {
 } from '../../common/utils/rango-fecha.util';
 import { CajaService } from '../caja/caja.service';
 import { EstadoVenta } from '../ventas/entities/venta.entity';
+import {
+  ESTADOS_QUE_ADMITEN_ABONO,
+  puedeAbonar,
+  recalcularEstadoDeLaVenta,
+  saldoDeVentaSql,
+} from '../ventas/saldo-venta';
 import type { EmisorMedio } from '../metodos-pago/entities/tenant-metodo-pago.entity';
 import { Pago } from './entities/pago.entity';
 import {
@@ -39,30 +45,6 @@ import type { QueryPagosDto } from './dto/query-pagos.dto';
 import { IdempotenciaService } from '../idempotencia/idempotencia.service';
 import { VentaDocumentosService } from '../venta-documentos/venta-documentos.service';
 import { huellaDe } from '../idempotencia/huella';
-
-// ─── helper puro (exportado para tests) ──────────────────────────────────────
-
-/**
- * Los estados de una venta que admiten un abono (`registrarAbono`). Una sola
- * lista: la usa también el `abonoConMaquinaDuplica` del detalle, para que el
- * aviso de la pantalla no pueda desalinearse de lo que el cobro acepta.
- * Strings y no `EstadoVenta`: el detalle lee la fila cruda.
- */
-export const ESTADOS_QUE_ADMITEN_ABONO: readonly string[] = [
-  'pendiente',
-  'pagada_parcial',
-];
-
-export function calcularEstadoVenta(
-  totalFinal: string,
-  montoAplicadoTotal: string,
-): EstadoVenta {
-  const total = new Decimal(totalFinal);
-  const aplicado = new Decimal(montoAplicadoTotal);
-  if (aplicado.gte(total)) return EstadoVenta.PAGADA;
-  if (aplicado.lte(0)) return EstadoVenta.PENDIENTE;
-  return EstadoVenta.PAGADA_PARCIAL;
-}
 
 // ─── tipos de respuesta ───────────────────────────────────────────────────────
 
@@ -394,7 +376,12 @@ export class PagosService {
     clave: string,
   ): Promise<{
     pagos: Pago[];
-    venta: { id: string; estado: EstadoVenta; saldo: string };
+    venta: {
+      id: string;
+      estado: EstadoVenta;
+      saldo: string;
+      puedeAbonar: boolean;
+    };
     repetida?: true;
   }> {
     const abonar = () =>
@@ -402,7 +389,6 @@ export class PagosService {
         // Cargar venta
         const ventaRows: {
           venta_id: string;
-          total_final: string;
           estado: string;
           moneda_id: string;
         }[] = await manager.query(
@@ -411,7 +397,7 @@ export class PagosService {
           // aplican — sobre-pago que ninguno de los dos ve, porque cada uno
           // comparó contra un saldo que el otro ya invalidó. La suma de
           // `pago_aplicaciones` de más abajo también queda bajo este lock.
-          `SELECT venta_id, total_final, estado, moneda_id
+          `SELECT venta_id, estado, moneda_id
          FROM ventas
          WHERE venta_id = $1
            AND tenant_id = $2
@@ -447,34 +433,23 @@ export class PagosService {
         // INSERT del movimiento de caja. El abono siempre opera sobre caja física.
         await this.cajaService.bloquearCajaAbierta(manager, caja.id, tenantId);
 
-        // Lo ya aplicado A LA VENTA sale de `pago_aplicaciones` con tipo='venta',
-        // no de `monto - vuelto`: un pago puede repartirse entre venta y propina,
-        // y la suma bruta contaría la propina como si fuera pago de la venta —
-        // dejando la venta en `pagada` con parte del total sin cobrar. Mismo
-        // criterio que `listar()` y `resumen()` en VentasService.
-        const pagosAplicadosRows: { monto_aplicado: string }[] =
-          await manager.query(
-            `SELECT COALESCE(SUM(pa.monto), 0) AS monto_aplicado
-             FROM pagos p
-             JOIN pago_aplicaciones pa ON pa.pago_id = p.pago_id
-                  AND pa.eliminado_el IS NULL AND pa.tipo = 'venta'
-            WHERE p.venta_id = $1
-              AND p.eliminado_el IS NULL`,
-            [dto.ventaId],
-          );
-
-        const montoAplicado = new Decimal(
-          pagosAplicadosRows[0]?.monto_aplicado ?? '0',
+        // Lo que la venta todavía debe: la expresión ÚNICA del saldo (total − lo
+        // aplicado a la venta − lo rebajado "sin plata"; ver `saldo-venta.ts`), leída
+        // bajo el lock de arriba. No se resta nada acá: un abono cobra solo lo que de
+        // verdad se debe, y lo aplicado (que no cuenta la propina ni el vuelto) y lo
+        // perdonado por una corrección ya vienen descontados.
+        const saldoRows: { saldo: string }[] = await manager.query(
+          `SELECT ${saldoDeVentaSql('v')}::text AS saldo
+             FROM ventas v
+            WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL`,
+          [dto.ventaId, tenantId],
         );
-        const totalFinal = new Decimal(venta.total_final);
-        const saldo = Decimal.max(0, totalFinal.minus(montoAplicado));
+        const saldo = new Decimal(saldoRows[0].saldo);
+        if (!saldo.gt(0))
+          throw new BadRequestException('La venta no tiene saldo pendiente');
 
         // Registrar los nuevos pagos
-        const {
-          pagos: savedPagos,
-          montoAplicadoVenta: montoNuevosVenta,
-          porPago,
-        } = await this.registrar(manager, {
+        const { pagos: savedPagos, porPago } = await this.registrar(manager, {
           tenantId,
           ventaId: dto.ventaId,
           pagos: dto.pagos,
@@ -511,26 +486,19 @@ export class PagosService {
           pagoIds: porPago.map((p) => p.pagoId),
         });
 
-        // Recalcular monto total aplicado y nuevo estado (solo aplicaciones venta)
-        const newMontoAplicado = montoAplicado.plus(montoNuevosVenta);
-        const newEstado = calcularEstadoVenta(
-          venta.total_final,
-          newMontoAplicado.toFixed(4),
-        );
-        const newSaldo = Decimal.max(
-          0,
-          totalFinal.minus(newMontoAplicado),
-        ).toFixed(4);
-
-        // Actualizar estado de la venta
-        await manager.query(
-          `UPDATE ventas SET estado = $1, actualizado_el = NOW() WHERE venta_id = $2`,
-          [newEstado, dto.ventaId],
-        );
+        // El estado y el saldo nuevos salen de la misma regla que el resto
+        // (`recalcularEstadoDeLaVenta`): sin saldo, la venta queda pagada.
+        const { estado: newEstado, saldo: newSaldo } =
+          await recalcularEstadoDeLaVenta(manager, tenantId, dto.ventaId);
 
         return {
           pagos: savedPagos,
-          venta: { id: dto.ventaId, estado: newEstado, saldo: newSaldo },
+          venta: {
+            id: dto.ventaId,
+            estado: newEstado,
+            saldo: newSaldo,
+            puedeAbonar: puedeAbonar(newEstado, newSaldo),
+          },
         };
       });
     return this.idempotencia.ejecutar(

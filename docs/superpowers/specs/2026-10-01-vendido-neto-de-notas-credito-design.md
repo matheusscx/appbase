@@ -59,11 +59,11 @@ Hoy toda nota de crédito (NC) es invisible para los números del negocio:
 | D7 | El vendido negativo se muestra tal cual. La variación es "—" cuando la semana pasada es cero **o negativa**. | Owner, AskUserQuestion 2026-10-01 |
 | D8 | El ticket es "—" con neto ≤ 0 o sin ventas. | Orquestadora (`61810f42`) |
 | D9 | `/ventas` saca las canceladas: de "Total facturado", de "Ventas registradas" y, como consecuencia, de "Saldo pendiente". | Owner, AskUserQuestion 2026-10-01 |
-| D10 | Saldo por venta = `total − NC de esa venta − (pagado − devuelto)`, con piso 0. "Devuelto" es **solo** el efectivo de `movimientos_caja` con `venta_id` de una NC. Los `REFUND` quedan afuera porque no guardan su NC (§ 1). Las NC siguen fuera de la suma como ventas. | Orquestadora (`b5436263`, `61810f42`) |
+| D10 | **Cerrado por la tarea 14 del frente de emisión (2026-10-02): reemplazado por la expresión única del saldo** (`backend/src/modules/ventas/saldo-venta.ts`): `total − Σ aplicado − Σ correcciones "no vuelve plata"`, con piso 0. Una corrección que devolvió plata (efectivo, tarjeta, pasarela) no cambia lo que se debe. Lo que decía: saldo por venta = `total − NC de esa venta − (pagado − devuelto)`, con piso 0; "devuelto" era **solo** el efectivo de `movimientos_caja` con `venta_id` de una NC, y los `REFUND` quedaban afuera porque no guardaban su NC (§ 1). Las NC siguen fuera de la suma como ventas. | Orquestadora (`b5436263`, `61810f42`); cierre: orquestadora, 2026-10-02 |
 | D11 | "Por cobrar" del inicio usa la misma regla que "Saldo pendiente" de `/ventas`. | Owner, AskUserQuestion 2026-10-01 |
 | D12 | El reembolso por pasarela sin NC: "lo vemos aparte". Tiene entrada propia en la § 6, y mientras tanto el saldo no lo cuenta. | Owner, AskUserQuestion 2026-10-01 |
 
-**Lo que D10 deja mal, a sabiendas.** El caso es una venta pagada en parte por pasarela, con saldo
+**Lo que D10 dejaba mal, a sabiendas (cerrado por la tarea 14, 2026-10-02: con la expresión única se deben $40).** El caso es una venta pagada en parte por pasarela, con saldo
 vivo, `REFUND` y NC. Con $100 de total, $60 pagados, y `REFUND` y NC de $20 cada uno, se deben $40
 y la fórmula da 20: el saldo muestra **de menos** lo reembolsado. Lo cubre la entrada de D12.
 
@@ -122,7 +122,7 @@ cuando es cero. Vale para las cuatro comparaciones del bloque.
 cantidad y en monto. Las líneas de ítems con `es_ajuste_nota_credito` quedan afuera. Se filtra
 `HAVING neto_monto > 0`, se ordena por el neto y se toman 5.
 
-**Por cobrar (D10, D11).** Por venta: `GREATEST(total − Σ NC de la venta − (pagado − devuelto en
+**Por cobrar (D10 —reemplazado por la tarea 14—, D11).** Por venta (la expresión de abajo es la original; la vigente es la de D10): `GREATEST(total − Σ NC de la venta − (pagado − devuelto en
 efectivo), 0)`. Sobre las mismas ventas `pendiente`/`pagada_parcial` que hoy, sin NC.
 
 - **Consecuencia que el owner tiene que ver en la spec:** `cantidad` pasa a contar las ventas con
@@ -147,7 +147,9 @@ original, así que cae en el mismo alcance. La consulta queda así:
 - `totalFacturado` = bruto − Σ NC. El campo es nuevo y aditivo: `totalBruto` y `totalNotasCredito`,
   para la línea de debajo;
 - `saldoPendiente` = Σ por venta no NC de `GREATEST(total − NC − (pagado − devuelto en efectivo),
-  0)`. Es la misma expresión que "Por cobrar".
+  0)`. Es la misma expresión que "Por cobrar". *(Reemplazado por la tarea 14 de emisión,
+  2026-10-02: ahora es la expresión única de `saldo-venta.ts`, `total − aplicado − notas "no
+  vuelve plata"`; ver D10.)*
 
 La expresión del saldo queda en dos consultas, la del inicio y la de `/ventas`. Duplicar dos veces
 es aceptable (`CLAUDE.md`), y se extrae a la tercera. El saldo por venta del listado **no** se toca:
@@ -220,7 +222,8 @@ módulo y no como admin.
 
 - El % de anulaciones por garzón (§ 6 de `pendientes.md`).
 - La NC que se emite dos veces al reintentar (§ 6).
-- El reembolso por pasarela sin NC y el caso de D10 (§ 6, entrada nueva).
+- El reembolso por pasarela sin NC y el caso de D10 (§ 6, entrada nueva). *(Cerrada por la tarea 14
+  de emisión, 2026-10-02: ver D10.)*
 - El saldo por venta del listado, el listado de deuda, y si se puede seguir cobrando una venta ya
   acreditada (§ 2).
 - El motor de precios y la emisión de la NC: no se toca `crearNotaCreditoEnTransaccion`.
