@@ -550,7 +550,12 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 
 ---
 
-## Tarea 10 — Pantallas de la devolución
+## Tarea 10 — Pantallas de la devolución (✅ absorbida por la 8 y la 9)
+
+> **Absorbida** (controlador, 2026-10-02): la 8 cambió el contrato de la nota de crédito y la 9 sacó
+> `generarNotaCredito`; dejar estas pantallas para después rompía main entre medio. El
+> `NotaCreditoModal` y el `esCorreccion` del drawer y del listado entraron con la 8 (`ee056645`),
+> y el `ReembolsoModal` con la 9 (`00af787a`).
 
 **Archivos:**
 - Modificar: `frontend/app/components/ventas/NotaCreditoModal.vue`,
@@ -583,7 +588,12 @@ la spec, se para y se avisa: la tarea no se resuelve sola.
 
 ---
 
-## Tarea 11 — Reportes (⏸ solo verificación, después del frente del vendido neto)
+## Tarea 11 — Reportes (✅ cubierta por el merge del vendido neto)
+
+> **Cubierta** (controlador, 2026-10-02): el merge `33b66887` dejó las consultas del vendido neto,
+> que reconocen la corrección por `venta_referencia_id`, y su revisión lo verificó. El e2e "lo que
+> resta una devolución interna" (`venta-correcciones.e2e-spec.ts`) afirma que resta del saldo, del
+> total facturado, del vendido y de lo más vendido.
 
 **No arranca hasta que la orquestadora avise que el frente "El vendido, el cobrado y el Total
 facturado restan las notas de crédito" está en main.** El predicado de "es corrección" de esas
@@ -623,6 +633,51 @@ la página.
 
 ---
 
+## Tarea 13 — El encargado borra el número de un documento hecho por fuera
+
+**Decisión del owner** (`9ebeea9b`, PRODUCTO § 10): quien tiene `Ventas:Anular` puede borrar el
+número de un documento `externo`; queda registrado quién lo borró, cuándo y el valor anterior; la
+venta vuelve a "sin número" y al anular se pregunta otra vez (E10). No es un registro de cada
+reescritura: solo del borrado.
+
+- [ ] Backend: un endpoint propio (`DELETE` no: es soft — p.ej. `POST /ventas/:id/documentos/:documentoId/borrar-numero`)
+  con `@RequiresPermiso('Ventas','Anular')`, el alcance de caja de `findOne` y el lock de la venta,
+  igual que el `PATCH` de la tarea 6. Solo documentos `externo` vigentes con número; si no, 404/400.
+- [ ] Dónde queda el registro: columnas en `venta_documentos` (`numero_borrado`,
+  `numero_borrado_el`, `numero_borrado_por_usuario_id`) o una tabla de eventos si el diseño lo
+  pide; la tarea lo mide contra el patrón del repo y lo justifica.
+- [ ] El detalle (`GET /ventas/:id`) muestra el borrado; el drawer ofrece "Borrar número" solo con
+  `Ventas:Anular`, y el `anularPreguntaExterno` vuelve a `true`.
+- [ ] e2e: el 403 sin `Ventas:Anular`, el caso que deja pasar, el registro, y que después anular
+  vuelve a preguntar. Docs: `ventas.md`, ADR-028.
+
+---
+
+## Tarea 14 — Un solo saldo exacto, y el abono cobra solo lo que se debe
+
+**Decisión del owner** (`0df86e11`, PRODUCTO § 10) y **fórmula de la orquestadora** (2026-10-02):
+el saldo de una venta es `total − pagado − Σ correcciones "sin plata"`. Las correcciones que
+devolvieron plata (efectivo, tarjeta, pasarela) no cambian lo que se debe. Es la misma cuenta que
+ya topa "No vuelve plata" (tarea 8) y cierra el D10 del vendido neto (el REFUND de pasarela que
+el saldo no contaba).
+
+- [ ] **Una sola expresión en un solo lugar**, que usan: "Por cobrar" del inicio, "Saldo pendiente"
+  de `/ventas/resumen`, el saldo por venta del listado (`mapVentaListRow`), el tope del abono
+  (`registrarAbono`), `abonoConMaquinaDuplica` y el "sin plata" de las correcciones.
+- [ ] Correcciones con `devolucion_via` nulo (anteriores a la tarea 8, seed o e2e): con salida de
+  caja cuentan como "con plata"; sin ella, como "sin plata". Medir si el seed tiene alguna.
+- [ ] **Medir antes de fijar**: si una corrección "con plata" puede devolver menos que su monto
+  (p.ej. el tope de efectivo por debajo de la nota). Si puede, se para y se manda a la orquestadora.
+- [ ] Si el saldo queda en cero, "Registrar pago" desaparece y la venta pasa a `pagada`.
+- [ ] e2e de los tres casos medidos (REFUND+NC de $20 sobre $60 pagados de $100 → debe 40; "sin
+  plata" de $40 sobre la deuda de $40 → 0; NC con efectivo de $20 → 40), con el mutante que vuelve
+  a la expresión vieja y rompe el D10.
+- [ ] Docs: la entrada del saldo de `pendientes.md` § 6 pasa a `resueltos.md`; la spec del vendido
+  neto marca el D10 cerrado por esta tarea; PRODUCTO si describe la fórmula.
+- [ ] Revisión con la duda: "¿queda algún lector del saldo de una venta que no use la expresión única?".
+
+---
+
 ## Cierre
 
 - [ ] Playwright: el cobro mixto con número, completar el número después, la NC por tarjeta y el
@@ -635,9 +690,9 @@ la página.
 
 ## Orden y paralelismo
 
-`1 → 2 → 3 → 4 → 5 → 6 → 8 → 9`, con `7` después de `6`, `10` después de `7`, `8` y `9` (la 7 y la 10 editan el drawer), y `12` después
-de `4`. La `11` es solo verificación, espera al vendido neto y no frena a ninguna. Las tareas de backend que comparten
-`ventas.service.ts` van de a una: es un archivo de 4.000 líneas y dos implementadores encima se
+Hecho: `1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9`, más el merge del vendido neto (`33b66887`), que cubre
+la `11`. La `10` quedó absorbida por la 8 y la 9. Sigue: `13 → 14 → 12 → cierre`, de a una, porque
+las tres tocan `ventas.service.ts`, un archivo de 4.000 líneas que dos implementadores a la vez se
 pisan.
 
 ## Medido en la tarea 1
