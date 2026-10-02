@@ -3969,13 +3969,25 @@ describe('VentasService', () => {
         });
       });
 
-      it('con dos pagos no elige ninguno: elegir uno sería adivinar', async () => {
+      it('con dos pagos no elige ninguno: elegir uno sería adivinar, y queda una advertencia con la venta y la orden', async () => {
         const r = await via(
           [{ documento_id: 'doc-boleta' }],
           [{ pago_id: 'p-1' }, { pago_id: 'p-2' }],
         );
 
         expect(r.tipo === 'pasarela' && r.pagoId).toBeNull();
+        expect(advertencia).toHaveBeenCalledTimes(1);
+        const mensaje = String(advertencia.mock.calls[0][0]);
+        expect(mensaje).toContain(VENTA_ORIG_ID);
+        expect(mensaje).toContain('orden-1');
+        expect(mensaje).toContain('pago');
+      });
+
+      it('con un pago, o con ninguno, no hay advertencia: una venta sin pagos no es rara', async () => {
+        await via([{ documento_id: 'doc-boleta' }], [{ pago_id: 'p-1' }]);
+        await via([{ documento_id: 'doc-boleta' }], []);
+
+        expect(advertencia).not.toHaveBeenCalled();
       });
 
       it('mira solo los documentos válidos de esa venta y ese tenant', async () => {

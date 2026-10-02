@@ -2660,16 +2660,22 @@ export class VentasService {
   /**
    * El documento que corrige un reembolso de pasarela. **Nunca lanza**: la plata
    * ya volvió por el proveedor y un hecho consumado se registra, no se rechaza
-   * (P3). `CobrosService.vincularVenta` puede ligar una orden a cualquier venta,
-   * así que no se supone nada de sus pagos: se miran sus documentos válidos
-   * (vigentes y no duplicados), y de sus pagos solo si hay uno único.
+   * (P3). Hoy solo dos caminos ligan una orden a una venta, y los dos dejan una
+   * venta online con **un** pago y **a lo sumo un** documento (cero en un país sin
+   * boleta sembrada o con total $0): el callback online, que crea la
+   * venta online (`online-callback.handler.ts`), y `CobrosService.vincularVenta`,
+   * cuyo único llamador es la venta inicial de la suscripción
+   * (`suscripciones.service.ts`). Por eso contar alcanza: se miran los documentos
+   * válidos de la venta (vigentes y no duplicados) y sus pagos, y las ramas de
+   * "más de uno" son la defensa para un ligador futuro, no un caso de hoy.
    * - uno solo (la boleta de la venta online, E5) → la corrección lo corrige;
    * - ninguno → corrección sin fila de documento, como siempre (tipo NC);
    * - más de uno (inalcanzable hoy: online y factura son un solo documento) →
    *   también sin fila de documento, y queda un `warn` con la venta y la orden:
    *   elegir uno sería adivinar.
    * - un único pago en la venta → la corrección lo anota (`devolucion_pago_id`) y gasta su
-   *   tope por pago; con 0 o más de uno queda sin pago.
+   *   tope por pago; con 0 queda sin pago (una venta $0 no es rara) y con más de uno
+   *   también, con un `warn` igual al de los documentos.
    * Lo llama el hook de reembolso, que corre fuera de toda transacción.
    */
   async viaDeReembolsoPasarela(
@@ -2704,6 +2710,10 @@ export class VentasService {
         LIMIT 2`,
       [ventaId, tenantId],
     );
+    if (pagos.length > 1)
+      this.logger.warn(
+        `Reembolso de la orden ${ordenId}: la venta ${ventaId} tiene más de un pago y la corrección no sabe por cuál volvió la plata; se emite sin pago.`,
+      );
     return {
       tipo: 'pasarela',
       documentoId: documentos.length === 1 ? documentos[0].documento_id : null,
