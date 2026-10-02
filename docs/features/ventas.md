@@ -117,7 +117,8 @@ boleta del país y el `tipoDocumentoId` del body ni se mira: el canal que se gua
 venta decide. Todo sale de **una sola lectura** por venta (`resolverTipoDocumento`), sin
 importar cuántas líneas lleve.
 
-Como toda venta nace con tipo, **el tipo ya no impide anular**: ver `POST /ventas/:id/anular`.
+Como toda venta nace con tipo, **el tipo ya no impide anular**: anular mira los documentos emitidos,
+ver `POST /ventas/:id/anular`.
 La boleta es única por país (`uq_tipo_documento_boleta_pais`, gemelo del índice de la NC).
 
 **Los documentos de la venta (2026-10-02, [ADR-028](../adr/028-emision-registrada-por-venta.md)).**
@@ -144,6 +145,16 @@ de esa deuda no genera documento. La suma de los documentos es el `totalFinal`. 
 del sistema y los `externo` congelan sus baldes (neto afecto, neto exento y la suma de todos los
 impuestos), a prorrata de las porciones de la venta cuando cubren solo una parte. Todo sale de
 lo que ya está en memoria: sin lecturas nuevas.
+
+**El abono no documenta, salvo el voucher duplicado** (`POST /pagos`, E1 y E1b). Lo que paga ya
+estaba documentado al entregar, así que un pago con un medio `sistema` o `nadie` no crea ningún
+documento. Un pago con un medio de la `maquina` sí deja anotado un documento `maquina` con
+`es_duplicado = true`, su `pago_id` y el número y la clase si el cajero los tipeó: la máquina
+imprime un voucher que vale como boleta sobre algo ya documentado, y el contador necesita saber
+cuál corregir. Solo se anota si la venta tiene algún documento vigente que no sea duplicado (una
+venta de $0 o de un país sin boleta no tiene nada que duplicar; una fila `nadie` no cuenta como
+documentada), no cuenta para la cobertura del
+total ni para los topes de una corrección, y **nunca rechaza el cobro**.
 
 **Un cobro que se repite no se registra dos veces** (2026-09-19,
 [ADR-026](../adr/026-idempotencia-de-cobros.md)). La cabecera `Idempotency-Key` es
@@ -181,18 +192,37 @@ trata aparte).
 
 ```
 POST /api/ventas/{id}/anular
-Request: { "motivo": "Ingresada por error", "reponerStock": true }
+Request: { "motivo": "Ingresada por error", "reponerStock": true, "externoHecho": false }  // externoHecho es opcional
 Response (201): { "id": "uuid", "estado": "cancelada", "stockRepuesto": true, "motivo": "..." }
 ```
 
-**Solo aplica a una venta `pendiente` y sin pagos.** Ahí no hay dinero que devolver y, mientras
-nada se haya enviado al SII, tampoco hecho fiscal que compensar, así que se puede deshacer de
-verdad. **El tipo de documento de la venta ya no impide anular** (2026-10-01): toda venta nace
-con la boleta del país, y un documento solo armado, sin enviar, no cuenta como emitido (que el
-SII no permita anular un DTE aceptado vale para lo que se *envió*, y hoy no se envía nada). Las
-reglas que miran los documentos de la venta —una boleta de máquina ya emitida, una factura hecha
-en otro facturador— llegan con la emisión por venta. Todo lo demás se revierte con nota de
-crédito.
+**Solo aplica a una venta `pendiente` y sin pagos, y mira lo emitido, no la etiqueta** (spec
+`emision-por-venta` § 3.5, E8 y E10). El `tipo_documento_id` no impide anular: toda venta nace con
+la boleta del país. Lo que decide es `venta_documentos`, solo los documentos **vigentes**
+(`descarte IS NULL`), leídos y actualizados en la misma transacción y después del lock de la venta
+(`lockVentaOriginal`). La regla vive en **un solo lugar**, `VentaDocumentosService.evaluarAnulacion`
+(devuelve `anulable` / `bloqueada` con su motivo / `pregunta_externo`). Hoy la usa
+`cancelarUnaVez`; el `anulable` del detalle va a usar la misma regla (tarea 6), sin replicarla:
+
+| Documento vigente | Qué pasa |
+|---|---|
+| `sistema` en `armado` | No bloquea. Se anula y queda descartado con `armado_sin_enviar` (E8): todavía no salió al SII |
+| `sistema` en `enviado` | 400, va por nota de crédito (hoy ninguno: no hay envío) |
+| `maquina` | 400, va por nota de crédito: la máquina ya emitió |
+| `externo` con número | 400 (*"Ya está hecho: se revierte con una nota de crédito, hecha por fuera y anotada con su número."*), sin preguntar: el número salió del otro facturador, el documento existe |
+| `externo` sin número y sin `externoHecho` | 400 (*"Esta venta tiene un documento hecho por fuera: falta decir si ya lo hiciste en tu facturador."*) |
+| `externo` sin número, `externoHecho: true` | 400, el mismo "Ya está hecho" |
+| `externo` sin número, `externoHecho: false` | Se anula; el `externo` queda descartado con `afirmado_no_hecho`, con el usuario y la hora: es el único registro de quién lo afirmó |
+| `nadie` | No bloquea ni se descarta |
+
+El descarte pone `descarte`, `descartado_el = NOW()` y `descartado_por_usuario_id` (el del token)
+con **un solo `UPDATE`** y **sin borrar filas**: queda el registro de que existieron. Un bloqueo gana
+sobre la pregunta (con una máquina no se pregunta por el externo), y todo ocurre **antes** de
+reponer stock, así que un 400 no deja movimientos a medias.
+
+`externoHecho?: boolean` en `CancelarVentaDto`: **ausente y `false` son dos conductas distintas**
+(el controller lo pasa tal cual, sin `?? false`). La pregunta de la pantalla sola no alcanza: el
+servidor la exige. Todo lo demás —una venta cobrada, ya enviada— se revierte con nota de crédito.
 
 **El detalle de la venta dice cuánto queda por acreditar** (2026-09-04). `GET /ventas/:id`
 devuelve `disponibleNotaCredito: { total, porPorcion: [{ clasificacion, monto }] }`, para que la
@@ -234,7 +264,8 @@ Lo calcula el backend a propósito: el navegador no replica la cuantización del
   órdenes distintos volverían a hacer posible el cruce que el orden fijo evita.
 
 **Errores:** `400` motivo corto · `400` estado distinto de `pendiente` · `400` con pagos ·
-`400` con documento tributario · `400` reponer stock de serie/lote · `403` sin permiso.
+`400` con un documento emitido por la máquina o ya enviado · `400` con un documento hecho por
+fuera (sin respuesta, o ya hecho) · `400` reponer stock de serie/lote · `403` sin permiso.
 
 **El default del checkbox de reposición lo decide la cocina, no la API** (decisión del
 owner 2026-08-15; caso mixto cerrado el 2026-08-23). En la pantalla, "Reponer el stock que

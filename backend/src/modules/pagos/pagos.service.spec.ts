@@ -10,6 +10,7 @@ import { IdempotenciaService } from '../idempotencia/idempotencia.service';
 const CLAVE = '2f1c8a3e-6a1b-4d8e-9a55-0c7b1f7d2e10';
 import { CajaService } from '../caja/caja.service';
 import { EstadoVenta } from '../ventas/entities/venta.entity';
+import { VentaDocumentosService } from '../venta-documentos/venta-documentos.service';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const USUARIO_ID = '550e8400-e29b-41d4-a716-446655440056';
@@ -164,6 +165,14 @@ describe('PagosService', () => {
         {
           provide: Db,
           useValue: dbMock,
+        },
+        // El duplicado de E1b se prueba en `venta-documentos.service.spec.ts`; acá
+        // solo que `registrarAbono` lo llama con lo que corresponde.
+        {
+          provide: VentaDocumentosService,
+          useValue: {
+            registrarDuplicadoDeAbono: jest.fn().mockResolvedValue([]),
+          },
         },
         // Pasa derecho a la operación: el reclamo y la reproducción se prueban
         // en `idempotencia.service.spec.ts` y contra Postgres en el e2e.
@@ -810,6 +819,99 @@ describe('PagosService', () => {
         CAJA_ID,
         TENANT_ID,
       );
+    });
+
+    describe('el abono no documenta, salvo el duplicado de la máquina (E1, E1b)', () => {
+      const METODO_EFECTIVO_Y_TARJETA_ROWS = [
+        ...METODO_EFECTIVO_ROWS,
+        ...METODO_TARJETA_ROWS,
+      ];
+
+      async function abonar(
+        pagos: {
+          metodoPagoId: string;
+          monto: string;
+          numeroDocumento?: string;
+          claseDocumento?: 'voucher' | 'boleta';
+        }[],
+        metodoRows: typeof METODO_EFECTIVO_Y_TARJETA_ROWS,
+      ) {
+        const manager = buildAbonableManager('pendiente', '100000.0000', '0');
+        manager.query.mockResolvedValueOnce(metodoRows); // métodos (en registrar)
+        manager.query.mockResolvedValueOnce([]); // UPDATE ventas
+        const module: TestingModule = await setupModule(manager);
+        const svc = module.get<PagosService>(PagosService);
+        const documentos = module.get<{
+          registrarDuplicadoDeAbono: jest.Mock;
+        }>(VentaDocumentosService);
+        const result = await svc.registrarAbono(
+          TENANT_ID,
+          USUARIO_ID,
+          { ventaId: VENTA_ID, pagos },
+          CLAVE,
+        );
+        return { manager, documentos, result };
+      }
+
+      it('le pasa a los documentos lo aplicado de cada pago, su medio y el número y la clase que tipeó el cajero, en el orden de la entrada', async () => {
+        const { manager, documentos, result } = await abonar(
+          [
+            {
+              metodoPagoId: EFECTIVO_ID,
+              monto: '20000',
+              numeroDocumento: 'NO-APLICA',
+            },
+            {
+              metodoPagoId: TARJETA_ID,
+              monto: '37500',
+              numeroDocumento: '778899',
+              claseDocumento: 'voucher',
+            },
+          ],
+          METODO_EFECTIVO_Y_TARJETA_ROWS,
+        );
+
+        expect(documentos.registrarDuplicadoDeAbono).toHaveBeenCalledTimes(1);
+        const [mgr, params] = documentos.registrarDuplicadoDeAbono.mock
+          .calls[0] as [unknown, Record<string, unknown>];
+        // La misma transacción: el lock de la venta ya está tomado.
+        expect(mgr).toBe(manager);
+        expect(params).toMatchObject({
+          tenantId: TENANT_ID,
+          ventaId: VENTA_ID,
+        });
+        expect(params.pagos).toEqual([
+          {
+            pagoId: 'pago-uuid-001',
+            metodoPagoId: EFECTIVO_ID,
+            emisor: 'sistema',
+            aplicadoVenta: '20000.0000',
+            numeroDocumento: 'NO-APLICA',
+            claseDocumento: undefined,
+          },
+          {
+            pagoId: 'pago-uuid-001',
+            metodoPagoId: TARJETA_ID,
+            emisor: 'maquina',
+            aplicadoVenta: '37500.0000',
+            numeroDocumento: '778899',
+            claseDocumento: 'voucher',
+          },
+        ]);
+        // El cobro pasa igual.
+        expect(result.venta.estado).toBe(EstadoVenta.PAGADA_PARCIAL);
+      });
+
+      it('el abono no crea documentos por su cuenta: solo delega en el duplicado', async () => {
+        const { manager } = await abonar(
+          [{ metodoPagoId: EFECTIVO_ID, monto: '20000' }],
+          METODO_EFECTIVO_Y_TARJETA_ROWS,
+        );
+        const guardados = manager.save.mock.calls.map(
+          (c: unknown[]) => (c[0] as { name?: string }).name,
+        );
+        expect(guardados).not.toContain('VentaDocumento');
+      });
     });
 
     it('retorna estado=pagada y saldo=0 cuando abono completa el pago', async () => {

@@ -7,6 +7,7 @@ import { PagosService } from './pagos.service';
 import { CajaModule } from '../caja/caja.module';
 import { MonedasModule } from '../monedas/monedas.module';
 import { IdempotenciaModule } from '../idempotencia/idempotencia.module';
+import { VentaDocumentosModule } from '../venta-documentos/venta-documentos.module';
 
 @Module({
   imports: [
@@ -16,6 +17,9 @@ import { IdempotenciaModule } from '../idempotencia/idempotencia.module';
     // ESTE módulo: sin este import el @Body del controller falla en runtime.
     MonedasModule,
     IdempotenciaModule,
+    // Solo para anotar el voucher duplicado de un abono con la máquina (E1b).
+    // El módulo es una hoja: no importa a pagos ni a ventas, sin ciclo.
+    VentaDocumentosModule,
   ],
   controllers: [PagosController],
   providers: [PagosService],

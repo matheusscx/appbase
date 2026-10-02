@@ -37,6 +37,7 @@ import {
 } from '../../common/utils/pagination.util';
 import type { QueryPagosDto } from './dto/query-pagos.dto';
 import { IdempotenciaService } from '../idempotencia/idempotencia.service';
+import { VentaDocumentosService } from '../venta-documentos/venta-documentos.service';
 import { huellaDe } from '../idempotencia/huella';
 
 // ─── helper puro (exportado para tests) ──────────────────────────────────────
@@ -117,6 +118,7 @@ export class PagosService {
     private readonly db: Db,
     private readonly cajaService: CajaService,
     private readonly idempotencia: IdempotenciaService,
+    private readonly ventaDocumentos: VentaDocumentosService,
   ) {}
 
   /**
@@ -457,16 +459,37 @@ export class PagosService {
         const saldo = Decimal.max(0, totalFinal.minus(montoAplicado));
 
         // Registrar los nuevos pagos
-        const { pagos: savedPagos, montoAplicadoVenta: montoNuevosVenta } =
-          await this.registrar(manager, {
-            tenantId,
-            ventaId: dto.ventaId,
-            pagos: dto.pagos,
-            cajaId: caja.id,
-            monedaOficialId: venta.moneda_id,
-            target: saldo.toFixed(4),
-            propinaMonto: '0',
-          });
+        const {
+          pagos: savedPagos,
+          montoAplicadoVenta: montoNuevosVenta,
+          porPago,
+        } = await this.registrar(manager, {
+          tenantId,
+          ventaId: dto.ventaId,
+          pagos: dto.pagos,
+          cajaId: caja.id,
+          monedaOficialId: venta.moneda_id,
+          target: saldo.toFixed(4),
+          propinaMonto: '0',
+        });
+
+        // El abono NO documenta: lo que paga ya estaba documentado al entregar
+        // (E1). Solo el pago con un medio de la máquina deja un voucher que vale
+        // como boleta sobre algo ya documentado: se anota como duplicado (E1b)
+        // para que el contador lo corrija, y el cobro sigue igual. `porPago`
+        // viene en el orden de `dto.pagos`: de ahí el número y la clase.
+        await this.ventaDocumentos.registrarDuplicadoDeAbono(manager, {
+          tenantId,
+          ventaId: dto.ventaId,
+          pagos: porPago.map((p, i) => ({
+            pagoId: p.pagoId,
+            metodoPagoId: p.metodoPagoId,
+            emisor: p.emisor,
+            aplicadoVenta: p.aplicadoVenta,
+            numeroDocumento: dto.pagos[i].numeroDocumento,
+            claseDocumento: dto.pagos[i].claseDocumento,
+          })),
+        });
 
         // Recalcular monto total aplicado y nuevo estado (solo aplicaciones venta)
         const newMontoAplicado = montoAplicado.plus(montoNuevosVenta);

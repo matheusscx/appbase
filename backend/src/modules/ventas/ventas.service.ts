@@ -1335,6 +1335,11 @@ export class VentasService {
     ventaId: string;
     motivo: string;
     reponerStock: boolean;
+    /**
+     * La respuesta a "¿ya hiciste esta factura en tu facturador?" (E10).
+     * `undefined` y `false` son conductas distintas: no se normaliza.
+     */
+    externoHecho?: boolean;
   }): Promise<{
     id: string;
     estado: EstadoVenta;
@@ -1368,6 +1373,11 @@ export class VentasService {
     ventaId: string;
     motivo: string;
     reponerStock: boolean;
+    /**
+     * La respuesta a "¿ya hiciste esta factura en tu facturador?" (E10).
+     * `undefined` y `false` son conductas distintas: no se normaliza.
+     */
+    externoHecho?: boolean;
   }): Promise<{
     id: string;
     estado: EstadoVenta;
@@ -1387,12 +1397,10 @@ export class VentasService {
         throw new BadRequestException(
           `Solo se anula una venta pendiente (esta está "${venta.estado}"). Una venta cobrada se revierte con nota de crédito.`,
         );
-      // El tipo de documento NO impide anular. Mirarlo era válido mientras era
-      // una etiqueta que solo alguien ponía a mano; desde que toda venta nace con
-      // la boleta del país, rechazar por él dejaría a ninguna anulable. Un
-      // documento solo armado y sin enviar al SII no cuenta como emitido (E8) y
-      // hoy el sistema no envía nada. Lo que sí impide anular: el estado y los
-      // pagos, justo abajo.
+      // La etiqueta `tipo_documento_id` NO impide anular: toda venta nace con la
+      // boleta del país, y rechazar por ella dejaría a ninguna anulable. Lo que
+      // cuenta es lo **emitido**, y eso lo dice `venta_documentos` (E8, E10), más
+      // abajo. Acá impiden anular el estado y los pagos.
       const conPagos: unknown[] = await manager.query(
         `SELECT 1 FROM pagos
           WHERE venta_id = $1 AND eliminado_el IS NULL
@@ -1403,6 +1411,17 @@ export class VentasService {
         throw new BadRequestException(
           'La venta tiene pagos registrados: se revierte con nota de crédito, no se anula.',
         );
+
+      // Lo emitido (E8, E10): una máquina o un envío bloquean; un `externo` se
+      // pregunta; lo que solo está armado se descarta en esta misma transacción.
+      // Después del lock de la venta (`lockVentaOriginal`) y antes de tocar stock:
+      // si bloquea, la respuesta es el 400 y nada se movió.
+      await this.ventaDocumentosService.descartarAlAnular(manager, {
+        tenantId: params.tenantId,
+        ventaId: params.ventaId,
+        usuarioId: params.usuarioId,
+        externoHecho: params.externoHecho,
+      });
 
       let repuesto = false;
       if (params.reponerStock) {

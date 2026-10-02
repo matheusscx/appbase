@@ -168,7 +168,27 @@ derivada se ve y la de origen no. No filtra plata ajena, pero es una regla parti
 3. Calcular el saldo pendiente: `total_final − Σ(pago_aplicaciones.monto WHERE tipo = 'venta')`.
 4. Rechazar todo `metodoPagoId` que no esté en `tenant_metodo_pago` del tenant.
 5. Calcular el excedente de pagos; validar `permite_vuelto` si hay excedente.
-6. En transacción: crear registros en `pagos` → recalcular saldo → actualizar `venta.estado` → registrar movimientos de caja (efectivo).
+6. En transacción: crear registros en `pagos` → anotar el voucher duplicado de la máquina, si corresponde (ver abajo) → recalcular saldo → actualizar `venta.estado` → registrar movimientos de caja (efectivo).
+
+### El abono no documenta, salvo el voucher duplicado (2026-10-02, E1 y E1b)
+
+Lo que un abono paga **ya estaba documentado al entregar** (la boleta o factura nació con la
+venta, se haya pagado o no): el abono no crea ningún documento, sea cual sea su medio
+(`sistema` o `nadie`). Una sola excepción: un pago cuyo medio emite con la **`maquina`** hace que
+la máquina imprima un voucher que vale como boleta sobre algo ya documentado. Ese pago deja un
+documento `maquina` con `es_duplicado = true` (`VentaDocumentosService.registrarDuplicadoDeAbono`),
+con su `pago_id` y, si el cajero los tipeó, el número y la clase del voucher (`PagoItemDto` suma
+`numeroDocumento?` y `claseDocumento?`, con las mismas validaciones que `PagoVentaDto`: máx. 40,
+sin caracteres de control; en un medio que no es de la máquina se ignoran sin error).
+
+- Se anota solo si la venta tiene algún documento **vigente, no duplicado y de `sistema`,
+  `maquina` o `externo`**: una fila `nadie` no cuenta, porque la deuda va siempre a `sistema` o
+  `externo` (E1/E2). Una venta de $0 o de un país sin boleta no tiene nada que duplicar.
+- Un pago cuyo aplicado a la venta fue 0 (todo propina) no da documento.
+- **El cobro nunca se rechaza por esto**: el pago se registra igual y el contador corrige después.
+- No cuenta para la cobertura del total de la venta ni para los topes de una nota de crédito.
+- Una lectura y un `save` del array por abono, aunque haya varios pagos de la máquina; corre
+  dentro de la transacción que ya tiene el lock de la venta.
 
 ### Reglas de negocio
 

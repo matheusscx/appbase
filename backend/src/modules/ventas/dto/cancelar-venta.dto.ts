@@ -1,4 +1,10 @@
-import { IsBoolean, IsOptional, IsString, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsOptional,
+  IsString,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 
 export class CancelarVentaDto {
   /**
@@ -22,4 +28,20 @@ export class CancelarVentaDto {
   @IsOptional()
   @IsBoolean()
   reponerStock?: boolean;
+
+  /**
+   * La respuesta a "¿ya hiciste esta factura en tu facturador?" (E10), cuando la
+   * venta tiene un documento hecho por fuera. **`undefined` y `false` son dos
+   * conductas distintas**: sin respuesta el servidor la pide (400), con `false`
+   * anula y deja registrado quién afirmó que no estaba hecho. Por eso no lleva
+   * default: un `?? false` en cualquier capa convertiría "no me preguntaste" en
+   * "no lo hice". El servidor la exige porque la pregunta de la pantalla sola no
+   * alcanza.
+   */
+  // `@ValidateIf` y no `@IsOptional`: este último también deja pasar `null`, y
+  // `null` no es "no contestó" ni "contestó que no": el servicio lo trataría como
+  // una respuesta que nadie dio. Ausente sigue permitido; `null` es 400.
+  @ValidateIf((_o: unknown, v: unknown) => v !== undefined)
+  @IsBoolean()
+  externoHecho?: boolean;
 }

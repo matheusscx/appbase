@@ -238,7 +238,10 @@ describe('VentasService', () => {
   let inventarioService: jest.Mocked<InventarioService>;
   let itemsService: jest.Mocked<ItemsService>;
   let pagosServiceMock: { registrar: jest.Mock };
-  let ventaDocumentosMock: { documentarVenta: jest.Mock };
+  let ventaDocumentosMock: {
+    documentarVenta: jest.Mock;
+    descartarAlAnular: jest.Mock;
+  };
   let ventaPropinaServiceMock: { crearEnTransaccion: jest.Mock };
   let garzonesServiceMock: {
     asegurarMostrador: jest.Mock;
@@ -271,6 +274,7 @@ describe('VentasService', () => {
     };
     ventaDocumentosMock = {
       documentarVenta: jest.fn().mockResolvedValue([]),
+      descartarAlAnular: jest.fn().mockResolvedValue(undefined),
     };
     ventaPropinaServiceMock = {
       crearEnTransaccion: jest.fn().mockResolvedValue({
@@ -3625,6 +3629,72 @@ describe('VentasService', () => {
         await expect(service.cancelar(cancelarParams)).rejects.toThrow(
           /Solo se anula una venta pendiente/,
         );
+      });
+
+      describe('lo emitido decide (E8, E10)', () => {
+        it('le pide a los documentos que descarten, con el usuario del token y en la transacción de la anulación', async () => {
+          await service.cancelar({ ...cancelarParams, externoHecho: false });
+
+          expect(ventaDocumentosMock.descartarAlAnular).toHaveBeenCalledTimes(
+            1,
+          );
+          expect(ventaDocumentosMock.descartarAlAnular).toHaveBeenCalledWith(
+            ncManager,
+            {
+              tenantId: TENANT_ID,
+              ventaId: VENTA_ORIG_ID,
+              usuarioId: USUARIO_ID,
+              externoHecho: false,
+            },
+          );
+        });
+
+        it.each([undefined, true, false])(
+          'pasa externoHecho = %s tal cual: ausente y false son dos conductas',
+          async (externoHecho) => {
+            await service.cancelar({ ...cancelarParams, externoHecho });
+            const [, args] = ventaDocumentosMock.descartarAlAnular.mock
+              .calls[0] as [unknown, { externoHecho?: boolean }];
+            expect(args.externoHecho).toBe(externoHecho);
+          },
+        );
+
+        it('si los documentos bloquean, el 400 sale tal cual y no se mueve stock ni se cancela la venta', async () => {
+          ventaDocumentosMock.descartarAlAnular.mockRejectedValueOnce(
+            new BadRequestException('motivo de los documentos'),
+          );
+          await expect(service.cancelar(cancelarParams)).rejects.toThrow(
+            'motivo de los documentos',
+          );
+          expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+          expect(
+            ncManager.query.mock.calls.some((c) =>
+              String(c[0]).includes('UPDATE ventas'),
+            ),
+          ).toBe(false);
+        });
+
+        it('una venta que ya no es anulable por estado o por pagos ni llega a mirar los documentos', async () => {
+          ventaRows = [{ ...ventaAnulable, estado: 'pagada' }];
+          await expect(service.cancelar(cancelarParams)).rejects.toThrow(
+            /Solo se anula una venta pendiente/,
+          );
+          ventaRows = [ventaAnulable];
+          conPagos = [{ '1': 1 }];
+          await expect(service.cancelar(cancelarParams)).rejects.toThrow(
+            /pagos registrados/,
+          );
+          expect(ventaDocumentosMock.descartarAlAnular).not.toHaveBeenCalled();
+        });
+
+        it('descarta ANTES de reponer stock: lo que bloquea no deja movimientos a medias', async () => {
+          await service.cancelar(cancelarParams);
+          const ordenDescarte =
+            ventaDocumentosMock.descartarAlAnular.mock.invocationCallOrder[0];
+          const ordenStock =
+            inventarioService.registrarMovimiento.mock.invocationCallOrder[0];
+          expect(ordenDescarte).toBeLessThan(ordenStock);
+        });
       });
 
       it('rechaza una venta con pagos registrados', async () => {

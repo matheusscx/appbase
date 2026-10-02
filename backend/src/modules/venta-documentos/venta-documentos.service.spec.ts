@@ -1,4 +1,7 @@
-import { InternalServerErrorException } from '@nestjs/common';
+import {
+  BadRequestException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import Decimal from 'decimal.js';
 import type { EntityManager } from 'typeorm';
 import type { ConfigCalculo } from '../calculo-precios/calculo-precios.engine';
@@ -6,6 +9,7 @@ import type { PorcionOriginal } from '../ventas/nota-credito-composicion';
 import {
   VentaDocumentosService,
   componerBaldes,
+  type AbonoParaDuplicado,
   type DocumentarVentaParams,
   type PagoParaDocumento,
 } from './venta-documentos.service';
@@ -681,5 +685,445 @@ describe('VentaDocumentosService.documentarVenta', () => {
     expect(docs.length).toBeGreaterThan(2);
     expect(save).toHaveBeenCalledTimes(1);
     expect(Array.isArray(save.mock.calls[0][1])).toBe(true);
+  });
+});
+
+/** Un manager con `query` además de `save`/`create`: lo que leen el abono y la anulación. */
+function managerConLectura(filas: Record<string, unknown>[]) {
+  const query = jest.fn().mockResolvedValue(filas);
+  const base = managerFalso();
+  return {
+    ...base,
+    query,
+    manager: {
+      save: base.save,
+      create: base.create,
+      query,
+    } as unknown as EntityManager,
+  };
+}
+
+describe('VentaDocumentosService.registrarDuplicadoDeAbono (E1b)', () => {
+  const abono = (pagos: AbonoParaDuplicado[]) => ({
+    tenantId: TENANT,
+    ventaId: VENTA,
+    pagos,
+  });
+  const conDocumentos = [{ '?column?': 1 }];
+
+  it('un pago de la máquina sobre una venta ya documentada da un documento duplicado, con su pago, número y clase', async () => {
+    const m = managerConLectura(conDocumentos);
+    const docs = await new VentaDocumentosService().registrarDuplicadoDeAbono(
+      m.manager,
+      abono([
+        {
+          pagoId: 'pago-a',
+          metodoPagoId: 'metodo-a',
+          emisor: 'maquina',
+          aplicadoVenta: '37500.0000',
+          numeroDocumento: '  778899 ',
+          claseDocumento: 'voucher',
+        },
+      ]),
+    );
+    expect(docs).toHaveLength(1);
+    expect(docs[0]).toMatchObject({
+      tenantId: TENANT,
+      ventaId: VENTA,
+      emisor: 'maquina',
+      tipoDocumentoId: null,
+      claseMaquina: 'voucher',
+      numero: '778899',
+      estadoEnvio: null,
+      monto: '37500.0000',
+      montoAfecto: null,
+      montoExento: null,
+      montoImpuestos: null,
+      pagoId: 'pago-a',
+      documentoCorregidoId: null,
+      esDuplicado: true,
+      descarte: null,
+    });
+  });
+
+  it('sin número ni clase quedan nulos (se completan después)', async () => {
+    const m = managerConLectura(conDocumentos);
+    const [doc] = await new VentaDocumentosService().registrarDuplicadoDeAbono(
+      m.manager,
+      abono([
+        {
+          pagoId: 'pago-a',
+          metodoPagoId: 'metodo-a',
+          emisor: 'maquina',
+          aplicadoVenta: '37500.0000',
+        },
+      ]),
+    );
+    expect(doc.numero).toBeNull();
+    expect(doc.claseMaquina).toBeNull();
+    expect(doc.esDuplicado).toBe(true);
+  });
+
+  it('los pagos del sistema y de nadie no dan documento: la deuda ya estaba documentada (E1), ni siquiera se consulta', async () => {
+    const m = managerConLectura(conDocumentos);
+    const docs = await new VentaDocumentosService().registrarDuplicadoDeAbono(
+      m.manager,
+      abono([
+        {
+          pagoId: 'pago-a',
+          metodoPagoId: 'metodo-a',
+          emisor: 'sistema',
+          aplicadoVenta: '20000.0000',
+          numeroDocumento: '1',
+        },
+        {
+          pagoId: 'pago-b',
+          metodoPagoId: 'metodo-b',
+          emisor: 'nadie',
+          aplicadoVenta: '10000.0000',
+        },
+      ]),
+    );
+    expect(docs).toEqual([]);
+    expect(m.query).not.toHaveBeenCalled();
+    expect(m.save).not.toHaveBeenCalled();
+  });
+
+  it('una venta sin documentos vigentes que no sean duplicados (de $0 o de un país sin boleta) no duplica nada', async () => {
+    const m = managerConLectura([]);
+    const docs = await new VentaDocumentosService().registrarDuplicadoDeAbono(
+      m.manager,
+      abono([
+        {
+          pagoId: 'pago-a',
+          metodoPagoId: 'metodo-a',
+          emisor: 'maquina',
+          aplicadoVenta: '37500.0000',
+        },
+      ]),
+    );
+    expect(docs).toEqual([]);
+    expect(m.save).not.toHaveBeenCalled();
+  });
+
+  it('la consulta mira solo documentos vigentes, no duplicados, de ESA venta y de ESE tenant', async () => {
+    const m = managerConLectura(conDocumentos);
+    await new VentaDocumentosService().registrarDuplicadoDeAbono(
+      m.manager,
+      abono([
+        {
+          pagoId: 'pago-a',
+          metodoPagoId: 'metodo-a',
+          emisor: 'maquina',
+          aplicadoVenta: '37500.0000',
+        },
+      ]),
+    );
+    const [sql, binds] = m.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/es_duplicado = false/);
+    expect(sql).toMatch(/emisor <> 'nadie'/);
+    expect(sql).toMatch(/descarte IS NULL/);
+    expect(sql).toMatch(/eliminado_el IS NULL/);
+    expect(binds).toEqual([VENTA, TENANT]);
+  });
+
+  it('un pago de la máquina cuyo aplicado a la venta es 0 no da documento', async () => {
+    const m = managerConLectura(conDocumentos);
+    const docs = await new VentaDocumentosService().registrarDuplicadoDeAbono(
+      m.manager,
+      abono([
+        {
+          pagoId: 'pago-a',
+          metodoPagoId: 'metodo-a',
+          emisor: 'maquina',
+          aplicadoVenta: '0.0000',
+        },
+      ]),
+    );
+    expect(docs).toEqual([]);
+  });
+
+  it('varios pagos de la máquina: un documento por pago, una sola lectura y un solo save (sin N+1)', async () => {
+    const m = managerConLectura(conDocumentos);
+    const docs = await new VentaDocumentosService().registrarDuplicadoDeAbono(
+      m.manager,
+      abono([
+        {
+          pagoId: 'pago-a',
+          metodoPagoId: 'metodo-a',
+          emisor: 'maquina',
+          aplicadoVenta: '12000.0000',
+          numeroDocumento: '111',
+        },
+        {
+          pagoId: 'pago-b',
+          metodoPagoId: 'metodo-b',
+          emisor: 'sistema',
+          aplicadoVenta: '5000.0000',
+        },
+        {
+          pagoId: 'pago-c',
+          metodoPagoId: 'metodo-c',
+          emisor: 'maquina',
+          aplicadoVenta: '8000.0000',
+          claseDocumento: 'boleta',
+        },
+      ]),
+    );
+    expect(
+      docs.map((d) => [d.pagoId, d.monto, d.numero, d.claseMaquina]),
+    ).toEqual([
+      ['pago-a', '12000.0000', '111', null],
+      ['pago-c', '8000.0000', null, 'boleta'],
+    ]);
+    expect(m.query).toHaveBeenCalledTimes(1);
+    expect(m.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('un duplicado no cuenta para la cobertura: no suma al total de la venta', async () => {
+    const m = managerConLectura(conDocumentos);
+    const docs = await new VentaDocumentosService().registrarDuplicadoDeAbono(
+      m.manager,
+      abono([
+        {
+          pagoId: 'pago-a',
+          metodoPagoId: 'metodo-a',
+          emisor: 'maquina',
+          aplicadoVenta: '60000.0000',
+        },
+      ]),
+    );
+    expect(sumaDeLaCobertura(docs)).toBe('0.0000');
+  });
+});
+
+describe('VentaDocumentosService.evaluarAnulacion (E8, E10)', () => {
+  const fila = (
+    emisor: string,
+    over: Partial<{ estado_envio: string | null; numero: string | null }> = {},
+  ) => ({
+    documento_id: `doc-${emisor}-${Math.random()}`,
+    emisor,
+    estado_envio: emisor === 'sistema' ? 'armado' : null,
+    numero: null,
+    ...over,
+  });
+  const evaluar = async (
+    filas: ReturnType<typeof fila>[],
+    externoHecho?: boolean,
+  ) => {
+    const m = managerConLectura(filas);
+    const r = await new VentaDocumentosService().evaluarAnulacion(m.manager, {
+      tenantId: TENANT,
+      ventaId: VENTA,
+      externoHecho,
+    });
+    return { r, ...m };
+  };
+
+  it('lee solo documentos vigentes (sin descarte ni borrado) de esa venta y ese tenant', async () => {
+    const { query } = await evaluar([]);
+    const [sql, binds] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/descarte IS NULL/);
+    expect(sql).toMatch(/eliminado_el IS NULL/);
+    expect(binds).toEqual([VENTA, TENANT]);
+  });
+
+  it('una venta sin documentos es anulable y no descarta nada', async () => {
+    const { r } = await evaluar([]);
+    expect(r).toEqual({ resultado: 'anulable', descartes: [] });
+  });
+
+  it('una boleta del sistema solo armada no bloquea y queda para descartar con armado_sin_enviar', async () => {
+    const doc = fila('sistema');
+    const { r } = await evaluar([doc]);
+    expect(r).toEqual({
+      resultado: 'anulable',
+      descartes: [
+        { documentoId: doc.documento_id, descarte: 'armado_sin_enviar' },
+      ],
+    });
+  });
+
+  it('las filas nadie no bloquean ni se descartan', async () => {
+    const { r } = await evaluar([fila('nadie')]);
+    expect(r).toEqual({ resultado: 'anulable', descartes: [] });
+  });
+
+  it('un documento de la máquina bloquea: se revierte con nota de crédito', async () => {
+    const { r } = await evaluar([fila('sistema'), fila('maquina')]);
+    expect(r).toMatchObject({ resultado: 'bloqueada' });
+    expect((r as { motivo: string }).motivo).toMatch(/máquina/);
+    expect((r as { motivo: string }).motivo).toMatch(/nota de crédito/);
+  });
+
+  it('un documento del sistema ya enviado bloquea (hoy ninguno: no hay envío)', async () => {
+    const { r } = await evaluar([fila('sistema', { estado_envio: 'enviado' })]);
+    expect(r).toMatchObject({ resultado: 'bloqueada' });
+    expect((r as { motivo: string }).motivo).toMatch(/enviado/);
+  });
+
+  describe('documento hecho por fuera (externo)', () => {
+    it('externoHecho null (nadie contestó) pide la respuesta, no anula', async () => {
+      const { r } = await evaluar(
+        [fila('externo')],
+        null as unknown as boolean,
+      );
+      expect(r.resultado).toBe('pregunta_externo');
+    });
+
+    it('sin número y sin respuesta: pide la respuesta, con el mensaje exacto', async () => {
+      const { r } = await evaluar([fila('externo')], undefined);
+      expect(r).toEqual({
+        resultado: 'pregunta_externo',
+        motivo:
+          'Esta venta tiene un documento hecho por fuera: falta decir si ya lo hiciste en tu facturador.',
+      });
+    });
+
+    it('externoHecho true: bloquea con el mensaje exacto (va por nota de crédito)', async () => {
+      const { r } = await evaluar([fila('externo')], true);
+      expect(r).toEqual({
+        resultado: 'bloqueada',
+        motivo:
+          'Ya está hecho: se revierte con una nota de crédito, hecha por fuera y anotada con su número.',
+      });
+    });
+
+    it('externoHecho false: anula y el externo queda para descartar con afirmado_no_hecho', async () => {
+      const doc = fila('externo');
+      const { r } = await evaluar([doc], false);
+      expect(r).toEqual({
+        resultado: 'anulable',
+        descartes: [
+          { documentoId: doc.documento_id, descarte: 'afirmado_no_hecho' },
+        ],
+      });
+    });
+
+    it.each([undefined, true, false])(
+      'con número anotado bloquea con externoHecho = %s: el número salió del otro facturador, el documento existe',
+      async (hecho) => {
+        const { r } = await evaluar(
+          [fila('externo', { numero: 'F-9981' })],
+          hecho,
+        );
+        expect(r).toEqual({
+          resultado: 'bloqueada',
+          motivo:
+            'Ya está hecho: se revierte con una nota de crédito, hecha por fuera y anotada con su número.',
+        });
+      },
+    );
+
+    it('un número en blanco no cuenta como número', async () => {
+      const { r } = await evaluar([fila('externo', { numero: '   ' })], false);
+      expect(r.resultado).toBe('anulable');
+    });
+
+    it('un bloqueo gana sobre la pregunta: con una máquina no se pregunta por el externo', async () => {
+      const { r } = await evaluar(
+        [fila('externo'), fila('maquina')],
+        undefined,
+      );
+      expect(r.resultado).toBe('bloqueada');
+    });
+
+    it('un externo y un sistema armado: con false se descartan los dos, cada uno con su motivo', async () => {
+      const ext = fila('externo');
+      const sis = fila('sistema');
+      const { r } = await evaluar([sis, ext], false);
+      expect(r).toEqual({
+        resultado: 'anulable',
+        descartes: [
+          { documentoId: sis.documento_id, descarte: 'armado_sin_enviar' },
+          { documentoId: ext.documento_id, descarte: 'afirmado_no_hecho' },
+        ],
+      });
+    });
+  });
+});
+
+describe('VentaDocumentosService.descartarAlAnular', () => {
+  const fila = (emisor: string) => ({
+    documento_id: `doc-${emisor}`,
+    emisor,
+    estado_envio: emisor === 'sistema' ? 'armado' : null,
+    numero: null,
+  });
+
+  it('descarta en UNA sola sentencia, con el usuario del token, sin borrar filas', async () => {
+    const m = managerConLectura([fila('sistema'), fila('externo')]);
+    await new VentaDocumentosService().descartarAlAnular(m.manager, {
+      tenantId: TENANT,
+      ventaId: VENTA,
+      usuarioId: 'usuario-7',
+      externoHecho: false,
+    });
+    // La 1ª query es la lectura; la 2ª, el UPDATE.
+    expect(m.query).toHaveBeenCalledTimes(2);
+    const [sql, binds] = m.query.mock.calls[1] as [string, unknown[]];
+    expect(sql).toMatch(/^\s*UPDATE venta_documentos/);
+    expect(sql).not.toMatch(/DELETE/i);
+    expect(sql).toMatch(/descartado_el = NOW\(\)/);
+    // Defensa en profundidad: aunque los ids salieron de una lectura del tenant.
+    expect(sql).toMatch(/vd\.tenant_id = \$4/);
+    expect(sql).toMatch(/eliminado_el IS NULL/);
+    expect(sql).toMatch(/descarte IS NULL/);
+    expect(binds).toEqual([
+      'usuario-7',
+      ['doc-sistema', 'doc-externo'],
+      ['armado_sin_enviar', 'afirmado_no_hecho'],
+      TENANT,
+    ]);
+  });
+
+  it('sin nada que descartar no escribe', async () => {
+    const m = managerConLectura([]);
+    await new VentaDocumentosService().descartarAlAnular(m.manager, {
+      tenantId: TENANT,
+      ventaId: VENTA,
+      usuarioId: 'usuario-7',
+    });
+    expect(m.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('una venta bloqueada lanza 400 con el motivo y no escribe', async () => {
+    const m = managerConLectura([fila('maquina')]);
+    const intento = new VentaDocumentosService().descartarAlAnular(m.manager, {
+      tenantId: TENANT,
+      ventaId: VENTA,
+      usuarioId: 'usuario-7',
+    });
+    await expect(intento).rejects.toBeInstanceOf(BadRequestException);
+    await expect(intento).rejects.toThrow(/nota de crédito/);
+    expect(m.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('un externo sin respuesta lanza 400 que pide la respuesta, y no escribe', async () => {
+    const m = managerConLectura([fila('externo')]);
+    const intento = new VentaDocumentosService().descartarAlAnular(m.manager, {
+      tenantId: TENANT,
+      ventaId: VENTA,
+      usuarioId: 'usuario-7',
+      externoHecho: undefined,
+    });
+    await expect(intento).rejects.toThrow(
+      'Esta venta tiene un documento hecho por fuera: falta decir si ya lo hiciste en tu facturador.',
+    );
+    expect(m.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('un externo con externoHecho true lanza 400 y no escribe', async () => {
+    const m = managerConLectura([fila('externo')]);
+    await expect(
+      new VentaDocumentosService().descartarAlAnular(m.manager, {
+        tenantId: TENANT,
+        ventaId: VENTA,
+        usuarioId: 'usuario-7',
+        externoHecho: true,
+      }),
+    ).rejects.toThrow(/Ya está hecho/);
+    expect(m.query).toHaveBeenCalledTimes(1);
   });
 });

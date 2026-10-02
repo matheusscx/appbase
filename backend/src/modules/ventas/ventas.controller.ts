@@ -89,6 +89,9 @@ export class VentasController {
       motivo: dto.motivo,
       // Por defecto repone: no hacerlo pierde inventario en silencio.
       reponerStock: dto.reponerStock !== false,
+      // Tal cual, sin default: `undefined` (no contestó) y `false` (contestó que
+      // no) son dos conductas distintas (E10).
+      externoHecho: dto.externoHecho,
     });
   }
 

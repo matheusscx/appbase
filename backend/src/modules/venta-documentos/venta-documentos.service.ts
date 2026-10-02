@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import type { EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import {
@@ -17,6 +21,7 @@ import type { Facturador } from '../tenants/entities/tenant.entity';
 import {
   VentaDocumento,
   type ClaseDocumentoMaquina,
+  type Descarte,
   type EmisorDocumento,
 } from './entities/venta-documento.entity';
 
@@ -85,6 +90,66 @@ export interface PagoParaDocumento {
   claseDocumento?: ClaseDocumentoMaquina;
 }
 
+/** Un pago de un abono (`registrarAbono`), tal como lo devuelve `registrar` en `porPago`. */
+export interface AbonoParaDuplicado {
+  pagoId: string;
+  metodoPagoId: string;
+  emisor: EmisorMedio;
+  /** `pago_aplicaciones.tipo = 'venta'` de ESE pago. */
+  aplicadoVenta: string;
+  numeroDocumento?: string;
+  claseDocumento?: ClaseDocumentoMaquina;
+}
+
+export interface RegistrarDuplicadoParams {
+  tenantId: string;
+  ventaId: string;
+  pagos: AbonoParaDuplicado[];
+}
+
+export interface EvaluarAnulacionParams {
+  tenantId: string;
+  ventaId: string;
+  /**
+   * La respuesta del usuario a "¿ya hiciste esta factura en tu facturador?"
+   * (E10). `undefined` (no contestó) y `false` (contestó que no) son dos
+   * conductas distintas: no se colapsan con un default.
+   */
+  externoHecho?: boolean;
+}
+
+export interface DescartarAlAnularParams extends EvaluarAnulacionParams {
+  /** El usuario del token: queda como quien afirmó el descarte. */
+  usuarioId: string;
+}
+
+/**
+ * El veredicto de anular una venta mirando lo **emitido** (spec § 3.5). Una sola
+ * regla para `cancelarUnaVez` y para el `anulable` del detalle:
+ * - `anulable`: se puede anular; `descartes` es lo que queda descartado en la
+ *   misma transacción (los `sistema` solo armados y los `externo` contestados
+ *   con "no");
+ * - `bloqueada`: va por nota de crédito; `motivo` es el 400;
+ * - `pregunta_externo`: hay un documento hecho por fuera y falta la respuesta;
+ *   `motivo` es el 400 que la pide. La pantalla la pregunta y reintenta.
+ */
+export type EvaluacionAnulacion =
+  | {
+      resultado: 'anulable';
+      descartes: { documentoId: string; descarte: Descarte }[];
+    }
+  | { resultado: 'bloqueada'; motivo: string }
+  | { resultado: 'pregunta_externo'; motivo: string };
+
+export const MOTIVO_ANULAR_CON_MAQUINA =
+  'La venta tiene un documento emitido por la máquina de tarjeta: se revierte con una nota de crédito, no se anula.';
+export const MOTIVO_ANULAR_CON_ENVIADO =
+  'La venta tiene un documento ya enviado al SII: se revierte con una nota de crédito, no se anula.';
+export const MOTIVO_EXTERNO_SIN_RESPUESTA =
+  'Esta venta tiene un documento hecho por fuera: falta decir si ya lo hiciste en tu facturador.';
+export const MOTIVO_EXTERNO_YA_HECHO =
+  'Ya está hecho: se revierte con una nota de crédito, hecha por fuera y anotada con su número.';
+
 export interface DocumentarVentaParams {
   tenantId: string;
   venta: {
@@ -116,8 +181,10 @@ interface Borrador {
 /**
  * Qué documentos tiene una venta y quién emitió cada uno (spec
  * `2026-10-01-emision-por-venta`, ADR-028). Módulo hoja: lo importan ventas y
- * pagos, y él no importa a ninguno (los datos que necesita los recibe por
- * parámetro; no consulta nada).
+ * pagos, y él no importa a ninguno. Al crear la venta recibe por parámetro lo
+ * que ya está en memoria; el abono y la anulación leen `venta_documentos` por
+ * el `manager` de la transacción del llamador, después de que éste tomó el lock
+ * de la venta.
  */
 @Injectable()
 export class VentaDocumentosService {
@@ -188,6 +255,181 @@ export class VentaDocumentosService {
       });
     });
     return manager.save(VentaDocumento, filas);
+  }
+
+  /**
+   * El abono (`registrarAbono`) **no documenta**: lo que paga ya estaba
+   * documentado al entregar (E1). La excepción es E1b: si el medio emite con la
+   * `maquina`, la máquina va a imprimir un voucher que vale como boleta sobre
+   * algo ya documentado. Queda anotado como duplicado (`es_duplicado`), con su
+   * `pago_id` y el número y la clase si vinieron, para que el contador sepa qué
+   * anular. **El cobro nunca se rechaza por esto.** No cuenta para la cobertura
+   * ni para los topes de una corrección.
+   *
+   * Solo se anota si la venta tiene algún documento vigente que no sea un
+   * duplicado: una venta de $0, o de un país sin boleta, no tiene nada que
+   * duplicar. Una sola lectura y un solo `save` del array, aunque haya varios
+   * pagos de la máquina.
+   */
+  async registrarDuplicadoDeAbono(
+    manager: EntityManager,
+    params: RegistrarDuplicadoParams,
+  ): Promise<VentaDocumento[]> {
+    const deLaMaquina = params.pagos.filter(
+      // Un pago que fue todo propina no cubre nada de la venta (como en
+      // `borradoresDeBoleta`): no da documento.
+      (p) => p.emisor === 'maquina' && new Decimal(p.aplicadoVenta).gt(0),
+    );
+    if (!deLaMaquina.length) return [];
+
+    // `emisor <> 'nadie'`: una fila `nadie` nunca documenta una deuda (la deuda va
+    // siempre a `sistema` o `externo`, E1/E2), así que no cuenta como documentada.
+    const documentada: unknown[] = await manager.query(
+      `SELECT 1
+         FROM venta_documentos
+        WHERE venta_id = $1
+          AND tenant_id = $2
+          AND es_duplicado = false
+          AND emisor <> 'nadie'
+          AND descarte IS NULL
+          AND eliminado_el IS NULL
+        LIMIT 1`,
+      [params.ventaId, params.tenantId],
+    );
+    if (!documentada.length) return [];
+
+    const filas = deLaMaquina.map((p) =>
+      manager.create(VentaDocumento, {
+        tenantId: params.tenantId,
+        ventaId: params.ventaId,
+        emisor: 'maquina',
+        tipoDocumentoId: null,
+        claseMaquina: p.claseDocumento ?? null,
+        numero: p.numeroDocumento?.trim() || null,
+        estadoEnvio: null,
+        monto: new Decimal(p.aplicadoVenta).toFixed(4),
+        montoAfecto: null,
+        montoExento: null,
+        montoImpuestos: null,
+        pagoId: p.pagoId,
+        documentoCorregidoId: null,
+        esDuplicado: true,
+        descarte: null,
+        descartadoEl: null,
+        descartadoPorUsuarioId: null,
+      }),
+    );
+    return manager.save(VentaDocumento, filas);
+  }
+
+  /**
+   * Anular mira lo **emitido**, no la etiqueta (E8, E10). Solo cuentan los
+   * documentos vigentes (`descarte IS NULL`). Devuelve el veredicto sin
+   * escribir; `descartarAlAnular` lo aplica. El llamador ya tiene el lock de la
+   * venta, así que los documentos no cambian entre esta lectura y el descarte.
+   *
+   * 1. Bloquea un documento de la `maquina` (la máquina ya emitió) o uno del
+   *    `sistema` ya `enviado`. Hoy ningún `sistema` está enviado: no hay envío.
+   * 2. Bloquea un `externo` que ya tiene número: salió del otro facturador, el
+   *    documento existe y va por nota de crédito, sin preguntar.
+   * 3. Un `externo` sin número se pregunta: sin respuesta, 400 que la pide;
+   *    `true`, 400 (va por NC); `false`, anula.
+   * Lo que queda son documentos `sistema` solo armados (se descartan), filas
+   * `nadie` (se dejan) y los `externo` contestados con "no" (se descartan).
+   */
+  async evaluarAnulacion(
+    manager: EntityManager,
+    params: EvaluarAnulacionParams,
+  ): Promise<EvaluacionAnulacion> {
+    const docs: {
+      documento_id: string;
+      emisor: EmisorDocumento;
+      estado_envio: string | null;
+      numero: string | null;
+    }[] = await manager.query(
+      `SELECT documento_id, emisor, estado_envio, numero
+         FROM venta_documentos
+        WHERE venta_id = $1
+          AND tenant_id = $2
+          AND descarte IS NULL
+          AND eliminado_el IS NULL
+        ORDER BY creado_el, documento_id`,
+      [params.ventaId, params.tenantId],
+    );
+
+    if (docs.some((d) => d.emisor === 'maquina'))
+      return { resultado: 'bloqueada', motivo: MOTIVO_ANULAR_CON_MAQUINA };
+    if (
+      docs.some((d) => d.emisor === 'sistema' && d.estado_envio === 'enviado')
+    )
+      return { resultado: 'bloqueada', motivo: MOTIVO_ANULAR_CON_ENVIADO };
+
+    const externos = docs.filter((d) => d.emisor === 'externo');
+    if (externos.some((d) => (d.numero ?? '').trim() !== ''))
+      return { resultado: 'bloqueada', motivo: MOTIVO_EXTERNO_YA_HECHO };
+    if (externos.length) {
+      // Comparación estricta: solo `true` y `false` son respuestas. `undefined`
+      // y `null` (que el DTO ya rechaza, pero este método no depende de eso) son
+      // "nadie contestó": se pregunta, no se anula.
+      if (params.externoHecho === true)
+        return { resultado: 'bloqueada', motivo: MOTIVO_EXTERNO_YA_HECHO };
+      if (params.externoHecho !== false)
+        return {
+          resultado: 'pregunta_externo',
+          motivo: MOTIVO_EXTERNO_SIN_RESPUESTA,
+        };
+    }
+
+    const descartes: { documentoId: string; descarte: Descarte }[] = [];
+    for (const d of docs) {
+      if (d.emisor === 'sistema')
+        descartes.push({
+          documentoId: d.documento_id,
+          descarte: 'armado_sin_enviar',
+        });
+      else if (d.emisor === 'externo')
+        descartes.push({
+          documentoId: d.documento_id,
+          descarte: 'afirmado_no_hecho',
+        });
+    }
+    return { resultado: 'anulable', descartes };
+  }
+
+  /**
+   * Aplica `evaluarAnulacion` dentro de la transacción de `cancelarUnaVez`: si
+   * no es anulable lanza 400 con el motivo; si lo es, descarta lo que
+   * corresponde con la hora y el usuario del token, en una sola sentencia y sin
+   * borrar filas (queda el registro de que existieron, y en `afirmado_no_hecho`,
+   * de quién lo afirmó).
+   */
+  async descartarAlAnular(
+    manager: EntityManager,
+    params: DescartarAlAnularParams,
+  ): Promise<void> {
+    const veredicto = await this.evaluarAnulacion(manager, params);
+    if (veredicto.resultado !== 'anulable')
+      throw new BadRequestException(veredicto.motivo);
+    if (!veredicto.descartes.length) return;
+
+    await manager.query(
+      `UPDATE venta_documentos AS vd
+          SET descarte = d.descarte,
+              descartado_el = NOW(),
+              descartado_por_usuario_id = $1,
+              actualizado_el = NOW()
+         FROM unnest($2::uuid[], $3::text[]) AS d(documento_id, descarte)
+        WHERE vd.documento_id = d.documento_id
+          AND vd.tenant_id = $4
+          AND vd.descarte IS NULL
+          AND vd.eliminado_el IS NULL`,
+      [
+        params.usuarioId,
+        veredicto.descartes.map((d) => d.documentoId),
+        veredicto.descartes.map((d) => d.descarte),
+        params.tenantId,
+      ],
+    );
   }
 
   /**

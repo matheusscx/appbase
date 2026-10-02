@@ -652,6 +652,388 @@ describe('Documentos de la venta (e2e)', () => {
     });
   });
 
+  describe('el abono de una deuda ya documentada (E1, E1b)', () => {
+    const abonar = async (
+      ventaId: string,
+      pago: Record<string, unknown>,
+      esperado = 201,
+    ) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/pagos')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ventaId, pagos: [pago] });
+      expect(res.status).toBe(esperado);
+      return res.body as { venta: { estado: string; saldo: string } };
+    };
+    /** La mesa de $100.000 que paga $40.000 con tarjeta y se va debiendo $60.000. */
+    const mesaConDeuda = async (facturaOBoleta: 'boleta' | 'factura') => {
+      const venta =
+        facturaOBoleta === 'boleta'
+          ? await vender({
+              lineas: lineas100k(),
+              pagos: [{ metodoPagoId: DEBITO_ID, monto: '40000' }],
+            })
+          : await vender({
+              tipoDocumentoId: FACTURA_ID,
+              lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
+              pagos: [{ metodoPagoId: DEBITO_ID, monto: '19000' }],
+            });
+      expect(venta.estado).toBe('pagada_parcial');
+      return venta;
+    };
+
+    it('la mesa que debe $60.000 paga en efectivo al día siguiente: ningún documento nuevo', async () => {
+      const venta = await mesaConDeuda('boleta');
+      const antes = await documentosDe(venta.id);
+      expect(antes.map((d) => [d.emisor, d.monto])).toEqual([
+        ['maquina', '40000.0000'],
+        ['sistema', '60000.0000'],
+      ]);
+
+      const res = await abonar(venta.id, {
+        metodoPagoId: EFECTIVO_ID,
+        monto: '60000',
+      });
+      expect(res.venta.estado).toBe('pagada');
+
+      expect(await documentosDe(venta.id)).toEqual(antes);
+    });
+
+    it('un medio del sistema y uno de nadie tampoco documentan el abono', async () => {
+      await patchMetodo(CREDITO_ID, 'sistema');
+      await patchMetodo(DEBITO_ID, 'nadie');
+      const venta = await vender({
+        lineas: lineas100k(),
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '40000' }],
+      });
+      const antes = await documentosDe(venta.id);
+      expect(antes).toHaveLength(1); // la boleta del sistema por los $100.000 (efectivo + lo debido)
+
+      await abonar(venta.id, {
+        metodoPagoId: CREDITO_ID,
+        monto: '25000',
+        numeroDocumento: 'IGNORADO',
+      });
+      await abonar(venta.id, { metodoPagoId: DEBITO_ID, monto: '35000' });
+
+      expect(await documentosDe(venta.id)).toEqual(antes);
+    });
+
+    it('la misma deuda pagada con tarjeta en la máquina: un duplicado marcado, con su pago y su número; el cobro pasa', async () => {
+      const venta = await mesaConDeuda('boleta');
+
+      const res = await abonar(venta.id, {
+        metodoPagoId: CREDITO_ID,
+        monto: '60000',
+        numeroDocumento: '990011',
+        claseDocumento: 'boleta',
+      });
+      expect(res.venta).toMatchObject({ estado: 'pagada', saldo: '0.0000' });
+
+      const docs = await documentosDe(venta.id);
+      expect(docs).toHaveLength(3);
+      const duplicado = docs.find((d) => d.es_duplicado)!;
+      expect(duplicado).toMatchObject({
+        tenant_id: TENANT_ID,
+        emisor: 'maquina',
+        tipo_documento_id: null,
+        clase_maquina: 'boleta',
+        numero: '990011',
+        estado_envio: null,
+        monto: '60000.0000',
+        monto_afecto: null,
+        monto_exento: null,
+        monto_impuestos: null,
+      });
+      expect(duplicado.pago_id).toBe(await pagoDe(venta.id, CREDITO_ID));
+      // No cuenta para la cobertura: lo que no es duplicado sigue sumando el total.
+      expect(suma(docs.filter((d) => !d.es_duplicado))).toBe(100000);
+      expect(docs.filter((d) => d.es_duplicado)).toHaveLength(1);
+    });
+
+    it('sin número ni clase el duplicado queda con ambos nulos', async () => {
+      const venta = await mesaConDeuda('boleta');
+      await abonar(venta.id, { metodoPagoId: CREDITO_ID, monto: '60000' });
+      const duplicado = (await documentosDe(venta.id)).find(
+        (d) => d.es_duplicado,
+      )!;
+      expect(duplicado.numero).toBeNull();
+      expect(duplicado.clase_maquina).toBeNull();
+    });
+
+    it('factura con abono en efectivo: ningún documento nuevo; con tarjeta en la máquina: un duplicado', async () => {
+      const venta = await mesaConDeuda('factura');
+      const antes = await documentosDe(venta.id);
+      expect(antes.map((d) => [d.emisor, d.monto])).toEqual([
+        ['sistema', '119000.0000'],
+      ]);
+      // Es la factura: el test mide lo que su título promete.
+      expect(antes[0].tipo_documento_id).toBe(FACTURA_ID);
+
+      await abonar(venta.id, { metodoPagoId: EFECTIVO_ID, monto: '50000' });
+      expect(await documentosDe(venta.id)).toEqual(antes);
+
+      await abonar(venta.id, { metodoPagoId: DEBITO_ID, monto: '50000' });
+      const docs = await documentosDe(venta.id);
+      expect(docs.map((d) => [d.emisor, d.monto, d.es_duplicado])).toEqual([
+        ['maquina', '50000.0000', true],
+        ['sistema', '119000.0000', false],
+      ]);
+      expect(docs.find((d) => d.emisor === 'sistema')!.tipo_documento_id).toBe(
+        FACTURA_ID,
+      );
+    });
+
+    it('un abono con un número con salto de línea se rechaza con 400 y no registra el pago', async () => {
+      const venta = await mesaConDeuda('boleta');
+      const res = await request(app.getHttpServer())
+        .post('/api/pagos')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          ventaId: venta.id,
+          pagos: [
+            {
+              metodoPagoId: CREDITO_ID,
+              monto: '60000',
+              numeroDocumento: '12\n34',
+            },
+          ],
+        });
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain('numeroDocumento');
+      expect(await documentosDe(venta.id)).toHaveLength(2);
+    });
+  });
+
+  describe('anular mira lo emitido (E8, E10)', () => {
+    interface Descarte {
+      emisor: string;
+      descarte: string | null;
+      descartado_el: Date | null;
+      descartado_por_usuario_id: string | null;
+      numero: string | null;
+      eliminado_el: Date | null;
+    }
+    const descartesDe = async (ventaId: string): Promise<Descarte[]> =>
+      ds.query(
+        // Sin filtrar `eliminado_el` a propósito: el test afirma que anular NO borra.
+        `SELECT emisor, descarte, descartado_el, descartado_por_usuario_id,
+                numero, eliminado_el
+           FROM venta_documentos
+          WHERE venta_id = $1
+          ORDER BY emisor, monto`,
+        [ventaId],
+      );
+    const estadoDe = async (ventaId: string): Promise<string> => {
+      const r: { estado: string }[] = await ds.query(
+        `SELECT estado FROM ventas WHERE venta_id = $1`,
+        [ventaId],
+      );
+      return r[0].estado;
+    };
+    const anular = (ventaId: string, extra: Record<string, unknown> = {}) =>
+      request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/anular`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ motivo: 'Se ingresó por error en la caja', ...extra });
+    const pendienteDeFactura = () =>
+      vender({
+        tipoDocumentoId: FACTURA_ID,
+        lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
+      });
+    const MENSAJE_PIDE_RESPUESTA =
+      'Esta venta tiene un documento hecho por fuera: falta decir si ya lo hiciste en tu facturador.';
+    const MENSAJE_YA_HECHO =
+      'Ya está hecho: se revierte con una nota de crédito, hecha por fuera y anotada con su número.';
+
+    it('boleta pendiente sin pagos: se anula y su boleta queda descartada, con el usuario y la hora, sin borrar la fila (E8)', async () => {
+      const venta = await vender({ lineas: lineas100k() });
+      const otra = await vender({ lineas: lineas100k() });
+
+      const res = await anular(venta.id);
+      expect(res.status).toBe(201);
+      expect(await estadoDe(venta.id)).toBe('cancelada');
+
+      const docs = await descartesDe(venta.id);
+      expect(docs).toHaveLength(1);
+      expect(docs[0]).toMatchObject({
+        emisor: 'sistema',
+        descarte: 'armado_sin_enviar',
+        descartado_por_usuario_id: usuarioId,
+        eliminado_el: null,
+      });
+      expect(docs[0].descartado_el).toBeInstanceOf(Date);
+      // El descarte de una venta no toca los documentos de otra.
+      expect((await descartesDe(otra.id))[0].descarte).toBeNull();
+    });
+
+    it('factura del sistema sin pagos: se anula y queda descartada', async () => {
+      const venta = await pendienteDeFactura();
+      expect((await anular(venta.id)).status).toBe(201);
+      const docs = await descartesDe(venta.id);
+      expect(docs).toHaveLength(1);
+      expect(docs[0]).toMatchObject({
+        emisor: 'sistema',
+        descarte: 'armado_sin_enviar',
+        descartado_por_usuario_id: usuarioId,
+      });
+    });
+
+    it('un documento descartado ya no cuenta como vigente: no se lista entre los documentos de la venta', async () => {
+      const venta = await pendienteDeFactura();
+      await anular(venta.id);
+      // `documentosDe` solo filtra `eliminado_el`: el descarte lo distingue la columna.
+      const vigentes: { n: string }[] = await ds.query(
+        `SELECT COUNT(*) AS n FROM venta_documentos
+          WHERE venta_id = $1 AND descarte IS NULL AND eliminado_el IS NULL`,
+        [venta.id],
+      );
+      expect(vigentes[0].n).toBe('0');
+    });
+
+    describe('factura hecha por fuera (externo)', () => {
+      beforeEach(() => patchFacturador('externo'));
+
+      it('sin externoHecho: 400 que pide la respuesta, y no se anula ni se descarta nada', async () => {
+        const venta = await pendienteDeFactura();
+        const res = await anular(venta.id);
+        expect(res.status).toBe(400);
+        expect((res.body as { message: string }).message).toBe(
+          MENSAJE_PIDE_RESPUESTA,
+        );
+        expect(await estadoDe(venta.id)).toBe('pendiente');
+        expect((await descartesDe(venta.id))[0].descarte).toBeNull();
+      });
+
+      it('externoHecho true: 400 (va por nota de crédito) y no se anula', async () => {
+        const venta = await pendienteDeFactura();
+        const res = await anular(venta.id, { externoHecho: true });
+        expect(res.status).toBe(400);
+        expect((res.body as { message: string }).message).toBe(
+          MENSAJE_YA_HECHO,
+        );
+        expect(await estadoDe(venta.id)).toBe('pendiente');
+        expect((await descartesDe(venta.id))[0].descarte).toBeNull();
+      });
+
+      it('externoHecho false: se anula y el externo queda afirmado_no_hecho, con el usuario y la hora', async () => {
+        const venta = await pendienteDeFactura();
+        const res = await anular(venta.id, { externoHecho: false });
+        expect(res.status).toBe(201);
+        expect(await estadoDe(venta.id)).toBe('cancelada');
+        const docs = await descartesDe(venta.id);
+        expect(docs).toHaveLength(1);
+        expect(docs[0]).toMatchObject({
+          emisor: 'externo',
+          descarte: 'afirmado_no_hecho',
+          descartado_por_usuario_id: usuarioId,
+          eliminado_el: null,
+        });
+        expect(docs[0].descartado_el).toBeInstanceOf(Date);
+      });
+
+      it('con el número anotado: 400 aunque venga externoHecho false (el número salió del otro facturador)', async () => {
+        const venta = await pendienteDeFactura();
+        // El número lo anota la tarea 6 (PATCH) o una integración futura; acá se
+        // anota por SQL para fijar el efecto de la regla, no el camino que lo escribe.
+        await ds.query(
+          `UPDATE venta_documentos SET numero = 'F-98123' WHERE venta_id = $1`,
+          [venta.id],
+        );
+        for (const externoHecho of [false, true, undefined]) {
+          const res = await anular(venta.id, { externoHecho });
+          expect(res.status).toBe(400);
+          expect((res.body as { message: string }).message).toBe(
+            MENSAJE_YA_HECHO,
+          );
+        }
+        expect(await estadoDe(venta.id)).toBe('pendiente');
+        expect((await descartesDe(venta.id))[0].descarte).toBeNull();
+      });
+
+      it('externoHecho null se rechaza con 400 por el pipe real y la venta no se anula', async () => {
+        const venta = await pendienteDeFactura();
+        const res = await anular(venta.id, { externoHecho: null });
+        expect(res.status).toBe(400);
+        expect(JSON.stringify(res.body)).toContain('externoHecho');
+        expect(await estadoDe(venta.id)).toBe('pendiente');
+        expect((await descartesDe(venta.id))[0].descarte).toBeNull();
+      });
+
+      it('un externoHecho que no es booleano se rechaza con 400', async () => {
+        const venta = await pendienteDeFactura();
+        const res = await anular(venta.id, { externoHecho: 'no' });
+        expect(res.status).toBe(400);
+        expect(JSON.stringify(res.body)).toContain('externoHecho');
+      });
+    });
+
+    describe('lo que ya emitió alguien bloquea', () => {
+      // Hoy no hay forma de llegar a esto por la API: una venta con un documento
+      // de la máquina tiene pagos, y los pagos ya impiden anular, y ningún
+      // documento del sistema está enviado porque no hay envío. Se arma el dato
+      // por SQL para fijar que la regla lee la tabla real; los datos que lo
+      // producirán (la integración, el PATCH de la tarea 6) llegan después.
+      const insertar = async (
+        ventaId: string,
+        emisor: string,
+        estadoEnvio: string | null,
+      ) =>
+        ds.query(
+          `INSERT INTO venta_documentos
+             (tenant_id, venta_id, emisor, estado_envio, monto)
+           VALUES ($1, $2, $3, $4, 1000)`,
+          [TENANT_ID, ventaId, emisor, estadoEnvio],
+        );
+
+      it('un documento de la máquina: 400 con nota de crédito, y no se anula', async () => {
+        const venta = await vender({ lineas: lineas100k() });
+        await insertar(venta.id, 'maquina', null);
+        const res = await anular(venta.id);
+        expect(res.status).toBe(400);
+        expect((res.body as { message: string }).message).toMatch(
+          /máquina de tarjeta.*nota de crédito/,
+        );
+        expect(await estadoDe(venta.id)).toBe('pendiente');
+        // Ni siquiera la boleta del sistema, que sola sí se descartaría.
+        expect(
+          (await descartesDe(venta.id)).every((d) => d.descarte === null),
+        ).toBe(true);
+      });
+
+      it('un documento del sistema ya enviado: 400, y no se anula', async () => {
+        const venta = await vender({ lineas: lineas100k() });
+        await ds.query(
+          `UPDATE venta_documentos SET estado_envio = 'enviado' WHERE venta_id = $1`,
+          [venta.id],
+        );
+        const res = await anular(venta.id);
+        expect(res.status).toBe(400);
+        expect((res.body as { message: string }).message).toMatch(
+          /enviado al SII.*nota de crédito/,
+        );
+        expect(await estadoDe(venta.id)).toBe('pendiente');
+      });
+    });
+
+    it('una venta con pagos sigue sin anularse (queda pagada_parcial) y sus documentos quedan vigentes', async () => {
+      const venta = await vender({
+        lineas: lineas100k(),
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '40000' }],
+      });
+      const res = await anular(venta.id);
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toMatch(
+        /Solo se anula una venta pendiente/,
+      );
+      expect(
+        (await descartesDe(venta.id)).every((d) => d.descarte === null),
+      ).toBe(true);
+    });
+  });
+
   describe('el esquema', () => {
     it('las columnas cerradas chocan con su CHECK', async () => {
       const filas: { documento_id: string }[] = await ds.query(

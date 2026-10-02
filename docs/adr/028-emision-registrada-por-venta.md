@@ -75,7 +75,9 @@ La única excepción es el **voucher duplicado** (E1b): una deuda ya documentada
 tarjeta de la máquina. El voucher también vale como boleta y duplica la del sistema, y el SII no
 lo resuelve por escrito; el cobro no se bloquea, el pago queda marcado (`es_duplicado`) para que
 el contador lo corrija, y ese documento no cuenta para la cobertura ni para los topes de una
-corrección. La columna existe desde esta tarea; la escribe el abono.
+corrección. Lo escribe `registrarDuplicadoDeAbono`, que `registrarAbono` llama por cada pago
+cuyo medio es `maquina` y solo si la venta tiene algún documento vigente que no sea duplicado
+(una venta de $0 o de un país sin boleta no tiene nada que duplicar).
 
 ### La tabla, y lo que decide su forma
 
@@ -111,8 +113,14 @@ corrección. La columna existe desde esta tarea; la escribe el abono.
   hecho por fuera **se pregunta** al anular, "¿ya hiciste esta factura en tu facturador?"
   (E10): si sí, va por NC hecha por fuera; si no, se anula y queda `'afirmado_no_hecho'` con
   quién lo afirmó y cuándo, que es el único registro de esa afirmación. Se descartaron "impide
-  solo si tiene número" y "nunca se anula". Estas dos reglas las construyen las tareas de la
-  anulación; la tabla las espera.
+  solo si tiene número" y "nunca se anula". Las dos reglas viven en un solo lugar,
+  `VentaDocumentosService.evaluarAnulacion` (devuelve `anulable` con los descartes, `bloqueada`
+  con su motivo, o `pregunta_externo`), y `descartarAlAnular` las aplica dentro de la transacción
+  de `cancelarUnaVez`, después del lock de la venta. Solo cuentan los documentos vigentes
+  (`descarte IS NULL`): una `maquina` o un `sistema` `enviado` bloquean, y un `externo` con
+  número bloquea sin preguntar (el número salió del otro facturador, así que el documento
+  existe). `externoHecho` ausente y `false` son dos conductas distintas, por eso el DTO y el
+  controller no le ponen default.
 - Las columnas cerradas (`emisor`, `clase_maquina`, `estado_envio`, `descarte`) siguen la forma
   de lo nuevo: `@Check` + `type: 'text'` explícito + una unión de TS exportada, no un `enum`
   nativo (cambiar los valores obligaría a `ALTER TYPE`).

@@ -1,15 +1,19 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsIn,
   IsInt,
   IsNumberString,
   IsOptional,
   IsString,
   IsUUID,
   Length,
+  Matches,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
+import type { ClaseDocumentoMaquina } from '../../venta-documentos/entities/venta-documento.entity';
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
@@ -45,6 +49,29 @@ export class PagoItemDto {
   @IsString()
   @Length(4, 4)
   tarjetaUltimos4?: string;
+
+  /**
+   * El número del voucher que emitió la máquina, si el cajero lo tiene a mano.
+   * **Solo lo lee el servidor para el voucher duplicado de E1b**: un abono con
+   * un medio de la máquina sobre una deuda ya documentada. En cualquier otro
+   * medio se ignora sin error. Mismas reglas que `PagoVentaDto.numeroDocumento`.
+   */
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  // eslint-disable-next-line no-control-regex
+  @Matches(/^[^\u0000-\u001F\u007F]*$/, {
+    message: 'numeroDocumento no puede llevar caracteres de control',
+  })
+  numeroDocumento?: string;
+
+  /** Qué emitió la máquina. Mismas reglas que `numeroDocumento`. */
+  @IsOptional()
+  @IsIn(['voucher', 'boleta'])
+  claseDocumento?: ClaseDocumentoMaquina;
 }
 
 export class CreatePagoDto {
