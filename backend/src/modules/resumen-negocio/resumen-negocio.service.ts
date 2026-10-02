@@ -28,7 +28,10 @@ export interface VentasHoy {
   vendido: Comparado;
   /** De hoy: lo vendido sin descontar, y lo que restaron las notas de crédito de hoy (positivo). */
   vendidoDesglose: { bruto: string; notasCredito: string };
+  /** NETO de lo devuelto: `cobradoDesglose.cobrado − cobradoDesglose.devuelto` en `hoy`. */
   cobrado: Comparado;
+  /** De hoy: lo cobrado sin descontar, y lo devuelto hoy (efectivo de las correcciones + REFUND aprobados), positivo. */
+  cobradoDesglose: { cobrado: string; devuelto: string };
   cantidad: Comparado<number>;
   /** `null` cuando esa cantidad es 0 o el neto no es positivo: no hay ticket que promediar. */
   ticketPromedio: Comparado<string | null>;
@@ -83,6 +86,10 @@ interface VentasRow {
 interface CobradoRow {
   cobrado_hoy: string;
   cobrado_semana_pasada: string;
+  efectivo_hoy: string;
+  efectivo_semana_pasada: string;
+  pasarela_hoy: string;
+  pasarela_semana_pasada: string;
 }
 
 interface PorCobrarRow {
@@ -214,20 +221,75 @@ export class ResumenNegocioService {
     // 400 si `SELECT 1 FROM pagos WHERE venta_id = …` encuentra alguna fila.
     // O sea que, por el camino de la app, ninguna nota de crédito ni ninguna
     // venta cancelada puede aportarle nada a esta suma — no hace falta un
-    // `JOIN` a `ventas` para excluirlas.
+    // `JOIN` a `ventas` para excluirlas. Lo que la NC devuelve no sale de esa
+    // suma: se resta aparte, en `e` y `r` (spec 2026-10-01-vendido-neto § 3.2).
+    const condHoyMov = condicion('mc.fecha', IDX_FECHA_HOY);
+    const condSemanaPasadaMov = condicionSemanaPasada(
+      'mc.fecha',
+      IDX_FECHA_SEMANA_PASADA,
+    );
+    const condHoyRefund = condicion('t.fecha_transaccion', IDX_FECHA_HOY);
+    const condSemanaPasadaRefund = condicionSemanaPasada(
+      't.fecha_transaccion',
+      IDX_FECHA_SEMANA_PASADA,
+    );
+
+    // Tres agregados de una fila cada uno, cruzados: una sola consulta.
     const cobradoRows: CobradoRow[] = await this.db.query(
-      `SELECT
-          COALESCE(SUM(pa.monto) FILTER (WHERE ${condHoyPago}), 0)::text
-            AS cobrado_hoy,
-          COALESCE(SUM(pa.monto) FILTER (WHERE ${condSemanaPasadaPago}), 0)::text
-            AS cobrado_semana_pasada
-         FROM pagos p
-         JOIN pago_aplicaciones pa
-           ON pa.pago_id = p.pago_id
-          AND pa.tipo = 'venta'
-          AND pa.eliminado_el IS NULL
-        WHERE p.tenant_id = $1
-          AND p.eliminado_el IS NULL`,
+      `SELECT c.cobrado_hoy, c.cobrado_semana_pasada,
+              e.efectivo_hoy, e.efectivo_semana_pasada,
+              r.pasarela_hoy, r.pasarela_semana_pasada
+         FROM (
+           SELECT COALESCE(SUM(pa.monto) FILTER (WHERE ${condHoyPago}), 0)::text
+                    AS cobrado_hoy,
+                  COALESCE(SUM(pa.monto) FILTER (WHERE ${condSemanaPasadaPago}), 0)::text
+                    AS cobrado_semana_pasada
+             FROM pagos p
+             JOIN pago_aplicaciones pa
+               ON pa.pago_id = p.pago_id
+              AND pa.tipo = 'venta'
+              AND pa.eliminado_el IS NULL
+            WHERE p.tenant_id = $1
+              AND p.eliminado_el IS NULL
+         ) c
+         -- Efectivo devuelto: la salida de caja que lleva el venta_id de una
+         -- corrección. Un retiro de caja no lleva venta_id y no entra. La caja
+         -- no tiene tenant_id: el alcance va por la corrección.
+         CROSS JOIN (
+           SELECT COALESCE(SUM(mc.monto) FILTER (WHERE ${condHoyMov}), 0)::text
+                    AS efectivo_hoy,
+                  COALESCE(SUM(mc.monto) FILTER (WHERE ${condSemanaPasadaMov}), 0)::text
+                    AS efectivo_semana_pasada
+             FROM movimientos_caja mc
+             JOIN ventas nc
+               ON nc.venta_id = mc.venta_id
+              AND nc.venta_referencia_id IS NOT NULL
+              AND nc.tenant_id = $1
+              AND nc.eliminado_el IS NULL
+            WHERE mc.tipo = 'salida'
+              AND mc.eliminado_el IS NULL
+         ) e
+         -- Reembolso por pasarela, con o sin NC (D6). Solo de órdenes con
+         -- venta: el cobro de una orden sin venta nunca entró a pagos, así
+         -- que su reembolso tampoco sale del cobrado. El reembolso del webhook
+         -- no deja salida de caja (no pide devolver dinero), así que esto y lo
+         -- de arriba no se pisan.
+         CROSS JOIN (
+           SELECT COALESCE(SUM(t.monto) FILTER (WHERE ${condHoyRefund}), 0)::text
+                    AS pasarela_hoy,
+                  COALESCE(SUM(t.monto) FILTER (WHERE ${condSemanaPasadaRefund}), 0)::text
+                    AS pasarela_semana_pasada
+             FROM pasarela_transacciones t
+             JOIN pasarela_ordenes o
+               ON o.orden_id = t.orden_id
+              AND o.tenant_id = t.tenant_id
+              AND o.venta_id IS NOT NULL
+              AND o.eliminado_el IS NULL
+            WHERE t.tenant_id = $1
+              AND t.tipo = 'REFUND'
+              AND t.estado = 'aprobada'
+              AND t.eliminado_el IS NULL
+         ) r`,
       params,
     );
 
@@ -343,8 +405,20 @@ export class ResumenNegocioService {
 
     const vendidoHoy = new Decimal(vr?.neto_hoy ?? '0');
     const vendidoSemanaPasada = new Decimal(vr?.vendido_semana_pasada ?? '0');
-    const cobradoHoy = new Decimal(cr?.cobrado_hoy ?? '0');
-    const cobradoSemanaPasada = new Decimal(cr?.cobrado_semana_pasada ?? '0');
+    // Neto de lo devuelto, hoy y la semana pasada. `pasarela_*` viene con la
+    // escala de `pasarela_transacciones.monto` (6) y `pagos` con la suya (4):
+    // lo derivado sale con `toFixed(ESCALA_COSTO)`.
+    const cobradoBrutoHoy = new Decimal(cr?.cobrado_hoy ?? '0');
+    const devueltoHoy = new Decimal(cr?.efectivo_hoy ?? '0').plus(
+      cr?.pasarela_hoy ?? '0',
+    );
+    const devueltoSemanaPasada = new Decimal(
+      cr?.efectivo_semana_pasada ?? '0',
+    ).plus(cr?.pasarela_semana_pasada ?? '0');
+    const cobradoHoy = cobradoBrutoHoy.minus(devueltoHoy);
+    const cobradoSemanaPasada = new Decimal(
+      cr?.cobrado_semana_pasada ?? '0',
+    ).minus(devueltoSemanaPasada);
     const cantidadHoy = vr?.cantidad_hoy ?? 0;
     const cantidadSemanaPasada = vr?.cantidad_semana_pasada ?? 0;
 
@@ -374,9 +448,13 @@ export class ResumenNegocioService {
           notasCredito: vr?.notas_hoy ?? '0',
         },
         cobrado: {
-          hoy: cr?.cobrado_hoy ?? '0',
-          semanaPasada: cr?.cobrado_semana_pasada ?? '0',
+          hoy: cobradoHoy.toFixed(ESCALA_COSTO),
+          semanaPasada: cobradoSemanaPasada.toFixed(ESCALA_COSTO),
           variacion: calcularVariacion(cobradoHoy, cobradoSemanaPasada),
+        },
+        cobradoDesglose: {
+          cobrado: cr?.cobrado_hoy ?? '0',
+          devuelto: devueltoHoy.toFixed(ESCALA_COSTO),
         },
         cantidad: {
           hoy: cantidadHoy,

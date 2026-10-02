@@ -12,6 +12,9 @@ import { TipoTokenAcceso } from '../src/modules/auth/entities/token-acceso.entit
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 import { loginSegundoTenant } from './helpers/segundo-tenant';
 import { randomUUID } from 'node:crypto';
+import { PasarelaOrden } from '../src/modules/pasarela/entities/pasarela-orden.entity';
+import { TransaccionesService } from '../src/modules/pasarela/services/transacciones.service';
+import { VentasReembolsoHandler } from '../src/modules/ventas/reembolso-callback.handler';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const SEGUNDO_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
@@ -68,6 +71,10 @@ interface ResumenHoyResponse {
     mermas: ResumenMermasResp;
   };
   masVendidos: MasVendidoResp[];
+}
+interface ConfigPasarelaRow {
+  tenantPasarelaId: string;
+  codigo: string;
 }
 interface ItemResponse {
   id: string;
@@ -566,6 +573,164 @@ describe('Resumen del negocio (e2e)', () => {
 
       expect(despues.ventas.vendido.hoy).toBe(antes.ventas.vendido.hoy);
       expect(despues.ventas.cantidad.hoy).toBe(antes.ventas.cantidad.hoy);
+    });
+
+    describe('lo devuelto resta del cobrado', () => {
+      const leer = async () =>
+        (await leerResumen(tokenAdmin)).body as ResumenHoyResponse;
+
+      /** La config demo de Paris: la fila con `codigo = 'demo'` de la lista de configuraciones, como la busca `tienda-pasarela-demo.e2e-spec.ts`. */
+      async function idConfigDemo(): Promise<string> {
+        const res = await request(app.getHttpServer())
+          .get('/api/pasarela/admin/config')
+          .set('Authorization', `Bearer ${tokenAdmin}`);
+        expect(res.status).toBe(200);
+        const demo = (res.body as ConfigPasarelaRow[]).find(
+          (c) => c.codigo === 'demo',
+        );
+        expect(demo).toBeDefined();
+        return demo!.tenantPasarelaId;
+      }
+
+      async function usuarioIdAdmin(): Promise<string> {
+        const rows: { usuario_id: string }[] = await ds.query(
+          `SELECT usuario_id FROM usuarios WHERE correo = $1 AND eliminado_el IS NULL`,
+          [ADMIN_EMAIL],
+        );
+        return rows[0].usuario_id;
+      }
+
+      /**
+       * Lo que deja el proveedor después de un reembolso aprobado. En el e2e no
+       * hay cómo llegar por la app: `ProviderFactory.getReembolsable` solo
+       * conoce Oneclick y Webpay Plus (Transbank) y la pasarela demo no
+       * reembolsa. Se arma con las piezas de la app —el repositorio de la orden
+       * y `TransaccionesService.registrar`, el mismo que usa
+       * `CobrosService.reembolsar`— y de ahí en adelante todo va por el camino
+       * real.
+       */
+      async function reembolsoAprobado(ventaId: string | null, monto: string) {
+        const tenantPasarelaId = await idConfigDemo();
+        const orden = await ds.getRepository(PasarelaOrden).save({
+          tenantId: PARIS_TENANT_ID,
+          ventaId,
+          codigoOrden: `e2e-${randomUUID().slice(0, 20)}`,
+          descripcion: 'Orden e2e vendido neto',
+          monto,
+          moneda: 'CLP',
+          estado: 'conciliada',
+          origen: 'interno',
+        });
+        await app.get(TransaccionesService).registrar({
+          tenantId: PARIS_TENANT_ID,
+          ordenId: orden.ordenId,
+          tenantPasarelaId,
+          tipo: 'REFUND',
+          estado: 'aprobada',
+          monto,
+          moneda: 'CLP',
+          codigoOrden: orden.codigoOrden,
+        });
+        return orden;
+      }
+
+      it('una NC con devolverDinero resta el efectivo devuelto; un retiro de caja ajeno no entra', async () => {
+        const venta = await crearVentaPagada('5');
+        const antes = await leer();
+
+        const nc = await request(app.getHttpServer())
+          .post(`/api/ventas/${venta.id}/notas-credito`)
+          .set('Authorization', `Bearer ${tokenAdmin}`)
+          .send({ monto: '2340', devolverDinero: true });
+        expect(nc.status).toBe(201);
+        // Control: una salida de caja que NO es devolución (sin venta_id). Si la
+        // consulta contara cualquier salida, el cobrado caería 2340 + 4100.
+        await post(`/api/caja/${caja.id}/movimientos`, {
+          tipo: 'salida',
+          concepto: 'Retiro e2e',
+          monto: '4100',
+        });
+        const despues = await leer();
+
+        expect(
+          delta(antes.ventas.cobrado.hoy, despues.ventas.cobrado.hoy),
+        ).toBe('-2340');
+        expect(
+          delta(
+            antes.ventas.cobradoDesglose.devuelto,
+            despues.ventas.cobradoDesglose.devuelto,
+          ),
+        ).toBe('2340');
+        expect(
+          delta(
+            antes.ventas.cobradoDesglose.cobrado,
+            despues.ventas.cobradoDesglose.cobrado,
+          ),
+        ).toBe('0');
+      });
+
+      it('un REFUND aprobado sin NC resta del cobrado y no toca lo vendido ni lo que se debe', async () => {
+        const venta = await crearVentaPagada('5');
+        const antes = await leer();
+
+        await reembolsoAprobado(venta.id, '1785');
+        const despues = await leer();
+
+        expect(
+          delta(antes.ventas.cobrado.hoy, despues.ventas.cobrado.hoy),
+        ).toBe('-1785');
+        expect(
+          delta(antes.ventas.vendido.hoy, despues.ventas.vendido.hoy),
+        ).toBe('0');
+        expect(despues.porCobrar).toEqual(antes.porCobrar);
+      });
+
+      it('un REFUND con la NC del webhook resta del cobrado UNA vez y del vendido, y la NC no deja salida de caja', async () => {
+        const venta = await crearVentaPagada('5');
+        const antes = await leer();
+
+        const orden = await reembolsoAprobado(venta.id, '1785');
+        const { notaCreditoId } = await app
+          .get(VentasReembolsoHandler)
+          .onReembolsoAprobado({
+            tenantId: PARIS_TENANT_ID,
+            ordenId: orden.ordenId,
+            codigoOrden: orden.codigoOrden,
+            ventaId: venta.id,
+            monto: '1785',
+            generarNotaCredito: true,
+            devoluciones: [],
+            usuarioId: await usuarioIdAdmin(),
+          });
+        expect(notaCreditoId).toBeDefined();
+        const despues = await leer();
+
+        // Una vez: el REFUND. Si la NC también restara su salida de caja, o
+        // contara dos veces, sería -3570.
+        expect(
+          delta(antes.ventas.cobrado.hoy, despues.ventas.cobrado.hoy),
+        ).toBe('-1785');
+        expect(
+          delta(antes.ventas.vendido.hoy, despues.ventas.vendido.hoy),
+        ).toBe('-1785');
+        const salidas: { n: string }[] = await ds.query(
+          `SELECT COUNT(*)::text AS n FROM movimientos_caja WHERE venta_id = $1`,
+          [notaCreditoId],
+        );
+        expect(salidas[0].n).toBe('0');
+      });
+
+      it('control: el REFUND de una orden sin venta no resta del cobrado', async () => {
+        const antes = await leer();
+
+        await reembolsoAprobado(null, '2210');
+        const despues = await leer();
+
+        expect(despues.ventas.cobrado.hoy).toBe(antes.ventas.cobrado.hoy);
+        expect(despues.ventas.cobradoDesglose).toEqual(
+          antes.ventas.cobradoDesglose,
+        );
+      });
     });
   });
 
