@@ -1172,6 +1172,21 @@ Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no s
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
+- [ ] **El IVA de varios documentos de una misma venta puede no sumar el IVA de la venta, por 1–2
+  pesos** (backend, motor/documentos; **fiscal y toca cómo se reparte el IVA: frente propio**).
+  Cada documento cierra exacto a la escala de la moneda, y la suma se corre por redondeo. Pasa en
+  dos lugares:
+  - **la serie de notas de crédito** de una venta: hasta 2 minor units, ya escrito en
+    [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md) como "decisión del owner no tomada";
+  - **los varios documentos de una venta**, que suma el frente de emisión (2026-10-02). Medido
+    por ese frente: una venta afecta de $100.001 pagada 33.333 + 33.334 + 33.334 da Σ IVA 15.966
+    contra 15.967 de la venta.
+
+  **La pregunta, para cuando se tome:** ¿se acepta la diferencia de un peso, como hace cada
+  documento por separado ante el SII, o el último documento absorbe el residuo para que la suma
+  cuadre con la venta? Absorberlo exige calcular cada documento contra lo que queda de la venta, y
+  no contra su propio monto. Hoy no bloquea nada, porque no se emite al SII.
+
 ## 5. Carreras de concurrencia
 
 ---
