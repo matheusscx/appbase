@@ -50,6 +50,7 @@ export class OnlineCallbackHandler
       tipoPago?: string | null;
       numeroCuotas?: number | null;
       tarjetaUltimos4?: string | null;
+      codigoAutorizacion?: string | null;
     };
 
     // Débito RedCompra (payment_type_code VD) → método débito si el tenant lo
@@ -79,6 +80,9 @@ export class OnlineCallbackHandler
           numeroCuotas: resultadoPago.numeroCuotas ?? undefined,
           tipoPago: resultadoPago.tipoPago ?? undefined,
           tarjetaUltimos4: resultadoPago.tarjetaUltimos4 ?? undefined,
+          // El código de autorización de Webpay es un dato del pago, no el
+          // documento tributario: queda en `pagos.referencia`.
+          referencia: resultadoPago.codigoAutorizacion ?? undefined,
         },
       ],
       customer: { nombre: checkout.customerNombre },

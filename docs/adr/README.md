@@ -39,6 +39,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [025](./025-decimales-estado-actual.md) | Estado actual de los decimales — línea base medida contra la que se mide ADR-024, con las cinco preguntas contestadas desde el código | Accepted | 2026-09-03 |
 | [026](./026-idempotencia-de-cobros.md) | Idempotencia de cobros: una `Idempotency-Key` por intento, reclamada como primera sentencia de la transacción del cobro; el reintento reproduce, con otros datos da 422 | Accepted | 2026-09-19 |
 | [027](./027-graficas-con-unovis.md) | Gráficas con Unovis: `AppGrafica` como único punto de entrada, colores por variable CSS de los tokens, y la gráfica siempre al lado de una tabla que tiene el número | Accepted | 2026-09-21 |
+| [028](./028-emision-registrada-por-venta.md) | La emisión se registra por venta: tabla `venta_documentos`, el emisor sale del medio de pago y de lo que declara el comercio, y el documento nace con la entrega | Accepted | 2026-10-02 |
 
 ## Creating a New ADR
 

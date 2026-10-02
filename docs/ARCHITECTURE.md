@@ -55,6 +55,7 @@ startup-app/
 │   │       ├── calculo-precios/  # Motor de cálculo de precios (servicio puro stateless)
 │   │       ├── ventas/           # Procesamiento de ventas transaccional + tipos de documento
 │   │       ├── pagos/            # Abonos a ventas pendientes y ledger de pagos
+│   │       ├── venta-documentos/ # Qué documentos tiene cada venta y quién los emitió (módulo hoja, ADR-028)
 │   │       ├── idempotencia/     # Un cobro por intento: Idempotency-Key → respuesta (ADR-026)
 │   │       ├── caja/             # Gestión de cajas (física/virtual, movimientos, cierre)
 │   │       ├── propinas/         # Registro, distribución, liquidación y reportes agregados

@@ -34,6 +34,8 @@ import { CajaService, IntentoRechazadoError } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService, type ConvertirUnidad } from '../items/items.service';
 import { PagosService, calcularEstadoVenta } from '../pagos/pagos.service';
+import { VentaDocumentosService } from '../venta-documentos/venta-documentos.service';
+import type { Facturador } from '../tenants/entities/tenant.entity';
 import { VentaPropinaService } from '../propinas/venta-propina.service';
 import { EstrategiaAsignacionPropina } from '../propinas/enums/estrategia-asignacion-propina.enum';
 import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion.entity';
@@ -226,6 +228,7 @@ export class VentasService {
     private readonly inventarioService: InventarioService,
     private readonly itemsService: ItemsService,
     private readonly pagosService: PagosService,
+    private readonly ventaDocumentosService: VentaDocumentosService,
     private readonly ventaPropinaService: VentaPropinaService,
     private readonly catalogService: CatalogService,
     private readonly garzonesService: GarzonesService,
@@ -494,8 +497,12 @@ export class VentasService {
       valor_del_dia: string | null;
       es_oficial: boolean;
       decimales: number | string;
+      facturador: Facturador;
     }[] = await this.db.query(
-      `SELECT m.moneda_id, tm.valor_del_dia, m.decimales,
+      // `t.facturador` viaja en esta misma consulta (que ya arranca en
+      // `tenants`) para que la emisión no cueste una lectura más. Es del
+      // tenant: sale repetido en cada fila de moneda.
+      `SELECT m.moneda_id, tm.valor_del_dia, m.decimales, t.facturador,
               (m.moneda_id = p.moneda_oficial_id) AS es_oficial
          FROM tenants t
          JOIN provincia prov ON prov.provincia_id = t.provincia_id
@@ -1159,6 +1166,50 @@ export class VentasService {
       [estadoFinal, venta.id],
     );
     venta.estado = estadoFinal;
+
+    // 7j. Los documentos de la venta. Se resuelven ACÁ, una sola vez, dentro de
+    //     la transacción: en POS y salones crear la venta es la entrega, y lo
+    //     entregado se documenta al entregarlo, se haya pagado o no (E1).
+    //     Todo lo que necesita ya está en memoria: las porciones salen de
+    //     `detalles` y el emisor de cada pago, de `registrar`.
+    const porciones = new Map<string, { total: Decimal; impuesto: Decimal }>();
+    for (const d of detalles) {
+      const acum = porciones.get(d.clasificacionTributaria) ?? {
+        total: new Decimal(0),
+        impuesto: new Decimal(0),
+      };
+      porciones.set(d.clasificacionTributaria, {
+        total: acum.total.plus(d.totalLinea),
+        impuesto: acum.impuesto.plus(d.impuestoAplicado),
+      });
+    }
+    await this.ventaDocumentosService.documentarVenta(manager, {
+      tenantId,
+      venta: {
+        id: venta.id,
+        tipoDocumentoId: tipoDocumento.id,
+        esBoleta: tipoDocumento.esBoleta,
+        canal,
+        totalFinal: resultado.totales.totalFinal,
+        configCalculo: resultado.config,
+      },
+      facturador: monedaOficial.facturador,
+      porciones: [...porciones].map(([clasificacion, p]) => ({
+        clasificacion,
+        total: p.total.toFixed(4),
+        impuesto: p.impuesto.toFixed(4),
+      })),
+      // `porPago[i]` es el pago de `pagosDto[i]`: el número y la clase que tipeó
+      // el cajero viajan por posición.
+      pagos: saved.porPago.map((p, i) => ({
+        pagoId: p.pagoId,
+        metodoPagoId: p.metodoPagoId,
+        emisor: p.emisor,
+        aplicadoVenta: p.aplicadoVenta,
+        numeroDocumento: pagosDto[i].numeroDocumento,
+        claseDocumento: pagosDto[i].claseDocumento,
+      })),
+    });
 
     // Detalle priceado de la personalización, con cada extra YA convertido a
     // moneda oficial. Es el ÚNICO productor: el POS lo imprime desde acá en vez

@@ -8,10 +8,13 @@ import {
   IsString,
   IsUUID,
   Length,
+  Matches,
+  MaxLength,
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
+import type { ClaseDocumentoMaquina } from '../../venta-documentos/entities/venta-documento.entity';
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
@@ -86,6 +89,33 @@ export class PagoVentaDto {
   @IsString()
   @Length(4, 4)
   tarjetaUltimos4?: string;
+
+  /**
+   * El número del voucher o de la boleta que emitió la máquina de tarjeta, si el
+   * cajero lo tiene a mano. Solo lo lee el servidor cuando el medio del pago
+   * emite con la máquina; en cualquier otro medio se ignora sin error (la
+   * pantalla no lo muestra ahí y el pago sigue siendo válido). Opcional: se
+   * puede completar después.
+   */
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  // Sin caracteres de control: un salto de línea o un NUL en el número llegaría
+  // a la base y a lo que se imprima. Con el `trim` de arriba, los de los
+  // extremos ya no están; acá se rechazan los del medio.
+  // eslint-disable-next-line no-control-regex
+  @Matches(/^[^\u0000-\u001F\u007F]*$/, {
+    message: 'numeroDocumento no puede llevar caracteres de control',
+  })
+  numeroDocumento?: string;
+
+  /** Qué emitió la máquina. Mismas reglas que `numeroDocumento`. */
+  @IsOptional()
+  @IsIn(['voucher', 'boleta'])
+  claseDocumento?: ClaseDocumentoMaquina;
 }
 
 export class CustomerVentaDto {

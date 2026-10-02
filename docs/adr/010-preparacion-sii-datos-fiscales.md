@@ -73,6 +73,17 @@ todo compatible con SII, sin integrarlo.
 - **Datos de emisor/receptor disponibles**: RUT + giro del receptor para factura; el modelo
   `customer`/`terceros` debe poder alojarlos.
 
+  ⚠️ **Actualización 2026-10-02 — la venta también registra qué documentos tiene y quién los
+  emitió.** Hasta ese día la venta llevaba solo una etiqueta (`tipo_documento_id`). Ahora cada
+  venta deja, al crearse, una fila por documento en `venta_documentos` —del sistema, de la
+  máquina de tarjeta, del otro facturador del comercio o la constancia de que nadie lo
+  emite—, con sus baldes congelados a prorrata y **sin folio** (el número es un dato externo).
+  Es el mismo principio de este ADR aplicado al documento: congelar el hecho en la
+  transacción, diferir el envío. Un matiz sobre los baldes de arriba: el documento congela
+  `neto afecto`, `exento` y **un solo** monto de impuestos (la venta no guarda IVA y adicionales
+  por separado). Decisión y razones en
+  [ADR-028](./028-emision-registrada-por-venta.md).
+
 ### Diferir explícitamente (NO construir ahora)
 - Generación del XML del DTE y web service del SII.
 - Folios / CAF (el SII asigna rangos). **Regla de diseño: la PK interna ≠ folio; mantener

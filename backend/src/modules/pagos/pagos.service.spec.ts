@@ -27,18 +27,36 @@ const mockCajaActiva = {
 };
 
 const METODO_EFECTIVO_ROWS = [
-  { metodo_pago_id: EFECTIVO_ID, nombre: 'Efectivo', permite_vuelto: true },
+  {
+    metodo_pago_id: EFECTIVO_ID,
+    nombre: 'Efectivo',
+    permite_vuelto: true,
+    emisor: 'sistema',
+    es_efectivo: true,
+  },
 ];
 
 const METODO_TARJETA_ROWS = [
-  { metodo_pago_id: TARJETA_ID, nombre: 'Tarjeta', permite_vuelto: false },
+  {
+    metodo_pago_id: TARJETA_ID,
+    nombre: 'Tarjeta',
+    permite_vuelto: false,
+    emisor: 'maquina',
+    es_efectivo: false,
+  },
 ];
 
 // Segundo método con vuelto, para ejercer el reparto del excedente entre varios.
 // Su id ordena DESPUÉS de EFECTIVO_ID, que es el criterio determinista del reparto.
 const VALE_ID = '550e8400-e29b-41d4-a716-446655440109';
 const METODO_VALE_ROWS = [
-  { metodo_pago_id: VALE_ID, nombre: 'Vale vista', permite_vuelto: true },
+  {
+    metodo_pago_id: VALE_ID,
+    nombre: 'Vale vista',
+    permite_vuelto: true,
+    emisor: 'nadie',
+    es_efectivo: false,
+  },
 ];
 
 // Método SIN vuelto cuyo id ordena ANTES que EFECTIVO_ID. Existe para que el
@@ -48,7 +66,13 @@ const METODO_VALE_ROWS = [
 // resultado y el test no distinguiría entre las tres.
 const CHEQUE_ID = '550e8400-e29b-41d4-a716-446655440100';
 const METODO_CHEQUE_ROWS = [
-  { metodo_pago_id: CHEQUE_ID, nombre: 'Cheque', permite_vuelto: false },
+  {
+    metodo_pago_id: CHEQUE_ID,
+    nombre: 'Cheque',
+    permite_vuelto: false,
+    emisor: 'sistema',
+    es_efectivo: false,
+  },
 ];
 
 function buildManagerMock(metodoRows = METODO_EFECTIVO_ROWS) {
@@ -176,7 +200,11 @@ describe('PagosService', () => {
           target: '100.0000',
         },
       );
-      expect(result).toEqual({ pagos: [], montoAplicadoVenta: '0.0000' });
+      expect(result).toEqual({
+        pagos: [],
+        montoAplicadoVenta: '0.0000',
+        porPago: [],
+      });
       expect(manager.save).not.toHaveBeenCalled();
     });
 
@@ -316,6 +344,113 @@ describe('PagosService', () => {
           }),
         ]),
       );
+    });
+
+    describe('porPago: lo que cada pago aplicó a la venta y quién emite su medio', () => {
+      // Los pagos van en un orden y las filas del medio vuelven en OTRO: el
+      // resultado tiene que salir en el orden de la entrada, que es lo que
+      // permite cruzar cada pago con el número que tipeó el cajero.
+      function managerConIds(rows: typeof METODO_EFECTIVO_ROWS) {
+        const manager = buildManagerMock(rows);
+        let pagoSeq = 0;
+        manager.save.mockImplementation(
+          (
+            _entity: unknown,
+            data: Record<string, unknown>,
+          ): Promise<unknown> => {
+            if (data['metodoPagoId'] !== undefined) {
+              pagoSeq += 1;
+              return Promise.resolve({
+                id: `pago-${pagoSeq}`,
+                ...data,
+                vuelto: (data['vuelto'] as string | undefined) ?? '0.0000',
+              });
+            }
+            return Promise.resolve({ id: 'app-1', ...data });
+          },
+        );
+        return manager;
+      }
+
+      it('sale en el orden de la entrada, con emisor, esEfectivo y lo aplicado de ESE pago', async () => {
+        const manager = managerConIds([
+          ...METODO_TARJETA_ROWS,
+          ...METODO_EFECTIVO_ROWS,
+        ]);
+        const module = await setupModule(manager);
+        const svc = module.get<PagosService>(PagosService);
+
+        const result = await svc.registrar(
+          manager as unknown as EntityManager,
+          {
+            tenantId: TENANT_ID,
+            ventaId: VENTA_ID,
+            pagos: [
+              { metodoPagoId: EFECTIVO_ID, monto: '30000' },
+              { metodoPagoId: TARJETA_ID, monto: '25000' },
+            ],
+            cajaId: CAJA_ID,
+            monedaOficialId: MONEDA_ID,
+            target: '55000',
+            propinaMonto: '5000',
+            ventaPropinaId: 'vp-uuid',
+          },
+        );
+
+        expect(result.porPago).toEqual([
+          {
+            pagoId: 'pago-1',
+            metodoPagoId: EFECTIVO_ID,
+            emisor: 'sistema',
+            esEfectivo: true,
+            aplicadoVenta: '30000.0000',
+          },
+          {
+            pagoId: 'pago-2',
+            metodoPagoId: TARJETA_ID,
+            emisor: 'maquina',
+            esEfectivo: false,
+            // 25.000 menos 5.000 de propina.
+            aplicadoVenta: '20000.0000',
+          },
+        ]);
+        expect(
+          result.porPago
+            .reduce((a, p) => a.plus(p.aplicadoVenta), new Decimal(0))
+            .toFixed(4),
+        ).toBe(result.montoAplicadoVenta);
+      });
+
+      it('un pago que fue todo propina sale con aplicadoVenta 0', async () => {
+        const manager = managerConIds([
+          ...METODO_EFECTIVO_ROWS,
+          ...METODO_TARJETA_ROWS,
+        ]);
+        const module = await setupModule(manager);
+        const svc = module.get<PagosService>(PagosService);
+
+        const result = await svc.registrar(
+          manager as unknown as EntityManager,
+          {
+            tenantId: TENANT_ID,
+            ventaId: VENTA_ID,
+            pagos: [
+              { metodoPagoId: EFECTIVO_ID, monto: '30000' },
+              { metodoPagoId: TARJETA_ID, monto: '5000' },
+            ],
+            cajaId: CAJA_ID,
+            monedaOficialId: MONEDA_ID,
+            target: '35000',
+            propinaMonto: '5000',
+            ventaPropinaId: 'vp-uuid',
+          },
+        );
+
+        expect(result.porPago.map((p) => p.aplicadoVenta)).toEqual([
+          '30000.0000',
+          '0.0000',
+        ]);
+      });
     });
 
     it('asigna vuelto al pago con permite_vuelto cuando suma supera el target', async () => {

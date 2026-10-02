@@ -18,6 +18,7 @@ import {
 } from '../../common/utils/rango-fecha.util';
 import { CajaService } from '../caja/caja.service';
 import { EstadoVenta } from '../ventas/entities/venta.entity';
+import type { EmisorMedio } from '../metodos-pago/entities/tenant-metodo-pago.entity';
 import { Pago } from './entities/pago.entity';
 import {
   PagoAplicacion,
@@ -94,6 +95,20 @@ interface PagoListRow {
   tarjeta_ultimos4: string | null;
 }
 
+/**
+ * Lo que `registrar` deja saber de cada pago, en el orden de la entrada: lo que
+ * aplicó a la venta (sin propina ni vuelto) y quién emite el documento de su
+ * medio. Es lo que la emisión necesita para armar los documentos de la venta.
+ */
+export interface PagoRegistrado {
+  pagoId: string;
+  metodoPagoId: string;
+  emisor: EmisorMedio;
+  esEfectivo: boolean;
+  /** `pago_aplicaciones.tipo = 'venta'` de ESE pago; `'0.0000'` si todo fue propina. */
+  aplicadoVenta: string;
+}
+
 // ─── service ─────────────────────────────────────────────────────────────────
 
 @Injectable()
@@ -122,7 +137,11 @@ export class PagosService {
       ventaPropinaId?: string | null;
       estrategia?: EstrategiaAsignacionPropina;
     },
-  ): Promise<{ pagos: Pago[]; montoAplicadoVenta: string }> {
+  ): Promise<{
+    pagos: Pago[];
+    montoAplicadoVenta: string;
+    porPago: PagoRegistrado[];
+  }> {
     const {
       tenantId,
       ventaId,
@@ -137,16 +156,21 @@ export class PagosService {
 
     // Ventas sin pago = cuentas por cobrar
     if (pagos.length === 0) {
-      return { pagos: [], montoAplicadoVenta: '0.0000' };
+      return { pagos: [], montoAplicadoVenta: '0.0000', porPago: [] };
     }
 
-    // Resolver nombre + permite_vuelto de cada método de pago
+    // Resolver nombre, permite_vuelto, emisor y es_efectivo de cada método de
+    // pago. El emisor y es_efectivo salen en ESTA lectura: la emisión no suma
+    // una consulta.
     const metodoPagoRows: {
       metodo_pago_id: string;
       nombre: string;
       permite_vuelto: boolean;
+      emisor: EmisorMedio;
+      es_efectivo: boolean;
     }[] = await manager.query(
-      `SELECT tmp.metodo_pago_id, mp.nombre, tmp.permite_vuelto
+      `SELECT tmp.metodo_pago_id, mp.nombre, tmp.permite_vuelto,
+              tmp.emisor, mp.es_efectivo
        FROM tenant_metodo_pago tmp
        JOIN metodos_pago mp ON mp.metodo_pago_id = tmp.metodo_pago_id
                             AND mp.eliminado_el IS NULL
@@ -159,7 +183,12 @@ export class PagosService {
     const metodoPagoMap = new Map(
       metodoPagoRows.map((r) => [
         r.metodo_pago_id,
-        { nombre: r.nombre, permiteVuelto: r.permite_vuelto },
+        {
+          nombre: r.nombre,
+          permiteVuelto: r.permite_vuelto,
+          emisor: r.emisor,
+          esEfectivo: r.es_efectivo,
+        },
       ]),
     );
 
@@ -273,6 +302,9 @@ export class PagosService {
     );
 
     let montoAplicadoVenta = new Decimal(0);
+    // Lo aplicado a la venta por cada pago (el índice es el de la entrada). Un
+    // pago que fue todo propina no tiene fila `venta` y queda en cero.
+    const aplicadoPorPago = new Map<number, Decimal>();
     for (const app of aplicaciones) {
       const pago = pagosGuardados[app.pagoIdx];
       const tipo =
@@ -281,6 +313,10 @@ export class PagosService {
           : TipoPagoAplicacion.PROPINA;
       if (tipo === TipoPagoAplicacion.VENTA) {
         montoAplicadoVenta = montoAplicadoVenta.plus(app.monto);
+        aplicadoPorPago.set(
+          app.pagoIdx,
+          (aplicadoPorPago.get(app.pagoIdx) ?? new Decimal(0)).plus(app.monto),
+        );
       }
       await manager.save(
         PagoAplicacion,
@@ -316,6 +352,16 @@ export class PagosService {
     return {
       pagos: pagosGuardados,
       montoAplicadoVenta: montoAplicadoVenta.toFixed(4),
+      porPago: pagosGuardados.map((pago, i) => {
+        const medio = metodoPagoMap.get(pago.metodoPagoId)!;
+        return {
+          pagoId: pago.id,
+          metodoPagoId: pago.metodoPagoId,
+          emisor: medio.emisor,
+          esEfectivo: medio.esEfectivo,
+          aplicadoVenta: (aplicadoPorPago.get(i) ?? new Decimal(0)).toFixed(4),
+        };
+      }),
     };
   }
 

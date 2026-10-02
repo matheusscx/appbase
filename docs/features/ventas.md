@@ -77,7 +77,8 @@ Request:
     }
   ],
   "pagos": [
-    { "metodoPagoId": "uuid", "monto": "1069810.0000", "referencia": "opt" }
+    { "metodoPagoId": "uuid", "monto": "1069810.0000", "referencia": "opt",
+      "numeroDocumento": "opt", "claseDocumento": "voucher | boleta (opt)" }
   ],
   "customer": { "nombre": "Juan Pérez", "rut": "12.345.678-9" },  // opcional
   "comentario": "string",                       // opcional
@@ -118,6 +119,31 @@ importar cuántas líneas lleve.
 
 Como toda venta nace con tipo, **el tipo ya no impide anular**: ver `POST /ventas/:id/anular`.
 La boleta es única por país (`uq_tipo_documento_boleta_pais`, gemelo del índice de la NC).
+
+**Los documentos de la venta (2026-10-02, [ADR-028](../adr/028-emision-registrada-por-venta.md)).**
+Al crear la venta, y dentro de su misma transacción, el servidor deja una fila por documento en
+`venta_documentos`: quién lo emitió y por cuánto. El cliente **nunca** manda quién emitió: lo
+resuelve el servidor con el `emisor` de cada medio de pago (`tenant_metodo_pago.emisor`:
+`sistema`, `maquina` o `nadie`) y con `tenants.facturador` (`sistema` o `externo`). Lo que sí
+manda el cajero, opcional, es el número y la clase de lo que emitió la máquina
+(`numeroDocumento`, máx. 40 y sin caracteres de control; `claseDocumento`: `voucher` o `boleta`); en un pago cuyo medio no
+es de la máquina se ignoran sin error.
+
+| La venta es… | Documentos que deja |
+|---|---|
+| de **$0** | ninguno (el mínimo de la boleta es $1) |
+| de un país **sin boleta sembrada** (sin tipo) | ninguno: no cambia |
+| **online** | uno del sistema por el total, sin mirar el medio |
+| **factura** | uno por el **total**, se pague o no: del sistema, o `externo` con el tipo factura y sin número si el comercio factura por fuera |
+| **boleta** | uno por cada pago de la `maquina` (con su pago, número y clase si vinieron); una fila `nadie` por la suma de los pagos en `nadie`; una boleta del sistema por los pagos `sistema` más lo **no pagado** (o, con `facturador = externo`, lo no pagado va en un `externo` con el tipo boleta y sin número) |
+
+El monto de cada documento es lo **aplicado a la venta**: sin propina ni vuelto. Lo entregado se
+documenta al entregarlo, se haya pagado o no (la mesa que paga $40.000 con tarjeta y debe
+$60.000 queda con el voucher por $40.000 y una boleta por $60.000 al cerrar); el pago posterior
+de esa deuda no genera documento. La suma de los documentos es el `totalFinal`. Los documentos
+del sistema y los `externo` congelan sus baldes (neto afecto, neto exento y la suma de todos los
+impuestos), a prorrata de las porciones de la venta cuando cubren solo una parte. Todo sale de
+lo que ya está en memoria: sin lecturas nuevas.
 
 **Un cobro que se repite no se registra dos veces** (2026-09-19,
 [ADR-026](../adr/026-idempotencia-de-cobros.md)). La cabecera `Idempotency-Key` es
@@ -414,6 +440,7 @@ lectura del supervisor en
 | `VentaRecargo` | `ventas_recargos` |
 | `VentaImpuesto` | `ventas_impuestos` |
 | `VentaCustomer` | `venta_customer` |
+| `VentaDocumento` | `venta_documentos` (módulo `venta-documentos`, ADR-028) |
 | `Pago` | `pagos` |
 | `TipoDocumentoTributario` | `tipos_documento_tributario` |
 
@@ -443,7 +470,7 @@ detalle necesita para mostrar "2,5 kg" en vez de "2,5". Ver también el congelad
 3. Convertir precios a moneda oficial (`precioOrigen × tasa_cambio`)
 4. Llamar `calculoPreciosService.calcular` → importes autoritativos
 5. Calcular excedente; validar `permite_vuelto` si hay excedente; determinar estado
-6. `db.transaccion`: **reclamar la `Idempotency-Key`** (primera sentencia; si ya estaba, reproducir y cortar acá) → guardar cabecera → detalles → trazas de reglas → customer → inventario (`salida/venta` por producto) → pagos → movimientos de caja (efectivo) → guardar la respuesta junto a la clave
+6. `db.transaccion`: **reclamar la `Idempotency-Key`** (primera sentencia; si ya estaba, reproducir y cortar acá) → guardar cabecera → detalles → trazas de reglas → customer → inventario (`salida/venta` por producto) → pagos → movimientos de caja (efectivo) → **documentos de la venta** (`VentaDocumentosService.documentarVenta`) → guardar la respuesta junto a la clave
 
 ### Dependencias reutilizadas
 

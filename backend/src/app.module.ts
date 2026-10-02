@@ -93,6 +93,8 @@ import { VentaDescuento } from './modules/ventas/entities/venta-descuento.entity
 import { VentaRecargo } from './modules/ventas/entities/venta-recargo.entity';
 import { VentaImpuesto } from './modules/ventas/entities/venta-impuesto.entity';
 import { VentaCustomer } from './modules/ventas/entities/venta-customer.entity';
+import { VentaDocumentosModule } from './modules/venta-documentos/venta-documentos.module';
+import { VentaDocumento } from './modules/venta-documentos/entities/venta-documento.entity';
 import { Pago } from './modules/pagos/entities/pago.entity';
 import { PagoAplicacion } from './modules/pagos/entities/pago-aplicacion.entity';
 import { PropinasModule } from './modules/propinas/propinas.module';
@@ -264,6 +266,7 @@ import { ReportesModule } from './modules/reportes/reportes.module';
           VentaDescuento,
           VentaRecargo,
           VentaImpuesto,
+          VentaDocumento,
           VentaCustomer,
           Pago,
           PagoAplicacion,
@@ -348,6 +351,7 @@ import { ReportesModule } from './modules/reportes/reportes.module';
     CajaModule,
     CajonesModule,
     VentasModule,
+    VentaDocumentosModule,
     PagosModule,
     PropinasModule,
     TercerosModule,

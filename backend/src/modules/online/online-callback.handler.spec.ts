@@ -83,6 +83,42 @@ describe('OnlineCallbackHandler', () => {
     expect(o.ventaId).toBe('venta-9');
   });
 
+  it('el código de autorización de Webpay va a pagos.referencia', async () => {
+    ventas.crear.mockResolvedValue({ id: 'venta-ref' });
+    await handler.onOrdenResuelta(
+      orden(
+        {},
+        {
+          tipoPago: 'VN',
+          numeroCuotas: 0,
+          tarjetaUltimos4: '6623',
+          codigoAutorizacion: '1213',
+        },
+      ),
+    );
+
+    const [, , dto] = ventas.crear.mock.calls[0] as [
+      string,
+      string,
+      { pagos: { referencia?: string }[] },
+    ];
+    expect(dto.pagos[0].referencia).toBe('1213');
+  });
+
+  it('sin código de autorización no manda referencia (ni null)', async () => {
+    ventas.crear.mockResolvedValue({ id: 'venta-sin-ref' });
+    await handler.onOrdenResuelta(
+      orden({}, { tipoPago: 'VN', codigoAutorizacion: null }),
+    );
+
+    const [, , dto] = ventas.crear.mock.calls[0] as [
+      string,
+      string,
+      { pagos: Record<string, unknown>[] },
+    ];
+    expect(dto.pagos[0].referencia).toBeUndefined();
+  });
+
   it('pasa presentación al CreateVentaDto cuando viene en snapshot', async () => {
     ventas.crear.mockResolvedValue({ id: 'venta-pres' });
     const o = orden();

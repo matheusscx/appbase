@@ -5,6 +5,7 @@ import { CajaModule } from '../caja/caja.module';
 import { InventarioModule } from '../inventario/inventario.module';
 import { ItemsModule } from '../items/items.module';
 import { PagosModule } from '../pagos/pagos.module';
+import { VentaDocumentosModule } from '../venta-documentos/venta-documentos.module';
 import { PropinasModule } from '../propinas/propinas.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { GarzonesModule } from '../garzones/garzones.module';
@@ -44,6 +45,7 @@ import { VentasReembolsoHandler } from './reembolso-callback.handler';
     InventarioModule,
     ItemsModule,
     PagosModule,
+    VentaDocumentosModule,
     PropinasModule,
     CatalogModule,
     // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de

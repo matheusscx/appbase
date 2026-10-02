@@ -1966,6 +1966,45 @@ WHERE p.eliminado_el IS NULL
     WHERE pa.pago_id = p.pago_id AND pa.eliminado_el IS NULL
   );
 
+-- Documentos de una venta: uno por documento que el sistema armó, que emitió la
+-- máquina de tarjeta, que el comercio hizo en otro facturador ('externo') o la
+-- constancia de que nadie lo emite ('nadie'). Spec 2026-10-01-emision-por-venta,
+-- ADR-028. Se crea al crear la venta y cubre su total_final (salvo $0); el único
+-- que no cuenta para esa cobertura es el voucher duplicado (es_duplicado).
+-- "numero" es un dato externo (el de la máquina o el del otro facturador): el
+-- folio del sistema no existe todavía (ADR-010). "monto_impuestos" es la suma de
+-- TODOS los impuestos del documento.
+CREATE TABLE "venta_documentos" (
+  "documento_id"              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"                 UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "venta_id"                  UUID          NOT NULL REFERENCES "ventas" ("venta_id"),
+  "emisor"                    TEXT          NOT NULL,
+  "tipo_documento_id"         UUID          REFERENCES "tipos_documento_tributario" ("tipo_documento_id"),
+  "clase_maquina"             TEXT,
+  "numero"                    TEXT,
+  "estado_envio"              TEXT,
+  "monto"                     NUMERIC(18,4) NOT NULL,
+  "monto_afecto"              NUMERIC(18,4),
+  "monto_exento"              NUMERIC(18,4),
+  "monto_impuestos"           NUMERIC(18,4),
+  "pago_id"                   UUID          REFERENCES "pagos" ("pago_id"),
+  "documento_corregido_id"    UUID          REFERENCES "venta_documentos" ("documento_id"),
+  "es_duplicado"              BOOLEAN       NOT NULL DEFAULT false,
+  "descarte"                  TEXT,
+  "descartado_el"             TIMESTAMPTZ,
+  "descartado_por_usuario_id" UUID          REFERENCES "usuarios" ("usuario_id"),
+  "creado_el"                 TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"            TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "eliminado_el"              TIMESTAMPTZ,
+  CONSTRAINT chk_venta_documentos_emisor CHECK ("emisor" IN ('sistema','maquina','nadie','externo')),
+  CONSTRAINT chk_venta_documentos_clase_maquina CHECK ("clase_maquina" IN ('voucher','boleta')),
+  CONSTRAINT chk_venta_documentos_estado_envio CHECK ("estado_envio" IN ('armado','enviado')),
+  CONSTRAINT chk_venta_documentos_descarte CHECK ("descarte" IN ('armado_sin_enviar','afirmado_no_hecho'))
+);
+
+CREATE INDEX "idx_venta_documentos_venta" ON "venta_documentos" ("venta_id");
+CREATE INDEX "idx_venta_documentos_corregido" ON "venta_documentos" ("documento_corregido_id");
+
 -- FKs diferidas de movimientos_caja (dependen de ventas y pagos)
 ALTER TABLE "movimientos_caja" ADD FOREIGN KEY ("venta_id") REFERENCES "ventas" ("venta_id");
 ALTER TABLE "movimientos_caja" ADD FOREIGN KEY ("pago_id")  REFERENCES "pagos" ("pago_id");

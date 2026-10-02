@@ -14,6 +14,7 @@ import { CajaService, IntentoRechazadoError } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService } from '../items/items.service';
 import { PagosService } from '../pagos/pagos.service';
+import { VentaDocumentosService } from '../venta-documentos/venta-documentos.service';
 import { VentaPropinaService } from '../propinas/venta-propina.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { GarzonesService } from '../garzones/garzones.service';
@@ -136,11 +137,14 @@ const MONEDA_ROWS = [
     valor_del_dia: '950.000000',
     es_oficial: false,
     decimales: 2,
+    // Es del tenant y no de la moneda: sale repetido en cada fila.
+    facturador: 'sistema',
   },
   {
     moneda_id: MONEDA_OFICIAL_ID,
     valor_del_dia: '1.000000',
     es_oficial: true,
+    facturador: 'sistema',
     // 4 = el máximo que admite el sistema (UF): la escala más fina con la que
     // el motor puede cuantizar.
     decimales: 4,
@@ -234,6 +238,7 @@ describe('VentasService', () => {
   let inventarioService: jest.Mocked<InventarioService>;
   let itemsService: jest.Mocked<ItemsService>;
   let pagosServiceMock: { registrar: jest.Mock };
+  let ventaDocumentosMock: { documentarVenta: jest.Mock };
   let ventaPropinaServiceMock: { crearEnTransaccion: jest.Mock };
   let garzonesServiceMock: {
     asegurarMostrador: jest.Mock;
@@ -258,9 +263,14 @@ describe('VentasService', () => {
   beforeEach(async () => {
     const manager = buildManagerMock();
     pagosServiceMock = {
-      registrar: jest
-        .fn()
-        .mockResolvedValue({ pagos: [], montoAplicadoVenta: '0.0000' }),
+      registrar: jest.fn().mockResolvedValue({
+        pagos: [],
+        montoAplicadoVenta: '0.0000',
+        porPago: [],
+      }),
+    };
+    ventaDocumentosMock = {
+      documentarVenta: jest.fn().mockResolvedValue([]),
     };
     ventaPropinaServiceMock = {
       crearEnTransaccion: jest.fn().mockResolvedValue({
@@ -389,6 +399,10 @@ describe('VentasService', () => {
           useValue: pagosServiceMock,
         },
         {
+          provide: VentaDocumentosService,
+          useValue: ventaDocumentosMock,
+        },
+        {
           provide: VentaPropinaService,
           useValue: ventaPropinaServiceMock,
         },
@@ -474,6 +488,15 @@ describe('VentasService', () => {
       pagosServiceMock.registrar.mockResolvedValueOnce({
         pagos: [{ id: 'pago-uuid-001', monto: '100.0000', vuelto: '0.0000' }],
         montoAplicadoVenta: '100.0000',
+        porPago: [
+          {
+            pagoId: 'pago-uuid-001',
+            metodoPagoId: EFECTIVO_ID,
+            emisor: 'sistema',
+            esEfectivo: true,
+            aplicadoVenta: '100.0000',
+          },
+        ],
       });
       const result = await service.crear(TENANT_ID, USUARIO_ID, baseDto);
       expect(result).toBeDefined();
@@ -781,6 +804,15 @@ describe('VentasService', () => {
       pagosServiceMock.registrar.mockResolvedValueOnce({
         pagos: [{ id: 'pago-uuid-001', monto: '100.0000', vuelto: '0.0000' }],
         montoAplicadoVenta: '100.0000',
+        porPago: [
+          {
+            pagoId: 'pago-uuid-001',
+            metodoPagoId: EFECTIVO_ID,
+            emisor: 'sistema',
+            esEfectivo: true,
+            aplicadoVenta: '100.0000',
+          },
+        ],
       });
       await service.crear(TENANT_ID, USUARIO_ID, baseDto);
 
@@ -1430,6 +1462,15 @@ describe('VentasService', () => {
       pagosServiceMock.registrar.mockResolvedValueOnce({
         pagos: [{ id: 'pago-uuid-001', monto: '150.0000', vuelto: '50.0000' }],
         montoAplicadoVenta: '100.0000',
+        porPago: [
+          {
+            pagoId: 'pago-uuid-001',
+            metodoPagoId: EFECTIVO_ID,
+            emisor: 'sistema',
+            esEfectivo: true,
+            aplicadoVenta: '100.0000',
+          },
+        ],
       });
       const result = await service.crear(
         TENANT_ID,
@@ -1457,6 +1498,15 @@ describe('VentasService', () => {
       pagosServiceMock.registrar.mockResolvedValueOnce({
         pagos: [{ id: 'pago-uuid-tip', monto: '110.0000', vuelto: '0.0000' }],
         montoAplicadoVenta: '100.0000',
+        porPago: [
+          {
+            pagoId: 'pago-uuid-tip',
+            metodoPagoId: EFECTIVO_ID,
+            emisor: 'sistema',
+            esEfectivo: true,
+            aplicadoVenta: '100.0000',
+          },
+        ],
       });
 
       await service.crear(TENANT_ID, USUARIO_ID, dtoConPropina);
@@ -1801,6 +1851,263 @@ describe('VentasService', () => {
     });
   });
 
+  describe('crear() — los documentos de la venta', () => {
+    // La resolución de quién emite cada documento vive en `VentaDocumentosService`
+    // (su spec la prueba entera). Lo que le toca probar a ventas es que se lo
+    // **llama** una vez, dentro de la transacción, después de registrar los
+    // pagos, y con los datos que ya tiene en memoria.
+    const BOLETA = '550e8400-e29b-41d4-a716-446655440145';
+    const FACTURA = '550e8400-e29b-41d4-a716-446655440146';
+    const ITEM_EXENTO_ID = '550e8400-e29b-41d4-a716-446655440999';
+    const TARJETA_ID = '550e8400-e29b-41d4-a716-446655440200';
+    let manager: ReturnType<typeof buildManagerMock>;
+
+    beforeEach(() => {
+      manager = buildManagerMock();
+      const queryBase = manager.query.getMockImplementation()!;
+      manager.query.mockImplementation((sql: string) => {
+        if (typeof sql === 'string' && sql.includes('es_boleta'))
+          return Promise.resolve(
+            [
+              [BOLETA, true],
+              [FACTURA, false],
+            ].map(([id, esBoleta]) => ({
+              tipo_documento_id: id,
+              es_boleta: esBoleta,
+              es_nota_credito: false,
+              activo: true,
+            })),
+          );
+        return queryBase(sql);
+      });
+      dataSourceMock.transaction.mockImplementation(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+    });
+
+    const llamada = () =>
+      ventaDocumentosMock.documentarVenta.mock.calls[0] as [
+        unknown,
+        Record<string, any>,
+      ];
+
+    it('documenta una vez, con el manager de la transacción y los datos de la venta', async () => {
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      expect(ventaDocumentosMock.documentarVenta).toHaveBeenCalledTimes(1);
+      const [m, p] = llamada();
+      expect(m).toBe(manager);
+      expect(p).toMatchObject({
+        tenantId: TENANT_ID,
+        facturador: 'sistema',
+        venta: {
+          id: 'venta-uuid-001',
+          tipoDocumentoId: BOLETA,
+          esBoleta: true,
+          canal: 'fisico',
+          totalFinal: '100.0000',
+          configCalculo: mockConfigCalculo,
+        },
+      });
+    });
+
+    it('una factura llega como no-boleta con su tipo', async () => {
+      await service.crear(TENANT_ID, USUARIO_ID, {
+        ...baseDto,
+        tipoDocumentoId: FACTURA,
+      });
+
+      expect(llamada()[1].venta).toMatchObject({
+        tipoDocumentoId: FACTURA,
+        esBoleta: false,
+      });
+    });
+
+    it('el facturador del comercio sale de la consulta de la moneda, sin otra lectura', async () => {
+      dataSourceMock.query.mockImplementation(() =>
+        Promise.resolve(
+          MONEDA_ROWS.map((r) => ({ ...r, facturador: 'externo' })),
+        ),
+      );
+      const consultasAntes = dataSourceMock.query.mock.calls.length;
+
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      expect(llamada()[1].facturador).toBe('externo');
+      // La consulta de la moneda ya existía: no se suma una lectura de `tenants`.
+      const lecturasDeTenants = dataSourceMock.query.mock.calls
+        .slice(consultasAntes)
+        .filter((c) => typeof c[0] === 'string' && /FROM tenants\b/.test(c[0]));
+      expect(lecturasDeTenants).toHaveLength(1);
+    });
+
+    it('un cierre sin tipo (país sin boleta) llega con tipo nulo', async () => {
+      const queryBase = manager.query.getMockImplementation()!;
+      manager.query.mockImplementation((sql: string) =>
+        typeof sql === 'string' && sql.includes('es_boleta')
+          ? Promise.resolve([])
+          : queryBase(sql),
+      );
+
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      expect(llamada()[1].venta).toMatchObject({
+        tipoDocumentoId: null,
+        esBoleta: false,
+      });
+    });
+
+    it('las porciones son la suma por clasificación de las líneas ya calculadas', async () => {
+      // Tres líneas: dos afectas (distinto importe) y una exenta.
+      calculoPreciosService.calcular.mockResolvedValueOnce({
+        ...mockResultadoVenta,
+        lineas: [
+          {
+            ...mockResultadoVenta.lineas[0],
+            totalLinea: '119.0000',
+            impuestoAplicado: '19.0000',
+          },
+          {
+            ...mockResultadoVenta.lineas[0],
+            totalLinea: '238.0000',
+            impuestoAplicado: '38.0000',
+          },
+          {
+            ...mockResultadoVenta.lineas[0],
+            itemId: ITEM_EXENTO_ID,
+            totalLinea: '70.0000',
+            impuestoAplicado: '0.0000',
+          },
+        ],
+        totales: { ...mockResultadoVenta.totales, totalFinal: '427.0000' },
+      });
+      itemsService.cargarBasePorIds.mockImplementationOnce(
+        (_t: string, ids: string[]) =>
+          Promise.resolve(
+            new Map(
+              ids.map((id) => [
+                id,
+                id === ITEM_EXENTO_ID
+                  ? { ...mockItem, clasificacionTributaria: 'exento' }
+                  : mockItem,
+              ]),
+            ) as never,
+          ),
+      );
+
+      await service.crear(TENANT_ID, USUARIO_ID, {
+        ...baseDto,
+        lineas: [
+          { itemId: ITEM_ID, cantidad: '1' },
+          { itemId: ITEM_ID, cantidad: '2' },
+          { itemId: ITEM_EXENTO_ID, cantidad: '1' },
+        ],
+      });
+
+      const porciones = llamada()[1].porciones as {
+        clasificacion: string;
+        total: string;
+        impuesto: string;
+      }[];
+      expect(
+        [...porciones].sort((a, b) =>
+          a.clasificacion.localeCompare(b.clasificacion),
+        ),
+      ).toEqual([
+        { clasificacion: 'afecto', total: '357.0000', impuesto: '57.0000' },
+        { clasificacion: 'exento', total: '70.0000', impuesto: '0.0000' },
+      ]);
+    });
+
+    it('los pagos salen de lo que registró PagosService, cruzados por índice con el número que tipeó el cajero', async () => {
+      pagosServiceMock.registrar.mockResolvedValueOnce({
+        pagos: [],
+        montoAplicadoVenta: '100.0000',
+        porPago: [
+          {
+            pagoId: 'pago-ef',
+            metodoPagoId: EFECTIVO_ID,
+            emisor: 'sistema',
+            esEfectivo: true,
+            aplicadoVenta: '60.0000',
+          },
+          {
+            pagoId: 'pago-tj',
+            metodoPagoId: TARJETA_ID,
+            emisor: 'maquina',
+            esEfectivo: false,
+            aplicadoVenta: '40.0000',
+          },
+        ],
+      });
+
+      await service.crear(TENANT_ID, USUARIO_ID, {
+        ...baseDto,
+        pagos: [
+          { metodoPagoId: EFECTIVO_ID, monto: '60.0000' },
+          {
+            metodoPagoId: TARJETA_ID,
+            monto: '40.0000',
+            numeroDocumento: '445566',
+            claseDocumento: 'voucher',
+          },
+        ],
+      });
+
+      expect(llamada()[1].pagos).toEqual([
+        {
+          pagoId: 'pago-ef',
+          metodoPagoId: EFECTIVO_ID,
+          emisor: 'sistema',
+          aplicadoVenta: '60.0000',
+          numeroDocumento: undefined,
+          claseDocumento: undefined,
+        },
+        {
+          pagoId: 'pago-tj',
+          metodoPagoId: TARJETA_ID,
+          emisor: 'maquina',
+          aplicadoVenta: '40.0000',
+          numeroDocumento: '445566',
+          claseDocumento: 'voucher',
+        },
+      ]);
+    });
+
+    it('sin pagos (cuenta por cobrar) también documenta, con la lista vacía', async () => {
+      await service.crear(TENANT_ID, USUARIO_ID, { ...baseDto, pagos: [] });
+
+      expect(ventaDocumentosMock.documentarVenta).toHaveBeenCalledTimes(1);
+      expect(llamada()[1].pagos).toEqual([]);
+    });
+
+    it('corre después de registrar los pagos y de dejar el estado de la venta', async () => {
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      const orden = (m: jest.Mock) => m.mock.invocationCallOrder[0];
+      expect(orden(ventaDocumentosMock.documentarVenta)).toBeGreaterThan(
+        orden(pagosServiceMock.registrar),
+      );
+      const update = manager.query.mock.calls.findIndex(
+        (c) => typeof c[0] === 'string' && c[0].includes('UPDATE ventas SET'),
+      );
+      expect(update).toBeGreaterThanOrEqual(0);
+      expect(orden(ventaDocumentosMock.documentarVenta)).toBeGreaterThan(
+        manager.query.mock.invocationCallOrder[update],
+      );
+    });
+
+    it('si documentar falla, la venta falla: va en la misma transacción', async () => {
+      ventaDocumentosMock.documentarVenta.mockRejectedValueOnce(
+        new Error('documento roto'),
+      );
+
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, baseDto),
+      ).rejects.toThrow('documento roto');
+    });
+  });
+
   describe('crear() — recetas', () => {
     const mockReceta = {
       id: 'receta-uuid',
@@ -1903,6 +2210,15 @@ describe('VentasService', () => {
       pagosServiceMock.registrar.mockResolvedValueOnce({
         pagos: [{ id: 'pago-uuid-001', monto: '4000.0000', vuelto: '0.0000' }],
         montoAplicadoVenta: '4000.0000',
+        porPago: [
+          {
+            pagoId: 'pago-uuid-001',
+            metodoPagoId: EFECTIVO_ID,
+            emisor: 'sistema',
+            esEfectivo: true,
+            aplicadoVenta: '4000.0000',
+          },
+        ],
       });
 
       const result = await service.crear(
@@ -2039,6 +2355,15 @@ describe('VentasService', () => {
       pagosServiceMock.registrar.mockResolvedValueOnce({
         pagos: [{ id: 'pago-uuid-001', monto: '100.0000', vuelto: '0.0000' }],
         montoAplicadoVenta: '100.0000',
+        porPago: [
+          {
+            pagoId: 'pago-uuid-001',
+            metodoPagoId: EFECTIVO_ID,
+            emisor: 'sistema',
+            esEfectivo: true,
+            aplicadoVenta: '100.0000',
+          },
+        ],
       });
       const result = await service.crear(TENANT_ID, USUARIO_ID, dtoOnline);
 
@@ -2053,6 +2378,15 @@ describe('VentasService', () => {
       pagosServiceMock.registrar.mockResolvedValueOnce({
         pagos: [{ id: 'pago-uuid-001', monto: '100.0000', vuelto: '0.0000' }],
         montoAplicadoVenta: '100.0000',
+        porPago: [
+          {
+            pagoId: 'pago-uuid-001',
+            metodoPagoId: EFECTIVO_ID,
+            emisor: 'sistema',
+            esEfectivo: true,
+            aplicadoVenta: '100.0000',
+          },
+        ],
       });
       await service.crear(TENANT_ID, USUARIO_ID, dtoOnline);
 
