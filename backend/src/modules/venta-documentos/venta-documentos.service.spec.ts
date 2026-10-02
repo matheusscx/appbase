@@ -1932,6 +1932,8 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
     es_efectivo: boolean | null;
     documento_id: string | null;
     aplicado_venta: string;
+    /** Lo ya devuelto por este pago (`devolucion_pago_id`) en correcciones anteriores. */
+    devuelto: string;
   }
   const doc = (
     id: string,
@@ -1957,6 +1959,7 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
     es_efectivo: false,
     documento_id: documentoId,
     aplicado_venta: aplicado.toFixed(4),
+    devuelto: '0.0000',
     ...extra,
   });
   /** Las tres lecturas, por el nombre de la tabla que cada una consulta. */
@@ -2002,11 +2005,13 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
       documento: { id: 'd-voucher', emisor: 'maquina', monto: '40000.0000' },
       saldo: null,
       mueveCaja: false,
+      devolvibleDelPago: '40000.0000',
     });
     await expect(resolver(l, via('p-efectivo'))).resolves.toEqual({
       documento: { id: 'd-boleta', emisor: 'sistema', monto: '60000.0000' },
       saldo: null,
       mueveCaja: true,
+      devolvibleDelPago: '60000.0000',
     });
   });
 
@@ -2022,9 +2027,77 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
     expect((await resolver(l, via('p-b'))).documento?.id).toBe('d-2');
   });
 
+  describe('el tope por pago: lo que ese pago aplicó a la venta menos lo ya devuelto por él', () => {
+    const devolvible = async (
+      l: { query: jest.Mock },
+      pagoId: string,
+    ): Promise<string | null> =>
+      (await resolver(l, via(pagoId))).devolvibleDelPago;
+
+    it('sin devoluciones previas es todo lo que el pago aplicó a la venta', async () => {
+      const l = lector(100000, MIXTA_DOCS, MIXTA_PAGOS);
+
+      expect(await devolvible(l, 'p-tarjeta')).toBe('40000.0000');
+      expect(await devolvible(l, 'p-efectivo')).toBe('60000.0000');
+    });
+
+    it('descuenta lo ya devuelto por ESE pago y no toca a los otros', async () => {
+      const l = lector(100000, MIXTA_DOCS, [
+        pagoFila('p-efectivo', 60000, 'd-boleta', {
+          es_efectivo: true,
+          devuelto: '55000.0000',
+        }),
+        pagoFila('p-tarjeta', 40000, 'd-voucher', { devuelto: '25000.0000' }),
+      ]);
+
+      expect(await devolvible(l, 'p-tarjeta')).toBe('15000.0000');
+      expect(await devolvible(l, 'p-efectivo')).toBe('5000.0000');
+    });
+
+    it('lee lo devuelto de la corrección vigente de esta venta y este tenant que eligió el pago, en la misma consulta de los pagos', async () => {
+      const l = lector(100000, MIXTA_DOCS, MIXTA_PAGOS);
+
+      await resolver(l, via('p-tarjeta'));
+
+      const consultas = l.query.mock.calls.filter(([sql]) =>
+        (sql as string).includes('FROM pagos p'),
+      ) as [string, unknown[]][];
+      // Una sola lectura para todos los pagos: sin una consulta por pago.
+      expect(consultas).toHaveLength(1);
+      const [sql, binds] = consultas[0];
+      expect(sql).toMatch(/c\.devolucion_pago_id = p\.pago_id/);
+      expect(sql).toMatch(/c\.venta_referencia_id = \$1/);
+      expect(sql).toMatch(/c\.tenant_id = \$2/);
+      expect(sql).toMatch(/c\.eliminado_el IS NULL/);
+      expect(binds).toEqual([VENTA, TENANT]);
+    });
+
+    it('lo que ese pago ya devolvió por completo deja el tope en cero', async () => {
+      const l = lector(100000, MIXTA_DOCS, [
+        pagoFila('p-tarjeta', 40000, 'd-voucher', { devuelto: '40000.0000' }),
+      ]);
+
+      expect(await devolvible(l, 'p-tarjeta')).toBe('0.0000');
+    });
+
+    it('la pasarela no topa a su pago (es un hecho consumado): nulo, aunque lo anote', async () => {
+      const l = lector(100000, MIXTA_DOCS, MIXTA_PAGOS);
+
+      expect(
+        (
+          await resolver(l, {
+            tipo: 'pasarela',
+            documentoId: null,
+            pagoId: 'p-tarjeta',
+          })
+        ).devolvibleDelPago,
+      ).toBeNull();
+    });
+  });
+
   describe('por pasarela (un hecho consumado: nunca rechaza ni mueve caja)', () => {
     const pasarela = (l: { query: jest.Mock }, documentoId: string | null) =>
-      resolver(l, { tipo: 'pasarela', documentoId });
+      resolver(l, { tipo: 'pasarela', documentoId, pagoId: null });
 
     it('corrige el documento que trae, que sigue vigente, y no mueve caja', async () => {
       const l = lector(100000, [], []);
@@ -2036,6 +2109,7 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
         documento: { id: 'd-boleta', emisor: 'sistema', monto: '100000.0000' },
         saldo: null,
         mueveCaja: false,
+        devolvibleDelPago: null,
       });
       // Solo ese documento, de esa venta y ese tenant, vigente.
       const [sql, binds] = l.query.mock.calls[0] as [string, unknown[]];
@@ -2051,6 +2125,7 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
         documento: null,
         saldo: null,
         mueveCaja: false,
+        devolvibleDelPago: null,
       });
       expect(l.query).not.toHaveBeenCalled();
     });
@@ -2062,6 +2137,7 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
         documento: null,
         saldo: null,
         mueveCaja: false,
+        devolvibleDelPago: null,
       });
     });
   });
@@ -2152,6 +2228,7 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
         // Lo que la venta todavía debe: el tope de "no vuelve plata".
         saldo: '60000.0000',
         mueveCaja: false,
+        devolvibleDelPago: null,
       });
     });
 
@@ -2292,6 +2369,7 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
       documento: null,
       saldo: null,
       mueveCaja: false,
+      devolvibleDelPago: '100000.0000',
     });
     await expect(resolver(l, via('p-ajeno'))).rejects.toThrow(
       BadRequestException,
@@ -2391,6 +2469,34 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
       }
       const sinDocs = lector(1000, [], [pagoFila('p-1', 1000, null)]);
       expect((await opciones(sinDocs))[0].registro).toBe('nota_credito');
+    });
+
+    it('el monto de cada pago es lo que todavía puede devolver (el tope que exige el servidor), no lo que aplicó', async () => {
+      const l = lector(100000, MIXTA_DOCS, [
+        pagoFila('p-efectivo', 60000, 'd-boleta', {
+          es_efectivo: true,
+          devuelto: '35000.0000',
+        }),
+        pagoFila('p-tarjeta', 40000, 'd-voucher', { devuelto: '15000.0000' }),
+      ]);
+
+      const o = await opciones(l);
+
+      expect(o.map((x) => [x.pagoId, x.monto])).toEqual([
+        ['p-efectivo', '25000.0000'],
+        ['p-tarjeta', '25000.0000'],
+      ]);
+    });
+
+    it('no ofrece el pago que ya devolvió todo lo que trajo, y los otros siguen', async () => {
+      const l = lector(100000, MIXTA_DOCS, [
+        pagoFila('p-efectivo', 60000, 'd-boleta', { es_efectivo: true }),
+        pagoFila('p-tarjeta', 40000, 'd-voucher', { devuelto: '40000.0000' }),
+      ]);
+
+      const o = await opciones(l);
+
+      expect(o.map((x) => x.pagoId)).toEqual(['p-efectivo']);
     });
 
     it('no ofrece el pago que fue todo propina ni el que no tiene documento enlazado', async () => {

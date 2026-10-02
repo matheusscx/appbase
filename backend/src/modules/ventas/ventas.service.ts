@@ -1867,6 +1867,22 @@ export class VentasService {
     });
   }
 
+  /**
+   * El tope por pago de una corrección: `devolvible` es lo que ese pago aplicó a
+   * la venta menos lo ya devuelto por él (`devolucion_pago_id`), calculado bajo el
+   * lock de la venta. `null` con las vías que no devuelven por un pago.
+   *
+   * ⚠️ El mensaje NO interpola el tope: dejaría adivinar, con un solo request
+   * rechazado, lo que cobró cada pago (el mismo oráculo de la fuga 5, que ya se
+   * cerró para el efectivo).
+   */
+  private exigirTopeDelPago(devolvible: string | null, monto: string): void {
+    if (devolvible !== null && new Decimal(monto).gt(devolvible))
+      throw new BadRequestException(
+        'El monto supera lo que queda por devolver por ese pago. Elegí otro pago o, si la venta todavía tiene saldo, emití la nota sin devolución de dinero.',
+      );
+  }
+
   private async crearNotaCreditoEnTransaccion(
     params: CrearNotaCreditoParams,
   ): Promise<NotaCreditoCreada> {
@@ -1957,6 +1973,15 @@ export class VentasService {
           documento: destino.documento,
           monto: params.monto,
         });
+      // Y el tope por pago: una corrección que devuelve la plata por un pago no
+      // pasa de lo que ese pago trajo a la venta (menos lo ya devuelto por él).
+      // Ninguna máquina ni banco reversa más de lo que cobró, y el tope por
+      // documento no lo acota cuando el medio emite `sistema` (la boleta es de
+      // toda la venta). El efectivo lo chequea más abajo, DESPUÉS del tope del
+      // efectivo de la venta: así el 422 con su rastro sigue siendo el que ve el
+      // cajero que prueba cuánto efectivo hay (fuga 5), y este 400 no lo esquiva.
+      if (!destino.mueveCaja)
+        this.exigirTopeDelPago(destino.devolvibleDelPago, params.monto);
 
       const devueltas = await this.validarDevolucionesReembolso(
         manager,
@@ -2379,8 +2404,10 @@ export class VentasService {
               : params.via.tipo === 'pasarela'
                 ? 'pasarela'
                 : 'pago',
+          // Con la pasarela solo si la venta tiene un único pago (`viaDeReembolsoPasarela`):
+          // la vía sigue siendo 'pasarela', pero lo devuelto cuenta en el tope de ese pago.
           devolucionPagoId:
-            params.via.tipo === 'pago' ? params.via.pagoId : null,
+            params.via.tipo === 'sin_plata' ? null : params.via.pagoId,
           estado: EstadoVenta.PAGADA,
           totalBruto: sumaSubtotales.toFixed(4),
           totalDescuentos: '0',
@@ -2581,6 +2608,10 @@ export class VentasService {
             },
           );
 
+        // El tope por pago también rige para el efectivo: dos pagos en efectivo
+        // suman el tope de arriba, pero cada uno devuelve solo lo suyo.
+        this.exigirTopeDelPago(destino.devolvibleDelPago, params.monto);
+
         const saldoEfectivo = await this.cajaService.calcularEsperadoEfectivo(
           caja.id,
           manager,
@@ -2621,12 +2652,14 @@ export class VentasService {
    * ya volvió por el proveedor y un hecho consumado se registra, no se rechaza
    * (P3). `CobrosService.vincularVenta` puede ligar una orden a cualquier venta,
    * así que no se supone nada de sus pagos: se miran sus documentos válidos
-   * (vigentes y no duplicados).
+   * (vigentes y no duplicados), y de sus pagos solo si hay uno único.
    * - uno solo (la boleta de la venta online, E5) → la corrección lo corrige;
    * - ninguno → corrección sin fila de documento, como siempre (tipo NC);
    * - más de uno (inalcanzable hoy: online y factura son un solo documento) →
    *   también sin fila de documento, y queda un `warn` con la venta y la orden:
    *   elegir uno sería adivinar.
+   * - un único pago en la venta → la corrección lo anota (`devolucion_pago_id`) y gasta su
+   *   tope por pago; con 0 o más de uno queda sin pago.
    * Lo llama el hook de reembolso, que corre fuera de toda transacción.
    */
   async viaDeReembolsoPasarela(
@@ -2648,9 +2681,23 @@ export class VentasService {
       this.logger.warn(
         `Reembolso de la orden ${ordenId}: la venta ${ventaId} tiene ${documentos.length} documentos válidos y la corrección no sabe cuál corregir; se emite sin documento.`,
       );
+    // El pago por el que volvió la plata, solo si no hay duda: con un único pago la
+    // venta online (o la que se ligó a la orden) devolvió por él, y esa devolución
+    // tiene que contar en su tope por pago. Con 0 o más de uno se queda sin pago:
+    // elegir uno sería adivinar. LIMIT 2: solo importa si hay uno o más.
+    const pagos: { pago_id: string }[] = await this.db.query(
+      `SELECT pago_id
+         FROM pagos
+        WHERE venta_id = $1
+          AND tenant_id = $2
+          AND eliminado_el IS NULL
+        LIMIT 2`,
+      [ventaId, tenantId],
+    );
     return {
       tipo: 'pasarela',
       documentoId: documentos.length === 1 ? documentos[0].documento_id : null,
+      pagoId: pagos.length === 1 ? pagos[0].pago_id : null,
     };
   }
 

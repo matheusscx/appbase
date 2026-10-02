@@ -217,6 +217,76 @@ describe('NotaCreditoModal — el body', () => {
   })
 })
 
+describe('NotaCreditoModal — el monto propuesto y su tope siguen a la opción elegida', () => {
+  // La venta tiene disponible $11.900; el efectivo admite $5.000 y la tarjeta $6.900
+  // (lo que cada pago todavía puede devolver). "Devolver todo por la tarjeta" no
+  // puede proponer los $11.900: el servidor lo rechaza con un 400.
+  const campoMonto = () => dialogo().querySelector<HTMLInputElement>('input')!
+  const errorDeMonto = () => dialogo().textContent?.includes('no superar el disponible') ?? false
+  async function escribirMonto(valor: string) {
+    const input = campoMonto()
+    input.value = valor
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await esperar()
+  }
+  async function montoQueSale(): Promise<unknown> {
+    generar().click()
+    await esperar()
+    const llamada = apiFetch.mock.calls.find(([url]) => String(url).endsWith('/notas-credito'))
+    expect(llamada, 'el POST de la nota').toBeTruthy()
+    return (llamada![1].body as Record<string, unknown>).monto
+  }
+
+  it('sin opción elegida propone lo disponible; al elegir pasa a lo que la opción admite', async () => {
+    await montar([EFECTIVO, TARJETA])
+    expect(campoMonto().value).toContain('11.900')
+
+    await elegir('Tarjeta de débito')
+    expect(campoMonto().value).toContain('6.900')
+    await elegir('Efectivo')
+    expect(campoMonto().value).toContain('5.000')
+  })
+
+  it('con una sola opción viene propuesto lo que ella admite, no lo disponible', async () => {
+    await montar([TARJETA])
+
+    expect(campoMonto().value).toContain('6.900')
+    expect(await montoQueSale()).toBe('6900')
+  })
+
+  it('al reabrir con una sola opción vuelve a proponer lo que ella admite (la elección no cambió, no hay nada que lo dispare)', async () => {
+    const wrapper = await montar([TARJETA])
+    await escribirMonto('1000')
+
+    await wrapper.setProps({ open: false })
+    await esperar()
+    await wrapper.setProps({ open: true })
+    await esperar()
+
+    expect(campoMonto().value).toContain('6.900')
+  })
+
+  it('una opción que admite más que lo disponible propone lo disponible (el menor de los dos topes)', async () => {
+    await montar([SIN_PLATA]) // $60.000 por cobrar, pero la venta solo admite $11.900
+
+    expect(campoMonto().value).toContain('11.900')
+  })
+
+  it('no deja confirmar un monto por encima de lo que la opción admite, aunque entre en lo disponible', async () => {
+    await montar([EFECTIVO, TARJETA])
+    await elegir('Tarjeta de débito')
+
+    await escribirMonto('7000')
+
+    expect(errorDeMonto()).toBe(true)
+    expect(generar().disabled).toBe(true)
+
+    await escribirMonto('6900')
+    expect(errorDeMonto()).toBe(false)
+    expect(generar().disabled).toBe(false)
+  })
+})
+
 describe('NotaCreditoModal — el efectivo sale de la caja', () => {
   it('sin caja física abierta la opción en efectivo no se puede elegir y dice por qué', async () => {
     await montar([EFECTIVO, TARJETA], false)

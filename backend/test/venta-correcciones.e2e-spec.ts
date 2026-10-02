@@ -960,6 +960,138 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
     });
   });
 
+  describe('el tope por pago: una corrección por un pago no devuelve más de lo que ese pago trajo', () => {
+    // Con el medio en `sistema` el documento del pago es la boleta de TODA la
+    // venta (100.000), así que el tope por documento no acota por pago: sin el
+    // tope por pago, una nota de 90.000 "por el débito de 40.000" daba 201.
+    const sinCorrecciones = async (ventaId: string): Promise<number> => {
+      const f: { n: number }[] = await ds.query(
+        `SELECT COUNT(*)::int AS n FROM ventas WHERE venta_referencia_id = $1`,
+        [ventaId],
+      );
+      return f[0].n;
+    };
+
+    it('la escena: 90.000 por el débito de 40.000 (medio en sistema) es un 400 sin cifras y no deja nada escrito', async () => {
+      await patchMetodo(DEBITO_ID, 'sistema');
+      const venta = await mesaConDeuda();
+      const debito = await pagoDe(venta.id, DEBITO_ID);
+
+      const res = await crearNc(venta.id, {
+        monto: '90000',
+        devolucion: { pagoId: debito },
+      });
+
+      expect(res.status).toBe(400);
+      expect(mensaje(res)).toMatch(/por devolver por ese pago/);
+      // Ni el 40.000 del pago ni ninguna otra cifra sale en el mensaje.
+      expect(mensaje(res)).not.toMatch(/\d/);
+      expect(await sinCorrecciones(venta.id)).toBe(0);
+    });
+
+    it('lo que deja pasar: 40.000 exactos, que es lo que el pago trajo', async () => {
+      await patchMetodo(DEBITO_ID, 'sistema');
+      const venta = await mesaConDeuda();
+      const debito = await pagoDe(venta.id, DEBITO_ID);
+
+      const creada = await nc(venta.id, {
+        monto: '40000',
+        devolucion: { pagoId: debito },
+      });
+
+      expect(creada.totalFinal).toBe('40000.0000');
+      // La plata volvió por fuera (tarjeta): no se mueve caja.
+      expect(creada.movimientoCajaId).toBeNull();
+    });
+
+    it('es una serie: 25.000 y 25.000 por el mismo pago, la segunda rebota; lo que queda (15.000) sí pasa', async () => {
+      await patchMetodo(DEBITO_ID, 'sistema');
+      const venta = await mesaConDeuda();
+      const debito = await pagoDe(venta.id, DEBITO_ID);
+
+      await nc(venta.id, { monto: '25000', devolucion: { pagoId: debito } });
+      const segunda = await crearNc(venta.id, {
+        monto: '25000',
+        devolucion: { pagoId: debito },
+      });
+
+      expect(segunda.status).toBe(400);
+      expect(mensaje(segunda)).toMatch(/por devolver por ese pago/);
+      expect(await sinCorrecciones(venta.id)).toBe(1);
+      await nc(venta.id, { monto: '15000', devolucion: { pagoId: debito } });
+    });
+
+    it('cada pago devuelve lo suyo: lo devuelto por el débito no gasta el tope del efectivo', async () => {
+      await patchMetodo(EFECTIVO_ID, 'sistema');
+      await patchMetodo(DEBITO_ID, 'sistema');
+      const venta = await ventaMixta(); // 60.000 en efectivo + 40.000 con débito
+      const debito = await pagoDe(venta.id, DEBITO_ID);
+      const efectivo = await pagoDe(venta.id, EFECTIVO_ID);
+
+      await nc(venta.id, { monto: '40000', devolucion: { pagoId: debito } });
+      // El tope del documento (100.000) y el de la venta sobran: solo el del pago
+      // del débito está agotado.
+      const otraVezDebito = await crearNc(venta.id, {
+        monto: '1000',
+        devolucion: { pagoId: debito },
+      });
+      expect(otraVezDebito.status).toBe(400);
+      // El efectivo sigue entero y sale de la caja.
+      const delEfectivo = await nc(venta.id, {
+        monto: '60000',
+        devolucion: { pagoId: efectivo },
+      });
+      expect(delEfectivo.movimientoCajaId).not.toBeNull();
+    });
+
+    it('la propina no cuenta: el tope es lo que el pago aplicó a la venta, no lo que se cobró en la tarjeta', async () => {
+      await patchMetodo(DEBITO_ID, 'sistema');
+      // Un solo pago de 48.000 con débito, de los cuales 8.000 son propina (la
+      // propina se sirve primero): a la venta llegan 40.000 y se deben 60.000.
+      const venta = await vender({
+        lineas: lineas100k(),
+        pagos: [{ metodoPagoId: DEBITO_ID, monto: '48000' }],
+        propinaDirecta: { montoPagado: '8000' },
+      });
+      const debito = await pagoDe(venta.id, DEBITO_ID);
+
+      // 45.000 cabe en lo cobrado por la tarjeta (48.000) pero no en lo que
+      // aplicó a la venta (40.000); el tope de la venta (100.000) y el del
+      // documento (la boleta del sistema, 100.000) lo dejarían pasar.
+      const res = await crearNc(venta.id, {
+        monto: '45000',
+        devolucion: { pagoId: debito },
+      });
+      expect(res.status).toBe(400);
+      expect(mensaje(res)).toMatch(/por devolver por ese pago/);
+      await nc(venta.id, { monto: '40000', devolucion: { pagoId: debito } });
+    });
+
+    it('la devolución interna (medio en nadie) también gasta el tope del pago', async () => {
+      await patchMetodo(EFECTIVO_ID, 'nadie');
+      await patchMetodo(DEBITO_ID, 'nadie');
+      const venta = await vender({
+        lineas: lineas100k(),
+        pagos: [
+          { metodoPagoId: EFECTIVO_ID, monto: '30000' },
+          { metodoPagoId: DEBITO_ID, monto: '70000' },
+        ],
+      });
+      const debito = await pagoDe(venta.id, DEBITO_ID);
+
+      await nc(venta.id, { monto: '50000', devolucion: { pagoId: debito } });
+      const res = await crearNc(venta.id, {
+        monto: '25000',
+        devolucion: { pagoId: debito },
+      });
+
+      // 50.000 + 25.000 > 70.000, y el tope del documento (la fila `nadie` por
+      // 100.000) y el de la venta no lo ven.
+      expect(res.status).toBe(400);
+      expect(mensaje(res)).toMatch(/por devolver por ese pago/);
+    });
+  });
+
   describe('lo que NO suma una devolución interna', () => {
     it('resta (no suma) en totalFacturado y saldoPendiente de GET /ventas/resumen, en el vendido y en lo más vendido del dashboard', async () => {
       await patchMetodo(DEBITO_ID, 'nadie');

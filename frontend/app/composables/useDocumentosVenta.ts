@@ -1,3 +1,5 @@
+import Decimal from 'decimal.js'
+
 /**
  * Los documentos de una venta tal como los muestra la pantalla (spec
  * `2026-10-01-emision-por-venta`, § 3.4). Espejo de `DocumentoDetalle` del
@@ -227,7 +229,11 @@ export interface OpcionDevolucion {
   sinPlata: boolean
   /** Nombre del medio de pago; `null` en "No vuelve plata". */
   metodo: string | null
-  /** Lo que ese pago cubrió de la venta, o el saldo en "No vuelve plata". */
+  /**
+   * Lo que esa forma de devolver todavía admite: lo que el pago cubrió de la venta
+   * menos lo ya devuelto por él, o el saldo en "No vuelve plata". Es el tope que el
+   * servidor exige a la nota: pasarlo es un 400.
+   */
   monto: string
   /** La plata sale de la caja física (el pago fue en efectivo). */
   mueveCaja: boolean
@@ -237,6 +243,17 @@ export interface OpcionDevolucion {
 /** La clave de una opción en el selector: el pago, o la de "No vuelve plata". */
 export function claveOpcion(o: OpcionDevolucion): string {
   return o.sinPlata ? 'sin-plata' : (o.pagoId ?? '')
+}
+
+/**
+ * El monto que el modal propone al elegir una forma de devolver, y el tope que
+ * le pone: lo menor entre lo disponible de la venta y lo que esa opción admite.
+ * Sin opción elegida (todavía), lo disponible. Es lo que el servidor va a aceptar:
+ * proponer el disponible entero con una opción más chica era un 400 asegurado.
+ */
+export function topeDeOpcion(disponible: string, o: OpcionDevolucion | null): string {
+  const d = new Decimal(disponible)
+  return (o ? Decimal.min(d, new Decimal(o.monto)) : d).toString()
 }
 
 const REGISTRO_QUE_QUEDA: Record<RegistroCorreccion, string> = {

@@ -5,6 +5,7 @@ import {
   claveOpcion,
   cuerpoDevolucion,
   registroQueQueda,
+  topeDeOpcion,
   type OpcionDevolucion,
 } from '~/composables/useDocumentosVenta'
 
@@ -60,23 +61,36 @@ const submitting = ref(false)
 const { filas, cargarDesdeDetalles, setCantidad, setReponer, filasValidas, devoluciones }
   = useDevolucionInventario()
 
+const opcionElegida = computed(() =>
+  props.opciones.find(o => claveOpcion(o) === seleccion.value) ?? null,
+)
+
+/**
+ * Lo máximo que se puede acreditar: lo disponible de la venta, y —con una forma
+ * de devolver elegida— lo que esa forma admite (lo que su pago todavía puede
+ * devolver). Es el mismo tope que exige el servidor.
+ */
+const tope = computed(() => topeDeOpcion(props.disponible, opcionElegida.value))
+
 watch(open, (v) => {
   if (!v) return
-  monto.value = props.disponible
   comentario.value = ''
   // Con una sola forma de devolver no hay nada que elegir; con varias, el
   // cajero elige: un default movería plata de la caja sin que lo decida.
   seleccion.value = props.opciones.length === 1 ? claveOpcion(props.opciones[0]!) : undefined
+  monto.value = tope.value
   cargarDesdeDetalles(props.detalles)
   // Habilita/deshabilita las opciones que sacan plata de la caja
   cajaStore.cargarActiva()
 })
 
-const tieneCaja = computed(() => !!cajaStore.activa)
+// Al elegir una forma de devolver, el monto propuesto pasa a ser lo que ella admite:
+// "devolver todo por la tarjeta" no puede proponer más que lo que la tarjeta trajo.
+watch(seleccion, () => {
+  if (open.value) monto.value = tope.value
+})
 
-const opcionElegida = computed(() =>
-  props.opciones.find(o => claveOpcion(o) === seleccion.value) ?? null,
-)
+const tieneCaja = computed(() => !!cajaStore.activa)
 
 /** Una opción en efectivo sin caja física abierta no se puede elegir. */
 const itemsOpciones = computed(() =>
@@ -99,7 +113,7 @@ const itemsOpciones = computed(() =>
 
 const montoValido = computed(() => {
   const m = new Decimal(monto.value || '0')
-  return m.gt(0) && m.lte(new Decimal(props.disponible))
+  return m.gt(0) && m.lte(new Decimal(tope.value))
 })
 
 // ⚠️ El botón NO se deshabilita por nada de plata más allá del disponible, que
@@ -203,7 +217,7 @@ async function confirmar() {
             oficial
           />
           <p v-if="!montoValido && monto" class="text-xs text-error">
-            El monto debe ser mayor a 0 y no superar el disponible.
+            El monto debe ser mayor a 0 y no superar el disponible ni lo que esa forma de devolver admite.
           </p>
         </div>
 

@@ -2410,20 +2410,23 @@ describe('Ventas (e2e)', () => {
 
     it('una NC mayor que lo que se debe deja el saldo de esa venta en cero, no en negativo', async () => {
       // El abono es con débito: la devolución vuelve por la máquina y no toca
-      // la caja. Con efectivo, una nota mayor que lo cobrado en efectivo
-      // (0,4·T) la frena el tope del efectivo, y sin plata la frena el saldo:
-      // solo el medio que no es efectivo deja que la nota supere lo que se debe.
+      // la caja. Con efectivo, una nota mayor que lo cobrado en efectivo la frena
+      // el tope del efectivo, y sin plata la frena el saldo. Y ninguna nota por un
+      // pago pasa de lo que ese pago trajo (P): la nota más grande que se puede
+      // emitir por la tarjeta es N ≤ P, así que este caso exige que el abono (P)
+      // supere lo que falta (T − P), para que N pueda ser mayor que lo que se debe.
       const { venta, total, abonado } = await crearVenta(
         '3',
-        (t) => piso(t.times('0.4')),
+        (t) => piso(t.times('0.7')),
         DEBITO_ID,
       );
       const antes = await leerResumen();
 
-      // N = T − ⌊0,1·T⌋ > T − P: sin el piso, el saldo de la venta sería
-      // T − N − P < 0 y `saldoPendiente` bajaría N en vez de T − P.
-      const N = total.minus(piso(total.times('0.1'))).toString();
+      // T − P < N ≤ P: sin el piso, el saldo de la venta sería T − N − P < 0 y
+      // `saldoPendiente` bajaría N en vez de T − P.
+      const N = piso(total.times('0.5')).toString();
       expect(new Decimal(N).gt(total.minus(abonado))).toBe(true);
+      expect(new Decimal(N).lte(abonado)).toBe(true);
       await post(`/api/ventas/${venta.id}/notas-credito`, {
         monto: N,
         ...(await devolucionDeLaVenta(venta.id)),

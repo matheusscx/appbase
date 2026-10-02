@@ -236,12 +236,15 @@ export const MOTIVO_EXTERNO_YA_HECHO =
  * - `pasarela`: el reembolso de una orden online (lo usa el hook de la pasarela).
  *   La plata ya volvió por el proveedor: no mueve caja y **no rechaza** (un hecho
  *   consumado se registra). Trae el único documento válido de la venta, o `null`
- *   si no hay uno solo: la corrección se emite entonces sin fila de documento.
+ *   si no hay uno solo: la corrección se emite entonces sin fila de documento. Trae
+ *   también el único pago de la venta (`null` con 0 o con más de uno): la corrección
+ *   lo anota en `devolucion_pago_id` para que lo devuelto por la pasarela gaste el
+ *   tope de ese pago. No lo topa a él (es un hecho consumado), solo cuenta.
  */
 export type ViaCorreccion =
   | { tipo: 'pago'; pagoId: string }
   | { tipo: 'sin_plata' }
-  | { tipo: 'pasarela'; documentoId: string | null };
+  | { tipo: 'pasarela'; documentoId: string | null; pagoId: string | null };
 
 /** Lo que una corrección deja registrado, para decírselo al usuario antes de confirmar. */
 export type RegistroCorreccion =
@@ -274,6 +277,13 @@ export interface DestinoCorreccion {
   saldo: string | null;
   /** El pago elegido es en efectivo: la plata sale de la caja. */
   mueveCaja: boolean;
+  /**
+   * Con una corrección por un pago: lo que ese pago todavía puede devolver (lo que
+   * aplicó a la venta menos lo ya devuelto por él en correcciones anteriores; ver
+   * `corregibles`). Es el tope de esa corrección, que el llamador aplica bajo el
+   * lock de la venta. `null` con cualquier otra vía (no hay un pago que topar).
+   */
+  devolvibleDelPago: string | null;
 }
 
 export interface DocumentoQueCorrigeParams extends VentaDeLosDocumentosParams {
@@ -291,7 +301,11 @@ export interface OpcionDevolucion {
   sinPlata: boolean;
   /** Nombre del medio de pago; `null` en "No vuelve plata". */
   metodo: string | null;
-  /** Lo que ese pago cubrió de la venta (sin propina ni vuelto), o el saldo en "No vuelve plata". */
+  /**
+   * Lo que ese pago todavía puede devolver (lo que cubrió de la venta, sin propina ni
+   * vuelto, menos lo ya devuelto por él), o el saldo en "No vuelve plata". Es el tope de
+   * esa opción: el mismo que exige el servidor.
+   */
   monto: string;
   /** La plata sale de la caja (el pago fue en efectivo). */
   mueveCaja: boolean;
@@ -1030,7 +1044,12 @@ export class VentaDocumentosService {
     // documento que la venta trae (si sigue vigente) y, si no hay, se emite sin.
     if (via.tipo === 'pasarela') {
       if (via.documentoId === null)
-        return { documento: null, saldo: null, mueveCaja: false };
+        return {
+          documento: null,
+          saldo: null,
+          mueveCaja: false,
+          devolvibleDelPago: null,
+        };
       const filas: {
         documento_id: string;
         emisor: EmisorDocumento;
@@ -1052,6 +1071,7 @@ export class VentaDocumentosService {
           : null,
         saldo: null,
         mueveCaja: false,
+        devolvibleDelPago: null,
       };
     }
 
@@ -1070,6 +1090,7 @@ export class VentaDocumentosService {
         documento: c.deuda,
         saldo: c.saldo.toFixed(4),
         mueveCaja: false,
+        devolvibleDelPago: null,
       };
     }
 
@@ -1088,6 +1109,7 @@ export class VentaDocumentosService {
       documento: pago.documento,
       saldo: null,
       mueveCaja: pago.esEfectivo,
+      devolvibleDelPago: pago.devolvible.toFixed(4),
     };
   }
 
@@ -1105,13 +1127,16 @@ export class VentaDocumentosService {
     const c = await this.corregibles(lector, params);
     const opciones: OpcionDevolucion[] = [];
     for (const p of c.pagos) {
-      if (!p.aplicadoVenta.gt(0)) continue;
+      // Lo que ese pago todavía puede devolver (el tope por pago): un pago que ya
+      // devolvió todo, o que no cubrió nada de la venta, no se ofrece, igual que
+      // "No vuelve plata" sin saldo. Ofrecerlo era mostrar lo que el servidor rechaza.
+      if (!p.devolvible.gt(0)) continue;
       if (c.hayDocumentos && !p.documento) continue;
       opciones.push({
         pagoId: p.pagoId,
         sinPlata: false,
         metodo: p.metodoNombre,
-        monto: p.aplicadoVenta.toFixed(4),
+        monto: p.devolvible.toFixed(4),
         mueveCaja: p.esEfectivo,
         registro: registroDe(p.documento),
       });
@@ -1250,6 +1275,8 @@ export class VentaDocumentosService {
       metodoNombre: string | null;
       esEfectivo: boolean;
       aplicadoVenta: Decimal;
+      /** Lo que ese pago todavía puede devolver: `aplicadoVenta` − lo ya devuelto por él. */
+      devolvible: Decimal;
       documento: DocumentoCorregido | null;
     }[];
   }> {
@@ -1295,12 +1322,27 @@ export class VentaDocumentosService {
       es_efectivo: boolean | null;
       documento_id: string | null;
       aplicado_venta: string;
+      devuelto: string;
     }[] = await lector.query(
       `SELECT p.pago_id,
               mp.nombre AS metodo_nombre,
               mp.es_efectivo,
               p.documento_id,
-              COALESCE(SUM(pa.monto), 0)::text AS aplicado_venta
+              COALESCE(SUM(pa.monto), 0)::text AS aplicado_venta,
+              -- Lo ya devuelto por ESTE pago: las correcciones vigentes de la venta
+              -- que lo anotan (\`devolucion_pago_id\`), sea cual sea su vía: la que lo
+              -- eligió, la devolución interna y la de la pasarela de una venta de un
+              -- solo pago.
+              -- Una sola lectura para todos los pagos; el tope de cada pago sale de
+              -- acá y no de una consulta por pago.
+              COALESCE((
+                SELECT SUM(c.total_final)
+                  FROM ventas c
+                 WHERE c.venta_referencia_id = $1
+                   AND c.tenant_id = $2
+                   AND c.devolucion_pago_id = p.pago_id
+                   AND c.eliminado_el IS NULL
+              ), 0)::text AS devuelto
          FROM pagos p
          JOIN ventas v ON v.venta_id = p.venta_id
                       AND v.tenant_id = p.tenant_id
@@ -1352,6 +1394,7 @@ export class VentaDocumentosService {
           metodoNombre: p.metodo_nombre,
           esEfectivo: p.es_efectivo === true,
           aplicadoVenta: new Decimal(p.aplicado_venta),
+          devolvible: new Decimal(p.aplicado_venta).minus(p.devuelto),
           documento: enlazado ? doc(enlazado) : null,
         };
       }),

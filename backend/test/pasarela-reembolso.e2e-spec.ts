@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { randomUUID } from 'node:crypto';
 import { AppModule } from '../src/app.module';
+import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import { ProviderFactory } from '../src/modules/pasarela/providers/provider.factory';
 import { PasarelaOrden } from '../src/modules/pasarela/entities/pasarela-orden.entity';
@@ -14,6 +15,7 @@ import { PasarelaTransaccion } from '../src/modules/pasarela/entities/pasarela-t
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris (Chile)
 const CLP = '550e8400-e29b-41d4-a716-446655440003';
 const DEBITO_ID = '550e8400-e29b-41d4-a716-446655440106';
+const CREDITO_ID = '550e8400-e29b-41d4-a716-446655440107';
 // Paris → Webpay Plus modo MALL (seed): las credenciales salen de la plataforma.
 const TP_PARIS_WEBPAY_ID = '550e8400-e29b-41d4-a716-446655440217';
 const ADMIN = { email: 'admin.paris@paris.cl', password: 'admin' };
@@ -324,6 +326,119 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
       (await refundsDe(ordenId)).map((r) => r.correccion_venta_id),
     ).toEqual([idPrimero, idSegundo]);
     expect(await correccionesDe(venta.id)).toHaveLength(2);
+  });
+
+  describe('lo devuelto por la pasarela gasta el tope por pago de una devolución manual', () => {
+    // La venta de mostrador pide caja abierta; el débito no mueve plata de la caja.
+    let caja: CajaAbierta;
+    beforeAll(async () => {
+      caja = await abrirCaja(app, token);
+    });
+    afterAll(async () => {
+      await cerrarCaja(app, token, caja);
+    });
+    const notaPorElPago = (ventaId: string, monto: string, pagoId: string) =>
+      request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set(auth())
+        .send({
+          monto,
+          devolucion: { pagoId },
+          comentario: 'por el mismo pago',
+        });
+    const viaYPago = async (
+      correccionId: string,
+    ): Promise<{ via: string; pago_id: string | null }> => {
+      const f: { via: string; pago_id: string | null }[] = await ds.query(
+        `SELECT devolucion_via AS via, devolucion_pago_id AS pago_id
+           FROM ventas WHERE venta_id = $1`,
+        [correccionId],
+      );
+      return f[0];
+    };
+    /** $100.000 con $40.000 pagados con débito (un único pago) y $60.000 debidos. */
+    const ventaConUnPago = async (): Promise<{
+      venta: Venta;
+      pagoId: string;
+    }> => {
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set(auth())
+        .send({
+          // Una venta de mostrador que se paga a medias, ligada después a la orden:
+          // `vincularVenta` puede ligar una orden a cualquier venta, y la online
+          // se cobra entera (con un único pago por el total, el tope de la venta
+          // y el del pago valen lo mismo y no se distinguen).
+          lineas: [
+            { itemId: itemAfecto60, cantidad: '1' },
+            { itemId: itemExento, cantidad: '1' },
+          ],
+          pagos: [{ metodoPagoId: DEBITO_ID, monto: '40000' }],
+        });
+      expect(res.status).toBe(201);
+      const venta = res.body as Venta;
+      const pagos: { pago_id: string }[] = await ds.query(
+        `SELECT pago_id FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [venta.id],
+      );
+      expect(pagos).toHaveLength(1);
+      return { venta, pagoId: pagos[0].pago_id };
+    };
+
+    it('con un único pago, el REFUND aprobado de 15.000 lo anota y la nota manual por ese pago solo puede devolver los 25.000 que quedan', async () => {
+      const { venta, pagoId } = await ventaConUnPago();
+      const ordenId = await ordenCobrada(venta.id);
+
+      const refund = await reembolsarAdmin(ordenId, { monto: '15000' });
+      expect(refund.status).toBe(201);
+      const correccion = (refund.body as RespuestaReembolso).notaCreditoId!;
+      // La vía sigue siendo la pasarela, pero la corrección anota el pago.
+      expect(await viaYPago(correccion)).toEqual({
+        via: 'pasarela',
+        pago_id: pagoId,
+      });
+
+      // El pago trajo 40.000 y por él ya volvieron 15.000: pedir los 40.000
+      // enteros rebota (el tope de la venta, 85.000, y el del documento no lo ven).
+      const demasiado = await notaPorElPago(venta.id, '40000', pagoId);
+      expect(demasiado.status).toBe(400);
+      expect(JSON.stringify(demasiado.body)).toMatch(
+        /por devolver por ese pago/,
+      );
+      expect(await correccionesDe(venta.id)).toHaveLength(1);
+
+      const resto = await notaPorElPago(venta.id, '25000', pagoId);
+      expect(resto.status).toBe(201);
+    });
+
+    it('con dos pagos la pasarela no elige ninguno: la corrección no anota pago y no gasta ningún tope', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set(auth())
+        .send({
+          canal: 'online',
+          lineas: [
+            { itemId: itemAfecto60, cantidad: '1' },
+            { itemId: itemExento, cantidad: '1' },
+          ],
+          pagos: [
+            { metodoPagoId: DEBITO_ID, monto: '40000' },
+            { metodoPagoId: CREDITO_ID, monto: '60000' },
+          ],
+        });
+      expect(res.status).toBe(201);
+      const venta = res.body as Venta;
+      const ordenId = await ordenCobrada(venta.id);
+
+      const refund = await reembolsarAdmin(ordenId, { monto: '15000' });
+
+      expect(refund.status).toBe(201);
+      expect(
+        await viaYPago((refund.body as RespuestaReembolso).notaCreditoId!),
+      ).toEqual({ via: 'pasarela', pago_id: null });
+    });
   });
 
   it('un body con generarNotaCredito da 400 y no llega a reembolsar nada (el campo ya no existe)', async () => {

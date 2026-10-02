@@ -790,16 +790,18 @@ describe('Resumen del negocio (e2e)', () => {
       it('una NC mayor que lo que se debe deja el saldo en cero, no en negativo, y la venta sale de la cuenta', async () => {
         // El abono es con débito: la devolución vuelve por la máquina y no
         // toca la caja. Con efectivo, una nota mayor que lo cobrado en
-        // efectivo (0,4·T) la frena el tope del efectivo, y sin plata la frena
-        // el saldo: solo el medio que no es efectivo deja que la nota supere
-        // lo que se debe.
-        const { venta, T, P } = await ventaParcial('0.4', DEBITO_ID);
+        // efectivo la frena el tope del efectivo, y sin plata la frena el
+        // saldo. Y ninguna nota por un pago pasa de lo que ese pago trajo (P):
+        // por eso el abono (P) tiene que superar lo que falta (T − P), para
+        // que una nota N ≤ P pueda ser mayor que lo que se debe.
+        const { venta, T, P } = await ventaParcial('0.7', DEBITO_ID);
         const antes = await leer();
 
-        // N = T − ⌊0,1·T⌋: más que lo que se debe (T − P). Sin el piso, el
-        // saldo de esta venta sería T − N − P < 0 y restaría de más.
-        const N = T.minus(piso(T.times('0.1'))).toString();
+        // T − P < N ≤ P: sin el piso, el saldo de esta venta sería T − N − P < 0
+        // y restaría de más.
+        const N = piso(T.times('0.5')).toString();
         expect(new Decimal(N).gt(T.minus(P))).toBe(true);
+        expect(new Decimal(N).lte(P)).toBe(true);
         await post(`/api/ventas/${venta.id}/notas-credito`, {
           monto: N,
           ...(await devolucionDe(venta.id)),

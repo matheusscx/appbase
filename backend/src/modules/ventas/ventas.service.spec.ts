@@ -295,6 +295,7 @@ describe('VentasService', () => {
         documento: { id: 'doc-boleta', emisor: 'sistema', monto: '11305.0000' },
         saldo: null,
         mueveCaja: false,
+        devolvibleDelPago: null,
       }),
       exigirTopeDelDocumento: jest.fn().mockResolvedValue(undefined),
       documentarCorreccion: jest.fn().mockResolvedValue({ id: 'doc-nc' }),
@@ -2616,6 +2617,7 @@ describe('VentasService', () => {
         documento: { id: 'doc-boleta', emisor: 'sistema', monto: '11305.0000' },
         saldo: null,
         mueveCaja: true,
+        devolvibleDelPago: null,
       });
 
     it('la NC se marca con el tipo de documento DEL PAÍS del tenant, no con una constante', async () => {
@@ -2753,6 +2755,7 @@ describe('VentasService', () => {
           },
           saldo: '5000.0000',
           mueveCaja: false,
+          devolvibleDelPago: null,
         });
 
         await service.crearNotaCredito({
@@ -2766,15 +2769,27 @@ describe('VentasService', () => {
         });
       });
 
-      it('por la pasarela: la vía y ningún pago', async () => {
+      it('por la pasarela de una venta sin un único pago: la vía y ningún pago', async () => {
         await service.crearNotaCredito({
           ...baseParams,
-          via: { tipo: 'pasarela', documentoId: null },
+          via: { tipo: 'pasarela', documentoId: null, pagoId: null },
         });
 
         expect(guardada()).toMatchObject({
           devolucionVia: 'pasarela',
           devolucionPagoId: null,
+        });
+      });
+
+      it('por la pasarela de una venta de un único pago: sigue siendo la pasarela, pero anota el pago para que gaste su tope', async () => {
+        await service.crearNotaCredito({
+          ...baseParams,
+          via: { tipo: 'pasarela', documentoId: null, pagoId: 'pago-unico' },
+        });
+
+        expect(guardada()).toMatchObject({
+          devolucionVia: 'pasarela',
+          devolucionPagoId: 'pago-unico',
         });
       });
     });
@@ -2792,6 +2807,7 @@ describe('VentasService', () => {
           },
           saldo,
           mueveCaja: false,
+          devolvibleDelPago: null,
         });
 
       it('un monto por encima del saldo es un 400 corto que no dice ningún número, y no escribe nada', async () => {
@@ -2832,12 +2848,90 @@ describe('VentasService', () => {
       });
     });
 
+    describe('el tope por pago: una corrección por un pago no pasa de lo que ese pago trajo', () => {
+      const conDevolvible = (devolvible: string, mueveCaja = false) =>
+        ventaDocumentosMock.documentoQueCorrige.mockResolvedValue({
+          // Un documento enorme (boleta `sistema` de toda la venta): el tope por
+          // documento no acota por pago, solo este lo ve.
+          documento: {
+            id: 'doc-boleta',
+            emisor: 'sistema',
+            monto: '11305.0000',
+          },
+          saldo: null,
+          mueveCaja,
+          devolvibleDelPago: devolvible,
+        });
+
+      it('un monto por encima de lo que queda por devolver por el pago es un 400 sin cifras, y no escribe nada', async () => {
+        conDevolvible('400.0000');
+
+        const error = (await service
+          .crearNotaCredito({ ...baseParams, monto: '900.0000' })
+          .catch((e: Error) => e)) as BadRequestException;
+
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect(error.message).toMatch(/por devolver por ese pago/);
+        expect(error.message).not.toMatch(/\d/);
+        expect(ncManager.save).not.toHaveBeenCalled();
+        expect(ventaDocumentosMock.documentarCorreccion).not.toHaveBeenCalled();
+      });
+
+      it('un monto igual a lo que queda por devolver pasa', async () => {
+        conDevolvible('400.0000');
+
+        const res = await service.crearNotaCredito({
+          ...baseParams,
+          monto: '400.0000',
+        });
+
+        expect(res.totalFinal).toBe('400.0000');
+      });
+
+      it('con una vía que no es un pago el tope no existe (viene nulo)', async () => {
+        const res = await service.crearNotaCredito(baseParams);
+
+        expect(res.totalFinal).toBe('1100.0000');
+      });
+
+      it('el efectivo también lo respeta: pasa el tope del efectivo de la venta y cae en el del pago', async () => {
+        // La venta cobró 1.100 en efectivo (tope de arriba), pero ESTE pago solo trajo 400.
+        conDevolvible('400.0000', true);
+
+        const error = (await service
+          .crearNotaCredito({ ...baseParams, monto: '900.0000' })
+          .catch((e: Error) => e)) as BadRequestException;
+
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect(error.message).toMatch(/por devolver por ese pago/);
+        expect(error.message).not.toMatch(/\d/);
+        expect(
+          cajaService.registrarMovimientoEnTransaccion,
+        ).not.toHaveBeenCalled();
+      });
+
+      it('con efectivo, el tope del efectivo de la venta corre primero (el 422 con su rastro, no este 400)', async () => {
+        // Del efectivo de la venta quedan 100 y del pago 400: pedir 900 rompe los
+        // dos, y tiene que verse el del efectivo.
+        efectivoCobrado = '1100.0000';
+        efectivoDevuelto = '1000.0000';
+        conDevolvible('400.0000', true);
+
+        const error = (await service
+          .crearNotaCredito({ ...baseParams, monto: '900.0000' })
+          .catch((e: Error) => e)) as Error;
+
+        expect(error).toBeInstanceOf(IntentoRechazadoError);
+      });
+    });
+
     describe('la devolución interna (el documento corregido es de "nadie")', () => {
       beforeEach(() => {
         ventaDocumentosMock.documentoQueCorrige.mockResolvedValue({
           documento: { id: 'doc-nadie', emisor: 'nadie', monto: '11305.0000' },
           saldo: null,
           mueveCaja: false,
+          devolvibleDelPago: null,
         });
       });
 
@@ -2880,6 +2974,7 @@ describe('VentasService', () => {
         documento: null,
         saldo: null,
         mueveCaja: false,
+        devolvibleDelPago: null,
       });
 
       await service.crearNotaCredito(baseParams);
@@ -3746,8 +3841,13 @@ describe('VentasService', () => {
     });
 
     describe('viaDeReembolsoPasarela: un hecho consumado, nunca lanza', () => {
-      const via = (filas: { documento_id: string }[]) => {
-        dataSourceMock.query.mockResolvedValueOnce(filas);
+      const via = (
+        filas: { documento_id: string }[],
+        pagos: { pago_id: string }[] = [],
+      ) => {
+        dataSourceMock.query
+          .mockResolvedValueOnce(filas)
+          .mockResolvedValueOnce(pagos);
         return service.viaDeReembolsoPasarela(
           TENANT_ID,
           VENTA_ORIG_ID,
@@ -3765,6 +3865,7 @@ describe('VentasService', () => {
         await expect(via([{ documento_id: 'doc-boleta' }])).resolves.toEqual({
           tipo: 'pasarela',
           documentoId: 'doc-boleta',
+          pagoId: null,
         });
         expect(advertencia).not.toHaveBeenCalled();
       });
@@ -3773,6 +3874,7 @@ describe('VentasService', () => {
         await expect(via([])).resolves.toEqual({
           tipo: 'pasarela',
           documentoId: null,
+          pagoId: null,
         });
         expect(advertencia).not.toHaveBeenCalled();
       });
@@ -3780,7 +3882,11 @@ describe('VentasService', () => {
       it('más de uno (inalcanzable hoy): sin documento y una advertencia con la venta y la orden', async () => {
         await expect(
           via([{ documento_id: 'a' }, { documento_id: 'b' }]),
-        ).resolves.toEqual({ tipo: 'pasarela', documentoId: null });
+        ).resolves.toEqual({
+          tipo: 'pasarela',
+          documentoId: null,
+          pagoId: null,
+        });
 
         expect(advertencia).toHaveBeenCalledTimes(1);
         const mensaje = String(advertencia.mock.calls[0][0]);
@@ -3788,7 +3894,26 @@ describe('VentasService', () => {
         expect(mensaje).toContain('orden-1');
       });
 
-      it('mira solo los documentos válidos de esa venta y ese tenant, nada de sus pagos', async () => {
+      it('con un único pago lo trae: lo que devolvió la pasarela gasta el tope de ese pago', async () => {
+        await expect(
+          via([{ documento_id: 'doc-boleta' }], [{ pago_id: 'pago-unico' }]),
+        ).resolves.toEqual({
+          tipo: 'pasarela',
+          documentoId: 'doc-boleta',
+          pagoId: 'pago-unico',
+        });
+      });
+
+      it('con dos pagos no elige ninguno: elegir uno sería adivinar', async () => {
+        const r = await via(
+          [{ documento_id: 'doc-boleta' }],
+          [{ pago_id: 'p-1' }, { pago_id: 'p-2' }],
+        );
+
+        expect(r.tipo === 'pasarela' && r.pagoId).toBeNull();
+      });
+
+      it('mira solo los documentos válidos de esa venta y ese tenant', async () => {
         await via([]);
 
         const [sql, params] = dataSourceMock.query.mock.calls[0] as [
@@ -3800,7 +3925,19 @@ describe('VentasService', () => {
         expect(sql).toContain('es_duplicado = false');
         expect(sql).toContain('eliminado_el IS NULL');
         expect(sql).toContain('tenant_id = $2');
-        expect(sql).not.toContain('pagos');
+        expect(params).toEqual([VENTA_ORIG_ID, TENANT_ID]);
+      });
+
+      it('y de sus pagos solo los vivos de esa venta y ese tenant', async () => {
+        await via([]);
+
+        const [sql, params] = dataSourceMock.query.mock.calls[1] as [
+          string,
+          unknown[],
+        ];
+        expect(sql).toContain('FROM pagos');
+        expect(sql).toContain('eliminado_el IS NULL');
+        expect(sql).toContain('tenant_id = $2');
         expect(params).toEqual([VENTA_ORIG_ID, TENANT_ID]);
       });
     });

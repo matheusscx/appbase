@@ -29,9 +29,11 @@ describe('VentasReembolsoHandler', () => {
       crearNotaCredito: jest
         .fn()
         .mockResolvedValue({ id: 'nc-1', totalFinal: '1100.0000' }),
-      viaDeReembolsoPasarela: jest
-        .fn()
-        .mockResolvedValue({ tipo: 'pasarela', documentoId: 'doc-boleta' }),
+      viaDeReembolsoPasarela: jest.fn().mockResolvedValue({
+        tipo: 'pasarela',
+        documentoId: 'doc-boleta',
+        pagoId: 'pago-1',
+      }),
     };
     monedasService = {
       decimalesDeLaVenta: jest
@@ -70,7 +72,7 @@ describe('VentasReembolsoHandler', () => {
       comentario: 'NC por reembolso orden O-1',
       // La plata ya volvió por el proveedor: corrige el único documento válido
       // de la venta y no mueve caja.
-      via: { tipo: 'pasarela', documentoId: 'doc-boleta' },
+      via: { tipo: 'pasarela', documentoId: 'doc-boleta', pagoId: 'pago-1' },
     });
     expect(ventasService.viaDeReembolsoPasarela).toHaveBeenCalledWith(
       't-1',

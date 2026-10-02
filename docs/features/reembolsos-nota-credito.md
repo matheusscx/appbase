@@ -398,6 +398,26 @@ mensaje del tope por documento no interpola ningún número (la fuga 5 del modo 
 cerrada). `exigirTipoNotaCredito` ya no corre al abrir la transacción: solo si la corrección
 lleva el tipo.
 
+- **Tope por pago (2026-10-02):** una corrección con `devolucion_via = 'pago'` no pasa de
+  `aplicado a la venta por ese pago − Σ total_final de las correcciones vigentes con
+  devolucion_pago_id = ese pago`. `corregibles` lo trae en la misma lectura de los pagos
+  (`devolvible`; sin una consulta por pago) y `crearNotaCreditoEnTransaccion` lo aplica bajo el
+  lock de la venta, después del tope por documento (que no acota por pago cuando el medio emite
+  `sistema`: su documento es la boleta de toda la venta). Rige para todo pago, efectivo incluido:
+  ahí corre **después** del tope del efectivo de la venta, para que el 422 con su rastro siga siendo
+  lo que ve quien prueba cuánto efectivo hay. 400 sin cifras (fuga 5). Lo que el comercio quiera
+  acreditar de más va por "No vuelve plata", topada por el saldo. Único camino que escribe
+  `devolucion_via = 'pago'`.
+  - **Lo devuelto cuenta sea cual sea la vía:** el reembolso de pasarela es un hecho consumado y no
+    se topa, pero cuando la venta tiene **exactamente un pago** su corrección anota ese pago en
+    `devolucion_pago_id` (la vía sigue siendo `'pasarela'`) y gasta su tope; con 0 o más de uno
+    queda sin pago (elegir uno sería adivinar).
+  - **La pantalla ofrece lo que el servidor acepta:** `opcionesDevolucion` trae en `monto` lo que
+    cada pago todavía puede devolver y no ofrece el que ya devolvió todo; el modal propone y topa el
+    monto con esa opción (`topeDeOpcion`, además del disponible de la venta).
+  - **La propina no cuenta:** el tope es lo que el pago aplicó a la venta (`pago_aplicaciones`
+    tipo `venta`), no lo cobrado en la tarjeta.
+
 ## Redondeo: la NC hereda el criterio del documento que corrige (2026-08-21)
 
 **La regla.** Una NC no redondea con las preferencias vigentes del tenant: lee el

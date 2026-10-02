@@ -15,6 +15,7 @@ import {
   puedeBorrarNumero,
   puedeCompletarNumero,
   registroQueQueda,
+  topeDeOpcion,
   resumenEmisores,
   type DocumentoVenta,
   type OpcionDevolucion,
@@ -227,6 +228,15 @@ describe('por dónde vuelve la plata (opcionesDevolucion)', () => {
   it('la clave distingue cada pago y "no vuelve plata"', () => {
     expect(claveOpcion(opcion({ pagoId: 'a' }))).toBe('a')
     expect(claveOpcion(opcion({ pagoId: null, sinPlata: true }))).toBe('sin-plata')
+  })
+
+  it('el tope de una opción es lo menor entre lo disponible y lo que ella admite', () => {
+    // La tarjeta trajo 40.000 y por ella ya volvieron 15.000: quedan 25.000.
+    expect(topeDeOpcion('85000.0000', opcion({ monto: '25000.0000' }))).toBe('25000')
+    // Lo disponible de la venta manda si es menor.
+    expect(topeDeOpcion('11900.0000', opcion({ monto: '60000.0000' }))).toBe('11900')
+    // Sin opción elegida, lo disponible.
+    expect(topeDeOpcion('11900.0000', null)).toBe('11900')
   })
 
   it('dice en una línea qué registro va a quedar, por cada tipo', () => {

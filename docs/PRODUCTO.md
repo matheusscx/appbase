@@ -960,6 +960,14 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   Hasta que el sistema emita, la nota la hace el comercio por fuera y el sistema anota su número;
 - **en un pago mixto, la devolución corrige el documento del medio por el que se devuelve la
   plata**: efectivo, la boleta del efectivo; tarjeta, el voucher;
+- **una devolución por un pago no pasa de lo que ese pago trajo a la venta**, menos lo que ya se
+  devolvió por él. Ninguna máquina ni banco reversa más de lo que cobró, y con el medio en
+  `sistema` el documento de ese pago es la boleta de toda la venta, que no lo acota. Vale para
+  cualquier medio, el efectivo incluido (donde se suma al tope de lo cobrado en efectivo). Lo que el
+  comercio quiera acreditar de más va por "No vuelve plata", topada por lo que la venta todavía
+  debe. Lo devuelto por la pasarela cuenta contra su pago cuando la venta tiene uno solo; la
+  propina no cuenta. La pantalla ofrece solo lo que cada pago todavía puede devolver. El rechazo no
+  dice ninguna cifra (2026-10-02, gemelo del tope de efectivo);
 - **una venta pendiente se puede anular mientras nadie haya emitido documento**, sin importar la
   etiqueta. Si alguien emitió, va por nota de crédito. La etiqueta no impide anular: lo que cuenta
   es lo registrado en `venta_documentos` (más el estado `pendiente` y los pagos). Una boleta del
