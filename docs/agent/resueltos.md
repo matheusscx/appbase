@@ -23,6 +23,69 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Las escrituras sobre una venta por su id, y el abono, respetan el alcance de caja (cerrada 2026-10-02)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **`POST /ventas/:id/notas-credito` no aplica el alcance de caja** (backend, invariante 6;
+  `ventas.controller.ts` ~L58). Solo exige `Ventas:Nota de crédito`. `findOne` y el `PATCH` de
+  documentos pasan por `resolverAlcanceDerivadoDeCaja` (eje `Cajas:Leer`); este no, así que un
+  cajero con el permiso de NC opera sobre ventas de otros cajeros del mismo comercio, aunque no
+  pueda verlas. Lo vio `api-security-reviewer` en la tarea 8 de la emisión (2026-10-02); verificado
+  por la orquestadora. **Arreglo:** el mismo alcance que `findOne`, con e2e del 404/403 sobre una
+  venta ajena y del caso que deja pasar. Barrer los otros `POST /ventas/:id/*` (abono, anular,
+  reembolso) buscando el gemelo. **Después de que la emisión entre a main**: toca el mismo
+  controller.
+
+### Qué se hizo
+
+- **El alcance del detalle, extraído y reusado.** El chequeo que ya hacían el `PATCH` de
+  documentos y `borrar-numero` (`tomarDocumentoDeLaVenta`) pasó a `exigirVentaVisible`
+  (`ventas.service.ts`), y ahora lo llaman también la anulación (`cancelarUnaVez`, dentro de la
+  transacción y antes del `FOR UPDATE`) y la nota manual (`crearNotaCreditoDesdeVenta`, antes de
+  abrir la transacción). El controller resuelve `verTodas` con `resolverAlcanceDerivadoDeCaja`,
+  como en `findOne`. Venta ajena: **404**, no 403.
+- **La nota de pasarela no pasa por el alcance.** El chequeo va en `crearNotaCreditoDesdeVenta`
+  y no en `crearNotaCredito`, que comparte el hook de reembolso: ese lo dispara el sistema, no un
+  cajero. `verTodas` es obligatorio en la firma de los dos métodos públicos, así que olvidarlo no
+  compila.
+- **El barrido del gemelo.** `POST /ventas/:id/anular` tampoco tenía alcance: entró acá. `PATCH`
+  de documentos y `borrar-numero` ya lo tenían (frente de emisión). El reembolso de pasarela
+  (`POST /pasarela/admin/ordenes/:id/reembolsos`) no es gemelo: opera sobre órdenes online, que
+  el alcance deja ver a todos. El **abono** (`POST /pagos`, `ventaId` en el body) tampoco lo
+  tenía, y restringirlo era regla de negocio —cobrar una deuda vendida en otra caja—: se le
+  preguntó al owner y eligió el mismo alcance (PRODUCTO § 10, 2026-10-02). Va en el mismo
+  `SELECT … FOR UPDATE` que carga la venta en `registrarAbono`, así que una venta ajena ni se
+  encuentra ni se bloquea. `online/pagar` crea su venta y la API de pasarela opera con API key,
+  sin cajero: ninguno toma una venta ajena por id.
+
+### Qué lo fija
+
+`visibilidad-ventas-pagos.e2e-spec.ts`, describe *"las escrituras sobre una venta respetan el
+alcance por caja"*: un usuario propio con `Ventas` (Leer, Crear, Anular, Nota de crédito) y
+`MiCaja`, sin `Cajas:Leer`, con caja abierta en un cajón propio. Sobre una venta **pendiente**
+del admin, la nota "no vuelve plata" y la anulación dan 404 y la venta no cambia; el admin, sobre
+la misma venta, sí puede (control). Sobre ventas de su propia caja, las dos pasan. El abono,
+igual: la deuda ajena es 404 y no deja pago, la propia se cobra, y el admin cobra con su caja una
+deuda de la caja del operador. Mutantes,
+medidos el 2026-10-02 (en esa suite, cada uno mata un solo test, el suyo):
+
+| Mutante | Test que muere | Sin el guard |
+|---|---|---|
+| sacar `exigirVentaVisible` de `crearNotaCreditoDesdeVenta` | nota de crédito sobre una venta de otra caja | 201: la nota se emitía |
+| sacar `exigirVentaVisible` de `cancelarUnaVez` | anular una venta de otra caja | 201: la venta ajena se anulaba |
+| volver el `SELECT … FOR UPDATE` de `registrarAbono` al de antes, sin alcance | abonar una deuda de otra caja | 201: se cobraba |
+
+La primera versión del test de la nota usaba una venta **pagada** del admin, y el mutante moría
+con un 400 de negocio en vez del 201: el test probaba "no es 404", no el agujero. Se cambió a una
+pendiente para que la rotura medida sea la real. En unit, `ventas.service.spec.ts` fija la forma
+de la consulta (con y sin `c.usuario_id`) y que el 404 llega antes del lock o de la transacción;
+`pagos.service.spec.ts`, la del `FOR UPDATE` del abono.
+
+---
+
 ## Cada venta registra quién emitió sus documentos, y la regla la declara cada medio de pago (cerrada 2026-10-02)
 
 Sale de [`pendientes.md`](pendientes.md) § 6.

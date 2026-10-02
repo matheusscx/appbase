@@ -374,6 +374,12 @@ export class PagosService {
      * huella.
      */
     clave: string,
+    /**
+     * El alcance de caja del detalle de la venta (`resolverAlcanceDerivadoDeCaja`):
+     * sin `Cajas:Leer` solo se cobra una deuda de las cajas propias, y la de otra
+     * caja es 404, como en `GET /ventas/:id` (PRODUCTO § 10, owner 2026-10-02).
+     */
+    verTodas: boolean,
   ): Promise<{
     pagos: Pago[];
     venta: {
@@ -397,13 +403,34 @@ export class PagosService {
           // aplican — sobre-pago que ninguno de los dos ve, porque cada uno
           // comparó contra un saldo que el otro ya invalidó. La suma de
           // `pago_aplicaciones` de más abajo también queda bajo este lock.
-          `SELECT venta_id, estado, moneda_id
-         FROM ventas
-         WHERE venta_id = $1
-           AND tenant_id = $2
-           AND eliminado_el IS NULL
+          //
+          // El alcance de caja va en el mismo WHERE: una venta que no se ve no
+          // se encuentra (404) ni se bloquea. Es el filtro de ventas de
+          // `VentasService.filtroDeMisCajas` —la online no es de nadie y la ven
+          // todos—, no el de pagos de este archivo.
+          `SELECT v.venta_id, v.estado, v.moneda_id
+         FROM ventas v
+         WHERE v.venta_id = $1
+           AND v.tenant_id = $2
+           AND v.eliminado_el IS NULL
+           ${
+             verTodas
+               ? ''
+               : `AND (
+             v.canal = 'online'
+             OR EXISTS (
+               SELECT 1 FROM cajas c
+                WHERE c.caja_id = v.caja_id
+                  AND c.tenant_id = v.tenant_id
+                  AND c.usuario_id = $3
+                  AND c.eliminado_el IS NULL
+             )
+           )`
+           }
          FOR UPDATE`,
-          [dto.ventaId, tenantId],
+          verTodas
+            ? [dto.ventaId, tenantId]
+            : [dto.ventaId, tenantId, usuarioId],
         );
 
         if (!ventaRows.length) {

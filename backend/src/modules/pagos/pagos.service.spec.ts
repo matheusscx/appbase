@@ -659,9 +659,45 @@ describe('PagosService', () => {
             pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
           },
           CLAVE,
+          true,
         ),
       ).rejects.toThrow(NotFoundException);
     });
+
+    // La forma de la consulta: el 404 de una venta ajena lo fija el e2e
+    // (`visibilidad-ventas-pagos`), que es el que corre el SQL.
+    it.each([
+      [false, [VENTA_ID, TENANT_ID, USUARIO_ID], true],
+      [true, [VENTA_ID, TENANT_ID], false],
+    ])(
+      'con verTodas=%p, el FOR UPDATE de la venta lleva el alcance de caja solo si hace falta',
+      async (verTodas, binds, filtra) => {
+        const manager = buildManagerMock();
+        manager.query.mockResolvedValueOnce([]);
+        const module: TestingModule = await setupModule(manager);
+        const svc = module.get<PagosService>(PagosService);
+
+        await expect(
+          svc.registrarAbono(
+            TENANT_ID,
+            USUARIO_ID,
+            {
+              ventaId: VENTA_ID,
+              pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
+            },
+            CLAVE,
+            verTodas,
+          ),
+        ).rejects.toThrow(NotFoundException);
+        const [sql, params] = manager.query.mock.calls[0] as [
+          string,
+          unknown[],
+        ];
+        expect(sql).toContain('FOR UPDATE');
+        expect(sql.includes('c.usuario_id = $3')).toBe(filtra);
+        expect(params).toEqual(binds);
+      },
+    );
 
     it('lanza BadRequestException si venta está en estado pagada', async () => {
       const manager = buildAbonableManager('pagada');
@@ -677,6 +713,7 @@ describe('PagosService', () => {
             pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
           },
           CLAVE,
+          true,
         ),
       ).rejects.toThrow(BadRequestException);
     });
@@ -695,6 +732,7 @@ describe('PagosService', () => {
             pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
           },
           CLAVE,
+          true,
         ),
       ).rejects.toThrow(BadRequestException);
     });
@@ -713,6 +751,7 @@ describe('PagosService', () => {
             pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
           },
           CLAVE,
+          true,
         ),
       ).rejects.toThrow(BadRequestException);
     });
@@ -738,6 +777,7 @@ describe('PagosService', () => {
             pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
           },
           CLAVE,
+          true,
         ),
       ).rejects.toThrow('La caja está en conciliación y no admite pagos');
 
@@ -765,6 +805,7 @@ describe('PagosService', () => {
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
         },
         CLAVE,
+        true,
       );
 
       expect(result.venta).toEqual({
@@ -796,6 +837,7 @@ describe('PagosService', () => {
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
         },
         CLAVE,
+        true,
       );
 
       expect(cajaSvc.bloquearCajaAbierta).toHaveBeenCalledWith(
@@ -836,6 +878,7 @@ describe('PagosService', () => {
           USUARIO_ID,
           { ventaId: VENTA_ID, pagos },
           CLAVE,
+          true,
         );
         return { manager, documentos, result };
       }
@@ -940,6 +983,7 @@ describe('PagosService', () => {
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100.0000' }],
         },
         CLAVE,
+        true,
       );
 
       expect(result.venta.estado).toBe(EstadoVenta.PAGADA);
@@ -964,6 +1008,7 @@ describe('PagosService', () => {
             pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '35000.0000' }],
           },
           CLAVE,
+          true,
         );
 
         const [lock, lectura, , recalculo] = manager.query.mock.calls as [
@@ -993,6 +1038,7 @@ describe('PagosService', () => {
               pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '400.0000' }],
             },
             CLAVE,
+            true,
           ),
         ).rejects.toThrow('La venta no tiene saldo pendiente');
         expect(manager.save).not.toHaveBeenCalled();
@@ -1013,6 +1059,7 @@ describe('PagosService', () => {
               pagos: [{ metodoPagoId: TARJETA_ID, monto: '35001.0000' }],
             },
             CLAVE,
+            true,
           ),
         ).rejects.toThrow(BadRequestException);
         expect(manager.save).not.toHaveBeenCalled();

@@ -62,16 +62,6 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   cada campo y espere 400. Barrer los DTOs de `PATCH` vecinos buscando el gemelo, sin asumir que es
   el único. **Tomarlo después de que la emisión entre a main**, porque toca el mismo archivo.
 
-- [ ] **`POST /ventas/:id/notas-credito` no aplica el alcance de caja** (backend, invariante 6;
-  `ventas.controller.ts` ~L58). Solo exige `Ventas:Nota de crédito`. `findOne` y el `PATCH` de
-  documentos pasan por `resolverAlcanceDerivadoDeCaja` (eje `Cajas:Leer`); este no, así que un
-  cajero con el permiso de NC opera sobre ventas de otros cajeros del mismo comercio, aunque no
-  pueda verlas. Lo vio `api-security-reviewer` en la tarea 8 de la emisión (2026-10-02); verificado
-  por la orquestadora. **Arreglo:** el mismo alcance que `findOne`, con e2e del 404/403 sobre una
-  venta ajena y del caso que deja pasar. Barrer los otros `POST /ventas/:id/*` (abono, anular,
-  reembolso) buscando el gemelo. **Después de que la emisión entre a main**: toca el mismo
-  controller.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:

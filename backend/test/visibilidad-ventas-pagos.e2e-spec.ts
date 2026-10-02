@@ -8,6 +8,8 @@ import { AppModule } from '../src/app.module';
 import Decimal from 'decimal.js';
 import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
+import { TokensAccesoService } from '../src/modules/auth/tokens-acceso.service';
+import { TipoTokenAcceso } from '../src/modules/auth/entities/token-acceso.entity';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
@@ -467,6 +469,281 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
           .toString(),
       ).toBe('-2323');
       expect(despues.totalBruto).toBe(antes.totalBruto);
+    });
+  });
+
+  /**
+   * Las escrituras sobre una venta por su id (`POST /ventas/:id/notas-credito` y
+   * `POST /ventas/:id/anular`) piden su permiso de Ventas como piso, y el eje
+   * **`Cajas:Leer`** dice sobre qué ventas: el mismo alcance que el detalle. Antes,
+   * quien tenía el permiso emitía la nota o anulaba ventas de otras cajas que ni
+   * siquiera podía ver (invariante 6).
+   *
+   * El usuario es propio, con un rol propio: ninguno del seed junta `Nota de
+   * crédito` y `Anular` sin `Cajas:Leer` (el Vendedor no tiene ninguno de los dos).
+   * Abre caja en un cajón propio y vende dos ventas pendientes —sin pagos: una
+   * se corrige con la nota "no vuelve plata", la otra se anula—, que son las que
+   * SÍ tienen que dejarlo pasar.
+   */
+  describe('las escrituras sobre una venta respetan el alcance por caja', () => {
+    let ds: DataSource;
+    let tokenOperador: string;
+    let rolId: string;
+    let usuarioId: string;
+    let cajonOperadorId: string;
+
+    const permisosDe = async (
+      modulo: string,
+      permisos: string[],
+    ): Promise<{ moduloTenantId: string; ids: string[] }> => {
+      const res = await request(app.getHttpServer())
+        .get('/api/roles/modulos-disponibles')
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(res.status).toBe(200);
+      const m = (
+        res.body as {
+          moduloTenantId: string;
+          nombre: string;
+          permisos: { moduloAppPermisoId: string; permisoNombre: string }[];
+        }[]
+      ).find((x) => x.nombre === modulo)!;
+      return {
+        moduloTenantId: m.moduloTenantId,
+        ids: permisos.map(
+          (p) =>
+            m.permisos.find((x) => x.permisoNombre === p)!.moduloAppPermisoId,
+        ),
+      };
+    };
+
+    const ventaPendiente = async (token: string): Promise<string> => {
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          tipoDocumentoId: BOLETA_ID,
+          lineas: [{ itemId, cantidad: '1' }],
+        });
+      expect(res.status).toBe(201);
+      expect((res.body as { estado: string }).estado).toBe('pendiente');
+      return (res.body as { id: string }).id;
+    };
+    const emitirNota = (token: string, ventaId: string) =>
+      request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ monto: '1000', devolucion: { sinPlata: true } });
+    const anular = (token: string, ventaId: string) =>
+      request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/anular`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ motivo: 'E2E alcance por caja' });
+    const abonar = (token: string, ventaId: string) =>
+      request(app.getHttpServer())
+        .post('/api/pagos')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          ventaId,
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000' }],
+        });
+    const pagosEnBase = async (ventaId: string): Promise<number> => {
+      const filas: unknown[] = await ds.query(
+        `SELECT 1 FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [ventaId],
+      );
+      return filas.length;
+    };
+    const notasDe = async (ventaId: string): Promise<number> => {
+      const filas: unknown[] = await ds.query(
+        `SELECT 1 FROM ventas
+          WHERE venta_referencia_id = $1 AND eliminado_el IS NULL`,
+        [ventaId],
+      );
+      return filas.length;
+    };
+    const estadoDe = async (ventaId: string): Promise<string> => {
+      const filas: { estado: string }[] = await ds.query(
+        `SELECT estado FROM ventas WHERE venta_id = $1`,
+        [ventaId],
+      );
+      return filas[0].estado;
+    };
+
+    beforeAll(async () => {
+      ds = app.get(DataSource);
+      const ventas = await permisosDe('Ventas', [
+        'Leer',
+        'Crear',
+        'Anular',
+        'Nota de crédito',
+      ]);
+      const pagos = await permisosDe('Pagos', ['Leer', 'Crear']);
+      const miCaja = await permisosDe('MiCaja', [
+        'Leer',
+        'Crear',
+        'Actualizar',
+      ]);
+
+      const rol = await request(app.getHttpServer())
+        .post('/api/roles')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ nombre: `E2E alcance escrituras ${Date.now()}` });
+      expect(rol.status).toBe(201);
+      rolId = (rol.body as { id: string }).id;
+      for (const m of [ventas, pagos, miCaja]) {
+        const asignados = await request(app.getHttpServer())
+          .put(`/api/roles/${rolId}/modules/${m.moduloTenantId}/permissions`)
+          .set('Authorization', `Bearer ${tokenAdmin}`)
+          .send({ moduloAppPermisoIds: m.ids });
+        expect(asignados.status).toBe(200);
+      }
+
+      const correo = `alcance-escrituras.${Date.now()}.${Math.floor(Math.random() * 1e6)}@e2e.cl`;
+      const alta = await request(app.getHttpServer())
+        .post('/api/tenants/usuarios')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          nombre: 'Alcance',
+          apellido: 'Escrituras',
+          correo,
+          rolIds: [rolId],
+        });
+      expect(alta.status).toBe(201);
+      usuarioId = (alta.body as { usuarioId: string }).usuarioId;
+      const invitacion = await app
+        .get(TokensAccesoService)
+        .emitir(usuarioId, TipoTokenAcceso.INVITACION);
+      const contrasena = 'clave-e2e-alcance-escrituras-1234';
+      const elegir = await request(app.getHttpServer())
+        .post(`/api/auth/invitacion/${invitacion}`)
+        .send({ contrasena });
+      expect(elegir.status).toBe(200);
+      const resLogin = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: correo, password: contrasena });
+      expect(resLogin.status).toBe(200);
+      const resSwitch = await request(app.getHttpServer())
+        .post('/api/auth/switch-tenant')
+        .set(
+          'Cookie',
+          (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
+        )
+        .set(
+          'Authorization',
+          `Bearer ${(resLogin.body as TokenResponse).access_token}`,
+        )
+        .send({ tenantId: PARIS_TENANT_ID });
+      expect(resSwitch.status).toBe(200);
+      tokenOperador = (resSwitch.body as TokenResponse).access_token;
+
+      cajonOperadorId = await crearCajon('operador');
+      const abrir = await request(app.getHttpServer())
+        .post('/api/caja/abrir')
+        .set('Authorization', `Bearer ${tokenOperador}`)
+        .send({ cajonId: cajonOperadorId, saldoInicial: '10000.0000' });
+      expect(abrir.status).toBe(201);
+    });
+
+    afterAll(async () => {
+      // Primero la caja; después, soft delete (nunca DELETE) del usuario y del rol.
+      // `liberarCaja` y no `cerrarCaja`: el abono en efectivo descuadra la caja
+      // contra el saldo inicial, y la fase 2 la resuelve el admin con un motivo.
+      const problema = tokenOperador ? await liberarCaja(tokenOperador) : null;
+      if (cajonOperadorId)
+        await request(app.getHttpServer())
+          .delete(`/api/cajones/${cajonOperadorId}`)
+          .set('Authorization', `Bearer ${tokenAdmin}`);
+      if (usuarioId)
+        await ds.query(
+          `UPDATE usuarios SET eliminado_el = NOW() WHERE usuario_id = $1`,
+          [usuarioId],
+        );
+      if (rolId)
+        await ds.query(
+          `UPDATE roles SET eliminado_el = NOW() WHERE rol_id = $1`,
+          [rolId],
+        );
+      if (problema) throw new Error(`Higiene incompleta: ${problema}`);
+    });
+
+    it('nota de crédito sobre una venta de otra caja: 404 (no 403) y no se emite', async () => {
+      // Pendiente y sin pagos, con la nota "no vuelve plata": sin el alcance, la
+      // nota se emitiría (201).
+      const ajena = await ventaPendiente(tokenAdmin);
+      const res = await emitirNota(tokenOperador, ajena);
+      expect(res.status).toBe(404);
+      expect((res.body as { message: string }).message).toBe(
+        'Venta no encontrada',
+      );
+      expect(await notasDe(ajena)).toBe(0);
+
+      // Control: el admin (con `Cajas:Leer`) sí la emite sobre la misma venta.
+      expect((await emitirNota(tokenAdmin, ajena)).status).toBe(201);
+      expect(await notasDe(ajena)).toBe(1);
+    });
+
+    it('nota de crédito sobre una venta de su propia caja: la emite', async () => {
+      const propia = await ventaPendiente(tokenOperador);
+      const res = await emitirNota(tokenOperador, propia);
+      expect(res.status).toBe(201);
+      expect(await notasDe(propia)).toBe(1);
+    });
+
+    it('anular una venta de otra caja: 404 (no 403) y la venta sigue pendiente', async () => {
+      // Pendiente y sin pagos: sin el alcance, la anulación pasaría (201).
+      const ajena = await ventaPendiente(tokenAdmin);
+      const res = await anular(tokenOperador, ajena);
+      expect(res.status).toBe(404);
+      expect((res.body as { message: string }).message).toBe(
+        'Venta no encontrada',
+      );
+      expect(await estadoDe(ajena)).toBe('pendiente');
+
+      // Control: el admin (con `Cajas:Leer`) sí la anula. El 404 de arriba no
+      // salió de que la venta no fuera anulable.
+      expect((await anular(tokenAdmin, ajena)).status).toBe(201);
+      expect(await estadoDe(ajena)).toBe('cancelada');
+    });
+
+    // Una deuda de otra caja la cobra solo quien ve todas las cajas (PRODUCTO
+    // § 10, owner 2026-10-02). El `ventaId` llega por el body, no por la ruta.
+    it('abonar una deuda de otra caja: 404 (no 403) y no se registra el pago', async () => {
+      const ajena = await ventaPendiente(tokenAdmin);
+      const res = await abonar(tokenOperador, ajena);
+      expect(res.status).toBe(404);
+      expect((res.body as { message: string }).message).toBe(
+        'Venta no encontrada',
+      );
+      expect(await pagosEnBase(ajena)).toBe(0);
+
+      // Control: el admin sí la cobra. El 404 de arriba no salió de que la
+      // deuda no fuera cobrable.
+      expect((await abonar(tokenAdmin, ajena)).status).toBe(201);
+      expect(await pagosEnBase(ajena)).toBe(1);
+    });
+
+    it('abonar una deuda de su propia caja: la cobra', async () => {
+      const propia = await ventaPendiente(tokenOperador);
+      const res = await abonar(tokenOperador, propia);
+      expect(res.status).toBe(201);
+      expect(await pagosEnBase(propia)).toBe(1);
+    });
+
+    it('quien ve todas las cajas (el admin) cobra la deuda de otra caja', async () => {
+      // El admin cobra, con su caja, una venta de la caja del operador.
+      const delOperador = await ventaPendiente(tokenOperador);
+      const res = await abonar(tokenAdmin, delOperador);
+      expect(res.status).toBe(201);
+      expect(await pagosEnBase(delOperador)).toBe(1);
+    });
+
+    it('anular una venta de su propia caja: la anula', async () => {
+      const propia = await ventaPendiente(tokenOperador);
+      const res = await anular(tokenOperador, propia);
+      expect(res.status).toBe(201);
+      expect(await estadoDe(propia)).toBe('cancelada');
     });
   });
 });

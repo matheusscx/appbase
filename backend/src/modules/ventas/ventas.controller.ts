@@ -57,6 +57,12 @@ export class VentasController {
     return this.ventasService.crear(u.tenantId ?? '', u.id, dto, clave);
   }
 
+  /**
+   * `Ventas:Nota de crédito` es el piso, y el eje **`Cajas:Leer`** dice sobre qué
+   * ventas: el mismo alcance que `findOne` (404, no 403, si la venta no es suya).
+   * Sin él, quien tenía el permiso emitía notas sobre ventas de otras cajas que no
+   * podía ni ver.
+   */
   @Post(':id/notas-credito')
   @RequiresPermiso('Ventas', 'Nota de crédito')
   async crearNotaCredito(
@@ -65,9 +71,14 @@ export class VentasController {
     @Body(EscalaMonedaPipe) dto: CreateNotaCreditoDto,
   ) {
     const u = req.user as JwtUser;
+    const verTodas = await this.rbacService.resolverAlcanceDerivadoDeCaja(
+      u.id,
+      u.tenantId!,
+    );
     return this.ventasService.crearNotaCreditoDesdeVenta({
       tenantId: u.tenantId ?? '',
       usuarioId: u.id,
+      verTodas,
       ventaOriginalId: id,
       monto: dto.monto,
       comentario: dto.comentario,
@@ -144,6 +155,7 @@ export class VentasController {
     });
   }
 
+  /** `Ventas:Anular` es el piso; el alcance de caja, el de `findOne`. */
   @Post(':id/anular')
   @RequiresPermiso('Ventas', 'Anular')
   async anular(
@@ -152,9 +164,14 @@ export class VentasController {
     @Body() dto: CancelarVentaDto,
   ) {
     const u = req.user as JwtUser;
+    const verTodas = await this.rbacService.resolverAlcanceDerivadoDeCaja(
+      u.id,
+      u.tenantId!,
+    );
     return this.ventasService.cancelar({
       tenantId: u.tenantId ?? '',
       usuarioId: u.id,
+      verTodas,
       ventaId: id,
       motivo: dto.motivo,
       // Por defecto repone: no hacerlo pierde inventario en silencio.

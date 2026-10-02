@@ -188,7 +188,8 @@ servidor*.
 
 Anula una venta — el *void* del dominio, distinto de la devolución. Permiso propio
 `Ventas/Anular` (no `Actualizar`: es la operación más sensible del módulo y el mercado la
-trata aparte).
+trata aparte), con el alcance de caja del detalle: una venta ajena es 404 (ver
+[Quién ve qué](#quién-ve-qué-el-eje-cajasleer)).
 
 ```
 POST /api/ventas/{id}/anular
@@ -610,11 +611,17 @@ cajas, el cajero ve 3, de las 2 suyas.
 
 ⚠️ **El detalle de una venta ajena responde `404`, no `403`** — un `403` confirmaría que existe.
 
-⚠️ **Lo que este eje NO cubre: las escrituras por id.** `POST /ventas/:id/notas-credito` y
-`POST /ventas/:id/anular` siguen resolviendo la venta **solo por tenant**, así que un usuario
-acotado puede operar sobre una venta que `GET /ventas/:id` le oculta. Hoy no es alcanzable con
-el rol `Vendedor` del seed —no tiene esos dos permisos—, pero el eje es de **lectura** y no hay
-que leerlo como si cubriera todo.
+**Las escrituras sobre una venta por su id también lo respetan** (2026-10-02):
+`POST /ventas/:id/notas-credito`, `POST /ventas/:id/anular`, `PATCH /ventas/:id/documentos/:documentoId`
+y `POST …/borrar-numero` pasan por el mismo alcance (`exigirVentaVisible`, antes del lock de la
+venta) y responden **404** sobre una venta ajena. El permiso de la escritura (`Nota de crédito`,
+`Anular`, `Crear`) es el piso; el eje dice sobre qué ventas. Antes, quien tenía el permiso
+operaba sobre ventas que `GET /ventas/:id` le ocultaba. Lo fija
+`visibilidad-ventas-pagos.e2e-spec.ts` con un usuario propio sin `Cajas:Leer`: la venta ajena
+da 404 y la propia pasa. El reembolso de pasarela, que crea su nota desde el sistema, no pasa
+por este alcance. El **abono** (`POST /pagos`, con el `ventaId` en el body) tiene el mismo
+alcance desde la misma fecha: una deuda de otra caja la cobra solo quien tiene `Cajas:Leer`
+(owner; ver [`pagos.md`](./pagos.md#quién-ve-qué-el-eje-cajasleer)).
 
 ⚠️ **La venta `canal='online'` la ve cualquiera con `Ventas:Leer`**, aunque no sea de nadie: va
 siempre contra la caja **virtual** del tenant, que nunca se cuenta físicamente, así que no puede
