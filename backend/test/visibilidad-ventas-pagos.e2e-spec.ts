@@ -5,7 +5,9 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import Decimal from 'decimal.js';
 import { randomUUID } from 'node:crypto';
+import { DataSource } from 'typeorm';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
@@ -393,5 +395,78 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
     expect((suyo.body as { totalPagos: number }).totalPagos).toBeLessThan(
       (todo.body as { totalPagos: number }).totalPagos,
     );
+  });
+
+  describe('el resumen de ventas neto de notas de crédito respeta el alcance por caja', () => {
+    interface ResumenVentas {
+      totalFacturado: string;
+      totalBruto: string;
+      totalNotasCredito: string;
+    }
+
+    const resumenDe = async (token: string): Promise<ResumenVentas> => {
+      const res = await request(app.getHttpServer())
+        .get('/api/ventas/resumen')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      return res.body as ResumenVentas;
+    };
+
+    const emitirNC = async (ventaId: string, monto: string) => {
+      // Por dónde vuelve la plata: el único pago de la venta (efectivo).
+      const pagos: { pago_id: string }[] = await app
+        .get(DataSource)
+        .query(
+          `SELECT pago_id FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL`,
+          [ventaId],
+        );
+      expect(pagos).toHaveLength(1);
+      const res = await request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ monto, devolucion: { pagoId: pagos[0].pago_id } });
+      expect(res.status).toBe(201);
+    };
+
+    // Una NC hereda la caja de la venta que corrige, así que `filtroDeMisCajas`
+    // la acota igual que a la venta: el cajero no ve las correcciones de una
+    // caja ajena.
+    it('una NC sobre una venta de OTRA caja no mueve el resumen del cajero', async () => {
+      const antes = await resumenDe(tokenCajero);
+      const antesAdmin = await resumenDe(tokenAdmin);
+
+      await emitirNC(ventaDelAdminId, '1717');
+      const despues = await resumenDe(tokenCajero);
+      const despuesAdmin = await resumenDe(tokenAdmin);
+
+      expect(despues.totalNotasCredito).toBe(antes.totalNotasCredito);
+      expect(despues.totalFacturado).toBe(antes.totalFacturado);
+      // Control: la NC existe y el admin (ve todas) sí la ve. Sin esto el test
+      // pasaría igual si la NC no se hubiera emitido.
+      expect(
+        new Decimal(despuesAdmin.totalNotasCredito)
+          .minus(antesAdmin.totalNotasCredito)
+          .toString(),
+      ).toBe('1717');
+    });
+
+    it('una NC sobre una venta de la caja del cajero sí le resta', async () => {
+      const antes = await resumenDe(tokenCajero);
+
+      await emitirNC(ventaDelCajeroId, '2323');
+      const despues = await resumenDe(tokenCajero);
+
+      expect(
+        new Decimal(despues.totalNotasCredito)
+          .minus(antes.totalNotasCredito)
+          .toString(),
+      ).toBe('2323');
+      expect(
+        new Decimal(despues.totalFacturado)
+          .minus(antes.totalFacturado)
+          .toString(),
+      ).toBe('-2323');
+      expect(despues.totalBruto).toBe(antes.totalBruto);
+    });
   });
 });

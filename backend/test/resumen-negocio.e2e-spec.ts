@@ -5,12 +5,16 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import Decimal from 'decimal.js';
+import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { TokensAccesoService } from '../src/modules/auth/tokens-acceso.service';
 import { TipoTokenAcceso } from '../src/modules/auth/entities/token-acceso.entity';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 import { loginSegundoTenant } from './helpers/segundo-tenant';
 import { randomUUID } from 'node:crypto';
+import { PasarelaOrden } from '../src/modules/pasarela/entities/pasarela-orden.entity';
+import { TransaccionesService } from '../src/modules/pasarela/services/transacciones.service';
+import { VentasReembolsoHandler } from '../src/modules/ventas/reembolso-callback.handler';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const SEGUNDO_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
@@ -18,6 +22,7 @@ const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
+const DEBITO_ID = '550e8400-e29b-41d4-a716-446655440106';
 /** Turno de la mañana del seed — mismo que usa `salones-anular-linea.e2e-spec.ts`. */
 const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
 
@@ -50,6 +55,8 @@ interface ResumenHoyResponse {
   fecha: string;
   ventas: {
     vendido: { hoy: string; semanaPasada: string; variacion: string | null };
+    vendidoDesglose: { bruto: string; notasCredito: string };
+    cobradoDesglose: { cobrado: string; devuelto: string };
     cobrado: { hoy: string; semanaPasada: string; variacion: string | null };
     cantidad: { hoy: number; semanaPasada: number; variacion: string | null };
     ticketPromedio: {
@@ -65,6 +72,15 @@ interface ResumenHoyResponse {
     mermas: ResumenMermasResp;
   };
   masVendidos: MasVendidoResp[];
+}
+interface LineaVentaResp {
+  itemId: string;
+  cantidad: string;
+  totalLinea: string;
+}
+interface ConfigPasarelaRow {
+  tenantPasarelaId: string;
+  codigo: string;
 }
 interface ItemResponse {
   id: string;
@@ -142,6 +158,7 @@ describe('Resumen del negocio (e2e)', () => {
   let app: INestApplication<App>;
   let tokenAdmin: string;
   let caja: CajaAbierta;
+  let ds: DataSource;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -153,6 +170,7 @@ describe('Resumen del negocio (e2e)', () => {
     app.use(cookieParser());
     app.useGlobalPipes(validacionGlobal());
     await app.init();
+    ds = app.get(DataSource);
 
     tokenAdmin = await login(app);
     caja = await abrirCaja(app, tokenAdmin, {
@@ -194,6 +212,22 @@ describe('Resumen del negocio (e2e)', () => {
       .send(body);
     expect(res.status).toBe(esperado);
     return res.body as T;
+  }
+
+  /**
+   * Por dónde vuelve la plata de una corrección: el único pago de la venta
+   * (`devolucion.pagoId`). Toda corrección declara su vía; si el pago es en
+   * efectivo, la plata sale de la caja física del que corrige.
+   */
+  async function devolucionDe(
+    ventaId: string,
+  ): Promise<{ devolucion: { pagoId: string } }> {
+    const pagos: { pago_id: string }[] = await ds.query(
+      `SELECT pago_id FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL`,
+      [ventaId],
+    );
+    expect(pagos).toHaveLength(1);
+    return { devolucion: { pagoId: pagos[0].pago_id } };
   }
 
   /**
@@ -410,6 +444,133 @@ describe('Resumen del negocio (e2e)', () => {
       ).toBe(saldoEsperado);
     });
 
+    /** Venta de `cantidad` unidades del ítem propio, pagada entera en efectivo. El total lo calcula el servidor (puede llevar IVA): se lee de la respuesta. */
+    async function crearVentaPagada(
+      cantidad: string,
+    ): Promise<VentaCreadaResponse> {
+      const resV = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ lineas: [{ itemId, cantidad }] });
+      expect(resV.status).toBe(201);
+      const venta = resV.body as VentaCreadaResponse;
+      const pago = await request(app.getHttpServer())
+        .post('/api/pagos')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          ventaId: venta.id,
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: venta.totalFinal }],
+        });
+      expect(pago.status).toBe(201);
+      return venta;
+    }
+
+    const delta = (a: string, b: string) => new Decimal(b).minus(a).toString();
+
+    it('una NC de hoy sobre una venta de ayer resta del vendido de hoy, no de ayer, y no cuenta como venta', async () => {
+      const venta = await crearVentaPagada('7');
+
+      const conVentaHoy = (await leerResumen(tokenAdmin))
+        .body as ResumenHoyResponse;
+
+      // La venta pasa a ayer. No es un estado inventado: es el reloj. La app
+      // no deja fechar una venta, y lo que se prueba es justamente que la NC
+      // cuenta en SU día y no en el de la venta.
+      const [movidas] = await ds.query<[unknown[], number]>(
+        `UPDATE ventas SET fecha = fecha - interval '1 day'
+          WHERE venta_id = $1 RETURNING venta_id`,
+        [venta.id],
+      );
+      expect(movidas).toHaveLength(1);
+
+      // Prueba de que el UPDATE sacó la venta de hoy: sin esto, el -3150 de
+      // abajo saldría igual aunque el UPDATE no moviera nada, y el test no
+      // distinguiría "la NC resta en SU fecha" de "la NC resta en la de la
+      // venta que corrige".
+      const antes = (await leerResumen(tokenAdmin)).body as ResumenHoyResponse;
+      expect(
+        delta(
+          conVentaHoy.ventas.vendidoDesglose.bruto,
+          antes.ventas.vendidoDesglose.bruto,
+        ),
+      ).toBe(new Decimal(venta.totalFinal).negated().toString());
+      expect(
+        delta(conVentaHoy.ventas.vendido.hoy, antes.ventas.vendido.hoy),
+      ).toBe(new Decimal(venta.totalFinal).negated().toString());
+
+      const nc = await request(app.getHttpServer())
+        .post(`/api/ventas/${venta.id}/notas-credito`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ monto: '3150', ...(await devolucionDe(venta.id)) });
+      expect(nc.status).toBe(201);
+      const despues = (await leerResumen(tokenAdmin))
+        .body as ResumenHoyResponse;
+
+      expect(delta(antes.ventas.vendido.hoy, despues.ventas.vendido.hoy)).toBe(
+        '-3150',
+      );
+      expect(
+        delta(
+          antes.ventas.vendidoDesglose.bruto,
+          despues.ventas.vendidoDesglose.bruto,
+        ),
+      ).toBe('0');
+      expect(
+        delta(
+          antes.ventas.vendidoDesglose.notasCredito,
+          despues.ventas.vendidoDesglose.notasCredito,
+        ),
+      ).toBe('3150');
+      expect(despues.ventas.cantidad.hoy).toBe(antes.ventas.cantidad.hoy);
+      expect(
+        delta(antes.ventas.porCanal.fisico, despues.ventas.porCanal.fisico),
+      ).toBe('-3150');
+    });
+
+    it('una venta y su NC de hace una semana: el vendido de la semana pasada es el neto y la cantidad cuenta la venta, no la NC', async () => {
+      const venta = await crearVentaPagada('7');
+      // 2870 no coincide con ningún otro monto del test ni con el total.
+      const nc = await request(app.getHttpServer())
+        .post(`/api/ventas/${venta.id}/notas-credito`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ monto: '2870', ...(await devolucionDe(venta.id)) });
+      expect(nc.status).toBe(201);
+
+      const antes = (await leerResumen(tokenAdmin)).body as ResumenHoyResponse;
+
+      // La venta y su NC pasan a hace 7 días. No es un estado inventado: es el
+      // reloj. La app no deja fechar una venta, y lo que se prueba es la
+      // columna de la semana pasada, que ninguna venta de hoy alcanza.
+      const [movidas] = await ds.query<[unknown[], number]>(
+        `UPDATE ventas SET fecha = fecha - interval '7 days'
+          WHERE venta_id = $1 OR venta_referencia_id = $1
+      RETURNING venta_id`,
+        [venta.id],
+      );
+      expect(movidas).toHaveLength(2);
+
+      const despues = (await leerResumen(tokenAdmin))
+        .body as ResumenHoyResponse;
+
+      const neto = new Decimal(venta.totalFinal).minus('2870').toString();
+      expect(
+        delta(
+          antes.ventas.vendido.semanaPasada,
+          despues.ventas.vendido.semanaPasada,
+        ),
+      ).toBe(neto);
+      expect(
+        despues.ventas.cantidad.semanaPasada -
+          antes.ventas.cantidad.semanaPasada,
+      ).toBe(1);
+      // Y salió de hoy, entera: la venta no cuenta y la NC tampoco resta.
+      expect(delta(antes.ventas.vendido.hoy, despues.ventas.vendido.hoy)).toBe(
+        new Decimal(neto).negated().toString(),
+      );
+    });
+
     it('una venta anulada no mueve el vendido', async () => {
       const antes = (await leerResumen(tokenAdmin)).body as ResumenHoyResponse;
 
@@ -434,6 +595,239 @@ describe('Resumen del negocio (e2e)', () => {
 
       expect(despues.ventas.vendido.hoy).toBe(antes.ventas.vendido.hoy);
       expect(despues.ventas.cantidad.hoy).toBe(antes.ventas.cantidad.hoy);
+    });
+
+    describe('lo devuelto resta del cobrado', () => {
+      const leer = async () =>
+        (await leerResumen(tokenAdmin)).body as ResumenHoyResponse;
+
+      /** La config demo de Paris: la fila con `codigo = 'demo'` de la lista de configuraciones, como la busca `tienda-pasarela-demo.e2e-spec.ts`. */
+      async function idConfigDemo(): Promise<string> {
+        const res = await request(app.getHttpServer())
+          .get('/api/pasarela/admin/config')
+          .set('Authorization', `Bearer ${tokenAdmin}`);
+        expect(res.status).toBe(200);
+        const demo = (res.body as ConfigPasarelaRow[]).find(
+          (c) => c.codigo === 'demo',
+        );
+        expect(demo).toBeDefined();
+        return demo!.tenantPasarelaId;
+      }
+
+      async function usuarioIdAdmin(): Promise<string> {
+        const rows: { usuario_id: string }[] = await ds.query(
+          `SELECT usuario_id FROM usuarios WHERE correo = $1 AND eliminado_el IS NULL`,
+          [ADMIN_EMAIL],
+        );
+        return rows[0].usuario_id;
+      }
+
+      /**
+       * Lo que deja el proveedor después de un reembolso aprobado. En el e2e no
+       * hay cómo llegar por la app: `ProviderFactory.getReembolsable` solo
+       * conoce Oneclick y Webpay Plus (Transbank) y la pasarela demo no
+       * reembolsa. Se arma con las piezas de la app —el repositorio de la orden
+       * y `TransaccionesService.registrar`, el mismo que usa
+       * `CobrosService.reembolsar`— y de ahí en adelante todo va por el camino
+       * real.
+       */
+      async function reembolsoAprobado(ventaId: string | null, monto: string) {
+        const tenantPasarelaId = await idConfigDemo();
+        const orden = await ds.getRepository(PasarelaOrden).save({
+          tenantId: PARIS_TENANT_ID,
+          ventaId,
+          codigoOrden: `e2e-${randomUUID().slice(0, 20)}`,
+          descripcion: 'Orden e2e vendido neto',
+          monto,
+          moneda: 'CLP',
+          estado: 'conciliada',
+          origen: 'interno',
+        });
+        await app.get(TransaccionesService).registrar({
+          tenantId: PARIS_TENANT_ID,
+          ordenId: orden.ordenId,
+          tenantPasarelaId,
+          tipo: 'REFUND',
+          estado: 'aprobada',
+          monto,
+          moneda: 'CLP',
+          codigoOrden: orden.codigoOrden,
+        });
+        return orden;
+      }
+
+      it('una NC devuelta en efectivo resta el efectivo devuelto; un retiro de caja ajeno no entra', async () => {
+        const venta = await crearVentaPagada('5');
+        const antes = await leer();
+
+        const nc = await request(app.getHttpServer())
+          .post(`/api/ventas/${venta.id}/notas-credito`)
+          .set('Authorization', `Bearer ${tokenAdmin}`)
+          .send({ monto: '2340', ...(await devolucionDe(venta.id)) });
+        expect(nc.status).toBe(201);
+        // Control: una salida de caja que NO es devolución (sin venta_id). Si la
+        // consulta contara cualquier salida, el cobrado caería 2340 + 4100.
+        await post(`/api/caja/${caja.id}/movimientos`, {
+          tipo: 'salida',
+          concepto: 'Retiro e2e',
+          monto: '4100',
+        });
+        const despues = await leer();
+
+        expect(
+          delta(antes.ventas.cobrado.hoy, despues.ventas.cobrado.hoy),
+        ).toBe('-2340');
+        expect(
+          delta(
+            antes.ventas.cobradoDesglose.devuelto,
+            despues.ventas.cobradoDesglose.devuelto,
+          ),
+        ).toBe('2340');
+        expect(
+          delta(
+            antes.ventas.cobradoDesglose.cobrado,
+            despues.ventas.cobradoDesglose.cobrado,
+          ),
+        ).toBe('0');
+      });
+
+      it('un REFUND aprobado sin NC resta del cobrado y no toca lo vendido ni lo que se debe', async () => {
+        // La app ya no produce este estado (todo REFUND con venta crea su corrección):
+        // se emula a mano para fijar que la consulta del cobrado resta el REFUND solo.
+        const venta = await crearVentaPagada('5');
+        const antes = await leer();
+
+        await reembolsoAprobado(venta.id, '1785');
+        const despues = await leer();
+
+        expect(
+          delta(antes.ventas.cobrado.hoy, despues.ventas.cobrado.hoy),
+        ).toBe('-1785');
+        expect(
+          delta(antes.ventas.vendido.hoy, despues.ventas.vendido.hoy),
+        ).toBe('0');
+        expect(despues.porCobrar).toEqual(antes.porCobrar);
+      });
+
+      it('un REFUND con la NC del webhook resta del cobrado UNA vez y del vendido, y la NC no deja salida de caja', async () => {
+        const venta = await crearVentaPagada('5');
+        const antes = await leer();
+
+        const orden = await reembolsoAprobado(venta.id, '1785');
+        const { correccionVentaId: notaCreditoId } = await app
+          .get(VentasReembolsoHandler)
+          .onReembolsoAprobado({
+            tenantId: PARIS_TENANT_ID,
+            ordenId: orden.ordenId,
+            codigoOrden: orden.codigoOrden,
+            ventaId: venta.id,
+            monto: '1785',
+            devoluciones: [],
+            usuarioId: await usuarioIdAdmin(),
+          });
+        expect(notaCreditoId).toBeDefined();
+        const despues = await leer();
+
+        // Una vez: el REFUND. Si la NC también restara su salida de caja, o
+        // contara dos veces, sería -3570.
+        expect(
+          delta(antes.ventas.cobrado.hoy, despues.ventas.cobrado.hoy),
+        ).toBe('-1785');
+        expect(
+          delta(antes.ventas.vendido.hoy, despues.ventas.vendido.hoy),
+        ).toBe('-1785');
+        const salidas: { n: string }[] = await ds.query(
+          `SELECT COUNT(*)::text AS n FROM movimientos_caja WHERE venta_id = $1`,
+          [notaCreditoId],
+        );
+        expect(salidas[0].n).toBe('0');
+      });
+
+      it('control: el REFUND de una orden sin venta no resta del cobrado', async () => {
+        const antes = await leer();
+
+        await reembolsoAprobado(null, '2210');
+        const despues = await leer();
+
+        expect(despues.ventas.cobrado.hoy).toBe(antes.ventas.cobrado.hoy);
+        expect(despues.ventas.cobradoDesglose).toEqual(
+          antes.ventas.cobradoDesglose,
+        );
+      });
+    });
+
+    describe('por cobrar descuenta las notas de crédito (saldo por venta, piso 0)', () => {
+      const leer = async () =>
+        (await leerResumen(tokenAdmin)).body as ResumenHoyResponse;
+
+      /** `⌊x⌋` en CLP: Decimal, hacia abajo, sin decimales. */
+      const piso = (x: Decimal.Value) =>
+        new Decimal(x).toFixed(0, Decimal.ROUND_DOWN);
+
+      /**
+       * Venta de 3 unidades del ítem propio con un abono en efectivo de
+       * `⌊fraccion·T⌋`, donde `T` es el `totalFinal` que calculó el servidor
+       * (puede llevar IVA): los montos salen de `T` para que ninguno coincida
+       * con otro.
+       */
+      async function ventaParcial(
+        fraccion: string,
+        metodoPagoId: string = EFECTIVO_ID,
+      ) {
+        const venta = await post<VentaCreadaResponse>('/api/ventas', {
+          lineas: [{ itemId, cantidad: '3' }],
+        });
+        const T = new Decimal(venta.totalFinal);
+        const P = piso(T.times(fraccion));
+        const pago = await post<AbonoResponse>('/api/pagos', {
+          ventaId: venta.id,
+          pagos: [{ metodoPagoId, monto: P }],
+        });
+        expect(pago.venta.estado).toBe('pagada_parcial');
+        return { venta, T, P };
+      }
+
+      it('una NC mayor que lo que se debe deja el saldo en cero, no en negativo, y la venta sale de la cuenta', async () => {
+        // El abono es con débito: la devolución vuelve por la máquina y no
+        // toca la caja. Con efectivo, una nota mayor que lo cobrado en
+        // efectivo (0,4·T) la frena el tope del efectivo, y sin plata la frena
+        // el saldo: solo el medio que no es efectivo deja que la nota supere
+        // lo que se debe.
+        const { venta, T, P } = await ventaParcial('0.4', DEBITO_ID);
+        const antes = await leer();
+
+        // N = T − ⌊0,1·T⌋: más que lo que se debe (T − P). Sin el piso, el
+        // saldo de esta venta sería T − N − P < 0 y restaría de más.
+        const N = T.minus(piso(T.times('0.1'))).toString();
+        expect(new Decimal(N).gt(T.minus(P))).toBe(true);
+        await post(`/api/ventas/${venta.id}/notas-credito`, {
+          monto: N,
+          ...(await devolucionDe(venta.id)),
+        });
+        const despues = await leer();
+
+        expect(delta(antes.porCobrar.saldo, despues.porCobrar.saldo)).toBe(
+          T.minus(P).negated().toString(),
+        );
+        expect(despues.porCobrar.cantidad - antes.porCobrar.cantidad).toBe(-1);
+      });
+
+      it('lo devuelto en efectivo vuelve a deberse: la NC baja la deuda y la plata devuelta la sube', async () => {
+        const { venta, T } = await ventaParcial('0.6');
+        const antes = await leer();
+
+        const N = piso(T.times('0.25'));
+        await post(`/api/ventas/${venta.id}/notas-credito`, {
+          monto: N,
+          ...(await devolucionDe(venta.id)),
+        });
+        const despues = await leer();
+
+        // Antes T − P, después T − N − (P − N): lo mismo. Sin el término del
+        // efectivo devuelto el saldo bajaría N.
+        expect(delta(antes.porCobrar.saldo, despues.porCobrar.saldo)).toBe('0');
+        expect(despues.porCobrar.cantidad).toBe(antes.porCobrar.cantidad);
+      });
     });
   });
 
@@ -659,6 +1053,132 @@ describe('Resumen del negocio (e2e)', () => {
         itemId: itemCaro.id,
         monto: venta.totalFinal,
       });
+    });
+
+    /** Las líneas de una venta o de una NC, tal como las lee el detalle. */
+    async function leerLineas(ventaId: string): Promise<LineaVentaResp[]> {
+      const res = await request(app.getHttpServer())
+        .get(`/api/ventas/${ventaId}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(res.status).toBe(200);
+      return (res.body as { detalles: LineaVentaResp[] }).detalles;
+    }
+
+    /** Venta de `cantidad` unidades de `itemId`, pagada entera en efectivo. */
+    async function ventaPagada(
+      itemId: string,
+      cantidad: string,
+    ): Promise<VentaCreadaResponse> {
+      const venta = await post<VentaCreadaResponse>('/api/ventas', {
+        lineas: [{ itemId, cantidad }],
+      });
+      await post('/api/pagos', {
+        ventaId: venta.id,
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: venta.totalFinal }],
+      });
+      return venta;
+    }
+
+    it('una NC con líneas resta su cantidad y su monto de la fila del ítem en masVendidos', async () => {
+      // Precio no redondo y alto, para entrar al top 5 del día aunque el seed
+      // y los demás tests también vendan. Sin `Date.now()` a propósito: el
+      // monto neto (2 unidades) queda muy por debajo del "carísimo" de arriba,
+      // así ese test sigue primero en cada corrida. Como contrapartida, este
+      // test asume la base reseteada (`entorno.sh db` antes del e2e): cada
+      // corrida repetida el mismo día suma otro "carísimo" que se lleva un
+      // lugar del top 5, y tras cuatro o cinco corridas la fila de acá no entra.
+      const marca = Date.now();
+      const item = await post<ItemResponse>('/api/items', {
+        nombre: `Ítem devuelto resumen-negocio E2E ${marca}`,
+        precioBase: '9870001',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'servicio',
+      });
+      const venta = await ventaPagada(item.id, '3');
+      // Un tercio del total, redondeado hacia abajo: una NC por UNA de las
+      // tres unidades, con un monto que no es el de la línea exacta.
+      const montoNC = new Decimal(venta.totalFinal)
+        .div(3)
+        .toDecimalPlaces(0, Decimal.ROUND_DOWN)
+        .toString();
+      const nc = await post<IdResponse>(
+        `/api/ventas/${venta.id}/notas-credito`,
+        {
+          monto: montoNC,
+          ...(await devolucionDe(venta.id)),
+          devoluciones: [{ itemId: item.id, cantidad: '1' }],
+        },
+      );
+
+      // Las dos líneas, leídas de la app: el monto esperado sale de lo que
+      // quedó persistido, no de una cuenta propia sobre el precio.
+      const lineaVenta = (await leerLineas(venta.id)).find(
+        (l) => l.itemId === item.id,
+      );
+      const lineasNC = (await leerLineas(nc.id)).filter(
+        (l) => l.itemId === item.id,
+      );
+      expect(lineaVenta).toBeDefined();
+      expect(lineasNC).toHaveLength(1);
+      const montoNeto = new Decimal(lineaVenta!.totalLinea).minus(
+        lineasNC[0].totalLinea,
+      );
+      // El mismo monto en la venta y en la NC no discrimina: la NC no es la
+      // línea entera.
+      expect(montoNeto.gt(0)).toBe(true);
+      expect(montoNeto.eq(lineaVenta!.totalLinea)).toBe(false);
+
+      const resumen = (await leerResumen(tokenAdmin))
+        .body as ResumenHoyResponse;
+      const fila = resumen.masVendidos.find((m) => m.itemId === item.id);
+      expect(fila).toBeDefined();
+      expect(new Decimal(fila!.cantidad).toString()).toBe('2');
+      expect(new Decimal(fila!.monto).toString()).toBe(montoNeto.toString());
+    });
+
+    it('una NC por monto libre no mete el ítem de ajuste en masVendidos', async () => {
+      const item = await post<ItemResponse>('/api/items', {
+        nombre: `Ítem ajuste resumen-negocio E2E ${Date.now()}`,
+        precioBase: '9870001',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'servicio',
+      });
+      const venta = await ventaPagada(item.id, '1');
+      const nc = await post<IdResponse>(
+        `/api/ventas/${venta.id}/notas-credito`,
+        {
+          monto: '4321',
+          ...(await devolucionDe(venta.id)),
+        },
+      );
+
+      // El ítem de ajuste no sale en `GET /api/items`: se toma de la base.
+      // Existe recién después de la primera NC, por eso se lee acá.
+      const ajuste: { item_id: string }[] = await ds.query(
+        `SELECT item_id FROM items
+          WHERE tenant_id = $1 AND es_ajuste_nota_credito = true
+            AND eliminado_el IS NULL`,
+        [PARIS_TENANT_ID],
+      );
+      expect(ajuste).toHaveLength(1);
+      const ajusteId = ajuste[0].item_id;
+      // Prueba de que la NC sí dejó una línea de ajuste: sin esto, "no
+      // aparece" valdría también si la NC no lo hubiera usado.
+      expect((await leerLineas(nc.id)).map((l) => l.itemId)).toContain(
+        ajusteId,
+      );
+
+      // Sin el `HAVING`, un ítem con neto <= 0 se ordena último y no entra al
+      // top 5 mientras haya cinco ítems con neto positivo, que en este e2e
+      // siempre hay: por eso esta aserción sobrevive a quitarlo. Quitar solo
+      // `es_ajuste_nota_credito = false` es equivalente en conducta mientras
+      // exista el `HAVING`, porque el ajuste que llega por una NC tiene
+      // siempre neto negativo. El filtro solo agrega algo si el ítem de ajuste
+      // se vendiera directo por `POST /ventas` con su id (la API no lo
+      // rechaza). Los dos los cubre el unitario sobre el texto del SQL.
+      const resumen = (await leerResumen(tokenAdmin))
+        .body as ResumenHoyResponse;
+      expect(resumen.masVendidos.map((m) => m.itemId)).not.toContain(ajusteId);
     });
   });
 });

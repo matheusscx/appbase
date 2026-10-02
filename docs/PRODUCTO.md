@@ -971,6 +971,15 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   tocaba al otro facturador, no si ya lo hizo. Al anular aparece "¿Ya hiciste esta factura en tu
   facturador?". Si sí, va por nota de crédito, hecha por fuera y anotada con su número; si no, se
   anula y queda registrado quién lo afirmó (owner, 2026-10-01);
+- **el número de un documento hecho por fuera lo puede borrar quien puede anular ventas**, y queda
+  registrado quién lo borró, cuándo y qué decía. La venta vuelve a "sin número" y al anular se
+  pregunta otra vez. Sin esto, un número anotado por error ("1" en una factura que no se hizo)
+  obligaba a ir por nota de crédito, porque con número el documento se da por hecho (owner,
+  2026-10-02);
+- **un abono cobra solo lo que de verdad se debe**: total − notas de crédito y devoluciones − lo
+  pagado. Si una nota de crédito "no vuelve plata" cubre la deuda, "Registrar pago" desaparece y la
+  venta pasa a pagada. Sin esto, el cliente podía pagar dos veces lo que ya se le había perdonado
+  (owner, 2026-10-02);
 - **lo entregado se documenta al entregarlo, se haya pagado o no.** Para el SII un restaurante
   vende, no presta un servicio: la boleta sale antes de que el cliente se retire (Res. Ex. SII
   58/2003); en una tienda, al entregar (art. 55 DL 825). Una mesa de $100.000 que paga $40.000 con
@@ -1099,6 +1108,17 @@ muestra un **modal informativo** con ambas fechas.
 - Lista las ventas de un tenant con todos sus detalles expandidos
 - Distingue reglas aplicadas por línea vs globales (`aplicado_en`)
 - CRUD básico por `venta_id + tenant_id`
+
+**Los números de plata del negocio son netos de las notas de crédito (2026-10-01).** Una
+nota de crédito resta del vendido en **su** fecha —aunque la venta que corrige sea de otro
+día— y no cuenta como venta; el cobrado resta lo devuelto ese día (el efectivo que salió
+de la caja y los reembolsos por pasarela); lo que se debe descuenta las notas de cada venta
+y nunca baja de cero; y una venta cancelada no cuenta en ningún total de `/ventas`. La
+pantalla muestra el bruto y lo restado debajo del neto, solo si hay algo que restar. Una
+corrección se reconoce por `venta_referencia_id`, no por el tipo de documento, para que la
+devolución interna del frente de emisión reste igual. Detalle y límites conocidos:
+[`features/dashboard-inicio.md`](./features/dashboard-inicio.md) y
+[`features/ventas.md`](./features/ventas.md).
 
 **Reimprimir la boleta de una venta ya cobrada (2026-09-17, permiso reabierto 2026-09-18 y
 2026-09-30):** botón en el detalle de la venta. Dos niveles, sin permiso nuevo: quien tiene

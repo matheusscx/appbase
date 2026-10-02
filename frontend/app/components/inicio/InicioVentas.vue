@@ -3,8 +3,11 @@
 // § 3.2 y § 4). El permiso (`Resumen del negocio:Leer`) y la carga los maneja
 // `InicioHoy.vue`, que pasa los datos ya resueltos por props — este bloque no
 // hace fetch propio. Vendido y cobrado van grandes; cantidad, ticket promedio
-// y local/online, chicos (spec § 3.2). Las variaciones las calculó el backend
-// con Decimal (spec § 4.3): acá no se hace ninguna cuenta con los montos.
+// y local/online, chicos (spec § 3.2). Vendido y cobrado son NETOS (el backend ya
+// restó las notas de crédito y lo devuelto) y debajo de cada uno va su desglose,
+// solo si hay algo que restar. Las variaciones y los netos los calculó el
+// backend con Decimal (spec § 4.3): acá no se hace ninguna cuenta con los montos.
+import Decimal from 'decimal.js'
 import type { VentasHoy } from '~/types/resumen-negocio'
 
 const props = defineProps<{
@@ -18,6 +21,11 @@ const props = defineProps<{
 const { formatMonto, formatPorcentaje, formatDiaSemana } = useFormatters()
 
 const diaLabel = computed(() => formatDiaSemana(props.fecha))
+
+// Mostrar o no la línea es presentación, no una cuenta: el monto ya viene
+// calculado del backend.
+const hayNotas = computed(() => !new Decimal(props.ventas.vendidoDesglose.notasCredito).isZero())
+const hayDevuelto = computed(() => !new Decimal(props.ventas.cobradoDesglose.devuelto).isZero())
 </script>
 
 <template>
@@ -37,10 +45,14 @@ const diaLabel = computed(() => formatDiaSemana(props.fecha))
     <div class="grid grid-cols-2 gap-4">
       <div>
         <p class="text-xs text-muted">
-          Vendido <span class="italic">(antes de notas de crédito)</span>
+          Vendido
         </p>
         <p class="text-lg font-semibold text-highlighted">
           {{ formatMonto(ventas.vendido.hoy) }}
+        </p>
+        <p v-if="hayNotas" class="text-xs text-muted">
+          bruto {{ formatMonto(ventas.vendidoDesglose.bruto) }}
+          · notas de crédito −{{ formatMonto(ventas.vendidoDesglose.notasCredito) }}
         </p>
         <p class="text-xs text-muted">
           vs. {{ diaLabel }} pasado: {{ formatPorcentaje(ventas.vendido.variacion, 0) }}
@@ -52,6 +64,10 @@ const diaLabel = computed(() => formatDiaSemana(props.fecha))
         </p>
         <p class="text-lg font-semibold text-highlighted">
           {{ formatMonto(ventas.cobrado.hoy) }}
+        </p>
+        <p v-if="hayDevuelto" class="text-xs text-muted">
+          cobrado {{ formatMonto(ventas.cobradoDesglose.cobrado) }}
+          · devuelto −{{ formatMonto(ventas.cobradoDesglose.devuelto) }}
         </p>
         <p class="text-xs text-muted">
           vs. {{ diaLabel }} pasado: {{ formatPorcentaje(ventas.cobrado.variacion, 0) }}

@@ -24,7 +24,9 @@ const RESUMEN_MERMAS_VACIO: ResumenMermas = {
 };
 
 interface VentasRowFixture {
-  vendido_hoy: string;
+  bruto_hoy: string;
+  notas_hoy: string;
+  neto_hoy: string;
   vendido_semana_pasada: string;
   cantidad_hoy: number;
   cantidad_semana_pasada: number;
@@ -35,6 +37,10 @@ interface VentasRowFixture {
 interface CobradoRowFixture {
   cobrado_hoy: string;
   cobrado_semana_pasada: string;
+  efectivo_hoy: string;
+  efectivo_semana_pasada: string;
+  pasarela_hoy: string;
+  pasarela_semana_pasada: string;
 }
 
 interface PorCobrarRowFixture {
@@ -111,7 +117,9 @@ describe('ResumenNegocioService', () => {
       ])
       .mockResolvedValueOnce([
         {
-          vendido_hoy: '0',
+          bruto_hoy: '0',
+          notas_hoy: '0',
+          neto_hoy: '0',
           vendido_semana_pasada: '0',
           cantidad_hoy: 0,
           cantidad_semana_pasada: 0,
@@ -121,7 +129,15 @@ describe('ResumenNegocioService', () => {
         },
       ])
       .mockResolvedValueOnce([
-        { cobrado_hoy: '0', cobrado_semana_pasada: '0', ...opts.cobrado },
+        {
+          cobrado_hoy: '0',
+          cobrado_semana_pasada: '0',
+          efectivo_hoy: '0',
+          efectivo_semana_pasada: '0',
+          pasarela_hoy: '0',
+          pasarela_semana_pasada: '0',
+          ...opts.cobrado,
+        },
       ])
       .mockResolvedValueOnce([{ cantidad: 0, saldo: '0', ...opts.porCobrar }])
       .mockResolvedValueOnce(opts.masVendidos ?? []);
@@ -136,7 +152,7 @@ describe('ResumenNegocioService', () => {
   it('vendido hoy 184500.0000 y semana pasada 150000.0000 → variación 0.2300', async () => {
     mockRespuestas({
       ventas: {
-        vendido_hoy: '184500.0000',
+        neto_hoy: '184500.0000',
         vendido_semana_pasada: '150000.0000',
         cantidad_hoy: 3,
         cantidad_semana_pasada: 3,
@@ -153,7 +169,7 @@ describe('ResumenNegocioService', () => {
   it('variación es null cuando la semana pasada vale 0', async () => {
     mockRespuestas({
       ventas: {
-        vendido_hoy: '50000.0000',
+        neto_hoy: '50000.0000',
         vendido_semana_pasada: '0',
         cantidad_hoy: 1,
       },
@@ -164,8 +180,118 @@ describe('ResumenNegocioService', () => {
     expect(res.ventas.vendido.variacion).toBeNull();
   });
 
+  it('vendidoDesglose sale de bruto_hoy y notas_hoy; vendido.hoy es el neto', async () => {
+    mockRespuestas({
+      ventas: {
+        bruto_hoy: '300000.0000',
+        notas_hoy: '20000.0000',
+        neto_hoy: '280000.0000',
+      },
+    });
+
+    const res = await service.hoy(TENANT);
+
+    expect(res.ventas.vendido.hoy).toBe('280000.0000');
+    expect(res.ventas.vendidoDesglose).toEqual({
+      bruto: '300000.0000',
+      notasCredito: '20000.0000',
+    });
+  });
+
+  it('cobrado.hoy es lo cobrado menos el efectivo devuelto y los REFUND; el desglose los separa', async () => {
+    mockRespuestas({
+      cobrado: {
+        cobrado_hoy: '500000.0000',
+        efectivo_hoy: '12000.0000',
+        // `pasarela_transacciones.monto` es numeric(18,6): otra escala que `pagos`.
+        pasarela_hoy: '7300.000000',
+      },
+    });
+
+    const res = await service.hoy(TENANT);
+
+    expect(res.ventas.cobrado.hoy).toBe('480700.0000');
+    expect(res.ventas.cobradoDesglose).toEqual({
+      cobrado: '500000.0000',
+      devuelto: '19300.0000',
+    });
+  });
+
+  it('cobrado.semanaPasada también es neto de lo devuelto, y la variación sale de los dos netos', async () => {
+    mockRespuestas({
+      cobrado: {
+        cobrado_hoy: '100000.0000',
+        efectivo_hoy: '1000.0000',
+        pasarela_hoy: '4000.000000',
+        cobrado_semana_pasada: '80000.0000',
+        efectivo_semana_pasada: '2500.0000',
+        pasarela_semana_pasada: '2500.000000',
+      },
+    });
+
+    const res = await service.hoy(TENANT);
+
+    expect(res.ventas.cobrado.hoy).toBe('95000.0000');
+    expect(res.ventas.cobrado.semanaPasada).toBe('75000.0000');
+    // (95000 − 75000) / 75000
+    expect(res.ventas.cobrado.variacion).toBe('0.2667');
+  });
+
+  it('variación del cobrado es null cuando lo devuelto deja la semana pasada en 0 o menos', async () => {
+    mockRespuestas({
+      cobrado: {
+        cobrado_hoy: '50000.0000',
+        cobrado_semana_pasada: '3000.0000',
+        efectivo_semana_pasada: '3000.0000',
+        pasarela_semana_pasada: '1000.000000',
+      },
+    });
+
+    const res = await service.hoy(TENANT);
+
+    expect(res.ventas.cobrado.semanaPasada).toBe('-1000.0000');
+    expect(res.ventas.cobrado.variacion).toBeNull();
+  });
+
+  it('el SQL de cobrado resta el efectivo de las correcciones y los REFUND aprobados de órdenes con venta, afirmando sobre cada bloque', async () => {
+    mockRespuestas({});
+
+    await service.hoy(TENANT);
+
+    const [cobradoSql] = queryMock.mock.calls[2] as [string];
+    // Efectivo devuelto: la salida de caja atada a una corrección, no cualquier salida.
+    expect(cobradoSql).toMatch(
+      /FROM movimientos_caja mc\s+JOIN ventas nc[\s\S]*?nc\.venta_referencia_id IS NOT NULL[\s\S]*?nc\.eliminado_el IS NULL[\s\S]*?mc\.tipo = 'salida'[\s\S]*?mc\.eliminado_el IS NULL/,
+    );
+    // REFUND: aprobado, de una orden con venta, ambos lados sin borrar.
+    expect(cobradoSql).toMatch(
+      /FROM pasarela_transacciones t\s+JOIN pasarela_ordenes o[\s\S]*?o\.venta_id IS NOT NULL[\s\S]*?o\.eliminado_el IS NULL[\s\S]*?t\.tipo = 'REFUND'[\s\S]*?t\.estado = 'aprobada'[\s\S]*?t\.eliminado_el IS NULL/,
+    );
+  });
+
+  it('variación es null cuando la semana pasada es negativa', async () => {
+    mockRespuestas({
+      ventas: {
+        neto_hoy: '50000.0000',
+        vendido_semana_pasada: '-12000.0000',
+      },
+    });
+
+    const res = await service.hoy(TENANT);
+
+    expect(res.ventas.vendido.variacion).toBeNull();
+  });
+
+  it('ticket es null con neto <= 0 aunque haya ventas', async () => {
+    mockRespuestas({ ventas: { neto_hoy: '-7000.0000', cantidad_hoy: 3 } });
+
+    const res = await service.hoy(TENANT);
+
+    expect(res.ventas.ticketPromedio.hoy).toBeNull();
+  });
+
   it('ticketPromedio.hoy es null cuando la cantidad de hoy es 0', async () => {
-    mockRespuestas({ ventas: { vendido_hoy: '0', cantidad_hoy: 0 } });
+    mockRespuestas({ ventas: { neto_hoy: '0', cantidad_hoy: 0 } });
 
     const res = await service.hoy(TENANT);
 
@@ -174,7 +300,7 @@ describe('ResumenNegocioService', () => {
 
   it('ticket con división no exacta: 100000.0000 / 3 → 33333.3333', async () => {
     mockRespuestas({
-      ventas: { vendido_hoy: '100000.0000', cantidad_hoy: 3 },
+      ventas: { neto_hoy: '100000.0000', cantidad_hoy: 3 },
     });
 
     const res = await service.hoy(TENANT);
@@ -182,36 +308,29 @@ describe('ResumenNegocioService', () => {
     expect(res.ventas.ticketPromedio.hoy).toBe('33333.3333');
   });
 
-  it('el SQL de ventas excluye canceladas y correcciones, afirmando sobre la cláusula', async () => {
+  it('el SQL de ventas excluye canceladas y resta las correcciones por venta_referencia_id, afirmando sobre la cláusula', async () => {
     mockRespuestas({});
 
     await service.hoy(TENANT);
 
     // Llamada #2: zona es la #1. Afirmar sobre la CLÁUSULA y no con un
-    // `toContain` suelto, que también matchearía el comentario que explica
-    // por qué el JOIN a `td` no filtra `eliminado_el`.
+    // `toContain` suelto.
     const [ventasSql] = queryMock.mock.calls[1] as [string];
     expect(ventasSql).toMatch(/v\.estado\s*<>\s*'cancelada'/);
-    // Sin correcciones por `venta_referencia_id` (E7), no por el tipo: la
-    // devolución interna no lo lleva.
-    expect(ventasSql).toMatch(/AND v\.venta_referencia_id IS NULL/);
-    expect(ventasSql).not.toMatch(/es_nota_credito/);
-    // `v\.eliminado_el` (no `vd\.` ni `td\.`) acotado al WHERE de esta
-    // consulta: una venta soft-deleteada no puede nacer por API, así que el
-    // e2e no la puede probar — esta es la única red para el mutante
-    // "dropear el filtro" (task-6-mutantes.md, mutante #5).
+    // La corrección resta en el neto: el signo lo pone el CASE.
+    expect(ventasSql).toMatch(
+      /CASE WHEN v\.venta_referencia_id IS NULL THEN v\.total_final ELSE -v\.total_final END/,
+    );
+    // La cantidad cuenta solo ventas, no correcciones.
+    expect(ventasSql).toMatch(
+      /COUNT\(\*\) FILTER \(WHERE[\s\S]*?v\.venta_referencia_id IS NULL\)::int\s+AS cantidad_hoy/,
+    );
+    // Ya no se lee el tipo de documento para reconocer la NC.
+    expect(ventasSql).not.toMatch(/tipos_documento_tributario/);
+    // `v\.eliminado_el` acotado al WHERE de esta consulta: una venta
+    // soft-deleteada no puede nacer por API, así que el e2e no la puede
+    // probar — esta es la única red para el mutante "dropear el filtro".
     expect(ventasSql).toMatch(/WHERE[\s\S]*?v\.eliminado_el IS NULL/);
-  });
-
-  it('el por cobrar tampoco cuenta las correcciones, por venta_referencia_id', async () => {
-    mockRespuestas({});
-
-    await service.hoy(TENANT);
-
-    // Orden de `Db.query`: zona(0), ventas(1), cobrado(2), porCobrar(3).
-    const [porCobrarSql] = queryMock.mock.calls[3] as [string];
-    expect(porCobrarSql).toMatch(/AND v\.venta_referencia_id IS NULL/);
-    expect(porCobrarSql).not.toMatch(/es_nota_credito/);
   });
 
   it('el cobrado lee pago_aplicaciones con tipo = venta, no pagos.monto (que trae el vuelto)', async () => {
@@ -405,7 +524,7 @@ describe('ResumenNegocioService', () => {
       expect(res.masVendidos).toEqual([]);
     });
 
-    it('la consulta de más vendidos excluye canceladas y correcciones, y filtra venta_detalles.eliminado_el, afirmando sobre la cláusula', async () => {
+    it('la consulta de más vendidos excluye canceladas y el ítem de ajuste, resta las correcciones, y filtra venta_detalles.eliminado_el, afirmando sobre la cláusula', async () => {
       mockRespuestas({});
 
       await service.hoy(TENANT);
@@ -415,8 +534,24 @@ describe('ResumenNegocioService', () => {
       const [masVendidosSql] = queryMock.mock.calls[4] as [string];
       expect(masVendidosSql).toMatch(/FROM venta_detalles vd/);
       expect(masVendidosSql).toMatch(/v\.estado\s*<>\s*'cancelada'/);
-      expect(masVendidosSql).toMatch(/AND v\.venta_referencia_id IS NULL/);
-      expect(masVendidosSql).not.toMatch(/es_nota_credito/);
+      // Ya no se lee el tipo de documento: la corrección se reconoce por
+      // `venta_referencia_id` y resta en la cantidad y en el monto.
+      expect(masVendidosSql).not.toMatch(/tipos_documento_tributario/);
+      expect(masVendidosSql).toMatch(
+        /SUM\(CASE WHEN v\.venta_referencia_id IS NULL THEN vd\.total_linea\s+ELSE -vd\.total_linea END\)::text AS monto/,
+      );
+      expect(masVendidosSql).toMatch(
+        /SUM\(CASE WHEN v\.venta_referencia_id IS NULL THEN vd\.cantidad\s+ELSE -vd\.cantidad END\)::text AS cantidad/,
+      );
+      // La línea "Ajuste" no es un producto: el filtro vive en el WHERE,
+      // acotado antes del GROUP BY.
+      expect(masVendidosSql).toMatch(
+        /WHERE[\s\S]*?AND i\.es_ajuste_nota_credito = false[\s\S]*?GROUP BY/,
+      );
+      // Un ítem con neto <= 0 sale. Acotado entre GROUP BY y ORDER BY.
+      expect(masVendidosSql).toMatch(
+        /GROUP BY[\s\S]*?HAVING SUM\(CASE WHEN v\.venta_referencia_id IS NULL THEN vd\.total_linea\s+ELSE -vd\.total_linea END\) > 0[\s\S]*?ORDER BY/,
+      );
       expect(masVendidosSql).toMatch(/vd\.eliminado_el IS NULL/);
       // `v\.eliminado_el` (la venta), no solo `vd\.eliminado_el` (el
       // detalle): son dos filas de soft-delete independientes.
@@ -432,7 +567,7 @@ describe('ResumenNegocioService', () => {
 
       const [masVendidosSql] = queryMock.mock.calls[4] as [string];
       expect(masVendidosSql).toMatch(
-        /ORDER BY SUM\(vd\.total_linea\) DESC, vd\.item_id/,
+        /ORDER BY SUM\(CASE WHEN v\.venta_referencia_id IS NULL THEN vd\.total_linea\s+ELSE -vd\.total_linea END\) DESC, vd\.item_id\s+LIMIT 5/,
       );
     });
 

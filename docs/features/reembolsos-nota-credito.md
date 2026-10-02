@@ -116,8 +116,9 @@ Response (200): orden pública + extras
 
 - `totalReembolsado` (Σ REFUND aprobados de órdenes vinculadas), `esCorreccion` y
   `esNotaCredito`.
-- `GET /ventas/resumen` **excluye** las correcciones (NC y devoluciones internas) de los
-  KPIs, por `venta_referencia_id`.
+- `GET /ventas/resumen` **resta** las correcciones (NCs y devoluciones internas, reconocidas
+  por `venta_referencia_id`): no las cuenta como ventas y las descuenta de "Total facturado"
+  y del saldo pendiente de la venta que corrigen (detalle en [`ventas.md`](ventas.md)).
 
 ---
 
@@ -326,12 +327,16 @@ países entra cuando abra el frente fiscal de cada uno, que el owner decidió qu
 a ser **progresivo** (2026-09-03). Relevamiento de las cuatro autoridades:
 [`agent/investigaciones/2026-09-03-facturacion-electronica-latam.md`](../agent/investigaciones/2026-09-03-facturacion-electronica-latam.md).
 
-⚠️ **Los resúmenes excluyen las correcciones por `venta_referencia_id IS NULL`**, no por
-el tipo: la devolución interna no lo lleva y, filtrando por tipo, se sumaría como una
-venta más con signo positivo. Sin tipo que comparar tampoco existe el caso "el país no
-lo tiene": el filtro nunca se cae (el hueco que tenía el `IS DISTINCT FROM NULL`, que
-dejaba afuera toda venta sin tipo, desapareció con él). Lo fijan `test/venta-correcciones.e2e-spec.ts`
-y el spec de `VentasService.resumen`.
+📌 **Los resúmenes ya no dependen de este tipo, y las correcciones RESTAN.** `GET /ventas/resumen`
+y el dashboard reconocen una corrección por `ventas.venta_referencia_id IS NOT NULL`, no por
+`es_nota_credito` ni por el id del tipo del país: la devolución interna no lleva el tipo y,
+filtrando por tipo, no restaría. La corrección no cuenta como venta y **resta** del vendido, del
+facturado y del saldo de la venta que corrige. Antes el resumen comparaba contra ese id y, si el
+país no tenía el tipo, el filtro había que **soltarlo entero** (un `IS DISTINCT FROM NULL` deja
+afuera toda venta sin tipo de documento, que son la mayoría, y los KPIs daban casi cero). Esa
+trampa ya no existe: sin tipo que comparar el filtro nunca se cae. Los topes de la corrección
+tampoco miran el tipo desde el frente de emisión (2026-10-02, ver "Los topes" más abajo). Lo
+fijan `test/venta-correcciones.e2e-spec.ts` y el spec de `VentasService.resumen`.
 
 ## Una corrección lleva su documento, según por dónde vuelve la plata (2026-10-02)
 
@@ -538,7 +543,7 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
 - `venta-correcciones.e2e-spec.ts` (2026-10-02): el documento de cada vía —el pago en
   efectivo y el de tarjeta de un pago mixto, "no vuelve plata" sobre la mesa que debe, el pago
   de un abono con tarjeta, la factura, el efectivo emitido por la máquina—, la devolución interna
-  (tipo nulo, cuenta en los tres topes, no suma a `/ventas/resumen` ni al dashboard), el tope por
+  (tipo nulo, cuenta en los tres topes, **resta** de `/ventas/resumen` y del dashboard sin contar como venta), el tope por
   documento, `opcionesDevolucion` y que cada opción crea la nota que anunció, y los 400 del
   `devolucion` mal formado o con un `pagoId` ajeno.
 - `ventas.service.spec.ts`: crearNotaCredito (composición por monto libre y con

@@ -961,7 +961,7 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
   });
 
   describe('lo que NO suma una devolución interna', () => {
-    it('no suma a totalFacturado ni a saldoPendiente de GET /ventas/resumen, ni al vendido ni a lo más vendido del dashboard', async () => {
+    it('resta (no suma) en totalFacturado y saldoPendiente de GET /ventas/resumen, en el vendido y en lo más vendido del dashboard', async () => {
       await patchMetodo(DEBITO_ID, 'nadie');
       // Pagada A MEDIAS: la venta debe la mitad. Si la corrección contara como una
       // venta (por filtrar por tipo y no por `venta_referencia_id`), su monto entero
@@ -987,17 +987,29 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
           devoluciones: [{ itemId: itemUnico, cantidad: '1' }],
         });
 
+        // La corrección RESTA (la nota rebaja la deuda y el facturado de la venta que
+        // corrige) y no SUMA como una venta: contada como venta, el saldo —que no
+        // tiene pagos de la corrección— subiría su monto y quedaría igual que antes.
+        // Montos enteros en CLP: se comparan como BigInt.
+        const entero = (monto: string) => BigInt(monto.split('.')[0]);
         const ventasDespues = await resumenVentas();
         // El saldo primero: es el que cambiaría por el monto de la corrección.
-        expect(ventasDespues.saldoPendiente).toBe(ventasAntes.saldoPendiente);
-        expect(ventasDespues.totalFacturado).toBe(ventasAntes.totalFacturado);
+        expect(
+          entero(ventasDespues.saldoPendiente) -
+            entero(ventasAntes.saldoPendiente),
+        ).toBe(-BigInt(mitad));
+        expect(
+          entero(ventasDespues.totalFacturado) -
+            entero(ventasAntes.totalFacturado),
+        ).toBe(-BigInt(mitad));
         const negocioDespues = await resumenNegocio();
-        expect(negocioDespues.ventas.vendido.hoy).toBe(
-          negocioAntes.ventas.vendido.hoy,
-        );
+        expect(
+          entero(negocioDespues.ventas.vendido.hoy) -
+            entero(negocioAntes.ventas.vendido.hoy),
+        ).toBe(-BigInt(mitad));
         expect(
           negocioDespues.masVendidos.find((m) => m.itemId === itemUnico)?.monto,
-        ).toBe(`${precioUnico}.0000`);
+        ).toBe(`${mitad}.0000`);
       } finally {
         await ds.query(
           `UPDATE ventas SET eliminado_el = NOW()

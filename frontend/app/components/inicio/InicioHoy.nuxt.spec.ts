@@ -13,6 +13,10 @@
 //      `perdidas.anulaciones` (`AnulacionPorTipo.sinValorizar` — fix round 1,
 //      ver `task-5-report.md`).
 //   6. Un 403 esconde la zona entera, sin aviso de error.
+//   7. Vendido y cobrado son NETOS: debajo de cada uno, el desglose
+//      `bruto $X · notas de crédito −$Y` / `cobrado $X · devuelto −$Y`, solo si
+//      hay algo que restar; el rótulo viejo "(antes de notas de crédito)" ya no
+//      está, y un neto negativo se muestra con su signo.
 //
 // Molde: `InicioAhora.nuxt.spec.ts` y `pages/salones/anulaciones.nuxt.spec.ts`
 // (moneda oficial hidratada a mano tras montar). El body simulado tiene la
@@ -50,7 +54,11 @@ const RESUMEN_HOY: ResumenNegocioHoy = {
   fecha: '2026-09-18',
   ventas: {
     vendido: { hoy: '850000', semanaPasada: '700000', variacion: '0.2143' },
+    // 873000 − 23000 = 850000: el neto es lo que sale grande, el desglose va debajo.
+    vendidoDesglose: { bruto: '873000.0000', notasCredito: '23000.0000' },
     cobrado: { hoy: '780000', semanaPasada: '0', variacion: null },
+    // 791500 − 11500 = 780000.
+    cobradoDesglose: { cobrado: '791500.0000', devuelto: '11500.0000' },
     cantidad: { hoy: 42, semanaPasada: 35, variacion: '0.2000' },
     ticketPromedio: { hoy: '20238.0952', semanaPasada: '20000', variacion: '0.0119' },
     porCanal: { fisico: '600000', online: '250000' },
@@ -248,6 +256,92 @@ describe('zona "Hoy" — formato', () => {
     const wrapper = await montarHoy()
 
     expect(wrapper.text()).not.toContain('sin costo cargado')
+
+    wrapper.unmount()
+  })
+})
+
+describe('zona "Hoy" — el neto y su desglose', () => {
+  function conDesglose(
+    vendidoDesglose: { bruto: string, notasCredito: string },
+    cobradoDesglose: { cobrado: string, devuelto: string },
+    vendidoHoy = RESUMEN_HOY.ventas.vendido.hoy,
+  ): ResumenNegocioHoy {
+    return {
+      ...RESUMEN_HOY,
+      ventas: {
+        ...RESUMEN_HOY.ventas,
+        vendido: { ...RESUMEN_HOY.ventas.vendido, hoy: vendidoHoy },
+        vendidoDesglose,
+        cobradoDesglose,
+      },
+    }
+  }
+
+  it('con notas de crédito, debajo del vendido se ve bruto y notas de crédito', async () => {
+    respuesta = conDesglose(
+      { bruto: '300000.0000', notasCredito: '20000.0000' },
+      RESUMEN_HOY.ventas.cobradoDesglose,
+    )
+    const wrapper = await montarHoy()
+
+    expect(wrapper.text()).toContain('bruto $300.000 · notas de crédito −$20.000')
+
+    wrapper.unmount()
+  })
+
+  it('sin notas de crédito, la línea del vendido no está', async () => {
+    respuesta = conDesglose(
+      { bruto: '300000.0000', notasCredito: '0.0000' },
+      RESUMEN_HOY.ventas.cobradoDesglose,
+    )
+    const wrapper = await montarHoy()
+
+    expect(wrapper.text()).not.toContain('notas de crédito')
+    expect(wrapper.text()).not.toContain('bruto')
+
+    wrapper.unmount()
+  })
+
+  it('con devuelto, debajo del cobrado se ve cobrado y devuelto', async () => {
+    const wrapper = await montarHoy()
+
+    expect(wrapper.text()).toContain('cobrado $791.500 · devuelto −$11.500')
+
+    wrapper.unmount()
+  })
+
+  it('sin devuelto, la línea del cobrado no está', async () => {
+    respuesta = conDesglose(
+      RESUMEN_HOY.ventas.vendidoDesglose,
+      { cobrado: '791500.0000', devuelto: '0.0000' },
+    )
+    const wrapper = await montarHoy()
+
+    expect(wrapper.text()).not.toContain('devuelto')
+    // La del vendido sigue: una línea no tapa a la otra.
+    expect(wrapper.text()).toContain('bruto $873.000 · notas de crédito −$23.000')
+
+    wrapper.unmount()
+  })
+
+  it('el rótulo "antes de notas de crédito" ya no aparece', async () => {
+    const wrapper = await montarHoy()
+
+    expect(wrapper.text()).not.toContain('antes de notas de crédito')
+
+    wrapper.unmount()
+  })
+
+  it('un vendido negativo se muestra con su signo', async () => {
+    respuesta = conDesglose(
+      { bruto: '13000.0000', notasCredito: '20000.0000' },
+      RESUMEN_HOY.ventas.cobradoDesglose,
+      '-7000.0000',
+    )
+    const wrapper = await montarHoy()
+
+    expect(wrapper.text()).toContain('-$7.000')
 
     wrapper.unmount()
   })

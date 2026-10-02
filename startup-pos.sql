@@ -1630,6 +1630,8 @@ CREATE TABLE "movimientos_caja" (
   CONSTRAINT chk_movimientos_caja_monto_no_negativo CHECK ("monto" >= 0)
 );
 
+CREATE INDEX "idx_movimientos_caja_venta" ON "movimientos_caja" ("venta_id");
+
 -- Rastro de los intentos RECHAZADOS contra la plata de una caja: el retiro con
 -- saldo insuficiente y la devolución en efectivo que supera lo que la venta
 -- cobró en efectivo. Los dos rechazos son oráculos sobre el esperado del turno

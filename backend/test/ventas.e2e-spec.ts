@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris
 const ITEM_ID = '550e8400-e29b-41d4-a716-446655440116'; // Smartphone (stock = 10)
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
+const DEBITO_ID = '550e8400-e29b-41d4-a716-446655440106';
 const BOLETA_ID = '550e8400-e29b-41d4-a716-446655440145';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 // USD — seedTenantMonedas(): habilitada para Paris con valor_del_dia '950'
@@ -2291,6 +2292,184 @@ describe('Ventas (e2e)', () => {
       expect(
         cuerpo.detalles.some((d) => !new Decimal(d.ajusteVenta).isZero()),
       ).toBe(true);
+    });
+  });
+
+  describe('GET /ventas/resumen neto de notas de crédito', () => {
+    interface ResumenVentas {
+      totalVentas: number;
+      totalFacturado: string;
+      totalBruto: string;
+      totalNotasCredito: string;
+      saldoPendiente: string;
+    }
+    interface VentaCreada {
+      id: string;
+      totalFinal: string;
+    }
+
+    let itemPropioId: string;
+
+    /** `⌊x⌋` en CLP: Decimal, hacia abajo, sin decimales. */
+    const piso = (x: Decimal.Value) =>
+      new Decimal(x).toFixed(0, Decimal.ROUND_DOWN);
+    const delta = (a: string, b: string) => new Decimal(b).minus(a).toString();
+
+    const leerResumen = async (): Promise<ResumenVentas> => {
+      const res = await request(app.getHttpServer())
+        .get('/api/ventas/resumen')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      return res.body as ResumenVentas;
+    };
+
+    const post = async <T>(
+      url: string,
+      body: Record<string, unknown>,
+    ): Promise<T> => {
+      const res = await request(app.getHttpServer())
+        .post(url)
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${token}`)
+        .send(body);
+      expect(res.status).toBe(201);
+      return res.body as T;
+    };
+
+    /**
+     * Por dónde vuelve la plata de una corrección: el único pago de la venta
+     * (`devolucion.pagoId`). Si el pago es en efectivo sale de la caja física.
+     */
+    const devolucionDeLaVenta = async (
+      ventaId: string,
+    ): Promise<{ devolucion: { pagoId: string } }> => {
+      const pagos: { pago_id: string }[] = await ds.query(
+        `SELECT pago_id FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [ventaId],
+      );
+      expect(pagos).toHaveLength(1);
+      return { devolucion: { pagoId: pagos[0].pago_id } };
+    };
+
+    /**
+     * Venta de `cantidad` unidades del ítem propio (sin stock, sin sembrado
+     * compartido) con un abono en efectivo de `abono`. El total lo calcula el
+     * servidor y puede llevar IVA: se lee de la respuesta.
+     */
+    const crearVenta = async (
+      cantidad: string,
+      abono?: (total: Decimal) => string,
+      metodoPagoId: string = EFECTIVO_ID,
+    ): Promise<{ venta: VentaCreada; total: Decimal; abonado: string }> => {
+      const venta = await post<VentaCreada>('/api/ventas', {
+        lineas: [{ itemId: itemPropioId, cantidad }],
+      });
+      const total = new Decimal(venta.totalFinal);
+      const abonado = abono ? abono(total) : '0';
+      if (abono) {
+        await post('/api/pagos', {
+          ventaId: venta.id,
+          pagos: [{ metodoPagoId, monto: abonado }],
+        });
+      }
+      return { venta, total, abonado };
+    };
+
+    beforeAll(async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `E2E Resumen Ventas Neto ${Date.now()}`,
+          precioBase: '1234',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+        });
+      expect(res.status).toBe(201);
+      itemPropioId = (res.body as { id: string }).id;
+    });
+
+    it('una NC sobre una venta pagada baja lo facturado, sube las notas de crédito y no toca ventas ni saldo', async () => {
+      const { venta } = await crearVenta('3', (t) => t.toString());
+      const antes = await leerResumen();
+
+      await post(`/api/ventas/${venta.id}/notas-credito`, {
+        monto: '1430',
+        ...(await devolucionDeLaVenta(venta.id)),
+      });
+      const despues = await leerResumen();
+
+      expect(delta(antes.totalFacturado, despues.totalFacturado)).toBe('-1430');
+      expect(delta(antes.totalBruto, despues.totalBruto)).toBe('0');
+      expect(delta(antes.totalNotasCredito, despues.totalNotasCredito)).toBe(
+        '1430',
+      );
+      expect(despues.totalVentas).toBe(antes.totalVentas);
+      expect(delta(antes.saldoPendiente, despues.saldoPendiente)).toBe('0');
+    });
+
+    it('una NC mayor que lo que se debe deja el saldo de esa venta en cero, no en negativo', async () => {
+      // El abono es con débito: la devolución vuelve por la máquina y no toca
+      // la caja. Con efectivo, una nota mayor que lo cobrado en efectivo
+      // (0,4·T) la frena el tope del efectivo, y sin plata la frena el saldo:
+      // solo el medio que no es efectivo deja que la nota supere lo que se debe.
+      const { venta, total, abonado } = await crearVenta(
+        '3',
+        (t) => piso(t.times('0.4')),
+        DEBITO_ID,
+      );
+      const antes = await leerResumen();
+
+      // N = T − ⌊0,1·T⌋ > T − P: sin el piso, el saldo de la venta sería
+      // T − N − P < 0 y `saldoPendiente` bajaría N en vez de T − P.
+      const N = total.minus(piso(total.times('0.1'))).toString();
+      expect(new Decimal(N).gt(total.minus(abonado))).toBe(true);
+      await post(`/api/ventas/${venta.id}/notas-credito`, {
+        monto: N,
+        ...(await devolucionDeLaVenta(venta.id)),
+      });
+      const despues = await leerResumen();
+
+      expect(delta(antes.saldoPendiente, despues.saldoPendiente)).toBe(
+        total.minus(abonado).negated().toString(),
+      );
+      expect(delta(antes.totalNotasCredito, despues.totalNotasCredito)).toBe(N);
+    });
+
+    it('lo devuelto en efectivo vuelve a deberse: el saldo de /ventas/resumen no cambia', async () => {
+      const { venta, total } = await crearVenta('3', (t) =>
+        piso(t.times('0.6')),
+      );
+      const antes = await leerResumen();
+
+      // Antes T − P, después T − N − (P − N): lo mismo. Misma expresión que el
+      // "por cobrar" del inicio: sin el término del efectivo devuelto el saldo
+      // bajaría N.
+      const N = piso(total.times('0.25'));
+      await post(`/api/ventas/${venta.id}/notas-credito`, {
+        monto: N,
+        ...(await devolucionDeLaVenta(venta.id)),
+      });
+      const despues = await leerResumen();
+
+      expect(delta(antes.saldoPendiente, despues.saldoPendiente)).toBe('0');
+      expect(delta(antes.totalNotasCredito, despues.totalNotasCredito)).toBe(N);
+    });
+
+    it('una venta cancelada no entra a ningún total (D9)', async () => {
+      const antes = await leerResumen();
+
+      const { venta } = await crearVenta('2');
+      await post(`/api/ventas/${venta.id}/anular`, {
+        motivo: 'Anulada por el e2e del resumen neto',
+      });
+      const despues = await leerResumen();
+
+      expect(despues.totalVentas).toBe(antes.totalVentas);
+      expect(despues.totalFacturado).toBe(antes.totalFacturado);
+      expect(despues.totalBruto).toBe(antes.totalBruto);
+      expect(despues.totalNotasCredito).toBe(antes.totalNotasCredito);
+      expect(despues.saldoPendiente).toBe(antes.saldoPendiente);
     });
   });
 });

@@ -3701,22 +3701,39 @@ describe('VentasService', () => {
       );
     });
 
-    it('resumen excluye las correcciones de los KPIs por venta_referencia_id, sin resolver ningún tipo de documento', async () => {
+    it('resumen separa las correcciones por venta_referencia_id y las canceladas salen', async () => {
       dataSourceMock.query.mockResolvedValueOnce([
-        { total_ventas: 5, total_facturado: '100', saldo_pendiente: '0' },
+        {
+          total_ventas: 5,
+          total_bruto: '130',
+          total_notas_credito: '30',
+          total_facturado: '100',
+          saldo_pendiente: '0',
+        },
       ]);
-      await service.resumen(TENANT_ID, 'u-test', true);
-      expect(dataSourceMock.query).toHaveBeenCalledTimes(1);
+
+      const res = await service.resumen(TENANT_ID, 'u-test', true);
+
       const [sql, params] = dataSourceMock.query.mock.calls[0] as [
         string,
         unknown[],
       ];
-      // La devolución interna no lleva el tipo NC: filtrar por tipo la sumaría
-      // como venta. Y sin tipo que comparar no hay caso "el país no lo tiene".
       expect(sql).toContain('v.venta_referencia_id IS NULL');
-      expect(sql).not.toContain('IS DISTINCT FROM');
+      expect(sql).toContain('v.venta_referencia_id IS NOT NULL');
+      expect(sql).toContain("v.estado <> 'cancelada'");
+      expect(sql).toContain('GREATEST(');
       expect(sql).toContain("pa.tipo = 'venta'");
       expect(sql).toContain('pago_aplicaciones');
+      expect(res).toEqual({
+        totalVentas: 5,
+        totalBruto: '130',
+        totalNotasCredito: '30',
+        totalFacturado: '100',
+        saldoPendiente: '0',
+      });
+      // El tipo de documento ya no entra: una sola consulta, sin su parámetro.
+      expect(dataSourceMock.query).toHaveBeenCalledTimes(1);
+      expect(sql).not.toContain('IS DISTINCT FROM');
       expect(params).toEqual([TENANT_ID]);
     });
 
@@ -4610,9 +4627,7 @@ describe('VentasService', () => {
 
     it('resumen acota igual, y con alcance completo no', async () => {
       const encolarResumen = () =>
-        dataSourceMock.query
-          .mockResolvedValueOnce([{ tipo_documento_id: 'tipo-nc' }])
-          .mockResolvedValueOnce([{}]);
+        dataSourceMock.query.mockResolvedValueOnce([{}]);
 
       encolarResumen();
       await service.resumen(TENANT_ID, USUARIO, false);

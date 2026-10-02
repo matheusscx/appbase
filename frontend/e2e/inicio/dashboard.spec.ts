@@ -1,5 +1,8 @@
 import { test, expect, type Browser, type Page } from '@playwright/test'
+import Decimal from 'decimal.js'
 import {
+  API,
+  EFECTIVO,
   TENANTS,
   abrirCaja,
   api,
@@ -26,7 +29,16 @@ import {
  * e ítem propios, y la caja se cierra al terminar.
  */
 
-/** La tarjeta, no el link del menú lateral que apunta a la misma ruta. */
+/** Lo único que este spec lee de `GET /resumen-negocio/hoy`. */
+interface ResumenHoy {
+  ventas: { vendidoDesglose: { bruto: string, notasCredito: string } }
+}
+
+/**
+ * La tarjeta, no el link del menú lateral que apunta a la misma ruta. El texto
+ * que la distingue de "Por cobrar" (que también va a `/ventas`) es un rótulo que
+ * solo tiene la de ventas: "Ticket promedio".
+ */
 function tarjeta(page: Page, href: string, texto: string | RegExp) {
   return page.locator(`a[href="${href}"]`).filter({ hasText: texto })
 }
@@ -76,7 +88,7 @@ test('muestra las dos zonas con sus datos', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Ahora' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Hoy' })).toBeVisible()
   await expect(tarjeta(page, '/salones', /mesas ocupadas/)).toBeVisible()
-  await expect(tarjeta(page, '/ventas', 'antes de notas de crédito')).toBeVisible()
+  await expect(tarjeta(page, '/ventas', 'Ticket promedio')).toBeVisible()
 })
 
 test('las tarjetas llevan a su detalle con un clic', async ({ page }) => {
@@ -86,14 +98,14 @@ test('las tarjetas llevan a su detalle con un clic', async ({ page }) => {
   await expect(page).toHaveURL(/\/salones$/)
 
   await page.goto('/')
-  await tarjeta(page, '/ventas', 'antes de notas de crédito').click()
+  await tarjeta(page, '/ventas', 'Ticket promedio').click()
   await expect(page).toHaveURL(/\/ventas$/)
 })
 
 test('una tarjeta se abre con el teclado', async ({ page }) => {
   await page.goto('/')
 
-  const ventas = tarjeta(page, '/ventas', 'antes de notas de crédito')
+  const ventas = tarjeta(page, '/ventas', 'Ticket promedio')
   await ventas.focus()
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/\/ventas$/)
@@ -101,7 +113,7 @@ test('una tarjeta se abre con el teclado', async ({ page }) => {
 
 test('"Actualizar" vuelve a pedir el día del dueño', async ({ page }) => {
   await page.goto('/')
-  await expect(tarjeta(page, '/ventas', 'antes de notas de crédito')).toBeVisible()
+  await expect(tarjeta(page, '/ventas', 'Ticket promedio')).toBeVisible()
 
   const recarga = page.waitForResponse(
     r => r.url().includes('/api/resumen-negocio/hoy') && r.status() === 200,
@@ -132,7 +144,7 @@ test('"Actualizar" trae la venta que se hizo después de abrir el inicio', async
   let ventaId: string | undefined
   try {
     await page.goto('/')
-    const ventas = tarjeta(page, '/ventas', 'antes de notas de crédito')
+    const ventas = tarjeta(page, '/ventas', 'Ticket promedio')
     await expect(ventas).toBeVisible()
     const antes = await ventas.innerText()
 
@@ -221,4 +233,134 @@ test('en un tenant sin el módulo, "Hoy" no aparece y no hay error', async ({ br
   finally {
     await page.context().close()
   }
+})
+
+test.describe('quien no es admin pero tiene "Resumen del negocio: Leer"', () => {
+  // El `beforeAll` arma un rol y se lo presta a una cuenta del seed; el `afterAll`
+  // lo deshace. La suite corre con `workers: 1` (`playwright.config.ts`), así que
+  // ese armado ocurre una sola vez.
+
+  /**
+   * La cuenta del seed que presta el escenario: `Compras:Leer` y nada más, y
+   * ningún otro spec de navegador entra con ella. Contraseña del seed, igual que
+   * las de `entrarComo`.
+   */
+  const CORREO = 'compras.lectura@paris.cl'
+
+  let adminToken: string
+  let rolId: string | undefined
+  let usuarioId: string | undefined
+
+  test.beforeAll(async ({ request }) => {
+    adminToken = await tokenDe(request, TENANTS.restaurante)
+    const auth = { Authorization: `Bearer ${adminToken}` }
+
+    // Los ids del módulo y del permiso se buscan por nombre, como el e2e de la
+    // API: ninguno se escribe a mano.
+    const modulos = await api<
+      {
+        nombre: string
+        moduloTenantId: string
+        permisos: { permisoNombre: string, moduloAppPermisoId: string }[]
+      }[]
+    >(request, 'get', '/roles/modulos-disponibles', { token: adminToken })
+    const resumen = modulos.find(m => m.nombre === 'Resumen del negocio')
+    const leer = resumen?.permisos.find(p => p.permisoNombre === 'Leer')
+    if (!resumen || !leer) throw new Error('El seed no trae "Resumen del negocio: Leer"')
+
+    const rol = await api<{ id: string }>(request, 'post', '/roles', {
+      token: adminToken,
+      data: { nombre: `E2E solo Resumen ${Date.now()}` },
+    })
+    rolId = rol.id
+    const permisos = await request.put(
+      `${API}/roles/${rolId}/modules/${resumen.moduloTenantId}/permissions`,
+      { headers: auth, data: { moduloAppPermisoIds: [leer.moduloAppPermisoId] } },
+    )
+    if (!permisos.ok()) throw new Error(`PUT permisos → ${permisos.status()}: ${await permisos.text()}`)
+
+    // Una cuenta nueva no puede entrar con contraseña desde acá: su alta manda un
+    // link de invitación por correo y el token no sale por la API. Se le suma el
+    // rol a una cuenta del seed y se lo saca al terminar.
+    const miembros = await api<{ usuarioId: string, correo: string }[]>(
+      request,
+      'get',
+      '/tenants/members',
+      { token: adminToken },
+    )
+    usuarioId = miembros.find(m => m.correo === CORREO)?.usuarioId
+    if (!usuarioId) throw new Error(`${CORREO} no es miembro de Demo Restaurante`)
+    await api(request, 'post', `/roles/${rolId}/users`, {
+      token: adminToken,
+      data: { usuarioId },
+    })
+  })
+
+  test.afterAll(async ({ request }) => {
+    const auth = { Authorization: `Bearer ${adminToken}` }
+    // No asevera: corre aunque el `beforeAll` haya llegado a la mitad.
+    if (rolId && usuarioId) {
+      await request.delete(`${API}/roles/${rolId}/users/${usuarioId}`, { headers: auth })
+    }
+    if (rolId) await request.delete(`${API}/roles/${rolId}`, { headers: auth })
+  })
+
+  test('ve en la tarjeta de ventas lo que restó una nota de crédito', async ({ browser, request }) => {
+    const MONTO_NC = '1234'
+    const notasDeHoy = async () =>
+      (await api<ResumenHoy>(request, 'get', '/resumen-negocio/hoy', { token: adminToken }))
+        .ventas.vendidoDesglose.notasCredito
+
+    let page: Page | undefined
+    let cajaId: string | undefined
+    let item: { id: string } | undefined
+    let totalVenta: string | undefined
+    try {
+      page = await entrarComo(browser, CORREO)
+      cajaId = await abrirCaja(request, adminToken)
+      item = await crearProducto(request, adminToken, {
+        nombre: `Inicio NC E2E ${Date.now()}`,
+        precioBase: '7350',
+      })
+      const ventas = tarjeta(page, '/ventas', 'Ticket promedio')
+      await expect(ventas).toBeVisible()
+
+      // El día puede traer notas de crédito de corridas anteriores: lo que se
+      // afirma es cuánto SUBIÓ, no que haya alguna.
+      const antes = await notasDeHoy()
+
+      // La venta se crea y se cobra entera por API; la NC es parcial para que su
+      // monto no se confunda con el total.
+      const venta = await api<{ id: string, totalFinal: string }>(request, 'post', '/ventas', {
+        token: adminToken,
+        data: { lineas: [{ itemId: item.id, cantidad: '2' }] },
+      })
+      totalVenta = venta.totalFinal
+      await api(request, 'post', '/pagos', {
+        token: adminToken,
+        data: { ventaId: venta.id, pagos: [{ metodoPagoId: EFECTIVO, monto: venta.totalFinal }] },
+      })
+      await api(request, 'post', `/ventas/${venta.id}/notas-credito`, {
+        token: adminToken,
+        data: { monto: MONTO_NC },
+      })
+
+      const despues = await notasDeHoy()
+      expect(new Decimal(despues).minus(antes).toFixed(0)).toBe(MONTO_NC)
+
+      await page.getByRole('button', { name: 'Actualizar' }).click()
+      // La línea muestra lo que dice el backend, no solo "alguna nota": CLP sin
+      // decimales y miles con ".". El lookahead evita que "−$1.234" calce con un
+      // número más largo.
+      const esperado = new Decimal(despues).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+      await expect(ventas).toContainText(
+        new RegExp(`notas de crédito −\\$${esperado.replace(/\./g, '\\.')}(?![\\d.])`),
+      )
+    }
+    finally {
+      if (cajaId) await cerrarCaja(request, adminToken, cajaId, totalVenta ?? '0')
+      if (item) await limpiarItems(request, adminToken, [item.id])
+      await page?.context().close()
+    }
+  })
 })

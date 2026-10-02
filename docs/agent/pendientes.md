@@ -41,6 +41,19 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
+- [ ] **🔴 El CI de main está rojo desde el 2026-10-02: un e2e de compras con fecha fija venció**
+  (backend, solo test: `backend/test/compras-deuda.e2e-spec.ts`). El test "GET /compras y GET
+  /compras/:id, con Pagar, traen estadoPago/deuda/vencida" (~L872) espera `vencida = false` en una
+  compra recién confirmada. Su fixture (`borradorSinDocumento`, ~L217) fija `fechaDocumento:
+  '2026-09-01'`, y el vencimiento por defecto es documento + `PLAZO_PAGO_DIAS_DEFAULT = 30`
+  (`compras/deuda.ts:14,44`): vence el 2026-10-01. Desde el 2026-10-02 sale vencida a cualquier
+  hora. Lo midió la orquestadora: falló en CI a las 08:43 (-03) del run 37002108852, así que
+  descarta la hipótesis anterior de la medianoche. **No es un bug del sistema.** **Arreglo:** que
+  la fecha del fixture salga de hoy, o fijar un plazo explícito en el test que lo necesite. Barrer
+  las otras fechas fijas del archivo (`'2026-09-01'` en ~L256, ~L978 y ~L1057) y de los demás e2e
+  que comparen contra el `hoy` real, sin asumir que esta es la única bomba de tiempo. Hasta que
+  entre, todo push a main sale con CI rojo por este test.
+
 - [ ] **El servidor no exige el customer de un tipo de documento con `customer_requerido`**
   (backend; invariante 6). La Factura lo tiene en `true` en el seed, pero el backend solo lo
   expone (`ventas.service.ts`, el listado de tipos, ~L2762) y nunca lo valida al crear la venta. Lo
@@ -62,55 +75,21 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
   cada campo y espere 400. Barrer los DTOs de `PATCH` vecinos buscando el gemelo, sin asumir que es
   el único. **Tomarlo después de que la emisión entre a main**, porque toca el mismo archivo.
 
+- [ ] **`POST /ventas/:id/notas-credito` no aplica el alcance de caja** (backend, invariante 6;
+  `ventas.controller.ts` ~L58). Solo exige `Ventas:Nota de crédito`. `findOne` y el `PATCH` de
+  documentos pasan por `resolverAlcanceDerivadoDeCaja` (eje `Cajas:Leer`); este no, así que un
+  cajero con el permiso de NC opera sobre ventas de otros cajeros del mismo comercio, aunque no
+  pueda verlas. Lo vio `api-security-reviewer` en la tarea 8 de la emisión (2026-10-02); verificado
+  por la orquestadora. **Arreglo:** el mismo alcance que `findOne`, con e2e del 404/403 sobre una
+  venta ajena y del caso que deja pasar. Barrer los otros `POST /ventas/:id/*` (abono, anular,
+  reembolso) buscando el gemelo. **Después de que la emisión entre a main**: toca el mismo
+  controller.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
-
-- [ ] **Un e2e de compras falla pasada la medianoche: `vencida` sale `true` en una compra recién
-  confirmada** (backend, test o `compras.service.ts`). `backend/test/compras-deuda.e2e-spec.ts`,
-  test "GET /compras y GET /compras/:id, con Pagar, traen estadoPago/deuda/vencida" (~L872):
-  `expect(detalle.vencida).toBe(false)` da `true`. Lo vio el frente de emisión el 2026-10-02 cerca
-  de las 00:30 (-03), y lo reprodujo en `c2739053`, sin sus cambios, así que no es de ese frente.
-  `vencida` es `fechaVencimiento < hoy` (`deuda.ts` ~L291), con `hoy = hoyNegocio(tenantId)`.
-  **Hipótesis sin medir:** la fecha de vencimiento de la compra y el `hoy` se calculan con relojes
-  distintos (UTC contra día de negocio del tenant), y a esa hora quedan en días diferentes. Medir
-  de dónde sale `fecha_vencimiento` al confirmar, y reproducir con el reloj fijado. Si es el
-  código, es un bug de producto: una compra marcada vencida de madrugada. Si es el fixture, es un
-  test que depende de la hora.
-
-- [ ] **El saldo de una venta no descuenta sus notas de crédito** (backend, `ventas.service.ts`:
-  `mapVentaListRow` → `saldo = total − pagado`; visto el 2026-10-01 al decidir el saldo pendiente
-  del frente "El vendido del día resta las notas de crédito", § 3). Una venta de $100.000 con
-  $40.000 pagados y una NC por $60.000 sigue mostrando $60.000 de saldo. Ese frente arregla solo
-  la tarjeta "Saldo pendiente" de `/ventas`. Falta medir el resto: el saldo por venta del listado,
-  el listado de deuda, y si se puede seguir cobrando esos $60.000. Si se puede, el cliente terminaría
-  pagando dos veces. Si eso pasa, es fiscal y va a la § 6 como frente propio.
-
-📌 Antes había una nota acá diciendo que la sección estaba vacía: la última entrada previa, la
-unicidad de `serie`, se cerró el 2026-09-19 y está en [`resueltos.md`](resueltos.md).
-
-📌 **Lo que se evaluó el 2026-09-19 y NO es trabajo** (se anota para no redescubrirlo, que es
-lo que hace la sección de Vigilancia): *"devolver o anular la venta de un producto serializado
-rebota con 400"*. **Es falso, y quedó escrito porque yo mismo lo anoté mal y casi entra acá
-como entrada.** `VentasService` sí repone sin pasar `series`
-(`ventas.service.ts:1404` en la anulación, `:2083` en la nota de crédito), pero **nunca llega
-ahí con un producto serializado**: la anulación corta antes con un guard propio y un mensaje
-específico (`:1382-1386`, *"usa inventario por …: anulá sin reponer stock"*), y en la nota de
-crédito el filtro `reponeStock` del loop **es** el filtro por modo —`reponeStock =
-quiereReponer && puedeReponer` con `puedeReponer = modo_inventario === 'cantidad'`, `:2580`—,
-así que la línea por serie se acredita sin reponer en vez de romper. La lección, que vale más
-que el dato: **leer `.filter(l => l.reponeStock)` y concluir "no filtra por modo de
-inventario" es mirar el mecanismo y no la conducta** — el modo estaba adentro del booleano,
-calculado 500 líneas antes.
-
-⚠️ **De la familia de "lo que la pantalla lee y escribe después del `await`" hay funciones con
-la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron una vez:
-`abrirHistorial` congela la cuenta y abre el modal **antes** del `await`;
-`cargarPendientesTestigo` y `abrirEntrarTurno` no están atadas a una cuenta. Lo **cerrado** de
-esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
-archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
 - [ ] **El pre-commit rechaza un recibo de revisión escrito sobre el mismo diff** (harness). Dos
   sesiones lo vieron el 2026-09-27, las dos desde un worktree (la del aviso sin costo de la
@@ -1083,99 +1062,6 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   precio congelado de la línea (`dd54f81d`). El motor de precios y lo fiscal no se tocan.
   Escribe en `movimientos_inventario`: va en su propio frente.
 
-### El vendido del día resta las notas de crédito (owner, 2026-09-30)
-
-**Cómo se decidió:** venía de la § 4. El owner no lo tenía claro y pidió investigar
-([`2026-09-30-vendido-y-notas-credito.md`](investigaciones/2026-09-30-vendido-y-notas-credito.md)).
-Después contestó en el selector de la sesión orquestadora, con la escena "hoy vendiste $300.000,
-un cliente devuelve algo de ayer por $20.000". Eligió la opción recomendada en dos de las tres
-preguntas; en la de cobrado no había recomendación. Las opciones descartadas eran dejar el bruto
-con las notas aparte, y corregir el día de la venta original.
-
-- [ ] **El vendido, el cobrado y el "Total facturado" restan las notas de crédito del día en que se
-  emiten** (backend + frontend; **fiscal: frente propio, con su sesión y su verificación**, `CLAUDE.md`
-  y ADR-010). Lo decidido:
-  - **Vendido** (`resumen-negocio.service.ts`, `GET /resumen-negocio/hoy`): el número grande es lo
-    vendido menos las notas de crédito emitidas ese día, y debajo va el bruto y el monto de las
-    notas ("bruto $300.000 · notas de crédito −$20.000" → $280.000). La NC cuenta en **su** fecha,
-    aunque la venta original sea de otro día, como hacen Shopify y Toast y como el SII la imputa
-    al mes en que se emite. El rótulo "antes de notas de crédito" sale. La semana pasada se
-    calcula igual, para que la variación compare lo mismo.
-  - **Cobrado:** descuenta lo que se devolvió ese día. Hoy no ve la devolución: la NC no escribe
-    `pagos`, y el efectivo devuelto queda como `salida` de `movimientos_caja` con `venta_id` de la NC,
-    que sí resta en el arqueo. La intención es que cobrado y caja cuadren.
-  - **"Total facturado"** de `/ventas` (`GET /ventas/resumen`): el mismo criterio que el vendido y el
-    mismo rótulo. Hoy excluye las NC con otro mecanismo (`tipo_documento_id IS DISTINCT FROM` el
-    tipo del país) que el dashboard (`es_nota_credito` del catálogo). Conviene que queden en uno.
-  - **Lo que el diseño tiene que resolver, y puede volver al owner:**
-    - si **ticket promedio**, **cantidad de ventas** y **local/online** usan el neto, y cuántas
-      ventas es una NC;
-    - si **lo más vendido** resta por ítem lo devuelto con líneas, cuando la NC es por monto
-      libre, sin líneas, y es el caso más común;
-    - qué devolución de plata entra en el cobrado: solo el efectivo de `movimientos_caja`, o
-      también el reembolso por pasarela (webhook);
-    - cómo se ve un día con neto negativo en la comparación.
-  - **Dos preguntas que salieron del diseño, decididas por la orquestadora (2026-10-01).** Cómo se
-    decidió: el owner pidió "investigá y decidí la 1 y la 2, no tengo idea"; las decidió la
-    orquestadora midiendo el código y con una búsqueda corta. Si aparece algo que las contradiga,
-    se reabren con el owner.
-    - **Lo más vendido resta las líneas de mercadería de la NC, con su cantidad y su monto.** La
-      duda era si esas líneas son confiables, porque la entrada "La nota de crédito no es un
-      documento todavía" dice que son informativas. Medido: ya no lo son. `crearNotaCredito`
-      valoriza cada línea al precio de la venta original, las escala para que no pasen el monto, y
-      el resto va a la línea de ajuste (`ajusteTotal = monto − líneas`). Así la cabecera es la suma
-      de las líneas, y lo que el ranking resta nunca supera lo que resta el vendido; la diferencia
-      es el ajuste. Una línea escalada ("2 lomitos acreditados por $5.000") resta 2 y $5.000.
-    - **El saldo pendiente descuenta las NC de cada venta.** Por venta: total − NC de esa venta −
-      (pagado − devuelto), con piso 0, porque lo que queda a favor del cliente no es plata por
-      cobrar. El caso es real: una NC manual solo exige que la venta esté `pagada` o
-      `pagada_parcial`, así que una venta de $100.000 con $40.000 pagados admite una NC por los
-      $60.000 restantes. Hoy esa venta sigue figurando con $60.000 por cobrar. Es la regla contable
-      de siempre, la NC rebaja la cuenta por cobrar
-      ([QuickBooks](https://quickbooks.intuit.com/learn-support/en-us/help-article/customer-refunds-credits/create-apply-credit-memos-delayed-credits-online/L5kne9EiI_US_en_US),
-      [Buk](https://www.buk.cl/novedades/finanzas/que-son-las-notas-de-credito-y-debito)).
-      Devuelto, en el saldo, es solo el efectivo de `movimientos_caja` con `venta_id` de una NC; los
-      `REFUND` de pasarela quedan afuera. La razón: el `REFUND` no guarda qué NC generó
-      (`aplicarPostReembolso` devuelve `notaCreditoId` pero no lo persiste), así que desde la base
-      no se distingue un reembolso con NC de uno sin NC. Con NC, la nota ya baja el saldo: $100.000
-      pagados por Webpay, `REFUND` + NC de $20.000 → 100 − 20 − 100, piso 0. Sin NC, el owner
-      eligió que el saldo no lo cuente (abajo). El único caso que sale mal es una venta pagada en
-      parte por pasarela, con saldo vivo, `REFUND` y NC: ahí el saldo muestra **de menos** lo
-      reembolsado. Con $100 de total, $60 pagados, `REFUND` y NC de $20, se deben $40 y la fórmula
-      da 20. Lo cubre la entrada del reembolso sin NC, en la § 6. Las NC siguen fuera de la suma
-      como ventas: sin pagos, cada una aparecería entera como deuda.
-    - **Ticket promedio con neto ≤ 0 o sin ventas: "—"**, igual que la variación. Lo decidió la
-      orquestadora en la misma pasada.
-  - **Lo que el owner contestó en la sesión del frente (AskUserQuestion, 2026-10-01):**
-    - **"Por cobrar" del inicio** (`resumen-negocio.service.ts`, `porCobrar.saldo`) entra en el
-      frente con la misma regla que "Saldo pendiente" de `/ventas`. Hoy hace la misma cuenta vieja
-      (total − pagado).
-    - **Reembolso por pasarela sin NC: "lo vemos aparte".** Va a entrada propia, en la § 6. Mientras
-      tanto el saldo no lo cuenta. En el cobrado del día sí resta, como ya estaba decidido.
-  - Fuera de esta entrada: el % de anulaciones por garzón, que ya tiene la suya en la § 6.
-  - **Una corrección se reconoce por `venta_referencia_id IS NOT NULL`, no por `es_nota_credito`**
-    (orquestadora, 2026-10-01). Lo pide el frente de emisión (E7 de su spec): la devolución interna
-    corrige una venta sin ser documento tributario, y así resta sola. Medido: hoy el único que
-    escribe esa columna es `crearNotaCredito`, así que el resultado es idéntico, y el frente de
-    emisión no tiene que reescribir estas consultas después. Deja también un solo mecanismo donde
-    hoy hay dos (`es_nota_credito` en el inicio, `IS DISTINCT FROM` el tipo en `/ventas/resumen`).
-  - **Cómo arrancarlo.** La sesión que escribió la spec desapareció el 2026-10-01 sin plan. Esta es
-    la solicitud para la sesión nueva:
-
-    > Sos la sesión del frente "El vendido, el cobrado y el Total facturado restan las notas de
-    > crédito". La orquestadora ("Listado de sesiones activas") coordina los frentes fiscales y es
-    > la jefa después del owner: lo que necesites decidir se lo mandás a ella. Trabajá en un
-    > worktree; arrancá con `git merge main` local. Todo lo decidido está en `docs/agent/pendientes.md`
-    > § 3, entrada "El vendido, el cobrado y el Total facturado restan las notas de crédito", y la
-    > spec ya está escrita: `docs/superpowers/specs/2026-10-01-vendido-neto-de-notas-credito-design.md`.
-    > Ajustala con lo único nuevo: una corrección se reconoce por `venta_referencia_id IS NOT NULL`
-    > (última viñeta de la entrada), porque el frente de emisión
-    > (`docs/superpowers/specs/2026-10-01-emision-por-venta-design.md` § 3.7) va a sumar la
-    > devolución interna, que no es NC. No hay decisiones de negocio abiertas. Siguiente paso: el
-    > plan en `docs/superpowers/plans/`, que pasa por el owner antes de escribir código. Es fiscal:
-    > frente solo, con su verificación (`verify-feature`). Al entrar a main avisá a la orquestadora,
-    > que destraba al frente de emisión.
-
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
@@ -1228,7 +1114,7 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     salones ponen Boleta por defecto. La regla de que una venta documentada no se anula y va por
     NC se lee contra esa etiqueta, no contra lo emitido.
   - **La devolución de una venta sin documento:** qué la registra y cómo baja el vendido y el
-    saldo sin emitir una NC fiscal. Es la entrada de abajo (reembolso sin NC), que depende de esta.
+    saldo sin emitir una NC fiscal. La resolvió este mismo frente (tarea 9): el reembolso por pasarela sin NC quedó archivado en [`resueltos.md`](resueltos.md).
   - **La NC de una boleta que emitió la máquina:** ¿la emite el sistema referenciando ese número,
     o la máquina o el portal? Y si la emite la máquina, ¿qué registra el sistema?
   - Cómo entra el número que dio la máquina: tipeado o traído por la integración.
@@ -1248,7 +1134,7 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   3. Cada venta registra quién emitió: el sistema, la máquina (con su número) o nadie.
   4. Lo vendido, lo cobrado y el saldo bajan con una devolución aunque la venta no tenga
      documento. Hoy solo los baja la NC: falta cómo se registra una devolución sin documento fiscal,
-     y eso destraba la entrada del reembolso sin NC.
+     y eso lo resolvió este mismo frente (tarea 9; el reembolso sin NC está en [`resueltos.md`](resueltos.md)).
   5. Lo de hoy deja la emisión lista para cuando llegue (ADR-010), sin construirla antes.
   **Afinado con el owner (AskUserQuestion, 2026-10-01; eligió la opción recomendada en las cuatro):**
   - **Devolución sobre una venta sin documento → "devolución interna".** No es un documento
@@ -1269,8 +1155,8 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     de la máquina**.
   - **Todo reembolso deja registro** (NC, NC de la máquina anotada, o devolución interna, según
     quién emitió). La pantalla elige cuál, y se va la casilla "generar nota de crédito" de
-    `ReembolsoModal.vue`. Esto resuelve la entrada de abajo del reembolso sin NC, que se construye
-    dentro de este frente.
+    `ReembolsoModal.vue`. Esto resolvió, dentro de este frente (tarea 9), la entrada del reembolso sin NC, ya
+    archivada en [`resueltos.md`](resueltos.md).
   Las reglas quedaron en [`PRODUCTO.md`](../PRODUCTO.md) § 10, "Emitir al SII es una elección".
   **El número de Webpay ya está en la base** (lo señaló el owner; medido 2026-10-01). El cobro por
   pasarela guarda el código de autorización en `pasarela_transacciones.codigo_autorizacion`
@@ -1344,6 +1230,21 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
     esta factura en tu facturador?". Sí → nota de crédito anotada; no → se anula, con quién lo
     afirmó. Se descartaron "impide solo si tiene número" (el que no anotó el número deja una
     factura viva) y "nunca se anula" (corrige una factura que puede no existir).
+  - **Un número externo mal anotado lo borra el encargado** (sesión del frente, tarea 6;
+    AskUserQuestion, 2026-10-02). Lo puede borrar quien tiene `Ventas:Anular`, queda registrado
+    quién, cuándo y el valor anterior, y la anulación vuelve a preguntar. Se descartaron "solo
+    dejar rastro" (el error queda a la vista pero sigue forzando la nota de crédito) y "dejarlo
+    así".
+  - **El abono cobra solo lo que de verdad se debe** (AskUserQuestion, 2026-10-02). Venía de la § 2
+    ("el saldo de una venta no descuenta sus notas de crédito"), y la tarea 8 lo confirmó midiendo:
+    una NC "no vuelve plata" por la deuda deja la venta en `pagada_parcial`, el abono calcula
+    `total − aplicado` (`pagos.service.ts` ~L411) sin mirar las correcciones, y el detalle sigue
+    ofreciendo "Registrar pago": el cliente paga dos veces. Regla: el tope del abono es total −
+    correcciones − lo pagado, con la fórmula del saldo ya decidida en la § 3; si queda en cero,
+    "Registrar pago" desaparece y la venta pasa a `pagada`. **Va dentro del frente de emisión**,
+    que es el que construyó "no vuelve plata". Se descartaron "frente aparte" (el doble cobro sigue
+    posible mientras tanto) y "apagar no vuelve plata hasta entonces". Falta medir, dentro del
+    frente, el listado de deuda y el saldo por venta del listado, que nombraba la entrada vieja.
   - **La factura la hace siempre el sistema**, se pague como se pague. La regla del medio decide
     solo las boletas, que es lo que cubre el modelo de emisión del SII.
   - **Un comercio nuevo trae "emite el sistema" en todos los medios**: es el error barato.
@@ -1381,7 +1282,7 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
 
   Fuera de alcance: enviar de verdad al SII (ADR-010: se diseña compatible, no se construye), un módulo para configurar las máquinas de cobro, el motor de precios y el % de anulaciones por garzón.
 
-  Dependencia: el frente "El vendido, el cobrado y el Total facturado restan las notas de crédito" está construyendo los reportes que restan las NC (spec docs/superpowers/specs/2026-10-01-vendido-neto-de-notas-credito-design.md). Este frente les tiene que sumar la devolución interna. Diseñá ya, pero no implementes sobre esos reportes hasta que ese frente esté en main; la orquestadora te avisa.
+  Dependencia (resuelta el 2026-10-02): el frente "El vendido, el cobrado y el Total facturado restan las notas de crédito" ya está en main (a6d07096). Sus reportes reconocen una corrección por venta_referencia_id, así que la devolución interna resta sola; a este frente le queda verificarlo (tarea 11).
 
   Cómo:
   1. Primero diseño: brainstorm → spec en docs/superpowers/specs/ → plan en docs/superpowers/plans/. Nada de código antes de que el owner apruebe el plan.
@@ -1390,10 +1291,22 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   4. No hagas push sin que el owner lo diga, porque main despliega en Railway.
   ```
 
+- [ ] **El saldo pendiente no descuenta lo reembolsado por pasarela** (fiscal, **frente propio**;
+  límite conocido D10 de la spec del vendido neto, 2026-10-01). La fórmula del saldo cuenta como
+  "devuelto" solo las salidas de caja de las correcciones, y el reembolso de pasarela no mueve
+  caja. Una venta pagada **en parte** por pasarela, con saldo vivo, `REFUND` y nota: con $100 de
+  total, $60 pagados, `REFUND` de $20 y nota de $20, se deben $40 y el saldo da $20. Ya se puede arreglar:
+  el frente de emisión dejó el vínculo (`pasarela_transacciones.correccion_venta_id`) y
+  `ventas.devolucion_via` anota por dónde volvió la plata. El tope del abono del frente de
+  emisión va a reemplazar esa expresión: tomarlo después de él o junto con él. La expresión
+  está escrita en dos consultas (el "por cobrar" del dashboard y `VentasService.resumen`,
+  [`dashboard-inicio.md`](../features/dashboard-inicio.md)); el saldo por venta del listado
+  sigue en `total − pagado` y tiene su propia entrada en la § 2.
+
 - [ ] **Una nota de crédito que se reintenta se emite dos veces** (fiscal, **frente propio**,
   anotado 2026-09-19 al diseñar la idempotencia del cobro). `POST /ventas/:id/notas-credito`
   no tiene clave de idempotencia: un corte de red después de emitir y un reintento del
-  operador emiten **dos** notas por el mismo monto. Con `devolverDinero` sale también **dos
+  operador emiten **dos** notas por el mismo monto. Si la nota devuelve por un pago en efectivo, sale también **dos
   veces** el efectivo de la caja. Lo acota solo el tope de la serie: la segunda rebota si la
   primera ya agotó lo acreditable, y pasa si quedaba saldo. El mecanismo ya existe desde el
   frente de la idempotencia del cobro ([ADR-026](../adr/026-idempotencia-de-cobros.md)):

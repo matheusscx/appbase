@@ -19,15 +19,21 @@ import { MermasService, type ResumenMermas } from '../mermas/mermas.service';
 export interface Comparado<T = string> {
   hoy: T;
   semanaPasada: T;
-  /** `(hoy − semanaPasada) / semanaPasada`, `toFixed(4)`; `null` si semanaPasada = 0. */
+  /** `(hoy − semanaPasada) / semanaPasada`, `toFixed(4)`; `null` si semanaPasada ≤ 0. */
   variacion: string | null;
 }
 
 export interface VentasHoy {
+  /** NETO de notas de crédito: `vendidoDesglose.bruto − vendidoDesglose.notasCredito` en `hoy`. */
   vendido: Comparado;
+  /** De hoy: lo vendido sin descontar, y lo que restaron las notas de crédito de hoy (positivo). */
+  vendidoDesglose: { bruto: string; notasCredito: string };
+  /** NETO de lo devuelto: `cobradoDesglose.cobrado − cobradoDesglose.devuelto` en `hoy`. */
   cobrado: Comparado;
+  /** De hoy: lo cobrado sin descontar, y lo devuelto hoy (efectivo de las correcciones + REFUND aprobados), positivo. */
+  cobradoDesglose: { cobrado: string; devuelto: string };
   cantidad: Comparado<number>;
-  /** `null` cuando esa cantidad es 0: no hay ticket que promediar. */
+  /** `null` cuando esa cantidad es 0 o el neto no es positivo: no hay ticket que promediar. */
   ticketPromedio: Comparado<string | null>;
   /** Vendido de HOY por canal, no comparado contra la semana pasada. */
   porCanal: { fisico: string; online: string };
@@ -50,9 +56,15 @@ export interface PerdidasHoy {
 export interface MasVendidoItem {
   itemId: string;
   itemNombre: string;
-  /** Σ en unidad base, `venta_detalles.cantidad`. */
+  /**
+   * Neto, en unidad base: Σ `venta_detalles.cantidad` de lo vendido hoy menos
+   * la de las líneas de las correcciones de hoy, sin la línea de ajuste.
+   */
   cantidad: string;
-  /** Σ `venta_detalles.total_linea`. */
+  /**
+   * Neto: Σ `venta_detalles.total_linea` de lo vendido hoy menos la de las
+   * líneas de las correcciones de hoy, sin la línea de ajuste.
+   */
   monto: string;
 }
 
@@ -62,12 +74,14 @@ export interface ResumenNegocioHoy {
   ventas: VentasHoy;
   porCobrar: PorCobrar;
   perdidas: PerdidasHoy;
-  /** Hasta 5, `ORDER BY monto DESC, itemId`. */
+  /** Hasta 5, `ORDER BY monto DESC, itemId`; solo entran ítems con neto > 0. */
   masVendidos: MasVendidoItem[];
 }
 
 interface VentasRow {
-  vendido_hoy: string;
+  bruto_hoy: string;
+  notas_hoy: string;
+  neto_hoy: string;
   vendido_semana_pasada: string;
   cantidad_hoy: number;
   cantidad_semana_pasada: number;
@@ -78,6 +92,10 @@ interface VentasRow {
 interface CobradoRow {
   cobrado_hoy: string;
   cobrado_semana_pasada: string;
+  efectivo_hoy: string;
+  efectivo_semana_pasada: string;
+  pasarela_hoy: string;
+  pasarela_semana_pasada: string;
 }
 
 interface PorCobrarRow {
@@ -92,9 +110,10 @@ interface MasVendidoRow {
   monto: string;
 }
 
-/** `(hoy − semanaPasada) / semanaPasada`, `null` si `semanaPasada` es 0. */
+/** `(hoy − semanaPasada) / semanaPasada`; `null` si `semanaPasada` ≤ 0: contra
+ *  un día negativo o vacío el porcentaje no dice nada (D7). */
 function calcularVariacion(hoy: Decimal, semanaPasada: Decimal): string | null {
-  if (semanaPasada.isZero()) return null;
+  if (semanaPasada.lte(0)) return null;
   return hoy.minus(semanaPasada).dividedBy(semanaPasada).toFixed(ESCALA_COSTO);
 }
 
@@ -148,31 +167,42 @@ export class ResumenNegocioService {
       IDX_FECHA_SEMANA_PASADA,
     );
 
+    // Una corrección (hoy, la nota de crédito) es la fila con
+    // `venta_referencia_id`: resta en SU fecha, aunque la venta que corrige sea
+    // de otro día (spec 2026-10-01-vendido-neto § 2 D1, § 3.1). Su total_final
+    // es positivo: el signo lo pone esta consulta.
+    const firmado =
+      'CASE WHEN v.venta_referencia_id IS NULL THEN v.total_final ELSE -v.total_final END';
+
     // Vendido, cantidad y por canal: hoy y la semana pasada en UNA consulta
-    // con `FILTER (WHERE …)`, sin importar cuántas ventas haya.
+    // con `FILTER (WHERE …)`, sin importar cuántas ventas haya. La NC copia el
+    // `canal` de la venta que corrige, así que resta en el mismo canal.
     const ventasRows: VentasRow[] = await this.db.query(
       `SELECT
-          COALESCE(SUM(v.total_final) FILTER (WHERE ${condHoyVenta}), 0)::text
-            AS vendido_hoy,
-          COALESCE(SUM(v.total_final) FILTER (WHERE ${condSemanaPasadaVenta}), 0)::text
-            AS vendido_semana_pasada,
-          COUNT(*) FILTER (WHERE ${condHoyVenta})::int AS cantidad_hoy,
-          COUNT(*) FILTER (WHERE ${condSemanaPasadaVenta})::int
-            AS cantidad_semana_pasada,
           COALESCE(SUM(v.total_final)
+            FILTER (WHERE ${condHoyVenta} AND v.venta_referencia_id IS NULL), 0)::text
+            AS bruto_hoy,
+          COALESCE(SUM(v.total_final)
+            FILTER (WHERE ${condHoyVenta} AND v.venta_referencia_id IS NOT NULL), 0)::text
+            AS notas_hoy,
+          COALESCE(SUM(${firmado}) FILTER (WHERE ${condHoyVenta}), 0)::text
+            AS neto_hoy,
+          COALESCE(SUM(${firmado}) FILTER (WHERE ${condSemanaPasadaVenta}), 0)::text
+            AS vendido_semana_pasada,
+          COUNT(*) FILTER (WHERE ${condHoyVenta} AND v.venta_referencia_id IS NULL)::int
+            AS cantidad_hoy,
+          COUNT(*) FILTER (WHERE ${condSemanaPasadaVenta} AND v.venta_referencia_id IS NULL)::int
+            AS cantidad_semana_pasada,
+          COALESCE(SUM(${firmado})
             FILTER (WHERE ${condHoyVenta} AND v.canal = 'fisico'), 0)::text
             AS vendido_fisico_hoy,
-          COALESCE(SUM(v.total_final)
+          COALESCE(SUM(${firmado})
             FILTER (WHERE ${condHoyVenta} AND v.canal = 'online'), 0)::text
             AS vendido_online_hoy
          FROM ventas v
-         -- Sin correcciones (notas de crédito y devoluciones internas): mismo
-         -- criterio que VentasService.resumen, por venta_referencia_id (E7) y no
-         -- por el tipo de documento, porque la devolución interna no lo lleva.
         WHERE v.tenant_id = $1
           AND v.eliminado_el IS NULL
-          AND v.estado <> 'cancelada'
-          AND v.venta_referencia_id IS NULL`,
+          AND v.estado <> 'cancelada'`,
       params,
     );
 
@@ -197,53 +227,126 @@ export class ResumenNegocioService {
     // 400 si `SELECT 1 FROM pagos WHERE venta_id = …` encuentra alguna fila.
     // O sea que, por el camino de la app, ninguna nota de crédito ni ninguna
     // venta cancelada puede aportarle nada a esta suma — no hace falta un
-    // `JOIN` a `ventas` para excluirlas.
+    // `JOIN` a `ventas` para excluirlas. Lo que la NC devuelve no sale de esa
+    // suma: se resta aparte, en `e` y `r` (spec 2026-10-01-vendido-neto § 3.2).
+    const condHoyMov = condicion('mc.fecha', IDX_FECHA_HOY);
+    const condSemanaPasadaMov = condicionSemanaPasada(
+      'mc.fecha',
+      IDX_FECHA_SEMANA_PASADA,
+    );
+    const condHoyRefund = condicion('t.fecha_transaccion', IDX_FECHA_HOY);
+    const condSemanaPasadaRefund = condicionSemanaPasada(
+      't.fecha_transaccion',
+      IDX_FECHA_SEMANA_PASADA,
+    );
+
+    // Tres agregados de una fila cada uno, cruzados: una sola consulta.
     const cobradoRows: CobradoRow[] = await this.db.query(
-      `SELECT
-          COALESCE(SUM(pa.monto) FILTER (WHERE ${condHoyPago}), 0)::text
-            AS cobrado_hoy,
-          COALESCE(SUM(pa.monto) FILTER (WHERE ${condSemanaPasadaPago}), 0)::text
-            AS cobrado_semana_pasada
-         FROM pagos p
-         JOIN pago_aplicaciones pa
-           ON pa.pago_id = p.pago_id
-          AND pa.tipo = 'venta'
-          AND pa.eliminado_el IS NULL
-        WHERE p.tenant_id = $1
-          AND p.eliminado_el IS NULL`,
+      `SELECT c.cobrado_hoy, c.cobrado_semana_pasada,
+              e.efectivo_hoy, e.efectivo_semana_pasada,
+              r.pasarela_hoy, r.pasarela_semana_pasada
+         FROM (
+           SELECT COALESCE(SUM(pa.monto) FILTER (WHERE ${condHoyPago}), 0)::text
+                    AS cobrado_hoy,
+                  COALESCE(SUM(pa.monto) FILTER (WHERE ${condSemanaPasadaPago}), 0)::text
+                    AS cobrado_semana_pasada
+             FROM pagos p
+             JOIN pago_aplicaciones pa
+               ON pa.pago_id = p.pago_id
+              AND pa.tipo = 'venta'
+              AND pa.eliminado_el IS NULL
+            WHERE p.tenant_id = $1
+              AND p.eliminado_el IS NULL
+         ) c
+         -- Efectivo devuelto: la salida de caja que lleva el venta_id de una
+         -- corrección. Un retiro de caja no lleva venta_id y no entra. La caja
+         -- no tiene tenant_id: el alcance va por la corrección.
+         CROSS JOIN (
+           SELECT COALESCE(SUM(mc.monto) FILTER (WHERE ${condHoyMov}), 0)::text
+                    AS efectivo_hoy,
+                  COALESCE(SUM(mc.monto) FILTER (WHERE ${condSemanaPasadaMov}), 0)::text
+                    AS efectivo_semana_pasada
+             FROM movimientos_caja mc
+             JOIN ventas nc
+               ON nc.venta_id = mc.venta_id
+              AND nc.venta_referencia_id IS NOT NULL
+              AND nc.tenant_id = $1
+              AND nc.eliminado_el IS NULL
+            WHERE mc.tipo = 'salida'
+              AND mc.eliminado_el IS NULL
+         ) e
+         -- Reembolso por pasarela, con o sin NC (D6). Solo de órdenes con
+         -- venta: el cobro de una orden sin venta nunca entró a pagos, así
+         -- que su reembolso tampoco sale del cobrado. El reembolso del webhook
+         -- no deja salida de caja (no pide devolver dinero), así que esto y lo
+         -- de arriba no se pisan.
+         CROSS JOIN (
+           SELECT COALESCE(SUM(t.monto) FILTER (WHERE ${condHoyRefund}), 0)::text
+                    AS pasarela_hoy,
+                  COALESCE(SUM(t.monto) FILTER (WHERE ${condSemanaPasadaRefund}), 0)::text
+                    AS pasarela_semana_pasada
+             FROM pasarela_transacciones t
+             JOIN pasarela_ordenes o
+               ON o.orden_id = t.orden_id
+              AND o.tenant_id = t.tenant_id
+              AND o.venta_id IS NOT NULL
+              AND o.eliminado_el IS NULL
+            WHERE t.tenant_id = $1
+              AND t.tipo = 'REFUND'
+              AND t.estado = 'aprobada'
+              AND t.eliminado_el IS NULL
+         ) r`,
       params,
     );
 
     // Por cobrar: ventas pendientes o parcialmente pagadas, de CUALQUIER
-    // fecha —es lo que se debe ahora, no lo que se vendió hoy—. Misma forma
-    // que `saldo_pendiente` de `VentasService.resumen`.
+    // fecha —es lo que se debe ahora, no lo que se vendió hoy—. Misma fórmula
+    // que `saldo_pendiente` de `VentasService.resumen`, con el saldo por venta
+    // de la spec 2026-10-01-vendido-neto (D10). Las correcciones no entran
+    // como filas (`venta_referencia_id IS NULL`): restan del saldo de la venta
+    // que corrigen.
     const porCobrarRows: PorCobrarRow[] = await this.db.query(
-      `SELECT COUNT(*)::int AS cantidad,
-              COALESCE(SUM(
-                v.total_final - COALESCE((
-                  SELECT SUM(pa.monto)
-                    FROM pagos p
-                    JOIN pago_aplicaciones pa
-                      ON pa.pago_id = p.pago_id
-                     AND pa.eliminado_el IS NULL
-                     AND pa.tipo = 'venta'
-                   WHERE p.venta_id = v.venta_id AND p.eliminado_el IS NULL
-                ), 0)
-              ), 0)::text AS saldo
-         FROM ventas v
-         -- Sin correcciones, por venta_referencia_id (E7).
-         --
-         -- Nota: hoy este filtro es cinturón-y-tirantes acá. Una nota de
-         -- crédito nace con estado = PAGADA
-         -- (crearNotaCreditoEnTransaccion, ventas.service.ts ~L1958), así que
-         -- nunca matchea el estado IN ('pendiente', 'pagada_parcial') de
-         -- abajo. Se deja igual: es la misma forma que
-         -- vendido y que VentasService.resumen, y si el día de mañana una
-         -- NC pudiera nacer pendiente, esta línea es la que ya la protege.
-        WHERE v.tenant_id = $1
-          AND v.eliminado_el IS NULL
-          AND v.estado IN ('pendiente', 'pagada_parcial')
-          AND v.venta_referencia_id IS NULL`,
+      `SELECT COUNT(*) FILTER (WHERE s.saldo > 0)::int AS cantidad,
+              COALESCE(SUM(s.saldo), 0)::text AS saldo
+         FROM (
+           SELECT
+             -- Saldo de una venta: total − correcciones de esa venta − (pagado
+             -- − devuelto en efectivo), con piso 0: lo que queda a favor del
+             -- cliente no es plata por cobrar (spec 2026-10-01-vendido-neto
+             -- D10). Los REFUND de pasarela quedan afuera: "devuelto" cuenta solo
+             -- las salidas de caja, y el reembolso por pasarela no mueve caja
+             -- (límite abierto en pendientes.md § 6). MISMA expresión en
+             -- ResumenNegocioService.hoy (porCobrar) y VentasService.resumen: si
+             -- cambia una, cambia la otra.
+             GREATEST(
+               v.total_final
+               - COALESCE((
+                   SELECT SUM(nc.total_final) FROM ventas nc
+                    WHERE nc.venta_referencia_id = v.venta_id AND nc.eliminado_el IS NULL
+                 ), 0)
+               - (
+                   COALESCE((
+                     SELECT SUM(pa.monto)
+                       FROM pagos p
+                       JOIN pago_aplicaciones pa
+                         ON pa.pago_id = p.pago_id AND pa.eliminado_el IS NULL AND pa.tipo = 'venta'
+                      WHERE p.venta_id = v.venta_id AND p.eliminado_el IS NULL
+                   ), 0)
+                   - COALESCE((
+                     SELECT SUM(mc.monto)
+                       FROM ventas nc
+                       JOIN movimientos_caja mc
+                         ON mc.venta_id = nc.venta_id AND mc.tipo = 'salida' AND mc.eliminado_el IS NULL
+                      WHERE nc.venta_referencia_id = v.venta_id AND nc.eliminado_el IS NULL
+                   ), 0)
+                 ),
+               0) AS saldo
+             FROM ventas v
+            WHERE v.tenant_id = $1
+              AND v.eliminado_el IS NULL
+              AND v.estado IN ('pendiente', 'pagada_parcial')
+              AND v.venta_referencia_id IS NULL
+         ) s`,
       [tenantId],
     );
 
@@ -259,7 +362,10 @@ export class ResumenNegocioService {
     const mermasHoy = await this.mermasService.resumen(tenantId, fecha, fecha);
 
     // Lo más vendido: los mismos filtros de venta que "vendido" arriba (sin
-    // canceladas, sin nota de crédito, rango de HOY), agregado por ítem.
+    // canceladas, rango de HOY), agregado por ítem y NETO de las correcciones:
+    // una venta suma sus líneas y una nota de crédito (`venta_referencia_id`)
+    // las resta, en la cantidad y en el monto. Un ítem cuyo neto del día no es
+    // positivo no es "lo más vendido" y sale (`HAVING`).
     // `ORDER BY` sobre la expresión SUM y no sobre el alias `monto`: el alias
     // sale con `::text` (para no perder precisión de Decimal en el mapeo), y
     // ordenar por un texto compararía "9990000" antes que "500"
@@ -288,12 +394,12 @@ export class ResumenNegocioService {
 
     const masVendidosRows: MasVendidoRow[] = await this.db.query(
       `SELECT vd.item_id, i.nombre AS item_nombre,
-              SUM(vd.total_linea)::text AS monto,
-              SUM(vd.cantidad)::text AS cantidad
+              SUM(CASE WHEN v.venta_referencia_id IS NULL THEN vd.total_linea
+                       ELSE -vd.total_linea END)::text AS monto,
+              SUM(CASE WHEN v.venta_referencia_id IS NULL THEN vd.cantidad
+                       ELSE -vd.cantidad END)::text AS cantidad
          FROM venta_detalles vd
          JOIN ventas v ON v.venta_id = vd.venta_id
-         -- Mismo criterio que "vendido" (arriba): sin canceladas, sin
-         -- correcciones (venta_referencia_id).
          -- Nombre del ítem SIN filtro de borrado, a propósito: se vendió
          -- hoy, y darlo de baja después no lo saca de lo más vendido (spec
          -- 2026-09-18-dashboard-inicio § 4.4/§ 5.1).
@@ -302,10 +408,15 @@ export class ResumenNegocioService {
           AND v.eliminado_el IS NULL
           AND vd.eliminado_el IS NULL
           AND v.estado <> 'cancelada'
-          AND v.venta_referencia_id IS NULL
+          -- La línea "Ajuste" es la parte de una NC que no corresponde a
+          -- ningún producto: resta del vendido, no de un ítem.
+          AND i.es_ajuste_nota_credito = false
           AND ${condHoyVentaMasVendidos}
         GROUP BY vd.item_id, i.nombre
-        ORDER BY SUM(vd.total_linea) DESC, vd.item_id
+       HAVING SUM(CASE WHEN v.venta_referencia_id IS NULL THEN vd.total_linea
+                       ELSE -vd.total_linea END) > 0
+        ORDER BY SUM(CASE WHEN v.venta_referencia_id IS NULL THEN vd.total_linea
+                          ELSE -vd.total_linea END) DESC, vd.item_id
         LIMIT 5`,
       paramsMasVendidos,
     );
@@ -314,19 +425,33 @@ export class ResumenNegocioService {
     const cr = cobradoRows[0];
     const pc = porCobrarRows[0];
 
-    const vendidoHoy = new Decimal(vr?.vendido_hoy ?? '0');
+    const vendidoHoy = new Decimal(vr?.neto_hoy ?? '0');
     const vendidoSemanaPasada = new Decimal(vr?.vendido_semana_pasada ?? '0');
-    const cobradoHoy = new Decimal(cr?.cobrado_hoy ?? '0');
-    const cobradoSemanaPasada = new Decimal(cr?.cobrado_semana_pasada ?? '0');
+    // Neto de lo devuelto, hoy y la semana pasada. `pasarela_*` viene con la
+    // escala de `pasarela_transacciones.monto` (6) y `pagos` con la suya (4):
+    // lo derivado sale con `toFixed(ESCALA_COSTO)`.
+    const cobradoBrutoHoy = new Decimal(cr?.cobrado_hoy ?? '0');
+    const devueltoHoy = new Decimal(cr?.efectivo_hoy ?? '0').plus(
+      cr?.pasarela_hoy ?? '0',
+    );
+    const devueltoSemanaPasada = new Decimal(
+      cr?.efectivo_semana_pasada ?? '0',
+    ).plus(cr?.pasarela_semana_pasada ?? '0');
+    const cobradoHoy = cobradoBrutoHoy.minus(devueltoHoy);
+    const cobradoSemanaPasada = new Decimal(
+      cr?.cobrado_semana_pasada ?? '0',
+    ).minus(devueltoSemanaPasada);
     const cantidadHoy = vr?.cantidad_hoy ?? 0;
     const cantidadSemanaPasada = vr?.cantidad_semana_pasada ?? 0;
 
+    // Ticket: `neto / cantidad`, solo con cantidad > 0 Y neto > 0 (D8): un
+    // neto ≤ 0 no es un ticket que mostrar.
     const ticketHoy =
-      cantidadHoy > 0
+      cantidadHoy > 0 && vendidoHoy.gt(0)
         ? vendidoHoy.dividedBy(cantidadHoy).toFixed(ESCALA_COSTO)
         : null;
     const ticketSemanaPasada =
-      cantidadSemanaPasada > 0
+      cantidadSemanaPasada > 0 && vendidoSemanaPasada.gt(0)
         ? vendidoSemanaPasada
             .dividedBy(cantidadSemanaPasada)
             .toFixed(ESCALA_COSTO)
@@ -336,14 +461,22 @@ export class ResumenNegocioService {
       fecha,
       ventas: {
         vendido: {
-          hoy: vr?.vendido_hoy ?? '0',
+          hoy: vr?.neto_hoy ?? '0',
           semanaPasada: vr?.vendido_semana_pasada ?? '0',
           variacion: calcularVariacion(vendidoHoy, vendidoSemanaPasada),
         },
+        vendidoDesglose: {
+          bruto: vr?.bruto_hoy ?? '0',
+          notasCredito: vr?.notas_hoy ?? '0',
+        },
         cobrado: {
-          hoy: cr?.cobrado_hoy ?? '0',
-          semanaPasada: cr?.cobrado_semana_pasada ?? '0',
+          hoy: cobradoHoy.toFixed(ESCALA_COSTO),
+          semanaPasada: cobradoSemanaPasada.toFixed(ESCALA_COSTO),
           variacion: calcularVariacion(cobradoHoy, cobradoSemanaPasada),
+        },
+        cobradoDesglose: {
+          cobrado: cr?.cobrado_hoy ?? '0',
+          devuelto: devueltoHoy.toFixed(ESCALA_COSTO),
         },
         cantidad: {
           hoy: cantidadHoy,
