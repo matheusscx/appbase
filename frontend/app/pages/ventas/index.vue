@@ -2,6 +2,12 @@
 import Decimal from 'decimal.js'
 import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
+import {
+  FILTRO_DOCUMENTO_ITEMS,
+  resumenEmisores,
+  type EmisorDocumento,
+  type FiltroDocumento,
+} from '~/composables/useDocumentosVenta'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -19,6 +25,9 @@ interface VentaResumen {
   esCorreccion: boolean
   /** Corrección con el tipo NC: falso en la devolución interna. */
   esNotaCredito: boolean
+  /** Quién emitió lo vigente de la venta (sin el voucher duplicado). Del backend. */
+  emisores: EmisorDocumento[]
+  tieneDuplicado: boolean
 }
 
 interface VentasResumenKpi {
@@ -43,10 +52,12 @@ const { pageSize } = useUserPreferences()
 
 const filtroEstado = ref<string | undefined>()
 const filtroCanal = ref<string | undefined>()
+const filtroDocumento = ref<FiltroDocumento | undefined>()
 
 const listFilters = computed(() => ({
   estado: filtroEstado.value,
   canal: filtroCanal.value,
+  documento: filtroDocumento.value,
 }))
 
 const { items: ventas, meta, page, loading } =
@@ -69,6 +80,12 @@ const drawerOpen = ref(false)
 const ventaSeleccionadaId = ref<string | null>(null)
 
 const { estadoColor, estadoLabel, estadoOptions } = useEstadoVenta()
+
+// Una corrección no se revisa por su documento: los filtros la dejan afuera y su
+// fila `nadie` es la devolución interna, que no es un faltante. Sin badge.
+function badgeEmisores(v: VentaResumen) {
+  return v.esCorreccion ? null : resumenEmisores(v.emisores)
+}
 
 function canalColor(canal: string): 'primary' | 'neutral' {
   return canal === 'online' ? 'primary' : 'neutral'
@@ -96,11 +113,12 @@ const canalOptions = [
   { label: 'Online', value: 'online' },
 ]
 
-const hayFiltrosActivos = computed(() => !!filtroEstado.value || !!filtroCanal.value)
+const hayFiltrosActivos = computed(() => !!filtroEstado.value || !!filtroCanal.value || !!filtroDocumento.value)
 
 function limpiarFiltros() {
   filtroEstado.value = undefined
   filtroCanal.value = undefined
+  filtroDocumento.value = undefined
 }
 
 // El "—" es solo de la carga inicial: una recarga (tras un cobro, una anulación
@@ -193,6 +211,7 @@ const columns: TableColumn<VentaResumen>[] = [
   { accessorKey: 'fecha', header: 'Fecha' },
   { accessorKey: 'canal', header: 'Canal' },
   { accessorKey: 'estado', header: 'Estado' },
+  { id: 'documento', header: 'Documento' },
   { accessorKey: 'totalFinal', header: 'Total', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'montoPagado', header: 'Pagado', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'saldo', header: 'Saldo', meta: { class: { th: 'text-right', td: 'text-right' } } },
@@ -269,6 +288,12 @@ const columns: TableColumn<VentaResumen>[] = [
             placeholder="Canal"
             class="w-44"
           />
+          <USelect
+            v-model="filtroDocumento"
+            :items="FILTRO_DOCUMENTO_ITEMS"
+            placeholder="Documento"
+            class="w-48"
+          />
           <UButton
             v-if="hayFiltrosActivos"
             label="Limpiar filtros"
@@ -307,6 +332,24 @@ const columns: TableColumn<VentaResumen>[] = [
                 v-else-if="badgeReembolso(row.original)"
                 :color="badgeReembolso(row.original)!.color"
                 :label="badgeReembolso(row.original)!.label"
+                variant="subtle"
+                size="sm"
+              />
+            </div>
+          </template>
+          <template #documento-cell="{ row }">
+            <div class="flex flex-wrap items-center gap-1">
+              <UBadge
+                v-if="badgeEmisores(row.original)"
+                :color="badgeEmisores(row.original)!.color"
+                :label="badgeEmisores(row.original)!.label"
+                variant="subtle"
+                size="sm"
+              />
+              <UBadge
+                v-if="!row.original.esCorreccion && row.original.tieneDuplicado"
+                color="info"
+                label="Duplicado"
                 variant="subtle"
                 size="sm"
               />

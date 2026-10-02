@@ -8,12 +8,14 @@ import {
   estadoDocumento,
   etiquetaEmisor,
   etiquetaTipo,
+  FILTRO_DOCUMENTO_ITEMS,
   leyendaCorrige,
   leyendaDescarte,
   leyendaNumeroBorrado,
   puedeBorrarNumero,
   puedeCompletarNumero,
   registroQueQueda,
+  resumenEmisores,
   type DocumentoVenta,
   type OpcionDevolucion,
 } from './useDocumentosVenta'
@@ -237,5 +239,28 @@ describe('por dónde vuelve la plata (opcionesDevolucion)', () => {
 
   it('un registro que este front no conoce no rompe', () => {
     expect(registroQueQueda('otro')).toBe('Una corrección de la venta.')
+  })
+})
+
+describe('filtro y resumen de emisores del listado de ventas', () => {
+  it('las opciones del filtro son los seis valores del backend, en ese orden', () => {
+    expect(FILTRO_DOCUMENTO_ITEMS.map(o => o.value)).toEqual([
+      'sistema', 'maquina', 'externo', 'sin_numero', 'sin_documento', 'duplicado',
+    ])
+    expect(FILTRO_DOCUMENTO_ITEMS.map(o => o.label)).toEqual([
+      'Del sistema', 'De la máquina', 'Hecho por fuera', 'Sin número', 'Sin documento', 'Voucher duplicado',
+    ])
+  })
+
+  it('resumenEmisores une los emisores y avisa solo cuando alguno es "nadie"', () => {
+    expect(resumenEmisores(['maquina', 'sistema'])).toEqual({ label: 'Máquina + Sistema', color: 'neutral' })
+    expect(resumenEmisores(['externo'])).toEqual({ label: 'Por fuera', color: 'neutral' })
+    expect(resumenEmisores(['nadie'])).toEqual({ label: 'Sin documento', color: 'warning' })
+    expect(resumenEmisores(['nadie', 'sistema'])?.color).toBe('warning')
+  })
+
+  it('sin emisores no hay nada que decir, y un emisor que el front no conoce se muestra crudo', () => {
+    expect(resumenEmisores([])).toBeNull()
+    expect(resumenEmisores(['otro'])?.label).toBe('otro')
   })
 })

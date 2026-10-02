@@ -351,10 +351,10 @@ respuesta de la última.
 
 ### GET /api/ventas
 
-Lista paginada de ventas del tenant autenticado. Query params: `page` (default 1), `pageSize` (default 15, max 100), `estado`, `canal`. La respuesta incluye campos enriquecidos por fila: `montoPagado` (suma de pagos menos vuelto) y `saldo` (total_final − montoPagado).
+Lista paginada de ventas del tenant autenticado. Query params: `page` (default 1), `pageSize` (default 15, max 100), `estado`, `canal`, `documento`. La respuesta incluye campos enriquecidos por fila: `montoPagado` (suma de pagos menos vuelto), `saldo` (total_final − montoPagado) y el resumen de quién emitió (`emisores`, `tieneDuplicado`).
 
 ```
-GET /api/ventas?page=1&pageSize=15&estado=pendiente&canal=fisico
+GET /api/ventas?page=1&pageSize=15&estado=pendiente&canal=fisico&documento=sin_numero
 
 Response (200):
 {
@@ -367,12 +367,54 @@ Response (200):
       "montoPagado": "1069810.0000",
       "saldo": "0.0000",
       "fecha": "2026-06-29T...",
-      "creadoEl": "2026-06-29T..."
+      "creadoEl": "2026-06-29T...",
+      "emisores": ["maquina", "sistema"],
+      "tieneDuplicado": false
     }
   ],
   "meta": { "page": 1, "pageSize": 15, "total": 42, "totalPages": 3 }
 }
 ```
+
+**`documento` — quién emitió** (spec `emision-por-venta` § 3.7, [ADR-028](../adr/028-emision-registrada-por-venta.md)).
+Es lo que deja al comercio revisar sus ventas sin documento, sus vouchers sin número y los
+duplicados para el contador. Un valor que no es uno de los seis es un 400, y ausente es "sin
+filtro". Cada valor es un `EXISTS` sobre `venta_documentos`, sobre los documentos **vigentes**
+(`descarte IS NULL` y `eliminado_el IS NULL`): lo que una anulación descartó no cuenta.
+
+| `documento` | La venta tiene algún documento vigente… |
+|---|---|
+| `sistema` | del sistema |
+| `maquina` | de la máquina que **no** es el voucher duplicado |
+| `externo` | hecho por fuera |
+| `sin_numero` | de la máquina o hecho por fuera, sin número |
+| `sin_documento` | `nadie`: un tramo que nadie documentó |
+| `duplicado` | `es_duplicado` (voucher de un abono sobre una deuda ya documentada, E1b) |
+
+- **Las correcciones y las ventas canceladas quedan fuera de todos los valores**
+  (`venta_referencia_id IS NOT NULL` o `estado = 'cancelada'`): las correcciones llevan sus
+  propios documentos y no son una venta que revisar (la fila `nadie` de una devolución interna
+  no es un faltante), y en una cancelada no hay nada pendiente que documentar. Lo de las
+  canceladas es una defensa: hoy no hay forma de que una conserve un documento vigente que el
+  filtro encontraría (los del sistema y los de afuera se descartan al anular, y un `nadie`
+  nace de un pago, que impide anular). Sin filtro, ambas siguen en el listado.
+- **`sin_numero` ignora al sistema y a `nadie`**: el sistema todavía no folia (ADR-010) y una fila
+  `nadie` no lleva número. El voucher duplicado **sí** cuenta si no tiene número: también se
+  completa con `PATCH /documentos/:id`.
+- **`maquina` no incluye al duplicado**: una venta cuyo único documento de la máquina es el
+  voucher duplicado se ve con `sistema` y con `duplicado`, no con `maquina`.
+- **El resumen por fila sale de la misma consulta**, una agregación sobre los documentos
+  vigentes (no una consulta por fila). `emisores` son los emisores de esos documentos, sin
+  repetir y ordenados, **sin contar el voucher duplicado** (así dice lo mismo que el filtro
+  `maquina`); `tieneDuplicado` lo avisa aparte. El resumen muestra solo documentos vigentes
+  (los descartados al anular no figuran), de modo que una venta anulada trae `[]` mientras no
+  conserve ninguno. A diferencia de los filtros, el resumen no mira el estado de la venta. En
+  una corrección son los de su propio documento.
+
+**Frontend (`pages/ventas/index.vue`):** un selector "Documento" junto a los de estado y canal
+(sus opciones y etiquetas viven en `useDocumentosVenta.ts`, derivadas de un solo mapa) y una
+columna "Documento" con un badge por fila: los emisores ("Máquina + Sistema"), en aviso si alguno
+es "Sin documento", más un badge "Duplicado". Las correcciones no llevan badge.
 
 ### GET /api/ventas/:id
 

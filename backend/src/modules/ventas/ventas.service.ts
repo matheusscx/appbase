@@ -44,7 +44,10 @@ import {
   type DocumentoDetalle,
   type ViaCorreccion,
 } from '../venta-documentos/venta-documentos.service';
-import type { ClaseDocumentoMaquina } from '../venta-documentos/entities/venta-documento.entity';
+import type {
+  ClaseDocumentoMaquina,
+  EmisorDocumento,
+} from '../venta-documentos/entities/venta-documento.entity';
 import type { Facturador } from '../tenants/entities/tenant.entity';
 import { VentaPropinaService } from '../propinas/venta-propina.service';
 import { EstrategiaAsignacionPropina } from '../propinas/enums/estrategia-asignacion-propina.enum';
@@ -58,7 +61,7 @@ import {
   resolverUnidadBaseDeItem,
 } from '../../common/utils/cantidad-presentacion.util';
 import type { CreateVentaDto } from './dto/create-venta.dto';
-import type { QueryVentasDto } from './dto/query-ventas.dto';
+import type { FiltroDocumento, QueryVentasDto } from './dto/query-ventas.dto';
 import { Venta, EstadoVenta } from './entities/venta.entity';
 import { VentaDetalle } from './entities/venta-detalle.entity';
 import { VentaDescuento } from './entities/venta-descuento.entity';
@@ -108,6 +111,37 @@ function flagsDeCorreccion(r: {
   };
 }
 
+/**
+ * Los documentos que valen de la venta `v`. Los descartados (la venta se anuló,
+ * E8/E10) y los dados de baja no cuentan: ni para filtrar ni para resumir. Es
+ * el único lugar que lo dice, así el filtro y el resumen no se separan.
+ */
+const DOCUMENTO_VIGENTE = `d.venta_id = v.venta_id AND d.tenant_id = v.tenant_id
+                  AND d.descarte IS NULL AND d.eliminado_el IS NULL`;
+
+/**
+ * Qué pide cada valor de `?documento=` sobre un documento vigente `d`. "Sin
+ * número" mira solo a la máquina y al facturador de afuera: el sistema todavía
+ * no folia (ADR-010) y una fila `nadie` no lleva número. El voucher duplicado
+ * no vuelve a una venta "de la máquina" por sí solo, pero sí cuenta sin número:
+ * también se completa (`PATCH /documentos/:id`). El valor ya pasó por el DTO:
+ * ningún texto del cliente llega al SQL.
+ */
+const CONDICION_DOCUMENTO: Record<FiltroDocumento, string> = {
+  sistema: `d.emisor = 'sistema'`,
+  maquina: `d.emisor = 'maquina' AND NOT d.es_duplicado`,
+  externo: `d.emisor = 'externo'`,
+  sin_numero: `d.emisor IN ('maquina', 'externo') AND NULLIF(btrim(d.numero), '') IS NULL`,
+  sin_documento: `d.emisor = 'nadie'`,
+  duplicado: `d.es_duplicado`,
+};
+
+/** Lo que la agregación de documentos devuelve por fila (`jsonb`, ya parseado por el driver). */
+interface DocumentosResumenRow {
+  emisores: EmisorDocumento[];
+  tieneDuplicado: boolean;
+}
+
 export interface VentaListItem {
   id: string;
   canal: string;
@@ -123,6 +157,15 @@ export interface VentaListItem {
   esCorreccion: boolean;
   /** Corrección que lleva el tipo NC: falso en la devolución interna (tipo nulo). */
   esNotaCredito: boolean;
+  /**
+   * Quién emitió lo vigente de esta fila (sin los descartados), sin repetir y
+   * ordenado. El voucher duplicado de un abono (E1b) no cuenta como emisor:
+   * se avisa aparte en `tieneDuplicado`, así el resumen dice lo mismo que el
+   * filtro `documento=maquina`.
+   */
+  emisores: EmisorDocumento[];
+  /** Tiene un voucher duplicado vigente (la deuda ya estaba documentada). */
+  tieneDuplicado: boolean;
 }
 
 export interface VentasResumen {
@@ -3297,9 +3340,20 @@ export class VentasService {
       total_reembolsado: string;
       tipo_documento_id: string | null;
       venta_referencia_id: string | null;
+      documentos_resumen: DocumentosResumenRow;
     }[] = await this.db.query(
       `SELECT v.venta_id, v.canal, v.estado, v.total_final, v.fecha, v.creado_el,
               v.tipo_documento_id, v.venta_referencia_id,
+              (
+                SELECT jsonb_build_object(
+                         'emisores',
+                         COALESCE(
+                           jsonb_agg(DISTINCT d.emisor) FILTER (WHERE NOT d.es_duplicado),
+                           '[]'::jsonb),
+                         'tieneDuplicado', COALESCE(bool_or(d.es_duplicado), false))
+                FROM venta_documentos d
+                WHERE ${DOCUMENTO_VIGENTE}
+              ) AS documentos_resumen,
               COALESCE((
                 SELECT SUM(pa.monto)
                 FROM pagos p
@@ -3354,6 +3408,21 @@ export class VentasService {
       filters += ` AND v.canal = $${paramIdx++}`;
       params.push(query.canal);
     }
+    if (query.documento) {
+      // Una corrección lleva sus propios documentos (E7) y no es una venta que
+      // revisar: queda fuera de todos los valores. Una venta cancelada tampoco:
+      // no hay nada pendiente que documentar. Esto último es una DEFENSA, hoy
+      // inalcanzable: una fila `nadie` nace solo de un pago con un medio `nadie`
+      // y anular exige que la venta no tenga pagos; los documentos del sistema y
+      // del facturador de afuera ya se descartan al anular. La condición viene
+      // de una tabla cerrada, no del texto del cliente: no lleva parámetro.
+      filters += ` AND v.venta_referencia_id IS NULL
+        AND v.estado <> 'cancelada'
+        AND EXISTS (
+          SELECT 1 FROM venta_documentos d
+          WHERE ${DOCUMENTO_VIGENTE} AND ${CONDICION_DOCUMENTO[query.documento]}
+        )`;
+    }
 
     return { filters, params };
   }
@@ -3369,6 +3438,7 @@ export class VentasService {
     total_reembolsado: string;
     tipo_documento_id: string | null;
     venta_referencia_id: string | null;
+    documentos_resumen: DocumentosResumenRow;
   }): VentaListItem {
     return {
       id: r.venta_id,
@@ -3383,6 +3453,8 @@ export class VentasService {
         .toFixed(4),
       totalReembolsado: new Decimal(r.total_reembolsado).toFixed(4),
       ...flagsDeCorreccion(r),
+      emisores: r.documentos_resumen.emisores,
+      tieneDuplicado: r.documentos_resumen.tieneDuplicado,
     };
   }
 

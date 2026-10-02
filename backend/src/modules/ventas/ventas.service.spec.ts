@@ -3642,6 +3642,10 @@ describe('VentasService', () => {
             total_reembolsado: '1100.0000',
             tipo_documento_id: 'doc-boleta',
             venta_referencia_id: null,
+            documentos_resumen: {
+              emisores: ['maquina', 'sistema'],
+              tieneDuplicado: true,
+            },
           },
           {
             venta_id: 'nc-1',
@@ -3654,6 +3658,7 @@ describe('VentasService', () => {
             total_reembolsado: '0',
             tipo_documento_id: TIPO_DOCUMENTO_NC_ID,
             venta_referencia_id: 'v-1',
+            documentos_resumen: { emisores: [], tieneDuplicado: false },
           },
           {
             // La devolución interna: corrige una venta y no lleva tipo.
@@ -3667,6 +3672,7 @@ describe('VentasService', () => {
             total_reembolsado: '0',
             tipo_documento_id: null,
             venta_referencia_id: 'v-1',
+            documentos_resumen: { emisores: [], tieneDuplicado: false },
           },
         ]);
       });
@@ -3687,6 +3693,8 @@ describe('VentasService', () => {
           totalReembolsado: '1100.0000',
           esCorreccion: false,
           esNotaCredito: false,
+          emisores: ['maquina', 'sistema'],
+          tieneDuplicado: true,
         }),
       );
       expect(res.data[1]).toEqual(

@@ -178,6 +178,8 @@ describe('ventas/index — el badge de corrección sale del flag del backend', (
     totalReembolsado: '0.0000',
     esCorreccion: false,
     esNotaCredito: false,
+    emisores: [],
+    tieneDuplicado: false,
     ...extra,
   })
 
@@ -199,6 +201,81 @@ describe('ventas/index — el badge de corrección sale del flag del backend', (
     expect(nota).not.toContain('Dev. interna')
     expect(interna).toContain('Dev. interna')
     expect(interna).not.toContain('NC')
+  })
+})
+
+describe('ventas/index — quién emitió: filtro "Documento" y badge por fila', () => {
+  const fila = (id: string, extra: Record<string, unknown>) => ({
+    id,
+    canal: 'fisico',
+    estado: 'pagada',
+    totalFinal: '10000.0000',
+    montoPagado: '10000.0000',
+    saldo: '0.0000',
+    fecha: '2026-10-02T12:00:00.000Z',
+    creadoEl: '2026-10-02T12:00:00.000Z',
+    totalReembolsado: '0.0000',
+    esCorreccion: false,
+    esNotaCredito: false,
+    emisores: [],
+    tieneDuplicado: false,
+    ...extra,
+  })
+  const esperar = () => new Promise(r => setTimeout(r, 20))
+  const urlsListado = () => llamadas.filter(u => /\/ventas\?/.test(u))
+
+  it('el selector "Documento" ofrece los seis valores que el backend acepta', async () => {
+    const wrapper = await montar()
+    const selects = wrapper.findAllComponents({ name: 'USelect' })
+    const items = selects.map(s => s.props('items') as { label: string, value: string }[])
+    const documento = items.find(i => i.some(o => o.value === 'sin_numero'))!
+    expect(documento.map(o => o.value)).toEqual(['sistema', 'maquina', 'externo', 'sin_numero', 'sin_documento', 'duplicado'])
+  })
+
+  it('elegir un valor lo manda como ?documento= y "Limpiar filtros" lo saca', async () => {
+    const wrapper = await montar()
+    expect(urlsListado().every(u => !u.includes('documento='))).toBe(true)
+
+    const select = wrapper.findAllComponents({ name: 'USelect' })
+      .find(s => (s.props('items') as { value: string }[]).some(o => o.value === 'sin_numero'))!
+    select.vm.$emit('update:modelValue', 'sin_numero')
+    await esperar()
+    expect(urlsListado().at(-1)).toContain('documento=sin_numero')
+
+    const limpiar = wrapper.findAll('button').find(b => b.text().includes('Limpiar filtros'))!
+    await limpiar.trigger('click')
+    await esperar()
+    expect(urlsListado().at(-1)).not.toContain('documento=')
+  })
+
+  it('cada fila dice quién emitió; "Sin documento" va como aviso y el duplicado aparte', async () => {
+    filasListado = [
+      fila('mixta', { emisores: ['maquina', 'sistema'] }),
+      fila('nadie', { emisores: ['nadie'] }),
+      fila('dup', { emisores: ['sistema'], tieneDuplicado: true }),
+      fila('anulada', { emisores: [] }),
+    ]
+    const wrapper = await montar()
+    const [mixta, nadie, dup, anulada] = wrapper.findAll('tbody tr').map(tr => tr.text())
+
+    expect(mixta).toContain('Máquina + Sistema')
+    expect(mixta).not.toContain('Duplicado')
+    expect(nadie).toContain('Sin documento')
+    expect(dup).toContain('Sistema')
+    expect(dup).toContain('Duplicado')
+    expect(anulada).not.toMatch(/Sistema|Máquina|Sin documento|Duplicado/)
+  })
+
+  it('una corrección no lleva badge de documento: su fila "nadie" es la devolución interna, no un faltante', async () => {
+    filasListado = [
+      fila('interna', { esCorreccion: true, esNotaCredito: false, emisores: ['nadie'], tieneDuplicado: true }),
+    ]
+    const wrapper = await montar()
+    const interna = wrapper.find('tbody tr').text()
+
+    expect(interna).toContain('Dev. interna')
+    expect(interna).not.toContain('Sin documento')
+    expect(interna).not.toContain('Duplicado')
   })
 })
 

@@ -262,3 +262,45 @@ export function cuerpoDevolucion(o: OpcionDevolucion): { pagoId: string } | { si
   if (!o.pagoId) throw new Error('Una opción de devolución sin pago ni "no vuelve plata"')
   return { pagoId: o.pagoId }
 }
+
+/**
+ * Los valores de `?documento=` de `GET /ventas` (spec § 3.7). Espejo de
+ * `FILTROS_DOCUMENTO` del backend, que rechaza con 400 cualquier otro.
+ */
+export type FiltroDocumento = 'sistema' | 'maquina' | 'externo' | 'sin_numero' | 'sin_documento' | 'duplicado'
+
+// Un `Record` completo: sumar un valor a la unión no compila hasta darle etiqueta,
+// y las opciones del selector se derivan de acá, no se repiten a mano.
+const ETIQUETA_FILTRO_DOCUMENTO: Record<FiltroDocumento, string> = {
+  sistema: 'Del sistema',
+  maquina: 'De la máquina',
+  externo: 'Hecho por fuera',
+  sin_numero: 'Sin número',
+  sin_documento: 'Sin documento',
+  duplicado: 'Voucher duplicado',
+}
+
+/** Las opciones del filtro "Documento" del listado de ventas. */
+export const FILTRO_DOCUMENTO_ITEMS: { label: string, value: FiltroDocumento }[] = (
+  Object.entries(ETIQUETA_FILTRO_DOCUMENTO) as [FiltroDocumento, string][]
+).map(([value, label]) => ({ label, value }))
+
+const ETIQUETA_EMISOR_CORTA: Record<EmisorDocumento, string> = {
+  sistema: 'Sistema',
+  maquina: 'Máquina',
+  externo: 'Por fuera',
+  nadie: 'Sin documento',
+}
+
+/**
+ * El resumen de una fila del listado: quién emitió lo vigente. `null` si no hay
+ * nada que decir (una venta anulada no deja documentos vigentes). "Nadie"
+ * es lo que el comercio revisa, así que se pinta como aviso.
+ */
+export function resumenEmisores(emisores: string[]): { label: string, color: 'neutral' | 'warning' } | null {
+  if (emisores.length === 0) return null
+  const label = emisores
+    .map(e => (ETIQUETA_EMISOR_CORTA as Record<string, string | undefined>)[e] ?? e)
+    .join(' + ')
+  return { label, color: emisores.includes('nadie') ? 'warning' : 'neutral' }
+}

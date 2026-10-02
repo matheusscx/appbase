@@ -2397,6 +2397,317 @@ describe('Documentos de la venta (e2e)', () => {
     });
   });
 
+  describe('GET /ventas?documento=: quién emitió (E1, E1b, E9)', () => {
+    // Una venta de cada caso, creadas una vez en `beforeAll`: los filtros se
+    // leen sobre el mismo conjunto, y cada uno afirma lo que trae Y lo que deja
+    // afuera. El listado es del tenant entero y otras suites venden en él, así
+    // que se afirma sobre ESTAS ventas (inclusión y exclusión), no sobre el total.
+    const v: Record<string, string> = {};
+
+    interface FilaLista {
+      id: string;
+      esCorreccion: boolean;
+      emisores: string[];
+      tieneDuplicado: boolean;
+    }
+    const listar = async (query = ''): Promise<FilaLista[]> => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/ventas?pageSize=100${query}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      return (res.body as { data: FilaLista[] }).data;
+    };
+    /** De las ventas de este describe, cuáles trae el filtro. */
+    const traeDeLasMias = async (documento: string): Promise<string[]> => {
+      const propias = new Set(Object.values(v));
+      return (await listar(`&documento=${documento}`))
+        .map((f) => f.id)
+        .filter((id) => propias.has(id))
+        .map((id) => Object.keys(v).find((k) => v[k] === id)!)
+        .sort();
+    };
+    const corregir = async (ventaId: string, metodoPagoId: string) => {
+      const res = await request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          monto: '10000',
+          comentario: 'devolución parcial',
+          devolucion: { pagoId: await pagoDe(ventaId, metodoPagoId) },
+        });
+      expect(res.status).toBe(201);
+      return (res.body as { id: string }).id;
+    };
+    const anularConMotivo = (ventaId: string, extra = {}) =>
+      request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/anular`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ motivo: 'Se ingresó por error en la caja', ...extra });
+
+    beforeAll(async () => {
+      await patchFacturador('sistema');
+      await patchMetodo(DEBITO_ID, 'maquina');
+      await patchMetodo(CREDITO_ID, 'maquina');
+
+      v.sistema = (
+        await vender({
+          lineas: lineas100k(),
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100000' }],
+        })
+      ).id;
+      v.maquinaConNumero = (
+        await vender({
+          lineas: lineas100k(),
+          pagos: [
+            {
+              metodoPagoId: DEBITO_ID,
+              monto: '100000',
+              numeroDocumento: '778899',
+              claseDocumento: 'voucher',
+            },
+          ],
+        })
+      ).id;
+      v.maquinaSinNumero = (
+        await vender({
+          lineas: lineas100k(),
+          pagos: [{ metodoPagoId: DEBITO_ID, monto: '100000' }],
+        })
+      ).id;
+      // Boleta del sistema por 60.000 + voucher con número por 40.000.
+      v.mixto = (
+        await vender({
+          lineas: lineas100k(),
+          pagos: [
+            { metodoPagoId: EFECTIVO_ID, monto: '60000' },
+            {
+              metodoPagoId: DEBITO_ID,
+              monto: '40000',
+              numeroDocumento: '445566',
+            },
+          ],
+        })
+      ).id;
+      // La deuda ya la documentó la boleta del sistema: la tarjeta de la máquina
+      // que la paga después deja solo el voucher duplicado (E1b).
+      v.duplicado = (
+        await vender({
+          lineas: lineas100k(),
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '40000' }],
+        })
+      ).id;
+      const abono = await request(app.getHttpServer())
+        .post('/api/pagos')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          ventaId: v.duplicado,
+          pagos: [{ metodoPagoId: CREDITO_ID, monto: '60000' }],
+        });
+      expect(abono.status).toBe(201);
+      // Su corrección (por el pago de la máquina) lleva un documento propio que,
+      // sin la exclusión de las correcciones, se colaría en `maquina`/`duplicado`.
+      v.correccionDeDuplicado = await corregir(v.duplicado, CREDITO_ID);
+
+      await patchMetodo(DEBITO_ID, 'nadie');
+      v.nadie = (
+        await vender({
+          lineas: lineas100k(),
+          pagos: [{ metodoPagoId: DEBITO_ID, monto: '100000' }],
+        })
+      ).id;
+      // La devolución de un pago de "nadie" es la interna: su fila también es `nadie`.
+      v.correccionDeNadie = await corregir(v.nadie, DEBITO_ID);
+      await patchMetodo(DEBITO_ID, 'maquina');
+
+      v.correccionDeSistema = await corregir(v.sistema, EFECTIVO_ID);
+      v.correccionDeMaquina = await corregir(v.maquinaSinNumero, DEBITO_ID);
+
+      await patchFacturador('externo');
+      v.externo = (await vender({ lineas: lineas100k() })).id;
+      // Una factura pagada con tarjeta tiene un solo documento, el externo (E2):
+      // se corrige por ese pago, y la corrección deja su propio documento externo,
+      // sin número, que sin la exclusión de las correcciones se colaría en
+      // `externo` y `sin_numero`.
+      v.externoConNumero = (
+        await vender({
+          tipoDocumentoId: FACTURA_ID,
+          lineas: [{ itemId: itemAfecto100, cantidad: '1' }],
+          pagos: [{ metodoPagoId: DEBITO_ID, monto: '119000' }],
+        })
+      ).id;
+      const numerar = await request(app.getHttpServer())
+        .patch(
+          `/api/ventas/${v.externoConNumero}/documentos/${await docIdDe(v.externoConNumero, 'externo')}`,
+        )
+        .set('Authorization', `Bearer ${token}`)
+        .send({ numero: 'F-9001' });
+      expect(numerar.status).toBe(200);
+      v.correccionDeExterno = await corregir(v.externoConNumero, DEBITO_ID);
+      // Anulada diciendo que no estaba hecho: su documento externo queda descartado.
+      v.externoDescartado = (await vender({ lineas: lineas100k() })).id;
+      expect(
+        (await anularConMotivo(v.externoDescartado, { externoHecho: false }))
+          .status,
+      ).toBe(201);
+
+      await patchFacturador('sistema');
+      // Su boleta del sistema queda descartada.
+      v.sistemaDescartado = (await vender({ lineas: lineas100k() })).id;
+      expect((await anularConMotivo(v.sistemaDescartado)).status).toBe(201);
+
+      // Una cancelada con un `nadie` vigente. Inalcanzable por la API: la fila
+      // `nadie` nace de un pago con un medio `nadie`, y anular exige que no haya
+      // pagos. Se arma por SQL para fijar que el filtro es una defensa real y no
+      // un efecto de que hoy nadie llegue ahí.
+      v.canceladaConNadie = (await vender({ lineas: lineas100k() })).id;
+      expect((await anularConMotivo(v.canceladaConNadie)).status).toBe(201);
+      await ds.query(
+        `INSERT INTO venta_documentos (tenant_id, venta_id, emisor, monto)
+         VALUES ($1, $2, 'nadie', 100000)`,
+        [TENANT_ID, v.canceladaConNadie],
+      );
+
+      // Un documento dado de baja (soft delete) no cuenta. Ningún camino de la
+      // API los da de baja hoy: el dato se arma por SQL, igual que en "lo que ya
+      // emitió alguien bloquea".
+      v.maquinaDadaDeBaja = (
+        await vender({
+          lineas: lineas100k(),
+          pagos: [{ metodoPagoId: DEBITO_ID, monto: '100000' }],
+        })
+      ).id;
+      await ds.query(
+        `UPDATE venta_documentos SET eliminado_el = now() WHERE venta_id = $1`,
+        [v.maquinaDadaDeBaja],
+      );
+    }, 120000);
+
+    it.each([
+      ['sistema', ['duplicado', 'mixto', 'sistema']],
+      ['maquina', ['maquinaConNumero', 'maquinaSinNumero', 'mixto']],
+      ['externo', ['externo', 'externoConNumero']],
+      // Todo lo que tiene un documento de la máquina o por fuera sin número, el
+      // voucher duplicado incluido (también es de la máquina y se completa igual).
+      ['sin_numero', ['duplicado', 'externo', 'maquinaSinNumero']],
+      ['sin_documento', ['nadie']],
+      ['duplicado', ['duplicado']],
+    ])(
+      'documento=%s trae exactamente sus ventas, sin las correcciones, canceladas, descartes ni bajas',
+      async (documento, esperadas) => {
+        expect(await traeDeLasMias(documento)).toEqual([...esperadas].sort());
+      },
+    );
+
+    it('meta.total cuenta lo filtrado: el mismo conjunto que trae la página', async () => {
+      // Pocas ventas del tenant tienen un duplicado: cabe en una página, así
+      // que el total tiene que ser exactamente lo que trae.
+      const res = await request(app.getHttpServer())
+        .get('/api/ventas?pageSize=100&documento=duplicado')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const body = res.body as {
+        data: FilaLista[];
+        meta: { total: number };
+      };
+      expect(body.meta.total).toBeGreaterThanOrEqual(1);
+      expect(body.meta.total).toBeLessThanOrEqual(100);
+      expect(body.data).toHaveLength(body.meta.total);
+      expect(body.data.every((f) => f.tieneDuplicado)).toBe(true);
+      expect(body.data.map((f) => f.id)).toContain(v.duplicado);
+    });
+
+    it('el voucher duplicado no vuelve "de la máquina" a una venta que solo lo tiene a él', async () => {
+      const ids = (await listar('&documento=maquina')).map((f) => f.id);
+      expect(ids).not.toContain(v.duplicado);
+    });
+
+    it('sin el filtro vienen todas, también las correcciones y las anuladas', async () => {
+      const ids = (await listar()).map((f) => f.id);
+      for (const id of Object.values(v)) expect(ids).toContain(id);
+    });
+
+    it('un valor que no es ninguno de los seis: 400', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/ventas?documento=otro')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(400);
+    });
+
+    it('un documento vacío es un 400, no "sin filtro"', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/ventas?documento=')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(400);
+    });
+
+    it('se suma al filtro de estado: las ventas de la máquina son pagadas, ninguna pendiente', async () => {
+      const pagadas = (await listar('&documento=maquina&estado=pagada')).map(
+        (f) => f.id,
+      );
+      expect(pagadas).toContain(v.maquinaSinNumero);
+      const pendientes = (
+        await listar('&documento=maquina&estado=pendiente')
+      ).map((f) => f.id);
+      expect(pendientes).not.toContain(v.maquinaSinNumero);
+    });
+
+    it('cada fila trae su resumen: los emisores de lo vigente, sin duplicado, y si tiene un duplicado', async () => {
+      const filas = new Map((await listar()).map((f) => [f.id, f]));
+      const resumen = (clave: string) => {
+        const f = filas.get(v[clave])!;
+        return { emisores: f.emisores, tieneDuplicado: f.tieneDuplicado };
+      };
+      expect(resumen('sistema')).toEqual({
+        emisores: ['sistema'],
+        tieneDuplicado: false,
+      });
+      expect(resumen('maquinaConNumero')).toEqual({
+        emisores: ['maquina'],
+        tieneDuplicado: false,
+      });
+      expect(resumen('mixto')).toEqual({
+        emisores: ['maquina', 'sistema'],
+        tieneDuplicado: false,
+      });
+      // El voucher duplicado no cuenta como emisor: se avisa aparte.
+      expect(resumen('duplicado')).toEqual({
+        emisores: ['sistema'],
+        tieneDuplicado: true,
+      });
+      expect(resumen('externo')).toEqual({
+        emisores: ['externo'],
+        tieneDuplicado: false,
+      });
+      expect(resumen('nadie')).toEqual({
+        emisores: ['nadie'],
+        tieneDuplicado: false,
+      });
+      // Lo descartado y lo dado de baja no figura.
+      expect(resumen('externoDescartado')).toEqual({
+        emisores: [],
+        tieneDuplicado: false,
+      });
+      expect(resumen('sistemaDescartado')).toEqual({
+        emisores: [],
+        tieneDuplicado: false,
+      });
+      expect(resumen('maquinaDadaDeBaja')).toEqual({
+        emisores: [],
+        tieneDuplicado: false,
+      });
+      // La corrección lleva su propio documento y su propio resumen.
+      expect(filas.get(v.correccionDeSistema)).toMatchObject({
+        esCorreccion: true,
+        emisores: ['sistema'],
+      });
+      expect(filas.get(v.correccionDeNadie)).toMatchObject({
+        esCorreccion: true,
+        emisores: ['nadie'],
+      });
+    });
+  });
+
   describe('el esquema', () => {
     it('las columnas cerradas chocan con su CHECK', async () => {
       const filas: { documento_id: string }[] = await ds.query(
