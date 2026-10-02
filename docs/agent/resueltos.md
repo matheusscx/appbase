@@ -24,6 +24,112 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 ---
 
 
+## Pagos resta lo devuelto con la misma cuenta que el inicio: "cobrado · propinas · devuelto → neto" (cerrada 2026-10-02)
+
+Sale de [`pendientes.md`](pendientes.md) § 3.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **En Pagos, "Total cobrado" no resta lo devuelto, y el inicio sí: el mismo día puede mostrar
+  dos cobrados distintos** (backend + frontend; anotado 2026-10-02 por la tarea 15 del frente de
+  emisión, la orquestadora lo mandó acá). `GET /pagos/resumen` (`pagos.service.ts`, `resumen`) suma
+  `Σ(monto − vuelto)` de los pagos y no resta ninguna devolución: ni el efectivo que salió de la caja,
+  ni la reversa en la máquina, ni el `REFUND` de pasarela. El "Cobrado" del inicio sí las resta desde
+  el 2026-10-02 (decisión del owner en el frente de emisión). Escena: un café cobra $100.000 con débito
+  y devuelve $40.000 en la máquina. El inicio dice "Cobrado $60.000"; Pagos dice "Total cobrado
+  $100.000" y "Cobrado hoy $100.000". No es nuevo: Pagos siempre midió los pagos registrados.
+
+  **La pregunta, en lenguaje de local:** en Pagos, ¿"Total cobrado" muestra lo que entró, o lo que
+  entró menos lo devuelto, como el inicio?
+  - **Lo que entró** (como hoy): Pagos es la lista de cobros, y cada devolución se ve en su nota. Costo:
+    las dos pantallas siguen mostrando números distintos para el mismo día, y hay que explicarlo en
+    la pantalla (p.ej. "sin restar devoluciones").
+  - **Lo que entró menos lo devuelto**: Pagos cuadra con el inicio. Costo: el resumen de Pagos pasa a
+    restar las tres devoluciones con la misma regla que el inicio (sin contarlas dos veces), y deja de
+    cuadrar con la suma de las filas de la lista, que son cobros.
+
+  **✅ Contestada por el owner (AskUserQuestion, 2026-10-02): el desglose.** Pagos muestra
+  "Cobrado $100.000 · devuelto −$40.000 → $60.000": cuadra con el inicio y con la suma de las filas,
+  que son cobros. El devuelto usa **la misma cuenta** que el "Cobrado" del inicio (efectivo de caja,
+  reversa en la máquina y `REFUND`, sin contar dos veces): se reusa, no se copia. Se descartaron "lo
+  que entró" (dos números distintos el mismo día) y "solo el neto" (deja de cuadrar con la lista).
+
+### Qué se hizo
+
+**La cuenta del devuelto se extrajo, no se copió.** Vive en `ventas/devuelto-venta.ts`
+(`devueltoSql`): un ítem de `FROM` de una fila con los tres bloques que tenía el inicio (efectivo
+de caja de una corrección, reversa en la máquina o el banco, `REFUND` aprobado de una orden con
+venta) y una columna `devuelto_<clave>` por cada ventana que pide quien lo incluye. El inicio
+(`resumen-negocio.service.ts`) pasa sus ventanas de hoy y de la semana pasada; Pagos
+(`pagos.service.ts`, `resumen`), la histórica y el "hoy" del día del negocio. Los tres bloques se
+suman en Postgres (`numeric`, exacto) y cada lector cuantiza con `toFixed`. El e2e del inicio pasó
+igual antes y después de la extracción.
+
+**Lo que se midió antes de construir.** El resumen de Pagos no toma los filtros de la lista
+(fechas, caja, método): son dos ventanas fijas, así que el devuelto entra con esas mismas
+ventanas, y el "hoy" de los dos resúmenes es el mismo (`inicioDiaNegocioSql`). Lo que no cerraba
+y se mandó a la orquestadora:
+
+- **El alcance del cajero** (sin `Cajas:Leer`). El inicio no acota; Pagos acota a "pagos de mis
+  cajas + ventas online", y el código no decía de quién es una devolución: la salida de efectivo
+  sale de la caja de quien hace la NC, y la NC copia la caja de la venta original. **Decidido por
+  la orquestadora (2026-10-02): una devolución es del pago que reversa** (`devolucion_pago_id`,
+  juzgado con el mismo "lo mío" del pago). Una corrección vieja sin `devolucion_pago_id` se juzga
+  por la venta que corrige y su caja, y el `REFUND`, que no tiene pago, entra solo por la rama
+  online. El predicado "lo mío" de `filtroDeMisCajas` se sacó a `deMisCajasSql` y lo usan las
+  filas y el devuelto, así que no hay dos reglas; `devueltoSql` lo recibe como parámetro
+  (`alcance`) y sin él es todo el tenant.
+- **La propina.** Pagos suma `monto − vuelto` (con propina) y el inicio `pago_aplicaciones` con
+  `tipo = 'venta'` (sin propina): con propinas, cuadrar con las filas y con el inicio a la vez
+  no era posible. **Decidido por la orquestadora: la propina va como línea propia**, "Cobrado
+  $105.000 · propinas −$5.000 · devuelto −$40.000 → $60.000". `GET /pagos/resumen` suma
+  `montoPropinas`/`propinasHoy` (la `pago_aplicaciones` de `tipo = 'propina'` de esos mismos
+  pagos), `montoDevuelto`/`devueltoHoy` y `montoNeto`/`netoHoy` (`cobrado − propinas − devuelto`,
+  con Decimal). `montoCobrado`/`montoHoy` no cambiaron: siguen siendo la suma de las filas.
+
+La pantalla (`pages/pagos/index.vue`) muestra el neto grande en "Total cobrado" y en "Cobrado
+hoy", y debajo, solo si hay algo que restar, "cobrado $X · propinas −$Y · devuelto −$Z" con cada
+parte solo si no es cero. Documentado en `docs/features/pagos.md` y `dashboard-inicio.md`.
+
+### Qué lo fija
+
+- E2e en `resumen-negocio.e2e-spec.ts` (con todo el tenant): cada escena lee los dos resúmenes
+  antes y después y afirma que el devuelto de Pagos se mueve lo mismo que el del inicio, y que
+  el neto de Pagos se mueve lo mismo que el "Cobrado" del inicio. Escenas: el café (débito
+  $100.000, devuelve $40.000 en la máquina → neto $60.000), la misma con propina ($105.000 ·
+  propinas −$5.000 · devuelto −$40.000 → $60.000), efectivo (con un retiro de caja ajeno que no
+  entra) y `REFUND` con la NC del webhook (resta una vez).
+- E2e en `visibilidad-ventas-pagos.e2e-spec.ts` (el cajero del seed contra el admin): la
+  devolución de un pago del cajero le resta a él aunque la plata salga de la caja del admin; la
+  de un pago de otra caja no; **la devolución sigue al pago y no a la venta**: el admin cobra
+  desde su caja una venta del cajero y la devuelve, y el devuelto es del admin (la NC copia la
+  caja de la venta, así que es la única escena donde las dos reglas dicen distinto; la
+  agregó la revisión independiente, que vio que las otras no las separaban); una corrección
+  vieja (`devolucion_pago_id` y `devolucion_via` en NULL por SQL, inalcanzable por la API) se
+  juzga por la caja de su venta; un `REFUND` de una venta online le resta al cajero y el de
+  una física no.
+- Unitarios: `devuelto-venta.spec.ts` (la forma de cada bloque, las ventanas y el alcance),
+  `pagos.service.spec.ts` (neto = cobrado − propinas − devuelto, cuantizado) y
+  `resumen-negocio.service.spec.ts`; `pages/pagos/index.nuxt.spec.ts` (qué partes de la línea se
+  muestran).
+- Mutantes, cada uno sobre base fresca con los dos e2e: el devuelto de Pagos en cero (lo de antes)
+  rompe las 4 escenas del inicio; sin alcance rompe "otra caja", "la devolución sigue al pago" y
+  "REFUND física"; sin la rama de la corrección vieja rompe solo la suya; forzar siempre esa rama
+  (`WHEN FALSE`, juzgar por la venta y no por el pago) rompe solo "la devolución sigue al pago";
+  la propina sin restar rompe solo la escena con propina. En la pantalla, mostrar el cobrado en
+  vez del neto rompe el café.
+- `api-security-reviewer` LIMPIO; por su sugerencia el join de propinas filtra también
+  `pa.tenant_id = p.tenant_id` (defensa: el `pago_id` ya venía del tenant).
+- Gate. Primero sobre el árbol con este frente y el de "Sin número": `test:e2e` completo en base
+  fresca, 1562 pasan y 6 saltados preexistentes; vitest 1818/1818; Playwright 75/75 con el stack
+  propio; build, `typecheck:ratchet` y `design:check` limpios. Después de la escena "la devolución
+  sigue al pago" y del `pa.tenant_id` (solo backend), otra vez en base fresca: `test:e2e`
+  completo, 1563 pasan y 6 saltados, sin re-siembra; unit backend 3499/3499; lint y typecheck
+  limpios.
+
+---
+
+
 ## "Sin número" trae también las notas de crédito sin número (cerrada 2026-10-02)
 
 Sale de [`pendientes.md`](pendientes.md) § 3.
@@ -815,7 +921,8 @@ Lo que **no** cierra, y sigue en [`pendientes.md`](pendientes.md): enviar de ver
 facturador externo (§ 6, "Integración con un facturador externo"); la Factura sin receptor que el
 servidor todavía acepta (§ 1); el peso de IVA que se corre al partir una venta en varios
 documentos (§ 4); el filtro "Sin número", que no encontraba las notas de la máquina o hechas por
-fuera que esperan su número (cerrado el 2026-10-02, arriba); el "Total cobrado" de Pagos, que no resta devoluciones (§ 4); y
+fuera que esperan su número (cerrado el 2026-10-02, arriba); el "Total cobrado" de Pagos, que no
+restaba devoluciones (cerrado el 2026-10-02, arriba); y
 el `REFUND` cuyo vínculo con su corrección falla, que queda contado dos veces (§ 2).
 
 ## El Playwright de compras filtra el listado por su proveedor (cerrada 2026-10-02)

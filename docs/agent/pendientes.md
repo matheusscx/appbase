@@ -191,30 +191,6 @@ El owner ya contestó lo que había que contestar. **No son mecánicas** —tien
 adentro, y alguna quedó a medias a propósito— pero nadie está esperando una respuesta para
 empezarlas.
 
-- [ ] **En Pagos, "Total cobrado" no resta lo devuelto, y el inicio sí: el mismo día puede mostrar
-  dos cobrados distintos** (backend + frontend; anotado 2026-10-02 por la tarea 15 del frente de
-  emisión, la orquestadora lo mandó acá). `GET /pagos/resumen` (`pagos.service.ts`, `resumen`) suma
-  `Σ(monto − vuelto)` de los pagos y no resta ninguna devolución: ni el efectivo que salió de la caja,
-  ni la reversa en la máquina, ni el `REFUND` de pasarela. El "Cobrado" del inicio sí las resta desde
-  el 2026-10-02 (decisión del owner en el frente de emisión). Escena: un café cobra $100.000 con débito
-  y devuelve $40.000 en la máquina. El inicio dice "Cobrado $60.000"; Pagos dice "Total cobrado
-  $100.000" y "Cobrado hoy $100.000". No es nuevo: Pagos siempre midió los pagos registrados.
-
-  **La pregunta, en lenguaje de local:** en Pagos, ¿"Total cobrado" muestra lo que entró, o lo que
-  entró menos lo devuelto, como el inicio?
-  - **Lo que entró** (como hoy): Pagos es la lista de cobros, y cada devolución se ve en su nota. Costo:
-    las dos pantallas siguen mostrando números distintos para el mismo día, y hay que explicarlo en
-    la pantalla (p.ej. "sin restar devoluciones").
-  - **Lo que entró menos lo devuelto**: Pagos cuadra con el inicio. Costo: el resumen de Pagos pasa a
-    restar las tres devoluciones con la misma regla que el inicio (sin contarlas dos veces), y deja de
-    cuadrar con la suma de las filas de la lista, que son cobros.
-
-  **✅ Contestada por el owner (AskUserQuestion, 2026-10-02): el desglose.** Pagos muestra
-  "Cobrado $100.000 · devuelto −$40.000 → $60.000": cuadra con el inicio y con la suma de las filas,
-  que son cobros. El devuelto usa **la misma cuenta** que el "Cobrado" del inicio (efectivo de caja,
-  reversa en la máquina y `REFUND`, sin contar dos veces): se reusa, no se copia. Se descartaron "lo
-  que entró" (dos números distintos el mismo día) y "solo el neto" (deja de cuadrar con la lista).
-
 ⚠️ **Esta sección no es una tanda que se "termine", y leerla como tal hace tomar malas
 decisiones.** **Varias de sus entradas son features de producto con su propia spec** —entre ellas el
 motor de promociones, la NC como documento, la UF como moneda oficial, `cashRounding`, el

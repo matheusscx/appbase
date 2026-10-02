@@ -10,6 +10,8 @@ import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { TokensAccesoService } from '../src/modules/auth/tokens-acceso.service';
 import { TipoTokenAcceso } from '../src/modules/auth/entities/token-acceso.entity';
+import { PasarelaOrden } from '../src/modules/pasarela/entities/pasarela-orden.entity';
+import { TransaccionesService } from '../src/modules/pasarela/services/transacciones.service';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
@@ -469,6 +471,226 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
           .toString(),
       ).toBe('-2323');
       expect(despues.totalBruto).toBe(antes.totalBruto);
+    });
+  });
+
+  /**
+   * Lo devuelto del resumen de Pagos tiene el mismo alcance que sus filas: una
+   * devolución es **del pago que reversa** (decidido por la orquestadora,
+   * 2026-10-02), así el "cobrado − devuelto" del cajero son siempre sus filas.
+   * Las notas las emite el admin, en efectivo y desde SU caja: la plata sale de
+   * la caja del admin, pero la devolución es del pago que reversa.
+   */
+  describe('lo devuelto del resumen de Pagos respeta el alcance por caja', () => {
+    interface ResumenPagos {
+      montoDevuelto: string;
+      devueltoHoy: string;
+    }
+    const devueltoDe = async (token: string): Promise<string> => {
+      const res = await request(app.getHttpServer())
+        .get('/api/pagos/resumen')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const r = res.body as ResumenPagos;
+      // Todo pasa hoy: el histórico y el de hoy se mueven igual.
+      return `${r.montoDevuelto}|${r.devueltoHoy}`;
+    };
+    const movio = (antes: string, despues: string) => {
+      const [ta, ha] = antes.split('|');
+      const [td, hd] = despues.split('|');
+      const total = new Decimal(td).minus(ta).toString();
+      expect(new Decimal(hd).minus(ha).toString()).toBe(total);
+      return total;
+    };
+    const devolverEnEfectivo = async (ventaId: string, monto: string) => {
+      const pagos: { pago_id: string }[] = await app
+        .get(DataSource)
+        .query(
+          `SELECT pago_id FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL`,
+          [ventaId],
+        );
+      expect(pagos).toHaveLength(1);
+      const res = await request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ monto, devolucion: { pagoId: pagos[0].pago_id } });
+      expect(res.status).toBe(201);
+      return (res.body as { id: string }).id;
+    };
+    /**
+     * Un REFUND aprobado, armado con las piezas de la app como en
+     * `resumen-negocio.e2e-spec.ts`: la pasarela demo no reembolsa.
+     */
+    const reembolsoAprobado = async (ventaId: string, monto: string) => {
+      const configs = await request(app.getHttpServer())
+        .get('/api/pasarela/admin/config')
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(configs.status).toBe(200);
+      const demo = (
+        configs.body as { codigo: string; tenantPasarelaId: string }[]
+      ).find((c) => c.codigo === 'demo')!;
+      const orden = await app
+        .get(DataSource)
+        .getRepository(PasarelaOrden)
+        .save({
+          tenantId: PARIS_TENANT_ID,
+          ventaId,
+          codigoOrden: `e2e-${randomUUID().slice(0, 20)}`,
+          descripcion: 'Orden e2e alcance del devuelto',
+          monto,
+          moneda: 'CLP',
+          estado: 'conciliada',
+          origen: 'interno',
+        });
+      await app.get(TransaccionesService).registrar({
+        tenantId: PARIS_TENANT_ID,
+        ordenId: orden.ordenId,
+        tenantPasarelaId: demo.tenantPasarelaId,
+        tipo: 'REFUND',
+        estado: 'aprobada',
+        monto,
+        moneda: 'CLP',
+        codigoOrden: orden.codigoOrden,
+      });
+    };
+
+    let notaSobreLaDelCajero: string;
+    let notaSobreLaDelAdmin: string;
+
+    it('la devolución de un pago del cajero le resta a él, aunque la plata salga de la caja del admin', async () => {
+      const antes = await devueltoDe(tokenCajero);
+      const antesAdmin = await devueltoDe(tokenAdmin);
+
+      notaSobreLaDelCajero = await devolverEnEfectivo(ventaDelCajeroId, '1111');
+      const despues = await devueltoDe(tokenCajero);
+      const despuesAdmin = await devueltoDe(tokenAdmin);
+
+      expect(movio(antes, despues)).toBe('1111');
+      expect(movio(antesAdmin, despuesAdmin)).toBe('1111');
+    });
+
+    it('la devolución de un pago de otra caja no le resta al cajero', async () => {
+      const antes = await devueltoDe(tokenCajero);
+      const antesAdmin = await devueltoDe(tokenAdmin);
+
+      notaSobreLaDelAdmin = await devolverEnEfectivo(ventaDelAdminId, '1212');
+      const despues = await devueltoDe(tokenCajero);
+      const despuesAdmin = await devueltoDe(tokenAdmin);
+
+      expect(movio(antes, despues)).toBe('0');
+      // Control: la devolución existe y el admin (ve todas) la cuenta.
+      expect(movio(antesAdmin, despuesAdmin)).toBe('1212');
+    });
+
+    it('la devolución sigue al pago, no a la venta: el abono que el admin cobró en su caja es del admin aunque la venta sea del cajero', async () => {
+      // La única escena donde "el pago que reversa" y "la caja de la venta"
+      // dicen cosas distintas: la NC copia la caja de la venta (la del cajero),
+      // pero el pago lo cobró el admin desde la suya. Las dos de arriba no lo
+      // separan: ahí el pago y la venta son de la misma caja.
+      const pendiente = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${tokenCajero}`)
+        .send({
+          tipoDocumentoId: BOLETA_ID,
+          lineas: [{ itemId, cantidad: '1' }],
+        });
+      expect(pendiente.status).toBe(201);
+      const venta = pendiente.body as { id: string; totalFinal: string };
+      const abono = await request(app.getHttpServer())
+        .post('/api/pagos')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          ventaId: venta.id,
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: venta.totalFinal }],
+        });
+      expect(abono.status).toBe(201);
+      // El cobro quedó en la caja del admin, no en la de la venta (la del
+      // cajero): sin esto la escena no separa las dos reglas.
+      const cajas: {
+        caja_pago: string;
+        caja_venta: string;
+        caja_del_cajero: string;
+      }[] = await app.get(DataSource).query(
+        `SELECT p.caja_id AS caja_pago, v.caja_id AS caja_venta,
+                  vc.caja_id AS caja_del_cajero
+             FROM pagos p
+             JOIN ventas v ON v.venta_id = p.venta_id
+             JOIN ventas vc ON vc.venta_id = $2
+            WHERE p.venta_id = $1 AND p.eliminado_el IS NULL`,
+        [venta.id, ventaDelCajeroId],
+      );
+      expect(cajas).toHaveLength(1);
+      expect(cajas[0].caja_venta).toBe(cajas[0].caja_del_cajero);
+      expect(cajas[0].caja_pago).not.toBe(cajas[0].caja_venta);
+      const antes = await devueltoDe(tokenCajero);
+      const antesAdmin = await devueltoDe(tokenAdmin);
+
+      await devolverEnEfectivo(venta.id, '1515');
+      const despues = await devueltoDe(tokenCajero);
+      const despuesAdmin = await devueltoDe(tokenAdmin);
+
+      expect(movio(antes, despues)).toBe('0');
+      expect(movio(antesAdmin, despuesAdmin)).toBe('1515');
+    });
+
+    it('una corrección vieja sin devolucion_pago_id se juzga por la caja de la venta que corrige', async () => {
+      // Inalcanzable por la API: toda corrección nueva guarda por dónde volvió
+      // la plata. Se arma por SQL, como el caso legacy de `saldo-venta.ts`.
+      const antes = await devueltoDe(tokenCajero);
+      const antesAdmin = await devueltoDe(tokenAdmin);
+
+      const viejas: unknown[] = await app.get(DataSource).query(
+        `UPDATE ventas SET devolucion_pago_id = NULL, devolucion_via = NULL
+          WHERE venta_id = ANY($1) RETURNING venta_id`,
+        [[notaSobreLaDelCajero, notaSobreLaDelAdmin]],
+      );
+      expect(viejas).toHaveLength(2);
+      const despues = await devueltoDe(tokenCajero);
+      const despuesAdmin = await devueltoDe(tokenAdmin);
+
+      // La del cajero sigue siendo suya (la NC copia la caja de su venta) y la
+      // del admin sigue afuera; el admin las sigue viendo las dos.
+      expect(movio(antes, despues)).toBe('0');
+      expect(movio(antesAdmin, despuesAdmin)).toBe('0');
+    });
+
+    it('un REFUND entra por la rama online: el de una venta online le resta al cajero, el de una física no', async () => {
+      // Online exige el pago completo al crear: un ítem con el IVA incluido deja
+      // el total conocido antes de vender.
+      const item = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          nombre: `E2E Visibilidad Online ${Date.now()}`,
+          precioBase: '5000',
+          precioIncluyeImpuesto: true,
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+        });
+      expect(item.status).toBe(201);
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          canal: 'online',
+          lineas: [{ itemId: (item.body as { id: string }).id, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '5000' }],
+        });
+      expect(venta.status).toBe(201);
+      const online = venta.body as { id: string };
+
+      const antes = await devueltoDe(tokenCajero);
+      const antesAdmin = await devueltoDe(tokenAdmin);
+      await reembolsoAprobado(online.id, '1313');
+      await reembolsoAprobado(ventaDelCajeroId, '1414');
+      const despues = await devueltoDe(tokenCajero);
+      const despuesAdmin = await devueltoDe(tokenAdmin);
+
+      expect(movio(antes, despues)).toBe('1313');
+      expect(movio(antesAdmin, despuesAdmin)).toBe('2727');
     });
   });
 

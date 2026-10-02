@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import { ESCALA_COSTO } from '../../common/constants/escalas';
 import { saldoDeVentaSql } from '../ventas/saldo-venta';
+import { devueltoSql } from '../ventas/devuelto-venta';
 import {
   bordeFechaSql,
   bordeHastaSql,
@@ -93,12 +94,8 @@ interface VentasRow {
 interface CobradoRow {
   cobrado_hoy: string;
   cobrado_semana_pasada: string;
-  efectivo_hoy: string;
-  efectivo_semana_pasada: string;
-  pasarela_hoy: string;
-  pasarela_semana_pasada: string;
-  maquina_hoy: string;
-  maquina_semana_pasada: string;
+  devuelto_hoy: string;
+  devuelto_semana_pasada: string;
 }
 
 interface PorCobrarRow {
@@ -231,29 +228,20 @@ export class ResumenNegocioService {
     // O sea que, por el camino de la app, ninguna nota de crédito ni ninguna
     // venta cancelada puede aportarle nada a esta suma — no hace falta un
     // `JOIN` a `ventas` para excluirlas. Lo que la NC devuelve no sale de esa
-    // suma: se resta aparte, en `e` y `r` (spec 2026-10-01-vendido-neto § 3.2).
-    const condHoyMov = condicion('mc.fecha', IDX_FECHA_HOY);
-    const condSemanaPasadaMov = condicionSemanaPasada(
-      'mc.fecha',
-      IDX_FECHA_SEMANA_PASADA,
-    );
-    const condHoyMaquina = condicion('nc.fecha', IDX_FECHA_HOY);
-    const condSemanaPasadaMaquina = condicionSemanaPasada(
-      'nc.fecha',
-      IDX_FECHA_SEMANA_PASADA,
-    );
-    const condHoyRefund = condicion('t.fecha_transaccion', IDX_FECHA_HOY);
-    const condSemanaPasadaRefund = condicionSemanaPasada(
-      't.fecha_transaccion',
-      IDX_FECHA_SEMANA_PASADA,
-    );
+    // suma: se resta aparte, con la cuenta ÚNICA de lo devuelto
+    // (`devuelto-venta.ts`), la misma que lee el resumen de Pagos.
+    const devuelto = devueltoSql({
+      idxTenant: 1,
+      ventanas: {
+        hoy: (columna) => condicion(columna, IDX_FECHA_HOY),
+        semana_pasada: (columna) =>
+          condicionSemanaPasada(columna, IDX_FECHA_SEMANA_PASADA),
+      },
+    });
 
-    // Cuatro agregados de una fila cada uno, cruzados: una sola consulta.
     const cobradoRows: CobradoRow[] = await this.db.query(
       `SELECT c.cobrado_hoy, c.cobrado_semana_pasada,
-              e.efectivo_hoy, e.efectivo_semana_pasada,
-              m.maquina_hoy, m.maquina_semana_pasada,
-              r.pasarela_hoy, r.pasarela_semana_pasada
+              dv.devuelto_hoy, dv.devuelto_semana_pasada
          FROM (
            SELECT COALESCE(SUM(pa.monto) FILTER (WHERE ${condHoyPago}), 0)::text
                     AS cobrado_hoy,
@@ -267,72 +255,7 @@ export class ResumenNegocioService {
             WHERE p.tenant_id = $1
               AND p.eliminado_el IS NULL
          ) c
-         -- Efectivo devuelto: la salida de caja que lleva el venta_id de una
-         -- corrección. Un retiro de caja no lleva venta_id y no entra. La caja
-         -- no tiene tenant_id: el alcance va por la corrección.
-         CROSS JOIN (
-           SELECT COALESCE(SUM(mc.monto) FILTER (WHERE ${condHoyMov}), 0)::text
-                    AS efectivo_hoy,
-                  COALESCE(SUM(mc.monto) FILTER (WHERE ${condSemanaPasadaMov}), 0)::text
-                    AS efectivo_semana_pasada
-             FROM movimientos_caja mc
-             JOIN ventas nc
-               ON nc.venta_id = mc.venta_id
-              AND nc.venta_referencia_id IS NOT NULL
-              AND nc.tenant_id = $1
-              AND nc.eliminado_el IS NULL
-            WHERE mc.tipo = 'salida'
-              AND mc.eliminado_el IS NULL
-         ) e
-         -- Devuelto por la máquina o el banco: la corrección "por un pago" de un
-         -- medio que NO es efectivo. La plata volvió reversando en el terminal o
-         -- por transferencia, y eso no deja salida de caja ni REFUND, así que ni
-         -- el bloque e ni el r lo ven. Se cuenta por su total_final y en SU fecha.
-         -- No duplica: devolucion_via = 'pago' descarta la sin_plata (no
-         -- devolvió nada) y la pasarela (la cuenta r por su REFUND); y el
-         -- NOT EXISTS descarta la que sí dejó salida de caja (el efectivo, que
-         -- ya cuenta e). Una legacy con devolucion_via NULL tampoco entra: solo
-         -- cuenta por su salida de caja, si la tuvo. e y este bloque son
-         -- complementarios por construcción: una corrección entra en uno solo.
-         CROSS JOIN (
-           SELECT COALESCE(SUM(nc.total_final) FILTER (WHERE ${condHoyMaquina}), 0)::text
-                    AS maquina_hoy,
-                  COALESCE(SUM(nc.total_final) FILTER (WHERE ${condSemanaPasadaMaquina}), 0)::text
-                    AS maquina_semana_pasada
-             FROM ventas nc
-            WHERE nc.tenant_id = $1
-              AND nc.venta_referencia_id IS NOT NULL
-              AND nc.devolucion_via = 'pago'
-              AND nc.eliminado_el IS NULL
-              AND NOT EXISTS (
-                SELECT 1
-                  FROM movimientos_caja mc
-                 WHERE mc.venta_id = nc.venta_id
-                   AND mc.tipo = 'salida'
-                   AND mc.eliminado_el IS NULL
-              )
-         ) m
-         -- Reembolso por pasarela, con o sin NC (D6). Solo de órdenes con
-         -- venta: el cobro de una orden sin venta nunca entró a pagos, así
-         -- que su reembolso tampoco sale del cobrado. El reembolso del webhook
-         -- no deja salida de caja (no pide devolver dinero), así que esto y lo
-         -- de arriba no se pisan.
-         CROSS JOIN (
-           SELECT COALESCE(SUM(t.monto) FILTER (WHERE ${condHoyRefund}), 0)::text
-                    AS pasarela_hoy,
-                  COALESCE(SUM(t.monto) FILTER (WHERE ${condSemanaPasadaRefund}), 0)::text
-                    AS pasarela_semana_pasada
-             FROM pasarela_transacciones t
-             JOIN pasarela_ordenes o
-               ON o.orden_id = t.orden_id
-              AND o.tenant_id = t.tenant_id
-              AND o.venta_id IS NOT NULL
-              AND o.eliminado_el IS NULL
-            WHERE t.tenant_id = $1
-              AND t.tipo = 'REFUND'
-              AND t.estado = 'aprobada'
-              AND t.eliminado_el IS NULL
-         ) r`,
+         CROSS JOIN ${devuelto} dv`,
       params,
     );
 
@@ -439,16 +362,12 @@ export class ResumenNegocioService {
 
     const vendidoHoy = new Decimal(vr?.neto_hoy ?? '0');
     const vendidoSemanaPasada = new Decimal(vr?.vendido_semana_pasada ?? '0');
-    // Neto de lo devuelto, hoy y la semana pasada. `pasarela_*` viene con la
-    // escala de `pasarela_transacciones.monto` (6) y `pagos` con la suya (4):
-    // lo derivado sale con `toFixed(ESCALA_COSTO)`.
+    // Neto de lo devuelto, hoy y la semana pasada. El devuelto trae la escala
+    // de `pasarela_transacciones.monto` (6) y `pagos` la suya (4): lo derivado
+    // sale con `toFixed(ESCALA_COSTO)`.
     const cobradoBrutoHoy = new Decimal(cr?.cobrado_hoy ?? '0');
-    const devueltoHoy = new Decimal(cr?.efectivo_hoy ?? '0')
-      .plus(cr?.maquina_hoy ?? '0')
-      .plus(cr?.pasarela_hoy ?? '0');
-    const devueltoSemanaPasada = new Decimal(cr?.efectivo_semana_pasada ?? '0')
-      .plus(cr?.maquina_semana_pasada ?? '0')
-      .plus(cr?.pasarela_semana_pasada ?? '0');
+    const devueltoHoy = new Decimal(cr?.devuelto_hoy ?? '0');
+    const devueltoSemanaPasada = new Decimal(cr?.devuelto_semana_pasada ?? '0');
     const cobradoHoy = cobradoBrutoHoy.minus(devueltoHoy);
     const cobradoSemanaPasada = new Decimal(
       cr?.cobrado_semana_pasada ?? '0',

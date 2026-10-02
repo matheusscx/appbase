@@ -109,7 +109,8 @@ coincide con la medianoche de siempre. Hasta el 2026-09-18 la fecha pura se leí
 
 ### GET /api/pagos/resumen
 
-KPIs globales del tenant (independientes de filtros/página).
+KPIs globales del tenant (independientes de filtros/página): cobrado, propinas, devuelto y neto,
+histórico y de hoy.
 
 ```
 GET /api/pagos/resumen
@@ -117,11 +118,44 @@ GET /api/pagos/resumen
 Response (200):
 {
   "totalPagos": 42,
-  "montoCobrado": "150000.0000",
+  "montoCobrado": "155000.0000",
+  "montoPropinas": "5000.0000",
+  "montoDevuelto": "40000.0000",
+  "montoNeto": "110000.0000",
   "pagosHoy": 3,
-  "montoHoy": "25000.0000"
+  "montoHoy": "25000.0000",
+  "propinasHoy": "0.0000",
+  "devueltoHoy": "0.0000",
+  "netoHoy": "25000.0000"
 }
 ```
+
+- **`montoCobrado`/`montoHoy`** son lo que suman las filas de la lista: `Σ(monto − vuelto)` de
+  los pagos, por `pagos.fecha`. Son cobros, con la propina adentro.
+- **`montoPropinas`/`propinasHoy`**: la parte de esos mismos pagos que fue propina
+  (`pago_aplicaciones` con `tipo = 'propina'`). Va como línea propia porque el "Cobrado" del
+  inicio suma solo lo aplicado a la venta.
+- **`montoDevuelto`/`devueltoHoy`** salen de la **misma cuenta** que resta el "Cobrado" del inicio
+  (`ventas/devuelto-venta.ts`; detalle en [`dashboard-inicio.md`](./dashboard-inicio.md)): el
+  efectivo que salió de la caja por una corrección, lo reversado en la máquina o el banco y los
+  `REFUND` aprobados de pasarela, sin contar dos veces. Se reusa, no se copia (owner,
+  2026-10-02). Cada término va por su propia fecha (la del movimiento, la de la corrección, la
+  del `REFUND`), no por la del pago que devolvió.
+- **`montoNeto`/`netoHoy`** = cobrado − propinas − devuelto, en el backend con Decimal. Con todo
+  el tenant (`verTodas`), `netoHoy` es el "Cobrado" del inicio del mismo día.
+
+La pantalla muestra el neto grande y debajo, solo si hay algo que restar, "cobrado $105.000 ·
+propinas −$5.000 · devuelto −$40.000": el cobrado cuadra con la suma de las filas y el neto con
+el inicio. Se descartaron "lo que entró" (dos números distintos el mismo día) y "solo el neto"
+(deja de cuadrar con la lista). La propina como línea propia la decidió la orquestadora
+(2026-10-02): sin ella, con propinas no se cumplían las dos cosas a la vez.
+
+**El devuelto tiene el alcance de las filas.** Sin `verTodas`, una devolución es **del pago que
+reversa** (`ventas.devolucion_pago_id`, juzgado con el mismo "lo mío" que el pago: venta online
+o caja del usuario). Así el "cobrado − devuelto" del cajero son siempre sus filas, aunque la
+plata haya salido de la caja de otro. Una corrección vieja sin `devolucion_pago_id` se juzga
+por la venta que corrige y su caja (la NC copia el `caja_id` de la original). Un `REFUND` no
+tiene pago: entra solo si la venta es online. Decidido por la orquestadora (2026-10-02).
 
 "Hoy" es el **día del negocio** del tenant: el día local (zona de su provincia) que termina en
 la hora de corte configurada (`tenants.hora_corte`, 0–6, default 0) —la misma ventana que el

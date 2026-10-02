@@ -37,12 +37,8 @@ interface VentasRowFixture {
 interface CobradoRowFixture {
   cobrado_hoy: string;
   cobrado_semana_pasada: string;
-  efectivo_hoy: string;
-  efectivo_semana_pasada: string;
-  pasarela_hoy: string;
-  pasarela_semana_pasada: string;
-  maquina_hoy: string;
-  maquina_semana_pasada: string;
+  devuelto_hoy: string;
+  devuelto_semana_pasada: string;
 }
 
 interface PorCobrarRowFixture {
@@ -134,12 +130,8 @@ describe('ResumenNegocioService', () => {
         {
           cobrado_hoy: '0',
           cobrado_semana_pasada: '0',
-          efectivo_hoy: '0',
-          efectivo_semana_pasada: '0',
-          pasarela_hoy: '0',
-          pasarela_semana_pasada: '0',
-          maquina_hoy: '0',
-          maquina_semana_pasada: '0',
+          devuelto_hoy: '0',
+          devuelto_semana_pasada: '0',
           ...opts.cobrado,
         },
       ])
@@ -202,38 +194,18 @@ describe('ResumenNegocioService', () => {
     });
   });
 
-  it('cobrado.hoy es lo cobrado menos el efectivo devuelto y los REFUND; el desglose los separa', async () => {
+  it('cobrado.hoy es lo cobrado menos lo devuelto; el desglose los separa', async () => {
     mockRespuestas({
       cobrado: {
         cobrado_hoy: '500000.0000',
-        efectivo_hoy: '12000.0000',
-        // `pasarela_transacciones.monto` es numeric(18,6): otra escala que `pagos`.
-        pasarela_hoy: '7300.000000',
+        // La suma de los tres bloques trae la escala de
+        // `pasarela_transacciones.monto` (numeric(18,6)), no la de `pagos`.
+        devuelto_hoy: '59300.000000',
       },
     });
 
     const res = await service.hoy(TENANT);
 
-    expect(res.ventas.cobrado.hoy).toBe('480700.0000');
-    expect(res.ventas.cobradoDesglose).toEqual({
-      cobrado: '500000.0000',
-      devuelto: '19300.0000',
-    });
-  });
-
-  it('cobrado.hoy resta también lo devuelto por la máquina o el banco, y el desglose lo suma al devuelto', async () => {
-    mockRespuestas({
-      cobrado: {
-        cobrado_hoy: '500000.0000',
-        efectivo_hoy: '12000.0000',
-        maquina_hoy: '40000.0000',
-        pasarela_hoy: '7300.000000',
-      },
-    });
-
-    const res = await service.hoy(TENANT);
-
-    // 500000 − (12000 + 40000 + 7300)
     expect(res.ventas.cobrado.hoy).toBe('440700.0000');
     expect(res.ventas.cobradoDesglose).toEqual({
       cobrado: '500000.0000',
@@ -241,30 +213,13 @@ describe('ResumenNegocioService', () => {
     });
   });
 
-  it('cobrado.semanaPasada también resta lo devuelto por la máquina', async () => {
-    mockRespuestas({
-      cobrado: {
-        cobrado_semana_pasada: '80000.0000',
-        efectivo_semana_pasada: '2500.0000',
-        maquina_semana_pasada: '9000.0000',
-        pasarela_semana_pasada: '1500.000000',
-      },
-    });
-
-    const res = await service.hoy(TENANT);
-
-    expect(res.ventas.cobrado.semanaPasada).toBe('67000.0000');
-  });
-
   it('cobrado.semanaPasada también es neto de lo devuelto, y la variación sale de los dos netos', async () => {
     mockRespuestas({
       cobrado: {
         cobrado_hoy: '100000.0000',
-        efectivo_hoy: '1000.0000',
-        pasarela_hoy: '4000.000000',
+        devuelto_hoy: '5000.000000',
         cobrado_semana_pasada: '80000.0000',
-        efectivo_semana_pasada: '2500.0000',
-        pasarela_semana_pasada: '2500.000000',
+        devuelto_semana_pasada: '5000.000000',
       },
     });
 
@@ -281,8 +236,7 @@ describe('ResumenNegocioService', () => {
       cobrado: {
         cobrado_hoy: '50000.0000',
         cobrado_semana_pasada: '3000.0000',
-        efectivo_semana_pasada: '3000.0000',
-        pasarela_semana_pasada: '1000.000000',
+        devuelto_semana_pasada: '4000.000000',
       },
     });
 
@@ -292,25 +246,19 @@ describe('ResumenNegocioService', () => {
     expect(res.ventas.cobrado.variacion).toBeNull();
   });
 
-  it('el SQL de cobrado resta el efectivo de las correcciones y los REFUND aprobados de órdenes con venta, afirmando sobre cada bloque', async () => {
+  it('lo devuelto sale de la cuenta única (`devueltoSql`), con las ventanas de hoy y de la semana pasada', async () => {
     mockRespuestas({});
 
     await service.hoy(TENANT);
 
     const [cobradoSql] = queryMock.mock.calls[2] as [string];
-    // Efectivo devuelto: la salida de caja atada a una corrección, no cualquier salida.
-    expect(cobradoSql).toMatch(
-      /FROM movimientos_caja mc\s+JOIN ventas nc[\s\S]*?nc\.venta_referencia_id IS NOT NULL[\s\S]*?nc\.eliminado_el IS NULL[\s\S]*?mc\.tipo = 'salida'[\s\S]*?mc\.eliminado_el IS NULL/,
-    );
-    // Devuelto por la máquina: la corrección por un pago que NO dejó salida de
-    // caja. Cada filtro es lo que impide contar dos veces o contar lo que no es.
-    expect(cobradoSql).toMatch(
-      /FROM ventas nc\s+WHERE nc\.tenant_id = \$1[\s\S]*?nc\.venta_referencia_id IS NOT NULL[\s\S]*?nc\.devolucion_via = 'pago'[\s\S]*?nc\.eliminado_el IS NULL[\s\S]*?AND NOT EXISTS \([\s\S]*?FROM movimientos_caja mc[\s\S]*?mc\.venta_id = nc\.venta_id[\s\S]*?mc\.tipo = 'salida'[\s\S]*?mc\.eliminado_el IS NULL/,
-    );
-    // REFUND: aprobado, de una orden con venta, ambos lados sin borrar.
-    expect(cobradoSql).toMatch(
-      /FROM pasarela_transacciones t\s+JOIN pasarela_ordenes o[\s\S]*?o\.venta_id IS NOT NULL[\s\S]*?o\.eliminado_el IS NULL[\s\S]*?t\.tipo = 'REFUND'[\s\S]*?t\.estado = 'aprobada'[\s\S]*?t\.eliminado_el IS NULL/,
-    );
+    // La forma de cada bloque la fija `devuelto-venta.spec.ts`; acá, que el
+    // cobrado la incluye en vez de repetirla.
+    expect(cobradoSql).toContain('FROM movimientos_caja dv_mc');
+    expect(cobradoSql).toContain('FROM pasarela_transacciones dv_t');
+    expect(cobradoSql).toMatch(/AS devuelto_hoy\b/);
+    expect(cobradoSql).toMatch(/AS devuelto_semana_pasada\b/);
+    expect(cobradoSql).not.toMatch(/FROM movimientos_caja mc\b/);
   });
 
   it('variación es null cuando la semana pasada es negativa', async () => {

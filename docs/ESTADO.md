@@ -57,7 +57,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Registro de pagos | ✅ Implementado (inline con ventas, 2026-06-29) |
 | Frontend POS (crear venta: catálogo, carrito, cobro multipago, fricción por documento). Desde el **2026-09-17** la boleta que imprime al cobrar sale de la respuesta de `POST /ventas` (`armarBoleta` sobre la venta persistida), no de un recálculo del carrito — mismo cambio que en salones, ver esa fila | ✅ Implementado (2026-06-29; **boleta desde la venta persistida 2026-09-17**) |
 | Frontend — historial/consulta de ventas | ✅ Implementado (2026-06-30) |
-| Módulo de Pagos (GET /pagos, POST /pagos, abono a ventas pendientes, ledger) | ✅ Implementado (2026-06-30) |
+| Módulo de Pagos (GET /pagos, POST /pagos, abono a ventas pendientes, ledger). Desde el **2026-10-02** el resumen muestra "cobrado · propinas · devuelto → neto": el devuelto es la misma cuenta que el "Cobrado" del inicio (`ventas/devuelto-venta.ts`), con el alcance de las filas, y el neto cuadra con el inicio | ✅ Implementado (2026-06-30; desglose del cobrado 2026-10-02) |
 | Tienda Online (canal online, checkout dummy, catálogo/carrito, medios de pago mock) | ✅ Implementado (2026-07-05) |
 | Suscripciones (tipo de item suscripcion, alta con primer cobro, gestión) | ✅ Implementado (2026-07-05) |
 | Suscripciones — administración (módulo RBAC propio, vigencia `activa_hasta`, "Mis suscripciones") | ✅ Implementado (2026-07-06) |

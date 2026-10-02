@@ -105,6 +105,10 @@ decisiones D1–D12). Lo que sigue es lo que cuenta cada número y el porqué.
   el efectivo), y una legacy con `devolucion_via` nulo solo cuenta por su salida de caja. Son
   complementarios por construcción.
 
+  **La cuenta está escrita una vez**, en `ventas/devuelto-venta.ts` (`devueltoSql`), y la usa
+  también el resumen de Pagos (`GET /pagos/resumen`, owner 2026-10-02): el mismo día no puede
+  dar dos devueltos. Quien la incluye pasa sus ventanas de tiempo; ninguno la copia.
+
   El porqué: la corrección nunca escribe `pagos`, y el efectivo devuelto ya resta en el
   arqueo, así que sin esto el cobrado y la caja del mismo día contaban la devolución al
   revés. Las partes no se pisan porque el reembolso del webhook no devuelve dinero por

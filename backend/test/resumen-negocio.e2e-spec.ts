@@ -876,6 +876,213 @@ describe('Resumen del negocio (e2e)', () => {
           antes.ventas.cobradoDesglose,
         );
       });
+
+      /**
+       * El resumen de Pagos resta lo devuelto con la MISMA cuenta que el
+       * "Cobrado" del inicio (`devuelto-venta.ts`, owner 2026-10-02): "Cobrado
+       * $100.000 · devuelto −$40.000 → $60.000". Cada escena lee los dos
+       * resúmenes antes y después, y afirma que el devuelto de Pagos se movió
+       * lo mismo que el del inicio, en el histórico y en hoy.
+       */
+      describe('el resumen de Pagos resta lo mismo que el inicio', () => {
+        interface PagosResumenResponse {
+          montoCobrado: string;
+          montoPropinas: string;
+          montoDevuelto: string;
+          montoNeto: string;
+          montoHoy: string;
+          propinasHoy: string;
+          devueltoHoy: string;
+          netoHoy: string;
+        }
+        const leerPagos = async (): Promise<PagosResumenResponse> => {
+          const res = await request(app.getHttpServer())
+            .get('/api/pagos/resumen')
+            .set('Authorization', `Bearer ${tokenAdmin}`);
+          expect(res.status).toBe(200);
+          return res.body as PagosResumenResponse;
+        };
+        const leerAmbos = async () => ({
+          pagos: await leerPagos(),
+          inicio: await leer(),
+        });
+        type Lectura = Awaited<ReturnType<typeof leerAmbos>>;
+        /** Cuánto se movió cada número de Pagos, y el devuelto del inicio. */
+        const movimiento = (antes: Lectura, despues: Lectura) => ({
+          cobrado: delta(antes.pagos.montoCobrado, despues.pagos.montoCobrado),
+          propinas: delta(
+            antes.pagos.montoPropinas,
+            despues.pagos.montoPropinas,
+          ),
+          devuelto: delta(
+            antes.pagos.montoDevuelto,
+            despues.pagos.montoDevuelto,
+          ),
+          neto: delta(antes.pagos.montoNeto, despues.pagos.montoNeto),
+          cobradoHoy: delta(antes.pagos.montoHoy, despues.pagos.montoHoy),
+          propinasHoy: delta(
+            antes.pagos.propinasHoy,
+            despues.pagos.propinasHoy,
+          ),
+          devueltoHoy: delta(
+            antes.pagos.devueltoHoy,
+            despues.pagos.devueltoHoy,
+          ),
+          netoHoy: delta(antes.pagos.netoHoy, despues.pagos.netoHoy),
+          devueltoInicio: delta(
+            antes.inicio.ventas.cobradoDesglose.devuelto,
+            despues.inicio.ventas.cobradoDesglose.devuelto,
+          ),
+          cobradoInicio: delta(
+            antes.inicio.ventas.cobrado.hoy,
+            despues.inicio.ventas.cobrado.hoy,
+          ),
+        });
+
+        it('el café: cobra $100.000 con débito y devuelve $40.000 en la máquina → cobrado 100.000, devuelto 40.000, neto 60.000', async () => {
+          const item = await request(app.getHttpServer())
+            .post('/api/items')
+            .set('Authorization', `Bearer ${tokenAdmin}`)
+            .send({
+              nombre: `E2E Café devuelto ${randomUUID().slice(0, 8)}`,
+              precioBase: '100000',
+              precioIncluyeImpuesto: true,
+              monedaId: CLP_MONEDA_ID,
+              tipo: 'servicio',
+            });
+          expect(item.status).toBe(201);
+          const antes = await leerAmbos();
+
+          const venta = await post<VentaCreadaResponse>('/api/ventas', {
+            lineas: [{ itemId: (item.body as ItemResponse).id, cantidad: '1' }],
+          });
+          expect(new Decimal(venta.totalFinal).toString()).toBe('100000');
+          await post('/api/pagos', {
+            ventaId: venta.id,
+            pagos: [{ metodoPagoId: DEBITO_ID, monto: venta.totalFinal }],
+          });
+          await post(`/api/ventas/${venta.id}/notas-credito`, {
+            monto: '40000',
+            ...(await devolucionDe(venta.id)),
+          });
+          const despues = await leerAmbos();
+
+          expect(movimiento(antes, despues)).toEqual({
+            cobrado: '100000',
+            propinas: '0',
+            devuelto: '40000',
+            neto: '60000',
+            cobradoHoy: '100000',
+            propinasHoy: '0',
+            devueltoHoy: '40000',
+            netoHoy: '60000',
+            devueltoInicio: '40000',
+            cobradoInicio: '60000',
+          });
+        });
+
+        it('con propina: "Cobrado $105.000 · propinas −$5.000 · devuelto −$40.000 → $60.000", y el neto es el cobrado del inicio', async () => {
+          const item = await request(app.getHttpServer())
+            .post('/api/items')
+            .set('Authorization', `Bearer ${tokenAdmin}`)
+            .send({
+              nombre: `E2E Café propina ${randomUUID().slice(0, 8)}`,
+              precioBase: '100000',
+              precioIncluyeImpuesto: true,
+              monedaId: CLP_MONEDA_ID,
+              tipo: 'servicio',
+            });
+          expect(item.status).toBe(201);
+          const antes = await leerAmbos();
+
+          const venta = await post<VentaCreadaResponse>('/api/ventas', {
+            lineas: [{ itemId: (item.body as ItemResponse).id, cantidad: '1' }],
+            pagos: [{ metodoPagoId: DEBITO_ID, monto: '105000' }],
+            propinaDirecta: { montoPagado: '5000' },
+          });
+          expect(new Decimal(venta.totalFinal).toString()).toBe('100000');
+          await post(`/api/ventas/${venta.id}/notas-credito`, {
+            monto: '40000',
+            ...(await devolucionDe(venta.id)),
+          });
+          const despues = await leerAmbos();
+
+          // El cobrado cuadra con las filas (el pago fue de 105.000) y el neto
+          // con el "Cobrado" del inicio, que no cuenta la propina.
+          expect(movimiento(antes, despues)).toEqual({
+            cobrado: '105000',
+            propinas: '5000',
+            devuelto: '40000',
+            neto: '60000',
+            cobradoHoy: '105000',
+            propinasHoy: '5000',
+            devueltoHoy: '40000',
+            netoHoy: '60000',
+            devueltoInicio: '40000',
+            cobradoInicio: '60000',
+          });
+        });
+
+        it('efectivo: resta la salida de la caja de la nota; un retiro de caja ajeno no entra', async () => {
+          const venta = await crearVentaPagada('5');
+          const antes = await leerAmbos();
+
+          await post(`/api/ventas/${venta.id}/notas-credito`, {
+            monto: '2340',
+            ...(await devolucionDe(venta.id)),
+          });
+          // Control: una salida de caja que no es devolución (sin venta_id).
+          await post(`/api/caja/${caja.id}/movimientos`, {
+            tipo: 'salida',
+            concepto: 'Retiro e2e Pagos',
+            monto: '4100',
+          });
+          const despues = await leerAmbos();
+
+          expect(movimiento(antes, despues)).toEqual({
+            cobrado: '0',
+            propinas: '0',
+            devuelto: '2340',
+            neto: '-2340',
+            cobradoHoy: '0',
+            propinasHoy: '0',
+            devueltoHoy: '2340',
+            netoHoy: '-2340',
+            devueltoInicio: '2340',
+            cobradoInicio: '-2340',
+          });
+        });
+
+        it('REFUND con la NC del webhook: resta UNA vez, como en el inicio', async () => {
+          const venta = await crearVentaPagada('5');
+          const antes = await leerAmbos();
+
+          const orden = await reembolsoAprobado(venta.id, '1785');
+          await app.get(VentasReembolsoHandler).onReembolsoAprobado({
+            tenantId: PARIS_TENANT_ID,
+            ordenId: orden.ordenId,
+            codigoOrden: orden.codigoOrden,
+            ventaId: venta.id,
+            monto: '1785',
+            devoluciones: [],
+            usuarioId: await usuarioIdAdmin(),
+          });
+          const despues = await leerAmbos();
+
+          expect(movimiento(antes, despues)).toEqual({
+            cobrado: '0',
+            propinas: '0',
+            devuelto: '1785',
+            neto: '-1785',
+            cobradoHoy: '0',
+            propinasHoy: '0',
+            devueltoHoy: '1785',
+            netoHoy: '-1785',
+            devueltoInicio: '1785',
+            cobradoInicio: '-1785',
+          });
+        });
+      });
     });
 
     describe('por cobrar descuenta solo las notas "no vuelve plata" (saldo por venta, piso 0)', () => {

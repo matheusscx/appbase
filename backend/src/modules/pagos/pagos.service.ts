@@ -18,6 +18,8 @@ import {
 } from '../../common/utils/rango-fecha.util';
 import { CajaService } from '../caja/caja.service';
 import { EstadoVenta } from '../ventas/entities/venta.entity';
+import { devueltoSql, type FilaDeAlcance } from '../ventas/devuelto-venta';
+import { ESCALA_COSTO } from '../../common/constants/escalas';
 import {
   ESTADOS_QUE_ADMITEN_ABONO,
   puedeAbonar,
@@ -65,11 +67,24 @@ export interface PagoListItem {
   tarjetaUltimos4: string | null;
 }
 
+/**
+ * Cobrado, propinas, devuelto y neto, histórico y de hoy. El cobrado es lo que
+ * suman las filas de la lista (cobros, con la propina); el devuelto sale de la
+ * cuenta ÚNICA que también resta el "Cobrado" del inicio (`devuelto-venta.ts`),
+ * y el neto es `cobrado − propinas − devuelto`: con todo el tenant, el
+ * "Cobrado" del inicio.
+ */
 export interface PagosResumen {
   totalPagos: number;
   montoCobrado: string;
+  montoPropinas: string;
+  montoDevuelto: string;
+  montoNeto: string;
   pagosHoy: number;
   montoHoy: string;
+  propinasHoy: string;
+  devueltoHoy: string;
+  netoHoy: string;
 }
 
 interface PagoListRow {
@@ -104,6 +119,30 @@ export interface PagoRegistrado {
 }
 
 // ─── service ─────────────────────────────────────────────────────────────────
+
+/**
+ * "Lo mío" de un pago (o de lo que hace de pago): la venta es online, o la caja
+ * es del usuario. El porqué de cada rama está en `filtroDeMisCajas`, que es su
+ * uso principal; existe suelto para que el devuelto del resumen (`devueltoSql`)
+ * juzgue el pago que reversa una devolución con la MISMA regla, no con una copia.
+ */
+function deMisCajasSql(fila: FilaDeAlcance, idxUsuario: number): string {
+  return `(
+             EXISTS (
+               SELECT 1 FROM ventas vo
+                WHERE vo.venta_id = ${fila.ventaId}
+                  AND vo.canal = 'online'
+                  AND vo.eliminado_el IS NULL
+             )
+             OR EXISTS (
+               SELECT 1 FROM cajas c
+                WHERE c.caja_id = ${fila.cajaId}
+                  AND c.tenant_id = ${fila.tenantId}
+                  AND c.usuario_id = $${idxUsuario}
+                  AND c.eliminado_el IS NULL
+             )
+           )`;
+}
 
 @Injectable()
 export class PagosService {
@@ -565,21 +604,10 @@ export class PagosService {
    * o sea que el `EXISTS` de abajo nunca los alcanza.
    */
   private filtroDeMisCajas(idxUsuario: number): string {
-    return ` AND (
-             EXISTS (
-               SELECT 1 FROM ventas vo
-                WHERE vo.venta_id = p.venta_id
-                  AND vo.canal = 'online'
-                  AND vo.eliminado_el IS NULL
-             )
-             OR EXISTS (
-               SELECT 1 FROM cajas c
-                WHERE c.caja_id = p.caja_id
-                  AND c.tenant_id = p.tenant_id
-                  AND c.usuario_id = $${idxUsuario}
-                  AND c.eliminado_el IS NULL
-             )
-           )`;
+    return ` AND ${deMisCajasSql(
+      { ventaId: 'p.venta_id', cajaId: 'p.caja_id', tenantId: 'p.tenant_id' },
+      idxUsuario,
+    )}`;
   }
 
   /**
@@ -605,16 +633,39 @@ export class PagosService {
     const params: unknown[] = [tenantId];
     const idx = empujarDiaNegocio(params, dia);
     let filtroPropio = '';
+    let idxUsuario: number | null = null;
     if (!verTodas) {
       params.push(usuarioId);
-      filtroPropio = this.filtroDeMisCajas(params.length);
+      idxUsuario = params.length;
+      filtroPropio = this.filtroDeMisCajas(idxUsuario);
     }
+
+    // Lo devuelto, con la MISMA cuenta que el "Cobrado" del inicio y las dos
+    // ventanas de este resumen: el histórico y el mismo "hoy" de los pagos.
+    // Sin `verTodas`, con el mismo "lo mío" que las filas: una devolución es
+    // del pago que reversa (owner vía la orquestadora, 2026-10-02).
+    const devuelto = devueltoSql({
+      idxTenant: 1,
+      ventanas: {
+        total: () => 'TRUE',
+        hoy: (columna) =>
+          `${columna} >= (SELECT desde FROM hoy) AND ${columna} < (SELECT hasta FROM hoy)`,
+      },
+      alcance:
+        idxUsuario === null
+          ? undefined
+          : (fila) => deMisCajasSql(fila, idxUsuario),
+    });
 
     const rows: {
       total_pagos: number;
       monto_cobrado: string;
       pagos_hoy: number;
       monto_hoy: string;
+      propinas_total: string;
+      propinas_hoy: string;
+      devuelto_total: string;
+      devuelto_hoy: string;
     }[] = await this.db.query(
       `WITH d AS (SELECT ${diaNegocioDeSql('NOW()', idx)} AS dia),
             hoy AS (
@@ -622,31 +673,77 @@ export class PagosService {
                      (${inicioDiaNegocioSql('d.dia + 1', idx)}) AS hasta
                 FROM d
             )
-       SELECT COUNT(*)::int AS total_pagos,
-              COALESCE(SUM(p.monto - p.vuelto), 0)::text AS monto_cobrado,
-              COUNT(*) FILTER (
-                WHERE p.fecha >= hoy.desde AND p.fecha < hoy.hasta
-              )::int AS pagos_hoy,
-              COALESCE(
-                SUM(p.monto - p.vuelto) FILTER (
-                  WHERE p.fecha >= hoy.desde AND p.fecha < hoy.hasta
-                ),
-                0
-              )::text AS monto_hoy
-       FROM pagos p
-       CROSS JOIN hoy
-       WHERE p.tenant_id = $1
-         AND p.eliminado_el IS NULL
-         ${filtroPropio}`,
+       SELECT kpi.total_pagos, kpi.monto_cobrado, kpi.pagos_hoy, kpi.monto_hoy,
+              prop.propinas_total, prop.propinas_hoy,
+              dv.devuelto_total, dv.devuelto_hoy
+         FROM (
+           SELECT COUNT(*)::int AS total_pagos,
+                  COALESCE(SUM(p.monto - p.vuelto), 0)::text AS monto_cobrado,
+                  COUNT(*) FILTER (
+                    WHERE p.fecha >= hoy.desde AND p.fecha < hoy.hasta
+                  )::int AS pagos_hoy,
+                  COALESCE(
+                    SUM(p.monto - p.vuelto) FILTER (
+                      WHERE p.fecha >= hoy.desde AND p.fecha < hoy.hasta
+                    ),
+                    0
+                  )::text AS monto_hoy
+             FROM pagos p
+            CROSS JOIN hoy
+            WHERE p.tenant_id = $1
+              AND p.eliminado_el IS NULL
+              ${filtroPropio}
+         ) kpi
+         -- La propina de esos mismos pagos: la parte de \`monto − vuelto\` que
+         -- no fue a la venta. Sin ella el neto no cuadra con el "Cobrado" del
+         -- inicio, que suma solo lo aplicado a la venta.
+         CROSS JOIN (
+           SELECT COALESCE(SUM(pa.monto), 0)::text AS propinas_total,
+                  COALESCE(
+                    SUM(pa.monto) FILTER (
+                      WHERE p.fecha >= hoy.desde AND p.fecha < hoy.hasta
+                    ),
+                    0
+                  )::text AS propinas_hoy
+             FROM pagos p
+             JOIN pago_aplicaciones pa
+               ON pa.pago_id = p.pago_id
+              AND pa.tenant_id = p.tenant_id
+              AND pa.tipo = 'propina'
+              AND pa.eliminado_el IS NULL
+            CROSS JOIN hoy
+            WHERE p.tenant_id = $1
+              AND p.eliminado_el IS NULL
+              ${filtroPropio}
+         ) prop
+         CROSS JOIN ${devuelto} dv`,
       params,
     );
 
     const row = rows[0];
+    const cobrado = new Decimal(row?.monto_cobrado ?? '0');
+    const propinas = new Decimal(row?.propinas_total ?? '0');
+    const devueltoTotal = new Decimal(row?.devuelto_total ?? '0');
+    const cobradoHoy = new Decimal(row?.monto_hoy ?? '0');
+    const propinasHoy = new Decimal(row?.propinas_hoy ?? '0');
+    const devueltoHoy = new Decimal(row?.devuelto_hoy ?? '0');
     return {
       totalPagos: row?.total_pagos ?? 0,
-      montoCobrado: row?.monto_cobrado ?? '0',
+      montoCobrado: cobrado.toFixed(ESCALA_COSTO),
+      montoPropinas: propinas.toFixed(ESCALA_COSTO),
+      montoDevuelto: devueltoTotal.toFixed(ESCALA_COSTO),
+      montoNeto: cobrado
+        .minus(propinas)
+        .minus(devueltoTotal)
+        .toFixed(ESCALA_COSTO),
       pagosHoy: row?.pagos_hoy ?? 0,
-      montoHoy: row?.monto_hoy ?? '0',
+      montoHoy: cobradoHoy.toFixed(ESCALA_COSTO),
+      propinasHoy: propinasHoy.toFixed(ESCALA_COSTO),
+      devueltoHoy: devueltoHoy.toFixed(ESCALA_COSTO),
+      netoHoy: cobradoHoy
+        .minus(propinasHoy)
+        .minus(devueltoHoy)
+        .toFixed(ESCALA_COSTO),
     };
   }
 

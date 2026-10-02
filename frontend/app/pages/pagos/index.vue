@@ -69,6 +69,15 @@ const { items: pagos, meta, page, loading } =
 const resumen = ref<PagosResumen | null>(null)
 const loadingResumen = ref(false)
 
+// Mostrar o no cada parte del desglose es presentación, no una cuenta: el neto,
+// las propinas y lo devuelto ya vienen del backend (el devuelto es la misma
+// cuenta que el "Cobrado" del inicio). "Cobrado $105.000 · propinas −$5.000 ·
+// devuelto −$40.000" bajo un neto de $60.000.
+const hayPropinas = computed(() => !!resumen.value && !new Decimal(resumen.value.montoPropinas).isZero())
+const hayDevuelto = computed(() => !!resumen.value && !new Decimal(resumen.value.montoDevuelto).isZero())
+const hayPropinasHoy = computed(() => !!resumen.value && !new Decimal(resumen.value.propinasHoy).isZero())
+const hayDevueltoHoy = computed(() => !!resumen.value && !new Decimal(resumen.value.devueltoHoy).isZero())
+
 // Los pagos muestran y filtran el estado de la VENTA asociada, no uno propio.
 const { estadoColor, estadoLabel, estadoOptions } = useEstadoVenta()
 
@@ -162,7 +171,19 @@ onMounted(cargar)
               Total cobrado
             </p>
             <p class="text-lg font-semibold text-success mt-1">
-              {{ loadingResumen ? '…' : formatMonto(resumen?.montoCobrado ?? '0') }}
+              {{ loadingResumen ? '…' : formatMonto(resumen?.montoNeto ?? '0') }}
+            </p>
+            <p
+              v-if="!loadingResumen && (hayPropinas || hayDevuelto)"
+              class="text-xs text-muted"
+            >
+              cobrado {{ formatMonto(resumen!.montoCobrado) }}
+              <template v-if="hayPropinas">
+                · propinas −{{ formatMonto(resumen!.montoPropinas) }}
+              </template>
+              <template v-if="hayDevuelto">
+                · devuelto −{{ formatMonto(resumen!.montoDevuelto) }}
+              </template>
             </p>
           </div>
           <div class="rounded-lg bg-primary/10 p-3">
@@ -170,8 +191,20 @@ onMounted(cargar)
               Cobrado hoy
             </p>
             <p class="text-lg font-semibold text-primary mt-1">
-              {{ loadingResumen ? '…' : formatMonto(resumen?.montoHoy ?? '0') }}
+              {{ loadingResumen ? '…' : formatMonto(resumen?.netoHoy ?? '0') }}
               <span class="text-xs font-normal">({{ resumen?.pagosHoy ?? 0 }})</span>
+            </p>
+            <p
+              v-if="!loadingResumen && (hayPropinasHoy || hayDevueltoHoy)"
+              class="text-xs text-muted"
+            >
+              cobrado {{ formatMonto(resumen!.montoHoy) }}
+              <template v-if="hayPropinasHoy">
+                · propinas −{{ formatMonto(resumen!.propinasHoy) }}
+              </template>
+              <template v-if="hayDevueltoHoy">
+                · devuelto −{{ formatMonto(resumen!.devueltoHoy) }}
+              </template>
             </p>
           </div>
         </div>

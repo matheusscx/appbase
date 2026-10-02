@@ -10,11 +10,22 @@ export interface PaginatedResponse<T> {
   meta: PaginationMeta
 }
 
+/**
+ * KPIs de Pagos. `montoCobrado`/`montoHoy` son lo que suman las filas (cobros,
+ * con la propina); el devuelto es la misma cuenta que resta el "Cobrado" del
+ * inicio, y el neto (`cobrado − propinas − devuelto`) ya viene del backend.
+ */
 export interface PagosResumen {
   totalPagos: number
   montoCobrado: string
+  montoPropinas: string
+  montoDevuelto: string
+  montoNeto: string
   pagosHoy: number
   montoHoy: string
+  propinasHoy: string
+  devueltoHoy: string
+  netoHoy: string
 }
 
 interface UsePaginatedListOptions {

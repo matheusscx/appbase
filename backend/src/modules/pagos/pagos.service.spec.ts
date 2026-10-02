@@ -1082,16 +1082,29 @@ describe('PagosService', () => {
           monto_cobrado: '1500.0000',
           pagos_hoy: 2,
           monto_hoy: '300.0000',
+          propinas_total: '100.0000',
+          propinas_hoy: '10.0000',
+          // La suma de los tres bloques de lo devuelto trae la escala del
+          // REFUND (6): el resumen la cuantiza a la de los montos.
+          devuelto_total: '400.000000',
+          devuelto_hoy: '40.000000',
         },
       ]);
 
       const result = await service.resumen(TENANT_ID, USUARIO_ID, true);
 
+      // neto = cobrado − propinas − devuelto
       expect(result).toEqual({
         totalPagos: 10,
         montoCobrado: '1500.0000',
+        montoPropinas: '100.0000',
+        montoDevuelto: '400.0000',
+        montoNeto: '1000.0000',
         pagosHoy: 2,
         montoHoy: '300.0000',
+        propinasHoy: '10.0000',
+        devueltoHoy: '40.0000',
+        netoHoy: '250.0000',
       });
     });
 
