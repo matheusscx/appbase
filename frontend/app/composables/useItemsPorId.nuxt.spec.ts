@@ -48,6 +48,20 @@ describe('useItemsPorId', () => {
     expect(c.porId.get('b')).toEqual(item('b'))
   })
 
+  it('sin ruta pega a /items; con ruta, buscar y resolver pegan a esa lista propia', async () => {
+    responder = porIds
+    await useItemsPorId<Item>().buscar('pan', {})
+    const c = useItemsPorId<Item>('/compras/productos')
+    await c.buscar('pan', {})
+    await c.resolver(['a'])
+
+    expect(urls.map(u => new URL(u, 'http://x').pathname)).toEqual([
+      '/api/items',
+      '/api/compras/productos',
+      '/api/compras/productos',
+    ])
+  })
+
   it('resolver pide solo los ids que faltan en la caché, sin repetidos', async () => {
     responder = porIds
     const c = useItemsPorId<Item>()

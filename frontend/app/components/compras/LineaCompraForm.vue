@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { PresentacionCompra } from '~/composables/useCompras'
 import type { DteLineaInfo, LineaDte } from '~/composables/useDte'
+import type { ItemsPorId } from '~/composables/useItemsPorId'
 
 /** Un producto del catálogo de Compras (pieza 2 § 6): lo que hace falta para
  *  resolver el modo de inventario y la unidad base al elegirlo en una línea. */
@@ -51,7 +52,8 @@ export interface LineaForm {
  */
 const props = defineProps<{
   linea: LineaForm
-  productos: ProductoOpt[]
+  /** El caché de la página (`useItemsPorId` sobre `/compras/productos`): busca en el servidor. */
+  catalogo: ItemsPorId<ProductoOpt>
   presentaciones: PresentacionCompra[]
   proveedorId: string
 }>()
@@ -74,8 +76,6 @@ const { formatMonto } = useFormatters()
 const monedasStore = useMonedasStore()
 const unidadesMedidaStore = useUnidadesMedidaStore()
 const { totalLinea, etiquetaPresentacion, cuentaPresentacion } = useCompras()
-
-const productoOpts = computed<Opt[]>(() => props.productos.map(p => ({ label: p.nombre, value: p.id })))
 
 /** `u:<codigo>` / `p:<id>` / `''`: la traducción es propia de esta fila (no
  *  del composable), que es la única que arma el selector combinado. */
@@ -146,7 +146,8 @@ const totalLineaTexto = computed(() => {
 /** Resetea todo lo que depende del producto elegido: un solo emit con los
  *  campos de una vez (no uno por campo) — la página los escribe de una. */
 function onSeleccionarItem(itemId: string) {
-  const producto = props.productos.find(p => p.id === itemId)
+  // Lo que se elige salió de una búsqueda, que ya lo dejó en el caché.
+  const producto = props.catalogo.porId.get(itemId)
   const modoInventario = producto?.modoInventario ?? 'cantidad'
   // Una línea del XML no hereda la unidad base (tarea 4 § 6): "3 CJ" no es "3
   // unidad", y la real sale de que el encargado la asocie. Serie y lote solo
@@ -190,14 +191,12 @@ function onSeriesChange(texto: string) {
   <div class="border border-default rounded-md p-4 space-y-3" data-qa="compra-linea">
     <div class="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-end">
       <UFormField label="Producto" class="md:col-span-4">
-        <USelectMenu
-          :model-value="linea.itemId"
-          :items="productoOpts"
-          value-key="value"
-          searchable
+        <AppItemSelect
+          :model-value="linea.itemId || null"
+          :catalogo="catalogo"
           placeholder="Selecciona un producto"
           class="w-full"
-          @update:model-value="(v: string) => onSeleccionarItem(v)"
+          @update:model-value="(v: string | string[] | null | undefined) => { if (typeof v === 'string') onSeleccionarItem(v) }"
         />
       </UFormField>
       <UFormField label="Cantidad" class="md:col-span-2">

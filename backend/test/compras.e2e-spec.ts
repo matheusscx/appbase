@@ -1771,7 +1771,7 @@ describe('Compras — borrador (e2e)', () => {
        * poder cargar una compra pasó todas las suites.
        */
       describe('listas propias de Compras, como el encargado', () => {
-        it('productos: el encargado ve productos e ingredientes, no servicios; sin Crear es 403', async () => {
+        it('productos: el encargado busca y resuelve sin Items:Leer; ve productos e ingredientes, no servicios ni borrados; sin Crear es 403', async () => {
           const encargado = await login(ENCARGADO_COMPRAS_EMAIL);
           const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
           const producto = await productoVacio({
@@ -1794,22 +1794,72 @@ describe('Compras — borrador (e2e)', () => {
               monedaId: CLP_MONEDA_ID,
             })
           ).id;
+          const borrado = await productoVacio({
+            nombre: `Producto borrado lista ${marca}`,
+          });
+          expect(
+            (await intentar('delete', `/api/items/${borrado}`)).status,
+          ).toBe(200);
 
-          // Lo que antes no podía: el catálogo de ítems.
+          // Lo que antes no podía: el catálogo de ítems. Y lo que impide
+          // "unificar" esta ruta con `/items`: buscar y resolver le dan 200.
           expect(
             (await intentar('get', '/api/items?tipo=producto', {}, encargado))
               .status,
           ).toBe(403);
 
-          const lista = await get<{ id: string; modoInventario: string }[]>(
-            '/api/compras/productos',
+          type Opcion = {
+            id: string;
+            nombre: string;
+            modoInventario: string;
+            unidadMedida: string | null;
+          };
+          const busqueda = await get<Paginado<Opcion>>(
+            `/api/compras/productos?search=${marca}&pageSize=100`,
             200,
             encargado,
           );
-          const ids = lista.map((p) => p.id);
-          expect(ids).toContain(producto);
-          expect(ids).toContain(ingrediente);
-          expect(ids).not.toContain(servicio);
+          // Ordenada por nombre: "Ingrediente…" antes que "Producto…".
+          expect(busqueda.data.map((p) => p.id)).toEqual([
+            ingrediente,
+            producto,
+          ]);
+          expect(busqueda.meta.total).toBe(2);
+          expect(busqueda.data[0]).toEqual({
+            id: ingrediente,
+            nombre: `Ingrediente lista ${marca}`,
+            modoInventario: 'cantidad',
+            unidadMedida: 'kg',
+          });
+
+          // Página a página, sin repetir: el selector pide 20 por vez.
+          const pagina2 = await get<Paginado<Opcion>>(
+            `/api/compras/productos?search=${marca}&pageSize=1&page=2`,
+            200,
+            encargado,
+          );
+          expect(pagina2.data.map((p) => p.id)).toEqual([producto]);
+          expect(pagina2.meta.total).toBe(2);
+
+          // Resolver por ids lo que ya está elegido: lo que no se compra no vuelve.
+          const resueltos = await get<Paginado<Opcion>>(
+            `/api/compras/productos?ids=${producto},${servicio},${borrado}`,
+            200,
+            encargado,
+          );
+          expect(resueltos.data.map((p) => p.id)).toEqual([producto]);
+
+          // Los filtros de `/items` no son de esta ruta: 400, no la lista entera.
+          expect(
+            (
+              await intentar(
+                'get',
+                '/api/compras/productos?tipo=servicio',
+                {},
+                encargado,
+              )
+            ).status,
+          ).toBe(400);
 
           const lectura = await login(COMPRAS_LECTURA_EMAIL);
           expect(

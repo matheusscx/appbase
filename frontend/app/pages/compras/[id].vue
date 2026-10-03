@@ -74,7 +74,11 @@ const editable = computed(() =>
 
 const tipos = ref<TipoDocumento[]>([])
 const proveedores = ref<Proveedor[]>([])
-const productos = ref<ProductoOpt[]>([])
+// La lista es de Compras y no `/items`: quien recibe mercadería no necesita
+// permiso sobre el catálogo de ítems (owner, 2026-09-19). Busca en el servidor
+// (`AppItemSelect`): entera pesaba demasiado para un catálogo grande
+// (docs/features/compras.md). Las cuentas de la página leen de `porId`.
+const catalogoProductos = useItemsPorId<ProductoOpt>('/compras/productos')
 const mediosPago = ref<MedioPagoOpcion[]>([])
 
 const tipoOpts = computed<Opt[]>(() => tipos.value.map(t => ({ label: t.nombre, value: t.id })))
@@ -189,7 +193,7 @@ const lineaEnPresentacion = ref<LineaForm | null>(null)
 const presentacionEnEdicion = ref<PresentacionCompra | null>(null)
 
 function itemDeLinea(linea: LineaForm) {
-  const producto = productos.value.find(p => p.id === linea.itemId)
+  const producto = catalogoProductos.porId.get(linea.itemId)
   return { id: linea.itemId, nombre: producto?.nombre ?? '', unidadMedida: linea.unidadMedida }
 }
 
@@ -274,13 +278,9 @@ watch(
 
 async function cargarCatalogos() {
   await unidadesMedidaStore.ensureLoaded()
-  // La lista es de Compras y no `/items`: quien recibe mercadería no necesita
-  // permiso sobre el catálogo de ítems (owner, 2026-09-19). Trae producto e
-  // ingrediente, los dos con stock, ya ordenados.
-  const [tiposRes, provRes, prodRes, , mediosRes] = await Promise.all([
+  const [tiposRes, provRes, , mediosRes] = await Promise.all([
     useApiFetch<TipoDocumento[]>(`${apiUrl}/compras/tipos-documento`),
     useApiFetch<Proveedor[]>(`${apiUrl}/compras/proveedores`),
-    useApiFetch<ProductoOpt[]>(`${apiUrl}/compras/productos`),
     cargarUbicaciones(),
     // Solo con `Pagar` (spec § 5.1, decisión 12): sin el permiso el endpoint
     // es 403, y el que carga sin pagar no necesita esta lista.
@@ -288,7 +288,6 @@ async function cargarCatalogos() {
   ])
   tipos.value = tiposRes
   proveedores.value = provRes
-  productos.value = prodRes
   mediosPago.value = mediosRes as MedioPagoOpcion[]
 }
 
@@ -328,7 +327,16 @@ onMounted(async () => {
   try {
     await cargarCatalogos()
     if (!esNueva.value) {
-      llenarDesde(await useApiFetch<CompraDetalle>(`${apiUrl}/compras/${route.params.id as string}`))
+      const c = await useApiFetch<CompraDetalle>(`${apiUrl}/compras/${route.params.id as string}`)
+      // Los productos de todas las líneas de una vez, ANTES de pintarlas: si no, cada
+      // `AppItemSelect` pide el suyo al montarse (una llamada por línea).
+      try {
+        await catalogoProductos.resolver(c.lineas.map(l => l.itemId))
+      }
+      catch {
+        // Se pinta igual: cada `AppItemSelect` vuelve a resolver el suyo al montarse y es él quien avisa.
+      }
+      llenarDesde(c)
     }
   } catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cargar la compra'), color: 'error' })
@@ -389,10 +397,13 @@ function lineaDesdeDte(
   destino: Exclude<DestinoCodigo, 'no_mercaderia'> | null,
   nota: string | null,
 ): LineaForm {
-  const producto = destino ? productos.value.find(p => p.id === destino.itemId) : undefined
+  const producto = destino ? catalogoProductos.porId.get(destino.itemId) : undefined
   const campos = lineaFormDesdeDte(linea, destino, nota, producto, formatMonto)
   return { ...nuevaLinea(), ...campos, dte: { ...campos.dte, origen: linea } }
 }
+
+// Descarta la carga de un XML que terminó después de otra más nueva (mismo patrón que `AppItemSelect`).
+let turnoDte = 0
 
 /**
  * Al recibir `cargar` del modal (spec § 6): encabezado, líneas repartidas por
@@ -402,7 +413,20 @@ function lineaDesdeDte(
  * bloqueándolo en este mismo instante y destrabarse recién cuando se aparta
  * (F1, ronda 1).
  */
-function onCargarDte({ documento, lectura, proveedorId, rutProveedor }: CargaDte) {
+async function onCargarDte({ documento, lectura, proveedorId, rutProveedor }: CargaDte) {
+  const mio = ++turnoDte
+  const { lineas: repartidas, apartadas: apartadasIniciales } = repartirLineas(documento, lectura.asociaciones)
+  // Los productos ya asociados, ANTES de tocar nada: `lineaDesdeDte` los lee de `porId`, y
+  // uno que no esté ahí la deja por asociar. Si falla, no se carga a medias: se avisa y el
+  // encargado vuelve a cargar el XML.
+  try {
+    await catalogoProductos.resolver(repartidas.flatMap(({ destino }) => destino ? [destino.itemId] : []))
+  }
+  catch (e: unknown) {
+    if (mio === turnoDte) toast.add({ title: apiErrorMsg(e, 'No se pudieron cargar los productos de la factura'), color: 'error' })
+    return
+  }
+  if (mio !== turnoDte) return
   const proveedor = proveedores.value.find(p => p.id === proveedorId)
 
   form.value.proveedorId = proveedorId
@@ -426,7 +450,6 @@ function onCargarDte({ documento, lectura, proveedorId, rutProveedor }: CargaDte
   form.value.totalDocumento = llevaTotalTranscrito ? (documento.montoTotal ?? '') : ''
   form.value.fechaVencimiento = documento.fechaVencimiento ?? ''
 
-  const { lineas: repartidas, apartadas: apartadasIniciales } = repartirLineas(documento, lectura.asociaciones)
   lineas.value = repartidas.length
     ? repartidas.map(({ linea, destino, nota }) => lineaDesdeDte(linea, destino, nota))
     : [nuevaLinea()]
@@ -950,7 +973,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
               v-for="linea in lineas"
               :key="linea.key"
               :linea="linea"
-              :productos="productos"
+              :catalogo="catalogoProductos"
               :presentaciones="presentaciones"
               :proveedor-id="form.proveedorId"
               @seleccionar-item="(cambios: Partial<LineaForm>) => Object.assign(linea, cambios)"

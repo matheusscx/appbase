@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { useMonedasStore } from '~/stores/monedas'
 import { useUnidadesMedidaStore } from '~/stores/unidades-medida'
+import type { ItemsPorId } from '~/composables/useItemsPorId'
 import type { LineaForm, ProductoOpt } from './LineaCompraForm.vue'
 import LineaCompraForm from './LineaCompraForm.vue'
 
@@ -41,9 +42,20 @@ function lineaBase(o: Partial<LineaForm> = {}): LineaForm {
   }
 }
 
+/** El caché de la página, ya con lo que devolvió una búsqueda: lo que se elige sale de ahí. */
+function catalogoCon(items: ProductoOpt[]): ItemsPorId<ProductoOpt> {
+  const porId = reactive(new Map(items.map(i => [i.id, i]))) as Map<string, ProductoOpt>
+  return {
+    porId,
+    buscar: () => Promise.resolve(items),
+    resolver: () => Promise.resolve(),
+    registrar: (i: ProductoOpt) => { porId.set(i.id, i) },
+  }
+}
+
 async function montar(props: {
   linea: LineaForm
-  productos?: ProductoOpt[]
+  catalogo?: ItemsPorId<ProductoOpt>
   presentaciones?: typeof CAJA[]
   proveedorId?: string
 }) {
@@ -58,7 +70,7 @@ async function montar(props: {
   ])
   const wrapper = await mountSuspended(LineaCompraForm, {
     props: {
-      productos: [HARINA, BOTELLA_SERIE],
+      catalogo: catalogoCon([HARINA, BOTELLA_SERIE]),
       presentaciones: [CAJA],
       proveedorId: 'prov-1',
       ...props,
@@ -71,7 +83,7 @@ async function montar(props: {
 type Wrapper = Awaited<ReturnType<typeof montar>>
 
 function productoSelect(wrapper: Wrapper) {
-  return wrapper.findComponent({ name: 'USelectMenu' })
+  return wrapper.findComponent({ name: 'AppItemSelect' }).findComponent({ name: 'USelectMenu' })
 }
 
 function unidadSelect(wrapper: Wrapper) {

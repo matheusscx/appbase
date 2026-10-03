@@ -68,6 +68,7 @@ import type {
   LineaCompraDto,
 } from './dto/compra-borrador.dto';
 import type { FindComprasDto } from './dto/find-compras.dto';
+import type { QueryProductosCompraDto } from './dto/productos-compra.dto';
 import type { AnularCompraDto } from './dto/anular-compra.dto';
 import type {
   ActualizarDocumentoDto,
@@ -599,8 +600,37 @@ export class ComprasService {
    * Es el mismo conjunto que acepta `validarLineas`: ofrecer algo que después
    * rebota, o esconder algo que se acepta, desincroniza la pantalla del
    * backend.
+   *
+   * Paginada y con búsqueda, con el contrato de `GET /items` que consume
+   * `AppItemSelect`: la lista entera no escalaba con un catálogo grande
+   * (medición en `docs/features/compras.md`).
    */
-  async productos(tenantId: string): Promise<ProductoCompraOpcion[]> {
+  async productos(
+    tenantId: string,
+    query: QueryProductosCompraDto,
+  ): Promise<PaginatedResponse<ProductoCompraOpcion>> {
+    const { page, pageSize, offset } = resolvePagination(query);
+    const params: unknown[] = [tenantId, TIPOS_CON_STOCK];
+    let where = `i.tenant_id = $1 AND i.tipo = ANY($2::text[])
+          AND i.eliminado_el IS NULL`;
+    if (query.ids?.length) {
+      params.push(query.ids);
+      where += `
+          AND i.item_id = ANY($${params.length}::uuid[])`;
+    }
+    if (query.search) {
+      params.push(`%${query.search}%`);
+      where += `
+          AND (i.nombre ILIKE $${params.length} OR i.descripcion ILIKE $${params.length})`;
+    }
+
+    const countRows: { total: number }[] = await this.db.query(
+      `SELECT COUNT(*)::int AS total
+         FROM items i
+         JOIN item_producto ip ON ip.item_id = i.item_id
+        WHERE ${where}`,
+      params,
+    );
     const rows: {
       item_id: string;
       nombre: string;
@@ -610,17 +640,20 @@ export class ComprasService {
       `SELECT i.item_id, i.nombre, ip.modo_inventario, ip.unidad_medida
          FROM items i
          JOIN item_producto ip ON ip.item_id = i.item_id
-        WHERE i.tenant_id = $1 AND i.tipo = ANY($2::text[])
-          AND i.eliminado_el IS NULL
-        ORDER BY i.nombre`,
-      [tenantId, TIPOS_CON_STOCK],
+        WHERE ${where}
+        ORDER BY i.nombre, i.item_id
+        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, pageSize, offset],
     );
-    return rows.map((r) => ({
-      id: r.item_id,
-      nombre: r.nombre,
-      modoInventario: r.modo_inventario,
-      unidadMedida: r.unidad_medida,
-    }));
+    return {
+      data: rows.map((r) => ({
+        id: r.item_id,
+        nombre: r.nombre,
+        modoInventario: r.modo_inventario,
+        unidadMedida: r.unidad_medida,
+      })),
+      meta: buildPaginationMeta(page, pageSize, countRows[0]?.total ?? 0),
+    };
   }
 
   /**

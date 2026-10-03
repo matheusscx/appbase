@@ -33,7 +33,9 @@ tres listados completos en cada toque sobre la cuenta abierta.
 - Incluido (fase B): los selectores de configuración e inventario (componentes de combo,
   promociones, grupos de modificadores, mermas, traslados, recuentos, suscripciones) buscan en el
   servidor con `AppItemSelect` y `useItemsPorId`.
-- Fuera: `GET /compras/productos`, que no pagina (el problema contrario).
+- Fuera: `GET /compras/productos`, que no paginaba (el problema contrario). Se cerró aparte el
+  2026-10-03 con el mismo selector sobre la lista de Compras: ver
+  [compras.md](compras.md#api-endpoints).
 
 ---
 

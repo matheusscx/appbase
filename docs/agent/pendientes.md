@@ -71,6 +71,15 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
+- [ ] **Un `page` cuyo `OFFSET` no cabe en un `bigint` da 500 en todas las rutas paginadas** (backend,
+  `common/dto/pagination-query.dto.ts`; medido el 2026-10-03, lo levantó la revisión de seguridad
+  del cierre de `GET /compras/productos`). `page` tiene `@IsInt` y `@Min(1)` pero no `@Max`:
+  `page=99999999999999999999` dio 500 en `/compras/productos`, `/items` y `/compras`, porque el
+  `OFFSET` no cabe en un `bigint`; `page=9007199254740991` (2^53 − 1) todavía dio 200 con `data: []`. El umbral es el `bigint` de Postgres dividido por `pageSize`, no 2^53. No expone
+  nada (es un 500 genérico, dentro del tenant), pero es un 500 que tendría que ser 400, y lo
+  heredan todos los DTOs que extienden `PaginationQueryDto` (16 archivos el 2026-10-03, por grep). **Arreglo:** un `@Max` en `page` en ese
+  DTO (con un tope holgado, por ejemplo 1.000.000) y un e2e que pida esa página y espere 400.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -189,13 +198,15 @@ destapa una decisión que no es mía).
   (minúsculas a la entrada). El `grupoOpcionId` del mismo DTO solo va a SQL (leído): no tiene el
   problema.
 
-- [ ] **`GET /compras/productos` trae todo el catálogo de una vez, sin paginar** (backend +
-  frontend; el problema contrario al que cerró el catálogo paginado). Lo consume
-  `pages/compras/[id].vue` para ofrecer qué comprar. **No medido:** no se sabe cuánto pesa ni cuánto
-  tarda con un catálogo grande. **Medir:** el mismo catálogo sintético del Apéndice A de
-  [`2026-10-03-catalogo-paginado.md`](../superpowers/plans/2026-10-03-catalogo-paginado.md) y
-  `curl -w "%{time_total} %{size_download}"` sobre la ruta, antes de decidir si se pagina o si la
-  pantalla pasa a `AppItemSelect` (el selector ya busca en el servidor).
+- [ ] **Ninguna respuesta de la API viaja comprimida** (backend + proxy de Nuxt; medido en local
+  el 2026-10-03, al cerrar la paginación de `GET /compras/productos`). Ni Nest ni
+  `server/api/[...].ts` comprimen: con `Accept-Encoding: gzip`, `GET /compras/productos` (entera,
+  antes del cierre) bajó del backend los mismos 691.257 bytes que sin el header, y
+  `GET /items?pageSize=100` bajó 66.158 bytes sin `Content-Encoding` tanto del backend como a
+  través del proxy (`nuxt build`). La ruta de compras ya no pesa (página de 20, 2,7 KB), así que
+  no hay un caso medido que duela hoy. **Medir:** el tamaño con y sin `gzip` de las respuestas grandes que siguen enteras
+  (listados sin paginar, reportes) y si Railway comprime en el borde, antes de decidir si va en
+  Nest, en el proxy o en ningún lado.
 
 - [ ] **Una venta con dos líneas del mismo producto con serie muestra todas las unidades bajo cada
   línea** (frontend + backend, `VentaDetalleDrawer.vue` y `VentasService` armado del detalle; **leído,
@@ -2119,14 +2130,14 @@ enterarse tarde. Esta sección se abre al encarar el paso a producción. Orden =
 
 - [ ] **El filtro de tipo de `GET /compras/productos` es redundante con su `JOIN`, y se deja a
   propósito** (backend, medido el 2026-09-19 al cerrar la pieza 1 de compras) — sacar
-  `i.tipo = ANY($2::text[])` de la consulta (`compras.service.ts:374`) **no rompe ningún
+  `i.tipo = ANY($2::text[])` de la consulta (`ComprasService.productos`) **no rompe ningún
   test**, y el motivo no es un hueco de cobertura: el `JOIN item_producto` ya deja afuera
   todo lo demás. Quien escribe esa fila es `ItemsService.create`, **dentro de un
   `if (dto.tipo === 'producto' || dto.tipo === 'ingrediente')`**
-  (`items.service.ts:1655`), que son exactamente los dos tipos que el filtro nombra. O sea
+  (`items.service.ts`), que son exactamente los dos tipos que el filtro nombra. O sea
   que hoy el filtro no puede cambiar ninguna fila del resultado.
   **Por qué se deja igual:** es el espejo de `validarLineas`, que valida contra la misma
-  constante `TIPOS_CON_STOCK` (`compras.service.ts:250`). Si mañana un tercer tipo llegara a
+  constante `TIPOS_CON_STOCK` (`ComprasService.validarLineas`). Si mañana un tercer tipo llegara a
   tener `item_producto`, la lista que se ofrece y la validación que acepta siguen diciendo lo
   mismo; sin el filtro, la pantalla ofrecería algo que el backend después rechaza. **No es un
   test que falte:** matarlo pediría un tipo con `item_producto` que hoy no se puede crear por

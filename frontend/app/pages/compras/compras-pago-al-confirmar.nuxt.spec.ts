@@ -63,7 +63,12 @@ mockNuxtImport('useApiFetch', () => {
     if (url.includes('/compras/tipos-documento')) return Promise.resolve([FACTURA])
     if (url.includes('/compras/proveedores')) return Promise.resolve([PROVEEDOR])
     if (url.includes('/ubicaciones')) return Promise.resolve([BODEGA])
-    if (url.includes('/compras/productos')) return Promise.resolve([CAFE, COCA])
+    // Paginada: `ids=` resuelve los elegidos; sin él es la búsqueda del selector.
+    if (url.includes('/compras/productos?')) {
+      const ids = new URL(url, 'http://x').searchParams.get('ids')?.split(',')
+      const data = [CAFE, COCA].filter(p => !ids || ids.includes(p.id))
+      return Promise.resolve({ data, meta: { page: 1, pageSize: 20, total: data.length, totalPages: 1 } })
+    }
     if (url.includes('/catalog/unidades-medida')) return Promise.resolve([])
     return Promise.resolve([])
   }

@@ -30,6 +30,7 @@ import { PresentacionesCompraService } from './presentaciones-compra.service';
 import { LecturaDteService } from './lectura-dte.service';
 import { CompraBorradorDto } from './dto/compra-borrador.dto';
 import { FindComprasDto } from './dto/find-compras.dto';
+import { QueryProductosCompraDto } from './dto/productos-compra.dto';
 import { AnularCompraDto } from './dto/anular-compra.dto';
 import {
   ActualizarDocumentoDto,
@@ -106,9 +107,9 @@ export class ComprasController {
    */
   @Get('productos')
   @RequiresPermiso('Compras', 'Crear')
-  productos(@Req() req: Request) {
+  productos(@Req() req: Request, @Query() query: QueryProductosCompraDto) {
     const { tenantId } = req.user as { tenantId: string };
-    return this.comprasService.productos(tenantId);
+    return this.comprasService.productos(tenantId, query);
   }
 
   /**

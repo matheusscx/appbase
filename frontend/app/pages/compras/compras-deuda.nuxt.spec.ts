@@ -56,7 +56,12 @@ mockNuxtImport('useApiFetch', () => {
     if (url.includes('/compras/tipos-documento')) return Promise.resolve([FACTURA, GUIA, SIN_DOC])
     if (url.includes('/compras/proveedores')) return Promise.resolve([PROVEEDOR_CON_PLAZO, PROVEEDOR_SIN_PLAZO])
     if (url.includes('/ubicaciones')) return Promise.resolve([BODEGA])
-    if (url.includes('/compras/productos')) return Promise.resolve([HARINA])
+    // Paginada: `ids=` resuelve los elegidos; sin él es la búsqueda del selector.
+    if (url.includes('/compras/productos?')) {
+      const ids = new URL(url, 'http://x').searchParams.get('ids')?.split(',')
+      const data = [HARINA].filter(p => !ids || ids.includes(p.id))
+      return Promise.resolve({ data, meta: { page: 1, pageSize: 20, total: data.length, totalPages: 1 } })
+    }
     if (url.includes('/catalog/unidades-medida')) return Promise.resolve([])
     return Promise.resolve([])
   }
@@ -87,6 +92,14 @@ function selectConOpcion(wrapper: Wrapper, valor: string) {
 async function emitir(comp: { vm: { $emit: (e: string, v: string) => void } }, valor: string) {
   comp.vm.$emit('update:modelValue', valor)
   await new Promise(r => setTimeout(r, 0))
+}
+
+/** Elige el producto de la primera línea: abre el `AppItemSelect` (la búsqueda llena el caché) y emite. */
+async function elegirProducto(wrapper: Wrapper, itemId: string) {
+  const menu = wrapper.findComponent({ name: 'AppItemSelect' }).findComponent({ name: 'USelectMenu' })
+  menu.vm.$emit('update:open', true)
+  await new Promise(r => setTimeout(r, 20))
+  await emitir(menu, itemId)
 }
 
 function totalDocumentoInput(wrapper: Wrapper) {
@@ -170,7 +183,7 @@ describe('compras/[id] — el total del documento y el vencimiento (spec compras
     const fecha = wrapper.find('input[type="date"]:not([data-qa="compra-vencimiento"])')
     await fecha.setValue('2026-10-01')
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
-    await emitir(selectConOpcion(wrapper, HARINA.id), HARINA.id)
+    await elegirProducto(wrapper, HARINA.id)
     await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
     await new Promise(r => setTimeout(r, 10))
     await emitir(totalDocumentoInput(wrapper)!, '500000')
@@ -203,7 +216,7 @@ describe('compras/[id] — el total del documento y el vencimiento (spec compras
     const fecha = wrapper.find('input[type="date"]:not([data-qa="compra-vencimiento"])')
     await fecha.setValue('2026-10-01')
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
-    await emitir(selectConOpcion(wrapper, HARINA.id), HARINA.id)
+    await elegirProducto(wrapper, HARINA.id)
     await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
     await new Promise(r => setTimeout(r, 10))
 

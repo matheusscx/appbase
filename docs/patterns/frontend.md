@@ -880,6 +880,10 @@ unidad, nombres de un alcance) sale de menos sin avisar.
 - **Los filtros van al servidor** (`filtros: { tipo, modoInventario, activo }`), no se filtra
   después sobre lo que llegó: una página de 20 filtrada en el navegador esconde resultados.
 - `clear` en un filtro donde vacío significa "todos".
+- **Si la pantalla no puede leer `/items`** (un módulo con su lista propia, backend § 19),
+  `useItemsPorId('/compras/productos')`: misma caché y mismo selector sobre esa ruta, que
+  responde con el contrato de `/items` (`search`, `ids`, página). A esa ruta no se le pasan
+  `filtros`: son parámetros de `/items`.
 - **Opciones = elegidos ∪ resultados.** Lo resuelve el componente; una pantalla que arma su propio
   `USelectMenu` con búsqueda tiene que repetirlo o el elegido se ve sin nombre.
 

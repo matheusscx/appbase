@@ -14,8 +14,13 @@ const TANDA_IDS = 100
  * Caché de ítems por id para las pantallas que ya no tienen el catálogo entero en memoria
  * (spec docs/superpowers/specs/2026-10-03-catalogo-paginado-design.md § 5): `buscar` llena
  * la caché con lo que devuelve el servidor; `resolver` trae por `ids=` solo lo que falta.
+ *
+ * `ruta`: una lista propia de otro módulo con el mismo contrato (`search`, `ids`, página),
+ * como `/compras/productos`, que no exige permiso sobre el catálogo de ítems
+ * (docs/patterns/backend.md § 19). ⚠️ Los `filtros` (`tipo`, `activo`, `modoInventario`) son
+ * parámetros de `/items`: con otra ruta no se pasan, y si se pasan el backend responde 400.
  */
-export function useItemsPorId<T extends { id: string, nombre: string }>() {
+export function useItemsPorId<T extends { id: string, nombre: string }>(ruta = '/items') {
   const apiUrl = useRuntimeConfig().public.apiUrl
   // El cast: `reactive` desenvuelve refs sobre `T` genérico y `set(id, item)` dejaría de compilar.
   const porId = reactive(new Map<string, T>()) as Map<string, T>
@@ -30,7 +35,7 @@ export function useItemsPorId<T extends { id: string, nombre: string }>() {
     if (filtros.tipo?.length) params.set('tipo', filtros.tipo.join(','))
     if (filtros.activo !== undefined) params.set('activo', String(filtros.activo))
     if (filtros.modoInventario) params.set('modoInventario', filtros.modoInventario)
-    const res = await useApiFetch<PaginatedResponse<T>>(`${apiUrl}/items?${params}`)
+    const res = await useApiFetch<PaginatedResponse<T>>(`${apiUrl}${ruta}?${params}`)
     res.data.forEach(registrar)
     return res.data
   }
@@ -42,7 +47,7 @@ export function useItemsPorId<T extends { id: string, nombre: string }>() {
         ids: faltan.slice(i, i + TANDA_IDS).join(','),
         pageSize: String(TANDA_IDS),
       })
-      const res = await useApiFetch<PaginatedResponse<T>>(`${apiUrl}/items?${params}`)
+      const res = await useApiFetch<PaginatedResponse<T>>(`${apiUrl}${ruta}?${params}`)
       res.data.forEach(registrar)
     }
   }

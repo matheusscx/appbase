@@ -172,7 +172,12 @@ test('el encargado encuentra el producto al cargar una compra: la lista es de Co
   await page.goto('/compras/nueva', { waitUntil: 'networkidle' })
 
   await page.getByText('Selecciona un producto').click()
+  // La búsqueda va al servidor, a la lista de Compras. Se espera la respuesta y no solo la
+  // opción: con el catálogo chico del seed, la opción ya puede estar en la primera página.
+  const busqueda = page.waitForResponse(r =>
+    r.url().includes('/api/compras/productos?') && new URL(r.url()).searchParams.get('search') === nombre)
   await page.keyboard.type(nombre)
+  expect((await busqueda).status()).toBe(200)
   await expect(page.getByRole('option', { name: nombre })).toBeVisible()
   // Ni un pedido al catálogo de ítems, que el encargado no puede leer.
   expect(listados).toEqual([])

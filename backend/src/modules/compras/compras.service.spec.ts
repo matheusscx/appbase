@@ -407,39 +407,85 @@ describe('ComprasService (borrador)', () => {
   });
 
   describe('listas propias de Compras (owner, 2026-09-19)', () => {
-    it('productos ofrece lo mismo que validarLineas acepta: producto e ingrediente con stock, no borrados', async () => {
-      pisar(
-        /JOIN item_producto ip ON ip\.item_id = i\.item_id\s+WHERE i\.tenant_id = \$1/,
-        [
-          {
-            item_id: ITEM,
-            nombre: 'Harina',
-            modo_inventario: 'cantidad',
-            unidad_medida: 'kg',
-          },
-        ],
-      );
+    // Control débil (texto del SQL): el JOIN, el orden y el filtro de borrado
+    // contra Postgres los ejerce `compras.e2e-spec.ts`.
+    const SQL_PRODUCTOS =
+      /JOIN item_producto ip ON ip\.item_id = i\.item_id\s+WHERE i\.tenant_id = \$1/;
+    const SQL_CONTEO = /SELECT COUNT\(\*\)::int AS total\s+FROM items i/;
+    const consultaDe = (re: RegExp) => {
+      const db = (service as unknown as { db: { query: jest.Mock } }).db;
+      return db.query.mock.calls.find(([q]) => re.test(q as string))! as [
+        string,
+        unknown[],
+      ];
+    };
 
-      const r = await service.productos(TENANT);
-
-      expect(r).toEqual([
+    it('productos ofrece lo mismo que validarLineas acepta, paginado: producto e ingrediente con stock, no borrados', async () => {
+      pisar(SQL_PRODUCTOS, [
         {
-          id: ITEM,
+          item_id: ITEM,
           nombre: 'Harina',
-          modoInventario: 'cantidad',
-          unidadMedida: 'kg',
+          modo_inventario: 'cantidad',
+          unidad_medida: 'kg',
         },
       ]);
-      const db = (service as unknown as { db: { query: jest.Mock } }).db;
-      const [sql, params] = db.query.mock.calls.find(([q]) =>
-        /JOIN item_producto ip ON ip\.item_id = i\.item_id\s+WHERE i\.tenant_id/.test(
-          q as string,
-        ),
-      )! as [string, unknown[]];
+      pisar(SQL_CONTEO, [{ total: 41 }]);
+
+      const r = await service.productos(TENANT, { page: 3, pageSize: 20 });
+
+      expect(r).toEqual({
+        data: [
+          {
+            id: ITEM,
+            nombre: 'Harina',
+            modoInventario: 'cantidad',
+            unidadMedida: 'kg',
+          },
+        ],
+        meta: { page: 3, pageSize: 20, total: 41, totalPages: 3 },
+      });
+      const [sql, params] = consultaDe(
+        /SELECT i\.item_id, i\.nombre, ip\.modo_inventario/,
+      );
       expect(sql).toMatch(
         /i\.tipo = ANY\(\$2::text\[\]\)\s+AND i\.eliminado_el IS NULL/,
       );
-      expect(params).toEqual([TENANT, ['producto', 'ingrediente']]);
+      // El desempate por id: sin él, dos nombres iguales cambian de página entre pedidos.
+      expect(sql).toMatch(
+        /ORDER BY i\.nombre, i\.item_id\s+LIMIT \$3 OFFSET \$4/,
+      );
+      expect(params).toEqual([TENANT, ['producto', 'ingrediente'], 20, 40]);
+      const [sqlConteo, paramsConteo] = consultaDe(SQL_CONTEO);
+      expect(sqlConteo).toMatch(
+        /i\.tipo = ANY\(\$2::text\[\]\)\s+AND i\.eliminado_el IS NULL/,
+      );
+      expect(paramsConteo).toEqual([TENANT, ['producto', 'ingrediente']]);
+    });
+
+    it('productos busca por nombre o descripción y resuelve por ids, igual que GET /items', async () => {
+      pisar(SQL_PRODUCTOS, []);
+      pisar(SQL_CONTEO, [{ total: 0 }]);
+
+      await service.productos(TENANT, { search: 'harina', ids: [ITEM] });
+
+      const [sql, params] = consultaDe(
+        /SELECT i\.item_id, i\.nombre, ip\.modo_inventario/,
+      );
+      expect(sql).toMatch(/AND i\.item_id = ANY\(\$3::uuid\[\]\)/);
+      expect(sql).toMatch(
+        /AND \(i\.nombre ILIKE \$4 OR i\.descripcion ILIKE \$4\)/,
+      );
+      expect(params).toEqual([
+        TENANT,
+        ['producto', 'ingrediente'],
+        [ITEM],
+        '%harina%',
+        15,
+        0,
+      ]);
+      expect(consultaDe(SQL_CONTEO)[0]).toMatch(
+        /AND i\.item_id = ANY\(\$3::uuid\[\]\)\s+AND \(i\.nombre ILIKE \$4/,
+      );
     });
 
     it('las unidades de una línea que no es de esa compra (o de otro tenant) son 404', async () => {

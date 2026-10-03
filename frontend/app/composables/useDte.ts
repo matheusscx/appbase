@@ -307,7 +307,7 @@ export interface DteLineaInfo {
  * Los campos de una `LineaForm` que salen de una línea del XML ya repartida
  * (`repartirLineas`): la pantalla los mezcla con `nuevaLinea()` para
  * completar el resto (key, series, lote…). Puro y testeable acá — la página
- * solo resuelve `producto` desde su catálogo (`productos.value.find(...)`).
+ * solo resuelve `producto` desde su catálogo (`catalogoProductos.porId`).
  *
  * ⚠️ **Un destino cuyo producto ya no está en el catálogo llega por asociar**,
  * nunca con un `itemId` que la pantalla no puede resolver (tarea 4 § 3, `nota`

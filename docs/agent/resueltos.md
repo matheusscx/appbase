@@ -24,6 +24,62 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 ---
 
 
+## `GET /compras/productos` busca y pagina en el servidor, y la compra usa `AppItemSelect` (cerrada 2026-10-03)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. La regla viva y la tabla de lo medido, en
+[`compras.md`](../features/compras.md#api-endpoints).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **`GET /compras/productos` trae todo el catálogo de una vez, sin paginar** (backend +
+  frontend; el problema contrario al que cerró el catálogo paginado). Lo consume
+  `pages/compras/[id].vue` para ofrecer qué comprar. **No medido:** no se sabe cuánto pesa ni cuánto
+  tarda con un catálogo grande. **Medir:** el mismo catálogo sintético del Apéndice A de
+  [`2026-10-03-catalogo-paginado.md`](../superpowers/plans/2026-10-03-catalogo-paginado.md) y
+  `curl -w "%{time_total} %{size_download}"` sobre la ruta, antes de decidir si se pagina o si la
+  pantalla pasa a `AppItemSelect` (el selector ya busca en el servidor).
+
+### Qué se midió
+
+Con el catálogo sintético del Apéndice A (5.307 productos e ingredientes en el tenant), **el
+servidor no era el problema**: 25 ms y 691 KB sin comprimir, y la consulta 17,9 ms. **La pantalla
+sí:** abrir el selector de producto de una línea tardaba **1,8 s** con el build de producción
+(5.307 opciones en el DOM), y cada línea de la compra tiene el suyo.
+
+### Qué se hizo
+
+La decisión no era obvia: `AppItemSelect` buscaba solo en `GET /items`, que exige permiso sobre
+el catálogo, y Compras tiene lista propia para no exigirlo (owner, 2026-09-19). La tomó la Sesión
+de esfuerzo máximo: **las dos cosas**, sin pasar por `/items`.
+
+- **Backend:** `GET /compras/productos` acepta `search` (nombre o descripción), `ids` (hasta 100)
+  y página, con el contrato de `GET /items`, y responde siempre `PaginatedResponse`. No acepta los
+  filtros de `/items`: un `tipo=` es 400. El filtro `TIPOS_CON_STOCK` sigue igual (Vigilancia).
+  Orden `nombre, item_id` para que la página no cambie entre pedidos.
+- **Frontend:** `useItemsPorId(ruta = '/items')`, sin tocar a ningún llamador existente. La compra
+  usa `useItemsPorId('/compras/productos')` y `AppItemSelect` en cada línea. Los productos de un
+  borrador y los asociados de un XML se resuelven por `ids=` en un solo pedido y antes de pintar
+  las líneas. Si ese pedido falla al cargar un XML, no se carga nada y se avisa. Con dos XML
+  seguidos queda el último (un `turno`, como en `AppItemSelect`): lo levantó la revisión
+  independiente, porque ese `await` era nuevo.
+- **Resultado:** la ruta, 16 ms y 2,7 KB; abrir el selector, ~54 ms.
+
+### Qué lo fija
+
+- `compras.e2e-spec.ts`, *"productos: el encargado busca y resuelve sin Items:Leer…"*: el
+  encargado (sin `Items:Leer`) busca y resuelve con 200, la página 2 no repite la 1, lo borrado y
+  lo que no se compra no vuelven, y `tipo=` es 400. **Sin `eliminado_el IS NULL`** en la consulta,
+  ese test cae: el borrado vuelve, y la primera aserción que lo ve es la de la búsqueda.
+- `compras-carga.nuxt.spec.ts`, *"los productos se resuelven por id…"*: **sin el `resolver` del
+  borrador** cae el de dos líneas (dos pedidos en vez de uno); **sin el del XML** caen 8: los dos nuevos
+  del XML y seis de la carga del XML (la Coca queda por asociar); **sin el `return` tras el fallo** cae el de
+  "no carga nada a medias"; **sin el `turno`** cae el de "dos XML seguidos" (queda el folio del
+  primero).
+- `compras-por-pantalla.spec.ts` (Playwright, como el encargado): la búsqueda va a
+  `/compras/productos` con 200 y nunca a `/items`.
+
+---
+
 ## Restaurar un combo o un grupo cuyo producto pasó a serie estando en la papelera frena con 400 (cerrada 2026-10-03)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. La regla viva, en

@@ -108,6 +108,13 @@ let replaceCalls: string[] = []
  */
 let confirmDuranteReplace: boolean | null = null
 
+const PRODUCTOS = [HARINA, LATAS, BOTELLA_SERIE, COCA, FANTA]
+/** Cada pedido a `/compras/productos`: para afirmar que no se trae la lista entera. */
+let pedidosProductos: string[] = []
+let productosFalla = false
+/** Si está, los pedidos a `/compras/productos` esperan a que se cumpla: para ordenar respuestas. */
+let retenerProductos: Promise<void> | null = null
+
 const FIXTURES_DTE = join(__dirname, '../../composables/__fixtures__/dte')
 function documentoAndina(): DocumentoDte {
   const buf = readFileSync(join(FIXTURES_DTE, 'andina-33.xml'))
@@ -177,7 +184,15 @@ mockNuxtImport('useApiFetch', () => {
     if (url.includes('/compras/proveedores')) return Promise.resolve([PROVEEDOR, PROVEEDOR2, PROVEEDOR_ANDINA])
     if (url.includes('/ubicaciones')) return Promise.resolve([BODEGA])
     // La lista de Compras, no `/items`: el encargado no tiene permiso de Ítems.
-    if (url.includes('/compras/productos')) return Promise.resolve([HARINA, LATAS, BOTELLA_SERIE, COCA, FANTA])
+    // Paginada: `ids=` resuelve los elegidos; sin él es la búsqueda del selector.
+    if (url.includes('/compras/productos?')) {
+      pedidosProductos.push(url)
+      if (productosFalla) return Promise.reject({ status: 500, statusCode: 500, data: { message: 'Se cayó' } })
+      const ids = new URL(url, 'http://x').searchParams.get('ids')?.split(',')
+      const data = ids ? PRODUCTOS.filter(p => ids.includes(p.id)) : PRODUCTOS
+      const respuesta = { data, meta: { page: 1, pageSize: 20, total: data.length, totalPages: 1 } }
+      return (retenerProductos ?? Promise.resolve()).then(() => respuesta)
+    }
     if (url.includes('/items')) throw new Error('la carga de compras no debe pedir /items')
     if (url.includes('/catalog/unidades-medida')) return Promise.resolve(UNIDADES_CATALOGO)
     // Un borrador existente (§ 8, caso "presentación retirada"): la línea llega
@@ -207,7 +222,13 @@ mockNuxtImport('useApiFetch', () => {
           id: 'l1', orden: 0, itemId: LATAS.id, itemNombre: LATAS.nombre, modoInventario: 'cantidad',
           unidadMedidaBase: 'unidad', cantidad: '10', unidadCodigo: null, precioUnitario: '9600',
           series: null, lote: null, presentacion: null,
-        }],
+        }, ...(routeId === 'compra-dos-lineas'
+          ? [{
+              id: 'l2', orden: 1, itemId: HARINA.id, itemNombre: HARINA.nombre, modoInventario: 'cantidad',
+              unidadMedidaBase: 'kg', cantidad: '5', unidadCodigo: 'kg', precioUnitario: '1000',
+              series: null, lote: null, presentacion: null,
+            }]
+          : [])],
         cambios: [],
       })
     }
@@ -221,6 +242,9 @@ async function montar() {
     separadorDecimal: ',', separadorMiles: '.', locale: 'es-CL', habilitada: true,
     esOficial: true, valorDelDia: null,
   }], 'tenant-1')
+  pedidosProductos = []
+  productosFalla = false
+  retenerProductos = null
   const wrapper = await mountSuspended(CompraCarga, { attachTo: document.body })
   await new Promise(r => setTimeout(r, 50))
   return wrapper
@@ -240,6 +264,17 @@ function selectConOpcion(wrapper: Wrapper, valor: string) {
 async function emitir(comp: { vm: { $emit: (e: string, v: string) => void } }, valor: string) {
   comp.vm.$emit('update:modelValue', valor)
   await new Promise(r => setTimeout(r, 0))
+}
+
+/** Elige el producto de la línea `index` como el usuario: abre el `AppItemSelect` (la búsqueda
+ *  llena el caché) y emite. Su `USelectMenu` no trae opciones hasta abrirse. */
+async function elegirProducto(wrapper: Wrapper, index: number, itemId: string) {
+  const selectores = wrapper.findAllComponents({ name: 'AppItemSelect' })
+  expect(selectores.length, 'AppItemSelect de producto').toBeGreaterThan(index)
+  const menu = selectores[index]!.findComponent({ name: 'USelectMenu' })
+  menu.vm.$emit('update:open', true)
+  await new Promise(r => setTimeout(r, 20))
+  await emitir(menu, itemId)
 }
 
 /** El `MoneyInput` del precio de la PRIMERA línea (el del descuento está deshabilitado). */
@@ -300,7 +335,7 @@ describe('compras/[id] — carga del borrador', () => {
     await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
     await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
-    await emitir(selectConOpcion(wrapper, HARINA.id), HARINA.id)
+    await elegirProducto(wrapper, 0, HARINA.id)
     await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
 
     await wrapper.find('form').trigger('submit')
@@ -324,7 +359,7 @@ describe('compras/[id] — carga del borrador', () => {
     await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
     await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
-    await emitir(selectConOpcion(wrapper, HARINA.id), HARINA.id)
+    await elegirProducto(wrapper, 0, HARINA.id)
     await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
     await emitir(precioInput(wrapper), '1000')
 
@@ -347,7 +382,7 @@ describe('compras/[id] — carga del borrador', () => {
     await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
     await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
-    await emitir(selectConOpcion(wrapper, HARINA.id), HARINA.id)
+    await elegirProducto(wrapper, 0, HARINA.id)
     await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
     const precio = precioInput(wrapper)
     await emitir(precio, '1000')
@@ -369,7 +404,7 @@ describe('compras/[id] — carga del borrador', () => {
     await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
     await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
-    await emitir(selectConOpcion(wrapper, HARINA.id), HARINA.id)
+    await elegirProducto(wrapper, 0, HARINA.id)
     await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
 
     await wrapper.find('[data-qa="compra-confirmar"]').trigger('click')
@@ -421,7 +456,7 @@ describe('compras/[id] — carga del borrador', () => {
     await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
     await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
-    await emitir(selectConOpcion(wrapper, HARINA.id), HARINA.id)
+    await elegirProducto(wrapper, 0, HARINA.id)
     await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
     await emitir(precioInput(wrapper), '1000')
 
@@ -502,7 +537,7 @@ describe('compras/[id] — carga del borrador', () => {
     await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
     await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
-    await emitir(selectConOpcion(wrapper, HARINA.id), HARINA.id)
+    await elegirProducto(wrapper, 0, HARINA.id)
     await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
 
     // Espía el router REAL de la instancia (mismo mecanismo que
@@ -560,7 +595,7 @@ async function elegirProveedorYProducto(wrapper: Wrapper, proveedorId: string, i
   await emitir(selectConOpcion(wrapper, proveedorId), proveedorId)
   // `presentaciones` se piden por `watch(proveedorId)`: darle una vuelta al loop.
   await new Promise(r => setTimeout(r, 20))
-  await emitir(selectConOpcion(wrapper, itemId), itemId)
+  await elegirProducto(wrapper, 0, itemId)
 }
 
 describe('compras/[id] — la unidad de compra por proveedor (pieza 2 § 6)', () => {
@@ -839,23 +874,12 @@ describe('compras/[id] — cargar desde el XML (tarea 4)', () => {
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
     expect(wrapper.find('[data-qa="compra-guardar"]').attributes('disabled')).toBeDefined()
 
-    // La segunda línea (índice 1) es la Fanta, "por asociar".
-    const selects = wrapper.findAllComponents({ name: 'USelectMenu' })
-    const productoFanta = selects.find((s) => {
-      const items = (s.props('items') ?? []) as { value: string }[]
-      return items.some(i => i?.value === FANTA.id)
-    })
-    // Hay un USelectMenu de Producto por línea: el de la Fanta es el que
-    // todavía no tiene a Coca elegido (su modelValue está vacío).
-    const fantaSelect = wrapper.findAllComponents({ name: 'USelectMenu' })
-      .filter(s => (s.props('items') as { value: string }[] | undefined)?.some(i => i?.value === FANTA.id))
-      .find(s => !s.props('modelValue'))
-    expect(fantaSelect, 'USelectMenu de la línea Fanta').toBeTruthy()
-    await emitir(fantaSelect!, FANTA.id)
+    // La segunda línea (índice 1) es la Fanta, "por asociar": sin producto elegido.
+    expect(wrapper.findAllComponents({ name: 'AppItemSelect' })[1]!.props('modelValue')).toBeNull()
+    await elegirProducto(wrapper, 1, FANTA.id)
 
     expect(unidadSelect(wrapper, 1).props('modelValue')).toBe('')
     expect(wrapper.find('[data-qa="compra-guardar"]').attributes('disabled')).toBeDefined()
-    expect(productoFanta).toBeTruthy()
     wrapper.unmount()
   })
 
@@ -910,10 +934,7 @@ describe('compras/[id] — cargar desde el XML (tarea 4)', () => {
 
     // Se asocia la Fanta a mano: producto + unidad (la unidad queda vacía al
     // elegir el producto — se completa acá, como haría el encargado).
-    const fantaSelect = wrapper.findAllComponents({ name: 'USelectMenu' })
-      .filter(s => (s.props('items') as { value: string }[] | undefined)?.some(i => i?.value === FANTA.id))
-      .find(s => !s.props('modelValue'))
-    await emitir(fantaSelect!, FANTA.id)
+    await elegirProducto(wrapper, 1, FANTA.id)
     await emitir(unidadSelect(wrapper, 1), 'u:unidad')
 
     await wrapper.find('form').trigger('submit')
@@ -961,10 +982,7 @@ describe('compras/[id] — cargar desde el XML (tarea 4)', () => {
       rutProveedor: doc.emisorRut, // simula que se eligió a mano
     })
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
-    const fantaSelect = wrapper.findAllComponents({ name: 'USelectMenu' })
-      .filter(s => (s.props('items') as { value: string }[] | undefined)?.some(i => i?.value === FANTA.id))
-      .find(s => !s.props('modelValue'))
-    await emitir(fantaSelect!, FANTA.id)
+    await elegirProducto(wrapper, 1, FANTA.id)
     await emitir(unidadSelect(wrapper, 1), 'u:unidad')
 
     await wrapper.find('form').trigger('submit')
@@ -1008,10 +1026,7 @@ describe('compras/[id] — cargar desde el XML (tarea 4)', () => {
       rutProveedor: null,
     })
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
-    const fantaSelect = wrapper.findAllComponents({ name: 'USelectMenu' })
-      .filter(s => (s.props('items') as { value: string }[] | undefined)?.some(i => i?.value === FANTA.id))
-      .find(s => !s.props('modelValue'))
-    await emitir(fantaSelect!, FANTA.id)
+    await elegirProducto(wrapper, 1, FANTA.id)
     await emitir(unidadSelect(wrapper, 1), 'u:unidad')
 
     await wrapper.find('form').trigger('submit')
@@ -1035,20 +1050,14 @@ describe('compras/[id] — cargar desde el XML (tarea 4)', () => {
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
 
     // Asocia la Fanta (obligatoria: `puedeGuardar` exige toda línea del XML asociada).
-    const fantaSelect = wrapper.findAllComponents({ name: 'USelectMenu' })
-      .filter(s => (s.props('items') as { value: string }[] | undefined)?.some(i => i?.value === FANTA.id))
-      .find(s => !s.props('modelValue'))
-    await emitir(fantaSelect!, FANTA.id)
+    await elegirProducto(wrapper, 1, FANTA.id)
     await emitir(unidadSelect(wrapper, 1), 'u:unidad')
 
     // El FLETE se asocia a CUALQUIER ítem (Harina) para destrabar "Guardar"
     // —pero sigue sin precio en el XML—, así que `faltaAlgunPrecio` nunca se
     // resuelve en esta lectura: el descuento de la factura ($2.100) no
     // llega a autocompletarse (`origenDte.descuentoLlenado` queda en `false`).
-    const fleteSelect = wrapper.findAllComponents({ name: 'USelectMenu' })
-      .filter(s => (s.props('items') as { value: string }[] | undefined)?.some(i => i?.value === HARINA.id))
-      .find(s => !s.props('modelValue'))
-    await emitir(fleteSelect!, HARINA.id)
+    await elegirProducto(wrapper, 2, HARINA.id)
     await emitir(unidadSelect(wrapper, 2), 'u:kg')
     await wrapper.findAll('input[data-qa="compra-cantidad"]').at(2)!.setValue('5')
     await new Promise(r => setTimeout(r, 10))
@@ -1073,6 +1082,96 @@ describe('compras/[id] — cargar desde el XML (tarea 4)', () => {
     // discriminar. Con `null`, ese mutante da rojo (`expected '2100' to be ''`). Solo `null` (⇒ `descuentoActual` vuelve a `''`) deja pasar la
     // condición y expone si `origenDte` se limpió a tiempo.
     expect(descuentoInput(wrapper).props('modelValue')).toBe('')
+    wrapper.unmount()
+  })
+})
+
+/**
+ * La lista de productos ya no llega entera (`AppItemSelect` busca en el servidor): lo que la
+ * página necesita de antemano —los productos de un borrador, los asociados de un XML— se trae
+ * por `ids=`, de una vez y ANTES de pintar las líneas. Si no, cada selector pide el suyo al
+ * montarse: una llamada por línea.
+ */
+describe('compras/[id] — los productos se resuelven por id, no con la lista entera', () => {
+  beforeEach(() => {
+    enviados = []
+    avisos = []
+    routeId = 'nueva'
+    razaRemonte = null
+    confirmarFalla = false
+  })
+
+  const conIds = () => pedidosProductos.filter(u => u.includes('ids='))
+  const ids = (u: string) => new URL(u, 'http://x').searchParams.get('ids')
+
+  it('una compra nueva no pide productos hasta que se abre un selector', async () => {
+    const wrapper = await montar()
+    expect(pedidosProductos).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('un borrador resuelve los productos de sus líneas en un solo pedido, y cada selector muestra su nombre', async () => {
+    // Dos líneas: con una sola, el pedido de la página y el del selector serían indistinguibles.
+    routeId = 'compra-dos-lineas'
+    const wrapper = await montar()
+
+    expect(pedidosProductos).toHaveLength(1)
+    expect(ids(pedidosProductos[0]!)).toBe(`${LATAS.id},${HARINA.id}`)
+    const menus = wrapper.findAllComponents({ name: 'AppItemSelect' }).map(c => c.findComponent({ name: 'USelectMenu' }))
+    expect(menus.map(m => m.props('items'))).toEqual([
+      [{ value: LATAS.id, label: LATAS.nombre }],
+      [{ value: HARINA.id, label: HARINA.nombre }],
+    ])
+    wrapper.unmount()
+  })
+
+  it('el XML resuelve sus productos asociados en un solo pedido antes de armar las líneas', async () => {
+    const wrapper = await montar()
+    await emitirCargar(wrapper, {
+      documento: documentoAndina(),
+      lectura: respuestaAndina(),
+      proveedorId: PROVEEDOR_ANDINA.id,
+      rutProveedor: null,
+    })
+
+    // Solo la Coca tiene destino (la Fanta llega por asociar y el FLETE, apartado).
+    expect(conIds().map(ids)).toEqual([COCA.id])
+    // La Coca salió del caché con su producto: calzada, no "por asociar".
+    expect(wrapper.find('[data-qa="compra-dte-calzo"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('dos XML seguidos: queda el último que se cargó, aunque los productos del primero lleguen después', async () => {
+    const wrapper = await montar()
+    let soltarPrimero!: () => void
+    retenerProductos = new Promise<void>((r) => { soltarPrimero = r })
+    const primero = documentoAndina()
+    const segundo = { ...documentoAndina(), folio: '999' }
+
+    await emitirCargar(wrapper, { documento: primero, lectura: respuestaAndina(), proveedorId: PROVEEDOR_ANDINA.id, rutProveedor: null })
+    retenerProductos = null
+    await emitirCargar(wrapper, { documento: segundo, lectura: respuestaAndina(), proveedorId: PROVEEDOR_ANDINA.id, rutProveedor: null })
+    soltarPrimero()
+    await new Promise(r => setTimeout(r, 20))
+
+    expect((wrapper.find('input[data-qa="compra-folio"]').element as HTMLInputElement).value).toBe('999')
+    expect(wrapper.find('[data-qa="compra-dte-franja"]').text()).toContain('N° 999')
+    wrapper.unmount()
+  })
+
+  it('si no se pueden traer los productos del XML, avisa y no carga nada a medias', async () => {
+    const wrapper = await montar()
+    productosFalla = true
+    await emitirCargar(wrapper, {
+      documento: documentoAndina(),
+      lectura: respuestaAndina(),
+      proveedorId: PROVEEDOR_ANDINA.id,
+      rutProveedor: null,
+    })
+
+    expect(avisos.map(a => a.title)).toContain('Se cayó')
+    expect(wrapper.find('[data-qa="compra-dte-franja"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-qa="compra-linea"]')).toHaveLength(1)
     wrapper.unmount()
   })
 })

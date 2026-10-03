@@ -886,7 +886,7 @@ Todas bajo `JwtAuthGuard + TenantGuard + PermisosGuard`, con el `tenant_id` del 
 | `GET /compras` (paginado; filtros `estado`, `proveedorId`, `faltaCosto`, `desde`, `hasta`, `estadoPago`) — con `Pagar` suma `estadoPago`/`deuda`/`vencida` por fila (ver [Confirmar con pago, el recorte y las lecturas de deuda](#confirmar-con-pago-el-recorte-y-las-lecturas-de-deuda-pieza-5-tarea-3)); `estadoPago` es 403 sin `Pagar` | Leer |
 | `GET /compras/:id`: encabezado, líneas, historial y motivo de anulación — con `Pagar` suma `aplicado` y `pagos` | Leer |
 | `GET /compras/tipos-documento` · `GET /compras/proveedores` | Leer |
-| `GET /compras/productos`: productos e ingredientes con stock, lo que se puede comprar | Crear |
+| `GET /compras/productos` (paginado; `search` por nombre o descripción, `ids` hasta 100): productos e ingredientes con stock, lo que se puede comprar | Crear |
 | `GET /compras/:id/lineas/:lineaId/unidades`: las series de la línea, disponibles en su ubicación | Actualizar |
 | `POST /compras` · `PATCH /compras/:id` (reemplaza el borrador entero) · `DELETE /compras/:id` | Crear |
 | `POST /compras/:id/confirmar` con `{ pago? }` opcional (con `Idempotency-Key` solo si viene `pago`) | Crear (+ `Pagar` si viene `pago`) |
@@ -916,6 +916,33 @@ compatible/precisión: 400.
 **Las listas que usa la pantalla son de Compras, no de Ítems** (owner, 2026-09-19): quien recibe
 mercadería elige el producto sin permiso sobre el catálogo, que muestra precios de venta y deja
 editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar una compra.
+
+**El selector de producto busca en el servidor** (2026-10-03). `GET /compras/productos` traía
+todo el catálogo de una vez, y lo caro no era el servidor sino la pantalla: cada línea pintaba
+**todas** las opciones al abrirse. Medido con el catálogo sintético del Apéndice A de
+[`2026-10-03-catalogo-paginado.md`](../superpowers/plans/2026-10-03-catalogo-paginado.md) (5.307
+productos e ingredientes en el tenant, build de producción, M2 Pro):
+
+| | Antes (lista entera) | Después (página de 20) |
+|---|---|---|
+| `curl` a la ruta | 25 ms · 691.257 bytes (sin comprimir) | 16 ms · 2.716 bytes |
+| `EXPLAIN ANALYZE` del `SELECT` | 17,9 ms (9 ms ordenando las 5.307) | 8,6–15,9 ms sin `search` y ~8 ms con `search=leche` (top-N de 20), más un `COUNT` de 4–7 ms |
+| Abrir el selector de una línea | 1,8 s (5.307 opciones en el DOM; 3,0 s en `nuxt dev`) | ~54 ms (20 opciones) |
+| Tipear un término hasta ver el filtrado | ~215 ms ("marca", filtro en el navegador) | ~350 ms ("leche"), de los que 300 son la espera del buscador |
+
+Medianas: `curl -s -o /dev/null -w "%{time_total} %{size_download}"` 5 o 6 veces por URL
+(`?pageSize=20`, con y sin `search`), y en el navegador 3 vueltas de un script de Playwright
+contra `nuxt build` que mide desde el clic en "Selecciona un producto" hasta la primera opción.
+
+La pantalla usa `AppItemSelect` con `useItemsPorId('/compras/productos')`: el mismo selector que
+las demás pantallas, sobre la lista propia de Compras, así que la decisión de arriba sigue en pie. La
+ruta acepta `search`, `ids` y página con el contrato de `GET /items`, y **no** sus filtros
+(`tipo`, `activo`…): lo que se puede comprar lo decide el backend, y un filtro de más es 400. Lo
+que la página necesita de antemano se trae por `ids=` **en un solo pedido y antes de pintar las
+líneas**: los productos de un borrador al abrirlo, y los asociados de un XML al cargarlo. Si ese
+pedido falla al cargar un XML, no se carga nada y se avisa, porque una línea cuyo producto no
+llegó quedaría "por asociar" aunque el sistema ya la conociera. Si se cargan dos XML seguidos,
+queda el último que se cargó aunque los productos del primero lleguen después.
 
 `precioUnitario` va a escala de costo (`@EsCosto`); `descuentoTotal`, a la de la moneda
 (`@EsMontoCobrado`), las dos con `EscalaMonedaPipe`. En la corrección de línea, precio y cantidad
@@ -957,7 +984,8 @@ editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar
 - `pages/compras/index.vue`: el listado, con las insignias *Borrador*, *Confirmada*, *Anulada* y
   **Falta costo**, y sus filtros. De la pieza 5 (tarea 5): la columna **Pago** (insignia) y el
   filtro "Estado de pago", solo con `Compras:Pagar`.
-- `pages/compras/[id].vue`: la carga del borrador —selector de unidad y presentación, el lápiz,
+- `pages/compras/[id].vue`: la carga del borrador —el producto con `AppItemSelect` sobre
+  `/compras/productos` (ver [API Endpoints](#api-endpoints)), selector de unidad y presentación, el lápiz,
   la cuenta a la vista (pieza 2 § 6, ver arriba)— y el modal de confirmar con el resumen. De la
   pieza 5: "Total del documento" (requerido/opcional/oculto según el tipo) y "Vence el" (sugerida
   desde el plazo del proveedor, editable).

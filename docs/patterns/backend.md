@@ -1732,9 +1732,9 @@ al encargado a `/items` y `/terceros`.
 // o "productos" entra como un id.
 @Get('productos')
 @RequiresPermiso('Compras', 'Crear')
-productos(@Req() req: Request) {
+productos(@Req() req: Request, @Query() query: QueryProductosCompraDto) {
   const { tenantId } = req.user as { tenantId: string };
-  return this.comprasService.productos(tenantId);
+  return this.comprasService.productos(tenantId, query);
 }
 ```
 
@@ -1746,6 +1746,9 @@ productos(@Req() req: Request) {
 - **El costo que se acepta a cambio:** la misma tabla se lee desde dos lugares. Es
   deliberado, y por eso la lista propia **no es un `SELECT *` del otro módulo**: devuelve lo
   que la pantalla pinta y nada más, así que no se vuelve una segunda API del catálogo.
+- **Si la lista crece, se pagina con el contrato del otro módulo** (`search`, `ids`, página), no
+  con uno propio: así la pantalla usa el mismo selector (`useItemsPorId(ruta)`, frontend
+  § 10.3). Los filtros del otro módulo no se copian: los decide el backend.
 - **Cómo se detecta el problema, que es lo que más cuesta:** ninguna suite del módulo lo ve
   —todas pegan a rutas propias— y correrlas como admin lo tapa entero. **El e2e y el smoke de
   un módulo con permisos propios corren como el usuario de su rol** (en compras,
