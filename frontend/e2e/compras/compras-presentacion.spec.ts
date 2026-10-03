@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { API, api, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/api'
+import { entrarComo } from '../support/ui'
 
 /**
  * Compras, pieza 2 — la unidad de compra por proveedor (spec
@@ -43,17 +44,6 @@ test.afterEach(async ({ request }) => {
     }
   }
 })
-
-/** Login por pantalla. Tiene un solo tenant: entra directo, sin elegir. */
-async function entrarComoEncargado(page: Page) {
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(ENCARGADO.email)
-  await page.locator('input[type="password"]').first().fill(ENCARGADO.password)
-  const submit = page.locator('button[type="submit"]').first()
-  await expect(submit).toBeEnabled()
-  await submit.click()
-  await page.waitForURL(url => url.pathname === '/')
-}
 
 /**
  * Elige en un `USelectMenu` haciendo pie en su **placeholder** (mismo helper que
@@ -144,7 +134,7 @@ test('crear "Caja (12)" desde la línea, confirmar 10 cajas y corregir en cajas'
   const local = await ubicacionLocal(request)
   const producto = await productoLata(request, `Coca-Cola lata e2e ${sello}`)
 
-  await entrarComoEncargado(page)
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
   await page.goto('/compras/nueva', { waitUntil: 'networkidle' })
 
   await elegirPorPlaceholder(page, 'A quién se le compró', proveedor.nombre, { buscar: true })
@@ -210,7 +200,7 @@ test('el lápiz corrige 24 → 12 antes de confirmar y el borrador toma el 12', 
   const producto = await productoLata(request, `Coca-Cola lata e2e ${sello}`)
   await crearPresentacion(request, proveedor.id, producto.id, '24')
 
-  await entrarComoEncargado(page)
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
   await page.goto('/compras/nueva', { waitUntil: 'networkidle' })
 
   await elegirPorPlaceholder(page, 'A quién se le compró', proveedor.nombre, { buscar: true })

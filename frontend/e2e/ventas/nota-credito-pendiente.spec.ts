@@ -1,4 +1,4 @@
-import type { APIRequestContext, Page } from '@playwright/test'
+import type { APIRequestContext } from '@playwright/test'
 import { test, expect } from '../support/sin-qz-tray'
 import {
   abrirCaja,
@@ -10,7 +10,7 @@ import {
   tokenDe,
   TENANTS,
 } from '../support/api'
-import { valorDeFila } from '../support/ui'
+import { entrarComo, valorDeFila } from '../support/ui'
 
 /**
  * Una venta PENDIENTE admite una nota de crédito "No vuelve plata" — Tarea 15
@@ -52,16 +52,6 @@ async function tokenDeVendedor(request: APIRequestContext): Promise<string> {
 }
 
 test.use({ storageState: { cookies: [], origins: [] } })
-
-async function entrarComoVendedor(page: Page) {
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(VENDEDOR.email)
-  await page.locator('input[type="password"]').first().fill(VENDEDOR.password)
-  const submit = page.locator('button[type="submit"]').first()
-  await expect(submit).toBeEnabled()
-  await submit.click()
-  await page.waitForURL(url => url.pathname === '/')
-}
 
 interface ModuloDisponible {
   moduloTenantId: string
@@ -161,7 +151,7 @@ test('la cajera con permiso de nota de crédito devuelve toda una venta pendient
   expect(venta.estado).toBe('pendiente')
   expect(venta.totalFinal).toBe('119000.0000')
 
-  await entrarComoVendedor(page)
+  await entrarComo(page, VENDEDOR.email, VENDEDOR.password)
   await page.goto(`/ventas?venta=${venta.id}`)
   const detalle = page.getByRole('dialog').filter({ hasText: 'Detalle de venta' })
   await expect(valorDeFila(detalle, 'Saldo pendiente')).toContainText(TOTAL_VENTA)

@@ -11,6 +11,7 @@ import {
   tokenDe,
   TENANTS,
 } from '../support/api'
+import { entrarComo } from '../support/ui'
 
 /**
  * El filtro "Documento" de `/ventas`, en un navegador real (spec
@@ -65,16 +66,6 @@ async function tokenDeVendedor(request: APIRequestContext): Promise<string> {
     data: { tenantId: TENANTS.restaurante },
   })
   return sesion.access_token
-}
-
-async function entrarComoVendedor(page: Page) {
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(VENDEDOR.email)
-  await page.locator('input[type="password"]').first().fill(VENDEDOR.password)
-  const submit = page.locator('button[type="submit"]').first()
-  await expect(submit).toBeEnabled()
-  await submit.click()
-  await page.waitForURL(url => url.pathname === '/')
 }
 
 test.beforeEach(async ({ request }) => {
@@ -174,7 +165,7 @@ test('filtro "Documento": "Sin documento" deja la venta sin documentar y saca la
   const delSistema = await ventaPorApi(request, productoSis.id, base + 2000, EFECTIVO)
   expect(comoSeVe(sinDocumento.totalFinal)).not.toBe(comoSeVe(delSistema.totalFinal))
 
-  await entrarComoVendedor(page)
+  await entrarComo(page, VENDEDOR.email, VENDEDOR.password)
   await page.goto('/ventas')
   const filtro = page.getByRole('combobox').filter({ hasText: 'Documento' })
 

@@ -1,4 +1,4 @@
-import type { APIRequestContext, Page } from '@playwright/test'
+import type { APIRequestContext } from '@playwright/test'
 import { test, expect } from '../support/sin-qz-tray'
 import {
   abrirCaja,
@@ -10,6 +10,7 @@ import {
   tokenDe,
   TENANTS,
 } from '../support/api'
+import { entrarComo } from '../support/ui'
 
 /**
  * "Reimprimir boleta" para la cajera SIN `Ventas:Anular`, en un navegador real
@@ -79,17 +80,6 @@ async function tokenDeVendedor(request: APIRequestContext): Promise<string> {
 
 test.use({ storageState: { cookies: [], origins: [] } })
 
-/** Login por pantalla, como la cajera. Un solo tenant: entra directo. */
-async function entrarComoVendedor(page: Page) {
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(VENDEDOR.email)
-  await page.locator('input[type="password"]').first().fill(VENDEDOR.password)
-  const submit = page.locator('button[type="submit"]').first()
-  await expect(submit).toBeEnabled()
-  await submit.click()
-  await page.waitForURL(url => url.pathname === '/')
-}
-
 let escenario: { tokenAdmin?: string, tokenVendedor?: string, cajaId?: string, itemId?: string } = {}
 
 test.beforeEach(async ({ request }) => {
@@ -130,7 +120,7 @@ test('la cajera ve "Reimprimir boleta" en una venta de su propia caja abierta, y
   })
   expect(venta.estado).toBe('pagada')
 
-  await entrarComoVendedor(page)
+  await entrarComo(page, VENDEDOR.email, VENDEDOR.password)
   await page.goto(`/ventas?venta=${venta.id}`)
 
   const detalle = page.getByRole('dialog').filter({ hasText: 'Detalle de venta' })

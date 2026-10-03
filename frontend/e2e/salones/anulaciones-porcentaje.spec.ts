@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import type { Page } from '@playwright/test'
 import { test, expect } from '../support/sin-qz-tray'
 import { API, api, tokenDe, limpiarItems, abrirCaja, cerrarCaja, TENANTS, CLP } from '../support/api'
+import { entrarComo } from '../support/ui'
 
 /**
  * La columna "% de lo pedido" en `/salones/anulaciones` — Tarea 3 de
@@ -195,21 +195,10 @@ test.afterAll(async ({ request }) => {
   }
 })
 
-/** Login por pantalla, como el encargado del salón. Un solo tenant: entra directo. */
-async function entrarComoEncargado(page: Page) {
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(ENCARGADO.email)
-  await page.locator('input[type="password"]').first().fill(ENCARGADO.password)
-  const submit = page.locator('button[type="submit"]').first()
-  await expect(submit).toBeEnabled()
-  await submit.click()
-  await page.waitForURL(url => url.pathname === '/')
-}
-
 test('@smoke la fila del garzón en "Por garzón" muestra el % de lo pedido, y a 375 px no rompe el layout', async ({ page }) => {
   const garzon = escenario.garzon!
 
-  await entrarComoEncargado(page)
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
 
   await page.goto('/salones/anulaciones')
   await expect(page.getByText('% de lo pedido')).toBeVisible()

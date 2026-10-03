@@ -1,7 +1,6 @@
-import type { APIRequestContext, Page } from '@playwright/test'
 import { test, expect } from '../support/sin-qz-tray'
 import { API, api, tokenDe, limpiarItems, TENANTS, CLP } from '../support/api'
-import { elegirEnSelector, rondaDePin, valorDelTotal } from '../support/ui'
+import { elegirEnSelector, entrarComo, rondaDePin, valorDelTotal } from '../support/ui'
 
 /**
  * Anular un plato ya despachado a cocina, de punta a punta en un navegador real
@@ -186,23 +185,12 @@ test.afterAll(async ({ request }) => {
 // tercer uso (este archivo era la segunda duplicación, junto con
 // `cuenta-hasta-cobro.spec.ts`; `boleta-al-cobrar.spec.ts` fue la tercera).
 
-/** Login por pantalla, como el encargado del salón. Un solo tenant: entra directo. */
-async function entrarComoEncargado(page: Page) {
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(ENCARGADO.email)
-  await page.locator('input[type="password"]').first().fill(ENCARGADO.password)
-  const submit = page.locator('button[type="submit"]').first()
-  await expect(submit).toBeEnabled()
-  await submit.click()
-  await page.waitForURL(url => url.pathname === '/')
-}
-
 test('pide, manda a cocina, anula como cortesía y el aviso aparece con el total ya abajo', async ({
   page,
   request,
 }) => {
   const garzon = escenario.garzon!
-  await entrarComoEncargado(page)
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
   await page.goto('/salones')
 
   // 1. El salón propio. Explícito aunque la pantalla preseleccione uno: cuál

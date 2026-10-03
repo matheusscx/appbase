@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test, expect, type APIRequestContext, type Dialog, type Locator, type Page } from '@playwright/test'
 import { API, api, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/api'
+import { entrarComo } from '../support/ui'
 
 /**
  * Compras, tarea 4 — cargar la compra desde el XML de la factura (DTE) del SII
@@ -94,17 +95,6 @@ test.afterEach(async ({ request }) => {
  */
 function botonVolverACompras(page: Page): Locator {
   return page.getByRole('link', { name: 'Compras', exact: true })
-}
-
-/** Login por pantalla. Tiene un solo tenant: entra directo, sin elegir. */
-async function entrarComoEncargado(page: Page) {
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(ENCARGADO.email)
-  await page.locator('input[type="password"]').first().fill(ENCARGADO.password)
-  const submit = page.locator('button[type="submit"]').first()
-  await expect(submit).toBeEnabled()
-  await submit.click()
-  await page.waitForURL(url => url.pathname === '/')
 }
 
 /** Elige en un `USelectMenu` haciendo pie en su placeholder (mismo helper que
@@ -256,7 +246,7 @@ test('el XML pre-llena, aprende el código del proveedor y avisa cuando la factu
   // Step 3): la Fanta, en cambio, la crea el encargado desde la línea.
   await crearPresentacion(request, proveedor.id, coca.id, '12')
 
-  await entrarComoEncargado(page)
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
 
   // ── Escena 1: primera factura, todo a mano ──────────────────────────────
   const folioFactura1 = `E2E1-${sello}`
@@ -417,7 +407,7 @@ test('salir con el XML leído sin guardar pide confirmación', async ({ page, re
   const proveedor = await crearProveedor(request, sello, rut)
   void proveedor // el nombre no se usa acá: alcanza con que el RUT resuelva un proveedor único.
 
-  await entrarComoEncargado(page)
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
   await page.goto('/compras/nueva', { waitUntil: 'networkidle' })
   await subirXml(page, rut, `E2E4-${sello}`)
   await expect(page.locator('[data-qa="cargar-dte-modal"]')).toHaveCount(0)

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { entrarComo } from '../support/ui'
 
 /**
  * El menú lateral agrupado por módulo (`composables/useMenuLateral.ts`, docs/patterns/frontend.md
@@ -29,17 +30,6 @@ const GRUPOS = ['Ventas', 'Salones', 'Tienda Online', 'Inventario', 'Compras']
 
 function menuLateral(page: Page) {
   return page.locator('[data-qa="menu-lateral"]')
-}
-
-/** Login por pantalla con un usuario del seed. Todos los de acá tienen un solo tenant. */
-async function entrarComo(page: Page, email: string) {
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(email)
-  await page.locator('input[type="password"]').first().fill('admin')
-  const submit = page.locator('button[type="submit"]').first()
-  await expect(submit).toBeEnabled()
-  await submit.click()
-  await page.waitForURL(url => url.pathname === '/')
 }
 
 test('el admin llega a cada pantalla del menú anterior, y a cada una una sola vez', async ({ page }) => {

@@ -11,7 +11,7 @@ import {
   tokenDe,
   TENANTS,
 } from '../support/api'
-import { elegirEnSelector, escribirMonto, valorDeFila } from '../support/ui'
+import { elegirEnSelector, entrarComo, escribirMonto, valorDeFila } from '../support/ui'
 
 /**
  * Emisión por venta, en un navegador real: el número del comprobante al cobrar,
@@ -86,16 +86,6 @@ async function tokenDeVendedor(request: APIRequestContext): Promise<string> {
   return sesion.access_token
 }
 
-async function entrarComoVendedor(page: Page) {
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(VENDEDOR.email)
-  await page.locator('input[type="password"]').first().fill(VENDEDOR.password)
-  const submit = page.locator('button[type="submit"]').first()
-  await expect(submit).toBeEnabled()
-  await submit.click()
-  await page.waitForURL(url => url.pathname === '/')
-}
-
 test.beforeEach(async ({ request }) => {
   escenario = { itemIds: [] }
   escenario.tokenAdmin = await tokenDe(request, TENANTS.restaurante)
@@ -167,7 +157,7 @@ test('cobro mixto: efectivo y tarjeta con número — el documento de la máquin
   request,
 }) => {
   const producto = await sembrarProducto(request, 'Emisión mixto')
-  await entrarComoVendedor(page)
+  await entrarComo(page, VENDEDOR.email, VENDEDOR.password)
   await page.goto('/ventas/pos')
   await page.locator(`[data-qa="item-catalogo-${producto.id}"]`).click()
   await expect(valorDeFila(page, 'Total')).toHaveText('$11.900')
@@ -261,7 +251,7 @@ test('abono con tarjeta sobre una deuda ya documentada: avisa el voucher duplica
   const venta = await ventaPorApi(request, producto.id, [{ metodoPagoId: EFECTIVO, monto: EN_EFECTIVO }])
   expect(venta.estado).toBe('pagada_parcial')
 
-  await entrarComoVendedor(page)
+  await entrarComo(page, VENDEDOR.email, VENDEDOR.password)
   await page.goto(`/ventas?venta=${venta.id}`)
   await detalleDe(page).getByRole('button', { name: 'Registrar pago' }).click()
   const abono = page
@@ -308,7 +298,7 @@ test('completar el número de la máquina desde el detalle: el PATCH va con la v
   const sinNumero = venta.documentos.find(d => d.emisor === 'maquina')
   expect(sinNumero?.numero).toBeNull()
 
-  await entrarComoVendedor(page)
+  await entrarComo(page, VENDEDOR.email, VENDEDOR.password)
   await page.goto(`/ventas?venta=${venta.id}`)
   const fila = detalleDe(page).locator(`[data-qa="documento-${sinNumero!.id}"]`)
   await expect(fila).toContainText('Sin número')
@@ -395,7 +385,7 @@ test('nota de crédito por la tarjeta de un pago mixto, como un rol con Ventas:N
     ])
     const voucher = venta.documentos.find(d => d.emisor === 'maquina')!
 
-    await entrarComoVendedor(page)
+    await entrarComo(page, VENDEDOR.email, VENDEDOR.password)
     await page.goto(`/ventas?venta=${venta.id}`)
     await detalleDe(page).getByRole('button', { name: 'Nota de crédito' }).click()
     const modal = page.getByRole('dialog').filter({ hasText: 'Generar nota de crédito' })

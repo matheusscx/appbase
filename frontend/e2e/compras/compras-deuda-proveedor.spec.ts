@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext, type Locator, type Page } from '@
 import {
   API, api, crearProducto, limpiarItems, tokenDe, TENANTS, abrirCaja, cerrarCaja,
 } from '../support/api'
-import { elegirEnSelector } from '../support/ui'
+import { elegirEnSelector, entrarComo } from '../support/ui'
 
 /**
  * Compras — la deuda con el proveedor y sus pagos (spec
@@ -100,17 +100,6 @@ async function tokenComo(request: APIRequestContext, email: string, password: st
   return sesion.access_token
 }
 
-/** Login por pantalla. `compras.paga` tiene un solo tenant: entra directo. */
-async function entrarComoPaga(page: Page) {
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(PAGA.email)
-  await page.locator('input[type="password"]').first().fill(PAGA.password)
-  const submit = page.locator('button[type="submit"]').first()
-  await expect(submit).toBeEnabled()
-  await submit.click()
-  await page.waitForURL(url => url.pathname === '/')
-}
-
 async function crearProveedor(request: APIRequestContext, sello: number, nombre?: string) {
   const proveedor = await api<{ id: string }>(request, 'post', '/terceros', {
     token: adminToken,
@@ -189,7 +178,7 @@ test('recibir la feria y pagarla al contado en un gesto: el efectivo baja en la 
   cajaAbiertaId = cajaId
   await fondearCaja(request, cajaId, '200000')
 
-  await entrarComoPaga(page)
+  await entrarComo(page, PAGA.email, PAGA.password)
   await page.goto('/compras/nueva', { waitUntil: 'networkidle' })
 
   await page.getByText('A quién se le compró').click()
@@ -252,7 +241,7 @@ test('pagar dos compras de un proveedor desde "Por pagar"', async ({ page, reque
   await compraConfirmada(request, { itemId: producto.id, cantidad: '10', precioUnitario: '12000' }, local.id, proveedor.id, '2026-09-01')
   await compraConfirmada(request, { itemId: producto.id, cantidad: '10', precioUnitario: '8000' }, local.id, proveedor.id, '2026-09-15')
 
-  await entrarComoPaga(page)
+  await entrarComo(page, PAGA.email, PAGA.password)
   await page.goto('/compras/por-pagar', { waitUntil: 'networkidle' })
 
   const filaProveedor = page.locator('[data-qa="por-pagar-proveedores"] tbody tr').filter({ hasText: proveedor.nombre })

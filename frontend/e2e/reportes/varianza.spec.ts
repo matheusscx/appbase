@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 import { api, CLP, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/api'
+import { entrarComo } from '../support/ui'
 
 /**
  * La pantalla de varianza **como el aprobador de inventario** (`aprobador@paris.cl`,
@@ -119,17 +120,6 @@ test.afterEach(async ({ request }) => {
   await limpiarItems(request, escenario.token, escenario.itemIds)
 })
 
-/** Login por pantalla. Tiene un solo tenant: entra directo, sin elegir. */
-async function entrarComoAprobador(page: Page) {
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(APROBADOR.email)
-  await page.locator('input[type="password"]').first().fill(APROBADOR.password)
-  const submit = page.locator('button[type="submit"]').first()
-  await expect(submit).toBeEnabled()
-  await submit.click()
-  await page.waitForURL(url => url.pathname === '/')
-}
-
 test('el aprobador llega por el menú y ve lo que falta, en cantidad y en plata', async ({ page, request }) => {
   const token = escenario.token!
   const nombre = `E2E varianza ${Date.now()}`
@@ -160,7 +150,7 @@ test('el aprobador llega por el menú y ve lo que falta, en cantidad y en plata'
     }
   })
 
-  await entrarComoAprobador(page)
+  await entrarComo(page, APROBADOR.email, APROBADOR.password)
 
   await page.getByRole('link', { name: 'Reportes' }).first().click()
   await page.waitForURL('**/reportes')
@@ -225,7 +215,7 @@ test('el aviso de sin costo filtra la tabla a los que perdieron sin costo', asyn
     }
   })
 
-  await entrarComoAprobador(page)
+  await entrarComo(page, APROBADOR.email, APROBADOR.password)
   await page.goto('/reportes/varianza', { waitUntil: 'networkidle' })
   await filtrarPorLaBodega(page, ubicaciones)
 

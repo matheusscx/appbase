@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js'
 import { test, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { API, api, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/api'
+import { entrarComo } from '../support/ui'
 
 /**
  * Compras por pantalla, **como el encargado de compras** (`encargado.compras`:
@@ -62,18 +63,6 @@ test.afterEach(async ({ request }) => {
     }
   }
 })
-
-/** Login por pantalla. Tiene un solo tenant: entra directo, sin elegir. */
-async function entrarComoEncargado(page: Page) {
-  // networkidle: esperar la hidratación antes de tipear (ver auth.setup.ts).
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(ENCARGADO.email)
-  await page.locator('input[type="password"]').first().fill(ENCARGADO.password)
-  const submit = page.locator('button[type="submit"]').first()
-  await expect(submit).toBeEnabled()
-  await submit.click()
-  await page.waitForURL(url => url.pathname === '/')
-}
 
 /**
  * Tipea en un `MoneyInput` tecla por tecla (maska ignora `fill`).
@@ -213,7 +202,7 @@ test('el encargado encuentra el producto al cargar una compra: la lista es de Co
   const producto = await crearProducto(request, escenario.token!, { nombre, precioBase: '900', stock: '0' })
   escenario.itemIds.push(producto.id)
 
-  await entrarComoEncargado(page)
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
   const listados: string[] = []
   page.on('response', (r) => {
     if (r.url().includes('/api/items')) listados.push(`${r.status()} ${r.url()}`)
@@ -252,7 +241,7 @@ test('cargar con una línea sin precio y confirmar: entran las dos y el costo pr
   // tampoco distinguiría "lo puso esta entrada" de "ya estaba ahí".
   await entradaPrevia(request, sinPrecio.id, local.id, '4', '500')
 
-  await entrarComoEncargado(page)
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
   await page.goto('/compras/nueva', { waitUntil: 'networkidle' })
 
   // ── El encabezado ────────────────────────────────────────────────────────
@@ -404,7 +393,7 @@ test('bajar una cantidad: el historial la anota con su unidad y el kardex suma s
     stock: '10.0000', costo: '1200.0000',
   })
 
-  await entrarComoEncargado(page)
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
   await page.goto(`/compras/${compra.id}`, { waitUntil: 'networkidle' })
 
   await page.locator(`[data-qa="compra-corregir-${compra.lineaId}"]`).click()
@@ -508,7 +497,7 @@ test('bajar por debajo de lo que queda: la pantalla muestra cuánto queda y no t
     data: { ubicacionId: local.id, tipo: 'salida', motivo: 'ajuste_manual', cantidad: '8' },
   })
 
-  await entrarComoEncargado(page)
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
   await page.goto(`/compras/${compra.id}`, { waitUntil: 'networkidle' })
 
   await page.locator(`[data-qa="compra-corregir-${compra.lineaId}"]`).click()
@@ -558,7 +547,7 @@ test('completar el precio, cargar el descuento y anular una compra confirmada', 
     proveedor.id,
   )
 
-  await entrarComoEncargado(page)
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
   await page.goto(`/compras/${compra.id}`, { waitUntil: 'networkidle' })
   const detalle = page.locator('[data-qa="compra-confirmada"]')
   await expect(detalle).toBeVisible()

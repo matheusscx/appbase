@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { test, expect, type Browser, type Page, type APIRequestContext } from '@playwright/test'
 import { API, TENANTS, api, crearProducto, limpiarItems, tokenDe } from '../support/api'
+import { entrarComo } from '../support/ui'
 
 /**
  * El aviso de stock bajo en un navegador de verdad (`docs/features/aviso-stock-bajo.md`),
@@ -27,17 +28,13 @@ const SELLO = `E2E stock mínimo ${randomUUID().slice(0, 8)}`
 
 let escenario: { token?: string, itemIds: string[], bodegaId?: string } = { itemIds: [] }
 
-async function entrarComo(browser: Browser, email: string): Promise<Page> {
+async function abrirComo(browser: Browser, email: string): Promise<Page> {
   const context = await browser.newContext({
     baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:5173',
     storageState: { cookies: [], origins: [] },
   })
   const page = await context.newPage()
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(email)
-  await page.locator('input[type="password"]').first().fill('admin')
-  await page.locator('button[type="submit"]').first().click()
-  await page.waitForURL(url => url.pathname === '/')
+  await entrarComo(page, email)
   return page
 }
 
@@ -94,7 +91,7 @@ test('cargar el mínimo, verlo en la marca y en el inicio, y trasladar según el
   escenario.itemIds.push(itemId)
 
   // ── El aprobador carga el mínimo ──────────────────────────────────────
-  const aprobador = await entrarComo(browser, 'aprobador@paris.cl')
+  const aprobador = await abrirComo(browser, 'aprobador@paris.cl')
   let fila = await filaEnLaBodega(aprobador, nombreBodega)
   const input = fila.locator(`input[data-qa="minimo-${itemId}-${escenario.bodegaId}"]`)
   await input.fill('6')
@@ -116,7 +113,7 @@ test('cargar el mínimo, verlo en la marca y en el inicio, y trasladar según el
     .toContainText('1')
 
   // ── El contador: sin editar el mínimo, con el traslado ────────────────
-  const contador = await entrarComo(browser, 'contador@paris.cl')
+  const contador = await abrirComo(browser, 'contador@paris.cl')
   fila = await filaEnLaBodega(contador, nombreBodega)
   await expect(fila.locator('input[data-qa^="minimo-"]')).toHaveCount(0)
   await fila.locator('[data-qa="trasladar"]').click()

@@ -1,4 +1,4 @@
-import type { APIRequestContext, Page } from '@playwright/test'
+import type { APIRequestContext } from '@playwright/test'
 import { test, expect } from '../support/sin-qz-tray'
 import {
   abrirCaja,
@@ -11,7 +11,7 @@ import {
   tokenDe,
   TENANTS,
 } from '../support/api'
-import { valorDeFila } from '../support/ui'
+import { entrarComo, valorDeFila } from '../support/ui'
 
 /**
  * Una nota "No vuelve plata" que cubre toda la deuda: la venta pasa a pagada y
@@ -56,16 +56,6 @@ async function tokenDeVendedor(request: APIRequestContext): Promise<string> {
 
 test.use({ storageState: { cookies: [], origins: [] } })
 
-async function entrarComoVendedor(page: Page) {
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(VENDEDOR.email)
-  await page.locator('input[type="password"]').first().fill(VENDEDOR.password)
-  const submit = page.locator('button[type="submit"]').first()
-  await expect(submit).toBeEnabled()
-  await submit.click()
-  await page.waitForURL(url => url.pathname === '/')
-}
-
 let escenario: { tokenAdmin?: string, tokenVendedor?: string, cajaId?: string, itemId?: string } = {}
 
 test.beforeEach(async ({ request }) => {
@@ -101,7 +91,7 @@ test('después de una nota "No vuelve plata" que cubre la deuda, la venta queda 
   })
   expect(venta.estado).toBe('pagada_parcial')
 
-  await entrarComoVendedor(page)
+  await entrarComo(page, VENDEDOR.email, VENDEDOR.password)
   await page.goto(`/ventas?venta=${venta.id}`)
   const detalle = page.getByRole('dialog').filter({ hasText: 'Detalle de venta' })
 

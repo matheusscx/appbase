@@ -115,3 +115,31 @@ export function valorDelTotal(page: Page): Locator {
     .first()
     .locator('xpath=following-sibling::span[1]')
 }
+
+/**
+ * Entra por la pantalla de login como un usuario de **un solo tenant**: la app
+ * hace el `switch-tenant` sola y aterriza en el Inicio.
+ *
+ * Es el login de los specs que corren como el rol que usa la pantalla y no como
+ * el admin del seed (`test.use({ storageState: { cookies: [], origins: [] } })`).
+ * `admin@sistema.com` tiene más de un tenant y entra por `/select-tenant`, que este
+ * helper no recorre: con un usuario así el test cae por timeout esperando `/`.
+ *
+ * ⚠️ `networkidle` antes de tipear: sin la hidratación de Nuxt el `v-model` no
+ * captura lo escrito y el submit queda deshabilitado (ver `auth.setup.ts`).
+ *
+ * `password` por defecto es la de todas las cuentas del seed.
+ */
+export async function entrarComo(
+  page: Page,
+  email: string,
+  password = 'admin',
+): Promise<void> {
+  await page.goto('/login', { waitUntil: 'networkidle' })
+  await page.getByPlaceholder('tu@email.com').fill(email)
+  await page.locator('input[type="password"]').first().fill(password)
+  const submit = page.locator('button[type="submit"]').first()
+  await expect(submit).toBeEnabled()
+  await submit.click()
+  await page.waitForURL(url => url.pathname === '/')
+}

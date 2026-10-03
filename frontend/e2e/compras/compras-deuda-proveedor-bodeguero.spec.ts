@@ -1,5 +1,6 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import { API, api, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/api'
+import { entrarComo } from '../support/ui'
 
 /**
  * Compras — la deuda con el proveedor, **como el bodeguero**
@@ -22,19 +23,8 @@ const ENCARGADO = { email: 'encargado.compras@paris.cl', password: 'admin' }
 
 test.use({ storageState: { cookies: [], origins: [] } })
 
-/** Login por pantalla. Un solo tenant: entra directo, sin elegir. */
-async function entrarComoEncargado(page: Page) {
-  await page.goto('/login', { waitUntil: 'networkidle' })
-  await page.getByPlaceholder('tu@email.com').fill(ENCARGADO.email)
-  await page.locator('input[type="password"]').first().fill(ENCARGADO.password)
-  const submit = page.locator('button[type="submit"]').first()
-  await expect(submit).toBeEnabled()
-  await submit.click()
-  await page.waitForURL(url => url.pathname === '/')
-}
-
 test('la navegación no ofrece "Por pagar"', async ({ page }) => {
-  await entrarComoEncargado(page)
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
   await page.goto('/compras', { waitUntil: 'networkidle' })
   const menu = page.locator('[data-qa="menu-lateral"]')
   // El grupo tiene que estar abierto: cerrado, sus pantallas no se dibujan y el
@@ -50,7 +40,7 @@ test('la navegación no ofrece "Por pagar"', async ({ page }) => {
 })
 
 test('entrar por URL a /compras/por-pagar lo frena el middleware de ruta', async ({ page }) => {
-  await entrarComoEncargado(page)
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
   await page.goto('/compras/por-pagar', { waitUntil: 'networkidle' })
   // El middleware `permiso` redirige a `/ventas` (pattern frontend § 1.2):
   // la pantalla nunca llega a montarse, y ningún dato de pago viaja.
@@ -59,7 +49,7 @@ test('entrar por URL a /compras/por-pagar lo frena el middleware de ruta', async
 })
 
 test('el listado de compras no lleva insignia de pago ni el filtro de estado de pago', async ({ page }) => {
-  await entrarComoEncargado(page)
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
   await page.goto('/compras', { waitUntil: 'networkidle' })
   await expect(page.locator('[data-qa="compras-filtro-estado-pago"]')).toHaveCount(0)
 })
@@ -78,7 +68,7 @@ test('confirmar una compra no ofrece "¿la pagaste ya?"', async ({ page, request
   const producto = await crearProducto(request, token, { nombre: nombreProducto, precioBase: '1000', stock: '0' })
 
   try {
-    await entrarComoEncargado(page)
+    await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
     await page.goto('/compras/nueva', { waitUntil: 'networkidle' })
 
     await page.getByText('A quién se le compró').click()
