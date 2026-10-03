@@ -190,6 +190,242 @@ describe('ItemsService', () => {
       expect(dataSource.query.mock.calls[0][1]).toEqual([TENANT, '%smart%']);
     });
 
+    it('filtra por tipo como lista: i.tipo = ANY($n) con el array', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, { tipo: ['producto', 'combo'] });
+
+      expect(dataSource.query.mock.calls[0][0]).toContain('i.tipo = ANY($2)');
+      expect(dataSource.query.mock.calls[0][1]).toEqual([
+        TENANT,
+        ['producto', 'combo'],
+      ]);
+    });
+
+    it('filtra por ids: i.item_id = ANY($n) con el array', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, { ids: [ITEM_ID, MONEDA_ID] });
+
+      expect(dataSource.query.mock.calls[0][0]).toContain(
+        'i.item_id = ANY($2)',
+      );
+      expect(dataSource.query.mock.calls[0][1]).toEqual([
+        TENANT,
+        [ITEM_ID, MONEDA_ID],
+      ]);
+    });
+
+    it('sin ids no agrega el filtro por id', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, {});
+
+      expect(dataSource.query.mock.calls[0][0]).not.toContain(
+        'i.item_id = ANY',
+      );
+    });
+
+    // Control débil (aserción sobre el texto del SQL): sirve para el ciclo
+    // corto; que el EXISTS filtre de verdad lo cubre el e2e contra Postgres.
+    // Se afirma sobre la cláusula entera y no sobre `toContain('modo')`: el
+    // comentario del SQL también lo contiene.
+    it('modoInventario agrega un EXISTS sobre item_producto con modo_inventario = $n', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, { modoInventario: 'cantidad' });
+
+      const sql = (dataSource.query.mock.calls[0][0] as string).replace(
+        /\s+/g,
+        ' ',
+      );
+      expect(sql).toContain(
+        'AND EXISTS (SELECT 1 FROM item_producto ipm WHERE ipm.item_id = i.item_id AND ipm.modo_inventario = $2)',
+      );
+      expect(dataSource.query.mock.calls[0][1]).toEqual([TENANT, 'cantidad']);
+    });
+
+    it('sin modoInventario no agrega el EXISTS', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, {});
+
+      expect(dataSource.query.mock.calls[0][0]).not.toContain('ipm.');
+    });
+
+    it('ids y modoInventario juntos numeran sus parámetros en orden', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, {
+        tipo: ['producto'],
+        ids: [ITEM_ID],
+        modoInventario: 'serie',
+      });
+
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      expect(sql).toContain('i.tipo = ANY($2)');
+      expect(sql).toContain('i.item_id = ANY($3)');
+      expect(sql).toContain('ipm.modo_inventario = $4');
+      expect(dataSource.query.mock.calls[0][1]).toEqual([
+        TENANT,
+        ['producto'],
+        [ITEM_ID],
+        'serie',
+      ]);
+    });
+
+    it('orden=disponibilidad: arma la página desde el paso liviano y relee las filas completas por id', async () => {
+      const filaCompleta = (
+        id: string,
+        tipo: string,
+        nombre: string,
+        extra: Record<string, unknown> = {},
+      ) => ({
+        ...filaProducto('5'),
+        item_id: id,
+        tipo,
+        nombre,
+        ...extra,
+      });
+      dataSource.query
+        // Paso 1: el listado liviano de TODO lo que matchea (sin LIMIT).
+        .mockResolvedValueOnce([
+          {
+            item_id: 'p-sin',
+            tipo: 'producto',
+            nombre: 'Agua',
+            stock_vendible: '0',
+          },
+          {
+            item_id: 'p-con',
+            tipo: 'producto',
+            nombre: 'Zapallo',
+            stock_vendible: '5',
+          },
+          {
+            item_id: 'r',
+            tipo: 'receta',
+            nombre: 'Burger',
+            stock_vendible: null,
+          },
+        ])
+        // Lo comprometido por las cuentas abiertas: ninguna.
+        .mockResolvedValueOnce([])
+        // Ingredientes de la receta: sin bloqueantes → `disponible` null → pedible.
+        .mockResolvedValueOnce([])
+        // Paso 2: las filas completas de la página, en OTRO orden que el pedido.
+        .mockResolvedValueOnce([
+          filaCompleta('p-con', 'producto', 'Zapallo', {
+            stock: '5',
+            stock_vendible: '5',
+            modo_inventario: 'serie',
+          }),
+          filaCompleta('r', 'receta', 'Burger', {
+            stock: null,
+            stock_vendible: null,
+            modo_inventario: null,
+          }),
+        ]);
+
+      const result = await service.findAll(TENANT, {
+        orden: 'disponibilidad',
+        page: 1,
+        pageSize: 2,
+      });
+
+      // Burger y Zapallo son pedibles (Agua no: sin stock); entre ellos, por nombre.
+      expect(result.data.map((d) => d.id)).toEqual(['r', 'p-con']);
+      expect(result.meta.total).toBe(3);
+      // El paso 2 pasa por `baseQuery` + `mapRow`: `modoInventario` llega en la
+      // fila (el selector de unidades de serie lo lee en `onCatalogoAdd`).
+      expect(result.data[1].modoInventario).toBe('serie');
+      expect(result.data[1].stockDisponible).toBe('5.0000');
+
+      const [sqlPaso2, paramsPaso2] = dataSource.query.mock.calls[3] as [
+        string,
+        unknown[],
+      ];
+      expect(sqlPaso2).toContain('i.item_id = ANY($1)');
+      expect(sqlPaso2).toContain('ip.modo_inventario');
+      expect(paramsPaso2).toEqual([
+        ['r', 'p-con'],
+        TENANT,
+        UBICACION_LOCAL_ID,
+        false,
+      ]);
+      expect(sqlPaso2).toContain('i.eliminado_el IS NULL');
+    });
+
+    it('orden=disponibilidad: la página 2 es el corte del orden completo (los no pedibles al final)', async () => {
+      dataSource.query
+        // Paso 1: las mismas 3 filas del caso anterior.
+        .mockResolvedValueOnce([
+          {
+            item_id: 'p-sin',
+            tipo: 'producto',
+            nombre: 'Agua',
+            stock_vendible: '0',
+          },
+          {
+            item_id: 'p-con',
+            tipo: 'producto',
+            nombre: 'Zapallo',
+            stock_vendible: '5',
+          },
+          {
+            item_id: 'r',
+            tipo: 'receta',
+            nombre: 'Burger',
+            stock_vendible: null,
+          },
+        ])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        // Paso 2: solo la fila de la página 2.
+        .mockResolvedValueOnce([
+          {
+            ...filaProducto('0'),
+            item_id: 'p-sin',
+            tipo: 'producto',
+            nombre: 'Agua',
+            stock: '0',
+            stock_vendible: '0',
+            modo_inventario: 'cantidad',
+          },
+        ]);
+
+      const result = await service.findAll(TENANT, {
+        orden: 'disponibilidad',
+        page: 2,
+        pageSize: 2,
+      });
+
+      expect(result.data.map((d) => d.id)).toEqual(['p-sin']);
+      expect(result.meta.total).toBe(3);
+      const [, paramsPaso2] = dataSource.query.mock.calls[3] as [
+        string,
+        unknown[],
+      ];
+      expect(paramsPaso2).toEqual([
+        ['p-sin'],
+        TENANT,
+        UBICACION_LOCAL_ID,
+        false,
+      ]);
+    });
+
     it('receta: agrega disponible = mínimo entre ingredientes bloqueantes', async () => {
       dataSource.query
         .mockResolvedValueOnce([{ total: 1 }])
@@ -244,7 +480,7 @@ describe('ItemsService', () => {
         '0.15', // carne 150g → 0.15kg
       ]);
 
-      const result = await service.findAll(TENANT, { tipo: 'receta' } as any);
+      const result = await service.findAll(TENANT, { tipo: ['receta'] });
 
       // pan: floor(8/1)=8; carne: floor(1/0.15)=6 → mínimo 6
       expect(result.data[0].disponible).toBe(6);

@@ -3,7 +3,6 @@ import Decimal from 'decimal.js'
 import { tipoDocumentoPorDefecto, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import type { EmisorMedio } from '~/composables/useDocumentosVenta'
 import { sugerirPropina, fetchPorcentajeSugerido, PROPINA_PORCENTAJE_DEFAULT } from '~/composables/usePropina'
-import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import {
   cuentaToCalcularInput,
@@ -84,7 +83,10 @@ const salones = ref<SalonConMesas[]>([])
 const loading = ref(false)
 const selectedSalonId = ref<string | undefined>(undefined)
 
-const items = ref<ItemCatalogo[]>([])
+// Sin `onError`, a propósito: el 403 del garzón sin permiso de catálogo se queda
+// en silencio (ver `cargarCatalogo`).
+const catalogo = useCatalogoVenta({ tipos: ['producto', 'receta', 'combo'] })
+const items = catalogo.items
 const metodos = ref<MetodoPago[]>([])
 const tiposDocumento = ref<TipoDoc[]>([])
 const loadingCatalogo = ref(false)
@@ -385,7 +387,7 @@ const anularModalOpen = ref(false)
 const anularModalCuenta = ref<CuentaDetalle | null>(null)
 const anularModalLinea = ref<CuentaLineaDetalle | null>(null)
 const anulando = ref(false)
-/** `unidadBaseLinea` depende del catálogo (`items`), cargado en la página —el
+/** `unidadBaseLinea` depende de los ítems resueltos en la página (`itemPorId`) —el
  *  modal no lo tiene, así que recibe el resultado ya resuelto. */
 const anularModalUnidadBase = computed(() =>
   anularModalLinea.value ? unidadBaseLinea(anularModalLinea.value) : 'unidad',
@@ -974,65 +976,22 @@ function patchMesaOcupacion(mesaId: string, deltaAbiertas: number) {
  */
 const REFRESCO_ITEMS_MS = 250
 
-/**
- * Descarta la respuesta que llega tarde: dos refrescos encimados no vuelven
- * necesariamente en orden, y el más viejo dejaría en pantalla el número de
- * antes hasta el refresco siguiente.
- */
-let secuenciaItems = 0
 let refrescoItemsPendiente: ReturnType<typeof setTimeout> | null = null
 
-/**
- * Los tres `/items` del catálogo, y nada más. **No toca `loadingCatalogo`**: un
- * refresco de fondo que vaciara la grilla para volver a dibujarla haría
- * parpadear el catálogo en cada ítem que el garzón agrega.
- *
- * ⚠️ **Una llamada que falla NO borra lo que ya está en pantalla.** Cada tipo
- * conserva sus ítems anteriores si SU consulta no respondió; con las tres
- * caídas, el catálogo queda exactamente como estaba. Esto no es defensa
- * decorativa: mientras el catálogo se pedía una sola vez en `onMounted`, un
- * blip de red no lo podía borrar; ahora se pide muchas veces por turno, y
- * asignar `?.data ?? []` a ciegas dejaba al garzón con "No hay ítems para
- * mostrar" a mitad de servicio por un corte de wifi de dos segundos, sin
- * ningún aviso y sin nada que reintentara hasta el próximo cambio.
- *
- * El `.catch(() => null)` por llamada se mantiene —lo puso el 403 del garzón
- * sin permiso de catálogo, medido en el smoke del 2026-08-15—, pero acá
- * significa otra cosa: **"esta tanda no trajo nada, quedate con lo de antes"**.
- * Sigue sin toast a propósito: un aviso rojo por cada blip, en una pantalla que
- * el garzón usa con las dos manos, es ruido que no puede accionar — y lo que de
- * verdad protege el stock es el 400 del backend al pedir, no este número.
- */
-async function refrescarItems() {
-  const turno = ++secuenciaItems
-  const [productosRes, recetasRes, combosRes] = await Promise.all([
-    useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=producto&activo=true&pageSize=100`).catch(() => null),
-    useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=receta&activo=true&pageSize=100`).catch(() => null),
-    useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=combo&activo=true&pageSize=100`).catch(() => null),
-  ])
-  if (turno !== secuenciaItems) return
-  // En la carga inicial `previos` está vacío, así que el 403 del garzón sigue
-  // dejando el catálogo vacío igual que antes: esto conserva, no inventa.
-  const previos = items.value
-  const conservando = (
-    res: PaginatedResponse<ItemCatalogo> | null,
-    tipo: string,
-  ) => res?.data ?? previos.filter(i => i.tipo === tipo)
-  // Los pausados no vienen: `activo=true` va en la query. Filtrarlos acá no
-  // era equivalente —el pausado igual ocupaba uno de los 100 lugares pedidos,
-  // así que en un catálogo grande empujaba fuera del salón a uno vendible—.
-  items.value = [
-    ...conservando(productosRes, 'producto'),
-    ...conservando(recetasRes, 'receta'),
-    ...conservando(combosRes, 'combo'),
-  ]
-}
+// El refresco de la grilla vive en `useCatalogoVenta` (`catalogo.refrescar`):
+// descarta la respuesta que llega tarde y **no borra lo que ya está en pantalla
+// si la llamada falla** —un corte de wifi a mitad de servicio no puede dejar al
+// garzón con "No hay ítems para mostrar"—. Falla en silencio: sin toast a
+// propósito (un aviso rojo por cada blip, en una pantalla que se usa con las dos
+// manos, es ruido que no se puede accionar; lo que protege el stock es el 400
+// del backend al pedir, no este número). No toca `loadingCatalogo`: un refresco
+// de fondo que vaciara la grilla la haría parpadear en cada ítem agregado.
 
 function programarRefrescoItems() {
   if (refrescoItemsPendiente) clearTimeout(refrescoItemsPendiente)
   refrescoItemsPendiente = setTimeout(() => {
     refrescoItemsPendiente = null
-    void refrescarItems()
+    void catalogo.refrescar()
   }, REFRESCO_ITEMS_MS)
 }
 
@@ -1088,10 +1047,10 @@ async function cargarCatalogo() {
   loadingCatalogo.value = true
   try {
     // Solo tipos vendibles (producto + receta + combo). Los ingredientes (y resto) no van al catálogo.
-    // `/items` (×3, dentro de `refrescarItems`) y `/tipos-documento` llevan
-    // `.catch(() => null)` propio,
-    // mismo motivo que `cargarActiva` en `onMounted`: son datos del POS que un
-    // garzón no tiene permiso de leer, y esta carga es de fondo — no una acción
+    // `/items` (dentro de `catalogo.cargar`) se calla solo: `useCatalogoVenta` va sin
+    // `onError`, así que su try/catch interno traga el fallo. `/tipos-documento` lleva
+    // `.catch(() => null)` propio. Mismo motivo que `cargarActiva` en `onMounted`: son
+    // datos del POS que un garzón no tiene permiso de leer, y esta carga es de fondo — no una acción
     // que el garzón haya pedido. Sin el catch, ese 403 volteaba el `Promise.all`
     // entero (incluido `/metodos-pago`, que SÍ pasa para ese rol) y el catch de
     // abajo lo mostraba como "No tienes permiso para esta acción" en rojo apenas
@@ -1099,7 +1058,7 @@ async function cargarCatalogo() {
     // se queda SIN catch propio a propósito: si esa sí falla, es un error real
     // y tiene que avisar.
     const [, metodosRes, tiposRes] = await Promise.all([
-      refrescarItems(),
+      catalogo.cargar(),
       useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`),
       useApiFetch<TipoDoc[]>(`${apiUrl}/tipos-documento`).catch(() => null),
     ])
@@ -1719,7 +1678,7 @@ const inflight = ref(
  * - **Solo si la grilla está en pantalla.** `VentasCatalogoGrid` se rinde en la
  *   rama de detalle de cuenta, así que pasear por las mesas sin entrar a
  *   ninguna no tiene por qué pedir el catálogo: seis mesas miradas eran 18 GET
- *   `/items` para no mostrar nada. Por eso la fuente mira `activeCuenta` y no
+ *   `/items` (3 por mesa) hasta 2026-10-03, y serían 6 hoy, para no mostrar nada. Por eso la fuente mira `activeCuenta` y no
  *   la mesa.
  * - **Nunca con una edición de cantidad a medio camino.** `onCantidadChange`
  *   pinta la cantidad nueva en el acto (`patchLineaOptimista`) y recién manda
@@ -1750,17 +1709,42 @@ watch(
   },
 )
 
-function unidadBaseLinea(linea: CuentaLineaDetalle): string {
-  const catalogItem = items.value.find(i => i.id === linea.itemId)
-  return catalogItem ? unidadBaseItem(catalogItem) : 'unidad'
-}
+// `items` es UNA página del catálogo (48, filtrada por la búsqueda): el ítem de una línea
+// ya cargada puede no estar en ella. Los ítems de las líneas y anulaciones de la cuenta
+// ACTIVA (la única cuyas líneas se pintan o se imprimen) se resuelven aparte, por `ids=`, y se
+// cachean (spec catálogo paginado § 5). Solo la activa, no `cuentas`: pasear por las mesas no
+// debe pedir nada (ver "pasear por las mesas sin entrar a una cuenta no pide el catálogo").
+// Silencioso como el resto del catálogo del salón: el 403 del garzón sin `Items:Leer` deja el
+// fallback `'unidad'`.
+const itemsDeLineas = useItemsPorId<ItemCatalogo>()
+watch(
+  () => {
+    const c = activeCuenta.value
+    if (!c) return ''
+    return [...new Set([
+      ...c.lineas.map(l => l.itemId),
+      ...(c.anulaciones ?? []).map(a => a.itemId),
+    ])].sort().join(',')
+  },
+  (ids) => { if (ids) itemsDeLineas.resolver(ids.split(',')).catch(() => {}) },
+  { immediate: true },
+)
 
 /**
- * Map del catálogo por id, para resolver la unidad de una anulación sin un
- * `find` por fila — mismo criterio que el `porItemId` de `itemsParaTicket`.
- * `computed` para no reconstruirlo en cada fila del aviso (`v-for`).
+ * Map de los ítems que la pantalla necesita resolver por id: la página visible del catálogo
+ * (más fresca) sobre la caché de los ítems de las líneas. Para la unidad de una línea, la de
+ * una anulación y el ticket, sin un `find` por fila. `computed` para no reconstruirlo en cada
+ * fila del aviso (`v-for`).
  */
-const itemsPorId = computed(() => new Map(items.value.map(it => [it.id, it])))
+const itemPorId = computed(() => new Map<string, ItemCatalogo>([
+  ...itemsDeLineas.porId,
+  ...items.value.map(it => [it.id, it] as const),
+]))
+
+function unidadBaseLinea(linea: CuentaLineaDetalle): string {
+  const catalogItem = itemPorId.value.get(linea.itemId)
+  return catalogItem ? unidadBaseItem(catalogItem) : 'unidad'
+}
 
 /**
  * La cantidad de una anulación, ya formateada con la unidad de su ítem — usa
@@ -1768,7 +1752,7 @@ const itemsPorId = computed(() => new Map(items.value.map(it => [it.id, it])))
  * bajo la cuenta y para la precuenta (`anuladasParaTicket`).
  */
 function cantidadAnuladaTexto(anulacion: CuentaAnulacionDetalle): string {
-  return formatCantidadAnulacion(anulacion, itemsPorId.value, unidadesStore.esFraccionaria)
+  return formatCantidadAnulacion(anulacion, itemPorId.value, unidadesStore.esFraccionaria)
 }
 
 function presentacionLinea(linea: CuentaLineaDetalle): string {
@@ -2399,8 +2383,8 @@ function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
   // Mismo orden que cuentaToCalcularInput (índice 1:1); find por itemId falla
   // si hay dos líneas del mismo ítem con distinta personalización.
   // La línea de cuenta no lleva `tipo`/`unidadMedida`, así que la unidad base
-  // sale del catálogo ya cargado. Map una vez, no un `find` por línea.
-  const porItemId = new Map(items.value.map(it => [it.id, it]))
+  // sale del catálogo ya cargado (`itemPorId`, un Map: no un `find` por línea).
+  const porItemId = itemPorId.value
   return res.lineas.map((l, i) => {
     const cl = cuenta.lineas[i]
     const itemCl = cl ? porItemId.get(cl.itemId) : undefined
@@ -3091,7 +3075,11 @@ async function cerrarCuentaConPin(
           <div v-else class="grid h-full min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-5">
             <div class="flex min-h-0 flex-col overflow-hidden lg:col-span-3">
               <VentasCatalogoGrid
+                v-model:busqueda="catalogo.busqueda.value"
+                v-model:page="catalogo.page.value"
                 :items="items"
+                :total="catalogo.total.value"
+                :page-size="catalogo.pageSize"
                 :loading="loadingCatalogo"
                 @add="addProducto"
               />

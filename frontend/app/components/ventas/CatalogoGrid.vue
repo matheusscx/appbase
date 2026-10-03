@@ -2,12 +2,14 @@
 import Decimal from 'decimal.js'
 import { stockPedible, type ItemCatalogo } from '~/composables/useVenta'
 
-const props = defineProps<{ items: ItemCatalogo[]; loading?: boolean }>()
+defineProps<{ items: ItemCatalogo[]; loading?: boolean; total: number; pageSize: number }>()
 const emit = defineEmits<{ add: [item: ItemCatalogo] }>()
 
 const { esMonedaExtranjera, convertirAMonedaOficial, monedaOficial } = useMonedaConversion()
 const { formatStock } = useFormatters()
-const busqueda = ref('')
+// El servidor busca, ordena (`orden=disponibilidad`) y pagina: la grilla solo pinta.
+const busqueda = defineModel<string>('busqueda', { default: '' })
+const page = defineModel<number>('page', { default: 1 })
 
 /**
  * Mide sobre lo que todavía se puede pedir, no sobre el stock físico: desde el
@@ -39,30 +41,16 @@ function puedeAgregar(item: ItemCatalogo): boolean {
  * y **puede ser negativo** (un ingrediente no bloqueante se pasa del stock,
  * § 4.2 de
  * `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`). Con
- * `=== 0`, un plato en −2 no se atenuaba y encima ordenaba como si tuviera
- * existencias: el peor de los tres estados se veía mejor que
- * el de cero. El `?? 1` deja intacto el `null`, que significa "no hay
- * bloqueantes que limiten" y no es falta de stock.
+ * `=== 0`, un plato en −2 no se atenuaba y se veía mejor que el de cero, siendo
+ * el peor de los tres estados (el orden ya no se decide acá: lo pone el servidor,
+ * `backend/src/modules/items/catalogo-orden.ts`, con el mismo `<= 0`). El `?? 1`
+ * deja intacto el `null`, que significa "no hay bloqueantes que limiten" y no es
+ * falta de stock.
  */
 function sinStockVisual(item: ItemCatalogo): boolean {
   if (item.tipo === 'receta' || item.tipo === 'combo') return (item.disponible ?? 1) <= 0
   return !tieneStock(item)
 }
-
-function compararCatalogo(a: ItemCatalogo, b: ItemCatalogo): number {
-  const aConStock = sinStockVisual(a) ? 1 : 0
-  const bConStock = sinStockVisual(b) ? 1 : 0
-  if (aConStock !== bConStock) return aConStock - bConStock
-  return a.nombre.localeCompare(b.nombre, 'es')
-}
-
-const filtrados = computed(() => {
-  const q = busqueda.value.trim().toLowerCase()
-  const list = q
-    ? props.items.filter((i) => i.nombre.toLowerCase().includes(q))
-    : props.items
-  return [...list].sort(compararCatalogo)
-})
 
 function onAgregar(item: ItemCatalogo) {
   if (!puedeAgregar(item)) return
@@ -83,14 +71,15 @@ function onAgregar(item: ItemCatalogo) {
     <div v-if="loading" class="text-center text-muted py-10 text-sm">
       Cargando catálogo...
     </div>
-    <div v-else-if="!filtrados.length" class="text-center text-muted py-10 text-sm">
+    <div v-else-if="!items.length" class="text-center text-muted py-10 text-sm">
       No hay ítems para mostrar.
     </div>
 
     <div v-else class="flex-1 min-h-0 overflow-y-auto overscroll-contain">
       <div class="grid grid-cols-2 md:grid-cols-3 gap-3 items-stretch p-1 pb-2">
+        <!-- El orden lo pone el servidor (`orden=disponibilidad`): no reordenar acá. -->
         <UCard
-          v-for="item in filtrados"
+          v-for="item in items"
           :key="item.id"
           class="h-full transition"
           :class="[
@@ -146,6 +135,17 @@ function onAgregar(item: ItemCatalogo) {
           </div>
         </UCard>
       </div>
+    </div>
+
+    <!-- `sibling-count` 1 y el scroll horizontal: con los 2 vecinos por defecto más los
+         controles la fila no entra a 375 px, y el contenedor de arriba recorta. -->
+    <div v-if="total > pageSize" class="flex justify-center shrink-0 min-w-0 overflow-x-auto">
+      <UPagination
+        v-model:page="page"
+        :items-per-page="pageSize"
+        :sibling-count="1"
+        :total="total"
+      />
     </div>
   </div>
 </template>

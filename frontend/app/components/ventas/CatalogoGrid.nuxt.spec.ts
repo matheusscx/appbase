@@ -39,8 +39,11 @@ function producto(over: Partial<ItemCatalogo> = {}): ItemCatalogo {
   }
 }
 
-async function montar(items: ItemCatalogo[]) {
-  return mountSuspended(CatalogoGrid, { props: { items }, global: { stubs } })
+async function montar(items: ItemCatalogo[], extra: { total?: number; pageSize?: number } = {}) {
+  return mountSuspended(CatalogoGrid, {
+    props: { items, total: extra.total ?? items.length, pageSize: extra.pageSize ?? 48 },
+    global: { stubs },
+  })
 }
 
 /** El texto de la tarjeta, con los saltos de línea del template aplanados. */
@@ -134,16 +137,9 @@ describe('CatalogoGrid — recetas y combos siguen con su propio número', () =>
     expect(wrapper.find('[data-qa="item-catalogo-receta-1"]').classes()).toContain('opacity-50')
   })
 
-  it('el disponible negativo también ordena al final, no como si hubiera stock', async () => {
-    const wrapper = await montar([
-      producto({ id: 'receta-negativa', nombre: 'AAA agotadísima', tipo: 'receta', stock: null, disponible: -2, stockDisponible: null }),
-      producto({ id: 'receta-con-stock', nombre: 'ZZZ con stock', tipo: 'receta', stock: null, disponible: 3, stockDisponible: null }),
-    ])
-
-    // Va segunda pese a ganar por nombre: el orden mira primero si hay o no.
-    const orden = wrapper.findAll('[data-qa^="item-catalogo-"]').map(c => c.attributes('data-qa'))
-    expect(orden).toEqual(['item-catalogo-receta-con-stock', 'item-catalogo-receta-negativa'])
-  })
+  // El orden por disponibilidad (incluido el disponible negativo al final) ya no
+  // vive acá: lo fija el servidor con `orden=disponibilidad`, y lo cubren
+  // `catalogo-orden.spec.ts` (backend) y `catalogo-paginado.e2e-spec.ts`.
 
   it('disponible null no se atenúa: es "sin bloqueantes", no "sin stock"', async () => {
     const wrapper = await montar([
@@ -162,5 +158,55 @@ describe('CatalogoGrid — recetas y combos siguen con su propio número', () =>
     expect(tarjeta.attributes('aria-disabled')).toBe('false')
     await tarjeta.trigger('click')
     expect(wrapper.emitted('add')).toHaveLength(1)
+  })
+})
+
+describe('CatalogoGrid — búsqueda, orden y paginación vienen de afuera', () => {
+  it('tipear en el buscador emite `update:busqueda`', async () => {
+    const wrapper = await montar([producto()])
+
+    await wrapper.find('input').setValue('coca')
+
+    expect(wrapper.emitted('update:busqueda')?.at(-1)).toEqual(['coca'])
+  })
+
+  it('respeta el orden en que llegan los ítems: ya no reordena', async () => {
+    // Antes la grilla mandaba lo agotado al final; ahora el orden es del servidor.
+    const wrapper = await montar([
+      producto({ id: 'sin-stock', nombre: 'AAA', stock: '0.0000', stockDisponible: '0.0000' }),
+      producto({ id: 'con-stock', nombre: 'ZZZ', stock: '3.0000', stockDisponible: '3.0000' }),
+    ])
+
+    const orden = wrapper.findAll('[data-qa^="item-catalogo-"]').map(c => c.attributes('data-qa'))
+    expect(orden).toEqual(['item-catalogo-sin-stock', 'item-catalogo-con-stock'])
+  })
+
+  it('no filtra por lo que hay en el buscador: muestra lo que llega', async () => {
+    const wrapper = await mountSuspended(CatalogoGrid, {
+      props: { items: [producto({ nombre: 'Coca-Cola' })], total: 1, pageSize: 48, busqueda: 'zzz' },
+      global: { stubs },
+    })
+
+    expect(wrapper.find('[data-qa="item-catalogo-item-1"]').exists()).toBe(true)
+  })
+
+  it('con más ítems que una página muestra la paginación y emite `update:page`', async () => {
+    const wrapper = await montar([producto()], { total: 100, pageSize: 48 })
+
+    const paginacion = wrapper.findComponent({ name: 'UPagination' })
+    expect(paginacion.exists()).toBe(true)
+    // A 375 px los dos vecinos por lado más los controles no entran en una fila.
+    expect(paginacion.props('siblingCount')).toBe(1)
+
+    paginacion.vm.$emit('update:page', 2)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('update:page')?.at(-1)).toEqual([2])
+  })
+
+  it('cabiendo en una página no muestra la paginación', async () => {
+    const wrapper = await montar([producto()], { total: 10, pageSize: 48 })
+
+    expect(wrapper.findComponent({ name: 'UPagination' }).exists()).toBe(false)
   })
 })

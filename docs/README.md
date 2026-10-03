@@ -59,6 +59,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [pasarela-pagos.md](./features/pasarela-pagos.md) | Pasarela de pagos multi-proveedor (Oneclick real, API keys m2m, admin UI) |
 | [reembolsos-nota-credito.md](./features/reembolsos-nota-credito.md) | Reembolsos con NC interna elegible + devolución de stock + visibilidad en ventas |
 | [cron.md](./features/cron.md) | Jobs internos programados: registro de ejecuciones + expiración de órdenes de pasarela |
+| [catalogo-paginado.md](./features/catalogo-paginado.md) | Catálogo de la grilla de venta (POS, salón, tienda) paginado, ordenado y buscado en el servidor |
 | [salones-mesas.md](./features/salones-mesas.md) | Salones y mesas de restaurante: plano drag&drop, cuentas por mesa y cierre que genera venta |
 | [garzones.md](./features/garzones.md) | Garzones con PIN de 6 dígitos: identificación operativa en dispositivos compartidos y trazabilidad de quién abre/cierra cada cuenta |
 | [turnos-garzones.md](./features/turnos-garzones.md) | Turnos y sesiones de garzón: catálogo de turnos, marca de entrada/salida con PIN, cierre admin y sesión obligatoria para abrir/cerrar cuentas |

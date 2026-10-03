@@ -3,7 +3,7 @@
 > **Para agentes:** sub-skill requerida: superpowers:subagent-driven-development (recomendada) o
 > superpowers:executing-plans. Las tareas usan checkboxes (`- [ ]`).
 
-**Status:** Draft · **Date:** 2026-10-03 · **Owner:** Cesar Matheus
+**Status:** In Progress · **Date:** 2026-10-03 · **Owner:** Cesar Matheus
 
 **Goal:** que el ítem 101 se pueda encontrar, vender y elegir. La grilla de venta pide al servidor
 una página ordenada y buscada, y los selectores buscan en el servidor.
@@ -81,7 +81,7 @@ tenant Demo Restaurante (`…440007`). Por eso hay que resetearla antes de cualq
 - Produce: `compararPorDisponibilidad(a, b, disponible, stockDisponible): number` y
   `esPedible(tipo, disponible, stockDisponible): boolean`, en `catalogo-orden.ts`.
 
-- [ ] **Paso 1: tests del orden (puros) que fallan.** En `catalogo-orden.spec.ts`:
+- [x] **Paso 1: tests del orden (puros) que fallan.** En `catalogo-orden.spec.ts`:
 
 ```ts
 import { compararPorDisponibilidad, esPedible } from './catalogo-orden';
@@ -130,11 +130,11 @@ describe('compararPorDisponibilidad', () => {
   armado con eso. Agregar además el caso del desempate: dos filas que se llaman `'Pan'`, con ids
   `'b'` y `'a'`, tienen que salir `['a', 'b']`.
 
-- [ ] **Paso 2: correr y ver el fallo.**
+- [x] **Paso 2: correr y ver el fallo.**
   `npx --prefix $WT/backend jest $WT/backend/src/modules/items/catalogo-orden.spec.ts`.
   Esperado: FAIL, `Cannot find module './catalogo-orden'`.
 
-- [ ] **Paso 3: implementar `catalogo-orden.ts`.**
+- [x] **Paso 3: implementar `catalogo-orden.ts`.**
 
 ```ts
 import Decimal from 'decimal.js';
@@ -174,7 +174,7 @@ export function compararPorDisponibilidad(
 
   Correr de nuevo. Esperado: PASS.
 
-- [ ] **Paso 4: tests de DTO que fallan.** En `query-items.dto.spec.ts`, con el molde de los
+- [x] **Paso 4: tests de DTO que fallan.** En `query-items.dto.spec.ts`, con el molde de los
   casos existentes (`plainToInstance` + `validate`):
   - `tipo: 'producto,receta'` → `['producto','receta']`;
   - `tipo: 'producto'` → `['producto']`;
@@ -185,7 +185,7 @@ export function compararPorDisponibilidad(
   Recordar (memoria del repo): estos tests no ejercen el pipe global; el 400 real lo cubre el e2e
   de la Tarea 3.
 
-- [ ] **Paso 5: implementar el DTO.**
+- [x] **Paso 5: implementar el DTO.**
   - `tipo` con un `@Transform` que parte por coma, hace trim y deduplica (molde: `parseTurnoIds`
     en `propinas/dto/query-propina-reporte.dto.ts`), más `@IsIn(TIPOS_ITEM, { each: true })`.
   - Sacar el tipo literal a `const TIPOS_ITEM = [...] as const` en el mismo archivo.
@@ -193,17 +193,17 @@ export function compararPorDisponibilidad(
 
   Correr los specs del DTO. Esperado: PASS.
 
-- [ ] **Paso 6: test de servicio que falla: `tipo` como lista.** En `items.service.spec.ts`
+- [x] **Paso 6: test de servicio que falla: `tipo` como lista.** En `items.service.spec.ts`
   (`describe('findAll')`), con el molde de `'filtra por búsqueda…'` (:180):
   `findAll(TENANT, { tipo: ['producto', 'combo'] })` debe mandar `i.tipo = ANY($2)` con
   `['producto','combo']` como segundo parámetro. **Ajustar** el caso existente
   `{ tipo: 'receta' } as any` (:247) a `{ tipo: ['receta'] }`.
 
-- [ ] **Paso 7: implementar en `buildFindAllFilters`.** Cambiar `AND i.tipo = $n` por
+- [x] **Paso 7: implementar en `buildFindAllFilters`.** Cambiar `AND i.tipo = $n` por
   `AND i.tipo = ANY($n)` con `params.push(query.tipo)`, solo si `query.tipo?.length`. Correr el
   `describe('findAll')`. Esperado: PASS.
 
-- [ ] **Paso 8: test de servicio que falla: `orden=disponibilidad` arma la página desde el paso
+- [x] **Paso 8: test de servicio que falla: `orden=disponibilidad` arma la página desde el paso
   1.** Fijar con el mock de `dataSource.query`, en este orden:
   1. el paso liviano devuelve 3 filas: `p-sin` (producto `'Agua'`, `stock_vendible '0'`), `p-con`
      (producto `'Zapallo'`, `'5'`) y `r` (receta `'Burger'`);
@@ -226,7 +226,7 @@ export function compararPorDisponibilidad(
   ⚠️ El mock no ve la forma del SQL (memoria del repo): este test fija el **armado de la
   página**; el orden real lo fija el e2e de la Tarea 3.
 
-- [ ] **Paso 9: implementar.**
+- [x] **Paso 9: implementar.**
   - Extraer de `findAll` el bloque que va desde `comboIdsConGrupos` hasta el `rows.map(...)`
     final a un `private async armarFilasListado(tenantId, query, rows, dispPorId,
     stockDispPorId)`. Lo usan los dos caminos; no se duplica.
@@ -259,7 +259,7 @@ const livianas: { item_id: string; tipo: string; nombre: string; stock_vendible:
 
   Correr el `describe('findAll')` completo. Esperado: PASS, sin tocar los casos viejos.
 
-- [ ] **Paso 10: índice.**
+- [x] **Paso 10: índice.**
   - En `item.entity.ts`, al lado del `@Index` existente:
     `@Index('idx_items_tenant_tipo_vivo', ['tenantId', 'tipo'], { where: '"eliminado_el" IS NULL' })`,
     con un comentario de una línea que apunte a la medición de la spec (§ 1).
@@ -267,7 +267,7 @@ const livianas: { item_id: string; tipo: string; nombre: string; stock_vendible:
   - En `backend/test/esquema.e2e-spec.ts`, un caso con el molde del de :124: el índice existe, es
     `btree (tenant_id, tipo)` y tiene `WHERE (eliminado_el IS NULL)`.
 
-- [ ] **Paso 11: medición con freno.**
+- [x] **Paso 11: medición con freno.**
   1. La base de 5433 todavía tiene el catálogo sintético. Si no lo tiene (por ejemplo, ya se
      reseteó), cargarlo con el script del Apéndice A.
   2. Levantar el backend contra esa base:
@@ -289,7 +289,7 @@ for u in "tipo=producto,receta,combo&activo=true&orden=disponibilidad&pageSize=4
     números. No seguir con la Tarea 2.
   - Bajar el backend. **No tocar ningún `.ts` con el backend corriendo** (se re-siembra).
 
-- [ ] **Paso 12: lint y typecheck, y stagear.**
+- [x] **Paso 12: lint y typecheck, y stagear.**
   `npm --prefix $WT/backend run lint:check && npm --prefix $WT/backend run typecheck`, y después
   `git -C $WT add` de los archivos de esta tarea, por ruta.
 
@@ -304,23 +304,23 @@ for u in "tipo=producto,receta,combo&activo=true&orden=disponibilidad&pageSize=4
 - Produce: `QueryItemsDto.ids?: string[]` (máximo 100, UUID cada uno) y
   `QueryItemsDto.modoInventario?: 'cantidad' | 'lote' | 'serie'`.
 
-- [ ] **Paso 1: tests de DTO que fallan.**
+- [x] **Paso 1: tests de DTO que fallan.**
   - `ids: 'a,b'` con UUID válidos da un array de 2;
   - un no-UUID da error;
   - 101 ids dan error (`ArrayMaxSize(100)`, molde: `compras/dto/pago-proveedor.dto.ts:71`);
   - `modoInventario: 'serie'` pasa;
   - `modoInventario: 'kilo'` da error.
-- [ ] **Paso 2:** correr y ver el FAIL.
-- [ ] **Paso 3: implementar el DTO.** El `@Transform` de partir por coma queda **una sola vez**
+- [x] **Paso 2:** correr y ver el FAIL.
+- [x] **Paso 3: implementar el DTO.** El `@Transform` de partir por coma queda **una sola vez**
   en el archivo, reusado por `tipo` e `ids` (segundo uso, no se extrae a `common/`); después,
   `@IsUUID('4', { each: true })`, `@ArrayMaxSize(100)` y `@IsIn([...], ...)` donde corresponda.
   Correr. Esperado: PASS.
-- [ ] **Paso 4: tests de servicio que fallan.**
+- [x] **Paso 4: tests de servicio que fallan.**
   - `findAll(TENANT, { ids: [A, B] })` manda `i.item_id = ANY($2)` con `[A, B]`.
   - `findAll(TENANT, { modoInventario: 'cantidad' })` manda un `EXISTS` sobre `item_producto`
     con `modo_inventario = $2`. **Afirmar sobre la cláusula, no sobre `toContain('modo')`**: el
     comentario del SQL también lo contiene (memoria del repo).
-- [ ] **Paso 5: implementar en `buildFindAllFilters`.**
+- [x] **Paso 5: implementar en `buildFindAllFilters`.**
 
 ```ts
 if (query.ids?.length) {
@@ -337,7 +337,7 @@ if (query.modoInventario) {
 
   `item_producto` no tiene `eliminado_el` (el borrado vive en `items`, que ya está filtrado).
   Correr el `describe('findAll')`. Esperado: PASS.
-- [ ] **Paso 6:** lint, typecheck y stagear por ruta.
+- [x] **Paso 6:** lint, typecheck y stagear por ruta.
 
 ### Tarea 3: e2e del catálogo paginado (backend)
 
@@ -347,7 +347,7 @@ if (query.modoInventario) {
 **Interfaces:**
 - Consume: todo lo de las Tareas 1 y 2 por HTTP.
 
-- [ ] **Paso 1: escribir el spec** con el molde de `items-pausados.e2e-spec.ts`:
+- [x] **Paso 1: escribir el spec** con el molde de `items-pausados.e2e-spec.ts`:
   - el arranque (`validacionGlobal`, `cookieParser`), el `login` a Paris y el `afterAll` que
     acumula fallos;
   - `abrirCaja` de `helpers/caja`;
@@ -382,15 +382,15 @@ if (query.modoInventario) {
 
   `afterAll`: cerrar la caja y hacer `DELETE /api/items/:id` de los 105. El borrado es soft:
   `items.service` marca `eliminado_el`.
-- [ ] **Paso 2: resetear la base** (tiene el catálogo sintético) y correr el spec solo:
+- [x] **Paso 2: resetear la base** (tiene el catálogo sintético) y correr el spec solo:
   `$WT/scripts/reset-db.sh`, y después
   `npx --prefix $WT/backend jest --config $WT/backend/test/jest-e2e.json $WT/backend/test/catalogo-paginado.e2e-spec.ts`.
   Esperado: PASS. Si algo falla, primero `reset-db.sh --verificar`.
-- [ ] **Paso 3: mutante que revierte.** Volver temporalmente `compararPorDisponibilidad` a
+- [x] **Paso 3: mutante que revierte.** Volver temporalmente `compararPorDisponibilidad` a
   comparar solo por nombre, con un `return COLLATOR.compare(...)` al principio. El caso de orden
   tiene que fallar. Revertir el mutante, mirar la hora de reinicio del watcher si hubiera uno
   corriendo, y volver a correr el spec hasta verlo en verde.
-- [ ] **Paso 4:** stagear por ruta.
+- [x] **Paso 4:** stagear por ruta.
 
 ### Tarea 4: `useCatalogoVenta`
 
@@ -426,7 +426,7 @@ export function useCatalogoVenta(opts: {
 }
 ```
 
-- [ ] **Paso 1: tests que fallan** (`// @vitest-environment nuxt`, con `mockNuxtImport('useApiFetch', …)`
+- [x] **Paso 1: tests que fallan** (`// @vitest-environment nuxt`, con `mockNuxtImport('useApiFetch', …)`
   como `pos.nuxt.spec.ts:122`, montando el composable dentro de un componente de prueba con
   `mountSuspended`, y `vi.useFakeTimers()` para los 300 ms). Casos:
   1. `cargar()` pide `/items?tipo=producto%2Creceta%2Ccombo&activo=true&orden=disponibilidad&page=1&pageSize=48`
@@ -444,9 +444,9 @@ export function useCatalogoVenta(opts: {
      parámetro además de los fijos.
   8. **No toca los ítems:** un ítem de la respuesta con `modoInventario: 'serie'` llega igual a
      `items` (el composable no mapea, y este test lo fija).
-- [ ] **Paso 2:** `npx --prefix $WT/frontend vitest run app/composables/useCatalogoVenta.nuxt.spec.ts`.
+- [x] **Paso 2:** `npx --prefix $WT/frontend vitest run app/composables/useCatalogoVenta.nuxt.spec.ts`.
   Esperado: FAIL.
-- [ ] **Paso 3: implementar.**
+- [x] **Paso 3: implementar.**
 
 ```ts
 import type { ItemCatalogo } from '~/composables/useVenta'
@@ -528,9 +528,9 @@ export function useCatalogoVenta(opts: {
 }
 ```
 
-- [ ] **Paso 4:** correr el spec. Esperado: PASS. Mutante: sacar el `if (mio !== turno) return`;
+- [x] **Paso 4:** correr el spec. Esperado: PASS. Mutante: sacar el `if (mio !== turno) return`;
   el caso 4 tiene que fallar. Revertir el mutante.
-- [ ] **Paso 5:** stagear por ruta.
+- [x] **Paso 5:** stagear por ruta.
 
 ### Tarea 5: `CatalogoGrid` deja de filtrar y de ordenar, y pagina
 
@@ -543,7 +543,7 @@ export function useCatalogoVenta(opts: {
   `pageSize: number`; `defineModel<string>('busqueda', { default: '' })` y
   `defineModel<number>('page', { default: 1 })`. El emit `add` no cambia.
 
-- [ ] **Paso 1: tests que fallan.**
+- [x] **Paso 1: tests que fallan.**
   - Tipear en el input emite `update:busqueda`.
   - Con `total: 100, pageSize: 48` aparece `UPagination`, y al cambiar de página emite
     `update:page`.
@@ -554,9 +554,9 @@ export function useCatalogoVenta(opts: {
     ahora lo fijan `catalogo-orden.spec.ts` y el e2e. Dejar una línea en el `describe` que diga
     dónde se mudó.
   - El helper `montar` pasa `total: items.length, pageSize: 48`.
-- [ ] **Paso 2:** `npx --prefix $WT/frontend vitest run app/components/ventas/CatalogoGrid.nuxt.spec.ts`.
+- [x] **Paso 2:** `npx --prefix $WT/frontend vitest run app/components/ventas/CatalogoGrid.nuxt.spec.ts`.
   Esperado: FAIL.
-- [ ] **Paso 3: implementar.**
+- [x] **Paso 3: implementar.**
   - Borrar `compararCatalogo` y `filtrados`.
   - El `v-for` recorre `items`, y el vacío mira `!items.length`.
   - El input pasa a `v-model="busqueda"`.
@@ -566,7 +566,7 @@ export function useCatalogoVenta(opts: {
   - `sinStockVisual`, `puedeAgregar` y `tieneStock` quedan como están.
   - Comentario de una línea arriba del `v-for`: el orden lo pone el servidor
     (`orden=disponibilidad`).
-- [ ] **Paso 4:** correr el spec, `npm --prefix $WT/frontend run design:check` y stagear.
+- [x] **Paso 4:** correr el spec, `npm --prefix $WT/frontend run design:check` y stagear.
 
 ### Tarea 6: POS y tienda
 
@@ -578,14 +578,14 @@ export function useCatalogoVenta(opts: {
 **Interfaces:**
 - Consume: `useCatalogoVenta` (Tarea 4) y las props y modelos de `CatalogoGrid` (Tarea 5).
 
-- [ ] **Paso 1: ajustar los specs para que fallen.**
+- [x] **Paso 1: ajustar los specs para que fallen.**
   - En `pos.nuxt.spec.ts`, el caso de :220 ("3 URLs con `tipo` producto/receta/combo") pasa a ser
     **1 URL**, con `tipo` = `producto,receta,combo`, `activo=true` y `orden=disponibilidad`.
   - Agregar un caso: con un ítem en el carrito, la tarjeta de ese ítem muestra el disponible
     descontado. `descontarStockCatalogo` sigue sobre la página.
   - En `tienda/index.nuxt.spec.ts`, la URL lleva `tipo=producto` y `orden=disponibilidad`.
-- [ ] **Paso 2:** correr los dos specs. Esperado: FAIL.
-- [ ] **Paso 3: implementar en `pos.vue`.**
+- [x] **Paso 2:** correr los dos specs. Esperado: FAIL.
+- [x] **Paso 3: implementar en `pos.vue`.**
 
 ```ts
 const catalogo = useCatalogoVenta({
@@ -604,10 +604,10 @@ const loadingCatalogo = catalogo.loading
     `<VentasCatalogoGrid v-model:busqueda="catalogo.busqueda.value" v-model:page="catalogo.page.value" :items="itemsVisibles" :total="catalogo.total.value" :page-size="catalogo.pageSize" :loading="loadingCatalogo" @add="onCatalogoAdd" />`.
     Si `vue-tsc` se queja de `.value` en el template, desestructurar los refs al top-level.
   - **No tocar** `onCatalogoAdd` (lo toca el frente de serie).
-- [ ] **Paso 4: lo mismo en `tienda/index.vue`**, con `tipos: ['producto']`. Si el frente de
+- [x] **Paso 4: lo mismo en `tienda/index.vue`**, con `tipos: ['producto']`. Si el frente de
   serie ya está en `main` cuando se rebasea, su filtro de la tienda pasa por `filtros` (spec del
   composable, caso 7).
-- [ ] **Paso 5:** correr los dos specs (PASS), `npm --prefix $WT/frontend run typecheck:ratchet` y
+- [x] **Paso 5:** correr los dos specs (PASS), `npm --prefix $WT/frontend run typecheck:ratchet` y
   stagear.
 
 ### Tarea 7: salón
@@ -619,7 +619,7 @@ const loadingCatalogo = catalogo.loading
 **Interfaces:**
 - Consume: `useCatalogoVenta` sin `onError`, para conservar el silencio del 403 del garzón.
 
-- [ ] **Paso 1: ajustar el spec para que falle.**
+- [x] **Paso 1: ajustar el spec para que falle.**
   - La rama `/items` del mock parsea `tipo` como **lista**
     (`new URLSearchParams(url.split('?')[1]).get('tipo')?.split(',')`) y filtra
     `catalogoItemsMock` por inclusión.
@@ -628,9 +628,9 @@ const loadingCatalogo = catalogo.loading
     tipos".
   - El caso de :4364 ("un refresco que falla deja la grilla como estaba") queda igual: lo cubre
     el composable.
-- [ ] **Paso 2:** `npx --prefix $WT/frontend vitest run app/pages/salones/index.nuxt.spec.ts`.
+- [x] **Paso 2:** `npx --prefix $WT/frontend vitest run app/pages/salones/index.nuxt.spec.ts`.
   Esperado: FAIL en los conteos.
-- [ ] **Paso 3: implementar.**
+- [x] **Paso 3: implementar.**
   - `const catalogo = useCatalogoVenta({ tipos: ['producto', 'receta', 'combo'] })`;
     `items = catalogo.items`.
   - Borrar `secuenciaItems` y `refrescarItems`; `programarRefrescoItems` llama a
@@ -641,18 +641,18 @@ const loadingCatalogo = catalogo.loading
     llamada.
   - El `watch` de la firma de la cuenta y `REFRESCO_ITEMS_MS` no se tocan.
   - Template: igual que en el POS.
-- [ ] **Paso 4: medir los bytes del refresco.** Con el catálogo sintético (Apéndice A) y el
+- [x] **Paso 4: medir los bytes del refresco.** Con el catálogo sintético (Apéndice A) y el
   backend de la Tarea 1, comparar
   `curl -s -o /dev/null -w "%{size_download}"` de la URL nueva (48 ítems) contra la suma de las
   tres viejas. Anotar los dos números para la entrada de `resueltos.md`.
-- [ ] **Paso 5:** correr el spec (PASS), typecheck y stagear.
+- [x] **Paso 5:** correr el spec (PASS), typecheck y stagear.
 
 ### Tarea 8: Playwright — vender el 101
 
 **Files:**
 - Create: `frontend/e2e/ventas/catalogo-paginado.spec.ts`
 
-- [ ] **Paso 1: escribir el spec.** Molde: `e2e/ventas/pos.spec.ts`, con `tokenDe`, `abrirCaja`,
+- [x] **Paso 1: escribir el spec.** Molde: `e2e/ventas/pos.spec.ts`, con `tokenDe`, `abrirCaja`,
   `crearProducto`, la baja de ítems en el `afterEach` y la red de seguridad del escenario.
   - Crear **101 productos** con la marca de la corrida, el 101 con un nombre distinguible.
   - **POS:** tipear la marca + `101` en el buscador de la grilla; la tarjeta aparece; agregarla;
@@ -664,15 +664,15 @@ const loadingCatalogo = catalogo.loading
   - Correr el POS **como cajera**: `tokenDe` con las credenciales del rol cajero que use el
     seed. Si no hay una, preguntar antes de correr como admin (memoria: "Probar pantallas con el
     rol real").
-- [ ] **Paso 2: pedir turno, correr y liberar.** Pedir "pido turno: Playwright" y esperar "turno
+- [x] **Paso 2: pedir turno, correr y liberar.** Pedir "pido turno: Playwright" y esperar "turno
   tuyo". Antes de correr, `$WT/scripts/entorno.sh stack`, y mirar `RestartCount` y `OOMKilled`
   de los contenedores. Correr `npm --prefix $WT/frontend run e2e -- e2e/ventas/catalogo-paginado.spec.ts`
   y liberar el turno con los conteos.
-- [ ] **Paso 3:** stagear por ruta.
+- [x] **Paso 3:** stagear por ruta.
 
 ### Tarea 9: docs de la Fase A, gate entero y commit 1
 
-- [ ] **Paso 1: docs.**
+- [x] **Paso 1: docs.**
   - Crear `docs/features/catalogo-paginado.md` desde `TEMPLATE.md`. Va el porqué, no el código:
     el orden en dos pasos y por qué no va en SQL, qué hace el refresco del salón, y que no hay
     trigram, con el umbral para reconsiderarlo.
@@ -682,7 +682,7 @@ const loadingCatalogo = catalogo.loading
   - En `docs/patterns/frontend.md`: la grilla con `useCatalogoVenta`.
   - Si cambió algo de la entrada de la grilla en `docs/features/salones-mesas.md`, ajustarlo
     (grepear "refresc" y "/items").
-- [ ] **Paso 2: gate entero, ejecutado y no afirmado.** Cada comando en una llamada aparte y
+- [x] **Paso 2: gate entero, ejecutado y no afirmado.** Cada comando en una llamada aparte y
   mirando el exit code, sin `| tail`. Turnos para los pesados.
 
 ```bash
@@ -698,7 +698,7 @@ cd $WT/frontend && npm run typecheck:ratchet
 cd $WT/frontend && npm run design:check
 ```
 
-- [ ] **Paso 3: verificar y commitear.**
+- [x] **Paso 3: verificar y commitear.**
   - Invocar el skill `verify-feature` (revisión independiente, paso 7) con la duda concreta:
     *"¿el paso 1 de `findAllPorDisponibilidad` filtra lo mismo que el `COUNT` viejo, incluido el
     ítem de ajuste y el borrado?"*.

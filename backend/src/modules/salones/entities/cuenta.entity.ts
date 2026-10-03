@@ -29,10 +29,9 @@ export enum EstadoCuenta {
  * `idx_cuentas_estado`: lo pide `ItemsService.comprometidoPorItem`, la consulta
  * que le resta a `disponible`/`stockDisponible` lo que las cuentas ABIERTAS ya
  * pidieron. Cuelga de `GET /items`, o sea del menú del POS, y las pantallas
- * disparan **tres `GET /items` en paralelo** cada vez (`pos.vue:138,141,144` y
- * `salones/index.vue:638-640`), así que el costo se multiplica por tres. En el
- * POS eso pasa por carga de pantalla; en `/salones`, por cada ráfaga de mutación
- * (`refrescarItems`, debounce de 250 ms).
+ * disparan **un `GET /items`** cada vez (`pos.vue:138,141,144` y
+ * `salones/index.vue:638-640`). En el POS eso pasa por carga de pantalla; en `/salones`, por cada ráfaga de mutación
+ * (`refrescar()` de `useCatalogoVenta`, debounce de 250 ms).
  *
  * ⚠️ **Solo no sirve de nada, y eso está medido con un control**: agregándolo
  * sin `idx_cuenta_lineas_cuenta` la consulta pasa de 13,99 ms a 12,52 ms — sigue

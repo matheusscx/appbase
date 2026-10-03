@@ -122,6 +122,8 @@ let clavesDeVenta: (string | undefined)[] = []
 let respuestasVenta: (Error | { status: number, data: unknown } | Record<string, unknown>)[] = []
 /** Lo que devuelve `GET /tipos-documento`, en el orden del servidor (por nombre). */
 let tiposDocumentoMock: unknown[] = []
+/** La página de catálogo que devuelve `GET /items`. */
+let itemsCatalogoMock: unknown[] = []
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: unknown, headers?: Record<string, string> }) => {
@@ -133,7 +135,7 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (ruta.includes('/items')) {
       urlsCatalogo.push(url)
-      return Promise.resolve({ data: [], meta: { total: 0, page: 1, pageSize: 100 } })
+      return Promise.resolve({ data: itemsCatalogoMock, meta: { total: itemsCatalogoMock.length, page: 1, pageSize: 48 } })
     }
     if (ruta.endsWith('/tipos-documento')) {
       return Promise.resolve(tiposDocumentoMock)
@@ -190,12 +192,25 @@ beforeEach(() => {
   clavesDeVenta = []
   respuestasVenta = []
   tiposDocumentoMock = []
+  itemsCatalogoMock = []
   toasts = []
   // La clave vive a nivel de módulo (sobrevive a cerrar y reabrir un modal):
   // cada test arranca sin intento abierto.
   useIntentoCobro().terminar('pos')
   impresionesQz.length = 0
 })
+
+/**
+ * `AppDrawer` stubeado (mismo motivo que `ventas/index.nuxt.spec.ts`): su root es `UDrawer` y,
+ * al cerrarse el drawer de la receta, la transición de `usePresence` tira bajo happy-dom un
+ * `TypeError: Receiver must be an instance of class CSSStyleDeclaration` como rechazo no
+ * capturado — vitest sale con código 1 con todos los tests en verde.
+ */
+const AppDrawerStub = {
+  name: 'AppDrawer',
+  props: ['open'],
+  template: '<div v-if="open" role="dialog"><slot name="header" /><slot name="body" /><slot name="actions" /></div>',
+}
 
 async function montar() {
   const wrapper = await mountSuspended(Pos, {
@@ -205,7 +220,7 @@ async function montar() {
     // llega a renderizar `VentasCarritoPanel` (el botón "Vaciar todo" lleva
     // tooltip) revienta antes de montar nada. El resto de este archivo nunca
     // lo pisó porque `tieneCaja` era `false` en todos esos tests.
-    global: { stubs: { UTooltip: { template: '<div><slot /></div>' } } },
+    global: { stubs: { UTooltip: { template: '<div><slot /></div>' }, AppDrawer: AppDrawerStub } },
   })
   montado = wrapper
   await new Promise(r => setTimeout(r, 0))
@@ -213,19 +228,86 @@ async function montar() {
 }
 
 describe('ventas/pos — el catálogo pide solo ítems vendibles', () => {
-  it('las tres consultas de catálogo llevan `activo=true`', async () => {
+  it('una sola consulta de catálogo, con los tres tipos, `activo=true` y el orden del servidor', async () => {
     await montar()
 
-    // Producto, receta y combo: las tres, no "alguna".
-    expect(urlsCatalogo).toHaveLength(3)
-    for (const url of urlsCatalogo) {
-      expect(url).toContain('activo=true')
+    // Producto, receta y combo en UNA página paginada y ordenada por el servidor.
+    expect(urlsCatalogo).toHaveLength(1)
+    const params = new URL(urlsCatalogo[0]!, 'http://x').searchParams
+    expect(params.get('tipo')).toBe('producto,receta,combo')
+    expect(params.get('activo')).toBe('true')
+    expect(params.get('orden')).toBe('disponibilidad')
+  })
+
+  it('con un ítem en el carrito, su tarjeta muestra el disponible descontado', async () => {
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    const palta = {
+      id: 'item-1',
+      nombre: 'Palta',
+      descripcion: null,
+      precioBase: '1000',
+      monedaId: 'clp',
+      monedaSimbolo: '$',
+      stock: '10',
+      stockDisponible: '10.0000',
+      unidadMedida: 'unidad',
+      tipo: 'producto',
+      activo: true,
     }
-    expect(urlsCatalogo.map(u => u.match(/tipo=(\w+)/)?.[1]).sort()).toEqual([
-      'combo',
-      'producto',
-      'receta',
-    ])
+    itemsCatalogoMock = [palta]
+    const wrapper = await montar()
+    await esperar(20)
+
+    const tarjeta = () => wrapper.find('[data-qa="item-catalogo-item-1"]')
+    expect(tarjeta().text()).toContain('Disponible: 10')
+
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', palta)
+    await esperar(20)
+
+    expect(tarjeta().text()).toContain('Disponible: 9')
+  })
+})
+
+describe('ventas/pos — la receta del drawer se fija al abrirlo', () => {
+  it('confirmar agrega la línea aunque la grilla ya haya cambiado de página y la receta no esté en ella', async () => {
+    // `items` es la página visible del servidor: una búsqueda o un cambio de página en vuelo
+    // puede sacar la receta mientras el drawer está abierto. Antes, "Confirmar" hacía `return`
+    // en silencio porque el `find` sobre la página no la encontraba.
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    const hamburguesa = {
+      id: 'item-receta',
+      nombre: 'Hamburguesa',
+      descripcion: null,
+      precioBase: '3000',
+      monedaId: 'clp',
+      monedaSimbolo: '$',
+      stock: null,
+      stockDisponible: null,
+      unidadMedida: 'unidad',
+      tipo: 'receta',
+      activo: true,
+    }
+    const palta = { ...hamburguesa, id: 'item-1', nombre: 'Palta', tipo: 'producto' }
+    itemsCatalogoMock = [hamburguesa]
+    const wrapper = await montar()
+    await esperar(20)
+
+    const grilla = wrapper.findComponent({ name: 'VentasCatalogoGrid' })
+    grilla.vm.$emit('add', hamburguesa) // abre el drawer de la receta
+    await esperar(20)
+
+    // La grilla recibe otra página, sin la receta.
+    itemsCatalogoMock = [palta]
+    grilla.vm.$emit('update:busqueda', 'palta')
+    await esperar(400)
+    expect(wrapper.find('[data-qa="item-catalogo-item-receta"]').exists()).toBe(false)
+
+    wrapper.findComponent({ name: 'VentasItemPersonalizacionDrawer' })
+      .vm.$emit('confirm', { omitidos: [], extras: [], comentario: '' }, '')
+    await esperar(20)
+
+    const lineas = wrapper.findComponent({ name: 'VentasCarritoPanel' }).props('lineas') as { itemId?: string }[]
+    expect(lineas).toHaveLength(1)
   })
 })
 

@@ -3086,7 +3086,7 @@ export class SeederService implements OnApplicationBootstrap {
    *
    * `Items:Leer` se suma desde el 2026-09-28 (decisión del owner): con
    * `Operar` el encargado llegaba a la mesa pero no podía cargar un pedido,
-   * porque el catálogo de `/salones` (`refrescarItems()` → `GET /items`) le
+   * porque el catálogo de `/salones` (`refrescar()` de `useCatalogoVenta` → `GET /items`) le
    * rebotaba 403 y quedaba vacío. Es el mismo permiso —y por la misma razón—
    * que ya llevan `Vendedor` (el POS) y los roles de inventario.
    *
@@ -5295,8 +5295,8 @@ export class SeederService implements OnApplicationBootstrap {
    * el selector de garzones va por `Operar` justamente para no exigir `Leer`.
    *
    * `Items:Leer` se suma desde el 2026-09-30 (decisión del owner, `pendientes.md`
-   * § 3 "Enviar a cocina exige `Impresoras:Leer`"): sin él, `refrescarItems()`
-   * (`GET /items`, la pantalla de `/salones`) le rebotaba 403 y el garzón no
+   * § 3 "Enviar a cocina exige `Impresoras:Leer`"): sin él, el refresco del catálogo
+   * (`refrescar()` de `useCatalogoVenta`, `GET /items`, la pantalla de `/salones`) le rebotaba 403 y el garzón no
    * podía cargar un pedido — el mismo hueco que ya se le cerró a
    * `encargado.salon` (`seedRolEncargadoSalon`, 2026-09-28) y que ya tienen
    * `Vendedor` y los roles de inventario. Medido antes de sembrarlo (owner,

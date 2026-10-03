@@ -665,6 +665,10 @@ CREATE TABLE "items" (
   "eliminado_por"           UUID          REFERENCES usuarios("usuario_id")
 );
 
+-- El listado de venta (GET /items) filtra por tenant y tipo sobre filas vivas.
+-- Lo crea `synchronize` desde la entity (idx_items_tenant_tipo_vivo); acá, de referencia.
+CREATE INDEX "idx_items_tenant_tipo_vivo" ON "items" ("tenant_id", "tipo") WHERE "eliminado_el" IS NULL;
+
 -- Extensión 1:1 para tipo 'producto'.
 -- No tiene "stock": el saldo vive en "stock_ubicacion" (una fila por
 -- ubicación), único dueño desde el frente "bodegas y traslados" (Tarea 4,

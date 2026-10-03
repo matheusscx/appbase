@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { descontarStockCatalogo, type ItemCatalogo } from '~/composables/useVenta'
-import type { PaginatedResponse } from '~/composables/usePaginatedList'
+import { descontarStockCatalogo } from '~/composables/useVenta'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -11,33 +10,19 @@ const unidadesStore = useUnidadesMedidaStore()
 
 const { lineas, resultado, loadingCalculo, vigente, asegurarVigente, add, quitar, cambiarCantidadPresentacion, pagar } = useTiendaCarrito()
 
-const items = ref<ItemCatalogo[]>([])
-const loadingCatalogo = ref(false)
+const catalogo = useCatalogoVenta({
+  tipos: ['producto'],
+  onError: e => toast.add({ title: apiErrorMsg(e, 'Error al cargar el catálogo'), color: 'error' }),
+})
+const items = catalogo.items
+const loadingCatalogo = catalogo.loading
 const pagando = ref(false)
 
 /** Catálogo restando lo ya en el carrito (stock), reactivo al agregar/quitar. */
 const itemsVisibles = computed(() => descontarStockCatalogo(items.value, lineas.value))
 
-async function cargar() {
-  loadingCatalogo.value = true
-  try {
-    const res = await useApiFetch<PaginatedResponse<ItemCatalogo>>(
-      `${apiUrl}/items?tipo=producto&activo=true&pageSize=100`,
-    )
-    // Los pausados no vienen: `activo=true` va en la query. Filtrarlos acá no
-    // era equivalente —el pausado igual ocupaba uno de los 100 lugares pedidos,
-    // así que en un catálogo grande empujaba fuera de la tienda a uno vendible—.
-    items.value = res.data
-  } catch (e: unknown) {
-    const msg = apiErrorMsg(e, 'Error al cargar el catálogo')
-    toast.add({ title: msg, color: 'error' })
-  } finally {
-    loadingCatalogo.value = false
-  }
-}
-
 onMounted(async () => {
-  await Promise.all([cargar(), unidadesStore.ensureLoaded()])
+  await Promise.all([catalogo.cargar(), unidadesStore.ensureLoaded()])
 })
 
 function onCambiarCantidadPresentacion(
@@ -91,7 +76,15 @@ async function irAPagar() {
     <template #body>
       <div class="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start p-4">
         <div class="lg:col-span-3">
-          <VentasCatalogoGrid :items="itemsVisibles" :loading="loadingCatalogo" @add="add" />
+          <VentasCatalogoGrid
+            v-model:busqueda="catalogo.busqueda.value"
+            v-model:page="catalogo.page.value"
+            :items="itemsVisibles"
+            :total="catalogo.total.value"
+            :page-size="catalogo.pageSize"
+            :loading="loadingCatalogo"
+            @add="add"
+          />
         </div>
         <div class="lg:col-span-2 lg:sticky lg:top-4">
           <TiendaCarritoOnline

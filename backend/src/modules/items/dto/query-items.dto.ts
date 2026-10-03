@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsBoolean,
   IsIn,
   IsOptional,
@@ -9,23 +10,75 @@ import {
 import { Transform } from 'class-transformer';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
+const TIPOS_ITEM = [
+  'producto',
+  'servicio',
+  'suscripcion',
+  'receta',
+  'ingrediente',
+  'combo',
+] as const;
+
+export type TipoItem = (typeof TIPOS_ITEM)[number];
+
+/**
+ * `tipo=producto,receta` e `ids=<uuid>,<uuid>` (o un valor suelto, o la clave
+ * repetida) llegan como lista sin repetidos. Ausente queda `undefined` (no
+ * filtra). **Un elemento vacío no se descarta**: `tipo=`, `tipo=,` o `ids=` se
+ * quedan como `''` para que el validador del campo los corte con un 400 —
+ * ignorarlos haría que un filtro mal armado devolviera el catálogo entero,
+ * justo lo que no se pidió. Lo que no es texto queda como centinela por lo
+ * mismo.
+ */
+function parseLista({ value }: { value: unknown }): unknown {
+  if (value === undefined || value === null) return undefined;
+  const source: unknown[] = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(',')
+      : [value];
+  return [
+    ...new Set(
+      source.map((t) => (typeof t === 'string' ? t.trim() : '__invalid__')),
+    ),
+  ];
+}
+
 export class QueryItemsDto extends PaginationQueryDto {
   @IsOptional()
-  @IsIn([
-    'producto',
-    'servicio',
-    'suscripcion',
-    'receta',
-    'ingrediente',
-    'combo',
-  ])
-  tipo?:
-    | 'producto'
-    | 'servicio'
-    | 'suscripcion'
-    | 'receta'
-    | 'ingrediente'
-    | 'combo';
+  @Transform(parseLista)
+  @IsIn(TIPOS_ITEM, { each: true })
+  tipo?: TipoItem[];
+
+  /**
+   * Ítems por id, para que un selector resuelva lo ya elegido sin depender de
+   * la página que cargó el listado. Tope 100 = `MAX_PAGE_SIZE`: la respuesta no
+   * puede traer más filas que eso.
+   */
+  @IsOptional()
+  @Transform(parseLista)
+  @IsUUID('4', { each: true })
+  @ArrayMaxSize(100)
+  ids?: string[];
+
+  /**
+   * Solo productos con ese modo de inventario (el selector de unidades de serie
+   * pide `serie`). Excluye todo lo que no es producto: solo `item_producto`
+   * tiene modo.
+   */
+  @IsOptional()
+  @IsIn(['cantidad', 'lote', 'serie'])
+  modoInventario?: 'cantidad' | 'lote' | 'serie';
+
+  /**
+   * `disponibilidad`: el orden de la grilla de venta (pedibles primero, después
+   * nombre, después id), calculado en el servidor porque depende de la
+   * disponibilidad de cada ítem y paginar con el orden en el cliente lo cambiaba
+   * entre páginas. Sin el parámetro (o `nombre`), el de siempre.
+   */
+  @IsOptional()
+  @IsIn(['nombre', 'disponibilidad'])
+  orden?: 'nombre' | 'disponibilidad';
 
   @IsOptional()
   @IsUUID()

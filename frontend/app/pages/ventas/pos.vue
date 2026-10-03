@@ -3,7 +3,6 @@ import Decimal from 'decimal.js'
 import type { EmisorMedio } from '~/composables/useDocumentosVenta'
 import { useVenta, descontarStockCatalogo, tieneCustomerData, tipoDocumentoPorDefecto, toVentaLineasBody, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
-import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import { itemsParaBoletaImpresion } from '~/utils/ticket-builder'
 import type { DropdownMenuItem } from '@nuxt/ui'
@@ -53,10 +52,14 @@ watch(
   },
 )
 
-const items = ref<ItemCatalogo[]>([])
+const catalogo = useCatalogoVenta({
+  tipos: ['producto', 'receta', 'combo'],
+  onError: e => toast.add({ title: apiErrorMsg(e, 'Error al cargar el catálogo'), color: 'error' }),
+})
+const items = catalogo.items
 const metodos = ref<MetodoPago[]>([])
 const tiposDocumento = ref<TipoDoc[]>([])
-const loadingCatalogo = ref(false)
+const loadingCatalogo = catalogo.loading
 
 /** Catálogo restando lo ya en el carrito (stock / disponible), reactivo. */
 const itemsVisibles = computed(() => descontarStockCatalogo(items.value, lineas.value))
@@ -74,6 +77,13 @@ const movimientoDrawerOpen = ref(false)
 const cierreDrawerOpen = ref(false)
 const recetaDrawerOpen = ref(false)
 const recetaItemId = ref<string | null>(null)
+// La receta se fija al abrir el drawer: `items` es la página visible del servidor y una
+// búsqueda o un cambio de página en vuelo la puede sacar antes de "Confirmar". `flush: 'sync'`
+// la captura en el mismo tick en que `onCatalogoAdd` asigna el id, antes de que llegue otra página.
+const recetaItem = ref<ItemCatalogo | null>(null)
+watch(recetaItemId, (id) => {
+  recetaItem.value = id ? (items.value.find(i => i.id === id) ?? null) : null
+}, { flush: 'sync' })
 
 function onCatalogoAdd(item: ItemCatalogo) {
   if (item.tipo === 'receta' || (item.tipo === 'combo' && item.disponibleCondicional)) {
@@ -85,7 +95,7 @@ function onCatalogoAdd(item: ItemCatalogo) {
 }
 
 function onRecetaConfirm(payload: PersonalizacionPayload, resumen: string) {
-  const item = items.value.find((i) => i.id === recetaItemId.value)
+  const item = recetaItem.value
   if (!item) return
   if (personalizacionVacia(payload)) {
     add(item)
@@ -153,37 +163,21 @@ watch(tipoDocumentoId, () => {
 })
 
 async function cargar() {
-  loadingCatalogo.value = true
   try {
-    const [productosRes, recetasRes, combosRes, metodosRes, tiposRes] = await Promise.all([
-      useApiFetch<PaginatedResponse<ItemCatalogo>>(
-        `${apiUrl}/items?tipo=producto&activo=true&pageSize=100`,
-      ),
-      useApiFetch<PaginatedResponse<ItemCatalogo>>(
-        `${apiUrl}/items?tipo=receta&activo=true&pageSize=100`,
-      ),
-      useApiFetch<PaginatedResponse<ItemCatalogo>>(
-        `${apiUrl}/items?tipo=combo&activo=true&pageSize=100`,
-      ),
+    const [metodosRes, tiposRes] = await Promise.all([
       useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`),
       useApiFetch<TipoDoc[]>(`${apiUrl}/tipos-documento`),
     ])
-    // Los pausados no vienen: `activo=true` va en la query. Filtrarlos acá no
-    // era equivalente —el pausado igual ocupaba uno de los 100 lugares pedidos,
-    // así que en un catálogo grande empujaba fuera del POS a uno vendible—.
-    items.value = [...productosRes.data, ...recetasRes.data, ...combosRes.data]
     metodos.value = metodosRes
     tiposDocumento.value = tiposRes
     tipoDocumentoId.value = tipoDocumentoPorDefecto(tiposRes)
   } catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cargar el POS'), color: 'error' })
-  } finally {
-    loadingCatalogo.value = false
   }
 }
 
 onMounted(async () => {
-  await Promise.all([cajaStore.cargarActiva(), cargar(), unidadesStore.ensureLoaded(), cargarEmisor()])
+  await Promise.all([cajaStore.cargarActiva(), cargar(), catalogo.cargar(), unidadesStore.ensureLoaded(), cargarEmisor()])
   const { porcentajeSugerido, habilitado } = await fetchPorcentajeSugeridoVenta()
   propinaPorcentaje.value = porcentajeSugerido
   propinaHabilitada.value = habilitado
@@ -352,7 +346,15 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
 
       <div v-else class="grid grid-cols-1 lg:grid-cols-5 gap-4 h-full min-h-0 flex-1 overflow-hidden p-4">
         <div class="lg:col-span-3 min-h-0 flex flex-col overflow-hidden">
-          <VentasCatalogoGrid :items="itemsVisibles" :loading="loadingCatalogo" @add="onCatalogoAdd" />
+          <VentasCatalogoGrid
+            v-model:busqueda="catalogo.busqueda.value"
+            v-model:page="catalogo.page.value"
+            :items="itemsVisibles"
+            :total="catalogo.total.value"
+            :page-size="catalogo.pageSize"
+            :loading="loadingCatalogo"
+            @add="onCatalogoAdd"
+          />
         </div>
         <div class="lg:col-span-2 min-h-0 flex flex-col overflow-hidden">
           <VentasCarritoPanel

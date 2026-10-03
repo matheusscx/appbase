@@ -799,7 +799,7 @@ Interfaz de punto de venta para crear una venta desde el catálogo hasta el cobr
 
 | Componente | Ubicación | Responsabilidad |
 |---|---|---|
-| `CatalogoGrid` | `app/components/ventas/CatalogoGrid.vue` | Buscador de items + grilla de productos; emite `add` al carrito |
+| `CatalogoGrid` | `app/components/ventas/CatalogoGrid.vue` | Buscador + grilla de productos, paginada en el servidor ([catalogo-paginado.md](./catalogo-paginado.md)); emite `add` al carrito |
 | `ClienteForm` | `app/components/ventas/ClienteForm.vue` | Datos del cliente (nombre, RUT, dirección, teléfono, email); exporta tipo `CustomerForm` |
 | `CarritoPanel` | `app/components/ventas/CarritoPanel.vue` | Líneas del carrito con `AppCantidadInput` (±, selector de unidad de la misma magnitud), selector de tipo de documento, desglose, botón Cobrar |
 | `CobroModal` | `app/components/ventas/CobroModal.vue` | Modal de pagos múltiples con distintos métodos, cálculo de vuelto, confirmación y emisión de POST /api/ventas |

@@ -401,7 +401,8 @@ del mismo permiso `Tienda Online:Leer`; las otras dos dicen abajo cómo se llega
 
 - `components/tienda/CarritoOnline.vue` — carrito con `AppCantidadInput` (± y
   selector de unidad de la misma magnitud).
-- Reutiliza `VentasCatalogoGrid` sin cambios.
+- Reutiliza `VentasCatalogoGrid`, paginada y buscada en el servidor con `useCatalogoVenta`
+  ([catalogo-paginado.md](./catalogo-paginado.md)).
 
 ### Composables (sin store Pinia — mismo enfoque que `useVenta`)
 

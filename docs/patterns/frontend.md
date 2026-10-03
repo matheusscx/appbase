@@ -846,6 +846,24 @@ Cómo se consume:
   usa `useState` en vez de refs locales. El token de request va con él —el
   composable se instancia en tres páginas y todas escriben el mismo estado.
 
+### 10.2 La grilla de venta: `useCatalogoVenta`, nunca `pageSize=100` como catálogo
+
+Una pantalla que ofrece ítems para vender (POS, salón, tienda) obtiene el catálogo de
+`useCatalogoVenta({ tipos, filtros?, onError? })` y se lo pasa a `VentasCatalogoGrid` con
+`v-model:busqueda`, `v-model:page`, `:total` y `:page-size`. **No** se pide `GET /items?pageSize=100`
+para armar un catálogo: el ítem 101 no llega, no se puede buscar y nada lo avisa.
+
+- La grilla **no filtra ni ordena**: el servidor busca y ordena (`orden=disponibilidad`).
+- Refrescar disponibilidad después de un cambio de la cuenta es `refrescar()`, que vuelve a pedir
+  la página visible (un solo request).
+- Una carga que falla **no vacía** la grilla. Si la pantalla quiere avisar, pasa `onError`
+  (POS y tienda: toast; el salón calla porque el 403 del garzón no es un error para él).
+- El query fijo de la pantalla va en `filtros` (el que ve el backend en ambos caminos de `findAll`).
+- `descontarStockCatalogo` se aplica sobre la página visible; un ítem que queda en 0 se atenúa en
+  su lugar.
+
+Detalle y porqué: [catalogo-paginado.md](../features/catalogo-paginado.md).
+
 ---
 
 ## 12. Listados paginados (server-side)

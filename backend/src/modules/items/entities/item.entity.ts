@@ -19,6 +19,15 @@ import {
   unique: true,
   where: `"es_ajuste_nota_credito" = true AND "eliminado_el" IS NULL`,
 })
+/**
+ * El listado de venta filtra por `(tenant_id, tipo)` y siempre sobre filas vivas:
+ * sin este índice el paso liviano de `GET /items?orden=disponibilidad` recorre
+ * toda la tabla del tenant. Medición en
+ * docs/superpowers/specs/2026-10-03-catalogo-paginado-design.md § 1.
+ */
+@Index('idx_items_tenant_tipo_vivo', ['tenantId', 'tipo'], {
+  where: '"eliminado_el" IS NULL',
+})
 export class Item {
   @PrimaryGeneratedColumn('uuid', { name: 'item_id' })
   id: string;

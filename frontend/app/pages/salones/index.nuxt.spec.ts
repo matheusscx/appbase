@@ -187,11 +187,18 @@ let cuentasDeLaMesa: unknown[] = []
 /** Las URLs completas del catálogo. Ver la rama `/items` del mock. */
 let urlsCatalogo: string[] = []
 /**
- * Lo que devuelven los tres `GET /items`. Vacío por defecto —a los tests que
+ * Lo que devuelve `GET /items`. Vacío por defecto —a los tests que
  * solo cuentan URLs no les importa el contenido— y lo llena el `describe` de la
  * disponibilidad, que sí necesita una tarjeta con números en el DOM.
  */
 let catalogoItemsMock: unknown[] = []
+/**
+ * Lo que devuelve `GET /items?ids=...` (la resolución de las líneas de la cuenta, que no
+ * están en la página visible del catálogo). Vacío por defecto.
+ */
+let itemsPorIdsMock: unknown[] = []
+/** Cada `GET /items?ids=...`. Aparte de `urlsCatalogo`: esa cuenta las cargas de la grilla. */
+let urlsItemsPorIds: string[] = []
 /** Los bodies de cada `POST /cuentas/:id/lineas`. Ver la rama del mock. */
 let lineasAgregadas: { itemId?: string, cantidad?: string }[] = []
 /** Cada `DELETE /cuentas/:id/lineas/:lineaId`, con el id de la línea. */
@@ -397,7 +404,7 @@ let salonesMock: unknown[] = [{ id: 'salon-1', nombre: 'Principal', mesas: [mesa
  */
 let miPinRechaza = false
 /**
- * Fuerza `/items` (×3) y `/tipos-documento` a rechazar con el 403 real de un
+ * Fuerza `/items` y `/tipos-documento` a rechazar con el 403 real de un
  * rol sin permiso de catálogo (dato del POS que un garzón no ve).
  */
 let catalogoRechaza403 = false
@@ -744,6 +751,18 @@ mockNuxtImport('useApiFetch', () => {
       })
     }
     if (ruta.includes('/items')) {
+      // `ids=a,b`: los ítems de las líneas de la cuenta, aunque no estén en la página visible.
+      const idsPedidos = new URLSearchParams(url.split('?')[1]).get('ids')?.split(',')
+      if (idsPedidos) {
+        urlsItemsPorIds.push(url)
+        if (catalogoRechaza403) {
+          const err = new Error('x') as Error & { data?: unknown }
+          err.data = { message: 'No tienes permiso para esta acción' }
+          return Promise.reject(err)
+        }
+        const data = itemsPorIdsMock.filter(i => idsPedidos.includes((i as { id: string }).id))
+        return Promise.resolve({ data, meta: { total: data.length, page: 1, pageSize: 100 } })
+      }
       // La URL ENTERA, con query string: el filtro de pausados vive ahí desde
       // que dejó de hacerse en el cliente, y si el mock cortara en el `?` se
       // podría borrar con la suite en verde. Mismo motivo que `urlsSelector`.
@@ -753,16 +772,15 @@ mockNuxtImport('useApiFetch', () => {
         err.data = { message: 'No tienes permiso para esta acción' }
         return Promise.reject(err)
       }
-      // Filtrado por `tipo` como lo hace el backend: la pantalla hace TRES
-      // llamadas y las concatena, así que devolver el mismo ítem en las tres lo
-      // dejaría tres veces en la grilla.
-      const tipo = url.match(/tipo=(\w+)/)?.[1]
+      // Filtrado por `tipo` como lo hace el backend: `tipo` viene como LISTA
+      // (`producto,receta,combo`), una sola consulta para los tres.
+      const tipos = new URLSearchParams(url.split('?')[1]).get('tipo')?.split(',')
       const data = catalogoItemsMock.filter(
-        i => (i as { tipo?: string }).tipo === tipo,
+        i => tipos?.includes((i as { tipo?: string }).tipo ?? ''),
       )
       return Promise.resolve({
         data,
-        meta: { total: data.length, page: 1, pageSize: 100 },
+        meta: { total: data.length, page: 1, pageSize: 48 },
       })
     }
     if (ruta.endsWith('/tipos-documento')) {
@@ -900,6 +918,8 @@ function reiniciarMock() {
   urlsSelector = []
   urlsCatalogo = []
   catalogoItemsMock = []
+  itemsPorIdsMock = []
+  urlsItemsPorIds = []
   lineasAgregadas = []
   lineasQuitadas = []
   patchesDeCantidad = []
@@ -1418,15 +1438,14 @@ describe('salones — cuenta con un ítem eliminado del catálogo', () => {
 describe('salones — el catálogo pide solo ítems vendibles', () => {
   beforeEach(reiniciarMock)
 
-  it('las tres consultas de catálogo llevan `activo=true`', async () => {
+  it('la consulta del catálogo lleva `activo=true` y los tres tipos', async () => {
     await montar()
 
-    // Producto, receta y combo: las tres, no "alguna".
-    expect(urlsCatalogo).toHaveLength(3)
-    for (const url of urlsCatalogo) {
-      expect(url).toContain('activo=true')
-    }
-    expect(urlsCatalogo.map(u => u.match(/tipo=(\w+)/)?.[1]).sort()).toEqual([
+    // UNA consulta, con producto, receta y combo en la misma lista.
+    expect(urlsCatalogo).toHaveLength(1)
+    const params = new URLSearchParams(urlsCatalogo[0]!.split('?')[1])
+    expect(params.get('activo')).toBe('true')
+    expect(params.get('tipo')?.split(',').sort()).toEqual([
       'combo',
       'producto',
       'receta',
@@ -1435,17 +1454,18 @@ describe('salones — el catálogo pide solo ítems vendibles', () => {
 })
 
 /**
- * `/items` (×3) y `/tipos-documento` son carga DE FONDO al montar la pantalla
+ * `/items` y `/tipos-documento` son carga DE FONDO al montar la pantalla
  * (`cargarCatalogo`, llamada una sola vez desde `onMounted`): un garzón no
- * tiene permiso de catálogo (dato del POS que ese rol no ve) y esas cuatro
+ * tiene permiso de catálogo (dato del POS que ese rol no ve) y esas dos
  * rutas responden 403. Medido en el smoke del 2026-08-15 con la cuenta
  * `garzon.pin@paris.cl`: el toast rojo "No tienes permiso para esta acción"
  * salía apenas se abría `/salones`, sin que el garzón hubiera pedido nada —
  * misma familia que el `.catch(() => null)` que ya lleva `cargarActiva`
- * (`onMounted` más arriba), acá aplicado a las cuatro llamadas de
- * `cargarCatalogo` que también fallan para ese rol.
+ * (`onMounted` más arriba), acá aplicado a las dos llamadas de
+ * `cargarCatalogo` que también fallan para ese rol: `/items` (una sola consulta,
+ * silenciada por `useCatalogoVenta` sin `onError`) y `/tipos-documento`.
  *
- * `/metodos-pago` es la QUINTA llamada del mismo `Promise.all` y se queda
+ * `/metodos-pago` es la TERCERA llamada del mismo `Promise.all` y se queda
  * sin `.catch` propio a propósito: para un garzón esa sí resuelve, así que si
  * falla es un error real y tiene que seguir avisando — es el contraejemplo
  * del segundo test, que prueba que no se silenció de más.
@@ -2122,7 +2142,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     cuentasDeLaMesa = [cuentaConPedido('2')]
 
     const wrapper = await montar()
-    expect(urlsCatalogo).toHaveLength(3)
+    expect(urlsCatalogo).toHaveLength(1)
 
     await abrirLaCuenta(wrapper)
     // El refresco sale con debounce (`REFRESCO_ITEMS_MS`), así que la espera es
@@ -2137,7 +2157,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     await esperar(400)
 
     expect(lineasAgregadas).toHaveLength(1)
-    expect(urlsCatalogo.length).toBe(trasEntrarALaCuenta + 3)
+    expect(urlsCatalogo.length).toBe(trasEntrarALaCuenta + 1)
     for (const url of urlsCatalogo) expect(url).toContain('activo=true')
   })
 
@@ -2161,11 +2181,11 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     // PATCH + 250 del catálogo) y medido llega a los 556-576 ms. Un `esperar(600)`
     // dejaba 24-44 ms de margen, y en la suite entera una vez no alcanzó
     // (2026-09-27: esperaba 9, vio 6).
-    await vi.waitFor(() => expect(urlsCatalogo.length).toBe(antesDeEditar + 3), { timeout: 3000 })
+    await vi.waitFor(() => expect(urlsCatalogo.length).toBe(antesDeEditar + 1), { timeout: 3000 })
     // Y fue UN refresco: el `waitFor` vuelve al primer +3, así que un segundo
     // disparo (el debounce roto) solo se ve mirando otra vez después.
     await esperar(300)
-    expect(urlsCatalogo.length).toBe(antesDeEditar + 3)
+    expect(urlsCatalogo.length).toBe(antesDeEditar + 1)
 
     expect(patchesDeCantidad).toHaveLength(1)
   })
@@ -4387,17 +4407,19 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
   it('pasear por las mesas sin entrar a una cuenta no pide el catálogo', async () => {
     // La grilla solo existe en la rama de detalle de cuenta. Sin este guard,
-    // seis mesas miradas de paso eran 18 GET `/items` para no mostrar nada.
+    // seis mesas miradas de paso eran 6 GET `/items` para no mostrar nada.
     catalogoItemsMock = [producto('3.0000', '1.0000')]
     cuentasDeLaMesa = [cuentaConPedido('2')]
 
     const wrapper = await montar()
-    expect(urlsCatalogo).toHaveLength(3)
+    expect(urlsCatalogo).toHaveLength(1)
 
     await seleccionarMesa(wrapper)
     await esperar(400)
 
-    expect(urlsCatalogo).toHaveLength(3)
+    expect(urlsCatalogo).toHaveLength(1)
+    // Ni la resolución por `ids=` de los ítems de las líneas: solo la cuenta activa la pide.
+    expect(urlsItemsPorIds).toHaveLength(0)
   })
 
   /**
@@ -6914,6 +6936,41 @@ describe('salones — anular un plato despachado', () => {
     await abrirLaCuenta(wrapper)
 
     expect(drawerMesa()?.textContent).toContain('0,5 l Papas fritas anulado — Cortesía, autorizó Ana')
+  })
+
+  it('un ítem de la cuenta que NO está en la página visible del catálogo conserva su unidad (kg), no cae a "unidad"', async () => {
+    // El catálogo del salón es una página de 48 filtrada por la búsqueda: el tomate de una línea
+    // ya cargada puede no estar en ella. Sin resolverlo por `ids=`, la línea de 1,5 kg se mostraba
+    // como "1,5 un". El `/items` de la página (sin `ids`) no trae el tomate.
+    useUnidadesMedidaStore().hydrate([
+      { unidadMedidaId: 'g-uuid', codigo: 'g', nombre: 'Gramo', magnitud: 'masa', factorBase: '1' },
+      { unidadMedidaId: 'kg-uuid', codigo: 'kg', nombre: 'Kilogramo', magnitud: 'masa', factorBase: '1000' },
+    ])
+    const tomate = { ...producto(), id: 'item-tomate', nombre: 'Tomate', unidadMedida: 'kg' }
+    catalogoItemsMock = [producto()]
+    itemsPorIdsMock = [tomate]
+    cuentasDeLaMesa = [cuentaCon(
+      { ...LINEA_BASE, itemId: 'item-tomate', nombre: 'Tomate', cantidad: '1.5000', cantidadEnviada: '0' },
+      [{
+        id: 'anulacion-1',
+        itemId: 'item-tomate',
+        itemNombre: 'Tomate',
+        cantidad: '0.5',
+        motivoNombre: 'Invitación',
+        motivoTipo: 'cortesia',
+        autorizadoPorNombre: 'Ana',
+        creadoEl: '2026-09-16T12:00:00.000Z',
+      }],
+    )]
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+    await esperar(50)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+    expect(urlsItemsPorIds).toHaveLength(1)
+    expect(input.props('unidadBaseCodigo')).toBe('kg')
+    expect(drawerMesa()?.textContent).toContain('0,5 kg Tomate anulado')
   })
 
   it('el aviso muestra un entero, sin unidad, para un ítem de conteo', async () => {

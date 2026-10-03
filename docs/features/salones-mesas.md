@@ -1072,8 +1072,8 @@ ESCRIBE** (2026-09-05, tres de ellas; **quedan miembros vivos**, ver
   `cuentas.value.push()` y abría el detalle sin condicionar: cambiar de mesa durante el POST
   metía la cuenta de la mesa A en el listado de la mesa B.
 - `cargarCuentas` asignaba la respuesta sin más, así que dos taps seguidos en el plano
-  dejaban ganar **al que llegara último**. Va con **token de request**, como `refrescarItems`
-  en este mismo archivo y `useResultadoCalculado`; un `if (mesaId === selectedMesa.value?.id)`
+  dejaban ganar **al que llegara último**. Va con **token de request**, como `refrescar()` de
+  `useCatalogoVenta` (antes `refrescarItems`) y `useResultadoCalculado`; un `if (mesaId === selectedMesa.value?.id)`
   no alcanza, porque
   pasar por la mesa B y volver a la A deja entrar la respuesta vieja de A.
 
@@ -1189,7 +1189,9 @@ hay que repintar lo que está en pantalla** (recalcular el total, omitir el cont
 
 ### Reuso del POS
 
-El detalle de cuenta reusa `VentasCatalogoGrid` (agregar productos), `useCalculoPrecios`
+El detalle de cuenta reusa `VentasCatalogoGrid` (agregar productos; paginada en el servidor con
+`useCatalogoVenta`, y su refresco por toque es un solo `GET /items`, ver
+[catalogo-paginado.md](./catalogo-paginado.md)), `useCalculoPrecios`
 (total en vivo) y `VentasCobroModal` (cobro al cerrar). La operación del garzón se
 navega desde el menú lateral, Salones ▸ Mesas (`composables/useMenuLateral.ts`, `/salones`,
 gateada por `can('Salones','Operar')`);

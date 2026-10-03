@@ -23,6 +23,7 @@ import {
 import { UpdateItemDto } from './dto/update-item.dto';
 import { AjusteStockDto } from './dto/ajuste-stock.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
+import { compararPorDisponibilidad, esPedible } from './catalogo-orden';
 import {
   InventarioService,
   type RegistrarMovimientoParams,
@@ -635,9 +636,22 @@ export class ItemsService {
     // `item.entity.ts`.
     where += ` AND i.es_ajuste_nota_credito = false`;
 
-    if (query.tipo) {
-      where += ` AND i.tipo = $${idx++}`;
+    if (query.tipo?.length) {
+      where += ` AND i.tipo = ANY($${idx++})`;
       params.push(query.tipo);
+    }
+    if (query.ids?.length) {
+      where += ` AND i.item_id = ANY($${idx++})`;
+      params.push(query.ids);
+    }
+    // EXISTS y no el alias `ip`: este `where` también alimenta el COUNT sin
+    // JOIN (mismo motivo que `sinCosto`). `item_producto` no tiene
+    // `eliminado_el` (el borrado vive en `items`, ya filtrado arriba). Solo los
+    // productos tienen modo: lo que no es producto queda afuera.
+    if (query.modoInventario) {
+      where += ` AND EXISTS (SELECT 1 FROM item_producto ipm
+                              WHERE ipm.item_id = i.item_id AND ipm.modo_inventario = $${idx++})`;
+      params.push(query.modoInventario);
     }
     if (query.categoriaId) {
       where += ` AND i.categoria_id = $${idx++}`;
@@ -718,6 +732,9 @@ export class ItemsService {
       }
     >
   > {
+    if (query.orden === 'disponibilidad') {
+      return this.findAllPorDisponibilidad(tenantId, query);
+    }
     const { page, pageSize, offset } = resolvePagination(query);
     const { where, params } = this.buildFindAllFilters(tenantId, query);
 
@@ -744,24 +761,119 @@ export class ItemsService {
       listParams,
     );
 
-    // Los combo ids con grupos se cargan de una sola vez para no disparar
-    // N queries extra (una por combo) al calcular disponibleCondicional.
-    let comboIdsConGrupos = new Set<string>();
-    if (rows.some((r) => r.tipo === 'combo')) {
-      const grupoItemRows: { item_id: string }[] = await this.db.query(
-        `SELECT DISTINCT item_id FROM item_grupos_modificadores
-         WHERE tenant_id = $1 AND eliminado_el IS NULL
-         UNION
-         SELECT DISTINCT cc.combo_item_id AS item_id
-         FROM combo_componentes cc
-         JOIN item_grupos_modificadores igm ON igm.item_id = cc.componente_item_id
-           AND igm.tenant_id = cc.tenant_id AND igm.eliminado_el IS NULL
-         WHERE cc.tenant_id = $1 AND cc.eliminado_el IS NULL`,
-        [tenantId],
+    const { dispPorId, stockDispPorId } = await this.disponibilidadDe(
+      tenantId,
+      rows,
+      localId,
+    );
+    const data = await this.armarFilasListado(
+      tenantId,
+      query,
+      rows,
+      dispPorId,
+      stockDispPorId,
+    );
+
+    return {
+      data,
+      meta: buildPaginationMeta(page, pageSize, total),
+    };
+  }
+
+  /**
+   * `orden=disponibilidad`: el orden de la grilla de venta (pedibles primero,
+   * nombre, id), en dos pasos. **No va en SQL**: "pedible" depende de la
+   * disponibilidad de receta/combo (mínimo entre ingredientes, ya descontado lo
+   * que las cuentas abiertas comprometieron) y eso lo calcula
+   * `calcularDisponibilidadBatch`, no una columna ordenable. Spec:
+   * docs/superpowers/specs/2026-10-03-catalogo-paginado-design.md § 3.2.
+   *
+   * 1. Una lectura liviana de TODO lo que matchea el filtro (id, tipo, nombre y
+   *    stock del local), sin LIMIT; su disponibilidad en un nº constante de
+   *    queries; el orden y el corte de la página en memoria.
+   * 2. Las filas completas de SOLO esa página, por `baseQuery` + `mapRow` como
+   *    el camino de siempre: cada fila trae lo mismo (`modoInventario`
+   *    incluido), no una copia recortada.
+   */
+  private async findAllPorDisponibilidad(
+    tenantId: string,
+    query: QueryItemsDto,
+  ): ReturnType<ItemsService['findAll']> {
+    const { page, pageSize, offset } = resolvePagination(query);
+    const { where, params } = this.buildFindAllFilters(tenantId, query);
+    const localId = await this.ubicacionesService.localDe(tenantId);
+
+    const livianas: {
+      item_id: string;
+      tipo: string;
+      nombre: string;
+      stock_vendible: string | null;
+    }[] = await this.db.query(
+      `SELECT i.item_id, i.tipo, i.nombre, su.stock AS stock_vendible
+         FROM items i
+         LEFT JOIN stock_ubicacion su
+           ON su.item_id = i.item_id AND su.ubicacion_id = $${params.length + 1}` +
+        where,
+      [...params, localId],
+    );
+
+    const { dispPorId, stockDispPorId } = await this.disponibilidadDe(
+      tenantId,
+      livianas,
+      localId,
+    );
+    // `pedible` una vez por fila (decorar, ordenar, descartar), no en el comparador.
+    const ids = livianas
+      .map((l) => ({
+        item_id: l.item_id,
+        nombre: l.nombre,
+        pedible: esPedible(
+          l.tipo,
+          dispPorId.get(l.item_id),
+          stockDispPorId.get(l.item_id),
+        ),
+      }))
+      .sort(compararPorDisponibilidad)
+      .slice(offset, offset + pageSize)
+      .map((l) => l.item_id);
+
+    let rows: ItemRow[] = [];
+    if (ids.length) {
+      // El mismo criterio de borrado que el paso 1 (`buildFindAllFilters`): vivos,
+      // o con `incluirEliminados` también los que borró una persona.
+      const completas: ItemRow[] = await this.db.query(
+        this.baseQuery(3) +
+          ' WHERE i.item_id = ANY($1) AND i.tenant_id = $2' +
+          ' AND (i.eliminado_el IS NULL OR ($4::boolean AND i.eliminado_por IS NOT NULL))',
+        [ids, tenantId, localId, !!query.incluirEliminados],
       );
-      comboIdsConGrupos = new Set(grupoItemRows.map((r) => r.item_id));
+      const porId = new Map(completas.map((r) => [r.item_id, r]));
+      rows = ids.flatMap((id) => porId.get(id) ?? []);
     }
 
+    const data = await this.armarFilasListado(
+      tenantId,
+      query,
+      rows,
+      dispPorId,
+      stockDispPorId,
+    );
+    return {
+      data,
+      meta: buildPaginationMeta(page, pageSize, livianas.length),
+    };
+  }
+
+  /**
+   * Disponibilidad de las filas dadas (recetas, combos, productos) en un nº
+   * constante de queries. Lo usan los dos caminos de `findAll`: el de siempre
+   * (las filas de la página) y `orden=disponibilidad` (todas las que matchean).
+   */
+  private async disponibilidadDe(
+    tenantId: string,
+    rows: { item_id: string; tipo: string; stock_vendible: string | null }[],
+    localId: string,
+  ) {
     // Disponibilidad de recetas/combos/productos en un nº CONSTANTE de queries
     // (batch), no una por fila (N+1).
     const recetaIds = rows
@@ -788,6 +900,38 @@ export class ItemsService {
         productos,
         localId,
       );
+    return { dispPorId, stockDispPorId };
+  }
+
+  /**
+   * Las filas del listado ya mapeadas: `disponible`/`stockDisponible` desde los
+   * mapas, `disponibleCondicional` de los combos y, con `incluirEliminados`, la
+   * auditoría del borrado. Compartido por los dos caminos de `findAll`.
+   */
+  private async armarFilasListado(
+    tenantId: string,
+    query: QueryItemsDto,
+    rows: ItemRow[],
+    dispPorId: Map<string, number | null>,
+    stockDispPorId: Map<string, string>,
+  ) {
+    // Los combo ids con grupos se cargan de una sola vez para no disparar
+    // N queries extra (una por combo) al calcular disponibleCondicional.
+    let comboIdsConGrupos = new Set<string>();
+    if (rows.some((r) => r.tipo === 'combo')) {
+      const grupoItemRows: { item_id: string }[] = await this.db.query(
+        `SELECT DISTINCT item_id FROM item_grupos_modificadores
+         WHERE tenant_id = $1 AND eliminado_el IS NULL
+         UNION
+         SELECT DISTINCT cc.combo_item_id AS item_id
+         FROM combo_componentes cc
+         JOIN item_grupos_modificadores igm ON igm.item_id = cc.componente_item_id
+           AND igm.tenant_id = cc.tenant_id AND igm.eliminado_el IS NULL
+         WHERE cc.tenant_id = $1 AND cc.eliminado_el IS NULL`,
+        [tenantId],
+      );
+      comboIdsConGrupos = new Set(grupoItemRows.map((r) => r.item_id));
+    }
 
     // Papelera: nombre de quien borró por JOIN en UNA query batch acotada a
     // los ids de esta página (no N+1). Sin filtrar el `eliminado_el` de
@@ -844,10 +988,7 @@ export class ItemsService {
       };
     });
 
-    return {
-      data,
-      meta: buildPaginationMeta(page, pageSize, total),
-    };
+    return data;
   }
 
   /**

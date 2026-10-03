@@ -759,6 +759,25 @@ Para listados grandes (pagos, ventas, kardex):
   con params. KPIs/agregados globales van en endpoint separado (`GET /pagos/resumen`),
   no en `data[]`.
 
+### Un orden derivado en TypeScript se pagina en dos pasos (2026-10-03)
+
+Si el orden depende de algo que **solo se calcula en TS** (la disponibilidad de una receta, lo
+comprometido por las cuentas abiertas, con conversión de unidades), el `ORDER BY ... LIMIT` no
+sirve, y copiar el cálculo a SQL crea una segunda verdad que deriva de la primera.
+
+- **Paso 1, liviano:** una consulta con solo las columnas que el orden necesita, de **todas** las
+  filas que pasan el filtro. Se calcula lo derivado **en lote** (una cantidad fija de consultas,
+  nunca una por fila), se ordena y se corta la página. El total es el largo de esa lista.
+- **Paso 2:** la consulta completa del listado con `WHERE id = ANY($ids)`, devuelta en el orden
+  del paso 1 y **reusando** lo ya calculado.
+- **Desempate por id**, para que el orden sea total y la página 2 no repita ni salte filas de la
+  página 1.
+- El paso 1 tiene que filtrar **igual** que el listado normal (borrado, `activo`, ítem de ajuste):
+  si no, el total y las páginas no cuadran con los del camino sin `orden`.
+
+Ejemplo: `findAllPorDisponibilidad` en `items.service.ts`. Medida y decisiones:
+[catalogo-paginado.md](../features/catalogo-paginado.md).
+
 ---
 
 ## 10b. El día se arma en un solo lugar: `rango-fecha.util.ts`

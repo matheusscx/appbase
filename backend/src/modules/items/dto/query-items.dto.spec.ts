@@ -52,7 +52,7 @@ describe('QueryItemsDto', () => {
 
     expect(await validate(dto)).toHaveLength(0);
     expect(dto.incluirEliminados).toBe(true);
-    expect(dto.tipo).toBe('producto');
+    expect(dto.tipo).toEqual(['producto']);
     // `search` ya tenía su propio `@Transform` (trim): confirma que el campo
     // agregado después no lo pisó.
     expect(dto.search).toBe('smart');
@@ -84,5 +84,141 @@ describe('QueryItemsDto.sinCosto', () => {
 
     expect(await validate(dto)).toHaveLength(0);
     expect(dto.sinCosto).toBeFalsy();
+  });
+});
+
+// `tipo` pasó a ser una lista (la grilla de venta pide producto, receta y combo
+// en una sola llamada). Un valor suelto sigue valiendo y llega como lista de
+// uno. Estos tests no ejercen el pipe global: el 400 real lo cubre el e2e.
+describe('QueryItemsDto.tipo', () => {
+  it('una lista separada por comas se parte en un array', async () => {
+    const dto = plainToInstance(QueryItemsDto, { tipo: 'producto,receta' });
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.tipo).toEqual(['producto', 'receta']);
+  });
+
+  it('un valor suelto llega como lista de uno', async () => {
+    const dto = plainToInstance(QueryItemsDto, { tipo: 'producto' });
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.tipo).toEqual(['producto']);
+  });
+
+  it('recorta blancos y deduplica', async () => {
+    const dto = plainToInstance(QueryItemsDto, {
+      tipo: 'producto, receta,producto',
+    });
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.tipo).toEqual(['producto', 'receta']);
+  });
+
+  it('un tipo desconocido dentro de la lista es un error de validación', async () => {
+    const dto = plainToInstance(QueryItemsDto, { tipo: 'producto,pizza' });
+
+    const errores = await validate(dto);
+    expect(errores).toHaveLength(1);
+    expect(errores[0].property).toBe('tipo');
+  });
+
+  // Sin parámetros nuevos `GET /items` responde lo de siempre: un `tipo` vacío
+  // fue 400 antes de que `tipo` fuera lista y lo sigue siendo (no se ignora).
+  it.each(['', ',', 'producto,'])(
+    'tipo=%j (un elemento vacío tras partir) es un error de validación',
+    async (tipo) => {
+      const dto = plainToInstance(QueryItemsDto, { tipo });
+
+      const errores = await validate(dto);
+      expect(errores).toHaveLength(1);
+      expect(errores[0].property).toBe('tipo');
+    },
+  );
+});
+
+describe('QueryItemsDto.orden', () => {
+  it('orden=disponibilidad pasa', async () => {
+    const dto = plainToInstance(QueryItemsDto, { orden: 'disponibilidad' });
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.orden).toBe('disponibilidad');
+  });
+
+  it('orden=nombre pasa', async () => {
+    const dto = plainToInstance(QueryItemsDto, { orden: 'nombre' });
+
+    expect(await validate(dto)).toHaveLength(0);
+  });
+
+  it('un orden desconocido es un error de validación', async () => {
+    const dto = plainToInstance(QueryItemsDto, { orden: 'precio' });
+
+    const errores = await validate(dto);
+    expect(errores).toHaveLength(1);
+    expect(errores[0].property).toBe('orden');
+  });
+});
+
+const ID_A = '550e8400-e29b-41d4-a716-446655440001';
+const ID_B = '550e8400-e29b-41d4-a716-446655440002';
+
+// `ids` y `modoInventario` los usan los selectores del frontend: `ids` para
+// resolver los ítems ya elegidos sin depender de la página que cargó el
+// listado. Estos tests no ejercen el pipe global (el 400 real lo cubre el e2e).
+describe('QueryItemsDto.ids', () => {
+  it('una lista separada por comas se parte en un array de UUID', async () => {
+    const dto = plainToInstance(QueryItemsDto, { ids: `${ID_A},${ID_B}` });
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.ids).toEqual([ID_A, ID_B]);
+  });
+
+  it('un valor que no es UUID es un error de validación', async () => {
+    const dto = plainToInstance(QueryItemsDto, { ids: `${ID_A},no-es-uuid` });
+
+    const errores = await validate(dto);
+    expect(errores).toHaveLength(1);
+    expect(errores[0].property).toBe('ids');
+  });
+
+  it('un ids vacío es un error de validación (no se ignora)', async () => {
+    const dto = plainToInstance(QueryItemsDto, { ids: '' });
+
+    const errores = await validate(dto);
+    expect(errores).toHaveLength(1);
+    expect(errores[0].property).toBe('ids');
+  });
+
+  it('100 ids pasan y 101 son un error', async () => {
+    const uuid = (n: number) =>
+      `550e8400-e29b-41d4-a716-${String(n).padStart(12, '0')}`;
+    const cien = Array.from({ length: 100 }, (_, i) => uuid(i)).join(',');
+
+    expect(
+      await validate(plainToInstance(QueryItemsDto, { ids: cien })),
+    ).toHaveLength(0);
+
+    const errores = await validate(
+      plainToInstance(QueryItemsDto, { ids: `${cien},${uuid(100)}` }),
+    );
+    expect(errores).toHaveLength(1);
+    expect(errores[0].property).toBe('ids');
+  });
+});
+
+describe('QueryItemsDto.modoInventario', () => {
+  it.each(['cantidad', 'lote', 'serie'])('%s pasa', async (modo) => {
+    const dto = plainToInstance(QueryItemsDto, { modoInventario: modo });
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.modoInventario).toBe(modo);
+  });
+
+  it('un modo desconocido es un error de validación', async () => {
+    const dto = plainToInstance(QueryItemsDto, { modoInventario: 'kilo' });
+
+    const errores = await validate(dto);
+    expect(errores).toHaveLength(1);
+    expect(errores[0].property).toBe('modoInventario');
   });
 });

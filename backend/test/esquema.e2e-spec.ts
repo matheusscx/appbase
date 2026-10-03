@@ -147,6 +147,23 @@ describe('Esquema (e2e) — invariantes medidas contra Postgres', () => {
   });
 
   /**
+   * El listado de venta (`GET /items`) filtra por tenant y tipo sobre filas
+   * vivas, y `items` no tenía ningún índice por `tenant_id`: cada pedido hacía
+   * seq scan de la tabla de todos los tenants. Mira `pg_indexes` y no la entity
+   * por la misma razón que el de `item_unidad`: la pregunta es qué índice hay.
+   */
+  it('items tiene el índice (tenant_id, tipo) parcial sobre filas vivas', async () => {
+    const indices: { indexdef: string }[] = await ds.query(
+      `SELECT indexdef FROM pg_indexes
+        WHERE tablename = 'items' AND indexname = 'idx_items_tenant_tipo_vivo'`,
+    );
+
+    expect(indices).toHaveLength(1);
+    expect(indices[0].indexdef).toMatch(/USING btree \(tenant_id, tipo\)/);
+    expect(indices[0].indexdef).toMatch(/WHERE \(eliminado_el IS NULL\)/);
+  });
+
+  /**
    * Y la normalización del índice es la MISMA que usa el guard del chokepoint.
    *
    * No es redundante con el test de arriba: ese mira la forma del índice, este

@@ -31,7 +31,7 @@ mockNuxtImport('useApiFetch', () => {
 
     if (ruta.includes('/items')) {
       urlsCatalogo.push(url)
-      return Promise.resolve({ data: [], meta: { total: 0, page: 1, pageSize: 100 } })
+      return Promise.resolve({ data: [], meta: { total: 0, page: 1, pageSize: 48 } })
     }
     // El resto del arranque (unidades de medida) no interviene en este flujo.
     return Promise.resolve([])
@@ -63,5 +63,6 @@ describe('tienda/index — el catálogo pide solo ítems vendibles', () => {
     expect(urlsCatalogo).toHaveLength(1)
     expect(urlsCatalogo[0]).toContain('activo=true')
     expect(urlsCatalogo[0]).toContain('tipo=producto')
+    expect(urlsCatalogo[0]).toContain('orden=disponibilidad')
   })
 })
