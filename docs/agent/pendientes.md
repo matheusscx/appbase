@@ -1169,6 +1169,28 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   una NC resta del garzón que vendió originalmente o de quien está en turno cuando se emite,
   que es una pregunta de negocio, no solo de datos.
 
+- [ ] **Una venta que llega a $0 por un descuento tendría que dejar boleta, y hoy no deja
+  ninguna: E6 cita la Res. Ex. SII 60/2023 a medias** (fiscal — **frente propio, con su propia
+  sesión**, ADR-010; lo encontró la pasada de investigación que la Sesión de esfuerzo máximo lanzó
+  para el frente de la cortesía, 2026-10-03, y ella lo verificó en el PDF oficial:
+  [Res. Ex. 60/2023](https://www.sii.cl/normativa_legislacion/resoluciones/2023/reso60.pdf); la
+  orquestadora verificó la cita del repo, no el PDF). [ADR-028](../adr/028-emision-registrada-por-venta.md)
+  ("Qué documentos deja una venta") y la spec `2026-10-01-emision-por-venta-design.md` (E6)
+  dicen que una venta de $0 no lleva documento porque *"el mínimo de la boleta es $1"*. Según la
+  misma resolución (resolutivo 1°, segundo párrafo), si el total es $0 *"como resultado de la
+  aplicación de descuentos o alguna otra condición de venta"*, la boleta **se emite igual,
+  informando el monto del descuento** (Res. Ex. 74 y 176 de 2020; sin campo para el descuento,
+  va a nivel de detalle). El $1 es el mínimo del monto, no una exención del $0 por descuento.
+  **Procedencia de E6:** la tabla de decisiones de la spec dice *"Sesión del frente; aprobado
+  con el diseño"*: la cita la puso el agente y el owner aprobó el diseño completo, no esa
+  pregunta suelta. O sea que es **corregir un dato**, no reabrir una decisión tomada con esa
+  información, pero igual lo decide el owner. **Alcance:** las ventas que hoy llegan a $0 (un
+  descuento del 100 %, una promoción). La cortesía no cae acá: la línea sale de la cuenta y no
+  hay transacción. **Antes de diseñar:** confirmar la lectura de la resolución, contar por qué
+  caminos se llega hoy a una venta de $0, y llevarle al owner qué documento deja (con el
+  descuento informado) en lenguaje de local. La forma de informar el descuento (los campos de la
+  Res. 74/2020) es materia de la emisión, no de este hallazgo.
+
 - [ ] **Serie y lote están a medias, y cada camino decide por su cuenta si rechazar o aceptar y
   corromper** (backend + BD, auditoría `inventario` 2026-08-15) — dos caras del mismo hueco,
   agrupadas porque se deciden juntas:
