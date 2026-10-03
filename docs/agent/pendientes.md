@@ -235,6 +235,20 @@ destapa una decisión que no es mía).
   compras, traslados) y si validan tenant e ítem, antes de decidir si se valida por camino o en el
   chokepoint de inventario. Escribe en `item_unidad`: el arreglo va en su propio frente.
 
+- [ ] **Los arrays de ids de los DTOs que no son de unidades no tienen `@ArrayMaxSize`** (backend,
+  `*.dto.ts`; lo listó el `api-security-reviewer` del frente Salón, 2026-10-03, y no se tocó por
+  alcance). Los de unidades con serie ya lo tienen (`@ArrayMaxSize(200)` en ventas, salón,
+  traslados y ajuste de stock); el resto no: entre otros `turnoIds` (propinas), `rolIds`
+  (`crear-usuario-tenant`), `itemIds` (promociones, recuentos), `impuestosIds`/`recargosIds`/
+  `descuentosIds` (ítems), `metodoPagoIds` (descuentos, recargos), `cuentaIds` (fusionar),
+  `usuarioIds` (cajones), `garzonIds` (testigo). Sin tope, un body con decenas de miles de ids
+  entra entero a un `= ANY($1)` o a un loop de validación. **Medir:** listar todos los campos array
+  de los DTOs y cuáles tienen tope —`grep -rn -B6 -E "Ids\??: (string|[A-Za-z]+)\[\]"
+  backend/src --include="*.dto.ts"` y mirar el bloque de decoradores de cada uno—, y para cada uno
+  qué hace el service con el array (un `ANY` es barato; un loop con una query por elemento, no).
+  Con eso se elige el tope por campo: el número no puede ser uno solo, porque `moduloAppPermisoIds`
+  de un rol puede ser legítimamente grande. Es de borde (DTO): no toca lógica.
+
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
