@@ -342,6 +342,7 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
     const notaPorElPago = (ventaId: string, monto: string, pagoId: string) =>
       request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set(auth())
         .send({
           monto,
@@ -466,6 +467,7 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
     const notaPorElPago = (ventaId: string, monto: string, pagoId: string) =>
       request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set(auth())
         .send({ monto, devolucion: { pagoId }, comentario: 'desde el POS' });
 

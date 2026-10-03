@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  avisoNotaRepetida,
   claveOpcion,
   comprobanteDelPago,
   cuerpoDevolucion,
@@ -272,5 +273,36 @@ describe('filtro y resumen de emisores del listado de ventas', () => {
   it('sin emisores no hay nada que decir, y un emisor que el front no conoce se muestra crudo', () => {
     expect(resumenEmisores([])).toBeNull()
     expect(resumenEmisores(['otro'])?.label).toBe('otro')
+  })
+})
+
+describe('avisoNotaRepetida — la nota ya había entrado: qué falta hacer (owner, 2026-10-03)', () => {
+  const opcion = (o: Partial<OpcionDevolucion>): OpcionDevolucion => ({
+    pagoId: 'p-1',
+    sinPlata: false,
+    metodo: 'Efectivo',
+    monto: '3000.0000',
+    mueveCaja: true,
+    registro: 'nota_credito_sistema',
+    ...o,
+  })
+
+  it('en efectivo: la salida ya está en la caja, entregar los billetes si no se entregaron', () => {
+    const aviso = avisoNotaRepetida(opcion({}), '$3.000')
+    expect(aviso).toContain('no se emitió dos veces')
+    expect(aviso).toContain('La salida de $3.000 ya está registrada')
+    expect(aviso).toContain('entregale los billetes')
+  })
+
+  it('por otro pago: la devolución en ese medio, una sola vez', () => {
+    const aviso = avisoNotaRepetida(opcion({ metodo: 'Tarjeta de débito', mueveCaja: false }), '$3.000')
+    expect(aviso).toContain('por Tarjeta de débito, hacelo una sola vez')
+    expect(aviso).not.toContain('billetes')
+  })
+
+  it('sin plata (o sin opción): solo que no se emitió dos veces', () => {
+    const base = 'Esta nota de crédito ya estaba emitida, no se emitió dos veces.'
+    expect(avisoNotaRepetida(opcion({ sinPlata: true, pagoId: null, metodo: null, mueveCaja: false }), '$3.000')).toBe(base)
+    expect(avisoNotaRepetida(null, '$3.000')).toBe(base)
   })
 })

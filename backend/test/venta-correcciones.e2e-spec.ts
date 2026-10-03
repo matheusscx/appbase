@@ -181,6 +181,7 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
   const crearNc = (ventaId: string, body: Record<string, unknown>) =>
     request(app.getHttpServer())
       .post(`/api/ventas/${ventaId}/notas-credito`)
+      .set('Idempotency-Key', randomUUID())
       .set(auth())
       .send({ comentario: 'devolución de prueba', ...body });
   const nc = async (

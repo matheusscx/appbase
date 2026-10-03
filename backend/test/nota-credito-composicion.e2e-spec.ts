@@ -151,6 +151,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
   ): Promise<{ id: string }> => {
     const res = await request(app.getHttpServer())
       .post(`/api/ventas/${ventaId}/notas-credito`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${token}`)
       .send({
         ...(await devolucionDe(ventaId)),
@@ -463,6 +464,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           ...(await devolucionDe(ventaId)),
@@ -513,6 +515,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
       const ventaId = await crearVentaMixta();
       const res = await request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           ...(await devolucionDe(ventaId)),
@@ -618,6 +621,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
       const ventaId = await crearVentaMixta();
       const res = await request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           ...(await devolucionDe(ventaId)),
@@ -826,6 +830,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
       // 1.330 que la venta cobró. Se rechaza, y el mensaje dice qué queda.
       const res = await request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           ...(await devolucionDe(ventaId)),
@@ -906,6 +911,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
       // que es plata en un documento fiscal.
       const res = await request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           ...(await devolucionDe(ventaId)),

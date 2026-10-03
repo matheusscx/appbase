@@ -1245,6 +1245,7 @@ describe('Documentos de la venta (e2e)', () => {
         // por el pago en efectivo, corrige la boleta del sistema.
         const nc = await request(app.getHttpServer())
           .post(`/api/ventas/${venta.id}/notas-credito`)
+          .set('Idempotency-Key', randomUUID())
           .set('Authorization', `Bearer ${token}`)
           .send({
             monto: '10000',
@@ -1722,6 +1723,7 @@ describe('Documentos de la venta (e2e)', () => {
       });
       const nc = await request(app.getHttpServer())
         .post(`/api/ventas/${venta.id}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           monto: '10000',
@@ -2417,6 +2419,7 @@ describe('Documentos de la venta (e2e)', () => {
       });
       const nc = await request(app.getHttpServer())
         .post(`/api/ventas/${venta.id}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           monto: '10000',
@@ -2514,6 +2517,7 @@ describe('Documentos de la venta (e2e)', () => {
     const corregir = async (ventaId: string, metodoPagoId: string) => {
       const res = await request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
           monto: '10000',

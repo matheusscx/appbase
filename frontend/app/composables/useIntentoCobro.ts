@@ -9,11 +9,24 @@ export const AVISO_COBRO_REPETIDO = 'Este cobro ya había entrado, no se registr
 const claves = new Map<string, string>()
 
 /**
+ * El id del 422 de "esta clave ya se usó con otros datos" (`IdempotenciaService`),
+ * o `null` si el error es otro. Un 422 sin id es otra cosa —p. ej. el tope de
+ * efectivo de la nota de crédito— y lo maneja la pantalla como siempre.
+ */
+export function idDeOtrosDatos(error: unknown): string | null {
+  const e = error as { status?: number, data?: { ventaId?: unknown } }
+  const id = e?.data?.ventaId
+  return e?.status === 422 && typeof id === 'string' && id ? id : null
+}
+
+/**
  * Un cobro que se repite no se registra dos veces
  * (`docs/adr/026-idempotencia-de-cobros.md`).
  *
  * El backend exige una `Idempotency-Key` por **intento de cobro** en
- * `POST /ventas`, `POST /cuentas/:id/cerrar` y `POST /pagos`. Con la misma
+ * `POST /ventas`, `POST /cuentas/:id/cerrar` y `POST /pagos`, y por intento de
+ * emisión en `POST /ventas/:id/notas-credito` (ámbito `nc:<ventaId>`; esa
+ * pantalla resuelve sus avisos por su cuenta, ver `NotaCreditoModal`). Con la misma
  * clave, el reintento reproduce lo que ya entró (`repetida: true`); con otros
  * datos, responde 422 con la venta.
  *
@@ -78,9 +91,8 @@ export function useIntentoCobro() {
      * con la venta de antes.
      */
     mostrarSiCobroConOtrosDatos: (error: unknown, ambito: string): boolean => {
-      const e = error as { status?: number, data?: { ventaId?: unknown } }
-      const ventaId = e?.data?.ventaId
-      if (e?.status !== 422 || typeof ventaId !== 'string' || !ventaId) return false
+      const ventaId = idDeOtrosDatos(error)
+      if (!ventaId) return false
       claves.delete(ambito)
       toast.add({
         title: apiErrorMsg(error, 'Este cobro ya se había registrado con otros datos'),

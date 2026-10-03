@@ -559,6 +559,7 @@ Dónde vive: `VentasReembolsoHandler.cuantizarMontoReembolso`
 ```
 POST /api/ventas/:id/notas-credito
 Authorization: Bearer <JWT>   (permiso dedicado Ventas:Nota de crédito)
+Idempotency-Key: <uuid por intento de emisión>   (obligatoria, ADR-026)
 
 Request:  { "monto": "5000", "comentario": "...",
             "devolucion": { "pagoId": "uuid" } | { "sinPlata": true },   // obligatoria, exactamente una
@@ -567,6 +568,13 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
                 "movimientoCajaId": "<uuid>" | null }
 ```
 
+- **Una nota por intento de emisión** (2026-10-03, [ADR-026](../adr/026-idempotencia-de-cobros.md)):
+  sin la cabecera, 400. Con la misma clave y el mismo pedido, el reintento —el cajero que vuelve
+  a confirmar después de un corte— **no emite otra nota ni saca otra vez el efectivo**: devuelve
+  la nota que entró más `repetida: true`. Con la misma clave y otro pedido (otro monto, otro
+  pago, otras devoluciones u otro comentario), 422 *"Esta nota de crédito ya se había emitido
+  con otros datos"* con el id de esa nota en `ventaId`. Detalle y pantalla en
+  [ventas.md](ventas.md#una-nota-de-crédito-que-se-reintenta-no-se-emite-dos-veces-2026-10-03).
 - Elegibilidad: venta `pagada`/`pagada_parcial` de cualquier canal, o `pendiente` **solo con
   "No vuelve plata"** (owner, 2026-10-02: la distribuidora que factura en otro sistema, vende a
   30 días y el cliente devuelve todo; el comercio hace la nota en su facturador y la anota acá

@@ -279,8 +279,9 @@ revisión independiente no lo pudo reproducir, con razón.
   - **Lo que hay que diseñar en su sesión.** (1) Idempotencia: dos clics no pueden emitir dos
     notas. El vínculo ya ayuda (`correccion_venta_id IS NULL` escribe una sola vez y, dentro de
     la transacción, revierte la segunda), pero el contrato visible —qué ve el segundo clic— es
-    del owner; ver la entrada gemela "Una nota de crédito que se reintenta se emite dos veces"
-    en la § 6. (2) Los ítems a devolver se eligen de nuevo: los del pedido original no quedaron
+    del owner; ver la entrada gemela "Una nota de crédito que se reintenta se emite dos veces",
+    cerrada el 2026-10-03 en [`resueltos.md`](resueltos.md) (el patrón que sirve acá: aviso de
+    qué falta hacer, y el 422 de otros datos que cierra el modal y recarga). (2) Los ítems a devolver se eligen de nuevo: los del pedido original no quedaron
     guardados (el `request` del `REFUND` es el del proveedor, no el DTO). (3) Permiso: el mismo
     `Pasarelas:Reembolsar` u otro. (4) Reusar `CobrosService.aplicarPostReembolso` —que ya arma
     el evento con `ligarCorreccion`— y no un camino paralelo.
@@ -1123,16 +1124,20 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   por exigencia en `tipos_documento_tributario`, o un conjunto fijo para la Factura?—, si el giro
   se congela en la venta y de dónde sale cuando hay tercero. El hecho fiscal se congela en la
   transacción, así que lo que falte hoy no se completa después en una venta ya hecha.
-- [ ] **Una nota de crédito que se reintenta se emite dos veces** (fiscal, **frente propio**,
-  anotado 2026-09-19 al diseñar la idempotencia del cobro). `POST /ventas/:id/notas-credito`
-  no tiene clave de idempotencia: un corte de red después de emitir y un reintento del
-  operador emiten **dos** notas por el mismo monto. Si la nota devuelve por un pago en efectivo, sale también **dos
-  veces** el efectivo de la caja. Lo acota solo el tope de la serie: la segunda rebota si la
-  primera ya agotó lo acreditable, y pasa si quedaba saldo. El mecanismo ya existe desde el
-  frente de la idempotencia del cobro ([ADR-026](../adr/026-idempotencia-de-cobros.md)):
-  es una operación más en `IdempotenciaService.ejecutar` (`docs/patterns/backend.md` § 18).
-  Lo que falta es decidir, **en su propia sesión** (`CLAUDE.md`, ADR-010), qué ve el operador
-  cuando la segunda nota se frena, y verificarlo contra la serie de notas, no contra una sola.
+- [ ] **Un reembolso de pasarela que se reintenta sale dos veces por el proveedor** (fiscal y
+  plata, **frente propio**; anotado el 2026-10-03 por el frente de la nota de crédito
+  idempotente, que lo encontró leyendo y lo **midió** con un e2e temporal en
+  `pasarela-reembolso.e2e-spec.ts`). `POST /pasarela/admin/ordenes/:id/reembolsos` y
+  `POST /pasarela/api/cobros/:id/reembolsos` no tienen `Idempotency-Key`: dos `POST` iguales
+  seguidos de 17.000 sobre una orden de 100.000 respondieron **201 y 201**, con **dos `REFUND`
+  aprobados** y dos correcciones. Lo que ya existe (`correccion_venta_id`) hace única la nota
+  **por** `REFUND`, no el `REFUND` por intento. El tope por pago lo acota igual que acotaba a la
+  nota manual: el segundo rebota solo si el primero agotó lo devolvible. A diferencia de la nota
+  manual, acá la segunda vez **llama al proveedor**, así que la plata sale de verdad. Es el
+  mismo mecanismo (ADR-026, `IdempotenciaService.ejecutar`), pero con una diferencia que hay que
+  diseñar: el reclamo y la llamada al proveedor no son atómicos (el proveedor no está en la
+  transacción), y la API externa usa llave de API, sin usuario, así que la clave no puede ser
+  `(tenant, usuario, clave)` tal cual. Y qué ve el admin en el segundo clic es del owner.
 - [ ] **La cortesía como retiro gravado con IVA** (fiscal — **frente propio, con su propia
   sesión**: `CLAUDE.md` y ADR-010 lo sacan de cualquier tanda de producto o de arrastre de
   otra tarea, y no se cuelga al final de una ronda de preguntas). Un retiro de mercadería
@@ -1836,7 +1841,9 @@ No se resuelve programando. Está acá para que tenga quién la reclame.
   servido —o simplemente con una pestaña abierta de antes—. Ese bundle manda el cobro **sin
   la cabecera** y el backend lo rechaza con `400 "Falta la cabecera Idempotency-Key, o no es
   un UUID"`: el cajero no puede cobrar hasta recargar la pantalla. **El paso:** desplegar
-  frontend y backend juntos y recargar las pantallas abiertas. Lo mismo vale para el alta de
+  frontend y backend juntos y recargar las pantallas abiertas. Desde el 2026-10-03 la ventana
+  también toca la **nota de crédito**: un modal abierto de antes emite sin la cabecera y recibe
+  400 hasta recargar. Lo mismo vale para el alta de
   la tabla `solicitudes_idempotentes`, que hoy la crea `synchronize` al arrancar (ligado a la
   entrada CRÍTICA de migraciones, más abajo).
 

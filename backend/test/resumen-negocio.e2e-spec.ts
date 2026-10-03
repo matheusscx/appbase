@@ -503,6 +503,7 @@ describe('Resumen del negocio (e2e)', () => {
 
       const nc = await request(app.getHttpServer())
         .post(`/api/ventas/${venta.id}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({ monto: '3150', ...(await devolucionDe(venta.id)) });
       expect(nc.status).toBe(201);
@@ -535,6 +536,7 @@ describe('Resumen del negocio (e2e)', () => {
       // 2870 no coincide con ningún otro monto del test ni con el total.
       const nc = await request(app.getHttpServer())
         .post(`/api/ventas/${venta.id}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({ monto: '2870', ...(await devolucionDe(venta.id)) });
       expect(nc.status).toBe(201);
@@ -663,6 +665,7 @@ describe('Resumen del negocio (e2e)', () => {
 
         const nc = await request(app.getHttpServer())
           .post(`/api/ventas/${venta.id}/notas-credito`)
+          .set('Idempotency-Key', randomUUID())
           .set('Authorization', `Bearer ${tokenAdmin}`)
           .send({ monto: '2340', ...(await devolucionDe(venta.id)) });
         expect(nc.status).toBe(201);

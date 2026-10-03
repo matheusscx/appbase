@@ -60,7 +60,23 @@ con el aviso de "otros datos".
 | El reintento llega con **otros datos** (cambió tarjeta por efectivo) | Se frena con *"Este cobro ya se había registrado con otros datos"* y *Ver venta*. Nunca se crea una segunda venta |
 | Después de ese aviso, el cajero vuelve a confirmar | Es una **venta nueva**: el aviso cierra el intento. El cajero ya vio la venta anterior, así que confirmar de nuevo —cobrar en efectivo, o después de anular la primera— es una decisión consciente, sin rearmar el carrito |
 | ¿Hasta cuándo se recuerda? | Mientras siga ese carrito: hasta el éxito o el vaciado. **No vence por tiempo**: con un vencimiento, el POS que quedó abierto de un día para otro vuelve a cobrar dos veces |
-| Mesa de salón y abono | Entran. La nota de crédito tiene el mismo hueco, pero es fiscal y va en su propio frente (`agent/pendientes.md` § 6) |
+| Mesa de salón y abono | Entran. La nota de crédito tiene el mismo hueco, pero es fiscal y va en su propio frente (`agent/pendientes.md` § 6) — entró el 2026-10-03, ver abajo |
+
+## Actualización 2026-10-03 — la nota de crédito entra, con una adaptación
+
+`POST /ventas/:id/notas-credito` exige la cabecera desde el 2026-10-03 (operación
+`notaCredito.emitir`, ámbito `nc:<ventaId>` en la pantalla). Antes, un corte y un segundo
+Confirmar emitían dos notas y, con un pago en efectivo, sacaban el efectivo dos veces. El
+mecanismo es el mismo; cambian tres cosas, decididas por el owner en el frente fiscal propio
+(`CLAUDE.md`, ADR-010):
+
+| Escena | Qué pasa |
+|---|---|
+| El reintento llega **igual** | Éxito más un aviso que dice **qué falta hacer**, no solo qué pasó: con efectivo, *"la salida ya está registrada: entregale los billetes al cliente si todavía no lo hiciste"*; con otro pago, que la devolución en esa máquina se hace una sola vez. El cajero vio un error, así que probablemente no entregó la plata |
+| El reintento llega con **otros datos** | 422 con un mensaje propio de la nota (`mensajeOtrosDatos` de la solicitud; no es un "cobro") y el id de la nota que entró. **La adaptación:** el modal se cierra y el detalle de la venta se recarga, en vez de quedar abierto con *Ver venta*. Es el mismo principio —el aviso cierra el intento y lo siguiente se decide con lo que entró a la vista—, pero en el POS el carrito sigue siendo válido y acá el disponible del modal quedó viejo: con el modal abierto, un segundo clic emitía la segunda nota |
+| ¿Hasta cuándo se recuerda? | Como el abono: por venta y por pestaña, sobrevive a cerrar y reabrir el modal |
+
+La huella ordena las `devoluciones`: el mismo pedido marcado en otro orden es la misma nota.
 
 ## Alternatives Considered
 
@@ -98,6 +114,11 @@ con el aviso de "otros datos".
   vive en la memoria de la pestaña, así que recargar la pierde (en el POS se pierde también el
   carrito; en el salón la cuenta ya cerrada rebota como antes; en el abono, un segundo abono
   sale si a la venta le queda saldo); y dos pestañas del mismo POS tienen claves distintas.
+- **El reembolso de la pasarela tampoco pasa por acá**, y queda un hueco: su nota es una por
+  `REFUND` (`correccion_venta_id`), pero el `REFUND` no es idempotente por intento (medido el
+  2026-10-03: dos `POST` iguales, dos `REFUND` aprobados). Es entrada propia en
+  `agent/pendientes.md` § 6, porque ahí la segunda llamada sale al proveedor y no es atómica con
+  el reclamo.
 - **Webpay no pasa por acá.** `OnlineCallbackHandler` llama a `VentasService.crear` sin HTTP y
   sin clave: ya es idempotente por orden (ADR-009).
 - **El primer deploy tiene una ventana.** Backend y frontend son servicios separados en

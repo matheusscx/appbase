@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import type { CriterioRedondeoCongelado, DetalleVentaDevolucion } from '~/composables/useDevolucionInventario'
+import { idDeOtrosDatos } from '~/composables/useIntentoCobro'
 import {
+  avisoNotaRepetida,
   claveOpcion,
   cuerpoDevolucion,
   registroQueQueda,
@@ -42,13 +44,20 @@ export interface NotaCreditoSuccessPayload {
   fecha: string
   comentario: string | null
   devoluciones: Array<{ itemId: string, cantidad: string, reponerStock: boolean }>
+  /** La nota ya había entrado y el backend la reprodujo (ADR-026). */
+  repetida?: boolean
 }
 
-const emit = defineEmits<{ success: [NotaCreditoSuccessPayload] }>()
+const emit = defineEmits<{
+  success: [NotaCreditoSuccessPayload]
+  /** La clave ya emitió otra nota con otros datos: el detalle tiene que recargarse. */
+  otrosDatos: []
+}>()
 const open = defineModel<boolean>('open', { required: true })
 
 const config = useRuntimeConfig()
 const toast = useToast()
+const intento = useIntentoCobro()
 const cajaStore = useCajaStore()
 const { formatMonto } = useFormatters()
 const apiUrl = config.public.apiUrl
@@ -155,6 +164,14 @@ const motivoRequerido = computed(() =>
   new Decimal(valorDevuelto.value).gt(new Decimal(monto.value || '0')),
 )
 
+/**
+ * Una nota por intento de emisión (ADR-026, owner 2026-10-03): el intento vive
+ * por venta y por pestaña —cerrar y reabrir el modal después de un corte sigue
+ * siendo el mismo— y muere con el éxito (también reproducido) o con el aviso de
+ * otros datos.
+ */
+const ambito = computed(() => `nc:${props.ventaId}`)
+
 async function confirmar() {
   submitting.value = true
   try {
@@ -166,11 +183,17 @@ async function confirmar() {
 
     const res = await useApiFetch<NotaCreditoSuccessPayload>(
       `${apiUrl}/ventas/${props.ventaId}/notas-credito`,
-      { method: 'POST', body },
+      { method: 'POST', body, headers: intento.cabecera(ambito.value) },
     )
+    intento.terminar(ambito.value)
 
     if (res.movimientoCajaId) {
-      cajaStore.aplicarMovimientoLocal('salida', res.totalFinal)
+      // Reproducida, no se sabe si el resumen ya la trae (pudo recargarse
+      // después del corte): se pide al servidor en vez de sumarla de nuevo.
+      if (res.repetida && cajaStore.activa && cajaStore.resumenTurno)
+        void cajaStore.cargarResumenTurno(cajaStore.activa.id).catch(() => {})
+      else if (!res.repetida)
+        cajaStore.aplicarMovimientoLocal('salida', res.totalFinal)
     }
 
     toast.add({
@@ -179,10 +202,25 @@ async function confirmar() {
         : 'Nota de crédito generada',
       color: 'success',
     })
+    if (res.repetida)
+      toast.add({
+        title: avisoNotaRepetida(opcionElegida.value, formatMonto(res.totalFinal)),
+        color: 'warning',
+      })
     open.value = false
     emit('success', res)
   }
   catch (e: unknown) {
+    if (idDeOtrosDatos(e)) {
+      // Otra nota ya entró con esta clave (el cajero cambió algo después de un
+      // corte): se frena, y el detalle recargado muestra la que entró y el
+      // disponible nuevo. Otra nota es un intento nuevo, reabriendo el modal.
+      intento.terminar(ambito.value)
+      toast.add({ title: apiErrorMsg(e, 'Esta nota de crédito ya se había emitido con otros datos'), color: 'error' })
+      open.value = false
+      emit('otrosDatos')
+      return
+    }
     toast.add({ title: apiErrorMsg(e, 'Error al generar la nota de crédito'), color: 'error' })
   }
   finally {

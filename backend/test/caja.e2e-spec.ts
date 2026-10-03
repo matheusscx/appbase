@@ -1323,6 +1323,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
 
       const nc = await request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({
           monto: '5000.0000',

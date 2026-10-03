@@ -10,6 +10,9 @@
 //   4. El body lleva `devolucion` (el pago, o `sinPlata`), nunca el documento ni
 //      la casilla `devolverDinero` de antes.
 //   5. Una opción en efectivo no se puede elegir sin una caja física abierta.
+//   6. Una nota por intento de emisión (ADR-026, owner 2026-10-03): la misma
+//      clave en el reintento —aunque se cierre y reabra el modal—, el aviso de
+//      qué falta hacer si ya había entrado, y el 422 de otros datos que cierra.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import NotaCreditoModal from './NotaCreditoModal.vue'
@@ -29,8 +32,8 @@ const CLP = {
   valorDelDia: null,
 }
 
-const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }))
-mockNuxtImport('useToast', () => () => ({ add: vi.fn() }))
+const { apiFetch, toastAdd } = vi.hoisted(() => ({ apiFetch: vi.fn(), toastAdd: vi.fn() }))
+mockNuxtImport('useToast', () => () => ({ add: toastAdd }))
 mockNuxtImport('useApiFetch', () => apiFetch)
 
 const DETALLES = [
@@ -80,7 +83,7 @@ async function esperar(ms = 50) {
 }
 
 /** Monta cerrado y abre: la elección por defecto nace en el `watch(open)`. */
-async function montar(opciones: OpcionDevolucion[], caja: boolean = true) {
+async function montar(opciones: OpcionDevolucion[], caja: boolean = true, ventaId = 'v-1') {
   apiFetch.mockImplementation((url: string) =>
     url.endsWith('/caja/activa')
       ? Promise.resolve(caja ? { id: 'caja-1', estado: 'abierta' } : null)
@@ -96,7 +99,7 @@ async function montar(opciones: OpcionDevolucion[], caja: boolean = true) {
   useMonedasStore().hydrate([CLP], 'tenant-1')
   const wrapper = await mountSuspended(NotaCreditoModal, {
     props: {
-      ventaId: 'v-1',
+      ventaId,
       disponible: '11900.0000',
       porPorcion: [],
       detalles: DETALLES,
@@ -131,6 +134,7 @@ async function elegir(texto: string) {
 beforeEach(() => {
   document.body.innerHTML = ''
   apiFetch.mockReset()
+  toastAdd.mockReset()
 })
 
 describe('NotaCreditoModal — ¿Por dónde vuelve la plata?', () => {
@@ -309,5 +313,135 @@ describe('NotaCreditoModal — el efectivo sale de la caja', () => {
 
     expect(radio('Efectivo')?.hasAttribute('disabled')).toBe(true)
     expect(generar().disabled).toBe(true)
+  })
+})
+
+describe('NotaCreditoModal — una nota por intento de emisión (ADR-026)', () => {
+  const NOTA = {
+    id: 'nc-1',
+    totalFinal: '3000.0000',
+    movimientoCajaId: 'mov-1',
+    fecha: '2026-10-03',
+    comentario: null,
+    devoluciones: [],
+  }
+  const RESUMEN = {
+    ciego: false,
+    saldoInicial: '100000.0000',
+    totalEntradas: '0.0000',
+    totalSalidas: '3000.0000',
+    saldoEsperado: '97000.0000',
+    totalMovimientos: 1,
+  }
+  const posts = () => apiFetch.mock.calls.filter(([url]) => String(url).endsWith('/notas-credito'))
+  const claveDe = (i: number) =>
+    (posts()[i]![1] as { headers: Record<string, string> }).headers['Idempotency-Key']
+  const titulos = () => toastAdd.mock.calls.map(([t]) => String((t as { title: string }).title))
+
+  /** La caja abierta, y el POST de la nota contesta lo que diga `nota`. */
+  function backend(nota: (n: number) => Promise<unknown>) {
+    let n = 0
+    apiFetch.mockImplementation((url: string) => {
+      if (url.endsWith('/caja/activa')) return Promise.resolve({ id: 'caja-1', estado: 'abierta' })
+      if (url.endsWith('/notas-credito')) return nota(n++)
+      // El resumen del turno según el servidor: la salida ya contada una vez.
+      if (url.endsWith('/movimientos/resumen')) return Promise.resolve({ ...RESUMEN })
+      return Promise.resolve({})
+    })
+  }
+
+  it('el reintento después de un error manda la misma clave, aunque se cierre y reabra el modal', async () => {
+    const wrapper = await montar([EFECTIVO], true, 'v-reintento')
+    backend(n => (n === 0 ? Promise.reject(new Error('Failed to fetch')) : Promise.resolve(NOTA)))
+
+    generar().click()
+    await esperar()
+    expect(wrapper.emitted('success')).toBeUndefined()
+    await wrapper.setProps({ open: false })
+    await wrapper.setProps({ open: true })
+    await esperar()
+    generar().click()
+    await esperar()
+
+    expect(posts()).toHaveLength(2)
+    expect(claveDe(0)).toMatch(/^[0-9a-f-]{36}$/)
+    expect(claveDe(1)).toBe(claveDe(0))
+  })
+
+  it('después de una nota que salió, la siguiente es otro intento', async () => {
+    const wrapper = await montar([EFECTIVO], true, 'v-serie')
+    backend(() => Promise.resolve(NOTA))
+
+    generar().click()
+    await esperar()
+    await wrapper.setProps({ open: false })
+    await wrapper.setProps({ open: true })
+    await esperar()
+    generar().click()
+    await esperar()
+
+    expect(posts()).toHaveLength(2)
+    expect(claveDe(1)).not.toBe(claveDe(0))
+  })
+
+  it('reproducida en efectivo: se ve el éxito y el aviso de entregar los billetes, y la caja no suma la salida dos veces', async () => {
+    const wrapper = await montar([EFECTIVO], true, 'v-repetida')
+    const caja = useCajaStore()
+    // Se recargó después del corte: ya trae la salida de la nota que entró.
+    caja.resumenTurno = { ...RESUMEN }
+    backend(() => Promise.resolve({ ...NOTA, repetida: true }))
+
+    generar().click()
+    await esperar()
+
+    expect(wrapper.emitted('success')).toHaveLength(1)
+    expect(titulos().some(t => t.includes('ya estaba emitida') && t.includes('entregale los billetes'))).toBe(true)
+    // No se suma localmente: el resumen se pide al servidor.
+    expect(caja.resumenTurno?.totalSalidas).toBe('3000.0000')
+    expect(apiFetch.mock.calls.some(([url]) => String(url).endsWith('/caja/caja-1/movimientos/resumen'))).toBe(true)
+  })
+
+  it('el 422 de otros datos: avisa, se cierra y pide recargar el detalle; reabrir es otro intento', async () => {
+    const wrapper = await montar([EFECTIVO], true, 'v-otros')
+    const otrosDatos = Object.assign(new Error('422'), {
+      status: 422,
+      data: {
+        statusCode: 422,
+        message: 'Esta nota de crédito ya se había emitido con otros datos. Revisá la venta antes de emitir otra.',
+        ventaId: 'nc-1',
+      },
+    })
+    backend(n => (n === 0 ? Promise.reject(otrosDatos) : Promise.resolve(NOTA)))
+
+    generar().click()
+    await esperar()
+
+    expect(wrapper.emitted('otrosDatos')).toHaveLength(1)
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false])
+    expect(titulos().some(t => t.includes('ya se había emitido con otros datos'))).toBe(true)
+
+    await wrapper.setProps({ open: false })
+    await wrapper.setProps({ open: true })
+    await esperar()
+    generar().click()
+    await esperar()
+    expect(claveDe(1)).not.toBe(claveDe(0))
+  })
+
+  it('un 422 sin id (el tope de efectivo) no es otros datos: el modal queda abierto y la clave sigue', async () => {
+    const wrapper = await montar([EFECTIVO], true, 'v-tope')
+    const tope = Object.assign(new Error('422'), {
+      status: 422,
+      data: { statusCode: 422, message: 'No se puede devolver en efectivo más de lo que esta venta cobró en efectivo.' },
+    })
+    backend(n => (n === 0 ? Promise.reject(tope) : Promise.resolve(NOTA)))
+
+    generar().click()
+    await esperar()
+    expect(wrapper.emitted('otrosDatos')).toBeUndefined()
+    generar().click()
+    await esperar()
+
+    expect(claveDe(1)).toBe(claveDe(0))
   })
 })

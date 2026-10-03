@@ -1674,7 +1674,8 @@ seq scan igual —o casi—, así que un `EXPLAIN` sobre ella no distingue el pl
 
 ## 18. Operación idempotente (un cobro por intento)
 
-Todo endpoint que **cobra** —crea una venta, cierra una cuenta, registra un abono— exige
+Todo endpoint que **cobra** —crea una venta, cierra una cuenta, registra un abono— o que
+**devuelve plata con un documento** —emite una nota de crédito— exige
 `Idempotency-Key` y corre su operación dentro de `IdempotenciaService.ejecutar`
 ([ADR-026](../adr/026-idempotencia-de-cobros.md)). El reintento del cajero después de un corte
 reproduce la respuesta en vez de cobrar dos veces.
@@ -1707,6 +1708,13 @@ return this.idempotencia.ejecutar(
   hash se revierte por fuerza bruta. Un campo nuevo del DTO se decide en el llamador; no entra
   solo. Un DTO sin credenciales puede ir entero (`huellaDe('pago.abono', dto)`).
 - **La operación agrega su valor a `OperacionIdempotente`** (`modules/idempotencia/huella.ts`).
+  Si no es un cobro, pasa su propio `mensajeOtrosDatos` en la solicitud (la nota de crédito:
+  *"Esta nota de crédito ya se había emitido con otros datos"*).
+- **Con un loop de deadlock y `conRastroDeRechazo`** (la nota de crédito, `compras.confirmar`),
+  `ejecutar` va **adentro** del loop y del rastro: un `40P01` aborta la transacción con el
+  reclamo y el intento siguiente reclama de nuevo; el rastro se escribe después del rollback.
+- **Un array cuyo orden no cambia el pedido se ordena para la huella** (las `devoluciones`
+  de la nota): si no, el mismo pedido marcado en otro orden cae en "otros datos".
 - **Un llamador interno sin HTTP no pasa clave** (el callback de Webpay, las suscripciones):
   ya tienen su propia idempotencia o no hay nadie que reintente. Por eso el parámetro del
   service es opcional solo en `VentasService.crear`.

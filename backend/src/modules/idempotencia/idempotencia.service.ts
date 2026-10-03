@@ -19,6 +19,11 @@ export interface SolicitudIdempotenteInput {
   operacion: OperacionIdempotente;
   /** `huellaDe(operacion, …)`, armada por el llamador sin datos sensibles. */
   huella: string;
+  /**
+   * El 422 de "otros datos" cuando la operación no es un cobro: la nota de
+   * crédito no "se cobró". Sin él, `MENSAJE_OTROS_DATOS`.
+   */
+  mensajeOtrosDatos?: string;
 }
 
 /**
@@ -112,7 +117,7 @@ export class IdempotenciaService {
     if (fila.huella !== s.huella)
       throw new UnprocessableEntityException({
         statusCode: 422,
-        message: MENSAJE_OTROS_DATOS,
+        message: s.mensajeOtrosDatos ?? MENSAJE_OTROS_DATOS,
         ventaId: fila.venta_id,
       });
     return { ...fila.respuesta, repetida: true } as unknown as T & {

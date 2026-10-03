@@ -23,6 +23,72 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Una nota de crédito que se reintenta no se emite dos veces (cerrada 2026-10-03)
+
+Sale de [`pendientes.md`](pendientes.md) § 6 (fiscal, frente propio). La regla viva, en
+[ADR-026](../adr/026-idempotencia-de-cobros.md#actualización-2026-10-03--la-nota-de-crédito-entra-con-una-adaptación)
+y en [`ventas.md`](../features/ventas.md#una-nota-de-crédito-que-se-reintenta-no-se-emite-dos-veces-2026-10-03).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 6
+
+- [ ] **Una nota de crédito que se reintenta se emite dos veces** (fiscal, **frente propio**,
+  anotado 2026-09-19 al diseñar la idempotencia del cobro). `POST /ventas/:id/notas-credito`
+  no tiene clave de idempotencia: un corte de red después de emitir y un reintento del
+  operador emiten **dos** notas por el mismo monto. Si la nota devuelve por un pago en efectivo, sale también **dos
+  veces** el efectivo de la caja. Lo acota solo el tope de la serie: la segunda rebota si la
+  primera ya agotó lo acreditable, y pasa si quedaba saldo. El mecanismo ya existe desde el
+  frente de la idempotencia del cobro ([ADR-026](../adr/026-idempotencia-de-cobros.md)):
+  es una operación más en `IdempotenciaService.ejecutar` (`docs/patterns/backend.md` § 18).
+  Lo que falta es decidir, **en su propia sesión** (`CLAUDE.md`, ADR-010), qué ve el operador
+  cuando la segunda nota se frena, y verificarlo contra la serie de notas, no contra una sola.
+  **Medido el 2026-10-03** (e2e en su frente): dos `POST` iguales seguidos emiten dos notas
+  (600 acreditados por un intento de 300) y, devolviendo por un pago en efectivo, dos salidas de
+  caja ($600 de efectivo por un intento de $300). La cabecera `Idempotency-Key` se ignoraba.
+  **Cómo arrancarlo — DECIDIDO (owner, 2026-10-03, AskUserQuestion del frente, con la escena de
+  una nota de $3.000 en efectivo y un corte; las tres eran la opción recomendada, y antes de
+  preguntar las cruzó la "Sesión de esfuerzo máximo", que coincidió y agregó el mensaje por
+  medio de pago y el orden de `devoluciones` en la huella):**
+  - **El reintento igual** se ve como una nota que salió bien —el modal se cierra y el detalle
+    muestra la nota— más un aviso que dice qué falta hacer: con efectivo, *"la salida de $3.000
+    ya está registrada: entregale los billetes al cliente si todavía no lo hiciste"*; con otro
+    pago, que la devolución en la máquina se hace una sola vez; sin plata, solo el aviso.
+    Descartado frenar con un error: el cajero no sabría si entregar el efectivo, y la caja
+    cerraría con un sobrante.
+  - **El reintento con otros datos** (cambió el monto después del corte) se frena con *"Esta
+    nota de crédito ya se había emitido con otros datos"*, el modal se cierra y el detalle se
+    recarga mostrando la nota que entró y el disponible nuevo; otra nota exige reabrir el modal.
+    Descartada la forma literal de ADR-026 (aviso con *Ver venta* y el modal abierto): el
+    disponible del modal quedaba viejo y un segundo clic emitía la segunda nota.
+  - **El intento vive por venta y por pestaña**, sobrevive a cerrar y reabrir el modal, y muere
+    con el éxito (también reproducido) o con el aviso de otros datos, como el abono. Descartado
+    que cerrar el modal lo termine: es la reacción más común al error y volvía a emitir.
+
+### Cómo se cerró
+
+- **Backend:** `POST /ventas/:id/notas-credito` exige `Idempotency-Key` (400 sin ella) y emite
+  dentro de `IdempotenciaService.ejecutar` (operación `notaCredito.emitir`), adentro del loop de
+  deadlock y de `conRastroDeRechazo`, con el alcance de caja antes del reclamo. La huella es la
+  venta más el cuerpo, con las `devoluciones` ordenadas. El 422 de otros datos lleva su propio
+  mensaje (`mensajeOtrosDatos`, campo nuevo de la solicitud) y el id de la nota que entró. La
+  forma de `ventas`/notas no cambió: la clave vive en `solicitudes_idempotentes`.
+- **Frontend:** `NotaCreditoModal` manda la clave de `useIntentoCobro` (ámbito `nc:<ventaId>`),
+  avisa qué falta hacer en la reproducción (`avisoNotaRepetida`), pide el resumen de caja al
+  servidor en vez de sumar otra vez la salida, y ante el 422 de otros datos (`idDeOtrosDatos`)
+  cierra y hace recargar el detalle; el drawer no pinta dos veces una nota reproducida.
+- **Lo que lo fija, contra la serie:** `idempotencia-venta.e2e-spec.ts`, bloque de la nota —misma
+  clave = una nota y una salida de caja (fallaban antes del fix: 2 notas, 600), reproducción tras
+  dejar la venta pagada, 422 con otros datos, dos intentos legítimos = dos notas, rechazo por
+  plata que suelta la clave y deja rastro, concurrencia, 400 sin cabecera—. Unitarios: la
+  solicitud que recibe `ejecutar` y el orden de la huella (mutante sin `.sort` muere); en la
+  pantalla, misma clave tras error y tras reabrir, otra tras éxito y tras otros datos, aviso de
+  billetes y caja sin doble suma (tres mutantes de revert mueren), y en el drawer el dedupe y la
+  recarga (dos mutantes mueren).
+- **Lo que quedó afuera:** el `REFUND` de la pasarela tampoco es idempotente por intento (medido
+  en este frente: dos `POST` iguales, dos `REFUND` aprobados). Entrada propia en
+  [`pendientes.md`](pendientes.md) § 6.
+
+---
+
 ## Una nota de crédito no toca el % de anulaciones por garzón: no corresponde (cerrada 2026-10-03)
 
 Sale de [`pendientes.md`](pendientes.md) § 6. Se cierra **sin cambiar la cuenta**: el owner
@@ -113,7 +179,6 @@ como cifra aparte. No se abrió como entrada: el owner no lo pidió.
   Los dos están revertidos.
 
 ---
-
 
 ## El `loteId` de una unidad con serie tiene que ser un lote vivo de su ítem y su tenant (cerrada 2026-10-03)
 

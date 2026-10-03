@@ -1307,7 +1307,8 @@ Referencia: `app/composables/useRefrescoPeriodico.ts` +
 ## 18. Cobrar con clave de idempotencia (`useIntentoCobro`)
 
 Toda pantalla que llama a un endpoint que cobra (`POST /ventas`, `POST /cuentas/:id/cerrar`,
-`POST /pagos`) manda la cabecera `Idempotency-Key` de `useIntentoCobro`
+`POST /pagos`) o que emite una nota de crédito (`POST /ventas/:id/notas-credito`) manda la
+cabecera `Idempotency-Key` de `useIntentoCobro`
 ([ADR-026](../adr/026-idempotencia-de-cobros.md)).
 
 ```ts
@@ -1336,6 +1337,10 @@ try {
 - **`useIntentoCobro()` se llama en el setup**, nunca después de un `await`: usa `useToast`,
   que hace `inject` + `useState`.
 - **Sin reintento automático.** El que vuelve a confirmar es el cajero.
+- **La nota de crédito** (`NotaCreditoModal`, ámbito `nc:<ventaId>`) usa `cabecera`/`terminar`
+  pero no los avisos del cobro: el reintento reproducido avisa qué falta hacer según por dónde
+  volvió la plata (`avisoNotaRepetida`), y el 422 de otros datos (`idDeOtrosDatos`) cierra el
+  modal y pide al detalle que se recargue en vez de ofrecer *Ver venta* (owner, 2026-10-03).
 - **Tests:** el mock de `useApiFetch` guarda `opts.headers['Idempotency-Key']` por request, y
   el spec afirma "misma clave tras un error" y "otra clave tras el éxito". Como el estado vive
   a nivel de módulo, el `beforeEach` llama a `useIntentoCobro().terminar(<ámbito>)`.

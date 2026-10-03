@@ -996,6 +996,12 @@ function onNcSuccess(payload: {
 }) {
   ncOpen.value = false
   if (!venta.value) return
+  // Una nota reproducida (ADR-026) puede ya estar en el detalle si se recargó
+  // después del corte: sumarla otra vez la duplicaría hasta la recarga.
+  if (venta.value.notasCredito.some(n => n.id === payload.id)) {
+    void resincronizar()
+    return
+  }
   venta.value.notasCredito = [
     ...venta.value.notasCredito,
     {
@@ -1018,6 +1024,12 @@ function onNcSuccess(payload: {
   // El disponible y las porciones los calcula el BACKEND: sin esto el drawer
   // seguía ofreciendo el número viejo y el modal precargaba un monto que el
   // POST rechaza. Va después de `emitPatch`, que lee `venta.value`.
+  void resincronizar()
+}
+
+/** La nota que entró con esa clave (otros datos): el detalle la muestra al recargar. */
+function onNcOtrosDatos() {
+  ncOpen.value = false
   void resincronizar()
 }
 </script>
@@ -1668,5 +1680,6 @@ function onNcSuccess(payload: {
     :config-calculo="venta.configCalculo"
     :opciones="venta.opcionesDevolucion"
     @success="onNcSuccess"
+    @otros-datos="onNcOtrosDatos"
   />
 </template>

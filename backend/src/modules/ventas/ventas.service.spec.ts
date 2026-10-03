@@ -8,7 +8,10 @@ import Decimal from 'decimal.js';
 import type { EntityManager } from 'typeorm';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { Db } from '../../common/db/db.service';
-import { VentasService } from './ventas.service';
+import {
+  MENSAJE_NOTA_CREDITO_OTROS_DATOS,
+  VentasService,
+} from './ventas.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import type { ConfigCalculo } from '../calculo-precios/calculo-precios.engine';
 import { CajaService, IntentoRechazadoError } from '../caja/caja.service';
@@ -26,7 +29,10 @@ import { VentaDescuento } from './entities/venta-descuento.entity';
 import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { VentaPromocion } from './entities/venta-promocion.entity';
-import { IdempotenciaService } from '../idempotencia/idempotencia.service';
+import {
+  IdempotenciaService,
+  type SolicitudIdempotenteInput,
+} from '../idempotencia/idempotencia.service';
 
 /**
  * El tipo "nota de crédito" que el service resuelve por país. Antes era una
@@ -242,6 +248,7 @@ describe('VentasService', () => {
   let service: VentasService;
   let dbService: Db;
   let cajaService: jest.Mocked<CajaService>;
+  let idempotencia: { ejecutar: jest.Mock };
   let calculoPreciosService: jest.Mocked<CalculoPreciosService>;
   let inventarioService: jest.Mocked<InventarioService>;
   let itemsService: jest.Mocked<ItemsService>;
@@ -477,9 +484,18 @@ describe('VentasService', () => {
             localDe: jest.fn().mockResolvedValue(UBICACION_LOCAL_ID),
           },
         },
-        // `crear` sin clave (el camino de Webpay) no lo toca; la idempotencia
-        // se prueba en su propio spec y en el e2e contra Postgres real.
-        { provide: IdempotenciaService, useValue: { ejecutar: jest.fn() } },
+        // Pasa-manos (`docs/patterns/backend.md` § 18): `crear` sin clave (el
+        // camino de Webpay) no lo toca, y la nota manual corre su operación tal
+        // cual. Reclamo, reproducción y 422 se prueban en su propio spec y en el
+        // e2e contra Postgres real.
+        {
+          provide: IdempotenciaService,
+          useValue: {
+            ejecutar: jest.fn((_s: unknown, operar: () => Promise<unknown>) =>
+              operar(),
+            ),
+          },
+        },
         {
           provide: Db,
           useValue: dbMock,
@@ -490,6 +506,7 @@ describe('VentasService', () => {
     service = module.get<VentasService>(VentasService);
     dbService = module.get(Db);
     cajaService = module.get(CajaService);
+    idempotencia = module.get(IdempotenciaService);
     calculoPreciosService = module.get(CalculoPreciosService);
     inventarioService = module.get(InventarioService);
     itemsService = module.get(ItemsService);
@@ -4863,7 +4880,8 @@ describe('VentasService', () => {
     });
 
     describe('crearNotaCreditoDesdeVenta()', () => {
-      const desdeVenta = { ...baseParams, verTodas: true };
+      const CLAVE = '6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7';
+      const desdeVenta = { ...baseParams, verTodas: true, clave: CLAVE };
       const consultaDeAlcance = () =>
         dataSourceMock.query.mock.calls.find((c) =>
           String(c[0]).includes('FROM ventas v'),
@@ -4888,6 +4906,47 @@ describe('VentasService', () => {
         const alcance = consultaDeAlcance()!;
         expect(String(alcance[0])).not.toContain('c.usuario_id');
         expect(alcance[1]).toEqual([VENTA_ORIG_ID, TENANT_ID]);
+      });
+
+      it('emite dentro de IdempotenciaService.ejecutar, con la clave y una huella de lo que se pidió', async () => {
+        await service.crearNotaCreditoDesdeVenta(desdeVenta);
+        expect(idempotencia.ejecutar).toHaveBeenCalledTimes(1);
+        const [solicitud] = idempotencia.ejecutar.mock.calls[0] as [
+          SolicitudIdempotenteInput,
+        ];
+        expect(solicitud).toEqual({
+          tenantId: TENANT_ID,
+          usuarioId: USUARIO_ID,
+          clave: CLAVE,
+          operacion: 'notaCredito.emitir',
+          huella: expect.any(String) as string,
+          mensajeOtrosDatos: MENSAJE_NOTA_CREDITO_OTROS_DATOS,
+        });
+        // Otro monto con la misma clave tiene que caer en "otros datos".
+        await service.crearNotaCreditoDesdeVenta({ ...desdeVenta, monto: '1' });
+        const [otra] = idempotencia.ejecutar.mock.calls[1] as [
+          SolicitudIdempotenteInput,
+        ];
+        expect(otra.huella).not.toBe(solicitud.huella);
+      });
+
+      it('los mismos ítems devueltos en otro orden dan la misma huella', async () => {
+        const a = { itemId: ITEM_ID, cantidad: '1' };
+        const b = {
+          itemId: '00000000-0000-4000-8000-000000000001',
+          cantidad: '2',
+          reponerStock: false,
+        };
+        await service
+          .crearNotaCreditoDesdeVenta({ ...desdeVenta, devoluciones: [a, b] })
+          .catch(() => undefined);
+        await service
+          .crearNotaCreditoDesdeVenta({ ...desdeVenta, devoluciones: [b, a] })
+          .catch(() => undefined);
+        const [[primera], [segunda]] = idempotencia.ejecutar.mock.calls as [
+          SolicitudIdempotenteInput,
+        ][];
+        expect(segunda.huella).toBe(primera.huella);
       });
 
       it('feliz sin dinero: delega en crearNotaCredito y devuelve movimientoCajaId null', async () => {

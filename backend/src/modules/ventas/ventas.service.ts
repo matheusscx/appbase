@@ -80,7 +80,10 @@ import {
   detallePersonalizacion,
   type PersonalizacionRecetaSnapshot,
 } from '../../common/utils/personalizacion-receta.util';
-import { IdempotenciaService } from '../idempotencia/idempotencia.service';
+import {
+  IdempotenciaService,
+  type SolicitudIdempotenteInput,
+} from '../idempotencia/idempotencia.service';
 import { huellaDe } from '../idempotencia/huella';
 
 /**
@@ -215,7 +218,18 @@ export interface CrearNotaCreditoParams {
     manager: EntityManager,
     correccionVentaId: string,
   ) => Promise<void>;
+  /**
+   * La `Idempotency-Key` de la nota manual, ya con su huella: el reintento
+   * reproduce la nota que entró en vez de emitir otra (ADR-026). El reembolso
+   * de la pasarela no la pasa: no hay operador que reintente, y su nota ya es
+   * una sola por REFUND (`correccion_venta_id`).
+   */
+  idempotencia?: SolicitudIdempotenteInput;
 }
+
+/** El 422 de la nota reintentada con otro monto, otro medio u otras devoluciones. */
+export const MENSAJE_NOTA_CREDITO_OTROS_DATOS =
+  'Esta nota de crédito ya se había emitido con otros datos. Revisá la venta antes de emitir otra.';
 
 export interface NotaCreditoCreada {
   id: string;
@@ -1948,7 +1962,7 @@ export class VentasService {
 
   async crearNotaCredito(
     params: CrearNotaCreditoParams,
-  ): Promise<NotaCreditoCreada> {
+  ): Promise<NotaCreditoCreada & { repetida?: true }> {
     if (new Decimal(params.monto).lte(0))
       throw new BadRequestException('El monto debe ser mayor a cero');
 
@@ -1965,9 +1979,20 @@ export class VentasService {
       // transacción envolvente—: el controller no abre ninguna, y el hook de
       // reembolso corre después del commit del REFUND
       // (`CobrosService.aplicarPostReembolso`).
+      //
+      // La clave se reclama ADENTRO del loop (como `compras.confirmar`): un
+      // `40P01` aborta la transacción de `ejecutar` con el reclamo incluido, y
+      // el intento siguiente vuelve a reclamar como si fuera el primero.
+      const emitir = () => this.crearNotaCreditoEnTransaccion(params);
       for (let intento = 0; ; intento++) {
         try {
-          return await this.crearNotaCreditoEnTransaccion(params);
+          return await (params.idempotencia
+            ? this.idempotencia.ejecutar(
+                params.idempotencia,
+                emitir,
+                (r) => r.id,
+              )
+            : emitir());
         } catch (error) {
           if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
             throw error;
@@ -2905,22 +2930,48 @@ export class VentasService {
     devoluciones?: DevolucionReembolso[];
     comentario?: string;
     via: ViaCorreccion;
-  }): Promise<{
-    id: string;
-    totalFinal: string;
-    movimientoCajaId: string | null;
-    fecha: Date;
-    comentario: string | null;
-    devoluciones: DevolucionReembolso[];
-  }> {
-    const { verTodas, ...nota } = params;
+    /** La `Idempotency-Key` del intento de emisión (ADR-026). */
+    clave: string;
+  }): Promise<NotaCreditoCreada & { repetida?: true }> {
+    const { verTodas, clave, ...nota } = params;
     await this.exigirVentaVisible(this.db, {
       tenantId: nota.tenantId,
       usuarioId: nota.usuarioId,
       verTodas,
       ventaId: nota.ventaOriginalId,
     });
-    return this.crearNotaCredito({ ...nota, validarVentaElegible: true });
+    return this.crearNotaCredito({
+      ...nota,
+      validarVentaElegible: true,
+      idempotencia: {
+        tenantId: nota.tenantId,
+        usuarioId: nota.usuarioId,
+        clave,
+        operacion: 'notaCredito.emitir',
+        // Todo lo que el request pidió, campo por campo: la venta de la ruta y
+        // el cuerpo entero (no trae credenciales). Las devoluciones van
+        // ordenadas: los mismos ítems marcados en otro orden son la misma
+        // nota, y reproducirla devuelve la que ya entró.
+        huella: huellaDe('notaCredito.emitir', {
+          ventaId: nota.ventaOriginalId,
+          monto: nota.monto,
+          comentario: nota.comentario ?? null,
+          devoluciones: [...(nota.devoluciones ?? [])]
+            .map((d) => ({
+              itemId: d.itemId,
+              cantidad: d.cantidad,
+              reponerStock: d.reponerStock ?? null,
+            }))
+            .sort((a, b) =>
+              `${a.itemId}|${a.cantidad}|${String(a.reponerStock)}`.localeCompare(
+                `${b.itemId}|${b.cantidad}|${String(b.reponerStock)}`,
+              ),
+            ),
+          via: nota.via,
+        }),
+        mensajeOtrosDatos: MENSAJE_NOTA_CREDITO_OTROS_DATOS,
+      },
+    });
   }
 
   /**

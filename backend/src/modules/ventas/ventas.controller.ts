@@ -65,10 +65,17 @@ export class VentasController {
    */
   @Post(':id/notas-credito')
   @RequiresPermiso('Ventas', 'Nota de crédito')
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description:
+      'UUID por intento de emisión. El reintento con la misma clave reproduce la nota ya emitida.',
+  })
   async crearNotaCredito(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
     @Body(EscalaMonedaPipe) dto: CreateNotaCreditoDto,
+    @ClaveIdempotencia() clave: string,
   ) {
     const u = req.user as JwtUser;
     const verTodas = await this.rbacService.resolverAlcanceDerivadoDeCaja(
@@ -89,6 +96,7 @@ export class VentasController {
         dto.devolucion.pagoId !== undefined
           ? { tipo: 'pago', pagoId: dto.devolucion.pagoId }
           : { tipo: 'sin_plata' },
+      clave,
     });
   }
 

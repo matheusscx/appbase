@@ -721,6 +721,40 @@ describe('VentaDetalleDrawer — resincroniza lo que calcula el backend', () => 
     expect(boton()).toBeDefined()
     documentoActual = VENTA
   })
+
+  const NC_QUE_ENTRO = { id: 'nc-1', totalFinal: '3000.0000', fecha: '2026-10-03', comentario: null }
+  const notasEnPantalla = (wrapper: Awaited<ReturnType<typeof montar>>) =>
+    wrapper.findAll('a').filter(a => a.text().trim() === 'Nota de crédito').length
+
+  it('la nota de "otros datos" (ADR-026): recarga el detalle y muestra la que sí entró', async () => {
+    const wrapper = await montar()
+    expect(notasEnPantalla(wrapper)).toBe(0)
+
+    documentoActual = { ...VENTA, notasCredito: [NC_QUE_ENTRO] } as unknown as typeof VENTA
+    wrapper.findComponent({ name: 'VentasNotaCreditoModal' }).vm.$emit('otrosDatos')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(notasEnPantalla(wrapper)).toBe(1)
+    documentoActual = VENTA
+  })
+
+  it('una nota reproducida que el detalle ya mostraba no se pinta dos veces', async () => {
+    // El detalle se recargó después del corte: ya trae la nota que entró.
+    documentoActual = { ...VENTA, notasCredito: [NC_QUE_ENTRO] } as unknown as typeof VENTA
+    const wrapper = await montar()
+    expect(notasEnPantalla(wrapper)).toBe(1)
+
+    wrapper.findComponent({ name: 'VentasNotaCreditoModal' }).vm.$emit('success', {
+      ...NC_QUE_ENTRO,
+      movimientoCajaId: null,
+      devoluciones: [],
+      repetida: true,
+    })
+    await nextTick()
+
+    expect(notasEnPantalla(wrapper)).toBe(1)
+    documentoActual = VENTA
+  })
 })
 
 /** Un documento tal como lo devuelve `GET /ventas/:id` en `documentos[]`. */

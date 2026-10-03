@@ -2086,6 +2086,7 @@ describe('Ventas (e2e)', () => {
     ): Promise<{ id: string }> => {
       const res = await request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({ ...(await devolucionDe(ventaId)), ...body });
       expect(res.status).toBe(201);

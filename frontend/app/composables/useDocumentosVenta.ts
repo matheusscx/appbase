@@ -240,6 +240,19 @@ export interface OpcionDevolucion {
   registro: RegistroCorreccion
 }
 
+/**
+ * El aviso de una nota de crédito que ya había entrado y el backend reprodujo
+ * (`repetida`): dice qué falta hacer, no solo qué pasó. El cajero vio un error,
+ * así que probablemente no entregó la plata (owner, 2026-10-03).
+ */
+export function avisoNotaRepetida(o: OpcionDevolucion | null, montoFormateado: string): string {
+  const base = 'Esta nota de crédito ya estaba emitida, no se emitió dos veces.'
+  if (!o || o.sinPlata) return base
+  if (o.mueveCaja)
+    return `${base} La salida de ${montoFormateado} ya está registrada en tu caja: entregale los billetes al cliente si todavía no lo hiciste.`
+  return `${base} Si todavía no devolviste ${montoFormateado} por ${o.metodo ?? 'ese pago'}, hacelo una sola vez.`
+}
+
 /** La clave de una opción en el selector: el pago, o la de "No vuelve plata". */
 export function claveOpcion(o: OpcionDevolucion): string {
   return o.sinPlata ? 'sin-plata' : (o.pagoId ?? '')

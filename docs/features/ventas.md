@@ -191,6 +191,37 @@ ofrece *Ver venta*. Un primer intento rechazado no deja rastro, así que el rein
 corre como nuevo. La clave es por usuario: la de otro no reproduce nada.
 El callback de Webpay llama al service sin clave; ya es idempotente por orden (ADR-009).
 
+### Una nota de crédito que se reintenta no se emite dos veces (2026-10-03)
+
+`POST /ventas/:id/notas-credito` exige la misma cabecera, por **intento de emisión**, y corre
+dentro de `IdempotenciaService.ejecutar` (operación `notaCredito.emitir`). Antes, un corte de red
+después de emitir y un segundo Confirmar emitían **dos** notas, y con un pago en efectivo sacaban
+el efectivo **dos** veces (medido: $600 por un intento de $300); solo lo frenaba el tope de la
+serie. La garantía se mide contra la **serie** de notas de la venta, no contra una sola
+(`idempotencia-venta.e2e-spec.ts`): misma clave = una nota y una salida de caja; dos intentos
+distintos con el mismo cuerpo = dos notas, porque la segunda devolución legítima no se frena.
+
+- **La huella** es la venta de la ruta más el cuerpo entero —monto, comentario, devolución y
+  `devoluciones` **ordenadas**: los mismos ítems en otro orden son la misma nota—. Cambiar
+  cualquier cosa después del corte, el comentario incluido, cae en "otros datos".
+- **El alcance de caja va antes del reclamo** (es autorización, como el PIN del garzón), y los
+  chequeos de estado y de topes van después, dentro de la operación: el reintento de una nota
+  que dejó la venta pagada reproduce, no rebota. Un rechazo (tope, caja, deadlock) se lleva el
+  reclamo, y el rastro del rechazo por plata se escribe igual (`conRastroDeRechazo`).
+- **Lo que ve el operador** (owner, 2026-10-03): el reintento igual se ve como una nota que salió
+  bien, más un aviso de qué falta hacer —con efectivo, que la salida ya está registrada y que
+  entregue los billetes si no lo hizo; con otro pago, que la devolución en ese medio se hace una
+  sola vez—. El de otros datos se frena, cierra el modal y recarga el detalle, que muestra la nota
+  que entró y el disponible nuevo: es el *Ver venta* de esta pantalla, porque el disponible del
+  modal quedó viejo. El intento vive por venta y por pestaña (ámbito `nc:<ventaId>`), sobrevive a
+  cerrar y reabrir el modal y muere con el éxito o con ese aviso.
+- **Costos asumidos:** recargar la página pierde la clave (el detalle recargado, al menos, ya
+  muestra la nota que entró); y una segunda nota idéntica emitida en la misma pestaña justo
+  después del corte se reproduce como la primera y pide un Confirmar más.
+- El reembolso de la pasarela llama al service sin clave: su nota ya es una por `REFUND`
+  (`correccion_venta_id`). El `REFUND` en sí **no** es idempotente por intento: entrada propia en
+  `agent/pendientes.md` § 6.
+
 **Un producto con número de serie se vende eligiendo la unidad (2026-10-03).** Quien vende
 decide cuál sale; el servidor no elige. La línea de un producto en modo `serie` **tiene que traer
 `unidadIds`**, con tantas unidades como `cantidad` (entera) y sin repetir dentro de la venta; en un

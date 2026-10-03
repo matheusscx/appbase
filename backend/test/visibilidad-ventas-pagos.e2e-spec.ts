@@ -427,6 +427,7 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
       expect(pagos).toHaveLength(1);
       const res = await request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({ monto, devolucion: { pagoId: pagos[0].pago_id } });
       expect(res.status).toBe(201);
@@ -512,6 +513,7 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
       expect(pagos).toHaveLength(1);
       const res = await request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({ monto, devolucion: { pagoId: pagos[0].pago_id } });
       expect(res.status).toBe(201);
@@ -754,6 +756,7 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
     const emitirNota = (token: string, ventaId: string) =>
       request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({ monto: '1000', devolucion: { sinPlata: true } });
     const anular = (token: string, ventaId: string) =>
