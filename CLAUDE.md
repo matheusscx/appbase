@@ -68,7 +68,9 @@ fiscal no se cuelga al final de una ronda de preguntas de producto.
 además el mercado ya resolvió el tema (POS maduros: Toast/Square/Lightspeed…) y el owner
 no es experto del dominio, **preguntar si quiere una pasada de investigación antes de
 diseñar** — nunca ejecutarla sin confirmación. El owner también puede pedirla cuando
-quiera. Lo que traiga es **insumo para cruzar y adaptar, no verdad a copiar**. Plantilla
+quiera. **Excepción:** la sesión que decide las dudas de otras sesiones por encargo del owner
+la lanza sin preguntar (owner, 2026-10-03); lo que decida con ella sigue sujeto a los límites
+de esta sección. Lo que traiga es **insumo para cruzar y adaptar, no verdad a copiar**. Plantilla
 y regla del cruce: `docs/agent/investigacion-mercado.md`.
 
 ## 🔧 Alcance del trabajo
