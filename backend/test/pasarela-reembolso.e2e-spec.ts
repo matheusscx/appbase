@@ -12,6 +12,7 @@ import { ProviderFactory } from '../src/modules/pasarela/providers/provider.fact
 import { VentasReembolsoHandler } from '../src/modules/ventas/reembolso-callback.handler';
 import { PasarelaOrden } from '../src/modules/pasarela/entities/pasarela-orden.entity';
 import { PasarelaTransaccion } from '../src/modules/pasarela/entities/pasarela-transaccion.entity';
+import { TransaccionesService } from '../src/modules/pasarela/services/transacciones.service';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris (Chile)
 const CLP = '550e8400-e29b-41d4-a716-446655440003';
@@ -600,6 +601,44 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
       expect(JSON.stringify(demasiado.body)).not.toMatch(/\d{4}/);
       expect(await correccionesDe(venta.id)).toEqual([]);
 
+      const resto = await notaPorElPago(venta.id, '30000', pagoId);
+      expect(resto.status).toBe(201);
+    });
+
+    // El vínculo se escribe dentro de la transacción de la corrección: si falla,
+    // la corrección se revierte con él y queda el estado del test de arriba
+    // ("el hook falló"), que cuenta una sola vez. Antes la corrección ya estaba
+    // commiteada y el REFUND sin ligar: el pago descontaba los 70.000 dos veces
+    // y los 30.000 que quedaban no salían ni por el POS ni por la pasarela.
+    it('si el vínculo con el REFUND falla, la corrección se revierte con él: el REFUND cuenta una sola vez y los 30.000 que quedan se pueden devolver', async () => {
+      const venta = await ventaOnline();
+      const ordenId = await ordenCobrada(venta.id);
+      const pagoId = await pagoDe(venta.id);
+      const vinculo = jest
+        .spyOn(app.get(TransaccionesService), 'vincularCorreccion')
+        .mockRejectedValueOnce(new Error('la conexión se cayó al ligar'));
+      let refund;
+      let llamadasAlVinculo: number;
+      try {
+        refund = await reembolsarAdmin(ordenId, { monto: '70000' });
+      } finally {
+        llamadasAlVinculo = vinculo.mock.calls.length;
+        vinculo.mockRestore();
+      }
+      // Lo que falló es el vínculo, y no otra cosa de la nota: sin esto el
+      // mismo warning saldría de cualquier error de la corrección.
+      expect(llamadasAlVinculo).toBe(1);
+      expect(refund.status).toBe(201);
+      const cuerpo = refund.body as RespuestaReembolso;
+      expect(cuerpo.reembolsoAprobado).toBe(true);
+      expect(cuerpo.warning).toContain('reembolso fue procesado');
+      expect(cuerpo.notaCreditoId).toBeUndefined();
+      expect(await refundsDe(ordenId)).toEqual([
+        { correccion_venta_id: null, estado: 'aprobada' },
+      ]);
+      expect(await correccionesDe(venta.id)).toEqual([]);
+
+      expect(await opcionDelPago(venta.id)).toBe('30000.0000');
       const resto = await notaPorElPago(venta.id, '30000', pagoId);
       expect(resto.status).toBe(201);
     });

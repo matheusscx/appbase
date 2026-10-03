@@ -347,16 +347,81 @@ describe('CobrosService', () => {
         monto: '1100',
         devoluciones: [{ itemId: 'item-1', cantidad: '2' }],
         usuarioId: 'user-1',
+        ligarCorreccion: expect.any(Function),
       });
-      // El REFUND que se acaba de registrar ('tx-1') queda ligado a la
-      // corrección que el handler creó, bajo el tenant del token.
-      expect(deps.transacciones.vincularCorreccion).toHaveBeenCalledWith(
-        't-1',
-        'tx-1',
-        'nc-1',
-      );
       expect(res.notaCreditoId).toBe('nc-1');
       expect(res.warning).toBeUndefined();
+    });
+
+    describe('el vínculo REFUND → corrección va dentro de la transacción de la corrección', () => {
+      type Ligar = (m: unknown, id: string) => Promise<void>;
+      const ligarDelEvento = (): Ligar =>
+        (
+          reembolsoHandler.onReembolsoAprobado.mock.calls[0][0] as {
+            ligarCorreccion: Ligar;
+          }
+        ).ligarCorreccion;
+
+      it('el evento trae cómo ligar: con el manager que le pasen liga el REFUND recién registrado (tx-1), bajo el tenant del token', async () => {
+        await service.reembolsar('t-1', 'orden-1', { monto: '1100' }, 'user-1');
+        const managerDeLaNota = { soy: 'la transacción de la nota' };
+
+        await ligarDelEvento()(managerDeLaNota, 'nc-1');
+
+        expect(deps.transacciones.vincularCorreccion).toHaveBeenCalledWith(
+          't-1',
+          'tx-1',
+          'nc-1',
+          managerDeLaNota,
+        );
+      });
+
+      it('si no ligó ninguna fila (affected != 1) lanza, para que la corrección se revierta', async () => {
+        await service.reembolsar('t-1', 'orden-1', { monto: '1100' }, 'user-1');
+        deps.transacciones.vincularCorreccion.mockResolvedValueOnce(false);
+
+        await expect(ligarDelEvento()({}, 'nc-1')).rejects.toThrow('tx-1');
+      });
+
+      it('CobrosService no liga por fuera después del handler: el único camino es el de adentro de la transacción', async () => {
+        // El handler de este test resuelve sin correr `ligarCorreccion`.
+        const res = await service.reembolsar(
+          't-1',
+          'orden-1',
+          { monto: '1100' },
+          'user-1',
+        );
+
+        expect(res.notaCreditoId).toBe('nc-1');
+        expect(deps.transacciones.vincularCorreccion).not.toHaveBeenCalled();
+      });
+
+      it('si el vínculo falla, el handler lanza (la corrección se revirtió): warning FIJO, sin notaCreditoId, y el detalle con orden y REFUND en el log', async () => {
+        const log = jest.spyOn(service['logger'], 'error').mockImplementation();
+        deps.transacciones.vincularCorreccion.mockRejectedValueOnce(
+          new Error('conexión caída a pg-interno'),
+        );
+        reembolsoHandler.onReembolsoAprobado.mockImplementationOnce(
+          async (evento: { ligarCorreccion: Ligar }) => {
+            await evento.ligarCorreccion({}, 'nc-1');
+            return { correccionVentaId: 'nc-1' };
+          },
+        );
+
+        const res = await service.reembolsar(
+          't-1',
+          'orden-1',
+          { monto: '1100' },
+          'user-1',
+        );
+
+        expect(res.notaCreditoId).toBeUndefined();
+        expect(res.warning).toContain('reembolso fue procesado');
+        expect(res.warning).not.toContain('pg-interno');
+        expect(log).toHaveBeenCalledWith(
+          expect.stringMatching(/orden-1.*tx-1.*pg-interno/),
+        );
+      });
     });
 
     describe('el tope por pago del lado de ventas, ANTES de llamar al proveedor', () => {
@@ -409,7 +474,6 @@ describe('CobrosService', () => {
       expect(reembolsoHandler.onReembolsoAprobado).toHaveBeenCalledWith(
         expect.objectContaining({ ventaId: 'venta-1', devoluciones: [] }),
       );
-      expect(deps.transacciones.vincularCorreccion).toHaveBeenCalledTimes(1);
       expect(res.notaCreditoId).toBe('nc-1');
     });
 
@@ -477,38 +541,6 @@ describe('CobrosService', () => {
         'user-1',
       );
       expect(res.warning).toContain('Venta no elegible para esta nota');
-    });
-
-    it('si la corrección se creó pero el vínculo falla: sigue la respuesta con su id y un warning FIJO (sin el texto del error)', async () => {
-      const log = jest.spyOn(service['logger'], 'error').mockImplementation();
-      deps.transacciones.vincularCorreccion.mockRejectedValueOnce(
-        new Error('conexión caída a pg-interno'),
-      );
-      const res = await service.reembolsar(
-        't-1',
-        'orden-1',
-        { monto: '1100' },
-        'user-1',
-      );
-      expect(res.notaCreditoId).toBe('nc-1');
-      expect(res.warning).toContain('reembolso fue procesado');
-      expect(res.warning).toContain('no se pudo ligar');
-      expect(res.warning).not.toContain('pg-interno');
-      expect(log).toHaveBeenCalledWith(expect.stringContaining('pg-interno'));
-    });
-
-    it('si el vínculo no tocó ninguna fila (affected != 1): no es silencioso, warning con la nota y log', async () => {
-      const log = jest.spyOn(service['logger'], 'error').mockImplementation();
-      deps.transacciones.vincularCorreccion.mockResolvedValueOnce(false);
-      const res = await service.reembolsar(
-        't-1',
-        'orden-1',
-        { monto: '1100' },
-        'user-1',
-      );
-      expect(res.notaCreditoId).toBe('nc-1');
-      expect(res.warning).toContain('no se pudo ligar');
-      expect(log).toHaveBeenCalledWith(expect.stringContaining('tx-1'));
     });
 
     it('por la llave de API no hay usuario: el evento lleva null, no una cadena vacía', async () => {

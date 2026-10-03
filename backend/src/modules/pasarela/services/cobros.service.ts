@@ -454,6 +454,11 @@ export class CobrosService {
    * commiteado y la plata ya volvió al cliente, así que un fallo aquí NUNCA
    * revierte el reembolso: se degrada a `warning` en la respuesta + log, y el
    * REFUND queda sin corrección ligada.
+   *
+   * El vínculo se escribe dentro de la transacción de la corrección
+   * (`ligarCorreccion`), así que hay dos estados y no tres: corrección ligada, o
+   * ni corrección ni vínculo. El tercero —corrección commiteada y REFUND sin
+   * ligar— hacía que el tope del pago descontara dos veces lo mismo.
    */
   private async aplicarPostReembolso(
     publico: Record<string, unknown>,
@@ -499,11 +504,25 @@ export class CobrosService {
         monto: dto.monto,
         devoluciones: dto.devoluciones ?? [],
         usuarioId: usuarioId ?? null,
+        ligarCorreccion: async (manager, id) => {
+          const ligado = await this.transacciones.vincularCorreccion(
+            ctx.orden.tenantId,
+            ctx.transaccionId,
+            id,
+            manager,
+          );
+          // Sin fila que ligar la corrección no puede quedar: sería el estado
+          // doble que esto cierra. Lanzar la revierte.
+          if (!ligado)
+            throw new Error(
+              `La corrección ${id} no tocó ninguna fila al ligarse al REFUND ${ctx.transaccionId}`,
+            );
+        },
       }));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.logger.error(
-        `La corrección falló tras reembolso aprobado (orden ${ctx.orden.ordenId}): ${msg}`,
+        `La corrección falló tras reembolso aprobado (orden ${ctx.orden.ordenId}, REFUND ${ctx.transaccionId}): ${msg}`,
       );
       // Al cliente (también el de la llave de API) solo llega un motivo de
       // negocio —un 400/422 que el servicio lanzó para ser leído—; el texto de un
@@ -517,32 +536,6 @@ export class CobrosService {
       };
     }
 
-    const ligadoAlRefund = await this.transacciones
-      .vincularCorreccion(
-        ctx.orden.tenantId,
-        ctx.transaccionId,
-        correccionVentaId,
-      )
-      .catch((e: unknown) => {
-        this.logger.error(
-          `No se pudo ligar la corrección ${correccionVentaId} al REFUND ${ctx.transaccionId} (orden ${ctx.orden.ordenId}): ${e instanceof Error ? e.message : String(e)}`,
-        );
-        return false;
-      });
-    if (!ligadoAlRefund) {
-      // Un REFUND sin vínculo es la señal de "falta la corrección": que quede
-      // así no puede ser silencioso, ni por un error ni por un UPDATE que no
-      // tocó ninguna fila.
-      this.logger.error(
-        `La corrección ${correccionVentaId} no quedó ligada al REFUND ${ctx.transaccionId} (orden ${ctx.orden.ordenId})`,
-      );
-      return {
-        ...publico,
-        notaCreditoId: correccionVentaId,
-        warning:
-          'El reembolso fue procesado y la nota de crédito se generó, pero no se pudo ligar al reembolso; el detalle quedó en el registro del servidor.',
-      };
-    }
     return { ...publico, notaCreditoId: correccionVentaId };
   }
 

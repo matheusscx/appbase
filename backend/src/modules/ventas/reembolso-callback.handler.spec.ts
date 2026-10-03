@@ -24,6 +24,7 @@ describe('VentasReembolsoHandler', () => {
     monto: '1100.0000',
     devoluciones: [] as { itemId: string; cantidad: string }[],
     usuarioId: 'user-1',
+    ligarCorreccion: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -103,6 +104,8 @@ describe('VentasReembolsoHandler', () => {
       // La plata ya volvió por el proveedor: corrige el único documento válido
       // de la venta y no mueve caja.
       via: { tipo: 'pasarela', documentoId: 'doc-boleta', pagoId: 'pago-1' },
+      // El vínculo con el REFUND corre adentro de la transacción de la nota.
+      enLaTransaccion: eventoBase.ligarCorreccion,
     });
     expect(ventasService.viaDeReembolsoPasarela).toHaveBeenCalledWith(
       't-1',

@@ -24,6 +24,128 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 ---
 
 
+## El vínculo `REFUND` → corrección se escribe dentro de la transacción de la nota (cerrada 2026-10-02)
+
+Sale de [`pendientes.md`](pendientes.md) § 1. **Cierra el doble conteo; la reparación del
+`REFUND` sin nota quedó abierta** como entrada propia en la § 3 de `pendientes.md` (botón
+"Generar nota", decidido por el owner el mismo día), porque es una regla de negocio nueva y
+fiscal.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Si el vínculo entre un `REFUND` y su corrección falla, ese reembolso queda contado dos veces
+  contra su pago, y no hay camino para volver a ligarlo** (backend; anotado 2026-10-02 por la
+  revisión de la tarea 16 del frente de emisión; medido el 2026-10-02).
+  **Decidido (orquestadora, 2026-10-02): el vínculo se escribe con el `manager` de la NC, dentro
+  de su transacción** (la opción A de abajo). Es atomicidad, no regla de negocio. ⛔ **Es fiscal y
+  va sola**: toca la creación de la nota de crédito, así que se toma en una sesión propia, con su
+  propia verificación, nunca de arrastre en otra tarea.
+  - **Qué pasa.** En una venta de un solo pago, el tope por pago de una devolución
+    (`devolvibleDelPagoUnico`, `venta-documentos.service.ts`) resta lo devuelto por las correcciones
+    que anotan el pago y, aparte, los `REFUND` aprobados **sin** `correccion_venta_id`. El hook de
+    `cobros.service.ts` (`aplicarPostReembolso`) crea la corrección en su propia transacción
+    (`crearNotaCredito` → `db.transaccion`, ya commiteada) y recién después liga el `REFUND` con un
+    `UPDATE` suelto (`TransaccionesService.vincularCorreccion`). Si ese `UPDATE` falla, quedan la
+    corrección **y** el `REFUND` sin ligar: el pago descuenta dos veces lo mismo.
+  - **Reproducido** con un caso temporal en `backend/test/pasarela-reembolso.e2e-spec.ts` (no
+    commiteado): venta online de $100.000 con un pago, `jest.spyOn(app.get(TransaccionesService),
+    'vincularCorreccion').mockRejectedValueOnce(...)` y un `REFUND` de $70.000. Quedan $30.000 por
+    devolver; lo medido:
+    - el reembolso: `201` con `notaCreditoId` y el `warning` de "no se pudo ligar";
+    - `pasarela_transacciones`: `[{"correccion_venta_id":null,"estado":"aprobada"}]`, con la
+      corrección de $70.000 (vía `pasarela`) ya creada;
+    - `GET /ventas/:id`: el pago **no ofrece** ninguna devolución con plata (sin la falla ofrece
+      $30.000, el control que ya existe en ese archivo);
+    - la nota del POS por $30.000 por ese pago: `400` "El monto supera lo que queda por devolver por
+      ese pago…";
+    - un segundo `REFUND` de $30.000 por la pasarela: `400` "…parte de ese dinero ya se devolvió…".
+    El tope queda en 100.000 − 70.000 − 70.000 < 0. Es el lado seguro (bloquea de más, nunca deja
+    salir de más), pero los $30.000 quedan sin vía para devolverse: ni por el POS ni por la pasarela.
+  - **Qué no toca, leído en el SQL.** El "Cobrado" del inicio (`resumen-negocio.service.ts`) resta
+    todo `REFUND` aprobado esté ligado o no, y no cuenta las correcciones con vía `pasarela`; el
+    listado de ventas (`total_reembolsado`) tampoco mira el vínculo, y el saldo solo lo mueven las
+    "sin plata". Con más de un pago el `REFUND` sin corrección no se resta de ningún pago. El daño
+    es solo el tope de un pago único.
+  - **Cuándo falla el `UPDATE`.** Es por PK sobre una fila que se insertó en el mismo request, así
+    que el `affected = 0` no tiene camino real (nadie borra ni liga esa fila en el medio). Lo que
+    queda es infraestructura: la conexión que se cae, el pool agotado o el proceso que muere
+    (deploy, OOM) entre el commit de la corrección y el `UPDATE`. En ese último caso ni siquiera
+    hay `warning`: el request muere.
+  - **Por qué no hay re-ligado.** La corrección no guarda a qué `REFUND` corresponde: solo un
+    comentario libre ("NC por reembolso orden …"), y una orden puede tener varios `REFUND`
+    parciales. Reconstruir el vínculo al leer, o al próximo reembolso, sería adivinar por monto.
+  - **La decidida (A) — ligar dentro de la transacción de la corrección.** El handler recibe el
+    `transaccionId` del `REFUND` y el `UPDATE` corre con el mismo `manager` antes del commit. Si el
+    `UPDATE` falla, la corrección se revierte y el `REFUND` queda sin ligar y **sin** corrección: el
+    caso "el hook falló", que ya cuenta una sola vez y ya tiene test. El estado doble deja de existir
+    y la cuenta del tope no cambia. Costo: toca la creación de la nota de crédito (cruza de `ventas`
+    a `pasarela_transacciones`, la dirección permitida del borde).
+  - **Condición para cerrarla, además de "cuenta una sola vez".** Con A, si la transacción falla
+    queda un `REFUND` aprobado **sin** corrección, y el owner decidió que todo reembolso deje
+    registro. Quien la tome tiene que medir que ese estado quede **visible y reintentable**: que el
+    webhook reintente, o que el `warning` lleve el id de la orden y haya cómo volver a pedir la
+    corrección. Hoy el `warning` de "la nota de crédito falló" no trae la orden, y no hay camino
+    para pedir de nuevo la corrección de un `REFUND` ya aprobado.
+  - **Descartada (B) — dejar el `warning`.** Es el lado seguro y el log trae los dos ids, pero el
+    arreglo queda en un `UPDATE` a mano por soporte; mientras no se haga, esos pesos no se pueden
+    devolver por el sistema.
+
+### Qué se hizo
+
+La opción A, como la decidió la orquestadora. `CobrosService.aplicarPostReembolso` ya no liga
+después del handler: le pasa en el evento `ligarCorreccion(manager, id)`, que llama a
+`TransaccionesService.vincularCorreccion` con ese `manager` (nuevo parámetro opcional, el mismo
+patrón que `registrar` y `listarPorOrden`) y **lanza si no ligó ninguna fila**. El handler de
+ventas se lo pasa a `crearNotaCredito` como `enLaTransaccion`, que corre como lo último dentro
+de `db.transaccion`, antes del commit. Si lanza, la nota se revierte y el caso cae en el
+`catch` que ya existía ("la corrección falló"): `warning` sin `notaCreditoId` y log con orden
+y `REFUND` (el id del `REFUND` se agregó a ese log).
+
+**Por qué un callback y no el `transaccionId` en el evento.** La entrada decía que el handler
+recibe el id del `REFUND`; así, ventas tendría que escribir en `pasarela_transacciones` y la
+pasarela exportarle `TransaccionesService`, que hoy no exporta. Con el callback la tabla sigue
+teniendo un solo dueño (`CobrosService`), el handler sigue sin tocarla (el contrato del
+registry lo decía y lo sigue diciendo) y el `UPDATE` corre igual con el `manager` de la nota.
+
+Se fue la rama "la nota se generó pero no se pudo ligar" (respuesta con `notaCreditoId` **y**
+`warning`): ese estado ya no existe.
+
+**La condición de cierre, medida.** Visible: a medias (toast del `warning`; log con orden y
+`REFUND`; el historial de la orden no marca el `REFUND` sin nota). Reintentable: no. Se le
+preguntó al owner con la escena; eligió el botón "Generar nota" y commitear este arreglo ya,
+con la reparación como frente propio (§ 3 de `pendientes.md`).
+
+### Qué lo fija
+
+- E2e en `pasarela-reembolso.e2e-spec.ts`: con `vincularCorreccion` fallando
+  (`jest.spyOn(...).mockRejectedValueOnce`), un `REFUND` de $70.000 sobre una venta online de
+  $100.000 responde `201` con `warning` y **sin** `notaCreditoId`; el `REFUND` queda aprobado
+  y sin ligar, no hay corrección, el pago ofrece $30.000 y la nota del POS por $30.000 pasa.
+  Con el código anterior el mismo test falla (medido: la respuesta traía `notaCreditoId`).
+- Unitarios: `cobros.service.spec.ts` (el `ligarCorreccion` del evento liga ese `REFUND` con
+  el `manager` que le pasan; lanza si no tocó fila; `CobrosService` no liga por fuera; un
+  vínculo que falla da el `warning` fijo sin `notaCreditoId` y el log con orden y `REFUND`),
+  `transacciones.service.spec.ts` (con `manager`, escribe con ese y no con el repo del
+  servicio) y `reembolso-callback.handler.spec.ts` (el handler pasa `enLaTransaccion`).
+- Mutantes: `crearNotaCredito` sin correr el callback rompe 7 tests de
+  `pasarela-reembolso.e2e-spec.ts`; `ligarCorreccion` sin lanzar cuando no ligó rompe 1 unitario
+  ("lanza si no ligó ninguna fila"). Los dos revertidos.
+- `domain-reviewer` LIMPIO, con cinco dudas delegadas (orden de locks, efectos fuera de la
+  transacción antes del callback, reintento por deadlock, consumidores del estado eliminado, y
+  si el e2e nuevo podía pasar por otra razón). Por la última, el e2e afirma además que el spy
+  del vínculo se llamó una vez: sin eso, cualquier otra falla de la nota daba el mismo
+  `warning`. Dejó además una advertencia que no se tomó: ningún unitario de `ventas.service`
+  fija que `enLaTransaccion` corre con `(manager, nc.id)` como último paso de la transacción;
+  lo cubren los e2e (el mutante que no lo corre rompe 7). Sin capa HTTP tocada,
+  `api-security-reviewer` no aplica.
+- Gate, con `entorno.sh db` (base vacía): `test:e2e` completo 1663 pasan y 6 saltados
+  preexistentes, exit 0; unit backend 3504/3504; lint y typecheck limpios; frontend (sin
+  cambios) build, vitest 1863/1863, `typecheck:ratchet` y `design:check` limpios. Después de
+  agregar la aserción del spy, `pasarela-reembolso.e2e-spec.ts` 19/19.
+
+---
+
+
 ## Tres índices únicos que vivían solo en `startup-pos.sql` ya están en sus entities (cerrada 2026-10-02)
 
 Sale de [`pendientes.md`](pendientes.md) § 1.

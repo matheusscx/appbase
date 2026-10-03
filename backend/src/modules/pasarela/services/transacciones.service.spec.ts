@@ -1,4 +1,4 @@
-import { IsNull } from 'typeorm';
+import { IsNull, type EntityManager } from 'typeorm';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { TransaccionesService } from './transacciones.service';
@@ -78,6 +78,22 @@ describe('TransaccionesService', () => {
       },
       { correccionVentaId: 'venta-nc' },
     );
+  });
+
+  it('vincularCorreccion: con un manager escribe con ESE (la transacción de la corrección), no con el repo del servicio', async () => {
+    const repoDeLaTx = { update: jest.fn().mockResolvedValue({ affected: 1 }) };
+    const manager = {
+      getRepository: jest.fn().mockReturnValue(repoDeLaTx),
+    } as unknown as EntityManager;
+
+    await service.vincularCorreccion('t-1', 'tx-refund', 'venta-nc', manager);
+
+    expect(manager.getRepository).toHaveBeenCalledWith(PasarelaTransaccion);
+    expect(repoDeLaTx.update).toHaveBeenCalledWith(
+      expect.objectContaining({ transaccionId: 'tx-refund', tenantId: 't-1' }),
+      { correccionVentaId: 'venta-nc' },
+    );
+    expect(repo.update).not.toHaveBeenCalled();
   });
 
   it('vincularCorreccion: avisa con false si no ligó ninguna fila (otro tenant, ya ligada o borrada)', async () => {

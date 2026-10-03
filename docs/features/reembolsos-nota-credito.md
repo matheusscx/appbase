@@ -81,11 +81,14 @@ Response (200): orden pública + extras
   que el DTO no declara, `forbidNonWhitelisted`). Vale igual para la API externa
   (`POST /pasarela/api/cobros/:ordenId/reembolsos`), que usa el mismo DTO.
 - Si la corrección falla después de un reembolso aprobado, **el reembolso NO se
-  revierte** (la plata ya volvió por el proveedor): la respuesta trae `warning`, el
-  error queda en logs y el REFUND queda **sin** `correccion_venta_id`. Eso —un REFUND
-  aprobado de una orden con venta y ese campo nulo— es la señal de que falta la
-  corrección. Si la corrección se creó pero no se pudo ligar al REFUND, la respuesta
-  trae `notaCreditoId` **y** `warning`.
+  revierte** (la plata ya volvió por el proveedor): la respuesta trae `warning` (sin
+  `notaCreditoId`), el error queda en logs con la orden y el REFUND, y el REFUND queda
+  **sin** `correccion_venta_id`. Eso —un REFUND aprobado de una orden con venta y ese
+  campo nulo— es la señal de que falta la corrección. Que no se pueda ligar al REFUND
+  cuenta como que la corrección falló: se revierte con el vínculo (ver
+  "El vínculo REFUND → corrección" en [Backend](#backend)). Todavía no hay cómo generar
+  la nota que faltó: el botón "Generar nota" está decidido y pendiente
+  ([`pendientes.md`](../agent/pendientes.md) § 3).
 - Una orden sin venta vinculada (`orden.venta_id` null) no tiene lado de ventas que
   corregir: se reembolsa sin corrección y **sin aviso** (es legítimo). Solo si se pidieron
   `devoluciones` responde `warning` (no hay venta donde aplicarlas).
@@ -282,16 +285,21 @@ Response (200): orden pública + extras
   ejecutado por el proveedor). Corre para **todo** REFUND aprobado de una orden con
   venta, pida devoluciones o no.
 - **El vínculo REFUND → corrección** (2026-10-02): el handler **no** toca
-  `pasarela_transacciones`; devuelve `{ correccionVentaId }` y `CobrosService`, que es
-  dueño de esa tabla, lo escribe con `TransaccionesService.vincularCorreccion`: un
-  `UPDATE` chico, filtrado por `tenant_id` y por el `transaccion_id` del REFUND, que
-  escribe una sola vez (`correccion_venta_id IS NULL`) y no toca `estado` ni nada de lo
-  que informó la pasarela. Es lo único que se escribe sobre una fila ya registrada: el
-  vínculo nace **después** del commit del REFUND porque la corrección la crea el hook. El
-  evento (`ReembolsoAprobadoEvento`) no lleva el id del REFUND: el handler no lo necesita.
-  `vincularCorreccion` devuelve si ligó una fila: si no (error o `affected != 1`) la respuesta
-  trae `notaCreditoId` **y** `warning`, y queda en el log — un REFUND sin vínculo nunca es
-  silencioso.
+  `pasarela_transacciones`. `CobrosService`, que es dueño de esa tabla, le pasa en el
+  evento cómo ligar (`ReembolsoAprobadoEvento.ligarCorreccion`), y el handler se lo da a
+  `crearNotaCredito` como `enLaTransaccion`: corre **dentro de la transacción de la
+  corrección, con su `manager`, antes del commit**. Escribe con
+  `TransaccionesService.vincularCorreccion`: un `UPDATE` chico, filtrado por `tenant_id` y
+  por el `transaccion_id` del REFUND, que escribe una sola vez (`correccion_venta_id IS
+  NULL`) y no toca `estado` ni nada de lo que informó la pasarela. Es lo único que se
+  escribe sobre una fila ya registrada: el vínculo nace **después** del commit del REFUND
+  porque la corrección la crea el hook. Si el `UPDATE` falla o no liga ninguna fila
+  (`affected != 1`), `ligarCorreccion` lanza y **la corrección se revierte con él**: quedan
+  dos estados, ligada o sin corrección, y nunca el tercero. **Por qué** (cerrado el
+  2026-10-02): con el `UPDATE` suelto, después del commit de la corrección, un vínculo
+  fallido dejaba la corrección **y** el REFUND sin ligar, y el tope del pago único
+  (`devolvibleDelPagoUnico`) restaba las dos — los $30.000 que quedaban de una venta de
+  $100.000 con un REFUND de $70.000 no salían ni por el POS ni por la pasarela.
 - **Usuario `null` por la llave de API**: la ruta m2m no tiene usuario, así que el evento y
   `CrearNotaCreditoParams.usuarioId` son `string | null`. Solo lo consume el movimiento de
   stock (`movimientos_inventario.usuario_id`, uuid nulo); mover caja exige usuario y esa rama
@@ -623,18 +631,21 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
 - `nota-credito-por-pais.e2e-spec.ts`: la forma del catálogo de documentos.
 - `reembolso-callback.handler.spec.ts`: registro en el registry y delegación; todo
   reembolso crea la corrección, también el que no trae devoluciones.
-- `cobros.service.spec.ts`: hook post-commit (evento completo, la corrección se liga
-  al REFUND, warning sin revertir —con la corrección sin ligar—, rechazado no dispara,
-  orden sin venta sin aviso, sin handler, usuario `null` por la llave de API, el texto de un
-  error que no es de negocio no llega al cliente, un vínculo que no tocó fila no es silencioso).
-- `transacciones.service.spec.ts`: `vincularCorreccion` acotado al tenant, escribe una vez y
-  devuelve si ligó una fila.
+- `cobros.service.spec.ts`: hook post-commit (evento completo, warning sin revertir,
+  rechazado no dispara, orden sin venta sin aviso, sin handler, usuario `null` por la llave de
+  API, el texto de un error que no es de negocio no llega al cliente) y el vínculo: el
+  `ligarCorreccion` del evento liga ese REFUND con el `manager` que le pasan, lanza si no tocó
+  ninguna fila, y `CobrosService` no liga por fuera del handler.
+- `transacciones.service.spec.ts`: `vincularCorreccion` acotado al tenant, escribe una vez,
+  devuelve si ligó una fila y, con un `manager`, escribe con ese.
 - `create-reembolso.dto.spec.ts`: validación anidada del DTO y el tope de 200 `devoluciones`.
 - `pasarela-reembolso.e2e-spec.ts` (2026-10-02): por la API real, con el proveedor doblado:
   el REFUND aprobado sin devoluciones deja la nota sobre la boleta y `correccion_venta_id`;
   dos reembolsos parciales, cada uno con su nota; `generarNotaCredito` da 400 por la ruta del
   admin y por la de la llave de API; la orden sin venta se reembolsa sin nota ni aviso; y la
-  corrección que falla deja el REFUND aprobado, sin vínculo y con `warning`; y, por la llave de
+  corrección que falla deja el REFUND aprobado, sin vínculo y con `warning`; un vínculo que
+  falla revierte la corrección y el pago ofrece los $30.000 que quedan (no los descuenta dos
+  veces); y, por la llave de
   API, una devolución que repone stock de un producto propio: la nota sale, el REFUND queda
   ligado y el movimiento de stock queda con `usuario_id` NULL (por la ruta del admin lleva el
   usuario del token).

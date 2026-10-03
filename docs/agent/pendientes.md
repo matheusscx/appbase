@@ -71,63 +71,6 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
-- [ ] **Si el vínculo entre un `REFUND` y su corrección falla, ese reembolso queda contado dos veces
-  contra su pago, y no hay camino para volver a ligarlo** (backend; anotado 2026-10-02 por la
-  revisión de la tarea 16 del frente de emisión; medido el 2026-10-02).
-  **Decidido (orquestadora, 2026-10-02): el vínculo se escribe con el `manager` de la NC, dentro
-  de su transacción** (la opción A de abajo). Es atomicidad, no regla de negocio. ⛔ **Es fiscal y
-  va sola**: toca la creación de la nota de crédito, así que se toma en una sesión propia, con su
-  propia verificación, nunca de arrastre en otra tarea.
-  - **Qué pasa.** En una venta de un solo pago, el tope por pago de una devolución
-    (`devolvibleDelPagoUnico`, `venta-documentos.service.ts`) resta lo devuelto por las correcciones
-    que anotan el pago y, aparte, los `REFUND` aprobados **sin** `correccion_venta_id`. El hook de
-    `cobros.service.ts` (`aplicarPostReembolso`) crea la corrección en su propia transacción
-    (`crearNotaCredito` → `db.transaccion`, ya commiteada) y recién después liga el `REFUND` con un
-    `UPDATE` suelto (`TransaccionesService.vincularCorreccion`). Si ese `UPDATE` falla, quedan la
-    corrección **y** el `REFUND` sin ligar: el pago descuenta dos veces lo mismo.
-  - **Reproducido** con un caso temporal en `backend/test/pasarela-reembolso.e2e-spec.ts` (no
-    commiteado): venta online de $100.000 con un pago, `jest.spyOn(app.get(TransaccionesService),
-    'vincularCorreccion').mockRejectedValueOnce(...)` y un `REFUND` de $70.000. Quedan $30.000 por
-    devolver; lo medido:
-    - el reembolso: `201` con `notaCreditoId` y el `warning` de "no se pudo ligar";
-    - `pasarela_transacciones`: `[{"correccion_venta_id":null,"estado":"aprobada"}]`, con la
-      corrección de $70.000 (vía `pasarela`) ya creada;
-    - `GET /ventas/:id`: el pago **no ofrece** ninguna devolución con plata (sin la falla ofrece
-      $30.000, el control que ya existe en ese archivo);
-    - la nota del POS por $30.000 por ese pago: `400` "El monto supera lo que queda por devolver por
-      ese pago…";
-    - un segundo `REFUND` de $30.000 por la pasarela: `400` "…parte de ese dinero ya se devolvió…".
-    El tope queda en 100.000 − 70.000 − 70.000 < 0. Es el lado seguro (bloquea de más, nunca deja
-    salir de más), pero los $30.000 quedan sin vía para devolverse: ni por el POS ni por la pasarela.
-  - **Qué no toca, leído en el SQL.** El "Cobrado" del inicio (`resumen-negocio.service.ts`) resta
-    todo `REFUND` aprobado esté ligado o no, y no cuenta las correcciones con vía `pasarela`; el
-    listado de ventas (`total_reembolsado`) tampoco mira el vínculo, y el saldo solo lo mueven las
-    "sin plata". Con más de un pago el `REFUND` sin corrección no se resta de ningún pago. El daño
-    es solo el tope de un pago único.
-  - **Cuándo falla el `UPDATE`.** Es por PK sobre una fila que se insertó en el mismo request, así
-    que el `affected = 0` no tiene camino real (nadie borra ni liga esa fila en el medio). Lo que
-    queda es infraestructura: la conexión que se cae, el pool agotado o el proceso que muere
-    (deploy, OOM) entre el commit de la corrección y el `UPDATE`. En ese último caso ni siquiera
-    hay `warning`: el request muere.
-  - **Por qué no hay re-ligado.** La corrección no guarda a qué `REFUND` corresponde: solo un
-    comentario libre ("NC por reembolso orden …"), y una orden puede tener varios `REFUND`
-    parciales. Reconstruir el vínculo al leer, o al próximo reembolso, sería adivinar por monto.
-  - **La decidida (A) — ligar dentro de la transacción de la corrección.** El handler recibe el
-    `transaccionId` del `REFUND` y el `UPDATE` corre con el mismo `manager` antes del commit. Si el
-    `UPDATE` falla, la corrección se revierte y el `REFUND` queda sin ligar y **sin** corrección: el
-    caso "el hook falló", que ya cuenta una sola vez y ya tiene test. El estado doble deja de existir
-    y la cuenta del tope no cambia. Costo: toca la creación de la nota de crédito (cruza de `ventas`
-    a `pasarela_transacciones`, la dirección permitida del borde).
-  - **Condición para cerrarla, además de "cuenta una sola vez".** Con A, si la transacción falla
-    queda un `REFUND` aprobado **sin** corrección, y el owner decidió que todo reembolso deje
-    registro. Quien la tome tiene que medir que ese estado quede **visible y reintentable**: que el
-    webhook reintente, o que el `warning` lleve el id de la orden y haya cómo volver a pedir la
-    corrección. Hoy el `warning` de "la nota de crédito falló" no trae la orden, y no hay camino
-    para pedir de nuevo la corrección de un `REFUND` ya aprobado.
-  - **Descartada (B) — dejar el `warning`.** Es el lado seguro y el log trae los dos ids, pero el
-    arreglo queda en un `UPDATE` a mano por soporte; mientras no se haga, esos pesos no se pueden
-    devolver por el sistema.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -298,6 +241,33 @@ revisión independiente no lo pudo reproducir, con razón.
   selectores de configuración y de inventario van con búsqueda en el servidor igual.
   Contexto: el filtro de pausados ya se movió a la query (resueltos, *"el pausado ocupaba uno
   de esos 100 lugares"*); esto es lo que quedó. Conviene hacerlo junto con el refresco del salón.
+
+- [ ] **Un `REFUND` aprobado que quedó sin nota de crédito no tiene cómo generarla: botón
+  "Generar nota"** (backend + frontend; ⛔ **fiscal, frente propio**: emite un documento, así que
+  va en su sesión, con su verificación, nunca de arrastre — `CLAUDE.md`, ADR-010). Sale del
+  cierre del doble conteo del vínculo `REFUND` → corrección ([`resueltos.md`](resueltos.md),
+  2026-10-02): desde ese día el vínculo se escribe dentro de la transacción de la nota, así que
+  si cualquiera de los dos falla queda un `REFUND` aprobado **sin** corrección — la plata ya
+  volvió por Webpay, el pago la cuenta una sola vez, y la boleta queda sin corregir. Ese estado
+  ya existía (la nota que falla entera); lo que falta es repararlo.
+  **Decidido (owner, 2026-10-02, por pregunta con la escena del reembolso de $70.000 sobre una
+  compra online de $100.000 y tres opciones: botón, marcar y que lo arregle soporte, reintento
+  automático):** en el historial de la orden, el reembolso sin nota aparece **marcado**, con un
+  botón **"Generar nota"** que emite la corrección por el monto de ese `REFUND`. Descartados:
+  dejarlo a soporte (cada caso manual y la boleta sin corregir mientras tanto) y el reintento
+  automático (choca con la regla del owner de que la app no repita sola lo que falló).
+  - **Medido hoy (2026-10-02).** Visible a medias: el toast del `ReembolsoModal` muestra el
+    `warning` (sin `notaCreditoId`) y el log trae orden y `REFUND`; el historial de la orden
+    (`OrdenDetalleDrawer`) lista el `REFUND` sin decir que le falta la nota. Reintentable: no —
+    no hay endpoint, y volver a reembolsar saca la plata otra vez por el proveedor.
+  - **Lo que hay que diseñar en su sesión.** (1) Idempotencia: dos clics no pueden emitir dos
+    notas. El vínculo ya ayuda (`correccion_venta_id IS NULL` escribe una sola vez y, dentro de
+    la transacción, revierte la segunda), pero el contrato visible —qué ve el segundo clic— es
+    del owner; ver la entrada gemela "Una nota de crédito que se reintenta se emite dos veces"
+    en la § 6. (2) Los ítems a devolver se eligen de nuevo: los del pedido original no quedaron
+    guardados (el `request` del `REFUND` es el del proveedor, no el DTO). (3) Permiso: el mismo
+    `Pasarelas:Reembolsar` u otro. (4) Reusar `CobrosService.aplicarPostReembolso` —que ya arma
+    el evento con `ligarCorreccion`— y no un camino paralelo.
 
 - [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
   medido 2026-08-22 al cerrar la anulación; el owner decidió que **va aparte**, no de

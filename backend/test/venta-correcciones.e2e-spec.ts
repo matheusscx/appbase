@@ -1555,6 +1555,8 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
         monto,
         devoluciones: [],
         usuarioId: await usuarioIdAdmin(),
+        // Llamado directo, sin CobrosService: no hay REFUND que ligar.
+        ligarCorreccion: async () => {},
       });
     const usuarioIdAdmin = async (): Promise<string> => {
       const u: { usuario_id: string }[] = await ds.query(
@@ -1736,6 +1738,7 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
             [ADMIN.email],
           )
         )[0].usuario_id,
+        ligarCorreccion: async () => {},
       });
     const ventaDe = async (pagos: { metodoPagoId: string; monto: string }[]) =>
       vender({ lineas: lineas100k(), pagos });

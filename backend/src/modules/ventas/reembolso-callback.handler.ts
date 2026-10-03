@@ -64,6 +64,9 @@ export class VentasReembolsoHandler
         evento.ventaId,
         evento.ordenId,
       ),
+      // El REFUND se liga antes del commit de la nota: si no se puede, la nota
+      // tampoco queda.
+      enLaTransaccion: evento.ligarCorreccion,
     });
     return { correccionVentaId: nc.id };
   }

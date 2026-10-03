@@ -206,6 +206,15 @@ export interface CrearNotaCreditoParams {
   via: ViaCorreccion;
   /** Solo el endpoint manual: exige venta pagada/pagada_parcial, o pendiente con la vía `sin_plata`. */
   validarVentaElegible?: boolean;
+  /**
+   * Lo último que corre dentro de la transacción de la nota, antes del commit,
+   * con su `manager` y su id. Si lanza, la nota se revierte. Lo usa el reembolso
+   * de la pasarela para ligar el REFUND (`ReembolsoAprobadoEvento.ligarCorreccion`).
+   */
+  enLaTransaccion?: (
+    manager: EntityManager,
+    correccionVentaId: string,
+  ) => Promise<void>;
 }
 
 export interface NotaCreditoCreada {
@@ -2743,6 +2752,8 @@ export class VentasService {
           });
         movimientoCajaId = movimiento.id;
       }
+
+      await params.enLaTransaccion?.(manager, nc.id);
 
       return {
         id: nc.id,

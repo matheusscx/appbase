@@ -94,13 +94,20 @@ export class TransaccionesService {
    * pasarela informó. Escribe una sola vez (`correccion_venta_id IS NULL`) y
    * acotado al tenant del token, no al id suelto. Devuelve si ligó una fila: `false`
    * es que no había ninguna que ligar (otro tenant, ya ligada, borrada).
+   *
+   * Corre con el `manager` de la transacción que crea la corrección, antes de su
+   * commit: corrección y vínculo existen los dos o ninguno.
    */
   async vincularCorreccion(
     tenantId: string,
     transaccionId: string,
     correccionVentaId: string,
+    manager?: EntityManager,
   ): Promise<boolean> {
-    const res = await this.repo.update(
+    const repo = manager
+      ? manager.getRepository(PasarelaTransaccion)
+      : this.repo;
+    const res = await repo.update(
       {
         transaccionId,
         tenantId,

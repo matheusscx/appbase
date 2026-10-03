@@ -28,6 +28,17 @@ export interface ReembolsoAprobadoEvento {
    * uuid) y con él toda la corrección.
    */
   usuarioId: string | null;
+  /**
+   * Liga el REFUND con la corrección. El handler lo corre con el `manager` de la
+   * transacción que crea la corrección, antes de su commit, y si lanza la
+   * corrección se revierte: una corrección commiteada con el REFUND sin ligar
+   * descontaba dos veces lo mismo del tope del pago. Lanza también si no ligó
+   * ninguna fila.
+   */
+  ligarCorreccion: (
+    manager: EntityManager,
+    correccionVentaId: string,
+  ) => Promise<void>;
 }
 
 /**
@@ -39,8 +50,9 @@ export interface ReembolsoAprobadoEvento {
  * interfaz. Los errores del handler los captura el caller (CobrosService) — el
  * reembolso nunca se revierte.
  *
- * El handler NO escribe en `pasarela_transacciones`: devuelve el id y
- * `CobrosService`, dueño de esa tabla, lo liga al REFUND.
+ * El handler NO escribe en `pasarela_transacciones`: `CobrosService`, dueño de
+ * esa tabla, le pasa en el evento cómo ligar el REFUND (`ligarCorreccion`), y el
+ * handler lo corre dentro de la transacción de la corrección.
  */
 export interface ReembolsoCallbackHandler {
   /**

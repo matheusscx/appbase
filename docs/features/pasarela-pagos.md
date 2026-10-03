@@ -77,7 +77,9 @@ REFUND queda ligado a ella en `pasarela_transacciones.correccion_venta_id`. El r
 admin acepta además `devoluciones?: [{itemId, cantidad}]` (opcional, ítems que se acreditan
 en esa nota). **`generarNotaCredito` ya no existe**: mandarlo da 400, por esta ruta y por la
 de la API externa (mismo DTO). La respuesta puede traer `notaCreditoId` o `warning` (la
-corrección falló: el reembolso NO se revierte y el REFUND queda sin `correccion_venta_id`).
+corrección falló: el reembolso NO se revierte y el REFUND queda sin `correccion_venta_id`). El
+vínculo se escribe dentro de la transacción de la corrección: si no se puede ligar, la
+corrección tampoco queda.
 Una orden sin venta se reembolsa sin corrección y sin aviso. **Antes de llamar al proveedor**, un
 reembolso de una orden con venta respeta el tope por pago de las notas de crédito (2026-10-02): lo que
 el pago de la venta todavía puede devolver, descontadas las notas "por el pago" hechas desde el POS y los reembolsos aprobados que todavía no

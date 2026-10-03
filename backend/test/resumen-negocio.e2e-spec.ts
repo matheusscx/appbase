@@ -846,6 +846,8 @@ describe('Resumen del negocio (e2e)', () => {
             monto: '1785',
             devoluciones: [],
             usuarioId: await usuarioIdAdmin(),
+            // Llamado directo, sin CobrosService: no liga ningún REFUND.
+            ligarCorreccion: async () => {},
           });
         expect(notaCreditoId).toBeDefined();
         const despues = await leer();
@@ -1066,6 +1068,7 @@ describe('Resumen del negocio (e2e)', () => {
             monto: '1785',
             devoluciones: [],
             usuarioId: await usuarioIdAdmin(),
+            ligarCorreccion: async () => {},
           });
           const despues = await leerAmbos();
 
