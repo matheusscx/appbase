@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { LARGO_RECEPTOR } from '~/composables/useReceptor'
 import type { TableColumn } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -18,6 +19,8 @@ interface Tercero {
   correo: string | null
   telefono: string | null
   direccion: string | null
+  giro: string | null
+  comuna: string | null
   activo: boolean
   /** El plazo en días para vencer una compra suya (spec compras-deuda-proveedor
    *  § 2, decisión 4). Null = 30 días. */
@@ -59,6 +62,8 @@ const emptyForm = () => ({
   correo: '',
   telefono: '',
   direccion: '',
+  giro: '',
+  comuna: '',
   activo: true,
   plazoPagoDias: '',
 })
@@ -151,6 +156,8 @@ function abrirEditar(tercero: Tercero) {
     correo: tercero.correo ?? '',
     telefono: tercero.telefono ?? '',
     direccion: tercero.direccion ?? '',
+    giro: tercero.giro ?? '',
+    comuna: tercero.comuna ?? '',
     activo: tercero.activo,
     plazoPagoDias: tercero.plazoPagoDias != null ? String(tercero.plazoPagoDias) : '',
   }
@@ -169,6 +176,8 @@ async function guardar() {
       correo: form.value.correo || undefined,
       telefono: form.value.telefono || undefined,
       direccion: form.value.direccion || undefined,
+      giro: form.value.giro || undefined,
+      comuna: form.value.comuna || undefined,
       activo: form.value.activo,
       // Distinto del resto de los campos de este body (`|| undefined`, "no
       // se toca"): `plazoPagoDias` vacío significa "volvé a 30 días" (spec
@@ -451,6 +460,20 @@ const columns: TableColumn<Tercero>[] = [
               </UFormField>
               <UFormField label="Dirección">
                 <UTextarea v-model="form.direccion" :rows="2" />
+              </UFormField>
+              <UFormField
+                label="Giro"
+                help="Lo precarga la factura en el POS. El SII acepta hasta 40 caracteres."
+                :hint="`${form.giro.length}/${LARGO_RECEPTOR.giro}`"
+              >
+                <UInput
+                  v-model="form.giro"
+                  :maxlength="LARGO_RECEPTOR.giro"
+                  placeholder="Venta de artículos de ferretería"
+                />
+              </UFormField>
+              <UFormField label="Comuna" :hint="`${form.comuna.length}/${LARGO_RECEPTOR.comuna}`">
+                <UInput v-model="form.comuna" :maxlength="LARGO_RECEPTOR.comuna" placeholder="Santiago" />
               </UFormField>
               <UFormField label="Plazo de pago (días)" help="Vacío = 30 días (spec compras-deuda-proveedor § 2)">
                 <UInput

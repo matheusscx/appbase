@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { CustomerForm } from './ClienteForm.vue'
+import type { ReglaReceptor } from '~/composables/useReceptor'
 
+defineProps<{ regla?: ReglaReceptor }>()
 const open = defineModel<boolean>('open', { required: true })
 const customer = defineModel<CustomerForm>('customer', { required: true })
 </script>
@@ -12,7 +14,7 @@ const customer = defineModel<CustomerForm>('customer', { required: true })
     </template>
 
     <template #body>
-      <VentasClienteForm v-model="customer" />
+      <VentasClienteForm v-model="customer" :regla="regla" />
     </template>
 
     <template #actions>

@@ -1016,8 +1016,8 @@ queda el último que se cargó aunque los productos del primero lleguen después
 - **Unitarios:** `compras.service.spec.ts` (incluye el orden de locks de pagar/anular y las
   validaciones de la tarea 2), `deuda.spec.ts` (`vencimiento`, `totalCompra`, `fondear`),
   `inventario.service.spec.ts` (la cuenta rehecha, con los números de la spec),
-  `reparto-descuento.spec.ts`, `lectura-dte.service.spec.ts` (`planAprendizaje`, `normalizarRut`)
-  y `useDte.spec.ts` (el lector del XML, front).
+  `reparto-descuento.spec.ts`, `lectura-dte.service.spec.ts` (`planAprendizaje`), `common/utils/rut.util.spec.ts`
+  (`normalizarRut`) y `useDte.spec.ts` (el lector del XML, front).
 - **E2E de la API:** `test/compras.e2e-spec.ts` (borrador, confirmar, rehacer la cuenta, corregir,
   anular, permisos y aislamiento — incluye el fixture `compras.paga` como primer consumidor de
   `usuarios_tenants`), `test/compras-pagos.e2e-spec.ts` (tarea 2: fondeo, anticipo, usar el saldo

@@ -331,8 +331,8 @@ describe('ventas/pos — el documento con que arranca es la boleta, no el primer
   it('elige el tipo marcado `esBoleta`, aunque no sea el primero de la lista', async () => {
     cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
     tiposDocumentoMock = [
-      { id: 'doc-acta', nombre: 'Acta de Entrega', customerRequerido: true, esBoleta: false },
-      { id: 'doc-boleta', nombre: 'Boleta de Venta', customerRequerido: false, esBoleta: true },
+      { id: 'doc-acta', nombre: 'Acta de Entrega', customerRequerido: true, esBoleta: false, receptorCompleto: false, rutChileno: false },
+      { id: 'doc-boleta', nombre: 'Boleta de Venta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: false },
     ]
     const wrapper = await montar()
     await esperar(20)
@@ -347,7 +347,7 @@ describe('ventas/pos — el documento con que arranca es la boleta, no el primer
     // si no hay deja la venta sin tipo: nunca elige otro documento por su cuenta.
     cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
     tiposDocumentoMock = [
-      { id: 'doc-acta', nombre: 'Acta de Entrega', customerRequerido: true, esBoleta: false },
+      { id: 'doc-acta', nombre: 'Acta de Entrega', customerRequerido: true, esBoleta: false, receptorCompleto: false, rutChileno: false },
     ]
     const wrapper = await montar()
     await esperar(20)
@@ -473,7 +473,9 @@ describe('ventas/pos — la boleta se imprime desde la respuesta de POST /ventas
     carritoPanel.vm.$emit('update:customer', {
       nombre: 'Cliente Formulario',
       rut: '11.111.111-1',
+      giro: '',
       direccion: 'Dirección Formulario',
+      comuna: '',
       telefono: '',
       email: '',
       terceroId: null,

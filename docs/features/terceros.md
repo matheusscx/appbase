@@ -99,6 +99,8 @@ Requiere `Terceros:Eliminar`. Soft delete (`eliminado_el`).
 | `correo` | VARCHAR(100) | nullable | |
 | `telefono` | VARCHAR(50) | nullable | |
 | `direccion` | TEXT | nullable | |
+| `giro` | VARCHAR(40) | nullable | largo del SII; precarga el receptor de la Factura |
+| `comuna` | VARCHAR(20) | nullable | largo del SII; precarga el receptor de la Factura |
 | `activo` | BOOLEAN | default true | |
 | `eliminado_el` | TIMESTAMPTZ | nullable | soft delete |
 
@@ -158,11 +160,11 @@ Estado local (`ref`), sin store — sigue la convención de páginas de configur
   ↓
 [Usuario selecciona un tercero en el USelectMenu]
   ↓ watch(terceroSeleccionado)
-[Autocompleta nombre/rut/direccion/telefono/email + fija terceroId]
+[Autocompleta nombre/rut/giro/direccion/comuna/telefono/email + fija terceroId]
   ↓ confirmarCobro() en pos.vue
 [POST /ventas con body.customer.terceroId]
   ↓
-[VentasService persiste venta_customer.tercero_id]
+[VentasService congela el customer del body (no relee el tercero) y venta_customer.tercero_id]
 ```
 
 ---

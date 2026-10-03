@@ -75,6 +75,13 @@ todo compatible con SII, sin integrarlo.
 - **Datos de emisor/receptor disponibles**: RUT + giro del receptor para factura; el modelo
   `customer`/`terceros` debe poder alojarlos.
 
+  ✅ **Actualización 2026-10-03 — la Factura congela el receptor completo.** La norma (Formato
+  DTE v2.5, zona Receptor) pide más que RUT y giro: también razón social, dirección y **comuna**,
+  con largos máximos. `venta_customer` y `terceros` ganan `giro` y `comuna`; en Chile la Factura
+  no se crea sin los cinco, el RUT se valida (DV) y se congela normalizado, y los largos del SII
+  se imponen al capturar —el sistema no trunca, porque lo emitido tiene que ser igual a lo
+  congelado—. Otros países, en pausa. Detalle en [`features/ventas.md`](../features/ventas.md).
+
   ⚠️ **Actualización 2026-10-02 — la venta también registra qué documentos tiene y quién los
   emitió.** Hasta ese día la venta llevaba solo una etiqueta (`tipo_documento_id`). Ahora cada
   venta deja, al crearse, una fila por documento en `venta_documentos` —del sistema, de la

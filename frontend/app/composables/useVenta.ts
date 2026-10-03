@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import Decimal from 'decimal.js'
 import { useResultadoCalculado, type CalcularVentaInput } from './useCalculoPrecios'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
+import { problemaDelReceptor, type ReglaReceptor } from './useReceptor'
 import type { ClaseDocumentoMaquina } from './useDocumentosVenta'
 import {
   personalizacionVacia,
@@ -495,6 +496,11 @@ export function tieneCustomerData(customer: CustomerForm): boolean {
   return Boolean(customer.nombre.trim() || customer.terceroId)
 }
 
+/** El formulario del cliente en blanco: al abrir el POS, al quitarlo y al vaciar. */
+export function customerVacio(): CustomerForm {
+  return { nombre: '', rut: '', giro: '', direccion: '', comuna: '', telefono: '', email: '', terceroId: null }
+}
+
 export function puedeCobrar(args: {
   /**
    * Permiso `Ventas:Crear`, el que exige `POST /ventas`. Va acá y no en un
@@ -507,14 +513,16 @@ export function puedeCobrar(args: {
   lineas: CarritoLinea[]
   customerRequerido: boolean
   customerExpandido: boolean
-  customerNombre: string
+  customer: CustomerForm
+  /** Qué exige el tipo elegido del receptor. Ver `problemaDelReceptor`. */
+  regla: ReglaReceptor
   tipoDocumentoId: string | undefined
 }): boolean {
   if (args.puedeVender === false) return false
   if (!args.tieneCaja) return false
   if (args.lineas.length === 0) return false
   if (!args.tipoDocumentoId) return false
-  if ((args.customerRequerido || args.customerExpandido) && args.customerNombre.trim() === '') return false
+  if ((args.customerRequerido || args.customerExpandido) && problemaDelReceptor(args.customer, args.regla)) return false
   return true
 }
 

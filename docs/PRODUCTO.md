@@ -210,10 +210,10 @@ reporte, nunca el hecho fiscal.
 
 Directorio de entidades externas del tenant: proveedores, empresas compradoras y personas naturales recurrentes. No tienen acceso al sistema — son registros de referencia reutilizables.
 
-**Datos:** nombre, RUT, tipo (`proveedor` | `empresa` | `persona_natural`), correo, teléfono, dirección, datos de facturación (nombre legal, RUT fiscal).
+**Datos:** nombre, RUT, tipo (`proveedor` | `empresa` | `persona_natural`), correo, teléfono, dirección, datos de facturación (nombre legal, RUT fiscal, giro, comuna).
 
 **Usos:**
-- Al emitir una factura → seleccionar tercero y autocompletar datos de facturación
+- Al emitir una factura → seleccionar tercero y autocompletar datos de facturación (razón social, RUT, giro, dirección y comuna); el cajero puede corregirlos y en la venta queda lo que confirmó
 - Compradores frecuentes → no reingresar datos en cada venta
 - Proveedores → referencia para compras y documentos
 
@@ -1090,7 +1090,12 @@ Registra una venta completa en una sola transacción atómica:
 1. Cabecera (`ventas`): tenant, caja, canal, moneda, tipo documento, estado, totales, `venta_referencia_id` (para notas de crédito)
 2. Líneas (`venta_detalles`): item, cantidad, precio origen, tasa de cambio, precio convertido, totales por línea
 3. Reglas aplicadas (`ventas_descuentos`, `ventas_recargos`, `ventas_impuestos`): valor aplicado, porcentaje y si es por línea o global
-4. Customer (`venta_customer`): datos del comprador si aplica
+4. Customer (`venta_customer`): datos del comprador si aplica. **La Factura chilena exige el
+   receptor completo** que pide el SII: RUT válido (dígito verificador), razón social, giro,
+   dirección y comuna, con los largos del SII (100, 40, 70 y 20 caracteres; el sistema no
+   trunca, el cajero abrevia). En Chile, todo RUT que se escriba —también en una boleta— tiene
+   que ser un RUT, y se guarda normalizado. Otros países: en pausa, exigen solo el nombre
+   (owner, 2026-10-03; detalle en `features/ventas.md`)
 5. Pagos (`pagos`): método, monto en moneda oficial, caja
 
 **Regla:** total por línea = valores unitarios × cantidad. Los descuentos/recargos/impuestos se calculan por unidad y se multiplican.

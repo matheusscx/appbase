@@ -14,6 +14,7 @@ import {
   setMontoPago,
   puedeCobrar,
   tieneCustomerData,
+  customerVacio,
   type CarritoLinea,
   type ItemCatalogo,
   type CustomerForm,
@@ -789,59 +790,84 @@ describe('setMontoPago', () => {
 describe('puedeCobrar (gate)', () => {
   const lineas: CarritoLinea[] = [{ item: item('a'), cantidad: '1' }]
   const docId = 'tipo-doc-1'
+  const SIN_REGLA = { receptorCompleto: false, rutChileno: false }
+  const conNombre = (nombre: string): CustomerForm => ({ ...customerVacio(), nombre })
+  const FACTURA_CHILE = { receptorCompleto: true, rutChileno: true }
+  const RECEPTOR: CustomerForm = {
+    ...customerVacio(),
+    nombre: 'Comercial Andes SpA',
+    rut: '76.543.210-3',
+    giro: 'Venta de artículos de ferretería',
+    direccion: 'Av. Matta 1234',
+    comuna: 'Santiago',
+  }
 
   it('false sin caja', () => {
-    expect(puedeCobrar({ tieneCaja: false, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(false)
+    expect(puedeCobrar({ tieneCaja: false, lineas, customerRequerido: false, customerExpandido: false, customer: conNombre(''), regla: SIN_REGLA, tipoDocumentoId: docId })).toBe(false)
   })
 
   it('false sin permiso Ventas:Crear, aunque el resto esté perfecto', () => {
     // Sin esto el cajero arma el carrito entero y recibe el 403 al cobrar.
-    expect(puedeCobrar({ puedeVender: false, tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(false)
+    expect(puedeCobrar({ puedeVender: false, tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customer: conNombre(''), regla: SIN_REGLA, tipoDocumentoId: docId })).toBe(false)
   })
 
   it('true con permiso y el resto en orden', () => {
-    expect(puedeCobrar({ puedeVender: true, tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(true)
+    expect(puedeCobrar({ puedeVender: true, tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customer: conNombre(''), regla: SIN_REGLA, tipoDocumentoId: docId })).toBe(true)
   })
 
   it('omitir `puedeVender` no bloquea: los llamadores que solo validan estado siguen igual', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(true)
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customer: conNombre(''), regla: SIN_REGLA, tipoDocumentoId: docId })).toBe(true)
   })
 
   it('false con carrito vacío', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas: [], customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(false)
+    expect(puedeCobrar({ tieneCaja: true, lineas: [], customerRequerido: false, customerExpandido: false, customer: conNombre(''), regla: SIN_REGLA, tipoDocumentoId: docId })).toBe(false)
   })
 
   it('false si tipoDocumentoId es undefined', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: undefined })).toBe(false)
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customer: conNombre(''), regla: SIN_REGLA, tipoDocumentoId: undefined })).toBe(false)
   })
 
   it('false si customerRequerido y falta nombre', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: true, customerExpandido: false, customerNombre: '  ', tipoDocumentoId: docId })).toBe(false)
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: true, customerExpandido: false, customer: conNombre('  '), regla: SIN_REGLA, tipoDocumentoId: docId })).toBe(false)
   })
 
   it('true con caja, líneas y (sin factura) sin cliente', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(true)
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customer: conNombre(''), regla: SIN_REGLA, tipoDocumentoId: docId })).toBe(true)
   })
 
   it('true con factura y nombre de cliente', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: true, customerExpandido: false, customerNombre: 'Juan', tipoDocumentoId: docId })).toBe(true)
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: true, customerExpandido: false, customer: conNombre('Juan'), regla: SIN_REGLA, tipoDocumentoId: docId })).toBe(true)
   })
 
   it('false con customerExpandido sin nombre', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: true, customerNombre: '', tipoDocumentoId: docId })).toBe(false)
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: true, customer: conNombre(''), regla: SIN_REGLA, tipoDocumentoId: docId })).toBe(false)
   })
 
   it('true con customerExpandido y nombre', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: true, customerNombre: 'Juan', tipoDocumentoId: docId })).toBe(true)
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: true, customer: conNombre('Juan'), regla: SIN_REGLA, tipoDocumentoId: docId })).toBe(true)
+  })
+
+  // La regla del receptor la decide `problemaDelReceptor` (su spec la prueba
+  // entera); acá se fija que el gate la consulta con la regla del tipo elegido.
+  it('false con la factura chilena y solo el nombre: faltan RUT, giro, dirección y comuna', () => {
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: true, customerExpandido: false, customer: conNombre('Juan'), regla: FACTURA_CHILE, tipoDocumentoId: docId })).toBe(false)
+  })
+
+  it('true con la factura chilena y el receptor completo', () => {
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: true, customerExpandido: false, customer: RECEPTOR, regla: FACTURA_CHILE, tipoDocumentoId: docId })).toBe(true)
+  })
+
+  it('false con datos del cliente en una boleta chilena y un RUT con DV malo', () => {
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: true, customer: { ...RECEPTOR, rut: '76.543.210-5' }, regla: { receptorCompleto: false, rutChileno: true }, tipoDocumentoId: docId })).toBe(false)
   })
 
   it('true con customerExpandido: false sin nombre (form cerrado)', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(true)
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customer: conNombre(''), regla: SIN_REGLA, tipoDocumentoId: docId })).toBe(true)
   })
 })
 
 describe('tieneCustomerData', () => {
-  const vacio: CustomerForm = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
+  const vacio: CustomerForm = customerVacio()
 
   it('false cuando no hay nombre ni terceroId', () => {
     expect(tieneCustomerData(vacio)).toBe(false)

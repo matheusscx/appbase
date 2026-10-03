@@ -78,9 +78,9 @@ function montar(props: { lineas: CarritoLinea[], resultado: ResultadoVenta | nul
     global: { stubs },
     props: {
       ...props,
-      tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true }],
+      tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: false }],
       tieneCaja: true,
-      customer: { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null },
+      customer: { nombre: '', rut: '', giro: '', direccion: '', comuna: '', telefono: '', email: '', terceroId: null },
     },
   })
 }
@@ -135,8 +135,8 @@ describe('CarritoPanel — "Vaciar todo" vuelve a la boleta, no al primero del c
    * se veía como "algo que limpiar".
    */
   const catalogo = [
-    { id: 'doc-acta', nombre: 'Acta de Entrega', customerRequerido: true, esBoleta: false },
-    { id: 'doc-boleta', nombre: 'Boleta de Venta', customerRequerido: false, esBoleta: true },
+    { id: 'doc-acta', nombre: 'Acta de Entrega', customerRequerido: true, esBoleta: false, receptorCompleto: false, rutChileno: false },
+    { id: 'doc-boleta', nombre: 'Boleta de Venta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: false },
   ]
 
   function montarConCatalogo(lineas: CarritoLinea[], tipoDocumentoId: string) {
@@ -149,7 +149,7 @@ describe('CarritoPanel — "Vaciar todo" vuelve a la boleta, no al primero del c
         tiposDocumento: catalogo,
         tieneCaja: true,
         tipoDocumentoId,
-        customer: { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null },
+        customer: { nombre: '', rut: '', giro: '', direccion: '', comuna: '', telefono: '', email: '', terceroId: null },
       },
     })
   }
@@ -190,9 +190,9 @@ describe('CarritoPanel — línea de un producto con serie', () => {
         lineas: [lineaSerie(), linea('item-1', 'Bebida')],
         resultado: null,
         vigente: true,
-        tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true }],
+        tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: false }],
         tieneCaja: true,
-        customer: { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null },
+        customer: { nombre: '', rut: '', giro: '', direccion: '', comuna: '', telefono: '', email: '', terceroId: null },
       },
     })
 
@@ -212,9 +212,9 @@ describe('CarritoPanel — línea de un producto con serie', () => {
         lineas: [linea('item-0', 'Papas'), lineaSerie()],
         resultado: null,
         vigente: true,
-        tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true }],
+        tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: false }],
         tieneCaja: true,
-        customer: { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null },
+        customer: { nombre: '', rut: '', giro: '', direccion: '', comuna: '', telefono: '', email: '', terceroId: null },
       },
     })
 

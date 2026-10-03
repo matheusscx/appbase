@@ -49,6 +49,16 @@ export class Tercero {
   @Column({ type: 'text', nullable: true })
   direccion: string | null;
 
+  /**
+   * Giro y comuna, para precargar el receptor de una Factura (ver
+   * `VentaCustomer.giro`). Opcionales: un proveedor no los necesita.
+   */
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  giro: string | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  comuna: string | null;
+
   @Column({ default: true })
   activo: boolean;
 

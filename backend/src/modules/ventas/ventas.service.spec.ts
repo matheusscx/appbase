@@ -29,6 +29,7 @@ import { VentaDescuento } from './entities/venta-descuento.entity';
 import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { VentaPromocion } from './entities/venta-promocion.entity';
+import { VentaCustomer } from './entities/venta-customer.entity';
 import {
   IdempotenciaService,
   type SolicitudIdempotenteInput,
@@ -1805,6 +1806,17 @@ describe('VentasService', () => {
     const FACTURA = '550e8400-e29b-41d4-a716-446655440146';
     const TIPO_INACTIVO = '550e8400-e29b-41d4-a716-446655440147';
     const NC_ARGENTINA = '550e8400-e29b-41d4-a716-446655440378';
+    // No sembrado: un tipo `customer_requerido` de otro país, para fijar que
+    // ahí conserva el significado viejo (exige solo el nombre).
+    const FACTURA_ARGENTINA = '550e8400-e29b-41d4-a716-446655449998';
+    /** El receptor completo que la Factura chilena exige (SII, Formato DTE). */
+    const RECEPTOR_FACTURA = {
+      nombre: 'Comercial Andes SpA',
+      rut: '76.543.210-3',
+      giro: 'Venta de artículos de ferretería',
+      direccion: 'Av. Matta 1234',
+      comuna: 'Santiago',
+    };
     const MENSAJE_CUSTOMER_REQUERIDO =
       'Este tipo de documento requiere los datos del cliente';
     const tipo = (
@@ -1834,6 +1846,7 @@ describe('VentasService', () => {
       }),
       tipo(TIPO_INACTIVO, 'CL', { activo: false }),
       tipo(NC_ARGENTINA, 'AR', { es_nota_credito: true, activo: false }),
+      tipo(FACTURA_ARGENTINA, 'AR', { customer_requerido: true }),
     ];
 
     let paisDelTenant: string;
@@ -1856,19 +1869,33 @@ describe('VentasService', () => {
       manager.query.mockImplementation((sql: string, params?: unknown[]) => {
         if (typeof sql === 'string' && sql.includes('es_boleta')) {
           const pedido = params?.[1] ?? null;
+          const filas = CATALOGO.filter(
+            (t) =>
+              t.pais === paisDelTenant &&
+              (t.tipo_documento_id === pedido ||
+                (t.es_boleta && t.activo && !t.es_nota_credito)),
+          ).map((t) => ({
+            codigo_iso: paisDelTenant,
+            tipo_documento_id: t.tipo_documento_id,
+            es_boleta: t.es_boleta,
+            es_nota_credito: t.es_nota_credito,
+            activo: t.activo,
+            customer_requerido: t.customer_requerido,
+          }));
+          // `LEFT JOIN`: sin tipo que calce, igual vuelve el país.
           return Promise.resolve(
-            CATALOGO.filter(
-              (t) =>
-                t.pais === paisDelTenant &&
-                (t.tipo_documento_id === pedido ||
-                  (t.es_boleta && t.activo && !t.es_nota_credito)),
-            ).map((t) => ({
-              tipo_documento_id: t.tipo_documento_id,
-              es_boleta: t.es_boleta,
-              es_nota_credito: t.es_nota_credito,
-              activo: t.activo,
-              customer_requerido: t.customer_requerido,
-            })),
+            filas.length
+              ? filas
+              : [
+                  {
+                    codigo_iso: paisDelTenant,
+                    tipo_documento_id: null,
+                    es_boleta: null,
+                    es_nota_credito: null,
+                    activo: null,
+                    customer_requerido: null,
+                  },
+                ],
           );
         }
         return queryBase(sql);
@@ -1888,7 +1915,7 @@ describe('VentasService', () => {
       await service.crear(TENANT_ID, USUARIO_ID, {
         ...baseDto,
         tipoDocumentoId: FACTURA,
-        customer: { nombre: 'Comercial Andes SpA' },
+        customer: RECEPTOR_FACTURA,
       });
 
       expect(tipoGuardado()).toBe(FACTURA);
@@ -2020,7 +2047,7 @@ describe('VentasService', () => {
       const dtoTresLineas = {
         ...baseDto,
         tipoDocumentoId: FACTURA,
-        customer: { nombre: 'Comercial Andes SpA' },
+        customer: RECEPTOR_FACTURA,
         lineas: [
           { itemId: 'item-a', cantidad: '1' },
           { itemId: 'item-b', cantidad: '2' },
@@ -2040,6 +2067,139 @@ describe('VentasService', () => {
       expect(consultasDeTipo()).toHaveLength(1);
     });
 
+    describe('el receptor, según el país', () => {
+      const customerGuardado = () => {
+        const filas = manager.save.mock.calls.filter(
+          (c) => c[0] === VentaCustomer,
+        );
+        return filas[0]?.[1] as Record<string, unknown> | undefined;
+      };
+      const facturaCon = (customer: Record<string, string>) =>
+        service.crear(TENANT_ID, USUARIO_ID, {
+          ...baseDto,
+          tipoDocumentoId: FACTURA,
+          customer: customer as typeof RECEPTOR_FACTURA,
+        });
+
+      it('Chile: la Factura con solo el nombre nombra lo que falta, sin escribir la venta', async () => {
+        await expect(
+          facturaCon({ nombre: 'Comercial Andes SpA' }),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'Este tipo de documento requiere del cliente: RUT, giro, dirección, comuna',
+          ),
+        );
+        expect(tipoGuardado()).toBeUndefined();
+      });
+
+      it.each([
+        ['rut', 'RUT'],
+        ['giro', 'giro'],
+        ['direccion', 'dirección'],
+        ['comuna', 'comuna'],
+      ])(
+        'Chile: la Factura con %s en blanco es un 400 que lo nombra',
+        async (campo, nombre) => {
+          await expect(
+            facturaCon({ ...RECEPTOR_FACTURA, [campo]: '   ' }),
+          ).rejects.toThrow(
+            new BadRequestException(
+              `Este tipo de documento requiere del cliente: ${nombre}`,
+            ),
+          );
+        },
+      );
+
+      it('Chile: la Factura completa congela el RUT normalizado, el giro y la comuna, sin bordes', async () => {
+        await facturaCon({
+          ...RECEPTOR_FACTURA,
+          nombre: '  Comercial Andes SpA ',
+          giro: ' Venta de artículos de ferretería ',
+          comuna: ' Santiago ',
+        });
+
+        expect(customerGuardado()).toMatchObject({
+          nombre: 'Comercial Andes SpA',
+          rut: '76543210-3',
+          giro: 'Venta de artículos de ferretería',
+          direccion: 'Av. Matta 1234',
+          comuna: 'Santiago',
+        });
+      });
+
+      it('Chile: un RUT con el DV equivocado es 400 en la Factura', async () => {
+        await expect(
+          facturaCon({ ...RECEPTOR_FACTURA, rut: '76.543.210-5' }),
+        ).rejects.toThrow(
+          new BadRequestException('El RUT del cliente no es válido'),
+        );
+        expect(tipoGuardado()).toBeUndefined();
+      });
+
+      it('Chile: un RUT con el DV equivocado es 400 también en una boleta', async () => {
+        await expect(
+          service.crear(TENANT_ID, USUARIO_ID, {
+            ...baseDto,
+            customer: { nombre: 'Juan Pérez', rut: '76.543.210-5' },
+          }),
+        ).rejects.toThrow(
+          new BadRequestException('El RUT del cliente no es válido'),
+        );
+      });
+
+      // Lo cazó la revisión de seguridad: el nombre en blanco salía antes de
+      // mirar el RUT, y un RUT basura quedaba congelado en la boleta.
+      it('Chile: un RUT malo es 400 aunque el nombre venga en blanco', async () => {
+        await expect(
+          service.crear(TENANT_ID, USUARIO_ID, {
+            ...baseDto,
+            customer: { nombre: '   ', rut: 'basura' },
+          }),
+        ).rejects.toThrow(
+          new BadRequestException('El RUT del cliente no es válido'),
+        );
+      });
+
+      it('Chile: una boleta con customer sin RUT no exige nada más', async () => {
+        await service.crear(TENANT_ID, USUARIO_ID, {
+          ...baseDto,
+          customer: { nombre: 'Juan Pérez' },
+        });
+
+        expect(customerGuardado()).toMatchObject({
+          nombre: 'Juan Pérez',
+          rut: null,
+          giro: null,
+          comuna: null,
+        });
+      });
+
+      it('otro país: el tipo customer_requerido exige solo el nombre y el RUT no se mira', async () => {
+        paisDelTenant = 'AR';
+        await service.crear(TENANT_ID, USUARIO_ID, {
+          ...baseDto,
+          tipoDocumentoId: FACTURA_ARGENTINA,
+          customer: { nombre: 'Distribuidora Sur SA', rut: '20-12345678-9' },
+        });
+
+        expect(customerGuardado()).toMatchObject({
+          nombre: 'Distribuidora Sur SA',
+          rut: '20-12345678-9',
+        });
+      });
+
+      it('otro país sin tipo: el customer pasa sin chequeo de RUT', async () => {
+        paisDelTenant = 'AR';
+        await service.crear(TENANT_ID, USUARIO_ID, {
+          ...baseDto,
+          customer: { nombre: 'Distribuidora Sur SA', rut: '20-12345678-9' },
+        });
+
+        expect(tipoGuardado()).toBeNull();
+        expect(customerGuardado()).toMatchObject({ rut: '20-12345678-9' });
+      });
+    });
+
     describe('resolverTipoDocumento()', () => {
       // Lo consume la emisión (tarea 4): cuál es el tipo y si es boleta.
       const resolver = (id: string | undefined, canal: 'fisico' | 'online') =>
@@ -2053,23 +2213,27 @@ describe('VentasService', () => {
               customer: { nombre: string } | undefined,
             ) => Promise<{ id: string | null; esBoleta: boolean }>;
           }
-        ).resolverTipoDocumento(manager, TENANT_ID, id, canal, {
-          nombre: 'Comercial Andes SpA',
-        });
+        ).resolverTipoDocumento(
+          manager,
+          TENANT_ID,
+          id,
+          canal,
+          RECEPTOR_FACTURA,
+        );
 
       it('la boleta del país es boleta', async () => {
-        expect(await resolver(undefined, 'fisico')).toEqual({
+        expect(await resolver(undefined, 'fisico')).toMatchObject({
           id: BOLETA,
           esBoleta: true,
         });
-        expect(await resolver(BOLETA, 'fisico')).toEqual({
+        expect(await resolver(BOLETA, 'fisico')).toMatchObject({
           id: BOLETA,
           esBoleta: true,
         });
       });
 
       it('una factura no es boleta', async () => {
-        expect(await resolver(FACTURA, 'fisico')).toEqual({
+        expect(await resolver(FACTURA, 'fisico')).toMatchObject({
           id: FACTURA,
           esBoleta: false,
         });
@@ -2077,7 +2241,7 @@ describe('VentasService', () => {
 
       it('sin boleta en el país no hay tipo ni es boleta', async () => {
         paisDelTenant = 'AR';
-        expect(await resolver(undefined, 'fisico')).toEqual({
+        expect(await resolver(undefined, 'fisico')).toMatchObject({
           id: null,
           esBoleta: false,
         });

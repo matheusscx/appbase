@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import type { EmisorMedio } from '~/composables/useDocumentosVenta'
-import { useVenta, descontarStockCatalogo, tieneCustomerData, tipoDocumentoPorDefecto, toVentaLineasBody, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
+import { useVenta, customerVacio, descontarStockCatalogo, tieneCustomerData, tipoDocumentoPorDefecto, toVentaLineasBody, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
+import { problemaDelReceptor } from '~/composables/useReceptor'
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { UnidadElegida } from '~/composables/useUnidadesSerie'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
@@ -16,7 +17,14 @@ import type { BoletaVenta } from '~/types/boleta'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
-interface TipoDoc { id: string; nombre: string; customerRequerido: boolean; esBoleta: boolean }
+interface TipoDoc {
+  id: string
+  nombre: string
+  customerRequerido: boolean
+  esBoleta: boolean
+  receptorCompleto: boolean
+  rutChileno: boolean
+}
 interface MetodoPago {
   metodoPagoId: string
   nombre: string
@@ -66,7 +74,7 @@ const loadingCatalogo = catalogo.loading
 const itemsVisibles = computed(() => descontarStockCatalogo(items.value, lineas.value))
 
 const tipoDocumentoId = ref<string | undefined>(undefined)
-const customer = ref<CustomerForm>({ nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null })
+const customer = ref<CustomerForm>(customerVacio())
 const customerExpandido = ref(false)
 
 const cobroOpen = ref(false)
@@ -201,7 +209,7 @@ watch(
 watch(tipoDocumentoId, () => {
   if (tieneCustomerData(customer.value)) return
   customerExpandido.value = false
-  customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
+  customer.value = customerVacio()
 })
 
 async function cargar() {
@@ -247,9 +255,15 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
   const docSel = tiposDocumento.value.find((t) => t.id === tipoDocumentoId.value)
   const incluirCustomer = docSel?.customerRequerido || customerExpandido.value
 
-  if (incluirCustomer && !customer.value.nombre.trim()) {
+  const problema = incluirCustomer
+    ? problemaDelReceptor(customer.value, {
+        receptorCompleto: docSel?.receptorCompleto ?? false,
+        rutChileno: docSel?.rutChileno ?? false,
+      })
+    : null
+  if (problema) {
     cobroOpen.value = false
-    toast.add({ title: 'El nombre del cliente es requerido', color: 'error' })
+    toast.add({ title: problema, color: 'error' })
     return
   }
 
@@ -271,6 +285,8 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         nombre: customer.value.nombre,
         rut: customer.value.rut || undefined,
         direccion: customer.value.direccion || undefined,
+        giro: customer.value.giro || undefined,
+        comuna: customer.value.comuna || undefined,
         telefono: customer.value.telefono || undefined,
         email: customer.value.email || undefined,
         terceroId: customer.value.terceroId || undefined,
@@ -350,7 +366,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     )
     limpiar()
     customerExpandido.value = false
-    customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
+    customer.value = customerVacio()
   } catch (e: unknown) {
     if (intentoCobro.mostrarSiCobroConOtrosDatos(e, AMBITO_COBRO)) return
     mostrarRechazoPorStock({ error: e, fallback: 'Error al registrar la venta', puedeTrasladar: puedeTrasladar.value })

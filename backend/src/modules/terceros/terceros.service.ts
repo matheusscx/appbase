@@ -63,6 +63,8 @@ export class TercerosService {
       correo: dto.correo,
       telefono: dto.telefono,
       direccion: dto.direccion,
+      giro: dto.giro,
+      comuna: dto.comuna,
       activo: dto.activo ?? true,
       plazoPagoDias: dto.plazoPagoDias ?? null,
     });

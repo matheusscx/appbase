@@ -22,7 +22,14 @@ const CREDITO_ID = '550e8400-e29b-41d4-a716-446655440107';
 const BOLETA_ID = '550e8400-e29b-41d4-a716-446655440145';
 const FACTURA_ID = '550e8400-e29b-41d4-a716-446655440146';
 // La Factura es `customer_requerido` en el seed: la venta tiene que traerlo.
-const RECEPTOR = { nombre: 'Comercial Andes SpA', rut: '76.123.456-7' };
+// El receptor completo que la Factura chilena exige (SII, Formato DTE).
+const RECEPTOR = {
+  nombre: 'Comercial Andes SpA',
+  rut: '76.123.456-0',
+  giro: 'Venta de artículos de ferretería',
+  direccion: 'Av. Matta 1234',
+  comuna: 'Santiago',
+};
 const ADMIN = { email: 'admin.paris@paris.cl', password: 'admin' };
 // `Ventas:Leer` + `Ventas:Crear` y sin `Cajas:Leer` (rol Vendedor): ve solo lo de su caja.
 const VENDEDOR = { email: 'vendedor@paris.cl', password: 'admin' };

@@ -85,6 +85,14 @@ import {
   type SolicitudIdempotenteInput,
 } from '../idempotencia/idempotencia.service';
 import { huellaDe } from '../idempotencia/huella';
+import { normalizarRut, rutValido } from '../../common/utils/rut.util';
+
+/**
+ * El país cuyas reglas del receptor están escritas: el receptor completo de la
+ * Factura y el RUT con DV módulo 11 (`receptorDeLaVenta`). Los demás países
+ * están en pausa hasta terminar Chile.
+ */
+const CODIGO_ISO_CHILE = 'CL';
 
 /**
  * Ítem/cantidad que se acredita en una nota de crédito. Ya NO es "ítem a
@@ -247,6 +255,14 @@ export interface TipoDocumentoResponse {
   customerRequerido: boolean;
   /** La boleta del país: lo que la pantalla elige por defecto. Ver `resolverTipoDocumento`. */
   esBoleta: boolean;
+  /**
+   * Exige el receptor tributario completo (RUT, razón social, giro, dirección y
+   * comuna). La pantalla no conoce el país: el servidor le dice qué regla de
+   * `receptorDeLaVenta` aplica a este tipo.
+   */
+  receptorCompleto: boolean;
+  /** El RUT del customer se valida con DV módulo 11. Ver `receptorDeLaVenta`. */
+  rutChileno: boolean;
 }
 
 /**
@@ -517,6 +533,8 @@ export class VentasService {
     // 1b. El tipo de documento de la venta lo decide el servidor, y se resuelve
     //     acá —antes de cargar ítems y calcular— para que un tipo inválido falle
     //     sin haber hecho trabajo. `esBoleta` lo consume la emisión.
+    //     También valida el receptor, y lo que se guarda en `venta_customer`
+    //     es el customer que devuelve, normalizado, no el del body.
     const tipoDocumento = await this.resolverTipoDocumento(
       manager,
       tenantId,
@@ -1090,21 +1108,24 @@ export class VentasService {
       await manager.save(VentaPromocion, filasPromocion);
     }
 
-    // 7e. Customer (opcional)
-    if (dto.customer) {
-      if (dto.customer.terceroId) {
-        await this.validarTercero(manager, tenantId, dto.customer.terceroId);
+    // 7e. Customer (opcional). El customer ya validado por `resolverTipoDocumento`.
+    const customer = tipoDocumento.customer;
+    if (customer) {
+      if (customer.terceroId) {
+        await this.validarTercero(manager, tenantId, customer.terceroId);
       }
       await manager.save(
         VentaCustomer,
         manager.create(VentaCustomer, {
           ventaId: venta.id,
-          terceroId: dto.customer.terceroId ?? null,
-          nombre: dto.customer.nombre,
-          rut: dto.customer.rut ?? null,
-          direccion: dto.customer.direccion ?? null,
-          telefono: dto.customer.telefono ?? null,
-          email: dto.customer.email ?? null,
+          terceroId: customer.terceroId ?? null,
+          nombre: customer.nombre,
+          rut: customer.rut ?? null,
+          direccion: customer.direccion ?? null,
+          giro: customer.giro ?? null,
+          comuna: customer.comuna ?? null,
+          telefono: customer.telefono ?? null,
+          email: customer.email ?? null,
         }),
       );
     }
@@ -1838,6 +1859,10 @@ export class VentasService {
    *   Por acá pasan todos los caminos que crean una venta desde un pedido: POS,
    *   el cierre de cuenta de salones, la tienda online y las suscripciones. La
    *   nota de crédito no: su tipo lo fija el sistema y no es `customer_requerido`.
+   * - **El receptor, según el país** (2026-10-03, ver `receptorDeLaVenta`): en
+   *   Chile, `customer_requerido` exige el receptor tributario completo y todo
+   *   RUT que venga se valida. Por eso la lectura trae el país aunque no haya
+   *   tipo (`LEFT JOIN`).
    *
    * **Una sola lectura**: trae, del país del tenant, el tipo pedido y la boleta
    * activa, y el resto se decide en memoria. La boleta es única por país
@@ -1856,28 +1881,38 @@ export class VentasService {
     tipoDocumentoId: string | undefined,
     canal: string,
     customer: CustomerVentaDto | undefined,
-  ): Promise<{ id: string | null; esBoleta: boolean }> {
+  ): Promise<{
+    id: string | null;
+    esBoleta: boolean;
+    customer: CustomerVentaDto | undefined;
+  }> {
     const pedido = canal === 'online' ? null : (tipoDocumentoId ?? null);
-    const filas: {
-      tipo_documento_id: string;
+    const leidas: {
+      codigo_iso: string;
+      tipo_documento_id: string | null;
       es_boleta: boolean;
       es_nota_credito: boolean;
       activo: boolean;
       customer_requerido: boolean;
     }[] = await manager.query(
-      `SELECT td.tipo_documento_id, td.es_boleta, td.es_nota_credito, td.activo,
-              td.customer_requerido
+      `SELECT p.codigo_iso, td.tipo_documento_id, td.es_boleta,
+              td.es_nota_credito, td.activo, td.customer_requerido
          FROM tenants t
          JOIN provincia prov ON prov.provincia_id = t.provincia_id
               AND prov.eliminado_el IS NULL
          JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
-         JOIN tipos_documento_tributario td ON td.pais_id = p.pais_id
+         LEFT JOIN tipos_documento_tributario td ON td.pais_id = p.pais_id
               AND td.eliminado_el IS NULL
               AND (td.tipo_documento_id = $2::uuid
                    OR (td.es_boleta = true AND td.activo = true
                        AND td.es_nota_credito = false))
         WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL`,
       [tenantId, pedido],
+    );
+    const esChile = leidas[0]?.codigo_iso === CODIGO_ISO_CHILE;
+    const filas = leidas.filter(
+      (f): f is (typeof leidas)[number] & { tipo_documento_id: string } =>
+        f.tipo_documento_id !== null,
     );
 
     let tipo: (typeof filas)[number] | undefined;
@@ -1898,19 +1933,96 @@ export class VentasService {
       }
     } else {
       tipo = filas.find((f) => f.es_boleta && f.activo && !f.es_nota_credito);
-      if (!tipo) return { id: null, esBoleta: false };
+      if (!tipo) {
+        return {
+          id: null,
+          esBoleta: false,
+          customer: this.receptorDeLaVenta(customer, esChile, false),
+        };
+      }
     }
 
-    // Online hoy no llega a este 400: resuelve siempre la boleta, que no es
-    // `customer_requerido` en ningún país sembrado, y la tienda y las
-    // suscripciones mandan el customer igual. Ningún endpoint edita el
-    // catálogo de tipos, así que su e2e cubre solo el caso que deja pasar.
-    if (tipo.customer_requerido && !customer?.nombre.trim()) {
+    // Online hoy no llega al 400 de `customer_requerido`: resuelve siempre la
+    // boleta, que no lo es en ningún país sembrado, y la tienda y las
+    // suscripciones mandan el customer igual (solo con nombre). Ningún
+    // endpoint edita el catálogo de tipos, así que su e2e cubre solo el caso
+    // que deja pasar.
+    return {
+      id: tipo.tipo_documento_id,
+      esBoleta: tipo.es_boleta,
+      customer: this.receptorDeLaVenta(
+        customer,
+        esChile,
+        tipo.customer_requerido,
+      ),
+    };
+  }
+
+  /**
+   * El receptor que se congela en la venta, validado y normalizado. Las reglas
+   * salen de la norma (SII, Formato DTE v2.5, zona Receptor) y las decidió el
+   * owner el 2026-10-03 (`docs/agent/pendientes.md`, "Cómo arrancarlo" del
+   * frente del receptor):
+   *
+   * - **Chile, tipo `customer_requerido`** (la Factura): RUT, razón social
+   *   (`nombre`), giro, dirección y comuna, sin blancos. Es el receptor completo
+   *   que la Factura exige; la nota de crédito exigiría menos, pero no pasa por
+   *   acá.
+   * - **Chile, cualquier tipo**: un RUT que venga tiene que ser un RUT (rango y
+   *   DV, `rutValido`) y se guarda normalizado. También en una boleta: un RUT con
+   *   DV malo congelado ensucia el documento aunque el receptor sea opcional.
+   * - **Otro país** (en pausa hasta terminar Chile): `customer_requerido` exige
+   *   solo el nombre, como antes, y el RUT no se mira (un CUIT usa otro DV).
+   *
+   * Los largos los pone el DTO, para todo país. Los textos fiscales se guardan
+   * sin blancos en los bordes y, si quedan vacíos, como `null`.
+   */
+  private receptorDeLaVenta(
+    customer: CustomerVentaDto | undefined,
+    esChile: boolean,
+    requerido: boolean,
+  ): CustomerVentaDto | undefined {
+    const sinBordes = (v: string | undefined) => v?.trim() || undefined;
+    const receptor: CustomerVentaDto | undefined = customer && {
+      ...customer,
+      nombre: customer.nombre.trim(),
+      rut: sinBordes(customer.rut),
+      direccion: sinBordes(customer.direccion),
+      giro: sinBordes(customer.giro),
+      comuna: sinBordes(customer.comuna),
+    };
+    // Un nombre en blanco no es un customer para el tipo que lo exige; para el
+    // que no, el customer se guarda igual que antes (con el nombre vacío), pero
+    // su RUT se valida igual: no hay camino que congele un RUT sin mirarlo.
+    if (requerido && !receptor?.nombre) {
       throw new BadRequestException(
         'Este tipo de documento requiere los datos del cliente',
       );
     }
-    return { id: tipo.tipo_documento_id, esBoleta: tipo.es_boleta };
+    if (!receptor || !esChile) return receptor;
+
+    if (requerido) {
+      const faltan = [
+        ['RUT', receptor.rut],
+        ['giro', receptor.giro],
+        ['dirección', receptor.direccion],
+        ['comuna', receptor.comuna],
+      ]
+        .filter(([, valor]) => !valor)
+        .map(([campo]) => campo);
+      if (faltan.length) {
+        throw new BadRequestException(
+          `Este tipo de documento requiere del cliente: ${faltan.join(', ')}`,
+        );
+      }
+    }
+    if (receptor.rut) {
+      if (!rutValido(receptor.rut)) {
+        throw new BadRequestException('El RUT del cliente no es válido');
+      }
+      receptor.rut = normalizarRut(receptor.rut);
+    }
+    return receptor;
   }
 
   /**
@@ -3469,12 +3581,14 @@ export class VentasService {
       codigo: string | null;
       customer_requerido: boolean;
       es_boleta: boolean;
+      codigo_iso: string;
     }[] = await this.db.query(
       `SELECT td.tipo_documento_id,
               td.nombre,
               td.codigo,
               td.customer_requerido,
-              td.es_boleta
+              td.es_boleta,
+              p.codigo_iso
        FROM tenants t
        JOIN provincia prov ON prov.provincia_id = t.provincia_id
             AND prov.eliminado_el IS NULL
@@ -3492,6 +3606,9 @@ export class VentasService {
       codigo: r.codigo,
       customerRequerido: r.customer_requerido === true,
       esBoleta: r.es_boleta === true,
+      receptorCompleto:
+        r.customer_requerido === true && r.codigo_iso === CODIGO_ISO_CHILE,
+      rutChileno: r.codigo_iso === CODIGO_ISO_CHILE,
     }));
   }
 
@@ -3961,7 +4078,8 @@ export class VentasService {
       [ventaId],
     );
     const customerRows: Row[] = await this.db.query(
-      `SELECT customer_id, tercero_id, nombre, rut, direccion, telefono, email
+      `SELECT customer_id, tercero_id, nombre, rut, direccion, giro, comuna,
+              telefono, email
        FROM venta_customer WHERE venta_id = $1 AND eliminado_el IS NULL`,
       [ventaId],
     );
@@ -4368,6 +4486,8 @@ export class VentasService {
             nombre: customerRow['nombre'],
             rut: customerRow['rut'],
             direccion: customerRow['direccion'],
+            giro: customerRow['giro'],
+            comuna: customerRow['comuna'],
             telefono: customerRow['telefono'],
             email: customerRow['email'],
           }

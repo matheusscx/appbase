@@ -1,11 +1,18 @@
 <script setup lang="ts">
 import type { CarritoLinea } from '~/composables/useVenta'
-import { puedeCobrar, tieneCustomerData, tipoDocumentoPorDefecto } from '~/composables/useVenta'
+import { customerVacio, puedeCobrar, tieneCustomerData, tipoDocumentoPorDefecto } from '~/composables/useVenta'
 import { unidadBaseItem } from '~/utils/cantidad-presentacion'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import type { CustomerForm } from './ClienteForm.vue'
 
-interface TipoDoc { id: string; nombre: string; customerRequerido: boolean; esBoleta: boolean }
+interface TipoDoc {
+  id: string
+  nombre: string
+  customerRequerido: boolean
+  esBoleta: boolean
+  receptorCompleto: boolean
+  rutChileno: boolean
+}
 
 const props = defineProps<{
   lineas: CarritoLinea[]
@@ -43,6 +50,10 @@ const docSeleccionado = computed(() =>
   props.tiposDocumento.find((t) => t.id === tipoDocumentoId.value),
 )
 const customerRequerido = computed(() => docSeleccionado.value?.customerRequerido ?? false)
+const reglaReceptor = computed(() => ({
+  receptorCompleto: docSeleccionado.value?.receptorCompleto ?? false,
+  rutChileno: docSeleccionado.value?.rutChileno ?? false,
+}))
 const hasCustomerData = computed(() => tieneCustomerData(customer.value))
 
 // `POST /ventas` exige `Ventas:Crear`. Se suma a la condición que ya existía
@@ -57,7 +68,8 @@ const habilitarCobro = computed(() =>
     lineas: props.lineas,
     customerRequerido: customerRequerido.value,
     customerExpandido: customerExpandido.value,
-    customerNombre: customer.value.nombre,
+    customer: customer.value,
+    regla: reglaReceptor.value,
     tipoDocumentoId: tipoDocumentoId.value,
   }),
 )
@@ -109,7 +121,7 @@ function abrirClienteDrawer() {
 function quitarCustomer() {
   customerExpandido.value = false
   clienteDrawerOpen.value = false
-  customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
+  customer.value = customerVacio()
 }
 
 const vaciarModalOpen = ref(false)
@@ -121,7 +133,7 @@ const hayAlgoQueLimpiar = computed(() =>
 )
 
 function confirmarVaciarTodo() {
-  customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
+  customer.value = customerVacio()
   customerExpandido.value = false
   clienteDrawerOpen.value = false
   tipoDocumentoId.value = tipoDocumentoPorDefecto(props.tiposDocumento)
@@ -307,7 +319,7 @@ watch(clienteDrawerOpen, (open) => {
       </div>
     </template>
   </UCard>
-  <VentasClienteDrawer v-model:open="clienteDrawerOpen" v-model:customer="customer" />
+  <VentasClienteDrawer v-model:open="clienteDrawerOpen" v-model:customer="customer" :regla="reglaReceptor" />
   <CrudModal
     v-model:open="vaciarModalOpen"
     title="Vaciar venta actual"

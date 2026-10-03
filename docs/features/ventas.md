@@ -87,7 +87,7 @@ Request:
     { "metodoPagoId": "uuid", "monto": "1069810.0000", "referencia": "opt",
       "numeroDocumento": "opt", "claseDocumento": "voucher | boleta (opt)" }
   ],
-  "customer": { "nombre": "Juan Pérez", "rut": "12.345.678-9" },  // opcional
+  "customer": { "nombre": "Juan Pérez", "rut": "12.345.678-5" },  // opcional
   "comentario": "string",                       // opcional
   "metodoPagoId": "uuid",                       // para el motor de precios (desc/recargos por método)
   "descuentosVentaIds": ["uuid"],               // descuentos a nivel de venta
@@ -108,7 +108,12 @@ Response (201):
 - `400` — sin caja abierta para el usuario
 - `400` — `tipoDocumentoId` de otro país, inexistente, inactivo o la nota de crédito
 - `400` — el tipo de la venta es `customer_requerido` (la Factura) y no viene `customer`, o
-  viene con el nombre en blanco
+  viene con el nombre en blanco; en Chile, además, si le falta RUT, giro, dirección o comuna
+  (el mensaje nombra lo que falta)
+- `400` — en Chile, un `customer.rut` que no es un RUT (rango o dígito verificador), en
+  cualquier tipo de documento
+- `400` — del pipe: razón social de más de 100 caracteres, giro de más de 40, dirección de más
+  de 70 o comuna de más de 20 (los largos del SII; el sistema no trunca)
 - `400` — excedente de pago sin método con `permite_vuelto = true`
 - `400` — `metodoPagoId` no habilitado para el tenant (rollback completo)
 - `400` — stock insuficiente (rollback completo)
@@ -139,7 +144,27 @@ pedido: el POS, el cierre de cuenta de salones (`POST /cuentas/:id/cerrar`, que 
 abierta ante el 400), la tienda online y las suscripciones. La nota de crédito no pasa: su tipo lo
 fija el sistema y no es `customer_requerido`. Un `customer` que no es un objeto (un array) es 400
 del pipe (`@IsObject()`), en los dos DTO. Vale igual con `facturador = 'externo'`, como en la pantalla.
-Exige el customer, no su RUT: lo que la Factura necesita del receptor es materia del frente fiscal.
+
+**El receptor de la Factura, según el país** (2026-10-03, frente fiscal propio; norma: SII,
+[Formato DTE v2.5](https://www.sii.cl/factura_electronica/factura_mercado/formato_dte_202602.pdf),
+zona Receptor). `resolverTipoDocumento` lee también el país del tenant (`pais.codigo_iso`) y le
+pasa el customer a `receptorDeLaVenta`, que devuelve el que se congela:
+
+- **Chile.** Un tipo `customer_requerido` (la Factura 33) exige el receptor tributario completo:
+  RUT, razón social (`nombre`), giro, dirección y comuna, sin blancos. Todo RUT que venga —también
+  en una boleta— tiene que ser un RUT (cuerpo 100.000–99.999.999, DV módulo 11,
+  `common/utils/rut.util.ts`) y se guarda **normalizado** (`76543210-3`).
+- **Otro país (en pausa).** `customer_requerido` exige solo el nombre, como antes, y el RUT no se
+  mira: un CUIT usa otro dígito verificador.
+- **Para todo país**, los largos del SII van en `CustomerVentaDto` (100/40/70/20) y los textos
+  fiscales se guardan sin blancos en los bordes. Lo que se congela es lo que llegó en el body:
+  el formulario precarga desde el tercero y el cajero puede corregir; el servidor no relee el
+  tercero.
+
+`GET /tipos-documento` suma `receptorCompleto` y `rutChileno` por tipo: la pantalla no conoce
+el país y valida con lo que el servidor le dice (`composables/useReceptor.ts`, gemelo de la
+regla). El detalle (`GET /ventas/:id`) devuelve `giro` y `comuna` en `customer`. ⛔ La nota de
+crédito no copia el receptor de la venta que corrige: queda en `pendientes.md`.
 
 Como toda venta nace con tipo, **el tipo ya no impide anular**: anular mira los documentos emitidos,
 ver `POST /ventas/:id/anular`.
@@ -896,10 +921,14 @@ con la regla del medio. Sin número se completa después desde el detalle de la 
 ### Fricción por Documento
 
 - **Boleta**: cliente opcional — se puede cobrar sin datos del comprador.
-- **Factura**: cliente obligatorio — campo de nombre debe estar completado para habilitar botón "Cobrar".
-- **Validación en cliente** vía `puedeCobrar()` y cambio de estado del botón Cobrar. Es
-  comodidad: el servidor rechaza con 400 la venta de un tipo `customer_requerido` sin cliente
-  (ver "El tipo de documento lo decide el servidor").
+- **Factura** (Chile): cliente obligatorio con RUT, razón social, giro, dirección y comuna; el
+  botón "Cobrar" no se habilita hasta completarlos. Giro, dirección, comuna y razón social
+  muestran el contador contra el largo del SII y no dejan pasar más; el cajero abrevia.
+- **RUT** (Chile): si se escribe, el campo avisa un dígito verificador malo y no deja cobrar,
+  también en una boleta con datos del cliente.
+- **Validación en cliente** vía `puedeCobrar()` → `problemaDelReceptor()` (`useReceptor.ts`),
+  con la regla del tipo elegido (`receptorCompleto`, `rutChileno`). Es comodidad: el servidor
+  rechaza con 400 lo mismo (ver "El receptor de la Factura, según el país").
 
 ### Testing
 

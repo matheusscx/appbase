@@ -180,6 +180,102 @@ como cifra aparte. No se abrió como entrada: el owner no lo pidió.
 
 ---
 
+## La Factura exige los datos tributarios del receptor (cerrada 2026-10-03)
+
+Sale de [`pendientes.md`](pendientes.md) § 6. Frente fiscal propio. La regla viva está en
+[`features/ventas.md`](../features/ventas.md) ("El receptor de la Factura, según el país") y en
+[ADR-010](../adr/010-preparacion-sii-datos-fiscales.md); spec:
+[`2026-10-03-receptor-de-factura-design.md`](../superpowers/specs/2026-10-03-receptor-de-factura-design.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 6
+
+- [ ] **La Factura exige receptor, pero el sistema solo le pide un nombre** (fiscal, **frente
+  propio**; anotado 2026-10-02 al cerrar "el servidor no exige el customer de un tipo
+  `customer_requerido`", a pedido de la orquestadora). Desde ese cierre el servidor rechaza una
+  Factura sin customer, y "customer" es **solo un nombre que no esté en blanco**: es lo que ya
+  exigía la pantalla. Según la orquestadora —dato a verificar contra la norma del SII al tomar la
+  entrada, no está en `PRODUCTO.md`—, una factura chilena exige del receptor **RUT, razón social,
+  giro y dirección**. Lo que hay hoy, medido el 2026-10-02:
+  - **`venta_customer`** guarda `nombre` (NOT NULL), `rut`, `direccion`, `telefono`, `email` y
+    `tercero_id`. **No hay columna de giro**, ni de comuna/ciudad; la razón social no es un campo
+    aparte (el único texto es `nombre`).
+  - **`CustomerVentaDto`** (`ventas/dto/create-venta.dto.ts`) exige `nombre` con `@MinLength(1)`
+    —sin `trim`; el servicio lo trimea al decidir `customer_requerido`— y deja `rut` y `direccion`
+    como `@IsString()` opcionales: **sin formato ni dígito verificador del RUT**, y sin exigirlos
+    para una Factura.
+  - Con `terceroId`, la venta guarda los datos **del body**, no los del tercero: `terceros` sí
+    tiene `nombre_legal` y `rut_fiscal`, pero `venta_customer` no los copia.
+  Decidir **en su propia sesión** (`CLAUDE.md`, ADR-010) qué campos exige cada tipo —¿una columna
+  por exigencia en `tipos_documento_tributario`, o un conjunto fijo para la Factura?—, si el giro
+  se congela en la venta y de dónde sale cuando hay tercero. El hecho fiscal se congela en la
+  transacción, así que lo que falte hoy no se completa después en una venta ya hecha.
+
+  **Cómo arrancarlo** (decidido 2026-10-03; norma verificada por la sesión del frente, análisis
+  de la "Sesión de esfuerzo máximo", decisiones del owner por AskUserQuestion, las cuatro
+  recomendadas; sin pasada de mercado: la regla la pone la norma).
+  - **La norma** ([SII, Formato DTE v2.5, 2026-02](https://www.sii.cl/factura_electronica/factura_mercado/formato_dte_202602.pdf),
+    zona Receptor, campos 50-65): en la Factura (33, y 34/46/52) son obligatorios `RUTRecep`
+    (cuerpo 100.000–99.999.999, guion y DV), `RznSocRecep` (≤ 100), `GiroRecep` (≤ 40, glosa
+    libre), `DirRecep` (≤ 70, la dirección legal) y **`CmnaRecep` (≤ 20)**: la comuna también, no
+    solo los cuatro que decía la entrada. Ciudad, contacto y correo son opcionales. En la nota de
+    crédito solo RUT y razón social son obligatorios.
+  - **Qué exige la Factura:** los cinco. Se queda el booleano `customer_requerido` y el conjunto
+    se elige **por el país del tenant**: en Chile significa "receptor tributario completo"; en
+    otro país conserva el significado viejo (exige el nombre), escrito como "en pausa". Nada de
+    una columna por campo (infraestructura especulativa, ADR-010).
+  - **Giro y comuna:** columnas nuevas en `venta_customer` (congeladas) **y** en `terceros`
+    (opcionales). El formulario las precarga desde el tercero y se congela lo que llega en el
+    body —lo que el cajero vio y confirmó—; el servidor no relee el tercero.
+  - **RUT:** en Chile, todo RUT que venga en el customer —también en una boleta— se valida
+    (rango, DV módulo 11) y se guarda normalizado (`76543210-3`); 400 si no es un RUT. En otro
+    país, sin chequeo (un CUIT usa otro DV). `normalizarRut` sale de `lectura-dte.service.ts` a
+    un archivo propio con el DV.
+  - **Largos del SII:** se imponen en el DTO (razón social 100, giro 40, dirección 70, comuna
+    20) y la pantalla muestra el contador sin dejar pasar: el cajero abrevia, el sistema nunca
+    trunca. Lo emitido tiene que ser igual a lo congelado.
+  - **Fuera:** la nota de crédito no copia `venta_customer` y debería llevar RUT + razón social
+    del receptor de la venta que corrige; queda para su propio frente, no está cubierto acá.
+
+### Qué se hizo
+
+- **Norma verificada en la fuente**, no en la entrada: la Factura exige también la **comuna**.
+- **Backend:** `venta_customer` y `terceros` ganan `giro varchar(40)` y `comuna varchar(20)`.
+  `CustomerVentaDto` suma los dos campos y los largos del SII (100/40/70/20, mensajes en
+  español). `resolverTipoDocumento` lee el país del tenant (`LEFT JOIN` al tipo) y
+  `receptorDeLaVenta` valida y normaliza el customer que se inserta. `normalizarRut` salió de
+  `lectura-dte.service.ts` a `common/utils/rut.util.ts`, con `rutValido`. `GET /tipos-documento`
+  suma `receptorCompleto` y `rutChileno`; `GET /ventas/:id` devuelve `giro` y `comuna`.
+- **Frontend:** `composables/useReceptor.ts` (gemelo de la regla, mismos casos de RUT que el
+  backend). `ClienteForm` suma giro y comuna con contador, marca obligatorios, avisa el RUT
+  inválido y precarga giro y comuna del tercero; `puedeCobrar` y el cobro del POS usan la misma
+  regla. `customerVacio()` reemplaza las cinco copias del formulario vacío. Terceros suma los dos
+  campos.
+
+### Qué lo fija
+
+- `rut.util.spec.ts` / `useReceptor.spec.ts`: los mismos casos, con DV calculados aparte.
+- `ventas.service.spec.ts`, "el receptor, según el país": mutante `esChile = false` → 8 tests
+  rojos; "un RUT malo es 400 aunque el nombre venga en blanco" (lo cazó la revisión de seguridad:
+  el nombre en blanco salía antes de mirar el RUT), rojo con el código anterior.
+  `ClienteForm.nuxt.spec.ts`: sin la precarga del giro, rojo.
+- e2e: `ventas.e2e-spec.ts` (Factura incompleta, RUT malo en factura y boleta, giro de 41, Factura
+  completa congelada y normalizada, flags de `GET /tipos-documento`) y `receptor-factura.e2e-spec.ts`
+  (terceros con giro y comuna, largos; un tenant argentino no valida el RUT). ⚠️ Este último **no
+  discrimina** el `LEFT JOIN`: el caso que cuida (Chile sin tipo que resolver) no se alcanza con el
+  catálogo sembrado.
+- Playwright: `frontend/e2e/ventas/factura-receptor.spec.ts` (Factura en el POS: frenada con solo el
+  nombre y con un RUT malo, congelada normalizada). Con `puedeCobrar` devuelto a "solo el nombre",
+  rojo en el primer paso.
+
+### Qué quedó afuera
+
+- La nota de crédito no copia el receptor → entrada nueva en `pendientes.md` § 6.
+- El receptor de AR/CO/MX → sumado al frente fiscal de esos países (en pausa).
+- El ticket impreso no suma giro ni comuna (formato, ADR-010), y el RUT sale normalizado.
+- El seed tenía RUT con DV malo. Se corrigió el del tercero "Juan Pérez" (`12.345.678-5`), que
+  precarga el receptor. Los RUT de las razones sociales del **emisor** (`76.123.456-7`, `96.654.390-9`)
+  siguen mal, y los e2e de compras-DTE dependen de ese valor. No pasan por esta validación.
+
 ## El `loteId` de una unidad con serie tiene que ser un lote vivo de su ítem y su tenant (cerrada 2026-10-03)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. La regla viva, en

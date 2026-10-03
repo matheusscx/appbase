@@ -1104,26 +1104,13 @@ transaccional nativo, con ALS — [ADR-020](../adr/020-contexto-transaccional-al
 Prisma y Drizzle tienen el mismo modelo manual de transacciones que TypeORM. No es un
 pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evaluación.
 
-- [ ] **La Factura exige receptor, pero el sistema solo le pide un nombre** (fiscal, **frente
-  propio**; anotado 2026-10-02 al cerrar "el servidor no exige el customer de un tipo
-  `customer_requerido`", a pedido de la orquestadora). Desde ese cierre el servidor rechaza una
-  Factura sin customer, y "customer" es **solo un nombre que no esté en blanco**: es lo que ya
-  exigía la pantalla. Según la orquestadora —dato a verificar contra la norma del SII al tomar la
-  entrada, no está en `PRODUCTO.md`—, una factura chilena exige del receptor **RUT, razón social,
-  giro y dirección**. Lo que hay hoy, medido el 2026-10-02:
-  - **`venta_customer`** guarda `nombre` (NOT NULL), `rut`, `direccion`, `telefono`, `email` y
-    `tercero_id`. **No hay columna de giro**, ni de comuna/ciudad; la razón social no es un campo
-    aparte (el único texto es `nombre`).
-  - **`CustomerVentaDto`** (`ventas/dto/create-venta.dto.ts`) exige `nombre` con `@MinLength(1)`
-    —sin `trim`; el servicio lo trimea al decidir `customer_requerido`— y deja `rut` y `direccion`
-    como `@IsString()` opcionales: **sin formato ni dígito verificador del RUT**, y sin exigirlos
-    para una Factura.
-  - Con `terceroId`, la venta guarda los datos **del body**, no los del tercero: `terceros` sí
-    tiene `nombre_legal` y `rut_fiscal`, pero `venta_customer` no los copia.
-  Decidir **en su propia sesión** (`CLAUDE.md`, ADR-010) qué campos exige cada tipo —¿una columna
-  por exigencia en `tipos_documento_tributario`, o un conjunto fijo para la Factura?—, si el giro
-  se congela en la venta y de dónde sale cuando hay tercero. El hecho fiscal se congela en la
-  transacción, así que lo que falte hoy no se completa después en una venta ya hecha.
+- [ ] **La nota de crédito no lleva el receptor de la venta que corrige** (fiscal, **frente
+  propio**; anotado 2026-10-03 al cerrar "La Factura exige receptor", ver
+  [`resueltos.md`](resueltos.md)). En la nota de crédito (61) el SII exige `RUTRecep` y
+  `RznSocRecep` (Formato DTE v2.5, zona Receptor; giro, dirección y comuna son opcionales ahí).
+  Hoy la NC de una Factura no escribe `venta_customer`: el receptor queda solo en la venta
+  original. Decidir **en su propia sesión** si la NC congela su propio receptor (copiado de la
+  venta que corrige) o lo lee de ella al emitir, y verificarlo contra la serie de notas.
 - [ ] **Un reembolso de pasarela que se reintenta sale dos veces por el proveedor** (fiscal y
   plata, **frente propio**; anotado el 2026-10-03 por el frente de la nota de crédito
   idempotente, que lo encontró leyendo y lo **midió** con un e2e temporal en
@@ -1636,6 +1623,13 @@ distintas —ver el punto 🟡 más abajo y la
 Lo destapó la **revisión de rama** del frente del redondeo por país, que es la única que
 podía verlo: la tarea que siembra una provincia por país nuevo y la que da de alta el tenant
 son correctas por separado.
+
+**El receptor de la factura de cada país** (sumado 2026-10-03, al cerrar el de Chile, ver
+[`resueltos.md`](resueltos.md)): `VentasService.receptorDeLaVenta` solo tiene escrita la regla
+chilena (receptor completo de la Factura, RUT con DV módulo 11). Para AR/CO/MX,
+`customer_requerido` exige solo el nombre y el identificador fiscal no se valida (un CUIT, un
+NIT o un RFC tienen su propio dígito o formato). Cuando se tome cada país: qué receptor exige su
+documento y cómo se valida su identificador.
 
 **Qué pasa:** sembrar la provincia volvió alcanzable `POST /admin/tenants` con un
 `provinciaId` de AR/CO/MX. El país gobierna **tres** catálogos, y hasta este frente los tres

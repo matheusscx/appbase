@@ -699,7 +699,7 @@ describe('Ventas (e2e)', () => {
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '200.0000' }],
-          customer: { nombre: 'Juan Pérez', rut: '12.345.678-9' },
+          customer: { nombre: 'Juan Pérez', rut: '12.345.678-5' },
         });
       expect(res.status).toBe(201);
       ventaId = (res.body as VentaResponse).id;
@@ -1208,8 +1208,15 @@ describe('Ventas (e2e)', () => {
     // lógica al final (el e2e no borra).
     const INACTIVO_CHILE_ID = '550e8400-e29b-41d4-a716-446655440999';
     const CHILE_ID = '550e8400-e29b-41d4-a716-446655440000';
-    // La Factura es `customer_requerido` en el seed: la venta tiene que traerlo.
-    const RECEPTOR = { nombre: 'Comercial Andes SpA', rut: '76.123.456-7' };
+    // La Factura es `customer_requerido` en el seed: la venta tiene que traer el
+    // receptor completo que exige el SII (Formato DTE v2.5, zona Receptor).
+    const RECEPTOR = {
+      nombre: 'Comercial Andes SpA',
+      rut: '76.123.456-0',
+      giro: 'Venta de artículos de ferretería',
+      direccion: 'Av. Matta 1234',
+      comuna: 'Santiago',
+    };
     const MENSAJE_CUSTOMER_REQUERIDO =
       'Este tipo de documento requiere los datos del cliente';
 
@@ -1371,6 +1378,86 @@ describe('Ventas (e2e)', () => {
         MENSAJE_CUSTOMER_REQUERIDO,
       );
       expect(await ventasDelTenant()).toBe(antes);
+    });
+
+    it('la factura con solo el nombre responde 400 nombrando lo que falta, y no crea la venta', async () => {
+      const antes = await ventasDelTenant();
+      const res = await crear({
+        tipoDocumentoId: FACTURA_CHILE_ID,
+        customer: { nombre: 'Comercial Andes SpA' },
+      });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toBe(
+        'Este tipo de documento requiere del cliente: RUT, giro, dirección, comuna',
+      );
+      expect(await ventasDelTenant()).toBe(antes);
+    });
+
+    it('un RUT con el DV equivocado responde 400, en la factura y en la boleta', async () => {
+      const antes = await ventasDelTenant();
+      for (const tipoDocumentoId of [FACTURA_CHILE_ID, BOLETA_ID]) {
+        const res = await crear({
+          tipoDocumentoId,
+          customer: { ...RECEPTOR, rut: '76.123.456-7' },
+        });
+        expect(res.status).toBe(400);
+        expect((res.body as { message: string }).message).toBe(
+          'El RUT del cliente no es válido',
+        );
+      }
+      expect(await ventasDelTenant()).toBe(antes);
+    });
+
+    it('un giro de 41 caracteres responde 400 del pipe: el sistema no trunca', async () => {
+      const antes = await ventasDelTenant();
+      const res = await crear({
+        tipoDocumentoId: FACTURA_CHILE_ID,
+        customer: { ...RECEPTOR, giro: 'x'.repeat(41) },
+      });
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain(
+        'El giro no puede pasar de 40 caracteres',
+      );
+      expect(await ventasDelTenant()).toBe(antes);
+    });
+
+    it('la factura completa congela el RUT normalizado, el giro y la comuna, y el detalle los devuelve', async () => {
+      const res = await crear({
+        tipoDocumentoId: FACTURA_CHILE_ID,
+        customer: { ...RECEPTOR, comuna: ' Santiago ' },
+      });
+      expect(res.status).toBe(201);
+      const detalle = await request(app.getHttpServer())
+        .get(`/api/ventas/${(res.body as VentaResponse).id}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(detalle.status).toBe(200);
+      expect((detalle.body as { customer: unknown }).customer).toMatchObject({
+        nombre: 'Comercial Andes SpA',
+        rut: '76123456-0',
+        giro: 'Venta de artículos de ferretería',
+        direccion: 'Av. Matta 1234',
+        comuna: 'Santiago',
+      });
+    });
+
+    it('GET /tipos-documento dice qué tipo exige el receptor completo y que el RUT es chileno', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/tipos-documento')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const tipos = res.body as {
+        id: string;
+        receptorCompleto: boolean;
+        rutChileno: boolean;
+      }[];
+      expect(tipos.find((t) => t.id === FACTURA_CHILE_ID)).toMatchObject({
+        receptorCompleto: true,
+        rutChileno: true,
+      });
+      expect(tipos.find((t) => t.id === BOLETA_ID)).toMatchObject({
+        receptorCompleto: false,
+        rutChileno: true,
+      });
     });
 
     // `@ValidateNested` deja pasar un array: con la factura caía en un TypeError

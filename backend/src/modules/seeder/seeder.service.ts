@@ -3644,7 +3644,9 @@ export class SeederService implements OnApplicationBootstrap {
         tenantId: PARIS,
         tipo: 'persona_natural',
         nombre: 'Juan Pérez',
-        rut: '12.345.678-9',
+        // DV calculado: desde el 2026-10-03 la venta valida el RUT en Chile, y
+        // con el '-9' que tenía, elegirlo en el POS frenaba el cobro.
+        rut: '12.345.678-5',
         nombreLegal: null,
         rutFiscal: null,
         correo: 'juan.perez@gmail.com',

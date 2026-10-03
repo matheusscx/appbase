@@ -634,9 +634,10 @@ describe('GET /ventas/:id/boleta — reimprimir boleta (e2e)', () => {
       },
     );
 
+    // El RUT se congela normalizado (Chile, `receptorDeLaVenta`).
     expect(venta.boleta.customer).toEqual({
       nombre: expect.stringContaining('Cliente boleta E2E'),
-      rut: '11.111.111-1',
+      rut: '11111111-1',
       direccion: 'Calle Falsa 123',
     });
 

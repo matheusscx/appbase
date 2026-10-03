@@ -269,6 +269,8 @@ CREATE TABLE "terceros" (
   "correo"         VARCHAR(100),
   "telefono"       VARCHAR(50),
   "direccion"      TEXT,
+  "giro"           VARCHAR(40),           -- glosa del giro: el SII la corta en 40
+  "comuna"         VARCHAR(20),           -- el SII la corta en 20
   "activo"         BOOLEAN     NOT NULL DEFAULT true,
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
@@ -1912,6 +1914,8 @@ CREATE TABLE "venta_customer" (
   "nombre"         TEXT NOT NULL,
   "rut"            TEXT,
   "direccion"      TEXT,
+  "giro"           VARCHAR(40),  -- receptor de la Factura (SII, Formato DTE, GiroRecep)
+  "comuna"         VARCHAR(20),  -- receptor de la Factura (SII, Formato DTE, CmnaRecep)
   "telefono"       TEXT,
   "email"          TEXT,
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),

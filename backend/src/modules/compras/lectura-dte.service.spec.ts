@@ -5,22 +5,10 @@ import type { LecturaDteDto } from './dto/lectura-dte.dto';
 import {
   LecturaDteService,
   normalizarClave,
-  normalizarRut,
   planAprendizaje,
   type CodigoVivo,
   type EntradaAprendizaje,
 } from './lectura-dte.service';
-
-describe('normalizarRut', () => {
-  it.each([
-    ['76.543.210-3', '76543210-3'],
-    ['76543210-3', '76543210-3'],
-    ['765432103', '76543210-3'],
-    [' 9.876.543-k ', '9876543-K'],
-  ])('%s → %s', (entrada, salida) => {
-    expect(normalizarRut(entrada)).toBe(salida);
-  });
-});
 
 describe('normalizarClave', () => {
   it('mayúsculas, sin bordes, espacios colapsados', () => {

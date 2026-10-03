@@ -571,3 +571,6 @@ Decisiones y evidencia:
 - [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md) — regla transversal: capturar/congelar el hecho fiscal ahora, diferir DTE.
 - [motor-calculo-precios.md](./motor-calculo-precios.md) — motor que consume estos impuestos.
 - [ventas.md](./ventas.md) — persistencia de `venta_detalles` y notas de crédito.
+- [ventas.md § El receptor de la Factura](./ventas.md) — el otro hecho fiscal que se congela en
+  la venta: RUT, razón social, giro, dirección y comuna del receptor (2026-10-03). No es un
+  impuesto, pero sin él la Factura no se puede emitir aunque los baldes estén bien.

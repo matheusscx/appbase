@@ -1,24 +1,9 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Db } from '../../common/db/db.service';
+import { normalizarRut } from '../../common/utils/rut.util';
 import { TIPOS_CON_STOCK } from './presentaciones-compra.service';
 import type { LecturaDteDto } from './dto/lectura-dte.dto';
 import type { ApartadaDteDto, LineaCompraDto } from './dto/compra-borrador.dto';
-
-/**
- * RUT chileno normalizado: sin puntos ni espacios, `K` mayúscula, guion antes
- * del DV. `'76.543.210-3'` → `'76543210-3'`; `'765432103'` → `'76543210-3'`
- * (spec compras-xml-dte § 3.1).
- */
-export function normalizarRut(rut: string): string {
-  const limpio = rut
-    .trim()
-    .toUpperCase()
-    .replace(/[.\s]/g, '')
-    .replace(/-/g, '');
-  const cuerpo = limpio.slice(0, -1);
-  const dv = limpio.slice(-1);
-  return `${cuerpo}-${dv}`;
-}
 
 /**
  * `trim`, mayúsculas, espacios internos colapsados (spec § 3.2). Hermana de

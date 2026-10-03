@@ -126,13 +126,24 @@ export class PagoVentaDto {
   claseDocumento?: ClaseDocumentoMaquina;
 }
 
+/**
+ * El receptor de la venta. Los largos son los del SII (Formato DTE v2.5, zona
+ * Receptor) y valen para todo país: lo que se congela es lo que se emitiría, y
+ * el sistema nunca trunca. Qué campos exige cada tipo y el chequeo del RUT
+ * dependen del país: `resolverTipoDocumento`.
+ */
 export class CustomerVentaDto {
   @IsOptional()
   @IsUUID()
   terceroId?: string;
 
+  /** Nombre o razón social (`RznSocRecep`). */
   @IsString()
   @MinLength(1)
+  @MaxLength(100, {
+    message:
+      'La razón social no puede pasar de 100 caracteres (límite del SII)',
+  })
   nombre: string;
 
   @IsOptional()
@@ -141,7 +152,24 @@ export class CustomerVentaDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(70, {
+    message: 'La dirección no puede pasar de 70 caracteres (límite del SII)',
+  })
   direccion?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40, {
+    message: 'El giro no puede pasar de 40 caracteres (límite del SII)',
+  })
+  giro?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20, {
+    message: 'La comuna no puede pasar de 20 caracteres (límite del SII)',
+  })
+  comuna?: string;
 
   @IsOptional()
   @IsString()

@@ -42,6 +42,18 @@ export class VentaCustomer {
   @Column({ type: 'text', nullable: true })
   direccion: string | null;
 
+  /**
+   * Giro y comuna del receptor: con RUT, razón social (`nombre`) y dirección,
+   * lo que la Factura chilena exige (SII, Formato DTE v2.5, `GiroRecep` y
+   * `CmnaRecep`). Se congela lo que mandó la pantalla, no lo que diga hoy el
+   * tercero. Quién los exige: `resolverTipoDocumento`.
+   */
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  giro: string | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  comuna: string | null;
+
   @Column({ type: 'text', nullable: true })
   telefono: string | null;
 

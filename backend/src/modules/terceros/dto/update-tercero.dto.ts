@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
   ValidateIf,
 } from 'class-validator';
@@ -50,6 +51,20 @@ export class UpdateTerceroDto {
   @IsOptional()
   @IsString()
   direccion?: string;
+
+  /**
+   * Giro y comuna con los largos del SII (40 y 20, Formato DTE v2.5): la venta
+   * los precarga como receptor de una Factura, y ahí no se aceptan más largos.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  giro?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  comuna?: string;
 
   @ValidateIf((_o, v) => v !== undefined)
   @IsBoolean()
