@@ -7842,14 +7842,14 @@ describe('salones — productos con serie: el garzón elige la unidad', () => {
   })
 
   it('si el servidor rechaza el cambio muestra su mensaje y deja la línea como estaba', async () => {
-    // El caso real: bajar de lo ya despachado a cocina. La regla es del servidor; la pantalla
-    // no la duplica, solo muestra lo que él contesta.
+    // El caso real: la unidad que entra la apartó otra mesa entre que se abrió el selector y se
+    // confirmó. La regla es del servidor; la pantalla solo muestra lo que él contesta.
     catalogoItemsMock = [iphone()]
     itemsPorIdsMock = [iphone()]
-    cuentasDeLaMesa = [cuentaCon([lineaSerie({ cantidadEnviada: '2.0000' })])]
-    unidadesVendiblesMock = []
+    cuentasDeLaMesa = [cuentaCon([lineaSerie()])]
+    unidadesVendiblesMock = [vendible(U3)]
     const rechazo = new Error('x') as Error & { data?: unknown }
-    rechazo.data = { message: 'No se puede bajar de lo ya despachado' }
+    rechazo.data = { message: `La unidad ${U3.serie} está apartada en la cuenta de Mesa 2` }
     patchUnidadesRechazo = rechazo
 
     const wrapper = await montar()
@@ -7857,10 +7857,33 @@ describe('salones — productos con serie: el garzón elige la unidad', () => {
     botonCambiarUnidades()!.click()
     await esperar(30)
     await tildar(U2.serie)
+    await tildar(U3.serie)
     await confirmarUnidades()
 
-    expect(toasts.some(t => t.color === 'error' && t.title === 'No se puede bajar de lo ya despachado')).toBe(true)
+    expect(toasts.some(t => t.color === 'error' && t.title === `La unidad ${U3.serie} está apartada en la cuenta de Mesa 2`)).toBe(true)
     expect(drawerMesa()!.textContent).toContain(U2.serie)
+  })
+
+  it('en una línea despachada las unidades que ya están no se desmarcan: solo se agregan', async () => {
+    // Están en la mesa: sacarlas por acá las volvía a ofrecer al POS. Se sacan con Anular.
+    catalogoItemsMock = [iphone()]
+    itemsPorIdsMock = [iphone()]
+    cuentasDeLaMesa = [cuentaCon([lineaSerie({ cantidadEnviada: '1.0000' })])]
+    unidadesVendiblesMock = [vendible(U3)]
+    cuentaTrasCambiarUnidades = cuentaCon([
+      lineaSerie({ cantidad: '3.0000', cantidadEnviada: '1.0000', unidades: [U1, U2, U3] }),
+    ])
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    botonCambiarUnidades()!.click()
+    await esperar(30)
+    await tildar(U2.serie) // no sale
+    expect(seriesMarcadas()).toEqual([U1.serie, U2.serie])
+    await tildar(U3.serie) // entra
+    await confirmarUnidades()
+
+    expect(patchesDeUnidades).toEqual([{ lineaId: 'linea-1', body: { unidadIds: ['u-1', 'u-2', 'u-3'] } }])
   })
 
   it('anular una línea con serie manda las unidades marcadas y la cantidad es cuántas son', async () => {

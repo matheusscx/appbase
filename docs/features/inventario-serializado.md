@@ -113,7 +113,7 @@ Response (200):
 
 ### PATCH /items/:id/stock — modo serie salida
 
-`unidadIds` es **obligatorio** y trae tantas como `cantidad`: el sistema no elige.
+`unidadIds` es **obligatorio** y trae tantas como `cantidad`, hasta 200 (el mismo techo que la venta, el salón y los traslados): el sistema no elige.
 
 ```json
 {
@@ -205,7 +205,8 @@ procedencia, porque "owner, fecha" a secas se lee como congelada):
 | La tienda online no vende productos con serie | Owner, 2026-10-03, AskUserQuestion: *"No se venden online"* (recomendada) sobre *"Online sale automática"*. Sin cajero no hay quién elija, y rechazar después de Webpay deja un cobro sin venta |
 | La serie vendida se ve en el detalle de la venta | Owner, 2026-10-03, AskUserQuestion: *"En el detalle de la venta"* (recomendada). La boleta impresa no cambia (es materia fiscal, frente propio) |
 | La merma rechaza el producto con serie por ahora | Owner, 2026-10-03, AskUserQuestion: *"La merma lo rechaza"* (recomendada) |
-| Cancelar con motivo una cuenta con una línea con serie despachada a medias se frena | Owner, 2026-10-03, AskUserQuestion: *"Pedir anular primero"* (recomendada) sobre *"Dar de baja todas"* |
+| Cancelar con motivo una cuenta con una línea con serie despachada a medias se frena, salvo con "no elaborado" | Owner, 2026-10-03, AskUserQuestion: *"Pedir anular primero"* (recomendada) sobre *"Dar de baja todas"*. La excepción del "no elaborado" (ninguna unidad sale de inventario, no hay cuál elegir) la tomó el controlador del frente al implementar: [`salones-mesas.md`](./salones-mesas.md) |
+| En una línea del salón con algo despachado, las unidades que tiene no se cambian ni se sacan: solo se agregan | Owner, 2026-10-03, *"No se cambia"* (recomendada) sobre *"Se cambia, con registro"* y *"Dejarlo como está"*, en una AskUserQuestion de la Sesión de esfuerzo máximo que le llegó a la orquestadora. La unidad despachada está en la mesa: sacarla de la línea la volvía a ofrecer, el POS la vendía y al cobrar el kardex registraba la otra. Para sacar una, Anular |
 
 **Los caminos, cada uno con lo que hace:**
 
@@ -266,11 +267,13 @@ el 400 de la API es el que manda.
 - **Detalle de venta:** `GET /ventas/:id` trae `unidades: [{ serie, condicion }]` en la línea de un
   producto con serie, leídas del kardex en una consulta por venta. Se agrupan **por ítem**, no por
   línea (el kardex no guarda a qué línea pertenece cada salida): con dos líneas del mismo producto
-  con serie —solo pasa en el salón, con el precio cambiado entre pedidos; el POS las fusiona— cada
+  con serie —solo pasa en el salón, con el precio o las reglas cambiados entre pedidos; el POS las fusiona— cada
   una muestra todas las unidades de ese producto en la venta. Se arregla guardando las unidades en
   `venta_detalles`; nadie lo pidió.
 - **Selector** (`UnidadesSerieModal`): serie, condición como badge, garantía, buscador por serie
   (sirve para pegar o escanear el IMEI) y selección múltiple; la cantidad es cuántas se eligieron.
+  En una línea del salón ya despachada, las unidades que tiene se ven marcadas y no se desmarcan
+  (prop `fijas`), con un aviso que manda a Anular.
 
 #### Lo que sigue abierto
 
@@ -428,7 +431,7 @@ espacios"* en `compras.e2e-spec.ts`.
 - Modo `cantidad`: igual que antes (cantidad numérica).
 - Modo `serie` entrada: agregar N series.
 - Modo `serie` salida: checkboxes sobre unidades disponibles (cargadas desde `GET /items/:id/unidades?estado=disponible`).
-- Venta (POS y salón): al tocar un producto con serie se abre el selector de unidades (`UnidadesSerieModal`); la línea guarda sus unidades, las muestra y no deja editar la cantidad a mano ("Cambiar unidades" reabre el selector). Anular una línea con serie pide con casillas cuáles se anulan. Mermas muestra el aviso y no deja registrar.
+- Venta (POS y salón): al tocar un producto con serie se abre el selector de unidades (`UnidadesSerieModal`); la línea guarda sus unidades, las muestra y no deja editar la cantidad a mano ("Cambiar unidades" reabre el selector; en una línea del salón ya despachada, las que tiene no se desmarcan). Anular una línea con serie pide con casillas cuáles se anulan. Mermas muestra el aviso y no deja registrar.
 - Modo `lote` entrada: código de lote + fechas + cantidad.
 - Modo `lote` salida: ID del lote + cantidad a retirar.
 

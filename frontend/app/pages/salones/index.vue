@@ -377,6 +377,8 @@ const unidadesCuentaId = ref<string | null>(null)
 const unidadesLineaId = ref<string | null>(null)
 const unidadesSeleccionadas = ref<UnidadElegida[]>([])
 const unidadesExcluir = ref<string[]>([])
+/** Las de una línea ya despachada: están en la mesa, se agregan pero no se sacan (se anulan). */
+const unidadesFijas = ref<string[]>([])
 /** El `PATCH` de unidades en vuelo: un segundo cambio encima chocaría con el conjunto que el primero deja. */
 const guardandoUnidades = ref(false)
 
@@ -2206,6 +2208,7 @@ function abrirUnidades(item: { id: string, nombre: string }, linea: CuentaLineaD
   unidadesItem.value = { id: item.id, nombre: item.nombre }
   unidadesLineaId.value = linea?.id ?? null
   unidadesSeleccionadas.value = linea?.unidades ?? []
+  unidadesFijas.value = linea && yaEnviadaACocina(linea) ? (linea.unidades ?? []).map(u => u.id) : []
   unidadesExcluir.value = activeCuenta.value.lineas
     .filter(l => l.itemId === item.id && l.id !== linea?.id)
     .flatMap(l => (l.unidades ?? []).map(u => u.id))
@@ -3476,6 +3479,7 @@ async function cerrarCuentaConPin(
         :item="unidadesItem"
         :seleccionadas="unidadesSeleccionadas"
         :excluir="unidadesExcluir"
+        :fijas="unidadesFijas"
         @confirm="onUnidadesConfirm"
       />
 

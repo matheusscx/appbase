@@ -199,6 +199,41 @@ describe('UnidadesSerieModal', () => {
     ])
   })
 
+  it('las fijas abren marcadas, no se pueden desmarcar y se confirman junto con las nuevas', async () => {
+    // Salón, línea ya despachada: las que están en la mesa no salen por acá, se anulan.
+    const wrapper = await abrir({
+      seleccionadas: [
+        { id: 'u-1', serie: '350000000000001', condicion: 'nuevo' },
+        { id: 'u-2', serie: '350000000000002', condicion: 'usado' },
+      ],
+      fijas: ['u-1', 'u-2'],
+    })
+
+    await tildar('350000000000001')
+    expect(marcadas()).toEqual(['350000000000001', '350000000000002'])
+    const fija = filas().find(f => f.getAttribute('data-serie') === '350000000000001')!
+    expect(fija.querySelector('[role="checkbox"]')!.hasAttribute('disabled')).toBe(true)
+    expect(dialogo().querySelector('[data-qa="unidades-fijas-aviso"]')?.textContent).toMatch(/anul/i)
+
+    await tildar('351111111111111')
+    botonConfirmar().click()
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(wrapper.emitted('confirm')![0]![0]).toEqual([
+      { id: 'u-1', serie: '350000000000001', condicion: 'nuevo' },
+      { id: 'u-2', serie: '350000000000002', condicion: 'usado' },
+      { id: 'u-3', serie: '351111111111111', condicion: 'reacondicionado' },
+    ])
+  })
+
+  it('sin fijas no hay aviso y todas se pueden desmarcar', async () => {
+    await abrir({ seleccionadas: [{ id: 'u-1', serie: '350000000000001', condicion: 'nuevo' }] })
+
+    expect(dialogo().querySelector('[data-qa="unidades-fijas-aviso"]')).toBeNull()
+    await tildar('350000000000001')
+    expect(marcadas()).toEqual([])
+  })
+
   it('si la carga falla no dice que el local no tiene unidades: avisa por toast y muestra el error', async () => {
     apiFetch.mockRejectedValue(new Error('boom'))
     await abrir()

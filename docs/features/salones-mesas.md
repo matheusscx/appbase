@@ -831,7 +831,7 @@ Cada puerta mantiene la invariante:
 | Puerta | Con serie |
 |---|---|
 | `agregarLinea` | `unidadIds` obligatorio, validado con `InventarioService.bloquearUnidadesParaSalida` bajo el lock de la cuenta y del producto. Pedir una unidad que **esta misma cuenta** ya tiene en otra línea también es 400 (sería pedirla dos veces). Si la línea se fusiona con una igual, las unidades se suman |
-| `actualizarLinea` | Se manda el conjunto nuevo (`unidadIds`) y la cantidad se deriva; mandar la cantidad sin unidades es 400, y al revés en un producto sin serie. Bajar de `cantidad_enviada` sigue rechazado. Solo se validan las que entran; las que salen quedan libres solas |
+| `actualizarLinea` | Se manda el conjunto nuevo (`unidadIds`) y la cantidad se deriva; mandar la cantidad sin unidades es 400, y al revés en un producto sin serie. Solo se validan las que entran; las que salen quedan libres solas. **Con algo despachado** (`cantidad_enviada > 0`, entera o a medias) el conjunto tiene que contener **todas** las unidades que la línea ya tiene: agregar sí, sacar o cambiar es 400 (*"Ya se despachó «Nombre»: para sacar o cambiar una unidad, anulala"*). La despachada está en la mesa: sacarla la volvía a ofrecer y el POS la vendía. A medias tampoco se saca ninguna porque no se sabe cuál salió, el mismo criterio que `cancelarConMotivo` (owner, 2026-10-03, *"No se cambia"*). Si el garzón registró la unidad equivocada, la anula con "no elaborado" (queda libre) y pide la correcta |
 | `quitarLinea` | Sin cambios: solo es posible sin nada despachado, y libera las unidades |
 | `anularLinea` | `unidadIds` obligatorio: tantas como `cantidad` a anular y un subconjunto de las de la línea. Con merma o cortesía esas unidades pasan a `baja` por el chokepoint (con la cuenta como dueña de la salida); con "no elaborado" solo salen de la línea y quedan libres. Un rechazo del chokepoint sobre unidades nombradas **no** se degrada a advertencia: es una invariante rota y la anulación aborta |
 | `cancelarConMotivo` | Con merma o cortesía: si la línea está despachada entera se anulan todas sus unidades; si se despachó **a medias** es 400 (*"Anulá primero «Nombre» eligiendo cuál salió"*), porque la línea no dice cuáles salieron (owner, 2026-10-03, AskUserQuestion: *"Pedir anular primero"*, recomendada, sobre *"Dar de baja todas"*). Con "no elaborado" **no se frena**: ninguna unidad sale de inventario, así que no hay "cuál se perdió" que contestar y todas quedan libres. Sin nada despachado, se liberan |
@@ -849,7 +849,9 @@ serie y esto corre cada vez que se abre o refresca una mesa).
 
 **Pantalla:** agregar un producto con serie abre el selector (`UnidadesSerieModal`, el mismo del
 POS); la línea muestra sus series y, en lugar del input de cantidad, tiene "Cambiar unidades", que
-reabre el selector con las de la línea marcadas y manda el conjunto nuevo por `PATCH`. Anular una
+reabre el selector con las de la línea marcadas y manda el conjunto nuevo por `PATCH`. En una línea
+ya despachada las que tiene no se pueden desmarcar (solo agregar), con un aviso que manda a Anular:
+el mismo `cantidad_enviada > 0` que el servidor. Anular una
 línea con serie pide con casillas cuáles se anulan, en vez de un número. El selector pide
 `GET /items/:id/unidades?vendibles=true`, que es `Items:Leer`: el mismo permiso que ya hace falta
 para ver el catálogo de la mesa, así que no se agrega ninguno.

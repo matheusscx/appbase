@@ -123,8 +123,10 @@ export class AjusteStockDto {
   @IsOptional()
   series?: SerieAjusteInputDto[];
 
-  // Modo 'serie' — salida: IDs de unidades a consumir
+  // Modo 'serie' — salida: IDs de unidades a consumir. Con techo, mismo 200 que
+  // `LineaVentaDto`: la salida lockea todas adentro del lock del producto.
   @IsArray()
+  @ArrayMaxSize(200)
   @IsUUID('4', { each: true })
   @IsOptional()
   unidadIds?: string[];

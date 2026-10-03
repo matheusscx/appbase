@@ -1135,6 +1135,24 @@ export class SalonesService {
             cantidadCanonica: resuelta.cantidadCanonica,
             unidadCodigoPresentacion: dto.unidadCodigoPresentacion,
           });
+          // **Con algo despachado, las unidades que están no se tocan: solo se
+          // agregan** (owner, 2026-10-03). La unidad despachada está en la mesa;
+          // sacarla de la línea la volvía a ofrecer, el POS la vendía y al cobrar
+          // el kardex registraba la otra. El tope de cantidad de abajo no lo ve:
+          // cambiar una por otra no baja la cantidad. Despachada a medias tampoco
+          // se saca ninguna, porque no se sabe cuál salió (el mismo criterio que
+          // el "Anulá primero" de `cancelarConMotivo`). Para sacar una está
+          // Anular, que pregunta cuál y con qué motivo. Va antes del tope para
+          // que sacar una dé este mensaje y no el de bajar la cantidad.
+          if (
+            item.modoInventario === 'serie' &&
+            new Decimal(linea.cantidadEnviada).greaterThan(0) &&
+            linea.unidadIds.some((id) => !unidadIds.includes(id))
+          ) {
+            throw new BadRequestException(
+              `Ya se despachó «${item.nombre}»: para sacar o cambiar una unidad, anulala`,
+            );
+          }
           // Mismo motivo que el guard de `quitarLinea`, por el otro camino: bajar
           // la cantidad por debajo de lo ya despachado regala la diferencia sin
           // registro. `actualizarLinea` recibe un valor ABSOLUTO, no un delta, así

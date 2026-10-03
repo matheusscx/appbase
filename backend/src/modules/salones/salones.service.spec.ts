@@ -2388,15 +2388,45 @@ describe('SalonesService', () => {
         expect(items.validarStockAlPedir).not.toHaveBeenCalled();
       });
 
-      it('no baja de lo ya despachado: el tope de cantidad_enviada sigue igual', async () => {
-        linea.cantidadEnviada = '2';
+      describe('con algo despachado', () => {
+        const mandaAAnular =
+          'Ya se despachó «Celular»: para sacar o cambiar una unidad, anulala';
 
-        await expect(
-          service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
-            unidadIds: [U1],
-          }),
-        ).rejects.toThrow(/Ya se despacharon 2/);
-        expect(manager.save).not.toHaveBeenCalled();
+        it('cambiar una unidad responde 400 mandando a anular y no aparta la nueva', async () => {
+          linea.cantidadEnviada = '2';
+
+          await expect(
+            service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+              unidadIds: [U1, U3],
+            }),
+          ).rejects.toThrow(mandaAAnular);
+          expect(inventario.bloquearUnidadesParaSalida).not.toHaveBeenCalled();
+          expect(manager.save).not.toHaveBeenCalled();
+          expect(linea.unidadIds).toEqual([U1, U2]);
+        });
+
+        it('sacar una unidad responde 400 mandando a anular, aunque esté despachada a medias', async () => {
+          // 2 pedidas, 1 despachada: no se sabe cuál salió, así que ninguna se saca.
+          linea.cantidadEnviada = '1';
+
+          await expect(
+            service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+              unidadIds: [U1],
+            }),
+          ).rejects.toThrow(mandaAAnular);
+          expect(manager.save).not.toHaveBeenCalled();
+        });
+
+        it('agregar una unidad sí: las que estaban se quedan y entra la nueva', async () => {
+          linea.cantidadEnviada = '2';
+
+          await service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+            unidadIds: [U1, U2, U3],
+          });
+
+          expect(linea.unidadIds).toEqual([U1, U2, U3]);
+          expect(linea.cantidad).toBe('3');
+        });
       });
 
       it('una unidad repetida o una cantidad que no coincide responde 400', async () => {

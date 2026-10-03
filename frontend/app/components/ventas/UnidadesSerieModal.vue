@@ -12,7 +12,10 @@ import type { UnidadElegida } from '~/composables/useUnidadesSerie'
  * el llamador pasa completas: en el salón las de la propia línea están apartadas
  * por esa misma cuenta y el servidor no las devuelve como vendibles, pero tienen
  * que verse marcadas para poder desmarcarlas. Las `excluir` son las de otras
- * líneas de la misma pantalla y no se ofrecen.
+ * líneas de la misma pantalla y no se ofrecen. Las `fijas` se ven marcadas y no
+ * se desmarcan: en el salón, las de una línea ya despachada están en la mesa y se
+ * sacan con Anular (owner, 2026-10-03); el servidor rechaza el conjunto que no
+ * las contenga.
  */
 const props = defineProps<{
   item: { id: string, nombre: string }
@@ -20,6 +23,8 @@ const props = defineProps<{
   seleccionadas: UnidadElegida[]
   /** Ids de otras líneas del mismo ítem en esta pantalla: no se muestran. */
   excluir: string[]
+  /** Ids de las seleccionadas que no se pueden desmarcar. */
+  fijas?: string[]
 }>()
 
 const emit = defineEmits<{ confirm: [unidades: UnidadElegida[]] }>()
@@ -85,6 +90,10 @@ function estaElegida(id: string): boolean {
   return elegidas.value.includes(id)
 }
 
+function esFija(id: string): boolean {
+  return props.fijas?.includes(id) ?? false
+}
+
 function alternar(id: string, marcada: boolean | 'indeterminate') {
   const sin = elegidas.value.filter(e => e !== id)
   elegidas.value = marcada === true ? [...sin, id] : sin
@@ -122,6 +131,9 @@ function confirmar() {
   >
     <template #body>
       <div class="flex flex-col gap-3">
+        <p v-if="fijas?.length" class="text-xs text-muted" data-qa="unidades-fijas-aviso">
+          Ya se despachó: las unidades que tiene la línea no se sacan por acá. Para sacar o cambiar una, anulala.
+        </p>
         <UInput
           v-model="busqueda"
           icon="i-lucide-search"
@@ -154,6 +166,7 @@ function confirmar() {
           >
             <UCheckbox
               :model-value="estaElegida(f.id)"
+              :disabled="esFija(f.id)"
               @update:model-value="(v: boolean | 'indeterminate') => alternar(f.id, v)"
             >
               <template #label>

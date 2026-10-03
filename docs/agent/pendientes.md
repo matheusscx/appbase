@@ -1038,44 +1038,6 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   precio congelado de la línea (`dd54f81d`). El motor de precios y lo fiscal no se tocan.
   Escribe en `movimientos_inventario`: va en su propio frente.
 
-### Una línea del salón ya despachada no deja cambiar sus unidades con serie (owner, 2026-10-03)
-
-- [ ] **"Cambiar unidades" en una línea despachada suelta en el inventario la unidad que está en
-  la mesa, y el POS la vende** (backend + frontend, `SalonesService.actualizarLinea` y
-  `pages/salones/index.vue`, botón "Cambiar unidades"; lo midió la Sesión de esfuerzo máximo con
-  un e2e en un worktree aislado, ya borrado, al revisar el frente de Serie `a09cd856`).
-  **La escena:** una línea con 2 celulares, los dos despachados (`cantidad_enviada` 2 =
-  `cantidad`). Un `PATCH /cuentas/:id/lineas/:lineaId` cambia el usado por el reacondicionado y
-  responde 200. El usado, que está en la mesa, vuelve a `GET /items/:id/unidades?vendibles=true`,
-  y un `POST /ventas` del POS lo vende (201, queda `vendido`). Al cobrar la mesa, el kardex
-  registra la salida del reacondicionado, que sigue en el local. **Causa:** `actualizarLinea`
-  solo exige `cantidad ≥ cantidad_enviada` y no mira qué unidades son. El plan de Serie decía "el
-  tope de `cantidad_enviada` sigue igual", y ninguna revisión miró el caso.
-  ✅ **DECIDIDO (owner, 2026-10-03): "No se cambia".** Cómo se decidió: AskUserQuestion de la
-  Sesión de esfuerzo máximo, que le llegó a la orquestadora por mensaje entre sesiones. Eligió la
-  recomendada por sobre *"Se cambia, con registro"* y *"Dejarlo como está"*.
-  **Cómo arrancarlo:**
-  - En una línea con serie con `cantidad_enviada > 0`, el `PATCH` solo acepta un conjunto que
-    contenga **todas** las unidades actuales. Agregar unidades sí; sacar o cambiar alguna da 400
-    con un mensaje que mande a Anular. Vale también si la línea está despachada a medias, porque
-    no se sabe cuál salió: es el mismo criterio que *"Pedir anular primero"* en `cancelarConMotivo`.
-  - Para sacar una unidad se usa Anular, que ya pregunta cuál y con qué motivo. Si el garzón
-    registró la unidad equivocada, la anula con "no elaborado" (queda libre) y pide la correcta.
-  - Pantalla: en una línea despachada, el selector no deja desmarcar las unidades actuales. El
-    detalle de la UI lo resuelve el frente.
-  - Test de regresión (e2e): la escena de arriba da 400, la unidad sigue apartada y el POS la
-    rechaza.
-  - **De arrastre, mecánico (lo decidió la Sesión de esfuerzo máximo):** `@ArrayMaxSize(200)` en
-    `AjusteStockDto.unidadIds` (`items/dto/ajuste-stock.dto.ts`), como sus gemelos de ventas,
-    salón y traslados (lo pidió el revisor de seguridad de Serie). Y en
-    `docs/features/inventario-serializado.md`, la fila de "Cancelar con motivo… se frena" tiene
-    que mencionar la excepción de "no elaborado", como ya lo hace `salones-mesas.md`. En el mismo
-    doc, la frase *"solo pasa en el salón, con el precio cambiado entre pedidos"* tiene que decir
-    *"con el precio o las reglas cambiados"*: el salón fusiona dos líneas solo si coinciden la
-    personalización, el precio y las reglas congeladas (`SalonesService`, el `find` del merge en
-    `agregarLinea`).
-  Escribe en el apartado de unidades y en la salida por venta: va en su propio frente.
-
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:

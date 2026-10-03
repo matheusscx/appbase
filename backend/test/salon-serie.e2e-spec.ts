@@ -1000,4 +1000,71 @@ describe('Salones — el garzón elige la unidad con serie (e2e)', () => {
       expect(await estadoDe(p.itemId, u.id)).toBe('disponible');
     }
   });
+
+  // ── Corregir una línea ya despachada ──
+
+  const mandaAAnular = (nombre: string) =>
+    `Ya se despachó «${nombre}»: para sacar o cambiar una unidad, anulala`;
+
+  it('cambiar una unidad de una línea despachada: 400, la que está en la mesa sigue apartada y el POS no la vende', async () => {
+    const p = await productoConTresUnidades(true);
+    const { cuentaId, lineaId } = await dosDespachados(p);
+
+    // Los dos celulares están en la mesa: se intenta cambiar el usado por el reacondicionado.
+    const res = await corregir(cuentaId, lineaId, {
+      unidadIds: [p.nuevo.id, p.reacond.id],
+    });
+
+    expect(res.status).toBe(400);
+    expect(mensajeDe(res)).toBe(mandaAAnular(p.nombre));
+    const cuenta = await detalleDe(cuentaId, mesaA.id);
+    expect(cuenta.lineas[0].unidades.map((u) => u.id).sort()).toEqual(
+      [p.usado.id, p.nuevo.id].sort(),
+    );
+    expect(await vendibles(p.itemId)).toEqual([p.reacond.id]);
+    const pos = await venderPorPos(p.itemId, [p.usado.id]);
+    expect(pos.status).toBe(400);
+    expect((pos.body as ErrorResponse).message).toBe(
+      `La unidad ${p.usado.serie} está apartada en la cuenta de ${mesaA.nombre}`,
+    );
+    expect(await estadoDe(p.itemId, p.usado.id)).toBe('disponible');
+  });
+
+  it('sacar una unidad de una línea despachada, entera o a medias: 400 mandando a anular, y nada cambia', async () => {
+    const p = await productoConTresUnidades(true);
+    const { cuentaId, lineaId } = await dosDespachados(p);
+
+    const entera = await corregir(cuentaId, lineaId, {
+      unidadIds: [p.nuevo.id],
+    });
+    expect(entera.status).toBe(400);
+    expect(mensajeDe(entera)).toBe(mandaAAnular(p.nombre));
+
+    // La tercera se pide después del despacho y se fusiona: la línea queda 3/2.
+    // Sacar justo la que no salió tampoco se puede: no se sabe cuál salió.
+    expect((await pedir(cuentaId, p.itemId, [p.reacond.id])).status).toBe(201);
+    const aMedias = await corregir(cuentaId, lineaId, {
+      unidadIds: [p.usado.id, p.nuevo.id],
+    });
+    expect(aMedias.status).toBe(400);
+    expect(mensajeDe(aMedias)).toBe(mandaAAnular(p.nombre));
+
+    const cuenta = await detalleDe(cuentaId, mesaA.id);
+    expect(Number(cuenta.lineas[0].cantidad)).toBe(3);
+    expect(cuenta.lineas[0].unidades).toHaveLength(3);
+    expect(await vendibles(p.itemId)).toEqual([]);
+  });
+
+  it('agregar una unidad a una línea despachada sí se puede: las que estaban se quedan', async () => {
+    const p = await productoConTresUnidades(true);
+    const { cuentaId, lineaId } = await dosDespachados(p);
+
+    const res = await corregir(cuentaId, lineaId, {
+      unidadIds: [p.usado.id, p.nuevo.id, p.reacond.id],
+    });
+
+    expect(res.status).toBe(200);
+    expect(Number(res.body.lineas[0].cantidad)).toBe(3);
+    expect(await vendibles(p.itemId)).toEqual([]);
+  });
 });
