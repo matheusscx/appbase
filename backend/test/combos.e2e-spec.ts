@@ -684,4 +684,40 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
       CARNE_MOLIDA_ID,
     );
   });
+
+  // `@IsUUID()` acepta mayúsculas y Postgres devuelve los ids en minúsculas:
+  // el mapa de filas se arma con lo que devuelve la BD, así que sin normalizar
+  // el componente no se encontraba (400 "Componente no encontrado") y uno
+  // repetido con otro casing pasaba el chequeo de repetidos.
+  it('14. un componente en mayúsculas se encuentra, y repetido con otro casing es 400 de repetido', async () => {
+    const combo = (componentes: { componenteItemId: string }[]) =>
+      request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Combo mayúsculas ${marca} ${Math.random()}`,
+          precioBase: '2000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'combo',
+          componentes: componentes.map((c) => ({ ...c, cantidad: '1' })),
+        });
+
+    const res = await combo([{ componenteItemId: papasId.toUpperCase() }]);
+    expect(res.status).toBe(201);
+    const vivos = await ds.query<{ componente_item_id: string }[]>(
+      `SELECT componente_item_id FROM combo_componentes
+        WHERE combo_item_id = $1 AND eliminado_el IS NULL`,
+      [(res.body as ItemResponse).id],
+    );
+    expect(vivos).toEqual([{ componente_item_id: papasId }]);
+
+    const repetido = await combo([
+      { componenteItemId: papasId },
+      { componenteItemId: papasId.toUpperCase() },
+    ]);
+    expect(repetido.status).toBe(400);
+    expect(JSON.stringify(repetido.body)).toContain(
+      'no puede aparecer más de una vez como componente',
+    );
+  });
 });

@@ -1478,4 +1478,86 @@ describe('Recetas — flujo completo (e2e)', () => {
       [extraViejo, extraNuevo].sort(),
     );
   }, 60000);
+
+  // `@IsUUID()` acepta mayúsculas y Postgres devuelve los ids en minúsculas:
+  // el mapa de filas se arma con lo que devuelve la BD, así que sin normalizar
+  // un ingrediente en mayúsculas no se encontraba (400 "no es un item de tipo
+  // ingrediente válido") y uno repetido con otro casing pasaba el chequeo de
+  // repetidos.
+  it('un ingrediente en mayúsculas se encuentra, y repetido con otro casing es 400 de repetido', async () => {
+    const receta = (ids: string[]) =>
+      request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Receta mayúsculas E2E ${Date.now()}-${Math.random()}`,
+          precioBase: '3000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'receta',
+          ingredientes: ids.map((id) => ({
+            ingredienteItemId: id,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+          })),
+        });
+
+    const res = await receta([panId.toUpperCase()]);
+    expect(res.status).toBe(201);
+    const vivos = await ds.query<{ ingrediente_item_id: string }[]>(
+      `SELECT ingrediente_item_id FROM receta_ingredientes
+        WHERE receta_item_id = $1 AND eliminado_el IS NULL`,
+      [(res.body as ItemResponse).id],
+    );
+    expect(vivos).toEqual([{ ingrediente_item_id: panId }]);
+
+    const repetido = await receta([panId, panId.toUpperCase()]);
+    expect(repetido.status).toBe(400);
+    expect(JSON.stringify(repetido.body)).toContain(
+      'no puede aparecer más de una vez en la receta',
+    );
+  });
+
+  it('un extra en mayúsculas se encuentra, y repetido con otro casing es 400 de repetido', async () => {
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Receta extra mayúsculas E2E ${Date.now()}`,
+        precioBase: '3000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          { ingredienteItemId: panId, cantidad: '1', unidadCodigo: 'unidad' },
+        ],
+      });
+    expect(resReceta.status).toBe(201);
+    const recetaId = (resReceta.body as ItemResponse).id;
+    const editarExtras = (ids: string[]) =>
+      request(app.getHttpServer())
+        .patch(`/api/items/${recetaId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          extrasPermitidos: ids.map((id) => ({
+            ingredienteItemId: id,
+            cantidad: '20',
+            unidadCodigo: 'g',
+            precioExtra: '500',
+          })),
+        });
+
+    const res = await editarExtras([quesoId.toUpperCase()]);
+    expect(res.status).toBe(200);
+    const vivos = await ds.query<{ ingrediente_item_id: string }[]>(
+      `SELECT ingrediente_item_id FROM receta_extras_permitidos
+        WHERE receta_item_id = $1 AND eliminado_el IS NULL`,
+      [recetaId],
+    );
+    expect(vivos).toEqual([{ ingrediente_item_id: quesoId }]);
+
+    const repetido = await editarExtras([quesoId, quesoId.toUpperCase()]);
+    expect(repetido.status).toBe(400);
+    expect(JSON.stringify(repetido.body)).toContain(
+      'no puede aparecer más de una vez como extra permitido',
+    );
+  });
 });

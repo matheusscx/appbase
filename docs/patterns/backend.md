@@ -305,6 +305,28 @@ grep), los de `personalizacion-receta.dto.ts` son `interface` de snapshot y no u
 DTO validado, y `googleId` es un id externo de Google que legítimamente no es un
 UUID.
 
+### Un UUID validado puede venir en mayúsculas: minúsculas antes de compararlo en TypeScript (2026-10-03)
+
+`@IsUUID()` y `ParseUUIDPipe` aceptan `A1B2…`, y Postgres castea igual, pero **devuelve** los ids
+en minúsculas. Mientras el id solo viaja a SQL no pasa nada; en cuanto se compara en TypeScript
+contra uno que vino de la BD (`Map.get`, `Set.has`, `===`) deja de encontrarse. Ya pasó tres
+veces: 404 en la venta, 500 por `uq_item_grupo_vivo` y un 400 que mentía ("no pertenece al
+grupo asociado") en las opciones, los ingredientes, los extras y los componentes de un ítem.
+
+Hay dos formas en el repo, y no son intercambiables:
+
+- **A la entrada de la función que compara**, `id.toLowerCase()` sobre lo que mandó el cliente
+  (`asociarGruposModificadores`, `validarYCostear*`, `validarExtrasPermitidos`, `salones`,
+  `inventario`, `ventas`). Es la forma por
+  defecto: arregla la búsqueda **y** todo lo demás que compara esos ids (repetidos, filas vivas).
+- **`aliasarCasingDeIds`** (`items.service.ts`), para un cargador que devuelve un mapa a
+  llamadores que hacen `.get(id)` con el casing del cliente. Solo sirve para `.get()`.
+
+⚠️ Aliasar el mapa donde además se chequean repetidos o se cruza con filas vivas **empeora** el
+error: `[x, X]` pasa el chequeo de repetidos y choca con el índice único (500 en vez de 400).
+Medido con mutantes el 2026-10-03. Lo fijan `recetas`, `combos` y
+`grupos-modificadores-overrides.e2e-spec.ts` (los tests "en mayúsculas").
+
 ### Tablas sin `tenant_id`
 
 **No todas las tablas lo llevan, y eso no es un olvido.**

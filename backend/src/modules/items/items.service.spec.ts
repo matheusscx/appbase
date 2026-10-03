@@ -9724,7 +9724,9 @@ describe('ItemsService', () => {
     // opción no agota ninguna cadena, solo cambia el conteo. Tres opciones en un
     // grupo: con una sola, leer por opción también daría 1.
     it('lee en lote si las opciones de un grupo le pertenecen: una consulta por grupo, no por opción', async () => {
-      const opciones = ['OP-1', 'OP-2', 'OP-3'];
+      // En minúsculas, como los devuelve Postgres: el service normaliza lo
+      // que manda el cliente antes de buscarlo entre las filas.
+      const opciones = ['op-1', 'op-2', 'op-3'];
       managerMock.query.mockImplementation((sql: string) => {
         if (/FROM grupos_modificadores/.test(sql))
           return Promise.resolve([{ grupo_modificador_id: GRUPO_ID }]);

@@ -24,6 +24,82 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 ---
 
 
+## Un id en mayúsculas ya no da un 400 falso en el `PATCH`/`POST` de un ítem (cerrada 2026-10-03)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. Es el gemelo de
+[`uq_item_grupo_vivo`](#uq_item_grupo_vivo-ya-no-da-500-en-el-patchpost-de-un-ítem-cerrada-2026-10-03),
+más abajo. La regla quedó en [`patterns/backend.md`](../patterns/backend.md#un-uuid-validado-puede-venir-en-mayúsculas-minúsculas-antes-de-compararlo-en-typescript-2026-10-03).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Un `grupoOpcionId` en mayúsculas en el `PATCH`/`POST` de un ítem da un 400 que miente:
+  "no pertenece al grupo asociado"** (backend, `ItemsService.upsertOverridesDeGrupo`; **leído, no
+  corrido**: lo vio la revisión del cierre de `uq_item_grupo_vivo`, 2026-10-03). Es el gemelo de
+  ese cierre (ver [`resueltos.md`](resueltos.md)): ahí el `grupoModificadorId` se pasa a
+  minúsculas, pero las opciones del mismo grupo no. `pertenecePorOpcion` tiene las claves como
+  vienen de Postgres, así que una opción en mayúsculas no se encuentra aunque sea del grupo. No da
+  500. Un cliente que manda el grupo en mayúsculas probablemente manda también las opciones, y
+  ahora pasa el grupo y rebota en la opción. Lo mismo vale para un ingrediente en mayúsculas
+  (leído: `filas.get` no lo encuentra; medido solo repetido, `[x, X]`, que da 400). El repo ya
+  resuelve esto en otro lado con `aliasarCasingDeIds` (`items.service.ts`, junto a
+  `cargarBasePorIds`). **Medir:** reproducir el 400 de la opción con
+  un e2e, y listar los ids del `PATCH`/`POST` de un ítem que se comparan contra ids de Postgres
+  antes de decidir si se normaliza por campo o en un solo lugar.
+
+### Qué se midió
+
+- **El 400 de la opción, reproducido:** `PATCH` con grupo y opción en mayúsculas →
+  *"La opción 73DCB7F5-… no pertenece al grupo asociado"*. También el ingrediente, el extra y el
+  componente en mayúsculas daban 400 aunque el ítem existía.
+
+### Qué se leyó (no corrido)
+
+- **Inventario de los ids del `POST /items` y el `PATCH /items/:id`, por mecanismo.** `@Param('id')`
+  (`ParseUUIDPipe`) solo va a SQL; la respuesta del `PATCH` lo devuelve en `id` tal como llegó, pero
+  la pantalla manda el que leyó del listado, que ya viene en minúsculas. `@Query` no hay. Del DTO, `monedaId`, `categoriaId`,
+  `impuestosIds`/`recargosIds`/`descuentosIds` y `series[].loteId` solo van a SQL: Postgres castea,
+  así que en mayúsculas funcionan (las reglas cuentan filas contra ids, y un `[x, X]` da el mismo 400
+  que un `[x, x]`, sin depender del casing). Los que se comparan en TypeScript son cinco, y uno ya
+  estaba arreglado:
+
+  | Campo | Dónde se compara | Antes |
+  |---|---|---|
+  | `gruposModificadores[].grupoModificadorId` | mapa de asociaciones vivas, `vistos` | ya en minúsculas |
+  | `gruposModificadores[].opciones[].grupoOpcionId` | `pertenecePorOpcion`, `overrideIdPorOpcion`, `opcionesEntrantes`, repetidos | 400 falso |
+  | `ingredientes[].ingredienteItemId` | `filas.get`, repetidos | 400 falso |
+  | `extrasPermitidos[].ingredienteItemId` | `filas.get`, repetidos | 400 falso |
+  | `componentes[].componenteItemId` | `filas.get`, repetidos | 400 falso |
+
+### Qué se hizo
+
+Minúsculas **a la entrada** de las funciones que comparan: `validarYCostearIngredientes`,
+`validarExtrasPermitidos`, `validarYCostearComponentes` y, en el `map` que ya pasaba el grupo a
+minúsculas en `asociarGruposModificadores`, sus opciones. Los `INSERT` siguen usando el id del
+cliente, y Postgres lo guarda en minúsculas (los tests lo leen así).
+
+**Por qué no `aliasarCasingDeIds`, que era lo que sugería la entrada.** Ese alias arregla un
+`.get()`, y acá cada lista además chequea repetidos y la de opciones cruza con los overrides vivos.
+Medido con mutantes que pasan a minúsculas solo la búsqueda, que es lo que hace el alias: convierte el 400 de `[x, X]` en **500** contra el
+índice único, y reenviar en mayúsculas una opción que ya tiene override también da **500**
+(`uq_item_grupo_opcion_vivo`).
+
+### Qué lo fija
+
+Tests "en mayúsculas" de `recetas.e2e-spec.ts` (ingrediente y extra), `combos.e2e-spec.ts` (14) y
+`grupos-modificadores-overrides.e2e-spec.ts` (18 y 19). Cada uno cubre el id solo y el `[x, X]`.
+Mutantes medidos, uno por normalización: sin la de opciones caen el 18 y el 19 (suite entera, el
+resto pasa); sin la de ingredientes, la de extras o la de componentes cae su test "en mayúsculas"
+(corridos con `-t mayúsculas`, así que el resto de esas suites no se miró). Los dos de arreglo a
+medias pasan a minúsculas solo la búsqueda: en opciones caen el 18 y el 19 con 500, y en
+ingredientes cae el `[x, X]` con 500.
+
+**Hallazgo lateral, leído y no corrido:** `series[].loteId` del alta en modo serie va directo a
+`item_unidad.lote_id` sin mirar que el lote sea del tenant ni del ítem
+(`InventarioService`, el `INSERT INTO item_unidad`). No es de casing; quedó en `pendientes.md` § 2. **Gemelo fuera de este endpoint**, también leído: `aplicarOverrides` de grupos de
+modificadores compara `itemGrupoIds` sin minúsculas. Quedó en `pendientes.md` § 2.
+
+---
+
 ## Una línea del salón ya despachada no deja cambiar sus unidades con serie (cerrada 2026-10-03)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. La regla viva, en
@@ -462,8 +538,8 @@ asocian el mismo grupo (`[500, 200]` con `esperando: 2`, o sea carrera de verdad
 - **Gemelos medidos, sin 500:** una opción repetida en mayúsculas dentro de un grupo, y un
   ingrediente repetido en mayúsculas en una receta, dan 400 (test temporal, no quedó). No es por
   el chequeo de repetidos: esos ids en mayúsculas se rechazan siempre, porque no se encuentran
-  entre los que vienen de Postgres (leído; medido solo el caso repetido). Lo que queda de eso
-  está anotado en `pendientes.md` § 2.
+  entre los que vienen de Postgres (leído; medido solo el caso repetido). Se cerró el mismo día:
+  [ids en mayúsculas en el `PATCH`/`POST` de un ítem](#un-id-en-mayúsculas-ya-no-da-un-400-falso-en-el-patchpost-de-un-ítem-cerrada-2026-10-03).
 
 ### Qué lo fija
 

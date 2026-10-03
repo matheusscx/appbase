@@ -169,20 +169,25 @@ destapa una decisión que no es mía).
     propio frente: es `.githooks/` y la integración del hook no se puede probar desde un worktree.
     Mientras tanto, ante un rechazo, correr el `diff` de la evidencia: si solo difieren las líneas
     `index`, el diff revisado es el mismo y reescribir el recibo es legítimo.
+    - **Lo que agrega el caso de `competent-feistel-148c2d`** (recibo `43e39e8a…`, hook `c46a0ba5…`,
+      `b1cb26103..0fa2361f7` contra `b1cb2610..0fa2361f`). Siete segundos antes del rechazo, a las
+      16:15:01, se reescribieron o refrescaron nueve `.pack` del store, y **no se encontró quién**: no
+      hay `maintenance` ni `gc` en la config, ni cron, ni launchd de git. Hay además un
+      `multi-pack-index`, y no se midió qué conteo usa git: con 65 623 empaquetados la abreviatura
+      tendría que ser siempre de 9, y a veces es de 8.
 
-- [ ] **Un `grupoOpcionId` en mayúsculas en el `PATCH`/`POST` de un ítem da un 400 que miente:
-  "no pertenece al grupo asociado"** (backend, `ItemsService.upsertOverridesDeGrupo`; **leído, no
-  corrido**: lo vio la revisión del cierre de `uq_item_grupo_vivo`, 2026-10-03). Es el gemelo de
-  ese cierre (ver [`resueltos.md`](resueltos.md)): ahí el `grupoModificadorId` se pasa a
-  minúsculas, pero las opciones del mismo grupo no. `pertenecePorOpcion` tiene las claves como
-  vienen de Postgres, así que una opción en mayúsculas no se encuentra aunque sea del grupo. No da
-  500. Un cliente que manda el grupo en mayúsculas probablemente manda también las opciones, y
-  ahora pasa el grupo y rebota en la opción. Lo mismo vale para un ingrediente en mayúsculas
-  (leído: `filas.get` no lo encuentra; medido solo repetido, `[x, X]`, que da 400). El repo ya
-  resuelve esto en otro lado con `aliasarCasingDeIds` (`items.service.ts`, junto a
-  `cargarBasePorIds`). **Medir:** reproducir el 400 de la opción con
-  un e2e, y listar los ids del `PATCH`/`POST` de un ítem que se comparan contra ids de Postgres
-  antes de decidir si se normaliza por campo o en un solo lugar.
+- [ ] **Un `itemGrupoId` en mayúsculas en `PATCH /grupos-modificadores/:id/overrides` da un 400
+  que miente: "item_grupo_id no válido para este grupo"** (backend,
+  `GruposModificadoresService.aplicarOverrides`; **leído, no corrido**: lo vio la revisión del cierre
+  de los ids en mayúsculas del ítem, 2026-10-03). Es la misma familia (ver
+  [`resueltos.md`](resueltos.md#un-id-en-mayúsculas-ya-no-da-un-400-falso-en-el-patchpost-de-un-ítem-cerrada-2026-10-03)):
+  `@IsUUID(…, { each: true })` acepta mayúsculas y `validSet` se arma con las filas de Postgres, así
+  que `validSet.has(ig)` no lo encuentra. El `new Set(dto.itemGrupoIds)` de más abajo tampoco ve
+  `[x, X]` como repetido, aunque hoy el 400 de arriba llega antes. **Medir:** reproducirlo con un
+  e2e; el arreglo probable es la forma de
+  [`patterns/backend.md`](../patterns/backend.md#un-uuid-validado-puede-venir-en-mayúsculas-minúsculas-antes-de-compararlo-en-typescript-2026-10-03)
+  (minúsculas a la entrada). El `grupoOpcionId` del mismo DTO solo va a SQL (leído): no tiene el
+  problema.
 
 - [ ] **`GET /compras/productos` trae todo el catálogo de una vez, sin paginar** (backend +
   frontend; el problema contrario al que cerró el catálogo paginado). Lo consume

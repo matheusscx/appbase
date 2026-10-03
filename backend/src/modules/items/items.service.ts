@@ -6216,6 +6216,13 @@ export class ItemsService {
       unidadCodigo: string;
       bloqueante: boolean;
     }[] = [];
+    // Minúsculas por lo mismo que en `asociarGruposModificadores`: las filas
+    // vuelven de la BD en minúsculas, y sin esto un id en mayúsculas no se
+    // encuentra en `filas` (400 que miente) ni cuenta como repetido.
+    ingredientes = ingredientes.map((i) => ({
+      ...i,
+      ingredienteItemId: i.ingredienteItemId.toLowerCase(),
+    }));
     this.assertSinIdsRepetidos(
       ingredientes.map((i) => i.ingredienteItemId),
       'Un ingrediente no puede aparecer más de una vez en la receta',
@@ -6301,6 +6308,11 @@ export class ItemsService {
         'Los combos requieren al menos un componente',
       );
     }
+    // Minúsculas: mismo porqué que en `validarYCostearIngredientes`.
+    componentes = componentes.map((c) => ({
+      ...c,
+      componenteItemId: c.componenteItemId.toLowerCase(),
+    }));
     this.assertSinIdsRepetidos(
       componentes.map((c) => c.componenteItemId),
       'Un item no puede aparecer más de una vez como componente del combo',
@@ -6392,6 +6404,11 @@ export class ItemsService {
     // Duplicados antes de tocar la BD, igual que `validarYCostearComponentes`:
     // sin esto el payload pasaba la validación y reventaba contra el índice
     // único parcial de `receta_extras_permitidos` (500 en vez de 400).
+    // Minúsculas: mismo porqué que en `validarYCostearIngredientes`.
+    extras = extras.map((e) => ({
+      ...e,
+      ingredienteItemId: e.ingredienteItemId.toLowerCase(),
+    }));
     this.assertSinIdsRepetidos(
       extras.map((e) => e.ingredienteItemId),
       'Un ingrediente no puede aparecer más de una vez como extra permitido',
@@ -7665,9 +7682,16 @@ export class ItemsService {
     // `@IsUUID()` acepta mayúsculas y Postgres devuelve los ids en minúsculas:
     // sin normalizar, un grupo ya asociado no se encuentra en el mapa (ni un
     // repetido en `vistos`) y el `INSERT` choca con `uq_item_grupo_vivo` (500).
+    // Las opciones del grupo, por lo mismo: sin minúsculas no se encontraban
+    // en la pertenencia (400 "no pertenece al grupo asociado") ni en los
+    // overrides vivos, que es el mismo choque con `uq_item_grupo_opcion_vivo`.
     for (const g of grupos.map((g) => ({
       ...g,
       grupoModificadorId: g.grupoModificadorId.toLowerCase(),
+      opciones: g.opciones?.map((o) => ({
+        ...o,
+        grupoOpcionId: o.grupoOpcionId.toLowerCase(),
+      })),
     }))) {
       if (vistos.has(g.grupoModificadorId)) {
         throw new BadRequestException(

@@ -836,4 +836,64 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
     expect(respuestas.map((r) => r.status)).toEqual([200, 200]);
     expect(await asociacionesVivas(recetaId)).toHaveLength(1);
   });
+
+  // El gemelo del 15/16 para las opciones del grupo: el grupo ya se pasaba a
+  // minúsculas, pero la opción no, así que un cliente que manda los dos en
+  // mayúsculas pasaba el grupo y rebotaba en la opción con un 400 que decía
+  // "no pertenece al grupo asociado".
+  const editarOverride = (
+    recetaId: string,
+    opciones: { grupoOpcionId: string; cantidad: string }[],
+  ) =>
+    request(app.getHttpServer())
+      .patch(`/api/items/${recetaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        gruposModificadores: [
+          {
+            grupoModificadorId: grupoProteinaId.toUpperCase(),
+            min: 1,
+            max: 1,
+            opciones: opciones.map((o) => ({ ...o, unidadCodigo: 'g' })),
+          },
+        ],
+      });
+
+  it('18. una opción en mayúsculas se reconoce del grupo: crea el override y reenviarla lo edita', async () => {
+    const { recetaId, itemGrupoId } = await recetaConProteinaSinOverride();
+
+    const alta = await editarOverride(recetaId, [
+      { grupoOpcionId: carneOpcionId.toUpperCase(), cantidad: '120' },
+    ]);
+    expect(alta.status).toBe(200);
+    expect(await overridesVivos(itemGrupoId)).toEqual([
+      { cantidad: '120.0000' },
+    ]);
+
+    // Con el override ya guardado: si solo se arreglara la pertenencia, el
+    // mapa de overrides existentes no la vería e insertaría otro (500 contra
+    // `uq_item_grupo_opcion_vivo`).
+    const edicion = await editarOverride(recetaId, [
+      { grupoOpcionId: carneOpcionId.toUpperCase(), cantidad: '180' },
+    ]);
+    expect(edicion.status).toBe(200);
+    expect(await overridesVivos(itemGrupoId)).toEqual([
+      { cantidad: '180.0000' },
+    ]);
+  });
+
+  it('19. la misma opción dos veces, una en mayúsculas, es 400 de repetida', async () => {
+    const { recetaId, itemGrupoId } = await recetaConProteinaSinOverride();
+
+    const res = await editarOverride(recetaId, [
+      { grupoOpcionId: carneOpcionId, cantidad: '100' },
+      { grupoOpcionId: carneOpcionId.toUpperCase(), cantidad: '130' },
+    ]);
+
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toContain(
+      'Una opción no puede aparecer más de una vez',
+    );
+    expect(await overridesVivos(itemGrupoId)).toHaveLength(0);
+  });
 });
