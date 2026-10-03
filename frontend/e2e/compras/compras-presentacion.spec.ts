@@ -1,6 +1,6 @@
 import { test, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { API, api, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/api'
-import { entrarComo } from '../support/ui'
+import { elegirPorPlaceholder, entrarComo } from '../support/ui'
 
 /**
  * Compras, pieza 2 — la unidad de compra por proveedor (spec
@@ -44,25 +44,6 @@ test.afterEach(async ({ request }) => {
     }
   }
 })
-
-/**
- * Elige en un `USelectMenu` haciendo pie en su **placeholder** (mismo helper que
- * `compras-por-pantalla.spec.ts`; no se importa de ahí porque los specs de `e2e/` no comparten
- * un módulo de helpers propio más allá de `support/api.ts`).
- */
-async function elegirPorPlaceholder(
-  raiz: Page | Locator,
-  placeholder: string,
-  opcion: string,
-  opts: { buscar?: boolean, exacta?: boolean } = {},
-) {
-  const page = 'goto' in raiz ? raiz : raiz.page()
-  await raiz.getByText(placeholder).click()
-  if (opts.buscar) await page.keyboard.type(opcion)
-  await page.getByRole('option', { name: opcion, exact: opts.exacta ?? false }).click()
-  await expect(page.getByRole('listbox')).toHaveCount(0)
-  await expect(raiz.getByText(placeholder)).toHaveCount(0)
-}
 
 /**
  * Elige en el `USelect` combinado de unidad/presentación de una línea, haciendo pie en su valor

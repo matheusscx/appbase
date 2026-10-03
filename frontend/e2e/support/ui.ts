@@ -75,6 +75,48 @@ export async function elegirEnSelector(
 }
 
 /**
+ * Elige en un `USelectMenu` haciendo pie en su **placeholder**.
+ *
+ * No se usa `elegirEnSelector` (arriba) por dos razones, y ninguna es que no
+ * acepte una raíz (la acepta). Una: en el formulario de Compras los tres
+ * selectores del encabezado **comparten** raíz —el formulario— y
+ * `elegirEnSelector` busca el trigger por su rol ("Show popup", el label que
+ * Reka le pone a TODOS), así que ahí encontraría tres. El placeholder es lo
+ * único que los distingue sin inventar un contenedor. Dos: los `searchable` no
+ * dibujan la opción hasta que se tipea, y eso `elegirEnSelector` no lo hace.
+ *
+ * ⚠️ Espera a que el popup **desaparezca**, no solo a que el trigger muestre el
+ * valor nuevo: al cerrarse, Reka devuelve el foco al trigger, y ese salto le
+ * roba las teclas a lo que se escriba después — en Compras, al precio de la
+ * línea. Medido en `elegirEnSelector`, mismo gesto.
+ *
+ * Extraído acá al tercer uso (`compras-por-pantalla.spec.ts`,
+ * `compras-dte.spec.ts` y `compras-presentacion.spec.ts`), misma regla que
+ * `rondaDePin`.
+ */
+export async function elegirPorPlaceholder(
+  raiz: Page | Locator,
+  placeholder: string,
+  opcion: string,
+  opts: { buscar?: boolean, exacta?: boolean } = {},
+): Promise<void> {
+  const page = 'goto' in raiz ? raiz : raiz.page()
+  await raiz.getByText(placeholder).click()
+  // Los `searchable` no dibujan la opción hasta que se tipea.
+  if (opts.buscar) await page.keyboard.type(opcion)
+  await page.getByRole('option', { name: opcion, exact: opts.exacta ?? false }).click()
+  await expect(page.getByRole('listbox')).toHaveCount(0)
+  // La elección prendió: el placeholder deja lugar al valor. Sin esto, un click
+  // que no seleccionó nada seguiría de largo y el fallo aparecería recién al
+  // guardar, lejos de su causa.
+  // ⚠️ Lo que impide que esto sea decorativo es el click **estricto** de arriba:
+  // si el locator resolviera a 0 se colgaría, y a 2 o más tiraría strict-mode,
+  // así que al llegar acá el count es exactamente 1. Un `.first()` puesto allá
+  // para callar un strict-mode apagaría esta aserción en silencio.
+  await expect(raiz.getByText(placeholder)).toHaveCount(0)
+}
+
+/**
  * Una ronda completa de identificación de garzón: elegir quién sos y teclear
  * los 6 dígitos del PIN. El modal tiene DOS pasos y el segundo no existe hasta
  * que el primero elige un garzón.

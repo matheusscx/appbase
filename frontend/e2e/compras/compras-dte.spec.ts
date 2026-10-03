@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test, expect, type APIRequestContext, type Dialog, type Locator, type Page } from '@playwright/test'
 import { API, api, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/api'
-import { entrarComo } from '../support/ui'
+import { elegirPorPlaceholder, entrarComo } from '../support/ui'
 
 /**
  * Compras, tarea 4 — cargar la compra desde el XML de la factura (DTE) del SII
@@ -95,23 +95,6 @@ test.afterEach(async ({ request }) => {
  */
 function botonVolverACompras(page: Page): Locator {
   return page.getByRole('link', { name: 'Compras', exact: true })
-}
-
-/** Elige en un `USelectMenu` haciendo pie en su placeholder (mismo helper que
- *  el resto de `e2e/compras/`; no se comparte módulo propio más allá de
- *  `support/api.ts`). */
-async function elegirPorPlaceholder(
-  raiz: Page | Locator,
-  placeholder: string,
-  opcion: string,
-  opts: { buscar?: boolean, exacta?: boolean } = {},
-) {
-  const page = 'goto' in raiz ? raiz : raiz.page()
-  await raiz.getByText(placeholder).click()
-  if (opts.buscar) await page.keyboard.type(opcion)
-  await page.getByRole('option', { name: opcion, exact: opts.exacta ?? false }).click()
-  await expect(page.getByRole('listbox')).toHaveCount(0)
-  await expect(raiz.getByText(placeholder)).toHaveCount(0)
 }
 
 /**
