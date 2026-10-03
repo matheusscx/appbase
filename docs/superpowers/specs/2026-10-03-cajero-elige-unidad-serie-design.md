@@ -210,9 +210,12 @@ La línea del carrito guarda las unidades, muestra sus series y no deja editar l
 mano: "Cambiar unidades" reabre el selector. Al cobrar, `toVentaLineasBody` manda las
 `unidadIds`.
 
-**Salón.** Agregar abre el selector. La línea muestra sus series. "+" reabre el selector para
-sumar y "−" pide cuál sale. Anular, sobre una línea con serie, pide cuáles se anulan en vez
-de un número.
+**Salón.** Agregar abre el selector. La línea muestra sus series y, en lugar del input de
+cantidad, tiene el mismo "Cambiar unidades" del POS: reabre el selector con las de la línea
+ya marcadas, y confirmar manda el conjunto nuevo (`PATCH`, § 5). Mismo patrón en las dos
+pantallas. Anular, sobre una línea con serie, pide con casillas cuáles se anulan en vez de
+un número. El detalle de cuenta trae `unidades: [{ id, serie, condicion }]` por línea,
+leídas en una consulta por cuenta.
 
 **Detalle de venta.** Ver § 10.
 
