@@ -3187,6 +3187,34 @@ export class ItemsService {
         `No se puede restaurar: primero restaurá de la papelera ${faltan.join(', ')}`,
       );
     }
+
+    // Un componente que pasó a serie mientras el combo estaba en la papelera
+    // (`nombreSiEsComponenteVivo` solo cuenta combos vivos). Medido sin este
+    // freno: el combo volvía, se activaba y la venta lo rechazaba con «Elegí qué
+    // unidades salen», porque nadie elige la unidad al expandirlo. Con unidades
+    // cargadas el producto ya no vuelve a cantidad y un combo borrado no se
+    // edita: la salida es armarlo de nuevo; sin unidades, volverlo a cantidad.
+    // Statement aparte del `FOR SHARE` de arriba: leído en el mismo, el modo
+    // saldría del snapshot previo a esperar al `FOR NO KEY UPDATE` con el que
+    // `update()` pasa el producto a serie.
+    const conSerie: { nombre: string }[] = await manager.query(
+      `SELECT i.nombre
+         FROM combo_componentes cc
+         JOIN items i ON i.item_id = cc.componente_item_id
+          AND i.tenant_id = $2 AND i.eliminado_el IS NULL
+         JOIN item_producto ip ON ip.item_id = i.item_id
+          AND ip.modo_inventario = 'serie'
+        WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2
+          AND cc.eliminado_el IS NULL AND ${enPapelera}
+        ORDER BY i.nombre`,
+      [itemId, tenantId],
+    );
+    if (conSerie.length) {
+      const uno = conSerie.length === 1;
+      throw new BadRequestException(
+        `No se puede restaurar: ${conSerie.map((c) => `«${c.nombre}»`).join(', ')} ahora ${uno ? 'tiene' : 'tienen'} número de serie y un combo no puede incluirlo${uno ? '' : 's'}`,
+      );
+    }
   }
 
   async ajustarStock(

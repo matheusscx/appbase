@@ -843,6 +843,39 @@ export class GruposModificadoresService {
         `No se puede restaurar: primero restaurá de la papelera ${faltan.join(', ')}`,
       );
     }
+
+    // El ítem de una opción que pasó a serie mientras el grupo estaba en la
+    // papelera (`nombreSiEsComponenteVivo` solo cuenta grupos vivos). Medido sin
+    // este freno: el grupo volvía, se asociaba a un combo nuevo y la venta lo
+    // rechazaba con «Elegí qué unidades salen». Con unidades cargadas el producto
+    // ya no vuelve a cantidad y un grupo borrado no se edita: se arma de nuevo;
+    // sin unidades, se vuelve el producto a cantidad.
+    // Las mismas opciones que la lectura de arriba, y por eso tampoco filtra
+    // `eliminado_el` de las opciones ni del grupo: son las que este borrado se
+    // llevó. Statement aparte del `FOR SHARE`: leído en el mismo, el modo
+    // saldría del snapshot previo a esperar al `FOR NO KEY UPDATE` con el que
+    // `ItemsService.update` pasa el producto a serie.
+    const conSerie: { nombre: string }[] = await manager.query(
+      `-- Sin filtro de eliminado_el en opciones ni grupos_modificadores, a propósito (comentario de arriba).
+       SELECT i.nombre
+         FROM grupo_modificador_opciones o
+         JOIN items i ON i.item_id = o.item_id
+          AND i.tenant_id = $2 AND i.eliminado_el IS NULL
+         JOIN item_producto ip ON ip.item_id = i.item_id
+          AND ip.modo_inventario = 'serie'
+        WHERE o.grupo_modificador_id = $1 AND o.tenant_id = $2
+          AND o.eliminado_el = (SELECT g.eliminado_el FROM grupos_modificadores g
+                                 WHERE g.grupo_modificador_id = $1 AND g.tenant_id = $2
+                                   AND g.eliminado_por IS NOT NULL)
+        ORDER BY i.nombre`,
+      [grupoId, tenantId],
+    );
+    if (conSerie.length) {
+      const uno = conSerie.length === 1;
+      throw new BadRequestException(
+        `No se puede restaurar: ${conSerie.map((c) => `«${c.nombre}»`).join(', ')} ahora ${uno ? 'tiene' : 'tienen'} número de serie y un grupo no puede ofrecerlo${uno ? '' : 's'}`,
+      );
+    }
   }
 
   /**

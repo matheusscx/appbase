@@ -24,6 +24,82 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 ---
 
 
+## Restaurar un combo o un grupo cuyo producto pasó a serie estando en la papelera frena con 400 (cerrada 2026-10-03)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. La regla viva, en
+[`papelera.md`](../features/papelera.md#restaurar-no-revive-un-compuesto-a-medias-owner-2026-09-14).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Restaurar de la papelera un combo o un grupo cuyo producto pasó a serie mientras estaba
+  borrado deja un compuesto que no se puede vender** (backend, `docs/features/papelera.md`
+  "Restaurar no revive un compuesto a medias"; **leído, no corrido**: lo dejó afuera el frente
+  "quien vende elige qué unidad con serie sale", 2026-10-03, por decisión del controlador del
+  frente). Ese frente cerró la configuración: un combo o un grupo no guarda un componente u opción
+  que sea un producto con serie, y un producto que ya es componente u opción **vivo** no pasa a
+  serie (`ItemsService.nombreSiEsComponenteVivo`, que solo cuenta combos y grupos vivos). Lo que
+  queda: con el combo en la papelera el producto **sí** puede pasar a serie —solo si no tiene
+  movimientos, porque `modo_inventario` es inmutable con ellos, así que es rarísimo—, y restaurar
+  el combo no mira el modo del componente. El combo vuelve configurado y la venta lo rechaza con
+  400 (*"Elegí qué unidades salen"*, en el chokepoint) sin elegir ninguna unidad: no corrompe ni
+  elige mal, solo no se puede vender hasta que alguien lo edite. **Medir:** reproducirlo por la API
+  (crear combo con un producto en modo cantidad sin movimientos, borrar el combo, pasar el producto
+  a serie, restaurar el combo, intentar venderlo). **Arreglo probable:** que restaurar frene con 400
+  nombrando el producto con serie, como ya frena por un componente en la papelera (mismo lugar, mismo
+  mensaje de "qué hay que sacar primero").
+
+### Qué se midió
+
+Se reproduce tal cual, por la API y sobre base fresca. Combo con un producto en modo cantidad sin
+movimientos → borrar el combo (200) → el producto a serie (200) → restaurar el combo (201, vuelve
+inactivo) → activarlo (200) → venderlo: 400 *"Elegí qué unidades salen: «…» tiene número de
+serie"*. Con un grupo, igual: restaurar 201, asociarlo a un combo nuevo 201 (la asociación no mira
+el modo de las opciones) y la venta 400.
+
+Lo que la entrada no decía: **con unidades cargadas el producto ya no vuelve a cantidad** (400,
+*"producto con movimientos"*), y un combo o un grupo en la papelera no se edita. Así que con el
+freno el compuesto queda en la papelera sin salida y hay que armarlo de nuevo. Antes volvía y se
+podía editar para sacarle el componente (`PATCH` 200).
+
+### Qué se decidió
+
+La sesión de esfuerzo máximo, con ese costo a la vista y por encargo del owner: **el 400 al
+restaurar** (opción A), sobre *"restaurar igual y frenar al activar el combo y al asociar el grupo"*
+(B). Los motivos: B no alcanza para los grupos, que no tienen `activo` y vuelven colgados de sus
+ítems, así que el grupo necesita el freno al restaurar igual. A cumple las dos reglas del owner que
+ya existen (combos y grupos no incluyen un producto con serie; restaurar no revive un compuesto a
+medias) en todas las puertas. Y el costo está acotado: para pasar a serie el producto no pudo tener
+movimientos, así que ninguna venta descontó ese componente. (La decisión decía "el combo nunca se
+vendió". La revisión independiente lo refutó: un componente no bloqueante sin stock se saltea al
+vender sin dejar movimiento, en `moverConsumoOSaltear`, así que el combo pudo venderse sin él. La
+decisión no cambia por eso.) Dos condiciones: leer el
+modo **después** del lock, y un mensaje que sea cierto también cuando el producto todavía no tiene
+unidades (hay salida: volverlo a cantidad).
+
+### Qué se hizo
+
+- **`ItemsService.assertComposicionRestaurable`** y **`GruposModificadoresService.assertOpcionesRestaurables`**
+  leen, después del 400 por lo que está en la papelera, los componentes vivos del combo o las
+  opciones que este borrado se llevó cuyo producto está en serie. Si hay alguno: 400 *"No se puede
+  restaurar: «Cargador» ahora tiene número de serie y un combo no puede incluirlo"* (*"un grupo no
+  puede ofrecerlo"*), con todos los nombres juntos y en plural cuando son varios.
+- La lectura va en un **statement aparte, posterior al `FOR SHARE`** sobre lo que compone el
+  compuesto. Ese lock choca con el `FOR NO KEY UPDATE` con el que `update()` toma el producto antes
+  de pasarlo a serie, así que los dos caminos se ordenan y ninguno lee el estado de antes de esperar.
+- Recetas no: ingredientes y extras solo admiten modo cantidad, y un ingrediente no pasa a serie.
+
+### Qué lo fija
+
+`venta-serie.e2e-spec.ts`: los dos tests *"restaurar un combo / un grupo cuyos … pasaron a serie
+estando en la papelera"* y las tres carreras *"carrera: el paso a serie gana …"* / *"el restaurar del
+combo gana …"*. Mutantes medidos, cada uno tumba solo su test: sin el freno (en cada service), sin
+`modo_inventario = 'serie'`, sin `cc.eliminado_el IS NULL`, sin acotar las opciones al timestamp
+del borrado, el plural roto (en cada service), el orden de los nombres, y la lectura del modo movida
+**antes** del `FOR SHARE` (en cada service: cae la carrera *"el paso a serie gana"*, porque el
+restaurar responde 201).
+
+---
+
 ## Un id en mayúsculas ya no da un 400 falso en el `PATCH`/`POST` de un ítem (cerrada 2026-10-03)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. Es el gemelo de
@@ -243,7 +319,8 @@ cosa; en cada una, la recomendada fue la elegida.
     y `unidadIds` en una con serie (400 si falta el que corresponde): es la única forma de que un
     `PATCH` lleve uno u otro.
   - **La papelera no se cubre en este frente:** restaurar un combo o grupo cuyo producto pasó a serie
-    mientras estaba borrado queda como entrada nueva en `pendientes.md` § 2.
+    mientras estaba borrado queda como entrada nueva en `pendientes.md` § 2. Se cerró el mismo día:
+    entrada "Restaurar un combo o un grupo cuyo producto pasó a serie…", arriba.
 
 ### Qué se hizo
 

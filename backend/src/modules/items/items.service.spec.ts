@@ -3607,13 +3607,15 @@ describe('ItemsService', () => {
     // versión pasaba el timestamp de `eliminado_el` por JS entre dos queries,
     // y el e2e real (Postgres de verdad, no mocks) mostró que eso pierde
     // precisión — ver el comentario en `restaurar()`. Va en una transacción
-    // detrás de las dos lecturas con lock de `assertComposicionRestaurable`,
-    // así que es la TERCERA llamada a `manager.query`.
-    /** Las dos lecturas con lock de `assertComposicionRestaurable`, sin nada borrado. */
+    // detrás de las tres lecturas de `assertComposicionRestaurable` (las dos
+    // con lock y la del modo de los componentes), así que es la CUARTA llamada
+    // a `manager.query`.
+    /** Las tres lecturas de `assertComposicionRestaurable`, sin nada borrado ni con serie. */
     function mockComposicionVacia() {
       managerMock.query
         .mockResolvedValueOnce([]) // ingredientes, extras y componentes
-        .mockResolvedValueOnce([]); // grupos asociados
+        .mockResolvedValueOnce([]) // grupos asociados
+        .mockResolvedValueOnce([]); // componentes con serie
     }
 
     function mockFindOneServicio() {
@@ -3663,7 +3665,7 @@ describe('ItemsService', () => {
       // sin importar lo que haga el código real). Que el ítem *de verdad*
       // vuelva inactivo lo prueba el e2e (`papelera.e2e-spec.ts`, contra
       // Postgres real, sin mocks).
-      const sql = managerMock.query.mock.calls[2][0] as string;
+      const sql = managerMock.query.mock.calls[3][0] as string;
       expect(sql).not.toMatch(/activo/i);
     });
 
@@ -3674,7 +3676,7 @@ describe('ItemsService', () => {
 
       await service.restaurar(TENANT, ITEM_ID);
 
-      const sql = managerMock.query.mock.calls[2][0] as string;
+      const sql = managerMock.query.mock.calls[3][0] as string;
       expect(sql).toContain('receta_extras_permitidos');
       expect(sql).toMatch(/eliminado_el\s*=\s*NULL/);
       // Acotado al timestamp que le puso `remove()`, leído por una subquery
@@ -3707,7 +3709,7 @@ describe('ItemsService', () => {
 
       await service.restaurar(TENANT, ITEM_ID);
 
-      const sql = managerMock.query.mock.calls[2][0] as string;
+      const sql = managerMock.query.mock.calls[3][0] as string;
       expect(sql).toContain('ingrediente_item_id = $1');
       expect(sql).toContain('receta_item_id = $1');
     });

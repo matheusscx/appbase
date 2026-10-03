@@ -197,23 +197,6 @@ destapa una decisión que no es mía).
   `curl -w "%{time_total} %{size_download}"` sobre la ruta, antes de decidir si se pagina o si la
   pantalla pasa a `AppItemSelect` (el selector ya busca en el servidor).
 
-- [ ] **Restaurar de la papelera un combo o un grupo cuyo producto pasó a serie mientras estaba
-  borrado deja un compuesto que no se puede vender** (backend, `docs/features/papelera.md`
-  "Restaurar no revive un compuesto a medias"; **leído, no corrido**: lo dejó afuera el frente
-  "quien vende elige qué unidad con serie sale", 2026-10-03, por decisión del controlador del
-  frente). Ese frente cerró la configuración: un combo o un grupo no guarda un componente u opción
-  que sea un producto con serie, y un producto que ya es componente u opción **vivo** no pasa a
-  serie (`ItemsService.nombreSiEsComponenteVivo`, que solo cuenta combos y grupos vivos). Lo que
-  queda: con el combo en la papelera el producto **sí** puede pasar a serie —solo si no tiene
-  movimientos, porque `modo_inventario` es inmutable con ellos, así que es rarísimo—, y restaurar
-  el combo no mira el modo del componente. El combo vuelve configurado y la venta lo rechaza con
-  400 (*"Elegí qué unidades salen"*, en el chokepoint) sin elegir ninguna unidad: no corrompe ni
-  elige mal, solo no se puede vender hasta que alguien lo edite. **Medir:** reproducirlo por la API
-  (crear combo con un producto en modo cantidad sin movimientos, borrar el combo, pasar el producto
-  a serie, restaurar el combo, intentar venderlo). **Arreglo probable:** que restaurar frene con 400
-  nombrando el producto con serie, como ya frena por un componente en la papelera (mismo lugar, mismo
-  mensaje de "qué hay que sacar primero").
-
 - [ ] **Una venta con dos líneas del mismo producto con serie muestra todas las unidades bajo cada
   línea** (frontend + backend, `VentaDetalleDrawer.vue` y `VentasService` armado del detalle; **leído,
   no corrido**: lo marcó la revisión independiente del frente "quien vende elige qué unidad con serie

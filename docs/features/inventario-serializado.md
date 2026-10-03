@@ -216,6 +216,7 @@ procedencia, porque "owner, fecha" a secas se lee como congelada):
 | Salón (pedir, cambiar, anular, cancelar con motivo, fusionar, cobrar) | La unidad viaja en la línea de la cuenta. Contrato: [`salones-mesas.md`](./salones-mesas.md) |
 | Componente de combo / opción de grupo | No se puede configurar (400 al guardar el combo o el grupo) |
 | Pasar a modo serie un producto que ya es componente u opción viva | 400: antes el cambio de modo solo se bloqueaba con movimientos, y este hueco era nuevo |
+| Restaurar un combo o grupo cuyo producto pasó a serie mientras estaba en la papelera | 400 nombrando el producto. Contrato y costo: [`papelera.md`](./papelera.md#restaurar-no-revive-un-compuesto-a-medias-owner-2026-09-14) |
 | Tienda online | `GET /items?vendibleOnline=true` los deja afuera del catálogo y `OnlineService.checkout` rechaza la línea **antes** de iniciar el pago |
 | Merma (`POST /mermas`) | 400; la pantalla muestra el aviso y deshabilita Registrar (no esconde el producto: quien busca el celular roto no entendería por qué no aparece). La baja se hace desde Ajuste de stock |
 | Ajuste de stock y traslado por API | Sin unidades, 400; la pantalla ya las mandaba |
@@ -278,9 +279,6 @@ el 400 de la API es el que manda.
 #### Lo que sigue abierto
 
 - Que la merma pregunte qué unidad o lote es: frente propio ([`pendientes.md`](../agent/pendientes.md) § 6, "Serie y lote están a medias").
-- Restaurar desde la papelera un combo o grupo cuyo producto pasó a serie mientras estaba borrado
-  no se cubre: queda configurado y la venta lo rechaza con 400 sin elegir unidad (entrada nueva en
-  [`pendientes.md`](../agent/pendientes.md) § 2).
 - Devolver una unidad al stock al cancelar una venta o emitir una nota de crédito sigue siendo a
   mano desde Inventario.
 - Precio distinto según la condición, y la serie en la boleta impresa (fiscal): fuera.

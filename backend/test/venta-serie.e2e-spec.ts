@@ -595,6 +595,292 @@ describe('venta — el cajero elige la unidad con serie (e2e)', () => {
     expect(await modoDe(itemId)).toBe('serie');
   });
 
+  // Con el combo o el grupo en la papelera el producto sí puede pasar a serie:
+  // `nombreSiEsComponenteVivo` solo cuenta compuestos vivos. Medido sin este
+  // freno: restaurar daba 201, el combo se activaba y la venta lo rechazaba con
+  // «Elegí qué unidades salen»; el grupo restaurado se asociaba a un combo nuevo
+  // y la venta igual. Con unidades cargadas el producto ya no vuelve a modo
+  // cantidad, así que el compuesto no se puede recuperar: se arma de nuevo. Sin
+  // unidades sí hay vuelta, y es lo que ejercitan los dos tests.
+  const restaurar = (ruta: string) =>
+    request(app.getHttpServer())
+      .post(`/api/${ruta}/restaurar`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+  const borrar = async (ruta: string, status: number) => {
+    const res = await request(app.getHttpServer())
+      .delete(`/api/${ruta}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(status);
+  };
+
+  const sigueEnLaPapelera = async (
+    tabla: 'items' | 'grupos_modificadores',
+    columnaId: string,
+    id: string,
+  ): Promise<boolean> => {
+    const filas: { borrado: boolean }[] = await ds.query(
+      `SELECT eliminado_el IS NOT NULL AS borrado FROM ${tabla} WHERE ${columnaId} = $1`,
+      [id],
+    );
+    return filas[0].borrado;
+  };
+
+  const pasarACantidad = (itemId: string) =>
+    request(app.getHttpServer())
+      .patch(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ modoInventario: 'cantidad' });
+
+  it('restaurar un combo cuyos componentes pasaron a serie estando en la papelera: 400 nombrando solo esos, y vuelve cuando ninguno tiene serie', async () => {
+    const sufijo = `${Date.now()}-${Math.random()}`;
+    const audifonos = `Audífonos papelera venta-serie E2E ${sufijo}`;
+    const cargador = `Cargador papelera venta-serie E2E ${sufijo}`;
+    const audifonosId = await productoSinStock(audifonos);
+    const cargadorId = await productoSinStock(cargador);
+    const fundaId = await productoSinStock(
+      `Funda papelera venta-serie E2E ${sufijo}`,
+    );
+    // Control: un componente que se sacó ANTES del borrado no vuelve con el
+    // combo, así que pasarlo a serie no frena el restaurar.
+    const parlanteId = await productoSinStock(
+      `Parlante papelera venta-serie E2E ${sufijo}`,
+    );
+    const componentes = (ids: string[]) =>
+      ids.map((componenteItemId) => ({
+        componenteItemId,
+        cantidad: '1',
+        bloqueante: true,
+      }));
+    const combo = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Combo papelera E2E ${sufijo}`,
+        tipo: 'combo',
+        precioBase: '15000',
+        monedaId: CLP_MONEDA_ID,
+        componentes: componentes([
+          audifonosId,
+          cargadorId,
+          fundaId,
+          parlanteId,
+        ]),
+      });
+    expect(combo.status).toBe(201);
+    const comboId = (combo.body as IdResponse).id;
+    const sacar = await request(app.getHttpServer())
+      .patch(`/api/items/${comboId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ componentes: componentes([audifonosId, cargadorId, fundaId]) });
+    expect(sacar.status).toBe(200);
+    await borrar(`items/${comboId}`, 200);
+    expect((await pasarASerie(parlanteId)).status).toBe(200);
+    expect((await pasarASerie(cargadorId)).status).toBe(200);
+    expect((await pasarASerie(audifonosId)).status).toBe(200);
+
+    const dos = await restaurar(`items/${comboId}`);
+    expect(dos.status).toBe(400);
+    expect(mensajeDe(dos)).toBe(
+      `No se puede restaurar: «${audifonos}», «${cargador}» ahora tienen número de serie y un combo no puede incluirlos`,
+    );
+    expect(await sigueEnLaPapelera('items', 'item_id', comboId)).toBe(true);
+
+    // Sin movimientos, el producto todavía puede volver a cantidad.
+    expect((await pasarACantidad(audifonosId)).status).toBe(200);
+    const uno = await restaurar(`items/${comboId}`);
+    expect(uno.status).toBe(400);
+    expect(mensajeDe(uno)).toBe(
+      `No se puede restaurar: «${cargador}» ahora tiene número de serie y un combo no puede incluirlo`,
+    );
+
+    expect((await pasarACantidad(cargadorId)).status).toBe(200);
+    expect((await restaurar(`items/${comboId}`)).status).toBe(201);
+  });
+
+  it('restaurar un grupo cuyas opciones pasaron a serie estando en la papelera: 400 nombrando solo esas, y vuelve cuando ninguna tiene serie', async () => {
+    const sufijo = `${Date.now()}-${Math.random()}`;
+    const audifonos = `Audífonos grupo papelera E2E ${sufijo}`;
+    const cargador = `Cargador grupo papelera E2E ${sufijo}`;
+    const audifonosId = await productoSinStock(audifonos);
+    const cargadorId = await productoSinStock(cargador);
+    const fundaId = await productoSinStock(
+      `Funda grupo papelera E2E ${sufijo}`,
+    );
+    // Control: una opción que se sacó ANTES del borrado no revive con el
+    // grupo, así que pasarla a serie no frena el restaurar.
+    const parlanteId = await productoSinStock(
+      `Parlante grupo papelera E2E ${sufijo}`,
+    );
+    const opciones = (ids: string[]) =>
+      ids.map((itemId) => ({ itemId, cantidad: '1', precioExtra: '0' }));
+    const grupo = await request(app.getHttpServer())
+      .post('/api/grupos-modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Grupo papelera E2E ${sufijo}`,
+        opciones: opciones([audifonosId, cargadorId, fundaId, parlanteId]),
+      });
+    expect(grupo.status).toBe(201);
+    const grupoId = (grupo.body as { grupoModificadorId: string })
+      .grupoModificadorId;
+    const sacar = await request(app.getHttpServer())
+      .patch(`/api/grupos-modificadores/${grupoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ opciones: opciones([audifonosId, cargadorId, fundaId]) });
+    expect(sacar.status).toBe(200);
+    await borrar(`grupos-modificadores/${grupoId}`, 204);
+    expect((await pasarASerie(parlanteId)).status).toBe(200);
+    expect((await pasarASerie(cargadorId)).status).toBe(200);
+    expect((await pasarASerie(audifonosId)).status).toBe(200);
+    const enLaPapelera = () =>
+      sigueEnLaPapelera(
+        'grupos_modificadores',
+        'grupo_modificador_id',
+        grupoId,
+      );
+
+    const dos = await restaurar(`grupos-modificadores/${grupoId}`);
+    expect(dos.status).toBe(400);
+    expect(mensajeDe(dos)).toBe(
+      `No se puede restaurar: «${audifonos}», «${cargador}» ahora tienen número de serie y un grupo no puede ofrecerlos`,
+    );
+    expect(await enLaPapelera()).toBe(true);
+
+    expect((await pasarACantidad(audifonosId)).status).toBe(200);
+    const uno = await restaurar(`grupos-modificadores/${grupoId}`);
+    expect(uno.status).toBe(400);
+    expect(mensajeDe(uno)).toBe(
+      `No se puede restaurar: «${cargador}» ahora tiene número de serie y un grupo no puede ofrecerlo`,
+    );
+
+    expect((await pasarACantidad(cargadorId)).status).toBe(200);
+    expect((await restaurar(`grupos-modificadores/${grupoId}`)).status).toBe(
+      201,
+    );
+    expect(await enLaPapelera()).toBe(false);
+  });
+
+  // Carrera restaurar ↔ pasar a serie. El restaurar toma `FOR SHARE` sobre el
+  // producto y lee el modo en un statement POSTERIOR; el paso a serie toma
+  // `FOR NO KEY UPDATE` sobre el mismo producto antes de mirar si es componente
+  // vivo. Gane quien gane, nunca terminan los dos en 2xx: eso dejaría un combo o
+  // un grupo vivo con un producto con serie adentro.
+  const respuesta = (t: request.Test) =>
+    t.then((r) => ({ status: r.status, body: r.body as unknown }));
+
+  async function comboEnLaPapeleraCon(
+    componenteItemId: string,
+  ): Promise<string> {
+    const combo = await crearCombo(
+      `Combo carrera papelera E2E ${Date.now()}-${Math.random()}`,
+      componenteItemId,
+    );
+    expect(combo.status).toBe(201);
+    const comboId = (combo.body as IdResponse).id;
+    await borrar(`items/${comboId}`, 200);
+    return comboId;
+  }
+
+  it('carrera: el paso a serie gana y el restaurar del combo espera y rebota con 400', async () => {
+    const nombre = `Cargador carrera venta-serie E2E ${Date.now()}-${Math.random()}`;
+    const itemId = await productoSinStock(nombre);
+    const comboId = await comboEnLaPapeleraCon(itemId);
+
+    // El paso a serie toma el producto y DESPUÉS lockea `item_producto`: la
+    // compuerta retiene esa fila, con el producto ya tomado.
+    const {
+      esperando,
+      respuestas: [serie, restaurado],
+    } = await correrCarrera(
+      ds,
+      [`SELECT 1 FROM item_producto WHERE item_id = $1 FOR UPDATE`, [itemId]],
+      [
+        () => respuesta(pasarASerie(itemId)),
+        () => respuesta(restaurar(`items/${comboId}`)),
+      ],
+      { escalonarMs: 800 },
+    );
+
+    expect({
+      esperando,
+      serie: serie.status,
+      restaurar: restaurado.status,
+    }).toEqual({ esperando: 2, serie: 200, restaurar: 400 });
+    expect(mensajeDe(restaurado)).toContain(`«${nombre}»`);
+    expect(await sigueEnLaPapelera('items', 'item_id', comboId)).toBe(true);
+  }, 60000);
+
+  it('carrera: el restaurar del combo gana y el paso a serie espera y rebota con 400', async () => {
+    const itemId = await productoSinStock(
+      `Cargador carrera venta-serie E2E ${Date.now()}-${Math.random()}`,
+    );
+    const comboId = await comboEnLaPapeleraCon(itemId);
+
+    // El restaurar toma lo que compone el combo y DESPUÉS revive la fila del
+    // combo: la compuerta retiene esa.
+    const {
+      esperando,
+      respuestas: [restaurado, serie],
+    } = await correrCarrera(
+      ds,
+      [`SELECT 1 FROM items WHERE item_id = $1 FOR UPDATE`, [comboId]],
+      [
+        () => respuesta(restaurar(`items/${comboId}`)),
+        () => respuesta(pasarASerie(itemId)),
+      ],
+      { escalonarMs: 800 },
+    );
+
+    expect({
+      esperando,
+      restaurar: restaurado.status,
+      serie: serie.status,
+    }).toEqual({ esperando: 2, restaurar: 201, serie: 400 });
+    expect(await modoDe(itemId)).toBe('cantidad');
+  }, 60000);
+
+  it('carrera: el paso a serie gana y el restaurar del grupo espera y rebota con 400', async () => {
+    const nombre = `Funda carrera venta-serie E2E ${Date.now()}-${Math.random()}`;
+    const itemId = await productoSinStock(nombre);
+    const grupo = await crearGrupo(
+      `Grupo carrera papelera E2E ${Date.now()}-${Math.random()}`,
+      itemId,
+    );
+    expect(grupo.status).toBe(201);
+    const grupoId = (grupo.body as { grupoModificadorId: string })
+      .grupoModificadorId;
+    await borrar(`grupos-modificadores/${grupoId}`, 204);
+
+    const {
+      esperando,
+      respuestas: [serie, restaurado],
+    } = await correrCarrera(
+      ds,
+      [`SELECT 1 FROM item_producto WHERE item_id = $1 FOR UPDATE`, [itemId]],
+      [
+        () => respuesta(pasarASerie(itemId)),
+        () => respuesta(restaurar(`grupos-modificadores/${grupoId}`)),
+      ],
+      { escalonarMs: 800 },
+    );
+
+    expect({
+      esperando,
+      serie: serie.status,
+      restaurar: restaurado.status,
+    }).toEqual({ esperando: 2, serie: 200, restaurar: 400 });
+    expect(mensajeDe(restaurado)).toContain(`«${nombre}»`);
+    expect(
+      await sigueEnLaPapelera(
+        'grupos_modificadores',
+        'grupo_modificador_id',
+        grupoId,
+      ),
+    ).toBe(true);
+  }, 60000);
+
   // ── Lecturas: qué unidades se ofrecen y qué serie quedó vendida ──
 
   /** Lo que el selector de la pantalla pide: solo lo que ESTE local puede vender ahora. */

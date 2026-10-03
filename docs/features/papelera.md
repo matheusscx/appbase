@@ -182,12 +182,12 @@ ni se bloquea la operación. Mismo patrón que Square, Toast y Clover.
 La excepción a (c) es lo que **compone** algo que se vende. Mientras una receta, un combo
 o un grupo de modificadores están en la papelera, se puede borrar lo que los compone: el
 chequeo de uso de `DELETE` solo mira compuestos vivos. Restaurar el compuesto después
-**frena con 400** y nombra qué hay que restaurar primero:
+**frena con 400** y nombra qué hay que resolver primero:
 
-| Se restaura | Frena si está en la papelera |
-|---|---|
-| Receta o combo (`items`) | un ingrediente, un extra, un componente o un grupo asociado |
-| Grupo de modificadores | el ítem de una opción |
+| Se restaura | Frena si está en la papelera | Frena si ya tiene número de serie |
+|---|---|---|
+| Receta o combo (`items`) | un ingrediente, un extra, un componente o un grupo asociado | un componente del combo |
+| Grupo de modificadores | el ítem de una opción | el producto de una opción |
 
 **Por qué no es un huérfano tolerado como la categoría.** Medido restaurando sin el freno:
 la receta volvía con lo borrado escondido por las lecturas, se activaba y **se vendía sin
@@ -203,13 +203,30 @@ frenan.
 recuperar el compuesto hay que restaurarlo, restaurar el compuesto, sacárselo y volver a
 borrarlo.
 
+**El producto que pasó a serie** (2026-10-03, lo decidió la sesión de esfuerzo máximo por encargo
+del owner). Un combo o un grupo no incluyen un producto con serie
+([`inventario-serializado.md`](./inventario-serializado.md#quién-elige-qué-unidad-con-serie-sale)), y un
+producto que es parte de uno **vivo** no pasa a serie. Con el compuesto en la papelera sí puede, y
+restaurarlo frena con 400: *"«Cargador» ahora tiene número de serie y un combo no puede incluirlo"*.
+Medido sin el freno: el combo volvía, se activaba y la venta lo rechazaba pidiendo elegir la unidad.
+**Qué cuesta:** si el producto todavía no tiene unidades, se vuelve a cantidad y se restaura; con
+unidades cargadas ya no vuelve (tiene movimientos), y el compuesto queda en la papelera: hay que
+armarlo de nuevo. Es acotado, porque para pasar a serie el producto no pudo tener movimientos (los
+de ajuste no cuentan), así que ninguna venta del combo descontó ese componente. Ojo: eso no quiere
+decir que el combo nunca se vendió. Un componente **no bloqueante** sin stock se saltea al vender sin
+dejar movimiento, así que el combo pudo venderse sin él. Recetas no: sus ingredientes y extras solo
+admiten modo cantidad.
+
 Un compuesto que borró el sistema sigue dando 404, aunque lo que lo compone esté en la
 papelera: el 404 de "Solo lo que borró una persona" manda sobre este 400.
 
 **Carrera con el borrado.** Restaurar toma `FOR SHARE` sobre lo que compone el compuesto
 antes de revivirlo, contra el `FOR UPDATE` con el que `DELETE` toma la fila antes de mirar
 el uso (`items.remove()`, y desde este cambio también `grupos-modificadores.remove()`).
-Probado con compuerta en `test/borrado-item-concurrente.e2e-spec.ts`, tests 6 a 8.
+Probado con compuerta en `test/borrado-item-concurrente.e2e-spec.ts`, tests 6 a 8. El modo del
+producto se lee en un statement **posterior** a ese `FOR SHARE`, que choca con el `FOR NO KEY UPDATE`
+con el que `update()` toma el producto antes de pasarlo a serie; probado en
+`test/venta-serie.e2e-spec.ts`, las tres carreras de restaurar.
 
 ### Colisión al restaurar → 400
 

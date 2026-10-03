@@ -627,6 +627,7 @@ describe('GruposModificadoresService', () => {
     it('restaurar() revive el grupo y devuelve el shape completo (findOne)', async () => {
       managerMock.query
         .mockResolvedValueOnce([]) // ítems de las opciones, ninguno borrado
+        .mockResolvedValueOnce([]) // ítems de las opciones con serie, ninguno
         .mockResolvedValueOnce([{ grupo_modificador_id: GRUPO_ID }]); // WITH restaurado ... RETURNING
       dataSourceMock.query
         .mockResolvedValueOnce([
@@ -638,7 +639,7 @@ describe('GruposModificadoresService', () => {
       const res = await service.restaurar(TENANT_ID, GRUPO_ID);
 
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        2,
+        3,
         expect.stringMatching(/eliminado_el\s*=\s*NULL/),
         [GRUPO_ID, TENANT_ID, null],
       );
@@ -649,7 +650,10 @@ describe('GruposModificadoresService', () => {
     });
 
     it('restaurar() algo que no está en la papelera es 404', async () => {
-      managerMock.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      managerMock.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
 
       await expect(service.restaurar(TENANT_ID, GRUPO_ID)).rejects.toThrow(
         NotFoundException,
@@ -661,6 +665,7 @@ describe('GruposModificadoresService', () => {
       // grupo estaba borrado nadie chocaba con él, pero al revivirlo vuelve
       // a competir por el nombre.
       managerMock.query
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
         .mockRejectedValueOnce(
           Object.assign(new Error('duplicate key'), { code: '23505' }),
@@ -678,6 +683,7 @@ describe('GruposModificadoresService', () => {
 
     it('el 400 de colisión de NOMBRE trae un nombre libre ya calculado', async () => {
       managerMock.query
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
         .mockRejectedValueOnce(
           Object.assign(new Error('duplicate key'), { code: '23505' }),
@@ -705,12 +711,15 @@ describe('GruposModificadoresService', () => {
     // que ese camino NO debe ofrecer una sugerencia — sería mandar al usuario
     // a arreglar algo que no es la causa. Mismo criterio que `garzones`.
     it('la colisión de OPCIÓN no ofrece sugerencia de nombre', async () => {
-      managerMock.query.mockResolvedValueOnce([]).mockRejectedValueOnce(
-        Object.assign(new Error('duplicate key'), {
-          code: '23505',
-          constraint: 'uq_grupo_opcion_item_vivo',
-        }),
-      );
+      managerMock.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockRejectedValueOnce(
+          Object.assign(new Error('duplicate key'), {
+            code: '23505',
+            constraint: 'uq_grupo_opcion_item_vivo',
+          }),
+        );
 
       const error: unknown = await service
         .restaurar(TENANT_ID, GRUPO_ID)
@@ -726,6 +735,7 @@ describe('GruposModificadoresService', () => {
 
     it('propaga un error de Postgres que no es 23505 sin traducirlo a 400', async () => {
       managerMock.query
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
         .mockRejectedValueOnce(
           Object.assign(new Error('connection lost'), { code: '57P01' }),
@@ -744,12 +754,15 @@ describe('GruposModificadoresService', () => {
     // opciones. Se distingue por `e.constraint`, no por asumir que todo
     // 23505 es la colisión de nombre.
     it('restaurar() con 23505 de uq_grupo_opcion_item_vivo da un mensaje distinto al de colisión de nombre', async () => {
-      managerMock.query.mockResolvedValueOnce([]).mockRejectedValueOnce(
-        Object.assign(new Error('duplicate key'), {
-          code: '23505',
-          constraint: 'uq_grupo_opcion_item_vivo',
-        }),
-      );
+      managerMock.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockRejectedValueOnce(
+          Object.assign(new Error('duplicate key'), {
+            code: '23505',
+            constraint: 'uq_grupo_opcion_item_vivo',
+          }),
+        );
 
       let error: unknown;
       try {
@@ -759,6 +772,8 @@ describe('GruposModificadoresService', () => {
       }
 
       expect(error).toBeInstanceOf(BadRequestException);
+      // El rechazo le cayó a la CTE (tercera llamada), no a una lectura previa.
+      expect(managerMock.query).toHaveBeenCalledTimes(3);
       expect((error as Error).message).not.toContain('ese nombre');
       expect((error as Error).message).toContain('opción viva');
     });
