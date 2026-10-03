@@ -47,40 +47,49 @@ Fuera de los módulos:
 
 ### Menú lateral
 
-El menú lateral (`frontend/app/layouts/dashboard.vue`) tiene **más entradas que módulos**:
-un mismo módulo abre varias pantallas. Cada entrada se muestra si el usuario es admin o tiene
-el permiso indicado (en orden de aparición):
+El menú lateral lo arma `frontend/app/composables/useMenuLateral.ts` (el layout
+`dashboard.vue` solo lo dibuja) **agrupado por módulo** desde el 2026-10-02: un módulo con
+varias pantallas es un grupo que se despliega, y uno de una sola, un link suelto. Cada pantalla
+se muestra si el usuario es admin o tiene el permiso indicado, y un grupo, si le queda al menos
+una pantalla visible (en orden de aparición):
 
-| Entrada | Ruta | Módulo · permiso que la muestra |
-|---|---|---|
-| Inicio | `/` | Siempre visible (el contenido lo filtra *Resumen del negocio*) |
-| Mi caja | `/mi-caja` | MiCaja · Leer |
-| Cajas | `/cajas` | Cajas · Leer |
-| Ventas | `/ventas` | Ventas · Leer |
-| Pagos | `/pagos` | Pagos · Leer |
-| Propinas | `/propinas` | Propinas · Leer |
-| Punto de venta | `/ventas/pos` | Ventas · Crear |
-| Salones | `/salones` | Salones · Operar |
-| Sesiones | `/sesiones-garzon` | Salones · Leer |
-| Anulaciones | `/salones/anulaciones` | Salones · Ver todas |
-| Tienda Online | `/tienda` | Tienda Online · Leer |
-| Mis suscripciones | `/tienda/suscripciones` | Tienda Online · Leer |
-| Medios de pago | `/tienda/medios-pago` | Tienda Online · Leer |
-| Suscripciones | `/suscripciones` | Suscripciones · Leer |
-| Terceros | `/terceros` | Terceros · Leer |
-| Inventario | `/inventario` | Inventario · Leer |
-| Mermas | `/mermas` | Inventario · Leer |
-| Recuentos | `/inventario/recuentos` | Inventario · Leer |
-| Traslados | `/inventario/traslados` | Inventario · Leer |
-| Stock mínimo | `/inventario/stock-minimo` | Inventario · Leer |
-| Compras | `/compras` | Compras · Leer |
-| Por pagar | `/compras/por-pagar` | Compras · Pagar |
-| Costos desfasados | `/desfases` | Items · Leer |
-| Órdenes | `/ordenes` | Pasarelas · Leer |
-| Reportes | `/reportes` | Algún reporte visible (hoy solo *Varianza* · Leer) |
-| Administración | `/admin` | Solo superadmin |
-| Configuración | `/configuracion/perfil` | Siempre visible (abre el menú de §3) |
-| Cerrar sesión | — | Siempre visible |
+| Grupo | Pantalla | Ruta | Módulo · permiso que la muestra |
+|---|---|---|---|
+| — | Inicio | `/` | Siempre visible (el contenido lo filtra *Resumen del negocio*) |
+| — | Mi caja | `/mi-caja` | MiCaja · Leer |
+| — | Cajas | `/cajas` | Cajas · Leer |
+| Ventas | Punto de venta | `/ventas/pos` | Ventas · Crear |
+| Ventas | Historial | `/ventas` | Ventas · Leer |
+| Ventas | Pagos | `/pagos` | Pagos · Leer |
+| Ventas | Órdenes | `/ordenes` | Pasarelas · Leer |
+| — | Propinas | `/propinas` | Propinas · Leer |
+| Salones | Mesas | `/salones` | Salones · Operar |
+| Salones | Sesiones | `/sesiones-garzon` | Salones · Leer |
+| Salones | Anulaciones | `/salones/anulaciones` | Salones · Ver todas |
+| Tienda Online | Catálogo | `/tienda` | Tienda Online · Leer |
+| Tienda Online | Mis suscripciones | `/tienda/suscripciones` | Tienda Online · Leer |
+| Tienda Online | Medios de pago | `/tienda/medios-pago` | Tienda Online · Leer |
+| — | Suscripciones | `/suscripciones` | Suscripciones · Leer |
+| — | Terceros | `/terceros` | Terceros · Leer |
+| Inventario | Stock | `/inventario` | Inventario · Leer |
+| Inventario | Recuentos | `/inventario/recuentos` | Inventario · Leer |
+| Inventario | Traslados | `/inventario/traslados` | Inventario · Leer |
+| Inventario | Mermas | `/mermas` | Inventario · Leer |
+| Inventario | Stock mínimo | `/inventario/stock-minimo` | Inventario · Leer |
+| Inventario | Costos desfasados | `/desfases` | Items · Leer |
+| Compras | Recepciones | `/compras` | Compras · Leer |
+| Compras | Por pagar | `/compras/por-pagar` | Compras · Pagar |
+| — | Reportes | `/reportes` | Algún reporte visible (hoy solo *Varianza* · Leer) |
+| — | Administración | `/admin` | Solo superadmin |
+| *(abajo)* | Configuración | `/configuracion/perfil` | Siempre visible (abre el menú de §3) |
+| *(abajo)* | Cerrar sesión | — | Siempre visible |
+
+Suma: 8 sueltas + Ventas 4 + Salones 3 + Tienda Online 3 + Inventario 6 + Compras 2 = las 26
+pantallas que el menú plano tenía, cada una una vez; más las 2 de abajo.
+
+Pagos y Órdenes viven en Ventas y Costos desfasados en Inventario aunque su permiso sea de
+otro módulo: son decisiones del owner (el porqué, en
+[patterns/frontend](../patterns/frontend.md) § 1).
 
 *Items*, *Pasarelas* e *Impresoras* no tienen entrada propia en el menú lateral: sus pantallas
 principales viven dentro de Configuración (§3).

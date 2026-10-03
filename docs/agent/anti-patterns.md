@@ -676,8 +676,8 @@ al patrón.** Diseño: [`spec del frente`](../superpowers/specs/2026-09-20-stack
 
 ### ❌ Test verde que no ejerce lo que dice probar
 
-Cinco caras, **ninguna descubierta leyendo el test**: cuatro apagando el fix a mano, y la
-quinta porque el bug volvió estando el test verde. Si con el fix apagado sigue verde, no prueba
+Seis caras, **ninguna descubierta leyendo el test**: cinco apagando el fix a mano, y una
+porque el bug volvió estando el test verde. Si con el fix apagado sigue verde, no prueba
 lo que dice — son treinta segundos y es lo primero que hay que correr.
 
 ⚠️ **Pero apagar el fix no alcanza.** El mutante confirma que el test *toca* el fix; no que mire
@@ -694,13 +694,16 @@ expect((server.address() as AddressInfo).address).toBe('127.0.0.1')
 título habla de un **resultado**. Si el título dice "queda atado a" / "se guarda" y la aserción
 dice `toHaveBeenCalledWith`, no son la misma afirmación.
 
-Las cinco caras: **(a)** el mock ya trae la respuesta, así que el branch del título nunca corre
+Las seis caras: **(a)** el mock ya trae la respuesta, así que el branch del título nunca corre
 —y su variante peor, el mock que precocina la condición que el código debía garantizar—;
 **(b)** otra regla dispara antes; **(c)** el fixture no puede aislar el criterio (con dos
 elementos el ganador es a la vez el último, el mayor y el de monto mayor: hacen falta **tres**,
 con el correcto en el **medio**); **(d)** la aserción no puede fallar porque lo que busca no
-puede aparecer; **(e)** la aserción mira la llamada, no el estado. Con su código y lo que costó
-cada una: [`resueltos.md`](resueltos.md).
+puede aparecer; **(e)** la aserción mira la llamada, no el estado; **(f)** el usuario del test no
+puede producir la condición: el admin del e2e es superadmin, `can()` lo deja pasar sin esperar
+los permisos, y un test de "el menú se arma cuando llegan los permisos" corrido con él pasó con
+el fix apagado (2026-10-02, lo cazó el bodeguero). Con su código y lo que costó cada una:
+[`resueltos.md`](resueltos.md); la (f), en [`patterns/frontend.md`](../patterns/frontend.md) § 1.
 
 **Regla:** construir el escenario de modo que **la regla bajo prueba sea la única que puede
 fallar**, y aseverar el mensaje, no sólo el status.

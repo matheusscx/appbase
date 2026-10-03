@@ -380,7 +380,7 @@ persiste en `items.precio_base`. La alternativa —recargar— tenía su propio 
   una suma sin convertir, y eso lo cierra el frente "sin mezclar"
   ([`agent/pendientes.md`](../agent/pendientes.md) § 3).
 - `composables/useSimuladorDesfases.ts` — mismo flujo aplicar/descartar para el modal (compartido entre `configuracion/items.vue` e `inventario.vue`); reproduce el manejo de `omitidos`/`afectados` con toasts propios. Al descartar **no recarga**: reemplaza en la lista lo que vuelve en `cambiados[].fila`. Es la única pantalla del proyecto que arma la lista del drawer con dos orígenes (`afectados` + la segunda pasada de `aplicar`), y ahí es donde una recarga divergía — ver *"La fila que cambió vuelve entera"*.
-- Nav en `dashboard.vue` → "Costos desfasados" (`/desfases`).
+- Menú lateral (`composables/useMenuLateral.ts`): Inventario ▸ "Costos desfasados" (`/desfases`), con gate `Items:Leer` aunque viva en el grupo de Inventario — el aviso nace donde cambia el costo (owner, 2026-10-02).
 - `configuracion/recetas-desfases.vue` es un stub de compatibilidad: redirige a `/desfases`.
 - Merma y ajustes que no cambian `costo_actual` **no** disparan el modal.
 

@@ -1191,7 +1191,8 @@ hay que repintar lo que está en pantalla** (recalcular el total, omitir el cont
 
 El detalle de cuenta reusa `VentasCatalogoGrid` (agregar productos), `useCalculoPrecios`
 (total en vivo) y `VentasCobroModal` (cobro al cerrar). La operación del garzón se
-navega desde `layouts/dashboard.vue` (`/salones`, gateada por `can('Salones','Operar')`);
+navega desde el menú lateral, Salones ▸ Mesas (`composables/useMenuLateral.ts`, `/salones`,
+gateada por `can('Salones','Operar')`);
 la administración vive dentro de Configuración (`pages/configuracion.vue` →
 `/configuracion/salones`, gateada por `can('Salones','Leer')` — **no `Crear`**: lo que la
 pantalla pide para abrirse es el permiso de lectura, si no queda escondida para quien solo

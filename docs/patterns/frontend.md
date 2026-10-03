@@ -38,10 +38,46 @@ Pantallas CRUD simples pueden usar `app/components/crud/` (`CrudPageHeader`,
 `CrudTable`, `CrudListItem`, `CrudModal`) — ver `DESIGN-SYSTEM.md` § Componentes CRUD
 y `configuracion/categorias.vue`.
 
+**Una pantalla operativa** (fuera de Configuración) va al menú lateral, que arma
+`composables/useMenuLateral.ts` **agrupado por módulo** (owner, 2026-10-02, en el selector
+interactivo; las siete preguntas salieron en la opción recomendada):
+
+- **Va al grupo del módulo cuyo permiso la muestra.** Un módulo con varias pantallas es un
+  grupo —Ventas, Salones, Tienda Online, Inventario, Compras— y lo sigue siendo aunque el rol
+  vea una sola (el bodeguero ve Compras ▸ Recepciones). Uno de una sola pantalla va suelto
+  (Mi caja, Cajas, Propinas, Suscripciones, Terceros); si una pantalla nueva le da la segunda,
+  pasa a ser grupo.
+- **Las pantallas de otro módulo que viven en un grupo son decisiones, no descuidos**: Pagos y
+  Órdenes en Ventas (son los cobros de lo vendido) y Costos desfasados (`Items`) en Inventario
+  (el aviso nace donde cambia el costo). "Mis suscripciones" y "Medios de pago" son del que
+  compra y quedan en Tienda Online, separadas de "Suscripciones", que es la del local.
+- **La pantalla principal de un grupo se nombra por lo que muestra**, no repite al grupo:
+  Stock, Historial, Mesas, Catálogo, Recepciones.
+- **El gate es el de la ruta, exacto** (`puede('Compras', 'Pagar') && { … }`). Casi todas piden
+  `Leer`; las que no, a propósito: Punto de venta (`Ventas:Crear`), Mesas (`Salones:Operar`),
+  Anulaciones (`Salones:Ver todas`) y Por pagar (`Compras:Pagar`). Un grupo aparece solo si le
+  queda al menos una pantalla visible.
+
+⚠️ **El grupo abierto es estado del composable (`gruposAbiertos`), no `defaultOpen`.** El
+acordeón de `UNavigationMenu` lee `defaultOpen` una sola vez, al montarse, y tras un F5 el menú
+se monta antes de que lleguen los permisos: el grupo de la pantalla actual quedaba cerrado.
+**Con el admin del e2e no se ve**: es superadmin, `can()` lo deja pasar sin esperar los
+permisos y su menú ya está completo al montarse (medido el 2026-10-02: un mutante con
+`defaultOpen` pasó como admin y lo cazó el bodeguero). Lo que dependa de cuándo llegan los
+permisos se prueba con un rol del tenant.
+
+⚠️ **Un grupo cerrado no dibuja sus pantallas** (`unmountOnHide`): un test que busca un link
+hijo tiene que abrir el grupo antes, y un `toHaveCount(0)` sobre una hija pasa vacío con el
+grupo cerrado. Verificar `aria-expanded="true"` primero.
+
+`useMenuLateral.nuxt.spec.ts` fija el árbol y el gate de cada pantalla, permiso por permiso;
+`e2e/layout/menu-lateral.spec.ts`, lo que solo se ve montado (F5, tarjeta del Inicio,
+colapsado con popover, celular).
+
 **Un reporte nuevo** no va al menú a mano: se agrega al catálogo de
 `composables/useReportes.ts` (título, ruta y el permiso que lo gatea). Esa lista
-alimenta a la vez la entrada "Reportes" de `layouts/dashboard.vue` —visible si el
-usuario puede ver al menos uno— y las tarjetas del índice `/reportes`, así los dos
+alimenta a la vez la entrada "Reportes" de `composables/useMenuLateral.ts` —visible si
+el usuario puede ver al menos uno— y las tarjetas del índice `/reportes`, así los dos
 no pueden desincronizarse. La pantalla del reporte igual declara su propio
 `middleware: ['auth', 'permiso']` (§ 1.2).
 

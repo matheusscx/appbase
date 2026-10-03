@@ -87,14 +87,13 @@ test.afterEach(async ({ request }) => {
 })
 
 /**
- * El botón "Compras" para volver, dentro del encabezado de la página — no el
- * de la barra lateral, que tiene el mismo nombre accesible. La barra lateral
- * se dibuja antes en el árbol de accesibilidad (medido: ambos matchean
- * `getByRole('link', { name: 'Compras' })`, y el de la página es siempre el
- * segundo), así que `.last()` es el de la página.
+ * El botón "Compras" para volver, dentro del encabezado de la página. En la
+ * barra lateral "Compras" es el grupo —un botón, no un link— y su pantalla se
+ * llama "Recepciones", así que el link con ese nombre exacto es solo este. Si
+ * el lateral volviera a tener uno, el modo estricto de Playwright lo avisa.
  */
 function botonVolverACompras(page: Page): Locator {
-  return page.getByRole('link', { name: 'Compras' }).last()
+  return page.getByRole('link', { name: 'Compras', exact: true })
 }
 
 /** Login por pantalla. Tiene un solo tenant: entra directo, sin elegir. */

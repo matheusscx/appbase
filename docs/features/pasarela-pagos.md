@@ -359,7 +359,7 @@ Golpea el ambiente de integración real (skipped en `npm test` normal).
 Con el stack arriba (`docker-compose up -d`):
 
 1. Login admin (`admin.paris@paris.cl` / `admin`) → `switch-tenant` al tenant
-   Paris → el sidebar muestra "Pasarelas".
+   Paris → Configuración muestra "Pasarelas", y el menú lateral, Ventas ▸ "Órdenes".
 2. Tab "Mis pasarelas": aparece Transbank Oneclick (Mall · Pruebas, sembrada).
 3. Tab "API Keys": crear → la key `pk_...` se muestra una sola vez.
 4. Inscripción vía API key (`POST /api/pasarela/api/inscripciones`) → abrir
@@ -368,7 +368,7 @@ Con el stack arriba (`docker-compose up -d`):
    la `urlRetorno` con `?inscripcionId=…&estado=activa`.
 5. Cobro (`POST /api/pasarela/api/cobros`) → `estado: "pagada"`.
 6. Reembolso (`POST /api/pasarela/api/cobros/:ordenId/reembolsos`).
-7. Tab "Órdenes": la orden aparece con su estado y monto.
+7. Ventas ▸ "Órdenes" (`/ordenes`): la orden aparece con su estado y monto.
 8. Revocar la API key → reintentar el cobro → 401.
 
 ---

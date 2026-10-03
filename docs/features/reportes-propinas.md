@@ -97,7 +97,7 @@ exponer su PIN.
 - Página: `frontend/app/pages/propinas/index.vue` — solo consume `resumen` vía
   `frontend/app/composables/usePropinaResumen.ts` para las 2 métricas de
   cabecera (pendiente por liquidar, cobrado del mes).
-- Navegación: grupo Propinas en `frontend/app/layouts/dashboard.vue`.
+- Navegación: link suelto "Propinas" del menú lateral (`frontend/app/composables/useMenuLateral.ts`).
 - El panel con tabs, sus filtros propios y el cache dual descritos antes del
   2026-07-17 ya no existen; `trabajadores` no tiene consumidor en el front.
 

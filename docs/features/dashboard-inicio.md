@@ -526,7 +526,8 @@ de la app:
 
 Las tarjetas-link también cambiaron el smoke `@smoke el dashboard carga`: buscaba el link
 "Ventas" del menú sin nombre exacto y ahora también matchea las tarjetas, así que usa
-`exact: true`.
+`exact: true`. Desde el 2026-10-02 "Ventas" es un grupo del menú lateral —un botón, no un
+link—, y el smoke busca ese botón dentro del menú.
 
 ```bash
 cd frontend && npm run e2e   # necesita el stack levantado

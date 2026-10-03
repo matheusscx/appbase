@@ -100,7 +100,7 @@ Ver [features/auth.md](./auth.md) para el módulo auth completo.
 
 ### Layouts / Components
 
-- `app/layouts/dashboard.vue` — Header del sidebar muestra `tenantStore.activeTenant?.nombre`. Enlace "Administración" en nav solo si `isSuperadmin`. Footer muestra nombre del tenant + nombre del usuario.
+- `app/layouts/dashboard.vue` — Header del sidebar muestra `tenantStore.activeTenant?.nombre`. Enlace "Administración" en nav solo si `isSuperadmin` (lo arma `composables/useMenuLateral.ts`). Footer muestra nombre del tenant + nombre del usuario.
 - `app/components/AppNavbar.vue` — Slot right muestra `activeTenant?.nombre ?? user?.nombre`.
 
 ### Middleware

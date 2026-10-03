@@ -249,7 +249,7 @@ Colección oficial del proyecto: **Lucide** vía Iconify — alineada con la rec
 
 - **Formato:** `i-lucide-{name}` en props `icon` de `UButton`, `UIcon`, nav items, etc.
 - **Paquete:** `@iconify-json/lucide` (en `frontend/package.json`).
-- **Buscar iconos:** [icones.js.org/collection/lucide](https://icones.js.org/collection/lucide), MCP `search_icons` de Nuxt UI, o copiar de `layouts/dashboard.vue` / `pages/configuracion.vue`.
+- **Buscar iconos:** [icones.js.org/collection/lucide](https://icones.js.org/collection/lucide), MCP `search_icons` de Nuxt UI, o copiar del menú lateral (`composables/useMenuLateral.ts`) / `pages/configuracion.vue`.
 - **No mezclar colecciones** (Heroicons, Material, etc.) en código nuevo.
 
 ### Ejemplos frecuentes

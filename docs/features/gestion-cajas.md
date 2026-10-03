@@ -2069,7 +2069,7 @@ bloquear ni al cajero dueño ni al encargado no-dueño sin `MiCaja:Actualizar` �
 
 ### Pages
 
-Dos superficies, cada una gateada por su módulo (sidebar en `layouts/dashboard.vue`):
+Dos superficies, cada una gateada por su módulo (links sueltos "Mi caja" y "Cajas" del menú lateral, `composables/useMenuLateral.ts`):
 
 - `pages/mi-caja/index.vue` — Cajero opera su propio turno: sin caja abierta → grid de
   cajones disponibles (`CajaAperturaGrid`; click en un cajón → drawer con saldo inicial +

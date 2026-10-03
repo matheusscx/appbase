@@ -357,7 +357,7 @@ cd frontend && npm run build
 - [x] GET /pagos devuelve respuesta paginada con filtros
 - [x] GET /pagos/resumen expone KPIs globales
 - [x] Página /pagos usa paginación server-side y USelectMenu para método
-- [x] Sidebar incluye entradas "Ventas" y "Pagos"
+- [x] Sidebar incluye "Ventas" y "Pagos" (desde el 2026-10-02, "Pagos" es una pantalla del grupo Ventas)
 - [x] Estado `pagada_parcial` visible en UI (badge info)
 
 ---

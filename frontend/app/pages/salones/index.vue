@@ -34,8 +34,9 @@ import { shellUi } from '~/utils/ui-shell'
 // "Salones · Encargado" del seed es exactamente ese— entraba por URL directa o
 // bookmark y se quedaba en una pantalla VACÍA con un toast genérico: el
 // listado rebotaba con 403 y no había nada más que ver. El menú ya no le
-// muestra el link (`layouts/dashboard.vue`), así que el callejón solo se
-// alcanzaba a mano. Su pantalla es Configuración → Salones, que sí pide `Leer`.
+// muestra el link (Salones ▸ Mesas, en `composables/useMenuLateral.ts`), así
+// que el callejón solo se alcanzaba a mano. Su pantalla es Configuración →
+// Salones, que sí pide `Leer`.
 // Esconder no es seguridad (invariante 6): el candado real sigue siendo el
 // `@RequiresPermiso` del backend.
 //

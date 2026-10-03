@@ -518,7 +518,7 @@ Pantalla entera detrás de `Compras:Pagar` con **middleware de ruta** (`definePa
 middleware: ['auth', 'permiso'], permiso: 'Compras:Pagar' })`, `docs/patterns/frontend.md` §
 1.2) — no un `v-if` por control: "el bodeguero recibe y el dueño paga" (decisión 12) hace que
 sea la pantalla ENTERA la que es de quien paga, así que cubre también la URL escrita a mano. La
-entrada de navegación (`layouts/dashboard.vue`) se gatea con el mismo permiso, no con `Leer`
+entrada de navegación (Compras ▸ Por pagar, en `composables/useMenuLateral.ts`) se gatea con el mismo permiso, no con `Leer`
 como el resto de Compras — es la excepción a la regla de § 1 del pattern frontend ("el link se
 gatea con `Leer`"): acá la pregunta que importa es "¿puede pagar?", porque no hay nada más que
 esta pantalla ofrezca a quien solo puede leer.
@@ -979,7 +979,7 @@ editarlos. Con `/items`, el encargado de compras recibía 403 y no podía cargar
   `cuerpoDocumento` (el pedazo del body de `totalDocumento`/`fechaVencimiento`),
   `fechaVencimientoSugerida` (espejo en JS de `deuda.ts → vencimiento`, sin la tipeada) y, de la
   tarea 5, `proponerReparto` (la propuesta de reparto de `PagarProveedorModal`, pura).
-- `layouts/dashboard.vue` (pieza 5, tarea 5): la entrada "Por pagar" del menú, gateada con
+- `composables/useMenuLateral.ts` (pieza 5, tarea 5, entonces en `layouts/dashboard.vue`): la entrada "Por pagar" del grupo Compras, gateada con
   `Compras:Pagar` (no con `Leer`, a diferencia del resto de Compras — ver la sección de la
   tarea 5).
 

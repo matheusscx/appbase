@@ -6,7 +6,7 @@ const authStore = useAuthStore()
 const tenantStore = useTenantStore()
 const permissionsStore = usePermissionsStore()
 const monedasStore = useMonedasStore()
-const { visibles: reportesVisibles } = useReportes()
+const { items, gruposAbiertos } = useMenuLateral()
 
 // Tras F5 o reapertura del navegador, Pinia pierde permisos en memoria.
 // Cargarlos al montar el layout (solo cliente) para poblar el menú lateral.
@@ -19,187 +19,6 @@ onMounted(async () => {
     tasks.push(monedasStore.ensureLoaded())
   }
   await Promise.all(tasks)
-})
-
-const items = computed<NavigationMenuItem[]>(() => {
-  const base: NavigationMenuItem[] = [
-    {
-      label: 'Inicio',
-      icon: 'i-lucide-house',
-      to: '/',
-    },
-  ]
-  if (permissionsStore.esAdmin || permissionsStore.can('MiCaja', 'Leer')) {
-    base.push({
-      label: 'Mi caja',
-      icon: 'i-lucide-banknote',
-      to: '/mi-caja',
-    })
-  }
-
-  if (permissionsStore.esAdmin || permissionsStore.can('Cajas', 'Leer')) {
-    base.push({
-      label: 'Cajas',
-      icon: 'i-lucide-layout-dashboard',
-      to: '/cajas',
-    })
-  }
-  if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Leer')) {
-    base.push({
-      label: 'Ventas',
-      icon: 'i-lucide-file-text',
-      to: '/ventas',
-    })
-  }
-  if (permissionsStore.esAdmin || permissionsStore.can('Pagos', 'Leer')) {
-    base.push({
-      label: 'Pagos',
-      icon: 'i-lucide-credit-card',
-      to: '/pagos',
-    })
-  }
-  if (permissionsStore.esAdmin || permissionsStore.can('Propinas', 'Leer')) {
-    base.push({
-      label: 'Propinas',
-      icon: 'i-lucide-hand-coins',
-      to: '/propinas',
-    })
-  }
-  if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Crear')) {
-    base.push({
-      label: 'Punto de venta',
-      icon: 'i-lucide-shopping-cart',
-      to: '/ventas/pos',
-    })
-  }
-  if (permissionsStore.esAdmin || permissionsStore.can('Salones', 'Operar')) {
-    base.push({
-      label: 'Salones',
-      icon: 'i-lucide-utensils',
-      to: '/salones',
-    })
-  }
-  if (permissionsStore.esAdmin || permissionsStore.can('Salones', 'Leer')) {
-    base.push({
-      label: 'Sesiones',
-      icon: 'i-lucide-timer',
-      to: '/sesiones-garzon',
-    })
-  }
-  if (permissionsStore.esAdmin || permissionsStore.can('Salones', 'Ver todas')) {
-    base.push({
-      label: 'Anulaciones',
-      icon: 'i-lucide-ban',
-      to: '/salones/anulaciones',
-    })
-  }
-  if (permissionsStore.esAdmin || permissionsStore.can('Tienda Online', 'Leer')) {
-    base.push({
-      label: 'Tienda Online',
-      icon: 'i-lucide-store',
-      to: '/tienda',
-    })
-    base.push({
-      label: 'Mis suscripciones',
-      icon: 'i-lucide-repeat',
-      to: '/tienda/suscripciones',
-    })
-    base.push({
-      label: 'Medios de pago',
-      icon: 'i-lucide-wallet',
-      to: '/tienda/medios-pago',
-    })
-  }
-  if (permissionsStore.esAdmin || permissionsStore.can('Suscripciones', 'Leer')) {
-    base.push({
-      label: 'Suscripciones',
-      icon: 'i-lucide-repeat-2',
-      to: '/suscripciones',
-    })
-  }
-  if (permissionsStore.esAdmin || permissionsStore.can('Terceros', 'Leer')) {
-    base.push({
-      label: 'Terceros',
-      icon: 'i-lucide-contact',
-      to: '/terceros',
-    })
-  }
-  if (permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Leer')) {
-    base.push({
-      label: 'Inventario',
-      icon: 'i-lucide-clipboard-list',
-      to: '/inventario',
-    })
-    base.push({
-      label: 'Mermas',
-      icon: 'i-lucide-trash-2',
-      to: '/mermas',
-    })
-    base.push({
-      label: 'Recuentos',
-      icon: 'i-lucide-clipboard-check',
-      to: '/inventario/recuentos',
-    })
-    base.push({
-      label: 'Traslados',
-      icon: 'i-lucide-arrow-left-right',
-      to: '/inventario/traslados',
-    })
-    base.push({
-      label: 'Stock mínimo',
-      icon: 'i-lucide-package-minus',
-      to: '/inventario/stock-minimo',
-    })
-  }
-  if (permissionsStore.esAdmin || permissionsStore.can('Compras', 'Leer')) {
-    base.push({
-      label: 'Compras',
-      icon: 'i-lucide-truck',
-      to: '/compras',
-    })
-  }
-  // "Por pagar" (spec compras-deuda-proveedor § 8 y § 10, decisión 12): "el
-  // bodeguero recibe y el dueño paga" — la entrada es de `Pagar`, no de
-  // `Leer` como el resto del módulo (§ 1 del pattern frontend: acá el link
-  // pregunta "¿puede pagar?", porque TODA la pantalla es de quien paga).
-  if (permissionsStore.esAdmin || permissionsStore.can('Compras', 'Pagar')) {
-    base.push({
-      label: 'Por pagar',
-      icon: 'i-lucide-hand-coins',
-      to: '/compras/por-pagar',
-    })
-  }
-  if (permissionsStore.esAdmin || permissionsStore.can('Items', 'Leer')) {
-    base.push({
-      label: 'Costos desfasados',
-      icon: 'i-lucide-scale',
-      to: '/desfases',
-    })
-  }
-  if (permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Leer')) {
-    base.push({
-      label: 'Órdenes',
-      icon: 'i-lucide-receipt',
-      to: '/ordenes',
-    })
-  }
-  // Visible si el usuario puede ver al menos un reporte: el catálogo y el
-  // chequeo viven en `useReportes`, compartidos con el índice `/reportes`.
-  if (reportesVisibles.value.length > 0) {
-    base.push({
-      label: 'Reportes',
-      icon: 'i-lucide-chart-column',
-      to: '/reportes',
-    })
-  }
-  if (authStore.isSuperadmin) {
-    base.push({
-      label: 'Administración',
-      icon: 'i-lucide-shield-check',
-      to: '/admin',
-    })
-  }
-  return base
 })
 
 const settingsItems = computed<NavigationMenuItem[]>(() => [
@@ -236,9 +55,13 @@ const settingsItems = computed<NavigationMenuItem[]>(() => [
       <template #default="{ collapsed }">
         <div class="flex flex-1 flex-col min-h-full gap-4">
           <UNavigationMenu
+            v-model="gruposAbiertos"
             :collapsed="collapsed"
             :items="items"
             orientation="vertical"
+            type="multiple"
+            popover
+            data-qa="menu-lateral"
           />
           <UNavigationMenu
             class="mt-auto"

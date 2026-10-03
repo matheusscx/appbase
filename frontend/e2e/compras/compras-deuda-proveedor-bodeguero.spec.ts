@@ -36,9 +36,17 @@ async function entrarComoEncargado(page: Page) {
 test('la navegación no ofrece "Por pagar"', async ({ page }) => {
   await entrarComoEncargado(page)
   await page.goto('/compras', { waitUntil: 'networkidle' })
+  const menu = page.locator('[data-qa="menu-lateral"]')
+  // El grupo tiene que estar abierto: cerrado, sus pantallas no se dibujan y el
+  // `toHaveCount(0)` de abajo pasaría aunque el rol pudiera pagar.
+  await expect(menu.getByRole('button', { name: 'Compras', exact: true }))
+    .toHaveAttribute('aria-expanded', 'true')
+  // "Recepciones" sí, porque tiene `Leer`.
+  await expect(menu.getByRole('link', { name: 'Recepciones', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Por pagar' })).toHaveCount(0)
-  // Y "Compras" sí, porque tiene `Leer`.
-  await expect(page.getByRole('link', { name: 'Compras', exact: true })).toBeVisible()
+  // Y ningún grupo sin pantallas: de todo el menú, el bodeguero ve Inicio y Compras.
+  await expect(menu.getByRole('button')).toHaveText(['Compras'])
+  await expect(menu.getByRole('link')).toHaveText(['Inicio', 'Recepciones'])
 })
 
 test('entrar por URL a /compras/por-pagar lo frena el middleware de ruta', async ({ page }) => {
