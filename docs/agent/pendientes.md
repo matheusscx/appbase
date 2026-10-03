@@ -151,6 +151,24 @@ destapa una decisión que no es mía).
     `recibo.diff` traía su propio hash, pero era el diff de un commit **anterior**: 11 archivos
     contra 21 en el primero y 13 contra 14 en el segundo, con conjuntos distintos. Es el rechazo
     normal de "falta la revisión de este diff", y la instrumentación lo separó bien.
+  - **Cazado el 2026-10-03, con causa medida: el largo del hash abreviado de las líneas `index`.**
+    Rechazo `20261003-162437-strange-kowalevski-f98e56-44912`: `recibo.diff` traía su propio hash
+    (`ac64a527…`) y difería de `hook.diff` (`c36eaede…`) **solo** en las 30 líneas `index`. El
+    recibo las escribió con 9 caracteres (`d88a81e46..9eec5cd2b`) y el hook, segundos después, con
+    8 (`d88a81e4..9eec5cd2`). El contenido es igual byte a byte. `git diff --cached --abbrev=9`
+    reproduce el hash del recibo, y `--abbrev=8` el del hook. **Causa:** sin `core.abbrev`, git
+    elige el largo según una **estimación** del número de objetos (los empaquetados más una muestra
+    de los sueltos). El repo está justo en el borde de 2^16 (`in-pack` 65 623 y `count` 2 854 sueltos
+    al medir), así que el largo salta entre 8 y 9 según cuándo se cuente, y cualquier sesión que
+    escriba objetos o haga `gc` lo mueve. Explica que reescribir el recibo segundos después
+    "arregle" el problema, y que ninguna combinación de opciones de `git diff` diera el hash: lo que
+    cambia es el estado del repo. Ese mismo día hubo otro caso igual,
+    `20261003-161508-competent-feistel-148c2d-41028` (16 líneas `index`, 0 de contenido).
+    **Arreglo probable, sin probar:** `git diff --cached --full-index` en los dos lados (hook y
+    comando del recibo del skill `verify-feature`), que escribe los hashes completos. Va en su
+    propio frente: es `.githooks/` y la integración del hook no se puede probar desde un worktree.
+    Mientras tanto, ante un rechazo, correr el `diff` de la evidencia: si solo difieren las líneas
+    `index`, el diff revisado es el mismo y reescribir el recibo es legítimo.
 
 - [ ] **Un `grupoOpcionId` en mayúsculas en el `PATCH`/`POST` de un ítem da un 400 que miente:
   "no pertenece al grupo asociado"** (backend, `ItemsService.upsertOverridesDeGrupo`; **leído, no
