@@ -1,4 +1,5 @@
 import {
+  Check,
   Entity,
   Index,
   PrimaryGeneratedColumn,
@@ -22,6 +23,15 @@ import {
  * tenant. Postgres no indexa las FK por su cuenta.
  */
 @Index('idx_cuenta_linea_anulaciones_cuenta', ['tenantId', 'cuentaId'])
+/**
+ * Los tres baldes fiscales van juntos: una cortesía con base y sin impuesto
+ * (o al revés) no se puede escribir. El tipo del motivo vive en `motivos_baja`
+ * y un CHECK no lo alcanza; que solo la cortesía los llene lo hace el service.
+ */
+@Check(
+  'chk_cuenta_linea_anulaciones_baldes_juntos',
+  '("monto_afecto" IS NULL) = ("monto_exento" IS NULL) AND ("monto_afecto" IS NULL) = ("monto_impuestos" IS NULL)',
+)
 @Entity('cuenta_linea_anulaciones')
 export class CuentaLineaAnulacion {
   @PrimaryGeneratedColumn('uuid', { name: 'cuenta_linea_anulacion_id' })
@@ -75,6 +85,43 @@ export class CuentaLineaAnulacion {
    */
   @Column({ name: 'garzon_id', type: 'uuid', nullable: true })
   garzonId: string | null;
+
+  /**
+   * Los baldes del retiro, congelados al anular: **solo una cortesía los
+   * llena** (DL 825 art. 8 d), owner 2026-10-03: *"Guardar el IVA ya"* y
+   * *"Siempre paga IVA"*); `merma` y `no_elaborado` quedan en NULL. Mismos
+   * nombres y escala que `venta_documentos` (ADR-028), para que el emisor del
+   * SII lea un solo vocabulario. Base = precio de carta sin descuentos ni
+   * promociones, neto de impuestos; `monto_impuestos` es solo el IVA. Exento
+   * es explícito: base en `monto_exento` e impuesto 0, nunca NULL. Spec
+   * `2026-10-03-cortesia-retiro-iva-design.md` § 3.
+   */
+  @Column({
+    name: 'monto_afecto',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  montoAfecto: string | null;
+
+  @Column({
+    name: 'monto_exento',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  montoExento: string | null;
+
+  @Column({
+    name: 'monto_impuestos',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  montoImpuestos: string | null;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;

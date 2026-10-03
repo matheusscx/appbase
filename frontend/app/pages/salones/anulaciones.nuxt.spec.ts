@@ -56,6 +56,7 @@ const LISTADO = [
     precioCarta: '8500.0000',
     costoEstado: 'no_aplica',
     costo: [],
+    fiscal: null,
   },
   {
     id: 'anu-sin-valorizar',
@@ -73,6 +74,7 @@ const LISTADO = [
     precioCarta: '17000.0000',
     costoEstado: 'sin_valorizar',
     costo: [],
+    fiscal: null,
   },
   {
     id: 'anu-valorizado',
@@ -90,15 +92,17 @@ const LISTADO = [
     precioCarta: '9000.0000',
     costoEstado: 'valorizado',
     costo: [{ monedaId: 'clp-1', monto: '1200.0000' }],
+    // Retiro gravado (spec 2026-10-03): 9.000 con IVA incluido → 7.563 + 1.437.
+    fiscal: { montoAfecto: '7563.0000', montoExento: '0.0000', montoImpuestos: '1437.0000' },
   },
 ]
 
 /** Resumen fijo: cubre TODO el rango, no una página — spec § 5.1. */
 const RESUMEN = {
   porTipo: [
-    { tipo: 'cortesia', platos: '3.0000', precioCarta: '9000.0000', costo: [{ monedaId: 'clp-1', monto: '1200.0000' }], sinValorizar: 0 },
-    { tipo: 'merma', platos: '2.0000', precioCarta: '17000.0000', costo: [], sinValorizar: 1 },
-    { tipo: 'no_elaborado', platos: '1.0000', precioCarta: '8500.0000', costo: [], sinValorizar: 0 },
+    { tipo: 'cortesia', platos: '3.0000', precioCarta: '9000.0000', costo: [{ monedaId: 'clp-1', monto: '1200.0000' }], sinValorizar: 0, fiscal: { montoAfecto: '7563.0000', montoExento: '0.0000', montoImpuestos: '1437.0000' } },
+    { tipo: 'merma', platos: '2.0000', precioCarta: '17000.0000', costo: [], sinValorizar: 1, fiscal: null },
+    { tipo: 'no_elaborado', platos: '1.0000', precioCarta: '8500.0000', costo: [], sinValorizar: 0, fiscal: null },
   ],
   porGarzon: [
     { garzonId: 'garzon-ana', garzonNombre: 'Ana', platos: '1.0000', precioCarta: '8500.0000', costo: [], sinValorizar: 0, pedido: '170000.0000', porcentaje: '0.0500' },
@@ -254,6 +258,16 @@ describe('anulaciones — resumen', () => {
     wrapper.unmount()
   })
 
+  it('solo la tarjeta de Cortesías muestra el IVA del retiro', async () => {
+    const wrapper = await montar()
+    const tarjeta = (titulo: string) =>
+      wrapper.findAll('div.rounded-lg').find(c => c.text().includes(titulo))!.text()
+    expect(tarjeta('Cortesías')).toContain('IVA: $1.437')
+    expect(tarjeta('Mermas en mesa')).not.toContain('IVA')
+    expect(tarjeta('No se hizo')).not.toContain('IVA')
+    wrapper.unmount()
+  })
+
   it('el aviso fijo dice que las mermas de la lista también están en Mermas', async () => {
     const wrapper = await montar()
     expect(wrapper.text()).toContain('Las mermas de esta lista también están contadas en Mermas.')
@@ -270,9 +284,22 @@ describe('anulaciones — detalle', () => {
     expect(filaNoAplica, 'fila no_aplica (Ceviche)').toBeTruthy()
     expect(filaSinValorizar, 'fila sin_valorizar (Lomo Saltado)').toBeTruthy()
 
-    expect(filaNoAplica!.text()).toContain('—')
-    expect(filaSinValorizar!.text()).toContain('Sin valorizar')
+    // La celda de Costo, no la fila: desde que existe la columna IVA, el "—"
+    // de esa columna haría pasar este test aunque el costo mostrara otra cosa.
+    const COL_IVA = 8
+    const COL_COSTO = 9
+    expect(filaNoAplica!.findAll('td')[COL_COSTO]!.text()).toBe('—')
+    expect(filaSinValorizar!.findAll('td')[COL_COSTO]!.text()).toContain('Sin valorizar')
+    expect(filaNoAplica!.findAll('td')[COL_IVA]!.text()).toBe('—')
 
+    wrapper.unmount()
+  })
+
+  it('la cortesía muestra su IVA en la columna IVA', async () => {
+    const wrapper = await montar()
+    const filaCortesia = wrapper.findAll('tbody tr').find(f => f.text().includes('Pisco Sour'))
+    expect(filaCortesia, 'fila cortesía (Pisco Sour)').toBeTruthy()
+    expect(filaCortesia!.findAll('td')[8]!.text()).toBe('$1.437')
     wrapper.unmount()
   })
 })

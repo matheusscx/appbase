@@ -93,6 +93,15 @@ todo compatible con SII, sin integrarlo.
   por separado). Decisión y razones en
   [ADR-028](./028-emision-registrada-por-venta.md).
 
+  ⚠️ **Actualización 2026-10-03 — un hecho fiscal fuera de una venta: la cortesía.** Regalar un
+  plato es un retiro gravado (DL 825 art. 8 d) y hasta ese día no dejaba nada. Ahora la
+  anulación con motivo cortesía congela los mismos tres baldes que ADR-028
+  (`cuenta_linea_anulaciones.monto_afecto/monto_exento/monto_impuestos`, solo el IVA), con base
+  en el precio de carta. Es esta regla aplicada a algo que no es una venta: se congela el hecho
+  al retirar y **se difiere el documento** (owner: *"Guardar el IVA ya"*). El emisor del retiro
+  tiene que leer esos baldes, igual que los de una venta. Detalle:
+  [`features/salones-mesas.md`](../features/salones-mesas.md#la-cortesía-como-retiro-gravado-2026-10-03).
+
 ### Diferir explícitamente (NO construir ahora)
 - Generación del XML del DTE y web service del SII.
 - Folios / CAF (el SII asigna rangos). **Regla de diseño: la PK interna ≠ folio; mantener

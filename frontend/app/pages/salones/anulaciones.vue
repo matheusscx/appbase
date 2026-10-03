@@ -8,6 +8,9 @@ type CostoEstado = 'valorizado' | 'no_aplica' | 'sin_valorizar'
 
 interface CostoPorMoneda { monedaId: string, monto: string }
 
+/** Los baldes del retiro que congela una cortesía: `montoImpuestos` es solo el IVA. */
+interface BaldesFiscales { montoAfecto: string, montoExento: string, montoImpuestos: string }
+
 interface GrupoResumen {
   platos: string
   precioCarta: string
@@ -28,7 +31,7 @@ interface GrupoPorAutorizo extends GrupoResumen {
 }
 
 interface ResumenAnulaciones {
-  porTipo: (GrupoResumen & { tipo: TipoMotivoBaja })[]
+  porTipo: (GrupoResumen & { tipo: TipoMotivoBaja, fiscal: BaldesFiscales | null })[]
   porGarzon: GrupoPorGarzon[]
   porAutorizo: GrupoPorAutorizo[]
 }
@@ -49,6 +52,7 @@ interface AnulacionReporteItem {
   precioCarta: string
   costoEstado: CostoEstado
   costo: CostoPorMoneda[]
+  fiscal: BaldesFiscales | null
 }
 
 interface MotivoOpt { id: string, nombre: string }
@@ -208,10 +212,10 @@ const garzonOpts = computed<Opt[]>(() => [
 ])
 
 const tarjetas = computed(() =>
-  TARJETAS.map(t => ({
-    ...t,
-    grupo: resumen.value?.porTipo.find(g => g.tipo === t.tipo) ?? GRUPO_VACIO,
-  })),
+  TARJETAS.map((t) => {
+    const grupo = resumen.value?.porTipo.find(g => g.tipo === t.tipo)
+    return { ...t, grupo: grupo ?? GRUPO_VACIO, fiscal: grupo?.fiscal ?? null }
+  }),
 )
 
 function sinValorizarTexto(n: number): string {
@@ -227,6 +231,7 @@ const columns: TableColumn<AnulacionReporteItem>[] = [
   { accessorKey: 'garzonNombre', header: 'Garzón' },
   { accessorKey: 'autorizadoPorNombre', header: 'Autorizó' },
   { accessorKey: 'precioCarta', header: 'Precio de carta', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'fiscal', header: 'IVA', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'costo', header: 'Costo', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
 
@@ -259,7 +264,7 @@ const columnasAutorizo: TableColumn<GrupoPorAutorizo>[] = [
         <CrudPageHeader
           large
           title="Anulaciones"
-          description="Cortesías, mermas en mesa y platos que no se hicieron — con precio de carta y costo congelados."
+          description="Cortesías, mermas en mesa y platos que no se hicieron — con precio de carta, costo e IVA de la cortesía congelados."
         />
 
         <div class="flex flex-wrap gap-2">
@@ -311,6 +316,9 @@ const columnasAutorizo: TableColumn<GrupoPorAutorizo>[] = [
             </p>
             <p class="text-sm text-muted">
               Costo: {{ loadingResumen ? '…' : formatCostoPorMoneda(t.grupo.costo) }}
+            </p>
+            <p v-if="t.tipo === 'cortesia'" class="text-sm text-muted" data-qa="anulaciones-iva-cortesias">
+              IVA: {{ loadingResumen ? '…' : formatMonto(t.fiscal?.montoImpuestos ?? '0') }}
             </p>
             <p v-if="t.grupo.sinValorizar > 0" class="text-xs text-warning mt-1">
               {{ sinValorizarTexto(t.grupo.sinValorizar) }}
@@ -397,6 +405,9 @@ const columnasAutorizo: TableColumn<GrupoPorAutorizo>[] = [
           </template>
           <template #precioCarta-cell="{ row }">
             {{ formatMonto(row.original.precioCarta) }}
+          </template>
+          <template #fiscal-cell="{ row }">
+            {{ row.original.fiscal ? formatMonto(row.original.fiscal.montoImpuestos) : '—' }}
           </template>
           <template #costo-cell="{ row }">
             <UBadge

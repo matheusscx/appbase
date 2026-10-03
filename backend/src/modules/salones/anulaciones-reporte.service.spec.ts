@@ -35,6 +35,10 @@ const anulacionRow = (overrides: Record<string, unknown> = {}) => ({
   tipo: TipoMotivoBaja.CORTESIA,
   garzon_nombre: 'Ana Torres',
   autorizado_por_nombre: 'Encargado',
+  // Cortesía de un bien: congeló sus baldes (spec 2026-10-03 § 3.1).
+  monto_afecto: '21681.0000',
+  monto_exento: '0.0000',
+  monto_impuestos: '4119.0000',
   ...overrides,
 });
 
@@ -76,6 +80,31 @@ describe('AnulacionesReporteService', () => {
         cantidad: '2.0000',
         precioCarta: '25800.0000',
       });
+    });
+
+    it('una cortesía trae sus baldes del retiro; una merma, fiscal null (spec 2026-10-03 § 3.4)', async () => {
+      dbQueryMock
+        .mockResolvedValueOnce([{ total: 2 }])
+        .mockResolvedValueOnce([
+          anulacionRow(),
+          anulacionRow({
+            id: 'anulacion-2',
+            tipo: TipoMotivoBaja.MERMA,
+            monto_afecto: null,
+            monto_exento: null,
+            monto_impuestos: null,
+          }),
+        ])
+        .mockResolvedValueOnce([]);
+
+      const res = await service.findAll(TENANT, {});
+
+      expect(res.data[0].fiscal).toEqual({
+        montoAfecto: '21681.0000',
+        montoExento: '0.0000',
+        montoImpuestos: '4119.0000',
+      });
+      expect(res.data[1].fiscal).toBeNull();
     });
 
     it('costo valorizado con dos monedas devuelve una lista de dos', async () => {
@@ -235,6 +264,9 @@ describe('AnulacionesReporteService', () => {
       garzon_nombre: 'Garzón Uno',
       usuario_id: 'usuario-1',
       usuario_nombre: 'Encargado',
+      monto_afecto: null,
+      monto_exento: null,
+      monto_impuestos: null,
       ...overrides,
     });
 
@@ -283,6 +315,46 @@ describe('AnulacionesReporteService', () => {
         { monedaId: 'CLP', monto: '4300.0000' },
       ]);
       expect(grupoMerma.sinValorizar).toBe(1);
+    });
+
+    it('porTipo suma los baldes de las cortesías que los tienen; merma queda con fiscal null', async () => {
+      dbQueryMock
+        .mockResolvedValueOnce([
+          filaResumen({
+            id: 'c1',
+            tipo: TipoMotivoBaja.CORTESIA,
+            monto_afecto: '2521.0000',
+            monto_exento: '0.0000',
+            monto_impuestos: '479.0000',
+          }),
+          filaResumen({
+            id: 'c2',
+            tipo: TipoMotivoBaja.CORTESIA,
+            monto_afecto: '0.0000',
+            monto_exento: '1500.0000',
+            monto_impuestos: '0.0000',
+          }),
+          // Cortesía de un servicio: no es retiro y no congeló nada (§ 3.3).
+          filaResumen({ id: 'c3', tipo: TipoMotivoBaja.CORTESIA }),
+          filaResumen({ id: 'm1', tipo: TipoMotivoBaja.MERMA }),
+        ])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]) // vendido
+        .mockResolvedValueOnce([]); // anulado
+
+      const res = await service.resumen(TENANT, RANGO);
+
+      const cortesia = res.porTipo.find(
+        (g) => g.tipo === TipoMotivoBaja.CORTESIA,
+      )!;
+      expect(cortesia.fiscal).toEqual({
+        montoAfecto: '2521.0000',
+        montoExento: '1500.0000',
+        montoImpuestos: '479.0000',
+      });
+      expect(
+        res.porTipo.find((g) => g.tipo === TipoMotivoBaja.MERMA)!.fiscal,
+      ).toBeNull();
     });
 
     it('costo de dos monedas en un mismo garzón: dos entradas en la lista de costo', async () => {
@@ -423,6 +495,9 @@ describe('AnulacionesReporteService', () => {
       garzon_nombre: 'Ana',
       usuario_id: 'usuario-1',
       usuario_nombre: 'Encargado',
+      monto_afecto: null,
+      monto_exento: null,
+      monto_impuestos: null,
       ...overrides,
     });
 

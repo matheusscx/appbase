@@ -563,6 +563,25 @@ Decisiones y evidencia:
 [spec](../superpowers/specs/2026-08-21-descuento-global-vs-iva-decisiones.md) ·
 [investigación del DTE](../agent/investigaciones/2026-08-21-descuento-global-vs-base-del-iva.md).
 
+## La cortesía: un retiro gravado que congela su IVA sin pasar por el motor (2026-10-03)
+
+Una cortesía en la mesa es un retiro gravado (DL 825 art. 8 d; owner: *"Siempre paga IVA"*) y
+congela sus baldes en `cuenta_linea_anulaciones` (`monto_afecto`/`monto_exento`/
+`monto_impuestos`). Tres diferencias con el IVA de una venta, todas a propósito:
+
+- **La base es la carta, no lo cobrado**: sin descuentos ni promociones (art. 16 b; owner,
+  *"Precio de carta"*), porque un regalo no tiene comprador al que aplicárselos.
+- **Solo se congela el IVA**: los adicionales (`tipo = 'otro'`) se sacan del precio para llegar
+  a la base, pero no se deben (art. 43, último inciso). Por eso, con adicionales, la suma de los
+  baldes no da el precio de carta.
+- **No usa `CalculoPreciosService.calcular`**: lo tasa `baldesDeCortesia`
+  (`salones/cortesia-retiro.ts`) con la misma regla de clasificación (IVA del país solo si
+  `afecto`), los mismos impuestos vigentes (un pausado no infla el divisor) y el mismo
+  cuantizador. Puede diferir en un peso de lo que el motor cobraría con varios impuestos.
+
+Reglas de negocio en [`PRODUCTO.md`](../PRODUCTO.md); diseño en
+[`salones-mesas.md`](./salones-mesas.md#la-cortesía-como-retiro-gravado-2026-10-03).
+
 ## Related Features
 
 - [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md) — el IVA se deriva de

@@ -538,9 +538,33 @@ anulaciones y cortesías sobre lo pedido"*. **Una nota de crédito no toca ese %
 2026-10-03), a diferencia del vendido neto del Inicio y de `/ventas`, que sí la restan (más
 abajo, *"Los números de plata del negocio son netos de las notas de crédito"*). El % mide lo
 que el garzón anula o regala antes de cobrar, y la nota la emite la caja después; además,
-también sirve para cambiar una boleta por factura. Lo que sigue sin
-existir: la cortesía como retiro gravado con IVA (fiscal, frente propio) —
-`agent/pendientes.md`.
+también sirve para cambiar una boleta por factura.
+
+**La cortesía es un retiro gravado con IVA, y congela su IVA al anular** (owner, 2026-10-03;
+DL 825 art. 8 d): regalar un plato con fin promocional es venta para el SII. Las reglas:
+
+- **Toda cortesía a un cliente paga IVA** (*"Siempre paga IVA"*): se trata como promoción,
+  también cuando es para compensar. No hay nada que elegir en la mesa.
+- **La base es el precio de carta**, sin descuentos ni promociones, neto de los impuestos que
+  incluya (*"Precio de carta"*, art. 16 b): una cerveza de carta a $3.000 con happy hour al 50%
+  paga IVA sobre $2.521 → $479. Solo se congela el IVA (el impuesto adicional no grava la venta
+  del minorista al consumidor, art. 43). Un ítem exento congela su base como exenta, con
+  impuesto 0.
+- **Solo un bien**: la cortesía de un servicio no es retiro y no congela nada. Merma y "no se
+  hizo" tampoco.
+- **Hoy no se emite el documento** (*"Guardar el IVA ya"*): el reporte de anulaciones muestra
+  el IVA de las cortesías del período y el contador declara con ese número; la boleta la emite
+  la emisión electrónica cuando llegue (ADR-010). Mientras tanto el riesgo de no documentar el
+  retiro sigue (art. 97 N° 10 del Código Tributario).
+- **La comida del personal dentro del local no es cortesía**: no es retiro (Oficio 734/2002) y
+  cargarla como cortesía pagaría IVA de más. Su motivo propio está pendiente
+  (`agent/pendientes.md`).
+
+Lectura de la ley, no oficio: el SII no tiene un pronunciamiento sobre la cortesía de
+restaurante. Investigación:
+[`agent/investigaciones/2026-10-03-cortesia-retiro-iva.md`](./agent/investigaciones/2026-10-03-cortesia-retiro-iva.md).
+Detalle en [`features/salones-mesas.md`](./features/salones-mesas.md) § *"La cortesía como
+retiro gravado"*.
 
 **Fuera de alcance (fases futuras):** FIFO o método de costeo elegible por tenant, y la
 emisión del **DTE 52** que legaliza un traslado en la vía pública —bodegas y traslados ya

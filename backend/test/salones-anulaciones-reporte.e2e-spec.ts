@@ -81,6 +81,12 @@ interface AnulacionReporteItem {
   precioCarta: string;
   costoEstado: 'valorizado' | 'no_aplica' | 'sin_valorizar';
   costo: CostoPorMoneda[];
+  fiscal: BaldesFiscales | null;
+}
+interface BaldesFiscales {
+  montoAfecto: string;
+  montoExento: string;
+  montoImpuestos: string;
 }
 interface ReportePaginado {
   data: AnulacionReporteItem[];
@@ -93,7 +99,7 @@ interface GrupoResumen {
   sinValorizar: number;
 }
 interface ResumenAnulaciones {
-  porTipo: (GrupoResumen & { tipo: string })[];
+  porTipo: (GrupoResumen & { tipo: string; fiscal: BaldesFiscales | null })[];
   porGarzon: (GrupoResumen & {
     garzonId: string | null;
     garzonNombre: string | null;
@@ -539,6 +545,43 @@ describe('Salones — reporte de anulaciones, listado (e2e)', () => {
     expect(filaCortesia.mesaNombre).toBe('Mesa reporte-anulaciones');
     expect(filaCortesia.cuentaId).toBe(cuenta.id);
     expect(typeof filaCortesia.cuentaNumero).toBe('number');
+
+    // El retiro (spec 2026-10-03 § 3.4): la cortesía trae sus baldes —2 ×
+    // 7.300 neto, afecto → IVA 2.774—; merma y no_elaborado, fiscal null.
+    expect(filaCortesia.fiscal).toEqual({
+      montoAfecto: '14600.0000',
+      montoExento: '0.0000',
+      montoImpuestos: '2774.0000',
+    });
+    expect(filaMerma.fiscal).toBeNull();
+    expect(filaNoElaborado.fiscal).toBeNull();
+
+    // `porTipo` de Cortesías suma los baldes de las filas del listado con el
+    // mismo filtro; Mermas queda con fiscal null.
+    const filtro = { ...rangoAmplio(), garzonId: garzon1.id };
+    const resumenGarzon = await resumen(tokenEncargado, filtro);
+    const listadoCortesias = await reporte(tokenEncargado, {
+      ...filtro,
+      tipo: 'cortesia',
+    });
+    expect(listadoCortesias.status).toBe(200);
+    const suma = (campo: keyof BaldesFiscales) =>
+      listadoCortesias.body.data
+        .reduce(
+          (acc, f) => (f.fiscal ? acc.plus(f.fiscal[campo]) : acc),
+          new Decimal(0),
+        )
+        .toFixed(4);
+    expect(
+      resumenGarzon.porTipo.find((g) => g.tipo === 'cortesia')!.fiscal,
+    ).toEqual({
+      montoAfecto: suma('montoAfecto'),
+      montoExento: suma('montoExento'),
+      montoImpuestos: suma('montoImpuestos'),
+    });
+    expect(
+      resumenGarzon.porTipo.find((g) => g.tipo === 'merma')!.fiscal,
+    ).toBeNull();
   });
 
   it('un plato SIN costo cargado anulado como merma → sin_valorizar, costo []', async () => {

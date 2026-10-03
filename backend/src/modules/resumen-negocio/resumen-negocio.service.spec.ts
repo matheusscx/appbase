@@ -436,6 +436,11 @@ describe('ResumenNegocioService', () => {
           precioCarta: '5000.0000',
           costo: [{ monedaId: 'clp-uuid', monto: '1200.0000' }],
           sinValorizar: 0,
+          fiscal: {
+            montoAfecto: '4202.0000',
+            montoExento: '0.0000',
+            montoImpuestos: '798.0000',
+          },
         },
       ];
       mockRespuestas({

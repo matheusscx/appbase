@@ -2790,9 +2790,19 @@ CREATE TABLE cuenta_linea_anulaciones (
     motivo_baja_id UUID NOT NULL REFERENCES motivo_baja(motivo_baja_id),
     autorizado_por UUID NOT NULL REFERENCES usuarios(usuario_id),
     garzon_id UUID REFERENCES garzones(garzon_id), -- congelado: cuentas.garzon_responsable_id al anular; ni transferencia ni fusión posterior lo cambian
+    -- Baldes del retiro (DL 825 art. 8 d): solo una cortesía los llena; merma y
+    -- no_elaborado quedan en NULL. Base = carta sin descuentos ni promociones,
+    -- neta de impuestos; monto_impuestos es solo el IVA. Exento explícito.
+    monto_afecto NUMERIC(18,4),
+    monto_exento NUMERIC(18,4),
+    monto_impuestos NUMERIC(18,4),
     creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    eliminado_el TIMESTAMPTZ
+    eliminado_el TIMESTAMPTZ,
+    CONSTRAINT chk_cuenta_linea_anulaciones_baldes_juntos CHECK (
+        (monto_afecto IS NULL) = (monto_exento IS NULL)
+        AND (monto_afecto IS NULL) = (monto_impuestos IS NULL)
+    )
 );
 CREATE INDEX idx_cuenta_linea_anulaciones_cuenta ON cuenta_linea_anulaciones (tenant_id, cuenta_id);
 

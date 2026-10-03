@@ -187,6 +187,24 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
       .send(body);
   }
 
+  /** Los baldes del retiro que congeló una anulación (spec 2026-10-03 § 3.1). */
+  async function baldesDe(anulacionId: string): Promise<{
+    monto_afecto: string | null;
+    monto_exento: string | null;
+    monto_impuestos: string | null;
+  }> {
+    const [fila]: {
+      monto_afecto: string | null;
+      monto_exento: string | null;
+      monto_impuestos: string | null;
+    }[] = await ds.query(
+      `SELECT monto_afecto, monto_exento, monto_impuestos
+         FROM cuenta_linea_anulaciones WHERE cuenta_linea_anulacion_id = $1`,
+      [anulacionId],
+    );
+    return fila;
+  }
+
   async function cancelarConMotivo(
     cuentaId: string,
     body: { motivoBajaId: string },
@@ -565,6 +583,156 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
     );
     expect(filaAnulacion.precio_unitario).toBe(filaLinea.precio_unitario);
     expect(filaAnulacion.garzon_id).toBe(garzon.id);
+
+    // Retiro gravado (spec 2026-10-03): el Lomo es afecto con precio neto, así
+    // que la carta ya es la base y el IVA es 19% de ella.
+    expect(await baldesDe(anulacionId)).toEqual({
+      monto_afecto: '1000.0000',
+      monto_exento: '0.0000',
+      monto_impuestos: '190.0000',
+    });
+  });
+
+  it('cortesía con precio de góndola y una exenta: base neta de carta e IVA por resta; exento explícito', async () => {
+    const marca = Date.now();
+    const gondolaId = (
+      await post<IdResponse>('/api/items', {
+        nombre: `Cerveza góndola E2E ${marca}`,
+        tipo: 'producto',
+        precioBase: '3000',
+        precioIncluyeImpuesto: true,
+        monedaId: CLP_MONEDA_ID,
+        unidadMedida: 'unidad',
+        stock: '50',
+        costo: '100',
+        categoriaId: catCocinaId,
+      })
+    ).id;
+    const exentoId = (
+      await post<IdResponse>('/api/items', {
+        nombre: `Exento E2E ${marca}`,
+        tipo: 'producto',
+        precioBase: '1500',
+        precioIncluyeImpuesto: true,
+        clasificacionTributaria: 'exento',
+        monedaId: CLP_MONEDA_ID,
+        unidadMedida: 'unidad',
+        stock: '50',
+        costo: '100',
+        categoriaId: catCocinaId,
+      })
+    ).id;
+    const cuenta = await abrirCuentaCon([
+      { itemId: gondolaId, cantidad: '1' },
+      { itemId: exentoId, cantidad: '2' },
+    ]);
+    await despachar(cuenta.id);
+    const lineas = (await detalleCuenta(cuenta.id)).lineas;
+
+    const resA = await anular(
+      cuenta.id,
+      lineas.find((l) => l.itemId === gondolaId)!.id,
+      { cantidad: '1', motivoBajaId: motivoCortesiaId },
+    );
+    expect(resA.status).toBe(201);
+    const resB = await anular(
+      cuenta.id,
+      lineas.find((l) => l.itemId === exentoId)!.id,
+      { cantidad: '2', motivoBajaId: motivoCortesiaId },
+    );
+    expect(resB.status).toBe(201);
+    const anulaciones = (resB.body as CuentaDetalle).anulaciones;
+
+    // La escena del owner: $3.000 con IVA incluido → base 2.521 + IVA 479.
+    expect(
+      await baldesDe(
+        anulaciones.find((a) => a.itemNombre.includes('Cerveza'))!.id,
+      ),
+    ).toEqual({
+      monto_afecto: '2521.0000',
+      monto_exento: '0.0000',
+      monto_impuestos: '479.0000',
+    });
+    expect(
+      await baldesDe(
+        anulaciones.find((a) => a.itemNombre.includes('Exento'))!.id,
+      ),
+    ).toEqual({
+      monto_afecto: '0.0000',
+      monto_exento: '3000.0000',
+      monto_impuestos: '0.0000',
+    });
+  });
+
+  it('un impuesto adicional sale de la base pero no se congela; pausado, ya no infla el divisor', async () => {
+    const marca = Date.now();
+    const adicionalId = (
+      await post<IdResponse>('/api/impuestos', {
+        nombre: `Adicional E2E ${marca}`,
+        porcentaje: '0.315',
+      })
+    ).id;
+    const licorId = (
+      await post<IdResponse>('/api/items', {
+        nombre: `Licor E2E ${marca}`,
+        tipo: 'producto',
+        precioBase: '3000',
+        precioIncluyeImpuesto: true,
+        impuestosIds: [adicionalId],
+        monedaId: CLP_MONEDA_ID,
+        unidadMedida: 'unidad',
+        stock: '50',
+        costo: '100',
+        categoriaId: catCocinaId,
+      })
+    ).id;
+
+    const anularUno = async (): Promise<string> => {
+      const cuenta = await abrirCuentaCon([
+        { itemId: licorId, cantidad: '1' },
+        { itemId: guarnicionId, cantidad: '1' },
+      ]);
+      await despachar(cuenta.id);
+      const linea = (await detalleCuenta(cuenta.id)).lineas.find(
+        (l) => l.itemId === licorId,
+      )!;
+      const res = await anular(cuenta.id, linea.id, {
+        cantidad: '1',
+        motivoBajaId: motivoCortesiaId,
+      });
+      expect(res.status).toBe(201);
+      expect(
+        (
+          await cancelarConMotivo(cuenta.id, {
+            motivoBajaId: motivoNoElaboradoId,
+          })
+        ).status,
+      ).toBe(201);
+      return (res.body as CuentaDetalle).anulaciones.find((a) =>
+        a.itemNombre.includes('Licor'),
+      )!.id;
+    };
+
+    // 3000 / (1 + 0,19 + 0,315) = 1993; adicional 628 (no se congela, art.
+    // 43); IVA = 3000 − 1993 − 628 = 379.
+    expect(await baldesDe(await anularUno())).toEqual({
+      monto_afecto: '1993.0000',
+      monto_exento: '0.0000',
+      monto_impuestos: '379.0000',
+    });
+
+    const pausa = await request(app.getHttpServer())
+      .patch(`/api/impuestos/${adicionalId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ activo: false });
+    expect(pausa.status).toBe(200);
+
+    // Pausado no se cobra: solo el IVA sale del precio (2521 + 479).
+    expect(await baldesDe(await anularUno())).toEqual({
+      monto_afecto: '2521.0000',
+      monto_exento: '0.0000',
+      monto_impuestos: '479.0000',
+    });
   });
 
   it('no_elaborado: el stock no se mueve, porque ese plato nunca salió', async () => {
@@ -586,6 +754,12 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
 
     const despues = await stockVendibleDe(platoId);
     expect(despues).toBe(antes);
+    // No es retiro: no congela baldes fiscales.
+    expect(await baldesDe(anulacionId)).toEqual({
+      monto_afecto: null,
+      monto_exento: null,
+      monto_impuestos: null,
+    });
 
     const mov: unknown[] = await ds.query(
       `SELECT 1 FROM movimientos_inventario WHERE cuenta_linea_anulacion_id = $1`,
@@ -723,6 +897,12 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
     expect(mov).toHaveLength(1);
     expect(mov[0].motivo).toBe('merma');
     expect(mov[0].item_id).toBe(descartableId);
+    // Y su cortesía igual se tasa: la lectura tributaria no filtra el borrado.
+    expect(await baldesDe(anulacionId)).toEqual({
+      monto_afecto: '1000.0000',
+      monto_exento: '0.0000',
+      monto_impuestos: '190.0000',
+    });
   });
 
   /**
@@ -1055,6 +1235,28 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
       expect(
         detalle.anulaciones.every((a) => a.motivoTipo === 'cortesia'),
       ).toBe(true);
+      // Cada línea congela su retiro por lo que tenía despachado (2 y 1 a
+      // $1.000 neto, afectos).
+      const baldes = await Promise.all(
+        detalle.anulaciones.map(async (a) => ({
+          cantidad: Number(a.cantidad),
+          ...(await baldesDe(a.id)),
+        })),
+      );
+      expect(baldes.sort((a, b) => a.cantidad - b.cantidad)).toEqual([
+        {
+          cantidad: 1,
+          monto_afecto: '1000.0000',
+          monto_exento: '0.0000',
+          monto_impuestos: '190.0000',
+        },
+        {
+          cantidad: 2,
+          monto_afecto: '2000.0000',
+          monto_exento: '0.0000',
+          monto_impuestos: '380.0000',
+        },
+      ]);
 
       // La mesa queda libre de verdad.
       const listado = await request(app.getHttpServer())

@@ -23,6 +23,104 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La cortesía es un retiro gravado y congela su IVA al anular (cerrada 2026-10-03)
+
+Sale de [`pendientes.md`](pendientes.md) § 6 (fiscal, frente propio). Reglas vivas en
+[`PRODUCTO.md`](../PRODUCTO.md) (*"La cortesía es un retiro gravado"*), diseño en
+[`salones-mesas.md`](../features/salones-mesas.md#la-cortesía-como-retiro-gravado-2026-10-03),
+spec [`2026-10-03-cortesia-retiro-iva-design.md`](../superpowers/specs/2026-10-03-cortesia-retiro-iva-design.md),
+investigación [`2026-10-03-cortesia-retiro-iva.md`](investigaciones/2026-10-03-cortesia-retiro-iva.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 6
+
+- [ ] **La cortesía como retiro gravado con IVA** (fiscal — **frente propio, con su propia
+  sesión**: `CLAUDE.md` y ADR-010 lo sacan de cualquier tanda de producto o de arrastre de
+  otra tarea, y no se cuelga al final de una ronda de preguntas). Un retiro de mercadería
+  para consumo de terceros es venta gravada con IVA (DL 825, art. 8 letra d), salvo rifas y
+  sorteos promocionales — hoy la cortesía registrada en `/salones/anulaciones` no genera
+  ningún hecho tributario, solo el descuento de stock y el registro del reporte. **Fuentes de
+  la investigación de mercado** (spec
+  [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md)
+  § 8, pasada del 2026-09-18): [DL 825](https://www.sii.cl/pagina/jurisprudencia/legislacion/basica/dl825.doc)
+  (el hecho gravado del retiro); no se encontró oficio del SII específico sobre la cortesía de
+  restaurante, así que la aplicación del art. 8 d a este caso concreto **no está confirmada**,
+  solo es la lectura más cercana. La merma normal se acredita con control interno
+  ([SII — mermas](https://www.sii.cl/preguntas_frecuentes/declaracion_renta/001_140_0736.htm));
+  la pérdida por caso fortuito exige aviso en 48 h
+  ([SII — pérdida de existencias](https://www.sii.cl/portales/sismo/pf_perdida_exis_docum.html)) —
+  ninguna de las dos aplica a la cortesía, que es deliberada, no una pérdida.
+  **Antes de diseñar:** decidir si se emite un documento tributario por cada cortesía, se
+  acumulan y se declaran aparte, o se espera a tener la emisión electrónica (ADR-010) para
+  resolverlo junto con el resto de lo fiscal — es la misma pregunta que la regla de "congelar
+  el hecho fiscal en la transacción, diferir lo que solo transmite o formatea" de ADR-010, y la
+  regla la pone el owner, no el agente.
+  ⚠️ **Corrección (2026-10-03, investigación
+  [`2026-10-03-cortesia-retiro-iva.md`](investigaciones/2026-10-03-cortesia-retiro-iva.md)):**
+  el "salvo rifas y sorteos" está al revés — el art. 8 d) **grava** las rifas, los sorteos y
+  "toda entrega gratuita" con fin promocional; la única exclusión (inc. 4, Ley 21.210) son
+  donaciones del art. 31 N° 3 LIR. La calificación la decide la **finalidad**: promocional →
+  retiro gravado (base art. 16 b), precio asignado neto de IVA, documento al entregar);
+  compensación o liberalidad → no afecta, sin crédito por los insumos. El personal comiendo
+  dentro del local no es retiro (Oficio 734/2002).
+  **Cómo arrancarlo — ✅ DECIDIDO (owner, 2026-10-03, AskUserQuestion de esta sesión, con el
+  análisis de la Sesión de esfuerzo máximo delante; escena: 60 postres de $4.990 regalados en el
+  mes, $299.400 a carta, $47.803 de IVA):**
+  - *"Guardar el IVA ya"* (recomendada, sobre *"Boleta armada por cortesía"* y *"Esperar la
+    emisión"*): al anular como cortesía se congela el neto y el IVA, y el reporte de anulaciones
+    muestra el IVA del período; la boleta la emite el frente de emisión electrónica leyendo esos
+    datos. Costo aceptado: hasta la emisión, el contador declara con el número del reporte y el
+    riesgo de no emitir el documento sigue.
+  - *"Siempre paga IVA"* (recomendada, sobre *"Lo elige quien la autoriza"*, *"Ninguna paga IVA"*
+    y *"Lo veo con mi contador"*): toda cortesía a un cliente se trata como promoción. Costo
+    aceptado: se paga IVA también por las compensaciones; no hay nada que elegir en la mesa.
+  - *"Precio de carta"* (recomendada, sobre *"Precio con descuentos del día"*; segunda tanda del
+    mismo día, con el análisis de la Sesión de esfuerzo máximo sobre el art. 16 b): la base es el
+    precio de carta **sin descuentos ni promociones**, neto de todo impuesto incluido. Escena:
+    cerveza de carta $3.000 con happy hour al 50% → base $2.521, IVA $479. Es lectura de la ley,
+    no oficio. Se congela solo el IVA: los adicionales no gravan la venta del minorista al
+    consumidor (art. 43, último inciso).
+  - *"Anotarlo aparte"* (recomendada): la comida del personal dentro del local no es retiro
+    (Oficio 734/2002) y no va como cortesía; su motivo propio es otra entrada de esta sección.
+
+### Qué se hizo
+
+- **Cómo se decidió:** la Sesión de esfuerzo máximo hizo la pasada normativa (tres subagentes
+  y verificación propia de los puntos que deciden) y el owner contestó dos tandas de
+  AskUserQuestion en esta sesión, con ese análisis delante (las cuatro decisiones, en la
+  entrada de arriba). La orquestadora pidió no tocar `CalculoPreciosService.calcular()` (es el
+  motor), y además se midió que no servía: aplica las promociones del día y `cargarBasePorIds`
+  da 404 con un ítem borrado del catálogo, cuya anulación está permitida.
+- `cuenta_linea_anulaciones` suma `monto_afecto`, `monto_exento` y `monto_impuestos`
+  (nullable, `numeric(18,4)`, y un `CHECK` que los exige juntos). Solo una cortesía de un bien
+  los llena; merma, no elaborado y la cortesía de un servicio quedan en `NULL`.
+- La tasación es una función pura, `baldesDeCortesia` (`salones/cortesia-retiro.ts`), y
+  `SalonesService.baldesDeCortesias` la alimenta con una consulta por operación, antes de
+  escribir, tanto en `anularLinea` como en `cancelarConMotivo`.
+- El reporte trae `fiscal` en cada fila y en cada grupo de `porTipo`; la pantalla suma la
+  columna IVA y la línea *"IVA: $X"* en la tarjeta de Cortesías.
+- **Queda afuera, con su lugar:** la comida del personal (entrada propia en `pendientes.md`
+  § 6), el documento del retiro (lo emite la emisión electrónica con estos baldes) y el
+  `motivo: 'merma'` del kardex para la cortesía (se distingue por `motivo_baja_id`; tocarlo es
+  escribir en `movimientos_inventario` y no se pidió).
+
+### Qué lo fija
+
+- `cortesia-retiro.spec.ts` (10 tests): la escena del owner (3.000 → 2.521 + 479), la góndola
+  de $993 (834 + 159, donde la fórmula daría 158), precio neto, exento, adicionales incluidos y
+  netos, cantidad fraccionaria, escala USD y el afecto sin IVA.
+- `salones.service.spec.ts`: cortesía, merma y cortesía de un servicio en `anularLinea`, y la
+  cancelación con cortesía con **una** consulta tributaria para dos líneas.
+- `anulaciones-reporte.service.spec.ts`: `fiscal` en la fila y la suma de `porTipo`.
+- E2E contra Postgres (`salones-anular-linea`, `salones-anulaciones-reporte`): afecto neto,
+  góndola, exento, un adicional que se pausa, el ítem borrado, la cancelación con motivo, y el
+  resumen igual a la suma del listado.
+- **Mutantes medidos, todos revertidos:** IVA por `tasa × base` en vez de por resta (muere la
+  góndola de $993); sacar `esBienRetirable` (muere el servicio); `porTipo` sin `fiscal`;
+  `cancelarConMotivo` sin baldes; los adicionales fuera del divisor (mueren 2); y quitar
+  `imp.activo` del SQL (muere el e2e del adicional pausado, que el mock de `Db` no ve).
+
+---
+
 ## Una nota de crédito que se reintenta no se emite dos veces (cerrada 2026-10-03)
 
 Sale de [`pendientes.md`](pendientes.md) § 6 (fiscal, frente propio). La regla viva, en

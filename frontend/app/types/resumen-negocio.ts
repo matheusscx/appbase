@@ -44,7 +44,10 @@ export interface CostoPorMoneda {
   monto: string
 }
 
-/** Espejo de `GrupoResumen & { tipo: TipoMotivoBaja }` — la forma `porTipo` de `ResumenAnulaciones`. */
+/**
+ * Espejo de `GrupoResumen & { tipo: TipoMotivoBaja }` — la forma `porTipo` de `ResumenAnulaciones`.
+ * El backend trae además `fiscal` (el IVA de las cortesías, 2026-10-03), que el Inicio no muestra.
+ */
 export interface AnulacionPorTipo {
   tipo: TipoMotivoBaja
   /** Σ `cantidad` de las filas del grupo. */

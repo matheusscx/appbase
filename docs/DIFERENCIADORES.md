@@ -199,6 +199,29 @@ entra en unidades y no en cajas.
 [feature](features/compras.md#la-lectura-del-xml-y-el-aprendizaje).
 **Estado:** ✅ Implementado 2026-09-27 ([ESTADO](ESTADO.md)).
 
+### La cortesía deja registrado el IVA que debe como retiro
+
+**Nosotros:** regalar un plato en la mesa (anular con motivo *cortesía*) congela, en ese
+momento, la base a precio de carta y el IVA del retiro, y el reporte de anulaciones muestra el
+IVA de las cortesías del período. El contador declara con ese número; la boleta del retiro la
+emitirá la emisión electrónica con esos datos.
+**El mercado:** de los POS chilenos relevados por su ayuda pública el 2026-10-03 (Toteat, Fudo,
+Justo, Bsale, Defontana, TUU), **ninguno trata la cortesía como concepto propio ni menciona el
+IVA del retiro**: usan un descuento con nombre, una anulación con comentario o un "consumo" de
+stock (Bsale lo llama `Retiro`, solo como movimiento de inventario). Ninguno trae un informe de
+cortesías. Afuera, Lightspeed K-Series separa los *comps* de los descuentos en su reporte, sin
+tratamiento fiscal chileno.
+⚠️ Regla 3: ausencia de documentación pública ≠ ausencia de la función. Y la calificación de
+la cortesía como retiro gravado es una lectura del DL 825 (art. 8 d), sin oficio del SII sobre
+restaurantes: no se promociona como "cumplimiento garantizado".
+**Por qué le importa a quien compra:** el patrón del mercado —descuento o consumo sin
+documento— deja un retiro gravado sin débito declarado. Acá el número existe desde el día uno.
+**Evidencia:** [investigación de la cortesía § 6](agent/investigaciones/2026-10-03-cortesia-retiro-iva.md) ·
+[spec](superpowers/specs/2026-10-03-cortesia-retiro-iva-design.md) ·
+[feature](features/salones-mesas.md#la-cortesía-como-retiro-gravado-2026-10-03).
+**Estado:** ✅ Implementado 2026-10-03 el registro del IVA ([ESTADO](ESTADO.md)); el documento
+del retiro, no (llega con la emisión electrónica).
+
 ---
 
 ## 📐 Diseñado, todavía no construido

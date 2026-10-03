@@ -250,7 +250,11 @@ describe('SalonesService', () => {
       ]),
     };
     calculoPrecios = {
-      cargarConfig: jest.fn().mockResolvedValue({ modoRedondeo: 'HALF_UP' }),
+      // La escala sale de lo que le pasan, como la real: la cortesía cuantiza
+      // con ella (spec 2026-10-03).
+      cargarConfig: jest.fn((_tenantId: string, decimalesMoneda: number) =>
+        Promise.resolve({ modoRedondeo: 'HALF_UP', decimalesMoneda }),
+      ),
       convertirAMonedaOficial: jest.fn(
         (precio: string, monedaId: string, tasaMap: Map<string, string>) =>
           new Decimal(precio).times(tasaMap.get(monedaId) ?? '1').toFixed(4),
@@ -2909,6 +2913,7 @@ describe('SalonesService', () => {
         cantidadPresentacion: null,
         unidadCodigoPresentacion: null,
         personalizacion: null,
+        precioUnitario: '12900.0000',
         ...overrides,
       };
     }
@@ -2939,6 +2944,20 @@ describe('SalonesService', () => {
       modoInventario: string | null = null,
     ) {
       manager.query.mockImplementation((sql: string) => {
+        // El tratamiento tributario para tasar una cortesía (spec 2026-10-03):
+        // afecto con IVA incluido, sin adicionales.
+        if (sql.includes('AS tasas_adicionales')) {
+          return Promise.resolve([
+            {
+              item_id: ITEM,
+              nombre: 'Lomo',
+              clasificacion_tributaria: 'afecto',
+              precio_incluye_impuesto: true,
+              tasas_adicionales: [],
+              tasa_iva: '0.1900',
+            },
+          ]);
+        }
         if (sql.includes('i.tipo, i.nombre, ip.unidad_medida')) {
           return Promise.resolve([
             {
@@ -3157,6 +3176,73 @@ describe('SalonesService', () => {
           precioUnitario: '12900.0000',
           garzonId: 'garzon-pedro',
         }),
+      );
+    });
+
+    it('una cortesía congela los baldes del retiro: base de carta neta e IVA (spec 2026-10-03)', async () => {
+      motivosBaja.assertMotivoActivo.mockResolvedValue({
+        id: MOTIVO,
+        nombre: 'Cortesía casa',
+        tipo: TipoMotivoBaja.CORTESIA,
+      });
+      mockCuentaYLinea(lineaViva({ precioUnitario: '3000.0000' }));
+
+      await service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+        cantidad: '2',
+        motivoBajaId: MOTIVO,
+      });
+
+      // 2 × 3.000 = 6.000 → 6000 / 1,19 = 5042,02 → 5042; IVA 958.
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.objectContaining({
+          montoAfecto: '5042.0000',
+          montoExento: '0.0000',
+          montoImpuestos: '958.0000',
+        }),
+      );
+    });
+
+    it('una merma no es retiro: baldes en null y ni siquiera se consulta el tratamiento tributario', async () => {
+      mockCuentaYLinea(lineaViva({ precioUnitario: '3000.0000' }));
+
+      await service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+        cantidad: '1',
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.objectContaining({
+          montoAfecto: null,
+          montoExento: null,
+          montoImpuestos: null,
+        }),
+      );
+      expect(
+        manager.query.mock.calls.some(([sql]: [string]) =>
+          sql.includes('AS tasas_adicionales'),
+        ),
+      ).toBe(false);
+    });
+
+    it('la cortesía de un servicio no es retiro de un bien: baldes en null', async () => {
+      motivosBaja.assertMotivoActivo.mockResolvedValue({
+        id: MOTIVO,
+        nombre: 'Cortesía casa',
+        tipo: TipoMotivoBaja.CORTESIA,
+      });
+      mockItemQuery('servicio');
+      mockCuentaYLinea(lineaViva({ precioUnitario: '3000.0000' }));
+
+      await service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+        cantidad: '1',
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.objectContaining({ montoAfecto: null, montoImpuestos: null }),
       );
     });
 
@@ -3708,6 +3794,85 @@ describe('SalonesService', () => {
 
     beforeEach(() => {
       manager.findOne.mockResolvedValue(cuentaAbierta());
+    });
+
+    it('con cortesía tasa todas las líneas despachadas en UNA consulta tributaria, no una por línea', async () => {
+      motivosBaja.assertMotivoActivo.mockResolvedValue({
+        id: MOTIVO,
+        nombre: 'Cortesía casa',
+        tipo: TipoMotivoBaja.CORTESIA,
+      });
+      const ITEM_B = 'item-b';
+      manager.find.mockResolvedValue([
+        lineaViva({ precioUnitario: '3000.0000' }),
+        lineaViva({
+          id: 'linea-2',
+          itemId: ITEM_B,
+          cantidadEnviada: '2',
+          precioUnitario: '1000.0000',
+        }),
+      ]);
+      mockItemsQuery({
+        [ITEM]: { tipo: 'producto', nombre: 'Lomo', unidad_medida: 'unidad' },
+        [ITEM_B]: { tipo: 'receta', nombre: 'Postre', unidad_medida: null },
+      });
+      const base = manager.query.getMockImplementation()!;
+      manager.query.mockImplementation((sql: string, params?: unknown[]) =>
+        sql.includes('AS tasas_adicionales')
+          ? Promise.resolve([
+              {
+                item_id: ITEM,
+                nombre: 'Lomo',
+                clasificacion_tributaria: 'afecto',
+                precio_incluye_impuesto: true,
+                tasas_adicionales: [],
+                tasa_iva: '0.1900',
+              },
+              {
+                item_id: ITEM_B,
+                nombre: 'Postre',
+                clasificacion_tributaria: 'exento',
+                precio_incluye_impuesto: true,
+                tasas_adicionales: [],
+                tasa_iva: '0.1900',
+              },
+            ])
+          : base(sql, params),
+      );
+      manager.save.mockImplementation((entidad: unknown, row: unknown) =>
+        Promise.resolve(
+          entidad === CuentaLineaAnulacion
+            ? { ...(row as object), id: 'anulacion-x' }
+            : row,
+        ),
+      );
+
+      await service.cancelarConMotivo(TENANT, USUARIO_ACTOR, CUENTA, {
+        motivoBajaId: MOTIVO,
+      });
+
+      const consultasFiscales = manager.query.mock.calls.filter(
+        ([sql]: [string]) => sql.includes('AS tasas_adicionales'),
+      );
+      expect(consultasFiscales).toHaveLength(1);
+      expect(consultasFiscales[0][1][0]).toEqual([ITEM, ITEM_B]);
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.objectContaining({
+          cuentaLineaId: 'linea-1',
+          montoAfecto: '2521.0000',
+          montoImpuestos: '479.0000',
+        }),
+      );
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.objectContaining({
+          cuentaLineaId: 'linea-2',
+          montoAfecto: '0.0000',
+          montoExento: '2000.0000',
+          montoImpuestos: '0.0000',
+        }),
+      );
     });
 
     it('una línea 3/1: una anulación de 1 y un consumo de 1; las 2 pendientes se descartan sin fila', async () => {

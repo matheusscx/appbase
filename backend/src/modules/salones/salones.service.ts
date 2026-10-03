@@ -20,6 +20,12 @@ import { CuentaLinea } from './entities/cuenta-linea.entity';
 import { CuentaLineaAnulacion } from './entities/cuenta-linea-anulacion.entity';
 import { CuentaLineaReparto } from './entities/cuenta-linea-reparto.entity';
 import { descontarReparto, fusionarRepartos } from './reparto-linea';
+import {
+  baldesDeCortesia,
+  esBienRetirable,
+  type BaldesCortesia,
+} from './cortesia-retiro';
+import { cuantizar } from '../calculo-precios/calculo-precios.engine';
 import { CreateSalonDto } from './dto/create-salon.dto';
 import { UpdateSalonDto } from './dto/update-salon.dto';
 import { CreateMesaDto } from './dto/create-mesa.dto';
@@ -1520,6 +1526,19 @@ export class SalonesService {
         ? await this.resolverContextoStockAnulacion(tenantId)
         : null;
 
+    // La cortesía es un retiro gravado (spec 2026-10-03): sus baldes se
+    // calculan antes de escribir, para que un rechazo (ítem sin clasificación)
+    // no deje nada a medias. Solo de un bien: el art. 8 d) grava el retiro de
+    // bienes corporales muebles, y un servicio regalado no lo es.
+    const baldes =
+      motivo.tipo === TipoMotivoBaja.CORTESIA && esBienRetirable(item.tipo)
+        ? (
+            await this.baldesDeCortesias(manager, tenantId, [
+              { linea, cantidad },
+            ])
+          ).get(linea.id)!
+        : null;
+
     const advertencias = await this.escribirAnulacionEnLinea(
       manager,
       tenantId,
@@ -1533,6 +1552,7 @@ export class SalonesService {
       catalogo,
       stockCtx,
       unidadIdsAnuladas,
+      baldes,
     );
 
     // El reparto baja lo mismo que la línea (spec § 3.3), acá y no dentro de
@@ -1599,6 +1619,9 @@ export class SalonesService {
    * unidades), y con un motivo que descuenta viajan al consumo con la cuenta
    * como dueña de la salida. Con `no_elaborado` solo salen de la línea: nada se
    * mueve y la unidad vuelve a estar libre. Vacío en una línea sin serie.
+   *
+   * `baldes`: los del retiro, ya calculados por el llamador en lote
+   * (`baldesDeCortesias`). Solo una cortesía los trae; `null` en el resto.
    */
   private async escribirAnulacionEnLinea(
     manager: EntityManager,
@@ -1613,6 +1636,7 @@ export class SalonesService {
     catalogo: UnidadCat[],
     stockCtx: ContextoStockAnulacion | null,
     unidadIdsAnuladas: string[],
+    baldes: BaldesCortesia | null,
   ): Promise<string[]> {
     const anulacion = await manager.save(
       CuentaLineaAnulacion,
@@ -1627,6 +1651,9 @@ export class SalonesService {
         motivoBajaId: motivo.id,
         autorizadoPor: usuarioId,
         garzonId,
+        montoAfecto: baldes?.montoAfecto.toFixed(4) ?? null,
+        montoExento: baldes?.montoExento.toFixed(4) ?? null,
+        montoImpuestos: baldes?.montoImpuestos.toFixed(4) ?? null,
       }),
     );
 
@@ -1796,6 +1823,116 @@ export class SalonesService {
   }
 
   /**
+   * Los baldes fiscales de las cortesías de una operación, por `linea.id`
+   * (spec `2026-10-03-cortesia-retiro-iva-design.md` § 3.2-3.3). Se llama UNA
+   * vez por operación y solo con motivo `cortesia`: una consulta para todos los
+   * ítems (clasificación, si el precio incluye impuesto, los adicionales y el
+   * IVA del país), más la config de redondeo. Nunca una por línea.
+   *
+   * No pasa por `CalculoPreciosService.calcular`: ver `baldesDeCortesia`.
+   */
+  private async baldesDeCortesias(
+    manager: EntityManager,
+    tenantId: string,
+    anuladas: { linea: CuentaLinea; cantidad: Decimal }[],
+  ): Promise<Map<string, BaldesCortesia>> {
+    const baldes = new Map<string, BaldesCortesia>();
+    if (anuladas.length === 0) return baldes;
+    const itemIds = [...new Set(anuladas.map((a) => a.linea.itemId))];
+    const rows: {
+      item_id: string;
+      nombre: string;
+      clasificacion_tributaria: 'afecto' | 'exento' | null;
+      precio_incluye_impuesto: boolean;
+      tasas_adicionales: string[];
+      tasa_iva: string | null;
+    }[] = await manager.query(
+      `WITH pais AS (
+         SELECT p.pais_id
+           FROM tenants t
+           JOIN provincia p ON p.provincia_id = t.provincia_id AND p.eliminado_el IS NULL
+          WHERE t.tenant_id = $2 AND t.eliminado_el IS NULL
+       )
+       SELECT i.item_id, i.nombre, i.clasificacion_tributaria, i.precio_incluye_impuesto,
+              COALESCE(
+                array_agg(imp.porcentaje::text) FILTER (WHERE imp.impuesto_id IS NOT NULL),
+                '{}'
+              ) AS tasas_adicionales,
+              (SELECT iva.porcentaje::text
+                 FROM impuestos iva
+                WHERE iva.pais_id = (SELECT pais_id FROM pais)
+                  AND iva.tipo = 'iva' AND iva.eliminado_el IS NULL
+                LIMIT 1) AS tasa_iva
+         FROM items i
+         LEFT JOIN item_impuestos ii ON ii.item_id = i.item_id
+         -- Mismos impuestos que suma el motor: del tenant o de su país, no
+         -- borrados, y un pausado no se cobra, así que no infla el divisor. El
+         -- IVA no se lee de item_impuestos (ADR-018): sale de la clasificación.
+         LEFT JOIN impuestos imp ON imp.impuesto_id = ii.impuesto_id
+              AND imp.tipo <> 'iva' AND imp.activo AND imp.eliminado_el IS NULL
+              AND (imp.tenant_id = $2 OR imp.pais_id = (SELECT pais_id FROM pais))
+        -- Deliberadamente SIN condición de vigencia sobre "i": anular la línea
+        -- de un ítem borrado del catálogo está permitido (es la única salida de
+        -- esa mesa, spec 2026-09-01 § 4.2), y su cortesía igual se tasa.
+        WHERE i.item_id = ANY($1) AND i.tenant_id = $2
+        GROUP BY i.item_id`,
+      [itemIds, tenantId],
+    );
+    const porItem = new Map(rows.map((r) => [r.item_id, r]));
+
+    // La escala de la moneda oficial y el `modo_redondeo` del tenant: los
+    // mismos insumos que `conversorAMonedaOficial`.
+    const oficial = (await this.monedasService.findMonedas(tenantId)).find(
+      (m) => m.esOficial,
+    );
+    if (!oficial) {
+      throw new BadRequestException(
+        'El tenant no tiene moneda oficial configurada',
+      );
+    }
+    const config = await this.calculoPreciosService.cargarConfig(
+      tenantId,
+      oficial.decimales,
+    );
+    const q = (d: Decimal) => cuantizar(d, config);
+
+    for (const { linea, cantidad } of anuladas) {
+      const item = porItem.get(linea.itemId);
+      if (!item) {
+        throw new NotFoundException(`Ítem ${linea.itemId} no encontrado`);
+      }
+      // Mismos dos rechazos que la venta: sin clasificación no hay
+      // tratamiento fiscal que congelar, y un afecto sin IVA del país
+      // congelaría un afecto sin impuesto.
+      if (item.clasificacion_tributaria === null) {
+        throw new BadRequestException(
+          `El ítem "${item.nombre}" no tiene clasificación tributaria: no se puede registrar como cortesía`,
+        );
+      }
+      if (item.clasificacion_tributaria === 'afecto' && !item.tasa_iva) {
+        throw new BadRequestException(
+          `El ítem "${item.nombre}" es afecto a IVA, pero el país del tenant no tiene un impuesto tipo 'iva' configurado`,
+        );
+      }
+      baldes.set(
+        linea.id,
+        baldesDeCortesia(
+          {
+            cantidad: cantidad.toString(),
+            precioUnitario: linea.precioUnitario,
+            clasificacion: item.clasificacion_tributaria,
+            precioIncluyeImpuesto: item.precio_incluye_impuesto,
+            tasaIva: item.tasa_iva,
+            tasasAdicionales: item.tasas_adicionales,
+          },
+          q,
+        ),
+      );
+    }
+    return baldes;
+  }
+
+  /**
    * Cancela una cuenta con platos despachados, con motivo y permiso
    * (spec § 6). Dos rutas para que el permiso siga en el guard (invariante 6
    * de CLAUDE.md): esta exige `Salones:Anular`; `cancelarCuenta` sigue con
@@ -1961,6 +2098,25 @@ export class SalonesService {
       ? await this.resolverContextoStockAnulacion(tenantId)
       : null;
 
+    // Los baldes de todas las cortesías en lote, antes de la primera
+    // escritura del bucle (spec 2026-10-03 § 3.3): una consulta, no una por
+    // línea.
+    const baldesPorLinea =
+      motivo.tipo === TipoMotivoBaja.CORTESIA
+        ? await this.baldesDeCortesias(
+            manager,
+            tenantId,
+            despachadas
+              .filter((linea) =>
+                esBienRetirable(itemsPorId.get(linea.itemId)?.tipo),
+              )
+              .map((linea) => ({
+                linea,
+                cantidad: new Decimal(linea.cantidadEnviada),
+              })),
+          )
+        : null;
+
     const advertencias: string[] = [];
     for (const linea of despachadas) {
       const item = itemsPorId.get(linea.itemId);
@@ -1984,6 +2140,7 @@ export class SalonesService {
         // Con `no_elaborado` no se mueve ninguna, y la línea se borra entera
         // más abajo, así que sus `unidad_ids` no hace falta tocarlos.
         tipoDescuenta && item.modoInventario === 'serie' ? linea.unidadIds : [],
+        baldesPorLinea?.get(linea.id) ?? null,
       );
       advertencias.push(...nuevas);
     }

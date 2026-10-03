@@ -764,10 +764,10 @@ rango, también a los que no anularon nada** — van con `platos`/`precioCarta` 
 garzón sin anulaciones es el punto de comparación que hace sospechoso el % alto de otro.
 Orden: por `garzonNombre`, *Sin garzón* al final.
 
-**Fuera de este frente** (`pendientes.md`): la cortesía como retiro gravado con IVA (fiscal,
-frente propio); el día comercial que cruza la medianoche; los ingredientes/componentes
-borrados del catálogo que se saltean sin movimiento al anular (el costo sale bajo sin marca —
-hueco heredado de la parte 2).
+**Fuera de este frente** (`pendientes.md`): el día comercial que cruza la medianoche; los
+ingredientes/componentes borrados del catálogo que se saltean sin movimiento al anular (el
+costo sale bajo sin marca — hueco heredado de la parte 2). La cortesía como retiro gravado con
+IVA se construyó el 2026-10-03 (sección siguiente).
 
 **El rol sembrado `Salones · Encargado` lleva `Items:Leer`** (owner, 2026-09-28). Con
 `Operar` llegaba a la mesa y con `Anular` anulaba lo despachado, pero `GET /items` —el catálogo
@@ -776,6 +776,41 @@ la tarea 3. **Sigue sin poder mandar a cocina**: *Enviar a cocina* lista antes l
 (`GET /impresoras`, `Impresoras:Leer`) y le rebota 403 — el owner decidió arreglar la pantalla
 en vez de sembrar el permiso (`pendientes.md` § 3). Por eso `anular-plato.spec.ts` todavía
 corre como admin.
+
+### La cortesía como retiro gravado (2026-10-03)
+
+Frente fiscal, spec
+[`2026-10-03-cortesia-retiro-iva-design.md`](../superpowers/specs/2026-10-03-cortesia-retiro-iva-design.md);
+reglas de negocio en [`PRODUCTO.md`](../PRODUCTO.md) (*"La cortesía es un retiro gravado"*).
+
+- **Qué se congela:** `cuenta_linea_anulaciones.monto_afecto` / `monto_exento` /
+  `monto_impuestos`, los mismos nombres y escala que `venta_documentos` (ADR-028). Solo una
+  cortesía de un `producto`/`receta`/`combo` los llena (`esBienRetirable`); el resto queda en
+  `NULL`. Un `CHECK` (`chk_cuenta_linea_anulaciones_baldes_juntos`) exige los tres juntos.
+  Exento explícito: base en `monto_exento` e impuesto `0`. `monto_impuestos` es **solo el IVA**.
+- **Cómo se tasa** (`baldesDeCortesia`, `salones/cortesia-retiro.ts`, función pura): sobre
+  `cantidad × precio_unitario` —el `precioCarta` del reporte—. Con precio que incluye impuesto,
+  `base = q(carta ÷ (1 + IVA + Σ adicionales))` y el IVA absorbe el residuo; con precio neto,
+  la carta es la base e `IVA = q(base × tasa)`. `q` es la escala de la moneda oficial con el
+  `modo_redondeo` del tenant. Los impuestos son los **vigentes al anular** (el retiro se
+  devenga al retirar); la línea congela su precio al pedir pero no su tratamiento tributario.
+- **No pasa por el motor** (`CalculoPreciosService.calcular`): aplicaría las promociones del
+  día y rechaza un ítem borrado del catálogo, cuya anulación está permitida. Puede diferir en
+  un peso de lo que el motor cobraría con varios impuestos; un regalo no tiene venta con la
+  que cuadrar.
+- **Dónde:** `SalonesService.baldesDeCortesias` corre **una vez por operación** —antes de
+  escribir, para que un rechazo no deje nada a medias— con una consulta para todos los ítems
+  (clasificación, `precio_incluye_impuesto`, adicionales activos y no borrados, IVA del país);
+  la lectura del ítem no filtra `eliminado_el` a propósito. `anularLinea` la pide para su
+  línea y `cancelarConMotivo` para todas las despachadas. Un ítem sin clasificación o afecto en
+  un país sin IVA rechazan **la cortesía** con 400, como la venta.
+- **Reporte:** cada fila de `GET /salones/anulaciones` trae `fiscal` (`null` salvo cortesía) y
+  cada grupo de `porTipo` en `/resumen`, la suma de los baldes de sus filas. La pantalla suma la
+  columna **IVA** al detalle y *"IVA: $X"* a la tarjeta *Cortesías*. `porGarzon` y lo vendido
+  no cambian.
+- **Fuera:** el documento del retiro (lo emite la emisión electrónica con estos baldes), el
+  `motivo: 'merma'` que el kardex sigue escribiendo para la cortesía (se distingue por
+  `motivo_baja_id`) y la comida del personal (`pendientes.md`).
 
 ### Cancelar una cuenta con platos despachados (2026-09-16)
 

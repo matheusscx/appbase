@@ -52,8 +52,27 @@ export interface GrupoResumen {
   sinValorizar: number;
 }
 
+/**
+ * Los baldes del retiro que congeló una cortesía (`cuenta_linea_anulaciones`,
+ * spec `2026-10-03-cortesia-retiro-iva-design.md` § 3.4), a ESCALA_COSTO.
+ * `montoImpuestos` es solo el IVA.
+ */
+export interface BaldesFiscales {
+  montoAfecto: string;
+  montoExento: string;
+  montoImpuestos: string;
+}
+
 export interface ResumenAnulaciones {
-  porTipo: (GrupoResumen & { tipo: TipoMotivoBaja })[];
+  /**
+   * `fiscal`: la suma de los baldes de las filas del grupo que los tienen —solo
+   * las cortesías de un bien—. `null` si ninguna fila los tiene (`merma`,
+   * `no_elaborado`).
+   */
+  porTipo: (GrupoResumen & {
+    tipo: TipoMotivoBaja;
+    fiscal: BaldesFiscales | null;
+  })[];
   porGarzon: (GrupoResumen & {
     garzonId: string | null;
     garzonNombre: string | null;
@@ -83,6 +102,8 @@ export interface AnulacionReporteItem {
   costoEstado: CostoEstado;
   /** [] si `costoEstado` es `no_aplica` o `sin_valorizar`. Nunca convertido de moneda. */
   costo: CostoPorMoneda[];
+  /** Los baldes del retiro: solo en una cortesía de un bien; `null` en el resto. */
+  fiscal: BaldesFiscales | null;
 }
 
 interface AnulacionRow {
@@ -99,6 +120,9 @@ interface AnulacionRow {
   tipo: TipoMotivoBaja;
   garzon_nombre: string | null;
   autorizado_por_nombre: string;
+  monto_afecto: string | null;
+  monto_exento: string | null;
+  monto_impuestos: string | null;
 }
 
 /** Fila cruda de la consulta base del resumen: sin paginar, todo el rango. */
@@ -111,6 +135,9 @@ interface ResumenBaseRow {
   garzon_nombre: string | null;
   usuario_id: string;
   usuario_nombre: string;
+  monto_afecto: string | null;
+  monto_exento: string | null;
+  monto_impuestos: string | null;
 }
 
 /** Acumulador en memoria de un grupo del resumen, antes de formatear a `GrupoResumen`. */
@@ -257,7 +284,8 @@ export class AnulacionesReporteService {
          c.numero AS cuenta_numero, m.nombre AS mesa_nombre, s.nombre AS salon_nombre,
          cla.item_nombre, cla.cantidad, cla.precio_unitario,
          mb.nombre AS motivo_baja_nombre, mb.tipo,
-         g.nombre AS garzon_nombre, u.nombre AS autorizado_por_nombre
+         g.nombre AS garzon_nombre, u.nombre AS autorizado_por_nombre,
+         cla.monto_afecto, cla.monto_exento, cla.monto_impuestos
        ${JOINS_BASE}
          ${filters}
        ORDER BY cla.creado_el DESC, cla.cuenta_linea_anulacion_id DESC
@@ -448,7 +476,8 @@ export class AnulacionesReporteService {
          cla.cuenta_linea_anulacion_id AS id, cla.cantidad, cla.precio_unitario,
          mb.tipo,
          cla.garzon_id, g.nombre AS garzon_nombre,
-         cla.autorizado_por AS usuario_id, u.nombre AS usuario_nombre
+         cla.autorizado_por AS usuario_id, u.nombre AS usuario_nombre,
+         cla.monto_afecto, cla.monto_exento, cla.monto_impuestos
        ${JOINS_BASE}
          ${filters}`,
       params,
@@ -539,8 +568,31 @@ export class AnulacionesReporteService {
     const porGarzon = new Map<string, AcumuladorGrupo>();
     const porAutorizo = new Map<string, AcumuladorGrupo>();
     const SIN_GARZON = AnulacionesReporteService.SIN_GARZON;
+    // Los baldes del retiro, por tipo: solo `porTipo` los lleva (la tarjeta
+    // de Cortesías), y solo suman las filas que los congelaron.
+    const fiscalPorTipo = new Map<TipoMotivoBaja, BaldesFiscales>();
 
     for (const r of rows) {
+      const fiscal = this.fiscalDeFila(r);
+      if (fiscal) {
+        const prev = fiscalPorTipo.get(r.tipo);
+        fiscalPorTipo.set(
+          r.tipo,
+          prev
+            ? {
+                montoAfecto: new Decimal(prev.montoAfecto)
+                  .plus(fiscal.montoAfecto)
+                  .toFixed(ESCALA_COSTO),
+                montoExento: new Decimal(prev.montoExento)
+                  .plus(fiscal.montoExento)
+                  .toFixed(ESCALA_COSTO),
+                montoImpuestos: new Decimal(prev.montoImpuestos)
+                  .plus(fiscal.montoImpuestos)
+                  .toFixed(ESCALA_COSTO),
+              }
+            : fiscal,
+        );
+      }
       const { costoEstado, costo } = this.resolverCosto(
         r.tipo,
         costosPorAnulacion.get(r.id),
@@ -581,9 +633,10 @@ export class AnulacionesReporteService {
     }
 
     return {
-      porTipo: [...porTipo.values()].map((a) =>
-        this.cerrarGrupo<{ tipo: TipoMotivoBaja }>(a),
-      ),
+      porTipo: [...porTipo.values()].map((a) => {
+        const grupo = this.cerrarGrupo<{ tipo: TipoMotivoBaja }>(a);
+        return { ...grupo, fiscal: fiscalPorTipo.get(grupo.tipo) ?? null };
+      }),
       porGarzon: this.armarPorGarzon(porGarzon, vendidoRows, anuladoRows),
       porAutorizo: [...porAutorizo.values()].map((a) =>
         this.cerrarGrupo<{ usuarioId: string; usuarioNombre: string }>(a),
@@ -763,6 +816,21 @@ export class AnulacionesReporteService {
       precioCarta,
       costoEstado,
       costo,
+      fiscal: this.fiscalDeFila(r),
+    };
+  }
+
+  /** Los tres baldes van juntos (CHECK de la tabla): mirar uno alcanza. */
+  private fiscalDeFila(r: {
+    monto_afecto: string | null;
+    monto_exento: string | null;
+    monto_impuestos: string | null;
+  }): BaldesFiscales | null {
+    if (r.monto_afecto === null) return null;
+    return {
+      montoAfecto: new Decimal(r.monto_afecto).toFixed(ESCALA_COSTO),
+      montoExento: new Decimal(r.monto_exento!).toFixed(ESCALA_COSTO),
+      montoImpuestos: new Decimal(r.monto_impuestos!).toFixed(ESCALA_COSTO),
     };
   }
 }

@@ -1125,27 +1125,19 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   diseñar: el reclamo y la llamada al proveedor no son atómicos (el proveedor no está en la
   transacción), y la API externa usa llave de API, sin usuario, así que la clave no puede ser
   `(tenant, usuario, clave)` tal cual. Y qué ve el admin en el segundo clic es del owner.
-- [ ] **La cortesía como retiro gravado con IVA** (fiscal — **frente propio, con su propia
-  sesión**: `CLAUDE.md` y ADR-010 lo sacan de cualquier tanda de producto o de arrastre de
-  otra tarea, y no se cuelga al final de una ronda de preguntas). Un retiro de mercadería
-  para consumo de terceros es venta gravada con IVA (DL 825, art. 8 letra d), salvo rifas y
-  sorteos promocionales — hoy la cortesía registrada en `/salones/anulaciones` no genera
-  ningún hecho tributario, solo el descuento de stock y el registro del reporte. **Fuentes de
-  la investigación de mercado** (spec
-  [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md)
-  § 8, pasada del 2026-09-18): [DL 825](https://www.sii.cl/pagina/jurisprudencia/legislacion/basica/dl825.doc)
-  (el hecho gravado del retiro); no se encontró oficio del SII específico sobre la cortesía de
-  restaurante, así que la aplicación del art. 8 d a este caso concreto **no está confirmada**,
-  solo es la lectura más cercana. La merma normal se acredita con control interno
-  ([SII — mermas](https://www.sii.cl/preguntas_frecuentes/declaracion_renta/001_140_0736.htm));
-  la pérdida por caso fortuito exige aviso en 48 h
-  ([SII — pérdida de existencias](https://www.sii.cl/portales/sismo/pf_perdida_exis_docum.html)) —
-  ninguna de las dos aplica a la cortesía, que es deliberada, no una pérdida.
-  **Antes de diseñar:** decidir si se emite un documento tributario por cada cortesía, se
-  acumulan y se declaran aparte, o se espera a tener la emisión electrónica (ADR-010) para
-  resolverlo junto con el resto de lo fiscal — es la misma pregunta que la regla de "congelar
-  el hecho fiscal en la transacción, diferir lo que solo transmite o formatea" de ADR-010, y la
-  regla la pone el owner, no el agente.
+- [ ] **La comida del personal no tiene motivo propio, y como cortesía pagaría IVA de más**
+  (fiscal — frente propio; anotado el 2026-10-03 por decisión del owner, *"Anotarlo aparte"*,
+  al cerrar la cortesía como retiro gravado). Desde ese frente toda anulación de tipo `cortesia`
+  congela el IVA del retiro (owner: *"Siempre paga IVA"*), pero el personal comiendo **dentro**
+  del local no es retiro: los bienes no salen de la empresa (Reglamento DS 55/1977 art. 11;
+  Oficio 734/2002, sobre un restaurante; investigación
+  [`2026-10-03-cortesia-retiro-iva.md`](investigaciones/2026-10-03-cortesia-retiro-iva.md) § 1,
+  escena c). Si un local la registra como cortesía, el reporte le suma un IVA que no debe; como
+  merma, el kardex la llama pérdida. **Lo que hay que decidir:** si va un cuarto tipo de motivo
+  (`consumo_personal`: descuenta stock, sin IVA), desde qué pantalla se registra (la comida del
+  personal no siempre pasa por una mesa) y si el criterio discrepante del SII sobre documentarla
+  con boleta "no afecta" (Oficio 734 vs. Oficios 1.750/2001 y 638/2009) pide algo más que el
+  registro. Se lleva al owner con el análisis de la Sesión de esfuerzo máximo.
 
 - [ ] **Una venta que llega a $0 por un descuento tendría que dejar boleta, y hoy no deja
   ninguna: E6 cita la Res. Ex. SII 60/2023 a medias** (fiscal — **frente propio, con su propia
