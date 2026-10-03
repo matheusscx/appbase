@@ -57,21 +57,10 @@ let escenario: {
   itemIds: string[]
 } = { itemIds: [] }
 
-async function tokenDeVendedor(request: APIRequestContext): Promise<string> {
-  const inicial = await api<{ access_token: string }>(request, 'post', '/auth/login', {
-    data: VENDEDOR,
-  })
-  const sesion = await api<{ access_token: string }>(request, 'post', '/auth/switch-tenant', {
-    token: inicial.access_token,
-    data: { tenantId: TENANTS.restaurante },
-  })
-  return sesion.access_token
-}
-
 test.beforeEach(async ({ request }) => {
   escenario = { itemIds: [] }
   escenario.tokenAdmin = await tokenDe(request, TENANTS.restaurante)
-  escenario.tokenVendedor = await tokenDeVendedor(request)
+  escenario.tokenVendedor = await tokenDe(request, TENANTS.restaurante, VENDEDOR)
 
   // Se guarda lo que había para devolverlo (la base del seed es compartida).
   // Si el PATCH que lo cambia falla a medias, el `afterEach` igual restaura.

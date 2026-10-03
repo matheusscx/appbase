@@ -50,16 +50,22 @@ export async function api<T>(
   return (await res.json()) as T
 }
 
-/** Token con `tenant_id` adentro: login + switch, que es lo que hace la app. */
+/**
+ * Token con `tenant_id` adentro: login + switch, que es lo que hace la app.
+ * Omitir `credenciales` = `CREDENCIALES` (el admin, salvo `E2E_EMAIL`/
+ * `E2E_PASSWORD`). Para correr como otro usuario del tenant —la cajera, el que
+ * paga compras—, pasar las suyas.
+ */
 export async function tokenDe(
   request: APIRequestContext,
   tenantId: string,
+  credenciales: { email: string; password: string } = CREDENCIALES,
 ): Promise<string> {
   const inicial = await api<{ access_token: string }>(
     request,
     'post',
     '/auth/login',
-    { data: CREDENCIALES },
+    { data: credenciales },
   )
   const sesion = await api<{ access_token: string }>(
     request,

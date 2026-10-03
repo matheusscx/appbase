@@ -1,4 +1,3 @@
-import type { APIRequestContext } from '@playwright/test'
 import { test, expect } from '../support/sin-qz-tray'
 import {
   abrirCaja,
@@ -62,22 +61,6 @@ const TOTAL_VENTA_API = '1190.0000'
 
 const VENDEDOR = { email: 'vendedor@paris.cl', password: 'admin' }
 
-/**
- * Token de la cajera. No reusa `tokenDe` de `../support/api`: esa función
- * inicia sesión con `CREDENCIALES` (admin, salvo `E2E_EMAIL`/`E2E_PASSWORD`
- * globales) y no toma credenciales por parámetro.
- */
-async function tokenDeVendedor(request: APIRequestContext): Promise<string> {
-  const inicial = await api<{ access_token: string }>(request, 'post', '/auth/login', {
-    data: VENDEDOR,
-  })
-  const sesion = await api<{ access_token: string }>(request, 'post', '/auth/switch-tenant', {
-    token: inicial.access_token,
-    data: { tenantId: TENANTS.restaurante },
-  })
-  return sesion.access_token
-}
-
 test.use({ storageState: { cookies: [], origins: [] } })
 
 let escenario: { tokenAdmin?: string, tokenVendedor?: string, cajaId?: string, itemId?: string } = {}
@@ -89,7 +72,7 @@ test.beforeEach(async ({ request }) => {
   // igual que en `pos.spec.ts`/`nota-credito.spec.ts` — lo que corre como la
   // cajera es solo su caja y su venta.
   escenario.tokenAdmin = await tokenDe(request, TENANTS.restaurante)
-  escenario.tokenVendedor = await tokenDeVendedor(request)
+  escenario.tokenVendedor = await tokenDe(request, TENANTS.restaurante, VENDEDOR)
   escenario.cajaId = await abrirCaja(request, escenario.tokenVendedor)
 })
 

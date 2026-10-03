@@ -1,4 +1,3 @@
-import type { APIRequestContext } from '@playwright/test'
 import { test, expect } from '../support/sin-qz-tray'
 import {
   abrirCaja,
@@ -39,17 +38,6 @@ const PRECIO_BASE = '100000'
 const TOTAL_VENTA = '$119.000'
 
 const VENDEDOR = { email: 'vendedor@paris.cl', password: 'admin' }
-
-async function tokenDeVendedor(request: APIRequestContext): Promise<string> {
-  const inicial = await api<{ access_token: string }>(request, 'post', '/auth/login', {
-    data: VENDEDOR,
-  })
-  const sesion = await api<{ access_token: string }>(request, 'post', '/auth/switch-tenant', {
-    token: inicial.access_token,
-    data: { tenantId: TENANTS.restaurante },
-  })
-  return sesion.access_token
-}
 
 test.use({ storageState: { cookies: [], origins: [] } })
 
@@ -108,7 +96,7 @@ test.beforeEach(async ({ request }) => {
     data: { facturador: 'externo' },
   })
 
-  escenario.tokenVendedor = await tokenDeVendedor(request)
+  escenario.tokenVendedor = await tokenDe(request, TENANTS.restaurante, VENDEDOR)
   escenario.cajaId = await abrirCaja(request, escenario.tokenVendedor)
 })
 

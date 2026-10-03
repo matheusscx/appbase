@@ -54,7 +54,7 @@ test.use({ storageState: { cookies: [], origins: [] } })
  */
 test.beforeAll(async ({ request }) => {
   adminToken = await tokenDe(request, TENANTS.restaurante)
-  pagaToken = await tokenComo(request, PAGA.email, PAGA.password, TENANTS.restaurante)
+  pagaToken = await tokenDe(request, TENANTS.restaurante, PAGA)
 })
 
 test.beforeEach(() => {
@@ -88,17 +88,6 @@ test.afterAll(async ({ request }) => {
   await cerrarCaja(request, pagaToken, cajaAbiertaId, '0.0000')
   cajaAbiertaId = undefined
 })
-
-/** Token con un usuario y contraseña propios (no el admin del seed). */
-async function tokenComo(request: APIRequestContext, email: string, password: string, tenantId: string) {
-  const inicial = await api<{ access_token: string }>(request, 'post', '/auth/login', {
-    data: { email, password },
-  })
-  const sesion = await api<{ access_token: string }>(request, 'post', '/auth/switch-tenant', {
-    token: inicial.access_token, data: { tenantId },
-  })
-  return sesion.access_token
-}
 
 async function crearProveedor(request: APIRequestContext, sello: number, nombre?: string) {
   const proveedor = await api<{ id: string }>(request, 'post', '/terceros', {
