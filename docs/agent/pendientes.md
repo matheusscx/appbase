@@ -71,15 +71,6 @@ Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrad
 necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
 primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
 
-- [ ] **Un `page` cuyo `OFFSET` no cabe en un `bigint` da 500 en todas las rutas paginadas** (backend,
-  `common/dto/pagination-query.dto.ts`; medido el 2026-10-03, lo levantó la revisión de seguridad
-  del cierre de `GET /compras/productos`). `page` tiene `@IsInt` y `@Min(1)` pero no `@Max`:
-  `page=99999999999999999999` dio 500 en `/compras/productos`, `/items` y `/compras`, porque el
-  `OFFSET` no cabe en un `bigint`; `page=9007199254740991` (2^53 − 1) todavía dio 200 con `data: []`. El umbral es el `bigint` de Postgres dividido por `pageSize`, no 2^53. No expone
-  nada (es un 500 genérico, dentro del tenant), pero es un 500 que tendría que ser 400, y lo
-  heredan todos los DTOs que extienden `PaginationQueryDto` (16 archivos el 2026-10-03, por grep). **Arreglo:** un `@Max` en `page` en ese
-  DTO (con un tope holgado, por ejemplo 1.000.000) y un e2e que pida esa página y espere 400.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:

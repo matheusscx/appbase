@@ -24,6 +24,54 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 ---
 
 
+## Un `page` enorme da 400, no 500, en todas las rutas paginadas (cerrada 2026-10-03)
+
+Sale de [`pendientes.md`](pendientes.md) § 1. La regla viva, en
+[`patterns/backend.md`](../patterns/backend.md#10-paginación-server-side) § 10.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Un `page` cuyo `OFFSET` no cabe en un `bigint` da 500 en todas las rutas paginadas** (backend,
+  `common/dto/pagination-query.dto.ts`; medido el 2026-10-03, lo levantó la revisión de seguridad
+  del cierre de `GET /compras/productos`). `page` tiene `@IsInt` y `@Min(1)` pero no `@Max`:
+  `page=99999999999999999999` dio 500 en `/compras/productos`, `/items` y `/compras`, porque el
+  `OFFSET` no cabe en un `bigint`; `page=9007199254740991` (2^53 − 1) todavía dio 200 con `data: []`. El umbral es el `bigint` de Postgres dividido por `pageSize`, no 2^53. No expone
+  nada (es un 500 genérico, dentro del tenant), pero es un 500 que tendría que ser 400, y lo
+  heredan todos los DTOs que extienden `PaginationQueryDto` (16 archivos el 2026-10-03, por grep). **Arreglo:** un `@Max` en `page` en ese
+  DTO (con un tope holgado, por ejemplo 1.000.000) y un e2e que pida esa página y espere 400.
+
+### Qué se midió
+
+- **Los mecanismos que leen `page`:** uno solo (grep sobre `backend/src`, 2026-10-03). Las 17
+  consultas con `OFFSET` salen de `resolvePagination`, que tiene 19 llamadas. Las otras dos no
+  llevan `OFFSET`: el orden por disponibilidad de `/items` corta con `slice`, y el arqueo ciego de
+  caja devuelve vacío. `GET /compras` con `estadoPago` también corta con `slice`, sobre la misma
+  llamada que en la otra rama lleva `OFFSET`. Siempre recibe el query de un controller por
+  `@Query()` con un DTO que es `PaginationQueryDto` (`/traslados`) o una de sus 16 subclases: 17
+  parámetros en total. No hay `@Query('page')`
+  crudo, ni `req.query`, ni código que arme `{ page }` a mano.
+- **El bug, con el `@Max` sacado:** `page=99999999999999999999` da 500 en `/traslados`, `/items` y
+  `/compras/productos`.
+
+### Qué se hizo
+
+- **`MAX_PAGE` en `pagination.util.ts`, por cuenta y no a ojo** (lo pidió la orquestadora):
+  `floor(Number.MAX_SAFE_INTEGER / MAX_PAGE_SIZE) + 1` = 90.071.992.547.410, la página más grande
+  cuyo `offset` con el `pageSize` máximo sigue siendo un entero exacto de JS. Es más estricta que
+  el `bigint` de Postgres, que es el que daba 500.
+- **`@Max(MAX_PAGE)` en `PaginationQueryDto.page`**, y `pageSize` usa `MAX_PAGE_SIZE` en vez del
+  `100` literal, para que el tope y la cuenta salgan de la misma constante.
+
+### Qué lo fija
+
+- `test/paginacion.e2e-spec.ts`: en las tres rutas, la página enorme es 400 y nombra `page`, la
+  última permitida da 200 vacía y la siguiente 400. **Sin el `@Max`** caen los 6: 500 en la enorme
+  y 200 en `MAX_PAGE + 1`.
+- `common/dto/pagination-query.dto.spec.ts`: el borde del DTO (sin el `@Max` caen los dos de
+  `page`) y que `MAX_PAGE` es la mayor página con `offset` exacto.
+
+---
+
 ## `GET /compras/productos` busca y pagina en el servidor, y la compra usa `AppItemSelect` (cerrada 2026-10-03)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. La regla viva y la tabla de lo medido, en

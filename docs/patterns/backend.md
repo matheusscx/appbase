@@ -770,8 +770,11 @@ Es el hermano de `TxContext` (§9): mismo mecanismo, otro contenido.
 
 Para listados grandes (pagos, ventas, kardex):
 
-- **DTO:** extender `common/dto/pagination-query.dto.ts` (`page` 1-based default 1,
-  `pageSize` default 15 max 100) con los filtros del recurso.
+- **DTO:** extender `common/dto/pagination-query.dto.ts` (`page` 1-based default 1, con
+  tope `MAX_PAGE`; `pageSize` default 15 max 100) con los filtros del recurso. **`page` y
+  `pageSize` se leen solo por ese DTO**, nunca con un `@Query('page')` crudo: el tope de `page`
+  vive ahí, y sin él una página enorme da 500 (su `OFFSET` no cabe en un `bigint`). Si cambia
+  `MAX_PAGE_SIZE`, `MAX_PAGE` se recalcula solo: la cuenta está en `pagination.util.ts`.
 - **Utils:** `common/utils/pagination.util.ts` — `resolvePagination(query)` →
   `{ page, pageSize, offset }`; `buildPaginationMeta(page, pageSize, total)`.
 - **Respuesta:** `PaginatedResponse<T>` (`common/interfaces/`) = `{ data, meta }`.
