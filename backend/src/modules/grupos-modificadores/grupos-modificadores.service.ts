@@ -1053,9 +1053,12 @@ export class GruposModificadoresService {
         }
       }
       const aActualizar = [...overridePorAsociacion.values()];
-      const aCrear = asociaciones.filter(
-        (ig) => !overridePorAsociacion.has(ig),
-      );
+      // Ordenadas: con el índice único, un INSERT espera al otro sobre la fila
+      // que insertan los dos, y dos aplicar con [a, b] y [b, a] se trababan
+      // (40P01). En el mismo orden que el `FOR SHARE` de arriba.
+      const aCrear = asociaciones
+        .filter((ig) => !overridePorAsociacion.has(ig))
+        .sort();
       if (aActualizar.length) {
         await manager.query(
           `UPDATE item_grupo_modificador_opciones
@@ -1064,12 +1067,22 @@ export class GruposModificadoresService {
           [cantidad, unidad, precio, aActualizar],
         );
       }
+      // `ON CONFLICT`: dos aplicar en carrera leen los dos "sin override" (el
+      // `FOR SHARE` de arriba es compartido) y los dos llegan acá. El que entra
+      // segundo pisa al primero, igual que si hubieran corrido en serie; sin
+      // esto, `uq_item_grupo_opcion_vivo` le contestaba 500. `asociaciones` ya
+      // viene sin repetidos, así que un mismo INSERT no toca dos veces la fila.
       if (aCrear.length) {
         await manager.query(
           `INSERT INTO item_grupo_modificador_opciones
              (tenant_id, item_grupo_id, grupo_opcion_id, cantidad, unidad_codigo, precio_extra)
            SELECT $1::uuid, ig, $3::uuid, $4::numeric, $5::text, $6::numeric
-             FROM unnest($2::uuid[]) AS ig`,
+             FROM unnest($2::uuid[]) AS ig
+           ON CONFLICT (item_grupo_id, grupo_opcion_id) WHERE eliminado_el IS NULL
+           DO UPDATE SET cantidad = EXCLUDED.cantidad,
+                         unidad_codigo = EXCLUDED.unidad_codigo,
+                         precio_extra = EXCLUDED.precio_extra,
+                         actualizado_el = NOW()`,
           [tenantId, aCrear, dto.grupoOpcionId, cantidad, unidad, precio],
         );
       }

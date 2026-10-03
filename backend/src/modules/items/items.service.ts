@@ -2051,7 +2051,14 @@ export class ItemsService {
       // PATCH de receta normal —nombre + ingredientes— corriendo contra un
       // "aplicar desfase con actualizar precio". Los dos caminos tienen que
       // tomar `item_receta` antes que `items`.
-      if (tipo === 'receta' && dto.ingredientes !== undefined) {
+      //
+      // También con solo `extrasPermitidos`: sin el lock, dos ediciones de
+      // extras de la misma receta no se ordenan, la segunda no ve lo que
+      // insertó la primera y choca con `uq_receta_extra_vivo` (500).
+      if (
+        tipo === 'receta' &&
+        (dto.ingredientes !== undefined || dto.extrasPermitidos !== undefined)
+      ) {
         await manager.query(
           `SELECT item_id FROM item_receta WHERE item_id = $1 FOR UPDATE`,
           [itemId],
@@ -7460,6 +7467,12 @@ export class ItemsService {
       );
     const overrideIdPorOpcion = new Map(
       vivos.map((r) => [r.grupo_opcion_id, r.item_grupo_opcion_id]),
+    );
+    // `overrideIdPorOpcion` no ve lo que inserta el bucle: una opción repetida
+    // se insertaba dos veces y chocaba con `uq_item_grupo_opcion_vivo` (500).
+    this.assertSinIdsRepetidos(
+      opciones.map((o) => o.grupoOpcionId),
+      'Una opción no puede aparecer más de una vez en el mismo grupo',
     );
     const opcionesEntrantes = new Set<string>();
 

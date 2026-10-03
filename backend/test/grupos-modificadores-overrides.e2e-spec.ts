@@ -7,6 +7,7 @@ import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
+import { correrCarrera } from './helpers/carrera';
 import { randomUUID } from 'node:crypto';
 
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
@@ -602,5 +603,145 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
       [igSinOverride, carneOpcionId],
     );
     expect(n).toBe(1);
+  });
+
+  /** Una receta nueva con el grupo Proteína asociado y sin override. */
+  async function recetaConProteinaSinOverride(): Promise<{
+    recetaId: string;
+    itemGrupoId: string;
+  }> {
+    const res = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Hamburguesa Carrera OV E2E ${Date.now()}-${Math.random()}`,
+        precioBase: '3500',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panBaseId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        gruposModificadores: [
+          { grupoModificadorId: grupoProteinaId, min: 1, max: 1 },
+        ],
+      });
+    expect(res.status).toBe(201);
+    const recetaId = (res.body as ItemResponse).id;
+    const [{ item_grupo_id }] = await ds.query<{ item_grupo_id: string }[]>(
+      `SELECT item_grupo_id FROM item_grupos_modificadores
+        WHERE item_id = $1 AND grupo_modificador_id = $2 AND eliminado_el IS NULL`,
+      [recetaId, grupoProteinaId],
+    );
+    return { recetaId, itemGrupoId: item_grupo_id };
+  }
+
+  const aplicarCarne = (itemGrupoIds: string[], cantidad: string) => () =>
+    request(app.getHttpServer())
+      .patch(`/api/grupos-modificadores/${grupoProteinaId}/overrides`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemGrupoIds,
+        grupoOpcionId: carneOpcionId,
+        cantidad,
+        unidadCodigo: 'g',
+      })
+      .then((r) => r);
+
+  const overridesVivos = (itemGrupoId: string) =>
+    ds.query<{ cantidad: string }[]>(
+      `SELECT cantidad FROM item_grupo_modificador_opciones
+        WHERE item_grupo_id = $1 AND grupo_opcion_id = $2 AND eliminado_el IS NULL`,
+      [itemGrupoId, carneOpcionId],
+    );
+
+  it('12. dos aplicar en carrera sobre la misma asociación dejan UN override vivo, no dos', async () => {
+    // Los dos leen "no hay override" antes de que el otro inserte y los dos
+    // insertan: el `FOR SHARE` de la asociación es compartido y no los ordena.
+    // La compuerta los hace arrancar juntos. La segunda fila la impide
+    // `uq_item_grupo_opcion_vivo`; el `ON CONFLICT` hace que el que llega
+    // segundo pise como en serie en vez de devolver 500.
+    const { itemGrupoId } = await recetaConProteinaSinOverride();
+
+    const { esperando, respuestas } = await correrCarrera(
+      ds,
+      [
+        `SELECT 1 FROM item_grupos_modificadores WHERE item_grupo_id = $1 FOR UPDATE`,
+        [itemGrupoId],
+      ],
+      [aplicarCarne([itemGrupoId], '120'), aplicarCarne([itemGrupoId], '180')],
+    );
+
+    expect(esperando).toBe(2);
+    expect(respuestas.map((r) => r.status)).toEqual([200, 200]);
+    const vivos = await overridesVivos(itemGrupoId);
+    expect(vivos).toHaveLength(1);
+    expect(['120.0000', '180.0000']).toContain(vivos[0].cantidad);
+  });
+
+  it('13. dos aplicar en carrera con las mismas asociaciones en distinto orden no se traban', async () => {
+    // Con el índice único, un INSERT espera al otro sobre la fila que los dos
+    // insertan. Si uno inserta [a, b] y el otro [b, a], cada uno queda
+    // esperando la fila que el otro ya puso: deadlock (40P01 → 500). Insertar
+    // en un orden fijo lo evita. Cinco rondas, porque el cruce depende de que
+    // los dos INSERT se solapen.
+    for (let ronda = 0; ronda < 5; ronda++) {
+      const a = (await recetaConProteinaSinOverride()).itemGrupoId;
+      const b = (await recetaConProteinaSinOverride()).itemGrupoId;
+
+      const { esperando, respuestas } = await correrCarrera(
+        ds,
+        [
+          `SELECT 1 FROM item_grupos_modificadores
+            WHERE item_grupo_id = ANY($1::uuid[]) FOR UPDATE`,
+          [[a, b]],
+        ],
+        [aplicarCarne([a, b], '120'), aplicarCarne([b, a], '180')],
+      );
+
+      expect(esperando).toBe(2);
+      expect(respuestas.map((r) => r.status)).toEqual([200, 200]);
+      expect(await overridesVivos(a)).toHaveLength(1);
+      expect(await overridesVivos(b)).toHaveLength(1);
+    }
+  }, 60000);
+
+  it('14. editar la receta con la misma opción dos veces en un grupo es 400, no 500', async () => {
+    // Sin el chequeo, las dos vueltas del upsert ven "sin override" y la
+    // segunda choca con `uq_item_grupo_opcion_vivo`. Antes del índice dejaba
+    // dos overrides vivos.
+    const { recetaId, itemGrupoId } = await recetaConProteinaSinOverride();
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/items/${recetaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        gruposModificadores: [
+          {
+            grupoModificadorId: grupoProteinaId,
+            min: 1,
+            max: 1,
+            opciones: [
+              {
+                grupoOpcionId: carneOpcionId,
+                cantidad: '100',
+                unidadCodigo: 'g',
+              },
+              {
+                grupoOpcionId: carneOpcionId,
+                cantidad: '130',
+                unidadCodigo: 'g',
+              },
+            ],
+          },
+        ],
+      });
+
+    expect(res.status).toBe(400);
+    expect(await overridesVivos(itemGrupoId)).toHaveLength(0);
   });
 });

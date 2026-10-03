@@ -5,9 +5,16 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   DeleteDateColumn,
+  Index,
 } from 'typeorm';
 
+// Un mismo ingrediente una sola vez como ingrediente vivo de la receta. Existía solo
+// en `startup-pos.sql`, así que no estaba en la base.
 @Entity('receta_ingredientes')
+@Index('uq_receta_ingrediente_vivo', ['recetaItemId', 'ingredienteItemId'], {
+  unique: true,
+  where: '"eliminado_el" IS NULL',
+})
 export class RecetaIngrediente {
   @PrimaryGeneratedColumn('uuid', { name: 'receta_ingrediente_id' })
   id: string;

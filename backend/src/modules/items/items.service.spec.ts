@@ -2660,6 +2660,7 @@ describe('ItemsService', () => {
     it('extrasPermitidos: update soft-deletea extras previos e inserta nuevos', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
+        .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // FOR UPDATE de item_receta
         .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
         .mockResolvedValueOnce([

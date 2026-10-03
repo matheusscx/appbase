@@ -1,6 +1,13 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, Index } from 'typeorm';
 
+// Un override vivo por (asociación, opción). Existía solo en `startup-pos.sql`,
+// así que no estaba en la base y dos "aplicar overrides" en carrera dejaban dos
+// filas vivas (grupos-modificadores-overrides.e2e-spec.ts, test 12).
 @Entity('item_grupo_modificador_opciones')
+@Index('uq_item_grupo_opcion_vivo', ['itemGrupoId', 'grupoOpcionId'], {
+  unique: true,
+  where: '"eliminado_el" IS NULL',
+})
 export class ItemGrupoModificadorOpcion {
   @PrimaryGeneratedColumn('uuid', { name: 'item_grupo_opcion_id' })
   itemGrupoOpcionId: string;

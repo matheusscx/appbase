@@ -365,6 +365,27 @@ describe('Esquema (e2e) — invariantes medidas contra Postgres', () => {
   });
 
   /**
+   * Los mismos gemelos de `uq_lote_item_codigo`: los tres existían solo en
+   * `startup-pos.sql` y sus entities no los declaraban, así que en la base no
+   * estaban (pendientes.md, "El índice único de los overrides de opción existe
+   * solo en `startup-pos.sql`"). Columnas peladas: van en la entity.
+   */
+  it.each([
+    ['uq_item_grupo_opcion_vivo', /\(item_grupo_id, grupo_opcion_id\)/],
+    ['uq_receta_ingrediente_vivo', /\(receta_item_id, ingrediente_item_id\)/],
+    ['uq_receta_extra_vivo', /\(receta_item_id, ingrediente_item_id\)/],
+  ])('%s es único sobre filas vivas', async (nombre, columnas) => {
+    const [indice]: { indexdef: string }[] = await ds.query(
+      `SELECT indexdef FROM pg_indexes WHERE indexname = $1`,
+      [nombre],
+    );
+    expect(indice).toBeDefined();
+    expect(indice.indexdef).toContain('UNIQUE');
+    expect(indice.indexdef).toMatch(columnas);
+    expect(indice.indexdef).toMatch(/WHERE \(eliminado_el IS NULL\)/);
+  });
+
+  /**
    * `synchronize` no tiene NADA que hacer al arrancar contra una base recién
    * sembrada.
    *

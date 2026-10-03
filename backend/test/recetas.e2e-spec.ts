@@ -8,6 +8,7 @@ import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
+import { correrCarrera } from './helpers/carrera';
 import { randomUUID } from 'node:crypto';
 
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
@@ -1408,4 +1409,73 @@ describe('Recetas — flujo completo (e2e)', () => {
       .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
     expect(resCerrar.status).toBe(201);
   });
+
+  it('dos ediciones de solo extras en carrera dejan los extras una vez, no dos ni un 500', async () => {
+    // Sin el lock de `item_receta`, un PATCH que trae solo `extrasPermitidos`
+    // no se ordena con otro: los dos soft-borran la lista vieja, el segundo no
+    // ve lo que insertó el primero y vuelve a insertar. Antes de
+    // `uq_receta_extra_vivo` quedaban duplicados; con el índice, el segundo
+    // daba 500. La compuerta retiene el ingrediente nuevo, que los dos toman
+    // `FOR SHARE` al validar los extras.
+    const extraViejo = await crearIngrediente(
+      app,
+      token,
+      'Extra viejo carrera',
+      'unidad',
+      '10',
+      '100',
+    );
+    const extraNuevo = await crearIngrediente(
+      app,
+      token,
+      'Extra nuevo carrera',
+      'unidad',
+      '10',
+      '100',
+    );
+    const extra = (id: string) => ({
+      ingredienteItemId: id,
+      cantidad: '1',
+      unidadCodigo: 'unidad',
+      precioExtra: '500',
+    });
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Receta extras carrera E2E ${Date.now()}`,
+        precioBase: '4000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          { ingredienteItemId: panId, cantidad: '1', unidadCodigo: 'unidad' },
+        ],
+        extrasPermitidos: [extra(extraViejo)],
+      });
+    expect(resReceta.status).toBe(201);
+    const recetaId = (resReceta.body as ItemResponse).id;
+
+    const editarExtras = () =>
+      request(app.getHttpServer())
+        .patch(`/api/items/${recetaId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ extrasPermitidos: [extra(extraViejo), extra(extraNuevo)] })
+        .then((r) => r);
+    const { esperando, respuestas } = await correrCarrera(
+      ds,
+      [`SELECT 1 FROM items WHERE item_id = $1 FOR UPDATE`, [extraNuevo]],
+      [editarExtras, editarExtras],
+    );
+
+    expect(esperando).toBe(2);
+    expect(respuestas.map((r) => r.status)).toEqual([200, 200]);
+    const vivos = await ds.query<{ ingrediente_item_id: string }[]>(
+      `SELECT ingrediente_item_id FROM receta_extras_permitidos
+        WHERE receta_item_id = $1 AND eliminado_el IS NULL`,
+      [recetaId],
+    );
+    expect(vivos.map((v) => v.ingrediente_item_id).sort()).toEqual(
+      [extraViejo, extraNuevo].sort(),
+    );
+  }, 60000);
 });

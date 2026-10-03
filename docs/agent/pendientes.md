@@ -98,17 +98,6 @@ primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
     arreglo queda en un `UPDATE` a mano por soporte; mientras no se haga, esos pesos no se pueden
     devolver por el sistema.
 
-- [ ] **El índice único de los overrides de opción existe solo en `startup-pos.sql`, no en la
-  entidad** (backend; `items/entities/item-grupo-modificador-opcion.entity.ts`). `startup-pos.sql`
-  ~L879 declara `uq_item_grupo_opcion_vivo` (`item_grupo_id`, `grupo_opcion_id`) parcial con
-  `eliminado_el IS NULL`, pero la entidad no tiene `@Index`. El esquema sale de las entidades
-  (`synchronize`), así que en la base ese índice **no existe**, y dos "aplicar overrides"
-  concurrentes pueden duplicar un override vivo. Lo vio el revisor del N+1 de overrides
-  (2026-10-02, `4f3e3085`); verificado por la orquestadora con grep. Es así desde antes de ese
-  cambio. **Arreglo:** declarar el índice parcial en la entidad (con su `where`), con un e2e
-  concurrente que hoy duplica y después rebota, y barrer los demás `CREATE UNIQUE INDEX` del `.sql`
-  buscando gemelos sin `@Index` en su entidad.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -195,6 +184,34 @@ destapa una decisión que no es mía).
       `recibo.diff` (recibo en forma vieja o ausente) o trae su hash. Probado a mano con el
       script, en cuatro casos y con el hook de `main` como control, que la dejaba en el
       worktree.
+
+- [ ] **`uq_item_grupo_vivo` todavía da 500 en dos caminos del `PATCH`/`POST` de un ítem**
+  (backend, `ItemsService.asociarGruposModificadores`; **leído, no corrido**: lo vio la revisión de
+  seguridad del cierre de los índices de overrides, 2026-10-02). Es el mismo molde que se cerró en
+  ese frente (ver [`resueltos.md`](resueltos.md)), pero sobre la asociación receta↔grupo:
+  - **Un `grupoModificadorId` en mayúsculas.** `@IsUUID()` lo acepta. El mapa de grupos ya
+    asociados tiene las claves en minúsculas (vienen de Postgres), así que el grupo no se encuentra,
+    se intenta un `INSERT` y choca con el índice. Con `[x, X]` en el mismo pedido también se saltea
+    el chequeo de repetidos (`vistos`).
+  - **Dos `PATCH` simultáneos que solo traen `gruposModificadores` y agregan el mismo grupo.** No
+    hay `UPDATE items` ni otro lock que los ordene, así que el segundo `INSERT` choca. Si el pedido
+    trae otro campo, el `UPDATE items` los ordena.
+  **Medir:** reproducir los dos casos con un e2e (el de la carrera, con `test/helpers/carrera.ts`).
+  Si dan 500, el arreglo sale del mismo molde: normalizar el id o devolver 400, y tomar un lock
+  que ordene.
+
+- [ ] **`borrado-item-concurrente.e2e-spec.ts` cuenta las esperas de toda la base, no las de su
+  compuerta** (test; anotado 2026-10-02 por la revisión del cierre de los índices de overrides).
+  Su `correrCarrera` local afirma `esperando: 2` contando cada sesión con `wait_event_type = 'Lock'`
+  en la base. Una espera ajena puede completar el 2 sin que los pedidos hayan llegado a la
+  compuerta. Su encabezado lo acota a "rojo falso, nunca verde falso" porque cada test afirma
+  además status o filas; lo que no se midió es si en los 13 esas afirmaciones distinguen la carrera
+  del camino en serie. `test/helpers/carrera.ts`
+  cuenta solo las sesiones que frena la compuerta (con `pg_blocking_pids`, también las
+  transitivas). **Medir:** migrar los 13 casos a ese conteo y confirmar que siguen dando 2. El
+  contrato no es el mismo: la copia local escalona los disparos 800 ms y llama por `fetch` al
+  puerto real, así que hay que ver si el helper necesita esas dos cosas o si los tests no dependen
+  de ellas.
 
 ## 3. Ya decidido, falta construir
 

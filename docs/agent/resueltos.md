@@ -24,6 +24,78 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 ---
 
 
+## Tres índices únicos que vivían solo en `startup-pos.sql` ya están en sus entities (cerrada 2026-10-02)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **El índice único de los overrides de opción existe solo en `startup-pos.sql`, no en la
+  entidad** (backend; `items/entities/item-grupo-modificador-opcion.entity.ts`). `startup-pos.sql`
+  ~L879 declara `uq_item_grupo_opcion_vivo` (`item_grupo_id`, `grupo_opcion_id`) parcial con
+  `eliminado_el IS NULL`, pero la entidad no tiene `@Index`. El esquema sale de las entidades
+  (`synchronize`), así que en la base ese índice **no existe**, y dos "aplicar overrides"
+  concurrentes pueden duplicar un override vivo. Lo vio el revisor del N+1 de overrides
+  (2026-10-02, `4f3e3085`); verificado por la orquestadora con grep. Es así desde antes de ese
+  cambio. **Arreglo:** declarar el índice parcial en la entidad (con su `where`), con un e2e
+  concurrente que hoy duplica y después rebota, y barrer los demás `CREATE UNIQUE INDEX` del `.sql`
+  buscando gemelos sin `@Index` en su entidad.
+
+### Qué se hizo
+
+- **El barrido**, que no fue solo por nombre. Por cada `CREATE UNIQUE INDEX` de `startup-pos.sql`
+  (43) se buscó el nombre en las entities y en el seeder, y se miró `pg_indexes` en una base
+  sembrada. Faltaban cinco nombres. Tres eran gemelos reales, sin restricción en la base:
+  `uq_item_grupo_opcion_vivo`, `uq_receta_ingrediente_vivo` y `uq_receta_extra_vivo`. Los otros
+  dos no lo son: `idx_pasarela_tx_externo` existe con nombre autogenerado (el `@Index` sin nombre
+  de `PasarelaTransaccion`, misma definición), y `uq_sesion_garzon_tenant_id_turno` incluye la PK,
+  así que no puede haber dos filas iguales aunque falte.
+- **Los tres van como `@Index([...], { unique: true, where })`** en `ItemGrupoModificadorOpcion`,
+  `RecetaIngrediente` y `RecetaExtraPermitido`. Son columnas peladas, igual que
+  `uq_lote_item_codigo`.
+- **El `INSERT` de aplicar overrides** (`GruposModificadoresService.aplicarOverrides`) lleva
+  `ON CONFLICT (item_grupo_id, grupo_opcion_id) WHERE eliminado_el IS NULL DO UPDATE`. Así el que
+  llega segundo a la carrera pisa al primero, igual que en serie, en vez de recibir el 500 del
+  índice.
+- **El índice convertía en 500 tres caminos que antes duplicaban en silencio.** Los vio la
+  revisión independiente y cada uno se midió en rojo antes de arreglarlo:
+  - **Una opción repetida en un grupo del `PATCH`/`POST` de un ítem.** El upsert
+    (`ItemsService.upsertOverridesDeGrupo`) no ve lo que inserta en su propio bucle. Ahora es 400
+    con `assertSinIdsRepetidos`, igual que ingredientes y extras.
+  - **Dos ediciones de solo `extrasPermitidos` de la misma receta.** El `FOR UPDATE` de
+    `item_receta` se tomaba solo si venían `ingredientes`, así que estas no se ordenaban, y la
+    segunda chocaba con `uq_receta_extra_vivo`. Ahora el lock se toma también con extras, en el
+    mismo lugar (antes de `items`), así que el orden de locks no cambia.
+  - **Deadlock entre dos aplicar con asociaciones en distinto orden** (`[a, b]` contra `[b, a]`).
+    Con el índice, un `INSERT` espera al otro sobre la fila que insertan los dos. `aCrear` se
+    ordena antes del `INSERT`.
+- **Restaurar desde la papelera no choca con el índice.** La CTE de `restore()` revive extras, pero
+  un ítem en la papelera no se puede editar ni elegir como extra, así que no puede haber un gemelo
+  vivo esperando.
+
+### Qué lo fija
+
+Las carreras usan `test/helpers/carrera.ts`. Ese helper cuenta solo las sesiones que su compuerta
+frena (directa o transitivamente, con `pg_blocking_pids`) y el test afirma que son 2. Contar las
+esperas de toda la base dejaba pasar el test con esperas ajenas, sin que hubiera carrera.
+
+- `grupos-modificadores-overrides.e2e-spec.ts`:
+  - **Test 12.** Dos aplicar sobre la misma asociación. **Antes del arreglo:** los dos 200 y dos
+    overrides vivos (120 y 180).
+  - **Test 13.** Cinco rondas de `[a, b]` contra `[b, a]`. **Sin el `.sort()`:** `deadlock
+    detected` y un 500.
+  - **Mutante sin `ON CONFLICT`:** caen el 12 y el 13, los dos con un 500.
+  - **Test 14.** La opción repetida. **Sin el chequeo:** 500 por `uq_item_grupo_opcion_vivo`.
+- `recetas.e2e-spec.ts`, "dos ediciones de solo extras en carrera". **Sin el lock:** 500 por
+  `uq_receta_extra_vivo`.
+- `esquema.e2e-spec.ts`: `%s es único sobre filas vivas` para los tres. **Mutante sin el `@Index`
+  de `RecetaExtraPermitido`:** `synchronize` tira el índice y el test cae (1 de 14).
+
+⚠️ **Una base con un duplicado vivo no arranca:** `synchronize` corta con `could not create unique
+index`. Pasó en local con el duplicado que había dejado la corrida en rojo del test 12, y se
+resolvió con `reset-db.sh`. Una base que ya tenga el duplicado (el demo de Railway) va a necesitar
+lo mismo (skill `railway-sync-db`).
+
 ## Pagos resta lo devuelto con la misma cuenta que el inicio: "cobrado · propinas · devuelto → neto" (cerrada 2026-10-02)
 
 Sale de [`pendientes.md`](pendientes.md) § 3.
