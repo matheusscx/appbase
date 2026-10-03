@@ -196,8 +196,7 @@ Acepta `itemId` de tipo `producto` o `ingrediente` (modo cantidad). Mensaje si o
 ## Frontend
 
 - `pages/configuracion/items.vue` — filtro y selector "Ingrediente"; formulario sin precio/modo/impuestos; badge warning; selector de insumos de receta vía `GET /items?tipo=ingrediente`; simulador de desfases al editar costo de ingrediente.
-- `pages/inventario.vue` — `Promise.all` de `tipo=producto` + `tipo=ingrediente`, merge por nombre.
-- `pages/mermas.vue` — mismo merge para selector de item.
+- `pages/inventario/index.vue` y `pages/mermas.vue` — el selector de ítem es `AppItemSelect` con `tipo=producto,ingrediente` y busca en el servidor (ver [catalogo-paginado.md](./catalogo-paginado.md)).
 - POS / tienda / salones — sin cambios (`?tipo=producto` / `receta` / `suscripcion`).
 
 ---

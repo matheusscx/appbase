@@ -28,6 +28,24 @@ const PRODUCTO = {
   stockDisponible: '10.0000',
 }
 
+// Un producto por serie que NO está en la primera búsqueda del selector: solo se alcanza por
+// `ids=` (el link directo del toast de rechazo por stock). Si la pantalla no lo trae por id,
+// no sabe que va por serie.
+const PRODUCTO_SERIE = {
+  id: 'item-serie',
+  nombre: 'Notebook',
+  modoInventario: 'serie',
+  unidadMedida: null,
+  stockDisponible: '2.0000',
+}
+const UNIDAD_SERIE = {
+  id: 'unidad-1',
+  serie: 'SN-0001',
+  condicion: 'nuevo',
+  garantiaHasta: null,
+  ubicacionId: 'bodega-1',
+}
+
 const ITEM_DETALLE = {
   id: PRODUCTO.id,
   nombre: PRODUCTO.nombre,
@@ -51,6 +69,10 @@ const MOTIVO = { id: 'motivo-1', nombre: 'Reposición' }
 // medido. El `router.replace(...)` que limpia la query al cerrar el drawer
 // corre contra el router REAL y no se afirma en este archivo.
 let routeQuery: Record<string, string> = {}
+// Si un test lo setea, la respuesta de `GET /items?ids=` espera a que se libere.
+let retenerIds: Promise<void> | null = null
+let pedidosIds = 0
+const urlsItems: string[] = []
 
 mockNuxtImport('useRoute', () => {
   return () => ({ query: routeQuery })
@@ -68,12 +90,20 @@ mockNuxtImport('useApiFetch', () => {
     if (typeof url !== 'string') return Promise.resolve({ data: [], meta: {} })
     if (url.includes('/ubicaciones')) return Promise.resolve([LOCAL, BODEGA, BODEGA_BARRA])
     if (url.includes('/motivos-traslado')) return Promise.resolve([MOTIVO])
-    if (url.includes('/items?tipo=producto')) {
-      return Promise.resolve({ data: [PRODUCTO], meta: { page: 1, pageSize: 100, total: 1, totalPages: 1 } })
+    // `GET /items?ids=` — el caché por id (`resolver`): solo conoce lo que se pide.
+    if (url.includes('/items?ids=')) {
+      pedidosIds++
+      const ids = new URL(url, 'http://x').searchParams.get('ids')!.split(',')
+      const data = [PRODUCTO, PRODUCTO_SERIE].filter(p => ids.includes(p.id))
+      const respuesta = { data, meta: { page: 1, pageSize: 100, total: data.length, totalPages: 1 } }
+      return retenerIds ? retenerIds.then(() => respuesta) : Promise.resolve(respuesta)
     }
-    if (url.includes('/items?tipo=ingrediente')) {
-      return Promise.resolve({ data: [], meta: { page: 1, pageSize: 100, total: 0, totalPages: 0 } })
+    // `GET /items?...` — la búsqueda del selector: 20 por página, solo el PRODUCTO.
+    if (url.includes('/items?')) {
+      urlsItems.push(url)
+      return Promise.resolve({ data: [PRODUCTO], meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 } })
     }
+    if (url.endsWith(`/items/${PRODUCTO_SERIE.id}/unidades?estado=disponible`)) return Promise.resolve([UNIDAD_SERIE])
     // `GET /items/:id` — el detalle con el desglose por ubicación. Se pide
     // solo cuando el origen es una bodega (del local no hace falta, ya viene
     // neto en `stockDisponible` del listado — `docs/features/bodegas-y-traslados.md`,
@@ -123,6 +153,19 @@ function selectConOpcion(wrapper: Wrapper, valor: string) {
   return encontrados[0]!
 }
 
+/**
+ * Elige el producto del selector con búsqueda: abre el menú (que dispara la búsqueda y llena el
+ * caché) y emite la selección, como el usuario. `AppItemSelect` no trae opciones hasta que se abre.
+ */
+async function elegirProducto(wrapper: Wrapper, valor: string) {
+  const menu = wrapper.findComponent({ name: 'AppItemSelect' }).findComponent({ name: 'USelectMenu' })
+  expect(menu.exists(), 'selector de producto').toBe(true)
+  menu.vm.$emit('update:open', true)
+  await new Promise(r => setTimeout(r, 20))
+  menu.vm.$emit('update:modelValue', valor)
+  await new Promise(r => setTimeout(r, 20))
+}
+
 async function emitir(comp: ReturnType<typeof selectConOpcion>, valor: string) {
   comp.vm.$emit('update:modelValue', valor)
   await new Promise(r => setTimeout(r, 20))
@@ -161,7 +204,7 @@ describe('traslados — formulario', () => {
     await emitir(origenSelect!, LOCAL.id)
     await emitir(destinoSelect!, LOCAL.id)
     await emitir(selectConOpcion(wrapper, MOTIVO.id), MOTIVO.id)
-    await emitir(selectConOpcion(wrapper, PRODUCTO.id), PRODUCTO.id)
+    await elegirProducto(wrapper, PRODUCTO.id)
     await wrapper.find('input[inputmode="decimal"]').setValue('2')
 
     const boton = botonConfirmar(wrapper)
@@ -181,7 +224,7 @@ describe('traslados — formulario', () => {
 
     const [origenSelect] = selectsConOpcion(wrapper, LOCAL.id)
     await emitir(origenSelect!, BODEGA.id)
-    await emitir(selectConOpcion(wrapper, PRODUCTO.id), PRODUCTO.id)
+    await elegirProducto(wrapper, PRODUCTO.id)
     await new Promise(r => setTimeout(r, 30))
 
     const disponible = wrapper.find('[data-qa="linea-disponible"]')
@@ -198,7 +241,7 @@ describe('traslados — formulario', () => {
 
     const [origenSelect] = selectsConOpcion(wrapper, LOCAL.id)
     await emitir(origenSelect!, LOCAL.id)
-    await emitir(selectConOpcion(wrapper, PRODUCTO.id), PRODUCTO.id)
+    await elegirProducto(wrapper, PRODUCTO.id)
 
     const cantidadInput = wrapper.find('input[inputmode="decimal"]')
     expect(cantidadInput.exists()).toBe(true)
@@ -220,6 +263,9 @@ describe('traslados — el traslado precargado desde el toast de "no hay stock"'
   beforeEach(() => {
     document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
     routeQuery = {}
+    retenerIds = null
+    pedidosIds = 0
+    urlsItems.length = 0
   })
 
   it('con ?itemId&origenId&cantidad, abre el drawer YA armado: origen la bodega, destino el local, el producto y la cantidad cargados', async () => {
@@ -284,6 +330,81 @@ describe('traslados — el traslado precargado desde el toast de "no hay stock"'
 
     const [, destinoSelect] = selectsConOpcion(wrapper, LOCAL.id)
     expect(destinoSelect!.props('modelValue')).toBe(LOCAL.id)
+
+    wrapper.unmount()
+  })
+
+  it('un producto por serie que no está en la primera búsqueda abre la línea en modo serie, no en cantidad', async () => {
+    routeQuery = { itemId: PRODUCTO_SERIE.id, origenId: BODEGA.id }
+    // La respuesta de `ids=` espera: mientras no llega, la pantalla NO puede haber precargado la
+    // línea (sin saber el modo, adivinaría `'cantidad'`). Retenerla también evita que el test
+    // pase por el resolve-al-montar del selector en vez de por el `resolver` de la pantalla.
+    let liberar!: () => void
+    retenerIds = new Promise<void>((r) => { liberar = r })
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 60))
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+    // Mientras `ids=` no llegó, la línea no tiene ítem: la pantalla no eligió nada (ni adivinó un modo).
+    expect(wrapper.findComponent({ name: 'AppItemSelect' }).props('modelValue')).toBe('')
+    expect(wrapper.find('input[inputmode="decimal"]').exists()).toBe(false)
+
+    liberar()
+    await new Promise(r => setTimeout(r, 60))
+
+    expect(wrapper.text()).toContain('SN-0001')
+    expect(wrapper.text()).toContain('Selecciona unidades a trasladar')
+    expect(wrapper.find('input[inputmode="decimal"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('si el usuario elige otro producto mientras se resuelve el del link, la precarga no lo pisa', async () => {
+    routeQuery = { itemId: PRODUCTO_SERIE.id, origenId: BODEGA.id }
+    let liberar!: () => void
+    retenerIds = new Promise<void>((r) => { liberar = r })
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 60))
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+
+    // El usuario elige a mano Harina (la búsqueda del selector no pasa por `ids=`).
+    await elegirProducto(wrapper, PRODUCTO.id)
+    expect(wrapper.findComponent({ name: 'AppItemSelect' }).props('modelValue')).toBe(PRODUCTO.id)
+
+    liberar()
+    await new Promise(r => setTimeout(r, 60))
+
+    expect(wrapper.findComponent({ name: 'AppItemSelect' }).props('modelValue')).toBe(PRODUCTO.id)
+    expect(wrapper.text()).not.toContain('SN-0001')
+    expect(wrapper.text()).toContain('Disponible en Bodega centro')
+
+    wrapper.unmount()
+  })
+
+  it('si el ítem del link no se puede traer, avisa y no precarga la línea', async () => {
+    routeQuery = { itemId: PRODUCTO_SERIE.id, origenId: BODEGA.id }
+    retenerIds = Promise.reject(new Error('sin red'))
+    retenerIds.catch(() => {})
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 60))
+
+    // El drawer abre con origen/destino, pero la línea queda vacía: nada de modo inventado.
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+    expect(wrapper.find('input[inputmode="decimal"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Selecciona unidades a trasladar')
+    expect(pedidosIds).toBeGreaterThan(0)
+
+    wrapper.unmount()
+  })
+
+  it('el selector de producto pide ambos tipos al servidor', async () => {
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    const [origenSelect] = selectsConOpcion(wrapper, LOCAL.id)
+    await emitir(origenSelect!, LOCAL.id)
+    await elegirProducto(wrapper, PRODUCTO.id)
+
+    expect(urlsItems.some(u => u.includes('tipo=producto%2Cingrediente'))).toBe(true)
 
     wrapper.unmount()
   })

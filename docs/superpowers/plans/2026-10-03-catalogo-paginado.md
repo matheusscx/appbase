@@ -3,7 +3,7 @@
 > **Para agentes:** sub-skill requerida: superpowers:subagent-driven-development (recomendada) o
 > superpowers:executing-plans. Las tareas usan checkboxes (`- [ ]`).
 
-**Status:** In Progress · **Date:** 2026-10-03 · **Owner:** Cesar Matheus
+**Status:** Done · **Date:** 2026-10-03 · **Owner:** Cesar Matheus
 
 **Goal:** que el ítem 101 se pueda encontrar, vender y elegir. La grilla de venta pide al servidor
 una página ordenada y buscada, y los selectores buscan en el servidor.
@@ -747,21 +747,21 @@ export function useItemsPorId<T extends { id: string, nombre: string }>(): {
   - `v-model` es `string | string[] | null`;
   - pasa `data-qa` y los atributos sueltos al `USelectMenu`.
 
-- [ ] **Paso 1: tests del caché que fallan.**
+- [x] **Paso 1: tests del caché que fallan.**
   - `buscar('pan', { tipo: ['producto'], activo: true })` pide `search=pan`, `pageSize=20`,
     `tipo=producto` y `activo=true`, y deja los resultados en `porId`.
   - `resolver([a, b, a])` con `a` ya en el caché pide solo `ids=b`.
   - `resolver` con 150 ids hace 2 pedidos (100 + 50).
   - `resolver([])` no pide nada.
-- [ ] **Paso 2: implementar `useItemsPorId`.** Un `reactive(new Map())` y `URLSearchParams`. No
+- [x] **Paso 2: implementar `useItemsPorId`.** Un `reactive(new Map())` y `URLSearchParams`. No
   pagina más allá de la primera página: un selector muestra 20 y se sigue tipeando.
-- [ ] **Paso 3: tests del componente que fallan.** Molde de montaje: `CatalogoGrid.nuxt.spec.ts`.
+- [x] **Paso 3: tests del componente que fallan.** Molde de montaje: `CatalogoGrid.nuxt.spec.ts`.
   1. Al abrir pide `buscar('')`; tipear espera 300 ms y pide con el término.
   2. **Unión con los elegidos:** con `v-model = [x]`, donde `x` está en `porId` pero no en los
      resultados, la opción de `x` existe con su etiqueta.
   3. Con `v-model = [y]`, donde `y` no está en `porId`, llama a `resolver([y])` al montar.
   4. `excluir` saca ids de los resultados, pero **nunca** a un elegido.
-- [ ] **Paso 4: implementar `AppItemSelect.vue`.**
+- [x] **Paso 4: implementar `AppItemSelect.vue`.**
   - `<script setup lang="ts" generic="T extends { id: string, nombre: string }">`.
   - `USelectMenu` con `ignore-filter`, `v-model:search-term`, `value-key="value"` y
     `:loading="buscando"`; abre con `@update:open`.
@@ -770,20 +770,20 @@ export function useItemsPorId<T extends { id: string, nombre: string }>(): {
     excluidos, mapeados a `{ value: id, label: etiqueta(item) }`.
   - Un `watch` de los elegidos con `immediate` llama a `catalogo.resolver(ids)`.
   - Un error de búsqueda va a toast, con `apiErrorMsg`.
-- [ ] **Paso 5: `promociones.vue`.**
+- [x] **Paso 5: `promociones.vue`.**
   - Sacar `/items?pageSize=100` de `cargarCatalogos` (`/categorias` queda).
   - `const catalogoItems = useItemsPorId<ItemCatalogo>()`.
   - El selector de :521 pasa a `<AppItemSelect v-model="scope.itemIds" multiple :catalogo="catalogoItems" :etiqueta="i => i.categoriaNombre ? `${i.nombre} (${i.categoriaNombre})` : i.nombre" />`.
   - En `abrirEditar`, `await catalogoItems.resolver(todos los itemIds de todos los alcances)`
     antes de abrir.
   - Sin filtros: hoy entran todos los tipos, también los pausados, y se conserva.
-- [ ] **Paso 6: spec de la pantalla.**
+- [x] **Paso 6: spec de la pantalla.**
   - Ajustar el mock de :117 para que responda según `search` e `ids`.
   - Caso nuevo: editar una promoción cuyo alcance tiene un ítem que **no** está en la primera
     búsqueda muestra su nombre.
   - **Mutante que revierte:** sacar el `resolver` de `abrirEditar`; el caso nuevo tiene que
     fallar. Revertir.
-- [ ] **Paso 7:** typecheck, `design:check` y stagear. En el reporte de la tarea va la forma
+- [x] **Paso 7:** typecheck, `design:check` y stagear. En el reporte de la tarea va la forma
   final del contrato, para las Tareas 11–14.
 
 ### Tarea 11: `configuracion/items.vue` (componentes de combo, ingredientes, extras)
@@ -798,11 +798,11 @@ export function useItemsPorId<T extends { id: string, nombre: string }>(): {
   - los selectores :2479-2484, :2538-2543 y :2600-2605.
 - Test: `frontend/app/pages/configuracion/items.nuxt.spec.ts`
 
-- [ ] **Paso 1: tests que fallan.**
+- [x] **Paso 1: tests que fallan.**
   - Editar un combo cuyo componente no aparece en la primera búsqueda muestra su nombre y suma
     su `costoActual` al preview. Hoy suma 0 en silencio: es el bug de spec § 1.
   - Lo mismo para una receta con un ingrediente así: el costo de la receta lo incluye.
-- [ ] **Paso 2: implementar.** Dos cachés:
+- [x] **Paso 2: implementar.** Dos cachés:
   - `catalogoVendibles`, con filtro `tipo: ['producto','receta','servicio']`;
   - `catalogoIngredientes`, con filtro `tipo: ['ingrediente']`.
 
@@ -810,7 +810,7 @@ export function useItemsPorId<T extends { id: string, nombre: string }>(): {
   resuelve componentes, ingredientes y extras en **una** llamada por caché, antes de llenar el
   formulario. `syncItemVendible` y `syncProductoIngrediente` pasan a `registrar(item)`, y
   `removeItemLocal` a `porId.delete(id)`. La tabla principal (`usePaginatedList`) no se toca.
-- [ ] **Paso 3:** mutante (sacar el `resolver` de `abrirEditar`: el caso del costo falla), correr
+- [x] **Paso 3:** mutante (sacar el `resolver` de `abrirEditar`: el caso del costo falla), correr
   el spec, typecheck y stagear.
 
 ### Tarea 12: `configuracion/grupos-modificadores.vue`
@@ -819,17 +819,17 @@ export function useItemsPorId<T extends { id: string, nombre: string }>(): {
 - Modify: `frontend/app/pages/configuracion/grupos-modificadores.vue` (`cargarItemsCatalogo` :309-322; `itemsCatalogo` :88; `familiaDeItem` :142-145; `opcionesDisponibles` :157-173; `abrirEditar` :381-396; el selector :721-727)
 - Test: `frontend/app/pages/configuracion/grupos-modificadores.nuxt.spec.ts` (:109)
 
-- [ ] **Paso 1: test que falla.** Editar un grupo con una opción cuyo ítem no aparece en la
+- [x] **Paso 1: test que falla.** Editar un grupo con una opción cuyo ítem no aparece en la
   primera búsqueda: la fila muestra el nombre y la unidad, y la validación de familia de :413
   **corre** sobre esa fila.
-- [ ] **Paso 2: implementar.**
+- [x] **Paso 2: implementar.**
   - Un caché, con filtro según la familia del grupo: `tipo: ['ingrediente']` o
     `['producto','receta','servicio']`, lo mismo que hoy decide `opcionesDisponibles`.
   - `excluir` = los ids de las filas hermanas.
   - `familiaDeItem` y las unidades leen `porId`.
   - `abrirEditar` resuelve todos los `opciones[].itemId`.
   - Sacar `cargarItemsCatalogo` y sus 4 pedidos.
-- [ ] **Paso 3:** mutante, spec, typecheck y stagear.
+- [x] **Paso 3:** mutante, spec, typecheck y stagear.
 
 ### Tarea 13: inventario y mermas
 
@@ -840,12 +840,12 @@ export function useItemsPorId<T extends { id: string, nombre: string }>(): {
 - Modify: `frontend/app/pages/mermas.vue` (:76-79, :105-130, :146-151, los selectores :276 y :406)
 - Test: los cuatro `.nuxt.spec.ts` de esas pantallas
 
-- [ ] **Paso 1: tests que fallan.**
+- [x] **Paso 1: tests que fallan.**
   - **traslados:** `?itemId=<id de un producto en modo serie que no está en la primera búsqueda>`
     abre la línea en modo serie, no en `'cantidad'` (bug de spec § 1).
   - **recuentos:** la búsqueda pide `modoInventario=cantidad` en el servidor.
   - **inventario y mermas:** el selector de filtro manda `itemId` al listado y "vacío" es todos.
-- [ ] **Paso 2: implementar.** Un caché por pantalla, con
+- [x] **Paso 2: implementar.** Un caché por pantalla, con
   `tipo: ['producto','ingrediente']`.
   - Las lecturas del elegido (`productoSeleccionado`, `productoAjusteSeleccionado`, el
     `producto` de `onSeleccionarItem`) leen `porId`.
@@ -853,7 +853,7 @@ export function useItemsPorId<T extends { id: string, nombre: string }>(): {
   - En recuentos, `filtros.modoInventario = 'cantidad'`, y se borra el `.filter` de :81.
   - Los filtros de mermas e inventario pierden el "Todos" de mentira y pasan a vacío con `clear`
     (spec § 5).
-- [ ] **Paso 3:** mutante (traslados sin el `resolver`: el caso de serie falla), specs, typecheck y
+- [x] **Paso 3:** mutante (traslados sin el `resolver`: el caso de serie falla), specs, typecheck y
   stagear.
 
 ### Tarea 14: `tienda/suscripciones.vue`
@@ -862,25 +862,25 @@ export function useItemsPorId<T extends { id: string, nombre: string }>(): {
 - Modify: `frontend/app/pages/tienda/suscripciones.vue` (`abrirCrear` :216-235; `itemsSuscribibles`/`itemsSuscribiblesOpts` :133, :174-179; `itemSeleccionado` :144-146; el selector :486-495)
 - Test: `frontend/app/pages/tienda/suscripciones.nuxt.spec.ts` (si no existe, crearlo con el molde de `tienda/index.nuxt.spec.ts`)
 
-- [ ] **Paso 1: test que falla.** Buscar pide `tipo=suscripcion&activo=true&search=…`;
+- [x] **Paso 1: test que falla.** Buscar pide `tipo=suscripcion&activo=true&search=…`;
   `itemSeleccionado` lee `porId`, y los días y el preview de precio siguen funcionando con un
   ítem que llegó por búsqueda.
-- [ ] **Paso 2: implementar.**
+- [x] **Paso 2: implementar.**
   - Etiqueta: `nombre · formatMonto(precioBase, monedaId) · frecuencia`, la de :174-179.
   - El `.filter(i => i.frecuencia)` queda, aplicado a las opciones.
   - Sacar la carga perezosa de 100.
-- [ ] **Paso 3:** spec, typecheck y stagear.
+- [x] **Paso 3:** spec, typecheck y stagear.
 
 ### Tarea 15: Playwright de un selector, docs, cierre de las entradas, gate y commit 2
 
-- [ ] **Paso 1: Playwright.**
+- [x] **Paso 1: Playwright.**
   - En `frontend/e2e/configuracion/`, un spec que crea 101 productos y edita un combo para
     sumarle el 101 buscándolo en el selector: guarda, reabre, y el componente se ve con su
     nombre.
   - Correrlo con el rol de configuración de ítems del seed (admin, si es admin-only:
     `TenantAdminGuard`; mirar el guard de `POST /items`).
   - Pedir turno.
-- [ ] **Paso 2: docs.**
+- [x] **Paso 2: docs.**
   - En `docs/features/catalogo-paginado.md`, la sección de selectores.
   - En `docs/patterns/frontend.md`: "selector de ítems = `AppItemSelect` + `useItemsPorId`;
     nunca `pageSize=100` como fuente de opciones", con el porqué.
@@ -890,16 +890,16 @@ export function useItemsPorId<T extends { id: string, nombre: string }>(): {
   - Mudar las **dos** entradas de `pendientes.md` § 3 a `resueltos.md` con lo medido (tiempos de
     la Tarea 1, bytes de la Tarea 7, el índice).
   - Anotar en `pendientes.md` § 2 que `GET /compras/productos` no pagina (trae todo de una vez).
-- [ ] **Paso 3: barrido de lo que quedó.** Este comando tiene que dar **0** líneas fuera de specs
+- [x] **Paso 3: barrido de lo que quedó.** Este comando tiene que dar **0** líneas fuera de specs
   y docs:
 
 ```bash
 grep -rn "pageSize=100\|pageSize: 100" $WT/frontend/app --include='*.vue' --include='*.ts' | grep -v 'spec.ts'
 ```
 
-- [ ] **Paso 4: gate entero**, igual que en la Tarea 9, Paso 2 (con turnos), más el Playwright de
+- [x] **Paso 4: gate entero**, igual que en la Tarea 9, Paso 2 (con turnos), más el Playwright de
   las Tareas 8 y 15.
-- [ ] **Paso 5: verificar, commitear y avisar.**
+- [x] **Paso 5: verificar, commitear y avisar.**
   - `verify-feature` con la duda concreta: *"¿alguna cuenta de una pantalla sigue leyendo de una
     lista y no de `porId`?"*.
   - Commit `feat(catalogo): los selectores de ítems buscan en el servidor`.

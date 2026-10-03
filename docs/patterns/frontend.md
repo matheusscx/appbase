@@ -864,6 +864,27 @@ para armar un catálogo: el ítem 101 no llega, no se puede buscar y nada lo avi
 
 Detalle y porqué: [catalogo-paginado.md](../features/catalogo-paginado.md).
 
+### 10.3 Selector de ítems: `AppItemSelect` + `useItemsPorId`, nunca `pageSize=100` como fuente de opciones
+
+Un selector que elige ítems (componente de combo, ingrediente, alcance de una promoción, ítem de una
+merma, un traslado, un recuento) es `AppItemSelect` con el caché `useItemsPorId()` de **la
+pantalla**. **No** se carga `GET /items?pageSize=100` para armar las opciones ni el mapa `id → ítem`:
+el ítem 101 no se puede elegir, y una cuenta que lee de esa lista (costo de un combo, familia de
+unidad, nombres de un alcance) sale de menos sin avisar.
+
+- **Las cuentas de la pantalla leen de `catalogo.porId`**, el mismo caché que alimenta al selector;
+  nunca de una lista aparte.
+- **Al editar un registro con ítems elegidos:** `await catalogo.resolver(ids del registro)` antes
+  de abrir el formulario, con el fallo tragado. `resolver` trae por `ids=` solo lo que falta, en
+  tandas de 100; si falla, el componente reintenta al montar y avisa con un toast.
+- **Los filtros van al servidor** (`filtros: { tipo, modoInventario, activo }`), no se filtra
+  después sobre lo que llegó: una página de 20 filtrada en el navegador esconde resultados.
+- `clear` en un filtro donde vacío significa "todos".
+- **Opciones = elegidos ∪ resultados.** Lo resuelve el componente; una pantalla que arma su propio
+  `USelectMenu` con búsqueda tiene que repetirlo o el elegido se ve sin nombre.
+
+Detalle y porqué: [catalogo-paginado.md](../features/catalogo-paginado.md).
+
 ---
 
 ## 12. Listados paginados (server-side)

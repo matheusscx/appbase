@@ -11,8 +11,7 @@
 //      último, no el que se disparó último. Esta pantalla NO usa
 //      `usePaginatedList` (verificado: `useApiFetch<Grupo[]>` plano, igual que
 //      `descuentos`), así que la cola serial es local (`cargaEnCurso`) y
-//      encierra también las otras dos cargas del `Promise.all` (catálogo de
-//      items y unidades de medida).
+//      encierra también la otra carga del `Promise.all` (unidades de medida).
 //   3. Doble submit al restaurar: el modal no se cierra durante el POST, así
 //      que un segundo click manda un segundo `POST .../restaurar` sobre una
 //      fila ya revivida → 404 → toast de ERROR encima de un éxito.
@@ -99,14 +98,43 @@ let postsRestaurar: { id: string, nombre?: string }[] = []
 /** Retiene la respuesta del restaurar para dejar el POST "en vuelo". */
 let restaurarRetenido: Promise<unknown> | null = null
 
+/** Ítems que el backend conoce: la búsqueda devuelve `itemsBuscables`; `ids=` trae cualquiera. */
+interface ItemFake { id: string, nombre: string, tipo: string, unidadMedida: string | null }
+let itemsBuscables: ItemFake[] = []
+let itemsPorIds: ItemFake[] = []
+/** Retiene la respuesta de `ids=` hasta que el test la libera. */
+let liberarIds: Promise<void> | null = null
+/** Hace fallar todo pedido por `ids=` (el ítem de una opción no se puede resolver). */
+let idsFalla = false
+let urlsItems: string[] = []
+/** Escrituras (`POST`/`PATCH`) de grupos: el guardado que la validación debía frenar. */
+let escrituras: string[] = []
+
+interface ToastCapturado { title?: string, color?: string }
+let toasts: ToastCapturado[] = []
+mockNuxtImport('useToast', () => {
+  return () => ({
+    add: (t: ToastCapturado) => {
+      toasts.push(t)
+    },
+  })
+})
+
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: { nombre?: string } }) => {
     if (typeof url !== 'string') return Promise.resolve([])
-    // Catálogo de items (`cargarItemsCatalogo()`), parte del `Promise.all` de
-    // `cargar()` pero ajeno a la papelera de grupos: forma paginada vacía, no
-    // el array plano de `/grupos-modificadores`.
+    // Ítems del selector (búsqueda o `ids=`): forma paginada, no el array plano de
+    // `/grupos-modificadores`.
     if (url.includes('/items?')) {
-      return Promise.resolve({ data: [], meta: { total: 0, page: 1, pageSize: 100, totalPages: 0 } })
+      urlsItems.push(url)
+      const params = new URL(url, 'http://x').searchParams
+      const ids = params.get('ids')
+      if (ids && idsFalla) return Promise.reject(new Error('ids= caído'))
+      const data = ids
+        ? itemsPorIds.filter(i => ids.split(',').includes(i.id))
+        : itemsBuscables
+      const respuesta = { data, meta: { total: data.length, page: 1, pageSize: 20, totalPages: 1 } }
+      return ids && liberarIds ? liberarIds.then(() => respuesta) : Promise.resolve(respuesta)
     }
     if (!url.includes('/grupos-modificadores')) {
       // Cubre `/catalog/unidades-medida` (`unidadesMedidaStore.ensureLoaded()`)
@@ -114,6 +142,7 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve([])
     }
     const method = opts?.method ?? 'GET'
+    if (method === 'POST' || method === 'PATCH') escrituras.push(`${method} ${url}`)
     if (method === 'DELETE') {
       const id = url.split('/').pop()
       const g = gruposBackend.find(x => x.grupoModificadorId === id)
@@ -245,6 +274,13 @@ function reset() {
   overrideSinEliminados = null
   postsRestaurar = []
   restaurarRetenido = null
+  itemsBuscables = []
+  itemsPorIds = []
+  liberarIds = null
+  idsFalla = false
+  urlsItems = []
+  escrituras = []
+  toasts = []
 }
 
 describe('configuracion/grupos-modificadores — papelera: eliminar respeta el toggle', () => {
@@ -625,6 +661,144 @@ describe('configuracion/grupos-modificadores — el precio extra hereda la moned
     // Y el mismo número NO aparece formateado con la moneda oficial (CLP:
     // 0 decimales, miles con '.'), que es lo que sale si el monedaId no viaja.
     expect(texto).not.toContain('$1.235')
+
+    wrapper.unmount()
+  })
+})
+
+/**
+ * Editar un grupo cuya opción trae un ítem que la primera búsqueda no devuelve. Antes los 100
+ * primeros ítems venían cargados y el elegido siempre estaba; ahora el formulario trae por id
+ * lo del registro ANTES de abrir. Sin eso la fila quedaba sin nombre ni unidad y la validación
+ * de familia (`familiaDeItem` nulo) la saltaba, así que un ingrediente sin unidad se guardaba.
+ */
+describe('configuracion/grupos-modificadores — editar con una opción fuera de la primera búsqueda', () => {
+  const LEJANO: ItemFake = { id: 'ing-lejano', nombre: 'Aceto Balsámico', tipo: 'ingrediente', unidadMedida: 'g' }
+
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(el => el.remove())
+    reset()
+    itemsBuscables = [{ id: 'ing-cercano', nombre: 'Sal', tipo: 'ingrediente', unidadMedida: 'g' }]
+    itemsPorIds = [LEJANO]
+    gruposBackend = [grupo({
+      familia: 'ingrediente',
+      opciones: [{
+        grupoOpcionId: 'op-lejana',
+        itemId: LEJANO.id,
+        itemNombre: LEJANO.nombre,
+        tipo: 'ingrediente',
+        cantidad: '5',
+        unidadCodigo: null,
+        precioExtra: '0',
+        orden: 0,
+        stock: null,
+      }],
+    })]
+  })
+
+  it('el drawer abre recién con el ítem resuelto por ids=, con su nombre, y la validación de familia corre', async () => {
+    const wrapper = await montar()
+    // La pantalla no pide ítems al montar: ya no hay catálogo entero en memoria.
+    expect(urlsItems).toEqual([])
+
+    // `ids=` retenido: con el pedido en vuelo el drawer NO se abre. (`AppItemSelect` también
+    // resuelve al montarse, así que sin esta retención un `abrirEditar` que no espera pasaría.)
+    let liberar!: () => void
+    liberarIds = new Promise<void>((r) => { liberar = r })
+
+    const editar = wrapper.findAll('button').find(b => b.attributes('title') === 'Editar')
+    expect(editar, 'botón Editar').toBeTruthy()
+    await editar!.trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+    expect(dialogo(), 'drawer cerrado mientras se resuelven los ítems').toBeNull()
+
+    liberar()
+    await new Promise(r => setTimeout(r, 60))
+    expect(dialogo(), 'drawer abierto con los ítems resueltos').not.toBeNull()
+
+    const pedidos = urlsItems.map(u => new URL(u, 'http://x').searchParams)
+    expect(pedidos.some(p => p.get('ids') === LEJANO.id)).toBe(true)
+
+    // Nombre y etiqueta de tipo del elegido, y su fila de "Unidad" (solo los ingredientes la tienen).
+    const selectItem = wrapper.findAllComponents({ name: 'USelectMenu' })
+      .find(c => c.props('items') && JSON.stringify(c.props('items')).includes('Aceto'))
+    expect(selectItem, 'selector del ítem').toBeTruthy()
+    expect(selectItem!.props('items')).toEqual([{ value: LEJANO.id, label: 'Aceto Balsámico (Ingrediente)' }])
+    expect(document.body.textContent).toContain('Unidad')
+
+    // La opción no trae unidad: la validación por familia tiene que frenar el guardado.
+    const form = dialogo()!.querySelector('#grupo-modificador-form')
+    expect(form, 'formulario del drawer').toBeTruthy()
+    form!.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+    await new Promise(r => setTimeout(r, 30))
+    expect(toasts.map(t => t.title)).toContain('Las opciones ingrediente requieren unidad de medida')
+    expect(escrituras).toEqual([])
+
+    wrapper.unmount()
+  })
+})
+
+/**
+ * Los dos caminos de falla de `resolver` (el pedido por `ids=` que no llega):
+ *  - `abrirRecetas` no abre el drawer del lote (sin la unidad base de cada ítem sus unidades
+ *    saldrían vacías) y avisa.
+ *  - `abrirEditar` abre igual, pero `validarForm` no deja guardar una fila cuya familia no se
+ *    conoce: antes `familiaDeItem` nulo saltaba la validación y un ingrediente sin unidad pasaba.
+ */
+describe('configuracion/grupos-modificadores — `ids=` que falla', () => {
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(el => el.remove())
+    reset()
+    idsFalla = true
+    gruposBackend = [grupo({
+      itemsUsandoCount: 1,
+      familia: 'ingrediente',
+      opciones: [{
+        grupoOpcionId: 'op-x',
+        itemId: 'ing-x',
+        itemNombre: 'Ají',
+        tipo: 'ingrediente',
+        cantidad: '5',
+        unidadCodigo: null,
+        precioExtra: '0',
+        orden: 0,
+        stock: null,
+      }],
+    })]
+    recetasBackend = [receta('ig-1', 'Completo', CLP.monedaId, '900')]
+  })
+
+  it('abrirRecetas: el drawer de recetas no abre y avisa', async () => {
+    const wrapper = await montar()
+    const boton = wrapper.findAll('button').find(b => b.text().trim() === '1')
+    expect(boton, 'botón con el conteo de recetas').toBeTruthy()
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 40))
+
+    expect(dialogo(), 'drawer "usado en recetas" cerrado').toBeNull()
+    // `apiErrorMsg` agrega el detalle local tras el fallback: se compara el prefijo.
+    expect(toasts.some(t => t.color === 'error' && t.title?.startsWith('Error al cargar las recetas que usan el grupo'))).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('validarForm: una opción sin resolver frena el guardado con su propio mensaje', async () => {
+    const wrapper = await montar()
+    const editar = wrapper.findAll('button').find(b => b.attributes('title') === 'Editar')
+    expect(editar, 'botón Editar').toBeTruthy()
+    await editar!.trigger('click')
+    await new Promise(r => setTimeout(r, 40))
+    expect(dialogo(), 'el drawer abre igual aunque ids= falle').not.toBeNull()
+
+    const form = dialogo()!.querySelector('#grupo-modificador-form')
+    expect(form, 'formulario del drawer').toBeTruthy()
+    form!.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+    await new Promise(r => setTimeout(r, 30))
+
+    expect(toasts.map(t => t.title)).toContain(
+      'No se pudo cargar un ítem de las opciones: cerrá y volvé a abrir el grupo',
+    )
+    expect(escrituras).toEqual([])
 
     wrapper.unmount()
   })

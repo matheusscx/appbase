@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
-import type { PaginatedResponse } from '~/composables/usePaginatedList'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -117,13 +116,13 @@ const destinoOpts = computed<Opt[]>(() =>
   ubicaciones.value.filter(u => u.activo).map(u => ({ label: u.nombre, value: u.id })),
 )
 
-const productos = ref<ProductoOpt[]>([])
+// Los productos ya no se cargan enteros (tope de 100): `AppItemSelect` busca en el servidor y el
+// caché guarda lo visto; el modo de inventario del elegido sale de acá.
+const catalogoItems = useItemsPorId<ProductoOpt>()
+const FILTROS_PRODUCTO = { tipo: ['producto', 'ingrediente'] }
 const motivos = ref<MotivoOpt[]>([])
 const catalogosCargados = ref(false)
 
-const productoOpts = computed<Opt[]>(() =>
-  productos.value.map(p => ({ label: p.nombre, value: p.id })),
-)
 const motivoOpts = computed<Opt[]>(() =>
   motivos.value.map(m => ({ label: m.nombre, value: m.id })),
 )
@@ -131,15 +130,10 @@ const motivoOpts = computed<Opt[]>(() =>
 async function cargarCatalogos() {
   try {
     await unidadesMedidaStore.ensureLoaded()
-    const [prodRes, ingRes, motivosRes] = await Promise.all([
-      useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=producto&pageSize=100`),
-      useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=ingrediente&pageSize=100`),
+    const [motivosRes] = await Promise.all([
       useApiFetch<MotivoOpt[]>(`${apiUrl}/motivos-traslado?soloActivas=true`),
       cargarUbicaciones(),
     ])
-    productos.value = [...prodRes.data, ...ingRes.data].sort((a, b) =>
-      a.nombre.localeCompare(b.nombre, 'es'),
-    )
     motivos.value = motivosRes
     catalogosCargados.value = true
   } catch (e: unknown) {
@@ -236,7 +230,7 @@ function quitarLinea(key: string) {
 
 async function onSeleccionarItem(linea: LineaForm, itemId: string) {
   linea.itemId = itemId
-  const producto = productos.value.find(p => p.id === itemId)
+  const producto = catalogoItems.porId.get(itemId)
   linea.modoInventario = producto?.modoInventario ?? 'cantidad'
   linea.unidadMedida = producto?.unidadMedida ?? null
   linea.cantidad = ''
@@ -328,6 +322,24 @@ async function abrirDesdeQuery() {
 
   const linea = lineas.value[0]
   if (!linea) return
+  // El ítem del link puede no estar entre los que el selector vio: se trae por id ANTES de
+  // elegirlo, porque de su `modoInventario` depende qué se carga (series, lotes o cantidad).
+  // Si no se puede traer, no se precarga la línea: adivinar `'cantidad'` mostraría un
+  // formulario de cantidad para un producto que va por serie o lote.
+  try {
+    await catalogoItems.resolver([itemId])
+  } catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'No se pudo cargar el producto del enlace'), color: 'error' })
+    return
+  }
+  if (!catalogoItems.porId.has(itemId)) {
+    toast.add({ title: 'No se encontró el producto del enlace', color: 'error' })
+    return
+  }
+  // El drawer ya está abierto mientras se resuelve: si el usuario cerró o eligió otro producto en
+  // ese intervalo (o el cambio de origen reinició las líneas), la precarga del link no lo pisa.
+  const lineaVigente = lineas.value.some(l => l.key === linea.key)
+  if (!drawerOpen.value || !lineaVigente || linea.itemId !== '') return
   await onSeleccionarItem(linea, itemId)
   if (typeof cantidad === 'string' && cantidad) linea.cantidad = cantidad
 }
@@ -612,15 +624,14 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                 >
                   <div class="flex items-start gap-3">
                     <UFormField label="Producto" class="flex-1">
-                      <USelectMenu
+                      <AppItemSelect
                         :model-value="linea.itemId"
-                        :items="productoOpts"
-                        value-key="value"
-                        searchable
+                        :catalogo="catalogoItems"
+                        :filtros="FILTROS_PRODUCTO"
                         :disabled="!form.origenId"
                         placeholder="Selecciona un producto"
                         class="w-full"
-                        @update:model-value="(v: string) => onSeleccionarItem(linea, v)"
+                        @update:model-value="(v) => onSeleccionarItem(linea, typeof v === 'string' ? v : '')"
                       />
                     </UFormField>
                     <UButton

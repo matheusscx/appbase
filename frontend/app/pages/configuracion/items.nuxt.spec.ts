@@ -315,6 +315,17 @@ let usoOverride: Record<string, Promise<unknown>> = {}
 // formulario, porque el bug estaba en lo que llegaba al backend.
 let enviados: { url: string; method: string; body: unknown }[] = []
 
+// El catálogo "del servidor" para los selectores de ingredientes y componentes, que ya no se
+// cargan enteros: `GET /items?ids=a,b` devuelve de acá solo lo pedido (como el backend, que
+// no devuelve un id que no existe). `null` = el mock de siempre, que contesta a todo con
+// `ITEM_PRODUCTO`. `llamadasPorIds` registra cada pedido para afirmar que es UNO por caché.
+let catalogoServidor: Record<string, Record<string, unknown>> | null = null
+let llamadasPorIds: string[][] = []
+// Si está seteado, la respuesta de `ids=` espera a que el test lo libere: así se afirma qué hay
+// en pantalla MIENTRAS el pedido está en vuelo (el `AppItemSelect` también resuelve al montarse,
+// y sin retener, ese segundo pedido tapa la ausencia del de `abrirEditar`).
+let retenerIds: Promise<void> | null = null
+
 // El store de monedas sale del auth (`ensureLoaded` corta sin `activeTenantId`), y
 // sin monedas todos los `MoneyInput` de la pantalla se montan DESHABILITADOS y sin
 // emitir: los tests de abajo pasarían igual con el `v-model` desconectado. Con esto
@@ -355,6 +366,13 @@ mockNuxtImport('useApiFetch', () => {
     // listado paginado `/items?page=...`.
     if (typeof url === 'string' && /\/items\/[^/?]+$/.test(url))
       return Promise.resolve(itemDetalleMock)
+    if (catalogoServidor && typeof url === 'string' && /\/items\?.*\bids=/.test(url)) {
+      const ids = decodeURIComponent(/\bids=([^&]*)/.exec(url)![1]!).split(',')
+      llamadasPorIds.push(ids)
+      const data = ids.flatMap(id => (catalogoServidor![id] ? [catalogoServidor![id]!] : []))
+      const respuesta = { data, meta: { total: data.length, page: 1, pageSize: 100, totalPages: 1 } }
+      return retenerIds ? retenerIds.then(() => respuesta) : Promise.resolve(respuesta)
+    }
     if (itemPapeleraBackend && typeof url === 'string' && url.includes('/items')) {
       const incluirEliminados = url.includes('incluirEliminados=true')
       if (incluirEliminados && overrideItemsConEliminados) return overrideItemsConEliminados
@@ -2041,6 +2059,88 @@ describe('configuracion/items — lo que una opción no tipea lo hereda del grup
     expect(body.gruposModificadores[0]!.opciones).toEqual([
       { grupoOpcionId: 'op-pepinillo', precioExtra: '450' },
     ])
+
+    wrapper.unmount()
+  })
+})
+
+// El costo de un combo y el de una receta se calculan en la pantalla desde el caché de ítems.
+// Antes era una lista de los primeros 100: un componente o ingrediente fuera de esos 100 no
+// estaba, la cuenta lo sumaba como cero y el "Costo actual" salía de menos, sin avisar.
+describe('configuracion/items — el costo cuenta lo que el ítem ya usa, esté o no en la primera página', () => {
+  beforeEach(() => {
+    esAdmin = true
+    permisos = []
+    llamadasPorIds = []
+  })
+
+  afterEach(() => {
+    itemDetalleMock = ITEM_PRODUCTO
+    catalogoServidor = null
+    retenerIds = null
+  })
+
+  async function abrirEditarItem() {
+    const wrapper = await montar()
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+    return wrapper
+  }
+
+  // El drawer vive en un portal: su texto está en el `body`, no en el wrapper.
+  const textoCosto = () =>
+    [...document.body.querySelectorAll('p')]
+      .find(p => p.textContent?.trim().startsWith('Costo actual'))?.textContent ?? ''
+
+  it('un combo con un componente fuera de la primera búsqueda lo nombra y suma su costo', async () => {
+    catalogoServidor = {
+      'item-lejano': { id: 'item-lejano', nombre: 'Postre Lejano', tipo: 'producto', costoActual: '250' },
+    }
+    itemDetalleMock = {
+      ...ITEM_COMBO,
+      componentes: [{ componenteItemId: 'item-lejano', cantidad: '2', bloqueante: true }],
+    }
+
+    let liberar!: () => void
+    retenerIds = new Promise<void>(r => { liberar = r })
+
+    const wrapper = await montar()
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+    // El pedido de `ids=` sigue en vuelo: el drawer NO abrió con un componente sin nombre ni
+    // costo (el "Costo actual" en cero que mostraba antes de este cambio).
+    expect(textoCosto()).toBe('')
+
+    liberar()
+    await new Promise(r => setTimeout(r, 50))
+
+    const selector = wrapper.findAllComponents({ name: 'AppItemSelect' })
+      .find(s => (s.props('catalogo') as { porId: Map<string, unknown> }).porId.has('item-lejano'))
+    expect(selector, 'selector del componente').toBeTruthy()
+    expect(selector!.findComponent({ name: 'USelectMenu' }).props('items'))
+      .toContainEqual({ value: 'item-lejano', label: 'Postre Lejano (producto)' })
+    // 2 × 250. Sin resolver, el componente no estaba en el caché y la cuenta daba 0.
+    expect(textoCosto()).toMatch(/500/)
+
+    wrapper.unmount()
+  })
+
+  it('una receta con un ingrediente fuera de la primera búsqueda suma su costo', async () => {
+    catalogoServidor = {
+      'ing-lejano': { id: 'ing-lejano', nombre: 'Trufa', tipo: 'ingrediente', costoActual: '100', unidadMedida: 'unidad' },
+      'ing-extra': { id: 'ing-extra', nombre: 'Aceite', tipo: 'ingrediente', costoActual: '5', unidadMedida: 'unidad' },
+    }
+    itemDetalleMock = {
+      ...ITEM_RECETA,
+      ingredientes: [{ ingredienteItemId: 'ing-lejano', cantidad: '3', unidadCodigo: 'unidad', bloqueante: true }],
+      extrasPermitidos: [{ ingredienteItemId: 'ing-extra', cantidad: '1', unidadCodigo: 'unidad', precioExtra: '500' }],
+    }
+
+    const wrapper = await abrirEditarItem()
+
+    // 3 × 100: el extra no entra en el costo, pero sí viaja en la MISMA llamada del caché.
+    expect(textoCosto()).toMatch(/300/)
+    expect(llamadasPorIds).toEqual([['ing-lejano', 'ing-extra']])
 
     wrapper.unmount()
   })

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import type { TableColumn } from '@nuxt/ui'
-import type { PaginatedResponse } from '~/composables/usePaginatedList'
+import type { FiltrosItems } from '~/composables/useItemsPorId'
 
 // Pantalla admin-only: sus escrituras van con `TenantAdminGuard` en el
 // backend. El menú ya la esconde a los no-admin, pero sin guard de ruta la URL
@@ -85,7 +85,10 @@ const tipoLabels: Record<string, string> = {
 }
 
 const grupos = ref<Grupo[]>([])
-const itemsCatalogo = ref<ItemCatalogo[]>([])
+// Los ítems ya no se cargan enteros (antes: 4 pedidos de 100, y una opción cuyo ítem quedaba fuera
+// de esos 100 se veía sin nombre ni unidad y se saltaba la validación por familia). El selector
+// busca en el servidor, el caché guarda lo visto y `abrirEditar` trae por id lo del registro.
+const catalogoItems = useItemsPorId<ItemCatalogo>()
 const loading = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
@@ -140,7 +143,7 @@ function familiaDeTipo(tipo: string): Familia {
 }
 
 function familiaDeItem(itemId: string): Familia | null {
-  const item = itemsCatalogo.value.find(i => i.id === itemId)
+  const item = catalogoItems.porId.get(itemId)
   return item ? familiaDeTipo(item.tipo) : null
 }
 
@@ -154,29 +157,30 @@ function familiaGrupoExcluyendo(idx: number): Familia | null {
   return null
 }
 
-function itemsUsadosExcluyendo(idx: number): Set<string> {
-  return new Set(
-    form.value.opciones
-      .filter((_, i) => i !== idx)
-      .map(o => o.itemId)
-      .filter(Boolean),
-  )
+/** Ids de las filas hermanas de la `idx`: el selector no se los ofrece como resultado. */
+function itemsUsadosExcluyendo(idx: number): string[] {
+  return form.value.opciones
+    .filter((_, i) => i !== idx)
+    .map(o => o.itemId)
+    .filter(Boolean)
 }
 
-/** Items candidatos para la fila `idx`: excluye ya usados y filtra por familia del grupo. */
-function opcionesDisponibles(idx: number) {
-  const familiaReq = familiaGrupoExcluyendo(idx)
-  const usados = itemsUsadosExcluyendo(idx)
-  return itemsCatalogo.value
-    .filter(it => !usados.has(it.id))
-    .filter(it => !familiaReq || familiaDeTipo(it.tipo) === familiaReq)
-    .map(it => ({ label: `${it.nombre} (${tipoLabels[it.tipo] ?? it.tipo})`, value: it.id }))
+/** Tipos que ofrece el selector de la fila `idx`: los de la familia del grupo (o todos, si aún no tiene). */
+function filtrosFila(idx: number): FiltrosItems {
+  const familia = familiaGrupoExcluyendo(idx)
+  if (familia === 'ingrediente') return { tipo: ['ingrediente'] }
+  if (familia === 'vendible') return { tipo: ['producto', 'receta', 'servicio'] }
+  return { tipo: ['ingrediente', 'producto', 'receta', 'servicio'] }
+}
+
+function etiquetaItem(it: ItemCatalogo): string {
+  return `${it.nombre} (${tipoLabels[it.tipo] ?? it.tipo})`
 }
 
 /** Unidades de la misma magnitud que la unidad base del ingrediente seleccionado. */
 function unidadesFiltradas(idx: number) {
   const op = form.value.opciones[idx]
-  const item = itemsCatalogo.value.find(i => i.id === op?.itemId)
+  const item = op ? catalogoItems.porId.get(op.itemId) : undefined
   const magnitud = unidadesMedidaStore.magnitudDe(item?.unidadMedida)
   if (!magnitud) return []
   return unidadesMedidaStore.unidades
@@ -204,7 +208,7 @@ const loteEsIngrediente = computed(() => recetasGrupoActual.value?.familia === '
 /** Unidades de la misma magnitud que la unidad base del item de la opción elegida en el lote. */
 function loteUnidadesFiltradas() {
   const opcion = recetasGrupoActual.value?.opciones.find(o => o.grupoOpcionId === loteOpcionId.value)
-  const item = itemsCatalogo.value.find(i => i.id === opcion?.itemId)
+  const item = opcion ? catalogoItems.porId.get(opcion.itemId) : undefined
   const magnitud = unidadesMedidaStore.magnitudDe(item?.unidadMedida)
   if (!magnitud) return []
   return unidadesMedidaStore.unidades
@@ -233,7 +237,11 @@ async function abrirRecetas(grupo: Grupo) {
   lotePrecio.value = ''
   recetasLoading.value = true
   try {
-    await cargarRecetasUsando()
+    // Las unidades del lote salen de la unidad base del ítem de cada opción: se traen por id.
+    await Promise.all([
+      cargarRecetasUsando(),
+      catalogoItems.resolver(grupo.opciones.map(o => o.itemId)),
+    ])
     recetasDrawerOpen.value = true
   }
   catch (e: unknown) {
@@ -307,29 +315,15 @@ function eliminarOpcion(idx: number) {
   form.value.opciones = form.value.opciones.filter((_, i) => i !== idx)
 }
 
-async function cargarItemsCatalogo() {
-  const tipos = ['ingrediente', 'producto', 'receta', 'servicio']
-  const respuestas = await Promise.all(
-    tipos.map(tipo =>
-      useApiFetch<PaginatedResponse<{ id: string, nombre: string, tipo: string, unidadMedida: string | null }>>(
-        `${apiUrl}/items?tipo=${tipo}&pageSize=100`,
-      ),
-    ),
-  )
-  itemsCatalogo.value = respuestas.flatMap(r =>
-    r.data.map(it => ({ id: it.id, nombre: it.nombre, tipo: it.tipo, unidadMedida: it.unidadMedida })),
-  )
-}
-
 // Cola serial, mismo patrón que `configuracion/descuentos.vue` → `cargar()`:
 // `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
 // sin encadenarlas la respuesta que llega segunda pisa `grupos.value` sin
 // importar cuál toggle la originó. Esta pantalla NO usa `usePaginatedList`,
-// así que no hereda ninguna cola que viva ahí: va local. Encierra las TRES
-// cargas del `Promise.all` (grupos, catálogo de items, unidades de medida) y
-// no solo la de grupos: comparten el mismo `loading`, y encadenar solo la de
-// grupos dejaría `loading` desincronizado si un toggle rápido reordena las
-// respuestas de las otras dos.
+// así que no hereda ninguna cola que viva ahí: va local. Encierra las DOS
+// cargas del `Promise.all` (grupos y unidades de medida) y no solo la de
+// grupos: comparten el mismo `loading`, y encadenar solo la de grupos
+// dejaría `loading` desincronizado si un toggle rápido reordena la
+// respuesta de la otra.
 let cargaEnCurso: Promise<void> | null = null
 
 async function cargar() {
@@ -341,7 +335,6 @@ async function cargar() {
       const query = verEliminados.value ? '?incluirEliminados=true' : ''
       const [gruposData] = await Promise.all([
         useApiFetch<Grupo[]>(`${apiUrl}/grupos-modificadores${query}`),
-        cargarItemsCatalogo(),
         unidadesMedidaStore.ensureLoaded(),
       ])
       grupos.value = gruposData
@@ -378,8 +371,18 @@ function abrirCrear() {
   drawerOpen.value = true
 }
 
-function abrirEditar(grupo: Grupo) {
+async function abrirEditar(grupo: Grupo) {
   if (grupo.eliminadoEl) return
+  // Los ítems de las opciones pueden no estar entre los que el selector vio: se traen por id
+  // ANTES de abrir, o la fila quedaría sin nombre ni unidad y la validación por familia no la
+  // vería. El fallo se traga a propósito: `AppItemSelect` reintenta al montarse y es él quien
+  // avisa por toast, así no sale doble (`validarForm` ya no deja guardar una fila sin resolver).
+  try {
+    await catalogoItems.resolver(grupo.opciones.map(o => o.itemId))
+  }
+  catch {
+    // Se abre igual, ver arriba.
+  }
   resetDrawer()
   editingId.value = grupo.grupoModificadorId
   form.value = {
@@ -410,7 +413,10 @@ function validarForm(): string | null {
       if (cantidad.isNaN() || cantidad.lessThanOrEqualTo(0)) return 'La cantidad debe ser mayor a 0'
     }
     if (!o.precioExtra) return 'Completá el precio extra de cada opción (puede ser 0)'
-    if (familiaDeItem(o.itemId) === 'ingrediente' && !o.unidadCodigo) {
+    const familia = familiaDeItem(o.itemId)
+    // Ítem sin resolver (falló el pedido por id): no se valida a ciegas ni se saltea en silencio.
+    if (!familia) return 'No se pudo cargar un ítem de las opciones: cerrá y volvé a abrir el grupo'
+    if (familia === 'ingrediente' && !o.unidadCodigo) {
       return 'Las opciones ingrediente requieren unidad de medida'
     }
   }
@@ -718,12 +724,14 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
               class="grid grid-cols-5 gap-2 items-end"
             >
               <UFormField label="Item" class="col-span-2">
-                <USelectMenu
+                <AppItemSelect
                   :model-value="op.itemId"
-                  :items="opcionesDisponibles(idx)"
-                  value-key="value"
+                  :catalogo="catalogoItems"
+                  :filtros="filtrosFila(idx)"
+                  :excluir="itemsUsadosExcluyendo(idx)"
+                  :etiqueta="etiquetaItem"
                   class="w-full"
-                  @update:model-value="(v: string) => onSelectItemOpcion(idx, v)"
+                  @update:model-value="(v: string | string[] | null | undefined) => onSelectItemOpcion(idx, (v as string | null) ?? undefined)"
                 />
               </UFormField>
 

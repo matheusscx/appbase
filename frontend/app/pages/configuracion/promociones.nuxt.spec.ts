@@ -88,6 +88,12 @@ const itemsBackend = [
   { id: 'item-1', nombre: 'Item Uno', categoriaNombre: 'Bebidas' },
   { id: 'item-2', nombre: 'Item Dos', categoriaNombre: null },
 ]
+/** Un ítem que la primera búsqueda del selector NO devuelve: solo aparece por `ids=`. */
+const itemLejano = { id: 'item-lejano', nombre: 'Item Lejano', categoriaNombre: 'Postres' }
+/** Cada `GET /items` recibido, para ver qué pidió la pantalla. */
+let urlsItems: string[] = []
+/** Si está, los pedidos con `ids=` esperan a que la prueba lo libere. */
+let liberarIds: Promise<void> | null = null
 
 /** Cada `POST /promociones` recibido, con el body entero — es donde se ve si
  *  la key `scopes` viaja con la forma exacta que el service espera. */
@@ -112,10 +118,19 @@ mockNuxtImport('useApiFetch', () => {
     if (typeof url !== 'string') return Promise.resolve([])
     if (url.includes('/categorias')) return Promise.resolve(categoriasBackend)
     if (url.includes('/items')) {
-      return Promise.resolve({
-        data: itemsBackend,
-        meta: { page: 1, pageSize: 100, total: itemsBackend.length, totalPages: 1 },
-      })
+      urlsItems.push(url)
+      const params = new URL(url, 'http://x').searchParams
+      const ids = params.get('ids')
+      const todos = [...itemsBackend, itemLejano]
+      // Como el backend: `ids=` trae esos; sin `ids`, la primera página de la búsqueda.
+      const data = ids
+        ? todos.filter(i => ids.split(',').includes(i.id))
+        : itemsBackend.filter(i => i.nombre.toLowerCase().includes((params.get('search') ?? '').toLowerCase()))
+      const respuesta = {
+        data,
+        meta: { page: 1, pageSize: Number(params.get('pageSize') ?? 20), total: data.length, totalPages: 1 },
+      }
+      return ids && liberarIds ? liberarIds.then(() => respuesta) : Promise.resolve(respuesta)
     }
     if (url.includes('/promociones')) {
       const method = opts?.method ?? 'GET'
@@ -147,6 +162,8 @@ mockNuxtImport('useApiFetch', () => {
 })
 
 function reset() {
+  urlsItems = []
+  liberarIds = null
   postsPromocion = []
   postPromocionFalla = false
   // `UDrawer` (dentro de `AppDrawer`) teletransporta su contenido al `body` y
@@ -435,6 +452,56 @@ describe('configuracion/promociones — el submit arma el payload correcto', () 
     expect(body.scopes).toEqual([
       { tipoScope: 'items', categoriaId: null, itemIds: ['item-1'], cantidad: undefined },
     ])
+
+    wrapper.unmount()
+  })
+})
+
+/**
+ * Editar una promo cuyo alcance trae un ítem que el selector no vio. Antes los 100 primeros
+ * ítems venían cargados y el elegido siempre estaba; ahora la lista se busca en el servidor y el
+ * formulario tiene que traer por id lo del registro ANTES de abrir, o el elegido se ve sin nombre.
+ */
+describe('configuracion/promociones — editar con ítems fuera de la primera búsqueda', () => {
+  beforeEach(() => {
+    reset()
+    promocionesBackend = [
+      promo({
+        id: 'p-lejano',
+        nombre: 'Con ítem lejano',
+        tipo: 'porcentaje',
+        scopes: [{ id: 's1', slot: 0, tipoScope: 'items', categoriaId: null, cantidad: 1, itemIds: ['item-lejano'] }],
+      }),
+    ]
+  })
+
+  it('el ítem del alcance se muestra con su nombre, traído por ids=', async () => {
+    const wrapper = await montar()
+    // La pantalla no pide ítems al montar: ya no hay catálogo entero en memoria.
+    expect(urlsItems).toEqual([])
+
+    // Con el pedido por `ids=` en vuelo, el drawer NO se abre: abrirlo antes mostraría al
+    // elegido sin nombre hasta que llegue la respuesta.
+    let liberar!: () => void
+    liberarIds = new Promise<void>((r) => { liberar = r })
+
+    const editar = wrapper.findAll('button').find(b => b.attributes('title') === 'Editar')
+    expect(editar, 'botón Editar').toBeTruthy()
+    await editar!.trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+    expect(dialogo(), 'drawer cerrado mientras se resuelven los ítems').toBeNull()
+
+    liberar()
+    await new Promise(r => setTimeout(r, 60))
+    expect(dialogo(), 'drawer abierto con los ítems resueltos').not.toBeNull()
+
+    const pedidos = urlsItems.map(u => new URL(u, 'http://x').searchParams)
+    expect(pedidos.some(p => p.get('ids') === 'item-lejano')).toBe(true)
+
+    const selectItems = wrapper.findAllComponents({ name: 'USelectMenu' })
+      .find(c => c.props('multiple') === true)
+    expect(selectItems, 'selector de ítems').toBeTruthy()
+    expect(selectItems!.props('items')).toEqual([{ value: 'item-lejano', label: 'Item Lejano (Postres)' }])
 
     wrapper.unmount()
   })

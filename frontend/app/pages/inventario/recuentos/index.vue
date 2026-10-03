@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
-import type { PaginatedResponse } from '~/composables/usePaginatedList'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -66,8 +65,10 @@ function onSelectRecuento(_e: Event, row: Row<RecuentoListItem>) {
 
 // ── Nuevo recuento ───────────────────────────────────────────────────────────
 
-const productos = ref<ProductoOpt[]>([])
-const cargandoProductos = ref(false)
+// Los productos ya no se cargan enteros (tope de 100): `AppItemSelect` busca en el servidor.
+// El recuento solo admite productos por cantidad, y ese filtro lo hace el servidor.
+const catalogoItems = useItemsPorId<ProductoOpt>()
+const FILTROS_RECUENTO = { tipo: ['producto', 'ingrediente'], modoInventario: 'cantidad' as const }
 const drawerOpen = ref(false)
 const creando = ref(false)
 
@@ -75,31 +76,6 @@ function emptyForm() {
   return { ubicacionId: '', itemIds: [] as string[], comentario: '' }
 }
 const form = ref(emptyForm())
-
-const productosContablesOpts = computed<Opt[]>(() =>
-  productos.value
-    .filter(p => p.modoInventario === 'cantidad')
-    .map(p => ({ label: p.nombre, value: p.id })),
-)
-
-async function cargarProductos() {
-  cargandoProductos.value = true
-  try {
-    const [prodRes, ingRes] = await Promise.all([
-      useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=producto&pageSize=100`),
-      useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=ingrediente&pageSize=100`),
-    ])
-    productos.value = [...prodRes.data, ...ingRes.data].sort((a, b) =>
-      a.nombre.localeCompare(b.nombre, 'es'),
-    )
-  }
-  catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar productos'), color: 'error' })
-  }
-  finally {
-    cargandoProductos.value = false
-  }
-}
 
 function abrirCrear() {
   form.value = emptyForm()
@@ -109,7 +85,6 @@ function abrirCrear() {
     form.value.ubicacionId = local.value.id
   }
   drawerOpen.value = true
-  if (!productos.value.length) void cargarProductos()
 }
 
 async function crear() {
@@ -277,13 +252,11 @@ const columns: TableColumn<RecuentoListItem>[] = [
                 required
                 help="Solo productos por cantidad — series y lotes no admiten recuento en esta versión."
               >
-                <USelectMenu
+                <AppItemSelect
                   v-model="form.itemIds"
-                  :items="productosContablesOpts"
-                  value-key="value"
+                  :catalogo="catalogoItems"
+                  :filtros="FILTROS_RECUENTO"
                   multiple
-                  searchable
-                  :loading="cargandoProductos"
                   placeholder="Selecciona uno o más productos"
                   class="w-full"
                 />

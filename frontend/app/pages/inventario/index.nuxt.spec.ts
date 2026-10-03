@@ -105,6 +105,9 @@ let ubicacionesBackend: { id: string, nombre: string, tipo: string, activo: bool
 let movimientosBackend: Record<string, unknown>[] = []
 /** Cada `GET /inventario/movimientos` que se pidió, para afirmar el filtro. */
 let movimientosUrls: string[] = []
+/** Cada `GET /items?...` (búsqueda del selector) y `GET /items?ids=` (resolver), por separado. */
+let busquedasItems: string[] = []
+let resolucionesItems: string[] = []
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, string> }) => {
@@ -114,12 +117,16 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve(undefined)
     }
     if (url.includes('/catalog/unidades-medida')) return Promise.resolve(UNIDADES)
-    if (url.includes('/items?tipo=producto')) {
-      const data = [HARINA, AZUCAR, SONDA_USD]
+    if (url.includes('/items?ids=')) {
+      resolucionesItems.push(url)
+      const ids = new URL(url, 'http://x').searchParams.get('ids')!.split(',')
+      const data = [HARINA, AZUCAR, SONDA_USD].filter(p => ids.includes(p.id))
       return Promise.resolve({ data, meta: { page: 1, pageSize: 100, total: data.length, totalPages: 1 } })
     }
-    if (url.includes('/items?tipo=ingrediente')) {
-      return Promise.resolve({ data: [], meta: { page: 1, pageSize: 100, total: 0, totalPages: 0 } })
+    if (url.includes('/items?')) {
+      busquedasItems.push(url)
+      const data = [HARINA, AZUCAR, SONDA_USD]
+      return Promise.resolve({ data, meta: { page: 1, pageSize: 20, total: data.length, totalPages: 1 } })
     }
     if (url.includes('/ubicaciones')) return Promise.resolve(ubicacionesBackend)
     if (url.includes('/inventario/movimientos')) {
@@ -194,8 +201,22 @@ function selectConOpcion(wrapper: Wrapper, valor: string, sinValor?: string) {
   return select!
 }
 
-/** El select de producto del formulario: el de filtro trae además "todos". */
-const selectProducto = (w: Wrapper) => selectConOpcion(w, HARINA.id, 'todos')
+/** Los dos `AppItemSelect` de la pantalla: el de filtro (con `clear`) y el del formulario. Un
+ * `USelectMenu` de `AppItemSelect` no trae opciones hasta abrirse, así que se identifican por la prop. */
+function selectorProducto(w: Wrapper, deFiltro: boolean) {
+  const sel = w.findAllComponents({ name: 'AppItemSelect' }).find(c => c.props('clear') === deFiltro)
+  expect(sel, deFiltro ? 'selector de filtro' : 'selector del formulario').toBeTruthy()
+  return sel!.findComponent({ name: 'USelectMenu' })
+}
+
+/** Elige un producto del formulario como el usuario: abre el menú (la búsqueda llena el caché) y emite. */
+async function elegirProducto(w: Wrapper, id: string) {
+  const menu = selectorProducto(w, false)
+  menu.vm.$emit('update:open', true)
+  await new Promise(r => setTimeout(r, 20))
+  menu.vm.$emit('update:modelValue', id)
+  await new Promise(r => setTimeout(r, 20))
+}
 const selectUnidad = (w: Wrapper) => selectConOpcion(w, 'kg')
 const campoCosto = (w: Wrapper) => w.findComponent({ name: 'MoneyInput' })
 
@@ -246,6 +267,8 @@ function vigente(wrapper: Wrapper) {
 describe('inventario — el drawer de ajuste de costo y la unidad', () => {
   beforeEach(() => {
     ajustesEnviados = []
+    busquedasItems = []
+    resolucionesItems = []
     // `AppDrawer` teletransporta al `body` y desmontar el wrapper no lo saca:
     // sin esto, los drawers de tests anteriores quedan en el DOM.
     document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
@@ -254,7 +277,7 @@ describe('inventario — el drawer de ajuste de costo y la unidad', () => {
   it('cambiar de unidad limpia el costo ya tipeado, en vez de reinterpretarlo', async () => {
     const wrapper = await montar()
     await abrirDrawer(wrapper)
-    await emitir(selectProducto(wrapper), HARINA.id)
+    await elegirProducto(wrapper, HARINA.id)
 
     await emitir(campoCosto(wrapper), '1500')
     expect(campoCosto(wrapper).props('modelValue')).toBe('1500')
@@ -270,7 +293,7 @@ describe('inventario — el drawer de ajuste de costo y la unidad', () => {
   it('el costo vigente se muestra en la unidad elegida, no siempre en la base', async () => {
     const wrapper = await montar()
     await abrirDrawer(wrapper)
-    await emitir(selectProducto(wrapper), HARINA.id)
+    await elegirProducto(wrapper, HARINA.id)
 
     expect(vigente(wrapper)).toEqual({ label: 'Costo vigente (por kg)', valor: '$1.500' })
 
@@ -288,7 +311,7 @@ describe('inventario — el drawer de ajuste de costo y la unidad', () => {
   it('tras limpiar, lo retipeado viaja con la unidad elegida', async () => {
     const wrapper = await montar()
     await abrirDrawer(wrapper)
-    await emitir(selectProducto(wrapper), HARINA.id)
+    await elegirProducto(wrapper, HARINA.id)
     await emitir(campoCosto(wrapper), '1500')
     await emitir(selectUnidad(wrapper), 'g')
 
@@ -309,6 +332,8 @@ describe('inventario — el drawer de ajuste de costo y la unidad', () => {
 describe('inventario — el drawer de ajuste de costo y el producto', () => {
   beforeEach(() => {
     ajustesEnviados = []
+    busquedasItems = []
+    resolucionesItems = []
     document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
   })
 
@@ -318,11 +343,11 @@ describe('inventario — el drawer de ajuste de costo y el producto', () => {
   it('cambiar de producto limpia el costo tipeado, aunque la unidad base sea la misma', async () => {
     const wrapper = await montar()
     await abrirDrawer(wrapper)
-    await emitir(selectProducto(wrapper), HARINA.id)
+    await elegirProducto(wrapper, HARINA.id)
     await emitir(campoCosto(wrapper), '1500')
     expect(campoCosto(wrapper).props('modelValue')).toBe('1500')
 
-    await emitir(selectProducto(wrapper), AZUCAR.id)
+    await elegirProducto(wrapper, AZUCAR.id)
 
     // Si sobreviviera, sería el costo de la harina aplicado al azúcar: un
     // número que nadie tecleó para ese producto.
@@ -343,13 +368,13 @@ describe('inventario — el drawer de ajuste de costo y el producto', () => {
   it('cambiar a un producto en otra moneda no deja el número reinterpretado en pantalla', async () => {
     const wrapper = await montar()
     await abrirDrawer(wrapper)
-    await emitir(selectProducto(wrapper), HARINA.id)
+    await elegirProducto(wrapper, HARINA.id)
     await emitir(campoCosto(wrapper), '1500')
     // Sin símbolo: maska re-enmascara lo que el watch escribió y se queda con
     // el número. Es el mismo `1.500` que se midió en pantalla el 2026-08-28.
     expect(textoCosto(wrapper)).toBe('1.500')
 
-    await emitir(selectProducto(wrapper), SONDA_USD.id)
+    await elegirProducto(wrapper, SONDA_USD.id)
 
     expect(campoCosto(wrapper).props('modelValue')).toBe('')
     expect(textoCosto(wrapper)).toBe('')
@@ -366,10 +391,10 @@ describe('inventario — el drawer de ajuste de costo y el producto', () => {
   it('tras limpiar, lo retipeado viaja con el producto nuevo', async () => {
     const wrapper = await montar()
     await abrirDrawer(wrapper)
-    await emitir(selectProducto(wrapper), HARINA.id)
+    await elegirProducto(wrapper, HARINA.id)
     await emitir(campoCosto(wrapper), '1500')
 
-    await emitir(selectProducto(wrapper), SONDA_USD.id)
+    await elegirProducto(wrapper, SONDA_USD.id)
     await emitir(campoCosto(wrapper), '8.25')
     await emitir(campoComentario(wrapper), 'Precio nuevo del proveedor')
     await enviar(wrapper)
@@ -379,6 +404,68 @@ describe('inventario — el drawer de ajuste de costo y el producto', () => {
       costoNuevo: '8.25',
       comentario: 'Precio nuevo del proveedor',
     }])
+    wrapper.unmount()
+  })
+
+  // El caché guarda el `costoActual` que vio al buscar: tras un ajuste exitoso hay que traer de
+  // nuevo al ajustado, o la próxima vez el formulario mostraría el costo vigente de antes.
+  it('tras un ajuste exitoso, vuelve a pedir por id al producto ajustado', async () => {
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegirProducto(wrapper, HARINA.id)
+    await emitir(campoCosto(wrapper), '1600')
+    await emitir(campoComentario(wrapper), 'Nuevo costo')
+    resolucionesItems = []
+    await enviar(wrapper)
+
+    expect(ajustesEnviados).toHaveLength(1)
+    expect(resolucionesItems.some(u => u.includes(`ids=${HARINA.id}`))).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('los selectores de producto piden ambos tipos al servidor, sin filtrar por activo', async () => {
+    const wrapper = await montar()
+    selectorProducto(wrapper, true).vm.$emit('update:open', true)
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(busquedasItems).toHaveLength(1)
+    const params = new URL(busquedasItems[0]!, 'http://x').searchParams
+    expect(params.get('tipo')).toBe('producto,ingrediente')
+    expect(params.has('activo')).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+// Los selectores de filtro del kardex: vacío = todos (con `clear`), no una opción "Todos" con un
+// valor inventado. El listado no manda `itemId` cuando está vacío.
+describe('inventario — el filtro de producto del kardex', () => {
+  beforeEach(() => {
+    movimientosUrls = []
+    busquedasItems = []
+    resolucionesItems = []
+    movimientosBackend = []
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  it('vacío no manda itemId; elegir uno lo manda; limpiar vuelve a no mandarlo', async () => {
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 50))
+    expect(movimientosUrls.length).toBeGreaterThan(0)
+    expect(movimientosUrls.every(u => !u.includes('itemId'))).toBe(true)
+
+    const filtro = selectorProducto(wrapper, true)
+    filtro.vm.$emit('update:open', true)
+    await new Promise(r => setTimeout(r, 20))
+    movimientosUrls = []
+    filtro.vm.$emit('update:modelValue', HARINA.id)
+    await new Promise(r => setTimeout(r, 60))
+    expect(movimientosUrls.some(u => u.includes(`itemId=${HARINA.id}`))).toBe(true)
+
+    movimientosUrls = []
+    filtro.vm.$emit('update:modelValue', null)
+    await new Promise(r => setTimeout(r, 60))
+    expect(movimientosUrls.length).toBeGreaterThan(0)
+    expect(movimientosUrls.every(u => !u.includes('itemId'))).toBe(true)
     wrapper.unmount()
   })
 })
@@ -392,6 +479,9 @@ describe('inventario — el kardex muestra dónde', () => {
 
   beforeEach(() => {
     ajustesEnviados = []
+    movimientosUrls = []
+    busquedasItems = []
+    resolucionesItems = []
     movimientosBackend = [
       {
         id: 'mov-1',

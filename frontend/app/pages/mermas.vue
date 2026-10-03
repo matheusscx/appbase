@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import type { PaginatedResponse } from '~/composables/usePaginatedList'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -52,15 +51,19 @@ const { ubicaciones, local, hayBodegas, cargar: cargarUbicaciones } = useUbicaci
 // Inventario/Crear (ver docs/patterns/frontend.md §1.1).
 const { puedeCrear: puedeRegistrar } = usePermisosCrud('Inventario')
 
-const productos = ref<ProductoOpt[]>([])
+// Los productos ya no se cargan enteros (tope de 100): `AppItemSelect` busca en el servidor y el
+// caché guarda lo visto; el producto de la merma se lee de acá.
+const catalogoItems = useItemsPorId<ProductoOpt>()
+const FILTROS_PRODUCTO = { tipo: ['producto', 'ingrediente'] }
 const motivos = ref<MotivoOpt[]>([])
-const filtroItem = ref('todos')
+// Vacío = todos los productos (con `clear`); no hay opción "Todos" con valor inventado.
+const filtroItem = ref<string | null>(null)
 const filtroMotivo = ref('todos')
 const filtroDesde = ref('')
 const filtroHasta = ref('')
 
 const listFilters = computed(() => ({
-  itemId: filtroItem.value !== 'todos' ? filtroItem.value : undefined,
+  itemId: filtroItem.value || undefined,
   motivoBajaId: filtroMotivo.value !== 'todos' ? filtroMotivo.value : undefined,
   desde: filtroDesde.value || undefined,
   hasta: filtroHasta.value || undefined,
@@ -72,11 +75,6 @@ const { items: mermas, meta, page, loading, fetch: fetchMermas } =
     pageSize,
     filters: listFilters,
   })
-
-const productosOpts = computed<Opt[]>(() => [
-  { label: 'Todos los productos', value: 'todos' },
-  ...productos.value.map(p => ({ label: p.nombre, value: p.id })),
-])
 
 const motivosFiltroOpts = computed<Opt[]>(() => [
   { label: 'Todos los motivos', value: 'todos' },
@@ -103,7 +101,7 @@ function emptyForm() {
 const form = ref(emptyForm())
 
 const productoSeleccionado = computed(() =>
-  productos.value.find(p => p.id === form.value.itemId) ?? null,
+  catalogoItems.porId.get(form.value.itemId) ?? null,
 )
 
 const sinCostoActual = computed(() =>
@@ -124,7 +122,7 @@ const mostrarSelectorUnidad = computed(() =>
 )
 
 watch(() => form.value.itemId, (itemId) => {
-  const prod = productos.value.find(p => p.id === itemId)
+  const prod = catalogoItems.porId.get(itemId)
   if (!prod) return
   form.value.unidadCodigo = prod.unidadMedida ?? 'unidad'
 })
@@ -142,15 +140,10 @@ watch(() => form.value.ubicacionId, (_nueva, anterior) => {
 async function cargarCatalogos() {
   try {
     await unidadesMedidaStore.ensureLoaded()
-    const [prodRes, ingRes, motivosRes] = await Promise.all([
-      useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=producto&pageSize=100`),
-      useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=ingrediente&pageSize=100`),
+    const [motivosRes] = await Promise.all([
       useApiFetch<MotivoOpt[]>(`${apiUrl}/motivos-baja?soloActivas=true&tipo=merma`),
       cargarUbicaciones(),
     ])
-    productos.value = [...prodRes.data, ...ingRes.data].sort((a, b) =>
-      a.nombre.localeCompare(b.nombre, 'es'),
-    )
     motivos.value = motivosRes
   }
   catch (e: unknown) {
@@ -272,12 +265,13 @@ const columns: TableColumn<MermaListItem>[] = [
     </CrudPageHeader>
 
     <div class="flex flex-wrap gap-2">
-      <USelectMenu
+      <AppItemSelect
         v-model="filtroItem"
-        :items="productosOpts"
-        value-key="value"
+        :catalogo="catalogoItems"
+        :filtros="FILTROS_PRODUCTO"
+        clear
         class="w-64"
-        placeholder="Producto"
+        placeholder="Todos los productos"
       />
       <USelectMenu
         v-model="filtroMotivo"
@@ -403,10 +397,10 @@ const columns: TableColumn<MermaListItem>[] = [
             label="Producto"
             required
           >
-            <USelectMenu
+            <AppItemSelect
               v-model="form.itemId"
-              :items="productos.map(p => ({ label: p.nombre, value: p.id }))"
-              value-key="value"
+              :catalogo="catalogoItems"
+              :filtros="FILTROS_PRODUCTO"
               placeholder="Selecciona un producto"
               class="w-full"
             />

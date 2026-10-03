@@ -49,3 +49,6 @@ export function useItemsPorId<T extends { id: string, nombre: string }>() {
 
   return { porId, buscar, resolver, registrar }
 }
+
+/** Lo que recibe `AppItemSelect` en su prop `catalogo`. */
+export type ItemsPorId<T extends { id: string, nombre: string }> = ReturnType<typeof useItemsPorId<T>>

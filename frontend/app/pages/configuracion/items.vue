@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import type { Row } from '@tanstack/vue-table'
-import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type {
   AplicarDesfaseItem,
   DesfaseItemDto,
@@ -346,33 +345,16 @@ function conPausadasAsociadas(
 // aparta del selector para que no pueda entrar ahí ni por accidente.
 const ivaDelPais = ref<ImpuestoApi | null>(null)
 
-	const productosIngrediente = ref<{
-	  id: string
-	  nombre: string
-	  unidadMedida: string
-	  costoActual: string | null
-	}[]>([])
-	const productosIngredienteOpts = computed(() =>
-	  productosIngrediente.value.map(p => ({ label: p.nombre, value: p.id })),
-	)
-
-	const itemsVendibles = ref<{ id: string; nombre: string; tipo: string; costoActual: string | null }[]>([])
-	const itemsVendiblesOpts = computed(() =>
-	  itemsVendibles.value.map(i => ({ label: `${i.nombre} (${i.tipo})`, value: i.id })),
-	)
-	async function cargarItemsVendibles() {
-	  try {
-	    const [p, r, s] = await Promise.all([
-	      useApiFetch<PaginatedResponse<Item>>(`${apiUrl}/items?tipo=producto&pageSize=100`),
-	      useApiFetch<PaginatedResponse<Item>>(`${apiUrl}/items?tipo=receta&pageSize=100`),
-	      useApiFetch<PaginatedResponse<Item>>(`${apiUrl}/items?tipo=servicio&pageSize=100`),
-	    ])
-	    itemsVendibles.value = [...p.data, ...r.data, ...s.data]
-	      .map(i => ({ id: i.id, nombre: i.nombre, tipo: i.tipo, costoActual: i.costoActual ?? null }))
-	  } catch {
-	    toast.add({ title: 'Error al cargar items para combos', color: 'error' })
-	  }
-	}
+	// Los selectores de ingredientes y de componentes buscan en el servidor (spec
+	// docs/superpowers/specs/2026-10-03-catalogo-paginado-design.md § 5): ya no hay un catálogo
+	// entero en memoria. Estos cachés guardan lo que la pantalla vio —buscado, resuelto por
+	// `ids=` al editar o recién guardado— y de ahí leen las cuentas de costo y de unidad.
+	const catalogoVendibles = useItemsPorId<Item>()
+	const catalogoIngredientes = useItemsPorId<Item>()
+	const TIPOS_VENDIBLES = ['producto', 'receta', 'servicio']
+	const FILTROS_VENDIBLES = { tipo: TIPOS_VENDIBLES }
+	const FILTROS_INGREDIENTES = { tipo: ['ingrediente'] }
+	const etiquetaVendible = (i: Item) => `${i.nombre} (${i.tipo})`
 
 	const gruposCatalogo = ref<{ grupoModificadorId: string; nombre: string; familia: string; opciones: { grupoOpcionId: string; itemNombre: string; cantidad: string | null; unidadCodigo: string | null; precioExtra: string }[] }[]>([])
 	const gruposCatalogoOpts = computed(() =>
@@ -432,45 +414,14 @@ const ivaDelPais = ref<ImpuestoApi | null>(null)
 	  }
 	}
 
-	function syncProductoIngrediente(item: Item) {
-	  if (item.tipo !== 'ingrediente') return
-	  const entry = {
-	    id: item.id,
-	    nombre: item.nombre,
-	    unidadMedida: item.unidadMedida ?? 'unidad',
-	    costoActual: item.costoActual ?? null,
-	  }
-	  const idx = productosIngrediente.value.findIndex(p => p.id === item.id)
-	  if (idx >= 0) {
-	    productosIngrediente.value[idx] = entry
-	  }
-	  else {
-	    productosIngrediente.value = [...productosIngrediente.value, entry]
-	      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
-	  }
-	}
-
-	function syncItemVendible(item: Item) {
-	  if (!['producto', 'receta', 'servicio'].includes(item.tipo)) return
-	  const entry = { id: item.id, nombre: item.nombre, tipo: item.tipo, costoActual: item.costoActual ?? null }
-	  const idx = itemsVendibles.value.findIndex(i => i.id === item.id)
-	  if (idx >= 0) {
-	    itemsVendibles.value[idx] = entry
-	  }
-	  else {
-	    itemsVendibles.value = [...itemsVendibles.value, entry]
-	      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
-	  }
-	}
-
 	function removeItemLocal(id: string) {
 	  const idx = items.value.findIndex(i => i.id === id)
 	  if (idx >= 0) {
 	    items.value = items.value.filter(i => i.id !== id)
 	    meta.value = { ...meta.value, total: Math.max(0, meta.value.total - 1) }
 	  }
-	  productosIngrediente.value = productosIngrediente.value.filter(p => p.id !== id)
-	  itemsVendibles.value = itemsVendibles.value.filter(i => i.id !== id)
+	  catalogoIngredientes.porId.delete(id)
+	  catalogoVendibles.porId.delete(id)
 	}
 
 const tiposOpts: Opt[] = [
@@ -908,7 +859,7 @@ const costoRecetaCalculado = computed((): string | null => {
   let algunaCompleta = false
   for (const ing of ings) {
     if (!ing.ingredienteItemId || !ing.cantidad || !ing.unidadCodigo) continue
-    const prod = productosIngrediente.value.find(p => p.id === ing.ingredienteItemId)
+    const prod = catalogoIngredientes.porId.get(ing.ingredienteItemId)
     if (!prod) continue
     let cantidad: Decimal
     try {
@@ -920,7 +871,7 @@ const costoRecetaCalculado = computed((): string | null => {
     const cantidadBase = convertirCantidad(
       ing.cantidad,
       ing.unidadCodigo,
-      prod.unidadMedida,
+      prod.unidadMedida ?? 'unidad',
     )
     if (!cantidadBase) continue
     total = total.plus(new Decimal(prod.costoActual ?? '0').mul(cantidadBase))
@@ -936,7 +887,7 @@ const costoComboPreview = computed((): string | null => {
   let total = new Decimal(0)
   for (const c of form.value.componentes) {
     if (!c.componenteItemId || !c.cantidad) continue
-    const it = itemsVendibles.value.find(i => i.id === c.componenteItemId)
+    const it = catalogoVendibles.porId.get(c.componenteItemId)
     total = total.plus(new Decimal(it?.costoActual ?? '0').mul(c.cantidad))
   }
   return total.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toString()
@@ -1237,13 +1188,12 @@ async function cargarCatalogos() {
       monedasStore.ensureLoaded(),
       unidadesMedidaStore.ensureLoaded(),
     ])
-    const [categorias, impuestos, descuentos, recargos, productos] =
+    const [categorias, impuestos, descuentos, recargos] =
       await Promise.all([
         useApiFetch<any[]>(`${apiUrl}/categorias`),
         useApiFetch<ImpuestoApi[]>(`${apiUrl}/impuestos`),
         useApiFetch<any[]>(`${apiUrl}/descuentos`),
         useApiFetch<any[]>(`${apiUrl}/recargos`),
-        useApiFetch<PaginatedResponse<Item>>(`${apiUrl}/items?tipo=ingrediente&pageSize=100`),
       ])
 
     monedasOpts.value = monedasStore.monedasHabilitadas
@@ -1328,14 +1278,6 @@ async function cargarCatalogos() {
     recargosPausadosOpts.value = recargosDeLinea
       .filter((r) => !r.activo)
       .map((r) => ({ label: `${r.nombre} (en pausa)`, value: r.id }))
-
-    productosIngrediente.value = productos.data
-      .map(p => ({
-        id: p.id,
-        nombre: p.nombre,
-        unidadMedida: p.unidadMedida ?? 'unidad',
-        costoActual: p.costoActual ?? null,
-      }))
   } catch {
     toast.add({ title: 'Error al cargar catálogos', color: 'error' })
   }
@@ -1352,7 +1294,6 @@ let catalogosListos: Promise<void> | null = null
 
 onMounted(() => {
   catalogosListos = cargarCatalogos()
-  cargarItemsVendibles()
   cargarGruposCatalogo()
   void cargarUbicaciones()
 })
@@ -1373,6 +1314,18 @@ async function abrirEditar(item: Item) {
     // filtro puede correr antes de que llegue y volverse un no-op. Ver el
     // comentario junto a `catalogosListos`.
     await catalogosListos
+    // Los selectores de ingredientes, extras y componentes buscan en el servidor: un elegido
+    // que no estuvo en ninguna búsqueda no tiene nombre ni costo en el caché, y la cuenta del
+    // costo lo sumaba como cero en silencio. Se trae TODO lo que el ítem ya usa, una llamada
+    // por caché, antes de abrir. El fallo se traga a propósito: `AppItemSelect` reintenta al
+    // montarse y es él quien avisa por toast, así no sale doble.
+    await Promise.allSettled([
+      catalogoIngredientes.resolver([
+        ...(detalle.ingredientes ?? []).map(i => i.ingredienteItemId),
+        ...(detalle.extrasPermitidos ?? []).map(e => e.ingredienteItemId),
+      ]),
+      catalogoVendibles.resolver((detalle.componentes ?? []).map(c => c.componenteItemId)),
+    ])
     editingId.value = item.id
     form.value = {
       nombre: detalle.nombre,
@@ -1582,8 +1535,8 @@ async function guardar() {
         })
 
     upsertItemEnLista(saved, isNew)
-    syncProductoIngrediente(saved)
-    syncItemVendible(saved)
+    if (saved.tipo === 'ingrediente') catalogoIngredientes.registrar(saved)
+    if (TIPOS_VENDIBLES.includes(saved.tipo)) catalogoVendibles.registrar(saved)
     toast.add({
       title: isNew ? 'Item creado' : 'Item actualizado',
       color: 'success',
@@ -2476,10 +2429,10 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 class="grid grid-cols-5 gap-2 items-end"
               >
                 <UFormField label="Ingrediente" class="col-span-2">
-                  <USelectMenu
+                  <AppItemSelect
                     v-model="form.ingredientes[idx]!.ingredienteItemId"
-                    :items="productosIngredienteOpts"
-                    value-key="value"
+                    :catalogo="catalogoIngredientes"
+                    :filtros="FILTROS_INGREDIENTES"
                     class="w-full"
                   />
                 </UFormField>
@@ -2491,7 +2444,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     v-model="form.ingredientes[idx]!.unidadCodigo"
                     :items="unidadesMedidaStore.unidades
                       .filter(u => u.magnitud === unidadesMedidaStore.magnitudDe(
-                        productosIngrediente.find(p => p.id === form.ingredientes[idx]!.ingredienteItemId)?.unidadMedida,
+                        catalogoIngredientes.porId.get(form.ingredientes[idx]!.ingredienteItemId)?.unidadMedida,
                       ))
                       .map(u => ({ label: u.codigo, value: u.codigo }))"
                     value-key="value"
@@ -2535,10 +2488,10 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 class="grid grid-cols-5 gap-2 items-end"
               >
                 <UFormField label="Ingrediente" class="col-span-2">
-                  <USelectMenu
+                  <AppItemSelect
                     v-model="form.extrasPermitidos[idx]!.ingredienteItemId"
-                    :items="productosIngredienteOpts"
-                    value-key="value"
+                    :catalogo="catalogoIngredientes"
+                    :filtros="FILTROS_INGREDIENTES"
                     class="w-full"
                   />
                 </UFormField>
@@ -2550,7 +2503,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     v-model="form.extrasPermitidos[idx]!.unidadCodigo"
                     :items="unidadesMedidaStore.unidades
                       .filter(u => u.magnitud === unidadesMedidaStore.magnitudDe(
-                        productosIngrediente.find(p => p.id === form.extrasPermitidos[idx]!.ingredienteItemId)?.unidadMedida,
+                        catalogoIngredientes.porId.get(form.extrasPermitidos[idx]!.ingredienteItemId)?.unidadMedida,
                       ))
                       .map(u => ({ label: u.codigo, value: u.codigo }))"
                     value-key="value"
@@ -2597,10 +2550,11 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 class="grid grid-cols-4 gap-2 items-end"
               >
                 <UFormField label="Item" class="col-span-2">
-                  <USelectMenu
+                  <AppItemSelect
                     v-model="form.componentes[idx]!.componenteItemId"
-                    :items="itemsVendiblesOpts"
-                    value-key="value"
+                    :catalogo="catalogoVendibles"
+                    :filtros="FILTROS_VENDIBLES"
+                    :etiqueta="etiquetaVendible"
                     class="w-full"
                   />
                 </UFormField>

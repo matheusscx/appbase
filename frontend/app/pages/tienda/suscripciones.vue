@@ -4,8 +4,6 @@ import type { Suscripcion } from '~/composables/useSuscripciones'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
-const config = useRuntimeConfig()
-const apiUrl = config.public.apiUrl
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
@@ -130,8 +128,10 @@ interface ItemSuscribible {
 }
 
 const drawerOpen = ref(false)
-const itemsSuscribibles = ref<ItemSuscribible[]>([])
-const cargandoItems = ref(false)
+// Los suscribibles ya no se cargan enteros (tope de 100): `AppItemSelect` busca en el servidor y
+// deja lo visto en este caché, de donde lee `itemSeleccionado`.
+const catalogoItems = useItemsPorId<ItemSuscribible>()
+const FILTROS_SUSCRIBIBLE = { tipo: ['suscripcion'], activo: true }
 const confirmando = ref(false)
 const selectedInscripcionId = ref('')
 
@@ -141,9 +141,13 @@ const form = ref({
   diaSemana: 1,
 })
 
-const itemSeleccionado = computed(
-  () => itemsSuscribibles.value.find((i) => i.id === form.value.itemId) ?? null,
-)
+// `frecuencia` no es un estado sino la condición de suscribible: un ítem sin ella no se puede
+// confirmar (los días y el cobro dependen de ella). `item_suscripcion.frecuencia` es NOT NULL y
+// el alta del ítem la exige, así que hoy no debería ocurrir; el filtro es la red.
+const itemSeleccionado = computed(() => {
+  const item = catalogoItems.porId.get(form.value.itemId)
+  return item?.frecuencia ? item : null
+})
 
 /**
  * El drawer rotulaba "Precio del período" con `item.precioBase`, que es el
@@ -171,12 +175,10 @@ const totalACobrar = computed(() =>
   calculoVigente.value ? (calculo.value?.totales.totalFinal ?? null) : null,
 )
 
-const itemsSuscribiblesOpts = computed(() =>
-  itemsSuscribibles.value.map((i) => ({
-    label: `${i.nombre} — ${formatMonto(i.precioBase, i.monedaId)} / ${frecuenciaLabel[i.frecuencia]}`,
-    value: i.id,
-  })),
-)
+function etiquetaSuscribible(i: ItemSuscribible): string {
+  const base = `${i.nombre} — ${formatMonto(i.precioBase, i.monedaId)}`
+  return i.frecuencia ? `${base} / ${frecuenciaLabel[i.frecuencia]}` : base
+}
 
 // Opciones de día según la frecuencia del item elegido
 const diasMesOpts = computed(() => {
@@ -212,27 +214,10 @@ function diasDePayload(item: ItemSuscribible): {
     : { diaMes: form.value.diaMes, diaSemana: null }
 }
 
-async function abrirCrear() {
+function abrirCrear() {
   form.value = { itemId: '', diaMes: 1, diaSemana: 1 }
   selectedInscripcionId.value = tarjetaPreferida.value?.inscripcionId ?? ''
   drawerOpen.value = true
-  if (!itemsSuscribibles.value.length) {
-    cargandoItems.value = true
-    try {
-      const res = await useApiFetch<{ data: ItemSuscribible[] }>(
-        `${apiUrl}/items?tipo=suscripcion&activo=true&pageSize=100`,
-      )
-      // Los pausados no vienen: `activo=true` va en la query, igual que en las
-      // otras tres superficies de venta (el backend además lo rechaza en
-      // `suscripciones.service.ts`). Lo que sigue filtrándose acá es
-      // `frecuencia`, que no es un estado sino la condición de suscribible.
-      itemsSuscribibles.value = res.data.filter((i) => i.frecuencia)
-    } catch (e: unknown) {
-      toast.add({ title: apiErrorMsg(e, 'Error al cargar items suscribibles'), color: 'error' })
-    } finally {
-      cargandoItems.value = false
-    }
-  }
 }
 
 // "Agregar nueva tarjeta" desde el drawer: guarda la intención de alta y sale a
@@ -484,11 +469,11 @@ onMounted(async () => {
 
             <UForm id="suscripcion-form" :state="form" class="space-y-4" @submit="confirmar">
               <UFormField label="Producto o servicio" required>
-                <USelectMenu
+                <AppItemSelect
                   v-model="form.itemId"
-                  :items="itemsSuscribiblesOpts"
-                  value-key="value"
-                  :loading="cargandoItems"
+                  :catalogo="catalogoItems"
+                  :filtros="FILTROS_SUSCRIBIBLE"
+                  :etiqueta="etiquetaSuscribible"
                   :disabled="!oneclickDisponible"
                   placeholder="Elegí una suscripción del catálogo"
                   class="w-full"

@@ -1,6 +1,6 @@
 # Feature: Catálogo paginado en el servidor
 
-**Status**: Fase A completa (grilla de venta: POS, salón, tienda). Fase B (selectores) pendiente.
+**Status**: Completo. Fase A (grilla de venta: POS, salón, tienda) y fase B (selectores de configuración e inventario).
 **Owner**: —
 **Last Updated**: 2026-10-03
 
@@ -30,9 +30,9 @@ tres listados completos en cada toque sobre la cuenta abierta.
 - Incluido (fase A): `GET /items` con `tipo` como lista, `ids`, `modoInventario` y
   `orden=disponibilidad`; índice por tenant; `useCatalogoVenta` y `CatalogoGrid` paginado;
   refresco del salón en un solo pedido.
-- Pendiente (fase B): los selectores de configuración e inventario (componentes de combo,
-  promociones, grupos de modificadores, mermas, traslados, recuentos, suscripciones) siguen
-  leyendo una lista de 100. Pasan a buscar en el servidor.
+- Incluido (fase B): los selectores de configuración e inventario (componentes de combo,
+  promociones, grupos de modificadores, mermas, traslados, recuentos, suscripciones) buscan en el
+  servidor con `AppItemSelect` y `useItemsPorId`.
 - Fuera: `GET /compras/productos`, que no pagina (el problema contrario).
 
 ---
@@ -137,12 +137,49 @@ antes pasaba al final de la lista.
 
 ---
 
-## Selectores de configuración e inventario (fase B — pendiente)
+## Selectores de ítems (fase B)
 
-Siguen cargando una lista de 100 como opciones y como mapa `id → ítem`. Cuando se haga, esta
-sección se completa con la forma real; el problema que resuelven (costos de combo y receta que se
-calculan de menos, ids sin nombre en promociones, el link de traslados que cae a modo `cantidad`)
-está en la spec § 1 y § 5.
+Un selector de ítems ya no recibe una lista de 100 como opciones: **busca en el servidor** y el
+ítem 101 se elige igual que el 1. Son dos piezas.
+
+- **`useItemsPorId<T>()`** (`app/composables/useItemsPorId.ts`): el caché `id → ítem` de **una
+  pantalla**. `porId` es el mapa; `buscar(termino, filtros)` pide 20 (`pageSize=20`) y los
+  registra; `resolver(ids)` trae por `ids=` solo los que faltan, en tandas de 100
+  (`pageSize=100`, que es el tope del servidor: una tanda cabe en una página); `registrar(item)`
+  mete uno a mano.
+- **`AppItemSelect`** (`app/components/AppItemSelect.vue`): recibe el caché de la pantalla en
+  `catalogo`, más `filtros`, `multiple`, `excluir`, `etiqueta` y `clear` (en los filtros, "vacío =
+  todos"). Espera 300 ms después de la última tecla, descarta la respuesta que llega tarde (turnos)
+  y, si cambian los `filtros`, invalida la búsqueda en vuelo.
+
+**Por qué las opciones son la unión de los elegidos y los resultados.** El `USelectMenu` pinta el
+nombre de un valor buscándolo entre sus opciones; si lo elegido no está en la página de
+resultados, se ve vacío. Por eso los elegidos salen de `catalogo.porId` y se suman a lo que
+devolvió la búsqueda; `excluir` saca ids de los resultados (las filas hermanas, el propio ítem)
+pero nunca a un elegido.
+
+**Por qué el caché es de la pantalla y no solo del componente.** Las cuentas de la pantalla
+—el costo de un combo o de una receta, la familia de unidad de un grupo, el alcance de una promoción— leen
+de `porId`, no de una lista. Antes leían de los primeros 100 y, si el componente no estaba ahí, el
+costo salía **de menos y en silencio**. Ahora `porId` tiene lo que el servidor devolvió.
+
+**Al editar: resolver antes de abrir.** El patrón es
+`await catalogo.resolver(<ids que tiene el registro>)` antes de abrir el formulario, con el fallo
+tragado: si la tanda falla, el formulario abre igual, el componente reintenta
+al montar y avisa con un toast. Así la cuenta de la pantalla ya tiene los nombres y los costos en el
+primer pintado.
+
+**Pantallas:** `configuracion/promociones`, `configuracion/items` (componentes de combo,
+ingredientes y extras), `configuracion/grupos-modificadores`, `inventario/index`,
+`inventario/traslados`, `inventario/recuentos/index` (pide `modoInventario=cantidad` al servidor, no
+filtra después), `mermas` y `tienda/suscripciones`.
+
+**Bugs que cerró:** costo de combo o receta calculado de menos; validación por familia de unidad
+salteada en grupos de modificadores; el link de traslados (`?itemId=`) que caía a modo `cantidad`
+con un producto en serie; nombres que faltaban en el alcance de una promoción.
+
+Verificación: `grep -rn "pageSize=100\|pageSize: 100" frontend/app --include='*.vue'
+--include='*.ts' | grep -v spec.ts` da 0 líneas.
 
 ---
 
@@ -152,8 +189,8 @@ está en la spec § 1 y § 5.
   desempate), `query-items.dto.spec.ts`, `items.service.spec.ts`.
 - Backend e2e: `npm run test:e2e -- catalogo-paginado` (105 productos: recorre las páginas sin
   repetir ni saltear; el 101 se encuentra por búsqueda y se vende).
-- Frontend: `useCatalogoVenta.nuxt.spec.ts` (turnos, el fallo no borra, página fuera de rango) y
-  los specs de `CatalogoGrid` y de cada pantalla.
+- Frontend: `useCatalogoVenta.nuxt.spec.ts` (turnos, el fallo no borra, página fuera de rango),
+  `AppItemSelect.nuxt.spec.ts` y los specs de `CatalogoGrid` y de cada pantalla.
 - Playwright: `frontend/e2e/ventas/catalogo-paginado.spec.ts` (POS como cajera, página 3, 375 px,
   salón).
 

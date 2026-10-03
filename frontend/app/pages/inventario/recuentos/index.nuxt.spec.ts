@@ -17,6 +17,7 @@ const HARINA = { id: 'item-harina', nombre: 'Harina', modoInventario: 'cantidad'
 
 let ubicacionesBackend: typeof LOCAL[] = [LOCAL]
 let recuentosEnviados: Record<string, unknown>[] = []
+let busquedasItems: string[] = []
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -33,11 +34,13 @@ mockNuxtImport('useApiFetch', () => {
       recuentosEnviados.push({ ...(opts.body ?? {}) })
       return Promise.resolve({ id: 'recuento-1' })
     }
-    if (url.includes('/items?tipo=producto')) {
+    // `GET /items?ids=` (resolver los elegidos) y `GET /items?...` (la búsqueda del selector).
+    if (url.includes('/items?ids=')) {
       return Promise.resolve({ data: [HARINA], meta: { page: 1, pageSize: 100, total: 1, totalPages: 1 } })
     }
-    if (url.includes('/items?tipo=ingrediente')) {
-      return Promise.resolve({ data: [], meta: { page: 1, pageSize: 100, total: 0, totalPages: 0 } })
+    if (url.includes('/items?')) {
+      busquedasItems.push(url)
+      return Promise.resolve({ data: [HARINA], meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 } })
     }
     return Promise.resolve({ data: [], meta: { page: 1, pageSize: 15, total: 0, totalPages: 0 } })
   }
@@ -86,6 +89,13 @@ async function emitir(comp: ReturnType<typeof selectConOpcion>, valor: string | 
   await new Promise(r => setTimeout(r, 20))
 }
 
+/** El selector de productos es el `AppItemSelect`; su `USelectMenu` no trae opciones hasta abrirse. */
+function selectorProductos(wrapper: Wrapper) {
+  const menu = wrapper.findComponent({ name: 'AppItemSelect' }).findComponent({ name: 'USelectMenu' })
+  expect(menu.exists(), 'selector de productos').toBe(true)
+  return menu
+}
+
 async function abrirCrear(wrapper: Wrapper) {
   const boton = wrapper.findAll('button').find(b => b.text().includes('Nuevo recuento'))
   expect(boton, 'botón "Nuevo recuento"').toBeTruthy()
@@ -104,6 +114,7 @@ async function crear(wrapper: Wrapper) {
 describe('inventario/recuentos — selector de ubicación al crear', () => {
   beforeEach(() => {
     recuentosEnviados = []
+    busquedasItems = []
     document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
   })
 
@@ -118,7 +129,7 @@ describe('inventario/recuentos — selector de ubicación al crear', () => {
     })
     expect(conUbicacion).toBeUndefined()
 
-    await emitir(selectConOpcion(wrapper, HARINA.id), [HARINA.id])
+    await emitir(selectorProductos(wrapper), [HARINA.id])
     await crear(wrapper)
 
     expect(recuentosEnviados).toHaveLength(1)
@@ -132,11 +143,26 @@ describe('inventario/recuentos — selector de ubicación al crear', () => {
     await abrirCrear(wrapper)
 
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
-    await emitir(selectConOpcion(wrapper, HARINA.id), [HARINA.id])
+    await emitir(selectorProductos(wrapper), [HARINA.id])
     await crear(wrapper)
 
     expect(recuentosEnviados).toHaveLength(1)
     expect(recuentosEnviados[0]).toMatchObject({ ubicacionId: BODEGA.id })
+    wrapper.unmount()
+  })
+
+  it('el selector de productos pide al servidor solo los de modo cantidad', async () => {
+    ubicacionesBackend = [LOCAL]
+    const wrapper = await montar()
+    await abrirCrear(wrapper)
+
+    selectorProductos(wrapper).vm.$emit('update:open', true)
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(busquedasItems).toHaveLength(1)
+    const params = new URL(busquedasItems[0]!, 'http://x').searchParams
+    expect(params.get('modoInventario')).toBe('cantidad')
+    expect(params.get('tipo')).toBe('producto,ingrediente')
     wrapper.unmount()
   })
 })

@@ -166,6 +166,14 @@ destapa una decisión que no es mía).
   un e2e, y listar los ids del `PATCH`/`POST` de un ítem que se comparan contra ids de Postgres
   antes de decidir si se normaliza por campo o en un solo lugar.
 
+- [ ] **`GET /compras/productos` trae todo el catálogo de una vez, sin paginar** (backend +
+  frontend; el problema contrario al que cerró el catálogo paginado). Lo consume
+  `pages/compras/[id].vue` para ofrecer qué comprar. **No medido:** no se sabe cuánto pesa ni cuánto
+  tarda con un catálogo grande. **Medir:** el mismo catálogo sintético del Apéndice A de
+  [`2026-10-03-catalogo-paginado.md`](../superpowers/plans/2026-10-03-catalogo-paginado.md) y
+  `curl -w "%{time_total} %{size_download}"` sobre la ruta, antes de decidir si se pagina o si la
+  pantalla pasa a `AppItemSelect` (el selector ya busca en el servidor).
+
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
@@ -197,36 +205,6 @@ que lo convierte en un frente propio y no en un remate.
 ⚠️ El comando va escrito porque la primera vez este dato se anotó como "459 ocurrencias en 5
 superficies" sumando conteos de código con un conteo de docs hecho con **otro patrón**. La
 revisión independiente no lo pudo reproducir, con razón.
-
-- [ ] 🔺 **PRIORIDAD (owner, 2026-09-28): las pantallas de venta cargan solo los primeros 100
-  ítems de cada tipo, y un producto 101 no se puede vender** (frontend + backend). Pasa de nota de
-  vigilancia a entrada de trabajo por pedido del owner, porque un minimarket con más de 100
-  productos es el caso normal, no el raro. **El mecanismo:** `MAX_PAGE_SIZE = 100`
-  (`backend/src/common/utils/pagination.util.ts`) y las pantallas piden `pageSize=100` **sin
-  paginar**: el resto no llega y nada lo avisa. **Dónde (medido el 2026-09-28, 22 llamadas en 11
-  pantallas, `grep -rn "pageSize=100\|pageSize: 100" frontend/app`):**
-  - **Venden:** `pages/ventas/pos.vue` (producto, receta, combo), `pages/salones/index.vue` (los
-    mismos tres), `pages/tienda/index.vue`, `pages/tienda/suscripciones.vue`.
-  - **Mueven stock:** `pages/mermas.vue` (producto, ingrediente), `pages/inventario/index.vue`,
-    `pages/inventario/traslados.vue`, `pages/inventario/recuentos/index.vue`.
-  - **Configuran:** `pages/configuracion/items.vue` (4), `configuracion/promociones.vue`,
-    `configuracion/grupos-modificadores.vue` — selectores donde el ítem 101 no se puede elegir.
-  ✅ **Decidido por el owner (2026-09-28, contestando a la orquestadora):** *"la grilla de
-  productos debe estar paginada en el backend"* y *"la grilla ya tiene buscador […] hay que hacer
-  que busque en el back"*. O sea: nada de traer todas las páginas; la grilla pide de a una
-  página al servidor y el buscador consulta al servidor. **Medido ese día:** el buscador de hoy
-  (`components/ventas/CatalogoGrid.vue`, `filtrados`) filtra **en el navegador** sobre los 100
-  que llegaron —`props.items.filter(i => i.nombre.includes(q))`—, así que buscar el producto 101
-  no lo encuentra nunca. La misma grilla la usan el POS y el salón.
-  **Lo que arrastra y hay que resolver en la spec (técnico):** el orden de la grilla (con stock
-  primero, después por nombre: `compararCatalogo`) hoy se hace en el navegador y tiene que pasar al
-  servidor, o el orden cambia entre páginas; el descuento de lo que ya está en el carrito
-  (`descontarStockCatalogo` en el POS) y la disponibilidad del salón se aplican sobre la página
-  visible; buscar por nombre necesita índice (`lower(nombre)` o trigram) y medirlo; y el refresco
-  del salón (§ 3) pasa a pedir solo la página visible, así que conviene diseñarlos juntos. Los
-  selectores de configuración y de inventario van con búsqueda en el servidor igual.
-  Contexto: el filtro de pausados ya se movió a la query (resueltos, *"el pausado ocupaba uno
-  de esos 100 lugares"*); esto es lo que quedó. Conviene hacerlo junto con el refresco del salón.
 
 - [ ] **Un `REFUND` aprobado que quedó sin nota de crédito no tiene cómo generarla: botón
   "Generar nota"** (backend + frontend; ⛔ **fiscal, frente propio**: emite un documento, así que
@@ -617,46 +595,6 @@ fiscal y va solo:
   en un empate exacto. **Es decisión del owner y es fiscal**: llevar el sistema a 6 decimales
   de verdad es cambiar la escala de todas las columnas de plata de `venta_detalles` — motor de
   cálculo + fiscal, frente propio (ADR-010).
-
-### Los cuatro que dejó el frente de la reserva de stock (2026-09-01)
-
-Los cuatro salieron de ese frente, pero **no todos son ajenos a él, y eso hay que decirlo
-bien**: la 1 y la 4 son **preexistentes** (julio, y de siempre); la 2 es un hueco viejo que
-**este frente volvió sub-descuento** —hasta el 2026-09-01 no existía ningún número descontado,
-así que el drawer no mostraba de más—; y la 3 **la introdujo este frente**, medido con
-`git log -L` sobre `salones/index.vue`: `refrescarItems` y `programarRefrescoItems` nacen en
-`c6489ecd` (Tarea 8) y antes los tres `GET /items` salían **solo en la carga inicial**.
-⚠️ Se escribe así porque la primera versión de este párrafo decía *"ninguno lo introduce"*, que
-es **el mismo error que este frente ya cometió y corrigió una vez** —atribuir a deuda heredada
-una regresión propia, ver el doble descuento en [`resueltos.md`](resueltos.md)—. La atribución
-se cruza con la fecha del commit, no se recuerda.
-
-Están acá y no en la § 1 porque ninguno es mecánico: **queda uno solo abierto** —el refresco
-del catálogo, que es frontend + backend y **pide medir antes de tomarse**—, y los tres ya
-cerrados estaban acá porque uno encendía un camino muerto, otro era contrato de otro endpoint
-y el tercero movía un rechazo de puerta. Y no
-en la § 4 porque **ninguno espera una respuesta del owner**: la decisión que los gobierna ya está tomada (*lo que la mesa pide queda apartado, y la
-pantalla muestra lo que se puede pedir*). Contexto del frente:
-[`resueltos.md`](resueltos.md).
-
-- [ ] **El refresco del catálogo del salón baja ~133 KB para actualizar 3 campos: achicarlo a un
-  pedido de disponibilidad** (frontend + backend; lo introdujo `c6489ecd` / Tarea 8 del frente de la
-  reserva de stock). **Medido el 2026-09-28** (sub-agente Sonnet, leyendo el código): el único
-  disparador es el `watch` de `pages/salones/index.vue` (~:1735) sobre la firma de la cuenta abierta
-  —cualquier mutación de líneas, y también al entrar a una cuenta—, con debounce de 250 ms que
-  colapsa una ráfaga solo si los toques vienen a menos de 250 ms. Cada refresco son **3 `GET
-  /items`** en paralelo (producto, receta, combo) con `pageSize=100`, ~24 campos por ítem, **~740
-  bytes por ítem**: con 100 productos + 60 recetas + 20 combos, **~133 KB sin comprimir por
-  toque** (no hay `compression()` en `main.ts`). Y de todo eso solo cambian `disponible`,
-  `stockDisponible` y `disponibleCondicional`. El cómputo del servidor ya está medido en 0,36 ms:
-  el costo es de bytes y de requests en la tablet, no de la base.
-  **Se descarta el "0 GET" que proponía la entrada** (que las respuestas de mutación traigan la
-  disponibilidad): hay que tocar los 4 métodos de mutación y definir "ítem afectado", que no es
-  solo el de la línea sino todo lo que comparte ingrediente o stock; y no arregla que otra tablet
-  se entere tarde, que sigue igual. **Qué hacer:** un solo pedido liviano —`GET` de solo `{id,
-  disponible, stockDisponible, disponibleCondicional}` para los ítems ya cargados— en vez de los
-  3 del catálogo entero: 3 requests → 1 y ~90 % menos de bytes, sin tocar las mutaciones. La ruta
-  nueva o el parámetro los define quien lo tome, con `calcularDisponibilidadBatch` (sin N+1).
 
 ### Dos que el owner decidió el 2026-09-03: acumulación de descuentos y compras
 
@@ -2557,8 +2495,8 @@ toca, que son contexto de la pasada y no trabajo tomable.
 —cobrar una cuenta de salón con un ítem pausado después de cargarlo, y que una regla pausada
 no quede congelada en `ventas_descuentos`— **se cerraron el 2026-08-09**; ver
 [`resueltos.md`](resueltos.md). Lo que sigue abierto de esa feature está repartido desde el
-2026-08-15: los specs que faltan en tres pantallas, en la sección 1; el tope de 100, en
-Vigilancia.
+2026-08-15: los specs que faltan en tres pantallas, en la sección 1. (El tope de 100 de los
+selectores ya no vive acá: se cerró con el catálogo paginado, ver [`resueltos.md`](resueltos.md).)
 
 **Ramas sin cobertura alguna.** La lista se triageó el 2026-08-09 y se cubrieron **cuatro
 ramas nuevas**: el spillover de propina entre pagos, el aislamiento multi-tenant **de

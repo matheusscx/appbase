@@ -24,6 +24,123 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 ---
 
 
+## El catálogo se pagina, ordena y busca en el servidor, y los selectores de ítems buscan en el servidor (cerrada 2026-10-03)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Dos entradas se cerraron con el mismo frente. Diseño y
+decisiones: [`catalogo-paginado-design.md`](../superpowers/specs/2026-10-03-catalogo-paginado-design.md);
+la regla viva, en [`catalogo-paginado.md`](../features/catalogo-paginado.md).
+
+### Las entradas que cierra, como estaban en `pendientes.md` § 3
+
+- [ ] 🔺 **PRIORIDAD (owner, 2026-09-28): las pantallas de venta cargan solo los primeros 100
+  ítems de cada tipo, y un producto 101 no se puede vender** (frontend + backend). Pasa de nota de
+  vigilancia a entrada de trabajo por pedido del owner, porque un minimarket con más de 100
+  productos es el caso normal, no el raro. **El mecanismo:** `MAX_PAGE_SIZE = 100`
+  (`backend/src/common/utils/pagination.util.ts`) y las pantallas piden `pageSize=100` **sin
+  paginar**: el resto no llega y nada lo avisa. **Dónde (medido el 2026-09-28, 22 llamadas en 11
+  pantallas, `grep -rn "pageSize=100\|pageSize: 100" frontend/app`):**
+  - **Venden:** `pages/ventas/pos.vue` (producto, receta, combo), `pages/salones/index.vue` (los
+    mismos tres), `pages/tienda/index.vue`, `pages/tienda/suscripciones.vue`.
+  - **Mueven stock:** `pages/mermas.vue` (producto, ingrediente), `pages/inventario/index.vue`,
+    `pages/inventario/traslados.vue`, `pages/inventario/recuentos/index.vue`.
+  - **Configuran:** `pages/configuracion/items.vue` (4), `configuracion/promociones.vue`,
+    `configuracion/grupos-modificadores.vue` — selectores donde el ítem 101 no se puede elegir.
+  ✅ **Decidido por el owner (2026-09-28, contestando a la orquestadora):** *"la grilla de
+  productos debe estar paginada en el backend"* y *"la grilla ya tiene buscador […] hay que hacer
+  que busque en el back"*. O sea: nada de traer todas las páginas; la grilla pide de a una
+  página al servidor y el buscador consulta al servidor. **Medido ese día:** el buscador de hoy
+  (`components/ventas/CatalogoGrid.vue`, `filtrados`) filtra **en el navegador** sobre los 100
+  que llegaron —`props.items.filter(i => i.nombre.includes(q))`—, así que buscar el producto 101
+  no lo encuentra nunca. La misma grilla la usan el POS y el salón.
+  **Lo que arrastra y hay que resolver en la spec (técnico):** el orden de la grilla (con stock
+  primero, después por nombre: `compararCatalogo`) hoy se hace en el navegador y tiene que pasar al
+  servidor, o el orden cambia entre páginas; el descuento de lo que ya está en el carrito
+  (`descontarStockCatalogo` en el POS) y la disponibilidad del salón se aplican sobre la página
+  visible; buscar por nombre necesita índice (`lower(nombre)` o trigram) y medirlo; y el refresco
+  del salón (§ 3) pasa a pedir solo la página visible, así que conviene diseñarlos juntos. Los
+  selectores de configuración y de inventario van con búsqueda en el servidor igual.
+  Contexto: el filtro de pausados ya se movió a la query (resueltos, *"el pausado ocupaba uno
+  de esos 100 lugares"*); esto es lo que quedó. Conviene hacerlo junto con el refresco del salón.
+
+- [ ] **El refresco del catálogo del salón baja ~133 KB para actualizar 3 campos: achicarlo a un
+  pedido de disponibilidad** (frontend + backend; lo introdujo `c6489ecd` / Tarea 8 del frente de la
+  reserva de stock). **Medido el 2026-09-28** (sub-agente Sonnet, leyendo el código): el único
+  disparador es el `watch` de `pages/salones/index.vue` (~:1735) sobre la firma de la cuenta abierta
+  —cualquier mutación de líneas, y también al entrar a una cuenta—, con debounce de 250 ms que
+  colapsa una ráfaga solo si los toques vienen a menos de 250 ms. Cada refresco son **3 `GET
+  /items`** en paralelo (producto, receta, combo) con `pageSize=100`, ~24 campos por ítem, **~740
+  bytes por ítem**: con 100 productos + 60 recetas + 20 combos, **~133 KB sin comprimir por
+  toque** (no hay `compression()` en `main.ts`). Y de todo eso solo cambian `disponible`,
+  `stockDisponible` y `disponibleCondicional`. El cómputo del servidor ya está medido en 0,36 ms:
+  el costo es de bytes y de requests en la tablet, no de la base.
+  **Se descarta el "0 GET" que proponía la entrada** (que las respuestas de mutación traigan la
+  disponibilidad): hay que tocar los 4 métodos de mutación y definir "ítem afectado", que no es
+  solo el de la línea sino todo lo que comparte ingrediente o stock; y no arregla que otra tablet
+  se entere tarde, que sigue igual. **Qué hacer:** un solo pedido liviano —`GET` de solo `{id,
+  disponible, stockDisponible, disponibleCondicional}` para los ítems ya cargados— en vez de los
+  3 del catálogo entero: 3 requests → 1 y ~90 % menos de bytes, sin tocar las mutaciones. La ruta
+  nueva o el parámetro los define quien lo tome, con `calcularDisponibilidadBatch` (sin N+1).
+
+### Qué se decidió
+
+- **Owner, 2026-09-28:** paginar en el backend y que el buscador consulte al servidor (la
+  decisión que ya traía la entrada).
+- **Owner, 2026-10-03:** páginas numeradas (`UPagination`, 48 por página) y no scroll infinito, y
+  el diseño completo: orden en el servidor, refresco del salón dentro del frente, selectores que
+  buscan en el servidor y entrega en dos commits.
+- El orden de la grilla (lo pedible primero, después nombre) **se conservó** y pasó al servidor
+  como `orden=disponibilidad`; no se simplificó a "solo por nombre" porque cambiarlo era una
+  decisión de producto que nadie pidió. Sin `pg_trgm`.
+
+### Qué se midió
+
+Postgres propio del worktree, catálogo sintético (Apéndice A del plan,
+[`2026-10-03-catalogo-paginado.md`](../superpowers/plans/2026-10-03-catalogo-paginado.md)): 5.454
+vendibles en el tenant y 45.000 de otro. Comando: `curl -w "%{time_total} %{size_download}"` sobre
+`GET /api/items`, mediana de las corridas.
+
+| Pedido | Medido |
+|---|---|
+| `orden=disponibilidad`, página de 48 | mediana 68,9 ms |
+| `orden=disponibilidad&search=leche` | 11,2 ms |
+| refresco del salón por toque | 32.559 B contra 200.707 B, y 3 requests pasan a 1 |
+
+El número del refresco de la entrada (~133 KB) era una estimación de 100+60+20 ítems; con el
+catálogo sintético los tres listados viejos suman 200.707 B.
+
+Índice nuevo: `idx_items_tenant_tipo_vivo` sobre `(tenant_id, tipo) WHERE eliminado_el IS NULL`
+(`items` no tenía ninguno por tenant).
+
+### Qué se hizo
+
+- **Fase A (grilla de venta: POS, salón, tienda), commit `8b6a8faf` en `origin/main`.**
+  `GET /items` acepta `tipo` en lista, `ids`, `modoInventario` y `orden=disponibilidad`;
+  `useCatalogoVenta` y `CatalogoGrid` paginan; el salón refresca con un solo pedido.
+- **Fase B (selectores), este commit.** `AppItemSelect` + `useItemsPorId` reemplazan a los
+  `USelectMenu` que filtraban sobre los primeros 100. Pantallas migradas: `configuracion/promociones`,
+  `configuracion/items` (componentes de combo, ingredientes y extras),
+  `configuracion/grupos-modificadores`, `inventario/index`, `inventario/traslados`,
+  `inventario/recuentos/index` (con `modoInventario=cantidad` en el servidor), `mermas` y
+  `tienda/suscripciones`.
+- **Bugs que el tope escondía y se cerraron:** el costo de un combo o una receta se calculaba de
+  menos en silencio cuando un componente no estaba entre los 100; la validación por familia de
+  unidad de grupos de modificadores se salteaba por la misma razón; el link de traslados
+  (`?itemId=`) caía a modo `cantidad` con un producto en serie; el alcance de una promoción
+  mostraba ids sin nombre.
+- Verificación del barrido: `grep -rn "pageSize=100\|pageSize: 100" frontend/app --include='*.vue'
+  --include='*.ts' | grep -v spec.ts` da 0 líneas.
+
+### Lo que enseñó
+
+La revisión independiente de la fase A cazó **dos lectores de la lista que trataban la página
+visible como si fuera el catálogo completo**: la unidad de las líneas del salón y el Confirmar de
+la receta del POS. El arreglo estaba en cada pantalla, pero el error estaba antes: al paginar un
+listado hay que **listar todos los lectores de esa lista**, no solo el que la pinta. Es hermana de [Cambiar un vocabulario compartido y actualizar solo los consumidores del módulo que
+tenés delante](anti-patterns.md#-cambiar-un-vocabulario-compartido-y-actualizar-solo-los-consumidores-del-módulo-que-tenés-delante)
+(mismo barrido, otro objeto: ahí un valor, acá una lista). No se abrió entrada nueva en
+`anti-patterns.md`; la lección vive acá.
+
+
 ## `uq_item_grupo_vivo` ya no da 500 en el `PATCH`/`POST` de un ítem (cerrada 2026-10-03)
 
 Sale de [`pendientes.md`](pendientes.md) § 2.

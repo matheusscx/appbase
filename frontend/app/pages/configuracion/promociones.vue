@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type {
   CanalPromocion,
   Promocion,
@@ -36,7 +35,8 @@ const { formatFecha, formatMonto } = useFormatters()
 const { listar, crear, actualizar, eliminar } = usePromociones()
 
 const promociones = ref<Promocion[]>([])
-const itemsCatalogo = ref<ItemCatalogo[]>([])
+// Los ítems ya no se cargan enteros: el selector busca en el servidor y el caché guarda lo visto.
+const catalogoItems = useItemsPorId<ItemCatalogo>()
 const categoriasCatalogo = ref<CategoriaCatalogo[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -46,12 +46,8 @@ const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
 const eliminando = ref(false)
 
-const itemsOpts = computed(() =>
-  itemsCatalogo.value.map(i => ({
-    label: i.categoriaNombre ? `${i.nombre} (${i.categoriaNombre})` : i.nombre,
-    value: i.id,
-  })),
-)
+const etiquetaItem = (i: ItemCatalogo) =>
+  i.categoriaNombre ? `${i.nombre} (${i.categoriaNombre})` : i.nombre
 const categoriasOpts = computed(() =>
   categoriasCatalogo.value.map(c => ({ label: c.nombre, value: c.id })),
 )
@@ -182,25 +178,15 @@ async function cargar() {
 }
 
 /**
- * Catálogos para el armado de slots (ítems/categoría). Mismo techo de 100 que
- * el resto de los selectores del repo (`pageSize` tope del backend) — filtrado
- * client-side por `USelectMenu`, sin buscador contra la API (ningún selector
- * del proyecto lo tiene, ver `docs/patterns/frontend.md`).
+ * Categorías para el armado de slots. Los ítems no se cargan acá: `AppItemSelect`
+ * los busca en el servidor y `abrirEditar` resuelve los del registro por id.
  */
 async function cargarCatalogos() {
   try {
-    const [categorias, itemsResp] = await Promise.all([
-      useApiFetch<{ id: string, nombre: string, activo: boolean }[]>(`${apiUrl}/categorias`),
-      useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?pageSize=100`),
-    ])
+    const categorias = await useApiFetch<{ id: string, nombre: string, activo: boolean }[]>(`${apiUrl}/categorias`)
     categoriasCatalogo.value = categorias
       .filter(c => c.activo)
       .map(c => ({ id: c.id, nombre: c.nombre }))
-    itemsCatalogo.value = itemsResp.data.map(i => ({
-      id: i.id,
-      nombre: i.nombre,
-      categoriaNombre: i.categoriaNombre,
-    }))
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cargar catálogos'), color: 'error' })
@@ -232,7 +218,15 @@ function scopeAForm(s: ScopePromocion): ScopeForm {
   }
 }
 
-function abrirEditar(p: Promocion) {
+async function abrirEditar(p: Promocion) {
+  // Los ítems del alcance pueden no estar entre los que el selector vio: se traen por id
+  // ANTES de abrir, o el formulario mostraría los elegidos sin nombre.
+  try {
+    await catalogoItems.resolver(p.scopes.flatMap(s => s.itemIds ?? []))
+  }
+  catch {
+    // Se abre igual: `AppItemSelect` vuelve a resolver los elegidos al montarse y es él quien avisa.
+  }
   resetDrawer()
   editingId.value = p.id
   form.value = {
@@ -519,10 +513,10 @@ const columns: TableColumn<Promocion>[] = [
               </UFormField>
 
               <UFormField v-if="scope.tipoScope === 'items'" label="Ítems" required>
-                <USelectMenu
+                <AppItemSelect
                   v-model="scope.itemIds"
-                  :items="itemsOpts"
-                  value-key="value"
+                  :catalogo="catalogoItems"
+                  :etiqueta="etiquetaItem"
                   multiple
                   placeholder="Selecciona uno o más ítems"
                 />

@@ -404,14 +404,12 @@ pago_proveedor_id` — con su unitario sobre el SQL (`compras.service.spec.ts`).
   lo justifica, la solución es una columna materializada del total (con su propio frente de
   sincronización), no una segunda cuantización en `WHERE`. No "arreglar" esto agregando una
   expresión de redondeo en SQL.
-  ⚠️ **Deuda conocida, cruzada con el backlog:** este `estadoPago` que trae TODO a memoria antes
-  de paginar es el mismo problema, en otra pantalla, que la entrada con prioridad de
-  [`pendientes.md`](../agent/pendientes.md) § 3 *"las pantallas de venta cargan solo los
-  primeros 100 ítems"* (owner, 2026-09-28: la grilla tiene que paginar y buscar en el
-  servidor) — acá el listado de compras filtrado por `estadoPago` tiene el mismo defecto de
-  fondo (paginar bien exige que el filtro nazca en el servidor, no que se aplique después de
-  traer la página). No se resuelve acá: cuando ese frente encare la paginación server-side en
-  serio, esta lectura de `GET /compras` es candidata al mismo arreglo.
+  ⚠️ **Deuda conocida:** este `estadoPago` que trae TODO a memoria antes de paginar es de la
+  misma familia que el defecto que cerró el
+  [catálogo paginado](./catalogo-paginado.md) —paginar bien exige que el filtro nazca en el
+  servidor, no que se aplique después de traer la página—, pero es **otro listado y sigue
+  pendiente aparte**: ese frente no lo tocó. Cuando se encare, `GET /compras` es candidato al
+  mismo arreglo.
 - **Las escrituras sobre una confirmada devuelven los mismos campos de pago que `GET
   /compras/:id`, sin un `GET` aparte.** `corregirLinea`, `corregirDescuento`,
   `actualizarDocumento`, `anular` y `confirmar` (con o sin `pago`) resuelven `Pagar` en su

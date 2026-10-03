@@ -39,6 +39,10 @@ let motivosUrlSolicitada = ''
 /** Task 5: corte del día de negocio que devuelve `GET /tenants/me` — 0 por
  *  defecto (sin corte, la `DiaNegocioNota` no se dibuja). */
 let horaCorteBackend = 0
+/** Cada `GET /mermas` que se pidió, para afirmar el filtro de producto. */
+let mermasUrls: string[] = []
+/** Cada `GET /items?...` (búsqueda del selector). */
+let busquedasItems: string[] = []
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -63,16 +67,19 @@ mockNuxtImport('useApiFetch', () => {
       })
     }
     if (url.includes('/mermas') && opts?.method !== 'POST') {
+      mermasUrls.push(url)
       return Promise.resolve({
         data: mermasListado,
         meta: { page: 1, pageSize: 15, total: mermasListado.length, totalPages: 1 },
       })
     }
-    if (url.includes('/items?tipo=producto')) {
+    // `ids=` (resolver los elegidos) y búsqueda (el selector con búsqueda en el servidor).
+    if (url.includes('/items?ids=')) {
       return Promise.resolve({ data: [HARINA], meta: { page: 1, pageSize: 100, total: 1, totalPages: 1 } })
     }
-    if (url.includes('/items?tipo=ingrediente')) {
-      return Promise.resolve({ data: [], meta: { page: 1, pageSize: 100, total: 0, totalPages: 0 } })
+    if (url.includes('/items?')) {
+      busquedasItems.push(url)
+      return Promise.resolve({ data: [HARINA], meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 } })
     }
     if (url.includes('/motivos-baja')) {
       motivosUrlSolicitada = url
@@ -111,7 +118,7 @@ async function montar() {
 type Wrapper = Awaited<ReturnType<typeof montar>>
 
 /**
- * La página tiene DOS selects con las mismas opciones: el filtro del listado
+ * La página tiene DOS selects de motivo con las mismas opciones: el filtro del listado
  * (que suma "todos") y el del formulario del drawer. Sin `sinValor: 'todos'`
  * el `.find()` se queda con el PRIMERO —el filtro— y el test termina
  * emitiendo sobre el select equivocado: `form.itemId` nunca se completa, el
@@ -129,7 +136,22 @@ function selectConOpcion(wrapper: Wrapper, valor: string, sinValor?: string) {
   return select!
 }
 
-const selectProducto = (w: Wrapper) => selectConOpcion(w, HARINA.id, 'todos')
+/** Los dos `AppItemSelect`: el de filtro (con `clear`) y el del formulario. Su `USelectMenu` no trae
+ * opciones hasta abrirse, así que se identifican por la prop y no por las opciones. */
+function selectorProducto(w: Wrapper, deFiltro: boolean) {
+  const sel = w.findAllComponents({ name: 'AppItemSelect' }).find(c => c.props('clear') === deFiltro)
+  expect(sel, deFiltro ? 'selector de filtro' : 'selector del formulario').toBeTruthy()
+  return sel!.findComponent({ name: 'USelectMenu' })
+}
+
+/** Elige el producto del formulario como el usuario: abre el menú (la búsqueda llena el caché) y emite. */
+async function elegirProducto(w: Wrapper, id: string) {
+  const menu = selectorProducto(w, false)
+  menu.vm.$emit('update:open', true)
+  await new Promise(r => setTimeout(r, 20))
+  menu.vm.$emit('update:modelValue', id)
+  await new Promise(r => setTimeout(r, 20))
+}
 const selectMotivo = (w: Wrapper) => selectConOpcion(w, MOTIVO.id, 'todos')
 
 async function emitir(comp: ReturnType<typeof selectConOpcion>, valor: string) {
@@ -155,6 +177,8 @@ async function enviar(wrapper: Wrapper) {
 describe('mermas — selector de ubicación', () => {
   beforeEach(() => {
     mermasEnviadas = []
+    mermasUrls = []
+    busquedasItems = []
     motivosUrlSolicitada = ''
     document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
   })
@@ -173,7 +197,7 @@ describe('mermas — selector de ubicación', () => {
     })
     expect(conUbicacion).toBeUndefined()
 
-    await emitir(selectProducto(wrapper), HARINA.id)
+    await elegirProducto(wrapper, HARINA.id)
     await wrapper.find('input[inputmode="decimal"]').setValue('2')
     await emitir(selectMotivo(wrapper), MOTIVO.id)
     await enviar(wrapper)
@@ -189,7 +213,7 @@ describe('mermas — selector de ubicación', () => {
     await abrirDrawer(wrapper)
 
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
-    await emitir(selectProducto(wrapper), HARINA.id)
+    await elegirProducto(wrapper, HARINA.id)
     await wrapper.find('input[inputmode="decimal"]').setValue('3')
     await emitir(selectMotivo(wrapper), MOTIVO.id)
     await enviar(wrapper)
@@ -218,12 +242,53 @@ describe('mermas — selector de ubicación', () => {
   })
 })
 
+// El filtro de producto: vacío = todos (con `clear`), no una opción "Todos" con un valor inventado.
+describe('mermas — filtro de producto', () => {
+  beforeEach(() => {
+    mermasEnviadas = []
+    mermasUrls = []
+    busquedasItems = []
+    motivosUrlSolicitada = ''
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  it('vacío no manda itemId; elegir uno lo manda; limpiar vuelve a no mandarlo', async () => {
+    ubicacionesBackend = [LOCAL]
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 50))
+    expect(mermasUrls.length).toBeGreaterThan(0)
+    expect(mermasUrls.every(u => !u.includes('itemId'))).toBe(true)
+
+    const filtro = selectorProducto(wrapper, true)
+    filtro.vm.$emit('update:open', true)
+    await new Promise(r => setTimeout(r, 20))
+    expect(busquedasItems).toHaveLength(1)
+    const params = new URL(busquedasItems[0]!, 'http://x').searchParams
+    expect(params.get('tipo')).toBe('producto,ingrediente')
+    expect(params.has('activo')).toBe(false)
+
+    mermasUrls = []
+    filtro.vm.$emit('update:modelValue', HARINA.id)
+    await new Promise(r => setTimeout(r, 60))
+    expect(mermasUrls.some(u => u.includes(`itemId=${HARINA.id}`))).toBe(true)
+
+    mermasUrls = []
+    filtro.vm.$emit('update:modelValue', null)
+    await new Promise(r => setTimeout(r, 60))
+    expect(mermasUrls.length).toBeGreaterThan(0)
+    expect(mermasUrls.every(u => !u.includes('itemId'))).toBe(true)
+    wrapper.unmount()
+  })
+})
+
 // Task 4: Mermas solo ofrece motivos de tipo `merma` (§4.4 del design). El
 // filtro de pantalla no reemplaza el 400 del servidor, pero sin él
 // "Cortesía de la casa" aparecería en este selector.
 describe('mermas — filtro de motivos', () => {
   beforeEach(() => {
     mermasEnviadas = []
+    mermasUrls = []
+    busquedasItems = []
     motivosUrlSolicitada = ''
     document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
   })

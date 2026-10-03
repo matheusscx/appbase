@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import type { PaginatedResponse } from '~/composables/usePaginatedList'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -52,14 +51,18 @@ interface ProductoCosto {
 interface Opt { label: string; value: string }
 
 const { public: { apiUrl } } = useRuntimeConfig()
-const productos = ref<ProductoCosto[]>([])
-const filtroItem = ref('todos')
+// Los productos ya no se cargan enteros (tope de 100): `AppItemSelect` busca en el servidor y el
+// caché guarda lo visto; el producto del ajuste de costo se lee de acá.
+const catalogoItems = useItemsPorId<ProductoCosto>()
+const FILTROS_PRODUCTO = { tipo: ['producto', 'ingrediente'] }
+// Vacío = todos los productos (con `clear`); no hay opción "Todos" con valor inventado.
+const filtroItem = ref<string | null>(null)
 const filtroMotivo = ref('todos')
 const filtroUbicacion = ref('todos')
 const unidadesMedidaStore = useUnidadesMedidaStore()
 
 const listFilters = computed(() => ({
-  itemId: filtroItem.value !== 'todos' ? filtroItem.value : undefined,
+  itemId: filtroItem.value || undefined,
   motivo: filtroMotivo.value !== 'todos' ? filtroMotivo.value : undefined,
   ubicacionId: filtroUbicacion.value !== 'todos' ? filtroUbicacion.value : undefined,
 }))
@@ -91,36 +94,7 @@ const motivoOpts: Opt[] = [
   { label: 'Traslado', value: 'traslado' },
 ]
 
-const productosOpts = computed<Opt[]>(() => [
-  { label: 'Todos los productos', value: 'todos' },
-  ...productos.value.map(p => ({ label: p.nombre, value: p.id })),
-])
-
-const productosFormOpts = computed<Opt[]>(() =>
-  productos.value.map(p => ({ label: p.nombre, value: p.id })),
-)
-
-async function cargarProductos() {
-  try {
-    const [prodRes, ingRes] = await Promise.all([
-      useApiFetch<PaginatedResponse<ProductoCosto>>(
-        `${apiUrl}/items?tipo=producto&pageSize=100`,
-      ),
-      useApiFetch<PaginatedResponse<ProductoCosto>>(
-        `${apiUrl}/items?tipo=ingrediente&pageSize=100`,
-      ),
-    ])
-    productos.value = [...prodRes.data, ...ingRes.data].sort((a, b) =>
-      a.nombre.localeCompare(b.nombre, 'es'),
-    )
-  }
-  catch {
-    toast.add({ title: 'Error al cargar productos', color: 'error' })
-  }
-}
-
 onMounted(() => {
-  void cargarProductos()
   void unidadesMedidaStore.ensureLoaded()
   void cargarUbicaciones()
 })
@@ -161,7 +135,7 @@ function emptyAjusteCostoForm() {
 const ajusteCostoForm = ref(emptyAjusteCostoForm())
 
 const productoAjusteSeleccionado = computed(() =>
-  productos.value.find(p => p.id === ajusteCostoForm.value.itemId) ?? null,
+  catalogoItems.porId.get(ajusteCostoForm.value.itemId) ?? null,
 )
 
 const unidadesAjusteOpts = computed(() => {
@@ -236,7 +210,7 @@ watch(() => ajusteCostoForm.value.itemId, (itemId) => {
   // Antes del `find`: si el producto no está en la lista, lo tipeado queda
   // igual de huérfano y el campo tiene que vaciarse lo mismo.
   ajusteCostoForm.value.costoNuevo = ''
-  const prod = productos.value.find(p => p.id === itemId)
+  const prod = catalogoItems.porId.get(itemId)
   if (!prod) return
   ajusteCostoForm.value.unidadCodigo = prod.unidadMedida ?? 'unidad'
 })
@@ -276,7 +250,13 @@ async function registrarAjusteCosto() {
     })
     toast.add({ title: 'Costo ajustado', color: 'success' })
     ajusteCostoOpen.value = false
-    await Promise.all([fetchMovimientos(), cargarProductos()])
+    // El costo vigente del ajustado cambió: se descarta del caché y se vuelve a traer, o el
+    // formulario mostraría el de antes la próxima vez.
+    catalogoItems.porId.delete(f.itemId)
+    // Un fallo acá no es un fallo del ajuste (ya se registró): se avisa aparte.
+    const refrescado = catalogoItems.resolver([f.itemId])
+      .catch(() => { toast.add({ title: 'Error al actualizar el producto', color: 'error' }) })
+    await Promise.all([fetchMovimientos(), refrescado])
     await maybeAbrirDesfases(f.itemId)
   }
   catch (e: unknown) {
@@ -313,12 +293,13 @@ async function registrarAjusteCosto() {
         </CrudPageHeader>
 
         <div class="flex flex-wrap gap-2">
-          <USelectMenu
+          <AppItemSelect
             v-model="filtroItem"
-            :items="productosOpts"
-            value-key="value"
+            :catalogo="catalogoItems"
+            :filtros="FILTROS_PRODUCTO"
+            clear
             class="w-64"
-            placeholder="Producto"
+            placeholder="Todos los productos"
           />
           <USelectMenu
             v-model="filtroMotivo"
@@ -443,10 +424,10 @@ async function registrarAjusteCosto() {
               @submit="registrarAjusteCosto"
             >
               <UFormField label="Producto" required>
-                <USelectMenu
+                <AppItemSelect
                   v-model="ajusteCostoForm.itemId"
-                  :items="productosFormOpts"
-                  value-key="value"
+                  :catalogo="catalogoItems"
+                  :filtros="FILTROS_PRODUCTO"
                   placeholder="Selecciona un producto"
                   class="w-full"
                 />
