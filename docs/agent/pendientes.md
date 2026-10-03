@@ -1056,7 +1056,11 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
     `AjusteStockDto.unidadIds` (`items/dto/ajuste-stock.dto.ts`), como sus gemelos de ventas,
     salón y traslados (lo pidió el revisor de seguridad de Serie). Y en
     `docs/features/inventario-serializado.md`, la fila de "Cancelar con motivo… se frena" tiene
-    que mencionar la excepción de "no elaborado", como ya lo hace `salones-mesas.md`.
+    que mencionar la excepción de "no elaborado", como ya lo hace `salones-mesas.md`. En el mismo
+    doc, la frase *"solo pasa en el salón, con el precio cambiado entre pedidos"* tiene que decir
+    *"con el precio o las reglas cambiados"*: el salón fusiona dos líneas solo si coinciden la
+    personalización, el precio y las reglas congeladas (`SalonesService`, el `find` del merge en
+    `agregarLinea`).
   Escribe en el apartado de unidades y en la salida por venta: va en su propio frente.
 
 ## 4. Necesita que el owner conteste
