@@ -23,6 +23,7 @@ import { MonedasModule } from '../monedas/monedas.module';
 import { CalculoPreciosModule } from '../calculo-precios/calculo-precios.module';
 import { MotivosBajaModule } from '../motivos-baja/motivos-baja.module';
 import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
+import { InventarioModule } from '../inventario/inventario.module';
 import { IdempotenciaModule } from '../idempotencia/idempotencia.module';
 
 @Module({
@@ -52,6 +53,10 @@ import { IdempotenciaModule } from '../idempotencia/idempotencia.module';
     // `anularLinea` resuelve `UbicacionesService.localDe` para el
     // `ubicacionLocalId` que le pasa a `ItemsService.consumirLineaAnulada`.
     UbicacionesModule,
+    // `agregarLinea`/`actualizarLinea` validan y lockean las unidades con número
+    // de serie con `InventarioService.bloquearUnidadesParaSalida`, la misma
+    // regla que usa la venta al sacarlas.
+    InventarioModule,
     IdempotenciaModule,
   ],
   controllers: [SalonesController, MesasController, CuentasController],

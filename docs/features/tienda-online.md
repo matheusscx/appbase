@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: —
-**Last Updated**: 2026-07-05
+**Last Updated**: 2026-10-03
 
 ---
 
@@ -113,6 +113,14 @@ Un ítem pausado **no llega al catálogo**: las cuatro superficies de venta pide
 `GET /items?...&activo=true` y el filtro se resuelve en la query, no en el cliente
 (2026-08-09). El parámetro tiene tres estados —ausente no filtra, `true` vendibles,
 `false` pausados— porque la pantalla de configuración necesita verlos a todos.
+
+**Los productos con número de serie no se venden online** (owner, 2026-10-03): sin cajero no hay
+quién elija la unidad, y rechazar la venta después de Webpay dejaría un cobro sin venta. El
+catálogo de la tienda pide `GET /items?vendibleOnline=true`, que los deja afuera (la tienda lo
+manda por los `filtros` de `useCatalogoVenta`); el filtro vive en `ItemsService.buildFindAllFilters`
+para que lo vean los dos caminos de `findAll`. El checkout rechaza la línea con *"«Nombre» se vende
+solo en el local"* **antes** de iniciar el pago, así que no queda orden creada.
+[Detalle](./inventario-serializado.md#quién-elige-qué-unidad-con-serie-sale).
 
 Aun así el checkout lo revalida, y no es redundante: el carrito vive en el navegador,
 así que el ítem se puede pausar **después** de que el cliente lo agregó.

@@ -152,6 +152,56 @@ describe('OnlineService', () => {
     });
   });
 
+  /**
+   * La tienda no vende productos con número de serie: no hay quien elija la
+   * unidad, y rechazar la venta después de Webpay dejaría un cargo sin venta.
+   */
+  describe('producto con número de serie', () => {
+    const serieEnLaSegundaLinea = () =>
+      items.cargarBasePorIds.mockImplementationOnce(
+        (_t: string, ids: string[]) =>
+          Promise.resolve(
+            new Map(
+              ids.map((id, i) => [
+                id,
+                itemBase(
+                  id,
+                  i === 1
+                    ? { nombre: 'Celular X', modoInventario: 'serie' }
+                    : {},
+                ),
+              ]),
+            ),
+          ),
+      );
+
+    const dosLineas = {
+      lineas: [
+        { itemId: ITEM_ID, cantidad: '1' },
+        { itemId: '550e8400-e29b-41d4-a716-446655440117', cantidad: '1' },
+      ],
+    };
+
+    it('checkout: rechaza nombrando el producto y no calcula nada', async () => {
+      serieEnLaSegundaLinea();
+      await expect(service.checkout(TENANT_ID, dosLineas)).rejects.toThrow(
+        '«Celular X» se vende solo en el local',
+      );
+      expect(calculo.calcular).not.toHaveBeenCalled();
+    });
+
+    it('pagar con Webpay activo: no llega a crear la orden', async () => {
+      tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+      metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
+      serieEnLaSegundaLinea();
+
+      await expect(
+        service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dosLineas),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(pagosRedirect.iniciar).not.toHaveBeenCalled();
+    });
+  });
+
   describe('sin Webpay activo', () => {
     const sinWebpay = () =>
       tenantPasarela.resolverConfiguracionActiva.mockRejectedValue(

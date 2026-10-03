@@ -1361,6 +1361,15 @@ traslados opuestos del mismo producto (A→B y B→A) piden la misma fila de
 `item_producto`, nunca dos filas distintas de `stock_ubicacion` en orden cruzado: no
 pueden hacer deadlock entre sí por esto.
 
+**Debajo del ancla, las unidades de un producto con serie** (2026-10-03): el orden es
+`item_producto` → `item_unidad`, esta última **en un solo** `SELECT … WHERE unidad_id = ANY($1)
+ORDER BY unidad_id FOR UPDATE`, nunca una por una en el orden en que las mandó el cliente.
+`InventarioService.bloquearUnidadesParaSalida` es esa consulta más la validación (del tenant, del
+ítem, ubicación, `disponible`, no apartada por otra cuenta) y la comparten `moverSerie` y el
+salón: quien necesite validar unidades de una salida la llama, no escribe otra. Toma por su
+cuenta el lock de `item_producto` (re-lockear la misma fila en la misma transacción no cuesta) para
+no depender de que el llamador lo haya tomado.
+
 ---
 
 ## 16. Alcance de lectura por usuario: el eje `MiCaja`/`Cajas`

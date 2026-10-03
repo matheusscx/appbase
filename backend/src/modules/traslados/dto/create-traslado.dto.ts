@@ -26,15 +26,16 @@ export class LineaTrasladoDto {
   cantidad: string;
 
   /**
-   * Modo `serie`: qué unidades concretas se mueven. Si no viene, el
-   * chokepoint auto-selecciona FIFO **entre las que están en el origen**.
+   * Modo `serie`: qué unidades concretas se mueven. Es obligatorio en ese
+   * modo —el chokepoint no elige—, con tantas como `cantidad` y todas en el
+   * origen.
    */
   @IsOptional()
   @IsArray()
-  // Con techo por la misma razón que `lineas`: la salida serie hace un
-  // `SELECT … FOR UPDATE` y un `UPDATE` por unidad adentro de la transacción
-  // que retiene el lock ancla, así que el largo que manda el cliente es tiempo
-  // de espera para las ventas de ese producto.
+  // Con techo por la misma razón que `lineas`: la salida serie lockea todas
+  // las unidades adentro de la transacción que retiene el lock ancla, así que
+  // el largo que manda el cliente es tiempo de espera para las ventas de ese
+  // producto.
   @ArrayMaxSize(200)
   @IsUUID('4', { each: true })
   unidadIds?: string[];

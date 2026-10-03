@@ -380,6 +380,27 @@ describe('MermasService', () => {
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
+    it('rechaza un producto con número de serie nombrándolo, sin pedir el motivo ni registrar el movimiento', async () => {
+      transactionQueryMock.mockResolvedValueOnce([
+        itemRow({ nombre: 'Celular X', modo_inventario: 'serie' }),
+      ]);
+
+      await expect(
+        service.registrar(TENANT, USER, {
+          itemId: ITEM,
+          ubicacionId: UBICACION_ID,
+          cantidad: '1',
+          motivoBajaId: MOTIVO,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          '«Celular X» tiene número de serie: dalo de baja desde Ajuste de stock, eligiendo la unidad',
+        ),
+      );
+      expect(motivosBajaService.assertMotivoActivo).not.toHaveBeenCalled();
+      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+    });
+
     it('rechaza un motivo que no es de tipo merma, antes de registrar el movimiento', async () => {
       transactionQueryMock.mockResolvedValueOnce([itemRow()]);
       motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({

@@ -371,6 +371,15 @@ al final, y con el mismo vencimiento decide la llegada y después el código del
 vende— **no se vende**: la venta lo salta, y elegido a mano se rechaza. Tampoco viaja en un
 traslado sin lote elegido. **Sí se merma**, y la merma sin lote elegido se lo lleva primero.
 
+**Qué unidad con serie sale** (implementado 2026-10-03, [`features/inventario-serializado.md`](features/inventario-serializado.md#quién-elige-qué-unidad-con-serie-sale)):
+en un producto con número de serie **la unidad la elige quien vende**, nunca el sistema: el cajero
+en el POS, el garzón en el salón al pedir. La razón es que dos unidades del mismo producto pueden
+no valer lo mismo (un celular nuevo y uno usado), y el sistema no puede saber cuál entrega el
+vendedor. Lo que una mesa pidió queda apartado para ella, y otra venta no puede llevarse esa
+unidad. Un combo o grupo no puede incluir un producto con serie, la tienda online no los vende y
+la merma los rechaza (se dan de baja desde Ajuste de stock). El precio no depende de la condición,
+y la serie se ve en el detalle de la venta, no en la boleta.
+
 **Stock bajo** (implementado, [`features/aviso-stock-bajo.md`](features/aviso-stock-bajo.md)): el
 mínimo es por producto **y** ubicación, nace vacío y sin mínimo no hay aviso. Cuenta unidades del
 saldo, igual en los tres modos de inventario; el vencimiento no entra. Una compra en borrador para

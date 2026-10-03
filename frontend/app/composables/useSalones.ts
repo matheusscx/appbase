@@ -1,6 +1,7 @@
 import { useApiFetch } from './useApiFetch'
 import type { CalcularVentaInput } from './useCalculoPrecios'
 import type { PagoInput } from './useVenta'
+import type { UnidadElegida } from './useUnidadesSerie'
 import type {
   PersonalizacionGrupoPayload,
   PersonalizacionPayload,
@@ -135,6 +136,13 @@ export interface CuentaLineaDetalle {
    *  del backend (`salones.service.ts`), copiado a mano como el resto de este
    *  archivo: al tocar una punta, tocar la otra. */
   itemEliminado?: true
+  /**
+   * Las unidades con serie que esta línea aparta, cuando el ítem es de
+   * `modoInventario = 'serie'`: ahí la cantidad es cuántas son y quien pide
+   * elige CUÁLES. Gemelo de `CuentaLineaDetalle.unidades` del backend, copiado a
+   * mano como el resto de este archivo. `[]` en cualquier otra línea.
+   */
+  unidades?: UnidadElegida[]
 }
 
 export interface CuentaAsignacionDetalle {
@@ -428,6 +436,7 @@ export function useSalones() {
     itemId: string,
     cantidad: string,
     personalizacion?: PersonalizacionPayload,
+    unidadIds?: string[],
   ) =>
     useApiFetch<CuentaDetalle>(`${apiUrl}/cuentas/${cuentaId}/lineas`, {
       method: 'POST',
@@ -435,6 +444,7 @@ export function useSalones() {
         itemId,
         cantidad,
         ...(personalizacion ? { personalizacion } : {}),
+        ...(unidadIds ? { unidadIds } : {}),
       },
     })
 
@@ -445,6 +455,9 @@ export function useSalones() {
       cantidad: string
       cantidadPresentacion?: string
       unidadCodigoPresentacion?: string
+    } | {
+      /** Línea con serie: el conjunto completo nuevo; la cantidad la deriva el servidor. */
+      unidadIds: string[]
     },
   ) =>
     useApiFetch<CuentaDetalle>(
@@ -463,12 +476,13 @@ export function useSalones() {
    * cocina — spec `2026-09-16-anular-plato-despachado-design.md` §§ 3-4.
    * `advertencias` son avisos de stock informativos: la anulación ya ocurrió,
    * se muestran, no bloquean nada (Task 3, `salones.service.ts` →
-   * `anularLinea`).
+   * `anularLinea`). En una línea con serie `unidadIds` dice CUÁLES se anulan
+   * (obligatorio, tantas como `cantidad`).
    */
   const anularLinea = (
     cuentaId: string,
     lineaId: string,
-    body: { cantidad: string, motivoBajaId: string },
+    body: { cantidad: string, motivoBajaId: string, unidadIds?: string[] },
   ) =>
     useApiFetch<CuentaDetalle & { advertencias: string[] }>(
       `${apiUrl}/cuentas/${cuentaId}/lineas/${lineaId}/anular`,

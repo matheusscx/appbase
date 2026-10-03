@@ -12,6 +12,7 @@ const { lineas, resultado, loadingCalculo, vigente, asegurarVigente, add, quitar
 
 const catalogo = useCatalogoVenta({
   tipos: ['producto'],
+  filtros: { vendibleOnline: 'true' },
   onError: e => toast.add({ title: apiErrorMsg(e, 'Error al cargar el catálogo'), color: 'error' }),
 })
 const items = catalogo.items

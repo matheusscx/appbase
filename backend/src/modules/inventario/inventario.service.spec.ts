@@ -553,6 +553,18 @@ describe('InventarioService', () => {
   // Modo 'serie'
   // ---------------------------------------------------------------------------
   describe('registrarMovimiento — modo serie', () => {
+    // Una fila de `SELECT … FROM item_unidad … FOR UPDATE` del método que
+    // valida y lockea las unidades de una salida.
+    const filaUnidad = (over: Record<string, unknown> = {}) => ({
+      unidad_id: UNIDAD_1,
+      serie: 'IMEI-001',
+      condicion: 'nuevo',
+      estado: 'disponible',
+      item_id: ITEM_ID,
+      ubicacion_id: UBICACION_ID,
+      ...over,
+    });
+
     it('entrada serie: inserta unidades, recalcula stock y registra movimiento', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
@@ -782,15 +794,9 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce([{ stock: '2' }]) // SELECT saldo: statement aparte, ya bajo el lock
-        .mockResolvedValueOnce([
-          {
-            estado: 'disponible',
-            item_id: ITEM_ID,
-            tenant_id: TENANT,
-            ubicacion_id: UBICACION_ID,
-            serie: 'IMEI-001',
-          },
-        ]) // SELECT unidad
+        .mockResolvedValueOnce([{ item_nombre: 'Celular' }]) // re-lock de item_producto
+        .mockResolvedValueOnce([filaUnidad()]) // SELECT unidades FOR UPDATE
+        .mockResolvedValueOnce([]) // SELECT apartado: ninguna
         .mockResolvedValueOnce(undefined) // UPDATE unidad
         .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
@@ -815,125 +821,282 @@ describe('InventarioService', () => {
       expect(res.stockResultante).toBe('1');
     });
 
-    it('salida serie sin unidadIds: auto-selecciona FIFO las unidades disponibles', async () => {
-      managerMock.query
-        .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
-        .mockResolvedValueOnce([{ stock: '2' }]) // SELECT saldo: statement aparte, ya bajo el lock
-        .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }]) // SELECT FIFO unidades
-        .mockResolvedValueOnce([
-          {
-            estado: 'disponible',
-            item_id: ITEM_ID,
-            tenant_id: TENANT,
-            ubicacion_id: UBICACION_ID,
-            serie: 'IMEI-001',
-          },
-        ]) // SELECT unidad (validación)
-        .mockResolvedValueOnce(undefined) // UPDATE unidad
-        .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
-        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
-        .mockResolvedValueOnce([{ movimiento_id: 'mov-s3' }]) // INSERT movimiento
-        .mockResolvedValueOnce(undefined); // INSERT detalle
+    // -------------------------------------------------------------------------
+    // Quien vende elige qué unidad con serie sale: el chokepoint ya no elige.
+    // -------------------------------------------------------------------------
+    const CUENTA_ID = 'cuenta-uuid-1';
+    const OTRA_CUENTA_ID = 'cuenta-uuid-2';
 
-      const res = await service.registrarMovimiento(
+    const paramsVenta = {
+      tenantId: TENANT,
+      itemId: ITEM_ID,
+      ubicacionId: UBICACION_ID,
+      tipo: 'salida' as const,
+      motivo: 'venta',
+      cantidad: '1',
+      usuarioId: USER_ID,
+      unidadIds: [UNIDAD_1],
+    };
+
+    it('salida serie sin unidadIds: rechaza pidiendo elegir y no escribe', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // lock item_producto
+        .mockResolvedValueOnce([{ stock: '2' }]) // saldo
+        .mockResolvedValueOnce([{ item_nombre: 'Celular' }]); // re-lock de item_producto
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          ...paramsVenta,
+          unidadIds: undefined,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Elegí qué unidades salen: «Celular» tiene número de serie',
+        ),
+      );
+      // Ni una sola escritura ni lectura de unidades: lock, saldo y re-lock.
+      expect(managerMock.query).toHaveBeenCalledTimes(3);
+    });
+
+    it('salida serie con unidades repetidas: rechaza sin tocar la base de unidades', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '2' }]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          ...paramsVenta,
+          cantidad: '2',
+          unidadIds: [UNIDAD_1, UNIDAD_1],
+        }),
+      ).rejects.toThrow(new BadRequestException('Una unidad viene repetida'));
+      expect(managerMock.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('salida serie: lockea TODAS las unidades en una sola query, ordenadas por unidad_id', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '3' }])
+        .mockResolvedValueOnce([{ item_nombre: 'Celular' }])
+        .mockResolvedValueOnce([
+          filaUnidad({ unidad_id: UNIDAD_1 }),
+          filaUnidad({ unidad_id: UNIDAD_2, serie: 'IMEI-002' }),
+        ])
+        .mockResolvedValueOnce([]) // apartado
+        .mockResolvedValueOnce(undefined) // UPDATE unidades
+        .mockResolvedValueOnce([{ cnt: '1' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-s4' }])
+        .mockResolvedValueOnce(undefined);
+
+      // El cliente las manda al revés: el orden del lock no es el del cliente.
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        { ...paramsVenta, cantidad: '2', unidadIds: [UNIDAD_2, UNIDAD_1] },
+      );
+
+      const lockUnidades = managerMock.query.mock.calls.filter(
+        (c) =>
+          /FROM item_unidad/.test(c[0] as string) &&
+          /FOR UPDATE/.test(c[0] as string),
+      );
+      expect(lockUnidades).toHaveLength(1);
+      const [sql, params] = lockUnidades[0] as [string, unknown[]];
+      // Aserción sobre la cláusula, no sobre un comentario: el `ORDER BY` de un
+      // `SELECT … FOR UPDATE` decide el orden de adquisición (backend.md §15).
+      expect(sql).toMatch(/ORDER BY unidad_id\s+FOR UPDATE\s*$/);
+      expect(sql).toMatch(/unidad_id = ANY\(\$1\)/);
+      expect(sql).toMatch(/eliminado_el IS NULL/);
+      expect(params).toEqual([[UNIDAD_2, UNIDAD_1], TENANT]);
+    });
+
+    it('bloquearUnidadesParaSalida: un uuid en mayúsculas es la misma unidad (se normaliza antes de lockear y de comparar)', async () => {
+      const ID = 'aaaaaaaa-0000-4000-8000-00000000000a';
+      managerMock.query
+        .mockResolvedValueOnce([{ item_nombre: 'Celular' }])
+        .mockResolvedValueOnce([filaUnidad({ unidad_id: ID })]) // Postgres devuelve minúsculas
+        .mockResolvedValueOnce([]); // apartado
+
+      const res = await service.bloquearUnidadesParaSalida(
         managerMock as unknown as EntityManager,
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
           ubicacionId: UBICACION_ID,
-          tipo: 'salida',
-          motivo: 'venta',
-          cantidad: '1',
-          usuarioId: USER_ID,
+          unidadIds: [ID.toUpperCase()],
         },
       );
 
-      expect(res.stockResultante).toBe('1');
-      // La 3ª query es el SELECT FIFO con ORDER BY creado_el ASC
-      // (1ª el lock, 2ª el saldo). Por VALOR exacto de los parámetros —no
-      // `arrayContaining`— para que un mutante que borre el filtro de
-      // ubicación (la auto-selección tomaría una unidad de cualquier lado,
-      // no solo de `params.ubicacionId`) falle acá.
-      expect(managerMock.query).toHaveBeenNthCalledWith(
-        3,
-        expect.stringContaining('ORDER BY u.creado_el ASC'),
-        [ITEM_ID, TENANT, UBICACION_ID, '1'],
-      );
-      const [fifoSql] = managerMock.query.mock.calls[2] as [string, unknown[]];
-      expect(fifoSql).toMatch(/u\.ubicacion_id\s*=\s*\$3/);
+      expect(res.map((u) => u.unidad_id)).toEqual([ID]);
+      // Lo que viaja a la base ya va en minúsculas.
+      expect(managerMock.query.mock.calls[1][1]).toEqual([[ID], TENANT]);
+      expect(managerMock.query.mock.calls[2][1]).toEqual([TENANT, [ID], null]);
     });
 
-    it('salida serie sin unidadIds: lanza BadRequest si no hay suficientes disponibles', async () => {
+    it('bloquearUnidadesParaSalida: la misma unidad en mayúsculas y minúsculas es una repetida', async () => {
+      const ID = 'aaaaaaaa-0000-4000-8000-00000000000a';
+
+      await expect(
+        service.bloquearUnidadesParaSalida(
+          managerMock as unknown as EntityManager,
+          {
+            tenantId: TENANT,
+            itemId: ITEM_ID,
+            ubicacionId: UBICACION_ID,
+            unidadIds: [ID, ID.toUpperCase()],
+          },
+        ),
+      ).rejects.toThrow(new BadRequestException('Una unidad viene repetida'));
+      expect(managerMock.query).not.toHaveBeenCalled();
+    });
+
+    it('salida serie: una unidad apartada por OTRA cuenta rechaza nombrando serie y mesa', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
-        .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo: statement aparte, ya bajo el lock
-        .mockResolvedValueOnce([]); // SELECT FIFO unidades (0 disponibles)
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '1' }])
+        .mockResolvedValueOnce([{ item_nombre: 'Celular' }])
+        .mockResolvedValueOnce([filaUnidad()])
+        .mockResolvedValueOnce([
+          { unidad_id: UNIDAD_1, mesa_nombre: 'Mesa 4' },
+        ]);
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
-          tenantId: TENANT,
-          itemId: ITEM_ID,
-          ubicacionId: UBICACION_ID,
-          tipo: 'salida',
-          motivo: 'venta',
-          cantidad: '1',
-          usuarioId: USER_ID,
+          ...paramsVenta,
+          cuentaId: OTRA_CUENTA_ID,
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(
+        new BadRequestException(
+          'La unidad IMEI-001 está apartada en la cuenta de Mesa 4',
+        ),
+      );
+      // La consulta de apartado excluye la cuenta dueña de la salida, y solo
+      // cuentas abiertas y vivas.
+      const [sql, params] = managerMock.query.mock.calls[4] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toMatch(/c\.estado = 'abierta'/);
+      expect(sql).toMatch(/c\.cuenta_id IS DISTINCT FROM \$3/);
+      expect(params).toEqual([TENANT, [UNIDAD_1], OTRA_CUENTA_ID]);
+    });
+
+    it('salida serie: una unidad apartada por la cuenta propia puede salir', async () => {
+      // La consulta ya excluye a la cuenta dueña (`IS DISTINCT FROM $3`), así
+      // que la base devuelve vacío: acá se fija que `cuentaId` viaja como $3.
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '2' }])
+        .mockResolvedValueOnce([{ item_nombre: 'Celular' }])
+        .mockResolvedValueOnce([filaUnidad()])
+        .mockResolvedValueOnce([]) // apartado: ninguna de OTRA cuenta
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ cnt: '1' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-s5' }])
+        .mockResolvedValueOnce(undefined);
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        { ...paramsVenta, cuentaId: CUENTA_ID },
+      );
+
+      expect(res.stockResultante).toBe('1');
+      expect(managerMock.query.mock.calls[4][1]).toEqual([
+        TENANT,
+        [UNIDAD_1],
+        CUENTA_ID,
+      ]);
+    });
+
+    it('salida serie sin cuentaId: la consulta de apartado recibe null', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '2' }])
+        .mockResolvedValueOnce([{ item_nombre: 'Celular' }])
+        .mockResolvedValueOnce([filaUnidad()])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ cnt: '1' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-s6' }])
+        .mockResolvedValueOnce(undefined);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        paramsVenta,
+      );
+
+      expect(managerMock.query.mock.calls[4][1]).toEqual([
+        TENANT,
+        [UNIDAD_1],
+        null,
+      ]);
+    });
+
+    it('venta serie: marca vendidas las unidades con UNA sola sentencia ANY', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '3' }])
+        .mockResolvedValueOnce([{ item_nombre: 'Celular' }])
+        .mockResolvedValueOnce([
+          filaUnidad({ unidad_id: UNIDAD_1 }),
+          filaUnidad({ unidad_id: UNIDAD_2, serie: 'IMEI-002' }),
+        ])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ cnt: '1' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-s7' }])
+        .mockResolvedValueOnce(undefined);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          ...paramsVenta,
+          cantidad: '2',
+          unidadIds: [UNIDAD_1, UNIDAD_2],
+          ventaId: 'venta-uuid-1',
+        },
+      );
+
+      const updates = managerMock.query.mock.calls.filter((c) =>
+        /UPDATE item_unidad/.test(c[0] as string),
+      );
+      expect(updates).toHaveLength(1);
+      const [sql, params] = updates[0] as [string, unknown[]];
+      expect(sql).toMatch(
+        /SET estado = \$1, venta_id = \$2\s+WHERE unidad_id = ANY\(\$3\)/,
+      );
+      expect(params).toEqual(['vendido', 'venta-uuid-1', [UNIDAD_1, UNIDAD_2]]);
+    });
+
+    it('salida serie: la cantidad tiene que coincidir con las unidades elegidas', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '3' }])
+        .mockResolvedValueOnce([{ item_nombre: 'Celular' }])
+        .mockResolvedValueOnce([filaUnidad()])
+        .mockResolvedValueOnce([]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          ...paramsVenta,
+          cantidad: '2',
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'La cantidad (2) no coincide con el número de unidades (1)',
+        ),
+      );
     });
 
     it('salida serie: lanza BadRequest si unidad no está disponible', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
         .mockResolvedValueOnce([{ stock: '1' }]) // SELECT saldo: statement aparte, ya bajo el lock
-        .mockResolvedValueOnce([
-          {
-            estado: 'vendido',
-            item_id: ITEM_ID,
-            tenant_id: TENANT,
-            ubicacion_id: UBICACION_ID,
-            serie: 'IMEI-001',
-          },
-        ]);
-
-      await expect(
-        service.registrarMovimiento(managerMock as unknown as EntityManager, {
-          tenantId: TENANT,
-          itemId: ITEM_ID,
-          ubicacionId: UBICACION_ID,
-          tipo: 'salida',
-          motivo: 'merma',
-          cantidad: '1',
-          usuarioId: USER_ID,
-          unidadIds: [UNIDAD_1],
-          motivoBajaId: MOTIVO_BAJA_ID,
-        }),
-      ).rejects.toThrow(BadRequestException);
-    });
-
-    it('salida serie: lanza BadRequest si la unidad no pertenece al tenant', async () => {
-      managerMock.query
-        .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
-        .mockResolvedValueOnce([{ stock: '1' }]) // SELECT saldo: statement aparte, ya bajo el lock
-        .mockResolvedValueOnce([
-          // La unidad existe y está disponible, pero es de otro tenant: el
-          // `unidadId` llega del body del cliente, así que este `if` es la
-          // única defensa contra pedir la baja de una unidad ajena.
-          {
-            estado: 'disponible',
-            item_id: ITEM_ID,
-            tenant_id: 'otro-tenant-uuid',
-          },
-        ])
-        // El resto de la cadena queda mockeada por si la validación de
-        // pertenencia desaparece: así el test rojo lo dice la propia
-        // aserción `rejects.toThrow` (nunca lanzó) y no un TypeError de un
-        // mock incompleto más adelante en el flujo.
-        .mockResolvedValueOnce(undefined) // UPDATE unidad
-        .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
-        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
-        .mockResolvedValueOnce([{ movimiento_id: 'mov-tenant-mutant' }]) // INSERT movimiento
-        .mockResolvedValueOnce(undefined); // INSERT detalle
+        .mockResolvedValueOnce([{ item_nombre: 'Celular' }]) // re-lock de item_producto
+        .mockResolvedValueOnce([filaUnidad({ estado: 'vendido' })]);
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -948,25 +1111,53 @@ describe('InventarioService', () => {
           motivoBajaId: MOTIVO_BAJA_ID,
         }),
       ).rejects.toThrow(
-        new BadRequestException(`Unidad ${UNIDAD_1} no pertenece al tenant`),
+        new BadRequestException(
+          'La unidad IMEI-001 no está disponible (estado: vendido)',
+        ),
+      );
+    });
+
+    it('salida serie: una unidad que no vuelve de la query (otro tenant o eliminada) rechaza igual que una ajena', async () => {
+      // La query lockea por `tenant_id = $2 AND eliminado_el IS NULL`: una
+      // unidad de otro tenant NO vuelve, y el mensaje es el mismo que el de
+      // una de otro producto — no distingue, para no ser un oráculo entre
+      // tenants. El `unidadId` llega del body del cliente: esta es la única
+      // defensa contra pedir la salida de una unidad ajena.
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '1' }])
+        .mockResolvedValueOnce([{ item_nombre: 'Celular' }])
+        .mockResolvedValueOnce([]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '1',
+          usuarioId: USER_ID,
+          unidadIds: [UNIDAD_1],
+          motivoBajaId: MOTIVO_BAJA_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          `Unidad ${UNIDAD_1} no pertenece a este producto`,
+        ),
       );
     });
 
     it('salida serie: lanza BadRequest si la unidad no pertenece al item', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
-        .mockResolvedValueOnce([{ stock: '1' }]) // SELECT saldo: statement aparte, ya bajo el lock
-        .mockResolvedValueOnce([
-          // Mismo tenant, pero la unidad es de otro ítem.
-          {
-            estado: 'disponible',
-            item_id: 'otro-item-uuid',
-            tenant_id: TENANT,
-          },
-        ])
-        // Igual que arriba: cadena completa para que un mutante que borre
-        // esta validación falle por la propia aserción, no por un
-        // TypeError río abajo.
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '1' }])
+        .mockResolvedValueOnce([{ item_nombre: 'Celular' }])
+        // Mismo tenant, pero la unidad es de otro ítem.
+        .mockResolvedValueOnce([filaUnidad({ item_id: 'otro-item-uuid' })])
+        // Cadena completa por si la validación desaparece: así un mutante
+        // falla por la propia aserción y no por un TypeError río abajo.
+        .mockResolvedValueOnce([]) // apartado
         .mockResolvedValueOnce(undefined) // UPDATE unidad
         .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
@@ -986,7 +1177,9 @@ describe('InventarioService', () => {
           motivoBajaId: MOTIVO_BAJA_ID,
         }),
       ).rejects.toThrow(
-        new BadRequestException(`Unidad ${UNIDAD_1} no pertenece al item`),
+        new BadRequestException(
+          `Unidad ${UNIDAD_1} no pertenece a este producto`,
+        ),
       );
     });
 
@@ -1034,16 +1227,11 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce([{ stock: '1' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ item_nombre: 'Celular' }]) // re-lock de item_producto
         .mockResolvedValueOnce([
           // La unidad existe, es del tenant y del item — pero está en la
           // bodega, y la salida se pide contra el local (UBICACION_ID).
-          {
-            estado: 'disponible',
-            item_id: ITEM_ID,
-            tenant_id: TENANT,
-            ubicacion_id: BODEGA_ID,
-            serie: 'IMEI-BODEGA',
-          },
+          filaUnidad({ ubicacion_id: BODEGA_ID, serie: 'IMEI-BODEGA' }),
         ])
         .mockResolvedValueOnce([
           { ubicacion_id: BODEGA_ID, nombre: 'Bodega Subsuelo' },

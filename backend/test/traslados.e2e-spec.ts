@@ -715,34 +715,31 @@ describe('Traslados entre ubicaciones (e2e)', () => {
   }, 60000);
 
   // ---------------------------------------------------------------------------
-  // 7b y 8b. Auto-selección: sin `unidadIds` y sin `loteId`
+  // 7b y 8b. Lo que la salida elige: serie lo elige el cliente, lote lo elige el chokepoint
   // ---------------------------------------------------------------------------
 
   /**
-   * El DTO publica `unidadIds` y `loteId` como OPCIONALES: sin ellos el
-   * chokepoint auto-selecciona entre lo que hay **en el origen** (series por
-   * FIFO, lotes por vencimiento). Es el único camino en el que la SALIDA
-   * elige y la ENTRADA tiene que registrar esa misma elección, así que es el
-   * que recorre los cruces que la entrada de traslado hace contra `cantidad` y
-   * contra el ítem. Sin estos dos casos esos
-   * guards no los ejercitaba nada.
+   * Es el único camino en el que la ENTRADA tiene que registrar exactamente lo
+   * que la SALIDA movió, así que es el que recorre los cruces que la entrada de
+   * traslado hace contra `cantidad` y contra el ítem. En modo `lote` el DTO
+   * deja `loteId` opcional y, sin él, el chokepoint elige por vencimiento entre
+   * lo que hay **en el origen**. En modo `serie` ya no elige nadie más que el
+   * cliente: el caso de serie conserva lo que protegía el viejo de FIFO —que la
+   * entrada registre lo que salió, con MÁS DE UNA unidad— y elige la más nueva
+   * y la más vieja, no las dos más viejas: así un regreso a "elegir por
+   * antigüedad" mueve otras y el caso lo ve.
    */
-  it('modo serie sin unidadIds: mueve las MÁS VIEJAS del origen', async () => {
+  it('modo serie con unidadIds: mueve exactamente las elegidas, no las más viejas', async () => {
     const { id: itemId } = await post<IdResponse>('/api/items', {
-      nombre: nombreUnico('Serie FIFO traslado E2E'),
+      nombre: nombreUnico('Serie elegida traslado E2E'),
       precioBase: '10000',
       monedaId: CLP_MONEDA_ID,
       tipo: 'producto',
       modoInventario: 'serie',
     });
     const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-    // Tres altas SEPARADAS para que `creado_el` las ordene: si entraran en una
-    // sola, el FIFO no tendría nada que ordenar y el caso no mediría el orden.
-    //
-    // Y las series van al REVÉS del orden de alta (C, B, A) a propósito: con
-    // `1, 2, 3` el orden alfabético coincidía con el de antigüedad y un
-    // `ORDER BY u.serie ASC` sobrevivía. Así, alfabético y FIFO eligen
-    // unidades distintas.
+    // Tres altas SEPARADAS para que `creado_el` las ordene (C, B, A: la más
+    // vieja es C).
     for (const sufijo of ['C', 'B', 'A']) {
       await request(app.getHttpServer())
         .patch(`/api/items/${itemId}/stock`)
@@ -752,13 +749,29 @@ describe('Traslados entre ubicaciones (e2e)', () => {
           motivo: 'inventario_inicial',
           ubicacionId: localId,
           cantidad: '1',
-          series: [{ serie: `FIFO-${sufijo}-${marca}` }],
+          series: [{ serie: `ELEGIDA-${sufijo}-${marca}` }],
         })
         .expect(200);
     }
+    const antes = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}/unidades`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(antes.status).toBe(200);
+    const idDeSerie = new Map(
+      (antes.body as UnidadResponse[]).map((u) => [u.serie, u.id]),
+    );
 
-    // 2 de 3, sin decir cuáles.
-    await trasladar(localId, bodegaId, [{ itemId, cantidad: '2' }]);
+    // 2 de 3, diciendo cuáles: la más vieja (C) y la más nueva (A).
+    await trasladar(localId, bodegaId, [
+      {
+        itemId,
+        cantidad: '2',
+        unidadIds: [
+          idDeSerie.get(`ELEGIDA-C-${marca}`)!,
+          idDeSerie.get(`ELEGIDA-A-${marca}`)!,
+        ],
+      },
+    ]);
 
     const resUnidades = await request(app.getHttpServer())
       .get(`/api/items/${itemId}/unidades`)
@@ -770,18 +783,17 @@ describe('Traslados entre ubicaciones (e2e)', () => {
         { ubicacionId: u.ubicacionId, estado: u.estado },
       ]),
     );
-    // Las dos MÁS VIEJAS (C y B) se fueron; la más nueva (A) se quedó — que es
-    // exactamente al revés de lo que elegiría un orden por serie. Y ninguna se
-    // dio de baja: un traslado mueve, no consume.
-    expect(porSerie.get(`FIFO-C-${marca}`)).toEqual({
+    // Las dos elegidas se fueron; la del medio (B) se quedó. Y ninguna se dio
+    // de baja: un traslado mueve, no consume.
+    expect(porSerie.get(`ELEGIDA-C-${marca}`)).toEqual({
       ubicacionId: bodegaId,
       estado: 'disponible',
     });
-    expect(porSerie.get(`FIFO-B-${marca}`)).toEqual({
+    expect(porSerie.get(`ELEGIDA-A-${marca}`)).toEqual({
       ubicacionId: bodegaId,
       estado: 'disponible',
     });
-    expect(porSerie.get(`FIFO-A-${marca}`)).toEqual({
+    expect(porSerie.get(`ELEGIDA-B-${marca}`)).toEqual({
       ubicacionId: localId,
       estado: 'disponible',
     });

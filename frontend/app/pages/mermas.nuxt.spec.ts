@@ -22,6 +22,13 @@ const HARINA = {
   unidadMedida: 'kg',
   modoInventario: 'cantidad',
 }
+const CELULAR = {
+  id: 'item-celular',
+  nombre: 'Celular X',
+  costoActual: '90000.0000',
+  unidadMedida: 'unidad',
+  modoInventario: 'serie',
+}
 const MOTIVO = { id: 'motivo-1', nombre: 'Vencimiento' }
 
 /** Ubicaciones que devuelve `GET /ubicaciones` en cada test. */
@@ -75,11 +82,11 @@ mockNuxtImport('useApiFetch', () => {
     }
     // `ids=` (resolver los elegidos) y búsqueda (el selector con búsqueda en el servidor).
     if (url.includes('/items?ids=')) {
-      return Promise.resolve({ data: [HARINA], meta: { page: 1, pageSize: 100, total: 1, totalPages: 1 } })
+      return Promise.resolve({ data: [HARINA, CELULAR], meta: { page: 1, pageSize: 100, total: 2, totalPages: 1 } })
     }
     if (url.includes('/items?')) {
       busquedasItems.push(url)
-      return Promise.resolve({ data: [HARINA], meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 } })
+      return Promise.resolve({ data: [HARINA, CELULAR], meta: { page: 1, pageSize: 20, total: 2, totalPages: 1 } })
     }
     if (url.includes('/motivos-baja')) {
       motivosUrlSolicitada = url
@@ -238,6 +245,77 @@ describe('mermas — selector de ubicación', () => {
     // Si sobreviviera, sería una cantidad tipeada mirando el stock del local
     // aplicada como si fuera de la bodega — un número que nadie tecleó ahí.
     expect((wrapper.find('input[inputmode="decimal"]').element as HTMLInputElement).value).toBe('')
+    wrapper.unmount()
+  })
+})
+
+// El backend rechaza la merma de un producto con serie (400): la pantalla lo avisa al
+// elegirlo y no deja registrar, en vez de dejar que el usuario descubra el error al enviar.
+describe('mermas — producto con número de serie', () => {
+  beforeEach(() => {
+    mermasEnviadas = []
+    mermasUrls = []
+    busquedasItems = []
+    motivosUrlSolicitada = ''
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  const botonRegistrar = (w: Wrapper) => w.findAllComponents({ name: 'UButton' })
+    .find(b => b.text().trim() === 'Registrar' && b.props('type') === 'submit')!
+
+  const AVISO = 'tiene número de serie: dalo de baja desde Ajuste de stock, eligiendo la unidad'
+
+  it('al elegirlo, avisa nombrándolo y deshabilita Registrar', async () => {
+    ubicacionesBackend = [LOCAL]
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    expect(wrapper.text()).not.toContain(AVISO)
+    expect(botonRegistrar(wrapper).props('disabled')).toBeFalsy()
+
+    await elegirProducto(wrapper, CELULAR.id)
+
+    expect(wrapper.text()).toContain(`«${CELULAR.nombre}» ${AVISO}`)
+    expect(botonRegistrar(wrapper).props('disabled')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('no registra aunque el resto del formulario esté completo', async () => {
+    ubicacionesBackend = [LOCAL]
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegirProducto(wrapper, CELULAR.id)
+    await wrapper.find('input[inputmode="decimal"]').setValue('1')
+    await emitir(selectMotivo(wrapper), MOTIVO.id)
+    await enviar(wrapper)
+
+    expect(mermasEnviadas).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('enviar el formulario por el submit (Enter) tampoco registra, sin depender del botón deshabilitado', async () => {
+    ubicacionesBackend = [LOCAL]
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegirProducto(wrapper, CELULAR.id)
+    await wrapper.find('input[inputmode="decimal"]').setValue('1')
+    await emitir(selectMotivo(wrapper), MOTIVO.id)
+
+    await wrapper.find('form#merma-form').trigger('submit')
+    await new Promise(r => setTimeout(r, 250))
+
+    expect(mermasEnviadas).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('volver a un producto sin serie quita el aviso y habilita Registrar', async () => {
+    ubicacionesBackend = [LOCAL]
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegirProducto(wrapper, CELULAR.id)
+    await elegirProducto(wrapper, HARINA.id)
+
+    expect(wrapper.text()).not.toContain(AVISO)
+    expect(botonRegistrar(wrapper).props('disabled')).toBeFalsy()
     wrapper.unmount()
   })
 })

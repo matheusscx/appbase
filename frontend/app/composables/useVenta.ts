@@ -7,6 +7,7 @@ import {
   personalizacionVacia,
   type PersonalizacionPayload,
 } from './useRecetaPersonalizacion'
+import type { UnidadElegida } from './useUnidadesSerie'
 import {
   aCantidadCanonica,
   desdeCantidadCanonica,
@@ -53,6 +54,13 @@ export interface ItemCatalogo {
   stockDisponible?: string | null
   /** Combos con al menos un grupo de modificadores asociado: la disponibilidad final depende de la opción elegida. */
   disponibleCondicional?: boolean
+  /**
+   * `'serie'` en el producto con número de serie (IMEI, chasis…): ahí quien vende
+   * elige QUÉ unidad sale, y la línea lleva `unidades` en vez de una cantidad
+   * tipeada. `GET /items` ya lo manda; el resto de los modos y los tipos no
+   * cambian nada.
+   */
+  modoInventario?: string | null
 }
 
 /**
@@ -83,6 +91,12 @@ export interface CarritoLinea {
   personalizacion?: PersonalizacionPayload
   /** texto UI precomputado al confirmar drawer */
   personalizacionResumen?: string
+  /**
+   * Producto con serie: las unidades que salen. `cantidad` es cuántas son y no se
+   * edita a mano (`setUnidades` es el único que la mueve); el cuerpo de la venta
+   * las manda como `unidadIds`.
+   */
+  unidades?: UnidadElegida[]
 }
 
 export interface PagoInput {
@@ -144,6 +158,7 @@ export function agregarLinea(
   catalogo: UnidadCat[],
   personalizacion?: PersonalizacionPayload,
   personalizacionResumen?: string,
+  unidades?: UnidadElegida[],
 ): CarritoLinea[] {
   const pers = personalizacionVacia(personalizacion) ? undefined : personalizacion
   const resumen = pers ? personalizacionResumen : undefined
@@ -152,6 +167,20 @@ export function agregarLinea(
   const idx = lineas.findIndex(
     (l) => l.item.id === item.id && mismaPersonalizacion(l.personalizacion, pers),
   )
+  if (unidades) {
+    // Producto con serie: la cantidad son las unidades. Si ya hay línea del mismo
+    // ítem se suman sin repetir ninguna, y no pasa por la presentación.
+    const existente = idx >= 0 ? lineas[idx]! : undefined
+    const vistas = new Set((existente?.unidades ?? []).map(u => u.id))
+    const todas = [...(existente?.unidades ?? []), ...unidades.filter(u => !vistas.has(u.id))]
+    const conUnidades: CarritoLinea = {
+      ...(existente ?? { item }),
+      cantidad: String(todas.length),
+      unidades: todas,
+    }
+    return existente ? lineas.map((l, i) => (i === idx ? conUnidades : l)) : [...lineas, conUnidades]
+  }
+
   if (idx >= 0) {
     const linea = lineas[idx]!
     const unidadPres = linea.unidadCodigoPresentacion ?? unidadBase
@@ -214,6 +243,21 @@ export function setCantidadPresentacion(
           unidadCodigoPresentacion: unidadCodigo,
         }
       : l,
+  )
+}
+
+/**
+ * Fija las unidades que salen de una línea con serie; la cantidad es cuántas son.
+ * Sin ninguna, la línea se quita: no existe una venta de 0 unidades.
+ */
+export function setUnidades(
+  lineas: CarritoLinea[],
+  index: number,
+  unidades: UnidadElegida[],
+): CarritoLinea[] {
+  if (unidades.length === 0) return quitarLinea(lineas, index)
+  return lineas.map((l, i) =>
+    i === index ? { ...l, unidades, cantidad: String(unidades.length) } : l,
   )
 }
 
@@ -280,6 +324,7 @@ export function toVentaLineasBody(lineas: CarritoLinea[]) {
     ...(l.personalizacion
       ? { personalizacion: personalizacionBody(l.personalizacion) }
       : {}),
+    ...(l.unidades?.length ? { unidadIds: l.unidades.map(u => u.id) } : {}),
   }))
 }
 
@@ -499,6 +544,7 @@ export function useVenta() {
     item: ItemCatalogo,
     personalizacion?: PersonalizacionPayload,
     personalizacionResumen?: string,
+    unidades?: UnidadElegida[],
   ) {
     lineas.value = agregarLinea(
       lineas.value,
@@ -506,6 +552,7 @@ export function useVenta() {
       catalogo(),
       personalizacion,
       personalizacionResumen,
+      unidades,
     )
   }
   function quitar(index: number) {
@@ -528,6 +575,9 @@ export function useVenta() {
   function cambiarCantidad(index: number, cantidad: string) {
     lineas.value = setCantidad(lineas.value, index, cantidad)
   }
+  function cambiarUnidades(index: number, unidades: UnidadElegida[]) {
+    lineas.value = setUnidades(lineas.value, index, unidades)
+  }
   function limpiar() {
     lineas.value = []
     limpiarResultado()
@@ -543,6 +593,7 @@ export function useVenta() {
     quitar,
     cambiarCantidad,
     cambiarCantidadPresentacion,
+    cambiarUnidades,
     limpiar,
   }
 }

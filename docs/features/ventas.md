@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-07-01
+**Last Updated**: 2026-10-03 (producto con serie: la línea trae las unidades que salen)
 
 ---
 
@@ -79,7 +79,7 @@ Request:
       "descuentoIds": ["uuid"],                 // opcional
       "recargoIds":   ["uuid"],                 // opcional
       "impuestoIds":  ["uuid"],                 // opcional
-      "unidadIds":    ["uuid"],                 // modo serie
+      "unidadIds":    ["uuid"],                 // obligatorio en modo serie; en otro modo, 400
       "loteId":       "uuid"                    // modo lote
     }
   ],
@@ -112,6 +112,9 @@ Response (201):
 - `400` — excedente de pago sin método con `permite_vuelto = true`
 - `400` — `metodoPagoId` no habilitado para el tenant (rollback completo)
 - `400` — stock insuficiente (rollback completo)
+- `400` — producto con serie sin `unidadIds`, con otra cantidad que unidades, con una unidad repetida,
+  que no es de ese producto o está fuera del local, ya vendida o apartada por una mesa; o `unidadIds`
+  en un producto sin serie (ver abajo)
 - `400` — falta la cabecera `Idempotency-Key` o no es un UUID
 - `422` — la misma `Idempotency-Key` con otros datos (body con `ventaId`)
 
@@ -187,6 +190,21 @@ tarjeta por efectivo) responde 422 con el `ventaId` de la venta que sí entró, 
 ofrece *Ver venta*. Un primer intento rechazado no deja rastro, así que el reintento corregido
 corre como nuevo. La clave es por usuario: la de otro no reproduce nada.
 El callback de Webpay llama al service sin clave; ya es idempotente por orden (ADR-009).
+
+**Un producto con número de serie se vende eligiendo la unidad (2026-10-03).** Quien vende
+decide cuál sale; el servidor no elige. La línea de un producto en modo `serie` **tiene que traer
+`unidadIds`**, con tantas unidades como `cantidad` (entera) y sin repetir dentro de la venta; en un
+producto de otro modo, un `unidadIds` es 400. Una línea con serie no admite una presentación
+distinta de la unidad base (misma regla y texto que la merma). Se valida en `ventas.service` al
+resolver las líneas, con el `modo_inventario` que ya se cargó y antes de tocar stock; el
+chokepoint de inventario vuelve a validar, bajo lock, que la unidad sea de ese producto, esté
+`disponible` en el local y no esté apartada por una cuenta de salón abierta
+([`inventario-serializado.md`](./inventario-serializado.md#quién-elige-qué-unidad-con-serie-sale)).
+El precio no depende de la condición (nuevo/usado): el motor no cambia, y
+`POST /ventas/calcular` sigue sin recibir unidades. La **tienda online** no vende productos con
+serie (rechaza la línea antes de iniciar el pago), y un **combo o grupo** no puede incluirlos.
+Sin compatibilidad hacia atrás: no hay un camino viejo que sostener (owner, 2026-09-29, *"no
+tenemos pantallas mas viejas ni tenemos datos productivos"*).
 
 **Una línea no lleva precio (2026-08-30).** El precio sale de `item.precioBase` —más lo
 que agregue la personalización— y lo calcula el servidor. Hasta esa fecha había un
@@ -458,7 +476,7 @@ es "Sin documento", más un badge "Duplicado". La nota de crédito lleva el badg
 
 ### GET /api/ventas/:id
 
-Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recargos`, `impuestos`, `customer`, `pagos`. Incluye `montoPagado`, `saldo` (la expresión única) y `puedeAbonar` (estado que admite abono **y** saldo > 0): la pantalla no resta ni replica el estado.
+Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recargos`, `impuestos`, `customer`, `pagos`. Cada detalle de un producto con serie trae `unidades: [{ serie, condicion }]` (`[]` en el resto): qué unidad se llevó el cliente, para una garantía o un reclamo. Salen del kardex, en **una** consulta por venta, agrupadas **por ítem** (el kardex no liga el movimiento a la línea: con dos líneas del mismo producto con serie, que solo pasa en el salón con el precio cambiado entre pedidos, cada una muestra todas las unidades de ese producto). La boleta impresa no cambia. Incluye `montoPagado`, `saldo` (la expresión única) y `puedeAbonar` (estado que admite abono **y** saldo > 0): la pantalla no resta ni replica el estado.
 
 **Los documentos y lo que el backend decide sobre ellos** (spec `emision-por-venta` § 3.4 y § 3.5,
 [ADR-028](../adr/028-emision-registrada-por-venta.md)). La pantalla solo los muestra:
@@ -801,11 +819,20 @@ Interfaz de punto de venta para crear una venta desde el catálogo hasta el cobr
 |---|---|---|
 | `CatalogoGrid` | `app/components/ventas/CatalogoGrid.vue` | Buscador + grilla de productos, paginada en el servidor ([catalogo-paginado.md](./catalogo-paginado.md)); emite `add` al carrito |
 | `ClienteForm` | `app/components/ventas/ClienteForm.vue` | Datos del cliente (nombre, RUT, dirección, teléfono, email); exporta tipo `CustomerForm` |
+| `UnidadesSerieModal` | `app/components/ventas/UnidadesSerieModal.vue` | Selector de unidades de un producto con serie: serie, condición como badge, garantía, buscador por serie y selección múltiple; también lo usa el salón |
 | `CarritoPanel` | `app/components/ventas/CarritoPanel.vue` | Líneas del carrito con `AppCantidadInput` (±, selector de unidad de la misma magnitud), selector de tipo de documento, desglose, botón Cobrar |
 | `CobroModal` | `app/components/ventas/CobroModal.vue` | Modal de pagos múltiples con distintos métodos, cálculo de vuelto, confirmación y emisión de POST /api/ventas |
 | `DocumentoNumeroCampos` | `app/components/ventas/DocumentoNumeroCampos.vue` | "N° del comprobante" + selector opcional "Es voucher / Es boleta de la máquina"; lo usan el cobro, el abono y "Completar número" |
 
 | `AppCantidadInput` | `app/components/AppCantidadInput.vue` | Stepper + selector de unidad (misma magnitud); emite cantidad canónica y presentación |
+
+**Producto con serie en el POS (2026-10-03).** Tocar un producto con `modoInventario === 'serie'` en
+la grilla (`ItemCatalogo` lo trae de `GET /items`) abre el selector en vez de sumar un +1. La línea del
+carrito guarda las unidades elegidas y muestra sus series; la cantidad es cuántas son y **no se edita
+a mano** (`setUnidades` es quien la mueve; sin ninguna unidad la línea se quita). "Cambiar unidades",
+o tocar otra vez el producto, reabre el selector con las de la línea marcadas, y las de otras líneas
+del mismo producto no se ofrecen. `toVentaLineasBody` manda `unidadIds`. El selector solo lista lo
+vendible ahora; si otra caja se lleva la unidad antes del cobro, el 400 lo avisa al cobrar.
 
 **Número del comprobante al cobrar (2026-10-02, emisión por venta).** Bajo un pago cuyo medio
 emite con la máquina (`emisor === 'maquina'` en `GET /metodos-pago`), `CobroModal` muestra dos

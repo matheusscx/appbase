@@ -1361,6 +1361,112 @@ describe('VentasService', () => {
       );
     });
 
+    describe('productos con número de serie: quien vende elige las unidades', () => {
+      const U1 = '11111111-1111-4111-8111-111111111111';
+      const U2 = '22222222-2222-4222-8222-222222222222';
+      const itemSerie = {
+        ...mockItem,
+        nombre: 'Celular',
+        modoInventario: 'serie',
+        unidadMedida: 'unidad',
+      };
+      const venderSerie = (lineas: Record<string, unknown>[]) =>
+        service.crear(TENANT_ID, USUARIO_ID, { ...baseDto, lineas } as never);
+
+      beforeEach(() => {
+        itemsService.cargarBasePorIds.mockImplementation(mapaDe(itemSerie));
+      });
+
+      it('pasa la cuenta que se cobra al chokepoint, junto con las unidades', async () => {
+        await service.crearEnTransaccion(
+          buildManagerMock() as never,
+          TENANT_ID,
+          USUARIO_ID,
+          {
+            ...baseDto,
+            lineas: [{ itemId: ITEM_ID, cantidad: '1', unidadIds: [U1] }],
+          },
+          'cuenta-1',
+        );
+
+        expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            cuentaId: 'cuenta-1',
+            unidadIds: [U1],
+          }),
+        );
+      });
+
+      it.each([
+        ['sin unidadIds', { cantidad: '1' }],
+        ['con unidadIds vacío', { cantidad: '1', unidadIds: [] }],
+      ])('%s: pide elegir y no toca el stock', async (_caso, extra) => {
+        await expect(
+          venderSerie([{ itemId: ITEM_ID, ...extra }]),
+        ).rejects.toThrow(
+          'Elegí qué unidades salen: «Celular» tiene número de serie',
+        );
+        expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ['2', [U1], '2', '1'],
+        ['1', [U1, U2], '1', '2'],
+        ['1.5', [U1], '1.5', '1'],
+      ])(
+        'cantidad %s con %j unidades: no coincide',
+        async (cantidad, unidadIds, n, m) => {
+          await expect(
+            venderSerie([{ itemId: ITEM_ID, cantidad, unidadIds }]),
+          ).rejects.toThrow(
+            `«Celular»: la cantidad (${n}) no coincide con las unidades elegidas (${m})`,
+          );
+          expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+        },
+      );
+
+      it('la misma unidad en dos líneas, aunque una venga en mayúsculas, se rechaza', async () => {
+        await expect(
+          venderSerie([
+            { itemId: ITEM_ID, cantidad: '1', unidadIds: [U1] },
+            { itemId: ITEM_ID, cantidad: '1', unidadIds: [U1.toUpperCase()] },
+          ]),
+        ).rejects.toThrow('Una unidad viene repetida en la venta');
+        expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      it('una presentación distinta de la unidad base se rechaza con el texto de la merma', async () => {
+        itemsService.cargarBasePorIds.mockImplementation(
+          mapaDe({ ...itemSerie, unidadMedida: 'kg' }),
+        );
+        await expect(
+          venderSerie([
+            {
+              itemId: ITEM_ID,
+              cantidad: '1',
+              cantidadPresentacion: '1000',
+              unidadCodigoPresentacion: 'g',
+              unidadIds: [U1],
+            },
+          ]),
+        ).rejects.toThrow(
+          'Los productos por serie o lote solo admiten su unidad base',
+        );
+        expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      it('unidadIds en un producto que no es de serie se rechaza', async () => {
+        itemsService.cargarBasePorIds.mockImplementation(mapaDe(mockItem));
+        await expect(
+          venderSerie([{ itemId: ITEM_ID, cantidad: '1', unidadIds: [U1] }]),
+        ).rejects.toThrow(
+          '«Smartphone» no tiene número de serie: no lleva unidades',
+        );
+        expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      });
+    });
+
     /**
      * Frente de bodegas y traslados: el chokepoint de inventario rechaza con un
      * mensaje genérico —"Stock insuficiente para la salida", sin nombrar el

@@ -222,3 +222,36 @@ describe('QueryItemsDto.modoInventario', () => {
     expect(errores[0].property).toBe('modoInventario');
   });
 });
+
+// Tres valores válidos como `activo` (`true`, `false`, ausente) y la basura
+// corta con 400: un `vendibleOnline=TRUE` que cayera a `false` mostraría
+// justo lo que la tienda no puede vender.
+describe('QueryItemsDto.vendibleOnline', () => {
+  it.each([
+    ['true', true],
+    ['false', false],
+  ])('%s se parsea como boolean', async (crudo, esperado) => {
+    const dto = plainToInstance(QueryItemsDto, { vendibleOnline: crudo });
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.vendibleOnline).toBe(esperado);
+  });
+
+  it.each(['TRUE', '1', 'si'])(
+    '%s es un error de validación, no un false silencioso',
+    async (basura) => {
+      const dto = plainToInstance(QueryItemsDto, { vendibleOnline: basura });
+
+      const errores = await validate(dto);
+      expect(errores).toHaveLength(1);
+      expect(errores[0].property).toBe('vendibleOnline');
+    },
+  );
+
+  it('sin el parámetro queda undefined (no filtra)', async () => {
+    const dto = plainToInstance(QueryItemsDto, {});
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.vendibleOnline).toBeUndefined();
+  });
+});

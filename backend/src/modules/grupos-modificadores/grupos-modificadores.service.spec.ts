@@ -172,6 +172,55 @@ describe('GruposModificadoresService', () => {
     ).rejects.toThrow(/producto.*receta.*servicio|ingrediente/i);
   });
 
+  it('rechaza una opción vendible que es un producto con número de serie', async () => {
+    managerMock.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }])
+      .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
+      .mockResolvedValueOnce([
+        {
+          item_id: ITEM_PROD,
+          tipo: 'producto',
+          nombre: 'Celular',
+          modo_inventario: 'serie',
+          unidad_medida: 'unidad',
+        },
+      ]); // lectura de todas las opciones, en una query
+    await expect(
+      service.create(TENANT_ID, {
+        nombre: 'X',
+        opciones: [{ itemId: ITEM_PROD, cantidad: '1', precioExtra: '0' }],
+      } as any),
+    ).rejects.toThrow(
+      new BadRequestException(
+        '«Celular» tiene número de serie: no puede ser opción de un grupo',
+      ),
+    );
+  });
+
+  it('admite una opción vendible que es un producto por lote o por cantidad', async () => {
+    managerMock.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }])
+      .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
+      .mockResolvedValueOnce([
+        {
+          item_id: ITEM_PROD,
+          tipo: 'producto',
+          nombre: 'Yogur',
+          modo_inventario: 'lote',
+          unidad_medida: 'unidad',
+        },
+      ])
+      .mockResolvedValueOnce([{ grupo_opcion_id: 'O1' }]);
+    await expect(
+      service.create(TENANT_ID, {
+        nombre: 'X',
+        opciones: [{ itemId: ITEM_PROD, cantidad: '1', precioExtra: '0' }],
+      } as any),
+    ).resolves.toBeDefined();
+  });
+
   it('permite crear una opción sin cantidad default (queda null)', async () => {
     managerMock.query
       .mockResolvedValueOnce([]) // assertNombreLibre

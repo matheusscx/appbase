@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { PagoVentaDto } from './create-venta.dto';
+import { LineaVentaDto, PagoVentaDto } from './create-venta.dto';
 
 const METODO_PAGO_ID = '550e8400-e29b-41d4-a716-446655440116';
 
@@ -98,5 +98,37 @@ describe('PagoVentaDto', () => {
       const errores = await validate(dto);
       expect(errores.some((e) => e.property === 'claseDocumento')).toBe(true);
     });
+  });
+});
+
+describe('LineaVentaDto.unidadIds', () => {
+  const unidad = (n: number) =>
+    `550e8400-e29b-41d4-a716-${String(n).padStart(12, '0')}`;
+  const base = { itemId: unidad(1), cantidad: '1' };
+
+  it('acepta hasta 200 unidades', async () => {
+    const dto = plainToInstance(LineaVentaDto, {
+      ...base,
+      unidadIds: Array.from({ length: 200 }, (_, i) => unidad(i + 2)),
+    });
+    expect(await validate(dto)).toHaveLength(0);
+  });
+
+  it('rechaza más de 200 unidades', async () => {
+    const dto = plainToInstance(LineaVentaDto, {
+      ...base,
+      unidadIds: Array.from({ length: 201 }, (_, i) => unidad(i + 2)),
+    });
+    const errores = await validate(dto);
+    expect(errores.some((e) => e.property === 'unidadIds')).toBe(true);
+  });
+
+  it('rechaza un valor que no es un arreglo', async () => {
+    const dto = plainToInstance(LineaVentaDto, {
+      ...base,
+      unidadIds: unidad(2),
+    });
+    const errores = await validate(dto);
+    expect(errores.some((e) => e.property === 'unidadIds')).toBe(true);
   });
 });

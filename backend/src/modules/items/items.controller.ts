@@ -22,6 +22,7 @@ import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { AjusteStockDto } from './dto/ajuste-stock.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
+import { QueryUnidadesDto } from './dto/query-unidades.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('items')
@@ -132,10 +133,10 @@ export class ItemsController {
   findUnidades(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
-    @Query('estado') estado?: string,
+    @Query() query: QueryUnidadesDto,
   ) {
     const { tenantId } = req.user as { tenantId: string };
-    return this.itemsService.findUnidades(tenantId, id, estado);
+    return this.itemsService.findUnidades(tenantId, id, query);
   }
 
   @Get(':id/lotes')

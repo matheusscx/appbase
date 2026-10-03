@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: SDD Team
-**Last Updated**: 2026-08-18
+**Last Updated**: 2026-10-03
 
 ---
 
@@ -34,6 +34,11 @@ de 5), reutilizando el costeo y la venta de productos/recetas ya existentes.
   `combo_componentes` (N componentes fijos, soft delete).
 - Alta/edición con validación: cada componente debe ser `tipo='producto' |
   'receta' | 'servicio'` (nunca otro combo — sin combos anidados), cantidad > 0.
+  Un componente `producto` **no puede tener número de serie** (`modo_inventario = 'serie'`):
+  al vender un combo nadie elige qué unidad sale, así que se rechaza al guardar (owner,
+  2026-10-03, [inventario-serializado.md](./inventario-serializado.md#quién-elige-qué-unidad-con-serie-sale)).
+  Y al revés: un producto que ya es componente vivo no puede pasar a modo serie. "Celular +
+  funda" se vende como dos líneas, y el precio de pack se arma con una promoción.
 - Venta: descuento de stock por componente vía `ItemsService.venderComponentesCombo`,
   reutilizando `venderIngredientesReceta` para componentes tipo receta; respuesta
   con `advertencias`.

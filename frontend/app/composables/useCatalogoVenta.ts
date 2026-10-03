@@ -14,10 +14,9 @@ const ESPERA_BUSQUEDA_MS = 300
 export function useCatalogoVenta(opts: {
   tipos: Array<'producto' | 'receta' | 'combo'>
   /**
-   * Query extra fijo por pantalla, que se suma al pedido de cada página. Hoy ninguna pantalla
-   * lo usa: queda reservado para que la tienda pase el filtro que va a agregar el frente de
-   * números de serie. Ese filtro tiene que vivir en `buildFindAllFilters` (backend) para que
-   * lo vean los dos caminos de `findAll`.
+   * Query extra fijo por pantalla, que se suma al pedido de cada página. Hoy solo lo usa la
+   * tienda (`vendibleOnline: 'true'`). Un filtro así tiene que vivir en `buildFindAllFilters`
+   * (backend) para que lo vean los dos caminos de `findAll`.
    */
   filtros?: Record<string, string>
   /** Cada carga que falla, ya descartadas las respuestas viejas. Sin esto, en silencio (salón). */

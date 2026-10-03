@@ -125,6 +125,27 @@ export class QueryItemsDto extends PaginationQueryDto {
   activo?: boolean;
 
   /**
+   * `true`: el catálogo que la tienda online puede vender, o sea sin los
+   * productos con número de serie (no hay quien elija la unidad, y rechazar la
+   * venta después de Webpay dejaría un cargo sin venta). `false` y ausente no
+   * filtran. El nombre dice la regla, no el mecanismo: el día que otra cosa no
+   * se venda online, el cliente no cambia.
+   *
+   * Misma coerción estricta que `activo`, y por la misma razón: con
+   * `value === 'true'`, un `vendibleOnline=TRUE` caería a `false` y mostraría
+   * justo lo que la tienda no puede vender. Lo que no es `true`/`false` llega
+   * tal cual a `@IsBoolean()` y sale como 400.
+   */
+  @Transform(({ value }: { value: unknown }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return value;
+  })
+  @IsOptional()
+  @IsBoolean()
+  vendibleOnline?: boolean;
+
+  /**
    * Filtra los ítems (`producto`/`ingrediente`) sin costo cargado. **Dos
    * estados, no tres** —a diferencia de `activo`—: no existe "solo los que sí
    * tienen costo", así que la coerción es la de `incluirEliminados`

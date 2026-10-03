@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsIn,
@@ -50,6 +51,12 @@ export class LineaVentaDto {
   impuestoIds?: string[];
 
   @IsOptional()
+  @IsArray()
+  // Con techo: la salida serie lockea todas las unidades adentro de la
+  // transacción que retiene el lock ancla del producto, así que el largo que
+  // manda el cliente es tiempo de espera para las ventas de ese producto. Mismo
+  // 200 que `LineaTrasladoDto`.
+  @ArrayMaxSize(200)
   @IsUUID(undefined, { each: true })
   unidadIds?: string[]; // modo 'serie' salida
 

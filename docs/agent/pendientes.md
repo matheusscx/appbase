@@ -174,6 +174,36 @@ destapa una decisión que no es mía).
   `curl -w "%{time_total} %{size_download}"` sobre la ruta, antes de decidir si se pagina o si la
   pantalla pasa a `AppItemSelect` (el selector ya busca en el servidor).
 
+- [ ] **Restaurar de la papelera un combo o un grupo cuyo producto pasó a serie mientras estaba
+  borrado deja un compuesto que no se puede vender** (backend, `docs/features/papelera.md`
+  "Restaurar no revive un compuesto a medias"; **leído, no corrido**: lo dejó afuera el frente
+  "quien vende elige qué unidad con serie sale", 2026-10-03, por decisión del controlador del
+  frente). Ese frente cerró la configuración: un combo o un grupo no guarda un componente u opción
+  que sea un producto con serie, y un producto que ya es componente u opción **vivo** no pasa a
+  serie (`ItemsService.nombreSiEsComponenteVivo`, que solo cuenta combos y grupos vivos). Lo que
+  queda: con el combo en la papelera el producto **sí** puede pasar a serie —solo si no tiene
+  movimientos, porque `modo_inventario` es inmutable con ellos, así que es rarísimo—, y restaurar
+  el combo no mira el modo del componente. El combo vuelve configurado y la venta lo rechaza con
+  400 (*"Elegí qué unidades salen"*, en el chokepoint) sin elegir ninguna unidad: no corrompe ni
+  elige mal, solo no se puede vender hasta que alguien lo edite. **Medir:** reproducirlo por la API
+  (crear combo con un producto en modo cantidad sin movimientos, borrar el combo, pasar el producto
+  a serie, restaurar el combo, intentar venderlo). **Arreglo probable:** que restaurar frene con 400
+  nombrando el producto con serie, como ya frena por un componente en la papelera (mismo lugar, mismo
+  mensaje de "qué hay que sacar primero").
+
+- [ ] **Una venta con dos líneas del mismo producto con serie muestra todas las unidades bajo cada
+  línea** (frontend + backend, `VentaDetalleDrawer.vue` y `VentasService` armado del detalle; **leído,
+  no corrido**: lo marcó la revisión independiente del frente "quien vende elige qué unidad con serie
+  sale", 2026-10-03). El detalle agrupa las unidades vendidas por ítem porque el kardex no liga cada
+  movimiento a su línea (decisión del controlador del frente, en
+  [`../features/inventario-serializado.md`](../features/inventario-serializado.md)). Solo pasa en el
+  salón, cuando el mismo producto quedó en dos líneas porque cambió el precio o las reglas entre un
+  pedido y otro (el POS siempre junta). Costo: en un reclamo de garantía la fila muestra más series que
+  su cantidad. **Medir:** reproducirlo por la API (dos pedidos del mismo producto con serie con un
+  cambio de precio en el medio, cerrar, leer `GET /ventas/:id`). **Arreglo probable, de menor a
+  mayor:** que el drawer muestre las unidades una sola vez por ítem; o guardar las unidades en la
+  línea de la venta.
+
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
@@ -928,27 +958,6 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
 
 ### Qué lote o unidad sale de stock (owner, 2026-09-28)
 
-- [ ] **En productos con número de serie, el cajero elige qué unidad sale** ✅ *(owner,
-  2026-09-28; antes era pregunta de la § 4)* (backend + frontend, `inventario.service.ts`, la
-  selección de `item_unidad`; POS y salones). **Cómo se decidió:** la orquestadora le planteó la
-  escena medida —en una misma compra entran un equipo **nuevo** y uno **usado** del mismo
-  producto; al vender, el sistema elige cualquiera, porque la selección nunca mira la condición y
-  la venta del POS no manda qué unidad— con tres opciones: *A: elige el cajero* (recomendada: es
-  lo que evita cobrar un usado como nuevo), *B: el sistema prefiere una condición* y *C: da lo
-  mismo*. Contestó "vamos A".
-  **Lo que falta al construirlo:** la pantalla de venta (POS y salones) pregunta qué unidad cuando
-  el producto es de modo serie, y la API recibe las `unidadIds` que hoy el POS nunca manda; una venta
-  que llega sin unidad no tiene camino viejo que sostener: preguntado en el selector
-  interactivo de la orquestadora (2026-09-29) si se rechazaba o salía la más vieja *"por ejemplo
-  desde una pantalla vieja"*, el owner contestó *"no tenemos pantallas mas viejas ni tenemos
-  datos productivos"*. O sea que la API exige la unidad y el POS y el salón la mandan siempre; no
-  hay compatibilidad que diseñar. El ingrediente de una receta en modo serie sigue abierto y se
-  decide en la spec. Decide qué unidad sale: escribe en
-  `movimientos_inventario` y toca la trazabilidad ([ADR-007](../adr/007-inventario-serie-lote.md)),
-  así que va en su propio frente. Va de la mano con "El lote que vence antes sale primero"
-  (cerrada el 2026-10-03, [`resueltos.md`](resueltos.md)) y con la entrada de la § 6 "Serie y
-  lote están a medias".
-
 ### Playwright entra al gate de cierre (owner, 2026-09-29)
 
 - [ ] **Un frente que toca pantallas o contratos de la API corre Playwright en local antes de
@@ -1043,6 +1052,18 @@ prohíbe.
 
 ## 5. Carreras de concurrencia
 
+- [ ] **Borrar una mesa mientras se abre una cuenta en ella puede dejar unidades con serie sin
+  apartar** (backend, `SalonesService.eliminarMesa` e `InventarioService.bloquearUnidadesParaSalida`;
+  **leído, no corrido**: lo marcó la revisión independiente del frente "quien vende elige qué unidad
+  con serie sale", 2026-10-03). `eliminarMesa` cuenta las cuentas abiertas y después borra, sin lock:
+  una cuenta que se abre entre las dos sentencias queda abierta sobre una mesa borrada. La consulta de
+  lo apartado hace `JOIN mesas … eliminado_el IS NULL` (para nombrar la mesa en el 400), así que esa
+  cuenta deja de apartar sus unidades y otra caja podría venderlas. La lista de vendibles
+  (`ItemsService.findUnidades`) no hace ese JOIN y sí las excluye: las dos consultas dejan de coincidir
+  justo ahí. **Medir:** la carrera con `test/helpers/carrera.ts` (borrar mesa vs. abrir cuenta).
+  **Arreglo probable:** `LEFT JOIN mesas` en la consulta de lo apartado (sigue filtrando el borrado y
+  no pierde la fila), y/o que `eliminarMesa` lockee antes de contar.
+
 ---
 
 ## 6. Proyectos que van solos
@@ -1127,24 +1148,19 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   que es una pregunta de negocio, no solo de datos.
 
 - [ ] **Serie y lote están a medias, y cada camino decide por su cuenta si rechazar o aceptar y
-  corromper** (backend + BD, auditoría `inventario` 2026-08-15) — tres caras del mismo hueco,
+  corromper** (backend + BD, auditoría `inventario` 2026-08-15) — dos caras del mismo hueco,
   agrupadas porque se deciden juntas:
-  1. **La merma acepta y descuenta la unidad equivocada.** `CreateMermaDto` no tiene
-     `unidadIds`/`loteId` y `mermas.service.ts` no chequea `modo_inventario`, a diferencia de
-     `recuentos.service.ts:566-569` y `ventas.service.ts:856-858,1316-1318`, que **sí rechazan
-     limpio**. Como `moverSerie` auto-selecciona FIFO cuando no le pasan unidades (hay un test
-     que lo fija), mermar un producto serializado da de baja **la unidad más vieja, no la que se
-     rompió**: se destruye la trazabilidad por IMEI que es la razón de ser de ADR-007. El
-     selector de `mermas.vue:161-165` tampoco filtra esos productos.
-  2. **Los índices únicos que la doc promete no existen en ninguna parte.**
-     `inventario-serializado.md` documenta únicos parciales `(tenant_id, serie)` y
-     `(item_id, codigo_lote)`; `item-unidad.entity.ts` e `item-lote.entity.ts` no declaran
-     `@Index`. **Busqué la refutación donde este proyecto suele esconderla** —los únicos
-     parciales los crea el seeder, no `synchronize`— y no está: el seeder crea once índices y
-     ninguno es de esas dos tablas (medido). Sin chequeo en código tampoco: `moverSerie` inserta
-     sin buscar duplicados y `moverLote` tiene un check-then-insert. Se puede cargar el mismo
-     IMEI dos veces.
-  3. ~~**`fecha_vencimiento` se guarda, se expone y no se compara con nada.**~~ Cerrada el
+  1. **La merma de un producto con serie: la mitad barata se cerró, el soporte sigue abierto.**
+     Antes la merma aceptaba el producto y `moverSerie` daba de baja la unidad más vieja, no la
+     que se rompió. Desde el 2026-10-03 (frente "quien vende elige qué unidad con serie sale",
+     [`resueltos.md`](resueltos.md)) `moverSerie` ya no auto-selecciona y `mermas.service.ts`
+     **rechaza con 400** el producto con serie (*"dalo de baja desde Ajuste de stock, eligiendo
+     la unidad"*); la pantalla de Mermas muestra ese aviso y deshabilita Registrar, sin esconder
+     el producto. **Sigue abierto:** que la merma deje **elegir** qué unidad o lote se da de baja
+     (`CreateMermaDto` sigue sin `unidadIds`/`loteId`); el selector de unidades que usan el POS y
+     el salón (`UnidadesSerieModal`) ya existe y es el punto de partida. La merma de un producto
+     **por lote** sigue como estaba (`moverLote` elige por vencimiento).
+  2. ~~**`fecha_vencimiento` se guarda, se expone y no se compara con nada.**~~ Cerrada el
      2026-10-03 ([`resueltos.md`](resueltos.md), "Sale primero el lote que vence antes"): la
      salida automática ordena por vencimiento y la venta y el traslado saltan los vencidos.
   **Lo que hay que decidir antes de tocar nada:** ¿se cierra la puerta (rechazar serie/lote en
@@ -1153,13 +1169,16 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   mermar, o se bloquea?** Eso es regla de negocio y no está en `PRODUCTO.md`.
   ✅ **DECIDIDO (owner, 2026-08-15): se construye el soporte, no se cierra la puerta.** La merma
   pasa a pedir **qué unidad o qué lote** se da de baja, igual que ya hacen la venta y el
-  recuento con lo suyo. Por eso esta entrada **se mudó a "proyectos que van solos"**: dejó de ser
+  recuento con lo suyo. *Entre tanto* (owner, 2026-10-03, AskUserQuestion del frente de la unidad
+  con serie: *"La merma lo rechaza"*, recomendada) la merma rechaza el producto con serie y no
+  descuenta nada: es el puente hasta que llegue el soporte, no lo reemplaza.
+  Por eso esta entrada **se mudó a "proyectos que van solos"**: dejó de ser
   una corrección y pasó a ser feature con pantalla, DTO y spec propia.
   **Lo que la spec tiene que resolver, y que no hace falta contestar ahora:**
-  - El **selector** en la pantalla de mermas: qué se muestra para elegir una serie entre muchas.
-  - Los **índices únicos** que la doc promete y no existen en ningún lado (ni entidad, ni seeder)
-    — sin ellos se puede cargar el mismo IMEI dos veces, y eso hay que cerrarlo antes de que la
-    merma dependa de elegir una serie concreta.
+  - El **selector** en la pantalla de mermas: qué se muestra para elegir una serie entre muchas
+    (desde el 2026-10-03 existe `UnidadesSerieModal`, con serie, condición, garantía y buscador, que
+    usan el POS y el salón; falta decidir si la merma lo reusa tal cual: ahí la unidad es la
+    **rota**, no la vendible).
   - **`fecha_vencimiento`**: desde el 2026-10-03 la salida automática ordena por vencimiento,
     la venta salta los vencidos (elegido a mano, 400) y el traslado sin lote elegido también
     ([`resueltos.md`](resueltos.md)). Lo que de esta cara sigue abierto es el aviso del inicio y

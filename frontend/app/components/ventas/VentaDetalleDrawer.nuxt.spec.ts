@@ -490,6 +490,45 @@ describe('VentaDetalleDrawer — promociones congeladas', () => {
   })
 })
 
+describe('VentaDetalleDrawer — unidades con serie vendidas', () => {
+  async function montarConDetalles(detalles: unknown[]) {
+    documentoActual = { ...VENTA, detalles } as unknown as typeof VENTA
+    try {
+      return await montar()
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  }
+
+  it('bajo la línea muestra cada serie vendida con su condición', async () => {
+    const wrapper = await montarConDetalles([
+      {
+        ...detalle('det-1', 'Celular X', '300000.0000', '300000.0000'),
+        modoInventario: 'serializado',
+        unidades: [
+          { serie: 'A1', condicion: 'nuevo' },
+          { serie: 'B2', condicion: 'reacondicionado' },
+        ],
+      },
+    ])
+
+    const linea = filas(wrapper).find(f => f.includes('Celular X'))
+    expect(linea).toBeDefined()
+    expect(linea).toMatch(/Serie A1\s*·\s*Nuevo/)
+    expect(linea).toMatch(/Serie B2\s*·\s*Reacondicionado/)
+  })
+
+  it('un producto sin serie no muestra nada, ni con `unidades` vacío ni sin la clave', async () => {
+    const wrapper = await montarConDetalles([
+      { ...detalle('det-1', 'Pizza grande', '6000.0000', '6000.0000'), unidades: [] },
+      detalle('det-2', 'Pizza chica', '4000.0000', '4000.0000'),
+    ])
+
+    expect(wrapper.text()).not.toContain('Serie ')
+  })
+})
+
 describe('VentaDetalleDrawer — nota de crédito compuesta', () => {
   it('distingue las dos líneas de ajuste por su porción fiscal, que es lo único que las separa', async () => {
     documentoActual = NOTA_CREDITO as unknown as typeof VENTA

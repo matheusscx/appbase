@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-10-03
+**Last Updated**: 2026-10-03 (quien vende elige qué unidad con serie sale)
 
 ---
 
@@ -30,11 +30,18 @@ Incluido:
 - Lógica completa en `registrarMovimiento` (entrada/salida por modo).
 - Endpoints `GET /items/:id/unidades` y `GET /items/:id/lotes`.
 - Frontend: selector de modo, captura de series/lotes en el form y en el modal de ajuste, modal "Ver unidades / lotes".
-- Seeder con producto serie (iPhone, 3 IMEIs) y producto lote (Paracetamol).
 - Qué lote sale cuando nadie lo elige (FEFO, 2026-10-03) — ver [Qué lote sale](#qué-lote-sale).
+- Qué unidad con serie sale: la elige quien vende, nunca el sistema (2026-10-03) — ver
+  [Quién elige qué unidad sale](#quién-elige-qué-unidad-con-serie-sale).
+
+El seeder no siembra productos de serie ni de lote: los e2e arman el suyo, con nombre propio.
 
 No incluido (futuro):
-- Estado `reservado` producido por ventas (el modelo lo soporta, el productor aún no existe).
+- Estado `reservado` producido por ventas (el modelo lo soporta, el productor aún no existe y
+  no hace falta: lo apartado por una mesa se deriva de la cuenta abierta, ver
+  [Lo apartado](#lo-apartado-por-una-cuenta-abierta)).
+- La merma de un producto con serie: hoy se rechaza (se da de baja desde Ajuste de stock); que
+  la merma pregunte qué unidad es un frente propio.
 - Pegado masivo/CSV de series.
 - Costeo/valoración de stock por unidad.
 
@@ -44,7 +51,10 @@ No incluido (futuro):
 
 ### GET /items/:id/unidades
 
-Retorna las unidades del item (modo `serie`). Acepta `?estado=disponible|reservado|vendido|baja`.
+Retorna las unidades del item (modo `serie`). Acepta `?estado=disponible|reservado|vendido|baja`
+y `?vendibles=true` (la lista del selector de la pantalla de venta, ver
+[abajo](#qué-unidades-se-ofrecen-vendibles)). El query es un DTO estricto
+(`QueryUnidadesDto`): `vendibles` solo acepta `true` o `false` y un parámetro desconocido es 400.
 
 ```
 GET /items/550e8400.../unidades?estado=disponible
@@ -102,6 +112,8 @@ Response (200):
 ```
 
 ### PATCH /items/:id/stock — modo serie salida
+
+`unidadIds` es **obligatorio** y trae tantas como `cantidad`: el sistema no elige.
 
 ```json
 {
@@ -168,6 +180,107 @@ vence antes**, porque en comida es lo que evita tirar mercadería.
 
 Medido contra la API real en `test/lote-fefo.e2e-spec.ts` (el yogur de enero y junio en la
 misma factura, desempate, sin fecha, y los vencidos en venta, traslado y merma).
+
+### Quién elige qué unidad con serie sale
+
+**La regla:** en un producto con número de serie, **nadie elige por quien vende**. La escena
+que lo motivó: en una misma compra entran un celular **nuevo** y uno **usado** del mismo
+producto; la salida vieja tomaba "las más antiguas" sin mirar la condición, y ninguna pantalla
+de venta mandaba qué unidad, así que se podía cobrar el usado como nuevo. Desde el 2026-10-03
+la salida de modo serie **siempre nombra sus unidades**: `moverSerie` ya no auto-selecciona, y
+sin `unidadIds` responde 400 (*"Elegí qué unidades salen: «Nombre» tiene número de serie"*).
+Quien elige es el cajero en el POS (al tocar el producto) o el garzón en el salón (al pedir).
+Va en el chokepoint y no en cada llamador porque es el único lugar por el que pasan todas las
+salidas: un camino olvidado, o uno que se agregue mañana, rechaza en vez de elegir.
+
+**Cómo se decidió** (spec del frente, borrada al integrar y recuperable de git; cada una con su
+procedencia, porque "owner, fecha" a secas se lee como congelada):
+
+| Decisión | Quién y cómo |
+|---|---|
+| Elige quien vende, nunca el sistema | Owner, 2026-09-28, "vamos A" en el selector interactivo de la orquestadora (*A: elige el cajero*, recomendada; *B: el sistema prefiere una condición*; *C: da lo mismo*) |
+| Sin compatibilidad: la API exige la unidad | Owner, 2026-09-29, en el selector de la orquestadora: *"no tenemos pantallas mas viejas ni tenemos datos productivos"* |
+| Combos y grupos no pueden incluir un producto con serie | Owner, 2026-10-03, AskUserQuestion de la sesión del frente: *"Prohibirlo al armar"* (recomendada) sobre *"Preguntar la unidad también ahí"* y *"Dejarlo automático"*. Costo aceptado: "celular + funda" se vende como dos líneas, y el precio de pack se arma con una promoción |
+| En el salón la elige el garzón, al pedir | Owner, 2026-10-03, AskUserQuestion: *"Al pedir, el garzón"* (recomendada) sobre *"Al cobrar, el cajero"*. Quien entrega es quien elige, y si otra mesa pidió la misma unidad el rechazo llega al pedir, no al cobrar |
+| La tienda online no vende productos con serie | Owner, 2026-10-03, AskUserQuestion: *"No se venden online"* (recomendada) sobre *"Online sale automática"*. Sin cajero no hay quién elija, y rechazar después de Webpay deja un cobro sin venta |
+| La serie vendida se ve en el detalle de la venta | Owner, 2026-10-03, AskUserQuestion: *"En el detalle de la venta"* (recomendada). La boleta impresa no cambia (es materia fiscal, frente propio) |
+| La merma rechaza el producto con serie por ahora | Owner, 2026-10-03, AskUserQuestion: *"La merma lo rechaza"* (recomendada) |
+| Cancelar con motivo una cuenta con una línea con serie despachada a medias se frena | Owner, 2026-10-03, AskUserQuestion: *"Pedir anular primero"* (recomendada) sobre *"Dar de baja todas"* |
+
+**Los caminos, cada uno con lo que hace:**
+
+| Camino | Con un producto con serie |
+|---|---|
+| `POST /ventas` (POS) | `unidadIds` obligatorio, tantas como `cantidad`. Contrato: [`ventas.md`](./ventas.md) |
+| Salón (pedir, cambiar, anular, cancelar con motivo, fusionar, cobrar) | La unidad viaja en la línea de la cuenta. Contrato: [`salones-mesas.md`](./salones-mesas.md) |
+| Componente de combo / opción de grupo | No se puede configurar (400 al guardar el combo o el grupo) |
+| Pasar a modo serie un producto que ya es componente u opción viva | 400: antes el cambio de modo solo se bloqueaba con movimientos, y este hueco era nuevo |
+| Tienda online | `GET /items?vendibleOnline=true` los deja afuera del catálogo y `OnlineService.checkout` rechaza la línea **antes** de iniciar el pago |
+| Merma (`POST /mermas`) | 400; la pantalla muestra el aviso y deshabilita Registrar (no esconde el producto: quien busca el celular roto no entendería por qué no aparece). La baja se hace desde Ajuste de stock |
+| Ajuste de stock y traslado por API | Sin unidades, 400; la pantalla ya las mandaba |
+| Recuento, cancelar venta con reposición, nota de crédito con devolución | Ya rechazaban serie; no cambian |
+
+**El ingrediente de una receta en modo serie no existe**: un ingrediente solo admite modo
+`cantidad`, así que ahí nunca hubo nada que elegir.
+
+#### Lo apartado por una cuenta abierta
+
+Una unidad que está en una línea de una **cuenta abierta** está apartada: solo puede salir por
+esa misma cuenta. Cualquier otra salida (otra venta, un ajuste, un traslado) responde 400
+nombrando la serie y la mesa. `RegistrarMovimientoParams.cuentaId` es la cuenta dueña de la
+salida (la que se cobra o la que anula su línea).
+
+**El apartado se deriva, no se escribe.** Mientras está en una cuenta abierta la unidad sigue
+`disponible`. No se usó el estado `reservado` porque cambiaría el saldo (`COUNT(disponible)`)
+sin un movimiento en el kardex, que es la fuente de verdad auditable. Es la misma idea que lo
+apartado en modo cantidad ([`salones-mesas.md`](./salones-mesas.md)): ningún camino que toca la
+línea necesitó código nuevo para liberar, porque una cuenta que deja de estar `abierta` suelta
+sola sus unidades.
+
+#### La validación es una sola
+
+`InventarioService.bloquearUnidadesParaSalida` valida un conjunto de unidades para un ítem y las
+lockea. Lo usan la salida de `moverSerie` y el salón al pedir (así las reglas no se duplican).
+Comprueba: que no vengan repetidas, que sean de este tenant y de este ítem (una ajena o borrada
+da el mismo mensaje que una de otro producto, para no ser un oráculo entre tenants), que estén en
+esta ubicación (el local: una bodega guarda stock y nunca vende), `disponible` y no apartadas por
+otra cuenta.
+
+Orden de bloqueo: `item_producto` primero (`FOR UPDATE`, lo toma el método por su cuenta porque un
+`PATCH` del salón que cambia una unidad por otra sin cambiar la cantidad no pasa por la reserva
+de stock), y después las unidades en **una** consulta con `ORDER BY unidad_id FOR UPDATE`.
+Pedir en el salón y vender en el POS se serializan en el lock de `item_producto`, por eso no
+hace falta un índice único sobre lo apartado (y no podría expresarlo: "apartada" depende de
+`cuentas.estado`). Orden global: cuenta → `item_producto` → `item_unidad`.
+
+#### Qué unidades se ofrecen: `vendibles`
+
+`GET /items/:id/unidades?vendibles=true` devuelve solo las `disponible` **del local** y no
+apartadas por ninguna cuenta abierta, ordenadas por condición (nuevo, reacondicionado, usado) y
+después por serie. Mismo permiso que el endpoint (`Items:Leer`). **Es una ayuda para la pantalla,
+no la regla:** entre que el selector lista y el cobro, otra caja puede vender la misma unidad, y
+el 400 de la API es el que manda.
+
+#### Qué se ve
+
+- **Detalle de venta:** `GET /ventas/:id` trae `unidades: [{ serie, condicion }]` en la línea de un
+  producto con serie, leídas del kardex en una consulta por venta. Se agrupan **por ítem**, no por
+  línea (el kardex no guarda a qué línea pertenece cada salida): con dos líneas del mismo producto
+  con serie —solo pasa en el salón, con el precio cambiado entre pedidos; el POS las fusiona— cada
+  una muestra todas las unidades de ese producto en la venta. Se arregla guardando las unidades en
+  `venta_detalles`; nadie lo pidió.
+- **Selector** (`UnidadesSerieModal`): serie, condición como badge, garantía, buscador por serie
+  (sirve para pegar o escanear el IMEI) y selección múltiple; la cantidad es cuántas se eligieron.
+
+#### Lo que sigue abierto
+
+- Que la merma pregunte qué unidad o lote es: frente propio ([`pendientes.md`](../agent/pendientes.md) § 6, "Serie y lote están a medias").
+- Restaurar desde la papelera un combo o grupo cuyo producto pasó a serie mientras estaba borrado
+  no se cubre: queda configurado y la venta lo rechaza con 400 sin elegir unidad (entrada nueva en
+  [`pendientes.md`](../agent/pendientes.md) § 2).
+- Devolver una unidad al stock al cancelar una venta o emitir una nota de crédito sigue siendo a
+  mano desde Inventario.
+- Precio distinto según la condición, y la serie en la boleta impresa (fiscal): fuera.
 
 ---
 
@@ -290,7 +403,8 @@ espacios"* en `compras.e2e-spec.ts`.
 
 - `registrarMovimiento(manager, params)` — dispatcher por modo
 - `moverCantidad()` — comportamiento original
-- `moverSerie()` — crea/consume `item_unidad`
+- `moverSerie()` — crea/consume `item_unidad`; la salida exige `unidadIds` y valida con `bloquearUnidadesParaSalida()`
+- `bloquearUnidadesParaSalida()` — la validación y el lock de unidades de una salida, compartida con el salón ([arriba](#la-validación-es-una-sola))
 - `moverLote()` — crea/actualiza `item_lote`
 - `recalcularStockSerie()` / `recalcularStockLote()` — actualiza el saldo de `stock_ubicacion` para la ubicación del movimiento, dentro de la transacción
 
@@ -314,6 +428,7 @@ espacios"* en `compras.e2e-spec.ts`.
 - Modo `cantidad`: igual que antes (cantidad numérica).
 - Modo `serie` entrada: agregar N series.
 - Modo `serie` salida: checkboxes sobre unidades disponibles (cargadas desde `GET /items/:id/unidades?estado=disponible`).
+- Venta (POS y salón): al tocar un producto con serie se abre el selector de unidades (`UnidadesSerieModal`); la línea guarda sus unidades, las muestra y no deja editar la cantidad a mano ("Cambiar unidades" reabre el selector). Anular una línea con serie pide con casillas cuáles se anulan. Mermas muestra el aviso y no deja registrar.
 - Modo `lote` entrada: código de lote + fechas + cantidad.
 - Modo `lote` salida: ID del lote + cantidad a retirar.
 
@@ -327,9 +442,15 @@ espacios"* en `compras.e2e-spec.ts`.
 
 ```bash
 cd backend && npm test -- --no-coverage
-# inventario.service.spec.ts: 13 tests de entrada/salida por modo
-# items.service.spec.ts: tests de create con modo, bloqueo de cambio de modo
+# inventario.service.spec.ts: entrada/salida por modo, y la validación de unidades de la salida serie
+# items.service.spec.ts: tests de create con modo, bloqueo de cambio de modo, vendibles, vendibleOnline
+npm run test:e2e -- venta-serie salon-serie tienda-merma-serie inventario-serie-ubicacion traslados
+cd ../frontend && npm run e2e -- e2e/ventas/venta-serie.spec.ts e2e/salones/salon-serie.spec.ts
 ```
+
+Los e2e de serie arman su propio producto (el seed no trae ninguno). Los de navegador cargan las
+dos unidades en **entradas separadas**: en una sola entrada comparten `creado_el` y el FIFO viejo
+(`creado_el ASC`) quedaba en un empate que no distinguía nada.
 
 ---
 

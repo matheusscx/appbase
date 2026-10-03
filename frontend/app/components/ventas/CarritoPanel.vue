@@ -21,6 +21,8 @@ const emit = defineEmits<{
     index: number,
     payload: { presentacion: string, unidadCodigo: string, cantidadCanonica: string },
   ]
+  /** Línea con serie: reabrir el selector de unidades (el POS decide cuáles ofrecer). */
+  'cambiar-unidades': [index: number]
   quitar: [index: number]
   cobrar: []
   'limpiar-todo': []
@@ -65,6 +67,7 @@ const docItems = computed(() =>
 )
 
 const { formatMonto } = useFormatters()
+const { etiquetaCondicion, colorCondicion } = useUnidadesSerie()
 
 const monedaIdsEnCarrito = computed(() => props.lineas.map((l) => l.item.monedaId))
 
@@ -226,8 +229,31 @@ watch(clienteDrawerOpen, (open) => {
             </p>
             <AdvertenciasPrecio :advertencias="calculoVigente?.lineas[index]?.advertencias ?? []" />
             <PromocionesAplicadas :promociones="calculoVigente?.lineas[index]?.trazas.promociones ?? []" />
+            <div v-if="linea.unidades?.length" class="flex flex-wrap gap-1 pt-1" data-qa="series-linea">
+              <UBadge
+                v-for="u in linea.unidades"
+                :key="u.id"
+                :color="colorCondicion(u.condicion)"
+                variant="subtle"
+                size="sm"
+                class="font-mono"
+              >
+                {{ u.serie }}<template v-if="u.condicion !== 'nuevo'"> · {{ etiquetaCondicion(u.condicion) }}</template>
+              </UBadge>
+            </div>
           </div>
+          <!-- Con serie la cantidad no se tipea: son las unidades que se eligieron. -->
+          <UButton
+            v-if="linea.unidades?.length"
+            label="Cambiar unidades"
+            icon="i-lucide-list-checks"
+            color="neutral"
+            variant="outline"
+            size="xs"
+            @click="emit('cambiar-unidades', index)"
+          />
           <AppCantidadInput
+            v-else
             :model-value="presentacionLinea(linea)"
             :unidad-codigo="unidadPresLinea(linea)"
             :unidad-base-codigo="unidadBaseItem(linea.item)"

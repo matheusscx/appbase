@@ -242,6 +242,86 @@ describe('inventario — unidades serializadas por ubicación (e2e)', () => {
     expect(filas[0].ubicacion_id).toBe(bodegaId);
   });
 
+  /**
+   * El chokepoint ya no elige unidades: una salida de modo serie sin
+   * `unidadIds` responde 400 por las dos puertas que no son una venta. Por la
+   * API real, porque lo que se fija es lo que ve el cliente.
+   */
+  it('PATCH /items/:id/stock: una salida serie sin unidadIds rechaza pidiendo elegir y no toca las unidades', async () => {
+    const nombre = `Serie sin elegir E2E ${Date.now()}-${Math.random()}`;
+    const itemId = await crearItemSerie(nombre);
+    const resEntrada = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'entrada',
+        motivo: 'inventario_inicial',
+        ubicacionId: localId,
+        cantidad: '2',
+        series: [
+          { serie: `IMEI-X-${Date.now()}` },
+          { serie: `IMEI-Y-${Date.now()}` },
+        ],
+      });
+    expect(resEntrada.status).toBe(200);
+
+    const resSalida = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'salida',
+        motivo: 'ajuste_manual',
+        ubicacionId: localId,
+        cantidad: '1',
+      });
+
+    expect(resSalida.status).toBe(400);
+    expect((resSalida.body as { message: string }).message).toBe(
+      `Elegí qué unidades salen: «${nombre}» tiene número de serie`,
+    );
+    const filas: { estado: string }[] = await ds.query(
+      `SELECT estado FROM item_unidad WHERE item_id = $1 AND eliminado_el IS NULL`,
+      [itemId],
+    );
+    expect(filas.map((f) => f.estado)).toEqual(['disponible', 'disponible']);
+  });
+
+  it('POST /traslados: una línea serie sin unidadIds rechaza pidiendo elegir y no mueve nada', async () => {
+    const nombre = `Serie traslado sin elegir E2E ${Date.now()}-${Math.random()}`;
+    const itemId = await crearItemSerie(nombre);
+    const resEntrada = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'entrada',
+        motivo: 'inventario_inicial',
+        ubicacionId: localId,
+        cantidad: '1',
+        series: [{ serie: `IMEI-Z-${Date.now()}` }],
+      });
+    expect(resEntrada.status).toBe(200);
+
+    const resTraslado = await request(app.getHttpServer())
+      .post('/api/traslados')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        origenId: localId,
+        destinoId: bodegaId,
+        motivoTrasladoId: await motivoTrasladoId(),
+        lineas: [{ itemId, cantidad: '1' }],
+      });
+
+    expect(resTraslado.status).toBe(400);
+    expect((resTraslado.body as { message: string }).message).toBe(
+      `Elegí qué unidades salen: «${nombre}» tiene número de serie`,
+    );
+    const filas: { ubicacion_id: string }[] = await ds.query(
+      `SELECT ubicacion_id FROM item_unidad WHERE item_id = $1 AND eliminado_el IS NULL`,
+      [itemId],
+    );
+    expect(filas.map((f) => f.ubicacion_id)).toEqual([localId]);
+  });
+
   it('stock_ubicacion se recalcula contando solo las unidades de esa ubicación', async () => {
     const itemId = await crearItemSerie(
       `Serie recálculo-ubicación E2E ${Date.now()}-${Math.random()}`,

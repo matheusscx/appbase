@@ -290,6 +290,21 @@ export class OnlineService {
       }
     }
 
+    // Un producto con número de serie no se vende online: no hay cajero que
+    // elija qué unidad sale, y el cobro ya habría pasado cuando la venta lo
+    // rechace —un cargo de Webpay sin venta—. El catálogo de la tienda ya los
+    // esconde (`vendibleOnline`); esto ataja el carrito armado a mano o con un
+    // producto pasado a serie después de agregarlo. Se corta ANTES de
+    // `pagosRedirect.iniciar`, así que no queda orden creada.
+    for (const linea of dto.lineas) {
+      const item = itemsBase.get(linea.itemId)!;
+      if (item.modoInventario === 'serie') {
+        throw new BadRequestException(
+          `«${item.nombre}» se vende solo en el local`,
+        );
+      }
+    }
+
     for (const linea of dto.lineas) {
       const item = itemsBase.get(linea.itemId)!;
       const { unidadBaseCodigo, forzarConteo } = resolverUnidadBaseDeItem(item);

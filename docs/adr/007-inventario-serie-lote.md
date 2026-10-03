@@ -1,7 +1,8 @@
 # ADR-007: Modelo de inventario serializado y por lote — eje `modo_inventario`
 
 **Status**: Accepted. Dos afirmaciones sobre `item_producto.stock` (Consequences,
-líneas 55 y 66) quedaron superadas — ver nota bajo Date.
+la de Positive «sigue siendo el saldo de lectura rápida» y la de Neutral sobre mantenerlo
+consistente) quedaron superadas — ver nota bajo Date.
 
 **Date**: 2026-06-28
 
@@ -10,6 +11,17 @@ líneas 55 y 66) quedaron superadas — ver nota bajo Date.
 > vive en `stock_ubicacion` (una fila por ubicación), único dueño del saldo. Las
 > menciones a `item_producto.stock` más abajo describen el estado en la fecha de
 > este ADR, no el actual. Detalle: `docs/features/bodegas-y-traslados.md`.
+
+> ⚠️ **La salida de modo serie siempre nombra sus unidades (2026-10-03).** La unidad que sale ya
+> no la elige el sistema: **la elige quien vende**, y `moverSerie` no auto-selecciona (sin
+> `unidadIds` responde 400). Cada salida de un producto con serie trae las unidades que se llevó,
+> y el kardex las liga por `movimiento_inventario_detalle` sin ambigüedad.
+> **`reservado` sigue sin productor, a propósito.** Lo que una cuenta de salón abierta ya pidió
+> queda *apartado*, pero se **deriva** de la línea de la cuenta (`cuenta_lineas.unidad_ids`) y la
+> unidad sigue `disponible`: pasarla a `reservado` movería el saldo (`COUNT(disponible)`) sin un
+> movimiento en el kardex, y el kardex es la fuente de verdad auditable. Cuando la cuenta deja de
+> estar abierta la unidad se libera sola, sin código de liberación. Detalle y decisiones:
+> [`inventario-serializado.md`](../features/inventario-serializado.md#quién-elige-qué-unidad-con-serie-sale).
 
 ## Context
 
@@ -46,7 +58,7 @@ rechaza cambios en `PATCH /items/:id` si hay filas en `movimientos_inventario` p
 
 ### Estados de unidad
 `item_unidad.estado`: `disponible | reservado | vendido | baja`.
-`reservado` es producido por el módulo de ventas (futuro). `vendido`/`baja` se asignan en salidas según motivo.
+`reservado` estaba pensado para el módulo de ventas, pero **no tiene productor** (ver la nota bajo Date). `vendido`/`baja` se asignan en salidas según motivo.
 
 ## Consequences
 

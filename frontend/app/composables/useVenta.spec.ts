@@ -4,6 +4,7 @@ import {
   quitarLinea,
   setCantidad,
   setCantidadPresentacion,
+  setUnidades,
   toCalcularInput,
   toVentaLineasBody,
   descontarStockCatalogo,
@@ -856,5 +857,69 @@ describe('tieneCustomerData', () => {
 
   it('true cuando hay terceroId aunque el nombre esté vacío', () => {
     expect(tieneCustomerData({ ...vacio, terceroId: 'tercero-1' })).toBe(true)
+  })
+})
+
+// ── Productos con serie: quien vende elige qué unidad sale ──────────────────
+//
+// La línea guarda las unidades elegidas y la cantidad es cuántas son; el cliente
+// manda `unidadIds` y el servidor exige que su largo coincida con `cantidad`
+// (`docs/features/inventario-serializado.md`, § «Quién elige qué unidad con serie sale»).
+describe('productos con serie: la línea lleva las unidades elegidas', () => {
+  const celular = (): ItemCatalogo => ({ ...item('celu-1'), modoInventario: 'serie' })
+  const nuevo = { id: 'u-1', serie: 'IMEI-1', condicion: 'nuevo' }
+  const usado = { id: 'u-2', serie: 'IMEI-2', condicion: 'usado' }
+
+  it('agregarLinea con unidades: cantidad = cuántas, sin presentación', () => {
+    const r = agregarLinea([], celular(), CAT, undefined, undefined, [nuevo, usado])
+
+    expect(r).toHaveLength(1)
+    expect(r[0]!.unidades).toEqual([nuevo, usado])
+    expect(r[0]!.cantidad).toBe('2')
+    expect(r[0]!.cantidadPresentacion).toBeUndefined()
+  })
+
+  it('toVentaLineasBody manda las unidadIds, en el orden de la línea', () => {
+    const r = agregarLinea([], celular(), CAT, undefined, undefined, [usado, nuevo])
+    const linea = toVentaLineasBody(r)[0]!
+
+    expect(linea).toMatchObject({ itemId: 'celu-1', cantidad: '2', unidadIds: ['u-2', 'u-1'] })
+  })
+
+  it('una línea sin unidades no manda unidadIds', () => {
+    const r = agregarLinea([], item('a'), CAT)
+
+    expect(toVentaLineasBody(r)[0]).not.toHaveProperty('unidadIds')
+  })
+
+  it('toCalcularInput manda la misma cantidad que la venta', () => {
+    const r = agregarLinea([], celular(), CAT, undefined, undefined, [nuevo, usado])
+
+    expect(toCalcularInput(r).lineas[0]!.cantidad).toBe('2')
+  })
+
+  it('setUnidades reemplaza el conjunto y fija la cantidad', () => {
+    const r = agregarLinea([], celular(), CAT, undefined, undefined, [nuevo, usado])
+    const r2 = setUnidades(r, 0, [usado])
+
+    expect(r2[0]!.unidades).toEqual([usado])
+    expect(r2[0]!.cantidad).toBe('1')
+    expect(toVentaLineasBody(r2)[0]).toMatchObject({ cantidad: '1', unidadIds: ['u-2'] })
+    expect(r[0]!.unidades).toHaveLength(2)
+  })
+
+  it('setUnidades con ninguna quita la línea: no existe una venta de 0 unidades', () => {
+    const r = agregarLinea([], celular(), CAT, undefined, undefined, [nuevo])
+
+    expect(setUnidades(r, 0, [])).toEqual([])
+  })
+
+  it('agregar de nuevo el mismo producto con serie suma las unidades, sin repetir ninguna', () => {
+    const r = agregarLinea([], celular(), CAT, undefined, undefined, [nuevo])
+    const r2 = agregarLinea(r, celular(), CAT, undefined, undefined, [nuevo, usado])
+
+    expect(r2).toHaveLength(1)
+    expect(r2[0]!.unidades!.map(u => u.id)).toEqual(['u-1', 'u-2'])
+    expect(r2[0]!.cantidad).toBe('2')
   })
 })

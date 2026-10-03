@@ -263,6 +263,60 @@ describe('ItemsService', () => {
       expect(dataSource.query.mock.calls[0][0]).not.toContain('ipm.');
     });
 
+    // Control débil (texto del SQL): que excluya de verdad lo cubre el e2e. El
+    // filtro vive en `buildFindAllFilters` y por eso lo ven el COUNT y los dos
+    // pasos del orden por disponibilidad.
+    it('vendibleOnline agrega un NOT EXISTS de modo serie, sin parámetro nuevo', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, { vendibleOnline: true });
+
+      const sql = (dataSource.query.mock.calls[0][0] as string).replace(
+        /\s+/g,
+        ' ',
+      );
+      expect(sql).toContain(
+        "AND NOT EXISTS (SELECT 1 FROM item_producto ipv WHERE ipv.item_id = i.item_id AND ipv.modo_inventario = 'serie')",
+      );
+      expect(dataSource.query.mock.calls[0][1]).toEqual([TENANT]);
+    });
+
+    it.each([[undefined], [false]])(
+      'vendibleOnline=%s no agrega el NOT EXISTS',
+      async (valor) => {
+        dataSource.query
+          .mockResolvedValueOnce([{ total: 0 }])
+          .mockResolvedValueOnce([]);
+
+        await service.findAll(TENANT, { vendibleOnline: valor });
+
+        expect(dataSource.query.mock.calls[0][0]).not.toContain('ipv.');
+      },
+    );
+
+    it('vendibleOnline convive con modoInventario: la numeración de parámetros no se corre', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, {
+        modoInventario: 'cantidad',
+        vendibleOnline: true,
+        categoriaId: ITEM_ID,
+      });
+
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      expect(sql).toContain('ipm.modo_inventario = $2');
+      expect(sql).toContain('i.categoria_id = $3');
+      expect(dataSource.query.mock.calls[0][1]).toEqual([
+        TENANT,
+        'cantidad',
+        ITEM_ID,
+      ]);
+    });
+
     it('ids y modoInventario juntos numeran sus parámetros en orden', async () => {
       dataSource.query
         .mockResolvedValueOnce([{ total: 0 }])
@@ -2172,6 +2226,35 @@ describe('ItemsService', () => {
         );
       });
 
+      it('rechaza un componente producto con número de serie, con su nombre', async () => {
+        const dto = {
+          nombre: 'X',
+          precioBase: '1',
+          monedaId: MONEDA_ID,
+          tipo: 'combo',
+          componentes: [{ componenteItemId: PROD_ID, cantidad: '1' }],
+        } as any;
+        managerMock.query
+          .mockResolvedValueOnce([{ '?column?': 1 }]) // validarMoneda
+          .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
+          .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
+          .mockResolvedValueOnce([
+            {
+              item_id: PROD_ID,
+              nombre: 'Celular',
+              tipo: 'producto',
+              modo_inventario: 'serie',
+              costo_actual: '500',
+            },
+          ]); // lookup batch de componentes
+
+        await expect(service.create(TENANT, 'user-uuid', dto)).rejects.toThrow(
+          new BadRequestException(
+            '«Celular» tiene número de serie: no puede ser parte de un combo',
+          ),
+        );
+      });
+
       it('rechaza componentes duplicados (mismo componenteItemId dos veces) sin consultar la BD', async () => {
         const componentes = [
           { componenteItemId: PROD_ID, cantidad: '1', bloqueante: true },
@@ -2572,6 +2655,113 @@ describe('ItemsService', () => {
       await expect(
         service.update(TENANT, USUARIO, ITEM_ID, { modoInventario: 'lote' }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    describe('pasar a modo serie un producto que ya es parte de un combo o grupo', () => {
+      it('rechaza con el nombre del producto, tras una sola consulta de uso', async () => {
+        managerMock.query.mockImplementation((sql: string) => {
+          if (sql.includes('FROM combo_componentes'))
+            return Promise.resolve([{ nombre: 'Celular' }]);
+          if (sql.includes('FROM item_producto WHERE item_id'))
+            return Promise.resolve([
+              { modo_inventario: 'cantidad', unidad_medida: 'unidad' },
+            ]);
+          if (sql.includes('FROM movimientos_inventario'))
+            return Promise.resolve([{ cnt: '0' }]);
+          if (sql.includes('combo_componentes')) return Promise.resolve([]);
+          if (sql.includes('FROM items'))
+            return Promise.resolve([{ item_id: ITEM_ID, tipo: 'producto' }]);
+          return Promise.resolve([]);
+        });
+
+        await expect(
+          service.update(TENANT, USUARIO, ITEM_ID, { modoInventario: 'serie' }),
+        ).rejects.toThrow(
+          new BadRequestException(
+            '«Celular» es parte de un combo o grupo: no puede pasar a número de serie',
+          ),
+        );
+
+        const usos = managerMock.query.mock.calls
+          .map((c: unknown[]) => c[0] as string)
+          .filter((sql) => sql.includes('FROM combo_componentes'));
+        expect(usos).toHaveLength(1);
+        // Combo y grupo en la MISMA consulta, y cada una de las 5 tablas con su filtro de borrado.
+        expect(usos[0]).toContain('FROM grupo_modificador_opciones');
+        expect(usos[0].match(/eliminado_el IS NULL/g)).toHaveLength(5);
+      });
+
+      it('toma el lock sobre `items` antes de leer el uso, contra el FOR SHARE de quien lo suma', async () => {
+        managerMock.query.mockImplementation((sql: string) => {
+          if (sql.includes('FROM item_producto WHERE item_id'))
+            return Promise.resolve([
+              { modo_inventario: 'cantidad', unidad_medida: 'unidad' },
+            ]);
+          if (sql.includes('FROM movimientos_inventario'))
+            return Promise.resolve([{ cnt: '0' }]);
+          if (sql.includes('combo_componentes')) return Promise.resolve([]);
+          if (sql.includes('FROM items'))
+            return Promise.resolve([{ item_id: ITEM_ID, tipo: 'producto' }]);
+          return Promise.resolve([]);
+        });
+
+        await service.update(TENANT, USUARIO, ITEM_ID, {
+          modoInventario: 'serie',
+        });
+
+        const sqls = managerMock.query.mock.calls.map(
+          (c: unknown[]) => c[0] as string,
+        );
+        const lock = sqls.findIndex((sql) => sql.includes('FOR NO KEY UPDATE'));
+        const uso = sqls.findIndex((sql) =>
+          sql.includes('FROM combo_componentes'),
+        );
+        expect(lock).toBeGreaterThanOrEqual(0);
+        expect(lock).toBeLessThan(uso);
+      });
+
+      it('lo deja pasar si no es componente ni opción vivos', async () => {
+        managerMock.query.mockImplementation((sql: string) => {
+          if (sql.includes('FROM item_producto WHERE item_id'))
+            return Promise.resolve([
+              { modo_inventario: 'cantidad', unidad_medida: 'unidad' },
+            ]);
+          if (sql.includes('FROM movimientos_inventario'))
+            return Promise.resolve([{ cnt: '0' }]);
+          if (sql.includes('combo_componentes')) return Promise.resolve([]);
+          if (sql.includes('FROM items'))
+            return Promise.resolve([{ item_id: ITEM_ID, tipo: 'producto' }]);
+          return Promise.resolve([]);
+        });
+
+        await expect(
+          service.update(TENANT, USUARIO, ITEM_ID, { modoInventario: 'serie' }),
+        ).resolves.toBeDefined();
+      });
+
+      it('no consulta el uso si el modo no cambia (reenviar `serie` sobre un producto ya serie)', async () => {
+        managerMock.query.mockImplementation((sql: string) => {
+          if (sql.includes('FROM item_producto WHERE item_id'))
+            return Promise.resolve([
+              { modo_inventario: 'serie', unidad_medida: 'unidad' },
+            ]);
+          if (sql.includes('combo_componentes')) return Promise.resolve([]);
+          if (sql.includes('FROM items'))
+            return Promise.resolve([{ item_id: ITEM_ID, tipo: 'producto' }]);
+          return Promise.resolve([]);
+        });
+
+        await service.update(TENANT, USUARIO, ITEM_ID, {
+          modoInventario: 'serie',
+        });
+
+        const sqls = managerMock.query.mock.calls.map(
+          (c: unknown[]) => c[0] as string,
+        );
+        expect(sqls.some((sql) => sql.includes('FROM combo_componentes'))).toBe(
+          false,
+        );
+      });
     });
 
     it('lee `item_producto` con FOR UPDATE antes de decidir sobre el kardex', async () => {
@@ -6840,6 +7030,84 @@ describe('ItemsService', () => {
       expect(advertencias).toEqual([
         'No había stock de Hamburguesa para descontar 3 unidad: revisá el inventario',
       ]);
+    });
+
+    describe('producto con unidades nombradas (serie)', () => {
+      const CUENTA_ID = 'cuenta-uuid';
+      const UNIDADES = ['unidad-1', 'unidad-2'];
+
+      it('pasa las unidades y la cuenta al chokepoint: es la cuenta la dueña de la salida', async () => {
+        const spyMov = jest
+          .spyOn(inventarioServiceMock, 'registrarMovimiento')
+          .mockResolvedValue({
+            movimientoId: 'mov-serie',
+            stockAnterior: '3',
+            stockResultante: '1',
+            cantidadMovida: '2',
+            costoActualPrevio: null,
+            costoActual: null,
+          } as any);
+
+        const advertencias = await service.consumirLineaAnulada(
+          managerMock as any,
+          {
+            ...PARAMS,
+            itemTipo: 'producto',
+            cantidad: '2',
+            unidadIds: UNIDADES,
+            cuentaId: CUENTA_ID,
+            convertir: conversorMock,
+          },
+        );
+
+        expect(advertencias).toEqual([]);
+        expect(spyMov).toHaveBeenCalledWith(
+          managerMock,
+          expect.objectContaining({
+            itemId: ITEM_ANULADO_ID,
+            motivo: 'merma',
+            cantidad: '2',
+            unidadIds: UNIDADES,
+            cuentaId: CUENTA_ID,
+          }),
+        );
+      });
+
+      // El catch de `moverConsumoOSaltear` degrada "Stock insuficiente..." a
+      // una advertencia porque un plato ya servido no se puede "des-servir".
+      // Con unidades NOMBRADAS no hay faltante que avisar: quien anuló dijo
+      // cuáles salían, y que el chokepoint las rechace es una invariante rota
+      // (la línea las tiene apartadas). Tragarlo dejaría la anulación escrita
+      // y la unidad sin dar de baja.
+      it.each([
+        [
+          'el prefijo que el catch sabe degradar',
+          'Stock insuficiente para la salida',
+        ],
+        [
+          'el rechazo real del chokepoint por una unidad no disponible',
+          'La unidad IMEI-1 no está disponible (estado: baja)',
+        ],
+        [
+          'el rechazo real por una unidad apartada por otra cuenta',
+          'La unidad IMEI-1 está apartada en la cuenta de Mesa 5',
+        ],
+      ])('aborta, no avisa: %s', async (_caso, mensaje) => {
+        jest
+          .spyOn(inventarioServiceMock, 'registrarMovimiento')
+          .mockRejectedValueOnce(new BadRequestException(mensaje));
+
+        await expect(
+          service.consumirLineaAnulada(managerMock as any, {
+            ...PARAMS,
+            itemTipo: 'producto',
+            cantidad: '2',
+            unidadIds: UNIDADES,
+            cuentaId: CUENTA_ID,
+            convertir: conversorMock,
+          }),
+        ).rejects.toThrow(mensaje);
+      });
     });
 
     it('receta: delega en venderIngredientesReceta con motivo merma y sin ventaId', async () => {

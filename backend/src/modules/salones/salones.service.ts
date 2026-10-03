@@ -38,6 +38,7 @@ import type { CreateVentaDto } from '../ventas/dto/create-venta.dto';
 import { EstrategiaAsignacionPropina } from '../propinas/enums/estrategia-asignacion-propina.enum';
 import { GarzonesService } from '../garzones/garzones.service';
 import { ItemsService } from '../items/items.service';
+import { InventarioService } from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
 import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
@@ -160,6 +161,7 @@ interface LineaDetalleRow {
   cantidad_enviada: string;
   item_eliminado: boolean;
   precio_unitario: string;
+  unidad_ids: string[];
 }
 
 export interface CuentaLineaDetalle {
@@ -197,6 +199,12 @@ export interface CuentaLineaDetalle {
    * solo dentro del preview de comanda (`ComandaEstacion`), que es otro flujo.
    */
   cantidadEnviada: string;
+  /**
+   * Las unidades con número de serie que esta línea tiene apartadas, con lo que
+   * el garzón necesita para reconocerlas (`serie`, `condicion`). `[]` en una
+   * línea sin serie. Se leen en una consulta por detalle, no una por línea.
+   */
+  unidades: { id: string; serie: string; condicion: string }[];
   /**
    * El ítem se eliminó del catálogo con la cuenta ya abierta. La línea se
    * sigue mostrando —esconderla dejaba la cuenta imposible de cobrar y de
@@ -303,6 +311,7 @@ export class SalonesService {
     private readonly calculoPreciosService: CalculoPreciosService,
     private readonly motivosBajaService: MotivosBajaService,
     private readonly ubicacionesService: UbicacionesService,
+    private readonly inventarioService: InventarioService,
     private readonly idempotencia: IdempotenciaService,
   ) {}
 
@@ -797,6 +806,20 @@ export class SalonesService {
     if (new Decimal(resuelta.cantidadCanonica).lte(0)) {
       throw new BadRequestException('La cantidad debe ser mayor a cero');
     }
+    // Un producto con serie se pide eligiendo las unidades: es el garzón quien
+    // decide cuáles salen. Lo que no depende de la base se valida acá, antes de
+    // tomar el lock; lo que sí (existen, son de este producto, están libres) lo
+    // valida el chokepoint bajo lock, dentro de la transacción.
+    const unidadIds = this.validarUnidadesDeLinea({
+      item,
+      unidadIds: dto.unidadIds,
+      cantidadCanonica: resuelta.cantidadCanonica,
+      unidadCodigoPresentacion: dto.unidadCodigoPresentacion,
+    });
+    const ubicacionLocalId =
+      unidadIds.length > 0
+        ? await this.ubicacionesService.localDe(tenantId)
+        : null;
 
     let snapshot: PersonalizacionRecetaSnapshot | null = null;
     let precioExtraTotal = '0';
@@ -934,6 +957,20 @@ export class SalonesService {
               personalizacion: snapshot,
             },
           ]);
+          // **`cuentaId: null` a propósito:** con la cuenta, el chokepoint deja
+          // pasar lo que ESTA cuenta ya tiene apartado —lo que necesita al cobrar—;
+          // acá, en cambio, pedir una unidad que la misma cuenta ya pidió es pedirla
+          // dos veces. Después del lock de la cuenta y de `item_producto`, antes de
+          // las unidades: el orden de `docs/patterns/backend.md` §15.
+          if (ubicacionLocalId !== null) {
+            await this.inventarioService.bloquearUnidadesParaSalida(manager, {
+              tenantId,
+              itemId: dto.itemId,
+              ubicacionId: ubicacionLocalId,
+              unidadIds,
+              cuentaId: null,
+            });
+          }
           const existentes = await manager.find(CuentaLinea, {
             where: { tenantId, cuentaId, itemId: dto.itemId },
           });
@@ -961,6 +998,7 @@ export class SalonesService {
             // números daría una unidad que no existe. Se recalcula desde la
             // canónica ya sumada, en la unidad que esa línea ya mostraba.
             this.sincronizarPresentacion(match, item, catalogo);
+            match.unidadIds = [...match.unidadIds, ...unidadIds];
             await manager.save(CuentaLinea, match);
             // El responsable VIGENTE de la cuenta, no el que creó la línea
             // (spec § 3.1/§ 3.3): es lo que hace que el "+" de otro garzón
@@ -987,6 +1025,7 @@ export class SalonesService {
                 precioUnitarioOrigen,
                 tasaCambio,
                 reglasCongeladas,
+                unidadIds,
               }),
             );
             await this.sumarAlReparto(
@@ -1057,8 +1096,30 @@ export class SalonesService {
             linea.itemId,
             manager,
           );
+          // **Qué se manda depende del producto, y el DTO no lo sabe.** Una línea
+          // con serie se corrige mandando el conjunto de unidades —la cantidad se
+          // deriva de él—; las demás, la cantidad. Faltar el que corresponde es un
+          // 400 explícito: con `cantidad` opcional en el DTO, un PATCH vacío
+          // llegaría a `Decimal(undefined)` y saldría como 500. `== null` y no
+          // `=== undefined`: `@IsOptional()` también deja pasar un `null` del JSON.
+          let cantidadEntrante: string;
+          if (item.modoInventario === 'serie') {
+            if (dto.unidadIds == null) {
+              throw new BadRequestException(
+                `Cambiá las unidades de «${item.nombre}», no la cantidad`,
+              );
+            }
+            cantidadEntrante = dto.cantidad ?? String(dto.unidadIds.length);
+          } else {
+            if (dto.cantidad == null) {
+              throw new BadRequestException(
+                `Indicá la cantidad de «${item.nombre}»`,
+              );
+            }
+            cantidadEntrante = dto.cantidad;
+          }
           const resuelta = this.resolverCantidadLinea({
-            cantidad: dto.cantidad,
+            cantidad: cantidadEntrante,
             cantidadPresentacion: dto.cantidadPresentacion,
             unidadCodigoPresentacion: dto.unidadCodigoPresentacion,
             item,
@@ -1068,6 +1129,12 @@ export class SalonesService {
           if (new Decimal(resuelta.cantidadCanonica).lte(0)) {
             throw new BadRequestException('La cantidad debe ser mayor a cero');
           }
+          const unidadIds = this.validarUnidadesDeLinea({
+            item,
+            unidadIds: dto.unidadIds,
+            cantidadCanonica: resuelta.cantidadCanonica,
+            unidadCodigoPresentacion: dto.unidadCodigoPresentacion,
+          });
           // Mismo motivo que el guard de `quitarLinea`, por el otro camino: bajar
           // la cantidad por debajo de lo ya despachado regala la diferencia sin
           // registro. `actualizarLinea` recibe un valor ABSOLUTO, no un delta, así
@@ -1136,6 +1203,25 @@ export class SalonesService {
             );
           }
 
+          // Solo las unidades que ENTRAN se validan: las que ya estaban en la
+          // línea están apartadas por ella misma y no se revalidan (si no, el
+          // chokepoint las rechazaría como apartadas). `cuentaId: null` por lo
+          // mismo que en `agregarLinea`: una unidad que esta cuenta ya tiene en
+          // OTRA línea tampoco se puede pedir de nuevo. Las que salen quedan
+          // libres solas: dejan de estar en una línea abierta.
+          const nuevas = unidadIds.filter(
+            (id) => !linea.unidadIds.includes(id),
+          );
+          if (nuevas.length > 0) {
+            await this.inventarioService.bloquearUnidadesParaSalida(manager, {
+              tenantId,
+              itemId: linea.itemId,
+              ubicacionId: await this.ubicacionesService.localDe(tenantId),
+              unidadIds: nuevas,
+              cuentaId: null,
+            });
+          }
+
           // El reparto sigue el delta de la cantidad ABSOLUTA que llega, ANTES
           // de pisar `linea.cantidad` (spec § 3.3): sube → suma al responsable
           // vigente; baja → descuenta con la prioridad de `descontarReparto`.
@@ -1163,6 +1249,7 @@ export class SalonesService {
           linea.cantidad = resuelta.cantidadCanonica;
           linea.cantidadPresentacion = resuelta.cantidadPresentacion;
           linea.unidadCodigoPresentacion = resuelta.unidadCodigoPresentacion;
+          linea.unidadIds = unidadIds;
           await manager.save(CuentaLinea, linea);
           return this.armarDetalle(tenantId, cuenta, manager);
         });
@@ -1351,8 +1438,9 @@ export class SalonesService {
       tipo: string;
       nombre: string;
       unidad_medida: string | null;
+      modo_inventario: string | null;
     }[] = await manager.query(
-      `SELECT i.item_id, i.tipo, i.nombre, ip.unidad_medida
+      `SELECT i.item_id, i.tipo, i.nombre, ip.unidad_medida, ip.modo_inventario
            FROM items i
            -- Deliberadamente SIN condición de vigencia sobre "i": un ítem
            -- pausado o borrado del catálogo NO frena la anulación (spec
@@ -1370,7 +1458,34 @@ export class SalonesService {
       tipo: itemRows[0].tipo,
       nombre: itemRows[0].nombre,
       unidadMedida: itemRows[0].unidad_medida,
+      modoInventario: itemRows[0].modo_inventario ?? null,
     };
+
+    // En una línea con serie, anular es elegir CUÁLES unidades se van: la
+    // línea las tiene apartadas una por una y no hay una "cualquiera". Tienen
+    // que ser tantas como `cantidad` (la línea guarda `cantidad = unidades`),
+    // distintas, y de las que la línea ya tiene. Un mismo mensaje para los
+    // cuatro modos de fallar: a quien anula le falta lo mismo, elegir bien.
+    let unidadIdsAnuladas: string[] = [];
+    if (item.modoInventario === 'serie') {
+      const elegidas = (dto.unidadIds ?? []).map((u) => u.toLowerCase());
+      const enLinea = new Set(linea.unidadIds);
+      const esValida =
+        elegidas.length > 0 &&
+        cantidad.equals(elegidas.length) &&
+        new Set(elegidas).size === elegidas.length &&
+        elegidas.every((id) => enLinea.has(id));
+      if (!esValida) {
+        throw new BadRequestException(
+          `Elegí cuáles unidades de «${item.nombre}» se anulan`,
+        );
+      }
+      unidadIdsAnuladas = elegidas;
+    } else if (dto.unidadIds?.length) {
+      throw new BadRequestException(
+        `«${item.nombre}» no tiene número de serie: no lleva unidades`,
+      );
+    }
 
     // Solo se resuelve el contexto de stock (conversor + ubicación local) si
     // hace falta: mismo gate que adentro de `escribirAnulacionEnLinea`,
@@ -1399,6 +1514,7 @@ export class SalonesService {
       item,
       catalogo,
       stockCtx,
+      unidadIdsAnuladas,
     );
 
     // El reparto baja lo mismo que la línea (spec § 3.3), acá y no dentro de
@@ -1458,6 +1574,13 @@ export class SalonesService {
    * que no se relee acá adentro aunque esto corra una vez por línea (spec
    * § 3.1). El precio de carta sale de `linea.precioUnitario`, que el
    * llamador ya recibe.
+   *
+   * `unidadIdsAnuladas`: en una línea con serie, las unidades que se van —ya
+   * validadas por el llamador, que es quien sabe cuántas y cuáles—. Salen de
+   * `linea.unidadIds` a la par de `cantidad` (la línea guarda `cantidad` =
+   * unidades), y con un motivo que descuenta viajan al consumo con la cuenta
+   * como dueña de la salida. Con `no_elaborado` solo salen de la línea: nada se
+   * mueve y la unidad vuelve a estar libre. Vacío en una línea sin serie.
    */
   private async escribirAnulacionEnLinea(
     manager: EntityManager,
@@ -1471,6 +1594,7 @@ export class SalonesService {
     item: { tipo: string; nombre: string; unidadMedida: string | null },
     catalogo: UnidadCat[],
     stockCtx: ContextoStockAnulacion | null,
+    unidadIdsAnuladas: string[],
   ): Promise<string[]> {
     const anulacion = await manager.save(
       CuentaLineaAnulacion,
@@ -1504,6 +1628,10 @@ export class SalonesService {
     } else {
       linea.cantidad = nuevaCantidad.toString();
       linea.cantidadEnviada = nuevaCantidadEnviada.toString();
+      if (unidadIdsAnuladas.length > 0) {
+        const seVan = new Set(unidadIdsAnuladas);
+        linea.unidadIds = linea.unidadIds.filter((id) => !seVan.has(id));
+      }
       // Mismo recálculo que `agregarLinea`/`fusionarCuentas`: la
       // presentación se reescribe en la unidad que la línea YA mostraba, no
       // se resta directamente.
@@ -1545,6 +1673,9 @@ export class SalonesService {
         snapshot: linea.personalizacion,
         motivoBajaId: motivo.id,
         cuentaLineaAnulacionId: anulacion.id,
+        ...(unidadIdsAnuladas.length > 0
+          ? { unidadIds: unidadIdsAnuladas, cuentaId }
+          : {}),
         convertir: stockCtx.convertir,
         ubicacionLocalId: stockCtx.ubicacionLocalId,
       });
@@ -1741,8 +1872,9 @@ export class SalonesService {
       tipo: string;
       nombre: string;
       unidad_medida: string | null;
+      modo_inventario: string | null;
     }[] = await manager.query(
-      `SELECT i.item_id, i.tipo, i.nombre, ip.unidad_medida
+      `SELECT i.item_id, i.tipo, i.nombre, ip.unidad_medida, ip.modo_inventario
            FROM items i
            -- Deliberadamente SIN condición de vigencia sobre "i", mismo
            -- criterio que escribirAnulacionDeLinea (spec § 4.2).
@@ -1753,16 +1885,49 @@ export class SalonesService {
     const itemsPorId = new Map(
       itemRows.map((r) => [
         r.item_id,
-        { tipo: r.tipo, nombre: r.nombre, unidadMedida: r.unidad_medida },
+        {
+          tipo: r.tipo,
+          nombre: r.nombre,
+          unidadMedida: r.unidad_medida,
+          modoInventario: r.modo_inventario ?? null,
+        },
       ]),
     );
 
-    // El contexto de stock se resuelve UNA vez para toda la cancelación, no
-    // por línea: si el motivo descuenta y AL MENOS una línea despachada tiene
-    // un ítem que descuenta, `escribirAnulacionEnLinea` lo va a necesitar.
+    // Si el motivo descuenta, las unidades que salen de inventario son las de
+    // `consumirLineaAnulada`; el contexto de stock se resuelve UNA vez para toda
+    // la cancelación, no por línea.
     const tipoDescuenta =
       motivo.tipo === TipoMotivoBaja.MERMA ||
       motivo.tipo === TipoMotivoBaja.CORTESIA;
+
+    // Una línea con serie despachada A MEDIAS no se puede cancelar de un tirón
+    // CUANDO EL MOTIVO DESCUENTA (owner, 2026-10-03; alcance por ruling del
+    // controlador): de las unidades que tiene apartadas, algunas ya salieron a
+    // la mesa y otras no, la línea no dice cuáles, y merma/cortesía da de baja
+    // exactamente las que salieron. Elegirlas es de quien anula (`anularLinea`),
+    // no de quien cancela. Con `no_elaborado` no hay nada que elegir: ninguna
+    // unidad sale de inventario ("¿cuál se perdió?" no tiene respuesta porque
+    // ninguna se perdió), así que la cancelación sigue y TODAS las unidades de
+    // la línea quedan libres. Se decide acá, con lo que ya se leyó, ANTES de la
+    // primera escritura del bucle de abajo —y sin una consulta más: es la línea
+    // y el ítem que ya están cargados—. Con nada despachado la línea se libera
+    // sin más (no entra en `despachadas`) y con todo despachado se anulan todas
+    // sus unidades.
+    if (tipoDescuenta) {
+      for (const linea of despachadas) {
+        const item = itemsPorId.get(linea.itemId);
+        if (
+          item?.modoInventario === 'serie' &&
+          new Decimal(linea.cantidadEnviada).lessThan(linea.cantidad)
+        ) {
+          throw new BadRequestException(
+            `Anulá primero «${item.nombre}» eligiendo cuál salió`,
+          );
+        }
+      }
+    }
+
     const necesitaStock =
       tipoDescuenta &&
       despachadas.some((l) => {
@@ -1796,6 +1961,11 @@ export class SalonesService {
         item,
         catalogo,
         stockCtx,
+        // Con un motivo que descuenta, la línea está despachada entera (el
+        // chequeo de arriba descartó la media): se van todas sus unidades.
+        // Con `no_elaborado` no se mueve ninguna, y la línea se borra entera
+        // más abajo, así que sus `unidad_ids` no hace falta tocarlos.
+        tipoDescuenta && item.modoInventario === 'serie' ? linea.unidadIds : [],
       );
       advertencias.push(...nuevas);
     }
@@ -2018,6 +2188,10 @@ export class SalonesService {
             existente.cantidadEnviada = new Decimal(existente.cantidadEnviada)
               .plus(linea.cantidadEnviada)
               .toString();
+            // Las unidades viajan con la cantidad: `cantidad = cardinalidad` es
+            // la invariante de la línea con serie. No se pueden repetir: cada
+            // unidad está apartada por una sola línea.
+            existente.unidadIds = [...existente.unidadIds, ...linea.unidadIds];
             // Mismo criterio que el merge de `agregarLinea`: la presentación se
             // reescribe en la unidad de la línea de DESTINO, que es la que
             // queda en pantalla. `itemsFusion` ya trae todo lo necesario: acá
@@ -2278,6 +2452,10 @@ export class SalonesService {
                   unidadCodigoPresentacion: l.unidadCodigoPresentacion,
                 }
               : {}),
+            // Las unidades con serie que la línea tiene apartadas: la venta las
+            // exige para todo producto con número de serie. Solo si hay: una
+            // línea de otro modo las lleva vacías y un `unidadIds` ahí es un 400.
+            ...(l.unidadIds.length > 0 ? { unidadIds: l.unidadIds } : {}),
             // ⚠️ **La personalización NO viaja en el DTO** desde el 2026-08-31.
             // Hasta acá esta línea desarmaba el snapshot congelado en puros ids y
             // `ventas.service` lo volvía a resolver contra el catálogo de hoy: de
@@ -2617,6 +2795,7 @@ export class SalonesService {
       `SELECT cl.cuenta_id, cl.cuenta_linea_id, cl.item_id, cl.cantidad,
               cl.cantidad_presentacion, cl.unidad_codigo_presentacion,
               cl.personalizacion, cl.cantidad_enviada, cl.precio_unitario,
+              cl.unidad_ids,
               i.nombre, i.precio_base, i.moneda_id,
               i.eliminado_el IS NOT NULL AS item_eliminado
          FROM cuenta_lineas cl
@@ -2634,6 +2813,11 @@ export class SalonesService {
       if (acc) acc.push(l);
       else porCuenta.set(l.cuenta_id, [l]);
     }
+    const unidades = await this.unidadesDeLineas(
+      tenantId,
+      lineas.flatMap((l) => l.unidad_ids),
+      runner,
+    );
     const nombresGarzon = await this.nombresGarzon(
       runner,
       cuentas.flatMap((c) => [
@@ -2685,8 +2869,47 @@ export class SalonesService {
         nombres,
         convertir,
         anulaciones.get(cuenta.id) ?? [],
+        unidades,
       ),
     );
+  }
+
+  /**
+   * Serie y condición de las unidades apartadas por las líneas, en UNA consulta
+   * para todas las cuentas del detalle (nunca una por línea). Sin ids no hay
+   * consulta: casi ninguna línea lleva serie y esto corre cada vez que se abre
+   * o se refresca una mesa.
+   *
+   * Una unidad borrada no vuelve (`eliminado_el IS NULL`, como toda lectura):
+   * la línea mostraría una unidad de menos que su cantidad, pero una unidad
+   * eliminada no es una que se pueda cobrar.
+   */
+  private async unidadesDeLineas(
+    tenantId: string,
+    unidadIds: string[],
+    runner: EntityManager | Db,
+  ): Promise<Map<string, { id: string; serie: string; condicion: string }>> {
+    const porId = new Map<
+      string,
+      { id: string; serie: string; condicion: string }
+    >();
+    if (unidadIds.length === 0) return porId;
+    const filas: { unidad_id: string; serie: string; condicion: string }[] =
+      await runner.query(
+        `SELECT unidad_id, serie, condicion
+           FROM item_unidad
+          WHERE unidad_id = ANY($1::uuid[]) AND tenant_id = $2
+            AND eliminado_el IS NULL`,
+        [unidadIds, tenantId],
+      );
+    for (const f of filas) {
+      porId.set(f.unidad_id, {
+        id: f.unidad_id,
+        serie: f.serie,
+        condicion: f.condicion,
+      });
+    }
+    return porId;
   }
 
   /**
@@ -2758,6 +2981,7 @@ export class SalonesService {
     nombres: Map<string, string>,
     convertir: (monto: string, monedaId: string) => string,
     anulaciones: CuentaAnulacionDetalle[],
+    unidades: Map<string, { id: string; serie: string; condicion: string }>,
   ): CuentaDetalle {
     return {
       id: cuenta.id,
@@ -2809,6 +3033,7 @@ export class SalonesService {
             : {}),
           personalizacion: l.personalizacion,
           cantidadEnviada: l.cantidad_enviada,
+          unidades: l.unidad_ids.flatMap((id) => unidades.get(id) ?? []),
           ...(personalizacionTexto ? { personalizacionTexto } : {}),
           ...(personalizacionDetalle.length ? { personalizacionDetalle } : {}),
           ...(l.item_eliminado ? { itemEliminado: true as const } : {}),
@@ -2991,6 +3216,66 @@ export class SalonesService {
     if (nueva !== null) linea.cantidadPresentacion = nueva;
   }
 
+  /**
+   * Lo que se puede decidir de las unidades de una línea sin mirar la base: si
+   * el ítem lleva serie, si hay unidades, si coinciden con la cantidad y si no
+   * se pide una presentación que una unidad serializada no admite. Devuelve las
+   * unidades a guardar (`[]` en una línea sin serie). La validación de que se
+   * puedan llevar —existen, son de este producto, están libres— es del chokepoint
+   * de inventario y corre bajo lock (`InventarioService.bloquearUnidadesParaSalida`).
+   *
+   * Los mensajes son los de `ventas.service`: es la misma regla dicha antes, no
+   * una regla nueva.
+   */
+  private validarUnidadesDeLinea(params: {
+    item: {
+      nombre: string;
+      tipo: string;
+      unidadMedida: string | null;
+      modoInventario: string | null;
+    };
+    unidadIds: string[] | undefined;
+    cantidadCanonica: string;
+    unidadCodigoPresentacion?: string;
+  }): string[] {
+    const { item, cantidadCanonica } = params;
+    // En minúsculas, como las devuelve Postgres: la línea guarda estos ids y
+    // el `includes` de `actualizarLinea` los compara con los suyos.
+    const unidadIds = (params.unidadIds ?? []).map((u) => u.toLowerCase());
+    if (item.modoInventario !== 'serie') {
+      if (unidadIds.length > 0) {
+        throw new BadRequestException(
+          `«${item.nombre}» no tiene número de serie: no lleva unidades`,
+        );
+      }
+      return [];
+    }
+    if (unidadIds.length === 0) {
+      throw new BadRequestException(
+        `Elegí qué unidades salen: «${item.nombre}» tiene número de serie`,
+      );
+    }
+    if (
+      params.unidadCodigoPresentacion &&
+      params.unidadCodigoPresentacion !==
+        resolverUnidadBaseDeItem(item).unidadBaseCodigo
+    ) {
+      throw new BadRequestException(
+        'Los productos por serie o lote solo admiten su unidad base',
+      );
+    }
+    const cantidad = new Decimal(cantidadCanonica);
+    if (!cantidad.isInteger() || !cantidad.equals(unidadIds.length)) {
+      throw new BadRequestException(
+        `«${item.nombre}»: la cantidad (${cantidad.toString()}) no coincide con las unidades elegidas (${unidadIds.length})`,
+      );
+    }
+    if (new Set(unidadIds).size !== unidadIds.length) {
+      throw new BadRequestException('Una unidad viene repetida');
+    }
+    return unidadIds;
+  }
+
   private resolverCantidadLinea(params: {
     cantidad: string;
     cantidadPresentacion?: string;
@@ -3050,20 +3335,26 @@ export class SalonesService {
     runner?: EntityManager | Db,
   ): Promise<{
     itemId: string;
+    nombre: string;
     tipo: string;
     unidadMedida: string | null;
+    /** `'serie'` obliga a elegir las unidades al pedir. `null` fuera de `producto`. */
+    modoInventario: string | null;
     /** Para congelar el precio de la línea al pedirla — ver `agregarLinea`. */
     precioBase: string;
     monedaId: string;
   }> {
     const rows: {
       item_id: string;
+      nombre: string;
       tipo: string;
       unidad_medida: string | null;
+      modo_inventario: string | null;
       precio_base: string;
       moneda_id: string;
     }[] = await (runner ?? this.db).query(
-      `SELECT i.item_id, i.tipo, ip.unidad_medida, i.precio_base, i.moneda_id
+      `SELECT i.item_id, i.nombre, i.tipo, ip.unidad_medida,
+              ip.modo_inventario, i.precio_base, i.moneda_id
          FROM items i
          LEFT JOIN item_producto ip ON ip.item_id = i.item_id
         WHERE i.item_id = $1 AND i.tenant_id = $2
@@ -3103,8 +3394,10 @@ export class SalonesService {
     }
     return {
       itemId: rows[0].item_id,
+      nombre: rows[0].nombre,
       tipo: rows[0].tipo,
       unidadMedida: rows[0].unidad_medida,
+      modoInventario: rows[0].modo_inventario ?? null,
       precioBase: rows[0].precio_base,
       monedaId: rows[0].moneda_id,
     };

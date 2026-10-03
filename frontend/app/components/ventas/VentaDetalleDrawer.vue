@@ -2,6 +2,7 @@
 import Decimal from 'decimal.js'
 import type { TableColumn } from '@nuxt/ui'
 import { formatCantidadLinea } from '~/utils/cantidad-presentacion'
+import { colorCondicion, etiquetaCondicion } from '~/composables/useUnidadesSerie'
 import { itemsParaBoletaImpresion } from '~/utils/ticket-builder'
 import type { BoletaVenta } from '~/types/boleta'
 import {
@@ -72,6 +73,8 @@ interface Detalle {
   clasificacionTributaria: string | null
   modoInventario: string | null
   cantidadDevuelta: string
+  /** Las unidades con serie que salieron en esta línea; `[]` si el producto no lleva serie. */
+  unidades?: { serie: string, condicion: string }[]
 }
 
 /**
@@ -469,6 +472,8 @@ interface FilaDetalle {
   clasificacion: string | null
   /** La regla se evaluó y no aportó nada. Se muestra, atenuada. */
   sinEfecto: boolean
+  /** Solo en la fila de un ítem con serie: qué unidades se vendieron (garantía, reclamo). */
+  unidades?: { serie: string, condicion: string }[]
 }
 
 /**
@@ -670,6 +675,7 @@ const filasDetalle = computed<FilaDetalle[]>(() => {
       recorte: null,
       sinEfecto: false,
       clasificacion: esCorreccion.value ? d.clasificacionTributaria : null,
+      unidades: d.unidades,
     }
     // Sin reglas no hay nada que expandir: el neto ya es el total.
     if (!reglas.length || !expandidas.value.has(d.id)) return [linea]
@@ -1148,6 +1154,21 @@ function onNcSuccess(payload: {
                   {{ row.original.concepto }}
                 </span>
               </div>
+              <!-- Qué unidades salieron: es lo que se busca al abrir una venta
+                   vieja por un reclamo de garantía. La boleta impresa no cambia. -->
+              <ul v-if="row.original.unidades?.length" class="mt-1 space-y-1 text-xs text-muted">
+                <li
+                  v-for="u in row.original.unidades"
+                  :key="u.serie"
+                  class="flex items-center gap-1.5"
+                >
+                  <span class="font-mono">Serie {{ u.serie }}</span>
+                  <span aria-hidden="true">·</span>
+                  <UBadge :color="colorCondicion(u.condicion)" variant="subtle" size="sm">
+                    {{ etiquetaCondicion(u.condicion) }}
+                  </UBadge>
+                </li>
+              </ul>
             </template>
             <template #cantidad-cell="{ row }">
               <span v-if="row.original.cantidad" class="font-mono">{{ row.original.cantidad }}</span>

@@ -175,6 +175,18 @@ export class GruposModificadoresService {
         );
       }
 
+      // Quien vende no está para elegir qué unidad con serie sale de una opción
+      // (owner, 2026-10-03): el chokepoint de inventario la rechazaría al vender.
+      if (
+        familiaOp === 'vendible' &&
+        tipo === 'producto' &&
+        modo_inventario === 'serie'
+      ) {
+        throw new BadRequestException(
+          `«${nombre}» tiene número de serie: no puede ser opción de un grupo`,
+        );
+      }
+
       let unidadCodigo: string | null = null;
       if (familiaOp === 'ingrediente') {
         if (modo_inventario !== 'cantidad') {

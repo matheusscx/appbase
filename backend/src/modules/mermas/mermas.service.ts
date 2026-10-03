@@ -178,6 +178,15 @@ export class MermasService {
         );
       }
 
+      // Una salida de un producto con serie nombra la unidad, y esta pantalla no
+      // tiene dónde elegirla. Hasta que la merma gane su selector, se da de baja
+      // desde Ajuste de stock.
+      if (itemRows[0].modo_inventario === 'serie') {
+        throw new BadRequestException(
+          `«${itemRows[0].nombre}» tiene número de serie: dalo de baja desde Ajuste de stock, eligiendo la unidad`,
+        );
+      }
+
       const motivo = await this.motivosBajaService.assertMotivoActivo(
         manager,
         tenantId,

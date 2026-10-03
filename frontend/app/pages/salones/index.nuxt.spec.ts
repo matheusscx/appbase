@@ -200,9 +200,24 @@ let itemsPorIdsMock: unknown[] = []
 /** Cada `GET /items?ids=...`. Aparte de `urlsCatalogo`: esa cuenta las cargas de la grilla. */
 let urlsItemsPorIds: string[] = []
 /** Los bodies de cada `POST /cuentas/:id/lineas`. Ver la rama del mock. */
-let lineasAgregadas: { itemId?: string, cantidad?: string }[] = []
+let lineasAgregadas: { itemId?: string, cantidad?: string, unidadIds?: string[] }[] = []
 /** Cada `DELETE /cuentas/:id/lineas/:lineaId`, con el id de la línea. */
 let lineasQuitadas: string[] = []
+/**
+ * Cada `GET /items/:id/unidades?...` recibido, con la URL entera: el `?vendibles=true` es lo que deja
+ * afuera lo apartado por una cuenta, y con el mock respondiendo 200 a todo no se vería si se borra.
+ */
+let urlsUnidades: string[] = []
+/** Lo que devuelve ese `GET`: las unidades vendibles del ítem en el local. */
+let unidadesVendiblesMock: unknown[] = []
+/** Cada `PATCH` de una línea con serie: el body COMPLETO, para ver que no viaja una `cantidad`. */
+let patchesDeUnidades: { lineaId: string, body: Record<string, unknown> }[] = []
+/** Lo que contesta ese `PATCH`: la cuenta con el conjunto nuevo. `null` = devuelve la del servidor tal cual. */
+let cuentaTrasCambiarUnidades: Record<string, unknown> | null = null
+/** Retiene el `PATCH` de unidades, igual que `patchCantidadRetenido`: la ventana "el cambio salió y no volvió". */
+let patchUnidadesRetenido: Promise<void> | null = null
+/** El `PATCH` de unidades rechaza con este error (el 400 de bajar de lo despachado). */
+let patchUnidadesRechazo: Error | null = null
 /** Cada `PATCH` de cantidad recibido, en orden. Ver la rama del mock. */
 let patchesDeCantidad: { lineaId: string, cantidad: string }[] = []
 /** Cada `POST /calculo-precios/calcular`. Es la señal de que la pantalla movió el carrito. */
@@ -556,6 +571,14 @@ mockNuxtImport('useApiFetch', () => {
       const respuesta = structuredClone(cuenta)
       return quitarLineaRetenido ? quitarLineaRetenido.then(() => respuesta) : Promise.resolve(respuesta)
     }
+    if (patchLinea && method === 'PATCH' && opts?.body && 'unidadIds' in opts.body) {
+      patchesDeUnidades.push({ lineaId: patchLinea[1] ?? '', body: opts.body })
+      if (patchUnidadesRechazo) return Promise.reject(patchUnidadesRechazo)
+      const cuenta = cuentasServidor?.[0]
+      if (!cuenta) return Promise.reject(new Error('PATCH sin GET previo de cuentas'))
+      const respuesta = cuentaTrasCambiarUnidades ?? structuredClone(cuenta)
+      return patchUnidadesRetenido ? patchUnidadesRetenido.then(() => respuesta) : Promise.resolve(respuesta)
+    }
     if (patchLinea && method === 'PATCH') {
       const body = (opts?.body ?? {}) as { cantidad?: string }
       patchesDeCantidad.push({ lineaId: patchLinea[1] ?? '', cantidad: body.cantidad ?? '' })
@@ -739,6 +762,11 @@ mockNuxtImport('useApiFetch', () => {
     // El detalle que pide el panel de personalización al abrirse. Solo para `item-receta`: sin esto
     // la carga falla y el panel se cierra solo, y el resto de las lecturas de `/items` siguen
     // siendo el catálogo.
+    const unidadesMatch = ruta.match(/\/items\/[^/]+\/unidades$/)
+    if (unidadesMatch && method === 'GET') {
+      urlsUnidades.push(url)
+      return Promise.resolve(unidadesVendiblesMock)
+    }
     if (ruta.endsWith('/items/item-receta')) {
       return Promise.resolve({
         id: 'item-receta',
@@ -923,6 +951,12 @@ function reiniciarMock() {
   lineasAgregadas = []
   lineasQuitadas = []
   patchesDeCantidad = []
+  urlsUnidades = []
+  unidadesVendiblesMock = []
+  patchesDeUnidades = []
+  cuentaTrasCambiarUnidades = null
+  patchUnidadesRechazo = null
+  patchUnidadesRetenido = null
   calculosPedidos = []
   sinSesionDeTrabajo = false
   abrirCuentaRetenido = null
@@ -3028,6 +3062,182 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
     soltarCierre()
     await esperar(100)
+  })
+
+  /**
+   * **El producto con serie en la cuenta que se cobra** (`docs/features/inventario-serializado.md`,
+   * § «Qué se ve»). Cambiar las unidades de una línea cambia
+   * su `cantidad` —o sea el total—, así que entra en las mismas reglas que los otros caminos: no se
+   * modifica la cuenta que se cobra, y Cobrar espera el `PATCH` que todavía viaja. El selector se abre
+   * ANTES del cobro (como el panel de la receta) y se confirma después.
+   */
+  const SERIE_U1 = { id: 'u-1', serie: '350000000000001', condicion: 'nuevo' }
+  const SERIE_U2 = { id: 'u-2', serie: '350000000000002', condicion: 'usado' }
+
+  function itemConSerie() {
+    return { ...producto('3.0000', '3.0000'), modoInventario: 'serie' }
+  }
+
+  /** La cuenta con una línea con serie de dos unidades (y `unidades` en el detalle, como el backend). */
+  function cuentaConLineaSerie() {
+    const base = cuentaConPedido('2.0000')
+    return { ...base, lineas: [{ ...base.lineas[0]!, unidades: [SERIE_U1, SERIE_U2] }] }
+  }
+
+  function modalUnidadesDe(wrapper: Awaited<ReturnType<typeof montar>>) {
+    return wrapper.findComponent({ name: 'VentasUnidadesSerieModal' })
+  }
+
+  function botonCambiarUnidades() {
+    return botonEn(drawerMesa(), 'Cambiar unidades')
+  }
+
+  it('con el cobro confirmado, un selector de unidades ya abierto no agrega a la cuenta que se cobra', async () => {
+    catalogoItemsMock = [itemConSerie()]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltarCierre!: () => void
+    cierreRetenido = new Promise<void>((r) => {
+      soltarCierre = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', catalogoItemsMock[0])
+    await esperar(30)
+    expect(modalUnidadesDe(wrapper).props('open'), 'el selector quedó abierto').toBe(true)
+
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    await esperar(50)
+    expect(cierresDeCuenta, 'el cierre está en vuelo').toEqual(['cuenta-9'])
+
+    modalUnidadesDe(wrapper).vm.$emit('confirm', [SERIE_U1])
+    await esperar(50)
+    expect(lineasAgregadas).toEqual([])
+    expect(toasts.some(t => t.title === 'Esta cuenta se está cobrando')).toBe(true)
+
+    soltarCierre()
+    await esperar(100)
+  })
+
+  it('con el cobro confirmado, "Cambiar unidades" se bloquea y un selector ya abierto no cambia la línea', async () => {
+    catalogoItemsMock = [itemConSerie()]
+    itemsPorIdsMock = [itemConSerie()]
+    cuentasDeLaMesa = [cuentaConLineaSerie()]
+    let soltarCierre!: () => void
+    cierreRetenido = new Promise<void>((r) => {
+      soltarCierre = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    botonCambiarUnidades()!.click()
+    await esperar(30)
+    expect(modalUnidadesDe(wrapper).props('open'), 'el selector quedó abierto').toBe(true)
+
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    await esperar(50)
+    expect(cierresDeCuenta, 'el cierre está en vuelo').toEqual(['cuenta-9'])
+
+    expect(botonCambiarUnidades()!.disabled, 'el botón').toBe(true)
+    modalUnidadesDe(wrapper).vm.$emit('confirm', [SERIE_U1])
+    await esperar(50)
+    expect(patchesDeUnidades).toEqual([])
+    expect(toasts.some(t => t.title === 'Esta cuenta se está cobrando')).toBe(true)
+
+    soltarCierre()
+    await esperar(100)
+  })
+
+  it('Cobrar espera el cambio de unidades que todavía se está guardando', async () => {
+    catalogoItemsMock = [itemConSerie()]
+    itemsPorIdsMock = [itemConSerie()]
+    cuentasDeLaMesa = [cuentaConLineaSerie()]
+    let soltarPatch!: () => void
+    patchUnidadesRetenido = new Promise<void>((r) => {
+      soltarPatch = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    botonCambiarUnidades()!.click()
+    await esperar(30)
+    modalUnidadesDe(wrapper).vm.$emit('confirm', [SERIE_U1])
+    await esperar(20)
+    expect(patchesDeUnidades, 'el cambio salió y no volvió').toHaveLength(1)
+
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(50)
+    expect(cobroModal.props('open'), 'no abre con el cambio en vuelo').toBe(false)
+
+    soltarPatch()
+    await esperar(100)
+    expect(cobroModal.props('open'), 'abre cuando el cambio volvió').toBe(true)
+  })
+
+  it('si lo que no vuelve es un cambio de unidades, el aviso habla de las unidades que se eligieron', async () => {
+    // Registrarlo como un agregado diría *"lo último que agregaste"*, y como un quitado, *"lo que
+    // sacaste"*: las dos mandan al garzón a buscar algo que no hizo.
+    catalogoItemsMock = [itemConSerie()]
+    itemsPorIdsMock = [itemConSerie()]
+    cuentasDeLaMesa = [cuentaConLineaSerie()]
+    patchUnidadesRetenido = new Promise<void>(() => {})
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    botonCambiarUnidades()!.click()
+    await esperar(30)
+    modalUnidadesDe(wrapper).vm.$emit('confirm', [SERIE_U1])
+    await esperar(20)
+
+    vi.useFakeTimers()
+    try {
+      botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+      await vi.advanceTimersByTimeAsync(10_100)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+    await esperar(20)
+
+    const aviso = toasts.find(t => t.title === 'Todavía se están guardando las unidades que elegiste')
+    expect(aviso, 'avisa que siguen guardándose').toBeTruthy()
+    expect(aviso!.description).toContain('No las vuelvas a elegir')
+    expect(toasts.some(t => (t.title ?? '').includes('agregaste') || (t.title ?? '').includes('sacaste'))).toBe(false)
+    expect(botonEn(drawerMesa(), 'Cancelar cuenta')?.disabled, 'la cuenta se desbloquea').toBe(false)
+  })
+
+  it('irse a otra cuenta con el selector de unidades abierto lo cierra, y un confirm que llegue igual no agrega nada', async () => {
+    // Sin esto, lo elegido para la cuenta 9 se podía confirmar estando en la 10.
+    catalogoItemsMock = [itemConSerie()]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), segundaCuenta()]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', catalogoItemsMock[0])
+    await esperar(30)
+    expect(modalUnidadesDe(wrapper).props('open'), 'el selector está abierto en la cuenta 9').toBe(true)
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(50)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetas[1]!.click()
+    await esperar(50)
+    expect(drawerMesa()?.textContent).toContain('Cuenta 10')
+
+    expect(modalUnidadesDe(wrapper).props('open'), 'el selector se cerró al cambiar de cuenta').toBe(false)
+    modalUnidadesDe(wrapper).vm.$emit('confirm', [SERIE_U1])
+    await esperar(50)
+    expect(lineasAgregadas).toEqual([])
   })
 
   /**
@@ -7370,6 +7580,321 @@ describe('salones — cancelar una cuenta con algo despachado', () => {
     expect(toasts.some(t =>
       t.color === 'warning' && t.title === 'Sin stock de "Papas" en el local: quedó en negativo',
     )).toBe(true)
+  })
+})
+
+/**
+ * El producto con número de serie en el salón: quien pide elige CUÁL unidad sale
+ * (`docs/features/inventario-serializado.md`, § «Qué se ve»). Agregar abre el
+ * selector, la línea muestra sus series con "Cambiar unidades" en vez del input de
+ * cantidad, y anular pide con casillas cuáles.
+ *
+ * `useApiFetch` contesta 200 a cualquier body, así que lo que se afirma es el body
+ * ENTERO de cada request: que `unidadIds` viaje y que, en el `PATCH`, NO viaje una
+ * `cantidad` (el servidor la rechaza con 400 en una línea con serie).
+ */
+describe('salones — productos con serie: el garzón elige la unidad', () => {
+  const ITEM_ID = 'item-iphone'
+
+  const U1 = { id: 'u-1', serie: '350000000000001', condicion: 'nuevo' }
+  const U2 = { id: 'u-2', serie: '350000000000002', condicion: 'usado' }
+  const U3 = { id: 'u-3', serie: '350000000000003', condicion: 'reacondicionado' }
+
+  function iphone() {
+    return {
+      id: ITEM_ID,
+      nombre: 'iPhone 15',
+      descripcion: null,
+      precioBase: '800000',
+      monedaId: CLP_ID,
+      monedaSimbolo: '$',
+      stock: '3.0000',
+      stockDisponible: '3.0000',
+      unidadMedida: 'unidad',
+      tipo: 'producto',
+      modoInventario: 'serie',
+      activo: true,
+      disponible: null,
+    }
+  }
+
+  function vendible(u: { id: string, serie: string, condicion: string }) {
+    return {
+      ...u,
+      estado: 'disponible',
+      garantiaHasta: null,
+      loteId: null,
+      codigoLote: null,
+      ventaId: null,
+      creadoEl: '2026-10-01T00:00:00.000Z',
+      ubicacionId: 'loc-1',
+    }
+  }
+
+  function lineaSerie(over: Record<string, unknown> = {}) {
+    return {
+      id: 'linea-1',
+      itemId: ITEM_ID,
+      nombre: 'iPhone 15',
+      precioBase: '800000',
+      monedaId: CLP_ID,
+      cantidad: '2.0000',
+      cantidadEnviada: '0',
+      unidades: [U1, U2],
+      ...over,
+    }
+  }
+
+  function cuentaCon(lineas: Record<string, unknown>[]) {
+    return {
+      id: 'cuenta-9',
+      numero: 9,
+      nombre: null,
+      estado: 'abierta',
+      mesaId: MESA_ID,
+      ventaId: null,
+      garzonAperturaId: 'g1',
+      garzonAperturaNombre: 'Ana',
+      garzonResponsableId: 'g1',
+      garzonResponsableNombre: 'Ana',
+      garzonCierreId: null,
+      garzonCierreNombre: null,
+      lineas,
+      anulaciones: [],
+    }
+  }
+
+  async function abrirLaCuenta(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await seleccionarMesa(wrapper)
+    const tarjeta = drawerMesa()?.querySelector<HTMLElement>('.cursor-pointer')
+    expect(tarjeta).toBeTruthy()
+    tarjeta!.click()
+    await esperar(20)
+  }
+
+  function modalUnidades(): HTMLElement | undefined {
+    return dialogos().find(d => d.textContent?.includes('Elegir unidades'))
+  }
+
+  function seriesOfrecidas(): string[] {
+    return [...(modalUnidades()?.querySelectorAll<HTMLElement>('[data-qa="unidad-fila"]') ?? [])]
+      .map(f => f.getAttribute('data-serie') ?? '')
+  }
+
+  function seriesMarcadas(): string[] {
+    return [...(modalUnidades()?.querySelectorAll<HTMLElement>('[data-qa="unidad-fila"]') ?? [])]
+      .filter(f => f.querySelector('[role="checkbox"]')?.getAttribute('aria-checked') === 'true')
+      .map(f => f.getAttribute('data-serie') ?? '')
+  }
+
+  async function tildar(serie: string) {
+    const fila = [...(modalUnidades()?.querySelectorAll<HTMLElement>('[data-qa="unidad-fila"]') ?? [])]
+      .find(f => f.getAttribute('data-serie') === serie)
+    expect(fila, `la fila de ${serie}`).toBeTruthy()
+    fila!.querySelector<HTMLElement>('[role="checkbox"]')!.click()
+    await esperar(20)
+  }
+
+  async function confirmarUnidades() {
+    modalUnidades()!.querySelector<HTMLElement>('[data-qa="unidades-confirmar"]')!.click()
+    await esperar(30)
+  }
+
+  function botonCambiarUnidades(): HTMLButtonElement | undefined {
+    return [...(drawerMesa()?.querySelectorAll('button') ?? [])]
+      .find(b => b.textContent?.trim() === 'Cambiar unidades')
+  }
+
+  function tarjetaDelIphone(): HTMLElement {
+    const t = drawerMesa()?.querySelector<HTMLElement>(`[data-qa="item-catalogo-${ITEM_ID}"]`)
+    expect(t, 'la tarjeta del iPhone').toBeTruthy()
+    return t!
+  }
+
+  beforeEach(reiniciarMock)
+
+  it('tocar el producto abre el selector y NO agrega nada hasta confirmar', async () => {
+    catalogoItemsMock = [iphone()]
+    cuentasDeLaMesa = [cuentaCon([])]
+    unidadesVendiblesMock = [vendible(U1), vendible(U2), vendible(U3)]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    tarjetaDelIphone().click()
+    await esperar(30)
+
+    expect(modalUnidades()).toBeTruthy()
+    expect(urlsUnidades).toHaveLength(1)
+    expect(urlsUnidades[0]).toMatch(/\/items\/item-iphone\/unidades\?vendibles=true$/)
+    expect(seriesOfrecidas()).toEqual([U1.serie, U2.serie, U3.serie])
+    expect(lineasAgregadas).toHaveLength(0)
+  })
+
+  it('al confirmar manda las unidades elegidas y la cantidad es cuántas son', async () => {
+    catalogoItemsMock = [iphone()]
+    cuentasDeLaMesa = [cuentaCon([])]
+    unidadesVendiblesMock = [vendible(U1), vendible(U2), vendible(U3)]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    tarjetaDelIphone().click()
+    await esperar(30)
+    await tildar(U1.serie)
+    await tildar(U3.serie)
+    await confirmarUnidades()
+
+    expect(lineasAgregadas).toEqual([{ itemId: ITEM_ID, cantidad: '2', unidadIds: ['u-1', 'u-3'] }])
+  })
+
+  it('no ofrece las unidades que ya están en otra línea de la cuenta', async () => {
+    // Una segunda línea del mismo ítem (otra tanda del pedido) ya tiene u-1: ofrecerla
+    // otra vez sería pedir al servidor algo que él mismo rechaza.
+    catalogoItemsMock = [iphone()]
+    cuentasDeLaMesa = [cuentaCon([lineaSerie({ cantidad: '1.0000', unidades: [U1] })])]
+    // El mock sí la lista (un `GET` que llega con la lista de antes del pedido): lo que la saca
+    // es el `excluir` de la pantalla, no el servidor.
+    unidadesVendiblesMock = [vendible(U1), vendible(U2), vendible(U3)]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    tarjetaDelIphone().click()
+    await esperar(30)
+
+    expect(seriesOfrecidas()).toEqual([U2.serie, U3.serie])
+  })
+
+  it('un producto sin serie se agrega como siempre: sin selector y sin unidadIds', async () => {
+    catalogoItemsMock = [{ ...iphone(), id: 'item-coca', nombre: 'Coca-Cola', modoInventario: 'cantidad' }]
+    cuentasDeLaMesa = [cuentaCon([])]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    drawerMesa()!.querySelector<HTMLElement>('[data-qa="item-catalogo-item-coca"]')!.click()
+    await esperar(30)
+
+    expect(modalUnidades()).toBeFalsy()
+    expect(lineasAgregadas).toEqual([{ itemId: 'item-coca', cantidad: '1' }])
+  })
+
+  it('la línea con serie muestra sus series y "Cambiar unidades" en vez del input de cantidad', async () => {
+    catalogoItemsMock = [iphone()]
+    itemsPorIdsMock = [iphone()]
+    cuentasDeLaMesa = [cuentaCon([lineaSerie()])]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+
+    const texto = drawerMesa()!.textContent!
+    expect(texto).toContain(U1.serie)
+    expect(texto).toContain(U2.serie)
+    expect(texto).toContain('Usado')
+    expect(botonCambiarUnidades()).toBeTruthy()
+    expect(wrapper.findComponent({ name: 'AppCantidadInput' }).exists()).toBe(false)
+  })
+
+  it('una línea normal conserva el input de cantidad y no ofrece "Cambiar unidades"', async () => {
+    catalogoItemsMock = [iphone()]
+    cuentasDeLaMesa = [cuentaCon([lineaSerie({ unidades: [] })])]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+
+    expect(botonCambiarUnidades()).toBeFalsy()
+    expect(wrapper.findComponent({ name: 'AppCantidadInput' }).exists()).toBe(true)
+  })
+
+  it('"Cambiar unidades" reabre el selector con las de la línea marcadas aunque el servidor no las liste', async () => {
+    // Las de la propia línea las aparta esta misma cuenta, así que `vendibles=true` no las
+    // trae: tienen que verse igual, marcadas, para poder desmarcarlas.
+    catalogoItemsMock = [iphone()]
+    itemsPorIdsMock = [iphone()]
+    cuentasDeLaMesa = [cuentaCon([lineaSerie()])]
+    unidadesVendiblesMock = [vendible(U3)]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    botonCambiarUnidades()!.click()
+    await esperar(30)
+
+    expect(seriesOfrecidas()).toEqual([U1.serie, U2.serie, U3.serie])
+    expect(seriesMarcadas()).toEqual([U1.serie, U2.serie])
+  })
+
+  it('confirmar manda el conjunto nuevo en un PATCH SIN cantidad', async () => {
+    catalogoItemsMock = [iphone()]
+    itemsPorIdsMock = [iphone()]
+    cuentasDeLaMesa = [cuentaCon([lineaSerie()])]
+    unidadesVendiblesMock = [vendible(U3)]
+    cuentaTrasCambiarUnidades = cuentaCon([lineaSerie({ cantidad: '2.0000', unidades: [U1, U3] })])
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    botonCambiarUnidades()!.click()
+    await esperar(30)
+    await tildar(U2.serie) // sale
+    await tildar(U3.serie) // entra
+    await confirmarUnidades()
+
+    expect(patchesDeUnidades).toEqual([{ lineaId: 'linea-1', body: { unidadIds: ['u-1', 'u-3'] } }])
+    expect(patchesDeCantidad).toHaveLength(0)
+    expect(drawerMesa()!.textContent).toContain(U3.serie)
+    expect(drawerMesa()!.textContent).not.toContain(U2.serie)
+  })
+
+  it('si el servidor rechaza el cambio muestra su mensaje y deja la línea como estaba', async () => {
+    // El caso real: bajar de lo ya despachado a cocina. La regla es del servidor; la pantalla
+    // no la duplica, solo muestra lo que él contesta.
+    catalogoItemsMock = [iphone()]
+    itemsPorIdsMock = [iphone()]
+    cuentasDeLaMesa = [cuentaCon([lineaSerie({ cantidadEnviada: '2.0000' })])]
+    unidadesVendiblesMock = []
+    const rechazo = new Error('x') as Error & { data?: unknown }
+    rechazo.data = { message: 'No se puede bajar de lo ya despachado' }
+    patchUnidadesRechazo = rechazo
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    botonCambiarUnidades()!.click()
+    await esperar(30)
+    await tildar(U2.serie)
+    await confirmarUnidades()
+
+    expect(toasts.some(t => t.color === 'error' && t.title === 'No se puede bajar de lo ya despachado')).toBe(true)
+    expect(drawerMesa()!.textContent).toContain(U2.serie)
+  })
+
+  it('anular una línea con serie manda las unidades marcadas y la cantidad es cuántas son', async () => {
+    usePermissionsStore().permisos = ['Salones:Anular']
+    motivosBajaMock = [{ id: 'motivo-cortesia', nombre: 'Invitación', tipo: 'cortesia' }]
+    catalogoItemsMock = [iphone()]
+    itemsPorIdsMock = [iphone()]
+    cuentasDeLaMesa = [cuentaCon([lineaSerie({ cantidadEnviada: '2.0000' })])]
+    cuentaTrasAnular = cuentaCon([lineaSerie({ cantidad: '1.0000', cantidadEnviada: '1.0000', unidades: [U1] })])
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    drawerMesa()!.querySelector<HTMLButtonElement>('button[title^="Anular"]')!.click()
+    await esperar(30)
+
+    const modal = dialogos().find(d => d.textContent?.includes('Anular plato'))
+    expect(modal).toBeTruthy()
+    const filas = [...modal!.querySelectorAll<HTMLElement>('[data-qa="unidad-anular"]')]
+    expect(filas).toHaveLength(2)
+    filas[1]!.querySelector<HTMLElement>('[role="checkbox"]')!.click()
+    await esperar(20)
+    wrapper.findComponent({ name: 'SalonesAnularLineaModal' })
+      .findComponent({ name: 'USelectMenu' })
+      .vm.$emit('update:modelValue', 'motivo-cortesia')
+    await esperar(10)
+    botonEn(modal, 'Anular')!.click()
+    await esperar(30)
+
+    expect(anulacionesPedidas).toHaveLength(1)
+    expect(anulacionesPedidas[0]!.body).toEqual({
+      cantidad: '1',
+      unidadIds: ['u-2'],
+      motivoBajaId: 'motivo-cortesia',
+    })
   })
 })
 

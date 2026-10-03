@@ -65,4 +65,14 @@ describe('tienda/index — el catálogo pide solo ítems vendibles', () => {
     expect(urlsCatalogo[0]).toContain('tipo=producto')
     expect(urlsCatalogo[0]).toContain('orden=disponibilidad')
   })
+
+  // La tienda no vende productos con número de serie (no hay quien elija la unidad):
+  // sin este param el catálogo los ofrecería y el checkout los rechazaría recién
+  // al pagar. El backend los excluye; esto es lo único que hace que lo pida.
+  it('la consulta de catálogo lleva `vendibleOnline=true`', async () => {
+    await montar()
+
+    expect(urlsCatalogo).toHaveLength(1)
+    expect(urlsCatalogo[0]).toContain('vendibleOnline=true')
+  })
 })

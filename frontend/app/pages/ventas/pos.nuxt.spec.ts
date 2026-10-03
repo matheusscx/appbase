@@ -124,6 +124,10 @@ let respuestasVenta: (Error | { status: number, data: unknown } | Record<string,
 let tiposDocumentoMock: unknown[] = []
 /** La página de catálogo que devuelve `GET /items`. */
 let itemsCatalogoMock: unknown[] = []
+/** Lo que devuelve `GET /items/:id/unidades` (las vendibles de un producto con serie). */
+let unidadesVendiblesMock: unknown[] = []
+/** Cada URL pedida a `GET /items/:id/unidades`, con su query string. */
+let urlsUnidades: string[] = []
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: unknown, headers?: Record<string, string> }) => {
@@ -132,6 +136,10 @@ mockNuxtImport('useApiFetch', () => {
 
     if (ruta.endsWith('/caja/activa')) {
       return Promise.resolve(cajaActivaMock)
+    }
+    if (ruta.endsWith('/unidades')) {
+      urlsUnidades.push(url)
+      return Promise.resolve(unidadesVendiblesMock)
     }
     if (ruta.includes('/items')) {
       urlsCatalogo.push(url)
@@ -193,6 +201,8 @@ beforeEach(() => {
   respuestasVenta = []
   tiposDocumentoMock = []
   itemsCatalogoMock = []
+  unidadesVendiblesMock = []
+  urlsUnidades = []
   toasts = []
   // La clave vive a nivel de módulo (sobrevive a cerrar y reabrir un modal):
   // cada test arranca sin intento abierto.
@@ -588,5 +598,121 @@ describe('ventas/pos — un cobro que se repite no se registra dos veces', () =>
 
     expect(clavesDeVenta).toHaveLength(2)
     expect(clavesDeVenta[1]).not.toBe(clavesDeVenta[0])
+  })
+})
+
+describe('ventas/pos — producto con serie: el cajero elige qué unidad sale', () => {
+  const celular = {
+    id: 'item-celu',
+    nombre: 'iPhone 15',
+    descripcion: null,
+    precioBase: '800000',
+    monedaId: 'clp',
+    monedaSimbolo: '$',
+    stock: '3',
+    stockDisponible: '3.0000',
+    unidadMedida: 'unidad',
+    tipo: 'producto',
+    modoInventario: 'serie',
+    activo: true,
+  }
+  const vendible = (id: string, serie: string, condicion: string) => ({
+    id, serie, estado: 'disponible', condicion, garantiaHasta: null, loteId: null, codigoLote: null,
+    ventaId: null, creadoEl: '2026-10-01T00:00:00.000Z', ubicacionId: 'loc-1',
+  })
+  const NUEVO = { id: 'u-1', serie: 'IMEI-1', condicion: 'nuevo' }
+  const USADO = { id: 'u-2', serie: 'IMEI-2', condicion: 'usado' }
+
+  async function montarConCelular() {
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    itemsCatalogoMock = [celular]
+    unidadesVendiblesMock = [vendible('u-1', 'IMEI-1', 'nuevo'), vendible('u-2', 'IMEI-2', 'usado')]
+    const wrapper = await montar()
+    await esperar(20)
+    return wrapper
+  }
+
+  const lineasDelCarrito = (w: Awaited<ReturnType<typeof montar>>) =>
+    w.findComponent({ name: 'VentasCarritoPanel' }).props('lineas') as { cantidad: string, unidades?: unknown[] }[]
+
+  it('tocar el producto abre el selector y no lo agrega al carrito', async () => {
+    const wrapper = await montarConCelular()
+
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', celular)
+    await esperar(50)
+
+    const modal = wrapper.findComponent({ name: 'VentasUnidadesSerieModal' })
+    expect(modal.exists()).toBe(true)
+    expect(modal.props('open')).toBe(true)
+    expect(urlsUnidades).toHaveLength(1)
+    expect(urlsUnidades[0]).toMatch(/\/items\/item-celu\/unidades\?vendibles=true$/)
+    expect(lineasDelCarrito(wrapper)).toHaveLength(0)
+  })
+
+  it('confirmar crea la línea con las unidades y el cobro manda sus unidadIds', async () => {
+    const wrapper = await montarConCelular()
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', celular)
+    await esperar(50)
+
+    wrapper.findComponent({ name: 'VentasUnidadesSerieModal' }).vm.$emit('confirm', [NUEVO, USADO])
+    await esperar(20)
+
+    const lineas = lineasDelCarrito(wrapper)
+    expect(lineas).toHaveLength(1)
+    expect(lineas[0]!.cantidad).toBe('2')
+    expect(lineas[0]!.unidades).toEqual([NUEVO, USADO])
+
+    wrapper.findComponent({ name: 'VentasCobroModal' })
+      .vm.$emit('confirmar', [{ metodoPagoId: 'mp-efectivo', monto: '1600000' }], '0')
+    await esperar(50)
+
+    expect(bodiesDeVenta).toHaveLength(1)
+    const linea = (bodiesDeVenta[0]!.lineas as Record<string, unknown>[])[0]!
+    expect(linea).toMatchObject({ itemId: 'item-celu', cantidad: '2', unidadIds: ['u-1', 'u-2'] })
+  })
+
+  it('tocar de nuevo el mismo producto reabre el selector con las de la línea marcadas, sin sumar un +1', async () => {
+    const wrapper = await montarConCelular()
+    const grilla = wrapper.findComponent({ name: 'VentasCatalogoGrid' })
+    grilla.vm.$emit('add', celular)
+    await esperar(50)
+    wrapper.findComponent({ name: 'VentasUnidadesSerieModal' }).vm.$emit('confirm', [NUEVO])
+    await esperar(20)
+
+    grilla.vm.$emit('add', celular)
+    await esperar(50)
+
+    const modal = wrapper.findComponent({ name: 'VentasUnidadesSerieModal' })
+    expect(modal.props('seleccionadas')).toEqual([NUEVO])
+    expect(lineasDelCarrito(wrapper)).toHaveLength(1)
+    expect(lineasDelCarrito(wrapper)[0]!.cantidad).toBe('1')
+
+    modal.vm.$emit('confirm', [NUEVO, USADO])
+    await esperar(20)
+
+    expect(lineasDelCarrito(wrapper)).toHaveLength(1)
+    expect(lineasDelCarrito(wrapper)[0]!.unidades).toEqual([NUEVO, USADO])
+    expect(lineasDelCarrito(wrapper)[0]!.cantidad).toBe('2')
+  })
+
+  it('"Cambiar unidades" de la línea reabre el selector sobre esa línea', async () => {
+    const wrapper = await montarConCelular()
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', celular)
+    await esperar(50)
+    wrapper.findComponent({ name: 'VentasUnidadesSerieModal' }).vm.$emit('confirm', [NUEVO, USADO])
+    await esperar(20)
+
+    wrapper.findComponent({ name: 'VentasCarritoPanel' }).vm.$emit('cambiar-unidades', 0)
+    await esperar(50)
+
+    const modal = wrapper.findComponent({ name: 'VentasUnidadesSerieModal' })
+    expect(modal.props('open')).toBe(true)
+    expect(modal.props('seleccionadas')).toEqual([NUEVO, USADO])
+
+    modal.vm.$emit('confirm', [USADO])
+    await esperar(20)
+
+    expect(lineasDelCarrito(wrapper)[0]!.unidades).toEqual([USADO])
+    expect(lineasDelCarrito(wrapper)[0]!.cantidad).toBe('1')
   })
 })

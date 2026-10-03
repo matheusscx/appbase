@@ -70,7 +70,14 @@ export interface RegistrarMovimientoParams {
   costoUnitario?: string | null;
   // Modo 'serie'
   series?: SerieInput[]; // entrada serie: N unidades a crear
-  unidadIds?: string[]; // salida serie: IDs de unidades a consumir
+  unidadIds?: string[]; // salida serie: IDs de unidades a consumir (obligatorias)
+  /**
+   * La cuenta abierta del salón dueña de esta salida (la que se cierra o la que
+   * anula su línea). Solo importa en la salida de modo `serie`: una unidad
+   * apartada por una cuenta abierta solo puede salir por esa misma cuenta, y
+   * cualquier otra salida la rechaza. Ausente en el resto de los llamadores.
+   */
+  cuentaId?: string | null;
   // Modo 'lote'
   lote?: LoteInput; // entrada lote: crea o agrega a lote existente
   loteId?: string; // salida lote: lote a descontar
@@ -320,10 +327,10 @@ export class InventarioService {
     costoActual: string | null;
     /**
      * Qué se movió realmente, para que el llamador no tenga que adivinarlo.
-     * Solo lo usa el traslado: su SALIDA puede auto-seleccionar unidades o
-     * lotes (unidades por FIFO, lotes por vencimiento), y la ENTRADA tiene que registrar **esos mismos** —no
-     * volver a elegir— o las dos filas de kardex describirían movimientos
-     * distintos.
+     * Solo lo usa el traslado: su SALIDA puede auto-seleccionar lotes (por
+     * vencimiento; las unidades con serie ya no se auto-seleccionan, se nombran),
+     * y la ENTRADA tiene que registrar **esos mismos** —no volver a elegir— o las
+     * dos filas de kardex describirían movimientos distintos.
      */
     unidadIds?: string[];
     loteConsumos?: { loteId: string; cantidad: string }[];
@@ -1337,6 +1344,163 @@ export class InventarioService {
     }
   }
 
+  /**
+   * La validación de unidades de una salida en modo serie: UNA, compartida por
+   * la salida de `moverSerie` (venta, merma, ajuste, traslado) y por el salón al
+   * pedir una línea con serie. Quien vende elige qué unidades salen; acá solo se
+   * comprueba que se puedan llevar y se las lockea.
+   *
+   * Orden de bloqueo (`docs/patterns/backend.md` §15): `item_producto` primero,
+   * después las unidades **en un solo `SELECT … ORDER BY unidad_id FOR UPDATE`**,
+   * nunca en el orden en que las mandó el cliente. El `ORDER BY` es lo que decide
+   * el orden de adquisición, y ningún test de conducta caza su ausencia: lo fija
+   * el unitario sobre el SQL.
+   *
+   * Toma el lock de `item_producto` por su cuenta aunque `registrarMovimiento`
+   * ya lo tenga: el salón llama acá en un PATCH que cambia una unidad por otra
+   * sin cambiar la cantidad, y ese camino no pasa por `validarStockAlPedir`.
+   * Re-lockear la misma fila en la misma transacción no cuesta nada. El chequeo
+   * de apartado se lee con ese lock tomado: pedir en el salón y vender en el POS
+   * se serializan ahí, por eso no hace falta un índice único sobre lo apartado.
+   *
+   * Devuelve las filas en orden de `unidad_id`.
+   */
+  async bloquearUnidadesParaSalida(
+    manager: EntityManager,
+    p: {
+      tenantId: string;
+      itemId: string;
+      ubicacionId: string;
+      unidadIds: string[];
+      cuentaId?: string | null;
+    },
+  ): Promise<{ unidad_id: string; serie: string; condicion: string }[]> {
+    // Un uuid en mayúsculas es la misma unidad que en minúsculas (Postgres lo
+    // devuelve siempre en minúsculas): se normaliza antes del chequeo de
+    // repetidas y de los `Map`/`includes` de más abajo, igual que el dedupe de
+    // `ventas.service`.
+    const unidadIds = p.unidadIds.map((u) => u.toLowerCase());
+    if (new Set(unidadIds).size !== unidadIds.length) {
+      throw new BadRequestException('Una unidad viene repetida');
+    }
+
+    // Mismo acote por tenant contra el padre que el chokepoint (`item_producto`
+    // no tiene `tenant_id`), y `OF ip` por la misma razón. Trae el nombre para
+    // el mensaje de "elegí", sin una query más.
+    // SIN `i.eliminado_el IS NULL`, a propósito: el producto de una línea ya
+    // pedida puede haberse eliminado después, y su línea igual tiene que poder
+    // anularse (devolver la unidad). El chokepoint (`registrarMovimiento`) lee
+    // `item_eliminado_el` y es quien decide, por motivo, si un producto
+    // eliminado admite el movimiento; filtrar acá lo volvería un "no existe".
+    const productoRows: { item_nombre: string }[] = await manager.query(
+      `SELECT i.nombre AS item_nombre
+         FROM item_producto ip
+         JOIN items i ON i.item_id = ip.item_id
+        WHERE ip.item_id = $1 AND i.tenant_id = $2
+        FOR UPDATE OF ip`,
+      [p.itemId, p.tenantId],
+    );
+    if (!productoRows.length) {
+      throw new BadRequestException('El item no tiene control de stock');
+    }
+    if (unidadIds.length === 0) {
+      throw new BadRequestException(
+        `Elegí qué unidades salen: «${productoRows[0].item_nombre}» tiene número de serie`,
+      );
+    }
+
+    // `tenant_id` y `eliminado_el` en la query: una unidad ajena o borrada no
+    // vuelve, y se rechaza con el mismo mensaje que una de otro producto — no
+    // distingue, para que el 400 no sea un oráculo entre tenants.
+    const filas: {
+      unidad_id: string;
+      serie: string;
+      condicion: string;
+      estado: string;
+      item_id: string;
+      ubicacion_id: string;
+    }[] = await manager.query(
+      `SELECT unidad_id, serie, condicion, estado, item_id, ubicacion_id
+         FROM item_unidad
+        WHERE unidad_id = ANY($1) AND tenant_id = $2 AND eliminado_el IS NULL
+        ORDER BY unidad_id
+        FOR UPDATE`,
+      [unidadIds, p.tenantId],
+    );
+    const porId = new Map(filas.map((f) => [f.unidad_id, f]));
+    for (const uid of unidadIds) {
+      if (porId.get(uid)?.item_id !== p.itemId) {
+        throw new BadRequestException(
+          `Unidad ${uid} no pertenece a este producto`,
+        );
+      }
+    }
+
+    const fueraDeLugar = filas.filter((f) => f.ubicacion_id !== p.ubicacionId);
+    if (fueraDeLugar.length) {
+      // Una unidad serializada está en un solo lugar: la salida tiene que
+      // pedirse desde ahí. El mensaje nombra la ubicación real de la unidad, no
+      // solo que "no se puede" — sin eso, quien opera no sabe si falta stock o
+      // si está mirando la ubicación equivocada. UNA consulta de nombres para
+      // todas las fuera de lugar, acotada por tenant y sin eliminadas: sin el
+      // filtro sería un oráculo de nombres de otro tenant en cuanto exista un
+      // llamador que reciba `ubicacionId` del body (`POST /traslados`).
+      const nombresRows: { ubicacion_id: string; nombre: string }[] =
+        await manager.query(
+          `SELECT ubicacion_id, nombre FROM ubicaciones
+            WHERE ubicacion_id = ANY($1) AND tenant_id = $2
+              AND eliminado_el IS NULL`,
+          [
+            [...fueraDeLugar.map((f) => f.ubicacion_id), p.ubicacionId],
+            p.tenantId,
+          ],
+        );
+      const nombreDe = (id: string) =>
+        nombresRows.find((r) => r.ubicacion_id === id)?.nombre ?? id;
+      throw new BadRequestException(
+        `La unidad ${fueraDeLugar[0].serie} está en ${nombreDe(fueraDeLugar[0].ubicacion_id)}, ` +
+          `no en ${nombreDe(p.ubicacionId)}`,
+      );
+    }
+
+    const noDisponible = filas.find((f) => f.estado !== 'disponible');
+    if (noDisponible) {
+      throw new BadRequestException(
+        `La unidad ${noDisponible.serie} no está disponible (estado: ${noDisponible.estado})`,
+      );
+    }
+
+    // Apartada: la tiene una línea de una cuenta ABIERTA que no es la dueña de
+    // esta salida. Solo cuentas vivas y abiertas, en mesas vivas (una mesa con
+    // cuentas abiertas no se puede eliminar, así que el JOIN interno no pierde
+    // ninguna). Una consulta para todas las unidades.
+    const apartadas: { unidad_id: string; mesa_nombre: string }[] =
+      await manager.query(
+        `SELECT x.unidad_id, me.nombre AS mesa_nombre
+           FROM cuenta_lineas cl
+           JOIN cuentas c ON c.cuenta_id = cl.cuenta_id AND c.tenant_id = $1
+            AND c.estado = 'abierta' AND c.eliminado_el IS NULL
+           JOIN mesas me ON me.mesa_id = c.mesa_id AND me.eliminado_el IS NULL
+          CROSS JOIN LATERAL unnest(cl.unidad_ids) AS x(unidad_id)
+          WHERE cl.tenant_id = $1 AND cl.eliminado_el IS NULL
+            AND x.unidad_id = ANY($2::uuid[])
+            AND c.cuenta_id IS DISTINCT FROM $3::uuid`,
+        [p.tenantId, unidadIds, p.cuentaId ?? null],
+      );
+    if (apartadas.length) {
+      const serie = porId.get(apartadas[0].unidad_id)?.serie;
+      throw new BadRequestException(
+        `La unidad ${serie ?? apartadas[0].unidad_id} está apartada en la cuenta de ${apartadas[0].mesa_nombre}`,
+      );
+    }
+
+    return filas.map(({ unidad_id, serie, condicion }) => ({
+      unidad_id,
+      serie,
+      condicion,
+    }));
+  }
+
   private async moverSerie(
     manager: EntityManager,
     params: RegistrarMovimientoParams,
@@ -1449,33 +1613,18 @@ export class InventarioService {
       return { stockResultante, unidadIds };
     } else {
       // salida serie
-      let unidadIds = params.unidadIds ?? [];
-      if (unidadIds.length === 0) {
-        // Auto-selección FIFO: las unidades disponibles más antiguas, y solo
-        // las de esta ubicación — sin el filtro, una salida en el local
-        // podría auto-seleccionar una unidad que físicamente está en la
-        // bodega.
-        const disponibles: { unidad_id: string }[] = await manager.query(
-          `SELECT u.unidad_id FROM item_unidad u
-           WHERE u.item_id = $1 AND u.tenant_id = $2 AND u.ubicacion_id = $3
-             AND u.estado = 'disponible' AND u.eliminado_el IS NULL
-           ORDER BY u.creado_el ASC
-           LIMIT $4
-           FOR UPDATE`,
-          [
-            params.itemId,
-            params.tenantId,
-            params.ubicacionId,
-            cantidad.toString(),
-          ],
-        );
-        if (!new Decimal(disponibles.length).equals(cantidad)) {
-          throw new BadRequestException(
-            `Stock insuficiente: se requieren ${cantidad.toString()} unidades disponibles, hay ${disponibles.length}`,
-          );
-        }
-        unidadIds = disponibles.map((u) => u.unidad_id);
-      } else if (!new Decimal(unidadIds.length).equals(cantidad)) {
+      // El chokepoint no elige: quien vende dice qué unidades salen y acá solo
+      // se valida y se lockea. El vacío rechaza ANTES que la cantidad, para que
+      // el mensaje de "elegí" gane sobre el de "no coincide".
+      const unidadIds = params.unidadIds ?? [];
+      await this.bloquearUnidadesParaSalida(manager, {
+        tenantId: params.tenantId,
+        itemId: params.itemId,
+        ubicacionId: params.ubicacionId,
+        unidadIds,
+        cuentaId: params.cuentaId,
+      });
+      if (!new Decimal(unidadIds.length).equals(cantidad)) {
         throw new BadRequestException(
           `La cantidad (${cantidad.toString()}) no coincide con el número de unidades (${unidadIds.length})`,
         );
@@ -1514,70 +1663,17 @@ export class InventarioService {
       }
       const estadoDestino = params.motivo === 'venta' ? 'vendido' : 'baja';
 
-      for (const uid of unidadIds) {
-        const rows: {
-          estado: string;
-          item_id: string;
-          tenant_id: string;
-          ubicacion_id: string;
-          serie: string;
-        }[] = await manager.query(
-          `SELECT estado, item_id, tenant_id, ubicacion_id, serie FROM item_unidad
-             WHERE unidad_id = $1 AND eliminado_el IS NULL FOR UPDATE`,
-          [uid],
+      // UNA sentencia para todas las unidades, ya lockeadas y validadas arriba.
+      if (esTraslado) {
+        await manager.query(
+          `UPDATE item_unidad SET ubicacion_id = $1 WHERE unidad_id = ANY($2)`,
+          [params.ubicacionDestinoId, unidadIds],
         );
-        if (!rows.length) {
-          throw new BadRequestException(`Unidad ${uid} no encontrada`);
-        }
-        if (rows[0].tenant_id !== params.tenantId) {
-          throw new BadRequestException(`Unidad ${uid} no pertenece al tenant`);
-        }
-        if (rows[0].item_id !== params.itemId) {
-          throw new BadRequestException(`Unidad ${uid} no pertenece al item`);
-        }
-        if (rows[0].ubicacion_id !== params.ubicacionId) {
-          // Una unidad serializada está en un solo lugar: la salida tiene que
-          // pedirse desde ahí. El mensaje nombra la ubicación real de la
-          // unidad, no solo que "no se puede" — sin eso, quien opera no sabe si
-          // falta stock o si está mirando la ubicación equivocada. Acotado por
-          // tenant y sin eliminadas, como toda lectura nueva de esta tabla: los
-          // dos ids que entran acá son de hoy siempre tenant-scoped (la unidad
-          // ya se validó contra el tenant arriba, y `params.ubicacionId` sale
-          // de `UbicacionesService.localDe` en todos los llamadores actuales),
-          // pero sin el filtro esta query se vuelve un oráculo de nombres de
-          // otro tenant en cuanto exista un llamador que reciba `ubicacionId`
-          // del body (`POST /traslados`).
-          const nombresRows: { ubicacion_id: string; nombre: string }[] =
-            await manager.query(
-              `SELECT ubicacion_id, nombre FROM ubicaciones
-                WHERE ubicacion_id = ANY($1) AND tenant_id = $2
-                  AND eliminado_el IS NULL`,
-              [[rows[0].ubicacion_id, params.ubicacionId], params.tenantId],
-            );
-          const nombreDe = (id: string) =>
-            nombresRows.find((r) => r.ubicacion_id === id)?.nombre ?? id;
-          throw new BadRequestException(
-            `La unidad ${rows[0].serie} está en ${nombreDe(rows[0].ubicacion_id)}, ` +
-              `no en ${nombreDe(params.ubicacionId)}`,
-          );
-        }
-        if (rows[0].estado !== 'disponible') {
-          throw new BadRequestException(
-            `Unidad ${uid} no está disponible (estado: ${rows[0].estado})`,
-          );
-        }
-
-        if (esTraslado) {
-          await manager.query(
-            `UPDATE item_unidad SET ubicacion_id = $1 WHERE unidad_id = $2`,
-            [params.ubicacionDestinoId, uid],
-          );
-        } else {
-          await manager.query(
-            `UPDATE item_unidad SET estado = $1, venta_id = $2 WHERE unidad_id = $3`,
-            [estadoDestino, params.ventaId ?? null, uid],
-          );
-        }
+      } else {
+        await manager.query(
+          `UPDATE item_unidad SET estado = $1, venta_id = $2 WHERE unidad_id = ANY($3)`,
+          [estadoDestino, params.ventaId ?? null, unidadIds],
+        );
       }
 
       const stockResultante = await this.recalcularStockSerie(

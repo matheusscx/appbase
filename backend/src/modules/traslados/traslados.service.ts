@@ -473,8 +473,9 @@ export class TrasladosService {
       comentario: dto.comentario ?? null,
       trasladoId,
       // Lo que la salida movió de verdad, no lo que el cliente pidió: en modo
-      // serie o lote la salida pudo auto-seleccionar (FIFO o vencimiento), y la entrada
-      // tiene que registrar esas mismas unidades/lotes.
+      // lote la salida pudo auto-seleccionar por vencimiento, y la entrada tiene que
+      // registrar esos mismos lotes (en serie son las unidades que el cliente
+      // eligió).
       unidadIds: salida.unidadIds,
       // La salida automática devuelve `loteConsumos`; la salida con lote elegido
       // devuelve `loteId` y la cantidad es la de la línea. Se normaliza acá y

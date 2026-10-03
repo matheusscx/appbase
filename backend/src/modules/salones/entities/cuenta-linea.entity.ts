@@ -130,6 +130,21 @@ export class CuentaLinea {
   personalizacion: PersonalizacionRecetaSnapshot | null;
 
   /**
+   * Las unidades con número de serie que esta línea tiene **apartadas**: las
+   * eligió quien pidió y ninguna otra salida de stock puede llevárselas mientras
+   * la cuenta siga abierta (`InventarioService.bloquearUnidadesParaSalida`).
+   * Invariante: en una línea de un producto con serie, `cantidad` es la
+   * cardinalidad de este arreglo; en cualquier otra línea, está vacío.
+   */
+  @Column({
+    name: 'unidad_ids',
+    type: 'uuid',
+    array: true,
+    default: () => "'{}'",
+  })
+  unidadIds: string[];
+
+  /**
    * **Lo que la mesa paga por una unidad de esta línea, congelado al pedirla.**
    * Decisión del owner (2026-08-30): *"¿cuál carta? si la hamburguesa se pidió
    * en 5 mil se paga en 5 mil"*. Hasta acá el precio salía del catálogo vivo

@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: SDD Team
-**Last Updated**: 2026-08-30
+**Last Updated**: 2026-10-03
 
 ---
 
@@ -57,7 +57,11 @@ alternativas homogéneas**, que `receta_extras_permitidos` no modela.
   'cantidad'` y `unidadCodigo` convertible contra la unidad base del
   ingrediente (mismo `CatalogService.convertirUnidad` que usan recetas);
   `vendible` nunca admite `combo` ni `suscripcion` como opción (sin combos ni
-  suscripciones anidadas dentro de un grupo).
+  suscripciones anidadas dentro de un grupo). Una opción `vendible` de tipo `producto` **no
+  puede tener número de serie**: nadie elige la unidad al expandir el grupo, así que se rechaza
+  al guardar (owner, 2026-10-03,
+  [inventario-serializado.md](./inventario-serializado.md#quién-elige-qué-unidad-con-serie-sale));
+  y un producto que ya es opción viva no puede pasar a modo serie.
 - Asociación item↔grupo (`item_grupos_modificadores`, `min`/`max`/`orden`) —
   un combo o una receta puede tener 0..N grupos asociados.
 - **Combos**: la validación "≥1 componente" se relaja a "≥1 componente fijo o

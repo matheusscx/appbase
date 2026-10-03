@@ -653,6 +653,15 @@ export class ItemsService {
                               WHERE ipm.item_id = i.item_id AND ipm.modo_inventario = $${idx++})`;
       params.push(query.modoInventario);
     }
+    // NOT EXISTS: lo que no es producto (servicio, combo) no tiene fila en
+    // `item_producto` y sí se vende online. Es una regla de catálogo y por eso
+    // vive acá y no en el SELECT: el orden por disponibilidad arma la página en
+    // dos pasos con este mismo `where`. El literal no es parámetro (no corre
+    // `idx`): es la regla, no un valor del cliente.
+    if (query.vendibleOnline) {
+      where += ` AND NOT EXISTS (SELECT 1 FROM item_producto ipv
+                                  WHERE ipv.item_id = i.item_id AND ipv.modo_inventario = 'serie')`;
+    }
     if (query.categoriaId) {
       where += ` AND i.categoria_id = $${idx++}`;
       params.push(query.categoriaId);
@@ -1639,6 +1648,42 @@ export class ItemsService {
     return refRows[0]?.origen ?? null;
   }
 
+  /**
+   * El nombre del ítem si es componente vivo de un combo vivo u opción viva de un grupo
+   * vivo; `null` si no. Pasar a modo serie a un ítem así dejaría un combo o grupo que no se
+   * puede vender (nadie elige la unidad al expandirlo), por eso se consulta antes. Una sola
+   * query, con `eliminado_el IS NULL` en las cinco tablas: el combo o grupo en la papelera
+   * no cuenta, ya no se vende.
+   */
+  private async nombreSiEsComponenteVivo(
+    manager: EntityManager,
+    tenantId: string,
+    itemId: string,
+  ): Promise<string | null> {
+    const rows: { nombre: string }[] = await manager.query(
+      `SELECT i.nombre
+         FROM items i
+        WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL
+          AND (EXISTS (
+                 SELECT 1
+                   FROM combo_componentes cc
+                   JOIN items c ON c.item_id = cc.combo_item_id
+                    AND c.tenant_id = $2 AND c.eliminado_el IS NULL
+                  WHERE cc.componente_item_id = i.item_id
+                    AND cc.tenant_id = $2 AND cc.eliminado_el IS NULL)
+               OR EXISTS (
+                 SELECT 1
+                   FROM grupo_modificador_opciones o
+                   JOIN grupos_modificadores g
+                     ON g.grupo_modificador_id = o.grupo_modificador_id
+                    AND g.tenant_id = $2 AND g.eliminado_el IS NULL
+                  WHERE o.item_id = i.item_id
+                    AND o.tenant_id = $2 AND o.eliminado_el IS NULL))`,
+      [itemId, tenantId],
+    );
+    return rows[0]?.nombre ?? null;
+  }
+
   async create(tenantId: string, usuarioId: string, dto: CreateItemDto) {
     if (dto.tipo === 'suscripcion' && !dto.frecuencia) {
       throw new BadRequestException(
@@ -2277,6 +2322,24 @@ export class ItemsService {
             await this.validarUnidadMedida(dto.unidadMedida);
           }
 
+          // Pasar a serie un producto que otra transacción está sumando a un
+          // combo o grupo: esa escritura toma `FOR SHARE` sobre `items`
+          // (`filasValidacionPorIds`, `GruposModificadoresService`) y lee el
+          // modo en un statement aparte. Sin este lock las dos se cruzan sin
+          // verse —el combo no ve el modo nuevo, el cambio no ve el componente
+          // nuevo— y queda un producto con serie dentro de un combo. Con él, la
+          // que llega segunda espera y ya lee lo que la primera confirmó.
+          // Antes del `FOR UPDATE` de `item_producto`: el mismo orden que el
+          // `UPDATE items` de arriba.
+          if (dto.modoInventario === 'serie') {
+            await manager.query(
+              `SELECT item_id FROM items
+                WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+                  FOR NO KEY UPDATE`,
+              [itemId, tenantId],
+            );
+          }
+
           const prodRows: {
             modo_inventario: string;
             unidad_medida: string;
@@ -2308,6 +2371,19 @@ export class ItemsService {
                 modoCambia
                   ? 'No se puede cambiar el modo de inventario de un producto con movimientos registrados'
                   : MENSAJE_UNIDAD_CON_MOVIMIENTOS,
+              );
+            }
+          }
+
+          if (modoCambia && dto.modoInventario === 'serie') {
+            const enUso = await this.nombreSiEsComponenteVivo(
+              manager,
+              tenantId,
+              itemId,
+            );
+            if (enUso !== null) {
+              throw new BadRequestException(
+                `«${enUso}» es parte de un combo o grupo: no puede pasar a número de serie`,
               );
             }
           }
@@ -3208,7 +3284,51 @@ export class ItemsService {
     });
   }
 
-  async findUnidades(tenantId: string, itemId: string, estado?: string) {
+  /**
+   * `vendibles` es la lista del selector de la pantalla de venta: solo las
+   * `disponible` del LOCAL (una bodega guarda stock y nunca vende) y sin las que
+   * una cuenta abierta tiene apartadas, ordenadas nuevo → reacondicionado →
+   * usado y después por serie. Sin él, la lista de Inventario no cambia.
+   *
+   * Es una ayuda para la pantalla, no la regla: entre que el selector lista y
+   * el cobro, otra caja puede vender la misma unidad, y el 400 de
+   * `bloquearUnidadesParaSalida` es el que manda. El `NOT EXISTS` equivale al
+   * de esa consulta, sin excluir ninguna cuenta (acá no hay cuenta propia): no
+   * hace el JOIN a `mesas` porque una mesa con una cuenta abierta no se puede
+   * eliminar, así que ese JOIN no pierde ninguna fila.
+   */
+  async findUnidades(
+    tenantId: string,
+    itemId: string,
+    filtros: { estado?: string; vendibles?: boolean } = {},
+  ) {
+    const { estado, vendibles } = filtros;
+    const params: unknown[] = [itemId, tenantId];
+    let filtroEstado = '';
+    if (estado) {
+      params.push(estado);
+      filtroEstado = `AND u.estado = $${params.length}`;
+    }
+    let filtroVendible = '';
+    let orden = 'u.creado_el DESC, u.serie ASC';
+    if (vendibles) {
+      params.push(await this.ubicacionesService.localDe(tenantId));
+      filtroVendible = `AND u.estado = 'disponible'
+         AND u.ubicacion_id = $${params.length}
+         AND NOT EXISTS (
+           SELECT 1
+             FROM cuenta_lineas cl
+             JOIN cuentas c ON c.cuenta_id = cl.cuenta_id AND c.tenant_id = $2
+              AND c.estado = 'abierta' AND c.eliminado_el IS NULL
+            WHERE cl.tenant_id = $2 AND cl.eliminado_el IS NULL
+              AND u.unidad_id = ANY(cl.unidad_ids)
+         )`;
+      orden = `CASE u.condicion
+                 WHEN 'nuevo' THEN 0
+                 WHEN 'reacondicionado' THEN 1
+                 ELSE 2
+               END, u.serie ASC`;
+    }
     const rows: {
       unidad_id: string;
       serie: string;
@@ -3227,13 +3347,14 @@ export class ItemsService {
        FROM item_unidad u
        LEFT JOIN item_lote l ON l.lote_id = u.lote_id AND l.eliminado_el IS NULL
        WHERE u.item_id = $1 AND u.tenant_id = $2 AND u.eliminado_el IS NULL
-         ${estado ? 'AND u.estado = $3' : ''}
+         ${filtroEstado}
+         ${filtroVendible}
        -- \`u.serie\` desempata: la entrada en modo serie hace un INSERT por
        -- serie en un loop (\`InventarioService.registrarMovimiento\`), así que
        -- una compra o un ajuste con N series deja N unidades con el mismo
        -- \`creado_el\` al microsegundo.
-       ORDER BY u.creado_el DESC, u.serie ASC`,
-      estado ? [itemId, tenantId, estado] : [itemId, tenantId],
+       ORDER BY ${orden}`,
+      params,
     );
 
     return rows.map((r) => ({
@@ -4162,9 +4283,11 @@ export class ItemsService {
    *   `registrarMovimiento` recibe `permiteSalidaParcial: true` y descuenta
    *   `min(disponible, requerido)` sin negativo, reusando el mismo saldo que
    *   ya leyó bajo su lock (cero consultas nuevas en el chokepoint). En modo
-   *   serie/lote el chokepoint no soporta parcial —no hay forma de decir
-   *   "media unidad" o "medio lote"— así que la salida completa se saltea. En
-   *   los dos casos, si falta algo, se agrega una advertencia con el faltante.
+   *   lote el chokepoint no soporta parcial —no hay forma de decir "medio
+   *   lote"— así que la salida completa se saltea. En los dos casos, si falta
+   *   algo, se agrega una advertencia con el faltante. En modo serie con
+   *   unidades nombradas (`movimientoParams.unidadIds`) no se saltea nada: un
+   *   rechazo del chokepoint es una invariante rota y se propaga.
    *
    * Devuelve la advertencia (o `null`) y si se sirvió algo del todo
    * (`sirvioAlgo`): un consumidor lo usa para decidir si sus modificadores de
@@ -4227,9 +4350,15 @@ export class ItemsService {
       const esStockInsuficiente =
         error instanceof BadRequestException &&
         error.message.startsWith('Stock insuficiente');
+      // Con unidades NOMBRADAS no hay faltante que degradar: quien anuló dijo
+      // cuáles salían y la línea las tiene apartadas, así que un rechazo del
+      // chokepoint es una invariante rota y la anulación aborta. Hoy los
+      // mensajes de la salida por serie no empiezan con "Stock insuficiente",
+      // pero que no se trague no puede depender de cómo se escriba un mensaje.
+      const nombraUnidades = !!movimientoParams.unidadIds?.length;
 
-      if (opciones.enAnulacion && esStockInsuficiente) {
-        // Serie/lote: no se movió nada, el faltante es el pedido completo.
+      if (opciones.enAnulacion && esStockInsuficiente && !nombraUnidades) {
+        // Lote: no se movió nada, el faltante es el pedido completo.
         return {
           advertencia: this.advertenciaFaltanteAnulacion(
             opciones.itemNombre,
@@ -4742,14 +4871,22 @@ export class ItemsService {
    * descuenta lo que hay, nunca queda stock negativo— vía
    * `registrarMovimiento({ permiteSalidaParcial: true })`, reusando el mismo
    * saldo que el chokepoint ya leyó bajo su lock (ninguna lectura de stock
-   * nueva). En modo serie/lote el chokepoint no soporta un descuento parcial
-   * —no hay forma de entregar "media unidad" o "medio lote"— así que esa
-   * salida puntual se saltea entera; como la línea de cuenta no registra QUÉ
-   * unidad serializada o lote salió, tampoco se le puede pedir uno en
-   * particular: se deja que el chokepoint elija (FIFO o vencimiento) como ya hace hoy
-   * (ningún llamador de esta expansión pasa `unidadIds`/`loteId`). Bloqueante
-   * y no bloqueante se tratan IGUAL en anulación (owner, ronda de fixes 1,
-   * Minor 6 de la revisión): el descuento parcial no depende de esa bandera.
+   * nueva). En modo lote el chokepoint no soporta un descuento parcial —no hay
+   * forma de entregar "medio lote"— así que esa salida puntual se saltea
+   * entera y el chokepoint elige el lote (vencimiento), porque la línea de
+   * cuenta no dice cuál salió. Bloqueante y no bloqueante se tratan IGUAL en
+   * anulación (owner, ronda de fixes 1, Minor 6 de la revisión): el descuento
+   * parcial no depende de esa bandera.
+   *
+   * **Serie: quien anula nombra las unidades, el chokepoint ya no elige.** La
+   * línea de cuenta con serie guarda las unidades que el garzón eligió al pedir
+   * (`cuenta_lineas.unidad_ids`), así que `unidadIds` son las que se anulan y
+   * `cuentaId` es la cuenta dueña de la salida: sus unidades apartadas pueden
+   * salir por ella y por ninguna otra. Un rechazo del chokepoint sobre unidades
+   * nombradas NO se degrada a advertencia: es una invariante rota (la línea las
+   * tenía apartadas) y la anulación aborta entera. Sin `unidadIds`, el
+   * chokepoint rechaza la salida de un producto con serie.
+   *
    * Todo esto vive en `moverConsumoOSaltear`, el único lugar que decide la
    * política — los tres caminos (producto, receta, combo) la comparten.
    */
@@ -4767,6 +4904,13 @@ export class ItemsService {
       snapshot?: PersonalizacionRecetaSnapshot | null;
       motivoBajaId: string;
       cuentaLineaAnulacionId: string;
+      /**
+       * Solo `producto` con serie: las unidades que se anulan, ya validadas
+       * contra la línea. Ausente en el resto.
+       */
+      unidadIds?: string[];
+      /** La cuenta dueña de la salida; acompaña a `unidadIds`. */
+      cuentaId?: string;
       /** Ver `venderIngredientesReceta`: quien recorre varias líneas lo resuelve una vez. */
       convertir: ConvertirUnidad;
       /** Ver `venderIngredientesReceta`. */
@@ -4792,6 +4936,9 @@ export class ItemsService {
           usuarioId: params.usuarioId,
           motivoBajaId: params.motivoBajaId,
           cuentaLineaAnulacionId: params.cuentaLineaAnulacionId,
+          ...(params.unidadIds?.length
+            ? { unidadIds: params.unidadIds, cuentaId: params.cuentaId }
+            : {}),
         },
         {
           enAnulacion: true,
@@ -6182,6 +6329,14 @@ export class ItemsService {
       if (!['producto', 'receta', 'servicio'].includes(tipo)) {
         throw new BadRequestException(
           `Un componente de combo debe ser producto, receta o servicio (recibido: ${tipo})`,
+        );
+      }
+      // Quien vende un combo no está para elegir qué unidad con serie sale
+      // (owner, 2026-10-03): el chokepoint de inventario la rechazaría al
+      // vender, así que se corta acá, al configurar.
+      if (tipo === 'producto' && fila.modo_inventario === 'serie') {
+        throw new BadRequestException(
+          `«${nombre}» tiene número de serie: no puede ser parte de un combo`,
         );
       }
       if (new Decimal(c.cantidad).lessThanOrEqualTo(0)) {

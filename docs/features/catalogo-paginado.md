@@ -113,7 +113,7 @@ búsqueda pasa de 20 ms en producción.
   - **Una carga que falla no borra la grilla** que ya estaba en pantalla. Avisar lo decide la
     pantalla con `onError`: POS y tienda muestran toast; el salón no (el 403 del garzón sin
     `Items:Leer` no es un error para él).
-  - `filtros` es el query fijo de cada pantalla (hoy ninguna lo usa: queda reservado para el filtro que agregue el frente de números de serie, que tiene que vivir en `buildFindAllFilters`).
+  - `filtros` es el query fijo de cada pantalla. Hoy solo lo usa la tienda (`vendibleOnline: 'true'`, que deja afuera los productos con número de serie, 2026-10-03); un filtro así tiene que vivir en `buildFindAllFilters`.
 - **`CatalogoGrid.vue`** es presentacional: ya no filtra ni ordena. Recibe `v-model:busqueda`,
   `v-model:page`, `total` y `pageSize`, y muestra `UPagination` cuando hay más de una página.
 - **El stock local** (`descontarStockCatalogo`, sin cambios de firma) se aplica sobre la página

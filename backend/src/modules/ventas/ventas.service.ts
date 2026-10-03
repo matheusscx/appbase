@@ -584,6 +584,57 @@ export class VentasService {
       };
     });
 
+    // 2b. Unidades con número de serie: quien vende elige cuáles salen. Se
+    //     valida acá, con el `modo_inventario` que ya trajo `cargarBasePorIds`
+    //     (cero consultas) y antes de cualquier escritura, para que un carrito
+    //     mal armado no llegue a tocar stock. El chokepoint de inventario vuelve
+    //     a validar pertenencia, estado, ubicación y apartado bajo lock.
+    const unidadesVistas = new Set<string>();
+    for (const [i, linea] of dto.lineas.entries()) {
+      const item = items[i];
+      const unidadIds = linea.unidadIds ?? [];
+      if (item.modoInventario !== 'serie') {
+        if (unidadIds.length > 0) {
+          throw new BadRequestException(
+            `«${item.nombre}» no tiene número de serie: no lleva unidades`,
+          );
+        }
+        continue;
+      }
+      if (unidadIds.length === 0) {
+        throw new BadRequestException(
+          `Elegí qué unidades salen: «${item.nombre}» tiene número de serie`,
+        );
+      }
+      // Misma regla y texto que la merma: una unidad serializada no se parte ni
+      // se vende por presentación.
+      if (
+        linea.unidadCodigoPresentacion &&
+        linea.unidadCodigoPresentacion !==
+          cantidadesResueltas[i].unidadBaseCodigo
+      ) {
+        throw new BadRequestException(
+          'Los productos por serie o lote solo admiten su unidad base',
+        );
+      }
+      const cantidad = new Decimal(cantidadesResueltas[i].cantidadCanonica);
+      if (!cantidad.isInteger() || !cantidad.equals(unidadIds.length)) {
+        throw new BadRequestException(
+          `«${item.nombre}»: la cantidad (${cantidad.toString()}) no coincide con las unidades elegidas (${unidadIds.length})`,
+        );
+      }
+      for (const uid of unidadIds) {
+        // En minúsculas: un UUID en mayúsculas es la misma unidad.
+        const clave = uid.toLowerCase();
+        if (unidadesVistas.has(clave)) {
+          throw new BadRequestException(
+            'Una unidad viene repetida en la venta',
+          );
+        }
+        unidadesVistas.add(clave);
+      }
+    }
+
     // 3. Resolver la moneda oficial del tenant: la de su PAÍS (ADR-005). Se
     //    trae junto con las demás para armar el mapa de tasas de una sola
     //    consulta.
@@ -1095,6 +1146,9 @@ export class VentasService {
             usuarioId,
             ventaId: venta.id,
             unidadIds: linea.unidadIds,
+            // La cuenta del salón que se está cobrando: las unidades que ella
+            // tiene apartadas pueden salir por acá, las de otra no.
+            cuentaId,
             loteId: linea.loteId,
           });
         } catch (e) {
@@ -3734,6 +3788,38 @@ export class VentasService {
        ORDER BY d.creado_el ASC, d.detalle_id ASC`,
       [ventaId],
     );
+    // La serie y la condición de lo que SALIÓ en esta venta, para que el detalle
+    // diga qué unidad se llevó el cliente. UNA consulta por venta, agrupada por
+    // ítem en memoria: una por línea sería un N+1. Se lee del kardex (la salida
+    // de la venta, `motivo = 'venta'`, como las otras lecturas del kardex de
+    // la venta: una salida de otro motivo no es lo que se llevó el cliente). El detalle
+    // del movimiento no tiene `eliminado_el`; el movimiento y la unidad sí, y
+    // se filtran. Ordenadas por serie para que la lista sea estable.
+    const unidadesVendidas: {
+      item_id: string;
+      serie: string;
+      condicion: string;
+    }[] = await this.db.query(
+      `SELECT m.item_id, u.serie, u.condicion
+         FROM movimientos_inventario m
+         JOIN movimiento_inventario_detalle d ON d.movimiento_id = m.movimiento_id
+         JOIN item_unidad u ON u.unidad_id = d.unidad_id
+          AND u.tenant_id = m.tenant_id AND u.eliminado_el IS NULL
+        WHERE m.venta_id = $1 AND m.tenant_id = $2
+          AND m.tipo = 'salida' AND m.motivo = 'venta'
+          AND m.eliminado_el IS NULL
+        ORDER BY u.serie ASC`,
+      [ventaId, tenantId],
+    );
+    const unidadesPorItem = new Map<
+      string,
+      { serie: string; condicion: string }[]
+    >();
+    for (const u of unidadesVendidas) {
+      const lista = unidadesPorItem.get(u.item_id) ?? [];
+      lista.push({ serie: u.serie, condicion: u.condicion });
+      unidadesPorItem.set(u.item_id, lista);
+    }
     // Ya comprometido por ítem: el mismo contador que aplica el tope al emitir
     // la nota. Compartirlo no es DRY por gusto — que la pantalla ofrezca una
     // unidad que el backend después rechaza es el modo de falla que este
@@ -4163,6 +4249,9 @@ export class VentasService {
         // null = servicio (sin fila en item_producto); el modal de reembolso
         // solo habilita devolución para modo 'cantidad'.
         modoInventario: d['modo_inventario'] ?? null,
+        // Vacío en lo que no tiene serie. Por ítem y no por línea: el kardex no
+        // guarda a qué línea pertenece cada salida.
+        unidades: unidadesPorItem.get(d['item_id'] as string) ?? [],
         cantidadDevuelta: (
           devueltoPorItem.get(d['item_id'] as string) ?? new Decimal(0)
         ).toString(),

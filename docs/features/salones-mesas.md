@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-09-27 (el reparto de cada línea entre los garzones que la sirvieron)
+**Last Updated**: 2026-10-03 (producto con serie: la unidad viaja en la línea de la cuenta)
 
 ---
 
@@ -74,8 +74,8 @@ lo tiene sin sembrar nada, por `es_fijo`.
 | GET | `/mesas/:id/cuentas` | Operar | Cuentas abiertas de la mesa (con líneas) |
 | POST | `/mesas/:id/cuentas` | Operar | Abrir cuenta (`FOR UPDATE` mesa + `numero` correlativo) |
 | POST | `/mesas/:id/cuentas/fusionar` | Operar | Fusionar 2+ cuentas abiertas de la mesa en una |
-| POST | `/cuentas/:id/lineas` | Operar | Agregar producto (merge por ítem) |
-| PATCH | `/cuentas/:id/lineas/:lineaId` | Operar | Cambiar cantidad (canónica + opcional `cantidadPresentacion` / `unidadCodigoPresentacion`) |
+| POST | `/cuentas/:id/lineas` | Operar | Agregar producto (merge por ítem); con serie, `unidadIds` obligatorio |
+| PATCH | `/cuentas/:id/lineas/:lineaId` | Operar | Cambiar cantidad (canónica + opcional `cantidadPresentacion` / `unidadCodigoPresentacion`); con serie se manda `unidadIds` y no la cantidad |
 | DELETE | `/cuentas/:id/lineas/:lineaId` | Operar | Quitar producto |
 | POST | `/cuentas/:id/lineas/:lineaId/anular` | Anular | Anular un plato ya despachado, con motivo — ver más abajo |
 | POST | `/cuentas/:id/cancelar` | Operar | Cancelar cuenta (sin venta) — hasta la Task 6, acepta cancelar aunque haya algo despachado |
@@ -250,7 +250,9 @@ práctica no se edita ni borra (append-only); las lecturas filtran
 filas.
 
 **`cuenta_lineas`**: `cuenta_linea_id` PK, `tenant_id`, `cuenta_id`, `item_id`,
-`cantidad numeric(18,4)`. El precio se resuelve al cerrar (igual que ventas).
+`cantidad numeric(18,4)`. El precio se resuelve al cerrar (igual que ventas). Desde el 2026-10-03
+`unidad_ids uuid[] NOT NULL DEFAULT '{}'`: las unidades con número de serie que la línea tiene
+apartadas (ver "Producto con serie" más abajo).
 
 **`cuenta_linea_reparto`** (2026-09-27): `cuenta_linea_reparto_id` PK, `tenant_id`,
 `cuenta_linea_id`, `garzon_id` (`uuid` NULL), `cantidad numeric(18,4)` + soft delete
@@ -809,6 +811,48 @@ la pantalla y la precuenta sin lo que se anuló antes de fusionar. Por eso, en l
 transacción, las filas de `cuenta_linea_anulaciones` de las cuentas de **origen** se mudan a
 la de **destino** con un solo `UPDATE ... SET cuenta_id = $1 WHERE cuenta_id = ANY($2) AND
 tenant_id = $3 AND eliminado_el IS NULL` — no por cuenta ni por anulación.
+
+### Producto con serie: la unidad viaja en la línea (2026-10-03)
+
+En un producto con número de serie **el garzón elige qué unidad pide, al pedir** (owner,
+2026-10-03, AskUserQuestion: *"Al pedir, el garzón"*, recomendada, sobre *"Al cobrar, el
+cajero"*). El porqué: la elige quien entrega, y si otra mesa pidió la misma unidad el rechazo
+llega al pedir y no al cobrar, que es la regla que el salón ya sigue con el stock. La regla de
+fondo, la validación y las demás decisiones: [`inventario-serializado.md`](./inventario-serializado.md#quién-elige-qué-unidad-con-serie-sale).
+
+**Invariante:** en una línea de un producto con serie, `cantidad` = cantidad de `unidad_ids`; en
+cualquier otra línea, `unidad_ids` está vacío. Una unidad en una línea de una cuenta **abierta**
+está apartada: solo puede salir por esa cuenta, y cualquier otra salida da 400 nombrando la serie y
+la mesa. No se usa el estado `reservado` de la unidad (movería el saldo sin un movimiento en el
+kardex): el apartado se deriva de la cuenta, igual que lo comprometido en modo cantidad.
+
+Cada puerta mantiene la invariante:
+
+| Puerta | Con serie |
+|---|---|
+| `agregarLinea` | `unidadIds` obligatorio, validado con `InventarioService.bloquearUnidadesParaSalida` bajo el lock de la cuenta y del producto. Pedir una unidad que **esta misma cuenta** ya tiene en otra línea también es 400 (sería pedirla dos veces). Si la línea se fusiona con una igual, las unidades se suman |
+| `actualizarLinea` | Se manda el conjunto nuevo (`unidadIds`) y la cantidad se deriva; mandar la cantidad sin unidades es 400, y al revés en un producto sin serie. Bajar de `cantidad_enviada` sigue rechazado. Solo se validan las que entran; las que salen quedan libres solas |
+| `quitarLinea` | Sin cambios: solo es posible sin nada despachado, y libera las unidades |
+| `anularLinea` | `unidadIds` obligatorio: tantas como `cantidad` a anular y un subconjunto de las de la línea. Con merma o cortesía esas unidades pasan a `baja` por el chokepoint (con la cuenta como dueña de la salida); con "no elaborado" solo salen de la línea y quedan libres. Un rechazo del chokepoint sobre unidades nombradas **no** se degrada a advertencia: es una invariante rota y la anulación aborta |
+| `cancelarConMotivo` | Con merma o cortesía: si la línea está despachada entera se anulan todas sus unidades; si se despachó **a medias** es 400 (*"Anulá primero «Nombre» eligiendo cuál salió"*), porque la línea no dice cuáles salieron (owner, 2026-10-03, AskUserQuestion: *"Pedir anular primero"*, recomendada, sobre *"Dar de baja todas"*). Con "no elaborado" **no se frena**: ninguna unidad sale de inventario, así que no hay "cuál se perdió" que contestar y todas quedan libres. Sin nada despachado, se liberan |
+| `cancelarCuenta` (sin motivo) | Sin cambios: la cuenta deja de estar abierta y las unidades quedan libres solas |
+| `fusionarCuentas` | Las unidades se mueven con la línea, o se suman al fusionarse con una igual |
+| `cerrarCuenta` | Arma la venta con las `unidadIds` de cada línea y le pasa la cuenta; el chokepoint acepta las unidades apartadas por ella y rechaza las de otra |
+
+El alcance del "no elaborado" en `cancelarConMotivo` fue una decisión tomada al implementar (el
+controlador del frente, 2026-10-03): la pregunta del owner era "cuál se perdió", y con
+`no_elaborado` no se pierde ninguna. Si el owner lo ve distinto, se reabre.
+
+**El detalle de cuenta** (`CuentaLineaDetalle`) trae `unidades: [{ id, serie, condicion }]` por
+línea, leídas en **una** consulta por detalle (sin ids no hay consulta: casi ninguna línea lleva
+serie y esto corre cada vez que se abre o refresca una mesa).
+
+**Pantalla:** agregar un producto con serie abre el selector (`UnidadesSerieModal`, el mismo del
+POS); la línea muestra sus series y, en lugar del input de cantidad, tiene "Cambiar unidades", que
+reabre el selector con las de la línea marcadas y manda el conjunto nuevo por `PATCH`. Anular una
+línea con serie pide con casillas cuáles se anulan, en vez de un número. El selector pide
+`GET /items/:id/unidades?vendibles=true`, que es `Items:Leer`: el mismo permiso que ya hace falta
+para ver el catálogo de la mesa, así que no se agrega ninguno.
 
 ---
 

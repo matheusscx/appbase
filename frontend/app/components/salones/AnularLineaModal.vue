@@ -29,16 +29,26 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  confirm: [{ cantidad: string, motivoBajaId: string }]
+  confirm: [{ cantidad: string, unidadIds?: string[], motivoBajaId: string }]
 }>()
 
 const salonesApi = useSalones()
 const unidadesStore = useUnidadesMedidaStore()
+const { etiquetaCondicion, colorCondicion } = useUnidadesSerie()
 
 const motivos = ref<MotivoBajaOpt[]>([])
 const cargandoMotivos = ref(false)
 const cantidad = ref<number | undefined>(undefined)
 const motivoBajaId = ref<string | undefined>(undefined)
+/** Solo en una línea con serie: los ids de las unidades que se anulan. */
+const unidadesElegidas = ref<string[]>([])
+
+/** Con serie la línea trae sus unidades y se anula por casillas; el resto, por cantidad. */
+const unidadesLinea = computed(() => props.linea?.unidades ?? [])
+const esSerie = computed(() => unidadesLinea.value.length > 0)
+
+/** Lo despachado, en unidades enteras: es lo máximo que se puede marcar. */
+const topeUnidades = computed(() => Math.floor(Number(props.linea?.cantidadEnviada ?? 0)))
 
 const catalogo = computed<UnidadCat[]>(() =>
   unidadesStore.unidades.map(u => ({
@@ -86,6 +96,7 @@ const motivoItems = computed(() =>
 // carga el catálogo de motivos — activos del tenant, los tres tipos.
 watch(open, async (isOpen) => {
   cantidad.value = undefined
+  unidadesElegidas.value = []
   motivoBajaId.value = undefined
   if (!isOpen) return
   await unidadesStore.ensureLoaded()
@@ -108,12 +119,36 @@ const cantidadValida = computed(() => {
   return new Decimal(cantidad.value).lte(maximoPresentacion.value || '0')
 })
 
+function estaMarcada(id: string): boolean {
+  return unidadesElegidas.value.includes(id)
+}
+
+/** Sumar se bloquea al llegar al tope; desmarcar nunca. */
+function bloqueada(id: string): boolean {
+  return !estaMarcada(id) && unidadesElegidas.value.length >= topeUnidades.value
+}
+
+function alternar(id: string, marcada: boolean | 'indeterminate') {
+  const sin = unidadesElegidas.value.filter(e => e !== id)
+  unidadesElegidas.value = marcada === true ? [...sin, id] : sin
+}
+
 const puedeConfirmar = computed(() =>
-  !!props.linea && cantidadValida.value && !!motivoBajaId.value && !props.submitting,
+  !!props.linea
+  && (esSerie.value ? unidadesElegidas.value.length > 0 : cantidadValida.value)
+  && !!motivoBajaId.value
+  && !props.submitting,
 )
 
 function confirmar() {
-  if (!puedeConfirmar.value || !props.linea || !motivoBajaId.value || cantidad.value === undefined) return
+  if (!puedeConfirmar.value || !props.linea || !motivoBajaId.value) return
+  if (esSerie.value) {
+    // En el orden de la línea, no en el de los clics.
+    const unidadIds = unidadesLinea.value.map(u => u.id).filter(estaMarcada)
+    emit('confirm', { cantidad: String(unidadIds.length), unidadIds, motivoBajaId: motivoBajaId.value })
+    return
+  }
+  if (cantidad.value === undefined) return
   const cantidadCanonica = aCantidadCanonica(
     String(cantidad.value),
     unidadPresentacion.value,
@@ -134,6 +169,35 @@ function confirmar() {
     <template #body>
       <div class="space-y-4">
         <UFormField
+          v-if="esSerie"
+          label="Unidades a anular"
+          required
+          :description="`Máximo ${topeUnidades} (lo despachado)`"
+        >
+          <ul class="divide-y divide-default">
+            <li v-for="u in unidadesLinea" :key="u.id" class="py-2" data-qa="unidad-anular">
+              <UCheckbox
+                :model-value="estaMarcada(u.id)"
+                :disabled="submitting || bloqueada(u.id)"
+                @update:model-value="(v: boolean | 'indeterminate') => alternar(u.id, v)"
+              >
+                <template #label>
+                  <span class="flex flex-wrap items-center gap-2">
+                    <span class="font-mono text-sm text-default">{{ u.serie }}</span>
+                    <UBadge
+                      :label="etiquetaCondicion(u.condicion)"
+                      :color="colorCondicion(u.condicion)"
+                      variant="subtle"
+                      size="sm"
+                    />
+                  </span>
+                </template>
+              </UCheckbox>
+            </li>
+          </ul>
+        </UFormField>
+        <UFormField
+          v-else
           label="Cantidad a anular"
           required
           :description="`Máximo ${maximoPresentacion} ${unidadPresentacion} (lo despachado)`"

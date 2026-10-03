@@ -172,3 +172,58 @@ describe('CarritoPanel — "Vaciar todo" vuelve a la boleta, no al primero del c
     expect(vaciar!.props('disabled')).toBe(true)
   })
 })
+
+describe('CarritoPanel — línea de un producto con serie', () => {
+  const lineaSerie = (): CarritoLinea => ({
+    item: { ...item('celu-1', 'iPhone 15'), modoInventario: 'serie' } as ItemCatalogo,
+    cantidad: '2',
+    unidades: [
+      { id: 'u-1', serie: '350000000000001', condicion: 'nuevo' },
+      { id: 'u-2', serie: '350000000000002', condicion: 'usado' },
+    ],
+  })
+
+  it('muestra las series y no el input de cantidad', async () => {
+    const wrapper = await mountSuspended(CarritoPanel, {
+      global: { stubs: { ...stubs, AppCantidadInput: { template: '<div data-qa="cantidad-input" />' } } },
+      props: {
+        lineas: [lineaSerie(), linea('item-1', 'Bebida')],
+        resultado: null,
+        vigente: true,
+        tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true }],
+        tieneCaja: true,
+        customer: { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null },
+      },
+    })
+
+    const filas = wrapper.findAll('li')
+    expect(filas[0]!.text()).toContain('350000000000001')
+    expect(filas[0]!.text()).toContain('350000000000002')
+    expect(filas[0]!.text()).toContain('Usado')
+    expect(filas[0]!.find('[data-qa="cantidad-input"]').exists()).toBe(false)
+    // La línea común conserva su input de cantidad.
+    expect(filas[1]!.find('[data-qa="cantidad-input"]').exists()).toBe(true)
+  })
+
+  it('"Cambiar unidades" emite el índice de la línea', async () => {
+    const wrapper = await mountSuspended(CarritoPanel, {
+      global: { stubs },
+      props: {
+        lineas: [linea('item-0', 'Papas'), lineaSerie()],
+        resultado: null,
+        vigente: true,
+        tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true }],
+        tieneCaja: true,
+        customer: { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null },
+      },
+    })
+
+    const filas = wrapper.findAll('li')
+    expect(filas[0]!.text()).not.toContain('Cambiar unidades')
+    const boton = filas[1]!.findAll('button').find(b => b.text().includes('Cambiar unidades'))
+    expect(boton, 'el botón Cambiar unidades').toBeTruthy()
+    await boton!.trigger('click')
+
+    expect(wrapper.emitted('cambiar-unidades')).toEqual([[1]])
+  })
+})

@@ -1,4 +1,10 @@
-import { IsNumberString, IsUUID } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsNumberString,
+  IsOptional,
+  IsUUID,
+} from 'class-validator';
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
 
 /**
@@ -13,6 +19,10 @@ import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.deco
  * `numeric(18,4)` que esto mueve— no es de FORMATO sino de VALOR frente a la
  * moneda/escala de la línea, así que se valida en el service, igual que
  * `MonedasService` valida escala contra la moneda y no en un decorador ciego.
+ *
+ * `unidadIds`: en una línea con número de serie, cuáles de las unidades de la
+ * línea se anulan (obligatorio ahí: lo exige el service, que es quien sabe si
+ * el ítem tiene serie). Con el mismo techo que `AddLineaDto`.
  */
 export class AnularLineaDto {
   @IsNumberString()
@@ -21,4 +31,10 @@ export class AnularLineaDto {
 
   @IsUUID()
   motivoBajaId: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID(undefined, { each: true })
+  unidadIds?: string[];
 }

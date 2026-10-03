@@ -20,6 +20,7 @@ import {
 import type { EventoPin, Garzon, MiPinEstado } from '~/composables/useGarzones'
 import { etiquetaCuentaPendiente, useTransferenciaPendientes } from '~/composables/useSesionesGarzon'
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
+import type { UnidadElegida } from '~/composables/useUnidadesSerie'
 import type { Turno } from '~/composables/useTurnos'
 import type { SolicitudTestigo } from '~/composables/useSalones'
 import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
@@ -225,8 +226,8 @@ const cobroEnVueloId = ref<string | null>(null)
  * En el segundo tramo, si una fusión se lleva la cuenta y anula
  * la marca, se desbloquea: en general ese cobro ya no se cierra, pero si la fusión vuelve con el
  * `POST` de cierre ya despachado, la cuenta destino queda editable con ese cierre en vuelo —un
- * borde que esto no cubre—. Los controles se deshabilitan y los cuatro caminos que mutan la cuenta
- * (`onCantidadChange`, `addProducto`, `onRecetaConfirm`, `quitarLinea`) y `confirmarCancelar`
+ * borde que esto no cubre—. Los controles se deshabilitan y los cinco caminos que mutan la cuenta
+ * (`onCantidadChange`, `addProducto`, `onRecetaConfirm`, `onUnidadesConfirm`, `quitarLinea`) y `confirmarCancelar`
  * además cortan, porque el
  * evento puede llegar igual: el catálogo no tiene `disabled`, y el panel de una receta puede
  * quedar abierto debajo del cobro.
@@ -248,7 +249,7 @@ function avisarCuentaEnCobro() {
 
 /**
  * Los requests que cambian las líneas de una cuenta y todavía no volvieron: agregar un producto o
- * una receta, y quitar una línea. Ninguno pinta antes de la respuesta, así que mientras viajan la
+ * una receta, quitar una línea y cambiar las unidades de una línea con serie. Ninguno pinta antes de la respuesta, así que mientras viajan la
  * pantalla —y el total que calcula `asegurarVigente`— muestra la cuenta sin ese cambio.
  * `abrirCobro` los espera (owner, 2026-09-13: *"Cobrar espera"*): antes el cobro abría con el total
  * de antes y el cierre no los esperaba, así que la venta quedaba cobrada de menos sin aviso si el
@@ -257,7 +258,7 @@ function avisarCuentaEnCobro() {
  * Las cantidades no entran: se pintan optimistas, así que el cálculo ya las ve, y el *Confirmar*
  * las manda con `flushPendientes`.
  */
-type CambioDeLinea = 'agregar' | 'quitar'
+type CambioDeLinea = 'agregar' | 'quitar' | 'cambiar'
 /** Por cuenta, cada request en vuelo con qué hace: el aviso del techo lo nombra (`abrirCobro`). */
 const lineasEnVuelo = new Map<string, Map<Promise<unknown>, CambioDeLinea>>()
 /**
@@ -362,6 +363,23 @@ const propinaHabilitada = ref(true)
 const recetaDrawerOpen = ref(false)
 const recetaItemId = ref<string | null>(null)
 
+/**
+ * El selector de unidades de un producto con serie (`docs/features/inventario-serializado.md`,
+ * § «Qué se ve»). La cuenta, el ítem, la línea que se
+ * edita y lo que se ofrece/excluye se fijan AL ABRIR, y lo que se confirma es sobre esa cuenta: si
+ * al llegar el `confirm` la activa ya es otra, no se manda nada (además el selector se cierra solo
+ * al cambiar de cuenta, ver el `watch` de `abrirUnidades`). `unidadesLineaId` es `null` al agregar
+ * una línea nueva.
+ */
+const unidadesOpen = ref(false)
+const unidadesItem = ref<{ id: string, nombre: string } | null>(null)
+const unidadesCuentaId = ref<string | null>(null)
+const unidadesLineaId = ref<string | null>(null)
+const unidadesSeleccionadas = ref<UnidadElegida[]>([])
+const unidadesExcluir = ref<string[]>([])
+/** El `PATCH` de unidades en vuelo: un segundo cambio encima chocaría con el conjunto que el primero deja. */
+const guardandoUnidades = ref(false)
+
 const { puedeActualizar: puedeTransferirAdmin } = usePermisosCrud('Salones')
 // Frente de bodegas y traslados: el 400 de "no hay stock" ofrece el traslado
 // precargado solo a quien de verdad puede crearlo. El garzón no tiene
@@ -369,6 +387,7 @@ const { puedeActualizar: puedeTransferirAdmin } = usePermisosCrud('Salones')
 // usa `inventario/traslados.vue`—, así que ve el mensaje y nada más.
 const { puedeCrear: puedeTrasladar } = usePermisosCrud('Inventario')
 const { mostrarRechazoPorStock } = useRechazoPorStock()
+const { etiquetaCondicion, colorCondicion } = useUnidadesSerie()
 
 // `Anular` no es uno de los cuatro permisos CRUD de `usePermisosCrud` —es la
 // acción de `POST .../lineas/:lineaId/anular`, `@RequiresPermiso('Salones',
@@ -878,6 +897,12 @@ async function abrirCobro() {
           aviso = {
             title: 'Todavía se está quitando lo último que sacaste',
             description: 'No lo vuelvas a quitar: va a desaparecer de la cuenta cuando termine. Después tocá Cobrar de nuevo.',
+          }
+        }
+        else if (cambios.has('cambiar')) {
+          aviso = {
+            title: 'Todavía se están guardando las unidades que elegiste',
+            description: 'No las vuelvas a elegir: van a aparecer en la línea cuando termine. Después tocá Cobrar de nuevo.',
           }
         }
         toast.add({ ...aviso, color: 'warning' })
@@ -2148,6 +2173,10 @@ async function addProducto(item: ItemCatalogo) {
     avisarCuentaEnCobro()
     return
   }
+  if (item.modoInventario === 'serie') {
+    abrirUnidades(item, null)
+    return
+  }
   if (item.tipo === 'receta' || (item.tipo === 'combo' && item.disponibleCondicional)) {
     recetaItemId.value = item.id
     recetaDrawerOpen.value = true
@@ -2163,6 +2192,70 @@ async function addProducto(item: ItemCatalogo) {
   }
   catch (e: unknown) {
     mostrarRechazoPorStock({ error: e, fallback: 'Error al agregar el producto', puedeTrasladar: puedeTrasladar.value })
+  }
+}
+
+/**
+ * Abre el selector de unidades para `item`. Sin `linea` es una línea nueva; con ella, se reabre
+ * con las suyas marcadas. Se excluyen las unidades de las OTRAS líneas de la cuenta de ese ítem:
+ * el servidor rechaza una unidad ya apartada, así que ofrecerla es pedir un 400.
+ */
+function abrirUnidades(item: { id: string, nombre: string }, linea: CuentaLineaDetalle | null) {
+  if (!activeCuenta.value) return
+  unidadesCuentaId.value = activeCuenta.value.id
+  unidadesItem.value = { id: item.id, nombre: item.nombre }
+  unidadesLineaId.value = linea?.id ?? null
+  unidadesSeleccionadas.value = linea?.unidades ?? []
+  unidadesExcluir.value = activeCuenta.value.lineas
+    .filter(l => l.itemId === item.id && l.id !== linea?.id)
+    .flatMap(l => (l.unidades ?? []).map(u => u.id))
+  unidadesOpen.value = true
+}
+
+/** Con el modal abierto el garzón puede irse a otra cuenta: lo elegido ya no sería de ésta. */
+watch(() => activeCuenta.value?.id, () => {
+  unidadesOpen.value = false
+})
+
+async function onUnidadesConfirm(unidades: UnidadElegida[]) {
+  const item = unidadesItem.value
+  const cuentaId = unidadesCuentaId.value
+  if (!item || !cuentaId || activeCuenta.value?.id !== cuentaId) return
+  if (cuentaActivaEnCobro.value) {
+    avisarCuentaEnCobro()
+    return
+  }
+  const unidadIds = unidades.map(u => u.id)
+  const lineaId = unidadesLineaId.value
+  if (lineaId === null) {
+    try {
+      const cuenta = await registrarEnVuelo(
+        cuentaId,
+        'agregar',
+        salonesApi.agregarLinea(cuentaId, item.id, String(unidadIds.length), undefined, unidadIds),
+      )
+      syncCuenta(cuenta)
+    }
+    catch (e: unknown) {
+      mostrarRechazoPorStock({ error: e, fallback: 'Error al agregar el producto', puedeTrasladar: puedeTrasladar.value })
+    }
+    return
+  }
+  // No es una edición de cantidad: la línea no tiene input ni pintado optimista. Pinta la respuesta.
+  guardandoUnidades.value = true
+  try {
+    const cuenta = await registrarEnVuelo(
+      cuentaId,
+      'cambiar',
+      salonesApi.actualizarLinea(cuentaId, lineaId, { unidadIds }),
+    )
+    syncCuenta(cuenta)
+  }
+  catch (e: unknown) {
+    mostrarRechazoPorStock({ error: e, fallback: 'Error al cambiar las unidades', puedeTrasladar: puedeTrasladar.value })
+  }
+  finally {
+    guardandoUnidades.value = false
   }
 }
 
@@ -2246,7 +2339,7 @@ function abrirAnularLinea(linea: CuentaLineaDetalle) {
   anularModalOpen.value = true
 }
 
-async function confirmarAnular(payload: { cantidad: string, motivoBajaId: string }) {
+async function confirmarAnular(payload: { cantidad: string, unidadIds?: string[], motivoBajaId: string }) {
   const cuenta = anularModalCuenta.value
   const linea = anularModalLinea.value
   if (!cuenta || !linea || anulando.value) return
@@ -3138,6 +3231,18 @@ async function cerrarCuentaConPin(
                       <p v-if="linea.itemEliminado" class="text-xs text-error">
                         Quitá esta línea para poder cobrar la cuenta.
                       </p>
+                      <div v-if="linea.unidades?.length" class="flex flex-wrap gap-1 pt-1" data-qa="series-linea">
+                        <UBadge
+                          v-for="u in linea.unidades"
+                          :key="u.id"
+                          :color="colorCondicion(u.condicion)"
+                          variant="subtle"
+                          size="sm"
+                          class="font-mono"
+                        >
+                          {{ u.serie }}<template v-if="u.condicion !== 'nuevo'"> · {{ etiquetaCondicion(u.condicion) }}</template>
+                        </UBadge>
+                      </div>
                       <p v-if="linea.personalizacionTexto" class="text-xs text-muted">
                         {{ linea.personalizacionTexto }}
                       </p>
@@ -3145,7 +3250,19 @@ async function cerrarCuentaConPin(
                       <AdvertenciasPrecio :advertencias="calculoVigente?.lineas[index]?.advertencias ?? []" />
                       <PromocionesAplicadas :promociones="calculoVigente?.lineas[index]?.trazas.promociones ?? []" />
                     </div>
+                    <!-- Con serie la cantidad no se tipea: son las unidades que se eligieron. -->
+                    <UButton
+                      v-if="linea.unidades?.length"
+                      label="Cambiar unidades"
+                      icon="i-lucide-list-checks"
+                      color="neutral"
+                      variant="outline"
+                      size="xs"
+                      :disabled="cuentaActivaEnCobro || guardandoUnidades"
+                      @click="abrirUnidades({ id: linea.itemId, nombre: linea.nombre }, linea)"
+                    />
                     <AppCantidadInput
+                      v-else
                       :model-value="presentacionLinea(linea)"
                       :unidad-codigo="unidadPresLinea(linea)"
                       :unidad-base-codigo="unidadBaseLinea(linea)"
@@ -3351,6 +3468,15 @@ async function cerrarCuentaConPin(
         :pin="testigoPin"
         :modo-personal="!!garzonPersonal?.garzonId"
         @resuelto="onTestigoResuelto"
+      />
+
+      <VentasUnidadesSerieModal
+        v-if="unidadesItem"
+        v-model:open="unidadesOpen"
+        :item="unidadesItem"
+        :seleccionadas="unidadesSeleccionadas"
+        :excluir="unidadesExcluir"
+        @confirm="onUnidadesConfirm"
       />
 
       <SalonesAnularLineaModal

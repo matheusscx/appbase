@@ -65,9 +65,9 @@ distintos. Las dos venden, así que ninguna es una bodega — esa es la discusi�
     importa no perder de vista.
   - Sucursal, con su propia consecuencia fiscal
   - Costeo por ubicación (ver "Por qué el costo no se parte")
-  - Elegir el criterio de salida al trasladar sin unidad/lote elegido: el chokepoint
-    auto-selecciona (series por FIFO, lotes por vencimiento) y el usuario no puede pedir "el
-    lote más nuevo"
+  - Elegir el criterio de salida al trasladar sin lote elegido: el chokepoint
+    auto-selecciona (lotes por vencimiento) y el usuario no puede pedir "el
+    lote más nuevo". En series no hay criterio que elegir: las unidades se eligen siempre
 
 ---
 
@@ -212,7 +212,7 @@ por un `toast.add` propio.
 | Traslado a sí misma (`origenId === destinoId`) | 400 |
 | Traslado que deja el local bajo lo apartado | 400 nombrando el ítem y la cantidad que falta |
 | Producto que nunca estuvo en el destino | Se crea la fila de `stock_ubicacion` en 0 y se suma. No existe el error "ese producto no vive acá" |
-| Modo `serie` | Se trasladan **IMEIs elegidos** (o FIFO entre los que están en el origen, si no se eligen); una unidad `vendido` o `baja` no se mueve |
+| Modo `serie` | Se trasladan **IMEIs elegidos**, siempre: sin `unidadIds` es 400 (desde el 2026-10-03 el sistema ya no elige por FIFO; [`inventario-serializado.md`](./inventario-serializado.md#quién-elige-qué-unidad-con-serie-sale)). Una unidad `vendido`, `baja` o apartada por una mesa no se mueve |
 | Modo `lote` | Se traslada cantidad **de un lote concreto** (o, si no se elige uno, el que vence antes entre los lotes con saldo y **sin los vencidos**, que se quedan en el origen para mermarlos — [`inventario-serializado.md`](./inventario-serializado.md#qué-lote-sale)); si no hay esa cantidad en el origen, 400 |
 | Producto eliminado | **Se puede trasladar**: `'traslado'` está en la allowlist de motivos permitidos sobre ítems borrados — si no, una bodega llena de producto discontinuado no se vaciaría nunca |
 
@@ -260,8 +260,8 @@ Request (CreateTrasladoDto):
 ```
 
 `lineas` acepta entre 1 y 200 líneas (el techo acota cuánto puede retener el lock ancla de
-cada ítem, que también sirve a las ventas de ese producto). `unidadIds`/`loteId` son
-opcionales — sin ellos, el chokepoint auto-selecciona (series por FIFO, lotes por vencimiento). La respuesta se relee entera con
+cada ítem, que también sirve a las ventas de ese producto). `unidadIds` es
+obligatorio en un producto con serie y `loteId` es opcional — sin lote elegido, el chokepoint auto-selecciona por vencimiento. La respuesta se relee entera con
 `GET /traslados/:id` al final de la transacción, para no mantener dos constructores de la
 misma forma.
 

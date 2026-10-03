@@ -1,7 +1,7 @@
 # Feature: Mermas tipificadas y valorizadas
 
 **Status**: Complete  
-**Last Updated**: 2026-08-28
+**Last Updated**: 2026-10-03
 
 ---
 
@@ -229,6 +229,7 @@ cd backend && npm run test:e2e -- mermas.e2e-spec.ts
 
 - [x] CRUD motivos custom; fijos inmutables
 - [x] `POST /mermas` tipifica, descuenta stock y congela costo
+- [x] `POST /mermas` de un producto con número de serie responde 400 (*"dalo de baja desde Ajuste de stock, eligiendo la unidad"*, 2026-10-03): la merma no tiene dónde elegir la unidad. La pantalla sigue encontrando el producto, muestra ese aviso y deshabilita Registrar. Que la merma pregunte la unidad es un frente propio ([`pendientes.md`](../agent/pendientes.md) § 6)
 - [x] El costo sale de `item_producto.costo_actual`, nunca se tipea; sin costo, la merma se registra sin valorizar y queda así para siempre — sin override por movimiento
 - [x] Listado y kardex muestran valorizado (o `—` sin costo) y motivo
 - [x] Cartel no bloqueante en la merma y en la entrada por compra cuando el ítem no tiene costo; marca y filtro `sinCosto` en el listado de ítems

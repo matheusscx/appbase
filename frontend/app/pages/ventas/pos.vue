@@ -3,6 +3,7 @@ import Decimal from 'decimal.js'
 import type { EmisorMedio } from '~/composables/useDocumentosVenta'
 import { useVenta, descontarStockCatalogo, tieneCustomerData, tipoDocumentoPorDefecto, toVentaLineasBody, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
+import type { UnidadElegida } from '~/composables/useUnidadesSerie'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import { itemsParaBoletaImpresion } from '~/utils/ticket-builder'
 import type { DropdownMenuItem } from '@nuxt/ui'
@@ -31,7 +32,7 @@ const toast = useToast()
 const cajaStore = useCajaStore()
 const { emisor, cargar: cargarEmisor } = useRazonSocialEmisor()
 
-const { lineas, resultado, loadingCalculo, vigente, asegurarVigente, add, quitar, cambiarCantidadPresentacion, limpiar } = useVenta()
+const { lineas, resultado, loadingCalculo, vigente, asegurarVigente, add, quitar, cambiarCantidadPresentacion, cambiarUnidades, limpiar } = useVenta()
 const unidadesStore = useUnidadesMedidaStore()
 const impresorasApi = useImpresoras()
 const { formatMonto } = useFormatters()
@@ -91,7 +92,48 @@ function onCatalogoAdd(item: ItemCatalogo) {
     recetaDrawerOpen.value = true
     return
   }
+  if (item.modoInventario === 'serie') {
+    // Con serie quien vende elige QUÉ unidad sale: tocar de nuevo el mismo producto
+    // reabre el selector con las de su línea marcadas, no suma un +1 mudo.
+    const indice = lineas.value.findIndex(l => l.item.id === item.id)
+    abrirUnidades(item, indice >= 0 ? indice : null)
+    return
+  }
   add(item)
+}
+
+// El ítem se fija al abrir (misma razón que `recetaItem`: `items` es la página visible y puede
+// cambiar con el modal abierto). `unidadesLinea` es la línea que se edita, o `null` si es una nueva.
+const unidadesOpen = ref(false)
+const unidadesItem = ref<ItemCatalogo | null>(null)
+const unidadesLinea = ref<number | null>(null)
+
+function abrirUnidades(item: ItemCatalogo, indice: number | null) {
+  unidadesItem.value = item
+  unidadesLinea.value = indice
+  unidadesOpen.value = true
+}
+
+const unidadesSeleccionadas = computed<UnidadElegida[]>(() =>
+  unidadesLinea.value === null ? [] : (lineas.value[unidadesLinea.value]?.unidades ?? []),
+)
+/** Las de otras líneas del mismo ítem: no se ofrecen dos veces la misma unidad. */
+const unidadesExcluir = computed(() =>
+  lineas.value
+    .filter((l, i) => i !== unidadesLinea.value && l.item.id === unidadesItem.value?.id)
+    .flatMap(l => (l.unidades ?? []).map(u => u.id)),
+)
+
+function onCambiarUnidades(index: number) {
+  const linea = lineas.value[index]
+  if (linea) abrirUnidades(linea.item, index)
+}
+
+function onUnidadesConfirm(unidades: UnidadElegida[]) {
+  const item = unidadesItem.value
+  if (!item) return
+  if (unidadesLinea.value === null) add(item, undefined, undefined, unidades)
+  else cambiarUnidades(unidadesLinea.value, unidades)
 }
 
 function onRecetaConfirm(payload: PersonalizacionPayload, resumen: string) {
@@ -368,6 +410,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
             :tipos-documento="tiposDocumento"
             :tiene-caja="tieneCaja"
             @cambiar-cantidad="onCambiarCantidadPresentacion"
+            @cambiar-unidades="onCambiarUnidades"
             @quitar="quitar"
             @cobrar="abrirCobro"
             @limpiar-todo="limpiar"
@@ -379,6 +422,14 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         v-model:open="recetaDrawerOpen"
         :item-id="recetaItemId"
         @confirm="onRecetaConfirm"
+      />
+      <VentasUnidadesSerieModal
+        v-if="unidadesItem"
+        v-model:open="unidadesOpen"
+        :item="unidadesItem"
+        :seleccionadas="unidadesSeleccionadas"
+        :excluir="unidadesExcluir"
+        @confirm="onUnidadesConfirm"
       />
       <VentasCobroModal
         v-model:open="cobroOpen"

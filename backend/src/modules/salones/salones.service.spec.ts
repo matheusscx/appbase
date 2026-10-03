@@ -19,7 +19,10 @@ import { MonedasService } from '../monedas/monedas.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import { MotivosBajaService } from '../motivos-baja/motivos-baja.service';
 import { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
+import type { AddLineaDto } from './dto/add-linea.dto';
+import type { UpdateLineaDto } from './dto/update-linea.dto';
 import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
+import { InventarioService } from '../inventario/inventario.service';
 import { CuentaLineaAnulacion } from './entities/cuenta-linea-anulacion.entity';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 
@@ -154,6 +157,7 @@ describe('SalonesService', () => {
   };
   let motivosBaja: { assertMotivoActivo: jest.Mock };
   let ubicaciones: { localDe: jest.Mock };
+  let inventario: { bloquearUnidadesParaSalida: jest.Mock };
   let manager: {
     query: jest.Mock;
     findOne: jest.Mock;
@@ -267,6 +271,12 @@ describe('SalonesService', () => {
     ubicaciones = {
       localDe: jest.fn().mockResolvedValue('ubicacion-local'),
     };
+    // La regla de las unidades (existen, son del producto, están libres) la
+    // cubre `inventario.service.spec.ts` y el e2e contra filas reales. Acá solo
+    // se mira CUÁNDO se la llama y con qué.
+    inventario = {
+      bloquearUnidadesParaSalida: jest.fn().mockResolvedValue([]),
+    };
 
     manager = {
       query: jest.fn(),
@@ -313,6 +323,7 @@ describe('SalonesService', () => {
         { provide: CalculoPreciosService, useValue: calculoPrecios },
         { provide: MotivosBajaService, useValue: motivosBaja },
         { provide: UbicacionesService, useValue: ubicaciones },
+        { provide: InventarioService, useValue: inventario },
         { provide: IdempotenciaService, useValue: idempotencia },
       ],
     }).compile();
@@ -457,6 +468,79 @@ describe('SalonesService', () => {
       return filtro === undefined ? [] : [filtro as string];
     }
 
+    it('las unidades con serie viajan con la línea: se suman al fusionarse y se mudan si no hay una igual', async () => {
+      const cuentaA = {
+        id: CUENTA_A,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 1,
+        estado: EstadoCuenta.ABIERTA,
+        garzonResponsableId: 'garzon-destino',
+      };
+      const cuentaB = {
+        id: CUENTA_B,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 2,
+        estado: EstadoCuenta.ABIERTA,
+        garzonResponsableId: 'garzon-origen',
+        cerradaEl: null as Date | null,
+      };
+      const base = { tenantId: TENANT, precioUnitario: '1000.0000' };
+      const destino = {
+        ...base,
+        id: 'linea-a1',
+        cuentaId: CUENTA_A,
+        itemId: 'celular',
+        cantidad: '1',
+        cantidadEnviada: '0',
+        unidadIds: ['u-1'],
+      };
+      const igual = {
+        ...base,
+        id: 'linea-b1',
+        cuentaId: CUENTA_B,
+        itemId: 'celular',
+        cantidad: '2',
+        cantidadEnviada: '0',
+        unidadIds: ['u-2', 'u-3'],
+      };
+      const otro = {
+        ...base,
+        id: 'linea-b2',
+        cuentaId: CUENTA_B,
+        itemId: 'tablet',
+        cantidad: '1',
+        cantidadEnviada: '0',
+        unidadIds: ['u-9'],
+      };
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      manager.find.mockImplementation(
+        (entity: unknown, opts?: { where?: { cuentaId?: unknown } }) => {
+          if (entity === Cuenta) return Promise.resolve([cuentaB, cuentaA]);
+          if (entity === CuentaLinea) {
+            const ids = idsDe(opts?.where?.cuentaId);
+            return Promise.resolve(
+              [destino, igual, otro].filter((l) => ids.includes(l.cuentaId)),
+            );
+          }
+          return Promise.resolve([]);
+        },
+      );
+      manager.query.mockResolvedValue([]);
+
+      await service.fusionarCuentas(TENANT, MESA, {
+        cuentaIds: [CUENTA_A, CUENTA_B],
+      });
+
+      // `cantidad = cardinalidad(unidadIds)` se conserva en la línea fusionada.
+      expect(destino.cantidad).toBe('3');
+      expect(destino.unidadIds).toEqual(['u-1', 'u-2', 'u-3']);
+      // La que no tiene par se muda entera, con sus unidades.
+      expect(otro.cuentaId).toBe(CUENTA_A);
+      expect(otro.unidadIds).toEqual(['u-9']);
+    });
+
     it('mueve las líneas de las cuentas de origen a la de menor número y las cancela', async () => {
       const cuentaA = {
         id: CUENTA_A,
@@ -482,6 +566,7 @@ describe('SalonesService', () => {
         itemId: 'item-1',
         cantidad: '1',
         precioUnitario: '1000.0000',
+        unidadIds: [],
         cantidadEnviada: '1',
       };
       const lineaOrigenMismoItem = {
@@ -491,6 +576,7 @@ describe('SalonesService', () => {
         itemId: 'item-1',
         cantidad: '2',
         precioUnitario: '1000.0000',
+        unidadIds: [],
         cantidadEnviada: '2',
       };
       const lineaOrigenOtroItem = {
@@ -500,6 +586,7 @@ describe('SalonesService', () => {
         itemId: 'item-2',
         cantidad: '1',
         precioUnitario: '1000.0000',
+        unidadIds: [],
         cantidadEnviada: '0',
       };
 
@@ -601,6 +688,7 @@ describe('SalonesService', () => {
         itemId: 'item-1',
         cantidad: '1',
         precioUnitario: '1000.0000',
+        unidadIds: [],
         cantidadEnviada: '0',
         personalizacion: null,
       };
@@ -611,6 +699,7 @@ describe('SalonesService', () => {
         itemId: 'item-1',
         cantidad: '2',
         precioUnitario: '1000.0000',
+        unidadIds: [],
         cantidadEnviada: '0',
         personalizacion: SNAPSHOT,
       };
@@ -671,6 +760,7 @@ describe('SalonesService', () => {
         itemId: ITEM,
         cantidad: '200',
         precioUnitario: '1000.0000',
+        unidadIds: [],
         cantidadEnviada: '0',
         cantidadPresentacion: '200',
         unidadCodigoPresentacion: 'g',
@@ -683,6 +773,7 @@ describe('SalonesService', () => {
         itemId: ITEM_2,
         cantidad: '100',
         precioUnitario: '1000.0000',
+        unidadIds: [],
         cantidadEnviada: '0',
         cantidadPresentacion: '100',
         unidadCodigoPresentacion: 'g',
@@ -695,6 +786,7 @@ describe('SalonesService', () => {
         itemId: ITEM,
         cantidad: '300',
         precioUnitario: '1000.0000',
+        unidadIds: [],
         cantidadEnviada: '0',
         cantidadPresentacion: '0.3',
         unidadCodigoPresentacion: 'kg',
@@ -707,6 +799,7 @@ describe('SalonesService', () => {
         itemId: ITEM_2,
         cantidad: '400',
         precioUnitario: '1000.0000',
+        unidadIds: [],
         cantidadEnviada: '0',
         cantidadPresentacion: '0.4',
         unidadCodigoPresentacion: 'kg',
@@ -822,6 +915,7 @@ describe('SalonesService', () => {
           itemId: `item-${i}-${j}`,
           cantidad: '1',
           precioUnitario: '1000.0000',
+          unidadIds: [],
           cantidadEnviada: '0',
           personalizacion: null,
         })),
@@ -892,6 +986,7 @@ describe('SalonesService', () => {
           itemId: ITEM,
           cantidad: '2',
           precioUnitario: '1000.0000',
+          unidadIds: [],
           cantidadEnviada: '0',
           personalizacion: null,
         },
@@ -902,6 +997,7 @@ describe('SalonesService', () => {
           itemId: ITEM,
           cantidad: '3',
           precioUnitario: '1000.0000',
+          unidadIds: [],
           cantidadEnviada: '1',
           personalizacion: null,
         },
@@ -962,6 +1058,7 @@ describe('SalonesService', () => {
           itemId: ITEM,
           cantidad: '1',
           precioUnitario: '3000.0000',
+          unidadIds: [],
           cantidadEnviada: '0',
           personalizacion: null,
         },
@@ -972,6 +1069,7 @@ describe('SalonesService', () => {
           itemId: ITEM,
           cantidad: '1',
           precioUnitario: '4000.0000',
+          unidadIds: [],
           cantidadEnviada: '0',
           personalizacion: null,
         },
@@ -1041,6 +1139,7 @@ describe('SalonesService', () => {
           itemId: ITEM,
           cantidad: '1',
           precioUnitario: '5000.0000',
+          unidadIds: [],
           reglasCongeladas: { descuentos: [], recargos: [] },
           cantidadEnviada: '0',
           personalizacion: null,
@@ -1052,6 +1151,7 @@ describe('SalonesService', () => {
           itemId: ITEM,
           cantidad: '1',
           precioUnitario: '5000.0000',
+          unidadIds: [],
           reglasCongeladas: conDescuento,
           cantidadEnviada: '0',
           personalizacion: null,
@@ -1481,6 +1581,7 @@ describe('SalonesService', () => {
         // Congelado al pedir: precio_base '1000' × tasa 1. Sin esto el merge
         // ni siquiera compara: `new Decimal(undefined)` tira `DecimalError`.
         precioUnitario: '1000.0000',
+        unidadIds: [],
         cantidad: '200',
         cantidadPresentacion: '200',
         unidadCodigoPresentacion: 'g',
@@ -1512,6 +1613,7 @@ describe('SalonesService', () => {
         // Congelado al pedir: precio_base '1000' × tasa 1. Sin esto el merge
         // ni siquiera compara: `new Decimal(undefined)` tira `DecimalError`.
         precioUnitario: '1000.0000',
+        unidadIds: [],
         cantidad: '2',
         cantidadPresentacion: null,
         unidadCodigoPresentacion: null,
@@ -1559,6 +1661,7 @@ describe('SalonesService', () => {
           {
             cuenta_id: CUENTA,
             cuenta_linea_id: 'linea-pres',
+            unidad_ids: [],
             item_id: ITEM,
             cantidad: '0.5',
             cantidad_presentacion: '500',
@@ -1603,6 +1706,7 @@ describe('SalonesService', () => {
           cantidad: '1',
           personalizacion: null,
           precioUnitario: '1000.0000',
+          unidadIds: [],
           reglasCongeladas: { descuentos: [], recargos: [] },
         },
       ]);
@@ -1635,6 +1739,7 @@ describe('SalonesService', () => {
           cantidad: '2',
           personalizacion: null,
           precioUnitario: '1000.0000',
+          unidadIds: [],
         },
       ]);
 
@@ -1758,6 +1863,7 @@ describe('SalonesService', () => {
         // Congelado al pedir: precio_base '1000' × tasa 1. Sin esto el merge
         // ni siquiera compara: `new Decimal(undefined)` tira `DecimalError`.
         precioUnitario: '1000.0000',
+        unidadIds: [],
         cantidad: '1',
         personalizacion: SNAPSHOT,
       };
@@ -1811,6 +1917,226 @@ describe('SalonesService', () => {
           personalizacion: { omitidos: [ING] },
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    describe('producto con número de serie', () => {
+      const U1 = 'unidad-1';
+      const U2 = 'unidad-2';
+
+      // Un producto en modo serie: lo único que cambia respecto del `beforeEach`
+      // de arriba es `modo_inventario`.
+      beforeEach(() => {
+        dataSource.query.mockImplementation((sql: string) => {
+          if (sql.includes('SELECT i.item_id'))
+            return Promise.resolve([
+              {
+                item_id: ITEM,
+                nombre: 'Celular',
+                tipo: 'producto',
+                unidad_medida: 'unidad',
+                modo_inventario: 'serie',
+                precio_base: '1000',
+                moneda_id: 'clp',
+              },
+            ]);
+          return Promise.resolve([]);
+        });
+        manager.find.mockResolvedValue([]);
+      });
+
+      it('sin unidadIds responde 400 y no abre la transacción', async () => {
+        await expect(
+          service.agregarLinea(TENANT, CUENTA, { itemId: ITEM, cantidad: '1' }),
+        ).rejects.toThrow(
+          'Elegí qué unidades salen: «Celular» tiene número de serie',
+        );
+        expect(dataSource.transaction).not.toHaveBeenCalled();
+      });
+
+      it('unidadIds: null responde 400 pidiendo elegir, no 500', async () => {
+        await expect(
+          service.agregarLinea(TENANT, CUENTA, {
+            itemId: ITEM,
+            cantidad: '1',
+            unidadIds: null,
+          } as unknown as AddLineaDto),
+        ).rejects.toThrow(
+          'Elegí qué unidades salen: «Celular» tiene número de serie',
+        );
+        expect(dataSource.transaction).not.toHaveBeenCalled();
+      });
+
+      it('la cantidad tiene que ser entera y coincidir con las unidades elegidas', async () => {
+        await expect(
+          service.agregarLinea(TENANT, CUENTA, {
+            itemId: ITEM,
+            cantidad: '2',
+            unidadIds: [U1],
+          }),
+        ).rejects.toThrow(
+          '«Celular»: la cantidad (2) no coincide con las unidades elegidas (1)',
+        );
+        await expect(
+          service.agregarLinea(TENANT, CUENTA, {
+            itemId: ITEM,
+            cantidad: '1.5',
+            unidadIds: [U1],
+          }),
+        ).rejects.toThrow(BadRequestException);
+        expect(manager.save).not.toHaveBeenCalled();
+      });
+
+      it('una unidad repetida en el pedido responde 400', async () => {
+        await expect(
+          service.agregarLinea(TENANT, CUENTA, {
+            itemId: ITEM,
+            cantidad: '2',
+            unidadIds: [U1, U1],
+          }),
+        ).rejects.toThrow('Una unidad viene repetida');
+      });
+
+      it('no admite una presentación distinta de la unidad base', async () => {
+        // Un producto cuya base es `g`, para que `kg` sea convertible y llegue a
+        // la regla (con `unidad` la conversión ya rebota antes, por magnitud).
+        dataSource.query.mockImplementation((sql: string) =>
+          Promise.resolve(
+            sql.includes('SELECT i.item_id')
+              ? [
+                  {
+                    item_id: ITEM,
+                    nombre: 'Celular',
+                    tipo: 'producto',
+                    unidad_medida: 'g',
+                    modo_inventario: 'serie',
+                    precio_base: '1000',
+                    moneda_id: 'clp',
+                  },
+                ]
+              : [],
+          ),
+        );
+        await expect(
+          service.agregarLinea(TENANT, CUENTA, {
+            itemId: ITEM,
+            cantidad: '1',
+            cantidadPresentacion: '1',
+            unidadCodigoPresentacion: 'kg',
+            unidadIds: [U1],
+          }),
+        ).rejects.toThrow(
+          'Los productos por serie o lote solo admiten su unidad base',
+        );
+      });
+
+      it('valida las unidades bajo el lock de la cuenta, después del tope de stock y con cuentaId null', async () => {
+        const orden: string[] = [];
+        manager.findOne.mockImplementation(() => {
+          orden.push('lock-cuenta');
+          return Promise.resolve({
+            id: CUENTA,
+            tenantId: TENANT,
+            estado: EstadoCuenta.ABIERTA,
+          });
+        });
+        items.validarStockAlPedir.mockImplementation(() => {
+          orden.push('tope-stock');
+          return Promise.resolve(undefined);
+        });
+        inventario.bloquearUnidadesParaSalida.mockImplementation(() => {
+          orden.push('unidades');
+          return Promise.resolve([]);
+        });
+
+        await service.agregarLinea(TENANT, CUENTA, {
+          itemId: ITEM,
+          cantidad: '2',
+          unidadIds: [U1, U2],
+        });
+
+        expect(orden).toEqual(['lock-cuenta', 'tope-stock', 'unidades']);
+        // `cuentaId: null`: pedir otra vez una unidad que ESTA cuenta ya tiene
+        // apartada tiene que rebotar. Con el id de la cuenta pasaría.
+        expect(inventario.bloquearUnidadesParaSalida).toHaveBeenCalledWith(
+          manager,
+          {
+            tenantId: TENANT,
+            itemId: ITEM,
+            ubicacionId: 'ubicacion-local',
+            unidadIds: [U1, U2],
+            cuentaId: null,
+          },
+        );
+        expect(manager.create).toHaveBeenCalledWith(
+          CuentaLinea,
+          expect.objectContaining({ cantidad: '2', unidadIds: [U1, U2] }),
+        );
+      });
+
+      it('si el chokepoint rechaza una unidad, no se escribe la línea', async () => {
+        inventario.bloquearUnidadesParaSalida.mockRejectedValue(
+          new BadRequestException(
+            'La unidad A1 está apartada en la cuenta de Mesa 2',
+          ),
+        );
+
+        await expect(
+          service.agregarLinea(TENANT, CUENTA, {
+            itemId: ITEM,
+            cantidad: '1',
+            unidadIds: [U1],
+          }),
+        ).rejects.toThrow('apartada en la cuenta de Mesa 2');
+        expect(manager.save).not.toHaveBeenCalled();
+      });
+
+      it('al mergear con una línea igual, las unidades se suman a las que ya tenía', async () => {
+        const existente = {
+          id: 'linea-1',
+          precioUnitario: '1000.0000',
+          unidadIds: [U1],
+          cantidad: '1',
+          cantidadPresentacion: null,
+          unidadCodigoPresentacion: null,
+          personalizacion: null,
+        };
+        manager.find.mockResolvedValue([existente]);
+
+        await service.agregarLinea(TENANT, CUENTA, {
+          itemId: ITEM,
+          cantidad: '1',
+          unidadIds: [U2],
+        });
+
+        expect(existente.cantidad).toBe('2');
+        expect(existente.unidadIds).toEqual([U1, U2]);
+      });
+    });
+
+    it('un ítem sin número de serie no admite unidadIds', async () => {
+      await expect(
+        service.agregarLinea(TENANT, CUENTA, {
+          itemId: ITEM,
+          cantidad: '1',
+          unidadIds: ['unidad-1'],
+        }),
+      ).rejects.toThrow('no tiene número de serie: no lleva unidades');
+      expect(inventario.bloquearUnidadesParaSalida).not.toHaveBeenCalled();
+    });
+
+    it('un ítem sin número de serie no toca el chokepoint de unidades ni guarda unidades', async () => {
+      manager.find.mockResolvedValue([]);
+
+      await service.agregarLinea(TENANT, CUENTA, {
+        itemId: ITEM,
+        cantidad: '2',
+      });
+
+      expect(inventario.bloquearUnidadesParaSalida).not.toHaveBeenCalled();
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLinea,
+        expect.objectContaining({ unidadIds: [] }),
+      );
     });
 
     it('rechaza cantidad menor o igual a cero', async () => {
@@ -1871,6 +2197,7 @@ describe('SalonesService', () => {
             {
               cuenta_id: CUENTA,
               cuenta_linea_id: 'linea-1',
+              unidad_ids: [],
               item_id: ITEM,
               cantidad: '3',
               cantidad_presentacion: '3',
@@ -1898,6 +2225,206 @@ describe('SalonesService', () => {
             },
           ]);
         return Promise.resolve([]);
+      });
+    });
+
+    it('sin cantidad ni unidades en un ítem sin serie responde 400, no 500', async () => {
+      // `cantidad` pasó a opcional en el DTO: sin este guard un PATCH vacío
+      // llegaba a `new Decimal(undefined)` y salía como un 500.
+      await expect(
+        service.actualizarLinea(TENANT, CUENTA, 'linea-1', {}),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.actualizarLinea(TENANT, CUENTA, 'linea-1', {}),
+      ).rejects.toThrow(/Indicá la cantidad/);
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    it('cantidad: null en un ítem sin serie responde 400, no 500', async () => {
+      // `@IsOptional()` deja pasar el `null` del JSON: un `=== undefined` lo
+      // dejaba llegar a `new Decimal(null)`.
+      await expect(
+        service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+          cantidad: null,
+        } as unknown as UpdateLineaDto),
+      ).rejects.toThrow(/Indicá la cantidad/);
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    it('unidadIds en una línea sin serie responde 400', async () => {
+      await expect(
+        service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+          cantidad: '1',
+          unidadIds: ['unidad-1'],
+        }),
+      ).rejects.toThrow('no tiene número de serie: no lleva unidades');
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    describe('línea con número de serie', () => {
+      const U1 = 'unidad-1';
+      const U2 = 'unidad-2';
+      const U3 = 'unidad-3';
+      let linea: {
+        id: string;
+        tenantId: string;
+        cuentaId: string;
+        itemId: string;
+        cantidad: string;
+        cantidadEnviada: string;
+        personalizacion: null;
+        unidadIds: string[];
+      };
+
+      beforeEach(() => {
+        linea = {
+          id: 'linea-1',
+          tenantId: TENANT,
+          cuentaId: CUENTA,
+          itemId: ITEM,
+          cantidad: '2',
+          personalizacion: null,
+          cantidadEnviada: '0',
+          unidadIds: [U1, U2],
+        };
+        manager.findOne.mockImplementation((entidad: unknown) =>
+          Promise.resolve(
+            entidad === Cuenta
+              ? { id: CUENTA, tenantId: TENANT, estado: EstadoCuenta.ABIERTA }
+              : linea,
+          ),
+        );
+        const consulta = manager.query.getMockImplementation()!;
+        manager.query.mockImplementation((sql: string, params?: unknown[]) =>
+          sql.includes('SELECT i.item_id')
+            ? Promise.resolve([
+                {
+                  item_id: ITEM,
+                  nombre: 'Celular',
+                  tipo: 'producto',
+                  unidad_medida: 'unidad',
+                  modo_inventario: 'serie',
+                  precio_base: '1000',
+                  moneda_id: 'clp',
+                },
+              ])
+            : consulta(sql, params),
+        );
+      });
+
+      it('con cantidad sola responde 400 y no toca la línea', async () => {
+        await expect(
+          service.actualizarLinea(TENANT, CUENTA, 'linea-1', { cantidad: '3' }),
+        ).rejects.toThrow('Cambiá las unidades de «Celular», no la cantidad');
+        expect(manager.save).not.toHaveBeenCalled();
+        expect(linea.unidadIds).toEqual([U1, U2]);
+      });
+
+      it('unidadIds: null responde 400 pidiendo cambiar las unidades, no 500', async () => {
+        await expect(
+          service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+            unidadIds: null,
+          } as unknown as UpdateLineaDto),
+        ).rejects.toThrow('Cambiá las unidades de «Celular», no la cantidad');
+        expect(manager.save).not.toHaveBeenCalled();
+      });
+
+      it('un PATCH vacío también responde 400, no 500', async () => {
+        await expect(
+          service.actualizarLinea(TENANT, CUENTA, 'linea-1', {}),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('la cantidad se deriva de las unidades y solo las que entran se validan', async () => {
+        // [U1, U2] → [U1, U3]: U1 se queda (ya está apartada por esta línea, no
+        // se revalida), U2 sale (queda libre sola) y U3 entra.
+        await service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+          unidadIds: [U1, U3],
+        });
+
+        expect(inventario.bloquearUnidadesParaSalida).toHaveBeenCalledTimes(1);
+        expect(inventario.bloquearUnidadesParaSalida).toHaveBeenCalledWith(
+          manager,
+          {
+            tenantId: TENANT,
+            itemId: ITEM,
+            ubicacionId: 'ubicacion-local',
+            unidadIds: [U3],
+            cuentaId: null,
+          },
+        );
+        expect(linea.unidadIds).toEqual([U1, U3]);
+        expect(linea.cantidad).toBe('2');
+        // Misma cantidad: no hay nada que topear contra el stock.
+        expect(items.validarStockAlPedir).not.toHaveBeenCalled();
+      });
+
+      it('agregar una unidad sube la cantidad y corre el tope de stock con previas y nuevas', async () => {
+        await service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+          unidadIds: [U1, U2, U3],
+        });
+
+        expect(linea.cantidad).toBe('3');
+        expect(linea.unidadIds).toEqual([U1, U2, U3]);
+        expect(items.validarStockAlPedir).toHaveBeenCalledWith(
+          TENANT,
+          [expect.objectContaining({ itemId: ITEM, cantidad: '3' })],
+          [expect.objectContaining({ itemId: ITEM, cantidad: '2' })],
+        );
+        expect(inventario.bloquearUnidadesParaSalida).toHaveBeenCalledWith(
+          manager,
+          expect.objectContaining({ unidadIds: [U3] }),
+        );
+      });
+
+      it('sacar una unidad baja la cantidad y no valida nada: solo libera', async () => {
+        await service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+          unidadIds: [U2],
+        });
+
+        expect(linea.cantidad).toBe('1');
+        expect(linea.unidadIds).toEqual([U2]);
+        expect(inventario.bloquearUnidadesParaSalida).not.toHaveBeenCalled();
+        expect(items.validarStockAlPedir).not.toHaveBeenCalled();
+      });
+
+      it('no baja de lo ya despachado: el tope de cantidad_enviada sigue igual', async () => {
+        linea.cantidadEnviada = '2';
+
+        await expect(
+          service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+            unidadIds: [U1],
+          }),
+        ).rejects.toThrow(/Ya se despacharon 2/);
+        expect(manager.save).not.toHaveBeenCalled();
+      });
+
+      it('una unidad repetida o una cantidad que no coincide responde 400', async () => {
+        await expect(
+          service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+            unidadIds: [U1, U1],
+          }),
+        ).rejects.toThrow('Una unidad viene repetida');
+        await expect(
+          service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+            cantidad: '5',
+            unidadIds: [U1, U3],
+          }),
+        ).rejects.toThrow(/no coincide con las unidades elegidas/);
+      });
+
+      it('si el chokepoint rechaza la unidad nueva, la línea queda como estaba', async () => {
+        inventario.bloquearUnidadesParaSalida.mockRejectedValue(
+          new BadRequestException('La unidad A3 no está disponible'),
+        );
+
+        await expect(
+          service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+            unidadIds: [U1, U3],
+          }),
+        ).rejects.toThrow('no está disponible');
+        expect(manager.save).not.toHaveBeenCalled();
+        expect(linea.unidadIds).toEqual([U1, U2]);
       });
     });
 
@@ -2233,6 +2760,7 @@ describe('SalonesService', () => {
                 {
                   cuenta_id: CUENTA,
                   cuenta_linea_id: 'linea-2',
+                  unidad_ids: [],
                   item_id: ITEM,
                   cantidad: '1',
                   cantidad_presentacion: null,
@@ -2376,11 +2904,20 @@ describe('SalonesService', () => {
     }
 
     /** `item.tipo` por defecto: `producto`, el caso que SÍ descuenta stock. */
-    function mockItemQuery(tipo = 'producto') {
+    function mockItemQuery(
+      tipo = 'producto',
+      modoInventario: string | null = null,
+    ) {
       manager.query.mockImplementation((sql: string) => {
         if (sql.includes('i.tipo, i.nombre, ip.unidad_medida')) {
           return Promise.resolve([
-            { item_id: ITEM, tipo, nombre: 'Lomo', unidad_medida: 'unidad' },
+            {
+              item_id: ITEM,
+              tipo,
+              nombre: 'Lomo',
+              unidad_medida: 'unidad',
+              modo_inventario: modoInventario,
+            },
           ]);
         }
         // El reparto de la línea (Task 1, spec § 3.3): una sola fila sin
@@ -2862,6 +3399,223 @@ describe('SalonesService', () => {
     });
   });
 
+  describe('anularLinea — línea con número de serie', () => {
+    const LINEA = 'linea-serie';
+    const MOTIVO = 'motivo-1';
+    const U1 = '00000000-0000-4000-8000-000000000001';
+    const U2 = '00000000-0000-4000-8000-000000000002';
+    const U3 = '00000000-0000-4000-8000-000000000003';
+    const AJENA = '00000000-0000-4000-8000-000000000009';
+
+    /** Tres celulares pedidos, dos ya despachados: 3/2. */
+    function lineaSerie(overrides: Record<string, unknown> = {}) {
+      return {
+        id: LINEA,
+        tenantId: TENANT,
+        cuentaId: CUENTA,
+        itemId: ITEM,
+        cantidad: '3',
+        cantidadEnviada: '2',
+        cantidadPresentacion: null,
+        unidadCodigoPresentacion: null,
+        personalizacion: null,
+        unidadIds: [U1, U2, U3],
+        ...overrides,
+      };
+    }
+
+    function mockSerie(
+      linea: Record<string, unknown>,
+      modoInventario: string | null = 'serie',
+    ) {
+      manager.findOne.mockImplementation((entidad: unknown) =>
+        Promise.resolve(
+          entidad === Cuenta
+            ? {
+                id: CUENTA,
+                tenantId: TENANT,
+                estado: EstadoCuenta.ABIERTA,
+                garzonAperturaId: null,
+                garzonCierreId: null,
+                garzonResponsableId: null,
+              }
+            : linea,
+        ),
+      );
+      manager.query.mockImplementation((sql: string) => {
+        if (sql.includes('i.tipo, i.nombre, ip.unidad_medida')) {
+          return Promise.resolve([
+            {
+              item_id: ITEM,
+              tipo: 'producto',
+              nombre: 'Celular',
+              unidad_medida: 'unidad',
+              modo_inventario: modoInventario,
+            },
+          ]);
+        }
+        if (sql.includes('FROM cuenta_linea_reparto')) {
+          return Promise.resolve([
+            {
+              id: 'reparto-1',
+              garzon_id: null,
+              cantidad: '999999.0000',
+              creado_el: new Date(),
+            },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+      manager.count.mockResolvedValue(1);
+      manager.save.mockImplementation((entidad: unknown, row: unknown) =>
+        Promise.resolve(
+          entidad === CuentaLineaAnulacion
+            ? { ...(row as object), id: 'anulacion-1' }
+            : row,
+        ),
+      );
+    }
+
+    const anular = (body: { cantidad: string; unidadIds?: string[] }) =>
+      service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+        motivoBajaId: MOTIVO,
+        ...body,
+      });
+
+    it.each([
+      ['sin unidadIds', { cantidad: '1' }],
+      ['con unidadIds vacío', { cantidad: '1', unidadIds: [] }],
+      [
+        'con una unidad que la línea no tiene',
+        { cantidad: '1', unidadIds: [AJENA] },
+      ],
+      ['con otra cantidad de unidades', { cantidad: '1', unidadIds: [U1, U2] }],
+      ['con una unidad repetida', { cantidad: '2', unidadIds: [U1, U1] }],
+    ])(
+      '%s: 400 pidiendo cuáles se anulan, antes de escribir nada',
+      async (_caso, body) => {
+        mockSerie(lineaSerie());
+
+        await expect(anular(body)).rejects.toThrow(
+          new BadRequestException(
+            'Elegí cuáles unidades de «Celular» se anulan',
+          ),
+        );
+        expect(manager.create).not.toHaveBeenCalledWith(
+          CuentaLineaAnulacion,
+          expect.anything(),
+        );
+        expect(items.consumirLineaAnulada).not.toHaveBeenCalled();
+      },
+    );
+
+    it('un ítem sin serie con unidadIds: 400', async () => {
+      mockSerie(lineaSerie({ unidadIds: [] }), null);
+
+      await expect(anular({ cantidad: '1', unidadIds: [U1] })).rejects.toThrow(
+        /no tiene número de serie/,
+      );
+    });
+
+    it('merma: las unidades salen de la línea (cantidad y enviada bajan juntas) y van al consumo con la cuenta', async () => {
+      mockSerie(lineaSerie());
+
+      await anular({ cantidad: '1', unidadIds: [U2] });
+
+      expect(manager.save).toHaveBeenCalledWith(
+        CuentaLinea,
+        expect.objectContaining({
+          cantidad: '2',
+          cantidadEnviada: '1',
+          unidadIds: [U1, U3],
+        }),
+      );
+      expect(items.consumirLineaAnulada).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          itemTipo: 'producto',
+          cantidad: '1',
+          unidadIds: [U2],
+          cuentaId: CUENTA,
+        }),
+      );
+    });
+
+    it('un uuid en mayúsculas es la misma unidad de la línea (el subconjunto no distingue mayúsculas)', async () => {
+      // Con letras hex: los U1..U3 son solo dígitos y `toUpperCase()` no los cambia.
+      const A = 'aaaaaaaa-0000-4000-8000-00000000000a';
+      const B = 'bbbbbbbb-0000-4000-8000-00000000000b';
+      mockSerie(lineaSerie({ cantidad: '2', unidadIds: [A, B] }));
+
+      await anular({ cantidad: '1', unidadIds: [B.toUpperCase()] });
+
+      expect(manager.save).toHaveBeenCalledWith(
+        CuentaLinea,
+        expect.objectContaining({ cantidad: '1', unidadIds: [A] }),
+      );
+      expect(items.consumirLineaAnulada).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ unidadIds: [B] }),
+      );
+    });
+
+    it('no_elaborado: las unidades salen de la línea y no hay consumo, quedan libres', async () => {
+      mockSerie(lineaSerie());
+      motivosBaja.assertMotivoActivo.mockResolvedValue({
+        id: MOTIVO,
+        nombre: 'No se alcanzó a hacer',
+        tipo: TipoMotivoBaja.NO_ELABORADO,
+      });
+
+      await anular({ cantidad: '2', unidadIds: [U1, U3] });
+
+      expect(manager.save).toHaveBeenCalledWith(
+        CuentaLinea,
+        expect.objectContaining({
+          cantidad: '1',
+          cantidadEnviada: '0',
+          unidadIds: [U2],
+        }),
+      );
+      expect(items.consumirLineaAnulada).not.toHaveBeenCalled();
+    });
+
+    it('anular todas las unidades borra la línea', async () => {
+      mockSerie(
+        lineaSerie({
+          cantidad: '2',
+          cantidadEnviada: '2',
+          unidadIds: [U1, U2],
+        }),
+      );
+
+      await anular({ cantidad: '2', unidadIds: [U2, U1] });
+
+      expect(manager.softDelete).toHaveBeenCalledWith(CuentaLinea, {
+        id: LINEA,
+        tenantId: TENANT,
+        cuentaId: CUENTA,
+      });
+      expect(items.consumirLineaAnulada).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ unidadIds: [U2, U1], cuentaId: CUENTA }),
+      );
+    });
+
+    it('si el consumo rechaza una unidad nombrada, la anulación aborta con ese error', async () => {
+      mockSerie(lineaSerie());
+      items.consumirLineaAnulada.mockRejectedValue(
+        new BadRequestException(
+          'La unidad IMEI-2 no está disponible (estado: baja)',
+        ),
+      );
+
+      await expect(anular({ cantidad: '1', unidadIds: [U2] })).rejects.toThrow(
+        /no está disponible/,
+      );
+    });
+  });
+
   describe('cancelarConMotivo', () => {
     const MOTIVO = 'motivo-1';
 
@@ -2897,7 +3651,12 @@ describe('SalonesService', () => {
     function mockItemsQuery(
       items: Record<
         string,
-        { tipo: string; nombre: string; unidad_medida: string | null }
+        {
+          tipo: string;
+          nombre: string;
+          unidad_medida: string | null;
+          modo_inventario?: string | null;
+        }
       >,
     ) {
       manager.query.mockImplementation((sql: string, params?: unknown[]) => {
@@ -3121,6 +3880,193 @@ describe('SalonesService', () => {
       expect(items.consumirLineaAnulada).toHaveBeenCalledTimes(2);
     });
 
+    describe('línea con número de serie', () => {
+      const U1 = '00000000-0000-4000-8000-000000000001';
+      const U2 = '00000000-0000-4000-8000-000000000002';
+      const U3 = '00000000-0000-4000-8000-000000000003';
+      const CELULAR = {
+        tipo: 'producto',
+        nombre: 'Celular',
+        unidad_medida: 'unidad',
+        modo_inventario: 'serie',
+      };
+
+      beforeEach(() => {
+        manager.save.mockImplementation((entidad: unknown, row: unknown) =>
+          Promise.resolve(
+            entidad === CuentaLineaAnulacion
+              ? { ...(row as object), id: 'anulacion-1' }
+              : row,
+          ),
+        );
+      });
+
+      it('despachada entera: se anulan todas sus unidades, con la cuenta como dueña de la salida', async () => {
+        manager.find.mockResolvedValue([
+          lineaViva({
+            cantidad: '2',
+            cantidadEnviada: '2',
+            unidadIds: [U1, U2],
+          }),
+        ]);
+        mockItemsQuery({ [ITEM]: CELULAR });
+
+        await service.cancelarConMotivo(TENANT, USUARIO_ACTOR, CUENTA, {
+          motivoBajaId: MOTIVO,
+        });
+
+        expect(items.consumirLineaAnulada).toHaveBeenCalledTimes(1);
+        expect(items.consumirLineaAnulada).toHaveBeenCalledWith(
+          manager,
+          expect.objectContaining({
+            cantidad: '2',
+            unidadIds: [U1, U2],
+            cuentaId: CUENTA,
+          }),
+        );
+      });
+
+      it('despachada a medias: 400 pidiendo anular primero, sin escribir nada', async () => {
+        manager.find.mockResolvedValue([
+          lineaViva({
+            cantidad: '3',
+            cantidadEnviada: '2',
+            unidadIds: [U1, U2, U3],
+          }),
+        ]);
+        mockItemsQuery({ [ITEM]: CELULAR });
+
+        await expect(
+          service.cancelarConMotivo(TENANT, USUARIO_ACTOR, CUENTA, {
+            motivoBajaId: MOTIVO,
+          }),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'Anulá primero «Celular» eligiendo cuál salió',
+          ),
+        );
+        expect(manager.create).not.toHaveBeenCalled();
+        expect(manager.softDelete).not.toHaveBeenCalled();
+        expect(items.consumirLineaAnulada).not.toHaveBeenCalled();
+      });
+
+      it('la media despachada de UNA línea frena toda la cancelación, aunque las otras estén enteras', async () => {
+        manager.find.mockResolvedValue([
+          lineaViva({
+            id: 'l-entera',
+            itemId: ITEM,
+            cantidad: '1',
+            cantidadEnviada: '1',
+            unidadIds: [U1],
+          }),
+          lineaViva({
+            id: 'l-media',
+            itemId: ITEM_2,
+            cantidad: '2',
+            cantidadEnviada: '1',
+            unidadIds: [U2, U3],
+          }),
+        ]);
+        mockItemsQuery({
+          [ITEM]: CELULAR,
+          [ITEM_2]: { ...CELULAR, nombre: 'Tablet' },
+        });
+
+        await expect(
+          service.cancelarConMotivo(TENANT, USUARIO_ACTOR, CUENTA, {
+            motivoBajaId: MOTIVO,
+          }),
+        ).rejects.toThrow('Anulá primero «Tablet» eligiendo cuál salió');
+        expect(manager.create).not.toHaveBeenCalled();
+        expect(items.consumirLineaAnulada).not.toHaveBeenCalled();
+      });
+
+      it('el chequeo previo no agrega consultas: los ítems siguen viniendo en una sola', async () => {
+        manager.find.mockResolvedValue([
+          lineaViva({
+            id: 'l1',
+            itemId: ITEM,
+            cantidad: '1',
+            cantidadEnviada: '1',
+            unidadIds: [U1],
+          }),
+          lineaViva({
+            id: 'l2',
+            itemId: ITEM_2,
+            cantidad: '1',
+            cantidadEnviada: '1',
+            unidadIds: [U2],
+          }),
+        ]);
+        mockItemsQuery({
+          [ITEM]: CELULAR,
+          [ITEM_2]: { ...CELULAR, nombre: 'Tablet' },
+        });
+
+        await service.cancelarConMotivo(TENANT, USUARIO_ACTOR, CUENTA, {
+          motivoBajaId: MOTIVO,
+        });
+
+        const consultasDeItems = manager.query.mock.calls.filter(([sql]) =>
+          (sql as string).includes('i.tipo, i.nombre, ip.unidad_medida'),
+        );
+        expect(consultasDeItems).toHaveLength(1);
+      });
+
+      it('con motivo no_elaborado y la línea a medias NO pide anular primero: no se mueve ninguna unidad y todas se liberan con la cuenta', async () => {
+        motivosBaja.assertMotivoActivo.mockResolvedValue({
+          id: MOTIVO,
+          nombre: 'No se alcanzó a hacer',
+          tipo: TipoMotivoBaja.NO_ELABORADO,
+        });
+        manager.find.mockResolvedValue([
+          lineaViva({
+            cantidad: '2',
+            cantidadEnviada: '1',
+            unidadIds: [U1, U2],
+          }),
+        ]);
+        mockItemsQuery({ [ITEM]: CELULAR });
+
+        const result = await service.cancelarConMotivo(
+          TENANT,
+          USUARIO_ACTOR,
+          CUENTA,
+          { motivoBajaId: MOTIVO },
+        );
+
+        expect(result.estado).toBe(EstadoCuenta.CANCELADA);
+        expect(items.consumirLineaAnulada).not.toHaveBeenCalled();
+        expect(manager.softDelete).toHaveBeenCalledWith(CuentaLinea, {
+          tenantId: TENANT,
+          cuentaId: CUENTA,
+        });
+      });
+
+      it('con cortesía y la línea a medias también pide anular primero: la regla es de los motivos que descuentan', async () => {
+        motivosBaja.assertMotivoActivo.mockResolvedValue({
+          id: MOTIVO,
+          nombre: 'Cortesía casa',
+          tipo: TipoMotivoBaja.CORTESIA,
+        });
+        manager.find.mockResolvedValue([
+          lineaViva({
+            cantidad: '2',
+            cantidadEnviada: '1',
+            unidadIds: [U1, U2],
+          }),
+        ]);
+        mockItemsQuery({ [ITEM]: CELULAR });
+
+        await expect(
+          service.cancelarConMotivo(TENANT, USUARIO_ACTOR, CUENTA, {
+            motivoBajaId: MOTIVO,
+          }),
+        ).rejects.toThrow(/Anulá primero/);
+        expect(manager.create).not.toHaveBeenCalled();
+      });
+    });
+
     /**
      * Mismo molde que `anularLinea`: el consumo de stock puede tomar el mismo
      * lock de `item_producto` que una venta concurrente.
@@ -3162,7 +4108,9 @@ describe('SalonesService', () => {
         garzonResponsableId: GARZON_RESPONSABLE,
         cerradaEl: null as Date | null,
       });
-      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+      manager.find.mockResolvedValue([
+        { itemId: ITEM, cantidad: '1', unidadIds: [] },
+      ]);
       manager.query.mockImplementation((sql: string) =>
         Promise.resolve(
           sql.includes('eliminado_el IS NOT NULL')
@@ -3189,6 +4137,45 @@ describe('SalonesService', () => {
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
 
+    it('manda a la venta las unidadIds de la línea con serie, y solo de esa', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 86,
+        estado: EstadoCuenta.ABIERTA,
+        ventaId: null,
+        garzonResponsableId: GARZON_RESPONSABLE,
+        cerradaEl: null as Date | null,
+      });
+      manager.find.mockResolvedValue([
+        { itemId: ITEM, cantidad: '2', unidadIds: ['u-1', 'u-2'] },
+        { itemId: COMBO, cantidad: '1', unidadIds: [] },
+      ]);
+      manager.query.mockResolvedValue([]);
+      ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
+
+      await service.cerrarCuenta(
+        TENANT,
+        USUARIO,
+        CUENTA,
+        {
+          garzonId: GARZON,
+          pin: PIN,
+          pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
+        },
+        CLAVE,
+      );
+
+      const dtoEnviado = ventas.crearEnTransaccion.mock.calls[0][3] as {
+        lineas: Record<string, unknown>[];
+      };
+      expect(dtoEnviado.lineas).toEqual([
+        { itemId: ITEM, cantidad: '2', unidadIds: ['u-1', 'u-2'] },
+        { itemId: COMBO, cantidad: '1' },
+      ]);
+    });
+
     it('genera la venta con crearEnTransaccion y cierra la cuenta', async () => {
       const cuenta = {
         id: CUENTA,
@@ -3202,7 +4189,12 @@ describe('SalonesService', () => {
       };
       manager.findOne.mockResolvedValue(cuenta);
       manager.find.mockResolvedValue([
-        { itemId: ITEM, cantidad: '2', personalizacion: SNAPSHOT },
+        {
+          itemId: ITEM,
+          cantidad: '2',
+          unidadIds: [],
+          personalizacion: SNAPSHOT,
+        },
       ]);
       manager.query.mockResolvedValue([]);
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
@@ -3285,7 +4277,12 @@ describe('SalonesService', () => {
       };
       manager.findOne.mockResolvedValue(cuenta);
       manager.find.mockResolvedValue([
-        { itemId: ITEM, cantidad: '2', personalizacion: SNAPSHOT },
+        {
+          itemId: ITEM,
+          cantidad: '2',
+          unidadIds: [],
+          personalizacion: SNAPSHOT,
+        },
       ]);
       manager.query.mockResolvedValue([]);
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
@@ -3332,7 +4329,12 @@ describe('SalonesService', () => {
       };
       manager.findOne.mockResolvedValue(cuenta);
       manager.find.mockResolvedValue([
-        { itemId: COMBO, cantidad: '1', personalizacion: SNAPSHOT_COMBO },
+        {
+          itemId: COMBO,
+          cantidad: '1',
+          unidadIds: [],
+          personalizacion: SNAPSHOT_COMBO,
+        },
       ]);
       manager.query.mockResolvedValue([]);
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
@@ -3378,7 +4380,12 @@ describe('SalonesService', () => {
       };
       manager.findOne.mockResolvedValue(cuenta);
       manager.find.mockResolvedValue([
-        { itemId: ITEM, cantidad: '1', personalizacion: SNAPSHOT_EXTRA },
+        {
+          itemId: ITEM,
+          cantidad: '1',
+          unidadIds: [],
+          personalizacion: SNAPSHOT_EXTRA,
+        },
       ]);
       manager.query.mockResolvedValue([]);
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
@@ -3419,7 +4426,9 @@ describe('SalonesService', () => {
         cerradaEl: null as Date | null,
       };
       manager.findOne.mockResolvedValue(cuenta);
-      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+      manager.find.mockResolvedValue([
+        { itemId: ITEM, cantidad: '1', unidadIds: [] },
+      ]);
       manager.query.mockResolvedValue([]);
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-2' });
 
@@ -3472,7 +4481,9 @@ describe('SalonesService', () => {
         cerradaEl: null as Date | null,
       };
       manager.findOne.mockResolvedValue(cuenta);
-      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+      manager.find.mockResolvedValue([
+        { itemId: ITEM, cantidad: '1', unidadIds: [] },
+      ]);
       manager.query.mockResolvedValue([]);
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-3' });
       sesiones.buscarSesionAbierta.mockResolvedValueOnce({
@@ -3519,7 +4530,9 @@ describe('SalonesService', () => {
         estado: EstadoCuenta.ABIERTA,
         garzonResponsableId: GARZON_RESPONSABLE,
       });
-      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+      manager.find.mockResolvedValue([
+        { itemId: ITEM, cantidad: '1', unidadIds: [] },
+      ]);
 
       await expect(
         service.cerrarCuenta(
@@ -3551,7 +4564,9 @@ describe('SalonesService', () => {
         estado: EstadoCuenta.ABIERTA,
         garzonResponsableId: GARZON_RESPONSABLE,
       });
-      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+      manager.find.mockResolvedValue([
+        { itemId: ITEM, cantidad: '1', unidadIds: [] },
+      ]);
       // El camino feliz tiene que poder completarse: si explota en un undefined
       // antes de llegar al final, el test muere por un TypeError y no por la
       // propiedad que enuncia. Local, no en el harness: como default global
@@ -3582,7 +4597,9 @@ describe('SalonesService', () => {
         estado: EstadoCuenta.ABIERTA,
         garzonResponsableId: null,
       });
-      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+      manager.find.mockResolvedValue([
+        { itemId: ITEM, cantidad: '1', unidadIds: [] },
+      ]);
 
       await expect(
         service.cerrarCuenta(
@@ -3631,7 +4648,9 @@ describe('SalonesService', () => {
         estado: EstadoCuenta.ABIERTA,
         garzonResponsableId: GARZON_RESPONSABLE,
       });
-      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+      manager.find.mockResolvedValue([
+        { itemId: ITEM, cantidad: '1', unidadIds: [] },
+      ]);
       sesiones.buscarSesionAbierta.mockResolvedValue(null);
 
       const err = (await service
@@ -3788,6 +4807,7 @@ describe('SalonesService', () => {
           return Promise.resolve(
             Array.from({ length: cuentas }, (_, i) => ({
               cuenta_linea_id: `linea-${i + 1}`,
+              unidad_ids: [],
               cuenta_id: `cuenta-${i + 1}`,
               item_id: ITEM,
               cantidad: '1',
@@ -3831,6 +4851,133 @@ describe('SalonesService', () => {
         ['linea-2'],
         ['linea-3'],
       ]);
+    });
+  });
+
+  describe('armarDetalles — unidades con serie', () => {
+    function cuentaAbierta(n: number) {
+      return {
+        id: `cuenta-${n}`,
+        numero: n,
+        nombre: null,
+        estado: EstadoCuenta.ABIERTA,
+        mesaId: MESA,
+        ventaId: null,
+        garzonAperturaId: null,
+        garzonResponsableId: null,
+        garzonCierreId: null,
+      };
+    }
+
+    /** Cada cuenta con una línea con serie (dos unidades) y otra sin. */
+    function conSerie(cuentas: number) {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      cuentaRepo.find.mockResolvedValue(
+        Array.from({ length: cuentas }, (_, i) => cuentaAbierta(i + 1)),
+      );
+      dataSource.query.mockImplementation((sql: string) => {
+        if (sql.includes('FROM cuenta_lineas')) {
+          return Promise.resolve(
+            Array.from({ length: cuentas }, (_, i) => i + 1).flatMap((n) => [
+              {
+                cuenta_linea_id: `serie-${n}`,
+                cuenta_id: `cuenta-${n}`,
+                item_id: ITEM,
+                cantidad: '2',
+                cantidad_presentacion: null,
+                unidad_codigo_presentacion: null,
+                nombre: 'Celular',
+                precio_base: '1000',
+                moneda_id: 'clp',
+                personalizacion: null,
+                item_eliminado: false,
+                unidad_ids: [`u-${n}-a`, `u-${n}-b`],
+              },
+              {
+                cuenta_linea_id: `comun-${n}`,
+                cuenta_id: `cuenta-${n}`,
+                item_id: ITEM_2,
+                cantidad: '1',
+                cantidad_presentacion: null,
+                unidad_codigo_presentacion: null,
+                nombre: 'Papas',
+                precio_base: '1000',
+                moneda_id: 'clp',
+                personalizacion: null,
+                item_eliminado: false,
+                unidad_ids: [],
+              },
+            ]),
+          );
+        }
+        if (sql.includes('FROM item_unidad')) {
+          return Promise.resolve(
+            Array.from({ length: cuentas }, (_, i) => i + 1).flatMap((n) => [
+              { unidad_id: `u-${n}-a`, serie: `A${n}`, condicion: 'nuevo' },
+              { unidad_id: `u-${n}-b`, serie: `B${n}`, condicion: 'usado' },
+            ]),
+          );
+        }
+        return Promise.resolve([]);
+      });
+      return dataSource.query;
+    }
+
+    const consultasDeUnidades = (query: jest.Mock) =>
+      query.mock.calls.filter((c) =>
+        (c[0] as string).includes('FROM item_unidad'),
+      );
+
+    it('cada línea con serie expone sus unidades y las demás, un arreglo vacío', async () => {
+      conSerie(2);
+      const detalles = await service.listarCuentasDeMesa(TENANT, MESA);
+
+      expect(detalles[1].lineas[0].unidades).toEqual([
+        { id: 'u-2-a', serie: 'A2', condicion: 'nuevo' },
+        { id: 'u-2-b', serie: 'B2', condicion: 'usado' },
+      ]);
+      expect(detalles[1].lineas[1].unidades).toEqual([]);
+    });
+
+    it('sale de UNA sola query para todas las líneas de todas las cuentas, y filtra tenant y eliminado_el', async () => {
+      const query = conSerie(4);
+      await service.listarCuentasDeMesa(TENANT, MESA);
+
+      const llamadas = consultasDeUnidades(query);
+      expect(llamadas).toHaveLength(1);
+      const [sql, params] = llamadas[0] as [string, unknown[]];
+      expect(sql).toMatch(/tenant_id = \$2/);
+      expect(sql).toMatch(/eliminado_el IS NULL/);
+      expect(params[0]).toHaveLength(8);
+    });
+
+    it('sin ninguna línea con serie no emite la consulta', async () => {
+      const query = conSerie(1);
+      query.mockImplementation((sql: string) =>
+        Promise.resolve(
+          sql.includes('FROM cuenta_lineas')
+            ? [
+                {
+                  cuenta_linea_id: 'comun-1',
+                  cuenta_id: 'cuenta-1',
+                  item_id: ITEM_2,
+                  cantidad: '1',
+                  cantidad_presentacion: null,
+                  unidad_codigo_presentacion: null,
+                  nombre: 'Papas',
+                  precio_base: '1000',
+                  moneda_id: 'clp',
+                  personalizacion: null,
+                  item_eliminado: false,
+                  unidad_ids: [],
+                },
+              ]
+            : [],
+        ),
+      );
+      await service.listarCuentasDeMesa(TENANT, MESA);
+
+      expect(consultasDeUnidades(query)).toHaveLength(0);
     });
   });
 
@@ -3965,7 +5112,9 @@ describe('SalonesService', () => {
         garzonResponsableId: GARZON_RESPONSABLE,
         cerradaEl: null as Date | null,
       });
-      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+      manager.find.mockResolvedValue([
+        { itemId: ITEM, cantidad: '1', unidadIds: [] },
+      ]);
       const sqls: string[] = [];
       manager.query.mockImplementation((sql: string) => {
         sqls.push(sql);
@@ -4051,6 +5200,7 @@ describe('SalonesService', () => {
             {
               cuenta_id: CUENTA,
               cuenta_linea_id: 'linea-1',
+              unidad_ids: [],
               item_id: ITEM,
               cantidad: '1',
               cantidad_presentacion: null,
@@ -4097,6 +5247,7 @@ describe('SalonesService', () => {
                 {
                   cuenta_id: CUENTA,
                   cuenta_linea_id: 'linea-1',
+                  unidad_ids: [],
                   item_id: ITEM,
                   cantidad: '1',
                   cantidad_presentacion: null,
@@ -4428,6 +5579,7 @@ describe('SalonesService', () => {
         return Promise.resolve([
           {
             cuenta_linea_id: 'linea-1',
+            unidad_ids: [],
             cantidad: '1',
             cantidad_enviada: '0',
             nombre: 'Pastel de choclo',
@@ -4467,6 +5619,7 @@ describe('SalonesService', () => {
         return Promise.resolve([
           {
             cuenta_linea_id: 'linea-1',
+            unidad_ids: [],
             cantidad: '3',
             cantidad_enviada: '1',
             nombre: 'Lomo a lo pobre',
@@ -4476,6 +5629,7 @@ describe('SalonesService', () => {
           },
           {
             cuenta_linea_id: 'linea-2',
+            unidad_ids: [],
             cantidad: '2',
             cantidad_enviada: '2',
             nombre: 'Agua mineral',
@@ -4485,6 +5639,7 @@ describe('SalonesService', () => {
           },
           {
             cuenta_linea_id: 'linea-3',
+            unidad_ids: [],
             cantidad: '1',
             cantidad_enviada: '0',
             nombre: 'Postre sin ruta',
@@ -4548,6 +5703,7 @@ describe('SalonesService', () => {
         .mockResolvedValueOnce([
           {
             cuenta_linea_id: 'linea-1',
+            unidad_ids: [],
             cantidad: '2',
             cantidad_enviada: '0',
             nombre: 'Lomo',
@@ -4577,6 +5733,7 @@ describe('SalonesService', () => {
         .mockResolvedValueOnce([
           {
             cuenta_linea_id: 'linea-1',
+            unidad_ids: [],
             cantidad: '3',
             cantidad_enviada: '1',
             nombre: 'Lomo a lo pobre',
@@ -4617,6 +5774,7 @@ describe('SalonesService', () => {
       manager.query.mockResolvedValueOnce([
         {
           cuenta_linea_id: 'linea-1',
+          unidad_ids: [],
           cantidad: '3',
           cantidad_enviada: '3',
           nombre: 'Lomo',

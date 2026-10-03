@@ -104,6 +104,13 @@ const productoSeleccionado = computed(() =>
   catalogoItems.porId.get(form.value.itemId) ?? null,
 )
 
+// El backend rechaza la merma de un producto con serie (nombra la unidad que sale y
+// esta pantalla no tiene dónde elegirla). El producto sigue apareciendo en el buscador:
+// quien busca el celular roto no entendería por qué no está. Mismo texto que el 400.
+const productoConSerie = computed(() =>
+  productoSeleccionado.value?.modoInventario === 'serie' ? productoSeleccionado.value : null,
+)
+
 const sinCostoActual = computed(() =>
   !!productoSeleccionado.value && productoSeleccionado.value.costoActual == null,
 )
@@ -163,6 +170,9 @@ function abrirRegistrar() {
 }
 
 async function registrar() {
+  // El botón ya está deshabilitado, pero Enter dentro del formulario también lo envía: el
+  // backend rechazaría con 400 y esta pantalla no tiene dónde elegir la unidad.
+  if (productoConSerie.value) return
   if (!form.value.itemId || !form.value.cantidad || !form.value.motivoBajaId) {
     toast.add({ title: 'Completa producto, cantidad y motivo', color: 'error' })
     return
@@ -443,6 +453,14 @@ const columns: TableColumn<MermaListItem>[] = [
           </UFormField>
 
           <UAlert
+            v-if="productoConSerie"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-circle-alert"
+            :title="`«${productoConSerie.nombre}» tiene número de serie: dalo de baja desde Ajuste de stock, eligiendo la unidad`"
+          />
+
+          <UAlert
             v-if="sinCostoActual"
             color="warning"
             variant="subtle"
@@ -473,6 +491,7 @@ const columns: TableColumn<MermaListItem>[] = [
           type="submit"
           form="merma-form"
           :loading="saving"
+          :disabled="!!productoConSerie"
         >
           Registrar
         </UButton>
