@@ -1692,7 +1692,7 @@ export class ComprasService {
               AND eliminado_el IS NULL`,
           [linea.item_id, loteCodigo, tenantId],
         );
-        // Sin él, la salida elegiría lotes por FIFO: bajaría de otro lote.
+        // Sin él, la salida elegiría el lote sola: bajaría de otro lote.
         if (!lote.length) {
           throw new BadRequestException(
             `El lote ${loteCodigo} de "${linea.item_nombre}" ya no existe: la cantidad no se puede bajar`,

@@ -928,24 +928,6 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
 
 ### Qué lote o unidad sale de stock (owner, 2026-09-28)
 
-- [ ] **El lote que vence antes sale primero (FEFO)** ✅ *(owner, 2026-09-28; antes era pregunta
-  de la § 4)* (backend, `inventario.service.ts`, la selección de `item_lote` … `ORDER BY creado_el
-  ASC LIMIT n FOR UPDATE`). **Cómo se decidió:** la orquestadora le planteó la escena medida —en
-  la misma factura llegan dos cajas de yogur, una vence en enero y otra en junio; se vende uno y
-  hoy el sistema sacó del de **junio** (medido por la API)— con tres opciones: *A: el que vence
-  antes solo cuando llegaron juntos*, *B: siempre el que vence antes* (recomendada: en comida es
-  lo que evita tirar mercadería) y *C: da lo mismo*. Contestó "vamos B".
-  **Lotes sin `fecha_vencimiento`:** salen **después** de los que tienen fecha, y entre ellos por
-  llegada. Lo propuso la orquestadora junto con la B y el owner no lo objetó; si al diseñar
-  aparece un caso que lo contradiga, se le vuelve a preguntar.
-  **Lo que falta al construirlo:** el desempate dentro de la misma fecha de vencimiento (llegada, y
-  después algo estable: `codigo_lote` o la PK); que la venta del POS, que nunca manda qué lote,
-  pase por el orden nuevo; y un e2e que monte el caso del yogur por la API real. ⚠️ Cruza con la
-  entrada de la § 6 *"Serie y lote están a medias"*: el owner ya contestó que un lote vencido
-  **se merma pero no se vende** (la venta lo salta), así que FEFO ordena solo entre los no vencidos. Decide qué lote sale: escribe en
-  `movimientos_inventario` y toca la trazabilidad ([ADR-007](../adr/007-inventario-serie-lote.md)),
-  así que va en su propio frente.
-
 - [ ] **En productos con número de serie, el cajero elige qué unidad sale** ✅ *(owner,
   2026-09-28; antes era pregunta de la § 4)* (backend + frontend, `inventario.service.ts`, la
   selección de `item_unidad`; POS y salones). **Cómo se decidió:** la orquestadora le planteó la
@@ -964,7 +946,8 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   decide en la spec. Decide qué unidad sale: escribe en
   `movimientos_inventario` y toca la trazabilidad ([ADR-007](../adr/007-inventario-serie-lote.md)),
   así que va en su propio frente. Va de la mano con "El lote que vence antes sale primero"
-  (arriba) y con la entrada de la § 6 "Serie y lote están a medias".
+  (cerrada el 2026-10-03, [`resueltos.md`](resueltos.md)) y con la entrada de la § 6 "Serie y
+  lote están a medias".
 
 ### Playwright entra al gate de cierre (owner, 2026-09-29)
 
@@ -1161,9 +1144,9 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
      ninguno es de esas dos tablas (medido). Sin chequeo en código tampoco: `moverSerie` inserta
      sin buscar duplicados y `moverLote` tiene un check-then-insert. Se puede cargar el mismo
      IMEI dos veces.
-  3. **`fecha_vencimiento` se guarda, se expone y no se compara con nada.** Cero comparaciones
-     contra `NOW()` en todo `backend/src` (medido). La salida automática es FIFO por `creado_el`,
-     no FEFO por vencimiento.
+  3. ~~**`fecha_vencimiento` se guarda, se expone y no se compara con nada.**~~ Cerrada el
+     2026-10-03 ([`resueltos.md`](resueltos.md), "Sale primero el lote que vence antes"): la
+     salida automática ordena por vencimiento y la venta y el traslado saltan los vencidos.
   **Lo que hay que decidir antes de tocar nada:** ¿se cierra la puerta (rechazar serie/lote en
   merma, como ya hacen venta y recuento) o se construye el soporte? La primera mitad es barata y
   para la sangría; la segunda es una feature. Y aparte: **¿un lote vencido se puede vender y
@@ -1177,9 +1160,10 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   - Los **índices únicos** que la doc promete y no existen en ningún lado (ni entidad, ni seeder)
     — sin ellos se puede cargar el mismo IMEI dos veces, y eso hay que cerrarlo antes de que la
     merma dependa de elegir una serie concreta.
-  - **`fecha_vencimiento`**: hoy se guarda, se expone y no se compara con nada; la salida
-    automática es FIFO por antigüedad, no FEFO por vencimiento (el owner eligió FEFO el
-    2026-09-28: § 3, "El lote que vence antes sale primero"). **¿Un lote vencido se puede
+  - **`fecha_vencimiento`**: desde el 2026-10-03 la salida automática ordena por vencimiento,
+    la venta salta los vencidos (elegido a mano, 400) y el traslado sin lote elegido también
+    ([`resueltos.md`](resueltos.md)). Lo que de esta cara sigue abierto es el aviso del inicio y
+    que la merma deje elegir el lote. **¿Un lote vencido se puede
     vender y mermar, o se bloquea?** ✅ **Mermar, sí** (owner, 2026-09-28, contestando a la
     orquestadora: "se puede mermar un lote vencido"). ✅ **Vender, no: la venta salta el lote
     vencido** y saca del siguiente (owner, 2026-09-28, "vamos A", entre *A: bloquear*

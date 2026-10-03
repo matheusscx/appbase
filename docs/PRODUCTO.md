@@ -196,7 +196,9 @@ cambiar la hora **recalcula el pasado** — un reporte ya visto puede mostrar ot
 nadie toque una venta, porque nada queda grabado con un día fijo. Rige "hoy" y cualquier filtro
 de fecha en pagos, caja, inventario, mermas, pasarela, anulaciones, sesiones de garzón, el
 resumen del negocio y propinas. **Lo que el corte nunca toca:** el motor de precios (la vigencia
-de una regla por horario es hora de reloj, no día de negocio) y la **boleta electrónica**, que
+de una regla por horario es hora de reloj, no día de negocio), el **vencimiento de un lote**, que
+vence a medianoche porque la fecha de la etiqueta es de calendario (owner, 2026-10-03; ver «Qué
+lote sale»), y la **boleta electrónica**, que
 siempre lleva la fecha calendario real (`FchEmis`) — el día de negocio es solo una vista de
 reporte, nunca el hecho fiscal.
 
@@ -361,6 +363,13 @@ Cada item:
 Extensiones futuras contempladas: combos con grupos de modificadores (elección, ej. "elige tu bebida"), items digitales.
 
 **Alertas útiles:** stock bajo, productos próximos a vencer.
+
+**Qué lote sale** (implementado 2026-10-03, [`features/inventario-serializado.md`](features/inventario-serializado.md#qué-lote-sale)):
+cuando nadie elige el lote, **sale primero el que vence antes**; los lotes sin vencimiento salen
+al final, y con el mismo vencimiento decide la llegada y después el código del lote. Un lote
+**vencido** —su fecha ya pasó en el calendario del local; el día del vencimiento todavía se
+vende— **no se vende**: la venta lo salta, y elegido a mano se rechaza. Tampoco viaja en un
+traslado sin lote elegido. **Sí se merma**, y la merma sin lote elegido se lo lleva primero.
 
 **Stock bajo** (implementado, [`features/aviso-stock-bajo.md`](features/aviso-stock-bajo.md)): el
 mínimo es por producto **y** ubicación, nace vacío y sin mínimo no hay aviso. Cuenta unidades del

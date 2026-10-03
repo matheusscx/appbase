@@ -4746,7 +4746,7 @@ export class ItemsService {
    * —no hay forma de entregar "media unidad" o "medio lote"— así que esa
    * salida puntual se saltea entera; como la línea de cuenta no registra QUÉ
    * unidad serializada o lote salió, tampoco se le puede pedir uno en
-   * particular: se deja que el chokepoint elija por FIFO como ya hace hoy
+   * particular: se deja que el chokepoint elija (FIFO o vencimiento) como ya hace hoy
    * (ningún llamador de esta expansión pasa `unidadIds`/`loteId`). Bloqueante
    * y no bloqueante se tratan IGUAL en anulación (owner, ronda de fixes 1,
    * Minor 6 de la revisión): el descuento parcial no depende de esa bandera.

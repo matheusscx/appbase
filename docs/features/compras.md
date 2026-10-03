@@ -869,7 +869,7 @@ la misma compra y los tomaría fuera de orden.
   cantidad o anular sobre una ubicación borrada es 400.
 - **Bajar una cantidad o anular lo que ya salió:** 400 con el producto, la ubicación y cuánto
   queda. En lote decide el saldo **del lote**, no el del producto. Anular es todo o nada.
-- **Un lote que ya no existe:** bajar o anular es 400, en vez de salir de otro lote por FIFO.
+- **Un lote que ya no existe:** bajar o anular es 400, en vez de salir de otro lote elegido solo.
 - **Un producto en la papelera:** corregir o anular es 400.
 - **El descuento** exige todas las líneas con precio y no puede superar el total. Un 0 es "sin
   descuento". Un descuento por la factura entera deja la mercadería a $0, y ese 0 es elegido; un

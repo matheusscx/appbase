@@ -40,9 +40,13 @@ function sinComentarios(fuente: string): string {
 
 // Hora de reloj, no día de negocio (spec § 3.2): el motor de precios y las
 // promociones colapsan un instante a su fecha y hora LOCAL sin corte.
+// El inventario también: un lote vence a medianoche del calendario, no a la
+// hora de corte, porque la fecha de la etiqueta es civil y después de ella no
+// se vende (owner, 2026-10-03; `moverLote`, `docs/features/inventario-serializado.md`).
 const RELOJ_ALLOWLIST = [
   'calculo-precios/calculo-precios.service.ts',
   'promociones/',
+  'inventario/inventario.service.ts',
 ];
 
 const PATRONES: { nombre: string; regex: RegExp; soloReloj: boolean }[] = [

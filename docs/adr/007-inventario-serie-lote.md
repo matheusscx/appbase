@@ -60,6 +60,8 @@ rechaza cambios en `PATCH /items/:id` si hay filas en `movimientos_inventario` p
 - Tres rutas de código en `registrarMovimiento`; la lógica crece en complejidad.
 - Un cambio de modo requiere reset completo (vaciado de stock y movimientos) — no hay migración automática.
 - Modo `lote` con salidas: el usuario debe elegir el lote manualmente (FEFO automático es trabajo futuro).
+  *Actualización 2026-10-03:* ya no — sin lote elegido sale el que vence antes y la venta salta los
+  vencidos ([`inventario-serializado.md`](../features/inventario-serializado.md#qué-lote-sale)).
 
 ### Neutral
 - `item_lote.cantidad_disponible` en modo `lote` y `item_unidad` en modo `serie` deben mantenerse consistentes

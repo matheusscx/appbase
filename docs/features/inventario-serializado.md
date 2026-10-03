@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-06-28
+**Last Updated**: 2026-10-03
 
 ---
 
@@ -31,10 +31,10 @@ Incluido:
 - Endpoints `GET /items/:id/unidades` y `GET /items/:id/lotes`.
 - Frontend: selector de modo, captura de series/lotes en el form y en el modal de ajuste, modal "Ver unidades / lotes".
 - Seeder con producto serie (iPhone, 3 IMEIs) y producto lote (Paracetamol).
+- Qué lote sale cuando nadie lo elige (FEFO, 2026-10-03) — ver [Qué lote sale](#qué-lote-sale).
 
 No incluido (futuro):
 - Estado `reservado` producido por ventas (el modelo lo soporta, el productor aún no existe).
-- FEFO automático en salida de lotes (el usuario elige el lote).
 - Pegado masivo/CSV de series.
 - Costeo/valoración de stock por unidad.
 
@@ -137,6 +137,37 @@ Response (200):
   "loteId": "uuid-del-lote"
 }
 ```
+
+### Qué lote sale
+
+La venta del POS y la de salones nunca mandan `loteId`, y la merma no lo acepta: el lote lo
+elige el chokepoint (`moverLote`). La regla es del owner (2026-09-28): **sale primero el que
+vence antes**, porque en comida es lo que evita tirar mercadería.
+
+- Orden: `fecha_vencimiento` (el día), los lotes **sin vencimiento al final**; dentro del mismo
+  día, la **llegada** (`creado_el`); dos lotes de la misma factura llegan juntos, así que
+  desempata **`codigo_lote`** —lo que el usuario ve en la caja— y la PK cierra un orden total.
+  Ese orden es también el de los `FOR UPDATE` sobre `item_lote`, y por eso tiene que ser total.
+- **Vencido** es el lote cuyo día ya pasó en el calendario del local (zona de la provincia):
+  el día del vencimiento todavía se vende, y vence a **medianoche**, no a la hora de corte del
+  negocio (owner, 2026-10-03: la fecha de la etiqueta es de calendario). Por eso
+  `inventario.service.ts` está en la allowlist de reloj de `dia-negocio.invariant.spec.ts`. El día se lee con `::date` en la sesión de la base,
+  el mismo cast con que se guardó la fecha pura que manda la pantalla. ⚠️ El DTO también acepta
+  un timestamp con hora y huso: un cliente de API que mande `2027-01-15T22:00:00-03:00` queda
+  con el día 16 en una sesión UTC, y ese lote se vende un día de más. La pantalla no lo hace.
+- **La venta salta los vencidos** y saca del siguiente (owner, 2026-09-28: un vencido se merma,
+  no se vende); vale para los ingredientes de una receta, que salen con motivo `venta`. Si sin
+  ellos no alcanza, el 400 dice cuánto hay vencido. Un vencido **elegido a mano** en una venta
+  también es 400.
+- **El traslado sin lote elegido también los salta** (owner, 2026-10-03): se quedan donde están
+  para mermarlos ahí. Elegido a mano, sí viaja.
+- **La merma, el ajuste, el recuento y la compra no los saltan.** La merma sin lote elegido se
+  lleva primero el vencido, que es justo lo que hay que hacer con él.
+- Costo aceptado: el stock cuenta los vencidos hasta que alguien los merme, así que puede
+  mostrar más de lo que se puede vender.
+
+Medido contra la API real en `test/lote-fefo.e2e-spec.ts` (el yogur de enero y junio en la
+misma factura, desempate, sin fecha, y los vencidos en venta, traslado y merma).
 
 ---
 

@@ -41,7 +41,8 @@ export class LineaTrasladoDto {
 
   /**
    * Modo `lote`: de qué lote sale la mercadería. Si no viene, el chokepoint
-   * descuenta FIFO de los lotes con saldo en el origen.
+   * descuenta primero del que vence antes entre los lotes con saldo en el
+   * origen, sin los vencidos. Elegido acá, un vencido sí viaja.
    */
   @IsOptional()
   @IsUUID()

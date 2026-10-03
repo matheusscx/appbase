@@ -720,10 +720,11 @@ describe('Traslados entre ubicaciones (e2e)', () => {
 
   /**
    * El DTO publica `unidadIds` y `loteId` como OPCIONALES: sin ellos el
-   * chokepoint auto-selecciona FIFO entre lo que hay **en el origen**. Es el
-   * único camino en el que la SALIDA elige y la ENTRADA tiene que registrar
-   * esa misma elección, así que es el que recorre los cruces que la entrada de
-   * traslado hace contra `cantidad` y contra el ítem. Sin estos dos casos esos
+   * chokepoint auto-selecciona entre lo que hay **en el origen** (series por
+   * FIFO, lotes por vencimiento). Es el único camino en el que la SALIDA
+   * elige y la ENTRADA tiene que registrar esa misma elección, así que es el
+   * que recorre los cruces que la entrada de traslado hace contra `cantidad` y
+   * contra el ítem. Sin estos dos casos esos
    * guards no los ejercitaba nada.
    */
   it('modo serie sin unidadIds: mueve las MÁS VIEJAS del origen', async () => {
@@ -790,31 +791,31 @@ describe('Traslados entre ubicaciones (e2e)', () => {
     expect(porUbicacion.get(bodegaId)).toBe(2);
   }, 60000);
 
-  it('modo lote sin loteId: parte el pedido entre dos lotes y la entrada registra los dos', async () => {
+  it('modo lote sin loteId: parte el pedido entre dos lotes por vencimiento y la entrada registra los dos', async () => {
     const { id: itemId } = await post<IdResponse>('/api/items', {
-      nombre: nombreUnico('Lote FIFO traslado E2E'),
+      nombre: nombreUnico('Lote FEFO traslado E2E'),
       precioBase: '5000',
       monedaId: CLP_MONEDA_ID,
       tipo: 'producto',
       modoInventario: 'lote',
     });
     const marca = Date.now();
-    // El fixture está armado para que FIFO dé un reparto que NO reproduce
-    // ninguno de los cuatro criterios ascendentes plausibles (los invertidos
-    // sí lo reproducen, y por eso no se afirma "ninguno"). El lote viejo es el
-    // CHICO (4), se llama `Z` —o sea último alfabéticamente— y vence DESPUÉS;
-    // el nuevo es el grande (5), se llama `A` y vence antes. Pidiendo 7:
-    //   FIFO (viejo primero)      → 4 de Z + 3 de A   ← lo que se afirma
-    //   mayor saldo primero       → 5 de A + 2 de Z
-    //   por código de lote (A<Z)  → 5 de A + 2 de Z
-    //   FEFO (vence antes)        → 5 de A + 2 de Z
-    //   LIFO (nuevo primero)      → 5 de A + 2 de Z
-    // Sin esta asimetría —viejo, grande y primero alfabéticamente a la vez—
-    // los cuatro criterios de arriba coinciden con FIFO y el caso diría "FIFO"
-    // midiendo mucho menos.
+    // Sin lote elegido sale primero el que vence antes (owner, 2026-09-28).
+    // Tres lotes, en este orden de llegada, armados para que el reparto FEFO
+    // no lo reproduzca ninguno de los criterios de abajo (el orden por código
+    // DESCENDENTE sí: ese lo caza `lote-fefo.e2e-spec.ts`). Con dos lotes no se
+    // puede: si el que vence antes es el viejo, FEFO coincide con FIFO, y si
+    // es el nuevo, coincide con LIFO. Pidiendo 7:
+    //   FEFO (vence antes)        → 3 de Z + 4 de M   ← lo que se afirma
+    //   FIFO (viejo primero)      → 4 de A + 3 de Z
+    //   LIFO (nuevo primero)      → 5 de M + 2 de Z
+    //   por código de lote        → 4 de A + 3 de M
+    //   mayor saldo primero       → 5 de M + 2 de A
+    //   menor saldo primero       → 3 de Z + 4 de A
     for (const [sufijo, cantidad, vence] of [
-      ['Z', '4', '2029-01-01'],
-      ['A', '5', '2028-01-01'],
+      ['A', '4', '2029-01-01'],
+      ['Z', '3', '2027-01-01'],
+      ['M', '5', '2028-01-01'],
     ]) {
       await request(app.getHttpServer())
         .patch(`/api/items/${itemId}/stock`)
@@ -826,7 +827,7 @@ describe('Traslados entre ubicaciones (e2e)', () => {
           cantidad,
           costoUnitario: '1000',
           lote: {
-            codigoLote: `FIFO-${sufijo}-${marca}`,
+            codigoLote: `FEFO-${sufijo}-${marca}`,
             fechaVencimiento: vence,
           },
         })
@@ -843,35 +844,36 @@ describe('Traslados entre ubicaciones (e2e)', () => {
         l.id,
       ]),
     );
-    /** El lote VIEJO y chico (4). */
-    const loteViejo = idDe.get(`FIFO-Z-${marca}`)!;
-    /** El lote NUEVO y grande (5). */
-    const loteNuevo = idDe.get(`FIFO-A-${marca}`)!;
+    /** El primero en llegar y el último en vencer: no se toca. */
+    const loteA = idDe.get(`FEFO-A-${marca}`)!;
+    /** El que vence antes: se vacía entero (3). */
+    const loteZ = idDe.get(`FEFO-Z-${marca}`)!;
+    /** El que vence segundo: pone los 4 que faltan. */
+    const loteM = idDe.get(`FEFO-M-${marca}`)!;
 
     const traslado = await trasladar(localId, bodegaId, [
       { itemId, cantidad: '7' },
     ]);
 
-    // El viejo se vació entero (4) y del nuevo salieron 3: el reparto que solo
-    // produce FIFO.
     const filas: { lote_id: string; ubicacion_id: string; cantidad: string }[] =
       await ds.query(
         `SELECT lote_id, ubicacion_id, cantidad FROM lote_ubicacion
           WHERE lote_id = ANY($1)`,
-        [[loteViejo, loteNuevo]],
+        [[loteA, loteZ, loteM]],
       );
     const saldoDe = new Map(
       filas.map((f) => [`${f.lote_id}|${f.ubicacion_id}`, Number(f.cantidad)]),
     );
-    expect(saldoDe.get(`${loteViejo}|${localId}`)).toBe(0);
-    expect(saldoDe.get(`${loteViejo}|${bodegaId}`)).toBe(4);
-    expect(saldoDe.get(`${loteNuevo}|${localId}`)).toBe(2);
-    expect(saldoDe.get(`${loteNuevo}|${bodegaId}`)).toBe(3);
+    expect(saldoDe.get(`${loteA}|${localId}`)).toBe(4);
+    expect(saldoDe.get(`${loteA}|${bodegaId}`)).toBeUndefined();
+    expect(saldoDe.get(`${loteZ}|${localId}`)).toBe(0);
+    expect(saldoDe.get(`${loteZ}|${bodegaId}`)).toBe(3);
+    expect(saldoDe.get(`${loteM}|${localId}`)).toBe(1);
+    expect(saldoDe.get(`${loteM}|${bodegaId}`)).toBe(4);
 
     // ⛔ Y la ENTRADA registró los MISMOS dos lotes que la salida eligió, no
     // una elección propia: es lo que ata las dos filas de kardex al mismo
-    // movimiento real. Dos filas de detalle por punta, con 4 y 3 — el reparto
-    // FIFO, no el 5 y 2 que darían los otros criterios.
+    // movimiento real. Dos filas de detalle por punta, con 4 de M y 3 de Z.
     const detalles: { tipo: string; lote_id: string; cantidad: string }[] =
       await ds.query(
         `SELECT mv.tipo, d.lote_id, d.cantidad
@@ -884,14 +886,14 @@ describe('Traslados entre ubicaciones (e2e)', () => {
     expect(
       detalles.map((d) => [d.tipo, d.lote_id, Number(d.cantidad)]),
     ).toEqual([
-      ['salida', loteViejo, 4],
-      ['salida', loteNuevo, 3],
-      ['entrada', loteViejo, 4],
-      ['entrada', loteNuevo, 3],
+      ['salida', loteM, 4],
+      ['salida', loteZ, 3],
+      ['entrada', loteM, 4],
+      ['entrada', loteZ, 3],
     ]);
 
     const porUbicacion = await saldos(itemId);
-    expect(porUbicacion.get(localId)).toBe(2);
+    expect(porUbicacion.get(localId)).toBe(5);
     expect(porUbicacion.get(bodegaId)).toBe(7);
   }, 60000);
 

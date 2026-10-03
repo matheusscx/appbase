@@ -1269,11 +1269,11 @@ describe('InventarioService', () => {
       expect(saldoCall[1]).toEqual([LOTE_ID, UBICACION_ID]);
     });
 
-    it('salida lote sin loteId: auto-selecciona FIFO el lote más antiguo', async () => {
+    it('salida lote sin loteId: auto-selecciona por vencimiento, con desempate total', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'lote' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce([{ stock: '50' }]) // SELECT saldo: statement aparte, ya bajo el lock
-        .mockResolvedValueOnce([{ lote_id: LOTE_ID, codigo_lote: 'LOTE-001' }]) // SELECT lotes FIFO FOR UPDATE
+        .mockResolvedValueOnce([{ lote_id: LOTE_ID, codigo_lote: 'LOTE-001' }]) // SELECT lotes por vencimiento FOR UPDATE
         .mockResolvedValueOnce([{ lote_id: LOTE_ID, cantidad: '50' }]) // saldos en esta ubicación
         .mockResolvedValueOnce(undefined) // INSERT/UPSERT lote_ubicacion
         .mockResolvedValueOnce([{ total: '40' }]) // SUM
@@ -1295,11 +1295,202 @@ describe('InventarioService', () => {
       );
 
       expect(res.stockResultante).toBe('40');
-      expect(managerMock.query).toHaveBeenNthCalledWith(
-        3,
-        expect.stringContaining('ORDER BY creado_el ASC'),
-        expect.arrayContaining([ITEM_ID, TENANT]),
+      // Qué orden produce lo prueba `test/lote-fefo.e2e-spec.ts` contra la
+      // base; acá se fija la forma, que además es el orden de los locks: un
+      // orden sin la PK al final no es total.
+      const lockCall = managerMock.query.mock.calls[2] as [string, unknown[]];
+      expect(lockCall[0]).toMatch(
+        /ORDER BY fecha_vencimiento::date ASC NULLS LAST, creado_el ASC,\s+codigo_lote ASC, lote_id ASC\s+FOR UPDATE/,
       );
+      expect(lockCall[1]).toEqual([ITEM_ID, TENANT]);
+    });
+
+    describe('lotes vencidos', () => {
+      const ZONA = [{ zona_horaria: 'America/Santiago', hora_corte: 0 }];
+      const LOTES = [
+        {
+          lote_id: 'lote-vencido',
+          codigo_lote: 'VENCIDO',
+          vence: '2000-01-31',
+        },
+        { lote_id: 'lote-bueno', codigo_lote: 'BUENO', vence: '2999-06-30' },
+      ];
+      const SALDOS = [
+        { lote_id: 'lote-vencido', cantidad: '3' },
+        { lote_id: 'lote-bueno', cantidad: '20' },
+      ];
+      const consumos = () =>
+        managerMock.query.mock.calls
+          .filter((c) => /INSERT INTO lote_ubicacion/.test(c[0] as string))
+          .map((c) => (c[1] as unknown[])[0]);
+      const consultasDeZona = () =>
+        managerMock.query.mock.calls.filter((c) =>
+          /zona_horaria/.test(c[0] as string),
+        ).length;
+
+      it('la venta salta el vencido y saca del siguiente', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ modo_inventario: 'lote' }])
+          .mockResolvedValueOnce([{ stock: '23' }])
+          .mockResolvedValueOnce(LOTES)
+          .mockResolvedValueOnce(SALDOS)
+          .mockResolvedValueOnce(ZONA)
+          .mockResolvedValueOnce(undefined)
+          .mockResolvedValueOnce([{ total: '22' }])
+          .mockResolvedValueOnce(undefined)
+          .mockResolvedValueOnce([{ movimiento_id: 'mov-v' }])
+          .mockResolvedValueOnce(undefined);
+
+        await service.registrarMovimiento(
+          managerMock as unknown as EntityManager,
+          {
+            tenantId: TENANT,
+            itemId: ITEM_ID,
+            ubicacionId: UBICACION_ID,
+            tipo: 'salida',
+            motivo: 'venta',
+            cantidad: '1',
+            usuarioId: USER_ID,
+          },
+        );
+
+        expect(consumos()).toEqual(['lote-bueno']);
+      });
+
+      it('la venta que no alcanza sin los vencidos dice cuánto hay vencido', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ modo_inventario: 'lote' }])
+          .mockResolvedValueOnce([{ stock: '23' }])
+          .mockResolvedValueOnce(LOTES)
+          .mockResolvedValueOnce(SALDOS)
+          .mockResolvedValueOnce(ZONA);
+
+        await expect(
+          service.registrarMovimiento(managerMock as unknown as EntityManager, {
+            tenantId: TENANT,
+            itemId: ITEM_ID,
+            ubicacionId: UBICACION_ID,
+            tipo: 'salida',
+            motivo: 'venta',
+            cantidad: '21',
+            usuarioId: USER_ID,
+          }),
+        ).rejects.toThrow(
+          'Stock insuficiente en lotes en esta ubicación (disponible: 20, requerido: 21); hay 3 más en lotes vencidos',
+        );
+      });
+
+      it('la merma se lleva primero el vencido y no consulta la zona', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ modo_inventario: 'lote' }])
+          .mockResolvedValueOnce([{ stock: '23' }])
+          .mockResolvedValueOnce(LOTES)
+          .mockResolvedValueOnce(SALDOS)
+          .mockResolvedValueOnce(undefined)
+          .mockResolvedValueOnce([{ total: '22' }])
+          .mockResolvedValueOnce(undefined)
+          .mockResolvedValueOnce([{ movimiento_id: 'mov-m' }])
+          .mockResolvedValueOnce(undefined);
+
+        await service.registrarMovimiento(
+          managerMock as unknown as EntityManager,
+          {
+            tenantId: TENANT,
+            itemId: ITEM_ID,
+            ubicacionId: UBICACION_ID,
+            tipo: 'salida',
+            motivo: 'merma',
+            cantidad: '1',
+            usuarioId: USER_ID,
+            motivoBajaId: MOTIVO_BAJA_ID,
+          },
+        );
+
+        expect(consumos()).toEqual(['lote-vencido']);
+        expect(consultasDeZona()).toBe(0);
+      });
+
+      it('elegido a mano, la venta lo rechaza', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ modo_inventario: 'lote' }])
+          .mockResolvedValueOnce([{ stock: '23' }])
+          .mockResolvedValueOnce([
+            { tenant_id: TENANT, codigo_lote: 'VENCIDO', vence: '2000-01-31' },
+          ])
+          .mockResolvedValueOnce(ZONA);
+
+        await expect(
+          service.registrarMovimiento(managerMock as unknown as EntityManager, {
+            tenantId: TENANT,
+            itemId: ITEM_ID,
+            ubicacionId: UBICACION_ID,
+            tipo: 'salida',
+            motivo: 'venta',
+            cantidad: '1',
+            usuarioId: USER_ID,
+            loteId: LOTE_ID,
+          }),
+        ).rejects.toThrow('El lote VENCIDO venció el 2000-01-31');
+      });
+    });
+
+    describe('hoy del local, memo por transacción', () => {
+      const ZONA = [{ zona_horaria: 'America/Santiago', hora_corte: 0 }];
+      const hoyLocal = (m: object, tenantId = TENANT) =>
+        service['hoyLocal'](m as EntityManager, tenantId);
+
+      it('dentro de una transacción resuelve la zona una sola vez por tenant', async () => {
+        const tx = {
+          query: jest.fn().mockResolvedValue(ZONA),
+          queryRunner: {},
+        };
+
+        await hoyLocal(tx);
+        await hoyLocal(tx);
+        expect(tx.query).toHaveBeenCalledTimes(1);
+
+        await hoyLocal(tx, 'otro-tenant');
+        expect(tx.query).toHaveBeenCalledTimes(2);
+      });
+
+      // Medianoche, no la hora de corte (owner, 2026-10-03): con corte a las
+      // 04:00, la 01:00 del 16 sigue siendo el 15 para la caja, pero para el
+      // vencimiento ya es el 16. 04:00Z del 16 de enero = 01:00 en Santiago.
+      it('el día es el del calendario, aunque el tenant tenga hora de corte', async () => {
+        jest.useFakeTimers({ now: new Date('2027-01-16T04:00:00Z') });
+        try {
+          const tx = {
+            query: jest
+              .fn()
+              .mockResolvedValue([
+                { zona_horaria: 'America/Santiago', hora_corte: 4 },
+              ]),
+          };
+          await expect(hoyLocal(tx)).resolves.toBe('2027-01-16');
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('otra transacción no hereda el memo, y sin transacción no hay memo', async () => {
+        const tx1 = {
+          query: jest.fn().mockResolvedValue(ZONA),
+          queryRunner: {},
+        };
+        const tx2 = {
+          query: jest.fn().mockResolvedValue(ZONA),
+          queryRunner: {},
+        };
+        const sinTx = { query: jest.fn().mockResolvedValue(ZONA) };
+
+        await hoyLocal(tx1);
+        await hoyLocal(tx2);
+        await hoyLocal(sinTx);
+        await hoyLocal(sinTx);
+
+        expect(tx2.query).toHaveBeenCalledTimes(1);
+        expect(sinTx.query).toHaveBeenCalledTimes(2);
+      });
     });
 
     // Fixture asimétrico (lote-A sin saldo acá, lote-B con 20 acá) para que

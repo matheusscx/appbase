@@ -31,6 +31,7 @@ import {
   bordeHastaSql,
   diaNegocioTenant,
   empujarDiaNegocio,
+  fechaLocalTenant,
   requiereDiaNegocio,
   type DiaNegocio,
 } from '../../common/utils/rango-fecha.util';
@@ -126,7 +127,7 @@ export interface RegistrarMovimientoParams {
    * Lo que la SALIDA de un traslado descontó de cada lote, tal cual. Solo en
    * la ENTRADA de un traslado en modo `lote`: la entrada suma exactamente eso
    * en el destino en vez de re-elegir por su cuenta (la salida pudo haber
-   * tomado FIFO de varios lotes), y así las dos filas de kardex describen el
+   * tomado de varios lotes, por vencimiento), y así las dos filas de kardex describen el
    * mismo movimiento.
    */
   loteConsumos?: { loteId: string; cantidad: string }[];
@@ -217,6 +218,19 @@ const MOTIVOS_QUE_RECALCULAN_CPP = ['compra', 'anulacion', 'devolucion'];
 const MOTIVOS_DE_VALOR = ['ajuste_costo', 'correccion_compra'];
 
 /**
+ * Salidas que nunca se llevan un lote vencido. `venta`: un lote vencido se
+ * merma pero no se vende —la venta lo salta y saca del siguiente— (owner,
+ * 2026-09-28); vale igual para el ingrediente de una receta, que sale con
+ * motivo `venta`. `traslado`: sin lote elegido, los vencidos se quedan donde
+ * están para mermarlos ahí (owner, 2026-10-03); elegido a mano, sí viajan.
+ *
+ * El resto (`merma`, ajuste, recuento, compra) sí puede sacarlos: mermar un
+ * vencido es justamente lo que hay que hacer con él, y con el orden por
+ * vencimiento la merma sin lote elegido se lleva primero el vencido.
+ */
+const MOTIVOS_QUE_SALTAN_VENCIDOS = ['venta', 'traslado'];
+
+/**
  * El par está bajo su mínimo: hay mínimo cargado y el saldo —0 si nunca se
  * movió ahí— es estrictamente menor. Igual al mínimo no avisa. Cuenta unidades
  * del saldo materializado, igual para los modos `cantidad`, `serie` y `lote`.
@@ -253,6 +267,36 @@ export class InventarioService {
     private readonly ubicacionesService: UbicacionesService,
   ) {}
 
+  /**
+   * "Hoy" en el calendario del local (zona de la provincia), memo por
+   * transacción. Una venta con varias líneas en modo lote pasa por
+   * `moverLote` una vez por línea, y resolver la zona en cada una sería una
+   * consulta por iteración. La clave es el `queryRunner` de la transacción y
+   * no la instancia —que es singleton— ni el `manager` sin transacción, que
+   * vive para siempre y serviría el día de ayer pasada la medianoche. Sin
+   * `queryRunner` no hay memo: se resuelve cada vez.
+   */
+  private readonly hoyLocalPorTx = new WeakMap<
+    object,
+    Map<string, Promise<string>>
+  >();
+
+  private hoyLocal(manager: EntityManager, tenantId: string): Promise<string> {
+    const tx = manager.queryRunner;
+    if (!tx) return fechaLocalTenant(manager, tenantId, new Date());
+    let porTenant = this.hoyLocalPorTx.get(tx);
+    if (!porTenant) {
+      porTenant = new Map();
+      this.hoyLocalPorTx.set(tx, porTenant);
+    }
+    let hoy = porTenant.get(tenantId);
+    if (!hoy) {
+      hoy = fechaLocalTenant(manager, tenantId, new Date());
+      porTenant.set(tenantId, hoy);
+    }
+    return hoy;
+  }
+
   async registrarMovimiento(
     manager: EntityManager,
     params: RegistrarMovimientoParams,
@@ -277,7 +321,7 @@ export class InventarioService {
     /**
      * Qué se movió realmente, para que el llamador no tenga que adivinarlo.
      * Solo lo usa el traslado: su SALIDA puede auto-seleccionar unidades o
-     * lotes por FIFO, y la ENTRADA tiene que registrar **esos mismos** —no
+     * lotes (unidades por FIFO, lotes por vencimiento), y la ENTRADA tiene que registrar **esos mismos** —no
      * volver a elegir— o las dos filas de kardex describirían movimientos
      * distintos.
      */
@@ -1635,7 +1679,7 @@ export class InventarioService {
 
       // Los saldos previos de TODOS los lotes que llegan, en UNA consulta —
       // nunca un `SELECT` por iteración. Es la misma forma que usa la salida
-      // FIFO más abajo, y acá pesa igual o más: cada round-trip de más se paga
+      // automática más abajo, y acá pesa igual o más: cada round-trip de más se paga
       // adentro de la transacción que retiene el lock ancla de
       // `item_producto`, o sea con toda venta de ese producto encolada detrás.
       //
@@ -1760,22 +1804,42 @@ export class InventarioService {
       // salida lote
       const loteId = params.loteId;
       if (!loteId) {
-        // Auto-selección FIFO: descuenta de los lotes más antiguos CON SALDO
-        // EN ESTA UBICACIÓN. El criterio de orden es el que ya tenía este
-        // método (creado_el ASC) — no cambia por ubicación, solo se filtra
-        // por ella.
+        // Auto-selección FEFO (owner, 2026-09-28): sale primero el lote que
+        // vence antes, entre los que tienen saldo EN ESTA UBICACIÓN. Los lotes
+        // sin vencimiento van al final. Dentro del mismo día de vencimiento
+        // decide la llegada (`creado_el`); dos lotes de la misma factura
+        // llegan en la misma transacción y empatan ahí, así que desempata
+        // `codigo_lote` —lo que el usuario ve en la caja— y la PK cierra un
+        // orden total.
         //
-        // Ancla del lock: todos los lotes del ítem (el alcance de siempre). El
-        // saldo por ubicación se lee aparte, ya bajo el lock — ver el docblock
-        // de `saldoLoteEnUbicacion`.
-        const lotes: { lote_id: string; codigo_lote: string }[] =
-          await manager.query(
-            `SELECT lote_id, codigo_lote FROM item_lote
-             WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
-             ORDER BY creado_el ASC
-             FOR UPDATE`,
-            [params.itemId, params.tenantId],
-          );
+        // El orden es también el orden en que se toman los locks (en Postgres
+        // `LockRows` corre sobre el `Sort`), y por eso tiene que ser total:
+        // dos salidas del mismo ítem lockean el mismo conjunto en el mismo
+        // orden. Igual corren detrás del ancla `FOR UPDATE OF ip` de
+        // `registrarMovimiento`, que ya las serializa.
+        //
+        // `::date` en la sesión de la base: el mismo cast con que se escribió
+        // la fecha pura que manda la pantalla (`'2027-01-15'` → medianoche de
+        // la sesión), así que devuelve el día tal como se tipeó. Un timestamp
+        // completo cuenta por el día en que cae en esa misma zona.
+        //
+        // Ancla del lock: todos los lotes del ítem (el alcance de siempre),
+        // vencidos incluidos: lo que cambia es cuáles se consumen, no qué se
+        // lockea. El saldo por ubicación se lee aparte, ya bajo el lock — ver
+        // el docblock de `saldoLoteEnUbicacion`.
+        const lotes: {
+          lote_id: string;
+          codigo_lote: string;
+          vence: string | null;
+        }[] = await manager.query(
+          `SELECT lote_id, codigo_lote, fecha_vencimiento::date::text AS vence
+             FROM item_lote
+            WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+            ORDER BY fecha_vencimiento::date ASC NULLS LAST, creado_el ASC,
+                     codigo_lote ASC, lote_id ASC
+            FOR UPDATE`,
+          [params.itemId, params.tenantId],
+        );
 
         const saldosRows: { lote_id: string; cantidad: string }[] =
           await manager.query(
@@ -1786,15 +1850,38 @@ export class InventarioService {
         const saldoDe = new Map(
           saldosRows.map((s) => [s.lote_id, new Decimal(s.cantidad)]),
         );
-        const lotesConSaldo = lotes.filter((l) => saldoDe.has(l.lote_id));
+
+        // Vencido = su día ya pasó en el calendario del local: el día del
+        // vencimiento todavía se vende. La zona se resuelve solo si algún lote
+        // tiene fecha y el motivo salta vencidos.
+        const hoy =
+          MOTIVOS_QUE_SALTAN_VENCIDOS.includes(params.motivo) &&
+          lotes.some((l) => l.vence)
+            ? await this.hoyLocal(manager, params.tenantId)
+            : null;
+        const vencido = (l: { vence: string | null }) =>
+          hoy !== null && l.vence !== null && l.vence < hoy;
+
+        const lotesConSaldo = lotes.filter(
+          (l) => saldoDe.has(l.lote_id) && !vencido(l),
+        );
 
         const totalDisponible = lotesConSaldo.reduce(
           (acc, l) => acc.plus(saldoDe.get(l.lote_id)!),
           new Decimal(0),
         );
         if (totalDisponible.lessThan(cantidad)) {
+          const enVencidos = lotes
+            .filter((l) => saldoDe.has(l.lote_id) && vencido(l))
+            .reduce(
+              (acc, l) => acc.plus(saldoDe.get(l.lote_id)!),
+              new Decimal(0),
+            );
           throw new BadRequestException(
-            `Stock insuficiente en lotes en esta ubicación (disponible: ${totalDisponible.toString()}, requerido: ${cantidad.toString()})`,
+            `Stock insuficiente en lotes en esta ubicación (disponible: ${totalDisponible.toString()}, requerido: ${cantidad.toString()})` +
+              (enVencidos.isZero()
+                ? ''
+                : `; hay ${enVencidos.toString()} más en lotes vencidos`),
           );
         }
 
@@ -1827,19 +1914,36 @@ export class InventarioService {
         return { stockResultante, loteConsumos };
       }
 
-      const rows: { tenant_id: string; codigo_lote: string }[] =
-        await manager.query(
-          `SELECT tenant_id, codigo_lote FROM item_lote
-           WHERE lote_id = $1 AND item_id = $2 AND eliminado_el IS NULL
-           FOR UPDATE`,
-          [loteId, params.itemId],
-        );
+      const rows: {
+        tenant_id: string;
+        codigo_lote: string;
+        vence: string | null;
+      }[] = await manager.query(
+        `SELECT tenant_id, codigo_lote, fecha_vencimiento::date::text AS vence
+           FROM item_lote
+          WHERE lote_id = $1 AND item_id = $2 AND eliminado_el IS NULL
+          FOR UPDATE`,
+        [loteId, params.itemId],
+      );
 
       if (!rows.length) {
         throw new BadRequestException('Lote no encontrado');
       }
       if (rows[0].tenant_id !== params.tenantId) {
         throw new BadRequestException('El lote no pertenece al tenant');
+      }
+      // Elegido a mano, un vencido no se vende (owner, 2026-09-28: bloquear).
+      // Solo `venta`: el traslado con lote elegido es justamente la forma de
+      // mover un vencido (ver `MOTIVOS_QUE_SALTAN_VENCIDOS`).
+      const vence = rows[0].vence;
+      if (
+        params.motivo === 'venta' &&
+        vence &&
+        vence < (await this.hoyLocal(manager, params.tenantId))
+      ) {
+        throw new BadRequestException(
+          `El lote ${rows[0].codigo_lote} venció el ${vence}: no se puede vender`,
+        );
       }
 
       const disponible = await this.saldoLoteEnUbicacion(

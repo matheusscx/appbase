@@ -24,6 +24,93 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 ---
 
 
+## Sale primero el lote que vence antes, y la venta salta los vencidos (cerrada 2026-10-03)
+
+Sale de [`pendientes.md`](pendientes.md) § 3, "Qué lote o unidad sale de stock".
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **El lote que vence antes sale primero (FEFO)** ✅ *(owner, 2026-09-28; antes era pregunta
+  de la § 4)* (backend, `inventario.service.ts`, la selección de `item_lote` … `ORDER BY creado_el
+  ASC LIMIT n FOR UPDATE`). **Cómo se decidió:** la orquestadora le planteó la escena medida —en
+  la misma factura llegan dos cajas de yogur, una vence en enero y otra en junio; se vende uno y
+  hoy el sistema sacó del de **junio** (medido por la API)— con tres opciones: *A: el que vence
+  antes solo cuando llegaron juntos*, *B: siempre el que vence antes* (recomendada: en comida es
+  lo que evita tirar mercadería) y *C: da lo mismo*. Contestó "vamos B".
+  **Lotes sin `fecha_vencimiento`:** salen **después** de los que tienen fecha, y entre ellos por
+  llegada. Lo propuso la orquestadora junto con la B y el owner no lo objetó; si al diseñar
+  aparece un caso que lo contradiga, se le vuelve a preguntar.
+  **Lo que falta al construirlo:** el desempate dentro de la misma fecha de vencimiento (llegada, y
+  después algo estable: `codigo_lote` o la PK); que la venta del POS, que nunca manda qué lote,
+  pase por el orden nuevo; y un e2e que monte el caso del yogur por la API real. ⚠️ Cruza con la
+  entrada de la § 6 *"Serie y lote están a medias"*: el owner ya contestó que un lote vencido
+  **se merma pero no se vende** (la venta lo salta), así que FEFO ordena solo entre los no vencidos. Decide qué lote sale: escribe en
+  `movimientos_inventario` y toca la trazabilidad ([ADR-007](../adr/007-inventario-serie-lote.md)),
+  así que va en su propio frente.
+
+### Qué se decidió al construirlo
+
+- **El traslado sin lote elegido también salta los vencidos** (owner, 2026-10-03, en el selector
+  interactivo: eligió *"Salta vencidos"*, recomendada, por sobre *"Vencido incluido"*; escena: 3
+  yogures vencidos y 20 de junio en la bodega, se mandan 5 al local sin elegir lote). Elegido a
+  mano, el vencido sí viaja: es la salida para moverlo a propósito.
+- **"Vencido" y el día del vencimiento:** se reusó la convención de la vigencia por fecha (spec
+  `2026-08-23-vigencia-por-fecha-design.md`, decisiones 2 y 3) —"hoy" es el día local de la
+  provincia y el borde es inclusivo—, así que el día del vencimiento todavía se vende. Lo que esa
+  convención no contestaba lo destapó la revisión: `dia-negocio.invariant.spec.ts` solo deja leer
+  la hora de reloj a una allowlist. **Vence a medianoche, no a la hora de corte del negocio**
+  (owner, 2026-10-03, en el selector interactivo: eligió *"Medianoche"*, recomendada, por sobre
+  *"Hora de corte"*; escena: bar con corte a las 04:00, yogur que vence el 15, venta a la 01:00
+  del 16). `inventario.service.ts` entró a la allowlist de reloj con ese porqué.
+- **Qué motivos saltan:** `venta` (incluye el ingrediente de una receta) y `traslado`. La merma
+  no, porque el owner ya había dicho que un vencido se merma; el ajuste, el recuento y la compra
+  tampoco, porque no son ventas. Un vencido elegido a mano en una venta es 400 (la decisión
+  *"A: bloquear"* de la § 6).
+- **Desempate:** día de vencimiento → llegada (`creado_el`) → `codigo_lote` → `lote_id`. Dos
+  lotes de la misma factura empatan en `creado_el` (misma transacción), así que el código es el
+  que decide en el caso del yogur con la misma fecha; la PK cierra un orden total, que es el
+  orden de los `FOR UPDATE`.
+
+### Qué se hizo
+
+`moverLote` (`inventario.service.ts`), rama de salida:
+
+- La auto-selección lockea **el mismo conjunto de siempre** (todos los lotes vivos del ítem) en
+  el orden nuevo y trae `fecha_vencimiento::date::text`. El cast es el de la sesión, el mismo con
+  que se escribió la fecha pura de la pantalla, así que devuelve el día tal como se tipeó.
+- Para `venta` y `traslado`, y solo si algún lote tiene fecha, resuelve "hoy" con
+  `fechaLocalTenant` y descarta los vencidos. El 400 por falta suma lo vencido (*"hay 3 más en
+  lotes vencidos"*). Con `loteId` elegido, la venta rechaza el vencido.
+- "Hoy" va con memo **por transacción** (`hoyLocal`, `WeakMap` sobre el `queryRunner`): una venta
+  con varias líneas en modo lote resolvía la zona una vez por línea. Sin `queryRunner` no hay
+  memo, porque el manager sin transacción vive para siempre y serviría el día de ayer.
+- Los llamadores no cambiaron: la venta del POS, la de salones, la receta y el traslado ya pasaban
+  por la auto-selección sin `loteId`.
+
+### Qué lo fija
+
+- `backend/test/lote-fefo.e2e-spec.ts`, 8 casos por la API real: el yogur (enero sale antes que
+  junio, en la misma factura y con los códigos en contra), el desempate por llegada y por código
+  (cuatro lotes de una misma factura, que empatan en `creado_el`, vendidos de a uno), el sin
+  fecha al final, y el vencido en venta (saltado, 400 con lo vencido, 400 elegido a mano),
+  traslado (saltado sin lote, movido con lote) y merma (sale primero, con el código y el orden
+  de línea en contra).
+- `backend/test/traslados.e2e-spec.ts`, el caso de lotes sin `loteId`, que fijaba el reparto FIFO:
+  reescrito a tres lotes, porque con dos FEFO coincide con FIFO o con LIFO. Pidiendo 7 sale
+  3 + 4, y ni FIFO, ni LIFO, ni el código ascendente, ni el mayor o el menor saldo dan ese
+  reparto (el código descendente sí, y a ese lo caza `lote-fefo`).
+- Mutantes medidos contra esos specs: el `ORDER BY creado_el ASC` de antes tumbó 3 de 8 en
+  `lote-fefo` en las dos corridas medidas (el yogur depende de un empate en `creado_el`, así que
+  ese caso no es determinista bajo el mutante; el de sin fecha sí) y el caso de `traslados`; sin `codigo_lote` en el desempate, 1 (en tres tiradas
+  de tres); `<=` en vez de `<` (el día del vencimiento ya no se vende), 4; `traslado` fuera de
+  los motivos que saltan, 2; `merma` dentro, 1; sin el chequeo del lote elegido, 2; el archivo
+  entero de `main`, 6 de 8 y el caso de `traslados`.
+- `inventario.service.spec.ts`: la forma del `ORDER BY` (que es el orden de los locks), la venta
+  que salta, el mensaje con lo vencido, la merma que se lleva el vencido sin consultar la zona, el
+  rechazo con lote elegido, el memo (sin memo, el test de una sola consulta por transacción cae)
+  y que el día sea el del calendario con un tenant de corte a las 04:00 (con el día de negocio en
+  su lugar, cae).
+
 ## El catálogo se pagina, ordena y busca en el servidor, y los selectores de ítems buscan en el servidor (cerrada 2026-10-03)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Dos entradas se cerraron con el mismo frente. Diseño y
