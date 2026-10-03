@@ -174,8 +174,10 @@ lo comprometido en modo cantidad.
 ## 8. Merma
 
 `POST /mermas` de un producto en modo serie responde 400: *"«Nombre» tiene número de
-serie: dalo de baja desde Ajuste de stock, eligiendo la unidad"*. La pantalla de Mermas deja
-de ofrecer esos productos. Cuando el frente de la § 6 construya la merma con selector, esto
+serie: dalo de baja desde Ajuste de stock, eligiendo la unidad"*. La pantalla de Mermas
+sigue encontrando el producto en su buscador, pero al elegirlo muestra ese mismo aviso y no
+deja registrar. No se lo esconde porque quien busca el celular roto no entendería por qué no
+aparece, y porque el filtro `modoInventario` de `GET /items` solo admite igualdad. Cuando el frente de la § 6 construya la merma con selector, esto
 se reemplaza.
 
 ## 9. Unidades que se pueden vender
@@ -218,7 +220,7 @@ leídas en una consulta por cuenta.
 
 **Detalle de venta.** Ver § 10.
 
-**Mermas.** Sin productos con serie (§ 8).
+**Mermas.** El producto con serie muestra el aviso y no deja registrar (§ 8).
 
 ## 12. Coordinación con los frentes paralelos
 

@@ -212,7 +212,9 @@ antes de cualquier escritura):
 - Modify: `frontend/app/pages/tienda/index.vue` (la llamada a `useCatalogoVenta`, ~13: pasarle
   `filtros: { vendibleOnline: 'true' }`; es lo único que se toca ahí. El composable ya acepta
   `filtros` desde la integración de la paginación, 8b6a8faf)
-- Modify: `frontend/app/pages/mermas.vue` (~122/161: el selector de producto excluye modo serie)
+- Modify: `frontend/app/pages/mermas.vue` (junto a `productoSeleccionado`, ~120): si el
+  producto elegido es `modoInventario === 'serie'`, un `UAlert` con el mismo texto del 400 y
+  el botón Registrar deshabilitado. El `AppItemSelect` y `FILTROS_PRODUCTO` no se tocan
 - Test: `backend/test/venta-serie.e2e-spec.ts` (o un spec propio `tienda-merma-serie.e2e-spec.ts`),
   unit de `online.service.spec.ts` y `mermas.service.spec.ts`
 
