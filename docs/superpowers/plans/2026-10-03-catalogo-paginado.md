@@ -217,6 +217,11 @@ export function compararPorDisponibilidad(
     Burger va antes;
   - `meta.total` es `3`;
   - la consulta del paso 2 recibe `[['r','p-con'], TENANT, UBICACION_LOCAL_ID]`.
+  - **`modoInventario` sigue llegando:** la fila `p-con` del paso 2 trae
+    `modo_inventario: 'serie'`, y `data[1].modoInventario` es `'serie'`. Lo pidió el frente de
+    serie: su `onCatalogoAdd` abre el selector de unidades leyendo ese campo, y si el camino
+    ordenado lo perdiera, nada lo avisaría. Por eso el paso 2 **tiene** que pasar por
+    `baseQuery` + `mapRow`, nunca por un SELECT propio.
 
   ⚠️ El mock no ve la forma del SQL (memoria del repo): este test fija el **armado de la
   página**; el orden real lo fija el e2e de la Tarea 3.
@@ -369,6 +374,9 @@ if (query.modoInventario) {
   - **Aislamiento de tenant.** Con `loginSegundoTenant` (`helpers/segundo-tenant`), `ids=<id
     P101>` devuelve `data: []`.
   - **`modoInventario=cantidad` con `search=${marca}`** devuelve los 105.
+  - **El camino ordenado conserva los campos del listado:** cada fila de
+    `orden=disponibilidad` trae `modoInventario` (`'cantidad'` en estos 105), además de
+    `stockDisponible`. Es la condición del frente de serie (ver Tarea 1, Paso 8).
   - **Sin parámetros nuevos, nada cambia.** `tipo=producto&search=${marca}&pageSize=100`
     devuelve 100 filas ordenadas por nombre puro, con P003 en su lugar alfabético.
 
@@ -398,7 +406,7 @@ export function useCatalogoVenta(opts: {
   tipos: Array<'producto' | 'receta' | 'combo'>
   /**
    * Query extra fijo por pantalla. Lo pidió la orquestadora para el frente de serie: la tienda
-   * va a mandar un filtro propio (nombre a confirmar, p. ej. `vendibleOnline=true`). Ese filtro
+   * manda `vendibleOnline=true`, que deja afuera los productos en modo serie. Ese filtro
    * tiene que vivir en `buildFindAllFilters` para que lo vean los dos caminos de `findAll`.
    */
   filtros?: Record<string, string>
@@ -434,6 +442,8 @@ export function useCatalogoVenta(opts: {
      lleva `page` a 2 y vuelve a pedir.
   7. **Filtros por pantalla:** con `filtros: { vendibleOnline: 'true' }`, el pedido lleva ese
      parámetro además de los fijos.
+  8. **No toca los ítems:** un ítem de la respuesta con `modoInventario: 'serie'` llega igual a
+     `items` (el composable no mapea, y este test lo fija).
 - [ ] **Paso 2:** `npx --prefix $WT/frontend vitest run app/composables/useCatalogoVenta.nuxt.spec.ts`.
   Esperado: FAIL.
 - [ ] **Paso 3: implementar.**
