@@ -326,7 +326,8 @@ con los permisos del módulo y no como admin.
 - El ticket impreso: sigue diciendo "documento interno".
 - Boleta y factura de AR/CO/MX (§ 6 de `pendientes.md`).
 - El motor de precios.
-- El % de anulaciones por garzón.
+- El % de anulaciones por garzón. *(Cerrada el 2026-10-03 como "no corresponde": la nota no toca ese %;
+  ver `resueltos.md`.)*
 - La NC que se emite dos veces al reintentar (§ 6 de `pendientes.md`).
 - El saldo por venta del listado (§ 2 de `pendientes.md`). El `correccion_venta_id` del `REFUND`
   le da al frente del vendido neto el dato que le faltaba para el caso de su D10, pero cambiar esa

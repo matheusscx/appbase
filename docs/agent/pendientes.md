@@ -1155,20 +1155,6 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   el hecho fiscal en la transacción, diferir lo que solo transmite o formatea" de ADR-010, y la
   regla la pone el owner, no el agente.
 
-- [ ] **Las notas de crédito no restan de lo vendido en el % de anulaciones por garzón**
-  (fiscal — **frente propio, con su propia sesión**: `CLAUDE.md` y ADR-010 lo sacan de
-  cualquier tanda de producto o de arrastre de otra tarea; anotado 2026-09-27 al construir el
-  % — spec
-  [`2026-09-27-porcentaje-anulaciones-por-garzon-design.md`](../superpowers/specs/2026-09-27-porcentaje-anulaciones-por-garzon-design.md)
-  § 6). `pedido`/`porcentaje` de `GET /salones/anulaciones/resumen` miden lo vendido como el
-  reparto de las líneas de cuentas **cerradas** cuya venta no está cancelada — una nota de
-  crédito emitida después (`POST /ventas/:id/notas-credito`) no lo toca: el garzón que sirvió
-  un plato devuelto por NC sigue mostrando esa venta como pedido, y su % no baja. Resolverlo
-  exige enlazar `venta_detalles`/`notas_credito` con `cuenta_lineas`/`cuenta_linea_reparto` —el
-  mismo cruce que § 6 de la spec descarta para "lo cobrado en vez de la carta"— y decidir si
-  una NC resta del garzón que vendió originalmente o de quien está en turno cuando se emite,
-  que es una pregunta de negocio, no solo de datos.
-
 - [ ] **Una venta que llega a $0 por un descuento tendría que dejar boleta, y hoy no deja
   ninguna: E6 cita la Res. Ex. SII 60/2023 a medias** (fiscal — **frente propio, con su propia
   sesión**, ADR-010; lo encontró la pasada de investigación que la Sesión de esfuerzo máximo lanzó

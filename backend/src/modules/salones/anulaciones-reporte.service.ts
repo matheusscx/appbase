@@ -502,7 +502,12 @@ export class AnulacionesReporteService {
          -- columna, y recorre el índice entero en vez de saltar directo al
          -- rango del tenant.
          JOIN cuentas c ON c.cuenta_id = cl.cuenta_id AND c.tenant_id = $1 AND c.estado = 'cerrada'
-         -- Una venta cancelada no vendió (spec § 4.2).
+         -- Una venta cancelada no vendió (spec § 4.2). Una nota de crédito
+         -- posterior NO resta, a propósito (owner, 2026-10-03), aunque el
+         -- vendido neto de resumen-negocio y de /ventas sí la reste: el % mide
+         -- lo que el garzón anula o regala antes del cobro; la nota la emite la
+         -- caja después, y también corrige un cambio de boleta a factura, que
+         -- el sistema no distingue de un plato devuelto.
          JOIN ventas v ON v.venta_id = c.venta_id AND v.estado <> 'cancelada' AND v.eliminado_el IS NULL
          -- Garzón SIN filtro de borrado: mismo porqué que JOINS_BASE.
          LEFT JOIN garzones g ON g.garzon_id = r.garzon_id

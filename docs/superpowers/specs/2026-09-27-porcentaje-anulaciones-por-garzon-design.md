@@ -125,7 +125,7 @@ suman el % total.
 | Cuenta **abierta** | ❌ hasta que se cierra | ✅ sus anulaciones ya hechas |
 | Cuenta cancelada (con o sin motivo) | ❌ no vendió nada | ✅ sus anulaciones |
 | Cuenta cerrada cuya venta se **canceló** | ❌ | ✅ |
-| Nota de crédito posterior | **No resta** (§ 6) | — |
+| Nota de crédito posterior | **No resta** (§ 6; decidido el 2026-10-03) | — |
 | Cuenta, mesa o salón borrados después | ✅ ya pasó | ✅ (ya era así) |
 | Garzón dado de baja después | ✅ ya pasó | ✅ (ya era así) |
 
@@ -178,7 +178,8 @@ semánticos, sin lógica en la página, a ancho de teléfono.
 ## 6. Fuera de alcance
 
 - **Las notas de crédito no restan de lo vendido.** Es lo fiscal, que va solo (`CLAUDE.md`, ADR-010).
-  Se anota en `pendientes.md`.
+  Se anota en `pendientes.md`. **Cerrado el 2026-10-03 como *no corresponde*:** el owner decidió que
+  la nota no toca el %, porque mide lo anulado antes del cobro (`resueltos.md`).
 - **Umbrales o semáforo por %**, exportar: ya estaban fuera (spec del reporte § 7).
 - **Lo cobrado en vez de la carta:** descartado por el owner (§ 2). Si se reabre, exige enlazar
   `venta_detalles` con `cuenta_lineas`, que es el registro fiscal de la venta: un frente propio.

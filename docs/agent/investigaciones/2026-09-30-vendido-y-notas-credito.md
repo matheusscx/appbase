@@ -18,7 +18,8 @@ sostienen el patrón se volvieron a abrir en la fuente (Shopify y Toast, abajo).
   `movimientos_caja`, y esa salida **sí** resta en el arqueo de caja. El cobrado y el arqueo del
   mismo día tratan la devolución al revés.
 - El **% de anulaciones por garzón** no la trata de ninguna forma: ya está anotado en `pendientes.md`
-  § 6 como frente fiscal propio.
+  § 6 como frente fiscal propio. *(Cerrado el 2026-10-03 como "no corresponde": el owner decidió que
+  la nota no toca ese %; ver `resueltos.md`.)*
 
 ## Qué hace el mercado
 

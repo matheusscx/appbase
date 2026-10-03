@@ -220,7 +220,8 @@ módulo y no como admin.
 
 ## 6. Fuera de alcance
 
-- El % de anulaciones por garzón (§ 6 de `pendientes.md`).
+- El % de anulaciones por garzón (§ 6 de `pendientes.md`). *(Cerrada el 2026-10-03 como "no corresponde":
+  el owner decidió que la nota no toca ese %; ver `resueltos.md`.)*
 - La NC que se emite dos veces al reintentar (§ 6).
 - El reembolso por pasarela sin NC y el caso de D10 (§ 6, entrada nueva). *(Cerrada por la tarea 14
   de emisión, 2026-10-02: ver D10.)*

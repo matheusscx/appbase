@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-10-03 (producto con serie: la unidad viaja en la línea de la cuenta)
+**Last Updated**: 2026-10-03 (una nota de crédito no toca el % de anulaciones por garzón)
 
 ---
 
@@ -747,9 +747,15 @@ pedido"** (`formatPorcentaje`, `—` con `null`):
 **Qué entra y qué no:** una cuenta abierta no suma a lo vendido hasta que se cierra (sus
 anulaciones ya hechas sí cuentan); una cuenta cancelada (con o sin motivo) no vendió nada,
 pero sus anulaciones sí anulan; una venta cancelada después de cerrar la cuenta saca esas
-líneas de lo vendido; una nota de crédito posterior **no** resta de lo vendido (es fiscal, va
-aparte — ver `pendientes.md`). Cuenta, línea y reparto filtran `eliminado_el IS NULL`; cuenta
-y garzón, cuando el JOIN mira algo que ya pasó, **no** (mismas excepciones deliberadas que el
+líneas de lo vendido; una nota de crédito posterior **no** resta de lo vendido ni entra en lo
+anulado, **a propósito** (owner, 2026-10-03), aunque el vendido neto del Inicio y de
+`/ventas` sí la reste (`PRODUCTO.md`). El % mide lo que el garzón anula o regala antes
+del cobro, y la nota la emite la caja después. Además, la nota no lleva motivo, así que un
+plato devuelto y un cambio de boleta a factura son, para el sistema, la misma cosa. Vale
+para toda nota: devuelva plata o no, reponga stock o no. Lo fija
+`salones-anulaciones-notas-credito.e2e-spec.ts`, y el porqué está escrito en la consulta; el
+detalle de la decisión, en `resueltos.md`. Cuenta, línea y reparto filtran
+`eliminado_el IS NULL`; cuenta y garzón, cuando el JOIN mira algo que ya pasó, **no** (mismas excepciones deliberadas que el
 resto del reporte, con el porqué escrito en la consulta).
 
 **El arreglo `porGarzon` de la respuesta trae a todo garzón con algo vendido o anulado en el
@@ -761,8 +767,7 @@ Orden: por `garzonNombre`, *Sin garzón* al final.
 **Fuera de este frente** (`pendientes.md`): la cortesía como retiro gravado con IVA (fiscal,
 frente propio); el día comercial que cruza la medianoche; los ingredientes/componentes
 borrados del catálogo que se saltean sin movimiento al anular (el costo sale bajo sin marca —
-hueco heredado de la parte 2); y que una nota de crédito reste de lo vendido en este %
-(fiscal, va sola).
+hueco heredado de la parte 2).
 
 **El rol sembrado `Salones · Encargado` lleva `Items:Leer`** (owner, 2026-09-28). Con
 `Operar` llegaba a la mesa y con `Anular` anulaba lo despachado, pero `GET /items` —el catálogo

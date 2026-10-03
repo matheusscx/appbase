@@ -23,6 +23,97 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Una nota de crédito no toca el % de anulaciones por garzón: no corresponde (cerrada 2026-10-03)
+
+Sale de [`pendientes.md`](pendientes.md) § 6. Se cierra **sin cambiar la cuenta**: el owner
+decidió que la nota no entra en el %. La regla viva, en
+[`salones-mesas.md`](../features/salones-mesas.md) § *"El % de anulaciones y cortesías sobre
+lo pedido"* y en [`PRODUCTO.md`](../PRODUCTO.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 6
+
+- [ ] **Las notas de crédito no restan de lo vendido en el % de anulaciones por garzón**
+  (fiscal — **frente propio, con su propia sesión**: `CLAUDE.md` y ADR-010 lo sacan de
+  cualquier tanda de producto o de arrastre de otra tarea; anotado 2026-09-27 al construir el
+  % — spec
+  [`2026-09-27-porcentaje-anulaciones-por-garzon-design.md`](../superpowers/specs/2026-09-27-porcentaje-anulaciones-por-garzon-design.md)
+  § 6). `pedido`/`porcentaje` de `GET /salones/anulaciones/resumen` miden lo vendido como el
+  reparto de las líneas de cuentas **cerradas** cuya venta no está cancelada — una nota de
+  crédito emitida después (`POST /ventas/:id/notas-credito`) no lo toca: el garzón que sirvió
+  un plato devuelto por NC sigue mostrando esa venta como pedido, y su % no baja. Resolverlo
+  exige enlazar `venta_detalles`/`notas_credito` con `cuenta_lineas`/`cuenta_linea_reparto` —el
+  mismo cruce que § 6 de la spec descarta para "lo cobrado en vez de la carta"— y decidir si
+  una NC resta del garzón que vendió originalmente o de quien está en turno cuando se emite,
+  que es una pregunta de negocio, no solo de datos.
+
+### Qué se midió
+
+- **El cruce no existía.** El frente del vendido neto (2026-10-01) resta las notas en
+  `resumen-negocio` agrupando por ítem, y nunca mira `cuenta_lineas` ni el reparto. Una nota
+  nombra `itemId` + cantidad (no la línea de la cuenta), y el resto del monto va a la línea
+  "Ajuste", en plata (con IVA y descuentos). El % está a precio de carta.
+- **La conducta, con un e2e.** La primera versión afirmaba que la nota restaba, y falló: una
+  nota total y una que devuelve el vino dan 201, y el `pedido` del garzón queda en 20.000 y
+  40.000. Después de la decisión, el mismo archivo pasó a afirmar lo contrario.
+- **La entrada sobreafirmaba la dirección.** Dice que *"su % no baja"*, pero con cualquier
+  forma de contar la nota el % del garzón **sube o queda igual**. Si la nota sale de lo
+  vendido, baja el denominador. Si cuenta como anulada, sube el numerador.
+
+### Qué se decidió
+
+✅ **La nota de crédito no toca `pedido` ni `porcentaje`** (owner, 2026-10-03). Se decidió con
+AskUserQuestion, escena de Beto con una cuenta de $50.000 y un plato frío de $10.000 devuelto
+en caja. El owner eligió *"No toca el %"*, que era la recomendada, por sobre *"Sale de lo
+vendido de Beto"* y *"Cuenta como anulado de Beto"*. Antes de preguntar, la "Sesión de
+esfuerzo máximo" hizo el análisis que la sostiene:
+
+- **Qué mide el %:** se modeló sobre el *Void %* de Toast, que mide lo que el garzón anula o
+  regala **antes del cobro**. Después del cobro no se anula, se devuelve, y en Toast son
+  reportes distintos.
+- **Quién actúa:** la nota la emite un usuario desde `/ventas`, no el garzón.
+- **Qué es una nota:** el DTO no lleva motivo. Una nota puede ser un plato devuelto, una
+  rebaja, un descuento tardío o un cambio de boleta a factura, y el sistema no las distingue.
+  Con la nota restando, un garzón perdería venta por un cambio de documento.
+
+**Si algún día se reabre,** el owner contestó también las preguntas condicionales, todas con
+la recomendada:
+
+- resta **a quien sirvió el plato** (el reparto), no a quien está en turno: la nota la emite
+  un cajero y no lleva garzón;
+- una nota o una parte de ella que **no nombra platos** (Ajuste) **no se reparte**;
+- resta **el día de la nota**, como el vendido neto del Inicio (owner, 2026-09-30).
+
+**Vigilar las devoluciones** ("notas de crédito por usuario que las emite") quedó ofrecido
+como cifra aparte. No se abrió como entrada: el owner no lo pidió.
+
+### Qué se hizo
+
+- La consulta de lo vendido (`anulaciones-reporte.service.ts`, `resumen`) lleva escrito el
+  porqué de no restar la nota, para que nadie lo "arregle" como un olvido.
+- Docs: `salones-mesas.md`, `PRODUCTO.md`, `ESTADO.md` y la spec del % (§ 4.2 y § 6) dicen que
+  la nota no entra, y por qué.
+
+### Qué lo fija
+
+- `backend/test/salones-anulaciones-notas-credito.e2e-spec.ts`, con tres tests, que comparan
+  la fila del garzón entera antes y después de la nota:
+  1. una nota total sin nombrar platos (todo Ajuste) no la mueve;
+  2. con una cortesía de por medio (pedido 40.000, 25%), no la mueve la nota que devuelve el
+     vino ni la que acredita el resto;
+  3. tampoco la mueve una nota que **devuelve efectivo** por el pago de la venta y **repone**
+     el vino al stock. Las otras dos van "no vuelve plata" y sin reponer, así que este cierra
+     la variante "solo resta la nota que devolvió algo".
+- **Mutantes medidos:**
+  - sumarle al JOIN de `ventas` un `NOT EXISTS` sobre las correcciones
+    (`venta_referencia_id`), que es la forma más simple del arreglo descartado, rompe los tres
+    tests;
+  - el mismo `NOT EXISTS`, pero solo sobre las correcciones con un movimiento de inventario
+    `devolucion` ("resta la nota que repuso stock"), rompe **exactamente** el 3.
+
+  Los dos están revertidos.
+
+---
+
 
 ## El `loteId` de una unidad con serie tiene que ser un lote vivo de su ítem y su tenant (cerrada 2026-10-03)
 
@@ -3786,7 +3877,9 @@ Tres tareas del mismo plan:
 
 ### Qué quedó afuera
 
-- **Las notas de crédito no restan de lo vendido** (fiscal, va solo — `pendientes.md` § 6).
+- ~~**Las notas de crédito no restan de lo vendido**~~ — cerrada el 2026-10-03 como *no
+  corresponde*: el owner decidió que la nota no toca el % (ver *"Una nota de crédito no toca el
+  % de anulaciones por garzón"*, arriba).
 - ~~**El rol `Salones · Encargado` no puede leer el catálogo de ítems**~~ — cerrada el
   2026-09-28: el owner eligió darle `Items:Leer` (ver *"El rol `Salones · Encargado` puede ver
   el catálogo"*, arriba).

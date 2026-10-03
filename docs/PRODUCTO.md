@@ -534,9 +534,13 @@ precio de carta, y el % es lo anulado sobre lo pedido (vendido + anulado) — nu
 100% ni divide por cero, y un garzón que no anuló nada igual aparece con 0%. La tabla "Por
 garzón" de `/salones/anulaciones` muestra la columna **"% de lo pedido"** (`—` si viene
 `null`). Detalle en [`features/salones-mesas.md`](./features/salones-mesas.md) § *"El % de
-anulaciones y cortesías sobre lo pedido"*. Lo que sigue sin existir: la cortesía como retiro
-gravado con IVA (fiscal, frente propio) y que una nota de crédito reste de lo vendido en este
-% (también fiscal) — `agent/pendientes.md`.
+anulaciones y cortesías sobre lo pedido"*. **Una nota de crédito no toca ese %** (owner,
+2026-10-03), a diferencia del vendido neto del Inicio y de `/ventas`, que sí la restan (más
+abajo, *"Los números de plata del negocio son netos de las notas de crédito"*). El % mide lo
+que el garzón anula o regala antes de cobrar, y la nota la emite la caja después; además,
+también sirve para cambiar una boleta por factura. Lo que sigue sin
+existir: la cortesía como retiro gravado con IVA (fiscal, frente propio) —
+`agent/pendientes.md`.
 
 **Fuera de alcance (fases futuras):** FIFO o método de costeo elegible por tenant, y la
 emisión del **DTE 52** que legaliza un traslado en la vía pública —bodegas y traslados ya
