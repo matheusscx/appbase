@@ -35,6 +35,36 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 
 ---
 
+## ⏸ En pausa: otros países hasta terminar Chile (owner, 2026-10-03)
+
+**Decisión del owner, en sesión, al pedir la § 2:** no se toma nada de Argentina, Colombia ni
+México hasta terminar Chile. No es un "no": es un orden. Las entradas que dependen de otro país
+se quedan escritas y no se toman; cuando Chile esté terminado, se reabren desde acá.
+
+Hoy son tres:
+
+- La de abajo, que estaba en la § 2.
+- **Los 6 decimales del Anexo 20** (México), en la § 3, bajo "Los tres que dejó el frente del
+  redondeo por país".
+- **El frente fiscal de Argentina, Colombia y México**, en la § 6.
+
+- [ ] **El POS de un tenant AR/CO/MX no puede cobrar: su catálogo de tipos de documento llega
+  vacío** (frontend + catálogo; **leído, no corrido**: anotado 2026-10-02 al cerrar el tipo por
+  defecto = boleta, ver [`resueltos.md`](resueltos.md)). De AR/CO/MX el seed solo trae la nota de
+  crédito interna, con `activo = false`, así que `GET /tipos-documento` les devuelve `[]`. La
+  pantalla arranca sin tipo —igual que el servidor, que sin boleta deja la venta sin tipo—, pero
+  `puedeCobrar` (`useVenta.ts`) devuelve `false` sin `tipoDocumentoId`: el botón Cobrar nunca se
+  habilita. Salones no pasa por `puedeCobrar` y sí cierra. Esto no lo causó el arreglo de la boleta:
+  antes, `[0]` de una lista vacía también daba `undefined`. **Medir:** reproducirlo con un tenant de
+  uno de esos países (`POST /admin/tenants` con una provincia AR/CO/MX, caja abierta, un ítem en el
+  carrito). **Si se confirma**, no se arregla de oficio: la pregunta para el owner es **si esos
+  países se soportan hoy** (hoy se opera solo en Chile). Lo fiscal va solo (`CLAUDE.md`).
+  **Lo que alcanzó a medirse antes de la pausa (2026-10-03):** por lectura, `puedeCobrar`
+  (`frontend/app/composables/useVenta.ts`) devuelve `false` sin `tipoDocumentoId`. El
+  `GET /tipos-documento` vacío del tenant nuevo **no se corrió**.
+
+---
+
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
 Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrada: ninguna
@@ -104,18 +134,6 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
-- [ ] **El POS de un tenant AR/CO/MX no puede cobrar: su catálogo de tipos de documento llega
-  vacío** (frontend + catálogo; **leído, no corrido**: anotado 2026-10-02 al cerrar el tipo por
-  defecto = boleta, ver [`resueltos.md`](resueltos.md)). De AR/CO/MX el seed solo trae la nota de
-  crédito interna, con `activo = false`, así que `GET /tipos-documento` les devuelve `[]`. La
-  pantalla arranca sin tipo —igual que el servidor, que sin boleta deja la venta sin tipo—, pero
-  `puedeCobrar` (`useVenta.ts`) devuelve `false` sin `tipoDocumentoId`: el botón Cobrar nunca se
-  habilita. Salones no pasa por `puedeCobrar` y sí cierra. Esto no lo causó el arreglo de la boleta:
-  antes, `[0]` de una lista vacía también daba `undefined`. **Medir:** reproducirlo con un tenant de
-  uno de esos países (`POST /admin/tenants` con una provincia AR/CO/MX, caja abierta, un ítem en el
-  carrito). **Si se confirma**, no se arregla de oficio: la pregunta para el owner es **si esos
-  países se soportan hoy** (hoy se opera solo en Chile). Lo fiscal va solo (`CLAUDE.md`).
-
 - [ ] **El pre-commit rechaza un recibo de revisión escrito sobre el mismo diff** (harness). Dos
   sesiones lo vieron el 2026-09-27, las dos desde un worktree (la del aviso sin costo de la
   varianza y la del aviso del login). Escribieron el recibo con el comando que imprime el hook, en
@@ -184,6 +202,12 @@ destapa una decisión que no es mía).
       `recibo.diff` (recibo en forma vieja o ausente) o trae su hash. Probado a mano con el
       script, en cuatro casos y con el hook de `main` como control, que la dejaba en el
       worktree.
+  - **Triage del 2026-10-03: ningún caso nuevo del fenómeno.** En
+    `.git/verify-feature-rechazos/` hay tres rechazos del 2026-10-02. Uno no tenía recibo. En los
+    otros dos (`20261002-024800-…` y `20261002-184441-…`, worktree `sad-dubinsky-6b3af5`),
+    `recibo.diff` traía su propio hash, pero era el diff de un commit **anterior**: 11 archivos
+    contra 21 en el primero y 13 contra 14 en el segundo, con conjuntos distintos. Es el rechazo
+    normal de "falta la revisión de este diff", y la instrumentación lo separó bien.
 
 - [ ] **`uq_item_grupo_vivo` todavía da 500 en dos caminos del `PATCH`/`POST` de un ítem**
   (backend, `ItemsService.asociarGruposModificadores`; **leído, no corrido**: lo vio la revisión de
@@ -627,7 +651,7 @@ es exactamente lo que ese frente acababa de hacer.
 Los dos primeros ya están en [`resueltos.md`](resueltos.md). **Sigue abierto el tercero**, que es
 fiscal y va solo:
 
-- [ ] **Los 6 decimales del Anexo 20 no entran en las columnas.** El tenant mexicano nace con
+- [ ] **Los 6 decimales del Anexo 20 no entran en las columnas.** ⏸ *En pausa hasta terminar Chile (ver arriba).* El tenant mexicano nace con
   `escalaCalculo: 4` porque toda columna de plata de `venta_detalles` es `NUMERIC(18,4)` y con
   `'documento'` las líneas se persisten **sin cuantizar**: con escala 6 el recorte lo
   terminaría decidiendo el cast de Postgres, fuera del modo de redondeo del tenant. El SAT
@@ -1663,6 +1687,8 @@ plazo es agregarle una dimensión, no una rama.
 ⛔ **Toca el motor de precios: va solo y con el sistema quieto** (`CLAUDE.md`).
 
 ### El frente fiscal de Argentina, Colombia y México — documentos tributarios e impuestos de sistema (agendado 2026-09-03)
+
+⏸ **En pausa hasta terminar Chile** (owner, 2026-10-03; ver la sección del principio).
 
 ℹ️ **Vino de la § 4**, donde entró el 2026-09-03 como pregunta al owner y salió el mismo día:
 el owner contestó que **los tres países van a emitir de verdad, progresivamente**, y el
