@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { entrarComo } from '../support/ui'
 
 /**
  * El menú de Configuración agrupado, montado en el navegador.
@@ -9,8 +10,6 @@ import { test, expect, type Page } from '@playwright/test'
  * superadmin y pasa `can()` sin esperarlos— vea sus grupos tras un F5, y que con el ancho
  * de la columna ninguna etiqueta se corte.
  */
-
-const ENCARGADO_SALON = { email: 'encargado.salon@paris.cl', password: 'admin' }
 
 /** El `<nav>` de Configuración, no el del menú lateral: es el único con un link "Perfil". */
 function menuConfiguracion(page: Page) {
@@ -45,13 +44,7 @@ test.describe('rol del tenant con permisos parciales', () => {
   test.use({ storageState: { cookies: [], origins: [] } })
 
   test('el encargado del salón ve Perfil, Items y su grupo, aun después de un F5', async ({ page }) => {
-    await page.goto('/login', { waitUntil: 'networkidle' })
-    await page.getByPlaceholder('tu@email.com').fill(ENCARGADO_SALON.email)
-    await page.locator('input[type="password"]').first().fill(ENCARGADO_SALON.password)
-    const submit = page.locator('button[type="submit"]').first()
-    await expect(submit).toBeEnabled()
-    await submit.click()
-    await page.waitForURL(url => url.pathname === '/')
+    await entrarComo(page, 'encargado.salon@paris.cl')
 
     // Entrada en frío: el menú se monta antes de que lleguen los permisos.
     await page.goto('/configuracion/perfil')
