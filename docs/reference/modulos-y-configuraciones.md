@@ -121,18 +121,47 @@ Se edita en Preferencias. Detalle: [motor-calculo-precios](../features/motor-cal
 
 ## 3. Pantallas de configuración (`/configuracion/*`)
 
-### Cuenta y organización
+El menú de `configuracion.vue` agrupa las pantallas **por lo que configuran**, en el orden en
+que se arma un local (owner, 2026-10-02, en el selector interactivo). Cada entrada lleva su
+propio gate —la columna *Quién*, que es también la condición del link— y un grupo sin
+entradas visibles no muestra el encabezado: un no-admin con solo `Salones:Leer` ve Mi cuenta
+y Restaurante, nada más. Las ubicaciones que no son obvias son decisiones, no descuidos; el
+owner eligió cada una en el selector, y la razón es la de la opción elegida:
+
+- **Propinas e Impresoras van en Restaurante** aunque un mostrador sin mesas las use: el
+  reparto de propinas es entre garzones y cocina, y la impresora principal es la de comanda.
+- **Pasarelas va con Métodos de pago en Cobros**, no en Precios: Precios es cuánto vale lo
+  vendido; Cobros, cómo se paga.
+- **Las dos "Motivos de diferencia"** se distinguen por el grupo (Caja / Inventario); el
+  título de la pantalla de inventario sigue diciendo "(inventario)".
+
+Suma: Mi cuenta 1 + Organización 4 + Catálogo 3 + Precios 6 + Cobros 2 + Caja 2 + Inventario 4
++ Restaurante 5 = las 27 entradas del menú plano anterior, cada una una vez.
+
+### Mi cuenta
 
 | Pantalla | Quién | Qué se configura |
 |---|---|---|
 | **Perfil** | Todo usuario | Nombre, apellido, teléfono, correo; tema (claro/oscuro) y filas por página (10/15/25/50); contraseña; PIN propio si está vinculado a un garzón |
-| **Roles y permisos** | Admin | Roles (nombre, descripción) y matriz de permisos por módulo contratado |
-| **Usuarios** | Admin | Alta por invitación, roles por miembro, flag "tótem compartido", baja (decidiendo qué pasa con el garzón vinculado) |
+
+### Organización
+
+| Pantalla | Quién | Qué se configura |
+|---|---|---|
 | **Empresa** | Admin | Nombre, correo, teléfono, dirección, provincia, hora de corte |
 | **Razones sociales** | Admin | Entidades legales: nombre legal, RUT, dirección, teléfono, habilitada, preferida |
-| **Monedas** | Admin | Monedas habilitadas y valor del día (la oficial viene del país) |
+| **Usuarios** | Admin | Alta por invitación, roles por miembro, flag "tótem compartido", baja (decidiendo qué pasa con el garzón vinculado) |
+| **Roles y permisos** | Admin | Roles (nombre, descripción) y matriz de permisos por módulo contratado |
 
-### Finanzas y precios
+### Catálogo
+
+| Pantalla | Quién | Qué se configura |
+|---|---|---|
+| **Items** | `Items:Leer` | Catálogo completo (tipo, precio, moneda, categoría, impuestos, modo de inventario cantidad/serie/lote, recetas, combos, modificadores, frecuencia de suscripción) |
+| **Categorías** | Admin | Nombre, aplica a productos/servicios/ambos, impresora de comanda, activa |
+| **Grupos de modificadores** | Admin | Grupos reutilizables de opciones (ítem, cantidad, unidad, precio extra) y overrides por receta |
+
+### Precios
 
 | Pantalla | Quién | Qué se configura |
 |---|---|---|
@@ -141,38 +170,46 @@ Se edita en Preferencias. Detalle: [motor-calculo-precios](../features/motor-cal
 | **Descuentos** | Admin | Reglas: tipo (`directo`, `metodo_pago`, `pronto_pago`, `por_mayor`, `por_monto_venta`), nivel línea/venta, porcentaje o monto fijo, valor único o por tramos, métodos de pago, vigencia |
 | **Recargos** | Admin | Reglas: tipo (`general`, `mora`, `recargo_metodo_pago`, `interes_simple`, `interes_compuesto`, `recargo_por_monto_venta`), mismo esquema que descuentos |
 | **Promociones** | Admin | Tipo `porcentaje` / `nxm` / `precio_fijo`; fechas, horario, días de la semana, canal (físico/online/ambos), alcance (ítems, categoría, venta) |
-| **Métodos de pago** | Admin | Por método: habilitado, permite vuelto, quién emite el documento (`sistema`/`maquina`/`nadie`). Por tenant: `facturador` |
-| **Pasarelas** | `Pasarelas:*` | Pasarela, ambiente (pruebas/producción), modo (mall/individual), códigos de comercio, prioridad, activo; API keys |
+| **Monedas** | Admin | Monedas habilitadas y valor del día (la oficial viene del país) |
 
-### Catálogo e inventario
+### Cobros
 
 | Pantalla | Quién | Qué se configura |
 |---|---|---|
-| **Items** | `Items:*` | Catálogo completo (tipo, precio, moneda, categoría, impuestos, modo de inventario cantidad/serie/lote, recetas, combos, modificadores, frecuencia de suscripción) |
-| **Categorías** | Admin | Nombre, aplica a productos/servicios/ambos, impresora de comanda, activa |
-| **Grupos de modificadores** | Admin | Grupos reutilizables de opciones (ítem, cantidad, unidad, precio extra) y overrides por receta |
-| **Ubicaciones** | Admin | El local (único, predefinido) y las bodegas |
-| **Motivos de baja** | Admin | Nombre, tipo (`merma`/`cortesia`/`no_elaborado`), activo; los fijos no se editan |
-| **Motivos de diferencia (inventario)** | Admin | Motivos de descuadre de recuento |
-| **Motivos de traslado** | Admin | Motivos de traslado entre ubicaciones |
-| **Stock mínimo** (`/inventario/stock-minimo`) | `Inventario:Leer/Actualizar` | Mínimo por ítem y ubicación, para el aviso de stock bajo |
+| **Métodos de pago** | Admin | Por método: habilitado, permite vuelto, quién emite el documento (`sistema`/`maquina`/`nadie`). Por tenant: `facturador` |
+| **Pasarelas** | `Pasarelas:Leer` | Pasarela, ambiente (pruebas/producción), modo (mall/individual), códigos de comercio, prioridad, activo; API keys |
 
 ### Caja
 
 | Pantalla | Quién | Qué se configura |
 |---|---|---|
-| **Cajas** | `Cajas:*` (arqueo ciego: Admin) | Cajones (nombre, activo, usuarios habilitados) y arqueo ciego |
+| **Cajas** | `Cajas:Leer` (arqueo ciego: Admin) | Cajones (nombre, activo, usuarios habilitados) y arqueo ciego |
 | **Motivos de diferencia** | Admin | Motivos de descuadre de caja: nombre, activo, requiere comentario |
+
+### Inventario
+
+| Pantalla | Quién | Qué se configura |
+|---|---|---|
+| **Ubicaciones** | Admin | El local (único, predefinido) y las bodegas |
+| **Motivos de baja** | Admin | Nombre, tipo (`merma`/`cortesia`/`no_elaborado`), activo; los fijos no se editan |
+| **Motivos de diferencia** | Admin | Motivos de descuadre de recuento |
+| **Motivos de traslado** | Admin | Motivos de traslado entre ubicaciones |
+
+**Stock mínimo** (mínimo por ítem y ubicación, para el aviso de stock bajo) no está en este
+menú: vive en `/inventario/stock-minimo`, en el grupo Inventario del menú lateral (§1).
 
 ### Restaurante
 
 | Pantalla | Quién | Qué se configura |
 |---|---|---|
-| **Salones** | `Salones:*` | Salones y mesas: forma, tamaño, posición en el plano |
-| **Garzones** | `Salones:*` o `Propinas:*` | Nombre, tipo (garzón/cocina/barra), activo, usuario vinculado, PIN de 6 dígitos, permiso de operar |
-| **Turnos** | `Salones:*` | Nombre, hora de inicio y fin, activo |
-| **Impresoras** | `Impresoras:*` | Rol (comanda/boleta), conexión red (host, puerto) o sistema (cola), activo |
-| **Propinas** | `Propinas:Leer` / `Configurar` | % sugerido, habilitada en POS y en salones; grupos de reparto (tipo, %, criterio, base de ventas, miembros y pesos) |
+| **Salones** | `Salones:Leer` | Salones y mesas: forma, tamaño, posición en el plano |
+| **Garzones** | `Salones:Leer` | Nombre, tipo (garzón/cocina/barra), activo, usuario vinculado, PIN de 6 dígitos, permiso de operar |
+| **Turnos** | `Salones:Leer` | Nombre, hora de inicio y fin, activo |
+| **Propinas** | `Propinas:Leer` o `Propinas:Configurar` | % sugerido, habilitada en POS y en salones; grupos de reparto (tipo, %, criterio, base de ventas, miembros y pesos) |
+| **Impresoras** | `Impresoras:Leer` | Rol (comanda/boleta), conexión red (host, puerto) o sistema (cola), activo |
+
+El listado de garzones (`GET /garzones`) también lo lee quien tiene `Propinas:Leer` —el
+reparto los necesita—, pero el link del menú pide `Salones:Leer`.
 
 Los criterios de reparto de propinas son `PARTES_IGUALES`, `VENTAS_NETAS`,
 `HORAS_TRABAJADAS`, `CANTIDAD_CUENTAS` y `MANUAL` (por pesos o por montos).

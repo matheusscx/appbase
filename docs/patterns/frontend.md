@@ -27,12 +27,22 @@ archivo real para copiar/adaptar.
 
 ## 1. Navegación
 
-Agregar el item al computed `navItems` de `app/pages/configuracion.vue` (dentro del
-bloque `permissionsStore.esAdmin` si es solo admin):
+Una pantalla de configuración va a **su grupo** en `navItems` de
+`app/pages/configuracion.vue`, con su propio gate delante: `admin &&` si es solo admin,
+`lee('Modulo') &&` si la abre el permiso de lectura del módulo.
 
 ```typescript
-{ label: 'Monedas', icon: 'i-lucide-dollar-sign', to: '/configuracion/monedas' }
+admin && { label: 'Monedas', icon: 'i-lucide-dollar-sign', to: '/configuracion/monedas' }
 ```
+
+Los grupos son por lo que la pantalla configura, no por el permiso que la gatea: Mi cuenta,
+Organización, Catálogo, Precios, Cobros, Caja, Inventario, Restaurante, en el orden en que se
+arma un local (owner, 2026-10-02, en el selector interactivo). El árbol y el porqué de las
+ubicaciones que no son obvias (Propinas e Impresoras en Restaurante, Pasarelas en Cobros):
+[modulos-y-configuraciones](../reference/modulos-y-configuraciones.md) § 3.
+Un grupo sin entradas visibles no se dibuja: se filtra en el computed, porque
+`UNavigationMenu` dibuja el encabezado y el separador aunque la lista llegue vacía.
+`pages/configuracion.nuxt.spec.ts` fija el árbol y el gate de cada entrada.
 
 Pantallas CRUD simples pueden usar `app/components/crud/` (`CrudPageHeader`,
 `CrudTable`, `CrudListItem`, `CrudModal`) — ver `DESIGN-SYSTEM.md` § Componentes CRUD

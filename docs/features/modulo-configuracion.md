@@ -134,7 +134,7 @@ Solo `JwtAuthGuard` — sin RBAC, sin tenant context. El `userId` viene del payl
 
 ### Pages
 
-- `pages/configuracion.vue` — página única con dos secciones
+- `pages/configuracion.vue` — menú de Configuración agrupado por lo que configura (árbol y gates: [modulos-y-configuraciones](../reference/modulos-y-configuraciones.md) § 3)
 
 ### Components
 

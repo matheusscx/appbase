@@ -1,7 +1,7 @@
 /**
  * Corta el acceso a las pantallas cuyo backend exige `TenantAdminGuard`.
  *
- * Va **además** de esconderlas del menú (`configuracion.vue` ya las agrupa bajo
+ * Va **además** de esconderlas del menú (`configuracion.vue` gatea cada una con
  * `esAdmin`): sin guard de ruta, escribir la URL a mano abre la pantalla igual
  * —la lectura de esos endpoints es abierta, así que la tabla carga— y el
  * usuario descubre que no puede escribir recién al recibir un 403 del backend.
