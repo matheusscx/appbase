@@ -2078,6 +2078,16 @@ enterarse tarde. Esta sección se abre al encarar el paso a producción. Orden =
 
 ## Vigilancia — evaluado y descartado, no es trabajo
 
+- [ ] **La salida de un lote elegido a mano busca el lote sin `tenant_id` en el SQL, y se deja
+  así** (backend, `InventarioService.moverLote`, la rama con `loteId` explícito; lo marcó el frente
+  "loteId de otro tenant", 2026-10-03, y lo leyó la orquestadora). La consulta filtra
+  `lote_id + item_id + eliminado_el` y el tenant se compara **después**, en JS (*"El lote no
+  pertenece al tenant"*). Esa rama es inalcanzable por la API: el ítem ya llega validado como del
+  tenant, y un lote de ese ítem no puede ser de otro tenant desde que la entrada valida el
+  `loteId` (`fb76972d`). Sumar `tenant_id` al `WHERE` no cambia ninguna respuesta. **Se reabre**
+  si aparece un camino que llame a `moverLote` con un `itemId` que no pasó por la validación del
+  tenant.
+
 - [ ] **El arqueo de `caja/apertura-cierre.spec.ts:107` mostró `-$10.000` una vez: se sacó
   del backlog** (frontend, e2e de navegador; visto el 2026-09-29, medido el mismo día, **sacado
   por el owner el 2026-09-30** porque salió una sola vez). El test abre con `$10.000`, cuenta
