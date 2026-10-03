@@ -2836,6 +2836,26 @@ describe('ItemsService', () => {
       expect(itemVivo).toBeLessThan(updateItems);
     });
 
+    it('con `gruposModificadores` toma el ítem vivo `FOR NO KEY UPDATE`, no `FOR KEY SHARE`', async () => {
+      // Dos ediciones de solo grupos no escriben `items`: sin este lock nada las
+      // ordenaba y la segunda chocaba con `uq_item_grupo_vivo` (e2e
+      // `grupos-modificadores-overrides`, test 17).
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }]) // SELECT existente
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // lock sobre el ítem vivo
+        .mockResolvedValueOnce([]); // asociaciones vivas: ninguna
+
+      await service.update(TENANT, USUARIO, ITEM_ID, {
+        gruposModificadores: [],
+      });
+
+      const lockItem = managerMock.query.mock.calls
+        .map((c: unknown[]) => c[0] as string)
+        .find((sql) => sql.includes('SELECT 1 FROM items'));
+      expect(lockItem).toContain('FOR NO KEY UPDATE');
+      expect(lockItem).not.toContain('FOR KEY SHARE');
+    });
+
     it('si el `FOR KEY SHARE` no devuelve filas, tira NotFoundException', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }]) // SELECT existente

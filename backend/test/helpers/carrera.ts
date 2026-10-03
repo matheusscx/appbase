@@ -13,11 +13,18 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * todas las de la base dejaba pasar el test con esperas ajenas, sin que los
  * pedidos hubieran llegado a la compuerta. El test afirma el número, porque
  * con menos no hubo carrera y mediría el camino en serie.
+ *
+ * `escalonarMs` dispara los pedidos en orden, con esa pausa entre uno y otro,
+ * para las carreras donde importa quién llega primero a la compuerta: sin
+ * ella, disparados juntos, el segundo puede terminar antes de que el primero
+ * llegue (medido el 2026-10-03 en `borrado-item-concurrente`: 6 o 7 de 13 en
+ * rojo, con `esperando: 0`).
  */
 export async function correrCarrera<T>(
   ds: DataSource,
   compuerta: [string, unknown[]],
   pedidos: (() => Promise<T>)[],
+  { escalonarMs }: { escalonarMs?: number } = {},
 ): Promise<{ esperando: number; respuestas: T[] }> {
   const qr = ds.createQueryRunner();
   try {
@@ -30,7 +37,11 @@ export async function correrCarrera<T>(
       `SELECT pg_backend_pid() AS pid`,
     );
 
-    const enCurso = pedidos.map((p) => p());
+    const enCurso: Promise<T>[] = [];
+    for (const [i, p] of pedidos.entries()) {
+      if (i > 0 && escalonarMs !== undefined) await dormir(escalonarMs);
+      enCurso.push(p());
+    }
     await dormir(800);
     const [{ n }] = await ds.query<{ n: number }[]>(
       `WITH RECURSIVE frenadas AS (

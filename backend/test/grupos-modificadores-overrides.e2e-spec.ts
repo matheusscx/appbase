@@ -744,4 +744,96 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
     expect(res.status).toBe(400);
     expect(await overridesVivos(itemGrupoId)).toHaveLength(0);
   });
+
+  const asociacionesVivas = (itemId: string) =>
+    ds.query<{ item_grupo_id: string }[]>(
+      `SELECT item_grupo_id FROM item_grupos_modificadores
+        WHERE item_id = $1 AND grupo_modificador_id = $2 AND eliminado_el IS NULL`,
+      [itemId, grupoProteinaId],
+    );
+
+  const asociarProteina = (itemId: string, grupoModificadorId: string) => () =>
+    request(app.getHttpServer())
+      .patch(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ gruposModificadores: [{ grupoModificadorId, min: 1, max: 1 }] })
+      .then((r) => r);
+
+  it('15. reenviar en mayúsculas un grupo ya asociado edita la asociación, no da 500', async () => {
+    const { recetaId, itemGrupoId } = await recetaConProteinaSinOverride();
+
+    const res = await asociarProteina(
+      recetaId,
+      grupoProteinaId.toUpperCase(),
+    )();
+
+    expect(res.status).toBe(200);
+    expect(await asociacionesVivas(recetaId)).toEqual([
+      { item_grupo_id: itemGrupoId },
+    ]);
+  });
+
+  it('16. el mismo grupo dos veces, una en mayúsculas, es 400 y no 500', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Hamburguesa Doble Grupo OV E2E ${Date.now()}`,
+        precioBase: '3500',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panBaseId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        gruposModificadores: [
+          { grupoModificadorId: grupoProteinaId, min: 1, max: 1 },
+          { grupoModificadorId: grupoProteinaId.toUpperCase(), min: 1, max: 1 },
+        ],
+      });
+
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toContain(
+      'Un grupo no puede asociarse dos veces',
+    );
+  });
+
+  it('17. dos PATCH en carrera que solo asocian el mismo grupo dejan UNA asociación', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Hamburguesa Sin Grupo OV E2E ${Date.now()}`,
+        precioBase: '3500',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panBaseId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+      });
+    expect(res.status).toBe(201);
+    const recetaId = (res.body as ItemResponse).id;
+
+    const { esperando, respuestas } = await correrCarrera(
+      ds,
+      [`SELECT 1 FROM items WHERE item_id = $1 FOR UPDATE`, [recetaId]],
+      [
+        asociarProteina(recetaId, grupoProteinaId),
+        asociarProteina(recetaId, grupoProteinaId),
+      ],
+    );
+
+    expect(esperando).toBe(2);
+    expect(respuestas.map((r) => r.status)).toEqual([200, 200]);
+    expect(await asociacionesVivas(recetaId)).toHaveLength(1);
+  });
 });

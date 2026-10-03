@@ -2088,10 +2088,19 @@ export class ItemsService {
       // `aplicarDesfases` toma esa fila y después `items` `FOR UPDATE`
       // (docs/patterns/backend.md §15). `KEY SHARE` no choca con el `UPDATE
       // items` de otra edición del mismo ítem, sí con el `FOR UPDATE`.
+      //
+      // Con `gruposModificadores`, `NO KEY UPDATE` (el lock del `UPDATE items`):
+      // dos ediciones que solo traen grupos no escriben `items`, así que nada
+      // las ordenaba; las dos leían "grupo sin asociar" y la segunda chocaba
+      // con `uq_item_grupo_vivo` (500).
+      const lockItem =
+        dto.gruposModificadores !== undefined
+          ? 'FOR NO KEY UPDATE'
+          : 'FOR KEY SHARE';
       const itemVivo: unknown[] = await manager.query(
         `SELECT 1 FROM items
           WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
-          FOR KEY SHARE`,
+          ${lockItem}`,
         [itemId, tenantId],
       );
       if (!itemVivo.length) throw new NotFoundException('Item no encontrado');
@@ -7357,7 +7366,13 @@ export class ItemsService {
     const gruposEntrantes = new Set<string>();
     let convertir: ConvertirUnidad | undefined;
     let orden = 0;
-    for (const g of grupos) {
+    // `@IsUUID()` acepta mayúsculas y Postgres devuelve los ids en minúsculas:
+    // sin normalizar, un grupo ya asociado no se encuentra en el mapa (ni un
+    // repetido en `vistos`) y el `INSERT` choca con `uq_item_grupo_vivo` (500).
+    for (const g of grupos.map((g) => ({
+      ...g,
+      grupoModificadorId: g.grupoModificadorId.toLowerCase(),
+    }))) {
       if (vistos.has(g.grupoModificadorId)) {
         throw new BadRequestException(
           'Un grupo no puede asociarse dos veces al mismo item',

@@ -152,33 +152,19 @@ destapa una decisión que no es mía).
     contra 21 en el primero y 13 contra 14 en el segundo, con conjuntos distintos. Es el rechazo
     normal de "falta la revisión de este diff", y la instrumentación lo separó bien.
 
-- [ ] **`uq_item_grupo_vivo` todavía da 500 en dos caminos del `PATCH`/`POST` de un ítem**
-  (backend, `ItemsService.asociarGruposModificadores`; **leído, no corrido**: lo vio la revisión de
-  seguridad del cierre de los índices de overrides, 2026-10-02). Es el mismo molde que se cerró en
-  ese frente (ver [`resueltos.md`](resueltos.md)), pero sobre la asociación receta↔grupo:
-  - **Un `grupoModificadorId` en mayúsculas.** `@IsUUID()` lo acepta. El mapa de grupos ya
-    asociados tiene las claves en minúsculas (vienen de Postgres), así que el grupo no se encuentra,
-    se intenta un `INSERT` y choca con el índice. Con `[x, X]` en el mismo pedido también se saltea
-    el chequeo de repetidos (`vistos`).
-  - **Dos `PATCH` simultáneos que solo traen `gruposModificadores` y agregan el mismo grupo.** No
-    hay `UPDATE items` ni otro lock que los ordene, así que el segundo `INSERT` choca. Si el pedido
-    trae otro campo, el `UPDATE items` los ordena.
-  **Medir:** reproducir los dos casos con un e2e (el de la carrera, con `test/helpers/carrera.ts`).
-  Si dan 500, el arreglo sale del mismo molde: normalizar el id o devolver 400, y tomar un lock
-  que ordene.
-
-- [ ] **`borrado-item-concurrente.e2e-spec.ts` cuenta las esperas de toda la base, no las de su
-  compuerta** (test; anotado 2026-10-02 por la revisión del cierre de los índices de overrides).
-  Su `correrCarrera` local afirma `esperando: 2` contando cada sesión con `wait_event_type = 'Lock'`
-  en la base. Una espera ajena puede completar el 2 sin que los pedidos hayan llegado a la
-  compuerta. Su encabezado lo acota a "rojo falso, nunca verde falso" porque cada test afirma
-  además status o filas; lo que no se midió es si en los 13 esas afirmaciones distinguen la carrera
-  del camino en serie. `test/helpers/carrera.ts`
-  cuenta solo las sesiones que frena la compuerta (con `pg_blocking_pids`, también las
-  transitivas). **Medir:** migrar los 13 casos a ese conteo y confirmar que siguen dando 2. El
-  contrato no es el mismo: la copia local escalona los disparos 800 ms y llama por `fetch` al
-  puerto real, así que hay que ver si el helper necesita esas dos cosas o si los tests no dependen
-  de ellas.
+- [ ] **Un `grupoOpcionId` en mayúsculas en el `PATCH`/`POST` de un ítem da un 400 que miente:
+  "no pertenece al grupo asociado"** (backend, `ItemsService.upsertOverridesDeGrupo`; **leído, no
+  corrido**: lo vio la revisión del cierre de `uq_item_grupo_vivo`, 2026-10-03). Es el gemelo de
+  ese cierre (ver [`resueltos.md`](resueltos.md)): ahí el `grupoModificadorId` se pasa a
+  minúsculas, pero las opciones del mismo grupo no. `pertenecePorOpcion` tiene las claves como
+  vienen de Postgres, así que una opción en mayúsculas no se encuentra aunque sea del grupo. No da
+  500. Un cliente que manda el grupo en mayúsculas probablemente manda también las opciones, y
+  ahora pasa el grupo y rebota en la opción. Lo mismo vale para un ingrediente en mayúsculas
+  (leído: `filas.get` no lo encuentra; medido solo repetido, `[x, X]`, que da 400). El repo ya
+  resuelve esto en otro lado con `aliasarCasingDeIds` (`items.service.ts`, junto a
+  `cargarBasePorIds`). **Medir:** reproducir el 400 de la opción con
+  un e2e, y listar los ids del `PATCH`/`POST` de un ítem que se comparan contra ids de Postgres
+  antes de decidir si se normaliza por campo o en un solo lugar.
 
 ## 3. Ya decidido, falta construir
 

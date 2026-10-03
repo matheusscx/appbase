@@ -24,6 +24,101 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 ---
 
 
+## `uq_item_grupo_vivo` ya no da 500 en el `PATCH`/`POST` de un ítem (cerrada 2026-10-03)
+
+Sale de [`pendientes.md`](pendientes.md) § 2.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **`uq_item_grupo_vivo` todavía da 500 en dos caminos del `PATCH`/`POST` de un ítem**
+  (backend, `ItemsService.asociarGruposModificadores`; **leído, no corrido**: lo vio la revisión de
+  seguridad del cierre de los índices de overrides, 2026-10-02). Es el mismo molde que se cerró en
+  ese frente (ver [`resueltos.md`](resueltos.md)), pero sobre la asociación receta↔grupo:
+  - **Un `grupoModificadorId` en mayúsculas.** `@IsUUID()` lo acepta. El mapa de grupos ya
+    asociados tiene las claves en minúsculas (vienen de Postgres), así que el grupo no se encuentra,
+    se intenta un `INSERT` y choca con el índice. Con `[x, X]` en el mismo pedido también se saltea
+    el chequeo de repetidos (`vistos`).
+  - **Dos `PATCH` simultáneos que solo traen `gruposModificadores` y agregan el mismo grupo.** No
+    hay `UPDATE items` ni otro lock que los ordene, así que el segundo `INSERT` choca. Si el pedido
+    trae otro campo, el `UPDATE items` los ordena.
+  **Medir:** reproducir los dos casos con un e2e (el de la carrera, con `test/helpers/carrera.ts`).
+  Si dan 500, el arreglo sale del mismo molde: normalizar el id o devolver 400, y tomar un lock
+  que ordene.
+
+### Qué se midió
+
+Los dos caminos, con un e2e cada uno, daban 500 por `uq_item_grupo_vivo`: el `PATCH` que reenvía
+en mayúsculas un grupo ya asociado, el `POST` con `[x, X]`, y dos `PATCH` en carrera que solo
+asocian el mismo grupo (`[500, 200]` con `esperando: 2`, o sea carrera de verdad).
+
+### Qué se hizo
+
+- **`asociarGruposModificadores` pasa el `grupoModificadorId` a minúsculas** antes de buscarlo en
+  el mapa de asociaciones vivas y en `vistos`. Así el grupo ya asociado se edita y el repetido es
+  400.
+- **El lock del ítem vivo en `update()` es `FOR NO KEY UPDATE` si el pedido trae
+  `gruposModificadores`** (`FOR KEY SHARE` si no). Es el mismo lock que toma el `UPDATE items`, así
+  que dos ediciones de solo grupos se ordenan como ya se ordenaban las que traen otro campo, y la
+  segunda ve la asociación que insertó la primera. Va en el mismo lugar que el `KEY SHARE`, así que
+  el orden de locks contra `aplicarDesfases` no cambia (`docs/patterns/backend.md` §15).
+- **Gemelos medidos, sin 500:** una opción repetida en mayúsculas dentro de un grupo, y un
+  ingrediente repetido en mayúsculas en una receta, dan 400 (test temporal, no quedó). No es por
+  el chequeo de repetidos: esos ids en mayúsculas se rechazan siempre, porque no se encuentran
+  entre los que vienen de Postgres (leído; medido solo el caso repetido). Lo que queda de eso
+  está anotado en `pendientes.md` § 2.
+
+### Qué lo fija
+
+`grupos-modificadores-overrides.e2e-spec.ts`, tests 15 a 17. **Sin el `toLowerCase()`:** caen el
+15 y el 16 (500). **Con `FOR KEY SHARE` también para grupos:** cae el 17 (`[500, 200]`).
+
+---
+
+## `borrado-item-concurrente` cuenta solo las esperas de su compuerta (cerrada 2026-10-03)
+
+Sale de [`pendientes.md`](pendientes.md) § 2.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **`borrado-item-concurrente.e2e-spec.ts` cuenta las esperas de toda la base, no las de su
+  compuerta** (test; anotado 2026-10-02 por la revisión del cierre de los índices de overrides).
+  Su `correrCarrera` local afirma `esperando: 2` contando cada sesión con `wait_event_type = 'Lock'`
+  en la base. Una espera ajena puede completar el 2 sin que los pedidos hayan llegado a la
+  compuerta. Su encabezado lo acota a "rojo falso, nunca verde falso" porque cada test afirma
+  además status o filas; lo que no se midió es si en los 13 esas afirmaciones distinguen la carrera
+  del camino en serie. `test/helpers/carrera.ts`
+  cuenta solo las sesiones que frena la compuerta (con `pg_blocking_pids`, también las
+  transitivas). **Medir:** migrar los 13 casos a ese conteo y confirmar que siguen dando 2. El
+  contrato no es el mismo: la copia local escalona los disparos 800 ms y llama por `fetch` al
+  puerto real, así que hay que ver si el helper necesita esas dos cosas o si los tests no dependen
+  de ellas.
+
+### Qué se midió
+
+Con el `correrCarrera` local instrumentado para contar las dos cosas a la vez, los 13 casos dan 2
+contando toda la base y 2 contando solo lo que frena la compuerta (con `pg_blocking_pids`,
+transitivas). Lo que el helper compartido no traía era el escalonado: disparando los dos pedidos
+juntos, en tres corridas cayeron 6, 7 y 6 de los 13, con `esperando: 0` —el segundo terminaba
+antes de que el primero llegara a la compuerta—. El `fetch` al puerto real no hacía falta en el
+helper: los pedidos son funciones que arma cada test.
+
+### Qué se hizo
+
+- **`test/helpers/carrera.ts` acepta `{ escalonarMs }`**: dispara los pedidos en orden con esa
+  pausa entre uno y otro. Sin la opción, disparan juntos como antes.
+- **El spec usa el helper** a través de `correrEnOrden` (dos pedidos, `escalonarMs: 800`, la misma
+  pausa que tenía). Se fueron `esperandoLock`, la copia local del conteo y su `dormir`.
+
+### Qué lo fija
+
+Los 13 casos siguen afirmando `esperando: 2`, ahora con el conteo de la compuerta. **Sin
+`escalonarMs`**, con el spec ya migrado, cayeron 8 de 13 en una corrida. El número varía entre
+corridas (arriba, 6, 7 y 6 con la copia local), porque depende de cuál de los dos pedidos llega
+primero.
+
+---
+
+
 ## El vínculo `REFUND` → corrección se escribe dentro de la transacción de la nota (cerrada 2026-10-02)
 
 Sale de [`pendientes.md`](pendientes.md) § 1. **Cierra el doble conteo; la reparación del

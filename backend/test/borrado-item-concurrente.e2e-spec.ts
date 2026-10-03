@@ -7,6 +7,7 @@ import type { App } from 'supertest/types';
 import type { Server, AddressInfo } from 'net';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { correrCarrera } from './helpers/carrera';
 
 // Seed (IDs fijos, ver seeder.service.ts)
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -29,8 +30,6 @@ interface Respuesta {
   status: number;
   body: unknown;
 }
-
-const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -114,12 +113,12 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * sin el `FOR SHARE` no hay nada que lo haga esperar.
  *
  * `esperando` es lo que separa este verde del verde de una compuerta que no
- * enganchó: las sesiones en `pg_stat_activity` con `wait_event_type = 'Lock'`
- * justo antes de soltar. Con el arreglo son DOS; sin ningún lado del par, una
- * sola. (Sin solo el `FOR UPDATE`, en 1-4 siguen siendo dos —el `UPDATE items`
- * final del borrado espera al `FOR SHARE`— y lo cazan los status y las filas.)
- * Cuenta la base entera, así que una espera ajena da rojo falso, nunca verde
- * falso: cada test afirma además status o filas.
+ * enganchó: las sesiones que la compuerta frena, directa o transitivamente (el
+ * segundo espera al primero, que espera a la compuerta), justo antes de
+ * soltar. Con el arreglo son DOS; sin ningún lado del par, una sola. (Sin solo
+ * el `FOR UPDATE`, en 1-4 siguen siendo dos —el `UPDATE items` final del
+ * borrado espera al `FOR SHARE`— y lo cazan los status y las filas.) El conteo
+ * y el disparo en orden son los de `test/helpers/carrera.ts`.
  *
  * NO PRUEBA:
  * - Componente de combo: pasa por el mismo `filasValidacionPorIds` que 1 y 2.
@@ -205,47 +204,25 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
       return { status: res.status, body: texto ? JSON.parse(texto) : null };
     };
 
-  /** Sesiones frenadas en un lock ahora mismo. */
-  const esperandoLock = async (): Promise<number> => {
-    const filas: { count: string }[] = await ds.query(
-      `SELECT count(*) FROM pg_stat_activity
-        WHERE datname = current_database() AND wait_event_type = 'Lock'`,
-    );
-    return Number(filas[0].count);
-  };
-
   /**
-   * Retiene la fila de la compuerta, dispara `primero`, le da tiempo a llegar
-   * hasta esa fila, dispara `segundo` y suelta. Devuelve cuántas sesiones
-   * estaban esperando un lock justo antes de soltar.
+   * `correrCarrera` con dos pedidos en orden: dispara `primero`, le da tiempo a
+   * llegar hasta la fila de la compuerta y recién ahí dispara `segundo`.
    */
-  async function correrCarrera(opciones: {
+  async function correrEnOrden(opciones: {
     compuerta: [string, unknown[]];
     primero: () => Promise<Respuesta>;
     segundo: () => Promise<Respuesta>;
   }): Promise<{ esperando: number; primero: Respuesta; segundo: Respuesta }> {
-    const compuerta = ds.createQueryRunner();
-    try {
-      await compuerta.connect();
-      await compuerta.startTransaction();
-      const retenidas: unknown[] = await compuerta.query(...opciones.compuerta);
-      // Una compuerta que no retiene ninguna fila no frena a nadie, y el test
-      // pasaría a medir otra cosa.
-      expect(retenidas.length).toBeGreaterThan(0);
-
-      const primero = opciones.primero();
-      await dormir(800);
-      const segundo = opciones.segundo();
-      await dormir(800);
-
-      const esperando = await esperandoLock();
-      await compuerta.rollbackTransaction();
-      const [rPrimero, rSegundo] = await Promise.all([primero, segundo]);
-      return { esperando, primero: rPrimero, segundo: rSegundo };
-    } finally {
-      if (compuerta.isTransactionActive) await compuerta.rollbackTransaction();
-      await compuerta.release();
-    }
+    const {
+      esperando,
+      respuestas: [primero, segundo],
+    } = await correrCarrera(
+      ds,
+      opciones.compuerta,
+      [opciones.primero, opciones.segundo],
+      { escalonarMs: 800 },
+    );
+    return { esperando, primero, segundo };
   }
 
   async function itemBorrado(itemId: string): Promise<boolean> {
@@ -358,7 +335,7 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
 
     // El PATCH valida los ingredientes y después soft-borra la lista vieja: la
     // compuerta retiene esa fila.
-    const r = await correrCarrera({
+    const r = await correrEnOrden({
       compuerta: [
         `SELECT 1 FROM receta_ingredientes
           WHERE receta_item_id = $1 AND eliminado_el IS NULL FOR UPDATE`,
@@ -391,7 +368,7 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
       extrasPermitidos: [extra(extraViejo)],
     });
 
-    const r = await correrCarrera({
+    const r = await correrEnOrden({
       compuerta: [
         `SELECT 1 FROM receta_extras_permitidos
           WHERE receta_item_id = $1 AND eliminado_el IS NULL FOR UPDATE`,
@@ -434,7 +411,7 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
     // a la vieja, cuyo UPDATE retiene la compuerta. Al revés, el PATCH sin
     // arreglo leería la nueva recién después de soltar, ya borrada, y
     // rebotaría solo — el test no vería la carrera.
-    const r = await correrCarrera({
+    const r = await correrEnOrden({
       compuerta: [
         `SELECT 1 FROM grupo_modificador_opciones
           WHERE grupo_modificador_id = $1 AND eliminado_el IS NULL FOR UPDATE`,
@@ -463,7 +440,7 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
 
     // `agregarLinea` toma el lock de stock (`item_producto`) después del lock
     // del ítem: la compuerta retiene ese.
-    const r = await correrCarrera({
+    const r = await correrEnOrden({
       compuerta: [
         `SELECT 1 FROM item_producto WHERE item_id = $1 FOR UPDATE`,
         [productoId],
@@ -497,7 +474,7 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
 
     // El borrado chequea el uso y DESPUÉS soft-borra las filas que ofrecen el
     // ingrediente como extra: la compuerta retiene esa.
-    const r = await correrCarrera({
+    const r = await correrEnOrden({
       compuerta: [
         `SELECT 1 FROM receta_extras_permitidos
           WHERE ingrediente_item_id = $1 AND eliminado_el IS NULL FOR UPDATE`,
@@ -538,7 +515,7 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
 
     // El restaurar toma lo que compone la receta y DESPUÉS revive la fila de
     // la receta: la compuerta retiene esa.
-    const r = await correrCarrera({
+    const r = await correrEnOrden({
       compuerta: [
         `SELECT 1 FROM items WHERE item_id = $1 FOR UPDATE`,
         [recetaId],
@@ -574,7 +551,7 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
     });
     expect((await llamar('DELETE', `/items/${recetaId}`)()).status).toBe(200);
 
-    const r = await correrCarrera({
+    const r = await correrEnOrden({
       compuerta: [
         `SELECT 1 FROM items WHERE item_id = $1 FOR UPDATE`,
         [recetaId],
@@ -610,7 +587,7 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
         .status,
     ).toBe(204);
 
-    const r = await correrCarrera({
+    const r = await correrEnOrden({
       compuerta: [
         `SELECT 1 FROM grupos_modificadores
           WHERE grupo_modificador_id = $1 FOR UPDATE`,
@@ -645,7 +622,7 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
 
     // El PATCH toma el ítem y DESPUÉS `FOR SHARE` sobre los ingredientes de
     // sus extras: la compuerta retiene uno de ellos.
-    const r = await correrCarrera({
+    const r = await correrEnOrden({
       compuerta: [
         `SELECT 1 FROM items WHERE item_id = $1 FOR UPDATE`,
         [extraNuevo],
@@ -704,7 +681,7 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
 
     // El PATCH asocia el grupo nuevo y DESPUÉS actualiza la asociación que ya
     // existía: la compuerta retiene esa.
-    const r = await correrCarrera({
+    const r = await correrEnOrden({
       compuerta: [
         `SELECT 1 FROM item_grupos_modificadores
           WHERE item_id = $1 AND grupo_modificador_id = $2
@@ -752,7 +729,7 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
     // El PATCH lee el grupo y DESPUÉS toma `FOR SHARE` sobre los ítems de sus
     // opciones: la compuerta retiene la opción nueva. Sin renombrar, que es la
     // variante donde la opción quedaba viva en el grupo borrado.
-    const r = await correrCarrera({
+    const r = await correrEnOrden({
       compuerta: [
         `SELECT 1 FROM items WHERE item_id = $1 FOR UPDATE`,
         [opcionNueva],
@@ -838,7 +815,7 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
     orden: 'otraPrimero' | 'estaPrimero',
   ) {
     const m = await montarAplicarContraQuitarGrupo();
-    const r = await correrCarrera({
+    const r = await correrEnOrden({
       compuerta: [
         `SELECT 1 FROM item_grupo_modificador_opciones
           WHERE item_grupo_id = $1 AND grupo_opcion_id = $2 AND eliminado_el IS NULL
