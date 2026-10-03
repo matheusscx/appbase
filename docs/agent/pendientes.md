@@ -204,6 +204,19 @@ destapa una decisión que no es mía).
   mayor:** que el drawer muestre las unidades una sola vez por ítem; o guardar las unidades en la
   línea de la venta.
 
+- [ ] **El `loteId` de una serie que entra por `POST /items` se guarda sin mirar de qué tenant ni de
+  qué ítem es el lote** (backend, `SerieInputDto.loteId` en `items/dto/create-item.dto.ts` →
+  `InventarioService`, el `INSERT INTO item_unidad`; **leído, no corrido**: lo vio el frente "ids en
+  mayúsculas", 2026-10-03, y la orquestadora confirmó que no hay chequeo antes del `INSERT`). El
+  valor viaja del DTO a `item_unidad.lote_id` tal cual. Si la FK solo pide que el lote exista, una
+  unidad puede quedar colgada del lote de **otro tenant** o de otro ítem, y lo que se lea del lote a
+  través de la unidad (código, vencimiento) sería ajeno. Es aislamiento multi-tenant.
+  **Medir:** con dos tenants del seed, crear un ítem en modo serie con `series[].loteId` = un lote
+  del otro tenant y ver si entra (y qué devuelve después `GET /items/:id/unidades`); repetir con
+  un lote propio de otro ítem. Listar los demás caminos que reciben un `loteId` (`AjusteStockDto`,
+  compras, traslados) y si validan tenant e ítem, antes de decidir si se valida por camino o en el
+  chokepoint de inventario. Escribe en `item_unidad`: el arreglo va en su propio frente.
+
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
