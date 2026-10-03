@@ -166,9 +166,8 @@ lo comprometido en modo cantidad.
   El nombre dice la regla y no el mecanismo. Va en `ItemsService.buildFindAllFilters`, no en
   el SELECT del listado: el orden por disponibilidad del frente de paginación arma la página
   en dos pasos reusando ese `where`, y un filtro puesto en otro lado no lo vería (condición
-  de ese frente). La carga del catálogo de `tienda/index.vue` lo
-  manda. Cuando el frente de paginación lleve esa carga a `useCatalogoVenta`, el filtro
-  viaja por el composable (acordado con la orquestadora).
+  de ese frente). La tienda lo manda por los
+  `filtros` de `useCatalogoVenta`, que el frente de paginación ya integró (8b6a8faf).
 - El checkout online (`OnlineService.checkout`) rechaza una línea de un producto con serie
   **antes** de iniciar el pago: *"«Nombre» se vende solo en el local"*.
 

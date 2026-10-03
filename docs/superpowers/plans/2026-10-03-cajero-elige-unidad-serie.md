@@ -209,8 +209,9 @@ antes de cualquier escritura):
   de query de `GET /items` (buscar el que usa `findAll`)
 - Modify: `backend/src/modules/online/online.service.ts` (checkout, junto al chequeo de `activo`, ~283)
 - Modify: `backend/src/modules/mermas/mermas.service.ts` (antes de `registrarMovimiento`, ~205)
-- Modify: `frontend/app/pages/tienda/index.vue` (~25: agregar `&vendibleOnline=true` a la URL
-  actual; es la única línea que se toca ahí)
+- Modify: `frontend/app/pages/tienda/index.vue` (la llamada a `useCatalogoVenta`, ~13: pasarle
+  `filtros: { vendibleOnline: 'true' }`; es lo único que se toca ahí. El composable ya acepta
+  `filtros` desde la integración de la paginación, 8b6a8faf)
 - Modify: `frontend/app/pages/mermas.vue` (~122/161: el selector de producto excluye modo serie)
 - Test: `backend/test/venta-serie.e2e-spec.ts` (o un spec propio `tienda-merma-serie.e2e-spec.ts`),
   unit de `online.service.spec.ts` y `mermas.service.spec.ts`
@@ -510,6 +511,5 @@ Antes de escribir: skill `nuxt-ui`.
 - [ ] Revisión independiente (paso 7 de `verify-feature`) con el diff staged → recibo → commit
   sin `--no-verify`.
 - [ ] `git -C <worktree> rebase main`. Si main tocó `inventario.service.ts`, `pos.vue`,
-  `salones/index.vue`, `tienda/index.vue` o `useVenta.ts`, re-correr lo afectado (y portar
-  `vendibleOnline` a `useCatalogoVenta` si Paginar integró antes).
+  `salones/index.vue`, `tienda/index.vue` o `useVenta.ts`, re-correr lo afectado.
 - [ ] Avisar a la orquestadora: `listo para integrar: <rama> <SHA>` + conteos.
