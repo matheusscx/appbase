@@ -24,6 +24,81 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 ---
 
 
+## El `loteId` de una unidad con serie tiene que ser un lote vivo de su ítem y su tenant (cerrada 2026-10-03)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. La regla viva, en
+[ADR-007](../adr/007-inventario-serie-lote.md#regla-anti-doble-conteo) y en
+[`inventario-serializado.md`](../features/inventario-serializado.md#entities).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **El `loteId` de una serie que entra por `POST /items` se guarda sin mirar de qué tenant ni de
+  qué ítem es el lote** (backend, `SerieInputDto.loteId` en `items/dto/create-item.dto.ts` →
+  `InventarioService`, el `INSERT INTO item_unidad`; **leído, no corrido**: lo vio el frente "ids en
+  mayúsculas", 2026-10-03, y la orquestadora confirmó que no hay chequeo antes del `INSERT`). El
+  valor viaja del DTO a `item_unidad.lote_id` tal cual. Si la FK solo pide que el lote exista, una
+  unidad puede quedar colgada del lote de **otro tenant** o de otro ítem, y lo que se lea del lote a
+  través de la unidad (código, vencimiento) sería ajeno. Es aislamiento multi-tenant.
+  **Medir:** con dos tenants del seed, crear un ítem en modo serie con `series[].loteId` = un lote
+  del otro tenant y ver si entra (y qué devuelve después `GET /items/:id/unidades`); repetir con
+  un lote propio de otro ítem. Listar los demás caminos que reciben un `loteId` (`AjusteStockDto`,
+  compras, traslados) y si validan tenant e ítem, antes de decidir si se valida por camino o en el
+  chokepoint de inventario. Escribe en `item_unidad`: el arreglo va en su propio frente.
+
+### Qué se midió
+
+Contra la API, con dos tenants del seed (`test/serie-lote-ajeno.e2e-spec.ts`, en su versión de
+medición):
+
+- **Entraba y filtraba.** Paris creaba un ítem en modo serie con `series[].loteId` = un lote real
+  de Demo Bodega: `POST /items` 201, y `GET /items/:id/unidades` devolvía el **`codigoLote` del
+  otro tenant** (el `LEFT JOIN item_lote` solo miraba `lote_id` y `eliminado_el`). Funcionaba como
+  oráculo: cualquier uuid de lote ajeno devolvía su código. Lo mismo por `PATCH /items/:id/stock`
+  (entrada, `SerieAjusteInputDto.loteId`).
+- **El lote de otro producto propio** también entraba, y su código se leía.
+- **Un uuid que no existe** también entraba: `item_unidad` **no tiene ninguna FK** en la base. La
+  entity no declara la relación, y el `REFERENCES` de `startup-pos.sql` no existe (el esquema sale
+  de las entities).
+
+Los otros caminos que reciben un `loteId` del cliente —`AjusteStockDto.loteId` (salida de lote),
+`LineaVentaDto.loteId`, `LineaTrasladoDto.loteId`— ya validaban: la salida de `moverLote` busca el
+lote por `item_id` (y la entrada del traslado, por ítem y tenant). Compras, mermas y recuentos no
+reciben `loteId` (la compra manda el código del lote, que se resuelve por ítem y tenant). Ningún
+`@Param` ni `@Query` lleva un id de lote.
+
+### Qué se hizo
+
+- **Escritura, en el chokepoint.** `InventarioService.moverSerie` —el único `INSERT INTO
+  item_unidad`; el alta, el ajuste y la compra pasan por ahí— valida, antes de insertar, que todo
+  `loteId` sea un lote **vivo, de este ítem y de este tenant**, en una sola consulta con `= ANY`
+  que corre solo si alguna serie trae lote. 400 con un mensaje único (*"El lote de la serie no es
+  de este producto"*) para ajeno, de otro producto, borrado o inexistente: distinguirlos sería un
+  oráculo. Los ids se pasan a minúsculas antes de deduplicar (el gemelo del cierre de "ids en
+  mayúsculas").
+- **Lectura.** El `LEFT JOIN item_lote` de `GET /items/:id/unidades` se acota al ítem y al tenant de
+  la unidad, para las filas que se hubieran escrito antes. Barrido de las demás lecturas de
+  `item_lote`: ninguna llega al lote a través de `item_unidad.lote_id`; todas lo buscan por ítem y
+  tenant, o por un ítem ya validado. Para repetir el barrido:
+  `grep -rn -iE "(JOIN|FROM)\s+item_lote" backend/src --include='*.ts'`.
+- **"Del ítem", no "del tenant"**, consultado con la Sesión de esfuerzo máximo: es el modelo de
+  ADR-007 (un lote pertenece a un ítem). Consecuencia declarada en el ADR: hoy ningún ítem en modo
+  serie tiene lotes propios, así que toda entrada serie con `loteId` da 400 hasta que exista quien
+  los cree.
+- **Sin FK**: la validación cubre la existencia, y el repo no declara relaciones en la gran mayoría
+  de sus entities. El DTO no cambia.
+
+### Qué lo fija
+
+- `test/serie-lote-ajeno.e2e-spec.ts`: el alta y el ajuste con un lote ajeno, de otro producto e
+  inexistente dan 400 sin dejar ítem ni unidad; sin `loteId` sigue entrando; la lectura de una fila
+  contaminada a mano no devuelve el código. Antes del arreglo fallaban 3 de 4.
+- `inventario.service.spec.ts`: la forma de la consulta, el dedupe sin mayúsculas, el 400 sin
+  `INSERT`, y que sin lote no se consulta `item_lote`.
+- Mutantes, cada uno revirtiendo al código anterior: sin la validación (2 e2e + 2 unitarios
+  caen), sin `item_id` en la validación (2 e2e + 1 unitario), el `JOIN` viejo (1 e2e), sin `toLowerCase`
+  (1 unitario). Superviviente declarado: sacar solo `l.tenant_id = u.tenant_id` del `JOIN` no lo
+  caza nada, porque un lote del mismo `item_id` ya es del mismo tenant; queda como defensa.
+
 ## Un `page` enorme da 400, no 500, en todas las rutas paginadas (cerrada 2026-10-03)
 
 Sale de [`pendientes.md`](pendientes.md) § 1. La regla viva, en

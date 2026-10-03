@@ -790,6 +790,114 @@ describe('InventarioService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    /**
+     * El `loteId` de una serie tiene que ser un lote vivo de este ítem y de este
+     * tenant. Que el lote ajeno, el de otro producto y el inexistente rebotan lo
+     * mide `test/serie-lote-ajeno.e2e-spec.ts` contra la API; el caso que pasa
+     * no se puede armar por la API —ningún ítem en modo serie tiene lotes
+     * propios todavía (ADR-007)—, así que vive acá.
+     */
+    const LOTE = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+
+    it('entrada serie con lote: valida el lote contra ítem y tenant en UNA consulta, deduplicando sin mirar mayúsculas', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([]) // series ya vivas: ninguna
+        .mockResolvedValueOnce([{ lote_id: LOTE }]) // SELECT item_lote
+        .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }])
+        .mockResolvedValueOnce([{ unidad_id: UNIDAD_2 }])
+        .mockResolvedValueOnce([{ cnt: '2' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-lote' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '2',
+          usuarioId: USER_ID,
+          series: [
+            { serie: 'IMEI-001', loteId: LOTE.toUpperCase() },
+            { serie: 'IMEI-002', loteId: LOTE },
+          ],
+        },
+      );
+
+      const [sql, params] = managerMock.query.mock.calls[3] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toContain('FROM item_lote');
+      expect(sql).toContain('item_id = $2 AND tenant_id = $3');
+      expect(sql).toContain('eliminado_el IS NULL');
+      // Uno solo: el mismo lote en mayúsculas y en minúsculas no cuenta dos
+      // contra la única fila que devuelve la base.
+      expect(params).toEqual([[LOTE], ITEM_ID, TENANT]);
+    });
+
+    it('entrada serie con un lote que no vuelve de la consulta: 400 sin insertar ninguna unidad', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]); // SELECT item_lote: ajeno, borrado o de otro ítem
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '1',
+          usuarioId: USER_ID,
+          series: [{ serie: 'IMEI-001', loteId: LOTE }],
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('El lote de la serie no es de este producto'),
+      );
+      const sqls = managerMock.query.mock.calls.map((c) => String(c[0]));
+      expect(sqls.some((s) => s.includes('INSERT INTO item_unidad'))).toBe(
+        false,
+      );
+    });
+
+    it('entrada serie sin lote: no consulta item_lote', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }])
+        .mockResolvedValueOnce([{ cnt: '1' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-sin-lote' }])
+        .mockResolvedValueOnce(undefined);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '1',
+          usuarioId: USER_ID,
+          series: [{ serie: 'IMEI-001' }],
+        },
+      );
+
+      const sqls = managerMock.query.mock.calls.map((c) => String(c[0]));
+      expect(sqls.some((s) => s.includes('item_lote'))).toBe(false);
+    });
+
     it('salida serie: cambia estado de unidades y recalcula stock', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE

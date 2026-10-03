@@ -1583,6 +1583,33 @@ export class InventarioService {
         series.map((s) => s.serie),
       );
 
+      // El `loteId` de una serie es metadato (ADR-007) y tiene que ser un lote
+      // vivo de ESTE ítem y de ESTE tenant: `item_unidad.lote_id` no tiene FK,
+      // y sin este chequeo una unidad colgaba del lote de otro tenant y
+      // `GET /items/:id/unidades` devolvía su código. Un solo mensaje para
+      // ajeno, borrado, de otro producto o inexistente: distinguirlos sería un
+      // oráculo de uuids entre tenants. La query corre solo si alguna serie
+      // trae lote. En minúsculas antes del `Set`: `@IsUUID` acepta mayúsculas
+      // y el mismo lote escrito de las dos formas contaría dos contra una fila.
+      const loteIds = [
+        ...new Set(
+          series.flatMap((s) => (s.loteId ? [s.loteId.toLowerCase()] : [])),
+        ),
+      ];
+      if (loteIds.length) {
+        const lotesValidos: { lote_id: string }[] = await manager.query(
+          `SELECT lote_id FROM item_lote
+            WHERE lote_id = ANY($1::uuid[]) AND item_id = $2 AND tenant_id = $3
+              AND eliminado_el IS NULL`,
+          [loteIds, params.itemId, params.tenantId],
+        );
+        if (lotesValidos.length !== loteIds.length) {
+          throw new BadRequestException(
+            'El lote de la serie no es de este producto',
+          );
+        }
+      }
+
       const unidadIds: string[] = [];
       for (const s of series) {
         const rows: { unidad_id: string }[] = await manager.query(

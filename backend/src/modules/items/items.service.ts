@@ -3373,7 +3373,11 @@ export class ItemsService {
          u.unidad_id, u.serie, u.estado, u.condicion, u.garantia_hasta,
          u.lote_id, l.codigo_lote, u.venta_id, u.creado_el, u.ubicacion_id
        FROM item_unidad u
-       LEFT JOIN item_lote l ON l.lote_id = u.lote_id AND l.eliminado_el IS NULL
+       -- \`item_lote\` acotado al ítem y al tenant de la unidad: \`u.lote_id\` no
+       -- tiene FK, y una fila escrita antes de que el chokepoint validara el
+       -- lote puede apuntar al de otro tenant (devolvía su código).
+       LEFT JOIN item_lote l ON l.lote_id = u.lote_id AND l.item_id = u.item_id
+                            AND l.tenant_id = u.tenant_id AND l.eliminado_el IS NULL
        WHERE u.item_id = $1 AND u.tenant_id = $2 AND u.eliminado_el IS NULL
          ${filtroEstado}
          ${filtroVendible}

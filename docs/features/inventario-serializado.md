@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-10-03 (quien vende elige qué unidad con serie sale)
+**Last Updated**: 2026-10-03 (el `loteId` de una serie tiene que ser un lote de su ítem y tenant)
 
 ---
 
@@ -303,7 +303,7 @@ el 400 de la API es el que manda.
 | `unidad_id` | UUID PK | |
 | `tenant_id` | UUID | |
 | `item_id` | UUID FK → items | |
-| `lote_id` | UUID FK → item_lote, nullable | metadato opcional |
+| `lote_id` | UUID nullable, **sin FK** | metadato opcional: un lote vivo de este ítem y tenant, lo valida `moverSerie` (abajo) |
 | `serie` | TEXT | IMEI u otro código; único por producto, comparado sin bordes ni mayúsculas. Se guarda tal como se tipeó |
 | `estado` | TEXT | `disponible / reservado / vendido / baja` |
 | `condicion` | TEXT | `nuevo / usado / reacondicionado` |
@@ -400,6 +400,14 @@ espacios"* en `compras.e2e-spec.ts`.
 | `lote_id` | UUID nullable | modo lote |
 | `cantidad` | NUMERIC(18,4) | 1 por unidad, N por lote |
 
+**El `loteId` de una serie** (`series[].loteId` en el alta y en la entrada por ajuste) tiene que
+ser un lote **vivo, de este ítem y de este tenant**: `moverSerie` lo valida antes del `INSERT` y
+responde 400 *"El lote de la serie no es de este producto"*, el mismo mensaje para ajeno, de otro
+producto, borrado o inexistente (no es un oráculo entre tenants). Hasta el 2026-10-03 se guardaba
+tal cual y `GET /items/:id/unidades` devolvía el código del lote de otro tenant; desde entonces esa
+lectura también acota el `JOIN` al ítem y al tenant de la unidad. Como ningún ítem en modo serie
+tiene lotes propios todavía, hoy toda serie con `loteId` da 400 ([ADR-007](../adr/007-inventario-serie-lote.md#regla-anti-doble-conteo)).
+
 ### Key Methods (inventario.service.ts)
 
 - `registrarMovimiento(manager, params)` — dispatcher por modo
@@ -445,7 +453,7 @@ espacios"* en `compras.e2e-spec.ts`.
 cd backend && npm test -- --no-coverage
 # inventario.service.spec.ts: entrada/salida por modo, y la validación de unidades de la salida serie
 # items.service.spec.ts: tests de create con modo, bloqueo de cambio de modo, vendibles, vendibleOnline
-npm run test:e2e -- venta-serie salon-serie tienda-merma-serie inventario-serie-ubicacion traslados
+npm run test:e2e -- venta-serie salon-serie tienda-merma-serie inventario-serie-ubicacion traslados serie-lote-ajeno
 cd ../frontend && npm run e2e -- e2e/ventas/venta-serie.spec.ts e2e/salones/salon-serie.spec.ts
 ```
 

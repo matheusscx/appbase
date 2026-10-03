@@ -47,6 +47,13 @@ En modo `serie` un `item_unidad` puede referenciar un `lote_id` como **metadato*
 pero `item_lote.cantidad_disponible` no se usa para el saldo — solo `item_unidad.estado = 'disponible'` cuenta.
 Los lotes con cantidad solo existen en modo `lote`.
 
+*Actualización 2026-10-03:* el `lote_id` de una unidad tiene que ser un lote **vivo del mismo ítem y
+del mismo tenant**; la entrada en modo serie (`moverSerie`) lo valida y responde 400 si no lo es
+(`item_unidad.lote_id` no tiene FK). Hoy **nadie crea lotes de metadato en modo serie** —`item_lote`
+solo nace en `moverLote`, que es de modo `lote`, y el modo es inmutable con movimientos—, así que
+**toda entrada serie con `loteId` da 400 hasta que exista ese productor**. No es un bug: el campo
+quedó adelantado al productor. Detalle: [`resueltos.md`](../agent/resueltos.md).
+
 ### Tabla `movimiento_inventario_detalle`
 El kardex (`movimientos_inventario`) mantiene la cantidad agregada como hoy.
 Se agrega `movimiento_inventario_detalle` para ligar cada movimiento a las unidades o lote afectados,
