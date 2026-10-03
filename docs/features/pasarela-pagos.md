@@ -15,10 +15,10 @@ Un módulo de pasarela de pagos **independiente** dentro del backend
 de forma agnóstica y expone dos superficies de consumo:
 
 - **Administración del tenant** (`/pasarela/admin/*`, JWT + RBAC): el admin
-  configura qué pasarelas usa (Oneclick, y a futuro Webpay/Stripe…), en modo
+  configura qué pasarelas usa (Oneclick o Webpay Plus; a futuro Stripe…), en modo
   **MALL** (bajo el comercio de la plataforma) o **INDIVIDUAL** (con sus
   propias credenciales), genera/revoca **API keys** para sus apps externas, y
-  puede reembolsar (total o parcial) órdenes `pagada` o `conciliada` desde el módulo Órdenes
+  puede reembolsar (total o parcial) órdenes `pagada` o `conciliada` desde Ventas ▸ Órdenes
   (`/ordenes`), gateado por el permiso dedicado `Pasarelas:Reembolsar`.
 - **API máquina-a-máquina** (`/pasarela/api/*`, API key): las apps del tenant
   inscriben medios de pago, cobran, reembolsan y consultan estado — sin pasar
@@ -40,8 +40,8 @@ proveedores sin cambios estructurales.
 
 - **Incluido**: módulo `gateway` con Oneclick real y **Webpay Plus Mall**
   (pago único con redirect), API keys por tenant, cifrado de credenciales,
-  historial inmutable de transacciones, pantalla de administración del tenant
-  (config, API keys, órdenes).
+  historial inmutable de transacciones, pantallas de administración del tenant
+  (config y API keys en Configuración; órdenes en Ventas).
 - **NO incluido (fases futuras)**: job de cobro recurrente automático de los
   períodos siguientes de una suscripción, Stripe / MercadoPago, webhooks
   entrantes, failover por `prioridad`, y rotación de la clave de cifrado.
@@ -297,23 +297,51 @@ El commit (`confirmarPago`) devuelve el detalle real de la transacción, que
 
 ## Frontend
 
-### Página
+### Pantallas
 
-`frontend/app/pages/pasarelas.vue` (layout dashboard, tokens semánticos,
-componentes CRUD del repo), con tres tabs:
+Desde el 2026-07-10 son dos, separadas por lo que hace cada una: la **configuración**
+(qué pasarelas usa el local y las API keys de sus apps) vive en Configuración, y la
+**operación** —las órdenes de cobro— en el menú lateral. Las dos son del módulo RBAC
+Pasarelas: Órdenes no tiene módulo propio.
 
-1. **Mis pasarelas**: lista de `tenant_pasarela`; drawer de alta/edición con
-   credenciales **write-only** (al editar muestran `••••`; en modo individual
-   exige reingresar las 3 credenciales juntas para no borrar las intactas).
+**Configuración ▸ Pasarelas** (`frontend/app/pages/configuracion/pasarelas.vue`), con
+dos tabs:
+
+1. **Mis pasarelas**: las configs del tenant (`tenant_pasarela`), con un drawer de
+   alta/edición. Las credenciales son **write-only**: el listado solo dice si las hay,
+   al editar los campos muestran `••••` y la configuración viaja solo si se tipeó algo.
+   Como el backend reemplaza el JSON cifrado entero (no mergea), en modo individual,
+   si se toca una credencial, el drawer exige las 3 juntas para no borrar las otras.
+   El selector de proveedor sale de `pasarelas-disponibles`: un local cuya moneda
+   oficial no es CLP no ve Transbank (ver "La moneda de una orden no es la del tenant").
    La **pasarela demo** (`codigo: 'demo'`) es la excepción: no habla con ningún
-   proveedor, así que el drawer no le pide credenciales ni modo de integración
-   —lo fuerza a `individual`, porque no soporta mall— y la fila se marca "solo
-   pruebas" en vez de "sin credenciales". Ver `docs/features/tienda-online.md`.
-2. **API Keys**: lista + crear (modal muestra la key completa **una sola vez**
-   con botón copiar) + revocar.
-3. **Órdenes**: listado paginado (`usePaginatedList`) con estado y monto.
+   proveedor, así que el drawer no le pide credenciales ni modo de integración —lo
+   fuerza a `individual`, porque no soporta mall—, avisa que aprueba sin cobrar, y la
+   fila se marca "Solo pruebas" en vez de "Sin credenciales". Ver
+   `docs/features/tienda-online.md`.
+2. **API Keys**: lista, crear y revocar. La key completa se muestra **una sola vez**,
+   en el modal que sigue a crearla, con botón copiar: en la base quedan su hash y un
+   prefijo, no la key. Revocar no la borra —sigue en la lista como "Revocada"— y desde
+   ese momento las apps que la usan reciben 401.
 
-Link del sidebar y botones gated por RBAC (`can('Pasarelas', <permiso>)`).
+**Ventas ▸ Órdenes** (`frontend/app/pages/ordenes.vue`): en el grupo Ventas del menú
+lateral desde el 2026-10-02, porque son los cobros de lo vendido (owner; ver
+[patterns/frontend.md](../patterns/frontend.md) § 1). Listado paginado con buscador
+(código, descripción, referencia externa o pagador) y filtros por estado, origen
+—Interno: los cobros de la propia app, como la tienda online; API externa: los de una
+app con API key— y rango de fechas, que se lee en días de negocio del local (si tiene
+hora de corte, la pantalla lo avisa). Al elegir una orden se abre un drawer con su
+detalle, el historial de transacciones y, si tiene venta, los links a la venta y a sus
+pagos. Desde ahí se **reembolsa** (total o parcial) una orden `pagada` o `conciliada`
+mientras le quede saldo; el modal y la nota de crédito que deja el reembolso están en
+[reembolsos-nota-credito.md](./reembolsos-nota-credito.md).
+
+### Permisos
+
+El link a cada pantalla aparece para el admin o con `Pasarelas:Leer`, y cada botón que
+escribe, con el permiso de su endpoint (`Crear`, `Actualizar` y `Eliminar` en
+Configuración; `Reembolsar` en el drawer de Órdenes). Es UX: el candado es el
+`@RequiresPermiso` de cada ruta (invariante 6).
 
 ---
 
