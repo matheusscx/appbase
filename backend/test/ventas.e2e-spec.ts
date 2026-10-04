@@ -1504,6 +1504,220 @@ describe('Ventas (e2e)', () => {
     });
   });
 
+  // `pendientes.md` → `resueltos.md`, "La nota de crédito lleva el receptor de la
+  // venta que corrige". Las notas son "no vuelve plata" sobre ventas sin pagos:
+  // no mueven caja ni dependen del cuadre de otra prueba.
+  describe('POST /ventas/:id/notas-credito — el receptor', () => {
+    const FACTURA_CHILE_ID = '550e8400-e29b-41d4-a716-446655440146';
+    const RECEPTOR = {
+      nombre: 'Comercial Andes SpA',
+      rut: '76.123.456-0',
+      giro: 'Venta de artículos de ferretería',
+      direccion: 'Av. Matta 1234',
+      comuna: 'Santiago',
+    };
+    interface DetalleNota {
+      customer: Record<string, unknown> | null;
+      receptorEsEmisor: boolean;
+      receptorSugerido: { nombre: string; rut: string } | null;
+    }
+    let itemId: string;
+
+    beforeAll(async () => {
+      const item = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio NC receptor E2E ${Date.now()}`,
+          precioBase: '10000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+        });
+      expect(item.status).toBe(201);
+      itemId = (item.body as { id: string }).id;
+    });
+
+    async function venderSinPagar(extra: Record<string, unknown>) {
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${token}`)
+        .send({ lineas: [{ itemId, cantidad: '1' }], ...extra });
+      expect(res.status).toBe(201);
+      return (res.body as VentaResponse).id;
+    }
+    function emitirNota(
+      ventaId: string,
+      extra: Record<string, unknown> = {},
+      clave: string = randomUUID(),
+    ) {
+      return request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Idempotency-Key', clave)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ monto: '2000', devolucion: { sinPlata: true }, ...extra });
+    }
+    async function detalle(ventaId: string): Promise<DetalleNota> {
+      const res = await request(app.getHttpServer())
+        .get(`/api/ventas/${ventaId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      return res.body as DetalleNota;
+    }
+    async function notasDe(ventaId: string): Promise<number> {
+      const rows: { n: string }[] = await ds.query(
+        `SELECT COUNT(*) AS n FROM ventas WHERE venta_referencia_id = $1`,
+        [ventaId],
+      );
+      return Number(rows[0].n);
+    }
+
+    it('la serie de notas de una factura: cada nota congela el receptor de la venta, y el ticket lo imprime', async () => {
+      const ventaId = await venderSinPagar({
+        tipoDocumentoId: FACTURA_CHILE_ID,
+        customer: RECEPTOR,
+      });
+      const receptorDeLaVenta = (await detalle(ventaId)).customer;
+      expect(receptorDeLaVenta).toMatchObject({ rut: '76123456-0' });
+
+      const notas: string[] = [];
+      for (const monto of ['3000', '2000']) {
+        const nota = await emitirNota(ventaId, { monto });
+        expect(nota.status).toBe(201);
+        notas.push((nota.body as { id: string }).id);
+      }
+      for (const notaId of notas) {
+        const d = await detalle(notaId);
+        // Todas las columnas, `terceroId` incluido; solo el id de la fila es otro.
+        expect(d.customer).toEqual({
+          ...receptorDeLaVenta,
+          id: expect.any(String) as string,
+        });
+        expect(d.customer?.id).not.toBe(receptorDeLaVenta?.id);
+        expect(d.receptorEsEmisor).toBe(false);
+        const boleta = await request(app.getHttpServer())
+          .get(`/api/ventas/${notaId}/boleta`)
+          .set('Authorization', `Bearer ${token}`);
+        expect(boleta.status).toBe(200);
+        expect((boleta.body as { customer: unknown }).customer).toEqual({
+          nombre: 'Comercial Andes SpA',
+          rut: '76123456-0',
+          direccion: 'Av. Matta 1234',
+        });
+      }
+      // Una fila por documento: la venta sigue con la suya y cada nota tiene la
+      // propia (la copia no se lleva ni duplica la de la venta).
+      const filas: { venta_id: string }[] = await ds.query(
+        `SELECT venta_id FROM venta_customer
+          WHERE venta_id = ANY($1) AND eliminado_el IS NULL`,
+        [[ventaId, ...notas]],
+      );
+      expect(filas.map((f) => f.venta_id).sort()).toEqual(
+        [ventaId, ...notas].sort(),
+      );
+    });
+
+    it('con cliente en la venta, mandar otro receptor es 400 y no emite la nota', async () => {
+      const ventaId = await venderSinPagar({
+        tipoDocumentoId: FACTURA_CHILE_ID,
+        customer: RECEPTOR,
+      });
+      const res = await emitirNota(ventaId, {
+        receptor: { nombre: 'Otra persona', rut: '12.345.678-5' },
+      });
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain(
+        'La nota de crédito va al mismo cliente que la venta',
+      );
+      expect(await notasDe(ventaId)).toBe(0);
+    });
+
+    // La pantalla precarga el receptor de la última nota que lo capturó (owner,
+    // 2026-10-04): si el sistema ya sabe quién es el comprador, "a nombre del
+    // emisor" no corresponde. El servidor congela lo que llega en el body.
+    it('boleta sin cliente: la nota congela el receptor del body o queda a nombre del emisor, y el detalle sugiere el último capturado', async () => {
+      const ventaId = await venderSinPagar({});
+      expect((await detalle(ventaId)).customer).toBeNull();
+      expect((await detalle(ventaId)).receptorSugerido).toBeNull();
+
+      const capturada = await emitirNota(ventaId, {
+        receptor: { nombre: '  Juan Pérez ', rut: '12.345.678-5' },
+      });
+      expect(capturada.status).toBe(201);
+      const d1 = await detalle((capturada.body as { id: string }).id);
+      expect(d1.customer).toMatchObject({
+        nombre: 'Juan Pérez',
+        rut: '12345678-5',
+      });
+      expect(d1.receptorEsEmisor).toBe(false);
+
+      const sinDatos = await emitirNota(ventaId);
+      expect(sinDatos.status).toBe(201);
+      const d2 = await detalle((sinDatos.body as { id: string }).id);
+      expect(d2.customer).toBeNull();
+      expect(d2.receptorEsEmisor).toBe(true);
+      // La venta no cambia: el receptor capturado es de la nota.
+      const venta = await detalle(ventaId);
+      expect(venta.customer).toBeNull();
+      expect(venta.receptorEsEmisor).toBe(false);
+      // La nota a nombre del emisor no tapa al último capturado.
+      expect(venta.receptorSugerido).toEqual({
+        nombre: 'Juan Pérez',
+        rut: '12345678-5',
+      });
+
+      const otra = await emitirNota(ventaId, {
+        receptor: { nombre: 'Ana Soto', rut: '11.111.111-1' },
+      });
+      expect(otra.status).toBe(201);
+      expect((await detalle(ventaId)).receptorSugerido).toEqual({
+        nombre: 'Ana Soto',
+        rut: '11111111-1',
+      });
+    });
+
+    it.each([
+      [
+        { nombre: 'Juan Pérez', rut: '12.345.678-9' },
+        'El RUT del cliente no es válido',
+      ],
+      [
+        { nombre: '   ', rut: '12.345.678-5' },
+        'El nombre del cliente no puede quedar en blanco',
+      ],
+      [{ nombre: 'Juan Pérez' }, 'rut'],
+      [{ nombre: 'x'.repeat(101), rut: '12.345.678-5' }, '100 caracteres'],
+      [[], 'receptor'],
+    ])(
+      'un receptor inválido (%j) es 400 y no emite la nota',
+      async (receptor, mensaje) => {
+        const ventaId = await venderSinPagar({});
+        const res = await emitirNota(ventaId, { receptor });
+        expect(res.status).toBe(400);
+        expect(JSON.stringify(res.body)).toContain(mensaje);
+        expect(await notasDe(ventaId)).toBe(0);
+      },
+    );
+
+    it('el reintento con la misma clave y otro receptor es otra nota: 422, y queda una sola', async () => {
+      const ventaId = await venderSinPagar({});
+      const clave = randomUUID();
+      const primera = await emitirNota(
+        ventaId,
+        { receptor: { nombre: 'Juan Pérez', rut: '12.345.678-5' } },
+        clave,
+      );
+      expect(primera.status).toBe(201);
+      const otra = await emitirNota(
+        ventaId,
+        { receptor: { nombre: 'Ana Soto', rut: '12.345.678-5' } },
+        clave,
+      );
+      expect(otra.status).toBe(422);
+      expect(await notasDe(ventaId)).toBe(1);
+    });
+  });
+
   describe('POST /ventas/:id/anular', () => {
     /** Venta pendiente (sin pagos) — el único caso anulable. */
     async function crearPendiente(): Promise<string> {

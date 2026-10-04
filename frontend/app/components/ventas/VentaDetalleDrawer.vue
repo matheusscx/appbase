@@ -150,7 +150,7 @@ interface VentaDetalle {
    * el modal de anulación para el default del checkbox de reposición.
    */
   tieneLineasDespachadas: boolean
-  tipoDocumento: { id: string, codigo: string | null, nombre: string | null, esBoleta: boolean } | null
+  tipoDocumento: { id: string, codigo: string | null, nombre: string | null, esBoleta: boolean, rutChileno: boolean } | null
   /**
    * Es una corrección: apunta a la venta que corrige (`venta_referencia_id`). Lo
    * calcula el backend; es lo que decide el rótulo, las líneas y si se ofrece
@@ -210,6 +210,10 @@ interface VentaDetalle {
   } | null
   pagos: Pago[]
   customer: { nombre: string; rut?: string } | null
+  /** Nota de crédito sin datos del comprador: va a nombre del local (FAQ SII). */
+  receptorEsEmisor: boolean
+  /** Sin customer: el receptor de la última nota que lo capturó, para precargar la siguiente. */
+  receptorSugerido: { nombre: string, rut: string | null } | null
   propina: PropinaVenta | null
   /**
    * Los documentos de la venta y de sus correcciones, y lo que el BACKEND decide
@@ -1102,6 +1106,15 @@ function onNcOtrosDatos() {
                 <span v-if="venta.customer.rut" class="ml-1 text-muted">({{ venta.customer.rut }})</span>
               </dd>
             </div>
+            <div v-else-if="venta.receptorEsEmisor" data-qa="receptor-es-emisor">
+              <dt class="text-muted">
+                Cliente
+              </dt>
+              <dd class="font-medium">
+                A nombre del local
+                <span class="ml-1 text-muted">(sin datos del comprador)</span>
+              </dd>
+            </div>
           </dl>
         </UCard>
 
@@ -1679,6 +1692,9 @@ function onNcOtrosDatos() {
     :detalles="venta.detalles"
     :config-calculo="venta.configCalculo"
     :opciones="venta.opcionesDevolucion"
+    :cliente="venta.customer"
+    :receptor-sugerido="venta.receptorSugerido"
+    :rut-chileno="venta.tipoDocumento?.rutChileno === true"
     @success="onNcSuccess"
     @otros-datos="onNcOtrosDatos"
   />

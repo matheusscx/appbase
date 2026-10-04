@@ -82,6 +82,16 @@ todo compatible con SII, sin integrarlo.
   se imponen al capturar —el sistema no trunca, porque lo emitido tiene que ser igual a lo
   congelado—. Otros países, en pausa. Detalle en [`features/ventas.md`](../features/ventas.md).
 
+  ✅ **Actualización 2026-10-04 — la nota de crédito congela su propio receptor.** La NC exige
+  RUT y razón social del receptor siempre (Formato DTE v2.5), también la de una boleta. La nota
+  **copia** el receptor de la venta que corrige en su transacción, no lo lee al emitir; sin
+  receptor en la venta, congela el que capturó el cajero (nombre y RUT) o la marca explícita
+  `receptor_es_emisor` —"a nombre del propio emisor", la excepción que publica el SII—, nunca la
+  ausencia de dato. Es la misma regla que "exento": un estado fiscal explícito. La única
+  corrección sin receptor y sin marca es la devolución interna, que no es documento tributario.
+  Detalle en
+  [`features/reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md).
+
   ⚠️ **Actualización 2026-10-02 — la venta también registra qué documentos tiene y quién los
   emitió.** Hasta ese día la venta llevaba solo una etiqueta (`tipo_documento_id`). Ahora cada
   venta deja, al crearse, una fila por documento en `venta_documentos` —del sistema, de la

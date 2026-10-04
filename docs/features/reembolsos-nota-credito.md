@@ -114,6 +114,8 @@ Response (200): orden pública + extras
   monto}] }` — cuánto queda por acreditar, en total y por porción fiscal, **en
   cero cuando el documento no admite nota de crédito**. Detalle y su porqué en
   [`ventas.md`](ventas.md).
+- El receptor (2026-10-04): `receptorEsEmisor`, `receptorSugerido` y
+  `tipoDocumento.rutChileno` — ver [La nota de crédito lleva el receptor](#la-nota-de-crédito-lleva-el-receptor-de-la-venta-que-corrige-2026-10-04).
 
 ### GET /ventas (listado)
 
@@ -459,6 +461,36 @@ lleva el tipo.
     monto con esa opción (`topeDeOpcion`, además del disponible de la venta).
   - **La propina no cuenta:** el tope es lo que el pago aplicó a la venta (`pago_aplicaciones`
     tipo `venta`), no lo cobrado en la tarjeta.
+
+## La nota de crédito lleva el receptor de la venta que corrige (2026-10-04)
+
+Frente fiscal propio; decisiones del owner en [`resueltos.md`](../agent/resueltos.md) ("La nota
+de crédito lleva el receptor…"), spec
+[`2026-10-04-receptor-de-nota-de-credito-design.md`](../superpowers/specs/2026-10-04-receptor-de-nota-de-credito-design.md).
+El SII exige `RUTRecep` y `RznSocRecep` en **toda** nota de crédito (Formato DTE v2.5, págs.
+19-21; giro, dirección y comuna son opcionales ahí). `crearNotaCreditoEnTransaccion` —la nota
+manual y la del webhook— resuelve el receptor bajo el lock de la venta:
+
+| La venta que corrige… | La corrección lleva |
+|---|---|
+| tiene customer | una **copia** de sus filas de `venta_customer`, todas las columnas (`tercero_id` incluido). Mandar `receptor` es 400: la nota va al mismo cliente que la venta |
+| no tiene, y el body trae `receptor` (`{ nombre, rut }`) | ese receptor: nombre sin blancos (≤ 100); en Chile el RUT se valida y se guarda normalizado, en otro país (en pausa) como vino |
+| no tiene, ni hay `receptor` | si la corrección lleva tipo NC, **`ventas.receptor_es_emisor = true`**: "a nombre del propio emisor" (FAQ SII 001.380.6571.003). La devolución interna no es documento tributario y no lleva la marca |
+
+- **Se copia, no se lee al emitir:** el receptor es un hecho de la nota (ADR-010), y así se lee
+  sola, como su `config_calculo`. El detalle y el ticket de la nota lo muestran sin ir a buscarlo
+  a otra venta.
+- **La marca congela el hecho, no los datos del local:** el RUT y la razón social del emisor
+  se derivan al emitir. Sin ella, el emisor de mañana no distingue "faltó el dato" de "nadie lo
+  pidió". `@Check`: solo `true` en una corrección; `DEFAULT false`, sin backfill.
+- **La serie de una venta sin customer:** el detalle devuelve `receptorSugerido` (`{ nombre,
+  rut }` de la última nota de la venta con receptor, en la misma consulta de la cabecera) y el
+  modal lo precarga editable (owner, 2026-10-04): si el sistema ya sabe quién es el comprador,
+  "a nombre del emisor" no corresponde. El servidor congela lo que llega en el body, así que las
+  notas de esa serie pueden llevar receptores distintos.
+- **Idempotencia:** `receptor` entra en la huella; reintentar con otro es otra nota (422). Sin
+  receptor la clave no aparece, así que la huella es la de antes del campo y una clave emitida
+  antes del deploy se sigue reproduciendo.
 
 ## Redondeo: la NC hereda el criterio del documento que corrige (2026-08-21)
 

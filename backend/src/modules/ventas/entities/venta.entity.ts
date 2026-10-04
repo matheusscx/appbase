@@ -37,6 +37,10 @@ export type DevolucionVia = 'pago' | 'sin_plata' | 'pasarela';
   'chk_ventas_devolucion_via',
   `"devolucion_via" IN ('pago','sin_plata','pasarela')`,
 )
+@Check(
+  'chk_ventas_receptor_es_emisor',
+  `NOT "receptor_es_emisor" OR "venta_referencia_id" IS NOT NULL`,
+)
 export class Venta {
   @PrimaryGeneratedColumn('uuid', { name: 'venta_id' })
   id: string;
@@ -149,6 +153,22 @@ export class Venta {
    */
   @Column({ name: 'devolucion_pago_id', type: 'uuid', nullable: true })
   devolucionPagoId: string | null;
+
+  /**
+   * Una nota de crédito con tipo de documento sin datos del comprador (la venta no
+   * tenía customer y el cajero no los capturó, o la nota es automática) va a nombre
+   * del propio emisor: la excepción que publica el SII (FAQ 001.380.6571.003). Se
+   * congela el hecho, no los datos del local, que se derivan al emitir. Solo
+   * `true` en una corrección (`@Check`). Quién la escribe:
+   * `VentasService.crearNotaCreditoEnTransaccion`.
+   */
+  @Column({
+    name: 'receptor_es_emisor',
+    type: 'boolean',
+    nullable: false,
+    default: false,
+  })
+  receptorEsEmisor: boolean;
 
   @Column({ type: 'text', nullable: true })
   comentario: string | null;

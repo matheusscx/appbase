@@ -83,7 +83,12 @@ async function esperar(ms = 50) {
 }
 
 /** Monta cerrado y abre: la elección por defecto nace en el `watch(open)`. */
-async function montar(opciones: OpcionDevolucion[], caja: boolean = true, ventaId = 'v-1') {
+async function montar(
+  opciones: OpcionDevolucion[],
+  caja: boolean = true,
+  ventaId = 'v-1',
+  receptor: Record<string, unknown> = {},
+) {
   apiFetch.mockImplementation((url: string) =>
     url.endsWith('/caja/activa')
       ? Promise.resolve(caja ? { id: 'caja-1', estado: 'abierta' } : null)
@@ -105,6 +110,10 @@ async function montar(opciones: OpcionDevolucion[], caja: boolean = true, ventaI
       detalles: DETALLES,
       configCalculo: null,
       opciones,
+      cliente: null,
+      receptorSugerido: null,
+      rutChileno: true,
+      ...receptor,
       open: false,
     },
   })
@@ -443,5 +452,105 @@ describe('NotaCreditoModal — una nota por intento de emisión (ADR-026)', () =
     await esperar()
 
     expect(claveDe(1)).toBe(claveDe(0))
+  })
+})
+
+describe('NotaCreditoModal — el receptor', () => {
+  const campo = (qa: string): HTMLInputElement => {
+    const el = dialogo().querySelector(`[data-qa="${qa}"]`)
+    expect(el, qa).toBeTruthy()
+    return (el!.tagName === 'INPUT' ? el : el!.querySelector('input')) as HTMLInputElement
+  }
+  async function tipear(qa: string, valor: string) {
+    const input = campo(qa)
+    input.value = valor
+    input.dispatchEvent(new Event('input'))
+    await esperar()
+  }
+  const bloque = () => dialogo().querySelector('[data-qa="receptor-nota"]')?.textContent ?? ''
+  async function bodyAlConfirmar(): Promise<Record<string, unknown>> {
+    generar().click()
+    await esperar()
+    const llamada = apiFetch.mock.calls.find(([url]) => String(url).endsWith('/notas-credito'))
+    expect(llamada, 'el POST de la nota').toBeTruthy()
+    return llamada![1].body as Record<string, unknown>
+  }
+
+  it('con cliente en la venta, la nota va a su nombre: no se piden datos ni se mandan', async () => {
+    await montar([TARJETA], true, 'v-1', {
+      cliente: { nombre: 'Comercial Andes SpA', rut: '76123456-0' },
+    })
+
+    expect(bloque()).toContain('La nota va a nombre del cliente de la venta')
+    expect(bloque()).toContain('Comercial Andes SpA')
+    expect(bloque()).toContain('76123456-0')
+    expect(dialogo().querySelector('[data-qa="receptor-rut"]')).toBeNull()
+    expect(await bodyAlConfirmar()).not.toHaveProperty('receptor')
+  })
+
+  it('sin cliente y sin datos, avisa que va a nombre del local y no manda receptor', async () => {
+    await montar([TARJETA])
+
+    expect(bloque()).toContain('Datos del cliente (opcional)')
+    expect(bloque()).toContain('la nota va a nombre del local')
+    expect(generar().disabled).toBe(false)
+    expect(await bodyAlConfirmar()).not.toHaveProperty('receptor')
+  })
+
+  it('en una devolución interna no pide datos ni los manda: no es documento tributario', async () => {
+    await montar([{ ...TARJETA, registro: 'devolucion_interna' }], true, 'v-1', {
+      receptorSugerido: { nombre: 'Juan Pérez', rut: '12345678-9' },
+    })
+
+    expect(dialogo().querySelector('[data-qa="receptor-rut"]')).toBeNull()
+    expect(bloque()).not.toContain('a nombre del local')
+    // Ni siquiera un sugerido con DV malo frena: no se mira.
+    expect(generar().disabled).toBe(false)
+    expect(await bodyAlConfirmar()).not.toHaveProperty('receptor')
+  })
+
+  it('precarga el receptor de la nota anterior, editable, y manda lo que quedó', async () => {
+    await montar([TARJETA], true, 'v-1', {
+      receptorSugerido: { nombre: 'Juan Pérez', rut: '12345678-5' },
+    })
+
+    expect(campo('receptor-nombre').value).toBe('Juan Pérez')
+    expect(campo('receptor-rut').value).toBe('12345678-5')
+    await tipear('receptor-nombre', '  Ana Soto ')
+    await tipear('receptor-rut', '11.111.111-1')
+
+    expect((await bodyAlConfirmar()).receptor).toEqual({ nombre: 'Ana Soto', rut: '11.111.111-1' })
+  })
+
+  it('borrar el precargado vuelve a "a nombre del local" (devuelve otra persona que no da datos)', async () => {
+    await montar([TARJETA], true, 'v-1', {
+      receptorSugerido: { nombre: 'Juan Pérez', rut: '12345678-5' },
+    })
+    await tipear('receptor-nombre', '')
+    await tipear('receptor-rut', '')
+
+    expect(bloque()).toContain('la nota va a nombre del local')
+    expect(await bodyAlConfirmar()).not.toHaveProperty('receptor')
+  })
+
+  it.each([
+    ['solo el nombre', 'Juan Pérez', '', 'Falta el RUT del cliente'],
+    ['solo el RUT', '', '12.345.678-5', 'Falta el nombre del cliente'],
+    ['un RUT con DV malo', 'Juan Pérez', '12.345.678-9', 'El RUT del cliente no es válido'],
+  ])('%s: lo dice y no deja confirmar', async (_caso, nombre, rut, mensaje) => {
+    await montar([TARJETA])
+    await tipear('receptor-nombre', nombre)
+    await tipear('receptor-rut', rut)
+
+    expect(bloque()).toContain(mensaje)
+    expect(generar().disabled).toBe(true)
+  })
+
+  it('sin RUT chileno (otro país, en pausa) el DV no se mira', async () => {
+    await montar([TARJETA], true, 'v-1', { rutChileno: false })
+    await tipear('receptor-nombre', 'Juan Pérez')
+    await tipear('receptor-rut', '20-12345678-3')
+
+    expect(generar().disabled).toBe(false)
   })
 })

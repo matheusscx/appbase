@@ -163,8 +163,9 @@ pasa el customer a `receptorDeLaVenta`, que devuelve el que se congela:
 
 `GET /tipos-documento` suma `receptorCompleto` y `rutChileno` por tipo: la pantalla no conoce
 el país y valida con lo que el servidor le dice (`composables/useReceptor.ts`, gemelo de la
-regla). El detalle (`GET /ventas/:id`) devuelve `giro` y `comuna` en `customer`. ⛔ La nota de
-crédito no copia el receptor de la venta que corrige: queda en `pendientes.md`.
+regla). El detalle (`GET /ventas/:id`) devuelve `giro` y `comuna` en `customer`. La nota de
+crédito lleva el receptor de la venta que corrige (o el que capture el cajero, o la marca "a
+nombre del emisor"): [reembolsos-nota-credito.md](reembolsos-nota-credito.md#la-nota-de-crédito-lleva-el-receptor-de-la-venta-que-corrige-2026-10-04).
 
 Como toda venta nace con tipo, **el tipo ya no impide anular**: anular mira los documentos emitidos,
 ver `POST /ventas/:id/anular`.

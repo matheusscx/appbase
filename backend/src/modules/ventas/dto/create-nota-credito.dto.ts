@@ -8,6 +8,8 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
+  MinLength,
   Validate,
   ValidateIf,
   ValidateNested,
@@ -72,6 +74,25 @@ export class DevolucionViaDto {
   sinPlata?: true;
 }
 
+/**
+ * Quién recibe la nota cuando la venta no tiene customer: lo que el SII exige en
+ * la nota de crédito (Formato DTE v2.5, `RznSocRecep` y `RUTRecep`). El RUT se
+ * valida según el país en `VentasService.crearNotaCreditoEnTransaccion`.
+ */
+export class ReceptorNotaCreditoDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100, {
+    message:
+      'La razón social no puede pasar de 100 caracteres (límite del SII)',
+  })
+  nombre: string;
+
+  @IsString()
+  @MinLength(1)
+  rut: string;
+}
+
 export class CreateNotaCreditoDto {
   // El service ya rechaza monto <= 0 (crearNotaCredito); se refuerza en el DTO.
   @IsNumberString()
@@ -105,4 +126,15 @@ export class CreateNotaCreditoDto {
   @ValidateNested({ each: true })
   @Type(() => DevolucionNotaCreditoDto)
   devoluciones?: DevolucionNotaCreditoDto[];
+
+  /**
+   * Solo si la venta no tiene customer; con customer, la nota lleva el de la venta
+   * y mandar otro es 400. Sin receptor, la nota va a nombre del emisor.
+   * `IsObject` además de `ValidateNested`: este deja pasar un array.
+   */
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ReceptorNotaCreditoDto)
+  receptor?: ReceptorNotaCreditoDto;
 }

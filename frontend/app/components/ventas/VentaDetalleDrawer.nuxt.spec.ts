@@ -188,6 +188,8 @@ const VENTA = {
   },
   pagos: [],
   customer: null,
+  receptorEsEmisor: false,
+  receptorSugerido: null,
   propina: null,
   // Lo que el BACKEND decide sobre los documentos (spec emisión por venta § 3.4
   // y § 3.5): la pantalla solo lo muestra. Una venta pagada no se anula.
@@ -650,6 +652,43 @@ describe('VentaDetalleDrawer — el disponible sale del backend', () => {
     const modal = wrapper.findComponent({ name: 'VentasNotaCreditoModal' })
 
     expect(modal.props('opciones')).toEqual(VENTA.opcionesDevolucion)
+  })
+})
+
+describe('VentaDetalleDrawer — el receptor de la nota de crédito', () => {
+  it('le pasa al modal el cliente, el receptor sugerido y si el RUT es chileno, del backend', async () => {
+    documentoActual = {
+      ...VENTA,
+      tipoDocumento: { id: 'td-39', codigo: '39', nombre: 'Boleta', esBoleta: true, rutChileno: true },
+      receptorSugerido: { nombre: 'Juan Pérez', rut: '12345678-5' },
+    } as unknown as typeof VENTA
+    try {
+      const modal = (await montar()).findComponent({ name: 'VentasNotaCreditoModal' })
+
+      expect(modal.props('cliente')).toBeNull()
+      expect(modal.props('receptorSugerido')).toEqual({ nombre: 'Juan Pérez', rut: '12345678-5' })
+      expect(modal.props('rutChileno')).toBe(true)
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  })
+
+  it('una nota a nombre del emisor lo dice donde iría el cliente', async () => {
+    documentoActual = { ...NOTA_CREDITO, receptorEsEmisor: true } as unknown as typeof VENTA
+    try {
+      const wrapper = await montar()
+
+      expect(wrapper.find('[data-qa="receptor-es-emisor"]').text()).toContain('A nombre del local')
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  })
+
+  it('una venta sin la marca no lo dice', async () => {
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="receptor-es-emisor"]').exists()).toBe(false)
   })
 })
 

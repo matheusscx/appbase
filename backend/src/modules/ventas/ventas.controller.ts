@@ -90,6 +90,7 @@ export class VentasController {
       monto: dto.monto,
       comentario: dto.comentario,
       devoluciones: dto.devoluciones,
+      receptor: dto.receptor,
       // El cliente dice por dónde vuelve la plata; el servidor resuelve qué
       // documento corrige y valida que el pago sea de ESTA venta y ESTE tenant.
       via:

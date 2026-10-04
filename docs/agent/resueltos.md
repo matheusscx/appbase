@@ -23,6 +23,90 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La nota de crédito lleva el receptor de la venta que corrige (cerrada 2026-10-04)
+
+Sale de [`pendientes.md`](pendientes.md) § 6. Frente fiscal propio. La regla viva está en
+[`features/reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md) ("La nota de
+crédito lleva el receptor…"), [PRODUCTO](../PRODUCTO.md) y
+[ADR-010](../adr/010-preparacion-sii-datos-fiscales.md); spec:
+[`2026-10-04-receptor-de-nota-de-credito-design.md`](../superpowers/specs/2026-10-04-receptor-de-nota-de-credito-design.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 6
+
+- [ ] **La nota de crédito no lleva el receptor de la venta que corrige** (fiscal, **frente
+  propio**; anotado 2026-10-03 al cerrar "La Factura exige receptor", ver
+  [`resueltos.md`](resueltos.md)). En la nota de crédito (61) el SII exige `RUTRecep` y
+  `RznSocRecep` (Formato DTE v2.5, zona Receptor; giro, dirección y comuna son opcionales ahí).
+  Hoy la NC de una Factura no escribe `venta_customer`: el receptor queda solo en la venta
+  original. Decidir **en su propia sesión** si la NC congela su propio receptor (copiado de la
+  venta que corrige) o lo lee de ella al emitir, y verificarlo contra la serie de notas.
+
+  **Cómo arrancarlo** (decidido 2026-10-04; norma verificada por la sesión del frente en el PDF
+  oficial; análisis e investigación de la "Sesión de esfuerzo máximo"; decisiones del **owner**
+  por AskUserQuestion de la sesión del frente, las cuatro recomendadas).
+  - **La norma.** [Formato DTE v2.5](https://www.sii.cl/factura_electronica/factura_mercado/formato_dte_202602.pdf),
+    págs. 19-21, columna NOTA CRED: `RUTRecep` y `RznSocRecep` son 1 (obligatorios **en toda
+    NC**, también la de una boleta); giro, dirección y comuna, 3 (opcionales). La NC de una
+    boleta sin comprador identificado: [FAQ SII 001.380.6571.003](https://www.sii.cl/preguntas_frecuentes/bol_electr_vtas_serv/001_380_6571.htm)
+    (actualizada 2026-07-14): *"excepcionalmente y sólo cuando sea infructuosa la obtención de
+    los datos del comprador"* va a nombre del propio emisor. Es práctica publicada del SII, no
+    una cláusula de la resolución vigente (la Res. 19/2008 que lo decía quedó sin efecto por la
+    74/2020). El 66.666.666-6 es de la boleta, no de la NC.
+  - **Medido** (e2e, 2026-10-04): la NC de una Factura es un 61 `sistema` armado, sin fila en
+    `venta_customer`; el detalle y el ticket de la NC dan `customer: null`.
+  - **La NC copia el receptor** de la venta que corrige, en su misma transacción
+    (`crearNotaCreditoEnTransaccion`: la manual y la del webhook), `tercero_id` incluido. No se
+    lee al emitir: es un hecho de la nota (ADR-010, P4) y "la nota va al mismo cliente que la
+    venta"; un receptor distinto del documento referenciado es inconsistente.
+  - **Toda corrección de una venta con customer**, sea cual sea el tipo (Factura, boleta con
+    customer, devolución interna): sin ramas por tipo.
+  - **Venta sin customer:** el modal de la NC ofrece **nombre y RUT** (opcional; RUT con DV en
+    Chile, como la Factura). Si no se captura —o la nota es automática, sin nadie en el
+    mostrador—, la nota queda marcada **explícita** "a nombre del emisor": se congela el hecho,
+    no los datos del local, que se derivan al emitir. Sin la marca, el emisor de mañana no
+    distingue "faltó el dato" de "nadie lo pidió".
+  - **La serie de una venta sin customer** (owner, 2026-10-04, por AskUserQuestion de la Sesión
+    de esfuerzo máximo, la recomendada): la NC siguiente **precarga** el receptor de la última
+    que lo capturó, editable. Si el sistema ya sabe quién es el comprador, "a nombre del emisor"
+    no corresponde. Es una lectura para precargar: el servidor congela lo que llega en el body.
+
+### Qué se hizo
+
+- **Norma verificada en la fuente** (PDF del DTE v2.5 y la FAQ del SII), no en la entrada: la
+  NC de una **boleta** también exige receptor, y eso agregó al frente la captura y la marca.
+- **Backend:** `ventas.receptor_es_emisor` (`boolean NOT NULL DEFAULT false`, `@Check` solo en
+  correcciones). `crearNotaCreditoEnTransaccion` lee el `venta_customer` de la venta bajo el
+  lock y, en un solo `save`, copia sus filas a la nota o guarda el receptor capturado
+  (`CreateNotaCreditoDto.receptor`, nombre ≤ 100 y RUT; en Chile con DV y normalizado); sin
+  ninguno, una nota con tipo NC lleva la marca. Con customer en la venta, un `receptor` es 400.
+  `receptor` entra en la huella de idempotencia. `GET /ventas/:id` suma `receptorEsEmisor`,
+  `receptorSugerido` (subconsulta de la cabecera, sin otra ida a la base) y
+  `tipoDocumento.rutChileno`.
+- **Frontend:** `NotaCreditoModal` muestra a nombre de quién va la nota o, sin cliente, ofrece
+  nombre y RUT precargados con `receptorSugerido` (`problemaDelReceptorDeNota`, gemela del
+  servidor, en `useReceptor.ts`). `VentaDetalleDrawer` dice "A nombre del local" en la nota con
+  la marca.
+- **Arranque sobre una base con ventas:** la columna nueva sincroniza sobre ventas y notas
+  existentes (default `false`, cumplen el `@Check`).
+
+### Qué lo fija
+
+- `ventas.e2e-spec.ts`, "POST /ventas/:id/notas-credito — el receptor" (contra la base): la serie de dos notas de una Factura, cada una con la copia entera y el ticket con el
+  cliente; el 400 por otro receptor; la boleta sin cliente (capturado, a nombre del emisor y el
+  `receptorSugerido` de la serie); los receptores inválidos; el 422 de la misma clave con otro
+  receptor. Mutantes, cada uno revertido a la conducta anterior: sin la copia → 2 rojos; marca
+  siempre `false` → 1; sin el 400 → 1; sin `receptor` en la huella → 1.
+- `ventas.service.spec.ts`, "el receptor de la nota": la devolución interna copia y no lleva
+  la marca (mutante "la marca sin mirar el tipo" → 1 rojo); la copia lleva todas las columnas
+  (sin `giro` → 2 rojos); RUT de Chile y de otro país. Y la huella sin receptor es literal a la
+  de antes del campo (mutante `receptor: null` en la huella → 1 rojo): sin eso, una clave previa
+  al deploy reintentada con el mismo body daba 422.
+- `NotaCreditoModal.nuxt.spec.ts`, "el receptor": sin el chequeo del receptor en
+  `puedeConfirmar` → 3 rojos; sin la precarga → 1. `useReceptor.spec.ts` y
+  `VentaDetalleDrawer.nuxt.spec.ts`: la regla gemela y la marca en el detalle.
+
+---
+
 ## Una venta que llega a $0 por un descuento deja su documento (cerrada 2026-10-04)
 
 Sale de [`pendientes.md`](pendientes.md) § 6 (fiscal, frente propio). La regla viva, en

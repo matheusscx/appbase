@@ -91,3 +91,26 @@ export function problemaDelReceptor(c: ReceptorEnPantalla, regla: ReglaReceptor)
   if (regla.rutChileno && c.rut.trim() && !rutValido(c.rut)) return 'El RUT del cliente no es válido'
   return null
 }
+
+/**
+ * El receptor que el cajero captura en una nota de crédito cuando la venta no
+ * tiene cliente: solo nombre y RUT, lo que el SII exige en la nota (owner,
+ * 2026-10-04). Vacío es válido —la nota va a nombre del local—; si viene uno,
+ * va el otro. Gemela de `crearNotaCreditoEnTransaccion` en el backend, que la
+ * vuelve a exigir.
+ */
+export function problemaDelReceptorDeNota(
+  r: { nombre: string, rut: string },
+  rutChileno: boolean,
+): string | null {
+  const nombre = r.nombre.trim()
+  const rut = r.rut.trim()
+  if (!nombre && !rut) return null
+  if (!nombre) return 'Falta el nombre del cliente'
+  if (!rut) return 'Falta el RUT del cliente'
+  if (r.nombre.length > LARGO_RECEPTOR.nombre) {
+    return `La razón social no puede pasar de ${LARGO_RECEPTOR.nombre} caracteres (límite del SII)`
+  }
+  if (rutChileno && !rutValido(rut)) return 'El RUT del cliente no es válido'
+  return null
+}

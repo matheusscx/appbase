@@ -1781,6 +1781,9 @@ CREATE TABLE "ventas" (
   -- hace de "no vuelve plata" una serie: lo ya rebajado baja el saldo por rebajar.
   "devolucion_via"        TEXT,
   "devolucion_pago_id"    UUID,          -- el pago por el que volvió: el elegido con 'pago', el único de la venta con 'pasarela'
+  -- Una nota de crédito sin datos del comprador va a nombre del propio emisor (FAQ
+  -- SII 001.380.6571.003): se congela el hecho; los datos del emisor salen al emitir.
+  "receptor_es_emisor"    BOOLEAN       NOT NULL DEFAULT false,
   "comentario"            TEXT,
   -- Config financiera del tenant con la que se calculó: formula, calculoDescuentos,
   -- calculoRecargos, escalaCalculo, modoRedondeo. Sin ella el congelado de las
@@ -1794,7 +1797,8 @@ CREATE TABLE "ventas" (
   "creado_el"             TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"        TIMESTAMPTZ,
   "eliminado_el"          TIMESTAMPTZ,
-  CONSTRAINT chk_ventas_devolucion_via CHECK ("devolucion_via" IN ('pago','sin_plata','pasarela'))
+  CONSTRAINT chk_ventas_devolucion_via CHECK ("devolucion_via" IN ('pago','sin_plata','pasarela')),
+  CONSTRAINT chk_ventas_receptor_es_emisor CHECK (NOT "receptor_es_emisor" OR "venta_referencia_id" IS NOT NULL)
 );
 
 -- Las notas de crédito de una venta: se busca en cada lectura del detalle.

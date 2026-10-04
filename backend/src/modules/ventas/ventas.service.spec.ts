@@ -30,6 +30,7 @@ import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { VentaPromocion } from './entities/venta-promocion.entity';
 import { VentaCustomer } from './entities/venta-customer.entity';
+import { huellaDe } from '../idempotencia/huella';
 import {
   IdempotenciaService,
   type SolicitudIdempotenteInput,
@@ -3317,6 +3318,167 @@ describe('VentasService', () => {
       });
     });
 
+    // La forma del SQL (filtro de borrado, que la fila es de la venta original) la
+    // ve el e2e (`ventas.e2e-spec.ts`, "el receptor"); acá, las ramas.
+    describe('el receptor de la nota', () => {
+      const CLIENTE = {
+        tercero_id: 'tercero-1',
+        nombre: 'Comercial Andes SpA',
+        rut: '76123456-0',
+        direccion: 'Av. Matta 1234',
+        giro: 'Ferretería',
+        comuna: 'Santiago',
+        telefono: null,
+        email: null,
+      };
+      let customerRows: (typeof CLIENTE)[];
+      let codigoIso: string;
+      const interna = () =>
+        ventaDocumentosMock.documentoQueCorrige.mockResolvedValue({
+          documento: { id: 'doc-nadie', emisor: 'nadie', monto: '11305.0000' },
+          saldo: null,
+          mueveCaja: false,
+          devolvibleDelPago: null,
+        });
+      const guardadoComoCustomer = () =>
+        ncManager.save.mock.calls.filter(([e]) => e === VentaCustomer);
+      const notaGuardada = () =>
+        ncManager.save.mock.calls.find(([e]) => e === Venta)?.[1] as {
+          receptorEsEmisor: boolean;
+        };
+
+      beforeEach(() => {
+        customerRows = [];
+        codigoIso = 'CL';
+        const base = ncManager.query.getMockImplementation()!;
+        ncManager.query.mockImplementation((sql: string, p?: unknown[]) => {
+          if (sql.includes('FROM venta_customer'))
+            return Promise.resolve(customerRows);
+          if (sql.includes('codigo_iso'))
+            return Promise.resolve([{ codigo_iso: codigoIso }]);
+          return base(sql, p);
+        });
+      });
+
+      it.each([
+        ['una nota con tipo', () => undefined],
+        ['la devolución interna', interna],
+      ])(
+        'con customer en la venta, %s lo copia entero a la nota y no lleva la marca',
+        async (_caso, preparar) => {
+          preparar();
+          customerRows = [CLIENTE];
+
+          await service.crearNotaCredito(baseParams);
+
+          expect(guardadoComoCustomer()).toEqual([
+            [
+              VentaCustomer,
+              [
+                {
+                  ventaId: 'venta-uuid-001',
+                  terceroId: 'tercero-1',
+                  nombre: 'Comercial Andes SpA',
+                  rut: '76123456-0',
+                  direccion: 'Av. Matta 1234',
+                  giro: 'Ferretería',
+                  comuna: 'Santiago',
+                  telefono: null,
+                  email: null,
+                },
+              ],
+            ],
+          ]);
+          expect(notaGuardada().receptorEsEmisor).toBe(false);
+        },
+      );
+
+      it('sin customer ni receptor, la nota con tipo va a nombre del emisor; la devolución interna no lleva la marca', async () => {
+        await service.crearNotaCredito(baseParams);
+        expect(notaGuardada().receptorEsEmisor).toBe(true);
+        expect(guardadoComoCustomer()).toEqual([]);
+
+        ncManager.save.mockClear();
+        interna();
+        await service.crearNotaCredito(baseParams);
+        expect(notaGuardada().receptorEsEmisor).toBe(false);
+        expect(guardadoComoCustomer()).toEqual([]);
+      });
+
+      it('el receptor capturado, en Chile, se congela con el RUT normalizado y sin blancos', async () => {
+        await service.crearNotaCredito({
+          ...baseParams,
+          receptor: { nombre: ' Juan Pérez ', rut: '12.345.678-5' },
+        });
+
+        expect(guardadoComoCustomer()).toEqual([
+          [
+            VentaCustomer,
+            [
+              {
+                ventaId: 'venta-uuid-001',
+                terceroId: null,
+                nombre: 'Juan Pérez',
+                rut: '12345678-5',
+              },
+            ],
+          ],
+        ]);
+        expect(notaGuardada().receptorEsEmisor).toBe(false);
+      });
+
+      it('en otro país (en pausa) el RUT no se mira: se guarda como vino, sin blancos', async () => {
+        codigoIso = 'AR';
+
+        await service.crearNotaCredito({
+          ...baseParams,
+          receptor: { nombre: 'Juan Pérez', rut: ' 20-12345678-3 ' },
+        });
+
+        expect(guardadoComoCustomer()[0][1]).toEqual([
+          expect.objectContaining({ rut: '20-12345678-3' }),
+        ]);
+      });
+
+      it.each([
+        [
+          { nombre: 'Juan', rut: '12.345.678-9' },
+          'CL',
+          'El RUT del cliente no es válido',
+        ],
+        [
+          { nombre: '  ', rut: '12.345.678-5' },
+          'CL',
+          'El nombre del cliente no puede quedar en blanco',
+        ],
+        [{ nombre: 'Juan', rut: '  ' }, 'AR', 'Falta el RUT del cliente'],
+      ])(
+        'un receptor inválido (%j, %s) es 400 y no guarda nada',
+        async (receptor, pais, mensaje) => {
+          codigoIso = pais;
+
+          await expect(
+            service.crearNotaCredito({ ...baseParams, receptor }),
+          ).rejects.toThrow(mensaje);
+          expect(notaGuardada()).toBeUndefined();
+        },
+      );
+
+      it('con customer en la venta, un receptor distinto es 400 y no guarda nada', async () => {
+        customerRows = [CLIENTE];
+
+        await expect(
+          service.crearNotaCredito({
+            ...baseParams,
+            receptor: { nombre: 'Otra persona', rut: '12.345.678-5' },
+          }),
+        ).rejects.toThrow(
+          'La nota de crédito va al mismo cliente que la venta',
+        );
+        expect(notaGuardada()).toBeUndefined();
+      });
+    });
+
     describe('la devolución interna (el documento corregido es de "nadie")', () => {
       beforeEach(() => {
         ventaDocumentosMock.documentoQueCorrige.mockResolvedValue({
@@ -4037,6 +4199,9 @@ describe('VentasService', () => {
               // Lo manda la consulta (`td.es_boleta`): el flag es del catálogo,
               // no se deduce del nombre ni del código.
               tipo_documento_es_boleta: true,
+              // El país del tipo: con él la pantalla valida el RUT que capture
+              // para una nota de crédito (DV módulo 11 solo en Chile).
+              tipo_documento_pais: 'CL',
             },
           ]);
         return Promise.resolve([]);
@@ -4054,6 +4219,7 @@ describe('VentasService', () => {
         codigo: '39',
         nombre: 'Boleta de Venta',
         esBoleta: true,
+        rutChileno: true,
       });
       expect(res.esNotaCredito).toBe(false);
       expect(res.esCorreccion).toBe(false);
@@ -5092,6 +5258,28 @@ describe('VentasService', () => {
           SolicitudIdempotenteInput,
         ];
         expect(otra.huella).not.toBe(solicitud.huella);
+      });
+
+      it('sin receptor la huella es la de antes del campo (una clave previa al deploy se reproduce); con receptor, cambia', async () => {
+        await service.crearNotaCreditoDesdeVenta(desdeVenta);
+        await service.crearNotaCreditoDesdeVenta({
+          ...desdeVenta,
+          receptor: { nombre: 'Juan Pérez', rut: '12.345.678-5' },
+        });
+        const [[sin], [con]] = idempotencia.ejecutar.mock.calls as [
+          SolicitudIdempotenteInput,
+        ][];
+        // Literal a la composición anterior al receptor, sin la clave.
+        expect(sin.huella).toBe(
+          huellaDe('notaCredito.emitir', {
+            ventaId: VENTA_ORIG_ID,
+            monto: baseParams.monto,
+            comentario: baseParams.comentario,
+            devoluciones: [],
+            via: baseParams.via,
+          }),
+        );
+        expect(con.huella).not.toBe(sin.huella);
       });
 
       it('los mismos ítems devueltos en otro orden dan la misma huella', async () => {

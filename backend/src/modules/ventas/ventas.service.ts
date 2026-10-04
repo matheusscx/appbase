@@ -63,6 +63,7 @@ import {
   resolverUnidadBaseDeItem,
 } from '../../common/utils/cantidad-presentacion.util';
 import type { CreateVentaDto, CustomerVentaDto } from './dto/create-venta.dto';
+import type { ReceptorNotaCreditoDto } from './dto/create-nota-credito.dto';
 import type { FiltroDocumento, QueryVentasDto } from './dto/query-ventas.dto';
 import { Venta, EstadoVenta } from './entities/venta.entity';
 import { VentaDetalle } from './entities/venta-detalle.entity';
@@ -209,6 +210,12 @@ export interface CrearNotaCreditoParams {
   monto: string;
   devoluciones?: DevolucionReembolso[];
   comentario?: string;
+  /**
+   * Quién recibe la nota cuando la venta no tiene customer (lo capturó el cajero).
+   * Con customer en la venta la nota lleva ese y mandar otro es 400; sin ninguno
+   * de los dos, la nota con tipo va a nombre del emisor (`receptorEsEmisor`).
+   */
+  receptor?: ReceptorNotaCreditoDto;
   /**
    * Por dónde vuelve la plata; de acá sale el documento que corrige la nota
    * (`VentaDocumentosService.documentoQueCorrige`). Con un pago en efectivo hay
@@ -2238,6 +2245,75 @@ export class VentasService {
         ? null
         : await this.exigirTipoNotaCredito(params.tenantId);
 
+      // El receptor de la nota (`pendientes.md` → `resueltos.md`, "La nota de
+      // crédito lleva el receptor de la venta que corrige"): el SII exige RUT y
+      // razón social en TODA nota de crédito (Formato DTE v2.5). La nota va al
+      // mismo cliente que la venta, así que se copia el suyo —todas las columnas,
+      // para que la nota se lea sola, como su `config_calculo`—. Sin customer en
+      // la venta, el que capturó el cajero; sin ninguno, la nota con tipo va a
+      // nombre del emisor (FAQ SII 001.380.6571.003). La devolución interna no es
+      // documento tributario: copia si hay, y nunca lleva la marca.
+      const customerDeLaVenta: {
+        tercero_id: string | null;
+        nombre: string;
+        rut: string | null;
+        direccion: string | null;
+        giro: string | null;
+        comuna: string | null;
+        telefono: string | null;
+        email: string | null;
+      }[] = await manager.query(
+        `SELECT tercero_id, nombre, rut, direccion, giro, comuna, telefono, email
+           FROM venta_customer
+          WHERE venta_id = $1 AND eliminado_el IS NULL
+          ORDER BY creado_el, customer_id`,
+        [params.ventaOriginalId],
+      );
+      const receptores: Partial<VentaCustomer>[] = customerDeLaVenta.map(
+        (c) => ({
+          terceroId: c.tercero_id,
+          nombre: c.nombre,
+          rut: c.rut,
+          direccion: c.direccion,
+          giro: c.giro,
+          comuna: c.comuna,
+          telefono: c.telefono,
+          email: c.email,
+        }),
+      );
+      if (params.receptor) {
+        if (receptores.length)
+          throw new BadRequestException(
+            'La nota de crédito va al mismo cliente que la venta: no se le cambia el receptor.',
+          );
+        const nombre = params.receptor.nombre.trim();
+        if (!nombre)
+          throw new BadRequestException(
+            'El nombre del cliente no puede quedar en blanco',
+          );
+        // El RUT, como el de la venta (`receptorDeLaVenta`): en Chile se valida
+        // y se guarda normalizado; en otro país, en pausa, como vino.
+        let rut = params.receptor.rut.trim();
+        const pais: { codigo_iso: string }[] = await manager.query(
+          `SELECT p.codigo_iso
+             FROM tenants t
+             JOIN provincia prov ON prov.provincia_id = t.provincia_id
+                  AND prov.eliminado_el IS NULL
+             JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
+            WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL`,
+          [params.tenantId],
+        );
+        if (pais[0]?.codigo_iso === CODIGO_ISO_CHILE) {
+          if (!rutValido(rut))
+            throw new BadRequestException('El RUT del cliente no es válido');
+          rut = normalizarRut(rut);
+        } else if (!rut) {
+          throw new BadRequestException('Falta el RUT del cliente');
+        }
+        receptores.push({ terceroId: null, nombre, rut });
+      }
+      const receptorEsEmisor = tipoNotaCredito !== null && !receptores.length;
+
       // Σ correcciones previas bajo el lock: dos NCs concurrentes sobre la misma
       // venta se serializan y no pueden exceder el total juntas. Por
       // `venta_referencia_id` y no por el tipo: la devolución interna cuenta.
@@ -2721,8 +2797,16 @@ export class VentasService {
           // La NC congela lo que heredó (decisión P4): así puede leerse
           // sola, sin ir a buscar la venta que corrige.
           configCalculo: cfgOriginal,
+          receptorEsEmisor,
         }),
       );
+      if (receptores.length)
+        await manager.save(
+          VentaCustomer,
+          receptores.map((r) =>
+            manager.create(VentaCustomer, { ...r, ventaId: nc.id }),
+          ),
+        );
 
       // 7. Las líneas, en un solo `save` con el array entero: el orden del
       // resultado es el del array, así que `detalles[i]` cruza con
@@ -3042,6 +3126,7 @@ export class VentasService {
     monto: string;
     devoluciones?: DevolucionReembolso[];
     comentario?: string;
+    receptor?: ReceptorNotaCreditoDto;
     via: ViaCorreccion;
     /** La `Idempotency-Key` del intento de emisión (ADR-026). */
     clave: string;
@@ -3081,6 +3166,13 @@ export class VentasService {
               ),
             ),
           via: nota.via,
+          // Otro receptor es otra nota: el documento va a otra persona. Sin
+          // receptor va `undefined`, que `huellaDe` descarta: la huella de una
+          // nota sin receptor es la misma que antes de que existiera el campo, y
+          // una clave emitida antes del deploy no se vuelve 422 al reintentarla.
+          receptor: nota.receptor
+            ? { nombre: nota.receptor.nombre, rut: nota.receptor.rut }
+            : undefined,
         }),
         mensajeOtrosDatos: MENSAJE_NOTA_CREDITO_OTROS_DATOS,
       },
@@ -3905,7 +3997,10 @@ export class VentasService {
       tipo_documento_codigo: string | null;
       tipo_documento_nombre: string | null;
       tipo_documento_es_boleta: boolean | null;
+      tipo_documento_pais: string | null;
       tiene_lineas_despachadas: boolean;
+      receptor_es_emisor: boolean;
+      receptor_sugerido: { nombre: string; rut: string | null } | null;
     }[] = await this.db.query(
       `SELECT v.venta_id, v.caja_id, v.moneda_id, v.tipo_documento_id, v.canal, v.estado,
               v.total_bruto, v.total_descuentos, v.total_recargos, v.total_impuestos, v.total_final,
@@ -3914,6 +4009,20 @@ export class VentasService {
               v.comentario, v.fecha, v.creado_el, v.venta_referencia_id,
               td.codigo AS tipo_documento_codigo, td.nombre AS tipo_documento_nombre,
               td.es_boleta AS tipo_documento_es_boleta,
+              tdp.codigo_iso AS tipo_documento_pais,
+              v.receptor_es_emisor,
+              -- El receptor de la última nota de esta venta que lo tiene: la
+              -- pantalla lo precarga en la nota siguiente cuando la venta no tiene
+              -- customer (owner, 2026-10-04). Una subconsulta y no otra ida a la base.
+              (SELECT json_build_object('nombre', vc.nombre, 'rut', vc.rut)
+                 FROM ventas nc
+                 JOIN venta_customer vc ON vc.venta_id = nc.venta_id
+                      AND vc.eliminado_el IS NULL
+                WHERE nc.venta_referencia_id = v.venta_id
+                  AND nc.tenant_id = v.tenant_id
+                  AND nc.eliminado_el IS NULL
+                ORDER BY nc.creado_el DESC, nc.venta_id DESC
+                LIMIT 1) AS receptor_sugerido,
               EXISTS (
                 SELECT 1 FROM cuentas cta
                   JOIN cuenta_lineas cl ON cl.cuenta_id = cta.cuenta_id
@@ -3927,6 +4036,7 @@ export class VentasService {
        FROM ventas v
        LEFT JOIN tipos_documento_tributario td
             ON td.tipo_documento_id = v.tipo_documento_id AND td.eliminado_el IS NULL
+       LEFT JOIN pais tdp ON tdp.pais_id = td.pais_id AND tdp.eliminado_el IS NULL
        WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL
          ${filtroPropio}`,
       paramsDetalle,
@@ -4291,6 +4401,9 @@ export class VentasService {
             // dice "esta factura" o "este documento" según esto. Nulo si el tipo
             // se borró del catálogo (el JOIN no lo trae): ahí no es boleta.
             esBoleta: v.tipo_documento_es_boleta === true,
+            // El RUT que se capture para una nota de crédito se valida con DV
+            // módulo 11: el país del tipo es el del tenant (`receptorDeLaVenta`).
+            rutChileno: v.tipo_documento_pais === CODIGO_ISO_CHILE,
           }
         : null,
       // Mismo criterio que `listar()` (`flagsDeCorreccion`): una corrección es
@@ -4493,6 +4606,10 @@ export class VentasService {
             email: customerRow['email'],
           }
         : null,
+      // Una nota de crédito sin datos del comprador va a nombre del emisor.
+      receptorEsEmisor: v.receptor_es_emisor === true,
+      // Solo sin customer: con customer, la nota lleva el de la venta.
+      receptorSugerido: customerRow ? null : (v.receptor_sugerido ?? null),
       pagos: pagos.map((p) => {
         const apps = aplicacionesPorPago.get(p['pago_id'] as string) ?? [];
         const montoAplicadoVenta = apps

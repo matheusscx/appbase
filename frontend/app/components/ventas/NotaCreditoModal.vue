@@ -2,6 +2,7 @@
 import Decimal from 'decimal.js'
 import type { CriterioRedondeoCongelado, DetalleVentaDevolucion } from '~/composables/useDevolucionInventario'
 import { idDeOtrosDatos } from '~/composables/useIntentoCobro'
+import { problemaDelReceptorDeNota } from '~/composables/useReceptor'
 import {
   avisoNotaRepetida,
   claveOpcion,
@@ -36,6 +37,15 @@ const props = defineProps<{
    * nota, así que el registro que anuncian es el que va a quedar.
    */
   opciones: OpcionDevolucion[]
+  /**
+   * El cliente de la venta: la nota va a su nombre (el servidor copia el suyo).
+   * `null` si la venta no tiene: ahí se ofrece capturar nombre y RUT.
+   */
+  cliente: { nombre: string, rut?: string | null } | null
+  /** El receptor de la última nota de esta venta que lo capturó: se precarga, editable. */
+  receptorSugerido: { nombre: string, rut: string | null } | null
+  /** El RUT capturado se valida con DV módulo 11 (lo dice el backend, por el país). */
+  rutChileno: boolean
 }>()
 export interface NotaCreditoSuccessPayload {
   id: string
@@ -67,6 +77,8 @@ const comentario = ref('')
 /** La clave de la opción elegida (`claveOpcion`); `undefined` hasta que se elige. */
 const seleccion = ref<string | undefined>(undefined)
 const submitting = ref(false)
+const receptorNombre = ref('')
+const receptorRut = ref('')
 const { filas, cargarDesdeDetalles, setCantidad, setReponer, filasValidas, devoluciones }
   = useDevolucionInventario()
 
@@ -84,6 +96,8 @@ const tope = computed(() => topeDeOpcion(props.disponible, opcionElegida.value))
 watch(open, (v) => {
   if (!v) return
   comentario.value = ''
+  receptorNombre.value = props.receptorSugerido?.nombre ?? ''
+  receptorRut.value = props.receptorSugerido?.rut ?? ''
   // Con una sola forma de devolver no hay nada que elegir; con varias, el
   // cajero elige: un default movería plata de la caja sin que lo decida.
   seleccion.value = props.opciones.length === 1 ? claveOpcion(props.opciones[0]!) : undefined
@@ -137,8 +151,22 @@ const opcionDisponible = computed(() => {
   return o !== null && !(o.mueveCaja && !tieneCaja.value)
 })
 
+/**
+ * Se pide el receptor solo para un documento tributario: la devolución interna
+ * no lo es, y el owner decidió la captura para la nota de crédito (2026-10-04).
+ */
+const pideReceptor = computed(() =>
+  !props.cliente && opcionElegida.value?.registro !== 'devolucion_interna',
+)
+const problemaReceptor = computed(() =>
+  !pideReceptor.value
+    ? null
+    : problemaDelReceptorDeNota({ nombre: receptorNombre.value, rut: receptorRut.value }, props.rutChileno),
+)
+const receptorVacio = computed(() => !receptorNombre.value.trim() && !receptorRut.value.trim())
+
 const puedeConfirmar = computed(() =>
-  montoValido.value && filasValidas.value && opcionDisponible.value,
+  montoValido.value && filasValidas.value && opcionDisponible.value && !problemaReceptor.value,
 )
 
 // Solo si hay más de una: en una venta toda afecta, repetir el total al lado
@@ -180,6 +208,9 @@ async function confirmar() {
     // Por dónde vuelve la plata: el servidor resuelve qué documento corrige.
     body.devolucion = cuerpoDevolucion(opcionElegida.value!)
     if (devoluciones.value.length) body.devoluciones = devoluciones.value
+    // Con cliente en la venta, la nota lleva el suyo: no se manda nada.
+    if (pideReceptor.value && !receptorVacio.value)
+      body.receptor = { nombre: receptorNombre.value.trim(), rut: receptorRut.value.trim() }
 
     const res = await useApiFetch<NotaCreditoSuccessPayload>(
       `${apiUrl}/ventas/${props.ventaId}/notas-credito`,
@@ -285,6 +316,27 @@ async function confirmar() {
           >
             Va a quedar: {{ registroQueQueda(opcionElegida.registro) }}
           </p>
+        </div>
+
+        <USeparator />
+
+        <div class="flex flex-col gap-2" data-qa="receptor-nota">
+          <p v-if="cliente" class="text-sm text-muted">
+            La nota va a nombre del cliente de la venta:
+            <span class="font-medium text-default">{{ cliente.nombre }}</span>
+            <span v-if="cliente.rut"> ({{ cliente.rut }})</span>
+          </p>
+          <template v-else-if="pideReceptor">
+            <span class="text-sm text-muted">Datos del cliente (opcional)</span>
+            <UInput v-model="receptorNombre" placeholder="Nombre o razón social" data-qa="receptor-nombre" />
+            <UInput v-model="receptorRut" placeholder="RUT" data-qa="receptor-rut" />
+            <p v-if="problemaReceptor" class="text-xs text-error">
+              {{ problemaReceptor }}
+            </p>
+            <p v-else-if="receptorVacio" class="text-xs text-muted">
+              Sin datos del cliente, la nota va a nombre del local.
+            </p>
+          </template>
         </div>
 
         <DevolucionInventarioLista

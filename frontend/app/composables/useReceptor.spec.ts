@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizarRut, problemaDelReceptor, rutValido } from './useReceptor'
+import { normalizarRut, problemaDelReceptor, problemaDelReceptorDeNota, rutValido } from './useReceptor'
 
 /**
  * Mismos casos que `backend/src/common/utils/rut.util.spec.ts`. Los DV salen de
@@ -96,5 +96,25 @@ describe('problemaDelReceptor', () => {
     ['nombre', 101, 'La razón social no puede pasar de 100 caracteres (límite del SII)'],
   ] as const)('un %s de %i caracteres frena (un tercero precargado puede traerlo)', (campo, largo, mensaje) => {
     expect(problemaDelReceptor({ ...completo, [campo]: 'x'.repeat(largo) }, boleta)).toBe(mensaje)
+  })
+})
+
+describe('problemaDelReceptorDeNota', () => {
+  it('vacío es válido: la nota va a nombre del local', () => {
+    expect(problemaDelReceptorDeNota({ nombre: ' ', rut: '' }, true)).toBeNull()
+  })
+
+  it.each([
+    [{ nombre: 'Juan Pérez', rut: ' ' }, 'Falta el RUT del cliente'],
+    [{ nombre: '  ', rut: '12.345.678-5' }, 'Falta el nombre del cliente'],
+    [{ nombre: 'x'.repeat(101), rut: '12.345.678-5' }, 'La razón social no puede pasar de 100 caracteres (límite del SII)'],
+    [{ nombre: 'Juan Pérez', rut: '12.345.678-9' }, 'El RUT del cliente no es válido'],
+  ])('%j → %s', (receptor, mensaje) => {
+    expect(problemaDelReceptorDeNota(receptor, true)).toBe(mensaje)
+  })
+
+  it('nombre y RUT válido pasan; en otro país el DV no se mira', () => {
+    expect(problemaDelReceptorDeNota({ nombre: 'Juan Pérez', rut: '12.345.678-5' }, true)).toBeNull()
+    expect(problemaDelReceptorDeNota({ nombre: 'Juan Pérez', rut: '20-12345678-9' }, false)).toBeNull()
   })
 })

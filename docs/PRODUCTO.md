@@ -1119,6 +1119,15 @@ salones y online; sin boleta sembrada, sin tipo y sin documentos). Pendiente:
 
 **Nota de crédito:** puede ser total (anula la venta completa) o parcial (anula parte). Referencia a la venta original mediante `venta_referencia_id` en la tabla `ventas`.
 
+**La nota de crédito va al mismo cliente que la venta** (owner, 2026-10-04): el SII exige RUT y
+razón social del receptor en toda nota. Si la venta tiene cliente, la nota guarda una copia y no
+se le puede poner otro. Si no tiene (una boleta sin RUT), al hacer la nota se le **ofrece** al
+cajero pedir nombre y RUT —solo esos dos— precargados con los de la última nota de esa venta que
+los tuvo; si el cliente no quiere o no tiene, la nota queda **a nombre del propio local**, que es
+la excepción que publica el SII cuando no se pueden obtener los datos del comprador. La nota
+automática de un reembolso de la pasarela, sin nadie en el mostrador, copia el cliente o va a
+nombre del local.
+
 Registra una venta completa en una sola transacción atómica:
 
 1. Cabecera (`ventas`): tenant, caja, canal, moneda, tipo documento, estado, totales, `venta_referencia_id` (para notas de crédito)

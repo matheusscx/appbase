@@ -1104,13 +1104,6 @@ transaccional nativo, con ALS — [ADR-020](../adr/020-contexto-transaccional-al
 Prisma y Drizzle tienen el mismo modelo manual de transacciones que TypeORM. No es un
 pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evaluación.
 
-- [ ] **La nota de crédito no lleva el receptor de la venta que corrige** (fiscal, **frente
-  propio**; anotado 2026-10-03 al cerrar "La Factura exige receptor", ver
-  [`resueltos.md`](resueltos.md)). En la nota de crédito (61) el SII exige `RUTRecep` y
-  `RznSocRecep` (Formato DTE v2.5, zona Receptor; giro, dirección y comuna son opcionales ahí).
-  Hoy la NC de una Factura no escribe `venta_customer`: el receptor queda solo en la venta
-  original. Decidir **en su propia sesión** si la NC congela su propio receptor (copiado de la
-  venta que corrige) o lo lee de ella al emitir, y verificarlo contra la serie de notas.
 - [ ] **Un reembolso de pasarela que se reintenta sale dos veces por el proveedor** (fiscal y
   plata, **frente propio**; anotado el 2026-10-03 por el frente de la nota de crédito
   idempotente, que lo encontró leyendo y lo **midió** con un e2e temporal en
