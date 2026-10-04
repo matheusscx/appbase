@@ -454,8 +454,41 @@ describe('ResumenNegocioService', () => {
         desde: '2026-09-18',
         hasta: '2026-09-18',
       });
-      // Tal cual: ni se reordena ni se le agrega/quita nada.
-      expect(res.perdidas.anulaciones).toBe(porTipoFixture);
+      // Tal cual: ni se reordena ni se le agrega nada.
+      expect(res.perdidas.anulaciones).toEqual(porTipoFixture);
+    });
+
+    // Decidido por la Sesión de esfuerzo máximo (2026-10-04): la comida del
+    // personal no es pérdida, así que no entra al bloque "Pérdidas". Merma y
+    // cortesía siguen, en el orden en que vienen.
+    it('saca la comida del personal de perdidas.anulaciones y deja el resto en su orden', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-18T15:00:00Z'));
+      const grupo = (tipo: TipoMotivoBaja) => ({
+        tipo,
+        platos: '1.0000',
+        precioCarta: '1000.0000',
+        costo: [],
+        sinValorizar: 0,
+        fiscal: null,
+      });
+      mockRespuestas({
+        zona: 'America/Santiago',
+        anulaciones: {
+          ...RESUMEN_ANULACIONES_VACIO,
+          porTipo: [
+            grupo(TipoMotivoBaja.MERMA),
+            grupo(TipoMotivoBaja.CONSUMO_PERSONAL),
+            grupo(TipoMotivoBaja.CORTESIA),
+          ],
+        },
+      });
+
+      const res = await service.hoy(TENANT);
+
+      expect(res.perdidas.anulaciones.map((g) => g.tipo)).toEqual([
+        TipoMotivoBaja.MERMA,
+        TipoMotivoBaja.CORTESIA,
+      ]);
     });
 
     it('pasa (tenantId, fecha, fecha) a MermasService.resumen y devuelve su resultado tal cual en perdidas.mermas', async () => {

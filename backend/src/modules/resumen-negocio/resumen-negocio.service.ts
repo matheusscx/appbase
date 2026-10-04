@@ -17,6 +17,7 @@ import {
   type ResumenAnulaciones,
 } from '../salones/anulaciones-reporte.service';
 import { MermasService, type ResumenMermas } from '../mermas/mermas.service';
+import { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
 
 export interface Comparado<T = string> {
   hoy: T;
@@ -47,7 +48,12 @@ export interface PorCobrar {
 }
 
 export interface PerdidasHoy {
-  /** `porTipo` tal cual lo devuelve `AnulacionesReporteService.resumen`. */
+  /**
+   * `porTipo` de `AnulacionesReporteService.resumen`, **sin la comida del
+   * personal**: no es pérdida (decidido por la Sesión de esfuerzo máximo el
+   * 2026-10-04, derivado de la decisión del owner de ese día), y Mermas y
+   * varianza ya la sacan. Sigue en el reporte de anulaciones.
+   */
   anulaciones: ResumenAnulaciones['porTipo'];
   mermas: ResumenMermas;
   // No hay "total de pérdidas": sumar los dos bloques contaría dos veces un
@@ -438,7 +444,9 @@ export class ResumenNegocioService {
         saldo: pc?.saldo ?? '0',
       },
       perdidas: {
-        anulaciones: anulacionesHoy.porTipo,
+        anulaciones: anulacionesHoy.porTipo.filter(
+          (g) => g.tipo !== TipoMotivoBaja.CONSUMO_PERSONAL,
+        ),
         mermas: mermasHoy,
       },
       masVendidos: masVendidosRows.map((r) => ({

@@ -23,6 +23,133 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La comida del personal tiene motivo propio y no paga IVA (cerrada 2026-10-04)
+
+Sale de [`pendientes.md`](pendientes.md) § 6 (fiscal, frente propio). La regla viva, en
+[`PRODUCTO.md`](../PRODUCTO.md) (*"La comida del personal tiene motivo propio"*) y en
+[`impuestos.md`](../features/impuestos.md#la-comida-del-personal-descuenta-sin-hecho-tributario-2026-10-04);
+diseño en
+[`2026-10-04-comida-del-personal-design.md`](../superpowers/specs/2026-10-04-comida-del-personal-design.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 6
+
+- [ ] **La comida del personal no tiene motivo propio, y como cortesía pagaría IVA de más**
+  (fiscal — frente propio; anotado el 2026-10-03 por decisión del owner, *"Anotarlo aparte"*,
+  al cerrar la cortesía como retiro gravado). Desde ese frente toda anulación de tipo `cortesia`
+  congela el IVA del retiro (owner: *"Siempre paga IVA"*), pero el personal comiendo **dentro**
+  del local no es retiro: los bienes no salen de la empresa (Reglamento DS 55/1977 art. 11;
+  Oficio 734/2002, sobre un restaurante; investigación
+  [`2026-10-03-cortesia-retiro-iva.md`](investigaciones/2026-10-03-cortesia-retiro-iva.md) § 1,
+  escena c). Si un local la registra como cortesía, el reporte le suma un IVA que no debe; como
+  merma, el kardex la llama pérdida. **Lo que hay que decidir:** si va un cuarto tipo de motivo
+  (`consumo_personal`: descuenta stock, sin IVA), desde qué pantalla se registra (la comida del
+  personal no siempre pasa por una mesa) y si el criterio discrepante del SII sobre documentarla
+  con boleta "no afecta" (Oficio 734 vs. Oficios 1.750/2001 y 638/2009) pide algo más que el
+  registro. Se lleva al owner con el análisis de la Sesión de esfuerzo máximo.
+  **✅ DECIDIDO (2026-10-04, por el canal de dudas fiscales):** la sesión del frente le mandó las
+  tres preguntas a la Sesión de esfuerzo máximo, con opciones y costos. Esa sesión decidió lo
+  técnico y le llevó al owner, en un AskUserQuestion, lo que era suyo:
+  - **Tipo nuevo `consumo_personal`** (decidió la Sesión de esfuerzo máximo; es la implementación
+    del *"Anotarlo aparte"* del owner del 2026-10-03). Descuenta stock y no congela IVA. El kardex se
+    escribe como la cortesía (`motivo 'merma'` + `motivo_baja_id`), sin valor nuevo en
+    `movimientos_inventario.motivo`. Lleva motivo fijo sembrado, grupo propio en el reporte de
+    anulaciones y balde propio *"Personal"* en el reporte de varianza: dejarlo caer en «Otros»
+    rompería el detector, y sumarlo a Cortesía mezclaría lo que este frente separa. Que el kardex
+    deje de llamar "costo perdido" a lo que no es merma queda como entrada aparte.
+  - **Pantalla: *"Mesa y Mermas"*** (owner, AskUserQuestion de la Sesión de esfuerzo máximo,
+    recomendada, sobre *"Solo desde la mesa"* y *"Pantalla nueva"*). En la mesa se anula con ese
+    motivo y la receta se expande. `POST /mermas` lo acepta para productos sueltos, y el listado de
+    Mermas lo muestra aparte, no como pérdida. Costo aceptado: un plato preparado igual pasa por
+    una mesa, y Mermas registra algo que no es merma.
+  - **Documento: alcanza con el registro** (decidió la Sesión de esfuerzo máximo aplicando ADR-010).
+    La anulación o el movimiento, con motivo, usuario, fecha, cantidad y costo, es el respaldo. No
+    se congelan montos fiscales, no hay documento ni IVA. Si el contador pide la boleta "no
+    afecta", la emite el frente de emisión leyendo estos registros: con los criterios del SII
+    discrepando, construirla ahora sería infraestructura DTE especulativa.
+  - **Crédito fiscal de los insumos: nada que construir** (decidió la Sesión de esfuerzo máximo,
+    con la fuente leída por ella). El [Oficio 1.280 de 18-06-2007](https://www.sii.cl/pagina/jurisprudencia/adminis/2007/ventas/ja4105.doc)
+    dice que la colación del trabajador es gasto general del giro, con derecho a crédito por las
+    facturas de compra si el desembolso es razonable, y que la entrega de alimentación al
+    trabajador no está gravada. El "sin crédito" de la investigación vale para regalos a
+    terceros, no para la comida del personal.
+  - **Dueño y lo que el empleado se lleva: *"Como cortesía, con IVA"*** (owner, el mismo
+    AskUserQuestion, recomendada, sobre *"Como personal, sin IVA"*). El motivo se llama *"Comida
+    del personal (dentro del local)"*, y su ayuda dice que lo que se lleva un empleado, o lo que
+    consume el dueño, se registra como cortesía. El art. 8 d) inc. 1 nombra al dueño, y lo que
+    sale de la empresa es retiro. Solo lo consumido dentro del local quedó libre (Oficio 734/2002).
+
+### Qué se hizo
+
+- **Cómo se decidió:** la sesión del frente le mandó las tres preguntas a la Sesión de esfuerzo
+  máximo por el canal de dudas fiscales, con opciones, costos y la recomendada primero. Esa sesión
+  decidió lo técnico y le llevó al owner, en un AskUserQuestion suyo, la pantalla y el dueño
+  (detalle en la entrada de arriba). El owner no fue consultado directo por esta sesión.
+- **Tipo `consumo_personal`** en el enum `tipo_motivo_baja`, y un motivo fijo *"Comida del
+  personal (dentro del local)"* (`MOTIVOS_BAJA_FIJOS`; seeder `…440460` París y `…440461`
+  Falabella, del rango que reservó la orquestadora). Si descuenta o no lo dice ahora una sola
+  función, `tipoMotivoBajaDescuenta`, con un `switch` exhaustivo: la regla estaba copiada tres
+  veces en `salones.service.ts`.
+- **Mesa:** `anularLinea` y `cancelarConMotivo` descuentan con el tipo nuevo y no calculan baldes
+  fiscales (los `monto_*` en `NULL`). El kardex se escribe igual que la cortesía.
+- **Mermas:** `POST /mermas` acepta el tipo nuevo; `GET /mermas` suma `?tipo=` (`merma` por
+  defecto, la respuesta de siempre). El filtro de tipo va bindeado (`filtroTipo`), y el resumen
+  del Inicio sigue fijo en `merma`. Pantalla con un selector *Mermas / Comida del personal*.
+- **Reporte de anulaciones:** `porTipo` agrupa por `mb.tipo`, así que el grupo nuevo aparece sin
+  tocar esa consulta; cuarta tarjeta sin IVA. La consulta de lo anulado total por garzón sí
+  cambió (el % la excluye, abajo).
+- **Varianza:** predicado `P.PERSONAL` en las tres consultas que clasifican, columna `personal`
+  en la fila y en el resumen, dentro del residuo y fuera de la plata perdida.
+- **Front:** la ayuda del motivo (`AYUDA_CONSUMO_PERSONAL`, `useSalones.ts`) en el modal de
+  anulación, en Mermas y en la configuración de motivos; la precuenta lo imprime en $0. Mermas
+  vacía los motivos al cambiar de vista, antes de pedir los nuevos (lo levantó la revisión
+  independiente: el servidor acepta los dos tipos, y uno de la otra vista se habría registrado en
+  la lista equivocada).
+- **Dos decisiones más, que levantó la revisión independiente:** la comida del personal sale del
+  % de anulaciones por garzón (numerador y denominador, aunque se filtre por su tipo) y de las
+  anulaciones del bloque "Pérdidas" del Inicio. Las decidió la Sesión de esfuerzo máximo,
+  derivadas de las decisiones del owner del 2026-10-04 (no es pérdida) y del 2026-09-27 (qué mide
+  el %), sin volver al owner porque él ya había fijado las dos reglas. Escena del %: un garzón con
+  $8.500 anulados sobre $170.000 (5,0 %) pasaría a 23,6 % por cargar la colación de seis
+  compañeros.
+- **Arranque sobre una base de `main`:** una base sembrada por `d1180798` con 26 motivos y 37
+  anulaciones de los tres tipos de entonces (restaurada de un dump) arrancó con este código
+  (`node dist/main`) sin error, hasta `Seed complete` y `/api/health` en 200. Los 63 conservaron
+  su tipo, las cortesías su IVA congelado, y el enum quedó con cuatro valores, sin tipo `_old`.
+  Entraron los dos motivos fijos nuevos.
+- **Queda afuera, con su lugar:** que el kardex deje de llamar "costo perdido" a lo que no es
+  merma (entrada nueva en `pendientes.md` § 3, decidida así por la Sesión de esfuerzo máximo) y
+  el documento "no afecta", si algún día se pide (lo emite el frente de emisión leyendo estos
+  registros).
+
+### Qué lo fija
+
+- `tipo-motivo-baja.enum.spec.ts`: qué tipo descuenta.
+- `salones.service.spec.ts`: anular y cancelar con personal descuentan, no consultan el
+  tratamiento tributario y dejan los baldes en `NULL`.
+- `mermas.service.spec.ts`: el `POST` acepta personal; el filtro de tipo bindeado vale `merma`
+  sin `tipo` y `consumo_personal` con él, en el COUNT y en la página; el resumen, `merma`.
+- `varianza.service.spec.ts`: la columna propia, el residuo que cierra con personal y el total
+  del resumen fuera del top.
+- `resumen-negocio.service.spec.ts`: el Inicio saca el grupo de personal y deja el resto en su
+  orden. `salones-anulaciones-porcentaje` (e2e, test 9): el % no la cuenta, ni filtrando por su
+  tipo, y la tabla por tipo sí.
+- E2E contra Postgres: `salones-anular-linea` (descuenta con su motivo, sin baldes),
+  `salones-anulaciones-reporte` (receta valorizada por sus ingredientes, grupo propio, `fiscal:
+  null`), `mermas` (descuenta, no aparece en el listado por defecto ni en el Inicio, sí con
+  `?tipo=consumo_personal`; `?tipo=cortesia` da 400; ocho fijos en un tenant nuevo) y
+  `reportes-varianza-buckets` (por la mesa y por Mermas, en su columna, con «Otros» en cero).
+- Front: specs de `mermas`, `anulaciones`, `motivos-baja`, `varianza`, `AnularLineaModal` y
+  `useSalones`; Playwright `inventario/mermas-personal.spec.ts`.
+- **Mutantes medidos, todos revertidos:** el predicado sin `consumo_personal` (mueren 3);
+  baldes también para personal (mueren 2); el filtro de Mermas fijo en `merma` (muere 1); el
+  residuo de varianza sin `personal`, en la fila y en el resumen (muere 1 cada uno); el `FILTER`
+  de `P.PERSONAL` apuntando a otro tipo (muere el e2e nuevo); y la celda de costo de la vista de
+  personal pintada como pérdida (muere 1); en el %, sacar el filtro del denominador o acumular
+  la fila en el numerador (muere el test 9 de `salones-anulaciones-porcentaje`, cada uno); el
+  Inicio sin el filtro (muere 1); y Mermas sin vaciar los motivos al cambiar de vista (muere 1).
+
+---
+
 ## Una boleta de más de 135 UF lleva el nombre y el RUT de quien paga (cerrada 2026-10-04)
 
 Sale de [`pendientes.md`](pendientes.md) § 6. Frente fiscal propio. La regla viva está en
@@ -667,8 +794,8 @@ investigación [`2026-10-03-cortesia-retiro-iva.md`](investigaciones/2026-10-03-
   escribir, tanto en `anularLinea` como en `cancelarConMotivo`.
 - El reporte trae `fiscal` en cada fila y en cada grupo de `porTipo`; la pantalla suma la
   columna IVA y la línea *"IVA: $X"* en la tarjeta de Cortesías.
-- **Queda afuera, con su lugar:** la comida del personal (entrada propia en `pendientes.md`
-  § 6), el documento del retiro (lo emite la emisión electrónica con estos baldes) y el
+- **Queda afuera, con su lugar:** la comida del personal (cerrada el 2026-10-04, arriba en este
+  archivo), el documento del retiro (lo emite la emisión electrónica con estos baldes) y el
   `motivo: 'merma'` del kardex para la cortesía (se distingue por `motivo_baja_id`; tocarlo es
   escribir en `movimientos_inventario` y no se pidió).
 

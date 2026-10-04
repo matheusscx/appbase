@@ -444,9 +444,10 @@ principio que [ADR-010](./adr/010-preparacion-sii-datos-fiscales.md) aplica al h
 fiscal: el número vale lo que valía cuando el hecho ocurrió, no lo que se sabe después.
 Detalle: [`mermas-valorizadas.md`](./features/mermas-valorizadas.md).
 
-**El catálogo de motivos de baja tiene tipo** (`merma` | `cortesia` | `no_elaborado`), y el
-tipo decide si la baja descuenta stock — no hay un flag aparte, porque eso permitiría una
-merma que no descuenta. Mermas solo acepta motivos de tipo `merma`: el selector de la
+**El catálogo de motivos de baja tiene tipo** (`merma` | `cortesia` | `no_elaborado` |
+`consumo_personal`), y el tipo decide si la baja descuenta stock — no hay un flag aparte,
+porque eso permitiría una merma que no descuenta. Mermas acepta motivos de tipo `merma` y,
+desde el 2026-10-04, `consumo_personal` (la comida del personal, más abajo): el selector de la
 pantalla ya filtra, y `POST /api/mermas` rechaza con 400 cualquier otro tipo aunque alguien
 lo mande igual. El tipo de un motivo propio se puede cambiar solo mientras no se usó —
 cambiarlo después reescribiría la historia del stock. Detalle:
@@ -505,8 +506,9 @@ quedar sin poder cobrar y sin poder sacar la línea. **La salida con motivo —m
 cortesía— ya existe**: anular un plato ya despachado a cocina, con motivo y el permiso
 propio `Salones:Anular` (no alcanza con `Operar`, que tiene cualquier garzón). Las reglas:
 
-- **El motivo decide si descuenta stock, no quien anula.** `merma` y `cortesia` descuentan
-  y se reportan por separado (ver abajo); `no_elaborado` no deja movimiento, porque ese
+- **El motivo decide si descuenta stock, no quien anula.** `merma`, `cortesia` y
+  `consumo_personal` descuentan y se reportan por separado (ver abajo); `no_elaborado` no
+  deja movimiento, porque ese
   plato nunca salió de cocina.
 - **El tope es lo ya despachado**, no lo pedido: se puede anular parcial (3 despachados, se
   anulan 2) y el resto sigue pedido. Lo que no salió a cocina se saca sin motivo, por el
@@ -560,14 +562,42 @@ DL 825 art. 8 d): regalar un plato con fin promocional es venta para el SII. Las
   la emisión electrónica cuando llegue (ADR-010). Mientras tanto el riesgo de no documentar el
   retiro sigue (art. 97 N° 10 del Código Tributario).
 - **La comida del personal dentro del local no es cortesía**: no es retiro (Oficio 734/2002) y
-  cargarla como cortesía pagaría IVA de más. Su motivo propio está pendiente
-  (`agent/pendientes.md`).
+  cargarla como cortesía pagaría IVA de más. Tiene su motivo propio (abajo).
 
 Lectura de la ley, no oficio: el SII no tiene un pronunciamiento sobre la cortesía de
 restaurante. Investigación:
 [`agent/investigaciones/2026-10-03-cortesia-retiro-iva.md`](./agent/investigaciones/2026-10-03-cortesia-retiro-iva.md).
 Detalle en [`features/salones-mesas.md`](./features/salones-mesas.md) § *"La cortesía como
 retiro gravado"*.
+
+**La comida del personal tiene motivo propio y no paga IVA** (2026-10-04; decisión por el canal
+de dudas fiscales, detalle y procedencia en
+[`agent/resueltos.md`](./agent/resueltos.md)). Lo que el personal come **dentro** del local no es
+retiro, porque los bienes no salen de la empresa (Reglamento DS 55/1977 art. 11; Oficio 734/2002),
+ni venta, porque es gratis. Las reglas:
+
+- **Un tipo de motivo propio, `consumo_personal`**, con el motivo fijo *"Comida del personal
+  (dentro del local)"*. Descuenta stock como la cortesía y no congela IVA.
+- **Se registra desde la mesa o desde Mermas** (owner, *"Mesa y Mermas"*). Un plato preparado se
+  anula en la mesa con ese motivo, y la receta se expande. Un producto suelto (la bebida, el pan)
+  se registra en Mermas, que lo lista aparte: no es pérdida, y ni Mermas ni el bloque "Pérdidas"
+  del Inicio lo suman, tampoco entre las anulaciones. El reporte de anulaciones y el de varianza
+  le dan grupo y columna propios.
+- **No cuenta para el % de anulaciones del garzón**, ni en lo anulado ni en lo pedido, aunque se
+  filtre por su tipo: el % mide el desvío del garzón, y la colación de sus compañeros no lo es.
+  Esta regla y la del Inicio las decidió la Sesión de esfuerzo máximo (2026-10-04), derivadas de
+  dos decisiones del owner: la comida del personal no es pérdida (2026-10-04) y qué mide el %
+  (2026-09-27).
+- **Sin documento y sin IVA**: el registro (motivo, usuario, fecha, cantidad y costo) es el
+  respaldo. Los criterios del SII sobre documentarla con una boleta "no afecta" discrepan
+  (Oficio 734/2002 contra Oficios 1.750/2001, Ord. 638/2009 y Circular 6/2024). Si el contador la
+  pide, la emite la emisión electrónica leyendo estos registros (ADR-010).
+- **El crédito fiscal de los insumos se mantiene**: la colación del trabajador es gasto general
+  del giro (Oficio 1.280/2007). El "sin crédito" de la entrega gratuita vale para los regalos a
+  terceros.
+- **Lo que un empleado se lleva, o lo que consume el dueño, es cortesía y paga IVA** (owner,
+  *"Como cortesía, con IVA"*): sale de la empresa, y el art. 8 d) inc. 1 nombra al dueño. La
+  ayuda del motivo lo dice al elegirlo.
 
 **Fuera de alcance (fases futuras):** FIFO o método de costeo elegible por tenant, y la
 emisión del **DTE 52** que legaliza un traslado en la vía pública —bodegas y traslados ya

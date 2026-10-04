@@ -109,6 +109,7 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
 
   let motivoMermaId: string;
   let motivoCortesiaId: string;
+  let motivoPersonalId: string;
   let motivoNoElaboradoId: string;
 
   /** Producto con stock, ruteado a una impresora para que `reclamar` avance `cantidadEnviada`. */
@@ -277,6 +278,8 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
     motivoMermaId = motivos.find((m) => m.tipo === 'merma')!.id;
     motivoCortesiaId = motivos.find((m) => m.tipo === 'cortesia')!.id;
     motivoNoElaboradoId = motivos.find((m) => m.tipo === 'no_elaborado')!.id;
+    motivoPersonalId = motivos.find((m) => m.tipo === 'consumo_personal')!.id;
+    expect(motivoPersonalId).toBeTruthy();
     expect(motivoMermaId).toBeTruthy();
     expect(motivoCortesiaId).toBeTruthy();
     expect(motivoNoElaboradoId).toBeTruthy();
@@ -732,6 +735,43 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
       monto_afecto: '2521.0000',
       monto_exento: '0.0000',
       monto_impuestos: '479.0000',
+    });
+  });
+
+  // Spec 2026-10-04: la comida del personal dentro del local descuenta como
+  // la cortesía, pero no es retiro (Oficio 734/2002): sin baldes fiscales.
+  it('comida del personal: descuenta lo anulado con su motivo, y no congela IVA', async () => {
+    const antes = await stockVendibleDe(platoId);
+    const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '2' }]);
+    await despachar(cuenta.id);
+    const linea = (await detalleCuenta(cuenta.id)).lineas.find(
+      (l) => l.itemId === platoId,
+    )!;
+
+    const res = await anular(cuenta.id, linea.id, {
+      cantidad: '1',
+      motivoBajaId: motivoPersonalId,
+    });
+    expect(res.status).toBe(201);
+    const anulacionId = (res.body as CuentaDetalle).anulaciones.find((a) =>
+      a.itemNombre.includes('Lomo'),
+    )!.id;
+
+    const despues = await stockVendibleDe(platoId);
+    expect(parseFloat(despues)).toBeCloseTo(parseFloat(antes) - 1, 4);
+
+    const mov: { motivo: string; motivo_baja_id: string }[] = await ds.query(
+      `SELECT motivo, motivo_baja_id FROM movimientos_inventario
+        WHERE cuenta_linea_anulacion_id = $1`,
+      [anulacionId],
+    );
+    expect(mov).toEqual([
+      { motivo: 'merma', motivo_baja_id: motivoPersonalId },
+    ]);
+    expect(await baldesDe(anulacionId)).toEqual({
+      monto_afecto: null,
+      monto_exento: null,
+      monto_impuestos: null,
     });
   });
 

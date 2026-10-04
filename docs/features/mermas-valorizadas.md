@@ -13,12 +13,14 @@ Registro dedicado de mermas de stock en productos (`tipo='producto'`) con **moti
 
 Decisión y porqué: [`docs/superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md).
 
-Motivos fijos del sistema (`es_fijo=true`): son **siete**, cada uno con su `tipo` (tabla completa
-en *Modelo de datos*, § `motivo_baja`). Cinco son `tipo='merma'` — **Vencimiento**, **Deterioro**,
-**Robo**, **Error operativo**, **Otro**. Los otros dos, **Cortesía de la casa** (`cortesia`) y
-**No se llegó a hacer** (`no_elaborado`), **no son de merma**: por eso `POST /api/mermas` los
-rechaza con 400 (ver más abajo). Ninguno de los siete se edita ni se elimina. El administrador
-puede crear motivos custom adicionales.
+Motivos fijos del sistema (`es_fijo=true`): cada uno con su `tipo` (tabla completa en *Modelo de
+datos*, § `motivo_baja`). Cinco son `tipo='merma'` — **Vencimiento**, **Deterioro**, **Robo**,
+**Error operativo**, **Otro**. **Cortesía de la casa** (`cortesia`) y **No se llegó a hacer**
+(`no_elaborado`) **no son de merma**: por eso `POST /api/mermas` los rechaza con 400 (ver más
+abajo). **Comida del personal (dentro del local)** (`consumo_personal`, desde el 2026-10-04)
+tampoco es merma, pero entra por esta pantalla para el producto suelto que no pasa por una
+mesa, y se lista aparte (abajo). Ningún fijo se edita ni se elimina. El administrador puede crear
+motivos custom adicionales.
 
 El ajuste genérico de stock (`PATCH /items/:id/stock`) **ya no acepta** `motivo='merma'`; toda merma pasa por el flujo dedicado con motivo obligatorio.
 
@@ -56,15 +58,15 @@ Food-service necesita saber *por qué* se perdió stock y cuánto costó, no sol
 | `nombre` | TEXT | Único vivo por tenant, **entre todos los tipos** |
 | `activo` | BOOLEAN | Default `true` |
 | `es_fijo` | BOOLEAN | Defaults del sistema |
-| `tipo` | ENUM `tipo_motivo_baja` | `merma` \| `cortesia` \| `no_elaborado`. Obligatorio, sin default. |
+| `tipo` | ENUM `tipo_motivo_baja` | `merma` \| `cortesia` \| `no_elaborado` \| `consumo_personal`. Obligatorio, sin default. |
 | `creado_el` / `actualizado_el` / `eliminado_el` | TIMESTAMPTZ | Soft delete |
 
 **El tipo decide si la baja descuenta stock** (lo consume la parte 2 del frente "anular un
-plato enviado a cocina", fuera de esta feature): `merma` y `cortesia` descuentan; `no_elaborado`
-no. No hay un flag aparte a propósito — permitiría una merma que no descuenta, que no significa
+plato enviado a cocina", fuera de esta feature): `merma`, `cortesia` y `consumo_personal`
+descuentan; `no_elaborado` no. La regla vive en `tipoMotivoBajaDescuenta`, junto al enum. No hay un flag aparte a propósito — permitiría una merma que no descuenta, que no significa
 nada.
 
-Los siete fijos que siembra el sistema (seeder y alta de tenant, `MOTIVOS_BAJA_FIJOS`):
+Los fijos que siembra el sistema (seeder y alta de tenant, `MOTIVOS_BAJA_FIJOS`):
 
 | Nombre | Tipo |
 |--------|------|
@@ -75,6 +77,7 @@ Los siete fijos que siembra el sistema (seeder y alta de tenant, `MOTIVOS_BAJA_F
 | Otro | `merma` |
 | Cortesía de la casa | `cortesia` |
 | No se llegó a hacer | `no_elaborado` |
+| Comida del personal (dentro del local) | `consumo_personal` |
 
 **El tipo de un motivo propio se puede cambiar solo mientras no se usó.** "Usado" es lo mismo
 que ya bloquea el borrado: algún movimiento de inventario vivo con ese motivo **o alguna
@@ -96,7 +99,7 @@ editarse ni borrarse (mismo 400 de siempre, no depende del campo que se mande).
 
 ### CRUD `/api/motivos-baja`
 
-- `GET` — cualquier usuario del tenant; query `?soloActivas=true` filtra activas, `?tipo=merma|cortesia|no_elaborado` filtra por tipo. Cada fila trae `enUso: boolean` — sale de la MISMA consulta del listado (un `EXISTS` sobre `movimientos_inventario` **UNION ALL** `cuenta_linea_anulaciones` — anular un plato con este motivo también cuenta como uso, spec `anular-plato-despachado` § 4.3, incluido `no_elaborado`, que no deja fila en el kardex), nunca de una consulta por motivo.
+- `GET` — cualquier usuario del tenant; query `?soloActivas=true` filtra activas, `?tipo=merma|cortesia|no_elaborado|consumo_personal` filtra por tipo. Cada fila trae `enUso: boolean` — sale de la MISMA consulta del listado (un `EXISTS` sobre `movimientos_inventario` **UNION ALL** `cuenta_linea_anulaciones` — anular un plato con este motivo también cuenta como uso, spec `anular-plato-despachado` § 4.3, incluido `no_elaborado`, que no deja fila en el kardex), nunca de una consulta por motivo.
 - `POST` — `TenantAdminGuard`; `tipo` es obligatorio, sin default (el admin lo elige).
 - `PATCH /:id` — `TenantAdminGuard`; rechaza editar `es_fijo=true`. Cambiar `tipo` de un motivo ya usado —en un movimiento o en una anulación de plato— da `400` (ver arriba); el resto de los campos no cambia de regla.
 - `DELETE /:id` — `TenantAdminGuard`; rechaza borrar `es_fijo=true`; soft-delete bloqueado si hay movimientos o anulaciones de plato con ese motivo.
@@ -124,9 +127,10 @@ Request (CreateMermaDto):
 merma lo que se pudrió **ahí**, y sin default silencioso — uno metería la salida en el local
 cada vez que la pantalla se olvide de mandarlo. `400` si falta o es de otro tenant.
 
-`POST /api/mermas` rechaza con 400 un motivo que no sea de tipo `merma` — la pantalla de
-Mermas ya filtra su selector con `tipo=merma`, pero el filtro de pantalla no alcanza: el
-servidor es el que manda.
+`POST /api/mermas` rechaza con 400 un motivo que no sea de tipo `merma` o `consumo_personal`
+— la pantalla de Mermas ya filtra su selector con el `tipo` de la vista, pero el filtro de
+pantalla no alcanza: el servidor es el que manda. La comida del personal escribe el mismo
+movimiento que una merma (`motivo='merma'` + `motivoBajaId`) y se valoriza igual.
 
 **Reglas de costo:**
 - **El costo no se tipea ni se acepta en el request** — `CreateMermaDto` no tiene ningún campo de costo. El endpoint valoriza con `item_producto.costo_actual` vigente al momento de mermar.
@@ -158,7 +162,16 @@ servidor es el que manda.
 
 ### `GET /api/mermas`
 
-Permiso: **Inventario:Leer**. Paginado; filtros `itemId`, `motivoBajaId`, `desde`, `hasta`. Cada fila incluye `motivoBajaNombre`, `costoPerdido` y `deAnulacion` (ver más abajo).
+Permiso: **Inventario:Leer**. Paginado; filtros `itemId`, `motivoBajaId`, `desde`, `hasta` y
+`tipo` (`merma` por defecto, o `consumo_personal`; otro valor da 400). Cada fila incluye
+`motivoBajaNombre`, `costoPerdido` y `deAnulacion` (ver más abajo).
+
+**La comida del personal se lista aparte** (2026-10-04, owner: *"Mesa y Mermas"*). Sin `tipo`,
+la respuesta es la de siempre: solo merma. Con `?tipo=consumo_personal`, solo la comida del
+personal, la registrada acá y la anulada en una mesa. La pantalla lo resuelve con un selector
+*Mermas / Comida del personal*: cambia el listado, los motivos que se ofrecen, los textos y la
+columna *"Costo perdido"*, que en esa vista se llama *"Costo"* porque no es pérdida. El bloque
+"Pérdidas" del Inicio (`MermasService.resumen`) sigue fijo en `merma`.
 
 **El listado sobrevive a la baja del producto.** Una merma registrada es plata
 perdida que ya ocurrió, así que dar de baja el producto después no la saca del
@@ -174,7 +187,8 @@ desde el propio `POST`): no hay operación real detrás.
 la medianoche de la zona del tenant, el timestamp se respeta al segundo. Ver
 [`inventario-kardex.md`](./inventario-kardex.md) §`GET /inventario/movimientos`.
 
-**Filtra por el `tipo` del motivo, no solo por `motivo = 'merma'` del kardex.** Anular un
+**Filtra por el `tipo` del motivo, no solo por `motivo = 'merma'` del kardex** (el tipo pedido,
+bindeado en `filtroTipo`). Anular un
 plato ya despachado a cocina (`docs/features/salones-mesas.md` § *"Anular una línea ya
 despachada"*) también registra su consumo con `motivo = 'merma'` + `motivoBajaId` cuando el
 motivo es de tipo `merma` **o** `cortesia` — la única diferencia entre ambos vive en el

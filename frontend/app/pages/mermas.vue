@@ -38,6 +38,13 @@ interface MotivoOpt {
   nombre: string
 }
 
+/**
+ * Qué lista la pantalla (owner, 2026-10-04, "Mesa y Mermas"): la merma de bodega
+ * o la comida del personal, que descuenta igual pero no es pérdida y por eso se
+ * ve aparte. Es el `?tipo=` de `GET /mermas` y decide qué motivos se ofrecen.
+ */
+type VistaMermas = 'merma' | 'consumo_personal'
+
 interface Opt { label: string; value: string }
 
 const { public: { apiUrl } } = useRuntimeConfig()
@@ -56,13 +63,30 @@ const { puedeCrear: puedeRegistrar } = usePermisosCrud('Inventario')
 const catalogoItems = useItemsPorId<ProductoOpt>()
 const FILTROS_PRODUCTO = { tipo: ['producto', 'ingrediente'] }
 const motivos = ref<MotivoOpt[]>([])
+const vista = ref<VistaMermas>('merma')
+const vistas = [
+  { label: 'Mermas', value: 'merma' },
+  { label: 'Comida del personal', value: 'consumo_personal' },
+]
+const esPersonal = computed(() => vista.value === 'consumo_personal')
 // Vacío = todos los productos (con `clear`); no hay opción "Todos" con valor inventado.
 const filtroItem = ref<string | null>(null)
 const filtroMotivo = ref('todos')
 const filtroDesde = ref('')
 const filtroHasta = ref('')
 
+// Un motivo de la otra vista dejaría la lista vacía sin explicar por qué, y los
+// motivos que se ofrecen son los del tipo de la vista. Se vacían ANTES de pedir:
+// mientras llega la respuesta —o si falla— no queda ofrecido un motivo de la
+// otra vista, que el servidor aceptaría y se registraría en la lista equivocada.
+watch(vista, () => {
+  filtroMotivo.value = 'todos'
+  motivos.value = []
+  cargarMotivos()
+})
+
 const listFilters = computed(() => ({
+  tipo: vista.value,
   itemId: filtroItem.value || undefined,
   motivoBajaId: filtroMotivo.value !== 'todos' ? filtroMotivo.value : undefined,
   desde: filtroDesde.value || undefined,
@@ -144,14 +168,24 @@ watch(() => form.value.ubicacionId, (_nueva, anterior) => {
   form.value.cantidad = ''
 })
 
+// El servidor filtra por el tipo de la vista: la cortesía y el "no se llegó a
+// hacer" son de la mesa y nunca se ofrecen acá.
+async function cargarMotivos() {
+  const pedida = vista.value
+  try {
+    const res = await useApiFetch<MotivoOpt[]>(`${apiUrl}/motivos-baja?soloActivas=true&tipo=${pedida}`)
+    // Cambiar de vista dos veces rápido: la respuesta vieja no pisa la nueva.
+    if (vista.value === pedida) motivos.value = res
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al cargar los motivos'), color: 'error' })
+  }
+}
+
 async function cargarCatalogos() {
   try {
     await unidadesMedidaStore.ensureLoaded()
-    const [motivosRes] = await Promise.all([
-      useApiFetch<MotivoOpt[]>(`${apiUrl}/motivos-baja?soloActivas=true&tipo=merma`),
-      cargarUbicaciones(),
-    ])
-    motivos.value = motivosRes
+    await Promise.all([cargarMotivos(), cargarUbicaciones()])
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cargar catálogos'), color: 'error' })
@@ -221,16 +255,18 @@ async function registrar() {
         totalPages: Math.max(1, Math.ceil((meta.value.total + 1) / size)),
       }
     }
+    const registrada = esPersonal.value ? 'Comida del personal registrada' : 'Merma registrada'
+    const costo = esPersonal.value ? 'costo' : 'costo perdido'
     toast.add({
       title: res.costoPerdido != null
-        ? `Merma registrada · costo perdido ${formatMonto(res.costoPerdido, res.merma.monedaId)}`
-        : 'Merma registrada · sin valorizar',
+        ? `${registrada} · ${costo} ${formatMonto(res.costoPerdido, res.merma.monedaId)}`
+        : `${registrada} · sin valorizar`,
       color: 'success',
     })
     drawerOpen.value = false
   }
   catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al registrar merma'), color: 'error' })
+    toast.add({ title: apiErrorMsg(e, esPersonal.value ? 'Error al registrar la comida del personal' : 'Error al registrar merma'), color: 'error' })
   }
   finally {
     saving.value = false
@@ -239,15 +275,16 @@ async function registrar() {
 
 onMounted(cargarCatalogos)
 
-const columns: TableColumn<MermaListItem>[] = [
+// En la comida del personal el costo no es una pérdida: la columna no lo dice así.
+const columns = computed<TableColumn<MermaListItem>[]>(() => [
   { accessorKey: 'creadoEl', header: 'Fecha' },
   { accessorKey: 'itemNombre', header: 'Producto' },
   { accessorKey: 'cantidad', header: 'Cantidad', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'motivoBajaNombre', header: 'Motivo' },
   { accessorKey: 'costoUnitario', header: 'Costo unit.', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { accessorKey: 'costoPerdido', header: 'Costo perdido', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'costoPerdido', header: esPersonal.value ? 'Costo' : 'Costo perdido', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'comentario', header: 'Comentario' },
-]
+])
 </script>
 
 <template>
@@ -261,7 +298,7 @@ const columns: TableColumn<MermaListItem>[] = [
     <CrudPageHeader
       large
       title="Mermas"
-      description="Registra descartes tipificados y ve el costo perdido congelado en el movimiento."
+      description="Registra descartes tipificados y la comida del personal, con el costo congelado en el movimiento."
     >
       <template #actions>
         <UButton
@@ -269,10 +306,12 @@ const columns: TableColumn<MermaListItem>[] = [
           icon="i-lucide-plus"
           @click="abrirRegistrar"
         >
-          Registrar merma
+          {{ esPersonal ? 'Registrar comida del personal' : 'Registrar merma' }}
         </UButton>
       </template>
     </CrudPageHeader>
+
+    <UTabs v-model="vista" :items="vistas" :content="false" />
 
     <div class="flex flex-wrap gap-2">
       <AppItemSelect
@@ -342,7 +381,8 @@ const columns: TableColumn<MermaListItem>[] = [
       <template #costoPerdido-cell="{ row }">
         <span
           v-if="row.original.costoPerdido != null"
-          class="font-medium text-error"
+          class="font-medium"
+          :class="esPersonal ? 'text-default' : 'text-error'"
         >
           {{ formatMonto(row.original.costoPerdido, row.original.monedaId) }}
         </span>
@@ -357,7 +397,7 @@ const columns: TableColumn<MermaListItem>[] = [
             name="i-lucide-trash-2"
             class="w-8 h-8 mx-auto mb-2 opacity-40"
           />
-          No hay mermas registradas.
+          {{ esPersonal ? 'No hay comida del personal registrada.' : 'No hay mermas registradas.' }}
         </div>
       </template>
     </CrudTable>
@@ -378,7 +418,7 @@ const columns: TableColumn<MermaListItem>[] = [
       width="md"
     >
       <template #header>
-        <span class="font-semibold text-default">Registrar merma</span>
+        <span class="font-semibold text-default">{{ esPersonal ? 'Registrar comida del personal' : 'Registrar merma' }}</span>
       </template>
 
       <template #body>
@@ -392,7 +432,9 @@ const columns: TableColumn<MermaListItem>[] = [
             v-if="hayBodegas"
             label="Ubicación"
             required
-            help="Dónde se pudrió — acota qué productos tienen stock ahí."
+            :help="esPersonal
+              ? 'De dónde sale — acota qué productos tienen stock ahí.'
+              : 'Dónde se pudrió — acota qué productos tienen stock ahí.'"
           >
             <USelectMenu
               v-model="form.ubicacionId"
@@ -451,6 +493,14 @@ const columns: TableColumn<MermaListItem>[] = [
               class="w-full"
             />
           </UFormField>
+
+          <UAlert
+            v-if="esPersonal"
+            color="info"
+            variant="subtle"
+            icon="i-lucide-info"
+            :title="AYUDA_CONSUMO_PERSONAL"
+          />
 
           <UAlert
             v-if="productoConSerie"

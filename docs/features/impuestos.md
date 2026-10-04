@@ -594,6 +594,29 @@ máximo; detalle en [ADR-028](../adr/028-emision-registrada-por-venta.md#actuali
   cortesía y paga IVA sobre la carta. Lo que todavía deja una línea en $0 sin IVA (un 99,99 %,
   dos descuentos que suman más del 100 %) queda como uso deliberado.
 
+## La comida del personal: descuenta sin hecho tributario (2026-10-04)
+
+Lo que el personal come **dentro** del local no es retiro (Reglamento DS 55/1977 art. 11; Oficio
+734/2002) ni venta. Por eso tiene su propio tipo de motivo, `consumo_personal`, que descuenta
+stock como la cortesía y **no congela baldes**: `monto_afecto`, `monto_exento` y `monto_impuestos`
+quedan en `NULL`, igual que en la merma.
+
+- **Sin documento.** Los criterios del SII sobre una boleta "no afecta" discrepan (Oficio
+  734/2002 contra Oficios 1.750/2001, Ord. 638/2009 y Circular 6/2024). El registro (motivo,
+  usuario, fecha, cantidad y costo) es el respaldo, y si el contador pide el documento lo emite
+  la emisión electrónica leyendo esos registros (ADR-010). Congelar un monto para ese documento
+  sería infraestructura DTE especulativa.
+- **El crédito de los insumos se mantiene**: la colación del trabajador es gasto general del
+  giro, con derecho a crédito por las facturas de compra (Oficio 1.280/2007). No hay nada que
+  reversar.
+- **El límite lo pone el motivo, no el sistema.** Lo que un empleado se lleva, o lo que consume el
+  dueño, es retiro (art. 8 d) inc. 1) y se registra como cortesía, con su IVA. La ayuda del motivo
+  *"Comida del personal (dentro del local)"* lo dice al elegirlo.
+
+Reglas en [`PRODUCTO.md`](../PRODUCTO.md); diseño en
+[`salones-mesas.md`](./salones-mesas.md) y en
+[`mermas-valorizadas.md`](./mermas-valorizadas.md).
+
 ## Related Features
 
 - [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md) — el IVA se deriva de

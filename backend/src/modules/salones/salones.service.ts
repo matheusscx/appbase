@@ -51,7 +51,10 @@ import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
 import { MonedasService } from '../monedas/monedas.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import { MotivosBajaService } from '../motivos-baja/motivos-baja.service';
-import { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
+import {
+  TipoMotivoBaja,
+  tipoMotivoBajaDescuenta,
+} from '../motivos-baja/tipo-motivo-baja.enum';
 import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import type { CuentaAsignacionDetalle } from './cuenta-asignaciones.service';
 import {
@@ -1515,9 +1518,7 @@ export class SalonesService {
     // hace falta: mismo gate que adentro de `escribirAnulacionEnLinea`,
     // evaluado acá porque es una LÍNEA sola y el gate decide si vale la pena
     // pedirlo antes de la escritura común.
-    const tipoDescuenta =
-      motivo.tipo === TipoMotivoBaja.MERMA ||
-      motivo.tipo === TipoMotivoBaja.CORTESIA;
+    const tipoDescuenta = tipoMotivoBajaDescuenta(motivo.tipo);
     const stockCtx =
       tipoDescuenta &&
       (item.tipo === 'producto' ||
@@ -1692,16 +1693,15 @@ export class SalonesService {
     // hace afuera, después de que este método vuelve — ver esa función y el
     // comentario en `escribirCancelacionConMotivo`.
 
-    // Solo `merma` y `cortesía` descuentan (spec § 4.3); `no_elaborado` no
-    // tiene movimiento porque ese stock nunca salió. Y solo si el ÍTEM
+    // Descuentan `merma`, `cortesía` y `consumo_personal` (spec § 4.3 y
+    // spec 2026-10-04); `no_elaborado` no tiene movimiento porque ese stock
+    // nunca salió. Y solo si el ÍTEM
     // tiene stock que descontar: `servicio` y `suscripcion` no lo tienen —
     // ni siquiera al vender (`ventas.service.ts`, el mismo `if`/`else if`
     // que no los menciona, así que ahí tampoco pasa nada) — así que acá
     // tampoco, sea cual sea el tipo de motivo. `consumirLineaAnulada` solo
     // acepta `producto | receta | combo`.
-    const tipoDescuenta =
-      motivo.tipo === TipoMotivoBaja.MERMA ||
-      motivo.tipo === TipoMotivoBaja.CORTESIA;
+    const tipoDescuenta = tipoMotivoBajaDescuenta(motivo.tipo);
     const itemTipo = item.tipo;
     if (
       tipoDescuenta &&
@@ -2052,9 +2052,7 @@ export class SalonesService {
     // Si el motivo descuenta, las unidades que salen de inventario son las de
     // `consumirLineaAnulada`; el contexto de stock se resuelve UNA vez para toda
     // la cancelación, no por línea.
-    const tipoDescuenta =
-      motivo.tipo === TipoMotivoBaja.MERMA ||
-      motivo.tipo === TipoMotivoBaja.CORTESIA;
+    const tipoDescuenta = tipoMotivoBajaDescuenta(motivo.tipo);
 
     // Una línea con serie despachada A MEDIAS no se puede cancelar de un tirón
     // CUANDO EL MOTIVO DESCUENTA (owner, 2026-10-03; alcance por ruling del

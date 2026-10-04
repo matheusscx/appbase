@@ -7,7 +7,7 @@ import type { TableColumn } from '@nuxt/ui'
 // cargaba) y el 403 llegaba recién al guardar.
 definePageMeta({ middleware: 'admin' })
 
-type TipoMotivoBaja = 'merma' | 'cortesia' | 'no_elaborado'
+type TipoMotivoBaja = 'merma' | 'cortesia' | 'no_elaborado' | 'consumo_personal'
 
 interface MotivoBaja {
   id: string
@@ -26,6 +26,7 @@ const TIPO_OPTS: { label: string, value: TipoMotivoBaja }[] = [
   { label: 'Merma', value: 'merma' },
   { label: 'Cortesía', value: 'cortesia' },
   { label: 'No se llegó a hacer', value: 'no_elaborado' },
+  { label: 'Comida del personal', value: 'consumo_personal' },
 ]
 
 function tipoLabel(tipo: TipoMotivoBaja): string {
@@ -465,7 +466,7 @@ const columns: TableColumn<MotivoBaja>[] = [
             required
             :help="editingEnUso
               ? 'Ya se usó: cambiarle el tipo reescribiría lo que pasó con el stock.'
-              : undefined"
+              : form.tipo === 'consumo_personal' ? AYUDA_CONSUMO_PERSONAL : undefined"
           >
             <USelect
               v-model="form.tipo"

@@ -11,4 +11,8 @@ export const MOTIVOS_BAJA_FIJOS: readonly {
   { nombre: 'Otro', tipo: TipoMotivoBaja.MERMA },
   { nombre: 'Cortesía de la casa', tipo: TipoMotivoBaja.CORTESIA },
   { nombre: 'No se llegó a hacer', tipo: TipoMotivoBaja.NO_ELABORADO },
+  {
+    nombre: 'Comida del personal (dentro del local)',
+    tipo: TipoMotivoBaja.CONSUMO_PERSONAL,
+  },
 ];

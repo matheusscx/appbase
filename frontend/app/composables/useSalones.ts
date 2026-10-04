@@ -48,7 +48,7 @@ export type MotivoCuentaAsignacion =
  * (`docs/agent/pendientes.md` § "workspace compartido"). Cambiar una sin las
  * otras dos abre una deriva silenciosa.
  */
-export type TipoMotivoBaja = 'merma' | 'cortesia' | 'no_elaborado'
+export type TipoMotivoBaja = 'merma' | 'cortesia' | 'no_elaborado' | 'consumo_personal'
 
 /**
  * La palabra del tipo, para el selector del modal de anulación (spec § 5: "que
@@ -60,11 +60,21 @@ const TIPO_MOTIVO_BAJA_LABELS: Record<TipoMotivoBaja, string> = {
   merma: 'Merma',
   cortesia: 'Cortesía',
   no_elaborado: 'No se llegó a hacer',
+  consumo_personal: 'Comida del personal',
 }
 
 export function tipoMotivoBajaLabel(tipo: TipoMotivoBaja): string {
   return TIPO_MOTIVO_BAJA_LABELS[tipo]
 }
+
+/**
+ * La ayuda del tipo `consumo_personal` (owner, 2026-10-04: lo que se lleva un
+ * empleado, o lo que consume el dueño, es retiro y va como cortesía). La
+ * muestran el modal de anulación, Mermas y la configuración de motivos: un solo
+ * texto para que las tres pantallas digan lo mismo.
+ */
+export const AYUDA_CONSUMO_PERSONAL =
+  'Solo lo que el personal come dentro del local. Si se lo lleva, o si lo consume el dueño, regístralo como cortesía: es retiro y paga IVA.'
 
 export type FormaMesa = 'redonda' | 'cuadrada' | 'rectangular'
 export type TamanoMesa = 'pequeno' | 'mediano' | 'grande' | 'extra_grande'

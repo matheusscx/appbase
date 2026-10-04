@@ -26,7 +26,7 @@ import { MotivosBajaService } from '../motivos-baja/motivos-baja.service';
 import { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
 import type { CostoPorMoneda } from '../salones/anulaciones-reporte.service';
 import { CreateMermaDto } from './dto/create-merma.dto';
-import { FindMermasDto } from './dto/find-mermas.dto';
+import { FindMermasDto, TIPOS_DE_MERMAS } from './dto/find-mermas.dto';
 
 export interface MermaResponse {
   movimientoId: string;
@@ -193,9 +193,13 @@ export class MermasService {
         dto.motivoBajaId,
       );
 
-      // La pantalla de Mermas ya pide solo `tipo=merma`, pero el servidor es el que
-      // manda: una cortesía o un "no se llegó a hacer" no son una merma de stock.
-      if (motivo.tipo !== TipoMotivoBaja.MERMA) {
+      // La pantalla de Mermas ya pide solo sus dos tipos, pero el servidor es el
+      // que manda: una cortesía o un "no se llegó a hacer" no son una merma de
+      // stock. La comida del personal sí entra por acá, para el producto suelto
+      // que no pasa por una mesa (owner, 2026-10-04, "Mesa y Mermas").
+      if (
+        !(TIPOS_DE_MERMAS as readonly TipoMotivoBaja[]).includes(motivo.tipo)
+      ) {
         throw new BadRequestException(
           `El motivo "${motivo.nombre}" no es de merma`,
         );
@@ -302,8 +306,13 @@ export class MermasService {
       ? await diaNegocioTenant(this.db, tenantId)
       : null;
     const { filters, params } = this.buildFilters(tenantId, query, dia);
+    // Sin `tipo`, la merma de siempre: la comida del personal no es pérdida y
+    // se pide aparte (spec 2026-10-04-comida-del-personal § 3.3).
+    params.push(query.tipo ?? TipoMotivoBaja.MERMA);
+    const filtroTipo = this.filtroTipo(params.length);
 
-    // El `EXISTS` de acá abajo es la condición que EXCLUYE la cortesía, y va
+    // El `EXISTS` de acá abajo es la condición que deja solo el tipo pedido
+    // (la que desde `2e1fad74` excluye la cortesía), y va
     // en las DOS consultas (COUNT y página) para que el total no se mueva sin
     // avisar (Task 4, spec § 5.2). No puede vivir en el `LEFT JOIN mb` de más
     // abajo: ese JOIN es LEFT a propósito para no perder la fila cuando el
@@ -318,7 +327,6 @@ export class MermasService {
     // registrada es plata perdida que ya ocurrió, así que dar de baja el
     // producto después no puede borrarla del informe ni —peor— bajar el total
     // sin avisar. Mismo criterio que el kardex (`InventarioService`).
-    const filtroTipoMerma = this.filtroTipoMerma();
 
     const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total
@@ -326,7 +334,7 @@ export class MermasService {
        LEFT JOIN items i ON i.item_id = mv.item_id
        WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
          AND mv.motivo = 'merma'
-         ${filtroTipoMerma}
+         ${filtroTipo}
          ${filters}`,
       params,
     );
@@ -352,7 +360,7 @@ export class MermasService {
        LEFT JOIN motivo_baja mb ON mb.motivo_baja_id = mv.motivo_baja_id AND mb.eliminado_el IS NULL
        WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
          AND mv.motivo = 'merma'
-         ${filtroTipoMerma}
+         ${filtroTipo}
          ${filters}
        -- Desempate por secuencia, igual que el kardex: cancelar con motivo una
        -- cuenta deja una merma por línea en UNA transacción, todas con el mismo
@@ -412,19 +420,21 @@ export class MermasService {
   }
 
   /**
-   * La condición que EXCLUYE la cortesía (desde `2e1fad74`), compartida por
-   * `findAll` (Task 4, spec § 5.2) y `resumen` (Task 2, spec
-   * 2026-09-18-dashboard-inicio § 4.4): un mismo motivo puede tener tipo
-   * `merma`, `cortesia` o `no_elaborado`, y solo el primero es plata perdida
-   * de bodega. No cuelga de un `LEFT JOIN … AND mb.tipo = 'merma'`: ese JOIN
-   * es LEFT a propósito para no perder la fila cuando el motivo se borró, y
-   * agregarle el tipo ahí dejaría pasar la cortesía con `motivo_baja_nombre:
-   * null` en vez de sacarla (ver el comentario grande de `findAll`).
+   * La condición que deja solo UN tipo de motivo (desde `2e1fad74` excluía la
+   * cortesía), compartida por `findAll` (Task 4, spec § 5.2) y `resumen`
+   * (Task 2, spec 2026-09-18-dashboard-inicio § 4.4): todas las bajas escriben
+   * `motivo = 'merma'` en el kardex, y solo `motivo_baja.tipo` separa la merma
+   * de bodega (lo único que es plata perdida) de la cortesía, el "no se llegó
+   * a hacer" y la comida del personal. El tipo va bindeado en `$idxTipo`. No
+   * cuelga de un `LEFT JOIN … AND mb.tipo = …`: ese JOIN es LEFT a propósito
+   * para no perder la fila cuando el motivo se borró, y agregarle el tipo ahí
+   * dejaría pasar la cortesía con `motivo_baja_nombre: null` en vez de sacarla
+   * (ver el comentario grande de `findAll`).
    */
-  private filtroTipoMerma(): string {
+  private filtroTipo(idxTipo: number): string {
     return `AND EXISTS (
          SELECT 1 FROM motivo_baja mbf
-         WHERE mbf.motivo_baja_id = mv.motivo_baja_id AND mbf.tipo = 'merma'
+         WHERE mbf.motivo_baja_id = mv.motivo_baja_id AND mbf.tipo = $${idxTipo}
        )`;
   }
 
@@ -468,6 +478,10 @@ export class MermasService {
       idxDia,
     );
 
+    // Solo la merma de bodega: la comida del personal no es pérdida.
+    params.push(TipoMotivoBaja.MERMA);
+    const filtroTipo = this.filtroTipo(params.length);
+
     const rows: ResumenMermaRow[] = await this.db.query(
       `SELECT i.moneda_id,
               COUNT(*)::int AS total_grupo,
@@ -483,7 +497,7 @@ export class MermasService {
          LEFT JOIN items i ON i.item_id = mv.item_id
         WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
           AND mv.motivo = 'merma'
-          ${this.filtroTipoMerma()}
+          ${filtroTipo}
           ${bordeDesde}${bordeHasta}
         GROUP BY i.moneda_id`,
       params,

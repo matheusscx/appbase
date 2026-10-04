@@ -592,8 +592,12 @@ eliminados) ni la línea quitar (ya está despachada).
 
 | Tipo del motivo | Efecto |
 |---|---|
-| `merma` / `cortesia` | Descuenta stock — `ItemsService.consumirLineaAnulada`, misma expansión de receta/combo/opciones que el cobro, con el snapshot de personalización **congelado en la línea**. El movimiento va `motivo: 'merma'` + `motivoBajaId` + `cuentaLineaAnulacionId` (nunca `motivo: 'anulacion'`, que en el kardex significa *anular una venta* y hace que el stock **vuelva**) |
+| `merma` / `cortesia` / `consumo_personal` | Descuenta stock — `ItemsService.consumirLineaAnulada`, misma expansión de receta/combo/opciones que el cobro, con el snapshot de personalización **congelado en la línea**. El movimiento va `motivo: 'merma'` + `motivoBajaId` + `cuentaLineaAnulacionId` (nunca `motivo: 'anulacion'`, que en el kardex significa *anular una venta* y hace que el stock **vuelva**) |
 | `no_elaborado` | Sin movimiento: ese stock nunca salió |
+
+La regla vive en una sola función, `tipoMotivoBajaDescuenta` (junto al enum, con un `switch`
+exhaustivo): `anularLinea` y `cancelarConMotivo` la consultan, y un tipo nuevo no compila hasta
+que alguien decida ahí si descuenta.
 
 Descuenta solo si el ÍTEM tiene stock que descontar — `producto`, `receta` o `combo`.
 `servicio` y `suscripcion` no lo tienen, ni siquiera al vender (`ventas.service.ts` no los
@@ -696,7 +700,7 @@ Pantalla **`/salones/anulaciones`**, entrada *"Anulaciones"* en el menú, visibl
 
 **`GET /salones/anulaciones`** — listado paginado. Filtros: rango de fechas (**opcional**,
 pagina así que un rango sin acotar no trae todo a memoria de una vez), `garzonId`, `tipo`
-(`merma` | `cortesia` | `no_elaborado`), `motivoBajaId`. Cada fila: `precioCarta`
+(`merma` | `cortesia` | `no_elaborado` | `consumo_personal`), `motivoBajaId`. Cada fila: `precioCarta`
 (`cantidad × precio_unitario` **congelado** en `cuenta_linea_anulaciones`, nunca el de la
 línea viva — la línea se borra cuando la anulación es total) y `costoEstado` (`valorizado` |
 `no_aplica` para `no_elaborado` | `sin_valorizar` si algún movimiento no tiene costo — la fila
@@ -810,7 +814,33 @@ reglas de negocio en [`PRODUCTO.md`](../PRODUCTO.md) (*"La cortesía es un retir
   no cambian.
 - **Fuera:** el documento del retiro (lo emite la emisión electrónica con estos baldes), el
   `motivo: 'merma'` que el kardex sigue escribiendo para la cortesía (se distingue por
-  `motivo_baja_id`) y la comida del personal (`pendientes.md`).
+  `motivo_baja_id`) y la comida del personal (abajo).
+
+### La comida del personal: descuenta sin IVA (2026-10-04)
+
+Frente fiscal, spec
+[`2026-10-04-comida-del-personal-design.md`](../superpowers/specs/2026-10-04-comida-del-personal-design.md);
+reglas de negocio en [`PRODUCTO.md`](../PRODUCTO.md) (*"La comida del personal tiene motivo
+propio"*).
+
+- **El tipo `consumo_personal`** (motivo fijo *"Comida del personal (dentro del local)"*) va por
+  el mismo camino que la cortesía: `anularLinea` y `cancelarConMotivo` descuentan con
+  `consumirLineaAnulada` (receta, combo y opciones expandidas) y escriben `motivo: 'merma'` +
+  `motivoBajaId` + `cuentaLineaAnulacionId`. **No pasa por `baldesDeCortesias`**: los tres
+  `monto_*` quedan en `NULL`, porque no es retiro.
+- **La regla de la serie a medias** de `cancelarConMotivo` vale igual: cuelga de "descuenta", no
+  de la cortesía.
+- **Reporte:** grupo propio en `porTipo` (con `fiscal: null` y el costo valorizado como el de
+  una merma), filtro `?tipo=consumo_personal`, y la tarjeta *"Comida del personal"* sin línea de
+  IVA. La precuenta lo imprime en $0 con su etiqueta, como la merma y la cortesía.
+- **Fuera del % por garzón**, en las dos puntas: la consulta de lo anulado total (el
+  denominador) filtra `mb.tipo <> 'consumo_personal'`, y el grupo por garzón (el numerador) no la
+  acumula, **aunque el filtro pida solo ese tipo** (si no, el numerador tendría lo que el
+  denominador excluye). Tampoco entra en las anulaciones del bloque "Pérdidas" del Inicio.
+  Decidido por la Sesión de esfuerzo máximo (2026-10-04), derivado de qué mide el % (owner,
+  2026-09-27) y de que la comida del personal no es pérdida (owner, 2026-10-04).
+- **Pantalla:** el modal de anulación muestra la ayuda del motivo al elegirlo (lo que el empleado
+  se lleva, o lo del dueño, va como cortesía).
 
 ### Cancelar una cuenta con platos despachados (2026-09-16)
 
@@ -933,7 +963,8 @@ la línea para la que se abrió. El modal:
   no una nueva.
 - **Motivo**, de `GET /motivos-baja?soloActivas=true` (`useSalones().listarMotivosBajaActivos`),
   mostrando la palabra de su tipo (`tipoMotivoBajaLabel`: `merma` → "Merma", `cortesia` →
-  "Cortesía", `no_elaborado` → "No se llegó a hacer") para que se vea si descuenta.
+  "Cortesía", `no_elaborado` → "No se llegó a hacer", `consumo_personal` → "Comida del
+  personal") para que se vea si descuenta.
 
 Al confirmar, `useSalones().anularLinea(cuentaId, lineaId, { cantidad, motivoBajaId })` —
 `cantidad` ya convertida a la unidad canónica. Las `advertencias` de stock que trae la
@@ -1411,7 +1442,8 @@ Tests: `index.nuxt.spec.ts` § *después de "Enviar a cocina"*.
 - [roles-permisos.md](./roles-permisos.md) — módulo RBAC `Salones` y permisos `Operar` /
   `Anular`.
 - [mermas-valorizadas.md](./mermas-valorizadas.md) — catálogo de motivos de baja
-  (`merma` / `cortesia` / `no_elaborado`) que decide si anular una línea descuenta stock.
+  (`merma` / `cortesia` / `no_elaborado` / `consumo_personal`) que decide si anular una línea
+  descuenta stock.
 - [garzones.md](./garzones.md) — identificación por PIN.
 - [turnos-garzones.md](./turnos-garzones.md) — sesión obligatoria para operar cuentas.
 - [inventario-kardex.md](./inventario-kardex.md) — por qué lo apartado al pedir **no**

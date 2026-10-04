@@ -3310,6 +3310,38 @@ describe('SalonesService', () => {
       expect(items.consumirLineaAnulada).toHaveBeenCalled();
     });
 
+    it('tipo comida del personal: descuenta como la cortesía, pero no es retiro: baldes en null y sin consulta tributaria', async () => {
+      motivosBaja.assertMotivoActivo.mockResolvedValue({
+        id: MOTIVO,
+        nombre: 'Comida del personal (dentro del local)',
+        tipo: TipoMotivoBaja.CONSUMO_PERSONAL,
+      });
+      mockCuentaYLinea(lineaViva({ precioUnitario: '3000.0000' }));
+
+      await service.anularLinea(TENANT, USUARIO_ACTOR, CUENTA, LINEA, {
+        cantidad: '1',
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(items.consumirLineaAnulada).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ itemId: ITEM, cantidad: '1' }),
+      );
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLineaAnulacion,
+        expect.objectContaining({
+          montoAfecto: null,
+          montoExento: null,
+          montoImpuestos: null,
+        }),
+      );
+      expect(
+        manager.query.mock.calls.some(([sql]: [string]) =>
+          sql.includes('AS tasas_adicionales'),
+        ),
+      ).toBe(false);
+    });
+
     it('tipo no_elaborado: NO descuenta, ese stock nunca salió', async () => {
       motivosBaja.assertMotivoActivo.mockResolvedValue({
         id: MOTIVO,
@@ -3873,6 +3905,57 @@ describe('SalonesService', () => {
           montoImpuestos: '0.0000',
         }),
       );
+    });
+
+    it('con comida del personal descuenta cada línea despachada y no tasa ninguna: baldes en null', async () => {
+      motivosBaja.assertMotivoActivo.mockResolvedValue({
+        id: MOTIVO,
+        nombre: 'Comida del personal (dentro del local)',
+        tipo: TipoMotivoBaja.CONSUMO_PERSONAL,
+      });
+      const ITEM_B = 'item-b';
+      manager.find.mockResolvedValue([
+        lineaViva({ precioUnitario: '3000.0000' }),
+        lineaViva({
+          id: 'linea-2',
+          itemId: ITEM_B,
+          cantidadEnviada: '2',
+          precioUnitario: '1000.0000',
+        }),
+      ]);
+      mockItemsQuery({
+        [ITEM]: { tipo: 'producto', nombre: 'Lomo', unidad_medida: 'unidad' },
+        [ITEM_B]: { tipo: 'receta', nombre: 'Postre', unidad_medida: null },
+      });
+      manager.save.mockImplementation((entidad: unknown, row: unknown) =>
+        Promise.resolve(
+          entidad === CuentaLineaAnulacion
+            ? { ...(row as object), id: 'anulacion-x' }
+            : row,
+        ),
+      );
+
+      await service.cancelarConMotivo(TENANT, USUARIO_ACTOR, CUENTA, {
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(items.consumirLineaAnulada).toHaveBeenCalledTimes(2);
+      expect(
+        manager.query.mock.calls.some(([sql]: [string]) =>
+          sql.includes('AS tasas_adicionales'),
+        ),
+      ).toBe(false);
+      for (const cuentaLineaId of ['linea-1', 'linea-2']) {
+        expect(manager.create).toHaveBeenCalledWith(
+          CuentaLineaAnulacion,
+          expect.objectContaining({
+            cuentaLineaId,
+            montoAfecto: null,
+            montoExento: null,
+            montoImpuestos: null,
+          }),
+        );
+      }
     });
 
     it('una línea 3/1: una anulación de 1 y un consumo de 1; las 2 pendientes se descartan sin fila', async () => {

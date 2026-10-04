@@ -108,6 +108,7 @@ describe('VarianzaService', () => {
     teorico: '0.0000',
     merma: '0.0000',
     cortesia: '0.0000',
+    personal: '0.0000',
     abastecimiento: '0.0000',
     ...overrides,
   });
@@ -325,6 +326,27 @@ describe('VarianzaService', () => {
       });
     });
 
+    it('la comida del personal viaja en su propia columna, no en merma ni en cortesía', async () => {
+      mockGrupos(
+        [grupoRow()],
+        [
+          bucketRow({
+            merma: '11.0000',
+            cortesia: '3.0000',
+            personal: '5.0000',
+          }),
+        ],
+      );
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toMatchObject({
+        merma: '11.0000',
+        cortesia: '3.0000',
+        personal: '5.0000',
+      });
+    });
+
     /**
      * ⚠️ **El signo importa y es el caso que más fácil se escribe al revés.**
      * Un recuento con SOBRANTE es una entrada: encontraste MÁS de lo que el
@@ -442,6 +464,34 @@ describe('VarianzaService', () => {
       const res = await service.findAll(TENANT, RANGO);
 
       expect(res.data[0]).toMatchObject({ otros: '0.0000' });
+    });
+
+    /**
+     * La comida del personal es consumo EXPLICADO (spec 2026-10-04): entra en
+     * los buckets, o cada plato del personal haría saltar «Otros», que es el
+     * detector de lo que el reporte no sabe clasificar.
+     * 100 + 40 − 110 = 30 = 21 de venta + 7 de personal + 2 de merma.
+     */
+    it('la comida del personal cierra la cuenta: otros queda en cero', async () => {
+      mockGrupos(
+        [grupoRow()],
+        [
+          bucketRow({
+            teorico: '21.0000',
+            merma: '2.0000',
+            personal: '7.0000',
+            abastecimiento: '40.0000',
+          }),
+        ],
+        [saldoRow({ saldo_desde: '100.0000', saldo_hasta: '110.0000' })],
+      );
+
+      const res = await service.findAll(TENANT, RANGO);
+
+      expect(res.data[0]).toMatchObject({
+        otros: '0.0000',
+        personal: '7.0000',
+      });
     });
 
     /**
@@ -758,6 +808,7 @@ describe('VarianzaService', () => {
       teorico: '0',
       merma: '0',
       cortesia: '0',
+      personal: '0',
       sin_explicacion: '0',
       consumo_total: '0',
       abastecimiento: '0',
@@ -854,6 +905,39 @@ describe('VarianzaService', () => {
       const res = await service.resumen(TENANT, RANGO_RESUMEN);
 
       expect(res.totales.otros).toEqual([{ monedaId: CLP, monto: '5.0000' }]);
+    });
+
+    /**
+     * La comida del personal tiene su total y se resta del residuo, pero NO
+     * es plata perdida (spec 2026-10-04: gasto de la operación): no ordena el
+     * top ni mete en él a un producto que solo comió el personal.
+     * consumo_total 20 = merma 6 + personal 13 + otros 1
+     */
+    it('la comida del personal tiene su total, se resta de otros y no entra al top', async () => {
+      mockResumen({
+        montos: [
+          montoRow({
+            item_id: 'item-merma',
+            item_nombre: 'Con merma',
+            merma: '6.0000',
+            consumo_total: '6.0000',
+          }),
+          montoRow({
+            item_id: 'item-personal',
+            item_nombre: 'Solo personal',
+            personal: '13.0000',
+            consumo_total: '14.0000',
+          }),
+        ],
+      });
+
+      const res = await service.resumen(TENANT, RANGO_RESUMEN);
+
+      expect(res.totales.personal).toEqual([
+        { monedaId: CLP, monto: '13.0000' },
+      ]);
+      expect(res.totales.otros).toEqual([{ monedaId: CLP, monto: '1.0000' }]);
+      expect(res.top.map((t) => t.itemId)).toEqual(['item-merma']);
     });
 
     /**

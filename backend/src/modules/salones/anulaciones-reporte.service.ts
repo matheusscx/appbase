@@ -555,11 +555,16 @@ export class AnulacionesReporteService {
       { desde: query.desde, hasta: query.hasta, garzonId: query.garzonId },
       dia,
     );
+    // La comida del personal no entra ni acá ni en el numerador (abajo): el %
+    // mide el desvío del garzón —lo que anula o regala antes de cobrar—, y la
+    // colación de sus compañeros no lo es. Decidido por la Sesión de esfuerzo
+    // máximo (2026-10-04), derivado de qué mide el % (owner, 2026-09-27).
     const anuladoRows: AnuladoRow[] = await this.db.query(
       `SELECT cla.garzon_id, g.nombre AS garzon_nombre,
               SUM(ROUND(cla.cantidad * cla.precio_unitario, 4)) AS anulado
          ${JOINS_BASE}
            ${filtrosTotal}
+           AND mb.tipo <> '${TipoMotivoBaja.CONSUMO_PERSONAL}'
         GROUP BY cla.garzon_id, g.nombre`,
       paramsTotal,
     );
@@ -612,15 +617,20 @@ export class AnulacionesReporteService {
         costoEstado,
         costo,
       );
-      this.acumular(
-        porGarzon,
-        r.garzon_id ?? SIN_GARZON,
-        { garzonId: r.garzon_id, garzonNombre: r.garzon_nombre },
-        cantidad,
-        precioCartaFila,
-        costoEstado,
-        costo,
-      );
+      // Fuera del grupo por garzón, que es el numerador del %: mismo porqué
+      // que en `anuladoRows`. Aunque el filtro pida solo este tipo, el % la
+      // ignora: si no, el numerador tendría lo que el denominador excluye.
+      if (r.tipo !== TipoMotivoBaja.CONSUMO_PERSONAL) {
+        this.acumular(
+          porGarzon,
+          r.garzon_id ?? SIN_GARZON,
+          { garzonId: r.garzon_id, garzonNombre: r.garzon_nombre },
+          cantidad,
+          precioCartaFila,
+          costoEstado,
+          costo,
+        );
+      }
       this.acumular(
         porAutorizo,
         r.usuario_id,

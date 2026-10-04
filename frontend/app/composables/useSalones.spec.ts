@@ -169,6 +169,10 @@ describe('tipoMotivoBajaLabel', () => {
   it('no_elaborado → No se llegó a hacer', () => {
     expect(tipoMotivoBajaLabel('no_elaborado')).toBe('No se llegó a hacer')
   })
+
+  it('consumo_personal → Comida del personal', () => {
+    expect(tipoMotivoBajaLabel('consumo_personal')).toBe('Comida del personal')
+  })
 })
 
 describe('formatCantidadAnulacion', () => {

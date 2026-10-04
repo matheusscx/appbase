@@ -144,3 +144,34 @@ describe('AnularLineaModal — línea con serie', () => {
     expect(casillas().every(c => c.getAttribute('aria-checked') !== 'true')).toBe(true)
   })
 })
+
+// Spec 2026-10-04-comida-del-personal (owner): la comida del personal no paga
+// IVA solo DENTRO del local. La ayuda aparece al elegir ese motivo —cuando
+// quien anula todavía puede cambiar a cortesía— y no con los demás.
+describe('AnularLineaModal — ayuda de la comida del personal', () => {
+  const AYUDA = 'Si se lo lleva, o si lo consume el dueño, regístralo como cortesía'
+
+  beforeEach(() => {
+    apiFetch.mockResolvedValue([
+      ...MOTIVOS,
+      { id: 'motivo-personal', nombre: 'Comida del personal (dentro del local)', tipo: 'consumo_personal' },
+    ])
+  })
+
+  it('aparece al elegir un motivo de comida del personal, y no con una cortesía', async () => {
+    const wrapper = await abrir(lineaSerie({ unidades: [] }))
+    // El catálogo de motivos se carga al ABRIR (el `watch(open)`), no al montar.
+    await wrapper.setProps({ open: false })
+    await wrapper.setProps({ open: true })
+    await new Promise(r => setTimeout(r, 50))
+    const select = wrapper.findComponent({ name: 'USelectMenu' })
+
+    select.vm.$emit('update:modelValue', 'motivo-cortesia')
+    await new Promise(r => setTimeout(r, 10))
+    expect(dialogo().textContent).not.toContain(AYUDA)
+
+    select.vm.$emit('update:modelValue', 'motivo-personal')
+    await new Promise(r => setTimeout(r, 10))
+    expect(dialogo().textContent).toContain(AYUDA)
+  })
+})

@@ -7,6 +7,7 @@ import {
   type UnidadCat,
 } from '~/utils/cantidad-presentacion'
 import {
+  AYUDA_CONSUMO_PERSONAL,
   tipoMotivoBajaLabel,
   type CuentaLineaDetalle,
   type TipoMotivoBaja,
@@ -92,8 +93,16 @@ const motivoItems = computed(() =>
   })),
 )
 
+// La comida del personal no paga IVA solo dentro del local: la ayuda lo dice al
+// elegirla, que es cuando quien anula todavía puede cambiar a cortesía.
+const ayudaMotivo = computed(() =>
+  motivos.value.find(m => m.id === motivoBajaId.value)?.tipo === 'consumo_personal'
+    ? AYUDA_CONSUMO_PERSONAL
+    : undefined,
+)
+
 // Arranca vacío en cada apertura (spec: "arrancando destildado o vacío") y
-// carga el catálogo de motivos — activos del tenant, los tres tipos.
+// carga el catálogo de motivos — activos del tenant, todos los tipos.
 watch(open, async (isOpen) => {
   cantidad.value = undefined
   unidadesElegidas.value = []
@@ -213,7 +222,7 @@ function confirmar() {
             class="w-full"
           />
         </UFormField>
-        <UFormField label="Motivo" required>
+        <UFormField label="Motivo" required :help="ayudaMotivo">
           <USelectMenu
             v-model="motivoBajaId"
             :items="motivoItems"

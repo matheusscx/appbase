@@ -78,7 +78,7 @@ interface GrupoResumenGarzon {
   porcentaje: string | null;
 }
 interface ResumenAnulaciones {
-  porTipo: unknown[];
+  porTipo: { tipo: string }[];
   porGarzon: GrupoResumenGarzon[];
   porAutorizo: unknown[];
 }
@@ -118,6 +118,7 @@ describe('Salones — % de anulaciones sobre lo pedido, por garzón (e2e)', () =
 
   let motivoMermaId: string;
   let motivoCortesiaId: string;
+  let motivoPersonalId: string;
 
   let itemEntrada: string; // $10.000
   let itemPostre: string; // $5.000
@@ -314,6 +315,8 @@ describe('Salones — % de anulaciones sobre lo pedido, por garzón (e2e)', () =
     const motivos = resMotivos.body as MotivoBajaItem[];
     motivoMermaId = motivos.find((m) => m.tipo === 'merma')!.id;
     motivoCortesiaId = motivos.find((m) => m.tipo === 'cortesia')!.id;
+    motivoPersonalId = motivos.find((m) => m.tipo === 'consumo_personal')!.id;
+    expect(motivoPersonalId).toBeTruthy();
     expect(motivoMermaId).toBeTruthy();
     expect(motivoCortesiaId).toBeTruthy();
 
@@ -700,5 +703,42 @@ describe('Salones — % de anulaciones sobre lo pedido, por garzón (e2e)', () =
     // Y tampoco aparece como un garzón fantasma "Sin garzón" (garzonId null):
     // ningún test de este archivo deja reparto de Paris sin garzón.
     expect(despues.porGarzon.some((f) => f.garzonId === null)).toBe(false);
+  });
+
+  // Decidido por la Sesión de esfuerzo máximo (2026-10-04), derivado de qué
+  // mide el % (owner, 2026-09-27): la colación de los compañeros no es un
+  // desvío del garzón. Va al final a propósito: la identidad del test 6 suma
+  // TODAS las anulaciones de la mesa, y esta no entra al pedido.
+  it('9. la comida del personal no entra al %: ni al numerador ni al pedido, aunque se filtre por su tipo', async () => {
+    const antes = fila(await resumen(), garzon1);
+
+    const cuenta = await abrirCuenta(garzon1);
+    await agregarLinea(cuenta.id, itemEntrada, '2'); // $20.000
+    await despachar(cuenta.id);
+    const linea = (await detalleCuenta(cuenta.id)).lineas.find(
+      (l) => l.itemId === itemEntrada,
+    )!;
+    await anularLinea(cuenta.id, linea.id, {
+      cantidad: '1',
+      motivoBajaId: motivoPersonalId,
+    });
+    await cerrar(cuenta.id, garzon1);
+
+    const r = await resumen();
+    const despues = fila(r, garzon1);
+    // Solo lo vendido (10.000) suma al pedido; la colación (10.000), no.
+    expect(new Decimal(despues.pedido).minus(antes.pedido).toFixed(4)).toBe(
+      '10000.0000',
+    );
+    expect(despues.precioCarta).toBe(antes.precioCarta);
+    // En la tabla por tipo sigue apareciendo.
+    const grupoPersonal = r.porTipo.find((g) => g.tipo === 'consumo_personal');
+    expect(grupoPersonal).toBeDefined();
+
+    // Con el filtro en su tipo, el % la ignora igual: el numerador no puede
+    // tener lo que el denominador excluye.
+    const filtrado = fila(await resumen({ tipo: 'consumo_personal' }), garzon1);
+    expect(filtrado.precioCarta).toBe('0.0000');
+    expect(filtrado.pedido).toBe(despues.pedido);
   });
 });

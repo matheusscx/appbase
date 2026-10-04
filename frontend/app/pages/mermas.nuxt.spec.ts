@@ -43,6 +43,8 @@ let mermasListado: Record<string, unknown>[] = []
  *  pantalla no alcanza (el servidor es el que manda), pero sin esto
  *  "Cortesía de la casa" aparecería en el selector de Mermas. */
 let motivosUrlSolicitada = ''
+/** Con esto en `true`, pedir los motivos de la comida del personal falla. */
+let motivosPersonalFallan = false
 /** Task 5: corte del día de negocio que devuelve `GET /tenants/me` — 0 por
  *  defecto (sin corte, la `DiaNegocioNota` no se dibuja). */
 let horaCorteBackend = 0
@@ -90,6 +92,9 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (url.includes('/motivos-baja')) {
       motivosUrlSolicitada = url
+      if (motivosPersonalFallan && url.includes('tipo=consumo_personal')) {
+        return Promise.reject(new Error('sin red'))
+      }
       return Promise.resolve([MOTIVO])
     }
     // `useUnidadesMedidaStore.ensureLoaded()` espera un ARRAY, no el shape
@@ -456,6 +461,86 @@ describe('mermas — nota del día de negocio', () => {
     const wrapper = await montar()
 
     expect(wrapper.text()).not.toContain('Tu día va de')
+    wrapper.unmount()
+  })
+})
+
+// Spec 2026-10-04-comida-del-personal § 3.3 (owner, "Mesa y Mermas"): la comida
+// del personal se registra acá para el producto suelto, pero se ve aparte. La
+// vista decide el `?tipo=` del listado, qué motivos pide al servidor, los
+// textos y que el costo no se llame pérdida.
+describe('mermas — vista de comida del personal', () => {
+  beforeEach(() => {
+    ubicacionesBackend = [LOCAL]
+    mermasListado = [{
+      id: 'mov-personal',
+      itemId: HARINA.id,
+      itemNombre: HARINA.nombre,
+      cantidad: '1.0000',
+      costoUnitario: '1500.0000',
+      costoPerdido: '1500.0000',
+      motivoBajaId: 'motivo-personal',
+      motivoBajaNombre: 'Comida del personal (dentro del local)',
+      comentario: null,
+      creadoEl: new Date().toISOString(),
+      usuarioNombre: null,
+      unidadMedida: 'kg',
+      monedaId: 'clp-1',
+      itemEliminado: false,
+      deAnulacion: false,
+    }]
+    mermasUrls = []
+    motivosUrlSolicitada = ''
+    motivosPersonalFallan = false
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  // Revisión independiente (H1): el servidor acepta los dos tipos, así que un
+  // motivo de merma ofrecido en la vista de personal se registraría como merma
+  // y se pintaría en la lista equivocada.
+  it('si fallan los motivos de la otra vista, no quedan ofrecidos los de la anterior', async () => {
+    motivosPersonalFallan = true
+    const wrapper = await montar()
+    // El filtro del listado ofrece el motivo de merma al arrancar.
+    expect(selectConOpcion(wrapper, MOTIVO.id).exists()).toBe(true)
+
+    wrapper.findComponent({ name: 'UTabs' }).vm.$emit('update:modelValue', 'consumo_personal')
+    await new Promise(r => setTimeout(r, 50))
+
+    const ofreceVencimiento = wrapper.findAllComponents({ name: 'USelectMenu' }).some(s =>
+      ((s.props('items') ?? []) as { value: string }[]).some?.(i => i?.value === MOTIVO.id))
+    expect(ofreceVencimiento).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('arranca en Mermas: pide tipo=merma al listado y a los motivos', async () => {
+    const wrapper = await montar()
+
+    expect(mermasUrls.at(-1)).toContain('tipo=merma')
+    expect(motivosUrlSolicitada).toContain('tipo=merma')
+    expect(wrapper.text()).toContain('Costo perdido')
+    wrapper.unmount()
+  })
+
+  it('al cambiar a Comida del personal pide su tipo, cambia los textos y el costo deja de ser pérdida', async () => {
+    const wrapper = await montar()
+
+    wrapper.findComponent({ name: 'UTabs' }).vm.$emit('update:modelValue', 'consumo_personal')
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(mermasUrls.at(-1)).toContain('tipo=consumo_personal')
+    expect(motivosUrlSolicitada).toContain('tipo=consumo_personal')
+    expect(wrapper.text()).toContain('Registrar comida del personal')
+    expect(wrapper.text()).not.toContain('Costo perdido')
+    // La celda del costo existe y no se pinta como pérdida.
+    const celdaCosto = wrapper.findAll('td span.font-medium')
+    expect(celdaCosto.length).toBeGreaterThan(0)
+    expect(celdaCosto.every(c => !c.classes().includes('text-error'))).toBe(true)
+
+    const boton = wrapper.findAll('button').find(b => b.text().includes('Registrar comida del personal'))
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    expect(document.body.textContent).toContain('Si se lo lleva, o si lo consume el dueño, regístralo como cortesía')
     wrapper.unmount()
   })
 })

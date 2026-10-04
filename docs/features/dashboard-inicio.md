@@ -156,8 +156,12 @@ decisiones D1–D12). Lo que sigue es lo que cuenta cada número y el porqué.
   `costo` — regla 6 de la spec del costo sin tipear (`docs/agent/pendientes.md` § 3): un
   `SUM` que ignorara esas filas informaría menos pérdida que la real sin decirlo. Reusa
   **el mismo filtro de tipo** que excluye las cortesías del listado de Mermas (desde
-  `2e1fad74`): un motivo en `motivo_baja` puede ser `merma`, `cortesia` o
-  `no_elaborado`, y solo el primero es plata perdida de bodega. Esta entrada de
+  `2e1fad74`; desde el 2026-10-04 con el tipo bindeado): un motivo en `motivo_baja`
+  puede ser `merma`, `cortesia`, `no_elaborado` o `consumo_personal`, y solo el primero
+  es plata perdida de bodega. **Las anulaciones del bloque tampoco traen la comida del
+  personal**: `perdidas.anulaciones` es el `porTipo` del reporte de anulaciones sin el grupo
+  `consumo_personal` (decidido por la Sesión de esfuerzo máximo el 2026-10-04, derivado de la
+  decisión del owner de ese día: no es pérdida). Merma, cortesía y `no_elaborado` siguen. Esta entrada de
   `pendientes.md` NO se cierra con esto: sigue faltando un reporte de mermas completo
   (listado agregable, filtros propios) — esto es solo el bloque que el dashboard
   necesita.

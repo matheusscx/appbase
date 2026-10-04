@@ -69,6 +69,7 @@ function fila(over: Record<string, unknown>) {
     teorico: '10.0000',
     merma: '1.0000',
     cortesia: '0.0000',
+    personal: '0.0000',
     sinExplicacion: '3.0000',
     otros: '0.0000',
     costoSinExplicacion: [{ monedaId: 'clp-1', monto: '750.0000' }],
@@ -90,6 +91,7 @@ const RESUMEN_BASE = {
     teorico: [{ monedaId: 'clp-1', monto: '5000.0000' }],
     merma: [{ monedaId: 'clp-1', monto: '400.0000' }],
     cortesia: [],
+    personal: [{ monedaId: 'clp-1', monto: '1300.0000' }],
     sinExplicacion: [{ monedaId: 'clp-1', monto: '750.0000' }],
     otros: [],
   },
@@ -213,6 +215,7 @@ beforeEach(() => {
       teorico: null,
       merma: null,
       cortesia: null,
+      personal: null,
       sinExplicacion: null,
       otros: null,
       costoSinExplicacion: [],
@@ -246,6 +249,17 @@ describe('varianza — tabla', () => {
     wrapper.unmount()
   })
 
+  // Spec 2026-10-04-comida-del-personal § 3.5: columna propia, con su cantidad.
+  it('la comida del personal tiene su columna, con la cantidad de la fila', async () => {
+    listado = [fila({ itemId: 'harina', itemNombre: 'Harina', personal: '7.0000' })]
+    const wrapper = await montar()
+    const encabezados = wrapper.findAll('thead th').map(th => th.text())
+    expect(encabezados).toContain('Personal')
+    const idx = encabezados.indexOf('Personal')
+    expect(filaDe(wrapper, 'Harina').findAll('td')[idx]!.text()).toContain('7')
+    wrapper.unmount()
+  })
+
   it('la columna «Otros» sigue aunque todas las filas den cero', async () => {
     listado = [fila({ itemId: 'harina', itemNombre: 'Harina' })]
     const wrapper = await montar()
@@ -256,6 +270,16 @@ describe('varianza — tabla', () => {
 })
 
 describe('varianza — resumen', () => {
+  // Spec 2026-10-04: la comida del personal tiene su total, pero no es pérdida.
+  it('la tarjeta de Comida del personal muestra su total', async () => {
+    const wrapper = await montar()
+    const tarjeta = wrapper.findAll('div').find(d =>
+      d.text().startsWith('Comida del personal') && d.text().length < 60)
+    expect(tarjeta, 'tarjeta de Comida del personal').toBeTruthy()
+    expect(tarjeta!.text()).toContain('$1.300')
+    wrapper.unmount()
+  })
+
   it('lo que no se pudo medir sale en dos números: sin contar y a medio contar', async () => {
     const wrapper = await montar()
     const linea = wrapper.find('[data-qa="varianza-sin-conteo"]')

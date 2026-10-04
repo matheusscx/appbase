@@ -36,6 +36,7 @@ interface VarianzaFilaResp {
   teorico: string | null;
   merma: string | null;
   cortesia: string | null;
+  personal: string | null;
   sinExplicacion: string | null;
   otros: string | null;
 }
@@ -66,6 +67,7 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
   let localId: string;
   let motivoMermaId: string;
   let motivoCortesiaId: string;
+  let motivoPersonalId: string;
   let motivoDiferenciaId: string;
   let categoriaId: string;
   let garzon: GarzonCreado;
@@ -125,6 +127,7 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
     const motivos = resMotivos.body as { id: string; tipo: string }[];
     motivoMermaId = motivos.find((m) => m.tipo === 'merma')!.id;
     motivoCortesiaId = motivos.find((m) => m.tipo === 'cortesia')!.id;
+    motivoPersonalId = motivos.find((m) => m.tipo === 'consumo_personal')!.id;
 
     const resDif = await request(app.getHttpServer())
       .get('/api/motivos-diferencia-inventario')
@@ -398,6 +401,63 @@ describe('Reporte de varianza — clasificación de buckets (e2e)', () => {
     expect(fila.medible).toBe(true);
     expect(fila.merma).toBe('3.0000');
     expect(fila.cortesia).toBe('7.0000');
+  });
+
+  /**
+   * La comida del personal (spec 2026-10-04) también escribe `motivo='merma'`:
+   * sin su propio `FILTER` caería en «Otros», el detector de lo que el reporte
+   * no sabe clasificar. Entra por los dos caminos que decidió el owner —la
+   * mesa (5) y Mermas (2)— y tiene que quedar en su columna, con merma (3) y
+   * cortesía (11) intactas y la cuenta cerrando.
+   */
+  it('la comida del personal va a su columna por la mesa y por Mermas, y Otros sigue en cero', async () => {
+    const itemId = await crearProducto('200');
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '200',
+      motivoDiferenciaId,
+    });
+
+    await request(app.getHttpServer())
+      .post('/api/mermas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId,
+        ubicacionId: localId,
+        cantidad: '3',
+        motivoBajaId: motivoMermaId,
+      })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/api/mermas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId,
+        ubicacionId: localId,
+        cantidad: '2',
+        motivoBajaId: motivoPersonalId,
+      })
+      .expect(201);
+    await anularEnMesa(itemId, '11', motivoCortesiaId);
+    await anularEnMesa(itemId, '5', motivoPersonalId);
+
+    // 200 − 3 − 2 − 11 − 5 = 179, y se cuentan 179: nada sin explicación.
+    await contarYAplicar(app, token, {
+      ubicacionId: localId,
+      itemId: itemId,
+      cantidadContada: '179',
+      motivoDiferenciaId,
+    });
+
+    const fila = await filaDe(itemId);
+
+    expect(fila.medible).toBe(true);
+    expect(fila.merma).toBe('3.0000');
+    expect(fila.cortesia).toBe('11.0000');
+    expect(fila.personal).toBe('7.0000');
+    expect(fila.sinExplicacion).toBe('0.0000');
+    expect(fila.otros).toBe('0.0000');
   });
 
   /**

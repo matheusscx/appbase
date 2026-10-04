@@ -191,7 +191,7 @@ Suma: Mi cuenta 1 + Organización 4 + Catálogo 3 + Precios 6 + Cobros 2 + Caja 
 | Pantalla | Quién | Qué se configura |
 |---|---|---|
 | **Ubicaciones** | Admin | El local (único, predefinido) y las bodegas |
-| **Motivos de baja** | Admin | Nombre, tipo (`merma`/`cortesia`/`no_elaborado`), activo; los fijos no se editan |
+| **Motivos de baja** | Admin | Nombre, tipo (`merma`/`cortesia`/`no_elaborado`/`consumo_personal`), activo; los fijos no se editan |
 | **Motivos de diferencia** | Admin | Motivos de descuadre de recuento |
 | **Motivos de traslado** | Admin | Motivos de traslado entre ubicaciones |
 

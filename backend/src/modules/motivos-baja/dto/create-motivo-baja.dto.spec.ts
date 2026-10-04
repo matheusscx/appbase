@@ -29,6 +29,7 @@ describe('CreateMotivoBajaDto — tipo', () => {
     TipoMotivoBaja.MERMA,
     TipoMotivoBaja.CORTESIA,
     TipoMotivoBaja.NO_ELABORADO,
+    TipoMotivoBaja.CONSUMO_PERSONAL,
   ])('acepta el valor del enum %s', async (tipo) => {
     await expect(errores({ nombre: 'Rotura', tipo })).resolves.toEqual([]);
   });

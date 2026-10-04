@@ -281,6 +281,18 @@ que lo convierte en un frente propio y no en un remate.
 superficies" sumando conteos de código con un conteo de docs hecho con **otro patrón**. La
 revisión independiente no lo pudo reproducir, con razón.
 
+- [ ] **El kardex llama "costo perdido" a la cortesía y a la comida del personal** (backend +
+  front; anotado el 2026-10-04 al cerrar "la comida del personal tiene motivo propio",
+  [`resueltos.md`](resueltos.md); que vaya como entrada propia lo decidió la Sesión de esfuerzo
+  máximo, por el canal de dudas fiscales). Toda baja escribe `motivo = 'merma'` en
+  `movimientos_inventario`, y solo `motivo_baja.tipo` separa la merma de la cortesía y de la comida
+  del personal. `InventarioService.mapMovimientoRow` calcula `costoPerdido` con `r.motivo ===
+  'merma'`, así que el kardex muestra "costo perdido" también para lo regalado y para lo que comió
+  el personal, que no son pérdidas. Mermas, el Inicio y varianza ya filtran por el tipo. **Lo que
+  falta:** que la lectura del kardex traiga `motivo_baja.tipo` y que el costo de lo que no es merma
+  no se llame pérdida, sin tocar cómo se escribe el kardex. **Antes de empezar:** listar a todos
+  los que leen `costoPerdido` del kardex (front incluido).
+
 - [ ] **Un `REFUND` aprobado que quedó sin nota de crédito no tiene cómo generarla: botón
   "Generar nota"** (backend + frontend; ⛔ **fiscal, frente propio**: emite un documento, así que
   va en su sesión, con su verificación, nunca de arrastre — `CLAUDE.md`, ADR-010). Sale del
@@ -1126,20 +1138,6 @@ y viaja con ella.
 transaccional nativo, con ALS — [ADR-020](../adr/020-contexto-transaccional-als.md));
 Prisma y Drizzle tienen el mismo modelo manual de transacciones que TypeORM. No es un
 pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evaluación.
-
-- [ ] **La comida del personal no tiene motivo propio, y como cortesía pagaría IVA de más**
-  (fiscal — frente propio; anotado el 2026-10-03 por decisión del owner, *"Anotarlo aparte"*,
-  al cerrar la cortesía como retiro gravado). Desde ese frente toda anulación de tipo `cortesia`
-  congela el IVA del retiro (owner: *"Siempre paga IVA"*), pero el personal comiendo **dentro**
-  del local no es retiro: los bienes no salen de la empresa (Reglamento DS 55/1977 art. 11;
-  Oficio 734/2002, sobre un restaurante; investigación
-  [`2026-10-03-cortesia-retiro-iva.md`](investigaciones/2026-10-03-cortesia-retiro-iva.md) § 1,
-  escena c). Si un local la registra como cortesía, el reporte le suma un IVA que no debe; como
-  merma, el kardex la llama pérdida. **Lo que hay que decidir:** si va un cuarto tipo de motivo
-  (`consumo_personal`: descuenta stock, sin IVA), desde qué pantalla se registra (la comida del
-  personal no siempre pasa por una mesa) y si el criterio discrepante del SII sobre documentarla
-  con boleta "no afecta" (Oficio 734 vs. Oficios 1.750/2001 y 638/2009) pide algo más que el
-  registro. Se lleva al owner con el análisis de la Sesión de esfuerzo máximo.
 
 - [ ] **La tienda online y la suscripción no piden RUT: una compra de más de 135 UF se rechaza**
   (anotado 2026-10-04 al cerrar "Una venta de más de 135 UF…", ver [`resueltos.md`](resueltos.md)).

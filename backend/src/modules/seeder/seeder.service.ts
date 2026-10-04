@@ -1599,12 +1599,19 @@ export class SeederService implements OnApplicationBootstrap {
     // Los cinco de siempre (Vencimiento…Otro) conservan su ID: el contador
     // que arranca en 266 recorre solo esos cinco, dos tenants.
     const CINCO_DE_SIEMPRE = MOTIVOS_BAJA_FIJOS.slice(0, 5);
-    // Los dos fijos nuevos son 4 IDs (2 tenants x 2 nombres) que quedan FUERA
-    // de ese contador — si lo siguieran, pisarían turnos ya tomados
+    // Los fijos que llegaron después (2 IDs por nombre, uno por tenant) quedan
+    // FUERA de ese contador — si lo siguieran, pisarían turnos ya tomados
     // (…277-…279). Se toman de números libres, fijos por nombre y tenant.
+    // La comida del personal (2026-10-04) toma 460/461: la orquestadora reservó
+    // 460-464 para este frente (456-459 y 465-469 son de otros frentes en
+    // paralelo), y los rangos dinámicos de este archivo terminan en 451
+    // (`uuid(450)`/`uuid(451)` de seedPresentacionesCompra). El "447–460" que
+    // `seedModulosApp` reserva para Varianza es de un frente ya cerrado: ningún
+    // ID de ese rango pasa del 455.
     const NUEVOS: Record<string, [paris: number, falabella: number]> = {
       'Cortesía de la casa': [401, 402],
       'No se llegó a hacer': [403, 404],
+      'Comida del personal (dentro del local)': [460, 461],
     };
 
     let id = 266;

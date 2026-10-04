@@ -82,6 +82,12 @@ export interface VarianzaFila {
   teorico: string | null;
   merma: string | null;
   cortesia: string | null;
+  /**
+   * La comida del personal dentro del local (spec 2026-10-04): un consumo
+   * explicado, como la cortesía, pero no una pérdida — no entra en la "plata
+   * perdida" del resumen.
+   */
+  personal: string | null;
   /** Σ `recuento` con signo: salidas menos entradas. Un sobrante resta. */
   sinExplicacion: string | null;
   /**
@@ -239,7 +245,7 @@ const SELECT_GRUPOS = `
  *
  * ```
  * porSaldos  = saldoDesde + abastecimiento − saldoHasta
- * porBuckets = teórico + merma + cortesía + sin explicación
+ * porBuckets = teórico + merma + cortesía + personal + sin explicación
  * otros      = porSaldos − porBuckets
  * ```
  *
@@ -295,6 +301,7 @@ function residuo(
   const porBuckets = d(bucket?.teorico)
     .plus(d(bucket?.merma))
     .plus(d(bucket?.cortesia))
+    .plus(d(bucket?.personal))
     .plus(d(sinExplicacion));
 
   return porSaldos.minus(porBuckets).toFixed(ESCALA_COSTO);
@@ -352,6 +359,7 @@ function mapGrupo(
     teorico: medible ? num(bucket?.teorico) : null,
     merma: medible ? num(bucket?.merma) : null,
     cortesia: medible ? num(bucket?.cortesia) : null,
+    personal: medible ? num(bucket?.personal) : null,
     sinExplicacion: medible ? num(r.sin_explicacion) : null,
     otros: medible ? num(residuo(bucket, saldo, r.sin_explicacion)) : null,
     // ⚠️ Una fila medible que cerró justo viaja con `[{ moneda, '0.0000' }]`, no
@@ -375,6 +383,7 @@ interface BucketRow {
   teorico: string;
   merma: string;
   cortesia: string;
+  personal: string;
   /** Entradas menos salidas de los motivos de ABASTECIMIENTO. No es consumo. */
   abastecimiento: string;
 }
@@ -448,10 +457,12 @@ const ventanaSql = (alias: string): string => `
  * valorizada como si fueran 9. Es la misma razón por la que `ventanaSql` y
  * `NETO_RECUENTO` viven fuera de las consultas.
  *
- * El `mb` que nombran `MERMA` y `CORTESIA` es el `LEFT JOIN motivo_baja`: las dos
- * escriben el mismo `motivo='merma'` en el kardex y solo las separa
- * `motivo_baja.tipo`, así que **toda consulta que use estos dos predicados tiene
- * que traer ese JOIN**.
+ * El `mb` que nombran `MERMA`, `CORTESIA` y `PERSONAL` es el `LEFT JOIN
+ * motivo_baja`: las tres escriben el mismo `motivo='merma'` en el kardex y solo
+ * las separa `motivo_baja.tipo`, así que **toda consulta que use estos
+ * predicados tiene que traer ese JOIN**. Un tipo de motivo que descuente y no
+ * tenga predicado acá cae en «Otros»: por eso la comida del personal tiene el
+ * suyo (spec 2026-10-04).
  */
 const P = {
   TEORICO_SALIDA: `mv.motivo = 'venta' AND mv.tipo = 'salida'`,
@@ -459,6 +470,7 @@ const P = {
              AND mv.venta_id IS NOT NULL`,
   MERMA: `mv.motivo = 'merma' AND mv.tipo = 'salida' AND mb.tipo = 'merma'`,
   CORTESIA: `mv.motivo = 'merma' AND mv.tipo = 'salida' AND mb.tipo = 'cortesia'`,
+  PERSONAL: `mv.motivo = 'merma' AND mv.tipo = 'salida' AND mb.tipo = 'consumo_personal'`,
   RECUENTO_SALIDA: `mv.motivo = 'recuento' AND mv.tipo = 'salida'`,
   RECUENTO_ENTRADA: `mv.motivo = 'recuento' AND mv.tipo = 'entrada'`,
 } as const;
@@ -583,10 +595,10 @@ const SQL_SALDOS = `
  *
  * ⚠️ Si alguna vez se afloja ese borrado, **el filtro sería lo PEOR que se
  * podría agregar acá**: `mb.tipo` saldría `NULL` y el movimiento desaparecería
- * de merma y de cortesía **a la vez**, sin caer en ningún bucket. La pregunta de
+ * de merma, de cortesía y de personal **a la vez**, sin caer en ningún bucket. La pregunta de
  * este `JOIN` es *"¿qué ERA esta merma cuando ocurrió?"*, y una pérdida pasada
  * no se reclasifica porque después se borró una fila de catálogo. Mismo criterio
- * que `MermasService.filtroTipoMerma`. (`anulaciones-reporte.service.ts` sí lo
+ * que `MermasService.filtroTipo`. (`anulaciones-reporte.service.ts` sí lo
  * filtra, pero ahí el `JOIN` cuelga de `cuenta_linea_anulaciones`: otra
  * pregunta.) El e2e deja esa garantía atada con un test.
  *
@@ -605,6 +617,7 @@ const SQL_BUCKETS = `
            AS teorico,
          COALESCE(SUM(mv.cantidad) FILTER (WHERE ${P.MERMA}), 0)    AS merma,
          COALESCE(SUM(mv.cantidad) FILTER (WHERE ${P.CORTESIA}), 0) AS cortesia,
+         COALESCE(SUM(mv.cantidad) FILTER (WHERE ${P.PERSONAL}), 0) AS personal,
          COALESCE(SUM(mv.cantidad) FILTER (WHERE ${pAbastecimiento(8, 'entrada')}), 0)
          - COALESCE(SUM(mv.cantidad) FILTER (WHERE ${pAbastecimiento(8, 'salida')}), 0)
            AS abastecimiento
@@ -791,6 +804,8 @@ export interface ResumenVarianza {
     teorico: CostoPorMoneda[];
     merma: CostoPorMoneda[];
     cortesia: CostoPorMoneda[];
+    /** La comida del personal: se informa, pero no es plata perdida. */
+    personal: CostoPorMoneda[];
     sinExplicacion: CostoPorMoneda[];
     otros: CostoPorMoneda[];
   };
@@ -834,6 +849,7 @@ interface MontoRow {
   teorico: string;
   merma: string;
   cortesia: string;
+  personal: string;
   sin_explicacion: string;
   /** Σ con signo de consumo (salidas − entradas) sobre **todos** los movimientos. */
   consumo_total: string;
@@ -857,8 +873,8 @@ interface MontoRow {
  * —que es justo lo que «Otros» significa— sin que nadie toque este archivo.
  *
  * ```
- * consumo_total = teórico + merma + cortesía + sin explicación + otros − abastecimiento
- * otros         = consumo_total − teórico − merma − cortesía − sin explicación + abastecimiento
+ * consumo_total = teórico + merma + cortesía + personal + sin explicación + otros − abastecimiento
+ * otros         = consumo_total − teórico − merma − cortesía − personal − sin explicación + abastecimiento
  * ```
  *
  * `consumo_total` suma **todos** los movimientos de la ventana con signo de
@@ -880,6 +896,7 @@ const sqlMontosPorGrupo = (idxMotivos: number): string => `
                AS teorico,
              COALESCE(SUM(${MONTO}) FILTER (WHERE ${P.MERMA}), 0)    AS merma,
              COALESCE(SUM(${MONTO}) FILTER (WHERE ${P.CORTESIA}), 0) AS cortesia,
+             COALESCE(SUM(${MONTO}) FILTER (WHERE ${P.PERSONAL}), 0) AS personal,
              COALESCE(SUM(${MONTO}) FILTER (WHERE ${P.RECUENTO_SALIDA}), 0)
              - COALESCE(SUM(${MONTO}) FILTER (WHERE ${P.RECUENTO_ENTRADA}), 0)
                AS sin_explicacion,
@@ -939,7 +956,9 @@ interface ConteoRow {
  * ⚠️ **"Plata perdida" es merma + cortesía + sin explicación, sin el teórico.**
  * El teórico es el consumo que las recetas explican: es lo que el local
  * **gastó**, no lo que perdió. Meterlo en el ranking pondría primeros a los
- * productos que más se venden.
+ * productos que más se venden. **La comida del personal tampoco entra**: es
+ * gasto de la operación (Oficio SII 1.280/2007, colación del trabajador), no
+ * pérdida, y tiene su total propio (spec 2026-10-04).
  */
 function agregarMontos(
   filas: MontoRow[],
@@ -951,6 +970,7 @@ function agregarMontos(
     teorico: new Map<string, Decimal>(),
     merma: new Map<string, Decimal>(),
     cortesia: new Map<string, Decimal>(),
+    personal: new Map<string, Decimal>(),
     sinExplicacion: new Map<string, Decimal>(),
     otros: new Map<string, Decimal>(),
   };
@@ -978,17 +998,20 @@ function agregarMontos(
     const teorico = d(f.teorico);
     const merma = d(f.merma);
     const cortesia = d(f.cortesia);
+    const personal = d(f.personal);
     const sinExplicacion = d(f.sin_explicacion);
     const otros = d(f.consumo_total)
       .minus(teorico)
       .minus(merma)
       .minus(cortesia)
+      .minus(personal)
       .minus(sinExplicacion)
       .plus(d(f.abastecimiento));
 
     acumular(totales.teorico, f.moneda_id, teorico);
     acumular(totales.merma, f.moneda_id, merma);
     acumular(totales.cortesia, f.moneda_id, cortesia);
+    acumular(totales.personal, f.moneda_id, personal);
     acumular(totales.sinExplicacion, f.moneda_id, sinExplicacion);
     acumular(totales.otros, f.moneda_id, otros);
 
@@ -1021,6 +1044,7 @@ function agregarMontos(
       teorico: porMoneda(totales.teorico),
       merma: porMoneda(totales.merma),
       cortesia: porMoneda(totales.cortesia),
+      personal: porMoneda(totales.personal),
       sinExplicacion: porMoneda(totales.sinExplicacion),
       otros: porMoneda(totales.otros),
     },
@@ -1260,7 +1284,7 @@ export class VarianzaService {
     // una aparte para no volver a agregar los grupos.
     const montos: MontoRow[] = await this.db.query(
       `SELECT g.item_id, g.item_nombre, g.moneda_id,
-              c.teorico, c.merma, c.cortesia, c.sin_explicacion,
+              c.teorico, c.merma, c.cortesia, c.personal, c.sin_explicacion,
               c.consumo_total, c.abastecimiento, c.falta_costo,
               ${perdiendoSinCostoSql('k')} AS perdiendo_sin_costo
          FROM (${SELECT_GRUPOS} ${FROM_GRUPOS} ${filtros} ${GROUP_BY_GRUPOS}) g

@@ -103,6 +103,8 @@ const RESUMEN = {
     { tipo: 'cortesia', platos: '3.0000', precioCarta: '9000.0000', costo: [{ monedaId: 'clp-1', monto: '1200.0000' }], sinValorizar: 0, fiscal: { montoAfecto: '7563.0000', montoExento: '0.0000', montoImpuestos: '1437.0000' } },
     { tipo: 'merma', platos: '2.0000', precioCarta: '17000.0000', costo: [], sinValorizar: 1, fiscal: null },
     { tipo: 'no_elaborado', platos: '1.0000', precioCarta: '8500.0000', costo: [], sinValorizar: 0, fiscal: null },
+    // Spec 2026-10-04: la comida del personal descuenta y se valoriza, sin IVA.
+    { tipo: 'consumo_personal', platos: '4.0000', precioCarta: '27600.0000', costo: [{ monedaId: 'clp-1', monto: '8400.0000' }], sinValorizar: 0, fiscal: null },
   ],
   porGarzon: [
     { garzonId: 'garzon-ana', garzonNombre: 'Ana', platos: '1.0000', precioCarta: '8500.0000', costo: [], sinValorizar: 0, pedido: '170000.0000', porcentaje: '0.0500' },
@@ -265,6 +267,18 @@ describe('anulaciones — resumen', () => {
     expect(tarjeta('Cortesías')).toContain('IVA: $1.437')
     expect(tarjeta('Mermas en mesa')).not.toContain('IVA')
     expect(tarjeta('No se hizo')).not.toContain('IVA')
+    expect(tarjeta('Comida del personal')).not.toContain('IVA')
+    wrapper.unmount()
+  })
+
+  // Spec 2026-10-04-comida-del-personal § 3.4: cuarta tarjeta, con su costo.
+  it('la tarjeta de Comida del personal muestra sus platos y su costo', async () => {
+    const wrapper = await montar()
+    const tarjeta = wrapper.findAll('div.rounded-lg')
+      .find(c => c.text().includes('Comida del personal'))!.text()
+    expect(tarjeta).toContain('4 platos')
+    expect(tarjeta).toContain('$27.600')
+    expect(tarjeta).toContain('$8.400')
     wrapper.unmount()
   })
 

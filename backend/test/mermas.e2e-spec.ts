@@ -373,6 +373,91 @@ describe('Mermas — motivos, registro y rechazo en ajuste (e2e)', () => {
     expect(fila?.costoPerdido).toBeTruthy();
   });
 
+  // Spec 2026-10-04-comida-del-personal § 3.3 (owner, "Mesa y Mermas"): el
+  // producto suelto que come el personal entra por POST /mermas y descuenta,
+  // pero no es pérdida: ni el listado por defecto ni el bloque "Pérdidas" del
+  // Inicio lo cuentan. Se lista aparte con `?tipo=consumo_personal`.
+  it('la comida del personal entra por POST /mermas, descuenta y se lista aparte, fuera de las pérdidas', async () => {
+    const auth = { Authorization: `Bearer ${token}` };
+    const resMotivos = await request(app.getHttpServer())
+      .get('/api/motivos-baja?tipo=consumo_personal')
+      .set(auth);
+    expect(resMotivos.status).toBe(200);
+    const personal = (resMotivos.body as MotivoBajaItem[]).find(
+      (m) => m.nombre === 'Comida del personal (dentro del local)',
+    )!;
+    expect(personal).toBeDefined();
+
+    const perdidasAntes = await request(app.getHttpServer())
+      .get('/api/resumen-negocio/hoy')
+      .set(auth);
+    expect(perdidasAntes.status).toBe(200);
+    const stockAntes = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}`)
+      .set(auth);
+    expect(stockAntes.status).toBe(200);
+
+    const res = await request(app.getHttpServer())
+      .post('/api/mermas')
+      .set(auth)
+      .send({
+        itemId,
+        ubicacionId: localId,
+        cantidad: '0.1',
+        motivoBajaId: personal.id,
+      });
+    expect(res.status).toBe(201);
+    const movimientoId = (res.body as MermaResponse).movimientoId;
+
+    const stockDespues = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}`)
+      .set(auth);
+    expect(stockDespues.status).toBe(200);
+    expect(
+      parseFloat((stockAntes.body as ItemResponse).stockVendible!) -
+        parseFloat((stockDespues.body as ItemResponse).stockVendible!),
+    ).toBeCloseTo(0.1, 4);
+
+    const porDefecto = await request(app.getHttpServer())
+      .get('/api/mermas?pageSize=100')
+      .set(auth);
+    expect(porDefecto.status).toBe(200);
+    expect(
+      (porDefecto.body as PaginatedMermas).data.some(
+        (m) => m.id === movimientoId,
+      ),
+    ).toBe(false);
+
+    const aparte = await request(app.getHttpServer())
+      .get('/api/mermas?tipo=consumo_personal&pageSize=100')
+      .set(auth);
+    expect(aparte.status).toBe(200);
+    const filas = (aparte.body as PaginatedMermas).data;
+    expect(filas.find((m) => m.id === movimientoId)?.motivoBajaNombre).toBe(
+      'Comida del personal (dentro del local)',
+    );
+    expect(filas.every((m) => m.motivoBajaId === personal.id)).toBe(true);
+    expect((aparte.body as PaginatedMermas).meta.total).toBe(filas.length);
+
+    const perdidasDespues = await request(app.getHttpServer())
+      .get('/api/resumen-negocio/hoy')
+      .set(auth);
+    expect(perdidasDespues.status).toBe(200);
+    expect(
+      (perdidasDespues.body as { perdidas: { mermas: { cantidad: number } } })
+        .perdidas.mermas.cantidad,
+    ).toBe(
+      (perdidasAntes.body as { perdidas: { mermas: { cantidad: number } } })
+        .perdidas.mermas.cantidad,
+    );
+
+    // Lo que no es de Mermas sigue afuera, y el filtro no acepta otro tipo.
+    const cortesia = await request(app.getHttpServer())
+      .get('/api/mermas?tipo=cortesia')
+      .set(auth);
+    expect(cortesia.status).toBe(400);
+  });
+
   it('PATCH /items/:id/stock con motivo merma es rechazado (400)', async () => {
     const res = await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
@@ -640,12 +725,12 @@ describe('Mermas — motivos, registro y rechazo en ajuste (e2e)', () => {
   });
 });
 
-// Describe propio: un tenant recién creado, para afirmar el seed de los siete
+// Describe propio: un tenant recién creado, para afirmar el seed de los ocho
 // motivos fijos con su tipo — tocar `Paris` acá le rompería el resto de la
 // suite de arriba. Molde de `crearTenantEn`/`entrarA` calcado de
 // `redondeo-por-pais.e2e-spec.ts` (superadmin, POST /api/admin/tenants,
 // switch-tenant).
-describe('Motivos de baja — un tenant nuevo nace con los siete fijos (e2e)', () => {
+describe('Motivos de baja — un tenant nuevo nace con los ocho fijos (e2e)', () => {
   let app: INestApplication<App>;
   const PROV_RM = '550e8400-e29b-41d4-a716-446655440001'; // Chile
   const SUPERADMIN = { email: 'admin@sistema.com', pass: 'admin' };
@@ -711,7 +796,7 @@ describe('Motivos de baja — un tenant nuevo nace con los siete fijos (e2e)', (
     await app.close();
   });
 
-  it('trae los siete fijos con su tipo', async () => {
+  it('trae los ocho fijos con su tipo', async () => {
     const tenant = await crearTenantEn(PROV_RM);
     const tokenTenantNuevo = await entrarA(tenant.id);
 
@@ -730,6 +815,7 @@ describe('Motivos de baja — un tenant nuevo nace con los siete fijos (e2e)', (
         .map((m) => [m.nombre, m.tipo])
         .sort(),
     ).toEqual([
+      ['Comida del personal (dentro del local)', 'consumo_personal'],
       ['Cortesía de la casa', 'cortesia'],
       ['Deterioro', 'merma'],
       ['Error operativo', 'merma'],

@@ -2525,14 +2525,14 @@ function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
 }
 
 /**
- * Los platos anulados que imprime la PRECUENTA (spec § 5): `merma` y
- * `cortesia`, en $0 con la etiqueta de su tipo. `no_elaborado` queda afuera
- * —nunca salió de cocina—, y esto no lo consume `imprimirBoleta`: la boleta no
- * imprime nada de lo anulado.
+ * Los platos anulados que imprime la PRECUENTA (spec § 5): `merma`,
+ * `cortesia` y `consumo_personal`, en $0 con la etiqueta de su tipo.
+ * `no_elaborado` queda afuera —nunca salió de cocina—, y esto no lo consume
+ * `imprimirBoleta`: la boleta no imprime nada de lo anulado.
  */
 function anuladasParaTicket(cuenta: CuentaDetalle): TicketAnulada[] {
   return (cuenta.anulaciones ?? [])
-    .filter(a => a.motivoTipo === 'merma' || a.motivoTipo === 'cortesia')
+    .filter(a => a.motivoTipo !== 'no_elaborado')
     .map(a => ({
       nombre: a.itemNombre,
       cantidad: cantidadAnuladaTexto(a),
@@ -3305,7 +3305,7 @@ async function cerrarCuentaConPin(
                       color="warning"
                       variant="ghost"
                       size="xs"
-                      title="Anular (cortesía, merma o no se llegó a hacer)"
+                      title="Anular (cortesía, merma, comida del personal o no se llegó a hacer)"
                       :disabled="cuentaActivaEnCobro"
                       @click="abrirAnularLinea(linea)"
                     />

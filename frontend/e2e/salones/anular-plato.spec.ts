@@ -240,7 +240,7 @@ test('pide, manda a cocina, anula como cortesía y el aviso aparece con el total
 
   // 6. Anular 1 de las 2 unidades despachadas, como cortesía.
   await page
-    .getByRole('button', { name: 'Anular (cortesía, merma o no se llegó a hacer)' })
+    .getByRole('button', { name: 'Anular (cortesía, merma, comida del personal o no se llegó a hacer)' })
     .click()
   const modalAnular = page.getByRole('dialog').filter({ hasText: 'Anular plato' })
   await expect(modalAnular).toBeVisible()

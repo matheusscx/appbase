@@ -39,6 +39,7 @@ en todos lados.
 | **Teórico** | Σ salidas `venta`, **menos** entradas `anulacion`/`devolucion` **que vienen de una venta** (`venta_id IS NOT NULL`) |
 | **Merma** | salidas `motivo='merma'` cuyo `motivo_baja.tipo` es `merma` |
 | **Cortesía** | las mismas salidas, con `motivo_baja.tipo = 'cortesia'` |
+| **Personal** | las mismas salidas, con `motivo_baja.tipo = 'consumo_personal'` (desde el 2026-10-04) |
 | **Sin explicación** | Σ `recuento` con signo (salidas − entradas). Un **sobrante resta** |
 | **Otros** | el **residuo** entre las dos formas de calcular el mismo consumo real |
 
@@ -46,9 +47,17 @@ en todos lados.
 
 ```
 porSaldos  = saldoDesde + abastecimiento − saldoHasta
-porBuckets = teórico + merma + cortesía + sin explicación
+porBuckets = teórico + merma + cortesía + personal + sin explicación
 otros      = porSaldos − porBuckets
 ```
+
+📌 **Un tipo de motivo que descuente necesita su balde.** Merma, cortesía y la comida del
+personal escriben el mismo `motivo='merma'` en el kardex; solo las separa `motivo_baja.tipo`. Un
+tipo nuevo sin predicado propio caería en «Otros» y lo haría saltar en cada local que lo use. Por
+eso la comida del personal tiene su columna (spec
+[`2026-10-04-comida-del-personal-design.md`](../superpowers/specs/2026-10-04-comida-del-personal-design.md)
+§ 3.5). **No es plata perdida**: tiene su total en el resumen, pero no entra en el top ni en la
+gráfica, porque es gasto de la operación (Oficio SII 1.280/2007).
 
 ⚠️ **Lo que el residuo NO puede ver:** cualquier movimiento que caiga en **algún** balde se cancela
 contra los saldos, aunque esté mal atribuido. Solo caza lo que no cae en ninguno — hoy,

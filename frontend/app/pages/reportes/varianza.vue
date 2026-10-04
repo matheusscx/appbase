@@ -32,6 +32,8 @@ interface VarianzaFila {
   teorico: string | null
   merma: string | null
   cortesia: string | null
+  /** La comida del personal dentro del local: consumo explicado, no pérdida. */
+  personal: string | null
   sinExplicacion: string | null
   otros: string | null
   costoSinExplicacion: CostoPorMoneda[]
@@ -54,6 +56,7 @@ interface ResumenVarianza {
     teorico: CostoPorMoneda[]
     merma: CostoPorMoneda[]
     cortesia: CostoPorMoneda[]
+    personal: CostoPorMoneda[]
     sinExplicacion: CostoPorMoneda[]
     otros: CostoPorMoneda[]
   }
@@ -234,6 +237,8 @@ const tarjetas = computed(() => {
     { clave: 'sinExplicacion', titulo: 'Sin explicación', monto: t?.sinExplicacion ?? [] },
     { clave: 'merma', titulo: 'Merma', monto: t?.merma ?? [] },
     { clave: 'cortesia', titulo: 'Cortesía', monto: t?.cortesia ?? [] },
+    // Fuera de la gráfica de pérdidas: es gasto de la operación (spec 2026-10-04).
+    { clave: 'personal', titulo: 'Comida del personal', monto: t?.personal ?? [] },
     { clave: 'teorico', titulo: 'Teórico (vendido)', monto: t?.teorico ?? [] },
   ]
 })
@@ -327,6 +332,7 @@ const columns: TableColumn<VarianzaFila>[] = [
   { accessorKey: 'teorico', header: 'Teórico', meta: DERECHA },
   { accessorKey: 'merma', header: 'Merma', meta: DERECHA },
   { accessorKey: 'cortesia', header: 'Cortesía', meta: DERECHA },
+  { accessorKey: 'personal', header: 'Personal', meta: DERECHA },
   { accessorKey: 'sinExplicacion', header: 'Sin explicación', meta: DERECHA },
   { accessorKey: 'costoSinExplicacion', header: '$ sin explicación', meta: DERECHA },
   { accessorKey: 'otros', header: 'Otros', meta: DERECHA },
@@ -373,7 +379,7 @@ const columns: TableColumn<VarianzaFila>[] = [
         </div>
 
         <template v-else>
-          <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <div
               v-for="t in tarjetas"
               :key="t.clave"
@@ -508,6 +514,9 @@ const columns: TableColumn<VarianzaFila>[] = [
           </template>
           <template #cortesia-cell="{ row }">
             <span v-if="row.original.medible">{{ formatStock(row.original.cortesia, row.original.unidadMedida) }}</span>
+          </template>
+          <template #personal-cell="{ row }">
+            <span v-if="row.original.medible">{{ formatStock(row.original.personal, row.original.unidadMedida) }}</span>
           </template>
           <template #sinExplicacion-cell="{ row }">
             <span v-if="row.original.medible" class="font-medium">

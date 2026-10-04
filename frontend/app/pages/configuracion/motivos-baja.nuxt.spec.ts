@@ -29,7 +29,7 @@ interface MotivoBajaFake {
   nombre: string
   activo: boolean
   esFijo: boolean
-  tipo: 'merma' | 'cortesia' | 'no_elaborado'
+  tipo: 'merma' | 'cortesia' | 'no_elaborado' | 'consumo_personal'
   enUso: boolean
   eliminadoEl: string | null
   eliminadoPorNombre: string | null
@@ -673,6 +673,30 @@ describe('configuracion/motivos-baja — tipo', () => {
     expect(patchesEditar).toHaveLength(1)
     expect(patchesEditar[0]!.id).toBe(MOTIVO_ID)
     expect(patchesEditar[0]!.body.tipo).toBe('cortesia')
+
+    wrapper.unmount()
+  })
+
+  // Spec 2026-10-04-comida-del-personal: el cuarto tipo se elige acá, y al
+  // elegirlo la ayuda dice qué NO entra (lo que se lleva el empleado, lo del dueño).
+  it('ofrece Comida del personal y, al elegirla, muestra su ayuda', async () => {
+    motivosBackend = [motivo({ tipo: 'merma', enUso: false })]
+    const wrapper = await montarParaCerrarDrawer()
+
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+
+    const select = wrapper.findComponent({ name: 'USelect' })
+    expect(
+      (select.props('items') as { value: string }[]).map(i => i.value),
+    ).toContain('consumo_personal')
+    expect(dialogo()!.textContent).not.toContain('regístralo como cortesía')
+
+    select.vm.$emit('update:modelValue', 'consumo_personal')
+    await new Promise(r => setTimeout(r, 20))
+    expect(dialogo()!.textContent).toContain(
+      'Si se lo lleva, o si lo consume el dueño, regístralo como cortesía',
+    )
 
     wrapper.unmount()
   })

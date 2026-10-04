@@ -3,7 +3,7 @@ import type { TableColumn } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
-type TipoMotivoBaja = 'merma' | 'cortesia' | 'no_elaborado'
+type TipoMotivoBaja = 'merma' | 'cortesia' | 'no_elaborado' | 'consumo_personal'
 type CostoEstado = 'valorizado' | 'no_aplica' | 'sin_valorizar'
 
 interface CostoPorMoneda { monedaId: string, monto: string }
@@ -62,6 +62,7 @@ const TIPO_LABELS: Record<TipoMotivoBaja, string> = {
   cortesia: 'Cortesía',
   merma: 'Merma',
   no_elaborado: 'No se hizo',
+  consumo_personal: 'Personal',
 }
 
 const GRUPO_VACIO: GrupoResumen = { platos: '0', precioCarta: '0', costo: [], sinValorizar: 0 }
@@ -69,6 +70,7 @@ const GRUPO_VACIO: GrupoResumen = { platos: '0', precioCarta: '0', costo: [], si
 const TARJETAS: { tipo: TipoMotivoBaja, titulo: string }[] = [
   { tipo: 'cortesia', titulo: 'Cortesías' },
   { tipo: 'merma', titulo: 'Mermas en mesa' },
+  { tipo: 'consumo_personal', titulo: 'Comida del personal' },
   { tipo: 'no_elaborado', titulo: 'No se hizo' },
 ]
 
@@ -192,6 +194,7 @@ const tipoOpts: Opt[] = [
   { label: 'Todos los tipos', value: 'todos' },
   { label: TIPO_LABELS.cortesia, value: 'cortesia' },
   { label: TIPO_LABELS.merma, value: 'merma' },
+  { label: TIPO_LABELS.consumo_personal, value: 'consumo_personal' },
   { label: TIPO_LABELS.no_elaborado, value: 'no_elaborado' },
 ]
 
@@ -299,7 +302,7 @@ const columnasAutorizo: TableColumn<GrupoPorAutorizo>[] = [
           Selecciona desde y hasta para ver el resumen.
         </div>
 
-        <div v-else class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div
             v-for="t in tarjetas"
             :key="t.tipo"

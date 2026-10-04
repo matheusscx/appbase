@@ -44,13 +44,15 @@ CREATE TYPE "tipo_movimiento" AS ENUM (
   'salida'
 );
 
--- Qué es un motivo de baja. Decide si la baja descuenta stock: 'merma' y
--- 'cortesia' descuentan; 'no_elaborado' no. No hay un flag aparte a propósito:
+-- Qué es un motivo de baja. Decide si la baja descuenta stock: 'merma',
+-- 'cortesia' y 'consumo_personal' (la comida del personal dentro del local, sin
+-- IVA) descuentan; 'no_elaborado' no. No hay un flag aparte a propósito:
 -- permitiría una merma que no descuenta.
 CREATE TYPE "tipo_motivo_baja" AS ENUM (
   'merma',
   'cortesia',
-  'no_elaborado'
+  'no_elaborado',
+  'consumo_personal'
 );
 
 -- =============================================================

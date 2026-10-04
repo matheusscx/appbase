@@ -153,9 +153,9 @@ ticket no depende de que nadie lo use.
   - **Platos anulados (2026-09-16)**: `buildPrecuentaTicket` recibe
     `anuladas?: TicketAnulada[]` (`{ nombre, cantidad, etiqueta }`) y los imprime
     **después de los ítems**, en una fila de las mismas columnas con `P.UNIT` y
-    `TOTAL` en `$0`, y la etiqueta del tipo (`Cortesía`/`Merma`) indentada debajo —
+    `TOTAL` en `$0`, y la etiqueta del tipo (`Cortesía`/`Merma`/`Comida del personal`) indentada debajo —
     spec `2026-09-16-anular-plato-despachado-design.md` § 5. Solo se pasan los de
-    tipo `merma`/`cortesia` (`anuladasParaTicket` en `salones/index.vue`, filtrando
+    tipo `merma`/`cortesia`/`consumo_personal` (`anuladasParaTicket` en `salones/index.vue`, filtrando
     `CuentaDetalle.anulaciones`); el `no_elaborado` no se imprime — nunca salió de
     cocina. **`buildBoletaTicket`, `imprimirBoleta` e `itemsParaTicket` no cambian**:
     la boleta no imprime nada de lo anulado, ni siquiera lo que sí descontó stock —

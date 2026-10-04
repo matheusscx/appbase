@@ -142,6 +142,7 @@ describe('Salones — reporte de anulaciones, listado (e2e)', () => {
   let motivoMermaId: string;
   let motivoCortesiaId: string;
   let motivoNoElaboradoId: string;
+  let motivoPersonalId: string;
 
   let catCocinaId: string;
   let marca: number;
@@ -290,6 +291,8 @@ describe('Salones — reporte de anulaciones, listado (e2e)', () => {
     motivoMermaId = motivos.find((m) => m.tipo === 'merma')!.id;
     motivoCortesiaId = motivos.find((m) => m.tipo === 'cortesia')!.id;
     motivoNoElaboradoId = motivos.find((m) => m.tipo === 'no_elaborado')!.id;
+    motivoPersonalId = motivos.find((m) => m.tipo === 'consumo_personal')!.id;
+    expect(motivoPersonalId).toBeTruthy();
     expect(motivoMermaId).toBeTruthy();
     expect(motivoCortesiaId).toBeTruthy();
     expect(motivoNoElaboradoId).toBeTruthy();
@@ -938,6 +941,80 @@ describe('Salones — reporte de anulaciones, listado (e2e)', () => {
         costoPorMonedaEsperado.get(CLP_MONEDA_ID) ?? new Decimal(0),
       ),
     ).toBe(true);
+  });
+
+  // Spec 2026-10-04: la comida del personal que pasa por una mesa expande la
+  // receta como cualquier anulación que descuenta, tiene su propio grupo en el
+  // resumen y nunca lleva IVA (no es retiro, Oficio 734/2002).
+  it('una receta anulada como comida del personal: costo de sus ingredientes, su propio grupo y fiscal null', async () => {
+    const ingrediente = (
+      await post<IdResponse>('/api/items', {
+        nombre: `Ingrediente personal reporte E2E ${marca}`,
+        precioBase: '700',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'ingrediente',
+        unidadMedida: 'unidad',
+        stock: '1000',
+        costo: '700',
+      })
+    ).id;
+    const platoPersonal = (
+      await post<IdResponse>('/api/items', {
+        nombre: `Colación personal reporte E2E ${marca}`,
+        precioBase: '6900',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        categoriaId: catCocinaId,
+        ingredientes: [
+          {
+            ingredienteItemId: ingrediente,
+            cantidad: '3',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+      })
+    ).id;
+
+    const cuenta = await abrirCuentaCon(
+      [{ itemId: platoPersonal, cantidad: '2' }],
+      garzon2,
+    );
+    await despachar(cuenta.id);
+    const linea = (await detalleCuenta(cuenta.id)).lineas.find(
+      (l) => l.itemId === platoPersonal,
+    )!;
+    const detalle = await anular(cuenta.id, linea.id, {
+      cantidad: '2',
+      motivoBajaId: motivoPersonalId,
+    });
+    const anulacionId = detalle.anulaciones.find(
+      (a) => a.itemId === platoPersonal,
+    )!.id;
+
+    const listado = await reporte(tokenEncargado, {
+      tipo: 'consumo_personal',
+    });
+    expect(listado.status).toBe(200);
+    expect(listado.body.data.every((f) => f.tipo === 'consumo_personal')).toBe(
+      true,
+    );
+    const fila = listado.body.data.find((f) => f.id === anulacionId)!;
+    // 2 platos × 3 unidades × 700 = 4.200 de costo; sin baldes fiscales.
+    expect(fila.costoEstado).toBe('valorizado');
+    expect(fila.costo).toEqual([
+      { monedaId: CLP_MONEDA_ID, monto: '4200.0000' },
+    ]);
+    expect(fila.fiscal).toBeNull();
+
+    const res = await resumen(tokenEncargado, {
+      garzonId: garzon2.id,
+      ...rangoAmplio(),
+    });
+    const grupo = res.porTipo.find((g) => g.tipo === 'consumo_personal')!;
+    expect(grupo).toBeDefined();
+    expect(grupo.fiscal).toBeNull();
+    expect(grupo.platos).toBe('2.0000');
   });
 
   /**

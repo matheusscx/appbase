@@ -139,7 +139,7 @@ function lineasPersonalizacionPreciada(
 }
 
 /**
- * Un plato anulado (tipo `merma`/`cortesia`) para la precuenta — spec
+ * Un plato anulado (tipo `merma`/`cortesia`/`consumo_personal`) para la precuenta — spec
  * `2026-09-16-anular-plato-despachado-design.md` § 5: se imprime en $0, con la
  * etiqueta del tipo. El `no_elaborado` no se pasa acá — nunca salió de cocina.
  */
@@ -425,7 +425,7 @@ export function buildPrecuentaTicket(input: {
   cuentaNumero: number
   items: BoletaItem[]
   /**
-   * Platos anulados de tipo `merma`/`cortesia`, impresos después de los ítems
+   * Platos anulados de tipo `merma`/`cortesia`/`consumo_personal`, impresos después de los ítems
    * en $0 (spec § 5). El `no_elaborado` no se pasa: nunca salió de cocina.
    */
   anuladas?: TicketAnulada[]

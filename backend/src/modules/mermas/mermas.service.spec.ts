@@ -6,6 +6,14 @@ import { MotivosBajaService } from '../motivos-baja/motivos-baja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
+import { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
+
+/** El valor bindeado en el `mbf.tipo = $N` del filtro de tipo. */
+function tipoBindeado(sql: string, params: unknown[]): unknown {
+  const idx = /mbf\.tipo = \$(\d+)/.exec(sql)?.[1];
+  expect(idx).toBeDefined();
+  return params[Number(idx) - 1];
+}
 
 const TENANT = 'tenant-uuid';
 const USER = 'user-uuid';
@@ -420,6 +428,32 @@ describe('MermasService', () => {
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
+    // Owner, 2026-10-04 ("Mesa y Mermas"): el producto suelto que come el
+    // personal entra por acá, con el mismo movimiento que una merma.
+    it('acepta un motivo de comida del personal: mismo movimiento merma con su motivo', async () => {
+      transactionQueryMock.mockResolvedValueOnce([itemRow()]);
+      motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
+        id: MOTIVO,
+        nombre: 'Comida del personal (dentro del local)',
+        tipo: 'consumo_personal',
+      });
+      inventarioService.registrarMovimiento.mockResolvedValueOnce(
+        movimientoResult(),
+      );
+
+      await service.registrar(TENANT, USER, {
+        itemId: ITEM,
+        ubicacionId: UBICACION_ID,
+        cantidad: '1',
+        motivoBajaId: MOTIVO,
+      });
+
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ motivo: 'merma', motivoBajaId: MOTIVO }),
+      );
+    });
+
     it('acepta item tipo ingrediente con mismo flujo que producto cantidad', async () => {
       transactionQueryMock.mockResolvedValueOnce([
         itemRow({ tipo: 'ingrediente', nombre: 'Harina premium' }),
@@ -600,17 +634,45 @@ describe('MermasService', () => {
 
       await service.findAll(TENANT, {});
 
-      const [countSql] = dataSourceQueryMock.mock.calls[0] as [string];
-      const [listSql] = dataSourceQueryMock.mock.calls[1] as [string];
+      const [countSql, countParams] = dataSourceQueryMock.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      const [listSql, listParams] = dataSourceQueryMock.mock.calls[1] as [
+        string,
+        unknown[],
+      ];
 
-      for (const sql of [countSql, listSql]) {
-        expect(sql).toMatch(/WHERE[\s\S]*EXISTS[\s\S]*mbf\.tipo = 'merma'/);
+      // Sin `tipo`, la merma de siempre: el tipo va bindeado y vale 'merma'.
+      for (const [sql, params] of [
+        [countSql, countParams],
+        [listSql, listParams],
+      ] as const) {
+        expect(sql).toMatch(/WHERE[\s\S]*EXISTS[\s\S]*mbf\.tipo = \$\d+/);
+        expect(tipoBindeado(sql, params)).toBe('merma');
       }
       // La condición no cuelga del `LEFT JOIN motivo_baja mb` (el que trae el
       // nombre en la página): ese sigue LEFT y sin `tipo` en su ON.
       expect(listSql).toMatch(
         /LEFT JOIN motivo_baja mb ON mb\.motivo_baja_id = mv\.motivo_baja_id AND mb\.eliminado_el IS NULL/,
       );
+    });
+
+    // Spec 2026-10-04-comida-del-personal § 3.3: la comida del personal se
+    // pide aparte, con el mismo filtro y las dos consultas de acuerdo.
+    it('con tipo consumo_personal lista solo la comida del personal, en el COUNT y en la página', async () => {
+      dataSourceQueryMock
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, { tipo: TipoMotivoBaja.CONSUMO_PERSONAL });
+
+      for (const [sql, params] of dataSourceQueryMock.mock.calls as [
+        string,
+        unknown[],
+      ][]) {
+        expect(tipoBindeado(sql, params)).toBe('consumo_personal');
+      }
     });
 
     // de_anulacion sale de `cuenta_linea_anulacion_id IS NOT NULL`: mapRow lo
@@ -752,8 +814,14 @@ describe('MermasService', () => {
       expect(sql).toMatch(/mv\.eliminado_el IS NULL/);
       expect(sql).toMatch(/mv\.motivo = 'merma'/);
       expect(sql).toMatch(
-        /EXISTS[\s\S]*mbf\.motivo_baja_id = mv\.motivo_baja_id AND mbf\.tipo = 'merma'/,
+        /EXISTS[\s\S]*mbf\.motivo_baja_id = mv\.motivo_baja_id AND mbf\.tipo = \$\d+/,
       );
+      // El Inicio suma pérdidas: la comida del personal no entra.
+      const [, params] = dataSourceQueryMock.mock.calls[1] as [
+        string,
+        unknown[],
+      ];
+      expect(tipoBindeado(sql, params)).toBe('merma');
       expect(sql).toMatch(/GROUP BY i\.moneda_id/);
     });
   });
