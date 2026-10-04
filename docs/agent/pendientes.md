@@ -1139,27 +1139,26 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   con boleta "no afecta" (Oficio 734 vs. Oficios 1.750/2001 y 638/2009) pide algo más que el
   registro. Se lleva al owner con el análisis de la Sesión de esfuerzo máximo.
 
-- [ ] **Una venta que llega a $0 por un descuento tendría que dejar boleta, y hoy no deja
-  ninguna: E6 cita la Res. Ex. SII 60/2023 a medias** (fiscal — **frente propio, con su propia
-  sesión**, ADR-010; lo encontró la pasada de investigación que la Sesión de esfuerzo máximo lanzó
-  para el frente de la cortesía, 2026-10-03, y ella lo verificó en el PDF oficial:
-  [Res. Ex. 60/2023](https://www.sii.cl/normativa_legislacion/resoluciones/2023/reso60.pdf); la
-  orquestadora verificó la cita del repo, no el PDF). [ADR-028](../adr/028-emision-registrada-por-venta.md)
-  ("Qué documentos deja una venta") y la spec `2026-10-01-emision-por-venta-design.md` (E6)
-  dicen que una venta de $0 no lleva documento porque *"el mínimo de la boleta es $1"*. Según la
-  misma resolución (resolutivo 1°, segundo párrafo), si el total es $0 *"como resultado de la
-  aplicación de descuentos o alguna otra condición de venta"*, la boleta **se emite igual,
-  informando el monto del descuento** (Res. Ex. 74 y 176 de 2020; sin campo para el descuento,
-  va a nivel de detalle). El $1 es el mínimo del monto, no una exención del $0 por descuento.
-  **Procedencia de E6:** la tabla de decisiones de la spec dice *"Sesión del frente; aprobado
-  con el diseño"*: la cita la puso el agente y el owner aprobó el diseño completo, no esa
-  pregunta suelta. O sea que es **corregir un dato**, no reabrir una decisión tomada con esa
-  información, pero igual lo decide el owner. **Alcance:** las ventas que hoy llegan a $0 (un
-  descuento del 100 %, una promoción). La cortesía no cae acá: la línea sale de la cuenta y no
-  hay transacción. **Antes de diseñar:** confirmar la lectura de la resolución, contar por qué
-  caminos se llega hoy a una venta de $0, y llevarle al owner qué documento deja (con el
-  descuento informado) en lenguaje de local. La forma de informar el descuento (los campos de la
-  Res. 74/2020) es materia de la emisión, no de este hallazgo.
+- [ ] **Una entrega gratuita sin rebaja no deja documento, y un plato regalado con una promo del
+  100 % no paga el IVA de la cortesía** (fiscal — frente propio; anotado el 2026-10-04 al cerrar
+  "una venta que llega a $0 por un descuento deja su documento", [`resueltos.md`](resueltos.md),
+  con las respuestas del owner a ese frente). Dos preguntas de la misma familia que la cortesía
+  como retiro gravado (también en `resueltos.md`):
+  1. **El producto de lista $0** (una muestra, una bolsa de regalo) que se vende solo, sin
+     ninguna rebaja, sigue **sin documento** (owner, 2026-10-04: *"Sin documento, pregunta
+     abierta"*, recomendada, entre esa y *"también boleta de $0"*). La Res. Ex. SII 60/2023 exige
+     la boleta de $0 cuando el total sale *"de la aplicación de descuentos o alguna otra condición
+     de venta"*, y un precio de lista $0 no es un monto que algo rebajó; el formato de la boleta
+     pide monto neto > 0 en una afecta. Como no tiene fila en `venta_documentos`, tampoco aparece
+     en el filtro "Sin documento" del listado (`?documento=sin_documento` mira `emisor = 'nadie'`).
+     **¿Lleva boleta, o se trata como retiro, como la cortesía?**
+  2. **El mismo plato regalado tiene dos tratamientos y lo elige el cajero**: como cortesía paga
+     IVA (retiro, sobre el precio de carta); con una promo del 100 % o un descuento de 99,99 %
+     queda en una boleta de $0, sin IVA. El 100 % exacto lo rechaza el DTO de descuentos, pero el
+     99,99 % y la promo `1.0000` pasan. El owner aceptó la diferencia por ahora (2026-10-04:
+     *"Aceptar y anotarlo"*, recomendada, entre esa y *"frente para restringir ya"*). **Lo que hay
+     que decidir:** si se restringen los descuentos y promos que dejan una línea en $0. Toca el
+     motor de cálculo y los formularios: va solo y con el sistema quieto.
 
 - [ ] **Una venta de más de 135 UF a quien no es contribuyente de IVA exige boleta con la
   identidad de quien paga, y el voucher no alcanza** (fiscal — **frente propio, con su propia

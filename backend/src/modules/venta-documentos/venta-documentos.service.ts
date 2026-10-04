@@ -338,6 +338,12 @@ export interface DocumentarVentaParams {
     esBoleta: boolean;
     canal: string;
     totalFinal: string;
+    /**
+     * El neto antes de descuentos y promociones (`subtotalNeto` del motor).
+     * Distingue la venta que llegó a $0 por una rebaja de la de un producto de
+     * lista $0: solo la primera lleva documento.
+     */
+    totalBruto: string;
     configCalculo: ConfigCalculo | null;
   };
   facturador: Facturador;
@@ -374,7 +380,8 @@ export class VentaDocumentosService {
    * el emisor sale del medio de cada pago y de `tenants.facturador`.
    *
    * Los documentos se insertan con un solo `save` del array. La suma de los no
-   * duplicados es el `totalFinal` de la venta, salvo la de $0.
+   * duplicados es el `totalFinal` de la venta, salvo la de un producto de lista
+   * $0, que no lleva ninguno.
    */
   async documentarVenta(
     manager: EntityManager,
@@ -383,8 +390,12 @@ export class VentaDocumentosService {
     const { venta, facturador, pagos } = params;
     const total = new Decimal(venta.totalFinal);
 
-    // E6: el mínimo de la boleta es $1; una venta de $0 no lleva documento.
-    if (total.lte(0)) return [];
+    // E6, corregida (Res. Ex. SII 60/2023, resolutivo 1°): la venta que llegó
+    // a $0 por un descuento o una promo lleva su documento por $0, que informa
+    // el descuento ya congelado en sus líneas. La de un producto de lista $0,
+    // sin rebaja, no: es una entrega gratuita y queda como pregunta abierta
+    // (`pendientes.md` § 6, "Una entrega gratuita sin rebaja no deja documento").
+    if (total.lt(0) || new Decimal(venta.totalBruto).lte(0)) return [];
     // Un país sin boleta sembrada no cambia (spec § 3.3, § 6): sin tipo, un
     // documento `sistema` no significaría nada. Ojo: `esBoleta = false` con
     // `id = null` NO es una factura.
@@ -397,6 +408,14 @@ export class VentaDocumentosService {
       borradores.push(delSistema(tipo, total));
     } else if (!venta.esBoleta) {
       // E2: la factura cubre el total, se pague o no.
+      borradores.push(
+        facturador === 'sistema'
+          ? delSistema(tipo, total)
+          : externo(tipo, total),
+      );
+    } else if (total.isZero()) {
+      // Sin nada aplicado a la venta no hay voucher ni fila `nadie`: queda solo
+      // lo no pagado, que va según el facturador (E1, E2), y por $0.
       borradores.push(
         facturador === 'sistema'
           ? delSistema(tipo, total)
@@ -457,8 +476,8 @@ export class VentaDocumentosService {
    * ni para los topes de una corrección.
    *
    * Solo se anota si la venta tiene algún documento vigente que no sea un
-   * duplicado: una venta de $0, o de un país sin boleta, no tiene nada que
-   * duplicar. Una sola lectura y un solo `save` del array, aunque haya varios
+   * duplicado: una venta de un producto de lista $0, o de un país sin boleta,
+   * no tiene nada que duplicar. Una sola lectura y un solo `save` del array, aunque haya varios
    * pagos de la máquina.
    */
   async registrarDuplicadoDeAbono(
@@ -503,8 +522,8 @@ export class VentaDocumentosService {
    * del sistema, el documento hecho por fuera o la factura. **Nunca** el voucher
    * duplicado de E1b, aunque el medio sea de la máquina: el abono no documenta,
    * lo que paga ya estaba documentado. Una sola lectura y **un solo `UPDATE`**
-   * para todos los pagos. Sin documento de la deuda (venta de $0, país sin
-   * boleta) no escribe nada y los pagos quedan sin enlace.
+   * para todos los pagos. Sin documento de la deuda (producto de lista $0, país
+   * sin boleta) no escribe nada y los pagos quedan sin enlace.
    *
    * Va en la misma transacción que el abono, con el lock de la venta ya tomado.
    */

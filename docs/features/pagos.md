@@ -221,7 +221,7 @@ sin caracteres de control; en un medio que no es de la máquina se ignoran sin e
 
 - Se anota solo si la venta tiene algún documento **vigente, no duplicado y de `sistema`,
   `maquina` o `externo`**: una fila `nadie` no cuenta, porque la deuda va siempre a `sistema` o
-  `externo` (E1/E2). Una venta de $0 o de un país sin boleta no tiene nada que duplicar.
+  `externo` (E1/E2). Una venta de un producto de lista $0 o de un país sin boleta no tiene nada que duplicar.
 - Un pago cuyo aplicado a la venta fue 0 (todo propina) no da documento.
 - **El cobro nunca se rechaza por esto**: el pago se registra igual y el contador corrige después.
 - No cuenta para la cobertura del total de la venta ni para los topes de una nota de crédito.

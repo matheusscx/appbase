@@ -10,8 +10,10 @@ import { todasLasPaginas } from './helpers/paginacion';
 
 /**
  * Una venta de total $0 —el caso real de una promoción que descuenta el 100%—
- * es una venta **PAGADA, sin línea de pago**: queda registrada, descuenta stock,
- * emite su documento y **no** aparece como deuda.
+ * es una venta **PAGADA, sin línea de pago**: queda registrada, descuenta stock
+ * y **no** aparece como deuda. Qué documento deja (boleta de $0 si la rebajó un
+ * descuento; ninguno con el producto de lista $0 que usa esta suite) lo cubre
+ * `venta-documentos.e2e-spec.ts`.
  *
  * Antes no tenía ningún camino: `ventas.service.ts` solo calculaba el estado
  * `if (saved.pagos.length > 0)`, así que una venta sin pagos quedaba `pendiente`

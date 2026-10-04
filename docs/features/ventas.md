@@ -181,7 +181,8 @@ es de la máquina se ignoran sin error.
 
 | La venta es… | Documentos que deja |
 |---|---|
-| de **$0** | ninguno (el mínimo de la boleta es $1) |
+| de **$0** porque un descuento o una promo la rebajó (`totalBruto > 0`) | uno por $0, como lo no pagado de su rama: boleta del sistema, o `externo` sin número si el comercio factura por fuera (Res. Ex. SII 60/2023, ADR-028) |
+| de **$0** porque el producto vale $0 en el catálogo | ninguno: entrega gratuita, pregunta abierta (`pendientes.md` § 6) |
 | de un país **sin boleta sembrada** (sin tipo) | ninguno: no cambia |
 | **online** | uno del sistema por el total, sin mirar el medio |
 | **factura** | uno por el **total**, se pague o no: del sistema, o `externo` con el tipo factura y sin número si el comercio factura por fuera |
@@ -201,7 +202,7 @@ documento. Un pago con un medio de la `maquina` sí deja anotado un documento `m
 `es_duplicado = true`, su `pago_id` y el número y la clase si el cajero los tipeó: la máquina
 imprime un voucher que vale como boleta sobre algo ya documentado, y el contador necesita saber
 cuál corregir. Solo se anota si la venta tiene algún documento vigente que no sea duplicado (una
-venta de $0 o de un país sin boleta no tiene nada que duplicar; una fila `nadie` no cuenta como
+venta de un producto de lista $0 o de un país sin boleta no tiene nada que duplicar; una fila `nadie` no cuenta como
 documentada), no cuenta para la cobertura del
 total ni para los topes de una corrección, y **nunca rechaza el cobro**.
 
@@ -828,7 +829,7 @@ detalle necesita para mostrar "2,5 kg" en vez de "2,5". Ver también el congelad
 | `cancelada` | Anulación explícita |
 
 **Una venta de total $0 es una venta PAGADA, sin línea de pago.** Es el caso real de una
-promoción que descuenta el 100%: la venta existió, descuenta stock, emite su documento y
+promoción que descuenta el 100%: la venta existió, descuenta stock, deja su boleta de $0 y
 **no** aparece como deuda. El estado se deriva siempre del saldo
 (`recalcularEstadoDeLaVenta`), sin condicionarlo a que existan pagos — condicionarlo dejaba esa
 venta en `pendiente` con saldo $0, arrastrándose en los listados de deuda. Ni el POS ni la

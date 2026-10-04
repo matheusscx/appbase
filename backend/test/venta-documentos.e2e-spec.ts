@@ -41,6 +41,8 @@ const BRUNO = {
   pin: '222222',
 };
 const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
+// "Directo": descuento de valor plano sin condiciones (`seedTiposRegla`).
+const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
 
 interface Documento {
   emisor: string;
@@ -79,6 +81,8 @@ describe('Documentos de la venta (e2e)', () => {
   let itemExento: string; // 28.600
   let itemAfecto100: string; // 100.000 neto → 119.000
   let itemGratis: string;
+  let item5000: string; // 5.000 con IVA incluido: 4.202 neto
+  let itemPromo100: string; // 5.000 con IVA incluido y una promo del 100 %
 
   const patchMetodo = async (metodoPagoId: string, emisor: string) => {
     const res = await request(app.getHttpServer())
@@ -98,6 +102,7 @@ describe('Documentos de la venta (e2e)', () => {
     nombre: string,
     precioBase: string,
     clasificacionTributaria: 'afecto' | 'exento',
+    precioIncluyeImpuesto = false,
   ): Promise<string> => {
     const res = await request(app.getHttpServer())
       .post('/api/items')
@@ -108,6 +113,7 @@ describe('Documentos de la venta (e2e)', () => {
         monedaId: CLP,
         tipo: 'servicio',
         clasificacionTributaria,
+        precioIncluyeImpuesto,
       });
     expect(res.status).toBe(201);
     return (res.body as { id: string }).id;
@@ -200,6 +206,21 @@ describe('Documentos de la venta (e2e)', () => {
     itemExento = await crearItem('Doc exento E2E', '28600', 'exento');
     itemAfecto100 = await crearItem('Doc afecto 100k E2E', '100000', 'afecto');
     itemGratis = await crearItem('Doc gratis E2E', '0', 'exento');
+    item5000 = await crearItem('Doc 5000 E2E', '5000', 'afecto', true);
+    itemPromo100 = await crearItem('Doc promo 100 E2E', '5000', 'afecto', true);
+    // La promo se acota a su ítem propio: no toca a nadie más del seed.
+    const promo = await request(app.getHttpServer())
+      .post('/api/promociones')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Doc promo 100 E2E ${Date.now()}`,
+        tipo: 'porcentaje',
+        fechaInicio: '2020-01-01',
+        fechaFin: '2035-12-31',
+        valorPorcentaje: '1.0000',
+        scopes: [{ tipoScope: 'items', itemIds: [itemPromo100] }],
+      });
+    expect(promo.status).toBe(201);
 
     caja = await abrirCaja(app, token, { saldoInicial: '10000.0000' });
   }, 60000);
@@ -470,6 +491,42 @@ describe('Documentos de la venta (e2e)', () => {
       expect(suma(docs)).toBe(100000);
     });
 
+    it('una cuenta que una promo del 100 % dejó en $0 cierra con la boleta del sistema por $0', async () => {
+      await request(app.getHttpServer())
+        .post('/api/sesiones-garzon/cerrar')
+        .set('Authorization', `Bearer ${token}`)
+        .send(BRUNO);
+      const sesion = await request(app.getHttpServer())
+        .post('/api/sesiones-garzon/iniciar')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...BRUNO, turnoId: TURNO_MANANA_ID });
+      expect(sesion.status).toBe(201);
+      const cuenta = await request(app.getHttpServer())
+        .post(`/api/mesas/${MESA_1_ID}/cuentas`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(BRUNO);
+      expect(cuenta.status).toBe(201);
+      const cuentaId = (cuenta.body as { id: string }).id;
+      const linea = await request(app.getHttpServer())
+        .post(`/api/cuentas/${cuentaId}/lineas`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ itemId: itemPromo100, cantidad: '1' });
+      expect(linea.status).toBe(201);
+
+      const cierre = await request(app.getHttpServer())
+        .post(`/api/cuentas/${cuentaId}/cerrar`)
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...BRUNO, pagos: [] });
+      expect(cierre.status).toBe(201);
+      const docs = await documentosDe(
+        (cierre.body as { ventaId: string }).ventaId,
+      );
+      expect(docs.map((d) => [d.emisor, d.tipo_documento_id, d.monto])).toEqual(
+        [['sistema', BOLETA_ID, '0.0000']],
+      );
+    });
+
     // `customer_requerido` (Factura): el cierre fija el tipo por el body igual que
     // el POS y pasa por la misma validación. El 400 deja la cuenta abierta, y la
     // misma cuenta cierra cuando el customer llega.
@@ -672,8 +729,120 @@ describe('Documentos de la venta (e2e)', () => {
     });
   });
 
+  // Res. Ex. SII 60/2023, resolutivo 1°: si el total es $0 "como resultado de la
+  // aplicación de descuentos o alguna otra condición de venta", la boleta se
+  // emite igual, informando el descuento (que la venta ya congeló en sus líneas).
   describe('venta de $0', () => {
-    it('no lleva documento (E6)', async () => {
+    const crearDescuento = async (body: Record<string, unknown>) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/descuentos')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Doc cero E2E ${randomUUID()}`,
+          tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+          activo: true,
+          ...body,
+        });
+      expect(res.status).toBe(201);
+      return (res.body as { id: string }).id;
+    };
+    const porcentaje = (valorPorcentaje: string) =>
+      crearDescuento({ modo: 'porcentaje', valorPorcentaje });
+
+    /** La boleta del sistema por $0, con los baldes en 0. */
+    const BOLETA_CERO = {
+      emisor: 'sistema',
+      tipo_documento_id: BOLETA_ID,
+      estado_envio: 'armado',
+      monto: '0.0000',
+      monto_afecto: '0.0000',
+      monto_exento: '0.0000',
+      monto_impuestos: '0.0000',
+    };
+
+    it.each([
+      [
+        'dos descuentos de 60 %',
+        async () => [await porcentaje('0.6'), await porcentaje('0.6')],
+      ],
+      [
+        'un descuento de 99,99 % que redondea a $0',
+        async () => [await porcentaje('0.9999')],
+      ],
+      [
+        'un descuento fijo de $9.000 topeado por el piso en cero',
+        async () => [
+          await crearDescuento({ modo: 'monto_fijo', valorMonto: '9000' }),
+        ],
+      ],
+    ])(
+      'un producto de $5.000 con %s deja la boleta del sistema por $0',
+      async (_caso, descuentos) => {
+        const venta = await vender({
+          lineas: [
+            {
+              itemId: item5000,
+              cantidad: '1',
+              descuentoIds: await descuentos(),
+            },
+          ],
+        });
+        expect(venta.totalFinal).toBe('0.0000');
+        expect(venta.estado).toBe('pagada');
+        const docs = await documentosDe(venta.id);
+        expect(docs).toHaveLength(1);
+        expect(docs[0]).toMatchObject(BOLETA_CERO);
+      },
+    );
+
+    it('un producto de $5.000 con una promo del 100 % deja la boleta del sistema por $0', async () => {
+      const venta = await vender({
+        lineas: [{ itemId: itemPromo100, cantidad: '1' }],
+      });
+      expect(venta.totalFinal).toBe('0.0000');
+      const docs = await documentosDe(venta.id);
+      expect(docs).toHaveLength(1);
+      expect(docs[0]).toMatchObject(BOLETA_CERO);
+    });
+
+    it('con facturador externo queda un documento hecho por fuera por $0, sin número', async () => {
+      await patchFacturador('externo');
+      const venta = await vender({
+        lineas: [{ itemId: itemPromo100, cantidad: '1' }],
+      });
+      const docs = await documentosDe(venta.id);
+      expect(
+        docs.map((d) => [d.emisor, d.tipo_documento_id, d.numero, d.monto]),
+      ).toEqual([['externo', BOLETA_ID, null, '0.0000']]);
+    });
+
+    it('la online de $0 por una promo la documenta el sistema', async () => {
+      const venta = await vender({
+        canal: 'online',
+        lineas: [{ itemId: itemPromo100, cantidad: '1' }],
+      });
+      const docs = await documentosDe(venta.id);
+      expect(docs.map((d) => [d.emisor, d.monto])).toEqual([
+        ['sistema', '0.0000'],
+      ]);
+    });
+
+    it('la factura de $0 por una promo lleva su documento por el total (E2)', async () => {
+      const venta = await vender({
+        tipoDocumentoId: FACTURA_ID,
+        customer: RECEPTOR,
+        lineas: [{ itemId: itemPromo100, cantidad: '1' }],
+      });
+      const docs = await documentosDe(venta.id);
+      expect(docs.map((d) => [d.emisor, d.tipo_documento_id, d.monto])).toEqual(
+        [['sistema', FACTURA_ID, '0.0000']],
+      );
+    });
+
+    // Un precio de lista $0 no es un monto que algo rebajó: es una entrega
+    // gratuita, pregunta abierta en `pendientes.md` § 6 ("Una entrega gratuita
+    // sin rebaja no deja documento").
+    it('un producto de lista $0, sin rebaja, sigue sin documento', async () => {
       const venta = await vender({
         lineas: [{ itemId: itemGratis, cantidad: '1' }],
       });
@@ -681,7 +850,7 @@ describe('Documentos de la venta (e2e)', () => {
       expect(await documentosDe(venta.id)).toEqual([]);
     });
 
-    it('tampoco la online de $0', async () => {
+    it('tampoco la online de un producto de lista $0', async () => {
       const venta = await vender({
         canal: 'online',
         lineas: [{ itemId: itemGratis, cantidad: '1' }],

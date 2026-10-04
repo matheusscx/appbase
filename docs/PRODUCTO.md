@@ -1077,7 +1077,17 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
 - **un comercio nuevo trae "emite el sistema" en todos los medios** hasta que lo configure: si su
   máquina también emite, sale un documento de más, que se corrige con nota de crédito. Es el error
   barato (owner, 2026-10-01). La regla se guarda por comercio (`tenant_metodo_pago`), porque
-  `metodos_pago` es el catálogo común a todos.
+  `metodos_pago` es el catálogo común a todos;
+- **una venta que llega a $0 por un descuento o una promoción deja su boleta por $0**, con el
+  descuento ya guardado en la venta: un producto de $5.000 con una promo del 100 % queda pagada y
+  con la boleta del sistema por $0, o, si el comercio factura por fuera, con un documento hecho por
+  fuera por $0 y sin número, para hacerlo en su facturador. Vale igual para la factura y la venta
+  online de $0. El SII lo exige: el mínimo de la boleta es $1, pero el total $0 que sale de un
+  descuento se emite igual, informando el descuento (Res. Ex. SII 60/2023). Reemplaza a "una venta
+  de $0 no lleva documento", que citaba esa resolución a medias (owner, 2026-10-04);
+- **un producto que vale $0 en el catálogo** (una muestra, una bolsa de regalo) y se lleva sin
+  ninguna rebaja **sigue sin documento**: es una entrega gratuita, como la cortesía, y queda como
+  pregunta abierta (owner, 2026-10-04, `pendientes.md` § 6).
 
 Todo esto lo decidió el owner el 2026-10-01 con las investigaciones de
 `docs/agent/investigaciones/2026-10-01-*`.

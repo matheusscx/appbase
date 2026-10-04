@@ -1379,6 +1379,7 @@ export class VentasService {
         esBoleta: tipoDocumento.esBoleta,
         canal,
         totalFinal: resultado.totales.totalFinal,
+        totalBruto: resultado.totales.subtotalNeto,
         configCalculo: resultado.config,
       },
       facturador: monedaOficial.facturador,

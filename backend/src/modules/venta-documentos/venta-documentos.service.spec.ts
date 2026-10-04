@@ -68,6 +68,8 @@ function params(
       esBoleta: true,
       canal: 'fisico',
       totalFinal: '100000.0000',
+      // El neto antes de descuentos y promos: 60.000 afecto + 28.600 exento.
+      totalBruto: '88600.0000',
       configCalculo: CFG,
       ...venta,
     },
@@ -181,12 +183,78 @@ describe('componerBaldes', () => {
 });
 
 describe('VentaDocumentosService.documentarVenta', () => {
-  it('una venta de $0 no lleva documento (E6)', async () => {
-    const { docs, save } = await documentar(
-      params({ venta: { totalFinal: '0.0000' } }),
-    );
-    expect(docs).toEqual([]);
-    expect(save).not.toHaveBeenCalled();
+  describe('venta de $0 (Res. Ex. SII 60/2023, resolutivo 1°)', () => {
+    /** Un producto de $5.000 que una promo del 100 % dejó en $0. */
+    const ceroPorRebaja = (
+      venta: Partial<DocumentarVentaParams['venta']> = {},
+      resto: Partial<Omit<DocumentarVentaParams, 'venta'>> = {},
+    ) =>
+      params({
+        venta: { totalFinal: '0.0000', totalBruto: '4202.0000', ...venta },
+        porciones: [{ clasificacion: 'afecto', total: '0', impuesto: '0' }],
+        ...resto,
+      });
+
+    it('la que llegó a $0 por una rebaja deja la boleta del sistema por $0, con los baldes en 0', async () => {
+      const { docs, save } = await documentar(ceroPorRebaja());
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(
+        docs.map((d) => [
+          d.emisor,
+          d.tipoDocumentoId,
+          d.estadoEnvio,
+          d.monto,
+          d.montoAfecto,
+          d.montoExento,
+          d.montoImpuestos,
+        ]),
+      ).toEqual([
+        ['sistema', BOLETA, 'armado', '0.0000', '0.0000', '0.0000', '0.0000'],
+      ]);
+    });
+
+    it('con facturador externo queda un documento hecho por fuera por $0, sin número', async () => {
+      const { docs } = await documentar(
+        ceroPorRebaja({}, { facturador: 'externo' }),
+      );
+      expect(
+        docs.map((d) => [d.emisor, d.tipoDocumentoId, d.numero, d.monto]),
+      ).toEqual([['externo', BOLETA, null, '0.0000']]);
+    });
+
+    it('la factura de $0 lleva su documento por el total (E2)', async () => {
+      const { docs } = await documentar(
+        ceroPorRebaja({ tipoDocumentoId: FACTURA, esBoleta: false }),
+      );
+      expect(docs.map((d) => [d.emisor, d.tipoDocumentoId, d.monto])).toEqual([
+        ['sistema', FACTURA, '0.0000'],
+      ]);
+    });
+
+    it('la online de $0 la documenta el sistema aunque el comercio facture por fuera (E5)', async () => {
+      const { docs } = await documentar(
+        ceroPorRebaja({ canal: 'online' }, { facturador: 'externo' }),
+      );
+      expect(docs.map((d) => [d.emisor, d.monto])).toEqual([
+        ['sistema', '0.0000'],
+      ]);
+    });
+
+    it('un pago que fue todo propina queda enlazado a la boleta de $0, como en cualquier boleta', async () => {
+      const { docs, queryEnlace } = await documentar(
+        ceroPorRebaja({}, { pagos: [pago('a', 'sistema', 0)] }),
+      );
+      expect(docs.map((d) => d.emisor)).toEqual(['sistema']);
+      expect(queryEnlace).toHaveBeenCalledTimes(1);
+    });
+
+    it('un producto de lista $0, sin ninguna rebaja, sigue sin documento', async () => {
+      const { docs, save } = await documentar(
+        params({ venta: { totalFinal: '0.0000', totalBruto: '0.0000' } }),
+      );
+      expect(docs).toEqual([]);
+      expect(save).not.toHaveBeenCalled();
+    });
   });
 
   it('una venta sin tipo de documento (país sin boleta) no lleva documento', async () => {
@@ -200,12 +268,13 @@ describe('VentaDocumentosService.documentarVenta', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
-  it('el $0 vale también para una factura (de cualquiera de los dos facturadores)', async () => {
+  it('el producto de lista $0 sigue sin documento también en una factura (de cualquiera de los dos facturadores)', async () => {
     for (const facturador of ['sistema', 'externo'] as const) {
       const { docs } = await documentar(
         params({
           venta: {
             totalFinal: '0.0000',
+            totalBruto: '0.0000',
             tipoDocumentoId: FACTURA,
             esBoleta: false,
           },
@@ -216,9 +285,11 @@ describe('VentaDocumentosService.documentarVenta', () => {
     }
   });
 
-  it('el $0 gana sobre el canal online', async () => {
+  it('el producto de lista $0 gana sobre el canal online', async () => {
     const { docs } = await documentar(
-      params({ venta: { canal: 'online', totalFinal: '0.0000' } }),
+      params({
+        venta: { canal: 'online', totalFinal: '0.0000', totalBruto: '0.0000' },
+      }),
     );
     expect(docs).toEqual([]);
   });
@@ -848,7 +919,7 @@ describe('VentaDocumentosService.documentarVenta: cada pago queda enlazado a su 
   });
 
   it.each([
-    ['venta de $0', { totalFinal: '0.0000' }],
+    ['producto de lista $0', { totalFinal: '0.0000', totalBruto: '0.0000' }],
     ['país sin boleta', { tipoDocumentoId: null }],
   ])('%s: sin documentos no hay nada que enlazar', async (_n, venta) => {
     const { llamadas } = await enlaces(

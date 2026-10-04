@@ -46,8 +46,9 @@ lugar por el que pasan POS, salones, online y suscripción).
 
 ### Qué documentos deja una venta (spec § 3.3)
 
-En este orden: una venta de **$0 no lleva documento** (E6: el mínimo de la boleta es $1, Res. Ex.
-SII N°60/2023); una venta **sin tipo de documento** (un país sin boleta sembrada: AR, CO, MX) no
+En este orden: una venta de **$0 lleva su documento por $0 si llegó ahí por un descuento o una
+promoción**, y ninguno si es un producto de lista $0 sin rebaja (E6, corregida el 2026-10-04: ver
+abajo); una venta **sin tipo de documento** (un país sin boleta sembrada: AR, CO, MX) no
 cambia y **no lleva ningún documento, ni del sistema ni de la máquina ni `nadie`**: el voucher
 que vale como boleta y el "nadie" son semántica chilena, y el frente fiscal de esos países es
 otro, así que un documento `sistema` sin tipo no significaría nada (spec § 3.3 y § 6); la
@@ -60,6 +61,31 @@ emite el IVA se devenga por ese monto y no corresponde nota de crédito (Oficio 
 **boleta** se parte por los pagos: un documento por cada pago `maquina` (con su `pago_id`), una
 fila `nadie` por la suma de los de `nadie`, una boleta del sistema por los de `sistema`, y **lo no
 pagado** según el facturador. La suma de los documentos que no son duplicados es el `total_final`.
+
+### La venta de $0: documento si la rebajó un descuento (E6 corregida, 2026-10-04)
+
+E6 decía que una venta de $0 no lleva documento porque *"el mínimo de la boleta es $1"*. La misma
+Res. Ex. SII 60/2023 (resolutivo 1°, segundo párrafo) dice lo contrario para el caso que importa:
+si el total es $0 *"como resultado de la aplicación de descuentos o alguna otra condición de
+venta"*, la boleta se emite igual, informando el descuento. El dato lo había puesto el agente y el
+owner aprobó el diseño completo, no esa cita; al corregirla decidió (`resueltos.md`, "Una venta que
+llega a $0 por un descuento deja su documento"):
+
+- **Con `totalBruto > 0` y total $0** (dos descuentos que suman más del 100 %, uno de 99,99 % que
+  redondea a $0, uno fijo topeado por el piso en cero, una promo del 100 %), la venta sigue la
+  regla de lo no pagado: boleta del sistema por $0 con los baldes en 0, o un `externo` por $0 sin
+  número si el comercio factura por fuera. La factura y la venta online de $0 siguen su propia
+  regla, por $0. `totalBruto` es el neto antes de descuentos y promociones que el motor ya calculó
+  (`subtotalNeto`): el criterio no toca el motor.
+- **Con `totalBruto = 0`** (un producto de lista $0, sin rebaja) no hay documento: es una entrega
+  gratuita, la misma familia que la cortesía, y queda como pregunta abierta
+  ([`pendientes.md`](../agent/pendientes.md) § 6, "Una entrega gratuita sin rebaja no deja documento").
+- **No hay columna nueva.** Lo que hay que congelar del hecho fiscal es el descuento, y la venta ya
+  lo congela (`venta_detalles.subtotal` y `descuento_aplicado`, `ventas.total_descuentos`,
+  `ventas_descuentos`, `ventas_promociones`). Cómo se informa en el XML (la zona de descuentos de
+  la Res. Ex. SII 74/2020, o el detalle) es formato de emisión: lo hace el facturador (ADR-010).
+- Una venta de $0 no tiene pagos ni saldo, así que no se abona ni se corrige por ningún pago:
+  el documento no cambia nada de la NC ni del abono.
 
 ### Por qué el documento nace con la entrega
 
@@ -77,7 +103,7 @@ lo resuelve por escrito; el cobro no se bloquea, el pago queda marcado (`es_dupl
 el contador lo corrija, y ese documento no cuenta para la cobertura ni para los topes de una
 corrección. Lo escribe `registrarDuplicadoDeAbono`, que `registrarAbono` llama **una vez, con todos los
 pagos del abono**, y que escribe un duplicado por cada pago cuyo medio es `maquina` y solo si la venta tiene algún documento vigente que no sea duplicado
-(una venta de $0 o de un país sin boleta no tiene nada que duplicar). Ese "¿ya está documentada?"
+(una venta de un producto de lista $0 o de un país sin boleta no tiene nada que duplicar). Ese "¿ya está documentada?"
 es un predicado único, `VentaDocumentosService.ventaDocumentada` (vigente, no duplicado y con
 emisor distinto de `nadie`): lo comparte el abono con el `abonoConMaquinaDuplica` del detalle,
 para que el aviso de la pantalla y lo que el abono después escribe no puedan desalinearse.
@@ -117,7 +143,7 @@ para que el aviso de la pantalla y lo que el abono después escribe no puedan de
   documento de la deuda —el hecho por fuera si lo hay, si no el del sistema—, nunca el voucher
   duplicado), y `documentoQueCorrige` lo lee en vez de inferirlo. Se enlaza porque el emisor de un
   medio puede cambiar entre la venta y el reembolso: inferirlo del medio de hoy movía el pago a otro
-  documento. Un pago sin documento (venta de $0, país sin boleta, o que fue todo propina) queda en
+  documento. Un pago sin documento (venta de un producto de lista $0, país sin boleta, o que fue todo propina) queda en
   `NULL`. Cada cobro y cada abono escriben todos sus enlaces con **un** `UPDATE`.
   **Cada corrección registra por dónde volvió la plata** (`ventas.devolucion_via`: `'pago'`,
   `'sin_plata'` o `'pasarela'`, y `devolucion_pago_id` con el pago): es la auditoría de ese dato

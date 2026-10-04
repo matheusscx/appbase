@@ -23,6 +23,92 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Una venta que llega a $0 por un descuento deja su documento (cerrada 2026-10-04)
+
+Sale de [`pendientes.md`](pendientes.md) § 6 (fiscal, frente propio). La regla viva, en
+[ADR-028](../adr/028-emision-registrada-por-venta.md) ("La venta de $0: documento si la rebajó un
+descuento"), en [`PRODUCTO.md`](../PRODUCTO.md) § 10 y en [`ventas.md`](../features/ventas.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 6
+
+- [ ] **Una venta que llega a $0 por un descuento tendría que dejar boleta, y hoy no deja
+  ninguna: E6 cita la Res. Ex. SII 60/2023 a medias** (fiscal — **frente propio, con su propia
+  sesión**, ADR-010; lo encontró la pasada de investigación que la Sesión de esfuerzo máximo lanzó
+  para el frente de la cortesía, 2026-10-03, y ella lo verificó en el PDF oficial:
+  [Res. Ex. 60/2023](https://www.sii.cl/normativa_legislacion/resoluciones/2023/reso60.pdf); la
+  orquestadora verificó la cita del repo, no el PDF). [ADR-028](../adr/028-emision-registrada-por-venta.md)
+  ("Qué documentos deja una venta") y la spec `2026-10-01-emision-por-venta-design.md` (E6)
+  dicen que una venta de $0 no lleva documento porque *"el mínimo de la boleta es $1"*. Según la
+  misma resolución (resolutivo 1°, segundo párrafo), si el total es $0 *"como resultado de la
+  aplicación de descuentos o alguna otra condición de venta"*, la boleta **se emite igual,
+  informando el monto del descuento** (Res. Ex. 74 y 176 de 2020; sin campo para el descuento,
+  va a nivel de detalle). El $1 es el mínimo del monto, no una exención del $0 por descuento.
+  **Procedencia de E6:** la tabla de decisiones de la spec dice *"Sesión del frente; aprobado
+  con el diseño"*: la cita la puso el agente y el owner aprobó el diseño completo, no esa
+  pregunta suelta. O sea que es **corregir un dato**, no reabrir una decisión tomada con esa
+  información, pero igual lo decide el owner. **Alcance:** las ventas que hoy llegan a $0 (un
+  descuento del 100 %, una promoción). La cortesía no cae acá: la línea sale de la cuenta y no
+  hay transacción. **Antes de diseñar:** confirmar la lectura de la resolución, contar por qué
+  caminos se llega hoy a una venta de $0, y llevarle al owner qué documento deja (con el
+  descuento informado) en lenguaje de local. La forma de informar el descuento (los campos de la
+  Res. 74/2020) es materia de la emisión, no de este hallazgo.
+  **Cómo arrancarlo — DECIDIDO (owner, 2026-10-04).** Procedencia: la sesión del frente bajó el
+  PDF de la Res. 60/2023 (el resolutivo 1°, 2° párrafo, dice lo citado arriba, literal) y midió
+  con un e2e los caminos a $0 sobre un producto de $5.000 con IVA incluido: dos descuentos de 60 %,
+  uno de 99,99 % que redondea a $0, uno de monto fijo de $9.000 (piso en cero) y una promo del
+  100 % quedan `pagada`, con tipo boleta y **sin ninguna fila** en `venta_documentos`; el 100 %
+  exacto en un descuento de catálogo lo rechaza el DTO, en una promo no. El descuento ya queda
+  congelado (`venta_detalles.descuento_aplicado`, `ventas.total_descuentos`, `ventas_descuentos`,
+  `ventas_promociones`). La Sesión de esfuerzo máximo revisó el análisis y propuso separar el ítem
+  de lista $0 y llevar el choque con la cortesía; el owner contestó tres preguntas
+  (AskUserQuestion, las tres recomendadas):
+  1. **La venta que llega a $0 por un descuento o una promo deja su documento por $0**, con la
+     misma regla que lo no pagado: boleta del sistema si factura el sistema, documento hecho por
+     fuera sin número si factura afuera; también la factura y la venta online de $0. Entre
+     *"siempre del sistema"* y *"dejarla sin documento"*.
+  2. **El producto de lista $0 sin rebaja sigue sin documento**: es una entrega gratuita, la misma
+     familia que la cortesía, y queda como pregunta abierta de ese frente (arriba). Entre *"también
+     boleta de $0"*, que sería una boleta sin descuento que informar.
+  3. **El choque con la cortesía se acepta y se anota**: el mismo plato regalado paga IVA como
+     cortesía y queda en una boleta de $0 sin IVA con una promo del 100 % o un descuento de 99,99 %.
+     Entre *"frente para restringir ya"*.
+  Criterio de "llegó a $0 por una rebaja": `totalBruto` (el neto antes de descuentos y promos) > 0
+  y `totalFinal` = 0, leído de lo que la venta ya calculó; no toca el motor.
+
+### Qué se hizo
+
+- **La lectura, en la fuente:** se bajó el PDF de la Res. Ex. SII 60/2023 y el resolutivo 1°,
+  segundo párrafo, dice lo citado, literal. La Res. Ex. SII 74/2020 (Anexo) trae la zona
+  "Descuentos y Recargos" de la boleta: es formato de emisión y queda para el facturador (ADR-010).
+- **Backend:** `documentarVenta` deja de cortar en `totalFinal ≤ 0`. Corta solo con
+  `totalBruto ≤ 0` (nada que rebajó un descuento: el producto de lista $0) o un total negativo.
+  Con total $0 y `totalBruto > 0`, la boleta va directo a lo no pagado según el facturador (por $0,
+  sin voucher ni fila `nadie`, que no existen sin nada aplicado); la factura y la online siguen su
+  rama. `DocumentarVentaParams.venta` suma `totalBruto`, que `crearEnTransaccion` pasa desde el
+  `subtotalNeto` que el motor ya calculó. El motor no se tocó; no hay columna nueva: el descuento
+  ya estaba congelado en `venta_detalles`, `ventas`, `ventas_descuentos` y `ventas_promociones`.
+
+### Qué lo fija
+
+- `venta-documentos.service.spec.ts`, "venta de $0": boleta del sistema con los baldes en 0, el
+  `externo` sin número, la factura, la online y el pago todo propina enlazado. Los tres tests que
+  afirmaban la regla vieja pasaron al producto de lista $0, que es lo que siguen cubriendo.
+- `venta-documentos.e2e-spec.ts`, "venta de $0": un producto de $5.000 con dos descuentos de 60 %,
+  uno de 99,99 %, uno fijo de $9.000 y una promo del 100 %; con facturador externo; online;
+  factura; y el cierre de una cuenta de salón. El producto de lista $0 sigue en `[]`.
+- Mutantes, medidos: volver al `total.lte(0)` de E6 → 8 e2e y 5 unitarios rojos (los nuevos);
+  sacar la condición de `totalBruto` → 2 e2e y 4 unitarios rojos (los del producto de lista $0).
+
+### Qué quedó afuera
+
+- **El producto de lista $0** y **el choque con la cortesía con IVA**: dos preguntas abiertas,
+  anotadas en una entrada nueva de `pendientes.md` § 6, "Una entrega gratuita sin rebaja no deja
+  documento" (la de la cortesía cerró el 2026-10-03, mientras corría este frente).
+- El filtro "Sin documento" del listado sigue mirando `emisor = 'nadie'`: una venta sin ninguna
+  fila (lista $0, país sin boleta) no aparece. Va con la primera de las dos preguntas.
+
+---
+
 ## La cortesía es un retiro gravado y congela su IVA al anular (cerrada 2026-10-03)
 
 Sale de [`pendientes.md`](pendientes.md) § 6 (fiscal, frente propio). Reglas vivas en
