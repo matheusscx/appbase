@@ -846,6 +846,41 @@ puede crear**. Vale para cualquier catálogo que otra suite pueda ensuciar. Cuan
 sí o sí (el `local` del tenant, que es único y no se crea), el `find` tiene que ser por una
 propiedad que **identifique**, no por posición.
 
+### ❌ `unref()` como limpieza de un timer de un setup file del e2e
+
+**Lo que costó:** el CI de `e34243ce` murió dos veces por falta de heap (suites 105 y 111, ~3,7 GB,
+ningún test en rojo). En local, la misma presión del GC daba timeouts de 30 s en los `beforeAll`.
+Se puso un parche de 8 GB (`88579a34`) mientras se buscaba la causa.
+
+**La causa:** la sonda del event loop de `test/setup-pool.ts` armaba un `setInterval` por suite y
+solo le hacía `unref()`. Eso deja terminar el proceso, pero el intervalo sigue vivo y retiene el
+registro de módulos de cada suite que ya terminó. Medido sobre la suite completa (`f39ccd35`, base
+fresca, 113 en verde + 2 salteadas en las tres, exit 0):
+
+| Corrida | Heap tras cada suite, 1.ª con tests → última | RSS pico |
+|---|---|---|
+| Sin arreglo, 8 GB, GC forzado | 185 → 3.096 MB, ~25 MB por suite | 3.918 MB |
+| Con `afterAll(() => clearInterval(reloj))`, 4 GB, GC forzado | 177 → 213 MB (máximo 227) | 1.528 MB |
+| Con el arreglo, 4 GB, **sin** GC forzado (como `npm run test:e2e`) | diente de sierra, pico 2.446 MB, cierra en 365 MB | 3.068 MB |
+
+La tercera es la condición del CI: el GC forzado baja el RSS por sí solo, así que el 1.528 MB no es
+lo que va a ver el CI. La pendiente es pareja, con saltos aislados de 80 y 109 MB en suites
+pesadas: no había una suite culpable, crecía lo que todas comparten. Las duraciones (~680, ~558 y
+~622 s) no comparan el arreglo: el load del host varió entre 3,7 y 13,3 durante las corridas.
+
+Queda un resto chico: jest no corre los `afterAll` de un archivo sin tests habilitados
+(`control-sonda-pool`, apagado salvo `CONTROL_SONDA=1`, y `pasarela-oneclick`), así que esas dos
+dejan su intervalo vivo. Ninguna de las dos levanta el `AppModule`, así que lo que retienen es
+poco, y no se tocó.
+
+⚠️ **Lo que lo escondió:** `--detectOpenHandles` da cero handles con y sin el arreglo, porque
+`unref()` es justo lo que saca al timer de esa lista. Y el síntoma —timeouts de `beforeAll`,
+muertes al final de la corrida— señalaba a las suites que estaban al final, no al setup file que
+corre en todas.
+
+**Regla:** cómo se escribe un setup file y cómo se mide la curva, en
+[`patterns/backend.md` § 7](../patterns/backend.md#e2e-de-api-lo-que-un-setup-file-deja-vivo-lo-apaga-en-afterall-2026-10-04).
+
 ## Pruebas E2E de navegador
 
 *(Sección a poblar cuando exista la suite. Entradas previstas según el diseño acordado:

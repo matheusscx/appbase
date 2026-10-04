@@ -600,6 +600,38 @@ llamó *"el `401` fantasma"* —historia y medición en
 **Ante un e2e que falla solo en la corrida completa**, sospechar primero de un recurso del seed
 que es único por definición, antes que del código.
 
+### E2E de API: lo que un setup file deja vivo, lo apaga en `afterAll` (2026-10-04)
+
+Los `setupFiles`/`setupFilesAfterEnv` de `test/jest-e2e.json` corren **una vez por suite**, dentro
+del sandbox de esa suite, y todas las suites comparten un proceso (`maxWorkers: 1`). Un timer, un
+listener o un socket que quede vivo al terminar la suite retiene su callback, y con él el
+registro de módulos entero de esa suite —el `AppModule` con todo lo que importa—. El GC no lo
+puede juntar, y la memoria crece suite tras suite hasta que el proceso muere sin heap.
+
+```ts
+// ❌ unref() deja terminar el proceso, pero no suelta nada
+const reloj = setInterval(muestrear, 100);
+reloj.unref();
+
+// ✅ además se apaga al cerrar la suite
+reloj.unref();
+afterAll(() => clearInterval(reloj));
+```
+
+⚠️ **`--detectOpenHandles` no lo ve:** descarta todo handle cuyo `hasRef()` da `false`, y
+`unref()` es justo lo que lo pone en `false`. Lo que sí lo ve es la curva de heap retenido por suite, que con el e2e sano
+es **plana**:
+
+```bash
+cd backend && node --expose-gc node_modules/.bin/jest --config ./test/jest-e2e.json <patrón> --logHeapUsage
+```
+
+Con `--expose-gc`, jest fuerza un GC antes de anotar el heap de cada suite. Ese GC corre antes
+del teardown de la suite, así que el número incluye la suite que acaba de terminar (~170 MB con el
+`AppModule`): lo que dice algo es la **pendiente**, no el valor. Si sube parejo de una suite a la
+siguiente, algo de un setup file o de un `afterAll` incompleto quedó vivo. El caso que lo trajo:
+[`anti-patterns.md`](../agent/anti-patterns.md#-unref-como-limpieza-de-un-timer-de-un-setup-file-del-e2e).
+
 ---
 
 ## 8. Seeding

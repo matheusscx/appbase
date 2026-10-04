@@ -195,6 +195,12 @@ const reloj = setInterval(() => {
 }, MUESTREO_MS);
 // Una sonda no puede ser la razón por la que el proceso de jest no termina.
 reloj.unref();
+// `unref` deja terminar al proceso, pero no suelta nada: mientras el intervalo
+// viva, su callback retiene el registro de módulos de ESTA suite —el AppModule
+// entero—. Todas las suites corren en un solo proceso (`maxWorkers: 1`), así
+// que cada una dejaba lo suyo sin que el GC pudiera juntarlo, y el e2e moría
+// sin heap al final (2026-10-03).
+afterAll(() => clearInterval(reloj));
 
 /** Atraso máximo del loop en la ventana muestreada. */
 function loopMax(): number {
