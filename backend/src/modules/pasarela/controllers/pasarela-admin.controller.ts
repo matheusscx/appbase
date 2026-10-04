@@ -11,7 +11,8 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiHeader, ApiTags } from '@nestjs/swagger';
+import { ClaveIdempotencia } from '../../../common/decorators/clave-idempotencia.decorator';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../../common/guards/tenant.guard';
@@ -26,6 +27,7 @@ import { UpdateTenantPasarelaDto } from '../dto/update-tenant-pasarela.dto';
 import { CreateApiKeyDto } from '../dto/create-api-key.dto';
 import { QueryOrdenesDto } from '../dto/query-ordenes.dto';
 import { CreateReembolsoDto } from '../dto/create-reembolso.dto';
+import { ResolverReembolsoDto } from '../dto/resolver-reembolso.dto';
 
 @ApiTags('pasarela')
 @ApiBearerAuth()
@@ -110,14 +112,54 @@ export class PasarelaAdminController {
 
   @Post('ordenes/:id/reembolsos')
   @RequiresPermiso('Pasarelas', 'Reembolsar')
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description:
+      'UUID por intento de reembolso: el reintento con la misma clave no vuelve a devolver la plata (ADR-029)',
+  })
   reembolsar(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CreateReembolsoDto,
+    @ClaveIdempotencia() clave: string,
   ) {
     return this.cobrosService.reembolsar(
       this.tenantId(req),
       id,
+      dto,
+      { usuarioId: (req.user as JwtUser).id },
+      clave,
+    );
+  }
+
+  /** "Volver a consultar": aclara por saldo el reembolso sin confirmar de la orden (ADR-029). */
+  @Post('ordenes/:id/reembolsos/aclarar')
+  @RequiresPermiso('Pasarelas', 'Reembolsar')
+  aclararReembolso(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.cobrosService.aclararReembolsoSinConfirmar(
+      this.tenantId(req),
+      id,
+      (req.user as JwtUser).id,
+    );
+  }
+
+  /** El admin marca, tras revisar el portal de Transbank, si el reembolso salió (ADR-029). */
+  @Post('ordenes/:id/reembolsos/:transaccionId/resolucion')
+  @RequiresPermiso('Pasarelas', 'Reembolsar')
+  resolverReembolso(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('transaccionId', ParseUUIDPipe) transaccionId: string,
+    @Body() dto: ResolverReembolsoDto,
+  ) {
+    return this.cobrosService.resolverReembolsoAMano(
+      this.tenantId(req),
+      id,
+      transaccionId,
       dto,
       (req.user as JwtUser).id,
     );

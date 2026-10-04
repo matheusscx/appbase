@@ -6,7 +6,8 @@ export type OperacionIdempotente =
   | 'pago.abono'
   | 'compras.pago'
   | 'compras.confirmar'
-  | 'notaCredito.emitir';
+  | 'notaCredito.emitir'
+  | 'pasarela.reembolso';
 
 /**
  * Lo que distingue "el mismo cobro reintentado" de "otro cobro con la misma

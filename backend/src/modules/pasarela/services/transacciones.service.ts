@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, IsNull, Repository } from 'typeorm';
+import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { PasarelaTransaccion } from '../entities/pasarela-transaccion.entity';
 
 const CLAVES_SENSIBLES = new Set([
@@ -117,5 +118,119 @@ export class TransaccionesService {
       { correccionVentaId },
     );
     return res.affected === 1;
+  }
+
+  /** El REFUND que escribió el reclamo de `Idempotency-Key` (ADR-029). */
+  reembolsoDeSolicitud(
+    tenantId: string,
+    solicitudIdempotenteId: string,
+  ): Promise<PasarelaTransaccion | null> {
+    return this.repo.findOne({
+      where: {
+        tenantId,
+        solicitudIdempotenteId,
+        tipo: 'REFUND',
+        eliminadoEl: IsNull(),
+      },
+    });
+  }
+
+  /**
+   * Cierra un REFUND "sin confirmar" (`iniciada` o `error`) en `aprobada` o
+   * `rechazada`, una sola vez. Es la SEGUNDA excepción al solo-INSERT del
+   * historial, al lado de `vincularCorreccion`, y con el mismo cuidado:
+   * - **compare-and-set**: un solo `UPDATE` cuyo `WHERE` exige el estado de
+   *   origen. Nunca vuelve atrás ni pasa de un final a otro, ni siquiera con
+   *   dos escritores a la vez: el segundo no encuentra fila. `false` = otro ya
+   *   la resolvió (o es de otro tenant, o está borrada) y no se tocó nada; el
+   *   llamador relee y responde eso;
+   * - acotada al tenant del token y al tipo REFUND;
+   * - deja **cómo** se resolvió (`resolucion`), quién y cuándo.
+   *
+   * Existe porque el REFUND se escribe en `iniciada` ANTES de llamar al
+   * proveedor (write-ahead): si el proceso cae después de que Transbank
+   * devolvió la plata, la fila es la única huella de que el intento existió
+   * (ADR-029).
+   */
+  async resolverReembolso(
+    tenantId: string,
+    transaccionId: string,
+    r: {
+      estado: 'aprobada' | 'rechazada';
+      resolucion: 'proveedor' | 'saldo' | 'manual' | 'no_enviado';
+      resueltaPor: string | null;
+      codigoRespuesta?: string | null;
+      codigoAutorizacion?: string | null;
+      tipoPago?: string | null;
+      request?: Record<string, unknown>;
+      response?: Record<string, unknown>;
+      /** Se suma a la `metadata` de la fila (p. ej. el motivo de un "no salió"). */
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<boolean> {
+    // El cast es por los `jsonb`: TypeORM tipa su update en profundidad y un
+    // `Record<string, unknown>` no entra en ese tipo, aunque es lo que guarda.
+    const cambios = {
+      estado: r.estado,
+      resolucion: r.resolucion,
+      resueltaPor: r.resueltaPor,
+      resueltaEl: new Date(),
+      ...(r.codigoRespuesta !== undefined && {
+        codigoRespuesta: r.codigoRespuesta,
+      }),
+      ...(r.codigoAutorizacion !== undefined && {
+        codigoAutorizacion: r.codigoAutorizacion,
+      }),
+      ...(r.tipoPago !== undefined && { tipoPago: r.tipoPago }),
+      ...(r.request && { request: this.redactar(r.request) }),
+      ...(r.response && { response: this.redactar(r.response) }),
+      // Se suma en la misma sentencia: leerla antes y escribirla después
+      // dejaría una ventana para pisar lo que otro escribió en el medio.
+      ...(r.metadata && {
+        metadata: () =>
+          "COALESCE(metadata, '{}'::jsonb) || CAST(:metadataNueva AS jsonb)",
+      }),
+    } as QueryDeepPartialEntity<PasarelaTransaccion>;
+    const res = await this.repo
+      .createQueryBuilder()
+      .update(PasarelaTransaccion)
+      .set(cambios)
+      .where('transaccion_id = :transaccionId', { transaccionId })
+      .andWhere('tenant_id = :tenantId', { tenantId })
+      .andWhere("tipo = 'REFUND'")
+      .andWhere("estado IN ('iniciada', 'error')")
+      .andWhere('eliminado_el IS NULL')
+      .setParameter('metadataNueva', JSON.stringify(r.metadata ?? {}))
+      .execute();
+    return res.affected === 1;
+  }
+
+  /**
+   * Guarda el `request`/`response` de una llamada que no llegó a confirmarse
+   * (error de red, 5xx, timeout) sobre el REFUND que sigue en `iniciada`: la
+   * fila no es final, así que es mutable. No cambia el estado: "sin
+   * confirmar" no es rechazo (el proveedor pudo haber devuelto la plata).
+   */
+  async registrarIntentoSinConfirmar(
+    tenantId: string,
+    transaccionId: string,
+    intento: {
+      request: Record<string, unknown>;
+      response: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    await this.repo.update(
+      {
+        transaccionId,
+        tenantId,
+        tipo: 'REFUND',
+        estado: 'iniciada',
+        eliminadoEl: IsNull(),
+      },
+      {
+        request: this.redactar(intento.request),
+        response: this.redactar(intento.response),
+      } as QueryDeepPartialEntity<PasarelaTransaccion>,
+    );
   }
 }

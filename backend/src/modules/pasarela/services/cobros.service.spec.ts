@@ -1,7 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Db } from '../../../common/db/db.service';
-import { CobrosService } from './cobros.service';
+import { CobrosService, veredictoPorSaldo } from './cobros.service';
 import { InscripcionesService } from './inscripciones.service';
 import { TenantPasarelaService } from './tenant-pasarela.service';
 import { TransaccionesService } from './transacciones.service';
@@ -14,7 +14,10 @@ import {
 import { ProviderComunicacionError } from '../providers/payment-provider.interface';
 import { ReembolsoCallbackRegistry } from './reembolso-callback.registry';
 import { MonedasService } from '../../monedas/monedas.service';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
+import Decimal from 'decimal.js';
+import { IdempotenciaService } from '../../idempotencia/idempotencia.service';
+import type { PasosConEfectoExterno } from '../../idempotencia/idempotencia.service';
 
 const inscripcionActiva = {
   inscripcionId: 'insc-1',
@@ -24,8 +27,16 @@ const inscripcionActiva = {
   identificadorExterno: 'v1:blob-tbk',
 };
 
+type Fila = Record<string, unknown>;
+const CLAVE = '2f1c8a3e-6a1b-4d8e-9a55-0c7b1f7d2e10';
+
 describe('CobrosService', () => {
   let service: CobrosService;
+  let historialBase: Fila[] = [];
+  let filas: Fila[] = [];
+  const conHistorial = (h: Fila[]) => {
+    historialBase = h;
+  };
   const ordenRepo = {
     create: jest.fn((x: Partial<PasarelaOrden>) => x),
     save: jest.fn((x: Partial<PasarelaOrden>) =>
@@ -75,10 +86,52 @@ describe('CobrosService', () => {
         cred: {},
       }),
     },
+    // Con estado, porque el REFUND nace en `iniciada` (write-ahead) y se
+    // cierra después (ADR-029): el historial que lee el service es el
+    // sembrado (`conHistorial`) más lo que el propio test fue registrando.
     transacciones: {
-      registrar: jest.fn().mockResolvedValue({ transaccionId: 'tx-1' }),
+      registrar: jest.fn((datos: Fila) => {
+        const fila: Fila = {
+          transaccionId: `tx-${filas.length + 1}`,
+          metadata: {},
+          ...datos,
+        };
+        filas.push(fila);
+        return Promise.resolve(fila);
+      }),
       vincularCorreccion: jest.fn().mockResolvedValue(true),
-      listarPorOrden: jest.fn().mockResolvedValue([]),
+      listarPorOrden: jest.fn(() =>
+        Promise.resolve([...historialBase, ...filas]),
+      ),
+      resolverReembolso: jest.fn(
+        (_t: string, id: string, r: Record<string, unknown>) => {
+          const fila = [...historialBase, ...filas].find(
+            (f) => f.transaccionId === id,
+          );
+          if (!fila || !['iniciada', 'error'].includes(fila.estado as string))
+            return Promise.resolve(false);
+          Object.assign(fila, {
+            estado: r.estado,
+            resolucion: r.resolucion,
+            ...(r.codigoAutorizacion !== undefined && {
+              codigoAutorizacion: r.codigoAutorizacion,
+            }),
+            metadata: {
+              ...(fila.metadata as object),
+              ...(r.metadata as object),
+            },
+          });
+          return Promise.resolve(true);
+        },
+      ),
+      registrarIntentoSinConfirmar: jest.fn().mockResolvedValue(undefined),
+      reembolsoDeSolicitud: jest.fn((_t: string, sol: string) =>
+        Promise.resolve(
+          [...historialBase, ...filas].find(
+            (f) => f.solicitudIdempotenteId === sol,
+          ) ?? null,
+        ),
+      ),
       redactar: jest.fn((o: Record<string, unknown>) => o),
     },
     credenciales: { descifrarTexto: jest.fn().mockReturnValue('tbk-u-1') },
@@ -105,9 +158,27 @@ describe('CobrosService', () => {
     register: jest.fn(),
     get: jest.fn(() => reembolsoHandler),
   };
+  // Pasa-manos de la primera vez (tx0 → tx1). Lo que importa del reclamo
+  // —commit antes del efecto, lock, reproducción— solo se prueba contra
+  // Postgres: `test/pasarela-reembolso.e2e-spec.ts`.
+  const efectuarDeUna = async (
+    _s: unknown,
+    pasos: PasosConEfectoExterno<unknown, Record<string, unknown>>,
+  ) => {
+    const preparado = await pasos.preparar('sol-1');
+    const r = await pasos.efectuar('sol-1', preparado);
+    if ('soltar' in r) throw r.soltar;
+    return { origen: 'efectuada', respuesta: r.respuesta };
+  };
+  const idempotencia = {
+    ejecutarConEfectoExterno: jest.fn(efectuarDeUna),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    historialBase = [];
+    filas = [];
+    idempotencia.ejecutarConEfectoExterno.mockImplementation(efectuarDeUna);
     const module = await Test.createTestingModule({
       providers: [
         CobrosService,
@@ -119,6 +190,7 @@ describe('CobrosService', () => {
         { provide: CredencialesService, useValue: deps.credenciales },
         { provide: ReembolsoCallbackRegistry, useValue: reembolsoRegistry },
         { provide: MonedasService, useValue: monedas },
+        { provide: IdempotenciaService, useValue: idempotencia },
         {
           provide: ProviderFactory,
           useValue: {
@@ -219,7 +291,7 @@ describe('CobrosService', () => {
       moneda: 'CLP',
       codigoOrden: 'O-1',
     });
-    deps.transacciones.listarPorOrden.mockResolvedValue([
+    conHistorial([
       {
         transaccionId: 'tx-auth',
         tipo: 'AUTHORIZATION',
@@ -241,15 +313,31 @@ describe('CobrosService', () => {
       request: {},
       response: {},
     });
-    const res = await service.reembolsar('t-1', 'orden-1', { monto: '5000' });
+    const res = await service.reembolsar(
+      't-1',
+      'orden-1',
+      { monto: '5000' },
+      { apiKeyId: 'key-1' },
+      CLAVE,
+    );
     expect(res.estado).toBe('reembolsada');
+    // Write-ahead (ADR-029): el REFUND nace en `iniciada`, ligado al reclamo
+    // de la clave, y la respuesta del proveedor lo cierra.
     expect(deps.transacciones.registrar).toHaveBeenCalledWith(
       expect.objectContaining({
         tipo: 'REFUND',
+        estado: 'iniciada',
         transaccionPadreId: 'tx-auth',
+        solicitudIdempotenteId: 'sol-1',
       }),
-      manager,
     );
+    expect(filas).toEqual([
+      expect.objectContaining({
+        tipo: 'REFUND',
+        estado: 'aprobada',
+        resolucion: 'proveedor',
+      }),
+    ]);
   });
 
   it('reembolso de una orden conciliada (checkout online) es aceptado', async () => {
@@ -261,7 +349,7 @@ describe('CobrosService', () => {
       moneda: 'CLP',
       codigoOrden: 'O-1',
     });
-    deps.transacciones.listarPorOrden.mockResolvedValue([
+    conHistorial([
       {
         transaccionId: 'tx-auth',
         tipo: 'AUTHORIZATION',
@@ -283,7 +371,13 @@ describe('CobrosService', () => {
       request: {},
       response: {},
     });
-    const res = await service.reembolsar('t-1', 'orden-1', { monto: '5000' });
+    const res = await service.reembolsar(
+      't-1',
+      'orden-1',
+      { monto: '5000' },
+      { apiKeyId: 'key-1' },
+      CLAVE,
+    );
     expect(res.estado).toBe('reembolsada');
     expect(provider.reembolsar).toHaveBeenCalled();
   });
@@ -323,7 +417,7 @@ describe('CobrosService', () => {
 
     beforeEach(() => {
       ordenRepo.findOne.mockResolvedValue({ ...ordenConVenta });
-      deps.transacciones.listarPorOrden.mockResolvedValue(authAprobada);
+      conHistorial(authAprobada);
       provider.reembolsar.mockResolvedValue(refundAprobado);
       reembolsoHandler.onReembolsoAprobado.mockResolvedValue({
         correccionVentaId: 'nc-1',
@@ -337,7 +431,8 @@ describe('CobrosService', () => {
           monto: '1100',
           devoluciones: [{ itemId: 'item-1', cantidad: '2' }],
         },
-        'user-1',
+        { usuarioId: 'user-1' },
+        CLAVE,
       );
       expect(reembolsoHandler.onReembolsoAprobado).toHaveBeenCalledWith({
         tenantId: 't-1',
@@ -363,7 +458,13 @@ describe('CobrosService', () => {
         ).ligarCorreccion;
 
       it('el evento trae cómo ligar: con el manager que le pasen liga el REFUND recién registrado (tx-1), bajo el tenant del token', async () => {
-        await service.reembolsar('t-1', 'orden-1', { monto: '1100' }, 'user-1');
+        await service.reembolsar(
+          't-1',
+          'orden-1',
+          { monto: '1100' },
+          { usuarioId: 'user-1' },
+          CLAVE,
+        );
         const managerDeLaNota = { soy: 'la transacción de la nota' };
 
         await ligarDelEvento()(managerDeLaNota, 'nc-1');
@@ -377,7 +478,13 @@ describe('CobrosService', () => {
       });
 
       it('si no ligó ninguna fila (affected != 1) lanza, para que la corrección se revierta', async () => {
-        await service.reembolsar('t-1', 'orden-1', { monto: '1100' }, 'user-1');
+        await service.reembolsar(
+          't-1',
+          'orden-1',
+          { monto: '1100' },
+          { usuarioId: 'user-1' },
+          CLAVE,
+        );
         deps.transacciones.vincularCorreccion.mockResolvedValueOnce(false);
 
         await expect(ligarDelEvento()({}, 'nc-1')).rejects.toThrow('tx-1');
@@ -389,7 +496,8 @@ describe('CobrosService', () => {
           't-1',
           'orden-1',
           { monto: '1100' },
-          'user-1',
+          { usuarioId: 'user-1' },
+          CLAVE,
         );
 
         expect(res.notaCreditoId).toBe('nc-1');
@@ -412,7 +520,8 @@ describe('CobrosService', () => {
           't-1',
           'orden-1',
           { monto: '1100' },
-          'user-1',
+          { usuarioId: 'user-1' },
+          CLAVE,
         );
 
         expect(res.notaCreditoId).toBeUndefined();
@@ -426,7 +535,13 @@ describe('CobrosService', () => {
 
     describe('el tope por pago del lado de ventas, ANTES de llamar al proveedor', () => {
       it('con venta vinculada lo consulta con la transacción, el tenant del token, la venta de la orden y el monto, y recién después llama al proveedor', async () => {
-        await service.reembolsar('t-1', 'orden-1', { monto: '1100' }, 'user-1');
+        await service.reembolsar(
+          't-1',
+          'orden-1',
+          { monto: '1100' },
+          { usuarioId: 'user-1' },
+          CLAVE,
+        );
 
         expect(reembolsoHandler.exigirTopeDelReembolso).toHaveBeenCalledWith(
           manager,
@@ -443,7 +558,13 @@ describe('CobrosService', () => {
         );
 
         await expect(
-          service.reembolsar('t-1', 'orden-1', { monto: '1100' }, 'user-1'),
+          service.reembolsar(
+            't-1',
+            'orden-1',
+            { monto: '1100' },
+            { usuarioId: 'user-1' },
+            CLAVE,
+          ),
         ).rejects.toThrow(BadRequestException);
 
         expect(provider.reembolsar).not.toHaveBeenCalled();
@@ -457,7 +578,13 @@ describe('CobrosService', () => {
           ventaId: null,
         });
 
-        await service.reembolsar('t-1', 'orden-1', { monto: '1100' }, 'user-1');
+        await service.reembolsar(
+          't-1',
+          'orden-1',
+          { monto: '1100' },
+          { usuarioId: 'user-1' },
+          CLAVE,
+        );
 
         expect(reembolsoHandler.exigirTopeDelReembolso).not.toHaveBeenCalled();
         expect(provider.reembolsar).toHaveBeenCalled();
@@ -469,7 +596,8 @@ describe('CobrosService', () => {
         't-1',
         'orden-1',
         { monto: '1100' },
-        'user-1',
+        { usuarioId: 'user-1' },
+        CLAVE,
       );
       expect(reembolsoHandler.onReembolsoAprobado).toHaveBeenCalledWith(
         expect.objectContaining({ ventaId: 'venta-1', devoluciones: [] }),
@@ -485,13 +613,13 @@ describe('CobrosService', () => {
         't-1',
         'orden-1',
         { monto: '1100' },
-        'user-1',
+        { usuarioId: 'user-1' },
+        CLAVE,
       );
       expect(res.warning).toContain('reembolso fue procesado');
-      expect(deps.transacciones.registrar).toHaveBeenCalledWith(
+      expect(filas).toEqual([
         expect.objectContaining({ tipo: 'REFUND', estado: 'aprobada' }),
-        manager,
-      );
+      ]);
       expect(deps.transacciones.vincularCorreccion).not.toHaveBeenCalled();
     });
 
@@ -505,7 +633,8 @@ describe('CobrosService', () => {
         't-1',
         'orden-1',
         { monto: '1100' },
-        'user-1',
+        { usuarioId: 'user-1' },
+        CLAVE,
       );
       expect(res.warning).toContain(
         'No se puede emitir una nota de crédito sobre otra nota de crédito',
@@ -522,7 +651,8 @@ describe('CobrosService', () => {
         't-1',
         'orden-1',
         { monto: '1100' },
-        'user-1',
+        { usuarioId: 'user-1' },
+        CLAVE,
       );
       expect(res.warning).toContain('reembolso fue procesado');
       expect(res.warning).not.toContain('uuid');
@@ -538,13 +668,20 @@ describe('CobrosService', () => {
         't-1',
         'orden-1',
         { monto: '1100' },
-        'user-1',
+        { usuarioId: 'user-1' },
+        CLAVE,
       );
       expect(res.warning).toContain('Venta no elegible para esta nota');
     });
 
     it('por la llave de API no hay usuario: el evento lleva null, no una cadena vacía', async () => {
-      await service.reembolsar('t-1', 'orden-1', { monto: '1100' });
+      await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100' },
+        { apiKeyId: 'key-1' },
+        CLAVE,
+      );
       expect(reembolsoHandler.onReembolsoAprobado).toHaveBeenCalledWith(
         expect.objectContaining({ usuarioId: null }),
       );
@@ -556,7 +693,13 @@ describe('CobrosService', () => {
         aprobada: false,
         codigoRespuesta: '-1',
       });
-      await service.reembolsar('t-1', 'orden-1', { monto: '1100' }, 'user-1');
+      await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100' },
+        { usuarioId: 'user-1' },
+        CLAVE,
+      );
       expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
       expect(deps.transacciones.vincularCorreccion).not.toHaveBeenCalled();
     });
@@ -570,7 +713,8 @@ describe('CobrosService', () => {
         't-1',
         'orden-1',
         { monto: '1100' },
-        'user-1',
+        { usuarioId: 'user-1' },
+        CLAVE,
       );
       expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
       expect(res.warning).toBeUndefined();
@@ -586,22 +730,26 @@ describe('CobrosService', () => {
         't-1',
         'orden-1',
         { monto: '1100', devoluciones: [{ itemId: 'item-1', cantidad: '1' }] },
-        'user-1',
+        { usuarioId: 'user-1' },
+        CLAVE,
       );
       expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
       expect(res.warning).toContain('venta vinculada');
     });
 
     it('sin handler registrado el reembolso sigue y el warning lo dice', async () => {
-      // Dos lecturas del registro: la del tope por pago y la del hook de después.
+      // Tres lecturas del registro: el tope por pago en tx0 y en tx1, y el hook
+      // de después.
       reembolsoRegistry.get
+        .mockReturnValueOnce(null as never)
         .mockReturnValueOnce(null as never)
         .mockReturnValueOnce(null as never);
       const res = await service.reembolsar(
         't-1',
         'orden-1',
         { monto: '1100' },
-        'user-1',
+        { usuarioId: 'user-1' },
+        CLAVE,
       );
       expect(res.warning).toContain('no hay un módulo de ventas');
       expect(deps.transacciones.vincularCorreccion).not.toHaveBeenCalled();
@@ -622,7 +770,7 @@ describe('CobrosService', () => {
       moneda: 'CLP',
       codigoOrden: 'O-1',
     });
-    deps.transacciones.listarPorOrden.mockResolvedValue([
+    conHistorial([
       {
         transaccionId: 'tx-auth',
         tipo: 'AUTHORIZATION',
@@ -639,12 +787,17 @@ describe('CobrosService', () => {
       },
     ]);
     await expect(
-      service.reembolsar('t-1', 'orden-1', { monto: '5000' }),
+      service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '5000' },
+        { apiKeyId: 'key-1' },
+        CLAVE,
+      ),
     ).rejects.toThrow('excede');
     // corrió dentro de una transacción y con lock pesimista de la orden
     expect(dataSource.transaction).toHaveBeenCalled();
-    expect(manager.findOne).toHaveBeenCalledWith(
-      PasarelaOrden,
+    expect(ordenRepo.findOne).toHaveBeenCalledWith(
       expect.objectContaining({ lock: { mode: 'pessimistic_write' } }),
     );
     expect(provider.reembolsar).not.toHaveBeenCalled();
@@ -659,7 +812,7 @@ describe('CobrosService', () => {
       moneda: 'CLP',
       codigoOrden: 'O-1',
     });
-    deps.transacciones.listarPorOrden.mockResolvedValue([
+    conHistorial([
       {
         transaccionId: 'tx-auth',
         tipo: 'AUTHORIZATION',
@@ -676,7 +829,13 @@ describe('CobrosService', () => {
       },
     ]);
     await expect(
-      service.reembolsar('t-1', 'orden-1', { monto: '2000' }),
+      service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '2000' },
+        { apiKeyId: 'key-1' },
+        CLAVE,
+      ),
     ).rejects.toThrow('excede');
   });
 
@@ -711,7 +870,13 @@ describe('CobrosService', () => {
 
   it('reembolso con monto fuera de la escala es rechazado antes de tocar la orden', async () => {
     await expect(
-      service.reembolsar('t-1', 'orden-1', { monto: '1000.50' }),
+      service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1000.50' },
+        { apiKeyId: 'key-1' },
+        CLAVE,
+      ),
     ).rejects.toThrow('decimales');
     expect(ordenRepo.findOne).not.toHaveBeenCalled();
     // El tercer call site también fija la moneda: sin esto, un mutante que
@@ -724,12 +889,18 @@ describe('CobrosService', () => {
 
   it('reembolso con monto <= 0 es rechazado antes de tocar la orden', async () => {
     await expect(
-      service.reembolsar('t-1', 'orden-1', { monto: '-1000' }),
+      service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '-1000' },
+        { apiKeyId: 'key-1' },
+        CLAVE,
+      ),
     ).rejects.toThrow('mayor a cero');
     expect(ordenRepo.findOne).not.toHaveBeenCalled();
   });
 
-  it('timeout en reembolso: transacción error + BadGateway, orden no cambia', async () => {
+  it('timeout en reembolso: 502 "sin confirmar", el REFUND queda en iniciada con el intento anotado, la orden no cambia', async () => {
     ordenRepo.findOne.mockResolvedValue({
       ordenId: 'orden-1',
       tenantId: 't-1',
@@ -738,7 +909,7 @@ describe('CobrosService', () => {
       moneda: 'CLP',
       codigoOrden: 'O-1',
     });
-    deps.transacciones.listarPorOrden.mockResolvedValue([
+    conHistorial([
       {
         transaccionId: 'tx-auth',
         tipo: 'AUTHORIZATION',
@@ -749,26 +920,542 @@ describe('CobrosService', () => {
       },
     ]);
     provider.reembolsar.mockRejectedValue(
-      new ProviderComunicacionError('timeout', {}),
+      new ProviderComunicacionError('timeout', { url: 'tbk' }, { x: 1 }),
     );
     await expect(
-      service.reembolsar('t-1', 'orden-1', { monto: '5000' }),
-    ).rejects.toThrow('verifique el estado');
-    // La auditoría del intento se registra FUERA de la transacción (sin el
-    // manager): el ProviderComunicacionError se propaga, la tx hace rollback y
-    // libera el FOR UPDATE, y recién ahí se escribe el rastro por conexión
-    // normal. Registrarlo dentro (con el manager sobre una conexión propia)
-    // auto-bloquearía por el conflicto FK FOR KEY SHARE ↔ FOR UPDATE.
-    expect(deps.transacciones.registrar).toHaveBeenCalledWith(
-      expect.objectContaining({ tipo: 'REFUND', estado: 'error' }),
-    );
-    expect(deps.transacciones.registrar).not.toHaveBeenCalledWith(
-      expect.objectContaining({ tipo: 'REFUND', estado: 'error' }),
-      manager,
-    );
-    // la orden nunca pasó a 'reembolsada'
+      service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '5000' },
+        { apiKeyId: 'key-1' },
+        CLAVE,
+      ),
+    ).rejects.toThrow('no sabemos si la plata salió');
+    // "Sin confirmar" no es rechazo: el REFUND write-ahead sigue en `iniciada`
+    // (el reintento lo aclara por saldo) y el intento se anota sobre él, fuera
+    // de la tx que hizo rollback.
+    expect(filas).toEqual([
+      expect.objectContaining({ tipo: 'REFUND', estado: 'iniciada' }),
+    ]);
+    expect(
+      deps.transacciones.registrarIntentoSinConfirmar,
+    ).toHaveBeenCalledWith('t-1', 'tx-1', {
+      request: { url: 'tbk' },
+      response: { x: 1 },
+    });
     const estadosGuardados = ordenRepo.save.mock.calls.map((c) => c[0].estado);
     expect(estadosGuardados).not.toContain('reembolsada');
+  });
+
+  describe('reembolso idempotente con efecto externo (ADR-029)', () => {
+    const orden = {
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'conciliada',
+      monto: '100000',
+      moneda: 'CLP',
+      codigoOrden: 'O-1',
+      ventaId: 'venta-1',
+    };
+    const auth = {
+      transaccionId: 'tx-auth',
+      tipo: 'AUTHORIZATION',
+      estado: 'aprobada',
+      tenantPasarelaId: 'tp-1',
+      inscripcionId: 'insc-1',
+      monto: '100000',
+    };
+    const aprobado = {
+      aprobada: true,
+      codigoRespuesta: '0',
+      codigoAutorizacion: 'AUT-1',
+      tipoPago: 'NULLIFIED',
+      request: {},
+      response: {},
+    };
+    /** Un REFUND de $17.000 que quedó sin confirmar, de un intento anterior. */
+    const sinConfirmar = (estado = 'iniciada'): Fila => ({
+      transaccionId: 'tx-pend',
+      ordenId: 'orden-1',
+      tipo: 'REFUND',
+      estado,
+      monto: '17000.000000',
+      tenantPasarelaId: 'tp-1',
+      solicitudIdempotenteId: 'sol-viejo',
+      metadata: { devoluciones: [{ itemId: 'item-1', cantidad: '1' }] },
+    });
+    const saldo = (s: string | null, estadoProveedor = 'PARTIALLY_NULLIFIED') =>
+      provider.consultarEstado.mockResolvedValue({
+        estado: 'pagada',
+        estadoProveedor,
+        saldo: s,
+        response: { balance: s },
+      });
+    const reembolsar = (monto = '10000') =>
+      service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto },
+        { usuarioId: 'user-1' },
+        CLAVE,
+      );
+
+    beforeEach(() => {
+      ordenRepo.findOne.mockResolvedValue({ ...orden });
+      provider.reembolsar.mockResolvedValue(aprobado);
+      reembolsoHandler.onReembolsoAprobado.mockResolvedValue({
+        correccionVentaId: 'nc-1',
+      });
+    });
+
+    describe('veredictoPorSaldo', () => {
+      const d = (v: string) => new Decimal(v);
+      const consulta = (saldo: string | null, estadoProveedor: string) => ({
+        estado: 'pagada' as const,
+        estadoProveedor,
+        saldo,
+        response: {},
+      });
+      // Orden de 100.000, sin aprobados: esperado 100.000; el de 17.000 dejaría 83.000.
+      it.each([
+        ['83000', 'PARTIALLY_NULLIFIED', 'salio'],
+        ['100000', 'AUTHORIZED', 'no_salio'],
+        ['70000', 'PARTIALLY_NULLIFIED', 'no_se_puede'],
+      ])('saldo %s (%s) → %s', (s, e, esperado) => {
+        expect(
+          veredictoPorSaldo(consulta(s, e), d('100000'), d('83000'), d('0')),
+        ).toBe(esperado);
+      });
+
+      it('sin balance: anulada entera es "salió" solo si el REFUND la completaba', () => {
+        expect(
+          veredictoPorSaldo(
+            consulta(null, 'NULLIFIED'),
+            d('100000'),
+            d('0'),
+            d('0'),
+          ),
+        ).toBe('salio');
+        expect(
+          veredictoPorSaldo(
+            consulta(null, 'NULLIFIED'),
+            d('100000'),
+            d('83000'),
+            d('0'),
+          ),
+        ).toBe('no_se_puede');
+      });
+
+      it('sin balance: autorizada es "no salió" solo si no hubo ningún reembolso aprobado', () => {
+        expect(
+          veredictoPorSaldo(
+            consulta(null, 'AUTHORIZED'),
+            d('100000'),
+            d('83000'),
+            d('0'),
+          ),
+        ).toBe('no_salio');
+        // Con un aprobado previo el proveedor tendría que informar balance: su
+        // ausencia no prueba nada.
+        expect(
+          veredictoPorSaldo(
+            consulta(null, 'AUTHORIZED'),
+            d('90000'),
+            d('73000'),
+            d('10000'),
+          ),
+        ).toBe('no_se_puede');
+      });
+    });
+
+    it('tx1 relee SU REFUND: si otro camino lo cerró entre tx0 y tx1, NO llama al proveedor y responde lo que la fila dice', async () => {
+      idempotencia.ejecutarConEfectoExterno.mockImplementationOnce(
+        async (_s, pasos) => {
+          const preparado = await pasos.preparar('sol-1');
+          // El aclarado de otro request lo cerró "no salió" en la ventana.
+          Object.assign(filas[0], {
+            estado: 'rechazada',
+            resolucion: 'saldo',
+            metadata: { motivo: 'no salió' },
+          });
+          const r = await pasos.efectuar('sol-1', preparado);
+          if ('soltar' in r) throw r.soltar;
+          return { origen: 'efectuada', respuesta: r.respuesta };
+        },
+      );
+      conHistorial([auth]);
+
+      const res = await reembolsar();
+
+      expect(provider.reembolsar).not.toHaveBeenCalled();
+      expect(res.reembolsoAprobado).toBe(false);
+      expect(res.motivo).toBe('no salió');
+    });
+
+    it('si la re-verificación de tx1 rebota, el REFUND se cierra "no se envió" (nunca se borra) y se suelta el reclamo con ese error', async () => {
+      let soltado: unknown;
+      idempotencia.ejecutarConEfectoExterno.mockImplementationOnce(
+        async (_s, pasos) => {
+          const preparado = await pasos.preparar('sol-1');
+          // Entre tx0 y tx1 otro reembolso agotó el disponible.
+          historialBase.push({
+            transaccionId: 'tx-otro',
+            tipo: 'REFUND',
+            estado: 'aprobada',
+            monto: '95000',
+          });
+          const r = await pasos.efectuar('sol-1', preparado);
+          soltado = 'soltar' in r ? r.soltar : undefined;
+          if ('soltar' in r) throw r.soltar;
+          return { origen: 'efectuada', respuesta: r.respuesta };
+        },
+      );
+      conHistorial([auth]);
+
+      await expect(reembolsar()).rejects.toThrow('excede');
+
+      expect(soltado).toBeInstanceOf(BadRequestException);
+      expect(provider.reembolsar).not.toHaveBeenCalled();
+      expect(filas).toEqual([
+        expect.objectContaining({
+          estado: 'rechazada',
+          resolucion: 'no_enviado',
+          metadata: expect.objectContaining({
+            motivo: expect.stringContaining('No se envió'),
+          }),
+        }),
+      ]);
+    });
+
+    describe('el reintento de un intento sin confirmar (misma clave, reclamo sin respuesta)', () => {
+      const retomar = () =>
+        idempotencia.ejecutarConEfectoExterno.mockImplementationOnce(
+          async (_s, pasos) => {
+            const r = await pasos.resolverSinConfirmar('sol-viejo');
+            if ('soltar' in r) throw r.soltar;
+            return { origen: 'resuelta', respuesta: r.respuesta };
+          },
+        );
+
+      it('el saldo bajó en el monto: lo cierra aprobado "por saldo", deja su corrección con lo que pidió el intento, y se ve como "ya se había hecho"', async () => {
+        retomar();
+        // El aclarado previo de la orden también lo vería: acá se prueba el de
+        // `resolverSinConfirmar`, así que la orden llega sin pendientes ahí.
+        conHistorial([auth]);
+        jest
+          .spyOn(service as never, 'aclararSinConfirmarDeLaOrden')
+          .mockResolvedValueOnce(undefined as never);
+        historialBase.push(sinConfirmar());
+        saldo('83000');
+
+        const res = await reembolsar('17000');
+
+        expect(provider.reembolsar).not.toHaveBeenCalled();
+        expect(historialBase[1]).toMatchObject({
+          estado: 'aprobada',
+          resolucion: 'saldo',
+        });
+        expect(reembolsoHandler.onReembolsoAprobado).toHaveBeenCalledWith(
+          expect.objectContaining({
+            monto: '17000',
+            devoluciones: [{ itemId: 'item-1', cantidad: '1' }],
+          }),
+        );
+        expect(res).toMatchObject({
+          reembolsoAprobado: true,
+          repetida: true,
+          notaCreditoId: 'nc-1',
+        });
+      });
+
+      it('el saldo no cambió: lo cierra rechazado con el motivo, sin corrección y sin volver a llamar', async () => {
+        retomar();
+        conHistorial([auth, sinConfirmar()]);
+        jest
+          .spyOn(service as never, 'aclararSinConfirmarDeLaOrden')
+          .mockResolvedValueOnce(undefined as never);
+        saldo('100000', 'AUTHORIZED');
+
+        const res = await reembolsar('17000');
+
+        expect(provider.reembolsar).not.toHaveBeenCalled();
+        expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+        expect(res.reembolsoAprobado).toBe(false);
+        expect(res.repetida).toBeUndefined();
+        expect(res.motivo).toContain('Podés reembolsar de nuevo');
+      });
+
+      it('el saldo no cuadra: 409 al portal, y la fila sigue sin confirmar', async () => {
+        retomar();
+        conHistorial([auth, sinConfirmar()]);
+        jest
+          .spyOn(service as never, 'aclararSinConfirmarDeLaOrden')
+          .mockResolvedValueOnce(undefined as never);
+        saldo('60000');
+
+        await expect(reembolsar('17000')).rejects.toThrow(ConflictException);
+        expect(historialBase[1].estado).toBe('iniciada');
+      });
+    });
+
+    describe('otro reembolso con un pendiente en la orden (decisión 4)', () => {
+      it('primero aclara el pendiente; si salió, deja su corrección y recién después sale el nuevo', async () => {
+        conHistorial([auth, sinConfirmar('error')]);
+        saldo('83000');
+
+        const res = await reembolsar('10000');
+
+        expect(historialBase[1]).toMatchObject({
+          estado: 'aprobada',
+          resolucion: 'saldo',
+        });
+        expect(
+          provider.consultarEstado.mock.invocationCallOrder[0],
+        ).toBeLessThan(provider.reembolsar.mock.invocationCallOrder[0]);
+        // Dos correcciones: la del aclarado (17.000) y la del nuevo (10.000).
+        expect(
+          reembolsoHandler.onReembolsoAprobado.mock.calls.map(
+            (c) => (c[0] as { monto: string }).monto,
+          ),
+        ).toEqual(['17000', '10000']);
+        expect(res.reembolsoAprobado).toBe(true);
+      });
+
+      it('si no se puede aclarar, 409 en preparar: el nuevo no llega al proveedor ni escribe un REFUND (el rollback suelta la clave)', async () => {
+        conHistorial([auth, sinConfirmar()]);
+        provider.consultarEstado.mockRejectedValue(
+          new ProviderComunicacionError('caído', {}),
+        );
+
+        await expect(reembolsar('10000')).rejects.toThrow(
+          'Hay un reembolso de $17000 sin confirmar',
+        );
+        expect(provider.reembolsar).not.toHaveBeenCalled();
+        expect(deps.transacciones.registrar).not.toHaveBeenCalled();
+      });
+
+      it('con dos pendientes (filas de antes) no consulta: el saldo no diría cuál salió', async () => {
+        conHistorial([
+          auth,
+          sinConfirmar('error'),
+          { ...sinConfirmar('error'), transaccionId: 'tx-pend-2' },
+        ]);
+
+        await expect(reembolsar('10000')).rejects.toThrow(ConflictException);
+        expect(provider.consultarEstado).not.toHaveBeenCalled();
+      });
+    });
+
+    it('la corrección del pendiente aclarado es de quien lo PIDIÓ, no de quien lo aclaró', async () => {
+      conHistorial([
+        auth,
+        { ...sinConfirmar('iniciada'), usuarioId: 'user-a' },
+      ]);
+      saldo('83000');
+
+      await reembolsar('10000');
+
+      const porMonto = Object.fromEntries(
+        reembolsoHandler.onReembolsoAprobado.mock.calls.map((c) => {
+          const e = c[0] as { monto: string; usuarioId: string | null };
+          return [e.monto, e.usuarioId];
+        }),
+      );
+      expect(porMonto).toEqual({ '17000': 'user-a', '10000': 'user-1' });
+    });
+
+    it('el REFUND nuevo guarda quién lo pidió (usuario o llave de API)', async () => {
+      conHistorial([auth]);
+      await reembolsar('10000');
+      await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '5000' },
+        { apiKeyId: 'key-1' },
+        CLAVE,
+      );
+      expect(deps.transacciones.registrar.mock.calls.map((c) => c[0])).toEqual([
+        expect.objectContaining({ usuarioId: 'user-1', apiKeyId: null }),
+        expect.objectContaining({ usuarioId: null, apiKeyId: 'key-1' }),
+      ]);
+    });
+
+    it('si otro cerró el pendiente en el medio (compare-and-set perdido), el aclarado no deja corrección', async () => {
+      conHistorial([auth, sinConfirmar()]);
+      saldo('83000');
+      // Otro escritor la cerró justo antes: el UPDATE no encuentra la fila.
+      deps.transacciones.resolverReembolso.mockImplementationOnce(() => {
+        Object.assign(historialBase[1], { estado: 'aprobada' });
+        return Promise.resolve(false);
+      });
+
+      await reembolsar('10000');
+
+      expect(
+        reembolsoHandler.onReembolsoAprobado.mock.calls.map(
+          (c) => (c[0] as { monto: string }).monto,
+        ),
+      ).toEqual(['10000']);
+    });
+
+    describe('el admin lo marca a mano tras revisar el portal', () => {
+      const marcar = (salio: boolean, codigoAutorizacion?: string) =>
+        service.resolverReembolsoAMano(
+          't-1',
+          'orden-1',
+          'tx-pend',
+          { salio, codigoAutorizacion },
+          'admin-2',
+        );
+
+      it('"Salió": aprobado a mano con el código del portal, y su corrección es de quien lo pidió', async () => {
+        conHistorial([auth, { ...sinConfirmar(), usuarioId: 'user-a' }]);
+
+        const res = await marcar(true, '1213');
+
+        expect(deps.transacciones.resolverReembolso).toHaveBeenCalledWith(
+          't-1',
+          'tx-pend',
+          expect.objectContaining({
+            estado: 'aprobada',
+            resolucion: 'manual',
+            resueltaPor: 'admin-2',
+            codigoAutorizacion: '1213',
+          }),
+        );
+        expect(reembolsoHandler.onReembolsoAprobado).toHaveBeenCalledWith(
+          expect.objectContaining({ monto: '17000', usuarioId: 'user-a' }),
+        );
+        expect(res).toMatchObject({
+          reembolsoAprobado: true,
+          notaCreditoId: 'nc-1',
+        });
+        expect(provider.reembolsar).not.toHaveBeenCalled();
+        expect(provider.consultarEstado).not.toHaveBeenCalled();
+      });
+
+      it('"No salió": rechazado a mano, sin corrección, y la orden queda sin pendientes', async () => {
+        conHistorial([auth, sinConfirmar()]);
+
+        const res = await marcar(false);
+
+        expect(historialBase[1]).toMatchObject({
+          estado: 'rechazada',
+          resolucion: 'manual',
+        });
+        expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+        expect(res.reembolsoAprobado).toBe(false);
+      });
+
+      it('uno ya resuelto da 409 y no toca nada; si lo cierra otro en el medio, también', async () => {
+        conHistorial([auth, sinConfirmar('aprobada')]);
+        await expect(marcar(false)).rejects.toThrow('ya estaba resuelto');
+
+        conHistorial([auth, sinConfirmar()]);
+        deps.transacciones.resolverReembolso.mockResolvedValueOnce(false);
+        await expect(marcar(true, '1213')).rejects.toThrow(ConflictException);
+        expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+      });
+
+      it('"Salió" no puede pasar el monto de la orden', async () => {
+        conHistorial([
+          auth,
+          {
+            transaccionId: 'tx-ok',
+            tipo: 'REFUND',
+            estado: 'aprobada',
+            monto: '90000',
+          },
+          sinConfirmar(),
+        ]);
+        await expect(marcar(true, '1213')).rejects.toThrow(BadRequestException);
+        expect(deps.transacciones.resolverReembolso).not.toHaveBeenCalled();
+      });
+    });
+
+    it('la reproducción agrega la corrección que el REFUND tiene HOY, sin volver a crearla', async () => {
+      idempotencia.ejecutarConEfectoExterno.mockResolvedValueOnce({
+        origen: 'reproducida',
+        respuesta: {
+          ordenId: 'orden-1',
+          ventaId: 'venta-1',
+          reembolsoAprobado: true,
+          reembolso: { transaccionId: 'tx-r' },
+          repetida: true,
+        },
+      });
+      conHistorial([
+        auth,
+        {
+          transaccionId: 'tx-r',
+          tipo: 'REFUND',
+          estado: 'aprobada',
+          monto: '17000',
+          correccionVentaId: 'nc-9',
+        },
+      ]);
+
+      const res = await reembolsar('17000');
+
+      expect(res).toMatchObject({ repetida: true, notaCreditoId: 'nc-9' });
+      expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+    });
+
+    it('la reproducción de un REFUND aprobado sin corrección lo dice, y tampoco la crea', async () => {
+      idempotencia.ejecutarConEfectoExterno.mockResolvedValueOnce({
+        origen: 'reproducida',
+        respuesta: {
+          ordenId: 'orden-1',
+          ventaId: 'venta-1',
+          reembolsoAprobado: true,
+          reembolso: { transaccionId: 'tx-r' },
+          repetida: true,
+        },
+      });
+      conHistorial([
+        auth,
+        {
+          transaccionId: 'tx-r',
+          tipo: 'REFUND',
+          estado: 'aprobada',
+          monto: '17000',
+          correccionVentaId: null,
+        },
+      ]);
+
+      const res = await reembolsar('17000');
+
+      expect(res.correccionPendiente).toBe(true);
+      expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+    });
+
+    it('la huella es la misma con otro formato de cantidad y las devoluciones en otro orden', async () => {
+      conHistorial([auth]);
+      const huellas: string[] = [];
+      idempotencia.ejecutarConEfectoExterno.mockImplementation(
+        (sol: { huella: string }) => {
+          huellas.push(sol.huella);
+          return Promise.resolve({ origen: 'reproducida', respuesta: {} });
+        },
+      );
+      const a = { itemId: 'a', cantidad: '1' };
+      const b = { itemId: 'b', cantidad: '2' };
+      await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '17000', devoluciones: [a, b] },
+        { usuarioId: 'user-1' },
+        CLAVE,
+      );
+      await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '17000', devoluciones: [{ ...b, cantidad: '2.00' }, a] },
+        { usuarioId: 'user-1' },
+        CLAVE,
+      );
+      expect(huellas[0]).toBe(huellas[1]);
+    });
   });
 
   it('verificar cierra una orden en_proceso según el proveedor', async () => {
@@ -831,7 +1518,7 @@ describe('CobrosService', () => {
       fechaExpiracion: new Date(Date.now() - 60_000),
       metadata: {},
     });
-    deps.transacciones.listarPorOrden.mockResolvedValue([
+    conHistorial([
       { transaccionId: 'tx-1', tipo: 'AUTHORIZATION', estado: 'error' },
     ]);
     const res = await service.obtenerOrden('t-1', 'orden-1');

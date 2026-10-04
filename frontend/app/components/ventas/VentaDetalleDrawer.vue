@@ -3,6 +3,10 @@ import Decimal from 'decimal.js'
 import type { TableColumn } from '@nuxt/ui'
 import { formatCantidadLinea } from '~/utils/cantidad-presentacion'
 import { colorCondicion, etiquetaCondicion } from '~/composables/useUnidadesSerie'
+import {
+  colorEstadoTransaccion,
+  etiquetaEstadoTransaccion,
+} from '~/composables/useReembolsoPasarela'
 import { itemsParaBoletaImpresion } from '~/utils/ticket-builder'
 import type { BoletaVenta } from '~/types/boleta'
 import {
@@ -401,15 +405,6 @@ const leyendaReembolso = computed(() => {
   if (total.lte(0)) return null
   return total.gte(venta.value.totalFinal) ? 'Reembolsada totalmente' : 'Reembolsada parcialmente'
 })
-
-function reembolsoColor(estado: string): 'success' | 'error' | 'warning' | 'neutral' {
-  const map: Record<string, 'success' | 'error' | 'warning'> = {
-    aprobada: 'success',
-    rechazada: 'error',
-    error: 'warning',
-  }
-  return map[estado] ?? 'neutral'
-}
 
 const { estadoColor, estadoLabel } = useEstadoVenta()
 
@@ -1537,7 +1532,7 @@ function onNcOtrosDatos() {
             >
               <span class="text-muted">{{ formatFecha(r.fecha) }}</span>
               <span class="font-mono">{{ formatMonto(r.monto) }}</span>
-              <UBadge :color="reembolsoColor(r.estado)" :label="r.estado" variant="subtle" size="xs" />
+              <UBadge :color="colorEstadoTransaccion(r.estado)" :label="etiquetaEstadoTransaccion(r.estado)" variant="subtle" size="xs" />
               <span class="font-mono text-xs text-muted">{{ r.codigoOrden }}</span>
             </li>
           </ul>

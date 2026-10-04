@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { MonedasModule } from '../monedas/monedas.module';
+import { IdempotenciaModule } from '../idempotencia/idempotencia.module';
 import { Pasarela } from './entities/pasarela.entity';
 import { TenantPasarela } from './entities/tenant-pasarela.entity';
 import { PasarelaApiKey } from './entities/pasarela-api-key.entity';
@@ -35,7 +36,8 @@ import { PasarelaRetornoController } from './controllers/pasarela-retorno.contro
  * `MonedasModule` NO rompe esa regla: es catálogo/configuración, no negocio, y
  * entra por una razón concreta —que la escala del monto de una orden salga de
  * `moneda.decimales` como en el resto del sistema, en vez de una segunda regla
- * escrita a mano acá adentro—.
+ * escrita a mano acá adentro—. `IdempotenciaModule` tampoco: es infraestructura
+ * (la `Idempotency-Key` del reembolso, ADR-029), no negocio.
  */
 @Module({
   imports: [
@@ -49,6 +51,7 @@ import { PasarelaRetornoController } from './controllers/pasarela-retorno.contro
       PasarelaTransaccion,
     ]),
     MonedasModule,
+    IdempotenciaModule,
   ],
   controllers: [
     PasarelaAdminController,

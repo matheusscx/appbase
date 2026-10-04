@@ -1,8 +1,10 @@
 import {
   BadGatewayException,
   BadRequestException,
+  ConflictException,
   HttpException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
@@ -17,7 +19,17 @@ import {
   PasarelaOrden,
 } from '../entities/pasarela-orden.entity';
 import { CreateCobroDto } from '../dto/create-cobro.dto';
-import { CreateReembolsoDto } from '../dto/create-reembolso.dto';
+import {
+  CreateReembolsoDto,
+  DevolucionLineaDto,
+} from '../dto/create-reembolso.dto';
+import { ResolverReembolsoDto } from '../dto/resolver-reembolso.dto';
+import { PasarelaTransaccion } from '../entities/pasarela-transaccion.entity';
+import {
+  IdempotenciaService,
+  type ActorIdempotente,
+} from '../../idempotencia/idempotencia.service';
+import { huellaDe } from '../../idempotencia/huella';
 import type { QueryOrdenesDto } from '../dto/query-ordenes.dto';
 import { InscripcionesService } from './inscripciones.service';
 import { TenantPasarelaService } from './tenant-pasarela.service';
@@ -28,6 +40,7 @@ import { ReembolsoCallbackRegistry } from './reembolso-callback.registry';
 import {
   ProviderComunicacionError,
   ResultadoCobro,
+  type ResultadoEstado,
 } from '../providers/payment-provider.interface';
 import type { PaginatedResponse } from '../../../common/interfaces/paginated-response.interface';
 import {
@@ -60,13 +73,65 @@ interface OrdenListRow {
 const PASARELA_V1 = 'oneclick';
 const EXPIRACION_ORDEN_MS = 2 * 60 * 60 * 1000; // 2 horas
 
-/** Datos mínimos para auditar un reembolso con timeout fuera de la transacción. */
-interface CtxAuditoriaReembolso {
+/** Un REFUND en estos estados es "sin confirmar": el proveedor pudo haber devuelto la plata. */
+const SIN_CONFIRMAR = ['iniciada', 'error'];
+
+const MENSAJE_REEMBOLSO_OTROS_DATOS =
+  'Este reembolso ya se había hecho con otros datos. Revisá la orden antes de reembolsar de nuevo.';
+
+const MENSAJE_REEMBOLSO_SIN_CONFIRMAR =
+  'Transbank no confirmó el reembolso: no sabemos si la plata salió. Volvé a confirmar y el sistema le va a consultar el saldo a Transbank, sin devolverla dos veces.';
+
+const MOTIVO_NO_SALIO =
+  'Transbank no hizo el reembolso: el saldo de la tarjeta no cambió. Podés reembolsar de nuevo.';
+
+const MOTIVO_NO_SALIO_MANUAL =
+  'Marcado "no salió" después de revisar el portal de Transbank.';
+
+function mensajeNoSePuedeAclarar(monto: string): string {
+  return `Hay un reembolso de $${new Decimal(monto).toString()} sin confirmar en esta orden y Transbank no pudo aclarar si salió. Revisalo en el portal de Transbank antes de volver a intentar.`;
+}
+
+/**
+ * Qué dice el saldo del proveedor de un REFUND sin confirmar (ADR-029):
+ * `esperado` es lo que quedaría sin anular sin ese REFUND, `despues` lo que
+ * quedaría con él. Sin `balance` (el proveedor no lo informa si no hubo
+ * anulaciones) decide el estado: anulada entera, o autorizada sin ningún
+ * reembolso aprobado. Lo demás no se puede aclarar acá.
+ */
+export function veredictoPorSaldo(
+  consulta: ResultadoEstado,
+  esperado: Decimal,
+  despues: Decimal,
+  aprobado: Decimal,
+): 'salio' | 'no_salio' | 'no_se_puede' {
+  if (consulta.saldo !== null) {
+    const saldo = new Decimal(consulta.saldo);
+    if (saldo.eq(despues)) return 'salio';
+    if (saldo.eq(esperado)) return 'no_salio';
+    return 'no_se_puede';
+  }
+  const estado = consulta.estadoProveedor;
+  if (despues.lte(0) && (estado === 'NULLIFIED' || estado === 'REVERSED'))
+    return 'salio';
+  if (aprobado.isZero() && (estado === 'AUTHORIZED' || estado === 'CAPTURED'))
+    return 'no_salio';
+  return 'no_se_puede';
+}
+
+/** Lo que tx0 le deja a tx1. */
+interface PreparadoReembolso {
+  refundId: string;
   tenantPasarelaId: string;
-  inscripcionId: string | null;
-  transaccionPadreId: string;
-  moneda: string;
-  codigoOrden: string;
+}
+
+/** Lo que el hook post-commit necesita de un REFUND aprobado. */
+interface CtxHookReembolso {
+  orden: PasarelaOrden;
+  usuarioId: string | null;
+  transaccionId: string;
+  monto: string;
+  devoluciones: DevolucionLineaDto[];
 }
 
 @Injectable()
@@ -84,6 +149,7 @@ export class CobrosService {
     private readonly providerFactory: ProviderFactory,
     private readonly reembolsoRegistry: ReembolsoCallbackRegistry,
     private readonly monedas: MonedasService,
+    private readonly idempotencia: IdempotenciaService,
   ) {}
 
   /** buyOrder ≤26 chars alfanumérico (límite Oneclick): 'O' + timestamp36 + 8 random. */
@@ -238,213 +304,806 @@ export class CobrosService {
     return this.toPublico(orden);
   }
 
+  /**
+   * Un reembolso por intento, aunque el admin (o la app de la llave de API)
+   * confirme dos veces: **at-most-once** contra el proveedor (ADR-029).
+   *
+   * El proveedor no está en la transacción y Transbank no acepta clave de
+   * idempotencia, así que el reclamo de la clave y el REFUND en `iniciada` se
+   * commitean ANTES de llamar (`IdempotenciaService.ejecutarConEfectoExterno`):
+   * - **aclarar**: si la orden tiene un REFUND sin confirmar, se aclara antes
+   *   de reclamar (consulta de saldo); si no se puede, 409. Con como mucho uno
+   *   sin confirmar por orden, el saldo dice cuál salió;
+   * - **preparar** (tx0): chequeos que rebotan con 400 sin dejar rastro, y el
+   *   REFUND write-ahead;
+   * - **efectuar** (tx1): con el reclamo y la orden bloqueados, relee SU
+   *   REFUND, re-verifica, llama al proveedor y cierra la fila;
+   * - **resolverSinConfirmar**: el reintento de un intento que no llegó a
+   *   confirmarse responde el estado final de su REFUND, aclarándolo si hace
+   *   falta. Nunca vuelve a llamar a `reembolsar` del proveedor.
+   */
   async reembolsar(
     tenantId: string,
     ordenId: string,
     dto: CreateReembolsoDto,
-    usuarioId?: string,
-  ) {
+    actor: ActorIdempotente,
+    clave: string,
+  ): Promise<Record<string, unknown>> {
     if (new Decimal(dto.monto).lte(0))
       throw new BadRequestException('El monto debe ser mayor a cero');
-    // Mismo borde que en `cobrar`, y por la misma razón: acá el rollback de la
-    // transacción evita la orden huérfana, pero sin esto el 400 sale de adentro
-    // del proveedor con un mensaje que nombra a Transbank, no al monto.
-    //
-    // ⚠️ Va contra `MONEDA_ORDEN_V1` y no contra `orden.moneda`, aunque acá la
-    // orden existe: la moneda de una orden la escribe ESTE mismo código desde
-    // la constante, así que hoy no pueden diferir. La razón de validarlo antes
-    // de abrir la transacción es que un monto mal formado da un 400 sin abrirla,
-    // sin tomar el `FOR UPDATE` y sin escribir nada (leer, lee: el chequeo hace
-    // su propio SELECT sobre `moneda`).
-    //
-    // El día que la moneda de la orden deje de salir de la constante, esto se
-    // mueve adentro de la transacción y pasa a leer `orden.moneda` — y es
-    // barato: `Db.query` resuelve el manager de la transacción activa
-    // (ADR-020), así que NO abre una segunda conexión. Lo único que la abriría
-    // es `db.sinTransaccion`, que este camino no usa ni necesita.
+    // Mismo borde que en `cobrar`, y por la misma razón: sin esto el 400 sale
+    // de adentro del proveedor con un mensaje que nombra a Transbank, no al
+    // monto. Va contra `MONEDA_ORDEN_V1` y no contra `orden.moneda`, aunque acá
+    // la orden existe: la moneda de una orden la escribe ESTE código desde la
+    // constante, así que hoy no pueden diferir, y validarlo antes no abre
+    // ninguna transacción. El día que la moneda de la orden deje de salir de la
+    // constante, esto pasa a `preparar` y lee `orden.moneda` (`Db.query`
+    // resuelve el manager activo: no abre otra conexión).
     await this.monedas.validarEscalaDeMoneda(dto.monto, MONEDA_ORDEN_V1);
+    const usuarioId = 'usuarioId' in actor ? actor.usuarioId : null;
 
-    // Todo el read (disponible) → proveedor → write corre bajo un lock pesimista
-    // de la fila de la orden (SELECT ... FOR UPDATE): dos reembolsos concurrentes
-    // sobre la misma orden se serializan y no pueden exceder el total juntos.
-    // Trade-off consciente: el lock se sostiene durante la llamada HTTP al
-    // proveedor; aceptable porque los reembolsos son de baja frecuencia.
+    // Decisión 4 del owner: otro reembolso de la orden espera a que el que
+    // quedó sin confirmar se aclare. Va en su propia transacción, antes del
+    // reclamo, para que un 400 posterior (el disponible) no se lleve puesto el
+    // aclarado.
     //
-    // Contexto capturado dentro de la tx para poder auditar un timeout DESPUÉS
-    // de que la tx haga rollback y libere el lock (ver el catch de más abajo).
-    // Sin inicializador: TS conserva el tipo declarado para vars asignadas en
-    // un closure (con `= null` lo estrecharía a `null` en el catch).
-    let ctxTimeout: CtxAuditoriaReembolso | undefined;
-    // Orden, aprobación y REFUND capturados para el hook post-commit de la
-    // corrección: el hook corre DESPUÉS del commit (correrlo dentro alargaría el
-    // FOR UPDATE durante la transacción de ventas y, si la corrección fallara,
-    // revertiría un reembolso que el proveedor ya ejecutó). El id del REFUND es
-    // lo que el hook liga con la corrección que crea.
-    let ctxHook:
-      | { orden: PasarelaOrden; aprobada: boolean; transaccionId: string }
-      | undefined;
+    // Si NO se puede aclarar, el 409 no sale de acá: el reclamo sigue mandando
+    // (ADR-026). El reintento de un reembolso que ya salió tiene que reproducir
+    // aunque la orden tenga OTRO sin confirmar, y un intento nuevo rebota con
+    // el mismo 409 en `preparar` (`verificarReembolsable`), sin reclamar.
+    await this.aclararSinConfirmarDeLaOrden(tenantId, ordenId, usuarioId).catch(
+      (e: unknown) => {
+        if (!(e instanceof ConflictException)) throw e;
+      },
+    );
+
+    // El REFUND al que el proveedor pudo haber devuelto la plata sin que nos
+    // enteremos: si la llamada falla por comunicación, se anota sobre él.
+    let llamado: string | undefined;
+    // Lo que el hook post-commit necesita: solo si ESTE request cerró un
+    // REFUND aprobado (la reproducción no escribe, ADR-026).
+    let paraElHook: CtxHookReembolso | undefined;
 
     try {
-      const publico = await this.db.transaccion(async (manager) => {
-        const orden = await manager.findOne(PasarelaOrden, {
-          where: { ordenId, tenantId },
-          lock: { mode: 'pessimistic_write' },
-        });
-        if (!orden) throw new NotFoundException('Orden no encontrada');
-        // 'conciliada' = pagada + venta materializada (checkout online): también reembolsable
-        if (!['pagada', 'conciliada', 'reembolsada'].includes(orden.estado))
-          throw new BadRequestException(
-            `No se puede reembolsar una orden ${orden.estado}`,
-          );
-
-        // Leído tras adquirir el lock: ve los REFUND ya commiteados por un
-        // reembolso concurrente previo (READ COMMITTED).
-        const historial = await this.transacciones.listarPorOrden(
-          tenantId,
-          ordenId,
-          manager,
-        );
-        const autorizacion = historial.find(
-          (t) => t.tipo === 'AUTHORIZATION' && t.estado === 'aprobada',
-        );
-        if (!autorizacion)
-          throw new BadRequestException(
-            'La orden no tiene una autorización aprobada',
-          );
-
-        const yaReembolsado = historial
-          .filter((t) => t.tipo === 'REFUND' && t.estado === 'aprobada')
-          .reduce((acc, t) => acc.plus(t.monto ?? '0'), new Decimal(0));
-        const disponible = new Decimal(orden.monto).minus(yaReembolsado);
-        if (new Decimal(dto.monto).gt(disponible))
-          throw new BadRequestException(
-            `El monto excede lo disponible para reembolso (${disponible.toString()})`,
-          );
-
-        // El tope por pago, del lado de ventas: la nota "por el pago" de Webpay
-        // hecha desde el POS ya devolvió esa plata, y el proveedor la sacaría de
-        // nuevo. Va ANTES de llamar al proveedor (después ya no hay vuelta atrás) y
-        // bajo el lock de la orden que ya tenemos.
-        //
-        // ⚠️ Orden de bloqueo: orden → venta, siempre. Medido: ningún camino toma
-        // la venta y después la orden (la venta online se crea y COMMITEA antes de
-        // que el dispatcher o `vincularVenta` toquen la orden; ventas solo lee
-        // `pasarela_*` sin lock), así que no hay ciclo. Quien algún día toque la
-        // orden dentro de una transacción que ya tiene `FOR UPDATE` sobre la venta
-        // cierra el ciclo. Sin handler (ventas no registrado) no hay lado de ventas
-        // que topar: el aviso de `aplicarPostReembolso` ya lo dice.
-        if (orden.ventaId)
-          await this.reembolsoRegistry.get()?.exigirTopeDelReembolso(manager, {
-            tenantId,
-            ventaId: orden.ventaId,
-            monto: dto.monto,
-          });
-
-        // Resolver el proveedor de la orden por la configuración con que se cobró
-        // (la AUTHORIZATION original), no por la activa del tenant: reembolsa bajo
-        // la misma pasarela aunque el tenant haya cambiado de activa. Sirve para
-        // cualquier flujo (Oneclick o Webpay Plus) vía la interfaz común.
-        const { pasarela, cred } =
-          await this.tenantPasarelaService.resolverPorId(
-            autorizacion.tenantPasarelaId,
-          );
-
-        // Guardar el contexto de auditoría ANTES de llamar al proveedor, por si
-        // hace timeout: el rastro se registra fuera de la tx (catch de abajo).
-        ctxTimeout = {
-          tenantPasarelaId: autorizacion.tenantPasarelaId,
-          inscripcionId: autorizacion.inscripcionId,
-          transaccionPadreId: autorizacion.transaccionId,
-          moneda: orden.moneda,
-          codigoOrden: orden.codigoOrden,
-        };
-
-        // Un ProviderComunicacionError se propaga fuera de la transacción: NO se
-        // audita aquí dentro. Registrar en pasarela_transacciones toma FOR KEY
-        // SHARE sobre la fila de la orden, que conflictúa con el FOR UPDATE que
-        // esta misma tx ya sostiene → auto-bloqueo (el detector de deadlock de PG
-        // no lo ve porque esperamos en Node). El rollback libera el lock primero;
-        // el rastro se escribe recién entonces, en una conexión normal.
-        const resultado = await this.providerFactory
-          .getReembolsable(pasarela.codigo)
-          .reembolsar(cred, {
-            codigoOrden: orden.codigoOrden,
-            monto: dto.monto,
-            tokenProveedor: orden.tokenProveedor,
-          });
-
-        const txRefund = await this.transacciones.registrar(
+      const { origen, respuesta } =
+        await this.idempotencia.ejecutarConEfectoExterno<
+          PreparadoReembolso,
+          Record<string, unknown>
+        >(
           {
             tenantId,
-            ordenId,
-            tenantPasarelaId: autorizacion.tenantPasarelaId,
-            inscripcionId: autorizacion.inscripcionId,
-            transaccionPadreId: autorizacion.transaccionId,
-            tipo: 'REFUND',
-            estado: resultado.aprobada ? 'aprobada' : 'rechazada',
-            monto: dto.monto,
-            moneda: orden.moneda,
-            codigoOrden: orden.codigoOrden,
-            codigoRespuesta: resultado.codigoRespuesta,
-            codigoAutorizacion: resultado.codigoAutorizacion,
-            tipoPago: resultado.tipoPago,
-            request: resultado.request,
-            response: resultado.response,
+            actor,
+            clave,
+            operacion: 'pasarela.reembolso',
+            // Lo que el request pidió, campo por campo; la ruta del admin y la
+            // de la API arman la misma. El monto va normalizado ("17000" y
+            // "17000.00" son el mismo reembolso) y las devoluciones ordenadas:
+            // los mismos ítems en otro orden son el mismo pedido.
+            huella: huellaDe('pasarela.reembolso', {
+              ordenId,
+              monto: new Decimal(dto.monto).toString(),
+              devoluciones: [...(dto.devoluciones ?? [])]
+                .map((d) => ({
+                  itemId: d.itemId,
+                  cantidad: new Decimal(d.cantidad).toString(),
+                  reponerStock: d.reponerStock ?? null,
+                }))
+                .sort((a, b) =>
+                  a.itemId === b.itemId
+                    ? a.cantidad.localeCompare(b.cantidad)
+                    : a.itemId.localeCompare(b.itemId),
+                ),
+            }),
+            mensajeOtrosDatos: MENSAJE_REEMBOLSO_OTROS_DATOS,
           },
-          manager,
+          {
+            preparar: (solicitudId) =>
+              this.prepararReembolso(
+                tenantId,
+                ordenId,
+                dto,
+                solicitudId,
+                actor,
+              ),
+            efectuar: async (_solicitudId, preparado) => {
+              const r = await this.efectuarReembolso(
+                tenantId,
+                ordenId,
+                dto,
+                preparado,
+                usuarioId,
+                () => {
+                  llamado = preparado.refundId;
+                },
+              );
+              if ('hook' in r) paraElHook = r.hook;
+              return r.resultado;
+            },
+            resolverSinConfirmar: async (solicitudId) => {
+              const r = await this.resolverReembolsoSinConfirmar(
+                tenantId,
+                solicitudId,
+                usuarioId,
+              );
+              if ('hook' in r) paraElHook = r.hook;
+              return { respuesta: r.respuesta };
+            },
+            cuerpoOtrosDatos: async (solicitudId) => ({
+              ordenId:
+                (
+                  await this.transacciones.reembolsoDeSolicitud(
+                    tenantId,
+                    solicitudId,
+                  )
+                )?.ordenId ?? null,
+            }),
+          },
         );
 
-        if (
-          resultado.aprobada &&
-          yaReembolsado.plus(dto.monto).gte(orden.monto)
-        ) {
-          orden.estado = 'reembolsada';
-          await manager.save(orden);
-        }
-        ctxHook = {
-          orden,
-          aprobada: resultado.aprobada,
-          transaccionId: txRefund.transaccionId,
-        };
-        return this.toPublico(orden, {
-          reembolsoAprobado: resultado.aprobada,
-          reembolso: {
-            transaccionId: txRefund.transaccionId,
-            tipo: txRefund.tipo,
-            estado: txRefund.estado,
-            monto: txRefund.monto,
-            codigoAutorizacion: txRefund.codigoAutorizacion,
-            codigoRespuesta: txRefund.codigoRespuesta,
-            fechaTransaccion: txRefund.fechaTransaccion,
-          },
-        });
-      });
-      return await this.aplicarPostReembolso(publico, dto, ctxHook, usuarioId);
+      if (origen === 'reproducida')
+        return await this.conCorreccionActual(tenantId, respuesta);
+      // Sin hook propio, el REFUND lo cerró otro camino (típicamente el
+      // aclarado previo de la orden, que ya dejó su corrección): se informa la
+      // que tiene hoy, como en la reproducción.
+      const final = paraElHook
+        ? await this.aplicarPostReembolso(respuesta, paraElHook)
+        : await this.conCorreccionActual(tenantId, respuesta);
+      // Un intento sin confirmar que resultó aprobado se ve como la primera
+      // respuesta perdida: "ya se había hecho" (decisión 1 del owner).
+      return origen === 'resuelta' && final.reembolsoAprobado === true
+        ? { ...final, repetida: true }
+        : final;
     } catch (e) {
-      if (e instanceof ProviderComunicacionError && ctxTimeout) {
-        // La tx ya hizo rollback y liberó el FOR UPDATE: ahora sí registramos el
-        // rastro del intento en una conexión normal, sin auto-bloqueo. Mismo
-        // invariante que cobrar(): un timeout no es rechazo → 502, orden intacta.
-        await this.transacciones.registrar({
+      if (e instanceof ProviderComunicacionError && llamado) {
+        // tx1 hizo rollback y soltó los locks: el REFUND sigue en `iniciada`
+        // (commiteado en tx0) y el reclamo sin respuesta. Se anota lo que se
+        // mandó y lo que volvió; el estado no cambia: no es un rechazo.
+        await this.transacciones.registrarIntentoSinConfirmar(
           tenantId,
-          ordenId,
-          tenantPasarelaId: ctxTimeout.tenantPasarelaId,
-          inscripcionId: ctxTimeout.inscripcionId,
-          transaccionPadreId: ctxTimeout.transaccionPadreId,
-          tipo: 'REFUND',
-          estado: 'error',
-          monto: dto.monto,
-          moneda: ctxTimeout.moneda,
-          codigoOrden: ctxTimeout.codigoOrden,
-          request: e.request,
-          response: e.response,
-        });
-        throw new BadGatewayException(
-          `No se pudo confirmar el reembolso (orden ${ordenId}); verifique el estado con POST /pasarela/api/ordenes/${ordenId}/verificar`,
+          llamado,
+          { request: e.request, response: e.response },
         );
+        throw new BadGatewayException(MENSAJE_REEMBOLSO_SIN_CONFIRMAR);
       }
       throw e;
     }
+  }
+
+  /**
+   * tx0: lo que puede rebotar con 400 antes de comprometer nada, y el REFUND
+   * en `iniciada` (write-ahead) ligado al reclamo.
+   */
+  private async prepararReembolso(
+    tenantId: string,
+    ordenId: string,
+    dto: CreateReembolsoDto,
+    solicitudId: string,
+    actor: ActorIdempotente,
+  ): Promise<PreparadoReembolso> {
+    const { orden, autorizacion } = await this.verificarReembolsable(
+      tenantId,
+      ordenId,
+      dto.monto,
+      null,
+    );
+    const refund = await this.transacciones.registrar({
+      tenantId,
+      ordenId,
+      tenantPasarelaId: autorizacion.tenantPasarelaId,
+      inscripcionId: autorizacion.inscripcionId,
+      transaccionPadreId: autorizacion.transaccionId,
+      solicitudIdempotenteId: solicitudId,
+      // Quién lo pidió: la corrección se le atribuye aunque lo aclare otro.
+      usuarioId: 'usuarioId' in actor ? actor.usuarioId : null,
+      apiKeyId: 'apiKeyId' in actor ? actor.apiKeyId : null,
+      tipo: 'REFUND',
+      estado: 'iniciada',
+      monto: dto.monto,
+      moneda: orden.moneda,
+      codigoOrden: orden.codigoOrden,
+      // Si la respuesta se pierde y el reembolso se aclara por saldo desde
+      // OTRO request, la corrección necesita lo que este pidió.
+      metadata: { devoluciones: dto.devoluciones ?? [] },
+    });
+    return {
+      refundId: refund.transaccionId,
+      tenantPasarelaId: autorizacion.tenantPasarelaId,
+    };
+  }
+
+  /**
+   * tx1, con la fila del reclamo bloqueada: bloquea la orden, relee SU
+   * REFUND, re-verifica, llama al proveedor y cierra la fila.
+   */
+  private async efectuarReembolso(
+    tenantId: string,
+    ordenId: string,
+    dto: CreateReembolsoDto,
+    preparado: PreparadoReembolso,
+    usuarioId: string | null,
+    alLlamar: () => void,
+  ): Promise<{
+    resultado: { respuesta: Record<string, unknown> } | { soltar: Error };
+    hook?: CtxHookReembolso;
+  }> {
+    const bloqueada = await this.bloquearOrden(tenantId, ordenId);
+    // Entre el COMMIT de tx0 y este lock la orden estuvo libre: otro reembolso
+    // pudo aclarar este REFUND por saldo ("no salió") y cerrarlo. Si ya no está
+    // en `iniciada`, llamar ahora devolvería plata con la fila diciendo otra
+    // cosa: se responde lo que la fila dice.
+    const propio = await this.refundDeLaOrden(
+      tenantId,
+      ordenId,
+      preparado.refundId,
+    );
+    if (propio.estado !== 'iniciada')
+      return {
+        resultado: { respuesta: this.publicoDeReembolso(bloqueada, propio) },
+      };
+
+    // Lo de tx0 pudo cambiar en el medio (la carrera rara): si ya no se puede,
+    // el REFUND se cierra "no se envió" y la clave se suelta —el mismo pedido
+    // corregido vuelve a entrar—. Nunca se borra la fila (invariante 3).
+    let verificado: Awaited<ReturnType<CobrosService['verificarReembolsable']>>;
+    try {
+      verificado = await this.verificarReembolsable(
+        tenantId,
+        ordenId,
+        dto.monto,
+        preparado.refundId,
+      );
+    } catch (e) {
+      if (!(e instanceof HttpException)) throw e;
+      const cerrada = await this.transacciones.resolverReembolso(
+        tenantId,
+        propio.transaccionId,
+        {
+          estado: 'rechazada',
+          resolucion: 'no_enviado',
+          resueltaPor: usuarioId,
+          metadata: { motivo: `No se envió: ${e.message}` },
+        },
+      );
+      if (!cerrada)
+        return {
+          resultado: {
+            respuesta: this.publicoDeReembolso(
+              bloqueada,
+              await this.refundDeLaOrden(
+                tenantId,
+                ordenId,
+                propio.transaccionId,
+              ),
+            ),
+          },
+        };
+      return { resultado: { soltar: e } };
+    }
+
+    const { orden, yaReembolsado } = verificado;
+    const { pasarela, cred } = await this.tenantPasarelaService.resolverPorId(
+      preparado.tenantPasarelaId,
+    );
+    alLlamar();
+    // Un ProviderComunicacionError sale de la transacción: tx1 hace rollback,
+    // el REFUND queda en `iniciada` y el reclamo sin respuesta —"sin
+    // confirmar"—, y el catch de `reembolsar` anota el intento fuera de la tx.
+    // Anotarlo acá adentro no sirve: el rollback se lo llevaría.
+    const resultado = await this.providerFactory
+      .getReembolsable(pasarela.codigo)
+      .reembolsar(cred, {
+        codigoOrden: orden.codigoOrden,
+        monto: dto.monto,
+        tokenProveedor: orden.tokenProveedor,
+      });
+
+    const cerrada = await this.transacciones.resolverReembolso(
+      tenantId,
+      propio.transaccionId,
+      {
+        estado: resultado.aprobada ? 'aprobada' : 'rechazada',
+        resolucion: 'proveedor',
+        resueltaPor: usuarioId,
+        codigoRespuesta: resultado.codigoRespuesta,
+        codigoAutorizacion: resultado.codigoAutorizacion,
+        tipoPago: resultado.tipoPago,
+        request: resultado.request,
+        response: resultado.response,
+      },
+    );
+    if (!cerrada) {
+      // Con el reclamo y la orden bloqueados nadie más puede cerrarla: si pasa,
+      // es un camino nuevo que no toma la orden. No se pisa lo que dejó; se
+      // responde la fila y se deja el rastro.
+      this.logger.error(
+        `El REFUND ${propio.transaccionId} ya estaba resuelto al volver Transbank (${resultado.aprobada ? 'aprobado' : 'rechazado'} por el proveedor)`,
+      );
+      return {
+        resultado: {
+          respuesta: this.publicoDeReembolso(
+            orden,
+            await this.refundDeLaOrden(tenantId, ordenId, propio.transaccionId),
+          ),
+        },
+      };
+    }
+    if (resultado.aprobada && yaReembolsado.plus(dto.monto).gte(orden.monto)) {
+      orden.estado = 'reembolsada';
+      await this.ordenRepo.save(orden);
+    }
+    const cerrado = await this.refundDeLaOrden(
+      tenantId,
+      ordenId,
+      propio.transaccionId,
+    );
+    return {
+      resultado: { respuesta: this.publicoDeReembolso(orden, cerrado) },
+      ...(resultado.aprobada && {
+        hook: this.ctxHookDe(orden, cerrado),
+      }),
+    };
+  }
+
+  /**
+   * El reclamo de la clave existe y no tiene respuesta: la tx1 que lo hizo
+   * murió, o el proveedor no contestó. Responde el estado final de SU REFUND;
+   * si sigue sin confirmar, lo aclara por saldo. Corre dentro de la
+   * transacción de `IdempotenciaService`, con el reclamo bloqueado.
+   */
+  private async resolverReembolsoSinConfirmar(
+    tenantId: string,
+    solicitudId: string,
+    usuarioId: string | null,
+  ): Promise<{ respuesta: Record<string, unknown>; hook?: CtxHookReembolso }> {
+    const refund = await this.transacciones.reembolsoDeSolicitud(
+      tenantId,
+      solicitudId,
+    );
+    // tx0 escribe reclamo y REFUND juntos: un reclamo sin REFUND es que algo
+    // rompió esa atomicidad. 500, nunca un falso "ya se había hecho".
+    if (!refund?.ordenId)
+      throw new InternalServerErrorException(
+        'Reclamo de reembolso sin su REFUND',
+      );
+    const orden = await this.bloquearOrden(tenantId, refund.ordenId);
+    // Releído con la orden bloqueada: un aclarado ajeno pudo cerrarlo recién.
+    const actual = await this.refundDeLaOrden(
+      tenantId,
+      orden.ordenId,
+      refund.transaccionId,
+    );
+    if (!SIN_CONFIRMAR.includes(actual.estado))
+      // Ya lo cerró otro camino (el aclarado de otro request): se responde eso.
+      // Su corrección, si correspondía, la dejó quien lo cerró.
+      return { respuesta: this.publicoDeReembolso(orden, actual) };
+
+    const aclarado = await this.aclararReembolso(orden, actual, usuarioId);
+    if (aclarado === 'ya_resuelto')
+      return {
+        respuesta: this.publicoDeReembolso(
+          orden,
+          await this.refundDeLaOrden(
+            tenantId,
+            orden.ordenId,
+            actual.transaccionId,
+          ),
+        ),
+      };
+    if (aclarado === 'no_se_puede')
+      throw new ConflictException(mensajeNoSePuedeAclarar(actual.monto ?? '0'));
+    const cerrado = await this.refundDeLaOrden(
+      tenantId,
+      orden.ordenId,
+      actual.transaccionId,
+    );
+    return {
+      respuesta: this.publicoDeReembolso(orden, cerrado),
+      ...(aclarado === 'salio' && { hook: this.ctxHookDe(orden, cerrado) }),
+    };
+  }
+
+  /**
+   * Decisión 4 del owner: antes de otro reembolso, se aclara el que quedó sin
+   * confirmar. Si salió, su corrección se deja como la de cualquier REFUND
+   * aprobado (post-commit, atribuida a quien PIDIÓ el reembolso, no a quien lo
+   * aclaró). Si no se puede aclarar, 409 y no se reclama nada. Lo usa también
+   * "Volver a consultar" del drawer de la orden.
+   */
+  private async aclararSinConfirmarDeLaOrden(
+    tenantId: string,
+    ordenId: string,
+    usuarioId: string | null,
+  ): Promise<{
+    aclarado: 'salio' | 'no_salio' | 'ya_resuelto' | null;
+    warning?: string;
+  }> {
+    const r = await this.db.transaccion(async () => {
+      const orden = await this.ordenRepo.findOne({
+        where: { ordenId, tenantId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      // Sin orden, el 404 lo da quien llamó, con su mensaje de siempre.
+      if (!orden) return { aclarado: null };
+      const pendientes = (
+        await this.transacciones.listarPorOrden(tenantId, ordenId)
+      ).filter((t) => t.tipo === 'REFUND' && SIN_CONFIRMAR.includes(t.estado));
+      if (pendientes.length === 0) return { aclarado: null };
+      const aclarado =
+        pendientes.length === 1
+          ? await this.aclararReembolso(orden, pendientes[0], usuarioId)
+          : 'no_se_puede';
+      if (aclarado === 'no_se_puede')
+        throw new ConflictException(
+          mensajeNoSePuedeAclarar(
+            pendientes
+              .reduce((acc, t) => acc.plus(t.monto ?? '0'), new Decimal(0))
+              .toString(),
+          ),
+        );
+      if (aclarado !== 'salio') return { aclarado };
+      return {
+        aclarado,
+        hook: this.ctxHookDe(
+          orden,
+          await this.refundDeLaOrden(
+            tenantId,
+            ordenId,
+            pendientes[0].transaccionId,
+          ),
+        ),
+      };
+    });
+    if (!('hook' in r) || !r.hook) return { aclarado: r.aclarado };
+    const conHook = await this.aplicarPostReembolso({}, r.hook);
+    return {
+      aclarado: r.aclarado,
+      ...(typeof conHook.warning === 'string' && { warning: conHook.warning }),
+    };
+  }
+
+  /**
+   * "Volver a consultar" (decisión del owner, 2026-10-04): aclara por saldo el
+   * reembolso sin confirmar de la orden y devuelve la orden como quedó. Si no se
+   * puede aclarar, 409: la pantalla ofrece entonces marcarlo a mano.
+   */
+  async aclararReembolsoSinConfirmar(
+    tenantId: string,
+    ordenId: string,
+    usuarioId: string,
+  ): Promise<Record<string, unknown>> {
+    const { aclarado, warning } = await this.aclararSinConfirmarDeLaOrden(
+      tenantId,
+      ordenId,
+      usuarioId,
+    );
+    return {
+      ...(await this.obtenerOrden(tenantId, ordenId)),
+      aclarado,
+      ...(warning && { warning }),
+    };
+  }
+
+  /**
+   * El admin revisó el portal de Transbank y marca el reembolso sin confirmar
+   * (decisión del owner, 2026-10-04): "Salió" —con el código de autorización
+   * que muestra el portal— lo aprueba y deja su corrección como cualquier
+   * reembolso aprobado; "No salió" lo rechaza y destraba la orden. Queda quién
+   * y cuándo (`resolucion = 'manual'`). Una sola vez: un segundo clic o una
+   * consulta que lo cerró en el medio dan 409, sin tocar nada.
+   */
+  async resolverReembolsoAMano(
+    tenantId: string,
+    ordenId: string,
+    transaccionId: string,
+    dto: ResolverReembolsoDto,
+    usuarioId: string,
+  ): Promise<Record<string, unknown>> {
+    const r = await this.db.transaccion(async () => {
+      const orden = await this.bloquearOrden(tenantId, ordenId);
+      const historial = await this.transacciones.listarPorOrden(
+        tenantId,
+        ordenId,
+      );
+      const refund = historial.find(
+        (t) => t.transaccionId === transaccionId && t.tipo === 'REFUND',
+      );
+      if (!refund) throw new NotFoundException('Reembolso no encontrado');
+      if (!SIN_CONFIRMAR.includes(refund.estado))
+        throw new ConflictException(
+          `Este reembolso ya estaba resuelto (${refund.estado})`,
+        );
+      const aprobado = historial
+        .filter((t) => t.tipo === 'REFUND' && t.estado === 'aprobada')
+        .reduce((acc, t) => acc.plus(t.monto ?? '0'), new Decimal(0));
+      const despues = aprobado.plus(refund.monto ?? '0');
+      if (dto.salio && despues.gt(orden.monto))
+        throw new BadRequestException(
+          'Ese reembolso no puede haber salido: con él se devolvería más que el monto de la orden. Revisá el portal de Transbank.',
+        );
+      const cerrada = await this.transacciones.resolverReembolso(
+        tenantId,
+        transaccionId,
+        dto.salio
+          ? {
+              estado: 'aprobada',
+              resolucion: 'manual',
+              resueltaPor: usuarioId,
+              codigoAutorizacion: dto.codigoAutorizacion ?? null,
+            }
+          : {
+              estado: 'rechazada',
+              resolucion: 'manual',
+              resueltaPor: usuarioId,
+              metadata: { motivo: MOTIVO_NO_SALIO_MANUAL },
+            },
+      );
+      if (!cerrada)
+        throw new ConflictException('Este reembolso ya estaba resuelto');
+      if (dto.salio && despues.gte(orden.monto)) {
+        orden.estado = 'reembolsada';
+        await this.ordenRepo.save(orden);
+      }
+      const final = await this.refundDeLaOrden(
+        tenantId,
+        ordenId,
+        transaccionId,
+      );
+      return {
+        publico: this.publicoDeReembolso(orden, final),
+        hook: dto.salio ? this.ctxHookDe(orden, final) : undefined,
+      };
+    });
+    return r.hook ? this.aplicarPostReembolso(r.publico, r.hook) : r.publico;
+  }
+
+  /**
+   * Aclara un REFUND sin confirmar con el saldo que informa el proveedor,
+   * bajo el `FOR UPDATE` de la orden (que el llamador ya tomó). Es
+   * determinista porque hay como mucho UN sin confirmar por orden:
+   * `esperado = monto − Σ aprobados`, y el saldo es `esperado − monto` (salió)
+   * o `esperado` (no salió). Cualquier otra cosa —un reembolso hecho a mano en
+   * el portal, la consulta vencida (Webpay Plus, 7 días) o que no responda—
+   * no se puede aclarar acá. Consultar no es reintentar: nunca llama a
+   * `reembolsar` del proveedor.
+   */
+  private async aclararReembolso(
+    orden: PasarelaOrden,
+    refund: PasarelaTransaccion,
+    usuarioId: string | null,
+  ): Promise<'salio' | 'no_salio' | 'no_se_puede' | 'ya_resuelto'> {
+    const historial = await this.transacciones.listarPorOrden(
+      orden.tenantId,
+      orden.ordenId,
+    );
+    const aprobado = historial
+      .filter((t) => t.tipo === 'REFUND' && t.estado === 'aprobada')
+      .reduce((acc, t) => acc.plus(t.monto ?? '0'), new Decimal(0));
+    const esperado = new Decimal(orden.monto).minus(aprobado);
+    const despues = esperado.minus(refund.monto ?? '0');
+
+    let consulta: ResultadoEstado;
+    try {
+      const { pasarela, cred } = await this.tenantPasarelaService.resolverPorId(
+        refund.tenantPasarelaId,
+      );
+      consulta = await this.providerFactory
+        .getReembolsable(pasarela.codigo)
+        .consultarEstado(cred, {
+          codigoOrden: orden.codigoOrden,
+          tokenProveedor: orden.tokenProveedor,
+        });
+    } catch (e) {
+      if (e instanceof ProviderComunicacionError) {
+        this.logger.warn(
+          `No se pudo consultar el saldo para aclarar el REFUND ${refund.transaccionId}: ${e.message}`,
+        );
+        return 'no_se_puede';
+      }
+      throw e;
+    }
+
+    const veredicto = veredictoPorSaldo(consulta, esperado, despues, aprobado);
+    if (veredicto === 'no_se_puede') {
+      this.logger.warn(
+        `El saldo no aclara el REFUND ${refund.transaccionId} (orden ${orden.ordenId}): estado ${consulta.estadoProveedor}, saldo ${consulta.saldo}, esperado ${esperado.toString()}`,
+      );
+      return 'no_se_puede';
+    }
+    const cerrada = await this.transacciones.resolverReembolso(
+      orden.tenantId,
+      refund.transaccionId,
+      {
+        estado: veredicto === 'salio' ? 'aprobada' : 'rechazada',
+        resolucion: 'saldo',
+        resueltaPor: usuarioId,
+        response: consulta.response,
+        ...(veredicto === 'no_salio' && {
+          metadata: { motivo: MOTIVO_NO_SALIO },
+        }),
+      },
+    );
+    // Otro la cerró en el medio: su corrección, si correspondía, es de él.
+    if (!cerrada) return 'ya_resuelto';
+    if (veredicto === 'salio' && despues.lte(0)) {
+      orden.estado = 'reembolsada';
+      await this.ordenRepo.save(orden);
+    }
+    return veredicto;
+  }
+
+  /**
+   * Los chequeos de un reembolso, con la orden bloqueada: estado, autorización,
+   * disponible y el tope por pago del lado de ventas. Corre en tx0 (rebota sin
+   * rastro) y otra vez en tx1 (pudo cambiar), donde `propio` excluye el REFUND
+   * en `iniciada` de este mismo intento de la cuenta de sin confirmar.
+   */
+  private async verificarReembolsable(
+    tenantId: string,
+    ordenId: string,
+    monto: string,
+    propio: string | null,
+  ): Promise<{
+    orden: PasarelaOrden;
+    autorizacion: PasarelaTransaccion;
+    yaReembolsado: Decimal;
+  }> {
+    const orden = await this.bloquearOrden(tenantId, ordenId);
+    // 'conciliada' = pagada + venta materializada (checkout online): también reembolsable
+    if (!['pagada', 'conciliada', 'reembolsada'].includes(orden.estado))
+      throw new BadRequestException(
+        `No se puede reembolsar una orden ${orden.estado}`,
+      );
+
+    // Leído tras adquirir el lock: ve los REFUND ya commiteados por un
+    // reembolso concurrente previo (READ COMMITTED).
+    const historial = await this.transacciones.listarPorOrden(
+      tenantId,
+      ordenId,
+    );
+    const autorizacion = historial.find(
+      (t) => t.tipo === 'AUTHORIZATION' && t.estado === 'aprobada',
+    );
+    if (!autorizacion)
+      throw new BadRequestException(
+        'La orden no tiene una autorización aprobada',
+      );
+    // El aclarado previo dejó la orden sin pendientes; si aparece uno es otro
+    // reembolso que entró en el medio, y con dos en duda el saldo ya no dice
+    // cuál salió.
+    const otroSinConfirmar = historial.find(
+      (t) =>
+        t.tipo === 'REFUND' &&
+        SIN_CONFIRMAR.includes(t.estado) &&
+        t.transaccionId !== propio,
+    );
+    if (otroSinConfirmar)
+      throw new ConflictException(
+        mensajeNoSePuedeAclarar(otroSinConfirmar.monto ?? '0'),
+      );
+
+    const yaReembolsado = historial
+      .filter((t) => t.tipo === 'REFUND' && t.estado === 'aprobada')
+      .reduce((acc, t) => acc.plus(t.monto ?? '0'), new Decimal(0));
+    const disponible = new Decimal(orden.monto).minus(yaReembolsado);
+    if (new Decimal(monto).gt(disponible))
+      throw new BadRequestException(
+        `El monto excede lo disponible para reembolso (${disponible.toString()})`,
+      );
+
+    // El tope por pago, del lado de ventas: la nota "por el pago" de Webpay
+    // hecha desde el POS ya devolvió esa plata, y el proveedor la sacaría de
+    // nuevo. Va ANTES de llamar al proveedor (después ya no hay vuelta atrás) y
+    // bajo el lock de la orden que ya tenemos.
+    //
+    // ⚠️ Orden de bloqueo: orden → venta, siempre. Medido: ningún camino toma
+    // la venta y después la orden (la venta online se crea y COMMITEA antes de
+    // que el dispatcher o `vincularVenta` toquen la orden; ventas solo lee
+    // `pasarela_*` sin lock), así que no hay ciclo. Quien algún día toque la
+    // orden dentro de una transacción que ya tiene `FOR UPDATE` sobre la venta
+    // cierra el ciclo. Sin handler (ventas no registrado) no hay lado de ventas
+    // que topar: el aviso de `aplicarPostReembolso` ya lo dice.
+    const handler = this.reembolsoRegistry.get();
+    const ventaId = orden.ventaId;
+    if (ventaId && handler)
+      // `db.transaccion` reusa la activa: es para tener su manager.
+      await this.db.transaccion((manager) =>
+        handler.exigirTopeDelReembolso(manager, { tenantId, ventaId, monto }),
+      );
+    return { orden, autorizacion, yaReembolsado };
+  }
+
+  /** `SELECT … FOR UPDATE` de la orden, en la transacción activa. */
+  private async bloquearOrden(
+    tenantId: string,
+    ordenId: string,
+  ): Promise<PasarelaOrden> {
+    const orden = await this.ordenRepo.findOne({
+      where: { ordenId, tenantId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!orden) throw new NotFoundException('Orden no encontrada');
+    return orden;
+  }
+
+  private async refundDeLaOrden(
+    tenantId: string,
+    ordenId: string,
+    transaccionId: string,
+  ): Promise<PasarelaTransaccion> {
+    const refund = (
+      await this.transacciones.listarPorOrden(tenantId, ordenId)
+    ).find((t) => t.transaccionId === transaccionId);
+    if (!refund)
+      throw new InternalServerErrorException(
+        `REFUND ${transaccionId} no encontrado en su orden`,
+      );
+    return refund;
+  }
+
+  private publicoDeReembolso(
+    orden: PasarelaOrden,
+    refund: PasarelaTransaccion,
+  ): Record<string, unknown> {
+    const motivo = refund.metadata?.motivo;
+    return this.toPublico(orden, {
+      reembolsoAprobado: refund.estado === 'aprobada',
+      reembolso: {
+        transaccionId: refund.transaccionId,
+        tipo: refund.tipo,
+        estado: refund.estado,
+        monto: refund.monto,
+        codigoAutorizacion: refund.codigoAutorizacion,
+        codigoRespuesta: refund.codigoRespuesta,
+        fechaTransaccion: refund.fechaTransaccion,
+        resolucion: refund.resolucion,
+      },
+      ...(typeof motivo === 'string' && { motivo }),
+    });
+  }
+
+  private ctxHookDe(
+    orden: PasarelaOrden,
+    refund: PasarelaTransaccion,
+  ): CtxHookReembolso {
+    const devoluciones = refund.metadata?.devoluciones;
+    return {
+      orden,
+      // La corrección es de quien PIDIÓ el reembolso (null: llave de API o
+      // fila de antes), no de quien lo aclaró o lo marcó.
+      usuarioId: refund.usuarioId,
+      transaccionId: refund.transaccionId,
+      // La fila trae escala 6 ("17000.000000"); la corrección recibe el monto
+      // como lo pidió el request.
+      monto: new Decimal(refund.monto ?? '0').toString(),
+      devoluciones: Array.isArray(devoluciones)
+        ? (devoluciones as DevolucionLineaDto[])
+        : [],
+    };
+  }
+
+  /**
+   * La reproducción devuelve lo que se contestó, más la corrección que el
+   * REFUND tiene HOY: la respuesta guardada es la de la transacción del
+   * reembolso, y la corrección se crea después del commit. Si la orden tiene
+   * venta y el REFUND aprobado no tiene corrección ligada, se dice
+   * (`correccionPendiente`): reproducir no la crea (ADR-026: no escribe).
+   */
+  private async conCorreccionActual(
+    tenantId: string,
+    respuesta: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const reembolso = respuesta.reembolso as
+      | { transaccionId?: string }
+      | undefined;
+    const ordenId = respuesta.ordenId as string | undefined;
+    if (!reembolso?.transaccionId || !ordenId) return respuesta;
+    const refund = (
+      await this.transacciones.listarPorOrden(tenantId, ordenId)
+    ).find((t) => t.transaccionId === reembolso.transaccionId);
+    if (refund?.estado !== 'aprobada' || !respuesta.ventaId) return respuesta;
+    return refund.correccionVentaId
+      ? { ...respuesta, notaCreditoId: refund.correccionVentaId }
+      : { ...respuesta, correccionPendiente: true };
   }
 
   /**
@@ -462,19 +1121,13 @@ export class CobrosService {
    */
   private async aplicarPostReembolso(
     publico: Record<string, unknown>,
-    dto: CreateReembolsoDto,
-    ctx:
-      | { orden: PasarelaOrden; aprobada: boolean; transaccionId: string }
-      | undefined,
-    usuarioId?: string,
+    ctx: CtxHookReembolso,
   ): Promise<Record<string, unknown>> {
-    if (!ctx?.aprobada) return publico;
-
     // Una orden sin venta (cobro por la API externa, sin venta ligada) no tiene
     // lado de ventas que corregir: es legítimo y no es un aviso. Solo avisa si
     // se pidieron devoluciones de stock, que sin venta no se pueden aplicar.
     if (!ctx.orden.ventaId)
-      return (dto.devoluciones?.length ?? 0) > 0
+      return ctx.devoluciones.length > 0
         ? {
             ...publico,
             warning:
@@ -501,9 +1154,9 @@ export class CobrosService {
         ordenId: ctx.orden.ordenId,
         codigoOrden: ctx.orden.codigoOrden,
         ventaId: ctx.orden.ventaId,
-        monto: dto.monto,
-        devoluciones: dto.devoluciones ?? [],
-        usuarioId: usuarioId ?? null,
+        monto: ctx.monto,
+        devoluciones: ctx.devoluciones,
+        usuarioId: ctx.usuarioId,
         ligarCorreccion: async (manager, id) => {
           const ligado = await this.transacciones.vincularCorreccion(
             ctx.orden.tenantId,

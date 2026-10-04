@@ -2205,8 +2205,14 @@ CREATE TABLE pasarela_transacciones (
     medio_pago_id UUID REFERENCES pasarela_medios_pago(medio_pago_id),
     transaccion_padre_id UUID REFERENCES pasarela_transacciones(transaccion_id),
     correccion_venta_id UUID, -- solo REFUND aprobado de una orden con venta: la corrección (ventas) que dejó; NULL = no se pudo crear. Sin FK, como pasarela_ordenes.venta_id
+    solicitud_idempotente_id UUID, -- solo REFUND: el reclamo de Idempotency-Key que lo pidió (ADR-029). Sin FK
+    usuario_id UUID, -- quién pidió el REFUND (la corrección se le atribuye); NULL = llave de API o fila de antes
+    api_key_id UUID, -- la llave de API que lo pidió
+    resolucion VARCHAR, -- REFUND resuelto desde iniciada/error: proveedor|saldo|manual|no_enviado
+    resuelta_por UUID, -- usuario que lo resolvió; NULL = llave de API
+    resuelta_el TIMESTAMPTZ,
     tipo VARCHAR NOT NULL, -- INSCRIPTION|AUTHORIZATION|CAPTURE|REVERSAL|REFUND|RECURRENT_PAYMENT
-    estado VARCHAR NOT NULL, -- iniciada|aprobada|rechazada|error (inmutable una vez terminal)
+    estado VARCHAR NOT NULL, -- iniciada|aprobada|rechazada|error (inmutable una vez terminal; en un REFUND, iniciada/error = sin confirmar)
     monto NUMERIC(18,6),
     moneda VARCHAR(3),
     codigo_orden VARCHAR,
@@ -2222,7 +2228,8 @@ CREATE TABLE pasarela_transacciones (
     fecha_transaccion TIMESTAMPTZ NOT NULL,
     creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    eliminado_el TIMESTAMPTZ
+    eliminado_el TIMESTAMPTZ,
+    CONSTRAINT chk_pasarela_transacciones_quien_pidio CHECK (solicitud_idempotente_id IS NULL OR ((usuario_id IS NULL) <> (api_key_id IS NULL)))
 );
 -- Idempotencia: una transacción externa no puede registrarse dos veces
 CREATE UNIQUE INDEX idx_pasarela_tx_externo

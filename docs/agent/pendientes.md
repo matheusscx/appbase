@@ -77,6 +77,28 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+
+- [ ] **Un `REFUND` sin confirmar no gasta el tope por pago de una nota hecha desde el POS**
+  (fiscal y de plata; lo levantó la revisión independiente del frente de ADR-029, 2026-10-04).
+  `devuelto-venta.ts` y `venta-documentos.service.ts` (`devolvibleDelPagoUnico`) cuentan solo los
+  `REFUND` en `aprobada`. Uno en `iniciada`/`error` pudo haber devuelto la plata por Transbank, y
+  mientras siga sin confirmar una nota "por el pago" de Webpay desde el POS lo ignora. **No es
+  regresión**: antes de ADR-029 la falla quedaba en `error`, que tampoco contaba. Otro reembolso
+  por la pasarela sí queda frenado (decisión 4 del owner). Medir primero cuánto vive un sin
+  confirmar en la práctica (se aclara en el reintento o a mano) antes de decidir si la nota del
+  POS también tiene que esperar —eso sí sería pregunta para el owner—.
+- [ ] **Probar en el sandbox de Transbank el saldo con el que se aclara un reembolso sin confirmar**
+  (anotado 2026-10-04 al cerrar "Un reembolso de pasarela que se reintenta sale dos veces",
+  [`resueltos.md`](resueltos.md); [ADR-029](../adr/029-reembolso-con-efecto-externo.md)). El
+  aclarado lee `details[0].balance` del `GET` de estado y, sin `balance`, el `status` del
+  detalle (`veredictoPorSaldo`, `cobros.service.ts`). Lo verificó la Sesión de esfuerzo máximo en
+  la referencia y en los SDK oficiales, **no en el sandbox**: el e2e usa un doble del proveedor.
+  Medir: (1) que `balance` venga después de una anulación parcial en Webpay Plus Mall y en
+  Oneclick Mall, y que no venga sin anulaciones; (2) si el `buyOrder` del `GET` de Oneclick Mall
+  es el del padre o el del hijo (la referencia no lo dice; el JSDoc del SDK Node dice el hijo, y
+  `consultarEstado` hoy manda el del padre); (3) la ventana de consulta de Webpay Plus (la
+  documentación dice 7 días, la referencia "en cualquier momento"). Si algo difiere, el aclarado
+  cae al 409 y a la marca manual del admin, que no se rompe: lo que se pierde es la automatización.
 - [ ] **El pre-commit rechaza un recibo de revisión escrito sobre el mismo diff** (harness). Dos
   sesiones lo vieron el 2026-09-27, las dos desde un worktree (la del aviso sin costo de la
   varianza y la del aviso del login). Escribieron el recibo con el comando que imprime el hook, en
@@ -1104,20 +1126,6 @@ transaccional nativo, con ALS — [ADR-020](../adr/020-contexto-transaccional-al
 Prisma y Drizzle tienen el mismo modelo manual de transacciones que TypeORM. No es un
 pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evaluación.
 
-- [ ] **Un reembolso de pasarela que se reintenta sale dos veces por el proveedor** (fiscal y
-  plata, **frente propio**; anotado el 2026-10-03 por el frente de la nota de crédito
-  idempotente, que lo encontró leyendo y lo **midió** con un e2e temporal en
-  `pasarela-reembolso.e2e-spec.ts`). `POST /pasarela/admin/ordenes/:id/reembolsos` y
-  `POST /pasarela/api/cobros/:id/reembolsos` no tienen `Idempotency-Key`: dos `POST` iguales
-  seguidos de 17.000 sobre una orden de 100.000 respondieron **201 y 201**, con **dos `REFUND`
-  aprobados** y dos correcciones. Lo que ya existe (`correccion_venta_id`) hace única la nota
-  **por** `REFUND`, no el `REFUND` por intento. El tope por pago lo acota igual que acotaba a la
-  nota manual: el segundo rebota solo si el primero agotó lo devolvible. A diferencia de la nota
-  manual, acá la segunda vez **llama al proveedor**, así que la plata sale de verdad. Es el
-  mismo mecanismo (ADR-026, `IdempotenciaService.ejecutar`), pero con una diferencia que hay que
-  diseñar: el reclamo y la llamada al proveedor no son atómicos (el proveedor no está en la
-  transacción), y la API externa usa llave de API, sin usuario, así que la clave no puede ser
-  `(tenant, usuario, clave)` tal cual. Y qué ve el admin en el segundo clic es del owner.
 - [ ] **La comida del personal no tiene motivo propio, y como cortesía pagaría IVA de más**
   (fiscal — frente propio; anotado el 2026-10-03 por decisión del owner, *"Anotarlo aparte"*,
   al cerrar la cortesía como retiro gravado). Desde ese frente toda anulación de tipo `cortesia`

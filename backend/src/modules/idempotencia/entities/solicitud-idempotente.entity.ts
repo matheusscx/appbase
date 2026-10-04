@@ -1,4 +1,5 @@
 import {
+  Check,
   Entity,
   Index,
   PrimaryGeneratedColumn,
@@ -18,9 +19,15 @@ import {
  * la transacción de la operación, y la respuesta al final de esa misma
  * transacción: o existen las dos cosas o ninguna.
  *
- * **Única por `(tenant, usuario, clave)`**, no solo por clave: la clave de otro
+ * **Única por `(tenant, actor, clave)`**, no solo por clave: la clave de otro
  * usuario no reproduce una respuesta ajena. Una boleta trae pagos, vuelto y
- * cajero, que es lo que el alcance por caja protege.
+ * cajero, que es lo que el alcance por caja protege. El actor es el usuario
+ * del JWT o, en la API externa de la pasarela, la llave de API (que no tiene
+ * usuario): exactamente uno de los dos (`chk_solicitudes_idempotentes_un_actor`).
+ * Un índice único por cada uno, y no uno sobre `COALESCE(usuario_id,
+ * api_key_id)`: el `@Index` de TypeORM no expresa un índice de expresión (el
+ * esquema sale de las entities) y mezclaría dos dominios de id. Con `NULL`
+ * distintos, cada fila choca solo en el suyo.
  *
  * ⚠️ **Sin relación (`@ManyToOne`) a `ventas` ni a `usuarios`, a propósito**,
  * con el criterio de `caja_intentos_rechazados` y `movimientos_caja`: la fila
@@ -39,6 +46,18 @@ import {
     where: '"eliminado_el" IS NULL',
   },
 )
+@Index(
+  'uq_solicitudes_idempotentes_clave_api_key',
+  ['tenantId', 'apiKeyId', 'clave'],
+  {
+    unique: true,
+    where: '"eliminado_el" IS NULL',
+  },
+)
+@Check(
+  'chk_solicitudes_idempotentes_un_actor',
+  '("usuario_id" IS NULL) <> ("api_key_id" IS NULL)',
+)
 @Entity('solicitudes_idempotentes')
 export class SolicitudIdempotente {
   @PrimaryGeneratedColumn('uuid', { name: 'solicitud_idempotente_id' })
@@ -47,15 +66,19 @@ export class SolicitudIdempotente {
   @Column({ name: 'tenant_id', type: 'uuid' })
   tenantId: string;
 
-  /** Quién hizo el request, del JWT. */
-  @Column({ name: 'usuario_id', type: 'uuid' })
-  usuarioId: string;
+  /** Quién hizo el request, del JWT. `NULL` si entró por una llave de API. */
+  @Column({ name: 'usuario_id', type: 'uuid', nullable: true })
+  usuarioId: string | null;
+
+  /** La llave de API de la pasarela (`pasarela_api_keys`) que hizo el request. */
+  @Column({ name: 'api_key_id', type: 'uuid', nullable: true })
+  apiKeyId: string | null;
 
   /** El valor de la cabecera `Idempotency-Key`. */
   @Column({ name: 'clave', type: 'uuid' })
   clave: string;
 
-  /** `'venta.crear'` | `'cuenta.cerrar'` | `'pago.abono'` (`OperacionIdempotente`). */
+  /** `OperacionIdempotente`: `'venta.crear'`, `'pasarela.reembolso'`, … */
   @Column({ name: 'operacion', type: 'varchar' })
   operacion: string;
 
@@ -64,8 +87,10 @@ export class SolicitudIdempotente {
   huella: string;
 
   /**
-   * Lo que se devolvió, ya serializado. `null` solo dentro de la transacción
-   * que la está creando: una fila commiteada siempre la tiene.
+   * Lo que se devolvió, ya serializado. Con `ejecutar`, `null` solo dentro de
+   * la transacción que la está creando: una fila commiteada siempre la tiene.
+   * Con `ejecutarConEfectoExterno` el reclamo se commitea ANTES del efecto, así
+   * que una fila commiteada sin respuesta es un efecto "sin confirmar".
    */
   @Column({ name: 'respuesta', type: 'jsonb', nullable: true })
   respuesta: Record<string, unknown> | null;

@@ -24,8 +24,27 @@ export interface ResultadoCobro extends ResultadoProvider {
 
 export interface ResultadoEstado {
   estado: 'pagada' | 'fallida' | 'desconocido';
+  /** El `status` del detalle tal como lo informa el proveedor (`AUTHORIZED`, `NULLIFIED`…). */
+  estadoProveedor: string | null;
+  /**
+   * El `balance` del detalle: lo que queda sin anular de la transacción. Solo
+   * viene si hubo anulaciones; es lo que aclara un reembolso sin confirmar
+   * (ADR-029). `null` si el proveedor no lo informó.
+   */
+  saldo: string | null;
   response: Record<string, unknown>;
 }
+
+/**
+ * Tope de una llamada de reembolso o de consulta de estado. Sin él, la
+ * transacción del reembolso sostiene el `FOR UPDATE` de la orden y una
+ * conexión del pool mientras el proveedor no conteste. Vencerlo es un
+ * `ProviderComunicacionError`: "sin confirmar", nunca rechazo (ADR-029).
+ *
+ * ⚠️ Un `idle_in_transaction_session_timeout` o `statement_timeout` de
+ * Postgres menor que esto cortaría la transacción a mitad de la llamada.
+ */
+export const TIMEOUT_LLAMADA_REEMBOLSO_MS = 30_000;
 
 /** Error de red/HTTP contra el proveedor — NO significa rechazo del cobro. */
 export class ProviderComunicacionError extends Error {

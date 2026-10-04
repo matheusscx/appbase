@@ -10,7 +10,8 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiHeader, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ClaveIdempotencia } from '../../../common/decorators/clave-idempotencia.decorator';
 import type { Request } from 'express';
 import { ApiKeyGuard, PasarelaAuth } from '../guards/api-key.guard';
 import { InscripcionesService } from '../services/inscripciones.service';
@@ -88,12 +89,26 @@ export class PasarelaApiController {
   }
 
   @Post('cobros/:ordenId/reembolsos')
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description:
+      'UUID por intento de reembolso, por llave de API: el reintento con la misma clave no vuelve a devolver la plata (ADR-029)',
+  })
   reembolsar(
     @Req() req: ApiRequest,
     @Param('ordenId', ParseUUIDPipe) ordenId: string,
     @Body() dto: CreateReembolsoDto,
+    @ClaveIdempotencia() clave: string,
   ) {
-    return this.cobros.reembolsar(req.pasarelaAuth.tenantId, ordenId, dto);
+    // La llave de API no tiene usuario: la clave es por llave.
+    return this.cobros.reembolsar(
+      req.pasarelaAuth.tenantId,
+      ordenId,
+      dto,
+      { apiKeyId: req.pasarelaAuth.apiKeyId },
+      clave,
+    );
   }
 
   @Post('ordenes/:id/verificar')

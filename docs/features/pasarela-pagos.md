@@ -67,7 +67,9 @@ POST   /api/pasarela/admin/api-keys                # crear — key visible UNA v
 DELETE /api/pasarela/admin/api-keys/:id            # revocar (Eliminar)
 GET    /api/pasarela/admin/ordenes                 # listado paginado (Leer)
 GET    /api/pasarela/admin/ordenes/:id             # detalle + transacciones (Leer)
-POST   /api/pasarela/admin/ordenes/:id/reembolsos  # reembolso parcial/total (Reembolsar)
+POST   /api/pasarela/admin/ordenes/:id/reembolsos  # reembolso parcial/total (Reembolsar) — exige Idempotency-Key
+POST   /api/pasarela/admin/ordenes/:id/reembolsos/aclarar                    # "Volver a consultar" un reembolso sin confirmar (Reembolsar)
+POST   /api/pasarela/admin/ordenes/:id/reembolsos/:transaccionId/resolucion  # el admin marca "Salió" (con código) o "No salió" (Reembolsar)
 ```
 
 Todo reembolso aprobado de una orden con `venta_id` deja su corrección en ventas
@@ -88,6 +90,37 @@ si no alcanza, 400 sin cifras y la pasarela no se llama (con más de un pago en 
 Ver
 [reembolsos-nota-credito.md](./reembolsos-nota-credito.md).
 
+### Un reembolso que se reintenta no sale dos veces (2026-10-04)
+
+[ADR-029](../adr/029-reembolso-con-efecto-externo.md). Las dos rutas de reembolso exigen
+`Idempotency-Key` (UUID, 400 sin ella); en la API externa la clave es **por llave de API**.
+Transbank no acepta clave de idempotencia, así que el sistema garantiza **como mucho una**
+llamada de reembolso por clave: el reclamo y el `REFUND` en `iniciada` se commitean **antes**
+de llamar, y un reintento nunca vuelve a llamar a `reembolsar`.
+
+| Escena (orden de $100.000, reembolso de $17.000) | Respuesta |
+|---|---|
+| Reintento igual | La respuesta original + `repetida: true` (y la corrección que el `REFUND` tiene hoy; sin ella, `correccionPendiente: true`) |
+| Reintento con otros datos | 422 *"Este reembolso ya se había hecho con otros datos"* con el `ordenId` |
+| Transbank no contestó (error de red, 5xx, 30 s) | 502 *"no sabemos si la plata salió"*; el `REFUND` queda **sin confirmar** (`iniciada`) |
+| Reintento de un sin confirmar | Se consulta el saldo (`balance`): bajó en el monto → `aprobada` por saldo + `repetida: true`; no bajó → `reembolsoAprobado: false` con `motivo`; no cuadra o no se puede consultar → 409 al portal de Transbank |
+| Otro reembolso de la orden con un sin confirmar | Primero lo aclara (igual que arriba); si no se puede, 409 sin llamar. El reintento de uno que ya salió reproduce igual |
+| La consulta no lo aclara | El drawer de la orden ofrece *Volver a consultar* y, si sigue, *Salió* (con el código de autorización del portal) o *No salió*; queda `resolucion = 'manual'` con quién y cuándo |
+
+Un `REFUND` en `iniciada` o `error` es **sin confirmar** (la pantalla dice "Sin confirmar"): no
+es un rechazo, el proveedor pudo haber devuelto la plata. Las fallas nuevas quedan en `iniciada`;
+`error` es de las filas de antes. Solo pasa una vez a `aprobada` o `rechazada` (`resolucion`:
+`proveedor`, `saldo`, `manual`, `no_enviado`), con quién y cuándo, y la corrección se atribuye a
+quien **pidió** el reembolso (`usuario_id`/`api_key_id` de la fila), no a quien lo aclaró. El historial del drawer de
+la orden dice "Sin confirmar" también para una `AUTHORIZATION` en `error` (un cobro cuyo
+proveedor no contestó), que es lo mismo: no se sabe si pasó.
+
+En la pantalla (`ReembolsoModal`), el intento es por orden y por pestaña (`useIntentoCobro`,
+ámbito `reembolso:<ordenId>`): sobrevive a cerrar y reabrir el modal, y termina con el éxito,
+con la reproducción, con "no salió" o con el 422 de otros datos, que cierra el modal y recarga
+la orden. Si Transbank no hizo el reembolso, el modal lo dice (antes decía "Reembolso
+procesado" también en el rechazo).
+
 ### API m2m (ApiKeyGuard — `Authorization: Bearer pk_...`)
 
 ```
@@ -96,7 +129,7 @@ GET    /api/pasarela/api/inscripciones?pagadorRef= # inscripciones del pagador
 GET    /api/pasarela/api/inscripciones/:id         # detalle (nunca expone tbkUser)
 DELETE /api/pasarela/api/inscripciones/:id         # elimina en proveedor + soft delete
 POST   /api/pasarela/api/cobros                     # (Oneclick) cobra con tarjeta guardada
-POST   /api/pasarela/api/cobros/:ordenId/reembolsos # reembolso parcial/total
+POST   /api/pasarela/api/cobros/:ordenId/reembolsos # reembolso parcial/total — exige Idempotency-Key (por llave)
 POST   /api/pasarela/api/pagos                      # (Webpay Plus) pago único → {ordenId, urlWebpay, token}
 POST   /api/pasarela/api/ordenes/:id/verificar      # reconcilia una orden en_proceso
 GET    /api/pasarela/api/ordenes/:id                # detalle de orden
@@ -221,7 +254,7 @@ e inyectan sus services públicos.
 | `pasarela_inscripciones` | inscripción del pagador; `identificador_externo` (tbkUser) **cifrado**; `pagador_ref` opaco |
 | `pasarela_medios_pago` | tarjetas registradas (marca, últimos 4) |
 | `pasarela_ordenes` | intención de pago; sin FK duras a ventas/pagos (`referencia_externa` opaca) |
-| `pasarela_transacciones` | historial **inmutable**; `request`/`response` **redactados**; único parcial por idempotencia. Única escritura posterior al registro: `correccion_venta_id` del REFUND (la corrección que dejó en ventas, sin FK), puesta una vez por el hook post-commit |
+| `pasarela_transacciones` | historial **inmutable**; `request`/`response` **redactados**; único parcial por idempotencia. Dos escrituras posteriores al registro, las dos una sola vez: `correccion_venta_id` del REFUND (la corrección que dejó en ventas, sin FK), puesta por el hook post-commit; y el cierre de un REFUND sin confirmar (`iniciada`/`error` → `aprobada`/`rechazada`, compare-and-set con `resolucion`, quién y cuándo, ADR-029) |
 
 Convenciones del repo: UUID PK/FK `type:'uuid'`, soft delete `eliminado_el`,
 `creado_el`/`actualizado_el`, `numeric` para dinero (Decimal.js).
@@ -234,7 +267,9 @@ Convenciones del repo: UUID PK/FK `type:'uuid'`, soft delete `eliminado_el`,
   Tras `pagada`, el callback marca `conciliada` cuando la app materializó su lado.
   `pendiente` está modelado (pago con conciliación demorada) aunque Webpay Plus
   resuelve inmediato en v1.
-- **Transacción**: `iniciada → aprobada | rechazada | error`.
+- **Transacción**: `iniciada → aprobada | rechazada | error`. En un `REFUND`, `iniciada` y
+  `error` son **sin confirmar** y pasan una sola vez a `aprobada` o `rechazada` (ADR-029); una
+  falla de comunicación nueva deja la fila en `iniciada` (`error` queda como estado legado).
 - **Inscripción**: `pendiente → procesando → activa | fallida | eliminada`
   (`procesando` es el claim atómico transitorio del retorno de Webpay).
 
@@ -409,7 +444,8 @@ Con el stack arriba (`docker-compose up -d`):
 |---|---|---|
 | Timeout del proveedor malinterpretado como rechazo | Cobro perdido / doble cobro | Orden queda `en_proceso`; endpoint `.../verificar` reconcilia contra el proveedor |
 | Doble retorno de Webpay (reintento) | Inscripción/medio duplicado | Claim atómico `pendiente→procesando`; compensación a `pendiente` si el provider falla |
-| Reembolsos concurrentes exceden el total | Sobre-reembolso | `reembolsar()` corre dentro de una transacción con lock pesimista (`SELECT … FOR UPDATE`) de la fila de la orden: dos reembolsos sobre la misma orden se serializan; el segundo ve el REFUND del primero y no puede exceder el saldo. Con venta ligada, esa misma transacción toma después el `FOR UPDATE` de la venta para el tope por pago (orden → venta, el único orden: ningún camino toma la venta y luego la orden). La auditoría de un timeout se registra **fuera** de la transacción (tras el rollback que libera el lock) para no auto-bloquearse contra el `FOR UPDATE` vía la FK de `pasarela_transacciones` |
+| Reembolsos concurrentes exceden el total | Sobre-reembolso | `reembolsar()` corre dentro de una transacción con lock pesimista (`SELECT … FOR UPDATE`) de la fila de la orden: dos reembolsos sobre la misma orden se serializan; el segundo ve el REFUND del primero y no puede exceder el saldo. Con venta ligada, esa misma transacción toma después el `FOR UPDATE` de la venta para el tope por pago (orden → venta, el único orden: ningún camino toma la venta y luego la orden). El intento que no se confirmó se anota sobre su `REFUND` en `iniciada` **fuera** de la transacción (tras el rollback que libera el lock) |
+| Reintento de un reembolso después de un corte | Doble devolución por el proveedor | `Idempotency-Key` con el reclamo commiteado **antes** de llamar y el `REFUND` write-ahead en `iniciada`; el reintento de uno sin confirmar se aclara por saldo y nunca vuelve a llamar ([ADR-029](../adr/029-reembolso-con-efecto-externo.md)) |
 | Orden con timeout marcada `expirada` por reloj (deja de ser reconciliable) | Cobro real dado por perdido | `obtenerOrden()` no expira perezosamente órdenes con una transacción `AUTHORIZATION 'error'` (hubo intento); `verificar()` además acepta órdenes `expirada`. Solo la reconciliación con el proveedor las cierra |
 | Credenciales expuestas | Fraude | Cifrado AES-256-GCM en reposo, API keys hasheadas, redacción de logs |
 

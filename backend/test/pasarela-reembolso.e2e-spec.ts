@@ -13,6 +13,7 @@ import { VentasReembolsoHandler } from '../src/modules/ventas/reembolso-callback
 import { PasarelaOrden } from '../src/modules/pasarela/entities/pasarela-orden.entity';
 import { PasarelaTransaccion } from '../src/modules/pasarela/entities/pasarela-transaccion.entity';
 import { TransaccionesService } from '../src/modules/pasarela/services/transacciones.service';
+import { ProviderComunicacionError } from '../src/modules/pasarela/providers/payment-provider.interface';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris (Chile)
 const CLP = '550e8400-e29b-41d4-a716-446655440003';
@@ -56,6 +57,7 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
   let itemExento: string;
   let itemProducto: string; // producto de modo `cantidad`, con stock propio
   const reembolsarEnElProveedor = jest.fn();
+  const consultarEnElProveedor = jest.fn();
 
   const auth = () => ({ Authorization: `Bearer ${token}` });
   const crearItem = async (
@@ -142,16 +144,27 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
     });
     return orden.ordenId;
   };
-  const reembolsarAdmin = (ordenId: string, body: Record<string, unknown>) =>
+  // Una clave nueva por llamada salvo que el test pase la suya (ADR-029).
+  const reembolsarAdmin = (
+    ordenId: string,
+    body: Record<string, unknown>,
+    clave: string = randomUUID(),
+  ) =>
     request(app.getHttpServer())
       .post(`/api/pasarela/admin/ordenes/${ordenId}/reembolsos`)
       .set(auth())
+      .set('Idempotency-Key', clave)
       .send(body);
   let apiKey: string;
-  const reembolsarApi = (ordenId: string, body: Record<string, unknown>) =>
+  const reembolsarApi = (
+    ordenId: string,
+    body: Record<string, unknown>,
+    clave: string = randomUUID(),
+  ) =>
     request(app.getHttpServer())
       .post(`/api/pasarela/api/cobros/${ordenId}/reembolsos`)
       .set('Authorization', `Bearer ${apiKey}`)
+      .set('Idempotency-Key', clave)
       .send(body);
   const refundsDe = (
     ordenId: string,
@@ -194,7 +207,10 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
     })
       .overrideProvider(ProviderFactory)
       .useValue({
-        getReembolsable: () => ({ reembolsar: reembolsarEnElProveedor }),
+        getReembolsable: () => ({
+          reembolsar: reembolsarEnElProveedor,
+          consultarEstado: consultarEnElProveedor,
+        }),
       })
       .compile();
     app = moduleFixture.createNestApplication();
@@ -252,6 +268,7 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
   });
 
   beforeEach(() => {
+    consultarEnElProveedor.mockReset();
     reembolsarEnElProveedor.mockReset();
     reembolsarEnElProveedor.mockResolvedValue({
       aprobada: true,
@@ -803,5 +820,574 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
     expect(await refundsDe(ordenId)).toEqual([
       { correccion_venta_id: null, estado: 'aprobada' },
     ]);
+  });
+
+  describe('un reembolso que se reintenta no sale dos veces por el proveedor (ADR-029)', () => {
+    /** Lo que Transbank informaría de una orden de $100.000 con este saldo sin anular. */
+    const saldoEnTransbank = (saldo: string | null, estado: string) =>
+      consultarEnElProveedor.mockResolvedValue({
+        estado: 'pagada',
+        estadoProveedor: estado,
+        saldo,
+        response: { balance: saldo, status: estado },
+      });
+    const serieDe = async (ordenId: string) =>
+      (
+        await ds.query<
+          {
+            estado: string;
+            monto: string;
+            resolucion: string | null;
+            correccion_venta_id: string | null;
+          }[]
+        >(
+          `SELECT estado, monto::text AS monto, resolucion, correccion_venta_id
+             FROM pasarela_transacciones
+            WHERE orden_id = $1 AND tipo = 'REFUND' AND eliminado_el IS NULL
+            ORDER BY fecha_transaccion`,
+          [ordenId],
+        )
+      ).map((r) => ({
+        ...r,
+        monto: r.monto.replace(/\.0+$/, ''),
+        corregido: r.correccion_venta_id !== null,
+      }));
+
+    it('admin: dos POST iguales con la misma clave = un REFUND, una corrección, el proveedor llamado una vez; el segundo reproduce', async () => {
+      const venta = await ventaOnline();
+      const ordenId = await ordenCobrada(venta.id);
+      const clave = randomUUID();
+
+      const primero = await reembolsarAdmin(ordenId, { monto: '17000' }, clave);
+      const segundo = await reembolsarAdmin(ordenId, { monto: '17000' }, clave);
+
+      expect(primero.status).toBe(201);
+      expect(segundo.status).toBe(201);
+      expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(1);
+      const uno = primero.body as RespuestaReembolso & { repetida?: boolean };
+      const dos = segundo.body as RespuestaReembolso & { repetida?: boolean };
+      expect(uno.repetida).toBeUndefined();
+      expect(dos).toMatchObject({
+        repetida: true,
+        reembolsoAprobado: true,
+        notaCreditoId: uno.notaCreditoId,
+      });
+      expect(dos.reembolso.transaccionId).toBe(uno.reembolso.transaccionId);
+      expect(await serieDe(ordenId)).toEqual([
+        expect.objectContaining({
+          estado: 'aprobada',
+          monto: '17000',
+          resolucion: 'proveedor',
+          corregido: true,
+        }),
+      ]);
+      expect(await correccionesDe(venta.id)).toHaveLength(1);
+    });
+
+    it('API: dos POST iguales con la misma clave = un REFUND, el proveedor llamado una vez', async () => {
+      const venta = await ventaOnline();
+      const ordenId = await ordenCobrada(venta.id);
+      const clave = randomUUID();
+
+      const primero = await reembolsarApi(ordenId, { monto: '17000' }, clave);
+      const segundo = await reembolsarApi(ordenId, { monto: '17000' }, clave);
+
+      expect(primero.status).toBe(201);
+      expect(segundo.status).toBe(201);
+      expect((segundo.body as { repetida?: boolean }).repetida).toBe(true);
+      expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(1);
+      expect(await serieDe(ordenId)).toHaveLength(1);
+      // La llave de API no tiene usuario: la clave queda a nombre de la llave.
+      const [reclamo] = await ds.query<
+        { usuario_id: string | null; api_key_id: string | null }[]
+      >(
+        `SELECT usuario_id, api_key_id FROM solicitudes_idempotentes
+          WHERE clave = $1 AND eliminado_el IS NULL`,
+        [clave],
+      );
+      expect(reclamo.usuario_id).toBeNull();
+      expect(reclamo.api_key_id).toEqual(expect.any(String));
+    });
+
+    it('la clave es por actor: la misma clave por el admin y por la llave de API son dos intentos', async () => {
+      const venta = await ventaOnline();
+      const ordenId = await ordenCobrada(venta.id);
+      const clave = randomUUID();
+
+      expect(
+        (await reembolsarAdmin(ordenId, { monto: '17000' }, clave)).status,
+      ).toBe(201);
+      expect(
+        (await reembolsarApi(ordenId, { monto: '17000' }, clave)).status,
+      ).toBe(201);
+
+      expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(2);
+      expect(await serieDe(ordenId)).toHaveLength(2);
+    });
+
+    it('duplicado concurrente: el segundo espera al primero y reproduce; el proveedor se llama una vez', async () => {
+      const venta = await ventaOnline();
+      const ordenId = await ordenCobrada(venta.id);
+      const clave = randomUUID();
+      reembolsarEnElProveedor.mockImplementation(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () =>
+                resolve({
+                  aprobada: true,
+                  codigoRespuesta: '0',
+                  codigoAutorizacion: 'AUT-E2E',
+                  tipoPago: 'VD',
+                  request: {},
+                  response: {},
+                }),
+              300,
+            ),
+          ),
+      );
+
+      const [a, b] = await Promise.all([
+        reembolsarAdmin(ordenId, { monto: '17000' }, clave),
+        reembolsarAdmin(ordenId, { monto: '17000' }, clave),
+      ]);
+
+      expect([a.status, b.status]).toEqual([201, 201]);
+      expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(1);
+      expect(
+        [a.body, b.body].filter((r) => (r as { repetida?: boolean }).repetida),
+      ).toHaveLength(1);
+      expect(await serieDe(ordenId)).toHaveLength(1);
+    });
+
+    it('un 400 de negocio no deja rastro: el mismo intento corregido entra con la misma clave', async () => {
+      const venta = await ventaOnline();
+      const ordenId = await ordenCobrada(venta.id);
+      const clave = randomUUID();
+
+      const excedido = await reembolsarAdmin(
+        ordenId,
+        { monto: '100001' },
+        clave,
+      );
+      expect(excedido.status).toBe(400);
+      expect(reembolsarEnElProveedor).not.toHaveBeenCalled();
+      expect(await serieDe(ordenId)).toEqual([]);
+
+      // Cambió el monto: otra huella, pero la clave quedó libre (sin 422).
+      const corregido = await reembolsarAdmin(
+        ordenId,
+        { monto: '17000' },
+        clave,
+      );
+      expect(corregido.status).toBe(201);
+      expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(1);
+    });
+
+    it('otros datos con la misma clave: 422 con la orden, y la serie sigue con un solo REFUND', async () => {
+      const venta = await ventaOnline();
+      const ordenId = await ordenCobrada(venta.id);
+      const clave = randomUUID();
+
+      await reembolsarAdmin(ordenId, { monto: '17000' }, clave);
+      const otro = await reembolsarAdmin(ordenId, { monto: '20000' }, clave);
+
+      expect(otro.status).toBe(422);
+      expect(otro.body).toMatchObject({
+        message: expect.stringContaining('ya se había hecho con otros datos'),
+        ordenId,
+      });
+      expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(1);
+      expect(await serieDe(ordenId)).toHaveLength(1);
+    });
+
+    it('sin la cabecera: 400 por las dos rutas, sin tocar al proveedor', async () => {
+      const venta = await ventaOnline();
+      const ordenId = await ordenCobrada(venta.id);
+
+      const admin = await request(app.getHttpServer())
+        .post(`/api/pasarela/admin/ordenes/${ordenId}/reembolsos`)
+        .set(auth())
+        .send({ monto: '17000' });
+      const api = await request(app.getHttpServer())
+        .post(`/api/pasarela/api/cobros/${ordenId}/reembolsos`)
+        .set('Authorization', `Bearer ${apiKey}`)
+        .send({ monto: '17000' });
+
+      expect(admin.status).toBe(400);
+      expect(api.status).toBe(400);
+      expect(reembolsarEnElProveedor).not.toHaveBeenCalled();
+    });
+
+    describe('cuando Transbank devolvió la plata y no nos enteramos', () => {
+      it('el proceso falla DESPUÉS de que el proveedor aprobó: el reintento NO vuelve a llamar, aclara por saldo y deja la corrección', async () => {
+        const venta = await ventaOnline();
+        const ordenId = await ordenCobrada(venta.id);
+        const clave = randomUUID();
+        // Lo que sea que rompa tx1 después de la llamada: acá, cerrar la fila.
+        const transacciones = app.get(TransaccionesService);
+        const cierre = jest
+          .spyOn(transacciones, 'resolverReembolso')
+          .mockRejectedValueOnce(new Error('se cayó la base'));
+
+        const primero = await reembolsarAdmin(
+          ordenId,
+          { monto: '17000' },
+          clave,
+        );
+        cierre.mockRestore();
+        expect(primero.status).toBe(500);
+        expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(1);
+        // La plata salió y la fila lo dice como puede: sin confirmar.
+        expect(await serieDe(ordenId)).toEqual([
+          expect.objectContaining({ estado: 'iniciada', monto: '17000' }),
+        ]);
+
+        saldoEnTransbank('83000', 'PARTIALLY_NULLIFIED');
+        const reintento = await reembolsarAdmin(
+          ordenId,
+          { monto: '17000' },
+          clave,
+        );
+
+        expect(reintento.status).toBe(201);
+        expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(1);
+        expect(reintento.body).toMatchObject({
+          reembolsoAprobado: true,
+          repetida: true,
+          notaCreditoId: expect.any(String),
+        });
+        expect(await serieDe(ordenId)).toEqual([
+          expect.objectContaining({
+            estado: 'aprobada',
+            resolucion: 'saldo',
+            corregido: true,
+          }),
+        ]);
+        expect(await correccionesDe(venta.id)).toHaveLength(1);
+      });
+
+      it('Transbank no contesta: 502 sin confirmar; el reintento consulta, "no salió", y un intento nuevo sí sale', async () => {
+        const venta = await ventaOnline();
+        const ordenId = await ordenCobrada(venta.id);
+        const clave = randomUUID();
+        reembolsarEnElProveedor.mockRejectedValueOnce(
+          new ProviderComunicacionError('timeout', { url: 'tbk' }),
+        );
+
+        const primero = await reembolsarAdmin(
+          ordenId,
+          { monto: '17000' },
+          clave,
+        );
+        expect(primero.status).toBe(502);
+        expect(await serieDe(ordenId)).toEqual([
+          expect.objectContaining({ estado: 'iniciada' }),
+        ]);
+
+        saldoEnTransbank(null, 'AUTHORIZED');
+        const reintento = await reembolsarAdmin(
+          ordenId,
+          { monto: '17000' },
+          clave,
+        );
+        expect(reintento.status).toBe(201);
+        expect(reintento.body).toMatchObject({
+          reembolsoAprobado: false,
+          motivo: expect.stringContaining('Podés reembolsar de nuevo'),
+        });
+        expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(1);
+
+        // El mismo clic otra vez reproduce "no salió": no vuelve a consultar.
+        consultarEnElProveedor.mockClear();
+        const otraVez = await reembolsarAdmin(
+          ordenId,
+          { monto: '17000' },
+          clave,
+        );
+        expect(otraVez.status).toBe(201);
+        expect(otraVez.body).toMatchObject({
+          reembolsoAprobado: false,
+          repetida: true,
+        });
+        expect(consultarEnElProveedor).not.toHaveBeenCalled();
+
+        // La decisión de reintentar es de la persona: con una clave nueva sale.
+        const nuevo = await reembolsarAdmin(ordenId, { monto: '17000' });
+        expect(nuevo.status).toBe(201);
+        expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(2);
+        expect(await serieDe(ordenId)).toEqual([
+          expect.objectContaining({ estado: 'rechazada', resolucion: 'saldo' }),
+          expect.objectContaining({
+            estado: 'aprobada',
+            resolucion: 'proveedor',
+          }),
+        ]);
+      });
+
+      it('si el saldo no cuadra: 409 al portal por la misma clave y por una nueva; nada sale y la fila sigue sin confirmar', async () => {
+        const venta = await ventaOnline();
+        const ordenId = await ordenCobrada(venta.id);
+        const clave = randomUUID();
+        reembolsarEnElProveedor.mockRejectedValueOnce(
+          new ProviderComunicacionError('timeout', {}),
+        );
+        await reembolsarAdmin(ordenId, { monto: '17000' }, clave);
+        // Alguien devolvió $30.000 a mano desde el portal de Transbank.
+        saldoEnTransbank('70000', 'PARTIALLY_NULLIFIED');
+
+        const mismo = await reembolsarAdmin(ordenId, { monto: '17000' }, clave);
+        const otro = await reembolsarAdmin(ordenId, { monto: '10000' });
+
+        expect(mismo.status).toBe(409);
+        expect(otro.status).toBe(409);
+        expect((otro.body as { message: string }).message).toContain(
+          'portal de Transbank',
+        );
+        expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(1);
+        expect(await serieDe(ordenId)).toEqual([
+          expect.objectContaining({ estado: 'iniciada' }),
+        ]);
+      });
+
+      /** Deja un REFUND de $17.000 sin confirmar (Transbank no contestó) y devuelve su id. */
+      const pendienteDe17000 = async (
+        ordenId: string,
+        reembolsar = reembolsarAdmin,
+        body: Record<string, unknown> = { monto: '17000' },
+      ): Promise<string> => {
+        reembolsarEnElProveedor.mockRejectedValueOnce(
+          new ProviderComunicacionError('timeout', {}),
+        );
+        expect((await reembolsar(ordenId, body)).status).toBe(502);
+        const [fila] = await ds.query<{ transaccion_id: string }[]>(
+          `SELECT transaccion_id FROM pasarela_transacciones
+            WHERE orden_id = $1 AND tipo = 'REFUND' AND estado = 'iniciada'`,
+          [ordenId],
+        );
+        return fila.transaccion_id;
+      };
+      const aclarar = (ordenId: string) =>
+        request(app.getHttpServer())
+          .post(`/api/pasarela/admin/ordenes/${ordenId}/reembolsos/aclarar`)
+          .set(auth());
+      const marcar = (
+        ordenId: string,
+        transaccionId: string,
+        body: Record<string, unknown>,
+      ) =>
+        request(app.getHttpServer())
+          .post(
+            `/api/pasarela/admin/ordenes/${ordenId}/reembolsos/${transaccionId}/resolucion`,
+          )
+          .set(auth())
+          .send(body);
+
+      it('"Volver a consultar" aclara el pendiente desde la orden, sin otro reembolso', async () => {
+        const venta = await ventaOnline();
+        const ordenId = await ordenCobrada(venta.id);
+        await pendienteDe17000(ordenId);
+        saldoEnTransbank('83000', 'PARTIALLY_NULLIFIED');
+
+        const res = await aclarar(ordenId);
+
+        expect(res.status).toBe(201);
+        expect(res.body).toMatchObject({ aclarado: 'salio' });
+        expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(1);
+        expect(await serieDe(ordenId)).toEqual([
+          expect.objectContaining({
+            estado: 'aprobada',
+            resolucion: 'saldo',
+            corregido: true,
+          }),
+        ]);
+      });
+
+      it('si la consulta no lo aclara, el admin marca "Salió" con el código del portal: aprobado a mano, con su corrección, y la orden se destraba', async () => {
+        const venta = await ventaOnline();
+        const ordenId = await ordenCobrada(venta.id);
+        const pendiente = await pendienteDe17000(ordenId);
+        saldoEnTransbank('70000', 'PARTIALLY_NULLIFIED');
+        expect((await aclarar(ordenId)).status).toBe(409);
+
+        const sinCodigo = await marcar(ordenId, pendiente, { salio: true });
+        expect(sinCodigo.status).toBe(400);
+        const res = await marcar(ordenId, pendiente, {
+          salio: true,
+          codigoAutorizacion: '1213',
+        });
+
+        expect(res.status).toBe(201);
+        expect(res.body).toMatchObject({
+          reembolsoAprobado: true,
+          notaCreditoId: expect.any(String),
+        });
+        const [fila] = await ds.query<
+          { codigo_autorizacion: string; resuelta_por: string | null }[]
+        >(
+          `SELECT codigo_autorizacion, resuelta_por FROM pasarela_transacciones
+            WHERE transaccion_id = $1`,
+          [pendiente],
+        );
+        expect(fila).toEqual({
+          codigo_autorizacion: '1213',
+          resuelta_por: expect.any(String),
+        });
+        expect(await serieDe(ordenId)).toEqual([
+          expect.objectContaining({
+            estado: 'aprobada',
+            resolucion: 'manual',
+            corregido: true,
+          }),
+        ]);
+        // Destrabada: el reembolso siguiente sale sin consultar nada.
+        consultarEnElProveedor.mockClear();
+        expect(
+          (await reembolsarAdmin(ordenId, { monto: '10000' })).status,
+        ).toBe(201);
+        expect(consultarEnElProveedor).not.toHaveBeenCalled();
+      });
+
+      it('"No salió" a mano: rechazado, sin corrección; y el reintento con la clave vieja responde eso sin llamar', async () => {
+        const venta = await ventaOnline();
+        const ordenId = await ordenCobrada(venta.id);
+        const clave = randomUUID();
+        reembolsarEnElProveedor.mockRejectedValueOnce(
+          new ProviderComunicacionError('timeout', {}),
+        );
+        await reembolsarAdmin(ordenId, { monto: '17000' }, clave);
+        const [{ transaccion_id: pendiente }] = await ds.query<
+          { transaccion_id: string }[]
+        >(
+          `SELECT transaccion_id FROM pasarela_transacciones
+            WHERE orden_id = $1 AND tipo = 'REFUND'`,
+          [ordenId],
+        );
+
+        expect(
+          (await marcar(ordenId, pendiente, { salio: false })).status,
+        ).toBe(201);
+        consultarEnElProveedor.mockClear();
+        const reintento = await reembolsarAdmin(
+          ordenId,
+          { monto: '17000' },
+          clave,
+        );
+
+        expect(reintento.status).toBe(201);
+        expect(reintento.body).toMatchObject({ reembolsoAprobado: false });
+        expect(consultarEnElProveedor).not.toHaveBeenCalled();
+        expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(1);
+        expect(await serieDe(ordenId)).toEqual([
+          expect.objectContaining({
+            estado: 'rechazada',
+            resolucion: 'manual',
+            corregido: false,
+          }),
+        ]);
+      });
+
+      it('"Salió" y "No salió" a la vez sobre el mismo pendiente: gana uno, el otro da 409, y queda una sola resolución', async () => {
+        const venta = await ventaOnline();
+        const ordenId = await ordenCobrada(venta.id);
+        const pendiente = await pendienteDe17000(ordenId);
+
+        const [a, b] = await Promise.all([
+          marcar(ordenId, pendiente, {
+            salio: true,
+            codigoAutorizacion: '1213',
+          }),
+          marcar(ordenId, pendiente, { salio: false }),
+        ]);
+
+        expect([a.status, b.status].sort()).toEqual([201, 409]);
+        const serie = await serieDe(ordenId);
+        expect(serie).toHaveLength(1);
+        expect(serie[0].resolucion).toBe('manual');
+        expect(await correccionesDe(venta.id)).toHaveLength(
+          serie[0].estado === 'aprobada' ? 1 : 0,
+        );
+      });
+
+      it('la corrección de un pendiente pedido por la llave de API es de la llave (sin usuario), aunque lo aclare el admin', async () => {
+        const venta = await ventaOnlineConProducto();
+        const ordenId = await ordenCobrada(venta.id);
+        await pendienteDe17000(ordenId, reembolsarApi, {
+          monto: '7000',
+          devoluciones: [{ itemId: itemProducto, cantidad: '1' }],
+        });
+        saldoEnTransbank('93000', 'PARTIALLY_NULLIFIED');
+
+        const res = await aclarar(ordenId);
+
+        expect(res.status).toBe(201);
+        expect(res.body).toMatchObject({ aclarado: 'salio' });
+        const [refund] = await serieDe(ordenId);
+        expect(refund).toMatchObject({ estado: 'aprobada', corregido: true });
+        expect(
+          await movimientosDeDevolucion(refund.correccion_venta_id!),
+        ).toEqual([{ cantidad: '1.0000', usuario_id: null }]);
+      });
+
+      it('el reintento de uno que ya salió reproduce aunque la orden tenga OTRO sin confirmar que no se puede aclarar', async () => {
+        const venta = await ventaOnline();
+        const ordenId = await ordenCobrada(venta.id);
+        const clave = randomUUID();
+        expect(
+          (await reembolsarAdmin(ordenId, { monto: '10000' }, clave)).status,
+        ).toBe(201);
+        reembolsarEnElProveedor.mockRejectedValueOnce(
+          new ProviderComunicacionError('timeout', {}),
+        );
+        expect(
+          (await reembolsarAdmin(ordenId, { monto: '17000' })).status,
+        ).toBe(502);
+        saldoEnTransbank('50000', 'PARTIALLY_NULLIFIED');
+
+        const reintento = await reembolsarAdmin(
+          ordenId,
+          { monto: '10000' },
+          clave,
+        );
+        const nuevo = await reembolsarAdmin(ordenId, { monto: '5000' });
+
+        expect(reintento.status).toBe(201);
+        expect(reintento.body).toMatchObject({
+          repetida: true,
+          reembolsoAprobado: true,
+        });
+        expect(nuevo.status).toBe(409);
+        expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(2);
+      });
+
+      it('otro reembolso con clave nueva primero aclara el pendiente: salió, deja su corrección, y después sale el nuevo', async () => {
+        const venta = await ventaOnline();
+        const ordenId = await ordenCobrada(venta.id);
+        reembolsarEnElProveedor.mockRejectedValueOnce(
+          new ProviderComunicacionError('timeout', {}),
+        );
+        await reembolsarAdmin(ordenId, { monto: '17000' });
+        saldoEnTransbank('83000', 'PARTIALLY_NULLIFIED');
+
+        const nuevo = await reembolsarAdmin(ordenId, { monto: '10000' });
+
+        expect(nuevo.status).toBe(201);
+        expect(await serieDe(ordenId)).toEqual([
+          expect.objectContaining({
+            estado: 'aprobada',
+            monto: '17000',
+            resolucion: 'saldo',
+            corregido: true,
+          }),
+          expect.objectContaining({
+            estado: 'aprobada',
+            monto: '10000',
+            resolucion: 'proveedor',
+            corregido: true,
+          }),
+        ]);
+        expect(await correccionesDe(venta.id)).toHaveLength(2);
+      });
+    });
   });
 });

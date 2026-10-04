@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import Decimal from 'decimal.js'
+import {
+  colorEstadoTransaccion,
+  esSinConfirmar,
+  etiquetaEstadoTransaccion,
+} from '~/composables/useReembolsoPasarela'
 
 interface TransaccionOrden {
   transaccionId: string
@@ -51,6 +56,19 @@ const disponibleReembolso = computed(() => {
     .reduce((acc, t) => acc.plus(new Decimal(t.monto ?? '0')), new Decimal(0))
   return Decimal.max(0, new Decimal(orden.value.monto).minus(reembolsado)).toString()
 })
+
+// El reembolso que quedó sin confirmar (como mucho uno por orden, ADR-029).
+const reembolsoSinConfirmar = computed(() =>
+  orden.value?.transacciones.find(t => t.tipo === 'REFUND' && esSinConfirmar(t.estado)) ?? null,
+)
+
+function onSinConfirmarResuelto() {
+  if (!orden.value) return
+  const id = orden.value.ordenId
+  cargar(id).then(() => {
+    if (orden.value) emit('updated', { ordenId: id, estado: orden.value.estado })
+  })
+}
 
 const puedeReembolsar = computed(() =>
   !!orden.value
@@ -138,8 +156,12 @@ function onReembolsoSuccess(payload: {
   reembolsoOpen.value = false
   if (!orden.value) return
   orden.value.estado = payload.estado
-  if (payload.reembolso) {
-    orden.value.transacciones = [...orden.value.transacciones, payload.reembolso]
+  const reembolso = payload.reembolso
+  if (reembolso) {
+    // Un reintento reproducido o aclarado trae un REFUND que ya está en la
+    // lista (quizás "sin confirmar"): se reemplaza, no se suma otra fila.
+    const otras = orden.value.transacciones.filter(t => t.transaccionId !== reembolso.transaccionId)
+    orden.value.transacciones = [...otras, reembolso]
   }
   emit('updated', { ordenId: payload.ordenId, estado: payload.estado })
 }
@@ -282,6 +304,15 @@ function onReembolsoSuccess(payload: {
           </p>
         </UCard>
 
+        <OrdenesReembolsoSinConfirmar
+          v-if="reembolsoSinConfirmar && permissionsStore.can('Pasarelas', 'Reembolsar')"
+          :key="reembolsoSinConfirmar.transaccionId"
+          :orden-id="orden.ordenId"
+          :transaccion-id="reembolsoSinConfirmar.transaccionId"
+          :monto="reembolsoSinConfirmar.monto"
+          @resuelto="onSinConfirmarResuelto"
+        />
+
         <UCard>
           <template #header>
             <h2 class="text-base font-semibold">
@@ -296,7 +327,7 @@ function onReembolsoSuccess(payload: {
               {{ tipoLabel(row.original.tipo) }}
             </template>
             <template #estado-cell="{ row }">
-              <UBadge :color="estadoColor[row.original.estado] ?? 'neutral'" :label="row.original.estado" variant="subtle" size="sm" />
+              <UBadge :color="colorEstadoTransaccion(row.original.estado)" :label="etiquetaEstadoTransaccion(row.original.estado)" variant="subtle" size="sm" />
             </template>
             <template #monto-cell="{ row }">
               <span class="font-mono">{{ row.original.monto ? formatMonto(row.original.monto) : '—' }}</span>
@@ -346,5 +377,6 @@ function onReembolsoSuccess(payload: {
     :disponible="disponibleReembolso"
     :venta-id="orden.ventaId"
     @success="onReembolsoSuccess"
+    @otros-datos="() => orden && cargar(orden.ordenId)"
   />
 </template>

@@ -140,4 +140,43 @@ describe('OneclickProvider', () => {
       }),
     ).resolves.toBeUndefined();
   });
+
+  // ADR-029: el saldo es lo que aclara un reembolso sin confirmar.
+  it('consultarEstado devuelve el balance y el status del detalle (saldo null si no vino)', async () => {
+    const ref = { codigoOrden: 'O-1', tokenProveedor: null };
+    mockFetch(200, {
+      details: [{ status: 'PARTIALLY_NULLIFIED', balance: 83000 }],
+    });
+    expect(await provider.consultarEstado(cred, ref)).toMatchObject({
+      estadoProveedor: 'PARTIALLY_NULLIFIED',
+      saldo: '83000',
+    });
+    mockFetch(200, { details: [{ status: 'AUTHORIZED' }] });
+    expect(await provider.consultarEstado(cred, ref)).toMatchObject({
+      estado: 'pagada',
+      estadoProveedor: 'AUTHORIZED',
+      saldo: null,
+    });
+  });
+
+  it('reembolsar y consultarEstado van con timeout; vencerlo es comunicación, no rechazo', async () => {
+    const ref = { codigoOrden: 'O-1', tokenProveedor: null };
+    mockFetch(200, { type: 'NULLIFIED', response_code: 0, balance: 0 });
+    await provider.reembolsar(cred, { ...ref, monto: '1000' });
+    await provider.consultarEstado(cred, ref);
+    for (const [, init] of (global.fetch as jest.Mock).mock.calls as [
+      string,
+      { signal?: AbortSignal },
+    ][])
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+
+    global.fetch = jest.fn().mockRejectedValue(
+      Object.assign(new Error('The operation was aborted due to timeout'), {
+        name: 'TimeoutError',
+      }),
+    );
+    await expect(
+      provider.reembolsar(cred, { ...ref, monto: '1000' }),
+    ).rejects.toBeInstanceOf(ProviderComunicacionError);
+  });
 });

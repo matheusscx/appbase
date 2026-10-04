@@ -114,11 +114,11 @@ La huella ordena las `devoluciones`: el mismo pedido marcado en otro orden es la
   vive en la memoria de la pestaña, así que recargar la pierde (en el POS se pierde también el
   carrito; en el salón la cuenta ya cerrada rebota como antes; en el abono, un segundo abono
   sale si a la venta le queda saldo); y dos pestañas del mismo POS tienen claves distintas.
-- **El reembolso de la pasarela tampoco pasa por acá**, y queda un hueco: su nota es una por
-  `REFUND` (`correccion_venta_id`), pero el `REFUND` no es idempotente por intento (medido el
-  2026-10-03: dos `POST` iguales, dos `REFUND` aprobados). Es entrada propia en
-  `agent/pendientes.md` § 6, porque ahí la segunda llamada sale al proveedor y no es atómica con
-  el reclamo.
+- **El reembolso de la pasarela no usa `ejecutar`**, a propósito: su efecto es la plata que
+  devuelve Transbank, que no está en la transacción, y reclamar adentro de ella daba
+  at-least-once contra el proveedor. Usa `ejecutarConEfectoExterno` (misma tabla, misma huella,
+  reclamo commiteado antes de llamar): [ADR-029](029-reembolso-con-efecto-externo.md). Ahí la
+  alternativa de "estado en proceso + 409" que este ADR descartó se elige por la razón inversa.
 - **Webpay no pasa por acá.** `OnlineCallbackHandler` llama a `VentasService.crear` sin HTTP y
   sin clave: ya es idempotente por orden (ADR-009).
 - **El primer deploy tiene una ventana.** Backend y frontend son servicios separados en

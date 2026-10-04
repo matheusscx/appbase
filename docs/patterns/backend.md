@@ -1707,7 +1707,7 @@ seq scan igual —o casi—, así que un `EXPLAIN` sobre ella no distingue el pl
 ## 18. Operación idempotente (un cobro por intento)
 
 Todo endpoint que **cobra** —crea una venta, cierra una cuenta, registra un abono— o que
-**devuelve plata con un documento** —emite una nota de crédito— exige
+**devuelve plata** —emite una nota de crédito, reembolsa por la pasarela— exige
 `Idempotency-Key` y corre su operación dentro de `IdempotenciaService.ejecutar`
 ([ADR-026](../adr/026-idempotencia-de-cobros.md)). El reintento del cajero después de un corte
 reproduce la respuesta en vez de cobrar dos veces.
@@ -1750,6 +1750,13 @@ return this.idempotencia.ejecutar(
 - **Un llamador interno sin HTTP no pasa clave** (el callback de Webpay, las suscripciones):
   ya tienen su propia idempotencia o no hay nadie que reintente. Por eso el parámetro del
   service es opcional solo en `VentasService.crear`.
+- **Si el efecto NO está en la base** (la plata que devuelve Transbank), `ejecutar` no sirve:
+  reclamar adentro de la transacción del efecto es at-least-once contra el proveedor. Va
+  `ejecutarConEfectoExterno` ([ADR-029](../adr/029-reembolso-con-efecto-externo.md)): reclamo y
+  registro write-ahead commiteados en tx0, el efecto en tx1 con la fila del reclamo bloqueada,
+  y `resolverSinConfirmar` para el reintento cuyo reclamo quedó sin respuesta —que **nunca**
+  repite el efecto—. No se suma a una transacción activa (lanza). La clave puede ser de un
+  usuario o de una llave de API (`actor`).
 - **Tests:** el unitario mockea `ejecutar` como pasa-manos (`(_s, operar) => operar()`) y
   afirma sobre la solicitud que recibe (la huella, sin el PIN). Lo que importa de verdad
   —reclamo atómico, duplicado concurrente, rollback que suelta la clave— solo se prueba contra

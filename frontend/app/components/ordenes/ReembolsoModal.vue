@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import type { DetalleVentaDevolucion } from '~/composables/useDevolucionInventario'
+import {
+  ambitoReembolso,
+  avisoReembolsoRepetido,
+  ordenDeOtrosDatos,
+} from '~/composables/useReembolsoPasarela'
 
 const props = defineProps<{
   ordenId: string
@@ -13,6 +18,12 @@ export interface ReembolsoSuccessPayload {
   reembolsoAprobado?: boolean
   warning?: string
   notaCreditoId?: string
+  /** El reintento reprodujo (o aclaró) un reembolso que ya había salido. */
+  repetida?: boolean
+  /** Por qué no salió, cuando lo aclaró el saldo o nunca se envió. */
+  motivo?: string
+  /** Salió, pero la nota de crédito de la venta no quedó ligada. */
+  correccionPendiente?: boolean
   reembolso?: {
     transaccionId: string
     tipo: string
@@ -24,11 +35,14 @@ export interface ReembolsoSuccessPayload {
   }
 }
 
-const emit = defineEmits<{ success: [ReembolsoSuccessPayload] }>()
+const emit = defineEmits<{ success: [ReembolsoSuccessPayload], otrosDatos: [] }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const config = useRuntimeConfig()
 const toast = useToast()
+// Una clave por intento, por orden y por pestaña: sobrevive a cerrar y reabrir
+// el modal después de un corte, y el reintento no devuelve la plata dos veces.
+const intento = useIntentoCobro()
 const { formatMonto } = useFormatters()
 const apiUrl = config.public.apiUrl
 
@@ -76,16 +90,31 @@ const puedeConfirmar = computed(() => montoValido.value && filasValidas.value)
 
 async function confirmar() {
   submitting.value = true
+  const ambito = ambitoReembolso(props.ordenId)
   try {
     const body: Record<string, unknown> = { monto: monto.value }
     if (props.ventaId && devoluciones.value.length) body.devoluciones = devoluciones.value
 
     const res = await useApiFetch<ReembolsoSuccessPayload>(
       `${apiUrl}/pasarela/admin/ordenes/${props.ordenId}/reembolsos`,
-      { method: 'POST', body },
+      { method: 'POST', body, headers: intento.cabecera(ambito) },
     )
+    // Salió, se reprodujo o Transbank dijo que no: el intento terminó, y el
+    // próximo clic es un reembolso nuevo.
+    intento.terminar(ambito)
 
-    if (res.warning) {
+    if (!res.reembolsoAprobado) {
+      toast.add({ title: 'Transbank no hizo el reembolso', description: res.motivo, color: 'error' })
+    }
+    else if (res.repetida) {
+      toast.add({
+        title: avisoReembolsoRepetido(formatMonto(res.reembolso?.monto ?? monto.value)),
+        description: res.warning
+          ?? (res.correccionPendiente ? 'La nota de crédito de este reembolso no se generó.' : undefined),
+        color: 'warning',
+      })
+    }
+    else if (res.warning) {
       toast.add({ title: 'Reembolso procesado con advertencia', description: res.warning, color: 'warning' })
     }
     else if (res.notaCreditoId) {
@@ -98,6 +127,20 @@ async function confirmar() {
     emit('success', res)
   }
   catch (e: unknown) {
+    if (ordenDeOtrosDatos(e)) {
+      // Ya salió uno con otros datos: el aviso cierra el intento, el modal se
+      // cierra y la orden se recarga con lo que entró (decisión 2 del owner).
+      // Con el modal abierto, el disponible quedaba viejo y el clic siguiente
+      // devolvía de más.
+      intento.terminar(ambito)
+      toast.add({ title: apiErrorMsg(e, 'Este reembolso ya se había hecho con otros datos'), color: 'error' })
+      open.value = false
+      emit('otrosDatos')
+      return
+    }
+    // Cualquier otro error —también "sin confirmar"— deja la clave viva: el
+    // clic siguiente es el mismo intento y el backend lo aclara sin devolver
+    // dos veces.
     toast.add({ title: apiErrorMsg(e, 'Error al procesar el reembolso'), color: 'error' })
   }
   finally {

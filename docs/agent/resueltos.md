@@ -23,6 +23,103 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Un reembolso de pasarela que se reintenta no sale dos veces por el proveedor (cerrada 2026-10-04)
+
+Sale de [`pendientes.md`](pendientes.md) § 6 (fiscal y de plata, frente propio). La regla viva,
+en [ADR-029](../adr/029-reembolso-con-efecto-externo.md) y en
+[`pasarela-pagos.md`](../features/pasarela-pagos.md#un-reembolso-que-se-reintenta-no-sale-dos-veces-2026-10-04).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 6
+
+- [ ] **Un reembolso de pasarela que se reintenta sale dos veces por el proveedor** (fiscal y
+  plata, **frente propio**; anotado el 2026-10-03 por el frente de la nota de crédito
+  idempotente, que lo encontró leyendo y lo **midió** con un e2e temporal en
+  `pasarela-reembolso.e2e-spec.ts`). `POST /pasarela/admin/ordenes/:id/reembolsos` y
+  `POST /pasarela/api/cobros/:id/reembolsos` no tienen `Idempotency-Key`: dos `POST` iguales
+  seguidos de 17.000 sobre una orden de 100.000 respondieron **201 y 201**, con **dos `REFUND`
+  aprobados** y dos correcciones. Lo que ya existe (`correccion_venta_id`) hace única la nota
+  **por** `REFUND`, no el `REFUND` por intento. El tope por pago lo acota igual que acotaba a la
+  nota manual: el segundo rebota solo si el primero agotó lo devolvible. A diferencia de la nota
+  manual, acá la segunda vez **llama al proveedor**, así que la plata sale de verdad. Es el
+  mismo mecanismo (ADR-026, `IdempotenciaService.ejecutar`), pero con una diferencia que hay que
+  diseñar: el reclamo y la llamada al proveedor no son atómicos (el proveedor no está en la
+  transacción), y la API externa usa llave de API, sin usuario, así que la clave no puede ser
+  `(tenant, usuario, clave)` tal cual. Y qué ve el admin en el segundo clic es del owner.
+  **Cómo arrancarlo — DECIDIDO (owner, 2026-10-04, AskUserQuestion del frente con la escena de
+  una orden de $100.000 y un reembolso de $17.000; las cuatro eran la opción recomendada. Antes
+  de preguntar, la "Sesión de esfuerzo máximo" cruzó el diseño técnico y verificó la API de
+  Transbank: no acepta clave de idempotencia y el `GET` de estado trae `balance`):**
+  - **El reintento igual** se ve como un reembolso hecho —el modal se cierra y la orden muestra
+    el de $17.000 y $83.000 disponibles— más el aviso *"Este reembolso ya se había hecho: al
+    cliente le vuelven $17.000 una sola vez"*. Transbank no se llama de nuevo.
+  - **El reintento con otros datos** (cambió a $20.000 después del corte) se frena con *"Este
+    reembolso ya se había hecho con otros datos"*, el modal se cierra y la orden se recarga;
+    otro reembolso exige reabrir el modal (lo mismo que la nota de crédito). Descartado dejar el
+    modal abierto: mostraba $100.000 disponibles y el clic siguiente devolvía $20.000 más.
+  - **Si Transbank no contestó**, el reintento le consulta el saldo: si bajó en el monto del
+    intento, el reembolso salió y se registra (sin código de autorización, "confirmado por
+    saldo"); si no bajó, avisa *"no salió, podés reembolsar de nuevo"* y no reintenta solo; si
+    no cuadra o no se puede consultar, manda al portal de Transbank. Descartado mandar siempre al
+    portal: si salió, el sistema no tenía cómo registrarlo (sin REFUND ni nota de crédito).
+  - **Otro reembolso de la misma orden mientras uno está sin confirmar** primero aclara el
+    pendiente con la consulta; si no se aclara, se frena. Además de prudencia, es lo que deja
+    que el saldo diga cuál salió: con dos en duda ya no se puede saber.
+  - **El pendiente que la consulta no aclara** (alguien devolvió a mano desde el portal, Webpay
+    Plus pasados 7 días, Transbank no responde la consulta) — DECIDIDO (owner, 2026-10-04,
+    AskUserQuestion de la Sesión de esfuerzo máximo, que le llevó la duda de este frente; eligió
+    *"El admin lo marca"*, la recomendada, por sobre *"Lo resuelve soporte"* y *"Se deja pasar el
+    nuevo"*): la pantalla ofrece primero **volver a consultar**; si sigue sin aclararse, el admin
+    revisa el portal de Transbank y aprieta **"Salió"** (con el código de autorización que muestra
+    el portal) o **"No salió"**. "Salió" registra el `REFUND` aprobado y su corrección como
+    cualquier reembolso aprobado; "No salió" lo pasa a rechazado y destraba la orden. Queda quién
+    y cuándo (`resolucion = 'manual'`). Permiso: el de Reembolsar. Costo aceptado: construir el
+    botón; un admin puede marcar mal, y queda registrado con el código.
+  - **Técnico (Sesión de esfuerzo máximo, sin costo de negocio):** la clave se reclama
+    commiteada **antes** de llamar al proveedor (at-most-once; ADR nuevo que referencia a
+    ADR-026, que reclama dentro de la transacción), y en la API externa la clave es por llave
+    de API (`api_key_id`), no por usuario.
+
+### Cómo se cerró
+
+- **Backend:** las dos rutas de reembolso exigen `Idempotency-Key` (400 sin ella; en la API, por
+  llave). Corren en `IdempotenciaService.ejecutarConEfectoExterno`, variante nueva de `ejecutar`
+  que da at-most-once: el reclamo y el `REFUND` en `iniciada` se commitean **antes** de llamar a
+  Transbank; tx1 bloquea el reclamo y la orden, relee su `REFUND`, llama y lo cierra; el
+  reintento cuyo reclamo quedó sin respuesta se aclara por el `balance` de Transbank y nunca
+  vuelve a llamar a `reembolsar`. Otro reembolso de la orden aclara antes el pendiente.
+  `resolverReembolso` cierra un sin confirmar como compare-and-set (`resolucion`, quién, cuándo).
+  La fila guarda quién pidió el reembolso, y la corrección se le atribuye. Timeout de 30 s en
+  `reembolsar` y `consultarEstado`. Endpoints nuevos del admin: *Volver a consultar* y la marca
+  manual *Salió* (con código) / *No salió*. Esquema: `solicitudes_idempotentes` con `usuario_id`
+  nullable, `api_key_id` y `CHECK` de un actor; `pasarela_transacciones` con
+  `solicitud_idempotente_id`, `usuario_id`, `api_key_id`, `resolucion`, `resuelta_por`,
+  `resuelta_el`.
+- **Frontend:** `ReembolsoModal` manda la clave de `useIntentoCobro` (ámbito
+  `reembolso:<ordenId>`), avisa la reproducción, dice cuándo Transbank no hizo el reembolso (antes
+  decía "Reembolso procesado" también en el rechazo) y ante el 422 de otros datos cierra y hace
+  recargar la orden. El drawer de la orden muestra el aviso "sin confirmar" con *Volver a
+  consultar* y, si sigue, *Salió/No salió* (`ReembolsoSinConfirmar`); los dos drawers dicen "Sin
+  confirmar" en vez del estado crudo.
+- **Lo que lo fija, contra la serie de `REFUND` de la orden:** `pasarela-reembolso.e2e-spec.ts`,
+  bloque *"se reintenta"* —misma clave dos veces por admin y por API (fallaban antes del fix: 2
+  llamadas), clave por actor, duplicado concurrente, 400 que suelta la clave, 422 de otros datos,
+  400 sin cabecera, el proceso que cae después de que Transbank aprobó, Transbank que no contesta
+  ("no salió" y el intento nuevo), saldo que no cuadra (409 por las dos claves), aclarado previo,
+  *Volver a consultar*, marca manual *Salió*/*No salió*, las dos a la vez, y la corrección de un
+  pendiente de la llave de API—. Mutantes que mueren: reclamo dentro de la transacción del efecto
+  (ADR-026 tal cual: 4 e2e), sin relectura en tx1 (unitario), sin bloqueo de la decisión 4 (2
+  e2e), corrección atribuida a quien aclaró (3 unitarios). Unitarios de `ejecutarConEfectoExterno`,
+  del CAS, de `veredictoPorSaldo`, de los proveedores (saldo y timeout) y de las pantallas.
+- **Esquema sobre datos:** medido con 33 reclamos sembrados por `main`: `synchronize` recrea el
+  índice único por usuario (cambia la nulabilidad) dentro de su transacción con lock exclusivo,
+  sin instante sin unicidad, y el `CHECK` vale sobre las filas viejas.
+- **Lo que quedó afuera:** probar `balance` y el `buyOrder` de Oneclick en el sandbox real
+  (entrada nueva en [`pendientes.md`](pendientes.md) § 2); sanar un `REFUND` aprobado sin
+  corrección sigue siendo el botón "Generar nota" ya decidido (§ 3) —la reproducción lo marca con
+  `correccionPendiente` y no la crea—.
+
+---
+
 ## La nota de crédito lleva el receptor de la venta que corrige (cerrada 2026-10-04)
 
 Sale de [`pendientes.md`](pendientes.md) § 6. Frente fiscal propio. La regla viva está en

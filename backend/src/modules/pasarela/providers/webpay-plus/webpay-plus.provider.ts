@@ -7,6 +7,7 @@ import {
   ResultadoCobro,
   ResultadoEstado,
   ResultadoProvider,
+  TIMEOUT_LLAMADA_REEMBOLSO_MS,
 } from '../payment-provider.interface';
 
 const BASE_PATH = '/rswebpaytransaction/api/webpay/v1.2';
@@ -29,6 +30,7 @@ export class WebpayPlusProvider implements ProviderPagoRedirect {
     method: string,
     path: string,
     body?: Record<string, unknown>,
+    timeoutMs?: number,
   ): Promise<{
     status: number;
     json: Record<string, unknown>;
@@ -49,6 +51,8 @@ export class WebpayPlusProvider implements ProviderPagoRedirect {
           'Content-Type': 'application/json',
         },
         body: body ? JSON.stringify(body) : undefined,
+        // El aborto cae en el catch de abajo: comunicación, no rechazo.
+        signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
       });
     } catch (e) {
       throw new ProviderComunicacionError(
@@ -208,6 +212,7 @@ export class WebpayPlusProvider implements ProviderPagoRedirect {
       'POST',
       `/transactions/${encodeURIComponent(p.tokenProveedor)}/refunds`,
       body,
+      TIMEOUT_LLAMADA_REEMBOLSO_MS,
     );
     // Refund OK trae 'type' (REVERSED | NULLIFIED); response_code != 0 es rechazo.
     const aprobada = !!json.type;
@@ -238,25 +243,49 @@ export class WebpayPlusProvider implements ProviderPagoRedirect {
     referencia: { codigoOrden: string; tokenProveedor: string | null },
   ): Promise<ResultadoEstado> {
     if (!referencia.tokenProveedor)
-      return { estado: 'desconocido', response: {} };
+      return {
+        estado: 'desconocido',
+        estadoProveedor: null,
+        saldo: null,
+        response: {},
+      };
     const { status, json } = await this.request(
       cred,
       'GET',
       `/transactions/${encodeURIComponent(referencia.tokenProveedor)}`,
+      undefined,
+      TIMEOUT_LLAMADA_REEMBOLSO_MS,
     );
-    if (status === 404) return { estado: 'fallida', response: json };
+    if (status === 404)
+      return {
+        estado: 'fallida',
+        estadoProveedor: null,
+        saldo: null,
+        response: json,
+      };
     const detalle = (
       json.details as Record<string, unknown>[] | undefined
     )?.[0];
-    if (!detalle) return { estado: 'desconocido', response: json };
+    if (!detalle)
+      return {
+        estado: 'desconocido',
+        estadoProveedor: null,
+        saldo: null,
+        response: json,
+      };
+    const leido = {
+      estadoProveedor: detalle.status != null ? toStr(detalle.status) : null,
+      saldo: detalle.balance != null ? toStr(detalle.balance) : null,
+      response: json,
+    };
     if (detalle.status === 'AUTHORIZED' || detalle.status === 'CAPTURED')
-      return { estado: 'pagada', response: json };
+      return { estado: 'pagada', ...leido };
     if (
       detalle.status === 'FAILED' ||
       detalle.status === 'REVERSED' ||
       detalle.status === 'NULLIFIED'
     )
-      return { estado: 'fallida', response: json };
-    return { estado: 'desconocido', response: json };
+      return { estado: 'fallida', ...leido };
+    return { estado: 'desconocido', ...leido };
   }
 }

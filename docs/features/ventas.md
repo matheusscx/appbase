@@ -246,8 +246,8 @@ distintos con el mismo cuerpo = dos notas, porque la segunda devolución legíti
   muestra la nota que entró); y una segunda nota idéntica emitida en la misma pestaña justo
   después del corte se reproduce como la primera y pide un Confirmar más.
 - El reembolso de la pasarela llama al service sin clave: su nota ya es una por `REFUND`
-  (`correccion_venta_id`). El `REFUND` en sí **no** es idempotente por intento: entrada propia en
-  `agent/pendientes.md` § 6.
+  (`correccion_venta_id`). El `REFUND` en sí es idempotente por intento desde el 2026-10-04, con
+  su propia clave del lado de la pasarela ([ADR-029](../adr/029-reembolso-con-efecto-externo.md)).
 
 **Un producto con número de serie se vende eligiendo la unidad (2026-10-03).** Quien vende
 decide cuál sale; el servidor no elige. La línea de un producto en modo `serie` **tiene que traer

@@ -13,6 +13,7 @@ describe('TransaccionesService', () => {
     ),
     find: jest.fn().mockResolvedValue([]),
     update: jest.fn().mockResolvedValue({ affected: 1 }),
+    createQueryBuilder: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -102,5 +103,58 @@ describe('TransaccionesService', () => {
     await expect(
       service.vincularCorreccion('t-1', 'tx-refund', 'venta-nc'),
     ).resolves.toBe(false);
+  });
+
+  /**
+   * El CAS de ADR-029: la sentencia que cierra un REFUND sin confirmar exige
+   * el estado de origen en su propio WHERE. Un escritor tardío —venga de tx1,
+   * del aclarado o de la marca manual— no encuentra fila y no pisa el final.
+   */
+  describe('resolverReembolso', () => {
+    const qb = (affected: number) => {
+      const cadena = {
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        setParameter: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({ affected }),
+      };
+      repo.createQueryBuilder.mockReturnValue(cadena);
+      return cadena;
+    };
+    const resolver = () =>
+      service.resolverReembolso('t-1', 'tx-1', {
+        estado: 'aprobada',
+        resolucion: 'saldo',
+        resueltaPor: 'u-1',
+        metadata: { motivo: 'x' },
+      });
+
+    it('una sola sentencia, acotada a tenant, REFUND, sin borrar y SOLO desde iniciada/error', async () => {
+      const cadena = qb(1);
+
+      await expect(resolver()).resolves.toBe(true);
+
+      const condiciones = [
+        ...cadena.where.mock.calls,
+        ...cadena.andWhere.mock.calls,
+      ].map((c) => c[0] as string);
+      expect(condiciones).toEqual(
+        expect.arrayContaining([
+          'tenant_id = :tenantId',
+          "tipo = 'REFUND'",
+          "estado IN ('iniciada', 'error')",
+          'eliminado_el IS NULL',
+        ]),
+      );
+      expect(cadena.execute).toHaveBeenCalledTimes(1);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('si otro ya la cerró (0 filas), devuelve false: el llamador relee', async () => {
+      qb(0);
+      await expect(resolver()).resolves.toBe(false);
+    });
   });
 });
