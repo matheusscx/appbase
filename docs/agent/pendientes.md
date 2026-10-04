@@ -1161,6 +1161,26 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   descuento informado) en lenguaje de local. La forma de informar el descuento (los campos de la
   Res. 74/2020) es materia de la emisión, no de este hallazgo.
 
+- [ ] **Una venta de más de 135 UF a quien no es contribuyente de IVA exige boleta con la
+  identidad de quien paga, y el voucher no alcanza** (fiscal — **frente propio, con su propia
+  sesión**, ADR-010; lo encontró una investigación de la Sesión de esfuerzo máximo para el frente
+  "la NC lleva el receptor", 2026-10-04, y ella lo verificó en el PDF oficial:
+  [Res. Ex. SII 44/2025](https://www.sii.cl/normativa_legislacion/resoluciones/2025/reso44.pdf),
+  art. 92 ter del Código Tributario, Ley 21.713; la orquestadora no leyó el PDF). Lo que dice,
+  según esa lectura: una venta a una persona que **no** es contribuyente de IVA, por más de
+  **135 UF por operación** y pagada por cualquier medio, va con **boleta electrónica** que registre
+  nombres y apellidos, RUT y forma de pago de quien paga, con los bienes claramente informados
+  (resolutivo 1°). Quien opera solo con voucher tiene que inscribirse en un sistema de boleta
+  electrónica para esas ventas (2°). El umbral se fija **en pesos cada año** con la UF al 31 de
+  diciembre ($5.186.253,15 para 2025) (3°). La sanción es la del art. 97 N° 10 (4°). Rige desde el
+  1-sep-2025, con registro interno desde el 1-jun-2025 (5°). **Por qué toca al sistema (inferencias,
+  sin medir):** `venta_customer` es opcional en la boleta, y [ADR-028](../adr/028-emision-registrada-por-venta.md)
+  documenta con el voucher los pagos con máquina. Una venta de más de 135 UF con tarjeta quedaría
+  documentada solo con el voucher y sin identidad. **Antes de diseñar:** confirmar la lectura,
+  medir con un e2e que hoy el sistema lo permite, y llevarle al owner qué exige el POS sobre ese
+  umbral y de dónde sale el umbral (es dato anual, no una constante). En un restaurante es raro;
+  en retail (electrónica, muebles), no.
+
 - [ ] **Serie y lote están a medias, y cada camino decide por su cuenta si rechazar o aceptar y
   corromper** (backend + BD, auditoría `inventario` 2026-08-15) — dos caras del mismo hueco,
   agrupadas porque se deciden juntas:
