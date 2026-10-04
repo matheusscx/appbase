@@ -1141,25 +1141,28 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   con boleta "no afecta" (Oficio 734 vs. Oficios 1.750/2001 y 638/2009) pide algo más que el
   registro. Se lleva al owner con el análisis de la Sesión de esfuerzo máximo.
 
-- [ ] **Una venta de más de 135 UF a quien no es contribuyente de IVA exige boleta con la
-  identidad de quien paga, y el voucher no alcanza** (fiscal — **frente propio, con su propia
-  sesión**, ADR-010; lo encontró una investigación de la Sesión de esfuerzo máximo para el frente
-  "la NC lleva el receptor", 2026-10-04, y ella lo verificó en el PDF oficial:
-  [Res. Ex. SII 44/2025](https://www.sii.cl/normativa_legislacion/resoluciones/2025/reso44.pdf),
-  art. 92 ter del Código Tributario, Ley 21.713; la orquestadora no leyó el PDF). Lo que dice,
-  según esa lectura: una venta a una persona que **no** es contribuyente de IVA, por más de
-  **135 UF por operación** y pagada por cualquier medio, va con **boleta electrónica** que registre
-  nombres y apellidos, RUT y forma de pago de quien paga, con los bienes claramente informados
-  (resolutivo 1°). Quien opera solo con voucher tiene que inscribirse en un sistema de boleta
-  electrónica para esas ventas (2°). El umbral se fija **en pesos cada año** con la UF al 31 de
-  diciembre ($5.186.253,15 para 2025) (3°). La sanción es la del art. 97 N° 10 (4°). Rige desde el
-  1-sep-2025, con registro interno desde el 1-jun-2025 (5°). **Por qué toca al sistema (inferencias,
-  sin medir):** `venta_customer` es opcional en la boleta, y [ADR-028](../adr/028-emision-registrada-por-venta.md)
-  documenta con el voucher los pagos con máquina. Una venta de más de 135 UF con tarjeta quedaría
-  documentada solo con el voucher y sin identidad. **Antes de diseñar:** confirmar la lectura,
-  medir con un e2e que hoy el sistema lo permite, y llevarle al owner qué exige el POS sobre ese
-  umbral y de dónde sale el umbral (es dato anual, no una constante). En un restaurante es raro;
-  en retail (electrónica, muebles), no.
+- [ ] **La tienda online y la suscripción no piden RUT: una compra de más de 135 UF se rechaza**
+  (anotado 2026-10-04 al cerrar "Una venta de más de 135 UF…", ver [`resueltos.md`](resueltos.md)).
+  Sobre el umbral de la Res. Ex. SII 44/2025 la boleta lleva nombre y RUT de quien paga, y ni el
+  checkout de la tienda ni el alta de una suscripción los piden. Por decisión del owner
+  (2026-10-04, AskUserQuestion de la Sesión de esfuerzo máximo) esas compras dan **400 antes del
+  cobro** (`VentasService.exigirCompraOnlineBajoUmbral`, en `OnlineService.pagar` y en
+  `SuscripcionesService.crear`) y la pantalla nueva queda para acá. **Lo que hay que decidir:**
+  si la tienda pide nombre y RUT cuando el carrito pasa el umbral (y cómo viajan en la orden hasta
+  el callback de Webpay, que hoy congela solo el nombre del usuario), o si el rechazo alcanza.
+  En un restaurante es raro; en retail online (electrónica, muebles), no.
+
+- [ ] **El registro interno de la Res. Ex. SII 44/2025 no tiene export** (fiscal, **frente
+  propio**; anotado 2026-10-04 al cerrar "Una venta de más de 135 UF…"). La resolución
+  (resolutivo 5°) pide desde el 1-jun-2025 mantener a disposición del SII un registro de las
+  ventas sobre el umbral *"mientras su sistema de emisión de boletas se ajusta para identificar
+  al comprador"*, con las columnas del Anexo I: RUT del comprador, fecha, detalle de los
+  productos, monto total y folio de la boleta. Los datos ya quedan congelados en cada venta
+  (`venta_customer`, `venta_detalles`, `venta_documentos`); el export es formato y se difirió
+  (la Sesión de esfuerzo máximo, 2026-10-04; ADR-010). **Lo que hay que decidir:** si hace
+  falta mientras el sistema no emita al SII. Ojo: el folio de una boleta del sistema no existe
+  todavía (ADR-010); el detalle sale de `venta_detalles.descripcion`, que congela el nombre del
+  ítem al vender.
 
 - [ ] **Serie y lote están a medias, y cada camino decide por su cuenta si rechazar o aceptar y
   corromper** (backend + BD, auditoría `inventario` 2026-08-15) — dos caras del mismo hueco,

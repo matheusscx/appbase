@@ -13,6 +13,7 @@ import { TenantPasarelaService } from '../pasarela/services/tenant-pasarela.serv
 import { PagosRedirectService } from '../pasarela/services/pagos-redirect.service';
 import { ItemsService } from '../items/items.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { VentasService } from '../ventas/ventas.service';
 import {
   assertPresentacionPareada,
   resolverCantidadDesdePresentacion,
@@ -80,6 +81,7 @@ export class OnlineService {
     private readonly config: ConfigService,
     private readonly itemsService: ItemsService,
     private readonly catalogService: CatalogService,
+    private readonly ventasService: VentasService,
   ) {}
 
   async checkout(
@@ -123,6 +125,12 @@ export class OnlineService {
           'Este local todavía no tiene un medio de cobro online configurado',
         );
       const checkout = await this.checkout(tenantId, dto);
+      // La demo crea la venta después por `POST /ventas`, que también lo exige;
+      // se rechaza acá para que las dos ramas se comporten igual.
+      await this.ventasService.exigirCompraOnlineBajoUmbral(
+        tenantId,
+        checkout.resultado.totales.totalFinal,
+      );
       // El método lo resuelve el backend, igual que la rama Webpay: la pantalla
       // lo elegía sola por el nombre y caía en `metodos[0]`, sin mirar siquiera
       // si estaba habilitado. Un carrito de $0 no registra pago, así que ahí no
@@ -149,6 +157,8 @@ export class OnlineService {
       calcularDto,
     );
     const totalFinal = resultado.totales.totalFinal;
+    // Antes de Webpay: el callback crea la venta con el cobro ya hecho.
+    await this.ventasService.exigirCompraOnlineBajoUmbral(tenantId, totalFinal);
     const { metodoCreditoId, metodoDebitoId } =
       await this.resolverMetodosTarjeta(tenantId);
 

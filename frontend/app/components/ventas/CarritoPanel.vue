@@ -3,6 +3,7 @@ import type { CarritoLinea } from '~/composables/useVenta'
 import { customerVacio, puedeCobrar, tieneCustomerData, tipoDocumentoPorDefecto } from '~/composables/useVenta'
 import { unidadBaseItem } from '~/utils/cantidad-presentacion'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
+import { sobreUmbralIdentidad } from '~/composables/useReceptor'
 import type { CustomerForm } from './ClienteForm.vue'
 
 interface TipoDoc {
@@ -12,6 +13,8 @@ interface TipoDoc {
   esBoleta: boolean
   receptorCompleto: boolean
   rutChileno: boolean
+  /** Sobre este total la boleta lleva nombre y RUT de quien paga (Res. Ex. SII 44/2025). */
+  umbralIdentidad: string | null
 }
 
 const props = defineProps<{
@@ -49,10 +52,17 @@ const calculoVigente = computed(() => props.vigente ? props.resultado : null)
 const docSeleccionado = computed(() =>
   props.tiposDocumento.find((t) => t.id === tipoDocumentoId.value),
 )
-const customerRequerido = computed(() => docSeleccionado.value?.customerRequerido ?? false)
+// Sobre el umbral la boleta pide al cliente como la factura, aunque solo nombre
+// y RUT: abre el formulario y no deja cobrar sin ellos. Mide el último total
+// calculado (el servidor lo vuelve a exigir sobre el suyo).
+const sobreUmbral = computed(() =>
+  sobreUmbralIdentidad(props.resultado?.totales.totalFinal, docSeleccionado.value?.umbralIdentidad),
+)
+const customerRequerido = computed(() => (docSeleccionado.value?.customerRequerido ?? false) || sobreUmbral.value)
 const reglaReceptor = computed(() => ({
   receptorCompleto: docSeleccionado.value?.receptorCompleto ?? false,
   rutChileno: docSeleccionado.value?.rutChileno ?? false,
+  identidadPagador: sobreUmbral.value,
 }))
 const hasCustomerData = computed(() => tieneCustomerData(customer.value))
 
@@ -226,6 +236,11 @@ watch(clienteDrawerOpen, (open) => {
         class="mb-4"
         @click="abrirClienteDrawer"
       />
+      <!-- Sin el monto: el umbral lleva centavos ($5.363.274,60) y formatMonto lo redondea a la
+           escala de la moneda, que dice un umbral distinto del que rige. -->
+      <p v-if="sobreUmbral" data-qa="aviso-identidad-pagador" class="-mt-2 mb-4 text-xs text-muted">
+        Una boleta de más de 135 UF lleva el nombre y el RUT de quien paga.
+      </p>
       <div v-if="!lineas.length" class="text-center text-muted py-10 text-sm">
         Agregá ítems desde el catálogo.
       </div>

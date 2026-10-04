@@ -1100,6 +1100,21 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   cajero. El 2x1 sigue igual (la unidad gratis de un paquete es precio). **Costo aceptado:** un
   descuento de 99,99 % o dos que suman más del 100 % todavía dejan una línea en $0 sin IVA, y una
   campaña de "gratis" ya no se arma como promo automática.
+- **una boleta de más de 135 UF lleva el nombre y el RUT de quien paga.** Lo exige el SII desde
+  el 1-sep-2025 (Res. Ex. SII 44/2025, art. 92 ter del Código Tributario) para toda venta a quien
+  no es contribuyente de IVA, se pague como se pague. Un notebook de $6.000.000 no se cobra sin
+  nombre y RUT de quien paga: el POS los pide y salones también, solo cuando el total pasa el
+  umbral. Cuenta la venta entera, no cada pago (pagar $3.000.000 con tarjeta y $3.000.000 en
+  efectivo también la pasa), y también la que queda debiendo. La Factura no cambia: ya lleva su
+  receptor completo y la ley la acepta. El umbral es en pesos y cambia cada año
+  ($5.186.253,15 en 2025, $5.363.274,60 en 2026); lo carga el sistema, no el comercio. **No
+  obliga a emitir nada**, que sigue siendo del comercio: guarda un dato que después no se
+  recupera (owner, 2026-10-04, elegido frente a "avisa y deja cobrar" sabiendo que choca con
+  "el sistema no bloquea cerrar una venta sin documento", de más arriba).
+  Si algún pago es de la máquina, el voucher se registra igual y la pantalla avisa que el voucher
+  no lleva a quien paga, así que el comercio tiene que emitir la boleta electrónica con esos
+  datos (owner, 2026-10-04). La tienda online y la suscripción todavía no piden RUT: rechazan
+  esas compras antes de cobrar (`pendientes.md` § 6).
 
 Todo esto lo decidió el owner el 2026-10-01 con las investigaciones de
 `docs/agent/investigaciones/2026-10-01-*`.
@@ -1150,7 +1165,8 @@ Registra una venta completa en una sola transacción atómica:
    dirección y comuna, con los largos del SII (100, 40, 70 y 20 caracteres; el sistema no
    trunca, el cajero abrevia). En Chile, todo RUT que se escriba —también en una boleta— tiene
    que ser un RUT, y se guarda normalizado. Otros países: en pausa, exigen solo el nombre
-   (owner, 2026-10-03; detalle en `features/ventas.md`)
+   (owner, 2026-10-03; detalle en `features/ventas.md`). **Una boleta de más de 135 UF** exige
+   nombre y RUT de quien paga (ver arriba)
 5. Pagos (`pagos`): método, monto en moneda oficial, caja
 
 **Regla:** total por línea = valores unitarios × cantidad. Los descuentos/recargos/impuestos se calculan por unidad y se multiplican.

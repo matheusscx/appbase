@@ -605,3 +605,7 @@ máximo; detalle en [ADR-028](../adr/028-emision-registrada-por-venta.md#actuali
 - [ventas.md § El receptor de la Factura](./ventas.md) — el otro hecho fiscal que se congela en
   la venta: RUT, razón social, giro, dirección y comuna del receptor (2026-10-03). No es un
   impuesto, pero sin él la Factura no se puede emitir aunque los baldes estén bien.
+- [ventas.md § La boleta de más de 135 UF](./ventas.md) — otro hecho fiscal que no es un
+  impuesto (2026-10-04): sobre el umbral de la Res. Ex. SII 44/2025 la boleta congela nombre y
+  RUT de quien paga. El umbral se compara con `total_final`, IVA incluido, y nunca entra al
+  motor de precios ni a los baldes.

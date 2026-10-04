@@ -245,6 +245,20 @@ la consulta de la moneda oficial). **`documentarVenta` no suma lecturas nuevas**
 se insertan con un solo `save` del array. El alta de la venta, en cambio, sí suma una:
 `resolverTipoDocumento` (el tipo pedido y la boleta activa del país, en una sola consulta).
 
+### Sobre 135 UF el voucher se registra igual, y la venta congela a quien paga (2026-10-04)
+
+La Res. Ex. SII 44/2025 (art. 92 ter del Código Tributario) exige que una boleta de más de 135 UF
+registre nombre, apellidos y RUT de quien paga, y le pide al comercio que opera solo con voucher
+inscribirse en un sistema de boleta electrónica para esas ventas. El voucher no lleva a quien
+paga. Se evaluaron tres salidas: que la parte de la máquina pase a boleta del sistema (la máquina
+imprime igual su voucher, que vale como boleta: un duplicado como el de E1b), solo registrar, o
+registrar y avisar. El owner eligió la última (2026-10-04, AskUserQuestion de la Sesión de
+esfuerzo máximo): **`documentarVenta` no cambia**, el documento `maquina` queda como siempre, la
+identidad se exige y se congela en `venta_customer` al crear la venta, y la pantalla avisa que
+el comercio tiene que emitir la boleta con esos datos. El voucher y su modelo de emisión siguen
+siendo del comercio, como el resto de este ADR. Detalle y umbral en
+[`features/ventas.md`](../features/ventas.md).
+
 ## Consequences
 
 **Positivo**

@@ -8,6 +8,7 @@ import { TenantPasarelaService } from '../pasarela/services/tenant-pasarela.serv
 import { PagosRedirectService } from '../pasarela/services/pagos-redirect.service';
 import { ItemsService } from '../items/items.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { VentasService } from '../ventas/ventas.service';
 
 const UNIDADES = [
   { codigo: 'g', magnitud: 'masa', factorBase: '1' },
@@ -73,6 +74,9 @@ describe('OnlineService', () => {
   const catalog = {
     findAllUnidadesMedida: jest.fn().mockResolvedValue(UNIDADES),
   };
+  const ventas = {
+    exigirCompraOnlineBajoUmbral: jest.fn().mockResolvedValue(undefined),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -86,6 +90,7 @@ describe('OnlineService', () => {
         { provide: ConfigService, useValue: config },
         { provide: ItemsService, useValue: items },
         { provide: CatalogService, useValue: catalog },
+        { provide: VentasService, useValue: ventas },
       ],
     }).compile();
     service = module.get(OnlineService);
@@ -514,6 +519,49 @@ describe('OnlineService', () => {
       numeroCuotas: 0,
       tarjetaUltimos4: '6623',
       motivoRechazo: null,
+    });
+  });
+
+  /**
+   * Sobre el umbral de la Res. Ex. SII 44/2025 la boleta lleva nombre y RUT de
+   * quien paga, y la tienda no los pide. El callback de Webpay crea la venta con
+   * el cobro ya hecho: el rechazo tiene que ser antes de iniciar la orden.
+   */
+  describe('compra sobre el umbral de identidad', () => {
+    const sobreUmbral = () =>
+      ventas.exigirCompraOnlineBajoUmbral.mockRejectedValueOnce(
+        new BadRequestException('lleva el nombre y el RUT de quien paga'),
+      );
+
+    it('con Webpay: se rechaza con el total calculado, antes de iniciar la orden', async () => {
+      tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+      sobreUmbral();
+
+      await expect(
+        service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dto),
+      ).rejects.toThrow('RUT de quien paga');
+      expect(ventas.exigirCompraOnlineBajoUmbral).toHaveBeenCalledWith(
+        TENANT_ID,
+        '100.0000',
+      );
+      expect(pagosRedirect.iniciar).not.toHaveBeenCalled();
+    });
+
+    it('con la demo: se rechaza igual y no resuelve el método', async () => {
+      tenantPasarela.resolverConfiguracionActiva.mockRejectedValue(
+        new Error('no config'),
+      );
+      tenantPasarela.codigoActivo.mockResolvedValue(true);
+      sobreUmbral();
+
+      await expect(
+        service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dto),
+      ).rejects.toThrow('RUT de quien paga');
+      expect(ventas.exigirCompraOnlineBajoUmbral).toHaveBeenCalledWith(
+        TENANT_ID,
+        '100.0000',
+      );
+      expect(metodos.resolverMetodoCredito).not.toHaveBeenCalled();
     });
   });
 });

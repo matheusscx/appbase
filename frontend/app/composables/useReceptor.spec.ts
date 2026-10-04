@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizarRut, problemaDelReceptor, problemaDelReceptorDeNota, rutValido } from './useReceptor'
+import { normalizarRut, problemaDelReceptor, problemaDelReceptorDeNota, rutValido, sobreUmbralIdentidad } from './useReceptor'
 
 /**
  * Mismos casos que `backend/src/common/utils/rut.util.spec.ts`. Los DV salen de
@@ -85,6 +85,21 @@ describe('problemaDelReceptor', () => {
     )
   })
 
+  // Sobre el umbral de la Res. Ex. SII 44/2025 la boleta lleva nombre y RUT de
+  // quien paga, sin giro, dirección ni comuna.
+  it('la boleta sobre el umbral exige el RUT, y nada más que nombre y RUT', () => {
+    const sobreUmbral = { ...boleta, identidadPagador: true }
+    expect(
+      problemaDelReceptor({ nombre: 'Juana Pérez', rut: ' ', giro: '', direccion: '', comuna: '' }, sobreUmbral),
+    ).toBe('Una boleta de este monto lleva el RUT de quien paga')
+    expect(
+      problemaDelReceptor({ nombre: 'Juana Pérez', rut: '12.345.678-5', giro: '', direccion: '', comuna: '' }, sobreUmbral),
+    ).toBeNull()
+    expect(
+      problemaDelReceptor({ nombre: '', rut: '12.345.678-5', giro: '', direccion: '', comuna: '' }, sobreUmbral),
+    ).toBe('Falta el nombre o razón social del cliente')
+  })
+
   it('en otro país el RUT no se mira', () => {
     expect(problemaDelReceptor({ ...completo, rut: '20-12345678-9' }, otroPais)).toBeNull()
   })
@@ -116,5 +131,22 @@ describe('problemaDelReceptorDeNota', () => {
   it('nombre y RUT válido pasan; en otro país el DV no se mira', () => {
     expect(problemaDelReceptorDeNota({ nombre: 'Juan Pérez', rut: '12.345.678-5' }, true)).toBeNull()
     expect(problemaDelReceptorDeNota({ nombre: 'Juan Pérez', rut: '20-12345678-9' }, false)).toBeNull()
+  })
+})
+
+/** Gemela de `faltaIdentidadDelPagador` (backend): mismos bordes. */
+describe('sobreUmbralIdentidad', () => {
+  const UMBRAL = '5363274.60'
+
+  it('estricto: el umbral exacto no lo pasa; una centésima más, sí', () => {
+    expect(sobreUmbralIdentidad(UMBRAL, UMBRAL)).toBe(false)
+    expect(sobreUmbralIdentidad('5363274.61', UMBRAL)).toBe(true)
+    expect(sobreUmbralIdentidad('5363275.0000', UMBRAL)).toBe(true)
+    expect(sobreUmbralIdentidad('5363274.0000', UMBRAL)).toBe(false)
+  })
+
+  it('sin umbral (otro tipo, otro país) o sin total todavía, no', () => {
+    expect(sobreUmbralIdentidad('9999999', null)).toBe(false)
+    expect(sobreUmbralIdentidad(undefined, UMBRAL)).toBe(false)
   })
 })

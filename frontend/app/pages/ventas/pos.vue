@@ -2,7 +2,7 @@
 import Decimal from 'decimal.js'
 import type { EmisorMedio } from '~/composables/useDocumentosVenta'
 import { useVenta, customerVacio, descontarStockCatalogo, tieneCustomerData, tipoDocumentoPorDefecto, toVentaLineasBody, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
-import { problemaDelReceptor } from '~/composables/useReceptor'
+import { problemaDelReceptor, sobreUmbralIdentidad } from '~/composables/useReceptor'
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { UnidadElegida } from '~/composables/useUnidadesSerie'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
@@ -24,6 +24,7 @@ interface TipoDoc {
   esBoleta: boolean
   receptorCompleto: boolean
   rutChileno: boolean
+  umbralIdentidad: string | null
 }
 interface MetodoPago {
   metodoPagoId: string
@@ -162,6 +163,17 @@ function abrirCierreDrawer() { cierreDrawerOpen.value = true }
 
 const tieneCaja = computed(() => cajaStore.activa !== null)
 const totalFinal = computed(() => resultado.value?.totales.totalFinal ?? '0')
+/**
+ * La boleta pasó el umbral de la Res. Ex. SII 44/2025: lleva nombre y RUT de
+ * quien paga (el panel ya los pide) y el modal de cobro avisa si algún pago es
+ * de la máquina, porque el voucher no los lleva.
+ */
+const sobreUmbral = computed(() =>
+  sobreUmbralIdentidad(
+    totalFinal.value,
+    tiposDocumento.value.find((t) => t.id === tipoDocumentoId.value)?.umbralIdentidad,
+  ),
+)
 
 /** El modal de cobro pide el `totalFinal` que sale de `resultado`, y entre el
  *  último cambio del carrito y su cálculo hay una ventana (debounce + ida y
@@ -253,12 +265,13 @@ const estadoToastTitle: Record<string, string> = {
 
 async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
   const docSel = tiposDocumento.value.find((t) => t.id === tipoDocumentoId.value)
-  const incluirCustomer = docSel?.customerRequerido || customerExpandido.value
+  const incluirCustomer = docSel?.customerRequerido || customerExpandido.value || sobreUmbral.value
 
   const problema = incluirCustomer
     ? problemaDelReceptor(customer.value, {
         receptorCompleto: docSel?.receptorCompleto ?? false,
         rutChileno: docSel?.rutChileno ?? false,
+        identidadPagador: sobreUmbral.value,
       })
     : null
   if (problema) {
@@ -456,6 +469,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         :porcentaje-sugerido="propinaPorcentaje"
         :metodos="metodos"
         :submitting="submitting"
+        :sobre-umbral-identidad="sobreUmbral"
         @confirmar="confirmarCobro"
       />
       <CajaMovimientoDrawer

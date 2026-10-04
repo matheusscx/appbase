@@ -11,6 +11,7 @@ import { Db } from '../../common/db/db.service';
 import {
   MENSAJE_NOTA_CREDITO_OTROS_DATOS,
   VentasService,
+  faltaIdentidadDelPagador,
 } from './ventas.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import type { ConfigCalculo } from '../calculo-precios/calculo-precios.engine';
@@ -6789,5 +6790,61 @@ describe('VentasService', () => {
         ).rejects.toThrow(ForbiddenException);
       });
     });
+  });
+});
+
+/**
+ * La boleta sobre el umbral de la Res. Ex. SII 44/2025 lleva nombre y RUT de
+ * quien paga. El umbral y su año los resuelve el SQL (lo cubre el e2e
+ * `boleta-sobre-umbral`); acá, la regla sobre el total. Montos de 2026:
+ * $5.363.274,60, así que el primer peso entero que excede es 5.363.275.
+ */
+describe('faltaIdentidadDelPagador', () => {
+  const UMBRAL = '5363274.60';
+  const PAGADOR = { nombre: 'Juana Pérez Soto', rut: '12345678-5' };
+  const falta = (
+    over: Partial<Parameters<typeof faltaIdentidadDelPagador>[0]> = {},
+  ) =>
+    faltaIdentidadDelPagador({
+      esBoleta: true,
+      umbral: UMBRAL,
+      totalFinal: '5363275.0000',
+      customer: undefined,
+      ...over,
+    });
+
+  it('boleta sobre el umbral sin cliente: nombra el umbral en pesos', () => {
+    expect(falta()).toBe(
+      'Una boleta de más de $5.363.274,60 lleva el nombre y el RUT de quien ' +
+        'paga (Res. Ex. SII 44/2025)',
+    );
+  });
+
+  it('con nombre y RUT pasa', () => {
+    expect(falta({ customer: PAGADOR })).toBeNull();
+  });
+
+  it.each([
+    ['sin RUT', { nombre: PAGADOR.nombre }],
+    ['con RUT en blanco', { nombre: PAGADOR.nombre, rut: '  ' }],
+    ['con nombre en blanco', { nombre: '  ', rut: PAGADOR.rut }],
+  ])('%s no pasa', (_caso, customer) => {
+    expect(falta({ customer })).not.toBeNull();
+  });
+
+  // "Exceda" es estricto: el umbral exacto no lo excede. El peso de más sí,
+  // y también la fracción de más (un umbral con centavos).
+  it('justo en el umbral pasa; una centésima más, no', () => {
+    expect(falta({ totalFinal: UMBRAL })).toBeNull();
+    expect(falta({ totalFinal: '5363274.61' })).not.toBeNull();
+    expect(falta({ totalFinal: '5363274.0000' })).toBeNull();
+  });
+
+  it('una factura no pasa por acá (lleva su receptor completo)', () => {
+    expect(falta({ esBoleta: false })).toBeNull();
+  });
+
+  it('un país sin umbral no tiene la regla', () => {
+    expect(falta({ umbral: null })).toBeNull();
   });
 });

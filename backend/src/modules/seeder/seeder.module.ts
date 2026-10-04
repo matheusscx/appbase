@@ -29,6 +29,7 @@ import { RecargoTramo } from '../recargos/entities/recargo-tramo.entity';
 import { RecargoMetodoPago } from '../recargos/entities/recargo-metodo-pago.entity';
 import { MovimientoInventario } from '../inventario/entities/movimiento-inventario.entity';
 import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
+import { UmbralIdentidadPagador } from '../ventas/entities/umbral-identidad-pagador.entity';
 import { Tercero } from '../terceros/entities/tercero.entity';
 import { Caja } from '../caja/entities/caja.entity';
 import { Cajon } from '../cajones/entities/cajon.entity';
@@ -82,6 +83,7 @@ import { PromocionScopeItem } from '../promociones/entities/promocion-scope-item
       RecargoMetodoPago,
       MovimientoInventario,
       TipoDocumentoTributario,
+      UmbralIdentidadPagador,
       Tercero,
       Caja,
       Cajon,

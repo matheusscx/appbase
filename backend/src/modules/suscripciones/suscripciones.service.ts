@@ -121,6 +121,9 @@ export class SuscripcionesService {
       lineas: [{ itemId: dto.itemId, cantidad: '1' }],
     });
     const totalFinal = resultado.totales.totalFinal;
+    // 5b. Sobre el umbral de la Res. Ex. SII 44/2025, antes de cobrar: la venta
+    //     del paso 9 lo exigiría con la tarjeta ya cobrada.
+    await this.ventasService.exigirCompraOnlineBajoUmbral(tenantId, totalFinal);
 
     // 6. Método de pago contable (se registra en el pago de la venta)
     const metodoPagoId =

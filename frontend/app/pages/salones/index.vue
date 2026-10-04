@@ -2,6 +2,7 @@
 import Decimal from 'decimal.js'
 import { tipoDocumentoPorDefecto, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import type { EmisorMedio } from '~/composables/useDocumentosVenta'
+import { sobreUmbralIdentidad } from '~/composables/useReceptor'
 import { sugerirPropina, fetchPorcentajeSugerido, PROPINA_PORCENTAJE_DEFAULT } from '~/composables/usePropina'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import {
@@ -51,7 +52,15 @@ definePageMeta({
   layout: 'dashboard',
 })
 
-interface TipoDoc { id: string, nombre: string, customerRequerido: boolean, esBoleta: boolean }
+interface TipoDoc {
+  id: string
+  nombre: string
+  customerRequerido: boolean
+  esBoleta: boolean
+  rutChileno: boolean
+  /** Sobre este total la boleta lleva nombre y RUT de quien paga (Res. Ex. SII 44/2025). */
+  umbralIdentidad: string | null
+}
 interface MetodoPago {
   metodoPagoId: string
   nombre: string
@@ -156,6 +165,16 @@ const cobroCuenta = ref<CuentaDetalle | null>(null)
 const cobroMesa = ref<MesaResumen | null>(null)
 const cobroTotal = ref('0')
 /**
+ * Quién paga, solo cuando el total pasa el umbral de la Res. Ex. SII 44/2025:
+ * la boleta lleva su nombre y RUT (owner, 2026-10-04: en salones, un formulario
+ * mínimo y solo sobre el umbral). Vive lo que vive el modal, igual que la foto.
+ */
+const pagador = ref({ nombre: '', rut: '' })
+const boletaDelPais = computed(() => tiposDocumento.value.find((t) => t.esBoleta))
+const pedirPagador = computed(() =>
+  sobreUmbralIdentidad(cobroTotal.value, boletaDelPais.value?.umbralIdentidad),
+)
+/**
  * **La foto vive lo que vive el modal.** Sin esto `cobroCuenta` queda apuntando a
  * la última cuenta que se abrió a cobrar **para siempre** —`confirmarCobro` y el
  * *Cancelar* del propio modal solo apagan `cobroOpen`—, y cualquier cosa que
@@ -173,6 +192,7 @@ watch(cobroOpen, (abierto) => {
     cobroCuenta.value = null
     cobroMesa.value = null
     cobroTotal.value = '0'
+    pagador.value = { nombre: '', rut: '' }
   }
 })
 
@@ -2731,6 +2751,11 @@ function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     vuelto,
     propinaMonto: propinaMonto.value || '0',
     propinaSugerida: propinaSugerida.value || propinaMonto.value || '0',
+    // Antes de apagar `cobroOpen`, que vacía el formulario. El modal no deja
+    // confirmar sin nombre y RUT válidos; el servidor lo vuelve a exigir.
+    customer: pedirPagador.value
+      ? { nombre: pagador.value.nombre.trim(), rut: pagador.value.rut.trim() }
+      : undefined,
   }
   // **`submitting` se prende ACÁ**, y no adentro de `cerrarCuentaConPin`, que corre
   // después del PIN y del flush. Hasta el 2026-09-06 se prendía **solo** allá, así que en
@@ -2791,6 +2816,7 @@ async function cerrarCuentaConPin(
     vuelto: string
     propinaMonto: string
     propinaSugerida: string
+    customer?: { nombre: string, rut: string }
   },
   garzonId: string,
   pin: string,
@@ -2862,6 +2888,7 @@ async function cerrarCuentaConPin(
         ...credencialGarzon(garzonId, pin),
         pagos,
         tipoDocumentoId: tipoDocumentoPorDefecto(tiposDocumento.value),
+        ...(cobro.customer ? { customer: cobro.customer } : {}),
         propinaMonto: tipMonto,
         propinaSugerida: tipSugerida,
         propinaPorcentajeSugerido: propinaPorcentaje.value,
@@ -3402,8 +3429,12 @@ async function cerrarCuentaConPin(
         :venta-total="cobroTotal"
         v-model:propina-monto="propinaMonto"
         :porcentaje-sugerido="propinaPorcentaje"
+        v-model:pagador="pagador"
         :metodos="metodos"
         :submitting="submitting"
+        :pedir-pagador="pedirPagador"
+        :sobre-umbral-identidad="pedirPagador"
+        :rut-chileno="boletaDelPais?.rutChileno ?? false"
         @confirmar="confirmarCobro"
       />
 

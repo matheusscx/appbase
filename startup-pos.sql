@@ -143,6 +143,26 @@ CREATE UNIQUE INDEX "uq_tipo_documento_boleta_pais"
   ON "tipos_documento_tributario" ("pais_id")
   WHERE "es_boleta" = true AND "eliminado_el" IS NULL;
 
+-- Sobre cuánto una boleta lleva nombre y RUT de quien paga (Res. Ex. SII 44/2025, art. 92 ter
+-- del Código Tributario): 135 UF fijadas en pesos cada año. Catálogo global por país y año,
+-- sembrado por el sistema con su fuente; ningún endpoint lo escribe. Rige la fila del año de la
+-- venta y, si no hay, la del último anterior.
+CREATE TABLE "umbral_identidad_pagador" (
+  "umbral_id"      UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "pais_id"        UUID          NOT NULL,
+  "anio"           INTEGER       NOT NULL,
+  "monto"          NUMERIC(18,2) NOT NULL,
+  "fuente"         TEXT          NOT NULL,
+  "creado_el"      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "eliminado_el"   TIMESTAMPTZ,
+  CONSTRAINT chk_umbral_identidad_pagador_monto CHECK ("monto" > 0)
+);
+
+CREATE UNIQUE INDEX "uq_umbral_identidad_pagador_pais_anio"
+  ON "umbral_identidad_pagador" ("pais_id", "anio")
+  WHERE "eliminado_el" IS NULL;
+
 CREATE TABLE "metodos_pago" (
   "metodo_pago_id" UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   "nombre"         TEXT        NOT NULL,

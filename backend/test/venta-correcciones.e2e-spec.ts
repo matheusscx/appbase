@@ -1120,6 +1120,9 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
       const venta = await vender({
         lineas: [{ itemId: itemUnico, cantidad: '1' }],
         pagos: [{ metodoPagoId: DEBITO_ID, monto: mitad }],
+        // "Carísimo" pasa el umbral de la Res. Ex. SII 44/2025 (135 UF): la
+        // boleta lleva nombre y RUT de quien paga.
+        customer: { nombre: 'Cliente Correcciones E2E', rut: '12.345.678-5' },
       });
       expect(venta.estado).toBe('pagada_parcial');
       try {

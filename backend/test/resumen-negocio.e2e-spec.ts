@@ -21,6 +21,9 @@ const SEGUNDO_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
+// Los ítems "carísimos" de esta suite pasan el umbral de la Res. Ex. SII 44/2025
+// (135 UF): una boleta así lleva nombre y RUT de quien paga, o es un 400.
+const PAGADOR = { nombre: 'Cliente Resumen E2E', rut: '12.345.678-5' };
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
 const DEBITO_ID = '550e8400-e29b-41d4-a716-446655440106';
 /** Turno de la mañana del seed — mismo que usa `salones-anular-linea.e2e-spec.ts`. */
@@ -1393,6 +1396,7 @@ describe('Resumen del negocio (e2e)', () => {
 
       const venta = await post<VentaCreadaResponse>('/api/ventas', {
         lineas: [{ itemId: itemCaro.id, cantidad: '1' }],
+        customer: PAGADOR,
       });
 
       const despues = (await leerResumen(tokenAdmin))
@@ -1421,6 +1425,7 @@ describe('Resumen del negocio (e2e)', () => {
     ): Promise<VentaCreadaResponse> {
       const venta = await post<VentaCreadaResponse>('/api/ventas', {
         lineas: [{ itemId, cantidad }],
+        customer: PAGADOR,
       });
       await post('/api/pagos', {
         ventaId: venta.id,

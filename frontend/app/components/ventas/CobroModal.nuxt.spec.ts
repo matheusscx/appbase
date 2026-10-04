@@ -151,3 +151,54 @@ describe('CobroModal — el número del comprobante de la máquina', () => {
     ])
   })
 })
+
+// La boleta sobre el umbral de la Res. Ex. SII 44/2025 lleva nombre y RUT de
+// quien paga (owner, 2026-10-04): el voucher se registra igual y se avisa; en
+// salones el modal pide a quien paga.
+describe('CobroModal — boleta sobre el umbral de identidad', () => {
+  async function montarCon(metodos: Metodo[], extra: Record<string, unknown>) {
+    const wrapper = await mountSuspended(CobroModal, {
+      props: { total: '6000000', metodos, open: false, ...extra },
+    })
+    await wrapper.setProps({ open: true })
+    await esperar()
+    return wrapper
+  }
+  const botonConfirmar = () =>
+    [...dialogo().querySelectorAll('button')]
+      .find(b => b.textContent?.includes('Confirmar venta')) as HTMLButtonElement
+
+  it('avisa del voucher solo con un pago de la máquina', async () => {
+    await montarCon([TARJETA, EFECTIVO], { sobreUmbralIdentidad: true })
+    expect(dialogo().querySelector('[data-qa="aviso-voucher-umbral"]')).toBeTruthy()
+
+    document.body.innerHTML = ''
+    await montarCon([EFECTIVO, TARJETA], { sobreUmbralIdentidad: true })
+    expect(dialogo().querySelector('[data-qa="aviso-voucher-umbral"]')).toBeNull()
+  })
+
+  it('bajo el umbral no avisa, aunque pague con la máquina', async () => {
+    await montarCon([TARJETA], { sobreUmbralIdentidad: false })
+    expect(dialogo().querySelector('[data-qa="aviso-voucher-umbral"]')).toBeNull()
+  })
+
+  it('pidiendo a quien paga: sin nombre y RUT válido no confirma; con ellos, sí', async () => {
+    const wrapper = await montarCon([EFECTIVO], { pedirPagador: true, rutChileno: true })
+    expect(dialogo().querySelector('[data-qa="pagador"]')).toBeTruthy()
+    expect(botonConfirmar().disabled).toBe(true)
+
+    await wrapper.setProps({ pagador: { nombre: 'Juana Pérez', rut: '12.345.678-9' } })
+    await esperar()
+    expect(botonConfirmar().disabled).toBe(true)
+
+    await wrapper.setProps({ pagador: { nombre: 'Juana Pérez', rut: '12.345.678-5' } })
+    await esperar()
+    expect(botonConfirmar().disabled).toBe(false)
+  })
+
+  it('sin pedirPagador no hay formulario ni bloqueo', async () => {
+    await montarCon([EFECTIVO], {})
+    expect(dialogo().querySelector('[data-qa="pagador"]')).toBeNull()
+    expect(botonConfirmar().disabled).toBe(false)
+  })
+})

@@ -96,6 +96,56 @@ import { normalizarRut, rutValido } from '../../common/utils/rut.util';
 const CODIGO_ISO_CHILE = 'CL';
 
 /**
+ * El umbral de la Res. Ex. SII 44/2025 que rige hoy para el país `p` (alias de
+ * `pais`), con el año en la zona de la provincia `prov` (el mismo criterio que
+ * `diaNegocioTenant`, sin hora de corte: es año calendario). Sin fila del año,
+ * rige la del último anterior: la ley dice que el monto *"se mantendrá"*
+ * mientras no se dicte otro. Un país sin filas da `NULL`: no tiene la regla.
+ * Subconsulta escalar para sumarla a la lectura que ya pasa por el país, sin
+ * una consulta más.
+ */
+const UMBRAL_IDENTIDAD_SQL = `(SELECT u.monto
+     FROM umbral_identidad_pagador u
+    WHERE u.pais_id = p.pais_id AND u.eliminado_el IS NULL
+      AND u.anio <= EXTRACT(YEAR FROM now() AT TIME ZONE prov.zona_horaria)
+    ORDER BY u.anio DESC
+    LIMIT 1)`;
+
+/** El umbral en pesos como lo lee el cajero: `$5.363.274,60`. Sin `number`: es plata. */
+function montoUmbral(umbral: string): string {
+  const [entero, decimales] = new Decimal(umbral).toFixed(2).split('.');
+  return `$${entero.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${decimales}`;
+}
+
+/**
+ * Por qué una boleta no puede salir sin quien paga, o `null` si puede (Res. Ex.
+ * SII 44/2025, art. 92 ter del Código Tributario; spec
+ * `2026-10-04-identidad-del-pagador-sobre-135-uf`). Sobre el umbral —estricto:
+ * la norma dice *"exceda"*— la boleta lleva nombre y RUT de quien paga. Mide la
+ * operación entera (`total_final`, ya en moneda oficial, sin propina ni
+ * vuelto): el 92 ter prohíbe fraccionar, así que nunca se mide por pago. La
+ * Factura no pasa por acá: lleva su receptor completo y el 92 ter la acepta.
+ * El RUT ya llega validado y normalizado por `receptorDeLaVenta`.
+ *
+ * No obliga a emitir nada —eso sigue siendo del comercio (PRODUCTO § 10)—:
+ * captura un dato que después no se recupera (ADR-010; owner, 2026-10-04).
+ */
+export function faltaIdentidadDelPagador(args: {
+  esBoleta: boolean;
+  umbral: string | null;
+  totalFinal: string;
+  customer: { nombre?: string; rut?: string } | undefined;
+}): string | null {
+  if (!args.esBoleta || args.umbral === null) return null;
+  if (!new Decimal(args.totalFinal).gt(args.umbral)) return null;
+  if (args.customer?.nombre?.trim() && args.customer.rut?.trim()) return null;
+  return (
+    `Una boleta de más de ${montoUmbral(args.umbral)} lleva el nombre y el ` +
+    'RUT de quien paga (Res. Ex. SII 44/2025)'
+  );
+}
+
+/**
  * Ítem/cantidad que se acredita en una nota de crédito. Ya NO es "ítem a
  * devolver a stock": desde el 2026-09-04 cualquier ítem vendido se acredita por
  * línea y la reposición es una propiedad de la línea, no un requisito para
@@ -270,6 +320,12 @@ export interface TipoDocumentoResponse {
   receptorCompleto: boolean;
   /** El RUT del customer se valida con DV módulo 11. Ver `receptorDeLaVenta`. */
   rutChileno: boolean;
+  /**
+   * Sobre este total la boleta lleva nombre y RUT de quien paga
+   * (`faltaIdentidadDelPagador`). Solo en la boleta de un país con la regla;
+   * `null` en los demás tipos.
+   */
+  umbralIdentidad: string | null;
 }
 
 /**
@@ -909,6 +965,18 @@ export class VentasService {
         );
       }
     }
+
+    // 6b. Sobre el umbral de la Res. Ex. SII 44/2025 la boleta lleva quién
+    //     paga. Recién acá se conoce el total, y todavía no se escribió nada.
+    //     Online y suscripción lo chequean además ANTES de cobrar
+    //     (`exigirCompraOnlineBajoUmbral`): acá serían plata cobrada sin venta.
+    const faltaIdentidad = faltaIdentidadDelPagador({
+      esBoleta: tipoDocumento.esBoleta,
+      umbral: tipoDocumento.umbralIdentidad,
+      totalFinal: resultado.totales.totalFinal,
+      customer: tipoDocumento.customer,
+    });
+    if (faltaIdentidad) throw new BadRequestException(faltaIdentidad);
 
     // 7. Transacción atómica (manager recibido por parámetro)
     // 7a. Cabecera de venta (estado inicial PENDIENTE; se actualiza tras registrar pagos)
@@ -1893,6 +1961,8 @@ export class VentasService {
     id: string | null;
     esBoleta: boolean;
     customer: CustomerVentaDto | undefined;
+    /** Ver `faltaIdentidadDelPagador`. `null` si el tipo no es la boleta. */
+    umbralIdentidad: string | null;
   }> {
     const pedido = canal === 'online' ? null : (tipoDocumentoId ?? null);
     const leidas: {
@@ -1902,9 +1972,11 @@ export class VentasService {
       es_nota_credito: boolean;
       activo: boolean;
       customer_requerido: boolean;
+      umbral_identidad: string | null;
     }[] = await manager.query(
       `SELECT p.codigo_iso, td.tipo_documento_id, td.es_boleta,
-              td.es_nota_credito, td.activo, td.customer_requerido
+              td.es_nota_credito, td.activo, td.customer_requerido,
+              ${UMBRAL_IDENTIDAD_SQL} AS umbral_identidad
          FROM tenants t
          JOIN provincia prov ON prov.provincia_id = t.provincia_id
               AND prov.eliminado_el IS NULL
@@ -1946,6 +2018,7 @@ export class VentasService {
           id: null,
           esBoleta: false,
           customer: this.receptorDeLaVenta(customer, esChile, false),
+          umbralIdentidad: null,
         };
       }
     }
@@ -1963,6 +2036,7 @@ export class VentasService {
         esChile,
         tipo.customer_requerido,
       ),
+      umbralIdentidad: tipo.es_boleta ? (tipo.umbral_identidad ?? null) : null,
     };
   }
 
@@ -3675,13 +3749,15 @@ export class VentasService {
       customer_requerido: boolean;
       es_boleta: boolean;
       codigo_iso: string;
+      umbral_identidad: string | null;
     }[] = await this.db.query(
       `SELECT td.tipo_documento_id,
               td.nombre,
               td.codigo,
               td.customer_requerido,
               td.es_boleta,
-              p.codigo_iso
+              p.codigo_iso,
+              ${UMBRAL_IDENTIDAD_SQL} AS umbral_identidad
        FROM tenants t
        JOIN provincia prov ON prov.provincia_id = t.provincia_id
             AND prov.eliminado_el IS NULL
@@ -3702,7 +3778,49 @@ export class VentasService {
       receptorCompleto:
         r.customer_requerido === true && r.codigo_iso === CODIGO_ISO_CHILE,
       rutChileno: r.codigo_iso === CODIGO_ISO_CHILE,
+      umbralIdentidad: r.es_boleta ? (r.umbral_identidad ?? null) : null,
     }));
+  }
+
+  /**
+   * La tienda online y la suscripción **cobran antes de crear la venta**
+   * (callback de Webpay, `cobrosService.cobrar`), y ninguna de las dos pide RUT:
+   * una compra sobre el umbral de la Res. Ex. SII 44/2025 se rechaza acá,
+   * antes del cobro. El 400 de `crearEnTransaccion` en ese camino dejaría plata
+   * cobrada sin venta, que es lo que el owner quiso evitar.
+   *
+   * Así el callback solo ve compras bajo el umbral, y la barrera de
+   * `crearEnTransaccion` solo podría rechazar ahí si el umbral **baja** entre
+   * este chequeo y el callback: un cambio de año con una fila nueva menor, y la
+   * UF casi nunca baja de un año a otro. Si pasa, cae en "orden pagada sin
+   * venta", que es reconciliable.
+   *
+   * Siempre la boleta: online no puede traer otro tipo (`resolverTipoDocumento`).
+   */
+  async exigirCompraOnlineBajoUmbral(
+    tenantId: string,
+    totalFinal: string,
+  ): Promise<void> {
+    const rows: { umbral_identidad: string | null }[] = await this.db.query(
+      `SELECT ${UMBRAL_IDENTIDAD_SQL} AS umbral_identidad
+         FROM tenants t
+         JOIN provincia prov ON prov.provincia_id = t.provincia_id
+              AND prov.eliminado_el IS NULL
+         JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
+         JOIN tipos_documento_tributario td ON td.pais_id = p.pais_id
+              AND td.es_boleta = true AND td.activo = true
+              AND td.eliminado_el IS NULL
+        WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL`,
+      [tenantId],
+    );
+    const umbral = rows[0]?.umbral_identidad ?? null;
+    if (umbral !== null && new Decimal(totalFinal).gt(umbral)) {
+      throw new BadRequestException(
+        `Una compra de más de ${montoUmbral(umbral)} lleva el nombre y el RUT ` +
+          'de quien paga (Res. Ex. SII 44/2025), y la compra online todavía ' +
+          'no los pide: hacela en el local',
+      );
+    }
   }
 
   /**

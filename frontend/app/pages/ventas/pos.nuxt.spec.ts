@@ -122,6 +122,8 @@ let clavesDeVenta: (string | undefined)[] = []
 let respuestasVenta: (Error | { status: number, data: unknown } | Record<string, unknown>)[] = []
 /** Lo que devuelve `GET /tipos-documento`, en el orden del servidor (por nombre). */
 let tiposDocumentoMock: unknown[] = []
+/** El total que devuelve `POST /calculo-precios/calcular`; `null` = el `[]` de siempre. */
+let totalCalculoMock: string | null = null
 /** La página de catálogo que devuelve `GET /items`. */
 let itemsCatalogoMock: unknown[] = []
 /** Lo que devuelve `GET /items/:id/unidades` (las vendibles de un producto con serie). */
@@ -147,6 +149,21 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (ruta.endsWith('/tipos-documento')) {
       return Promise.resolve(tiposDocumentoMock)
+    }
+    if (ruta.endsWith('/calculo-precios/calcular') && totalCalculoMock !== null) {
+      return Promise.resolve({
+        lineas: [],
+        totales: {
+          subtotalNeto: totalCalculoMock,
+          totalDescuentos: '0',
+          totalRecargos: '0',
+          totalImpuestos: '0',
+          totalFinal: totalCalculoMock,
+        },
+        trazasVenta: { descuentos: [], recargos: [] },
+        advertencias: [],
+        advertenciasVenta: [],
+      })
     }
     if (ruta.endsWith('/impresoras/operacion')) {
       return Promise.resolve(impresorasBoleta)
@@ -200,6 +217,7 @@ beforeEach(() => {
   clavesDeVenta = []
   respuestasVenta = []
   tiposDocumentoMock = []
+  totalCalculoMock = null
   itemsCatalogoMock = []
   unidadesVendiblesMock = []
   urlsUnidades = []
@@ -716,5 +734,78 @@ describe('ventas/pos — producto con serie: el cajero elige qué unidad sale', 
 
     expect(lineasDelCarrito(wrapper)[0]!.unidades).toEqual([USADO])
     expect(lineasDelCarrito(wrapper)[0]!.cantidad).toBe('1')
+  })
+})
+
+describe('ventas/pos — boleta sobre el umbral de la Res. Ex. SII 44/2025', () => {
+  // El panel lo prueba `CarritoPanel.nuxt.spec.ts`; acá, lo que hace la página
+  // al cobrar: manda a quien paga aunque el cajero no haya abierto el
+  // formulario, frena sin RUT y le pasa al modal el aviso del voucher.
+  const notebook = {
+    id: 'item-nb',
+    nombre: 'Notebook',
+    descripcion: null,
+    precioBase: '6000000',
+    monedaId: 'clp',
+    monedaSimbolo: '$',
+    stock: null,
+    stockDisponible: null,
+    unidadMedida: 'unidad',
+    tipo: 'producto',
+    activo: true,
+  }
+  const pagador = (rut: string) => ({
+    nombre: 'Juana Pérez', rut, giro: '', direccion: '', comuna: '', telefono: '', email: '', terceroId: null,
+  })
+
+  async function carritoSobreElUmbral(total = '6000000') {
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    tiposDocumentoMock = [
+      { id: 'doc-boleta', nombre: 'Boleta de Venta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: true, umbralIdentidad: '5363274.60' },
+    ]
+    totalCalculoMock = total
+    itemsCatalogoMock = [notebook]
+    const wrapper = await montar()
+    await esperar(20)
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', notebook)
+    await esperar(500)
+    return wrapper
+  }
+  const cobrar = async (wrapper: Awaited<ReturnType<typeof montar>>) => {
+    wrapper.findComponent({ name: 'VentasCobroModal' }).vm
+      .$emit('confirmar', [{ metodoPagoId: 'mp-efectivo', monto: '6000000' }], '0')
+    await esperar(50)
+  }
+
+  it('manda nombre y RUT aunque el formulario no se haya expandido, y avisa al modal', async () => {
+    const wrapper = await carritoSobreElUmbral()
+    expect(wrapper.findComponent({ name: 'VentasCobroModal' }).props('sobreUmbralIdentidad')).toBe(true)
+
+    wrapper.findComponent({ name: 'VentasCarritoPanel' }).vm.$emit('update:customer', pagador('12.345.678-5'))
+    wrapper.findComponent({ name: 'VentasCarritoPanel' }).vm.$emit('update:customerExpandido', false)
+    await esperar(0)
+    await cobrar(wrapper)
+
+    expect(bodiesDeVenta).toHaveLength(1)
+    expect(bodiesDeVenta[0]).toMatchObject({ customer: { nombre: 'Juana Pérez', rut: '12.345.678-5' } })
+  })
+
+  it('sin RUT no sale el POST y lo dice', async () => {
+    const wrapper = await carritoSobreElUmbral()
+    wrapper.findComponent({ name: 'VentasCarritoPanel' }).vm.$emit('update:customer', pagador(''))
+    await esperar(0)
+    await cobrar(wrapper)
+
+    expect(bodiesDeVenta).toEqual([])
+    expect(toasts.some(t => t.title === 'Una boleta de este monto lleva el RUT de quien paga')).toBe(true)
+  })
+
+  it('bajo el umbral, sin cliente, cobra sin mandar cliente y sin avisar', async () => {
+    const wrapper = await carritoSobreElUmbral('5363274')
+    expect(wrapper.findComponent({ name: 'VentasCobroModal' }).props('sobreUmbralIdentidad')).toBe(false)
+    await cobrar(wrapper)
+
+    expect(bodiesDeVenta).toHaveLength(1)
+    expect(bodiesDeVenta[0]).not.toHaveProperty('customer')
   })
 })

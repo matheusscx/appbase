@@ -129,7 +129,7 @@ function ponerReadonly(e: Event) {
           @focusout="ponerReadonly"
         />
       </UFormField>
-      <UFormField label="RUT" :required="regla.receptorCompleto" :error="errorRut">
+      <UFormField label="RUT" :required="regla.receptorCompleto || regla.identidadPagador" :error="errorRut">
         <UInput
           v-model="model.rut"
           class="w-full"

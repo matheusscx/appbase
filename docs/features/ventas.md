@@ -40,19 +40,27 @@ Response (200):
     "nombre": "Boleta de Venta",
     "codigo": "39",
     "customerRequerido": false,
-    "esBoleta": true
+    "esBoleta": true,
+    "receptorCompleto": false,
+    "rutChileno": true,
+    "umbralIdentidad": "5363274.60"
   },
   {
     "id": "uuid",
     "nombre": "Factura Electrónica",
     "codigo": "33",
     "customerRequerido": true,
-    "esBoleta": false
+    "esBoleta": false,
+    "receptorCompleto": true,
+    "rutChileno": true,
+    "umbralIdentidad": null
   }
 ]
 ```
 
-Usada en el frontend para renderizar el selector de documento y aplicar fricción (cliente obligatorio en Factura, opcional en Boleta).
+Usada en el frontend para renderizar el selector de documento y aplicar fricción (cliente obligatorio en Factura, opcional en Boleta). `umbralIdentidad`
+viene solo en la boleta de un país con la regla (ver "La boleta de más de 135 UF…"); en los
+demás tipos, `null`.
 
 **El documento por defecto de las pantallas es el marcado `esBoleta`, nunca el primero de la lista**
 (`tipoDocumentoPorDefecto`, `useVenta.ts`): el orden es por nombre y la boleta no tiene por qué
@@ -112,6 +120,8 @@ Response (201):
   (el mensaje nombra lo que falta)
 - `400` — en Chile, un `customer.rut` que no es un RUT (rango o dígito verificador), en
   cualquier tipo de documento
+- `400` — una boleta de más del umbral de la Res. Ex. SII 44/2025 sin nombre y RUT de quien
+  paga (el mensaje nombra el umbral en pesos)
 - `400` — del pipe: razón social de más de 100 caracteres, giro de más de 40, dirección de más
   de 70 o comuna de más de 20 (los largos del SII; el sistema no trunca)
 - `400` — excedente de pago sin método con `permite_vuelto = true`
@@ -166,6 +176,34 @@ el país y valida con lo que el servidor le dice (`composables/useReceptor.ts`, 
 regla). El detalle (`GET /ventas/:id`) devuelve `giro` y `comuna` en `customer`. La nota de
 crédito lleva el receptor de la venta que corrige (o el que capture el cajero, o la marca "a
 nombre del emisor"): [reembolsos-nota-credito.md](reembolsos-nota-credito.md#la-nota-de-crédito-lleva-el-receptor-de-la-venta-que-corrige-2026-10-04).
+
+**La boleta de más de 135 UF lleva el nombre y el RUT de quien paga** (2026-10-04, frente
+fiscal propio; norma: [Res. Ex. SII 44/2025](https://www.sii.cl/normativa_legislacion/resoluciones/2025/reso44.pdf),
+art. 92 ter del Código Tributario; spec
+[`identidad-del-pagador-sobre-135-uf`](../superpowers/specs/2026-10-04-identidad-del-pagador-sobre-135-uf-design.md)).
+Si el tipo resuelto es la boleta y `total_final` **excede** el umbral (estricto, con Decimal),
+la venta sin `customer` con nombre y RUT es un 400 y no se escribe nada. Se mide la venta entera
+—ya en moneda oficial, sin propina ni vuelto—, nunca cada pago, y también la que queda
+pendiente. La Factura no pasa por acá: lleva su receptor completo y el 92 ter la acepta. El RUT
+pasa por la validación de siempre (`receptorDeLaVenta`).
+
+- **El umbral** vive en `umbral_identidad_pagador` (país, año, monto en moneda oficial con 2
+  decimales y la fuente): un catálogo global, sin `tenant_id`, que solo escribe el seeder. Rige
+  la fila del año de la venta en la zona de la provincia del tenant y, si no hay, la del último
+  año anterior (la ley: *"se mantendrá este monto"*). Un país sin filas no tiene la regla. Lo
+  trae `resolverTipoDocumento` en su misma lectura, sin una consulta más.
+- **El voucher se registra igual** (owner, 2026-10-04): `documentarVenta` no cambia, la
+  identidad queda en `venta_customer` y la pantalla de cobro avisa, si algún pago es de la
+  máquina, que el comercio tiene que emitir la boleta electrónica con esos datos.
+- **Online y suscripción cobran antes de crear la venta**, y no piden RUT: una compra sobre el
+  umbral se rechaza en `POST /online/pagar` y al crear la suscripción, **antes del cobro**
+  (`VentasService.exigirCompraOnlineBajoUmbral`). `crearEnTransaccion` lo exige igual para
+  todo canal; en el callback de Webpay solo podría rechazar si el umbral baja entre el chequeo y
+  el callback (un cambio de año con una fila nueva menor), y eso cae en "orden pagada sin venta",
+  que es reconciliable.
+- **El cierre de mesa** (`POST /cuentas/:id/cerrar`) pasa por la misma regla: el 400 deja la
+  cuenta abierta, y la pantalla de salones pide nombre y RUT en el modal de cobro solo cuando el
+  total pasa el umbral.
 
 Como toda venta nace con tipo, **el tipo ya no impide anular**: anular mira los documentos emitidos,
 ver `POST /ventas/:id/anular`.
@@ -928,6 +966,10 @@ con la regla del medio. Sin número se completa después desde el detalle de la 
   muestran el contador contra el largo del SII y no dejan pasar más; el cajero abrevia.
 - **RUT** (Chile): si se escribe, el campo avisa un dígito verificador malo y no deja cobrar,
   también en una boleta con datos del cliente.
+- **Boleta de más de 135 UF** (`umbralIdentidad`, `sobreUmbralIdentidad`): el cliente pasa a
+  obligatorio con nombre y RUT, el panel abre el formulario y lo dice, y "Cobrar" no se habilita
+  sin ellos. Con un pago de la máquina, el modal de cobro avisa que el voucher no lleva a quien
+  paga. En salones, el modal de cobro pide nombre y RUT solo sobre el umbral.
 - **Validación en cliente** vía `puedeCobrar()` → `problemaDelReceptor()` (`useReceptor.ts`),
   con la regla del tipo elegido (`receptorCompleto`, `rutChileno`). Es comodidad: el servidor
   rechaza con 400 lo mismo (ver "El receptor de la Factura, según el país").

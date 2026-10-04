@@ -110,6 +110,7 @@ import { LiquidacionPropinasFuente } from './modules/propinas/entities/liquidaci
 import { LiquidacionPropinasEvento } from './modules/propinas/entities/liquidacion-propinas-evento.entity';
 import { PagosModule } from './modules/pagos/pagos.module';
 import { TipoDocumentoTributario } from './modules/ventas/entities/tipo-documento-tributario.entity';
+import { UmbralIdentidadPagador } from './modules/ventas/entities/umbral-identidad-pagador.entity';
 import { Tercero } from './modules/terceros/entities/tercero.entity';
 import { TercerosModule } from './modules/terceros/terceros.module';
 import { OnlineModule } from './modules/online/online.module';
@@ -282,6 +283,7 @@ import { ReportesModule } from './modules/reportes/reportes.module';
           LiquidacionPropinasFuente,
           LiquidacionPropinasEvento,
           TipoDocumentoTributario,
+          UmbralIdentidadPagador,
           Tercero,
           Suscripcion,
           Pasarela,

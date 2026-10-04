@@ -33,6 +33,7 @@ import {
   NivelRegla,
 } from '../../common/enums/reglas.enums';
 import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
+import { UmbralIdentidadPagador } from '../ventas/entities/umbral-identidad-pagador.entity';
 import { Tercero } from '../terceros/entities/tercero.entity';
 import { Garzon } from '../garzones/entities/garzon.entity';
 import { PIN_INUTILIZABLE } from '../garzones/garzones.service';
@@ -119,6 +120,8 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly recargoMetodoPagoRepo: Repository<RecargoMetodoPago>,
     @InjectRepository(TipoDocumentoTributario)
     private readonly tipoDocumentoRepo: Repository<TipoDocumentoTributario>,
+    @InjectRepository(UmbralIdentidadPagador)
+    private readonly umbralIdentidadRepo: Repository<UmbralIdentidadPagador>,
     @InjectRepository(Tercero)
     private readonly terceroRepo: Repository<Tercero>,
     @InjectRepository(Caja)
@@ -200,6 +203,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedItemsAjuste();
     await this.seedPromociones();
     await this.seedTiposDocumentoTributario();
+    await this.seedUmbralIdentidadPagador();
     await this.seedTiposDocumentoCompra();
     await this.seedRazonesSociales();
     await this.seedUsuarioAdmin();
@@ -5183,6 +5187,56 @@ export class SeederService implements OnApplicationBootstrap {
       } else {
         await this.tipoDocumentoRepo.save({ ...existing, ...data });
       }
+    }
+  }
+
+  /**
+   * El umbral sobre el cual una boleta lleva el nombre y el RUT de quien paga
+   * (Res. Ex. SII 44/2025, resolutivo 3°): 135 UF fijadas en pesos con la UF
+   * al 31 de diciembre del año anterior. Lo carga el sistema cada año, con
+   * fuente, cuando hay valor oficial; si falta el año en curso rige el último
+   * anterior (ver `UmbralIdentidadPagador`). Solo Chile: los demás países no
+   * tienen esta regla.
+   *
+   * 2026 no tiene resolución propia en el índice del SII: sale de 135 × la UF
+   * del 31-12-2025, con el mismo método que da el valor de 2025 (135 ×
+   * $38.416,69, la UF del 31-12-2024 = $5.186.253,15, el de la resolución).
+   * IDs 456–457, reservados por la orquestadora el 2026-10-04.
+   */
+  private async seedUmbralIdentidadPagador(): Promise<void> {
+    const CHILE = '550e8400-e29b-41d4-a716-446655440000';
+    const umbrales: Partial<UmbralIdentidadPagador>[] = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440456',
+        paisId: CHILE,
+        anio: 2025,
+        monto: '5186253.15',
+        fuente:
+          'Res. Ex. SII 44/2025, resolutivo 3° ' +
+          '(https://www.sii.cl/normativa_legislacion/resoluciones/2025/reso44.pdf); ' +
+          '135 × UF 31-12-2024 $38.416,69 ' +
+          '(https://www.sii.cl/valores_y_fechas/uf/uf2024.htm)',
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440457',
+        paisId: CHILE,
+        anio: 2026,
+        monto: '5363274.60',
+        fuente:
+          '135 × UF 31-12-2025 $39.727,96 ' +
+          '(https://www.sii.cl/valores_y_fechas/uf/uf2025.htm), ' +
+          'método del resolutivo 3° de la Res. Ex. SII 44/2025',
+      },
+    ];
+    for (const data of umbrales) {
+      const existing = await this.umbralIdentidadRepo.findOne({
+        where: { id: data.id },
+      });
+      await this.umbralIdentidadRepo.save(
+        existing
+          ? { ...existing, ...data }
+          : this.umbralIdentidadRepo.create(data),
+      );
     }
   }
 

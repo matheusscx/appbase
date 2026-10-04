@@ -78,7 +78,7 @@ function montar(props: { lineas: CarritoLinea[], resultado: ResultadoVenta | nul
     global: { stubs },
     props: {
       ...props,
-      tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: false }],
+      tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: false, umbralIdentidad: null }],
       tieneCaja: true,
       customer: { nombre: '', rut: '', giro: '', direccion: '', comuna: '', telefono: '', email: '', terceroId: null },
     },
@@ -135,8 +135,8 @@ describe('CarritoPanel — "Vaciar todo" vuelve a la boleta, no al primero del c
    * se veía como "algo que limpiar".
    */
   const catalogo = [
-    { id: 'doc-acta', nombre: 'Acta de Entrega', customerRequerido: true, esBoleta: false, receptorCompleto: false, rutChileno: false },
-    { id: 'doc-boleta', nombre: 'Boleta de Venta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: false },
+    { id: 'doc-acta', nombre: 'Acta de Entrega', customerRequerido: true, esBoleta: false, receptorCompleto: false, rutChileno: false, umbralIdentidad: null },
+    { id: 'doc-boleta', nombre: 'Boleta de Venta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: false, umbralIdentidad: null },
   ]
 
   function montarConCatalogo(lineas: CarritoLinea[], tipoDocumentoId: string) {
@@ -190,7 +190,7 @@ describe('CarritoPanel — línea de un producto con serie', () => {
         lineas: [lineaSerie(), linea('item-1', 'Bebida')],
         resultado: null,
         vigente: true,
-        tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: false }],
+        tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: false, umbralIdentidad: null }],
         tieneCaja: true,
         customer: { nombre: '', rut: '', giro: '', direccion: '', comuna: '', telefono: '', email: '', terceroId: null },
       },
@@ -212,7 +212,7 @@ describe('CarritoPanel — línea de un producto con serie', () => {
         lineas: [linea('item-0', 'Papas'), lineaSerie()],
         resultado: null,
         vigente: true,
-        tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: false }],
+        tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: false, umbralIdentidad: null }],
         tieneCaja: true,
         customer: { nombre: '', rut: '', giro: '', direccion: '', comuna: '', telefono: '', email: '', terceroId: null },
       },
@@ -225,5 +225,61 @@ describe('CarritoPanel — línea de un producto con serie', () => {
     await boton!.trigger('click')
 
     expect(wrapper.emitted('cambiar-unidades')).toEqual([[1]])
+  })
+})
+
+describe('CarritoPanel — boleta sobre el umbral de la Res. Ex. SII 44/2025', () => {
+  // Montos de 2026: $5.363.274,60. "Exceda" es estricto: 5.363.274 no lo pasa.
+  const boleta = {
+    id: 'doc-boleta',
+    nombre: 'Boleta de Venta',
+    customerRequerido: false,
+    esBoleta: true,
+    receptorCompleto: false,
+    rutChileno: true,
+    umbralIdentidad: '5363274.60',
+  }
+  const resultadoDe = (totalFinal: string): ResultadoVenta => ({
+    ...resultadoConAvisoEn(-1, 1),
+    totales: { ...resultadoConAvisoEn(-1, 1).totales, totalFinal },
+    advertenciasVenta: [],
+  })
+  const cliente = (nombre: string, rut: string) => ({
+    nombre, rut, giro: '', direccion: '', comuna: '', telefono: '', email: '', terceroId: null,
+  })
+
+  function montarSobre(totalFinal: string, customer = cliente('', '')) {
+    return mountSuspended(CarritoPanel, {
+      global: { stubs: { ...stubs, VentasClienteDrawer: true } },
+      props: {
+        lineas: [linea('item-0', 'Notebook')],
+        resultado: resultadoDe(totalFinal),
+        vigente: true,
+        tiposDocumento: [boleta],
+        tieneCaja: true,
+        tipoDocumentoId: 'doc-boleta',
+        customer,
+      },
+    })
+  }
+  const cobrar = (wrapper: Awaited<ReturnType<typeof montarSobre>>) =>
+    wrapper.findAllComponents({ name: 'UButton' }).find(b => b.props('label') === 'Cobrar')!
+
+  it('un peso sobre el umbral sin cliente: avisa y no deja cobrar', async () => {
+    const wrapper = await montarSobre('5363275')
+    expect(wrapper.find('[data-qa="aviso-identidad-pagador"]').exists()).toBe(true)
+    expect(cobrar(wrapper).props('disabled')).toBe(true)
+  })
+
+  it('con nombre y sin RUT tampoco; con nombre y RUT válido, sí', async () => {
+    expect(cobrar(await montarSobre('5363275', cliente('Juana Pérez', ''))).props('disabled')).toBe(true)
+    expect(cobrar(await montarSobre('5363275', cliente('Juana Pérez', '12.345.678-9'))).props('disabled')).toBe(true)
+    expect(cobrar(await montarSobre('5363275', cliente('Juana Pérez', '12.345.678-5'))).props('disabled')).toBe(false)
+  })
+
+  it('bajo el umbral la boleta se cobra sin cliente y no avisa', async () => {
+    const wrapper = await montarSobre('5363274')
+    expect(wrapper.find('[data-qa="aviso-identidad-pagador"]').exists()).toBe(false)
+    expect(cobrar(wrapper).props('disabled')).toBe(false)
   })
 })

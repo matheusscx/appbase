@@ -58,7 +58,10 @@ describe('SuscripcionesService', () => {
   };
   let itemsServiceMock: { findOne: jest.Mock };
   let calculoPreciosServiceMock: { calcular: jest.Mock };
-  let ventasServiceMock: { crearEnTransaccion: jest.Mock };
+  let ventasServiceMock: {
+    crearEnTransaccion: jest.Mock;
+    exigirCompraOnlineBajoUmbral: jest.Mock;
+  };
   let metodosPagoServiceMock: { resolverMetodoCredito: jest.Mock };
   let inscripcionesServiceMock: { resolverMedioDeUsuario: jest.Mock };
   let cobrosServiceMock: { cobrar: jest.Mock; vincularVenta: jest.Mock };
@@ -92,6 +95,7 @@ describe('SuscripcionesService', () => {
       crearEnTransaccion: jest
         .fn()
         .mockResolvedValue({ id: 'venta-1', advertencias: [] }),
+      exigirCompraOnlineBajoUmbral: jest.fn().mockResolvedValue(undefined),
     };
     metodosPagoServiceMock = {
       resolverMetodoCredito: jest.fn().mockResolvedValue(METODO_PAGO_ID),
@@ -270,6 +274,24 @@ describe('SuscripcionesService', () => {
       );
       expect(ventasServiceMock.crearEnTransaccion).not.toHaveBeenCalled();
       expect(dataSourceMock.transaction).not.toHaveBeenCalled();
+    });
+
+    // Sobre el umbral de la Res. Ex. SII 44/2025 la venta exigiría nombre y RUT
+    // de quien paga, que la suscripción no pide: se rechaza antes de cobrar,
+    // no con la tarjeta ya cobrada.
+    it('sobre el umbral de identidad: 400 con el total del período y NO cobra', async () => {
+      ventasServiceMock.exigirCompraOnlineBajoUmbral.mockRejectedValueOnce(
+        new BadRequestException('lleva el nombre y el RUT de quien paga'),
+      );
+
+      await expect(service.crear(TENANT_ID, USUARIO_ID, dto)).rejects.toThrow(
+        'RUT de quien paga',
+      );
+      expect(
+        ventasServiceMock.exigirCompraOnlineBajoUmbral,
+      ).toHaveBeenCalledWith(TENANT_ID, '30000.0000');
+      expect(cobrosServiceMock.cobrar).not.toHaveBeenCalled();
+      expect(ventasServiceMock.crearEnTransaccion).not.toHaveBeenCalled();
     });
 
     it('timeout del proveedor (502) se propaga sin crear nada', async () => {

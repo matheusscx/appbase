@@ -23,6 +23,136 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Una boleta de más de 135 UF lleva el nombre y el RUT de quien paga (cerrada 2026-10-04)
+
+Sale de [`pendientes.md`](pendientes.md) § 6. Frente fiscal propio. La regla viva está en
+[`features/ventas.md`](../features/ventas.md) ("La boleta de más de 135 UF…"),
+[PRODUCTO](../PRODUCTO.md) § 10 y [ADR-028](../adr/028-emision-registrada-por-venta.md); spec:
+[`2026-10-04-identidad-del-pagador-sobre-135-uf-design.md`](../superpowers/specs/2026-10-04-identidad-del-pagador-sobre-135-uf-design.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 6
+
+- [ ] **Una venta de más de 135 UF a quien no es contribuyente de IVA exige boleta con la
+  identidad de quien paga, y el voucher no alcanza** (fiscal — **frente propio, con su propia
+  sesión**, ADR-010; lo encontró una investigación de la Sesión de esfuerzo máximo para el frente
+  "la NC lleva el receptor", 2026-10-04, y ella lo verificó en el PDF oficial:
+  [Res. Ex. SII 44/2025](https://www.sii.cl/normativa_legislacion/resoluciones/2025/reso44.pdf),
+  art. 92 ter del Código Tributario, Ley 21.713; la orquestadora no leyó el PDF). Lo que dice,
+  según esa lectura: una venta a una persona que **no** es contribuyente de IVA, por más de
+  **135 UF por operación** y pagada por cualquier medio, va con **boleta electrónica** que registre
+  nombres y apellidos, RUT y forma de pago de quien paga, con los bienes claramente informados
+  (resolutivo 1°). Quien opera solo con voucher tiene que inscribirse en un sistema de boleta
+  electrónica para esas ventas (2°). El umbral se fija **en pesos cada año** con la UF al 31 de
+  diciembre ($5.186.253,15 para 2025) (3°). La sanción es la del art. 97 N° 10 (4°). Rige desde el
+  1-sep-2025, con registro interno desde el 1-jun-2025 (5°). **Por qué toca al sistema (inferencias,
+  sin medir):** `venta_customer` es opcional en la boleta, y [ADR-028](../adr/028-emision-registrada-por-venta.md)
+  documenta con el voucher los pagos con máquina. Una venta de más de 135 UF con tarjeta quedaría
+  documentada solo con el voucher y sin identidad. **Antes de diseñar:** confirmar la lectura,
+  medir con un e2e que hoy el sistema lo permite, y llevarle al owner qué exige el POS sobre ese
+  umbral y de dónde sale el umbral (es dato anual, no una constante). En un restaurante es raro;
+  en retail (electrónica, muebles), no.
+  **Medido (2026-10-04, frente propio):** la sesión del frente leyó el PDF entero y confirma la
+  lectura, con matices: el art. 92 ter acepta como respaldo *"cualquier documento que registre la
+  identidad del pagador ... o en una factura"* (la Factura ya lleva receptor); "exceda" es
+  estricto; 2025 y 2026 quedan en 135 UF por ley (considerando 4°). Un e2e sobre una venta de
+  $6.000.000 en Paris pasó con 201 en los cuatro casos: crédito con emisor `maquina` sin cliente
+  (un solo documento `maquina`, sin `venta_customer`), efectivo sin cliente (boleta del sistema sin
+  identidad), cliente con nombre y sin RUT, y pendiente sin pagos y sin cliente.
+  **Decidido (2026-10-04, por la Sesión de esfuerzo máximo, canal de dudas fiscales):**
+  1. **Sobre el umbral, una boleta pide nombre y RUT de quien paga; sin ellos no se cobra** —
+     owner, en un AskUserQuestion de la Sesión de esfuerzo máximo: *"Pide nombre y RUT"*
+     (recomendada) por sobre *"Avisa y deja cobrar"*. Se le presentó la tensión con "el sistema no
+     impone la emisión" (PRODUCTO § 10) y la eligió sabiéndolo: **no obliga a emitir nada**, que
+     sigue siendo del comercio; captura un dato que después no se recupera (ADR-010).
+  2. **Canales** (owner, la misma opción): POS con su formulario de cliente; salones, un formulario
+     mínimo (nombre + RUT) solo cuando el total pasa el umbral; online y suscripción, 400 claro y
+     sin pantalla nueva en la tienda (entrada aparte). La sesión del frente midió que los dos
+     cobran **antes** de crear la venta, así que el 400 va antes del cobro.
+  3. **El voucher de la máquina se registra y la pantalla avisa** — owner, mismo AskUserQuestion:
+     *"Registra y avisa"* (recomendada) por sobre *"Boleta del sistema además"* y *"Solo
+     registrar"*. El documento `maquina` queda como siempre, la identidad queda congelada en la
+     venta, y la pantalla avisa que sobre 135 UF el comercio emite la boleta electrónica con esos
+     datos. El voucher y su modelo de emisión son del comercio (resolutivo 2°).
+  4. **El umbral es una tabla global por país y año**, en moneda oficial con los 2 decimales que
+     publica el SII, sembrada por el sistema; se usa la fila del año de la venta en la zona horaria
+     del tenant y, si no hay, la del último año anterior (*"se mantendrá este monto"*). `total_final
+     > umbral`, estricto — la Sesión de esfuerzo máximo. 2026 se carga con fuente: 135 × UF del
+     31-12-2025 ($39.727,96, tabla UF 2025 del SII) = $5.363.274,60; el método se verificó contra
+     2025 (135 × $38.416,69 = $5.186.253,15, el valor de la resolución).
+  5. **"No contribuyente de IVA" se infiere del tipo**: la boleta se trata como venta a no
+     contribuyente; la Factura ya cumple el 92 ter — la Sesión de esfuerzo máximo.
+  6. **El registro interno se difiere**: los datos quedan congelados y el export del Anexo I es
+     formato (ADR-010) — la Sesión de esfuerzo máximo.
+  7. **Se mide la operación entera**: `total_final` en moneda oficial, sin propina ni vuelto, sin
+     partir por pago, también la pendiente o fiada — la Sesión de esfuerzo máximo.
+
+### Qué se hizo
+
+- **La norma, en la fuente.** La sesión del frente leyó entero el PDF de la Res. Ex. SII 44/2025
+  y verificó el método del umbral contra la tabla de UF del SII: 135 × $38.416,69 (UF del
+  31-12-2024) = $5.186.253,15, el valor de la resolución. El de 2026 sale igual: 135 × $39.727,96
+  (UF del 31-12-2025) = $5.363.274,60. No hay resolución de diciembre 2025 en el índice del SII.
+- **Backend:** tabla global `umbral_identidad_pagador` (país, año, monto en moneda oficial con 2
+  decimales, fuente), sin `tenant_id` y sin endpoint que la escriba; sembrada para Chile 2025 y
+  2026 (IDs 456–457) con las URLs de la fuente. Rige la fila del año en la zona horaria de la
+  provincia del tenant y, sin ella, la del último anterior. `resolverTipoDocumento` la trae en
+  la misma lectura (subconsulta escalar, sin ida nueva a la base); `crearEnTransaccion` exige
+  nombre y RUT con el total ya calculado y antes de escribir nada (`faltaIdentidadDelPagador`,
+  Decimal, estricto). Online y suscripción rechazan **antes del cobro**
+  (`exigirCompraOnlineBajoUmbral`). `GET /tipos-documento` suma `umbralIdentidad` a la boleta.
+  `documentarVenta` no cambió: el voucher se registra como siempre.
+- **Dos suites ajenas se adaptaron**, porque la regla las alcanza con razón:
+  `resumen-negocio.e2e-spec.ts` y `venta-correcciones.e2e-spec.ts` venden ítems "carísimos"
+  (para salir primeros en lo más vendido) como boleta sin cliente; ahora mandan nombre y RUT.
+  Ninguna de las dos trata de la identidad: lo que miden no cambió.
+- **Frontend:** `sobreUmbralIdentidad` (gemela, en `useReceptor.ts`) y la regla
+  `identidadPagador` de `problemaDelReceptor`. En el POS el cliente pasa a obligatorio sobre el
+  umbral (nombre y RUT) y el panel lo dice; en salones el modal de cobro pide nombre y RUT solo
+  sobre el umbral y el cierre los manda; el modal avisa cuando algún pago es de la máquina.
+- **Arranque sobre una base de `main`:** una base sembrada por `main` (`d1180798`) con tres
+  ventas de $7.000.000 —que `main` dejó entrar sin RUT— arrancó con esta rama: crea la tabla y
+  el índice, siembra las dos filas, las ventas viejas se leen (`GET /ventas`, `GET /ventas/:id`
+  200) y una cuarta igual da 400. Un segundo arranque deja las mismas dos filas.
+
+### Qué lo fija
+
+- `boleta-sobre-umbral.e2e-spec.ts` (contra la base): 400 con el voucher, con efectivo, sin RUT,
+  sin nombre, pendiente y con **dos pagos que solo sumados pasan el umbral**; 201 con nombre y
+  RUT (el documento sigue `maquina` y el RUT queda normalizado), un peso por debajo y la Factura;
+  el cierre de mesa (400 y la cuenta sigue abierta; con cliente, cierra); `POST /online/pagar`
+  sobre el umbral; `GET /tipos-documento`, y el último año anterior / un año futuro que no rige.
+  Mutantes, cada uno revertido a la conducta anterior: sin el chequeo de `crearEnTransaccion` →
+  7 rojos; sin el de online → 1; `anio =` en vez de `anio <=` → 1 (el del último año
+  anterior). Medidos sobre una base recién sembrada, después del rebase sobre `2027d2ba`.
+- `ventas.service.spec.ts`, `faltaIdentidadDelPagador`: los bordes (`gte` en vez de `gt` → 1
+  rojo), sin RUT, nombre en blanco, Factura y país sin umbral. `online.service.spec.ts` y
+  `suscripciones.service.spec.ts`: el rechazo es antes de iniciar la orden y antes de cobrar.
+- Frontend: `CarritoPanel.nuxt.spec.ts` (sin `|| sobreUmbral` → 2 rojos),
+  `CobroModal.nuxt.spec.ts` (sin el bloqueo de quien paga → 1), `salones/index.nuxt.spec.ts`
+  (el cierre sin `customer` → 1), `pos.nuxt.spec.ts` (sin el `|| sobreUmbral` de
+  `incluirCustomer` → 1, sin `identidadPagador` en la regla → 1, sin el aviso al modal → 1) y
+  `useReceptor.spec.ts` (la gemela, mismos bordes).
+- Navegador (Playwright, contra el stack propio): `e2e/ventas/boleta-sobre-umbral.spec.ts` (el
+  POS abre solo el formulario, frena sin RUT y el servidor congela lo tipeado) y
+  `e2e/salones/boleta-sobre-umbral.spec.ts` (el modal de cobro de la mesa pide nombre y RUT,
+  avisa el RUT inválido y el cierre los congela).
+- **Un rojo "intermitente" que era determinista.** El test del último año anterior da de baja
+  la fila del año y la restaura en un `finally`; leía los ids de un `UPDATE … RETURNING`, que
+  con Postgres `ds.query` devuelve como `[filas, cantidad]`, así que no restauraba nada y la
+  suite seguía con el umbral de 2025: 3 rojos la primera vez, y verde después sobre la base ya
+  rota. Ahora lee los ids con un `SELECT` antes. El seeder siembra como el resto del archivo: una
+  fila sembrada que alguien dé de baja no revive sola (se evaluó revivirla y se descartó: rompía
+  el arranque si a mano se había cargado otra fila para el mismo país y año).
+
+### Qué quedó afuera
+
+- Pedir nombre y RUT en la tienda online y en la suscripción: hoy esas compras se rechazan
+  (entrada nueva en `pendientes.md` § 6).
+- El export del registro interno del Anexo I (entrada nueva en `pendientes.md` § 6).
+- El código `MedioPago` del SII para la forma de pago: formato de emisión (ADR-010).
+
+---
+
 ## El saldo con el que se aclara un reembolso, medido en el sandbox de Transbank (cerrada 2026-10-04)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. La regla viva, en

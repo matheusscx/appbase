@@ -3,6 +3,7 @@ import Decimal from 'decimal.js'
 import { resumenCobro, setMontoPago, sumaPagos, type PagoInput } from '~/composables/useVenta'
 import { sugerirPropina } from '~/composables/usePropina'
 import { comprobanteDelPago, type EmisorMedio } from '~/composables/useDocumentosVenta'
+import { LARGO_RECEPTOR, problemaDelReceptor, rutValido } from '~/composables/useReceptor'
 
 interface MetodoPago {
   metodoPagoId: string
@@ -25,8 +26,29 @@ const props = withDefaults(
     ventaTotal?: string
     /** Decimal API, ej. '0.10'. Solo modoPropina. */
     porcentajeSugerido?: string
+    /**
+     * La venta pasa el umbral de la Res. Ex. SII 44/2025: si algún pago es de la
+     * máquina, avisa que el voucher no lleva a quien paga (owner, 2026-10-04:
+     * se registra y se avisa).
+     */
+    sobreUmbralIdentidad?: boolean
+    /**
+     * Pide acá nombre y RUT de quien paga (salones, que no tiene formulario de
+     * cliente). El POS no lo usa: su panel ya los pide.
+     */
+    pedirPagador?: boolean
+    /** El RUT se valida con DV módulo 11 (`GET /tipos-documento`). */
+    rutChileno?: boolean
   }>(),
-  { modoPropina: false, total: '0', ventaTotal: '0', porcentajeSugerido: '0.10' },
+  {
+    modoPropina: false,
+    total: '0',
+    ventaTotal: '0',
+    porcentajeSugerido: '0.10',
+    sobreUmbralIdentidad: false,
+    pedirPagador: false,
+    rutChileno: false,
+  },
 )
 
 const emit = defineEmits<{ confirmar: [pagos: PagoInput[], vuelto: string] }>()
@@ -41,6 +63,10 @@ const monedas = useMonedasStore()
 const decimalesPropina = computed(() => monedas.monedaOficial?.decimals ?? 0)
 const open = defineModel<boolean>('open', { required: true })
 const propinaMonto = defineModel<string>('propinaMonto', { default: '0' })
+/** Quién paga, cuando `pedirPagador`. Lo lee la pantalla al confirmar. */
+const pagador = defineModel<{ nombre: string, rut: string }>('pagador', {
+  default: () => ({ nombre: '', rut: '' }),
+})
 
 const pagos = ref<PagoInput[]>([])
 
@@ -122,10 +148,26 @@ const nadaQueCobrar = computed(() =>
   new Decimal(totalAPagar.value || '0').lte(0),
 )
 
+/** La misma regla que el panel del POS: nombre y RUT, y el RUT tiene que ser un RUT. */
+const problemaPagador = computed(() =>
+  props.pedirPagador
+    ? problemaDelReceptor(
+        { ...pagador.value, giro: '', direccion: '', comuna: '' },
+        { receptorCompleto: false, rutChileno: props.rutChileno, identidadPagador: true },
+      )
+    : null,
+)
+const errorRutPagador = computed(() =>
+  props.rutChileno && pagador.value.rut.trim() && !rutValido(pagador.value.rut)
+    ? 'RUT inválido: revisá el dígito verificador'
+    : undefined,
+)
+
 const puedeConfirmar = computed(
   () =>
     (nadaQueCobrar.value || pagosValidos.value.length > 0) &&
-    !resumen.value.excedenteSinVuelto,
+    !resumen.value.excedenteSinVuelto &&
+    !problemaPagador.value,
 )
 
 function emisorDe(metodoPagoId: string): EmisorMedio | undefined {
@@ -136,6 +178,10 @@ function emisorDe(metodoPagoId: string): EmisorMedio | undefined {
 function emiteLaMaquina(metodoPagoId: string): boolean {
   return emisorDe(metodoPagoId) === 'maquina'
 }
+
+const avisoVoucher = computed(
+  () => props.sobreUmbralIdentidad && pagosValidos.value.some((p) => emiteLaMaquina(p.metodoPagoId)),
+)
 
 function confirmar() {
   // Lo tipeado antes de cambiar de medio no viaja: `comprobanteDelPago` lo suelta
@@ -229,6 +275,32 @@ function confirmar() {
             @click="agregarPago"
           />
         </div>
+
+        <div v-if="pedirPagador" data-qa="pagador" class="flex flex-col gap-2 border-t border-default pt-2">
+          <p class="text-sm text-muted">
+            Por el monto, la boleta lleva el nombre y el RUT de quien paga.
+          </p>
+          <UFormField label="Nombre y apellidos" required>
+            <UInput
+              v-model="pagador.nombre"
+              :maxlength="LARGO_RECEPTOR.nombre"
+              class="w-full"
+              data-qa="pagador-nombre"
+            />
+          </UFormField>
+          <UFormField label="RUT" required :error="errorRutPagador">
+            <UInput v-model="pagador.rut" placeholder="12.345.678-5" class="w-full" data-qa="pagador-rut" />
+          </UFormField>
+        </div>
+
+        <UAlert
+          v-if="avisoVoucher"
+          data-qa="aviso-voucher-umbral"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-triangle-alert"
+          description="El voucher de la máquina no lleva a quien paga: sobre 135 UF hay que emitir la boleta electrónica con su nombre y RUT."
+        />
 
         <div v-if="!nadaQueCobrar" class="text-sm space-y-1 border-t border-default pt-2">
           <div class="flex justify-between text-muted"><span>Pagado</span><span>{{ formatMonto(suma) }}</span></div>

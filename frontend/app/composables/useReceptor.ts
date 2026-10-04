@@ -4,8 +4,9 @@
  * para avisar antes de cobrar, y el servidor la vuelve a exigir.
  *
  * La pantalla no conoce el país: lo dice cada tipo de documento
- * (`GET /tipos-documento`, `receptorCompleto` y `rutChileno`).
+ * (`GET /tipos-documento`, `receptorCompleto`, `rutChileno` y `umbralIdentidad`).
  */
+import Decimal from 'decimal.js'
 
 /** Los largos del SII (Formato DTE v2.5, zona Receptor). Gemelos del DTO. */
 export const LARGO_RECEPTOR = {
@@ -50,6 +51,26 @@ export interface ReglaReceptor {
   receptorCompleto: boolean
   /** El RUT que venga se valida con DV módulo 11. */
   rutChileno: boolean
+  /**
+   * La boleta pasó el umbral de la Res. Ex. SII 44/2025: lleva nombre y RUT de
+   * quien paga. Ver `sobreUmbralIdentidad`.
+   */
+  identidadPagador?: boolean
+}
+
+/**
+ * ¿El total pasa el umbral sobre el que la boleta lleva nombre y RUT de quien
+ * paga? Estricto (la norma dice *"exceda"*) y sobre el total de la venta
+ * entera, nunca por pago. Gemela de `faltaIdentidadDelPagador` en
+ * `backend/src/modules/ventas/ventas.service.ts`, que lo vuelve a exigir. Sin
+ * umbral (otro tipo, otro país) o sin total todavía, no.
+ */
+export function sobreUmbralIdentidad(
+  total: string | null | undefined,
+  umbral: string | null | undefined,
+): boolean {
+  if (!total || !umbral) return false
+  return new Decimal(total).gt(umbral)
 }
 
 export interface ReceptorEnPantalla {
@@ -77,6 +98,9 @@ export function problemaDelReceptor(c: ReceptorEnPantalla, regla: ReglaReceptor)
       ['comuna', c.comuna],
     ] as const).filter(([, v]) => !v.trim()).map(([campo]) => campo)
     if (faltan.length) return `La factura requiere del cliente: ${faltan.join(', ')}`
+  }
+  if (regla.identidadPagador && !c.rut.trim()) {
+    return 'Una boleta de este monto lleva el RUT de quien paga'
   }
   for (const [campo, etiqueta] of [
     ['nombre', 'La razón social'],

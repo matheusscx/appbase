@@ -5283,6 +5283,62 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(bodiesDeCierre[0]).toMatchObject({ tipoDocumentoId: 'doc-boleta' })
   })
 
+  it('sobre el umbral de la Res. Ex. SII 44/2025 pide a quien paga y el cierre lo manda', async () => {
+    // Salones no tiene formulario de cliente: el modal pide nombre y RUT solo
+    // cuando el total pasa el umbral (owner, 2026-10-04).
+    tiposDocumentoMock = [
+      { id: 'doc-boleta', nombre: 'Boleta de Venta', customerRequerido: false, esBoleta: true, rutChileno: true, umbralIdentidad: '5363274.60' },
+    ]
+    totalDelCalculo = '5363275'
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(50)
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    expect(cobroModal.props('pedirPagador'), 'pide a quien paga').toBe(true)
+    cobroModal.vm.$emit('update:pagador', { nombre: 'Juana Pérez ', rut: '12.345.678-5' })
+    await esperar(20)
+    cobroModal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5363275' }], '0')
+    await esperar(20)
+    await tipearPin()
+    await esperar(300)
+
+    expect(bodiesDeCierre).toHaveLength(1)
+    expect(bodiesDeCierre[0]).toMatchObject({
+      customer: { nombre: 'Juana Pérez', rut: '12.345.678-5' },
+    })
+  })
+
+  it('bajo el umbral no pide a quien paga y el cierre no manda cliente', async () => {
+    tiposDocumentoMock = [
+      { id: 'doc-boleta', nombre: 'Boleta de Venta', customerRequerido: false, esBoleta: true, rutChileno: true, umbralIdentidad: '5363274.60' },
+    ]
+    totalDelCalculo = '5363274'
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(50)
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    expect(cobroModal.props('pedirPagador')).toBe(false)
+    cobroModal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5363274' }], '0')
+    await esperar(20)
+    await tipearPin()
+    await esperar(300)
+
+    expect(bodiesDeCierre).toHaveLength(1)
+    expect(bodiesDeCierre[0]).not.toHaveProperty('customer')
+  })
+
   it('cerrar el teclado de PIN sin tipearlo devuelve el botón, no lo deja trabado', async () => {
     /**
      * El control de la línea de arriba, y la trampa de prender `submitting` antes
