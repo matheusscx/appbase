@@ -339,6 +339,7 @@ describe('TenantsService', () => {
       montoTolerancia: '0',
       umbralDescuadreAviso: '0',
       umbralDescuadreAlto: '0',
+      promosAcumulanDescuentos: false,
     };
 
     it('el GET dice qué perilla está cerrada, con qué valor y por qué', async () => {
@@ -954,6 +955,7 @@ describe('TenantsService', () => {
       nivelRedondeo: 'linea',
       umbralDescuadreAviso: '0',
       umbralDescuadreAlto: '0',
+      promosAcumulanDescuentos: false,
     };
 
     it('persiste modos y reescribe la fórmula con pasos correctos', async () => {
@@ -977,6 +979,7 @@ describe('TenantsService', () => {
         nivelRedondeo: 'linea',
         umbralDescuadreAviso: '2000',
         umbralDescuadreAlto: '10000',
+        promosAcumulanDescuentos: false,
       };
 
       const result = await service.updatePreferenciasFinancieras(

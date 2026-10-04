@@ -8,7 +8,6 @@ import {
   Max,
   IsNumberString,
   IsBoolean,
-  ValidateIf,
 } from 'class-validator';
 import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
@@ -78,13 +77,9 @@ export class UpdatePreferenciasFinancierasDto {
 
   /**
    * Si una promo puede convivir con un descuento en la misma línea o venta.
-   * Opcional para no romper clientes que aún no la envían: omitida, el
-   * service la persiste como `false` (el default de la columna).
-   * `@ValidateIf` y no `@IsOptional()`: `IsOptional` trata `null` igual que
-   * ausente, así que un `null` explícito caía en ese mismo `false` y pisaba el
-   * valor guardado con un 200. Omitirla y mandarla en `null` no son lo mismo.
+   * Obligatoria como el resto: el PUT reemplaza la config entera, y omitirla
+   * escribía `false` y pisaba lo guardado con un 200 (owner, 2026-10-04).
    */
-  @ValidateIf((_o, v) => v !== undefined)
   @IsBoolean()
-  promosAcumulanDescuentos?: boolean;
+  promosAcumulanDescuentos: boolean;
 }

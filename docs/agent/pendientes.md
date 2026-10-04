@@ -67,31 +67,6 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
-Lo que va acá tiene el arreglo ya decidido y escrito dentro de la propia entrada: ninguna
-necesita una respuesta del owner. Las cerradas están en [`resueltos.md`](resueltos.md); la del
-primer deploy con `Idempotency-Key`, que no era código, se mudó a la § 7.
-
-- [ ] **En los `PUT` que reemplazan, omitir un campo opcional es un 400** (backend;
-  `PUT /propinas/distribucion` y `PUT /tenants/preferencias-financieras`; **decidido por el owner el
-  2026-10-04**, AskUserQuestion de la orquestadora, entre "rechazar", "conservar lo guardado" y
-  "dejar el default"). Hoy omitir el campo escribe el default y pisa lo guardado con un 200: un
-  grupo apagado que llega sin `activo` se vuelve a prender. **Qué cambia:** en
-  `GrupoDistribucionDto`, `baseVentas`, `activo`, `orden` y `pesos` pasan a obligatorios (400 si
-  faltan, igual que el `null` desde el 2026-10-02); en `UpdatePreferenciasFinancierasDto`,
-  `promosAcumulanDescuentos`, y se saca el `?? false` de `TenantsService`. **Lo que no cambia:**
-  `manualModo` sigue obligatorio solo con criterio `MANUAL`, y `habilitadoPos`/`habilitadoSalones`
-  siguen conservando lo guardado si se omiten (no entraron en la pregunta). Las pantallas ya mandan
-  todos los campos (verificarlo en `usePropinaDistribucion.ts` y `preferencias-financieras.vue`
-  antes de cerrar, con Playwright). Docs: la regla va en `patterns/backend.md` junto a la del `null`.
-
-- [ ] **`PATCH /me/preferencias` con `ui.colorMode` o `ui.pageSize` en `null` es un 400** (backend,
-  `me/dto/update-preferencias.dto.ts`; **decidido por el owner el 2026-10-04**, AskUserQuestion de la
-  orquestadora, contra "`null` = volver al default"). Hoy `@IsOptional()` deja pasar el `null`, el
-  merge (`common/utils/usuario-preferencias.util.ts`) lo guarda y la normalización lo cambia por
-  `light` / `15`: un 200 con la preferencia reseteada. **Qué cambia:** `@ValidateIf((_o, v) => v !==
-  undefined)` en los dos, como el resto de los `PATCH` desde el 2026-10-02; omitirlos sigue sin
-  tocar lo guardado. La pantalla (`useUserPreferences.ts`) nunca manda `null`.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:

@@ -23,6 +23,94 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## En los `PUT` que reemplazan, omitir un campo es un 400 (cerrada 2026-10-04)
+
+Sale de [`pendientes.md`](pendientes.md) § 1. La regla viva está en
+[`patterns/backend.md`](../patterns/backend.md) § 3.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **En los `PUT` que reemplazan, omitir un campo opcional es un 400** (backend;
+  `PUT /propinas/distribucion` y `PUT /tenants/preferencias-financieras`; **decidido por el owner el
+  2026-10-04**, AskUserQuestion de la orquestadora, entre "rechazar", "conservar lo guardado" y
+  "dejar el default"). Hoy omitir el campo escribe el default y pisa lo guardado con un 200: un
+  grupo apagado que llega sin `activo` se vuelve a prender. **Qué cambia:** en
+  `GrupoDistribucionDto`, `baseVentas`, `activo`, `orden` y `pesos` pasan a obligatorios (400 si
+  faltan, igual que el `null` desde el 2026-10-02); en `UpdatePreferenciasFinancierasDto`,
+  `promosAcumulanDescuentos`, y se saca el `?? false` de `TenantsService`. **Lo que no cambia:**
+  `manualModo` sigue obligatorio solo con criterio `MANUAL`, y `habilitadoPos`/`habilitadoSalones`
+  siguen conservando lo guardado si se omiten (no entraron en la pregunta). Las pantallas ya mandan
+  todos los campos (verificarlo en `usePropinaDistribucion.ts` y `preferencias-financieras.vue`
+  antes de cerrar, con Playwright). Docs: la regla va en `patterns/backend.md` junto a la del `null`.
+
+### Lo medido
+
+- **La premisa de la pantalla no se cumplía.** `propinas-distribucion.vue` mandaba
+  `pesos: undefined` —que el JSON omite— en todo grupo que no fuera `MANUAL` + `PESOS`. Con la
+  regla nueva, guardar la config del seed (un grupo `PARTES_IGUALES`) daba 400: medido con el
+  e2e de navegador contra la pantalla de antes. `preferencias-financieras.vue` sí mandaba todo.
+- Los fixtures de `liquidacion-propinas.e2e-spec.ts` tampoco mandaban `pesos` (y uno, tampoco
+  `baseVentas`): su interfaz los tenía opcionales, así que el typecheck no lo veía.
+
+### Cómo se cerró
+
+- **Backend:** `GrupoDistribucionDto` sin `@ValidateIf` en `baseVentas`, `activo`, `orden` y
+  `pesos` (obligatorios, tipos sin `?`); `PropinaDistribucionService` pierde los defaults que
+  quedaron muertos (`?? TOTAL_FINAL`, `!== false`, `?? 0`, `pesos?.`).
+  `promosAcumulanDescuentos` obligatorio y `TenantsService` usa `dto.promosAcumulanDescuentos`
+  sin `?? false`. `manualModo` y `habilitadoPos`/`habilitadoSalones`, sin cambios.
+- **Frontend:** la pantalla de propinas manda `pesos: []` fuera de `MANUAL` + `PESOS` (lo mismo
+  que el backend guardaba al omitirlo), y `UpdateDistribucionBody` pasa a tener los cinco campos
+  del grupo obligatorios, para que el tipo lo exija.
+- **Lo que lo fija:** `null-en-actualizaciones.e2e-spec.ts`, bloque C: cada uno de los cuatro
+  campos del grupo y `promosAcumulanDescuentos` omitidos → 400, con el control de reenviarlos
+  → 200, y el 400 tiene que nombrar al campo omitido (un `toContain` no alcanzaba: "activo" está
+  en "grupos activos", el 400 de la suma); y `habilitadoPos`/`habilitadoSalones`, guardados en
+  `false`, omitidos → 200 y siguen en `false`. Mutantes que revierten al código anterior: DTO +
+  service de propinas, y solo su DTO (mueren los 4 de grupo en los dos); DTO + service de
+  preferencias (muere el de `promosAcumulanDescuentos`); los flags escribiendo `true` al
+  omitirse (muere el de conservar). Playwright
+  `e2e/configuracion/put-que-reemplaza.spec.ts`: las dos pantallas guardan sin cambios, el body
+  lleva los campos, vuelve 200 y lo guardado no se mueve; con la pantalla de propinas de antes,
+  el PUT vuelve 400.
+
+---
+
+## `PATCH /me/preferencias` con `ui.colorMode` o `ui.pageSize` en `null` es un 400 (cerrada 2026-10-04)
+
+Sale de [`pendientes.md`](pendientes.md) § 1.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **`PATCH /me/preferencias` con `ui.colorMode` o `ui.pageSize` en `null` es un 400** (backend,
+  `me/dto/update-preferencias.dto.ts`; **decidido por el owner el 2026-10-04**, AskUserQuestion de la
+  orquestadora, contra "`null` = volver al default"). Hoy `@IsOptional()` deja pasar el `null`, el
+  merge (`common/utils/usuario-preferencias.util.ts`) lo guarda y la normalización lo cambia por
+  `light` / `15`: un 200 con la preferencia reseteada. **Qué cambia:** `@ValidateIf((_o, v) => v !==
+  undefined)` en los dos, como el resto de los `PATCH` desde el 2026-10-02; omitirlos sigue sin
+  tocar lo guardado. La pantalla (`useUserPreferences.ts`) nunca manda `null`.
+
+### Lo medido
+
+- **"Omitirlos sigue sin tocar lo guardado" era falso.** Con target ES2023, `UiPreferenciasDto`
+  dejaba la clave que no vino como propiedad propia en `undefined` (medido con
+  `plainToInstance`: `["colorMode","pageSize"]` con solo `pageSize` en el body), el spread de
+  `mergeUsuarioPreferencias` pisaba lo guardado con ella y la normalización la volvía default.
+  `useUserPreferences.ts` manda una sola clave por PATCH, así que cambiar el tamaño de página
+  reseteaba el modo oscuro (y al revés). Mismo mecanismo que `declare` ya resolvía en los
+  Update con `PartialType`.
+
+### Cómo se cerró
+
+- `@ValidateIf((_o, v) => v !== undefined)` en las dos claves, y las dos con `declare`.
+  `ui` en sí sigue con `@IsOptional()`: no entró en la decisión.
+- **Lo que lo fija:** `null-en-actualizaciones.e2e-spec.ts`, bloque D: cada clave en `null` →
+  400 con el control válido → 200, y "omitir una clave de ui no toca lo guardado". Mutantes:
+  el DTO de antes (mueren los 3); `@IsOptional()` con `declare` (mueren los 2 del `null`); sin
+  `declare` (muere el de omitir).
+
+---
+
 ## Un `REFUND` sin confirmar gasta el tope por pago de la nota hecha desde el POS (cerrada 2026-10-04)
 
 Sale de [`pendientes.md`](pendientes.md) § 2 (fiscal y de plata, frente propio). La regla viva

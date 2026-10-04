@@ -73,7 +73,10 @@ Auth: JWT + tenant. Permiso: `Propinas:Configurar`.
 Reemplazo transaccional de grupos (soft-delete + recreate); `version++`.
 Body requiere `porcentajeSugerido` (decimal `0`–`1`). `habilitadoPos` y
 `habilitadoSalones` son **opcionales**: si el body no los manda, se conserva
-el valor ya persistido (no se sobreescriben a un default).
+el valor ya persistido (no se sobreescriben a un default). En cada grupo, en
+cambio, `baseVentas`, `activo`, `orden` y `pesos` son **obligatorios** (`[]`
+si no hay pesos): omitir uno es un 400, porque el reemplazo escribía su default
+y pisaba lo guardado (owner, 2026-10-04). `manualModo` solo con `MANUAL`.
 
 ```json
 {
@@ -88,15 +91,18 @@ el valor ya persistido (no se sobreescriben a un default).
       "criterio": "VENTAS_NETAS",
       "baseVentas": "TOTAL_FINAL",
       "activo": true,
-      "orden": 0
+      "orden": 0,
+      "pesos": []
     },
     {
       "tipoGarzon": "cocina",
       "nombre": "Cocina",
       "porcentaje": "0.20",
       "criterio": "PARTES_IGUALES",
+      "baseVentas": "TOTAL_FINAL",
       "activo": true,
-      "orden": 1
+      "orden": 1,
+      "pesos": []
     }
   ]
 }

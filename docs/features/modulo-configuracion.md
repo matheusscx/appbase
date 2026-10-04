@@ -102,6 +102,9 @@ Response (200):
 }
 ```
 
+Una clave de `ui` que no viene conserva lo guardado; una en `null` es un 400 (no
+"volver al default"; owner, 2026-10-04).
+
 `GET /auth/me` incluye el campo `preferencias` en el usuario.
 
 ---

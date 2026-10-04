@@ -111,12 +111,28 @@ arregló DTO por DTO varias veces antes del barrido del 2026-10-02
 ([`resueltos.md`](../agent/resueltos.md)); el e2e que lo fija es
 `backend/test/null-en-actualizaciones.e2e-spec.ts`.
 
+**En un `PUT` que reemplaza el recurso entero, omitir no significa "no tocar": los campos van
+obligatorios, aunque tengan un default obvio.** El `PUT` reescribe todo, así que un campo
+omitido que el service completa con `??` pisa lo guardado con un 200 —un grupo de propinas
+apagado que llegaba sin `activo` se volvía a prender—. Omitirlo es un 400, igual que el `null`
+(owner, 2026-10-04: `GrupoDistribucionDto` y `promosAcumulanDescuentos`). Lo que sigue opcional
+en un `PUT` tiene que conservar lo guardado si no viene, nunca escribir un default
+(`habilitadoPos`/`habilitadoSalones` de `UpdateDistribucionDto`). Si se agrega un campo nuevo a
+uno de estos `PUT`, la pantalla lo tiene que mandar en el mismo commit: el e2e de navegador
+`frontend/e2e/configuracion/put-que-reemplaza.spec.ts` guarda las dos pantallas contra el DTO
+real.
+
 Con `PartialType(Create)`, la opción **`{ skipNullProperties: false }`** hace eso mismo en
 los campos que el alta exige. No alcanza para los que el alta ya marca `@IsOptional()` y van
 a una columna NOT NULL (un `activo` con default): esos se redeclaran en el Update **con
 `declare`** y solo `@ValidateIf`, que reemplaza la condición heredada y conserva los
 validadores. Sin `declare`, con target ES2023 el campo existe en cada instancia en `undefined` y
 un `Object.assign(entidad, dto)` lo copia a la respuesta. Modelo: `UpdateDescuentoDto`.
+
+Lo mismo con cualquier DTO cuya instancia se esparce sobre lo guardado (`{ ...guardado,
+...dto }`), herede o no: el campo que no vino existe en `undefined` y pisa. Por eso
+`UiPreferenciasDto` (`PATCH /me/preferencias`) declara sus dos claves con `declare`; sin él,
+cambiar el tamaño de página reseteaba el modo oscuro.
 
 **Lo que el DTO no declara es un 400** que nombra el campo (`property x should not exist`),
 en el body y en la querystring: el pipe corre con `forbidNonWhitelisted` desde el 2026-09-27.
@@ -1014,7 +1030,7 @@ Columna `usuarios.preferencias JSONB NOT NULL DEFAULT '{}'`
 (shape `{ ui?: { colorMode?, pageSize? } }`); utils en
 `common/utils/usuario-preferencias.util.ts` (`normalize`/`merge`).
 API: `GET /auth/me` incluye `preferencias`; `PATCH /me/preferencias` hace merge
-parcial validado con DTO anidado. Defaults en código: `colorMode: 'light'`,
+parcial validado con DTO anidado: una clave omitida no se toca, una en `null` es un 400. Defaults en código: `colorMode: 'light'`,
 `pageSize: 15`. Alcance **usuario**, no tenant.
 
 ---

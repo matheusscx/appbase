@@ -127,6 +127,16 @@ describe('null explícito en PATCH/PUT → 400 (e2e)', () => {
     return (res.body as Record<string, string>)[clave];
   }
 
+  // El 400 tiene que nombrar el campo omitido como su propia causa. Un
+  // `toContain` sobre el body no discrimina: "activo" está dentro de "grupos
+  // activos", el mensaje de la suma, que también es un 400.
+  function rechazaPor(res: { body: unknown }, ruta: string) {
+    const { message } = res.body as { message: string | string[] };
+    expect([message].flat()).toEqual(
+      expect.arrayContaining([expect.stringMatching(new RegExp(`^${ruta} `))]),
+    );
+  }
+
   // Producto sin stock inicial: alcanza para ser opción de un grupo, y no
   // escribe movimientos de inventario.
   function crearProducto(nombre: string): Promise<string> {
@@ -512,7 +522,11 @@ describe('null explícito en PATCH/PUT → 400 (e2e)', () => {
     });
   });
 
-  describe('C — un PUT: el null equivalía a omitir, y omitir escribe el default', () => {
+  // Omitir también es un 400 en estos campos (owner, 2026-10-04): el PUT
+  // reemplaza el recurso entero, y omitir escribía el default con un 200 —un
+  // grupo apagado que llegaba sin `activo` se volvía a prender—. Por eso cada
+  // bloque prueba el null y la ausencia.
+  describe('C — un PUT: el null equivalía a omitir, y omitir escribía el default', () => {
     describe('PUT /tenants/preferencias-financieras', () => {
       // El PUT reemplaza la config entera: mandar la actual sin cambios no
       // mueve nada, y el control del 200 no deja estado sucio.
@@ -529,6 +543,26 @@ describe('null explícito en PATCH/PUT → 400 (e2e)', () => {
         () => actuales,
         ['promosAcumulanDescuentos'],
       );
+
+      it('promosAcumulanDescuentos omitido → 400; con su valor actual → 200', async () => {
+        const { promosAcumulanDescuentos, ...sinCampo } = actuales;
+        const res = await enviar(
+          'put',
+          'tenants/preferencias-financieras',
+          sinCampo,
+        );
+        expect(res.status).toBe(400);
+        rechazaPor(res, 'promosAcumulanDescuentos');
+        const control = await enviar(
+          'put',
+          'tenants/preferencias-financieras',
+          {
+            ...sinCampo,
+            promosAcumulanDescuentos,
+          },
+        );
+        expect(control.status).toBe(200);
+      });
     });
 
     // Igual que preferencias: se reenvía la config actual, así que el control
@@ -588,6 +622,104 @@ describe('null explícito en PATCH/PUT → 400 (e2e)', () => {
           expect(control.status).toBe(200);
         },
       );
+
+      it.each(['baseVentas', 'activo', 'orden', 'pesos'] as const)(
+        'grupos[].%s omitido → 400; con su valor actual → 200',
+        async (campo) => {
+          const sinCampo = {
+            ...actual,
+            grupos: actual.grupos.map((g, i) =>
+              i === 0
+                ? Object.fromEntries(
+                    Object.entries(g).filter(([clave]) => clave !== campo),
+                  )
+                : g,
+            ),
+          };
+          const res = await enviar('put', 'propinas/distribucion', sinCampo);
+          expect(res.status).toBe(400);
+          rechazaPor(res, `grupos\\.0\\.${campo}`);
+          const control = await enviar('put', 'propinas/distribucion', actual);
+          expect(control.status).toBe(200);
+        },
+      );
+
+      // Estos dos no entraron en la decisión del 2026-10-04: omitirlos sigue
+      // conservando lo guardado. Se guardan primero en `false` (el default es
+      // `true`): con lo del seed, conservar y escribir el default darían lo
+      // mismo y el test no vería la diferencia.
+      it('habilitadoPos y habilitadoSalones omitidos → 200 y conservan lo guardado', async () => {
+        const sinFlags = {
+          porcentajeSugerido: actual.porcentajeSugerido,
+          grupos: actual.grupos,
+        };
+        try {
+          const apagar = await enviar('put', 'propinas/distribucion', {
+            ...actual,
+            habilitadoPos: false,
+            habilitadoSalones: false,
+          });
+          expect(apagar.status).toBe(200);
+          const res = await enviar('put', 'propinas/distribucion', sinFlags);
+          expect(res.status).toBe(200);
+          expect(res.body).toMatchObject({
+            habilitadoPos: false,
+            habilitadoSalones: false,
+          });
+        } finally {
+          const restaurar = await enviar(
+            'put',
+            'propinas/distribucion',
+            actual,
+          );
+          expect(restaurar.status).toBe(200);
+        }
+      });
+    });
+  });
+
+  // `ui` es un JSON que se mezcla con lo guardado y después se normaliza: un
+  // `null` pasaba `@IsOptional()`, pisaba la clave en el merge y la
+  // normalización lo cambiaba por el default (`light` / `15`). Un 200 con la
+  // preferencia reseteada. Omitir la clave sigue sin tocar lo guardado.
+  describe('D — PATCH /me/preferencias: el null se guardaba como default', () => {
+    const validos = { colorMode: 'dark', pageSize: 25 } as const;
+    let originales: Record<string, unknown>;
+    beforeAll(async () => {
+      // Un PATCH sin `ui` no cambia nada y devuelve lo guardado.
+      const res = await enviar('patch', 'me/preferencias', {});
+      expect(res.status).toBe(200);
+      originales = (res.body as { ui: Record<string, unknown> }).ui;
+    });
+    afterAll(async () => {
+      const res = await enviar('patch', 'me/preferencias', { ui: originales });
+      expect(res.status).toBe(200);
+    });
+
+    it.each(Object.keys(validos))(
+      'ui.%s null → 400; con un valor válido → 200',
+      async (campo) => {
+        const res = await enviar('patch', 'me/preferencias', {
+          ui: { [campo]: null },
+        });
+        expect(res.status).toBe(400);
+        const control = await enviar('patch', 'me/preferencias', {
+          ui: { [campo]: validos[campo as keyof typeof validos] },
+        });
+        expect(control.status).toBe(200);
+      },
+    );
+
+    it('omitir una clave de ui no toca lo guardado', async () => {
+      const guardar = await enviar('patch', 'me/preferencias', {
+        ui: validos,
+      });
+      expect(guardar.status).toBe(200);
+      const res = await enviar('patch', 'me/preferencias', {
+        ui: { colorMode: 'light' },
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ ui: { colorMode: 'light', pageSize: 25 } });
     });
   });
 

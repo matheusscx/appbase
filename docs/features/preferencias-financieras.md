@@ -102,7 +102,10 @@ Request:
   "escalaCalculo": 4,
   "modoRedondeo": "HALF_EVEN",
   "nivelRedondeo": "linea",
-  "montoTolerancia": "1500"
+  "montoTolerancia": "1500",
+  "umbralDescuadreAviso": "0",
+  "umbralDescuadreAlto": "0",
+  "promosAcumulanDescuentos": false
 }
 
 Response (200):
@@ -113,7 +116,10 @@ Response (200):
   "escalaCalculo": 4,
   "modoRedondeo": "HALF_EVEN",
   "nivelRedondeo": "linea",
-  "montoTolerancia": "1500"
+  "montoTolerancia": "1500",
+  "umbralDescuadreAviso": "0",
+  "umbralDescuadreAlto": "0",
+  "promosAcumulanDescuentos": false
 }
 
 Response (400):
@@ -204,6 +210,7 @@ export class PreferenciasFinancierasDto {
   montoTolerancia: string;      // numeric como string (Decimal.js)
   umbralDescuadreAviso: string; // idem — '0' desactiva
   umbralDescuadreAlto: string;  // idem — '0' desactiva
+  promosAcumulanDescuentos: boolean;
 }
 
 // PUT request
@@ -217,8 +224,13 @@ export class UpdatePreferenciasFinancierasDto {
   montoTolerancia: string;      // @IsNumberString @IsDecimalNoNegativo @EsMontoCobrado
   umbralDescuadreAviso: string; // idem
   umbralDescuadreAlto: string;  // idem — el service exige además alto >= aviso
+  promosAcumulanDescuentos: boolean; // @IsBoolean
 }
 ```
+
+Es un `PUT` que reemplaza la config entera: **todos los campos son obligatorios**. Omitir
+uno es un 400, no "dejar lo que había" ni "escribir el default" (owner, 2026-10-04, para
+`promosAcumulanDescuentos`, el último que era opcional).
 
 Validación con `class-validator`:
 - `formula` debe ser un array con exactamente 3 elementos

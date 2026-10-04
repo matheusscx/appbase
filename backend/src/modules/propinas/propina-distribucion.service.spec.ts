@@ -216,6 +216,8 @@ describe('PropinaDistribucionService', () => {
           criterio: CriterioDistribucion.PARTES_IGUALES,
           activo: true,
           orden: 0,
+          baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+          pesos: [],
         },
       ],
     });
@@ -239,6 +241,8 @@ describe('PropinaDistribucionService', () => {
             criterio: CriterioDistribucion.PARTES_IGUALES,
             activo: true,
             orden: 0,
+            baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+            pesos: [],
           },
         ],
       }),
@@ -280,12 +284,20 @@ describe('PropinaDistribucionService', () => {
             nombre: 'G',
             porcentaje: '0.80',
             criterio: CriterioDistribucion.PARTES_IGUALES,
+            baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+            activo: true,
+            orden: 0,
+            pesos: [],
           },
           {
             tipoGarzon: TipoGarzon.COCINA,
             nombre: 'C',
             porcentaje: '0.10',
             criterio: CriterioDistribucion.PARTES_IGUALES,
+            baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+            activo: true,
+            orden: 1,
+            pesos: [],
           },
         ],
       }),
@@ -346,6 +358,10 @@ describe('PropinaDistribucionService', () => {
           nombre: 'Garzones',
           porcentaje: '0.80',
           criterio: CriterioDistribucion.VENTAS_NETAS,
+          baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+          activo: true,
+          orden: 0,
+          pesos: [],
         },
         {
           tipoGarzon: TipoGarzon.COCINA,
@@ -353,6 +369,9 @@ describe('PropinaDistribucionService', () => {
           porcentaje: '0.20',
           criterio: CriterioDistribucion.PARTES_IGUALES,
           orden: 1,
+          baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+          activo: true,
+          pesos: [],
         },
       ],
     });
@@ -374,12 +393,20 @@ describe('PropinaDistribucionService', () => {
             nombre: 'A',
             porcentaje: '0.50',
             criterio: CriterioDistribucion.PARTES_IGUALES,
+            baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+            activo: true,
+            orden: 0,
+            pesos: [],
           },
           {
             tipoGarzon: TipoGarzon.GARZON,
             nombre: 'B',
             porcentaje: '0.50',
             criterio: CriterioDistribucion.PARTES_IGUALES,
+            baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+            activo: true,
+            orden: 1,
+            pesos: [],
           },
         ],
       }),
@@ -396,6 +423,10 @@ describe('PropinaDistribucionService', () => {
             nombre: 'G',
             porcentaje: '1',
             criterio: CriterioDistribucion.MANUAL,
+            baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+            activo: true,
+            orden: 0,
+            pesos: [],
           },
         ],
       }),
@@ -411,6 +442,10 @@ describe('PropinaDistribucionService', () => {
             porcentaje: '1',
             criterio: CriterioDistribucion.PARTES_IGUALES,
             manualModo: ManualModo.PESOS,
+            baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+            activo: true,
+            orden: 0,
+            pesos: [],
           },
         ],
       }),
@@ -429,6 +464,9 @@ describe('PropinaDistribucionService', () => {
             criterio: CriterioDistribucion.MANUAL,
             manualModo: ManualModo.MONTOS,
             pesos: [{ garzonId: 'g1', peso: '2' }],
+            baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+            activo: true,
+            orden: 0,
           },
         ],
       }),
@@ -458,6 +496,9 @@ describe('PropinaDistribucionService', () => {
           pesos: [
             { garzonId: '550e8400-e29b-41d4-a716-446655440238', peso: '2' },
           ],
+          baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+          activo: true,
+          orden: 0,
         },
       ],
     });
@@ -471,7 +512,7 @@ describe('PropinaDistribucionService', () => {
     );
   });
 
-  it('baseVentas default TOTAL_FINAL ok con VENTAS_NETAS', async () => {
+  it('persiste el baseVentas que recibe, no un default', async () => {
     const config = {
       id: 'cfg-1',
       tenantId: TENANT,
@@ -492,6 +533,10 @@ describe('PropinaDistribucionService', () => {
           nombre: 'G',
           porcentaje: '1',
           criterio: CriterioDistribucion.VENTAS_NETAS,
+          baseVentas: BaseVentasGrupo.BASE_SIN_IMPUESTOS,
+          activo: true,
+          orden: 0,
+          pesos: [],
         },
       ],
     });
@@ -499,7 +544,7 @@ describe('PropinaDistribucionService', () => {
     expect(manager.create).toHaveBeenCalledWith(
       PropinaGrupoDistribucion,
       expect.objectContaining({
-        baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+        baseVentas: BaseVentasGrupo.BASE_SIN_IMPUESTOS,
         criterio: CriterioDistribucion.VENTAS_NETAS,
       }),
     );

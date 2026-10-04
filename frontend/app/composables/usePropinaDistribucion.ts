@@ -50,11 +50,11 @@ export interface UpdateDistribucionBody {
     nombre: string
     porcentaje: string
     criterio: CriterioDistribucion
-    baseVentas?: BaseVentasGrupo
-    manualModo?: ManualModo | null
-    activo?: boolean
-    orden?: number
-    pesos?: PesoManual[]
+    baseVentas: BaseVentasGrupo
+    manualModo: ManualModo | null
+    activo: boolean
+    orden: number
+    pesos: PesoManual[]
   }>
 }
 

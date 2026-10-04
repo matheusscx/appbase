@@ -72,7 +72,8 @@ y el cruce contra cada decisión: spec §"Investigación de mercado".
 
 Columna `promos_acumulan_descuentos` en `tenants` (default `false`), editable por
 `PUT /tenants/preferencias-financieras` junto a fórmula y redondeo — es conducta de precio,
-no configuración de catálogo. Viaja al motor por `ConfigCalculo.promosAcumulanDescuentos`
+no configuración de catálogo. Obligatorio en ese `PUT` desde el 2026-10-04: omitirlo es un
+400, no un `false`. Viaja al motor por `ConfigCalculo.promosAcumulanDescuentos`
 (campo **requerido**, no opcional: un default silencioso cambiaría plata sin que nadie lo
 decidiera) y se **congela** en `ventas.config_calculo` como el resto de la config de cálculo.
 

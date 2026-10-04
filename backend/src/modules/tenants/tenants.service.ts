@@ -1813,10 +1813,6 @@ export class TenantsService {
       );
     }
 
-    // Opcional en el DTO para no romper clientes que aún no la envían: omitida,
-    // se persiste como `false` — el mismo default de la columna.
-    const promosAcumulanDescuentos = dto.promosAcumulanDescuentos ?? false;
-
     await this.db.transaccion(async (manager) => {
       await manager.query(
         `UPDATE tenants
@@ -1834,7 +1830,7 @@ export class TenantsService {
           dto.nivelRedondeo,
           dto.umbralDescuadreAviso,
           dto.umbralDescuadreAlto,
-          promosAcumulanDescuentos,
+          dto.promosAcumulanDescuentos,
           tenantId,
         ],
       );
@@ -1865,7 +1861,7 @@ export class TenantsService {
       montoTolerancia: dto.montoTolerancia,
       umbralDescuadreAviso: dto.umbralDescuadreAviso,
       umbralDescuadreAlto: dto.umbralDescuadreAlto,
-      promosAcumulanDescuentos,
+      promosAcumulanDescuentos: dto.promosAcumulanDescuentos,
     };
   }
 }

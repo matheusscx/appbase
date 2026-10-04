@@ -62,9 +62,10 @@ interface GrupoDistribucion {
   nombre: string;
   porcentaje: string;
   criterio: string;
-  baseVentas?: string;
-  activo?: boolean;
-  orden?: number;
+  baseVentas: string;
+  activo: boolean;
+  orden: number;
+  pesos: { garzonId: string; peso: string }[];
 }
 // Config default sembrada para PARIS (seeder.service.ts): un único grupo
 // Garzones al 100% PARTES_IGUALES. Se restaura en afterAll tras mutar la config.
@@ -77,6 +78,7 @@ const DISTRIBUCION_DEFAULT: GrupoDistribucion[] = [
     baseVentas: 'TOTAL_FINAL',
     activo: true,
     orden: 0,
+    pesos: [],
   },
 ];
 
@@ -485,6 +487,7 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
           baseVentas: 'TOTAL_FINAL',
           activo: true,
           orden: 0,
+          pesos: [],
         },
       ]);
 
@@ -575,6 +578,7 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
             baseVentas: 'TOTAL_FINAL',
             activo: true,
             orden: 0,
+            pesos: [],
           },
         ]);
 
@@ -616,6 +620,8 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
           criterio: 'PARTES_IGUALES',
           activo: true,
           orden: 0,
+          baseVentas: 'TOTAL_FINAL',
+          pesos: [],
         },
         {
           tipoGarzon: 'cocina',
@@ -624,6 +630,8 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
           criterio: 'PARTES_IGUALES',
           activo: true,
           orden: 1,
+          baseVentas: 'TOTAL_FINAL',
+          pesos: [],
         },
       ]);
 

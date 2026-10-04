@@ -24,6 +24,7 @@ const base = {
   montoTolerancia: '0',
   umbralDescuadreAviso: '0',
   umbralDescuadreAlto: '0',
+  promosAcumulanDescuentos: false,
 };
 
 async function propiedadesConError(

@@ -186,7 +186,6 @@ export class PropinaDistribucionService {
       }
 
       for (const g of dto.grupos) {
-        const activo = g.activo !== false;
         const grupo = await manager.save(
           PropinaGrupoDistribucion,
           manager.create(PropinaGrupoDistribucion, {
@@ -196,20 +195,19 @@ export class PropinaDistribucionService {
             nombre: g.nombre,
             porcentaje: new Decimal(g.porcentaje).toFixed(6),
             criterio: g.criterio,
-            baseVentas: g.baseVentas ?? BaseVentasGrupo.TOTAL_FINAL,
+            baseVentas: g.baseVentas,
             manualModo:
               g.criterio === CriterioDistribucion.MANUAL
                 ? (g.manualModo ?? null)
                 : null,
-            activo,
-            orden: g.orden ?? 0,
+            activo: g.activo,
+            orden: g.orden,
           }),
         );
 
         if (
           g.criterio === CriterioDistribucion.MANUAL &&
-          g.manualModo === ManualModo.PESOS &&
-          g.pesos?.length
+          g.manualModo === ManualModo.PESOS
         ) {
           for (const p of g.pesos) {
             if (new Decimal(p.peso).lte(0)) {
@@ -250,7 +248,7 @@ export class PropinaDistribucionService {
   }
 
   private validarGrupos(grupos: GrupoDistribucionDto[]): void {
-    const activos = grupos.filter((g) => g.activo !== false);
+    const activos = grupos.filter((g) => g.activo);
 
     let suma = new Decimal(0);
     const tipos = new Set<string>();
@@ -277,7 +275,7 @@ export class PropinaDistribucionService {
             'El criterio MANUAL exige manualModo (PESOS o MONTOS)',
           );
         }
-        if (g.manualModo === ManualModo.MONTOS && g.pesos?.length) {
+        if (g.manualModo === ManualModo.MONTOS && g.pesos.length) {
           throw new BadRequestException(
             'En modo MONTOS no se configuran pesos (se capturan en la liquidación)',
           );
@@ -286,7 +284,7 @@ export class PropinaDistribucionService {
         throw new BadRequestException(
           'manualModo solo aplica cuando el criterio es MANUAL',
         );
-      } else if (g.pesos?.length) {
+      } else if (g.pesos.length) {
         throw new BadRequestException(
           'Los pesos solo aplican con criterio MANUAL y modo PESOS',
         );

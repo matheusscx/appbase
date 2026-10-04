@@ -26,11 +26,12 @@ export class PesoManualDto {
   peso: string;
 }
 
-// `@ValidateIf` y no `@IsOptional()` en `baseVentas`, `activo`, `orden` y
-// `pesos`: `IsOptional` trata `null` igual que ausente, y como el PUT reescribe
-// todos los grupos, un `null` caía en el default (`TOTAL_FINAL`, activo, orden 0,
-// sin pesos) y pisaba lo guardado con un 200. Omitirlos sigue escribiendo el
-// default; mandarlos en `null` es un 400.
+// `baseVentas`, `activo`, `orden` y `pesos` son obligatorios aunque tengan un
+// default obvio: el PUT reescribe todos los grupos, así que omitir uno (o
+// mandarlo en `null`) escribía el default y pisaba lo guardado con un 200 —un
+// grupo apagado que llegaba sin `activo` se volvía a prender—. Decidido por el
+// owner el 2026-10-04: omitirlos es un 400. `manualModo` solo es obligatorio con
+// criterio MANUAL.
 export class GrupoDistribucionDto {
   @IsIn(Object.values(TipoGarzon))
   tipoGarzon: TipoGarzon;
@@ -45,9 +46,8 @@ export class GrupoDistribucionDto {
   @IsIn(Object.values(CriterioDistribucion))
   criterio: CriterioDistribucion;
 
-  @ValidateIf((_o, v) => v !== undefined)
   @IsIn(Object.values(BaseVentasGrupo))
-  baseVentas?: BaseVentasGrupo;
+  baseVentas: BaseVentasGrupo;
 
   @ValidateIf(
     (o: GrupoDistribucionDto) => o.criterio === CriterioDistribucion.MANUAL,
@@ -55,20 +55,17 @@ export class GrupoDistribucionDto {
   @IsIn(Object.values(ManualModo))
   manualModo?: ManualModo | null;
 
-  @ValidateIf((_o, v) => v !== undefined)
   @IsBoolean()
-  activo?: boolean;
+  activo: boolean;
 
-  @ValidateIf((_o, v) => v !== undefined)
   @IsInt()
   @Min(0)
-  orden?: number;
+  orden: number;
 
-  @ValidateIf((_o, v) => v !== undefined)
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => PesoManualDto)
-  pesos?: PesoManualDto[];
+  pesos: PesoManualDto[];
 }
 
 // `@ValidateIf` y no `@IsOptional()`: las dos columnas son NOT NULL e

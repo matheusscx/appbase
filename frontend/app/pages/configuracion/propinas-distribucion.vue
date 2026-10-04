@@ -192,7 +192,7 @@ async function guardar() {
         pesos:
           g.criterio === 'MANUAL' && g.manualModo === 'PESOS'
             ? g.pesos.filter(p => p.garzonId)
-            : undefined,
+            : [],
       })),
     }
     const saved = await api.reemplazar(body)
