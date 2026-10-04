@@ -2409,7 +2409,7 @@ columnas nullables, donde `null` borra el dato. Cada DTO lleva un comentario que
 - **C** (`PUT` → default): preferencias financieras (`promosAcumulanDescuentos`) y el grupo de
   `PUT /propinas/distribucion` (`baseVentas`, `activo`, `orden`, y `pesos`, que no es columna pero
   con `null` quedaba "sin pesos"). En el mismo DTO, `habilitadoPos`/`habilitadoSalones` eran forma A.
-  **Omitir** sigue escribiendo el default: esa pregunta pasó a `pendientes.md` § 4.
+  **Omitir** sigue escribiendo el default: esa pregunta pasó a `pendientes.md` § 4, y el owner la contestó el 2026-10-04 (400 si falta; ahora en § 1).
 - **PartialType**: `PartialType(Create, { skipNullProperties: false })`, una opción de
   `@nestjs/mapped-types` y `@nestjs/swagger` que aplica exactamente `ValidateIf(v !== undefined)`
   en lugar de `IsOptional`. Cubre lo que el alta exige. No alcanza para lo que el alta ya marca
@@ -2477,7 +2477,7 @@ del service, salvo esa coerción. Los casos quedan para que el 400 no dependa de
 - **Omitir un campo en un `PUT` que reemplaza escribe el default**: es pregunta de producto, en
   `pendientes.md` § 4.
 - **`PATCH /me/preferencias`** con `ui.colorMode`/`ui.pageSize` en `null` vuelve al default
-  (`jsonb`, sin 500): en § 4, por si `null` quiere decir "volver al default". Lo encontró el
+  (`jsonb`, sin 500): fue a § 4, por si `null` quería decir "volver al default"; el owner decidió el 2026-10-04 que es un 400 (ahora en § 1). Lo encontró el
   barrido independiente de las rutas `@Patch`/`@Put` que no estaban en la entrada. Ese barrido no
   encontró otra forma A ni A'.
 
