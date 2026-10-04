@@ -224,7 +224,10 @@ describe('Salones — las notas de crédito en el % de anulaciones por garzón (
     ventaId: string,
     monto: string,
     devoluciones: { itemId: string; cantidad: string }[] = [],
-    via: { pagoId?: string; reponerStock?: boolean } = {},
+    // Lo devuelto se pierde salvo que el caso diga otra cosa: es lo que hacía
+    // el `reponerStock: false` de antes (no vuelve al stock), y la merma que
+    // deja no es una anulación de plato, así que no toca el %.
+    via: { pagoId?: string; stock?: 'recupera' | 'pierde' } = {},
   ): Promise<void> {
     const res = await request(app.getHttpServer())
       .post(`/api/ventas/${ventaId}/notas-credito`)
@@ -236,7 +239,7 @@ describe('Salones — las notas de crédito en el % de anulaciones por garzón (
         devolucion: via.pagoId ? { pagoId: via.pagoId } : { sinPlata: true },
         devoluciones: devoluciones.map((d) => ({
           ...d,
-          reponerStock: via.reponerStock ?? false,
+          stock: via.stock ?? 'pierde',
         })),
       });
     expect(res.status).toBe(201);
@@ -467,7 +470,7 @@ describe('Salones — las notas de crédito en el % de anulaciones por garzón (
       ventaId,
       montoVino,
       [{ itemId: itemVino, cantidad: '1' }],
-      { pagoId: pagos[0].pago_id, reponerStock: true },
+      { pagoId: pagos[0].pago_id, stock: 'recupera' },
     );
 
     // Premisa: la nota devolvió plata y repuso el vino de verdad.

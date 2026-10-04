@@ -3,12 +3,23 @@ import Decimal from 'decimal.js'
 
 // ── Tipos ───────────────────────────────────────────────────────────────────
 
+/**
+ * Qué se le pregunta a una línea al devolverla, según lo que salió del
+ * inventario por ella (GET /ventas/:id, `devolucionStock`): nada, las dos
+ * respuestas, o solo "se perdió" (serie o lote no vuelven solos al stock).
+ */
+export type DevolucionStock = 'sin_stock' | 'recuperable' | 'solo_perdida'
+
+/** Lo que pasa con lo devuelto: vuelve al stock, o se perdió (merma "Devolución"). */
+export type DestinoStock = 'recupera' | 'pierde'
+
 /** Línea de venta tal como la expone GET /ventas/:id (subset para devoluciones). */
 export interface DetalleVentaDevolucion {
   itemId: string
   descripcion: string | null
   cantidad: string
   modoInventario: string | null
+  devolucionStock: DevolucionStock
   /** Total ya devuelto del ÍTEM — el backend repite el mismo total en cada línea del ítem. */
   cantidadDevuelta: string
   /** Bruto de la línea, con descuentos y recargos ya adentro. */
@@ -21,14 +32,15 @@ export interface FilaDevolucion {
   disponible: string
   modoInventario: string | null
   cantidad: string
-  /** ¿El ítem admite volver al inventario? Solo `modo_inventario = 'cantidad'`. */
-  puedeReponer: boolean
+  /** Si se pregunta y qué respuestas admite; lo decide el backend. */
+  devolucionStock: DevolucionStock
   /**
-   * ¿Esta fila vuelve al stock? Arranca en lo que el ítem puede, que es la
-   * conducta de antes de que existiera el campo. En una nota de crédito se
-   * puede apagar: acreditar y reponer dejaron de ser lo mismo (2026-09-04).
+   * La respuesta a "¿vuelve al stock o se perdió?" (owner, 2026-08-23). Nace
+   * sin responder a propósito: no hay default, porque los dos destinos son
+   * comunes —la botella que vuelve cerrada y la hamburguesa ya armada— y
+   * cualquiera elegido de antemano se confirmaría sin mirar.
    */
-  reponerStock: boolean
+  stock: DestinoStock | null
 }
 
 // ── Helpers (puros, inmutables) ──────────────────────────────────────────────
@@ -52,15 +64,14 @@ export function agruparFilasDevolucion(
       previa.disponible = new Decimal(previa.disponible).plus(d.cantidad).toString()
     }
     else {
-      const puedeReponer = d.modoInventario === 'cantidad'
       porItem.set(d.itemId, {
         itemId: d.itemId,
         descripcion: d.descripcion ?? d.itemId,
         disponible: new Decimal(d.cantidad).minus(d.cantidadDevuelta).toString(),
         modoInventario: d.modoInventario,
         cantidad: '',
-        puedeReponer,
-        reponerStock: puedeReponer,
+        devolucionStock: d.devolucionStock,
+        stock: null,
       })
     }
   }
@@ -83,17 +94,33 @@ export function filasDevolucionValidas(filas: FilaDevolucion[]): boolean {
   })
 }
 
-export function setReponerFila(
+/**
+ * ¿Falta contestar "¿vuelve al stock o se perdió?" en alguna fila que se va a
+ * devolver? Es lo que el backend rechaza con 400 (`Falta decir si…`): el botón
+ * no se habilita hasta contestarlas todas.
+ */
+export function faltaDestinoStock(filas: FilaDevolucion[]): boolean {
+  return filas.some(f =>
+    f.cantidad
+    && esDecimalValido(f.cantidad)
+    && new Decimal(f.cantidad).gt(0)
+    && f.devolucionStock !== 'sin_stock'
+    && f.stock === null,
+  )
+}
+
+export function setStockFila(
   filas: FilaDevolucion[],
   itemId: string,
-  valor: boolean,
+  valor: DestinoStock,
 ): FilaDevolucion[] {
-  // Solo donde el ítem puede: encender la reposición de una receta manda al
-  // backend un pedido que rechaza con 400, y el switch de esa fila está
-  // deshabilitado justamente para que no pase.
-  return filas.map(f =>
-    f.itemId === itemId && f.puedeReponer ? { ...f, reponerStock: valor } : f,
-  )
+  // Solo lo que el backend acepta: una fila sin stock no lleva respuesta, y la
+  // que solo puede perderse no se recupera (serie o lote).
+  return filas.map((f) => {
+    if (f.itemId !== itemId || f.devolucionStock === 'sin_stock') return f
+    if (valor === 'recupera' && f.devolucionStock === 'solo_perdida') return f
+    return { ...f, stock: valor }
+  })
 }
 
 /**
@@ -136,12 +163,21 @@ function cuantizar(d: Decimal, cfg: CriterioRedondeoCongelado): Decimal {
   )
 }
 
+/**
+ * Las líneas a devolver, con `stock` solo donde se pregunta: el backend
+ * rechaza la respuesta en una línea sin stock, igual que la falta de ella en una
+ * que lo tiene. Es el contrato de `devoluciones` de la nota y del reembolso.
+ */
 export function devolucionesPayload(
   filas: FilaDevolucion[],
-): { itemId: string, cantidad: string, reponerStock: boolean }[] {
+): { itemId: string, cantidad: string, stock?: DestinoStock }[] {
   return filas
     .filter(f => f.cantidad && esDecimalValido(f.cantidad) && new Decimal(f.cantidad).gt(0))
-    .map(f => ({ itemId: f.itemId, cantidad: f.cantidad, reponerStock: f.reponerStock }))
+    .map(f =>
+      f.devolucionStock === 'sin_stock' || f.stock === null
+        ? { itemId: f.itemId, cantidad: f.cantidad }
+        : { itemId: f.itemId, cantidad: f.cantidad, stock: f.stock },
+    )
 }
 
 /**
@@ -197,18 +233,19 @@ export function valorDevueltoCuantizado(
     .toString()
 }
 
+/** Por qué una fila no pregunta, o no deja recuperar. `null` si admite las dos. */
 export function notaDevolucion(fila: FilaDevolucion): string | null {
-  if (fila.modoInventario === null) return 'Servicio: no vuelve al stock'
-  if (fila.modoInventario !== 'cantidad')
-    return `Modo ${fila.modoInventario}: la vuelta al stock se registra desde Inventario`
+  if (fila.devolucionStock === 'sin_stock') return 'No sacó nada del inventario'
+  if (fila.devolucionStock === 'solo_perdida')
+    return 'Tiene serie o lote: si vuelve, se registra desde Inventario'
   return null
 }
 
 /**
  * ¿La fila se puede acreditar en una nota de crédito? **Cualquier ítem vendido**
  * con disponible: desde el 2026-09-04 acreditar dejó de exigir que el ítem
- * pudiera volver al stock, y lo que `modoInventario` decide es solo si el switch
- * de reposición está disponible.
+ * pudiera volver al stock; lo que se pregunta por el stock va aparte
+ * (`devolucionStock`).
  */
 export function filaAcreditable(fila: FilaDevolucion): boolean {
   return new Decimal(fila.disponible).gt(0)
@@ -231,11 +268,12 @@ export function useDevolucionInventario() {
     filas.value = setCantidadFila(filas.value, itemId, valor)
   }
 
-  function setReponer(itemId: string, valor: boolean) {
-    filas.value = setReponerFila(filas.value, itemId, valor)
+  function setStock(itemId: string, valor: DestinoStock) {
+    filas.value = setStockFila(filas.value, itemId, valor)
   }
 
   const filasValidas = computed(() => filasDevolucionValidas(filas.value))
+  const faltaDestino = computed(() => faltaDestinoStock(filas.value))
   const devoluciones = computed(() => devolucionesPayload(filas.value))
 
   return {
@@ -243,8 +281,9 @@ export function useDevolucionInventario() {
     cargarDesdeDetalles,
     limpiar,
     setCantidad,
-    setReponer,
+    setStock,
     filasValidas,
+    faltaDestino,
     devoluciones,
   }
 }

@@ -380,11 +380,12 @@ export class TenantsService {
       await this.itemsService.asegurarItemAjuste(manager, savedTenant.id);
 
       // 7. Sembrar motivos de baja fijos del sistema
-      for (const { nombre, tipo } of MOTIVOS_BAJA_FIJOS) {
+      for (const { nombre, tipo, esDevolucion } of MOTIVOS_BAJA_FIJOS) {
         await manager.query(
-          `INSERT INTO motivo_baja (tenant_id, nombre, activo, es_fijo, tipo)
-           VALUES ($1, $2, true, true, $3)`,
-          [savedTenant.id, nombre, tipo],
+          `INSERT INTO motivo_baja
+             (tenant_id, nombre, activo, es_fijo, tipo, es_devolucion)
+           VALUES ($1, $2, true, true, $3, $4)`,
+          [savedTenant.id, nombre, tipo, esDevolucion === true],
         );
       }
 

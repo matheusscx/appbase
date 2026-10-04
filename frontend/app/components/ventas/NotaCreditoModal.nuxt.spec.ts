@@ -43,6 +43,9 @@ const DETALLES = [
     cantidad: '1',
     totalLinea: '11900.0000',
     modoInventario: null,
+    // Una línea que no sacó nada del inventario: los casos de "¿por dónde vuelve
+    // la plata?" no pasan por la pregunta del stock (va en su propio describe).
+    devolucionStock: 'sin_stock' as const,
     cantidadDevuelta: '0',
   },
 ]
@@ -230,6 +233,66 @@ describe('NotaCreditoModal — el body', () => {
     const body = await confirmar()
 
     expect(body.devolucion).toEqual({ sinPlata: true })
+  })
+})
+
+describe('NotaCreditoModal — ¿vuelve al stock o se perdió? (owner, 2026-08-23)', () => {
+  const HAMBURGUESA = {
+    itemId: 'item-receta',
+    descripcion: 'Hamburguesa',
+    cantidad: '2',
+    totalLinea: '11900.0000',
+    modoInventario: null,
+    devolucionStock: 'recuperable' as const,
+    cantidadDevuelta: '0',
+  }
+  const CELULAR = { ...HAMBURGUESA, itemId: 'item-serie', descripcion: 'Celular', devolucionStock: 'solo_perdida' as const }
+  const fila = (itemId: string) =>
+    dialogo().querySelector<HTMLElement>(`[data-testid="devolucion-fila-${itemId}"]`)!
+  const radioDe = (itemId: string, texto: string) =>
+    [...fila(itemId).querySelectorAll<HTMLElement>('[role="radio"]')]
+      .find(r => r.getAttribute('aria-label')?.includes(texto))
+  async function cantidad(itemId: string, valor: string) {
+    const input = fila(itemId).querySelector<HTMLInputElement>('input')!
+    input.value = valor
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await esperar()
+  }
+
+  it('sin respuesta no se puede confirmar, y avisa; contestada, manda la respuesta', async () => {
+    await montar([TARJETA], true, 'v-1', { detalles: [HAMBURGUESA] })
+    await cantidad('item-receta', '1')
+
+    // Ninguna nace elegida: los dos destinos son comunes.
+    expect(radioDe('item-receta', 'Vuelve al stock')?.getAttribute('aria-checked')).toBe('false')
+    expect(radioDe('item-receta', 'Se perdió')?.getAttribute('aria-checked')).toBe('false')
+    expect(generar().disabled).toBe(true)
+    expect(dialogo().textContent).toContain('si vuelve al stock o se perdió')
+
+    radioDe('item-receta', 'Se perdió')!.click()
+    await esperar()
+    expect(dialogo().textContent).toContain('Sale como merma «Devolución»')
+    expect(generar().disabled).toBe(false)
+
+    generar().click()
+    await esperar()
+    const llamada = apiFetch.mock.calls.find(([url]) => String(url).endsWith('/notas-credito'))
+    expect((llamada![1].body as Record<string, unknown>).devoluciones).toEqual([
+      { itemId: 'item-receta', cantidad: '1', stock: 'pierde' },
+    ])
+  })
+
+  it('serie o lote: "Vuelve al stock" no se puede elegir, "Se perdió" sí', async () => {
+    await montar([TARJETA], true, 'v-1', { detalles: [CELULAR] })
+    expect(radioDe('item-serie', 'Vuelve al stock')?.hasAttribute('data-disabled')
+      || radioDe('item-serie', 'Vuelve al stock')?.hasAttribute('disabled')).toBe(true)
+    expect(fila('item-serie').textContent).toContain('se registra desde Inventario')
+  })
+
+  it('una línea sin stock no pregunta nada', async () => {
+    await montar([TARJETA])
+    expect(fila('item-1').querySelectorAll('[role="radio"]')).toHaveLength(0)
+    expect(fila('item-1').textContent).toContain('No sacó nada del inventario')
   })
 })
 

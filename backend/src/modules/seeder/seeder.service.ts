@@ -1612,6 +1612,9 @@ export class SeederService implements OnApplicationBootstrap {
       'Cortesía de la casa': [401, 402],
       'No se llegó a hacer': [403, 404],
       'Comida del personal (dentro del local)': [460, 461],
+      // La causa de la merma de una nota de crédito (2026-10-04): 470/471, el
+      // siguiente libre después del …469 que reservaron los frentes paralelos.
+      Devolución: [470, 471],
     };
 
     let id = 266;
@@ -1633,7 +1636,7 @@ export class SeederService implements OnApplicationBootstrap {
       }
     }
 
-    for (const { nombre, tipo } of MOTIVOS_BAJA_FIJOS.slice(5)) {
+    for (const { nombre, tipo, esDevolucion } of MOTIVOS_BAJA_FIJOS.slice(5)) {
       const [idParis, idFalabella] = NUEVOS[nombre];
       for (const [tenantId, n] of [
         [PARIS, idParis],
@@ -1647,9 +1650,10 @@ export class SeederService implements OnApplicationBootstrap {
         if (!exists.length) {
           await this.dataSource.query(
             `INSERT INTO motivo_baja
-               (motivo_baja_id, tenant_id, nombre, activo, es_fijo, tipo)
-             VALUES ($1,$2,$3,true,true,$4)`,
-            [motivoId, tenantId, nombre, tipo],
+               (motivo_baja_id, tenant_id, nombre, activo, es_fijo, tipo,
+                es_devolucion)
+             VALUES ($1,$2,$3,true,true,$4,$5)`,
+            [motivoId, tenantId, nombre, tipo, esDevolucion === true],
           );
         }
       }

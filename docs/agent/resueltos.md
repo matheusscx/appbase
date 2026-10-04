@@ -23,6 +23,155 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La nota de crédito pregunta si lo devuelto se recupera o se pierde (cerrada 2026-10-04)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Frente fiscal propio (`CLAUDE.md`, ADR-010). La regla
+viva está en [`features/reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md#se-recupera-o-se-pierde-2026-10-04)
+y en [`features/mermas-valorizadas.md`](../features/mermas-valorizadas.md); spec y plan:
+[`2026-10-04-nc-recupera-o-pierde-design.md`](../superpowers/specs/2026-10-04-nc-recupera-o-pierde-design.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
+  medido 2026-08-22 al cerrar la anulación; el owner decidió que **va aparte**, no de
+  arrastre) — el camino de la NC usa `LEFT JOIN item_producto` (en
+  `validarDevolucionesReembolso`, y el gemelo en la lectura del detalle de `findOne`; las citas
+  de línea se sacaron el 2026-09-04 porque ya apuntaban a otra cosa), así que la línea de receta
+  **no** desaparece como
+  desaparecía en `cancelar`: cae en la rama `modo_inventario === null` y responde *"no
+  maneja stock (servicio): no admite devolución a inventario"*. Para una receta ese
+  mensaje es **falso** — no es un servicio, tiene ingredientes que sí salieron del
+  inventario y que hoy no vuelven por ningún camino.
+
+  ⚠️ **Actualizado el 2026-09-04:** ese mensaje **ya no dispara por nombrar la receta**. Desde
+  el frente de la devolución con crédito parcial ([`resueltos.md`](resueltos.md)) la receta **sí
+  se acredita por línea** —con su nombre en el documento, no como "Ajuste"— y el mensaje solo
+  aparece si alguien pide explícitamente que reponga. **Lo que esta entrada pide sigue vivo y no
+  se achica:** los ingredientes de esa receta siguen sin volver al inventario por ningún camino,
+  y eso es lo que la decisión del owner de más abajo viene a resolver.
+  **El arreglo ya existe del otro lado y está probado:** `cancelar` revierte leyendo las
+  salidas del kardex por `venta_id`, que cubre recetas, combos y opciones de grupo sin
+  casos especiales. La NC podría usar la misma fuente, acotada a las líneas devueltas.
+  **La pregunta para el owner:** la NC devuelve **por línea elegida** (`devoluciones`),
+  no la venta entera. Para un producto la correspondencia línea→stock es directa; para una
+  receta hay que decidir si devolver una unidad de "Hamburguesa" repone sus ingredientes
+  —simétrico con la venta— o si se rechaza explícito.
+  ✅ **DECIDIDO (owner, 2026-08-23): ni una cosa ni la otra — se pregunta.** Al hacer la nota
+  de crédito, el sistema pregunta **si el producto se recupera o se pierde**. Si se recupera,
+  repone; si no, **sale como merma**. Es lo fiel a un local de comida: una hamburguesa ya
+  armada no vuelve a ser pan y carne, pero una que nunca salió de la cocina sí.
+  ✅ **La pregunta aparece SIEMPRE que haya stock de por medio**, no solo en recetas y combos:
+  también en el producto suelto, porque la botella puede volver rota. Una sola regla, sin
+  excepción que explicar.
+  ✅ **La causa de esa merma es una fija, "Devolución", que crea el sistema en cada tenant**
+  (owner, 2026-09-29, en el selector interactivo de la orquestadora: eligió *A: una causa fija
+  "Devolución"*, recomendada, por sobre *B: el cajero elige una causa*). Así las devoluciones se
+  ven aparte en el reporte de mermas sin que nadie elija nada. Al construir: sembrarla al crear el
+  tenant, como el rol admin, y decidir si el tenant puede renombrarla o borrarla.
+  Y sigue en pie que toca `movimientos_inventario` y el camino del reembolso de pasarela.
+
+### Lo medido antes de tocar nada
+
+- `validarDevolucionesReembolso` decidía "tiene stock" con `LEFT JOIN item_producto` sobre la
+  **línea**: una receta o un combo caían en `modo_inventario = null`, como un servicio.
+- `cancelar` revierte leyendo el kardex por `venta_id`, pero **el kardex no ligaba el movimiento a
+  la línea** y la nota devuelve por ítem y cantidad: con dos recetas que comparten el pan no había
+  cómo saber qué pan salió por cuál. Usar "la misma fuente, acotada a las líneas devueltas" exigía
+  ligarlo.
+- El contador de unidades ya devueltas (`unidadesComprometidasPorItem`) contaba por `item_id` toda
+  entrada `devolucion` de la venta y de sus notas: con la vuelta de un componente (la Bebida de un
+  combo) se habría sumado a las devueltas de la Bebida suelta de la misma venta. Hoy no pasaba
+  porque nada devolvía componentes.
+
+### Cómo se decidió lo que quedaba
+
+Lo del owner está en la entrada (pregunta siempre; recupera repone, pierde merma; causa fija
+"Devolución" sembrada por tenant). Lo que quedaba —si la causa se renombra o borra, la forma en el
+kardex, el contrato, serie/lote, el default de pantalla y el tenant viejo— se mandó como siete
+propuestas a la *Sesión de esfuerzo máximo*. **Decidido por la Sesión de esfuerzo máximo
+(2026-10-04), derivado de las decisiones del owner** (2026-08-23, 2026-09-29 y la de 2026-08-15: lo
+que vuelve reingresa al costo con que salió), sin llevarlo al owner porque no agrega ninguna regla
+para el operador. Cinco salieron como se propusieron; dos con ajuste:
+
+- **La entrada de lo que se pierde no puede ir sin costo.** Sin costo congela el CPP de hoy y la
+  merma el de la salida: varianza resta del teórico esa entrada y vería 0 unidades con plata. Y con
+  costo, `devolucion` promedia. Va al mismo costo de salida que la merma y **sin promediar**
+  (`registrarMovimiento({ sinPromediar })`, que deja `costo_informado` en falso para "rehacer la
+  cuenta").
+- **Nunca adoptar un motivo propio** como la causa: lo volvería fijo, lo sacaría de sus selectores
+  sin avisar y mezclaría sus mermas manuales con las devoluciones. Con el nombre tomado, la causa
+  nace "Devolución (nota de crédito)".
+
+La orquestadora había objetado el find-or-create (sin datos productivos no se hacen caminos para
+tenants existentes) y lo dejó a la Sesión de esfuerzo máximo, que lo mantuvo: no es por los datos,
+es para que el webhook no pierda un evento consumado, igual que el ítem "Ajuste".
+
+### Cómo se cerró
+
+- **El kardex sabe de qué línea salió cada movimiento**: `movimientos_inventario.venta_detalle_id`
+  (nullable, sin FK), escrito por la venta en toda salida —también ingredientes, componentes y
+  opciones, por `ContextoConsumo`— y por la nota en lo que revierte.
+- **Un lector, dos consumidores**: `salidasPorItemVendido` (la nota bajo el lock de la venta y el
+  `devolucionStock` del detalle). Lo que vuelve por ítem movido: `cantidadADevolver`, que redondea
+  lo acumulado para que una serie de notas parciales cierre exacto.
+- **El contrato**: `stock: 'recupera' | 'pierde'` en cada línea de `devoluciones` (nota manual y
+  reembolso), obligatorio con stock y prohibido sin; `reponerStock` sale de los DTO. El reembolso lo
+  valida en tx0, antes de Transbank (`ReembolsoCallbackHandler.validarDevoluciones`).
+- **Se pierde**: entrada `devolucion` + salida `merma` con la causa fija, las dos al costo de la
+  salida y la entrada sin promediar. **Se recupera**: entrada al costo de la salida, el CPP se
+  recalcula.
+- **La causa "Devolución"**: `motivo_baja.es_devolucion`, fija, en `MOTIVOS_BAJA_FIJOS` (alta de
+  tenant) y en el seeder (`…440470` París, `…440471` Falabella); find-or-create para los tenants de
+  antes (`asegurarDevolucion`, con `ON CONFLICT` sobre `uq_motivo_baja_devolucion_tenant`, sin
+  adoptar nunca un motivo propio);
+  `assertMotivoActivo` la rechaza en toda baja manual (merma, anular y cancelar en la mesa) y las
+  pantallas no la ofrecen.
+- **La nota guarda lo que devolvió** (`ventas.devoluciones`, `jsonb`, `[]` si nada) y el contador
+  de unidades devueltas cuenta de ahí; una nota anterior (`NULL`) se cuenta por sus huellas como
+  antes. Lo levantó la revisión independiente (BLOQUEA): una receta escalada a $0 fuera del documento
+  —o la porción agotada del webhook— devolvía sus ingredientes sin dejar línea, y un celular con
+  serie que "se pierde" no deja ni línea ni movimiento: la misma unidad volvía dos veces. Se
+  propusieron tres salidas (una huella más en el kardex, no mover stock, o un 400 nuevo); la Sesión
+  de esfuerzo máximo eligió una cuarta, la nota como fuente, porque cualquier huella derivada vuelve
+  a quedar ciega con el próximo caso. Decidido por la Sesión de esfuerzo máximo (2026-10-04);
+  técnico, a partir de la duda que levantó la revisión independiente.
+- **Arranque medido**: base sembrada por `main` en un Postgres aislado, después esta rama encima con
+  `synchronize`: arranca, crea las columnas (`es_devolucion`, `venta_detalle_id`,
+  `ventas.devoluciones`) y el índice, y siembra las dos causas. Medido dos veces: sobre `4f6c4154`
+  (con un segundo arranque, que no duplica nada) y, después del rebase, sobre `5557876e`.
+
+### Qué lo fija
+
+Cada mutante revierte una pieza al comportamiento anterior; todos rojos, por la aserción (no por
+`TypeError`):
+
+| Mutante | Lo mata |
+|---|---|
+| la receta no mueve ingredientes (solo el propio ítem) | 2 unitarios de `ventas.service.spec.ts` |
+| la línea con stock sin respuesta no rechaza | 2 unitarios |
+| "se pierde" promedia (`sinPromediar` ignorado al calcular el CPP) | el unitario de `inventario.service.spec.ts` |
+| la entrada de lo perdido vuelve sin costo (la primera versión de este frente) | el e2e de punta a punta (stock, CPP y teórico de varianza en 0 en cantidad y plata) |
+| la causa ignora un "Devolución" propio y toma su nombre | 2 unitarios de `motivos-baja` |
+| la nota no congela sus devoluciones (vuelve a contarse por las huellas) | 3 e2e: la receta escalada a $0 y el celular con serie que se pierde vuelven dos veces (`201` en vez de `400`), y la columna queda en `null` |
+| el reparto sin acumular (`r4(T·q/V)`) | `nota-credito-composicion.spec.ts` (la serie no cierra) |
+| la venta no liga la línea | 6 de `nota-credito-recupera-o-pierde.e2e-spec.ts` (sin la línea la receta no tiene stock: es la raíz) |
+| el contador vuelve a contar los componentes | el e2e del combo y la Bebida suelta |
+| la merma manual acepta "Devolución" | 1 unitario de `motivos-baja` y el e2e de `POST /mermas` |
+| el reembolso no valida antes del proveedor | 2 unitarios de `cobros.service.spec.ts` y el e2e (`201` en vez de `400`) |
+| la pantalla confirma sin respuesta (nota y reembolso) | `NotaCreditoModal` y `ReembolsoModal` |
+| la pregunta nace contestada (`recupera`) | 3 specs de Vitest |
+| Mermas y la mesa ofrecen "Devolución" | `mermas.nuxt.spec.ts` y `salones/index.nuxt.spec.ts` |
+
+### Lo que quedó afuera
+
+- **Serie y lote**: "se recupera" sigue por Inventario y "se pierde" no deja merma (la unidad ya
+  está vendida y la merma de serie no existe): § 6, *"Serie y lote están a medias"*.
+- **El botón "Generar nota"** de un `REFUND` sin nota: es el frente siguiente y reusa este contrato.
+- **Ventas anteriores al 2026-10-04**: una receta o un combo vendidos antes no tienen salidas
+  ligadas y no preguntan ni mueven nada (sin datos productivos, owner).
+
+---
+
 ## El kardex llamaba "costo perdido" a la cortesía y a la comida del personal (cerrada 2026-10-04)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. La regla viva, en

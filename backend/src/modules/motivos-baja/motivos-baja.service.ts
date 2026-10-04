@@ -12,6 +12,7 @@ import {
 import { CreateMotivoBajaDto } from './dto/create-motivo-baja.dto';
 import { UpdateMotivoBajaDto } from './dto/update-motivo-baja.dto';
 import { TipoMotivoBaja } from './tipo-motivo-baja.enum';
+import { NOMBRE_DEVOLUCION } from './motivos-baja.defaults';
 
 // `eliminadoEl`/`eliminadoPor`/`eliminadoPorNombre` solo se completan cuando
 // se pide `incluirEliminados` (o tras `restaurar`): el listado normal no trae
@@ -22,6 +23,12 @@ export interface MotivoBajaListItem {
   activo: boolean;
   esFijo: boolean;
   tipo: TipoMotivoBaja;
+  /**
+   * La causa fija de la merma de una nota de crédito. La devuelve el listado
+   * para que los selectores de una baja manual (mermas, anular en la mesa) no la
+   * ofrezcan: el servidor igual la rechaza (`assertMotivoActivo`).
+   */
+  esDevolucion: boolean;
   enUso: boolean;
   eliminadoEl?: string | null;
   eliminadoPor?: string | null;
@@ -48,7 +55,11 @@ interface MotivoBajaRow {
   tipo: TipoMotivoBaja;
 }
 
-interface MotivoBajaRowConUso extends MotivoBajaRow {
+interface MotivoBajaRowListado extends MotivoBajaRow {
+  es_devolucion: boolean;
+}
+
+interface MotivoBajaRowConUso extends MotivoBajaRowListado {
   en_uso: boolean;
 }
 
@@ -77,7 +88,7 @@ export class MotivosBajaService {
 
     if (!incluirEliminados) {
       const rows: MotivoBajaRowConUso[] = await this.db.query(
-        `SELECT mb.motivo_baja_id, mb.nombre, mb.activo, mb.es_fijo, mb.tipo,
+        `SELECT mb.motivo_baja_id, mb.nombre, mb.activo, mb.es_fijo, mb.tipo, mb.es_devolucion,
                 -- "En uso" cuenta las dos fuentes que bloquean editar el tipo
                 -- y borrar (spec motivos-de-baja-con-tipo § 4.3, ampliada por
                 -- anular-plato-despachado § 4.3): el kardex Y las anulaciones
@@ -103,6 +114,7 @@ export class MotivosBajaService {
         nombre: r.nombre,
         activo: r.activo,
         esFijo: r.es_fijo,
+        esDevolucion: r.es_devolucion,
         tipo: r.tipo,
         enUso: r.en_uso,
       }));
@@ -117,7 +129,7 @@ export class MotivosBajaService {
     // del sistema, no restaurable ni visible — decisión del owner,
     // docs/features/papelera.md.
     const rows: MotivoBajaRowConEliminado[] = await this.db.query(
-      `SELECT mb.motivo_baja_id, mb.nombre, mb.activo, mb.es_fijo, mb.tipo,
+      `SELECT mb.motivo_baja_id, mb.nombre, mb.activo, mb.es_fijo, mb.tipo, mb.es_devolucion,
               -- Mismas dos fuentes que el listado normal (ver comentario de
               -- arriba): kardex y anulaciones, una sola consulta.
               EXISTS (
@@ -145,6 +157,7 @@ export class MotivosBajaService {
       nombre: r.nombre,
       activo: r.activo,
       esFijo: r.es_fijo,
+      esDevolucion: r.es_devolucion,
       tipo: r.tipo,
       enUso: r.en_uso,
       eliminadoEl: r.eliminado_el,
@@ -176,6 +189,8 @@ export class MotivosBajaService {
       activo: rows[0].activo,
       esFijo: rows[0].es_fijo,
       tipo: rows[0].tipo,
+      // Uno propio nunca es la causa de la nota de crédito.
+      esDevolucion: false,
       // Recién creado: no puede tener movimientos todavía.
       enUso: false,
     };
@@ -244,7 +259,7 @@ export class MotivosBajaService {
         this.db.query(
           `UPDATE motivo_baja SET ${sets.join(', ')}
          WHERE motivo_baja_id = $${idx++} AND tenant_id = $${idx} AND eliminado_el IS NULL
-         RETURNING motivo_baja_id, nombre, activo, es_fijo, tipo,
+         RETURNING motivo_baja_id, nombre, activo, es_fijo, tipo, es_devolucion,
                    -- Mismas dos fuentes que el listado (kardex y anulaciones).
                    EXISTS (
                      SELECT 1 FROM movimientos_inventario mv
@@ -275,6 +290,7 @@ export class MotivosBajaService {
       activo: rows[0].activo,
       esFijo: rows[0].es_fijo,
       tipo: rows[0].tipo,
+      esDevolucion: rows[0].es_devolucion,
       enUso: rows[0].en_uso,
     };
   }
@@ -332,7 +348,7 @@ export class MotivosBajaService {
                   actualizado_el = NOW()
             WHERE motivo_baja_id = $1 AND tenant_id = $2
               AND eliminado_el IS NOT NULL AND eliminado_por IS NOT NULL
-          RETURNING motivo_baja_id, nombre, activo, es_fijo, tipo,
+          RETURNING motivo_baja_id, nombre, activo, es_fijo, tipo, es_devolucion,
                     -- Mismas dos fuentes que el listado (kardex y anulaciones).
                     EXISTS (
                       SELECT 1 FROM movimientos_inventario mv
@@ -360,6 +376,7 @@ export class MotivosBajaService {
         activo: rows[0].activo,
         esFijo: rows[0].es_fijo,
         tipo: rows[0].tipo,
+        esDevolucion: rows[0].es_devolucion,
         enUso: rows[0].en_uso,
         eliminadoEl: rows[0].eliminado_el,
         eliminadoPor: rows[0].eliminado_por,
@@ -397,19 +414,94 @@ export class MotivosBajaService {
     }
   }
 
+  /**
+   * La causa fija "Devolución" del tenant: la merma que deja una nota de crédito
+   * cuando lo devuelto se pierde. Se siembra al crear el tenant; un tenant de
+   * antes (Railway) la recibe acá, la primera vez que una nota la necesita
+   * —find-or-create, como el ítem "Ajuste" (`ItemsService.asegurarItemAjuste`)—,
+   * porque el webhook de reembolso no puede perder un evento ya consumado por un
+   * dato de configuración que falta. (Decidido por la Sesión de esfuerzo máximo,
+   * 2026-10-04: sin datos productivos no hace falta para los datos, pero sí para
+   * no perder ese evento.)
+   *
+   * Corre dentro de la transacción de la nota (`db.query` resuelve su manager).
+   * **Un motivo propio del tenant nunca se adopta**: volverlo fijo lo sacaría de
+   * sus selectores sin avisar y mezclaría sus mermas manuales con las
+   * devoluciones, que es lo que la causa existe para separar. Si "Devolución" ya
+   * es el nombre de un motivo vivo, la causa nace como "Devolución (nota de
+   * crédito)". Dos notas concurrentes del mismo tenant sin la causa: el
+   * `ON CONFLICT` sobre `uq_motivo_baja_devolucion_tenant` deja una sola (la misma
+   * carrera que ya tiene "Ajuste").
+   */
+  async asegurarDevolucion(tenantId: string): Promise<string> {
+    const marcada = async (): Promise<string | undefined> => {
+      const filas: { motivo_baja_id: string }[] = await this.db.query(
+        `SELECT motivo_baja_id FROM motivo_baja
+          WHERE tenant_id = $1 AND es_devolucion AND eliminado_el IS NULL`,
+        [tenantId],
+      );
+      return filas[0]?.motivo_baja_id;
+    };
+    const existente = await marcada();
+    if (existente) return existente;
+
+    const nombreTomado: unknown[] = await this.db.query(
+      `SELECT 1 FROM motivo_baja
+        WHERE tenant_id = $1 AND lower(nombre) = lower($2)
+          AND eliminado_el IS NULL`,
+      [tenantId, NOMBRE_DEVOLUCION],
+    );
+    await this.db.query(
+      `INSERT INTO motivo_baja
+         (tenant_id, nombre, activo, es_fijo, tipo, es_devolucion)
+       VALUES ($1, $2, true, true, $3, true)
+       ON CONFLICT DO NOTHING`,
+      [
+        tenantId,
+        nombreTomado.length
+          ? `${NOMBRE_DEVOLUCION} (nota de crédito)`
+          : NOMBRE_DEVOLUCION,
+        TipoMotivoBaja.MERMA,
+      ],
+    );
+    // Sin destino en el \`ON CONFLICT\`: cubre la carrera de dos notas (la
+    // marca) y la de un admin que justo crea un motivo con el mismo nombre. En la
+    // primera, la otra ya la creó; en la segunda no hay causa y el error lo dice.
+    const creada = await marcada();
+    if (!creada)
+      throw new BadRequestException(
+        `No se pudo crear la causa "${NOMBRE_DEVOLUCION}": el nombre está tomado por otro motivo de baja. Renombralo y volvé a intentar.`,
+      );
+    return creada;
+  }
+
   async assertMotivoActivo(
     runner: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
     tenantId: string,
     motivoBajaId: string,
   ): Promise<{ id: string; nombre: string; tipo: TipoMotivoBaja }> {
     const rows = (await runner.query(
-      `SELECT motivo_baja_id, nombre, tipo FROM motivo_baja
+      `SELECT motivo_baja_id, nombre, tipo, es_devolucion FROM motivo_baja
        WHERE motivo_baja_id = $1 AND tenant_id = $2
          AND activo = true AND eliminado_el IS NULL`,
       [motivoBajaId, tenantId],
-    )) as { motivo_baja_id: string; nombre: string; tipo: TipoMotivoBaja }[];
+    )) as {
+      motivo_baja_id: string;
+      nombre: string;
+      tipo: TipoMotivoBaja;
+      es_devolucion: boolean;
+    }[];
     if (!rows.length) {
       throw new BadRequestException('Motivo de baja no válido o inactivo');
+    }
+    // Los tres llamadores (la merma, anular una línea y cancelar una cuenta en la
+    // mesa) son bajas que elige una persona. "Devolución" la deja solo la nota de
+    // crédito: aceptarla acá mezclaría en el reporte de mermas lo devuelto con lo
+    // que alguien cargó a mano, que es lo que la causa fija vino a separar.
+    if (rows[0].es_devolucion) {
+      throw new BadRequestException(
+        `La causa "${rows[0].nombre}" la deja la nota de crédito cuando lo devuelto se pierde: elegí otra.`,
+      );
     }
     return {
       id: rows[0].motivo_baja_id,

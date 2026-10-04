@@ -9,6 +9,7 @@ import {
 } from '~/composables/useReembolsoPasarela'
 import { itemsParaBoletaImpresion } from '~/utils/ticket-builder'
 import type { BoletaVenta } from '~/types/boleta'
+import type { DevolucionStock } from '~/composables/useDevolucionInventario'
 import {
   NUMERO_DOCUMENTO_MAX,
   cuerpoCompletarNumero,
@@ -76,6 +77,8 @@ interface Detalle {
   /** `'afecto'` | `'exento'`, congelada al vender. */
   clasificacionTributaria: string | null
   modoInventario: string | null
+  /** Qué preguntarle a la línea al devolverla (`useDevolucionInventario`). */
+  devolucionStock: DevolucionStock
   cantidadDevuelta: string
   /** Las unidades con serie que salieron en esta línea; `[]` si el producto no lleva serie. */
   unidades?: { serie: string, condicion: string }[]

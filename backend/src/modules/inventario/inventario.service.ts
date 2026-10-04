@@ -64,6 +64,14 @@ export interface RegistrarMovimientoParams {
   cantidad: string;
   usuarioId: string | null;
   ventaId?: string | null;
+  /**
+   * La línea vendida a la que pertenece el movimiento: la salida de la venta
+   * (el producto, o el ingrediente/componente/opción de una receta o un combo)
+   * y su vuelta por una nota de crédito. Es lo que deja devolver "lo que salió
+   * por esa línea" sin adivinar de cuál receta salió un ingrediente compartido.
+   * Solo con `ventaId`.
+   */
+  ventaDetalleId?: string | null;
   comentario?: string | null;
   // Costo pagado en este movimiento. En una entrada por compra recalcula el
   // promedio ponderado de item_producto.costo_actual; en el resto solo se
@@ -106,6 +114,16 @@ export interface RegistrarMovimientoParams {
    * (incluida la venta) no cambia de comportamiento.
    */
   permiteSalidaParcial?: boolean;
+  /**
+   * La entrada congela `costoUnitario` en el kardex pero **no** mueve el CPP, y
+   * queda `costo_informado = false` para que "rehacer la cuenta" tampoco la
+   * promedie. Es la vuelta de lo que se perdió en una nota de crédito: entra y
+   * sale enseguida como merma, las dos al costo con que salió en la venta, así
+   * el par no cambia la valorización (varianza ve plata cero) ni arrastra el
+   * promedio del stock que queda hacia un costo que no volvió. Solo con
+   * `motivo: 'devolucion'` y `tipo: 'entrada'`.
+   */
+  sinPromediar?: boolean;
   motivoDiferenciaId?: string | null; // solo en motivo='recuento'
   /**
    * El documento interno que ata las DOS filas de kardex de un traslado
@@ -478,6 +496,11 @@ export class InventarioService {
       throw new BadRequestException('La cantidad debe ser mayor a cero');
     }
 
+    if (params.ventaDetalleId && !params.ventaId) {
+      throw new BadRequestException(
+        'ventaDetalleId solo aplica a un movimiento de una venta',
+      );
+    }
     if (params.motivo === 'merma' && !params.motivoBajaId) {
       throw new BadRequestException('La merma requiere un motivo de baja');
     }
@@ -487,6 +510,14 @@ export class InventarioService {
     if (params.motivo !== 'merma' && params.cuentaLineaAnulacionId) {
       throw new BadRequestException(
         'cuenta_linea_anulacion_id solo aplica a merma',
+      );
+    }
+    if (
+      params.sinPromediar &&
+      (params.motivo !== 'devolucion' || params.tipo !== 'entrada')
+    ) {
+      throw new BadRequestException(
+        'sinPromediar solo aplica a una entrada de devolución',
       );
     }
     if (params.motivo !== 'merma' && params.permiteSalidaParcial) {
@@ -606,6 +637,7 @@ export class InventarioService {
     let costoActualNuevo: string | null = null;
     if (
       params.costoUnitario != null &&
+      !params.sinPromediar &&
       params.tipo === 'entrada' &&
       MOTIVOS_QUE_RECALCULAN_CPP.includes(params.motivo)
     ) {
@@ -696,8 +728,8 @@ export class InventarioService {
           stock_anterior, stock_resultante, venta_id, usuario_id, comentario,
           costo_unitario, costo_anterior, motivo_baja_id, motivo_diferencia_id,
           traslado_id, cuenta_linea_anulacion_id, compra_linea_id,
-          costo_informado)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+          costo_informado, venta_detalle_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        RETURNING movimiento_id`,
       [
         params.tenantId,
@@ -721,7 +753,8 @@ export class InventarioService {
         // Si trajo costo: `costo_unitario` no lo dice, porque sin costo congela
         // el CPP vigente. "Rehacer la cuenta" lo lee para saber qué entrada
         // promedió (spec compras-recepcion § 4.3).
-        params.costoUnitario != null,
+        params.costoUnitario != null && !params.sinPromediar,
+        params.ventaDetalleId ?? null,
       ],
     );
 

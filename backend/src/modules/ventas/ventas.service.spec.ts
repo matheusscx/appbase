@@ -32,6 +32,10 @@ import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { VentaPromocion } from './entities/venta-promocion.entity';
 import { VentaCustomer } from './entities/venta-customer.entity';
 import { huellaDe } from '../idempotencia/huella';
+import { MotivosBajaService } from '../motivos-baja/motivos-baja.service';
+
+/** La causa fija "Devolución" del tenant (`asegurarDevolucion`). */
+const MOTIVO_DEVOLUCION_ID = 'motivo-devolucion-uuid';
 import {
   IdempotenciaService,
   type SolicitudIdempotenteInput,
@@ -254,6 +258,7 @@ describe('VentasService', () => {
   let idempotencia: { ejecutar: jest.Mock };
   let calculoPreciosService: jest.Mocked<CalculoPreciosService>;
   let inventarioService: jest.Mocked<InventarioService>;
+  let motivosBaja: { asegurarDevolucion: jest.Mock };
   let itemsService: jest.Mocked<ItemsService>;
   let pagosServiceMock: { registrar: jest.Mock };
   let ventaDocumentosMock: {
@@ -289,6 +294,19 @@ describe('VentasService', () => {
    * por lo mismo que el contador: la consulta va por `db.query`.
    */
   let disponiblePorPorcionRows: { clasificacion: string; monto: string }[] = [];
+  /**
+   * Lo que salió por la venta, por ítem vendido (`salidasPorItemVendido`): de
+   * acá sale qué se pregunta en una línea y lo que vuelve al stock. Va por
+   * `db.query`, como el contador. Una función para que lea el costo congelado
+   * del caso.
+   */
+  let salidasVentaRows: () => {
+    item_vendido: string;
+    item_id: string;
+    modo_inventario: string;
+    cantidad: string;
+    costo_unitario: string | null;
+  }[] = () => [];
 
   beforeEach(async () => {
     const manager = buildManagerMock();
@@ -362,6 +380,8 @@ describe('VentasService', () => {
         // `findOne`— el pool.
         if (sql.includes('WITH docs AS'))
           return Promise.resolve(unidadesComprometidasRows);
+        if (sql.includes('AS item_vendido'))
+          return Promise.resolve(salidasVentaRows());
         if (sql.includes('AS clasificacion'))
           return Promise.resolve(disponiblePorPorcionRows);
         return Promise.resolve(MONEDA_ROWS);
@@ -503,6 +523,14 @@ describe('VentasService', () => {
           provide: Db,
           useValue: dbMock,
         },
+        {
+          provide: MotivosBajaService,
+          useValue: {
+            asegurarDevolucion: jest
+              .fn()
+              .mockResolvedValue(MOTIVO_DEVOLUCION_ID),
+          },
+        },
       ],
     }).compile();
 
@@ -512,6 +540,7 @@ describe('VentasService', () => {
     idempotencia = module.get(IdempotenciaService);
     calculoPreciosService = module.get(CalculoPreciosService);
     inventarioService = module.get(InventarioService);
+    motivosBaja = module.get(MotivosBajaService);
     itemsService = module.get(ItemsService);
     catalogService = module.get(CatalogService);
     ubicacionesService = module.get(UbicacionesService);
@@ -2939,6 +2968,26 @@ describe('VentasService', () => {
       efectivoCobrado = '1100.0000';
       efectivoDevuelto = '0';
       costosCongelados = [{ item_id: ITEM_ID, costo_unitario: '50.0000' }];
+      // El producto en `cantidad` salió por su línea; el serializado, por la
+      // suya; el servicio no sacó nada.
+      salidasVentaRows = () => [
+        {
+          item_vendido: ITEM_ID,
+          item_id: ITEM_ID,
+          modo_inventario: 'cantidad',
+          cantidad: '3',
+          costo_unitario:
+            costosCongelados.find((c) => c.item_id === ITEM_ID)
+              ?.costo_unitario ?? null,
+        },
+        {
+          item_vendido: ITEM_SERIE_ID,
+          item_id: ITEM_SERIE_ID,
+          modo_inventario: 'serie',
+          cantidad: '1',
+          costo_unitario: null,
+        },
+      ];
       ncManager.query.mockImplementation((sql: string) => {
         if (sql.includes('WITH s AS'))
           return Promise.resolve([{ ...ncManager.recalculo }]);
@@ -3621,7 +3670,7 @@ describe('VentasService', () => {
     it('NC con devoluciones: la línea se valúa a lo que costó en esa boleta y el resto va a ajuste', async () => {
       const res = await service.crearNotaCredito({
         ...baseParams,
-        devoluciones: [{ itemId: ITEM_ID, cantidad: '2' }],
+        devoluciones: [{ itemId: ITEM_ID, cantidad: '2', stock: 'recupera' }],
       });
       const lineas = ncManager.save.mock.calls[1][1] as {
         itemId: string;
@@ -3678,7 +3727,7 @@ describe('VentasService', () => {
       const res = await service.crearNotaCredito({
         ...baseParams,
         monto: '200.0000',
-        devoluciones: [{ itemId: ITEM_ID, cantidad: '3' }],
+        devoluciones: [{ itemId: ITEM_ID, cantidad: '3', stock: 'recupera' }],
       });
       expect(res.id).toBeDefined();
 
@@ -3713,7 +3762,7 @@ describe('VentasService', () => {
       // el kardex de la venta original, no el CPP del momento de devolver.
       const res = await service.crearNotaCredito({
         ...baseParams,
-        devoluciones: [{ itemId: ITEM_ID, cantidad: '2' }],
+        devoluciones: [{ itemId: ITEM_ID, cantidad: '2', stock: 'recupera' }],
       });
 
       expect(res.id).toBeDefined();
@@ -3732,7 +3781,7 @@ describe('VentasService', () => {
       // congelan contra el mismo `costo_actual`.
       await service.crearNotaCredito({
         ...baseParams,
-        devoluciones: [{ itemId: ITEM_ID, cantidad: '1' }],
+        devoluciones: [{ itemId: ITEM_ID, cantidad: '1', stock: 'recupera' }],
       });
 
       expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
@@ -3746,7 +3795,7 @@ describe('VentasService', () => {
 
       await service.crearNotaCredito({
         ...baseParams,
-        devoluciones: [{ itemId: ITEM_ID, cantidad: '2' }],
+        devoluciones: [{ itemId: ITEM_ID, cantidad: '2', stock: 'recupera' }],
       });
 
       expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
@@ -3800,10 +3849,10 @@ describe('VentasService', () => {
           ...baseParams,
           validarVentaElegible: true,
           devoluciones: [
-            { itemId: ITEM_SERIE_ID, cantidad: '1', reponerStock: true },
+            { itemId: ITEM_SERIE_ID, cantidad: '1', stock: 'recupera' },
           ],
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(/no vuelve al stock desde acá/);
 
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
@@ -3814,10 +3863,10 @@ describe('VentasService', () => {
           ...baseParams,
           validarVentaElegible: true,
           devoluciones: [
-            { itemId: SERVICIO_ID, cantidad: '1', reponerStock: true },
+            { itemId: SERVICIO_ID, cantidad: '1', stock: 'recupera' },
           ],
         }),
-      ).rejects.toThrow(/no maneja stock/);
+      ).rejects.toThrow(/no sacó nada del inventario/);
     });
 
     it('sin pedir reposición, un servicio se acredita por línea y no mueve inventario', async () => {
@@ -3843,12 +3892,222 @@ describe('VentasService', () => {
         service.crearNotaCredito({
           ...baseParams,
           devoluciones: [
-            { itemId: SERVICIO_ID, cantidad: '1', reponerStock: true },
+            { itemId: SERVICIO_ID, cantidad: '1', stock: 'recupera' },
           ],
         }),
       ).resolves.toBeDefined();
 
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+    });
+
+    describe('¿se recupera o se pierde? (owner, 2026-08-23)', () => {
+      const RECETA_ID = 'item-receta-uuid-001';
+      const PAN_ID = 'item-pan-uuid-001';
+      const CARNE_ID = 'item-carne-uuid-001';
+      const movimientos = () =>
+        inventarioService.registrarMovimiento.mock.calls.map(
+          (c) => c[1] as unknown as Record<string, unknown>,
+        );
+
+      it('una línea con stock sin respuesta es 400 en la nota manual, y no mueve nada', async () => {
+        await expect(
+          service.crearNotaCredito({
+            ...baseParams,
+            validarVentaElegible: true,
+            devoluciones: [{ itemId: ITEM_ID, cantidad: '1' }],
+          }),
+        ).rejects.toThrow(/Falta decir si "Smartphone" se recupera/);
+        expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      it('por el webhook, una línea sin respuesta se acredita y no mueve stock', async () => {
+        await service.crearNotaCredito({
+          ...baseParams,
+          devoluciones: [{ itemId: ITEM_ID, cantidad: '1' }],
+        });
+        expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      it('se recupera: vuelve al costo de la salida y no pide la causa de merma', async () => {
+        await service.crearNotaCredito({
+          ...baseParams,
+          devoluciones: [{ itemId: ITEM_ID, cantidad: '1', stock: 'recupera' }],
+        });
+        expect(movimientos()).toEqual([
+          expect.objectContaining({
+            itemId: ITEM_ID,
+            tipo: 'entrada',
+            motivo: 'devolucion',
+            cantidad: '1',
+            costoUnitario: '50.0000',
+          }),
+        ]);
+        expect(motivosBaja.asegurarDevolucion).not.toHaveBeenCalled();
+      });
+
+      it('se pierde: vuelve y sale como merma "Devolución", las dos al costo de la salida y sin promediar', async () => {
+        const res = await service.crearNotaCredito({
+          ...baseParams,
+          devoluciones: [{ itemId: ITEM_ID, cantidad: '2', stock: 'pierde' }],
+        });
+        // La entrada congela el costo de la salida sin mover el CPP; la merma
+        // se lleva ese mismo costo: el par no cambia la valorización.
+        expect(movimientos()).toEqual([
+          expect.objectContaining({
+            itemId: ITEM_ID,
+            tipo: 'entrada',
+            motivo: 'devolucion',
+            cantidad: '2',
+            costoUnitario: '50.0000',
+            sinPromediar: true,
+            ventaId: res.id,
+          }),
+          expect.objectContaining({
+            itemId: ITEM_ID,
+            tipo: 'salida',
+            motivo: 'merma',
+            cantidad: '2',
+            motivoBajaId: MOTIVO_DEVOLUCION_ID,
+            costoUnitario: '50.0000',
+            ventaId: res.id,
+          }),
+        ]);
+        expect(motivosBaja.asegurarDevolucion).toHaveBeenCalledWith(TENANT_ID);
+      });
+
+      it('la nota congela lo que devolvió, con la respuesta, también lo que no movió stock', async () => {
+        await service.crearNotaCredito({
+          ...baseParams,
+          validarVentaElegible: true,
+          devoluciones: [
+            { itemId: ITEM_ID, cantidad: '1', stock: 'recupera' },
+            { itemId: ITEM_SERIE_ID, cantidad: '1', stock: 'pierde' },
+            { itemId: SERVICIO_ID, cantidad: '1' },
+          ],
+        });
+        const cabecera = ncManager.save.mock.calls[0][1] as {
+          devoluciones: unknown;
+        };
+        expect(cabecera.devoluciones).toEqual([
+          { itemId: ITEM_ID, cantidad: '1', stock: 'recupera' },
+          { itemId: ITEM_SERIE_ID, cantidad: '1', stock: 'pierde' },
+          { itemId: SERVICIO_ID, cantidad: '1', stock: null },
+        ]);
+      });
+
+      it('sin devoluciones congela [] y no null: null es solo "nota de antes"', async () => {
+        await service.crearNotaCredito(baseParams);
+        const cabecera = ncManager.save.mock.calls[0][1] as {
+          devoluciones: unknown;
+        };
+        expect(cabecera.devoluciones).toEqual([]);
+      });
+
+      it('serie: "se pierde" se acredita sin mover nada (la unidad ya está vendida)', async () => {
+        await service.crearNotaCredito({
+          ...baseParams,
+          validarVentaElegible: true,
+          devoluciones: [
+            { itemId: ITEM_SERIE_ID, cantidad: '1', stock: 'pierde' },
+          ],
+        });
+        expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      describe('una receta devuelve lo que salió por sus líneas', () => {
+        beforeEach(() => {
+          const previa = ncManager.query.getMockImplementation()!;
+          ncManager.query.mockImplementation((sql: string, params?: unknown) =>
+            sql.includes('FROM venta_detalles') &&
+            !sql.includes('AS es_nc') &&
+            !sql.includes('FOR UPDATE')
+              ? Promise.resolve([
+                  ...detallesRows,
+                  {
+                    ...detallesRows[0],
+                    item_id: RECETA_ID,
+                    cantidad: '2',
+                    total_linea: '200.0000',
+                    descripcion: 'Hamburguesa',
+                    modo_inventario: null,
+                  },
+                ])
+              : (previa(sql, params) as Promise<unknown>),
+          );
+          // 2 hamburguesas sacaron 2 panes y 0,5 kg de carne.
+          const antes = salidasVentaRows;
+          salidasVentaRows = () => [
+            ...antes(),
+            {
+              item_vendido: RECETA_ID,
+              item_id: CARNE_ID,
+              modo_inventario: 'cantidad',
+              cantidad: '0.5',
+              costo_unitario: '8000.0000',
+            },
+            {
+              item_vendido: RECETA_ID,
+              item_id: PAN_ID,
+              modo_inventario: 'cantidad',
+              cantidad: '2',
+              costo_unitario: '100.0000',
+            },
+          ];
+        });
+
+        it('el detalle no dice "no maneja stock": se pregunta, y sin respuesta es 400', async () => {
+          await expect(
+            service.crearNotaCredito({
+              ...baseParams,
+              validarVentaElegible: true,
+              devoluciones: [{ itemId: RECETA_ID, cantidad: '1' }],
+            }),
+          ).rejects.toThrow(/Falta decir si "Hamburguesa"/);
+        });
+
+        it('se recupera: vuelven sus ingredientes, acotados a la unidad devuelta y ordenados por ítem', async () => {
+          await service.crearNotaCredito({
+            ...baseParams,
+            validarVentaElegible: true,
+            devoluciones: [
+              { itemId: RECETA_ID, cantidad: '1', stock: 'recupera' },
+            ],
+          });
+          expect(movimientos()).toEqual([
+            expect.objectContaining({
+              itemId: CARNE_ID,
+              motivo: 'devolucion',
+              cantidad: '0.25',
+              costoUnitario: '8000.0000',
+            }),
+            expect.objectContaining({
+              itemId: PAN_ID,
+              motivo: 'devolucion',
+              cantidad: '1',
+              costoUnitario: '100.0000',
+            }),
+          ]);
+        });
+
+        it('lo ya acreditado se descuenta: la segunda nota se lleva el resto', async () => {
+          unidadesComprometidasRows = [{ item_id: RECETA_ID, devuelto: '1' }];
+          await service.crearNotaCredito({
+            ...baseParams,
+            validarVentaElegible: true,
+            devoluciones: [
+              { itemId: RECETA_ID, cantidad: '1', stock: 'pierde' },
+            ],
+          });
+          expect(
+            movimientos().map((m) => [m.itemId, m.motivo, m.cantidad]),
+          ).toEqual([
+            [CARNE_ID, 'devolucion', '0.25'],
+            [CARNE_ID, 'merma', '0.25'],
+            [PAN_ID, 'devolucion', '1'],
+            [PAN_ID, 'merma', '1'],
+          ]);
+        });
+      });
     });
 
     it('lanza NotFoundException si la venta no existe o es de otro tenant', async () => {
@@ -4673,12 +4932,23 @@ describe('VentasService', () => {
 
       it('la NC repone en orden de itemId, no en el que llegaron las devoluciones', async () => {
         conOtroProductoQueRepone();
+        const salidasAntes = salidasVentaRows;
+        salidasVentaRows = () => [
+          ...salidasAntes(),
+          {
+            item_vendido: ITEM_ANTES_ID,
+            item_id: ITEM_ANTES_ID,
+            modo_inventario: 'cantidad',
+            cantidad: '1',
+            costo_unitario: null,
+          },
+        ];
 
         await service.crearNotaCredito({
           ...baseParams,
           devoluciones: [
-            { itemId: ITEM_ID, cantidad: '1' },
-            { itemId: ITEM_ANTES_ID, cantidad: '1' },
+            { itemId: ITEM_ID, cantidad: '1', stock: 'recupera' },
+            { itemId: ITEM_ANTES_ID, cantidad: '1', stock: 'recupera' },
           ],
         });
 

@@ -752,10 +752,11 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
     it('por la llave de API (sin usuario): la corrección sale, el REFUND queda ligado y el stock vuelve con usuario NULL', async () => {
       const venta = await ventaOnlineConProducto();
       const ordenId = await ordenCobrada(venta.id);
-      // `reponerStock` ausente: repone si el ítem puede, que es el caso común.
       const res = await reembolsarApi(ordenId, {
         monto: '7000',
-        devoluciones: [{ itemId: itemProducto, cantidad: '1' }],
+        devoluciones: [
+          { itemId: itemProducto, cantidad: '1', stock: 'recupera' },
+        ],
       });
 
       expect(res.status).toBe(201);
@@ -778,7 +779,9 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
 
       const res = await reembolsarAdmin(ordenId, {
         monto: '7000',
-        devoluciones: [{ itemId: itemProducto, cantidad: '1' }],
+        devoluciones: [
+          { itemId: itemProducto, cantidad: '1', stock: 'recupera' },
+        ],
       });
 
       expect(res.status).toBe(201);
@@ -787,6 +790,55 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
       const movimientos = await movimientosDeDevolucion(cuerpo.notaCreditoId!);
       expect(movimientos).toHaveLength(1);
       expect(movimientos[0].usuario_id).toEqual(expect.any(String));
+    });
+
+    // La pregunta de la nota (owner, 2026-08-23) también la hace el reembolso, y
+    // ANTES de llamar a Transbank: después la plata ya salió y la nota no puede
+    // rechazar nada, así que una línea sin respuesta saldría sin reponer ni mermar.
+    it('una línea con stock sin "¿se recupera o se pierde?" rebota antes del proveedor: ni plata ni REFUND', async () => {
+      const venta = await ventaOnlineConProducto();
+      const ordenId = await ordenCobrada(venta.id);
+
+      const res = await reembolsarAdmin(ordenId, {
+        monto: '7000',
+        devoluciones: [{ itemId: itemProducto, cantidad: '1' }],
+      });
+
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toMatch(
+        /Falta decir si .* se recupera/,
+      );
+      expect(reembolsarEnElProveedor).not.toHaveBeenCalled();
+      expect(await refundsDe(ordenId)).toEqual([]);
+    });
+
+    it('lo que se pierde por el reembolso vuelve y sale como merma "Devolución"', async () => {
+      const venta = await ventaOnlineConProducto();
+      const ordenId = await ordenCobrada(venta.id);
+
+      const res = await reembolsarAdmin(ordenId, {
+        monto: '7000',
+        devoluciones: [
+          { itemId: itemProducto, cantidad: '1', stock: 'pierde' },
+        ],
+      });
+
+      expect(res.status).toBe(201);
+      const cuerpo = res.body as RespuestaReembolso;
+      expect(cuerpo.warning).toBeUndefined();
+      const movs: { tipo: string; motivo: string; nombre: string | null }[] =
+        await ds.query(
+          `SELECT m.tipo, m.motivo, mb.nombre
+             FROM movimientos_inventario m
+             LEFT JOIN motivo_baja mb ON mb.motivo_baja_id = m.motivo_baja_id
+            WHERE m.venta_id = $1
+            ORDER BY m.secuencia`,
+          [cuerpo.notaCreditoId],
+        );
+      expect(movs).toEqual([
+        { tipo: 'entrada', motivo: 'devolucion', nombre: null },
+        { tipo: 'salida', motivo: 'merma', nombre: 'Devolución' },
+      ]);
     });
   });
 
@@ -1314,7 +1366,9 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
         const ordenId = await ordenCobrada(venta.id);
         await pendienteDe17000(ordenId, reembolsarApi, {
           monto: '7000',
-          devoluciones: [{ itemId: itemProducto, cantidad: '1' }],
+          devoluciones: [
+            { itemId: itemProducto, cantidad: '1', stock: 'recupera' },
+          ],
         });
         saldoEnTransbank('93000', 'PARTIALLY_NULLIFIED');
 

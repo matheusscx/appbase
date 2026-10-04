@@ -2382,7 +2382,11 @@ describe('Ventas (e2e)', () => {
       ventaId: string,
       body: {
         monto: string;
-        devoluciones?: { itemId: string; cantidad: string }[];
+        devoluciones?: {
+          itemId: string;
+          cantidad: string;
+          stock?: 'recupera' | 'pierde';
+        }[];
       },
     ): Promise<{ id: string }> => {
       const res = await request(app.getHttpServer())
@@ -2420,7 +2424,7 @@ describe('Ventas (e2e)', () => {
       // objeto.)
       const nc = await emitirNotaCredito(ventaId, {
         monto: '1300.0000',
-        devoluciones: [{ itemId, cantidad: '1' }],
+        devoluciones: [{ itemId, cantidad: '1', stock: 'recupera' }],
       });
 
       const lineas: { total_linea: string }[] = await ds.query(

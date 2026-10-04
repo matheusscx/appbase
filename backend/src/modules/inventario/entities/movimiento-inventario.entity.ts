@@ -123,6 +123,16 @@ export class MovimientoInventario {
   @Column({ name: 'venta_id', type: 'uuid', nullable: true })
   ventaId: string | null;
 
+  /**
+   * La línea vendida a la que pertenece el movimiento: la salida de la venta y
+   * su vuelta por una nota de crédito (que lleva `venta_id` = la nota y acá la
+   * línea vendida que revierte). Sin FK, como `venta_id`. Nulo en las ventas
+   * anteriores al 2026-10-04 y en todo lo que no es de una venta. Sin índice
+   * propio: siempre se lee junto a `venta_id`, que tiene el suyo.
+   */
+  @Column({ name: 'venta_detalle_id', type: 'uuid', nullable: true })
+  ventaDetalleId: string | null;
+
   @Column({ name: 'usuario_id', type: 'uuid', nullable: true })
   usuarioId: string | null;
 

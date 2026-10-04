@@ -2,6 +2,16 @@ import { Injectable } from '@nestjs/common';
 import type { EntityManager } from 'typeorm';
 
 /**
+ * Lo que pasa con lo devuelto en una línea con stock de por medio (owner,
+ * 2026-08-23): vuelve al stock, o vuelve y sale como merma con la causa fija
+ * "Devolución". Vive acá porque es el contrato entre los dos lados del borde:
+ * la pasarela lo valida en su DTO y ventas lo aplica, y la pasarela no importa
+ * ventas.
+ */
+export const DESTINOS_STOCK_DEVOLUCION = ['recupera', 'pierde'] as const;
+export type DestinoStockDevolucion = (typeof DESTINOS_STOCK_DEVOLUCION)[number];
+
+/**
  * Evento emitido tras el COMMIT de un reembolso aprobado sobre una orden con
  * venta vinculada. `devoluciones` viene del DTO del endpoint; `usuarioId`
  * siempre del token (nunca del body).
@@ -13,14 +23,16 @@ export interface ReembolsoAprobadoEvento {
   ventaId: string;
   monto: string;
   /**
-   * `reponerStock` ausente = repone si el ítem puede. Por este camino pedir que
-   * reponga algo que no puede NO se rechaza: se acredita igual y no se repone
-   * (ver `validarDevolucionesReembolso`), porque un throw acá pierde el evento.
+   * Las líneas que se acreditan, con lo que pasa con lo devuelto (`stock`). La
+   * respuesta ya se exigió antes de llamar al proveedor
+   * (`validarDevolucionesDelReembolso`); por este camino nada se rechaza, porque
+   * un throw acá pierde el evento: sin respuesta (la `metadata` de un REFUND
+   * anterior a la pregunta) no se mueve stock.
    */
   devoluciones: {
     itemId: string;
     cantidad: string;
-    reponerStock?: boolean;
+    stock?: DestinoStockDevolucion;
   }[];
   /**
    * Quién reembolsó, siempre del token. `null` por la API externa (llave de API):
@@ -76,6 +88,23 @@ export interface ReembolsoCallbackHandler {
       ventaId: string;
       monto: string;
       excluirReembolsoId: string | null;
+    },
+  ): Promise<void>;
+
+  /**
+   * Las líneas que se van a acreditar, validadas como en la nota manual —ítem de
+   * la venta, cantidad disponible y, en la línea con stock de por medio, la
+   * respuesta a "¿se recupera o se pierde?"—, ANTES de llamar al proveedor:
+   * después la plata ya salió y la nota no puede rechazar nada. Lanza un 400 con
+   * el motivo. Corre en tx0, después de `exigirTopeDelReembolso` (que ya tomó el
+   * lock de la venta); con una venta que ya no existe no lanza.
+   */
+  validarDevoluciones(
+    manager: EntityManager,
+    params: {
+      tenantId: string;
+      ventaId: string;
+      devoluciones: ReembolsoAprobadoEvento['devoluciones'];
     },
   ): Promise<void>;
 

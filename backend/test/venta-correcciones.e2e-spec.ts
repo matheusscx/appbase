@@ -1341,7 +1341,9 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
         const creada = await nc(venta.id, {
           monto: '59500',
           devolucion: { sinPlata: true },
-          devoluciones: [{ itemId: itemProducto, cantidad: '1' }],
+          devoluciones: [
+            { itemId: itemProducto, cantidad: '1', stock: 'recupera' },
+          ],
         });
         expect(await stockDe(itemProducto)).toBe('10');
         expect((await detalle(venta.id)).anulable).toBe(false);

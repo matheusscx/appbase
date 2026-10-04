@@ -66,7 +66,16 @@ import {
  * que pasa la rama `'merma'`.
  */
 type ContextoConsumo =
-  | { motivo?: 'venta'; ventaId: string }
+  | {
+      motivo?: 'venta';
+      ventaId: string;
+      /**
+       * La línea de la venta que se está expandiendo: cada salida de su
+       * expansión la lleva (`movimientos_inventario.venta_detalle_id`), para
+       * que una nota de crédito devuelva lo que salió por ESA línea.
+       */
+      ventaDetalleId: string;
+    }
   | { motivo: 'merma'; motivoBajaId: string; cuentaLineaAnulacionId: string };
 
 /** Los cuatro campos de `ContextoConsumo`, ya desambiguados, más si estamos
@@ -75,6 +84,7 @@ type ContextoConsumo =
 interface ContextoResuelto {
   motivo: string;
   ventaId: string | null;
+  ventaDetalleId: string | null;
   motivoBajaId: string | null;
   cuentaLineaAnulacionId: string | null;
   enAnulacion: boolean;
@@ -85,6 +95,7 @@ function resolverContexto(ctx: ContextoConsumo): ContextoResuelto {
     return {
       motivo: 'merma',
       ventaId: null,
+      ventaDetalleId: null,
       motivoBajaId: ctx.motivoBajaId,
       cuentaLineaAnulacionId: ctx.cuentaLineaAnulacionId,
       enAnulacion: true,
@@ -93,6 +104,7 @@ function resolverContexto(ctx: ContextoConsumo): ContextoResuelto {
   return {
     motivo: 'venta',
     ventaId: ctx.ventaId,
+    ventaDetalleId: ctx.ventaDetalleId,
     motivoBajaId: null,
     cuentaLineaAnulacionId: null,
     enAnulacion: false,
@@ -109,7 +121,11 @@ function contextoParaHijo(r: ContextoResuelto): ContextoConsumo {
         motivoBajaId: r.motivoBajaId!,
         cuentaLineaAnulacionId: r.cuentaLineaAnulacionId!,
       }
-    : { motivo: 'venta', ventaId: r.ventaId! };
+    : {
+        motivo: 'venta',
+        ventaId: r.ventaId!,
+        ventaDetalleId: r.ventaDetalleId!,
+      };
 }
 
 interface ItemRow {
@@ -4502,6 +4518,7 @@ export class ItemsService {
         cantidad: cantidadConvertida,
         usuarioId: params.usuarioId,
         ventaId: ctx.ventaId,
+        ventaDetalleId: ctx.ventaDetalleId,
         motivoBajaId: ctx.motivoBajaId,
         cuentaLineaAnulacionId: ctx.cuentaLineaAnulacionId,
       };
@@ -4686,6 +4703,7 @@ export class ItemsService {
         cantidad: cantidadTotal,
         usuarioId: params.usuarioId,
         ventaId: ctx.ventaId,
+        ventaDetalleId: ctx.ventaDetalleId,
         motivoBajaId: ctx.motivoBajaId,
         cuentaLineaAnulacionId: ctx.cuentaLineaAnulacionId,
       };
@@ -4846,6 +4864,7 @@ export class ItemsService {
           cantidad: cantidadSalida,
           usuarioId: params.usuarioId,
           ventaId: ctx.ventaId,
+          ventaDetalleId: ctx.ventaDetalleId,
           motivoBajaId: ctx.motivoBajaId,
           cuentaLineaAnulacionId: ctx.cuentaLineaAnulacionId,
         },

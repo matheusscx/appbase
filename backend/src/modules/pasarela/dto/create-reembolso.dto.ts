@@ -1,13 +1,18 @@
 import {
   ArrayMaxSize,
   IsArray,
-  IsBoolean,
+  IsIn,
   IsNumberString,
   IsOptional,
   IsUUID,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  DESTINOS_STOCK_DEVOLUCION,
+  type DestinoStockDevolucion,
+} from '../services/reembolso-callback.registry';
 
 export class DevolucionLineaDto {
   @IsUUID()
@@ -17,14 +22,18 @@ export class DevolucionLineaDto {
   cantidad: string;
 
   /**
-   * ¿Vuelve al stock? Ausente = repone si el ítem puede. Va también acá —y no
-   * solo en el DTO de la nota de crédito manual— porque el pipe global rechaza
-   * con 400 lo que el DTO no declara: sin declararlo, un reembolso que lo mande
-   * no llega al service y la política del webhook queda inalcanzable.
+   * Lo que pasa con lo devuelto si hay stock de por medio (owner, 2026-08-23):
+   * `recupera` vuelve al stock; `pierde` vuelve y sale como merma con la causa
+   * fija "Devolución". **Obligatorio** en una línea que sacó inventario al
+   * venderse —el producto suelto, la receta (sus ingredientes), el combo (sus
+   * componentes)— y **prohibido** en la que no (un servicio): los dos son 400
+   * con el nombre del ítem. Qué preguntar lo dice el detalle de la venta, por
+   * línea (`devolucionStock`). `null` es 400 siempre (del DTO); ausente es 400
+   * solo en la línea con stock. Contrato y porqué: `docs/features/reembolsos-nota-credito.md`.
    */
-  @IsOptional()
-  @IsBoolean()
-  reponerStock?: boolean;
+  @ValidateIf((_o, v) => v !== undefined)
+  @IsIn(DESTINOS_STOCK_DEVOLUCION)
+  stock?: DestinoStockDevolucion;
 }
 
 export class CreateReembolsoDto {

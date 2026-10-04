@@ -2464,6 +2464,71 @@ describe('InventarioService', () => {
       },
     );
 
+    // La vuelta de lo que se perdió en una nota de crédito (2026-10-04): entra y
+    // sale enseguida como merma, las dos al costo de la salida. Congela ese
+    // costo pero no promedia, ni ahora ni al rehacer la cuenta.
+    it('entrada devolucion con sinPromediar: congela el costo, no toca el CPP y no queda informada', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '57.1429' },
+        ])
+        .mockResolvedValueOnce([{ stock: '4' }]) // SELECT saldo
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-perdida' }]);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'entrada',
+          motivo: 'devolucion',
+          cantidad: '1',
+          usuarioId: USER_ID,
+          ventaId: 'nc-1',
+          costoUnitario: '50',
+          sinPromediar: true,
+        },
+      );
+
+      const insert = managerMock.query.mock.calls[3];
+      expect(insert[0]).toContain('INSERT INTO movimientos_inventario');
+      const valores = insert[1] as unknown[];
+      expect(valores[11]).toBe('50'); // costo_unitario: el de la salida
+      expect(valores[18]).toBe(false); // costo_informado: rehacer no la promedia
+      // Sin lectura del stock total ni UPDATE de costo_actual.
+      expect(managerMock.query).toHaveBeenCalledTimes(4);
+    });
+
+    it.each([
+      ['salida', 'devolucion'],
+      ['entrada', 'anulacion'],
+    ] as const)(
+      'sinPromediar fuera de una entrada de devolución (%s %s) es un 400',
+      async (tipo, motivo) => {
+        managerMock.query
+          .mockResolvedValueOnce([
+            { modo_inventario: 'cantidad', costo_actual: '57.1429' },
+          ])
+          .mockResolvedValueOnce([{ stock: '4' }]);
+        await expect(
+          service.registrarMovimiento(managerMock as unknown as EntityManager, {
+            tenantId: TENANT,
+            itemId: ITEM_ID,
+            ubicacionId: UBICACION_ID,
+            tipo,
+            motivo,
+            cantidad: '1',
+            usuarioId: USER_ID,
+            sinPromediar: true,
+          }),
+        ).rejects.toThrow(
+          'sinPromediar solo aplica a una entrada de devolución',
+        );
+      },
+    );
+
     it('entrada por anulación SIN costoUnitario no toca el promedio', async () => {
       // La salida original puede no tener costo congelado (un producto que
       // nunca tuvo costo). Ahí no hay nada que promediar: se repone la

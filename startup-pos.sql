@@ -964,6 +964,9 @@ CREATE TABLE "motivo_baja" (
   "activo"         BOOLEAN NOT NULL DEFAULT true,
   "es_fijo"        BOOLEAN NOT NULL DEFAULT false,
   "tipo"           tipo_motivo_baja NOT NULL,
+  "es_devolucion"  BOOLEAN NOT NULL DEFAULT false,
+  -- la causa fija "Devolución": la merma que deja una nota de crédito cuando lo
+  -- devuelto se pierde. Una viva por tenant; ninguna baja manual la acepta.
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ,
@@ -971,6 +974,8 @@ CREATE TABLE "motivo_baja" (
 );
 CREATE UNIQUE INDEX "uq_motivo_baja_tenant_nombre"
   ON "motivo_baja" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
+CREATE UNIQUE INDEX "uq_motivo_baja_devolucion_tenant"
+  ON "motivo_baja" ("tenant_id") WHERE "es_devolucion" AND "eliminado_el" IS NULL;
 
 -- Causas de diferencia detectada en un recuento físico. Catálogo por tenant.
 -- NO se reusa motivo_baja: un recuento puede dar SOBRANTE, y ningún motivo de
@@ -1046,6 +1051,10 @@ CREATE TABLE "movimientos_inventario" (
   "stock_anterior"   NUMERIC(18,4) NOT NULL,
   "stock_resultante" NUMERIC(18,4) NOT NULL,
   "venta_id"         UUID,         -- FK definida después de crear ventas (motivo 'venta'/'devolucion')
+  "venta_detalle_id" UUID,
+  -- la línea vendida a la que pertenece: la salida de la venta (producto,
+  -- ingrediente, componente u opción) y su vuelta por una nota de crédito
+  -- (venta_id = la nota). Sin FK, como venta_id. NULL fuera de una venta.
   "usuario_id"       UUID          REFERENCES "usuarios" ("usuario_id"),
   "comentario"       TEXT,
   "costo_unitario"   NUMERIC(18,4),
@@ -1811,6 +1820,11 @@ CREATE TABLE "ventas" (
   -- calculoRecargos, escalaCalculo, modoRedondeo. Sin ella el congelado de las
   -- reglas no es interpretable (el mismo 10% da distinto según orden y base|cascada).
   "config_calculo"        JSONB,
+  "devoluciones"          JSONB,
+  -- solo en una corrección: lo que devolvió, tal como se aceptó ([{itemId,
+  -- cantidad, stock: 'recupera'|'pierde'|null}]), también lo que quedó fuera del
+  -- documento. De acá cuenta las unidades ya devueltas. [] si no devolvió nada;
+  -- NULL en una corrección anterior al 2026-10-04 (se cuenta por sus huellas).
   -- Anulación (estado 'cancelada'). Solo aplica a ventas 'pendiente' sin pagos y
   -- sin documento tributario; el resto se revierte con nota de crédito.
   "cancelada_el"              TIMESTAMPTZ,

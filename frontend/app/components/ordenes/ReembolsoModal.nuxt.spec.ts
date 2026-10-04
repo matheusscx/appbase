@@ -18,6 +18,7 @@ import ReembolsoModal from './ReembolsoModal.vue'
 type Opts = { method?: string, body?: Record<string, unknown>, headers?: Record<string, string> }
 let llamadas: { url: string, opts?: Opts }[] = []
 let respuestaPost: () => Promise<unknown>
+let detallesVenta: unknown[] = []
 const APROBADO = { ordenId: 'orden-1', estado: 'reembolsada', reembolsoAprobado: true, notaCreditoId: 'nc-1' }
 
 const { toastAdd } = vi.hoisted(() => ({ toastAdd: vi.fn() }))
@@ -26,7 +27,7 @@ mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: Opts) => {
     llamadas.push({ url, opts })
     if (opts?.method === 'POST') return respuestaPost()
-    return Promise.resolve({ detalles: [] })
+    return Promise.resolve({ detalles: detallesVenta })
   }
 })
 
@@ -46,8 +47,44 @@ describe('ReembolsoModal — el reembolso siempre deja su corrección', () => {
   beforeEach(() => {
     llamadas = []
     respuestaPost = () => Promise.resolve(APROBADO)
+    detallesVenta = []
     toastAdd.mockClear()
     document.body.innerHTML = ''
+  })
+
+  // La misma pregunta que la nota del POS (owner, 2026-08-23): el backend la
+  // exige ANTES de llamar a Transbank, así que sin respuesta no se confirma.
+  it('una línea con stock pregunta si vuelve o se perdió, y sin respuesta no deja confirmar', async () => {
+    detallesVenta = [{
+      itemId: 'item-1',
+      descripcion: 'Bebida',
+      cantidad: '2',
+      totalLinea: '2380',
+      modoInventario: 'cantidad',
+      devolucionStock: 'recuperable',
+      cantidadDevuelta: '0',
+    }]
+    await abrir('venta-1')
+    const fila = document.body.querySelector<HTMLElement>('[data-testid="devolucion-fila-item-1"]')!
+    const input = fila.querySelector<HTMLInputElement>('input')!
+    input.value = '1'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    expect(botonConfirmar()!.disabled).toBe(true)
+
+    const vuelve = [...fila.querySelectorAll<HTMLElement>('[role="radio"]')]
+      .find(r => r.getAttribute('aria-label')?.includes('Vuelve al stock'))!
+    vuelve.click()
+    await flushPromises()
+    expect(botonConfirmar()!.disabled).toBe(false)
+
+    botonConfirmar()!.click()
+    await flushPromises()
+    const post = llamadas.find(l => l.opts?.method === 'POST')!
+    expect(post.opts!.body).toEqual({
+      monto: '100000',
+      devoluciones: [{ itemId: 'item-1', cantidad: '1', stock: 'recupera' }],
+    })
   })
 
   it('no ofrece la casilla "Generar nota de crédito": no hay nada que elegir', async () => {

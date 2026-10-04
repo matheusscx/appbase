@@ -1,7 +1,7 @@
 # Feature: Mermas tipificadas y valorizadas
 
 **Status**: Complete  
-**Last Updated**: 2026-10-03
+**Last Updated**: 2026-10-04 (la causa fija "Devolución")
 
 ---
 
@@ -19,8 +19,9 @@ datos*, § `motivo_baja`). Cinco son `tipo='merma'` — **Vencimiento**, **Deter
 (`no_elaborado`) **no son de merma**: por eso `POST /api/mermas` los rechaza con 400 (ver más
 abajo). **Comida del personal (dentro del local)** (`consumo_personal`, desde el 2026-10-04)
 tampoco es merma, pero entra por esta pantalla para el producto suelto que no pasa por una
-mesa, y se lista aparte (abajo). Ningún fijo se edita ni se elimina. El administrador puede crear
-motivos custom adicionales.
+mesa, y se lista aparte (abajo). **Devolución** (`merma`, desde el 2026-10-04) es la causa de la
+merma que deja una nota de crédito cuando lo devuelto se pierde, y **no se elige a mano** (abajo).
+Ningún fijo se edita ni se elimina. El administrador puede crear motivos custom adicionales.
 
 El ajuste genérico de stock (`PATCH /items/:id/stock`) **ya no acepta** `motivo='merma'`; toda merma pasa por el flujo dedicado con motivo obligatorio.
 
@@ -32,7 +33,7 @@ Food-service necesita saber *por qué* se perdió stock y cuánto costó, no sol
 
 **Included:**
 - Tabla `motivo_baja` por tenant + columna `motivo_baja_id` en `movimientos_inventario`.
-- Semilla de 7 motivos fijos al crear tenant y en el seeder de desarrollo.
+- Semilla de los motivos fijos (`MOTIVOS_BAJA_FIJOS`) al crear tenant y en el seeder de desarrollo.
 - CRUD `/api/motivos-baja` y registro/listado `/api/mermas`.
 - UI: configuración de motivos, operación de mermas (drawer sin campo de costo; cartel no bloqueante cuando el producto no tiene costo cargado), kardex con motivo y costo de la baja (pérdida solo si es merma).
 - Quitar opción Merma del modal de ajuste de stock en items.
@@ -59,6 +60,7 @@ Food-service necesita saber *por qué* se perdió stock y cuánto costó, no sol
 | `activo` | BOOLEAN | Default `true` |
 | `es_fijo` | BOOLEAN | Defaults del sistema |
 | `tipo` | ENUM `tipo_motivo_baja` | `merma` \| `cortesia` \| `no_elaborado` \| `consumo_personal`. Obligatorio, sin default. |
+| `es_devolucion` | BOOLEAN | La causa fija "Devolución" de la nota de crédito. Una viva por tenant (`uq_motivo_baja_devolucion_tenant`); default `false` |
 | `creado_el` / `actualizado_el` / `eliminado_el` | TIMESTAMPTZ | Soft delete |
 
 **El tipo decide si la baja descuenta stock** (lo consume la parte 2 del frente "anular un
@@ -78,6 +80,26 @@ Los fijos que siembra el sistema (seeder y alta de tenant, `MOTIVOS_BAJA_FIJOS`)
 | Cortesía de la casa | `cortesia` |
 | No se llegó a hacer | `no_elaborado` |
 | Comida del personal (dentro del local) | `consumo_personal` |
+| Devolución | `merma` (marcada `es_devolucion`) |
+
+**"Devolución"** (2026-10-04, owner 2026-09-29: *"una causa fija"* por sobre *"el cajero elige"*): la
+merma que deja una nota de crédito —manual o por reembolso de pasarela— cuando lo devuelto **se
+pierde** ([`reembolsos-nota-credito.md`](reembolsos-nota-credito.md#se-recupera-o-se-pierde-2026-10-04)).
+Se reconoce por `es_devolucion`, no por el nombre.
+
+- **Es fija** (no se renombra ni se borra, como el resto) y **no se elige a mano**: ninguna baja
+  que elige una persona la acepta —`POST /mermas`, anular un plato y cancelar una cuenta en la
+  mesa— (`assertMotivoActivo`, 400), y las pantallas no la ofrecen. Se puede **filtrar** por ella en
+  Mermas: es lo que deja ver las devoluciones aparte, que es para lo que existe.
+- **Es pérdida**: tipo `merma`, entra en `GET /mermas`, en el "Pérdidas" del Inicio y en el costo
+  perdido, valorizada al costo con que la unidad salió en la venta.
+- **Tenants de antes** (Railway): la reciben al emitir la primera nota que la necesite
+  (`MotivosBajaService.asegurarDevolucion`, find-or-create, como el ítem "Ajuste": el webhook no
+  puede perder un evento por un dato que falta). **Un motivo propio nunca se adopta**: si el nombre
+  "Devolución" ya es de un motivo vivo del tenant, de cualquier tipo, la causa nace como
+  "Devolución (nota de crédito)" y el del tenant queda como estaba (adoptarlo lo sacaría de sus
+  selectores sin avisar y mezclaría sus mermas manuales con las devoluciones). Decidido por la
+  Sesión de esfuerzo máximo (2026-10-04), derivado de las decisiones del owner.
 
 **El tipo de un motivo propio se puede cambiar solo mientras no se usó.** "Usado" es lo mismo
 que ya bloquea el borrado: algún movimiento de inventario vivo con ese motivo **o alguna
@@ -127,7 +149,8 @@ Request (CreateMermaDto):
 merma lo que se pudrió **ahí**, y sin default silencioso — uno metería la salida en el local
 cada vez que la pantalla se olvide de mandarlo. `400` si falta o es de otro tenant.
 
-`POST /api/mermas` rechaza con 400 un motivo que no sea de tipo `merma` o `consumo_personal`
+`POST /api/mermas` rechaza con 400 la causa "Devolución" (es de la nota de crédito) y un motivo
+que no sea de tipo `merma` o `consumo_personal`
 — la pantalla de Mermas ya filtra su selector con el `tipo` de la vista, pero el filtro de
 pantalla no alcanza: el servidor es el que manda. La comida del personal escribe el mismo
 movimiento que una merma (`motivo='merma'` + `motivoBajaId`) y se valoriza igual.

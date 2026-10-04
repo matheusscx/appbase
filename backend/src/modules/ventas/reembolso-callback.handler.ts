@@ -52,6 +52,17 @@ export class VentasReembolsoHandler
     await this.ventasService.exigirTopeDelReembolsoPasarela(manager, params);
   }
 
+  async validarDevoluciones(
+    manager: EntityManager,
+    params: {
+      tenantId: string;
+      ventaId: string;
+      devoluciones: ReembolsoAprobadoEvento['devoluciones'];
+    },
+  ): Promise<void> {
+    await this.ventasService.validarDevolucionesDelReembolso(manager, params);
+  }
+
   async onReembolsoAprobado(
     evento: ReembolsoAprobadoEvento,
   ): Promise<{ correccionVentaId: string }> {

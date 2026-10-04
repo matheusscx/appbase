@@ -510,11 +510,17 @@ export function useSalones() {
       { method: 'POST', body },
     )
 
-  /** Catálogo de motivos de baja activos, para el selector del modal de anulación. */
-  const listarMotivosBajaActivos = () =>
-    useApiFetch<{ id: string, nombre: string, tipo: TipoMotivoBaja }[]>(
-      `${apiUrl}/motivos-baja?soloActivas=true`,
-    )
+  /**
+   * Catálogo de motivos de baja activos, para el selector del modal de anulación.
+   * Sin "Devolución": es la causa que deja la nota de crédito, y anular en la
+   * mesa con ella es un 400 del backend.
+   */
+  const listarMotivosBajaActivos = async () =>
+    (
+      await useApiFetch<
+        { id: string, nombre: string, tipo: TipoMotivoBaja, esDevolucion?: boolean }[]
+      >(`${apiUrl}/motivos-baja?soloActivas=true`)
+    ).filter(m => !m.esDevolucion)
 
   const cancelarCuenta = (cuentaId: string) =>
     useApiFetch<CuentaDetalle>(`${apiUrl}/cuentas/${cuentaId}/cancelar`, {

@@ -10,6 +10,13 @@ import {
 } from 'typeorm';
 import type { ConfigCalculo } from '../../calculo-precios/calculo-precios.engine';
 
+/** Una devolución de una nota de crédito, como quedó congelada (`ventas.devoluciones`). */
+export interface DevolucionCongelada {
+  itemId: string;
+  cantidad: string;
+  stock: 'recupera' | 'pierde' | null;
+}
+
 /**
  * No hay `borrador`: la venta en construcción vive en `cuenta`/`cuenta_lineas`
  * de salones, que es el *open ticket* del dominio. Un estado paralelo en `ventas`
@@ -186,6 +193,20 @@ export class Venta {
    */
   @Column({ name: 'config_calculo', type: 'jsonb', nullable: true })
   configCalculo: ConfigCalculo | null;
+
+  /**
+   * Solo en una corrección (nota de crédito o devolución interna): lo que
+   * devolvió, tal como se aceptó —ítem, cantidad y la respuesta a "¿se recupera
+   * o se pierde?" (`null` sin stock de por medio)—, también lo que quedó fuera
+   * del documento (escalado a $0, o la porción agotada del webhook). Es el hecho
+   * del que cuenta las unidades ya devueltas `unidadesComprometidasPorItem`: las
+   * líneas y los movimientos son proyecciones que pierden datos. Toda corrección
+   * nueva la escribe, `[]` si no devolvió nada; `null` es una corrección anterior
+   * al 2026-10-04, que se sigue contando como entonces. Hecho congelado, como
+   * `config_calculo`.
+   */
+  @Column({ name: 'devoluciones', type: 'jsonb', nullable: true })
+  devoluciones: DevolucionCongelada[] | null;
 
   /** Auditoría de la anulación. Ver `VentasService.cancelar`. */
   @Column({ name: 'cancelada_el', type: 'timestamptz', nullable: true })

@@ -152,6 +152,7 @@ describe('CobrosService', () => {
   };
   const reembolsoHandler = {
     exigirTopeDelReembolso: jest.fn(),
+    validarDevoluciones: jest.fn(),
     onReembolsoAprobado: jest.fn(),
   };
   const reembolsoRegistry = {
@@ -591,6 +592,56 @@ describe('CobrosService', () => {
         expect(provider.reembolsar).not.toHaveBeenCalled();
         expect(deps.transacciones.registrar).not.toHaveBeenCalled();
         expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+      });
+
+      it('las devoluciones —y la pregunta de cada línea con stock— se validan en tx0, ANTES del proveedor', async () => {
+        const devoluciones = [
+          { itemId: 'item-1', cantidad: '1', stock: 'pierde' as const },
+        ];
+        await service.reembolsar(
+          't-1',
+          'orden-1',
+          { monto: '1100', devoluciones },
+          { usuarioId: 'user-1' },
+          CLAVE,
+        );
+        expect(reembolsoHandler.validarDevoluciones.mock.calls).toEqual([
+          [manager, { tenantId: 't-1', ventaId: 'venta-1', devoluciones }],
+        ]);
+        expect(
+          reembolsoHandler.validarDevoluciones.mock.invocationCallOrder[0],
+        ).toBeLessThan(provider.reembolsar.mock.invocationCallOrder[0]);
+      });
+
+      it('una línea sin respuesta corta ANTES de la pasarela: no sale plata ni queda REFUND', async () => {
+        reembolsoHandler.validarDevoluciones.mockRejectedValueOnce(
+          new BadRequestException('Falta decir si "X" se recupera'),
+        );
+        await expect(
+          service.reembolsar(
+            't-1',
+            'orden-1',
+            {
+              monto: '1100',
+              devoluciones: [{ itemId: 'item-1', cantidad: '1' }],
+            },
+            { usuarioId: 'user-1' },
+            CLAVE,
+          ),
+        ).rejects.toThrow(/Falta decir/);
+        expect(provider.reembolsar).not.toHaveBeenCalled();
+        expect(deps.transacciones.registrar).not.toHaveBeenCalled();
+      });
+
+      it('sin devoluciones no hay nada que validar', async () => {
+        await service.reembolsar(
+          't-1',
+          'orden-1',
+          { monto: '1100' },
+          { usuarioId: 'user-1' },
+          CLAVE,
+        );
+        expect(reembolsoHandler.validarDevoluciones).not.toHaveBeenCalled();
       });
 
       it('una orden sin venta no tiene tope por pago: ni lo consulta (como hoy)', async () => {

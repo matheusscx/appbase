@@ -428,7 +428,7 @@ let metodosPagoRechaza = false
 /** Cada `POST /cuentas/:id/lineas/:lineaId/anular`: cuentaId, lineaId y el body mandado. */
 let anulacionesPedidas: { cuentaId: string, lineaId: string, body: Record<string, unknown> }[] = []
 /** Lo que devuelve `GET /motivos-baja?soloActivas=true` — el catálogo del modal de anulación. */
-let motivosBajaMock: { id: string, nombre: string, tipo: string }[] = []
+let motivosBajaMock: { id: string, nombre: string, tipo: string, esDevolucion?: boolean }[] = []
 /** Fuerza el rechazo del `POST .../anular`. */
 let anularLineaRechaza = false
 /** `advertencias` que trae el `POST .../anular` junto a la cuenta — avisos de stock informativos. */
@@ -7118,6 +7118,8 @@ describe('salones — anular un plato despachado', () => {
     motivosBajaMock = [
       { id: 'motivo-cortesia', nombre: 'Invitación', tipo: 'cortesia' },
       { id: 'motivo-merma', nombre: 'Se cayó', tipo: 'merma' },
+      // La causa de la nota de crédito: anular con ella es un 400, no se ofrece.
+      { id: 'motivo-devolucion', nombre: 'Devolución', tipo: 'merma', esDevolucion: true },
     ]
     catalogoItemsMock = [{ ...producto(), unidadMedida: 'kg' }]
     cuentasDeLaMesa = [cuentaCon({
@@ -7139,6 +7141,9 @@ describe('salones — anular un plato despachado', () => {
     await esperar(20) // carga de `GET /motivos-baja`
 
     const modalComponent = wrapper.findComponent({ name: 'SalonesAnularLineaModal' })
+    const ofrecidos = JSON.stringify(modalComponent.findComponent({ name: 'USelectMenu' }).props('items'))
+    expect(ofrecidos).toContain('motivo-merma')
+    expect(ofrecidos).not.toContain('motivo-devolucion')
     modalComponent.findComponent({ name: 'UInputNumber' }).vm.$emit('update:modelValue', 300)
     modalComponent.findComponent({ name: 'USelectMenu' }).vm.$emit('update:modelValue', 'motivo-cortesia')
     await esperar(10)

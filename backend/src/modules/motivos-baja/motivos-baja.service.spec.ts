@@ -106,6 +106,97 @@ describe('MotivosBajaService', () => {
     });
   });
 
+  describe('la causa fija "Devolución" (nota de crédito, 2026-10-04)', () => {
+    const DEVOLUCION = 'devolucion-uuid';
+
+    it('ninguna baja manual la acepta: assertMotivoActivo la rechaza nombrándola', async () => {
+      queryMock.mockResolvedValueOnce([
+        {
+          motivo_baja_id: DEVOLUCION,
+          nombre: 'Devolución',
+          tipo: 'merma',
+          es_devolucion: true,
+        },
+      ]);
+      await expect(
+        service.assertMotivoActivo({ query: queryMock }, TENANT, DEVOLUCION),
+      ).rejects.toThrow(/"Devolución" la deja la nota de crédito/);
+    });
+
+    it('una merma común sigue pasando', async () => {
+      queryMock.mockResolvedValueOnce([
+        {
+          motivo_baja_id: MOTIVO,
+          nombre: 'Vencimiento',
+          tipo: 'merma',
+          es_devolucion: false,
+        },
+      ]);
+      await expect(
+        service.assertMotivoActivo({ query: queryMock }, TENANT, MOTIVO),
+      ).resolves.toEqual({ id: MOTIVO, nombre: 'Vencimiento', tipo: 'merma' });
+    });
+
+    it('asegurarDevolucion devuelve la marcada si existe, sin escribir', async () => {
+      queryMock.mockResolvedValueOnce([{ motivo_baja_id: DEVOLUCION }]);
+      await expect(service.asegurarDevolucion(TENANT)).resolves.toBe(
+        DEVOLUCION,
+      );
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('un tenant sin la causa la recibe, con ON CONFLICT (la carrera de dos notas)', async () => {
+      queryMock
+        .mockResolvedValueOnce([]) // marcada: no hay
+        .mockResolvedValueOnce([]) // homónima: no hay
+        .mockResolvedValueOnce([]) // INSERT
+        .mockResolvedValueOnce([{ motivo_baja_id: DEVOLUCION }]); // relectura
+      await expect(service.asegurarDevolucion(TENANT)).resolves.toBe(
+        DEVOLUCION,
+      );
+      const [sql, params] = queryMock.mock.calls[2] as [string, unknown[]];
+      expect(sql).toContain('ON CONFLICT DO NOTHING');
+      expect(params).toEqual([TENANT, 'Devolución', 'merma']);
+    });
+
+    it('si el INSERT no deja causa (el nombre se tomó en el medio), lo dice en vez de seguir sin causa', async () => {
+      queryMock
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+      await expect(service.asegurarDevolucion(TENANT)).rejects.toThrow(
+        /el nombre está tomado por otro motivo de baja/,
+      );
+    });
+
+    // Nunca se adopta un motivo propio (Sesión de esfuerzo máximo, 2026-10-04):
+    // sea del tipo que sea, sus mermas manuales no pasan al balde de devoluciones.
+    it.each(['merma', 'cortesia'])(
+      'un "Devolución" propio (%s) no se toca: la causa nace con otro nombre',
+      async (tipo) => {
+        queryMock
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([{ '?column?': 1, tipo }])
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([{ motivo_baja_id: DEVOLUCION }]);
+        await expect(service.asegurarDevolucion(TENANT)).resolves.toBe(
+          DEVOLUCION,
+        );
+        expect(
+          queryMock.mock.calls.some(([sql]) =>
+            String(sql).includes('UPDATE motivo_baja'),
+          ),
+        ).toBe(false);
+        expect((queryMock.mock.calls[2] as [string, unknown[]])[1]).toEqual([
+          TENANT,
+          'Devolución (nota de crédito)',
+          'merma',
+        ]);
+      },
+    );
+  });
+
   describe('create', () => {
     it('inserta con es_fijo=false y nombre trim', async () => {
       queryMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
@@ -134,6 +225,7 @@ describe('MotivosBajaService', () => {
         activo: true,
         esFijo: false,
         tipo: 'merma',
+        esDevolucion: false,
         enUso: false,
       });
     });

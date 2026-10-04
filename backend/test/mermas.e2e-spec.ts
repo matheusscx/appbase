@@ -725,12 +725,12 @@ describe('Mermas — motivos, registro y rechazo en ajuste (e2e)', () => {
   });
 });
 
-// Describe propio: un tenant recién creado, para afirmar el seed de los ocho
+// Describe propio: un tenant recién creado, para afirmar el seed de los nueve
 // motivos fijos con su tipo — tocar `Paris` acá le rompería el resto de la
 // suite de arriba. Molde de `crearTenantEn`/`entrarA` calcado de
 // `redondeo-por-pais.e2e-spec.ts` (superadmin, POST /api/admin/tenants,
 // switch-tenant).
-describe('Motivos de baja — un tenant nuevo nace con los ocho fijos (e2e)', () => {
+describe('Motivos de baja — un tenant nuevo nace con los nueve fijos (e2e)', () => {
   let app: INestApplication<App>;
   const PROV_RM = '550e8400-e29b-41d4-a716-446655440001'; // Chile
   const SUPERADMIN = { email: 'admin@sistema.com', pass: 'admin' };
@@ -796,7 +796,7 @@ describe('Motivos de baja — un tenant nuevo nace con los ocho fijos (e2e)', ()
     await app.close();
   });
 
-  it('trae los ocho fijos con su tipo', async () => {
+  it('trae los nueve fijos con su tipo', async () => {
     const tenant = await crearTenantEn(PROV_RM);
     const tokenTenantNuevo = await entrarA(tenant.id);
 
@@ -818,6 +818,8 @@ describe('Motivos de baja — un tenant nuevo nace con los ocho fijos (e2e)', ()
       ['Comida del personal (dentro del local)', 'consumo_personal'],
       ['Cortesía de la casa', 'cortesia'],
       ['Deterioro', 'merma'],
+      // La causa de la merma que deja una nota de crédito (2026-10-04).
+      ['Devolución', 'merma'],
       ['Error operativo', 'merma'],
       ['No se llegó a hacer', 'no_elaborado'],
       ['Otro', 'merma'],

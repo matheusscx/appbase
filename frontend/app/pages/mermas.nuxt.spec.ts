@@ -29,7 +29,9 @@ const CELULAR = {
   unidadMedida: 'unidad',
   modoInventario: 'serie',
 }
-const MOTIVO = { id: 'motivo-1', nombre: 'Vencimiento' }
+const MOTIVO = { id: 'motivo-1', nombre: 'Vencimiento', esDevolucion: false }
+/** La causa fija de la nota de crédito: se filtra por ella, no se registra a mano. */
+const DEVOLUCION = { id: 'motivo-devolucion', nombre: 'Devolución', esDevolucion: true }
 
 /** Ubicaciones que devuelve `GET /ubicaciones` en cada test. */
 let ubicacionesBackend: typeof LOCAL[] = [LOCAL]
@@ -95,7 +97,7 @@ mockNuxtImport('useApiFetch', () => {
       if (motivosPersonalFallan && url.includes('tipo=consumo_personal')) {
         return Promise.reject(new Error('sin red'))
       }
-      return Promise.resolve([MOTIVO])
+      return Promise.resolve([MOTIVO, DEVOLUCION])
     }
     // `useUnidadesMedidaStore.ensureLoaded()` espera un ARRAY, no el shape
     // paginado del catch-all de abajo — sin esto `unidades.value.find` revienta.
@@ -383,6 +385,20 @@ describe('mermas — filtro de motivos', () => {
     expect(motivosUrlSolicitada).toContain('tipo=merma')
     expect(motivosUrlSolicitada).toContain('soloActivas=true')
 
+    wrapper.unmount()
+  })
+
+  it('"Devolución" se puede filtrar pero no registrar a mano: la deja la nota de crédito', async () => {
+    ubicacionesBackend = [LOCAL]
+    const wrapper = await montar()
+    // El filtro del listado (con "todos") la ofrece.
+    expect(selectConOpcion(wrapper, DEVOLUCION.id).exists()).toBe(true)
+
+    await abrirDrawer(wrapper)
+    const delFormulario = selectMotivo(wrapper)
+    const valores = (delFormulario.props('items') as { value: string }[]).map(i => i.value)
+    expect(valores).toContain(MOTIVO.id)
+    expect(valores).not.toContain(DEVOLUCION.id)
     wrapper.unmount()
   })
 })

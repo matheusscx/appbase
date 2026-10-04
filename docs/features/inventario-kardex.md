@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: SDD Team  
-**Last Updated**: 2026-09-01 (lo apartado por una mesa no escribe movimientos)
+**Last Updated**: 2026-10-04 (cada salida de una venta lleva su línea)
 
 ---
 
@@ -28,6 +28,10 @@ El stock de productos es un activo crítico: cambios sin trazabilidad generan me
   repone con `entrada`/`motivo='anulacion'`; que un cliente devuelva mercadería genera
   `motivo='devolucion'`. Son eventos distintos y el kardex los separa: confundirlos ensucia
   el análisis de mermas y no se recupera después.
+- **Cada salida de una venta lleva su línea** (`venta_detalle_id`, 2026-10-04): la del producto
+  y la de cada ingrediente, componente u opción. Es lo que deja a la nota de crédito devolver lo
+  que salió por las líneas devueltas; lo que se pierde vuelve con `devolucion` y sale como `merma` con
+  la causa fija "Devolución", las dos al costo con que salió y sin promediar (`sinPromediar`) ([`reembolsos-nota-credito.md`](reembolsos-nota-credito.md#se-recupera-o-se-pierde-2026-10-04)).
 - Integración con recuento de inventario: `POST /recuentos/:id/aplicar` genera un movimiento
   `entrada`/`salida` con `motivo='recuento'` por cada línea contada con diferencia — ver
   "Regla del recuento: delta, no absoluto" más abajo
@@ -422,6 +426,7 @@ Regla de negocio completa: [`PRODUCTO.md`](../PRODUCTO.md) § 8b. Dónde se hace
 | `stock_resultante` | integer | NOT NULL | Saldo después del movimiento (snapshot); en `ajuste_costo` es igual a `stock_anterior` |
 | `usuario_id` | UUID | FK `usuarios`, NOT NULL | Quién registró el movimiento |
 | `venta_id` | UUID | FK `ventas`, nullable | Si es `motivo = 'venta'`, referencia a la venta |
+| `venta_detalle_id` | UUID | nullable, sin FK | La línea vendida a la que pertenece: la salida de la venta (también de un ingrediente o componente) y su vuelta por una nota de crédito (que lleva `venta_id` = la nota). Nula en ventas anteriores al 2026-10-04 y fuera de una venta |
 | `comentario` | text | nullable | Observaciones del usuario |
 | `costo_unitario` | NUMERIC(18,4) | nullable | Congela el costo del momento del movimiento (en `ajuste_costo`, el costo nuevo) |
 | `costo_anterior` | NUMERIC(18,4) | nullable | Solo poblado en `motivo='ajuste_costo'`: el `costo_actual` vigente antes del ajuste |

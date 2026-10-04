@@ -5,6 +5,7 @@ import {
   type Cuantizador,
 } from '../calculo-precios/calculo-precios.engine';
 import {
+  cantidadADevolver,
   descomponer,
   escalarDevoluciones,
   repartirAjuste,
@@ -211,5 +212,64 @@ describe('escalarDevoluciones', () => {
       q,
     );
     expect(partes.map((p) => p.toString())).toEqual(['0', '0']);
+  });
+});
+
+describe('cantidadADevolver', () => {
+  // Una receta de 3 unidades que se llevó 1 kg de carne: lo que vuelve por
+  // cada nota sale de lo que salió por ESAS líneas, y la serie cierra exacto.
+  it('una serie de notas parciales suma exacto lo que salió', () => {
+    const salido = '1';
+    const notas = ['1', '1', '1'];
+    let acreditadas = new Decimal(0);
+    const devueltas = notas.map((q) => {
+      const d = cantidadADevolver({
+        salido,
+        vendidas: '3',
+        yaAcreditadas: acreditadas.toString(),
+        devueltas: q,
+      });
+      acreditadas = acreditadas.plus(q);
+      return d;
+    });
+    expect(devueltas).toEqual(['0.3333', '0.3334', '0.3333']);
+    expect(
+      devueltas.reduce((a, d) => a.plus(d), new Decimal(0)).toString(),
+    ).toBe('1');
+  });
+
+  it('devolver todo de una vez devuelve todo lo que salió', () => {
+    expect(
+      cantidadADevolver({
+        salido: '0.75',
+        vendidas: '2',
+        yaAcreditadas: '0',
+        devueltas: '2',
+      }),
+    ).toBe('0.75');
+  });
+
+  // Lo acreditado antes (aunque esa nota no haya movido stock, como las de
+  // receta anteriores a esto) ya se llevó su parte: no se devuelve dos veces.
+  it('lo ya acreditado se descuenta: la última nota se lleva el resto', () => {
+    expect(
+      cantidadADevolver({
+        salido: '1',
+        vendidas: '3',
+        yaAcreditadas: '2',
+        devueltas: '1',
+      }),
+    ).toBe('0.3333');
+  });
+
+  it('nada vendido no divide por cero', () => {
+    expect(
+      cantidadADevolver({
+        salido: '1',
+        vendidas: '0',
+        yaAcreditadas: '0',
+        devueltas: '1',
+      }),
+    ).toBe('0');
   });
 });

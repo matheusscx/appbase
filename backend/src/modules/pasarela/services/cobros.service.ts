@@ -386,7 +386,7 @@ export class CobrosService {
                 .map((d) => ({
                   itemId: d.itemId,
                   cantidad: new Decimal(d.cantidad).toString(),
-                  reponerStock: d.reponerStock ?? null,
+                  stock: d.stock ?? null,
                 }))
                 .sort((a, b) =>
                   a.itemId === b.itemId
@@ -486,6 +486,23 @@ export class CobrosService {
       dto.monto,
       null,
     );
+    // Las devoluciones, como las valida la nota manual —y sobre todo la
+    // pregunta "¿se recupera o se pierde?" de cada línea con stock—, ANTES del
+    // proveedor: el hook post-commit ya no puede rechazar nada, y una línea sin
+    // respuesta saldría sin reponer ni mermar. Solo acá, en tx0: las líneas de
+    // la venta no cambian entre tx0 y tx1.
+    const devoluciones = dto.devoluciones ?? [];
+    const ventaId = orden.ventaId;
+    const handler =
+      ventaId && devoluciones.length ? this.reembolsoRegistry.get() : null;
+    if (ventaId && handler)
+      await this.db.transaccion((manager) =>
+        handler.validarDevoluciones(manager, {
+          tenantId,
+          ventaId,
+          devoluciones,
+        }),
+      );
     const refund = await this.transacciones.registrar({
       tenantId,
       ordenId,

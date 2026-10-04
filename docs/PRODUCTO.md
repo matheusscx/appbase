@@ -1176,6 +1176,17 @@ salones y online; sin boleta sembrada, sin tipo y sin documentos). Pendiente:
 
 **Nota de crédito:** puede ser total (anula la venta completa) o parcial (anula parte). Referencia a la venta original mediante `venta_referencia_id` en la tabla `ventas`.
 
+**Lo devuelto se recupera o se pierde, y el sistema lo pregunta** (owner, 2026-08-23 y
+2026-09-29). Al hacer la nota —y al reembolsar por la pasarela—, cada ítem devuelto que sacó algo
+del inventario (el producto suelto, la receta con sus ingredientes, el combo con sus componentes)
+pide una respuesta, sin ninguna elegida de antemano: **vuelve al stock** (lo que salió por esa línea
+vuelve, al costo con que salió) o **se perdió** (vuelve y sale como merma con la causa fija
+**"Devolución"**, que el sistema crea en cada tenant). Una hamburguesa ya armada no vuelve a ser pan
+y carne; una botella puede volver rota o cerrada. La causa "Devolución" no se renombra, no se borra
+y no se elige a mano en una merma: es la que separa, en el reporte de mermas, lo devuelto de lo que
+se perdió en el local. Un servicio no pregunta. Lo que tiene número de serie o lote no vuelve al
+stock desde la nota (se registra desde Inventario).
+
 **La nota de crédito va al mismo cliente que la venta** (owner, 2026-10-04): el SII exige RUT y
 razón social del receptor en toda nota. Si la venta tiene cliente, la nota guarda una copia y no
 se le puede poner otro. Si no tiene (una boleta sin RUT), al hacer la nota se le **ofrece** al

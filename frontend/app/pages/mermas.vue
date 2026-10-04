@@ -36,6 +36,8 @@ interface ProductoOpt {
 interface MotivoOpt {
   id: string
   nombre: string
+  /** La causa fija de la nota de crédito: se filtra por ella, no se elige a mano. */
+  esDevolucion: boolean
 }
 
 /**
@@ -105,8 +107,13 @@ const motivosFiltroOpts = computed<Opt[]>(() => [
   ...motivos.value.map(c => ({ label: c.nombre, value: c.id })),
 ])
 
+// "Devolución" la deja la nota de crédito cuando lo devuelto se pierde: se
+// puede filtrar por ella (arriba), pero no registrar a mano —el backend la
+// rechaza con 400—.
 const motivosFormOpts = computed<Opt[]>(() =>
-  motivos.value.map(c => ({ label: c.nombre, value: c.id })),
+  motivos.value
+    .filter(c => !c.esDevolucion)
+    .map(c => ({ label: c.nombre, value: c.id })),
 )
 
 const drawerOpen = ref(false)

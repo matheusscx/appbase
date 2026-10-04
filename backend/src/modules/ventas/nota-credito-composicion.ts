@@ -141,3 +141,36 @@ export function escalarDevoluciones(
     q,
   );
 }
+
+/**
+ * Cuánto de un ítem que salió por las líneas de un ítem vendido vuelve con una
+ * nota que devuelve `devueltas` unidades de esas líneas (la receta que vuelve
+ * trae sus ingredientes; el combo, sus componentes). Es una cantidad de stock,
+ * no plata: escala 4, la de `movimientos_inventario.cantidad`.
+ *
+ * `r4(salido·(R+q)/V) − r4(salido·R/V)`, y no `r4(salido·q/V)`: lo que se
+ * redondea es lo **acumulado**, así una serie de notas parciales suma exacto lo
+ * que salió (la última se lleva el resto) sin leer lo que devolvieron las
+ * anteriores. `yaAcreditadas` es el contador de unidades ya comprometidas del
+ * ítem vendido (`unidadesComprometidasPorItem`).
+ */
+export function cantidadADevolver(args: {
+  salido: string;
+  vendidas: string;
+  yaAcreditadas: string;
+  devueltas: string;
+}): string {
+  const vendidas = new Decimal(args.vendidas);
+  if (vendidas.lte(0)) return '0';
+  const salido = new Decimal(args.salido);
+  const hasta = (unidades: Decimal) =>
+    salido
+      .times(Decimal.min(unidades, vendidas))
+      .dividedBy(vendidas)
+      .toDecimalPlaces(ESCALA_CANTIDAD, Decimal.ROUND_HALF_UP);
+  const antes = new Decimal(args.yaAcreditadas);
+  return hasta(antes.plus(args.devueltas)).minus(hasta(antes)).toString();
+}
+
+/** La escala de `movimientos_inventario.cantidad` (`numeric(18,4)`). */
+const ESCALA_CANTIDAD = 4;

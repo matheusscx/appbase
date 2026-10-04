@@ -7,7 +7,8 @@ import {
   devolucionesPayload,
   notaDevolucion,
   filaAcreditable,
-  setReponerFila,
+  setStockFila,
+  faltaDestinoStock,
   valorDevueltoCuantizado,
   type DetalleVentaDevolucion,
   type FilaDevolucion,
@@ -22,6 +23,7 @@ const detalle = (
   descripcion: `Item ${itemId}`,
   cantidad: '2',
   modoInventario: 'cantidad',
+  devolucionStock: 'recuperable',
   cantidadDevuelta: '0',
   totalLinea: '2000',
   ...overrides,
@@ -36,8 +38,8 @@ const fila = (
   disponible: '2',
   modoInventario: 'cantidad',
   cantidad: '',
-  puedeReponer: true,
-  reponerStock: true,
+  devolucionStock: 'recuperable',
+  stock: null,
   ...overrides,
 })
 
@@ -68,8 +70,8 @@ describe('agruparFilasDevolucion', () => {
         disponible: '2',
         modoInventario: 'cantidad',
         cantidad: '',
-        puedeReponer: true,
-        reponerStock: true,
+        devolucionStock: 'recuperable',
+        stock: null,
       },
     ])
   })
@@ -94,18 +96,17 @@ describe('agruparFilasDevolucion', () => {
     expect(filas[0]!.modoInventario).toBeNull()
   })
 
-  it('la reposición nace en lo que el ítem PUEDE, no en true', () => {
-    // Tres modos distintos en la misma tanda: con uno solo, arrancar todo en
-    // `true` pasaría igual.
+  it('la pregunta nace SIN respuesta, en las tres clases de fila (owner: sin default)', () => {
+    // Tres clases distintas en la misma tanda: un default por clase pasaría con una sola.
     const filas = agruparFilasDevolucion([
-      detalle('a', { modoInventario: 'cantidad' }),
-      detalle('l', { modoInventario: 'lote' }),
-      detalle('s', { modoInventario: null }),
+      detalle('a', { devolucionStock: 'recuperable' }),
+      detalle('l', { devolucionStock: 'solo_perdida' }),
+      detalle('s', { devolucionStock: 'sin_stock' }),
     ])
-    expect(filas.map(f => [f.puedeReponer, f.reponerStock])).toEqual([
-      [true, true],
-      [false, false],
-      [false, false],
+    expect(filas.map(f => [f.devolucionStock, f.stock])).toEqual([
+      ['recuperable', null],
+      ['solo_perdida', null],
+      ['sin_stock', null],
     ])
   })
 })
@@ -145,69 +146,84 @@ describe('devolucionesPayload', () => {
       fila('c', { cantidad: '0' }),
       fila('d', { cantidad: 'x' }),
     ])
-    expect(payload).toEqual([{ itemId: 'a', cantidad: '1', reponerStock: true }])
+    expect(payload).toEqual([{ itemId: 'a', cantidad: '1' }])
   })
 
-  it('el payload lleva la reposición de CADA fila', () => {
-    // Las dos con cantidad y con reposición distinta: con un solo valor, mandar
-    // siempre `true` pasaría igual.
+  it('el payload lleva la respuesta de CADA fila, y ninguna en la que no tiene stock', () => {
+    // Dos respuestas distintas: mandar siempre la misma pasaría con una sola.
     const payload = devolucionesPayload([
-      fila('a', { cantidad: '2', reponerStock: true }),
-      fila('b', { cantidad: '1', reponerStock: false }),
+      fila('a', { cantidad: '2', stock: 'recupera' }),
+      fila('b', { cantidad: '1', stock: 'pierde' }),
+      fila('s', { cantidad: '1', devolucionStock: 'sin_stock' }),
     ])
     expect(payload).toEqual([
-      { itemId: 'a', cantidad: '2', reponerStock: true },
-      { itemId: 'b', cantidad: '1', reponerStock: false },
+      { itemId: 'a', cantidad: '2', stock: 'recupera' },
+      { itemId: 'b', cantidad: '1', stock: 'pierde' },
+      { itemId: 's', cantidad: '1' },
     ])
   })
 })
 
-describe('setReponerFila', () => {
-  it('apaga la reposición de la fila pedida y no toca las otras', () => {
-    const filas = [fila('a'), fila('b')]
-    const r = setReponerFila(filas, 'a', false)
-    expect(r.map(f => f.reponerStock)).toEqual([false, true])
+describe('setStockFila', () => {
+  it('contesta la fila pedida y no toca las otras', () => {
+    const r = setStockFila([fila('a'), fila('b')], 'a', 'pierde')
+    expect(r.map(f => f.stock)).toEqual(['pierde', null])
   })
 
-  it('no la enciende donde el ítem no puede reponer', () => {
-    // Encenderla mandaría al backend un pedido que rechaza con 400.
-    const filas = [fila('s', { modoInventario: null, puedeReponer: false, reponerStock: false })]
-    expect(setReponerFila(filas, 's', true)[0]!.reponerStock).toBe(false)
+  it('serie/lote no se recupera desde acá, pero sí se pierde', () => {
+    const filas = [fila('l', { devolucionStock: 'solo_perdida' })]
+    expect(setStockFila(filas, 'l', 'recupera')[0]!.stock).toBeNull()
+    expect(setStockFila(filas, 'l', 'pierde')[0]!.stock).toBe('pierde')
+  })
+
+  it('una fila sin stock no lleva respuesta: el backend la rechazaría', () => {
+    const filas = [fila('s', { devolucionStock: 'sin_stock' })]
+    expect(setStockFila(filas, 's', 'pierde')[0]!.stock).toBeNull()
+  })
+})
+
+describe('faltaDestinoStock', () => {
+  it('falta en una fila con stock y cantidad, sin respuesta', () => {
+    expect(faltaDestinoStock([fila('a', { cantidad: '1' })])).toBe(true)
+  })
+
+  it('no falta sin cantidad, en un servicio, ni con la respuesta dada', () => {
+    expect(faltaDestinoStock([fila('a')])).toBe(false)
+    expect(faltaDestinoStock([fila('a', { cantidad: '0' })])).toBe(false)
+    expect(
+      faltaDestinoStock([fila('s', { cantidad: '1', devolucionStock: 'sin_stock' })]),
+    ).toBe(false)
+    expect(faltaDestinoStock([fila('a', { cantidad: '1', stock: 'recupera' })])).toBe(false)
   })
 })
 
 describe('notaDevolucion / filaAcreditable', () => {
-  it('servicio (modoInventario null): no vuelve al stock, pero SÍ se acredita', () => {
-    // Es el cambio del 2026-09-04: acreditar dejó de exigir que el ítem pudiera
-    // volver al inventario.
-    const f = fila('s', { modoInventario: null, puedeReponer: false, reponerStock: false })
-    expect(notaDevolucion(f)).toBe('Servicio: no vuelve al stock')
+  it('sin stock (un servicio): no se pregunta, pero SÍ se acredita', () => {
+    // Acreditar no exige stock (2026-09-04); la pregunta sí.
+    const f = fila('s', { devolucionStock: 'sin_stock' })
+    expect(notaDevolucion(f)).toBe('No sacó nada del inventario')
     expect(filaAcreditable(f)).toBe(true)
   })
 
-  it('modo serie/lote: la vuelta al stock va por Inventario, y se acredita igual', () => {
-    const f = fila('l', { modoInventario: 'lote', puedeReponer: false, reponerStock: false })
+  it('serie/lote: la vuelta al stock va por Inventario, y se acredita igual', () => {
+    const f = fila('l', { devolucionStock: 'solo_perdida' })
     expect(notaDevolucion(f)).toBe(
-      'Modo lote: la vuelta al stock se registra desde Inventario',
+      'Tiene serie o lote: si vuelve, se registra desde Inventario',
     )
     expect(filaAcreditable(f)).toBe(true)
   })
 
-  it('modo cantidad con disponible > 0: sin nota y acreditable', () => {
+  it('recuperable con disponible > 0: sin nota y acreditable', () => {
     const f = fila('a')
     expect(notaDevolucion(f)).toBeNull()
     expect(filaAcreditable(f)).toBe(true)
   })
 
-  it('sin disponible no se acredita, pueda o no reponer', () => {
-    // Las dos mitades del título: una fila que puede reponer y otra que no.
+  it('sin disponible no se acredita, tenga o no stock', () => {
     const producto = fila('a', { disponible: '0' })
-    const servicio = fila('s', {
-      disponible: '0', modoInventario: null, puedeReponer: false, reponerStock: false,
-    })
+    const servicio = fila('s', { disponible: '0', devolucionStock: 'sin_stock' })
     expect(filaAcreditable(producto)).toBe(false)
     expect(filaAcreditable(servicio)).toBe(false)
-    expect(notaDevolucion(producto)).toBeNull()
   })
 })
 

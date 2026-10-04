@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-10-02
+**Last Updated**: 2026-10-04 (la nota pregunta si lo devuelto se recupera o se pierde)
 
 ---
 
@@ -19,9 +19,11 @@ El REFUND queda ligado a ella (`pasarela_transacciones.correccion_venta_id`).
 Desde el drawer de Órdenes el admin puede además:
 
 - **Elegir ítems que se acreditan en esa nota** (`devoluciones`): cantidades por
-  línea. Cualquier ítem vendido se acredita y la reposición al stock es una
-  elección por línea (2026-09-04). Las devoluciones de stock viajan **dentro** de la
-  corrección: ya no existe el camino que solo mueve inventario sin documento.
+  línea. Cualquier ítem vendido se acredita, y en la línea con stock de por medio
+  hay que decir si lo devuelto **se recupera o se pierde** (2026-10-04, ver
+  [abajo](#se-recupera-o-se-pierde-2026-10-04)). Las devoluciones de stock viajan
+  **dentro** de la corrección: ya no existe el camino que solo mueve inventario sin
+  documento.
 
 Además, el módulo de Ventas ahora **muestra los reembolsos siempre** (haya o no NC):
 sección "Reembolsos" y "Documentos relacionados" en el detalle de la venta, y badges
@@ -45,8 +47,9 @@ lista para el día en que se integre facturación electrónica.
   de venta con egreso de caja elegible (2026-07-11)**.
 - NO incluido (futuro): emisión tributaria real (SII/folios); **la REPOSICIÓN**
   en modos `serie`/`lote` (requiere elegir unidades/lote — se hace manual desde
-  Inventario); egreso en el ledger de `pagos`; devolución de dinero por el
-  método de pago original (el egreso es efectivo de caja).
+  Inventario), ni la merma de serie/lote cuando se pierden; egreso en el ledger de
+  `pagos`; devolución de dinero por el método de pago original (el egreso es
+  efectivo de caja).
 
   ⚠️ **Ojo con el primero:** desde el 2026-09-04 un ítem `serie`/`lote` **sí se
   acredita por línea**. Lo único que sigue afuera es que vuelva al stock.
@@ -65,7 +68,7 @@ Request:
 {
   "monto": "1100",
   "devoluciones": [                                    // opcional: ítems que se acreditan en la nota
-    { "itemId": "uuid", "cantidad": "2" }
+    { "itemId": "uuid", "cantidad": "2", "stock": "recupera" }   // "stock": ver más abajo
   ]
 }
 
@@ -107,7 +110,10 @@ Response (200): orden pública + extras
   **misma resolución** que usa la nota al crearse, así que la pantalla ofrece lo
   que el servidor acepta y no replica la regla. Vacío en una corrección o en una
   venta que no admite nota.
-- `detalles[]`: + `itemId`, `modoInventario` (`null` = servicio), `cantidadDevuelta`.
+- `detalles[]`: + `itemId`, `modoInventario` (`null` = sin fila en `item_producto`:
+  servicio, receta o combo), `cantidadDevuelta` y `devolucionStock` (`sin_stock` |
+  `recuperable` | `solo_perdida`: qué preguntarle a la línea, ver
+  [abajo](#se-recupera-o-se-pierde-2026-10-04)).
 - `reembolsos[]`: REFUNDs de las órdenes de pasarela vinculadas
   (`{id, monto, estado, fecha, ordenId, codigoOrden}`).
 - `notasCredito[]`: NCs hijas (`{id, totalFinal, fecha, comentario}`).
@@ -155,19 +161,19 @@ Response (200): orden pública + extras
   llevar impuestos distintos y no existe "la tasa" que leer. La NC corrige aquel
   documento, así que hereda su criterio — el mismo principio que el redondeo.
 
-  **Cualquier ítem vendido se acredita por línea, reponga o no el stock**
-  (2026-09-04). `devoluciones` dejó de significar *"ítems a devolver a stock"* y
-  significa *"ítems que se acreditan"*; la reposición es una propiedad de cada
-  línea (`reponerStock`, ausente = repone si el ítem puede). Antes, nombrar un
-  ítem exigía `modo_inventario = 'cantidad'`, así que recetas, combos y
-  servicios no se podían acreditar por línea: caían al balde de ajuste y la nota
-  decía *"Ajuste"* en vez del nombre del plato. **La razón de ese corte era el
-  inventario**, así que hoy dispara según lo que el camino pida del stock:
+  **Cualquier ítem vendido se acredita por línea** (2026-09-04). `devoluciones`
+  dejó de significar *"ítems a devolver a stock"* y significa *"ítems que se
+  acreditan"*. Antes, nombrar un ítem exigía `modo_inventario = 'cantidad'`, así
+  que recetas, combos y servicios no se podían acreditar por línea: caían al balde
+  de ajuste y la nota decía *"Ajuste"* en vez del nombre del plato. Qué pasa con
+  el stock lo dice desde el 2026-10-04 la respuesta de cada línea (`stock`), con
+  una política por camino:
 
-  | Camino | Política ante una línea que no repone |
+  | Camino | Línea con stock sin respuesta, o con una que no se puede cumplir |
   |---|---|
-  | Nota manual (`POST /ventas/:id/notas-credito`) | rechaza **solo si se PIDIÓ** reponer algo que no puede; lo que no repone se acredita igual |
-  | Nota por el webhook de reembolso | **nunca rechaza**: el hook corre después del commit y un throw pierde el evento (`cobros.service.ts` lo traga como warning). Se acredita y no se repone |
+  | Nota manual (`POST /ventas/:id/notas-credito`) | 400 con el nombre del ítem |
+  | Reembolso de pasarela, **antes** de llamar al proveedor (tx0) | el mismo 400: no sale plata ni queda `REFUND` |
+  | Nota por el webhook de reembolso (post-commit) | **nunca rechaza**: un throw pierde el evento (`cobros.service.ts` lo traga como warning). Sin respuesta —solo la `metadata` de un `REFUND` anterior a la pregunta— se acredita y no se mueve stock |
 
   (Hubo una tercera fila, la devolución de stock **sin** documento, que exigía que toda línea
   reponga. Se eliminó el 2026-10-02 con el camino: todo reembolso deja nota.)
@@ -223,7 +229,8 @@ Response (200): orden pública + extras
   el stock volviendo igual.
 
   📌 **Es el único rechazo de los ANTERIORES que sobrevive** —el frente agregó
-  dos propios: motivo faltante al escalar, y pedir reponer lo que no puede— y
+  dos propios: motivo faltante al escalar, y pedir reponer lo que no puede (hoy:
+  la respuesta a "¿se recupera o se pierde?", 2026-10-04)— y
   sobrevive porque es invariante
   fiscal y no preferencia de producto: el error no se ve en el documento, se ve
   sumando la serie. Y **se evalúa sobre las líneas ya escaladas**: sobre los
@@ -247,11 +254,8 @@ Response (200): orden pública + extras
   **completa**, no a medias: dejar la porción exenta adentro y la afecta afuera
   partiría el documento sin decírselo a nadie.
 
-  **El movimiento de inventario corre solo sobre las líneas de devolución que
-  reponen.** La de ajuste cuelga de un `servicio` y `registrarMovimiento` rechaza
-  con 400 todo lo que no sea producto: sin ese corte, agregar la línea de ajuste
-  haría fallar el reembolso entero. Desde el 2026-09-04 se agrega el filtro por
-  `reponeStock`, porque una línea se puede acreditar sin volver al stock.
+  **El movimiento de inventario corre solo sobre las líneas de devolución con
+  respuesta.** La de ajuste cuelga de un `servicio` y nunca mueve stock.
 
   ⚠️ **Y por eso el tope por cantidad dejó de contar solo movimientos.** Mientras
   toda línea aceptada movía stock, el movimiento ERA el rastro de la unidad; con
@@ -275,10 +279,10 @@ Response (200): orden pública + extras
   original (serializa NCs concurrentes). Validaciones: Σ(NCs) ≤ `total_final`;
   cantidad devuelta ≤ vendida − ya devuelta —contando lo acreditado por las notas
   hijas y no solo los movimientos de stock, porque desde el 2026-09-04 una línea
-  se puede acreditar sin reponer—; y la política de reposición del camino
-  (`validarDevolucionesReembolso`): la nota manual rechaza solo si se PIDE
-  reponer lo que no puede y la nota por webhook nunca rechaza (un throw pierde el
-  evento).
+  se puede acreditar sin reponer—; y la respuesta de cada línea con stock
+  (`validarDevolucionesReembolso`, ver [¿Se recupera o se pierde?](#se-recupera-o-se-pierde-2026-10-04)):
+  la nota manual y el reembolso antes del proveedor rechazan, la nota por webhook
+  nunca (un throw pierde el evento).
 - **Borde de módulos**: `ReembolsoCallbackRegistry` en pasarela (mismo patrón §13
   que `PagoCallbackRegistry`); `VentasReembolsoHandler` (módulo ventas) se
   registra en `onModuleInit`. La pasarela nunca importa ventas.
@@ -316,6 +320,82 @@ Response (200): orden pública + extras
   de una compra.
 - Índices nuevos: `pasarela_ordenes(venta_id)`, `pasarela_transacciones(orden_id)`
   (para el agregado de REFUNDs del listado de ventas).
+
+## ¿Se recupera o se pierde? (2026-10-04)
+
+Decisión del owner (2026-08-23, en [`resueltos.md`](../agent/resueltos.md) § *"La nota de crédito
+miente distinto sobre la misma línea de receta"*): al hacer la nota, el sistema **pregunta siempre
+que haya stock de por medio** —el producto suelto, la receta, el combo— si lo devuelto se recupera
+o se pierde. Una hamburguesa ya armada no vuelve a ser pan y carne, una que nunca salió de la
+cocina sí; y la botella puede volver rota. Spec:
+[`2026-10-04-nc-recupera-o-pierde-design.md`](../superpowers/specs/2026-10-04-nc-recupera-o-pierde-design.md).
+
+**El contrato** — una línea de `devoluciones`, igual en la nota manual (`DevolucionNotaCreditoDto`)
+y en los dos `POST …/reembolsos` de la pasarela (`DevolucionLineaDto`); es el que reusa el botón
+"Generar nota" de un `REFUND` sin nota:
+
+```jsonc
+{ "itemId": "uuid", "cantidad": "1", "stock": "recupera" | "pierde" }
+```
+
+| La línea… (`detalles[].devolucionStock` del detalle) | `stock` |
+|---|---|
+| no sacó nada del inventario: servicio, o receta cuyos ingredientes no salieron (`sin_stock`) | **prohibido**: 400 *"no sacó nada del inventario"* |
+| sacó solo inventario por `cantidad` (`recuperable`) | **obligatorio**: `recupera` o `pierde`; sin él, 400 *"Falta decir si «X» se recupera…"* |
+| sacó algo de serie o lote (`solo_perdida`) | **obligatorio**; `recupera` es 400 (la vuelta va por Inventario) |
+
+`stock: null` es 400 siempre (lo rechaza el DTO); ausente es 400 solo en la línea con stock. El campo de antes, `reponerStock`, ya no existe: el pipe lo rechaza.
+
+**Qué devuelve una línea: lo que salió por ella.** La misma fuente que revierte `cancelar` —el
+kardex de la venta, motivo `venta`— acotada a las líneas devueltas: desde el 2026-10-04 cada salida
+de una venta lleva su línea (`movimientos_inventario.venta_detalle_id`), también la de cada
+ingrediente, componente y opción. Por cada ítem que salió por las líneas del ítem devuelto vuelve
+`r4(salido·(R+q)/V) − r4(salido·R/V)` (`cantidadADevolver`: `V` vendidas, `R` ya acreditadas, `q`
+devueltas), así una serie de notas parciales suma exacto lo que salió. El producto suelto vuelve tal
+cual (`q`). Un ingrediente no bloqueante que se vendió sin stock no vuelve: nunca salió. Una receta
+o un combo vendidos antes de la columna no tienen salidas ligadas: no preguntan ni mueven nada.
+⚠️ Mientras la nota devuelva **por ítem** y no por línea, dos líneas del mismo ítem personalizadas
+distinto (una hamburguesa sin queso y otra con) **se promedian**: vuelve la proporción de lo que
+salió por las dos. Las vueltas llevan en `venta_detalle_id` la **primera línea vendida del ítem**,
+y es la que miran las dos lecturas (`salidasPorItemVendido` y el contador).
+
+**La respuesta queda guardada** en la `metadata` del `REFUND`, escrita en tx0: la leen quien crea
+la nota después —el hook, el aclarado por saldo, el admin que marca *Salió* y, mañana, "Generar
+nota"—, y nadie vuelve a preguntar ni a deducir.
+
+**Cómo se decidió:** la pregunta, sus dos destinos, la causa fija y el costo de la vuelta son del
+owner (2026-08-23, 2026-09-29 y 2026-08-15); el resto —la causa fija y solo de la nota, el par al
+mismo costo sin promediar, la columna de la línea con su reparto, el contrato, la frontera de serie y
+lote, sin default en pantalla y el find-or-create sin adoptar un motivo propio— fue decidido por la Sesión de esfuerzo máximo (2026-10-04), derivado de las decisiones del owner.
+
+| Respuesta | En el kardex, por ítem que salió (solo `cantidad`) |
+|---|---|
+| **Se recupera** | entrada `devolucion` al costo con que salió; el CPP se recalcula (como al anular) |
+| **Se pierde** | entrada `devolucion` + salida `merma` con la causa fija **"Devolución"**, **las dos al costo con que salió**; la entrada **no promedia** (`sinPromediar`, y `costo_informado` en falso para que "rehacer la cuenta" tampoco). Stock neto cero, CPP intacto |
+
+Los dos movimientos llevan `venta_id` = la nota y `venta_detalle_id` = la línea vendida que
+revierten. Por qué el mismo costo y sin promediar: con el CPP de hoy congelado en la entrada y el de
+la salida en la merma, varianza vería el teórico en 0 unidades pero con plata; y promediada, la
+entrada arrastraría el CPP del stock que queda hacia un costo que no volvió. La merma la ven el
+reporte de mermas, el "Pérdidas" del Inicio y el costo de la baja del kardex como cualquier otra ([`mermas-valorizadas.md`](mermas-valorizadas.md)). Serie y lote: *se recupera* sigue
+afuera (Inventario) y *se pierde* no mueve nada —la unidad ya está vendida—; un combo con un
+componente en lote mueve solo lo que es `cantidad`.
+
+**La nota guarda lo que devolvió** (`ventas.devoluciones`, `jsonb`: `[{ itemId, cantidad, stock }]`
+tal como se aceptó, también lo que quedó fuera del documento, y `[]` si no devolvió nada), y el
+contador de unidades ya devueltas (`unidadesComprometidasPorItem`) suma de ahí, sin mirar líneas ni
+movimientos. Antes reconstruía "qué devolvió cada nota" desde esas dos proyecciones, que pierden
+datos: una receta escalada a $0 fuera del documento (o la porción agotada del webhook) devolvía sus
+ingredientes sin dejar línea, y un celular con serie que "se pierde" no deja ni línea ni movimiento,
+así que la misma unidad podía volver dos veces (lo levantó la revisión independiente). Una nota
+anterior al 2026-10-04 (`NULL`) se sigue contando por sus huellas, como entonces. De paso queda
+registrado lo que contestó el cajero, que para serie y lote no quedaba en ningún lado. Decidido por
+la Sesión de esfuerzo máximo (2026-10-04); técnico.
+
+**La pantalla** (`DevolucionInventarioLista`, compartida por `NotaCreditoModal` y `ReembolsoModal`):
+por línea con stock, *Vuelve al stock* / *Se perdió*, **ninguna elegida de antemano** (los dos
+destinos son comunes y un default se confirmaría sin mirar); *Vuelve al stock* deshabilitada en
+serie/lote, y Confirmar deshabilitado mientras falte una respuesta.
 
 ## Cuál fila es la nota de crédito la dice el catálogo, no el código (2026-09-03)
 
@@ -562,7 +642,8 @@ Dónde vive: `VentasReembolsoHandler.cuantizarMontoReembolso`
   el body nunca lleva `generarNotaCredito` (el backend lo rechazaría con 400). Respuesta
   con `warning` → toast warning.
   La lista (`DevolucionInventarioLista`) es compartida con la NC y desde el 2026-10-02 tiene
-  un solo modo —acredita cualquier ítem vendido, con switch de reponer por fila—: el modo
+  un solo modo —acredita cualquier ítem vendido; desde el 2026-10-04 con la pregunta "¿vuelve
+  al stock o se perdió?" por fila en vez del switch de reponer—: el modo
   "solo stock" (líneas que no reponen deshabilitadas) y la normalización al destildar la casilla
   existían solo para el camino sin documento, que se eliminó.
 - `ventas/VentaDetalleDrawer.vue`: badges "Nota de Crédito" / "Devolución interna" (según
@@ -577,7 +658,7 @@ Dónde vive: `VentasReembolsoHandler.cuantizarMontoReembolso`
   la tabla de líneas con sus reglas congeladas y la fila "Impuestos" de los
   totales existían desde antes.
 - `ventas/NotaCreditoModal.vue` (2026-09-04; umbral exacto 2026-09-14; **"¿Por dónde vuelve la
-  plata?" 2026-10-02**): la casilla "devolver dinero" se reemplazó por un selector con una opción
+  plata?" 2026-10-02**; **"¿vuelve al stock o se perdió?" 2026-10-04**, arriba): la casilla "devolver dinero" se reemplazó por un selector con una opción
   por pago (*"Efectivo · $60.000"*, *"Tarjeta de débito · $40.000"*) y "No vuelve plata" solo
   si el backend la mandó (hay saldo), todo de `opcionesDevolucion`. Con varias opciones no viene
   ninguna elegida (un default movería plata de la caja sin decisión); con una sola, sí. Debajo,
@@ -585,9 +666,9 @@ Dónde vive: `VentasReembolsoHandler.cuantizarMontoReembolso`
   sistema, de la máquina, hecha por fuera o devolución interna). La opción en efectivo no se
   puede elegir sin caja física abierta. El body lleva `devolucion`, nunca el documento. Además muestra el
   **disponible por porción fiscal** debajo del total —solo si hay más de una: en
-  una venta toda afecta repetir el total es ruido—, un **switch de reponer por
-  fila** (deshabilitado con su nota en lo que no puede volver al stock) y **pide
-  el motivo** cuando lo marcado vale más que el monto.
+  una venta toda afecta repetir el total es ruido—, la pregunta **"¿vuelve al
+  stock o se perdió?"** por fila (ver arriba) y **pide el motivo** cuando lo
+  marcado vale más que el monto.
   ⚠️ **Pide, nunca bloquea**: el único guard sigue siendo el backend. Pero desde
   el 2026-09-14 esa cuenta es un **gemelo exacto** de la del backend, no una
   aproximación: `useDevolucionInventario.valorDevueltoCuantizado` valúa cada
@@ -684,7 +765,8 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
   mixta real — dos líneas y totales derivados, el corte de inventario en la línea
   de ajuste, la proporción tomada del remanente con una NC previa, el
   find-or-create del ítem de sistema y, desde el 2026-09-04: **la receta
-  acreditada por línea sin mover inventario**, `reponerStock: false`, el
+  acreditada por línea** (desde el 2026-10-04, recuperada repone su ingrediente),
+  el producto que se pierde (entrada + merma), el
   **escalado** con su motivo obligatorio, la línea que queda en cero y no se
   escribe, el tope por porción sobre las líneas ya escaladas, y el disponible por
   porción —también sobre un documento que no admite nota—.
@@ -709,7 +791,15 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
   API, una devolución que repone stock de un producto propio: la nota sale, el REFUND queda
   ligado y el movimiento de stock queda con `usuario_id` NULL (por la ruta del admin lleva el
   usuario del token).
-- `ReembolsoModal.nuxt.spec.ts`: sin casilla, y el body no lleva `generarNotaCredito`.
+- `ReembolsoModal.nuxt.spec.ts`: sin casilla, el body no lleva `generarNotaCredito`, y una línea
+  con stock no deja confirmar sin "¿vuelve al stock o se perdió?".
+- `nota-credito-recupera-o-pierde.e2e-spec.ts` (2026-10-04): la venta liga cada salida a su
+  línea; `devolucionStock` del detalle; los 400 (sin respuesta, respuesta en un servicio,
+  `reponerStock`); recuperar y perder una receta (stock, CPP, la merma en `GET /mermas`); una serie
+  de notas parciales que cierra exacto; el combo cuya Bebida no se descuenta de la suelta; la causa
+  "Devolución" (fija, rechazada en `POST /mermas`, sembrada al crear el tenant y find-or-create
+  concurrente). En `pasarela-reembolso.e2e-spec.ts`, el REFUND sin respuesta rebota antes del
+  proveedor y el que se pierde deja la merma.
 
 ## Referencias
 

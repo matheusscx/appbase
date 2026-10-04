@@ -59,6 +59,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
   let itemAfectoId: string;
   let itemExentoId: string;
   let itemRecetaId: string;
+  let itemIngredienteId: string;
 
   /** Una venta mixta nueva, pagada. Cada caso arma la suya: compartirla haría
    *  que el remanente de un test dependiera del que corrió antes. */
@@ -258,6 +259,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
         costo: '500',
       });
     expect(resIngrediente.status).toBe(201);
+    itemIngredienteId = (resIngrediente.body as { id: string }).id;
 
     const resReceta = await request(app.getHttpServer())
       .post('/api/items')
@@ -428,11 +430,19 @@ describe('Nota de crédito compuesta (e2e)', () => {
   });
 
   describe('qué se acredita y qué vuelve al stock', () => {
-    it('una receta se acredita por línea, sin mover inventario', async () => {
+    // Hasta el 2026-10-04 la receta se acreditaba sin mover inventario: no
+    // tiene fila en `item_producto` y sus ingredientes no volvían por ningún
+    // camino. Hoy la nota pregunta si se recupera o se pierde (owner,
+    // 2026-08-23) y el detalle de los dos destinos vive en
+    // `nota-credito-recupera-o-pierde.e2e-spec.ts`; acá queda lo de la
+    // composición.
+    it('una receta se acredita por línea, con su nombre, y recuperada repone su ingrediente', async () => {
       const ventaId = await crearVentaConReceta();
       const { id } = await emitirNC(ventaId, {
         monto: TOTAL_RECETA,
-        devoluciones: [{ itemId: itemRecetaId, cantidad: '1' }],
+        devoluciones: [
+          { itemId: itemRecetaId, cantidad: '1', stock: 'recupera' },
+        ],
       });
 
       const nc = await leerNC(id);
@@ -442,24 +452,23 @@ describe('Nota de crédito compuesta (e2e)', () => {
       expect(linea).toBeDefined();
       expect(new Decimal(linea!.totalLinea).toString()).toBe(TOTAL_RECETA);
 
-      const movs: unknown[] = await ds.query(
-        `SELECT 1 FROM movimientos_inventario
+      const movs: { item_id: string; motivo: string }[] = await ds.query(
+        `SELECT item_id, motivo FROM movimientos_inventario
           WHERE venta_id = $1 AND eliminado_el IS NULL`,
         [id],
       );
-      expect(movs).toHaveLength(0);
+      expect(movs).toEqual([
+        { item_id: itemIngredienteId, motivo: 'devolucion' },
+      ]);
     });
 
-    it('lo acreditado sin reponer igual gasta las unidades del ítem', async () => {
+    it('lo acreditado gasta las unidades del ítem: la misma receta no vuelve dos veces', async () => {
       const ventaId = await crearVentaConReceta();
-      // La receta no mueve stock, así que hasta el 2026-09-04 el contador de
-      // "ya devuelto" —que solo miraba `movimientos_inventario`— se quedaba en
-      // cero y la MISMA unidad se podía acreditar dos veces. El tope por
-      // porción fiscal no lo tapa: mira plata por porción, y las 7 unidades
-      // afectas de esta venta le donan capacidad de sobra.
       await emitirNC(ventaId, {
         monto: TOTAL_RECETA,
-        devoluciones: [{ itemId: itemRecetaId, cantidad: '1' }],
+        devoluciones: [
+          { itemId: itemRecetaId, cantidad: '1', stock: 'pierde' },
+        ],
       });
 
       const res = await request(app.getHttpServer())
@@ -469,7 +478,9 @@ describe('Nota de crédito compuesta (e2e)', () => {
         .send({
           ...(await devolucionDe(ventaId)),
           monto: TOTAL_RECETA,
-          devoluciones: [{ itemId: itemRecetaId, cantidad: '1' }],
+          devoluciones: [
+            { itemId: itemRecetaId, cantidad: '1', stock: 'recupera' },
+          ],
         });
       expect(res.status).toBe(400);
       expect((res.body as { message: string }).message).toContain(
@@ -477,30 +488,35 @@ describe('Nota de crédito compuesta (e2e)', () => {
       );
     });
 
-    it('un producto con reponerStock false se acredita y NO vuelve al stock', async () => {
+    it('un producto que se pierde se acredita y no queda en el stock: vuelve y sale como merma', async () => {
       const ventaId = await crearVentaMixta();
       const { id } = await emitirNC(ventaId, {
         monto: '2000',
         devoluciones: [
-          { itemId: itemAfectoId, cantidad: '1', reponerStock: false },
+          { itemId: itemAfectoId, cantidad: '1', stock: 'pierde' },
         ],
       });
 
       const nc = await leerNC(id);
       expect(nc.detalles.some((l) => l.itemId === itemAfectoId)).toBe(true);
-      const movs: unknown[] = await ds.query(
-        `SELECT 1 FROM movimientos_inventario
-          WHERE venta_id = $1 AND eliminado_el IS NULL`,
+      const movs: { tipo: string; motivo: string }[] = await ds.query(
+        `SELECT tipo, motivo FROM movimientos_inventario
+          WHERE venta_id = $1 AND eliminado_el IS NULL ORDER BY secuencia`,
         [id],
       );
-      expect(movs).toHaveLength(0);
+      expect(movs).toEqual([
+        { tipo: 'entrada', motivo: 'devolucion' },
+        { tipo: 'salida', motivo: 'merma' },
+      ]);
     });
 
-    it('sin el flag, un producto por cantidad sigue reponiendo como antes', async () => {
+    it('un producto que se recupera vuelve al stock', async () => {
       const ventaId = await crearVentaMixta();
       const { id } = await emitirNC(ventaId, {
         monto: '2000',
-        devoluciones: [{ itemId: itemAfectoId, cantidad: '1' }],
+        devoluciones: [
+          { itemId: itemAfectoId, cantidad: '1', stock: 'recupera' },
+        ],
       });
       const movs: { item_id: string }[] = await ds.query(
         `SELECT item_id FROM movimientos_inventario
@@ -511,7 +527,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
       expect(movs[0].item_id).toBe(itemAfectoId);
     });
 
-    it('pedir que un servicio reponga se rechaza', async () => {
+    it('un servicio no se recupera ni se pierde: con respuesta es 400', async () => {
       const ventaId = await crearVentaMixta();
       const res = await request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
@@ -521,12 +537,12 @@ describe('Nota de crédito compuesta (e2e)', () => {
           ...(await devolucionDe(ventaId)),
           monto: '3000',
           devoluciones: [
-            { itemId: itemExentoId, cantidad: '1', reponerStock: true },
+            { itemId: itemExentoId, cantidad: '1', stock: 'recupera' },
           ],
         });
       expect(res.status).toBe(400);
       expect((res.body as { message: string }).message).toContain(
-        'no maneja stock',
+        'no sacó nada del inventario',
       );
     });
   });
@@ -585,7 +601,9 @@ describe('Nota de crédito compuesta (e2e)', () => {
       // 2026-09-04 esto se rechazaba con 400.
       const { id } = await emitirNC(ventaId, {
         monto: '500',
-        devoluciones: [{ itemId: itemAfectoId, cantidad: '2' }],
+        devoluciones: [
+          { itemId: itemAfectoId, cantidad: '2', stock: 'recupera' },
+        ],
         comentario: 'Volvieron abiertas',
       });
 
@@ -626,7 +644,9 @@ describe('Nota de crédito compuesta (e2e)', () => {
         .send({
           ...(await devolucionDe(ventaId)),
           monto: '500',
-          devoluciones: [{ itemId: itemAfectoId, cantidad: '2' }],
+          devoluciones: [
+            { itemId: itemAfectoId, cantidad: '2', stock: 'recupera' },
+          ],
         });
       expect(res.status).toBe(400);
       expect((res.body as { message: string }).message).toContain('motivo');
@@ -641,7 +661,11 @@ describe('Nota de crédito compuesta (e2e)', () => {
       const { id } = await emitirNC(ventaId, {
         monto: '501',
         devoluciones: [
-          { itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA },
+          {
+            itemId: itemAfectoId,
+            cantidad: CANTIDAD_AFECTA,
+            stock: 'recupera',
+          },
           { itemId: itemExentoId, cantidad: '1' },
         ],
         comentario: 'Se anula el pedido completo',
@@ -676,7 +700,11 @@ describe('Nota de crédito compuesta (e2e)', () => {
       const { id } = await emitirNC(ventaId, {
         monto: '1',
         devoluciones: [
-          { itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA },
+          {
+            itemId: itemAfectoId,
+            cantidad: CANTIDAD_AFECTA,
+            stock: 'recupera',
+          },
           { itemId: itemExentoId, cantidad: '1' },
         ],
         comentario: 'Cortesía total',
@@ -697,7 +725,9 @@ describe('Nota de crédito compuesta (e2e)', () => {
       // los 810 restantes salen como ajuste. Es la conducta de antes.
       const { id } = await emitirNC(ventaId, {
         monto: '2000',
-        devoluciones: [{ itemId: itemAfectoId, cantidad: '1' }],
+        devoluciones: [
+          { itemId: itemAfectoId, cantidad: '1', stock: 'recupera' },
+        ],
       });
       const nc = await leerNC(id);
       const devuelta = nc.detalles.find((l) => l.itemId === itemAfectoId)!;
@@ -715,7 +745,13 @@ describe('Nota de crédito compuesta (e2e)', () => {
       // perfectamente válido.
       const { id } = await emitirNC(ventaId, {
         monto: '500',
-        devoluciones: [{ itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA }],
+        devoluciones: [
+          {
+            itemId: itemAfectoId,
+            cantidad: CANTIDAD_AFECTA,
+            stock: 'recupera',
+          },
+        ],
         comentario: 'Cortesía',
       });
       const nc = await leerNC(id);
@@ -727,7 +763,9 @@ describe('Nota de crédito compuesta (e2e)', () => {
       // 1 unidad devuelta (1.190) + 810 de ajuste = 2.000.
       const { id } = await emitirNC(ventaId, {
         monto: '2000',
-        devoluciones: [{ itemId: itemAfectoId, cantidad: '1' }],
+        devoluciones: [
+          { itemId: itemAfectoId, cantidad: '1', stock: 'recupera' },
+        ],
       });
 
       // La línea de ajuste cuelga de un `servicio`, y `registrarMovimiento`
@@ -764,7 +802,9 @@ describe('Nota de crédito compuesta (e2e)', () => {
       // remanente queda 2.380 / 3.000 — la proporción se da vuelta.
       await emitirNC(ventaId, {
         monto: '5950',
-        devoluciones: [{ itemId: itemAfectoId, cantidad: '5' }],
+        devoluciones: [
+          { itemId: itemAfectoId, cantidad: '5', stock: 'recupera' },
+        ],
       });
 
       const segunda = await emitirNC(ventaId, { monto: '1000' });
@@ -796,7 +836,13 @@ describe('Nota de crédito compuesta (e2e)', () => {
       // crédito con importe e impuesto en negativo.
       const primera = await emitirNC(ventaId, {
         monto: '9000',
-        devoluciones: [{ itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA }],
+        devoluciones: [
+          {
+            itemId: itemAfectoId,
+            cantidad: CANTIDAD_AFECTA,
+            stock: 'recupera',
+          },
+        ],
       });
       const nc1 = await leerNC(primera.id);
       const ajuste1 = nc1.detalles.filter((l) => l.itemId !== itemAfectoId);
@@ -835,7 +881,13 @@ describe('Nota de crédito compuesta (e2e)', () => {
         .send({
           ...(await devolucionDe(ventaId)),
           monto: '8330',
-          devoluciones: [{ itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA }],
+          devoluciones: [
+            {
+              itemId: itemAfectoId,
+              cantidad: CANTIDAD_AFECTA,
+              stock: 'recupera',
+            },
+          ],
         });
       expect(res.status).toBe(400);
       expect((res.body as { message: string }).message).toContain('7595');
@@ -843,7 +895,9 @@ describe('Nota de crédito compuesta (e2e)', () => {
       // Por lo que SÍ queda, pasa: 6 unidades valen 7.140.
       const segunda = await emitirNC(ventaId, {
         monto: '7140',
-        devoluciones: [{ itemId: itemAfectoId, cantidad: '6' }],
+        devoluciones: [
+          { itemId: itemAfectoId, cantidad: '6', stock: 'recupera' },
+        ],
       });
       const nc2 = await leerNC(segunda.id);
       const ivaAcreditado = new Decimal(nc1.totalImpuestos).plus(
@@ -917,8 +971,8 @@ describe('Nota de crédito compuesta (e2e)', () => {
           ...(await devolucionDe(ventaId)),
           monto: '4760',
           devoluciones: [
-            { itemId: itemAfectoId, cantidad: '2' },
-            { itemId: itemAfectoId, cantidad: '2' },
+            { itemId: itemAfectoId, cantidad: '2', stock: 'recupera' },
+            { itemId: itemAfectoId, cantidad: '2', stock: 'recupera' },
           ],
         });
       expect(res.status).toBe(400);

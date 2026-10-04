@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-10-03 (producto con serie: la línea trae las unidades que salen)
+**Last Updated**: 2026-10-04 (la nota de crédito pregunta si lo devuelto se recupera o se pierde)
 
 ---
 
@@ -576,7 +576,7 @@ es "Sin documento", más un badge "Duplicado". La nota de crédito lleva el badg
 
 ### GET /api/ventas/:id
 
-Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recargos`, `impuestos`, `customer`, `pagos`. Cada detalle de un producto con serie trae `unidades: [{ serie, condicion }]` (`[]` en el resto): qué unidad se llevó el cliente, para una garantía o un reclamo. Salen del kardex, en **una** consulta por venta, agrupadas **por ítem** (el kardex no liga el movimiento a la línea: con dos líneas del mismo producto con serie, que solo pasa en el salón con el precio cambiado entre pedidos, cada una muestra todas las unidades de ese producto). La boleta impresa no cambia. Incluye `montoPagado`, `saldo` (la expresión única) y `puedeAbonar` (estado que admite abono **y** saldo > 0): la pantalla no resta ni replica el estado.
+Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recargos`, `impuestos`, `customer`, `pagos`. Cada detalle de un producto con serie trae `unidades: [{ serie, condicion }]` (`[]` en el resto): qué unidad se llevó el cliente, para una garantía o un reclamo. Salen del kardex, en **una** consulta por venta, agrupadas **por ítem** (esta lectura no usa la línea de cada salida —`venta_detalle_id`, que el kardex guarda desde el 2026-10-04—: con dos líneas del mismo producto con serie, que solo pasa en el salón con el precio cambiado entre pedidos, cada una muestra todas las unidades de ese producto). Cada detalle trae además `devolucionStock` (`sin_stock` | `recuperable` | `solo_perdida`): qué preguntarle a la línea en una nota de crédito, según lo que salió por ella ([`reembolsos-nota-credito.md`](reembolsos-nota-credito.md#se-recupera-o-se-pierde-2026-10-04)). La boleta impresa no cambia. Incluye `montoPagado`, `saldo` (la expresión única) y `puedeAbonar` (estado que admite abono **y** saldo > 0): la pantalla no resta ni replica el estado.
 
 **Los documentos y lo que el backend decide sobre ellos** (spec `emision-por-venta` § 3.4 y § 3.5,
 [ADR-028](../adr/028-emision-registrada-por-venta.md)). La pantalla solo los muestra:
@@ -849,7 +849,7 @@ detalle necesita para mostrar "2,5 kg" en vez de "2,5". Ver también el congelad
 3. Convertir precios a moneda oficial (`precioOrigen × tasa_cambio`)
 4. Llamar `calculoPreciosService.calcular` → importes autoritativos
 5. Calcular excedente; validar `permite_vuelto` si hay excedente; determinar estado
-6. `db.transaccion`: **reclamar la `Idempotency-Key`** (primera sentencia; si ya estaba, reproducir y cortar acá) → guardar cabecera → detalles → trazas de reglas → customer → inventario (`salida/venta` por producto) → pagos → movimientos de caja (efectivo) → **documentos de la venta** (`VentaDocumentosService.documentarVenta`) → guardar la respuesta junto a la clave
+6. `db.transaccion`: **reclamar la `Idempotency-Key`** (primera sentencia; si ya estaba, reproducir y cortar acá) → guardar cabecera → detalles → trazas de reglas → customer → inventario (`salida/venta` por producto, ingrediente, componente u opción, cada una con su línea: `venta_detalle_id`) → pagos → movimientos de caja (efectivo) → **documentos de la venta** (`VentaDocumentosService.documentarVenta`) → guardar la respuesta junto a la clave
 
 ### Dependencias reutilizadas
 

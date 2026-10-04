@@ -54,8 +54,9 @@ const {
   cargarDesdeDetalles,
   limpiar,
   setCantidad,
-  setReponer,
+  setStock,
   filasValidas,
+  faltaDestino,
   devoluciones,
 } = useDevolucionInventario()
 
@@ -86,7 +87,9 @@ const montoValido = computed(() => {
   return m.gt(0) && m.lte(new Decimal(props.disponible))
 })
 
-const puedeConfirmar = computed(() => montoValido.value && filasValidas.value)
+const puedeConfirmar = computed(() =>
+  montoValido.value && filasValidas.value && !faltaDestino.value,
+)
 
 async function confirmar() {
   submitting.value = true
@@ -175,9 +178,10 @@ async function confirmar() {
           <DevolucionInventarioLista
             :filas="filas"
             :valida="filasValidas"
+            :falta-destino="faltaDestino"
             :cargando="cargandoVenta"
             @set-cantidad="setCantidad"
-            @set-reponer="setReponer"
+            @set-stock="setStock"
           />
         </template>
       </div>

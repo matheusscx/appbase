@@ -1,8 +1,12 @@
 import { Type } from 'class-transformer';
 import {
+  DESTINOS_STOCK_DEVOLUCION,
+  type DestinoStockDevolucion,
+} from '../../pasarela/services/reembolso-callback.registry';
+import {
   Equals,
   IsArray,
-  IsBoolean,
+  IsIn,
   IsNumberString,
   IsObject,
   IsOptional,
@@ -28,14 +32,18 @@ export class DevolucionNotaCreditoDto {
   cantidad: string;
 
   /**
-   * ¿Vuelve al stock? Ausente = repone **si el ítem puede**, que es la conducta
-   * de antes de este campo. Para lo que no puede reponer —servicios, recetas,
-   * combos, y los modos `serie`/`lote`— pedirlo explícitamente se rechaza, para
-   * no confirmar en silencio algo que no pasó.
+   * Lo que pasa con lo devuelto si hay stock de por medio (owner, 2026-08-23):
+   * `recupera` vuelve al stock; `pierde` vuelve y sale como merma con la causa
+   * fija "Devolución". **Obligatorio** en una línea que sacó inventario al
+   * venderse —el producto suelto, la receta (sus ingredientes), el combo (sus
+   * componentes)— y **prohibido** en la que no (un servicio): los dos son 400
+   * con el nombre del ítem. Qué preguntar lo dice el detalle de la venta, por
+   * línea (`devolucionStock`). `null` es 400 siempre (del DTO); ausente es 400
+   * solo en la línea con stock. Contrato y porqué: `docs/features/reembolsos-nota-credito.md`.
    */
-  @IsOptional()
-  @IsBoolean()
-  reponerStock?: boolean;
+  @ValidateIf((_o, v) => v !== undefined)
+  @IsIn(DESTINOS_STOCK_DEVOLUCION)
+  stock?: DestinoStockDevolucion;
 }
 
 /** Exactamente uno de `pagoId` / `sinPlata`: ni los dos, ni ninguno. */

@@ -26,6 +26,7 @@ import {
 } from '../calculo-precios/calculo-precios.engine';
 import {
   CFG_SIN_CONGELAR,
+  cantidadADevolver,
   descomponer,
   escalarDevoluciones,
   repartirAjuste,
@@ -86,6 +87,8 @@ import {
   type SolicitudIdempotenteInput,
 } from '../idempotencia/idempotencia.service';
 import { huellaDe } from '../idempotencia/huella';
+import { MotivosBajaService } from '../motivos-baja/motivos-baja.service';
+import type { DestinoStockDevolucion } from '../pasarela/services/reembolso-callback.registry';
 import { normalizarRut, rutValido } from '../../common/utils/rut.util';
 
 /**
@@ -154,8 +157,40 @@ export function faltaIdentidadDelPagador(args: {
 export interface DevolucionReembolso {
   itemId: string;
   cantidad: string;
-  /** Ausente = repone si el ítem puede. Ver `DevolucionNotaCreditoDto`. */
-  reponerStock?: boolean;
+  /**
+   * Lo que pasa con lo devuelto, si hay stock de por medio (owner, 2026-08-23):
+   * `'recupera'` vuelve al stock; `'pierde'` vuelve y sale como merma con la
+   * causa fija "Devolución". Obligatorio en la línea con stock y prohibido en la
+   * que no; ver `DevolucionNotaCreditoDto` y `validarDevolucionesReembolso`.
+   */
+  stock?: DestinoStockDevolucion;
+}
+
+/**
+ * Qué se le pregunta a una línea de la nota, según lo que salió por ella
+ * (`salidasPorItemVendido`): nada (`sin_stock`, un servicio, o una receta cuyos
+ * ingredientes no salieron), las dos respuestas (`recuperable`), o solo "se
+ * pierde" (`solo_perdida`: algo de lo que salió es de serie o lote, que no
+ * vuelve al stock solo).
+ */
+export type DevolucionStock = 'sin_stock' | 'recuperable' | 'solo_perdida';
+
+/** Una salida de la venta, agrupada por el ítem vendido que la produjo. */
+interface SalidaDeLaVenta {
+  /** El ítem que se movió: el producto, o el ingrediente/componente/opción. */
+  itemId: string;
+  cantidad: string;
+  modoInventario: string;
+  /** El costo con que salió (`costosDeSalidaPorItem`): con ese vuelve. */
+  costoUnitario: string | null;
+}
+
+/** La respuesta a la pregunta, por línea, como la valida el servidor. */
+function devolucionStockDe(salidas: SalidaDeLaVenta[]): DevolucionStock {
+  if (!salidas.length) return 'sin_stock';
+  return salidas.every((x) => x.modoInventario === 'cantidad')
+    ? 'recuperable'
+    : 'solo_perdida';
 }
 
 /**
@@ -429,6 +464,7 @@ export class VentasService {
     private readonly garzonesService: GarzonesService,
     private readonly ubicacionesService: UbicacionesService,
     private readonly idempotencia: IdempotenciaService,
+    private readonly motivosBajaService: MotivosBajaService,
   ) {}
 
   /**
@@ -1255,6 +1291,8 @@ export class VentasService {
             cantidad: cantidadCanonica,
             usuarioId,
             ventaId: venta.id,
+            // La línea: la nota de crédito devuelve lo que salió por ella.
+            ventaDetalleId: detalles[i].id,
             unidadIds: linea.unidadIds,
             // La cuenta del salón que se está cobrando: las unidades que ella
             // tiene apartadas pueden salir por acá, las de otra no.
@@ -1295,6 +1333,7 @@ export class VentasService {
             tenantId,
             usuarioId,
             ventaId: venta.id,
+            ventaDetalleId: detalles[i].id,
             recetaItemId: item.id,
             recetaNombre: item.nombre,
             cantidadVendida: cantidadCanonica,
@@ -1310,6 +1349,7 @@ export class VentasService {
             tenantId,
             usuarioId,
             ventaId: venta.id,
+            ventaDetalleId: detalles[i].id,
             comboItemId: item.id,
             comboNombre: item.nombre,
             cantidadVendida: cantidadCanonica,
@@ -2262,6 +2302,35 @@ export class VentasService {
     );
   }
 
+  /**
+   * Las devoluciones de un REFUND de la pasarela, validadas como en la nota
+   * manual (`validarDevolucionesReembolso` con `'rechazar'`), ANTES de llamar al
+   * proveedor. Lo llama `CobrosService` en tx0, después de
+   * `exigirTopeDelReembolsoPasarela`, que ya tomó el lock de la venta. Una venta
+   * que ya no existe no frena el reembolso (mismo criterio que el tope).
+   */
+  async validarDevolucionesDelReembolso(
+    manager: EntityManager,
+    params: {
+      tenantId: string;
+      ventaId: string;
+      devoluciones: DevolucionReembolso[];
+    },
+  ): Promise<void> {
+    const viva: unknown[] = await manager.query(
+      `SELECT 1 FROM ventas
+        WHERE venta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+      [params.ventaId, params.tenantId],
+    );
+    if (!viva.length) return;
+    await this.validarDevolucionesReembolso(
+      manager,
+      params.ventaId,
+      params.devoluciones,
+      'rechazar',
+    );
+  }
+
   private async crearNotaCreditoEnTransaccion(
     params: CrearNotaCreditoParams,
   ): Promise<NotaCreditoCreada> {
@@ -2448,7 +2517,7 @@ export class VentasService {
         params.devoluciones ?? [],
         // `validarVentaElegible` es hoy el único discriminante entre el camino
         // manual y el del webhook, y son exactamente las dos políticas.
-        params.validarVentaElegible === true ? 'rechazar-imposible' : 'ignorar',
+        params.validarVentaElegible === true ? 'rechazar' : 'ignorar',
       );
 
       // El cuantizador de la nota. **Ignora `nivelRedondeo` a propósito**: sus
@@ -2884,6 +2953,13 @@ export class VentasService {
           // sola, sin ir a buscar la venta que corrige.
           configCalculo: cfgOriginal,
           receptorEsEmisor,
+          // Lo que devolvió, tal como se aceptó —también lo que quedó fuera del
+          // documento—: el hecho del que cuenta `unidadesComprometidasPorItem`.
+          devoluciones: devueltas.map((l) => ({
+            itemId: l.itemId,
+            cantidad: l.cantidad,
+            stock: l.stock,
+          })),
         }),
       );
       if (receptores.length)
@@ -2962,50 +3038,80 @@ export class VentasService {
         q,
       );
 
-      // 9. Inventario: **solo las líneas de devolución**. La de ajuste cuelga
-      // de un `servicio`, y `registrarMovimiento` rechaza con 400 todo lo que
-      // no sea producto (`inventario.service.ts`): sin este corte, agregar la
-      // línea de ajuste haría fallar el reembolso ENTERO.
+      // 9. Inventario: lo que vuelve por las líneas devueltas con stock de por
+      // medio, según la respuesta de cada una (owner, 2026-08-23). La línea de
+      // ajuste cuelga de un `servicio` y nunca mueve stock.
       //
-      // Una sola lectura de costos para todas: los costos congelados son de la
-      // venta ORIGINAL, no de la NC que se está creando. La NC por monto libre
-      // —sin devoluciones, el caso más común— no paga la query.
+      // - **Se recupera**: entrada `devolucion` de cada ítem que salió, al costo
+      //   con que salió (el CPP se recalcula incluyéndola, como en `cancelar`).
+      // - **Se pierde**: la misma entrada y enseguida la salida `merma` con la
+      //   causa fija "Devolución", las DOS al costo con que salió: lo que se
+      //   perdió es esa unidad, no una al costo de hoy. La entrada no promedia
+      //   (`sinPromediar`): con el CPP de hoy congelado en la entrada y el de la
+      //   salida en la merma, varianza vería plata donde hay cero unidades; y
+      //   promediada arrastraría el CPP del stock que queda hacia un costo que no
+      //   volvió. Stock neto cero, CPP intacto, y la merma la ven el reporte, el
+      //   Inicio y el costo de la baja. (Decidido por la Sesión de esfuerzo
+      //   máximo, 2026-10-04, derivado del owner: lo que vuelve reingresa al
+      //   costo con que salió, 2026-08-15.)
       //
-      // Y **solo las que reponen**: desde el 2026-09-04 una línea puede
-      // acreditarse sin volver al stock (producto que vuelve roto, receta que
-      // no se puede rearmar), y `registrarMovimiento` rechazaría con 400 todo
-      // lo que no sea producto.
+      // El stock vuelve aunque la línea haya quedado fuera del DOCUMENTO
+      // (camino del webhook, porción agotada): recorre `devoluciones`, no
+      // `devolucionesDelDocumento`.
       //
-      // En orden por `itemId`, con el MISMO comparador que `crear()` y
-      // `cancelar()` (`localeCompare`, no el `ORDER BY` de Postgres): llegaban
-      // en el orden del array del cliente, y dos devoluciones cruzadas sobre
-      // los mismos ítems podían bloquearse en cruz.
-      const aReponer = devoluciones
-        .filter((l) => l.reponeStock)
+      // En orden por el ítem que se MUEVE, con el MISMO comparador que
+      // `crear()` y `cancelar()` (`localeCompare`, no el `ORDER BY` de
+      // Postgres): dos devoluciones cruzadas sobre los mismos ítems no se
+      // bloquean en cruz. Con dos líneas que mueven el mismo ingrediente, las
+      // dos se aplican seguidas: el lock de su `item_producto` ya está tomado.
+      const aMover = devoluciones
+        .flatMap((l) =>
+          l.stock === null
+            ? []
+            : l.movimientos.map((m) => ({
+                ...m,
+                stock: l.stock!,
+                ventaDetalleId: l.ventaDetalleId,
+              })),
+        )
         .sort((a, b) => a.itemId.localeCompare(b.itemId));
-      const costosOriginales = aReponer.length
-        ? await this.costosDeSalidaPorItem(manager, params.ventaOriginalId)
-        : new Map<string, string | null>();
+      // La causa se pide solo si algo se pierde, y con find-or-create: un tenant
+      // anterior a la causa fija la recibe acá en vez de perder el evento.
+      const motivoDevolucionId = aMover.some((m) => m.stock === 'pierde')
+        ? await this.motivosBajaService.asegurarDevolucion(params.tenantId)
+        : null;
       // Resuelto UNA vez antes del loop: `localDe` por línea sería una
       // consulta por línea devuelta, N+1.
-      const ubicacionLocalId = aReponer.length
+      const ubicacionLocalId = aMover.length
         ? await this.ubicacionesService.localDe(params.tenantId)
         : null;
-      for (const linea of aReponer) {
-        await this.inventarioService.registrarMovimiento(manager, {
+      for (const m of aMover) {
+        const comun = {
           tenantId: params.tenantId,
-          itemId: linea.itemId,
+          itemId: m.itemId,
           ubicacionId: ubicacionLocalId!,
+          cantidad: m.cantidad,
+          usuarioId: params.usuarioId,
+          // La vuelta queda ligada a la nota y a la línea vendida que revierte.
+          ventaId: nc.id,
+          ventaDetalleId: m.ventaDetalleId,
+          comentario: params.comentario,
+        };
+        await this.inventarioService.registrarMovimiento(manager, {
+          ...comun,
           tipo: 'entrada',
           motivo: 'devolucion',
-          cantidad: linea.cantidad,
-          // El costo sale de la venta ORIGINAL, no de esta NC: el movimiento
-          // queda ligado a `nc.id`, pero la unidad que vuelve salió allá.
-          costoUnitario: costosOriginales.get(linea.itemId) ?? null,
-          usuarioId: params.usuarioId,
-          ventaId: nc.id,
-          comentario: params.comentario,
+          costoUnitario: m.costoUnitario,
+          sinPromediar: m.stock === 'pierde',
         });
+        if (m.stock === 'pierde')
+          await this.inventarioService.registrarMovimiento(manager, {
+            ...comun,
+            tipo: 'salida',
+            motivo: 'merma',
+            motivoBajaId: motivoDevolucionId,
+            costoUnitario: m.costoUnitario,
+          });
       }
 
       let movimientoCajaId: string | null = null;
@@ -3244,11 +3350,13 @@ export class VentasService {
             .map((d) => ({
               itemId: d.itemId,
               cantidad: d.cantidad,
-              reponerStock: d.reponerStock ?? null,
+              // Recuperar o perder lo mismo son dos notas distintas: una
+              // repone y la otra deja una merma.
+              stock: d.stock ?? null,
             }))
             .sort((a, b) =>
-              `${a.itemId}|${a.cantidad}|${String(a.reponerStock)}`.localeCompare(
-                `${b.itemId}|${b.cantidad}|${String(b.reponerStock)}`,
+              `${a.itemId}|${a.cantidad}|${String(a.stock)}`.localeCompare(
+                `${b.itemId}|${b.cantidad}|${String(b.stock)}`,
               ),
             ),
           via: nota.via,
@@ -3407,22 +3515,23 @@ export class VentasService {
    * Cuántas unidades de cada ítem de una venta ya están comprometidas por
    * devoluciones previas — el tope de `cantidad` de la devolución siguiente.
    *
-   * Hasta el 2026-09-04 alcanzaba con contar `movimientos_inventario`: toda
-   * línea aceptada movía stock, así que el movimiento ERA el rastro de la
-   * unidad. Desde que una línea se puede acreditar **sin** reponer, ese
-   * contador se quedó ciego justo para las líneas nuevas: dos notas seguidas
-   * podían acreditar la misma receta y el documento afirmaba que volvieron 2
-   * unidades de una venta de 1. El tope por porción fiscal no lo tapa —mira
-   * PLATA por porción, no cantidad por ítem— así que basta con que otra línea
-   * afecta de la misma venta done capacidad.
+   * **Una corrección nueva (2026-10-04) lo dice ella misma** (`ventas.devoluciones`:
+   * lo que devolvió, tal como se aceptó), y se suma de ahí sin mirar nada más.
+   * Antes el contador reconstruía "qué devolvió cada nota" desde dos
+   * proyecciones que pierden datos —las líneas del documento y los
+   * movimientos—, y cada cambio que dejaba una devolución sin una de esas
+   * huellas lo dejaba ciego: el 2026-09-04 la receta acreditada sin reponer, y
+   * con la pregunta "¿se recupera o se pierde?" la receta escalada a $0 fuera del
+   * documento, cuyas vueltas son de ingredientes (la misma hamburguesa volvía dos
+   * veces; lo levantó la revisión independiente). Decidido por la Sesión de
+   * esfuerzo máximo (2026-10-04); técnico.
    *
-   * Por eso cuenta las dos cosas y se queda con la mayor **por documento**:
-   * - las líneas de las notas de crédito hijas (lo acreditado), y
-   * - los movimientos de devolución de esta venta o de sus notas (lo repuesto).
-   *
-   * `GREATEST` y no la suma porque la línea que repone deja las DOS huellas y
-   * sumarlas contaría doble. El caso donde una sola huella existe es real: la
-   * línea que se acredita sin reponer deja solo la del documento.
+   * **Una corrección anterior** (`devoluciones` en `NULL`) se sigue contando como
+   * entonces, con el mayor entre las dos huellas **por documento**: sus líneas
+   * (lo acreditado) y sus movimientos de devolución (lo repuesto) —`GREATEST` y
+   * no la suma, porque la línea que repone deja las dos—. Ahí también entran los
+   * movimientos de devolución ligados a la venta misma, de cuando existía la
+   * devolución sin documento.
    *
    * Filtra por `venta_referencia_id` sin mirar el tipo de documento porque esa
    * columna la escribe un solo lugar —la creación de la nota de crédito—, mismo
@@ -3436,13 +3545,24 @@ export class VentasService {
     // lectura del detalle— comparten esta consulta sin enhebrar el manager.
     const filas: { item_id: string; devuelto: string }[] = await this.db.query(
       `WITH docs AS (
-         SELECT venta_id FROM ventas
+         SELECT venta_id, devoluciones FROM ventas
           WHERE venta_referencia_id = $1 AND eliminado_el IS NULL
+       ),
+       declaradas AS (
+         SELECT (d.dev ->> 'itemId')::uuid AS item_id,
+                SUM((d.dev ->> 'cantidad')::numeric) AS cant
+           FROM docs
+          CROSS JOIN LATERAL jsonb_array_elements(docs.devoluciones) AS d(dev)
+          WHERE docs.devoluciones IS NOT NULL
+          GROUP BY 1
+       ),
+       anteriores AS (
+         SELECT venta_id FROM docs WHERE devoluciones IS NULL
        ),
        lineas AS (
          SELECT d.venta_id, d.item_id, SUM(d.cantidad) AS cant
            FROM venta_detalles d
-           JOIN docs ON docs.venta_id = d.venta_id
+           JOIN anteriores a ON a.venta_id = d.venta_id
           WHERE d.eliminado_el IS NULL
           GROUP BY 1, 2
        ),
@@ -3459,17 +3579,24 @@ export class VentasService {
             -- midió y es la salida chica: con el \`OR\` puesto baja a 1,4-1,9 ms, contra
             -- los 0,10 que da sacarlo. Ver \`docs/patterns/backend.md\` § 17.
             AND m.venta_id IN (
-              SELECT venta_id FROM docs
+              SELECT venta_id FROM anteriores
               UNION ALL
               SELECT $1::uuid
             )
           GROUP BY 1, 2
+       ),
+       por_huellas AS (
+         SELECT COALESCE(l.item_id, mv.item_id) AS item_id,
+                SUM(GREATEST(COALESCE(l.cant, 0), COALESCE(mv.cant, 0))) AS cant
+           FROM lineas l
+           FULL OUTER JOIN movs mv
+             ON mv.venta_id = l.venta_id AND mv.item_id = l.item_id
+          GROUP BY 1
        )
-       SELECT COALESCE(l.item_id, mv.item_id) AS item_id,
-              SUM(GREATEST(COALESCE(l.cant, 0), COALESCE(mv.cant, 0)))::text AS devuelto
-         FROM lineas l
-         FULL OUTER JOIN movs mv
-           ON mv.venta_id = l.venta_id AND mv.item_id = l.item_id
+       SELECT item_id, SUM(cant)::text AS devuelto
+         FROM (SELECT item_id, cant FROM declaradas
+               UNION ALL
+               SELECT item_id, cant FROM por_huellas) x
         GROUP BY 1`,
       [ventaOriginalId],
     );
@@ -3477,33 +3604,102 @@ export class VentasService {
   }
 
   /**
-   * Valida las devoluciones contra el detalle de la venta original y devuelve
-   * las líneas listas para acreditar y, las que corresponda, para mover stock.
-   * Se valida TODO antes de tocar inventario para fallar con un mensaje de
-   * negocio claro.
+   * Lo que salió del inventario por la venta, agrupado por el **ítem vendido**
+   * que lo produjo: el producto suelto, o la receta/combo cuyos ingredientes,
+   * componentes y opciones salieron. Es la misma fuente que revierte `cancelar`
+   * (el kardex por `venta_id`, motivo `venta`), acotada a una línea: la liga
+   * `venta_detalle_id`, que la venta escribe en cada salida desde el
+   * 2026-10-04. Una salida sin línea (anterior a la columna) se atribuye a su
+   * propio ítem, que es como se vendía el producto suelto.
    *
-   * Hasta el 2026-09-04 exigía `modo_inventario = 'cantidad'` para TODAS: el
-   * ítem que no podía volver al stock tampoco podía nombrarse en la nota, y por
-   * eso recetas, combos y servicios caían al balde de ajuste —la nota decía
-   * "Ajuste" en vez del nombre del plato—. La razón de ese corte era el
-   * INVENTARIO, así que hoy dispara solo cuando se pide reponer.
+   * Lo leen la nota (bajo el lock de la venta) y el detalle (`devolucionStock`),
+   * así la pantalla pregunta exactamente donde el servidor exige respuesta. Una
+   * sola consulta por venta, sin una por línea.
+   *
+   * Sin filtrar `eliminado_el` de `items`/`item_producto`, por la misma regla
+   * que `cancelarUnaVez`: lo que está en el kardex queda en el kardex, y un
+   * ingrediente discontinuado después tiene que poder volver. Tampoco el de la
+   * línea: una línea de venta no se borra, y es un hecho de la venta.
+   */
+  private async salidasPorItemVendido(
+    ventaId: string,
+  ): Promise<Map<string, SalidaDeLaVenta[]>> {
+    const filas: {
+      item_vendido: string;
+      item_id: string;
+      modo_inventario: string;
+      cantidad: string;
+      costo_unitario: string | null;
+    }[] = await this.db.query(
+      `SELECT COALESCE(d.item_id, m.item_id) AS item_vendido,
+              m.item_id,
+              ip.modo_inventario,
+              SUM(m.cantidad)::text AS cantidad,
+              MIN(m.costo_unitario)::text AS costo_unitario
+         FROM movimientos_inventario m
+         -- Ni \`item_producto\` ni la línea filtran \`eliminado_el\`, a
+         -- propósito y por la regla de \`cancelarUnaVez\`: lo que está en el
+         -- kardex queda en el kardex, un ingrediente discontinuado después
+         -- tiene que poder volver (\`devolucion\` y \`merma\` están en
+         -- \`MOTIVOS_SOBRE_ITEM_ELIMINADO\`), y una línea de venta no se borra.
+         JOIN item_producto ip ON ip.item_id = m.item_id
+         LEFT JOIN venta_detalles d ON d.detalle_id = m.venta_detalle_id
+        WHERE m.venta_id = $1 AND m.tipo = 'salida' AND m.motivo = 'venta'
+          AND m.eliminado_el IS NULL
+        GROUP BY 1, 2, 3
+        ORDER BY 1, 2`,
+      [ventaId],
+    );
+    const porItem = new Map<string, SalidaDeLaVenta[]>();
+    for (const f of filas) {
+      const lista = porItem.get(f.item_vendido) ?? [];
+      lista.push({
+        itemId: f.item_id,
+        cantidad: f.cantidad,
+        modoInventario: f.modo_inventario,
+        costoUnitario: f.costo_unitario,
+      });
+      porItem.set(f.item_vendido, lista);
+    }
+    return porItem;
+  }
+
+  /**
+   * Valida las devoluciones contra el detalle de la venta original y devuelve
+   * las líneas listas para acreditar y, las que tienen stock de por medio, lo
+   * que vuelve al inventario. Se valida TODO antes de tocar inventario para
+   * fallar con un mensaje de negocio claro.
+   *
+   * **La pregunta** (owner, 2026-08-23): toda línea con stock de por medio —el
+   * producto suelto, la receta, el combo— dice si lo devuelto **se recupera** o
+   * **se pierde** (`stock`). Qué tiene stock no lo dice el catálogo de hoy sino
+   * lo que SALIÓ por esa línea (`salidasPorItemVendido`): una receta repone sus
+   * ingredientes, no "no maneja stock" como decía la línea de `item_producto`
+   * cuando la receta no tiene fila ahí. Lo que vuelve de cada ítem que salió lo
+   * calcula `cantidadADevolver`, acotado a las unidades devueltas.
+   *
+   * Lo público también lo usa la pasarela, ANTES de llamar al proveedor
+   * (`validarDevolucionesDelReembolso`): un REFUND con una línea sin respuesta
+   * rebota sin que salga plata.
    */
   private async validarDevolucionesReembolso(
     manager: EntityManager,
     ventaOriginalId: string,
     devoluciones: DevolucionReembolso[],
     /**
-     * Qué hacer con una línea que NO va a volver al stock. Son dos caminos con
-     * dos políticas, y por eso no alcanza un booleano:
+     * Qué hacer con una respuesta que falta o que no se puede cumplir. Son dos
+     * caminos con dos políticas, y por eso no alcanza un booleano:
      *
-     * - `'rechazar-imposible'` — nota de crédito manual. Solo rechaza si se
-     *   PIDIÓ reponer algo que no puede; lo que no repone se acredita igual.
-     * - `'ignorar'` — nota de crédito por el webhook de reembolso. Nunca
-     *   rechaza: el hook corre después del commit y un throw pierde el evento
-     *   (`cobros.service.ts` se lo traga como warning), así que se acredita y
-     *   no se repone.
+     * - `'rechazar'` — la nota manual, y el reembolso antes de llamar al
+     *   proveedor. Falta la respuesta en una línea con stock, sobra en una sin
+     *   stock, o pide recuperar lo que no vuelve solo (serie, lote): 400.
+     * - `'ignorar'` — la nota del webhook de reembolso. Nunca rechaza: el hook
+     *   corre después del commit y un throw pierde el evento (`cobros.service.ts`
+     *   se lo traga como warning). Sin respuesta no se mueve stock —solo pasa
+     *   con la `metadata` de un REFUND anterior a la pregunta—, y de lo que no
+     *   vuelve solo se mueve lo que sí puede.
      */
-    politicaReposicion: 'rechazar-imposible' | 'ignorar',
+    politica: 'rechazar' | 'ignorar',
   ): Promise<
     {
       itemId: string;
@@ -3526,13 +3722,19 @@ export class VentasService {
        * documento.
        */
       valorUnitarioBruto: string;
+      /** La respuesta, o `null` si no se mueve stock (sin stock, o sin respuesta por el webhook). */
+      stock: DestinoStockDevolucion | null;
       /**
-       * ¿Esta línea vuelve al inventario? Ya resuelto acá —lo pedido cruzado
-       * con lo que el ítem puede— para que el loop de inventario no vuelva a
-       * decidirlo. Una línea con `false` se acredita igual: es plata en el
-       * documento, no una unidad en el stock.
+       * Lo que vuelve al inventario por esta línea, por ítem movido y solo en
+       * modo `cantidad`. Vacío con `stock: null`.
        */
-      reponeStock: boolean;
+      movimientos: {
+        itemId: string;
+        cantidad: string;
+        costoUnitario: string | null;
+      }[];
+      /** La primera línea vendida del ítem: la que liga la vuelta en el kardex. */
+      ventaDetalleId: string;
     }[]
   > {
     if (!devoluciones.length) return [];
@@ -3551,6 +3753,7 @@ export class VentasService {
     }
 
     const detalles: {
+      detalle_id: string;
       item_id: string;
       cantidad: string;
       precio_unitario: string;
@@ -3561,19 +3764,19 @@ export class VentasService {
       clasificacion_tributaria: string;
       unidad_codigo_base: string;
       total_linea: string;
-      modo_inventario: string | null;
     }[] = await manager.query(
-      `SELECT d.item_id, d.cantidad, d.precio_unitario, d.precio_unitario_origen,
-              d.tasa_cambio, d.moneda_id_origen, d.descripcion, d.clasificacion_tributaria,
-              d.unidad_codigo_base, d.total_linea,
-              ip.modo_inventario
+      `SELECT d.detalle_id, d.item_id, d.cantidad, d.precio_unitario,
+              d.precio_unitario_origen, d.tasa_cambio, d.moneda_id_origen,
+              d.descripcion, d.clasificacion_tributaria, d.unidad_codigo_base,
+              d.total_linea
        FROM venta_detalles d
-       LEFT JOIN item_producto ip ON ip.item_id = d.item_id
-       WHERE d.venta_id = $1 AND d.eliminado_el IS NULL`,
+       WHERE d.venta_id = $1 AND d.eliminado_el IS NULL
+       ORDER BY d.creado_el, d.detalle_id`,
       [ventaOriginalId],
     );
     const devueltoPorItem =
       await this.unidadesComprometidasPorItem(ventaOriginalId);
+    const salidasPorItem = await this.salidasPorItemVendido(ventaOriginalId);
 
     return devoluciones.map((dev) => {
       const filas = detalles.filter((d) => d.item_id === dev.itemId);
@@ -3582,37 +3785,76 @@ export class VentasService {
           'El ítem no pertenece a la venta original',
         );
       const detalle = filas[0];
+      const nombre = detalle.descripcion ?? dev.itemId;
       if (new Decimal(dev.cantidad).lte(0))
         throw new BadRequestException(
           'La cantidad a devolver debe ser mayor a cero',
         );
-      // Este corte disparaba por el solo hecho de nombrar el ítem. Su razón es
-      // el INVENTARIO, así que hoy dispara según lo que el camino pida del
-      // stock; lo que no puede reponer se acredita igual en la nota.
-      const puedeReponer = detalle.modo_inventario === 'cantidad';
-      const quiereReponer = dev.reponerStock ?? puedeReponer;
-      const reponeStock = quiereReponer && puedeReponer;
-      const noPuedeReponer = () =>
-        new BadRequestException(
-          detalle.modo_inventario === null
-            ? `"${detalle.descripcion ?? dev.itemId}" no maneja stock (servicio): no admite devolución a inventario`
-            : `"${detalle.descripcion ?? dev.itemId}" usa inventario por ${detalle.modo_inventario}: la devolución debe registrarse manualmente desde Inventario`,
-        );
-      // Con `'rechazar-imposible'`, lo que no puede reponer se acredita igual y
-      // solo se corta si alguien PIDIÓ que repusiera.
-      if (!reponeStock && politicaReposicion !== 'ignorar' && quiereReponer)
-        throw noPuedeReponer();
       const vendida = filas.reduce(
         (acc, f) => acc.plus(f.cantidad),
         new Decimal(0),
       );
-      const disponible = vendida.minus(
-        devueltoPorItem.get(dev.itemId) ?? new Decimal(0),
-      );
+      const yaComprometidas = devueltoPorItem.get(dev.itemId) ?? new Decimal(0);
+      const disponible = vendida.minus(yaComprometidas);
       if (new Decimal(dev.cantidad).gt(disponible))
         throw new BadRequestException(
-          `La cantidad a devolver de "${detalle.descripcion ?? dev.itemId}" excede lo disponible (${disponible.toString()})`,
+          `La cantidad a devolver de "${nombre}" excede lo disponible (${disponible.toString()})`,
         );
+
+      // La pregunta. La respuesta se exige donde salió algo, y solo ahí.
+      const salidas = salidasPorItem.get(dev.itemId) ?? [];
+      const conStock = devolucionStockDe(salidas);
+      // Defensa del camino del webhook, que lee la respuesta de la `metadata`
+      // del REFUND sin pasar otra vez por el DTO: lo que no es una de las dos
+      // respuestas cuenta como ninguna.
+      let stock: DestinoStockDevolucion | null =
+        dev.stock === 'recupera' || dev.stock === 'pierde' ? dev.stock : null;
+      if (conStock === 'sin_stock' && stock !== null) {
+        if (politica === 'rechazar')
+          throw new BadRequestException(
+            `"${nombre}" no sacó nada del inventario: no se recupera ni se pierde. Mandá la línea sin "stock".`,
+          );
+        stock = null;
+      }
+      if (conStock !== 'sin_stock' && stock === null && politica === 'rechazar')
+        throw new BadRequestException(
+          `Falta decir si "${nombre}" se recupera (vuelve al stock) o se pierde (sale como merma).`,
+        );
+      if (
+        conStock === 'solo_perdida' &&
+        stock === 'recupera' &&
+        politica === 'rechazar'
+      ) {
+        const manual = salidas.find((x) => x.modoInventario !== 'cantidad')!;
+        throw new BadRequestException(
+          `"${nombre}" sacó inventario por ${manual.modoInventario}: no vuelve al stock desde acá. Marcalo como que se pierde y registrá el ingreso manualmente desde Inventario.`,
+        );
+      }
+
+      // Lo que vuelve: por cada ítem que salió, acotado a las unidades
+      // devueltas. El producto suelto vuelve tal cual (lo que volvió es lo que
+      // se devolvió); un ingrediente, en la proporción de lo que salió por las
+      // líneas de este ítem. Serie y lote no vuelven solos: quedan afuera.
+      const movimientos =
+        stock === null
+          ? []
+          : salidas
+              .filter((x) => x.modoInventario === 'cantidad')
+              .map((x) => ({
+                itemId: x.itemId,
+                cantidad:
+                  x.itemId === dev.itemId
+                    ? dev.cantidad
+                    : cantidadADevolver({
+                        salido: x.cantidad,
+                        vendidas: vendida.toString(),
+                        yaAcreditadas: yaComprometidas.toString(),
+                        devueltas: dev.cantidad,
+                      }),
+                costoUnitario: x.costoUnitario,
+              }))
+              .filter((x) => new Decimal(x.cantidad).gt(0));
+
       return {
         itemId: dev.itemId,
         cantidad: dev.cantidad,
@@ -3633,7 +3875,9 @@ export class VentasService {
               .reduce((a, f) => a.plus(f.total_linea), new Decimal(0))
               .dividedBy(vendida)
               .toString(),
-        reponeStock,
+        stock,
+        movimientos,
+        ventaDetalleId: detalle.detalle_id,
       };
     });
   }
@@ -4235,6 +4479,10 @@ export class VentasService {
     // unidad que el backend después rechaza es el modo de falla que este
     // número existe para evitar.
     const devueltoPorItem = await this.unidadesComprometidasPorItem(ventaId);
+    // Qué preguntarle a cada línea en una nota de crédito: el mismo lector con
+    // que la nota exige la respuesta, así la pantalla pregunta donde el
+    // servidor la pide y en ningún otro lado.
+    const salidasPorItem = await this.salidasPorItemVendido(ventaId);
     // Reembolsos de la(s) orden(es) de pasarela vinculadas a esta venta.
     const reembolsos: Row[] = await this.db.query(
       `SELECT t.transaccion_id, t.monto, t.estado, t.fecha_transaccion,
@@ -4660,11 +4908,17 @@ export class VentasService {
         ajusteVenta: d['ajuste_venta'],
         impuestoAplicado: d['impuesto_aplicado'],
         totalLinea: d['total_linea'],
-        // null = servicio (sin fila en item_producto); el modal de reembolso
-        // solo habilita devolución para modo 'cantidad'.
+        // null = sin fila en item_producto (servicio, receta o combo).
         modoInventario: d['modo_inventario'] ?? null,
-        // Vacío en lo que no tiene serie. Por ítem y no por línea: el kardex no
-        // guarda a qué línea pertenece cada salida.
+        // "¿Se recupera o se pierde?" en una nota de crédito: si se pregunta y
+        // si "se recupera" se puede, según lo que salió por las líneas del
+        // ítem (`salidasPorItemVendido`). Por ítem, como la devolución.
+        devolucionStock: devolucionStockDe(
+          salidasPorItem.get(d['item_id'] as string) ?? [],
+        ),
+        // Vacío en lo que no tiene serie. Por ítem y no por línea: la lectura
+        // agrupa por ítem (las ventas de antes del 2026-10-04 no guardan la
+        // línea de cada salida).
         unidades: unidadesPorItem.get(d['item_id'] as string) ?? [],
         cantidadDevuelta: (
           devueltoPorItem.get(d['item_id'] as string) ?? new Decimal(0)

@@ -12,6 +12,7 @@ import { GarzonesModule } from '../garzones/garzones.module';
 import { MonedasModule } from '../monedas/monedas.module';
 import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
 import { IdempotenciaModule } from '../idempotencia/idempotencia.module';
+import { MotivosBajaModule } from '../motivos-baja/motivos-baja.module';
 import { VentasService } from './ventas.service';
 import {
   VentasController,
@@ -60,6 +61,9 @@ import { VentasReembolsoHandler } from './reembolso-callback.handler';
     // líneas.
     UbicacionesModule,
     IdempotenciaModule,
+    // La causa fija "Devolución" de la merma que deja una nota de crédito
+    // cuando lo devuelto se pierde (`asegurarDevolucion`).
+    MotivosBajaModule,
   ],
   controllers: [VentasController, TiposDocumentoController],
   providers: [VentasService, VentasReembolsoHandler],

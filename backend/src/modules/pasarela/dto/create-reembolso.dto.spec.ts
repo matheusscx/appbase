@@ -26,32 +26,28 @@ describe('CreateReembolsoDto', () => {
     expect(errores).toHaveLength(0);
   });
 
-  it('acepta reponerStock por línea, y lo rechaza si no es booleano', async () => {
+  it('acepta stock recupera/pierde por línea; otro valor, null o reponerStock son error', async () => {
     // El campo tiene que estar declarado ACÁ o el pipe global rechaza el body
-    // con 400 y la política del webhook queda inalcanzable.
-    const ok = await validar({
+    // con 400 y la pregunta del reembolso queda inalcanzable.
+    const linea = (extra: Record<string, unknown>) => ({
       monto: '1100',
       devoluciones: [
         {
           itemId: '550e8400-e29b-41d4-a716-446655440116',
           cantidad: '2',
-          reponerStock: false,
+          ...extra,
         },
       ],
     });
-    expect(ok).toHaveLength(0);
-
-    const mal = await validar({
-      monto: '1100',
-      devoluciones: [
-        {
-          itemId: '550e8400-e29b-41d4-a716-446655440116',
-          cantidad: '2',
-          reponerStock: 'no',
-        },
-      ],
-    });
-    expect(mal.length).toBeGreaterThan(0);
+    expect(await validar(linea({ stock: 'recupera' }))).toHaveLength(0);
+    expect(await validar(linea({ stock: 'pierde' }))).toHaveLength(0);
+    // Ausente pasa el DTO: si la línea tiene stock lo exige el service, que es
+    // el que sabe qué salió en la venta.
+    expect(await validar(linea({}))).toHaveLength(0);
+    expect((await validar(linea({ stock: 'repone' }))).length).toBeGreaterThan(
+      0,
+    );
+    expect((await validar(linea({ stock: null }))).length).toBeGreaterThan(0);
   });
 
   it('rechaza devoluciones con itemId no UUID', async () => {

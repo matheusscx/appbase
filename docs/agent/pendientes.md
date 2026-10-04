@@ -319,44 +319,12 @@ revisión independiente no lo pudo reproducir, con razón.
     guardados (el `request` del `REFUND` es el del proveedor, no el DTO). (3) Permiso: el mismo
     `Pasarelas:Reembolsar` u otro. (4) Reusar `CobrosService.aplicarPostReembolso` —que ya arma
     el evento con `ligarCorreccion`— y no un camino paralelo.
-
-- [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
-  medido 2026-08-22 al cerrar la anulación; el owner decidió que **va aparte**, no de
-  arrastre) — el camino de la NC usa `LEFT JOIN item_producto` (en
-  `validarDevolucionesReembolso`, y el gemelo en la lectura del detalle de `findOne`; las citas
-  de línea se sacaron el 2026-09-04 porque ya apuntaban a otra cosa), así que la línea de receta
-  **no** desaparece como
-  desaparecía en `cancelar`: cae en la rama `modo_inventario === null` y responde *"no
-  maneja stock (servicio): no admite devolución a inventario"*. Para una receta ese
-  mensaje es **falso** — no es un servicio, tiene ingredientes que sí salieron del
-  inventario y que hoy no vuelven por ningún camino.
-
-  ⚠️ **Actualizado el 2026-09-04:** ese mensaje **ya no dispara por nombrar la receta**. Desde
-  el frente de la devolución con crédito parcial ([`resueltos.md`](resueltos.md)) la receta **sí
-  se acredita por línea** —con su nombre en el documento, no como "Ajuste"— y el mensaje solo
-  aparece si alguien pide explícitamente que reponga. **Lo que esta entrada pide sigue vivo y no
-  se achica:** los ingredientes de esa receta siguen sin volver al inventario por ningún camino,
-  y eso es lo que la decisión del owner de más abajo viene a resolver.
-  **El arreglo ya existe del otro lado y está probado:** `cancelar` revierte leyendo las
-  salidas del kardex por `venta_id`, que cubre recetas, combos y opciones de grupo sin
-  casos especiales. La NC podría usar la misma fuente, acotada a las líneas devueltas.
-  **La pregunta para el owner:** la NC devuelve **por línea elegida** (`devoluciones`),
-  no la venta entera. Para un producto la correspondencia línea→stock es directa; para una
-  receta hay que decidir si devolver una unidad de "Hamburguesa" repone sus ingredientes
-  —simétrico con la venta— o si se rechaza explícito.
-  ✅ **DECIDIDO (owner, 2026-08-23): ni una cosa ni la otra — se pregunta.** Al hacer la nota
-  de crédito, el sistema pregunta **si el producto se recupera o se pierde**. Si se recupera,
-  repone; si no, **sale como merma**. Es lo fiel a un local de comida: una hamburguesa ya
-  armada no vuelve a ser pan y carne, pero una que nunca salió de la cocina sí.
-  ✅ **La pregunta aparece SIEMPRE que haya stock de por medio**, no solo en recetas y combos:
-  también en el producto suelto, porque la botella puede volver rota. Una sola regla, sin
-  excepción que explicar.
-  ✅ **La causa de esa merma es una fija, "Devolución", que crea el sistema en cada tenant**
-  (owner, 2026-09-29, en el selector interactivo de la orquestadora: eligió *A: una causa fija
-  "Devolución"*, recomendada, por sobre *B: el cajero elige una causa*). Así las devoluciones se
-  ven aparte en el reporte de mermas sin que nadie elija nada. Al construir: sembrarla al crear el
-  tenant, como el rol admin, y decidir si el tenant puede renombrarla o borrarla.
-  Y sigue en pie que toca `movimientos_inventario` y el camino del reembolso de pasarela.
+  - **La pregunta del stock ya existe y se reusa (2026-10-04):** cada línea elegida lleva
+    `stock: 'recupera' | 'pierde'`, obligatorio donde salió inventario y prohibido donde no, y
+    `ReembolsoCallbackHandler.validarDevoluciones` la valida con la regla de la nota manual. Qué
+    preguntar por línea lo dice `devolucionStock` del detalle de la venta, y la pantalla es
+    `DevolucionInventarioLista`. Contrato:
+    [`reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md#se-recupera-o-se-pierde-2026-10-04).
 
 - [ ] **Lo que quedó del frente del modo ciego, ya cerrado** (backend + producto; la entrada
   madre —seis fugas, el eje mío/todos y el rastro de los oráculos— se mudó entera a
@@ -1155,6 +1123,14 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
      (`CreateMermaDto` sigue sin `unidadIds`/`loteId`); el selector de unidades que usan el POS y
      el salón (`UnidadesSerieModal`) ya existe y es el punto de partida. La merma de un producto
      **por lote** sigue como estaba (`moverLote` elige por vencimiento).
+     **La nota de crédito tiene el mismo hueco** (2026-10-04, frente "recupera o pierde",
+     [`resueltos.md`](resueltos.md)): con serie o lote, "vuelve al stock" se rechaza (va por
+     Inventario) y "se perdió" se acredita **sin** dejar merma, porque la unidad ya está `vendido`
+     y no hay merma de serie. Cuando llegue el soporte, la nota puede pedir la unidad o el lote
+     que vuelve. Dos consecuencias que quedan escritas (Sesión de esfuerzo máximo, 2026-10-04):
+     **el reporte de mermas cuenta de menos, sin marca**, lo que se perdió con serie o lote; y **un
+     combo con un componente en lote obliga a elegir "se perdió"** aunque lo que es por cantidad
+     haya vuelto sano (lo de cantidad sale como merma).
   2. ~~**`fecha_vencimiento` se guarda, se expone y no se compara con nada.**~~ Cerrada el
      2026-10-03 ([`resueltos.md`](resueltos.md), "Sale primero el lote que vence antes"): la
      salida automática ordena por vencimiento y la venta y el traslado saltan los vencidos.

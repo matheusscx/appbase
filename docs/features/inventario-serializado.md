@@ -220,7 +220,8 @@ procedencia, porque "owner, fecha" a secas se lee como congelada):
 | Tienda online | `GET /items?vendibleOnline=true` los deja afuera del catálogo y `OnlineService.checkout` rechaza la línea **antes** de iniciar el pago |
 | Merma (`POST /mermas`) | 400; la pantalla muestra el aviso y deshabilita Registrar (no esconde el producto: quien busca el celular roto no entendería por qué no aparece). La baja se hace desde Ajuste de stock |
 | Ajuste de stock y traslado por API | Sin unidades, 400; la pantalla ya las mandaba |
-| Recuento, cancelar venta con reposición, nota de crédito con devolución | Ya rechazaban serie; no cambian |
+| Recuento, cancelar venta con reposición | Ya rechazaban serie; no cambian |
+| Nota de crédito con devolución | "Vuelve al stock" se rechaza (va por Inventario); "Se perdió" se acredita sin mover nada: la unidad ya está vendida (2026-10-04, [`reembolsos-nota-credito.md`](./reembolsos-nota-credito.md#se-recupera-o-se-pierde-2026-10-04)) |
 
 **El ingrediente de una receta en modo serie no existe**: un ingrediente solo admite modo
 `cantidad`, así que ahí nunca hubo nada que elegir.
@@ -267,7 +268,8 @@ el 400 de la API es el que manda.
 
 - **Detalle de venta:** `GET /ventas/:id` trae `unidades: [{ serie, condicion }]` en la línea de un
   producto con serie, leídas del kardex en una consulta por venta. Se agrupan **por ítem**, no por
-  línea (el kardex no guarda a qué línea pertenece cada salida): con dos líneas del mismo producto
+  línea (desde el 2026-10-04 el kardex guarda la línea de cada salida —`venta_detalle_id`—, pero
+  esta lectura no la usa y las ventas de antes no la tienen): con dos líneas del mismo producto
   con serie —solo pasa en el salón, con el precio o las reglas cambiados entre pedidos; el POS las fusiona— cada
   una muestra todas las unidades de ese producto en la venta. Se arregla guardando las unidades en
   `venta_detalles`; nadie lo pidió.

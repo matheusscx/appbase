@@ -149,8 +149,12 @@ test('la cajera con permiso de nota de crédito devuelve toda una venta pendient
   await detalle.getByRole('button', { name: 'Nota de crédito' }).click()
   const modal = page.getByRole('dialog').filter({ hasText: 'Nota de crédito' })
   await expect(valorDeFila(modal, 'Disponible para nota de crédito')).toHaveText(TOTAL_VENTA)
-  await expect(modal.getByRole('radio')).toHaveCount(1)
-  await expect(modal.getByRole('radio', { name: /No vuelve plata/ })).toBeChecked()
+  // Acotado al grupo de "¿Por dónde vuelve la plata?": la línea del producto trae
+  // además su pregunta "¿vuelve al stock o se perdió?" (2026-10-04), con sus
+  // propios radios.
+  const porDondeVuelve = modal.locator('[data-qa="por-donde-vuelve"]')
+  await expect(porDondeVuelve.getByRole('radio')).toHaveCount(1)
+  await expect(porDondeVuelve.getByRole('radio', { name: /No vuelve plata/ })).toBeChecked()
 
   const pedido = page.waitForRequest(
     r => r.url().includes('/notas-credito') && r.method() === 'POST',

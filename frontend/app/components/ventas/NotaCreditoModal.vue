@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
-import type { CriterioRedondeoCongelado, DetalleVentaDevolucion } from '~/composables/useDevolucionInventario'
+import type { CriterioRedondeoCongelado, DestinoStock, DetalleVentaDevolucion } from '~/composables/useDevolucionInventario'
 import { idDeOtrosDatos } from '~/composables/useIntentoCobro'
 import { problemaDelReceptorDeNota } from '~/composables/useReceptor'
 import {
@@ -54,7 +54,7 @@ export interface NotaCreditoSuccessPayload {
   movimientoCajaId: string | null
   fecha: string
   comentario: string | null
-  devoluciones: Array<{ itemId: string, cantidad: string, reponerStock: boolean }>
+  devoluciones: Array<{ itemId: string, cantidad: string, stock?: DestinoStock }>
   /** La nota ya había entrado y el backend la reprodujo (ADR-026). */
   repetida?: boolean
 }
@@ -80,7 +80,7 @@ const seleccion = ref<string | undefined>(undefined)
 const submitting = ref(false)
 const receptorNombre = ref('')
 const receptorRut = ref('')
-const { filas, cargarDesdeDetalles, setCantidad, setReponer, filasValidas, devoluciones }
+const { filas, cargarDesdeDetalles, setCantidad, setStock, filasValidas, faltaDestino, devoluciones }
   = useDevolucionInventario()
 
 const opcionElegida = computed(() =>
@@ -170,7 +170,8 @@ const problemaReceptor = computed(() =>
 const receptorVacio = computed(() => !receptorNombre.value.trim() && !receptorRut.value.trim())
 
 const puedeConfirmar = computed(() =>
-  montoValido.value && filasValidas.value && opcionDisponible.value && !problemaReceptor.value,
+  montoValido.value && filasValidas.value && !faltaDestino.value
+  && opcionDisponible.value && !problemaReceptor.value,
 )
 
 // Solo si hay más de una: en una venta toda afecta, repetir el total al lado
@@ -346,8 +347,9 @@ async function confirmar() {
         <DevolucionInventarioLista
           :filas="filas"
           :valida="filasValidas"
+          :falta-destino="faltaDestino"
           @set-cantidad="setCantidad"
-          @set-reponer="setReponer"
+          @set-stock="setStock"
         />
       </div>
     </template>
