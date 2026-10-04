@@ -3916,8 +3916,9 @@ export class VentasService {
       // ese valor: con cualquier otro, una corrección no es una venta que
       // revisar. Una venta cancelada tampoco entra en ninguno: no hay nada
       // pendiente que documentar. Esto último es una DEFENSA, hoy
-      // inalcanzable: una fila `nadie` nace solo de un pago con un medio `nadie`
-      // y anular exige que la venta no tenga pagos; los documentos del sistema y
+      // inalcanzable: una fila `nadie` nace de un pago con un medio `nadie` (y
+      // anular exige que la venta no tenga pagos) o de una entrega gratuita, que
+      // nace pagada y anular exige `pendiente`; los documentos del sistema y
       // del facturador de afuera ya se descartan al anular. La condición viene
       // de una tabla cerrada, no del texto del cliente: no lleva parámetro.
       if (query.documento !== 'sin_numero')

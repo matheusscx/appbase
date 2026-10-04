@@ -197,6 +197,9 @@ destapa una decisión que no es mía).
       hay `maintenance` ni `gc` en la config, ni cron, ni launchd de git. Hay además un
       `multi-pack-index`, y no se midió qué conteo usa git: con 65 623 empaquetados la abreviatura
       tendría que ser siempre de 9, y a veces es de 8.
+    - **Otro caso, 2026-10-04:** `20261004-152722-interesting-hugle-9a753a-74264` (22 líneas `index`
+      de 9 contra 8 caracteres, 0 de contenido; recibo escrito segundos antes del commit, con
+      `in-pack` 66 969 y `count` 2 193). Se reescribió el recibo sobre el mismo diff revisado.
 
 - [ ] **Un `itemGrupoId` en mayúsculas en `PATCH /grupos-modificadores/:id/overrides` da un 400
   que miente: "item_grupo_id no válido para este grupo"** (backend,
@@ -1139,27 +1142,6 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   personal no siempre pasa por una mesa) y si el criterio discrepante del SII sobre documentarla
   con boleta "no afecta" (Oficio 734 vs. Oficios 1.750/2001 y 638/2009) pide algo más que el
   registro. Se lleva al owner con el análisis de la Sesión de esfuerzo máximo.
-
-- [ ] **Una entrega gratuita sin rebaja no deja documento, y un plato regalado con una promo del
-  100 % no paga el IVA de la cortesía** (fiscal — frente propio; anotado el 2026-10-04 al cerrar
-  "una venta que llega a $0 por un descuento deja su documento", [`resueltos.md`](resueltos.md),
-  con las respuestas del owner a ese frente). Dos preguntas de la misma familia que la cortesía
-  como retiro gravado (también en `resueltos.md`):
-  1. **El producto de lista $0** (una muestra, una bolsa de regalo) que se vende solo, sin
-     ninguna rebaja, sigue **sin documento** (owner, 2026-10-04: *"Sin documento, pregunta
-     abierta"*, recomendada, entre esa y *"también boleta de $0"*). La Res. Ex. SII 60/2023 exige
-     la boleta de $0 cuando el total sale *"de la aplicación de descuentos o alguna otra condición
-     de venta"*, y un precio de lista $0 no es un monto que algo rebajó; el formato de la boleta
-     pide monto neto > 0 en una afecta. Como no tiene fila en `venta_documentos`, tampoco aparece
-     en el filtro "Sin documento" del listado (`?documento=sin_documento` mira `emisor = 'nadie'`).
-     **¿Lleva boleta, o se trata como retiro, como la cortesía?**
-  2. **El mismo plato regalado tiene dos tratamientos y lo elige el cajero**: como cortesía paga
-     IVA (retiro, sobre el precio de carta); con una promo del 100 % o un descuento de 99,99 %
-     queda en una boleta de $0, sin IVA. El 100 % exacto lo rechaza el DTO de descuentos, pero el
-     99,99 % y la promo `1.0000` pasan. El owner aceptó la diferencia por ahora (2026-10-04:
-     *"Aceptar y anotarlo"*, recomendada, entre esa y *"frente para restringir ya"*). **Lo que hay
-     que decidir:** si se restringen los descuentos y promos que dejan una línea en $0. Toca el
-     motor de cálculo y los formularios: va solo y con el sistema quieto.
 
 - [ ] **Una venta de más de 135 UF a quien no es contribuyente de IVA exige boleta con la
   identidad de quien paga, y el voucher no alcanza** (fiscal — **frente propio, con su propia

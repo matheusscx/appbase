@@ -163,6 +163,18 @@ Por tipo (detalle y ejemplos en el docblock de cada función):
 
 - **`porcentaje`**: cada línea del scope, dentro de su franja, recibe `valorPorcentaje ×
   precioLista × cantidad`. Único tipo que admite cantidad fraccionaria (venta al peso).
+  **El valor es menor a 1** (owner, 2026-10-04, *"Topar la promo bajo 100 %"*): una promo no
+  regala. Un plato regalado es una cortesía, que paga IVA como retiro, y con una promo del 100 %
+  saldría en una boleta de $0 sin IVA. El 400 lo da `PromocionesService.validarTopeDelPorcentaje`
+  al crear, al editar el valor o el tipo y al activarla (`{ activo: true }`, lo que manda el
+  toggle de la pantalla). Un `PATCH` que no hace nada de eso pasa, así una promo guardada al
+  100 % antes del tope se puede **pausar** (el toggle) y, por API, renombrar con un `PATCH` que no
+  toque valor, tipo ni `activo: true`. El drawer de edición no sirve para eso, porque reenvía el
+  valor y el tipo en cada guardado: ahí hay que bajar el valor a menos de 1 o pausarla. No se
+  puede volver a activar mientras siga al 100 % (el motor la sigue aplicando mientras siga
+  activa; no hay datos productivos que migrar). El `nxm` no tiene tope: su `1.0000` es
+  la unidad gratis del 2x1, que es precio. Detalle en
+  [ADR-028](../adr/028-emision-registrada-por-venta.md).
 - **`nxm`**: explota unidades enteras, ordena por precio de lista descendente, arma grupos
   de `cadaN`; en cada grupo la más barata recibe el descuento. Repetible.
 - **`precio_fijo`** (combo): arma combos con las unidades **más caras** de cada slot

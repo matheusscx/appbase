@@ -183,7 +183,7 @@ es de la máquina se ignoran sin error.
 | La venta es… | Documentos que deja |
 |---|---|
 | de **$0** porque un descuento o una promo la rebajó (`totalBruto > 0`) | uno por $0, como lo no pagado de su rama: boleta del sistema, o `externo` sin número si el comercio factura por fuera (Res. Ex. SII 60/2023, ADR-028) |
-| de **$0** porque el producto vale $0 en el catálogo | ninguno: entrega gratuita, pregunta abierta (`pendientes.md` § 6) |
+| de **$0** porque el producto vale $0 en el catálogo (una entrega gratuita: bruto ≤ 0 y total $0) | una fila `nadie` por $0: no paga, pero aparece en "Sin documento" (owner, 2026-10-04). Con un recargo que la deja en más de $0 es una venta cobrada y va por su rama |
 | de un país **sin boleta sembrada** (sin tipo) | ninguno: no cambia |
 | **online** | uno del sistema por el total, sin mirar el medio |
 | **factura** | uno por el **total**, se pague o no: del sistema, o `externo` con el tipo factura y sin número si el comercio factura por fuera |
@@ -496,7 +496,7 @@ filtro". Cada valor es un `EXISTS` sobre `venta_documentos`, sobre los documento
 | `maquina` | de la máquina que **no** es el voucher duplicado |
 | `externo` | hecho por fuera |
 | `sin_numero` | de la máquina o hecho por fuera, sin número — **también una NC** (ver abajo) |
-| `sin_documento` | `nadie`: un tramo que nadie documentó |
+| `sin_documento` | `nadie`: un tramo que nadie documentó, o una entrega gratuita (producto de lista $0) |
 | `duplicado` | `es_duplicado` (voucher de un abono sobre una deuda ya documentada, E1b) |
 
 - **Las correcciones y las ventas canceladas quedan fuera de todos los valores**

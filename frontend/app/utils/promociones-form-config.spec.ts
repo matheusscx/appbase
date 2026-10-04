@@ -27,6 +27,14 @@ describe('promociones-form-config', () => {
     })
   })
 
+  // El servidor rechaza un `porcentaje` de 1.00 o más (una promo no regala:
+  // eso es una cortesía, owner 2026-10-04); el 2x1 sí es 1.00.
+  it('la ayuda del porcentaje no ofrece el 100 % en porcentaje, y sí en nxm', () => {
+    expect(PROMOCION_CONFIG.porcentaje.ayudaPorcentaje).toMatch(/menor a 1\.00.*cortesía/)
+    expect(PROMOCION_CONFIG.porcentaje.ayudaPorcentaje).not.toMatch(/gratis/)
+    expect(PROMOCION_CONFIG.nxm.ayudaPorcentaje).toMatch(/1\.00 = 100% \(gratis\)/)
+  })
+
   it('precio_fijo pide el monto y arma slots (1..N)', () => {
     expect(PROMOCION_CONFIG.precio_fijo).toMatchObject({
       campoPorcentaje: false,

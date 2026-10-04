@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import Decimal from 'decimal.js';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository, type EntityManager } from 'typeorm';
 import { Db } from '../../common/db/db.service';
@@ -222,6 +223,7 @@ export class PromocionesService {
     await this.validarNombreUnico(tenantId, dto.nombre);
     this.validarHorario(dto);
     this.validarFormaSegunTipo(dto.tipo, dto);
+    this.validarTopeDelPorcentaje(dto.tipo, dto.valorPorcentaje);
     this.validarScopes(dto.tipo, dto.scopes);
 
     const escritura = this.db.transaccion(async (manager) => {
@@ -291,6 +293,15 @@ export class PromocionesService {
     this.validarFechas(fechasYHorario);
     this.validarHorario(fechasYHorario);
     this.validarFormaSegunTipo(tipoResultante, forma);
+    // Si el PATCH escribe el valor o el tipo, o la activa: una promo guardada
+    // al 100 % antes del tope se tiene que poder pausar o renombrar, pero no
+    // volver a regalar (el toggle de la pantalla manda solo `{ activo: true }`).
+    if (
+      dto.valorPorcentaje !== undefined ||
+      dto.tipo !== undefined ||
+      dto.activo === true
+    )
+      this.validarTopeDelPorcentaje(tipoResultante, forma.valorPorcentaje);
     if (dto.scopes !== undefined) {
       this.validarScopes(tipoResultante, dto.scopes);
     } else if (tipoResultante !== promo.tipo) {
@@ -429,6 +440,27 @@ export class PromocionesService {
     if ((dto.horaInicio == null) !== (dto.horaFin == null))
       throw new BadRequestException(
         'horaInicio y horaFin deben venir juntos, o ninguno',
+      );
+  }
+
+  /**
+   * Una promo de porcentaje no regala: con 100 % o más, el plato saldría en
+   * una boleta de $0 sin IVA, y regalarlo es una cortesía, que paga IVA como
+   * retiro (owner, 2026-10-04, "Topar la promo bajo 100 %"). El `nxm` queda
+   * afuera: su 1.0000 es la unidad gratis de un paquete (2x1), que es precio.
+   * Es la misma cota que `validarMonto` (`monto-regla.util.ts`) pone a
+   * descuentos y recargos, pero no se reusa: aquella también rechaza el 0 y su
+   * mensaje habla de la notación, y cambiarla movería esos dos módulos.
+   * El 99,99 % pasa: es un uso deliberado, y es el costo aceptado del tope.
+   */
+  private validarTopeDelPorcentaje(
+    tipo: TipoPromocion,
+    valorPorcentaje: string | null | undefined,
+  ): void {
+    if (tipo !== 'porcentaje' || valorPorcentaje == null) return;
+    if (new Decimal(valorPorcentaje).gte(1))
+      throw new BadRequestException(
+        'Una promoción de porcentaje tiene que ser menor al 100 %: para regalar un producto, registralo como cortesía.',
       );
   }
 

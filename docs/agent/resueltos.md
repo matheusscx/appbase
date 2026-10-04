@@ -23,6 +23,116 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La entrega gratuita sin rebaja se ve, y la promo no regala (cerrada 2026-10-04)
+
+Sale de [`pendientes.md`](pendientes.md) § 6 (fiscal, frente propio). La regla viva, en
+[ADR-028](../adr/028-emision-registrada-por-venta.md) ("Actualización 2026-10-04"), en
+[`PRODUCTO.md`](../PRODUCTO.md) § 10, en [`motor-promociones.md`](../features/motor-promociones.md)
+y en [`impuestos.md`](../features/impuestos.md). Spec
+[`2026-10-04-entrega-gratuita-y-promo-100-design.md`](../superpowers/specs/2026-10-04-entrega-gratuita-y-promo-100-design.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 6
+
+- [ ] **Una entrega gratuita sin rebaja no deja documento, y un plato regalado con una promo del
+  100 % no paga el IVA de la cortesía** (fiscal — frente propio; anotado el 2026-10-04 al cerrar
+  "una venta que llega a $0 por un descuento deja su documento", [`resueltos.md`](resueltos.md),
+  con las respuestas del owner a ese frente). Dos preguntas de la misma familia que la cortesía
+  como retiro gravado (también en `resueltos.md`):
+  1. **El producto de lista $0** (una muestra, una bolsa de regalo) que se vende solo, sin
+     ninguna rebaja, sigue **sin documento** (owner, 2026-10-04: *"Sin documento, pregunta
+     abierta"*, recomendada, entre esa y *"también boleta de $0"*). La Res. Ex. SII 60/2023 exige
+     la boleta de $0 cuando el total sale *"de la aplicación de descuentos o alguna otra condición
+     de venta"*, y un precio de lista $0 no es un monto que algo rebajó; el formato de la boleta
+     pide monto neto > 0 en una afecta. Como no tiene fila en `venta_documentos`, tampoco aparece
+     en el filtro "Sin documento" del listado (`?documento=sin_documento` mira `emisor = 'nadie'`).
+     **¿Lleva boleta, o se trata como retiro, como la cortesía?**
+  2. **El mismo plato regalado tiene dos tratamientos y lo elige el cajero**: como cortesía paga
+     IVA (retiro, sobre el precio de carta); con una promo del 100 % o un descuento de 99,99 %
+     queda en una boleta de $0, sin IVA. El 100 % exacto lo rechaza el DTO de descuentos, pero el
+     99,99 % y la promo `1.0000` pasan. El owner aceptó la diferencia por ahora (2026-10-04:
+     *"Aceptar y anotarlo"*, recomendada, entre esa y *"frente para restringir ya"*). **Lo que hay
+     que decidir:** si se restringen los descuentos y promos que dejan una línea en $0. Toca el
+     motor de cálculo y los formularios: va solo y con el sistema quieto.
+  **Cómo arrancarlo — ✅ DECIDIDO (2026-10-04).** Procedencia: la sesión del frente midió en el
+  código (d1180798) y le llevó las dos preguntas a la Sesión de esfuerzo máximo, con tres opciones
+  por pregunta y su costo. Esa sesión decidió lo técnico y le llevó al owner lo suyo en el **mismo
+  AskUserQuestion** que las preguntas de "la comida del personal", para que no se contradijeran:
+  1. **La bolsa de $0: *"No paga, pero se ve"*** (owner, recomendada, sobre *"Que pague IVA
+     (frente propio)"* y *"Boleta de $0"*). La pregunta incluía la bolsa sola **y** la bolsa junto
+     con una compra (el Oficio 1.420/2010, punto 7, lee "regalo junto con una venta" como venta más
+     entrega promocional): dentro de una compra sigue en la boleta a $0, sin IVA. **Costo
+     aceptado:** si el SII la lee como entrega promocional (art. 8 d inc. 3), el IVA iría sobre su
+     valor en plaza (art. 16 b), que el sistema no conoce. **Técnico** (Sesión de esfuerzo
+     máximo): la venta deja una fila `nadie` por $0, no se amplía el filtro. `nadie` es el valor
+     que ADR-028 ya usa para "quién emitió: nadie", y así el filtro "Sin documento" y el detalle
+     la leen sin tocar lectores. Hay que confirmar que ningún lector la cuente como plata ni como
+     devolución interna.
+  2. **La promo del 100 %: *"Topar la promo bajo 100 %"*** (owner, recomendada, sobre *"Dejarlo
+     como está"* y *"Toda línea en $0 paga IVA"*). Una promo de tipo `porcentaje` con valor ≥ 1 se
+     rechaza con un 400 que manda a la cortesía. Se valida en el borde, al crear y al editar; el
+     motor no se toca y `nxm` (el 2x1 es `1.0000`) queda igual. Las promos al 100 % ya guardadas no
+     se migran: no hay datos productivos, y el seed no trae ninguna. **Costo aceptado:** no cierra
+     el 99,99 % ni dos descuentos que llegan a $0 (queda como uso deliberado), y una campaña de
+     "gratis" pierde la promo automática.
+
+### Qué se hizo
+
+- **`documentarVenta`**: con total $0 **y** `totalBruto` ≤ 0 (la entrega gratuita) escribe una
+  fila `nadie` por $0, sin tipo, sin baldes y sin enlazar pagos (el único posible es uno que fue
+  todo propina), para boleta, factura y online. El país sin boleta sigue en `[]`.
+- **De paso, una regresión de 47ca2df8:** el corte era `totalBruto ≤ 0` sin mirar el total, y
+  `totalBruto` es el `subtotalNeto` del motor, **antes de los recargos**. Un recargo de $2.000
+  sobre un producto de $0 dejaba una venta cobrada sin ningún documento (medido: el e2e nuevo
+  falla con el código de antes). Ahora esa venta va por su rama, como cualquier venta cobrada.
+- **Lectores de `venta_documentos`** (barrido por subagente, cada cita abierta): ven la fila
+  nueva el detalle (sección Documentos: "Sin documento" por $0), el chip del listado (warning) y
+  `?documento=sin_documento`. Ninguna suma ni tope cambia (la fila vale 0). `ventaDocumentada`
+  filtra `nadie`, así que el abono y el aviso del duplicado no cambian. La NC y la devolución sobre
+  esa venta siguen sin opciones: sin pagos que cubran algo y sin saldo, `documentoQueCorrige`
+  rechaza antes de mirar `hayDocumentos`. El único lector que cambiaría es
+  `viaDeReembolsoPasarela`: corregiría la fila `nadie` (devolución interna) en vez de emitir sin
+  documento. Pide un REFUND sobre una venta de $0, y una orden de pasarela de $0 no existe; no se
+  tocó. El comentario de `ventas.service.ts` sobre de dónde nace una fila `nadie` se actualizó.
+- **`PromocionesService.validarTopeDelPorcentaje`**: `porcentaje` con valor ≥ 1 → 400 (*"tiene que
+  ser menor al 100 %: para regalar un producto, registralo como cortesía"*), al crear y en un
+  `PATCH` que escribe `valorPorcentaje` o `tipo`, o que la activa (`{ activo: true }`: sin eso,
+  una promo vieja al 100 % pausada se reactivaba desde el toggle y volvía a regalar; lo encontró
+  la revisión independiente). No se reusa `monto-regla.util.ts`: su
+  `validarMonto` es privado, también rechaza el 0 y cambiarlo movería descuentos y recargos
+  (orquestadora). El `nxm` no tiene tope.
+- **Una promo guardada al 100 % antes del tope** (medido en e2e, armada por SQL porque la API ya
+  no la crea): el motor la sigue aplicando (total $0), se puede pausar, y reescribirla a `1.0000`
+  o reactivarla da 400; renombrarla con un `PATCH { nombre }` suelto pasa (medido en unitarios).
+  Desde la pantalla no se renombra: el drawer reenvía valor y tipo, y rebota hasta bajar el valor. No hay datos productivos que migrar; el seed no trae ninguna (su `1.0000` es
+  el 2x1). El e2e de 47ca2df8 que creaba una promo `1.0000` pasó a `0.9999`, que sigue llegando a
+  $0 por un camino que la API permite.
+- **Frontend**: la ayuda del campo porcentaje sale de `PROMOCION_CONFIG.ayudaPorcentaje`. En
+  `porcentaje` dice "menor a 1.00… para regalar, usá la cortesía", y en `nxm` sigue "1.00 = 100%
+  (gratis)". Sin validación gemela: el 400 llega por el toast existente.
+
+### Qué lo fija
+
+- `venta-documentos.service.spec.ts`, "entrega gratuita": la fila `nadie` $0 (boleta, factura de
+  los dos facturadores, online), el país sin boleta en `[]`, la propina sin enlace y el recargo.
+- `venta-documentos.e2e-spec.ts`: lista $0 en POS, online y factura; el recargo de $2.000; la
+  entrega gratuita en `?documento=sin_documento` y en el resumen de emisores del listado.
+- `promociones.service.spec.ts`, "el porcentaje de una promo es menor al 100 %", y
+  `promociones.e2e-spec.ts` (el 400 por el pipe real con `1`, `1.0000` y `100`; la promo vieja).
+- `promociones-form-config.spec.ts`: la ayuda por tipo.
+- **Mutantes, medidos y revertidos:** volver `venta-documentos.service.ts` al de HEAD → 3
+  unitarios y 5 e2e rojos; enlazar los pagos de la entrega gratuita → 1; cortar solo por el bruto
+  (sin `total.isZero()`) → 1 (el recargo); sin tope al crear → 3; sin tope en el `PATCH` → 2;
+  tope en todo `PATCH` → 2 (pausar y renombrar); tope también en `nxm` → 1; sin mirar
+  `activo: true` → 1 (reactivar).
+
+### Qué quedó afuera
+
+- El IVA de la entrega gratuita sobre su valor en plaza, y el 99,99 % y los descuentos que suman
+  más del 100 %: costos aceptados por el owner (arriba).
+- La cota inferior del porcentaje de una promo (0 o negativo): no es lo que se decidió acá.
+
+---
+
 ## Un reembolso de pasarela que se reintenta no sale dos veces por el proveedor (cerrada 2026-10-04)
 
 Sale de [`pendientes.md`](pendientes.md) § 6 (fiscal y de plata, frente propio). La regla viva,

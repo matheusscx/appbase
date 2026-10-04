@@ -16,6 +16,12 @@ export interface PromocionTipoConfig {
   /** `porcentaje` y `nxm`: el descuento en decimal (0.10 = 10%). */
   campoPorcentaje: boolean
   labelPorcentaje?: string
+  /**
+   * La ayuda bajo el porcentaje. Difiere por tipo: en `nxm` 1.00 es la unidad
+   * gratis del 2x1; en `porcentaje` el servidor rechaza 1.00 o más, porque una
+   * promo no regala (un regalo es una cortesía, owner 2026-10-04).
+   */
+  ayudaPorcentaje?: string
   /** Solo `nxm`: cada cuántas unidades se regala una (2x1→2, 3x2→3). */
   campoCadaN: boolean
   /** Solo `precio_fijo`: el precio del combo, en moneda oficial. */
@@ -42,6 +48,7 @@ export const PROMOCION_CONFIG: Record<TipoPromocion, PromocionTipoConfig> = {
   porcentaje: {
     campoPorcentaje: true,
     labelPorcentaje: 'Porcentaje de descuento',
+    ayudaPorcentaje: 'Expresar en decimal y menor a 1.00: 0.10 = 10%. Para regalar un producto, usá la cortesía.',
     campoCadaN: false,
     campoMonto: false,
     scopesMultiples: false,
@@ -50,6 +57,7 @@ export const PROMOCION_CONFIG: Record<TipoPromocion, PromocionTipoConfig> = {
   nxm: {
     campoPorcentaje: true,
     labelPorcentaje: 'Porcentaje sobre la unidad más barata del grupo',
+    ayudaPorcentaje: 'Expresar en decimal: 1.00 = 100% (gratis)',
     campoCadaN: true,
     campoMonto: false,
     scopesMultiples: false,

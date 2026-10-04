@@ -444,6 +444,101 @@ describe('PromocionesService', () => {
 
   // ─── remove ───────────────────────────────────────────────────────────────
 
+  // Una promo no regala: un plato regalado es una cortesía, que paga IVA como
+  // retiro (owner, 2026-10-04, "Topar la promo bajo 100 %"). El `nxm` sí usa
+  // 1.0000: la unidad gratis de un paquete (2x1) es precio, no regalo.
+  describe('el porcentaje de una promo es menor al 100 %', () => {
+    const guardada = (over: Record<string, unknown> = {}) => ({
+      id: 'promo-vieja',
+      tenantId: TENANT,
+      nombre: 'Postre gratis',
+      tipo: 'porcentaje',
+      fechaInicio: '2026-01-01',
+      fechaFin: '2026-12-31',
+      horaInicio: null,
+      horaFin: null,
+      diasSemana: null,
+      canal: null,
+      valorPorcentaje: '1.0000',
+      cadaN: null,
+      valorMonto: null,
+      activo: true,
+      ...over,
+    });
+
+    it.each(['1', '1.0000', '1.5'])(
+      'crear una de porcentaje con %s es 400 y manda a la cortesía',
+      async (valorPorcentaje) => {
+        await expect(
+          service.create(TENANT, makeCreateDto({ valorPorcentaje })),
+        ).rejects.toThrow(/menor al 100 %.*cortesía/);
+        expect(managerMock.save).not.toHaveBeenCalled();
+      },
+    );
+
+    it('el 99,99 % pasa: el tope es el 100 % literal', async () => {
+      await expect(
+        service.create(TENANT, makeCreateDto({ valorPorcentaje: '0.9999' })),
+      ).resolves.toBeDefined();
+    });
+
+    it('un nxm con 1.0000 (el 2x1) pasa', async () => {
+      await expect(
+        service.create(
+          TENANT,
+          makeCreateDto({
+            tipo: 'nxm',
+            valorPorcentaje: '1.0000',
+            cadaN: 2,
+            scopes: [{ tipoScope: 'categoria', categoriaId: CATEGORIA_ID }],
+          }),
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('editar el porcentaje a 100 % es 400', async () => {
+      promocionRepoMock.findOne.mockResolvedValue(
+        guardada({ valorPorcentaje: '0.2000' }),
+      );
+      await expect(
+        service.update(TENANT, 'promo-vieja', { valorPorcentaje: '1' }),
+      ).rejects.toThrow(/menor al 100 %/);
+    });
+
+    it('pasar un 2x1 a porcentaje sin reenviar el valor es 400: quedaría en 100 %', async () => {
+      promocionRepoMock.findOne.mockResolvedValue(
+        guardada({ tipo: 'nxm', cadaN: 2 }),
+      );
+      await expect(
+        service.update(TENANT, 'promo-vieja', {
+          tipo: 'porcentaje',
+          cadaN: null,
+        }),
+      ).rejects.toThrow(/menor al 100 %/);
+    });
+
+    // Una guardada antes del tope tiene que poder apagarse: si el PATCH que no
+    // toca el valor rebotara, no habría forma de pausarla.
+    it.each([
+      ['pausar', { activo: false }],
+      ['renombrar', { nombre: 'Postre de la casa' }],
+    ])('a una ya guardada al 100 %% se la puede %s', async (_caso, dto) => {
+      promocionRepoMock.findOne.mockResolvedValue(guardada());
+      await expect(
+        service.update(TENANT, 'promo-vieja', dto),
+      ).resolves.toBeDefined();
+    });
+
+    // Reactivarla volvería a regalar: el toggle de la pantalla manda
+    // `{ activo: true }` y nada más, así que el tope también mira eso.
+    it('reactivar una pausada al 100 % es 400', async () => {
+      promocionRepoMock.findOne.mockResolvedValue(guardada({ activo: false }));
+      await expect(
+        service.update(TENANT, 'promo-vieja', { activo: true }),
+      ).rejects.toThrow(/menor al 100 %.*cortesía/);
+    });
+  });
+
   describe('remove', () => {
     it('throws NotFoundException when promo not found', async () => {
       promocionRepoMock.findOne.mockResolvedValue(null);

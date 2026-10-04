@@ -339,9 +339,10 @@ export interface DocumentarVentaParams {
     canal: string;
     totalFinal: string;
     /**
-     * El neto antes de descuentos y promociones (`subtotalNeto` del motor).
-     * Distingue la venta que llegó a $0 por una rebaja de la de un producto de
-     * lista $0: solo la primera lleva documento.
+     * El neto antes de descuentos, promociones y recargos (`subtotalNeto` del
+     * motor). Con total $0 distingue la venta que llegó ahí por una rebaja (su
+     * documento por $0) de la entrega gratuita de un producto de lista $0 (una
+     * fila `nadie` por $0).
      */
     totalBruto: string;
     configCalculo: ConfigCalculo | null;
@@ -380,8 +381,8 @@ export class VentaDocumentosService {
    * el emisor sale del medio de cada pago y de `tenants.facturador`.
    *
    * Los documentos se insertan con un solo `save` del array. La suma de los no
-   * duplicados es el `totalFinal` de la venta, salvo la de un producto de lista
-   * $0, que no lleva ninguno.
+   * duplicados es el `totalFinal` de la venta (la de un producto de lista $0
+   * lleva una fila `nadie` por $0).
    */
   async documentarVenta(
     manager: EntityManager,
@@ -390,12 +391,7 @@ export class VentaDocumentosService {
     const { venta, facturador, pagos } = params;
     const total = new Decimal(venta.totalFinal);
 
-    // E6, corregida (Res. Ex. SII 60/2023, resolutivo 1°): la venta que llegó
-    // a $0 por un descuento o una promo lleva su documento por $0, que informa
-    // el descuento ya congelado en sus líneas. La de un producto de lista $0,
-    // sin rebaja, no: es una entrega gratuita y queda como pregunta abierta
-    // (`pendientes.md` § 6, "Una entrega gratuita sin rebaja no deja documento").
-    if (total.lt(0) || new Decimal(venta.totalBruto).lte(0)) return [];
+    if (total.lt(0)) return [];
     // Un país sin boleta sembrada no cambia (spec § 3.3, § 6): sin tipo, un
     // documento `sistema` no significaría nada. Ojo: `esBoleta = false` con
     // `id = null` NO es una factura.
@@ -403,7 +399,23 @@ export class VentaDocumentosService {
     const tipo = venta.tipoDocumentoId;
 
     const borradores: Borrador[] = [];
-    if (venta.canal === 'online') {
+    const esEntregaGratuita =
+      total.isZero() && new Decimal(venta.totalBruto).lte(0);
+    if (esEntregaGratuita) {
+      // La entrega gratuita: un producto de lista $0 que se lleva sin ninguna
+      // rebaja. No es la venta de $0 de la Res. Ex. SII 60/2023 (no hay
+      // descuento que informar): no paga, pero se ve, con la constancia de que
+      // nadie la documenta, en todo canal y tipo (owner, 2026-10-04, "No paga,
+      // pero se ve"). Mira el total y no solo el bruto: `totalBruto` es el
+      // neto antes de los recargos, y un envío sobre un producto de $0 es una
+      // venta cobrada que se documenta como cualquier otra.
+      borradores.push({
+        emisor: 'nadie',
+        tipoDocumentoId: null,
+        estadoEnvio: null,
+        monto: total,
+      });
+    } else if (venta.canal === 'online') {
       // E5: la documenta el sistema, sin mirar el medio (en lo online no hay máquina).
       borradores.push(delSistema(tipo, total));
     } else if (!venta.esBoleta) {
@@ -453,6 +465,9 @@ export class VentaDocumentosService {
       });
     });
     const guardadas = await manager.save(VentaDocumento, filas);
+    // La constancia de la entrega gratuita no cubre ningún pago: el único
+    // posible es uno que fue todo propina.
+    if (esEntregaGratuita) return guardadas;
     // Cada pago del cierre queda enlazado al documento que lo cubre, en la misma
     // transacción (ver `Pago.documentoId`: se enlaza y no se infiere).
     await this.enlazarPagosDelCierre(manager, {

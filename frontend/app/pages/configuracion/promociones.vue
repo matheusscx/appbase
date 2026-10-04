@@ -449,7 +449,7 @@ const columns: TableColumn<Promocion>[] = [
           <UFormField v-if="cfg.campoPorcentaje" :label="cfg.labelPorcentaje ?? 'Porcentaje'" required>
             <UInput v-model="form.valorPorcentaje" inputmode="decimal" placeholder="0.10 (= 10%)" />
             <template #hint>
-              Expresar en decimal: 1.00 = 100% (gratis)
+              {{ cfg.ayudaPorcentaje }}
             </template>
           </UFormField>
 

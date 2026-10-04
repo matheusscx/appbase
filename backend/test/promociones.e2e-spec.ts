@@ -972,6 +972,88 @@ describe('Motor de promociones (e2e)', () => {
     });
   });
 
+  // Una promo no regala: un plato regalado es una cortesía, que paga IVA como
+  // retiro (owner, 2026-10-04, "Topar la promo bajo 100 %"). El tope está en el
+  // borde, no en el motor.
+  describe('El porcentaje de una promo es menor al 100 %', () => {
+    it.each(['1', '1.0000', '100'])(
+      'crear una de porcentaje con %s → 400, y el mensaje manda a la cortesía',
+      async (valorPorcentaje) => {
+        const res = await request(app.getHttpServer())
+          .post('/api/promociones')
+          .set('Authorization', `Bearer ${tokenAdmin}`)
+          .send({
+            nombre: `Promo gratis E2E ${randomUUID()}`,
+            tipo: 'porcentaje',
+            fechaInicio: FECHA_INICIO_AMPLIA,
+            fechaFin: FECHA_FIN_AMPLIA,
+            valorPorcentaje,
+            scopes: [{ tipoScope: 'venta' }],
+          });
+        expect(res.status).toBe(400);
+        expect(JSON.stringify(res.body)).toMatch(/menor al 100 %.*cortesía/);
+      },
+    );
+
+    // Una promo guardada al 100 % antes del tope (en Railway o en una base
+    // local vieja) solo existe de antes del cambio: la API ya no la crea, así
+    // que el estado se arma por SQL. Lo que fija: el motor la sigue aplicando
+    // (no se tocó), se la puede pausar, y no se la puede volver a escribir.
+    it('una guardada al 100 % se sigue aplicando, se puede pausar y no se puede reescribir ni reactivar', async () => {
+      const marca = Date.now();
+      const itemId = (
+        await crearItem(`Item promo vieja E2E ${marca}`, {
+          precioBase: '700',
+          clasificacionTributaria: 'exento',
+        })
+      ).id;
+      const promo = await crearPromo(`Promo vieja E2E ${marca}`, {
+        valorPorcentaje: '0.50',
+        scopes: [{ tipoScope: 'items', itemIds: [itemId] }],
+      });
+      await ds.query(
+        `UPDATE promociones SET valor_porcentaje = 1.0000 WHERE promocion_id = $1`,
+        [promo.id],
+      );
+
+      const antes = await calcular({ lineas: [{ itemId, cantidad: '1' }] });
+      expect(antes.status).toBe(201);
+      expect(
+        Number((antes.body as ResultadoVentaResponse).totales.totalFinal),
+      ).toBe(0);
+
+      const reescribir = await request(app.getHttpServer())
+        .patch(`/api/promociones/${promo.id}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ valorPorcentaje: '1.0000' });
+      expect(reescribir.status).toBe(400);
+      expect(JSON.stringify(reescribir.body)).toMatch(/menor al 100 %/);
+
+      const pausar = await request(app.getHttpServer())
+        .patch(`/api/promociones/${promo.id}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ activo: false });
+      expect(pausar.status).toBe(200);
+
+      // Reactivarla volvería a regalar: el toggle de la pantalla manda solo
+      // `{ activo: true }`, y eso también rebota.
+      const reactivar = await request(app.getHttpServer())
+        .patch(`/api/promociones/${promo.id}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ activo: true });
+      expect(reactivar.status).toBe(400);
+      expect(JSON.stringify(reactivar.body)).toMatch(
+        /menor al 100 %.*cortesía/,
+      );
+
+      const despues = await calcular({ lineas: [{ itemId, cantidad: '1' }] });
+      expect(despues.status).toBe(201);
+      expect(
+        Number((despues.body as ResultadoVentaResponse).totales.totalFinal),
+      ).toBe(700);
+    });
+  });
+
   // ─── Extra (review del motor): góndola ──────────────────────────────────
 
   describe('Góndola (precio_incluye_impuesto) — casos exigidos por la review', () => {

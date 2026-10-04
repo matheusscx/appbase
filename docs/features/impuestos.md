@@ -582,6 +582,18 @@ congela sus baldes en `cuenta_linea_anulaciones` (`monto_afecto`/`monto_exento`/
 Reglas de negocio en [`PRODUCTO.md`](../PRODUCTO.md); diseño en
 [`salones-mesas.md`](./salones-mesas.md#la-cortesía-como-retiro-gravado-2026-10-03).
 
+## La entrega gratuita y la promo que no regala (2026-10-04)
+
+Dos regalos que no pasan por la cortesía, cerrados el mismo día (owner y Sesión de esfuerzo
+máximo; detalle en [ADR-028](../adr/028-emision-registrada-por-venta.md#actualización-2026-10-04--la-entrega-gratuita-se-ve-y-la-promo-no-regala)):
+
+- **El producto de lista $0 que se lleva sin rebaja** (una bolsa, una muestra) **no paga IVA**: la
+  venta deja una fila `nadie` por $0 y aparece en "Sin documento". El sistema no conoce su valor
+  en plaza, que sería la base del retiro (art. 16 b); es el costo aceptado.
+- **Una promo de porcentaje no puede llegar al 100 %**: el plato regalado se registra como
+  cortesía y paga IVA sobre la carta. Lo que todavía deja una línea en $0 sin IVA (un 99,99 %,
+  dos descuentos que suman más del 100 %) queda como uso deliberado.
+
 ## Related Features
 
 - [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md) — el IVA se deriva de

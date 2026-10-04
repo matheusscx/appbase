@@ -47,8 +47,8 @@ lugar por el que pasan POS, salones, online y suscripción).
 ### Qué documentos deja una venta (spec § 3.3)
 
 En este orden: una venta de **$0 lleva su documento por $0 si llegó ahí por un descuento o una
-promoción**, y ninguno si es un producto de lista $0 sin rebaja (E6, corregida el 2026-10-04: ver
-abajo); una venta **sin tipo de documento** (un país sin boleta sembrada: AR, CO, MX) no
+promoción**, y una fila `nadie` por $0 si es un producto de lista $0 sin rebaja (E6, corregida el
+2026-10-04, y la entrega gratuita, decidida el mismo día: ver abajo); una venta **sin tipo de documento** (un país sin boleta sembrada: AR, CO, MX) no
 cambia y **no lleva ningún documento, ni del sistema ni de la máquina ni `nadie`**: el voucher
 que vale como boleta y el "nadie" son semántica chilena, y el frente fiscal de esos países es
 otro, así que un documento `sistema` sin tipo no significaría nada (spec § 3.3 y § 6); la
@@ -72,20 +72,46 @@ owner aprobó el diseño completo, no esa cita; al corregirla decidió (`resuelt
 llega a $0 por un descuento deja su documento"):
 
 - **Con `totalBruto > 0` y total $0** (dos descuentos que suman más del 100 %, uno de 99,99 % que
-  redondea a $0, uno fijo topeado por el piso en cero, una promo del 100 %), la venta sigue la
+  redondea a $0, uno fijo topeado por el piso en cero, una promo del 99,99 %; la del 100 % ya no
+  se puede crear, ver abajo), la venta sigue la
   regla de lo no pagado: boleta del sistema por $0 con los baldes en 0, o un `externo` por $0 sin
   número si el comercio factura por fuera. La factura y la venta online de $0 siguen su propia
   regla, por $0. `totalBruto` es el neto antes de descuentos y promociones que el motor ya calculó
   (`subtotalNeto`): el criterio no toca el motor.
-- **Con `totalBruto = 0`** (un producto de lista $0, sin rebaja) no hay documento: es una entrega
-  gratuita, la misma familia que la cortesía, y queda como pregunta abierta
-  ([`pendientes.md`](../agent/pendientes.md) § 6, "Una entrega gratuita sin rebaja no deja documento").
+- **Con `totalBruto = 0` y total $0** (un producto de lista $0, sin rebaja: la entrega gratuita)
+  queda **una fila `nadie` por $0**, en todo canal y tipo: no paga, pero se ve (owner,
+  2026-10-04, *"No paga, pero se ve"*, por sobre *"Que pague IVA"* y *"Boleta de $0"*). Ver
+  "Actualización 2026-10-04" abajo.
 - **No hay columna nueva.** Lo que hay que congelar del hecho fiscal es el descuento, y la venta ya
   lo congela (`venta_detalles.subtotal` y `descuento_aplicado`, `ventas.total_descuentos`,
   `ventas_descuentos`, `ventas_promociones`). Cómo se informa en el XML (la zona de descuentos de
   la Res. Ex. SII 74/2020, o el detalle) es formato de emisión: lo hace el facturador (ADR-010).
 - Una venta de $0 no tiene pagos ni saldo, así que no se abona ni se corrige por ningún pago:
   el documento no cambia nada de la NC ni del abono.
+
+### Actualización 2026-10-04 — la entrega gratuita se ve, y la promo no regala
+
+Sale de `pendientes.md` § 6 → [`resueltos.md`](../agent/resueltos.md), "La entrega gratuita sin
+rebaja se ve, y la promo no regala"; spec
+[`2026-10-04-entrega-gratuita-y-promo-100-design.md`](../superpowers/specs/2026-10-04-entrega-gratuita-y-promo-100-design.md).
+
+- **La entrega gratuita deja una fila `nadie` por $0**, sin tipo, sin baldes y sin pago enlazado
+  (un pago que fue todo propina no lo cubre). La Res. Ex. SII 60/2023 pide la boleta de $0 cuando
+  el total sale de un descuento, y acá no hay descuento que informar. `nadie` es el valor que
+  esta tabla ya usa para "nadie lo documenta", así que el filtro "Sin documento" y el detalle la
+  leen sin cambios (decisión técnica de la Sesión de esfuerzo máximo, por sobre ampliar el
+  filtro). **Costo aceptado:** si el SII la lee como entrega promocional (art. 8 d inc. 3), el
+  IVA iría sobre su valor en plaza (art. 16 b), que el sistema no conoce. Vale también para la
+  bolsa de $0 que va dentro de una compra: queda a $0 en la boleta (Oficio 1.420/2010, punto 7,
+  aceptado como costo en la misma pregunta).
+- **El corte mira el total, no solo el bruto.** `totalBruto` es el `subtotalNeto` del motor, antes
+  de los recargos: entre el 2026-10-04 (47ca2df8) y este cambio, un envío de $2.000 sobre un
+  producto de $0 dejaba una venta **cobrada** sin ningún documento. Ahora es entrega gratuita
+  solo con total $0 **y** bruto ≤ 0; con total > 0, la venta va por su rama (E1).
+- **La promo de porcentaje es menor al 100 %** (owner, *"Topar la promo bajo 100 %"*): el mismo
+  plato regalado pagaba IVA como cortesía y quedaba en una boleta de $0 sin IVA con una promo del
+  100 %. Ver [`motor-promociones.md`](../features/motor-promociones.md). No cierra el 99,99 % ni
+  dos descuentos que suman más del 100 % (costo aceptado: uso deliberado).
 
 ### Por qué el documento nace con la entrega
 

@@ -339,6 +339,9 @@ promoción es un **descuento sobre líneas que ya existen**, medible por separad
 cambia según la hora— rompería la invariante de precio propio fijo del ADR-012 y dejaría el
 descuento por horario sin medición propia.
 
+**Una promoción no regala** (owner, 2026-10-04): la de porcentaje es menor al 100 %. Un producto
+regalado es una cortesía, que paga IVA (§ 10).
+
 **Métodos de pago** — catálogo global habilitado por tenant (`tenant_metodo_pago`)
 
 ---
@@ -1086,8 +1089,17 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   descuento se emite igual, informando el descuento (Res. Ex. SII 60/2023). Reemplaza a "una venta
   de $0 no lleva documento", que citaba esa resolución a medias (owner, 2026-10-04);
 - **un producto que vale $0 en el catálogo** (una muestra, una bolsa de regalo) y se lleva sin
-  ninguna rebaja **sigue sin documento**: es una entrega gratuita, como la cortesía, y queda como
-  pregunta abierta (owner, 2026-10-04, `pendientes.md` § 6).
+  ninguna rebaja **no paga IVA, pero se ve**: la venta queda "Sin documento", por $0, y aparece en
+  ese filtro del listado (owner, 2026-10-04, *"No paga, pero se ve"*). Dentro de una compra, la
+  bolsa va a $0 en la boleta. **Costo aceptado:** si el SII la lee como entrega promocional, el
+  IVA iría sobre su valor de mercado, que el sistema no conoce. Si a ese producto se le suma un
+  recargo (un envío de $2.000), es una venta cobrada y lleva su documento como cualquiera;
+- **una promoción de porcentaje no regala**: no puede llegar al 100 % (*"Topar la promo bajo
+  100 %"*, owner, 2026-10-04). Para regalar un plato está la cortesía, que paga IVA sobre la carta;
+  con una promo del 100 % el mismo plato quedaba en una boleta de $0 sin IVA, y lo elegía el
+  cajero. El 2x1 sigue igual (la unidad gratis de un paquete es precio). **Costo aceptado:** un
+  descuento de 99,99 % o dos que suman más del 100 % todavía dejan una línea en $0 sin IVA, y una
+  campaña de "gratis" ya no se arma como promo automática.
 
 Todo esto lo decidió el owner el 2026-10-01 con las investigaciones de
 `docs/agent/investigaciones/2026-10-01-*`.

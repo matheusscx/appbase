@@ -64,7 +64,7 @@ Las que salieron de este diseño:
 | E3 | Un comercio nuevo trae **"emite el sistema"** en todos los medios. Es el error barato: se corrige con NC. | Owner, AskUserQuestion 2026-10-01 |
 | E4 | La regla va en **`tenant_metodo_pago`**, no en `metodos_pago`. La decisión decía `metodos_pago`, pero esa tabla es global: la regla sería la misma para todos los comercios. La pantalla es la que se decidió. | Sesión del frente, por lo medido en § 1; aprobado con el diseño |
 | E5 | **La venta online la documenta el sistema**, sin mirar la regla del medio. Si la mirara, "Tarjeta de crédito → la máquina" la dejaría sin documento, porque en lo online no hay máquina. | Derivada de la decisión del owner sobre la venta online; aprobada con el diseño |
-| E6 | ~~**Una venta de $0 no lleva documento**: el mínimo de la boleta es $1 (Res. Ex. SII N°60/2023).~~ **Corregida el 2026-10-04**: la venta que llegó a $0 por un descuento o una promoción (`totalBruto > 0`) lleva su documento por $0 con la regla de lo no pagado; la de un producto de lista $0 sin rebaja, ninguno. La misma resolución (resolutivo 1°, 2° párrafo) manda emitir la boleta de $0 informando el descuento (ADR-028, "La venta de $0"). | Sesión del frente; aprobado con el diseño. La corrección: owner, 2026-10-04, AskUserQuestion del frente de la venta de $0, recomendada |
+| E6 | ~~**Una venta de $0 no lleva documento**: el mínimo de la boleta es $1 (Res. Ex. SII N°60/2023).~~ **Corregida el 2026-10-04**: la venta que llegó a $0 por un descuento o una promoción (`totalBruto > 0`) lleva su documento por $0 con la regla de lo no pagado; la de un producto de lista $0 sin rebaja, una fila `nadie` por $0 (entrega gratuita, 2026-10-04). La misma resolución (resolutivo 1°, 2° párrafo) manda emitir la boleta de $0 informando el descuento (ADR-028, "La venta de $0"). | Sesión del frente; aprobado con el diseño. La corrección: owner, 2026-10-04, AskUserQuestion del frente de la venta de $0, recomendada |
 | E7 | **Una corrección se reconoce por `venta_referencia_id`**, no por `es_nota_credito`. La devolución interna no es un documento tributario y no lleva ese tipo. | Sesión del frente; aprobado con el diseño |
 | E8 | **Una boleta del sistema solo armada, sin enviar al SII, no cuenta como emitida para anular.** La venta se anula y esa boleta queda descartada. Cuando el sistema envíe al SII, lo enviado va por NC. Que ninguna máquina haya emitido sigue siendo condición. | Owner, AskUserQuestion 2026-10-01 (`ab13bcd0`) |
 | E9 | **La declaración de E2 se guarda por comercio**, en `tenants.facturador` (`'sistema' \| 'externo'`, default `'sistema'`, que es la conducta de hoy), y se edita en la misma pantalla de métodos de pago. El documento hecho por fuera es un emisor más, **`externo`**, con el tipo del catálogo (factura o boleta) y su número; el de la deuda lleva el tipo de la venta. | Sesión del frente: el owner dejó el dónde y el cómo como diseño (orquestadora, `ab13bcd0`) |
@@ -118,8 +118,8 @@ Tabla nueva **`venta_documentos`**, una fila por documento:
   venta, con el mismo cuantizador y el mismo reparto que la NC por monto
   (`nota-credito-composicion.ts`). El residuo de cuantización va igual que en la NC. Lo que
   congela es lo que el emisor futuro lee sin recalcular.
-- **Los documentos de una venta cubren su total desde que se crea** (E1), salvo la de un
-  producto de lista $0 (E6). En POS y salones, crear la venta **es** la entrega: el sistema no tiene un paso de
+- **Los documentos de una venta cubren su total desde que se crea** (E1); la de un producto de
+  lista $0 lleva una fila `nadie` por $0 (E6 y la entrega gratuita, 2026-10-04). En POS y salones, crear la venta **es** la entrega: el sistema no tiene un paso de
   entrega aparte. La única excepción es el voucher duplicado de E1b, que se registra marcado y no
   cuenta para la cobertura.
 - `es_duplicado` (bool, default `false`): un documento de la máquina por un cobro de deuda ya
@@ -132,7 +132,9 @@ registrar los pagos del cierre. El cliente nunca manda quién emitió.
 
 1. **Total $0**: con `totalBruto > 0` (lo rebajó un descuento o una promo), un documento por $0
    según la rama que le toque abajo (online, factura, o boleta → lo no pagado según el
-   facturador); con `totalBruto = 0` (producto de lista $0), sin documento (E6).
+   facturador); con `totalBruto = 0` (producto de lista $0, la entrega gratuita), una fila `nadie`
+   por $0 (owner, 2026-10-04, ADR-028). Con total > 0 y `totalBruto = 0` (un recargo sobre un
+   producto de $0) no es total $0: va por su rama.
 2. **Online** (`canal = 'online'`): un documento `sistema` / `armado` por el total, con la boleta del
    país, sin mirar el medio (E5). La venta online pasa a nacer con ese `tipo_documento_id`. Es un
    pago anterior a la entrega, y documentarlo antes es válido (Oficio SII 3.008/2016); el momento

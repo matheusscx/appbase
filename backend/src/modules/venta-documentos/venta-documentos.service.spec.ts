@@ -247,13 +247,77 @@ describe('VentaDocumentosService.documentarVenta', () => {
       expect(docs.map((d) => d.emisor)).toEqual(['sistema']);
       expect(queryEnlace).toHaveBeenCalledTimes(1);
     });
+  });
 
-    it('un producto de lista $0, sin ninguna rebaja, sigue sin documento', async () => {
+  // La entrega gratuita: un producto de lista $0 que se lleva sin ninguna
+  // rebaja. No paga IVA, pero se ve (owner, 2026-10-04, "No paga, pero se ve"):
+  // una fila `nadie` por $0, la que el filtro "Sin documento" ya lee.
+  describe('entrega gratuita (producto de lista $0, sin rebaja)', () => {
+    const gratuita = (
+      venta: Partial<DocumentarVentaParams['venta']> = {},
+      resto: Partial<Omit<DocumentarVentaParams, 'venta'>> = {},
+    ) =>
+      params({
+        venta: { totalFinal: '0.0000', totalBruto: '0.0000', ...venta },
+        porciones: [{ clasificacion: 'afecto', total: '0', impuesto: '0' }],
+        ...resto,
+      });
+    const forma = (docs: VentaDocumento[]) =>
+      docs.map((d) => [
+        d.emisor,
+        d.tipoDocumentoId,
+        d.estadoEnvio,
+        d.monto,
+        d.montoAfecto,
+        d.pagoId,
+      ]);
+    const NADIE_EN_CERO = [['nadie', null, null, '0.0000', null, null]];
+
+    it('deja una sola fila nadie por $0, sin tipo ni baldes', async () => {
+      const { docs, save } = await documentar(gratuita());
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(forma(docs)).toEqual(NADIE_EN_CERO);
+    });
+
+    it('igual con facturador externo, en una factura y en la online', async () => {
+      for (const [venta, facturador] of [
+        [{}, 'externo'],
+        [{ tipoDocumentoId: FACTURA, esBoleta: false }, 'sistema'],
+        [{ tipoDocumentoId: FACTURA, esBoleta: false }, 'externo'],
+        [{ canal: 'online' }, 'sistema'],
+      ] as const) {
+        const { docs } = await documentar(gratuita(venta, { facturador }));
+        expect(forma(docs)).toEqual(NADIE_EN_CERO);
+      }
+    });
+
+    it('un país sin boleta sigue sin ninguna fila', async () => {
       const { docs, save } = await documentar(
-        params({ venta: { totalFinal: '0.0000', totalBruto: '0.0000' } }),
+        gratuita({ tipoDocumentoId: null, esBoleta: false }),
       );
       expect(docs).toEqual([]);
       expect(save).not.toHaveBeenCalled();
+    });
+
+    it('un pago que fue todo propina no se enlaza a la fila de la entrega gratuita', async () => {
+      const { queryEnlace } = await documentar(
+        gratuita({}, { pagos: [pago('a', 'nadie', 0)] }),
+      );
+      expect(queryEnlace).not.toHaveBeenCalled();
+    });
+
+    // `totalBruto` es el `subtotalNeto` del motor, antes de los recargos: un
+    // envío de $2.000 sobre un producto de $0 deja una venta cobrada con bruto 0.
+    it('con un recargo que la deja en más de $0 se documenta como cualquier venta cobrada', async () => {
+      const { docs } = await documentar(
+        params({
+          venta: { totalFinal: '2000.0000', totalBruto: '0.0000' },
+          pagos: [pago('a', 'sistema', 2000)],
+        }),
+      );
+      expect(docs.map((d) => [d.emisor, d.monto])).toEqual([
+        ['sistema', '2000.0000'],
+      ]);
     });
   });
 
@@ -266,32 +330,6 @@ describe('VentaDocumentosService.documentarVenta', () => {
     );
     expect(docs).toEqual([]);
     expect(save).not.toHaveBeenCalled();
-  });
-
-  it('el producto de lista $0 sigue sin documento también en una factura (de cualquiera de los dos facturadores)', async () => {
-    for (const facturador of ['sistema', 'externo'] as const) {
-      const { docs } = await documentar(
-        params({
-          venta: {
-            totalFinal: '0.0000',
-            totalBruto: '0.0000',
-            tipoDocumentoId: FACTURA,
-            esBoleta: false,
-          },
-          facturador,
-        }),
-      );
-      expect(docs).toEqual([]);
-    }
-  });
-
-  it('el producto de lista $0 gana sobre el canal online', async () => {
-    const { docs } = await documentar(
-      params({
-        venta: { canal: 'online', totalFinal: '0.0000', totalBruto: '0.0000' },
-      }),
-    );
-    expect(docs).toEqual([]);
   });
 
   describe('online (E5)', () => {
@@ -918,12 +956,12 @@ describe('VentaDocumentosService.documentarVenta: cada pago queda enlazado a su 
     expect(pares).toEqual([['pago-ef', 'doc-1']]);
   });
 
-  it.each([
-    ['producto de lista $0', { totalFinal: '0.0000', totalBruto: '0.0000' }],
-    ['país sin boleta', { tipoDocumentoId: null }],
-  ])('%s: sin documentos no hay nada que enlazar', async (_n, venta) => {
+  it('país sin boleta: sin documentos no hay nada que enlazar', async () => {
     const { llamadas } = await enlaces(
-      params({ venta, pagos: [pago('a', 'sistema', 100000)] }),
+      params({
+        venta: { tipoDocumentoId: null },
+        pagos: [pago('a', 'sistema', 100000)],
+      }),
     );
 
     expect(llamadas).toHaveLength(0);

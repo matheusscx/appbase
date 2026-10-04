@@ -43,6 +43,7 @@ const BRUNO = {
 const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
 // "Directo": descuento de valor plano sin condiciones (`seedTiposRegla`).
 const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
+const TIPO_RECARGO_GENERAL = '550e8400-e29b-41d4-a716-446655440122';
 
 interface Documento {
   emisor: string;
@@ -82,7 +83,9 @@ describe('Documentos de la venta (e2e)', () => {
   let itemAfecto100: string; // 100.000 neto → 119.000
   let itemGratis: string;
   let item5000: string; // 5.000 con IVA incluido: 4.202 neto
-  let itemPromo100: string; // 5.000 con IVA incluido y una promo del 100 %
+  // 5.000 con IVA incluido y una promo del 99,99 %, que redondea a $0. La del
+  // 100 % ya no se puede crear ("Topar la promo bajo 100 %", owner, 2026-10-04).
+  let itemPromo100: string;
 
   const patchMetodo = async (metodoPagoId: string, emisor: string) => {
     const res = await request(app.getHttpServer())
@@ -207,17 +210,22 @@ describe('Documentos de la venta (e2e)', () => {
     itemAfecto100 = await crearItem('Doc afecto 100k E2E', '100000', 'afecto');
     itemGratis = await crearItem('Doc gratis E2E', '0', 'exento');
     item5000 = await crearItem('Doc 5000 E2E', '5000', 'afecto', true);
-    itemPromo100 = await crearItem('Doc promo 100 E2E', '5000', 'afecto', true);
+    itemPromo100 = await crearItem(
+      'Doc promo 9999 E2E',
+      '5000',
+      'afecto',
+      true,
+    );
     // La promo se acota a su ítem propio: no toca a nadie más del seed.
     const promo = await request(app.getHttpServer())
       .post('/api/promociones')
       .set('Authorization', `Bearer ${token}`)
       .send({
-        nombre: `Doc promo 100 E2E ${Date.now()}`,
+        nombre: `Doc promo 9999 E2E ${Date.now()}`,
         tipo: 'porcentaje',
         fechaInicio: '2020-01-01',
         fechaFin: '2035-12-31',
-        valorPorcentaje: '1.0000',
+        valorPorcentaje: '0.9999',
         scopes: [{ tipoScope: 'items', itemIds: [itemPromo100] }],
       });
     expect(promo.status).toBe(201);
@@ -491,7 +499,7 @@ describe('Documentos de la venta (e2e)', () => {
       expect(suma(docs)).toBe(100000);
     });
 
-    it('una cuenta que una promo del 100 % dejó en $0 cierra con la boleta del sistema por $0', async () => {
+    it('una cuenta que una promo del 99,99 % dejó en $0 cierra con la boleta del sistema por $0', async () => {
       await request(app.getHttpServer())
         .post('/api/sesiones-garzon/cerrar')
         .set('Authorization', `Bearer ${token}`)
@@ -795,7 +803,7 @@ describe('Documentos de la venta (e2e)', () => {
       },
     );
 
-    it('un producto de $5.000 con una promo del 100 % deja la boleta del sistema por $0', async () => {
+    it('un producto de $5.000 con una promo del 99,99 % deja la boleta del sistema por $0', async () => {
       const venta = await vender({
         lineas: [{ itemId: itemPromo100, cantidad: '1' }],
       });
@@ -840,22 +848,75 @@ describe('Documentos de la venta (e2e)', () => {
     });
 
     // Un precio de lista $0 no es un monto que algo rebajó: es una entrega
-    // gratuita, pregunta abierta en `pendientes.md` § 6 ("Una entrega gratuita
-    // sin rebaja no deja documento").
-    it('un producto de lista $0, sin rebaja, sigue sin documento', async () => {
+    // gratuita. No paga, pero se ve (owner, 2026-10-04): una fila `nadie` por
+    // $0, que es la que lee el filtro "Sin documento".
+    const NADIE_EN_CERO = {
+      emisor: 'nadie',
+      tipo_documento_id: null,
+      estado_envio: null,
+      monto: '0.0000',
+      monto_afecto: null,
+      pago_id: null,
+    };
+
+    it('un producto de lista $0, sin rebaja, deja una fila nadie por $0', async () => {
       const venta = await vender({
         lineas: [{ itemId: itemGratis, cantidad: '1' }],
       });
       expect(venta.totalFinal).toBe('0.0000');
-      expect(await documentosDe(venta.id)).toEqual([]);
+      const docs = await documentosDe(venta.id);
+      expect(docs).toHaveLength(1);
+      expect(docs[0]).toMatchObject(NADIE_EN_CERO);
     });
 
-    it('tampoco la online de un producto de lista $0', async () => {
-      const venta = await vender({
-        canal: 'online',
-        lineas: [{ itemId: itemGratis, cantidad: '1' }],
-      });
-      expect(await documentosDe(venta.id)).toEqual([]);
+    it('también la online y la factura de un producto de lista $0', async () => {
+      for (const body of [
+        { canal: 'online' },
+        { tipoDocumentoId: FACTURA_ID, customer: RECEPTOR },
+      ]) {
+        const venta = await vender({
+          ...body,
+          lineas: [{ itemId: itemGratis, cantidad: '1' }],
+        });
+        const docs = await documentosDe(venta.id);
+        expect(docs).toHaveLength(1);
+        expect(docs[0]).toMatchObject(NADIE_EN_CERO);
+      }
+    });
+
+    // `totalBruto` es el neto antes de los recargos: un envío de $2.000 sobre un
+    // producto de $0 es una venta cobrada, y se documenta como cualquiera.
+    it('un producto de lista $0 con un recargo de $2.000 deja la boleta del sistema por $2.000', async () => {
+      const recargo = await request(app.getHttpServer())
+        .post('/api/recargos')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Doc envío E2E ${randomUUID()}`,
+          tipoReglaId: TIPO_RECARGO_GENERAL,
+          modo: 'monto_fijo',
+          valorMonto: '2000',
+          activo: true,
+        });
+      expect(recargo.status).toBe(201);
+      const recargoId = (recargo.body as { id: string }).id;
+      try {
+        const venta = await vender({
+          lineas: [
+            { itemId: itemGratis, cantidad: '1', recargoIds: [recargoId] },
+          ],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000' }],
+        });
+        expect(venta.totalFinal).toBe('2000.0000');
+        const docs = await documentosDe(venta.id);
+        expect(
+          docs.map((d) => [d.emisor, d.tipo_documento_id, d.monto]),
+        ).toEqual([['sistema', BOLETA_ID, '2000.0000']]);
+      } finally {
+        // El recargo es del tenant que comparten todas las suites.
+        await request(app.getHttpServer())
+          .delete(`/api/recargos/${recargoId}`)
+          .set('Authorization', `Bearer ${token}`);
+      }
     });
   });
 
@@ -2847,6 +2908,13 @@ describe('Documentos de la venta (e2e)', () => {
         [TENANT_ID, v.canceladaConNadie],
       );
 
+      // La entrega gratuita (un producto de lista $0, sin rebaja) no paga, pero
+      // se ve: su fila `nadie` por $0 la pone en "Sin documento" (owner,
+      // 2026-10-04, "No paga, pero se ve").
+      v.entregaGratuita = (
+        await vender({ lineas: [{ itemId: itemGratis, cantidad: '1' }] })
+      ).id;
+
       // Un documento dado de baja (soft delete) no cuenta. Ningún camino de la
       // API los da de baja hoy: el dato se arma por SQL, igual que en "lo que ya
       // emitió alguien bloquea".
@@ -2866,7 +2934,7 @@ describe('Documentos de la venta (e2e)', () => {
       ['sistema', ['duplicado', 'mixto', 'sistema']],
       ['maquina', ['maquinaConNumero', 'maquinaSinNumero', 'mixto']],
       ['externo', ['externo', 'externoConNumero']],
-      ['sin_documento', ['nadie']],
+      ['sin_documento', ['entregaGratuita', 'nadie']],
       ['duplicado', ['duplicado']],
     ])(
       'documento=%s trae exactamente sus ventas, sin las correcciones, canceladas, descartes ni bajas',
@@ -2979,6 +3047,11 @@ describe('Documentos de la venta (e2e)', () => {
         tieneDuplicado: false,
       });
       expect(resumen('nadie')).toEqual({
+        emisores: ['nadie'],
+        tieneDuplicado: false,
+      });
+      // La entrega gratuita se lee igual: el chip "Sin documento" del listado.
+      expect(resumen('entregaGratuita')).toEqual({
         emisores: ['nadie'],
         tieneDuplicado: false,
       });

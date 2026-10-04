@@ -48,8 +48,8 @@ export class Pago {
    * el voucher duplicado). **Se enlaza y no se infiere** porque el emisor de un
    * medio puede cambiar entre la venta y el reembolso, y la corrección tiene que
    * seguir cayendo en el documento que de verdad cubrió ese pago. Nulo si la venta
-   * no tiene documentos (producto de lista $0, país sin boleta) o el pago no cubrió
-   * nada de la venta.
+   * no tiene documentos (país sin boleta), si es una entrega gratuita (su fila
+   * `nadie` por $0 no cubre ningún pago) o si el pago no cubrió nada de la venta.
    */
   @Column({ name: 'documento_id', type: 'uuid', nullable: true })
   documentoId: string | null;
