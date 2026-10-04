@@ -192,6 +192,9 @@ destapa una decisión que no es mía).
     - **Otro caso, 2026-10-04:** `20261004-152722-interesting-hugle-9a753a-74264` (22 líneas `index`
       de 9 contra 8 caracteres, 0 de contenido; recibo escrito segundos antes del commit, con
       `in-pack` 66 969 y `count` 2 193). Se reescribió el recibo sobre el mismo diff revisado.
+    - **Otro caso, 2026-10-04:** `20261004-194906-pensive-hugle-d7c7c5-43294` (15 líneas `index`
+      de 9 contra 8 caracteres, 0 de contenido; recibo escrito minutos antes del commit, con
+      `in-pack` 66 969 y `count` 2 562). Se reescribió el recibo sobre el mismo diff revisado.
 
 - [ ] **Un `itemGrupoId` en mayúsculas en `PATCH /grupos-modificadores/:id/overrides` da un 400
   que miente: "item_grupo_id no válido para este grupo"** (backend,
