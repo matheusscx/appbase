@@ -222,3 +222,20 @@ test('@smoke la fila del garzón en "Por garzón" muestra el % de lo pedido, y a
   )
   expect(overflowHorizontal, 'la página no debería scrollear horizontalmente a 375 px').toBe(false)
 })
+
+test('la cortesía muestra su IVA congelado en el detalle y la tarjeta de Cortesías lo suma', async ({ page }) => {
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
+
+  await page.goto('/salones/anulaciones')
+
+  // La cortesía del `beforeAll`: 1 × $1.000 neto, afecto → IVA $190 (spec
+  // 2026-10-03, retiro gravado). El detalle es la ÚLTIMA tabla de la pantalla.
+  const filaCortesia = page.locator('table').last().locator('tbody tr', { hasText: escenario.itemNombre! })
+  await expect(filaCortesia).toBeVisible()
+  await expect(filaCortesia).toContainText('$190')
+
+  // La tarjeta suma todas las cortesías del día de negocio, así que el monto
+  // exacto depende de otros specs; pero incluye la de este, así que nunca es
+  // $0 (lo que mostraría si no sumara) ni "…" (cargando).
+  await expect(page.locator('[data-qa="anulaciones-iva-cortesias"]')).toHaveText(/IVA: \$[1-9]/)
+})
