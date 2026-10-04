@@ -17,22 +17,22 @@ esfuerzo máximo.
 
 ## Backend
 
-- [ ] e2e en rojo: el repro pasa a test (opciones 83.000 + `sinConfirmar`, 83.001 → 400, "salió" → corrección entra; "no salió" → vuelve a 100.000)
-- [ ] `corregibles`: columna `sin_confirmar` (REFUND `iniciada`/`error`, sin el excluido) y resta con un único pago
-- [ ] `excluirReembolsoId` por `devolvibleDelPagoUnico` → `exigirTopeDelReembolsoPasarela` → handler → `verificarReembolsable(propio)`
-- [ ] `OpcionDevolucion.sinConfirmar`
-- [ ] Unitarios: fixture de `venta-documentos.service.spec.ts`, caso de la resta y de la exclusión
-- [ ] Mutantes: sin la resta del sin confirmar (mueren los e2e del POS); sin la exclusión (muere el REFUND total)
+- [x] e2e en rojo: el repro pasa a test (opciones 83.000 + `sinConfirmar`, 83.001 → 400, "salió" → corrección entra; "no salió" → vuelve a 100.000)
+- [x] `corregibles`: columna `sin_confirmar` (REFUND `iniciada`/`error`, sin el excluido) y resta con un único pago
+- [x] `excluirReembolsoId` por `devolvibleDelPagoUnico` → `exigirTopeDelReembolsoPasarela` → handler → `verificarReembolsable(propio)`
+- [x] `OpcionDevolucion.sinConfirmar`
+- [x] Unitarios: fixture de `venta-documentos.service.spec.ts`, caso de la resta y de la exclusión
+- [x] Mutantes: sin la resta del sin confirmar (mueren los e2e del POS); sin la exclusión (muere el REFUND total)
 
 ## Frontend
 
-- [ ] `OpcionDevolucion.sinConfirmar` en `useDocumentosVenta.ts`; descripción de la opción en `NotaCreditoModal.vue`
+- [x] `OpcionDevolucion.sinConfirmar` en `useDocumentosVenta.ts`; descripción de la opción en `NotaCreditoModal.vue`
 - [ ] Spec del modal; Playwright entero
 
 ## Verification
 
 - [ ] Gate entero (`verify-feature`), con Playwright sobre `entorno.sh stack`
-- [ ] Docs: `ventas.md`, `pasarela-pagos.md`, ADR-029 (consecuencia), `ESTADO.md`; la entrada pasa a `resueltos.md`; este plan y la spec se borran
+- [x] Docs: `ventas.md`, `pasarela-pagos.md`, ADR-029 (consecuencia), `ESTADO.md`; la entrada pasa a `resueltos.md`
 
 ## Decisions / Open questions
 

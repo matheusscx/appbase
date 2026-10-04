@@ -543,10 +543,31 @@ describe('CobrosService', () => {
           CLAVE,
         );
 
-        expect(reembolsoHandler.exigirTopeDelReembolso).toHaveBeenCalledWith(
-          manager,
-          { tenantId: 't-1', ventaId: 'venta-1', monto: '1100' },
-        );
+        // tx0 sin REFUND propio; tx1 excluye el suyo, ya en `iniciada`, por id:
+        // los demás sin confirmar gastan el tope (ADR-029).
+        const [refund] = deps.transacciones.registrar.mock.results;
+        const propio = ((await refund.value) as { transaccionId: string })
+          .transaccionId;
+        expect(reembolsoHandler.exigirTopeDelReembolso.mock.calls).toEqual([
+          [
+            manager,
+            {
+              tenantId: 't-1',
+              ventaId: 'venta-1',
+              monto: '1100',
+              excluirReembolsoId: null,
+            },
+          ],
+          [
+            manager,
+            {
+              tenantId: 't-1',
+              ventaId: 'venta-1',
+              monto: '1100',
+              excluirReembolsoId: propio,
+            },
+          ],
+        ]);
         expect(
           reembolsoHandler.exigirTopeDelReembolso.mock.invocationCallOrder[0],
         ).toBeLessThan(provider.reembolsar.mock.invocationCallOrder[0]);

@@ -1002,12 +1002,21 @@ export class CobrosService {
     // orden dentro de una transacción que ya tiene `FOR UPDATE` sobre la venta
     // cierra el ciclo. Sin handler (ventas no registrado) no hay lado de ventas
     // que topar: el aviso de `aplicarPostReembolso` ya lo dice.
+    //
+    // Los REFUND sin confirmar de la venta gastan ese tope (pudieron haber
+    // devuelto la plata); en tx1 el propio ya está en `iniciada` y no se cuenta a
+    // sí mismo: por id (`propio`), así que otro sin confirmar sí cuenta.
     const handler = this.reembolsoRegistry.get();
     const ventaId = orden.ventaId;
     if (ventaId && handler)
       // `db.transaccion` reusa la activa: es para tener su manager.
       await this.db.transaccion((manager) =>
-        handler.exigirTopeDelReembolso(manager, { tenantId, ventaId, monto }),
+        handler.exigirTopeDelReembolso(manager, {
+          tenantId,
+          ventaId,
+          monto,
+          excluirReembolsoId: propio,
+        }),
       );
     return { orden, autorizacion, yaReembolsado };
   }

@@ -2045,6 +2045,8 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
     devuelto: string;
     /** Lo que la pasarela devolvió y todavía no tiene su corrección (REFUND con `correccion_venta_id` NULL). */
     reembolsado_sin_correccion: string;
+    /** Los REFUND sin confirmar de la venta (`iniciada`/`error`), sin el que se excluye. */
+    sin_confirmar: string;
   }
   const doc = (
     id: string,
@@ -2072,6 +2074,7 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
     aplicado_venta: aplicado.toFixed(4),
     devuelto: '0.0000',
     reembolsado_sin_correccion: '0.0000',
+    sin_confirmar: '0.0000',
     ...extra,
   });
   /** Las tres lecturas, por el nombre de la tabla que cada una consulta. */
@@ -2185,7 +2188,7 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
       expect(sql).toMatch(/c\.venta_referencia_id = \$1/);
       expect(sql).toMatch(/c\.tenant_id = \$2/);
       expect(sql).toMatch(/c\.eliminado_el IS NULL/);
-      expect(binds).toEqual([VENTA, TENANT]);
+      expect(binds).toEqual([VENTA, TENANT, null]);
     });
 
     it('lo que ese pago ya devolvió por completo deja el tope en cero', async () => {
@@ -2323,7 +2326,7 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
         expect(sql).toMatch(/o\.venta_id = \$1/);
         expect(sql).toMatch(/o\.tenant_id = \$2/);
         expect(sql).toMatch(/o\.eliminado_el IS NULL/);
-        expect(binds).toEqual([VENTA, TENANT]);
+        expect(binds).toEqual([VENTA, TENANT, null]);
       });
 
       it('la corrección del propio REFUND no se frena a sí misma: la vía pasarela ni lee los pagos, así que su REFUND sin ligar no le cuenta', async () => {
@@ -2341,6 +2344,88 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
             (sql as string).includes('FROM pagos p'),
           ),
         ).toHaveLength(0);
+      });
+    });
+
+    // Decisión del owner (2026-10-04): un REFUND sin confirmar pudo haber devuelto
+    // la plata y nada lo aclara solo, así que gasta el tope hasta que se aclare.
+    describe('lo que la pasarela pudo haber devuelto: los REFUND sin confirmar', () => {
+      const unPago = (extra: Partial<PagoFila>) =>
+        lector(
+          100000,
+          [doc('d-voucher', 'maquina', 100000)],
+          [pagoFila('p-tarjeta', 100000, 'd-voucher', extra)],
+        );
+
+      it('con un único pago lo resta, y la opción dice cuánto: 100.000 − 17.000 = 83.000', async () => {
+        const l = unPago({ sin_confirmar: '17000.000000' });
+
+        expect(await unico(l)).toBe('83000.0000');
+        expect((await resolver(l, via('p-tarjeta'))).devolvibleDelPago).toBe(
+          '83000.0000',
+        );
+        const opciones = await new VentaDocumentosService().opcionesDevolucion(
+          l as unknown as EntityManager,
+          { tenantId: TENANT, ventaId: VENTA },
+        );
+        expect(
+          opciones.map(({ monto, sinConfirmar }) => ({ monto, sinConfirmar })),
+        ).toEqual([{ monto: '83000.0000', sinConfirmar: '17000.0000' }]);
+      });
+
+      it('suma con lo aprobado sin corrección y lo ya devuelto: 100.000 − 20.000 − 45.000 − 17.000 = 18.000', async () => {
+        const l = unPago({
+          devuelto: '20000.0000',
+          reembolsado_sin_correccion: '45000.000000',
+          sin_confirmar: '17000.000000',
+        });
+
+        expect(await unico(l)).toBe('18000.0000');
+      });
+
+      it('con más de un pago no se le resta a ninguno ni se dice: no se adivina a cuál pertenece', async () => {
+        const l = lector(100000, MIXTA_DOCS, [
+          pagoFila('p-efectivo', 60000, 'd-boleta', {
+            es_efectivo: true,
+            sin_confirmar: '17000.000000',
+          }),
+          pagoFila('p-tarjeta', 40000, 'd-voucher', {
+            sin_confirmar: '17000.000000',
+          }),
+        ]);
+
+        const opciones = await new VentaDocumentosService().opcionesDevolucion(
+          l as unknown as EntityManager,
+          { tenantId: TENANT, ventaId: VENTA },
+        );
+        expect(
+          opciones.map(({ monto, sinConfirmar }) => ({ monto, sinConfirmar })),
+        ).toEqual([
+          { monto: '60000.0000', sinConfirmar: null },
+          { monto: '40000.0000', sinConfirmar: null },
+        ]);
+      });
+
+      it('lee los REFUND en iniciada o error de órdenes vivas de esta venta, sin el que se re-verifica a sí mismo, en la misma consulta de los pagos', async () => {
+        const l = unPago({});
+
+        await new VentaDocumentosService().devolvibleDelPagoUnico(
+          l as unknown as EntityManager,
+          {
+            tenantId: TENANT,
+            ventaId: VENTA,
+            excluirReembolsoId: 'refund-propio',
+          },
+        );
+
+        const consultas = l.query.mock.calls.filter(([sql]) =>
+          (sql as string).includes('FROM pagos p'),
+        ) as [string, unknown[]][];
+        expect(consultas).toHaveLength(1);
+        const [sql, binds] = consultas[0];
+        expect(sql).toMatch(/t\.estado IN \('iniciada', 'error'\)/);
+        expect(sql).toMatch(/t\.transaccion_id IS DISTINCT FROM \$3::uuid/);
+        expect(binds).toEqual([VENTA, TENANT, 'refund-propio']);
       });
     });
 
@@ -2646,7 +2731,8 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
 
     expect(l.query).toHaveBeenCalledTimes(3);
     for (const [sql, binds] of l.query.mock.calls as [string, unknown[]][]) {
-      expect(binds).toEqual([VENTA, TENANT]);
+      // La de los pagos lleva además el REFUND a excluir (ninguno acá).
+      expect(binds.slice(0, 2)).toEqual([VENTA, TENANT]);
       expect(sql).toMatch(/eliminado_el IS NULL/);
     }
     const sqlDocs = (l.query.mock.calls as [string][]).find(([q]) =>
@@ -2678,6 +2764,7 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
           sinPlata: false,
           metodo: 'Medio p-efectivo',
           monto: '60000.0000',
+          sinConfirmar: null,
           mueveCaja: true,
           registro: 'nota_credito_sistema',
         },
@@ -2686,6 +2773,7 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
           sinPlata: false,
           metodo: 'Medio p-tarjeta',
           monto: '40000.0000',
+          sinConfirmar: null,
           mueveCaja: false,
           registro: 'nota_maquina',
         },
@@ -2710,6 +2798,7 @@ describe('VentaDocumentosService.documentoQueCorrige / opcionesDevolucion', () =
         sinPlata: true,
         metodo: null,
         monto: '60000.0000',
+        sinConfirmar: null,
         mueveCaja: false,
         registro: 'nota_externa',
       });

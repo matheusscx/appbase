@@ -146,6 +146,12 @@ proveedores. Vencerlo es comunicación, no rechazo: "sin confirmar". Alcanza tam
   momento"): un reembolso que quedó sin confirmar y se reintenta después cae al portal. Es lo
   único de este ADR que no se midió en el sandbox: hace falta un pago de más de 7 días
   ([`pendientes.md`](../agent/pendientes.md) § 2).
+- **Un sin confirmar gasta el tope por pago de la nota del POS mientras no se aclare**
+  (2026-10-04, decisión del owner): pudo haber devuelto la plata y nada lo aclara solo. El detalle
+  de la venta ofrece lo que queda y explica lo descontado; "no salió" lo libera. La re-verificación
+  de tx1 excluye **por id** su propio `iniciada` de esa cuenta. El "Cobrado/Devuelto" no lo cuenta
+  hasta que se aclara. Detalle en
+  [`reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md) ("Tope por pago").
 - **Las fallas nuevas quedan en `iniciada`, no en `error`**: `error` es el estado de las filas de
   antes y cuenta igual como sin confirmar. Ninguna pantalla trataba aparte un `REFUND` en
   `error` (medido el 2026-10-04); las dos que muestran reembolsos dicen "Sin confirmar".

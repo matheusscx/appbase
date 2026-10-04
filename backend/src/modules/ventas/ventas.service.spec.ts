@@ -4430,7 +4430,12 @@ describe('VentasService', () => {
       const exigir = (monto: string) =>
         service.exigirTopeDelReembolsoPasarela(
           manager as unknown as EntityManager,
-          { tenantId: TENANT_ID, ventaId: VENTA_ORIG_ID, monto },
+          {
+            tenantId: TENANT_ID,
+            ventaId: VENTA_ORIG_ID,
+            monto,
+            excluirReembolsoId: 'refund-propio',
+          },
         );
       beforeEach(() => {
         manager = buildManagerMock();
@@ -4462,9 +4467,14 @@ describe('VentasService', () => {
           ventaDocumentosMock.devolvibleDelPagoUnico.mock
             .invocationCallOrder[0],
         );
+        // El propio REFUND (tx1) no se cuenta como sin confirmar: viaja por id.
         expect(ventaDocumentosMock.devolvibleDelPagoUnico).toHaveBeenCalledWith(
           manager,
-          { tenantId: TENANT_ID, ventaId: VENTA_ORIG_ID },
+          {
+            tenantId: TENANT_ID,
+            ventaId: VENTA_ORIG_ID,
+            excluirReembolsoId: 'refund-propio',
+          },
         );
       });
 

@@ -5,6 +5,7 @@ import { idDeOtrosDatos } from '~/composables/useIntentoCobro'
 import { problemaDelReceptorDeNota } from '~/composables/useReceptor'
 import {
   avisoNotaRepetida,
+  avisoSinConfirmar,
   claveOpcion,
   cuerpoDevolucion,
   registroQueQueda,
@@ -119,16 +120,19 @@ const tieneCaja = computed(() => !!cajaStore.activa)
 const itemsOpciones = computed(() =>
   props.opciones.map((o) => {
     const sinCaja = o.mueveCaja && !tieneCaja.value
+    const caja = sinCaja
+      ? 'Necesitás una caja física abierta para devolver efectivo.'
+      : o.mueveCaja
+        ? 'La plata sale de tu caja física abierta.'
+        : null
+    // Por qué ofrece menos de lo que el pago cubrió (decisión del owner, 2026-10-04).
+    const sinConfirmar = avisoSinConfirmar(o, formatMonto)
     return {
       value: claveOpcion(o),
       label: o.sinPlata
         ? `No vuelve plata · ${formatMonto(o.monto)} por cobrar`
         : `${o.metodo ?? 'Pago'} · ${formatMonto(o.monto)}`,
-      description: sinCaja
-        ? 'Necesitás una caja física abierta para devolver efectivo.'
-        : o.mueveCaja
-          ? 'La plata sale de tu caja física abierta.'
-          : undefined,
+      description: [caja, sinConfirmar].filter(Boolean).join(' ') || undefined,
       disabled: sinCaja,
     }
   }),

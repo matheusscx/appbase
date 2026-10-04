@@ -23,6 +23,82 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Un `REFUND` sin confirmar gasta el tope por pago de la nota hecha desde el POS (cerrada 2026-10-04)
+
+Sale de [`pendientes.md`](pendientes.md) § 2 (fiscal y de plata, frente propio). La regla viva
+está en [`reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md) ("Tope por pago") y en
+[ADR-029](../adr/029-reembolso-con-efecto-externo.md) (Consequences).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Un `REFUND` sin confirmar no gasta el tope por pago de una nota hecha desde el POS**
+  (fiscal y de plata; lo levantó la revisión independiente del frente de ADR-029, 2026-10-04).
+  `devuelto-venta.ts` y `venta-documentos.service.ts` (`devolvibleDelPagoUnico`) cuentan solo los
+  `REFUND` en `aprobada`. Uno en `iniciada`/`error` pudo haber devuelto la plata por Transbank, y
+  mientras siga sin confirmar una nota "por el pago" de Webpay desde el POS lo ignora. **No es
+  regresión**: antes de ADR-029 la falla quedaba en `error`, que tampoco contaba. Otro reembolso
+  por la pasarela sí queda frenado (decisión 4 del owner). Medir primero cuánto vive un sin
+  confirmar en la práctica (se aclara en el reintento o a mano) antes de decidir si la nota del
+  POS también tiene que esperar —eso sí sería pregunta para el owner—.
+
+### Lo medido
+
+- **Reproducido** con un e2e (`pasarela-reembolso.e2e-spec.ts`): orden de $100.000 con venta de un
+  único pago y un reembolso de $17.000 al que Transbank no contestó (`iniciada`). El detalle
+  ofrecía "Tarjeta · $100.000" y la nota por el pago de $100.000 daba 201. Al aclararse "salió"
+  por saldo, la corrección del REFUND fallaba (*"excede lo disponible para nota de crédito (0)"*):
+  REFUND aprobado sin corrección y al cliente le volvían $117.000.
+- **Cuánto vive un sin confirmar: no tiene tope.** No hay cron (el único job es `expirar-ordenes`),
+  abrir la orden no lo aclara, y la clave del `ReembolsoModal` vive en memoria de la pestaña. Lo
+  aclara solo una persona en Pasarela: el reintento en la misma pestaña, otro reembolso de la orden
+  (decisión 4) o el drawer (*Volver a consultar*, *Salió/No salió*). El cajero del POS no lo ve.
+  No hay datos productivos para medir la duración real.
+- **Donde no hay hueco:** mientras tx1 está en vuelo tiene el `FOR UPDATE` de la venta (la
+  re-verificación del tope), así que la nota del POS espera y después ve el aprobado. Entre el
+  commit de tx0 y el lock de tx1, si la nota gana, tx1 re-verifica y cierra el REFUND con "no se
+  envió". El hueco existía solo después de una falla de comunicación o de una caída.
+
+### Cómo se decidió
+
+- **DECIDIDO (owner, 2026-10-04, AskUserQuestion de la Sesión de esfuerzo máximo, que le llevó la
+  duda de este frente con la escena de $100.000 y $17.000):** *"Descuenta lo sin confirmar"* (la
+  recomendada) por sobre *"Frena todo hasta aclarar"* y *"El POS consulta a Transbank"*. La opción
+  incluía el texto en pantalla: el detalle ofrece $83.000 y explica *"$17.000 en un reembolso por
+  Transbank sin confirmar"*. Si después se aclara "no salió", vuelve solo. Costo aceptado: si no
+  salió, esos $17.000 no se devuelven por la tarjeta hasta que el admin lo aclare.
+- **Técnico (Sesión de esfuerzo máximo, sin costo de negocio):** (t1) la re-verificación de tx1
+  excluye su **propio** `iniciada`, identificado por id; otro sin confirmar, si lo hubiera, cuenta.
+  (t2) `devuelto-venta.ts` no se toca: es un reporte de hechos y cuenta solo lo aprobado, con la
+  fecha del REFUND (la del intento, no la del aclarado). Costo: el Cobrado/Devuelto de un día
+  pasado cambia cuando se aclara un sin confirmar de ese día.
+
+### Cómo se cerró
+
+- **Backend:** `corregibles` (`venta-documentos.service.ts`) suma en la misma lectura de los pagos
+  los REFUND en `iniciada`/`error` de las órdenes de la venta (`sin_confirmar`, sin el
+  `excluirReembolsoId`), y con un único pago los resta del `devolvible`. `OpcionDevolucion` suma
+  `sinConfirmar`. `excluirReembolsoId` viaja por `devolvibleDelPagoUnico` →
+  `exigirTopeDelReembolsoPasarela` → `ReembolsoCallbackHandler.exigirTopeDelReembolso` →
+  `CobrosService.verificarReembolsable` (su `propio`: null en tx0, el id en tx1).
+- **Frontend:** `NotaCreditoModal` agrega a la descripción de la opción el texto de
+  `avisoSinConfirmar` (`useDocumentosVenta.ts`).
+- **Lo que lo fija, contra la serie:** `pasarela-reembolso.e2e-spec.ts`, bloque *"un REFUND sin
+  confirmar gasta el tope por pago de la nota del POS"*. (1) Con 17.000 sin confirmar, el detalle
+  ofrece 83.000 con `sinConfirmar`, la nota de 83.001 da 400 sin cifras y la de 83.000 entra; al
+  aclararse "salió" la corrección del REFUND entra y la serie de correcciones es 83.000 + 17.000.
+  (2) Al aclararse "no salió", el detalle vuelve a ofrecer 100.000 y la nota entra. (3) El sin
+  confirmar de otra orden de la venta frena un REFUND de 100.000 y deja pasar 83.000. Mutantes que
+  mueren: sin la resta, el código anterior (3 e2e); sin la exclusión del propio (9 e2e, entre ellos
+  el REFUND total, más el unitario de `cobros.service.spec.ts`); contar también los `rechazada`
+  ("no salió" no libera: 1 e2e); sin el texto en el modal (1 spec del modal). Playwright
+  `nota-credito-reembolso-sin-confirmar.spec.ts`: el navegador pinta lo que publica el detalle,
+  con el descuento inyectado en la respuesta real, porque el stack no tiene doble de Transbank.
+- **Lo que quedó afuera:** una venta de más de un pago sigue sin tope por pago, sin cambios. Si el
+  sin confirmar se come todo el pago, la opción desaparece igual que con un pago ya devuelto, y el
+  modal no dice por qué.
+
+---
+
 ## La comida del personal tiene motivo propio y no paga IVA (cerrada 2026-10-04)
 
 Sale de [`pendientes.md`](pendientes.md) § 6 (fiscal, frente propio). La regla viva, en

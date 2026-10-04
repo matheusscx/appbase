@@ -84,8 +84,9 @@ vínculo se escribe dentro de la transacción de la corrección: si no se puede 
 corrección tampoco queda.
 Una orden sin venta se reembolsa sin corrección y sin aviso. **Antes de llamar al proveedor**, un
 reembolso de una orden con venta respeta el tope por pago de las notas de crédito (2026-10-02): lo que
-el pago de la venta todavía puede devolver, descontadas las notas "por el pago" hechas desde el POS y los reembolsos aprobados que todavía no
-tienen su corrección;
+el pago de la venta todavía puede devolver, descontadas las notas "por el pago" hechas desde el POS, los reembolsos aprobados que todavía no
+tienen su corrección y, desde el 2026-10-04, los sin confirmar de la venta salvo el propio (que en
+la re-verificación ya está en `iniciada` y se excluye por id);
 si no alcanza, 400 sin cifras y la pasarela no se llama (con más de un pago en la venta no hay tope).
 Ver
 [reembolsos-nota-credito.md](./reembolsos-nota-credito.md).
@@ -108,7 +109,10 @@ de llamar, y un reintento nunca vuelve a llamar a `reembolsar`.
 | La consulta no lo aclara | El drawer de la orden ofrece *Volver a consultar* y, si sigue, *Salió* (con el código de autorización del portal) o *No salió*; queda `resolucion = 'manual'` con quién y cuándo |
 
 Un `REFUND` en `iniciada` o `error` es **sin confirmar** (la pantalla dice "Sin confirmar"): no
-es un rechazo, el proveedor pudo haber devuelto la plata. Las fallas nuevas quedan en `iniciada`;
+es un rechazo, el proveedor pudo haber devuelto la plata. Por eso, hasta que se aclare, gasta el
+tope por pago de la nota del POS, y el detalle de la venta dice *"$17.000 en un reembolso por
+Transbank sin confirmar"* (decisión del owner, 2026-10-04; ver
+[reembolsos-nota-credito.md](./reembolsos-nota-credito.md)). Las fallas nuevas quedan en `iniciada`;
 `error` es de las filas de antes. Solo pasa una vez a `aprobada` o `rechazada` (`resolucion`:
 `proveedor`, `saldo`, `manual`, `no_enviado`), con quién y cuándo, y la corrección se atribuye a
 quien **pidió** el reembolso (`usuario_id`/`api_key_id` de la fila), no a quien lo aclaró. El historial del drawer de

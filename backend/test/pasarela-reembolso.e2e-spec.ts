@@ -1389,5 +1389,149 @@ describe('Reembolso por pasarela: toda corrección queda ligada al REFUND (e2e)'
         expect(await correccionesDe(venta.id)).toHaveLength(2);
       });
     });
+
+    // Un REFUND sin confirmar pudo haber devuelto la plata por Transbank sin que
+    // nos enteremos, y nada lo aclara solo: lo aclara una persona en Pasarela.
+    // Mientras tanto descuenta del tope por pago, y el detalle dice por qué
+    // (decisión del owner, 2026-10-04). Antes, la nota del POS por 100.000
+    // entraba, la corrección del REFUND fallaba al aclararse "salió" y al
+    // cliente le volvían 117.000 de una venta de 100.000.
+    describe('un REFUND sin confirmar gasta el tope por pago de la nota del POS', () => {
+      let caja: CajaAbierta;
+      beforeAll(async () => {
+        caja = await abrirCaja(app, token);
+      });
+      afterAll(async () => {
+        await cerrarCaja(app, token, caja);
+      });
+      const pagoUnicoDe = async (ventaId: string): Promise<string> => {
+        const pagos = await ds.query<{ pago_id: string }[]>(
+          `SELECT pago_id FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL`,
+          [ventaId],
+        );
+        expect(pagos).toHaveLength(1);
+        return pagos[0].pago_id;
+      };
+      const notaPorElPago = (ventaId: string, monto: string, pagoId: string) =>
+        request(app.getHttpServer())
+          .post(`/api/ventas/${ventaId}/notas-credito`)
+          .set('Idempotency-Key', randomUUID())
+          .set(auth())
+          .send({ monto, devolucion: { pagoId }, comentario: 'desde el POS' });
+      const opcionesDe = async (ventaId: string) => {
+        const res = await request(app.getHttpServer())
+          .get(`/api/ventas/${ventaId}`)
+          .set(auth());
+        expect(res.status).toBe(200);
+        return (
+          res.body as {
+            opcionesDevolucion: {
+              sinPlata: boolean;
+              monto: string;
+              sinConfirmar: string | null;
+            }[];
+          }
+        ).opcionesDevolucion
+          .filter((o) => !o.sinPlata)
+          .map(({ monto, sinConfirmar }) => ({ monto, sinConfirmar }));
+      };
+      const aclarar = (ordenId: string) =>
+        request(app.getHttpServer())
+          .post(`/api/pasarela/admin/ordenes/${ordenId}/reembolsos/aclarar`)
+          .set(auth());
+      /** Un reembolso de 17.000 al que Transbank no contestó: queda en `iniciada`. */
+      const sinConfirmarDe17000 = async (ordenId: string) => {
+        reembolsarEnElProveedor.mockRejectedValueOnce(
+          new ProviderComunicacionError('timeout', {}),
+        );
+        expect(
+          (await reembolsarAdmin(ordenId, { monto: '17000' })).status,
+        ).toBe(502);
+        expect(await serieDe(ordenId)).toEqual([
+          expect.objectContaining({ estado: 'iniciada', monto: '17000' }),
+        ]);
+      };
+
+      it('el detalle ofrece 83.000 y lo explica; 83.001 da 400 sin cifras; al aclararse "salió" la corrección del REFUND entra y la serie suma 100.000', async () => {
+        const venta = await ventaOnline();
+        const ordenId = await ordenCobrada(venta.id);
+        const pagoId = await pagoUnicoDe(venta.id);
+        await sinConfirmarDe17000(ordenId);
+
+        expect(await opcionesDe(venta.id)).toEqual([
+          { monto: '83000.0000', sinConfirmar: '17000.0000' },
+        ]);
+        const demasiado = await notaPorElPago(venta.id, '83001', pagoId);
+        expect(demasiado.status).toBe(400);
+        expect(JSON.stringify(demasiado.body)).toMatch(/por devolver/);
+        expect(JSON.stringify(demasiado.body)).not.toMatch(/\d{4}/);
+        expect(await correccionesDe(venta.id)).toEqual([]);
+        expect((await notaPorElPago(venta.id, '83000', pagoId)).status).toBe(
+          201,
+        );
+
+        saldoEnTransbank('83000', 'PARTIALLY_NULLIFIED');
+        const res = await aclarar(ordenId);
+
+        expect(res.status).toBe(201);
+        expect(res.body).toMatchObject({ aclarado: 'salio' });
+        expect((res.body as { warning?: string }).warning).toBeUndefined();
+        expect(await serieDe(ordenId)).toEqual([
+          expect.objectContaining({
+            estado: 'aprobada',
+            resolucion: 'saldo',
+            corregido: true,
+          }),
+        ]);
+        // La serie de correcciones: la nota del POS y la del REFUND, ni un peso más
+        // que la venta. Y el pago ya no ofrece nada.
+        const correcciones = await correccionesDe(venta.id);
+        expect(correcciones.map((c) => c.total_final).sort()).toEqual([
+          '17000.0000',
+          '83000.0000',
+        ]);
+        expect(await opcionesDe(venta.id)).toEqual([]);
+      });
+
+      it('al aclararse "no salió", lo descontado vuelve solo: el detalle ofrece otra vez 100.000, sin texto', async () => {
+        const venta = await ventaOnline();
+        const ordenId = await ordenCobrada(venta.id);
+        await sinConfirmarDe17000(ordenId);
+        expect(await opcionesDe(venta.id)).toEqual([
+          { monto: '83000.0000', sinConfirmar: '17000.0000' },
+        ]);
+
+        saldoEnTransbank(null, 'AUTHORIZED');
+        const res = await aclarar(ordenId);
+
+        expect(res.status).toBe(201);
+        expect(res.body).toMatchObject({ aclarado: 'no_salio' });
+        expect(await opcionesDe(venta.id)).toEqual([
+          { monto: '100000.0000', sinConfirmar: null },
+        ]);
+        const nota = await notaPorElPago(
+          venta.id,
+          '100000',
+          await pagoUnicoDe(venta.id),
+        );
+        expect(nota.status).toBe(201);
+      });
+
+      it('el sin confirmar de OTRA orden de la venta también gasta el tope del REFUND: la otra orden no puede devolver los 100.000', async () => {
+        const venta = await ventaOnline();
+        const conPendiente = await ordenCobrada(venta.id);
+        const otra = await ordenCobrada(venta.id);
+        await sinConfirmarDe17000(conPendiente);
+
+        const total = await reembolsarAdmin(otra, { monto: '100000' });
+        expect(total.status).toBe(400);
+        expect(JSON.stringify(total.body)).toMatch(/por devolver/);
+        expect(await serieDe(otra)).toEqual([]);
+
+        const resto = await reembolsarAdmin(otra, { monto: '83000' });
+        expect(resto.status).toBe(201);
+        expect(reembolsarEnElProveedor).toHaveBeenCalledTimes(2);
+      });
+    });
   });
 });

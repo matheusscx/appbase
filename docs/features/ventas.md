@@ -391,6 +391,10 @@ Lo calcula el backend a propósito: el navegador no replica la cuantización del
   (`VentaDocumentosService.documentoQueCorrige`); una corrección es lo que tiene
   `venta_referencia_id`, y `esNotaCredito` solo si además lleva el tipo NC (la devolución interna
   no). Ver [reembolsos-nota-credito.md](reembolsos-nota-credito.md#una-corrección-lleva-su-documento-según-por-dónde-vuelve-la-plata-2026-10-02).
+  Desde el 2026-10-04, en una venta de un solo pago, el `monto` de la opción descuenta también lo
+  que un reembolso por Transbank sin confirmar pudo haber devuelto, y `sinConfirmar` dice cuánto
+  para que el modal lo explique (decisión del owner; ver "Tope por pago" en
+  [reembolsos-nota-credito.md](reembolsos-nota-credito.md)).
 
 - `motivo` obligatorio, mínimo 10 caracteres: una anulación sin explicación no sirve como
   auditoría. Queda en `ventas.motivo_cancelacion`, junto con `cancelada_el` y

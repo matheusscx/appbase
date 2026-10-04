@@ -102,7 +102,8 @@ Response (200): orden pública + extras
   documento — ver [Una corrección lleva su documento](#una-corrección-lleva-su-documento-según-por-dónde-vuelve-la-plata-2026-10-02).
 - `opcionesDevolucion[]`: "¿por dónde vuelve la plata?", una entrada por pago que
   puede recibir la devolución y "no vuelve plata" solo si la venta tiene saldo
-  (`{ pagoId | null, sinPlata, metodo, monto, mueveCaja, registro }`). Salen de la
+  (`{ pagoId | null, sinPlata, metodo, monto, sinConfirmar, mueveCaja, registro }`;
+  `sinConfirmar` es lo que un REFUND sin confirmar ya le descontó a `monto`, o `null`). Salen de la
   **misma resolución** que usa la nota al crearse, así que la pantalla ofrece lo
   que el servidor acepta y no replica la regla. Vacío en una corrección o en una
   venta que no admite nota.
@@ -456,6 +457,25 @@ lleva el tipo.
     de sobreconteo, del lado seguro). Como es la cuenta compartida, la ven la nota del POS, el tope
     del REFUND y las opciones de la pantalla. La corrección del propio REFUND no se frena a sí misma:
     la vía `pasarela` no pasa por `corregibles` (sus topes son el global y el del documento).
+  - **Lo que un REFUND sin confirmar pudo haber devuelto también gasta el tope (2026-10-04,
+    decisión del owner):** un `REFUND` en `iniciada`/`error` (Transbank no contestó, ADR-029) pudo
+    haber devuelto la plata, y **nada lo aclara solo**: no hay cron ni aclarado al abrir la orden;
+    lo aclara una persona en Pasarela (reintento, otro reembolso de la orden, *Volver a consultar*
+    o *Salió/No salió*). Antes la nota del POS lo ignoraba: con $17.000 sin confirmar ofrecía
+    $100.000 por el pago y, si después se aclaraba "salió", la corrección del REFUND fallaba por el
+    tope global y al cliente le volvían $117.000. Ahora `corregibles` lo resta, con un **único**
+    pago, en la misma lectura (columna `sin_confirmar`), y el detalle dice por qué ofrece menos:
+    *"$17.000 en un reembolso por Transbank sin confirmar"* (`sinConfirmar` de la opción). "No
+    salió" lo saca de la cuenta y vuelve solo; "salió" lo pasa a aprobado y a su corrección, que
+    ahora entra. **Costo aceptado:** si no salió, esos $17.000 no se devuelven por la tarjeta hasta
+    que el admin lo aclare. Descartadas: frenar la nota hasta aclarar, y que el POS consulte a
+    Transbank. El tope del REFUND usa la misma cuenta, así que en su re-verificación (tx1) el propio
+    reembolso, ya en `iniciada`, se excluiría a sí mismo: va **por id** (`excluirReembolsoId`), y
+    otro sin confirmar de la venta sí cuenta. Mientras tx1 está en vuelo no hay hueco: tiene el
+    `FOR UPDATE` de la venta, así que la nota del POS espera. El "Cobrado/Devuelto"
+    (`devuelto-venta.ts`) **no** cuenta lo sin confirmar: es un reporte de hechos, y el REFUND entra
+    al aclararse, con su fecha (`fecha_transaccion`, la del intento). Costo: el devuelto de un día
+    pasado cambia cuando se aclara un sin confirmar de ese día.
   - **La pantalla ofrece lo que el servidor acepta:** `opcionesDevolucion` trae en `monto` lo que
     cada pago todavía puede devolver y no ofrece el que ya devolvió todo; el modal propone y topa el
     monto con esa opción (`topeDeOpcion`, además del disponible de la venta).

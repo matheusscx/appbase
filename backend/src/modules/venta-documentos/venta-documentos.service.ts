@@ -126,6 +126,12 @@ export type Lector = EntityManager | Db;
 export interface VentaDeLosDocumentosParams {
   tenantId: string;
   ventaId: string;
+  /**
+   * Un REFUND que no cuenta como sin confirmar: el del reembolso que se está
+   * re-verificando a sí mismo (tx1, ADR-029). Por id: otro sin confirmar, si lo
+   * hay, sí cuenta.
+   */
+  excluirReembolsoId?: string | null;
 }
 
 export interface ListarParaDetalleParams extends VentaDeLosDocumentosParams {
@@ -308,6 +314,11 @@ export interface OpcionDevolucion {
    * esa opción: el mismo que exige el servidor.
    */
   monto: string;
+  /**
+   * Lo que un REFUND de la pasarela sin confirmar ya le descontó a `monto` (decisión
+   * del owner, 2026-10-04): la pantalla dice por qué ofrece menos. `null` sin ninguno.
+   */
+  sinConfirmar: string | null;
   /** La plata sale de la caja (el pago fue en efectivo). */
   mueveCaja: boolean;
   registro: RegistroCorreccion;
@@ -1172,6 +1183,7 @@ export class VentaDocumentosService {
         sinPlata: false,
         metodo: p.metodoNombre,
         monto: p.devolvible.toFixed(4),
+        sinConfirmar: p.sinConfirmar.gt(0) ? p.sinConfirmar.toFixed(4) : null,
         mueveCaja: p.esEfectivo,
         registro: registroDe(p.documento),
       });
@@ -1182,6 +1194,7 @@ export class VentaDocumentosService {
         sinPlata: true,
         metodo: null,
         monto: c.saldo.toFixed(4),
+        sinConfirmar: null,
         mueveCaja: false,
         registro: registroDe(c.deuda),
       });
@@ -1195,6 +1208,9 @@ export class VentaDocumentosService {
    * que anota ese pago en la corrección). Es el `devolvible` de `corregibles`: la
    * MISMA cuenta que el tope de la nota manual y que lo que ofrece el detalle, no
    * una copia. `null` con 0 o más de un pago: no hay tope por pago.
+   *
+   * Los REFUND sin confirmar gastan el tope (ADR-029); el que se re-verifica a sí
+   * mismo en tx1 va en `excluirReembolsoId`, o un reembolso total se rechazaría solo.
    *
    * Hay que llamarla bajo el `FOR UPDATE` de la venta, igual que el tope de la nota.
    */
@@ -1330,9 +1346,12 @@ export class VentaDocumentosService {
       aplicadoVenta: Decimal;
       /**
        * Lo que ese pago todavía puede devolver: `aplicadoVenta` − lo ya devuelto por él
-       * (correcciones) − con un único pago, lo que la pasarela devolvió y aún no tiene corrección.
+       * (correcciones) − con un único pago, lo que la pasarela devolvió y aún no tiene
+       * corrección y lo que pudo haber devuelto sin confirmar (`sinConfirmar`).
        */
       devolvible: Decimal;
+      /** Con un único pago, los REFUND sin confirmar de la venta; si no, 0. */
+      sinConfirmar: Decimal;
       documento: DocumentoCorregido | null;
     }[];
   }> {
@@ -1372,6 +1391,7 @@ export class VentaDocumentosService {
       aplicado_venta: string;
       devuelto: string;
       reembolsado_sin_correccion: string;
+      sin_confirmar: string;
     }[] = await lector.query(
       `SELECT p.pago_id,
               mp.nombre AS metodo_nombre,
@@ -1416,7 +1436,28 @@ export class VentaDocumentosService {
                  WHERE o.venta_id = $1
                    AND o.tenant_id = $2
                    AND o.eliminado_el IS NULL
-              ), 0)::text AS reembolsado_sin_correccion
+              ), 0)::text AS reembolsado_sin_correccion,
+              -- Lo que la pasarela PUDO haber devuelto: los REFUND sin confirmar
+              -- (\`iniciada\`, o \`error\` de las filas de antes; ADR-029). Transbank no
+              -- contestó y nada los aclara solo, así que gastan el tope hasta que una
+              -- persona los aclare en Pasarela: "salió" los pasa a aprobados (y a su
+              -- corrección), "no salió" los saca de acá (decisión del owner,
+              -- 2026-10-04). Sin \`correccion_venta_id\`: un sin confirmar nunca la
+              -- tiene. $3 es el REFUND que se re-verifica a sí mismo (tx1).
+              COALESCE((
+                SELECT SUM(t.monto)
+                  FROM pasarela_ordenes o
+                  JOIN pasarela_transacciones t
+                    ON t.orden_id = o.orden_id
+                   AND t.tenant_id = o.tenant_id
+                   AND t.tipo = 'REFUND'
+                   AND t.estado IN ('iniciada', 'error')
+                   AND t.transaccion_id IS DISTINCT FROM $3::uuid
+                   AND t.eliminado_el IS NULL
+                 WHERE o.venta_id = $1
+                   AND o.tenant_id = $2
+                   AND o.eliminado_el IS NULL
+              ), 0)::text AS sin_confirmar
          FROM pagos p
          JOIN ventas v ON v.venta_id = p.venta_id
                       AND v.tenant_id = p.tenant_id
@@ -1433,7 +1474,7 @@ export class VentaDocumentosService {
         WHERE p.venta_id = $1 AND p.tenant_id = $2 AND p.eliminado_el IS NULL
         GROUP BY p.pago_id, mp.nombre, mp.es_efectivo, p.documento_id
         ORDER BY p.creado_el, p.pago_id`,
-      [params.ventaId, params.tenantId],
+      [params.ventaId, params.tenantId, params.excluirReembolsoId ?? null],
     );
 
     const doc = (d: (typeof docs)[number]): DocumentoCorregido => ({
@@ -1457,6 +1498,11 @@ export class VentaDocumentosService {
         const enlazado = p.documento_id
           ? docs.find((d) => d.documento_id === p.documento_id)
           : undefined;
+        // Con un único pago, lo devuelto por la pasarela que aún no tiene su
+        // corrección, y lo que pudo haber devuelto sin confirmar, también gastan
+        // su tope; con 0 o más de uno no se adivina.
+        const unico = pagos.length === 1;
+        const sinConfirmar = new Decimal(unico ? p.sin_confirmar : 0);
         return {
           pagoId: p.pago_id,
           metodoNombre: p.metodo_nombre,
@@ -1464,9 +1510,9 @@ export class VentaDocumentosService {
           aplicadoVenta: new Decimal(p.aplicado_venta),
           devolvible: new Decimal(p.aplicado_venta)
             .minus(p.devuelto)
-            // Con un único pago, lo devuelto por la pasarela que aún no tiene su
-            // corrección también gasta su tope; con 0 o más de uno no se adivina.
-            .minus(pagos.length === 1 ? p.reembolsado_sin_correccion : 0),
+            .minus(unico ? p.reembolsado_sin_correccion : 0)
+            .minus(sinConfirmar),
+          sinConfirmar,
           documento: enlazado ? doc(enlazado) : null,
         };
       }),

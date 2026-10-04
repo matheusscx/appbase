@@ -2228,10 +2228,18 @@ export class VentasService {
    * Una venta que ya no existe no frena el reembolso (la plata de una orden ligada a
    * una venta rota igual tiene que poder volver; el hook lo avisa después), ni una
    * con más de un pago (no hay a cuál atribuirlo). El mensaje no lleva cifras.
+   *
+   * `excluirReembolsoId`: el REFUND en `iniciada` del propio reembolso, en su
+   * re-verificación (tx1). Los demás sin confirmar gastan el tope (ADR-029).
    */
   async exigirTopeDelReembolsoPasarela(
     manager: EntityManager,
-    params: { tenantId: string; ventaId: string; monto: string },
+    params: {
+      tenantId: string;
+      ventaId: string;
+      monto: string;
+      excluirReembolsoId: string | null;
+    },
   ): Promise<void> {
     try {
       await this.lockVentaOriginal(manager, params.tenantId, params.ventaId);
@@ -2241,7 +2249,11 @@ export class VentasService {
     }
     const devolvible = await this.ventaDocumentosService.devolvibleDelPagoUnico(
       manager,
-      { tenantId: params.tenantId, ventaId: params.ventaId },
+      {
+        tenantId: params.tenantId,
+        ventaId: params.ventaId,
+        excluirReembolsoId: params.excluirReembolsoId,
+      },
     );
     this.exigirTopeDelPago(
       devolvible,

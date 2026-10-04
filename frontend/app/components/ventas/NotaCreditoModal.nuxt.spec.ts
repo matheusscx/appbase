@@ -52,6 +52,7 @@ const EFECTIVO: OpcionDevolucion = {
   sinPlata: false,
   metodo: 'Efectivo',
   monto: '5000.0000',
+  sinConfirmar: null,
   mueveCaja: true,
   registro: 'nota_credito_sistema',
 }
@@ -60,6 +61,7 @@ const TARJETA: OpcionDevolucion = {
   sinPlata: false,
   metodo: 'Tarjeta de débito',
   monto: '6900.0000',
+  sinConfirmar: null,
   mueveCaja: false,
   registro: 'nota_maquina',
 }
@@ -68,6 +70,7 @@ const SIN_PLATA: OpcionDevolucion = {
   sinPlata: true,
   metodo: null,
   monto: '60000.0000',
+  sinConfirmar: null,
   mueveCaja: false,
   registro: 'nota_externa',
 }
@@ -322,6 +325,25 @@ describe('NotaCreditoModal — el efectivo sale de la caja', () => {
 
     expect(radio('Efectivo')?.hasAttribute('disabled')).toBe(true)
     expect(generar().disabled).toBe(true)
+  })
+})
+
+// Decisión del owner (2026-10-04): un reembolso por Transbank sin confirmar pudo
+// haber devuelto la plata; el backend ya lo descontó del tope de la opción, y la
+// pantalla dice por qué ofrece menos.
+describe('NotaCreditoModal — un reembolso por Transbank sin confirmar', () => {
+  it('la opción ofrece lo que queda y explica lo descontado', async () => {
+    await montar([{ ...TARJETA, monto: '83000.0000', sinConfirmar: '17000.0000' }])
+
+    const item = itemDe(radio('Tarjeta de débito'))
+    expect(item).toContain('$83.000')
+    expect(item).toContain('$17.000 en un reembolso por Transbank sin confirmar')
+  })
+
+  it('sin ninguno no dice nada', async () => {
+    await montar([TARJETA])
+
+    expect(itemDe(radio('Tarjeta de débito'))).not.toContain('sin confirmar')
   })
 })
 

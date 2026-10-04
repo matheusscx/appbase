@@ -59,7 +59,12 @@ describe('VentasReembolsoHandler', () => {
 
   it('el tope por pago del REFUND lo resuelve ventas, con la misma transacción y sin tocar nada más', async () => {
     const manager = {} as EntityManager;
-    const params = { tenantId: 't-1', ventaId: 'venta-1', monto: '70000' };
+    const params = {
+      tenantId: 't-1',
+      ventaId: 'venta-1',
+      monto: '70000',
+      excluirReembolsoId: 'refund-propio',
+    };
 
     await handler.exigirTopeDelReembolso(manager, params);
 
@@ -80,6 +85,7 @@ describe('VentasReembolsoHandler', () => {
         tenantId: 't-1',
         ventaId: 'venta-1',
         monto: '70001',
+        excluirReembolsoId: null,
       }),
     ).rejects.toThrow(BadRequestException);
   });

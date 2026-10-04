@@ -235,6 +235,12 @@ export interface OpcionDevolucion {
    * servidor exige a la nota: pasarlo es un 400.
    */
   monto: string
+  /**
+   * Lo que un reembolso por Transbank sin confirmar ya le descontó a `monto`: pudo
+   * haber devuelto la plata, y hasta que el admin lo aclare no se ofrece de nuevo
+   * (decisión del owner, 2026-10-04). `null` sin ninguno.
+   */
+  sinConfirmar: string | null
   /** La plata sale de la caja física (el pago fue en efectivo). */
   mueveCaja: boolean
   registro: RegistroCorreccion
@@ -251,6 +257,15 @@ export function avisoNotaRepetida(o: OpcionDevolucion | null, montoFormateado: s
   if (o.mueveCaja)
     return `${base} La salida de ${montoFormateado} ya está registrada en tu caja: entregale los billetes al cliente si todavía no lo hiciste.`
   return `${base} Si todavía no devolviste ${montoFormateado} por ${o.metodo ?? 'ese pago'}, hacelo una sola vez.`
+}
+
+/**
+ * Por qué la opción ofrece menos de lo que el pago cubrió, si es por un reembolso
+ * por Transbank sin confirmar: *"$17.000 en un reembolso por Transbank sin
+ * confirmar"*. `null` sin ninguno.
+ */
+export function avisoSinConfirmar(o: OpcionDevolucion, formatear: (monto: string) => string): string | null {
+  return o.sinConfirmar ? `${formatear(o.sinConfirmar)} en un reembolso por Transbank sin confirmar.` : null
 }
 
 /** La clave de una opción en el selector: el pago, o la de "No vuelve plata". */

@@ -65,10 +65,18 @@ export interface ReembolsoCallbackHandler {
    * Corre en la transacción del reembolso, con el `FOR UPDATE` de la orden ya
    * tomado, y toma el de la venta: el orden orden → venta es el único que existe
    * (ver `CobrosService.reembolsar`).
+   *
+   * Los REFUND sin confirmar de la venta gastan el tope (ADR-029), salvo
+   * `excluirReembolsoId`: el del propio reembolso, que en tx1 ya está en `iniciada`.
    */
   exigirTopeDelReembolso(
     manager: EntityManager,
-    params: { tenantId: string; ventaId: string; monto: string },
+    params: {
+      tenantId: string;
+      ventaId: string;
+      monto: string;
+      excluirReembolsoId: string | null;
+    },
   ): Promise<void>;
 
   onReembolsoAprobado(

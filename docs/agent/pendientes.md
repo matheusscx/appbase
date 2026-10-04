@@ -77,16 +77,6 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
-
-- [ ] **Un `REFUND` sin confirmar no gasta el tope por pago de una nota hecha desde el POS**
-  (fiscal y de plata; lo levantó la revisión independiente del frente de ADR-029, 2026-10-04).
-  `devuelto-venta.ts` y `venta-documentos.service.ts` (`devolvibleDelPagoUnico`) cuentan solo los
-  `REFUND` en `aprobada`. Uno en `iniciada`/`error` pudo haber devuelto la plata por Transbank, y
-  mientras siga sin confirmar una nota "por el pago" de Webpay desde el POS lo ignora. **No es
-  regresión**: antes de ADR-029 la falla quedaba en `error`, que tampoco contaba. Otro reembolso
-  por la pasarela sí queda frenado (decisión 4 del owner). Medir primero cuánto vive un sin
-  confirmar en la práctica (se aclara en el reintento o a mano) antes de decidir si la nota del
-  POS también tiene que esperar —eso sí sería pregunta para el owner—.
 - [ ] **Medir la ventana de consulta de Webpay Plus con un pago de más de 7 días** (queda del
   cierre de "Probar en el sandbox de Transbank el saldo…", 2026-10-04, [`resueltos.md`](resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04)).
   La documentación de Webpay Plus dice que el estado se consulta hasta 7 días; la referencia, "en

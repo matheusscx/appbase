@@ -58,6 +58,7 @@ interface OpcionDevolucion {
   sinPlata: boolean;
   metodo: string | null;
   monto: string;
+  sinConfirmar: string | null;
   mueveCaja: boolean;
   registro: string;
 }
@@ -1514,6 +1515,7 @@ describe('Correcciones: el documento según por dónde vuelve la plata (e2e)', (
         sinPlata: true,
         metodo: null,
         monto: '60000.0000',
+        sinConfirmar: null,
         mueveCaja: false,
         registro: 'nota_credito_sistema',
       });

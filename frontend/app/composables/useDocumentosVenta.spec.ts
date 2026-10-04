@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   avisoNotaRepetida,
+  avisoSinConfirmar,
   claveOpcion,
   comprobanteDelPago,
   cuerpoDevolucion,
@@ -212,9 +213,17 @@ describe('por dónde vuelve la plata (opcionesDevolucion)', () => {
     sinPlata: false,
     metodo: 'Efectivo',
     monto: '60000.0000',
+    sinConfirmar: null,
     mueveCaja: true,
     registro: 'nota_credito_sistema',
     ...parcial,
+  })
+
+  it('dice cuánto descontó un reembolso por Transbank sin confirmar, y nada sin ninguno (owner, 2026-10-04)', () => {
+    const formatear = (m: string) => `$${Number(m).toLocaleString('es-CL')}`
+    expect(avisoSinConfirmar(opcion({ sinConfirmar: '17000.0000' }), formatear))
+      .toBe('$17.000 en un reembolso por Transbank sin confirmar.')
+    expect(avisoSinConfirmar(opcion(), formatear)).toBeNull()
   })
 
   it('manda el pago elegido, o sinPlata: nunca el documento', () => {
@@ -282,6 +291,7 @@ describe('avisoNotaRepetida — la nota ya había entrado: qué falta hacer (own
     sinPlata: false,
     metodo: 'Efectivo',
     monto: '3000.0000',
+    sinConfirmar: null,
     mueveCaja: true,
     registro: 'nota_credito_sistema',
     ...o,

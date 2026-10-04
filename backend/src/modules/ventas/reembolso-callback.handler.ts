@@ -42,7 +42,12 @@ export class VentasReembolsoHandler
 
   async exigirTopeDelReembolso(
     manager: EntityManager,
-    params: { tenantId: string; ventaId: string; monto: string },
+    params: {
+      tenantId: string;
+      ventaId: string;
+      monto: string;
+      excluirReembolsoId: string | null;
+    },
   ): Promise<void> {
     await this.ventasService.exigirTopeDelReembolsoPasarela(manager, params);
   }

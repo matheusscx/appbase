@@ -118,6 +118,7 @@ const VENTA = {
       sinPlata: false,
       metodo: 'Efectivo',
       monto: '7500.0000',
+      sinConfirmar: null,
       mueveCaja: true,
       registro: 'nota_credito_sistema',
     },
@@ -702,6 +703,7 @@ describe('VentaDetalleDrawer — una venta pendiente admite la nota "no vuelve p
     sinPlata: true,
     metodo: null,
     monto: '7500.0000',
+    sinConfirmar: null,
     mueveCaja: false,
     registro: 'nota_externa',
   }
