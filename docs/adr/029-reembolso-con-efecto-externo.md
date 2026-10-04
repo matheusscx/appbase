@@ -23,7 +23,12 @@ mismo bug con otra ventana.
 Transbank (API REST v1.2, Webpay Plus y Oneclick Mall; verificado en la referencia y en los seis
 SDK oficiales) **no acepta clave de idempotencia**: una parcial repetida con saldo suficiente se
 aplica otra vez. Su `GET` de estado sí trae `balance` —lo que queda sin anular—, por transacción
-en Webpay Plus y por detalle en los Mall, sin la lista de reembolsos.
+en Webpay Plus y por detalle en los Mall, sin la lista de reembolsos. **Medido en el sandbox de
+integración el 2026-10-04**, en Webpay Plus Mall y en Oneclick Mall: sin anulaciones el detalle
+no trae `balance`; tras cada anulación parcial trae lo que queda (`PARTIALLY_NULLIFIED`); anulado
+entero trae `0` (`NULLIFIED`); una anulación total inmediata es reversa (`REVERSED`) y no trae
+`balance`. El `GET` de Oneclick Mall va con el `buy_order` del **padre** (con el del hijo da 422).
+Las respuestas, en [`resueltos.md`](../agent/resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04).
 
 ## Decision
 
@@ -138,7 +143,9 @@ proveedores. Vencerlo es comunicación, no rechazo: "sin confirmar". Alcanza tam
 - **Una `REFUND` aclarada por saldo no tiene código de autorización**: Transbank no lo da en la
   consulta.
 - **Webpay Plus deja consultar 7 días** (según su documentación; la referencia dice "en cualquier
-  momento"): un reembolso que quedó sin confirmar y se reintenta después cae al portal.
+  momento"): un reembolso que quedó sin confirmar y se reintenta después cae al portal. Es lo
+  único de este ADR que no se midió en el sandbox: hace falta un pago de más de 7 días
+  ([`pendientes.md`](../agent/pendientes.md) § 2).
 - **Las fallas nuevas quedan en `iniciada`, no en `error`**: `error` es el estado de las filas de
   antes y cuenta igual como sin confirmar. Ninguna pantalla trataba aparte un `REFUND` en
   `error` (medido el 2026-10-04); las dos que muestran reembolsos dicen "Sin confirmar".

@@ -23,6 +23,67 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El saldo con el que se aclara un reembolso, medido en el sandbox de Transbank (cerrada 2026-10-04)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. La regla viva, en
+[ADR-029](../adr/029-reembolso-con-efecto-externo.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Probar en el sandbox de Transbank el saldo con el que se aclara un reembolso sin confirmar**
+  (anotado 2026-10-04 al cerrar "Un reembolso de pasarela que se reintenta sale dos veces",
+  [`resueltos.md`](resueltos.md); [ADR-029](../adr/029-reembolso-con-efecto-externo.md)). El
+  aclarado lee `details[0].balance` del `GET` de estado y, sin `balance`, el `status` del
+  detalle (`veredictoPorSaldo`, `cobros.service.ts`). Lo verificó la Sesión de esfuerzo máximo en
+  la referencia y en los SDK oficiales, **no en el sandbox**: el e2e usa un doble del proveedor.
+  Medir: (1) que `balance` venga después de una anulación parcial en Webpay Plus Mall y en
+  Oneclick Mall, y que no venga sin anulaciones; (2) si el `buyOrder` del `GET` de Oneclick Mall
+  es el del padre o el del hijo (la referencia no lo dice; el JSDoc del SDK Node dice el hijo, y
+  `consultarEstado` hoy manda el del padre); (3) la ventana de consulta de Webpay Plus (la
+  documentación dice 7 días, la referencia "en cualquier momento"). Si algo difiere, el aclarado
+  cae al 409 y a la marca manual del admin, que no se rompe: lo que se pierde es la automatización.
+
+### Cómo se cerró
+
+Sin cambios de código: `veredictoPorSaldo` y los dos `consultarEstado` leen lo que Transbank
+contesta. Se midió con [`scripts/qa/transbank-saldo-sandbox.mjs`](../../scripts/qa/transbank-saldo-sandbox.mjs)
+(opt-in, solo el ambiente de integración, credenciales públicas por variables de entorno), con
+la tarjeta de prueba de Transbank. Un pago de $10.000 por producto, anulado en tres parciales
+(1.000, 2.000 y 7.000) y consultado antes y después de cada una; en Oneclick, además, un cobro de
+$5.000 anulado entero de inmediato.
+
+| Momento | Webpay Plus Mall: `details[0]` | Oneclick Mall: `details[0]` (GET por el padre) |
+|---|---|---|
+| Sin anulaciones | `AUTHORIZED`, **sin** `balance` | `AUTHORIZED`, **sin** `balance` |
+| Tras anular 1.000 | `PARTIALLY_NULLIFIED`, `balance: 9000` | `PARTIALLY_NULLIFIED`, `balance: 9000` |
+| Tras anular 2.000 | `PARTIALLY_NULLIFIED`, `balance: 7000` | `PARTIALLY_NULLIFIED`, `balance: 7000` |
+| Tras anular 7.000 | `NULLIFIED`, `balance: 0` | `NULLIFIED`, `balance: 0` |
+| Anulación total inmediata | (no medida) | `REVERSED`, **sin** `balance` (la respuesta del refund: solo `{"type":"REVERSED"}`) |
+
+La respuesta de cada anulación parcial trae `type: "NULLIFIED"`, `balance` y `nullified_amount`,
+los mismos números que el `GET` posterior. Leído con `veredictoPorSaldo`:
+
+1. **`balance` después de una parcial, en los dos Mall, y ausente sin anulaciones:** confirmado.
+   Sin `balance`, `AUTHORIZED` y ningún aprobado da "no salió"; con `balance`, `esperado − monto`
+   da "salió" y `esperado` da "no salió".
+2. **El `buy_order` del `GET` de Oneclick Mall es el del padre.** Con el del hijo (`<padre>-1`)
+   Transbank contesta **422** `"Invalid value for parameter: buy order not found"`, en cada
+   consulta. `consultarEstado` ya manda el del padre (`codigoOrden`); el JSDoc del SDK Node que
+   dice "Child transaction buy order" está mal.
+3. **La anulación total cubre los dos caminos:** por parciales queda `balance: 0`, que es
+   `despues`; por reversa no hay `balance` y decide `REVERSED` con `despues ≤ 0`. Los dos dan
+   "salió".
+4. **La ventana de 7 días de Webpay Plus no se pudo medir** (hace falta un pago viejo): quedó
+   como entrada propia en [`pendientes.md`](pendientes.md) § 2, con el pago de esta medición y
+   el comando para repetir la consulta desde el 2026-10-12.
+
+De paso: el retorno de Webpay Plus llegó por `GET` con `token_ws` en la query. Un primer
+intento volvió sin ningún parámetro y el pago no se confirmó; por eso el script confirma con el
+token que guardó al crear el pago, no con el que trae el retorno. El retorno del backend
+(`/pasarela/retorno/pago`) no se tocó: ya acepta `GET` y `POST`.
+
+---
+
 ## La entrega gratuita sin rebaja se ve, y la promo no regala (cerrada 2026-10-04)
 
 Sale de [`pendientes.md`](pendientes.md) § 6 (fiscal, frente propio). La regla viva, en
@@ -224,7 +285,8 @@ en [ADR-029](../adr/029-reembolso-con-efecto-externo.md) y en
   índice único por usuario (cambia la nulabilidad) dentro de su transacción con lock exclusivo,
   sin instante sin unicidad, y el `CHECK` vale sobre las filas viejas.
 - **Lo que quedó afuera:** probar `balance` y el `buyOrder` de Oneclick en el sandbox real
-  (entrada nueva en [`pendientes.md`](pendientes.md) § 2); sanar un `REFUND` aprobado sin
+  —cerrada el 2026-10-04, [arriba](#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04);
+  sigue abierta solo la ventana de 7 días de Webpay Plus, en [`pendientes.md`](pendientes.md) § 2—; sanar un `REFUND` aprobado sin
   corrección sigue siendo el botón "Generar nota" ya decidido (§ 3) —la reproducción lo marca con
   `correccionPendiente` y no la crea—.
 

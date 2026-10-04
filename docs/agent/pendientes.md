@@ -87,18 +87,16 @@ destapa una decisión que no es mía).
   por la pasarela sí queda frenado (decisión 4 del owner). Medir primero cuánto vive un sin
   confirmar en la práctica (se aclara en el reintento o a mano) antes de decidir si la nota del
   POS también tiene que esperar —eso sí sería pregunta para el owner—.
-- [ ] **Probar en el sandbox de Transbank el saldo con el que se aclara un reembolso sin confirmar**
-  (anotado 2026-10-04 al cerrar "Un reembolso de pasarela que se reintenta sale dos veces",
-  [`resueltos.md`](resueltos.md); [ADR-029](../adr/029-reembolso-con-efecto-externo.md)). El
-  aclarado lee `details[0].balance` del `GET` de estado y, sin `balance`, el `status` del
-  detalle (`veredictoPorSaldo`, `cobros.service.ts`). Lo verificó la Sesión de esfuerzo máximo en
-  la referencia y en los SDK oficiales, **no en el sandbox**: el e2e usa un doble del proveedor.
-  Medir: (1) que `balance` venga después de una anulación parcial en Webpay Plus Mall y en
-  Oneclick Mall, y que no venga sin anulaciones; (2) si el `buyOrder` del `GET` de Oneclick Mall
-  es el del padre o el del hijo (la referencia no lo dice; el JSDoc del SDK Node dice el hijo, y
-  `consultarEstado` hoy manda el del padre); (3) la ventana de consulta de Webpay Plus (la
-  documentación dice 7 días, la referencia "en cualquier momento"). Si algo difiere, el aclarado
-  cae al 409 y a la marca manual del admin, que no se rompe: lo que se pierde es la automatización.
+- [ ] **Medir la ventana de consulta de Webpay Plus con un pago de más de 7 días** (queda del
+  cierre de "Probar en el sandbox de Transbank el saldo…", 2026-10-04, [`resueltos.md`](resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04)).
+  La documentación de Webpay Plus dice que el estado se consulta hasta 7 días; la referencia, "en
+  cualquier momento". Si vence, el aclarado de un reembolso sin confirmar más viejo cae al 409 y
+  a la marca manual del admin ([ADR-029](../adr/029-reembolso-con-efecto-externo.md)), que no se
+  rompe. **Desde el 2026-10-12**, repetir el `GET` del pago de integración de la medición (creado
+  2026-10-04 18:23 UTC, anulado entero, `balance` 0):
+  `RUN_TRANSBANK_SANDBOX=1 TBK_API_KEY_SECRET=<el de integración del seed> TBK_WEBPAY_MALL=597055555535 node scripts/qa/transbank-saldo-sandbox.mjs --reconsultar 01abe0ccb73419df9944e395fa2396743e230bb3eeb7f1cb003d1285f27209bf`.
+  Si sigue contestando 200 con el detalle, la ventana no aplica a la consulta y el ADR se corrige;
+  si no, el ADR ya lo dice.
 - [ ] **El pre-commit rechaza un recibo de revisión escrito sobre el mismo diff** (harness). Dos
   sesiones lo vieron el 2026-09-27, las dos desde un worktree (la del aviso sin costo de la
   varianza y la del aviso del login). Escribieron el recibo con el comando que imprime el hook, en

@@ -419,6 +419,14 @@ cd backend && RUN_TRANSBANK_E2E=1 npx jest --config ./test/jest-e2e.json pasarel
 
 Golpea el ambiente de integración real (skipped en `npm test` normal).
 
+El saldo con el que se aclara un reembolso sin confirmar (ADR-029) se mide con
+[`scripts/qa/transbank-saldo-sandbox.mjs`](../../scripts/qa/transbank-saldo-sandbox.mjs):
+opt-in (`RUN_TRANSBANK_SANDBOX=1`), solo contra el ambiente de integración y con las credenciales
+por variables de entorno (las de integración del seed; el comando, en el encabezado del script).
+Pide pasar una vez por el formulario de Webpay con la tarjeta de prueba, por producto; las
+anulaciones y consultas las hace solo. Lo medido el 2026-10-04, en
+[`resueltos.md`](../agent/resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04).
+
 ### Verificación manual de punta a punta
 
 Con el stack arriba (`docker-compose up -d`):
