@@ -68,6 +68,17 @@ export function tipoMotivoBajaLabel(tipo: TipoMotivoBaja): string {
 }
 
 /**
+ * Si el costo de una baja es pérdida. La cortesía y la comida del personal no lo
+ * son (decisiones del owner: spec `2026-10-04-kardex-costo-de-baja-design.md`
+ * § 3.3). Invertido a propósito: solo sale de "pérdida" lo que se sabe que no lo
+ * es, así que una baja sin tipo queda como pérdida en vez de neutralizarse en
+ * silencio.
+ */
+export function tipoMotivoBajaEsPerdida(tipo: TipoMotivoBaja | null | undefined): boolean {
+  return tipo !== 'cortesia' && tipo !== 'consumo_personal'
+}
+
+/**
  * La ayuda del tipo `consumo_personal` (owner, 2026-10-04: lo que se lleva un
  * empleado, o lo que consume el dueño, es retiro y va como cortesía). La
  * muestran el modal de anulación, Mermas y la configuración de motivos: un solo

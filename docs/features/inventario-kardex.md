@@ -122,6 +122,19 @@ está expresado su costo. El kardex global mezcla productos de distintas
 monedas, así que sin este campo la UI formatearía todo costo con la moneda
 oficial del tenant y mostraría un costo en USD con símbolo y decimales de CLP.
 
+**Una baja dice qué fue (2026-10-04).** La merma, la cortesía y la comida del personal escriben
+las tres `motivo='merma'`; lo único que las separa es `motivo_baja.tipo`. Por eso cada fila trae
+`motivoBajaTipo` (`merma` | `cortesia` | `consumo_personal`, `null` fuera de las bajas) y
+`costoBaja` —`cantidad × costo_unitario` congelado, escala 4, `null` sin costo—, que hasta esa
+fecha se llamaba `costoPerdido` y se pintaba como pérdida para las tres. El número es el valor
+de lo dado de baja; si es pérdida lo decide la pantalla por el tipo: `/inventario` lo muestra en
+rojo salvo para la cortesía y la comida del personal (una baja sin tipo queda en rojo, como
+antes), bajo la columna *"Costo de la baja"*, y el badge dice `{tipo} · {motivo}` con
+`tipoMotivoBajaLabel`. El `JOIN` a `motivo_baja` **no filtra su borrado**, con el porqué en la
+consulta: el tipo es un hecho del movimiento ya aplicado (mismo criterio que ítems y
+ubicaciones). Spec: [`2026-10-04-kardex-costo-de-baja-design.md`](../superpowers/specs/2026-10-04-kardex-costo-de-baja-design.md).
+⚠️ El filtro `motivo=merma` sigue trayendo las tres bajas (`docs/agent/pendientes.md`).
+
 ---
 
 ### PATCH /items/:id/stock

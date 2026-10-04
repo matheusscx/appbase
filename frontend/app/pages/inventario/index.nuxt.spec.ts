@@ -545,3 +545,77 @@ describe('inventario — el kardex muestra dónde', () => {
     wrapper.unmount()
   })
 })
+
+// Spec 2026-10-04-kardex-costo-de-baja § 3.2: las tres bajas escriben
+// `motivo = 'merma'` y solo el tipo del motivo las separa. La cortesía y la
+// comida del personal no son pérdida; todo lo demás —incluida una baja sin
+// tipo— sigue en rojo, para que lo inesperado no se neutralice en silencio.
+describe('inventario — el kardex no llama pérdida a lo que no lo es', () => {
+  const baja = (id: string, tipo: string | null, nombre: string, costoBaja: string) => ({
+    id,
+    itemId: HARINA.id,
+    itemNombre: 'Harina',
+    tipo: 'salida',
+    motivo: 'merma',
+    cantidad: '1.0000',
+    stockAnterior: '10.0000',
+    stockResultante: '9.0000',
+    usuarioNombre: 'Admin',
+    comentario: null,
+    creadoEl: '2026-10-04T10:00:00.000Z',
+    motivoBajaNombre: nombre,
+    motivoBajaTipo: tipo,
+    costoBaja,
+    unidadMedida: 'kg',
+    monedaId: 'clp-1',
+    itemEliminado: false,
+    ubicacionId: 'local-1',
+    ubicacionNombre: 'Local',
+  })
+
+  beforeEach(() => {
+    ubicacionesBackend = []
+    movimientosBackend = [
+      baja('mov-merma', 'merma', 'Vencimiento', '1000.0000'),
+      baja('mov-cortesia', 'cortesia', 'Cumpleaños', '2000.0000'),
+      baja('mov-personal', 'consumo_personal', 'Almuerzo', '3000.0000'),
+      baja('mov-sin-tipo', null, 'Rotura', '4000.0000'),
+    ]
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  /** El `<span>` del monto en la columna del costo de la baja, por su texto formateado. */
+  function celdaCosto(wrapper: Wrapper, monto: string) {
+    const span = wrapper.findAll('td span').find(s => s.text() === monto)
+    expect(span, `celda con ${monto}`).toBeTruthy()
+    return span!
+  }
+
+  it('la columna se llama "Costo de la baja", no "Costo perdido"', async () => {
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('Costo de la baja')
+    expect(wrapper.text()).not.toContain('Costo perdido')
+    wrapper.unmount()
+  })
+
+  it('la merma y la baja sin tipo van en rojo; la cortesía y la comida del personal no', async () => {
+    const wrapper = await montar()
+    expect(celdaCosto(wrapper, '$1.000').classes()).toContain('text-error')
+    expect(celdaCosto(wrapper, '$4.000').classes()).toContain('text-error')
+    expect(celdaCosto(wrapper, '$2.000').classes()).not.toContain('text-error')
+    expect(celdaCosto(wrapper, '$3.000').classes()).not.toContain('text-error')
+    wrapper.unmount()
+  })
+
+  it('el motivo dice el tipo de la baja, y "Merma" solo para la merma o la baja sin tipo', async () => {
+    const wrapper = await montar()
+    const texto = wrapper.text()
+    expect(texto).toContain('Merma · Vencimiento')
+    expect(texto).toContain('Cortesía · Cumpleaños')
+    expect(texto).toContain('Comida del personal · Almuerzo')
+    expect(texto).toContain('Merma · Rotura')
+    expect(texto).not.toContain('Merma · Cumpleaños')
+    expect(texto).not.toContain('Merma · Almuerzo')
+    wrapper.unmount()
+  })
+})

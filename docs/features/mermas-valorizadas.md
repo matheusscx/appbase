@@ -34,7 +34,7 @@ Food-service necesita saber *por qué* se perdió stock y cuánto costó, no sol
 - Tabla `motivo_baja` por tenant + columna `motivo_baja_id` en `movimientos_inventario`.
 - Semilla de 7 motivos fijos al crear tenant y en el seeder de desarrollo.
 - CRUD `/api/motivos-baja` y registro/listado `/api/mermas`.
-- UI: configuración de motivos, operación de mermas (drawer sin campo de costo; cartel no bloqueante cuando el producto no tiene costo cargado), kardex con motivo y costo perdido.
+- UI: configuración de motivos, operación de mermas (drawer sin campo de costo; cartel no bloqueante cuando el producto no tiene costo cargado), kardex con motivo y costo de la baja (pérdida solo si es merma).
 - Quitar opción Merma del modal de ajuste de stock en items.
 - Mismo cartel no bloqueante en la entrada por compra (`configuracion/items.vue`), porque el dato de costo se carga ahí, no al mermar.
 - Marca **Sin costo** y filtro `sinCosto` en el listado de ítems (ver [`inventario-kardex.md`](./inventario-kardex.md) § *"Ítems sin costo"*).
@@ -223,7 +223,7 @@ visible que ese plato quemado también está contado en el otro reporte.
   campo se muestra deshabilitado, con la ayuda que explica por qué — el 400 del servidor
   sigue siendo la regla, esto es solo UX.
 - `/mermas` — listado filtrable + drawer registrar (solo cantidad, unidad y motivo; **sin campo de costo**). El selector de motivo pide `GET /api/motivos-baja?soloActivas=true&tipo=merma`: *Cortesía de la casa* y *No se llegó a hacer* no aparecen ahí, aunque el filtro de pantalla no reemplaza el 400 de `POST /api/mermas`. Cartel no bloqueante cuando el producto no tiene `costo_actual`: avisa que la merma se va a registrar igual pero sin valorizar, y que no se puede corregir después. Columna Cantidad formateada por magnitud vía `formatStock` (`useFormatters`) — `MermaListItem.unidadMedida` (viene de `item_producto.unidad_medida`). Columna Motivo: `UBadge` con el nombre y, cuando `deAnulacion` es `true`, un segundo `UBadge` *"Anulación en mesa"* al lado.
-- Kardex / historial de movimientos: `Merma · {motivoBajaNombre}` y costo perdido formateado (`formatMonto`), o `—` cuando es `null`.
+- Kardex (`/inventario`): `{tipo} · {motivoBajaNombre}` (*Merma*, *Cortesía*, *Comida del personal*) y la columna *"Costo de la baja"* formateada (`formatMonto`), en rojo salvo para la cortesía y la comida del personal, o `—` cuando es `null` (desde el 2026-10-04: [`inventario-kardex.md`](./inventario-kardex.md#get-inventariomovimientos)). El historial del ítem en `/configuracion/items` no muestra ni el motivo de baja ni ese costo.
 - Modal de ajuste de stock en items: opción Merma eliminada.
 - `configuracion/items.vue` — mismo cartel no bloqueante en el drawer de entrada por compra cuando el producto no tiene costo; badge **Sin costo** y checkbox **Solo sin costo** en el listado (filtro `sinCosto`, ver [`inventario-kardex.md`](./inventario-kardex.md)).
 

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   cuentaToCalcularInput,
   tipoMotivoBajaLabel,
+  tipoMotivoBajaEsPerdida,
   formatCantidadAnulacion,
   type CuentaDetalle,
   type CuentaLineaDetalle,
@@ -217,5 +218,20 @@ describe('formatCantidadAnulacion', () => {
   it('si el ítem ya no está en el catálogo, cae al mismo fallback que `unidadBaseLinea`: unidad', () => {
     const itemsPorId = new Map<string, { tipo: string, unidadMedida?: string | null }>()
     expect(formatCantidadAnulacion(anulacion({ cantidad: '3' }), itemsPorId, esFraccionariaDelCatalogo)).toBe('3')
+  })
+})
+
+describe('tipoMotivoBajaEsPerdida', () => {
+  // Spec `2026-10-04-kardex-costo-de-baja-design.md` § 3.2: la cortesía y la
+  // comida del personal no son pérdida; lo demás sí, incluida una baja sin tipo.
+  it.each([
+    ['merma', true],
+    ['no_elaborado', true],
+    [null, true],
+    [undefined, true],
+    ['cortesia', false],
+    ['consumo_personal', false],
+  ] as const)('%s → %s', (tipo, esperado) => {
+    expect(tipoMotivoBajaEsPerdida(tipo)).toBe(esperado)
   })
 })

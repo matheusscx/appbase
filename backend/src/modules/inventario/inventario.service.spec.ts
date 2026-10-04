@@ -3754,44 +3754,86 @@ describe('InventarioService', () => {
       expect(res.data[0].costoUnitario).toBe('4200');
     });
 
-    it('findMovimientos expone motivo y costoPerdido en merma', async () => {
+    // Toda baja escribe `motivo = 'merma'`; solo `motivo_baja.tipo` separa la
+    // merma de la cortesía y de la comida del personal (spec
+    // 2026-10-04-kardex-costo-de-baja § 3.1). El número es el mismo para las
+    // tres —el valor de lo que se dio de baja—; el tipo viaja para que la
+    // pantalla no llame pérdida a lo que no lo es.
+    const filaBaja = (tipo: string | null, nombre: string | null) => ({
+      movimiento_id: `mov-${tipo}`,
+      item_id: ITEM_ID,
+      item_nombre: 'Lechuga',
+      tipo: 'salida',
+      motivo: 'merma',
+      cantidad: '3.5000',
+      stock_anterior: '10.0000',
+      stock_resultante: '6.5000',
+      usuario_id: USER_ID,
+      usuario_nombre: 'Admin',
+      comentario: null,
+      creado_el: new Date('2026-07-15T00:00:00Z'),
+      costo_unitario: '1200.5000',
+      motivo_baja_id: MOTIVO_BAJA_ID,
+      motivo_baja_nombre: nombre,
+      motivo_baja_tipo: tipo,
+    });
+
+    it.each([
+      ['merma', 'Vencimiento'],
+      ['cortesia', 'Cumpleaños'],
+      ['consumo_personal', 'Almuerzo'],
+    ])(
+      'findMovimientos expone el tipo de la baja (%s) y su costoBaja',
+      async (tipo, nombre) => {
+        dataSource.query
+          .mockResolvedValueOnce([{ total: 1 }])
+          .mockResolvedValueOnce([filaBaja(tipo, nombre)]);
+
+        const res = await service.findMovimientos(TENANT, {});
+
+        expect(res.data[0]).toMatchObject({
+          motivoBajaId: MOTIVO_BAJA_ID,
+          motivoBajaNombre: nombre,
+          motivoBajaTipo: tipo,
+          costoBaja: '4201.7500',
+        });
+        expect(res.data[0]).not.toHaveProperty('costoPerdido');
+      },
+    );
+
+    it('findMovimientos: fuera de las bajas, motivoBajaTipo y costoBaja van en null aunque haya costo', async () => {
       dataSource.query
         .mockResolvedValueOnce([{ total: 1 }])
         .mockResolvedValueOnce([
           {
-            movimiento_id: 'mov-m1',
-            item_id: ITEM_ID,
-            item_nombre: 'Lechuga',
-            tipo: 'salida',
-            motivo: 'merma',
-            cantidad: '3.5000',
-            stock_anterior: '10.0000',
-            stock_resultante: '6.5000',
-            usuario_id: USER_ID,
-            usuario_nombre: 'Admin',
-            comentario: null,
-            creado_el: new Date('2026-07-15T00:00:00Z'),
-            costo_unitario: '1200.5000',
-            motivo_baja_id: MOTIVO_BAJA_ID,
-            motivo_baja_nombre: 'Vencimiento',
+            ...filaBaja(null, null),
+            motivo: 'venta',
+            motivo_baja_id: null,
           },
         ]);
 
       const res = await service.findMovimientos(TENANT, {});
 
-      expect(res.data[0]).toMatchObject({
-        motivoBajaId: MOTIVO_BAJA_ID,
-        motivoBajaNombre: 'Vencimiento',
-        costoPerdido: '4201.7500',
-      });
-      expect(dataSource.query).toHaveBeenCalledWith(
-        expect.stringContaining('motivo_baja_id'),
-        expect.any(Array),
-      );
-      expect(dataSource.query).toHaveBeenCalledWith(
-        expect.stringContaining('motivo_baja'),
-        expect.any(Array),
-      );
+      expect(res.data[0].motivoBajaTipo).toBeNull();
+      expect(res.data[0].costoBaja).toBeNull();
+      expect(res.data[0].costoUnitario).toBe('1200.5000');
+    });
+
+    // Control DÉBIL (texto del SQL; el fuerte es el e2e de mermas.e2e-spec.ts,
+    // "el kardex dice el tipo de cada baja"): el tipo sale del mismo JOIN que
+    // el nombre, y ese JOIN no filtra el borrado del motivo, para que la fila
+    // ya aplicada no pierda su tipo.
+    it('findMovimientos trae mb.tipo del JOIN a motivo_baja, que no filtra el borrado', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findMovimientos(TENANT, {});
+
+      const [listSql] = dataSource.query.mock.calls[1] as [string, unknown[]];
+      expect(listSql).toMatch(/mb\.tipo AS motivo_baja_tipo/);
+      const join = /LEFT JOIN motivo_baja mb ON ([^\n]*)/.exec(listSql);
+      expect(join?.[1]).toBe('mb.motivo_baja_id = mv.motivo_baja_id');
     });
   });
 

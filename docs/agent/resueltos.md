@@ -23,6 +23,78 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El kardex llamaba "costo perdido" a la cortesía y a la comida del personal (cerrada 2026-10-04)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. La regla viva, en
+[`inventario-kardex.md`](../features/inventario-kardex.md#get-inventariomovimientos); diseño en
+[`2026-10-04-kardex-costo-de-baja-design.md`](../superpowers/specs/2026-10-04-kardex-costo-de-baja-design.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **El kardex llama "costo perdido" a la cortesía y a la comida del personal** (backend +
+  front; anotado el 2026-10-04 al cerrar "la comida del personal tiene motivo propio",
+  [`resueltos.md`](resueltos.md); que vaya como entrada propia lo decidió la Sesión de esfuerzo
+  máximo, por el canal de dudas fiscales). Toda baja escribe `motivo = 'merma'` en
+  `movimientos_inventario`, y solo `motivo_baja.tipo` separa la merma de la cortesía y de la comida
+  del personal. `InventarioService.mapMovimientoRow` calcula `costoPerdido` con `r.motivo ===
+  'merma'`, así que el kardex muestra "costo perdido" también para lo regalado y para lo que comió
+  el personal, que no son pérdidas. Mermas, el Inicio y varianza ya filtran por el tipo. **Lo que
+  falta:** que la lectura del kardex traiga `motivo_baja.tipo` y que el costo de lo que no es merma
+  no se llame pérdida, sin tocar cómo se escribe el kardex. **Antes de empezar:** listar a todos
+  los que leen `costoPerdido` del kardex (front incluido).
+
+### Lo medido antes de diseñar
+
+Lectores de `costoPerdido` **del kardex**: `InventarioService.mapMovimientoRow` (y su unit) y
+`pages/inventario/index.vue`, nada más. `configuracion/items.vue` pega al mismo endpoint (historial
+del ítem) sin leer ese campo ni `motivoBajaNombre`. Los `costoPerdido` de `mermas.service.ts`,
+`mermas.vue`, `mermas-personal.spec.ts` y `resumen-negocio.e2e-spec.ts` son el campo de
+`GET/POST /mermas`, otro contrato, y quedaron como estaban. La Sesión de esfuerzo máximo verificó
+lo mismo en `frontend/e2e`, `frontend/app/types` y `backend/test`.
+
+### Cómo se decidió
+
+La sesión del frente le mandó a la Sesión de esfuerzo máximo el contrato, el color y el badge, con
+tres opciones y la recomendada primero. **Decidido por la Sesión de esfuerzo máximo (2026-10-04),
+derivado de dos decisiones del owner**: la comida del personal no es pérdida (owner, 2026-10-04) y
+la cortesía no es pérdida real (spec del reporte de anulaciones, 2026-09-18, aprobada por el
+owner). Va la recomendada con dos ajustes suyos: el rojo invertido (solo salen la cortesía y la
+comida del personal; una baja sin tipo sigue en rojo) y el badge con `tipoMotivoBajaLabel`.
+Descartadas: un campo aparte para el costo de lo que no es merma (el mismo número en dos campos) y
+esconder ese costo (eso sí habría sido del owner: oculta un dato que el kardex mostraba).
+
+### Cómo se cerró
+
+- **Lectura, sin consulta nueva:** el `SELECT` del kardex trae `mb.tipo` del `LEFT JOIN
+  motivo_baja` que ya tenía. Ese `JOIN` **dejó de filtrar `mb.eliminado_el`**, con el porqué en la
+  consulta: el tipo es un hecho del movimiento ya aplicado, un motivo en uso no se puede borrar
+  salvo por la carrera sin lock que documenta `salones.service.ts`, y en ese caso la fila habría
+  perdido tipo y nombre sin decirlo. El `COUNT` no tiene ese `JOIN`.
+- **Contrato:** `MovimientoListItem` gana `motivoBajaTipo` y `costoPerdido` pasa a `costoBaja`,
+  el mismo número. Nada escribe en `movimientos_inventario`.
+- **Pantalla:** columna *"Costo de la baja"*, en rojo salvo cortesía y comida del personal
+  (`tipoMotivoBajaEsPerdida`, `useSalones.ts`, al lado de `tipoMotivoBajaLabel`); el badge dice
+  `{tipo} · {motivo}`.
+- **Queda afuera, con su lugar:** el filtro *"Merma"* del kardex sigue trayendo las tres bajas
+  (entrada nueva en `pendientes.md` § 3).
+
+### Qué lo fija
+
+- `inventario.service.spec.ts`: tipo y `costoBaja` de las tres bajas, los dos `null` fuera de
+  ellas, y —control débil, sobre el texto— `mb.tipo` del `JOIN` sin filtro de borrado.
+- `mermas.e2e-spec.ts` (control fuerte): merma y cortesía anuladas en mesa y comida del personal
+  por `POST /mermas` sobre un plato propio; el kardex devuelve cada una con su tipo y $1.000.
+- `inventario/index.nuxt.spec.ts` (encabezado, rojo por tipo, badges) y `useSalones.spec.ts`
+  (`tipoMotivoBajaEsPerdida`); Playwright `inventario/kardex-costo-de-baja.spec.ts` contra el
+  backend real.
+- **Mutantes medidos, todos revertidos:** volver a filtrar `mb.eliminado_el` en el `JOIN` (muere
+  1, el unit del SQL: el estado solo se alcanza por una carrera, así que no hay e2e que lo monte);
+  sacar `mb.tipo` del `SELECT` (muere el mismo unit y el e2e nuevo); el monto siempre en rojo, como
+  antes (muere 1); la baja sin tipo neutralizada (mueren 4); el badge *"Merma"* para toda baja,
+  como antes (muere 1); el encabezado *"Costo perdido"* (muere 1).
+
+---
+
 ## En los `PUT` que reemplazan, omitir un campo es un 400 (cerrada 2026-10-04)
 
 Sale de [`pendientes.md`](pendientes.md) § 1. La regla viva está en

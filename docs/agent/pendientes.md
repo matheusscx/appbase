@@ -277,17 +277,17 @@ que lo convierte en un frente propio y no en un remate.
 superficies" sumando conteos de código con un conteo de docs hecho con **otro patrón**. La
 revisión independiente no lo pudo reproducir, con razón.
 
-- [ ] **El kardex llama "costo perdido" a la cortesía y a la comida del personal** (backend +
-  front; anotado el 2026-10-04 al cerrar "la comida del personal tiene motivo propio",
-  [`resueltos.md`](resueltos.md); que vaya como entrada propia lo decidió la Sesión de esfuerzo
-  máximo, por el canal de dudas fiscales). Toda baja escribe `motivo = 'merma'` en
-  `movimientos_inventario`, y solo `motivo_baja.tipo` separa la merma de la cortesía y de la comida
-  del personal. `InventarioService.mapMovimientoRow` calcula `costoPerdido` con `r.motivo ===
-  'merma'`, así que el kardex muestra "costo perdido" también para lo regalado y para lo que comió
-  el personal, que no son pérdidas. Mermas, el Inicio y varianza ya filtran por el tipo. **Lo que
-  falta:** que la lectura del kardex traiga `motivo_baja.tipo` y que el costo de lo que no es merma
-  no se llame pérdida, sin tocar cómo se escribe el kardex. **Antes de empezar:** listar a todos
-  los que leen `costoPerdido` del kardex (front incluido).
+- [ ] **El filtro "Merma" del kardex trae también la cortesía y la comida del personal** (backend +
+  front; anotado el 2026-10-04 al cerrar "el kardex llama 'costo perdido' a la cortesía",
+  [`resueltos.md`](resueltos.md); que quedara afuera de ese frente lo decidió la Sesión de esfuerzo
+  máximo). La opción *"Merma"* del filtro de motivo de `/inventario` manda `motivo=merma`, y
+  `buildMovimientosFilters` filtra por `mv.motivo`, que las tres bajas comparten. **Desde ese
+  cierre la contradicción se ve en la misma pantalla**: con el filtro *"Merma"* puesto aparecen
+  filas con el badge *"Cortesía · …"* y *"Comida del personal · …"*. Las decisiones de fondo ya
+  están (la cortesía y la comida del personal no son pérdida: owner, 2026-09-18 y 2026-10-04); lo
+  que falta es la forma del filtro —un parámetro por tipo de baja, o opciones separadas en el
+  desplegable— y que el `COUNT` y la página lo apliquen igual. Al tocarlo, el tipo sale de
+  `motivo_baja` sin filtrar su borrado, como el `JOIN` de la lectura.
 
 - [ ] **Un `REFUND` aprobado que quedó sin nota de crédito no tiene cómo generarla: botón
   "Generar nota"** (backend + frontend; ⛔ **fiscal, frente propio**: emite un documento, así que

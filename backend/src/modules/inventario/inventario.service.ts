@@ -26,6 +26,7 @@ import type { FindMovimientosDto } from './dto/find-movimientos.dto';
 import type { AjusteCostoDto } from './dto/ajuste-costo.dto';
 import type { FindStockMinimoDto } from './dto/find-stock-minimo.dto';
 import type { OrigenStockMinimo } from './entities/stock-minimo.entity';
+import type { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
 import {
   bordeFechaSql,
   bordeHastaSql,
@@ -2555,7 +2556,7 @@ export class InventarioService {
          mv.usuario_id, u.nombre AS usuario_nombre,
          mv.comentario, mv.creado_el, mv.costo_unitario, mv.costo_anterior,
          mv.motivo_baja_id, mv.motivo_diferencia_id,
-         mb.nombre AS motivo_baja_nombre,
+         mb.nombre AS motivo_baja_nombre, mb.tipo AS motivo_baja_tipo,
          p.unidad_medida,
          -- El kardex global mezcla ítems de distintas monedas: sin esto la UI
          -- formatea todo costo con la moneda oficial del tenant.
@@ -2566,7 +2567,15 @@ export class InventarioService {
        LEFT JOIN items i ON i.item_id = mv.item_id
        LEFT JOIN item_producto p ON p.item_id = mv.item_id
        LEFT JOIN usuarios u ON u.usuario_id = mv.usuario_id AND u.eliminado_el IS NULL
-       LEFT JOIN motivo_baja mb ON mb.motivo_baja_id = mv.motivo_baja_id AND mb.eliminado_el IS NULL
+       -- Sin mb.eliminado_el IS NULL, a propósito: el tipo del motivo es lo único
+       -- que separa la merma de la cortesía y de la comida del personal (las
+       -- tres escriben motivo = 'merma'), y es un hecho del movimiento ya
+       -- aplicado. Un motivo en uso no se puede borrar (MotivosBajaService.
+       -- remove), salvo por la carrera sin lock que documenta salones.service
+       -- (remove contra una baja concurrente); ahí, con el filtro, la fila
+       -- perdería tipo y nombre sin decirlo, y la pantalla no sabría si es
+       -- pérdida. El COUNT de arriba no tiene este JOIN: el total no cambia.
+       LEFT JOIN motivo_baja mb ON mb.motivo_baja_id = mv.motivo_baja_id
        -- Sin ub.eliminado_el IS NULL, a propósito e igual que el JOIN de items
        -- arriba: un movimiento ya escrito en el kardex tiene que seguir diciendo
        -- en qué ubicación pasó aunque esa bodega se haya borrado después (es lo
@@ -2659,12 +2668,14 @@ export class InventarioService {
       costoAnterior: r.costo_anterior,
       motivoBajaId: r.motivo_baja_id,
       motivoBajaNombre: r.motivo_baja_nombre,
+      motivoBajaTipo: r.motivo_baja_tipo,
       motivoDiferenciaId: r.motivo_diferencia_id,
       // Proyección de lectura: cantidad × costo congelado del kardex, a escala de
       // costo (4). Nadie paga este número y no se persiste. Redondearlo con la config
       // vigente haría que el historial cambie al cambiar la preferencia del tenant;
-      // el formateo a moneda es de presentación, no de acá.
-      costoPerdido:
+      // el formateo a moneda es de presentación, no de acá. Es el valor de lo dado
+      // de baja, no "lo perdido": si es pérdida lo dice `motivoBajaTipo`.
+      costoBaja:
         r.motivo === 'merma' && r.costo_unitario != null
           ? new Decimal(r.cantidad).mul(r.costo_unitario).toFixed(ESCALA_COSTO)
           : null,
@@ -2694,8 +2705,18 @@ export interface MovimientoListItem {
   costoAnterior: string | null;
   motivoBajaId: string | null;
   motivoBajaNombre: string | null;
+  /**
+   * Qué fue la baja (`merma`, `cortesia`, `consumo_personal`): las tres escriben
+   * `motivo = 'merma'`. `null` fuera de las bajas.
+   */
+  motivoBajaTipo: TipoMotivoBaja | null;
   motivoDiferenciaId: string | null;
-  costoPerdido: string | null;
+  /**
+   * `cantidad × costo_unitario` de una baja, a escala de costo; `null` fuera de
+   * las bajas o sin costo congelado. No es pérdida si el tipo es `cortesia` o
+   * `consumo_personal`: eso lo decide la pantalla.
+   */
+  costoBaja: string | null;
   unidadMedida: string | null;
   monedaId: string;
   /**
@@ -2735,6 +2756,7 @@ interface MovimientoRow {
   costo_anterior: string | null;
   motivo_baja_id: string | null;
   motivo_baja_nombre: string | null;
+  motivo_baja_tipo: TipoMotivoBaja | null;
   motivo_diferencia_id: string | null;
   unidad_medida: string | null;
   moneda_id: string;

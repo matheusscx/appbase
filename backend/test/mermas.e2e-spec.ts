@@ -1087,6 +1087,90 @@ describe('Mermas — deja de listar cortesías, marca deAnulacion (Task 4, e2e)'
     expect(filaMesa?.motivoBajaNombre).toBe(motivoMermaNombre);
   });
 
+  // Spec 2026-10-04-kardex-costo-de-baja § 3.1, control FUERTE (el débil es
+  // el texto del SQL en inventario.service.spec.ts): las tres bajas escriben
+  // `motivo = 'merma'` en el kardex y solo el tipo del motivo las separa. El
+  // kardex tiene que devolver ese tipo en cada fila, con el mismo costoBaja
+  // para las tres, y sin llamarlo pérdida en el contrato.
+  it('el kardex dice el tipo de cada baja —merma, cortesía y comida del personal— con su costoBaja', async () => {
+    const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    // Plato propio: el filtro por itemId deja solo las bajas de este test.
+    const platoPropioId = (
+      await post<ItemResponse>('/api/items', {
+        nombre: `Plato kardex-tipo E2E ${marca}`,
+        tipo: 'producto',
+        precioBase: '5000',
+        monedaId: CLP_MONEDA_ID,
+        unidadMedida: 'unidad',
+        stock: '100',
+        costo: '1000',
+        categoriaId: catCocinaId,
+      })
+    ).id;
+
+    const resMotivos = await request(app.getHttpServer())
+      .get('/api/motivos-baja?tipo=consumo_personal')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resMotivos.status).toBe(200);
+    const motivoPersonalId = (resMotivos.body as { id: string }[])[0]?.id;
+    expect(motivoPersonalId).toBeTruthy();
+
+    const cuenta = await abrirCuentaCon([
+      { itemId: platoPropioId, cantidad: '2' },
+    ]);
+    await despachar(cuenta.id);
+    const linea = (await detalleCuenta(cuenta.id)).lineas.find(
+      (l) => l.itemId === platoPropioId,
+    )!;
+    await anular(cuenta.id, linea.id, {
+      cantidad: '1',
+      motivoBajaId: motivoCortesiaId,
+    });
+    const lineaTrasCortesia = (await detalleCuenta(cuenta.id)).lineas.find(
+      (l) => l.itemId === platoPropioId,
+    )!;
+    await anular(cuenta.id, lineaTrasCortesia.id, {
+      cantidad: '1',
+      motivoBajaId: motivoMermaId,
+    });
+    await post('/api/mermas', {
+      itemId: platoPropioId,
+      ubicacionId: localId,
+      cantidad: '1',
+      motivoBajaId: motivoPersonalId,
+    });
+
+    const res = await request(app.getHttpServer())
+      .get(`/api/inventario/movimientos?itemId=${platoPropioId}&motivo=merma`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(res.status).toBe(200);
+    const filas = (
+      res.body as {
+        data: {
+          motivoBajaId: string | null;
+          motivoBajaTipo: string | null;
+          costoBaja: string | null;
+        }[];
+      }
+    ).data;
+
+    expect(filas).toHaveLength(3);
+    const porMotivo = Object.fromEntries(filas.map((f) => [f.motivoBajaId, f]));
+    expect(porMotivo[motivoMermaId]).toMatchObject({
+      motivoBajaTipo: 'merma',
+      costoBaja: '1000.0000',
+    });
+    expect(porMotivo[motivoCortesiaId]).toMatchObject({
+      motivoBajaTipo: 'cortesia',
+      costoBaja: '1000.0000',
+    });
+    expect(porMotivo[motivoPersonalId]).toMatchObject({
+      motivoBajaTipo: 'consumo_personal',
+      costoBaja: '1000.0000',
+    });
+    expect(filas.every((f) => !('costoPerdido' in f))).toBe(true);
+  });
+
   /**
    * Cancelar con motivo una cuenta con varios platos despachados deja una
    * merma por línea en UNA transacción, así que todas llevan el mismo

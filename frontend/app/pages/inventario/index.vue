@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
+import type { TipoMotivoBaja } from '~/composables/useSalones'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -27,9 +28,12 @@ interface Movimiento {
   comentario: string | null
   creadoEl: string
   motivoBajaNombre?: string | null
+  /** Qué fue la baja: las tres escriben `motivo = 'merma'`. `null` fuera de las bajas. */
+  motivoBajaTipo?: TipoMotivoBaja | null
   costoUnitario?: string | null
   costoAnterior?: string | null
-  costoPerdido?: string | null
+  /** Valor de lo dado de baja; solo es pérdida si el tipo no es cortesía ni comida del personal. */
+  costoBaja?: string | null
   unidadMedida: string | null
   monedaId: string
   /** El producto se dio de baja después de este movimiento; el kardex lo conserva. */
@@ -102,7 +106,8 @@ onMounted(() => {
 function motivoLabel(mov: Movimiento): string {
   const base = motivoOpts.find(o => o.value === mov.motivo)?.label ?? mov.motivo
   if (mov.motivo === 'merma' && mov.motivoBajaNombre) {
-    return `Merma · ${mov.motivoBajaNombre}`
+    const tipo = mov.motivoBajaTipo ? tipoMotivoBajaLabel(mov.motivoBajaTipo) : 'Merma'
+    return `${tipo} · ${mov.motivoBajaNombre}`
   }
   return base
 }
@@ -120,7 +125,7 @@ const columns = computed<TableColumn<Movimiento>[]>(() => [
   { accessorKey: 'cantidad', header: 'Cantidad', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { id: 'costoAjuste', header: 'Costo', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'stockResultante', header: 'Resultante', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { accessorKey: 'costoPerdido', header: 'Costo perdido', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'costoBaja', header: 'Costo de la baja', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'usuarioNombre', header: 'Usuario' },
 ])
 
@@ -374,12 +379,13 @@ async function registrarAjusteCosto() {
           <template #stockResultante-cell="{ row }">
             <span class="font-medium">{{ formatStock(row.original.stockResultante, row.original.unidadMedida) }}</span>
           </template>
-          <template #costoPerdido-cell="{ row }">
+          <template #costoBaja-cell="{ row }">
             <span
-              v-if="row.original.costoPerdido != null"
-              class="font-medium text-error"
+              v-if="row.original.costoBaja != null"
+              class="font-medium"
+              :class="{ 'text-error': tipoMotivoBajaEsPerdida(row.original.motivoBajaTipo) }"
             >
-              {{ formatMonto(row.original.costoPerdido, row.original.monedaId) }}
+              {{ formatMonto(row.original.costoBaja, row.original.monedaId) }}
             </span>
             <span v-else class="text-muted">—</span>
           </template>
