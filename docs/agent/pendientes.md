@@ -67,6 +67,14 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
+- [ ] **`PATCH /me/preferencias` con `ui: null` (el objeto entero) da 200 sin hacer nada** (backend,
+  `me/dto/update-preferencias.dto.ts`; anotado 2026-10-04 por el frente que hizo 400 el `null` de
+  `ui.colorMode`/`ui.pageSize`, que no lo tocó por alcance). `ui` sigue con `@IsOptional()`, que
+  trata `null` como ausente: no resetea nada, pero es la única forma de `null` que esa ruta todavía
+  acepta. Sale de la misma decisión del owner (2026-10-04, "un `null` en las preferencias es un
+  400"): `@ValidateIf((_o, v) => v !== undefined)` en `ui`, con su e2e en
+  `null-en-actualizaciones.e2e-spec.ts`.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -227,7 +235,9 @@ destapa una decisión que no es mía).
   traslados y ajuste de stock); el resto no: entre otros `turnoIds` (propinas), `rolIds`
   (`crear-usuario-tenant`), `itemIds` (promociones, recuentos), `impuestosIds`/`recargosIds`/
   `descuentosIds` (ítems), `metodoPagoIds` (descuentos, recargos), `cuentaIds` (fusionar),
-  `usuarioIds` (cajones), `garzonIds` (testigo). Sin tope, un body con decenas de miles de ids
+  `usuarioIds` (cajones), `garzonIds` (testigo), y `grupos` y sus `pesos` en
+  `PUT /propinas/distribucion`, donde el guardado hace un `obtenerActivoPorId` por peso (lo anotó el
+  frente del campo omitido, 2026-10-04). Sin tope, un body con decenas de miles de ids
   entra entero a un `= ANY($1)` o a un loop de validación. **Medir:** listar todos los campos array
   de los DTOs y cuáles tienen tope —`grep -rn -B6 -E "Ids\??: (string|[A-Za-z]+)\[\]"
   backend/src --include="*.dto.ts"` y mirar el bloque de decoradores de cada uno—, y para cada uno
