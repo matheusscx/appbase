@@ -228,6 +228,14 @@ destapa una decisión que no es mía).
   (minúsculas a la entrada). El `grupoOpcionId` del mismo DTO solo va a SQL (leído): no tiene el
   problema.
 
+- [ ] **`e2e/salones/anular-plato.spec.ts:188` salió flaky en CI** (frontend, Playwright; run
+  37465150509 de `d08aef16`, 2026-10-06). El test "pide, manda a cocina, anula como cortesía…" dio
+  `locator.click: Test timeout of 30000ms exceeded` y pasó en el retry; el run siguiente
+  (`74f96279`) dio 106/106 sin flaky. El diff de ese commit no tocaba salones. **Medir:** bajar
+  del artefacto `playwright-report` de ese run los tres `test-failed-*.png` y ver en qué click se
+  quedó; correr el spec en loop (`--repeat-each`) sobre stack propio. Si se repite, la causa se
+  busca en lo que el click espera, no subiendo el timeout.
+
 - [ ] **Ninguna respuesta de la API viaja comprimida** (backend + proxy de Nuxt; medido en local
   el 2026-10-03, al cerrar la paginación de `GET /compras/productos`). Ni Nest ni
   `server/api/[...].ts` comprimen: con `Accept-Encoding: gzip`, `GET /compras/productos` (entera,
