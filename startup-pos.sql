@@ -1933,7 +1933,7 @@ CREATE TABLE "ventas_promociones" (
   "venta_promocion_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "venta_id"            UUID          NOT NULL REFERENCES "ventas" ("venta_id"),
   "detalle_id"          UUID          NOT NULL REFERENCES "venta_detalles" ("detalle_id"),
-  "aplicacion"          SMALLINT      NOT NULL,
+  "aplicacion"          INTEGER       NOT NULL,
   "promocion_id"        UUID          NOT NULL REFERENCES "promociones" ("promocion_id"),
   "nombre_promocion"    TEXT          NOT NULL,
   "tipo"                TEXT          NOT NULL,

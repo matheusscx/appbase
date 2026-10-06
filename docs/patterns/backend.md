@@ -1908,6 +1908,25 @@ saldo. Un fragmento y no una función de la base, porque el esquema sale de las 
 
 ---
 
+## 21. Un INSERT multi-fila cuyo largo lo decide la entrada va por tandas (2026-10-06)
+
+`manager.save(Entidad, filas)` arma **un** INSERT con todas las filas, y Postgres cuenta los
+parámetros de una sentencia en 16 bits: más de 65.535 dan la vuelta y la sentencia falla con
+`bind message supplies 0 parameters, but prepared statement "" requires 65536`. Con 8 columnas
+eso son 8.192 filas, y se alcanzan: una venta de 16.384 unidades con un 2x1 daba 500 al guardar
+sus promos.
+
+```ts
+// ❌ el largo lo decide la venta, el límite lo pone el protocolo
+await manager.save(VentaPromocion, filasPromocion);
+// ✅ tandas con nombre y porqué (FILAS_POR_INSERT = 1000 → cabe hasta 65 columnas)
+await manager.save(VentaPromocion, filasPromocion, { chunk: FILAS_POR_INSERT });
+```
+
+**Cuándo aplica:** cuando el número de filas sale de la entrada (unidades, aplicaciones, líneas ×
+reglas), no cuando lo acota un DTO muy por debajo. Hoy lo usan las cuatro tablas de trazas de
+`ventas.service.ts`.
+
 ## 12. Docs vivas a tocar en el mismo commit
 
 - `startup-pos.sql` — agregar las tablas nuevas.

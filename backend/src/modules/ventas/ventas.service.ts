@@ -92,6 +92,22 @@ import type { DestinoStockDevolucion } from '../pasarela/services/reembolso-call
 import { normalizarRut, rutValido } from '../../common/utils/rut.util';
 
 /**
+ * **Filas por INSERT al guardar las trazas de una venta** (promos, descuentos,
+ * recargos, impuestos). Postgres cuenta los parámetros de una sentencia en 16
+ * bits: un INSERT multi-fila con más de 65.535 da la vuelta y falla
+ * (`bind message supplies 0 parameters, but prepared statement "" requires
+ * 65536`). `ventas_promociones` lleva 8 parámetros por fila, así que 8.192
+ * filas ya no entraban: medido el 2026-10-06, una venta de 16.384 unidades con
+ * un 2x1 daba 500. Con 1.000 filas cabe cualquier tabla de hasta 65 columnas.
+ *
+ * Lo cubre el e2e de `ventas_promociones` (`cantidad-grande-promo.e2e-spec.ts`).
+ * Descuentos, recargos e impuestos usan la misma tanda **sin e2e propio**: sus
+ * filas son líneas × reglas, y pasar las 8.192 pide del orden de 500 líneas × 17
+ * reglas.
+ */
+const FILAS_POR_INSERT = 1000;
+
+/**
  * El país cuyas reglas del receptor están escritas: el receptor completo de la
  * Factura y el RUT con DV módulo 11 (`receptorDeLaVenta`). Los demás países
  * están en pausa hasta terminar Chile.
@@ -1214,17 +1230,29 @@ export class VentasService {
     // TypeORM ya cortocircuita un array vacío, pero el guard queda explícito:
     // que una venta sin reglas no escriba nada no debería depender de un
     // detalle interno de la librería.
+    //
+    // Y van **por tandas** (`FILAS_POR_INSERT`): sin `chunk`, cada `save` es UN
+    // INSERT con todas las filas, y una venta de 16.384 unidades con un 2x1 daba
+    // 500 al guardar sus promos.
     if (filasDescuento.length > 0) {
-      await manager.save(VentaDescuento, filasDescuento);
+      await manager.save(VentaDescuento, filasDescuento, {
+        chunk: FILAS_POR_INSERT,
+      });
     }
     if (filasRecargo.length > 0) {
-      await manager.save(VentaRecargo, filasRecargo);
+      await manager.save(VentaRecargo, filasRecargo, {
+        chunk: FILAS_POR_INSERT,
+      });
     }
     if (filasImpuesto.length > 0) {
-      await manager.save(VentaImpuesto, filasImpuesto);
+      await manager.save(VentaImpuesto, filasImpuesto, {
+        chunk: FILAS_POR_INSERT,
+      });
     }
     if (filasPromocion.length > 0) {
-      await manager.save(VentaPromocion, filasPromocion);
+      await manager.save(VentaPromocion, filasPromocion, {
+        chunk: FILAS_POR_INSERT,
+      });
     }
 
     // 7e. Customer (opcional). El customer ya validado por `resolverTipoDocumento`.

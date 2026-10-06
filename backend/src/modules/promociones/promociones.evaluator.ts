@@ -224,33 +224,136 @@ function evaluarPorcentaje(
   ];
 }
 
-// ── `nxm` ─────────────────────────────────────────────────────────────────
+// ── Unidades enteras, sin explotarlas ──────────────────────────────────────
 
-/** Una unidad concreta del carrito, explotada de su línea de origen. */
-interface UnidadNxm {
+/**
+ * Las unidades enteras de UNA línea: `cantidad` unidades fungibles al mismo
+ * precio de lista. `nxm` y `precio_fijo` razonan sobre unidades sueltas, pero
+ * las unidades de una línea son indistinguibles (mismo ítem, mismo precio,
+ * mismo `lineaIndex`), así que alcanza con contarlas.
+ *
+ * ⚠️ **No explotarlas es la razón de este tipo.** Hasta el 2026-10-06 cada
+ * evaluador armaba un array con un elemento por unidad y lo ordenaba, y
+ * `cantidad` la elige el cliente: una línea de 10⁶ unidades con un 2x1 tardaba
+ * 5,2 s y +824 MB, con el event loop tomado para todos los tenants. Ordenar
+ * lotes da exactamente el mismo orden que ordenar sus unidades —el comparador
+ * no distingue dos unidades de la misma línea—, así que los grupos y los
+ * combos salen idénticos. Ver `docs/features/motor-promociones.md` § El
+ * evaluador.
+ */
+interface LoteUnidades {
   lineaIndex: number;
   precioLista: Decimal;
+  cantidad: number;
 }
 
 /**
- * NxM (2x1, "2do al 50%", etc.): explota las líneas del scope —dentro de su
- * franja— en unidades enteras (`⌊cantidad⌋`; una cantidad fraccionaria como
- * '0.7' no aporta ninguna, a diferencia de `porcentaje`), las ordena por precio de lista
- * DESCENDENTE y arma grupos completos de `cadaN` consecutivos. En cada grupo,
- * la unidad más barata —la última tras ordenar desc— recibe
- * `valorPorcentaje × precioLista` (2x1 = 100% de la más barata: "paga la más cara").
- * Un grupo incompleto al final no aplica.
+ * Los lotes del scope —dentro de su franja—, ordenados por precio de lista
+ * DESCENDENTE con desempate por `lineaIndex` ASCENDENTE. Cada lote trae
+ * `⌊cantidad⌋` unidades: una cantidad fraccionaria como '0.7' no aporta
+ * ninguna, a diferencia de `porcentaje`.
  *
- * Desempate de precio por `lineaIndex` ASCENDENTE: sin él, dos unidades del
- * mismo precio en líneas distintas dejarían el resultado a merced del orden
- * de entrada del array (que en este evaluador es estable, pero dos llamadas
- * con el mismo carrito armado en otro orden darían grupos distintos).
+ * Sin el desempate, dos unidades del mismo precio en líneas distintas
+ * dejarían el resultado a merced del orden de entrada del array (que acá es
+ * estable, pero dos llamadas con el mismo carrito armado en otro orden darían
+ * grupos distintos).
+ */
+function lotesDelScope(
+  promo: PromoElegible,
+  scope: ScopePromoResuelto,
+  lineas: LineaPromo[],
+): LoteUnidades[] {
+  const lotes: LoteUnidades[] = [];
+  for (const linea of lineas) {
+    if (!perteneceAScope(scope, linea)) continue;
+    if (!instanteEnVentana(promo.ventana, linea.instante)) continue;
+
+    const cantidad = new Decimal(linea.cantidad).floor().toNumber();
+    if (cantidad <= 0) continue;
+    lotes.push({
+      lineaIndex: linea.index,
+      precioLista: new Decimal(linea.precioListaUnitario),
+      cantidad,
+    });
+  }
+  return lotes.sort((a, b) => {
+    const cmp = b.precioLista.comparedTo(a.precioLista);
+    return cmp !== 0 ? cmp : a.lineaIndex - b.lineaIndex;
+  });
+}
+
+/** Un tramo de unidades consecutivas tomadas de un mismo lote. */
+interface Tramo {
+  lote: LoteUnidades;
+  unidades: number;
+}
+
+/**
+ * Un cursor que recorre las unidades de una lista de lotes ordenada como si
+ * estuvieran explotadas, sin explotarlas: `tomar(n)` devuelve las próximas `n`
+ * como tramos por lote, en el mismo orden en que las daría el array de
+ * unidades.
+ */
+class CursorDeLotes {
+  private indice = 0;
+  private tomadasDelLote = 0;
+  disponibles: number;
+
+  constructor(private readonly lotes: LoteUnidades[]) {
+    this.disponibles = lotes.reduce((a, l) => a + l.cantidad, 0);
+  }
+
+  /** Las próximas `n` unidades. Solo se llama con `n <= disponibles`. */
+  tomar(n: number): Tramo[] {
+    const tramos: Tramo[] = [];
+    let faltan = n;
+    while (faltan > 0) {
+      const lote = this.lotes[this.indice];
+      const unidades = Math.min(faltan, lote.cantidad - this.tomadasDelLote);
+      tramos.push({ lote, unidades });
+      faltan -= unidades;
+      this.tomadasDelLote += unidades;
+      if (this.tomadasDelLote === lote.cantidad) {
+        this.indice++;
+        this.tomadasDelLote = 0;
+      }
+    }
+    this.disponibles -= n;
+    return tramos;
+  }
+}
+
+/** Mismos tramos, en el mismo orden: el grupo o combo da la misma plata. */
+function mismosTramos(a: Tramo[][], b: Tramo[][]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (tramos, i) =>
+        tramos.length === b[i].length &&
+        tramos.every(
+          (t, j) => t.lote === b[i][j].lote && t.unidades === b[i][j].unidades,
+        ),
+    )
+  );
+}
+
+// ── `nxm` ─────────────────────────────────────────────────────────────────
+
+/**
+ * NxM (2x1, "2do al 50%", etc.): toma las unidades enteras del scope en el
+ * orden de `lotesDelScope` (precio de lista DESCENDENTE) y arma grupos
+ * completos de `cadaN` consecutivas. En cada grupo, la unidad más barata —la
+ * última del grupo— recibe `valorPorcentaje × precioLista` (2x1 = 100% de la
+ * más barata: "paga la más cara"). Un grupo incompleto al final no aplica.
  *
  * Cada grupo completo es UNA `AplicacionPromo` propia (no se agregan en una
  * sola, a diferencia de `porcentaje`): 4 cervezas en el 2x1 son 2 aplicaciones,
  * cada una con su propia línea beneficiada — así lo pide el § El evaluador de
  * `docs/superpowers/specs/2026-08-27-motor-promociones-design.md`, y así lo
- * espera el desglose de venta, que nombra cada aplicación.
+ * espera el desglose de venta, que nombra cada aplicación. ⚠️ Por eso el costo
+ * sigue creciendo con la cantidad aunque las unidades no se exploten: 10⁶
+ * unidades son 500.000 aplicaciones. Lo acota el tope de unidades por venta
+ * (`MAX_UNIDADES_POR_VENTA`), no este evaluador.
  *
  * Para el greedy, cada candidata pide las unidades de TODO su grupo, no solo
  * de la barata que aparece en `montosPorLinea`: la "cara" del grupo no recibe
@@ -268,52 +371,46 @@ function evaluarNxm(
   const cadaN = promo.cadaN as number;
   const valor = new Decimal(promo.valorPorcentaje as string);
 
-  const unidades: UnidadNxm[] = [];
-  for (const linea of lineas) {
-    if (!perteneceAScope(scope, linea)) continue;
-    if (!instanteEnVentana(promo.ventana, linea.instante)) continue;
-
-    const cantidadEntera = new Decimal(linea.cantidad).floor().toNumber();
-    const precioLista = new Decimal(linea.precioListaUnitario);
-    for (let u = 0; u < cantidadEntera; u++) {
-      unidades.push({ lineaIndex: linea.index, precioLista });
-    }
-  }
-
-  unidades.sort((a, b) => {
-    const cmp = b.precioLista.comparedTo(a.precioLista);
-    return cmp !== 0 ? cmp : a.lineaIndex - b.lineaIndex;
-  });
-
-  const gruposCompletos = Math.floor(unidades.length / cadaN);
+  const cursor = new CursorDeLotes(lotesDelScope(promo, scope, lineas));
+  const gruposCompletos = Math.floor(cursor.disponibles / cadaN);
   const candidatas: CandidataGreedy[] = [];
 
+  // El monto depende solo de la barata del grupo: se calcula una vez por lote.
+  let barataAnterior: LoteUnidades | null = null;
+  let monto = ZERO;
+
   for (let g = 0; g < gruposCompletos; g++) {
-    const inicio = g * cadaN;
-    const grupo = unidades.slice(inicio, inicio + cadaN);
-    // Ordenado desc: la última del grupo es la más barata.
-    const barata = grupo[grupo.length - 1];
-    const monto = valor.times(barata.precioLista);
-    if (monto.greaterThan(ZERO)) {
-      const conteo = new Map<number, number>();
-      for (const u of grupo) {
-        conteo.set(u.lineaIndex, (conteo.get(u.lineaIndex) ?? 0) + 1);
-      }
-      candidatas.push({
-        aplicacion: {
-          promocionId: promo.id,
-          nombre: promo.nombre,
-          tipo: promo.tipo,
-          valorEfectivo: promo.valorPorcentaje as string,
-          montosPorLinea: [
-            { lineaIndex: barata.lineaIndex, monto: monto.toString() },
-          ],
-        },
-        unidadesPorLinea: [...conteo.entries()].map(
-          ([lineaIndex, unidades]) => ({ lineaIndex, unidades }),
-        ),
-      });
+    const tramos = cursor.tomar(cadaN);
+    // Ordenado desc: la última unidad del grupo es la más barata.
+    const barata = tramos[tramos.length - 1].lote;
+    if (barata !== barataAnterior) {
+      barataAnterior = barata;
+      monto = valor.times(barata.precioLista);
     }
+    if (!monto.greaterThan(ZERO)) continue;
+
+    const conteo = new Map<number, number>();
+    for (const t of tramos) {
+      conteo.set(
+        t.lote.lineaIndex,
+        (conteo.get(t.lote.lineaIndex) ?? 0) + t.unidades,
+      );
+    }
+    candidatas.push({
+      aplicacion: {
+        promocionId: promo.id,
+        nombre: promo.nombre,
+        tipo: promo.tipo,
+        valorEfectivo: promo.valorPorcentaje as string,
+        montosPorLinea: [
+          { lineaIndex: barata.lineaIndex, monto: monto.toString() },
+        ],
+      },
+      unidadesPorLinea: [...conteo.entries()].map(([lineaIndex, unidades]) => ({
+        lineaIndex,
+        unidades,
+      })),
+    });
   }
 
   return candidatas;
@@ -356,68 +453,56 @@ function evaluarPrecioFijo(
 ): CandidataGreedy[] {
   const valorMonto = new Decimal(promo.valorMonto as string);
 
-  const pools = promo.scopes.map((scope) => {
-    const unidades: UnidadNxm[] = [];
-    for (const linea of lineas) {
-      if (!perteneceAScope(scope, linea)) continue;
-      if (!instanteEnVentana(promo.ventana, linea.instante)) continue;
-
-      const cantidadEntera = new Decimal(linea.cantidad).floor().toNumber();
-      const precioLista = new Decimal(linea.precioListaUnitario);
-      for (let u = 0; u < cantidadEntera; u++) {
-        unidades.push({ lineaIndex: linea.index, precioLista });
-      }
-    }
-    unidades.sort((a, b) => {
-      const cmp = b.precioLista.comparedTo(a.precioLista);
-      return cmp !== 0 ? cmp : a.lineaIndex - b.lineaIndex;
-    });
-    return { cantidad: scope.cantidad, unidades, cursor: 0 };
-  });
+  const pools = promo.scopes.map((scope) => ({
+    cantidad: scope.cantidad,
+    cursor: new CursorDeLotes(lotesDelScope(promo, scope, lineas)),
+  }));
 
   const candidatas: CandidataGreedy[] = [];
 
+  // Los combos con los mismos tramos que el anterior —todas sus unidades salen
+  // de los mismos lotes, en las mismas cantidades— dan la misma plata: se
+  // calcula una vez y se reusa. Dentro de un combo la suma sigue siendo unidad
+  // por unidad, en el orden de siempre, para que el redondeo de `Decimal` sea
+  // el mismo que cuando las unidades se explotaban.
+  let anterior: {
+    tramos: Tramo[][];
+    montosPorLinea: { lineaIndex: number; monto: string }[];
+    conteoPorLinea: Map<number, number>;
+  } | null = null;
+
   for (;;) {
-    const tomas: UnidadNxm[][] = [];
-    let alcanza = true;
-    for (const pool of pools) {
-      const grupo = pool.unidades.slice(
-        pool.cursor,
-        pool.cursor + pool.cantidad,
-      );
-      if (grupo.length < pool.cantidad) {
-        alcanza = false;
-        break;
+    if (pools.some((pool) => pool.cursor.disponibles < pool.cantidad)) break;
+    const tramos = pools.map((pool) => pool.cursor.tomar(pool.cantidad));
+
+    if (anterior === null || !mismosTramos(anterior.tramos, tramos)) {
+      let sumaListas = ZERO;
+      const pesosPorLinea = new Map<number, Decimal>();
+      const conteoPorLinea = new Map<number, number>();
+      for (const { lote, unidades } of tramos.flat()) {
+        for (let u = 0; u < unidades; u++) {
+          sumaListas = sumaListas.plus(lote.precioLista);
+          pesosPorLinea.set(
+            lote.lineaIndex,
+            (pesosPorLinea.get(lote.lineaIndex) ?? ZERO).plus(lote.precioLista),
+          );
+        }
+        conteoPorLinea.set(
+          lote.lineaIndex,
+          (conteoPorLinea.get(lote.lineaIndex) ?? 0) + unidades,
+        );
       }
-      tomas.push(grupo);
+      const descuento = sumaListas.minus(valorMonto);
+      if (!descuento.greaterThan(ZERO)) break;
+      const aportes = [...pesosPorLinea.entries()]
+        .map(([lineaIndex, peso]) => ({ lineaIndex, peso }))
+        .sort((a, b) => a.lineaIndex - b.lineaIndex);
+      anterior = {
+        tramos,
+        montosPorLinea: repartirDescuentoCombo(descuento, aportes),
+        conteoPorLinea,
+      };
     }
-    if (!alcanza) break;
-
-    const unidadesCombo = tomas.flat();
-    const sumaListas = unidadesCombo.reduce(
-      (a, u) => a.plus(u.precioLista),
-      ZERO,
-    );
-    const descuento = sumaListas.minus(valorMonto);
-    if (!descuento.greaterThan(ZERO)) break;
-
-    for (const pool of pools) pool.cursor += pool.cantidad;
-
-    const pesosPorLinea = new Map<number, Decimal>();
-    const conteoPorLinea = new Map<number, number>();
-    for (const u of unidadesCombo) {
-      pesosPorLinea.set(
-        u.lineaIndex,
-        (pesosPorLinea.get(u.lineaIndex) ?? ZERO).plus(u.precioLista),
-      );
-      conteoPorLinea.set(
-        u.lineaIndex,
-        (conteoPorLinea.get(u.lineaIndex) ?? 0) + 1,
-      );
-    }
-    const aportes = [...pesosPorLinea.entries()]
-      .map(([lineaIndex, peso]) => ({ lineaIndex, peso }))
-      .sort((a, b) => a.lineaIndex - b.lineaIndex);
 
     candidatas.push({
       aplicacion: {
@@ -425,9 +510,9 @@ function evaluarPrecioFijo(
         nombre: promo.nombre,
         tipo: promo.tipo,
         valorEfectivo: promo.valorMonto as string,
-        montosPorLinea: repartirDescuentoCombo(descuento, aportes),
+        montosPorLinea: anterior.montosPorLinea.map((m) => ({ ...m })),
       },
-      unidadesPorLinea: [...conteoPorLinea.entries()].map(
+      unidadesPorLinea: [...anterior.conteoPorLinea.entries()].map(
         ([lineaIndex, unidades]) => ({ lineaIndex, unidades }),
       ),
     });

@@ -209,7 +209,8 @@ fijos, donde el orden no mueve el total.
 ### DTOs
 
 - `CalcularVentaDto` / `LineaDto` (`dto/calcular.dto.ts`) — validación con
-  `class-validator`. `cantidad` como `@IsNumberString`, `personalizacion` como
+  `class-validator`. `cantidad` como `@IsNumberString` con `@IsDecimalHasta(MAX_UNIDADES_POR_VENTA)`
+  (ver "El tope de unidades de una venta" en Notes), `personalizacion` como
   `@ValidateNested`.
 - `CalcularVentaInput` / `LineaCalculo` (mismo archivo) — la entrada **del
   service**, un campo más ancha que el DTO HTTP. Ver la regla de abajo.
@@ -828,6 +829,19 @@ cd backend && npm test            # incluye los specs del motor y del servicio
 ---
 
 ## Notes
+
+### El tope de unidades de una venta (2026-10-06)
+
+`calcular` rechaza con 400 una venta cuyas líneas sumen más de **99.999 unidades (o kilos)**,
+antes de evaluar nada (`assertTopeUnidadesVenta`, constante `MAX_UNIDADES_POR_VENTA` en
+`common/utils/tope-unidades-venta.util.ts`). Decisión del owner: sin tope, `cantidad` la elegía
+el cliente, y el motor de promociones trabaja por unidad. Medido, 10⁶ unidades con un 2x1 tomaban
+el event loop de todos los tenants por 4–5 s. Va acá porque por `calcular` pasan `/calcular`, la
+venta del POS, el online y el cierre de una cuenta, y las líneas ya llegan en la unidad canónica:
+una presentación de 24 cuenta 24. Lo que se escribe en una cuenta sin pasar por el motor
+(agregar, cambiar y fusionar) se corta en `SalonesService`. Por qué es por venta y no por línea,
+y lo medido antes y después: [motor-promociones.md](motor-promociones.md) § Unidades contadas, no
+explotadas, y el tope de una venta.
 
 ### El prorrateo de las reglas de nivel venta (2026-08-21)
 

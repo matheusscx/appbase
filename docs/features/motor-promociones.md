@@ -176,15 +176,66 @@ Por tipo (detalle y ejemplos en el docblock de cada función):
   activa; no hay datos productivos que migrar). El `nxm` no tiene tope: su `1.0000` es
   la unidad gratis del 2x1, que es precio. Detalle en
   [ADR-028](../adr/028-emision-registrada-por-venta.md).
-- **`nxm`**: explota unidades enteras, ordena por precio de lista descendente, arma grupos
-  de `cadaN`; en cada grupo la más barata recibe el descuento. Repetible.
+- **`nxm`**: toma las unidades enteras (`⌊cantidad⌋`) por precio de lista descendente, arma
+  grupos de `cadaN`; en cada grupo la más barata recibe el descuento. Repetible.
 - **`precio_fijo`** (combo): arma combos con las unidades **más caras** de cada slot
   (decisión 3 del owner) mientras el descuento resultante sea positivo — una promoción nunca
   encarece —, y reparte el descuento a prorrata del precio aportado entre las líneas del
   combo (residuo por mayores restos). Repetible.
 
-Tests: `promociones.evaluator.spec.ts` (43 casos: agrupación, empates, franja que cruza
-medianoche, cantidades fraccionarias, greedy entre promos y dentro de la misma promo, etc.).
+### Unidades contadas, no explotadas, y el tope de una venta (2026-10-06)
+
+**`nxm` y `precio_fijo` razonan por unidad, pero no arman un elemento por unidad.** Hasta esa
+fecha cada uno armaba un array con una entrada por unidad y lo ordenaba, y `cantidad` la elige
+el cliente: una línea de 10⁶ unidades con un 2x1 tardaba 4–5 s por HTTP con el event loop tomado
+para todos los tenants. Ahora cuentan por **lote** (las unidades de una línea, que el comparador
+no distingue entre sí) con un cursor que las recorre en el mismo orden. Lo que sale es idéntico, y
+lo prueba `promociones.evaluator.oraculo.spec.ts`, que tiene adentro el evaluador anterior
+(`6cecf160`) como oráculo y compara la salida completa. Dos detalles que el oráculo cazó como
+mutantes:
+
+- **Dentro de un combo la suma sigue siendo unidad por unidad.** Con un precio de 20 cifras
+  significativas (la precisión de `Decimal`), sumar 7 veces no da lo mismo que multiplicar por 7.
+- Los grupos y combos con los mismos tramos que el anterior **reusan** la plata ya calculada:
+  mismas operaciones, mismo resultado.
+
+⚠️ **Contar no cierra el problema solo, y conviene saber por qué.** El contrato devuelve **una
+aplicación por grupo o combo**: 10⁶ unidades en un 2x1 son 500.000 aplicaciones, cada una con su
+traza en el motor —cuantizada aparte— y su fila en `ventas_promociones`. Medido, el evaluador
+explicaba menos de la mitad del tiempo. Lo que lo cierra es el **tope**: **99.999 unidades (o
+kilos) por venta o por mesa** (owner, 2026-10-06, por AskUserQuestion de la Sesión de esfuerzo
+máximo: primero con los tiempos de `/calcular` —0,1 / 0,5 / 5 s para 10⁴ / 10⁵ / 10⁶—, y después
+se le volvió a preguntar con la venta guardada en el peor caso, y mantuvo 99.999 sobre 9.999;
+también descartó 999.999). Es por venta porque la numeración de las
+aplicaciones y el costo dependen de toda la venta: 500 líneas de 9.999 se cuelgan igual.
+
+| Dónde se aplica | Qué ve el usuario |
+|---|---|
+| `cantidad` de `/calcular`, la venta, agregar y cambiar una línea de cuenta (`@IsDecimalHasta`) | 400 `… no puede superar 99.999` |
+| La suma de la venta, en `CalculoPreciosService.calcular` (pasan `/calcular`, el POS, el online y el cierre de una cuenta) | 400 `Una venta puede llevar hasta 99.999 unidades en total, y esta suma …` |
+| La suma de la cuenta bajo su lock, al agregar, cambiar (reemplaza la cantidad vieja) y fusionar | 400 `Una mesa puede llevar hasta 99.999 …` |
+
+**Agregar aplicaciones iguales en una sola no se hizo**, y solo se abre si el tope resulta corto
+para algún negocio (Sesión de esfuerzo máximo). No cambiaría la plata: k × q(m) da el total de
+hoy. Cambiaría las filas de `ventas_promociones`, el ticket y el congelado, así que sería un
+frente de motor y congelado.
+
+**Medido después**, con un 2x1 sobre un servicio de $1.000, el peor caso tiene **dos números, y
+no se mezclan**:
+
+- **~0,5 s para `/calcular` y para el resto de los usuarios.** `/calcular` con 99.999 unidades
+  tarda 346 ms; con 10⁶ da 400 en 57 ms. Mientras se guarda la venta más grande, el event loop
+  queda tomado ~0,1–0,3 s (el cálculo).
+- **~2 s para quien cobra esa venta.** `POST /ventas` con 99.999 unidades tarda 2,2 s: el resto
+  es la espera de las 49.999 filas que se insertan.
+
+El "medio segundo" no vale para la venta guardada. Por qué la venta no se cae al guardarlas: § Congelado y dónde se ve.
+
+Tests: `promociones.evaluator.spec.ts` (agrupación, empates, franja que cruza medianoche,
+cantidades fraccionarias, greedy entre promos y dentro de la misma promo),
+`promociones.evaluator.oraculo.spec.ts` (misma salida que el evaluador anterior, y 10⁶
+unidades en menos de 50 ms) y `test/cantidad-grande-promo.e2e-spec.ts` (el tope por cada
+puerta y la venta de 65.536 unidades).
 
 ---
 
@@ -225,6 +276,11 @@ que un 2x1 sobre una etiqueta de $993 no le cuesta un peso a la unidad "gratis".
   cruzando línea→detalle **por índice** (nunca por `itemId` — el mismo ítem puede estar en
   dos líneas con personalizaciones distintas), en la misma transacción que el resto del
   congelado. `config_calculo` gana `promosAcumulanDescuentos`.
+  Dos cosas que una venta grande hizo visibles el 2026-10-06: las filas se insertan **por
+  tandas** (`FILAS_POR_INSERT`, en `ventas.service.ts`). Antes, 16.384 unidades con un 2x1 daban
+  500, porque Postgres cuenta en 16 bits los parámetros de un INSERT de 8.192 filas × 8. Y
+  `aplicacion` es `integer`: 65.536 unidades ya pasaban las 32.767 de un `smallint`. Las dos las
+  fija `test/cantidad-grande-promo.e2e-spec.ts`.
 - **Drawer de venta** (`frontend/app/components/ventas/VentaDetalleDrawer.vue`): familia
   propia `'Promoción'` en el desglose expandido de la línea, mismo formato que
   descuento/recargo/impuesto, y **después** de las reglas de catálogo dentro del paso

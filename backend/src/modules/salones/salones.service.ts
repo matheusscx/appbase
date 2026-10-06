@@ -67,6 +67,7 @@ import {
 import type { PersonalizacionRecetaSnapshot } from '../../common/dto/personalizacion-receta.dto';
 import { IdempotenciaService } from '../idempotencia/idempotencia.service';
 import { huellaDe } from '../idempotencia/huella';
+import { assertTopeUnidadesVenta } from '../../common/utils/tope-unidades-venta.util';
 import {
   detallePersonalizacion,
   hashPersonalizacion,
@@ -972,6 +973,12 @@ export class SalonesService {
             tenantId,
             cuentaId,
           );
+          await this.assertTopeUnidadesCuenta(
+            manager,
+            tenantId,
+            [cuentaId],
+            resuelta.cantidadCanonica,
+          );
           // **Lo que se está pidiendo no se borra a mitad del pedido.**
           // `FOR SHARE` sobre las filas de `items` que esta línea referencia
           // —el ítem y los ingredientes de sus extras, las dos cosas que
@@ -1198,6 +1205,13 @@ export class SalonesService {
             cantidadCanonica: resuelta.cantidadCanonica,
             unidadCodigoPresentacion: dto.unidadCodigoPresentacion,
           });
+          await this.assertTopeUnidadesCuenta(
+            manager,
+            tenantId,
+            [cuentaId],
+            resuelta.cantidadCanonica,
+            linea.id,
+          );
           // **Con algo despachado, las unidades que están no se tocan: solo se
           // agregan** (owner, 2026-10-03). La unidad despachada está en la mesa;
           // sacarla de la línea la volvía a ofrecer, el POS la vendía y al cobrar
@@ -2305,6 +2319,7 @@ export class SalonesService {
       }
       cuentas.sort((a, b) => a.numero - b.numero);
       const [destino, ...origenes] = cuentas;
+      await this.assertTopeUnidadesCuenta(manager, tenantId, ids, '0');
 
       // Las dos lecturas van FUERA del loop: esto corre sosteniendo el
       // `pessimistic_write` sobre todas las cuentas, así que cada query de más
@@ -3371,6 +3386,36 @@ export class SalonesService {
     const mesa = await this.mesaRepo.findOne({ where: { id, tenantId } });
     if (!mesa) throw new NotFoundException(`Mesa ${id} no encontrada`);
     return mesa;
+  }
+
+  /**
+   * **Una mesa no puede pasar el tope de unidades de una venta**
+   * (`MAX_UNIDADES_POR_VENTA`): al cerrarla, el motor la rechazaría entera, con
+   * la comida ya servida. Por eso se corta al pedir, en cada escritura que sube
+   * el total de la cuenta —agregar una línea, subirle la cantidad, fusionar—.
+   *
+   * Suma lo que las cuentas ya tienen, sin `reemplaza` (la línea cuya cantidad
+   * se está cambiando, que cuenta con su valor nuevo), más `entra`. Va **bajo el
+   * lock de la cuenta** que el llamador ya tomó: dos pedidos concurrentes a la
+   * misma mesa se serializan ahí y el segundo ve la suma del primero.
+   */
+  private async assertTopeUnidadesCuenta(
+    manager: EntityManager,
+    tenantId: string,
+    cuentaIds: string[],
+    entra: string,
+    reemplaza: string | null = null,
+  ): Promise<void> {
+    const [{ total }]: { total: string }[] = await manager.query(
+      `SELECT COALESCE(SUM(cantidad), 0)::text AS total
+         FROM cuenta_lineas
+        WHERE tenant_id = $1
+          AND cuenta_id = ANY($2::uuid[])
+          AND cuenta_linea_id IS DISTINCT FROM $3::uuid
+          AND eliminado_el IS NULL`,
+      [tenantId, cuentaIds, reemplaza],
+    );
+    assertTopeUnidadesVenta([total, entra], 'una mesa');
   }
 
   /**

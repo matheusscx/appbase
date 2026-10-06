@@ -19,16 +19,21 @@ import {
 import { Transform, Type } from 'class-transformer';
 import type { ClaseDocumentoMaquina } from '../../venta-documentos/entities/venta-documento.entity';
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
-import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalPositivo,
+  IsDecimalHasta,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 import { PropinaCierreMesaDto } from './propina-cierre-mesa.dto';
 import { PropinaDirectaDto } from './propina-directa.dto';
+import { MAX_UNIDADES_POR_VENTA } from '../../../common/utils/tope-unidades-venta.util';
 
 export class LineaVentaDto {
   @IsUUID()
   itemId: string;
 
   @IsNumberString()
+  @IsDecimalHasta(MAX_UNIDADES_POR_VENTA)
   cantidad: string;
 
   @IsOptional()

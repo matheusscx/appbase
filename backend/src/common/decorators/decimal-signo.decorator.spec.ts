@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import {
+  IsDecimalHasta,
   IsDecimalNoNegativo,
   IsDecimalPositivo,
 } from './decimal-signo.decorator';
@@ -9,6 +10,11 @@ import {
 class PositivoDto {
   @IsDecimalPositivo()
   monto: string;
+}
+
+class HastaDto {
+  @IsDecimalHasta('99999')
+  cantidad: string;
 }
 
 class NoNegativoDto {
@@ -56,5 +62,28 @@ describe('IsDecimalNoNegativo', () => {
     const dto = plainToInstance(NoNegativoDto, { monto: '-0.01' });
     const errores = await validate(dto);
     expect(errores.some((e) => e.property === 'monto')).toBe(true);
+  });
+});
+
+describe('IsDecimalHasta', () => {
+  it('acepta el máximo exacto, también escrito con decimales', async () => {
+    for (const cantidad of ['99999', '99999.0000', '0.5']) {
+      const dto = plainToInstance(HastaDto, { cantidad });
+      expect(await validate(dto)).toHaveLength(0);
+    }
+  });
+
+  it('rechaza un diezmilésimo arriba del máximo, con el máximo en el mensaje', async () => {
+    const dto = plainToInstance(HastaDto, { cantidad: '99999.0001' });
+    const errores = await validate(dto);
+    expect(errores[0]?.constraints?.isDecimalHasta).toBe(
+      'cantidad no puede superar 99.999',
+    );
+  });
+
+  it('rechaza lo que no es número en vez de tirar', async () => {
+    const dto = plainToInstance(HastaDto, { cantidad: 'mucho' });
+    const errores = await validate(dto);
+    expect(errores.some((e) => e.property === 'cantidad')).toBe(true);
   });
 });

@@ -65,3 +65,39 @@ export function IsDecimalNoNegativo(validationOptions?: ValidationOptions) {
     });
   };
 }
+
+/**
+ * Valida que un string numérico (Decimal.js) no pase de `max`, inclusive. Lo
+ * usa `cantidad` de las líneas de venta y de cuenta con
+ * `MAX_UNIDADES_POR_VENTA` (`tope-unidades-venta.util.ts`): una línea sola
+ * tampoco puede pasar el tope de la venta entera.
+ *
+ * Se combina con `@IsNumberString()`, igual que los de arriba.
+ */
+export function IsDecimalHasta(
+  max: string,
+  validationOptions?: ValidationOptions,
+) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'isDecimalHasta',
+      target: object.constructor,
+      propertyName,
+      constraints: [max],
+      options: validationOptions,
+      validator: {
+        validate(value: unknown): boolean {
+          if (typeof value !== 'string') return false;
+          try {
+            return new Decimal(value).lte(max);
+          } catch {
+            return false;
+          }
+        },
+        defaultMessage(): string {
+          return `${propertyName} no puede superar ${new Intl.NumberFormat('es-CL').format(Number(max))}`;
+        },
+      },
+    });
+  };
+}

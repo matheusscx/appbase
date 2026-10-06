@@ -34,8 +34,14 @@ export class VentaPromocion {
   @Column({ name: 'detalle_id', type: 'uuid' })
   detalleId: string;
 
-  /** Agrupador: la aplicación #N de la promo tocó estas filas. */
-  @Column({ type: 'smallint' })
+  /**
+   * Agrupador: la aplicación #N de la promo tocó estas filas.
+   *
+   * `integer` y no `smallint` desde el 2026-10-06: con el tope de 99.999
+   * unidades por venta, un 2x1 llega a 49.999 aplicaciones, y 65.536 unidades ya
+   * pasaban las 32.767 que entran en un `smallint`.
+   */
+  @Column({ type: 'integer' })
   aplicacion: number;
 
   /** Resoluble para siempre: el catálogo es soft delete. */

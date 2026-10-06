@@ -14,6 +14,7 @@ import {
   type LineaPromo,
 } from '../promociones/promociones.evaluator';
 import { Db } from '../../common/db/db.service';
+import { assertTopeUnidadesVenta } from '../../common/utils/tope-unidades-venta.util';
 import {
   fechaLocalTenant,
   instanteLocalEnZona,
@@ -167,6 +168,16 @@ export class CalculoPreciosService {
         lineas: await this.lineasDeCuenta(tenantId, dto.cuentaId),
       };
     }
+
+    // **El tope de unidades de la venta, antes de evaluar nada.** Acá pasan
+    // `/calcular`, la venta del POS, el online y el cierre de una cuenta, y las
+    // líneas ya vienen en la unidad canónica (una presentación de 24 cuenta 24).
+    // El motor de promociones trabaja por unidad: sin este corte, una venta de
+    // 10⁶ unidades con un 2x1 tomaba el event loop de todos los tenants.
+    assertTopeUnidadesVenta(
+      dto.lineas.map((l) => l.cantidad),
+      dto.cuentaId ? 'una mesa' : 'una venta',
+    );
 
     // Sin `configPrecargada` (la previsualización), acá es donde se resuelve
     // la escala de la moneda oficial: una consulta más, no una por línea.

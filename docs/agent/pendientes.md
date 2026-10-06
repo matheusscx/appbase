@@ -90,25 +90,9 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
-- [ ] **Una `cantidad` grande en una línea con promo NxM o de precio fijo cuelga el backend de todos los tenants** (backend, motor de precios: `promociones.evaluator.ts:276-280` `evaluarNxm` y `:365-369` `evaluarPrecioFijo`; lo leyó el api-security-reviewer del frente de topes de los DTOs, 2026-10-06, y ese frente lo midió). El evaluador hace `for (u < cantidadEntera) unidades.push(...)` y después un `sort`: arma un array del tamaño de la cantidad. `cantidad` es `@IsNumberString` sin máximo (`calcular.dto.ts:22`, `create-venta.dto.ts:32`, `add-linea.dto.ts:18`) y lo único que se valida es `> 0`. **Medido** por HTTP en un backend compilado de worktree, `POST /calculo-precios/calcular` de un servicio de $1.000 con una promo 2x1 (`nxm`, `cadaN: 2`, `valorPorcentaje: 1`):
-
-  | cantidad | tiempo | RSS del proceso |
-  |---|---|---|
-  | 1 | 36 ms | 130 → 131 MB |
-  | 10⁴ | 116 ms | 131 → 166 MB |
-  | 10⁵ | 543 ms | 166 → 278 MB |
-  | 10⁶ | 5.190 ms (repetido: 5.057) | 278 → 1.102 MB |
-
-  El mismo 10⁶ sin promo tarda 30 ms. **El loop bloquea el event loop:** un `GET /auth/me` lanzado durante el pedido de 10⁶ tardó **4.413 ms**, contra 2 ms en reposo. Un pedido frena a todos los tenants. Crece lineal, así que 10⁷ serían ~50 s y ~8 GB, y la caída del proceso por falta de heap (extrapolado: no se corrió más allá de 10⁶ a propósito). Puertas:
-  - `POST /calculo-precios/calcular`: cualquier usuario del tenant, sin `@RequiresPermiso`.
-  - `POST /online/checkout|pagar`.
-  - `POST /ventas`.
-  - `POST /cuentas/:id/lineas`: queda guardada en `cuenta_lineas` y cada precuenta o cierre de esa mesa la vuelve a disparar.
-
-  **Arreglo probable:** un tope en `cantidad` en el borde, o contar unidades sin materializarlas en el evaluador. Toca el motor: va solo.
-
 - [ ] **Entradas sin cota que dan 500 o trabajo lineal, y una trampa del `@ArrayUnique`** (backend, DTOs; leído por el api-security-reviewer y el domain-reviewer del frente de topes de los DTOs, 2026-10-06, **no corrido**).
   - **B2:** `ComboComponenteInputDto.cantidad` sin máximo (`create-item.dto.ts:109-110`) controla un loop por unidad en cada venta personalizada del combo (`items.service.ts:4115-4116`).
+    **Medido el 2026-10-06** por el frente de la cantidad grande con promo, `POST /calculo-precios/calcular` de un combo con un componente de receta con un grupo opcional, eligiendo una opción en la última unidad: 10³ → 17–20 ms, 10⁴ → 28–31 ms, 10⁵ → 114–115 ms. Sin elegir nada, 10⁵ → 13 ms. Lineal, ~1 µs por unidad del componente. **No entró en ese frente:** lo maneja la configuración del combo, que la carga el admin del tenant, y no la `cantidad` de la venta. El tope de 99.999 unidades por venta no lo acota (la personalización se resuelve una vez por línea, no por unidad vendida). Se cierra con un máximo en `ComboComponenteInputDto.cantidad`, y cuántas unidades puede llevar un componente de un combo es regla del owner.
   - **B3:** `unidades` de los extras de la personalización (`personalizacion-receta.dto.ts:57-60`) sin máximo: multiplica precio y stock hasta desbordar `NUMERIC` (500).
   - **B4/B5:** enteros sin `@Max` que dan 500 por desborde de `int`: `min`/`max` de `ItemGrupoModificadorInputDto`, `numeroCuotas` (que además acepta negativos: `create-pago.dto.ts:43`, `create-venta.dto.ts:103`), `orden`, `duracionEstimada`, `diasVencimiento`, `cadaN` y `ScopePromoDto.cantidad`.
   - **B6:** strings sin `@MaxLength` (`comentario`, `referencia`, `descripcion`, `nombre`, `codigoLote`, `motivoAjuste`, rut/teléfono/email del customer), acotados por el body de 100 kB.
@@ -1298,6 +1282,15 @@ enterarse tarde. Esta sección se abre al encarar el paso a producción. Orden =
 ---
 
 ## Vigilancia — evaluado y descartado, no es trabajo
+
+- [ ] **Una promo con muchas aplicaciones iguales guarda una fila por aplicación, y se deja así**
+  (motor de promociones + congelado; Sesión de esfuerzo máximo, 2026-10-06, al cerrar "una
+  `cantidad` grande con promo", ver [`resueltos.md`](resueltos.md)). Un 2x1 sobre 99.999 unidades
+  son 49.999 aplicaciones: 49.999 trazas en el motor y 49.999 filas de `ventas_promociones`, y la
+  venta tarda 2,2 s para quien la cobra. Agregarlas en una aplicación con multiplicidad **no
+  cambiaría la plata** (k × q(m) da el total de hoy), pero sí las filas, el ticket y el congelado.
+  Sería un frente de motor y congelado. **Se abre solo si el tope de 99.999 resulta corto para
+  algún negocio.**
 
 - [ ] **Lo que lee el navegador de la API viaja sin comprimir, y hoy se deja así** (proxy de
   Nuxt + borde de Railway; medido el 2026-10-06, sacado de la § 2). La abrió el 2026-10-03 el

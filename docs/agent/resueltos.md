@@ -23,6 +23,109 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Una `cantidad` grande con promo ya no cuelga el backend: evaluador por lotes y tope de 99.999 unidades por venta (cerrada 2026-10-06)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. Spec y plan:
+[`2026-10-06-cantidad-grande-con-promo-design.md`](../superpowers/specs/2026-10-06-cantidad-grande-con-promo-design.md),
+[`2026-10-06-cantidad-grande-con-promo.md`](../superpowers/plans/2026-10-06-cantidad-grande-con-promo.md).
+Lo técnico lo decidió la Sesión de esfuerzo máximo, y el tope, el owner. La regla viva está en
+[`features/motor-promociones.md`](../features/motor-promociones.md) § Unidades contadas, no
+explotadas, y el tope de una venta.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Una `cantidad` grande en una línea con promo NxM o de precio fijo cuelga el backend de todos los tenants** (backend, motor de precios: `promociones.evaluator.ts:276-280` `evaluarNxm` y `:365-369` `evaluarPrecioFijo`; lo leyó el api-security-reviewer del frente de topes de los DTOs, 2026-10-06, y ese frente lo midió). El evaluador hace `for (u < cantidadEntera) unidades.push(...)` y después un `sort`: arma un array del tamaño de la cantidad. `cantidad` es `@IsNumberString` sin máximo (`calcular.dto.ts:22`, `create-venta.dto.ts:32`, `add-linea.dto.ts:18`) y lo único que se valida es `> 0`. **Medido** por HTTP en un backend compilado de worktree, `POST /calculo-precios/calcular` de un servicio de $1.000 con una promo 2x1 (`nxm`, `cadaN: 2`, `valorPorcentaje: 1`):
+
+  | cantidad | tiempo | RSS del proceso |
+  |---|---|---|
+  | 1 | 36 ms | 130 → 131 MB |
+  | 10⁴ | 116 ms | 131 → 166 MB |
+  | 10⁵ | 543 ms | 166 → 278 MB |
+  | 10⁶ | 5.190 ms (repetido: 5.057) | 278 → 1.102 MB |
+
+  El mismo 10⁶ sin promo tarda 30 ms. **El loop bloquea el event loop:** un `GET /auth/me` lanzado durante el pedido de 10⁶ tardó **4.413 ms**, contra 2 ms en reposo. Un pedido frena a todos los tenants. Crece lineal, así que 10⁷ serían ~50 s y ~8 GB, y la caída del proceso por falta de heap (extrapolado: no se corrió más allá de 10⁶ a propósito). Puertas:
+  - `POST /calculo-precios/calcular`: cualquier usuario del tenant, sin `@RequiresPermiso`.
+  - `POST /online/checkout|pagar`.
+  - `POST /ventas`.
+  - `POST /cuentas/:id/lineas`: queda guardada en `cuenta_lineas` y cada precuenta o cierre de esa mesa la vuelve a disparar.
+
+  **Arreglo probable:** un tope en `cantidad` en el borde, o contar unidades sin materializarlas en el evaluador. Toca el motor: va solo.
+
+### Qué se midió
+
+- **El evaluador explicaba menos de la mitad.** Solo, sobre `dist`, 10⁶ unidades con un 2x1:
+  697 ms y 39 → 499 MB (combo de precio fijo: 1.258 ms). Por HTTP, el mismo pedido: 3.961 ms.
+  El contrato devuelve una aplicación por grupo o combo (500.000 para 10⁶), y cada una es una
+  traza en el motor y una fila en la venta. Contar por lote, con salida idéntica, dejaba 10⁶ en
+  3.550 ms por HTTP: no cerraba.
+- **La venta se caía mucho antes de colgarse:** `POST /ventas` con un 2x1, 16.383 unidades → 201,
+  **16.384 → 500**. El INSERT de `ventas_promociones` pasaba los 65.535 parámetros que Postgres
+  cuenta en 16 bits (8.192 filas × 8). Detrás estaba el `smallint` de `aplicacion`.
+- **B2 (el loop por unidad del componente de un combo):** 10⁵ unidades en 13–115 ms. Lo controla
+  el admin al configurar el combo, no la venta; queda en su entrada con la medición.
+
+### Qué se hizo
+
+- **Evaluador por lotes** (`promociones.evaluator.ts`): `lotesDelScope` + `CursorDeLotes`. Dentro
+  de un combo la suma sigue unidad por unidad, y los grupos y combos con los mismos tramos reusan
+  la plata calculada.
+- **Tope de 99.999 unidades (o kilos) por venta o mesa** (owner, 2026-10-06, por AskUserQuestion
+  de la Sesión de esfuerzo máximo. Primero eligió con la escena de los tiempos de `/calcular`
+  —0,1 / 0,5 / 5 s—. Después se le volvió a preguntar con la venta guardada en el peor caso
+  —99.999 con 2x1: 2,2 s para la caja que cobra, menos de 0,3 s para el resto— y mantuvo 99.999
+  sobre 9.999. También descartó 999.999). Una constante
+  (`MAX_UNIDADES_POR_VENTA`). Se aplica en el borde, con `@IsDecimalHasta` en `cantidad` de
+  `/calcular`, la venta y agregar o cambiar una línea de cuenta. La suma se valida en
+  `CalculoPreciosService.calcular` y, para la cuenta, bajo su lock al agregar, cambiar y fusionar.
+  El de cambiar no estaba en la decisión: lo agregó el frente, porque sin él el tope de agregar se
+  esquiva subiendo una línea, y lo aprobó la Sesión de esfuerzo máximo. Reemplaza la cantidad
+  vieja, no la suma.
+- **INSERT por tandas** (`FILAS_POR_INSERT = 1000`) en las cuatro tablas de trazas de la venta.
+  Descuentos, recargos e impuestos van **sin e2e propio**: pasar las 8.192 filas pide del orden de
+  500 líneas × 17 reglas.
+- **`ventas_promociones.aplicacion` → `integer`** (entity y `startup-pos.sql`).
+
+  ⚠️ **El deploy necesitó un `ALTER` previo en Railway, y el próximo cambio de tipo de una columna
+  también lo va a necesitar.** `synchronize` no hace `ALTER COLUMN … TYPE`: hace DROP + ADD de la
+  columna, y el ADD `NOT NULL` sin default falla con filas existentes (`column "aplicacion" … contains
+  null values`) y el backend no bootea. Medido en una base con el estado de Railway (smallint con
+  filas): el sync se revierte y la base queda intacta. Un `ALTER TABLE ventas_promociones ALTER
+  COLUMN aplicacion TYPE integer` corrido **antes** del push bootea y conserva las filas. Un
+  `default: 0` transitorio en la entity también bootea, pero deja las filas en 0 y pide un segundo
+  deploy para sacar el default. El owner eligió el `ALTER`, y lo corrió la orquestadora justo antes
+  del push. En Railway la tabla tenía 0 filas, así que el DROP + ADD no habría fallado, pero se
+  corrió igual por si se creaba una venta en el medio.
+
+**Medido después** (backend compilado, 2x1 sobre un servicio de $1.000):
+
+| Pedido | Antes | Después |
+|---|---|---|
+| `/calcular` 10⁴ | 81 ms | 76 ms |
+| `/calcular` 99.999 | — | 346 ms, RSS 180 → 290 MB |
+| `/calcular` 10⁵ | 399 ms | 400 en 6 ms |
+| `/calcular` 10⁶ | 3.961 ms, RSS 317 → 819 MB; `/auth/me` durante: 3.557 ms | 400 en 57 ms; `/auth/me` durante: 4 ms |
+| `POST /ventas` 16.384 | 500 | 201 en 380 ms |
+| `POST /ventas` 99.999 | — | 201 en 2,2 s; `/auth/me` durante: 124–304 ms en la primera sonda, 2–25 ms después |
+
+La columna "antes" es de esta misma sesión, con el mismo backend y la misma promo. La entrada de
+arriba midió 10⁶ en 5.190 ms en otra corrida.
+
+### Qué lo fija
+
+- `promociones.evaluator.oraculo.spec.ts`: el evaluador de `6cecf160` como oráculo, sobre bordes
+  de cada N, fraccionarias, el mismo ítem en varias líneas, combos que cruzan líneas, un precio de
+  20 cifras, 20.000 unidades y 4.000 carritos generados. Más un test de 10⁶ unidades en menos de
+  50 ms. Mutantes: volver al evaluador de `6cecf160` pone rojo **solo** el de rendimiento (265 ms).
+  Cinco mutantes del nuevo ponen rojo el diferencial: desempate invertido, combo que reusa siempre
+  la primera plata, barata del primer tramo, cursor que ignora lo ya tomado y suma del combo por
+  multiplicación (este último, solo con el caso de 20 cifras).
+- `test/cantidad-grande-promo.e2e-spec.ts`. Mutantes, cada uno rojo por su aserción: sin `chunk`
+  (`bind message … requires 262144`), `smallint` (`value "32768" is out of range`), sin la suma en
+  `calcular`, sin tope en agregar, cambiar o fusionar, cambiar que no excluye la línea que reemplaza
+  (suma 160.000), y sin el decorador en cada uno de los cuatro DTOs.
+
+---
+
 ## Playwright ya no cae al login pasados los 15 minutos: una sesión nueva por test (cerrada 2026-10-06)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. Plan:

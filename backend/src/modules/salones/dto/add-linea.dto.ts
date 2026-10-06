@@ -9,12 +9,15 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
+import { IsDecimalHasta } from '../../../common/decorators/decimal-signo.decorator';
+import { MAX_UNIDADES_POR_VENTA } from '../../../common/utils/tope-unidades-venta.util';
 
 export class AddLineaDto {
   @IsUUID()
   itemId: string;
 
   @IsNumberString()
+  @IsDecimalHasta(MAX_UNIDADES_POR_VENTA)
   cantidad: string;
 
   @IsOptional()

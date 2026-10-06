@@ -333,6 +333,18 @@ describe('SalonesService', () => {
     }).compile();
 
     service = module.get<SalonesService>(SalonesService);
+    // El tope de unidades de la mesa es una suma en SQL
+    // (`assertTopeUnidadesCuenta`), y con `manager.query` mockeado no hay suma
+    // que probar: la cubre `test/cantidad-grande-promo.e2e-spec.ts` contra
+    // Postgres, en agregar, cambiar y fusionar.
+    jest
+      .spyOn(
+        service as unknown as {
+          assertTopeUnidadesCuenta: () => Promise<void>;
+        },
+        'assertTopeUnidadesCuenta',
+      )
+      .mockResolvedValue(undefined);
   });
 
   describe('abrirCuenta', () => {

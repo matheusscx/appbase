@@ -13,12 +13,15 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
+import { IsDecimalHasta } from '../../../common/decorators/decimal-signo.decorator';
+import { MAX_UNIDADES_POR_VENTA } from '../../../common/utils/tope-unidades-venta.util';
 
 export class LineaDto {
   @IsUUID('4')
   itemId: string;
 
   @IsNumberString()
+  @IsDecimalHasta(MAX_UNIDADES_POR_VENTA)
   cantidad: string;
 
   @IsOptional()
