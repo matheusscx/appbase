@@ -361,7 +361,8 @@ Procedimiento completo: skill `verify-feature`.
 |---|---|
 | `docs/patterns/` | **Playbook backend/frontend — leer ANTES de planificar una feature** |
 | `docs/agent/anti-patterns.md` | Errores reales ya cometidos en el repo |
-| `docs/agent/pendientes.md` | Backlog de correcciones diferidas, **ordenado por lo que hace falta para tomar cada entrada** (mecánico → medir → ya decidido → necesita respuesta del owner). Ya no hay sección de prioridad máxima: la tanda 🔴 se cerró el 2026-08-21 |
+| `docs/agent/pendientes.md` | Backlog de **arreglos y correcciones** (algo que ya existe y anda mal), **ordenado por lo que hace falta para tomar cada entrada** (mecánico → medir → ya decidido → necesita respuesta del owner). Ya no hay sección de prioridad máxima: la tanda 🔴 se cerró el 2026-08-21 |
+| `docs/agent/desarrollo-nuevo.md` | **Desarrollo nuevo**: features, proyectos con spec propia y refactors que todavía no existen. Separado de `pendientes.md` el 2026-10-06 (owner) |
 | `docs/agent/resueltos.md` | Archivo de las entradas de `pendientes.md` ya cerradas, con el detalle de cada fix |
 | `docs/agent/README.md` | Por qué este setup está escrito así |
 | `docs/agent/investigacion-mercado.md` | Plantilla de investigación de mercado + regla del cruce |
