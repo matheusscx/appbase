@@ -412,20 +412,6 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
     );
   });
 
-  it('mandar una regla de venta en la línea es 400', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/api/calculo-precios/calcular')
-      .set('Authorization', `Bearer ${tokenAdmin}`)
-      .send({
-        lineas: [{ itemId, cantidad: '1', descuentoIds: [descuentoDeVentaId] }],
-      });
-
-    expect(res.status).toBe(400);
-    expect((res.body as { message: string }).message).toContain(
-      'es de nivel venta',
-    );
-  });
-
   it('la regla de venta SÍ se aplica por su propia puerta (ancla positiva)', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/calculo-precios/calcular')
@@ -435,8 +421,10 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
         descuentosVentaIds: [descuentoDeVentaId],
       });
 
-    // Sin esto, los cuatro 400 de arriba también pasarían con una puerta
-    // tapiada de los dos lados.
+    // Sin esto, los tres 400 de arriba también pasarían con una puerta
+    // tapiada de los dos lados. (Había un cuarto, la regla de venta mandada en
+    // `descuentoIds` de una línea: desde el 2026-10-06 la línea no lleva ids y
+    // ese 400 es el del pipe, en `calculo-precios.e2e-spec.ts`.)
     expect(res.status).toBe(201);
     expect(
       Number(

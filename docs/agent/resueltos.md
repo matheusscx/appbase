@@ -23,6 +23,126 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los descuentos y recargos de una línea salen de su ítem: mandar otros es un 400 (cerrada 2026-10-06)
+
+Sale de [`pendientes.md`](pendientes.md) § 3, **solo la parte de producto**: la fiscal
+(`impuestoIds`) sigue allá, para su propia sesión. Spec y plan:
+[`2026-10-06-reglas-de-linea-del-item-design.md`](../superpowers/specs/2026-10-06-reglas-de-linea-del-item-design.md),
+[`2026-10-06-reglas-de-linea-del-item.md`](../superpowers/plans/2026-10-06-reglas-de-linea-del-item.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **Los ids de reglas que manda el cliente salen del ítem: mandar otros es un 400** ✅
+  *(decidido por el owner el 2026-10-06; antes era "los ids de reglas que manda el cliente reemplazan
+  las del ítem" en la § 2)* (backend, motor de precios; medido por HTTP el 2026-10-06 por el frente
+  de topes de los DTOs, que no lo tocó). `resolverLinea` (`calculo-precios.service.ts:849-851`) usa
+  `linea.descuentoIds ?? reglas…` y lo mismo con `recargoIds` e `impuestoIds`. Lo que manda la línea
+  **reemplaza** lo asociado al ítem, y solo se valida el nivel y el tenant (documentado en
+  `motor-calculo-precios.md`). Ninguna pantalla manda esos campos: el frontend solo los declara en el
+  tipo de `useCalculoPrecios.ts`. Pero quien tiene `Ventas:Crear` llega por la API a mano, y también
+  quien tiene `Tienda Online:Crear` por `POST /online/checkout|pagar` (`CalcularVentaDto`). La tienda es
+  interna (usuario del tenant logueado), pero es la base del futuro storefront público. Medido con
+  `POST /ventas`, admin de Paris, todo 201 y persistido:
+  - **Producto (descuentos y recargos).** (a) Un descuento de nivel línea que el ítem no tiene
+    asociado se aplica igual: Smartphone (`…116`, sin filas en `item_descuentos`) ×2 con
+    `descuentoIds: ["…338"]` (Promo fija $5.000) → `totalFinal` 5.950, contra 11.900 sin él.
+    (b) `recargoIds: []` le saca al ítem su recargo asociado: un servicio de 1.000 neto con "Interés
+    compuesto 4%" (`…132`) y un impuesto adicional del 10% → 1.342 sin el campo, **1.290** con
+    `recargoIds: []`.
+  - **Fiscal (va en su propia sesión, ADR-010).** (c) `impuestoIds: []` vende sin el impuesto
+    adicional (`tipo='otro'`): el mismo ítem → **1.238**, la venta queda con 1 impuesto en vez de 2.
+    ADR-018 cerró solo el IVA. Además, un `impuestoIds` **repetido** cobra el impuesto adicional una
+    vez por repetición: es el gemelo del bug de descuentos y recargos repetidos que cerró el
+    `@ArrayUnique` del 2026-10-06 ([`resueltos.md`](resueltos.md)). Se dejó afuera por la regla fiscal.
+  - **Decidido, producto** (owner, 2026-10-06, AskUserQuestion de la Sesión de esfuerzo máximo, con la
+    medición de arriba como escena: el celular de $11.900 a $5.950 y el servicio sin su recargo).
+    Eligió *"Cerrarlo: salen del ítem"* por sobre elegir solo entre los del ítem y dejarlo como está:
+    cada línea lleva los descuentos y recargos asociados a su ítem, y mandar otros da error, en la
+    caja y en la tienda. Si un día la caja necesita elegir descuentos a mano, se diseña con su
+    pantalla y su permiso. **Construir:** `descuentoIds` y `recargoIds` de `LineaVentaDto` y de
+    `LineaDto` → 400 en `/ventas`, `/calcular`, `/online/checkout` y `/online/pagar`, sacar la rama
+    `linea.descuentoIds ?? reglas` de `resolverLinea`, y corregir `motor-calculo-precios.md:61-66` y
+    `ventas.md:89`, que hoy lo documentan como contrato. Toca código del motor: va sin otro frente de
+    backend en paralelo.
+  - **Derivado, decidido por la Sesión de esfuerzo máximo (objetable por el owner):** los
+    `descuentosVentaIds` y `recargosVentaIds` de `CreateVentaDto` y `CalcularVentaDto` también se
+    cierran: son "la caja elige descuentos a mano", hoy sin pantalla ni permiso. ⚠️ Antes de cerrarlos,
+    medir quién los usa (e2e, flujos internos, reglas por `metodoPagoId`); si cerrarlos rompe algo
+    diseñado, va a esa sesión.
+  - **Decidido, fiscal** (owner, 2026-10-06, pregunta aparte: el servicio de $1.000 cobrado $1.238 en
+    vez de $1.342, con un impuesto en la boleta en vez de dos). Eligió *"Cerrarlo: salen del ítem"*
+    por sobre dejarlo como está: los impuestos adicionales salen siempre del ítem, como el IVA desde
+    ADR-018. `impuestoIds` de las dos clases → 400. **Va en su propia sesión fiscal** (regla del
+    2026-08-23), y con eso desaparece también el `impuestoIds` repetido.
+  - El `@ArrayUnique` del 2026-10-06 protege mientras tanto; cuando estos campos se vayan, se va con
+    ellos.
+  - **Reproducir:** `POST /api/ventas` con `{ lineas: [{ itemId, cantidad: '2', descuentoIds:
+    ['550e8400-e29b-41d4-a716-446655440338'] }], pagos: [{ metodoPagoId: EFECTIVO, monto:
+    '2000000.0000' }] }` y la cabecera `Idempotency-Key`, sobre el seed de Paris.
+
+### Qué se midió
+
+- **Los consumidores, antes de sacar nada.** En `backend/src` leían `descuentoIds`/`recargoIds`
+  de línea los dos DTOs, el pasamanos de `ventas.service` al motor y `resolverLinea`. Ningún flujo
+  interno los armaba: ni `cerrarCuenta` del salón ni el callback online. En `frontend/app` solo los
+  declaraba el tipo de `useCalculoPrecios.ts`, ninguna pantalla los mandaba (grep). El seed no los
+  usa. Los e2e que los usaban eran atajos para aplicar una regla, en `ventas`, `venta-documentos`,
+  `uso-reglas`, `calculo-precios` y `topes-dto`.
+- **El derivado no se podía construir como estaba escrito.** `descuentosVentaIds`/`recargosVentaIds`
+  son la **única** puerta de las reglas `nivel='venta'`: `calcular()` arma `descuentosVenta`/
+  `recargosVenta` solo desde esos campos, y no hay aplicación automática por `metodoPagoId`. Cerrarlos
+  dejaba sin camino las tres reglas de venta del seed de Paris, el radio "Al total de la venta" del
+  admin, el prorrateo, el IVA persistido con descuento de venta y cinco e2e. Se le llevó a la Sesión
+  de esfuerzo máximo, que **revisó su propia decisión** (2026-10-06): abiertos en la caja y cerrados
+  en la tienda.
+- **En la tienda, cobrado ≠ persistido.** `prepararLineasCheckout` esparce el body (`...dto` y
+  `...linea`) en el cálculo cuyo total `/online/pagar` autoriza contra la tarjeta, y el callback
+  crea la venta sin esas reglas. Antes del cambio, las 12 filas de cierre del e2e nuevo daban **201**,
+  `/online/pagar` incluido.
+- **El mismo hueco con `metodoPagoId`** (lo encontró la revisión de seguridad del frente, leído en
+  el código). El del body prende las reglas por método en el total que se autoriza, y el callback
+  crea la venta sin él. Si autoriza de menos, `ventas.service` rechaza la venta (*"Las ventas online
+  requieren el pago completo"*) con el cargo ya hecho en Webpay. La Sesión de esfuerzo máximo decidió
+  cerrarlo en este frente (2026-10-06), por la misma razón que el nivel venta. Las dos filas daban
+  201 antes del cambio. El mismo hueco con `impuestoIds` de línea quedó anotado en la entrada fiscal.
+
+### Qué se hizo
+
+- `descuentoIds` y `recargoIds` salieron de `LineaVentaDto` y de `LineaDto`, y con ellos su
+  `@ArrayUnique`. El 400 lo da el pipe global (`lineas.0.property descuentoIds should not exist`).
+  El porqué del tope y del `@ArrayUnique`, que los campos de venta citaban, se mudó a
+  `CreateVentaDto.descuentosVentaIds`.
+- `resolverLinea` usa siempre `reglas.descuentosIds`/`recargosIds` del ítem (o las congeladas de
+  `cerrarCuenta`), y `ventas.service` dejó de pasar los dos campos. El nivel que exige
+  `resolverReglas` del lado de la línea pasó a ser defensa contra una fila puente con una regla de
+  venta, porque ningún request trae ids.
+- `CheckoutOnlineDto` = `OmitType(CalcularVentaDto, ['descuentosVentaIds', 'recargosVentaIds',
+  'metodoPagoId'])` en `/online/checkout` y `/online/pagar`.
+- El tipo `CalcularLineaInput` del frontend perdió los dos campos. Los de venta se quedan, porque
+  `/calcular` los sigue aceptando.
+- La pantalla y el permiso de "la caja elige descuentos" quedaron anotados en
+  [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2: hoy la puerta de venta en `/ventas` no pide
+  permiso propio.
+
+### Qué lo fija
+
+- `calculo-precios.e2e-spec.ts` § *"las reglas de una línea salen del ítem"*. Cubre: las cuatro
+  puertas con `descuentoIds` (una regla ajena) y con `recargoIds: []` (sacar la propia), 400 con el
+  mensaje del pipe y sin venta nueva · el control sin el campo en `/ventas`, `/calcular` y
+  `/online/checkout`, donde la línea cobra el recargo de su ítem · `descuentosVentaIds`,
+  `recargosVentaIds` y `metodoPagoId` 400 en las dos puertas de la tienda · las reglas de venta
+  aplicadas en `/ventas` y `/calcular`.
+- `calculo-precios.service.spec.ts` *"una línea usa los descuentos y recargos de su ítem aunque
+  traiga otros ids"*: el motor ante un camino interno que los arrastrara.
+- **Mutantes**, cada uno restaurado desde copia, todos rojos por *201 en lugar de 400*: el campo
+  devuelto a `LineaDto` mata 3 filas por campo (`/calcular`, `/online/checkout`, `/online/pagar`);
+  devuelto a `LineaVentaDto`, 1 (`/ventas`); la tienda con `CalcularVentaDto`, las 4 filas de nivel
+  venta; `metodoPagoId` sacado del `OmitType`, sus 2 filas. **La rama del reemplazo restaurada no se ve por HTTP**: los DTOs no dejan entrar los ids, y
+  el e2e queda verde. La mata el unit, medido por mitades: con la del descuento, 20 en lugar de 10;
+  con la del recargo, *"recargo rec-ajeno no encontrado"*.
+
+---
+
 ## Una `cantidad` grande con promo ya no cuelga el backend: evaluador por lotes y tope de 99.999 unidades por venta (cerrada 2026-10-06)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. Spec y plan:

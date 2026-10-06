@@ -54,23 +54,6 @@ export class LineaDto {
   @Type(() => PersonalizacionRecetaDto)
   personalizacion?: PersonalizacionRecetaDto;
 
-  /** Si se pasa, reemplaza los descuentos asociados al ítem. */
-  @IsOptional()
-  @IsArray()
-  // Mismo tope y misma razón que `LineaVentaDto.descuentoIds`.
-  @ArrayMaxSize(50)
-  @ArrayUnique()
-  @IsUUID('4', { each: true })
-  descuentoIds?: string[];
-
-  @IsOptional()
-  @IsArray()
-  // Mismo tope y misma razón que `LineaVentaDto.descuentoIds`.
-  @ArrayMaxSize(50)
-  @ArrayUnique()
-  @IsUUID('4', { each: true })
-  recargoIds?: string[];
-
   @IsOptional()
   @IsArray()
   // Mismo tope que `LineaVentaDto.impuestoIds`.
@@ -97,7 +80,7 @@ export class CalcularVentaDto {
   /** Descuentos aplicados a nivel venta (sobre el total agregado). */
   @IsOptional()
   @IsArray()
-  // Mismo tope y misma razón que `LineaVentaDto.descuentoIds`.
+  // Mismo tope y misma razón que `CreateVentaDto.descuentosVentaIds`.
   @ArrayMaxSize(50)
   @ArrayUnique()
   @IsUUID('4', { each: true })
@@ -105,7 +88,7 @@ export class CalcularVentaDto {
 
   @IsOptional()
   @IsArray()
-  // Mismo tope y misma razón que `LineaVentaDto.descuentoIds`.
+  // Mismo tope y misma razón que `CreateVentaDto.descuentosVentaIds`.
   @ArrayMaxSize(50)
   @ArrayUnique()
   @IsUUID('4', { each: true })

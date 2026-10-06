@@ -699,7 +699,7 @@ Reglas:
   | costo vigente (producto/ingrediente, al editar) | **no** | sí | no es un campo: sale de los movimientos de inventario |
   | "Costo actual" calculado (receta/combo) | **no** | sí | no es un campo: lo calcula la pantalla desde los ítems que componen a este |
   | precio de opción de modificador | **no** | sí | la API manda el **efectivo** (`COALESCE(override, default)`) sin el default al lado, así que no se puede distinguir el de este ítem del compartido del catálogo — y ese es "del extra como tal" (regla del owner) |
-  | monto fijo de un descuento/recargo asociado | **no** | **no** | **no está denominado en la moneda del ítem**: el motor lo aplica DESPUÉS de convertir el precio de la línea (`calculo-precios.service.ts:869`, o `:405` si es receta/combo personalizado). Hoy es plata en la oficial; por decisión del owner (2026-09-09) pasará a tener moneda propia en la regla — bajo los dos diseños la fila dice lo mismo. Además el drawer no lo muestra |
+  | monto fijo de un descuento/recargo asociado | **no** | **no** | **no está denominado en la moneda del ítem**: el motor lo aplica DESPUÉS de convertir el precio de la línea (`calculo-precios.service.ts:882`, o `:416` si es receta/combo personalizado). Hoy es plata en la oficial; por decisión del owner (2026-09-09) pasará a tener moneda propia en la regla — bajo los dos diseños la fila dice lo mismo. Además el drawer no lo muestra |
 
   ⚠️ **La última fila decía otra cosa, y era falsa**: que el monto fijo "no tiene moneda propia"
   y que por eso un `-1000` le descontaba mil **dólares** a un ítem en dólares. La corrección es

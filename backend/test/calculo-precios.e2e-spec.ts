@@ -2,9 +2,12 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication } from '@nestjs/common';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import request from 'supertest';
+import { randomUUID } from 'crypto';
+import { DataSource } from 'typeorm';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
@@ -27,6 +30,10 @@ const ITEM_ID = '550e8400-e29b-41d4-a716-446655440281';
 const TIPO_RECARGO_METODO_PAGO = '550e8400-e29b-41d4-a716-446655440124';
 const TARJETA_CREDITO_ID = '550e8400-e29b-41d4-a716-446655440107';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
+// Tipo `general` de recargo y "Recargo por pedido chico", de nivel VENTA, los
+// dos del seed.
+const TIPO_RECARGO_GENERAL = '550e8400-e29b-41d4-a716-446655440122';
+const RECARGO_VENTA_ID = '550e8400-e29b-41d4-a716-446655440354';
 // "Producto demo (unidad · CLP)" — `clasificacion_tributaria = 'afecto'`, el
 // motor le deriva el IVA del país (ya no hay `item_impuestos` asociado). Se usa
 // para el caso de casing: un total sin impuesto delata que se perdieron las
@@ -100,16 +107,38 @@ describe('Cálculo de precios (e2e)', () => {
   });
 
   it('descuento de línea topeado avisa en la línea, no en la venta', async () => {
+    // La regla y el ítem son del test: la línea toma los descuentos de su ítem,
+    // y asociar "Promo fija $5.000" a un ítem le movería el uso a las suites
+    // que lo cuentan.
+    const nombre = `Fijo $5.000 E2E ${randomUUID()}`;
+    const resDesc = await request(app.getHttpServer())
+      .post('/api/descuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre,
+        tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+        modo: 'monto_fijo',
+        valorMonto: '5000',
+      });
+    expect(resDesc.status).toBe(201);
+    const resItem = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Servicio de $1.500 E2E ${randomUUID()}`,
+        precioBase: '1500',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'servicio',
+        descuentosIds: [(resDesc.body as { id: string }).id],
+      });
+    expect(resItem.status).toBe(201);
+
     const res = await request(app.getHttpServer())
       .post('/api/calculo-precios/calcular')
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [
-          {
-            itemId: ITEM_ID,
-            cantidad: '1',
-            descuentoIds: [DESCUENTO_FIJO_ID],
-          },
+          { itemId: (resItem.body as { id: string }).id, cantidad: '1' },
         ],
       });
 
@@ -117,9 +146,7 @@ describe('Cálculo de precios (e2e)', () => {
     const body = res.body as ResultadoVentaResponse;
 
     expect(body.lineas[0].advertencias).toHaveLength(1);
-    expect(body.lineas[0].advertencias[0].titulo).toContain(
-      'Promo fija $5.000',
-    );
+    expect(body.lineas[0].advertencias[0].titulo).toContain(nombre);
     expect(body.advertenciasVenta).toHaveLength(0);
     expect(body.advertencias).toHaveLength(1);
   });
@@ -439,5 +466,229 @@ describe('Cálculo de precios (e2e)', () => {
     expect((mayusculas.body as ResultadoVentaResponse).totales).toEqual(
       totales,
     );
+  });
+
+  /**
+   * Las reglas de una línea salen del ítem (owner, 2026-10-06). Hasta esa fecha
+   * `descuentoIds`/`recargoIds` de la línea **reemplazaban** los del ítem: un
+   * celular de $11.900 salía a $5.950 con un descuento que no tenía asociado, y
+   * `recargoIds: []` le sacaba a un servicio su recargo. Ahora el campo no existe
+   * en ninguna de las cuatro puertas y el pipe global contesta 400 nombrándolo.
+   *
+   * Las filas usan las dos formas medidas: meter una regla ajena (`descuentoIds`
+   * con "Promo fija $5.000", que el ítem no tiene) y sacar la propia
+   * (`recargoIds: []` contra un ítem con su recargo). El control —mismo pedido
+   * sin el campo— prueba que el 400 es por el campo y que la línea sigue
+   * cobrando las reglas de su ítem.
+   *
+   * ⚠️ Se afirma el MENSAJE y no solo el status: sin caja abierta, o sin
+   * pasarela, la puerta también da 400 por otra cosa. Con el campo devuelto al
+   * DTO, un test que mirara solo el status seguiría verde.
+   */
+  describe('las reglas de una línea salen del ítem: mandar otras es 400', () => {
+    let ds: DataSource;
+    let caja: CajaAbierta | undefined;
+    let recargoId: string;
+    /** Servicio: no tiene stock, así que las ventas del spec no gastan nada. */
+    let itemConRecargoId: string;
+
+    beforeAll(async () => {
+      ds = app.get(DataSource);
+      const resRec = await request(app.getHttpServer())
+        .post('/api/recargos')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Recargo del ítem E2E ${randomUUID()}`,
+          tipoReglaId: TIPO_RECARGO_GENERAL,
+          modo: 'porcentaje',
+          valorPorcentaje: '0.04',
+        });
+      expect(resRec.status).toBe(201);
+      recargoId = (resRec.body as { id: string }).id;
+
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio con recargo E2E ${randomUUID()}`,
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+          clasificacionTributaria: 'exento',
+          recargosIds: [recargoId],
+        });
+      expect(resItem.status).toBe(201);
+      itemConRecargoId = (resItem.body as { id: string }).id;
+
+      caja = await abrirCaja(app, token, {
+        comentario: 'Apertura E2E reglas de línea',
+      });
+    });
+
+    afterAll(async () => {
+      if (caja) await cerrarCaja(app, token, caja);
+    });
+
+    const PUERTAS = [
+      'ventas',
+      'calculo-precios/calcular',
+      'online/checkout',
+      'online/pagar',
+    ] as const;
+    type Puerta = (typeof PUERTAS)[number];
+
+    const pedir = (puerta: Puerta, body: Record<string, unknown>) =>
+      request(app.getHttpServer())
+        .post(`/api/${puerta}`)
+        .set('Authorization', `Bearer ${token}`)
+        .set('Idempotency-Key', randomUUID())
+        .send(
+          puerta === 'ventas'
+            ? {
+                ...body,
+                pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000000.0000' }],
+              }
+            : body,
+        );
+
+    // Los mensajes de un rechazo: afirma el 400 antes de leer el body, para que
+    // otro status no llegue como una lista vacía.
+    const mensajesDel400 = (res: {
+      status: number;
+      body: unknown;
+    }): string[] => {
+      expect(res.status).toBe(400);
+      return [
+        (res.body as { message?: string | string[] }).message ?? [],
+      ].flat();
+    };
+
+    const contarVentas = async (): Promise<string> => {
+      // Sin `eliminado_el IS NULL` a propósito: lo que se cuenta es si el
+      // pedido escribió algo, y una fila borrada también sería una escritura.
+      const filas: { n: string }[] = await ds.query(
+        `SELECT count(*) AS n FROM ventas WHERE tenant_id = $1`,
+        [PARIS_TENANT_ID],
+      );
+      return filas[0].n;
+    };
+
+    const FILAS = PUERTAS.flatMap((puerta) => [
+      { puerta, campo: 'descuentoIds', valor: [DESCUENTO_FIJO_ID] },
+      { puerta, campo: 'recargoIds', valor: [] as string[] },
+    ]);
+
+    it.each(FILAS)(
+      'POST /$puerta con lineas.0.$campo: 400 nombrando el campo, y no escribe',
+      async ({ puerta, campo, valor }) => {
+        const antes = await contarVentas();
+        const res = await pedir(puerta, {
+          lineas: [{ itemId: itemConRecargoId, cantidad: '2', [campo]: valor }],
+        });
+        expect(res.status).toBe(400);
+        expect(mensajesDel400(res)).toContain(
+          `lineas.0.property ${campo} should not exist`,
+        );
+        expect(await contarVentas()).toBe(antes);
+      },
+    );
+
+    // `/online/pagar` queda afuera del control: con una pasarela activa abre una
+    // orden, y lo que esta fila prueba ya lo prueba el 400 del pipe.
+    it.each(['ventas', 'calculo-precios/calcular', 'online/checkout'] as const)(
+      'control en /%s: sin el campo, la línea cobra el recargo de su ítem y ningún descuento',
+      async (puerta) => {
+        const res = await pedir(puerta, {
+          lineas: [{ itemId: itemConRecargoId, cantidad: '2' }],
+        });
+        expect(res.status).toBe(201);
+        const body = res.body as Record<string, unknown>;
+        const totales =
+          puerta === 'online/checkout'
+            ? (body.resultado as ResultadoVentaResponse).totales
+            : puerta === 'ventas'
+              ? (body as unknown as ResultadoVentaResponse['totales'])
+              : (body as unknown as ResultadoVentaResponse).totales;
+        // $2.000 exentos con 4%: $80 de recargo, nada de descuento.
+        expect(Number(totales.totalRecargos)).toBe(80);
+        expect(Number(totales.totalDescuentos)).toBe(0);
+        expect(Number(totales.totalFinal)).toBe(2080);
+      },
+    );
+
+    /**
+     * Las reglas de nivel VENTA se quedan abiertas en la caja y se cierran en
+     * la tienda (revisado por la Sesión de esfuerzo máximo, 2026-10-06): son la
+     * única puerta de esas reglas, que esperan su pantalla, pero el comprador
+     * online no elige reglas. Además, `/online/pagar` las metía en el total que
+     * se autoriza contra la tarjeta y el callback crea la venta sin ellas.
+     */
+    describe('las reglas de nivel venta y por método: abiertas en la caja, cerradas en la tienda', () => {
+      const VENTA = [
+        { campo: 'descuentosVentaIds', id: DESCUENTO_FIJO_VENTA_ID },
+        { campo: 'recargosVentaIds', id: RECARGO_VENTA_ID },
+      ];
+      // $10.000: el descuento de venta de $5.000 no deja la venta en cero.
+      const lineas = () => [{ itemId: itemConRecargoId, cantidad: '10' }];
+
+      it.each(
+        (['online/checkout', 'online/pagar'] as const).flatMap((puerta) =>
+          VENTA.map((v) => ({ puerta, ...v })),
+        ),
+      )(
+        'POST /$puerta con $campo: 400 nombrando el campo',
+        async ({ puerta, campo, id }) => {
+          const res = await pedir(puerta, { lineas: lineas(), [campo]: [id] });
+          expect(res.status).toBe(400);
+          expect(mensajesDel400(res)).toContain(
+            `property ${campo} should not exist`,
+          );
+        },
+      );
+
+      // Mismo cierre, misma razón (Sesión de esfuerzo máximo, 2026-10-06; lo
+      // encontró la revisión de seguridad de este frente): `metodoPagoId` del
+      // body prendía las reglas por método en el total que se autoriza, y el
+      // callback crea la venta sin él. Autorizar de menos terminaba en un cargo
+      // en Webpay sin venta. El control por `/calcular` con `metodoPagoId` es
+      // el describe del recargo de tarjeta por escalones, más arriba.
+      it.each(['online/checkout', 'online/pagar'] as const)(
+        'POST /%s con metodoPagoId: 400 nombrando el campo',
+        async (puerta) => {
+          const res = await pedir(puerta, {
+            lineas: lineas(),
+            metodoPagoId: TARJETA_CREDITO_ID,
+          });
+          expect(res.status).toBe(400);
+          expect(mensajesDel400(res)).toContain(
+            'property metodoPagoId should not exist',
+          );
+        },
+      );
+
+      it.each(
+        (['ventas', 'calculo-precios/calcular'] as const).flatMap((puerta) =>
+          VENTA.map((v) => ({ puerta, ...v })),
+        ),
+      )(
+        'POST /$puerta con $campo: se sigue aplicando',
+        async ({ puerta, campo, id }) => {
+          const res = await pedir(puerta, { lineas: lineas(), [campo]: [id] });
+          expect(res.status).toBe(201);
+          const body = res.body as Record<string, unknown>;
+          const totales =
+            puerta === 'ventas'
+              ? (body as unknown as ResultadoVentaResponse['totales'])
+              : (body as unknown as ResultadoVentaResponse).totales;
+          // Sin la regla de venta serían $400 de recargo (4% del ítem) y $0 de
+          // descuento. "Recargo por pedido chico" suma $2.000 bajo $20.000.
+          if (campo === 'descuentosVentaIds') {
+            expect(Number(totales.totalDescuentos)).toBe(5000);
+          } else {
+            expect(Number(totales.totalRecargos)).toBe(2400);
+          }
+        },
+      );
+    });
   });
 });

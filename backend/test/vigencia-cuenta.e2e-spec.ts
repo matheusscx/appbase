@@ -341,9 +341,8 @@ describe('Vigencia por fecha — el instante lo decide el pedido (e2e)', () => {
         })
       ).id;
 
-      // Ítem propio con el descuento asociado por defecto (`descuentosIds`):
-      // `cerrarCuenta` arma sus líneas SIN `descuentoIds` explícito, así que
-      // lo que aplica es lo que el ítem trae por defecto
+      // Ítem propio con el descuento asociado (`descuentosIds`): las reglas de
+      // una línea salen siempre de su ítem
       // (`ItemsService.cargarReglasPorIds`). `tipo: 'servicio'` de propósito:
       // sin fila en `item_producto`, cerrar la cuenta no exige stock.
       itemId = (

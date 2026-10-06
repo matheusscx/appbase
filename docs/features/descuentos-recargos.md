@@ -2,7 +2,7 @@
 
 **Status**: Implemented
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-08-23
+**Last Updated**: 2026-10-06
 
 ---
 
@@ -84,7 +84,7 @@ Reglas de la pausa:
   La venta sale igual, con el monto correcto: sigue el precedente del tope de descuento, que
   tampoco frena la venta.
 - **Vale igual si la piden a mano.** Da lo mismo que la regla venga heredada del ítem o
-  explícita en el request (`descuentosVentaIds`, `descuentoIds` de línea): pausada no aplica.
+  explícita en el request (`descuentosVentaIds`): pausada no aplica.
 - **Nunca se tocan las tablas puente.** `item_descuentos` / `item_recargos` / `item_impuestos`
   quedan intactas. Borrar esas filas y no poder devolverlas sería *eliminar* las asociaciones
   con otro nombre.
@@ -113,8 +113,8 @@ Una regla declara **dónde se aplica**, en la columna `nivel` (`'linea' | 'venta
 
 | Nivel | Cómo se usa | Contra qué se mide |
 |---|---|---|
-| `linea` | se asocia a ítems (`item_descuentos` / `item_recargos`) o viaja en `descuentoIds` de una línea | el subtotal de esa línea |
-| `venta` | se elige al cobrar y viaja en `descuentosVentaIds` / `recargosVentaIds` | el acumulado de la venta |
+| `linea` | se asocia a ítems (`item_descuentos` / `item_recargos`); la línea las toma de su ítem, nunca del request | el subtotal de esa línea |
+| `venta` | se elige al cobrar y viaja en `descuentosVentaIds` / `recargosVentaIds`, solo en la caja (`/ventas`, `/calcular`) | el acumulado de la venta |
 
 **Por qué hace falta la columna:** hasta el 2026-08-25 la misma fila servía para las dos
 cosas, así que *"20% sobre compras de $50.000"* se podía colgar de un ítem y dispararse con
@@ -147,10 +147,12 @@ respetarlo en cada puerta, contra duplicar una fila una vez.
 | Puerta | Rechaza |
 |---|---|
 | `ItemsService.validarReglas` | asociar a un ítem una regla de nivel venta (`POST`/`PATCH /items`) |
-| `CalculoPreciosService.resolverReglas` | una regla de venta en `descuentoIds` de una línea, y una de línea en `descuentosVentaIds` |
+| `CalculoPreciosService.resolverReglas` | una regla de línea en `descuentosVentaIds`, y una regla de venta que le llegue a una línea desde la fila puente |
 
-La segunda no es redundante: una línea puede mandar sus propios `descuentoIds` y pisar los del
-ítem, camino que nunca pasa por el catálogo.
+La segunda no es redundante: `descuentosVentaIds` nunca pasa por el catálogo. Del lado de la
+línea, desde el 2026-10-06 los ids salen siempre del ítem (mandarlos en el request es 400), así que
+ahí solo ataja una fila puente con una regla de venta: una carrera, o un camino nuevo que escriba
+`item_descuentos` sin pasar por `validarReglas`.
 
 **La validación NO vive en el motor.** El motor recibe las dos listas ya separadas y calcula
 plata; el nivel es una regla de catálogo sobre dónde se puede usar cada regla, del mismo orden
@@ -196,6 +198,16 @@ salvo que se acuerde de filtrarlos.
 `recargosVentaIds` están declarados en `useCalculoPrecios.ts` y consumidos por el backend, pero
 ninguna pantalla los llena todavía. El campo se construyó **antes** que el productor a
 propósito: al revés, el productor habría nacido pudiendo mandar cualquier regla.
+
+📌 **Los dos campos quedan abiertos en la caja y cerrados en la tienda** (revisado por la Sesión
+de esfuerzo máximo el 2026-10-06, con la medición del frente que cerró las reglas de línea). En
+`/ventas` y `/calcular` son la única puerta de las reglas de venta, así que cerrarlos apagaba la
+feature. En `/online/checkout|pagar` son 400 (`CheckoutOnlineDto`): el comprador no elige reglas,
+y el body esparcido en el cálculo que se autoriza contra la tarjeta las metía en el cobro mientras
+el callback creaba la venta sin ellas. Por la misma razón la tienda tampoco acepta `metodoPagoId`,
+que prende las reglas por método ([tienda-online.md](./tienda-online.md)). ⚠️ **La puerta de la caja
+no pide permiso propio**: hoy alcanza `Ventas:Crear`. Entra con la pantalla de "la caja elige
+descuentos" ([`desarrollo-nuevo.md`](../agent/desarrollo-nuevo.md) § 2).
 
 ## Recargo por escalones de monto (2026-08-22)
 

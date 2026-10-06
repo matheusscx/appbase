@@ -331,6 +331,20 @@ No entran de arrastre dentro de otra tarea. Las que llevan una pregunta para el 
 tienen como primer paso: después queda la spec entera. El contexto de dónde salió cada una
 es parte del enunciado y viaja con ella.
 
+- [ ] **La caja elige descuentos y recargos de nivel venta: pantalla y permiso** (anotado
+  2026-10-06 al cerrar "Los ids de reglas que manda el cliente salen del ítem", ver
+  [`resueltos.md`](resueltos.md)). Las reglas de nivel venta (*"Promo del total $5.000"*,
+  *"Recargo por pedido chico"* del seed) entran **solo** por `descuentosVentaIds` /
+  `recargosVentaIds` de `POST /ventas` y `/calculo-precios/calcular`, y ninguna pantalla los
+  manda: el admin las puede crear y nadie las puede aplicar. Por decisión del owner (2026-10-06):
+  *"si un día la caja necesita elegir descuentos a mano, se diseña con su pantalla y su permiso"*.
+  La Sesión de esfuerzo máximo revisó ese mismo día su decisión derivada, con la medición del frente:
+  los dos campos **quedan abiertos en la caja** porque son la única puerta de una feature diseñada,
+  y se cerraron en la tienda. ⚠️ **Hoy esa puerta no pide permiso propio**: alcanza `Ventas:Crear`,
+  así que quien vende puede aplicar por la API cualquier regla de venta del tenant. El permiso entra
+  con la pantalla. **Lo que hay que decidir:** quién elige (cajero o supervisor), con qué permiso, y
+  si un descuento de venta elegido a mano pide autorización o motivo.
+
 - [ ] **La tienda online y la suscripción no piden RUT: una compra de más de 135 UF se rechaza**
   (anotado 2026-10-04 al cerrar "Una venta de más de 135 UF…", ver [`resueltos.md`](resueltos.md)).
   Sobre el umbral de la Res. Ex. SII 44/2025 la boleta lleva nombre y RUT de quien paga, y ni el

@@ -82,7 +82,6 @@ describe('Documentos de la venta (e2e)', () => {
   let itemExento: string; // 28.600
   let itemAfecto100: string; // 100.000 neto → 119.000
   let itemGratis: string;
-  let item5000: string; // 5.000 con IVA incluido: 4.202 neto
   // 5.000 con IVA incluido y una promo del 99,99 %, que redondea a $0. La del
   // 100 % ya no se puede crear ("Topar la promo bajo 100 %", owner, 2026-10-04).
   let itemPromo100: string;
@@ -106,6 +105,9 @@ describe('Documentos de la venta (e2e)', () => {
     precioBase: string,
     clasificacionTributaria: 'afecto' | 'exento',
     precioIncluyeImpuesto = false,
+    // Las reglas de una línea salen de su ítem: un test que necesita un
+    // descuento o un recargo se los asocia acá (`descuentosIds`/`recargosIds`).
+    reglas: Record<string, string[]> = {},
   ): Promise<string> => {
     const res = await request(app.getHttpServer())
       .post('/api/items')
@@ -117,6 +119,7 @@ describe('Documentos de la venta (e2e)', () => {
         tipo: 'servicio',
         clasificacionTributaria,
         precioIncluyeImpuesto,
+        ...reglas,
       });
     expect(res.status).toBe(201);
     return (res.body as { id: string }).id;
@@ -209,7 +212,6 @@ describe('Documentos de la venta (e2e)', () => {
     itemExento = await crearItem('Doc exento E2E', '28600', 'exento');
     itemAfecto100 = await crearItem('Doc afecto 100k E2E', '100000', 'afecto');
     itemGratis = await crearItem('Doc gratis E2E', '0', 'exento');
-    item5000 = await crearItem('Doc 5000 E2E', '5000', 'afecto', true);
     itemPromo100 = await crearItem(
       'Doc promo 9999 E2E',
       '5000',
@@ -786,14 +788,12 @@ describe('Documentos de la venta (e2e)', () => {
     ])(
       'un producto de $5.000 con %s deja la boleta del sistema por $0',
       async (_caso, descuentos) => {
+        // 5.000 con IVA incluido: 4.202 neto.
+        const itemId = await crearItem('Doc 5000 E2E', '5000', 'afecto', true, {
+          descuentosIds: await descuentos(),
+        });
         const venta = await vender({
-          lineas: [
-            {
-              itemId: item5000,
-              cantidad: '1',
-              descuentoIds: await descuentos(),
-            },
-          ],
+          lineas: [{ itemId, cantidad: '1' }],
         });
         expect(venta.totalFinal).toBe('0.0000');
         expect(venta.estado).toBe('pagada');
@@ -900,10 +900,11 @@ describe('Documentos de la venta (e2e)', () => {
       expect(recargo.status).toBe(201);
       const recargoId = (recargo.body as { id: string }).id;
       try {
+        const itemId = await crearItem('Doc gratis E2E', '0', 'exento', false, {
+          recargosIds: [recargoId],
+        });
         const venta = await vender({
-          lineas: [
-            { itemId: itemGratis, cantidad: '1', recargoIds: [recargoId] },
-          ],
+          lineas: [{ itemId, cantidad: '1' }],
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000' }],
         });
         expect(venta.totalFinal).toBe('2000.0000');

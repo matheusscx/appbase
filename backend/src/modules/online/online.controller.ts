@@ -16,7 +16,7 @@ import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { OnlineService } from './online.service';
-import { CalcularVentaDto } from '../calculo-precios/dto/calcular.dto';
+import { CheckoutOnlineDto } from './dto/checkout-online.dto';
 
 @ApiTags('online')
 @ApiBearerAuth()
@@ -27,14 +27,14 @@ export class OnlineController {
 
   @Post('checkout')
   @RequiresPermiso('Tienda Online', 'Crear')
-  async checkout(@Req() req: Request, @Body() dto: CalcularVentaDto) {
+  async checkout(@Req() req: Request, @Body() dto: CheckoutOnlineDto) {
     const u = req.user as JwtUser;
     return this.onlineService.checkout(u.tenantId ?? '', dto);
   }
 
   @Post('pagar')
   @RequiresPermiso('Tienda Online', 'Crear')
-  async pagar(@Req() req: Request, @Body() dto: CalcularVentaDto) {
+  async pagar(@Req() req: Request, @Body() dto: CheckoutOnlineDto) {
     const u = req.user as JwtUser;
     return this.onlineService.pagar(u.tenantId ?? '', u.id, u.email, dto);
   }

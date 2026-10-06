@@ -1864,6 +1864,23 @@ describe('Ventas (e2e)', () => {
       return (res.body as { id: string }).id;
     };
 
+    // La línea toma los descuentos de su ítem (owner, 2026-10-06): cada test le
+    // cuelga su regla a un servicio propio, que además no gasta stock.
+    const itemCon = async (descuentoId: string) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio con regla E2E ${randomUUID()}`,
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+          descuentosIds: [descuentoId],
+        });
+      expect(res.status).toBe(201);
+      return (res.body as { id: string }).id;
+    };
+
     const filasDescuento = (ventaId: string) =>
       ds.query<
         {
@@ -1890,15 +1907,14 @@ describe('Ventas (e2e)', () => {
       // choca con la unicidad de nombre en la segunda corrida sobre la misma BD.
       const sufijo = `E2E ${Date.now()}`;
       const descuentoId = await crearDescuento(`Socio 10% ${sufijo}`, '0.10');
+      const itemId = await itemCon(descuentoId);
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
         .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
-          lineas: [
-            { itemId: ITEM_ID, cantidad: '1', descuentoIds: [descuentoId] },
-          ],
+          lineas: [{ itemId, cantidad: '1' }],
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000000.0000' }],
         });
       expect(venta.status).toBe(201);
@@ -1947,12 +1963,13 @@ describe('Ventas (e2e)', () => {
      * mentiría en el detalle de la venta, diciendo que se aplicó una regla que
      * el tenant tenía apagada.
      */
-    it('una regla PAUSADA no deja fila, ni pedida por línea ni asociada al ítem', async () => {
+    it('una regla PAUSADA asociada al ítem no deja fila', async () => {
       const sufijo = `E2E ${Date.now()}`;
       const descuentoId = await crearDescuento(`Pausado 25% ${sufijo}`, '0.25');
 
-      // Un ítem con la regla ASOCIADA: es el camino que la feature de pausa
-      // protege (el POS no manda `descuentoIds`, los hereda del ítem).
+      // Un ítem con la regla ASOCIADA: es el único camino por el que una regla
+      // de línea llega a la venta. Pedirla explícita en la línea era el otro,
+      // y desde el 2026-10-06 es un 400 (`calculo-precios.e2e-spec.ts`).
       const resItem = await request(app.getHttpServer())
         .post('/api/items')
         .set('Authorization', `Bearer ${token}`)
@@ -1980,13 +1997,7 @@ describe('Ventas (e2e)', () => {
         .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
-          lineas: [
-            // Heredada por asociación…
-            { itemId: itemConReglaId, cantidad: '1' },
-            // …y pedida EXPLÍCITAMENTE, que es la forma más forzada de
-            // intentar aplicarla. Si alguna colara una fila, es esta.
-            { itemId: ITEM_ID, cantidad: '1', descuentoIds: [descuentoId] },
-          ],
+          lineas: [{ itemId: itemConReglaId, cantidad: '1' }],
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000000.0000' }],
         });
       expect(venta.status).toBe(201);
@@ -1996,7 +2007,7 @@ describe('Ventas (e2e)', () => {
         totalDescuentos: string;
       };
 
-      // Ni una fila, por ninguno de los dos caminos.
+      // Ni una fila.
       expect(await filasDescuento(body.id)).toHaveLength(0);
       // Y el total no la aplicó: sin esto, una regla que SÍ descontara pero no
       // congelara pasaría el test.
@@ -2008,15 +2019,14 @@ describe('Ventas (e2e)', () => {
         `Efímero 15% E2E ${Date.now()}`,
         '0.15',
       );
+      const itemId = await itemCon(descuentoId);
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
         .set('Idempotency-Key', randomUUID())
         .set('Authorization', `Bearer ${token}`)
         .send({
-          lineas: [
-            { itemId: ITEM_ID, cantidad: '1', descuentoIds: [descuentoId] },
-          ],
+          lineas: [{ itemId, cantidad: '1' }],
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000000.0000' }],
         });
       expect(venta.status).toBe(201);
@@ -2040,6 +2050,7 @@ describe('Ventas (e2e)', () => {
         `Doble línea E2E ${Date.now()}`,
         '0.05',
       );
+      const itemId = await itemCon(descuentoId);
 
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
@@ -2047,8 +2058,8 @@ describe('Ventas (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [
-            { itemId: ITEM_ID, cantidad: '1', descuentoIds: [descuentoId] },
-            { itemId: ITEM_ID, cantidad: '2', descuentoIds: [descuentoId] },
+            { itemId, cantidad: '1' },
+            { itemId, cantidad: '2' },
           ],
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000000.0000' }],
         });

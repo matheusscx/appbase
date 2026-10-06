@@ -8,6 +8,7 @@ import type {
   LineaDto,
 } from '../calculo-precios/dto/calcular.dto';
 import type { ResultadoVenta } from '../calculo-precios/calculo-precios.engine';
+import type { CheckoutOnlineDto } from './dto/checkout-online.dto';
 import { MetodosPagoService } from '../metodos-pago/metodos-pago.service';
 import { TenantPasarelaService } from '../pasarela/services/tenant-pasarela.service';
 import { PagosRedirectService } from '../pasarela/services/pagos-redirect.service';
@@ -86,7 +87,7 @@ export class OnlineService {
 
   async checkout(
     tenantId: string,
-    dto: CalcularVentaDto,
+    dto: CheckoutOnlineDto,
   ): Promise<CheckoutResponse> {
     const { calcularDto } = await this.prepararLineasCheckout(tenantId, dto);
     const resultado = await this.calculoPreciosService.calcular(
@@ -106,7 +107,7 @@ export class OnlineService {
     tenantId: string,
     usuarioId: string,
     usuarioNombre: string,
-    dto: CalcularVentaDto,
+    dto: CheckoutOnlineDto,
   ): Promise<PagarResponse> {
     // Precedencia: la que cobra de verdad le gana a la que simula. Con las dos
     // prendidas, apagar Webpay en Configuración → Pasarelas es lo que hace caer
@@ -243,7 +244,7 @@ export class OnlineService {
 
   private async prepararLineasCheckout(
     tenantId: string,
-    dto: CalcularVentaDto,
+    dto: CheckoutOnlineDto,
   ): Promise<{
     calcularDto: CalcularVentaDto;
     lineasSnapshot: CheckoutLineaSnapshot[];

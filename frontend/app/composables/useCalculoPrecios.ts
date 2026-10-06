@@ -19,9 +19,11 @@ export interface CalcularLineaInput {
    * en pesos. Gemelo de `LineaDto` (backend): al tocar una punta, tocar la otra.
    */
   personalizacion?: PersonalizacionPayload
-  /** Si se pasa, reemplaza las reglas asociadas al ítem. */
-  descuentoIds?: string[]
-  recargoIds?: string[]
+  /**
+   * Si se pasa, reemplaza los impuestos adicionales del ítem. Los descuentos y
+   * recargos de la línea no tienen campo: salen siempre del ítem (owner,
+   * 2026-10-06) y el backend rechaza con 400 un body que los traiga.
+   */
   impuestoIds?: string[]
 }
 

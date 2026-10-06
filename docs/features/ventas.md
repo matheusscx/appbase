@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-10-04 (la nota de crédito pregunta si lo devuelto se recupera o se pierde)
+**Last Updated**: 2026-10-06 (los descuentos y recargos de una línea salen de su ítem)
 
 ---
 
@@ -84,9 +84,7 @@ Request:
       "itemId": "uuid",
       "cantidad": "1",
       "personalizacion": { ... },               // opcional (recetas y combos)
-      "descuentoIds": ["uuid"],                 // opcional
-      "recargoIds":   ["uuid"],                 // opcional
-      "impuestoIds":  ["uuid"],                 // opcional
+      "impuestoIds":  ["uuid"],                 // opcional (fiscal: ver motor-calculo-precios.md)
       "unidadIds":    ["uuid"],                 // obligatorio en modo serie; en otro modo, 400
       "loteId":       "uuid"                    // modo lote
     }
@@ -101,6 +99,8 @@ Request:
   "descuentosVentaIds": ["uuid"],               // descuentos a nivel de venta
   "recargosVentaIds":  ["uuid"]
 }
+// Una línea no lleva `descuentoIds` ni `recargoIds`: sus descuentos y recargos
+// salen del ítem (owner, 2026-10-06) y mandarlos es 400.
 
 Response (201):
 {

@@ -210,11 +210,22 @@ describe('CalculoPreciosService', () => {
     expect(r.lineas[0].totalLinea).toBe('107.100000');
   });
 
-  it('los descuentoIds de la línea reemplazan los del ítem', async () => {
-    const r = await service.calcular(TENANT, {
-      lineas: [{ itemId: 'item-1', cantidad: '1', descuentoIds: ['desc-2'] }],
-    });
-    expect(r.lineas[0].descuentoAplicado).toBe('20.000000'); // usa desc-2 (0.20)
+  // Las reglas de una línea salen de su ítem (owner, 2026-10-06): hasta esa
+  // fecha `descuentoIds`/`recargoIds` de la línea las reemplazaban. Los DTOs ya
+  // no declaran esos campos y por HTTP no llegan (lo fija
+  // `calculo-precios.e2e-spec.ts`); esto fija el motor ante un camino interno
+  // que los arrastrara, como el `...dto` de la tienda.
+  it('una línea usa los descuentos y recargos de su ítem aunque traiga otros ids', async () => {
+    // En una variable y no literal: el tipo ya no admite esos campos.
+    const conIdsAjenos = {
+      itemId: 'item-1',
+      cantidad: '1',
+      descuentoIds: ['desc-2'],
+      recargoIds: ['rec-ajeno'],
+    };
+    const r = await service.calcular(TENANT, { lineas: [conIdsAjenos] });
+    expect(r.lineas[0].descuentoAplicado).toBe('10.000000'); // desc-1 del ítem, no desc-2
+    expect(r.lineas[0].recargoAplicado).toBe('0.000000'); // el ítem no tiene recargos
   });
 
   /**
@@ -228,7 +239,10 @@ describe('CalculoPreciosService', () => {
    * depende de que el cliente se calle, y el extra entra ANTES de convertir.
    */
   it('tasa la personalización en el servidor y convierte el total a moneda oficial', async () => {
-    mockItems({ precioBase: '10', monedaId: 'moneda-usd', tipo: 'receta' });
+    mockItems(
+      { precioBase: '10', monedaId: 'moneda-usd', tipo: 'receta' },
+      { descuentosIds: [] },
+    );
     itemsService.resolverPersonalizacionReceta.mockResolvedValue({
       snapshot: { omitidos: [], extras: [] },
       precioExtraTotal: '2.0000',
@@ -238,7 +252,6 @@ describe('CalculoPreciosService', () => {
         {
           itemId: 'item-usd',
           cantidad: '1',
-          descuentoIds: [],
           personalizacion: { extras: [{ ingredienteItemId: 'ing-1' }] },
         },
       ],
@@ -259,7 +272,7 @@ describe('CalculoPreciosService', () => {
    * sirvió de nada).
    */
   it('precarga los catálogos de personalización UNA vez para todas las líneas', async () => {
-    mockItems({ precioBase: '10', tipo: 'receta' });
+    mockItems({ precioBase: '10', tipo: 'receta' }, { descuentosIds: [] });
     itemsService.resolverPersonalizacionReceta.mockResolvedValue({
       snapshot: { omitidos: [], extras: [] },
       precioExtraTotal: '1.0000',
@@ -267,7 +280,6 @@ describe('CalculoPreciosService', () => {
     const conExtra = (itemId: string) => ({
       itemId,
       cantidad: '1',
-      descuentoIds: [],
       personalizacion: { extras: [{ ingredienteItemId: 'ing-1' }] },
     });
 
@@ -295,13 +307,12 @@ describe('CalculoPreciosService', () => {
    * lote. Con un carrito entero de "sin cebolla" no se toca la base.
    */
   it('no precarga nada si ninguna línea puede agregar precio', async () => {
-    mockItems({ precioBase: '10', tipo: 'receta' });
+    mockItems({ precioBase: '10', tipo: 'receta' }, { descuentosIds: [] });
     await service.calcular(TENANT, {
       lineas: [
         {
           itemId: 'receta-1',
           cantidad: '1',
-          descuentoIds: [],
           personalizacion: { omitidos: ['cebolla'], extras: [] },
         },
       ],
@@ -317,7 +328,10 @@ describe('CalculoPreciosService', () => {
    * los componentes, y el preview volvería a quedar por debajo del cobro.
    */
   it('un combo se tasa por resolverPersonalizacionCombo, no por el de receta', async () => {
-    mockItems({ precioBase: '10', monedaId: 'moneda-usd', tipo: 'combo' });
+    mockItems(
+      { precioBase: '10', monedaId: 'moneda-usd', tipo: 'combo' },
+      { descuentosIds: [] },
+    );
     itemsService.resolverPersonalizacionCombo.mockResolvedValue({
       snapshot: { omitidos: [], extras: [] },
       precioExtraTotal: '2.0000',
@@ -327,7 +341,6 @@ describe('CalculoPreciosService', () => {
         {
           itemId: 'combo-usd',
           cantidad: '1',
-          descuentoIds: [],
           personalizacion: {
             componentes: [
               {
@@ -355,13 +368,12 @@ describe('CalculoPreciosService', () => {
    * llena de "sin cebolla".
    */
   it('una personalización que solo omite no mueve el precio ni consulta nada', async () => {
-    mockItems({ precioBase: '100', tipo: 'receta' });
+    mockItems({ precioBase: '100', tipo: 'receta' }, { descuentosIds: [] });
     const r = await service.calcular(TENANT, {
       lineas: [
         {
           itemId: 'receta-1',
           cantidad: '1',
-          descuentoIds: [],
           personalizacion: {
             omitidos: ['ingrediente-cebolla'],
             extras: [],
@@ -376,9 +388,12 @@ describe('CalculoPreciosService', () => {
   });
 
   it('convierte el precio del ítem a moneda oficial', async () => {
-    mockItems({ precioBase: '10', monedaId: 'moneda-usd' });
+    mockItems(
+      { precioBase: '10', monedaId: 'moneda-usd' },
+      { descuentosIds: [] },
+    );
     const r = await service.calcular(TENANT, {
-      lineas: [{ itemId: 'item-usd', cantidad: '1', descuentoIds: [] }],
+      lineas: [{ itemId: 'item-usd', cantidad: '1' }],
     });
     expect(r.lineas[0].subtotalNeto).toBe('9500.000000');
     expect(r.lineas[0].impuestoAplicado).toBe('1805.000000');
@@ -402,13 +417,16 @@ describe('CalculoPreciosService', () => {
         { monedaId: 'moneda-clp', valorDelDia: '1' },
         { monedaId: 'moneda-usd', valorDelDia: '950.123456' },
       ]);
-      mockItems({ precioBase: '19.99', monedaId: 'moneda-usd' });
+      mockItems(
+        { precioBase: '19.99', monedaId: 'moneda-usd' },
+        { descuentosIds: [] },
+      );
       tenantsService.getPreferenciasFinancieras.mockResolvedValue({
         ...prefs,
         modoRedondeo: modo,
       });
       const r = await service.calcular(TENANT, {
-        lineas: [{ itemId: 'item-usd', cantidad: '1', descuentoIds: [] }],
+        lineas: [{ itemId: 'item-usd', cantidad: '1' }],
       });
       return r.lineas[0].precioUnitario;
     };
@@ -448,12 +466,11 @@ describe('CalculoPreciosService', () => {
     });
   });
 
-  it('lanza BadRequest si una regla pedida no existe', async () => {
+  it('lanza BadRequest si una regla del ítem no existe', async () => {
+    mockItems({}, { descuentosIds: ['no-existe'] });
     await expect(
       service.calcular(TENANT, {
-        lineas: [
-          { itemId: 'item-1', cantidad: '1', descuentoIds: ['no-existe'] },
-        ],
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -526,8 +543,9 @@ describe('CalculoPreciosService', () => {
   // ── El nivel decide por qué puerta se usa una regla ──────────────────────
   //
   // Las dos puertas del nivel viven acá y en `ItemsService.validarReglas`. Ésta
-  // es la que cubre el camino que la otra no ve: una línea puede mandar sus
-  // propios `descuentoIds` y pisar los del ítem, sin pasar nunca por el catálogo.
+  // es la que cubre el camino que la otra no ve: `descuentosVentaIds`, que no
+  // pasa por ningún ítem. Del lado de la línea los ids salen del ítem, y acá
+  // solo atajan una fila puente con una regla de venta.
   describe('nivel de la regla', () => {
     const reglaDeVenta = {
       id: 'desc-venta',
@@ -541,14 +559,13 @@ describe('CalculoPreciosService', () => {
       nivel: 'venta',
     };
 
-    it('una regla de venta pedida en la línea es 400', async () => {
+    it('una regla de venta asociada al ítem es 400 al calcular la línea', async () => {
       descuentosService.findAll.mockResolvedValue([reglaDeVenta]);
+      mockItems({}, { descuentosIds: ['desc-venta'] });
 
       await expect(
         service.calcular(TENANT, {
-          lineas: [
-            { itemId: 'item-1', cantidad: '1', descuentoIds: ['desc-venta'] },
-          ],
+          lineas: [{ itemId: 'item-1', cantidad: '1' }],
         }),
       ).rejects.toThrow(/nivel venta/);
     });
@@ -991,7 +1008,7 @@ describe('CalculoPreciosService', () => {
     // Forma copiada del mock de `descuentosService.findAll` de arriba: mismos
     // campos que ya usa el resto del archivo, sumando `fechaInicio`/`fechaFin`
     // (entidad `Descuento`). `desc-1` es el id que ya trae por default
-    // `reglas()` en `descuentoIds`, así que no hace falta tocar el mock de
+    // `reglas()` en `descuentosIds`, así que no hace falta tocar el mock de
     // `itemsService.cargarReglasPorIds`.
     const reglaConVigencia = (over: Record<string, unknown> = {}) => ({
       id: 'desc-1',

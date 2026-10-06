@@ -858,8 +858,13 @@ export class CalculoPreciosService {
     const reglas = reglasPorItem.get(linea.itemId);
 
     const impuestoIds = linea.impuestoIds ?? reglas?.impuestosIds ?? [];
-    const descuentoIds = linea.descuentoIds ?? reglas?.descuentosIds ?? [];
-    const recargoIds = linea.recargoIds ?? reglas?.recargosIds ?? [];
+    // Los descuentos y recargos de una línea son SIEMPRE los de su ítem (owner,
+    // 2026-10-06). Hasta esa fecha `linea.descuentoIds`/`recargoIds` los
+    // reemplazaban, y por la API se aplicaba una regla que el ítem no tenía o se
+    // le sacaba la suya. Los DTOs ya no declaran esos campos, así que el pipe
+    // global los rechaza con 400 antes de llegar acá.
+    const descuentoIds = reglas?.descuentosIds ?? [];
+    const recargoIds = reglas?.recargosIds ?? [];
 
     // **Los impuestos NO tienen rama congelada, y es deliberado** (ADR-010):
     // son fiscales y se leen vivos aunque la línea traiga todo lo demás
@@ -867,9 +872,6 @@ export class CalculoPreciosService {
     //
     // Las reglas sí: si la línea viene con las suyas —solo `cerrarCuenta` las
     // pone— se usan tal cual y las asociaciones vivas del ítem no se miran.
-    // Pisan también a `linea.descuentoIds`, el override del cliente: en el
-    // cobro de una cuenta ese override no existe (`cerrarCuenta` no lo manda) y
-    // si algún día existiera, lo que la mesa pidió gana.
     const congeladas = linea.reglasCongeladas;
 
     // `precioResuelto` ya viene convertido —lo decidió `calcular()`—; el resto
@@ -939,9 +941,11 @@ export class CalculoPreciosService {
    * se hace cumplir; la primera es `ItemsService.validarReglas`, que cubre la
    * asociación en el catálogo.
    *
-   * Hacen falta las DOS. Una línea puede mandar `descuentoIds` propios y pisar
-   * los del ítem (`resolverLinea`), así que la puerta del catálogo no ve ese
-   * camino; y `descuentosVentaIds` no pasa por ningún ítem.
+   * Hacen falta las DOS: `descuentosVentaIds` no pasa por ningún ítem, así que
+   * la puerta del catálogo no lo ve. Del lado de la línea, desde el 2026-10-06
+   * los ids salen siempre del ítem (`resolverLinea`) y ningún request los trae:
+   * ahí esta puerta solo ataja una fila de `item_descuentos` con una regla de
+   * venta, que el catálogo no deja escribir (ver más abajo).
    *
    * ⚠️ **La validación vive acá y NO en el motor.** El motor recibe las reglas
    * ya separadas en dos listas y calcula plata; el nivel es una regla del

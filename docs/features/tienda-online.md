@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: —
-**Last Updated**: 2026-10-03
+**Last Updated**: 2026-10-06
 
 ---
 
@@ -100,6 +100,10 @@ Request:
 {
   "lineas": [{ "itemId": "uuid", "cantidad": "2" }]
 }
+// `CheckoutOnlineDto`, el mismo de `/online/pagar`: el carro de `/calcular` sin
+// `descuentosVentaIds`, `recargosVentaIds` ni `metodoPagoId`. El comprador no elige
+// reglas: mandarlas es 400, igual que `descuentoIds`/`recargoIds` en una línea
+// (2026-10-06).
 
 Response (201):
 {
@@ -108,6 +112,20 @@ Response (201):
   "checkoutUrl": "/tienda/pasarela?ref=uuid"
 }
 ```
+
+**Lo que el comprador no manda** (Sesión de esfuerzo máximo, 2026-10-06; el `metodoPagoId` lo
+encontró la revisión de seguridad del frente que cerró las reglas de línea). `prepararLineasCheckout`
+esparce el body en el cálculo cuyo total `pagar()` autoriza contra la tarjeta, y el callback crea la
+venta con un `CreateVentaDto` propio que no lleva reglas de venta ni `metodoPagoId` de nivel motor.
+Cualquier campo que mueva el total en un lado y no en el otro hace que cobrado y persistido no
+cierren, y autorizar de menos termina en **un cargo en Webpay sin venta** (*"Las ventas online
+requieren el pago completo"*). Por eso esos tres campos son 400 en la tienda. Las reglas por método
+de pago quedan apagadas en la tienda, igual que ya lo estaban en la venta del callback. Si algún día
+se quieren, el backend tiene que resolver el método **antes** de autorizar y el callback
+reproducirlo: es diseño aparte. Con Webpay Plus, además, el tipo de tarjeta se elige en el formulario
+de Transbank, después del monto. `cuentaId` y `canal` los pisa el service, y `personalizacion` la
+descarta (documentado en `online.service.ts`). Los `impuestoIds` de una línea siguen entrando: son
+fiscales, ver [`pendientes.md`](../agent/pendientes.md) § 3.
 
 Un ítem pausado **no llega al catálogo**: las cuatro superficies de venta piden
 `GET /items?...&activo=true` y el filtro se resuelve en la query, no en el cliente

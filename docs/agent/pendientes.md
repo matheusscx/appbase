@@ -97,7 +97,7 @@ destapa una decisión que no es mía).
   - **B4/B5:** enteros sin `@Max` que dan 500 por desborde de `int`: `min`/`max` de `ItemGrupoModificadorInputDto`, `numeroCuotas` (que además acepta negativos: `create-pago.dto.ts:43`, `create-venta.dto.ts:103`), `orden`, `duracionEstimada`, `diasVencimiento`, `cadaN` y `ScopePromoDto.cantidad`.
   - **B6:** strings sin `@MaxLength` (`comentario`, `referencia`, `descripcion`, `nombre`, `codigoLote`, `motivoAjuste`, rut/teléfono/email del customer), acotados por el body de 100 kB.
   - **Repetidos que llegan a la base:** `CreateItemDto.impuestosIds/recargosIds/descuentosIds` y `ScopePromoDto.itemIds` aceptan ids repetidos; se insertan de a uno o en lote contra una PK compuesta, así que probablemente dan 500.
-  - **Trampa del `@ArrayUnique`** de los ids de reglas: compara strings exactos. Hoy `[D, D.toUpperCase()]` da 400 "no encontrado", porque `requerir` (`calculo-precios.service.ts:1032-1037`) no pasa a minúsculas, y eso ya es un 400 que miente para un único id en mayúsculas. Si alguien arregla ese 400 aliasando el mapa, el par pasa y la regla se aplica dos veces. El arreglo correcto es pasar a minúsculas en el borde (un `@Transform` en el DTO) antes de comparar repetidos: patrón de `patterns/backend.md` "Un UUID validado puede venir en mayúsculas".
+  - **Trampa del `@ArrayUnique`** de los ids de reglas: compara strings exactos. Hoy `[D, D.toUpperCase()]` da 400 "no encontrado", porque `requerir` (`calculo-precios.service.ts:1047-1053`) no pasa a minúsculas, y eso ya es un 400 que miente para un único id en mayúsculas. Si alguien arregla ese 400 aliasando el mapa, el par pasa y la regla se aplica dos veces. El arreglo correcto es pasar a minúsculas en el borde (un `@Transform` en el DTO) antes de comparar repetidos: patrón de `patterns/backend.md` "Un UUID validado puede venir en mayúsculas".
 
 - [ ] **Una cuenta de salón no tiene tope de líneas y la precuenta sí** (backend, `SalonesService.agregarLinea`, `salones.service.ts:852`; anotado por el frente de topes de los DTOs, 2026-10-06). La precuenta (`useSalones.ts:356`) manda todas las líneas de la cuenta a `/calcular`, que corta en 500 (`CalcularVentaDto.lineas`). Dos pedidos del mismo plato con distinta personalización son dos líneas, y una fusión las suma. Una cuenta con más de 500 líneas distintas se queda sin precuenta, aunque cerrarla sigue andando. **Salida probable:** tope de líneas por cuenta en `agregarLinea` y `fusionarCuentas` (400 al pasarse), con el mismo número que `CalcularVentaDto.lineas`.
 
@@ -162,53 +162,52 @@ oficial, `cashRounding`, el conteo por denominación, el envío diario del resum
 la acumulación de descuentos y compras— y el renombre de `moneda.decimales` se mudaron a
 [`desarrollo-nuevo.md`](desarrollo-nuevo.md) el 2026-10-06. Acá quedan las correcciones.
 
-- [ ] **Los ids de reglas que manda el cliente salen del ítem: mandar otros es un 400** ✅
-  *(decidido por el owner el 2026-10-06; antes era "los ids de reglas que manda el cliente reemplazan
-  las del ítem" en la § 2)* (backend, motor de precios; medido por HTTP el 2026-10-06 por el frente
-  de topes de los DTOs, que no lo tocó). `resolverLinea` (`calculo-precios.service.ts:849-851`) usa
-  `linea.descuentoIds ?? reglas…` y lo mismo con `recargoIds` e `impuestoIds`. Lo que manda la línea
-  **reemplaza** lo asociado al ítem, y solo se valida el nivel y el tenant (documentado en
-  `motor-calculo-precios.md`). Ninguna pantalla manda esos campos: el frontend solo los declara en el
-  tipo de `useCalculoPrecios.ts`. Pero quien tiene `Ventas:Crear` llega por la API a mano, y también
-  quien tiene `Tienda Online:Crear` por `POST /online/checkout|pagar` (`CalcularVentaDto`). La tienda es
-  interna (usuario del tenant logueado), pero es la base del futuro storefront público. Medido con
-  `POST /ventas`, admin de Paris, todo 201 y persistido:
-  - **Producto (descuentos y recargos).** (a) Un descuento de nivel línea que el ítem no tiene
-    asociado se aplica igual: Smartphone (`…116`, sin filas en `item_descuentos`) ×2 con
-    `descuentoIds: ["…338"]` (Promo fija $5.000) → `totalFinal` 5.950, contra 11.900 sin él.
-    (b) `recargoIds: []` le saca al ítem su recargo asociado: un servicio de 1.000 neto con "Interés
-    compuesto 4%" (`…132`) y un impuesto adicional del 10% → 1.342 sin el campo, **1.290** con
-    `recargoIds: []`.
-  - **Fiscal (va en su propia sesión, ADR-010).** (c) `impuestoIds: []` vende sin el impuesto
-    adicional (`tipo='otro'`): el mismo ítem → **1.238**, la venta queda con 1 impuesto en vez de 2.
-    ADR-018 cerró solo el IVA. Además, un `impuestoIds` **repetido** cobra el impuesto adicional una
-    vez por repetición: es el gemelo del bug de descuentos y recargos repetidos que cerró el
-    `@ArrayUnique` del 2026-10-06 ([`resueltos.md`](resueltos.md)). Se dejó afuera por la regla fiscal.
-  - **Decidido, producto** (owner, 2026-10-06, AskUserQuestion de la Sesión de esfuerzo máximo, con la
-    medición de arriba como escena: el celular de $11.900 a $5.950 y el servicio sin su recargo).
-    Eligió *"Cerrarlo: salen del ítem"* por sobre elegir solo entre los del ítem y dejarlo como está:
-    cada línea lleva los descuentos y recargos asociados a su ítem, y mandar otros da error, en la
-    caja y en la tienda. Si un día la caja necesita elegir descuentos a mano, se diseña con su
-    pantalla y su permiso. **Construir:** `descuentoIds` y `recargoIds` de `LineaVentaDto` y de
-    `LineaDto` → 400 en `/ventas`, `/calcular`, `/online/checkout` y `/online/pagar`, sacar la rama
-    `linea.descuentoIds ?? reglas` de `resolverLinea`, y corregir `motor-calculo-precios.md:61-66` y
-    `ventas.md:89`, que hoy lo documentan como contrato. Toca código del motor: va sin otro frente de
-    backend en paralelo.
-  - **Derivado, decidido por la Sesión de esfuerzo máximo (objetable por el owner):** los
-    `descuentosVentaIds` y `recargosVentaIds` de `CreateVentaDto` y `CalcularVentaDto` también se
-    cierran: son "la caja elige descuentos a mano", hoy sin pantalla ni permiso. ⚠️ Antes de cerrarlos,
-    medir quién los usa (e2e, flujos internos, reglas por `metodoPagoId`); si cerrarlos rompe algo
-    diseñado, va a esa sesión.
+- [ ] **Los impuestos adicionales de una línea salen del ítem: `impuestoIds` es un 400** ✅
+  *(decidido por el owner el 2026-10-06. Es la parte fiscal de "Los ids de reglas que manda el
+  cliente salen del ítem": la de producto —descuentos y recargos— se cerró el mismo día, ver
+  [`resueltos.md`](resueltos.md))* (backend, motor de precios; **fiscal: va en su propia sesión**,
+  regla del 2026-08-23 y ADR-010). `resolverLinea` (`calculo-precios.service.ts:860`) usa
+  `linea.impuestoIds ?? reglas?.impuestosIds`: lo que manda la línea **reemplaza** los impuestos
+  adicionales (`tipo='otro'`) del ítem. El IVA no, desde ADR-018. Entra por las mismas cuatro
+  puertas: `POST /ventas`, `/calculo-precios/calcular`, `/online/checkout` y `/online/pagar`.
+  - **Medido** por HTTP el 2026-10-06 (admin de Paris): un servicio de 1.000 neto con "Interés
+    compuesto 4%" (`…132`) y un impuesto adicional del 10% cobra 1.342 sin el campo y **1.238** con
+    `impuestoIds: []`, y la venta queda con 1 impuesto en vez de 2. Además, un `impuestoIds`
+    **repetido** cobra el impuesto adicional una vez por repetición: es el gemelo del bug de
+    descuentos y recargos repetidos que cerró el `@ArrayUnique` del 2026-10-06.
+  - **Agravante en la tienda** (lo vio la revisión de seguridad del frente de producto,
+    2026-10-06; leído en el código, no medido por HTTP). `prepararLineasCheckout` esparce
+    `...linea` en el cálculo cuyo total `/online/pagar` autoriza contra la tarjeta. El snapshot de
+    la orden **no** lo arrastra (`lineasSnapshot` lleva solo `itemId`, `cantidad` y presentación),
+    así que el callback (`online-callback.handler.ts`) recalcula con los impuestos del ítem. Con
+    `impuestoIds: []`, Webpay autoriza de menos, `ventas.service` rechaza la venta (*"Las ventas
+    online requieren el pago completo"*) y queda **un cargo en Webpay sin venta**. Con un impuesto
+    adicional que el ítem no tiene, autoriza de más y el pago supera el total: sin `permite_vuelto`
+    en el método de tarjeta (lo normal), `PagosService` lo rechaza con 400 (*"…ningún método de pago
+    permite vuelto"*) y también queda un cargo sin venta. Con `permite_vuelto`, la venta se guarda
+    con vuelto sobre la tarjeta. Es lo que más apura del frente fiscal.
   - **Decidido, fiscal** (owner, 2026-10-06, pregunta aparte: el servicio de $1.000 cobrado $1.238 en
     vez de $1.342, con un impuesto en la boleta en vez de dos). Eligió *"Cerrarlo: salen del ítem"*
     por sobre dejarlo como está: los impuestos adicionales salen siempre del ítem, como el IVA desde
     ADR-018. `impuestoIds` de las dos clases → 400. **Va en su propia sesión fiscal** (regla del
     2026-08-23), y con eso desaparece también el `impuestoIds` repetido.
-  - El `@ArrayUnique` del 2026-10-06 protege mientras tanto; cuando estos campos se vayan, se va con
-    ellos.
-  - **Reproducir:** `POST /api/ventas` con `{ lineas: [{ itemId, cantidad: '2', descuentoIds:
-    ['550e8400-e29b-41d4-a716-446655440338'] }], pagos: [{ metodoPagoId: EFECTIVO, monto:
-    '2000000.0000' }] }` y la cabecera `Idempotency-Key`, sobre el seed de Paris.
+  - **Construir:** sacar `impuestoIds` de `LineaVentaDto` y de `LineaDto` (el pipe global da el
+    400, igual que con descuentos y recargos), la rama `linea.impuestoIds ??` de `resolverLinea` y el
+    pasamanos de `ventas.service.ts:993`. El 400 del IVA explícito de `calcular()` (*"El IVA no se
+    asigna por ítem ni por línea"*, `calculo-precios.service.ts:288`) se queda sin camino: decidir si
+    se borra. Corregir el request y las "Decisiones" de `motor-calculo-precios.md`, y `ventas.md`. El
+    molde es el describe *"las reglas de una línea salen del ítem"* de `calculo-precios.e2e-spec.ts`,
+    con sus mutantes.
+  - **Lo que dejó el frente de producto, revisado por la Sesión de esfuerzo máximo (2026-10-06, con
+    la medición del frente).** La decisión derivada decía cerrar también `descuentosVentaIds` y
+    `recargosVentaIds`. Quedó así: **abiertos en la caja** (`/ventas` y `/calcular`), porque son la
+    única puerta de las reglas de nivel venta, una feature de catálogo diseñada que espera su
+    pantalla; **cerrados con 400 en la tienda** (`/online/checkout|pagar`, construido), porque el
+    comprador no elige reglas y el total autorizado contra la tarjeta no cerraba con la venta del
+    callback. Por la misma razón se cerró en la tienda `metodoPagoId` (decidido por la Sesión de
+    esfuerzo máximo, 2026-10-06; lo encontró el revisor de seguridad del frente). ⚠️ La puerta de nivel venta en `/ventas` **no pide permiso propio** (alcanza
+    `Ventas:Crear`): entra con la pantalla de "la caja elige descuentos",
+    [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2.
 
 - [ ] **Lo que quedó del frente del modo ciego, ya cerrado** (backend + producto; la entrada
   madre —seis fugas, el eje mío/todos y el rastro de los oráculos— se mudó entera a
@@ -459,7 +458,7 @@ medido en otra moneda. Si algún día hace falta, es otra decisión, no un olvid
 ⚠️ **Antes de tocarlo, lo que el sistema hace HOY, medido el 2026-09-09** — porque una revisión
 independiente ya lo leyó al revés una vez y la entrada que salió de eso decía lo contrario: el
 motor convierte el precio de la línea a moneda oficial **antes** de aplicar las reglas
-(`calculo-precios.service.ts:869`, o `:405` si la línea es una receta o un combo personalizado),
+(`calculo-precios.service.ts:882`, o `:416` si la línea es una receta o un combo personalizado),
 así que un `-1000` sobre una langosta en dólares saca **mil pesos**, no mil dólares. El monto
 fijo hoy **ya está denominado**, en la oficial y de punta a punta: lo que la decisión cambia no
 es un descuido, es cuál de dos diseños coherentes queremos.
@@ -490,7 +489,7 @@ vive en la tabla de abajo y **no se duplica acá**.
 |---|---|
 | Esquema | `moneda_id` en `descuentos` y `recargos`. Sin datos productivos: entities + seeder + reset |
 | Escala | ⚠️ **Más grande que "tocar el decorador".** `EscalaMonedaPipe` resuelve **una** moneda por request —la oficial, desde el contexto— y la aplica a todo campo `@EsMontoCobrado`. Con el diseño nuevo, en el **mismo body** conviven `minimoMonto` (oficial) y `valorMonto` + cada `tramos[].valorMonto` (moneda de la regla): el pipe no sabe expresar escala **por campo**, ni tomarla del body en vez del contexto. Y es un borde compartido con muchos otros DTOs |
-| Motor — y **dónde** cuantiza | ⚠️ **La decisión de diseño del frente, y esta entrada no la toma.** Convertir **dentro** del motor le agrega una dependencia de tasas y lo deja de ser puro (`calculo-precios.engine.ts:1-14`: sin BD, sin Nest, único import `decimal.js`). Convertir **en el service** —donde vive hoy toda conversión, `calculo-precios.service.ts:1019`, alcanzada desde cinco sitios— le suma **un** redondeo nuevo: el `toDecimalPlaces(4)` de la conversión, con el `modo_redondeo` del tenant. ⚠️ Los otros dos de la cadena (`escalaCalculo` y el `q()` del minor unit) ya corren hoy sobre cualquier `monto_fijo` y correrían igual por el otro camino: el delta entre las dos opciones es **uno**, no tres. Pesa igual, porque `aplicarValor` aplica el `monto_fijo` **plano** (`engine.ts:493`) y entonces el número convertido **es** lo que el documento declara: es un sitio de cuantización de plata **nuevo**, encima de la invariante que se cerró el 2026-08-21 |
+| Motor — y **dónde** cuantiza | ⚠️ **La decisión de diseño del frente, y esta entrada no la toma.** Convertir **dentro** del motor le agrega una dependencia de tasas y lo deja de ser puro (`calculo-precios.engine.ts:1-14`: sin BD, sin Nest, único import `decimal.js`). Convertir **en el service** —donde vive hoy toda conversión, `calculo-precios.service.ts:1034`, alcanzada desde cinco sitios— le suma **un** redondeo nuevo: el `toDecimalPlaces(4)` de la conversión, con el `modo_redondeo` del tenant. ⚠️ Los otros dos de la cadena (`escalaCalculo` y el `q()` del minor unit) ya corren hoy sobre cualquier `monto_fijo` y correrían igual por el otro camino: el delta entre las dos opciones es **uno**, no tres. Pesa igual, porque `aplicarValor` aplica el `monto_fijo` **plano** (`engine.ts:493`) y entonces el número convertido **es** lo que el documento declara: es un sitio de cuantización de plata **nuevo**, encima de la invariante que se cerró el 2026-08-21 |
 | Pantallas | Selector de moneda en `descuentos.vue` y `recargos.vue`. ⚠️ Y la grilla **ya muestra el importe crudo, sin símbolo** (`descuentos.vue:876`, `recargos.vue:878`): con moneda propia ese `0,2` suelto pasa a ser ambiguo |
 | Congelado | Al **pedir** una línea, la cuenta congela sus reglas ya resueltas (`salones.service.ts:725`, dentro de `agregarLinea`) y `ReglaCongelada` es `ReglaResuelta` (`common/dto/reglas-congeladas.dto.ts:38`), cuyo `valorMonto` (`calculo-precios.engine.ts:31`) no lleva **moneda ni tasa**: un importe congelado en UF se convertiría recién al cobrar, con la tasa de ese momento. La línea ya congela su `tasaCambio` (`:717`), pero **no es el mismo gesto**: la línea tiene una sola moneda y las reglas son un array donde cada una —y cada tramo— podría traer la suya. ⚠️ Y `hashReglasCongeladas` decide si un pedido nuevo **se fusiona** con una línea existente (`salones.service.ts:793`): meter la tasa adentro de la regla cambia ese hash, así que el mismo ítem pedido antes y después de un cambio de tasa dejaría de fusionarse y saldrían dos líneas |
 
@@ -538,7 +537,7 @@ va a "arreglar" la conversión que falta.
 
 ⚠️ **Que el costo no se convierta nunca no es un olvido de esas cuatro sumas:** no hay un solo
 `× tasa` en todo el camino del costo (medido el 2026-09-09). El único del backend es
-`calculo-precios.service.ts:1019` (`convertirAMonedaOficial`) y es **del precio**. La regla del
+`calculo-precios.service.ts:1034` (`convertirAMonedaOficial`) y es **del precio**. La regla del
 owner es justamente lo que evita meter una tasa del día adentro de un costo, que lo volvería
 variable — y el costo se usa para márgenes.
 

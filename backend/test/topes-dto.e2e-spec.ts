@@ -33,12 +33,8 @@ const ADMIN_PARIS = { email: 'admin.paris@paris.cl', pass: 'admin' };
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
 const SMARTPHONE_ID = '550e8400-e29b-41d4-a716-446655440116';
-/** "Promo fija $5.000", nivel línea. */
-const DESCUENTO_LINEA_ID = '550e8400-e29b-41d4-a716-446655440338';
 /** "Promo del total $5.000", nivel venta. */
 const DESCUENTO_VENTA_ID = '550e8400-e29b-41d4-a716-446655440360';
-/** "Interés compuesto cuotas 4%", nivel línea. */
-const RECARGO_LINEA_ID = '550e8400-e29b-41d4-a716-446655440132';
 /** "Recargo por pedido chico", nivel venta. */
 const RECARGO_VENTA_ID = '550e8400-e29b-41d4-a716-446655440354';
 const ANA_ID = '550e8400-e29b-41d4-a716-446655440238';
@@ -564,20 +560,6 @@ const TOPES: FilaTope[] = [
     cuerpo: (n) => ({ lineas: lista(n, lineaDe) }),
   },
   {
-    campo: 'lineas.0.descuentoIds',
-    tope: 50,
-    metodo: 'post',
-    ruta: 'ventas',
-    cuerpo: (n) => linea({ descuentoIds: uuids(n) }),
-  },
-  {
-    campo: 'lineas.0.recargoIds',
-    tope: 50,
-    metodo: 'post',
-    ruta: 'ventas',
-    cuerpo: (n) => linea({ recargoIds: uuids(n) }),
-  },
-  {
     campo: 'lineas.0.impuestoIds',
     tope: 50,
     metodo: 'post',
@@ -605,20 +587,6 @@ const TOPES: FilaTope[] = [
     metodo: 'post',
     ruta: 'calculo-precios/calcular',
     cuerpo: (n) => ({ lineas: lista(n, lineaDe) }),
-  },
-  {
-    campo: 'lineas.0.descuentoIds',
-    tope: 50,
-    metodo: 'post',
-    ruta: 'calculo-precios/calcular',
-    cuerpo: (n) => linea({ descuentoIds: uuids(n) }),
-  },
-  {
-    campo: 'lineas.0.recargoIds',
-    tope: 50,
-    metodo: 'post',
-    ruta: 'calculo-precios/calcular',
-    cuerpo: (n) => linea({ recargoIds: uuids(n) }),
   },
   {
     campo: 'lineas.0.impuestoIds',
@@ -799,16 +767,6 @@ describe('Topes y forma de los arrays y objetos de los DTOs (e2e)', () => {
   // motor lo recorría como lista: un 500 (medido en `POST /ventas`).
   describe('@IsArray: una lista que llega como un valor suelto es 400', () => {
     const FILAS: { campo: string; ruta: string; cuerpo: object }[] = [
-      {
-        campo: 'lineas.0.descuentoIds',
-        ruta: 'ventas',
-        cuerpo: linea({ descuentoIds: DESCUENTO_LINEA_ID }),
-      },
-      {
-        campo: 'lineas.0.recargoIds',
-        ruta: 'ventas',
-        cuerpo: linea({ recargoIds: RECARGO_LINEA_ID }),
-      },
       {
         campo: 'lineas.0.impuestoIds',
         ruta: 'ventas',
@@ -1030,8 +988,8 @@ describe('Topes y forma de los arrays y objetos de los DTOs (e2e)', () => {
 
   describe('motor: ids de reglas repetidos son 400, no una regla aplicada dos veces', () => {
     // 200 unidades de $1.000: el descuento fijo de $5.000 no deja el total en 0.
-    const venta = (extra: object, lineaExtra: object = {}) => ({
-      lineas: [{ itemId: servicioId, cantidad: '200', ...lineaExtra }],
+    const venta = (extra: object) => ({
+      lineas: [{ itemId: servicioId, cantidad: '200' }],
       pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000000.0000' }],
       ...extra,
     });
@@ -1042,18 +1000,6 @@ describe('Topes y forma de los arrays y objetos de los DTOs (e2e)', () => {
       cuerpo: (ids: string[]) => object;
       id: string;
     }[] = [
-      {
-        campo: 'lineas.0.descuentoIds',
-        ruta: 'ventas',
-        id: DESCUENTO_LINEA_ID,
-        cuerpo: (ids) => venta({}, { descuentoIds: ids }),
-      },
-      {
-        campo: 'lineas.0.recargoIds',
-        ruta: 'ventas',
-        id: RECARGO_LINEA_ID,
-        cuerpo: (ids) => venta({}, { recargoIds: ids }),
-      },
       {
         campo: 'descuentosVentaIds',
         ruta: 'ventas',
@@ -1067,18 +1013,6 @@ describe('Topes y forma de los arrays y objetos de los DTOs (e2e)', () => {
         cuerpo: (ids) => venta({ recargosVentaIds: ids }),
       },
       {
-        campo: 'lineas.0.descuentoIds',
-        ruta: 'calculo-precios/calcular',
-        id: DESCUENTO_LINEA_ID,
-        cuerpo: (ids) => linea({ descuentoIds: ids }),
-      },
-      {
-        campo: 'lineas.0.recargoIds',
-        ruta: 'calculo-precios/calcular',
-        id: RECARGO_LINEA_ID,
-        cuerpo: (ids) => linea({ recargoIds: ids }),
-      },
-      {
         campo: 'descuentosVentaIds',
         ruta: 'calculo-precios/calcular',
         id: DESCUENTO_VENTA_ID,
@@ -1089,13 +1023,6 @@ describe('Topes y forma de los arrays y objetos de los DTOs (e2e)', () => {
         ruta: 'calculo-precios/calcular',
         id: RECARGO_VENTA_ID,
         cuerpo: (ids) => ({ ...linea({}), recargosVentaIds: ids }),
-      },
-      // La tienda online es otra puerta al mismo DTO (`CalcularVentaDto`).
-      {
-        campo: 'lineas.0.descuentoIds',
-        ruta: 'online/checkout',
-        id: DESCUENTO_LINEA_ID,
-        cuerpo: (ids) => linea({ descuentoIds: ids }),
       },
     ];
 
@@ -1113,20 +1040,6 @@ describe('Topes y forma de los arrays y objetos de los DTOs (e2e)', () => {
       },
     );
 
-    // `pagar` con Webpay activo abre una orden en la pasarela: el control de
-    // "una vez" no se corre acá, solo que el repetido muere en el pipe.
-    it('POST /online/pagar lineas.0.descuentoIds: repetido es 400', async () => {
-      const res = await enviar(
-        'post',
-        'online/pagar',
-        linea({ descuentoIds: [DESCUENTO_LINEA_ID, DESCUENTO_LINEA_ID] }),
-      );
-      expect(res.status).toBe(400);
-      expect(mensajes(res)).toContain(
-        "lineas.0.All descuentoIds's elements must be unique",
-      );
-    });
-
     it('POST /ventas con el mismo descuento dos veces no se guarda', async () => {
       // Sin `eliminado_el IS NULL` a propósito: lo que se cuenta es si el pedido
       // escribió algo, y una fila borrada también sería una escritura.
@@ -1137,7 +1050,7 @@ describe('Topes y forma de los arrays y objetos de los DTOs (e2e)', () => {
       const res = await enviar(
         'post',
         'ventas',
-        venta({}, { descuentoIds: [DESCUENTO_LINEA_ID, DESCUENTO_LINEA_ID] }),
+        venta({ descuentosVentaIds: [DESCUENTO_VENTA_ID, DESCUENTO_VENTA_ID] }),
       );
       expect(res.status).toBe(400);
       // Mismo conteo sin filtro de borrado, por la misma razón.

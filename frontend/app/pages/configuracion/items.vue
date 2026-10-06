@@ -573,7 +573,7 @@ watch(() => form.value.unidadMedida, () => {
  * ⛔ **Tampoco entran los descuentos y recargos de MONTO FIJO asociados al ítem**, y es una
  * decisión, no un olvido: **ese monto no está denominado en la moneda del ítem**, así que
  * cambiarla no lo reinterpreta. Hoy es plata en la moneda **oficial** —el motor lo aplica
- * después de convertir el precio de la línea (`calculo-precios.service.ts:869`, o `:405` si la
+ * después de convertir el precio de la línea (`calculo-precios.service.ts:882`, o `:416` si la
  * línea es una receta o un combo personalizado), y su DTO lo marca `@EsMontoCobrado`—, y el
  * owner decidió el 2026-09-09 que pase a tener **moneda propia declarada en la regla**, convertida
  * antes de aplicarse (frente sin construir, `docs/agent/pendientes.md` § 3; **dónde** se hace esa

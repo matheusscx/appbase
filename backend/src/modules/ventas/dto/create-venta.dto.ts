@@ -46,23 +46,6 @@ export class LineaVentaDto {
 
   @IsOptional()
   @IsArray()
-  // Reglas del catálogo del tenant. Sin repetidos: repetido, el motor aplicaba
-  // la regla una vez por repetición (un 201 con total 0, medido 2026-10-06).
-  @ArrayMaxSize(50)
-  @ArrayUnique()
-  @IsUUID(undefined, { each: true })
-  descuentoIds?: string[];
-
-  @IsOptional()
-  @IsArray()
-  // Mismo tope y misma razón que `descuentoIds`.
-  @ArrayMaxSize(50)
-  @ArrayUnique()
-  @IsUUID(undefined, { each: true })
-  recargoIds?: string[];
-
-  @IsOptional()
-  @IsArray()
   // Reglas del catálogo del tenant.
   @ArrayMaxSize(50)
   @IsUUID(undefined, { each: true })
@@ -230,7 +213,8 @@ export class CreateVentaDto {
 
   @IsOptional()
   @IsArray()
-  // Mismo tope y misma razón que `LineaVentaDto.descuentoIds`.
+  // Reglas del catálogo del tenant. Sin repetidos: repetido, el motor aplicaba
+  // la regla una vez por repetición (un 201 con total 0, medido 2026-10-06).
   @ArrayMaxSize(50)
   @ArrayUnique()
   @IsUUID(undefined, { each: true })
@@ -238,7 +222,7 @@ export class CreateVentaDto {
 
   @IsOptional()
   @IsArray()
-  // Mismo tope y misma razón que `LineaVentaDto.descuentoIds`.
+  // Mismo tope y misma razón que `descuentosVentaIds`.
   @ArrayMaxSize(50)
   @ArrayUnique()
   @IsUUID(undefined, { each: true })
