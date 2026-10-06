@@ -81,6 +81,19 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **Playwright entero que dura más de 15 minutos cae al login a partir de ahí** (infra de
+  test; anotado el 2026-10-04 en el gate de "Generar nota", sin tocarlo: no era del frente).
+  **Medido:** con el host cargado la suite tardó 21,8 min; 12 de sus 16 rojos son la pantalla de
+  login, contiguos desde el test 94, y los 16 pasaron al correrlos de nuevo con un login fresco.
+  **La causa, leída en el código y no confirmada con un log:** todos los tests reusan la sesión
+  del `storageState` del setup, y cada `tokenDe` (`e2e/support/api.ts`) hace `switch-tenant` con
+  el mismo `admin@sistema.com`, que revoca **todos** sus refresh (`AuthService`, decisión del owner:
+  la sesión es de la cuenta). La del navegador sobrevive mientras su access token viva, 15 min;
+  después el refresh rebota y la app vuelve al login. Con el host libre la suite entra en esa
+  ventana y no se ve. Para confirmarlo: correr con `JWT_EXPIRATION=2m` y mirar dónde empiezan a
+  caer. Salida probable: que `tokenDe` use otro usuario que el del navegador, o renovar el
+  `storageState` por spec.
+
 - [ ] **Medir la ventana de consulta de Webpay Plus con un pago de más de 7 días** (queda del
   cierre de "Probar en el sandbox de Transbank el saldo…", 2026-10-04, [`resueltos.md`](resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04)).
   La documentación de Webpay Plus dice que el estado se consulta hasta 7 días; la referencia, "en
@@ -195,6 +208,12 @@ destapa una decisión que no es mía).
     - **Otro caso, 2026-10-04:** `20261004-194906-pensive-hugle-d7c7c5-43294` (15 líneas `index`
       de 9 contra 8 caracteres, 0 de contenido; recibo escrito minutos antes del commit, con
       `in-pack` 66 969 y `count` 2 562). Se reescribió el recibo sobre el mismo diff revisado.
+    - **Otro caso, 2026-10-06, que contradice el "borde de 2^16":**
+      `20261006-093947-bold-carson-9d7303-20887` (28 líneas `index` de 9 contra 8 caracteres, 0 de
+      contenido). Medido justo después: `in-pack` **44 253** y `count` 1 414, lejos de 2^16, y aun así
+      el recibo salió con 9. O el conteo que usa git no es el de `count-objects` (el
+      `multi-pack-index`, sin medir), o la causa es otra. Se reescribió el recibo sobre el mismo diff
+      revisado.
 
 - [ ] **Un `itemGrupoId` en mayúsculas en `PATCH /grupos-modificadores/:id/overrides` da un 400
   que miente: "item_grupo_id no válido para este grupo"** (backend,
@@ -291,40 +310,6 @@ revisión independiente no lo pudo reproducir, con razón.
   que falta es la forma del filtro —un parámetro por tipo de baja, o opciones separadas en el
   desplegable— y que el `COUNT` y la página lo apliquen igual. Al tocarlo, el tipo sale de
   `motivo_baja` sin filtrar su borrado, como el `JOIN` de la lectura.
-
-- [ ] **Un `REFUND` aprobado que quedó sin nota de crédito no tiene cómo generarla: botón
-  "Generar nota"** (backend + frontend; ⛔ **fiscal, frente propio**: emite un documento, así que
-  va en su sesión, con su verificación, nunca de arrastre — `CLAUDE.md`, ADR-010). Sale del
-  cierre del doble conteo del vínculo `REFUND` → corrección ([`resueltos.md`](resueltos.md),
-  2026-10-02): desde ese día el vínculo se escribe dentro de la transacción de la nota, así que
-  si cualquiera de los dos falla queda un `REFUND` aprobado **sin** corrección — la plata ya
-  volvió por Webpay, el pago la cuenta una sola vez, y la boleta queda sin corregir. Ese estado
-  ya existía (la nota que falla entera); lo que falta es repararlo.
-  **Decidido (owner, 2026-10-02, por pregunta con la escena del reembolso de $70.000 sobre una
-  compra online de $100.000 y tres opciones: botón, marcar y que lo arregle soporte, reintento
-  automático):** en el historial de la orden, el reembolso sin nota aparece **marcado**, con un
-  botón **"Generar nota"** que emite la corrección por el monto de ese `REFUND`. Descartados:
-  dejarlo a soporte (cada caso manual y la boleta sin corregir mientras tanto) y el reintento
-  automático (choca con la regla del owner de que la app no repita sola lo que falló).
-  - **Medido hoy (2026-10-02).** Visible a medias: el toast del `ReembolsoModal` muestra el
-    `warning` (sin `notaCreditoId`) y el log trae orden y `REFUND`; el historial de la orden
-    (`OrdenDetalleDrawer`) lista el `REFUND` sin decir que le falta la nota. Reintentable: no —
-    no hay endpoint, y volver a reembolsar saca la plata otra vez por el proveedor.
-  - **Lo que hay que diseñar en su sesión.** (1) Idempotencia: dos clics no pueden emitir dos
-    notas. El vínculo ya ayuda (`correccion_venta_id IS NULL` escribe una sola vez y, dentro de
-    la transacción, revierte la segunda), pero el contrato visible —qué ve el segundo clic— es
-    del owner; ver la entrada gemela "Una nota de crédito que se reintenta se emite dos veces",
-    cerrada el 2026-10-03 en [`resueltos.md`](resueltos.md) (el patrón que sirve acá: aviso de
-    qué falta hacer, y el 422 de otros datos que cierra el modal y recarga). (2) Los ítems a devolver se eligen de nuevo: los del pedido original no quedaron
-    guardados (el `request` del `REFUND` es el del proveedor, no el DTO). (3) Permiso: el mismo
-    `Pasarelas:Reembolsar` u otro. (4) Reusar `CobrosService.aplicarPostReembolso` —que ya arma
-    el evento con `ligarCorreccion`— y no un camino paralelo.
-  - **La pregunta del stock ya existe y se reusa (2026-10-04):** cada línea elegida lleva
-    `stock: 'recupera' | 'pierde'`, obligatorio donde salió inventario y prohibido donde no, y
-    `ReembolsoCallbackHandler.validarDevoluciones` la valida con la regla de la nota manual. Qué
-    preguntar por línea lo dice `devolucionStock` del detalle de la venta, y la pantalla es
-    `DevolucionInventarioLista`. Contrato:
-    [`reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md#se-recupera-o-se-pierde-2026-10-04).
 
 - [ ] **Lo que quedó del frente del modo ciego, ya cerrado** (backend + producto; la entrada
   madre —seis fugas, el eje mío/todos y el rastro de los oráculos— se mudó entera a
@@ -1055,6 +1040,16 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
+
+- [ ] **Un `REFUND` marcado "Sin nota de crédito" cuya venta ya está corregida entera por otras
+  notas no tiene salida** (backend + producto; anotado el 2026-10-04 al cerrar "Generar nota",
+  [`resueltos.md`](resueltos.md); **solo si aparece en uso real** — hoy no se construye, lo decidió
+  la Sesión de esfuerzo máximo). Escena: una venta online de $100.000 pagada con dos tarjetas, un
+  reembolso de $70.000 cuya nota falló, y después dos notas del POS "por el pago" que acreditan los
+  $100.000. "Generar nota" da 400 *"La venta ya está corregida entera…"* cada vez y el `REFUND`
+  sigue marcado para siempre. **La pregunta para el owner:** ¿se liga el `REFUND` a una de las
+  notas que ya existen (¿cuál, si son dos?), o se descarta la marca con un motivo escrito? Ninguna
+  de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
 
 ## 5. Carreras de concurrencia
 

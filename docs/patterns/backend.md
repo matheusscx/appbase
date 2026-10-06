@@ -1723,7 +1723,8 @@ seq scan igual —o casi—, así que un `EXPLAIN` sobre ella no distingue el pl
 ## 18. Operación idempotente (un cobro por intento)
 
 Todo endpoint que **cobra** —crea una venta, cierra una cuenta, registra un abono— o que
-**devuelve plata** —emite una nota de crédito, reembolsa por la pasarela— exige
+**devuelve plata** —emite una nota de crédito (también la de un `REFUND` que quedó sin ella,
+"Generar nota"), reembolsa por la pasarela— exige
 `Idempotency-Key` y corre su operación dentro de `IdempotenciaService.ejecutar`
 ([ADR-026](../adr/026-idempotencia-de-cobros.md)). El reintento del cajero después de un corte
 reproduce la respuesta en vez de cobrar dos veces.
@@ -1761,6 +1762,10 @@ return this.idempotencia.ejecutar(
 - **Con un loop de deadlock y `conRastroDeRechazo`** (la nota de crédito, `compras.confirmar`),
   `ejecutar` va **adentro** del loop y del rastro: un `40P01` aborta la transacción con el
   reclamo y el intento siguiente reclama de nuevo; el rastro se escribe después del rollback.
+- **Si la operación la ejecuta otro módulo** ("Generar nota": la pasarela pide, ventas emite),
+  la clave viaja en el evento del registry (§13) y el chequeo de estado del llamador —que el
+  `REFUND` siga sin nota— va como callback (`alTomarLaVenta`) que el otro corre después del
+  reclamo y bajo su lock. Chequearlo antes de llamar haría rebotar la reproducción.
 - **Un array cuyo orden no cambia el pedido se ordena para la huella** (las `devoluciones`
   de la nota): si no, el mismo pedido marcado en otro orden cae en "otros datos".
 - **Un llamador interno sin HTTP no pasa clave** (el callback de Webpay, las suscripciones):

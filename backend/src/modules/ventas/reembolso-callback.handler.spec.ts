@@ -121,6 +121,50 @@ describe('VentasReembolsoHandler', () => {
     expect(res).toEqual({ correccionVentaId: 'nc-1' });
   });
 
+  it('"Generar nota": la clave del intento y el chequeo bajo el lock de la venta llegan a la nota, y la reproducción se informa', async () => {
+    const idempotencia = {
+      tenantId: 't-1',
+      usuarioId: 'admin-1',
+      clave: 'clave-1',
+      operacion: 'pasarela.generarNota' as const,
+      huella: 'h',
+      mensajeOtrosDatos: 'otros datos',
+    };
+    const alTomarLaVenta = jest.fn();
+    ventasService.crearNotaCredito.mockResolvedValueOnce({
+      id: 'nc-1',
+      totalFinal: '1100.0000',
+      repetida: true,
+    });
+
+    const res = await handler.onReembolsoAprobado({
+      ...eventoBase,
+      idempotencia,
+      alTomarLaVenta,
+    });
+
+    expect(ventasService.crearNotaCredito).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencia,
+        alTomarLaVenta,
+        enLaTransaccion: eventoBase.ligarCorreccion,
+      }),
+    );
+    expect(res).toEqual({ correccionVentaId: 'nc-1', repetida: true });
+  });
+
+  it('el hook no pasa clave: la nota no reclama nada y la respuesta no dice "repetida"', async () => {
+    const res = await handler.onReembolsoAprobado(eventoBase);
+
+    const params = ventasService.crearNotaCredito.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(params.idempotencia).toBeUndefined();
+    expect(params.alTomarLaVenta).toBeUndefined();
+    expect(res).not.toHaveProperty('repetida');
+  });
+
   it('todo reembolso deja su corrección, también el que no pide devolver ningún ítem', async () => {
     // Antes la nota dependía de una casilla y, sin ella, un reembolso sin
     // devoluciones no dejaba ningún registro del lado de ventas.

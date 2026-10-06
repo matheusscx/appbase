@@ -14,7 +14,11 @@ import {
 import { ProviderComunicacionError } from '../providers/payment-provider.interface';
 import { ReembolsoCallbackRegistry } from './reembolso-callback.registry';
 import { MonedasService } from '../../monedas/monedas.service';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { IdempotenciaService } from '../../idempotencia/idempotencia.service';
 import type { PasosConEfectoExterno } from '../../idempotencia/idempotencia.service';
@@ -1530,6 +1534,298 @@ describe('CobrosService', () => {
     });
   });
 
+  describe('"Generar nota" de un REFUND aprobado que quedó sin ella', () => {
+    const ordenConVenta = {
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'reembolsada',
+      monto: '100000',
+      moneda: 'CLP',
+      codigoOrden: 'O-1',
+      ventaId: 'venta-1',
+    };
+    const declarado = [
+      { itemId: 'item-b', cantidad: '1', stock: 'pierde' },
+      { itemId: 'item-a', cantidad: '2', stock: 'recupera' },
+    ];
+    const refundSinNota = (extra: Fila = {}): Fila => ({
+      transaccionId: 'tx-r',
+      tipo: 'REFUND',
+      estado: 'aprobada',
+      // Escala 6, como la trae la fila.
+      monto: '70000.000000',
+      usuarioId: 'quien-pidio',
+      correccionVentaId: null,
+      metadata: { devoluciones: declarado },
+      ...extra,
+    });
+    type Evento = {
+      monto: string;
+      usuarioId: string | null;
+      devoluciones: unknown[];
+      idempotencia: {
+        operacion: string;
+        usuarioId: string;
+        clave: string;
+        huella: string;
+      };
+      alTomarLaVenta: (m: unknown) => Promise<void>;
+      ligarCorreccion: (m: unknown, id: string) => Promise<void>;
+    };
+    const eventoEnviado = (): Evento =>
+      reembolsoHandler.onReembolsoAprobado.mock.calls[0][0] as Evento;
+    const generar = (devoluciones?: unknown[], clave = CLAVE) =>
+      service.generarNotaDeReembolso(
+        't-1',
+        'orden-1',
+        'tx-r',
+        { devoluciones } as never,
+        'admin-1',
+        clave,
+      );
+
+    beforeEach(() => {
+      ordenRepo.findOne.mockResolvedValue({ ...ordenConVenta });
+      conHistorial([
+        {
+          transaccionId: 'tx-auth',
+          tipo: 'AUTHORIZATION',
+          estado: 'aprobada',
+          monto: '100000',
+        },
+        refundSinNota(),
+      ]);
+      reembolsoHandler.onReembolsoAprobado.mockResolvedValue({
+        correccionVentaId: 'nc-1',
+      });
+    });
+
+    it('emite la corrección por el monto del REFUND con la clave del intento, y NUNCA llama al proveedor', async () => {
+      const res = await generar(declarado);
+
+      expect(eventoEnviado()).toMatchObject({
+        tenantId: 't-1',
+        ordenId: 'orden-1',
+        codigoOrden: 'O-1',
+        ventaId: 'venta-1',
+        monto: '70000',
+        devoluciones: declarado,
+        idempotencia: {
+          tenantId: 't-1',
+          usuarioId: 'admin-1',
+          clave: CLAVE,
+          operacion: 'pasarela.generarNota',
+        },
+      });
+      expect(res).toMatchObject({ notaCreditoId: 'nc-1' });
+      expect(res.repetida).toBeUndefined();
+      expect(provider.reembolsar).not.toHaveBeenCalled();
+      expect(provider.consultarEstado).not.toHaveBeenCalled();
+    });
+
+    it('la reproducción (misma clave, mismo pedido) se informa como repetida', async () => {
+      reembolsoHandler.onReembolsoAprobado.mockResolvedValueOnce({
+        correccionVentaId: 'nc-1',
+        repetida: true,
+      });
+
+      const res = await generar(declarado);
+
+      expect(res).toMatchObject({ notaCreditoId: 'nc-1', repetida: true });
+    });
+
+    it('la huella no cambia con otro formato de cantidad ni con las líneas en otro orden, y sí con otra respuesta', async () => {
+      await generar(declarado);
+      await generar([{ ...declarado[1], cantidad: '2.00' }, declarado[0]]);
+      await generar([declarado[0], { ...declarado[1], stock: 'pierde' }]);
+      const huellas = reembolsoHandler.onReembolsoAprobado.mock.calls.map(
+        (c) => (c[0] as Evento).idempotencia.huella,
+      );
+      expect(huellas[0]).toBe(huellas[1]);
+      expect(huellas[2]).not.toBe(huellas[0]);
+    });
+
+    describe('el stock se le atribuye a quien hizo la declaración', () => {
+      it('lo confirmado es lo que pidió el reembolso (en otro orden y formato): a quien lo pidió', async () => {
+        await generar([{ ...declarado[1], cantidad: '2.0' }, declarado[0]]);
+        expect(eventoEnviado().usuarioId).toBe('quien-pidio');
+      });
+
+      it('el admin lo editó: a quien hizo clic', async () => {
+        await generar([{ ...declarado[1], stock: 'pierde' }, declarado[0]]);
+        expect(eventoEnviado().usuarioId).toBe('admin-1');
+      });
+
+      it('el REFUND no guardó qué pidió: a quien hizo clic', async () => {
+        conHistorial([refundSinNota({ metadata: {} })]);
+        await generar([]);
+        expect(eventoEnviado().usuarioId).toBe('admin-1');
+      });
+
+      it('el reembolso no pidió líneas y la nota tampoco: a quien lo pidió', async () => {
+        conHistorial([refundSinNota({ metadata: { devoluciones: [] } })]);
+        await generar(undefined);
+        expect(eventoEnviado().usuarioId).toBe('quien-pidio');
+        expect(eventoEnviado().devoluciones).toEqual([]);
+      });
+    });
+
+    describe('lo que se mira ANTES del reclamo (no cambia nunca para un REFUND)', () => {
+      it('un REFUND que no es de esta orden: 404 y no se emite nada', async () => {
+        await expect(
+          service.generarNotaDeReembolso(
+            't-1',
+            'orden-1',
+            'otro',
+            {},
+            'admin-1',
+            CLAVE,
+          ),
+        ).rejects.toThrow(NotFoundException);
+        expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+      });
+
+      it('la autorización no es un reembolso: 404', async () => {
+        await expect(
+          service.generarNotaDeReembolso(
+            't-1',
+            'orden-1',
+            'tx-auth',
+            {},
+            'admin-1',
+            CLAVE,
+          ),
+        ).rejects.toThrow(NotFoundException);
+      });
+
+      it.each(['rechazada', 'iniciada', 'error'])(
+        'un REFUND %s no lleva nota por acá: 400 (el sin confirmar se aclara en su tarjeta)',
+        async (estado) => {
+          conHistorial([refundSinNota({ estado })]);
+          await expect(generar(declarado)).rejects.toThrow(BadRequestException);
+          expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+        },
+      );
+
+      it('una orden sin venta no tiene documento que corregir: 400', async () => {
+        ordenRepo.findOne.mockResolvedValue({
+          ...ordenConVenta,
+          ventaId: null,
+        });
+        await expect(generar(declarado)).rejects.toThrow(BadRequestException);
+        expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+      });
+
+      it('una orden de otro tenant: 404', async () => {
+        ordenRepo.findOne.mockResolvedValue(null);
+        await expect(generar(declarado)).rejects.toThrow(NotFoundException);
+      });
+    });
+
+    describe('lo que se mira DESPUÉS del reclamo, bajo el lock de la venta (alTomarLaVenta)', () => {
+      const managerDeLaNota = { soy: 'la transacción de la nota' };
+
+      it('el REFUND ya ligado (otra clave, otro admin): 409 con la nota que tiene, y no valida nada más', async () => {
+        await generar(declarado);
+        conHistorial([refundSinNota({ correccionVentaId: 'nc-otra' })]);
+
+        const error = await eventoEnviado()
+          .alTomarLaVenta(managerDeLaNota)
+          .catch((e: unknown) => e);
+
+        expect(error).toBeInstanceOf(ConflictException);
+        expect((error as ConflictException).getResponse()).toMatchObject({
+          notaCreditoId: 'nc-otra',
+        });
+        expect(reembolsoHandler.validarDevoluciones).not.toHaveBeenCalled();
+      });
+
+      it('lee el REFUND con la transacción de la nota (el vínculo lo escribe quien tiene el lock de la venta)', async () => {
+        await generar(declarado);
+        await eventoEnviado().alTomarLaVenta(managerDeLaNota);
+        expect(deps.transacciones.listarPorOrden).toHaveBeenLastCalledWith(
+          't-1',
+          'orden-1',
+          managerDeLaNota,
+        );
+      });
+
+      it('las líneas se validan con la regla de la nota manual, con la misma transacción', async () => {
+        await generar(declarado);
+        await eventoEnviado().alTomarLaVenta(managerDeLaNota);
+        expect(reembolsoHandler.validarDevoluciones).toHaveBeenCalledWith(
+          managerDeLaNota,
+          { tenantId: 't-1', ventaId: 'venta-1', devoluciones: declarado },
+        );
+      });
+
+      it('sin líneas no hay nada que validar', async () => {
+        await generar([]);
+        await eventoEnviado().alTomarLaVenta(managerDeLaNota);
+        expect(reembolsoHandler.validarDevoluciones).not.toHaveBeenCalled();
+      });
+
+      it('liga ESTE REFUND con el manager de la nota', async () => {
+        await generar(declarado);
+        await eventoEnviado().ligarCorreccion(managerDeLaNota, 'nc-1');
+        expect(deps.transacciones.vincularCorreccion).toHaveBeenCalledWith(
+          't-1',
+          'tx-r',
+          'nc-1',
+          managerDeLaNota,
+        );
+      });
+    });
+
+    it('si la nota no se puede emitir, el error SUBE (no hay nada consumado): ni warning ni 200', async () => {
+      reembolsoHandler.onReembolsoAprobado.mockRejectedValueOnce(
+        new BadRequestException('La venta ya está corregida entera'),
+      );
+      await expect(generar(declarado)).rejects.toThrow(
+        'La venta ya está corregida entera',
+      );
+    });
+
+    it('el hook post-commit no cambió: sin clave ni chequeo bajo el lock, y un fallo sigue siendo warning', async () => {
+      conHistorial([
+        {
+          transaccionId: 'tx-auth',
+          tipo: 'AUTHORIZATION',
+          estado: 'aprobada',
+          tenantPasarelaId: 'tp-1',
+          monto: '100000',
+        },
+      ]);
+      ordenRepo.findOne.mockResolvedValue({
+        ...ordenConVenta,
+        estado: 'conciliada',
+      });
+      provider.reembolsar.mockResolvedValue({
+        aprobada: true,
+        codigoRespuesta: '0',
+        request: {},
+        response: {},
+      });
+      reembolsoHandler.onReembolsoAprobado.mockRejectedValueOnce(
+        new BadRequestException('tope'),
+      );
+
+      const res = await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100' },
+        { usuarioId: 'user-1' },
+        CLAVE,
+      );
+
+      const evento = eventoEnviado() as unknown as Record<string, unknown>;
+      expect(evento).not.toHaveProperty('idempotencia');
+      expect(evento).not.toHaveProperty('alTomarLaVenta');
+      expect(res.warning).toContain('reembolso fue procesado');
+      expect(res.notaCreditoId).toBeUndefined();
+    });
+  });
+
   it('verificar cierra una orden en_proceso según el proveedor', async () => {
     ordenRepo.findOne.mockResolvedValue({
       ordenId: 'orden-1',
@@ -1568,6 +1864,85 @@ describe('CobrosService', () => {
     expect(deps.transacciones.redactar).toHaveBeenCalledWith({
       tbk_user: 'secreto',
     });
+  });
+
+  it('obtenerOrden dice qué REFUND quedó sin nota y qué pidió (lo que "Generar nota" precarga)', async () => {
+    ordenRepo.findOne.mockResolvedValue({
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'reembolsada',
+      metadata: {},
+    });
+    const pedido = [{ itemId: 'item-a', cantidad: '1', stock: 'pierde' }];
+    conHistorial([
+      {
+        transaccionId: 'tx-auth',
+        tipo: 'AUTHORIZATION',
+        estado: 'aprobada',
+        correccionVentaId: null,
+        metadata: { devoluciones: ['no es de un reembolso'] },
+      },
+      {
+        transaccionId: 'tx-r1',
+        tipo: 'REFUND',
+        estado: 'aprobada',
+        correccionVentaId: null,
+        metadata: { devoluciones: pedido },
+      },
+      {
+        transaccionId: 'tx-r2',
+        tipo: 'REFUND',
+        estado: 'aprobada',
+        correccionVentaId: 'nc-2',
+        metadata: {},
+      },
+    ]);
+
+    const res = await service.obtenerOrden('t-1', 'orden-1', {
+      vistaAdmin: true,
+    });
+
+    expect(res.transacciones).toEqual([
+      expect.objectContaining({
+        transaccionId: 'tx-auth',
+        correccionVentaId: null,
+        devoluciones: null,
+      }),
+      expect.objectContaining({
+        transaccionId: 'tx-r1',
+        correccionVentaId: null,
+        devoluciones: pedido,
+      }),
+      expect.objectContaining({
+        transaccionId: 'tx-r2',
+        correccionVentaId: 'nc-2',
+        devoluciones: null,
+      }),
+    ]);
+  });
+
+  it('obtenerOrden sin la vista del admin (la ruta de la llave de API) no expone el vínculo ni lo que pidió el reembolso', async () => {
+    ordenRepo.findOne.mockResolvedValue({
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'reembolsada',
+      metadata: {},
+    });
+    conHistorial([
+      {
+        transaccionId: 'tx-r1',
+        tipo: 'REFUND',
+        estado: 'aprobada',
+        correccionVentaId: 'nc-1',
+        metadata: { devoluciones: [{ itemId: 'a', cantidad: '1' }] },
+      },
+    ]);
+
+    const res = await service.obtenerOrden('t-1', 'orden-1');
+
+    const [fila] = res.transacciones as Record<string, unknown>[];
+    expect(fila).not.toHaveProperty('correccionVentaId');
+    expect(fila).not.toHaveProperty('devoluciones');
   });
 
   it('obtenerOrden aplica expiración perezosa', async () => {

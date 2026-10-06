@@ -28,6 +28,7 @@ import { CreateApiKeyDto } from '../dto/create-api-key.dto';
 import { QueryOrdenesDto } from '../dto/query-ordenes.dto';
 import { CreateReembolsoDto } from '../dto/create-reembolso.dto';
 import { ResolverReembolsoDto } from '../dto/resolver-reembolso.dto';
+import { GenerarNotaReembolsoDto } from '../dto/generar-nota-reembolso.dto';
 
 @ApiTags('pasarela')
 @ApiBearerAuth()
@@ -107,7 +108,9 @@ export class PasarelaAdminController {
   @Get('ordenes/:id')
   @RequiresPermiso('Pasarelas', 'Leer')
   obtenerOrden(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
-    return this.cobrosService.obtenerOrden(this.tenantId(req), id);
+    return this.cobrosService.obtenerOrden(this.tenantId(req), id, {
+      vistaAdmin: true,
+    });
   }
 
   @Post('ordenes/:id/reembolsos')
@@ -144,6 +147,35 @@ export class PasarelaAdminController {
       this.tenantId(req),
       id,
       (req.user as JwtUser).id,
+    );
+  }
+
+  /**
+   * "Generar nota": la corrección de un REFUND aprobado que quedó sin ella. Por
+   * el monto del REFUND, sin llamar al proveedor; una por intento.
+   */
+  @Post('ordenes/:id/reembolsos/:transaccionId/nota')
+  @RequiresPermiso('Pasarelas', 'Reembolsar')
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description:
+      'UUID por intento: el reintento con la misma clave no emite otra nota (ADR-026)',
+  })
+  generarNota(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('transaccionId', ParseUUIDPipe) transaccionId: string,
+    @Body() dto: GenerarNotaReembolsoDto,
+    @ClaveIdempotencia() clave: string,
+  ) {
+    return this.cobrosService.generarNotaDeReembolso(
+      this.tenantId(req),
+      id,
+      transaccionId,
+      dto,
+      (req.user as JwtUser).id,
+      clave,
     );
   }
 

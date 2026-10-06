@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { EntityManager } from 'typeorm';
+import type { SolicitudIdempotenteInput } from '../../idempotencia/idempotencia.service';
 
 /**
  * Lo que pasa con lo devuelto en una línea con stock de por medio (owner,
@@ -51,6 +52,20 @@ export interface ReembolsoAprobadoEvento {
     manager: EntityManager,
     correccionVentaId: string,
   ) => Promise<void>;
+  /**
+   * Solo "Generar nota" (la corrección de un REFUND que quedó sin ella): la
+   * `Idempotency-Key` del intento, que la nota reclama como primera sentencia de
+   * su transacción (ADR-026). El hook post-commit no la pasa: no hay nadie que
+   * reintente, y su nota ya es una por REFUND.
+   */
+  idempotencia?: SolicitudIdempotenteInput;
+  /**
+   * Solo "Generar nota": lo que se chequea DESPUÉS del reclamo y bajo el
+   * `FOR UPDATE` de la venta, antes de componer nada —que el REFUND siga sin
+   * corrección y las líneas, con la regla de la nota manual—. Antes del reclamo
+   * haría rebotar la reproducción (ADR-026). Si lanza, no queda nada.
+   */
+  alTomarLaVenta?: (manager: EntityManager) => Promise<void>;
 }
 
 /**
@@ -108,9 +123,10 @@ export interface ReembolsoCallbackHandler {
     },
   ): Promise<void>;
 
+  /** `repetida`: la clave del evento ya había emitido esta nota y se reprodujo. */
   onReembolsoAprobado(
     evento: ReembolsoAprobadoEvento,
-  ): Promise<{ correccionVentaId: string }>;
+  ): Promise<{ correccionVentaId: string; repetida?: true }>;
 }
 
 /**

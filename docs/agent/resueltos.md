@@ -23,6 +23,87 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## "Generar nota": un `REFUND` aprobado que quedó sin nota de crédito (cerrada 2026-10-04)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Frente fiscal propio (`CLAUDE.md`, ADR-010). La regla
+viva está en [`features/reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md#generar-nota-un-refund-aprobado-que-quedó-sin-nota-2026-10-04);
+spec y plan:
+[`2026-10-04-generar-nota-de-refund-sin-nota-design.md`](../superpowers/specs/2026-10-04-generar-nota-de-refund-sin-nota-design.md),
+[`2026-10-04-generar-nota-de-refund-sin-nota.md`](../superpowers/plans/2026-10-04-generar-nota-de-refund-sin-nota.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **Un `REFUND` aprobado que quedó sin nota de crédito no tiene cómo generarla: botón
+  "Generar nota"** (backend + frontend; ⛔ **fiscal, frente propio**: emite un documento, así que
+  va en su sesión, con su verificación, nunca de arrastre — `CLAUDE.md`, ADR-010). Sale del
+  cierre del doble conteo del vínculo `REFUND` → corrección ([`resueltos.md`](resueltos.md),
+  2026-10-02): desde ese día el vínculo se escribe dentro de la transacción de la nota, así que
+  si cualquiera de los dos falla queda un `REFUND` aprobado **sin** corrección — la plata ya
+  volvió por Webpay, el pago la cuenta una sola vez, y la boleta queda sin corregir. Ese estado
+  ya existía (la nota que falla entera); lo que falta es repararlo.
+  **Decidido (owner, 2026-10-02, por pregunta con la escena del reembolso de $70.000 sobre una
+  compra online de $100.000 y tres opciones: botón, marcar y que lo arregle soporte, reintento
+  automático):** en el historial de la orden, el reembolso sin nota aparece **marcado**, con un
+  botón **"Generar nota"** que emite la corrección por el monto de ese `REFUND`. Descartados:
+  dejarlo a soporte (cada caso manual y la boleta sin corregir mientras tanto) y el reintento
+  automático (choca con la regla del owner de que la app no repita sola lo que falló).
+  - **Medido hoy (2026-10-02).** Visible a medias: el toast del `ReembolsoModal` muestra el
+    `warning` (sin `notaCreditoId`) y el log trae orden y `REFUND`; el historial de la orden
+    (`OrdenDetalleDrawer`) lista el `REFUND` sin decir que le falta la nota. Reintentable: no —
+    no hay endpoint, y volver a reembolsar saca la plata otra vez por el proveedor.
+  - **Lo que hay que diseñar en su sesión.** (1) Idempotencia: dos clics no pueden emitir dos
+    notas. El vínculo ya ayuda (`correccion_venta_id IS NULL` escribe una sola vez y, dentro de
+    la transacción, revierte la segunda), pero el contrato visible —qué ve el segundo clic— es
+    del owner; ver la entrada gemela "Una nota de crédito que se reintenta se emite dos veces",
+    cerrada el 2026-10-03 en [`resueltos.md`](resueltos.md) (el patrón que sirve acá: aviso de
+    qué falta hacer, y el 422 de otros datos que cierra el modal y recarga). (2) Los ítems a devolver se eligen de nuevo: los del pedido original no quedaron
+    guardados (el `request` del `REFUND` es el del proveedor, no el DTO). ⚠️ *Corregido al cerrar
+    (2026-10-04): ya no es cierto. Desde ADR-029 tx0 guarda lo pedido en la `metadata` del
+    `REFUND`, así que las líneas se **precargan** de ahí, editables (lo decidió la Sesión de
+    esfuerzo máximo).* (3) Permiso: el mismo
+    `Pasarelas:Reembolsar` u otro. (4) Reusar `CobrosService.aplicarPostReembolso` —que ya arma
+    el evento con `ligarCorreccion`— y no un camino paralelo.
+  - **La pregunta del stock ya existe y se reusa (2026-10-04):** cada línea elegida lleva
+    `stock: 'recupera' | 'pierde'`, obligatorio donde salió inventario y prohibido donde no, y
+    `ReembolsoCallbackHandler.validarDevoluciones` la valida con la regla de la nota manual. Qué
+    preguntar por línea lo dice `devolucionStock` del detalle de la venta, y la pantalla es
+    `DevolucionInventarioLista`. Contrato:
+    [`reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md#se-recupera-o-se-pierde-2026-10-04).
+
+### Cómo se cerró
+
+- **Lo que se diseñó en su sesión** lo decidió la Sesión de esfuerzo máximo (2026-10-04), derivado
+  de la decisión del owner del 2026-10-02 (el botón), de la del 2026-10-03 (el contrato visible del
+  gemelo) y de ADR-029 (la atribución): (1) una nota por intento, con `repetida` / 422 / **409**
+  para la otra clave con el `REFUND` ya ligado; (2) las líneas precargadas y editables, revalidadas
+  bajo el lock de la venta; (3) `Pasarelas:Reembolsar`; (4) `aplicarPostReembolso` partido en
+  `corregirReembolso` (lanza, lo usa el botón) y el `try/catch` del hook, sin cambios para éste.
+  Los movimientos de stock son de quien hizo la declaración. ADR-029 se corrigió en el mismo commit:
+  decía que "la nota dice quién devolvió la plata", y la fila de la nota no lleva usuario.
+- **La ruta de la llave de API no expone lo nuevo.** `obtenerOrden` atiende también
+  `GET /pasarela/api/ordenes/:id`, y el revisor de seguridad vio que `correccionVentaId` y las
+  `devoluciones` del REFUND le llegaban de arrastre. Decidido por la Sesión de esfuerzo máximo
+  (2026-10-06), técnico, a partir de ese hallazgo: solo la vista del admin los pide
+  (`{ vistaAdmin: true }`). Lo fijan un unitario y un e2e por la llave de API; el mutante que los
+  prende para todos muere en los dos.
+- **El 400 del tope agotado nombra la causa** (*"La venta ya está corregida entera por sus notas de
+  crédito"*) en todo camino con lo disponible en cero. La salida para ese `REFUND` es pregunta del
+  owner, anotada en [`pendientes.md`](pendientes.md) § 4 solo para si aparece en uso real.
+- **Lo que lo fija:** `pasarela-generar-nota.e2e-spec.ts` (16 casos contra Postgres, el proveedor
+  doblado contando llamadas), `cobros.service.spec.ts`, `reembolso-callback.handler.spec.ts`, los
+  specs del modal y del drawer, y Playwright con la venta real y la orden inyectada.
+- **Mutantes medidos, todos revertidos.** Backend (e2e): sin `alTomarLaVenta` (mueren 3), sin el
+  chequeo de "ya ligado" (2), sin validar las líneas (1), sin pasar la clave (2), atribución siempre
+  a quien hizo clic (1), el mensaje viejo del tope (1), y el botón tragándose el error como el hook
+  (6). **Superviviente declarado, con el motivo medido:** el caso "lo que otra nota ya devolvió no
+  se acredita dos veces" no muere sin `alTomarLaVenta` ni sin la validación, porque la nota con su
+  política `'ignorar'` rechaza igual la cantidad de más; la validación propia es la que exige la
+  respuesta de stock. Frente: sin recargar tras un reembolso con `warning`, el `REFUND` pintado sin
+  su nota, sin precarga, sin el 409, sin el estado en `esRefundSinNota`, sin terminar el intento
+  tras 422/409, y generar sin las líneas de la venta: los siete mueren.
+
+---
+
 ## La nota de crédito pregunta si lo devuelto se recupera o se pierde (cerrada 2026-10-04)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Frente fiscal propio (`CLAUDE.md`, ADR-010). La regla

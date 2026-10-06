@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import Decimal from 'decimal.js'
+import type { LineaDeclarada } from '~/composables/useDevolucionInventario'
 import {
   colorEstadoTransaccion,
+  esRefundSinNota,
   esSinConfirmar,
   etiquetaEstadoTransaccion,
 } from '~/composables/useReembolsoPasarela'
@@ -15,6 +17,10 @@ interface TransaccionOrden {
   codigoAutorizacion: string | null
   codigoRespuesta: string | null
   fechaTransaccion: string
+  /** La corrección que dejó el REFUND; `null` si su nota falló. */
+  correccionVentaId: string | null
+  /** Lo que pidió el reembolso (lo precarga "Generar nota"), o `null`. */
+  devoluciones: LineaDeclarada[] | null
 }
 
 interface OrdenDetalle {
@@ -48,6 +54,8 @@ const apiUrl = config.public.apiUrl
 const orden = ref<OrdenDetalle | null>(null)
 const loading = ref(false)
 const reembolsoOpen = ref(false)
+const generarNotaOpen = ref(false)
+const generarNotaDe = ref<TransaccionOrden | null>(null)
 
 const disponibleReembolso = computed(() => {
   if (!orden.value) return '0'
@@ -63,6 +71,23 @@ const reembolsoSinConfirmar = computed(() =>
 )
 
 function onSinConfirmarResuelto() {
+  recargarOrden()
+}
+
+// "Generar nota" (owner, 2026-10-02): el REFUND aprobado cuya nota falló se
+// marca en el historial y, con el permiso de reembolsar, se repara desde acá.
+const puedeGenerarNota = computed(() => permissionsStore.can('Pasarelas', 'Reembolsar'))
+
+function sinNota(t: TransaccionOrden): boolean {
+  return esRefundSinNota(t, orden.value?.ventaId ?? null)
+}
+
+function abrirGenerarNota(t: TransaccionOrden) {
+  generarNotaDe.value = t
+  generarNotaOpen.value = true
+}
+
+function recargarOrden() {
   if (!orden.value) return
   const id = orden.value.ordenId
   cargar(id).then(() => {
@@ -120,6 +145,7 @@ const transaccionColumns: TableColumn<TransaccionOrden>[] = [
   { accessorKey: 'estado', header: 'Estado' },
   { accessorKey: 'monto', header: 'Monto', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'codigoAutorizacion', header: 'Cód. autorización' },
+  { id: 'nota', header: '' },
 ]
 
 async function cargar(id: string) {
@@ -144,6 +170,7 @@ watch(
     else if (!isOpen) {
       orden.value = null
       reembolsoOpen.value = false
+      generarNotaOpen.value = false
     }
   },
 )
@@ -151,12 +178,22 @@ watch(
 function onReembolsoSuccess(payload: {
   ordenId: string
   estado: string
-  reembolso?: TransaccionOrden
+  reembolsoAprobado?: boolean
+  notaCreditoId?: string
+  reembolso?: Omit<TransaccionOrden, 'correccionVentaId' | 'devoluciones'>
 }) {
   reembolsoOpen.value = false
   if (!orden.value) return
+  // Salió pero sin nota (su corrección falló): la marca y lo que "Generar
+  // nota" precarga los trae la orden, no la respuesta del reembolso.
+  if (payload.reembolsoAprobado && !payload.notaCreditoId && orden.value.ventaId) {
+    recargarOrden()
+    return
+  }
   orden.value.estado = payload.estado
   const reembolso = payload.reembolso
+    ? { ...payload.reembolso, correccionVentaId: payload.notaCreditoId ?? null, devoluciones: null }
+    : null
   if (reembolso) {
     // Un reintento reproducido o aclarado trae un REFUND que ya está en la
     // lista (quizás "sin confirmar"): se reemplaza, no se suma otra fila.
@@ -327,7 +364,28 @@ function onReembolsoSuccess(payload: {
               {{ tipoLabel(row.original.tipo) }}
             </template>
             <template #estado-cell="{ row }">
-              <UBadge :color="colorEstadoTransaccion(row.original.estado)" :label="etiquetaEstadoTransaccion(row.original.estado)" variant="subtle" size="sm" />
+              <div class="flex flex-wrap items-center gap-1">
+                <UBadge :color="colorEstadoTransaccion(row.original.estado)" :label="etiquetaEstadoTransaccion(row.original.estado)" variant="subtle" size="sm" />
+                <UBadge
+                  v-if="sinNota(row.original)"
+                  color="warning"
+                  variant="outline"
+                  size="sm"
+                  icon="i-lucide-file-warning"
+                  label="Sin nota de crédito"
+                />
+              </div>
+            </template>
+            <template #nota-cell="{ row }">
+              <UButton
+                v-if="sinNota(row.original) && puedeGenerarNota"
+                label="Generar nota"
+                icon="i-lucide-file-plus"
+                size="xs"
+                color="warning"
+                variant="subtle"
+                @click="abrirGenerarNota(row.original)"
+              />
             </template>
             <template #monto-cell="{ row }">
               <span class="font-mono">{{ row.original.monto ? formatMonto(row.original.monto) : '—' }}</span>
@@ -378,5 +436,17 @@ function onReembolsoSuccess(payload: {
     :venta-id="orden.ventaId"
     @success="onReembolsoSuccess"
     @otros-datos="() => orden && cargar(orden.ordenId)"
+  />
+
+  <OrdenesGenerarNotaModal
+    v-if="orden?.ventaId && generarNotaDe"
+    v-model:open="generarNotaOpen"
+    :orden-id="orden.ordenId"
+    :transaccion-id="generarNotaDe.transaccionId"
+    :monto="generarNotaDe.monto ?? '0'"
+    :venta-id="orden.ventaId"
+    :devoluciones="generarNotaDe.devoluciones"
+    @success="recargarOrden"
+    @recargar="recargarOrden"
   />
 </template>

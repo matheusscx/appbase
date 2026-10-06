@@ -24,6 +24,7 @@ import {
   DevolucionLineaDto,
 } from '../dto/create-reembolso.dto';
 import { ResolverReembolsoDto } from '../dto/resolver-reembolso.dto';
+import { GenerarNotaReembolsoDto } from '../dto/generar-nota-reembolso.dto';
 import { PasarelaTransaccion } from '../entities/pasarela-transaccion.entity';
 import {
   IdempotenciaService,
@@ -36,7 +37,11 @@ import { TenantPasarelaService } from './tenant-pasarela.service';
 import { TransaccionesService } from './transacciones.service';
 import { CredencialesService } from './credenciales.service';
 import { ProviderFactory } from '../providers/provider.factory';
-import { ReembolsoCallbackRegistry } from './reembolso-callback.registry';
+import {
+  ReembolsoCallbackRegistry,
+  type ReembolsoAprobadoEvento,
+  type ReembolsoCallbackHandler,
+} from './reembolso-callback.registry';
 import {
   ProviderComunicacionError,
   ResultadoCobro,
@@ -117,6 +122,33 @@ export function veredictoPorSaldo(
   if (aprobado.isZero() && (estado === 'AUTHORIZED' || estado === 'CAPTURED'))
     return 'no_salio';
   return 'no_se_puede';
+}
+
+const MENSAJE_NOTA_OTROS_DATOS =
+  'Esta nota ya se había generado con otros datos. Revisá la orden antes de generar otra.';
+
+const MENSAJE_YA_TIENE_NOTA = 'Este reembolso ya tiene su nota de crédito.';
+
+/**
+ * Las líneas de un pedido como las compara una huella: la cantidad normalizada
+ * ("2" y "2.00" son lo mismo) y ordenadas (los mismos ítems en otro orden son
+ * el mismo pedido). La respuesta de stock cuenta: recuperar o perder lo mismo
+ * son dos pedidos distintos.
+ */
+function devolucionesNormalizadas(
+  devoluciones: readonly DevolucionLineaDto[] | undefined,
+): { itemId: string; cantidad: string; stock: string | null }[] {
+  return [...(devoluciones ?? [])]
+    .map((d) => ({
+      itemId: d.itemId,
+      cantidad: new Decimal(d.cantidad).toString(),
+      stock: d.stock ?? null,
+    }))
+    .sort((a, b) =>
+      a.itemId === b.itemId
+        ? a.cantidad.localeCompare(b.cantidad)
+        : a.itemId.localeCompare(b.itemId),
+    );
 }
 
 /** Lo que tx0 le deja a tx1. */
@@ -382,17 +414,7 @@ export class CobrosService {
             huella: huellaDe('pasarela.reembolso', {
               ordenId,
               monto: new Decimal(dto.monto).toString(),
-              devoluciones: [...(dto.devoluciones ?? [])]
-                .map((d) => ({
-                  itemId: d.itemId,
-                  cantidad: new Decimal(d.cantidad).toString(),
-                  stock: d.stock ?? null,
-                }))
-                .sort((a, b) =>
-                  a.itemId === b.itemId
-                    ? a.cantidad.localeCompare(b.cantidad)
-                    : a.itemId.localeCompare(b.itemId),
-                ),
+              devoluciones: devolucionesNormalizadas(dto.devoluciones),
             }),
             mensajeOtrosDatos: MENSAJE_REEMBOLSO_OTROS_DATOS,
           },
@@ -794,7 +816,7 @@ export class CobrosService {
       usuarioId,
     );
     return {
-      ...(await this.obtenerOrden(tenantId, ordenId)),
+      ...(await this.obtenerOrden(tenantId, ordenId, { vistaAdmin: true })),
       aclarado,
       ...(warning && { warning }),
     };
@@ -1175,29 +1197,11 @@ export class CobrosService {
 
     let correccionVentaId: string;
     try {
-      ({ correccionVentaId } = await handler.onReembolsoAprobado({
-        tenantId: ctx.orden.tenantId,
-        ordenId: ctx.orden.ordenId,
-        codigoOrden: ctx.orden.codigoOrden,
-        ventaId: ctx.orden.ventaId,
-        monto: ctx.monto,
-        devoluciones: ctx.devoluciones,
-        usuarioId: ctx.usuarioId,
-        ligarCorreccion: async (manager, id) => {
-          const ligado = await this.transacciones.vincularCorreccion(
-            ctx.orden.tenantId,
-            ctx.transaccionId,
-            id,
-            manager,
-          );
-          // Sin fila que ligar la corrección no puede quedar: sería el estado
-          // doble que esto cierra. Lanzar la revierte.
-          if (!ligado)
-            throw new Error(
-              `La corrección ${id} no tocó ninguna fila al ligarse al REFUND ${ctx.transaccionId}`,
-            );
-        },
-      }));
+      ({ correccionVentaId } = await this.corregirReembolso(
+        handler,
+        ctx,
+        ctx.orden.ventaId,
+      ));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.logger.error(
@@ -1216,6 +1220,173 @@ export class CobrosService {
     }
 
     return { ...publico, notaCreditoId: correccionVentaId };
+  }
+
+  /**
+   * La corrección de un REFUND aprobado: arma el evento —con cómo ligar el
+   * REFUND dentro de la transacción de la nota— y se lo pasa a ventas. LANZA:
+   * el hook post-commit lo envuelve en `aplicarPostReembolso` (un fallo ahí es
+   * un `warning`, la plata ya volvió), y "Generar nota" deja subir el error
+   * (ahí no hay nada consumado y el admin puede reintentar). Un solo camino.
+   *
+   * `extras` es solo de "Generar nota": la clave del intento y el chequeo bajo
+   * el lock de la venta.
+   */
+  private corregirReembolso(
+    handler: ReembolsoCallbackHandler,
+    ctx: CtxHookReembolso,
+    ventaId: string,
+    extras: Pick<
+      ReembolsoAprobadoEvento,
+      'idempotencia' | 'alTomarLaVenta'
+    > = {},
+  ): Promise<{ correccionVentaId: string; repetida?: true }> {
+    return handler.onReembolsoAprobado({
+      tenantId: ctx.orden.tenantId,
+      ordenId: ctx.orden.ordenId,
+      codigoOrden: ctx.orden.codigoOrden,
+      ventaId,
+      monto: ctx.monto,
+      devoluciones: ctx.devoluciones,
+      usuarioId: ctx.usuarioId,
+      ligarCorreccion: async (manager, id) => {
+        const ligado = await this.transacciones.vincularCorreccion(
+          ctx.orden.tenantId,
+          ctx.transaccionId,
+          id,
+          manager,
+        );
+        // Sin fila que ligar la corrección no puede quedar: sería el estado
+        // doble que esto cierra. Lanzar la revierte.
+        if (!ligado)
+          throw new Error(
+            `La corrección ${id} no tocó ninguna fila al ligarse al REFUND ${ctx.transaccionId}`,
+          );
+      },
+      ...extras,
+    });
+  }
+
+  /**
+   * "Generar nota" (owner, 2026-10-02): la corrección de un REFUND aprobado
+   * cuya nota falló —la plata ya volvió por el proveedor y la boleta quedó sin
+   * corregir—. Emite por el monto del REFUND con las líneas que confirma el
+   * admin (la pantalla las precarga de lo que pidió el reembolso). **Nunca**
+   * llama al proveedor. Mismo camino que el hook (`corregirReembolso`).
+   *
+   * Una nota por intento (ADR-026: el efecto está entero en la base): la clave
+   * viaja en el evento y la nota la reclama como primera sentencia de su
+   * transacción. Antes del reclamo solo se mira lo que nunca cambia para un
+   * REFUND (que exista, que esté aprobado, que la orden tenga venta); lo que
+   * cambia —que siga sin nota, y las líneas— va DESPUÉS, en `alTomarLaVenta`,
+   * bajo el `FOR UPDATE` de la venta: chequearlo antes haría rebotar la
+   * reproducción.
+   *
+   * ⚠️ Orden de locks: venta → fila del REFUND (la escribe `ligarCorreccion`),
+   * el mismo del hook. La orden no se bloquea. Leer el vínculo bajo el lock de
+   * la venta es confiable porque todo escritor del vínculo lo tiene.
+   *
+   * Los movimientos de stock son de quien hizo la declaración: quien pidió el
+   * reembolso si lo confirmado es lo que pidió (ADR-029), si no quien hizo
+   * clic. La fila de la nota no lleva usuario; quien hizo clic queda en el
+   * reclamo de la clave.
+   */
+  async generarNotaDeReembolso(
+    tenantId: string,
+    ordenId: string,
+    transaccionId: string,
+    dto: GenerarNotaReembolsoDto,
+    usuarioId: string,
+    clave: string,
+  ): Promise<Record<string, unknown>> {
+    const orden = await this.ordenRepo.findOne({
+      where: { ordenId, tenantId },
+    });
+    if (!orden) throw new NotFoundException('Orden no encontrada');
+    const refund = (
+      await this.transacciones.listarPorOrden(tenantId, ordenId)
+    ).find((t) => t.transaccionId === transaccionId && t.tipo === 'REFUND');
+    if (!refund) throw new NotFoundException('Reembolso no encontrado');
+    // Un sin confirmar se aclara en su tarjeta (Volver a consultar / Salió /
+    // No salió) y deja su nota ahí: dos caminos para el mismo REFUND no.
+    if (refund.estado !== 'aprobada')
+      throw new BadRequestException(
+        'Solo un reembolso aprobado lleva nota de crédito.',
+      );
+    const ventaId = orden.ventaId;
+    if (!ventaId)
+      throw new BadRequestException(
+        'La orden no tiene una venta: no hay documento que corregir.',
+      );
+    const handler = this.reembolsoRegistry.get();
+    if (!handler)
+      throw new InternalServerErrorException(
+        'No hay un módulo de ventas registrado para generar la nota de crédito',
+      );
+
+    const devoluciones = dto.devoluciones ?? [];
+    const declaradas: unknown = refund.metadata?.devoluciones;
+    // Con la normalización de la huella: el mismo pedido en otro orden o con
+    // "2.00" por "2" sigue siendo lo que declaró quien pidió el reembolso.
+    const esLaDeclarada =
+      Array.isArray(declaradas) &&
+      JSON.stringify(
+        devolucionesNormalizadas(declaradas as DevolucionLineaDto[]),
+      ) === JSON.stringify(devolucionesNormalizadas(devoluciones));
+    const ctx: CtxHookReembolso = {
+      ...this.ctxHookDe(orden, refund),
+      devoluciones,
+      usuarioId: esLaDeclarada ? refund.usuarioId : usuarioId,
+    };
+
+    const { correccionVentaId, repetida } = await this.corregirReembolso(
+      handler,
+      ctx,
+      ventaId,
+      {
+        idempotencia: {
+          tenantId,
+          usuarioId,
+          clave,
+          operacion: 'pasarela.generarNota',
+          huella: huellaDe('pasarela.generarNota', {
+            ordenId,
+            transaccionId,
+            devoluciones: devolucionesNormalizadas(devoluciones),
+          }),
+          mensajeOtrosDatos: MENSAJE_NOTA_OTROS_DATOS,
+        },
+        alTomarLaVenta: async (manager) => {
+          const actual = (
+            await this.transacciones.listarPorOrden(tenantId, ordenId, manager)
+          ).find((t) => t.transaccionId === transaccionId);
+          // Otra clave —otra pestaña, otro admin— ya la generó. No se reproduce
+          // como éxito: le diría a este admin que generó una nota que no generó.
+          if (actual?.correccionVentaId)
+            throw new ConflictException({
+              statusCode: 409,
+              message: MENSAJE_YA_TIENE_NOTA,
+              notaCreditoId: actual.correccionVentaId,
+            });
+          // Las líneas, con la regla de la nota manual (tx0 del reembolso):
+          // bajo el lock, así lo devuelto por otra nota desde el REFUND cuenta.
+          if (devoluciones.length)
+            await handler.validarDevoluciones(manager, {
+              tenantId,
+              ventaId,
+              devoluciones,
+            });
+        },
+      },
+    );
+    return {
+      ...this.publicoDeReembolso(
+        orden,
+        await this.refundDeLaOrden(tenantId, ordenId, transaccionId),
+      ),
+      notaCreditoId: correccionVentaId,
+      ...(repetida && { repetida: true }),
+    };
   }
 
   /**
@@ -1272,7 +1443,17 @@ export class CobrosService {
     return this.toPublico(orden);
   }
 
-  async obtenerOrden(tenantId: string, ordenId: string) {
+  /**
+   * `vistaAdmin`: lo que solo usa la pantalla del admin (el drawer de la
+   * orden), que la ruta de la llave de API no expone. La respuesta de la API
+   * externa es un contrato: un campo entra ahí por decisión propia, no de
+   * arrastre de un cambio de pantalla (Sesión de esfuerzo máximo, 2026-10-06).
+   */
+  async obtenerOrden(
+    tenantId: string,
+    ordenId: string,
+    { vistaAdmin = false }: { vistaAdmin?: boolean } = {},
+  ) {
     const orden = await this.ordenRepo.findOne({
       where: { ordenId, tenantId },
     });
@@ -1305,6 +1486,15 @@ export class CobrosService {
         codigoAutorizacion: t.codigoAutorizacion,
         codigoRespuesta: t.codigoRespuesta,
         fechaTransaccion: t.fechaTransaccion,
+        // La marca "sin nota de crédito" y lo que "Generar nota" precarga: lo
+        // que pidió el reembolso (tx0, ADR-029), o `null` si no lo guardó.
+        ...(vistaAdmin && {
+          correccionVentaId: t.correccionVentaId,
+          devoluciones:
+            t.tipo === 'REFUND' && Array.isArray(t.metadata?.devoluciones)
+              ? t.metadata.devoluciones
+              : null,
+        }),
       })),
     });
   }

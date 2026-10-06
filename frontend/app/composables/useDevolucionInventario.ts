@@ -123,6 +123,33 @@ export function setStockFila(
   })
 }
 
+/** Una línea tal como la declaró un reembolso (lo que guardó su `metadata`). */
+export interface LineaDeclarada {
+  itemId: string
+  cantidad: string
+  stock?: DestinoStock | null
+}
+
+/**
+ * Las filas con lo que ya declaró el reembolso ("Generar nota" de un REFUND
+ * sin nota, ADR-029): nadie vuelve a preguntar lo que ya se contestó, pero se
+ * puede editar —desde el reembolso pudo cambiar algo—. Pasa por las mismas
+ * reglas que un clic: una respuesta que la fila ya no admite queda sin
+ * contestar, y un ítem que ya no está en la venta no aparece.
+ */
+export function precargarFilas(
+  filas: FilaDevolucion[],
+  devoluciones: LineaDeclarada[] | null,
+): FilaDevolucion[] {
+  let r = filas
+  for (const d of devoluciones ?? []) {
+    if (!r.some(f => f.itemId === d.itemId)) continue
+    r = setCantidadFila(r, d.itemId, d.cantidad)
+    if (d.stock) r = setStockFila(r, d.itemId, d.stock)
+  }
+  return r
+}
+
 /**
  * El criterio de redondeo CONGELADO de la venta (`venta.configCalculo`), el
  * subconjunto que hace falta para cuantizar como el motor. Nace acá y no en
@@ -264,6 +291,10 @@ export function useDevolucionInventario() {
     filas.value = []
   }
 
+  function precargar(devoluciones: LineaDeclarada[] | null) {
+    filas.value = precargarFilas(filas.value, devoluciones)
+  }
+
   function setCantidad(itemId: string, valor: string) {
     filas.value = setCantidadFila(filas.value, itemId, valor)
   }
@@ -280,6 +311,7 @@ export function useDevolucionInventario() {
     filas,
     cargarDesdeDetalles,
     limpiar,
+    precargar,
     setCantidad,
     setStock,
     filasValidas,

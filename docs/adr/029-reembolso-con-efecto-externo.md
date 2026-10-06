@@ -84,8 +84,14 @@ Es la segunda excepción, al lado de `vincularCorreccion`. Mientras no es final,
 `request`/`response` del último intento fallido.
 
 **La fila sabe quién pidió el reembolso** (`usuario_id` o `api_key_id`, exactamente uno si tiene
-reclamo), y la corrección se le atribuye a esa persona aunque lo aclare o lo marque otra: la nota
-dice quién devolvió la plata, y el que aclaró solo descubrió que había salido.
+reclamo), y la corrección se le atribuye a esa persona aunque lo aclare o lo marque otra: quien
+devolvió la plata es quien la pidió, y el que aclaró solo descubrió que había salido. **Dónde
+queda escrito** (corrección del 2026-10-04 a esta decisión de la Sesión de esfuerzo máximo, que se
+leía como si la fila de la nota guardara un usuario): la fila de la corrección en `ventas` **no
+lleva usuario**; lo atribuido son sus **movimientos de stock** (`movimientos_inventario.usuario_id`,
+nulo por la llave de API). La vía `pasarela` nunca mueve caja; en la nota manual, por la vía
+`pago` en efectivo, el usuario queda también en la salida de caja. Desde "Generar nota" (abajo,
+*Consequences*), los movimientos son de quien hizo la **declaración** de las líneas.
 
 **Timeout de 30 s** (`AbortSignal.timeout`) en `reembolsar` y `consultarEstado` de los dos
 proveedores. Vencerlo es comunicación, no rechazo: "sin confirmar". Alcanza también a
@@ -139,7 +145,12 @@ proveedores. Vencerlo es comunicación, no rechazo: "sin confirmar". Alcanza tam
   `REFUND` tiene hoy; sin corrección ligada lo dice (`correccionPendiente`) y no la crea.
 - **Una `REFUND` aclarada "salió" (o marcada a mano) deja su corrección** como cualquier
   aprobada, con las devoluciones que pidió el intento (guardadas en su `metadata` al escribirla)
-  y atribuida a quien lo pidió (por llave de API, sin usuario).
+  y sus movimientos de stock atribuidos a quien lo pidió (por llave de API, sin usuario).
+- **Si la corrección de una `REFUND` aprobada falla, la repara "Generar nota"** (2026-10-04,
+  [`reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md#generar-nota-un-refund-aprobado-que-quedó-sin-nota-2026-10-04)):
+  emite por el monto del `REFUND` sin llamar al proveedor, y como su efecto está entero en la base
+  usa `ejecutar` (ADR-026), no `ejecutarConEfectoExterno`. Los movimientos de stock son de quien
+  pidió el reembolso si se confirma lo que declaró, y de quien hizo clic si lo cambió.
 - **Una `REFUND` aclarada por saldo no tiene código de autorización**: Transbank no lo da en la
   consulta.
 - **Webpay Plus deja consultar 7 días** (según su documentación; la referencia dice "en cualquier

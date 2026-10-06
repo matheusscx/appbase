@@ -114,8 +114,9 @@ tope por pago de la nota del POS, y el detalle de la venta dice *"$17.000 en un 
 Transbank sin confirmar"* (decisión del owner, 2026-10-04; ver
 [reembolsos-nota-credito.md](./reembolsos-nota-credito.md)). Las fallas nuevas quedan en `iniciada`;
 `error` es de las filas de antes. Solo pasa una vez a `aprobada` o `rechazada` (`resolucion`:
-`proveedor`, `saldo`, `manual`, `no_enviado`), con quién y cuándo, y la corrección se atribuye a
-quien **pidió** el reembolso (`usuario_id`/`api_key_id` de la fila), no a quien lo aclaró. El historial del drawer de
+`proveedor`, `saldo`, `manual`, `no_enviado`), con quién y cuándo, y los movimientos de stock de
+la corrección se atribuyen a quien **pidió** el reembolso (`usuario_id`/`api_key_id` de la fila), no
+a quien lo aclaró (la fila de la nota no lleva usuario). El historial del drawer de
 la orden dice "Sin confirmar" también para una `AUTHORIZATION` en `error` (un cobro cuyo
 proveedor no contestó), que es lo mismo: no se sabe si pasó.
 

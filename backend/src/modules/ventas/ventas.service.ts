@@ -319,10 +319,18 @@ export interface CrearNotaCreditoParams {
     correccionVentaId: string,
   ) => Promise<void>;
   /**
-   * La `Idempotency-Key` de la nota manual, ya con su huella: el reintento
-   * reproduce la nota que entró en vez de emitir otra (ADR-026). El reembolso
-   * de la pasarela no la pasa: no hay operador que reintente, y su nota ya es
-   * una sola por REFUND (`correccion_venta_id`).
+   * Lo primero que corre después del `FOR UPDATE` de la venta original, con su
+   * `manager`: los chequeos de estado de un llamador que tienen que ir DESPUÉS
+   * del reclamo de la clave y bajo el lock. Si lanza, la nota no se emite. Lo
+   * usa "Generar nota" de un REFUND sin corrección (`ReembolsoAprobadoEvento`).
+   */
+  alTomarLaVenta?: (manager: EntityManager) => Promise<void>;
+  /**
+   * La `Idempotency-Key` de la nota manual —o de "Generar nota" de un REFUND
+   * que quedó sin ella—, ya con su huella: el reintento reproduce la nota que
+   * entró en vez de emitir otra (ADR-026). El hook post-commit del reembolso
+   * no la pasa: no hay operador que reintente, y su nota ya es una sola por
+   * REFUND (`correccion_venta_id`).
    */
   idempotencia?: SolicitudIdempotenteInput;
 }
@@ -2340,6 +2348,7 @@ export class VentasService {
         params.tenantId,
         params.ventaOriginalId,
       );
+      await params.alTomarLaVenta?.(manager);
 
       // Una corrección no se corrige (E7): se reconoce por `venta_referencia_id`
       // y no por el tipo de documento, porque una devolución interna no lo lleva.
@@ -2481,6 +2490,13 @@ export class VentasService {
       );
       const previas = new Decimal(previasRows[0]?.total ?? '0');
       const disponible = new Decimal(original.total_final).minus(previas);
+      // Sin nada que acreditar, la causa —y no un "(0)"—: es lo que ve el admin
+      // que aprieta "Generar nota" sobre un REFUND cuya venta ya corrigió otra
+      // nota, y tiene que saber que reintentar no lo arregla.
+      if (disponible.lte(0))
+        throw new BadRequestException(
+          'La venta ya está corregida entera por sus notas de crédito: no queda nada que acreditar.',
+        );
       if (new Decimal(params.monto).gt(disponible))
         throw new BadRequestException(
           `El monto excede lo disponible para nota de crédito (${disponible.toString()})`,

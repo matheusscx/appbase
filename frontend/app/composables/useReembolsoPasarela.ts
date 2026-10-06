@@ -47,3 +47,33 @@ export function ordenDeOtrosDatos(error: unknown): string | null {
   const id = e?.data?.ordenId
   return e?.status === 422 && typeof id === 'string' && id ? id : null
 }
+
+/** El ámbito de `useIntentoCobro` de "Generar nota": uno por REFUND y por pestaña. */
+export function ambitoGenerarNota(transaccionId: string): string {
+  return `gn:${transaccionId}`
+}
+
+/**
+ * Un REFUND aprobado de una orden con venta que quedó sin corrección: la plata
+ * ya volvió y la boleta no se corrigió. Es el que se marca y lleva "Generar
+ * nota". Uno sin confirmar no: se aclara en su tarjeta y deja su nota ahí.
+ */
+export function esRefundSinNota(
+  t: { tipo: string, estado: string, correccionVentaId: string | null },
+  ventaId: string | null,
+): boolean {
+  return !!ventaId && t.tipo === 'REFUND' && t.estado === 'aprobada' && !t.correccionVentaId
+}
+
+/** El reintento llegó igual y el backend reprodujo la nota que ya había entrado. */
+export const AVISO_NOTA_REPETIDA = 'Esta nota ya se había generado: no se emitió dos veces.'
+
+/**
+ * La nota del 409 "este reembolso ya tiene su nota de crédito" (otra pestaña u
+ * otro admin la generó), o `null` si el error es otro.
+ */
+export function notaYaLigada(error: unknown): string | null {
+  const e = error as { status?: number, data?: { notaCreditoId?: unknown } }
+  const id = e?.data?.notaCreditoId
+  return e?.status === 409 && typeof id === 'string' && id ? id : null
+}

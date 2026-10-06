@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-10-04 (la nota pregunta si lo devuelto se recupera o se pierde)
+**Last Updated**: 2026-10-04 ("Generar nota" para el REFUND que quedó sin nota)
 
 ---
 
@@ -89,9 +89,9 @@ Response (200): orden pública + extras
   **sin** `correccion_venta_id`. Eso —un REFUND aprobado de una orden con venta y ese
   campo nulo— es la señal de que falta la corrección. Que no se pueda ligar al REFUND
   cuenta como que la corrección falló: se revierte con el vínculo (ver
-  "El vínculo REFUND → corrección" en [Backend](#backend)). Todavía no hay cómo generar
-  la nota que faltó: el botón "Generar nota" está decidido y pendiente
-  ([`pendientes.md`](../agent/pendientes.md) § 3).
+  "El vínculo REFUND → corrección" en [Backend](#backend)). La nota que faltó la genera el
+  botón "Generar nota" del drawer de la orden (ver
+  [abajo](#generar-nota-un-refund-aprobado-que-quedó-sin-nota-2026-10-04)).
 - Una orden sin venta vinculada (`orden.venta_id` null) no tiene lado de ventas que
   corregir: se reembolsa sin corrección y **sin aviso** (es legítimo). Solo si se pidieron
   `devoluciones` responde `warning` (no hay venta donde aplicarlas).
@@ -360,8 +360,8 @@ salió por las dos. Las vueltas llevan en `venta_detalle_id` la **primera línea
 y es la que miran las dos lecturas (`salidasPorItemVendido` y el contador).
 
 **La respuesta queda guardada** en la `metadata` del `REFUND`, escrita en tx0: la leen quien crea
-la nota después —el hook, el aclarado por saldo, el admin que marca *Salió* y, mañana, "Generar
-nota"—, y nadie vuelve a preguntar ni a deducir.
+la nota después —el hook, el aclarado por saldo, el admin que marca *Salió* y "Generar nota", que
+la precarga—, y nadie vuelve a preguntar ni a deducir.
 
 **Cómo se decidió:** la pregunta, sus dos destinos, la causa fija y el costo de la vuelta son del
 owner (2026-08-23, 2026-09-29 y 2026-08-15); el resto —la causa fija y solo de la nota, el par al
@@ -396,6 +396,81 @@ la Sesión de esfuerzo máximo (2026-10-04); técnico.
 por línea con stock, *Vuelve al stock* / *Se perdió*, **ninguna elegida de antemano** (los dos
 destinos son comunes y un default se confirmaría sin mirar); *Vuelve al stock* deshabilitada en
 serie/lote, y Confirmar deshabilitado mientras falte una respuesta.
+
+## Generar nota: un REFUND aprobado que quedó sin nota (2026-10-04)
+
+Si la corrección de un `REFUND` aprobado falla (el tope global, el del documento, un país sin tipo
+NC, un error de base), la plata ya volvió por Transbank y la boleta queda sin corregir. **Decidido
+(owner, 2026-10-02):** el historial de la orden lo marca *"Sin nota de crédito"* y un botón
+**"Generar nota"** emite la corrección por el monto de ese `REFUND`. Descartados: dejarlo a soporte
+y el reintento automático (la app no repite sola lo que falló). Spec:
+[`2026-10-04-generar-nota-de-refund-sin-nota-design.md`](../superpowers/specs/2026-10-04-generar-nota-de-refund-sin-nota-design.md).
+
+```
+POST /api/pasarela/admin/ordenes/:id/reembolsos/:transaccionId/nota
+Authorization: Bearer <JWT>          (Pasarelas:Reembolsar)
+Idempotency-Key: <uuid por intento>  (obligatoria)
+
+Request:  { "devoluciones": [{ "itemId": "uuid", "cantidad": "1", "stock": "pierde" }] }   // opcional
+Response 201: { ...orden pública, "reembolso": {...}, "notaCreditoId": "uuid", "repetida"?: true }
+```
+
+- **El monto no viaja y el proveedor no se llama.** Es el del `REFUND`, cuantizado como en el hook.
+  Solo la ruta del admin (la API externa no tiene drawer).
+- **Un solo camino con el hook:** `CobrosService.corregirReembolso` arma el evento —con
+  `ligarCorreccion`— y **lanza**; el hook lo envuelve en `aplicarPostReembolso`, que degrada a
+  `warning` (allá la plata ya volvió y el evento no se puede perder), y el botón deja subir el
+  error (acá no hay nada consumado: el admin corrige y reintenta). Lo demás es lo del hook: vía
+  `pasarela` (sin caja, anota el pago único), el comentario *"NC por reembolso orden X"*, el
+  escalado sin motivo obligatorio y la porción agotada fuera del documento.
+- **Las líneas** se precargan de lo que declaró el reembolso (`metadata.devoluciones`, que
+  `GET /pasarela/admin/ordenes/:id` publica por transacción junto con `correccionVentaId`) y se
+  pueden editar. **Solo la ruta del admin los publica** (`obtenerOrden(…, { vistaAdmin: true })`):
+  la de la llave de API (`GET /pasarela/api/ordenes/:id`) es un contrato externo, y un campo entra
+  ahí por decisión propia, no de arrastre de una pantalla (Sesión de esfuerzo máximo, 2026-10-06,
+  técnico, a partir del hallazgo del revisor de seguridad). Las líneas se pueden editar: desde el reembolso pudo entrar otra nota que devolvió esas unidades. El servidor
+  las revalida con la regla de la nota manual (`'rechazar'`) bajo el lock de la venta.
+- **Solo un `REFUND` aprobado** de una orden con venta: el sin confirmar se aclara en su tarjeta
+  (*Volver a consultar / Salió / No salió*) y deja su nota ahí; uno rechazado es 400, uno de otra
+  orden 404.
+
+**Una nota por intento** ([ADR-026](../adr/026-idempotencia-de-cobros.md): el efecto está entero
+en la base, así que es `ejecutar`, no el `ejecutarConEfectoExterno` del reembolso). La clave viaja
+en el evento (`idempotencia`, operación `pasarela.generarNota`) y la nota la reclama como primera
+sentencia de su transacción, dentro del loop de deadlock. La huella es la orden, el `REFUND` y las
+líneas normalizadas y ordenadas. Contrato visible, el del gemelo "la nota que se reintenta":
+
+| Segundo clic | Respuesta | Pantalla |
+|---|---|---|
+| Misma clave, mismo pedido (el corte) | 201 con la nota que entró y `repetida: true` | *"Esta nota ya se había generado: no se emitió dos veces."* |
+| Misma clave, otro pedido | 422 *"Esta nota ya se había generado con otros datos…"* con `ventaId` = la nota | el modal se cierra y la orden se recarga |
+| Otra clave con el `REFUND` ya ligado (otra pestaña, otro admin) | **409** *"Este reembolso ya tiene su nota de crédito."* con `notaCreditoId` | igual que el 422 |
+
+El 409 no se reproduce como éxito: le diría a otro admin que generó una nota que no generó.
+
+**Lo que se mira después del reclamo** va en `alTomarLaVenta` (`CrearNotaCreditoParams`), que la
+nota corre justo después del `FOR UPDATE` de la venta: que el `REFUND` siga sin corrección —leído
+con la transacción de la nota; todo escritor del vínculo tiene ese lock— y las líneas. Antes del
+reclamo haría rebotar la reproducción. Orden de locks: venta → fila del `REFUND`, el del hook; la
+orden no se bloquea.
+
+**A quién se atribuye.** La fila de la nota no lleva usuario: lo atribuido son sus movimientos de
+stock. Son de quien hizo la **declaración**: quien pidió el reembolso si lo confirmado es lo que
+declaró (con la normalización de la huella), y quien hizo clic si lo cambió o el `REFUND` no lo
+guardó. Quien hizo clic queda siempre en el reclamo (`solicitudes_idempotentes`).
+
+**Borde aceptado: la venta ya corregida entera.** Si otras notas ya acreditaron todo (dos pagos y
+una nota del POS por cada uno, por ejemplo), el botón da 400 *"La venta ya está corregida entera
+por sus notas de crédito: no queda nada que acreditar."* cada vez, y el `REFUND` sigue marcado. El
+mensaje nombra la causa para que nadie reintente a ciegas; sin cifras ni número de nota (una venta
+no tiene número). Vale para todo camino con lo disponible en cero, la nota manual incluida. Qué
+hacer con esa marca (ligarla a la nota que ya existe, o descartarla con un motivo) es pregunta
+del owner si aparece en uso real ([`pendientes.md`](../agent/pendientes.md)).
+
+**Cómo se decidió:** el botón y su alcance son del owner (2026-10-02); el contrato visible deriva
+de su decisión del 2026-10-03 (la nota que se reintenta); la atribución, de ADR-029. El resto —la
+precarga editable, el 409, el corte en `corregirReembolso`, el permiso `Pasarelas:Reembolsar` y la
+atribución por declaración— lo decidió la Sesión de esfuerzo máximo (2026-10-04).
 
 ## Cuál fila es la nota de crédito la dice el catálogo, no el código (2026-09-03)
 
@@ -684,6 +759,13 @@ Dónde vive: `VentasReembolsoHandler.cuantizarMontoReembolso`
   este modal fija `validarVentaElegible: true`, y con eso el backend rechaza
   cualquier nota manual sobre esa venta antes de llegar a valuar algo. Cierre
   medido en `docs/agent/resueltos.md`.
+- `ordenes/OrdenDetalleDrawer.vue` + `ordenes/GenerarNotaModal.vue` (2026-10-04): el `REFUND`
+  aprobado de una orden con venta y sin `correccionVentaId` lleva el badge *"Sin nota de crédito"*
+  y, con `Pasarelas:Reembolsar`, el botón *"Generar nota"* (`esRefundSinNota`). El modal muestra
+  el monto fijo y la `DevolucionInventarioLista` precargada (`useDevolucionInventario.precargar`);
+  sin las líneas de la venta no deja generar. Clave de `useIntentoCobro`, ámbito
+  `gn:<transaccionId>`. Un reembolso que sale con `warning` recarga la orden para que la marca y
+  la precarga vengan del servidor.
 - `pages/ventas/index.vue`: badges "NC" / "Dev. interna" (por `esCorreccion`/`esNotaCredito`)
   / "Reemb. parcial" / "Reembolsada" junto al estado.
 
@@ -800,6 +882,16 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
   "Devolución" (fija, rechazada en `POST /mermas`, sembrada al crear el tenant y find-or-create
   concurrente). En `pasarela-reembolso.e2e-spec.ts`, el REFUND sin respuesta rebota antes del
   proveedor y el que se pierde deja la merma.
+
+- `pasarela-generar-nota.e2e-spec.ts` (2026-10-04): la nota por el monto del `REFUND` sin
+  llamar al proveedor; la línea declarada y quién queda en el kardex (quien pidió / quien hizo
+  clic); reproducción, 422, 409 y dos clics concurrentes con claves distintas (una nota); la línea
+  sin respuesta y la revalidación contra otra nota posterior; la venta corregida entera; rechazado,
+  de otra orden, sin cabecera, con `monto` en el body; permisos con un rol real (403 con solo
+  `Leer`); y que la ruta de la llave de API no publica `correccionVentaId` ni `devoluciones`.
+  `cobros.service.spec.ts` fija el evento, lo que se mira antes y después del reclamo, y que el
+  hook no cambió. Frente: `GenerarNotaModal.nuxt.spec.ts`, `OrdenDetalleDrawer.nuxt.spec.ts` y
+  Playwright `nota-credito-generar-de-reembolso.spec.ts` (orden inyectada, venta real).
 
 ## Referencias
 

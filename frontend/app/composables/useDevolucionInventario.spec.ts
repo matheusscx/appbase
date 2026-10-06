@@ -9,6 +9,7 @@ import {
   filaAcreditable,
   setStockFila,
   faltaDestinoStock,
+  precargarFilas,
   valorDevueltoCuantizado,
   type DetalleVentaDevolucion,
   type FilaDevolucion,
@@ -409,5 +410,43 @@ describe('valorDevueltoCuantizado', () => {
     const detalles = [detalle('a', { cantidad: '3', totalLinea: '3570' })]
     const filas = [fila('a', { cantidad: '2' })]
     expect(valorDevueltoCuantizado(detalles, filas, null)).toBe('2380')
+  })
+})
+
+describe('precargarFilas', () => {
+  it('pone la cantidad y la respuesta que declaró el reembolso, y deja las demás filas como estaban', () => {
+    const r = precargarFilas(
+      [fila('a'), fila('b'), fila('c')],
+      [
+        { itemId: 'a', cantidad: '2', stock: 'recupera' },
+        { itemId: 'b', cantidad: '1', stock: 'pierde' },
+      ],
+    )
+    expect(r.map(f => [f.itemId, f.cantidad, f.stock])).toEqual([
+      ['a', '2', 'recupera'],
+      ['b', '1', 'pierde'],
+      ['c', '', null],
+    ])
+  })
+
+  it('una respuesta que la fila ya no admite queda sin contestar: el admin la vuelve a mirar', () => {
+    const r = precargarFilas(
+      [
+        fila('l', { devolucionStock: 'solo_perdida' }),
+        fila('s', { devolucionStock: 'sin_stock' }),
+      ],
+      [
+        { itemId: 'l', cantidad: '1', stock: 'recupera' },
+        { itemId: 's', cantidad: '1', stock: 'pierde' },
+      ],
+    )
+    expect(r.map(f => [f.cantidad, f.stock])).toEqual([['1', null], ['1', null]])
+  })
+
+  it('un ítem que ya no está en la venta no aparece, y sin declaración no cambia nada', () => {
+    expect(
+      precargarFilas([fila('a')], [{ itemId: 'otro', cantidad: '1', stock: 'pierde' }]),
+    ).toEqual([fila('a')])
+    expect(precargarFilas([fila('a')], null)).toEqual([fila('a')])
   })
 })

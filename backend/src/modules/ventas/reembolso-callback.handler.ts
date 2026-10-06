@@ -65,7 +65,7 @@ export class VentasReembolsoHandler
 
   async onReembolsoAprobado(
     evento: ReembolsoAprobadoEvento,
-  ): Promise<{ correccionVentaId: string }> {
+  ): Promise<{ correccionVentaId: string; repetida?: true }> {
     const nc = await this.ventasService.crearNotaCredito({
       tenantId: evento.tenantId,
       usuarioId: evento.usuarioId,
@@ -83,8 +83,15 @@ export class VentasReembolsoHandler
       // El REFUND se liga antes del commit de la nota: si no se puede, la nota
       // tampoco queda.
       enLaTransaccion: evento.ligarCorreccion,
+      // Solo "Generar nota" los trae: la clave del intento y el chequeo bajo el
+      // lock de la venta (el REFUND sin ligar y las líneas, que ahí rebotan).
+      idempotencia: evento.idempotencia,
+      alTomarLaVenta: evento.alTomarLaVenta,
     });
-    return { correccionVentaId: nc.id };
+    return {
+      correccionVentaId: nc.id,
+      ...(nc.repetida && { repetida: true as const }),
+    };
   }
 
   /**
