@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
+import { test, expect } from '../support/sesion'
 
 // Vigila en navegador real la forma de desborde documentada en
 // docs/patterns/frontend.md §16: `truncate` en un DESCENDIENTE de un ítem flex/grid

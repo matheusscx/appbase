@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../support/sesion'
 import {
   api,
   CLP,

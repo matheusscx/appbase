@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../support/sesion'
 import { api, cerrarCaja, tokenDe, TENANTS } from '../support/api'
 import { elegirEnSelector, escribirMonto, valorDeFila } from '../support/ui'
 

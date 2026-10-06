@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../support/sesion'
 import { api, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/api'
 
 /**

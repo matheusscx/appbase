@@ -15,7 +15,8 @@ import { elegirEnSelector, entrarComo, rondaDePin, valorDelTotal } from '../supp
  *
  * **Se anula sin salir de la cuenta**: el gesto aparece en cuanto vuelve el
  * claim. Sin QZ Tray (CI) la impresión falla después del claim y deja un toast
- * de error sobre el que no se afirma; el despacho ya ocurrió igual, y la
+ * de error que se espera para no clickear a través de él (paso 5b); el
+ * despacho ya ocurrió igual, y la
  * pantalla lo refleja igual (`docs/features/salones-mesas.md` § *Lo despachado
  * se ve en el acto*).
  *
@@ -237,6 +238,22 @@ test('pide, manda a cocina, anula como cortesía y el aviso aparece con el total
     p => !p.includes('/impresoras/operacion') && !p.includes('/impresoras/qz'),
   )
   expect(configuracionImpresoras).toEqual([])
+
+  // 5b. El envío termina con el toast de impresión, y hay que dejar que se vaya
+  //     antes de tocar la línea. ⚠️ No es cosmético: con el de "Cuenta abierta"
+  //     todavía vivo, los dos toasts apilados bajan el viewport hasta y=212 y el
+  //     centro del botón Anular está en y=211. Medido cuadro a cuadro: el de QZ
+  //     entra ~20 ms después del claim. Si el click alcanzaba a mover el mouse
+  //     antes, el toast aparecía DEBAJO del mouse, el hover los pausaba
+  //     (Reka) y el click reintentaba 30 s contra un tapado que ya no se iba —
+  //     2 de 10 en loop, y el flaky de CI del 2026-10-06—. Esperar al toast de
+  //     QZ cierra la carrera (sin QZ Tray siempre sale: `sin-qz-tray`), y
+  //     esperar a que se vayan saca el tapado. Por CSS y no por rol: con la
+  //     cuenta abierta el toaster queda `aria-hidden` y `getByRole` contaría
+  //     cero desde el principio. Los 10 s son la vida del toast (5 s, el
+  //     default de Nuxt UI) más el margen, no un click más paciente.
+  await expect(page.getByText('Error al enviar la comanda').first()).toBeVisible()
+  await expect(page.locator('ol[data-slot="viewport"] li')).toHaveCount(0, { timeout: 10_000 })
 
   // 6. Anular 1 de las 2 unidades despachadas, como cortesía.
   await page

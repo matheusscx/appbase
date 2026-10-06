@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { test, expect, type Route } from '@playwright/test'
+import type { Route } from '@playwright/test'
+import { test, expect } from '../support/sesion'
 import {
   abrirCaja,
   api,

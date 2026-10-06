@@ -2,6 +2,7 @@ import Decimal from 'decimal.js'
 import { test, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { API, api, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/api'
 import { elegirPorPlaceholder, entrarComo } from '../support/ui'
+import { sesionFresca } from '../support/sesion'
 
 /**
  * Compras por pantalla, **como el encargado de compras** (`encargado.compras`:
@@ -389,10 +390,8 @@ test('bajar una cantidad: el historial la anota con su unidad y el kardex suma s
   })
 
   // ── El kardex, como admin ────────────────────────────────────────────────
-  const adminCtx = await browser.newContext({
-    storageState: 'e2e/.auth/paris.json',
-    baseURL: test.info().project.use.baseURL,
-  })
+  const baseURL = test.info().project.use.baseURL!
+  const adminCtx = await browser.newContext({ storageState: await sesionFresca(baseURL), baseURL })
   try {
     const admin = await adminCtx.newPage()
     await admin.goto('/inventario', { waitUntil: 'networkidle' })

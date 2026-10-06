@@ -1,7 +1,9 @@
 import { test as setup, expect } from '@playwright/test'
 
-// Login vía UI una vez → guarda la sesión (storageState) y la reutilizan todos los
-// tests. Credenciales del seed de dev (admin@sistema.com / admin) — no son secretos
+// Login vía UI una vez → guarda la sesión (storageState). Los tests no la cargan
+// tal cual: es la plantilla de la que `support/sesion.ts` saca una sesión nueva
+// por test (la foto se pudre a los 15 min; el porqué está allá).
+// Credenciales del seed de dev (admin@sistema.com / admin) — no son secretos
 // reales. admin@sistema.com pertenece a >1 tenant → hay pantalla de selección.
 const authFile = 'e2e/.auth/paris.json'
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@sistema.com'

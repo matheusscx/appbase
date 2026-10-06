@@ -1,11 +1,11 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../support/sesion'
 
 // @smoke — subconjunto que corre en cada tarea (README). Prueba el pipeline E2E
-// end-to-end: sesión reutilizada (storageState) → dashboard autenticado carga.
+// end-to-end: sesión del admin (storageState, nueva por test) → dashboard autenticado carga.
 test('@smoke el dashboard carga con sesión autenticada', async ({ page }) => {
   await page.goto('/')
 
-  // no redirige a login (la sesión de storageState es válida)
+  // no redirige a login (la sesión que armó `support/sesion.ts` es válida)
   await expect(page).not.toHaveURL(/\/login/)
   // chrome de la app autenticada
   await expect(page.getByText('Bienvenido')).toBeVisible()

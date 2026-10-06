@@ -74,6 +74,16 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
+- [ ] **`e2e/inventario/stock-minimo.spec.ts` abre contextos de navegador y no los cierra**
+  (frontend, Playwright; visto el 2026-10-06 por el frente de la sesión de Playwright, que no lo
+  tocó por alcance). `abrirComo` hace `browser.newContext()` + `entrarComo` por cada rol y nadie
+  llama a `context.close()`, así que esas páginas siguen vivas —la app montada, con sus pedidos— el
+  resto de la corrida del worker. **Medido en el artefacto de CI del run 37465150509:** al fallar
+  `anular-plato`, Playwright guardó tres capturas, una por página abierta, y dos eran de este spec
+  ("Stock mínimo" y el drawer "Nuevo traslado", como *Aprobador Inventario*), varios specs después.
+  No se midió cuánto pesan en la corrida. Arreglo: cerrar los contextos en un `finally` o
+  `afterEach`, como hacen `compras-por-pantalla.spec.ts` y `inicio/dashboard.spec.ts`.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -146,20 +156,6 @@ destapa una decisión que no es mía).
   dos cuentas, mandar a la comanda de una el `cuentaLineaId` de la otra, y releer. **Arreglo
   probable:** agregar `cuentaId` y `eliminadoEl: IsNull()` al `where`, y que una línea ajena sea 400 o
   404 en vez de un `update` que no toca nada.
-
-- [ ] **Playwright entero que dura más de 15 minutos cae al login a partir de ahí** (infra de
-  test; anotado el 2026-10-04 en el gate de "Generar nota", sin tocarlo: no era del frente).
-  **Medido:** con el host cargado la suite tardó 21,8 min; 12 de sus 16 rojos son la pantalla de
-  login, contiguos desde el test 94, y los 16 pasaron al correrlos de nuevo con un login fresco.
-  **La causa, leída en el código y no confirmada con un log:** todos los tests reusan la sesión
-  del `storageState` del setup, y cada `tokenDe` (`e2e/support/api.ts`) hace `switch-tenant` con
-  el mismo `admin@sistema.com`, que revoca **todos** sus refresh (`AuthService`, decisión del owner:
-  la sesión es de la cuenta). La del navegador sobrevive mientras su access token viva, 15 min;
-  después el refresh rebota y la app vuelve al login. Con el host libre la suite entra en esa
-  ventana y no se ve. Para confirmarlo: correr con `JWT_EXPIRATION=2m` y mirar dónde empiezan a
-  caer. Salida probable: que `tokenDe` use otro usuario que el del navegador, o renovar el
-  `storageState` por spec.
-
 - [ ] **Medir la ventana de consulta de Webpay Plus con un pago de más de 7 días** (queda del
   cierre de "Probar en el sandbox de Transbank el saldo…", 2026-10-04, [`resueltos.md`](resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04)).
   La documentación de Webpay Plus dice que el estado se consulta hasta 7 días; la referencia, "en
@@ -170,25 +166,6 @@ destapa una decisión que no es mía).
   `RUN_TRANSBANK_SANDBOX=1 TBK_API_KEY_SECRET=<el de integración del seed> TBK_WEBPAY_MALL=597055555535 node scripts/qa/transbank-saldo-sandbox.mjs --reconsultar 01abe0ccb73419df9944e395fa2396743e230bb3eeb7f1cb003d1285f27209bf`.
   Si sigue contestando 200 con el detalle, la ventana no aplica a la consulta y el ADR se corrige;
   si no, el ADR ya lo dice.
-
-- [ ] **`e2e/salones/anular-plato.spec.ts:188` salió flaky en CI** (frontend, Playwright; run
-  37465150509 de `d08aef16`, 2026-10-06). El test "pide, manda a cocina, anula como cortesía…" dio
-  `locator.click: Test timeout of 30000ms exceeded` y pasó en el retry; el run siguiente
-  (`74f96279`) dio 106/106 sin flaky. El diff de ese commit no tocaba salones. **Medir:** bajar
-  del artefacto `playwright-report` de ese run los tres `test-failed-*.png` y ver en qué click se
-  quedó; correr el spec en loop (`--repeat-each`) sobre stack propio. Si se repite, la causa se
-  busca en lo que el click espera, no subiendo el timeout.
-
-- [ ] **`e2e/configuracion/items-moneda.spec.ts:103` salió flaky en local** (frontend, Playwright;
-  2026-10-06, stack propio del worktree del filtro de bajas del kardex, base recién sembrada y 0
-  reinicios de contenedor). En una corrida entera, `"cambiar la moneda frena y avisa…"` dio
-  `locator.click: Test timeout of 30000ms exceeded` sobre la opción *"Dólar Estadounidense (USD)"*:
-  la opción resolvía pero *"element is not stable"* y después *"detached from the DOM"*. La corrida
-  entera anterior, sobre el mismo código, lo pasó, y solo pasó 5 de 5. Ese diff no tocaba
-  `configuracion/` ni `components/`. Misma firma que `anular-plato`: un click en un menú de reka-ui
-  durante su animación. **Medir:** `--repeat-each` dentro de la suite entera (solo no se reproduce)
-  y ver si el selector se re-renderiza al abrir; la causa se busca en qué remonta la lista, no
-  subiendo el timeout.
 
 ## 3. Ya decidido, falta construir
 
@@ -677,6 +654,19 @@ prohíbe.
   sigue marcado para siempre. **La pregunta para el owner:** ¿se liga el `REFUND` a una de las
   notas que ya existen (¿cuál, si son dos?), o se descarta la marca con un motivo escrito? Ninguna
   de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
+
+- [ ] **En la cuenta del salón, los avisos tapan los botones de la primera línea** (frontend, UX;
+  anotado el 2026-10-06 por el frente que arregló el flaky de `anular-plato`, a pedido de la
+  orquestadora). El toaster va arriba a la derecha (`app.vue`, `position: 'top-right'`, siempre
+  expandido) y ahí mismo está la columna de acciones de la cuenta. **Medido cuadro a cuadro con
+  1280×720:** con un aviso ("Cuenta abierta por…") el viewport de toasts ocupa y=16–104; al mandar a
+  cocina sin QZ Tray entra el de error y baja a y=212, y el centro del botón **Anular** de la
+  primera línea está en y=211. Quedan así ~4,8 s (lo que le queda de vida al primero). Y el hover
+  pausa los toasts, así que un garzón que apunta al botón tapado los congela encima: tiene que
+  correr el mouse o cerrarlos. El test ya no depende de esto (espera a que se vayan); el garzón sí.
+  **La pregunta para el owner:** ¿los avisos se mueven de lugar (abajo a la derecha, o arriba al
+  centro) para toda la app, se mueven solo en el salón, o se deja como está porque se van solos en
+  5 s?
 
 ## 5. Carreras de concurrencia
 
@@ -1372,6 +1362,21 @@ enterarse tarde. Esta sección se abre al encarar el paso a producción. Orden =
 
   Los cuatro reportes que piden rango dan 400 en esa lista. Se miden aparte con
   `?desde=2026-01-01&hasta=2026-12-31`.
+
+- [ ] **`e2e/configuracion/items-moneda.spec.ts:103` salió flaky una vez en local y no se
+  reprodujo en 32 corridas** (frontend, Playwright; visto el 2026-10-06 en el worktree del filtro de
+  bajas del kardex, medido el mismo día por el frente de Playwright). En una corrida entera, *"cambiar
+  la moneda frena y avisa…"* dio `locator.click: Test timeout of 30000ms exceeded` sobre la opción
+  *"Dólar Estadounidense (USD)"*: resolvía, pero *"element is not stable"* y después *"detached from
+  the DOM"*. **Medido sin un rojo:** 15/15 con `--repeat-each` solo; 10/10 con la CPU del navegador
+  estrangulada 6× (CDP `setCPUThrottlingRate`); 7/7 dentro de Playwright entero (4 corridas enteras
+  y una `--repeat-each 3`, base reseteada y 0 reinicios de contenedor). A 20× el spec sí falla, pero
+  por lentitud general y en pasos distintos, sin esa firma: no cuenta como reproducción. **No es la
+  misma causa que `anular-plato`**, como suponía la entrada: aquél no era un menú de reka sino un
+  toast que tapaba el botón ([`resueltos.md`](resueltos.md)). **Si vuelve a pasar:** en local no se
+  guarda traza (`retries` 0), así que correr con `--trace retain-on-failure` y mirar en la traza si
+  la lista se cerró —el foco saltó a otro control o el drawer se re-renderizó— o si se re-montaron
+  las opciones (`monedasOpts` se reemplaza entero cuando vuelve `cargarCatalogos`).
 
 - [ ] **La salida de un lote elegido a mano busca el lote sin `tenant_id` en el SQL, y se deja
   así** (backend, `InventarioService.moverLote`, la rama con `loteId` explícito; lo marcó el frente

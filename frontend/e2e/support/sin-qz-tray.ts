@@ -1,8 +1,9 @@
-import { test as base, expect } from '@playwright/test'
+import { test as base, expect } from './sesion'
 
 /**
  * El `test` de los specs que imprimen: cobrar en el POS o en salones, mandar a
- * cocina, pedir la precuenta. Todos pasan por `imprimirEn` (`useImpresoras.ts`),
+ * cocina, pedir la precuenta. Extiende el de `./sesion`, así que trae también la
+ * sesión nueva por test del admin. Todos pasan por `imprimirEn` (`useImpresoras.ts`),
  * que se conecta a QZ Tray.
  *
  * En CI no hay QZ Tray: la conexión falla al toque y el flujo sigue con el aviso

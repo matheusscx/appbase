@@ -140,7 +140,8 @@ primero, por definición, nunca mira lo que ya está.
 ## Pendiente
 
 - **Suite E2E de navegador (Playwright).** [x] **Fundación lista** (`frontend/playwright.config.ts`,
-  `e2e/auth.setup.ts` con login vía `storageState`, `e2e/smoke/*.smoke.spec.ts`,
+  `e2e/auth.setup.ts` con login vía `storageState` —desde el 2026-10-06 es solo la plantilla:
+  cada test arranca con una sesión nueva, `e2e/support/sesion.ts`—, `e2e/smoke/*.smoke.spec.ts`,
   `e2e/layout/desborde.spec.ts`, scripts `e2e`/`e2e:smoke`). En local corre contra el
   stack real (`docker-compose up`); en CI no hay compose, así que `webServer` en
   `playwright.config.ts` levanta backend y frontend (`node dist/main` / `node

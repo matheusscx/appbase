@@ -1,6 +1,6 @@
 import net from 'node:net'
 import tls from 'node:tls'
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../support/sesion'
 
 // @smoke — el proxy de `/api` (ADR-022) visto como proxy, no como navegador.
 // El otro smoke (`mismo-origen`) prueba que el navegador no se va a otro

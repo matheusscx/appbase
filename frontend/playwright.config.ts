@@ -157,7 +157,14 @@ export default defineConfig({
     { name: 'setup', testMatch: /.*\.setup\.ts/ },
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/paris.json' },
+      // No es la sesión: es el centinela `SESION_FRESCA` de `e2e/support/sesion.ts`,
+      // que su `test` cambia por una sesión nueva en cada test (el porqué, allá).
+      // ⚠️ Literal y no importado a propósito: importar ese módulo carga
+      // `support/api.ts`, que fija su `API` con `E2E_API_URL` al cargarse, ANTES de
+      // que este config la asigne. Hoy sale bien solo porque cada worker hereda el
+      // env del runner (medido, 2026-10-06); si dejara de pasar, `API` apuntaría al
+      // 3000 sin avisar. Un literal que no coincida, en cambio, falla con ENOENT.
+      use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/NO-EXISTE--importar-test-de-e2e-support-sesion.json' },
       dependencies: ['setup'],
     },
   ],

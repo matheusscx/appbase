@@ -23,6 +23,121 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Playwright ya no cae al login pasados los 15 minutos: una sesión nueva por test (cerrada 2026-10-06)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. Plan:
+[`2026-10-06-playwright-sesion-y-flakies.md`](../superpowers/plans/2026-10-06-playwright-sesion-y-flakies.md).
+Arreglo solo en el soporte de los tests: el sistema de tokens del backend no se tocó
+(invariante 4).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Playwright entero que dura más de 15 minutos cae al login a partir de ahí** (infra de
+  test; anotado el 2026-10-04 en el gate de "Generar nota", sin tocarlo: no era del frente).
+  **Medido:** con el host cargado la suite tardó 21,8 min; 12 de sus 16 rojos son la pantalla de
+  login, contiguos desde el test 94, y los 16 pasaron al correrlos de nuevo con un login fresco.
+  **La causa, leída en el código y no confirmada con un log:** todos los tests reusan la sesión
+  del `storageState` del setup, y cada `tokenDe` (`e2e/support/api.ts`) hace `switch-tenant` con
+  el mismo `admin@sistema.com`, que revoca **todos** sus refresh (`AuthService`, decisión del owner:
+  la sesión es de la cuenta). La del navegador sobrevive mientras su access token viva, 15 min;
+  después el refresh rebota y la app vuelve al login. Con el host libre la suite entra en esa
+  ventana y no se ve. Para confirmarlo: correr con `JWT_EXPIRATION=2m` y mirar dónde empiezan a
+  caer. Salida probable: que `tokenDe` use otro usuario que el del navegador, o renovar el
+  `storageState` por spec.
+
+### Qué se midió
+
+- **La causa, confirmada como pedía la entrada.** Playwright entero contra el código de antes,
+  con el backend en `JWT_EXPIRATION=2m` y la base reseteada: 63 passed / 44 failed de 107 en
+  18,9 min. El primer rojo es el test 31, a los 2,1 min, y desde ahí cae **todo** test que usa la
+  sesión del admin; los únicos verdes son los que entran por pantalla con su propio usuario
+  (`storageState` vacío). El log del backend no tiene ningún *"Reuso de refresh token"*: el
+  refresh de la foto no se rotó y reusó, lo **revocó** el `switch-tenant` de un `tokenDe`.
+- **Lo que la entrada no decía:** en local hay dos relojes de 15 min, no uno. El del JWT
+  (`JWT_EXPIRATION`, 15m en `.env.example`; el compose sin `.env` usa 7d) y el de la cookie
+  `access_token`, que el store crea con `maxAge` de 15 min del lado del cliente. Cualquiera de
+  los dos que venza manda al middleware a canjear el refresh de la foto, y el arreglo cubre los
+  dos.
+- **Duración** (Playwright entero, `JWT_EXPIRATION=15m`, base reseteada, una corrida de cada
+  lado): 313 s antes y 327 s después, +14 s. El login + switch por API mide ~81 ms por test
+  (mediana de 20).
+
+### Qué se hizo
+
+- `e2e/support/sesion.ts`: un `test` que, cuando el `storageState` es el default del config, lo
+  cambia por una sesión nueva hecha por API (login + switch-tenant, por el origen del frontend,
+  ADR-022). La foto del setup queda como plantilla de forma: atributos de las cookies,
+  `localStorage`, el tenant (el `tenant_id` de su access token) y la vida de la cookie de acceso
+  (su `expires` menos el `iat`, para no repetir el `maxAge` del store).
+- El default del config pasó a ser un **centinela**, una ruta que no existe: un spec que use la
+  sesión del admin sin ese `test` falla con ENOENT al crear el contexto, en vez de andar 15 min y
+  caer. Incluye a los que solo usan `request`: el fixture de Playwright carga el mismo
+  `storageState` (lo cazó la corrida de prueba en `smoke/proxy-api`).
+- Pasaron a ese `test` los 18 specs que corrían con la sesión del admin y `support/sin-qz-tray.ts`.
+  `compras-por-pantalla` (contexto de admin abierto a mano) usa `sesionFresca`, y
+  `catalogo-paginado` dejó de nombrar la ruta: un `test.use` con un valor pisa el fixture
+  (medido en un proyecto de juguete).
+
+### Qué lo fija
+
+La misma corrida de la medición (Playwright entero, `JWT_EXPIRATION=2m`, base reseteada) con el
+arreglo: ningún test cayó al login. El único rojo fue `smoke/proxy-api` por el centinela, que se
+corrigió; después, Playwright entero con 15m dio 107/107. Si alguien vuelve a cargar la foto
+cruda, el centinela lo frena en el primer test.
+
+---
+
+## El flaky de `anular-plato`: un toast que entraba bajo el mouse (cerrada 2026-10-06)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. Plan:
+[`2026-10-06-playwright-sesion-y-flakies.md`](../superpowers/plans/2026-10-06-playwright-sesion-y-flakies.md).
+La parte de UX que destapó —los avisos tapan la línea también para el garzón— quedó como
+pregunta al owner en `pendientes.md` § 4.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **`e2e/salones/anular-plato.spec.ts:188` salió flaky en CI** (frontend, Playwright; run
+  37465150509 de `d08aef16`, 2026-10-06). El test "pide, manda a cocina, anula como cortesía…" dio
+  `locator.click: Test timeout of 30000ms exceeded` y pasó en el retry; el run siguiente
+  (`74f96279`) dio 106/106 sin flaky. El diff de ese commit no tocaba salones. **Medir:** bajar
+  del artefacto `playwright-report` de ese run los tres `test-failed-*.png` y ver en qué click se
+  quedó; correr el spec en loop (`--repeat-each`) sobre stack propio. Si se repite, la causa se
+  busca en lo que el click espera, no subiendo el timeout.
+
+### Qué se midió
+
+- **No era un menú de reka-ui.** En el artefacto del run, el click colgado es el de **Anular** de
+  la línea (spec :241-243), y el call log repite *"`<ol data-slot="viewport">` … from
+  `Notifications (F8)` subtree intercepts pointer events"* durante los 30 s. La captura muestra dos
+  toasts arriba a la derecha: el de error de QZ y "Cuenta abierta por…".
+- **Se reproduce en local:** 2 de 10 con `--repeat-each 10`, los dos en la misma línea y con la
+  misma firma.
+- **Cuadro a cuadro** (un `requestAnimationFrame` midiendo el viewport de toasts y
+  `elementFromPoint` en el centro del botón): con un toast el viewport ocupa y=16–104; ~20 ms
+  después de la respuesta del claim entra el de QZ y baja a y=212; el centro de Anular está en
+  y=211. Así queda ~4,8 s, hasta que vence el primero.
+- **Por qué a veces sí y a veces no.** Si el toast de QZ ya estaba cuando el click arranca,
+  Playwright ve el tapado antes de mover el mouse, reintenta, el toast vence y el click pasa (a
+  los ~5 s; por eso los verdes tardaban eso). Si el click alcanzó a mover el mouse antes de que
+  entrara, el toast aparece **debajo** del mouse, el hover lo pausa (Reka) y el tapado ya no se va.
+  La sonda que esperaba el toast de QZ antes del click pasó 5 de 5: la carrera es esa ventana de
+  ~20 ms, no el tapado en sí.
+
+### Qué se hizo
+
+`anular-plato.spec.ts` (paso 5b): después del claim espera el toast de QZ —sin QZ Tray siempre
+sale, `support/sin-qz-tray.ts`— y que el viewport de toasts quede vacío, y recién ahí anula. El
+conteo va por CSS (`ol[data-slot="viewport"] li`) y no por rol: con la cuenta abierta el toaster
+está `aria-hidden` y un `getByRole` contaría cero desde el principio. El tope de 10 s es la vida
+del toast (5 s) más margen; el click no se hizo más paciente.
+
+### Qué lo fija
+
+20 de 20 con `--repeat-each 20` sobre el spec arreglado, contra 2 de 10 del original sobre el mismo
+stack.
+
+---
+
 ## Topes en los arrays de los DTOs, `@IsObject()` en los objetos únicos y reglas repetidas (cerrada 2026-10-06)
 
 Salen de [`pendientes.md`](pendientes.md) § 2, juntas porque son de borde y tocan los mismos

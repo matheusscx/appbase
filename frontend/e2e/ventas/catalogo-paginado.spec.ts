@@ -248,8 +248,8 @@ test.describe('POS como cajera', () => {
 
 test.describe('Salón', () => {
   // El garzón no se loguea: se identifica con el PIN sobre la sesión del admin
-  // del seed (como `cuenta-hasta-cobro.spec.ts`).
-  test.use({ storageState: 'e2e/.auth/paris.json' })
+  // del seed (como `cuenta-hasta-cobro.spec.ts`), que es la que este bloque hereda
+  // del config: una nueva por test (`support/sesion.ts`).
 
   const salon: {
     token?: string
