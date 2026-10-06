@@ -10,6 +10,7 @@ import { serieNormalizadaSql } from '../items/entities/item-unidad.entity';
 import { MovimientoInventario } from './entities/movimiento-inventario.entity';
 import { CatalogService } from '../catalog/catalog.service';
 import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
+import { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
 
 const TENANT = 'tenant-uuid';
 const ITEM_ID = 'item-uuid';
@@ -3899,6 +3900,71 @@ describe('InventarioService', () => {
       expect(listSql).toMatch(/mb\.tipo AS motivo_baja_tipo/);
       const join = /LEFT JOIN motivo_baja mb ON ([^\n]*)/.exec(listSql);
       expect(join?.[1]).toBe('mb.motivo_baja_id = mv.motivo_baja_id');
+    });
+
+    // El filtro por tipo de baja va en el WHERE compartido: el COUNT y la
+    // página lo llevan igual, con el mismo `$n`. Con `motivo` delante, el tipo
+    // cae en $3 (no en la posición del motivo) — un índice corrido se ve acá.
+    // El control fuerte —que el total cuente solo las del tipo— es el e2e de
+    // mermas.e2e-spec.ts, "el kardex filtra por tipo de baja".
+    it('findMovimientos filtra por motivoBajaTipo con un EXISTS en el COUNT y en la página', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findMovimientos(TENANT, {
+        motivo: 'merma',
+        motivoBajaTipo: TipoMotivoBaja.CORTESIA,
+      });
+
+      const exists =
+        /AND EXISTS \(\s*SELECT 1 FROM motivo_baja mbf\s+WHERE mbf\.motivo_baja_id = mv\.motivo_baja_id AND mbf\.tipo = \$3\s*\)/;
+      const [countSql, countParams] = dataSource.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      const [listSql, listParams] = dataSource.query.mock.calls[1] as [
+        string,
+        unknown[],
+      ];
+      expect(countSql).toMatch(exists);
+      expect(listSql).toMatch(exists);
+      expect(countParams).toEqual([TENANT, 'merma', 'cortesia']);
+      expect(listParams.slice(0, 3)).toEqual([TENANT, 'merma', 'cortesia']);
+    });
+
+    // Control DÉBIL, sobre el texto: el EXISTS no filtra el borrado de
+    // motivo_baja, igual que el JOIN de la lectura. El estado (un motivo
+    // borrado con movimientos) solo se alcanza por una carrera, así que no hay
+    // e2e que lo monte.
+    it('findMovimientos: el EXISTS del tipo de baja no filtra el borrado del motivo', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findMovimientos(TENANT, {
+        motivoBajaTipo: TipoMotivoBaja.MERMA,
+      });
+
+      const [countSql] = dataSource.query.mock.calls[0] as [string, unknown[]];
+      const exists = /AND EXISTS \(([\s\S]*?)\)/.exec(countSql);
+      expect(exists?.[1]).toMatch(/mbf\.tipo = \$2/);
+      expect(exists?.[1]).not.toMatch(/eliminado_el/);
+    });
+
+    it('findMovimientos sin motivoBajaTipo no agrega el EXISTS', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findMovimientos(TENANT, { motivo: 'merma' });
+
+      const [countSql, countParams] = dataSource.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(countSql).not.toMatch(/motivo_baja/);
+      expect(countParams).toEqual([TENANT, 'merma']);
     });
   });
 

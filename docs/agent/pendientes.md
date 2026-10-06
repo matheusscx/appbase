@@ -241,6 +241,17 @@ destapa una decisión que no es mía).
   quedó; correr el spec en loop (`--repeat-each`) sobre stack propio. Si se repite, la causa se
   busca en lo que el click espera, no subiendo el timeout.
 
+- [ ] **`e2e/configuracion/items-moneda.spec.ts:103` salió flaky en local** (frontend, Playwright;
+  2026-10-06, stack propio del worktree del filtro de bajas del kardex, base recién sembrada y 0
+  reinicios de contenedor). En una corrida entera, `"cambiar la moneda frena y avisa…"` dio
+  `locator.click: Test timeout of 30000ms exceeded` sobre la opción *"Dólar Estadounidense (USD)"*:
+  la opción resolvía pero *"element is not stable"* y después *"detached from the DOM"*. La corrida
+  entera anterior, sobre el mismo código, lo pasó, y solo pasó 5 de 5. Ese diff no tocaba
+  `configuracion/` ni `components/`. Misma firma que `anular-plato`: un click en un menú de reka-ui
+  durante su animación. **Medir:** `--repeat-each` dentro de la suite entera (solo no se reproduce)
+  y ver si el selector se re-renderiza al abrir; la causa se busca en qué remonta la lista, no
+  subiendo el timeout.
+
 - [ ] **Ninguna respuesta de la API viaja comprimida** (backend + proxy de Nuxt; medido en local
   el 2026-10-03, al cerrar la paginación de `GET /compras/productos`). Ni Nest ni
   `server/api/[...].ts` comprimen: con `Accept-Encoding: gzip`, `GET /compras/productos` (entera,
@@ -311,18 +322,6 @@ que lo convierte en un frente propio y no en un remate.
 ⚠️ El comando va escrito porque la primera vez este dato se anotó como "459 ocurrencias en 5
 superficies" sumando conteos de código con un conteo de docs hecho con **otro patrón**. La
 revisión independiente no lo pudo reproducir, con razón.
-
-- [ ] **El filtro "Merma" del kardex trae también la cortesía y la comida del personal** (backend +
-  front; anotado el 2026-10-04 al cerrar "el kardex llama 'costo perdido' a la cortesía",
-  [`resueltos.md`](resueltos.md); que quedara afuera de ese frente lo decidió la Sesión de esfuerzo
-  máximo). La opción *"Merma"* del filtro de motivo de `/inventario` manda `motivo=merma`, y
-  `buildMovimientosFilters` filtra por `mv.motivo`, que las tres bajas comparten. **Desde ese
-  cierre la contradicción se ve en la misma pantalla**: con el filtro *"Merma"* puesto aparecen
-  filas con el badge *"Cortesía · …"* y *"Comida del personal · …"*. Las decisiones de fondo ya
-  están (la cortesía y la comida del personal no son pérdida: owner, 2026-09-18 y 2026-10-04); lo
-  que falta es la forma del filtro —un parámetro por tipo de baja, o opciones separadas en el
-  desplegable— y que el `COUNT` y la página lo apliquen igual. Al tocarlo, el tipo sale de
-  `motivo_baja` sin filtrar su borrado, como el `JOIN` de la lectura.
 
 - [ ] **Lo que quedó del frente del modo ciego, ya cerrado** (backend + producto; la entrada
   madre —seis fugas, el eje mío/todos y el rastro de los oráculos— se mudó entera a

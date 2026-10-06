@@ -23,6 +23,76 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El filtro "Merma" del kardex separa la merma de la cortesía y de la comida del personal (cerrada 2026-10-06)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. La regla viva, en
+[`inventario-kardex.md`](../features/inventario-kardex.md#get-inventariomovimientos); diseño en
+[`2026-10-06-kardex-filtro-por-tipo-de-baja-design.md`](../superpowers/specs/2026-10-06-kardex-filtro-por-tipo-de-baja-design.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **El filtro "Merma" del kardex trae también la cortesía y la comida del personal** (backend +
+  front; anotado el 2026-10-04 al cerrar "el kardex llama 'costo perdido' a la cortesía",
+  [`resueltos.md`](resueltos.md); que quedara afuera de ese frente lo decidió la Sesión de esfuerzo
+  máximo). La opción *"Merma"* del filtro de motivo de `/inventario` manda `motivo=merma`, y
+  `buildMovimientosFilters` filtra por `mv.motivo`, que las tres bajas comparten. **Desde ese
+  cierre la contradicción se ve en la misma pantalla**: con el filtro *"Merma"* puesto aparecen
+  filas con el badge *"Cortesía · …"* y *"Comida del personal · …"*. Las decisiones de fondo ya
+  están (la cortesía y la comida del personal no son pérdida: owner, 2026-09-18 y 2026-10-04); lo
+  que falta es la forma del filtro —un parámetro por tipo de baja, o opciones separadas en el
+  desplegable— y que el `COUNT` y la página lo apliquen igual. Al tocarlo, el tipo sale de
+  `motivo_baja` sin filtrar su borrado, como el `JOIN` de la lectura.
+
+### Lo medido antes de diseñar
+
+Quiénes usan `motivo` del kardex: `FindMovimientosDto` (whitelist), `buildMovimientosFilters` (el
+`WHERE` que comparten el `COUNT` y la página) y el desplegable de `pages/inventario/index.vue`.
+`configuracion/items.vue` pega al endpoint sin `motivo`. Lo leen los e2e de API `mermas`,
+`costeo-cpp`, `recuentos`, `traslados` y `ventas`, y los Playwright `nota-credito-recupera-o-pierde`
+y `kardex-costo-de-baja`. **Ningún reporte ni export lo usa**: varianza, Mermas y el Inicio tienen
+consultas propias, y el kardex no tiene export.
+
+### Cómo se decidió
+
+**La forma**, siguiendo lo que ya existe: un parámetro aparte, como `GET /mermas?tipo=` y
+`GET /reportes/anulaciones?tipo=`. Se llama `motivoBajaTipo` porque en el kardex `tipo` ya es
+entrada/salida. `motivo` no cambia de significado. Lo decidió la sesión del frente y lo confirmó la
+Sesión de esfuerzo máximo (2026-10-06), que además pidió **"Bajas (todas)"**: la opción vieja ya
+mostraba las tres juntas y lo único malo era el nombre, así que partirla sin esa opción sacaba una
+vista que funcionaba. Deriva de la decisión del 2026-10-04 de no llamar pérdida a la cortesía ni a
+la comida del personal.
+
+### Cómo se cerró
+
+- **DTO:** `motivoBajaTipo` con `@IsIn(TIPOS_BAJA_DEL_KARDEX)`, derivado de
+  `tipoMotivoBajaDescuenta` (`merma`, `cortesia`, `consumo_personal`). `no_elaborado` es 400: no
+  descuenta, así que nunca deja fila en el kardex.
+- **SQL:** un `EXISTS` sobre `motivo_baja` en `buildMovimientosFilters`, o sea en el `COUNT` y en
+  la página por construcción, sin filtrar el borrado del motivo y con el porqué en la consulta
+  (mismo criterio que el `JOIN` de la lectura). Nada escribe en `movimientos_inventario`.
+- **Pantalla:** *"Merma"* pasa a ser *Bajas (todas)* (solo `motivo=merma`), *Merma*, *Cortesía* y
+  *Comida del personal* (`motivo=merma&motivoBajaTipo=…`). `motivoOpts` sigue siendo el mapa del
+  badge; el selector es `motivoFiltroOpts`.
+
+### Qué lo fija
+
+- `mermas.e2e-spec.ts` (control fuerte): las tres bajas de un plato propio (la cortesía anulando en
+  mesa), cada tipo con `pageSize=1` trae la suya y `meta.total = 1`; sin el tipo, `3`. El pipe:
+  `no_elaborado`, un valor inventado y vacío → 400 con la lista de valores.
+- `inventario.service.spec.ts`: el `EXISTS` con su `$n` en las dos consultas y, como control débil
+  sobre el texto, sin `eliminado_el` (el estado solo se alcanza por una carrera, así que no hay e2e).
+- `inventario/index.nuxt.spec.ts` (las cuatro opciones y la URL que pide cada una) y Playwright
+  `inventario/kardex-costo-de-baja.spec.ts` (Comida del personal, Merma y Bajas (todas) contra el
+  backend real).
+- **Mutantes medidos, todos revertidos:** sin la rama del filtro (mueren 2 unit, 1 e2e y el
+  Playwright, contra el stack: con *Comida del personal* la merma seguía visible); el `COUNT`
+  sin el filtro (muere el e2e: total 3 en vez de 1, y 2 unit); el `EXISTS` filtrando
+  `mbf.eliminado_el` (mueren 2 unit, ningún e2e: es el control débil); la whitelist con todo el
+  enum (mueren los 3 e2e del pipe); el selector viejo (mueren 6 de página); sin *Bajas (todas)*
+  (mueren 2); sin `motivoBajaTipo` en la URL (mueren 3).
+
+---
+
 ## `PATCH /me/preferencias` con `ui: null` es un 400 (cerrada 2026-10-06)
 
 Sale de [`pendientes.md`](pendientes.md) § 1. Plan:
@@ -337,8 +407,9 @@ esconder ese costo (eso sí habría sido del owner: oculta un dato que el kardex
 - **Pantalla:** columna *"Costo de la baja"*, en rojo salvo cortesía y comida del personal
   (`tipoMotivoBajaEsPerdida`, `useSalones.ts`, al lado de `tipoMotivoBajaLabel`); el badge dice
   `{tipo} · {motivo}`.
-- **Queda afuera, con su lugar:** el filtro *"Merma"* del kardex sigue trayendo las tres bajas
-  (entrada nueva en `pendientes.md` § 3).
+- **Lo que quedó afuera ya se cerró:** el filtro *"Merma"* del kardex, que traía las tres bajas,
+  las separa desde el 2026-10-06 (§ *"El filtro 'Merma' del kardex separa la merma de la
+  cortesía y de la comida del personal"*, arriba).
 
 ### Qué lo fija
 

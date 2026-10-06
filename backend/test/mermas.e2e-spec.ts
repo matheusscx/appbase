@@ -1173,6 +1173,110 @@ describe('Mermas — deja de listar cortesías, marca deAnulacion (Task 4, e2e)'
     expect(filas.every((f) => !('costoPerdido' in f))).toBe(true);
   });
 
+  // Las tres bajas escriben `motivo = 'merma'`, así que `motivo=merma` las
+  // trae juntas (es la vista "Bajas (todas)" de /inventario). `motivoBajaTipo`
+  // separa una sola, y el COUNT tiene que filtrar igual que la página: con
+  // `pageSize=1` la página trae una fila en los dos casos y solo `meta.total`
+  // dice si el COUNT filtró (1) o no (3). Spec
+  // 2026-10-06-kardex-filtro-por-tipo-de-baja.
+  it('el kardex filtra por tipo de baja con motivoBajaTipo, en la página y en el total', async () => {
+    const marca = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    // Plato propio: el filtro por itemId deja solo las bajas de este test.
+    const platoPropioId = (
+      await post<ItemResponse>('/api/items', {
+        nombre: `Plato kardex-filtro-tipo E2E ${marca}`,
+        tipo: 'producto',
+        precioBase: '5000',
+        monedaId: CLP_MONEDA_ID,
+        unidadMedida: 'unidad',
+        stock: '100',
+        costo: '1000',
+        categoriaId: catCocinaId,
+      })
+    ).id;
+
+    const resMotivos = await request(app.getHttpServer())
+      .get('/api/motivos-baja?tipo=consumo_personal')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resMotivos.status).toBe(200);
+    const motivoPersonalId = (resMotivos.body as { id: string }[])[0]?.id;
+    expect(motivoPersonalId).toBeTruthy();
+
+    // La cortesía solo entra anulando en mesa: POST /mermas la rechaza.
+    const cuenta = await abrirCuentaCon([
+      { itemId: platoPropioId, cantidad: '1' },
+    ]);
+    await despachar(cuenta.id);
+    const linea = (await detalleCuenta(cuenta.id)).lineas.find(
+      (l) => l.itemId === platoPropioId,
+    )!;
+    await anular(cuenta.id, linea.id, {
+      cantidad: '1',
+      motivoBajaId: motivoCortesiaId,
+    });
+    await post('/api/mermas', {
+      itemId: platoPropioId,
+      ubicacionId: localId,
+      cantidad: '1',
+      motivoBajaId: motivoMermaId,
+    });
+    await post('/api/mermas', {
+      itemId: platoPropioId,
+      ubicacionId: localId,
+      cantidad: '1',
+      motivoBajaId: motivoPersonalId,
+    });
+
+    async function kardex(extra: string) {
+      const res = await request(app.getHttpServer())
+        .get(
+          `/api/inventario/movimientos?itemId=${platoPropioId}&motivo=merma&pageSize=1${extra}`,
+        )
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(res.status).toBe(200);
+      return res.body as {
+        data: { motivoBajaId: string; motivoBajaTipo: string }[];
+        meta: { total: number };
+      };
+    }
+
+    // Control: sin el tipo, las tres bajas.
+    expect((await kardex('')).meta.total).toBe(3);
+
+    for (const [tipo, motivoId] of [
+      ['merma', motivoMermaId],
+      ['cortesia', motivoCortesiaId],
+      ['consumo_personal', motivoPersonalId],
+    ] as const) {
+      const body = await kardex(`&motivoBajaTipo=${tipo}`);
+      expect(body.meta.total).toBe(1);
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]).toMatchObject({
+        motivoBajaId: motivoId,
+        motivoBajaTipo: tipo,
+      });
+    }
+  });
+
+  // El pipe, no el DTO suelto: un spec de DTO con plainToInstance + validate
+  // no ejerce el ValidationPipe global. `no_elaborado` es un tipo real pero no
+  // descuenta, así que nunca deja fila en el kardex: filtrar por él sería un
+  // vacío que parece respuesta. El mensaje distingue "valor fuera de la lista"
+  // de "property should not exist", que es lo que contestaba antes de existir
+  // el parámetro.
+  it.each(['no_elaborado', 'perdida', ''])(
+    'GET /inventario/movimientos?motivoBajaTipo=%p responde 400 con la lista de valores',
+    async (valor) => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/inventario/movimientos?motivoBajaTipo=${valor}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain(
+        'motivoBajaTipo must be one of the following values: merma, cortesia, consumo_personal',
+      );
+    },
+  );
+
   /**
    * Cancelar con motivo una cuenta con varios platos despachados deja una
    * merma por línea en UNA transacción, así que todas llevan el mismo

@@ -110,7 +110,8 @@ Response (200):
 
 **Query Parameters:**
 - `itemId` (optional): Filtrar por item UUID
-- `motivo` (optional): Filtrar por motivo exacto (`compra`, `venta`, `devolucion`, `merma`, `ajuste_manual`, `ajuste_costo`, `inventario_inicial`, `recuento`, `traslado`)
+- `motivo` (optional): Filtrar por motivo exacto (`compra`, `venta`, `devolucion`, `anulacion`, `merma`, `ajuste_manual`, `ajuste_costo`, `correccion_compra`, `inventario_inicial`, `recuento`, `traslado`). `merma` trae las tres bajas
+- `motivoBajaTipo` (optional, 2026-10-06): `merma` | `cortesia` | `consumo_personal`. Separa las bajas por `motivo_baja.tipo`; otro valor —incluido `no_elaborado`, que no descuenta y nunca deja fila— es 400
 - `desde` (optional): ISO-8601, filtrar movimientos a partir de esta fecha
 - `hasta` (optional): ISO-8601, filtrar movimientos hasta esta fecha
 - `skip` (optional, default 0): Paginación
@@ -137,7 +138,16 @@ antes), bajo la columna *"Costo de la baja"*, y el badge dice `{tipo} · {motivo
 `tipoMotivoBajaLabel`. El `JOIN` a `motivo_baja` **no filtra su borrado**, con el porqué en la
 consulta: el tipo es un hecho del movimiento ya aplicado (mismo criterio que ítems y
 ubicaciones). Spec: [`2026-10-04-kardex-costo-de-baja-design.md`](../superpowers/specs/2026-10-04-kardex-costo-de-baja-design.md).
-⚠️ El filtro `motivo=merma` sigue trayendo las tres bajas (`docs/agent/pendientes.md`).
+
+**El filtro separa las bajas por tipo (2026-10-06).** `motivo=merma` sigue trayendo las tres; el
+parámetro `motivoBajaTipo` deja una sola. Es un `EXISTS` sobre `motivo_baja` en el `WHERE` que
+comparten el `COUNT` y la página —el `COUNT` no tiene el `JOIN` de la lectura—, así que el total
+cuenta lo mismo que se lista. Tampoco filtra el borrado del motivo, por la misma razón que el
+`JOIN`, escrita en la consulta. La whitelist sale de `tipoMotivoBajaDescuenta`: un tipo nuevo se
+decide en su `switch`. En `/inventario` la opción *"Merma"* pasó a ser cuatro: **Bajas (todas)**
+(solo `motivo=merma`, la vista de antes con el nombre correcto), **Merma**, **Cortesía** y
+**Comida del personal** (`motivo=merma&motivoBajaTipo=…`). Spec:
+[`2026-10-06-kardex-filtro-por-tipo-de-baja-design.md`](../superpowers/specs/2026-10-06-kardex-filtro-por-tipo-de-baja-design.md).
 
 ---
 

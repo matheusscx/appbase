@@ -2660,6 +2660,20 @@ export class InventarioService {
       params.push(query.motivo);
       filters += ` AND mv.motivo = $${params.length}`;
     }
+    if (query.motivoBajaTipo) {
+      params.push(query.motivoBajaTipo);
+      filters += `
+         -- Un EXISTS y no el LEFT JOIN mb de la página: este filtro lo
+         -- comparten el COUNT y la página, y el COUNT no tiene ese JOIN.
+         -- Sin mbf.eliminado_el IS NULL, a propósito y por lo mismo que el
+         -- JOIN de la lectura: el tipo es un hecho del movimiento ya aplicado,
+         -- y la baja de un motivo borrado por la carrera que documenta
+         -- salones.service desaparecería del filtro sin decirlo.
+         AND EXISTS (
+           SELECT 1 FROM motivo_baja mbf
+           WHERE mbf.motivo_baja_id = mv.motivo_baja_id AND mbf.tipo = $${params.length}
+         )`;
+    }
     if (query.desde) {
       params.push(query.desde);
       filters += bordeFechaSql(

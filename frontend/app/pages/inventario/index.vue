@@ -65,9 +65,19 @@ const filtroMotivo = ref('todos')
 const filtroUbicacion = ref('todos')
 const unidadesMedidaStore = useUnidadesMedidaStore()
 
+// Una opción `baja:<tipo>` del filtro es una de las tres bajas: van con `motivo=merma`, que
+// comparten, más el tipo que las separa.
+const PREFIJO_BAJA = 'baja:'
+const tipoBajaFiltro = computed(() =>
+  filtroMotivo.value.startsWith(PREFIJO_BAJA) ? filtroMotivo.value.slice(PREFIJO_BAJA.length) : undefined,
+)
+
 const listFilters = computed(() => ({
   itemId: filtroItem.value || undefined,
-  motivo: filtroMotivo.value !== 'todos' ? filtroMotivo.value : undefined,
+  motivo: filtroMotivo.value === 'todos'
+    ? undefined
+    : tipoBajaFiltro.value ? 'merma' : filtroMotivo.value,
+  motivoBajaTipo: tipoBajaFiltro.value,
   ubicacionId: filtroUbicacion.value !== 'todos' ? filtroUbicacion.value : undefined,
 }))
 
@@ -97,6 +107,26 @@ const motivoOpts: Opt[] = [
   { label: 'Recuento', value: 'recuento' },
   { label: 'Traslado', value: 'traslado' },
 ]
+
+/**
+ * Los tipos de baja que dejan fila en el kardex. Gemelo de `TIPOS_BAJA_DEL_KARDEX`
+ * (`find-movimientos.dto.ts`), sin enlace de compilación: un tipo que falte acá no se puede
+ * filtrar; uno de más, el backend lo rechaza con 400.
+ */
+const TIPOS_BAJA_DEL_KARDEX: TipoMotivoBaja[] = ['merma', 'cortesia', 'consumo_personal']
+
+/**
+ * El selector del filtro. `motivoOpts` sigue siendo el mapa de etiquetas del badge; acá la
+ * opción `merma` se abre en cuatro, porque las tres bajas escriben `motivo = 'merma'`:
+ * "Bajas (todas)" las trae juntas, como siempre, y cada tipo la angosta (spec
+ * `2026-10-06-kardex-filtro-por-tipo-de-baja-design.md` § 3.3).
+ */
+const motivoFiltroOpts: Opt[] = motivoOpts.flatMap(o => o.value !== 'merma'
+  ? [o]
+  : [
+      { label: 'Bajas (todas)', value: 'merma' },
+      ...TIPOS_BAJA_DEL_KARDEX.map(t => ({ label: tipoMotivoBajaLabel(t), value: `${PREFIJO_BAJA}${t}` })),
+    ])
 
 onMounted(() => {
   void unidadesMedidaStore.ensureLoaded()
@@ -308,7 +338,7 @@ async function registrarAjusteCosto() {
           />
           <USelectMenu
             v-model="filtroMotivo"
-            :items="motivoOpts"
+            :items="motivoFiltroOpts"
             value-key="value"
             class="w-52"
             placeholder="Motivo"

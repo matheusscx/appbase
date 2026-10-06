@@ -619,3 +619,86 @@ describe('inventario — el kardex no llama pérdida a lo que no lo es', () => {
     wrapper.unmount()
   })
 })
+
+// Spec 2026-10-06-kardex-filtro-por-tipo-de-baja § 3.3: las tres bajas
+// escriben `motivo = 'merma'`. "Bajas (todas)" es la vista de siempre
+// (solo `motivo=merma`); Merma, Cortesía y Comida del personal la angostan
+// con `motivoBajaTipo`. Se afirma la URL pedida, que es lo que el backend
+// filtra.
+describe('inventario — el filtro de motivo separa las bajas por tipo', () => {
+  beforeEach(() => {
+    ubicacionesBackend = []
+    movimientosBackend = []
+    movimientosUrls = []
+  })
+
+  function filtroMotivo(wrapper: Wrapper) {
+    const select = wrapper.findAllComponents({ name: 'USelectMenu' }).find((s) => {
+      const items = (s.props('items') ?? []) as { value: string }[]
+      return Array.isArray(items) && items.some(i => i?.value === 'compra')
+    })
+    expect(select, 'filtro de motivo').toBeTruthy()
+    return select!
+  }
+
+  async function elegir(wrapper: Wrapper, label: string): Promise<URLSearchParams> {
+    const select = filtroMotivo(wrapper)
+    const opcion = (select.props('items') as { label: string, value: string }[])
+      .find(o => o.label === label)
+    expect(opcion, `opción "${label}"`).toBeTruthy()
+    movimientosUrls = []
+    select.vm.$emit('update:modelValue', opcion!.value)
+    await new Promise(r => setTimeout(r, 50))
+    expect(movimientosUrls.length, `GET tras elegir "${label}"`).toBeGreaterThan(0)
+    return new URL(movimientosUrls.at(-1)!, 'http://x').searchParams
+  }
+
+  it('ofrece "Bajas (todas)" y las tres bajas por su nombre, y ya no una "Merma" que las mezcla', async () => {
+    const wrapper = await montar()
+
+    const labels = (filtroMotivo(wrapper).props('items') as { label: string }[]).map(o => o.label)
+    const desde = labels.indexOf('Bajas (todas)')
+    expect(desde).toBeGreaterThan(-1)
+    expect(labels.slice(desde, desde + 4)).toEqual([
+      'Bajas (todas)', 'Merma', 'Cortesía', 'Comida del personal',
+    ])
+    expect(labels.filter(l => l === 'Merma')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('"Bajas (todas)" manda solo motivo=merma, como siempre', async () => {
+    const wrapper = await montar()
+
+    const q = await elegir(wrapper, 'Bajas (todas)')
+    expect(q.get('motivo')).toBe('merma')
+    expect(q.has('motivoBajaTipo')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['Merma', 'merma'],
+    ['Cortesía', 'cortesia'],
+    ['Comida del personal', 'consumo_personal'],
+  ])('"%s" manda motivo=merma y motivoBajaTipo=%s', async (label, tipo) => {
+    const wrapper = await montar()
+
+    const q = await elegir(wrapper, label)
+    expect(q.get('motivo')).toBe('merma')
+    expect(q.get('motivoBajaTipo')).toBe(tipo)
+    wrapper.unmount()
+  })
+
+  it('un motivo que no es baja no manda motivoBajaTipo, y volver a todos no manda ninguno', async () => {
+    const wrapper = await montar()
+
+    await elegir(wrapper, 'Cortesía')
+    const compra = await elegir(wrapper, 'Compra')
+    expect(compra.get('motivo')).toBe('compra')
+    expect(compra.has('motivoBajaTipo')).toBe(false)
+
+    const todos = await elegir(wrapper, 'Todos los motivos')
+    expect(todos.has('motivo')).toBe(false)
+    expect(todos.has('motivoBajaTipo')).toBe(false)
+    wrapper.unmount()
+  })
+})

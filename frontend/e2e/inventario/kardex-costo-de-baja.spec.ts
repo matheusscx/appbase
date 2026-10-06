@@ -10,6 +10,11 @@ import { api, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/a
  * es que `GET /inventario/movimientos` lo trae: la merma y la comida del personal escriben las
  * dos `motivo = 'merma'`, y sin el tipo la pantalla las pintaría igual.
  *
+ * El mismo par de bajas fija también el filtro por tipo (spec
+ * `2026-10-06-kardex-filtro-por-tipo-de-baja-design.md` § 3.3): que el backend real separe la
+ * merma de la comida del personal aunque las dos escriban `motivo = 'merma'`. La cortesía solo
+ * entra anulando en mesa; ese caso lo cubre el e2e de API (`mermas.e2e-spec.ts`).
+ *
  * ⚠️ **Deja dos residuos irreversibles por corrida: los dos movimientos de baja** (el kardex no
  * se borra; se limpia con `./scripts/reset-db.sh`). El producto se da de baja en el `afterAll`.
  */
@@ -65,4 +70,38 @@ test('la merma se pinta como pérdida y la comida del personal no, cada una con 
     .filter({ hasText: `Comida del personal · ${MOTIVO_PERSONAL}` })
   await expect(filaPersonal).toBeVisible()
   await expect(filaPersonal.getByText('$800', { exact: true })).not.toHaveClass(/text-error/)
+})
+
+test('el filtro de motivo separa la merma de la comida del personal, y "Bajas (todas)" las trae juntas', async ({ page }) => {
+  await page.goto('/inventario')
+
+  const filasDelProducto = page.getByRole('row', { name: new RegExp(PRODUCTO) })
+  const merma = filasDelProducto.filter({ hasText: 'Merma · Vencimiento' })
+  const personal = filasDelProducto.filter({ hasText: `Comida del personal · ${MOTIVO_PERSONAL}` })
+  // El trigger del USelectMenu es un botón que muestra la opción elegida: se lo encuentra por la
+  // vigente en cada paso, con el texto entero (el molde de `reportes/varianza.spec.ts`, pero sin
+  // armar un RegExp: los paréntesis de "Bajas (todas)" serían un grupo y no matchearían).
+  let vigente = 'Todos los motivos'
+  async function elegir(opcion: string) {
+    await page.getByRole('button').filter({ has: page.getByText(vigente, { exact: true }) }).click()
+    await page.getByRole('option', { name: opcion, exact: true }).click()
+    vigente = opcion
+  }
+
+  await elegir('Comida del personal')
+  await expect(personal).toBeVisible()
+  await expect(merma).toHaveCount(0)
+
+  await elegir('Merma')
+  await expect(merma).toBeVisible()
+  await expect(personal).toHaveCount(0)
+
+  await elegir('Bajas (todas)')
+  await expect(merma).toBeVisible()
+  await expect(personal).toBeVisible()
+
+  // Y de vuelta desde "Bajas (todas)": ejerce el locator con paréntesis en el texto vigente.
+  await elegir('Comida del personal')
+  await expect(merma).toHaveCount(0)
+  await expect(personal).toBeVisible()
 })
