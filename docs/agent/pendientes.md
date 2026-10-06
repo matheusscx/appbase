@@ -224,6 +224,11 @@ destapa una decisión que no es mía).
       siguiente, menos de un minuto después). `in-pack` **44 253** y `count` 1 503 al medir: el
       mismo `in-pack` que el de `bold-carson`, así que tampoco cae cerca de 2^16. Se reescribió el
       recibo sobre el mismo diff revisado (`ca462e75`).
+    - **Otro caso, 2026-10-06:** `20261006-120947-dreamy-goldstine-3474cd-58358` (5 líneas `index`
+      de 9 contra 8 caracteres, 0 de contenido; recibo escrito ~10 min antes del commit; medido
+      después: `in-pack` 44 253 y `count` 1 550, de nuevo lejos de 2^16). El mismo commit traía un
+      rechazo real (`check-e2e-status`): se corrigió, el delta pasó por la revisión y el recibo se
+      escribió en el mismo comando que el commit, que entró.
 
 - [ ] **Un `itemGrupoId` en mayúsculas en `PATCH /grupos-modificadores/:id/overrides` da un 400
   que miente: "item_grupo_id no válido para este grupo"** (backend,
