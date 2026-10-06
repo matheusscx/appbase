@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsNumberString,
@@ -41,6 +42,8 @@ export class DescartarDesfaseItemDto {
 
 export class DescartarDesfasesDto {
   @IsArray()
+  // Mismo tope que `AplicarDesfasesDto.items`.
+  @ArrayMaxSize(500)
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => DescartarDesfaseItemDto)

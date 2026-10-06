@@ -6,6 +6,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -156,6 +157,8 @@ export class ItemGrupoModificadorInputDto {
   orden?: number;
 
   @IsArray()
+  // Las opciones de un grupo: mismo tope que `CreateGrupoModificadorDto`.
+  @ArrayMaxSize(100)
   @IsOptional()
   @ValidateNested({ each: true })
   @Type(() => ItemGrupoOpcionOverrideInputDto)
@@ -272,6 +275,9 @@ export class CreateItemDto {
   series?: SerieInputDto[];
 
   // Carga inicial modo 'lote'
+  // `IsObject` además de `ValidateNested`: este deja pasar un array, que con
+  // stock inicial reventaba el alta en un 500.
+  @IsObject()
   @ValidateNested()
   @Type(() => LoteInputDto)
   @IsOptional()
@@ -279,12 +285,18 @@ export class CreateItemDto {
 
   // Extensión receta
   @IsArray()
+  // Ingredientes de una receta; un INSERT por ingrediente. Es también el tope
+  // de `PersonalizacionRecetaDto.omitidos`.
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => RecetaIngredienteInputDto)
   @IsOptional()
   ingredientes?: RecetaIngredienteInputDto[];
 
   @IsArray()
+  // Extras de una receta; un INSERT por extra. Es también el tope de
+  // `PersonalizacionRecetaDto.extras`.
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => RecetaExtraInputDto)
   @IsOptional()
@@ -292,6 +304,8 @@ export class CreateItemDto {
 
   // Extensión combo
   @IsArray()
+  // Componentes de un combo; un INSERT por componente.
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => ComboComponenteInputDto)
   @IsOptional()
@@ -299,6 +313,9 @@ export class CreateItemDto {
 
   // Asociación de grupos de modificadores (combo | receta)
   @IsArray()
+  // Grupos de un ítem; unas cuatro queries por grupo. Es también el tope de
+  // `PersonalizacionRecetaDto.grupos`.
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => ItemGrupoModificadorInputDto)
   @IsOptional()
@@ -321,16 +338,22 @@ export class CreateItemDto {
 
   // Reglas N:M
   @IsArray()
+  // Reglas del catálogo del tenant; un INSERT por id.
+  @ArrayMaxSize(50)
   @IsUUID('4', { each: true })
   @IsOptional()
   impuestosIds?: string[];
 
   @IsArray()
+  // Reglas del catálogo del tenant; un INSERT por id.
+  @ArrayMaxSize(50)
   @IsUUID('4', { each: true })
   @IsOptional()
   recargosIds?: string[];
 
   @IsArray()
+  // Reglas del catálogo del tenant; un INSERT por id.
+  @ArrayMaxSize(50)
   @IsUUID('4', { each: true })
   @IsOptional()
   descuentosIds?: string[];

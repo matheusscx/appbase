@@ -23,6 +23,206 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Topes en los arrays de los DTOs, `@IsObject()` en los objetos únicos y reglas repetidas (cerrada 2026-10-06)
+
+Salen de [`pendientes.md`](pendientes.md) § 2, juntas porque son de borde y tocan los mismos
+archivos. Plan: [`2026-10-06-topes-arrays-y-objetos-dto.md`](../superpowers/plans/2026-10-06-topes-arrays-y-objetos-dto.md).
+La regla viva quedó en [`patterns/backend.md`](../patterns/backend.md) § 3; el e2e que fija todo es
+`backend/test/topes-dto.e2e-spec.ts`.
+
+### Las entradas que cierra, como estaban en `pendientes.md` § 2
+
+- [ ] **Los arrays de ids de los DTOs que no son de unidades no tienen `@ArrayMaxSize`** (backend,
+  `*.dto.ts`; lo listó el `api-security-reviewer` del frente Salón, 2026-10-03, y no se tocó por
+  alcance). Los de unidades con serie ya lo tienen (`@ArrayMaxSize(200)` en ventas, salón,
+  traslados y ajuste de stock); el resto no: entre otros `turnoIds` (propinas), `rolIds`
+  (`crear-usuario-tenant`), `itemIds` (promociones, recuentos), `impuestosIds`/`recargosIds`/
+  `descuentosIds` (ítems), `metodoPagoIds` (descuentos, recargos), `cuentaIds` (fusionar),
+  `usuarioIds` (cajones), `garzonIds` (testigo), y `grupos` y sus `pesos` en
+  `PUT /propinas/distribucion`, donde el guardado hace un `obtenerActivoPorId` por peso (lo anotó el
+  frente del campo omitido, 2026-10-04). Sin tope, un body con decenas de miles de ids
+  entra entero a un `= ANY($1)` o a un loop de validación. **Medir:** listar todos los campos array
+  de los DTOs y cuáles tienen tope —`grep -rn -B6 -E "Ids\??: (string|[A-Za-z]+)\[\]"
+  backend/src --include="*.dto.ts"` y mirar el bloque de decoradores de cada uno—, y para cada uno
+  qué hace el service con el array (un `ANY` es barato; un loop con una query por elemento, no).
+  Con eso se elige el tope por campo: el número no puede ser uno solo, porque `moduloAppPermisoIds`
+  de un rol puede ser legítimamente grande. Es de borde (DTO): no toca lógica.
+
+- [ ] **Once campos de objeto único con `@ValidateNested()` y sin `@IsObject()` aceptan un
+  array** (backend, DTOs de compras, propinas, ventas, ítems, cálculo de precios y salones; anotado
+  2026-10-06 por el frente que hizo 400 `ui: []` en `PATCH /me/preferencias`, que no los tocó por
+  alcance). `@ValidateNested()` deja pasar un array y valida cada elemento; el campo llega al service
+  como array donde espera un objeto. **Criterio del conteo:** de los `@ValidateNested()` de
+  `backend/src`, fuera los `{ each: true }` (campos que sí son arrays), fuera los que ya llevan
+  `@IsObject()` (`devolucion` y `receptor` de nota de crédito, `customer` de venta y de cerrar
+  cuenta) y fuera `ui` de `/me` (cerrado). Quedan, todos tipados como un objeto solo:
+  `ConfirmarCompraDto.pago`, `LineaCompraDto.lote`, `LiquidarDto.ajustes`,
+  `PreviewLiquidacionDto.ajustes`, `LineaVentaDto.personalizacion`,
+  `CreateVentaDto.propinaCierreMesa`, `CreateVentaDto.propinaDirecta`, `AjusteStockDto.lote`,
+  `CreateItemDto.lote`, `LineaDto.personalizacion` (`calculo-precios`) y
+  `AddLineaDto.personalizacion`. **Medido** con `plainToInstance` + `validateSync` (no por HTTP):
+  `{ campo: [] }` no da error sobre el campo en ninguno de los once; el control, `ui` con
+  `@IsObject()`, sí. **No medido:** qué hace cada service con el array —200 sin efecto, 500, o un
+  dato mal escrito—; eso decide si alguno es más que un 400 que falta. Salida probable, la de
+  `customer`: `@IsObject()` junto al `@ValidateNested()`, con un e2e por campo. Las dos
+  `personalizacion` de venta y de cálculo entran al motor de precios: van con el criterio de
+  `CLAUDE.md` (frente propio, sistema quieto) aunque el cambio sea de borde.
+
+### Cómo se cerró
+
+**Lo medido antes de tocar código, que cambió el tamaño del problema:**
+
+- **El body ya tenía techo.** El backend no configura body parser, así que rige el límite por defecto
+  de Express (100 kB). Medido por HTTP contra `/calculo-precios/calcular`: 2.400 UUIDs (93,7 kB)
+  pasan y 2.700 (105 kB) dan 413. "Decenas de miles de ids" no entraban; lo que pesaba eran los loops
+  con una query por elemento (hasta ~2.500 vueltas por pedido), no los `= ANY`.
+- **Censo de los campos array de entrada:** 95 declaraciones en `*.dto.ts`. Se contaron de dos
+  formas, por el tipo `[]` y por los decoradores de array, y las dos cierran; los 4 que solo ve la
+  primera son las redeclaraciones `declare`. Cómo quedaron: **22** ya tenían tope, **67** lo
+  recibieron y **6** quedan sin tope por una razón escrita: `QueryItemsDto.tipo` (acotado por
+  construcción: `parseLista` deduplica y `@IsIn` admite 6 valores); las 4 redeclaraciones `declare`
+  de `UpdateDescuentoDto`/`UpdateRecargoDto` (`metodoPagoIds`, `tramos`), que heredan el tope del
+  alta; y `CreateNotaCreditoDto.devoluciones`, que es fiscal y quedó anotado. 22 + 67 + 6 = 95.
+  Lo reproduce este comando desde la raíz del repo. Imprime los campos sin tope y al final el
+  total: hoy da `95 campos array, 89 con @ArrayMaxSize` y lista los 6. Un campo cuenta como array
+  si su tipo lleva `[]` o si un decorador lleva `@IsArray` o `each: true`.
+
+  ```bash
+  find backend/src -name '*.dto.ts' | xargs awk '
+    FNR==1 { d="" }
+    /^ *@/ { d = d $0; next }
+    /^ *(declare |readonly )?[A-Za-z_]+[?!]?: [^;=(]*;/ {
+      if (d != "" && ($0 ~ /\[\]/ || d ~ /@IsArray|each: true/)) {
+        n++; if (d ~ /@ArrayMaxSize/) t++; else print FILENAME ": " $0
+      }
+      d = ""; next
+    }
+    !/^ *(\/\/|\*|\/\*)/ && !/^ *$/ && !/^ *[)}\]]/ && !/^ *\(/ { d = "" }
+    END { print n " campos array, " t " con @ArrayMaxSize" }'
+  ```
+- **Qué hace el service con cada uno.** Lo leyeron tres agentes y se verificó por muestreo. Un solo
+  `= ANY` o un INSERT en lote: `turnoIds` (×3), `usuarioIds`, `rolIds`, `itemGrupoIds`, `itemIds` de
+  recuentos y de promociones, `moduloAppPermisoIds`, `metodoPagoIds`. Una o más queries por
+  elemento: `garzonIds` (testigos), `pesos` (dos por peso) y `grupos` de la distribución,
+  `participantes`, `lineas` de la comanda, `mesas` del layout, `pagos` (×3, de tres a cuatro INSERT
+  por pago), los arrays de composición de un ítem (alta y edición), las `opciones` de un grupo,
+  `items` de desfases (×2) y `cuentaIds` (por cuenta origen). Solo en memoria: `lineas` del cierre
+  de caja (×3), `exclusiones`/`montosManuales`, `tramos`, `diasSemana`, los ids de reglas del motor
+  y el subárbol de la personalización.
+- **Los once objetos, por HTTP** (lo que la entrada daba por "no medido"). **Tres escribían mal un
+  dato:**
+  - `LiquidarDto.ajustes` confirmaba la liquidación sin el ajuste pedido: con
+    `ajustes: [{ exclusiones: [Ana] }]`, Ana cobraba 1.667 de un pool de 5.000. Con el objeto
+    quedaba en 0 y los otros dos en 2.500.
+  - `LineaCompraDto.lote` guardaba `lote: []` en el jsonb del borrador (201) y la confirmación daba
+    500.
+  - `LineaVentaDto.personalizacion` descartaba las omisiones y descontaba el ingrediente omitido.
+    Quedó excluida: ver abajo.
+
+  `PreviewLiquidacionDto.ajustes` daba un 201 que ignoraba el ajuste. `CreateItemDto.lote` sin
+  stock daba un 201 sin efecto. Daban 500 con rollback (verificado: no quedaban ventas, ítems ni
+  lotes) `propinaDirecta`, `propinaCierreMesa`, `ConfirmarCompraDto.pago`, `AjusteStockDto.lote` y
+  `CreateItemDto.lote` con stock.
+- **Un hallazgo de plata en el camino:** un id de regla **repetido** aplicaba la regla una vez por
+  repetición. En `/calcular`, `descuentoIds` [D] → 5.000, [D,D] → 10.000, [D,D,D] → 15.000.
+  `POST /ventas` con [D,D] se **guardaba** con `totalFinal` 0 en vez de 5.950. `recargoIds` [R,R]
+  cobraba el recargo dos veces. `descuentosVentaIds` [V,V] daba 49.500 contra 54.500. `/online/pagar`
+  abría la orden de Webpay por 47.600 contra 53.550. Ninguna pantalla manda esos campos.
+
+**Qué se hizo** (solo decoradores; ningún service cambió):
+
+- `@ArrayMaxSize` en los 67 campos, con el tope elegido por campo y el porqué escrito al lado. El
+  criterio quedó en `patterns/backend.md` § 3.
+- `@IsObject()` en los ocho objetos únicos fuera del motor.
+- `@ArrayUnique()` en `descuentoIds`/`recargoIds` de `LineaVentaDto` y `LineaDto` y en
+  `descuentosVentaIds`/`recargosVentaIds` de `CreateVentaDto` y `CalcularVentaDto`: repetido es
+  400. La forma la decidió la Sesión de esfuerzo máximo (2026-10-06): es la convención del repo para
+  las listas de ids, solo rechaza y ninguna pantalla manda esos campos. Que entrara a este frente lo
+  decidió la orquestadora.
+- `@IsArray()` en los cinco `*Ids` de `LineaVentaDto`/`CreateVentaDto` (un id suelto daba 500 en
+  `POST /ventas`) y en `tramos` de descuentos y recargos.
+- Los arrays que entran al motor (`lineas`, ids de reglas, subárbol de `personalizacion-receta.dto.ts`)
+  entraron por decisión técnica de la Sesión de esfuerzo máximo (2026-10-06). Un tope no cambia lo
+  que cobra un pedido aceptado: debajo del tope el motor recibe lo mismo que antes. Condición: un
+  e2e por DTO del motor con `lineas` en el tope que dé el mismo total que la suma por línea.
+
+**Lo que lo fija:** `topes-dto.e2e-spec.ts`, 102 tests. Una fila por `@ArrayMaxSize`, más una por
+cada edición que hereda el tope del alta (tope + 1 → 400 que nombra el campo; tope justo → sin ese
+mensaje, con un campo no declarado para que el pedido muera en el pipe y no escriba nada). Una por `@IsArray`. Una por `@IsObject`: la de compras
+afirma que el borrador no se guarda y la de `liquidar`, que no aparece una liquidación nueva. Las de
+`@ArrayUnique` reproducen el 201 con total 0 y cubren las dos puertas de la tienda online. Los dos
+totales del motor van con 500 líneas.
+
+📌 **Lo que muerde al escribir estos e2e:** si un elemento de un array **de primer nivel** falla su
+validación, Nest informa solo los errores de los hijos y se come los del propio campo (el tope o
+`must be an object`). El 400 sale igual, pero el test que afirma el mensaje queda rojo. En un campo
+anidado los conserva. Por eso las filas mandan elementos válidos.
+
+**Mutantes:** uno por decorador nuevo, 90 en total (67 `@ArrayMaxSize`, 8 `@ArrayUnique`, 8
+`@IsObject`, 7 `@IsArray`). Se saca uno, se corre el spec y se vuelve a poner. **81 ponen rojo
+exactamente un test, el de su campo.** Los otros 9 son el mismo decorador visto por más de una
+puerta:
+- los 7 topes de alta que las ediciones heredan (`metodoPagoIds` y `tramos` de descuentos y recargos;
+  `scopes`, `itemIds` y `diasSemana` de promociones) matan 2, la fila del alta y la de la edición;
+- `LineaDto.descuentoIds` mata 3: `/calcular`, `/online/checkout` y `/online/pagar`;
+- `LineaVentaDto.descuentoIds` mata 2: su fila y el repro del 201 con total 0.
+
+Esos 7 se corrieron de nuevo después de agregar las filas de edición: la herencia con `declare` +
+`@ValidateIf` conserva el tope, y eso estaba supuesto, no medido. Los dos totales del motor no
+dependen de ningún decorador y siguen verdes con cualquiera: son la guarda de que el tope no cambia
+lo que se cobra.
+
+**Peor caso cronometrado** (condición de la Sesión de esfuerzo máximo), tres corridas contra el
+backend compilado y la base del worktree. Los números van de menor a mayor.
+
+| Pedido | 1 línea | 200 líneas | 500 líneas |
+|---|---|---|---|
+| `/calcular`, servicio | 13-27 ms | 23-33 ms | 33-37 ms |
+| `/calcular`, receta | — | 21-24 ms | 29-36 ms |
+| `/calcular`, Hamburguesa con su grupo | — | 34-42 ms | 413: no entra en 100 kB |
+| `POST /ventas`, servicio | 24-37 ms | 66-78 ms | 117-139 ms |
+| `POST /ventas`, receta | 27-31 ms | 531-570 ms | **1.063-1.181 ms** |
+
+La receta descuenta stock por línea, y ése es el costo que el tope acota. Sin tope cabían ~1.500
+líneas en los 100 kB del body. Extrapolando, no medido: unos 3 s adentro de una sola transacción.
+
+**El tope de `lineas` empezó en 200 y quedó en 500** (venta, cálculo y comanda). El `domain-reviewer`
+encontró que la precuenta del salón manda a `/calcular` todas las líneas de la cuenta
+(`cuentaToCalcularInput`, `useSalones.ts:356`). Agregar líneas a una cuenta no tiene tope, dos
+pedidos del mismo plato con distinta personalización son dos líneas y una fusión las suma. Con 200,
+una mesa grande se quedaba sin precuenta; cerrarla sí funcionaba, porque arma la venta por dentro sin
+pasar por el pipe. Con 500 el peor caso sigue en ~1,1 s.
+
+Lo que el tope **sí** cambia: antes, la precuenta cortaba solo en el body de 100 kB, y dónde cortaba
+dependía de cuánto pesa cada línea. Lo contó la tercera ronda de la revisión con `JSON.stringify` de
+lo que arma `cuentaToCalcularInput`, con `cantidad` como la devuelve la cuenta (`"1.0000"`):
+
+| Línea | Bytes | Entraban en 100 kB |
+|---|---|---|
+| sin personalizar | 70 | ~1.450 |
+| un ingrediente omitido | 154 | ~660 |
+| un grupo con una opción (la Hamburguesa) | 254 | ~400 |
+
+Una cuenta de entre 501 líneas y ese número tenía precuenta y ahora da 400. Con grupos, el body ya
+cortaba antes de 500 (la tabla de arriba: 413) y el tope no cambia nada. El hueco de fondo, que una
+cuenta no tiene tope de líneas, **no está en este commit**: la entrada de `pendientes.md` la escribe
+la orquestadora al integrar el frente, junto con las demás que se le pasaron.
+
+**Lo que quedó afuera**, anotado en `pendientes.md` § 2:
+
+- el `@IsObject()` de las tres `personalizacion`, por exclusión de la orquestadora, con la medición
+  del stock descontado;
+- `CreateNotaCreditoDto.devoluciones` (fiscal);
+- el reemplazo por línea de las reglas del ítem y el `impuestoIds` repetido (producto y fiscal por
+  separado);
+- `confirmarComanda`, que escribe líneas de cualquier cuenta del tenant (hallazgo lateral, leído).
+
+Además: `diasSemana` sigue aceptando repetidos (`[1,1,1]`), ahora con 7 como máximo. El evaluador solo pregunta
+`diasSemana.includes(dia)` (`promociones.evaluator.ts:136`), así que un repetido no cambia qué
+días aplica: no se tocó.
+
+---
+
 ## Una venta con dos líneas del mismo producto con serie ya no muestra todas las unidades bajo cada una (cerrada 2026-10-06)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. Plan:

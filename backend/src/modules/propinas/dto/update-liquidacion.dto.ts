@@ -1,12 +1,13 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsNumberString,
   IsOptional,
   IsString,
   IsUUID,
-  ValidateNested,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
@@ -64,6 +65,9 @@ export class UpdateLiquidacionParticipanteDto {
 export class UpdateLiquidacionDto {
   @ValidateIf((_o, v) => v !== undefined)
   @IsArray()
+  // Los participantes de una liquidación: los garzones del tenant. Una o dos
+  // queries por elemento.
+  @ArrayMaxSize(200)
   @ValidateNested({ each: true })
   @Type(() => UpdateLiquidacionParticipanteDto)
   participantes?: UpdateLiquidacionParticipanteDto[];

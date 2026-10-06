@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsNotEmpty,
@@ -13,6 +14,9 @@ import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 
 export class AplicarOverridesDto {
   @IsArray()
+  // "Aplicar a todos" manda cada ítem que usa el grupo; se resuelven en lote
+  // (`= ANY` y un INSERT con `unnest`).
+  @ArrayMaxSize(1000)
   @ArrayMinSize(1)
   @IsUUID(undefined, { each: true })
   itemGrupoIds: string[];

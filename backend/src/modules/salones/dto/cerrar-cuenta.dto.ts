@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsNumberString,
   IsObject,
@@ -17,6 +18,8 @@ import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorat
 export class CerrarCuentaDto extends CredencialGarzonOpcionalDto {
   @IsOptional()
   @IsArray()
+  // Mismo tope que `CreateVentaDto.pagos`: termina en la misma venta.
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => PagoVentaDto)
   pagos?: PagoVentaDto[];

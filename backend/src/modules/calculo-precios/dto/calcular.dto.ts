@@ -1,7 +1,9 @@
 import { Type } from 'class-transformer';
 import type { ReglasCongeladas } from '../../../common/dto/reglas-congeladas.dto';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
+  ArrayUnique,
   IsArray,
   IsIn,
   IsNumberString,
@@ -52,22 +54,33 @@ export class LineaDto {
   /** Si se pasa, reemplaza los descuentos asociados al ítem. */
   @IsOptional()
   @IsArray()
+  // Mismo tope y misma razón que `LineaVentaDto.descuentoIds`.
+  @ArrayMaxSize(50)
+  @ArrayUnique()
   @IsUUID('4', { each: true })
   descuentoIds?: string[];
 
   @IsOptional()
   @IsArray()
+  // Mismo tope y misma razón que `LineaVentaDto.descuentoIds`.
+  @ArrayMaxSize(50)
+  @ArrayUnique()
   @IsUUID('4', { each: true })
   recargoIds?: string[];
 
   @IsOptional()
   @IsArray()
+  // Mismo tope que `LineaVentaDto.impuestoIds`.
+  @ArrayMaxSize(50)
   @IsUUID('4', { each: true })
   impuestoIds?: string[];
 }
 
 export class CalcularVentaDto {
   @IsArray()
+  // Mismo tope que `CreateVentaDto.lineas`: es el mismo carro, y la precuenta
+  // del salón manda acá todas las líneas de la cuenta.
+  @ArrayMaxSize(500)
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => LineaDto)
@@ -81,11 +94,17 @@ export class CalcularVentaDto {
   /** Descuentos aplicados a nivel venta (sobre el total agregado). */
   @IsOptional()
   @IsArray()
+  // Mismo tope y misma razón que `LineaVentaDto.descuentoIds`.
+  @ArrayMaxSize(50)
+  @ArrayUnique()
   @IsUUID('4', { each: true })
   descuentosVentaIds?: string[];
 
   @IsOptional()
   @IsArray()
+  // Mismo tope y misma razón que `LineaVentaDto.descuentoIds`.
+  @ArrayMaxSize(50)
+  @ArrayUnique()
   @IsUUID('4', { each: true })
   recargosVentaIds?: string[];
 

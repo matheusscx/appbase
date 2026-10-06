@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsBoolean,
@@ -63,6 +64,9 @@ export class GrupoDistribucionDto {
   orden: number;
 
   @IsArray()
+  // Uno por garzón activo; el guardado valida y escribe cada peso por
+  // separado (dos queries por elemento).
+  @ArrayMaxSize(200)
   @ValidateNested({ each: true })
   @Type(() => PesoManualDto)
   pesos: PesoManualDto[];
@@ -77,6 +81,9 @@ export class UpdateDistribucionDto {
   porcentajeSugerido: string;
 
   @IsArray()
+  // Activos hay a lo sumo uno por tipo de garzón (tres); el resto son grupos
+  // apagados que la pantalla conserva. Un INSERT por grupo.
+  @ArrayMaxSize(20)
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => GrupoDistribucionDto)

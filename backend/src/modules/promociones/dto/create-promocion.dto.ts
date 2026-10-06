@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsBoolean,
@@ -43,6 +44,9 @@ export class ScopePromoDto {
 
   @IsOptional()
   @IsArray()
+  // Una promo puede abarcar buena parte del catálogo; se guardan en un solo
+  // INSERT.
+  @ArrayMaxSize(1000)
   @IsUUID('4', { each: true })
   itemIds?: string[];
 }
@@ -96,6 +100,8 @@ export class CreatePromocionDto {
   /** ISO-8601: 1=lunes…7=domingo. Ausente/null = todos los días. */
   @IsOptional()
   @IsArray()
+  // Los siete días de la semana.
+  @ArrayMaxSize(7)
   @IsInt({ each: true })
   @Min(1, { each: true })
   @Max(7, { each: true })
@@ -124,6 +130,8 @@ export class CreatePromocionDto {
   valorMonto?: string | null;
 
   @IsArray()
+  // Alcances de una promo (por ítems o por categoría).
+  @ArrayMaxSize(50)
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => ScopePromoDto)

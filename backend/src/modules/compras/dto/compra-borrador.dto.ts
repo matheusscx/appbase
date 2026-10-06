@@ -5,6 +5,7 @@ import {
   IsIn,
   IsNotEmpty,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -114,7 +115,10 @@ export class LineaCompraDto {
   @Type(() => SerieCompraDto)
   series?: SerieCompraDto[];
 
+  // `IsObject` además de `ValidateNested`: este deja pasar un array, que se
+  // guardaba tal cual en el borrador y después hacía fallar la confirmación.
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => LoteCompraDto)
   lote?: LoteCompraDto;

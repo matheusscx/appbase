@@ -1,7 +1,9 @@
 import {
+  ArrayMaxSize,
   ArrayUnique,
   IsArray,
   IsISO8601,
+  IsObject,
   IsOptional,
   IsUUID,
   ValidateNested,
@@ -20,11 +22,16 @@ export class PreviewLiquidacionDto {
 
   @IsOptional()
   @IsArray()
+  // Mismo tope que `CreateLiquidacionDto.turnoIds`.
+  @ArrayMaxSize(50)
   @ArrayUnique()
   @IsUUID('4', { each: true })
   turnoIds?: string[];
 
+  // `IsObject` además de `ValidateNested`: este deja pasar un array, y el
+  // preview mostraba el reparto sin los ajustes pedidos.
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => AjustesRepartoDto)
   ajustes?: AjustesRepartoDto;

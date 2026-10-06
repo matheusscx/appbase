@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsNotEmpty,
@@ -24,6 +25,8 @@ export class UpdateGrupoModificadorDto {
   // + cascada de overrides si desaparece). Ver GruposModificadoresService.update.
   @ValidateIf((_o, v) => v !== undefined)
   @IsArray()
+  // Mismo tope que `CreateGrupoModificadorDto.opciones`.
+  @ArrayMaxSize(100)
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => GrupoOpcionInputDto)

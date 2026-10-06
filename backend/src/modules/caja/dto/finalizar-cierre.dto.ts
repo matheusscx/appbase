@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsOptional,
   IsString,
@@ -10,6 +11,8 @@ import { LineaJustificacionDto } from './justificar-diferencias.dto';
 
 export class FinalizarCierreDto {
   @IsArray()
+  // Una línea por medio de pago del arqueo, igual que el conteo.
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => LineaJustificacionDto)
   lineas: LineaJustificacionDto[];

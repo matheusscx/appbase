@@ -1,4 +1,10 @@
-import { IsArray, IsOptional, IsUUID, ValidateNested } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsOptional,
+  IsUUID,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
@@ -20,11 +26,15 @@ export class MontoManualDto {
 export class AjustesRepartoDto {
   @IsOptional()
   @IsArray()
+  // A lo sumo los participantes del reparto: los garzones del tenant.
+  @ArrayMaxSize(200)
   @IsUUID('4', { each: true })
   exclusiones?: string[];
 
   @IsOptional()
   @IsArray()
+  // Uno por participante, igual que `exclusiones`.
+  @ArrayMaxSize(200)
   @ValidateNested({ each: true })
   @Type(() => MontoManualDto)
   montosManuales?: MontoManualDto[];

@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsNumber,
@@ -26,6 +27,8 @@ export class MesaPosicionDto {
 
 export class UpdateLayoutDto {
   @IsArray()
+  // Mesas de un salón; el service hace un UPDATE por mesa.
+  @ArrayMaxSize(200)
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => MesaPosicionDto)

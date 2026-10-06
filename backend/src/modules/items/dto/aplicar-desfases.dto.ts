@@ -1,11 +1,12 @@
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsNumberString,
   IsOptional,
   IsUUID,
   ValidateNested,
-  ArrayMinSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
@@ -42,6 +43,9 @@ export class AplicarDesfaseItemDto {
 
 export class AplicarDesfasesDto {
   @IsArray()
+  // La bandeja puede mandar todas las recetas y combos que un cambio de costo
+  // dejó desfasados; hasta dos UPDATE por elemento.
+  @ArrayMaxSize(500)
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => AplicarDesfaseItemDto)

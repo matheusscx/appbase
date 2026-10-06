@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsIn,
@@ -79,6 +80,8 @@ export class CreatePagoDto {
   ventaId: string;
 
   @IsArray()
+  // Mismo tope que `CreateVentaDto.pagos`: tres o cuatro INSERT por pago.
+  @ArrayMaxSize(50)
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => PagoItemDto)

@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayUnique,
   IsArray,
   IsBoolean,
@@ -79,11 +80,17 @@ export class CreateDescuentoDto {
   // Mismo decorador que usan las listas de ids de `propinas` y `recuentos`.
   @IsOptional()
   @IsArray()
+  // Catálogo global de medios de pago (hoy 4); `@ArrayUnique` ya no deja
+  // repetir.
+  @ArrayMaxSize(20)
   @ArrayUnique()
   @IsUUID('4', { each: true })
   metodoPagoIds?: string[];
 
   @IsOptional()
+  @IsArray()
+  // Tramos por volumen de una regla: una escala, no un catálogo.
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => TramoDto)
   tramos?: TramoDto[];

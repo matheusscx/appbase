@@ -80,6 +80,75 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **Los ids de reglas que manda el cliente reemplazan las del ítem, y el impuesto adicional
+  repetido se cobra dos veces** (backend, motor de precios; medido por HTTP el 2026-10-06 por el frente
+  de topes de los DTOs, que no lo tocó). `resolverLinea` (`calculo-precios.service.ts:849-851`) usa
+  `linea.descuentoIds ?? reglas…` y lo mismo con `recargoIds` e `impuestoIds`. Lo que manda la línea
+  **reemplaza** lo asociado al ítem, y solo se valida el nivel y el tenant (documentado en
+  `motor-calculo-precios.md`). Ninguna pantalla manda esos campos: el frontend solo los declara en el
+  tipo de `useCalculoPrecios.ts`. Pero quien tiene `Ventas:Crear` llega por la API a mano, y también
+  quien tiene `Tienda Online:Crear` por `POST /online/checkout|pagar` (`CalcularVentaDto`). La tienda es
+  interna (usuario del tenant logueado), pero es la base del futuro storefront público. Medido con
+  `POST /ventas`, admin de Paris, todo 201 y persistido:
+  - **Producto (descuentos y recargos).** (a) Un descuento de nivel línea que el ítem no tiene
+    asociado se aplica igual: Smartphone (`…116`, sin filas en `item_descuentos`) ×2 con
+    `descuentoIds: ["…338"]` (Promo fija $5.000) → `totalFinal` 5.950, contra 11.900 sin él.
+    (b) `recargoIds: []` le saca al ítem su recargo asociado: un servicio de 1.000 neto con "Interés
+    compuesto 4%" (`…132`) y un impuesto adicional del 10% → 1.342 sin el campo, **1.290** con
+    `recargoIds: []`.
+  - **Fiscal (va en su propia sesión, ADR-010).** (c) `impuestoIds: []` vende sin el impuesto
+    adicional (`tipo='otro'`): el mismo ítem → **1.238**, la venta queda con 1 impuesto en vez de 2.
+    ADR-018 cerró solo el IVA. Además, un `impuestoIds` **repetido** cobra el impuesto adicional una
+    vez por repetición: es el gemelo del bug de descuentos y recargos repetidos que cerró el
+    `@ArrayUnique` del 2026-10-06 ([`resueltos.md`](resueltos.md)). Se dejó afuera por la regla fiscal.
+  - **La pregunta de fondo** (anotada por la orquestadora): `CLAUDE.md` dice que *el cliente manda qué
+    se pidió, nunca cuánto vale*. Que el comprador elija qué ids de regla se le aplican puede chocar
+    con eso, más allá de la repetición. La Sesión de esfuerzo máximo se lo lleva al owner en dos
+    preguntas: descuentos y recargos por un lado, impuesto adicional por otro.
+  - **Reproducir:** `POST /api/ventas` con `{ lineas: [{ itemId, cantidad: '2', descuentoIds:
+    ['550e8400-e29b-41d4-a716-446655440338'] }], pagos: [{ metodoPagoId: EFECTIVO, monto:
+    '2000000.0000' }] }` y la cabecera `Idempotency-Key`, sobre el seed de Paris.
+
+- [ ] **`personalizacion` como array: la venta descarta las omisiones y descuenta el ingrediente
+  omitido** (backend, `LineaVentaDto.personalizacion`, `LineaDto.personalizacion` de
+  `calculo-precios` y `AddLineaDto.personalizacion`; medido por HTTP el 2026-10-06 por el frente que
+  le puso `@IsObject()` a los otros ocho objetos únicos, y no tocado por exclusión de la
+  orquestadora). Son los tres que quedaron de "Once campos de objeto único con `@ValidateNested()` y
+  sin `@IsObject()`" ([`resueltos.md`](resueltos.md)). **Medido:**
+  - `POST /ventas`, receta con un ingrediente no bloqueante: `personalizacion: { omitidos: [X] }` →
+    201, `venta_detalles.personalizacion` con `omitidos: [X]` y sin movimiento de X. Con
+    `personalizacion: [{ omitidos: [X] }]` o `[]` → **201**, guardada con `omitidos: []`, y **X se
+    descuenta del stock** (`movimientos_inventario`, motivo `venta`). La cocina recibe el plato
+    entero y el inventario se mueve.
+  - Si el ítem tiene un grupo obligatorio ("Proteína" de la Hamburguesa Especial del seed), el array
+    da 400 "El grupo … requiere elegir…", porque la elección del grupo se perdió con el resto.
+  - `/calculo-precios/calcular`: 201 y la personalización ignorada.
+  - `POST /cuentas/:id/lineas` (`AddLineaDto`): **no medido**.
+
+  **Salida probable:** `@IsObject()` junto al `@ValidateNested()`, con un e2e por campo
+  (`backend/test/topes-dto.e2e-spec.ts` tiene el patrón). Según la Sesión de esfuerzo máximo, con el
+  criterio de conducta tampoco necesitaría el sistema quieto: un `@IsObject()` solo rechaza, y un
+  pedido aceptado le da al motor lo mismo que hoy. Falta la medición de `AddLineaDto` y que la
+  orquestadora le dé frente.
+
+- [ ] **`CreateNotaCreditoDto.devoluciones` no tiene tope** (backend, `ventas/dto/
+  create-nota-credito.dto.ts`; anotado el 2026-10-06 por el frente de topes de los DTOs, que no lo
+  tocó: lo fiscal va solo, owner 2026-08-23). Es el único campo array de entrada que quedó sin
+  `@ArrayMaxSize` por decisión y no por construcción. **El arreglo es mecánico y tiene precedente:**
+  sus dos gemelos de pasarela ya llevan `@ArrayMaxSize(200)` (`CreateReembolsoDto.devoluciones` y
+  `GenerarNotaReembolsoDto.devoluciones`, este último desde `d08aef16`). Va con el mismo 200 y su
+  fila en `topes-dto.e2e-spec.ts`; solo espera su sesión fiscal.
+
+- [ ] **`POST /cuentas/:id/comanda` escribe líneas de cualquier cuenta del tenant** (backend,
+  `SalonesService.confirmarComanda`, `salones.service.ts:2979-2985`; leído, **no corrido**, por un
+  agente del frente de topes de los DTOs el 2026-10-06 y confirmado leyendo el código). El loop hace
+  `manager.update(CuentaLinea, { id: linea.cuentaLineaId, tenantId }, …)`: no ata la línea a la
+  `cuentaId` de la ruta (que sí se valida abierta), ni filtra `eliminado_el`. Con el id de una línea de
+  otra cuenta del mismo tenant, abierta o cerrada, le pisa `cantidadEnviada`. **Medir:** por HTTP,
+  dos cuentas, mandar a la comanda de una el `cuentaLineaId` de la otra, y releer. **Arreglo
+  probable:** agregar `cuentaId` y `eliminadoEl: IsNull()` al `where`, y que una línea ajena sea 400 o
+  404 en vez de un `update` que no toca nada.
+
 - [ ] **Playwright entero que dura más de 15 minutos cae al login a partir de ahí** (infra de
   test; anotado el 2026-10-04 en el gate de "Generar nota", sin tocarlo: no era del frente).
   **Medido:** con el host cargado la suite tardó 21,8 min; 12 de sus 16 rojos son la pantalla de
@@ -122,42 +191,6 @@ destapa una decisión que no es mía).
   durante su animación. **Medir:** `--repeat-each` dentro de la suite entera (solo no se reproduce)
   y ver si el selector se re-renderiza al abrir; la causa se busca en qué remonta la lista, no
   subiendo el timeout.
-
-- [ ] **Los arrays de ids de los DTOs que no son de unidades no tienen `@ArrayMaxSize`** (backend,
-  `*.dto.ts`; lo listó el `api-security-reviewer` del frente Salón, 2026-10-03, y no se tocó por
-  alcance). Los de unidades con serie ya lo tienen (`@ArrayMaxSize(200)` en ventas, salón,
-  traslados y ajuste de stock); el resto no: entre otros `turnoIds` (propinas), `rolIds`
-  (`crear-usuario-tenant`), `itemIds` (promociones, recuentos), `impuestosIds`/`recargosIds`/
-  `descuentosIds` (ítems), `metodoPagoIds` (descuentos, recargos), `cuentaIds` (fusionar),
-  `usuarioIds` (cajones), `garzonIds` (testigo), y `grupos` y sus `pesos` en
-  `PUT /propinas/distribucion`, donde el guardado hace un `obtenerActivoPorId` por peso (lo anotó el
-  frente del campo omitido, 2026-10-04). Sin tope, un body con decenas de miles de ids
-  entra entero a un `= ANY($1)` o a un loop de validación. **Medir:** listar todos los campos array
-  de los DTOs y cuáles tienen tope —`grep -rn -B6 -E "Ids\??: (string|[A-Za-z]+)\[\]"
-  backend/src --include="*.dto.ts"` y mirar el bloque de decoradores de cada uno—, y para cada uno
-  qué hace el service con el array (un `ANY` es barato; un loop con una query por elemento, no).
-  Con eso se elige el tope por campo: el número no puede ser uno solo, porque `moduloAppPermisoIds`
-  de un rol puede ser legítimamente grande. Es de borde (DTO): no toca lógica.
-
-- [ ] **Once campos de objeto único con `@ValidateNested()` y sin `@IsObject()` aceptan un
-  array** (backend, DTOs de compras, propinas, ventas, ítems, cálculo de precios y salones; anotado
-  2026-10-06 por el frente que hizo 400 `ui: []` en `PATCH /me/preferencias`, que no los tocó por
-  alcance). `@ValidateNested()` deja pasar un array y valida cada elemento; el campo llega al service
-  como array donde espera un objeto. **Criterio del conteo:** de los `@ValidateNested()` de
-  `backend/src`, fuera los `{ each: true }` (campos que sí son arrays), fuera los que ya llevan
-  `@IsObject()` (`devolucion` y `receptor` de nota de crédito, `customer` de venta y de cerrar
-  cuenta) y fuera `ui` de `/me` (cerrado). Quedan, todos tipados como un objeto solo:
-  `ConfirmarCompraDto.pago`, `LineaCompraDto.lote`, `LiquidarDto.ajustes`,
-  `PreviewLiquidacionDto.ajustes`, `LineaVentaDto.personalizacion`,
-  `CreateVentaDto.propinaCierreMesa`, `CreateVentaDto.propinaDirecta`, `AjusteStockDto.lote`,
-  `CreateItemDto.lote`, `LineaDto.personalizacion` (`calculo-precios`) y
-  `AddLineaDto.personalizacion`. **Medido** con `plainToInstance` + `validateSync` (no por HTTP):
-  `{ campo: [] }` no da error sobre el campo en ninguno de los once; el control, `ui` con
-  `@IsObject()`, sí. **No medido:** qué hace cada service con el array —200 sin efecto, 500, o un
-  dato mal escrito—; eso decide si alguno es más que un 400 que falta. Salida probable, la de
-  `customer`: `@IsObject()` junto al `@ValidateNested()`, con un e2e por campo. Las dos
-  `personalizacion` de venta y de cálculo entran al motor de precios: van con el criterio de
-  `CLAUDE.md` (frente propio, sistema quieto) aunque el cambio sea de borde.
 
 ## 3. Ya decidido, falta construir
 

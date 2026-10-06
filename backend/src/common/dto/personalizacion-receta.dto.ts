@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsInt,
   IsOptional,
@@ -74,6 +75,8 @@ export class PersonalizacionGrupoInputDto {
   grupoId: string;
 
   @IsArray()
+  // A lo sumo las opciones del grupo: el tope de `CreateGrupoModificadorDto`.
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => PersonalizacionGrupoOpcionInputDto)
   opciones: PersonalizacionGrupoOpcionInputDto[];
@@ -88,6 +91,9 @@ export class PersonalizacionComponenteInputDto {
   unidad: number;
 
   @IsArray()
+  // A lo sumo los grupos del componente: el tope de
+  // `CreateItemDto.gruposModificadores`.
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => PersonalizacionGrupoInputDto)
   grupos: PersonalizacionGrupoInputDto[];
@@ -96,11 +102,17 @@ export class PersonalizacionComponenteInputDto {
 export class PersonalizacionRecetaDto {
   @IsOptional()
   @IsArray()
+  // A lo sumo los ingredientes de la receta: el tope de
+  // `CreateItemDto.ingredientes`.
+  @ArrayMaxSize(100)
   @IsUUID('4', { each: true })
   omitidos?: string[];
 
   @IsOptional()
   @IsArray()
+  // A lo sumo los extras de la receta: el tope de
+  // `CreateItemDto.extrasPermitidos`.
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => PersonalizacionExtraInputDto)
   extras?: PersonalizacionExtraInputDto[];
@@ -112,12 +124,17 @@ export class PersonalizacionRecetaDto {
 
   @IsOptional()
   @IsArray()
+  // A lo sumo los grupos del ítem: el tope de `CreateItemDto.gruposModificadores`.
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => PersonalizacionGrupoInputDto)
   grupos?: PersonalizacionGrupoInputDto[];
 
   @IsOptional()
   @IsArray()
+  // Una entrada por unidad de cada componente del combo (un combo de 50
+  // componentes con varias unidades de alguno).
+  @ArrayMaxSize(200)
   @ValidateNested({ each: true })
   @Type(() => PersonalizacionComponenteInputDto)
   componentes?: PersonalizacionComponenteInputDto[];

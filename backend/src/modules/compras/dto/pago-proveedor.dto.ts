@@ -5,6 +5,7 @@ import {
   IsArray,
   IsNotEmpty,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -114,7 +115,10 @@ export class PagoAlConfirmarDto {
 
 /** Body de `POST /compras/:id/confirmar` (spec § 7): el `pago` es opcional. */
 export class ConfirmarCompraDto {
+  // `IsObject` además de `ValidateNested`: este deja pasar un array, que
+  // reventaba la confirmación en un 500.
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => PagoAlConfirmarDto)
   pago?: PagoAlConfirmarDto;

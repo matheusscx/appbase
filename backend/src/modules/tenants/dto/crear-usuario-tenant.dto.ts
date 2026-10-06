@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   ArrayUnique,
   IsArray,
@@ -43,6 +44,8 @@ export class CrearUsuarioTenantDto {
   telefono?: string;
 
   @IsArray()
+  // Roles del tenant; se resuelven en un solo `= ANY`.
+  @ArrayMaxSize(50)
   @ArrayMinSize(1, { message: 'Elegí al menos un rol' })
   @ArrayUnique()
   @IsUUID('4', { each: true })

@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayUnique,
   IsArray,
   IsISO8601,
@@ -18,6 +19,9 @@ export class CreateLiquidacionDto {
 
   @IsOptional()
   @IsArray()
+  // Mismo tope que el filtro de turnos del reporte de propinas: los turnos
+  // de un período; van en un solo `= ANY`.
+  @ArrayMaxSize(50)
   @ArrayUnique()
   @IsUUID('4', { each: true })
   turnoIds?: string[];

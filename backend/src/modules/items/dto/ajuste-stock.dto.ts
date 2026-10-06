@@ -4,6 +4,7 @@ import {
   IsIn,
   IsNotEmpty,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -132,6 +133,9 @@ export class AjusteStockDto {
   unidadIds?: string[];
 
   // Modo 'lote' — entrada: datos del lote a crear/agregar
+  // `IsObject` además de `ValidateNested`: este deja pasar un array, que
+  // reventaba el ajuste en un 500.
+  @IsObject()
   @ValidateNested()
   @Type(() => LoteAjusteInputDto)
   @IsOptional()

@@ -70,6 +70,9 @@ Request:
   "descuentosVentaIds": ["uuid"],         // opcional (reglas a nivel venta)
   "recargosVentaIds": []
 }
+// Topes del borde (400 al pasarse): 500 líneas, 50 ids por lista. Los ids de
+// descuentos y recargos (de línea y de venta) no se repiten: repetido es 400
+// (2026-10-06; antes la regla se aplicaba una vez por repetición).
 
 Response (201):
 {

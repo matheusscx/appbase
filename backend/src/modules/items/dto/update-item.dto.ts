@@ -1,17 +1,18 @@
 import {
-  IsString,
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
   IsNotEmpty,
   IsNumberString,
-  IsUUID,
-  IsBoolean,
   IsOptional,
-  IsInt,
-  IsIn,
+  IsString,
+  IsUUID,
   Min,
-  IsArray,
-  ValidateNested,
   Validate,
   ValidateIf,
+  ValidateNested,
   ValidatorConstraint,
   ValidatorConstraintInterface,
 } from 'class-validator';
@@ -167,12 +168,16 @@ export class UpdateItemDto {
 
   // Extensión receta (reemplazo total de la lista)
   @IsArray()
+  // Mismo tope que `CreateItemDto.ingredientes`.
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => RecetaIngredienteInputDto)
   @ValidateIf((_o, v) => v !== undefined)
   ingredientes?: RecetaIngredienteInputDto[];
 
   @IsArray()
+  // Mismo tope que `CreateItemDto.extrasPermitidos`.
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => RecetaExtraInputDto)
   @ValidateIf((_o, v) => v !== undefined)
@@ -180,6 +185,8 @@ export class UpdateItemDto {
 
   // Extensión combo (reemplazo total de la lista)
   @IsArray()
+  // Mismo tope que `CreateItemDto.componentes`.
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => ComboComponenteInputDto)
   @ValidateIf((_o, v) => v !== undefined)
@@ -187,6 +194,8 @@ export class UpdateItemDto {
 
   // Asociación de grupos de modificadores (combo | receta, reemplazo total)
   @IsArray()
+  // Mismo tope que `CreateItemDto.gruposModificadores`.
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => ItemGrupoModificadorInputDto)
   @ValidateIf((_o, v) => v !== undefined)
@@ -194,16 +203,22 @@ export class UpdateItemDto {
 
   // Reglas N:M (undefined = no tocar; [] = limpiar todas)
   @IsArray()
+  // Mismo tope que `CreateItemDto.impuestosIds`.
+  @ArrayMaxSize(50)
   @IsUUID('4', { each: true })
   @ValidateIf((_o, v) => v !== undefined)
   impuestosIds?: string[];
 
   @IsArray()
+  // Mismo tope que `CreateItemDto.recargosIds`.
+  @ArrayMaxSize(50)
   @IsUUID('4', { each: true })
   @ValidateIf((_o, v) => v !== undefined)
   recargosIds?: string[];
 
   @IsArray()
+  // Mismo tope que `CreateItemDto.descuentosIds`.
+  @ArrayMaxSize(50)
   @IsUUID('4', { each: true })
   @ValidateIf((_o, v) => v !== undefined)
   descuentosIds?: string[];

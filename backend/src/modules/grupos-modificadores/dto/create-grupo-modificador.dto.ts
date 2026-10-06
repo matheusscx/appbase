@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsInt,
@@ -50,6 +51,9 @@ export class CreateGrupoModificadorDto {
   nombre: string;
 
   @IsArray()
+  // Opciones de un grupo (una carta de salsas, de bebidas); un INSERT por
+  // opción.
+  @ArrayMaxSize(100)
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => GrupoOpcionInputDto)

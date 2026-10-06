@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   ArrayMinSize,
+  ArrayUnique,
   IsArray,
   IsIn,
   IsInt,
@@ -39,14 +40,26 @@ export class LineaVentaDto {
   unidadCodigoPresentacion?: string;
 
   @IsOptional()
+  @IsArray()
+  // Reglas del catálogo del tenant. Sin repetidos: repetido, el motor aplicaba
+  // la regla una vez por repetición (un 201 con total 0, medido 2026-10-06).
+  @ArrayMaxSize(50)
+  @ArrayUnique()
   @IsUUID(undefined, { each: true })
   descuentoIds?: string[];
 
   @IsOptional()
+  @IsArray()
+  // Mismo tope y misma razón que `descuentoIds`.
+  @ArrayMaxSize(50)
+  @ArrayUnique()
   @IsUUID(undefined, { each: true })
   recargoIds?: string[];
 
   @IsOptional()
+  @IsArray()
+  // Reglas del catálogo del tenant.
+  @ArrayMaxSize(50)
   @IsUUID(undefined, { each: true })
   impuestoIds?: string[];
 
@@ -182,6 +195,13 @@ export class CustomerVentaDto {
 
 export class CreateVentaDto {
   @IsArray()
+  // El POS junta el mismo producto en una línea, pero una cuenta de salón no:
+  // dos pedidos del mismo plato con distinta personalización son dos líneas,
+  // y una mesa grande o una fusión las acumula. 500 deja pasar esa mesa. Cada
+  // línea cuesta unas queries (receta, grupos, stock): 500 líneas de receta
+  // tardan ~1,1 s (medido el 2026-10-06), y el body de 100 kB dejaba pasar
+  // ~1.500.
+  @ArrayMaxSize(500)
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => LineaVentaDto)
@@ -189,6 +209,8 @@ export class CreateVentaDto {
 
   @IsOptional()
   @IsArray()
+  // Una cuenta dividida entre comensales; tres o cuatro INSERT por pago.
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => PagoVentaDto)
   pagos?: PagoVentaDto[];
@@ -202,10 +224,18 @@ export class CreateVentaDto {
   metodoPagoId?: string;
 
   @IsOptional()
+  @IsArray()
+  // Mismo tope y misma razón que `LineaVentaDto.descuentoIds`.
+  @ArrayMaxSize(50)
+  @ArrayUnique()
   @IsUUID(undefined, { each: true })
   descuentosVentaIds?: string[];
 
   @IsOptional()
+  @IsArray()
+  // Mismo tope y misma razón que `LineaVentaDto.descuentoIds`.
+  @ArrayMaxSize(50)
+  @ArrayUnique()
   @IsUUID(undefined, { each: true })
   recargosVentaIds?: string[];
 
@@ -226,12 +256,18 @@ export class CreateVentaDto {
   canal?: 'fisico' | 'online';
 
   /** Solo cierre de cuenta de mesa — crea venta_propina y eleva target de cobro. */
+  // `IsObject` además de `ValidateNested`: este deja pasar un array, que
+  // reventaba la venta en un 500.
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => PropinaCierreMesaDto)
   propinaCierreMesa?: PropinaCierreMesaDto;
 
+  // `IsObject` además de `ValidateNested`: este deja pasar un array, que
+  // reventaba la venta en un 500.
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => PropinaDirectaDto)
   propinaDirecta?: PropinaDirectaDto;

@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsNumberString,
   IsUUID,
@@ -17,6 +18,9 @@ class LineaEnviadaDto {
 
 export class ConfirmarComandaDto {
   @IsArray()
+  // Líneas de una cuenta, mismo tope que `CreateVentaDto.lineas`; el service
+  // hace un UPDATE por línea.
+  @ArrayMaxSize(500)
   @ValidateNested({ each: true })
   @Type(() => LineaEnviadaDto)
   lineas: LineaEnviadaDto[];

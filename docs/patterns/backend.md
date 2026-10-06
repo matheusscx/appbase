@@ -138,8 +138,27 @@ cambiar el tamaño de página reseteaba el modo oscuro.
 `@ValidateNested()` acepta un array y valida cada elemento, así que al service llega un array
 donde espera un objeto: un 200 sin efecto (`ui` de `PATCH /me/preferencias`, 2026-10-06) o un 500
 (`customer` de una venta con Factura). Los campos que sí son arrays van con `@IsArray()` y
-`{ each: true }`. Hay campos anteriores a la regla sin `@IsObject()`: los anota
+`{ each: true }`. Quedan sin `@IsObject()` las tres `personalizacion` de una línea, anotadas en
 [`pendientes.md`](../agent/pendientes.md) § 2.
+
+**Todo array que entra por la API lleva `@ArrayMaxSize`, con el tope elegido por campo y el porqué
+al lado** (2026-10-06). No hay un número único. Se elige así:
+
+- **Por encima de lo legítimo.** Lo acota el catálogo o la composición que el array referencia (los
+  medios de pago de un arqueo, las reglas de un tenant, los ingredientes de una receta), y si alguna
+  pantalla manda "todos" de algo, el tope tiene que dejarlo pasar.
+- **Según lo que cuesta cada elemento en el service.** Un `= ANY` o un INSERT en lote aguanta un tope
+  alto. Un loop con una query por elemento lo pide bajo.
+- **Coherente con su gemelo.** Si un array nace de otro, se toman el mismo número: las `omitidos` de
+  una personalización no pueden superar los `ingredientes` de una receta, y `lineas` de `/calcular` y
+  de `POST /ventas` son el mismo carro.
+
+El body ya tiene techo, porque Express corta en 100 kB (unos 2.500 UUIDs): un tope que no frena antes
+de ese límite no aporta nada. Los ids de descuentos y recargos que entran al motor van además con
+`@ArrayUnique()`: repetido es 400, porque una regla no vale dos veces (repetida, el motor la aplicaba
+una vez por repetición). El e2e
+que lo fija tiene una fila por decorador (`backend/test/topes-dto.e2e-spec.ts`). Si se agrega un
+array, su fila va en el mismo commit.
 
 **Lo que el DTO no declara es un 400** que nombra el campo (`property x should not exist`),
 en el body y en la querystring: el pipe corre con `forbidNonWhitelisted` desde el 2026-09-27.
