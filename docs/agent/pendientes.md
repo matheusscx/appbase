@@ -80,34 +80,32 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
-- [ ] **Los ids de reglas que manda el cliente reemplazan las del ítem, y el impuesto adicional
-  repetido se cobra dos veces** (backend, motor de precios; medido por HTTP el 2026-10-06 por el frente
-  de topes de los DTOs, que no lo tocó). `resolverLinea` (`calculo-precios.service.ts:849-851`) usa
-  `linea.descuentoIds ?? reglas…` y lo mismo con `recargoIds` e `impuestoIds`. Lo que manda la línea
-  **reemplaza** lo asociado al ítem, y solo se valida el nivel y el tenant (documentado en
-  `motor-calculo-precios.md`). Ninguna pantalla manda esos campos: el frontend solo los declara en el
-  tipo de `useCalculoPrecios.ts`. Pero quien tiene `Ventas:Crear` llega por la API a mano, y también
-  quien tiene `Tienda Online:Crear` por `POST /online/checkout|pagar` (`CalcularVentaDto`). La tienda es
-  interna (usuario del tenant logueado), pero es la base del futuro storefront público. Medido con
-  `POST /ventas`, admin de Paris, todo 201 y persistido:
-  - **Producto (descuentos y recargos).** (a) Un descuento de nivel línea que el ítem no tiene
-    asociado se aplica igual: Smartphone (`…116`, sin filas en `item_descuentos`) ×2 con
-    `descuentoIds: ["…338"]` (Promo fija $5.000) → `totalFinal` 5.950, contra 11.900 sin él.
-    (b) `recargoIds: []` le saca al ítem su recargo asociado: un servicio de 1.000 neto con "Interés
-    compuesto 4%" (`…132`) y un impuesto adicional del 10% → 1.342 sin el campo, **1.290** con
-    `recargoIds: []`.
-  - **Fiscal (va en su propia sesión, ADR-010).** (c) `impuestoIds: []` vende sin el impuesto
-    adicional (`tipo='otro'`): el mismo ítem → **1.238**, la venta queda con 1 impuesto en vez de 2.
-    ADR-018 cerró solo el IVA. Además, un `impuestoIds` **repetido** cobra el impuesto adicional una
-    vez por repetición: es el gemelo del bug de descuentos y recargos repetidos que cerró el
-    `@ArrayUnique` del 2026-10-06 ([`resueltos.md`](resueltos.md)). Se dejó afuera por la regla fiscal.
-  - **La pregunta de fondo** (anotada por la orquestadora): `CLAUDE.md` dice que *el cliente manda qué
-    se pidió, nunca cuánto vale*. Que el comprador elija qué ids de regla se le aplican puede chocar
-    con eso, más allá de la repetición. La Sesión de esfuerzo máximo se lo lleva al owner en dos
-    preguntas: descuentos y recargos por un lado, impuesto adicional por otro.
-  - **Reproducir:** `POST /api/ventas` con `{ lineas: [{ itemId, cantidad: '2', descuentoIds:
-    ['550e8400-e29b-41d4-a716-446655440338'] }], pagos: [{ metodoPagoId: EFECTIVO, monto:
-    '2000000.0000' }] }` y la cabecera `Idempotency-Key`, sobre el seed de Paris.
+- [ ] **Una `cantidad` grande en una línea con promo NxM o de precio fijo cuelga el backend de todos los tenants** (backend, motor de precios: `promociones.evaluator.ts:276-280` `evaluarNxm` y `:365-369` `evaluarPrecioFijo`; lo leyó el api-security-reviewer del frente de topes de los DTOs, 2026-10-06, y ese frente lo midió). El evaluador hace `for (u < cantidadEntera) unidades.push(...)` y después un `sort`: arma un array del tamaño de la cantidad. `cantidad` es `@IsNumberString` sin máximo (`calcular.dto.ts:22`, `create-venta.dto.ts:32`, `add-linea.dto.ts:18`) y lo único que se valida es `> 0`. **Medido** por HTTP en un backend compilado de worktree, `POST /calculo-precios/calcular` de un servicio de $1.000 con una promo 2x1 (`nxm`, `cadaN: 2`, `valorPorcentaje: 1`):
+
+  | cantidad | tiempo | RSS del proceso |
+  |---|---|---|
+  | 1 | 36 ms | 130 → 131 MB |
+  | 10⁴ | 116 ms | 131 → 166 MB |
+  | 10⁵ | 543 ms | 166 → 278 MB |
+  | 10⁶ | 5.190 ms (repetido: 5.057) | 278 → 1.102 MB |
+
+  El mismo 10⁶ sin promo tarda 30 ms. **El loop bloquea el event loop:** un `GET /auth/me` lanzado durante el pedido de 10⁶ tardó **4.413 ms**, contra 2 ms en reposo. Un pedido frena a todos los tenants. Crece lineal, así que 10⁷ serían ~50 s y ~8 GB, y la caída del proceso por falta de heap (extrapolado: no se corrió más allá de 10⁶ a propósito). Puertas:
+  - `POST /calculo-precios/calcular`: cualquier usuario del tenant, sin `@RequiresPermiso`.
+  - `POST /online/checkout|pagar`.
+  - `POST /ventas`.
+  - `POST /cuentas/:id/lineas`: queda guardada en `cuenta_lineas` y cada precuenta o cierre de esa mesa la vuelve a disparar.
+
+  **Arreglo probable:** un tope en `cantidad` en el borde, o contar unidades sin materializarlas en el evaluador. Toca el motor: va solo.
+
+- [ ] **Entradas sin cota que dan 500 o trabajo lineal, y una trampa del `@ArrayUnique`** (backend, DTOs; leído por el api-security-reviewer y el domain-reviewer del frente de topes de los DTOs, 2026-10-06, **no corrido**).
+  - **B2:** `ComboComponenteInputDto.cantidad` sin máximo (`create-item.dto.ts:109-110`) controla un loop por unidad en cada venta personalizada del combo (`items.service.ts:4115-4116`).
+  - **B3:** `unidades` de los extras de la personalización (`personalizacion-receta.dto.ts:57-60`) sin máximo: multiplica precio y stock hasta desbordar `NUMERIC` (500).
+  - **B4/B5:** enteros sin `@Max` que dan 500 por desborde de `int`: `min`/`max` de `ItemGrupoModificadorInputDto`, `numeroCuotas` (que además acepta negativos: `create-pago.dto.ts:43`, `create-venta.dto.ts:103`), `orden`, `duracionEstimada`, `diasVencimiento`, `cadaN` y `ScopePromoDto.cantidad`.
+  - **B6:** strings sin `@MaxLength` (`comentario`, `referencia`, `descripcion`, `nombre`, `codigoLote`, `motivoAjuste`, rut/teléfono/email del customer), acotados por el body de 100 kB.
+  - **Repetidos que llegan a la base:** `CreateItemDto.impuestosIds/recargosIds/descuentosIds` y `ScopePromoDto.itemIds` aceptan ids repetidos; se insertan de a uno o en lote contra una PK compuesta, así que probablemente dan 500.
+  - **Trampa del `@ArrayUnique`** de los ids de reglas: compara strings exactos. Hoy `[D, D.toUpperCase()]` da 400 "no encontrado", porque `requerir` (`calculo-precios.service.ts:1032-1037`) no pasa a minúsculas, y eso ya es un 400 que miente para un único id en mayúsculas. Si alguien arregla ese 400 aliasando el mapa, el par pasa y la regla se aplica dos veces. El arreglo correcto es pasar a minúsculas en el borde (un `@Transform` en el DTO) antes de comparar repetidos: patrón de `patterns/backend.md` "Un UUID validado puede venir en mayúsculas".
+
+- [ ] **Una cuenta de salón no tiene tope de líneas y la precuenta sí** (backend, `SalonesService.agregarLinea`, `salones.service.ts:852`; anotado por el frente de topes de los DTOs, 2026-10-06). La precuenta (`useSalones.ts:356`) manda todas las líneas de la cuenta a `/calcular`, que corta en 500 (`CalcularVentaDto.lineas`). Dos pedidos del mismo plato con distinta personalización son dos líneas, y una fusión las suma. Una cuenta con más de 500 líneas distintas se queda sin precuenta, aunque cerrarla sigue andando. **Salida probable:** tope de líneas por cuenta en `agregarLinea` y `fusionarCuentas` (400 al pasarse), con el mismo número que `CalcularVentaDto.lineas`.
 
 - [ ] **`personalizacion` como array: la venta descarta las omisiones y descuenta el ingrediente
   omitido** (backend, `LineaVentaDto.personalizacion`, `LineaDto.personalizacion` de
@@ -202,6 +200,54 @@ Las features de producto que también se decidieron —la NC como documento, la 
 oficial, `cashRounding`, el conteo por denominación, el envío diario del resumen de descuadres,
 la acumulación de descuentos y compras— y el renombre de `moneda.decimales` se mudaron a
 [`desarrollo-nuevo.md`](desarrollo-nuevo.md) el 2026-10-06. Acá quedan las correcciones.
+
+- [ ] **Los ids de reglas que manda el cliente salen del ítem: mandar otros es un 400** ✅
+  *(decidido por el owner el 2026-10-06; antes era "los ids de reglas que manda el cliente reemplazan
+  las del ítem" en la § 2)* (backend, motor de precios; medido por HTTP el 2026-10-06 por el frente
+  de topes de los DTOs, que no lo tocó). `resolverLinea` (`calculo-precios.service.ts:849-851`) usa
+  `linea.descuentoIds ?? reglas…` y lo mismo con `recargoIds` e `impuestoIds`. Lo que manda la línea
+  **reemplaza** lo asociado al ítem, y solo se valida el nivel y el tenant (documentado en
+  `motor-calculo-precios.md`). Ninguna pantalla manda esos campos: el frontend solo los declara en el
+  tipo de `useCalculoPrecios.ts`. Pero quien tiene `Ventas:Crear` llega por la API a mano, y también
+  quien tiene `Tienda Online:Crear` por `POST /online/checkout|pagar` (`CalcularVentaDto`). La tienda es
+  interna (usuario del tenant logueado), pero es la base del futuro storefront público. Medido con
+  `POST /ventas`, admin de Paris, todo 201 y persistido:
+  - **Producto (descuentos y recargos).** (a) Un descuento de nivel línea que el ítem no tiene
+    asociado se aplica igual: Smartphone (`…116`, sin filas en `item_descuentos`) ×2 con
+    `descuentoIds: ["…338"]` (Promo fija $5.000) → `totalFinal` 5.950, contra 11.900 sin él.
+    (b) `recargoIds: []` le saca al ítem su recargo asociado: un servicio de 1.000 neto con "Interés
+    compuesto 4%" (`…132`) y un impuesto adicional del 10% → 1.342 sin el campo, **1.290** con
+    `recargoIds: []`.
+  - **Fiscal (va en su propia sesión, ADR-010).** (c) `impuestoIds: []` vende sin el impuesto
+    adicional (`tipo='otro'`): el mismo ítem → **1.238**, la venta queda con 1 impuesto en vez de 2.
+    ADR-018 cerró solo el IVA. Además, un `impuestoIds` **repetido** cobra el impuesto adicional una
+    vez por repetición: es el gemelo del bug de descuentos y recargos repetidos que cerró el
+    `@ArrayUnique` del 2026-10-06 ([`resueltos.md`](resueltos.md)). Se dejó afuera por la regla fiscal.
+  - **Decidido, producto** (owner, 2026-10-06, AskUserQuestion de la Sesión de esfuerzo máximo, con la
+    medición de arriba como escena: el celular de $11.900 a $5.950 y el servicio sin su recargo).
+    Eligió *"Cerrarlo: salen del ítem"* por sobre elegir solo entre los del ítem y dejarlo como está:
+    cada línea lleva los descuentos y recargos asociados a su ítem, y mandar otros da error, en la
+    caja y en la tienda. Si un día la caja necesita elegir descuentos a mano, se diseña con su
+    pantalla y su permiso. **Construir:** `descuentoIds` y `recargoIds` de `LineaVentaDto` y de
+    `LineaDto` → 400 en `/ventas`, `/calcular`, `/online/checkout` y `/online/pagar`, sacar la rama
+    `linea.descuentoIds ?? reglas` de `resolverLinea`, y corregir `motor-calculo-precios.md:61-66` y
+    `ventas.md:89`, que hoy lo documentan como contrato. Toca código del motor: va sin otro frente de
+    backend en paralelo.
+  - **Derivado, decidido por la Sesión de esfuerzo máximo (objetable por el owner):** los
+    `descuentosVentaIds` y `recargosVentaIds` de `CreateVentaDto` y `CalcularVentaDto` también se
+    cierran: son "la caja elige descuentos a mano", hoy sin pantalla ni permiso. ⚠️ Antes de cerrarlos,
+    medir quién los usa (e2e, flujos internos, reglas por `metodoPagoId`); si cerrarlos rompe algo
+    diseñado, va a esa sesión.
+  - **Decidido, fiscal** (owner, 2026-10-06, pregunta aparte: el servicio de $1.000 cobrado $1.238 en
+    vez de $1.342, con un impuesto en la boleta en vez de dos). Eligió *"Cerrarlo: salen del ítem"*
+    por sobre dejarlo como está: los impuestos adicionales salen siempre del ítem, como el IVA desde
+    ADR-018. `impuestoIds` de las dos clases → 400. **Va en su propia sesión fiscal** (regla del
+    2026-08-23), y con eso desaparece también el `impuestoIds` repetido.
+  - El `@ArrayUnique` del 2026-10-06 protege mientras tanto; cuando estos campos se vayan, se va con
+    ellos.
+  - **Reproducir:** `POST /api/ventas` con `{ lineas: [{ itemId, cantidad: '2', descuentoIds:
+    ['550e8400-e29b-41d4-a716-446655440338'] }], pagos: [{ metodoPagoId: EFECTIVO, monto:
+    '2000000.0000' }] }` y la cabecera `Idempotency-Key`, sobre el seed de Paris.
 
 - [ ] **Lo que quedó del frente del modo ciego, ya cerrado** (backend + producto; la entrada
   madre —seis fugas, el eje mío/todos y el rastro de los oráculos— se mudó entera a
@@ -407,6 +453,8 @@ fiscal y va solo:
 - [ ] **Darle `moneda_id` a `descuentos` y `recargos`, y convertir ese importe antes de
   aplicarlo** —como ya se hace con el precio— para que un recargo legítimo en UF o en dólares sea
   expresable (backend + BD + frontend, decidido por el owner el 2026-09-09).
+  **Cuándo:** cuando un cliente lo pida, sin fecha (decidido por la Sesión de esfuerzo máximo el
+  2026-10-06; el owner marcó "sin preferencia" el 2026-10-04 y se aplicó la recomendada).
 
 **El caso que lo motiva, con las tasas sembradas (1 UF = 38.000):** un arriendo de salón con un
 recargo de `+0,2 UF` de gastos, sobre ítems de precios distintos. **No se puede escribir como
