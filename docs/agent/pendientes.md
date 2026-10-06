@@ -67,19 +67,6 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
-- [ ] **`PATCH /me/preferencias` con `ui` como array da 200 sin hacer nada** (backend,
-  `me/dto/update-preferencias.dto.ts`; anotado 2026-10-06 por el frente que hizo 400 `ui: null`, que
-  no lo tocó por alcance: no es un `null`). `@ValidateNested()` acepta un array y valida cada
-  elemento; el spread de `mergeUsuarioPreferencias` mete la clave `"0"` y la normalización la
-  descarta. **Medido** con `plainToInstance` + `validate` (no por HTTP): `ui: []` y
-  `ui: [{ colorMode: 'light' }]` dan 0 errores, y el segundo deja `dark` guardado —pide un cambio y
-  contesta 200 sin hacerlo—. La pantalla nunca manda un array. Salida probable: `@IsObject()` debajo
-  del `@ValidateIf` de `ui` (rechaza arrays y `null`). Con él, `ui: null` **suma** `ui must be an
-  object` sin quitar `nested property ui must be either object or array` (medido por la revisión con
-  `validateSync`: `customValidations` corre antes que `nestedValidations` y las dos escriben), así
-  que el bloque D de `null-en-actualizaciones.e2e-spec.ts` no cambia. Agregar un caso `ui: [...]` →
-  400 por HTTP: lo de arriba no pasó por el pipe real.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -300,6 +287,26 @@ destapa una decisión que no es mía).
   qué hace el service con el array (un `ANY` es barato; un loop con una query por elemento, no).
   Con eso se elige el tope por campo: el número no puede ser uno solo, porque `moduloAppPermisoIds`
   de un rol puede ser legítimamente grande. Es de borde (DTO): no toca lógica.
+
+- [ ] **Once campos de objeto único con `@ValidateNested()` y sin `@IsObject()` aceptan un
+  array** (backend, DTOs de compras, propinas, ventas, ítems, cálculo de precios y salones; anotado
+  2026-10-06 por el frente que hizo 400 `ui: []` en `PATCH /me/preferencias`, que no los tocó por
+  alcance). `@ValidateNested()` deja pasar un array y valida cada elemento; el campo llega al service
+  como array donde espera un objeto. **Criterio del conteo:** de los `@ValidateNested()` de
+  `backend/src`, fuera los `{ each: true }` (campos que sí son arrays), fuera los que ya llevan
+  `@IsObject()` (`devolucion` y `receptor` de nota de crédito, `customer` de venta y de cerrar
+  cuenta) y fuera `ui` de `/me` (cerrado). Quedan, todos tipados como un objeto solo:
+  `ConfirmarCompraDto.pago`, `LineaCompraDto.lote`, `LiquidarDto.ajustes`,
+  `PreviewLiquidacionDto.ajustes`, `LineaVentaDto.personalizacion`,
+  `CreateVentaDto.propinaCierreMesa`, `CreateVentaDto.propinaDirecta`, `AjusteStockDto.lote`,
+  `CreateItemDto.lote`, `LineaDto.personalizacion` (`calculo-precios`) y
+  `AddLineaDto.personalizacion`. **Medido** con `plainToInstance` + `validateSync` (no por HTTP):
+  `{ campo: [] }` no da error sobre el campo en ninguno de los once; el control, `ui` con
+  `@IsObject()`, sí. **No medido:** qué hace cada service con el array —200 sin efecto, 500, o un
+  dato mal escrito—; eso decide si alguno es más que un 400 que falta. Salida probable, la de
+  `customer`: `@IsObject()` junto al `@ValidateNested()`, con un e2e por campo. Las dos
+  `personalizacion` de venta y de cálculo entran al motor de precios: van con el criterio de
+  `CLAUDE.md` (frente propio, sistema quieto) aunque el cambio sea de borde.
 
 ## 3. Ya decidido, falta construir
 

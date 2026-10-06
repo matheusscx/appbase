@@ -134,6 +134,13 @@ Lo mismo con cualquier DTO cuya instancia se esparce sobre lo guardado (`{ ...gu
 `UiPreferenciasDto` (`PATCH /me/preferencias`) declara sus dos claves con `declare`; sin él,
 cambiar el tamaño de página reseteaba el modo oscuro.
 
+**Un campo que es un objeto solo, con `@ValidateNested()`, lleva también `@IsObject()`.**
+`@ValidateNested()` acepta un array y valida cada elemento, así que al service llega un array
+donde espera un objeto: un 200 sin efecto (`ui` de `PATCH /me/preferencias`, 2026-10-06) o un 500
+(`customer` de una venta con Factura). Los campos que sí son arrays van con `@IsArray()` y
+`{ each: true }`. Hay campos anteriores a la regla sin `@IsObject()`: los anota
+[`pendientes.md`](../agent/pendientes.md) § 2.
+
 **Lo que el DTO no declara es un 400** que nombra el campo (`property x should not exist`),
 en el body y en la querystring: el pipe corre con `forbidNonWhitelisted` desde el 2026-09-27.
 Hasta esa fecha lo borraba callado y contestaba 200, y un filtro mal escrito o un campo que
@@ -1030,7 +1037,8 @@ Columna `usuarios.preferencias JSONB NOT NULL DEFAULT '{}'`
 (shape `{ ui?: { colorMode?, pageSize? } }`); utils en
 `common/utils/usuario-preferencias.util.ts` (`normalize`/`merge`).
 API: `GET /auth/me` incluye `preferencias`; `PATCH /me/preferencias` hace merge
-parcial validado con DTO anidado: una clave omitida no se toca, una en `null` es un 400. Defaults en código: `colorMode: 'light'`,
+parcial validado con DTO anidado: una clave omitida no se toca, una en `null` es un 400, y
+`ui` que no es un objeto (un array) también. Defaults en código: `colorMode: 'light'`,
 `pageSize: 15`. Alcance **usuario**, no tenant.
 
 ---

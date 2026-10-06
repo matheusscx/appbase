@@ -1,5 +1,11 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, ValidateIf, ValidateNested } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsObject,
+  ValidateIf,
+  ValidateNested,
+} from 'class-validator';
 import {
   ALLOWED_PAGE_SIZES,
   type ColorModePreference,
@@ -28,8 +34,11 @@ class UiPreferenciasDto {
 
 // `ui` entero, igual: con `@IsOptional()` un `ui: null` pasaba como ausente y
 // contestaba 200 sin haber hecho nada (el spread del merge ignora el `null`).
+// `IsObject` además de `ValidateNested`: este deja pasar un array, el merge
+// mete la clave "0" y la normalización la descarta; otro 200 sin hacer nada.
 export class UpdatePreferenciasDto {
   @ValidateIf((_o, v) => v !== undefined)
+  @IsObject()
   @ValidateNested()
   @Type(() => UiPreferenciasDto)
   ui?: UiPreferenciasDto;

@@ -739,6 +739,26 @@ describe('null explícito en PATCH/PUT → 400 (e2e)', () => {
       expect(sinUi.status).toBe(200);
       expect(sinUi.body).toEqual({ ui: validos });
     });
+
+    // No es un `null`, pero es el mismo 200 mintiendo: `@ValidateNested()`
+    // acepta un array y valida cada elemento, el spread del merge mete la
+    // clave "0" y la normalización la descarta. `[{ colorMode: 'light' }]`
+    // pedía un cambio y dejaba `dark` guardado.
+    it.each([[[]], [[{ colorMode: 'light' }]]])(
+      'ui %j → 400 y no toca lo guardado',
+      async (ui) => {
+        const guardar = await enviar('patch', 'me/preferencias', {
+          ui: validos,
+        });
+        expect(guardar.status).toBe(200);
+        const res = await enviar('patch', 'me/preferencias', { ui });
+        expect(res.status).toBe(400);
+        rechazaPor(res, 'ui');
+        const sinUi = await enviar('patch', 'me/preferencias', {});
+        expect(sinUi.status).toBe(200);
+        expect(sinUi.body).toEqual({ ui: validos });
+      },
+    );
   });
 
   describe('PartialType — heredaba @IsOptional en todos los campos', () => {

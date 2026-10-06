@@ -23,6 +23,43 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `PATCH /me/preferencias` con `ui` como array es un 400 (cerrada 2026-10-06)
+
+Sale de [`pendientes.md`](pendientes.md) § 1. Plan:
+[`2026-10-06-ui-array-en-preferencias.md`](../superpowers/plans/2026-10-06-ui-array-en-preferencias.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **`PATCH /me/preferencias` con `ui` como array da 200 sin hacer nada** (backend,
+  `me/dto/update-preferencias.dto.ts`; anotado 2026-10-06 por el frente que hizo 400 `ui: null`, que
+  no lo tocó por alcance: no es un `null`). `@ValidateNested()` acepta un array y valida cada
+  elemento; el spread de `mergeUsuarioPreferencias` mete la clave `"0"` y la normalización la
+  descarta. **Medido** con `plainToInstance` + `validate` (no por HTTP): `ui: []` y
+  `ui: [{ colorMode: 'light' }]` dan 0 errores, y el segundo deja `dark` guardado —pide un cambio y
+  contesta 200 sin hacerlo—. La pantalla nunca manda un array. Salida probable: `@IsObject()` debajo
+  del `@ValidateIf` de `ui` (rechaza arrays y `null`). Con él, `ui: null` **suma** `ui must be an
+  object` sin quitar `nested property ui must be either object or array` (medido por la revisión con
+  `validateSync`: `customValidations` corre antes que `nestedValidations` y las dos escriben), así
+  que el bloque D de `null-en-actualizaciones.e2e-spec.ts` no cambia. Agregar un caso `ui: [...]` →
+  400 por HTTP: lo de arriba no pasó por el pipe real.
+
+### Cómo se cerró
+
+- **Reproducido por HTTP antes del arreglo:** `ui: []` y `ui: [{ colorMode: 'light' }]` contestaban
+  200 por el pipe real.
+- `@IsObject()` en `ui`, debajo del `@ValidateIf`. El 400 dice `ui must be an object`; `ui: null`
+  sigue siendo 400 con el mensaje de antes y omitir `ui` sigue siendo un 200 que no toca nada.
+- **Lo que lo fija:** `null-en-actualizaciones.e2e-spec.ts`, bloque D, "ui [] → 400 y no toca lo
+  guardado" y "ui [{"colorMode":"light"}] → …", que releen lo guardado después del 400. Mutante:
+  el DTO de antes (sin `@IsObject()`) → mueren esos dos (400 → 200) y solo esos: 2 rojos, 107 verdes
+  en el archivo.
+- **Barrido de `/me`:** `UpdatePreferenciasDto` es el único DTO del módulo con `@ValidateNested()`.
+- **Lo que quedó afuera:** once campos de objeto único fuera de `/me` con el mismo hueco (compras,
+  propinas, ventas, ítems, cálculo de precios, salones), medidos a nivel de validación; fueron a
+  `pendientes.md` § 2 con el criterio del conteo.
+
+---
+
 ## Borrar una mesa (o su salón) mientras se abre una cuenta en ella (cerrada 2026-10-06)
 
 Sale de [`pendientes.md`](pendientes.md) § 5. La regla viva está en
@@ -182,8 +219,9 @@ Sale de [`pendientes.md`](pendientes.md) § 1. Plan:
 - **Barrido de los hermanos de `/me`:** `UpdatePerfilDto` no tiene claves anidadas (`apellido` y
   `telefono` siguen con `@IsOptional()` a propósito: sus columnas son nullables y `null` las borra);
   `UpdateContrasenaDto` no tiene opcionales. No quedó otra clave que deje pasar un `null` entero.
-- **Lo que quedó afuera:** `ui` como array (`ui: []`) sigue dando 200 sin efecto; no es un `null`,
-  así que fue a `pendientes.md` § 1. Lo levantaron los dos revisores del cierre.
+- **Lo que quedó afuera:** `ui` como array (`ui: []`) seguía dando 200 sin efecto; no es un `null`,
+  así que fue a `pendientes.md` § 1. Lo levantaron los dos revisores del cierre. Cerrado el mismo
+  día: ver "`PATCH /me/preferencias` con `ui` como array es un 400", arriba.
 - La pantalla (`useUserPreferences.ts`) manda una sola clave de `ui` por PATCH, nunca `ui: null`.
 
 ---
