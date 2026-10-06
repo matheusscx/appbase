@@ -1070,18 +1070,6 @@ prohíbe.
 
 ## 5. Carreras de concurrencia
 
-- [ ] **Borrar una mesa mientras se abre una cuenta en ella puede dejar unidades con serie sin
-  apartar** (backend, `SalonesService.eliminarMesa` e `InventarioService.bloquearUnidadesParaSalida`;
-  **leído, no corrido**: lo marcó la revisión independiente del frente "quien vende elige qué unidad
-  con serie sale", 2026-10-03). `eliminarMesa` cuenta las cuentas abiertas y después borra, sin lock:
-  una cuenta que se abre entre las dos sentencias queda abierta sobre una mesa borrada. La consulta de
-  lo apartado hace `JOIN mesas … eliminado_el IS NULL` (para nombrar la mesa en el 400), así que esa
-  cuenta deja de apartar sus unidades y otra caja podría venderlas. La lista de vendibles
-  (`ItemsService.findUnidades`) no hace ese JOIN y sí las excluye: las dos consultas dejan de coincidir
-  justo ahí. **Medir:** la carrera con `test/helpers/carrera.ts` (borrar mesa vs. abrir cuenta).
-  **Arreglo probable:** `LEFT JOIN mesas` en la consulta de lo apartado (sigue filtrando el borrado y
-  no pierde la fila), y/o que `eliminarMesa` lockee antes de contar.
-
 ---
 
 ## 6. Proyectos que van solos

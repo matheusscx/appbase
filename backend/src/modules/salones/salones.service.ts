@@ -520,17 +520,6 @@ export class SalonesService {
   ): Promise<void> {
     const salon = await this.salonRepo.findOne({ where: { id, tenantId } });
     if (!salon) throw new NotFoundException(`Salón ${id} no encontrado`);
-    const abiertas = await this.cuentaRepo
-      .createQueryBuilder('c')
-      .innerJoin(Mesa, 'm', 'm.mesa_id = c.mesa_id')
-      .where('m.salon_id = :id', { id })
-      .andWhere('c.estado = :estado', { estado: EstadoCuenta.ABIERTA })
-      .getCount();
-    if (abiertas > 0) {
-      throw new BadRequestException(
-        'No se puede eliminar un salón con cuentas abiertas',
-      );
-    }
     // Un solo `ahora` compartido entre las dos escrituras: las mesas
     // colaterales quedan con el MISMO `eliminado_el` que el salón, para que
     // `restaurarSalon` pueda acotar por ese valor exacto más adelante (ver
@@ -545,11 +534,44 @@ export class SalonesService {
     // `restaurarSalon` la revivería por error.
     const ahora = new Date();
     await this.db.transaccion(async (manager) => {
-      await manager.update(
-        Mesa,
-        { salonId: id, tenantId, eliminadoEl: IsNull() },
-        { eliminadoEl: ahora, eliminadoPor: usuarioId },
+      // El mismo par de locks que `eliminarMesa`, sobre todas las mesas vivas
+      // del salón: sin él, una apertura a medio commitear no se ve en el conteo
+      // y su mesa se borra igual. Varias filas en un statement, en orden de
+      // `mesa_id` (`docs/patterns/backend.md` §15).
+      const locked: { mesa_id: string }[] = await manager.query(
+        `SELECT mesa_id FROM mesas
+          WHERE salon_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+          ORDER BY mesa_id
+          FOR UPDATE`,
+        [id, tenantId],
       );
+      const abiertas = await this.cuentaRepo
+        .createQueryBuilder('c')
+        .innerJoin(Mesa, 'm', 'm.mesa_id = c.mesa_id')
+        .where('m.salon_id = :id', { id })
+        .andWhere('c.estado = :estado', { estado: EstadoCuenta.ABIERTA })
+        .getCount();
+      if (abiertas > 0) {
+        throw new BadRequestException(
+          'No se puede eliminar un salón con cuentas abiertas',
+        );
+      }
+      // Solo las mesas que se lockearon: una creada en el salón después del
+      // lock no pasó por el conteo, y borrarla podría llevarse una cuenta que
+      // se abrió en ella. Esa mesa queda viva en un salón borrado —el hueco de
+      // crear una mesa mientras se borra su salón, que existía antes y es otro—,
+      // no una cuenta abierta sobre una mesa borrada.
+      if (locked.length) {
+        await manager.update(
+          Mesa,
+          {
+            id: In(locked.map((m) => m.mesa_id)),
+            tenantId,
+            eliminadoEl: IsNull(),
+          },
+          { eliminadoEl: ahora, eliminadoPor: usuarioId },
+        );
+      }
       await manager.update(
         Salon,
         { id, tenantId },
@@ -653,23 +675,41 @@ export class SalonesService {
     usuarioId: string,
     id: string,
   ): Promise<void> {
-    const mesa = await this.mesaRepo.findOne({ where: { id, tenantId } });
-    if (!mesa) throw new NotFoundException(`Mesa ${id} no encontrada`);
-    const abiertas = await this.cuentaRepo.count({
-      where: { mesaId: id, tenantId, estado: EstadoCuenta.ABIERTA },
-    });
-    if (abiertas > 0) {
-      throw new BadRequestException(
-        'No se puede eliminar una mesa con cuentas abiertas',
+    await this.db.transaccion(async (manager) => {
+      // **El conteo solo vale con la mesa lockeada.** `abrirCuenta` toma este
+      // mismo `FOR UPDATE` antes de insertar la cuenta; sin él, una apertura a
+      // medio commitear no se ve en el conteo, el `UPDATE` la espera y pasa
+      // igual: queda una cuenta abierta sobre una mesa borrada, que la pantalla
+      // no muestra y cuyas unidades con serie dejan de estar apartadas (lo
+      // apartado une `mesas` vivas). Con el lock, el conteo corre después del
+      // commit de la apertura y la ve. Medido en
+      // `test/borrado-mesa-concurrente.e2e-spec.ts`.
+      const locked: { mesa_id: string }[] = await manager.query(
+        `SELECT mesa_id FROM mesas
+          WHERE mesa_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+          FOR UPDATE`,
+        [id, tenantId],
       );
-    }
-    // Una sola escritura en vez de `softDelete()` + `update()`: dos
-    // sentencias sueltas pueden quedar a medias y dejar una fila borrada
-    // sin autor (mismo cambio que categorias.service.ts → remove()).
-    await this.mesaRepo.update(
-      { id, tenantId },
-      { eliminadoEl: new Date(), eliminadoPor: usuarioId },
-    );
+      if (!locked.length) {
+        throw new NotFoundException(`Mesa ${id} no encontrada`);
+      }
+      const abiertas = await manager.count(Cuenta, {
+        where: { mesaId: id, tenantId, estado: EstadoCuenta.ABIERTA },
+      });
+      if (abiertas > 0) {
+        throw new BadRequestException(
+          'No se puede eliminar una mesa con cuentas abiertas',
+        );
+      }
+      // Una sola escritura en vez de `softDelete()` + `update()`: dos
+      // sentencias sueltas pueden quedar a medias y dejar una fila borrada
+      // sin autor (mismo cambio que categorias.service.ts → remove()).
+      await manager.update(
+        Mesa,
+        { id, tenantId },
+        { eliminadoEl: new Date(), eliminadoPor: usuarioId },
+      );
+    });
   }
 
   /**
@@ -706,8 +746,22 @@ export class SalonesService {
     dto: UpdateLayoutDto,
   ): Promise<void> {
     await this.getSalonOrThrow(tenantId, salonId);
+    // **En orden de `mesa_id`, no en el que mandó la pantalla** (que es el de
+    // nombre). Cada `UPDATE` toma la fila de su mesa, y `eliminarSalon` toma
+    // las mismas filas con `ORDER BY mesa_id FOR UPDATE`: en órdenes distintos
+    // se abrazaban y Postgres mataba a uno con `40P01` (medido en
+    // `test/borrado-mesa-concurrente.e2e-spec.ts`). `abrirCuenta` y
+    // `eliminarMesa` toman una sola mesa, así que no tienen orden que romper.
+    // En minúsculas antes de comparar: un UUID validado puede venir en
+    // mayúsculas y Postgres ordena el valor, no el texto
+    // (`docs/patterns/backend.md` §4).
+    const enOrden = [...dto.mesas].sort((a, b) => {
+      const x = a.mesaId.toLowerCase();
+      const y = b.mesaId.toLowerCase();
+      return x < y ? -1 : x > y ? 1 : 0;
+    });
     await this.db.transaccion(async (manager) => {
-      for (const m of dto.mesas) {
+      for (const m of enOrden) {
         const res = await manager.update(
           Mesa,
           { id: m.mesaId, tenantId, salonId },

@@ -3338,8 +3338,9 @@ export class ItemsService {
    * el cobro, otra caja puede vender la misma unidad, y el 400 de
    * `bloquearUnidadesParaSalida` es el que manda. El `NOT EXISTS` equivale al
    * de esa consulta, sin excluir ninguna cuenta (acá no hay cuenta propia): no
-   * hace el JOIN a `mesas` porque una mesa con una cuenta abierta no se puede
-   * eliminar, así que ese JOIN no pierde ninguna fila.
+   * hace el JOIN a `mesas` porque una cuenta abierta nunca queda sobre una mesa
+   * borrada —el borrado de la mesa o del salón cuenta con la mesa lockeada, el
+   * mismo lock que toma `abrirCuenta`—, así que ese JOIN no pierde ninguna fila.
    */
   async findUnidades(
     tenantId: string,

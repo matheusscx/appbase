@@ -1282,6 +1282,30 @@ describe('SalonesService', () => {
         { posX: '10', posY: '20' },
       );
     });
+
+    it('escribe las mesas en orden de mesa_id, no en el que las mandó la pantalla (orden de locks contra eliminarSalon)', async () => {
+      // `eliminarSalon` toma las mismas filas con `ORDER BY mesa_id FOR UPDATE`.
+      // Una en mayúsculas se ordena por su valor: Postgres la guarda igual.
+      salonRepo.findOne.mockResolvedValue({ id: 'salon-1', tenantId: TENANT });
+      manager.update.mockResolvedValue({ affected: 1 });
+      const [m1, m2, m3] = [
+        '10000000-0000-4000-8000-000000000000',
+        'b0000000-0000-4000-8000-000000000000',
+        'c0000000-0000-4000-8000-000000000000',
+      ];
+
+      await service.guardarLayout(TENANT, 'salon-1', {
+        mesas: [m3, m2.toUpperCase(), m1].map((mesaId) => ({
+          mesaId,
+          posX: 0.5,
+          posY: 0.5,
+        })),
+      });
+
+      expect(
+        manager.update.mock.calls.map((c) => (c[1] as { id: string }).id),
+      ).toEqual([m1, m2.toUpperCase(), m3]);
+    });
   });
 
   describe('agregarLinea', () => {
@@ -5548,41 +5572,79 @@ describe('SalonesService', () => {
   });
 
   describe('eliminarMesa', () => {
-    it('lanza NotFound al eliminar una mesa de otro tenant', async () => {
-      mesaRepo.findOne.mockResolvedValue(null);
+    /** El lock de la mesa devuelve la fila viva; el resto, sin filas. */
+    const conMesaViva = (sql: string) =>
+      Promise.resolve(sql.includes('FROM mesas') ? [{ mesa_id: MESA }] : []);
+
+    it('lanza NotFound al eliminar una mesa de otro tenant (o ya borrada)', async () => {
+      manager.query.mockResolvedValue([]);
       await expect(service.eliminarMesa(TENANT, USUARIO, MESA)).rejects.toThrow(
         NotFoundException,
       );
-      expect(mesaRepo.update).not.toHaveBeenCalled();
+      expect(manager.update).not.toHaveBeenCalled();
     });
 
     it('no elimina una mesa con cuentas abiertas', async () => {
-      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
-      cuentaRepo.count.mockResolvedValue(1);
+      manager.query.mockImplementation(conMesaViva);
+      manager.count.mockResolvedValue(1);
       await expect(service.eliminarMesa(TENANT, USUARIO, MESA)).rejects.toThrow(
         BadRequestException,
       );
-      expect(mesaRepo.update).not.toHaveBeenCalled();
+      expect(manager.update).not.toHaveBeenCalled();
     });
 
     it('registra quién borró y cuándo, en una sola escritura', async () => {
-      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
-      cuentaRepo.count.mockResolvedValue(0);
+      manager.query.mockImplementation(conMesaViva);
+      manager.count.mockResolvedValue(0);
 
       await service.eliminarMesa(TENANT, USUARIO, MESA);
 
-      expect(mesaRepo.update).toHaveBeenCalledWith(
+      expect(manager.update).toHaveBeenCalledWith(
+        Mesa,
         { id: MESA, tenantId: TENANT },
         { eliminadoEl: expect.any(Date), eliminadoPor: USUARIO },
       );
+    });
+
+    it('cuenta con la mesa lockeada, adentro de la transacción (el par del FOR UPDATE de abrirCuenta)', async () => {
+      // Las dos mitades: el lock precede al conteo, y la transacción está
+      // abierta antes del lock. Afuera de la transacción el `FOR UPDATE` se
+      // suelta al terminar su statement y el conteo vuelve a no ver la
+      // apertura a medio commitear.
+      const orden: string[] = [];
+      dataSource.transaction.mockImplementation(
+        (cb: (m: typeof manager) => unknown) => {
+          orden.push('transaccion');
+          return cb(manager);
+        },
+      );
+      manager.query.mockImplementation((sql: string) => {
+        orden.push(sql);
+        return conMesaViva(sql);
+      });
+      manager.count.mockImplementation(() => {
+        orden.push('count');
+        return Promise.resolve(0);
+      });
+
+      await service.eliminarMesa(TENANT, USUARIO, MESA);
+
+      expect(orden[0]).toBe('transaccion');
+      expect(orden[1]).toMatch(
+        /FROM mesas[\s\S]*eliminado_el IS NULL[\s\S]*FOR UPDATE/,
+      );
+      expect(orden[2]).toBe('count');
     });
   });
 
   describe('eliminarSalon', () => {
     const SALON = 'salon-uuid';
 
+    const MESAS_DEL_SALON = [{ mesa_id: 'mesa-a' }, { mesa_id: 'mesa-b' }];
+
     beforeEach(() => {
       salonRepo.findOne.mockResolvedValue({ id: SALON, tenantId: TENANT });
+      manager.query.mockResolvedValue(MESAS_DEL_SALON);
       cuentaRepo.createQueryBuilder.mockReturnValue({
         innerJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
@@ -5648,6 +5710,61 @@ describe('SalonesService', () => {
       // motivo antes de este borrado perdería su timestamp original y
       // `restaurarSalon` la revivería por error.
       expect(criterio.eliminadoEl).toBeDefined();
+    });
+
+    it('lockea las mesas vivas del salón en orden de mesa_id antes de contar, adentro de la transacción', async () => {
+      const orden: string[] = [];
+      dataSource.transaction.mockImplementation(
+        (cb: (m: typeof manager) => unknown) => {
+          orden.push('transaccion');
+          return cb(manager);
+        },
+      );
+      manager.query.mockImplementation((sql: string) => {
+        orden.push(sql);
+        return Promise.resolve(MESAS_DEL_SALON);
+      });
+      cuentaRepo.createQueryBuilder.mockReturnValue({
+        innerJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getCount: jest.fn(() => {
+          orden.push('count');
+          return Promise.resolve(0);
+        }),
+      });
+
+      await service.eliminarSalon(TENANT, USUARIO, SALON);
+
+      expect(orden[0]).toBe('transaccion');
+      // El `ORDER BY` decide el orden de adquisición y ningún test de conducta
+      // caza su ausencia (`docs/patterns/backend.md` §15).
+      expect(orden[1]).toMatch(
+        /FROM mesas[\s\S]*eliminado_el IS NULL[\s\S]*ORDER BY mesa_id\s+FOR UPDATE/,
+      );
+      expect(orden[2]).toBe('count');
+    });
+
+    it('borra solo las mesas que lockeó: una creada después no pasó por el conteo', async () => {
+      await service.eliminarSalon(TENANT, USUARIO, SALON);
+
+      const mesasCall = manager.update.mock.calls.find(
+        (c) => c[0] === Mesa,
+      ) as unknown[];
+      const criterio = mesasCall[1] as {
+        id: { value: string[] };
+        salonId?: string;
+      };
+      expect(criterio.id.value).toEqual(['mesa-a', 'mesa-b']);
+      expect(criterio.salonId).toBeUndefined();
+    });
+
+    it('un salón sin mesas vivas borra solo el salón', async () => {
+      manager.query.mockResolvedValue([]);
+
+      await service.eliminarSalon(TENANT, USUARIO, SALON);
+
+      expect(manager.update.mock.calls.map((c) => c[0])).toEqual([Salon]);
     });
   });
 

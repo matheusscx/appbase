@@ -23,6 +23,69 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Borrar una mesa (o su salón) mientras se abre una cuenta en ella (cerrada 2026-10-06)
+
+Sale de [`pendientes.md`](pendientes.md) § 5. La regla viva está en
+[`patterns/backend.md`](../patterns/backend.md) §15 (*"Borrar una mesa contra abrir una cuenta en
+ella"*) y en [`features/salones-mesas.md`](../features/salones-mesas.md) § Concurrencia; spec y plan:
+[`2026-10-06-borrado-mesa-concurrente-design.md`](../superpowers/specs/2026-10-06-borrado-mesa-concurrente-design.md),
+[`2026-10-06-borrado-mesa-concurrente.md`](../superpowers/plans/2026-10-06-borrado-mesa-concurrente.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 5
+
+- [ ] **Borrar una mesa mientras se abre una cuenta en ella puede dejar unidades con serie sin
+  apartar** (backend, `SalonesService.eliminarMesa` e `InventarioService.bloquearUnidadesParaSalida`;
+  **leído, no corrido**: lo marcó la revisión independiente del frente "quien vende elige qué unidad
+  con serie sale", 2026-10-03). `eliminarMesa` cuenta las cuentas abiertas y después borra, sin lock:
+  una cuenta que se abre entre las dos sentencias queda abierta sobre una mesa borrada. La consulta de
+  lo apartado hace `JOIN mesas … eliminado_el IS NULL` (para nombrar la mesa en el 400), así que esa
+  cuenta deja de apartar sus unidades y otra caja podría venderlas. La lista de vendibles
+  (`ItemsService.findUnidades`) no hace ese JOIN y sí las excluye: las dos consultas dejan de coincidir
+  justo ahí. **Medir:** la carrera con `test/helpers/carrera.ts` (borrar mesa vs. abrir cuenta).
+  **Arreglo probable:** `LEFT JOIN mesas` en la consulta de lo apartado (sigue filtrando el borrado y
+  no pierde la fila), y/o que `eliminarMesa` lockee antes de contar.
+
+### Lo medido antes de tocar código
+
+`backend/test/borrado-mesa-concurrente.e2e-spec.ts` con `correrCarrera`: la compuerta retiene la
+fila de la mesa, la apertura llega primero y el borrado 800 ms después (`esperando: 2`). Sobre
+`19a18cc2`: apertura 201, `DELETE /mesas/:id` **200** y la mesa borrada con la cuenta abierta. La
+cuenta huérfana pidió la unidad U (201), `vendibles` dejó de ofrecerla, **otra mesa pidió la misma U
+(201)** y **el POS la vendió (201)**; cobrar la cuenta huérfana dio 400 *"no está disponible
+(estado: vendido)"*. Con una sola unidad en stock la otra mesa rebota antes por la reserva de stock
+(`validarStockAlPedir` no une `mesas`): la escena usa dos. **Gemelo que la entrada no nombraba:**
+`eliminarSalon`, mismo conteo sin lock, mismo resultado (200).
+
+### Qué se hizo
+
+- `eliminarMesa` y `eliminarSalon` toman `FOR UPDATE` de la(s) mesa(s) viva(s) **antes** de contar,
+  dentro de `db.transaccion` —el mismo lock que `abrirCuenta` ya tomaba—. El salón lo toma en un
+  statement con `ORDER BY mesa_id` y borra solo las mesas que lockeó (una creada después no pasó
+  por el conteo).
+- `guardarLayout` escribe las mesas en orden de `mesa_id`. **Lo pidió la orquestadora** tras la
+  medición: el ciclo layout ↔ borrado del salón (`40P01`, un 500) ya existía —en un plano con los
+  nombres al revés del id, 2 de 3 rondas sobre `19a18cc2`, según cayera el orden físico— y el lock
+  ordenado lo volvía 3 de 3. Ordenar los dos lados lo cierra.
+- **El `LEFT JOIN mesas` que proponía la entrada no se hizo.** Medido el porqué: solo, sin el lock,
+  no arregla la carrera —la cuenta queda abierta en una mesa que la pantalla no muestra, con su
+  unidad apartada para siempre—; con el lock, una cuenta abierta sobre una mesa borrada deja de ser
+  alcanzable (`abrirCuenta` es el único que crea cuentas abiertas, ninguna cambia de mesa, y los dos
+  borrados cuentan con el lock), así que no habría un caso real que lo ejercite. Lo dice el
+  comentario de la consulta, y el de `findUnidades`.
+
+### Qué lo fija
+
+| Mutante (revierte al código de `19a18cc2`) | Rojo, en loop |
+|---|---|
+| `eliminarMesa` sin lock | caso 1 del e2e, 8 de 8 corridas |
+| `eliminarSalon` sin lock | caso 2, 8 de 8; también el 3 en 5 de 8 (vuelve el orden de plan) |
+| `guardarLayout` en el orden del cliente | caso 3 (500 por `40P01`), 8 de 8 |
+
+Con el arreglo, el e2e pasó 10 de 10 seguidas. Los unitarios de `salones.service.spec.ts` fijan la
+transacción antes del lock, el lock antes del conteo, el `ORDER BY mesa_id` y el orden del layout.
+
+---
+
 ## El filtro "Merma" del kardex separa la merma de la cortesía y de la comida del personal (cerrada 2026-10-06)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. La regla viva, en

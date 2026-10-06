@@ -277,6 +277,14 @@ Backfill al arrancar: cuentas existentes sin responsable reciben
 ### Concurrencia
 
 - Apertura de cuenta: `FOR UPDATE` de la mesa antes de calcular `MAX(numero)+1`.
+- **Borrar una mesa o un salón: el mismo `FOR UPDATE` de la(s) mesa(s), antes de contar las
+  cuentas abiertas** (2026-10-06). Contando sin lock, una apertura a medio commitear no se veía:
+  el borrado pasaba y quedaba una cuenta abierta sobre una mesa borrada, invisible en la pantalla y
+  cuyas unidades con serie dejaban de estar apartadas (otra mesa y el POS se llevaban la misma
+  unidad). El salón lockea todas sus mesas vivas en orden de `mesa_id` y borra solo las que
+  lockeó; `guardarLayout` escribe las mesas en ese mismo orden, porque en el de la pantalla (el
+  de nombre) se abrazaba con el borrado del salón (`40P01`). Lo fija
+  `backend/test/borrado-mesa-concurrente.e2e-spec.ts`.
 - Transferencia y cierre/cancelación: `FOR UPDATE` pesimista de la cuenta.
 - **Agregar, editar y quitar líneas: `FOR UPDATE` de la cuenta, en la misma
   transacción que escribe.** No alcanza con leer el estado: un `SELECT` plano no

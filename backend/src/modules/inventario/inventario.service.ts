@@ -1505,9 +1505,20 @@ export class InventarioService {
     }
 
     // Apartada: la tiene una línea de una cuenta ABIERTA que no es la dueña de
-    // esta salida. Solo cuentas vivas y abiertas, en mesas vivas (una mesa con
-    // cuentas abiertas no se puede eliminar, así que el JOIN interno no pierde
-    // ninguna). Una consulta para todas las unidades.
+    // esta salida. Solo cuentas vivas y abiertas, en mesas vivas. El JOIN
+    // interno a `mesas` (está para nombrar la mesa en el 400) no pierde ninguna
+    // porque una cuenta abierta nunca queda sobre una mesa borrada: la abre
+    // `abrirCuenta` con la mesa viva lockeada, y `eliminarMesa`/`eliminarSalon`
+    // cuentan con ese mismo lock tomado. Antes contaban sin lock y la carrera
+    // dejaba la cuenta en una mesa borrada: este JOIN la perdía y otra caja
+    // vendía su unidad (2026-10-06, `test/borrado-mesa-concurrente.e2e-spec.ts`).
+    // No es un `LEFT JOIN` a propósito: solo, no arreglaba nada (la cuenta queda
+    // en una mesa que la pantalla no muestra, con la unidad apartada para
+    // siempre), y con el lock no hay estado real que lo ejercite. Si algún día
+    // otro camino abre o mueve cuentas, ese camino entra al par de locks
+    // (`docs/patterns/backend.md` §15), no este JOIN. `findUnidades` (`vendibles`)
+    // no une `mesas` y coincide por lo mismo. Una consulta para todas las
+    // unidades.
     const apartadas: { unidad_id: string; mesa_nombre: string }[] =
       await manager.query(
         `SELECT x.unidad_id, me.nombre AS mesa_nombre

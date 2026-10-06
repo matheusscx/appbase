@@ -1377,6 +1377,35 @@ determinista, repetición sin compuerta, y la bodega con un recuento abierto),
 `inventario.service.spec.ts` (el lock va antes que el de `item_producto`) y de
 `recuentos.service.spec.ts`.
 
+### Borrar una mesa contra abrir una cuenta en ella (2026-10-06)
+
+Mismo molde, sobre la fila de `mesas`. Acá los dos lados son exclusivos porque la apertura ya
+tomaba `FOR UPDATE` de la mesa (serializa `MAX(numero)+1`): faltaba que el borrado lo pidiera
+**antes** de contar.
+
+| Lado | Quién | Lock |
+|---|---|---|
+| Borrado | `SalonesService.eliminarMesa`, antes de contar cuentas abiertas | `FOR UPDATE` de la mesa viva |
+| Borrado | `SalonesService.eliminarSalon`, antes de contar | `FOR UPDATE` de las mesas vivas del salón, `ORDER BY mesa_id`, y borra **solo** las que lockeó |
+| Escritura | `SalonesService.abrirCuenta`, antes de insertar la cuenta | `FOR UPDATE` de la mesa viva |
+| Escritura | `SalonesService.guardarLayout` | un `UPDATE` por mesa, **en orden de `mesa_id`** (no en el de la pantalla) |
+
+**Por qué el layout entra.** `eliminarSalon` toma varias filas en un statement ordenado y
+`guardarLayout` las escribe una por una: en el orden de la pantalla (el de nombre) se abrazaban.
+El ciclo existía antes de este lock —el `UPDATE mesas` del salón tomaba las filas en orden de
+plan, que no es el de nombre—; con el lock, el sorteo pasó a ser el orden de `mesa_id` contra el
+de nombre (medido: 2 de 3 rondas antes, 3 de 3 después, en un plano con los nombres al revés del
+id), y se cerró ordenando el layout.
+
+**Un camino nuevo que abra una cuenta o la mueva de mesa** entra en la fila de "Escritura". Si no,
+una cuenta abierta puede quedar sobre una mesa borrada, y la consulta de lo apartado
+(`bloquearUnidadesParaSalida`, que une `mesas` vivas) la pierde: otra caja vende su unidad.
+
+**Qué lo fija:** `backend/test/borrado-mesa-concurrente.e2e-spec.ts` (una carrera por lado, con
+compuerta; revertir cada lock o el orden del layout pone rojo su caso) y los unitarios de
+`salones.service.spec.ts` (transacción antes del lock, lock antes del conteo, `ORDER BY mesa_id`,
+el orden del layout).
+
 ### El lock de stock ancla en `item_producto`, nunca en `stock_ubicacion` (2026-09-06)
 
 **El criterio, no la lista:** todo lo que lockea para leer o mover saldo de
