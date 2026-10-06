@@ -201,8 +201,13 @@ toca services de backend o `.vue` de `pages`/`components` y no hay un recibo par
 **ese diff exacto**:
 
 ```bash
-d="$(git rev-parse --git-dir)" && git diff --cached > "$d/verify-feature.receipt.diff" && git hash-object --stdin < "$d/verify-feature.receipt.diff" > "$d/verify-feature.receipt"
+d="$(git rev-parse --git-dir)" && git diff --cached --full-index > "$d/verify-feature.receipt.diff" && git hash-object --stdin < "$d/verify-feature.receipt.diff" > "$d/verify-feature.receipt"
 ```
+
+`--full-index` es la mitad de un par: el hook hashea con la misma opción, y sin ella las
+líneas `index` llevan hashes abreviados cuyo largo git elige según el estado del repo (el
+mismo diff daba dos hashes y el recibo se rechazaba). Escribir el recibo sin ella, o con
+otro comando, lo hace rechazar siempre.
 
 Va al git-dir y no a `.git/` literal: en un worktree `.git` es un archivo. Guarda también
 el diff del que sale, para que un rechazo se pueda comparar contra lo que vio el hook: el
@@ -210,7 +215,11 @@ hook deja su evidencia en el git-dir común (`.git/verify-feature-rechazos/` del
 principal, también desde un worktree, para que sobreviva a su borrado) y dice con qué `diff`
 mirarla.
 Si el recibo era de este mismo diff y aun así se rechaza, **no reescribirlo hasta pasar**:
-comparar, reportarlo y anotarlo en `docs/agent/pendientes.md` § 2.
+comparar `recibo.diff` con `hook.diff`, reportarlo y abrir una entrada en
+`docs/agent/pendientes.md` con la ruta de la evidencia. La excepción la nombra el propio
+aviso: un recibo escrito sin `--full-index` (un worktree creado antes de que el arreglo
+llegara a `main` trae el skill viejo) se reescribe con el comando de arriba sobre el mismo
+diff revisado.
 
 El recibo se emite **después** de que los revisores devuelvan LIMPIO, nunca antes.
 Si después de revisar cambiás algo y lo stageás, el hash deja de coincidir y hay

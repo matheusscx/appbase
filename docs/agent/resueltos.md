@@ -23,6 +23,197 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El recibo de revisión hashea el diff con `--full-index` (cerrada 2026-10-06)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. El owner dio el sí al arreglo el 2026-10-06, al
+pedir la tanda: `--full-index` en los dos lados. Plan:
+[`2026-10-06-recibo-full-index.md`](../superpowers/plans/2026-10-06-recibo-full-index.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **El pre-commit rechaza un recibo de revisión escrito sobre el mismo diff** (harness). Dos
+  sesiones lo vieron el 2026-09-27, las dos desde un worktree (la del aviso sin costo de la
+  varianza y la del aviso del login). Escribieron el recibo con el comando que imprime el hook, en
+  el mismo comando que el `git commit`, y el commit se bloqueó. Lo reescribieron sobre el mismo
+  diff y el segundo commit pasó, sin `--no-verify`. El riesgo es que la salida fácil, reescribir
+  el recibo hasta que pase, vacíe el gate. **Medido el 2026-09-28, sin causa encontrada.**
+  - **El error estuvo en la escritura del recibo, no en el hook.** Según los transcripts, el
+    archivo quedó con un hash (`21445ec1…` en la varianza, `b23814af…` en el login; en el login,
+    con el mtime del comando que falló). Segundos después, `git diff --cached` en el shell daba
+    otro (`450de47c…`, `e23d8c2d…`), estable en tres corridas seguidas. Con ese otro hash el commit
+    pasó, y `450de47c` es exactamente el diff del commit `d6eb54d3`. Lo que cuesta explicar es
+    qué salida hasheó la primera escritura.
+  - **Descartado, cada uno medido:** las variables que git le exporta al hook (en un commit sin
+    rutas `GIT_INDEX_FILE` es el índice normal, y el diff dentro del hook es idéntico byte a
+    byte al del shell); la configuración de git (no hay color, diff ni textconv en global, local
+    ni worktree); la forma del comando (recibo + `git commit -q -F - <<'EOF'` encadenados pasa
+    a la primera); el `cd <worktree> &&` que el harness antepone a cada comando (lo lleva
+    cualquier comando, no solo el que falló); otro escritor (esos hashes no aparecen en ningún
+    otro transcript, los revisores ya habían terminado y solo leían, y ningún script del hook
+    escribe archivos); un índice que cambia solo (monitor de 5 min, 1313 muestras cada 0,2 s: ni
+    el hash ni el stat del índice se movieron).
+  - **Ninguna salida candidata da el hash escrito:** ni un prefijo byte a byte ni un subconjunto
+    de archivos del diff final; ni los estados staged previos, reconstruidos deshaciendo las
+    ediciones de la sesión; ni el mismo cambio con 1624 combinaciones de opciones de `git diff`
+    (color, algoritmo, prefijos, renames, contexto, `autocrlf`); ni el índice final contra cualquier
+    commit de esos días; ni un archivo leído a medio escribir (29.943 cortes por línea).
+  - **Un mecanismo que sí se reproduce, pero que no es el del 27:** `git commit <rutas>` y
+    `git commit -a` corren el hook contra un índice temporal (`next-index-*.lock` o `index.lock`).
+    Si hay algo más staged, o cambios sin stagear, el hook ve otro diff y el recibo que imprime no
+    coincide nunca, ni reescribiéndolo. Para reproducirlo: stagear un `.vue` y un `.md`, escribir
+    el recibo y hacer `git commit -m x <el .vue>`.
+  - **Instrumentado el 2026-09-28, a pedido del owner; sigue abierta hasta el próximo caso.** El
+    comando del recibo (el mismo en el hook y en el skill `verify-feature`) guarda también el diff
+    del que sale, en `<git-dir>/verify-feature.receipt.diff`. Cada rechazo deja en
+    `.git/verify-feature-rechazos/<fecha>-<checkout>-<pid>/` del checkout principal (el git-dir
+    común desde el 2026-09-30, así que sobrevive al borrado del worktree) tres archivos:
+    `hook.diff` (lo que vio el hook), `recibo.diff` (copia del diff del recibo en ese momento,
+    antes de que una reescritura lo pise) e `info.txt` (el checkout, los hashes, `GIT_INDEX_FILE`,
+    si el índice era temporal, y si `recibo.diff` estaba con su hash o faltaba). Si el
+    índice es temporal, el aviso lo dice y pide stagear y commitear sin rutas ni `-a`. El
+    skill ya no escribe en `.git/` literal, que en un worktree falla.
+  - **Qué mirar la próxima vez que un recibo del mismo diff se rechace:** no reescribirlo
+    todavía. Correr el `diff` que imprime el hook entre `recibo.diff` y `hook.diff`:
+    - antes, mirar en `info.txt` si el hash de `recibo.diff` es el `hash del recibo`: si no lo
+      es, o `recibo.diff` es de un recibo anterior (el último se escribió con la forma vieja), o
+      el hash que se escribió no es el de su propio diff —que sería el fenómeno mismo, cazado—;
+      en los dos casos el `diff` de abajo no dice nada;
+    - si **difieren**, el contenido cambió entre la escritura y el hook, y ese diff dice qué;
+    - si son **iguales** y los hashes no, lo que falló fue el hash y no el diff.
+    Anotar lo encontrado acá con la ruta de la evidencia.
+  - **Medido el 2026-09-30: hubo un caso más y la instrumentación no lo capturó.** Fue el
+    2026-09-28 a las 19:31, en el worktree `heuristic-jepsen-4a8a7d`, con el recibo encadenado al
+    `git commit` en el mismo comando. El recibo tenía `9c160412…`. El hook vio `1c17f612…`, sobre
+    el índice normal del worktree, no uno temporal. Doce segundos después el shell dio
+    `1c17f612…` y la reescritura pasó. El revisor ya había terminado, y sus 40 llamadas no tocaron
+    el índice. No hay `recibo.diff` por dos razones: la sesión escribió el recibo con la forma
+    **vieja** (`git diff --cached | git hash-object --stdin > …`, sin guardar el diff), que traía
+    de su rama anterior a `66944c72`, y el worktree ya se borró con su `hook.diff`.
+    - **Recuento en los transcripts** (27 al 30 de septiembre, recibo y commit en un mismo comando):
+      la forma vieja, 24 intentos y 3 rechazos, que son los dos del 27 y este. La nueva, 12 y
+      ninguno. Todos los rechazos son de la forma con el pipe, pero con estos números la
+      diferencia puede ser azar (0 de 12 sale con probabilidad ~0,2 si la tasa fuera la vieja).
+      Queda como pista, no como causa. El comando que imprimen el hook y el skill ya es el nuevo.
+    - **Lo que fallaba en la instrumentación, arreglado el mismo día:** la evidencia iba al
+      git-dir del worktree, que se borra con él. Ahora va al común, y `info.txt` dice si faltaba
+      `recibo.diff` (recibo en forma vieja o ausente) o trae su hash. Probado a mano con el
+      script, en cuatro casos y con el hook de `main` como control, que la dejaba en el
+      worktree.
+  - **Triage del 2026-10-03: ningún caso nuevo del fenómeno.** En
+    `.git/verify-feature-rechazos/` hay tres rechazos del 2026-10-02. Uno no tenía recibo. En los
+    otros dos (`20261002-024800-…` y `20261002-184441-…`, worktree `sad-dubinsky-6b3af5`),
+    `recibo.diff` traía su propio hash, pero era el diff de un commit **anterior**: 11 archivos
+    contra 21 en el primero y 13 contra 14 en el segundo, con conjuntos distintos. Es el rechazo
+    normal de "falta la revisión de este diff", y la instrumentación lo separó bien.
+  - **Cazado el 2026-10-03, con causa medida: el largo del hash abreviado de las líneas `index`.**
+    Rechazo `20261003-162437-strange-kowalevski-f98e56-44912`: `recibo.diff` traía su propio hash
+    (`ac64a527…`) y difería de `hook.diff` (`c36eaede…`) **solo** en las 30 líneas `index`. El
+    recibo las escribió con 9 caracteres (`d88a81e46..9eec5cd2b`) y el hook, segundos después, con
+    8 (`d88a81e4..9eec5cd2`). El contenido es igual byte a byte. `git diff --cached --abbrev=9`
+    reproduce el hash del recibo, y `--abbrev=8` el del hook. **Causa:** sin `core.abbrev`, git
+    elige el largo según una **estimación** del número de objetos (los empaquetados más una muestra
+    de los sueltos). El repo está justo en el borde de 2^16 (`in-pack` 65 623 y `count` 2 854 sueltos
+    al medir), así que el largo salta entre 8 y 9 según cuándo se cuente, y cualquier sesión que
+    escriba objetos o haga `gc` lo mueve. Explica que reescribir el recibo segundos después
+    "arregle" el problema, y que ninguna combinación de opciones de `git diff` diera el hash: lo que
+    cambia es el estado del repo. Ese mismo día hubo otro caso igual,
+    `20261003-161508-competent-feistel-148c2d-41028` (16 líneas `index`, 0 de contenido).
+    **Arreglo probable, sin probar:** `git diff --cached --full-index` en los dos lados (hook y
+    comando del recibo del skill `verify-feature`), que escribe los hashes completos. Va en su
+    propio frente: es `.githooks/` y la integración del hook no se puede probar desde un worktree.
+    Mientras tanto, ante un rechazo, correr el `diff` de la evidencia: si solo difieren las líneas
+    `index`, el diff revisado es el mismo y reescribir el recibo es legítimo.
+    - **Lo que agrega el caso de `competent-feistel-148c2d`** (recibo `43e39e8a…`, hook `c46a0ba5…`,
+      `b1cb26103..0fa2361f7` contra `b1cb2610..0fa2361f`). Siete segundos antes del rechazo, a las
+      16:15:01, se reescribieron o refrescaron nueve `.pack` del store, y **no se encontró quién**: no
+      hay `maintenance` ni `gc` en la config, ni cron, ni launchd de git. Hay además un
+      `multi-pack-index`, y no se midió qué conteo usa git: con 65 623 empaquetados la abreviatura
+      tendría que ser siempre de 9, y a veces es de 8.
+    - **Otro caso, 2026-10-04:** `20261004-152722-interesting-hugle-9a753a-74264` (22 líneas `index`
+      de 9 contra 8 caracteres, 0 de contenido; recibo escrito segundos antes del commit, con
+      `in-pack` 66 969 y `count` 2 193). Se reescribió el recibo sobre el mismo diff revisado.
+    - **Otro caso, 2026-10-04:** `20261004-194906-pensive-hugle-d7c7c5-43294` (15 líneas `index`
+      de 9 contra 8 caracteres, 0 de contenido; recibo escrito minutos antes del commit, con
+      `in-pack` 66 969 y `count` 2 562). Se reescribió el recibo sobre el mismo diff revisado.
+    - **Otro caso, 2026-10-06, que contradice el "borde de 2^16":**
+      `20261006-093947-bold-carson-9d7303-20887` (28 líneas `index` de 9 contra 8 caracteres, 0 de
+      contenido). Medido justo después: `in-pack` **44 253** y `count` 1 414, lejos de 2^16, y aun así
+      el recibo salió con 9. O el conteo que usa git no es el de `count-objects` (el
+      `multi-pack-index`, sin medir), o la causa es otra. Se reescribió el recibo sobre el mismo diff
+      revisado.
+    - **Otro caso, 2026-10-06:** `20261006-120037-heuristic-sanderson-949bf5-56020` (13 líneas
+      `index` de 9 contra 8 caracteres, 0 de contenido; recibo escrito en un comando y commit en el
+      siguiente, menos de un minuto después). `in-pack` **44 253** y `count` 1 503 al medir: el
+      mismo `in-pack` que el de `bold-carson`, así que tampoco cae cerca de 2^16. Se reescribió el
+      recibo sobre el mismo diff revisado (`ca462e75`).
+    - **Otro caso, 2026-10-06:** `20261006-120947-dreamy-goldstine-3474cd-58358` (5 líneas `index`
+      de 9 contra 8 caracteres, 0 de contenido; recibo escrito ~10 min antes del commit; medido
+      después: `in-pack` 44 253 y `count` 1 550, de nuevo lejos de 2^16). El mismo commit traía un
+      rechazo real (`check-e2e-status`): se corrigió, el delta pasó por la revisión y el recibo se
+      escribió en el mismo comando que el commit, que entró.
+    - **Otro caso, 2026-10-06, y descarta que escribir el recibo junto al commit alcance:**
+      `20261006-131958-focused-satoshi-fcec0b-75334` (8 líneas `index` de 9 contra 8 caracteres, 0
+      de contenido). El recibo se escribió **en el mismo comando** que el commit, menos de un
+      segundo antes del hook, y aun así salió con 9. Un momento después, el mismo `git diff
+      --cached` en el shell ya daba 8 y el hash del hook (`4c690a2b`). Medido después: `in-pack`
+      44 253 y `count` 1 624. Se reescribió el recibo sobre el mismo diff revisado (`124c9438`).
+
+### Qué se midió antes de tocar el hook
+
+Con un `.vue` staged en un clon del repo, `git diff --cached | git hash-object --stdin` dio
+cuatro hashes distintos con `core.abbrev` en 7, 8, 9 y 12, y el default coincidió con el de 8.
+Con `--full-index`, los cinco dieron el mismo. Las líneas `index` pasan de `9fdea274..35206a05`
+a los 40 caracteres de cada blob, y no queda otra abreviatura en la salida del diff.
+
+### Qué se hizo
+
+- **`.githooks/pre-commit`:** el veredicto, el `hook.diff` de la evidencia y el comando que
+  imprime el aviso pasan a `git diff --cached --full-index`. Las tres van juntas: si el
+  veredicto y `hook.diff` difirieran en la opción, `info.txt` daría dos hashes del hook.
+- **`.claude/skills/verify-feature/SKILL.md`:** el comando del recibo, con la misma opción y la
+  razón al lado. Un lado con `--full-index` y el otro sin él rechaza siempre.
+- **El recibo con el comando viejo se nombra, pero solo si es del mismo diff.** Un worktree
+  creado antes de que el arreglo llegue a `main` trae el skill viejo, y su recibo no coincide
+  nunca. Si `recibo.diff` tiene líneas `index` abreviadas, `info.txt` lo marca (*"escrito SIN
+  --full-index"*) y dice si es **del mismo diff** o **de OTRO**: es el mismo cuando las dos
+  salidas son iguales línea a línea, salvo las `index` cuyo hash abreviado es prefijo del
+  completo. Solo en ese caso el aviso pide reescribirlo con el comando nuevo. La primera
+  versión lo pedía con solo ver las líneas abreviadas, y la revisión independiente la
+  bloqueó: el recibo del commit anterior queda en el git-dir, así que un diff nuevo sin revisar
+  habría recibido la instrucción de reescribir el recibo, y eso vacía el gate. Con el comando
+  nuevo, un recibo del mismo diff que se rechace ya no tiene explicación conocida: va a una
+  entrada nueva de `pendientes.md`, con la evidencia.
+- **Fuera de alcance:** los planes de `docs/superpowers/plans/` que citan formas anteriores
+  del comando, con `.git/` literal o sin guardar el diff. Son ocho, y todos son de features
+  ya implementadas. Cinco tienen checkboxes sin marcar porque nadie los borró al cerrar,
+  aunque el README de `superpowers/` lo pide. Ya estaban desactualizados antes de este
+  cambio. Si alguien siguiera uno, falla cerrado: el recibo se rechaza.
+
+### Qué lo fija
+
+Prueba a mano del script (`sh .githooks/pre-commit; echo $?`), en un clon del repo con un
+`.vue` de `components` staged:
+
+| Caso | Exit |
+|---|---|
+| Sin recibo | 1 |
+| Recibo con el comando nuevo | 0 |
+| Recibo con el comando nuevo, de **otro** diff | 1, sin la marca del comando viejo |
+| Recibo con el comando viejo, del mismo diff | 1, *"del mismo diff"* y el aviso pide reescribirlo |
+| Recibo con el comando viejo, de **otro** diff (el del commit anterior) | 1, *"de OTRO diff"* y sin ese aviso |
+| Recibo con el comando viejo y un hash abreviado que no es prefijo del completo | 1, *"de OTRO diff"* y sin ese aviso |
+| Mutante: la comparación reemplazada por `true` (la versión bloqueada) | los dos casos de otro diff piden reescribir: lo caza |
+| Recibo con `core.abbrev=12`, hook con `core.abbrev=8` | 0 |
+| El mismo par 12 contra 8 con el hook **anterior** y el comando anterior | 1 (con 12 contra 12, 0) |
+| Mutante: `--full-index` solo en el recibo, no en el veredicto del hook | 1 |
+
+**Sin verificar desde el worktree: la integración con git.** `core.hooksPath` es la ruta absoluta
+al `.githooks` del checkout principal, así que un commit desde el worktree corre el hook de
+`main`, no este. La comprobación es en `main`, después del merge: un commit real que pase por el
+hook con un recibo escrito con el comando nuevo.
+
+---
+
 ## Un id en mayúsculas ya no da un 400 falso en los grupos de modificadores (cerrada 2026-10-06)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. Misma familia y misma forma que

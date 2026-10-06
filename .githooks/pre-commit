@@ -146,11 +146,11 @@ fi
 # El recibo guarda también el diff del que sale (verify-feature.receipt.diff), y
 # un rechazo deja el diff que vio el hook. Existe porque el 2026-09-27 dos
 # sesiones escribieron un recibo que no coincidía con su propio diff staged, y
-# con solo dos hashes no se pudo saber qué habían hasheado
-# (docs/agent/pendientes.md § 2). La evidencia va al git-dir COMÚN, no al del
-# worktree: el del worktree se borra con él, y así se perdió el caso del
-# 2026-09-28 (medido 2026-09-30). Vive fuera del árbol: nunca se
-# stagea ni se versiona.
+# con solo dos hashes no se pudo saber qué habían hasheado (docs/agent/
+# resueltos.md, "El recibo de revisión hashea el diff con --full-index"). La
+# evidencia va al git-dir COMÚN, no al del worktree: el del worktree se borra con
+# él, y así se perdió el caso del 2026-09-28 (medido 2026-09-30). Vive fuera del
+# árbol: nunca se stagea ni se versiona.
 needs_review=$(git diff --cached --name-only --diff-filter=ACM \
                | grep -E 'backend/src/.*\.service\.ts$|frontend/app/(pages|components)/.*\.vue$' || true)
 
@@ -160,7 +160,11 @@ if [ -n "$needs_review" ]; then
   recorded=$(cat "$receipt_file" 2>/dev/null || echo '')
   # El veredicto sale de un pipe, sin archivos de por medio: si el hash pasara por
   # un archivo, un error al escribirlo daría "" y coincidiría con un recibo ausente.
-  actual=$(git diff --cached | git hash-object --stdin)
+  # --full-index, igual que el comando del recibo: sin él, las líneas `index` llevan
+  # el hash abreviado de cada blob, y git elige el largo según el estado del repo
+  # (saltaba entre 8 y 9 de un momento a otro). El mismo diff daba dos hashes y el
+  # recibo se rechazaba (misma entrada de resueltos.md, cerrada el 2026-10-06).
+  actual=$(git diff --cached --full-index | git hash-object --stdin)
   if [ "$actual" != "$recorded" ]; then
     red "✗ Este diff no pasó la revisión independiente (verify-feature paso 7)."
     red "  El hook cubre lo grepeable; N+1, filtro de borrado y alcance son juicio."
@@ -188,12 +192,38 @@ if [ -n "$needs_review" ]; then
     # --path-format es de git 2.31: con uno más viejo, el del worktree antes que "/".
     comun=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
     rechazo="${comun:-$git_dir}/verify-feature-rechazos/$(date +%Y%m%d-%H%M%S)-$(basename "$checkout")-$$"
-    if mkdir -p "$rechazo" 2>/dev/null && git diff --cached > "$rechazo/hook.diff" 2>/dev/null; then
+    if mkdir -p "$rechazo" 2>/dev/null && git diff --cached --full-index > "$rechazo/hook.diff" 2>/dev/null; then
       # Si su hash no es el del recibo, recibo.diff es de un recibo anterior (el
       # último se escribió con la forma vieja, sin guardar el diff) o lo que
-      # falló fue el hash: los dos casos que pendientes.md § 2 manda distinguir.
+      # falló fue el hash: los dos casos que esa entrada de resueltos.md separa.
       if cp "$git_dir/verify-feature.receipt.diff" "$rechazo/recibo.diff" 2>/dev/null; then
         recibo_diff="presente, hash $(git hash-object --stdin < "$rechazo/recibo.diff")"
+        # Un worktree creado antes de que --full-index llegara a main trae el skill
+        # con el comando viejo: ese recibo no coincide nunca, ni reescribiéndolo igual.
+        # Que sea viejo no dice que sea de ESTE diff (el recibo del commit anterior
+        # sigue ahí): la pista de reescribirlo sale solo si las dos salidas son
+        # iguales línea a línea, salvo las `index` cuyo hash abreviado es prefijo
+        # del completo. Si no, el rechazo es el de siempre: falta la revisión.
+        if grep -qE '^index [0-9a-f]{4,39}\.\.' "$rechazo/recibo.diff"; then
+          if awk '
+            NR == FNR { r[FNR] = $0; nr = FNR; next }
+            {
+              nh++
+              if (r[FNR] == $0) next
+              split(r[FNR], x, " "); split($0, h, " ")
+              if (substr(r[FNR], 1, 6) != "index " || substr($0, 1, 6) != "index " || x[3] != h[3]) { malo = 1; next }
+              split(x[2], xp, "[.][.]"); split(h[2], hp, "[.][.]")
+              if (length(xp[1]) < 4 || length(xp[2]) < 4) malo = 1
+              if (index(hp[1], xp[1]) != 1 || index(hp[2], xp[2]) != 1) malo = 1
+            }
+            END { exit (malo || nh != nr) }
+          ' "$rechazo/recibo.diff" "$rechazo/hook.diff"; then
+            recibo_diff="$recibo_diff; escrito SIN --full-index (comando viejo), del mismo diff"
+            sin_full_index=1
+          else
+            recibo_diff="$recibo_diff; escrito SIN --full-index (comando viejo), de OTRO diff"
+          fi
+        fi
       elif [ -n "$recorded" ]; then
         recibo_diff="ausente: el recibo se escribió sin guardar su diff (la forma vieja, con pipe)"
       else
@@ -210,13 +240,17 @@ if [ -n "$needs_review" ]; then
         echo "recibo.diff:       $recibo_diff"
       } > "$rechazo/info.txt" 2>/dev/null
       ylw "  Evidencia del rechazo: $rechazo"
+      if [ "${sin_full_index:-0}" -eq 1 ]; then
+        red "  El recibo es de este mismo diff, pero se escribió sin --full-index (comando"
+        red "  viejo) y así no coincide nunca. Reescribilo con el comando de abajo."
+      fi
       ylw "  Si el recibo era de este mismo diff, antes de reescribirlo compará y reportá:"
       ylw "    diff \"$rechazo/recibo.diff\" \"$rechazo/hook.diff\""
     else
       red "  No se pudo guardar la evidencia en $rechazo."
     fi
     ylw "  Corré el skill verify-feature. Al cerrar en LIMPIO deja el recibo con:"
-    ylw "    d=\"\$(git rev-parse --git-dir)\" && git diff --cached > \"\$d/verify-feature.receipt.diff\" && git hash-object --stdin < \"\$d/verify-feature.receipt.diff\" > \"\$d/verify-feature.receipt\""
+    ylw "    d=\"\$(git rev-parse --git-dir)\" && git diff --cached --full-index > \"\$d/verify-feature.receipt.diff\" && git hash-object --stdin < \"\$d/verify-feature.receipt.diff\" > \"\$d/verify-feature.receipt\""
     fail=1
   fi
 fi
