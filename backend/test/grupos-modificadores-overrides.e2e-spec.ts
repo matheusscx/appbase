@@ -896,4 +896,41 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
     );
     expect(await overridesVivos(itemGrupoId)).toHaveLength(0);
   });
+
+  // El gemelo del 18/19 en el aplicar en lote: `@IsUUID` deja pasar la
+  // asociación en mayúsculas y las válidas salen de Postgres en minúsculas, así
+  // que no se encontraba y el 400 decía "item_grupo_id no válido para este
+  // grupo" aunque la asociación era del grupo.
+  it('20. una asociación en mayúsculas en el aplicar en lote crea el override y reenviarla lo edita', async () => {
+    const { itemGrupoId } = await recetaConProteinaSinOverride();
+
+    const alta = await aplicarCarne([itemGrupoId.toUpperCase()], '140')();
+    expect(alta.status).toBe(200);
+    expect(await overridesVivos(itemGrupoId)).toEqual([
+      { cantidad: '140.0000' },
+    ]);
+
+    const edicion = await aplicarCarne([itemGrupoId.toUpperCase()], '170')();
+    expect(edicion.status).toBe(200);
+    expect(await overridesVivos(itemGrupoId)).toEqual([
+      { cantidad: '170.0000' },
+    ]);
+  });
+
+  it('21. la misma asociación dos veces, una en mayúsculas, deja UN override y no da 500', async () => {
+    // Como el repetido del 11: el pedido no se rechaza, la asociación se aplica
+    // una vez. Si solo se arreglara la búsqueda, las dos irían al mismo INSERT
+    // y el `ON CONFLICT` tocaría la fila dos veces (500).
+    const { itemGrupoId } = await recetaConProteinaSinOverride();
+
+    const res = await aplicarCarne(
+      [itemGrupoId, itemGrupoId.toUpperCase()],
+      '160',
+    )();
+
+    expect(res.status).toBe(200);
+    expect(await overridesVivos(itemGrupoId)).toEqual([
+      { cantidad: '160.0000' },
+    ]);
+  });
 });

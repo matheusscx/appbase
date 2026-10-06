@@ -23,6 +23,67 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Un id en mayúsculas ya no da un 400 falso en los grupos de modificadores (cerrada 2026-10-06)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. Misma familia y misma forma que
+[el cierre de los ids del ítem](#un-id-en-mayúsculas-ya-no-da-un-400-falso-en-el-patchpost-de-un-ítem-cerrada-2026-10-03);
+la regla, en [`patterns/backend.md`](../patterns/backend.md#un-uuid-validado-puede-venir-en-mayúsculas-minúsculas-antes-de-compararlo-en-typescript-2026-10-03).
+Plan: [`2026-10-06-ids-en-mayusculas-grupos-modificadores.md`](../superpowers/plans/2026-10-06-ids-en-mayusculas-grupos-modificadores.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Un `itemGrupoId` en mayúsculas en `PATCH /grupos-modificadores/:id/overrides` da un 400
+  que miente: "item_grupo_id no válido para este grupo"** (backend,
+  `GruposModificadoresService.aplicarOverrides`; **leído, no corrido**: lo vio la revisión del cierre
+  de los ids en mayúsculas del ítem, 2026-10-03). Es la misma familia (ver
+  [`resueltos.md`](resueltos.md#un-id-en-mayúsculas-ya-no-da-un-400-falso-en-el-patchpost-de-un-ítem-cerrada-2026-10-03)):
+  `@IsUUID(…, { each: true })` acepta mayúsculas y `validSet` se arma con las filas de Postgres, así
+  que `validSet.has(ig)` no lo encuentra. El `new Set(dto.itemGrupoIds)` de más abajo tampoco ve
+  `[x, X]` como repetido, aunque hoy el 400 de arriba llega antes. **Medir:** reproducirlo con un
+  e2e; el arreglo probable es la forma de
+  [`patterns/backend.md`](../patterns/backend.md#un-uuid-validado-puede-venir-en-mayúsculas-minúsculas-antes-de-compararlo-en-typescript-2026-10-03)
+  (minúsculas a la entrada). El `grupoOpcionId` del mismo DTO solo va a SQL (leído): no tiene el
+  problema.
+
+### Qué se midió
+
+- **El 400 del aplicar en lote, reproducido:** asociación en mayúsculas →
+  *"item_grupo_id no válido para este grupo: AF108412-…"*; `[x, X]` → 400 (status medido, el
+  mensaje no se capturó).
+- **Un gemelo en el mismo service, que encontró el barrido:** `opciones[].itemId` del
+  `POST`/`PATCH /grupos-modificadores` (`validarYResolverOpciones`) se busca en `filaPorItem`, que
+  tiene las claves de Postgres. En mayúsculas → 400 *"Opción no encontrada: 280EBAF0-…"* aunque el
+  ítem existía, y el mismo ítem dos veces (una en mayúsculas) daba ese mismo 400 en vez del de
+  repetido. En el `PATCH` además se compara contra `opcionIdPorItem` (la opción que ya existía) e
+  `itemsEntrantes` (cuáles se borran).
+- **Lo que solo va a SQL (leído):** `grupoOpcionId` del DTO de overrides y los `@Param('id')` de
+  todas las rutas del controller.
+
+### Qué se hizo
+
+Minúsculas a la entrada de las dos funciones que comparan: `aplicarOverrides` (`itemGrupoIds`, que
+de ahí en más se usa en la query, la validación, los repetidos y el conteo) y
+`validarYResolverOpciones` (`itemId` de cada opción; la opción resuelta que recibe el `update` ya
+lo trae en minúsculas). Los unitarios de `aplicarOverrides` usaban ids falsos `'IG1'` que el mock
+de la base devolvía en mayúsculas, algo que Postgres no hace: pasaron a `'ig1'`.
+
+### Qué lo fija
+
+`grupos-modificadores-overrides.e2e-spec.ts` (20 y 21) y los dos tests "en mayúsculas" de
+`grupos-modificadores.e2e-spec.ts`. Mutantes medidos con las dos suites enteras (29 tests):
+
+| Mutante | Caen |
+|---|---|
+| El service de antes | los 4 nuevos (400 en los cuatro) |
+| Sin la normalización de `itemGrupoIds` | 20 y 21 (400) |
+| Sin la de `opciones[].itemId` | los dos de `grupos-modificadores.e2e-spec.ts` (400) |
+| A medias en overrides: minúsculas solo en `validSet.has` | 21 (500: *"ON CONFLICT DO UPDATE command cannot affect row a second time"*) |
+| A medias en opciones: minúsculas solo en `filaPorItem.get` | los dos (el `PATCH` da 400, el repetido 500 por `uq_grupo_opcion_item_vivo`) |
+
+Los dos "a medias" son lo que haría un alias del mapa: confirman lo que ya decía el patrón.
+
+---
+
 ## `PATCH /me/preferencias` con `ui` como array es un 400 (cerrada 2026-10-06)
 
 Sale de [`pendientes.md`](pendientes.md) § 1. Plan:

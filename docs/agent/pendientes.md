@@ -217,19 +217,6 @@ destapa una decisión que no es mía).
       rechazo real (`check-e2e-status`): se corrigió, el delta pasó por la revisión y el recibo se
       escribió en el mismo comando que el commit, que entró.
 
-- [ ] **Un `itemGrupoId` en mayúsculas en `PATCH /grupos-modificadores/:id/overrides` da un 400
-  que miente: "item_grupo_id no válido para este grupo"** (backend,
-  `GruposModificadoresService.aplicarOverrides`; **leído, no corrido**: lo vio la revisión del cierre
-  de los ids en mayúsculas del ítem, 2026-10-03). Es la misma familia (ver
-  [`resueltos.md`](resueltos.md#un-id-en-mayúsculas-ya-no-da-un-400-falso-en-el-patchpost-de-un-ítem-cerrada-2026-10-03)):
-  `@IsUUID(…, { each: true })` acepta mayúsculas y `validSet` se arma con las filas de Postgres, así
-  que `validSet.has(ig)` no lo encuentra. El `new Set(dto.itemGrupoIds)` de más abajo tampoco ve
-  `[x, X]` como repetido, aunque hoy el 400 de arriba llega antes. **Medir:** reproducirlo con un
-  e2e; el arreglo probable es la forma de
-  [`patterns/backend.md`](../patterns/backend.md#un-uuid-validado-puede-venir-en-mayúsculas-minúsculas-antes-de-compararlo-en-typescript-2026-10-03)
-  (minúsculas a la entrada). El `grupoOpcionId` del mismo DTO solo va a SQL (leído): no tiene el
-  problema.
-
 - [ ] **`e2e/salones/anular-plato.spec.ts:188` salió flaky en CI** (frontend, Playwright; run
   37465150509 de `d08aef16`, 2026-10-06). El test "pide, manda a cocina, anula como cortesía…" dio
   `locator.click: Test timeout of 30000ms exceeded` y pasó en el retry; el run siguiente

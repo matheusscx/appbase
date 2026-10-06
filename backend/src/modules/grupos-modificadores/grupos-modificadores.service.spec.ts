@@ -939,21 +939,23 @@ describe('GruposModificadoresService', () => {
     });
   });
 
+  // Los `item_grupo_id` de los mocks van en minúsculas, como los devuelve
+  // Postgres: el service pasa a minúsculas los del pedido antes de comparar.
   describe('itemsUsando / aplicarOverrides', () => {
     it('aplicarOverrides hace upsert del mismo valor a varias asociaciones', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }]) // grupo vivo
         .mockResolvedValueOnce([{ grupo_opcion_id: OPCION_ID }]) // opción pertenece al grupo
         .mockResolvedValueOnce([
-          { item_grupo_id: 'IG1' },
-          { item_grupo_id: 'IG2' },
+          { item_grupo_id: 'ig1' },
+          { item_grupo_id: 'ig2' },
         ]) // asociaciones válidas del grupo
-        .mockResolvedValueOnce([]) // overrides vivos de IG1
-        .mockResolvedValueOnce([]) // INSERT override IG1
-        .mockResolvedValueOnce([]) // overrides vivos de IG2
-        .mockResolvedValueOnce([]); // INSERT override IG2
+        .mockResolvedValueOnce([]) // overrides vivos de ig1
+        .mockResolvedValueOnce([]) // INSERT override ig1
+        .mockResolvedValueOnce([]) // overrides vivos de ig2
+        .mockResolvedValueOnce([]); // INSERT override ig2
       const res = await service.aplicarOverrides(TENANT_ID, 'G1', {
-        itemGrupoIds: ['IG1', 'IG2'],
+        itemGrupoIds: ['ig1', 'ig2'],
         grupoOpcionId: OPCION_ID,
         cantidad: '150',
         unidadCodigo: 'g',
@@ -965,11 +967,11 @@ describe('GruposModificadoresService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }])
         .mockResolvedValueOnce([{ grupo_opcion_id: OPCION_ID }])
-        .mockResolvedValueOnce([{ item_grupo_id: 'IG1' }])
-        .mockResolvedValueOnce([]) // overrides vivos de IG1
-        .mockResolvedValueOnce([]); // INSERT override IG1
+        .mockResolvedValueOnce([{ item_grupo_id: 'ig1' }])
+        .mockResolvedValueOnce([]) // overrides vivos de ig1
+        .mockResolvedValueOnce([]); // INSERT override ig1
       await service.aplicarOverrides(TENANT_ID, 'G1', {
-        itemGrupoIds: ['IG1'],
+        itemGrupoIds: ['ig1'],
         grupoOpcionId: OPCION_ID,
         precioExtra: '100',
       });
@@ -994,19 +996,19 @@ describe('GruposModificadoresService', () => {
           return Promise.resolve([{ grupo_opcion_id: OPCION_ID }]);
         if (/FROM item_grupos_modificadores/.test(sql))
           return Promise.resolve([
-            { item_grupo_id: 'IG1' },
-            { item_grupo_id: 'IG2' },
-            { item_grupo_id: 'IG3' },
+            { item_grupo_id: 'ig1' },
+            { item_grupo_id: 'ig2' },
+            { item_grupo_id: 'ig3' },
           ]);
         if (/^\s*SELECT[\s\S]*FROM item_grupo_modificador_opciones/.test(sql))
           return Promise.resolve([
-            { item_grupo_id: 'IG1', item_grupo_opcion_id: 'OV1' },
+            { item_grupo_id: 'ig1', item_grupo_opcion_id: 'OV1' },
           ]);
         return Promise.resolve([]);
       });
 
       const res = await service.aplicarOverrides(TENANT_ID, 'G1', {
-        itemGrupoIds: ['IG1', 'IG2', 'IG3', 'IG3'],
+        itemGrupoIds: ['ig1', 'ig2', 'ig3', 'ig3'],
         grupoOpcionId: OPCION_ID,
         cantidad: '150',
         unidadCodigo: 'g',
@@ -1022,17 +1024,17 @@ describe('GruposModificadoresService', () => {
       const update = llamadas.find(([q]) => /^\s*UPDATE/.test(q))!;
       expect(update[1]).toContainEqual(['OV1']);
       const insert = llamadas.find(([q]) => /^\s*INSERT/.test(q))!;
-      expect(insert[1]).toContainEqual(['IG2', 'IG3']);
+      expect(insert[1]).toContainEqual(['ig2', 'ig3']);
     });
 
     it('rechaza aplicar a un item_grupo_id que no pertenece al grupo', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }])
         .mockResolvedValueOnce([{ grupo_opcion_id: OPCION_ID }])
-        .mockResolvedValueOnce([{ item_grupo_id: 'IG1' }]); // solo IG1 es válido; IG9 no
+        .mockResolvedValueOnce([{ item_grupo_id: 'ig1' }]); // solo ig1 es válido; ig9 no
       await expect(
         service.aplicarOverrides(TENANT_ID, 'G1', {
-          itemGrupoIds: ['IG1', 'IG9'],
+          itemGrupoIds: ['ig1', 'ig9'],
           grupoOpcionId: OPCION_ID,
           cantidad: '150',
         }),
@@ -1051,10 +1053,10 @@ describe('GruposModificadoresService', () => {
             unidad_medida: 'g',
           },
         ]) // opción pertenece (ingrediente, sin default de cantidad/unidad)
-        .mockResolvedValueOnce([{ item_grupo_id: 'IG1' }]); // asociaciones válidas
+        .mockResolvedValueOnce([{ item_grupo_id: 'ig1' }]); // asociaciones válidas
       await expect(
         service.aplicarOverrides(TENANT_ID, 'G1', {
-          itemGrupoIds: ['IG1'],
+          itemGrupoIds: ['ig1'],
           grupoOpcionId: OPCION_ID,
           cantidad: '150', // sin unidadCodigo → unidad efectiva null
         }),
@@ -1074,10 +1076,10 @@ describe('GruposModificadoresService', () => {
             unidad_medida: 'g',
           },
         ])
-        .mockResolvedValueOnce([{ item_grupo_id: 'IG1' }]);
+        .mockResolvedValueOnce([{ item_grupo_id: 'ig1' }]);
       await expect(
         service.aplicarOverrides(TENANT_ID, 'G1', {
-          itemGrupoIds: ['IG1'],
+          itemGrupoIds: ['ig1'],
           grupoOpcionId: OPCION_ID,
           cantidad: '150',
           unidadCodigo: 'ml',

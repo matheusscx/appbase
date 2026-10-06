@@ -345,4 +345,63 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
       `${base} 2`,
     );
   });
+
+  // `@IsUUID` deja pasar el ítem de una opción en mayúsculas, y los ítems salen
+  // de Postgres en minúsculas: se buscaba con el casing del cliente y daba
+  // "Opción no encontrada" aunque el ítem existía.
+  const crearGrupoConBebida = (itemId: string) =>
+    request(app.getHttpServer())
+      .post('/api/grupos-modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Bebida MAY GM E2E ${Date.now()}-${Math.random()}`,
+        opciones: [{ itemId, cantidad: '1', precioExtra: '800' }],
+      });
+  const opcionesVivas = (grupoId: string) =>
+    ds.query<{ grupo_opcion_id: string; precio_extra: string }[]>(
+      `SELECT grupo_opcion_id, precio_extra FROM grupo_modificador_opciones
+        WHERE grupo_modificador_id = $1 AND eliminado_el IS NULL`,
+      [grupoId],
+    );
+
+  it('una opción con el ítem en mayúsculas crea el grupo, y reenviarla edita la misma opción', async () => {
+    const alta = await crearGrupoConBebida(bebidaId.toUpperCase());
+    expect(alta.status).toBe(201);
+    const grupoId = (alta.body as GrupoModificadorResponse).grupoModificadorId;
+    const [{ grupo_opcion_id: opcionId }] = await opcionesVivas(grupoId);
+
+    // La misma opción, no otra: si el `PATCH` no la reconociera, insertaría
+    // una nueva (choca con `uq_grupo_opcion_item_vivo`) y borraría la vieja con
+    // sus overrides.
+    const edicion = await request(app.getHttpServer())
+      .patch(`/api/grupos-modificadores/${grupoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        opciones: [
+          { itemId: bebidaId.toUpperCase(), cantidad: '1', precioExtra: '900' },
+        ],
+      });
+    expect(edicion.status).toBe(200);
+    expect(await opcionesVivas(grupoId)).toEqual([
+      { grupo_opcion_id: opcionId, precio_extra: '900.0000' },
+    ]);
+  });
+
+  it('el mismo ítem dos veces como opción, una en mayúsculas, es 400 de repetido', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/grupos-modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Bebida MAY GM E2E ${Date.now()}-${Math.random()}`,
+        opciones: [
+          { itemId: bebidaId, cantidad: '1', precioExtra: '800' },
+          { itemId: bebidaId.toUpperCase(), cantidad: '1', precioExtra: '800' },
+        ],
+      });
+
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toContain(
+      'Un item no puede aparecer más de una vez',
+    );
+  });
 });

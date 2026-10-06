@@ -84,6 +84,14 @@ export class GruposModificadoresService {
     if (!opciones.length) {
       throw new BadRequestException('El grupo requiere al menos una opción');
     }
+    // Minúsculas antes de comparar: `@IsUUID` acepta `A1B2…` y los ítems
+    // vuelven de la BD en minúsculas, y sin esto un ítem en mayúsculas no se
+    // encuentra en `filaPorItem` (400 "Opción no encontrada" que miente), no
+    // cuenta como repetido, y el `update` no ve la opción que ya existía.
+    opciones = opciones.map((op) => ({
+      ...op,
+      itemId: op.itemId.toLowerCase(),
+    }));
 
     const ids = [...new Set(opciones.map((op) => op.itemId))];
     // `FOR SHARE` sobre los ítems de las opciones: el par del `FOR UPDATE` de
@@ -978,6 +986,10 @@ export class GruposModificadoresService {
     grupoId: string,
     dto: AplicarOverridesDto,
   ) {
+    // Minúsculas: mismo porqué que en `validarYResolverOpciones`. Las válidas
+    // salen de Postgres, así que sin esto `validSet` no encuentra la asociación
+    // (400 "item_grupo_id no válido") y `[x, X]` no cuenta como repetida.
+    const itemGrupoIds = dto.itemGrupoIds.map((id) => id.toLowerCase());
     return this.db.transaccion(async (manager) => {
       const grupoRows: { grupo_modificador_id: string }[] = await manager.query(
         `SELECT grupo_modificador_id FROM grupos_modificadores
@@ -1022,10 +1034,10 @@ export class GruposModificadoresService {
            AND tenant_id = $3 AND eliminado_el IS NULL
          ORDER BY item_grupo_id
          FOR SHARE`,
-        [dto.itemGrupoIds, grupoId, tenantId],
+        [itemGrupoIds, grupoId, tenantId],
       );
       const validSet = new Set(validos.map((r) => r.item_grupo_id));
-      for (const ig of dto.itemGrupoIds) {
+      for (const ig of itemGrupoIds) {
         if (!validSet.has(ig)) {
           throw new BadRequestException(
             `item_grupo_id no válido para este grupo: ${ig}`,
@@ -1083,7 +1095,7 @@ export class GruposModificadoresService {
       // un SELECT más una escritura por asociación (N+1). Las repetidas del
       // pedido se cuentan una vez: el bucle, al llegar a la segunda, ya veía el
       // override que había insertado la primera y lo pisaba con el mismo valor.
-      const asociaciones = [...new Set(dto.itemGrupoIds)];
+      const asociaciones = [...new Set(itemGrupoIds)];
       const vivos: { item_grupo_id: string; item_grupo_opcion_id: string }[] =
         await manager.query(
           `SELECT item_grupo_id, item_grupo_opcion_id FROM item_grupo_modificador_opciones
@@ -1131,7 +1143,7 @@ export class GruposModificadoresService {
           [tenantId, aCrear, dto.grupoOpcionId, cantidad, unidad, precio],
         );
       }
-      return { actualizados: dto.itemGrupoIds.length };
+      return { actualizados: itemGrupoIds.length };
     });
   }
   /**
