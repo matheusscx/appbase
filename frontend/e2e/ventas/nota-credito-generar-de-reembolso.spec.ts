@@ -133,7 +133,9 @@ test('el reembolso sin nota se marca, y "Generar nota" la emite con lo que decla
   await expect(fila.getByRole('radio', { name: 'Se perdió' })).toBeChecked()
 
   await modal.getByRole('button', { name: 'Generar nota', exact: true }).click()
-  await expect(page.getByText('Nota de crédito generada')).toBeVisible()
+  // `.first()`: el toast pinta el texto dos veces (su título y el `role="alert"`
+  // que anuncia el lector de pantalla), y en strict mode eso es un error (CI).
+  await expect(page.getByText('Nota de crédito generada').first()).toBeVisible()
   expect(cuerpo).toEqual({ devoluciones: declarado })
   expect(clave).toMatch(/^[0-9a-f-]{36}$/)
   // La orden se recargó: el reembolso ya tiene su nota y deja de estar marcado.
