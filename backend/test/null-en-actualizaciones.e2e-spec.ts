@@ -721,6 +721,24 @@ describe('null explícito en PATCH/PUT → 400 (e2e)', () => {
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ ui: { colorMode: 'light', pageSize: 25 } });
     });
+
+    // `ui` entero en `null` no llegaba a pisar nada —el spread del merge
+    // ignora un `null`— pero `@IsOptional()` lo dejaba pasar como ausente: un
+    // 200 que no había hecho lo que se le mandó.
+    it('ui null → 400 y no toca lo guardado; sin ui → 200 sin cambios', async () => {
+      const guardar = await enviar('patch', 'me/preferencias', {
+        ui: validos,
+      });
+      expect(guardar.status).toBe(200);
+      const res = await enviar('patch', 'me/preferencias', { ui: null });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string[] }).message).toContain(
+        'nested property ui must be either object or array',
+      );
+      const sinUi = await enviar('patch', 'me/preferencias', {});
+      expect(sinUi.status).toBe(200);
+      expect(sinUi.body).toEqual({ ui: validos });
+    });
   });
 
   describe('PartialType — heredaba @IsOptional en todos los campos', () => {

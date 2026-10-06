@@ -1,11 +1,5 @@
 import { Type } from 'class-transformer';
-import {
-  IsIn,
-  IsInt,
-  IsOptional,
-  ValidateIf,
-  ValidateNested,
-} from 'class-validator';
+import { IsIn, IsInt, ValidateIf, ValidateNested } from 'class-validator';
 import {
   ALLOWED_PAGE_SIZES,
   type ColorModePreference,
@@ -32,8 +26,10 @@ class UiPreferenciasDto {
   declare pageSize?: (typeof ALLOWED_PAGE_SIZES)[number];
 }
 
+// `ui` entero, igual: con `@IsOptional()` un `ui: null` pasaba como ausente y
+// contestaba 200 sin haber hecho nada (el spread del merge ignora el `null`).
 export class UpdatePreferenciasDto {
-  @IsOptional()
+  @ValidateIf((_o, v) => v !== undefined)
   @ValidateNested()
   @Type(() => UiPreferenciasDto)
   ui?: UiPreferenciasDto;

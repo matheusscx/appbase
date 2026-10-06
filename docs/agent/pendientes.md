@@ -67,13 +67,18 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
-- [ ] **`PATCH /me/preferencias` con `ui: null` (el objeto entero) da 200 sin hacer nada** (backend,
-  `me/dto/update-preferencias.dto.ts`; anotado 2026-10-04 por el frente que hizo 400 el `null` de
-  `ui.colorMode`/`ui.pageSize`, que no lo tocó por alcance). `ui` sigue con `@IsOptional()`, que
-  trata `null` como ausente: no resetea nada, pero es la única forma de `null` que esa ruta todavía
-  acepta. Sale de la misma decisión del owner (2026-10-04, "un `null` en las preferencias es un
-  400"): `@ValidateIf((_o, v) => v !== undefined)` en `ui`, con su e2e en
-  `null-en-actualizaciones.e2e-spec.ts`.
+- [ ] **`PATCH /me/preferencias` con `ui` como array da 200 sin hacer nada** (backend,
+  `me/dto/update-preferencias.dto.ts`; anotado 2026-10-06 por el frente que hizo 400 `ui: null`, que
+  no lo tocó por alcance: no es un `null`). `@ValidateNested()` acepta un array y valida cada
+  elemento; el spread de `mergeUsuarioPreferencias` mete la clave `"0"` y la normalización la
+  descarta. **Medido** con `plainToInstance` + `validate` (no por HTTP): `ui: []` y
+  `ui: [{ colorMode: 'light' }]` dan 0 errores, y el segundo deja `dark` guardado —pide un cambio y
+  contesta 200 sin hacerlo—. La pantalla nunca manda un array. Salida probable: `@IsObject()` debajo
+  del `@ValidateIf` de `ui` (rechaza arrays y `null`). Con él, `ui: null` **suma** `ui must be an
+  object` sin quitar `nested property ui must be either object or array` (medido por la revisión con
+  `validateSync`: `customValidations` corre antes que `nestedValidations` y las dos escriben), así
+  que el bloque D de `null-en-actualizaciones.e2e-spec.ts` no cambia. Agregar un caso `ui: [...]` →
+  400 por HTTP: lo de arriba no pasó por el pipe real.
 
 ## 2. Medir primero — no es una pregunta para el owner
 

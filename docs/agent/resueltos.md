@@ -23,6 +23,38 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `PATCH /me/preferencias` con `ui: null` es un 400 (cerrada 2026-10-06)
+
+Sale de [`pendientes.md`](pendientes.md) § 1. Plan:
+[`2026-10-06-ui-null-en-preferencias.md`](../superpowers/plans/2026-10-06-ui-null-en-preferencias.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **`PATCH /me/preferencias` con `ui: null` (el objeto entero) da 200 sin hacer nada** (backend,
+  `me/dto/update-preferencias.dto.ts`; anotado 2026-10-04 por el frente que hizo 400 el `null` de
+  `ui.colorMode`/`ui.pageSize`, que no lo tocó por alcance). `ui` sigue con `@IsOptional()`, que
+  trata `null` como ausente: no resetea nada, pero es la única forma de `null` que esa ruta todavía
+  acepta. Sale de la misma decisión del owner (2026-10-04, "un `null` en las preferencias es un
+  400"): `@ValidateIf((_o, v) => v !== undefined)` en `ui`, con su e2e en
+  `null-en-actualizaciones.e2e-spec.ts`.
+
+### Cómo se cerró
+
+- `@ValidateIf((_o, v) => v !== undefined)` en `ui` en lugar de `@IsOptional()`. El 400 lo da
+  `@ValidateNested()` con `nested property ui must be either object or array`; omitir `ui` sigue
+  siendo un 200 que no toca nada.
+- **Lo que lo fija:** `null-en-actualizaciones.e2e-spec.ts`, bloque D, "ui null → 400 y no toca lo
+  guardado; sin ui → 200 sin cambios". Mutante: el DTO de antes (`@IsOptional()` en `ui`) → muere
+  ese test (400 → 200) y solo ese.
+- **Barrido de los hermanos de `/me`:** `UpdatePerfilDto` no tiene claves anidadas (`apellido` y
+  `telefono` siguen con `@IsOptional()` a propósito: sus columnas son nullables y `null` las borra);
+  `UpdateContrasenaDto` no tiene opcionales. No quedó otra clave que deje pasar un `null` entero.
+- **Lo que quedó afuera:** `ui` como array (`ui: []`) sigue dando 200 sin efecto; no es un `null`,
+  así que fue a `pendientes.md` § 1. Lo levantaron los dos revisores del cierre.
+- La pantalla (`useUserPreferences.ts`) manda una sola clave de `ui` por PATCH, nunca `ui: null`.
+
+---
+
 ## "Generar nota": un `REFUND` aprobado que quedó sin nota de crédito (cerrada 2026-10-04)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Frente fiscal propio (`CLAUDE.md`, ADR-010). La regla
@@ -405,7 +437,8 @@ Sale de [`pendientes.md`](pendientes.md) § 1.
 ### Cómo se cerró
 
 - `@ValidateIf((_o, v) => v !== undefined)` en las dos claves, y las dos con `declare`.
-  `ui` en sí sigue con `@IsOptional()`: no entró en la decisión.
+  `ui` en sí sigue con `@IsOptional()`: no entró en la decisión (cerrado el 2026-10-06, `ui: null`
+  también es un 400).
 - **Lo que lo fija:** `null-en-actualizaciones.e2e-spec.ts`, bloque D: cada clave en `null` →
   400 con el control válido → 200, y "omitir una clave de ui no toca lo guardado". Mutantes:
   el DTO de antes (mueren los 3); `@IsOptional()` con `declare` (mueren los 2 del `null`); sin
