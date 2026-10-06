@@ -4459,18 +4459,23 @@ export class VentasService {
       [ventaId],
     );
     // La serie y la condición de lo que SALIÓ en esta venta, para que el detalle
-    // diga qué unidad se llevó el cliente. UNA consulta por venta, agrupada por
-    // ítem en memoria: una por línea sería un N+1. Se lee del kardex (la salida
+    // diga qué unidad se llevó el cliente. UNA consulta por venta, repartida por
+    // línea en memoria: una por línea sería un N+1. Se lee del kardex (la salida
     // de la venta, `motivo = 'venta'`, como las otras lecturas del kardex de
     // la venta: una salida de otro motivo no es lo que se llevó el cliente). El detalle
     // del movimiento no tiene `eliminado_el`; el movimiento y la unidad sí, y
     // se filtran. Ordenadas por serie para que la lista sea estable.
+    // Por línea y no por ítem: en el salón el mismo producto puede quedar en dos
+    // líneas (subió el precio entre pedidos) y cada una se llevó la suya. La
+    // liga es `venta_detalle_id`, que `crearEnTransaccion` escribe en toda
+    // salida desde el 2026-10-04; no hay ventas con serie anteriores (sin datos
+    // productivos).
     const unidadesVendidas: {
-      item_id: string;
+      venta_detalle_id: string;
       serie: string;
       condicion: string;
     }[] = await this.db.query(
-      `SELECT m.item_id, u.serie, u.condicion
+      `SELECT m.venta_detalle_id, u.serie, u.condicion
          FROM movimientos_inventario m
          JOIN movimiento_inventario_detalle d ON d.movimiento_id = m.movimiento_id
          JOIN item_unidad u ON u.unidad_id = d.unidad_id
@@ -4481,14 +4486,14 @@ export class VentasService {
         ORDER BY u.serie ASC`,
       [ventaId, tenantId],
     );
-    const unidadesPorItem = new Map<
+    const unidadesPorLinea = new Map<
       string,
       { serie: string; condicion: string }[]
     >();
     for (const u of unidadesVendidas) {
-      const lista = unidadesPorItem.get(u.item_id) ?? [];
+      const lista = unidadesPorLinea.get(u.venta_detalle_id) ?? [];
       lista.push({ serie: u.serie, condicion: u.condicion });
-      unidadesPorItem.set(u.item_id, lista);
+      unidadesPorLinea.set(u.venta_detalle_id, lista);
     }
     // Ya comprometido por ítem: el mismo contador que aplica el tope al emitir
     // la nota. Compartirlo no es DRY por gusto — que la pantalla ofrezca una
@@ -4932,10 +4937,8 @@ export class VentasService {
         devolucionStock: devolucionStockDe(
           salidasPorItem.get(d['item_id'] as string) ?? [],
         ),
-        // Vacío en lo que no tiene serie. Por ítem y no por línea: la lectura
-        // agrupa por ítem (las ventas de antes del 2026-10-04 no guardan la
-        // línea de cada salida).
-        unidades: unidadesPorItem.get(d['item_id'] as string) ?? [],
+        // Vacío en lo que no tiene serie. Las que salieron por esta línea.
+        unidades: unidadesPorLinea.get(d['detalle_id'] as string) ?? [],
         cantidadDevuelta: (
           devueltoPorItem.get(d['item_id'] as string) ?? new Decimal(0)
         ).toString(),

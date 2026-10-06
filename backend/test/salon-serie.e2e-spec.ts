@@ -515,6 +515,48 @@ describe('Salones — el garzón elige la unidad con serie (e2e)', () => {
     ]);
   });
 
+  it('dos líneas del mismo producto (subió el precio entre pedidos): cada una muestra solo su unidad', async () => {
+    const { itemId, usado, nuevo } = await productoConTresUnidades();
+    const cuentaA = await abrirCuenta(mesaA.id);
+    expect((await pedir(cuentaA, itemId, [usado.id])).status).toBe(201);
+    // Sube la carta: el segundo pedido es otro hecho y no se fusiona.
+    const subir = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ precioBase: '12000' });
+    expect(subir.status).toBe(200);
+    const segundo = await pedir(cuentaA, itemId, [nuevo.id]);
+    expect(segundo.status).toBe(201);
+    expect(segundo.body.lineas).toHaveLength(2);
+
+    const ventaId = await cerrarCuenta(cuentaA);
+
+    const detalle = await request(app.getHttpServer())
+      .get(`/api/ventas/${ventaId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(detalle.status).toBe(200);
+    const lineas = (
+      detalle.body as {
+        detalles: {
+          precioUnitario: string;
+          unidades: { serie: string; condicion: string }[];
+        }[];
+      }
+    ).detalles;
+    expect(lineas).toHaveLength(2);
+    // La barata es la del primer pedido (el usado); la cara, la del segundo.
+    const [barata, cara] = [...lineas].sort(
+      (a, b) => Number(a.precioUnitario) - Number(b.precioUnitario),
+    );
+    expect(Number(barata.precioUnitario)).toBeLessThan(
+      Number(cara.precioUnitario),
+    );
+    expect(barata.unidades).toEqual([
+      { serie: usado.serie, condicion: 'usado' },
+    ]);
+    expect(cara.unidades).toEqual([{ serie: nuevo.serie, condicion: 'nuevo' }]);
+  });
+
   // ── La unidad vuelve a estar libre ──
 
   it('cancelar la cuenta sin despachar libera la unidad: se ofrece y se puede vender por POS', async () => {

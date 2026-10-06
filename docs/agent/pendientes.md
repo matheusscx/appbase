@@ -123,19 +123,6 @@ destapa una decisión que no es mía).
   y ver si el selector se re-renderiza al abrir; la causa se busca en qué remonta la lista, no
   subiendo el timeout.
 
-- [ ] **Una venta con dos líneas del mismo producto con serie muestra todas las unidades bajo cada
-  línea** (frontend + backend, `VentaDetalleDrawer.vue` y `VentasService` armado del detalle; **leído,
-  no corrido**: lo marcó la revisión independiente del frente "quien vende elige qué unidad con serie
-  sale", 2026-10-03). El detalle agrupa las unidades vendidas por ítem porque el kardex no liga cada
-  movimiento a su línea (decisión del controlador del frente, en
-  [`../features/inventario-serializado.md`](../features/inventario-serializado.md)). Solo pasa en el
-  salón, cuando el mismo producto quedó en dos líneas porque cambió el precio o las reglas entre un
-  pedido y otro (el POS siempre junta). Costo: en un reclamo de garantía la fila muestra más series que
-  su cantidad. **Medir:** reproducirlo por la API (dos pedidos del mismo producto con serie con un
-  cambio de precio en el medio, cerrar, leer `GET /ventas/:id`). **Arreglo probable, de menor a
-  mayor:** que el drawer muestre las unidades una sola vez por ítem; o guardar las unidades en la
-  línea de la venta.
-
 - [ ] **Los arrays de ids de los DTOs que no son de unidades no tienen `@ArrayMaxSize`** (backend,
   `*.dto.ts`; lo listó el `api-security-reviewer` del frente Salón, 2026-10-03, y no se tocó por
   alcance). Los de unidades con serie ya lo tienen (`@ArrayMaxSize(200)` en ventas, salón,

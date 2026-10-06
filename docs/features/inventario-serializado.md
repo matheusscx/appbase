@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-10-03 (el `loteId` de una serie tiene que ser un lote de su ítem y tenant)
+**Last Updated**: 2026-10-06 (las unidades del detalle de venta, por línea)
 
 ---
 
@@ -267,12 +267,11 @@ el 400 de la API es el que manda.
 #### Qué se ve
 
 - **Detalle de venta:** `GET /ventas/:id` trae `unidades: [{ serie, condicion }]` en la línea de un
-  producto con serie, leídas del kardex en una consulta por venta. Se agrupan **por ítem**, no por
-  línea (desde el 2026-10-04 el kardex guarda la línea de cada salida —`venta_detalle_id`—, pero
-  esta lectura no la usa y las ventas de antes no la tienen): con dos líneas del mismo producto
-  con serie —solo pasa en el salón, con el precio o las reglas cambiados entre pedidos; el POS las fusiona— cada
-  una muestra todas las unidades de ese producto en la venta. Se arregla guardando las unidades en
-  `venta_detalles`; nadie lo pidió.
+  producto con serie, leídas del kardex en una consulta por venta y repartidas **por línea** con
+  `venta_detalle_id` (la línea de cada salida, que la venta escribe desde el 2026-10-04). Importa
+  en el salón, donde el mismo producto queda en dos líneas si cambió el precio o las reglas entre
+  pedidos (el POS las fusiona): cada línea muestra solo las suyas. Hasta el 2026-10-06 se
+  agrupaban por ítem y cada línea mostraba todas; medido en `test/salon-serie.e2e-spec.ts`.
 - **Selector** (`UnidadesSerieModal`): serie, condición como badge, garantía, buscador por serie
   (sirve para pegar o escanear el IMEI) y selección múltiple; la cantidad es cuántas se eligieron.
   En una línea del salón ya despachada, las unidades que tiene se ven marcadas y no se desmarcan

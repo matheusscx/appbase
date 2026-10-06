@@ -23,6 +23,56 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Una venta con dos líneas del mismo producto con serie ya no muestra todas las unidades bajo cada una (cerrada 2026-10-06)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. Plan:
+[`2026-10-06-unidades-serie-por-linea.md`](../superpowers/plans/2026-10-06-unidades-serie-por-linea.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Una venta con dos líneas del mismo producto con serie muestra todas las unidades bajo cada
+  línea** (frontend + backend, `VentaDetalleDrawer.vue` y `VentasService` armado del detalle; **leído,
+  no corrido**: lo marcó la revisión independiente del frente "quien vende elige qué unidad con serie
+  sale", 2026-10-03). El detalle agrupa las unidades vendidas por ítem porque el kardex no liga cada
+  movimiento a su línea (decisión del controlador del frente, en
+  [`../features/inventario-serializado.md`](../features/inventario-serializado.md)). Solo pasa en el
+  salón, cuando el mismo producto quedó en dos líneas porque cambió el precio o las reglas entre un
+  pedido y otro (el POS siempre junta). Costo: en un reclamo de garantía la fila muestra más series que
+  su cantidad. **Medir:** reproducirlo por la API (dos pedidos del mismo producto con serie con un
+  cambio de precio en el medio, cerrar, leer `GET /ventas/:id`). **Arreglo probable, de menor a
+  mayor:** que el drawer muestre las unidades una sola vez por ítem; o guardar las unidades en la
+  línea de la venta.
+
+### Qué se midió
+
+- **Reproducido por la API** (e2e nuevo): el salón pide el celular usado, sube `precioBase` de
+  10.000 a 12.000, pide el nuevo → dos líneas; al cerrar, `GET /ventas/:id` traía las dos series
+  bajo la línea de 10.000 (y bajo la de 12.000).
+- **El dato ya estaba escrito**: en la base, cada salida de esa venta trae su `venta_detalle_id`
+  y la unidad correcta (lo escribe `crearEnTransaccion` desde el frente de la nota de crédito,
+  2026-10-04). La entrada suponía que el kardex no ligaba la salida a su línea; eso dejó de ser
+  cierto ese día. Ninguna de las dos salidas propuestas hizo falta: no se escribe nada nuevo en
+  `movimientos_inventario` ni en `venta_detalles`.
+- **Consumidores de `detalles[].unidades`**: solo `VentaDetalleDrawer.vue`, que ya pintaba la
+  lista de su fila. La nota de crédito, la boleta y el ticket no la leen (el `unidades` de
+  `ticket-builder.ts` es la cantidad de un extra). La forma no cambia; el frontend, tampoco.
+
+### Qué se hizo
+
+`VentasService.findOne`: la consulta de unidades (una por venta, sin JOIN nuevo) trae
+`m.venta_detalle_id` en vez de `m.item_id`, y el armado las reparte por `detalle_id`. Sin rama
+para salidas sin línea: toda salida con serie pasa por `crearEnTransaccion`, que la escribe, y el
+proyecto no tiene ventas anteriores a la columna (sin datos productivos). Una rama así no se
+podía alcanzar por la API.
+
+### Qué lo fija
+
+`salon-serie.e2e-spec.ts`, *"dos líneas del mismo producto (subió el precio entre pedidos): cada
+una muestra solo su unidad"*. Mutante: `ventas.service.ts` de `HEAD` (agrupar por ítem) → rojo
+por la aserción (la línea barata trae las dos series).
+
+---
+
 ## El recibo de revisión hashea el diff con `--full-index` (cerrada 2026-10-06)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. El owner dio el sí al arreglo el 2026-10-06, al
