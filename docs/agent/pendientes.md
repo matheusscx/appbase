@@ -249,16 +249,6 @@ destapa una decisión que no es mía).
   y ver si el selector se re-renderiza al abrir; la causa se busca en qué remonta la lista, no
   subiendo el timeout.
 
-- [ ] **Ninguna respuesta de la API viaja comprimida** (backend + proxy de Nuxt; medido en local
-  el 2026-10-03, al cerrar la paginación de `GET /compras/productos`). Ni Nest ni
-  `server/api/[...].ts` comprimen: con `Accept-Encoding: gzip`, `GET /compras/productos` (entera,
-  antes del cierre) bajó del backend los mismos 691.257 bytes que sin el header, y
-  `GET /items?pageSize=100` bajó 66.158 bytes sin `Content-Encoding` tanto del backend como a
-  través del proxy (`nuxt build`). La ruta de compras ya no pesa (página de 20, 2,7 KB), así que
-  no hay un caso medido que duela hoy. **Medir:** el tamaño con y sin `gzip` de las respuestas grandes que siguen enteras
-  (listados sin paginar, reportes) y si Railway comprime en el borde, antes de decidir si va en
-  Nest, en el proxy o en ningún lado.
-
 - [ ] **Una venta con dos líneas del mismo producto con serie muestra todas las unidades bajo cada
   línea** (frontend + backend, `VentaDetalleDrawer.vue` y `VentasService` armado del detalle; **leído,
   no corrido**: lo marcó la revisión independiente del frente "quien vende elige qué unidad con serie
@@ -1376,6 +1366,70 @@ enterarse tarde. Esta sección se abre al encarar el paso a producción. Orden =
 ---
 
 ## Vigilancia — evaluado y descartado, no es trabajo
+
+- [ ] **Lo que lee el navegador de la API viaja sin comprimir, y hoy se deja así** (proxy de
+  Nuxt + borde de Railway; medido el 2026-10-06, sacado de la § 2). La abrió el 2026-10-03 el
+  cierre de la paginación de `GET /compras/productos`, que entera pesaba 691.257 B. En local ni
+  Nest ni el proxy comprimen. **Railway comprime en el
+  borde, pero no el camino del navegador:** directo al backend, `GET /api/docs-json` baja
+  100.662 B sin `gzip` y 7.740 B con `gzip`. A través del proxy (`frontend-…/api/docs-json`, el
+  camino que usa el navegador según ADR-022) baja **100.662 B pida lo que pida**, incluido el
+  `Accept-Encoding` de un navegador. Los assets del frontend sí salen comprimidos (un chunk de
+  `/_nuxt/` pasa de 429.272 B a 148.971 B), así que lo pesado de la app ya viaja comprimido.
+  **Por qué no sirve comprimir en Nest:** `proxyRequest` de h3 no reenvía el `Accept-Encoding`
+  del navegador (`ignoredHeaders`), y el `fetch` de Node que lo reemplaza con el suyo
+  descomprime solo y h3 descarta el `Content-Encoding`. Medido además: con el pedido por defecto
+  de ese `fetch`, el borde le entrega el backend **sin** comprimir. **Por qué el borde de afuera no
+  comprime lo que sale del proxy: sin medir.** La respuesta del proxy lleva copiadas cabeceras del
+  salto interno (`vary: Origin, accept-encoding`, dos `x-railway-request-id`, `x-hikari-trace`
+  con dos saltos) y no lleva `content-length`. La última queda descartada: el `/` del frontend
+  tampoco lo lleva y se comprime. Entre las otras no se puede elegir sin desplegar.
+  **Por qué no duele hoy (seed, admin de Paris):** de los 105 `GET` sin parámetro de ruta del
+  Swagger, el JSON más grande pesa 10.080 B (`/inventario/movimientos`, paginado). El más grande
+  sin paginar pesa 8.315 B (`/roles/modulos-disponibles`, tamaño fijo) y en gzip, ~1 KB. El peor
+  reporte es `GET /propinas/reportes/resumen`: con el rango máximo (366 días) pesa 25.681 B vacío,
+  porque trae una serie por día, y 1.440 B en gzip. Lo que crece con los datos del tenant sin
+  paginar es `/descuentos` y `/recargos`, a ~1 KB por fila, y `/terceros`, a ~500 B por fila.
+  Medido con el seed solo, que no trae ventas: los listados de ventas, pagos y caja vienen
+  paginados y vacíos. **Se reabre** cuando una respuesta del camino del navegador pase de ~100 KB
+  (`/terceros` llega con ~200 terceros) o cuando un cliente se queje de una red lenta. **El
+  lugar es el proxy** (`frontend/server/api/[...].ts`), sin dependencia nueva. Hay dos salidas.
+  La primera es comprimir ahí con `node:zlib` según el `Accept-Encoding` del navegador; se
+  verifica en local. La segunda es dejar de copiar las cabeceras del borde interno para que el
+  borde de afuera comprima solo; es una hipótesis que solo se prueba desplegando. Antes de las
+  dos, primero hay que paginar lo que crece.
+
+  **Para medirlo de nuevo** (dos pasos). El primero son lecturas públicas, sin credenciales, y
+  mide el borde: si los dos números se igualan, el camino del navegador ya se comprime.
+
+  ```bash
+  for u in https://backend-production-8635.up.railway.app https://frontend-production-c0db.up.railway.app; do
+    curl -s -H 'Accept-Encoding: gzip, deflate, br, zstd' -o /dev/null -w "$u %{size_download}\n" "$u/api/docs-json"
+  done
+  ```
+
+  El segundo mide los tamaños con el seed. Primero se levanta el backend del worktree
+  (`./scripts/entorno.sh db`, `npm run build`, `.env` exportado, `PORT=3003 node dist/main`).
+  Después corre este script, que recorre cada `GET` sin parámetro de ruta del Swagger con el
+  admin de Paris e imprime el estado, los bytes enteros, los bytes en gzip y la ruta, de mayor a
+  menor:
+
+  ```bash
+  node --input-type=module -e '
+  import { gzipSync } from "node:zlib"
+  const B = "http://localhost:3003", j = { "content-type": "application/json" }
+  const l = await fetch(`${B}/api/auth/login`, { method: "POST", headers: j, body: JSON.stringify({ email: "admin@sistema.com", password: "admin" }) })
+  const cookie = l.headers.getSetCookie().map(c => c.split(";")[0]).join("; ")
+  const s = await fetch(`${B}/api/auth/switch-tenant`, { method: "POST", headers: { ...j, cookie, authorization: `Bearer ${(await l.json()).access_token}` }, body: JSON.stringify({ tenantId: "550e8400-e29b-41d4-a716-446655440007" }) })
+  const auth = { authorization: `Bearer ${(await s.json()).access_token}` }
+  const rutas = Object.entries((await (await fetch(`${B}/api/docs-json`)).json()).paths).filter(([p, o]) => o.get && !p.includes("{")).map(([p]) => p)
+  const filas = []
+  for (const p of rutas) { const r = await fetch(B + p, { headers: auth, redirect: "manual" }); const b = Buffer.from(await r.arrayBuffer()); filas.push([r.status, b.length, gzipSync(b).length, p]) }
+  for (const f of filas.sort((a, b) => b[1] - a[1])) console.log(f.join("\t"))'
+  ```
+
+  Los cuatro reportes que piden rango dan 400 en esa lista. Se miden aparte con
+  `?desde=2026-01-01&hasta=2026-12-31`.
 
 - [ ] **La salida de un lote elegido a mano busca el lote sin `tenant_id` en el SQL, y se deja
   así** (backend, `InventarioService.moverLote`, la rama con `loteId` explícito; lo marcó el frente
