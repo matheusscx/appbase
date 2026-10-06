@@ -219,6 +219,11 @@ destapa una decisión que no es mía).
       el recibo salió con 9. O el conteo que usa git no es el de `count-objects` (el
       `multi-pack-index`, sin medir), o la causa es otra. Se reescribió el recibo sobre el mismo diff
       revisado.
+    - **Otro caso, 2026-10-06:** `20261006-120037-heuristic-sanderson-949bf5-56020` (13 líneas
+      `index` de 9 contra 8 caracteres, 0 de contenido; recibo escrito en un comando y commit en el
+      siguiente, menos de un minuto después). `in-pack` **44 253** y `count` 1 503 al medir: el
+      mismo `in-pack` que el de `bold-carson`, así que tampoco cae cerca de 2^16. Se reescribió el
+      recibo sobre el mismo diff revisado (`ca462e75`).
 
 - [ ] **Un `itemGrupoId` en mayúsculas en `PATCH /grupos-modificadores/:id/overrides` da un 400
   que miente: "item_grupo_id no válido para este grupo"** (backend,
