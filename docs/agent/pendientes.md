@@ -216,6 +216,12 @@ destapa una decisión que no es mía).
       después: `in-pack` 44 253 y `count` 1 550, de nuevo lejos de 2^16). El mismo commit traía un
       rechazo real (`check-e2e-status`): se corrigió, el delta pasó por la revisión y el recibo se
       escribió en el mismo comando que el commit, que entró.
+    - **Otro caso, 2026-10-06, y descarta que escribir el recibo junto al commit alcance:**
+      `20261006-131958-focused-satoshi-fcec0b-75334` (8 líneas `index` de 9 contra 8 caracteres, 0
+      de contenido). El recibo se escribió **en el mismo comando** que el commit, menos de un
+      segundo antes del hook, y aun así salió con 9. Un momento después, el mismo `git diff
+      --cached` en el shell ya daba 8 y el hash del hook (`4c690a2b`). Medido después: `in-pack`
+      44 253 y `count` 1 624. Se reescribió el recibo sobre el mismo diff revisado (`124c9438`).
 
 - [ ] **`e2e/salones/anular-plato.spec.ts:188` salió flaky en CI** (frontend, Playwright; run
   37465150509 de `d08aef16`, 2026-10-06). El test "pide, manda a cocina, anula como cortesía…" dio
