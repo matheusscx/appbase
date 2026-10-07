@@ -124,8 +124,9 @@ de pago quedan apagadas en la tienda, igual que ya lo estaban en la venta del ca
 se quieren, el backend tiene que resolver el método **antes** de autorizar y el callback
 reproducirlo: es diseño aparte. Con Webpay Plus, además, el tipo de tarjeta se elige en el formulario
 de Transbank, después del monto. `cuentaId` y `canal` los pisa el service, y `personalizacion` la
-descarta (documentado en `online.service.ts`). Los `impuestoIds` de una línea siguen entrando: son
-fiscales, ver [`pendientes.md`](../agent/pendientes.md) § 3.
+descarta (documentado en `online.service.ts`). Los `impuestoIds` de una línea tampoco entran: son 400
+en las cuatro puertas del motor (owner, 2026-10-06, fiscal), y con ellos se cerró el mismo cargo sin
+venta —autorizado de menos o de más contra lo que el callback cobra con los impuestos del ítem—.
 
 Un ítem pausado **no llega al catálogo**: las cuatro superficies de venta piden
 `GET /items?...&activo=true` y el filtro se resuelve en la query, no en el cliente

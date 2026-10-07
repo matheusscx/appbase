@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-08-21
+**Last Updated**: 2026-10-06
 
 ---
 
@@ -270,9 +270,10 @@ que aplicarse: quedar en el mapa solo lo hace resoluble por id, no lo suma a nin
 línea. Lo que decide si el IVA se cobra es exclusivamente `resolverLinea`
 (`calculo-precios.service.ts`, ver [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)):
 
-1. Sobre la lista de impuestos ya resuelta de la línea —venga del ítem o pisada por el
-   payload— **se saca** cualquier `tipo='iva'` (defensa contra `item_impuestos` viejo; la
-   API ya rechaza con 400 que llegue uno explícito, ver más abajo).
+1. La lista de impuestos de la línea es **siempre la del ítem** (`item_impuestos`, solo
+   adicionales `tipo='otro'`): la línea no tiene campo para pedir otros (owner, 2026-10-06,
+   ver más abajo). Sobre esa lista **se saca** cualquier `tipo='iva'` (defensa contra
+   `item_impuestos` viejo).
 2. Si `item.clasificacionTributaria === 'afecto'` (condición **positiva**, no
    `!== 'exento'`: la columna es nullable y un `NULL` no debe derivar IVA), se agrega el
    IVA del país del tenant.
@@ -292,10 +293,19 @@ if (item.clasificacionTributaria === 'afecto') {
 ```
 
 **El IVA no se acepta nunca por payload.** Un `tipo='iva'` en `impuestosIds` (`POST`/
-`PATCH /items`) o en `impuestoIds` por línea (`POST /calculo-precios/calcular`,
-`POST /ventas`) es 400: "El IVA no se asigna por ítem ni por línea: sale de la
+`PATCH /items`) es 400: "El IVA no se asigna por ítem ni por línea: sale de la
 clasificación tributaria." Omitirlo es el camino normal — con la derivación no queda nada
-que normalizar, porque el IVA ya no se guarda. Del mismo modo, mandar
+que normalizar, porque el IVA ya no se guarda.
+
+**Una línea de venta no elige impuestos** (owner, 2026-10-06, fiscal). Hasta esa fecha
+`impuestoIds` por línea (`POST /ventas`, `/calculo-precios/calcular`, `/online/checkout`,
+`/online/pagar`) **reemplazaba** los adicionales del ítem: un servicio de $1.000 con un
+adicional del 10% se cobraba $1.238 en vez de $1.342 con `impuestoIds: []`, y un id
+repetido cobraba el adicional dos veces. En la tienda, además, lo que se autorizaba en
+Webpay no era lo que cobraba la venta del callback, y quedaba un cargo sin venta. Ahora el
+campo no existe y mandarlo es 400 (*"lineas.0.property impuestoIds should not exist"*);
+con él se fue el 400 del IVA explícito por línea, que quedó sin camino. Una venta exenta
+no se arma por línea: la exención es la clasificación del ítem. Del mismo modo, mandar
 `clasificacionTributaria` junto a `tipo: 'ingrediente'` es 400: lo que no aplica no se
 acepta en silencio.
 
@@ -501,17 +511,20 @@ cd backend && npm run test:e2e
   `!== 'exento'` o al código previo a la derivación): item `afecto` sin impuestos
   asociados igual lleva el IVA; `afecto` con adicionales lleva los adicionales
   **más** el IVA; `exento` con adicionales lleva los adicionales **sin** IVA; una
-  línea que pisa impuestos con `impuestoIds: []` sobre un item `afecto` igual lleva
-  el IVA (segunda puerta); `clasificacionTributaria: null` no deriva nada (fija el
+  línea que trae `impuestoIds` por un camino interno igual usa los adicionales de su
+  ítem, más el IVA; `clasificacionTributaria: null` no deriva nada (fija el
   `===` contra el `!==`); `afecto` en un país sin fila `'iva'` revienta nombrando el
   país en vez de vender sin IVA.
 - `items.service.spec`: un `tipo='iva'` en `impuestosIds` es 400;
   `clasificacionTributaria` junto a `tipo: 'ingrediente'` es 400; un ingrediente se
   guarda con `clasificacion_tributaria = NULL`.
 - `ventas.service.spec`: `clasificacion_tributaria` congelada en el detalle (venta
-  normal y nota de crédito, usando el valor original de la venta referenciada). El
-  400 de `impuestoIds` por línea no se duplica acá: `VentasService` calcula a
-  través de `CalculoPreciosService.calcular`, que es donde vive y se testea (arriba).
+  normal y nota de crédito, usando el valor original de la venta referenciada).
+- **E2E, la línea no elige impuestos** (`calculo-precios.e2e-spec.ts`): las cuatro
+  puertas con `impuestoIds` vacío, ajeno o repetido son 400 y no escriben ni venta ni
+  orden de pasarela; sin el campo cobran el IVA más el adicional del ítem. El cargo
+  sin venta de la tienda lo recorre `tienda-impuestos-del-item.e2e-spec.ts` hasta la
+  venta del callback, con el proveedor de Webpay falso.
 - **E2E, el camino por default** (el bug de entrada de ADR-018): crear un item
   `afecto` sin tocar impuestos y venderlo — cobra el 19% de IVA y deja la traza en
   `ventas_impuestos`, sin haber asociado nada en `item_impuestos`.

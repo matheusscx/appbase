@@ -990,7 +990,6 @@ export class VentasService {
           // consultas dos veces. Ver `LineaCalculo` en `calcular.dto.ts`.
           precioUnitarioResuelto: precioConvertido,
           reglasCongeladas: lineasCongeladas?.[i]?.reglasCongeladas,
-          impuestoIds: linea.impuestoIds,
         }),
       ),
       metodoPagoId: dto.metodoPagoId,

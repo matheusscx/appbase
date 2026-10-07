@@ -821,12 +821,36 @@ describe('CalculoPreciosService', () => {
       expect(r.lineas[0].trazas.impuestos.map((i) => i.id)).toEqual(['imp-2']);
     });
 
-    it('una línea que pisa los impuestos con [] igual lleva el IVA si el ítem es afecto', async () => {
-      mockItems({}, { impuestosIds: [], descuentosIds: [], recargosIds: [] });
+    // Los impuestos adicionales de una línea salen de su ítem (owner,
+    // 2026-10-06; fiscal): hasta esa fecha `impuestoIds` de la línea los
+    // reemplazaba. Los DTOs ya no declaran el campo y por HTTP no llega (lo fija
+    // `calculo-precios.e2e-spec.ts`); esto fija el motor ante un camino interno
+    // que lo arrastrara, como el `...linea` de la tienda.
+    it('una línea usa los impuestos adicionales de su ítem aunque traiga otros ids', async () => {
+      mockItems(
+        {},
+        { impuestosIds: ['imp-2'], descuentosIds: [], recargosIds: [] },
+      );
+      // En variables y no literales: el tipo ya no admite el campo.
+      const sinElAdicional = {
+        itemId: 'item-1',
+        cantidad: '1',
+        impuestoIds: [],
+      };
+      const repetido = {
+        itemId: 'item-1',
+        cantidad: '1',
+        impuestoIds: ['imp-2', 'imp-2'],
+      };
       const r = await service.calcular(TENANT, {
-        lineas: [{ itemId: 'item-1', cantidad: '1', impuestoIds: [] }],
+        lineas: [sinElAdicional, repetido],
       });
-      expect(r.lineas[0].trazas.impuestos.map((i) => i.id)).toEqual(['imp-1']);
+      for (const linea of r.lineas) {
+        expect(linea.trazas.impuestos.map((i) => i.id)).toEqual([
+          'imp-2',
+          'imp-1',
+        ]);
+      }
     });
 
     it('una clasificación null no deriva IVA', async () => {
@@ -919,19 +943,6 @@ describe('CalculoPreciosService', () => {
       expect(r.lineas[0].trazas.impuestos).toEqual([
         expect.objectContaining({ id: 'imp-1', tasa: '0.19' }),
       ]);
-    });
-
-    it('rechaza el IVA mandado explícito en una línea', async () => {
-      // El IVA no entra por payload, mismo contrato que POST/PATCH /items
-      // (`validarImpuestos`, ADR-018): imp-1 es tipo 'iva' en el catálogo
-      // mockeado del beforeEach.
-      await expect(
-        service.calcular(TENANT, {
-          lineas: [{ itemId: 'item-1', cantidad: '1', impuestoIds: ['imp-1'] }],
-        }),
-      ).rejects.toThrow(
-        'El IVA no se asigna por ítem ni por línea: sale de la clasificación tributaria',
-      );
     });
   });
 

@@ -53,13 +53,6 @@ export class LineaDto {
   @ValidateNested()
   @Type(() => PersonalizacionRecetaDto)
   personalizacion?: PersonalizacionRecetaDto;
-
-  @IsOptional()
-  @IsArray()
-  // Mismo tope que `LineaVentaDto.impuestoIds`.
-  @ArrayMaxSize(50)
-  @IsUUID('4', { each: true })
-  impuestoIds?: string[];
 }
 
 export class CalcularVentaDto {

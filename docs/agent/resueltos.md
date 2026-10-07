@@ -23,10 +23,120 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los impuestos adicionales de una línea salen de su ítem: `impuestoIds` es un 400 (cerrada 2026-10-06)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Es la parte fiscal de la entrada cuya parte de
+producto se cerró el mismo día (la de abajo), en su propia sesión. Spec y plan:
+[`2026-10-06-impuestos-de-linea-del-item-design.md`](../superpowers/specs/2026-10-06-impuestos-de-linea-del-item-design.md),
+[`2026-10-06-impuestos-de-linea-del-item.md`](../superpowers/plans/2026-10-06-impuestos-de-linea-del-item.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **Los impuestos adicionales de una línea salen del ítem: `impuestoIds` es un 400** ✅
+  *(decidido por el owner el 2026-10-06. Es la parte fiscal de "Los ids de reglas que manda el
+  cliente salen del ítem": la de producto —descuentos y recargos— se cerró el mismo día, ver
+  [`resueltos.md`](resueltos.md))* (backend, motor de precios; **fiscal: va en su propia sesión**,
+  regla del 2026-08-23 y ADR-010). `resolverLinea` (`calculo-precios.service.ts:860`) usa
+  `linea.impuestoIds ?? reglas?.impuestosIds`: lo que manda la línea **reemplaza** los impuestos
+  adicionales (`tipo='otro'`) del ítem. El IVA no, desde ADR-018. Entra por las mismas cuatro
+  puertas: `POST /ventas`, `/calculo-precios/calcular`, `/online/checkout` y `/online/pagar`.
+  - **Medido** por HTTP el 2026-10-06 (admin de Paris): un servicio de 1.000 neto con "Interés
+    compuesto 4%" (`…132`) y un impuesto adicional del 10% cobra 1.342 sin el campo y **1.238** con
+    `impuestoIds: []`, y la venta queda con 1 impuesto en vez de 2. Además, un `impuestoIds`
+    **repetido** cobra el impuesto adicional una vez por repetición: es el gemelo del bug de
+    descuentos y recargos repetidos que cerró el `@ArrayUnique` del 2026-10-06.
+  - **Agravante en la tienda** (lo vio la revisión de seguridad del frente de producto,
+    2026-10-06; leído en el código, no medido por HTTP). `prepararLineasCheckout` esparce
+    `...linea` en el cálculo cuyo total `/online/pagar` autoriza contra la tarjeta. El snapshot de
+    la orden **no** lo arrastra (`lineasSnapshot` lleva solo `itemId`, `cantidad` y presentación),
+    así que el callback (`online-callback.handler.ts`) recalcula con los impuestos del ítem. Con
+    `impuestoIds: []`, Webpay autoriza de menos, `ventas.service` rechaza la venta (*"Las ventas
+    online requieren el pago completo"*) y queda **un cargo en Webpay sin venta**. Con un impuesto
+    adicional que el ítem no tiene, autoriza de más y el pago supera el total: sin `permite_vuelto`
+    en el método de tarjeta (lo normal), `PagosService` lo rechaza con 400 (*"…ningún método de pago
+    permite vuelto"*) y también queda un cargo sin venta. Con `permite_vuelto`, la venta se guarda
+    con vuelto sobre la tarjeta. Es lo que más apura del frente fiscal.
+  - **Decidido, fiscal** (owner, 2026-10-06, pregunta aparte: el servicio de $1.000 cobrado $1.238 en
+    vez de $1.342, con un impuesto en la boleta en vez de dos). Eligió *"Cerrarlo: salen del ítem"*
+    por sobre dejarlo como está: los impuestos adicionales salen siempre del ítem, como el IVA desde
+    ADR-018. `impuestoIds` de las dos clases → 400. **Va en su propia sesión fiscal** (regla del
+    2026-08-23), y con eso desaparece también el `impuestoIds` repetido.
+  - **Construir:** sacar `impuestoIds` de `LineaVentaDto` y de `LineaDto` (el pipe global da el
+    400, igual que con descuentos y recargos), la rama `linea.impuestoIds ??` de `resolverLinea` y el
+    pasamanos de `ventas.service.ts:993`. El 400 del IVA explícito de `calcular()` (*"El IVA no se
+    asigna por ítem ni por línea"*, `calculo-precios.service.ts:288`) se queda sin camino: decidir si
+    se borra. Corregir el request y las "Decisiones" de `motor-calculo-precios.md`, y `ventas.md`. El
+    molde es el describe *"las reglas de una línea salen del ítem"* de `calculo-precios.e2e-spec.ts`,
+    con sus mutantes.
+  - **Lo que dejó el frente de producto, revisado por la Sesión de esfuerzo máximo (2026-10-06, con
+    la medición del frente).** La decisión derivada decía cerrar también `descuentosVentaIds` y
+    `recargosVentaIds`. Quedó así: **abiertos en la caja** (`/ventas` y `/calcular`), porque son la
+    única puerta de las reglas de nivel venta, una feature de catálogo diseñada que espera su
+    pantalla; **cerrados con 400 en la tienda** (`/online/checkout|pagar`, construido), porque el
+    comprador no elige reglas y el total autorizado contra la tarjeta no cerraba con la venta del
+    callback. Por la misma razón se cerró en la tienda `metodoPagoId` (decidido por la Sesión de
+    esfuerzo máximo, 2026-10-06; lo encontró el revisor de seguridad del frente). ⚠️ La puerta de nivel venta en `/ventas` **no pide permiso propio** (alcanza
+    `Ventas:Crear`): entra con la pantalla de "la caja elige descuentos",
+    [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2.
+
+### Qué se midió
+
+- **Los consumidores, antes de sacar nada** (grep de `impuestoIds`, que no es el `impuestosIds` del
+  ítem). En `backend/src`: los dos DTOs, la rama de `resolverLinea`, el 400 del IVA explícito de
+  `calcular()` y el pasamanos de `ventas.service`. Ningún flujo interno lo armaba: ni `cerrarCuenta`
+  del salón ni el callback online, y el seed no lo usa. En `frontend/app`, solo el tipo de
+  `useCalculoPrecios.ts`. En los tests, dos unit del motor y tres filas de `topes-dto.e2e-spec.ts`.
+  **Nada diseñado dependía de mandarlo**: la exención es `clasificacion_tributaria = 'exento'`
+  (invariante 5), y ni `PRODUCTO.md`, ni `features/`, ni `desarrollo-nuevo.md` tienen una venta exenta
+  o un impuesto por línea que el ítem no exprese. No hubo nada que escalar.
+- **Antes del cambio**, las 12 filas nuevas del e2e (cuatro puertas × vacío, ajeno, repetido) daban
+  **201**, `/online/pagar` incluido.
+- **El agravante de la tienda, medido por primera vez** (hasta acá estaba leído en el código).
+  Con el proveedor de Webpay falso, sobre el código viejo, el mismo servicio de $1.000 afecto con un
+  adicional del 10%: con `impuestoIds: []` se autorizaron **$1.190** y con un adicional ajeno del 5%,
+  **$1.240**, contra los $1.290 que cobra el ítem. Después del retorno por HTTP, las dos órdenes
+  quedaron `pagada` con `venta_id` nulo: **un cargo sin venta**. El caso del ajeno también autorizaba
+  de menos porque el reemplazo saca el adicional propio; el "de más" de la entrada pide uno ajeno más
+  caro que el propio.
+
+### Qué se hizo
+
+- `impuestoIds` salió de `LineaVentaDto` y de `LineaDto`. El 400 lo da el pipe global
+  (`lineas.0.property impuestoIds should not exist`) en las cuatro puertas: la tienda usa
+  `CheckoutOnlineDto`, que hereda `LineaDto`.
+- `resolverLinea` usa siempre `reglas.impuestosIds` del ítem, y `ventas.service` dejó de pasar el
+  campo. El filtro de `tipo='iva'` se queda: es defensa contra `item_impuestos` viejo (ADR-018).
+- **El 400 del IVA explícito por línea se borró** (*"El IVA no se asigna por ítem ni por línea"*,
+  en `calcular()`): quedó sin camino, porque ningún request trae el campo y el tipo dejó de
+  declararlo. El de `POST`/`PATCH /items` (`validarImpuestos`) sigue. ADR-018 lleva la nota.
+- El tipo `CalcularLineaInput` del frontend perdió el campo.
+
+### Qué lo fija
+
+- `calculo-precios.e2e-spec.ts` § *"los impuestos adicionales de una línea salen del ítem"*: las
+  cuatro puertas con `impuestoIds` vacío, ajeno y repetido, 400 con el mensaje del pipe, sin venta ni
+  orden de pasarela nuevas · el control sin el campo en `/ventas`, `/calcular` y `/online/checkout`,
+  que cobra $290 de impuestos sobre $1.000 (IVA más el adicional).
+- `tienda-impuestos-del-item.e2e-spec.ts`, con `ProviderFactory` falso: `/online/pagar` con el campo
+  es 400 y el proveedor nunca se llama · sin el campo, el camino entero —`pagar`, retorno de Webpay
+  por HTTP, callback en proceso— autoriza $1.290 y la venta cobra $1.290, pagados, con los dos
+  impuestos en `ventas_impuestos`.
+- `calculo-precios.service.spec.ts` *"una línea usa los impuestos adicionales de su ítem aunque
+  traiga otros ids"*: el motor ante un camino interno que lo arrastrara, con una línea vacía y una
+  repetida.
+- **Mutantes**, cada uno restaurado desde copia: el campo devuelto a `LineaDto` mata 10 (las 9 filas
+  de `/calcular`, `/online/checkout` y `/online/pagar`, más el 400 del spec de la tienda), todas por
+  *201 en lugar de 400*; devuelto a `LineaVentaDto`, las 3 de `/ventas`. **La rama restaurada no se
+  ve por HTTP** (los DTOs no dejan entrar el campo); la mata el unit, medido por mitades: con la rama
+  entera, la línea vacía pierde `imp-2`; con la rama solo para listas no vacías, la repetida lo
+  cobra dos veces.
+
+---
+
 ## Los descuentos y recargos de una línea salen de su ítem: mandar otros es un 400 (cerrada 2026-10-06)
 
 Sale de [`pendientes.md`](pendientes.md) § 3, **solo la parte de producto**: la fiscal
-(`impuestoIds`) sigue allá, para su propia sesión. Spec y plan:
+(`impuestoIds`) quedó allá para su propia sesión, y se cerró el mismo día (la entrada de arriba). Spec y plan:
 [`2026-10-06-reglas-de-linea-del-item-design.md`](../superpowers/specs/2026-10-06-reglas-de-linea-del-item-design.md),
 [`2026-10-06-reglas-de-linea-del-item.md`](../superpowers/plans/2026-10-06-reglas-de-linea-del-item.md).
 

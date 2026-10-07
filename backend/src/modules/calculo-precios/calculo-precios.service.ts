@@ -279,17 +279,6 @@ export class CalculoPreciosService {
       }
     }
 
-    // El IVA no entra por payload, mismo contrato que POST/PATCH /items. El
-    // strip de `resolverLinea` es defensa contra `item_impuestos` viejo, no
-    // contrato de la API: si el cliente lo manda explícito, se le dice.
-    for (const l of dto.lineas) {
-      if (l.impuestoIds?.some((id) => impuestoMap.get(id)?.tipo === 'iva')) {
-        throw new BadRequestException(
-          'El IVA no se asigna por ítem ni por línea: sale de la clasificación tributaria',
-        );
-      }
-    }
-
     const itemIds = dto.lineas.map((l) => l.itemId);
     /**
      * **Secuencial a propósito, y no es una desoptimización.** Los dos loaders
@@ -857,12 +846,13 @@ export class CalculoPreciosService {
     const item = itemsBase.get(linea.itemId)!;
     const reglas = reglasPorItem.get(linea.itemId);
 
-    const impuestoIds = linea.impuestoIds ?? reglas?.impuestosIds ?? [];
-    // Los descuentos y recargos de una línea son SIEMPRE los de su ítem (owner,
-    // 2026-10-06). Hasta esa fecha `linea.descuentoIds`/`recargoIds` los
-    // reemplazaban, y por la API se aplicaba una regla que el ítem no tenía o se
-    // le sacaba la suya. Los DTOs ya no declaran esos campos, así que el pipe
+    // Los impuestos, descuentos y recargos de una línea son SIEMPRE los de su
+    // ítem (owner, 2026-10-06). Hasta esa fecha `linea.impuestoIds`/
+    // `descuentoIds`/`recargoIds` los reemplazaban: por la API se aplicaba una
+    // regla que el ítem no tenía, se le sacaba la suya o se vendía sin su
+    // impuesto adicional. Los DTOs ya no declaran esos campos, así que el pipe
     // global los rechaza con 400 antes de llegar acá.
+    const impuestoIds = reglas?.impuestosIds ?? [];
     const descuentoIds = reglas?.descuentosIds ?? [];
     const recargoIds = reglas?.recargosIds ?? [];
 
@@ -887,10 +877,10 @@ export class CalculoPreciosService {
       );
 
     // El IVA de una línea lo decide la clasificación tributaria, NUNCA la lista
-    // de impuestos: se saca cualquier 'iva' que venga —del ítem o pisado por la
-    // línea— y se agrega el del país solo si es afecto. El mismo código cubre
-    // las dos direcciones y no puede duplicar. Los 'otro' aplican siempre, en
-    // afectos y exentos (DL 825 / IndExe del DTE).
+    // de impuestos: se saca cualquier 'iva' que venga del ítem (defensa contra
+    // `item_impuestos` viejo, ADR-018) y se agrega el del país solo si es
+    // afecto. El mismo código cubre las dos direcciones y no puede duplicar. Los
+    // 'otro' aplican siempre, en afectos y exentos (DL 825 / IndExe del DTE).
     //
     // ⚠️ La condición es POSITIVA a propósito. `clasificacion_tributaria` es
     // nullable (los ingredientes no tienen tratamiento fiscal): un `!== 'exento'`

@@ -56,12 +56,8 @@ Request:
 {
   "lineas": [
     { "itemId": "uuid", "cantidad": "2",
-      "personalizacion": { ... },         // opcional; el precio de la línea lo
+      "personalizacion": { ... }          // opcional; el precio de la línea lo
                                            // calcula el servidor a partir de esto
-      "impuestoIds": []                   // opcional (reemplaza los ADICIONALES del
-                                           // ítem, tipo='otro'; el IVA no se puede
-                                           // pisar ni quitar — 400 si trae un id
-                                           // tipo='iva', ver ADR-018)
     }
   ],
   "metodoPagoId": "uuid",                 // opcional (habilita reglas metodo_pago;
@@ -69,10 +65,11 @@ Request:
   "descuentosVentaIds": ["uuid"],         // opcional (reglas a nivel venta)
   "recargosVentaIds": []
 }
-// Los descuentos y recargos de una línea salen SIEMPRE de su ítem (owner,
-// 2026-10-06): una línea con `descuentoIds` o `recargoIds` es 400 ("property
-// descuentoIds should not exist"). Hasta esa fecha esos ids reemplazaban los
-// del ítem, y por la API se aplicaba una regla que el ítem no tenía.
+// Los impuestos, descuentos y recargos de una línea salen SIEMPRE de su ítem
+// (owner, 2026-10-06): una línea con `impuestoIds`, `descuentoIds` o
+// `recargoIds` es 400 ("property impuestoIds should not exist"). Hasta esa
+// fecha esos ids reemplazaban los del ítem: por la API se aplicaba una regla
+// que el ítem no tenía, o se vendía sin su impuesto adicional.
 // Topes del borde (400 al pasarse): 500 líneas, 50 ids por lista. Los ids de
 // descuentos y recargos de venta no se repiten: repetido es 400 (2026-10-06;
 // antes la regla se aplicaba una vez por repetición).
@@ -496,16 +493,13 @@ redondean y siguen en HALF_UP fijo (`docs/agent/pendientes.md`).
 **Decisiones**: `monto_fijo` se aplica por línea (no por unidad); las reglas
 diferidas (`mora`, `pronto_pago`) devuelven monto 0; una regla con fechas fuera
 de su vigencia hace `continue` antes de evaluar (sin traza ni advertencia); los
-descuentos y recargos de una línea son **siempre los asociados a su ítem** (owner,
-2026-10-06: la línea no tiene campo para pedir otros, y mandarlos es 400). Hasta esa
-fecha los ids de la línea los **reemplazaban**, y por la API un celular de $11.900
-salía a $5.950 con un descuento que no tenía asociado. Los `impuestoIds` de la línea
-todavía reemplazan los impuestos **adicionales** (`tipo='otro'`) del ítem: el owner
-decidió cerrarlos igual, y va en su propia sesión fiscal
-([`pendientes.md`](../agent/pendientes.md) § 3). El IVA nunca sale de `impuestoIds`,
-ni del ítem ni de la línea — lo deriva el motor de `clasificacion_tributaria` y no se
-puede pisar ni quitar por payload (400 si llega un id `tipo='iva'` explícito, ver
-[ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)).
+impuestos adicionales, descuentos y recargos de una línea son **siempre los asociados a
+su ítem** (owner, 2026-10-06, en dos preguntas: la de producto y la fiscal; la línea no
+tiene campo para pedir otros, y mandarlos es 400). Hasta esa fecha los ids de la línea
+los **reemplazaban**: por la API un celular de $11.900 salía a $5.950 con un descuento
+que no tenía asociado, y un servicio de $1.342 se cobraba $1.238 sin su impuesto
+adicional. El IVA tampoco sale de la línea: lo deriva el motor de
+`clasificacion_tributaria` ([ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)).
 
 **Orden de aplicación dentro de un paso: porcentajes antes que montos fijos**
 (decisión del owner, 2026-08-11). Cuando un ítem —o una venta— tiene varias reglas

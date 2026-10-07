@@ -691,4 +691,138 @@ describe('Cálculo de precios (e2e)', () => {
       );
     });
   });
+
+  /**
+   * Los impuestos adicionales de una línea salen del ítem, como el IVA desde
+   * ADR-018 (owner, 2026-10-06; fiscal, su propia sesión). Hasta esa fecha
+   * `impuestoIds` de la línea **reemplazaba** los `tipo='otro'` del ítem: un
+   * servicio de $1.000 con un adicional del 10% se cobraba $1.238 en vez de
+   * $1.342 con `impuestoIds: []`, y un id repetido cobraba el adicional una vez
+   * por repetición. Ahora el campo no existe en ninguna de las cuatro puertas.
+   *
+   * Las tres filas por puerta son las tres formas del bug: sacar el adicional
+   * del ítem, meter uno que el ítem no tiene y repetir el suyo. El control
+   * —mismo pedido sin el campo— prueba que el 400 es por el campo y que la línea
+   * sigue cobrando el IVA más el adicional de su ítem.
+   *
+   * "No escribe" cuenta ventas Y órdenes de pasarela: en `/online/pagar` lo que
+   * se escribe primero es la orden que se autoriza contra la tarjeta. El cargo
+   * sin venta que eso dejaba lo recorre `tienda-impuestos-del-item.e2e-spec.ts`.
+   */
+  describe('los impuestos adicionales de una línea salen del ítem: mandar otros es 400', () => {
+    let ds: DataSource;
+    let caja: CajaAbierta | undefined;
+    let adicionalId: string;
+    let ajenoId: string;
+    /** Servicio afecto con el adicional asociado: sin stock que gastar. */
+    let itemId: string;
+
+    const crearImpuesto = async (nombre: string, porcentaje: string) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/impuestos')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ nombre: `${nombre} ${randomUUID()}`, porcentaje });
+      expect(res.status).toBe(201);
+      return (res.body as { id: string }).id;
+    };
+
+    beforeAll(async () => {
+      ds = app.get(DataSource);
+      adicionalId = await crearImpuesto('Adicional del ítem E2E', '0.10');
+      ajenoId = await crearImpuesto('Adicional ajeno E2E', '0.05');
+
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio con adicional E2E ${randomUUID()}`,
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+          clasificacionTributaria: 'afecto',
+          impuestosIds: [adicionalId],
+        });
+      expect(resItem.status).toBe(201);
+      itemId = (resItem.body as { id: string }).id;
+
+      caja = await abrirCaja(app, token, {
+        comentario: 'Apertura E2E impuestos de línea',
+      });
+    });
+
+    afterAll(async () => {
+      if (caja) await cerrarCaja(app, token, caja);
+    });
+
+    const PUERTAS = [
+      'ventas',
+      'calculo-precios/calcular',
+      'online/checkout',
+      'online/pagar',
+    ] as const;
+    type Puerta = (typeof PUERTAS)[number];
+
+    const pedir = (puerta: Puerta, linea: Record<string, unknown>) =>
+      request(app.getHttpServer())
+        .post(`/api/${puerta}`)
+        .set('Authorization', `Bearer ${token}`)
+        .set('Idempotency-Key', randomUUID())
+        .send({
+          lineas: [{ itemId, cantidad: '1', ...linea }],
+          ...(puerta === 'ventas'
+            ? { pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000000.0000' }] }
+            : {}),
+        });
+
+    const contarEscrituras = async () => {
+      // Sin `eliminado_el IS NULL` a propósito: lo que se cuenta es si el
+      // pedido escribió algo, y una fila borrada también sería una escritura.
+      const filas: { ventas: string; ordenes: string }[] = await ds.query(
+        `SELECT (SELECT count(*) FROM ventas WHERE tenant_id = $1) AS ventas,
+                (SELECT count(*) FROM pasarela_ordenes WHERE tenant_id = $1) AS ordenes`,
+        [PARIS_TENANT_ID],
+      );
+      return filas[0];
+    };
+
+    const FILAS = PUERTAS.flatMap((puerta) => [
+      { puerta, forma: 'sin el adicional', valor: () => [] as string[] },
+      { puerta, forma: 'con uno ajeno', valor: () => [ajenoId] },
+      { puerta, forma: 'repetido', valor: () => [adicionalId, adicionalId] },
+    ]);
+
+    it.each(FILAS)(
+      'POST /$puerta con lineas.0.impuestoIds $forma: 400 nombrando el campo, y no escribe',
+      async ({ puerta, valor }) => {
+        const antes = await contarEscrituras();
+        const res = await pedir(puerta, { impuestoIds: valor() });
+        expect(res.status).toBe(400);
+        expect(
+          [(res.body as { message?: string | string[] }).message ?? []].flat(),
+        ).toContain('lineas.0.property impuestoIds should not exist');
+        expect(await contarEscrituras()).toEqual(antes);
+      },
+    );
+
+    // `/online/pagar` queda afuera del control: con Webpay activo abre una orden
+    // contra el proveedor. Su control con el proveedor falso, hasta la venta del
+    // callback, es `tienda-impuestos-del-item.e2e-spec.ts`.
+    it.each(['ventas', 'calculo-precios/calcular', 'online/checkout'] as const)(
+      'control en /%s: sin el campo, la línea cobra el IVA y el adicional de su ítem',
+      async (puerta) => {
+        const res = await pedir(puerta, {});
+        expect(res.status).toBe(201);
+        const body = res.body as Record<string, unknown>;
+        const totales =
+          puerta === 'online/checkout'
+            ? (body.resultado as ResultadoVentaResponse).totales
+            : puerta === 'ventas'
+              ? (body as unknown as ResultadoVentaResponse['totales'])
+              : (body as unknown as ResultadoVentaResponse).totales;
+        // $1.000 neto: $190 de IVA más $100 del adicional.
+        expect(Number(totales.totalImpuestos)).toBe(290);
+        expect(Number(totales.totalFinal)).toBe(1290);
+      },
+    );
+  });
 });

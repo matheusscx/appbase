@@ -560,13 +560,6 @@ const TOPES: FilaTope[] = [
     cuerpo: (n) => ({ lineas: lista(n, lineaDe) }),
   },
   {
-    campo: 'lineas.0.impuestoIds',
-    tope: 50,
-    metodo: 'post',
-    ruta: 'ventas',
-    cuerpo: (n) => linea({ impuestoIds: uuids(n) }),
-  },
-  {
     campo: 'descuentosVentaIds',
     tope: 50,
     metodo: 'post',
@@ -587,13 +580,6 @@ const TOPES: FilaTope[] = [
     metodo: 'post',
     ruta: 'calculo-precios/calcular',
     cuerpo: (n) => ({ lineas: lista(n, lineaDe) }),
-  },
-  {
-    campo: 'lineas.0.impuestoIds',
-    tope: 50,
-    metodo: 'post',
-    ruta: 'calculo-precios/calcular',
-    cuerpo: (n) => linea({ impuestoIds: uuids(n) }),
   },
   {
     campo: 'descuentosVentaIds',
@@ -767,11 +753,6 @@ describe('Topes y forma de los arrays y objetos de los DTOs (e2e)', () => {
   // motor lo recorría como lista: un 500 (medido en `POST /ventas`).
   describe('@IsArray: una lista que llega como un valor suelto es 400', () => {
     const FILAS: { campo: string; ruta: string; cuerpo: object }[] = [
-      {
-        campo: 'lineas.0.impuestoIds',
-        ruta: 'ventas',
-        cuerpo: linea({ impuestoIds: ID }),
-      },
       {
         campo: 'descuentosVentaIds',
         ruta: 'ventas',

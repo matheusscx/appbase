@@ -171,53 +171,6 @@ oficial, `cashRounding`, el conteo por denominación, el envío diario del resum
 la acumulación de descuentos y compras— y el renombre de `moneda.decimales` se mudaron a
 [`desarrollo-nuevo.md`](desarrollo-nuevo.md) el 2026-10-06. Acá quedan las correcciones.
 
-- [ ] **Los impuestos adicionales de una línea salen del ítem: `impuestoIds` es un 400** ✅
-  *(decidido por el owner el 2026-10-06. Es la parte fiscal de "Los ids de reglas que manda el
-  cliente salen del ítem": la de producto —descuentos y recargos— se cerró el mismo día, ver
-  [`resueltos.md`](resueltos.md))* (backend, motor de precios; **fiscal: va en su propia sesión**,
-  regla del 2026-08-23 y ADR-010). `resolverLinea` (`calculo-precios.service.ts:860`) usa
-  `linea.impuestoIds ?? reglas?.impuestosIds`: lo que manda la línea **reemplaza** los impuestos
-  adicionales (`tipo='otro'`) del ítem. El IVA no, desde ADR-018. Entra por las mismas cuatro
-  puertas: `POST /ventas`, `/calculo-precios/calcular`, `/online/checkout` y `/online/pagar`.
-  - **Medido** por HTTP el 2026-10-06 (admin de Paris): un servicio de 1.000 neto con "Interés
-    compuesto 4%" (`…132`) y un impuesto adicional del 10% cobra 1.342 sin el campo y **1.238** con
-    `impuestoIds: []`, y la venta queda con 1 impuesto en vez de 2. Además, un `impuestoIds`
-    **repetido** cobra el impuesto adicional una vez por repetición: es el gemelo del bug de
-    descuentos y recargos repetidos que cerró el `@ArrayUnique` del 2026-10-06.
-  - **Agravante en la tienda** (lo vio la revisión de seguridad del frente de producto,
-    2026-10-06; leído en el código, no medido por HTTP). `prepararLineasCheckout` esparce
-    `...linea` en el cálculo cuyo total `/online/pagar` autoriza contra la tarjeta. El snapshot de
-    la orden **no** lo arrastra (`lineasSnapshot` lleva solo `itemId`, `cantidad` y presentación),
-    así que el callback (`online-callback.handler.ts`) recalcula con los impuestos del ítem. Con
-    `impuestoIds: []`, Webpay autoriza de menos, `ventas.service` rechaza la venta (*"Las ventas
-    online requieren el pago completo"*) y queda **un cargo en Webpay sin venta**. Con un impuesto
-    adicional que el ítem no tiene, autoriza de más y el pago supera el total: sin `permite_vuelto`
-    en el método de tarjeta (lo normal), `PagosService` lo rechaza con 400 (*"…ningún método de pago
-    permite vuelto"*) y también queda un cargo sin venta. Con `permite_vuelto`, la venta se guarda
-    con vuelto sobre la tarjeta. Es lo que más apura del frente fiscal.
-  - **Decidido, fiscal** (owner, 2026-10-06, pregunta aparte: el servicio de $1.000 cobrado $1.238 en
-    vez de $1.342, con un impuesto en la boleta en vez de dos). Eligió *"Cerrarlo: salen del ítem"*
-    por sobre dejarlo como está: los impuestos adicionales salen siempre del ítem, como el IVA desde
-    ADR-018. `impuestoIds` de las dos clases → 400. **Va en su propia sesión fiscal** (regla del
-    2026-08-23), y con eso desaparece también el `impuestoIds` repetido.
-  - **Construir:** sacar `impuestoIds` de `LineaVentaDto` y de `LineaDto` (el pipe global da el
-    400, igual que con descuentos y recargos), la rama `linea.impuestoIds ??` de `resolverLinea` y el
-    pasamanos de `ventas.service.ts:993`. El 400 del IVA explícito de `calcular()` (*"El IVA no se
-    asigna por ítem ni por línea"*, `calculo-precios.service.ts:288`) se queda sin camino: decidir si
-    se borra. Corregir el request y las "Decisiones" de `motor-calculo-precios.md`, y `ventas.md`. El
-    molde es el describe *"las reglas de una línea salen del ítem"* de `calculo-precios.e2e-spec.ts`,
-    con sus mutantes.
-  - **Lo que dejó el frente de producto, revisado por la Sesión de esfuerzo máximo (2026-10-06, con
-    la medición del frente).** La decisión derivada decía cerrar también `descuentosVentaIds` y
-    `recargosVentaIds`. Quedó así: **abiertos en la caja** (`/ventas` y `/calcular`), porque son la
-    única puerta de las reglas de nivel venta, una feature de catálogo diseñada que espera su
-    pantalla; **cerrados con 400 en la tienda** (`/online/checkout|pagar`, construido), porque el
-    comprador no elige reglas y el total autorizado contra la tarjeta no cerraba con la venta del
-    callback. Por la misma razón se cerró en la tienda `metodoPagoId` (decidido por la Sesión de
-    esfuerzo máximo, 2026-10-06; lo encontró el revisor de seguridad del frente). ⚠️ La puerta de nivel venta en `/ventas` **no pide permiso propio** (alcanza
-    `Ventas:Crear`): entra con la pantalla de "la caja elige descuentos",
-    [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2.
-
 - [ ] **Lo que quedó del frente del modo ciego, ya cerrado** (backend + producto; la entrada
   madre —seis fugas, el eje mío/todos y el rastro de los oráculos— se mudó entera a
   [`resueltos.md`](resueltos.md) § *"El modo ciego deja de prometer lo que no sostiene, y los

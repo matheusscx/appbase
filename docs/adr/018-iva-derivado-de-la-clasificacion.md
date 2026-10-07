@@ -35,6 +35,12 @@ API (`items.service.ts` → `validarImpuestos`, y su gemelo en `ventas`/simulado
 precios) cuando el cliente manda un `tipo='iva'` explícito. Los dos mecanismos conviven a
 propósito: uno cierra la entrada, el otro cubre lo que ya está en la base.
 
+⚠️ **Actualización 2026-10-06 — la línea ya no pisa nada.** El owner cerró también los
+impuestos adicionales: una línea de venta no tiene `impuestoIds`, y mandarlo es 400 del pipe
+global en las cuatro puertas del motor. La lista resuelta es siempre la del ítem, y el 400
+del IVA explícito por línea se borró porque quedó sin camino; el de `POST`/`PATCH /items`
+sigue. Detalle en [`features/impuestos.md`](../features/impuestos.md).
+
 `items.clasificacion_tributaria` pasa a **nullable** —un `tipo='ingrediente'` se guarda
 con `NULL` porque no se vende y no tiene tratamiento fiscal— **pero conserva
 `DEFAULT 'afecto'`**. Las dos cosas resuelven problemas distintos y son complementarias,

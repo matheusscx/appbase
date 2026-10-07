@@ -46,13 +46,6 @@ export class LineaVentaDto {
 
   @IsOptional()
   @IsArray()
-  // Reglas del catálogo del tenant.
-  @ArrayMaxSize(50)
-  @IsUUID(undefined, { each: true })
-  impuestoIds?: string[];
-
-  @IsOptional()
-  @IsArray()
   // Con techo: la salida serie lockea todas las unidades adentro de la
   // transacción que retiene el lock ancla del producto, así que el largo que
   // manda el cliente es tiempo de espera para las ventas de ese producto. Mismo
