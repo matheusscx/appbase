@@ -2,7 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import Decimal from 'decimal.js';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { In, IsNull } from 'typeorm';
+import { In } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import { SalonesService } from './salones.service';
 import { IdempotenciaService } from '../idempotencia/idempotencia.service';
@@ -1280,7 +1280,7 @@ describe('SalonesService', () => {
           ],
         }),
       ).rejects.toThrow(NotFoundException);
-      expect(manager.update).not.toHaveBeenCalled();
+      expect(manager.query).not.toHaveBeenCalled();
     });
 
     it('lee las mesas del salón CON las borradas: la borrada no es ajena', async () => {
@@ -1288,6 +1288,7 @@ describe('SalonesService', () => {
       // `salones-entrada.e2e-spec.ts`, que borra una mesa y la manda.
       salonRepo.findOne.mockResolvedValue({ id: 'salon-1', tenantId: TENANT });
       manager.find.mockResolvedValue([{ id: MESA }]);
+      manager.query.mockResolvedValue([[], 0]);
 
       await service.guardarLayout(TENANT, 'salon-1', {
         mesas: [{ mesaId: MESA, posX: 0.1, posY: 0.2 }],
@@ -1302,25 +1303,48 @@ describe('SalonesService', () => {
       );
     });
 
-    it('acota el UPDATE por tenant, salón y mesa viva, y la borrada (affected 0) no corta', async () => {
+    it('acota el UPDATE por tenant, salón y mesa viva, y la borrada (sin fila en el RETURNING) no corta ni vuelve', async () => {
+      // Control débil de la forma del SQL (`docs/agent/anti-patterns.md`, Db
+      // mockeado); el fuerte es `salones-entrada.e2e-spec.ts`.
       salonRepo.findOne.mockResolvedValue({ id: 'salon-1', tenantId: TENANT });
       manager.find.mockResolvedValue([{ id: MESA }]);
-      manager.update.mockResolvedValue({ affected: 0 });
+      manager.query.mockResolvedValue([[], 0]);
 
-      await service.guardarLayout(TENANT, 'salon-1', {
-        mesas: [{ mesaId: MESA, posX: 10, posY: 20 }],
+      const escritas = await service.guardarLayout(TENANT, 'salon-1', {
+        mesas: [{ mesaId: MESA, posX: 0.1, posY: 0.2 }],
       });
 
-      expect(manager.update).toHaveBeenCalledWith(
-        Mesa,
-        {
-          id: MESA,
-          tenantId: TENANT,
-          salonId: 'salon-1',
-          eliminadoEl: IsNull(),
-        },
-        { posX: '10', posY: '20' },
+      expect(escritas).toEqual([]);
+      const [sql, params] = manager.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain(
+        'WHERE mesa_id = $3 AND tenant_id = $4 AND salon_id = $5\n                AND eliminado_el IS NULL',
       );
+      expect(params).toEqual([0.1, 0.2, MESA, TENANT, 'salon-1']);
+    });
+
+    it('devuelve las mesas que escribió, con la posición que quedó', async () => {
+      salonRepo.findOne.mockResolvedValue({ id: 'salon-1', tenantId: TENANT });
+      const otra = 'f0000000-0000-4000-8000-000000000000';
+      manager.find.mockResolvedValue([{ id: MESA }, { id: otra }]);
+      // En orden de `mesa_id` va primero `otra`, que se escribe, y después
+      // MESA, que estaba borrada y no devuelve fila.
+      manager.query
+        .mockResolvedValueOnce([
+          [{ mesa_id: otra, pos_x: '0.30000', pos_y: '0.40000' }],
+          1,
+        ])
+        .mockResolvedValueOnce([[], 0]);
+
+      const escritas = await service.guardarLayout(TENANT, 'salon-1', {
+        mesas: [
+          { mesaId: otra, posX: 0.3, posY: 0.4 },
+          { mesaId: MESA, posX: 0.1, posY: 0.2 },
+        ],
+      });
+
+      expect(escritas).toEqual([
+        { id: otra, posX: '0.30000', posY: '0.40000' },
+      ]);
     });
 
     it('escribe las mesas en orden de mesa_id, no en el que las mandó la pantalla (orden de locks contra eliminarSalon)', async () => {
@@ -1333,6 +1357,7 @@ describe('SalonesService', () => {
         'c0000000-0000-4000-8000-000000000000',
       ];
       manager.find.mockResolvedValue([m1, m2, m3].map((id) => ({ id })));
+      manager.query.mockResolvedValue([[], 0]);
 
       await service.guardarLayout(TENANT, 'salon-1', {
         mesas: [m3, m2.toUpperCase(), m1].map((mesaId) => ({
@@ -1343,7 +1368,7 @@ describe('SalonesService', () => {
       });
 
       expect(
-        manager.update.mock.calls.map((c) => (c[1] as { id: string }).id),
+        manager.query.mock.calls.map((c) => (c[1] as unknown[])[2]),
       ).toEqual([m1, m2.toUpperCase(), m3]);
     });
   });

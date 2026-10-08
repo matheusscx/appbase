@@ -322,7 +322,7 @@ describe('Salones — lo que entra por el body (e2e)', () => {
       expect(res.status).toBe(200);
     });
 
-    it('200: la viva toma la posición nueva y la borrada conserva la suya', async () => {
+    it('200: la viva toma la posición nueva, la borrada conserva la suya, y vuelve solo la escrita', async () => {
       const antes = (await mesasDelPlano()).get(borrada)!;
 
       const res = await enviar('patch', `/api/salones/${salonId}/layout`, {
@@ -335,6 +335,14 @@ describe('Salones — lo que entra por el body (e2e)', () => {
       });
 
       expect(res.status).toBe(200);
+      // La respuesta es lo que se escribió: la pantalla del plano saca la que
+      // mandó y no volvió (la borrada), en vez de seguir dibujándola como viva.
+      // El id vuelve como lo guarda la base, en minúsculas, que es como lo
+      // tiene la pantalla.
+      const escritas = res.body as MesaPlano[];
+      expect(escritas.map((m) => m.id)).toEqual([viva]);
+      expect(Number(escritas[0].posX)).toBe(0.11);
+      expect(Number(escritas[0].posY)).toBe(0.22);
       const despues = await mesasDelPlano();
       expect(Number(despues.get(viva)!.posX)).toBe(0.11);
       expect(Number(despues.get(viva)!.posY)).toBe(0.22);

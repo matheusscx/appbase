@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SalonConMesas, MesaResumen, FormaMesa, TamanoMesa } from '~/composables/useSalones'
+import type { SalonConMesas, MesaResumen, MesaPosicionGuardada, FormaMesa, TamanoMesa } from '~/composables/useSalones'
 import { FORMA_MESA_OPTIONS, TAMANO_MESA_OPTIONS } from '~/composables/useSalones'
 
 // La lectura es abierta (`Salones:Leer`), pero cada escritura pega a un endpoint
@@ -131,18 +131,56 @@ function avisarSolape(_mesaId: string, nombres: string[]) {
   })
 }
 
+/**
+ * Saca del plano las mesas que se mandaron y el servidor no escribió: otra
+ * sesión las borró después de que esta cargó (no hay polling). Hasta el
+ * 2026-10-08 se reponían como vivas y seguían arrastrables hasta recargar.
+ *
+ * ⚠️ **Solo saca; nunca agrega ni repinta posiciones con la respuesta.** El
+ * guardado no se serializa y la posición local puede ser más nueva que la que
+ * viajó (otro arrastre en vuelo): pintar la del servidor haría saltar la mesa
+ * para atrás. Y como sacar no se deshace, una respuesta que llega después que
+ * la de un guardado posterior no puede revivir una mesa ya sacada.
+ *
+ * Solo cuenta las que esta pantalla todavía tiene vivas: una que ESTA sesión
+ * borró con el guardado en vuelo ya está marcada (con «Ver eliminados») o ya
+ * no está, y sacarla la borraría de "Mesas eliminadas" con un aviso falso.
+ */
+function sacarMesasNoEscritas(salonId: string, enviadas: string[], escritas: MesaPosicionGuardada[]) {
+  const salon = salones.value.find(s => s.id === salonId)
+  if (!salon) return
+  const vuelven = new Set(escritas.map(m => m.id))
+  const enviadasSet = new Set(enviadas)
+  const noEscritas = salon.mesas.filter(m => !m.eliminadoEl && enviadasSet.has(m.id) && !vuelven.has(m.id))
+  if (!noEscritas.length) return
+  const sacadas = new Set(noEscritas.map(m => m.id))
+  const nombres = noEscritas.map(m => m.nombre)
+  salon.mesas = salon.mesas.filter(m => !sacadas.has(m.id))
+  localMesas.value = localMesas.value.filter(m => !sacadas.has(m.id))
+  toast.add({
+    title: nombres.length === 1
+      ? `Se sacó "${nombres[0]}" del plano`
+      : `Se sacaron ${nombres.length} mesas del plano`,
+    description: 'Otra sesión las eliminó. La distribución del resto se guardó.',
+    color: 'warning',
+  })
+}
+
 async function guardarDistribucion() {
   if (!selectedSalonId.value || selectedSalon.value?.eliminadoEl) return
+  const salonId = selectedSalonId.value
+  const mesas = localMesas.value.map(m => ({
+    mesaId: m.id,
+    posX: Number(m.posX),
+    posY: Number(m.posY),
+  }))
   savingLayout.value = true
   try {
-    await salonesApi.guardarLayout(
-      selectedSalonId.value,
-      localMesas.value.map(m => ({
-        mesaId: m.id,
-        posX: Number(m.posX),
-        posY: Number(m.posY),
-      })),
-    )
+    const escritas = await salonesApi.guardarLayout(salonId, mesas)
+    sacarMesasNoEscritas(salonId, mesas.map(m => m.mesaId), escritas)
+    // El salón seleccionado AHORA, no `salonId`: `localMesas` es de ese, y si
+    // se cambió de salón con el guardado en vuelo, pasarle el capturado
+    // escribiría las mesas de un salón dentro de otro.
     patchSalonMesas(selectedSalonId.value, localMesas.value)
     toast.add({ title: 'Distribución guardada', color: 'success' })
   }

@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-10-03 (una nota de crédito no toca el % de anulaciones por garzón)
+**Last Updated**: 2026-10-08 (el plano saca la mesa que otra sesión borró)
 
 ---
 
@@ -171,6 +171,18 @@ todos los guardados siguientes, y un 404 habría hecho fallar cada arrastre hast
 esa fecha la borrada recibía la posición y volvía con ella si se restauraba. Una mesa que no es
 del salón, o que no existe, sigue siendo 404 y no se escribe ninguna. Lo fija
 `backend/test/salones-entrada.e2e-spec.ts`.
+
+**Responde las mesas que escribió**, `[{ id, posX, posY }]` (`RETURNING`, desde el 2026-10-08), y
+la pantalla **saca del plano las que mandó y no volvieron**, con un aviso (*"Se sacó "Mesa 3" del
+plano"*). Sin eso la borrada seguía dibujada y arrastrable hasta recargar, y cada arrastre la volvía
+a mandar (medido en navegador con dos sesiones del admin). La pantalla **solo saca**: no repinta
+posiciones con la respuesta —la local puede ser más nueva, porque el guardado no se serializa y un
+arrastre posterior puede estar en vuelo— ni agrega mesas que otra sesión creó (no hay polling). Como
+sacar no se deshace, una respuesta vieja que llega tarde no revive una mesa ya sacada. Solo saca
+las que tiene vivas: una que esta misma sesión borró con el guardado en vuelo se queda donde la dejó
+su borrado. Con «Ver eliminados» prendido, la sacada aparece en "Mesas eliminadas" recién al
+recargar. Lo fijan
+`pages/configuracion/salones.nuxt.spec.ts` y `frontend/e2e/salones/plano-mesa-borrada.spec.ts`.
 
 ---
 

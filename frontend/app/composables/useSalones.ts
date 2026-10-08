@@ -246,6 +246,15 @@ export interface MesaPosicion {
   posY: number
 }
 
+/** Respuesta de `PATCH /salones/:id/layout`: cada mesa que el guardado escribió.
+ *  La que se mandó y no vuelve no se escribió porque estaba borrada —espejo de
+ *  `MesaPosicionGuardada` (`backend/src/modules/salones/salones.service.ts`). */
+export interface MesaPosicionGuardada {
+  id: string
+  posX: string
+  posY: string
+}
+
 /** Una línea del arqueo, tal como la ve el garzón: nunca `esperado` — espejo de
  *  `LineaTestigo` (`backend/src/modules/caja/caja-testigo.service.ts`). */
 export interface LineaTestigoContado {
@@ -428,7 +437,7 @@ export function useSalones() {
     useApiFetch(`${apiUrl}/mesas/${id}`, { method: 'DELETE' })
 
   const guardarLayout = (salonId: string, mesas: MesaPosicion[]) =>
-    useApiFetch(`${apiUrl}/salones/${salonId}/layout`, {
+    useApiFetch<MesaPosicionGuardada[]>(`${apiUrl}/salones/${salonId}/layout`, {
       method: 'PATCH',
       body: { mesas },
     })

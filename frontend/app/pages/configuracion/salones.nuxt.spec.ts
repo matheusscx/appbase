@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { markRaw } from 'vue'
 import Salones from './salones.vue'
+import SalonPlano from '~/components/salones/SalonPlano.vue'
 
 /**
  * Esta es la primera pantalla de la serie que CIERRA un `AppDrawer` dentro de
@@ -133,7 +134,22 @@ mockNuxtImport('usePermissionsStore', () => {
   })
 })
 
+/** Cada toast que la pantalla pidió: el aviso de la mesa sacada del plano. */
+let toasts: { title?: string, color?: string }[] = []
+mockNuxtImport('useToast', () => {
+  return () => ({ add: (t: { title?: string, color?: string }) => { toasts.push(t) } })
+})
+
 let salonesBackend: SalonFake[] = []
+/** Cada body del `PATCH /salones/:id/layout`, en el orden en que salió. */
+let patchesLayout: { mesas: { mesaId: string, posX: number, posY: number }[] }[] = []
+/**
+ * Con `retenerLayout`, cada `PATCH` del plano queda en vuelo hasta que el test
+ * lo resuelve a mano, con la respuesta y en el orden que quiera. Sin él, el
+ * mock contesta lo que haría el backend: las mesas vivas que se mandaron.
+ */
+let retenerLayout = false
+let layoutEnVuelo: ((escritas: unknown[]) => void)[] = []
 // Para el test de la carrera: retiene la respuesta de cada variante del `GET`
 // en una promesa que el test resuelve a mano, en el orden que quiera.
 let overrideConEliminados: Promise<unknown[]> | null = null
@@ -174,7 +190,7 @@ function respuestaGet(incluirEliminados: boolean) {
 }
 
 mockNuxtImport('useApiFetch', () => {
-  return (url: string, opts?: { method?: string }) => {
+  return (url: string, opts?: { method?: string, body?: unknown }) => {
     if (typeof url !== 'string') return Promise.resolve([])
     const method = opts?.method ?? 'GET'
 
@@ -247,6 +263,18 @@ mockNuxtImport('useApiFetch', () => {
         m.eliminadoPorNombre = 'admin.paris'
       }
       return Promise.resolve(undefined)
+    }
+
+    if (method === 'PATCH' && url.endsWith('/layout')) {
+      const body = opts?.body as (typeof patchesLayout)[number]
+      patchesLayout.push(body)
+      if (retenerLayout) {
+        return new Promise((resolve) => { layoutEnVuelo.push(resolve) })
+      }
+      const vivas = new Set(salonesBackend.flatMap(x => x.mesas).filter(m => !m.eliminadoEl).map(m => m.id))
+      return Promise.resolve(body.mesas
+        .filter(m => vivas.has(m.mesaId))
+        .map(m => ({ id: m.mesaId, posX: m.posX.toFixed(5), posY: m.posY.toFixed(5) })))
     }
 
     if (method === 'GET' && url.includes('/salones')) {
@@ -369,6 +397,10 @@ function reset() {
   postsRestaurarMesa = []
   restaurarSalonRetenido = null
   restaurarMesaRetenido = null
+  toasts = []
+  patchesLayout = []
+  retenerLayout = false
+  layoutEnVuelo = []
 }
 
 describe('salones — cada control con el permiso de SU endpoint', () => {
@@ -729,6 +761,142 @@ describe('salones — papelera: la carrera de `cargar()` bajo toggles rápidos',
     expect(wrapper.text()).not.toContain('Mesas eliminadas')
     expect(wrapper.text()).not.toContain('Mesa vieja')
     expect(wrapper.find('[data-qa="mesa-mesa-viva"]').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+})
+
+describe('salones — plano: la mesa que otra sesión borró', () => {
+  beforeEach(() => {
+    salonesBackend = [
+      salon({
+        mesas: [
+          mesa({ id: 'mesa-a', nombre: 'Mesa A', posX: '0.2', posY: '0.2' }),
+          mesa({ id: 'mesa-b', nombre: 'Mesa B', posX: '0.6', posY: '0.6' }),
+        ],
+      }),
+    ]
+    reset()
+    esAdmin = true
+  })
+
+  /** Lo que hace el plano al arrastrar y soltar una mesa: `move` y `dragend`. */
+  async function arrastrar(
+    wrapper: Awaited<ReturnType<typeof montar>>,
+    mesaId: string,
+    posX: number,
+    posY: number,
+  ) {
+    const plano = wrapper.findComponent(SalonPlano)
+    expect(plano.exists(), 'plano montado').toBe(true)
+    plano.vm.$emit('move', mesaId, posX, posY)
+    plano.vm.$emit('dragend', mesaId)
+    await new Promise(r => setTimeout(r, 10))
+  }
+
+  /** Otra sesión borra la mesa: esta pantalla no se entera (no hay polling). */
+  function otraSesionBorra(mesaId: string) {
+    const m = salonesBackend.flatMap(x => x.mesas).find(x => x.id === mesaId)!
+    m.eliminadoEl = BORRADO_EL
+    m.eliminadoPorNombre = 'otro.admin'
+  }
+
+  const enPlano = (wrapper: Awaited<ReturnType<typeof montar>>, id: string) =>
+    wrapper.find(`[data-qa="mesa-${id}"]`).exists()
+
+  it('la mesa que el guardado no devuelve sale del plano, con aviso, y el arrastre siguiente ya no la manda', async () => {
+    const wrapper = await montar()
+    otraSesionBorra('mesa-a')
+    expect(enPlano(wrapper, 'mesa-a')).toBe(true)
+
+    await arrastrar(wrapper, 'mesa-b', 0.5, 0.5)
+
+    expect(patchesLayout[0]!.mesas.map(m => m.mesaId)).toEqual(['mesa-a', 'mesa-b'])
+    expect(enPlano(wrapper, 'mesa-a')).toBe(false)
+    expect(enPlano(wrapper, 'mesa-b')).toBe(true)
+    expect(toasts).toContainEqual(expect.objectContaining({
+      title: 'Se sacó "Mesa A" del plano',
+      color: 'warning',
+    }))
+
+    await arrastrar(wrapper, 'mesa-b', 0.4, 0.4)
+    expect(patchesLayout[1]!.mesas.map(m => m.mesaId)).toEqual(['mesa-b'])
+
+    wrapper.unmount()
+  })
+
+  it('si la respuesta de un guardado viejo llega después que la de uno nuevo, no revive la mesa sacada', async () => {
+    const wrapper = await montar()
+    retenerLayout = true
+
+    // Guardado 1: sale con las dos, todavía vivas.
+    await arrastrar(wrapper, 'mesa-b', 0.5, 0.5)
+    // Otra sesión borra la A; guardado 2 sale mientras el 1 sigue en vuelo.
+    otraSesionBorra('mesa-a')
+    await arrastrar(wrapper, 'mesa-b', 0.4, 0.4)
+    expect(layoutEnVuelo).toHaveLength(2)
+
+    // Responde primero el 2 (ya sin la A)…
+    layoutEnVuelo[1]!([{ id: 'mesa-b', posX: '0.40000', posY: '0.40000' }])
+    await new Promise(r => setTimeout(r, 10))
+    expect(enPlano(wrapper, 'mesa-a')).toBe(false)
+
+    // …y después el 1, que la escribió cuando estaba viva.
+    layoutEnVuelo[0]!([
+      { id: 'mesa-a', posX: '0.20000', posY: '0.20000' },
+      { id: 'mesa-b', posX: '0.50000', posY: '0.50000' },
+    ])
+    await new Promise(r => setTimeout(r, 10))
+    expect(enPlano(wrapper, 'mesa-a')).toBe(false)
+    expect(enPlano(wrapper, 'mesa-b')).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('la mesa que ESTA sesión borró con el guardado en vuelo sigue en "Mesas eliminadas", sin aviso de otra sesión', async () => {
+    const wrapper = await montar()
+    await activarVerEliminados(wrapper)
+    retenerLayout = true
+
+    // El guardado sale con las dos vivas…
+    await arrastrar(wrapper, 'mesa-b', 0.5, 0.5)
+    // …y antes de que vuelva, esta misma pantalla borra la A.
+    await abrirEditarMesaDesdePlano(wrapper, 'mesa-a')
+    botonEnDialogo('Eliminar')!.click()
+    await new Promise(r => setTimeout(r, 20))
+    await confirmarEnModal('Eliminar')
+    expect(wrapper.text()).toContain('Mesas eliminadas')
+    expect(wrapper.text()).toContain('Mesa A')
+
+    // El servidor no la escribió: ya estaba borrada.
+    layoutEnVuelo[0]!([{ id: 'mesa-b', posX: '0.50000', posY: '0.50000' }])
+    await new Promise(r => setTimeout(r, 10))
+
+    expect(wrapper.text()).toContain('Mesas eliminadas')
+    expect(wrapper.text()).toContain('Mesa A')
+    expect(toasts.map(t => t.title)).not.toContain('Se sacó "Mesa A" del plano')
+
+    wrapper.unmount()
+  })
+
+  it('la posición que devuelve el guardado no pisa la de un arrastre posterior', async () => {
+    const wrapper = await montar()
+    retenerLayout = true
+
+    await arrastrar(wrapper, 'mesa-b', 0.3, 0.3)
+    // La mesa se mueve otra vez antes de que vuelva el primer guardado.
+    wrapper.findComponent(SalonPlano).vm.$emit('move', 'mesa-b', 0.7, 0.7)
+    await new Promise(r => setTimeout(r, 10))
+
+    layoutEnVuelo[0]!([
+      { id: 'mesa-a', posX: '0.20000', posY: '0.20000' },
+      { id: 'mesa-b', posX: '0.30000', posY: '0.30000' },
+    ])
+    await new Promise(r => setTimeout(r, 10))
+
+    const estilo = wrapper.find('[data-qa="mesa-mesa-b"]').attributes('style') ?? ''
+    expect(estilo).toContain('left: 70%')
+    expect(estilo).toContain('top: 70%')
 
     wrapper.unmount()
   })

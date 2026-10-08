@@ -23,6 +23,71 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El plano saca la mesa que otra sesión borró, en vez de seguir dibujándola (cerrada 2026-10-08)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. Plan:
+[`2026-10-08-plano-mesa-borrada.md`](../superpowers/plans/2026-10-08-plano-mesa-borrada.md). El diseño
+lo aprobó la orquestadora (2026-10-08). La regla viva está en
+[`features/salones-mesas.md`](../features/salones-mesas.md), en el párrafo de
+`PATCH /salones/:salonId/layout`.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **El plano sigue dibujando una mesa que otro admin borró, hasta recargar** (frontend,
+  `pages/configuracion/salones.vue`; anotado el 2026-10-08 al cerrar "el layout le escribe la posición a
+  una mesa ya borrada", [`resueltos.md`](resueltos.md); **leído, no medido en navegador**).
+  `PATCH /salones/:salonId/layout` saltea una mesa borrada y responde vacío. `guardarDistribucion`
+  manda todas las de `localMesas` y, al volver, `patchSalonMesas` las repone como vivas, así que la
+  borrada sigue en el plano —arrastrable, y cada arrastre la manda de nuevo— hasta el próximo
+  `cargar()`. La página no tiene polling. No es nuevo: antes del arreglo pasaba lo mismo, solo que
+  además se le escribía la posición. **Medir:** dos sesiones de admin, borrar la mesa en una, arrastrar
+  otra en la segunda y mirar si la borrada sigue dibujada. **Salida probable:** que el `PATCH` devuelva
+  las mesas que guardó (o las que salteó) y la pantalla saque las que no vuelven (Sesión de esfuerzo
+  máximo, 2026-10-08: anotarlo, no construirlo en ese frente).
+
+### Qué se midió
+
+Con Playwright, dos sesiones del admin con el plano del mismo salón abierto (base `2fa71b75`): la
+sesión 2 borra una mesa por pantalla; la sesión 1, que la sigue dibujando, arrastra otra y suelta.
+El `PATCH` salió con las dos mesas y respondió **200 con body vacío**; la sesión 1 mostró
+*"Distribución guardada"* y **siguió dibujando la borrada**. Arrastrar después la borrada también
+dio 200 y *"Distribución guardada"*, sin escribir nada. La entrada se confirmó tal cual.
+
+### Qué se hizo
+
+- **Backend:** `guardarLayout` escribe con `UPDATE … RETURNING` y responde las mesas que escribió,
+  `[{ id, posX, posY }]` en orden de `mesa_id` (antes `void`). El único consumidor del endpoint es
+  `guardarDistribucion` (`useSalones.guardarLayout`), y los tres e2e que lo llaman miran el status.
+- **Frontend:** `guardarDistribucion` saca del plano —y del salón en memoria— las mesas que mandó y
+  no volvieron y que todavía tenía vivas, y avisa con un toast de advertencia (*"Se sacó "Mesa 3"
+  del plano"*). **Solo saca:**
+  no repinta posiciones con la respuesta (la local puede ser más nueva: el guardado no se serializa)
+  ni agrega mesas nuevas de otra sesión. Sacar es monótono, así que una respuesta vieja que llega
+  tarde no revive una mesa ya sacada. Patrón de `docs/patterns/frontend.md` §5 (patch mergeable con
+  `RETURNING`), sin polling.
+
+### Qué lo fija
+
+- `backend/test/salones-entrada.e2e-spec.ts`: el 200 con una viva (en mayúsculas) y una borrada
+  devuelve solo la viva, con su id en minúsculas y su posición. Mutante: el service de antes (que
+  devolvía `void`) → rojo en ese caso, con `escritas.map is not a function`.
+- `frontend/app/pages/configuracion/salones.nuxt.spec.ts`, § "plano: la mesa que otra sesión
+  borró", cuatro casos, cada uno con su mutante:
+  - la que no vuelve sale del plano, hay aviso, y el arrastre siguiente ya no la manda — volver
+    `salones.vue` al de antes lo pone rojo (junto con el siguiente);
+  - dos guardados con las respuestas al revés no reviven la sacada — un mutante que repone lo que
+    vuelve en la respuesta lo pone rojo solo a él;
+  - la posición de la respuesta no pisa la de un arrastre posterior — un mutante que pinta las
+    posiciones de la respuesta lo pone rojo solo a él;
+  - la mesa que **esta** sesión borró con el guardado en vuelo (con «Ver eliminados») sigue en
+    "Mesas eliminadas" y no se avisa como de otra sesión — sacar el filtro de mesas vivas lo pone
+    rojo solo a él. Lo levantó la revisión independiente.
+- `frontend/e2e/salones/plano-mesa-borrada.spec.ts`: la escena medida, con dos contextos de
+  navegador. Mutante: `salones.vue` de antes con el backend nuevo → rojo en
+  `toHaveCount(0)` de la borrada (`Expected: 0, Received: 1`).
+
+---
+
 ## Ids en mayúsculas en el cierre de caja y en los métodos de descuentos y recargos; una línea por medio en el cierre (cerrada 2026-10-08)
 
 Dos entradas de [`pendientes.md`](pendientes.md) § 2, **leídas, no medidas**: se midieron por HTTP

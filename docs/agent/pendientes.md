@@ -92,6 +92,24 @@ Hoy son tres:
   done
   ```
 
+- [ ] **Un worktree que corre `npm ci` en el host mientras su primer `entorno.sh stack` construye
+  hornea los `node_modules` del host en la imagen** (entorno de desarrollo, `backend/` y `frontend/` sin
+  `.dockerignore`; medido el 2026-10-08 por el frente del plano, que lo esquivó en su worktree y no lo
+  arregló, por pedido de la orquestadora). Orden de los comandos: `entorno.sh stack` y, en paralelo,
+  `npm ci` en `backend/` y `frontend/` del host (un worktree nuevo llega con los `node_modules`
+  vacíos, y los gates del host los necesitan). El `COPY . .` de los Dockerfiles copia
+  el contexto entero, `node_modules` incluido, encima del que instaló `RUN npm ci` adentro: queda en la
+  imagen el de macOS, a medio instalar. Medido en paralelo; con el `npm ci` terminado **antes** del
+  build, leído y no medido: el `COPY . .` copiaría igual el de macOS entero. Síntomas: los dos
+  contenedores en restart loop con **RestartCount 11** a los pocos minutos; el backend con `sh: nest: Permission denied` (exit 126:
+  `@nestjs/cli/bin/nest.js` sin bit de ejecución) y el frontend con `@babel/parser` roto al cargar
+  Nuxt. El volumen anónimo `/app/node_modules` no lo salva: se puebla desde la imagen ya rota. Cómo se
+  esquivó: apartar los `node_modules` del host, `docker compose -p <proyecto> build backend frontend`,
+  `up -d --force-recreate --renew-anon-volumes backend frontend`, y devolverlos. **Arreglo probable:**
+  `.dockerignore` en `backend/` y `frontend/` con `node_modules`. **Verificación:** en un worktree
+  nuevo, `npm ci` en los dos paquetes, **después** `./scripts/entorno.sh stack`, y `docker inspect -f
+  '{{.RestartCount}}'` de backend y frontend en 0 con el `Seed complete` en el log.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -106,18 +124,6 @@ destapa una decisión que no es mía).
   - **Qué cubre hoy "la orden reconciliable".** El dispatcher (`callback-dispatcher.service.ts:52-61`) atrapa el error y deja la orden en `pagada` sin `ventaId` (no `conciliada`), con un `logger.error`. El admin la ve en Ventas ▸ Órdenes (filtro por estado) y la puede **reembolsar** entera: "una orden sin venta se reembolsa sin corrección" (`pasarela-pagos.md`).
   - **Qué no cubre.** (1) **No hay forma de crear la venta después**: no existe un "reintentar el callback". `POST /pasarela/ordenes/:id/verificar` solo acepta `en_proceso`/`expirada` (`cobros.service.ts:1393`), y aunque existiera, recalcularía con un tercer "ahora". (2) **Nadie se entera**: no hay aviso al admin, solo el log. (3) **El comprador ve "Pago aprobado. Tu compra fue registrada correctamente."** (`tienda/retorno.vue:88-91`): `urlRetornoApp` (`pagos-redirect.service.ts:75-76`) manda `estado=pagada` igual con la orden sin venta, y la pantalla solo esconde el botón "Ver detalle de la venta".
   - **Lo que hay que decidir** (diseño aparte, no de arrastre): congelar en el snapshot de la orden lo que el checkout cobró (el total, o las líneas resueltas, como `reglasCongeladas` del salón) y que el callback lo respete, o calcular el callback con el instante del checkout. Y por separado, que una orden pagada sin venta avise y no le diga al comprador que su compra quedó registrada.
-
-- [ ] **El plano sigue dibujando una mesa que otro admin borró, hasta recargar** (frontend,
-  `pages/configuracion/salones.vue`; anotado el 2026-10-08 al cerrar "el layout le escribe la posición a
-  una mesa ya borrada", [`resueltos.md`](resueltos.md); **leído, no medido en navegador**).
-  `PATCH /salones/:salonId/layout` saltea una mesa borrada y responde vacío. `guardarDistribucion`
-  manda todas las de `localMesas` y, al volver, `patchSalonMesas` las repone como vivas, así que la
-  borrada sigue en el plano —arrastrable, y cada arrastre la manda de nuevo— hasta el próximo
-  `cargar()`. La página no tiene polling. No es nuevo: antes del arreglo pasaba lo mismo, solo que
-  además se le escribía la posición. **Medir:** dos sesiones de admin, borrar la mesa en una, arrastrar
-  otra en la segunda y mirar si la borrada sigue dibujada. **Salida probable:** que el `PATCH` devuelva
-  las mesas que guardó (o las que salteó) y la pantalla saque las que no vuelven (Sesión de esfuerzo
-  máximo, 2026-10-08: anotarlo, no construirlo en ese frente).
 
 - [ ] **Medir la ventana de consulta de Webpay Plus con un pago de más de 7 días** (queda del
   cierre de "Probar en el sandbox de Transbank el saldo…", 2026-10-04, [`resueltos.md`](resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04)).
@@ -475,6 +481,21 @@ prohíbe.
   5 s?
 
 ## 5. Carreras de concurrencia
+
+- [ ] **Borrar y restaurar la misma mesa mientras viaja el guardado del plano la saca del plano
+  estando viva, hasta recargar** (frontend, `pages/configuracion/salones.vue`,
+  `sacarMesasNoEscritas`; **leída, no medida**: la vio la revisión independiente del frente que hizo
+  que el plano saque la mesa que otra sesión borró, 2026-10-08,
+  [`resueltos.md`](resueltos.md#el-plano-saca-la-mesa-que-otra-sesión-borró-en-vez-de-seguir-dibujándola-cerrada-2026-10-08)).
+  El guardado sale con la mesa viva; antes de que vuelva, esta misma pantalla la borra y la restaura
+  (con «Ver eliminados» prendido). Si el `UPDATE` del guardado corrió con la mesa borrada, no vuelve
+  en la respuesta, y la pantalla la saca aunque en el servidor ya esté viva otra vez. Hacen falta dos
+  acciones con modal durante la latencia de un `PATCH`. **Cierre posible:** serializar el guardado
+  del plano con el borrado y la restauración de mesas (que esos dos esperen al guardado en vuelo), o
+  no sacar las mesas que esta pantalla borró o restauró durante el vuelo, anotadas en un set de ids
+  mientras el guardado viaja. Comparar el estado al enviar con el de la respuesta no alcanza: borrar y
+  restaurar deja `eliminadoEl` en `null` en las dos puntas. Tampoco alcanza encolar los `PATCH` entre
+  sí: la carrera es del guardado contra el borrado y la restauración.
 
 ---
 

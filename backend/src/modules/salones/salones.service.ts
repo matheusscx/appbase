@@ -117,6 +117,17 @@ export interface MesaPublica {
   tamano: TamanoMesa;
 }
 
+/**
+ * `PATCH /salones/:salonId/layout`: cada mesa que el guardado escribió, con la
+ * posición que quedó. La que no vuelve no se escribió (estaba borrada), y la
+ * pantalla del plano la saca.
+ */
+export interface MesaPosicionGuardada {
+  id: string;
+  posX: string;
+  posY: string;
+}
+
 export interface SalonConMesas {
   id: string;
   nombre: string;
@@ -742,12 +753,15 @@ export class SalonesService {
     return this.mesaRepo.findOneOrFail({ where: { id, tenantId } });
   }
 
-  /** Persiste las posiciones (drag & drop) de varias mesas de un salón. */
+  /**
+   * Persiste las posiciones (drag & drop) de varias mesas de un salón y
+   * devuelve las que escribió, en orden de `mesa_id`.
+   */
   async guardarLayout(
     tenantId: string,
     salonId: string,
     dto: UpdateLayoutDto,
-  ): Promise<void> {
+  ): Promise<MesaPosicionGuardada[]> {
     await this.getSalonOrThrow(tenantId, salonId);
     // **En orden de `mesa_id`, no en el que mandó la pantalla** (que es el de
     // nombre). Cada `UPDATE` toma la fila de su mesa, y `eliminarSalon` toma
@@ -763,7 +777,7 @@ export class SalonesService {
       const y = b.mesaId.toLowerCase();
       return x < y ? -1 : x > y ? 1 : 0;
     });
-    await this.db.transaccion(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       // CON las borradas, a propósito: lo que se pregunta acá es si la mesa es
       // de este salón, no si sigue viva. Una borrada se saltea más abajo; una
       // que no es del salón —o no existe— es 404.
@@ -779,20 +793,35 @@ export class SalonesService {
           `Mesa ${ajena.mesaId} no pertenece al salón`,
         );
       }
+      const escritas: MesaPosicionGuardada[] = [];
       for (const m of enOrden) {
         // Una mesa borrada no se escribe y no corta el guardado: la pantalla
         // manda todas las mesas que cargó en cada arrastre, así que una que
         // otro admin borró después viaja en todos los guardados siguientes.
         // Hasta el 2026-10-08 recibía la posición (y volvía con ella si se
         // restauraba); con un 404 cada arrastre del plano fallaba hasta
-        // recargar. `affected` 0 acá es eso, o un borrado entre la lectura de
-        // arriba y este `UPDATE`.
-        await manager.update(
-          Mesa,
-          { id: m.mesaId, tenantId, salonId, eliminadoEl: IsNull() },
-          { posX: m.posX.toString(), posY: m.posY.toString() },
+        // recargar. Sin fila en el `RETURNING` es eso, o un borrado entre la
+        // lectura de arriba y este `UPDATE`: no vuelve en la respuesta, y la
+        // pantalla la saca del plano en vez de seguir dibujándola como viva.
+        const filas = unwrap<{ mesa_id: string; pos_x: string; pos_y: string }>(
+          await manager.query(
+            `UPDATE mesas
+                SET pos_x = $1, pos_y = $2, actualizado_el = NOW()
+              WHERE mesa_id = $3 AND tenant_id = $4 AND salon_id = $5
+                AND eliminado_el IS NULL
+              RETURNING mesa_id, pos_x, pos_y`,
+            [m.posX, m.posY, m.mesaId, tenantId, salonId],
+          ),
+        );
+        escritas.push(
+          ...filas.map((f) => ({
+            id: f.mesa_id,
+            posX: f.pos_x,
+            posY: f.pos_y,
+          })),
         );
       }
+      return escritas;
     });
   }
 
