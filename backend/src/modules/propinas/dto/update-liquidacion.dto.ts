@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -68,6 +69,7 @@ export class UpdateLiquidacionDto {
   // Los participantes de una liquidación: los garzones del tenant. Una o dos
   // queries por elemento.
   @ArrayMaxSize(200)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => UpdateLiquidacionParticipanteDto)
   participantes?: UpdateLiquidacionParticipanteDto[];

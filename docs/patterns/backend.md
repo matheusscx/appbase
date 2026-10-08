@@ -140,9 +140,10 @@ donde espera un objeto: un 200 sin efecto (`ui` de `PATCH /me/preferencias`, 202
 (`customer` de una venta con Factura), y las tres `personalizacion` de una línea guardaban sin
 la omisión. Los campos que sí son arrays van con `@IsArray()` y `{ each: true }`, y el mismo hueco
 baja un nivel: **con un `[]` como elemento, `@ValidateNested({ each: true })` no tiene nada que
-validar**, así que `[[]]` llega al service. Lo cierra `@IsObject({ each: true })`; lo llevan los
-cinco arrays de la personalización (`common/dto/personalizacion-receta.dto.ts`, 2026-10-08), y los
-demás arrays de objetos están anotados en [`pendientes.md`](../agent/pendientes.md) § 1.
+validar**, así que `[[]]` llega al service: medido en los 40 arrays que no lo tenían, era un 500 o
+un 4xx que mentía. Lo cierra `@IsObject({ each: true })`. **La regla la fuerza un test**:
+`src/common/invariants/validate-nested-objeto.invariant.spec.ts` falla si un `@ValidateNested`
+no tiene su `@IsObject` del mismo `each`.
 
 **Todo array que entra por la API lleva `@ArrayMaxSize`, con el tope elegido por campo y el porqué
 al lado** (2026-10-06). No hay un número único. Se elige así:

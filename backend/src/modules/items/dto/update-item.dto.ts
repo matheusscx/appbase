@@ -7,6 +7,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -175,6 +176,7 @@ export class UpdateItemDto {
   @IsArray()
   // Mismo tope que `CreateItemDto.ingredientes`.
   @ArrayMaxSize(100)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => RecetaIngredienteInputDto)
   @ValidateIf((_o, v) => v !== undefined)
@@ -183,6 +185,7 @@ export class UpdateItemDto {
   @IsArray()
   // Mismo tope que `CreateItemDto.extrasPermitidos`.
   @ArrayMaxSize(100)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => RecetaExtraInputDto)
   @ValidateIf((_o, v) => v !== undefined)
@@ -192,6 +195,7 @@ export class UpdateItemDto {
   @IsArray()
   // Mismo tope que `CreateItemDto.componentes`.
   @ArrayMaxSize(50)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => ComboComponenteInputDto)
   @ValidateIf((_o, v) => v !== undefined)
@@ -201,6 +205,7 @@ export class UpdateItemDto {
   @IsArray()
   // Mismo tope que `CreateItemDto.gruposModificadores`.
   @ArrayMaxSize(50)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => ItemGrupoModificadorInputDto)
   @ValidateIf((_o, v) => v !== undefined)

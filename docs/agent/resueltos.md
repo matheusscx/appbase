@@ -23,6 +23,111 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Un array de objetos con `@ValidateNested({ each: true })` dejaba pasar `[[]]`: barrido (cerrada 2026-10-08)
+
+Sale de [`pendientes.md`](pendientes.md) § 1. Plan:
+[`2026-10-08-validate-nested-is-object-barrido.md`](../superpowers/plans/2026-10-08-validate-nested-is-object-barrido.md).
+La regla viva está en [`patterns/backend.md`](../patterns/backend.md) § 3, y la fuerza un test
+(abajo).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Un array de objetos con `@ValidateNested({ each: true })` deja pasar `[[]]`: barrido
+  mecánico** (backend, transversal; anotado el 2026-10-08 por el frente que cerró el mismo hueco en
+  la personalización, donde se midió: 400 con el mensaje del service, que mentía, en sus cinco
+  arrays; en el resto, **leído, no medido**; a § 1 por decisión de la orquestadora, 2026-10-08). Con un
+  `[]` como elemento, `ValidateNested` no tiene nada que validar y el pipe global lo deja pasar
+  (`pagos: [[]]` en `POST /ventas`, por ejemplo). Qué contesta cada puerta después —un 400 que
+  miente, un 500 o un 201— no se midió. **Arreglo:** `@IsObject({ each: true })`
+  encima de cada `@ValidateNested({ each: true })` que no lo tenga, como en
+  `common/dto/personalizacion-receta.dto.ts`, con un e2e de una puerta por DTO y su mutante. Los
+  que faltan se listan con este script, que mira las seis líneas de arriba de cada uno (el
+  2026-10-08 eran 41 de 46):
+
+  ```bash
+  grep -rn "ValidateNested({ each: true })" backend/src | while IFS=: read -r f n _; do
+    sed -n "$((n > 6 ? n - 6 : 1)),$((n - 1))p" "$f" | grep -q "IsObject({ each: true })" || echo "$f:$n"
+  done
+  ```
+
+### Qué se midió
+
+**El conteo.** El script de la entrada daba **40 de 45**, no 41 de 46: el commit del salón
+(`2fa71b75`) había retirado `confirmar-comanda.dto.ts`, y uno de los 41 estaba ahí. Los 16
+`@ValidateNested()` sobre un objeto suelto ya tenían `@IsObject()`. Ahí no hay hueco: un array lo
+rechaza `IsObject` y un primitivo, el propio `ValidateNested`. Tampoco hay `@Type(() => XDto)` sin
+`ValidateNested`.
+
+**Por HTTP, los 40, con el código sin tocar** (sondas e2e descartables contra la base del
+worktree, base `2fa71b75`): por cada sitio, un control con un elemento válido (2xx en los 40) y el
+mismo body con `[[]]`, contando filas de las tablas que la puerta escribe antes y después. También
+`[válido, []]`, que en todos dio lo mismo salvo donde se dice. **Ninguno escribe:** todos fallan
+antes del INSERT o dentro de una transacción que vuelve atrás. Lo que cambia es la respuesta:
+
+- **500 en 27 sitios.**
+  - Por una excepción del código (`.toLowerCase()`/`.trim()` sobre `undefined`,
+    `new Decimal(undefined)`). Lo confirmado del revisor de seguridad: la venta **online** con
+    `pagos: [[]]` da 500 `[DecimalError] Invalid argument: undefined` en `ventas.service.ts:1016`,
+    antes de crear la venta. Igual: `lineas` de la venta (`items.service.ts:1168`), `POST
+    /calculo-precios/calcular` (`tope-unidades-venta.util.ts:79`), el layout del salón
+    (`salones.service.ts:776`), los dos reembolsos de pasarela (`cobros.service.ts:144`, antes de
+    llamar al proveedor), los nueve arrays de alta y edición de ítems que no son `series`, los dos de grupos de
+    modificadores, los traslados (`traslados.service.ts:234`), las `apartadas` del borrador de
+    compra (`lectura-dte.service.ts:270`), las `series` del borrador de compra de un producto por
+    serie, los `montosManuales` del preview y de la liquidación de propinas, y los `pesos` (MANUAL
+    con PESOS) y `grupos` (`[válido, []]`) de la distribución.
+  - Por una restricción de la base, porque el `undefined` llega al INSERT como NULL: las `series`
+    del alta de ítem, del ajuste de stock y de la corrección de compra (`item_unidad.serie`), y los
+    `scopes` de una promoción, en el POST y en el PATCH (`promocion_scopes.tipo_scope`). En el PATCH,
+    el rollback deja vivos los scopes viejos.
+- **400 o 404 que miente en los otros 13.** Los pagos del abono y del cierre de cuenta: *"Método de
+  pago no habilitado para este tenant"* (lo mismo contesta la venta física, pero su `pagos` es el de la
+  online y ya cuenta entre los 27). Las devoluciones de la NC: *"El ítem no
+  pertenece a la venta original"*. Los dos de desfases: 404 *"Item undefined no encontrado"*. Las
+  `lineas` del borrador de compra: *"Producto no encontrado"*. Las `aplicaciones` del pago a
+  proveedor: 404 *"Alguna compra no existe"*. Los `participantes` de la liquidación: *"Agregar un
+  participante manual exige…"*. Los `tramos` de descuentos y recargos: *"Cada tramo tiene que
+  expresar su importe en…"*. Y los tres de caja (conteo, cierre y justificación), donde
+  `[válido, []]` además **pisa la línea buena**: `claveDe(undefined)` da `'EFECTIVO'` y el `Map` por
+  medio se queda con la vacía (*"Falta el conteo de Efectivo"*, *"Falta el motivo de la
+  diferencia"*).
+- **2xx sin daño, en dos variantes de los 40:** la corrección de compra de un producto por cantidad
+  ignora `series`, y justificar una caja que cuadra no mira las líneas.
+
+### Qué se hizo
+
+- `@IsObject({ each: true })` encima de cada uno de los 40 `@ValidateNested({ each: true })`. El
+  400 nombra el campo (*"each value in pagos must be an object"*).
+
+### Qué lo fija
+
+- **Que no vuelva a pasar:** `src/common/invariants/validate-nested-objeto.invariant.spec.ts`, con
+  el patrón del de ADR-004 (`uuid-columns`). Recorre la metadata de class-validator y exige que todo
+  `@ValidateNested` tenga un `@IsObject` del mismo `each` en la misma propiedad, también los
+  sueltos. Importa los fuentes por conducta, no por nombre: todo `.ts` que declare un
+  `@ValidateNested(`. Un segundo `it` verifica que vio todos los del fuente, para que un cambio en
+  la carga no dé verde vacío. Rojo con los 40 antes del arreglo.
+- **La respuesta:** `test/elemento-de-array-objeto.e2e-spec.ts` tiene una prueba por forma de
+  daño medida, cada una con su control en 201 y el conteo de filas sin cambios. La venta online
+  con `pagos: [[]]` (el 500 por excepción), la promoción con `scopes: [[]]` (el 500 por NOT NULL) y
+  la venta física con `pagos: [[]]` (el 400 que mentía). Rojo antes del arreglo, con los tres
+  mensajes de arriba.
+- **Mutantes**, cada uno revierte un sitio al código anterior y se midió:
+  - Sin el `@IsObject` de `CreateVentaDto.pagos`: rojo el invariante y las dos pruebas de venta.
+    Vuelven el 500 y *"Método de pago no habilitado"*.
+  - Sin el de `CreatePromocionDto.scopes`: rojo el invariante y la prueba de la promoción, con el
+    500.
+  - Sin el de `CreateTrasladoDto.lineas`, que no tiene e2e: rojo el invariante, con
+    `CreateTrasladoDto.lineas` como único faltante; ningún e2e manda un array en esas `lineas`.
+  - Sin el de `CerrarCajaDto.lineas`: rojo el invariante y, sobre ids-caja (`dc5f3a72`), el test
+    de `caja.e2e-spec` *"dos líneas sin medio de pago no se reportan como efectivo repetido"*, que
+    con `lineas: [[], []]` ahora afirma también el mensaje de `IsObject` (medido por HTTP).
+  - Las dos ramas del invariante: sin el `@IsObject()` de `UpdatePreferenciasDto.ui` (objeto
+    suelto), y con `@IsObject()` sin `each` en `CreateTrasladoDto.lineas`. Rojo en los dos, cada uno
+    con su faltante.
+
+---
+
 ## El plano saca la mesa que otra sesión borró, en vez de seguir dibujándola (cerrada 2026-10-08)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. Plan:
@@ -412,7 +517,8 @@ cierre y la justificación de caja (`claveDe` cruza con el arqueo de la base) y 
 descuentos y recargos (`[x, X]` pasa `@ArrayUnique`), cerradas el mismo día (arriba, "Ids en
 mayúsculas en el cierre de caja…"); en § 1, como barrido mecánico, los otros
 arrays de objetos con `@ValidateNested({ each: true })`, que dejan pasar `[[]]` igual que la
-personalización.
+personalización (cerrado el mismo día: § "Un array de objetos con `@ValidateNested({ each: true })`
+dejaba pasar `[[]]`", arriba).
 
 ### Qué se hizo
 

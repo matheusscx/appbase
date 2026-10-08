@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsNumberString,
+  IsObject,
   IsUUID,
   ValidateNested,
 } from 'class-validator';
@@ -45,6 +46,7 @@ export class DescartarDesfasesDto {
   // Mismo tope que `AplicarDesfasesDto.items`.
   @ArrayMaxSize(500)
   @ArrayMinSize(1)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => DescartarDesfaseItemDto)
   items: DescartarDesfaseItemDto[];

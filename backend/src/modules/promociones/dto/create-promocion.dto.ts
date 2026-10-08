@@ -8,6 +8,7 @@ import {
   IsIn,
   IsInt,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -143,6 +144,7 @@ export class CreatePromocionDto {
   // Alcances de una promo (por ítems o por categoría).
   @ArrayMaxSize(50)
   @ArrayMinSize(1)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => ScopePromoDto)
   scopes: ScopePromoDto[];

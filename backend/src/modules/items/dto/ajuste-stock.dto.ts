@@ -119,6 +119,7 @@ export class AjusteStockDto {
   // él, una tanda de decenas de miles de series entra entera al `unnest` del
   // guard y al loop de INSERT.
   @ArrayMaxSize(200)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => SerieAjusteInputDto)
   @IsOptional()

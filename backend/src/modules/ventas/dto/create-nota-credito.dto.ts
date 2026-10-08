@@ -136,6 +136,7 @@ export class CreateNotaCreditoDto {
   // Una devolución por ítem distinto de la venta, y una venta tiene a lo sumo
   // 500 líneas (`CreateVentaDto.lineas`): con menos se corta una nota válida.
   @ArrayMaxSize(MAX_LINEAS_POR_VENTA)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => DevolucionNotaCreditoDto)
   devoluciones?: DevolucionNotaCreditoDto[];

@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsUUID,
   ValidateIf,
@@ -46,6 +47,7 @@ export class CorregirLineaDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(200)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => SerieCompraDto)
   series?: SerieCompraDto[];

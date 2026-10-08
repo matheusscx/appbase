@@ -111,6 +111,7 @@ export class LineaCompraDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(200)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => SerieCompraDto)
   series?: SerieCompraDto[];
@@ -236,6 +237,7 @@ export class CompraBorradorDto {
   // Un borrador puede estar vacío; confirmar exige al menos una línea.
   @IsArray()
   @ArrayMaxSize(200)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => LineaCompraDto)
   lineas: LineaCompraDto[];
@@ -248,6 +250,7 @@ export class CompraBorradorDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(60)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => ApartadaDteDto)
   apartadas?: ApartadaDteDto[];

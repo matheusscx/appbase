@@ -123,6 +123,9 @@ primero, por definición, nunca mira lo que ya está.
   estos archivos crezcan sin límite.
 - **Las invariantes son un backlog de automatización**, no un sustituto permanente.
   - [x] tipo `uuid` explícito → test `src/common/invariants/uuid-columns.invariant.spec.ts`.
+  - [x] `@ValidateNested` sin su `@IsObject` del mismo `each` (un `[]` como elemento, o un array
+    donde va un objeto, pasa el pipe) → test
+    `src/common/invariants/validate-nested-objeto.invariant.spec.ts`.
   - [x] Tailwind hardcoded fuera de Caja → `frontend/scripts/check-design-tokens.mjs`
     (`npm run design:check` en el gate + `--staged` en el pre-commit).
   - [x] Tabla GFM rota por un párrafo pegado → `scripts/check-md-tables.mjs`

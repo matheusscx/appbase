@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsObject,
   IsOptional,
   IsUUID,
   ValidateNested,
@@ -35,6 +36,7 @@ export class AjustesRepartoDto {
   @IsArray()
   // Uno por participante, igual que `exclusiones`.
   @ArrayMaxSize(200)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => MontoManualDto)
   montosManuales?: MontoManualDto[];

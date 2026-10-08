@@ -4,6 +4,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsNumber,
+  IsObject,
   IsUUID,
   Max,
   Min,
@@ -30,6 +31,7 @@ export class UpdateLayoutDto {
   // Mesas de un salón; el service hace un UPDATE por mesa.
   @ArrayMaxSize(200)
   @ArrayMinSize(1)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => MesaPosicionDto)
   mesas: MesaPosicionDto[];

@@ -6,6 +6,7 @@ import {
   IsIn,
   IsInt,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -94,6 +95,7 @@ export class CreatePagoDto {
   // Mismo tope que `CreateVentaDto.pagos`: tres o cuatro INSERT por pago.
   @ArrayMaxSize(50)
   @ArrayMinSize(1)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => PagoItemDto)
   pagos: PagoItemDto[];

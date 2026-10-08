@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsObject,
   IsOptional,
   ValidateNested,
 } from 'class-validator';
@@ -20,6 +21,7 @@ export class GenerarNotaReembolsoDto {
   @IsArray()
   // El mismo tope que `CreateReembolsoDto.devoluciones`.
   @ArrayMaxSize(MAX_LINEAS_POR_VENTA)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => DevolucionLineaDto)
   devoluciones?: DevolucionLineaDto[];

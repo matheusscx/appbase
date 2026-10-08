@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -36,6 +37,7 @@ export class JustificarDiferenciasDto {
   // Una línea por medio de pago del arqueo, igual que el conteo.
   @ArrayMaxSize(50)
   @UnaLineaPorMedio()
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => LineaJustificacionDto)
   lineas: LineaJustificacionDto[];

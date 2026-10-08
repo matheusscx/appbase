@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsNotEmpty,
+  IsObject,
   IsString,
   ValidateIf,
   ValidateNested,
@@ -28,6 +29,7 @@ export class UpdateGrupoModificadorDto {
   // Mismo tope que `CreateGrupoModificadorDto.opciones`.
   @ArrayMaxSize(100)
   @ArrayMinSize(1)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => GrupoOpcionInputDto)
   opciones?: GrupoOpcionInputDto[];

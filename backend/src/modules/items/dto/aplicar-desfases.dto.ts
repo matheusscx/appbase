@@ -4,6 +4,7 @@ import {
   IsArray,
   IsBoolean,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsUUID,
   ValidateNested,
@@ -47,6 +48,7 @@ export class AplicarDesfasesDto {
   // dejó desfasados; hasta dos UPDATE por elemento.
   @ArrayMaxSize(500)
   @ArrayMinSize(1)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => AplicarDesfaseItemDto)
   items: AplicarDesfaseItemDto[];

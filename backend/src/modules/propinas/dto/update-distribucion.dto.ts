@@ -8,6 +8,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumberString,
+  IsObject,
   IsString,
   IsUUID,
   Max,
@@ -71,6 +72,7 @@ export class GrupoDistribucionDto {
   // Uno por garzón activo; el guardado valida y escribe cada peso por
   // separado (dos queries por elemento).
   @ArrayMaxSize(200)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => PesoManualDto)
   pesos: PesoManualDto[];
@@ -89,6 +91,7 @@ export class UpdateDistribucionDto {
   // apagados que la pantalla conserva. Un INSERT por grupo.
   @ArrayMaxSize(20)
   @ArrayMinSize(1)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => GrupoDistribucionDto)
   grupos: GrupoDistribucionDto[];

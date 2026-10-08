@@ -8,6 +8,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -98,6 +99,7 @@ export class CreateDescuentoDto {
   @IsArray()
   // Tramos por volumen de una regla: una escala, no un catálogo.
   @ArrayMaxSize(50)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => TramoDto)
   tramos?: TramoDto[];

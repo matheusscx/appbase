@@ -74,24 +74,6 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
-- [ ] **Un array de objetos con `@ValidateNested({ each: true })` deja pasar `[[]]`: barrido
-  mecánico** (backend, transversal; anotado el 2026-10-08 por el frente que cerró el mismo hueco en
-  la personalización, donde se midió: 400 con el mensaje del service, que mentía, en sus cinco
-  arrays; en el resto, **leído, no medido**; a § 1 por decisión de la orquestadora, 2026-10-08). Con un
-  `[]` como elemento, `ValidateNested` no tiene nada que validar y el pipe global lo deja pasar
-  (`pagos: [[]]` en `POST /ventas`, por ejemplo). Qué contesta cada puerta después —un 400 que
-  miente, un 500 o un 201— no se midió. **Arreglo:** `@IsObject({ each: true })`
-  encima de cada `@ValidateNested({ each: true })` que no lo tenga, como en
-  `common/dto/personalizacion-receta.dto.ts`, con un e2e de una puerta por DTO y su mutante. Los
-  que faltan se listan con este script, que mira las seis líneas de arriba de cada uno (el
-  2026-10-08 eran 41 de 46):
-
-  ```bash
-  grep -rn "ValidateNested({ each: true })" backend/src | while IFS=: read -r f n _; do
-    sed -n "$((n > 6 ? n - 6 : 1)),$((n - 1))p" "$f" | grep -q "IsObject({ each: true })" || echo "$f:$n"
-  done
-  ```
-
 - [ ] **Un worktree que corre `npm ci` en el host mientras su primer `entorno.sh stack` construye
   hornea los `node_modules` del host en la imagen** (entorno de desarrollo, `backend/` y `frontend/` sin
   `.dockerignore`; medido el 2026-10-08 por el frente del plano, que lo esquivó en su worktree y no lo

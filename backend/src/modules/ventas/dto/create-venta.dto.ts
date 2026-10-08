@@ -197,6 +197,7 @@ export class CreateVentaDto {
   // Por qué ese número: `MAX_LINEAS_POR_VENTA`.
   @ArrayMaxSize(MAX_LINEAS_POR_VENTA)
   @ArrayMinSize(1)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => LineaVentaDto)
   lineas: LineaVentaDto[];
@@ -205,6 +206,7 @@ export class CreateVentaDto {
   @IsArray()
   // Una cuenta dividida entre comensales; tres o cuatro INSERT por pago.
   @ArrayMaxSize(50)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => PagoVentaDto)
   pagos?: PagoVentaDto[];

@@ -69,6 +69,7 @@ export class CalcularVentaDto {
   // del salón manda acá todas las líneas de la cuenta.
   @ArrayMaxSize(MAX_LINEAS_POR_VENTA)
   @ArrayMinSize(1)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => LineaDto)
   lineas: LineaDto[];

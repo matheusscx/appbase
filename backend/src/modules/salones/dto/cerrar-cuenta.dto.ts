@@ -20,6 +20,7 @@ export class CerrarCuentaDto extends CredencialGarzonOpcionalDto {
   @IsArray()
   // Mismo tope que `CreateVentaDto.pagos`: termina en la misma venta.
   @ArrayMaxSize(50)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => PagoVentaDto)
   pagos?: PagoVentaDto[];

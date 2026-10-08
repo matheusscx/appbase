@@ -8,6 +8,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -97,6 +98,7 @@ export class CreateRecargoDto {
   @IsArray()
   // Mismo tope que `CreateDescuentoDto.tramos`.
   @ArrayMaxSize(50)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => TramoDto)
   tramos?: TramoDto[];

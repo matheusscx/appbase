@@ -3,6 +3,7 @@ import {
   IsArray,
   IsIn,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsUUID,
   ValidateIf,
@@ -66,6 +67,7 @@ export class CreateReembolsoDto {
   // 500 líneas (`CreateVentaDto.lineas`): con menos se corta una corrección
   // válida.
   @ArrayMaxSize(MAX_LINEAS_POR_VENTA)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => DevolucionLineaDto)
   devoluciones?: DevolucionLineaDto[];

@@ -1043,7 +1043,8 @@ El conteo, la fase 2 y el override admin llevan **una línea por medio**: un med
 minúsculas antes de comparar) y dos líneas de efectivo (`metodoPagoId: null`). El `400` nombra el
 medio (*"El medio de pago … viene en más de una línea: va una sola por medio"*, `efectivo` para
 `null`), salvo cuando los elementos son arrays en vez de líneas (`[[], []]`, `[[{…}], [{…}]]`), donde
-dice *"Hay más de una línea sin un medio de pago válido"*. No filtra nada del modo ciego, porque el id lo mandó el propio cliente y
+dice *"Hay más de una línea sin un medio de pago válido"*, junto con *"each value in lineas must be an
+object"*. No filtra nada del modo ciego, porque el id lo mandó el propio cliente y
 se rechaza antes de mirar el arqueo.
 
 El porqué es plata: el service cruza las líneas con el arqueo por un mapa, y hasta este cambio se

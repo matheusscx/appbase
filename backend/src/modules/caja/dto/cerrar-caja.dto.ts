@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsObject,
   IsOptional,
   IsString,
   ValidateNested,
@@ -14,6 +15,7 @@ export class CerrarCajaDto {
   // movimiento): son pocos, y el service rechaza los que no están en él.
   @ArrayMaxSize(50)
   @UnaLineaPorMedio()
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => LineaCierreDto)
   lineas: LineaCierreDto[];

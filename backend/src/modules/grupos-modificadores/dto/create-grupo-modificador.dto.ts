@@ -5,6 +5,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -59,6 +60,7 @@ export class CreateGrupoModificadorDto {
   // opción.
   @ArrayMaxSize(100)
   @ArrayMinSize(1)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => GrupoOpcionInputDto)
   opciones: GrupoOpcionInputDto[];

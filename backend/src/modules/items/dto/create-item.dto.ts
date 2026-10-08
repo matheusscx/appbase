@@ -179,6 +179,7 @@ export class ItemGrupoModificadorInputDto {
   // Las opciones de un grupo: mismo tope que `CreateGrupoModificadorDto`.
   @ArrayMaxSize(100)
   @IsOptional()
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => ItemGrupoOpcionOverrideInputDto)
   opciones?: ItemGrupoOpcionOverrideInputDto[];
@@ -288,6 +289,7 @@ export class CreateItemDto {
   // él, una tanda de decenas de miles de series entra entera al `unnest` del
   // guard y al loop de INSERT.
   @ArrayMaxSize(200)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => SerieInputDto)
   @IsOptional()
@@ -307,6 +309,7 @@ export class CreateItemDto {
   // Ingredientes de una receta; un INSERT por ingrediente. Es también el tope
   // de `PersonalizacionRecetaDto.omitidos`.
   @ArrayMaxSize(100)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => RecetaIngredienteInputDto)
   @IsOptional()
@@ -316,6 +319,7 @@ export class CreateItemDto {
   // Extras de una receta; un INSERT por extra. Es también el tope de
   // `PersonalizacionRecetaDto.extras`.
   @ArrayMaxSize(100)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => RecetaExtraInputDto)
   @IsOptional()
@@ -325,6 +329,7 @@ export class CreateItemDto {
   @IsArray()
   // Componentes de un combo; un INSERT por componente.
   @ArrayMaxSize(50)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => ComboComponenteInputDto)
   @IsOptional()
@@ -335,6 +340,7 @@ export class CreateItemDto {
   // Grupos de un ítem; unas cuatro queries por grupo. Es también el tope de
   // `PersonalizacionRecetaDto.grupos`.
   @ArrayMaxSize(50)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => ItemGrupoModificadorInputDto)
   @IsOptional()

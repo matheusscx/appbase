@@ -70,6 +70,7 @@ export class CrearPagoProveedorDto {
 
   @IsArray()
   @ArrayMaxSize(500)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => AplicacionPagoProveedorDto)
   aplicaciones: AplicacionPagoProveedorDto[];

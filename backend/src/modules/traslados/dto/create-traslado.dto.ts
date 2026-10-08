@@ -4,6 +4,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -76,6 +77,7 @@ export class CreateTrasladoDto {
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(200)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => LineaTrasladoDto)
   lineas: LineaTrasladoDto[];

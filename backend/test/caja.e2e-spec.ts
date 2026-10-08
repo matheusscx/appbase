@@ -1256,18 +1256,22 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       });
 
       it('dos líneas sin medio de pago no se reportan como efectivo repetido', async () => {
-        // `[[], []]` llega sin errores propios en las líneas (`@ValidateNested`
-        // no mira adentro de un `[]`), así que el 400 es el del repetido, y no
-        // puede decir que el repetido es el efectivo. El pipe corta antes que el
-        // service: la caja no necesita existir.
+        // `[[], []]` no tiene errores propios en las líneas (`@ValidateNested`
+        // no mira adentro de un `[]`): el 400 es el de `lineas`, con
+        // `@IsObject` y el repetido, y el repetido no puede decir que es el
+        // efectivo. El pipe corta antes que el service: la caja no necesita
+        // existir.
         const res = await request(app.getHttpServer())
           .post(`/api/caja/${randomUUID()}/conteo`)
           .set('Authorization', `Bearer ${tokenSupervisor}`)
           .send({ lineas: [[], []] });
-        expect(res.body).toMatchObject({
-          message: ['Hay más de una línea sin un medio de pago válido'],
-        });
         expect(res.status).toBe(400);
+        expect(res.body).toMatchObject({
+          message: [
+            'each value in lineas must be an object',
+            'Hay más de una línea sin un medio de pago válido',
+          ],
+        });
       });
 
       it('POST /caja/:id/cerrar: un medio repetido es 400 y la caja sigue en conciliación sin motivo', async () => {
