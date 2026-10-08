@@ -12,6 +12,9 @@ const toast = useToast()
 const loading = ref(true)
 
 const cajaId = computed(() => route.params.id as string)
+// El historial de cajas es de supervisión (owner, 2026-09-29).
+const { puedeLeer: puedeVerHistorial } = usePermisosCrud('Cajas')
+const historialUrl = computed(() => puedeVerHistorial.value ? '/mi-caja/historial' : undefined)
 
 const readonly = computed(() =>
   cajaStore.detalle?.id !== cajaStore.activa?.id,
@@ -34,8 +37,10 @@ onMounted(async () => {
       await cajaStore.cargarArqueo(cajaId.value)
     }
   }
-  catch {
-    toast.add({ title: 'No tenés acceso a esta caja o no existe', color: 'warning' })
+  catch (e: unknown) {
+    // Con el mensaje del backend: a un cajero que recarga su caja recién
+    // cerrada le dice que el historial es de supervisión, no que no existe.
+    toast.add({ title: apiErrorMsg(e, 'No tenés acceso a esta caja o no existe', { detalleLocal: false }), color: 'warning' })
     await navigateTo('/mi-caja')
   }
   finally {
@@ -84,14 +89,14 @@ watch(() => cajaStore.activa, (newActiva, oldActiva) => {
             v-if="cajaStore.detalle.estado === 'abierta'"
             :caja="cajaStore.detalle"
             :readonly="readonly"
-            historial-url="/mi-caja/historial"
+            :historial-url="historialUrl"
           />
           <CajaCierreDetalle
             v-else
             :caja="cajaStore.detalle"
             :arqueo="cajaStore.arqueo"
             :readonly="readonly"
-            historial-url="/mi-caja/historial"
+            :historial-url="historialUrl"
           />
         </div>
       </div>

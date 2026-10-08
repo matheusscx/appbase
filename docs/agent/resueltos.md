@@ -23,6 +23,92 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El historial de cajas es de supervisión: el cajero ve solo su turno en curso (cerrada 2026-10-08)
+
+Sale de [`pendientes.md`](pendientes.md) § 3, residuo 2 de *"Lo que quedó del frente del modo
+ciego"*. Plan: [`2026-10-08-historial-de-cajas-del-cajero.md`](../superpowers/plans/2026-10-08-historial-de-cajas-del-cajero.md).
+El residuo 1 no se construyó: pasó a [`pendientes.md`](pendientes.md) § Vigilancia, con su porqué
+**refutado** y corregido (abajo).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **Lo que quedó del frente del modo ciego, ya cerrado** (backend + producto; la entrada
+  madre —seis fugas, el eje mío/todos y el rastro de los oráculos— se mudó entera a
+  [`resueltos.md`](resueltos.md) § *"El modo ciego deja de prometer lo que no sostiene, y los
+  oráculos dejan rastro"* el 2026-08-23) — dos residuos, ninguno urgente:
+  1. **El `400` *"Método de pago no pertenece al arqueo"* sigue siendo un oráculo de presencia
+     por medio de pago**, pero cada sondeo exitoso **cierra la caja**: es de un solo uso y no se
+     tocó. Se anota para que nadie lo redescubra como fuga nueva.
+  2. **El historial de cajas del cajero** (pedido del owner el 2026-08-22: bloquearlo): ya no
+     está ordenado detrás de ninguna decisión —la salida (c) para la caja propia y el rastro
+     para los oráculos ya están—. Hoy el cajero con `MiCaja` ve el acumulado de sus propios
+     turnos. ✅ **Se bloquea (owner, 2026-09-29, en el selector interactivo de la orquestadora):** eligió *A: sí, se bloquea*
+     (recomendada, porque era lo que había pedido en agosto) por sobre *B: que vea sus turnos*.
+     El cajero deja de ver su historial y el supervisor lo sigue viendo. Es chico.
+
+### Qué se hizo
+
+- **Backend.** `GET /caja` da 403 sin `Cajas:Leer` (*"El historial de cajas es solo para
+  supervisión"*), aun pidiendo lo propio: lo corta `CajaController.historial`. Las cuatro rutas de
+  detalle (`/:id`, `/:id/arqueo`, `/:id/movimientos`, `/:id/movimientos/resumen`) pasan por
+  `verificarAccesoCaja`, que ahora exige, sin `Cajas:Leer`, que la caja propia esté `abierta` o
+  `en_conciliacion` (el conjunto de `findActiva`: sin la conciliación el cajero no termina su propio
+  cierre). `findOne` dejó de tener su copia del chequeo y usa ese mismo. Con `Cajas:Leer` no cambia
+  nada. No hubo permiso nuevo.
+- **La revelación del cierre ciego se mudó.** Antes el drawer navegaba al detalle de la caja recién
+  cerrada, que pasó a ser 403. Primero se propuso mostrarla dentro del drawer (orquestadora, sí),
+  pero al medir el código resultó imposible sin reestructurar: en el POS el drawer cuelga de
+  `v-if="cajaStore.activa"` y en `/mi-caja/[id]` del estado de la caja, y los dos se apagan en el
+  mismo tick en que el cierre pone `activa` en null. Quedó en el store (`resultadoCierre`, con lo
+  que ya devolvió el cierre) y en una tarjeta de `/mi-caja` con *Listo* (orquestadora, 2026-10-08).
+  El store de caja la vacía cuando cambia la persona o el tenant de la sesión (logout incluido) y
+  al abrir un turno nuevo, y un F5 la descarta. Hubo además un `onBeforeUnmount` de `/mi-caja` que la descartaba al salir, y
+  se sacó: medido en el navegador, como el logout sale de esa página, con las dos defensas el
+  mutante sin el `watch` sobrevivía (el test de logout seguía verde); con una sola, cae. Primero se limpiaba llamándolo desde `clearAuth` y
+  `switchTenant`; medido, que el store de sesión importara el de caja cambiaba el orden de carga de
+  módulos y el spec de `NotaCreditoModal` pasaba a usar el `useApiFetch` real (8 rojos, deterministas,
+  bisecados archivo por archivo). La dependencia quedó en el sentido que ya tenía: caja → sesión.
+- **Pantalla.** "Ver historial" de `/mi-caja` y del header del turno, solo con `Cajas:Leer`;
+  `/mi-caja/historial` pasó a pedir `Cajas:Leer` en la ruta. `/mi-caja/[id]` muestra el mensaje del
+  backend al rebotar, en vez de *"no existe"*.
+- **Lo que no cubre**, anotado en [`pendientes.md`](pendientes.md) § 4 como pregunta del owner: el
+  cajero sigue viendo sus pagos de turnos cerrados y rearma lo cobrado por turno (no la diferencia).
+
+### Qué lo fija
+
+| Test | Qué afirma |
+|---|---|
+| `backend/test/historial-cajas-supervision.e2e-spec.ts` | Cajero 403 en `GET /caja` (tres formas) y en las cuatro de detalle de su caja cerrada; supervisor 200 en las mismas; el cajero abre, registra un movimiento, lee su turno, concilia, cierra con la diferencia en la respuesta, y recién ahí 403 |
+| `caja.service.spec.ts` / `caja.controller.spec.ts` | Las cuatro rutas rechazan la caja propia cerrada sin consultar nada más; abierta y en conciliación pasan; el listado no llega al service |
+| `CajaCierreDrawer.nuxt.spec.ts` | Cierre propio en ciego: guarda el resultado y va a `/mi-caja`; forzado: va a `/cajas/<id>` sin tocar el resultado |
+| `stores/auth.spec.ts` | Logout, otro token (cambio de tenant) y otra persona vacían el resultado; la misma persona traída otra vez por `fetchMe`, no |
+| `frontend/e2e/caja/historial-cajero.spec.ts` | Cajero en ciego desde `/mi-caja` y desde el POS; F5; logout y otra persona en el mismo navegador; supervisor en el historial |
+
+Mutantes (cada uno revierte a la conducta anterior, no solo rompe):
+
+| Mutante | Cae |
+|---|---|
+| Sin el 403 del controller, con el `scope` de antes | 3 tests del e2e de API: `GET /caja` del cajero, 403 → 200 |
+| Sin el chequeo de estado en `verificarAccesoCaja` | 5 del e2e de API: las cuatro de detalle y el 403 después de cerrar, 403 → 200 |
+| Sin el brazo `en_conciliacion` | 1 del e2e de API: el cajero no ve su caja en conciliación, 200 → 403 |
+| El drawer vuelve a navegar a `/mi-caja/<id>` | 1 del spec del drawer |
+| Sin el `watch` de la sesión en el store de caja | 3 de `auth.spec.ts` (logout, tenant, persona) |
+| El `watch` con un array armado en el getter | 1 de `auth.spec.ts`: la misma persona vuelta a traer lo borraba |
+| Sin el `watch` de la sesión, en el navegador | 1 de `historial-cajero.spec.ts` (Playwright): logout y otra persona en el mismo navegador ve la tarjeta |
+| `abrir` sin descartar el resultado anterior | 1 de `caja.spec.ts`: la tarjeta de un turno viejo seguía a la vista con el turno nuevo (lo levantó la revisión independiente) |
+| El drawer vuelve a navegar al detalle, en el navegador | 3 de `historial-cajero.spec.ts`: `/mi-caja`, POS y logout no llegan a la tarjeta |
+
+### El residuo 1, refutado
+
+El backlog decía que el 400 *"Método de pago no pertenece al arqueo"* era un oráculo **de un solo
+uso**, porque cada sondeo exitoso cerraba la caja. Medido el 2026-10-08, es falso: sin la línea de
+efectivo, un medio usado da *"Falta el conteo de un medio de pago obligatorio"* y uno no usado da
+*"no pertenece"*, con la caja abierta y repetible. Se deja igual porque solo entrega presencia por
+medio, que el cajero ya ve en sus pagos. Detalle, medición y la salida de dos líneas, en
+[`pendientes.md`](pendientes.md) § Vigilancia.
+
+---
+
 ## El motivo del 400 del motor llega a la pantalla; los avisos se quedan arriba a la derecha (cerrada 2026-10-08)
 
 Salen de [`pendientes.md`](pendientes.md) § 1 y § 3, en la misma tanda porque tocan la misma capa.
@@ -21067,11 +21153,12 @@ quedó:**
   mutantes verificados: sin el envoltorio caen 2 tests; sin `sinTransaccion` cae el que fija
   el orden rollback→rastro.
 
-⏳ **Lo que esta entrada deja abierto:** el frente del historial de cajas del cajero (párrafo
-de arriba) ya no está bloqueado por "decidir (a)/(b)/(c)" — la salida (c) para la caja propia
-y el rastro para los oráculos ya están. Y el `400` *"Método de pago no pertenece al arqueo"*
-sigue siendo un oráculo de presencia por medio, pero **cada sondeo exitoso cierra la caja**,
-así que es de un solo uso y no se tocó.
+⏳ **Lo que esta entrada dejó abierto, y cómo se cerró:** el historial de cajas del cajero se
+bloqueó el 2026-10-08 (owner, 2026-09-29) — ver *"El historial de cajas es de supervisión"* al
+principio de este archivo. Y el `400` *"Método de pago no pertenece al arqueo"*, que acá se daba
+por "de un solo uso, cada sondeo exitoso cierra la caja", **no lo es** (medido el 2026-10-08): se
+repite sin cerrar nada. Se dejó igual, en `pendientes.md` § Vigilancia, porque solo entrega
+presencia por medio.
 
 ---
 

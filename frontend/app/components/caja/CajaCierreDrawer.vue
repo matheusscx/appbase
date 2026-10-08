@@ -140,8 +140,8 @@ const obligatoriasCompletas = computed(() =>
   obligatorias.value.every(l => !!contado.value[claveDe(l)]),
 )
 
-/** Común a ambas fases: toast + cierre del drawer + revelación en el detalle. */
-async function finalizarExito(arqueoResultante: ArqueoLinea[]) {
+/** Común a ambas fases: toast + cierre del drawer + revelación. */
+async function finalizarExito(arqueoResultante: ArqueoLinea[], fechaCierre: string | null) {
   const efectivo = arqueoResultante.find(l => l.esEfectivo)
   const dif = efectivo?.diferencia ?? '0'
   toast.add({
@@ -150,13 +150,23 @@ async function finalizarExito(arqueoResultante: ArqueoLinea[]) {
     color: new Decimal(dif).gte(0) ? 'success' : 'error',
   })
   open.value = false
-  if (ciego.value) {
-    // Revelación: el arqueo se muestra en el detalle. Desde POS, navigateTo
-    // remonta /mi-caja/[id] (o /cajas/[id] para el encargado, vía `redirectBase`)
-    // y su onMounted recarga todo; si ya se está ahí, es una navegación al
-    // mismo destino (no-op).
-    await navigateTo(`${props.redirectBase ?? '/mi-caja'}/${props.cajaId}`)
+  if (!ciego.value) return
+  if (props.redirectBase) {
+    // Cierre forzado: el encargado tiene `Cajas:Leer` y ve la caja cerrada en
+    // su detalle (`/cajas/[id]`), que la remonta y recarga.
+    await navigateTo(`${props.redirectBase}/${props.cajaId}`)
+    return
   }
+  // Cierre propio: la caja recién cerrada ya es historial, y el cajero sin
+  // `Cajas:Leer` recibe 403 en su detalle (owner, 2026-09-29). La revelación
+  // sigue ocurriendo al contar: viaja en el store, con lo que devolvió el
+  // cierre, y la muestra `/mi-caja`. Ver `resultadoCierre` en el store.
+  cajaStore.mostrarResultadoCierre({
+    arqueo: arqueoResultante,
+    cajonNombre: cajaStore.detalle?.id === props.cajaId ? cajaStore.detalle.cajonNombre : null,
+    fechaCierre,
+  })
+  await navigateTo('/mi-caja')
 }
 
 async function enviarConteo() {
@@ -190,7 +200,7 @@ async function enviarConteo() {
       return
     }
 
-    await finalizarExito(res.arqueo)
+    await finalizarExito(res.arqueo, null)
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al registrar el conteo')
@@ -268,7 +278,7 @@ async function confirmarCierre() {
       comentario: comentario.value.trim() || undefined,
       explicacionDescuadre: explicacionDescuadre.value.trim() || undefined,
     })
-    await finalizarExito(res.arqueo)
+    await finalizarExito(res.arqueo, res.caja.fechaCierre)
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al confirmar el cierre')

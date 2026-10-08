@@ -251,20 +251,6 @@ la acumulación de descuentos y compras— y el renombre de `moneda.decimales` s
   ya con 400 (el guard del motor). **Arreglo probable:** el mismo chequeo antes del `INSERT` de la
   línea, reusando `cabeEnColumnaDePlata`.
 
-- [ ] **Lo que quedó del frente del modo ciego, ya cerrado** (backend + producto; la entrada
-  madre —seis fugas, el eje mío/todos y el rastro de los oráculos— se mudó entera a
-  [`resueltos.md`](resueltos.md) § *"El modo ciego deja de prometer lo que no sostiene, y los
-  oráculos dejan rastro"* el 2026-08-23) — dos residuos, ninguno urgente:
-  1. **El `400` *"Método de pago no pertenece al arqueo"* sigue siendo un oráculo de presencia
-     por medio de pago**, pero cada sondeo exitoso **cierra la caja**: es de un solo uso y no se
-     tocó. Se anota para que nadie lo redescubra como fuga nueva.
-  2. **El historial de cajas del cajero** (pedido del owner el 2026-08-22: bloquearlo): ya no
-     está ordenado detrás de ninguna decisión —la salida (c) para la caja propia y el rastro
-     para los oráculos ya están—. Hoy el cajero con `MiCaja` ve el acumulado de sus propios
-     turnos. ✅ **Se bloquea (owner, 2026-09-29, en el selector interactivo de la orquestadora):** eligió *A: sí, se bloquea*
-     (recomendada, porque era lo que había pedido en agosto) por sobre *B: que vea sus turnos*.
-     El cajero deja de ver su historial y el supervisor lo sigue viendo. Es chico.
-
 - [ ] **El token de Google viaja por la URL** — ⬇️ **prioridad muy baja, reconfirmada por el
   owner el 2026-08-22** (backend + frontend, auditoría RBAC/auth 2026-08-15; **dos lentes
   ciegas entre sí lo vieron**).
@@ -531,6 +517,23 @@ prohíbe.
   sigue marcado para siempre. **La pregunta para el owner:** ¿se liga el `REFUND` a una de las
   notas que ya existen (¿cuál, si son dos?), o se descarta la marca con un motivo escrito? Ninguna
   de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
+
+- [ ] **El cajero ya no ve sus cajas cerradas, pero con sus pagos rearma lo que cobró en cada
+  turno** (backend + producto; anotado el 2026-10-08 al cerrar "el historial de cajas es de
+  supervisión", [`resueltos.md`](resueltos.md)). **Escena:** desde hoy Bruno, el cajero, abre
+  "Mi caja" y ve solo su turno de hoy; los turnos de la semana pasada los ve el encargado. Pero en
+  "Pagos" Bruno sigue viendo todos los cobros que hizo, con la caja de cada uno: si filtra por la
+  caja del martes y suma, sabe que ese día cobró $412.000 en efectivo y $95.000 con tarjeta. Lo que
+  **no** puede rearmar es la diferencia del cierre (le falta lo que contó): esa la vio una vez,
+  al cerrar. **La pregunta para el owner:** ¿también se le esconden los cobros de turnos ya
+  cerrados?
+  - **Dejarlo así (recomendada):** Bruno sigue buscando una venta vieja para cobrar un saldo
+    pendiente, reimprimir o hacer una nota de crédito, que es trabajo de todos los días. El costo:
+    con paciencia, rearma lo que cobró en cada turno.
+  - **Esconderle los cobros de cajas cerradas:** ya no puede sumar turnos viejos, pero tampoco
+    encuentra la venta de ayer cuando el cliente vuelve a pagar el saldo o a devolver algo; eso
+    tendría que hacerlo el encargado. Es lo mismo que hizo descartar el ocultamiento en agosto
+    (§11.3 de la investigación de caja).
 
 ## 5. Carreras de concurrencia
 
@@ -902,6 +905,29 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
 ---
 
 ## Vigilancia — evaluado y descartado, no es trabajo
+
+- [ ] **El `400` *"Método de pago no pertenece al arqueo"* dice qué medios se usaron en el turno,
+  y se deja así** (backend, caja; residuo 1 del frente del modo ciego, que se cerró el 2026-08-23 —
+  [`resueltos.md`](resueltos.md) § *"El modo ciego deja de prometer lo que no sostiene"*—; pasado
+  a Vigilancia el 2026-10-08 por la orquestadora).
+  ❌ **Refutado: "es de un solo uso, cada sondeo exitoso cierra la caja".** Así lo decía la entrada
+  desde agosto, y es falso. Medido por HTTP el 2026-10-08 —cajero `vendedor@paris.cl`, tenant en
+  modo ciego, una venta con tarjeta débito en su caja—, `POST /caja/:id/conteo` **sin la línea de
+  efectivo**:
+  - con la tarjeta (usada) → 400 *"Falta el conteo de un medio de pago obligatorio"*;
+  - con un medio no usado → 400 *"Método de pago no pertenece al arqueo"*;
+  - con la tarjeta otra vez → lo mismo que la primera.
+
+  La caja siguió `abierta` en los tres: el sondeo se repite cuantas veces se quiera. Pasa porque
+  `CajaService.enviarConteo` mira "no pertenece" **antes** que las líneas obligatorias, y el
+  efectivo siempre lo es. `dc5f3a72` (ids en minúsculas, una línea por medio) no cambió ese orden:
+  tocó el DTO, no el service.
+  **Por qué se deja igual:** entrega solo **presencia por medio**, nunca montos, y eso el cajero ya
+  lo ve en sus propios pagos del turno (`GET /pagos`, eje mío/todos). No es una fuga nueva.
+  **La salida, si algún día se quiere cerrar** (no se construye ahora): invertir el orden de los dos
+  chequeos en `enviarConteo` —las obligatorias primero—, dos líneas. Sin la línea de efectivo,
+  cualquier medio da el mismo 400 genérico, y con ella un medio usado cierra la caja: recién ahí
+  sería de un solo uso.
 
 - [ ] **Una promo con muchas aplicaciones iguales guarda una fila por aplicación, y se deja así**
   (motor de promociones + congelado; Sesión de esfuerzo máximo, 2026-10-06, al cerrar "una

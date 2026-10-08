@@ -2037,15 +2037,12 @@ export class CajaService {
   ): Promise<
     Caja & { cajonNombre: string | null; usuarioNombre: string | null }
   > {
-    const caja = await this.cajaRepo.findOne({
-      where: { id: cajaId, tenantId, eliminadoEl: IsNull() },
-    });
-    if (!caja) {
-      throw new NotFoundException('Caja no encontrada');
-    }
-    if (caja.usuarioId !== usuarioId && !tieneVerTodas) {
-      throw new ForbiddenException('No tienes acceso a esta caja');
-    }
+    const caja = await this.verificarAccesoCaja(
+      tenantId,
+      usuarioId,
+      cajaId,
+      tieneVerTodas,
+    );
     // El detalle expone el nombre del cajón (el header lo muestra) y el del
     // cajero dueño — lo necesita el encargado antes de forzar el cierre de la
     // caja de otro (frente del testigo de cierre forzado): tiene que ver de
@@ -2256,6 +2253,23 @@ export class CajaService {
 
     if (caja.usuarioId !== usuarioId && !tieneVerTodas) {
       throw new ForbiddenException('No tienes acceso a esta caja');
+    }
+
+    // El historial de cajas es de supervisión (owner, 2026-09-29): sin
+    // `Cajas:Leer` solo se llega a la caja propia ACTIVA —el turno en curso, con
+    // su conciliación: el mismo conjunto que `findActiva`—. Una caja propia ya
+    // cerrada es historial. La lista va al revés de un `!== 'cerrada'` a
+    // propósito: un estado nuevo queda cerrado hasta que alguien lo decida.
+    // Las cuatro rutas de detalle (`findOne`, arqueo, movimientos y su
+    // resumen) pasan por acá; `GET /caja` lo corta el controller.
+    if (
+      !tieneVerTodas &&
+      caja.estado !== 'abierta' &&
+      caja.estado !== 'en_conciliacion'
+    ) {
+      throw new ForbiddenException(
+        'El historial de cajas es solo para supervisión',
+      );
     }
 
     return caja;

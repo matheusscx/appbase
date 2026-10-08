@@ -9,6 +9,9 @@ definePageMeta({
 const cajaStore = useCajaStore()
 const toast = useToast()
 const loading = ref(false)
+// El historial de cajas es de supervisión (owner, 2026-09-29): el backend le
+// da 403 a quien no tiene `Cajas:Leer`, así que el link no se ofrece.
+const { puedeLeer: puedeVerHistorial } = usePermisosCrud('Cajas')
 
 onMounted(async () => {
   loading.value = true
@@ -63,7 +66,30 @@ async function onOpened(cajaId: string): Promise<void> {
         <!-- Sin caja abierta: apertura + link al historial -->
         <template v-else-if="!cajaStore.activa">
           <div class="space-y-6">
-            <div class="flex justify-end">
+            <UCard v-if="cajaStore.resultadoCierre" data-qa="resultado-cierre">
+              <template #header>
+                <div class="flex items-center justify-between gap-3">
+                  <h3 class="text-sm font-semibold text-default">
+                    Resultado de tu cierre
+                  </h3>
+                  <UButton
+                    color="neutral"
+                    variant="outline"
+                    size="sm"
+                    label="Listo"
+                    @click="cajaStore.descartarResultadoCierre()"
+                  />
+                </div>
+              </template>
+              <div class="space-y-4">
+                <CajaCierreResumen
+                  :arqueo="cajaStore.resultadoCierre.arqueo"
+                  :caja="cajaStore.resultadoCierre"
+                />
+                <CajaArqueoTable :lineas="cajaStore.resultadoCierre.arqueo" />
+              </div>
+            </UCard>
+            <div v-if="puedeVerHistorial" class="flex justify-end">
               <UButton
                 to="/mi-caja/historial"
                 variant="outline"

@@ -114,12 +114,19 @@ export class CajaController {
   async historial(@Req() req: Request, @Query() query: QueryHistorialCajaDto) {
     const u = req.user as JwtUser;
     const verTodas = await this.resolverLecturaCompartida(u);
+    // El historial de cajas es de supervisión (owner, 2026-09-29): el cajero
+    // con `MiCaja:Leer` y sin `Cajas:Leer` ya no lista ni sus propios turnos.
+    // Su caja en curso la sigue viendo por `GET /caja/activa` y `GET /:id`.
+    if (!verTodas) {
+      throw new ForbiddenException(
+        'El historial de cajas es solo para supervisión',
+      );
+    }
     const consultaOtroUsuario =
       query.usuarioId != null && query.usuarioId !== u.id;
-    const scope =
-      query.todas || consultaOtroUsuario || query.cajonId != null
-        ? verTodas
-        : false;
+    const scope = Boolean(
+      query.todas || consultaOtroUsuario || query.cajonId != null,
+    );
     return this.cajaService.historial(u.tenantId!, u.id, query, scope);
   }
 

@@ -95,6 +95,27 @@ describe('useCajaStore — cargarActiva', () => {
     )
   })
 
+  it('abrir un turno nuevo descarta el resultado del cierre anterior', async () => {
+    const store = useCajaStore()
+    store.mostrarResultadoCierre({ arqueo: [], cajonNombre: 'Barra', fechaCierre: null })
+    mockApiFetch.mockResolvedValueOnce(CAJA)
+
+    await store.abrir({ saldoInicial: '1000.0000', cajonId: 'cajon-1' })
+
+    expect(store.resultadoCierre).toBeNull()
+  })
+
+  it('si abrir falla, el resultado del cierre anterior sigue a la vista', async () => {
+    const store = useCajaStore()
+    const resultado = { arqueo: [], cajonNombre: 'Barra', fechaCierre: null }
+    store.mostrarResultadoCierre(resultado)
+    mockApiFetch.mockRejectedValueOnce(new Error('409'))
+
+    await expect(store.abrir({ saldoInicial: '1000.0000', cajonId: 'cajon-1' })).rejects.toThrow('409')
+
+    expect(store.resultadoCierre).toEqual(resultado)
+  })
+
   it('loadingActiva es true durante la llamada y false al terminar', async () => {
     const store = useCajaStore()
     let loadingDuringCall = false

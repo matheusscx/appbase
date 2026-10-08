@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 
 // Mock the virtual module paths that Nuxt uses for auto-imports.
 // These are resolved by Nuxt's Vite plugins in the real app but need
@@ -41,6 +41,7 @@ vi.mock('~/composables/useApiFetch', () => ({
 
 import { navigateTo } from '#app/composables/router'
 import { useAuthStore } from './auth'
+import { useCajaStore } from './caja'
 
 // El tipo de rutas de `$fetch` (Nuxt) dispara TS2321 (recursión de tipos) al pasar por
 // vi.mocked; en el test lo tratamos como un mock plano.
@@ -307,5 +308,70 @@ describe('useAuthStore — handlePostLogin avisa cuando no pudo entrar al tenant
     expect(store.error).toBeNull()
     expect(store.activeTenantId).toBe('t1')
     expect(navigateToMock).toHaveBeenCalledWith('/')
+  })
+})
+
+// El resultado del último cierre de caja vive en memoria para `/mi-caja`: el
+// que entra después en ese navegador no puede verlo. Lo limpia el store de
+// caja observando la sesión (ver `resultadoCierre` en `caja.ts`).
+describe('useAuthStore — la sesión que cambia descarta el resultado del cierre de caja', () => {
+  const RESULTADO = { arqueo: [], cajonNombre: 'Barra', fechaCierre: null }
+  const tokenDe = (tenantId: string) =>
+    makeToken({ sub: 'u1', email: 'a@b.com', tenant_id: tenantId, es_superadmin: false, iat: 0, exp: 9999 })
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    $fetchMock.mockReset()
+  })
+
+  function sesionConResultado() {
+    const auth = useAuthStore()
+    auth.setToken(tokenDe('t1'))
+    auth.user = { id: 'u1', nombre: 'Bruno' } as never
+    const caja = useCajaStore()
+    caja.mostrarResultadoCierre(RESULTADO)
+    return { auth, caja }
+  }
+
+  it('logout lo vacía', async () => {
+    const { auth, caja } = sesionConResultado()
+    await nextTick()
+    expect(caja.resultadoCierre).toEqual(RESULTADO)
+    $fetchMock.mockResolvedValueOnce(undefined) // /auth/logout
+
+    await auth.logout()
+    await nextTick()
+
+    expect(caja.resultadoCierre).toBeNull()
+  })
+
+  it('cambiar de tenant (otro token) lo vacía', async () => {
+    const { auth, caja } = sesionConResultado()
+    await nextTick()
+
+    auth.setToken(tokenDe('t2'))
+    await nextTick()
+
+    expect(caja.resultadoCierre).toBeNull()
+  })
+
+  it('otra persona en el mismo tenant lo vacía', async () => {
+    const { auth, caja } = sesionConResultado()
+    await nextTick()
+
+    auth.user = { id: 'u2', nombre: 'Ana' } as never
+    await nextTick()
+
+    expect(caja.resultadoCierre).toBeNull()
+  })
+
+  it('si `fetchMe` vuelve a traer a la misma persona, queda', async () => {
+    const { auth, caja } = sesionConResultado()
+    await nextTick()
+
+    auth.user = { id: 'u1', nombre: 'Bruno' } as never
+    await nextTick()
+
+    expect(caja.resultadoCierre).toEqual(RESULTADO)
   })
 })

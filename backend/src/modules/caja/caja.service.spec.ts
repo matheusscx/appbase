@@ -1064,7 +1064,9 @@ describe('CajaService', () => {
         TENANT_ID,
         USUARIO_ID,
         CAJA_ID,
-        false,
+        // Con Cajas:Leer: una caja cerrada es historial, y sin ese permiso
+        // ni el dueño llega (ver "caja propia cerrada sin Cajas:Leer → 403").
+        true,
       );
 
       expect(res.ciego).toBe(false);
@@ -2468,6 +2470,71 @@ describe('CajaService', () => {
       await expect(
         service.findOne(TENANT_ID, USUARIO_ID, CAJA_ID, false),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // Decisión del owner del 2026-09-29: el historial de cajas es de supervisión.
+  // Sin `Cajas:Leer` (tieneVerTodas=false), el cajero solo llega a su caja
+  // ACTIVA —abierta o en conciliación, el conjunto de `findActiva`—; una caja
+  // propia ya cerrada es historial. Las cuatro rutas de detalle pasan por el
+  // mismo chequeo (`verificarAccesoCaja`).
+  describe('caja propia cerrada sin Cajas:Leer → 403 (historial de supervisión)', () => {
+    const cajaPropiaCerrada = { ...mockCajaAbierta, estado: 'cerrada' };
+    const MENSAJE = 'El historial de cajas es solo para supervisión';
+
+    const rutas: [string, () => Promise<unknown>][] = [
+      ['findOne', () => service.findOne(TENANT_ID, USUARIO_ID, CAJA_ID, false)],
+      [
+        'obtenerArqueo',
+        () => service.obtenerArqueo(TENANT_ID, USUARIO_ID, CAJA_ID, false),
+      ],
+      [
+        'resumenMovimientos',
+        () => service.resumenMovimientos(TENANT_ID, USUARIO_ID, CAJA_ID, false),
+      ],
+      [
+        'listarMovimientos',
+        () =>
+          service.listarMovimientos(TENANT_ID, USUARIO_ID, CAJA_ID, {}, false),
+      ],
+    ];
+
+    it.each(rutas)('%s rechaza sin consultar nada más', async (_r, llamar) => {
+      cajaRepo.findOne.mockResolvedValue(cajaPropiaCerrada);
+
+      await expect(llamar()).rejects.toThrow(MENSAJE);
+      await expect(llamar()).rejects.toBeInstanceOf(ForbiddenException);
+      expect(dataSource.query).not.toHaveBeenCalled();
+    });
+
+    it.each(['abierta', 'en_conciliacion'])(
+      'findOne deja pasar la caja propia %s (el turno en curso)',
+      async (estado) => {
+        cajaRepo.findOne.mockResolvedValue({ ...mockCajaAbierta, estado });
+        dataSource.query.mockResolvedValueOnce([
+          { cajon_nombre: null, usuario_nombre: null, usuario_apellido: null },
+        ]);
+
+        const res = await service.findOne(
+          TENANT_ID,
+          USUARIO_ID,
+          CAJA_ID,
+          false,
+        );
+
+        expect(res.estado).toBe(estado);
+      },
+    );
+
+    it('con Cajas:Leer (supervisor) la caja cerrada sigue visible', async () => {
+      cajaRepo.findOne.mockResolvedValue(cajaPropiaCerrada);
+      dataSource.query.mockResolvedValueOnce([
+        { cajon_nombre: null, usuario_nombre: null, usuario_apellido: null },
+      ]);
+
+      const res = await service.findOne(TENANT_ID, USUARIO_ID, CAJA_ID, true);
+
+      expect(res.estado).toBe('cerrada');
     });
   });
 

@@ -178,6 +178,13 @@ export interface ResumenDescuadresDia {
   efectivoSuma: string
 }
 
+/** El cierre propio recién revelado (ver `resultadoCierre` en el store). */
+export interface ResultadoCierre {
+  arqueo: ArqueoLinea[]
+  cajonNombre: string | null
+  fechaCierre: string | null
+}
+
 export interface MotivoDiferencia {
   id: string
   nombre: string
@@ -208,6 +215,39 @@ export const useCajaStore = defineStore('caja', () => {
   const testigos = ref<TestigoEstado[]>([])
   const loadingActiva = ref(false)
   const loadingResumenTurno = ref(false)
+  /**
+   * Lo que reveló el cierre de la caja PROPIA en modo ciego, para mostrarlo en
+   * `/mi-caja` hasta que el cajero aprieta *Listo*. Antes la revelación era navegar al detalle de la
+   * caja recién cerrada; desde que el historial de cajas es de supervisión
+   * (owner, 2026-09-29) el cajero sin `Cajas:Leer` recibe 403 ahí, así que el
+   * resultado viaja acá con lo que ya devolvió el cierre —sin ningún GET de una
+   * caja cerrada—. No va dentro del drawer: en el POS y en `/mi-caja/[id]` su
+   * padre lo desmonta en el mismo tick en que el cierre pone `activa` en null.
+   * Vive solo en memoria: un F5 lo descarta, y el `watch` de abajo lo limpia
+   * en logout, cambio de persona y cambio de tenant, para que no lo vea el que
+   * entra después en ese navegador.
+   */
+  const resultadoCierre = ref<ResultadoCierre | null>(null)
+
+  // Lo observa este store y no lo llaman `clearAuth`/`switchTenant`: que el
+  // store de sesión importe el de caja cambia el orden de carga de los módulos,
+  // y medido, el spec de `NotaCreditoModal` pasaba a usar el `useApiFetch` real
+  // (8 rojos). Así la dependencia va en el sentido que ya tenía: caja → sesión.
+  const auth = useAuthStore()
+  // Dos fuentes y no un array armado en el getter: un array nuevo en cada
+  // lectura dispararía también cuando `fetchMe` trae a la misma persona.
+  watch(
+    [() => auth.user?.id ?? null, () => auth.activeTenantId],
+    () => { resultadoCierre.value = null },
+  )
+
+  function mostrarResultadoCierre(r: ResultadoCierre): void {
+    resultadoCierre.value = r
+  }
+
+  function descartarResultadoCierre(): void {
+    resultadoCierre.value = null
+  }
 
   async function cargarActiva(): Promise<void> {
     loadingActiva.value = true
@@ -246,6 +286,11 @@ export const useCajaStore = defineStore('caja', () => {
       saldoEsperado: caja.saldoInicial,
       totalMovimientos: 0,
     }
+    // Un turno nuevo deja atrás el resultado del anterior: si quedó sin "Listo"
+    // y este turno cierra por un camino que no arma tarjeta (la conciliación
+    // retomada en `/mi-caja/[id]`), `/mi-caja` mostraría la diferencia de otro
+    // turno como si fuera la de ahora (revisión independiente, 2026-10-08).
+    resultadoCierre.value = null
     return caja
   }
 
@@ -496,6 +541,9 @@ export const useCajaStore = defineStore('caja', () => {
     testigos,
     loadingActiva,
     loadingResumenTurno,
+    resultadoCierre,
+    mostrarResultadoCierre,
+    descartarResultadoCierre,
     cargarActiva,
     abrir,
     cargarResumenTurno,

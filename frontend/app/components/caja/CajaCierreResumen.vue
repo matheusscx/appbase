@@ -4,7 +4,8 @@ import type { ArqueoLinea, Caja } from '~/stores/caja'
 
 const props = defineProps<{
   arqueo: ArqueoLinea[]
-  caja: Caja
+  // Solo lo que pinta: el resultado del cierre (`/mi-caja`) no tiene la caja entera.
+  caja: Pick<Caja, 'cajonNombre' | 'fechaCierre'>
 }>()
 
 const { formatMonto, formatFecha } = useFormatters()

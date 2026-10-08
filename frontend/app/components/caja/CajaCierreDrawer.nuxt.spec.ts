@@ -10,7 +10,7 @@
 // (`caja.comentarioCierre`), alcanza como explicación y el botón se habilita
 // sin pedir un segundo comentario — una UI más estricta que el backend
 // contradice al backend.
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { reactive } from 'vue'
@@ -34,6 +34,7 @@ const cajaStoreMock = reactive<{
   cargarDetalle: () => Promise<void>
   enviarConteo: () => Promise<{ estado: string, arqueo: unknown[], nivelDescuadre: string }>
   cerrar: () => Promise<{ caja: unknown, arqueo: unknown[] }>
+  mostrarResultadoCierre: (r: unknown) => void
 }>({
   arqueoCiego: false,
   motivos: [],
@@ -47,9 +48,21 @@ const cajaStoreMock = reactive<{
   cargarDetalle: vi.fn(async () => {}),
   enviarConteo: vi.fn(async () => ({ estado: 'cerrada', arqueo: [], nivelDescuadre: 'ninguno' })),
   cerrar: vi.fn(async () => ({ caja: {}, arqueo: [] })),
+  mostrarResultadoCierre: vi.fn(),
 })
 
 mockNuxtImport('useCajaStore', () => () => cajaStoreMock)
+
+const { navigateToMock } = vi.hoisted(() => ({ navigateToMock: vi.fn() }))
+mockNuxtImport('navigateTo', () => navigateToMock)
+
+// Cada test desmonta lo que montó: con `attachTo: document.body`, un drawer de
+// un test anterior queda vivo y reacciona al store compartido del siguiente
+// (medido: el test del cierre forzado pasaba solo y fallaba en el archivo).
+const montados: { unmount: () => void }[] = []
+afterEach(() => {
+  while (montados.length) montados.pop()!.unmount()
+})
 
 // `UDrawer` (Nuxt UI, sobre reka-ui) llama `useAppConfig()` en su propio
 // `setup()`: stubear `AppDrawer` con template propio (mismo patrón que
@@ -95,6 +108,7 @@ async function montarEnConciliacionForzada(
     global: { stubs },
     props: { cajaId: 'caja-1', resumir: true, forzado: true, open: false },
   })
+  montados.push(wrapper)
   await wrapper.setProps({ open: true })
   await flushPromises()
   return wrapper
@@ -182,6 +196,7 @@ describe('CajaCierreDrawer — aviso de umbral de descuadre', () => {
       global: { stubs },
       props: { cajaId: 'caja-1', resumir: true, open: false },
     })
+    montados.push(wrapper)
     await wrapper.setProps({ open: true })
     await flushPromises()
     return wrapper
@@ -221,5 +236,56 @@ describe('CajaCierreDrawer — aviso de umbral de descuadre', () => {
     await flushPromises()
 
     expect(botonConfirmar(wrapper).attributes('disabled')).toBeUndefined()
+  })
+})
+
+// El historial de cajas es de supervisión (owner, 2026-09-29): la caja propia
+// recién cerrada ya no se abre en `/mi-caja/[id]` (403 sin `Cajas:Leer`). En
+// modo ciego, la revelación viaja en el store y la muestra `/mi-caja`; el
+// cierre forzado del encargado sigue yendo al detalle de `/cajas`.
+describe('CajaCierreDrawer — revelación del cierre en modo ciego', () => {
+  const FECHA_CIERRE = '2026-10-08T22:00:00.000Z'
+
+  async function cerrarEnCiego(props: { redirectBase?: string }) {
+    vi.mocked(cajaStoreMock.mostrarResultadoCierre).mockClear()
+    navigateToMock.mockClear()
+    Object.assign(cajaStoreMock, {
+      arqueoCiego: true,
+      motivos: [],
+      arqueo: ARQUEO_CUADRADO,
+      testigos: [],
+      detalle: { id: 'caja-1', comentarioCierre: 'ya explicado', cajonNombre: 'Barra' },
+      activa: null,
+      cerrar: vi.fn(async () => ({ caja: { fechaCierre: FECHA_CIERRE }, arqueo: ARQUEO_CUADRADO })),
+    })
+    const wrapper = await mountSuspended(CajaCierreDrawer, {
+      attachTo: document.body,
+      global: { stubs },
+      props: { cajaId: 'caja-1', resumir: true, open: false, ...props },
+    })
+    montados.push(wrapper)
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    await botonConfirmar(wrapper).trigger('click')
+    await flushPromises()
+    return wrapper
+  }
+
+  it('cierre propio: deja el resultado en el store y vuelve a /mi-caja, nunca al detalle de la caja cerrada', async () => {
+    await cerrarEnCiego({})
+
+    expect(cajaStoreMock.mostrarResultadoCierre).toHaveBeenCalledWith({
+      arqueo: ARQUEO_CUADRADO,
+      cajonNombre: 'Barra',
+      fechaCierre: FECHA_CIERRE,
+    })
+    expect(navigateToMock.mock.calls).toEqual([['/mi-caja']])
+  })
+
+  it('cierre forzado (redirectBase /cajas): va al detalle de supervisión y no toca el resultado', async () => {
+    await cerrarEnCiego({ redirectBase: '/cajas' })
+
+    expect(cajaStoreMock.mostrarResultadoCierre).not.toHaveBeenCalled()
+    expect(navigateToMock.mock.calls).toEqual([['/cajas/caja-1']])
   })
 })

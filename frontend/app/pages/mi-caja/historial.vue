@@ -1,8 +1,9 @@
 <script setup lang="ts">
 definePageMeta({
   middleware: ['auth', 'permiso'],
-  permiso: 'MiCaja:Leer',
-  permisoLabel: 'Mi caja',
+  // El historial de cajas es de supervisión (owner, 2026-09-29): sin
+  // `Cajas:Leer` el backend da 403. Quien tiene los dos ve acá lo propio.
+  permiso: 'Cajas:Leer',
   layout: 'dashboard',
 })
 </script>

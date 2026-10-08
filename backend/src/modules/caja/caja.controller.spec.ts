@@ -251,21 +251,30 @@ describe('CajaController', () => {
       expect(historial).toHaveBeenCalledWith('t1', 'u1', query, true);
     });
 
-    it('pasa verTodas=false cuando query.todas=true pero el usuario solo tiene MiCaja:Leer', async () => {
-      jest
-        .spyOn(rbacService, 'userHasPermiso')
-        .mockImplementation(
-          async (_u, _t, modulo, permiso) =>
-            modulo === 'MiCaja' && permiso === 'Leer',
+    // Decisión del owner del 2026-09-29: el historial de cajas es de
+    // supervisión. El cajero (MiCaja:Leer sin Cajas:Leer) ya no lista ni sus
+    // propios turnos, con o sin `todas`.
+    it.each([
+      ['sin filtros', {}],
+      ['con todas=true', { todas: true }],
+      ['con su propio usuarioId', { usuarioId: 'u1' }],
+    ])(
+      'lanza 403 al cajero que solo tiene MiCaja:Leer (%s), sin llegar al service',
+      async (_caso, query) => {
+        jest
+          .spyOn(rbacService, 'userHasPermiso')
+          .mockImplementation(
+            async (_u, _t, modulo, permiso) =>
+              modulo === 'MiCaja' && permiso === 'Leer',
+          );
+        const historial = jest.spyOn(cajaService, 'historial');
+        const req = { user: { id: 'u1', tenantId: 't1' } } as any;
+        await expect(controller.historial(req, query as any)).rejects.toThrow(
+          'El historial de cajas es solo para supervisión',
         );
-      const historial = jest
-        .spyOn(cajaService, 'historial')
-        .mockResolvedValue({} as any);
-      const req = { user: { id: 'u1', tenantId: 't1' } } as any;
-      const query = { todas: true } as any;
-      await controller.historial(req, query);
-      expect(historial).toHaveBeenCalledWith('t1', 'u1', query, false);
-    });
+        expect(historial).not.toHaveBeenCalled();
+      },
+    );
 
     it('pasa verTodas=true cuando consulta a otro usuario y tiene Cajas:Leer', async () => {
       jest

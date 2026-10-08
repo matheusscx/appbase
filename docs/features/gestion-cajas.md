@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: —
-**Last Updated**: 2026-08-15
+**Last Updated**: 2026-10-08
 
 ---
 
@@ -31,7 +31,8 @@ cajero cuenta (`monto_contado`), generando el reporte de cuadre de caja.
   - Movimientos manuales (entrada / salida de efectivo)
   - Cierre en dos fases con cuadre automático multi-medio y motivos categorizados de
     diferencia (congela → concilia con motivo → finaliza; auto-cierre si todo cuadra)
-  - Historial de sesiones de caja (propia + todas con permiso especial)
+  - Historial de sesiones de caja, **de supervisión** (`Cajas:Leer`): el cajero ve su turno en
+    curso, no los cerrados — ver [El historial de cajas es de supervisión](#el-historial-de-cajas-es-de-supervisión-2026-10-08)
   - Caja virtual (creada automáticamente por tenant para ventas online — excluida de flujos manuales)
   - Permisos granulares vía `@RequiresPermiso` + `PermisosGuard`
   - Cierre forzado de una caja ajena por el encargado (`Cajas:Actualizar` — operativo, no
@@ -60,7 +61,7 @@ en **dos módulos de permiso y dos superficies de navegación**:
 
 | Módulo | Permiso | Superficie (frontend) | Qué puede hacer |
 |---|---|---|---|
-| `MiCaja` | `Leer` / `Crear` / `Actualizar` | `/mi-caja*` | El cajero opera **su propio** turno: abrir, registrar movimientos, cerrar con cuadre, ver su propio historial. |
+| `MiCaja` | `Leer` / `Crear` / `Actualizar` | `/mi-caja*` | El cajero opera **su propio** turno: abrir, registrar movimientos, cerrar con cuadre. **No** ve sus turnos cerrados: desde el 2026-10-08 el historial es de supervisión ([ver abajo](#el-historial-de-cajas-es-de-supervisión-2026-10-08)). |
 | `Cajas` | `Leer` / `Crear` / `Actualizar` / `Eliminar` | `/cajas*`, `/configuracion/cajas` | Con `Leer`, el encargado **supervisa** todos los cajones del tenant: grid con su estado, historial de todos (filtro por cajero o por cajón) y detalle de cualquier caja. `Crear`/`Actualizar`/`Eliminar` gobiernan el **CRUD de cajones** (desde 2026-07-23). Y desde el **2026-08-13**, `Actualizar` habilita además **operar sobre caja ajena**: forzar el cierre de la caja de un cajero ausente y pedirle fe a un garzón en turno (ver [Ciclo de vida](#ciclo-de-vida-de-una-solicitud-de-testigo)). Hasta esa fecha la **superficie `/cajas*` era read-only** —el módulo no, que ya administraba cajones—, y ese ensanche del significado de `Actualizar` está anotado como permiso grueso en [`pendientes.md`](../agent/pendientes.md). |
 📌 **Los dos módulos se venden juntos, y con `Ventas` presencial** (regla del owner, 2026-08-22).
 No son dos productos: son **dos alcances de permiso modelados como módulos** —operar la propia
@@ -121,6 +122,69 @@ testigo: el encargado le pide fe a un garzón en turno (`POST /caja/:id/testigos
 garzón firma o rechaza desde su propia sesión (`POST /caja/testigos/:id/resolver`, cuenta
 vinculada o PIN). Sin firma alguna, la fase 2 (más abajo) exige un comentario que explique
 qué pasó.
+
+---
+
+## El historial de cajas es de supervisión (2026-10-08)
+
+**Decisión del owner del 2026-09-29** (opción A en el selector de la orquestadora, que era lo que
+había pedido el 2026-08-22): **el cajero deja de ver su historial de cajas y el supervisor lo
+sigue viendo.** No hay permiso nuevo: la línea la traza `Cajas:Leer`, el mismo de toda la
+supervisión.
+
+| Ruta | Cajero (`MiCaja` sin `Cajas:Leer`) | Con `Cajas:Leer` (supervisor, encargado, admin) |
+|---|---|---|
+| `GET /caja` (listado) | **403**, con o sin filtros, aun pidiendo lo propio | 200, sin cambios |
+| `GET /caja/:id`, `/:id/arqueo`, `/:id/movimientos`, `/:id/movimientos/resumen` | 200 solo para su caja **activa**; una caja propia cerrada es **403** | 200, sin cambios |
+| `tendencia`, `pendientes-revision`, `resumen-descuadres-dia`, `intentos-rechazados`, `cajones-estado`, `/:id/testigos` | 403, como antes | 200 |
+
+El 403 dice *"El historial de cajas es solo para supervisión"*. **"Activa" es `abierta` o
+`en_conciliacion`**, el mismo conjunto que `findActiva`: sin la conciliación el cajero no podría
+terminar la fase 2 de su propio cierre. El listado lo corta el controller (`historial`); las
+cuatro rutas de detalle, `verificarAccesoCaja` en el service (`findOne` pasa por ahí desde este
+cambio, así hay un solo chequeo). El chequeo nombra los dos estados que dejan pasar en vez de
+excluir `cerrada`: un estado nuevo queda cerrado hasta que alguien lo decida.
+
+**La revelación del cierre ciego no se perdió, se mudó.** Hasta este cambio, al cerrar en modo
+ciego el drawer navegaba al detalle de la caja recién cerrada (`/mi-caja/[id]`), que ahora es
+403 para el cajero. El resultado viaja en el store (`resultadoCierre`) con lo que **ya devolvió
+el cierre** —ningún GET de una caja cerrada— y `/mi-caja` lo muestra en una tarjeta *"Resultado
+de tu cierre"* con un botón *Listo*. No va dentro del drawer: en el POS y en `/mi-caja/[id]` el
+padre del drawer lo desmonta en el mismo tick en que el cierre pone `activa` en null. La tarjeta
+queda hasta que el cajero aprieta *Listo* o abre otro turno, y vive en memoria: un F5 la descarta, y
+el logout y el cambio de persona o de tenant la limpian para que no la vea el que entra después en ese navegador. La decisión del 2026-08-22 (*la
+revelación ocurre al contar*) sigue en pie; lo que el cajero pierde es **volver** a ese número.
+
+📌 **La tarjeta sale cuando el drawer sigue ciego al cerrar**, igual que antes salía la
+redirección: el auto-cierre de la fase 1, y la fase 2 hecha en el mismo drawer (el POS). Si el
+cajero descuadra en `/mi-caja/[id]`, la página pasa a `CajaCierreDetalle` y la conciliación se
+retoma desde *Continuar conciliación*. Ese drawer recarga el arqueo de una caja `en_conciliacion`,
+que siempre llega revelado (`ciego:false`), así que al confirmar vuelve a `/mi-caja` sin tarjeta.
+La diferencia ya la vio en la conciliación, línea por línea. Medido en el navegador el
+2026-10-08, y no cambió con este frente: antes ese camino tampoco navegaba al detalle.
+
+⚠️ **Residual aceptado: dos pestañas.** El turno nuevo descarta la tarjeta solo si se abre en la
+misma pestaña (`abrir` del store). Si el cajero deja la tarjeta sin *Listo*, abre y cierra otro
+turno en otra pestaña o equipo, y vuelve a esta, `/mi-caja` le muestra la tarjeta de su cierre
+anterior. Es un dato suyo y verdadero; *Listo* o un F5 la sacan. Leído en el código por la
+revisión independiente, no medido.
+
+⚠️ **Un tenant con `MiCaja` y sin el módulo `Cajas` contratado** se queda sin nadie que vea el
+historial, ni el admin, porque `Cajas:Leer` es inobtenible sin el módulo. No existe por regla
+(los dos se venden juntos), pero es construible al aprovisionar. Se dejó así a propósito
+(orquestadora, 2026-10-08): copiar la rama "tenant sin `Cajas` → ve todo" de
+`resolverAlcanceDerivadoDeCaja` le devolvería el historial al cajero.
+
+⛔ **Lo que este cambio NO cubre:** el cajero sigue viendo sus ventas y sus pagos de turnos
+pasados (eje mío/todos de [patterns/backend §16](../patterns/backend.md)), así que sumando sus
+pagos por caja reconstruye lo que cobró en cada turno. Bloquear eso cambia qué ve en ventas y
+pagos, y es una pregunta abierta del owner (`pendientes.md` § 4).
+
+Lo fijan `historial-cajas-supervision.e2e-spec.ts` (cajero 403 y supervisor 200 por ruta; el
+cajero abre, mueve, lee, concilia y cierra su caja, y recién ahí 403) y
+`frontend/e2e/caja/historial-cajero.spec.ts` (cajero en ciego desde `/mi-caja` y desde el POS,
+F5, logout, y el supervisor en el historial). Mutantes en
+[`resueltos.md`](../agent/resueltos.md).
 
 ---
 
@@ -378,7 +442,7 @@ caja. Ver [Entity & Database](#entity--database).
 GET /caja/:id/arqueo
 Authorization: Bearer <token>
 
-Permiso requerido: MiCaja:Leer (propia) o Cajas:Leer (ajena) — lectura compartida,
+Permiso requerido: MiCaja:Leer (propia y activa) o Cajas:Leer (cualquiera) — lectura compartida,
                    igual que el resto de endpoints de lectura de este controller.
 
 Response (200): { "ciego": boolean, "lineas": [...] } — ver por qué el envoltorio en
@@ -560,15 +624,18 @@ líneas descuadradas y finaliza —, así que no tiene ningún rol en la revelac
 ciego sigue gobernando únicamente el **preview** (`GET /:id/arqueo` con la caja todavía
 `abierta`), nunca el resultado del conteo ni de un cierre posterior.
 
-### Drawer ciego + revelación por redirección al detalle
+### Drawer ciego + revelación al cerrar
 
 `CajaCierreDrawer` lee `cajaStore.arqueoCiego` (poblado por `cargarArqueo`, que ahora
 consume `{ ciego, lineas }`). En modo ciego el drawer solo muestra las líneas obligatorias,
 sin esperado ni diferencia en vivo (los inputs de conteo son los mismos, pero no hay número
-de referencia contra qué compararse mientras se escribe). Al confirmar el cierre, en vez de
-solo cerrar el drawer, el flujo **redirige al detalle** de la caja recién cerrada
-(`/mi-caja/[id]`) para que el cajero vea ahí la diferencia revelada vía `CajaArqueoTable` —
-la misma tabla congelada que usa cualquier caja cerrada, no una vista especial. En modo
+de referencia contra qué compararse mientras se escribe). Al confirmar el cierre, el flujo
+vuelve a `/mi-caja` y muestra ahí la diferencia revelada en una tarjeta con `CajaArqueoTable`
+—la misma tabla congelada que usa cualquier caja cerrada—, armada con lo que devolvió el
+cierre. Hasta el 2026-10-08 redirigía al detalle de la caja cerrada, que desde entonces es
+historial y da 403 al cajero (ver [El historial de cajas es de
+supervisión](#el-historial-de-cajas-es-de-supervisión-2026-10-08)). El cierre forzado del
+encargado sigue yendo a `/cajas/[id]`. En modo
 normal (`arqueoCiego === false`) el drawer se comporta exactamente como en el sub-proyecto A
 (esperado y diferencia visibles en vivo, sin redirección forzada al cerrar).
 
@@ -626,12 +693,13 @@ calculada, que es justo lo que el control quiere evitar.
 entera y no corrige.
 
 ⛔ **Y una precisión que hay que respetar al apoyarse en esto: es fricción, no una barrera de
-datos.** El cajero con `MiCaja:Leer` ya lista **todos sus cierres con su diferencia** en su
-propio historial, así que el acumulado le queda a una suma de distancia. Lo que esta pantalla
-le niega es el número **ya calculado**, no la información. Si en algún momento el control
-tiene que ser real, el frente no es esta pantalla sino el historial propio — y ahí vuelve a
-aparecer todo lo que hizo descartar el ocultamiento (§11.3 de la investigación). Levantado
-por la revisión independiente del 2026-08-22.
+datos.** Hasta el 2026-10-08 el cajero con `MiCaja:Leer` listaba **todos sus cierres con su
+diferencia** en su propio historial, así que el acumulado le quedaba a una suma de distancia
+(lo levantó la revisión independiente del 2026-08-22). Ese historial ahora es de supervisión:
+el cajero ve cada diferencia **una vez**, al cerrar, y para acumularlas tendría que anotarlas.
+Sigue siendo fricción —las vio—, pero ya no es una suma sobre datos que el sistema le sirve.
+Lo que sí sigue derivable es lo **cobrado** por turno, desde sus propios pagos (pregunta
+abierta en `pendientes.md` § 4); la diferencia no, porque necesita lo contado.
 
 ℹ️ **No contradice la revelación al enviar el conteo**, que sigue igual: aquello es el
 **turno en curso** —un dato que el cajero ya tiene— y esto es el **acumulado**, que es
@@ -1259,7 +1327,7 @@ no ocurre en este nivel y el contexto ALS sigue activo—. La tabla **no declara
 está muriendo retiene con `FOR UPDATE`, y las dos se esperarían para siempre.
 
 **Lectura, solo supervisión:** `GET /caja/intentos-rechazados` con `Cajas:Leer` a secas
-(igual que `tendencia`, y a diferencia del historial: **no hay versión "los míos"**, porque
+(igual que `tendencia` y, desde el 2026-10-08, que el historial: **no hay versión "los míos"**, porque
 el rastro existe para vigilar al cajero y dárselo le diría cuánto ruido hizo). Filtros
 opcionales `cajaId` y `usuarioId`, paginado. Se renderiza en el detalle de caja
 (`/cajas/:id`, `CajaIntentosRechazados.vue`), en cualquier estado de la caja: la ráfaga que
@@ -1486,7 +1554,7 @@ Error (403) si la caja no pertenece al usuario (owner-only, aun con `Cajas:Leer`
 GET /caja/:id/movimientos/resumen
 Authorization: Bearer <token>
 
-Permiso requerido: MiCaja:Leer (propia) o Cajas:Leer (ajena) — lectura compartida,
+Permiso requerido: MiCaja:Leer (propia y activa) o Cajas:Leer (cualquiera) — lectura compartida,
                    ver nota en GET /caja/:id/movimientos.
 
 Response (200):
@@ -1507,7 +1575,7 @@ Totales globales del turno (independientes de la página del listado).
 GET /caja/:id/movimientos?page=1&pageSize=15&tipo=entrada
 Authorization: Bearer <token>
 
-Permiso requerido: MiCaja:Leer (propia) o Cajas:Leer (ajena) — resuelto por el helper
+Permiso requerido: MiCaja:Leer (propia y activa) o Cajas:Leer (cualquiera) — resuelto por el helper
                    `resolverLecturaCompartida` del controller (403 si no tiene ninguno).
 Nota: usuarios con Cajas:Leer pueden listar movimientos de cajas ajenas (read-only).
       Solo el dueño puede registrar movimientos (POST) o cerrar (POST /cerrar),
@@ -1537,7 +1605,7 @@ Response (200):
 GET /caja/:id/arqueo
 Authorization: Bearer <token>
 
-Permiso requerido: MiCaja:Leer (propia) o Cajas:Leer (ajena) — lectura compartida.
+Permiso requerido: MiCaja:Leer (propia y activa) o Cajas:Leer (cualquiera) — lectura compartida.
 
 Response (200): { "ciego": boolean, "lineas": [...] } — una línea por método + la de
       efectivo agregada. Si la caja está 'abierta', recomputado en vivo sin
@@ -1858,17 +1926,18 @@ Errores:
 ### GET /caja — Historial de cajas (paginado)
 
 ```
-GET /caja?page=1&pageSize=15
-GET /caja?todas=true&page=1&pageSize=15   // requiere Cajas:Leer
-GET /caja?usuarioId=uuid&page=1&pageSize=15   // historial de un cajero (detalle /caja/:id); ajeno requiere Cajas:Leer
-GET /caja?cajonId=uuid&page=1&pageSize=15   // historial de un cajón (todos los usuarios); requiere Cajas:Leer
+GET /caja?page=1&pageSize=15              // lo propio de quien tiene Cajas:Leer
+GET /caja?todas=true&page=1&pageSize=15
+GET /caja?usuarioId=uuid&page=1&pageSize=15   // historial de un cajero (detalle /caja/:id)
+GET /caja?cajonId=uuid&page=1&pageSize=15   // historial de un cajón (todos los usuarios)
 Authorization: Bearer <token>
 
-Permiso requerido: MiCaja:Leer o Cajas:Leer (lectura compartida). `todas=true`,
-                   `usuarioId` de otro usuario o `cajonId` solo escalan el alcance si
-                   tiene `Cajas:Leer`; si no, se ignora y devuelve solo lo propio.
-                   Con `cajonId` (y `Cajas:Leer`) el historial del cajón incluye a
-                   todos los usuarios que lo operaron.
+Permiso requerido: Cajas:Leer. Sin él —el cajero con MiCaja:Leer— es 403 aun
+                   pidiendo lo propio (owner, 2026-09-29: el historial es de
+                   supervisión). Sin filtros devuelve lo propio; `todas=true`,
+                   `usuarioId` de otro usuario o `cajonId` escalan al tenant. Con
+                   `cajonId` el historial del cajón incluye a todos los usuarios
+                   que lo operaron.
 
 Response (200):
 {
@@ -1899,14 +1968,17 @@ Response (200):
 GET /caja/:id
 Authorization: Bearer <token>
 
-Permiso requerido: MiCaja:Leer (propia) o Cajas:Leer (ajena)
+Permiso requerido: MiCaja:Leer (propia y activa: `abierta` o `en_conciliacion`) o Cajas:Leer
+                   (cualquiera, incluida una cerrada)
 
 Response (200): objeto `Caja` completo (sin movimientos — esos son
 `GET /caja/:id/movimientos`) más `cajonNombre` y `usuarioNombre`, resueltos en una sola
 query liviana a partir de `cajonId`/`usuarioId` (nunca un N+1: una fila por request, no
 una por caja de una lista). `usuarioNombre` es lo que el encargado necesita ver antes de
 forzar el cierre de una caja ajena (plan `testigo-cierre-forzado`, Task 6).
-Error (403) si la caja pertenece a otro usuario y no tiene `Cajas:Leer`.
+Error (403) si la caja pertenece a otro usuario y no tiene `Cajas:Leer`, o si es propia y
+      ya está cerrada y no tiene `Cajas:Leer` ("El historial de cajas es solo para
+      supervisión"). Vale igual para `/:id/arqueo`, `/:id/movimientos` y su resumen.
 ```
 
 ---
@@ -2030,8 +2102,8 @@ recalcula después de escrita)
 - `cajaService.enviarConteo(tenantId, usuarioId, cajaId, dto, puedeForzar)` — **fase 1**, owner-o-encargado; recomputa y congela el arqueo (`calcularArqueo` + `caja_arqueo_medio`), valida obligatorias (`400`), copia la línea de efectivo a `cajas.saldoFinal`/`montoContado`/`diferencia`, congela `cajas.cerradaPor` (siempre, no solo forzado) y `cajas.testigosDisponibles` (sesiones de garzón abiertas del tenant, vía `SesionesGarzonService.contarAbiertas` corrido con el mismo `manager` de la transacción), bifurca a `estado='cerrada'` (todo cuadró y `usuarioId` es el dueño) o `estado='en_conciliacion'` (algún descuadre, o forzado aunque cuadre) — sin cambios por el modo ciego, ver Cierre ciego. `puedeForzar` es el controller resolviendo `Cajas:Actualizar` (`resolverEscrituraCompartida`, decisión del owner 2026-08-13), no `esAdmin` — el parámetro se renombró porque cambió de significado
 - `cajaService.cerrar(tenantId, usuarioId, cajaId, puedeForzar, dto)` — **fase 2**, owner-o-encargado; lock de la caja `en_conciliacion`, aplica motivos vía `aplicarMotivosADescuadres` (`400` si falta alguno), y si el cierre es forzado (`cajas.cerradaPor !== cajas.usuarioId`, fail-closed ante `cerradaPor` ausente) y nadie firmó testigo (`CajaTestigoService.hayFirmaDe`) exige un comentario en `cajas.comentarioCierre` — el de esta fase o el que ya haya dejado la fase 1, sin tocar nunca `cajas.comentario` (el de la apertura, columna separada) — antes de marcar `estado='cerrada'`. Cancela las solicitudes de testigo pendientes (`CajaTestigoService.cancelarPendientes`) siempre, forzado o no. No recalcula nada del arqueo
 - `cajaService.justificarDiferencias(tenantId, cajaId, lineas)` — **override admin**, invocado desde el controller bajo `TenantAdminGuard`; misma validación que `cerrar` vía `aplicarMotivosADescuadres`, pero exige `estado='cerrada'` en vez de `en_conciliacion`
-- `cajaService.historial(tenantId, usuarioId, query, todas)` — historial; `todas=true` retorna todas las cajas del tenant
-- `cajaService.findOne(tenantId, usuarioId, cajaId, verTodas)` — detalle de la caja
+- `cajaService.historial(tenantId, usuarioId, query, todas)` — historial; `todas=true` retorna todas las cajas del tenant. El controller lo corta con 403 antes de llamarlo si no hay `Cajas:Leer`
+- `cajaService.findOne(tenantId, usuarioId, cajaId, verTodas)` — detalle de la caja; el acceso lo decide `verificarAccesoCaja`, igual que arqueo y movimientos: sin `verTodas`, solo la caja propia `abierta` o `en_conciliacion`
 - `motivosDiferenciaService.hayMotivosActivos(runner, tenantId)` / `assertMotivoValido(runner, tenantId, motivoId)` — consultados por `aplicarMotivosADescuadres` para decidir si exigir motivo o solo comentario (red de seguridad)
 
 ### Guards
@@ -2100,13 +2172,19 @@ Dos superficies, cada una gateada por su módulo (links sueltos "Mi caja" y "Caj
 - `pages/mi-caja/index.vue` — Cajero opera su propio turno: sin caja abierta → grid de
   cajones disponibles (`CajaAperturaGrid`; click en un cajón → drawer con saldo inicial +
   comentario → abre la caja sobre ese cajón) + botón "Ver historial" →
-  `/mi-caja/historial`; con caja abierta → redirect a `/mi-caja/[id]`. Gate: `MiCaja:Leer`.
-- `pages/mi-caja/historial.vue` — Historial paginado **del propio cajero**
-  (`CajaHistorial` con alcance por defecto = propias; sin `todas`).
+  `/mi-caja/historial` **solo con `Cajas:Leer`**; con caja abierta → redirect a
+  `/mi-caja/[id]`. Arriba, la tarjeta *"Resultado de tu cierre"* cuando el store trae
+  `resultadoCierre` (cierre propio en modo ciego), con *Listo*, que la descarta. Gate:
+  `MiCaja:Leer`.
+- `pages/mi-caja/historial.vue` — Historial paginado **propio** de quien además supervisa
+  (`CajaHistorial` sin `todas`).
+  Gate: `Cajas:Leer` desde el 2026-10-08 —el cajero recibiría 403—; queda para quien opera
+  caja y además supervisa (el admin).
 - `pages/mi-caja/[id].vue` — Detalle operable de su turno activo: KPIs + tabla de
   movimientos (`CajaActivaDashboard`). En el header de la tarjeta de caja: "Ver historial"
-  + botones de operar (+Movimiento / Cerrar). En vista read-only (caja ajena/cerrada) queda
-  solo "Ver historial" + back-link "Volver a caja".
+  (solo con `Cajas:Leer`) + botones de operar (+Movimiento / Cerrar). Si el backend rechaza
+  la caja (ajena, o propia ya cerrada sin `Cajas:Leer`), muestra su mensaje y vuelve a
+  `/mi-caja`.
 - `pages/cajas/index.vue` — Grid de **todos los cajones activos** del tenant y su estado
   (`CajaCajonesGrid`), read-only. **Sin apertura** (la caja se abre en `/mi-caja`). El botón
   "Ver historial" abre `/cajas/historial`. Gate: `Cajas:Leer`.
@@ -2116,7 +2194,8 @@ Dos superficies, cada una gateada por su módulo (links sueltos "Mi caja" y "Caj
   el guard— pero ofrecer una acción que va a rebotar con 403 es peor que no ofrecerla).
 - `pages/cajas/historial.vue` — Historial de **todos los cajeros** del tenant
   (`CajaHistorial` con `todas`; alcance fijo, sin toggle). Soporta `?usuarioId=` (por
-  cajero) y `?cajonId=` (por cajón). El alcance "solo propias" vive en `/mi-caja/historial`.
+  cajero) y `?cajonId=` (por cajón). El alcance "solo propias" vive en `/mi-caja/historial`,
+  y también pide `Cajas:Leer`.
 - `pages/cajas/[id].vue` — Detalle **read-only** de cualquier caja (sin botones de operar
   el turno propio, aunque sea la propia): KPIs + movimientos (`CajaActivaDashboard` en
   modo read-only). Botón "Ver historial del cajón" (`?cajonId=` de esa caja) en el header
@@ -2143,7 +2222,7 @@ sin necesidad.
 - `components/caja/CajaTurnoHeader.vue` — Título, badge de estado, fecha de apertura, botones +Movimiento / Cerrar caja
 - `components/caja/CajaTurnoResumen.vue` — Grid de 4 KPIs (saldo inicial, entradas, salidas, saldo esperado)
 - `components/caja/CajaMovimientosTable.vue` — Tabla paginada de movimientos con filtro por tipo, scroll interno y thead sticky
-- `components/caja/CajaHistorial.vue` — Listado paginado de sesiones (`GET /caja`); props `todas` (alcance todo el tenant), `usuarioId` y `cajonId` (o sus `?query=`). El alcance es fijo por página: `/mi-caja/historial` sin `todas` (propias), `/cajas/historial` con `todas`. Sin toggle.
+- `components/caja/CajaHistorial.vue` — Listado paginado de sesiones (`GET /caja`); props `todas` (alcance todo el tenant), `usuarioId` y `cajonId` (o sus `?query=`). El alcance es fijo por página: `/mi-caja/historial` sin `todas` (propias), `/cajas/historial` con `todas`. Sin toggle. Las dos páginas piden `Cajas:Leer`: el cajero sin él recibe 403 en `GET /caja` (historial de supervisión, 2026-10-08).
 - `components/caja/CajaAperturaGrid.vue` — Apertura en `/mi-caja`: grid de cards de cajones disponibles (poblado por `cajonesDisponibles`); click en un cajón abre un `AppDrawer` con saldo inicial + comentario → `cajaStore.abrir`. Cajón implícito por la card (nombre en el título del drawer)
 - `components/caja/CajaAperturaForm.vue` — Formulario de apertura con selector de cajón (poblado por `cajonesDisponibles`, obligatorio) + saldo inicial + comentario; usado en el POS (`pages/ventas/pos.vue`) para abrir caja sin salir de la venta
 - `components/caja/CajaMovimientoDrawer.vue` — Drawer entrada/salida manual
@@ -2160,9 +2239,9 @@ sin necesidad.
   `en_conciliacion` (prop `resumir` o detección automática vía
   `cajaStore.activa?.estado`), arranca directo en fase conciliacion sin repetir el conteo.
   En modo ciego (`cajaStore.arqueoCiego`) oculta esperado/diferencia en vivo durante el
-  conteo y, al confirmar (cualquiera de las dos fases), redirige al detalle en vez de solo
-  cerrar el drawer (prop `redirectBase`, por defecto `/mi-caja`; `/cajas` para el cierre
-  forzado) — ver [Cierre ciego](#cierre-ciego-modo-anti-fraude) y [Cierre en dos
+  conteo y, al confirmar (cualquiera de las dos fases), revela: en el cierre propio guarda
+  el resultado en el store (`mostrarResultadoCierre`) y vuelve a `/mi-caja`; con
+  `redirectBase` (`/cajas`, el cierre forzado) navega al detalle de supervisión — ver [Cierre ciego](#cierre-ciego-modo-anti-fraude) y [Cierre en dos
   fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c). Prop `forzado` (plan
   `testigo-cierre-forzado`, Task 6): en fase conciliacion, si nadie firmó como testigo
   (`cajaStore.testigos`) y no hay comentario ya persistido en `caja.comentarioCierre`,
@@ -2225,6 +2304,7 @@ Un único store sirve a ambas superficies — no se partió por módulo de permi
 - `cajonesDisponibles: CajonDisponible[]` — opciones del picker de apertura (activos + libres + autorizados)
 - `arqueo: ArqueoLinea[]` — líneas del arqueo (preview en vivo o congeladas), poblado por `cargarArqueo()`; se consume desde `CajaCierreDrawer` y `CajaArqueoTable`. `ArqueoLinea.esperado` es `string | null` (nullable desde el modo ciego); incluye `motivoDiferenciaId`/`motivoNombre`/`comentarioDiferencia` (sub-proyecto C)
 - `arqueoCiego: boolean` — `ciego` del último `cargarArqueo()`; consumida por `CajaCierreDrawer` para la rama ciega y por la config de Cajas para el toggle
+- `resultadoCierre: ResultadoCierre | null` — lo que reveló el cierre propio en modo ciego (`arqueo`, `cajonNombre`, `fechaCierre`), para la tarjeta de `/mi-caja`. Solo en memoria; `mostrarResultadoCierre()` / `descartarResultadoCierre()`; `abrir` lo vacía (un turno nuevo deja atrás el anterior), y el propio store lo vacía cuando cambia la persona o el tenant de la sesión (logout incluido): lo observa con un `watch` en vez de que `clearAuth`/`switchTenant` lo llamen, porque esa importación cambiaba el orden de carga de módulos y rompía el spec de `NotaCreditoModal`
 - `motivos: MotivoDiferencia[]` — catálogo de motivos de diferencia (sub-proyecto C), poblado por `cargarMotivos()`; consumido por `CajaCierreDrawer` (fase 2) y `CajaArqueoTable` (override admin)
 - `testigos: TestigoEstado[]` — solicitudes de firma de una caja (`GET /caja/:id/testigos`, plan `testigo-cierre-forzado`), poblado por `cargarTestigos()`; consumido por `CajaCierreForzadoPanel` (lista de estado) y `CajaCierreDrawer` (gate del comentario en fase 2, `hayFirmaAlguna`)
 - `loadingActiva` / `loadingResumenTurno: boolean`
@@ -2380,7 +2460,8 @@ manualmente, y no acepta movimientos manuales. No tiene cajón: `cajon_id` queda
 
 El módulo `Cajas` con permiso `Leer` permite a supervisores o administradores:
 
-- Consultar todas las cajas del tenant (historial completo vía `GET /caja?todas=true`).
+- Consultar todas las cajas del tenant (historial completo vía `GET /caja?todas=true`). El
+  historial, incluso el propio, es solo de este módulo desde el 2026-10-08.
 - Ver el grid de todos los cajones activos y su estado ocupado/libre (`GET /caja/cajones-estado`).
 - Acceder en read-only al detalle de cualquier caja (`GET /caja/:id` y `GET /caja/:id/movimientos`).
 
@@ -2426,7 +2507,7 @@ npm run test:e2e -- umbral-descuadre.e2e-spec.ts
 ### Manual Testing (Swagger)
 
 1. Abrir http://localhost:3000/api/docs
-2. Autenticar con Bearer token (con permiso `MiCaja/Leer` y `MiCaja/Crear`)
+2. Autenticar con Bearer token (con permiso `MiCaja/Leer` y `MiCaja/Crear`; los pasos 14 y 15 leen una caja ya cerrada y el historial, así que van con un token que tenga además `Cajas/Leer`, o con el admin)
 3. `GET /caja/activa` → debe retornar `null` si no hay caja
 4. `GET /caja/cajones-disponibles` → lista de cajones activos y libres para el usuario
 5. `POST /caja/abrir` con `{ "cajonId": "<uuid del picker>", "saldoInicial": "500" }` → 201
@@ -2438,8 +2519,8 @@ npm run test:e2e -- umbral-descuadre.e2e-spec.ts
 11. Repetir la apertura + un conteo que **no** cuadre → `{ "estado": "en_conciliacion", arqueo }`; la caja queda ocupando el cajón (no aparece en `cajones-disponibles`) y bloquea `POST /:id/movimientos` (403, ya no está `'abierta'`)
 12. `POST /caja/:id/cerrar` sobre la caja `en_conciliacion` sin `lineas` (o sin motivo) → 400; con `{ "lineas": [{ "metodoPagoId": null, "motivoDiferenciaId": "<uuid de GET /motivos-diferencia>" }] }` → 200 con `{ caja, arqueo }`, `estado: 'cerrada'`
 13. `PATCH /caja/:id/arqueo/motivos` (con un token admin) sobre la caja recién cerrada, cambiando el motivo → 200; con un token no-admin → 403 (`TenantAdminGuard`)
-14. `GET /caja/:id/arqueo` con la misma caja ya cerrada → las mismas líneas, ahora con `contado`/`diferencia`/`motivoDiferenciaId` congelados
-15. `GET /caja` → historial con la caja cerrada; `saldoFinal`/`montoContado`/`diferencia` = línea de efectivo
+14. `GET /caja/:id/arqueo` con la misma caja ya cerrada (token con `Cajas/Leer`; sin él, 403) → las mismas líneas, ahora con `contado`/`diferencia`/`motivoDiferenciaId` congelados
+15. `GET /caja` (token con `Cajas/Leer`; el cajero sin él recibe 403) → historial con la caja cerrada; `saldoFinal`/`montoContado`/`diferencia` = línea de efectivo
 16. Con un token que solo tenga `Cajas/Leer` (sin `MiCaja`): `GET /caja/cajones-estado` → 200 (todos los cajones); `POST /caja/abrir` → 403
 
 ### Manual Testing (Frontend)
@@ -2463,7 +2544,7 @@ npm run test:e2e -- umbral-descuadre.e2e-spec.ts
 10. Cerrar el drawer en medio de una conciliación pendiente (sin confirmar) y volver a
     entrar a `/mi-caja/[id]` → clic en "Cerrar caja" retoma directo en "Conciliar
     diferencias" (no repite el conteo)
-11. Reabrir el detalle de la caja recién cerrada → verificar la tabla de desglose por
+11. Como supervisor o admin (`Cajas:Leer`; el cajero recibe 403), reabrir el detalle de la caja recién cerrada → verificar la tabla de desglose por
     método (`CajaArqueoTable`) con `esperado`/`contado`/`diferencia`/motivo congelados
 12. Con un usuario admin: en el detalle de una caja cerrada con descuadre, editar el
     motivo/comentario de una línea (override) → "Guardar" → verificar que persiste al
@@ -2471,7 +2552,8 @@ npm run test:e2e -- umbral-descuadre.e2e-spec.ts
 13. Configuración → Motivos de diferencia: crear/editar/desactivar un motivo; un motivo
     fijo no permite editar el nombre pero sí `activo`/`requiereComentario`; eliminar un
     motivo no fijo
-14. `/mi-caja` (cajero sin caja): grid de cajones disponibles + botón "Ver historial" → `/mi-caja/historial`
+14. `/mi-caja` (cajero sin caja): grid de cajones disponibles, **sin** "Ver historial"; con
+    `Cajas:Leer` (admin) el botón aparece → `/mi-caja/historial`
 15. Admin: sidebar muestra "Mi caja" y "Cajas" como entradas independientes
 16. `/cajas`: grid de todos los cajones activos (ocupados con datos, libres con badge
     "Libre"); sin card de apertura. Click en ocupado → `/cajas/[id]`; click en libre →
@@ -2528,8 +2610,10 @@ npm run test:e2e -- umbral-descuadre.e2e-spec.ts
 - [x] Caja `en_conciliacion` o cerrada siempre revela (`ciego:false`, líneas completas), sin importar la config del tenant
 - [x] `POST /caja/:id/conteo` (fase 1) sigue recomputando y congelando el arqueo completo, ignorando el modo ciego — es donde ocurre la revelación
 - [x] Toggle "Arqueo ciego" en Configuración → Cajas (`Cajas:Actualizar`)
-- [x] `CajaCierreDrawer` en modo ciego oculta esperado/diferencia en vivo durante el conteo y redirige al detalle tras cerrar (cualquiera de las dos fases)
+- [x] `CajaCierreDrawer` en modo ciego oculta esperado/diferencia en vivo durante el conteo y, al cerrar, revela: el cierre propio en una tarjeta de `/mi-caja`, el forzado en el detalle de `/cajas` (hasta el 2026-10-08 redirigía al detalle de la caja propia, que ahora es historial)
 - [x] `CajaCierreDrawer` retoma en fase "conciliacion" si se reabre sobre una caja ya `en_conciliacion`, sin repetir el conteo
+- [x] El historial de cajas es de supervisión: sin `Cajas:Leer`, `GET /caja` es 403 y el detalle de una caja propia cerrada también; la caja activa (`abierta` o `en_conciliacion`) se sigue viendo y operando
+- [x] El cierre propio en modo ciego revela en una tarjeta de `/mi-caja` (no en el detalle de la caja cerrada); logout y cambio de tenant la limpian
 
 ---
 
