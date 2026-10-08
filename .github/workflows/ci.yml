@@ -20,9 +20,11 @@ jobs:
     # Tope propio, no el default de 6 horas de GitHub. El caso que lo justifica:
     # un entorno Nuxt colgado tarda hasta un minuto por archivo en reportarse
     # (`hookTimeout` 60s) y hay 22 `.nuxt.spec.ts`, así que un cuelgue general se
-    # arrastraría muchísimo antes de fallar. En verde el job corre bastante por
-    # debajo de este número; si lo toca, es que algo se colgó.
-    timeout-minutes: 25
+    # arrastraría muchísimo antes de fallar. El número tiene que dejar margen al
+    # job en verde: con 25 lo cortó el 2026-10-08 con todos los tests pasados
+    # (22-22,5 min en los verdes previos, y la suite crece con cada frente). Si un
+    # verde vuelve a acercarse al tope, se sube con la medición al lado.
+    timeout-minutes: 40
 
     services:
       postgres:
