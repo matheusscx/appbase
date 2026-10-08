@@ -74,16 +74,6 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
-- [ ] **`e2e/inventario/stock-minimo.spec.ts` abre contextos de navegador y no los cierra**
-  (frontend, Playwright; visto el 2026-10-06 por el frente de la sesión de Playwright, que no lo
-  tocó por alcance). `abrirComo` hace `browser.newContext()` + `entrarComo` por cada rol y nadie
-  llama a `context.close()`, así que esas páginas siguen vivas —la app montada, con sus pedidos— el
-  resto de la corrida del worker. **Medido en el artefacto de CI del run 37465150509:** al fallar
-  `anular-plato`, Playwright guardó tres capturas, una por página abierta, y dos eran de este spec
-  ("Stock mínimo" y el drawer "Nuevo traslado", como *Aprobador Inventario*), varios specs después.
-  No se midió cuánto pesan en la corrida. Arreglo: cerrar los contextos en un `finally` o
-  `afterEach`, como hacen `compras-por-pantalla.spec.ts` y `inicio/dashboard.spec.ts`.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:

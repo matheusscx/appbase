@@ -23,6 +23,55 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `stock-minimo.spec.ts` cierra los contextos que abre por rol (cerrada 2026-10-08)
+
+Sale de [`pendientes.md`](pendientes.md) § 1. Solo toca el spec: la app no cambió.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **`e2e/inventario/stock-minimo.spec.ts` abre contextos de navegador y no los cierra**
+  (frontend, Playwright; visto el 2026-10-06 por el frente de la sesión de Playwright, que no lo
+  tocó por alcance). `abrirComo` hace `browser.newContext()` + `entrarComo` por cada rol y nadie
+  llama a `context.close()`, así que esas páginas siguen vivas —la app montada, con sus pedidos— el
+  resto de la corrida del worker. **Medido en el artefacto de CI del run 37465150509:** al fallar
+  `anular-plato`, Playwright guardó tres capturas, una por página abierta, y dos eran de este spec
+  ("Stock mínimo" y el drawer "Nuevo traslado", como *Aprobador Inventario*), varios specs después.
+  No se midió cuánto pesan en la corrida. Arreglo: cerrar los contextos en un `finally` o
+  `afterEach`, como hacen `compras-por-pantalla.spec.ts` y `inicio/dashboard.spec.ts`.
+
+### Qué se midió
+
+- **El barrido por los demás specs de `frontend/e2e/`** (`newContext`, `newPage`, `launch`,
+  `dispose`, `close`, y todo spec que pida el fixture `browser`): el único que abre contextos sin
+  cerrarlos es este. `compras-por-pantalla` cierra el suyo en un `finally`; `inicio/dashboard`
+  cierra los tres en un `finally` (`page.context().close()`); `support/sesion.ts` hace `dispose`
+  de su `APIRequestContext`.
+- **El leak, con un test temporal** que corre después del de stock mínimo en el mismo worker y
+  cuenta `browser.contexts()`: con el spec de antes, **2 contextos vivos** (y Playwright sacó dos
+  capturas de esas páginas al fallar el control, el síntoma del CI); con el arreglo, **0**.
+- **El camino de falla no filtra, y por eso no se tocó `dashboard`.** Su helper `entrarComo`
+  abre el contexto antes del `try` del test, así que si el login falla nadie lo cierra. Se probó
+  envolverlo en un `catch` que cierra: con un login que vence el timeout del test, el `catch`
+  corre pero `close()` rebota con *"Test ended"*. Y no hace falta: Playwright descarta el worker
+  entero —navegador incluido— después de un test que falla (conducta documentada de Playwright, no
+  medida acá), así que lo que filtra hacia los specs siguientes es lo que deja un test **que
+  pasa**. Se revirtió.
+
+### Qué se hizo
+
+`abrirComo` anota cada contexto en una lista del archivo y el `afterEach` los cierra todos antes
+de limpiar por API. `afterEach` y no `finally`: el test abre dos (aprobador y contador) y el
+`afterEach` ya existía para la limpieza.
+
+### Qué lo fija
+
+Nada en CI: el control fue temporal y no quedó en el repo. Lo que se corrió: Playwright entero
+con el arreglo, 107/107 (base reseteada, sin reinicios de contenedores; esa corrida llevaba
+además el `catch` de `dashboard`, revertido después, y el spec de stock mínimo se volvió a correr
+solo con su versión final); el control con y sin el arreglo, arriba.
+
+---
+
 ## Los impuestos adicionales de una línea salen de su ítem: `impuestoIds` es un 400 (cerrada 2026-10-06)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Es la parte fiscal de la entrada cuya parte de

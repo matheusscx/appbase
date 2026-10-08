@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { test, expect, type Browser, type Page, type APIRequestContext } from '@playwright/test'
+import { test, expect, type Browser, type BrowserContext, type Page, type APIRequestContext } from '@playwright/test'
 import { API, TENANTS, api, crearProducto, limpiarItems, tokenDe } from '../support/api'
 import { entrarComo } from '../support/ui'
 
@@ -28,11 +28,19 @@ const SELLO = `E2E stock mínimo ${randomUUID().slice(0, 8)}`
 
 let escenario: { token?: string, itemIds: string[], bodegaId?: string } = { itemIds: [] }
 
+/**
+ * Los contextos que abre {@link abrirComo}: `browser` es del worker y no los cierra
+ * al terminar el test, así que sus páginas seguirían montadas (y pidiendo) en los
+ * specs que vengan después.
+ */
+const contextos: BrowserContext[] = []
+
 async function abrirComo(browser: Browser, email: string): Promise<Page> {
   const context = await browser.newContext({
     baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:5173',
     storageState: { cookies: [], origins: [] },
   })
+  contextos.push(context)
   const page = await context.newPage()
   await entrarComo(page, email)
   return page
@@ -60,6 +68,7 @@ test.beforeEach(async ({ request }) => {
 })
 
 test.afterEach(async ({ request }) => {
+  await Promise.all(contextos.splice(0).map(c => c.close()))
   if (!escenario.token) return
   const headers = { Authorization: `Bearer ${escenario.token}` }
   for (const itemId of escenario.itemIds) {
