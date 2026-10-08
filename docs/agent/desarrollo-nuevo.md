@@ -553,6 +553,436 @@ plazo es agregarle una dimensión, no una rama.
 
 ⛔ **Toca el motor de precios: va solo y con el sistema quieto** (`CLAUDE.md`).
 
+### Los cuatro que esperan una sesión del owner (mudados de `pendientes.md` el 2026-10-08)
+
+El owner fijó el corte para pasar a endurecer producción (2026-10-08, AskUserQuestion de la
+orquestadora): se cierran los arreglos de `pendientes.md` y estos cuatro avanzan aparte, cada uno
+cuando haya una sesión del owner para decidirlo. No bloquean el endurecimiento. Se mudan con su
+texto entero: lo medido y lo decidido sigue valiendo.
+
+- [ ] **Serie y lote están a medias, y cada camino decide por su cuenta si rechazar o aceptar y
+  corromper** (backend + BD, auditoría `inventario` 2026-08-15) — dos caras del mismo hueco,
+  agrupadas porque se deciden juntas:
+  1. **La merma de un producto con serie: la mitad barata se cerró, el soporte sigue abierto.**
+     Antes la merma aceptaba el producto y `moverSerie` daba de baja la unidad más vieja, no la
+     que se rompió. Desde el 2026-10-03 (frente "quien vende elige qué unidad con serie sale",
+     [`resueltos.md`](resueltos.md)) `moverSerie` ya no auto-selecciona y `mermas.service.ts`
+     **rechaza con 400** el producto con serie (*"dalo de baja desde Ajuste de stock, eligiendo
+     la unidad"*); la pantalla de Mermas muestra ese aviso y deshabilita Registrar, sin esconder
+     el producto. **Sigue abierto:** que la merma deje **elegir** qué unidad o lote se da de baja
+     (`CreateMermaDto` sigue sin `unidadIds`/`loteId`); el selector de unidades que usan el POS y
+     el salón (`UnidadesSerieModal`) ya existe y es el punto de partida. La merma de un producto
+     **por lote** sigue como estaba (`moverLote` elige por vencimiento).
+     **La nota de crédito tiene el mismo hueco** (2026-10-04, frente "recupera o pierde",
+     [`resueltos.md`](resueltos.md)): con serie o lote, "vuelve al stock" se rechaza (va por
+     Inventario) y "se perdió" se acredita **sin** dejar merma, porque la unidad ya está `vendido`
+     y no hay merma de serie. Cuando llegue el soporte, la nota puede pedir la unidad o el lote
+     que vuelve. Dos consecuencias que quedan escritas (Sesión de esfuerzo máximo, 2026-10-04):
+     **el reporte de mermas cuenta de menos, sin marca**, lo que se perdió con serie o lote; y **un
+     combo con un componente en lote obliga a elegir "se perdió"** aunque lo que es por cantidad
+     haya vuelto sano (lo de cantidad sale como merma).
+  2. ~~**`fecha_vencimiento` se guarda, se expone y no se compara con nada.**~~ Cerrada el
+     2026-10-03 ([`resueltos.md`](resueltos.md), "Sale primero el lote que vence antes"): la
+     salida automática ordena por vencimiento y la venta y el traslado saltan los vencidos.
+  **Lo que hay que decidir antes de tocar nada:** ¿se cierra la puerta (rechazar serie/lote en
+  merma, como ya hacen venta y recuento) o se construye el soporte? La primera mitad es barata y
+  para la sangría; la segunda es una feature. Y aparte: **¿un lote vencido se puede vender y
+  mermar, o se bloquea?** Eso es regla de negocio y no está en `PRODUCTO.md`.
+  ✅ **DECIDIDO (owner, 2026-08-15): se construye el soporte, no se cierra la puerta.** La merma
+  pasa a pedir **qué unidad o qué lote** se da de baja, igual que ya hacen la venta y el
+  recuento con lo suyo. *Entre tanto* (owner, 2026-10-03, AskUserQuestion del frente de la unidad
+  con serie: *"La merma lo rechaza"*, recomendada) la merma rechaza el producto con serie y no
+  descuenta nada: es el puente hasta que llegue el soporte, no lo reemplaza.
+  Por eso esta entrada **se mudó a "proyectos que van solos"**: dejó de ser
+  una corrección y pasó a ser feature con pantalla, DTO y spec propia.
+  **Lo que la spec tiene que resolver, y que no hace falta contestar ahora:**
+  - El **selector** en la pantalla de mermas: qué se muestra para elegir una serie entre muchas
+    (desde el 2026-10-03 existe `UnidadesSerieModal`, con serie, condición, garantía y buscador, que
+    usan el POS y el salón; falta decidir si la merma lo reusa tal cual: ahí la unidad es la
+    **rota**, no la vendible).
+  - **`fecha_vencimiento`**: desde el 2026-10-03 la salida automática ordena por vencimiento,
+    la venta salta los vencidos (elegido a mano, 400) y el traslado sin lote elegido también
+    ([`resueltos.md`](resueltos.md)). Lo que de esta cara sigue abierto es el aviso del inicio y
+    que la merma deje elegir el lote. **¿Un lote vencido se puede
+    vender y mermar, o se bloquea?** ✅ **Mermar, sí** (owner, 2026-09-28, contestando a la
+    orquestadora: "se puede mermar un lote vencido"). ✅ **Vender, no: la venta salta el lote
+    vencido** y saca del siguiente (owner, 2026-09-28, "vamos A", entre *A: bloquear*
+    —recomendada—, *B: avisar y dejar vender* y *C: vender sin decir nada*; escena: 3 yogures
+    vencidos ayer y 20 que vencen en junio). **Costo aceptado:** si nadie merma los vencidos, el
+    stock muestra más de lo vendible; ✅ **va un aviso de lotes vencidos en el inicio**, como el
+    de stock bajo (owner, 2026-09-29, en el selector interactivo de la orquestadora: eligió *A:
+    sí, aviso en el inicio*, recomendada, por sobre *B: no, se ve en inventario*; escena: 3
+    yogures vencidos, el stock muestra 23 y se pueden vender 20).
+  ⚠️ Y queda igual la corrección barata que da la mitad del beneficio si esto se demora: que la
+  merma **rechace** serie/lote en vez de aceptar y descontar la unidad equivocada en silencio.
+
+- [ ] 🔵 **Decimales, redondeo y unidades de cuenta — tema propio, EN CURSO** (backend + BD +
+  producto, abierto por el owner el 2026-08-15) — **el tema activo.** Es la tercera pata de la
+  tanda 🔴 (*"redondeo de plata"*), acá con el alcance completo y medido. **Una de sus dos
+  decisiones reabiertas —el redondeo por país— ya se construyó el 2026-09-03; la otra —la
+  UF— es la que mantiene el tema abierto.**
+
+  > 🛑 **PAUSADO OTRA VEZ POR EL OWNER, PARA UNA SESIÓN PROPIA (2026-09-03).** Contestó las
+  > cinco preguntas de la §9 esa mañana y **reabrió dos de ellas esa misma tarde**, al ofrecerle
+  > la medición que faltaba: *"quedé super confundido, creo que dejemos esto para una sesión
+  > sola"*. **De esas dos, la del país ya está construida** (ver [`resueltos.md`](resueltos.md)); **la UF sigue
+  > sin decidir y es la que pesa.**
+  >
+  > **Al retomar, arrancar por [ADR-024](../adr/024-decimales-redondeo-y-unidades-de-cuenta.md)**,
+  > que en su encabezado dice qué quedó firme, qué se cerró y qué sigue abierto. En una línea:
+  > firmes el criterio único, el congelado en el documento y la columna única; **cerrado y
+  > construido el redondeo por país**; **abierta la UF**, que es lo que más lo frenó y lo único
+  > que queda por decidir acá.
+  >
+  > ⚠️ **El escenario de la UF que el owner describió, textual, porque no está contestado por la
+  > decisión como está escrita:** *"pueden llevar toda su operación en UF, pero esas UF al final
+  > se convierten a pesos para poder pagar"*. Suena compatible con *"la UF solo cotiza"*, y ahí
+  > está la trampa: **nadie midió qué implica**. Qué pasa con los reportes históricos, con la
+  > lista de precios y con la contabilidad si el negocio piensa en UF todo el día y el sistema le
+  > guarda pesos. Eso es lo que hay que traerle resuelto, no una pregunta más.
+  >
+  > 📌 **La medición pendiente NO se corrió, a propósito**: afina una prohibición que cuelga de
+  > las decisiones reabiertas.
+  >
+  > ⚠️ Lo que sigue abierto es la **decisión 3, la UF** —
+  > que es la que más frenó al owner— y con ella el tema entero sigue pausado para una
+  > sesión propia. Lo que el frente dejó de deuda propia está en la § 3 de este archivo,
+  > *"Los tres que dejó el frente del redondeo por país"*, y uno de esos tres (los 6
+  > decimales del Anexo 20 contra columnas `NUMERIC(18,4)`) **es fiscal y lo decide el
+  > owner**.
+  >
+  > 📊 **Los pros y contras ya están hechos**, a pedido del owner el mismo día:
+  > [`investigaciones/2026-09-03-uf-y-nivel-por-pais-analisis.md`](investigaciones/2026-09-03-uf-y-nivel-por-pais-analisis.md).
+  > Su hallazgo principal cambia la pregunta: **cuatro de los cinco huecos del escenario de la UF
+  > no se resuelven haciéndola moneda oficial** —se resuelven con un reporte y con historial de
+  > tasas—, y el monto en UF **ya está persistido por línea**, así que el costo que el ADR daba
+  > por aceptado era falso.
+  >
+  > ✅ Lo que **sí** quedó y no se toca: [ADR-025](../adr/025-decimales-estado-actual.md), el
+  > estado actual medido contra el código. Es lo único del tema que se puede leer sin riesgo, y
+  > vale igual pase lo que pase con las decisiones.
+  >
+  > **Lo primero que apareció al retomar es que la pregunta estaba peor planteada que el
+  > sistema.** El owner describió tres capas —cálculo, presentación y redondeo al final— y las
+  > tres **ya estaban construidas con esos mismos nombres** (`escala_calculo`,
+  > `moneda.decimales`, `nivelRedondeo`). Tres de las cinco preguntas se cerraron sin construir
+  > nada. Corolario para el próximo: **antes de llevarle al owner las preguntas de una
+  > investigación, cruzarlas contra lo que el código ya resuelve** — varias pueden estar
+  > contestadas.
+  >
+  > **Lo que sí queda, y es una MEDICIÓN, no una decisión:** `nivelRedondeo = documento` se
+  > rechaza con 400 si la moneda oficial tiene 0 decimales, y esa prohibición hay que volver a
+  > medirla — lo medido apunta al revés (con descuento de nivel venta, `documento` se queda
+  > plano y `linea` crece con el carrito) y **su premisa es falsa**: lo señaló el owner, un
+  > tenant chileno puede cotizar en **UF** y otro puede llegar a decimales por **conversión
+  > desde dólar**, así que *"moneda sin decimales ⇒ nada tiene decimales"* no se sostiene. Los
+  > tres casos que la medición tiene que cubrir están listados en el ADR.
+  >
+  > 🛑 **Sigue valiendo lo de siempre:** esto es el motor de precios e impuestos. Con el ADR
+  > escrito se puede hacer la medición y redactar la spec; **tocar el motor no**, hasta que la
+  > spec esté aprobada.
+  > Lo de abajo es el material que la investigación usó como punto de partida; lo que la
+  > investigación **corrigió o agregó** está más abajo, en el bloque ✅ de resultados.
+
+  **El criterio del owner:** *"los redondeos son para montos; hay cosas que no se deben redondear
+  con la configuración"*, y **tiene que ser un solo criterio para todo el sistema**, contemplando
+  que es multi-país y multi-moneda.
+
+  **Los TRES momentos donde un número se recorta, medidos:**
+
+  | Momento | Quién lo gobierna hoy | Estado |
+  |---|---|---|
+  | Cálculo intermedio | `tenants.escala_calculo` (smallint, hoy **6**) | ✅ Definido: el esquema lo llama *"decimales para cálculos intermedios"* — el borrador con el que el motor arrastra reglas sin acumular error |
+  | Lo que se persiste | `ESCALA_PERSISTIDA = 4` + `tenants.modo_redondeo` | ⚠️ Aplicado **solo** en `convertirAMonedaOficial`. `subtotal` y `total_linea` salen del motor con 6 decimales y entran a `NUMERIC(18,4)`: **lo recorta Postgres**, con su regla, fuera de la config del tenant |
+  | **Lo cobrable** | **nadie** | ❌ `moneda.decimales` existe y solo lo usa propinas. Webpay y Oneclick **rechazan** (*"CLP no admite decimales en el monto"*) en vez de que el sistema redondee |
+
+  ✅ **Lo que ya está bien y no hay que tocar:** `redondear()` se usa **exactamente 3 veces** en el
+  motor (`calculo-precios.engine.ts:453, 520, 581`) y las tres son **montos** —el monto de una
+  regla, el subtotal neto, el monto de un impuesto—. No toca porcentajes, ni tasas, ni cantidades.
+  El criterio del owner **ya se respeta ahí**; lo que falta es el tercer momento.
+
+  ✅ **Y el argumento que hay que conservar** (docblock de `convertirAMonedaOficial`): redondear a
+  `escalaCalculo` en vez de a la escala persistida **no evita el recorte, lo mueve al `INSERT`**,
+  donde lo hace Postgres sin que ningún test lo vea. Vale para `subtotal`/`total_linea` igual que
+  para `precio × tasa`, y ahí no se aplicó.
+
+  **Lo que el catálogo tiene hoy** (medido contra la base): tres monedas, **`CLP` 0 decimales,
+  `USD` 2, `UF` 4**, las tres mapeadas a Chile. Un solo país sembrado.
+
+  ⚠️ **La UF abre un problema de modelo, no de redondeo.** Está en la misma tabla que CLP y USD,
+  **sin nada que la distinga** — pero no son la misma clase de cosa: en UF se **cotiza**, en pesos
+  se **cobra**, y nadie paga en UF. Hoy nada impide ponerla como moneda oficial de un tenant, y
+  ahí los totales se persistirían en una unidad en la que la pasarela no puede cobrar.
+
+  ⚠️ **Y `tenant_moneda` no puede representar "la tasa de hoy".** La tabla es PK
+  `(tenant_id, moneda_id)` + `valor_del_dia numeric(18,6)`, **sin ninguna columna de fecha**
+  (verificado con `\d`): una sola tasa por moneda, que se pisa. La UF cambia **todos los días** y
+  la publica el Banco Central, así que un tenant que cotice en UF tendría que actualizarla a mano
+  cada mañana sin nada que le avise que quedó vieja.
+  ✅ **Lo que sí está a salvo:** la venta **congela `tasa_cambio` por línea**, así que una venta
+  vieja sabe con qué tasa se hizo. Lo que no se puede contestar es *"cuánto valía la UF el 1 de
+  agosto"* para algo que no sea una venta ya registrada — un reporte, una nota de crédito, la
+  renovación de una suscripción.
+
+  ⛔ **NO es una investigación del mercado de restaurantes — es financiera en general**
+  (corrección del owner, 2026-08-15). Cómo lo hace un POS es **un insumo más, no la fuente**.
+  Representar plata, redondearla y manejar unidades indexadas son problemas **ya resueltos y
+  estandarizados** fuera de este dominio, y ahí hay que ir primero:
+  - **ISO 4217** define, junto con el código de cada moneda, su **minor unit** — cuántos decimales
+    tiene. Es la respuesta autoritativa a "¿cuántos decimales tiene esta moneda?", y hoy el
+    proyecto la tiene copiada a mano en `moneda.decimales` para tres monedas.
+  - **Las redes de pago** (ISO 8583 y las APIs de tarjetas) expresan los montos **en unidades
+    mínimas** —centavos, no pesos— y eso no es negociable: es la restricción dura del momento
+    "cobrable". Explica por qué Webpay rechaza un CLP con decimales en vez de redondearlo.
+  - **El patrón `Money`** de la literatura de diseño: monto + moneda como un tipo, el monto en
+    unidades mínimas, y el **problema de la asignación** (repartir un total en N partes sin que
+    la suma se despegue). ℹ️ El proyecto **ya resolvió ese último** con mayores restos para el
+    reparto de propinas — o sea que una pieza del enfoque financiero ya está adentro, sin nombre.
+  - **Las autoridades tributarias** de cada país tienen reglas sobre en qué momento se redondea
+    una factura y con qué criterio. Eso es norma, no preferencia, y varía por país — que es
+    exactamente lo que un sistema multi-país tiene que poder expresar.
+  - **Los ERP** (SAP, Oracle, Odoo) modelan moneda de cuenta vs moneda de transacción vs moneda
+    de presentación hace décadas. La UF entra ahí, no en "una moneda rara de Chile".
+
+  ✅ **INVESTIGACIÓN CORRIDA Y CERRADA (2026-08-15) →
+  [`docs/agent/investigaciones/2026-08-15-decimales-y-redondeo.md`](investigaciones/2026-08-15-decimales-y-redondeo.md).**
+  Seis lentes ciegas entre sí (ISO 4217 · redes de pago · patrón Money · autoridades
+  tributarias · unidades indexadas · ERP), cada hallazgo etiquetado NORMA / PRÁCTICA /
+  INFERENCIA. **Leer ese documento antes de escribir una línea de spec.** Lo que cambió
+  respecto de lo que esta entrada asumía:
+  - ⭐ **No hay "cuántos decimales tiene una moneda": hay CUATRO respuestas y no coinciden**
+    (minor unit ISO / CLDR para mostrar / la del gateway para cobrar / la de la tasa
+    publicada). Convergencia de tres lentes ciegas. `moneda.decimales` es una sola columna.
+  - ⭐ **El SII SÍ permite emitir un DTE en UF**, con el total en pesos enteros y el bloque
+    `<OtraMoneda>`. El documento fiscal lleva **dos montos**. La pregunta ya no es si se
+    prohíbe la UF: es cómo se representan denominación y liquidación por separado.
+  - ⭐ **La UF tiene código ISO 4217: `CLF` (990)** — y el seed ya lo sabe a medias
+    (`codigoNumero: '990'` correcto, `codigoIso: 'UF'` no es ISO). Tiene hermanas (COU, UYI,
+    MXV) con **minor units distintos entre sí**: no vale "unidad indexada ⇒ 4 decimales".
+  - ⭐ **No existe respuesta universal a "¿por línea o por total?"** — el TJUE lo declaró
+    discreción nacional (C‑484/06), y UK (por línea) y México (solo al total) son opuestos.
+    Tiene que ser configurable por país.
+  - **La UTM no va en la misma tabla**: mensual, para multas y tramos, sin código ISO.
+  - **El redondeo de efectivo nunca toca el impuesto** — norma en Chile, Canadá y Argentina.
+  - ✅ Ya tienen respaldo normativo y no se tocan: moneda oficial derivada del país (IAS 21),
+    congelar la tasa por línea (política de SAP y Odoo), `modo_redondeo` configurable
+    (las normas que fijan modo exigen half-up, no half-even), y `Decimal.js` sobre `NUMERIC`
+    (el argumento del entero es contra el binario, no contra el decimal exacto).
+  - ⭐ **Propinas ya tiene el enfoque completo, sin nombre**: unidades mínimas enteras
+    (`mayores-restos.ts:41`), reparto por mayores restos (= método Hamilton), y
+    **`decimales_moneda` congelado en el documento** (`liquidacion-propinas.entity.ts:57`).
+    La decisión pendiente es si se generaliza a ventas y pagos.
+  - **Medido en el código:** la escala 4 está escrita a mano en **97 sitios de 17 archivos**;
+    `ESCALA_PERSISTIDA` tiene **3 usos**, los tres en un solo archivo; y `moneda.decimales`
+    **no tiene ningún consumidor fuera de propinas**.
+  ⚠️ **Las cinco preguntas de la §9 se contestaron el 2026-09-03 y DOS se reabrieron ese mismo
+  día** → [ADR-024](../adr/024-decimales-redondeo-y-unidades-de-cuenta.md).
+  En una línea cada una: un solo **criterio** con el número puesto por la moneda; el **nivel de
+  redondeo lo fija el país** y el tenant no lo toca; la **UF solo cotiza**, nunca es moneda
+  oficial; se **congelan los decimales en el documento** pero el reparto por mayores restos no
+  se generaliza; y **una sola columna de decimales por moneda** (YAGNI explícito del owner:
+  *"estamos muy lejos de tener casos como el afgani"*), con su costo anotado.
+
+  <details><summary>Lo que se le pidió a la investigación (histórico)</summary>
+
+  Lo que tenía que traer: (a) **redondeo** — en qué momento exacto los POS maduros llevan un monto
+  a la unidad de la moneda, si redondean por línea o solo el total, y qué hacen los países sin
+  decimales (hay reglas fiscales, no es solo criterio); (b) **unidades de cuenta** — cómo modelan
+  una unidad indexada (UF chilena, UVR colombiana, UI uruguaya) separada de la moneda de cobro, y
+  en qué momento se congela la tasa: al cotizar, al emitir o al cobrar; (c) **tasas con fecha** —
+  si guardan historial con vigencia y de dónde las toman.
+  ⚠️ Regla del cruce: insumo para adaptar, **no verdad a copiar**. Con un matiz que este tema
+  tiene y otros no: **una norma tributaria o una restricción de una red de pago no se "adapta"** —
+  se cumple o se incumple. Lo adaptable es el diseño alrededor, no el número de decimales que
+  ISO 4217 le asigna al peso.
+  ✅ **Alcance acordado (owner, 2026-08-15): se abre a varios países.** El objetivo que fijó el
+  owner es que **funcione con todas las monedas y con las conversiones tipo UF y USD**, no que
+  resuelva el caso chileno. Entonces la investigación tiene que cubrir, como mínimo:
+  - **Monedas sin decimales** (CLP, PYG, JPY) — donde el total tiene que ser entero sí o sí.
+  - **Monedas con 2** (USD, MXN, y la mayoría).
+  - **Monedas con 3** (KWD, BHD, TND). Van a propósito: son las que rompen cualquier diseño que
+    asuma "0 o 2" y hoy el sistema no tiene ninguna.
+  - **Unidades de cuenta indexadas**: UF chilena, UVR colombiana, UI uruguaya.
+  - **Operación multi-moneda de verdad**: cotizar en una moneda y cobrar en otra, que es el caso
+    que la UF y el USD tienen en común y el que el sistema ya intenta con `convertirAMonedaOficial`.
+
+  </details>
+
+  ⚠️ **Consecuencia de diseño que ya se puede anticipar, y que la investigación agravó:** con
+  0, 2, 3 y 4 decimales en juego, la cantidad de decimales **no puede quedar hardcodeada en
+  ningún lado** —ni en un `toFixed(4)`, ni en `ESCALA_PERSISTIDA`— sin decidir antes qué pasa
+  cuando la moneda tiene más decimales que la columna. `NUMERIC(18,4)` alcanza para UF (4) y
+  sobra para CLP (0), pero es una restricción que hoy nadie eligió a conciencia: quedó. Y ahora
+  se sabe que son **97 sitios en 17 archivos** los que repiten el 4 a mano, no un par.
+
+- [ ] 🔵 **Manejo de fechas y zonas horarias — tema propio, EN COLA detrás de decimales**
+  (backend, medido el 2026-08-15) — **el owner lo puso explícitamente después de decimales.**
+  No es un bug suelto: es que **no existe un solo lugar que conteste "qué significa *desde el 1 de
+  agosto* para esta empresa"**.
+
+  **Lo medido:**
+  - **La zona horaria no está en el tenant.** Vive en `provincia.zona_horaria`, con
+    `pais.zona_horaria_principal` de respaldo — se **deriva** igual que la moneda oficial y el IVA.
+  - **El almacenamiento está resuelto:** [ADR-019](../adr/019-timestamptz-en-toda-columna-de-fecha.md)
+    dejó toda columna de fecha en `timestamptz`.
+  - **La entrada no.** **11 DTOs** usan `@IsDateString()`, que acepta tanto `2026-08-01` como un
+    timestamp completo. Y **solo 3 archivos** en todo el backend usan la zona del tenant
+    (`sesiones-garzon.service.ts`, `propina-reportes.service.ts`, el seeder).
+  - Los filtros que no normalizan heredan la zona de la sesión de Postgres — hoy UTC, **porque
+    nadie la fija**: ni el compose ni la config del pool.
+
+  🔗 **La decisión ya tomada dispara la reapertura de una entrada archivada.** El owner decidió el
+  2026-08-15 que *"desde el 1 de agosto"* es la **medianoche del local** para los tres filtros de
+  mermas, inventario y cobros (ver esa entrada en "Ya decidido"). Pero la entrada del JOIN del país
+  —hoy en Vigilancia— dice textual: *"si aparece una tercera copia del helper de zona, ahí sí
+  conviene la vista"*. **Hoy hay dos copias; aplicar la decisión crea tres más.** O sea que ese
+  trabajo no son "tres servicios copiando un molde": es el momento de decidir dónde vive el helper.
+
+### Un descuento o recargo de monto fijo declara su propia moneda (owner, 2026-09-09)
+
+- [ ] **Darle `moneda_id` a `descuentos` y `recargos`, y convertir ese importe antes de
+  aplicarlo** —como ya se hace con el precio— para que un recargo legítimo en UF o en dólares sea
+  expresable (backend + BD + frontend, decidido por el owner el 2026-09-09).
+  **Cuándo:** cuando un cliente lo pida, sin fecha (decidido por la Sesión de esfuerzo máximo el
+  2026-10-06; el owner marcó "sin preferencia" el 2026-10-04 y se aplicó la recomendada).
+
+**El caso que lo motiva, con las tasas sembradas (1 UF = 38.000):** un arriendo de salón con un
+recargo de `+0,2 UF` de gastos, sobre ítems de precios distintos. **No se puede escribir como
+porcentaje** —es plano, no proporcional al precio— y hoy tampoco como monto fijo: tipear `0,2`
+**se guarda mal en silencio**. Lo único expresable hoy es `+7600`, o sea la conversión hecha a
+mano y congelada a la tasa del día en que alguien la tipeó.
+
+⛔ **Cómo falla hoy ese `0,2`, porque NO es un rechazo.** Por API directa sí hay 400 —el importe
+se valida contra los decimales de la oficial, y CLP tiene **cero**—, pero **por la pantalla nunca
+llega a salir**: el campo es un `<MoneyInput oficial>` y con `fraction: 0` maska no deja abrir
+parte decimal, así que lo tecleado queda en `2` —dos pesos— y se guarda con **201**. ✅ **Medido
+el 2026-09-09**, no deducido del docblock: montando el componente con `monedaId: 'clp-1'` y
+tecleando `0,2` —y también `0.2`—, el modelo queda en `"2"` en los dos casos, y **cada uno quedó fijado con su propio test** en
+`MoneyInput.spec.ts`, en el describe de las limitaciones conocidas.
+➕ **Pegarlo es una tercera conducta, y la buena**: `currency-format.ts` lo marca `rechazado`, el
+componente hace `preventDefault` y el campo queda como estaba — sin request y sin plata mal
+guardada. ⚠️ Vale **solo para el pegado que reemplaza el campo entero**: uno parcial ni se juzga
+y cae al camino de tecleo (`MoneyInput.vue:224`, `reemplazaTodo`). Misma
+familia que el ×10 del separador, que el propio `MoneyInput.vue:157-175` tiene anotado, con el
+mismo aviso: *un entero es válido en cualquier escala, así que ningún validador **de escala** lo puede ver*.
+📌 Con eso la motivación de esta entrada es más fuerte que *"no se puede escribir"*: hoy se
+escribe otra cosa y nadie se entera.
+
+**Los escalones, contestado en la misma ronda:** el **mínimo** de un tramo sigue midiendo en
+**moneda oficial** y el **importe** va en la moneda de la regla.
+
+⚠️ **Contra qué mide el mínimo lo decide el NIVEL de la regla, y los dos niveles miden NETO** —
+`neto: subtotalNeto` en `calculo-precios.engine.ts:1166` (línea) y `:1849` / `:1864` (venta)—. Lo que
+cambia entre ellos es el **alcance**: una regla de línea mide su propia línea (`neto unitario ×
+cantidad`, `:1100`) y una de venta la **suma de los netos** de todas (`:1798`), que **no** es el
+total cobrado. Así que *"+0,5 UF cuando supere $50.000"* mide 50.000 **de neto**: con IVA 19%,
+eso es 59.500 de total. Un recargo por tramos mide el neto **sin descontar** —el acumulado viaja
+aparte, y solo como base de los porcentajes (`:812-819`)—. Y el recargo plano en UF que motiva
+esta entrada es de **línea**, porque va asociado a ítems: lo hacen cumplir dos puertas
+(`items.service.ts` al asociar, `calculo-precios.service.ts` al resolver) y **no** un constraint
+de la base, según advierte el docblock de la segunda.
+
+⚠️ Lo que **no** queda expresable es la mitad simétrica —*"cuando supere 2 UF"*—: un mínimo
+medido en otra moneda. Si algún día hace falta, es otra decisión, no un olvido de ésta.
+
+⚠️ **Antes de tocarlo, lo que el sistema hace HOY, medido el 2026-09-09** — porque una revisión
+independiente ya lo leyó al revés una vez y la entrada que salió de eso decía lo contrario: el
+motor convierte el precio de la línea a moneda oficial **antes** de aplicar las reglas
+(`calculo-precios.service.ts:882`, o `:416` si la línea es una receta o un combo personalizado),
+así que un `-1000` sobre una langosta en dólares saca **mil pesos**, no mil dólares. El monto
+fijo hoy **ya está denominado**, en la oficial y de punta a punta: lo que la decisión cambia no
+es un descuido, es cuál de dos diseños coherentes queremos.
+
+📌 **Al cerrar el frente hay que borrar la afirmación en futuro de TODO lugar que la repita**, no
+solo de acá — el criterio es *"dice que el monto pasará a tener moneda propia"*, y se vuelven a
+encontrar con:
+
+```bash
+grep -rn "moneda propia\|moneda de la regla" docs frontend/app backend/src
+```
+
+Al escribir esto eran, además de esta entrada: `docs/patterns/frontend.md` (fila del monto fijo
+en § 8), `docs/agent/resueltos.md` (el cierre del vaciado por cambio de moneda) y el docblock de
+`monedaPendiente` en `frontend/app/pages/configuracion/items.vue` —el que enumera qué se vacía y
+qué frena el gesto—. ⚠️ **No está en `elegirMoneda`**, que es donde el reflejo lo busca porque es
+la función del gesto y el template la nombra: ahí no hay docblock, solo comentarios sueltos. Va el comando y no el número
+porque el número envejece solo, y porque cerrar en un consumidor no es cerrar.
+
+📌 **Este párrafo vence cuando el frente se construya, y se borra en el mismo commit** — salvo la
+refutación del `-1000`, que es lo único que sigue sirviendo después: es lo que evita que la
+próxima revisión vuelva a levantar el mismo falso positivo. El inventario de lo que hay que tocar
+vive en la tabla de abajo y **no se duplica acá**.
+
+**Lo que cuesta, contado antes de empezar:**
+
+| | |
+|---|---|
+| Esquema | `moneda_id` en `descuentos` y `recargos`. Sin datos productivos: entities + seeder + reset |
+| Escala | ⚠️ **Más grande que "tocar el decorador".** `EscalaMonedaPipe` resuelve **una** moneda por request —la oficial, desde el contexto— y la aplica a todo campo `@EsMontoCobrado`. Con el diseño nuevo, en el **mismo body** conviven `minimoMonto` (oficial) y `valorMonto` + cada `tramos[].valorMonto` (moneda de la regla): el pipe no sabe expresar escala **por campo**, ni tomarla del body en vez del contexto. Y es un borde compartido con muchos otros DTOs |
+| Motor — y **dónde** cuantiza | ⚠️ **La decisión de diseño del frente, y esta entrada no la toma.** Convertir **dentro** del motor le agrega una dependencia de tasas y lo deja de ser puro (`calculo-precios.engine.ts:1-14`: sin BD, sin Nest, único import `decimal.js`). Convertir **en el service** —donde vive hoy toda conversión, `calculo-precios.service.ts:1034`, alcanzada desde cinco sitios— le suma **un** redondeo nuevo: el `toDecimalPlaces(4)` de la conversión, con el `modo_redondeo` del tenant. ⚠️ Los otros dos de la cadena (`escalaCalculo` y el `q()` del minor unit) ya corren hoy sobre cualquier `monto_fijo` y correrían igual por el otro camino: el delta entre las dos opciones es **uno**, no tres. Pesa igual, porque `aplicarValor` aplica el `monto_fijo` **plano** (`engine.ts:493`) y entonces el número convertido **es** lo que el documento declara: es un sitio de cuantización de plata **nuevo**, encima de la invariante que se cerró el 2026-08-21 |
+| Pantallas | Selector de moneda en `descuentos.vue` y `recargos.vue`. ⚠️ Y la grilla **ya muestra el importe crudo, sin símbolo** (`descuentos.vue:876`, `recargos.vue:878`): con moneda propia ese `0,2` suelto pasa a ser ambiguo |
+| Congelado | Al **pedir** una línea, la cuenta congela sus reglas ya resueltas (`salones.service.ts:725`, dentro de `agregarLinea`) y `ReglaCongelada` es `ReglaResuelta` (`common/dto/reglas-congeladas.dto.ts:38`), cuyo `valorMonto` (`calculo-precios.engine.ts:31`) no lleva **moneda ni tasa**: un importe congelado en UF se convertiría recién al cobrar, con la tasa de ese momento. La línea ya congela su `tasaCambio` (`:717`), pero **no es el mismo gesto**: la línea tiene una sola moneda y las reglas son un array donde cada una —y cada tramo— podría traer la suya. ⚠️ Y `hashReglasCongeladas` decide si un pedido nuevo **se fusiona** con una línea existente (`salones.service.ts:793`): meter la tasa adentro de la regla cambia ese hash, así que el mismo ítem pedido antes y después de un cambio de tasa dejaría de fusionarse y saldrían dos líneas |
+
+📌 **Va solo y con el sistema quieto** — y el motivo es de **conducta**, no de qué archivo se
+toca: el frente **cambia lo que un `monto_fijo` cobra** y **abre un sitio de cuantización de
+plata nuevo**. Es el porqué que da `CLAUDE.md` para el motor y para lo fiscal: *el error no se ve
+al escribirlo, se ve en un documento ya emitido*. ⚠️ La justificación *"toca el motor de
+cálculo"* NO se sostiene sola: si la conversión se resuelve en el service, `calculo-precios.engine.ts`
+puede no cambiar ni una línea.
+
+### La moneda de un ítem y la de sus partes: "se puede, pero sin mezclar" (owner, 2026-09-09)
+
+- [ ] **Enforcear "sin mezclar" en las cuatro superficies donde la moneda de un ítem se cruza
+  con la de otro** (backend + frontend, decidido por el owner el 2026-09-09) — la tabla de
+  decisiones, lo medido y las trampas son todo lo que sigue en esta sección.
+
+**Cuatro respuestas de una ronda**, sobre las tres entradas que la § 4 tenía abiertas del frente
+del vaciado por cambio de moneda. Van en **una sola entrada** porque las respuestas resultaron
+ser **una misma regla** aplicada a cuatro superficies: construirlas por separado deja el sistema
+incoherente a mitad de camino.
+
+⚠️ **Lo primero, porque cambia el planteo de todo lo demás:** el catálogo multi-moneda
+**funciona hoy de punta a punta**. Un tenant chileno tiene CLP, UF y USD habilitadas
+(`seeder.service.ts:533`, `seedTenantMonedas`) y una venta de un ítem en dólares se convierte a
+pesos con la tasa del día, **congelando esa tasa en la línea** (`ventas.service.ts:515`). No es
+una capacidad a medio hacer que se pueda apagar sin costo — por eso la salida elegida no fue
+"todo el catálogo en la moneda oficial".
+
+**La decisión: se pueden tener precios en otra moneda que la oficial, y el sistema rechaza
+mezclar.** Las cuatro caras, con lo que hay que construir en cada una:
+
+| Caso | Decisión del owner | Dónde se enforcea |
+|---|---|---|
+| Receta o combo con partes en otra moneda que la suya | **Rechazar al guardar** | `items.service.ts`, alta y `PATCH` |
+| Cambiarle la moneda a un ítem que ya es ingrediente o componente | **Rechazar mientras esté en uso**, y el mensaje dice en cuántas recetas está | ídem |
+| `PATCH /items/:id { monedaId }` sin los precios nuevos | **400**: cambiar de moneda exige mandar precio base y los precios de extras y opciones ya en la moneda nueva | `update-item.dto.ts` + service |
+| Un grupo de modificadores del catálogo pegado a ítems de monedas distintas | **Se deja pegar, pero exige precio propio del ítem** para cada opción: no hereda el `precio_extra` del catálogo | asociación de grupos |
+
+📌 **Con esa regla, las sumas de costo pasan a ser correctas por invariante, no por
+aritmética.** Hoy `items.vue:817` (receta) y `:849` (combo) suman `costoActual × cantidad` sin
+mirar la moneda, y el backend hace lo mismo y además **lo persiste** (`items.service.ts:5661`
+receta, `:5740` combo). "Sin mezclar" las vuelve válidas **porque todas las partes comparten
+moneda** — así que el comentario que las acompañe tiene que decir eso, o el próximo que las lea
+va a "arreglar" la conversión que falta.
+
+⚠️ **Que el costo no se convierta nunca no es un olvido de esas cuatro sumas:** no hay un solo
+`× tasa` en todo el camino del costo (medido el 2026-09-09). El único del backend es
+`calculo-precios.service.ts:1034` (`convertirAMonedaOficial`) y es **del precio**. La regla del
+owner es justamente lo que evita meter una tasa del día adentro de un costo, que lo volvería
+variable — y el costo se usa para márgenes.
+
+⚠️ **Lo que la cuarta cara arrastra y NO está construido:** el override por ítem existe en la
+tabla (`item_grupo_modificador_opciones.precio_extra`) pero **la pantalla donde tipearlo no**.
+Exigir precio propio sin dónde escribirlo bloquea la asociación entera. Lo que sí existe desde el
+2026-09-11 es poder **leerlo**: `GET /items/:id` y `GET /grupos-modificadores/:id/items` mandan
+`precioExtraDefault` al lado del efectivo ([`resueltos.md`](resueltos.md)), y desde el
+2026-09-13 `GET /items/:id` manda además lo propio de la receta (`precioExtraPropio`, `null` si
+hereda), que es lo que carga el formulario de ítems.
+
+📌 **Va en su propio frente.** Toca DTO y service de items, dos pantallas y una regla de qué es
+un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya está construido
+(2026-09-09) y es el que la API tiene que espejar, no contradecir.
+
 ---
 
 ## 3. Refactors — cambian nombres o lugares, no agregan funciones

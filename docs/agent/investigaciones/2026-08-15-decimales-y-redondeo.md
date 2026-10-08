@@ -2,7 +2,7 @@
 
 **Fecha:** 2026-08-15
 **Estado:** 🔎 Investigación cerrada — **insumo, no diseño**. No se tocó código.
-**Entrada del backlog:** `docs/agent/pendientes.md` → §6 "Proyectos que van solos" →
+**Entrada del backlog:** `docs/agent/desarrollo-nuevo.md` → §2 "Proyectos con spec propia" (antes en `pendientes.md` §6, mudada el 2026-10-08) →
 *"🔵 Decimales, redondeo y unidades de cuenta"*.
 **Tema en cola detrás de este:** fechas y zonas horarias (decisión del owner).
 

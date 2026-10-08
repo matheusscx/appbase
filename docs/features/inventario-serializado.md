@@ -279,7 +279,7 @@ el 400 de la API es el que manda.
 
 #### Lo que sigue abierto
 
-- Que la merma pregunte qué unidad o lote es: frente propio ([`pendientes.md`](../agent/pendientes.md) § 6, "Serie y lote están a medias").
+- Que la merma pregunte qué unidad o lote es: frente propio ([`desarrollo-nuevo.md`](../agent/desarrollo-nuevo.md) § 2, "Serie y lote están a medias").
 - Devolver una unidad al stock al cancelar una venta o emitir una nota de crédito sigue siendo a
   mano desde Inventario.
 - Precio distinto según la condición, y la serie en la boleta impresa (fiscal): fuera.
