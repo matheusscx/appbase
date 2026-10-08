@@ -18,6 +18,7 @@ import {
 import { ModoRegla, NivelRegla } from '../../../common/enums/reglas.enums';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 import { EsFechaPura } from '../../../common/decorators/fecha-pura.decorator';
+import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
 export class TramoDto {
   // El mínimo va en UNA de las dos, y cuál corresponde lo decide el TIPO de la
@@ -86,6 +87,9 @@ export class CreateDescuentoDto {
   // Catálogo global de medios de pago (hoy 4); `@ArrayUnique` ya no deja
   // repetir.
   @ArrayMaxSize(20)
+  // En minúsculas antes del `@ArrayUnique`: `[x, X]` pasaba como dos ids y la
+  // puente recibía la misma fila dos veces (500, medido el 2026-10-08).
+  @IdEnMinusculas()
   @ArrayUnique()
   @IsUUID('4', { each: true })
   metodoPagoIds?: string[];

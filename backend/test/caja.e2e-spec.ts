@@ -1047,6 +1047,304 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         );
       }
     });
+
+    describe('metodoPagoId de las líneas: en mayúsculas es el mismo medio, y cada medio va en una sola línea', () => {
+      // `@IsUUID` acepta un id en mayúsculas y la base devuelve el del arqueo en
+      // minúsculas; `CajaService` cruza cada línea con el arqueo por un
+      // `Map`/`Set` (`claveDe`), así que sin pasarlo a minúsculas la línea de la
+      // tarjeta no se encontraba: 400 *"Método de pago no pertenece al arqueo"*
+      // en el conteo y *"Falta el motivo de la diferencia"* al justificar.
+      const FALTA_EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440291';
+      const DIVERGENCIA_TARJETA_ID = '550e8400-e29b-41d4-a716-446655440293';
+      const TARJETA_EN_MAYUSCULAS = TARJETA_DEBITO_ID.toUpperCase();
+
+      // Abre la caja del admin con fondo 0 y vende $5.000 con tarjeta: el arqueo
+      // queda con la línea de efectivo (esperado 0) y la de tarjeta (5.000).
+      const abrirConVentaConTarjeta = async (): Promise<string> => {
+        const abrir = await request(app.getHttpServer())
+          .post('/api/caja/abrir')
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({ cajonId: cajonArqueoId, saldoInicial: '0' });
+        expect(abrir.status).toBe(201);
+        const cajaId = (abrir.body as CajaResponse).id;
+        const venta = await request(app.getHttpServer())
+          .post('/api/ventas')
+          .set('Idempotency-Key', randomUUID())
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({
+            tipoDocumentoId: BOLETA_ID,
+            lineas: [{ itemId, cantidad: '1' }],
+            pagos: [{ metodoPagoId: TARJETA_DEBITO_ID, monto: '5000.0000' }],
+          });
+        expect(venta.status).toBe(201);
+        return cajaId;
+      };
+
+      const lineaTarjeta = async (cajaId: string): Promise<ArqueoLinea> => {
+        const res = await request(app.getHttpServer())
+          .get(`/api/caja/${cajaId}/arqueo`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`);
+        expect(res.status).toBe(200);
+        const linea = (res.body as { lineas: ArqueoLinea[] }).lineas.find(
+          (l) => l.metodoPagoId === TARJETA_DEBITO_ID,
+        );
+        expect(linea).toBeDefined();
+        return linea!;
+      };
+
+      // La tarjeta se cuenta en 4.500 contra 5.000 esperados: queda
+      // `en_conciliacion` con -500 en la línea de tarjeta.
+      const contarConFaltanteEnTarjeta = async (
+        cajaId: string,
+        metodoPagoId: string,
+      ) =>
+        request(app.getHttpServer())
+          .post(`/api/caja/${cajaId}/conteo`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({
+            lineas: [
+              { metodoPagoId: null, montoContado: '0' },
+              { metodoPagoId, montoContado: '4500.0000' },
+            ],
+          });
+
+      afterEach(async () => {
+        // Un rojo a mitad de un `it` deja la caja del admin abierta o en
+        // conciliación, y el `it` siguiente no puede abrir otra.
+        await liberarCajeroSiQuedoOcupado(
+          app,
+          tokenSupervisor,
+          tokenSupervisor,
+        );
+      });
+
+      it('POST /caja/:id/conteo: congela lo contado en la línea de tarjeta', async () => {
+        const cajaId = await abrirConVentaConTarjeta();
+
+        const conteo = await contarConFaltanteEnTarjeta(
+          cajaId,
+          TARJETA_EN_MAYUSCULAS,
+        );
+        expect(conteo.body).toMatchObject({ estado: 'en_conciliacion' });
+        expect(conteo.status).toBe(201);
+
+        const tarjeta = await lineaTarjeta(cajaId);
+        expect(tarjeta.contado).toBe('4500.0000');
+        expect(tarjeta.diferencia).toBe('-500.0000');
+      });
+
+      // Fase 2 desde `en_conciliacion` con el motivo puesto en la línea de
+      // tarjeta: la caja queda `cerrada` con ese motivo.
+      const cerrarConMotivo = async (
+        cajaId: string,
+        metodoPagoId: string,
+        motivoDiferenciaId: string,
+      ) =>
+        request(app.getHttpServer())
+          .post(`/api/caja/${cajaId}/cerrar`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({ lineas: [{ metodoPagoId, motivoDiferenciaId }] });
+
+      const estadoDe = async (cajaId: string): Promise<string> => {
+        const res = await request(app.getHttpServer())
+          .get(`/api/caja/${cajaId}`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`);
+        expect(res.status).toBe(200);
+        return (res.body as { estado: string }).estado;
+      };
+
+      it('POST /caja/:id/cerrar: el motivo queda en la línea de tarjeta y la caja se cierra', async () => {
+        const cajaId = await abrirConVentaConTarjeta();
+        const conteo = await contarConFaltanteEnTarjeta(
+          cajaId,
+          TARJETA_DEBITO_ID,
+        );
+        expect(conteo.status).toBe(201);
+
+        const cerrar = await cerrarConMotivo(
+          cajaId,
+          TARJETA_EN_MAYUSCULAS,
+          DIVERGENCIA_TARJETA_ID,
+        );
+        expect(cerrar.body).toMatchObject({ caja: { estado: 'cerrada' } });
+        expect(cerrar.status).toBe(201);
+
+        expect((await lineaTarjeta(cajaId)).motivoNombre).toBe(
+          'divergencia de tarjeta',
+        );
+      });
+
+      it('PATCH /caja/:id/arqueo/motivos: re-justifica la línea de tarjeta', async () => {
+        const cajaId = await abrirConVentaConTarjeta();
+        const conteo = await contarConFaltanteEnTarjeta(
+          cajaId,
+          TARJETA_DEBITO_ID,
+        );
+        expect(conteo.status).toBe(201);
+        const cerrar = await cerrarConMotivo(
+          cajaId,
+          TARJETA_DEBITO_ID,
+          DIVERGENCIA_TARJETA_ID,
+        );
+        expect(cerrar.status).toBe(201);
+
+        const patch = await request(app.getHttpServer())
+          .patch(`/api/caja/${cajaId}/arqueo/motivos`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({
+            lineas: [
+              {
+                metodoPagoId: TARJETA_EN_MAYUSCULAS,
+                motivoDiferenciaId: FALTA_EFECTIVO_ID,
+              },
+            ],
+          });
+        expect(patch.body).toMatchObject({ ciego: false });
+        expect(patch.status).toBe(200);
+
+        expect((await lineaTarjeta(cajaId)).motivoNombre).toBe(
+          'falta de efectivo',
+        );
+      });
+
+      // Una línea por medio: un repetido es 400 y se rechaza el request entero
+      // —no se suma ni se elige uno— (orquestadora, 2026-10-08). Antes el `Map`
+      // de `CajaService` se quedaba con la última: `[tarjeta 4.500, tarjeta
+      // 5.000]` contra 5.000 esperados cerraba la caja cuadrada (201) y los
+      // 4.500 se perdían sin aviso. Los tres casos de cada puerta: el mismo id,
+      // el mismo id en dos casings y dos líneas de efectivo.
+      const repetido = (medio: string) => ({
+        message: [
+          `El medio de pago ${medio} viene en más de una línea: va una sola por medio`,
+        ],
+      });
+      const casosRepetidos = [
+        {
+          caso: '[x, x]',
+          segundo: TARJETA_DEBITO_ID,
+          medio: TARJETA_DEBITO_ID,
+        },
+        {
+          caso: '[x, X]',
+          segundo: TARJETA_EN_MAYUSCULAS,
+          medio: TARJETA_DEBITO_ID,
+        },
+        { caso: '[null, null]', segundo: null, medio: 'efectivo' },
+      ];
+
+      it('POST /caja/:id/conteo: un medio repetido es 400 y la caja sigue abierta sin conteo', async () => {
+        const cajaId = await abrirConVentaConTarjeta();
+        for (const { caso, segundo, medio } of casosRepetidos) {
+          const res = await request(app.getHttpServer())
+            .post(`/api/caja/${cajaId}/conteo`)
+            .set('Authorization', `Bearer ${tokenSupervisor}`)
+            .send({
+              lineas: [
+                { metodoPagoId: null, montoContado: '0' },
+                { metodoPagoId: TARJETA_DEBITO_ID, montoContado: '4500.0000' },
+                { metodoPagoId: segundo, montoContado: '5000.0000' },
+              ],
+            });
+          expect({
+            caso,
+            status: res.status,
+            body: res.body as unknown,
+          }).toMatchObject({ caso, status: 400, body: repetido(medio) });
+          expect(await estadoDe(cajaId)).toBe('abierta');
+          expect((await lineaTarjeta(cajaId)).contado ?? null).toBeNull();
+        }
+      });
+
+      it('dos líneas sin medio de pago no se reportan como efectivo repetido', async () => {
+        // `[[], []]` llega sin errores propios en las líneas (`@ValidateNested`
+        // no mira adentro de un `[]`), así que el 400 es el del repetido, y no
+        // puede decir que el repetido es el efectivo. El pipe corta antes que el
+        // service: la caja no necesita existir.
+        const res = await request(app.getHttpServer())
+          .post(`/api/caja/${randomUUID()}/conteo`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({ lineas: [[], []] });
+        expect(res.body).toMatchObject({
+          message: ['Hay más de una línea sin un medio de pago válido'],
+        });
+        expect(res.status).toBe(400);
+      });
+
+      it('POST /caja/:id/cerrar: un medio repetido es 400 y la caja sigue en conciliación sin motivo', async () => {
+        const cajaId = await abrirConVentaConTarjeta();
+        const conteo = await contarConFaltanteEnTarjeta(
+          cajaId,
+          TARJETA_DEBITO_ID,
+        );
+        expect(conteo.status).toBe(201);
+        for (const { caso, segundo, medio } of casosRepetidos) {
+          const res = await request(app.getHttpServer())
+            .post(`/api/caja/${cajaId}/cerrar`)
+            .set('Authorization', `Bearer ${tokenSupervisor}`)
+            .send({
+              lineas: [
+                { metodoPagoId: null, motivoDiferenciaId: FALTA_EFECTIVO_ID },
+                {
+                  metodoPagoId: TARJETA_DEBITO_ID,
+                  motivoDiferenciaId: DIVERGENCIA_TARJETA_ID,
+                },
+                {
+                  metodoPagoId: segundo,
+                  motivoDiferenciaId: FALTA_EFECTIVO_ID,
+                },
+              ],
+            });
+          expect({
+            caso,
+            status: res.status,
+            body: res.body as unknown,
+          }).toMatchObject({ caso, status: 400, body: repetido(medio) });
+          expect(await estadoDe(cajaId)).toBe('en_conciliacion');
+          expect((await lineaTarjeta(cajaId)).motivoNombre).toBeNull();
+        }
+      });
+
+      it('PATCH /caja/:id/arqueo/motivos: un medio repetido es 400 y el motivo no cambia', async () => {
+        const cajaId = await abrirConVentaConTarjeta();
+        const conteo = await contarConFaltanteEnTarjeta(
+          cajaId,
+          TARJETA_DEBITO_ID,
+        );
+        expect(conteo.status).toBe(201);
+        const cerrar = await cerrarConMotivo(
+          cajaId,
+          TARJETA_DEBITO_ID,
+          DIVERGENCIA_TARJETA_ID,
+        );
+        expect(cerrar.status).toBe(201);
+        for (const { caso, segundo, medio } of casosRepetidos) {
+          const res = await request(app.getHttpServer())
+            .patch(`/api/caja/${cajaId}/arqueo/motivos`)
+            .set('Authorization', `Bearer ${tokenSupervisor}`)
+            .send({
+              lineas: [
+                { metodoPagoId: null, motivoDiferenciaId: FALTA_EFECTIVO_ID },
+                {
+                  metodoPagoId: TARJETA_DEBITO_ID,
+                  motivoDiferenciaId: FALTA_EFECTIVO_ID,
+                },
+                {
+                  metodoPagoId: segundo,
+                  motivoDiferenciaId: FALTA_EFECTIVO_ID,
+                },
+              ],
+            });
+          expect({
+            caso,
+            status: res.status,
+            body: res.body as unknown,
+          }).toMatchObject({ caso, status: 400, body: repetido(medio) });
+          expect((await lineaTarjeta(cajaId)).motivoNombre).toBe(
+            'divergencia de tarjeta',
+          );
+        }
+      });
+    });
   });
 
   describe('cierre normal con descuadre — motivo es un paso aparte', () => {

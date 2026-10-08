@@ -394,7 +394,16 @@ Hay tres formas en el repo, y no son intercambiables:
   salón, el `garzonId` de `transferir-admin` (en mayúsculas registraba un traspaso del garzón a sí
   mismo) y los `cuentaIds` de la fusión. Y en el método de cada pago (`PagoVentaDto` y
   `PagoItemDto`), que no entra al motor: lo compara `PagosService.registrar` para tres puertas
-  (venta, cierre de cuenta y abono).
+  (venta, cierre de cuenta y abono). En la caja, el `metodoPagoId` de las líneas del conteo, de la
+  fase 2 y del override de motivos (`LineaCierreDto`, `LineaJustificacionDto`): `CajaService` las
+  cruza con el arqueo por un `Map`, y en mayúsculas daban 400 "no pertenece al arqueo" o "Falta el
+  motivo". Ahí `lineas` lleva además un `@ArrayUnique` por `metodoPagoId` (`@UnaLineaPorMedio()`):
+  con un selector, compara los elementos ya transformados, así que `[x, X]` es un repetido. Su
+  mensaje solo llega si todos los elementos son válidos: con uno que tenga un error propio, el
+  `ValidationPipe` de Nest devuelve los de los elementos y descarta los del array (medido el
+  2026-10-08). Y los
+  `metodoPagoIds` de descuentos y recargos, donde `[x, X]` pasaba el `@ArrayUnique` y la puente daba
+  500.
 - **`aliasarCasingDeIds`** (`items.service.ts`), para un cargador que devuelve un mapa a
   llamadores que hacen `.get(id)` con el casing del cliente. Solo sirve para `.get()`.
 
@@ -402,7 +411,8 @@ Hay tres formas en el repo, y no son intercambiables:
 error: `[x, X]` pasa el chequeo de repetidos y choca con el índice único (500 en vez de 400).
 Medido con mutantes el 2026-10-03 y otra vez el 2026-10-06. Lo fijan `recetas`, `combos`,
 `grupos-modificadores` y `grupos-modificadores-overrides.e2e-spec.ts` (los tests "en mayúsculas"),
-y la forma del borde, `motor-entrada.e2e-spec.ts`.
+y la forma del borde, `motor-entrada.e2e-spec.ts`, `salones-entrada.e2e-spec.ts`, `caja.e2e-spec.ts`
+(§ "metodoPagoId de las líneas") y `reglas-valor.e2e-spec.ts` (los "dos casings").
 
 ### Tablas sin `tenant_id`
 

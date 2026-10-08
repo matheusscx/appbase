@@ -23,6 +23,105 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Ids en mayúsculas en el cierre de caja y en los métodos de descuentos y recargos; una línea por medio en el cierre (cerrada 2026-10-08)
+
+Dos entradas de [`pendientes.md`](pendientes.md) § 2, **leídas, no medidas**: se midieron por HTTP
+antes de tocar código (e2e de medición contra la base del worktree, base `2fa71b75`). Plan:
+[`2026-10-08-ids-mayusculas-caja-y-reglas.md`](../superpowers/plans/2026-10-08-ids-mayusculas-caja-y-reglas.md).
+La regla viva está en [`patterns/backend.md`](../patterns/backend.md) § "Un UUID validado puede
+venir en mayúsculas" y en [`gestion-cajas.md`](../features/gestion-cajas.md) § "Una línea por
+medio de pago".
+
+### Las entradas que cierra, como estaban en `pendientes.md` § 2
+
+- [ ] **El `metodoPagoId` del cierre y de la justificación de caja en mayúsculas da un 400 que
+  miente** (backend, `LineaCierreDto` y `LineaJustificacionDto` en `caja/dto/`; **leído, no medido**,
+  por el frente que cerró `pagos[].metodoPagoId` en mayúsculas, 2026-10-08). `CajaService` cruza
+  cada línea con el arqueo de la base por `claveDe(metodoPagoId)`, un `Map`/`Set` con el casing del
+  cliente: en el cierre, la línea en mayúsculas sería 400 *"Método de pago no pertenece al
+  arqueo"*; al justificar (`aplicarMotivosADescuadres`, fase 2 del cierre y
+  `justificarDiferencias`), no encontraría su línea y daría 400 *"Falta el motivo de la
+  diferencia"*. No escribe nada distinto: corta antes. **Medir** por HTTP y, si se confirma,
+  `@IdEnMinusculas()` en los dos campos (lo deja pasar en `null`, que es la línea de efectivo), con
+  su e2e y su mutante.
+
+- [ ] **`metodoPagoIds` de descuentos y recargos con `[x, X]` pasa `@ArrayUnique`** (backend,
+  `CreateDescuentoDto`/`CreateRecargoDto` y sus `Update`; **leído, no medido**, mismo frente,
+  2026-10-08). Los dos casings son el mismo uuid para Postgres, así que la puente
+  (`descuento_metodo_pago`, `recargo_metodo_pago`, PK compuesta) recibiría la misma fila dos veces:
+  el 500 que el `@ArrayUnique` se puso para evitar. Un id solo en mayúsculas no rompe nada (va a
+  SQL). **Medir** con `POST /descuentos` y `PATCH /recargos/:id`; si se confirma, `@IdEnMinusculas()`
+  antes del `@ArrayUnique`, como los ids de reglas de `CreateVentaDto`.
+
+### Qué se midió
+
+- **Caja, con la línea de tarjeta en mayúsculas:** `POST /caja/:id/conteo` → 400 *"Método de pago
+  no pertenece al arqueo"*; `POST /caja/:id/cerrar` y `PATCH /caja/:id/arqueo/motivos` → 400
+  *"Falta el motivo de la diferencia"*. Las dos se confirmaron tal como estaban leídas.
+- **Descuentos y recargos con `metodoPagoIds: [x, X]`:** 500 en `POST` (PK compuesta de la puente)
+  y en `PATCH` (*"ON CONFLICT DO UPDATE command cannot affect row a second time"*), en los dos
+  recursos. No queda nada escrito: la transacción revierte. Un id solo en mayúsculas ya funcionaba
+  (va a SQL; la respuesta hacía eco del casing del cliente, la puente guarda minúsculas).
+- **Lo que la entrada no nombraba: una línea repetida en el cierre.** `[efectivo 0, tarjeta 4.500,
+  tarjeta 5.000]` con 5.000 esperados en tarjeta → 201 y la caja **cerrada cuadrada**: el `Map`
+  de `enviarConteo` se queda con la última línea y los 4.500 se descartan sin aviso. Lo mismo en la
+  justificación (gana el motivo de la última). Hasta este cierre, `[tarjeta 4.500, TARJETA 5.000]`
+  era un 400 que salvaba por el casing; con solo `@IdEnMinusculas` pasaba a ese 201 (medido con el
+  mutante que saca la regla de abajo).
+
+**Barrido de los lectores.** En caja, el único que compara el id del cliente es `claveDe` (`Map`/
+`Set`) en `enviarConteo` (fase 1) y en `aplicarMotivosADescuadres` (lo comparten la fase 2 y el
+override admin); `motivoDiferenciaId` solo va a SQL. En reglas, `metodoPagoIds` va al INSERT, al
+`ON CONFLICT` y al eco de la respuesta; el motor lee los ids de la base.
+
+### Qué se hizo
+
+- `@IdEnMinusculas()` en `LineaCierreDto.metodoPagoId`, `LineaJustificacionDto.metodoPagoId` y
+  `metodoPagoIds` de `CreateDescuentoDto`/`CreateRecargoDto`, antes del `@ArrayUnique` (los `Update`
+  lo heredan por `PartialType`; el `declare` con `@ValidateIf` no lo pierde, medido en el `PATCH`).
+- **Una línea por medio de pago en las tres puertas del cierre** (orquestadora, 2026-10-08: casing
+  y repetido son el mismo número, así que van juntos): `@UnaLineaPorMedio()` (`caja/dto/
+  linea-cierre.dto.ts`, `@ArrayUnique` por `metodoPagoId`) en `lineas` de `CerrarCajaDto`,
+  `FinalizarCierreDto` y `JustificarDiferenciasDto`. Un repetido —el mismo id, el mismo id en dos
+  casings o dos líneas de efectivo en `null`— es 400 que nombra el medio, y no se suma ni se elige
+  uno. Ese mensaje llega solo si ninguna línea tiene un error propio (el `ValidationPipe` de Nest
+  descarta los del array cuando hay errores en los elementos, medido): el repetido es entonces un
+  UUID o `null`, salvo con arrays en vez de líneas (`[[], []]`, o líneas válidas anidadas), que no
+  tienen `metodoPagoId` y contestan *"Hay más de una línea sin un medio de pago válido"* en vez de
+  nombrar al efectivo (lo vio una prueba con el pipe real
+  después de la revisión). Ninguna pantalla manda repetidos: el conteo sale de un objeto con una clave por medio, y la
+  fase 2 y el `PATCH` de las filas del arqueo, una por medio (`calcularArqueo` arma una sola de
+  efectivo y agrupa el resto por medio; `ux_caja_arqueo_medio` lo asegura para los medios con id,
+  no para el efectivo en `NULL`).
+
+### Qué lo fija
+
+`test/caja.e2e-spec.ts` § "arqueo multi-medio › metodoPagoId de las líneas": una prueba de
+mayúsculas por puerta (lo contado y el motivo quedan en la línea de tarjeta) y una de repetidos por
+puerta con los tres casos, que además relee que nada quedó escrito (la caja sigue abierta sin
+conteo, sigue en conciliación sin motivo, el motivo no cambió), más `[[], []]` en el conteo. `test/reglas-valor.e2e-spec.ts`
+§ "los métodos de pago sobreviven al PATCH": `[x, X]` en `POST` y `PATCH`, una prueba por recurso,
+que relee la lista de métodos.
+
+Mutantes, cada uno revierte al código anterior (saca el decorador):
+
+| Mutante | Rojos | Por qué murió |
+|---|---|---|
+| sin `@IdEnMinusculas` en `LineaCierreDto` | conteo en mayúsculas; repetidos del conteo | 400 *"no pertenece al arqueo"*; en repetidos, el caso `[x, X]` |
+| sin `@IdEnMinusculas` en `LineaJustificacionDto` | mayúsculas y repetidos de fase 2 y `PATCH` (4) | 400 *"Falta el motivo"*; en repetidos, `[x, X]` pasa el pipe y el service aplica el motivo (201 cerrada, 200) |
+| sin `@UnaLineaPorMedio` en `CerrarCajaDto` | repetidos del conteo; `[[], []]` | `[x, x]` → 201 cerrada; `[[], []]` pasa el pipe y llega al service (403 *"Caja no encontrada o no está abierta"*: la caja del test no existe) |
+| sin `@UnaLineaPorMedio` en `FinalizarCierreDto` | repetidos de fase 2 | `[x, x]` → 201, gana el motivo de la última |
+| sin `@UnaLineaPorMedio` en `JustificarDiferenciasDto` | repetidos del `PATCH` | `[x, x]` → 200, gana el motivo de la última |
+| sin `@IdEnMinusculas` en `CreateDescuentoDto` | `[x, X]` de descuentos | 500 |
+| sin `@IdEnMinusculas` en `CreateRecargoDto` | `[x, X]` de recargos | 500 |
+| el mensaje sin la rama "sin medio" (lo que no es string dice efectivo) | `[[], []]` | dice *"El medio de pago efectivo viene en más de una línea"* |
+
+Como cada prueba de repetidos corta en el primer caso, `[x, X]` y `[null, null]` se midieron además
+solos, sin `@UnaLineaPorMedio` en los tres DTOs: rojos en las tres puertas (`[x, X]` en el conteo da
+201 cerrada; `[null, null]`, 201 en conciliación con el efectivo de la última línea).
+
+---
+
 ## El salón: ids en mayúsculas, layout con mesa borrada, y el confirmar legado de la comanda se retiró (cerrada 2026-10-08)
 
 Tres entradas de [`pendientes.md`](pendientes.md) (§ 1 y dos de § 2), las tres en el módulo salones y
@@ -245,7 +344,8 @@ el id solo va a SQL (`uuid` no distingue casing): compras (`CrearPagoProveedorDt
 `PagoAlConfirmarDto`), el filtro de `GET /pagos`, y suscripciones y el callback online, que toman
 el id de la base. **Quedaron afuera, anotados en `pendientes.md` sin medir:** en § 2, las líneas del
 cierre y la justificación de caja (`claveDe` cruza con el arqueo de la base) y `metodoPagoIds` de
-descuentos y recargos (`[x, X]` pasa `@ArrayUnique`); en § 1, como barrido mecánico, los otros
+descuentos y recargos (`[x, X]` pasa `@ArrayUnique`), cerradas el mismo día (arriba, "Ids en
+mayúsculas en el cierre de caja…"); en § 1, como barrido mecánico, los otros
 arrays de objetos con `@ValidateNested({ each: true })`, que dejan pasar `[[]]` igual que la
 personalización.
 

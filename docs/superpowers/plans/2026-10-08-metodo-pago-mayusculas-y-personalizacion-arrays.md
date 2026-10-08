@@ -23,7 +23,8 @@ cálculo ni una regla de plata: las dos se cierran en el borde (DTO).
 - **No cubiertos y fuera de este frente** (no escriben plata; anotados en `pendientes.md` § 2,
   sin medir): `LineaCierreDto`/`LineaJustificacionDto` de caja (`claveDe` compara con el arqueo de
   la base: 400 "no pertenece al arqueo" / "falta el motivo") y `metodoPagoIds` de descuentos y
-  recargos (`[x, X]` pasa `@ArrayUnique` y choca con la PK de la puente). Y en § 1, como barrido
+  recargos (`[x, X]` pasa `@ArrayUnique` y choca con la PK de la puente) —cerradas el mismo día en
+  [`2026-10-08-ids-mayusculas-caja-y-reglas.md`](2026-10-08-ids-mayusculas-caja-y-reglas.md)—. Y en § 1, como barrido
   mecánico (orquestadora), los 41 de 46 `@ValidateNested({ each: true })` del backend sin
   `@IsObject({ each: true })`.
 

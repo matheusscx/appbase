@@ -930,7 +930,8 @@ Permiso requerido: (dueño con MiCaja:Actualizar) o (cualquiera con Cajas:Actual
                    ver Modelo de acceso)
 Request: { "lineas": [{ "metodoPagoId": null | string, "montoContado": string }, ...], "comentario"?: string }
 Response (200): { "estado": "cerrada" | "en_conciliacion", "arqueo": LineaArqueo[] }
-Error (400) si falta el conteo de una línea obligatoria o una línea no pertenece al arqueo.
+Error (400) si falta el conteo de una línea obligatoria, una línea no pertenece al arqueo o un
+      medio viene en más de una línea.
 Error (403) si el usuario no tiene ni MiCaja:Actualizar ni Cajas:Actualizar, o si la caja
       no existe, no está 'abierta', o no es del usuario ni el usuario tiene Cajas:Actualizar.
 ```
@@ -1000,6 +1001,7 @@ Permiso requerido: (dueño con MiCaja:Actualizar) o (cualquiera con Cajas:Actual
 Request: { "lineas": [{ "metodoPagoId": null | string, "motivoDiferenciaId"?: string, "comentarioDiferencia"?: string }, ...], "comentario"?: string }
 Response (200): { "caja": Caja (estado 'cerrada'), "arqueo": LineaArqueo[] }
 Error (400) si falta el motivo (o el comentario que ese motivo exige) de una línea descuadrada.
+Error (400) si un medio viene en más de una línea.
 Error (400) si el cierre es forzado, nadie firmó como testigo, y no hay comentario de cierre (ni en esta fase ni el que ya haya dejado la fase 1).
 Error (403) si el usuario no tiene ni MiCaja:Actualizar ni Cajas:Actualizar, o si la caja
       no es del usuario ni el usuario tiene Cajas:Actualizar.
@@ -1032,6 +1034,26 @@ flujo futuro. Es la misma lógica anti-fraude del cierre ciego (B): si el númer
 ajustar después de conocerse la diferencia, cualquier control de motivos sería teatro —
 bastaría con "corregir" el conteo para que la diferencia (y su justificación) desaparezcan.
 Congelar antes de exigir la explicación es lo que hace que la explicación signifique algo.
+
+### Una línea por medio de pago (2026-10-08)
+
+El conteo, la fase 2 y el override admin llevan **una línea por medio**: un medio repetido es
+`400` y se rechaza el request entero —no se suman las líneas ni se elige una— (orquestadora,
+2026-10-08). Cuenta como repetido el mismo id, el mismo id en dos casings (el DTO lo pasa a
+minúsculas antes de comparar) y dos líneas de efectivo (`metodoPagoId: null`). El `400` nombra el
+medio (*"El medio de pago … viene en más de una línea: va una sola por medio"*, `efectivo` para
+`null`), salvo cuando los elementos son arrays en vez de líneas (`[[], []]`, `[[{…}], [{…}]]`), donde
+dice *"Hay más de una línea sin un medio de pago válido"*. No filtra nada del modo ciego, porque el id lo mandó el propio cliente y
+se rechaza antes de mirar el arqueo.
+
+El porqué es plata: el service cruza las líneas con el arqueo por un mapa, y hasta este cambio se
+quedaba con la última. Medido: `[tarjeta 4.500, tarjeta 5.000]` con 5.000 esperados cerraba la caja
+**cuadrada** y los 4.500 se perdían sin aviso. Ninguna pantalla manda repetidos: el conteo sale de
+un objeto con una clave por medio, y la fase 2 y el override de las filas del arqueo, que tiene una
+por medio (`calcularArqueo` arma una sola de efectivo y una por medio con `GROUP BY`; el índice
+`ux_caja_arqueo_medio` lo asegura para los medios con id, no para el efectivo en `NULL`). Un
+repetido solo llega de un cliente de la API. Detalle y
+mutantes: [`resueltos.md`](../agent/resueltos.md), "Ids en mayúsculas en el cierre de caja…".
 
 ### Motivos de diferencia — catálogo admin-only
 
@@ -1079,7 +1101,8 @@ PATCH /caja/:id/arqueo/motivos
 Guard: TenantAdminGuard (admin-only, a diferencia de la fase 2 que es owner-o-encargado)
 Request: { "lineas": [{ "metodoPagoId": null | string, "motivoDiferenciaId"?: string, "comentarioDiferencia"?: string }, ...] }
 Response (200): { "ciego": false, "lineas": LineaArqueo[] }
-Error (400) si la caja no está 'cerrada', o si falta el motivo/comentario de una línea descuadrada.
+Error (400) si la caja no está 'cerrada', si falta el motivo/comentario de una línea descuadrada,
+      o si un medio viene en más de una línea.
 ```
 
 Frontend: `CajaArqueoTable` (usada en el detalle de cualquier caja cerrada, `/mi-caja/[id]`
@@ -1586,8 +1609,9 @@ Response (200) — algo descuadró (pasa a conciliación):
   ]
 }
 
-Error (400) si falta el conteo de una línea obligatoria (es_efectivo o requiere_conteo)
-      o si una línea del body no pertenece al arqueo recomputado del servidor.
+Error (400) si falta el conteo de una línea obligatoria (es_efectivo o requiere_conteo),
+      si una línea del body no pertenece al arqueo recomputado del servidor, o si un medio
+      viene en más de una línea (ver "Una línea por medio de pago").
 Error (403) si el usuario no tiene ni MiCaja:Actualizar ni Cajas:Actualizar (piso de la
       ruta), o si la caja no existe, no está 'abierta', o no pertenece al usuario ni el
       usuario tiene Cajas:Actualizar.
@@ -1649,6 +1673,7 @@ Response (200):
 
 Error (400) si falta el motivo (o el comentario que ese motivo exige) de una línea
       descuadrada.
+Error (400) si un medio viene en más de una línea.
 Error (400) si el cierre es forzado, nadie firmó como testigo, y no hay comentario
       (ni en esta fase ni el que ya haya dejado la fase 1).
 Error (403) si el usuario no tiene ni MiCaja:Actualizar ni Cajas:Actualizar (piso de la
@@ -1750,8 +1775,8 @@ Request:
 
 Response (200): { "ciego": false, "lineas": [...] } — mismo shape que GET /caja/:id/arqueo
 
-Error (400) si la caja no está 'cerrada', o si falta el motivo/comentario de una línea
-      descuadrada.
+Error (400) si la caja no está 'cerrada', si falta el motivo/comentario de una línea
+      descuadrada, o si un medio viene en más de una línea.
 ```
 
 Corrige o completa la justificación de una caja ya cerrada — nunca toca
@@ -1982,10 +2007,10 @@ recalcula después de escrita)
 - `AbrirCajaDto` — `{ cajonId: string, saldoInicial: string, comentario?: string }` (`@IsUUID`, `@IsNumberString`, `@IsOptional`)
 - `MovimientoCajaDto` — `{ tipo, concepto, monto: string, referencia? }`
 - `CerrarCajaDto` — `{ lineas: LineaCierreDto[], comentario?: string }` — body de la fase 1 (`POST /caja/:id/conteo`), pese al nombre heredado del sub-proyecto A
-- `LineaCierreDto` — `{ metodoPagoId: string | null, montoContado: string }` (`metodoPagoId: null` = línea de efectivo; `@IsNumberString` sin `no_symbols` para admitir decimales)
+- `LineaCierreDto` — `{ metodoPagoId: string | null, montoContado: string }` (`metodoPagoId: null` = línea de efectivo, en minúsculas por `@IdEnMinusculas`; `@IsNumberString` sin `no_symbols` para admitir decimales). Las `lineas` de `CerrarCajaDto`, `FinalizarCierreDto` y `JustificarDiferenciasDto` llevan `@UnaLineaPorMedio()`: un medio repetido es 400 (ver "Una línea por medio de pago")
 - `FinalizarCierreDto` — `{ lineas: LineaJustificacionDto[], comentario?: string }` — body de la fase 2 (`POST /caja/:id/cerrar`); `comentario` es opcional a nivel DTO, la obligatoriedad (forzado + sin firma + sin comentario de fase 1) vive en el service
 - `JustificarDiferenciasDto` — `{ lineas: LineaJustificacionDto[] }` — body del override admin (`PATCH /caja/:id/arqueo/motivos`); mismo shape que `FinalizarCierreDto`, DTO propio porque son endpoints distintos
-- `LineaJustificacionDto` — `{ metodoPagoId: string | null, motivoDiferenciaId?: string, comentarioDiferencia?: string }` (`@IsUUID('4')` opcional en ambos campos; `metodoPagoId` acepta `null` vía `@ValidateIf`)
+- `LineaJustificacionDto` — `{ metodoPagoId: string | null, motivoDiferenciaId?: string, comentarioDiferencia?: string }` (`@IsUUID('4')` opcional en ambos campos; `metodoPagoId` acepta `null` vía `@ValidateIf` y pasa a minúsculas por `@IdEnMinusculas`)
 - `SetArqueoCiegoDto` — `{ arqueoCiego: boolean }` (`@IsBoolean`) — body de `PUT /caja/arqueo-ciego`
 - `CreateMotivoDiferenciaDto` / `UpdateMotivoDiferenciaDto` — `{ nombre?, activo?, requiereComentario? }`, mismo patrón que `motivo_baja`
 

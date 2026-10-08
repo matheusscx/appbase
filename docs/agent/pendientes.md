@@ -98,25 +98,6 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
-- [ ] **El `metodoPagoId` del cierre y de la justificación de caja en mayúsculas da un 400 que
-  miente** (backend, `LineaCierreDto` y `LineaJustificacionDto` en `caja/dto/`; **leído, no medido**,
-  por el frente que cerró `pagos[].metodoPagoId` en mayúsculas, 2026-10-08). `CajaService` cruza
-  cada línea con el arqueo de la base por `claveDe(metodoPagoId)`, un `Map`/`Set` con el casing del
-  cliente: en el cierre, la línea en mayúsculas sería 400 *"Método de pago no pertenece al
-  arqueo"*; al justificar (`aplicarMotivosADescuadres`, fase 2 del cierre y
-  `justificarDiferencias`), no encontraría su línea y daría 400 *"Falta el motivo de la
-  diferencia"*. No escribe nada distinto: corta antes. **Medir** por HTTP y, si se confirma,
-  `@IdEnMinusculas()` en los dos campos (lo deja pasar en `null`, que es la línea de efectivo), con
-  su e2e y su mutante.
-
-- [ ] **`metodoPagoIds` de descuentos y recargos con `[x, X]` pasa `@ArrayUnique`** (backend,
-  `CreateDescuentoDto`/`CreateRecargoDto` y sus `Update`; **leído, no medido**, mismo frente,
-  2026-10-08). Los dos casings son el mismo uuid para Postgres, así que la puente
-  (`descuento_metodo_pago`, `recargo_metodo_pago`, PK compuesta) recibiría la misma fila dos veces:
-  el 500 que el `@ArrayUnique` se puso para evitar. Un id solo en mayúsculas no rompe nada (va a
-  SQL). **Medir** con `POST /descuentos` y `PATCH /recargos/:id`; si se confirma, `@IdEnMinusculas()`
-  antes del `@ArrayUnique`, como los ids de reglas de `CreateVentaDto`.
-
 - [ ] **La tienda calcula el total dos veces, con dos "ahora": lo que cambia entre el pago y el callback deja un cargo sin venta** (backend; lo vio la revisión de seguridad del frente "reglas de línea salen del ítem", 2026-10-06; **leído en el código, no corrido**; las citas de línea son contra `54bc8f6e`). `POST /online/pagar` calcula el total con `calcular()` y ese número es el que se autoriza en Webpay. Cuando el comprador vuelve del formulario de Transbank, el callback (`online-callback.handler.ts`) crea la venta con `VentasService.crear`, que **vuelve a calcular desde cero** con el snapshot de la orden (solo `itemId`, `cantidad` y presentación) y el pago fijado en el total autorizado. Si los dos cálculos no dan lo mismo, la venta no se crea:
   - **total del callback mayor** → `ventas.service.ts:1019` *"Las ventas online requieren el pago completo"*;
   - **total del callback menor** → el pago sobra, y sin `permite_vuelto` en el método de tarjeta (el seed solo lo tiene en efectivo) `pagos.service.ts:270` da *"El pago supera el total pero ningún método de pago permite vuelto"*. Con `permite_vuelto`, la venta se guarda con vuelto sobre una tarjeta.

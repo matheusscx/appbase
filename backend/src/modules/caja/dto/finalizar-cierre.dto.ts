@@ -8,11 +8,13 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { LineaJustificacionDto } from './justificar-diferencias.dto';
+import { UnaLineaPorMedio } from './linea-cierre.dto';
 
 export class FinalizarCierreDto {
   @IsArray()
   // Una línea por medio de pago del arqueo, igual que el conteo.
   @ArrayMaxSize(50)
+  @UnaLineaPorMedio()
   @ValidateNested({ each: true })
   @Type(() => LineaJustificacionDto)
   lineas: LineaJustificacionDto[];

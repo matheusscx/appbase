@@ -1030,5 +1030,51 @@ describe('Descuentos y recargos (e2e) — CRUD', () => {
       await editarMetodos('recargos', id, [EFECTIVO_ID]);
       expect(await metodosDe('recargos', id)).toEqual([EFECTIVO_ID]);
     });
+
+    // El mismo método en dos casings es un repetido. `@IsUUID` acepta los dos y
+    // para Postgres son el mismo uuid, así que sin pasarlos a minúsculas antes
+    // del `@ArrayUnique` la puente recibía la misma fila dos veces: el 500 que
+    // el decorador se puso para evitar.
+    const repetidoEnDosCasings = async (
+      recurso: 'descuentos' | 'recargos',
+    ): Promise<void> => {
+      const dosCasings = [EFECTIVO_ID, EFECTIVO_ID.toUpperCase()];
+      const creado = await request(app.getHttpServer())
+        .post(`/api/${recurso}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Metodos en dos casings E2E ${recurso} ${Date.now()}`,
+          tipoReglaId:
+            recurso === 'descuentos'
+              ? TIPO_DESCUENTO_METODO_PAGO
+              : TIPO_RECARGO_METODO_PAGO,
+          modo: 'porcentaje',
+          valorPorcentaje: '0.10',
+          metodoPagoIds: dosCasings,
+        });
+      expect(creado.body).toMatchObject({
+        message: ["All metodoPagoIds's elements must be unique"],
+      });
+      expect(creado.status).toBe(400);
+
+      const id = await crearPorMetodoPago(recurso, [TARJETA_CREDITO_ID]);
+      const patch = await request(app.getHttpServer())
+        .patch(`/api/${recurso}/${id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ metodoPagoIds: dosCasings });
+      expect(patch.body).toMatchObject({
+        message: ["All metodoPagoIds's elements must be unique"],
+      });
+      expect(patch.status).toBe(400);
+      expect(await metodosDe(recurso, id)).toEqual([TARJETA_CREDITO_ID]);
+    };
+
+    it('descuentos: el mismo método en dos casings es 400 en POST y PATCH', async () => {
+      await repetidoEnDosCasings('descuentos');
+    });
+
+    it('recargos: el mismo método en dos casings es 400 en POST y PATCH', async () => {
+      await repetidoEnDosCasings('recargos');
+    });
   });
 });
