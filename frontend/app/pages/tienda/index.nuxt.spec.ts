@@ -23,11 +23,23 @@ import TiendaIndex from './index.vue'
  * que este spec existe para sostener.
  */
 let urlsCatalogo: string[] = []
+/** Si no es `null`, `POST /calculo-precios/calcular` se rechaza con esto. */
+let calculoFallaCon: unknown = null
+/** Cada `POST /online/pagar`: el Pagar no tiene que salir con un cálculo fallido. */
+let pagosIniciados = 0
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
     if (typeof url !== 'string') return Promise.resolve([])
     const ruta = url.split('?')[0] ?? ''
+
+    if (ruta.endsWith('/calculo-precios/calcular') && calculoFallaCon !== null) {
+      return Promise.reject(calculoFallaCon)
+    }
+    if (ruta.endsWith('/online/pagar')) {
+      pagosIniciados++
+      return Promise.resolve({ modo: 'simulado', checkoutUrl: '/tienda/pasarela' })
+    }
 
     if (ruta.includes('/items')) {
       urlsCatalogo.push(url)
@@ -38,15 +50,31 @@ mockNuxtImport('useApiFetch', () => {
   }
 })
 
+interface ToastTienda { title?: string, description?: string, color?: string }
+let toasts: ToastTienda[] = []
+mockNuxtImport('useToast', () => {
+  return () => ({
+    add: (t: ToastTienda) => {
+      toasts.push(t)
+    },
+  })
+})
+
 let montado: { unmount: () => void } | null = null
 
 afterEach(() => {
   montado?.unmount()
   montado = null
+  // El carrito de la tienda vive en `useState` y sobrevive al desmontaje: cada
+  // test arranca con uno vacío.
+  useTiendaCarrito().limpiar()
 })
 
 beforeEach(() => {
   urlsCatalogo = []
+  calculoFallaCon = null
+  pagosIniciados = 0
+  toasts = []
 })
 
 async function montar() {
@@ -74,5 +102,53 @@ describe('tienda/index — el catálogo pide solo ítems vendibles', () => {
 
     expect(urlsCatalogo).toHaveLength(1)
     expect(urlsCatalogo[0]).toContain('vendibleOnline=true')
+  })
+})
+
+describe('tienda/index — Pagar con un cálculo que falla dice por qué', () => {
+  // Hasta el 2026-10-08 cualquier fallo de `/calcular` decía "Intentá de nuevo":
+  // con un 400 del motor, reintentar da lo mismo.
+  const cafe = {
+    id: 'item-cafe',
+    nombre: 'Café',
+    descripcion: null,
+    precioBase: '1000',
+    monedaId: 'clp',
+    monedaSimbolo: '$',
+    stock: null,
+    stockDisponible: null,
+    unidadMedida: 'unidad',
+    tipo: 'producto',
+    activo: true,
+  }
+
+  async function pagarConCalculoQueFalla(error: unknown) {
+    calculoFallaCon = error
+    const wrapper = await montar()
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', cafe)
+    await new Promise(r => setTimeout(r, 400))
+    wrapper.findComponent({ name: 'TiendaCarritoOnline' }).vm.$emit('pagar')
+    await new Promise(r => setTimeout(r, 50))
+  }
+
+  it('un 400 del motor muestra el motivo del servidor y no inicia el pago', async () => {
+    await pagarConCalculoQueFalla(Object.assign(new Error('400'), {
+      status: 400,
+      data: { statusCode: 400, message: 'La cantidad 99999999999 supera el máximo permitido para la línea 1.' },
+    }))
+
+    expect(toasts).toEqual([{
+      title: 'No se pudo calcular el total',
+      description: 'La cantidad 99999999999 supera el máximo permitido para la línea 1.',
+      color: 'error',
+    }])
+    expect(pagosIniciados).toBe(0)
+  })
+
+  it('un corte de red pide reintentar', async () => {
+    await pagarConCalculoQueFalla(new Error('[POST] "http://api/calcular": <no response> fetch failed'))
+
+    expect(toasts).toEqual([{ title: 'No se pudo calcular el total. Intentá de nuevo.', color: 'error' }])
+    expect(pagosIniciados).toBe(0)
   })
 })

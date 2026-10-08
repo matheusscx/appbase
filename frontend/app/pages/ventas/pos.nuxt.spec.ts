@@ -124,6 +124,8 @@ let respuestasVenta: (Error | { status: number, data: unknown } | Record<string,
 let tiposDocumentoMock: unknown[] = []
 /** El total que devuelve `POST /calculo-precios/calcular`; `null` = el `[]` de siempre. */
 let totalCalculoMock: string | null = null
+/** Si no es `null`, `POST /calculo-precios/calcular` se rechaza con esto (gana sobre el total). */
+let calculoFallaCon: unknown = null
 /** La página de catálogo que devuelve `GET /items`. */
 let itemsCatalogoMock: unknown[] = []
 /** Lo que devuelve `GET /items/:id/unidades` (las vendibles de un producto con serie). */
@@ -149,6 +151,9 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (ruta.endsWith('/tipos-documento')) {
       return Promise.resolve(tiposDocumentoMock)
+    }
+    if (ruta.endsWith('/calculo-precios/calcular') && calculoFallaCon !== null) {
+      return Promise.reject(calculoFallaCon)
     }
     if (ruta.endsWith('/calculo-precios/calcular') && totalCalculoMock !== null) {
       return Promise.resolve({
@@ -188,7 +193,7 @@ mockNuxtImport('useApiFetch', () => {
   }
 })
 
-interface ToastPos { title?: string, color?: string, actions?: { label: string }[] }
+interface ToastPos { title?: string, description?: string, color?: string, actions?: { label: string }[] }
 let toasts: ToastPos[] = []
 mockNuxtImport('useToast', () => {
   return () => ({
@@ -218,6 +223,7 @@ beforeEach(() => {
   respuestasVenta = []
   tiposDocumentoMock = []
   totalCalculoMock = null
+  calculoFallaCon = null
   itemsCatalogoMock = []
   unidadesVendiblesMock = []
   urlsUnidades = []
@@ -807,5 +813,59 @@ describe('ventas/pos — boleta sobre el umbral de la Res. Ex. SII 44/2025', () 
 
     expect(bodiesDeVenta).toHaveLength(1)
     expect(bodiesDeVenta[0]).not.toHaveProperty('customer')
+  })
+})
+
+describe('ventas/pos — Cobrar con un cálculo que falla dice por qué', () => {
+  // Hasta el 2026-10-08 cualquier fallo de `/calcular` decía "Intentá de nuevo":
+  // con un 400 del motor, reintentar da lo mismo y el cajero no sabía qué revisar.
+  const cafe = {
+    id: 'item-cafe',
+    nombre: 'Café',
+    descripcion: null,
+    precioBase: '1000',
+    monedaId: 'clp',
+    monedaSimbolo: '$',
+    stock: null,
+    stockDisponible: null,
+    unidadMedida: 'unidad',
+    tipo: 'producto',
+    activo: true,
+  }
+
+  async function cobrarConCalculoQueFalla(error: unknown) {
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    calculoFallaCon = error
+    itemsCatalogoMock = [cafe]
+    const wrapper = await montar()
+    await esperar(20)
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', cafe)
+    await esperar(500)
+    wrapper.findComponent({ name: 'VentasCarritoPanel' }).vm.$emit('cobrar')
+    await esperar(50)
+    return wrapper
+  }
+
+  it('un 400 del motor muestra el motivo del servidor y no abre el cobro', async () => {
+    const wrapper = await cobrarConCalculoQueFalla(Object.assign(new Error('400'), {
+      status: 400,
+      data: { statusCode: 400, message: 'El monto de la línea 1 no cabe en lo que el sistema puede guardar.' },
+    }))
+
+    expect(toasts.filter(t => t.color === 'error')).toEqual([{
+      title: 'No se pudo calcular el total',
+      description: 'El monto de la línea 1 no cabe en lo que el sistema puede guardar.',
+      color: 'error',
+    }])
+    expect(wrapper.findComponent({ name: 'VentasCobroModal' }).props('open')).toBe(false)
+  })
+
+  it('un corte de red pide reintentar, que ahí sí es verdad', async () => {
+    const wrapper = await cobrarConCalculoQueFalla(new Error('[POST] "http://api/calcular": <no response> fetch failed'))
+
+    expect(toasts.filter(t => t.color === 'error')).toEqual([
+      { title: 'No se pudo calcular el total. Intentá de nuevo.', color: 'error' },
+    ])
+    expect(wrapper.findComponent({ name: 'VentasCobroModal' }).props('open')).toBe(false)
   })
 })

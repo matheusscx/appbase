@@ -41,7 +41,7 @@ const toast = useToast()
 const cajaStore = useCajaStore()
 const { emisor, cargar: cargarEmisor } = useRazonSocialEmisor()
 
-const { lineas, resultado, loadingCalculo, vigente, asegurarVigente, add, quitar, cambiarCantidadPresentacion, cambiarUnidades, limpiar } = useVenta()
+const { lineas, resultado, loadingCalculo, vigente, errorCalculo, asegurarVigente, add, quitar, cambiarCantidadPresentacion, cambiarUnidades, limpiar } = useVenta()
 const unidadesStore = useUnidadesMedidaStore()
 const impresorasApi = useImpresoras()
 const { formatMonto } = useFormatters()
@@ -184,7 +184,7 @@ async function abrirCobro() {
     cobroOpen.value = true
     return
   }
-  toast.add({ title: 'No se pudo calcular el total. Intentá de nuevo.', color: 'error' })
+  toast.add({ ...avisoCalculoFallido(errorCalculo.value), color: 'error' })
 }
 
 const cajaMenuItems = computed<DropdownMenuItem[][]>(() => [

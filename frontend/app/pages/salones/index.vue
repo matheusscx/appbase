@@ -132,6 +132,7 @@ const activeCuenta = ref<CuentaDetalle | null>(null)
 const {
   resultado,
   vigente,
+  error: errorCalculo,
   recalcular,
   asegurarVigente,
   limpiar: limpiarResultado,
@@ -957,7 +958,7 @@ async function abrirCobro() {
     if (cobroPedidoId.value !== cuenta.id) return
     if (activeCuenta.value?.id !== cuenta.id) return
     if (!res) {
-      toast.add({ title: 'No se pudo calcular el total de la cuenta. Intentá de nuevo.', color: 'error' })
+      toast.add({ ...avisoCalculoFallido(errorCalculo.value, 'No se pudo calcular el total de la cuenta'), color: 'error' })
       return
     }
     cobroCuenta.value = cuenta
@@ -2576,7 +2577,7 @@ async function imprimirPrecuenta() {
     const res = await asegurarVigente()
     if (activeCuenta.value?.id !== cuenta.id) return
     if (!res) {
-      toast.add({ title: 'No se pudo calcular el total de la cuenta. Intentá de nuevo.', color: 'error' })
+      toast.add({ ...avisoCalculoFallido(errorCalculo.value, 'No se pudo calcular el total de la cuenta'), color: 'error' })
       return
     }
     // ⚠️ **Las líneas del ticket se releen; la mesa va congelada.** `res` es el

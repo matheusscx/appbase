@@ -840,6 +840,14 @@ Cómo se consume:
 - **Un cálculo que falla no borra el resultado guardado.** La vigencia ya dice si
   sirve; borrarlo deja el total en cero por un error de red, y `totalFinal` es un
   computed vivo: puede pasar con el modal de cobro ya abierto.
+- **Un cálculo que falla dice por qué.** `error` es el del último cálculo fallido **de este
+  carrito** (atado a su clave, como el resultado). Cuando `asegurarVigente()` devuelve `null`,
+  el aviso sale de `avisoCalculoFallido(error.value, titulo)`:
+  - un 4xx lleva el motivo del motor (el tope de unidades, un monto que no cabe);
+  - la red o un 5xx dicen "Intentá de nuevo", que ahí sí es verdad.
+
+  Un "Intentá de nuevo" fijo mentía con un 400: reintentar da lo mismo y quien cobra no sabe
+  qué revisar.
 - **`debounceMs`** solo para los carritos que cambian tecla a tecla (POS,
   tienda). Salones muta por request y llama `recalcular()` explícito.
 - **`persistKey`** solo para el carrito que sobrevive la navegación (tienda):

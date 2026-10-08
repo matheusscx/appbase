@@ -23,6 +23,117 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El motivo del 400 del motor llega a la pantalla; los avisos se quedan arriba a la derecha (cerrada 2026-10-08)
+
+Salen de [`pendientes.md`](pendientes.md) § 1 y § 3, en la misma tanda porque tocan la misma capa.
+Plan: [`2026-10-08-avisos-y-motivo-del-400.md`](../superpowers/plans/2026-10-08-avisos-y-motivo-del-400.md).
+
+### Las entradas que cierran, como estaban en `pendientes.md`
+
+§ 1:
+
+- [ ] **La previsualización no muestra el motivo de un 400 del motor** (frontend,
+  `composables/useCalculoPrecios.ts` → `useResultadoCalculado`; visto el 2026-10-08 por el frente del
+  guard del motor, que lo dejó afuera por decisión de la orquestadora). `ejecutar` atrapa el error de
+  `/calculo-precios/calcular` con un `catch` vacío, así que el mensaje del 400 se pierde. Al tocar
+  Cobrar o Pagar, las tres pantallas —POS (`pages/ventas/pos.vue`, `abrirCobro`), tienda
+  (`pages/tienda/index.vue`, `irAPagar`) y salones (`pages/salones/index.vue`, el cobro de la
+  cuenta)— muestran *"No se pudo calcular el total. Intentá de nuevo."*, y **el "intentá de nuevo"
+  miente**: reintentar no lo arregla, y quien cobra no sabe qué revisar. Vale para **cualquier** 400
+  del motor (el tope de unidades, el monto que no cabe, una regla que no existe), no solo para uno.
+  **Arreglo probable:** guardar el error en `useResultadoCalculado` y que los tres toasts usen
+  `apiErrorMsg`. La orquestadora lo toma en la tanda siguiente, junto con los avisos, que tocan la
+  misma capa.
+
+§ 3:
+
+- [ ] **En la cuenta del salón, los avisos tapan los botones de la primera línea** (frontend, UX;
+  anotado el 2026-10-06 por el frente que arregló el flaky de `anular-plato`, a pedido de la
+  orquestadora). El toaster va arriba a la derecha (`app.vue`, `position: 'top-right'`, siempre
+  expandido) y ahí mismo está la columna de acciones de la cuenta. **Medido cuadro a cuadro con
+  1280×720:** con un aviso ("Cuenta abierta por…") el viewport de toasts ocupa y=16–104; al mandar a
+  cocina sin QZ Tray entra el de error y baja a y=212, y el centro del botón **Anular** de la
+  primera línea está en y=211. Quedan así ~4,8 s (lo que le queda de vida al primero). Y el hover
+  pausa los toasts, así que un garzón que apunta al botón tapado los congela encima: tiene que
+  correr el mouse o cerrarlos. El test ya no depende de esto (espera a que se vayan); el garzón sí.
+  **La pregunta para el owner:** ¿los avisos se mueven de lugar (abajo a la derecha, o arriba al
+  centro) para toda la app, se mueven solo en el salón, o se deja como está porque se van solos en
+  5 s?
+
+  ✅ **Contestado por el owner (2026-10-08, AskUserQuestion de la orquestadora): los avisos van abajo
+  a la derecha, en toda la app.** Falta construirlo: cambiar la posición del toaster en `app.vue` y
+  barrer las pantallas y los specs de Playwright que dependan de dónde aparecen los avisos. Playwright
+  entero, porque toca toda la UI.
+
+### Qué se hizo con el § 1
+
+`useResultadoCalculado` guarda el error del cálculo que falló **con la clave del carrito que lo
+produjo**, igual que el resultado, y lo expone como `error`. Es `null` si el que falló era otro
+carrito. Se borra con un cálculo que sale bien, con `limpiar()` y con el carrito vacío, y una
+respuesta obsoleta no lo escribe (token). `avisoCalculoFallido(e, titulo)`, en el mismo
+archivo, arma el aviso:
+
+- **4xx con mensaje:** el título sin "Intentá de nuevo" y el motivo del servidor como
+  descripción. Usa `apiErrorMsg` con `detalleLocal: false`.
+- **Red, 5xx o 4xx sin mensaje:** el *"… Intentá de nuevo."* de siempre, que ahí sí es verdad.
+
+Lo usan el POS (`abrirCobro`), la tienda (`irAPagar`) y el salón (cobro y precuenta). Sin
+reintento automático: la app avisa y la persona decide.
+
+**Qué lo fija:**
+
+- `useResultadoCalculado.nuxt.spec.ts`, describes *"el motivo del fallo"* y
+  *"avisoCalculoFallido"*.
+- Los specs de pantalla del POS, la tienda y el salón: 400 → motivo, red → reintento.
+- `e2e/ventas/pos.spec.ts`: un exento de $73.456.789.012.345 por 2 unidades, que el motor
+  rechaza (`motor-monto-no-cabe.e2e-spec.ts`), muestra el motivo y no abre el cobro.
+
+**Mutantes, cada uno muerto por su aserción:**
+
+- El `catch` vacío de antes mata los seis tests del 400: composable ×2, POS, tienda, cobro y
+  precuenta del salón.
+- Las tres pantallas en su versión de HEAD matan sus cuatro specs del 400, y `pos.vue` en HEAD
+  mata el Playwright.
+- Una guarda por mutante, y cada una mata solo su test: sin chequeo de clave, `limpiar()` sin
+  borrar, `catch` sin token, éxito sin borrar, helper sin corte por status, helper con detalle
+  local.
+- Los tests de red siguen en verde con el código viejo, y es lo esperado: ese mensaje no cambió.
+
+### Qué se hizo con el § 3: se deja como está, por decisión del owner
+
+Antes de mover el toaster se midió qué tapa cada posición. Lo medido contradijo la decisión, y
+el owner la cambió (AskUserQuestion de la orquestadora, 2026-10-08): **los avisos se quedan
+arriba a la derecha**. `app.vue` no cambió.
+
+**Cómo se midió:** una sonda de Playwright (no commiteada) en POS con un ítem en el carrito,
+tienda con un ítem y salón con una cuenta despachada. Se probó con el aviso real de "Error al
+enviar la comanda" y con 1 y 2 avisos inyectados. Por cada control visible se miró si el aviso
+lo pisa y si tapa su **centro** (`elementFromPoint`). Fue fuera de la ventana sin memoria de la
+VM: el RC del front quedó igual antes y después.
+
+En mobile el aviso ocupa el ancho entero (343 px de 375), así que **cualquier** posición de
+abajo tapa la barra de cobro y cualquiera de arriba tapa el encabezado. "Centro" quiere decir
+que el clic cae sobre el aviso.
+
+| Posición | 1280×720 | 375×812 |
+|---|---|---|
+| Arriba a la derecha (**la que queda**) | POS: "Caja abierta" y el menú de usuario; con 2 avisos, también el selector de documento. Salón: el menú de usuario y la fila de arriba de la cuenta (Tomar cuenta, Transferir, Ver historial, Salir de turno). La entrada midió además el Anular de la primera línea. Tienda: el menú de usuario | Encabezado (menú, "Caja abierta", usuario), el buscador y la primera fila del catálogo. Salón: "Cuentas" y el buscador |
+| Arriba al centro | Centro del buscador del catálogo en POS, tienda y salón, y "Entrar a turno". Nada que cobre | Igual que arriba a la derecha |
+| **Abajo a la derecha** (la decidida antes) | **Centro de Cobrar** (POS). **Centro de las cuatro de la barra del salón**: Enviar a cocina, Imprimir precuenta, Cancelar cuenta, Cerrar y cobrar. Tienda: nada | **Centro de Cobrar** (POS). **Pagar** o las tarjetas, según el scroll (tienda). Las cuatro de la barra del salón |
+| Abajo al centro | Ningún centro. Roza Enviar a cocina y Cancelar cuenta (salón) y, con 2 avisos, tarjetas del catálogo (tienda) | Cobrar y la barra del salón, como abajo a la derecha |
+| Abajo a la izquierda | El pie del menú lateral (Configuración, Cerrar sesión, Administración) y tarjetas del catálogo | Cobrar y la barra del salón, como abajo a la derecha |
+
+**Lo que pesó contra abajo a la derecha:** el aviso que contesta a un toque cae **encima del
+botón que se acaba de tocar**. Al tocar Enviar a cocina sin QZ, el error cae sobre la barra. Al
+tocar Cobrar con un 400 del motor, el motivo nuevo cae sobre Cobrar. Con el mouse ahí, el hover
+lo pausa (Reka) y queda fijo hasta que se mueve el mouse o se cierra. Es el mecanismo del flaky
+de Anular, pero sobre los botones de plata.
+
+El test de `anular-plato.spec.ts` sigue esperando a que se vayan los avisos antes de anular
+(paso 5b). Con la posición sin cambios, esa espera sigue haciendo falta.
+
+---
+
 ## Playwright entra al gate de cierre: criterio por rutas, secuencia y cómo leer la corrida (cerrada 2026-10-08)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Plan:

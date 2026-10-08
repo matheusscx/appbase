@@ -74,19 +74,6 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
-- [ ] **La previsualización no muestra el motivo de un 400 del motor** (frontend,
-  `composables/useCalculoPrecios.ts` → `useResultadoCalculado`; visto el 2026-10-08 por el frente del
-  guard del motor, que lo dejó afuera por decisión de la orquestadora). `ejecutar` atrapa el error de
-  `/calculo-precios/calcular` con un `catch` vacío, así que el mensaje del 400 se pierde. Al tocar
-  Cobrar o Pagar, las tres pantallas —POS (`pages/ventas/pos.vue`, `abrirCobro`), tienda
-  (`pages/tienda/index.vue`, `irAPagar`) y salones (`pages/salones/index.vue`, el cobro de la
-  cuenta)— muestran *"No se pudo calcular el total. Intentá de nuevo."*, y **el "intentá de nuevo"
-  miente**: reintentar no lo arregla, y quien cobra no sabe qué revisar. Vale para **cualquier** 400
-  del motor (el tope de unidades, el monto que no cabe, una regla que no existe), no solo para uno.
-  **Arreglo probable:** guardar el error en `useResultadoCalculado` y que los tres toasts usen
-  `apiErrorMsg`. La orquestadora lo toma en la tanda siguiente, junto con los avisos, que tocan la
-  misma capa.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -488,24 +475,6 @@ fiscal y va solo:
   (por ejemplo, si un componente de 0,5 cuenta como 1 para exigir sus grupos obligatorios, y cómo se
   cobran sus extras). Eso es diseño, no mecánica: brainstorm → spec → plan. Si toca cómo se cobran los
   extras, toca el motor y va solo.
-
-- [ ] **En la cuenta del salón, los avisos tapan los botones de la primera línea** (frontend, UX;
-  anotado el 2026-10-06 por el frente que arregló el flaky de `anular-plato`, a pedido de la
-  orquestadora). El toaster va arriba a la derecha (`app.vue`, `position: 'top-right'`, siempre
-  expandido) y ahí mismo está la columna de acciones de la cuenta. **Medido cuadro a cuadro con
-  1280×720:** con un aviso ("Cuenta abierta por…") el viewport de toasts ocupa y=16–104; al mandar a
-  cocina sin QZ Tray entra el de error y baja a y=212, y el centro del botón **Anular** de la
-  primera línea está en y=211. Quedan así ~4,8 s (lo que le queda de vida al primero). Y el hover
-  pausa los toasts, así que un garzón que apunta al botón tapado los congela encima: tiene que
-  correr el mouse o cerrarlos. El test ya no depende de esto (espera a que se vayan); el garzón sí.
-  **La pregunta para el owner:** ¿los avisos se mueven de lugar (abajo a la derecha, o arriba al
-  centro) para toda la app, se mueven solo en el salón, o se deja como está porque se van solos en
-  5 s?
-
-  ✅ **Contestado por el owner (2026-10-08, AskUserQuestion de la orquestadora): los avisos van abajo
-  a la derecha, en toda la app.** Falta construirlo: cambiar la posición del toaster en `app.vue` y
-  barrer las pantallas y los specs de Playwright que dependan de dónde aparecen los avisos. Playwright
-  entero, porque toca toda la UI.
 
 - [ ] **En una pasarela modo Mall, el código de comercio hijo lo escribe el propio local y nadie
   verifica que sea suyo** (producto + proceso de alta; anotado el 2026-10-08 al cerrar "la

@@ -463,3 +463,47 @@ test('el vuelto depende del método: con tarjeta no se puede devolver, con efect
     'cerrada',
   )
 })
+
+/**
+ * Precio exento al tope de lo que la columna admite (`< 10^14`): una unidad cabe,
+ * dos dan $146.913.578.024.690 y el motor las rechaza con 400 (el guard de
+ * `calculo-precios.service.ts`, `assertCabeEnLaVenta`). Molde del e2e de API
+ * `motor-monto-no-cabe.e2e-spec.ts`.
+ */
+const PRECIO_AL_TOPE = '73456789012345'
+
+test('Cobrar con un carrito que el motor rechaza dice por qué, y no abre el cobro', async ({
+  page,
+  request,
+}) => {
+  const nombre = `POS al tope ${Date.now()}`
+  const producto = await sembrarProducto(request, {
+    nombre,
+    precioBase: PRECIO_AL_TOPE,
+    clasificacionTributaria: 'exento',
+  })
+
+  await page.goto('/ventas/pos')
+  const tarjeta = tarjetaDeCatalogo(page, producto.id)
+  await tarjeta.click()
+  await tarjeta.click()
+
+  // El clic espera el cálculo del carrito actual (`asegurarVigente`), así que la
+  // respuesta que importa es la del 400 que dispara el propio Cobrar o el debounce.
+  const rechazo = page.waitForResponse(
+    (r) => r.url().endsWith('/calculo-precios/calcular') && r.status() === 400,
+  )
+  await page.getByRole('button', { name: 'Cobrar', exact: true }).click()
+  await rechazo
+
+  // Hasta el 2026-10-08 decía "No se pudo calcular el total. Intentá de nuevo.",
+  // que con un 400 miente: reintentar da lo mismo.
+  await expect(page.getByText('No se pudo calcular el total', { exact: true }).first()).toBeVisible()
+  await expect(
+    page.getByText(
+      `«${nombre}» da $146.913.578.024.690, y el sistema no puede guardar montos de $100.000.000.000.000 o más: revisá el precio y la cantidad`,
+    ).first(),
+  ).toBeVisible()
+  await expect(page.getByText('Intentá de nuevo')).toHaveCount(0)
+  await expect(page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })).toHaveCount(0)
+})

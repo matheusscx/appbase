@@ -228,6 +228,8 @@ let calculosPedidos: string[] = []
  * los ítems contra el catálogo vivo.
  */
 let calculoFalla = false
+/** Si no es `null`, `POST /calculo-precios/calcular` se rechaza con esto: el 400 del motor o un corte de red. */
+let calculoFallaCon: unknown = null
 /**
  * El `totalFinal` que devuelve el cálculo (y, coherente con él, el neto y el
  * total de la única línea). Es un knob y no una constante porque el modal de
@@ -616,6 +618,7 @@ mockNuxtImport('useApiFetch', () => {
       // resuelve los ítems contra el catálogo vivo (`items.service.ts` →
       // `cargarBasePorIds` filtra `eliminado_el IS NULL`).
       if (calculoFalla) return Promise.reject(new Error('Ítem no encontrado'))
+      if (calculoFallaCon !== null) return Promise.reject(calculoFallaCon)
       // La forma completa de `ResultadoVenta`, no la que este test consume: una
       // respuesta recortada le deja una trampa al próximo test que toque el
       // cobro, que lee `lineas[].trazas.impuestos`.
@@ -963,6 +966,7 @@ function reiniciarMock() {
   vinculoPersonal = null
   cuentasDeLaMesa = []
   calculoFalla = false
+  calculoFallaCon = null
   calculoRetenido = null
   totalDelCalculo = '5000'
   patchCantidadFalla = false
@@ -6995,6 +6999,67 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
       const aviso = toasts.find(t => (t.title ?? '').includes('otros datos'))
       expect(aviso?.actions?.map(a => a.label)).toEqual(['Ver venta'])
       expect(toasts.some(t => (t.title ?? '').startsWith('Error al cerrar la cuenta'))).toBe(false)
+    })
+  })
+
+  describe('un cálculo que falla dice por qué', () => {
+    // Hasta el 2026-10-08 el cobro y la precuenta decían "Intentá de nuevo" ante
+    // cualquier fallo de `/calcular`: con un 400 del motor, reintentar da lo mismo.
+    const error400 = Object.assign(new Error('400'), {
+      status: 400,
+      data: { statusCode: 400, message: 'La cantidad 99999999999 supera el máximo permitido para la línea 1.' },
+    })
+    const errorDeRed = new Error('[POST] "http://api/calcular": <no response> fetch failed')
+
+    /** Abre la cuenta con el cálculo sano y después lo rompe con una edición, que es
+     *  como llega el garzón: la cuenta cambió y el total de ahora no se puede calcular. */
+    async function cuentaConCalculoQueFalla(error: unknown) {
+      catalogoItemsMock = [producto('20.0000', '10.0000')]
+      cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+      impresorasBoleta = [impresoraDeBoleta()]
+      const wrapper = await montar()
+      await abrirLaCuenta(wrapper)
+      await esperar(400)
+      calculoFallaCon = error
+      wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+        .vm.$emit('change', { presentacion: '2', unidadCodigo: 'unidad', cantidadCanonica: '2.0000' })
+      await esperar(400)
+      toasts = []
+      return wrapper
+    }
+
+    it('Cerrar y cobrar con un 400 del motor muestra el motivo y no abre el cobro', async () => {
+      const wrapper = await cuentaConCalculoQueFalla(error400)
+      botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+      await esperar(50)
+
+      expect(toasts).toEqual([{
+        title: 'No se pudo calcular el total de la cuenta',
+        description: 'La cantidad 99999999999 supera el máximo permitido para la línea 1.',
+        color: 'error',
+      }])
+      expect(wrapper.findComponent({ name: 'VentasCobroModal' }).props('open')).toBe(false)
+    })
+
+    it('Cerrar y cobrar con un corte de red pide reintentar', async () => {
+      await cuentaConCalculoQueFalla(errorDeRed)
+      botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+      await esperar(50)
+
+      expect(toasts).toEqual([{ title: 'No se pudo calcular el total de la cuenta. Intentá de nuevo.', color: 'error' }])
+    })
+
+    it('la precuenta con un 400 del motor muestra el motivo y no imprime', async () => {
+      await cuentaConCalculoQueFalla(error400)
+      botonEn(drawerMesa(), 'Imprimir precuenta')!.click()
+      await esperar(50)
+
+      expect(toasts).toEqual([{
+        title: 'No se pudo calcular el total de la cuenta',
+        description: 'La cantidad 99999999999 supera el máximo permitido para la línea 1.',
+        color: 'error',
+      }])
+      expect(impresionesQz).toEqual([])
     })
   })
 })

@@ -1,4 +1,5 @@
 import type { Ref } from 'vue'
+import { apiErrorMsg } from '~/utils/api-error'
 import { useApiFetch } from './useApiFetch'
 import type { PersonalizacionPayload } from './useRecetaPersonalizacion'
 
@@ -147,6 +148,34 @@ export function useCalculoPrecios() {
 }
 
 /**
+ * El aviso para un cálculo que no se pudo hacer, según **por qué** no se pudo.
+ *
+ * Un 4xx es el motor diciendo que el carrito no se puede calcular —el tope de
+ * unidades, un monto que no cabe, una regla que no existe—: reintentar da lo
+ * mismo, así que el aviso lleva el motivo que mandó el servidor. Un error de red
+ * o un 5xx sí puede salir distinto la próxima vez, y ahí el "intentá de nuevo" es
+ * verdad. Hasta el 2026-10-08 los dos decían "Intentá de nuevo": quien cobraba
+ * reintentaba sin saber qué revisar.
+ *
+ * Sin reintento automático: la app avisa y la persona decide.
+ *
+ * `detalleLocal: false` porque el `message` de un error de red de ofetch trae la
+ * URL del backend, que no le dice nada a quien cobra.
+ */
+export function avisoCalculoFallido(
+  e: unknown,
+  titulo = 'No se pudo calcular el total',
+): { title: string, description?: string } {
+  const status = (e as { status?: number })?.status
+    ?? (e as { response?: { status?: number } })?.response?.status
+  if (status !== undefined && status >= 400 && status < 500) {
+    const motivo = apiErrorMsg(e, '', { detalleLocal: false })
+    if (motivo) return { title: titulo, description: motivo }
+  }
+  return { title: `${titulo}. Intentá de nuevo.` }
+}
+
+/**
  * Estado del último cálculo de un carrito, atado al carrito que lo produjo.
  *
  * El cruce línea↔resultado es **por índice**, que es lo correcto: dos líneas del
@@ -172,6 +201,12 @@ export function useCalculoPrecios() {
  * `asegurarVigente()` y **construyen con lo que devuelve** (ticket, totales
  * impresos, proyección de caja), no releyendo el ref.
  *
+ * **`error` es el motivo del último cálculo fallido de ESTE carrito**, atado a su
+ * clave igual que el resultado: un fallo de otro carrito no lo explica. Cuando
+ * `asegurarVigente()` devuelve `null`, la pantalla lo pasa a
+ * `avisoCalculoFallido` para decir por qué, en vez de un "intentá de nuevo" que
+ * con un 400 del motor miente.
+ *
  * @param input     Getter del input de cálculo. `null` o sin líneas = carrito vacío.
  * @param debounceMs Si se pasa, el composable recalcula solo con ese retardo tras
  *   cada cambio del input (POS y tienda, donde el carrito cambia tecla a tecla).
@@ -196,6 +231,9 @@ export function useResultadoCalculado(
   const loading: Ref<boolean> = persistKey
     ? useState(`${persistKey}-loading`, () => false)
     : ref(false)
+  const fallo: Ref<{ clave: string, error: unknown } | null> = persistKey
+    ? useState<{ clave: string, error: unknown } | null>(`${persistKey}-fallo`, () => null)
+    : ref(null)
 
   function clave(i: CalcularVentaInput | null): string | null {
     return i && i.lineas.length > 0 ? JSON.stringify(i) : null
@@ -205,6 +243,11 @@ export function useResultadoCalculado(
   /** ¿El resultado guardado corresponde al carrito actual? Con el carrito vacío
    *  y el resultado limpio ambas claves son `null`: consistente, no obsoleto. */
   const vigente = computed(() => claveResultado.value === claveActual.value)
+  /** El error del último cálculo de ESTE carrito, si falló; `null` si no falló o
+   *  si el que falló era de otro carrito. */
+  const error = computed(() =>
+    fallo.value && fallo.value.clave === claveActual.value ? fallo.value.error : null,
+  )
 
   // El token también va en `useState` cuando el estado se comparte: `useTiendaCarrito()`
   // se instancia en tres páginas, y si el token fuera local el `limpiar()` de una no
@@ -218,6 +261,7 @@ export function useResultadoCalculado(
     if (clv === null || inp === null) {
       resultado.value = null
       claveResultado.value = null
+      fallo.value = null
       loading.value = false
       return
     }
@@ -227,13 +271,16 @@ export function useResultadoCalculado(
       if (mio !== token.value) return
       resultado.value = r
       claveResultado.value = clv
+      fallo.value = null
     }
-    catch {
+    catch (e: unknown) {
       // No se toca el resultado guardado: la vigencia ya dice si sirve. Si el
       // cálculo que falló era de OTRO carrito, el guardado queda fuera de
       // vigencia igual (nadie lo va a mostrar ni a cobrar); si era de ESTE, el
       // guardado sigue siendo el bueno y borrarlo dejaría el total en cero por
       // un error de red — con el modal de cobro abierto, incluso.
+      // Lo que sí se guarda es el motivo, con la clave del carrito que falló.
+      if (mio === token.value) fallo.value = { clave: clv, error: e }
     }
     finally {
       if (mio === token.value) loading.value = false
@@ -269,6 +316,7 @@ export function useResultadoCalculado(
     enVuelo = null
     resultado.value = null
     claveResultado.value = null
+    fallo.value = null
     loading.value = false
   }
 
@@ -289,5 +337,5 @@ export function useResultadoCalculado(
     if (getCurrentScope()) onScopeDispose(() => { if (timer) clearTimeout(timer) })
   }
 
-  return { resultado, loading, vigente, recalcular, asegurarVigente, limpiar }
+  return { resultado, loading, vigente, error, recalcular, asegurarVigente, limpiar }
 }

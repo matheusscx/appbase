@@ -55,6 +55,7 @@ export function useTiendaCarrito() {
     resultado,
     loading: loadingCalculo,
     vigente,
+    error: errorCalculo,
     asegurarVigente,
     limpiar: limpiarResultado,
   } = useResultadoCalculado(
@@ -121,6 +122,7 @@ export function useTiendaCarrito() {
     resultado,
     loadingCalculo,
     vigente,
+    errorCalculo,
     asegurarVigente,
     checkout,
     add,

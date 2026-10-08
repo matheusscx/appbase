@@ -536,6 +536,7 @@ export function useVenta() {
     resultado,
     loading: loadingCalculo,
     vigente,
+    error: errorCalculo,
     asegurarVigente,
     limpiar: limpiarResultado,
   } = useResultadoCalculado(() => toCalcularInput(lineas.value), { debounceMs: 300 })
@@ -596,6 +597,7 @@ export function useVenta() {
     resultado,
     loadingCalculo,
     vigente,
+    errorCalculo,
     asegurarVigente,
     add,
     quitar,

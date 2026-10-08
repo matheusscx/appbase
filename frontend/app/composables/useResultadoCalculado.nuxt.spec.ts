@@ -13,6 +13,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { ref, effectScope } from 'vue'
 import {
+  avisoCalculoFallido,
   useResultadoCalculado,
   type CalcularVentaInput,
   type ResultadoVenta,
@@ -327,5 +328,120 @@ describe('useResultadoCalculado — debounce', () => {
     // pasado el retardo no hay un segundo cálculo.
     await vi.advanceTimersByTimeAsync(500)
     expect(apiMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+/** Lo que tira `$fetch` (ofetch) ante una respuesta HTTP: `status` y el cuerpo en `data`. */
+function errorHttp(status: number, message: string | string[]) {
+  return Object.assign(new Error(`[POST] "http://api:3000/api/calculo-precios/calcular": ${status}`), {
+    status,
+    data: { statusCode: status, message },
+  })
+}
+/** Un corte de red: ofetch no trae `status` y el `message` lleva la URL del backend. */
+const errorDeRed = () => new Error('[POST] "http://api:3000/api/calculo-precios/calcular": <no response> fetch failed')
+
+describe('useResultadoCalculado — el motivo del fallo', () => {
+  // Hasta el 2026-10-08 el `catch` estaba vacío: un 400 del motor llegaba a la
+  // pantalla como un `null` sin motivo y las tres decían "Intentá de nuevo".
+  it('guarda el error del cálculo que falló para el carrito actual', async () => {
+    const carrito = ref(input(['A']))
+    const e = errorHttp(400, 'La cantidad supera el máximo permitido')
+    apiMock.mockRejectedValueOnce(e)
+    const { error, asegurarVigente } = useResultadoCalculado(() => carrito.value)
+
+    expect(await asegurarVigente()).toBeNull()
+    expect(error.value).toBe(e)
+  })
+
+  it('el error de OTRO carrito no explica el actual', async () => {
+    const carrito = ref(input(['A']))
+    apiMock.mockRejectedValueOnce(errorHttp(400, 'Motivo de A'))
+    const { error, recalcular } = useResultadoCalculado(() => carrito.value)
+    await recalcular()
+
+    carrito.value = input(['A', 'B'])
+    expect(error.value).toBeNull()
+  })
+
+  it('un cálculo que sale bien borra el motivo anterior', async () => {
+    const carrito = ref(input(['A']))
+    apiMock.mockRejectedValueOnce(errorHttp(400, 'Motivo'))
+    apiMock.mockResolvedValueOnce(resultadoDe(['A']))
+    const { error, recalcular } = useResultadoCalculado(() => carrito.value)
+    await recalcular()
+    expect(error.value).not.toBeNull()
+
+    await recalcular()
+    expect(error.value).toBeNull()
+  })
+
+  it('limpiar() se lleva el motivo con el carrito', async () => {
+    const carrito = ref(input(['A']))
+    apiMock.mockRejectedValueOnce(errorHttp(400, 'Motivo'))
+    const { error, recalcular, limpiar } = useResultadoCalculado(() => carrito.value)
+    await recalcular()
+
+    limpiar()
+    expect(error.value).toBeNull()
+  })
+
+  it('una respuesta obsoleta que falla no escribe el motivo', async () => {
+    const carrito = ref(input(['A']))
+    const viejo = diferido()
+    const nuevo = diferido()
+    apiMock.mockReturnValueOnce(viejo.promesa).mockReturnValueOnce(nuevo.promesa)
+    const { error, recalcular } = useResultadoCalculado(() => carrito.value)
+
+    const p1 = recalcular()
+    carrito.value = input(['B'])
+    const p2 = recalcular()
+    nuevo.resolver(resultadoDe(['B']))
+    await p2
+    carrito.value = input(['A'])
+    viejo.rechazar(errorHttp(400, 'Motivo del viejo'))
+    await p1
+
+    expect(error.value).toBeNull()
+  })
+})
+
+describe('avisoCalculoFallido', () => {
+  it('un 400 del motor lleva el motivo del servidor, sin "intentá de nuevo"', () => {
+    expect(avisoCalculoFallido(errorHttp(400, 'La cantidad supera el máximo permitido'))).toEqual({
+      title: 'No se pudo calcular el total',
+      description: 'La cantidad supera el máximo permitido',
+    })
+  })
+
+  it('el array del ValidationPipe se une en una sola línea', () => {
+    expect(avisoCalculoFallido(errorHttp(400, ['a inválido', 'b inválido'])).description)
+      .toBe('a inválido, b inválido')
+  })
+
+  it('un error de red pide reintentar y no muestra la URL del backend', () => {
+    const aviso = avisoCalculoFallido(errorDeRed())
+    expect(aviso).toEqual({ title: 'No se pudo calcular el total. Intentá de nuevo.' })
+  })
+
+  it('un 5xx pide reintentar aunque traiga mensaje', () => {
+    expect(avisoCalculoFallido(errorHttp(500, 'Internal server error')))
+      .toEqual({ title: 'No se pudo calcular el total. Intentá de nuevo.' })
+  })
+
+  it('sin error (el carrito quedó vacío) pide reintentar, como antes', () => {
+    expect(avisoCalculoFallido(null)).toEqual({ title: 'No se pudo calcular el total. Intentá de nuevo.' })
+  })
+
+  it('un 4xx sin mensaje no inventa uno: pide reintentar', () => {
+    const e = Object.assign(new Error('[POST] url: 400'), { status: 400, data: {} })
+    expect(avisoCalculoFallido(e)).toEqual({ title: 'No se pudo calcular el total. Intentá de nuevo.' })
+  })
+
+  it('respeta el título de la pantalla', () => {
+    expect(avisoCalculoFallido(errorDeRed(), 'No se pudo calcular el total de la cuenta'))
+      .toEqual({ title: 'No se pudo calcular el total de la cuenta. Intentá de nuevo.' })
+    expect(avisoCalculoFallido(errorHttp(400, 'Motivo'), 'No se pudo calcular el total de la cuenta'))
+      .toEqual({ title: 'No se pudo calcular el total de la cuenta', description: 'Motivo' })
   })
 })

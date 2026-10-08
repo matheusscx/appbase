@@ -8,7 +8,7 @@ const apiUrl = config.public.apiUrl
 const toast = useToast()
 const unidadesStore = useUnidadesMedidaStore()
 
-const { lineas, resultado, loadingCalculo, vigente, asegurarVigente, add, quitar, cambiarCantidadPresentacion, pagar } = useTiendaCarrito()
+const { lineas, resultado, loadingCalculo, vigente, errorCalculo, asegurarVigente, add, quitar, cambiarCantidadPresentacion, pagar } = useTiendaCarrito()
 
 const catalogo = useCatalogoVenta({
   tipos: ['producto'],
@@ -45,7 +45,7 @@ async function irAPagar() {
     // ese total sea el de su carrito. El monto lo recalcula el backend igual,
     // pero mostrar uno y cobrar otro no es una diferencia que le toque descubrir.
     if (!await asegurarVigente()) {
-      toast.add({ title: 'No se pudo calcular el total. Intentá de nuevo.', color: 'error' })
+      toast.add({ ...avisoCalculoFallido(errorCalculo.value), color: 'error' })
       pagando.value = false
       return
     }
