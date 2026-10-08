@@ -74,6 +74,21 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
+- [ ] **La suscripción de la tienda descarta el error de `/calcular` y deja pagar sin total**
+  (frontend, `frontend/app/pages/tienda/suscripciones.vue`, que usa `useResultadoCalculado` en la
+  línea 171 y no lee su error; visto el 2026-10-08 por el domain-reviewer del frente "la
+  previsualización dice el motivo de un 400", **leído, no medido**). Con un 400 de `/calcular`, el
+  drawer muestra "Total a cobrar por período: —" sin decir por qué, y "Suscribirme y pagar" queda
+  habilitado. **Arreglo:** el mismo que el POS, la tienda y el salón. Usar `avisoCalculoFallido`
+  (`composables/useCalculoPrecios.ts`) para el motivo y deshabilitar el botón mientras no haya un
+  total, con su spec de pantalla y el mutante.
+
+- [ ] **Un 401 que termina en logout muestra "Unauthorized" un instante en el aviso del cálculo**
+  (frontend, `avisoCalculoFallido` en `composables/useCalculoPrecios.ts`; cosmético, lo introdujo
+  el frente del motivo del 400 y lo vio su revisor, **leído, no medido**). La rama del motivo toma
+  cualquier 4xx, también un 401 cuyo refresh falla, así que el toast dice "Unauthorized" justo antes
+  de ir al login. **Arreglo:** excluir el 401 de esa rama, con un unitario.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
