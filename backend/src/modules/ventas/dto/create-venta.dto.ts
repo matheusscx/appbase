@@ -27,6 +27,7 @@ import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorat
 import { PropinaCierreMesaDto } from './propina-cierre-mesa.dto';
 import { PropinaDirectaDto } from './propina-directa.dto';
 import { MAX_UNIDADES_POR_VENTA } from '../../../common/utils/tope-unidades-venta.util';
+import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
 export class LineaVentaDto {
   @IsUUID()
@@ -58,7 +59,11 @@ export class LineaVentaDto {
   @IsUUID()
   loteId?: string; // modo 'lote' salida
 
+  // `IsObject` además de `ValidateNested`: este deja pasar un array, que se
+  // aceptaba con 201 guardando `omitidos: []` y descontando el ingrediente
+  // omitido (medido el 2026-10-08).
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => PersonalizacionRecetaDto)
   personalizacion?: PersonalizacionRecetaDto;
@@ -200,7 +205,12 @@ export class CreateVentaDto {
   @IsUUID()
   tipoDocumentoId?: string;
 
+  // En minúsculas: el motor lo busca entre los métodos de cada regla, que vienen
+  // de la base, y en mayúsculas la venta se calculaba sin el recargo por método
+  // de pago (medido el 2026-10-08: el pago exacto con recargo daba 400 "El pago
+  // supera el total").
   @IsOptional()
+  @IdEnMinusculas()
   @IsUUID()
   metodoPagoId?: string;
 
@@ -208,15 +218,20 @@ export class CreateVentaDto {
   @IsArray()
   // Reglas del catálogo del tenant. Sin repetidos: repetido, el motor aplicaba
   // la regla una vez por repetición (un 201 con total 0, medido 2026-10-06).
+  // En minúsculas ANTES de `@ArrayUnique`, que compara strings exactos: sin
+  // eso `[D, d]` pasaba como dos ids, y un id solo en mayúsculas daba 400 "no
+  // encontrado" porque el mapa del motor tiene los de la base.
   @ArrayMaxSize(50)
+  @IdEnMinusculas()
   @ArrayUnique()
   @IsUUID(undefined, { each: true })
   descuentosVentaIds?: string[];
 
   @IsOptional()
   @IsArray()
-  // Mismo tope y misma razón que `descuentosVentaIds`.
+  // Mismo tope, mismas minúsculas y misma razón que `descuentosVentaIds`.
   @ArrayMaxSize(50)
+  @IdEnMinusculas()
   @ArrayUnique()
   @IsUUID(undefined, { each: true })
   recargosVentaIds?: string[];

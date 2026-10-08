@@ -74,6 +74,36 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
+- [ ] **`pagos[].metodoPagoId` en mayúsculas es 400 "Método de pago no habilitado para este
+  tenant"** (backend, `PagoVentaDto.metodoPagoId` en `ventas/dto/create-venta.dto.ts`, que también
+  usa `CerrarCuentaDto.pagos`; medido por HTTP el 2026-10-08 por el frente de los ids que entran al
+  motor, que no lo tocó porque este id no entra al motor). `POST /ventas` con
+  `pagos: [{ metodoPagoId: EFECTIVO.toUpperCase(), … }]` → 400: `pagos.service.ts:234` busca el id
+  con el casing del cliente en un mapa armado con los de la base. Es un 400 que miente: el método
+  está habilitado. **Arreglo:** `@IdEnMinusculas()` en el campo (`common/decorators/`, el mismo del
+  motor), con su e2e (en mayúsculas, el pago se guarda) y el mutante. Antes, barrer los demás
+  lectores de `p.metodoPagoId` en `pagos.service.ts` (vuelto, emisor, caja) por si alguno compara
+  y hoy no se ve porque el gate de arriba corta primero.
+
+- [ ] **Un array como elemento de `extras`, `grupos`, `opciones` o `componentes` de la
+  personalización pasa el pipe** (backend, `common/dto/personalizacion-receta.dto.ts`, los cinco
+  `@ValidateNested({ each: true })`; visto el 2026-10-08 por el `api-security-reviewer` del frente de
+  la personalización, que lo midió contra el pipe real). `extras: [[]]`, `grupos: [[]]` y
+  `opciones: [[]]` validan, porque `ValidateNested` no mira adentro de un `[]`. **No escribe nada:**
+  el service lo rechaza con 400 porque el id queda `undefined` y no matchea el catálogo, pero con un
+  mensaje que miente (*"La opción undefined no pertenece al grupo…"*, *"Extra no permitido"*).
+  **Arreglo:** `@IsObject({ each: true })` en los cinco, con un e2e por campo y su mutante.
+
+- [ ] **`TransferirCuentaAdminDto.garzonId` en mayúsculas registra una transferencia del garzón a
+  sí mismo** (backend, `salones/dto/transferir-cuenta.dto.ts`; visto el 2026-10-08 por la revisión
+  independiente del frente de los ids del motor, **por lectura, no medido**). Va crudo a
+  `cuenta-asignaciones.service.ts`, donde `transferir` compara `cuenta.garzonResponsableId ===
+  destinoGarzonId` (la base, en minúsculas, contra el casing del cliente): con el garzón actual en
+  mayúsculas el guard "El garzón ya es responsable" no salta, se cierra el tramo vigente y se abre
+  una asignación self→self con motivo `TRANSFERENCIA_ADMIN`. Es auditoría ensuciada, no plata.
+  Gemelo menor: `FusionarCuentasDto.cuentaIds` con `[X, x]` pasa `@ArrayUnique` y termina en un 400
+  con mensaje impreciso, sin efecto en datos. **Arreglo:** medirlo por HTTP y, si se confirma,
+  `@IdEnMinusculas()` (`common/decorators/`) en los dos, con su e2e y su mutante.
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -89,38 +119,14 @@ destapa una decisión que no es mía).
   - **Qué no cubre.** (1) **No hay forma de crear la venta después**: no existe un "reintentar el callback". `POST /pasarela/ordenes/:id/verificar` solo acepta `en_proceso`/`expirada` (`cobros.service.ts:1393`), y aunque existiera, recalcularía con un tercer "ahora". (2) **Nadie se entera**: no hay aviso al admin, solo el log. (3) **El comprador ve "Pago aprobado. Tu compra fue registrada correctamente."** (`tienda/retorno.vue:88-91`): `urlRetornoApp` (`pagos-redirect.service.ts:75-76`) manda `estado=pagada` igual con la orden sin venta, y la pantalla solo esconde el botón "Ver detalle de la venta".
   - **Lo que hay que decidir** (diseño aparte, no de arrastre): congelar en el snapshot de la orden lo que el checkout cobró (el total, o las líneas resueltas, como `reglasCongeladas` del salón) y que el callback lo respete, o calcular el callback con el instante del checkout. Y por separado, que una orden pagada sin venta avise y no le diga al comprador que su compra quedó registrada.
 
-- [ ] **Entradas sin cota que dan 500 o trabajo lineal, y una trampa del `@ArrayUnique`** (backend, DTOs; leído por el api-security-reviewer y el domain-reviewer del frente de topes de los DTOs, 2026-10-06, **no corrido**).
+- [ ] **Entradas sin cota que dan 500 o trabajo lineal** (backend, DTOs; leído por el api-security-reviewer y el domain-reviewer del frente de topes de los DTOs, 2026-10-06, **no corrido**).
   - **B2:** `ComboComponenteInputDto.cantidad` sin máximo (`create-item.dto.ts:109-110`) controla un loop por unidad en cada venta personalizada del combo (`items.service.ts:4115-4116`).
     **Medido el 2026-10-06** por el frente de la cantidad grande con promo, `POST /calculo-precios/calcular` de un combo con un componente de receta con un grupo opcional, eligiendo una opción en la última unidad: 10³ → 17–20 ms, 10⁴ → 28–31 ms, 10⁵ → 114–115 ms. Sin elegir nada, 10⁵ → 13 ms. Lineal, ~1 µs por unidad del componente. **No entró en ese frente:** lo maneja la configuración del combo, que la carga el admin del tenant, y no la `cantidad` de la venta. El tope de 99.999 unidades por venta no lo acota (la personalización se resuelve una vez por línea, no por unidad vendida). Se cierra con un máximo en `ComboComponenteInputDto.cantidad`, y cuántas unidades puede llevar un componente de un combo es regla del owner.
-  - **B3:** `unidades` de los extras de la personalización (`personalizacion-receta.dto.ts:57-60`) sin máximo: multiplica precio y stock hasta desbordar `NUMERIC` (500).
-  - **B4/B5:** enteros sin `@Max` que dan 500 por desborde de `int`: `min`/`max` de `ItemGrupoModificadorInputDto`, `numeroCuotas` (que además acepta negativos: `create-pago.dto.ts:43`, `create-venta.dto.ts:103`), `orden`, `duracionEstimada`, `diasVencimiento`, `cadaN` y `ScopePromoDto.cantidad`.
+  - **B4/B5:** enteros sin `@Max` que dan 500 por desborde de `int`: `min`/`max` de `ItemGrupoModificadorInputDto`, `numeroCuotas` (que además acepta negativos: `pagos/dto/create-pago.dto.ts:43`, `create-venta.dto.ts:89`), `orden`, `duracionEstimada`, `diasVencimiento`, `cadaN` y `ScopePromoDto.cantidad`.
   - **B6:** strings sin `@MaxLength` (`comentario`, `referencia`, `descripcion`, `nombre`, `codigoLote`, `motivoAjuste`, rut/teléfono/email del customer), acotados por el body de 100 kB.
   - **Repetidos que llegan a la base:** `CreateItemDto.impuestosIds/recargosIds/descuentosIds` y `ScopePromoDto.itemIds` aceptan ids repetidos; se insertan de a uno o en lote contra una PK compuesta, así que probablemente dan 500.
-  - **Trampa del `@ArrayUnique`** de los ids de reglas: compara strings exactos. Hoy `[D, D.toUpperCase()]` da 400 "no encontrado", porque `requerir` (`calculo-precios.service.ts:1047-1053`) no pasa a minúsculas, y eso ya es un 400 que miente para un único id en mayúsculas. Si alguien arregla ese 400 aliasando el mapa, el par pasa y la regla se aplica dos veces. El arreglo correcto es pasar a minúsculas en el borde (un `@Transform` en el DTO) antes de comparar repetidos: patrón de `patterns/backend.md` "Un UUID validado puede venir en mayúsculas".
 
 - [ ] **Una cuenta de salón no tiene tope de líneas y la precuenta sí** (backend, `SalonesService.agregarLinea`, `salones.service.ts:852`; anotado por el frente de topes de los DTOs, 2026-10-06). La precuenta (`useSalones.ts:356`) manda todas las líneas de la cuenta a `/calcular`, que corta en 500 (`CalcularVentaDto.lineas`). Dos pedidos del mismo plato con distinta personalización son dos líneas, y una fusión las suma. Una cuenta con más de 500 líneas distintas se queda sin precuenta, aunque cerrarla sigue andando. **Salida probable:** tope de líneas por cuenta en `agregarLinea` y `fusionarCuentas` (400 al pasarse), con el mismo número que `CalcularVentaDto.lineas`.
-
-- [ ] **`personalizacion` como array: la venta descarta las omisiones y descuenta el ingrediente
-  omitido** (backend, `LineaVentaDto.personalizacion`, `LineaDto.personalizacion` de
-  `calculo-precios` y `AddLineaDto.personalizacion`; medido por HTTP el 2026-10-06 por el frente que
-  le puso `@IsObject()` a los otros ocho objetos únicos, y no tocado por exclusión de la
-  orquestadora). Son los tres que quedaron de "Once campos de objeto único con `@ValidateNested()` y
-  sin `@IsObject()`" ([`resueltos.md`](resueltos.md)). **Medido:**
-  - `POST /ventas`, receta con un ingrediente no bloqueante: `personalizacion: { omitidos: [X] }` →
-    201, `venta_detalles.personalizacion` con `omitidos: [X]` y sin movimiento de X. Con
-    `personalizacion: [{ omitidos: [X] }]` o `[]` → **201**, guardada con `omitidos: []`, y **X se
-    descuenta del stock** (`movimientos_inventario`, motivo `venta`). La cocina recibe el plato
-    entero y el inventario se mueve.
-  - Si el ítem tiene un grupo obligatorio ("Proteína" de la Hamburguesa Especial del seed), el array
-    da 400 "El grupo … requiere elegir…", porque la elección del grupo se perdió con el resto.
-  - `/calculo-precios/calcular`: 201 y la personalización ignorada.
-  - `POST /cuentas/:id/lineas` (`AddLineaDto`): **no medido**.
-
-  **Salida probable:** `@IsObject()` junto al `@ValidateNested()`, con un e2e por campo
-  (`backend/test/topes-dto.e2e-spec.ts` tiene el patrón). Según la Sesión de esfuerzo máximo, con el
-  criterio de conducta tampoco necesitaría el sistema quieto: un `@IsObject()` solo rechaza, y un
-  pedido aceptado le da al motor lo mismo que hoy. Falta la medición de `AddLineaDto` y que la
-  orquestadora le dé frente.
 
 - [ ] **`POST /cuentas/:id/comanda` escribe líneas de cualquier cuenta del tenant** (backend,
   `SalonesService.confirmarComanda`, `salones.service.ts:2979-2985`; leído, **no corrido**, por un
@@ -571,6 +577,15 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
+
+- [ ] **El drawer deja tipear más unidades de un extra que las que acepta el backend** (frontend,
+  `frontend/app/components/ventas/ItemPersonalizacionDrawer.vue:422`, el `UInputNumber` de la cantidad del extra: `:min="1"` y sin
+  `:max`; anotado el 2026-10-08 por el frente que le puso `@Max(MAX_UNIDADES_EXTRA)` a
+  `PersonalizacionExtraInputDto.unidades`). Con 100 el garzón ve el 400 *"…Un extra se puede agregar
+  hasta 99 veces por plato"*. **La pregunta: ¿99 por plato?** El 99 es tentativo hasta que el owner lo
+  confirme (lo lleva la Sesión de esfuerzo máximo). **Arreglo:** `:max` gemelo exacto del backend
+  (orquestadora, 2026-10-08) —back y front no comparten paquete, así que la constante va duplicada
+  con un comentario que nombre la otra—, y Playwright entero porque toca front.
 
 - [ ] **Un `REFUND` marcado "Sin nota de crédito" cuya venta ya está corregida entera por otras
   notas no tiene salida** (backend + producto; anotado el 2026-10-04 al cerrar "Generar nota",

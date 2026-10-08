@@ -23,6 +23,118 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La personalización es un objeto, sus extras tienen tope, y los ids que entran al motor van en minúsculas (cerrada 2026-10-08)
+
+Sale de [`pendientes.md`](pendientes.md) § 2: la entrada de `personalizacion` como array entera, y
+**B3** y **la trampa del `@ArrayUnique`** de "Entradas sin cota…" (el resto de esa entrada lo cierra
+otro frente). Va solo en el motor, como pide `CLAUDE.md`. Plan:
+[`2026-10-08-personalizacion-e-ids-del-motor.md`](../superpowers/plans/2026-10-08-personalizacion-e-ids-del-motor.md).
+
+### Las entradas que cierra, como estaban en `pendientes.md` § 2
+
+- [ ] **`personalizacion` como array: la venta descarta las omisiones y descuenta el ingrediente
+  omitido** (backend, `LineaVentaDto.personalizacion`, `LineaDto.personalizacion` de
+  `calculo-precios` y `AddLineaDto.personalizacion`; medido por HTTP el 2026-10-06 por el frente que
+  le puso `@IsObject()` a los otros ocho objetos únicos, y no tocado por exclusión de la
+  orquestadora). Son los tres que quedaron de "Once campos de objeto único con `@ValidateNested()` y
+  sin `@IsObject()`" ([`resueltos.md`](resueltos.md)). **Medido:**
+  - `POST /ventas`, receta con un ingrediente no bloqueante: `personalizacion: { omitidos: [X] }` →
+    201, `venta_detalles.personalizacion` con `omitidos: [X]` y sin movimiento de X. Con
+    `personalizacion: [{ omitidos: [X] }]` o `[]` → **201**, guardada con `omitidos: []`, y **X se
+    descuenta del stock** (`movimientos_inventario`, motivo `venta`). La cocina recibe el plato
+    entero y el inventario se mueve.
+  - Si el ítem tiene un grupo obligatorio ("Proteína" de la Hamburguesa Especial del seed), el array
+    da 400 "El grupo … requiere elegir…", porque la elección del grupo se perdió con el resto.
+  - `/calculo-precios/calcular`: 201 y la personalización ignorada.
+  - `POST /cuentas/:id/lineas` (`AddLineaDto`): **no medido**.
+
+  **Salida probable:** `@IsObject()` junto al `@ValidateNested()`, con un e2e por campo
+  (`backend/test/topes-dto.e2e-spec.ts` tiene el patrón). Según la Sesión de esfuerzo máximo, con el
+  criterio de conducta tampoco necesitaría el sistema quieto: un `@IsObject()` solo rechaza, y un
+  pedido aceptado le da al motor lo mismo que hoy. Falta la medición de `AddLineaDto` y que la
+  orquestadora le dé frente.
+
+De "Entradas sin cota que dan 500 o trabajo lineal, y una trampa del `@ArrayUnique`":
+
+  - **B3:** `unidades` de los extras de la personalización (`personalizacion-receta.dto.ts:57-60`) sin máximo: multiplica precio y stock hasta desbordar `NUMERIC` (500).
+  - **Trampa del `@ArrayUnique`** de los ids de reglas: compara strings exactos. Hoy `[D, D.toUpperCase()]` da 400 "no encontrado", porque `requerir` (`calculo-precios.service.ts:1047-1053`) no pasa a minúsculas, y eso ya es un 400 que miente para un único id en mayúsculas. Si alguien arregla ese 400 aliasando el mapa, el par pasa y la regla se aplica dos veces. El arreglo correcto es pasar a minúsculas en el borde (un `@Transform` en el DTO) antes de comparar repetidos: patrón de `patterns/backend.md` "Un UUID validado puede venir en mayúsculas".
+
+### Qué se midió (por HTTP, base nueva, 2026-10-08)
+
+- **`metodoPagoId` en mayúsculas cobra de menos, en silencio.** Es lo más grave y la entrada no lo
+  nombraba: un servicio de $1.000 con un recargo del 3% con tarjeta de crédito, en `/calcular` con
+  el id en mayúsculas, da $1.190 en vez de $1.226 (`totalRecargos` 0 en vez de 30). La venta calcula
+  igual: pagada con los $1.226 que corresponden da 400 *"El pago supera el total…"* (no se midió
+  una venta pagada con $1.190, que es la que cobraría de menos). Causa: `evaluarRegla` filtra con
+  `regla.metodoPagoIds.includes(ctx.metodoPagoId)`, ids de la base contra el casing del cliente.
+- **La trampa, confirmada:** `descuentosVentaIds: [D.toUpperCase()]` y `[D, D.toUpperCase()]` → 400
+  *"descuento … no encontrado"* en `/calcular` y `/ventas`; ídem recargos.
+- **El mismo bug en los ids de la personalización**, en las tres puertas: `omitidos` (400 *"no
+  pertenece a la receta"* en `/ventas` y `/cuentas`; `/calcular` no mira omisiones), `extras[].
+  ingredienteItemId` (*"Extra no permitido"*), `grupos[].grupoId` (*"no asociado a este item"*),
+  `opciones[].itemId` (*"no pertenece al grupo Proteína"*), `componentes[].componenteItemId` (*"no
+  pertenece a este combo"*).
+- **Barridos y sanos:** `lineas[].itemId` de `/calcular` y `/ventas` (lo resuelve
+  `aliasarCasingDeIds`) y `cuentaId` (solo viaja a SQL; mismo total en los dos casings).
+- **El que el barrido no vio, y lo encontró la revisión independiente:** `AddLineaDto.itemId`. La
+  línea de cuenta no pasa por `aliasarCasingDeIds`: el id va crudo a los resolvers de la
+  personalización y a la búsqueda del ítem vivo (`salones.service.ts`, `vivosIds.has(dto.itemId)`).
+  Medido: el plato en mayúsculas con un extra → 404 *"Ítem … no encontrado"*.
+- **Fuera del motor:** `pagos[].metodoPagoId` en mayúsculas → 400 *"Método de pago no habilitado"*.
+  Quedó en `pendientes.md` § 1.
+- **`AddLineaDto`, que faltaba medir:** igual que la venta. Array → 201 con `omitidos: []` en
+  `cuenta_lineas.personalizacion`, y al cerrar la cuenta **se descuenta el ingrediente omitido**.
+  Además, `/calcular` con el array previsualiza sin los extras ($4.000 en vez de $4.500).
+- **B3:** 10^12 unidades de un extra de $500 → 500 *"numeric field overflow"* en
+  `cuenta_lineas.precio_unitario` NUMERIC(18,4) (`POST /cuentas/:id/lineas`) y en `POST /ventas` con
+  customer (sin customer lo tapa el 400 de boleta > $5,3 M). `/calcular` nunca da 500 (Decimal), da
+  totales absurdos. **Ninguna columna guarda `unidades`** —vive en el JSON del snapshot—, así que el
+  tope no sale del esquema: es regla de negocio y se llevó a la Sesión de esfuerzo máximo.
+
+### Qué se hizo
+
+- **`@IsObject()`** junto al `@ValidateNested()` en `LineaVentaDto`, `LineaDto` y `AddLineaDto`. La
+  tienda (`CheckoutOnlineDto`) hereda `LineaDto`.
+- **`@IdEnMinusculas()`** (`common/decorators/id-en-minusculas.decorator.ts`): un `@Transform` que
+  baja a minúsculas un string o cada string de un array, y deja pasar lo demás para que lo rechace
+  el decorador de tipo. Es genérico —el frente de DTOs sin cota lo reusa para sus repetidos—. Puesto
+  en 12 campos: `AddLineaDto.itemId`, `metodoPagoId`, `descuentosVentaIds` y `recargosVentaIds` de `CalcularVentaDto` y de
+  `CreateVentaDto`, y `omitidos`, `extras[].ingredienteItemId`, `grupos[].grupoId`,
+  `opciones[].itemId` y `componentes[].componenteItemId` de `PersonalizacionRecetaDto`. Corre en
+  `plainToInstance`, antes que `@ArrayUnique`: `[D, d]` es un repetido. Es la tercera forma de
+  `patterns/backend.md` § "Un UUID validado puede venir en mayúsculas", con su cuándo.
+- **B3:** `@Max(MAX_UNIDADES_EXTRA)` en `PersonalizacionExtraInputDto.unidades`, **99 por plato,
+  tentativo**: es regla de negocio, la recomendó la Sesión de esfuerzo máximo y **la tiene que
+  confirmar el owner** (se la llevó esa sesión el 2026-10-08). Si cambia, cambia la constante y su
+  e2e la sigue. El `:max` de la pantalla espera ese número (`pendientes.md` § 4).
+  `unidades` es por plato —50 hamburguesas con queso extra son `cantidad: 50`, `unidades: 1`—, así
+  que el tope no limita un pedido grande y ataja el tipeo. Los gemelos ya estaban acotados:
+  `opciones[].unidades` por el `max` del grupo y `componentes[].unidad` por la cantidad del
+  componente.
+
+### Qué lo fija
+
+- `motor-entrada.e2e-spec.ts` (spec propio: `topes-dto.e2e-spec.ts` lo editaban otros dos frentes
+  en paralelo). Cubre: array en cada `personalizacion` → 400 nombrando el campo, sin venta, sin línea
+  de cuenta y sin movimiento del ingrediente, con el control como objeto y el control positivo del
+  conteo (sin omitir, +1) · `metodoPagoId` en
+  mayúsculas cobra el 3% en `/calcular` y la venta guarda $30 de recargo y $1.226 · `[id, ID]` → 400
+  por repetido y `ID` solo → 201, en descuentos y recargos de `/calcular` y `/ventas` · cada id de la
+  personalización en mayúsculas cobra lo mismo que en minúsculas · el omitido en mayúsculas se
+  congela en minúsculas y no se descuenta, y en dos casings es repetido · el plato de la línea de
+  cuenta en mayúsculas se agrega con su extra ($4.500) · unidades: el tope pasa y
+  uno más es 400 en `/calcular` y `/ventas` (sin venta), y 10^12 en la cuenta es 400, no 500.
+- `id-en-minusculas.decorator.spec.ts`: lo que no es string pasa intacto.
+- **Mutantes**, cada uno sacando un decorador del código final y restaurado desde copia, leyendo el
+  motivo: los 16 ponen rojo sus tests y ninguno ajeno (el de `descuentosVentaIds` de `/calcular`, el
+  `@Max` y el de `omitidos` matan dos o tres, todos suyos). Los 4 de `PersonalizacionRecetaDto` que
+  comparten el test de `/calcular` mueren cada uno en su fila (el `campo` del fallo es el del
+  decorador sacado). El de `metodoPagoId` en `CalcularVentaDto` muere por $1.190 contra $1.226; el de
+  `CreateVentaDto`, por el 400 del pago exacto; el de `AddLineaDto.itemId`, por el 404. El `@Max`,
+  por 201 en `/calcular` y `/ventas` y **500** en la cuenta.
+
+---
+
 ## `CreateNotaCreditoDto.devoluciones` tiene tope, y es 500 y no 200 (cerrada 2026-10-08)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. Frente fiscal propio (regla del 2026-08-23). Plan:

@@ -357,19 +357,27 @@ ingredientes, los extras y los componentes de un ítem ("no pertenece al grupo a
 los ítems de un grupo de modificadores y el aplicar en lote de sus overrides ("Opción no
 encontrada", "item_grupo_id no válido").
 
-Hay dos formas en el repo, y no son intercambiables:
+Hay tres formas en el repo, y no son intercambiables:
 
 - **A la entrada de la función que compara**, `id.toLowerCase()` sobre lo que mandó el cliente
   (`asociarGruposModificadores`, `validarYCostear*`, `validarExtrasPermitidos`,
   `validarYResolverOpciones`, `aplicarOverrides`, `salones`, `inventario`, `ventas`). Es la forma por
   defecto: arregla la búsqueda **y** todo lo demás que compara esos ids (repetidos, filas vivas).
+- **`@IdEnMinusculas()` en el DTO** (`common/decorators/`, 2026-10-08), cuando **el propio DTO
+  compara** —`@ArrayUnique` corre en el pipe, antes que cualquier service: sin el decorador `[x, X]`
+  pasa como dos ids— o cuando el campo lo leen varias funciones por varias puertas (los ids de
+  `PersonalizacionRecetaDto` los leen tres resolvers en cuatro endpoints). Va **antes** de
+  `@ArrayUnique` en la lectura del DTO, aunque `class-transformer` lo corre primero igual. Hoy en los
+  ids que entran al motor: `metodoPagoId` (en mayúsculas cobraba **sin** el recargo por método de
+  pago), los ids de reglas de venta, los de la personalización y el plato de la línea de cuenta.
 - **`aliasarCasingDeIds`** (`items.service.ts`), para un cargador que devuelve un mapa a
   llamadores que hacen `.get(id)` con el casing del cliente. Solo sirve para `.get()`.
 
 ⚠️ Aliasar el mapa donde además se chequean repetidos o se cruza con filas vivas **empeora** el
 error: `[x, X]` pasa el chequeo de repetidos y choca con el índice único (500 en vez de 400).
 Medido con mutantes el 2026-10-03 y otra vez el 2026-10-06. Lo fijan `recetas`, `combos`,
-`grupos-modificadores` y `grupos-modificadores-overrides.e2e-spec.ts` (los tests "en mayúsculas").
+`grupos-modificadores` y `grupos-modificadores-overrides.e2e-spec.ts` (los tests "en mayúsculas"),
+y la forma del borde, `motor-entrada.e2e-spec.ts`.
 
 ### Tablas sin `tenant_id`
 

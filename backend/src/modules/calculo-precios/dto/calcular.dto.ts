@@ -7,6 +7,7 @@ import {
   IsArray,
   IsIn,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -15,6 +16,7 @@ import {
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
 import { IsDecimalHasta } from '../../../common/decorators/decimal-signo.decorator';
 import { MAX_UNIDADES_POR_VENTA } from '../../../common/utils/tope-unidades-venta.util';
+import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
 export class LineaDto {
   @IsUUID('4')
@@ -49,7 +51,10 @@ export class LineaDto {
    * `precioUnitarioResuelto` y NO es parte de este DTO, así que el
    * `ValidationPipe` global rechaza con 400 cualquier body que lo traiga.
    */
+  // `IsObject` además de `ValidateNested`: este deja pasar un array, que se
+  // aceptaba con 201 y previsualizaba sin los extras (medido el 2026-10-08).
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => PersonalizacionRecetaDto)
   personalizacion?: PersonalizacionRecetaDto;
@@ -65,24 +70,33 @@ export class CalcularVentaDto {
   @Type(() => LineaDto)
   lineas: LineaDto[];
 
-  /** Habilita la evaluación de reglas por método de pago. */
+  /**
+   * Habilita la evaluación de reglas por método de pago. En minúsculas: el
+   * motor lo busca con `includes` entre los métodos de la regla, que vienen de
+   * la base, y en mayúsculas cobraba sin el recargo (medido el 2026-10-08).
+   */
   @IsOptional()
+  @IdEnMinusculas()
   @IsUUID('4')
   metodoPagoId?: string;
 
   /** Descuentos aplicados a nivel venta (sobre el total agregado). */
   @IsOptional()
   @IsArray()
-  // Mismo tope y misma razón que `CreateVentaDto.descuentosVentaIds`.
+  // Mismo tope y misma razón que `CreateVentaDto.descuentosVentaIds`, y en
+  // minúsculas por la misma razón.
   @ArrayMaxSize(50)
+  @IdEnMinusculas()
   @ArrayUnique()
   @IsUUID('4', { each: true })
   descuentosVentaIds?: string[];
 
   @IsOptional()
   @IsArray()
-  // Mismo tope y misma razón que `CreateVentaDto.descuentosVentaIds`.
+  // Mismo tope y misma razón que `CreateVentaDto.descuentosVentaIds`, y en
+  // minúsculas por la misma razón.
   @ArrayMaxSize(50)
+  @IdEnMinusculas()
   @ArrayUnique()
   @IsUUID('4', { each: true })
   recargosVentaIds?: string[];

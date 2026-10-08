@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-10-06
+**Last Updated**: 2026-10-08
 
 ---
 
@@ -73,6 +73,12 @@ Request:
 // Topes del borde (400 al pasarse): 500 líneas, 50 ids por lista. Los ids de
 // descuentos y recargos de venta no se repiten: repetido es 400 (2026-10-06;
 // antes la regla se aplicaba una vez por repetición).
+// Los ids del body se pasan a minúsculas en el borde (`@IdEnMinusculas`,
+// 2026-10-08): `metodoPagoId`, los de reglas de venta y los de la
+// personalización. `[D, d]` es un repetido; un id solo en mayúsculas funciona.
+// `personalizacion` es un objeto (un array es 400) y cada extra va hasta 99
+// veces por plato (`MAX_UNIDADES_EXTRA`; tentativo hasta que el owner lo
+// confirme).
 
 Response (201):
 {
@@ -211,7 +217,19 @@ fijos, donde el orden no mueve el total.
 - `CalcularVentaDto` / `LineaDto` (`dto/calcular.dto.ts`) — validación con
   `class-validator`. `cantidad` como `@IsNumberString` con `@IsDecimalHasta(MAX_UNIDADES_POR_VENTA)`
   (ver "El tope de unidades de una venta" en Notes), `personalizacion` como
-  `@ValidateNested`.
+  `@IsObject` + `@ValidateNested`: sin el primero un array pasaba con 201 y se
+  perdía la personalización entera —en la venta y la cuenta, el ingrediente
+  omitido se descontaba igual— (medido el 2026-10-08).
+- **Los ids que el motor compara en TypeScript van a minúsculas en el DTO**
+  (`@IdEnMinusculas`, 2026-10-08). `@IsUUID` acepta mayúsculas y la base
+  devuelve minúsculas: `metodoPagoId` en mayúsculas **cobraba sin el recargo por
+  método de pago** (`includes` exacto en `evaluarRegla`; $1.190 en vez de
+  $1.226 en `/calcular`, y la venta calculaba igual), los ids de reglas de venta daban 400 "no
+  encontrado" en `requerir` y los de la personalización 400 "no pertenece".
+  `lineas[].itemId` de `/calcular` y `/ventas` no lo necesita: lo resuelve
+  `aliasarCasingDeIds`. El de la línea de cuenta (`AddLineaDto.itemId`) sí: no
+  pasa por ahí y en mayúsculas daba 404 "Ítem … no encontrado". Ver
+  `patterns/backend.md` § "Un UUID validado puede venir en mayúsculas".
 - `CalcularVentaInput` / `LineaCalculo` (mismo archivo) — la entrada **del
   service**, un campo más ancha que el DTO HTTP. Ver la regla de abajo.
 

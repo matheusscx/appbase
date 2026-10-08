@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: SDD Team  
-**Last Updated**: 2026-08-30
+**Last Updated**: 2026-10-08
 
 ---
 
@@ -22,6 +22,14 @@ Food-service necesita adaptar el plato al pedido del comensal sin perder trazabi
 - Drawer de personalización al click en receta (POS y Salones); productos sin cambio.
 - Configurar `extrasPermitidos` al crear/editar receta (ingrediente + cantidad + unidad + `precioExtra` por porción).
 - Snapshot en la línea: `omitidos`, `extras` elegidos con `unidades`, `comentario` (máx. 200 caracteres).
+- **Un extra se agrega hasta 99 veces por plato** (`MAX_UNIDADES_EXTRA`, 2026-10-08, **tentativo**: lo
+  recomendó la Sesión de esfuerzo máximo y lo confirma el owner). `unidades` es por plato —50
+  hamburguesas con queso extra son `cantidad: 50` y `unidades: 1`—, así que el tope no limita un
+  pedido grande: ataja el tipeo. Sin tope, 10^12 unidades desbordaban `precio_unitario` (500). La
+  pantalla todavía no lo topea (`docs/agent/pendientes.md` § 4).
+- `personalizacion` es un **objeto**: un array es 400 (hasta el 2026-10-08 se aceptaba y se perdía
+  entera, descontando el ingrediente omitido). Los ids van en minúsculas en el borde: uno en
+  mayúsculas es el mismo ingrediente, grupo u opción.
 - Precio cobrado = `precioBase` + Σ (`precioExtra` × `unidades`) de extras; **omitir no rebaja** el precio.
 - Persistencia del snapshot en **Salones** (`cuenta_lineas.personalizacion` JSONB); POS en memoria (`useVenta`).
 - Al vender / cerrar cuenta: inventario según snapshot (base − omitidos + extras × `unidades`).
@@ -155,7 +163,7 @@ Request (fragmento):
 }
 ```
 
-Backend: valida omitidos ⊆ ingredientes; extras ∈ `receta_extras_permitidos`; `unidades` entero ≥ 1 (default 1); congela snapshot; recalcula precio (× unidades); `venderIngredientesReceta` con base − omitidos + extras (porción × unidades).
+Backend: valida omitidos ⊆ ingredientes; extras ∈ `receta_extras_permitidos`; `unidades` entero entre 1 y 99 (default 1); congela snapshot; recalcula precio (× unidades); `venderIngredientesReceta` con base − omitidos + extras (porción × unidades).
 
 **En salones, lo que se cobra es el snapshot** (desde el 2026-08-31). `cerrarCuenta` le pasa a `ventas.service.ts` la personalización congelada de la línea y la venta no la vuelve a resolver contra la carta viva: un extra que salió de la carta entre el pedido y el cobro se cobra igual, al precio de cuando se pidió. En `POST /ventas` la personalización llega en el body y sí se resuelve contra la carta. Detalle en [salones-mesas.md](./salones-mesas.md).
 

@@ -2,6 +2,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsNumberString,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -9,10 +10,15 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
+import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 import { IsDecimalHasta } from '../../../common/decorators/decimal-signo.decorator';
 import { MAX_UNIDADES_POR_VENTA } from '../../../common/utils/tope-unidades-venta.util';
 
 export class AddLineaDto {
+  // En minúsculas: la línea de cuenta no pasa por `aliasarCasingDeIds`, y el id
+  // va crudo a los resolvers de la personalización y a la búsqueda del ítem
+  // vivo. En mayúsculas daba 404 "Ítem … no encontrado" (medido el 2026-10-08).
+  @IdEnMinusculas()
   @IsUUID()
   itemId: string;
 
@@ -37,7 +43,11 @@ export class AddLineaDto {
   @IsUUID(undefined, { each: true })
   unidadIds?: string[];
 
+  // `IsObject` además de `ValidateNested`: este deja pasar un array, que se
+  // aceptaba con 201 guardando `omitidos: []`, y al cerrar la cuenta se
+  // descontaba el ingrediente omitido (medido el 2026-10-08).
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => PersonalizacionRecetaDto)
   personalizacion?: PersonalizacionRecetaDto;
