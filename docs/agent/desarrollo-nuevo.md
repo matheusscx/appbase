@@ -323,6 +323,33 @@ Eran tres: la tercera —el reporte de varianza— se construyó y está en [`re
   pieza 1 puso el flujo en pie, pero "en uso real" es el smoke del owner y lo que venga
   después, no el merge: la revisión sigue esperando.
 
+- [ ] **Regla 6 de la spec del costo sin tipear: un reporte agregado tiene que decir cuántas
+  filas quedaron sin valorizar** (backend + producto, decisión del owner 2026-08-28,
+  [`2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md)
+  §2 regla 6 y §4). **Ya existe un reporte agregado que la cumple**: `GET
+  /salones/anulaciones/resumen` (2026-09-18,
+  [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md))
+  agrupa por tipo, por garzón y por quién autorizó, y cada grupo trae `sinValorizar` — cuántas
+  anulaciones del grupo no tienen costo, sin que su cifra parcial se sume al costo del grupo.
+  Cubre merma, cortesía y "no se hizo" que salen de **anular un plato en la mesa**.
+  **Lo que sigue abierto:** un reporte agregado de **Mermas** (`GET /api/mermas`, las
+  registradas desde bodega/local sin pasar por una mesa). `mermas.controller.ts` sigue
+  teniendo solo el `GET` de listado paginado (sin agregación) y el `POST`; nadie agregó
+  `costoPerdido` todavía, así que no hay ningún `SUM` roto hoy. Es una cuenta futura que va a
+  nacer mal si nadie la avisa: el día que se construya ese agregado, cualquier `SUM`/promedio
+  que ignore las filas con `costoUnitario: null` va a informar **menos pérdida que la real,
+  sin decirlo** — exactamente lo que hace posible el congelado de la regla 2 de la misma spec.
+  ⚠️ **Ojo con cómo se lee el hueco: `costoPerdido` no es una columna.** Se deriva en la
+  lectura (`mermas.service.ts` → `mapRow`, `cantidad × costo_unitario` a la escala de
+  costo cuando `costo_unitario` no es `null`; `null` si no hay costo) — verificado
+  2026-08-28. **Al construir el reporte de Mermas:** contar esas filas aparte (cuántas
+  quedaron sin valorizar, no solo omitirlas del total) — mismo criterio que ya usa el resumen
+  de anulaciones.
+
+  📌 **Mudada desde `pendientes.md` el 2026-10-08 (orquestadora):** no hay nada roto que arreglar
+  hoy. El reporte agregado de Mermas no existe, y la regla 6 es un requisito para cuando se
+  construya, así que vive acá.
+
 ---
 
 ## 2. Proyectos con spec propia
