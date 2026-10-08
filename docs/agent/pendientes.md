@@ -130,7 +130,7 @@ destapa una decisión que no es mía).
   Si sigue contestando 200 con el detalle, la ventana no aplica a la consulta y el ADR se corrige;
   si no, el ADR ya lo dice.
 
-- [ ] **La configuración de la pasarela puede quedar incompleta para su modo, y el cobro da 500**
+- [ ] **La configuración de la pasarela puede quedar incompleta para su modo, y el cobro da 500** — ⬇️ **prioridad baja** (owner, 2026-10-08: la pasarela va después del resto de los arreglos)
   (backend, `pasarela/dto/create-tenant-pasarela.dto.ts` y `tenant-pasarela.service.ts`
   `crear`/`actualizar`; queda del cierre de "la configuración de la pasarela no se valida",
   2026-10-08, [`resueltos.md`](resueltos.md)). `ConfiguracionPasarelaDto` valida tipo y tope de cada
@@ -146,7 +146,7 @@ destapa una decisión que no es mía).
   limpiar la config. La pantalla ya exige las tres en INDIVIDUAL y el código hijo en MALL, pero solo
   cuando se tocó la credencial.
 
-- [ ] **El `urlCallback` de un pago por API es un SSRF ciego desde el backend** (backend,
+- [ ] **El `urlCallback` de un pago por API es un SSRF ciego desde el backend** — ⬇️ **prioridad baja** (owner, 2026-10-08: la pasarela va después del resto de los arreglos) (backend,
   `pasarela/dto/create-pago.dto.ts` (`urlCallback`, solo `@IsUrl({ require_tld: false })`) y
   `callback-dispatcher.service.ts` (el `fetch` del callback HTTP); visto el 2026-10-08 por el
   api-security-reviewer del frente "configuración de la pasarela", **leído, no medido**). Quien tenga
@@ -161,7 +161,7 @@ destapa una decisión que no es mía).
   `redirect: 'manual'` y `AbortSignal.timeout`. Un callback a `localhost` en desarrollo es legítimo
   hoy: cómo distinguirlo es parte del diseño.
 
-- [ ] **Cualquiera que conozca el código de una orden la puede marcar `fallida`** (backend,
+- [ ] **Cualquiera que conozca el código de una orden la puede marcar `fallida`** — ⬇️ **prioridad baja** (owner, 2026-10-08: la pasarela va después del resto de los arreglos) (backend,
   `pagos-redirect.service.ts`, `abortarRetorno` con solo `TBK_ORDEN_COMPRA`; visto el 2026-10-08 por el
   mismo revisor, **leído, no medido**). El retorno de timeout de Transbank trae solo
   `TBK_ORDEN_COMPRA`, y con eso la orden abierta pasa a `fallida`, sin prueba de que la mande
