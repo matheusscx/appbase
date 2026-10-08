@@ -160,6 +160,24 @@ una vez por repetición). El e2e
 que lo fija tiene una fila por decorador (`backend/test/topes-dto.e2e-spec.ts`). Si se agrega un
 array, su fila va en el mismo commit.
 
+**Un entero o un texto que va a una columna con tope lleva ese tope en el DTO** (2026-10-08).
+`@IsInt()` deja pasar 2147483648 y `@IsString()` deja pasar 101 caracteres para un `varchar(100)`, y
+los dos revientan en el INSERT con un 500 sin mapear. El tope sale de la columna (`MAX_INT`/
+`MAX_SMALLINT` de `common/constants/escalas.ts`, el `length` del `varchar`, los valores del enum con
+`@IsEnum`) o del rango del dato (un puerto TCP, 65535). Si el número que haría falta es una regla de
+negocio y no está escrito, se pregunta: no se inventa. Un texto que va a `text` o a un `varchar` sin
+largo no lleva tope: no rompe nada y lo acota el body de 100 kB (Sesión de esfuerzo máximo,
+2026-10-08: un número por campo para 81 campos sería una regla inventada). Los que vayan al DTE
+cuando llegue la emisión electrónica (nombre, dirección, giro del receptor…) tienen largos del SII, y
+esos topes los pone el frente fiscal de emisión. Un DTO común que llega a una columna
+con tope en un solo recurso (`RestaurarDto` y `turnos.nombre`) se extiende para ese recurso
+(`RestaurarTurnoDto`); no se le pone el tope a todos. ⚠️ **Al redeclarar un campo en la subclase con un
+validador propio, se repiten los heredados**: class-validator descarta los de la base con el mismo
+tipo de metadata —todos los de `registerDecorator` comparten uno: `@IsString`, `@IsNotEmpty`,
+`@MaxLength`…— en cuanto la subclase pone uno sobre ese campo. Conserva los `@Transform`, y
+`@IsOptional`/`@ValidateIf` mientras la subclase no ponga el suyo (si lo pone, lo reemplaza). Con solo `@MaxLength`, un nombre
+vacío pasaba el DTO (lo cazó el `api-security-reviewer`, 2026-10-08). Las filas van en el mismo e2e.
+
 **Lo que el DTO no declara es un 400** que nombra el campo (`property x should not exist`),
 en el body y en la querystring: el pipe corre con `forbidNonWhitelisted` desde el 2026-09-27.
 Hasta esa fecha lo borraba callado y contestaba 200, y un filtro mal escrito o un campo que

@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsIn,
@@ -20,6 +21,8 @@ import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorat
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsFechaPura } from '../../../common/decorators/fecha-pura.decorator';
 import type { TipoPromocion } from '../entities/promocion.entity';
+import { MAX_SMALLINT } from '../../../common/constants/escalas';
+import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
 /**
  * Un slot de la promo (la Condición): qué se le pide al cliente para que
@@ -37,9 +40,11 @@ export class ScopePromoDto {
   categoriaId?: string | null;
 
   /** Solo significa algo en `precio_fijo`: cuántas unidades pide este slot. */
+  // Columna `smallint` de `promocion_scopes`.
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(MAX_SMALLINT)
   cantidad?: number;
 
   @IsOptional()
@@ -47,6 +52,9 @@ export class ScopePromoDto {
   // Una promo puede abarcar buena parte del catálogo; se guardan en un solo
   // INSERT.
   @ArrayMaxSize(1000)
+  // Un ítem repetido —también `[x, X]`— chocaba con la PK de la puente: 500.
+  @IdEnMinusculas()
+  @ArrayUnique()
   @IsUUID('4', { each: true })
   itemIds?: string[];
 }
@@ -117,9 +125,11 @@ export class CreatePromocionDto {
   valorPorcentaje?: string | null;
 
   /** Solo `nxm`: 2x1→2, 3x2→3. */
+  // Columna `smallint` de `promociones`.
   @IsOptional()
   @IsInt()
   @Min(2)
+  @Max(MAX_SMALLINT)
   cadaN?: number | null;
 
   /** Solo `precio_fijo`: el precio del conjunto en moneda oficial. */

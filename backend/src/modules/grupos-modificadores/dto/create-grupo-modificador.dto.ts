@@ -8,12 +8,14 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
+import { MAX_INT } from '../../../common/constants/escalas';
 
 export class GrupoOpcionInputDto {
   @IsUUID()
@@ -39,9 +41,11 @@ export class GrupoOpcionInputDto {
   @EsCosto()
   precioExtra: string;
 
+  // Columna `int` de `grupo_modificador_opcion`.
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(MAX_INT)
   orden?: number;
 }
 

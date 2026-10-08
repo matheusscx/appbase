@@ -23,29 +23,37 @@ export class UpdateTerceroDto {
   @IsIn(['proveedor', 'empresa', 'persona_natural'])
   tipo?: string;
 
+  // Los topes de largo son los de las columnas `varchar` de `terceros`: sin
+  // ellos, uno más largo pasaba el DTO y daba 500 en el INSERT (2026-10-08).
   @ValidateIf((_o, v) => v !== undefined)
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
   nombre?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   rut?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   nombreLegal?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   rutFiscal?: string;
 
   @IsOptional()
   @IsEmail()
+  @MaxLength(100)
   correo?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   telefono?: string;
 
   @IsOptional()

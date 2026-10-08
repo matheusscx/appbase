@@ -11,10 +11,11 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
-import { NivelRegla } from '../../../common/enums/reglas.enums';
+import { ModoRegla, NivelRegla } from '../../../common/enums/reglas.enums';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 import { EsFechaPura } from '../../../common/decorators/fecha-pura.decorator';
 
@@ -69,8 +70,10 @@ export class CreateRecargoDto {
   valorPorcentaje?: string | null;
 
   // modo is optional at DTO level; service validates by tipo
+  // `@IsEnum`: la columna es el enum `modo_regla` de Postgres, y un valor que no
+  // es de él pasaba el DTO y daba 500 en el INSERT (2026-10-08).
   @IsOptional()
-  @IsString()
+  @IsEnum(ModoRegla)
   modo?: string | null;
 
   // `@ArrayUnique` no es cosmético: la lista se guarda con un
@@ -94,9 +97,15 @@ export class CreateRecargoDto {
   @Type(() => TramoDto)
   tramos?: TramoDto[];
 
+  // `@Max(9999)`: el tope del formulario de reglas
+  // (`frontend/app/utils/reglas-form-config.ts`, `diasMax`). Se guarda como
+  // texto en `condicion_valor` y se lee con `parseInt`: sin tope, `1e21` se
+  // guardaba como "1e+21" y se leía como 1 (2026-10-08). La mora tiene además
+  // su 0-365 en el service.
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(9999)
   diasVencimiento?: number;
 
   // `recargos.fecha_inicio`/`fecha_fin` son `date`: fecha pura estricta, no

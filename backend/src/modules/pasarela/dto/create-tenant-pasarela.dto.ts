@@ -5,8 +5,10 @@ import {
   IsObject,
   IsOptional,
   IsUUID,
+  Max,
   Min,
 } from 'class-validator';
+import { MAX_INT } from '../../../common/constants/escalas';
 
 export class CreateTenantPasarelaDto {
   @IsUUID()
@@ -27,8 +29,10 @@ export class CreateTenantPasarelaDto {
   @IsBoolean()
   activo?: boolean;
 
+  // Columna `int` de `tenant_pasarela`.
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(MAX_INT)
   prioridad?: number;
 }

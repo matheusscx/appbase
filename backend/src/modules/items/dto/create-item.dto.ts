@@ -1,5 +1,6 @@
 import {
   ArrayMaxSize,
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsIn,
@@ -11,15 +12,22 @@ import {
   IsString,
   IsUUID,
   Matches,
+  Max,
   MaxLength,
   Min,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalHasta,
+  IsDecimalNoNegativo,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
+import { MAX_INT } from '../../../common/constants/escalas';
+import { MAX_UNIDADES_POR_PLATO } from '../../../common/utils/tope-unidades-venta.util';
+import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
 export class SerieInputDto {
   // Una serie de solo espacios no identifica nada, y `@IsNotEmpty` no la
@@ -106,7 +114,11 @@ export class ComboComponenteInputDto {
   @IsUUID()
   componenteItemId: string;
 
+  // Cuántas unidades del componente lleva el combo: la personalización recorre
+  // una vez por unidad, y con 10^7 `/calcular` tardaba 11 s. Tope del owner
+  // (2026-10-08): `MAX_UNIDADES_POR_PLATO`.
   @IsNumberString()
+  @IsDecimalHasta(String(MAX_UNIDADES_POR_PLATO))
   cantidad: string;
 
   @IsBoolean()
@@ -143,17 +155,24 @@ export class ItemGrupoModificadorInputDto {
   @IsUUID()
   grupoModificadorId: string;
 
+  // `min` y `orden` van a columnas `int` de `item_grupo_modificador`.
   @IsInt()
   @Min(0)
+  @Max(MAX_INT)
   min: number;
 
+  // `max` acota las `unidades` que se eligen del grupo en un plato: mismo tope
+  // que las de un extra (`MAX_UNIDADES_POR_PLATO`). El owner fijó 99 para los
+  // extras (2026-10-08); este lo derivó de ahí la Sesión de esfuerzo máximo.
   @IsInt()
   @Min(1)
+  @Max(MAX_UNIDADES_POR_PLATO)
   max: number;
 
   @IsInt()
   @IsOptional()
   @Min(0)
+  @Max(MAX_INT)
   orden?: number;
 
   @IsArray()
@@ -321,9 +340,10 @@ export class CreateItemDto {
   @IsOptional()
   gruposModificadores?: ItemGrupoModificadorInputDto[];
 
-  // Extensión servicio
+  // Extensión servicio. Columna `int` de `item_servicio`.
   @IsInt()
   @Min(0)
+  @Max(MAX_INT)
   @IsOptional()
   duracionEstimada?: number;
 
@@ -338,8 +358,12 @@ export class CreateItemDto {
 
   // Reglas N:M
   @IsArray()
+  // `@IdEnMinusculas` + `@ArrayUnique`: un id repetido —también `[x, X]`— daba un
+  // 400 que mentía ("no pertenecen a este tenant") en vez de decir qué pasa.
   // Reglas del catálogo del tenant; un INSERT por id.
   @ArrayMaxSize(50)
+  @IdEnMinusculas()
+  @ArrayUnique()
   @IsUUID('4', { each: true })
   @IsOptional()
   impuestosIds?: string[];
@@ -347,6 +371,8 @@ export class CreateItemDto {
   @IsArray()
   // Reglas del catálogo del tenant; un INSERT por id.
   @ArrayMaxSize(50)
+  @IdEnMinusculas()
+  @ArrayUnique()
   @IsUUID('4', { each: true })
   @IsOptional()
   recargosIds?: string[];
@@ -354,6 +380,8 @@ export class CreateItemDto {
   @IsArray()
   // Reglas del catálogo del tenant; un INSERT por id.
   @ArrayMaxSize(50)
+  @IdEnMinusculas()
+  @ArrayUnique()
   @IsUUID('4', { each: true })
   @IsOptional()
   descuentosIds?: string[];

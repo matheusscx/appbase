@@ -23,6 +23,98 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los campos de los DTOs sin cota: 500 por desborde, datos malos y trabajo lineal (cerrada 2026-10-08)
+
+Sale de [`pendientes.md`](pendientes.md) § 2: lo que quedaba de "Entradas sin cota…" (B2, B4/B5, B6 y
+los repetidos). B3 y la trampa del `@ArrayUnique` los cerró el frente de personalización del motor
+(abajo). Plan: [`2026-10-08-dtos-campos-sin-cota.md`](../superpowers/plans/2026-10-08-dtos-campos-sin-cota.md).
+La regla viva quedó en [`patterns/backend.md`](../patterns/backend.md) § 3; el e2e es
+`backend/test/topes-dto.e2e-spec.ts`.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Entradas sin cota que dan 500 o trabajo lineal** (backend, DTOs; leído por el api-security-reviewer y el domain-reviewer del frente de topes de los DTOs, 2026-10-06, **no corrido**).
+  - **B2:** `ComboComponenteInputDto.cantidad` sin máximo (`create-item.dto.ts:109-110`) controla un loop por unidad en cada venta personalizada del combo (`items.service.ts:4115-4116`).
+    **Medido el 2026-10-06** por el frente de la cantidad grande con promo, `POST /calculo-precios/calcular` de un combo con un componente de receta con un grupo opcional, eligiendo una opción en la última unidad: 10³ → 17–20 ms, 10⁴ → 28–31 ms, 10⁵ → 114–115 ms. Sin elegir nada, 10⁵ → 13 ms. Lineal, ~1 µs por unidad del componente. **No entró en ese frente:** lo maneja la configuración del combo, que la carga el admin del tenant, y no la `cantidad` de la venta. El tope de 99.999 unidades por venta no lo acota (la personalización se resuelve una vez por línea, no por unidad vendida). Se cierra con un máximo en `ComboComponenteInputDto.cantidad`, y cuántas unidades puede llevar un componente de un combo es regla del owner.
+  - **B4/B5:** enteros sin `@Max` que dan 500 por desborde de `int`: `min`/`max` de `ItemGrupoModificadorInputDto`, `numeroCuotas` (que además acepta negativos: `pagos/dto/create-pago.dto.ts:43`, `create-venta.dto.ts:89`), `orden`, `duracionEstimada`, `diasVencimiento`, `cadaN` y `ScopePromoDto.cantidad`.
+  - **B6:** strings sin `@MaxLength` (`comentario`, `referencia`, `descripcion`, `nombre`, `codigoLote`, `motivoAjuste`, rut/teléfono/email del customer), acotados por el body de 100 kB.
+  - **Repetidos que llegan a la base:** `CreateItemDto.impuestosIds/recargosIds/descuentosIds` y `ScopePromoDto.itemIds` aceptan ids repetidos; se insertan de a uno o en lote contra una PK compuesta, así que probablemente dan 500.
+
+### Cómo se cerró
+
+**Lo medido por HTTP antes de tocar código** (backend compilado contra la base del worktree):
+
+- **500 por desborde de `int`** con 2147483648 (2147483647 da 201): `min`/`max`/`orden` de
+  `gruposModificadores` (alta y edición de ítems), `duracionEstimada` (alta y edición),
+  `opciones[].orden` de grupos de modificadores (alta y edición), `grupos[].orden` de la distribución
+  de propinas, `numeroCuotas` (`POST /ventas`, `POST /pagos`), y dos gemelos que la entrada no
+  nombraba: `prioridad` (`POST /pasarela/admin/config`) y `puerto` (`POST /impresoras`).
+- **500 por `smallint`** con 32768 (32767 da 201): `cadaN` y `ScopePromoDto.cantidad`.
+- **201 con un dato malo:** `numeroCuotas: -5` en `POST /pagos` se guardaba -5; `puerto: 70000` se
+  guardaba; `diasVencimiento: 1e21` de un descuento de pronto pago se guardaba `"1e+21"` en
+  `condicion_valor` y se leía 1. La mora tenía su 0-365 en el service; el pronto pago, nada.
+- **B6:** de 117 campos string sin tope, 18 van a una columna `varchar(N)` (terceros e impresoras, alta
+  y edición) y daban 500 con N+1 caracteres. El resto: `text` 52, `varchar` sin largo 29, no se
+  guardan 14, `jsonb` 2, enum 2. Un `text` de 90.000 caracteres da 201. Dos gemelos con 500 que no
+  estaban en la entrada: el nombre de `POST /turnos/:id/restaurar` (`varchar(100)` detrás del
+  `RestaurarDto` común) y un `modo` inválido de descuentos y recargos (enum `modo_regla`).
+- **Repetidos:** `ScopePromoDto.itemIds` `[x,x]` y `[x,X]` daban **500** (alta y edición). Los de
+  `CreateItemDto` **no** daban 500, como suponía la entrada: daban un 400 que mentía ("no pertenecen
+  a este tenant").
+- **B2:** `/calcular` de un combo con un componente de receta con un grupo opcional, eligiendo en la
+  última unidad: 10^5 → 133-139 ms; 10^6 → 989-1.263 ms; **10^7 → 10,8-11,1 s**, con el event loop
+  bloqueado para todos los tenants.
+
+**Qué se hizo** (solo decoradores, más `RestaurarTurnoDto` y su uso en el controller de turnos):
+
+- `@Max` de la columna en los enteros: `MAX_INT`/`MAX_SMALLINT`, nuevas en
+  `common/constants/escalas.ts`. `puerto` hasta 65535 (rango TCP). `numeroCuotas` con `@Min(0)`
+  (Webpay informa 0 cuotas en débito) y sin tope de negocio (Sesión de esfuerzo máximo, 2026-10-08:
+  el POS no lo manda y la pasarela informa lo que Transbank autorizó).
+- `diasVencimiento`: `@Max(9999)`, la regla que ya estaba escrita en el formulario
+  (`frontend/app/utils/reglas-form-config.ts:72`, `diasMax` de `pronto_pago`). La mora conserva su
+  0-365 del service.
+- `@MaxLength(N)` de la columna en los 18 `varchar(N)` y en `RestaurarTurnoDto` (solo turnos: en los
+  otros recursos que restauran con nombre la columna es `text`). `RestaurarTurnoDto` repite
+  `@IsString`/`@IsNotEmpty` de `RestaurarDto`: con solo el `@MaxLength`, class-validator descartaba los
+  heredados y un nombre vacío pasaba el DTO y restauraba en silencio con el nombre viejo. Lo cazó el
+  `api-security-reviewer` del cierre; medido por HTTP antes de arreglarlo (`"   "` y `""` llegaban al
+  service, `42` solo caía por largo). `@IsEnum(ModoRegla)` en `modo`. Los
+  `text` y `varchar` sin largo quedan sin tope: no rompen nada y los acota el body de 100 kB (Sesión
+  de esfuerzo máximo, 2026-10-08).
+- **B2** y el **`max` de un grupo**: `MAX_UNIDADES_POR_PLATO` (99), la constante que el frente del
+  motor puso para las `unidades` de un extra. B2 lo decidió el owner (2026-10-08, AskUserQuestion de
+  la Sesión de esfuerzo máximo: descartó 999, medio segundo en el pedido más pesado, y 99.999, casi un
+  minuto); el `max` lo derivó la Sesión del 99 de los extras. `min` y `orden` del grupo quedan con el
+  int de su columna.
+- **Repetidos:** `@IdEnMinusculas() @ArrayUnique()` (el decorador del frente del motor) en
+  `impuestosIds`/`recargosIds`/`descuentosIds` de alta y edición de ítems y en
+  `ScopePromoDto.itemIds`: `[x,x]` y `[x,X]` son 400.
+
+**Lo que lo fija:** 61 filas nuevas en `topes-dto.e2e-spec.ts` (de 91 a 152 tests). Cada fila de tope
+manda el tope + 1 y espera el 400 que nombra el campo, y manda el tope justo con un campo no declarado
+para que el pedido muera en el pipe sin ese mensaje. Los repetidos prueban `[x,x]` y `[x,X]`;
+`numeroCuotas`, -1 contra 0; el restaurar de turnos, sin nombre, `""`, `"   "` y `42`.
+
+**Mutantes:** uno por decorador nuevo, **56** (18 `@Max`/`@Min` de enteros —`diasVencimiento`
+incluido—, 19 `@MaxLength`, 2 `@IsEnum`, 1 `@IsDecimalHasta`, 7 `@ArrayUnique`, 7 `@IdEnMinusculas`, y
+`@IsString`/`@IsNotEmpty` de `RestaurarTurnoDto`). Cada uno revierte a lo que había antes (saca el
+decorador, o vuelve `modo` a `@IsString()`). 54 se midieron contra el spec entero de 149 tests; los dos
+de `RestaurarTurnoDto` y otra vez su `@MaxLength`, contra el de 152, después de agregar las filas del
+restaurar (que ningún otro mutante toca). **44 ponen rojo exactamente su fila**, y `@IsNotEmpty` las
+dos suyas (`""` y `"   "`). Los otros 11 son el mismo
+decorador visto por dos puertas, el alta y la edición que lo hereda o reusa su DTO, y matan esas dos
+filas: el `max` de un grupo de un ítem, el `orden` de las opciones de un grupo de modificadores,
+`cadaN`, `prioridad`, `modo` (×2), `diasVencimiento` (×2), la `cantidad` de un componente de combo, y
+`@ArrayUnique`/`@IdEnMinusculas` de `ScopePromoDto.itemIds`. Los de `@IdEnMinusculas` mueren por el par
+`[x, X]`: sin el decorador pasa `@ArrayUnique`.
+
+**Lo que se anotó aparte:** un monto que no cabe en `numeric(18,4)` da 500 al guardar y una venta
+aceptada traba la caja (§ 3, decidido por la Sesión de esfuerzo máximo: guard técnico en el motor), y
+el componente de combo fraccionario, cuya personalización no se valida (§ 4).
+
+---
+
 ## `POST /cuentas/:id/comanda` ya no escribe líneas de otra cuenta (cerrada 2026-10-08)
 
 Sale de [`pendientes.md`](pendientes.md) § 2, junto con la de abajo (misma sesión, mismo

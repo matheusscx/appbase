@@ -8,3 +8,12 @@
  * moneda y la aplica el motor al cerrar el documento — ver ConfigCalculo.
  */
 export const ESCALA_COSTO = 4;
+
+/**
+ * Lo que cabe en una columna entera de Postgres. Un entero de la API que va a
+ * una de estas columnas lleva `@Max` con su tope: sin él, uno más grande pasa
+ * `@IsInt()` y revienta en el INSERT con un 500 ("out of range for type
+ * integer"), medido el 2026-10-08.
+ */
+export const MAX_INT = 2147483647;
+export const MAX_SMALLINT = 32767;

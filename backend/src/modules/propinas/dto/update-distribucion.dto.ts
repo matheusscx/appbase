@@ -10,6 +10,7 @@ import {
   IsNumberString,
   IsString,
   IsUUID,
+  Max,
   Min,
   ValidateIf,
   ValidateNested,
@@ -18,6 +19,7 @@ import { TipoGarzon } from '../../garzones/enums/tipo-garzon.enum';
 import { CriterioDistribucion } from '../enums/criterio-distribucion.enum';
 import { BaseVentasGrupo } from '../enums/base-ventas-grupo.enum';
 import { ManualModo } from '../enums/manual-modo.enum';
+import { MAX_INT } from '../../../common/constants/escalas';
 
 export class PesoManualDto {
   @IsUUID()
@@ -59,8 +61,10 @@ export class GrupoDistribucionDto {
   @IsBoolean()
   activo: boolean;
 
+  // Columna `int` de `propina_grupo_distribucion`.
   @IsInt()
   @Min(0)
+  @Max(MAX_INT)
   orden: number;
 
   @IsArray()

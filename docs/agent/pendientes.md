@@ -129,13 +129,6 @@ destapa una decisión que no es mía).
   - **Qué no cubre.** (1) **No hay forma de crear la venta después**: no existe un "reintentar el callback". `POST /pasarela/ordenes/:id/verificar` solo acepta `en_proceso`/`expirada` (`cobros.service.ts:1393`), y aunque existiera, recalcularía con un tercer "ahora". (2) **Nadie se entera**: no hay aviso al admin, solo el log. (3) **El comprador ve "Pago aprobado. Tu compra fue registrada correctamente."** (`tienda/retorno.vue:88-91`): `urlRetornoApp` (`pagos-redirect.service.ts:75-76`) manda `estado=pagada` igual con la orden sin venta, y la pantalla solo esconde el botón "Ver detalle de la venta".
   - **Lo que hay que decidir** (diseño aparte, no de arrastre): congelar en el snapshot de la orden lo que el checkout cobró (el total, o las líneas resueltas, como `reglasCongeladas` del salón) y que el callback lo respete, o calcular el callback con el instante del checkout. Y por separado, que una orden pagada sin venta avise y no le diga al comprador que su compra quedó registrada.
 
-- [ ] **Entradas sin cota que dan 500 o trabajo lineal** (backend, DTOs; leído por el api-security-reviewer y el domain-reviewer del frente de topes de los DTOs, 2026-10-06, **no corrido**).
-  - **B2:** `ComboComponenteInputDto.cantidad` sin máximo (`create-item.dto.ts:109-110`) controla un loop por unidad en cada venta personalizada del combo (`items.service.ts:4115-4116`).
-    **Medido el 2026-10-06** por el frente de la cantidad grande con promo, `POST /calculo-precios/calcular` de un combo con un componente de receta con un grupo opcional, eligiendo una opción en la última unidad: 10³ → 17–20 ms, 10⁴ → 28–31 ms, 10⁵ → 114–115 ms. Sin elegir nada, 10⁵ → 13 ms. Lineal, ~1 µs por unidad del componente. **No entró en ese frente:** lo maneja la configuración del combo, que la carga el admin del tenant, y no la `cantidad` de la venta. El tope de 99.999 unidades por venta no lo acota (la personalización se resuelve una vez por línea, no por unidad vendida). Se cierra con un máximo en `ComboComponenteInputDto.cantidad`, y cuántas unidades puede llevar un componente de un combo es regla del owner.
-  - **B4/B5:** enteros sin `@Max` que dan 500 por desborde de `int`: `min`/`max` de `ItemGrupoModificadorInputDto`, `numeroCuotas` (que además acepta negativos: `pagos/dto/create-pago.dto.ts:43`, `create-venta.dto.ts:89`), `orden`, `duracionEstimada`, `diasVencimiento`, `cadaN` y `ScopePromoDto.cantidad`.
-  - **B6:** strings sin `@MaxLength` (`comentario`, `referencia`, `descripcion`, `nombre`, `codigoLote`, `motivoAjuste`, rut/teléfono/email del customer), acotados por el body de 100 kB.
-  - **Repetidos que llegan a la base:** `CreateItemDto.impuestosIds/recargosIds/descuentosIds` y `ScopePromoDto.itemIds` aceptan ids repetidos; se insertan de a uno o en lote contra una PK compuesta, así que probablemente dan 500.
-
 - [ ] **`PATCH /salones/:salonId/layout` le escribe la posición a una mesa ya borrada** (backend,
   `SalonesService.guardarLayout`; **leído, no corrido**, por el frente que cerró "la comanda escribe
   líneas de otra cuenta", 2026-10-08). El `manager.update(Mesa, { id, tenantId, salonId }, …)` ata la
@@ -185,6 +178,33 @@ Las features de producto que también se decidieron —la NC como documento, la 
 oficial, `cashRounding`, el conteo por denominación, el envío diario del resumen de descuadres,
 la acumulación de descuentos y compras— y el renombre de `moneda.decimales` se mudaron a
 [`desarrollo-nuevo.md`](desarrollo-nuevo.md) el 2026-10-06. Acá quedan las correcciones.
+
+- [ ] **Un monto calculado que no cabe en `NUMERIC(18,4)` da 500 al guardar, y una venta aceptada
+  deja la caja sin poder cerrarse** (backend, `CalculoPreciosService.calcular`; medido por HTTP el
+  2026-10-08 por el frente de los DTOs sin cota, que no lo tocó). Los montos que carga el admin
+  (`precioExtra` de un grupo, `precioBase` de un ítem) solo los acota su columna, `numeric(18,4)`
+  (< 10^14). El motor los multiplica por unidades y cantidad, y el resultado no cabe en la columna de
+  la venta. Medido en CLP, con caja abierta y customer con RUT:
+  - `precioExtra` 99.999.999.999.999 en una opción de grupo: `/calcular` → 201 con total
+    100.000.000.000.999, y `POST /ventas` → **500** ("numeric field overflow") **con 1 unidad**,
+    porque se suma al precio base. Con `precioExtra` 1.000.000, 10^7 unidades cortan en "Stock
+    insuficiente" y 10^8 dan 500.
+  - `precioBase` 99.999.999.999.999: cantidad 1 → 201 (la venta se guarda); cantidad 2 → 500.
+  - **Después de esa venta de cantidad 1 en efectivo, `POST /caja/:id/conteo` da 500** (22003): el
+    saldo esperado (saldo inicial + la venta) supera 10^14. El cajón queda ocupado y la caja no se
+    puede cerrar por la API.
+  - `/calcular` nunca falla: devuelve totales que después no se pueden guardar.
+
+  ✅ **Decidido por la Sesión de esfuerzo máximo (2026-10-08, a pedido del frente de los DTOs sin
+  cota):** no se inventa un tope de precio por moneda. Va un **guard técnico en el service**: si un
+  monto calculado no cabe en `numeric(18,4)`, 400 "el monto no cabe", antes de persistir, **en un
+  solo lugar, después de calcular los totales**. Cierra la clase entera y no campo por campo, y por
+  conducta solo rechaza lo que hoy da 500. Los topes de cantidad (el `max` de un grupo en 99, las
+  `unidades` de un extra en 99) bajan el producto, pero no lo cierran: con un `precioExtra` cerca del
+  tope de la columna desborda con una unidad. **Cuándo:** toca `CalculoPreciosService.calcular`, el
+  mismo lugar donde el frente de personalización del motor puso la suma por venta; la orquestadora
+  lo programa cuando ese frente integre. Falta medir si el conteo de caja necesita su propio guard o
+  si alcanza con que la venta no entre.
 
 - [ ] **Lo que quedó del frente del modo ciego, ya cerrado** (backend + producto; la entrada
   madre —seis fugas, el eje mío/todos y el rastro de los oráculos— se mudó entera a
@@ -604,6 +624,15 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
+
+- [ ] **Un componente de combo con cantidad fraccionaria no valida su personalización** (backend +
+  producto, `ComboComponenteInputDto.cantidad` y `items.service.ts`, el loop por unidad de la
+  personalización del combo; medido por HTTP el 2026-10-08 por el frente de los DTOs sin cota). Hoy
+  `cantidad: "0.5"` en un componente da 201. Al resolver la personalización, el loop
+  `for (u = 1; u <= unidades; u++)` corre **0 veces**, así que un grupo obligatorio de ese componente
+  nunca se exige y lo que elija el cliente no se valida. (`-1` y `0` ya dan 400 en el service.)
+  **La pregunta para el owner:** ¿un componente de combo puede ser fraccionario (medio kilo de algo
+  dentro de un combo)? Si puede, hay que decidir cómo se valida su personalización; si no, va un 400.
 
 - [ ] **Un `REFUND` marcado "Sin nota de crédito" cuya venta ya está corregida entera por otras
   notas no tiene salida** (backend + producto; anotado el 2026-10-04 al cerrar "Generar nota",

@@ -45,10 +45,13 @@ export const MAX_LINEAS_POR_VENTA = 500;
  * sube la `cantidad` de la línea: el tope es por plato y no limita un pedido
  * grande.
  *
- * Acota las unidades de un extra (`PersonalizacionExtraInputDto.unidades`).
- * Según el frente de DTOs sin cota (mensaje del 2026-10-08), el owner fijó el
- * mismo número para el `max` de un grupo de modificadores y la `cantidad` de un
- * componente de combo, que ese frente construye. Sin tope, 10^12 unidades de un extra de
+ * Acota las unidades de un extra (`PersonalizacionExtraInputDto.unidades`), el
+ * `max` de un grupo de modificadores (`ItemGrupoModificadorInputDto.max`, que
+ * acota las unidades elegidas del grupo) y la `cantidad` de un componente de
+ * combo (`ComboComponenteInputDto.cantidad`, que la personalización recorre una
+ * vez por unidad: 10^7 tardaban 11 s). El owner lo fijó para los extras y para
+ * el componente de combo (2026-10-08); el `max` de grupo lo derivó del de los
+ * extras la Sesión de esfuerzo máximo. Sin tope, 10^12 unidades de un extra de
  * $500 desbordaban `precio_unitario` NUMERIC(18,4) y la línea de cuenta o la
  * venta daban 500 (medido el 2026-10-08).
  *

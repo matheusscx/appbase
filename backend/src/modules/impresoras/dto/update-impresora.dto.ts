@@ -5,6 +5,8 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Max,
+  MaxLength,
   Min,
   ValidateIf,
 } from 'class-validator';
@@ -20,9 +22,11 @@ import type {
 // Los que conservan `@IsOptional()` van a columnas nullable: ahí `null` borra
 // el dato.
 export class UpdateImpresoraDto {
+  // Mismos topes de largo que el alta: las columnas `varchar` de `impresoras`.
   @ValidateIf((_o, v) => v !== undefined)
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
   nombre?: string;
 
   @ValidateIf((_o, v) => v !== undefined)
@@ -35,15 +39,19 @@ export class UpdateImpresoraDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   host?: string;
 
+  // Mismo rango que el alta: un puerto TCP.
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(65535)
   puerto?: number;
 
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   nombreCola?: string;
 
   @ValidateIf((_o, v) => v !== undefined)

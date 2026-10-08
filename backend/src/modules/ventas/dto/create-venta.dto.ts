@@ -12,7 +12,9 @@ import {
   IsUUID,
   Length,
   Matches,
+  Max,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -31,6 +33,7 @@ import {
   MAX_UNIDADES_POR_VENTA,
 } from '../../../common/utils/tope-unidades-venta.util';
 import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
+import { MAX_INT } from '../../../common/constants/escalas';
 
 export class LineaVentaDto {
   @IsUUID()
@@ -87,8 +90,11 @@ export class PagoVentaDto {
   referencia?: string;
 
   // Detalle de tarjeta desde la pasarela (Webpay). No lo envía el POS manual.
+  // Mismo rango que `PagoItemDto.numeroCuotas`.
   @IsOptional()
   @IsInt()
+  @Min(0)
+  @Max(MAX_INT)
   numeroCuotas?: number;
 
   @IsOptional()

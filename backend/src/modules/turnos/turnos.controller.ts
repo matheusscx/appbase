@@ -17,11 +17,10 @@ import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import { QueryIncluirEliminadosDto } from '../../common/dto/query-incluir-eliminados.dto';
-import { RestaurarDto } from '../../common/dto/restaurar.dto';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { TurnosService } from './turnos.service';
 import { CreateTurnoDto } from './dto/create-turno.dto';
-import { UpdateTurnoDto } from './dto/update-turno.dto';
+import { RestaurarTurnoDto, UpdateTurnoDto } from './dto/update-turno.dto';
 
 /**
  * Catálogo de turnos referenciales. Reutiliza el módulo RBAC `Salones`.
@@ -63,14 +62,15 @@ export class TurnosController {
     return this.turnosService.eliminar(user.tenantId!, user.id, id);
   }
 
-  // `RestaurarDto` es 100% opcional: sin body se restaura con el nombre que la
-  // fila ya tenía, que es como llaman las pantallas sin colisión.
+  // `RestaurarTurnoDto` (`RestaurarDto` con el tope de la columna) es 100%
+  // opcional: sin body se restaura con el nombre que la fila ya tenía, que es
+  // como llaman las pantallas sin colisión.
   @Post(':id/restaurar')
   @RequiresPermiso('Salones', 'Eliminar')
   restaurar(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: RestaurarDto,
+    @Body() dto: RestaurarTurnoDto,
   ) {
     const user = req.user as JwtUser;
     return this.turnosService.restaurar(user.tenantId!, id, dto.nombre);

@@ -11,12 +11,15 @@ import {
   IsUUID,
   Length,
   Matches,
+  Max,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import type { ClaseDocumentoMaquina } from '../../venta-documentos/entities/venta-documento.entity';
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
+import { MAX_INT } from '../../../common/constants/escalas';
 
 export class PagoItemDto {
   @IsUUID()
@@ -38,8 +41,12 @@ export class PagoItemDto {
   referencia?: string;
 
   // Detalle de tarjeta desde la pasarela (Webpay). No lo envía el POS manual.
+  // `@Min(0)` y no 1: Webpay informa 0 cuotas en débito. Un negativo se
+  // guardaba tal cual. El máximo es el de la columna `int`.
   @IsOptional()
   @IsInt()
+  @Min(0)
+  @Max(MAX_INT)
   numeroCuotas?: number;
 
   @IsOptional()

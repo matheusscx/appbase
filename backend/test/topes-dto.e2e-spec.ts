@@ -26,6 +26,10 @@ import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
  *   /ventas` con el mismo descuento dos veces se guardaba con total 0).
  * - **Los DTOs del motor** con `lineas` en el tope dan el mismo total que la
  *   suma por línea: el tope no cambia lo que se cobra.
+ * - **`@Max` en los enteros** (2026-10-08): el tope es lo que cabe en la
+ *   columna (`int`, `smallint`) o el rango del dato (un puerto TCP). Sin él,
+ *   uno más grande pasaba `@IsInt()` y daba 500 en el INSERT. Mismo esquema que
+ *   los topes: tope + 1 → 400 nombrando el campo; tope justo → sin ese mensaje.
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -688,6 +692,291 @@ const TOPES: FilaTope[] = [
   },
 ];
 
+/** Lo que cabe en una columna `int` y `smallint` de Postgres. */
+const MAX_INT = 2147483647;
+const MAX_SMALLINT = 32767;
+/** Cuántas veces entra una misma cosa en un plato: `MAX_UNIDADES_POR_PLATO`. */
+const MAX_UNIDADES_POR_PLATO = 99;
+
+const grupoDeReceta = (g: object) => ({
+  gruposModificadores: [{ grupoModificadorId: ID, min: 0, max: 1, ...g }],
+});
+const opcionDeGrupo = (orden: number) => ({
+  nombre: 'Grupo topes E2E',
+  opciones: [{ itemId: ID, precioExtra: '0', orden }],
+});
+const promo = (extra: object, scope: object = {}) => ({
+  nombre: 'Promo topes E2E',
+  tipo: 'nxm',
+  fechaInicio: '2026-10-01',
+  fechaFin: '2026-12-31',
+  scopes: [{ tipoScope: 'venta', ...scope }],
+  ...extra,
+});
+const impresoraRed = (puerto: number) => ({
+  nombre: 'Impresora topes E2E',
+  rol: 'comanda',
+  tipoConexion: 'red',
+  host: '10.0.0.9',
+  puerto,
+});
+const pagoConCuotas = (numeroCuotas: number) => ({
+  pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1', numeroCuotas }],
+});
+
+/**
+ * Una fila por `@Max` agregado el 2026-10-08: sin él, el entero pasaba
+ * `@IsInt()` y reventaba en el INSERT con un 500 (o, en `puerto`, se guardaba
+ * un valor que no sirve). Las ediciones que heredan el decorador del alta
+ * llevan su propia fila.
+ */
+const ENTEROS: FilaTope[] = [
+  {
+    campo: 'gruposModificadores.0.min',
+    tope: MAX_INT,
+    metodo: 'post',
+    ruta: 'items',
+    cuerpo: (n) => grupoDeReceta({ min: n }),
+  },
+  // El `max` de un grupo acota las unidades elegidas en un plato: no es el int.
+  {
+    campo: 'gruposModificadores.0.max',
+    tope: MAX_UNIDADES_POR_PLATO,
+    metodo: 'post',
+    ruta: 'items',
+    cuerpo: (n) => grupoDeReceta({ max: n }),
+  },
+  {
+    campo: 'gruposModificadores.0.orden',
+    tope: MAX_INT,
+    metodo: 'post',
+    ruta: 'items',
+    cuerpo: (n) => grupoDeReceta({ orden: n }),
+  },
+  // El `max` de un grupo acota las unidades elegidas en un plato: no es el int.
+  {
+    campo: 'gruposModificadores.0.max',
+    tope: MAX_UNIDADES_POR_PLATO,
+    metodo: 'patch',
+    ruta: `items/${ID}`,
+    cuerpo: (n) => grupoDeReceta({ max: n }),
+  },
+  {
+    campo: 'duracionEstimada',
+    tope: MAX_INT,
+    metodo: 'post',
+    ruta: 'items',
+    cuerpo: (n) => ({ duracionEstimada: n }),
+  },
+  {
+    campo: 'duracionEstimada',
+    tope: MAX_INT,
+    metodo: 'patch',
+    ruta: `items/${ID}`,
+    cuerpo: (n) => ({ duracionEstimada: n }),
+  },
+  {
+    campo: 'opciones.0.orden',
+    tope: MAX_INT,
+    metodo: 'post',
+    ruta: 'grupos-modificadores',
+    cuerpo: opcionDeGrupo,
+  },
+  {
+    campo: 'opciones.0.orden',
+    tope: MAX_INT,
+    metodo: 'patch',
+    ruta: `grupos-modificadores/${ID}`,
+    cuerpo: opcionDeGrupo,
+  },
+  {
+    campo: 'grupos.0.orden',
+    tope: MAX_INT,
+    metodo: 'put',
+    ruta: 'propinas/distribucion',
+    cuerpo: (n) => ({ grupos: [{ ...grupoPropinas(ID), orden: n }] }),
+  },
+  {
+    campo: 'cadaN',
+    tope: MAX_SMALLINT,
+    metodo: 'post',
+    ruta: 'promociones',
+    cuerpo: (n) => promo({ cadaN: n }),
+  },
+  {
+    campo: 'cadaN',
+    tope: MAX_SMALLINT,
+    metodo: 'patch',
+    ruta: `promociones/${ID}`,
+    cuerpo: (n) => ({ cadaN: n }),
+  },
+  {
+    campo: 'scopes.0.cantidad',
+    tope: MAX_SMALLINT,
+    metodo: 'post',
+    ruta: 'promociones',
+    cuerpo: (n) => promo({}, { cantidad: n }),
+  },
+  {
+    campo: 'prioridad',
+    tope: MAX_INT,
+    metodo: 'post',
+    ruta: 'pasarela/admin/config',
+    cuerpo: (n) => ({ prioridad: n }),
+  },
+  {
+    campo: 'prioridad',
+    tope: MAX_INT,
+    metodo: 'patch',
+    ruta: `pasarela/admin/config/${ID}`,
+    cuerpo: (n) => ({ prioridad: n }),
+  },
+  {
+    campo: 'puerto',
+    tope: 65535,
+    metodo: 'post',
+    ruta: 'impresoras',
+    cuerpo: impresoraRed,
+  },
+  {
+    campo: 'puerto',
+    tope: 65535,
+    metodo: 'patch',
+    ruta: `impresoras/${ID}`,
+    cuerpo: (n) => ({ puerto: n }),
+  },
+  // `diasVencimiento` no va a una columna entera: el tope es el del formulario.
+  ...(['descuentos', 'recargos'] as const).flatMap((recurso): FilaTope[] => [
+    {
+      campo: 'diasVencimiento',
+      tope: 9999,
+      metodo: 'post',
+      ruta: recurso,
+      cuerpo: (n) => ({ diasVencimiento: n }),
+    },
+    {
+      campo: 'diasVencimiento',
+      tope: 9999,
+      metodo: 'patch',
+      ruta: `${recurso}/${ID}`,
+      cuerpo: (n) => ({ diasVencimiento: n }),
+    },
+  ]),
+  {
+    campo: 'pagos.0.numeroCuotas',
+    tope: MAX_INT,
+    metodo: 'post',
+    ruta: 'pagos',
+    cuerpo: pagoConCuotas,
+  },
+  {
+    campo: 'pagos.0.numeroCuotas',
+    tope: MAX_INT,
+    metodo: 'post',
+    ruta: 'ventas',
+    cuerpo: (n) => ({ ...linea({}), ...pagoConCuotas(n) }),
+  },
+];
+
+const texto = (n: number): string => 'x'.repeat(n);
+/** Un correo válido de exactamente `n` caracteres. */
+const correoDe = (n: number): string =>
+  `${'a'.repeat(60)}@${'b'.repeat(n - 65)}.com`;
+const impresoraSistema = (nombreCola: string) => ({
+  nombre: 'Impresora topes E2E',
+  rol: 'comanda',
+  tipoConexion: 'sistema',
+  nombreCola,
+});
+
+/** Los campos de un tercero que van a una columna `varchar(N)`. */
+const CAMPOS_TERCERO: [string, number, (n: number) => string][] = [
+  ['nombre', 100, texto],
+  ['rut', 50, texto],
+  ['nombreLegal', 100, texto],
+  ['rutFiscal', 50, texto],
+  ['correo', 100, correoDe],
+  ['telefono', 50, texto],
+];
+
+/**
+ * Una fila por `@MaxLength` agregado el 2026-10-08: el tope es el largo de la
+ * columna `varchar(N)`, y sin él uno más largo daba 500 al guardar. Los
+ * campos que van a `text` no llevan tope: no rompen nada.
+ */
+const LARGOS: FilaTope[] = [
+  ...CAMPOS_TERCERO.flatMap(([campo, tope, valor]): FilaTope[] => [
+    {
+      campo,
+      tope,
+      metodo: 'post',
+      ruta: 'terceros',
+      cuerpo: (n) => ({
+        tipo: 'proveedor',
+        nombre: 'Tercero',
+        [campo]: valor(n),
+      }),
+    },
+    {
+      campo,
+      tope,
+      metodo: 'patch',
+      ruta: `terceros/${ID}`,
+      cuerpo: (n) => ({ [campo]: valor(n) }),
+    },
+  ]),
+  {
+    campo: 'nombre',
+    tope: 100,
+    metodo: 'post',
+    ruta: 'impresoras',
+    cuerpo: (n) => ({ ...impresoraRed(9100), nombre: texto(n) }),
+  },
+  {
+    campo: 'nombre',
+    tope: 100,
+    metodo: 'patch',
+    ruta: `impresoras/${ID}`,
+    cuerpo: (n) => ({ nombre: texto(n) }),
+  },
+  {
+    campo: 'host',
+    tope: 255,
+    metodo: 'post',
+    ruta: 'impresoras',
+    cuerpo: (n) => ({ ...impresoraRed(9100), host: texto(n) }),
+  },
+  {
+    campo: 'host',
+    tope: 255,
+    metodo: 'patch',
+    ruta: `impresoras/${ID}`,
+    cuerpo: (n) => ({ host: texto(n) }),
+  },
+  {
+    campo: 'nombreCola',
+    tope: 100,
+    metodo: 'post',
+    ruta: 'impresoras',
+    cuerpo: (n) => impresoraSistema(texto(n)),
+  },
+  {
+    campo: 'nombreCola',
+    tope: 100,
+    metodo: 'patch',
+    ruta: `impresoras/${ID}`,
+    cuerpo: (n) => ({ nombreCola: texto(n) }),
+  },
+  // `RestaurarDto` es común; solo turnos guarda el nombre en un `varchar(100)`.
+  {
+    campo: 'nombre',
+    tope: 100,
+    metodo: 'post',
+    ruta: `turnos/${ID}/restaurar`,
+    cuerpo: (n) => ({ nombre: texto(n) }),
+  },
+];
+
 describe('Topes y forma de los arrays y objetos de los DTOs (e2e)', () => {
   let app: INestApplication<App>;
   let ds: DataSource;
@@ -775,6 +1064,205 @@ describe('Topes y forma de los arrays y objetos de los DTOs (e2e)', () => {
         expect(justo.status).toBe(400);
         expect(mensajes(justo)).toContain('property zz should not exist');
         expect(mensajes(justo)).not.toContain(esperado);
+      },
+    );
+  });
+
+  describe('@Max: un entero que no cabe en su columna es 400', () => {
+    it.each(ENTEROS)(
+      '$metodo /$ruta $campo: $tope pasa, uno más no',
+      async ({ campo, tope, metodo, ruta, cuerpo }) => {
+        const esperado = `${campo} must not be greater than ${tope}`;
+
+        const pasado = await enviar(metodo, ruta, cuerpo(tope + 1));
+        expect(pasado.status).toBe(400);
+        expect(mensajes(pasado)).toContain(esperado);
+
+        const justo = await enviar(metodo, ruta, { ...cuerpo(tope), zz: 1 });
+        expect(justo.status).toBe(400);
+        expect(mensajes(justo)).toContain('property zz should not exist');
+        expect(mensajes(justo)).not.toContain(esperado);
+      },
+    );
+  });
+
+  describe('@MaxLength: un texto que no cabe en su columna es 400', () => {
+    it.each(LARGOS)(
+      '$metodo /$ruta $campo: $tope caracteres pasan, uno más no',
+      async ({ campo, tope, metodo, ruta, cuerpo }) => {
+        const esperado = `${campo} must be shorter than or equal to ${tope} characters`;
+
+        const pasado = await enviar(metodo, ruta, cuerpo(tope + 1));
+        expect(pasado.status).toBe(400);
+        expect(mensajes(pasado)).toContain(esperado);
+
+        const justo = await enviar(metodo, ruta, { ...cuerpo(tope), zz: 1 });
+        expect(justo.status).toBe(400);
+        expect(mensajes(justo)).toContain('property zz should not exist');
+        expect(mensajes(justo)).not.toContain(esperado);
+      },
+    );
+
+    it('POST /turnos/:id/restaurar sin nombre sigue sin pedirlo', async () => {
+      const res = await enviar('post', `turnos/${ID}/restaurar`, { zz: 1 });
+      expect(res.status).toBe(400);
+      expect(mensajes(res)).toEqual(['property zz should not exist']);
+    });
+
+    // `RestaurarTurnoDto` redeclara `nombre`: class-validator descarta los
+    // validadores heredados del mismo tipo, así que los repite. Sin eso, un
+    // nombre vacío restauraba en silencio con el nombre viejo (200).
+    it.each([
+      ['solo espacios', '   ', 'nombre should not be empty'],
+      ['vacío', '', 'nombre should not be empty'],
+      ['un número', 42, 'nombre must be a string'],
+    ])(
+      'POST /turnos/:id/restaurar con nombre %s sigue siendo 400',
+      async (_caso, nombre, esperado) => {
+        const res = await enviar('post', `turnos/${ID}/restaurar`, { nombre });
+        expect(res.status).toBe(400);
+        expect(mensajes(res)).toContain(esperado);
+      },
+    );
+  });
+
+  // `modo` va a la columna enum `modo_regla`: un valor fuera de él daba 500.
+  describe('@IsEnum: modo fuera de modo_regla es 400', () => {
+    it.each([
+      ['post', 'descuentos'],
+      ['patch', `descuentos/${ID}`],
+      ['post', 'recargos'],
+      ['patch', `recargos/${ID}`],
+    ] as [Metodo, string][])(
+      '%s /%s modo: porcentaje pasa, otro no',
+      async (metodo, ruta) => {
+        const esperado =
+          'modo must be one of the following values: porcentaje, monto_fijo';
+
+        const otro = await enviar(metodo, ruta, { modo: 'xx' });
+        expect(otro.status).toBe(400);
+        expect(mensajes(otro)).toContain(esperado);
+
+        const valido = await enviar(metodo, ruta, {
+          modo: 'porcentaje',
+          zz: 1,
+        });
+        expect(valido.status).toBe(400);
+        expect(mensajes(valido)).toContain('property zz should not exist');
+        expect(mensajes(valido)).not.toContain(esperado);
+      },
+    );
+  });
+
+  // La personalización de un combo recorre una vez por unidad del componente:
+  // con 10^7, `/calcular` tardaba 11 s.
+  describe('@IsDecimalHasta: un componente de combo lleva hasta 99 unidades', () => {
+    it.each([
+      ['post', 'items'],
+      ['patch', `items/${ID}`],
+    ] as [Metodo, string][])(
+      '%s /%s componentes.0.cantidad: 99 pasa, 99.0001 no',
+      async (metodo, ruta) => {
+        const cuerpo = (cantidad: string) => ({
+          componentes: [{ componenteItemId: ID, cantidad }],
+        });
+        const esperado = 'componentes.0.cantidad no puede superar 99';
+
+        const pasado = await enviar(metodo, ruta, cuerpo('99.0001'));
+        expect(pasado.status).toBe(400);
+        expect(mensajes(pasado)).toContain(esperado);
+
+        const justo = await enviar(metodo, ruta, { ...cuerpo('99'), zz: 1 });
+        expect(justo.status).toBe(400);
+        expect(mensajes(justo)).toContain('property zz should not exist');
+        expect(mensajes(justo)).not.toContain(esperado);
+      },
+    );
+  });
+
+  // Repetidos: los de un ítem daban un 400 que mentía ("no pertenecen a este
+  // tenant"); los de una promo chocaban con la PK de la puente (500). En
+  // mayúsculas también: `@IdEnMinusculas` corre antes que `@ArrayUnique`.
+  describe('@ArrayUnique: un id repetido es 400, también en mayúsculas', () => {
+    interface FilaRepetido {
+      campo: string;
+      metodo: Metodo;
+      ruta: string;
+      cuerpo: (ids: string[]) => object;
+    }
+    const FILAS: FilaRepetido[] = [
+      ...(['impuestosIds', 'recargosIds', 'descuentosIds'] as const).flatMap(
+        (campo): FilaRepetido[] => [
+          {
+            campo,
+            metodo: 'post',
+            ruta: 'items',
+            cuerpo: (ids: string[]) => ({ [campo]: ids }),
+          },
+          {
+            campo,
+            metodo: 'patch',
+            ruta: `items/${ID}`,
+            cuerpo: (ids: string[]) => ({ [campo]: ids }),
+          },
+        ],
+      ),
+      {
+        campo: 'scopes.0.itemIds',
+        metodo: 'post',
+        ruta: 'promociones',
+        cuerpo: (ids) => promo({}, { tipoScope: 'items', itemIds: ids }),
+      },
+      {
+        campo: 'scopes.0.itemIds',
+        metodo: 'patch',
+        ruta: `promociones/${ID}`,
+        cuerpo: (ids) => ({ scopes: [{ tipoScope: 'items', itemIds: ids }] }),
+      },
+    ];
+
+    it.each(FILAS)(
+      '$metodo /$ruta $campo: [x, x] y [x, X] son 400; [x] no',
+      async ({ campo, metodo, ruta, cuerpo }) => {
+        const esperado = `${campo.replace(/[^.]+$/, '')}All ${campo.split('.').pop()}'s elements must be unique`;
+
+        for (const ids of [
+          [ID, ID],
+          [ID, ID.toUpperCase()],
+        ]) {
+          const repetido = await enviar(metodo, ruta, cuerpo(ids));
+          expect(repetido.status).toBe(400);
+          expect(mensajes(repetido)).toContain(esperado);
+        }
+
+        const unaVez = await enviar(metodo, ruta, { ...cuerpo([ID]), zz: 1 });
+        expect(unaVez.status).toBe(400);
+        expect(mensajes(unaVez)).toContain('property zz should not exist');
+        expect(mensajes(unaVez)).not.toContain(esperado);
+      },
+    );
+  });
+
+  // Un negativo se guardaba tal cual (`POST /pagos` con -5 → 201 y -5 en la
+  // columna). 0 es legítimo: Webpay informa 0 cuotas en débito.
+  describe('@Min(0): numeroCuotas negativo es 400', () => {
+    it.each(['pagos', 'ventas'])(
+      'POST /%s pagos.0.numeroCuotas: 0 pasa, -1 no',
+      async (ruta) => {
+        const cuerpo = (n: number) =>
+          ruta === 'ventas'
+            ? { ...linea({}), ...pagoConCuotas(n) }
+            : pagoConCuotas(n);
+        const esperado = 'pagos.0.numeroCuotas must not be less than 0';
+
+        const negativo = await enviar('post', ruta, cuerpo(-1));
+        expect(negativo.status).toBe(400);
+        expect(mensajes(negativo)).toContain(esperado);
+
+        const cero = await enviar('post', ruta, { ...cuerpo(0), zz: 1 });
+        expect(cero.status).toBe(400);
+        expect(mensajes(cero)).toContain('property zz should not exist');
+        expect(mensajes(cero)).not.toContain(esperado);
       },
     );
   });

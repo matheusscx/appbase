@@ -1,5 +1,6 @@
 import {
   ArrayMaxSize,
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsIn,
@@ -9,6 +10,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   Min,
   Validate,
   ValidateIf,
@@ -26,6 +28,8 @@ import {
 import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
+import { MAX_INT } from '../../../common/constants/escalas';
+import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
 @ValidatorConstraint({ name: 'costoNoEditable', async: false })
 export class CostoNoEditableConstraint implements ValidatorConstraintInterface {
@@ -151,9 +155,10 @@ export class UpdateItemDto {
   @Validate(CostoNoEditableConstraint)
   costo?: string;
 
-  // Extensión servicio
+  // Extensión servicio. Mismo tope que el alta: columna `int`.
   @IsInt()
   @Min(0)
+  @Max(MAX_INT)
   @IsOptional()
   duracionEstimada?: number;
 
@@ -205,6 +210,8 @@ export class UpdateItemDto {
   @IsArray()
   // Mismo tope que `CreateItemDto.impuestosIds`.
   @ArrayMaxSize(50)
+  @IdEnMinusculas()
+  @ArrayUnique()
   @IsUUID('4', { each: true })
   @ValidateIf((_o, v) => v !== undefined)
   impuestosIds?: string[];
@@ -212,6 +219,8 @@ export class UpdateItemDto {
   @IsArray()
   // Mismo tope que `CreateItemDto.recargosIds`.
   @ArrayMaxSize(50)
+  @IdEnMinusculas()
+  @ArrayUnique()
   @IsUUID('4', { each: true })
   @ValidateIf((_o, v) => v !== undefined)
   recargosIds?: string[];
@@ -219,6 +228,8 @@ export class UpdateItemDto {
   @IsArray()
   // Mismo tope que `CreateItemDto.descuentosIds`.
   @ArrayMaxSize(50)
+  @IdEnMinusculas()
+  @ArrayUnique()
   @IsUUID('4', { each: true })
   @ValidateIf((_o, v) => v !== undefined)
   descuentosIds?: string[];
