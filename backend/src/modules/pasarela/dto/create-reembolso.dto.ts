@@ -9,6 +9,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { MAX_LINEAS_POR_VENTA } from '../../../common/utils/tope-unidades-venta.util';
 import {
   DESTINOS_STOCK_DEVOLUCION,
   type DestinoStockDevolucion,
@@ -64,7 +65,7 @@ export class CreateReembolsoDto {
   // Una devolución por ítem distinto de la venta, y una venta tiene a lo sumo
   // 500 líneas (`CreateVentaDto.lineas`): con menos se corta una corrección
   // válida.
-  @ArrayMaxSize(500)
+  @ArrayMaxSize(MAX_LINEAS_POR_VENTA)
   @ValidateNested({ each: true })
   @Type(() => DevolucionLineaDto)
   devoluciones?: DevolucionLineaDto[];

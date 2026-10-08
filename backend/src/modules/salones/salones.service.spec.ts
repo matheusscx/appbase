@@ -2,6 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import Decimal from 'decimal.js';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { IsNull } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import { SalonesService } from './salones.service';
 import { IdempotenciaService } from '../idempotencia/idempotencia.service';
@@ -6337,9 +6338,29 @@ describe('SalonesService', () => {
 
       expect(manager.update).toHaveBeenCalledWith(
         CuentaLinea,
-        { id: 'linea-1', tenantId: TENANT },
+        {
+          id: 'linea-1',
+          tenantId: TENANT,
+          cuentaId: CUENTA,
+          eliminadoEl: IsNull(),
+        },
         { cantidadEnviada: '3' },
       );
+    });
+
+    it('lanza NotFound si la línea no es de esa cuenta o ya se quitó', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+      });
+      manager.update.mockResolvedValueOnce({ affected: 0 });
+
+      await expect(
+        service.confirmarComanda(TENANT, CUENTA, {
+          lineas: [{ cuentaLineaId: 'linea-ajena', cantidadEnviada: '3' }],
+        }),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('lanza BadRequest si la cuenta no está abierta', async () => {

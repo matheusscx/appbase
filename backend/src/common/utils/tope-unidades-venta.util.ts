@@ -18,6 +18,24 @@ import Decimal from 'decimal.js';
  */
 export const MAX_UNIDADES_POR_VENTA = '99999';
 
+/**
+ * **Cuántas líneas puede tener una venta: 500.** El POS junta el mismo
+ * producto en una línea, pero una cuenta de salón no: dos pedidos del mismo
+ * plato con distinta personalización son dos líneas, y una mesa grande o una
+ * fusión las acumula. 500 deja pasar esa mesa. Cada línea cuesta unas queries
+ * (receta, grupos, stock): 500 líneas de receta tardan ~1,1 s (medido el
+ * 2026-10-06), y el body de 100 kB dejaba pasar ~1.500.
+ *
+ * Una sola constante porque son el mismo carro visto desde tres puertas:
+ * `CreateVentaDto.lineas`, `CalcularVentaDto.lineas` (la precuenta del salón
+ * manda ahí todas las líneas de la cuenta) y la cuenta de salón misma, que lo
+ * hace cumplir al pedir y al fusionar. Si la cuenta aceptara más que
+ * `/calcular`, la mesa se quedaría sin precuenta. Y lo mismo hacia atrás: las
+ * devoluciones de una nota de crédito o un reembolso son una por ítem distinto
+ * de la venta, así que su tope es este (con menos se corta una nota válida).
+ */
+export const MAX_LINEAS_POR_VENTA = 500;
+
 const formato = new Intl.NumberFormat('es-CL', { maximumFractionDigits: 4 });
 
 /**

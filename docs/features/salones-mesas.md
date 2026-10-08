@@ -198,6 +198,25 @@ Requiere caja física abierta (lo valida `crearEnTransaccion`).
 Al quedar solo el destino abierta, la numeración por mesa sigue el mismo criterio
 normal (se reinicia en 1 cuando esa cuenta también se cierre).
 
+### Tope de líneas de una cuenta (2026-10-08)
+
+Una cuenta tiene como máximo **`MAX_LINEAS_POR_VENTA` líneas (500)**, el mismo número que la
+venta y `/calcular`, y desde una sola constante (`common/utils/tope-unidades-venta.util.ts`). La
+razón es la precuenta: manda todas las líneas de la cuenta a `/calcular`, que corta en ese
+número, y una mesa con más líneas se quedaba sin precuenta (cerrarla seguía andando, porque el
+cierre no pasa por el `ValidationPipe`).
+
+Se corta en las dos puertas que suman líneas, con un 400 que dice cuántas quedarían:
+
+- **Pedir** (`agregarLinea`): solo cuando el pedido crea una línea. Pedir otra vez algo que se
+  junta con una línea existente suma cantidad y pasa aunque la cuenta esté llena.
+- **Fusionar**: se cuenta **después** de mover, porque cuántas líneas quedan depende de cuántas
+  se juntaron; si se pasa, la fusión se revierte entera y las cuentas quedan como estaban.
+
+Las dos cuentan bajo el `FOR UPDATE` de la cuenta que ya toma la escritura, igual que el tope de
+unidades: dos pedidos concurrentes se serializan y el segundo ve la línea del primero. Lo fija
+`backend/test/salones-tope-lineas.e2e-spec.ts`.
+
 ### Tablas
 
 **`salones`**: `salon_id` PK, `tenant_id`, `nombre` + soft delete/timestamps.
@@ -296,6 +315,11 @@ Backfill al arrancar: cuentas existentes sin responsable reciben
   resuelven **fuera** del lock; lo que sí necesita leerse adentro va con el manager de
   la transacción, porque pedir una segunda conexión del pool sosteniendo el
   `FOR UPDATE` es un doble checkout que puede estancarse.
+- **Confirmar la comanda (`POST /cuentas/:id/comanda`, el legado de `reclamar`): el mismo
+  `FOR UPDATE` de la cuenta, y cada línea tiene que ser de esa cuenta y estar viva** (2026-10-08).
+  Hasta entonces el `UPDATE` iba por id + tenant: con el id de una línea de otra cuenta le pisaba
+  `cantidad_enviada` —lo que decide si se puede quitar, bajar o anular— y respondía 201. Ahora es
+  404, como en `actualizarLinea`/`quitarLinea`. Lo fija `backend/test/salones-comanda.e2e-spec.ts`.
 - Un solo tramo vigente por cuenta: índice parcial único en `cuenta_asignaciones`.
 
 ### Ítem eliminado con la cuenta abierta

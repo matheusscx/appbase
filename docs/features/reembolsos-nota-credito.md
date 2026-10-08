@@ -346,16 +346,14 @@ y en los dos `POST …/reembolsos` de la pasarela (`DevolucionLineaDto`); es el 
 
 `stock: null` es 400 siempre (lo rechaza el DTO); ausente es 400 solo en la línea con stock. El campo de antes, `reponerStock`, ya no existe: el pipe lo rechaza.
 
-**Hasta 500 líneas** en los tres DTOs (`@ArrayMaxSize(500)`; la 501 es 400 del pipe): se acepta
+**Hasta 500 líneas** en los tres DTOs (`@ArrayMaxSize(MAX_LINEAS_POR_VENTA)`; la 501 es 400 del pipe): se acepta
 una línea por ítem distinto de la venta (repetido es 400), y una venta tiene a lo sumo 500 líneas
 (`CreateVentaDto.lineas`). Con menos, el tope cortaba una nota válida: medido el 2026-10-08, una
 venta con 201 ítems distintos se devolvía entera con 201 líneas. El peor caso, 500 productos con
 `pierde` (1000 movimientos de inventario), tardó ~1,5 s. Decidido por la Sesión de esfuerzo
-máximo (2026-10-08), por construcción. ⚠️ **La excepción, al cierre:** cerrar una cuenta de salón
-crea la venta sin pasar por `CreateVentaDto`, y la cuenta todavía no tiene tope de líneas
-([`pendientes.md`](../agent/pendientes.md) § 2, "Una cuenta de salón no tiene tope de líneas").
-Una venta así con más de 500 ítems distintos no se devuelve entera en una nota: van dos notas
-parciales.
+máximo (2026-10-08), por construcción. Vale también para la venta de una cuenta de salón, que se
+crea sin pasar por `CreateVentaDto`: la cuenta tiene el mismo tope de líneas desde el 2026-10-08
+([salones-mesas.md](salones-mesas.md) § Tope de líneas de una cuenta).
 
 **Qué devuelve una línea: lo que salió por ella.** La misma fuente que revierte `cancelar` —el
 kardex de la venta, motivo `venta`— acotada a las líneas devueltas: desde el 2026-10-04 cada salida

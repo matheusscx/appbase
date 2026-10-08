@@ -23,6 +23,98 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `POST /cuentas/:id/comanda` ya no escribe líneas de otra cuenta (cerrada 2026-10-08)
+
+Sale de [`pendientes.md`](pendientes.md) § 2, junto con la de abajo (misma sesión, mismo
+service). Plan: [`2026-10-08-salon-comanda-ajena-y-tope-de-lineas.md`](../superpowers/plans/2026-10-08-salon-comanda-ajena-y-tope-de-lineas.md).
+La regla viva está en [`features/salones-mesas.md`](../features/salones-mesas.md) § Concurrencia.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **`POST /cuentas/:id/comanda` escribe líneas de cualquier cuenta del tenant** (backend,
+  `SalonesService.confirmarComanda`, `salones.service.ts:2979-2985`; leído, **no corrido**, por un
+  agente del frente de topes de los DTOs el 2026-10-06 y confirmado leyendo el código). El loop hace
+  `manager.update(CuentaLinea, { id: linea.cuentaLineaId, tenantId }, …)`: no ata la línea a la
+  `cuentaId` de la ruta (que sí se valida abierta), ni filtra `eliminado_el`. Con el id de una línea de
+  otra cuenta del mismo tenant, abierta o cerrada, le pisa `cantidadEnviada`. **Medir:** por HTTP,
+  dos cuentas, mandar a la comanda de una el `cuentaLineaId` de la otra, y releer. **Arreglo
+  probable:** agregar `cuentaId` y `eliminadoEl: IsNull()` al `where`, y que una línea ajena sea 400 o
+  404 en vez de un `update` que no toca nada.
+
+### Qué se midió
+
+Por HTTP, con el e2e nuevo corrido contra el código sin tocar: dos cuentas abiertas en la misma
+mesa, y a la comanda de la primera el `cuentaLineaId` de la segunda → **201**. Releída la base, la
+línea ajena (cantidad 3) quedó con `cantidad_enviada` 3 y la propia en 0. Una línea ya quitada de
+la propia cuenta también: 201, y la fila borrada quedó escrita.
+
+### Qué se hizo
+
+- El `where` del `UPDATE` lleva `cuentaId` y `eliminadoEl: IsNull()`, y una línea que no matchea
+  es **404** `Línea … no encontrada`: lo que ya contestan `actualizarLinea`, `quitarLinea` y
+  `anularLinea` con una línea ajena (`guardarLayout` hace lo mismo con una mesa de otro salón).
+- La cuenta se lee con `getCuentaAbiertaConLock`, como toda escritura sobre sus líneas: el
+  `findOne` plano no esperaba al lock de `cerrarCuenta` ni al de una fusión.
+
+**Barrido de `SalonesService`** por el mismo mecanismo (update o delete por id + tenant sin atar
+al padre de la ruta): `confirmarComanda` era el único. `actualizarLinea`, `quitarLinea` y
+`escribirAnulacionDeLinea` leen la línea con `cuentaId`; `escribirAnulacionEnLinea` y la fusión
+borran con `cuentaId` o con ids leídos de la cuenta; `reclamarComanda` escribe ids que salen de su
+propio `SELECT` filtrado por cuenta; los `UPDATE` del reparto van por ids derivados en el server;
+`guardarLayout` ata la mesa al salón. **Anotado y no tocado** (otro mecanismo): el `UPDATE` de
+`guardarLayout` no filtra `eliminado_el`, así que una mesa ya borrada de ese salón recibe la
+posición y responde OK (leído, no medido; quedó como entrada en `pendientes.md` § 2).
+
+### Qué lo fija
+
+`test/salones-comanda.e2e-spec.ts` § "confirmar la comanda solo escribe líneas de ESA cuenta":
+línea de otra cuenta → 404 y su despacho releído en 0; línea quitada → 404; control con la propia
+→ 201 y releída. Mutantes, cada uno rojo en su test: sin `cuentaId` en el `where` ("la línea de
+otra cuenta"), sin `eliminadoEl` ("una línea ya quitada"). Revertir el arreglo entero es la
+corrida de reproducción: los dos en rojo con 201.
+
+## Una cuenta de salón tiene el mismo tope de líneas que la venta (cerrada 2026-10-08)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. Plan: el mismo de arriba. La regla viva está en
+[`features/salones-mesas.md`](../features/salones-mesas.md) § Tope de líneas de una cuenta.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Una cuenta de salón no tiene tope de líneas y la precuenta sí** (backend, `SalonesService.agregarLinea`, `salones.service.ts:852`; anotado por el frente de topes de los DTOs, 2026-10-06). La precuenta (`useSalones.ts:356`) manda todas las líneas de la cuenta a `/calcular`, que corta en 500 (`CalcularVentaDto.lineas`). Dos pedidos del mismo plato con distinta personalización son dos líneas, y una fusión las suma. Una cuenta con más de 500 líneas distintas se queda sin precuenta, aunque cerrarla sigue andando. **Salida probable:** tope de líneas por cuenta en `agregarLinea` y `fusionarCuentas` (400 al pasarse), con el mismo número que `CalcularVentaDto.lineas`.
+
+### Qué se hizo
+
+- **`MAX_LINEAS_POR_VENTA = 500`**, una constante junto a `MAX_UNIDADES_POR_VENTA`
+  (`common/utils/tope-unidades-venta.util.ts`), con el porqué que antes vivía en el comentario de
+  `CreateVentaDto.lineas`. La usan los tres DTOs que ya decían 500 —`CreateVentaDto.lineas`,
+  `CalcularVentaDto.lineas`, `ConfirmarComandaDto.lineas`— y la cuenta.
+- **No se consultó el número:** no es uno nuevo. Es el de `/calcular` (medido por el frente de
+  topes de los DTOs: ~1,1 s para 500 líneas de receta, y escrito ahí que "500 deja pasar esa
+  mesa"), aplicado a lo que la precuenta le manda. Una cuenta que aceptara más que `/calcular`
+  dejaba la mesa sin precuenta.
+- `assertTopeLineasCuenta` en las dos puertas que suman líneas, bajo el lock de la cuenta que la
+  escritura ya toma: en `agregarLinea` solo en la rama que crea una línea (un pedido que se junta
+  no agrega ninguna), y en `fusionarCuentas` después de mover, porque cuántas quedan depende de
+  cuántas se juntaron. El 400 dice cuántas quedarían y que se abra otra cuenta.
+- Las devoluciones de la NC y del reembolso (`CreateNotaCreditoDto`, `CreateReembolsoDto`,
+  `GenerarNotaReembolsoDto`), que el frente fiscal había dejado en 500 literal por la misma razón
+  (sección de abajo), pasan a la constante al rebasar sobre ese frente. No cambia su número: lo
+  decidió la sesión fiscal.
+
+### Qué lo fija
+
+`test/salones-tope-lineas.e2e-spec.ts`, armado **por la API** (502 productos distintos, una línea
+de cada uno; ~23 s): la línea 500 entra, la 501 es 400 y la cuenta sigue con 500; pedir de nuevo un
+plato que ya está suma cantidad con la cuenta llena; fusionar una línea que no se junta es 400 y
+las dos cuentas quedan como estaban; fusionar una que se junta pasa. Mutantes: sin el tope al pedir
+(rojo "una línea más es 400", y los siguientes en cascada porque la cuenta queda con 501), sin el
+tope al fusionar (rojo "fusionar … es 400"), `>=` en vez de `>` (rojo el `beforeAll`: la línea 500
+no entra), y el tope antes del merge en vez de en la rama que crea (rojo solo "pedir otra vez …
+suma cantidad"). La concurrencia (dos pedidos a la vez sobre la línea 500) no tiene test propio:
+el conteo corre bajo el mismo `FOR UPDATE` que el tope de unidades.
+
+---
+
 ## La personalización es un objeto, sus extras tienen tope, y los ids que entran al motor van en minúsculas (cerrada 2026-10-08)
 
 Sale de [`pendientes.md`](pendientes.md) § 2: la entrada de `personalizacion` como array entera, y
@@ -164,8 +256,8 @@ se corrió por HTTP: haría falta una orden online de 201 líneas con el proveed
 excepción, y no se cerró acá:** cerrar una cuenta de salón crea la venta sin pasar por
 `CreateVentaDto` (`SalonesService.cerrarCuenta` → `crearEnTransaccion`), y la cuenta no tiene tope
 de líneas. Una venta de salón con más de 500 ítems distintos se devuelve en dos notas parciales.
-La cierra el tope por cuenta que sigue abierto en `pendientes.md` § 2 ("Una cuenta de salón no
-tiene tope de líneas"). Lo encontró la revisión independiente.
+La cerró el mismo día el tope por cuenta (sección de arriba, "Una cuenta de salón tiene el mismo
+tope de líneas que la venta"). Lo encontró la revisión independiente.
 
 - `@ArrayMaxSize(500)` en `CreateNotaCreditoDto.devoluciones`, `CreateReembolsoDto.devoluciones`
   y `GenerarNotaReembolsoDto.devoluciones`. Es un literal con su porqué al lado, sin constante

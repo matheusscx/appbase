@@ -24,6 +24,7 @@ import {
 } from 'class-validator';
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
+import { MAX_LINEAS_POR_VENTA } from '../../../common/utils/tope-unidades-venta.util';
 
 export class DevolucionNotaCreditoDto {
   @IsUUID()
@@ -134,7 +135,7 @@ export class CreateNotaCreditoDto {
   @IsArray()
   // Una devolución por ítem distinto de la venta, y una venta tiene a lo sumo
   // 500 líneas (`CreateVentaDto.lineas`): con menos se corta una nota válida.
-  @ArrayMaxSize(500)
+  @ArrayMaxSize(MAX_LINEAS_POR_VENTA)
   @ValidateNested({ each: true })
   @Type(() => DevolucionNotaCreditoDto)
   devoluciones?: DevolucionNotaCreditoDto[];

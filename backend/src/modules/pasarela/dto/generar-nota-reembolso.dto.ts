@@ -5,6 +5,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { MAX_LINEAS_POR_VENTA } from '../../../common/utils/tope-unidades-venta.util';
 import { DevolucionLineaDto } from './create-reembolso.dto';
 
 /**
@@ -18,7 +19,7 @@ export class GenerarNotaReembolsoDto {
   @IsOptional()
   @IsArray()
   // El mismo tope que `CreateReembolsoDto.devoluciones`.
-  @ArrayMaxSize(500)
+  @ArrayMaxSize(MAX_LINEAS_POR_VENTA)
   @ValidateNested({ each: true })
   @Type(() => DevolucionLineaDto)
   devoluciones?: DevolucionLineaDto[];

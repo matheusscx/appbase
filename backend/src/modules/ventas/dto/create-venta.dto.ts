@@ -26,7 +26,10 @@ import {
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 import { PropinaCierreMesaDto } from './propina-cierre-mesa.dto';
 import { PropinaDirectaDto } from './propina-directa.dto';
-import { MAX_UNIDADES_POR_VENTA } from '../../../common/utils/tope-unidades-venta.util';
+import {
+  MAX_LINEAS_POR_VENTA,
+  MAX_UNIDADES_POR_VENTA,
+} from '../../../common/utils/tope-unidades-venta.util';
 import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
 export class LineaVentaDto {
@@ -181,13 +184,8 @@ export class CustomerVentaDto {
 
 export class CreateVentaDto {
   @IsArray()
-  // El POS junta el mismo producto en una línea, pero una cuenta de salón no:
-  // dos pedidos del mismo plato con distinta personalización son dos líneas,
-  // y una mesa grande o una fusión las acumula. 500 deja pasar esa mesa. Cada
-  // línea cuesta unas queries (receta, grupos, stock): 500 líneas de receta
-  // tardan ~1,1 s (medido el 2026-10-06), y el body de 100 kB dejaba pasar
-  // ~1.500.
-  @ArrayMaxSize(500)
+  // Por qué ese número: `MAX_LINEAS_POR_VENTA`.
+  @ArrayMaxSize(MAX_LINEAS_POR_VENTA)
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => LineaVentaDto)

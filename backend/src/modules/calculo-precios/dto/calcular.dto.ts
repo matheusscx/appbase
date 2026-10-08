@@ -15,7 +15,10 @@ import {
 } from 'class-validator';
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
 import { IsDecimalHasta } from '../../../common/decorators/decimal-signo.decorator';
-import { MAX_UNIDADES_POR_VENTA } from '../../../common/utils/tope-unidades-venta.util';
+import {
+  MAX_LINEAS_POR_VENTA,
+  MAX_UNIDADES_POR_VENTA,
+} from '../../../common/utils/tope-unidades-venta.util';
 import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
 export class LineaDto {
@@ -64,7 +67,7 @@ export class CalcularVentaDto {
   @IsArray()
   // Mismo tope que `CreateVentaDto.lineas`: es el mismo carro, y la precuenta
   // del salón manda acá todas las líneas de la cuenta.
-  @ArrayMaxSize(500)
+  @ArrayMaxSize(MAX_LINEAS_POR_VENTA)
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => LineaDto)

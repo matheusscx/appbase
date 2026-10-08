@@ -67,7 +67,10 @@ import {
 import type { PersonalizacionRecetaSnapshot } from '../../common/dto/personalizacion-receta.dto';
 import { IdempotenciaService } from '../idempotencia/idempotencia.service';
 import { huellaDe } from '../idempotencia/huella';
-import { assertTopeUnidadesVenta } from '../../common/utils/tope-unidades-venta.util';
+import {
+  assertTopeUnidadesVenta,
+  MAX_LINEAS_POR_VENTA,
+} from '../../common/utils/tope-unidades-venta.util';
 import {
   detallePersonalizacion,
   hashPersonalizacion,
@@ -1081,6 +1084,9 @@ export class SalonesService {
               resuelta.cantidadCanonica,
             );
           } else {
+            // Solo acá: un pedido que se junta con una línea existente no
+            // agrega ninguna.
+            await this.assertTopeLineasCuenta(manager, tenantId, cuentaId, 1);
             const nueva = await manager.save(
               CuentaLinea,
               manager.create(CuentaLinea, {
@@ -2465,6 +2471,10 @@ export class SalonesService {
         );
         await manager.save(Cuenta, origen);
       }
+      // Después de mover, no antes: cuántas líneas quedan depende de cuántas
+      // se juntaron, y eso lo decide el recorrido de arriba. Si se pasa, la
+      // excepción revierte la fusión entera.
+      await this.assertTopeLineasCuenta(manager, tenantId, destino.id, 0);
 
       // El reparto de las líneas que se juntaron (spec § 3.3): una lectura y tres
       // escrituras por lotes, sin importar cuántas líneas. Las que se movieron
@@ -2982,21 +2992,30 @@ export class SalonesService {
     dto: ConfirmarComandaDto,
   ): Promise<void> {
     await this.db.transaccion(async (manager) => {
-      const cuenta = await manager.findOne(Cuenta, {
-        where: { id: cuentaId, tenantId },
-      });
-      if (!cuenta) {
-        throw new NotFoundException(`Cuenta ${cuentaId} no encontrada`);
-      }
-      if (cuenta.estado !== EstadoCuenta.ABIERTA) {
-        throw new BadRequestException('La cuenta no está abierta');
-      }
+      // Con lock, como toda escritura sobre las líneas de una cuenta (ver
+      // `getCuentaAbiertaConLock`).
+      await this.getCuentaAbiertaConLock(manager, tenantId, cuentaId);
       for (const linea of dto.lineas) {
-        await manager.update(
+        // La línea tiene que ser de ESTA cuenta y estar viva. Hasta el
+        // 2026-10-08 el `where` era id + tenant: con el id de una línea de otra
+        // cuenta le pisaba `cantidad_enviada` —lo que decide si se puede
+        // quitar, bajar o anular— y respondía OK. 404, igual que
+        // `actualizarLinea`/`quitarLinea` con una línea ajena.
+        const res = await manager.update(
           CuentaLinea,
-          { id: linea.cuentaLineaId, tenantId },
+          {
+            id: linea.cuentaLineaId,
+            tenantId,
+            cuentaId,
+            eliminadoEl: IsNull(),
+          },
           { cantidadEnviada: linea.cantidadEnviada },
         );
+        if (!res.affected) {
+          throw new NotFoundException(
+            `Línea ${linea.cuentaLineaId} no encontrada`,
+          );
+        }
       }
     });
   }
@@ -3416,6 +3435,32 @@ export class SalonesService {
       [tenantId, cuentaIds, reemplaza],
     );
     assertTopeUnidadesVenta([total, entra], 'una mesa');
+  }
+
+  /**
+   * **Una cuenta no puede tener más líneas que una venta**
+   * (`MAX_LINEAS_POR_VENTA`): la precuenta manda todas sus líneas a
+   * `/calcular`, que corta en ese número, y la mesa se quedaba sin precuenta.
+   * Se corta en las dos puertas que suman líneas —pedir una nueva y fusionar—.
+   *
+   * Cuenta las líneas vivas de la cuenta más `entran`. Va **bajo el lock de la
+   * cuenta** que el llamador ya tomó, igual que `assertTopeUnidadesCuenta`: dos
+   * pedidos concurrentes se serializan ahí y el segundo ve la línea del primero.
+   */
+  private async assertTopeLineasCuenta(
+    manager: EntityManager,
+    tenantId: string,
+    cuentaId: string,
+    entran: number,
+  ): Promise<void> {
+    const lineas = await manager.count(CuentaLinea, {
+      where: { tenantId, cuentaId },
+    });
+    if (lineas + entran > MAX_LINEAS_POR_VENTA) {
+      throw new BadRequestException(
+        `Una cuenta puede tener hasta ${MAX_LINEAS_POR_VENTA} líneas, y esta quedaría con ${lineas + entran}. Abrí otra cuenta en la mesa para seguir pidiendo.`,
+      );
+    }
   }
 
   /**

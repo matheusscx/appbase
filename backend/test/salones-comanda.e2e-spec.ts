@@ -456,6 +456,79 @@ describe('Salones — comanda a cocina (e2e)', () => {
   });
 
   /**
+   * `POST /cuentas/:id/comanda` (el legado de `reclamar`) escribe
+   * `cantidad_enviada` de las líneas que le mandan. Hasta el 2026-10-08 el
+   * `UPDATE` iba por `cuenta_linea_id` + tenant, sin la cuenta de la ruta ni
+   * el filtro de borrado: con el id de una línea de OTRA cuenta del tenant le
+   * pisaba lo despachado, y respondía 201 (medido con este spec). Lo despachado
+   * es lo que decide si una línea se puede quitar, bajar o anular, así que
+   * pisarlo le cambia las reglas a una mesa ajena.
+   */
+  describe('confirmar la comanda solo escribe líneas de ESA cuenta', () => {
+    async function lineaDe(
+      cuentaId: string,
+    ): Promise<{ id: string; cantidadEnviada: string }> {
+      const res = await request(app.getHttpServer())
+        .get(`/api/mesas/${mesaId}/cuentas`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const cuenta = (
+        res.body as {
+          id: string;
+          lineas: { id: string; cantidadEnviada: string }[];
+        }[]
+      ).find((c) => c.id === cuentaId);
+      expect(cuenta).toBeTruthy();
+      expect(cuenta!.lineas).toHaveLength(1);
+      return cuenta!.lineas[0];
+    }
+
+    it('la línea de otra cuenta es 404, y su despacho no se mueve', async () => {
+      const propia = await abrirCuentaCon([{ itemId: platoId, cantidad: '2' }]);
+      const ajena = await abrirCuentaCon([{ itemId: platoId, cantidad: '3' }]);
+      const lineaAjena = await lineaDe(ajena.id);
+
+      await post(
+        `/api/cuentas/${propia.id}/comanda`,
+        { lineas: [{ cuentaLineaId: lineaAjena.id, cantidadEnviada: '3' }] },
+        404,
+      );
+
+      expect(Number((await lineaDe(ajena.id)).cantidadEnviada)).toBe(0);
+    });
+
+    it('una línea ya quitada de la propia cuenta es 404', async () => {
+      // El otro término del `where`: sin el filtro de borrado, el `UPDATE`
+      // encuentra la fila borrada, la escribe y responde 201.
+      const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '1' }]);
+      const linea = await lineaDe(cuenta.id);
+      await request(app.getHttpServer())
+        .delete(`/api/cuentas/${cuenta.id}/lineas/${linea.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      await post(
+        `/api/cuentas/${cuenta.id}/comanda`,
+        { lineas: [{ cuentaLineaId: linea.id, cantidadEnviada: '1' }] },
+        404,
+      );
+    });
+
+    it('la línea de la propia cuenta se sigue confirmando', async () => {
+      // El contraste que hace falsables a los dos de arriba: un guard que
+      // rechazara todo también los pondría en verde.
+      const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '2' }]);
+      const linea = await lineaDe(cuenta.id);
+
+      await post(`/api/cuentas/${cuenta.id}/comanda`, {
+        lineas: [{ cuentaLineaId: linea.id, cantidadEnviada: '2' }],
+      });
+
+      expect(Number((await lineaDe(cuenta.id)).cantidadEnviada)).toBe(2);
+    });
+  });
+
+  /**
    * El default del checkbox "Reponer el stock" del modal de anulación (decisión
    * del owner 2026-08-15; el caso mixto —unas líneas despachadas y otras no— lo
    * cerró el owner el 2026-08-23: **un solo checkbox para toda la venta,

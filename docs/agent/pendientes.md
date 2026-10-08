@@ -126,17 +126,34 @@ destapa una decisión que no es mía).
   - **B6:** strings sin `@MaxLength` (`comentario`, `referencia`, `descripcion`, `nombre`, `codigoLote`, `motivoAjuste`, rut/teléfono/email del customer), acotados por el body de 100 kB.
   - **Repetidos que llegan a la base:** `CreateItemDto.impuestosIds/recargosIds/descuentosIds` y `ScopePromoDto.itemIds` aceptan ids repetidos; se insertan de a uno o en lote contra una PK compuesta, así que probablemente dan 500.
 
-- [ ] **Una cuenta de salón no tiene tope de líneas y la precuenta sí** (backend, `SalonesService.agregarLinea`, `salones.service.ts:852`; anotado por el frente de topes de los DTOs, 2026-10-06). La precuenta (`useSalones.ts:356`) manda todas las líneas de la cuenta a `/calcular`, que corta en 500 (`CalcularVentaDto.lineas`). Dos pedidos del mismo plato con distinta personalización son dos líneas, y una fusión las suma. Una cuenta con más de 500 líneas distintas se queda sin precuenta, aunque cerrarla sigue andando. **Salida probable:** tope de líneas por cuenta en `agregarLinea` y `fusionarCuentas` (400 al pasarse), con el mismo número que `CalcularVentaDto.lineas`.
+- [ ] **`PATCH /salones/:salonId/layout` le escribe la posición a una mesa ya borrada** (backend,
+  `SalonesService.guardarLayout`; **leído, no corrido**, por el frente que cerró "la comanda escribe
+  líneas de otra cuenta", 2026-10-08). El `manager.update(Mesa, { id, tenantId, salonId }, …)` ata la
+  mesa al salón de la ruta pero no filtra `eliminado_el`, y el `update` de TypeORM no lo agrega solo:
+  una mesa borrada de ese salón recibe la posición y la respuesta es OK. Es inofensivo para la
+  operación (la mesa sigue borrada), pero si después se restaura vuelve con una posición que nadie
+  vio guardar. **Medir:** borrar una mesa, mandar el layout con su id y releerla desde la papelera.
+  **Arreglo probable:** `eliminadoEl: IsNull()` en el `where`, con lo que pasa al 404 *"no pertenece
+  al salón"* que ya existe; ver antes si la pantalla puede mandar una mesa que otro admin borró
+  (con el 404, el guardado del plano entero fallaría).
 
-- [ ] **`POST /cuentas/:id/comanda` escribe líneas de cualquier cuenta del tenant** (backend,
-  `SalonesService.confirmarComanda`, `salones.service.ts:2979-2985`; leído, **no corrido**, por un
-  agente del frente de topes de los DTOs el 2026-10-06 y confirmado leyendo el código). El loop hace
-  `manager.update(CuentaLinea, { id: linea.cuentaLineaId, tenantId }, …)`: no ata la línea a la
-  `cuentaId` de la ruta (que sí se valida abierta), ni filtra `eliminado_el`. Con el id de una línea de
-  otra cuenta del mismo tenant, abierta o cerrada, le pisa `cantidadEnviada`. **Medir:** por HTTP,
-  dos cuentas, mandar a la comanda de una el `cuentaLineaId` de la otra, y releer. **Arreglo
-  probable:** agregar `cuentaId` y `eliminadoEl: IsNull()` al `where`, y que una línea ajena sea 400 o
-  404 en vez de un `update` que no toca nada.
+- [ ] **`POST /cuentas/:id/comanda` acepta cualquier `cantidadEnviada`** (backend,
+  `ConfirmarComandaDto.cantidadEnviada`, que solo tiene `@IsNumberString`; lo leyó el
+  api-security-reviewer del frente que cerró "la comanda escribe líneas de otra cuenta", 2026-10-08;
+  **leído, no corrido**). Desde ese cierre solo alcanza a líneas vivas de la cuenta de la ruta, pero
+  ahí acepta negativos, más que `cantidad` y más de 4 decimales. `cantidad_enviada` es lo que
+  deciden `quitarLinea` (rechaza si es > 0) y `anularLinea` (tope de lo que se anula). Con
+  `cantidadEnviada = cantidad` en una línea que nunca fue a cocina, se puede anular entera con un
+  motivo que mueve stock (pide además `Salones:Anular`). Con un valor mayor que `cantidad`, anular
+  parte deja `cantidad_enviada > cantidad` (línea de 3 con 10, anular 2 → queda 1 con 8); anular
+  más que `cantidad` no pasa: `descontarReparto` (`reparto-linea.ts`) tira un `Error` plano, o
+  sea 500 con rollback. Con un valor > 0 nunca despachado, la línea ya no se puede quitar; con uno
+  negativo, la comanda pendiente reclama más de lo pedido. Un número con demasiados dígitos da 500
+  (`22003`). El frontend no usa la ruta (la reemplazó `reclamar`,
+  `features/impresion-termica.md`). **Medir** por HTTP cada caso, incluido el 500 del reparto.
+  **Salida probable:** `0 ≤ cantidadEnviada ≤ cantidad` y escala 4 en el service (el criterio de
+  `anularLinea`), o retirar la ruta si nada la usa: eso último es decisión del owner.
+
 - [ ] **Medir la ventana de consulta de Webpay Plus con un pago de más de 7 días** (queda del
   cierre de "Probar en el sandbox de Transbank el saldo…", 2026-10-04, [`resueltos.md`](resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04)).
   La documentación de Webpay Plus dice que el estado se consulta hasta 7 días; la referencia, "en
