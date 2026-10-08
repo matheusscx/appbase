@@ -12,6 +12,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { IdEnMinusculas } from '../decorators/id-en-minusculas.decorator';
+import { MAX_UNIDADES_POR_PLATO } from '../utils/tope-unidades-venta.util';
 
 export interface SnapshotGrupo {
   grupoId: string;
@@ -52,19 +53,6 @@ export interface PersonalizacionRecetaSnapshot {
   }[];
 }
 
-/**
- * Cuántas veces se puede agregar un mismo extra a **un** plato. `unidades` es
- * por plato: 50 hamburguesas con queso extra son `cantidad: 50` y `unidades: 1`,
- * así que el tope no limita un pedido grande, ataja el error de tipeo. Sin tope,
- * 10^12 unidades de un extra de $500 desbordaban `precio_unitario` NUMERIC(18,4)
- * y la línea de cuenta o la venta daban 500 (medido el 2026-10-08).
- *
- * ⚠️ El 99 es **tentativo**: lo recomendó la Sesión de esfuerzo máximo y lo
- * tiene que confirmar el owner (`docs/agent/resueltos.md`, cierre del
- * 2026-10-08).
- */
-export const MAX_UNIDADES_EXTRA = 99;
-
 export class PersonalizacionExtraInputDto {
   @IdEnMinusculas()
   @IsUUID()
@@ -73,8 +61,8 @@ export class PersonalizacionExtraInputDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(MAX_UNIDADES_EXTRA, {
-    message: `Un extra se puede agregar hasta ${MAX_UNIDADES_EXTRA} veces por plato`,
+  @Max(MAX_UNIDADES_POR_PLATO, {
+    message: `Un extra se puede agregar hasta ${MAX_UNIDADES_POR_PLATO} veces por plato`,
   })
   unidades?: number;
 }

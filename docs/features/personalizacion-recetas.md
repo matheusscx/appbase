@@ -22,11 +22,11 @@ Food-service necesita adaptar el plato al pedido del comensal sin perder trazabi
 - Drawer de personalización al click en receta (POS y Salones); productos sin cambio.
 - Configurar `extrasPermitidos` al crear/editar receta (ingrediente + cantidad + unidad + `precioExtra` por porción).
 - Snapshot en la línea: `omitidos`, `extras` elegidos con `unidades`, `comentario` (máx. 200 caracteres).
-- **Un extra se agrega hasta 99 veces por plato** (`MAX_UNIDADES_EXTRA`, 2026-10-08, **tentativo**: lo
-  recomendó la Sesión de esfuerzo máximo y lo confirma el owner). `unidades` es por plato —50
+- **Un extra se agrega hasta 99 veces por plato** (`MAX_UNIDADES_POR_PLATO`; owner, 2026-10-08, AskUserQuestion de la Sesión de esfuerzo máximo).
+  `unidades` es por plato —50
   hamburguesas con queso extra son `cantidad: 50` y `unidades: 1`—, así que el tope no limita un
   pedido grande: ataja el tipeo. Sin tope, 10^12 unidades desbordaban `precio_unitario` (500). La
-  pantalla todavía no lo topea (`docs/agent/pendientes.md` § 4).
+  pantalla todavía no lo topea (`docs/agent/pendientes.md` § 1).
 - `personalizacion` es un **objeto**: un array es 400 (hasta el 2026-10-08 se aceptaba y se perdía
   entera, descontando el ingrediente omitido). Los ids van en minúsculas en el borde: uno en
   mayúsculas es el mismo ingrediente, grupo u opción.

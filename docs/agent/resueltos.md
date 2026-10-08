@@ -195,10 +195,14 @@ De "Entradas sin cota que dan 500 o trabajo lineal, y una trampa del `@ArrayUniq
   `opciones[].itemId` y `componentes[].componenteItemId` de `PersonalizacionRecetaDto`. Corre en
   `plainToInstance`, antes que `@ArrayUnique`: `[D, d]` es un repetido. Es la tercera forma de
   `patterns/backend.md` § "Un UUID validado puede venir en mayúsculas", con su cuándo.
-- **B3:** `@Max(MAX_UNIDADES_EXTRA)` en `PersonalizacionExtraInputDto.unidades`, **99 por plato,
-  tentativo**: es regla de negocio, la recomendó la Sesión de esfuerzo máximo y **la tiene que
-  confirmar el owner** (se la llevó esa sesión el 2026-10-08). Si cambia, cambia la constante y su
-  e2e la sigue. El `:max` de la pantalla espera ese número (`pendientes.md` § 4).
+- **B3:** `@Max(MAX_UNIDADES_POR_PLATO)` en `PersonalizacionExtraInputDto.unidades`, **99 por
+  plato** (owner, 2026-10-08, AskUserQuestion de la Sesión de esfuerzo máximo: la escena fue el garzón que tipea 30.000 en vez de 3
+  en "queso extra"; descartó 99.999 porque no ataja el tipeo, y un tope configurable por extra
+  porque es pantalla aparte). Se cerró primero como tentativo (89b6810e) y el número llegó después,
+  el mismo día. La constante, `MAX_UNIDADES_POR_PLATO`, vive en
+  `common/utils/tope-unidades-venta.util.ts`, al lado de `MAX_UNIDADES_POR_VENTA`, porque según el
+  frente de DTOs sin cota (mensaje del 2026-10-08) el owner fijó el mismo 99 para el `max` de un
+  grupo de modificadores y la `cantidad` de un componente de combo, que construye ese frente. El `:max` de la pantalla quedó en `pendientes.md` § 1.
   `unidades` es por plato —50 hamburguesas con queso extra son `cantidad: 50`, `unidades: 1`—, así
   que el tope no limita un pedido grande y ataja el tipeo. Los gemelos ya estaban acotados:
   `opciones[].unidades` por el `max` del grupo y `componentes[].unidad` por la cantidad del

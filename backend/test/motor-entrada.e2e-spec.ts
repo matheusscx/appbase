@@ -7,7 +7,7 @@ import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
-import { MAX_UNIDADES_EXTRA } from '../src/common/dto/personalizacion-receta.dto';
+import { MAX_UNIDADES_POR_PLATO } from '../src/common/utils/tope-unidades-venta.util';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 
 /**
@@ -596,12 +596,12 @@ describe('Lo que entra al motor por el body (e2e)', () => {
       );
     });
   });
-  describe('extras[].unidades: hasta MAX_UNIDADES_EXTRA veces por plato', () => {
+  describe('extras[].unidades: hasta MAX_UNIDADES_POR_PLATO veces por plato', () => {
     const conUnidades = (unidades: number) => ({
       extras: [{ ingredienteItemId: extraId, unidades }],
     });
     // El pipe antepone la ruta del campo a un mensaje anidado.
-    const MENSAJE = `extras.0.Un extra se puede agregar hasta ${MAX_UNIDADES_EXTRA} veces por plato`;
+    const MENSAJE = `extras.0.Un extra se puede agregar hasta ${MAX_UNIDADES_POR_PLATO} veces por plato`;
 
     it('POST /calculo-precios/calcular: el tope pasa, uno más es 400', async () => {
       const calcular = (unidades: number) =>
@@ -614,9 +614,9 @@ describe('Lo que entra al motor por el body (e2e)', () => {
             },
           ],
         });
-      const justo = await calcular(MAX_UNIDADES_EXTRA);
+      const justo = await calcular(MAX_UNIDADES_POR_PLATO);
       expect(justo.status).toBe(201);
-      const pasado = await calcular(MAX_UNIDADES_EXTRA + 1);
+      const pasado = await calcular(MAX_UNIDADES_POR_PLATO + 1);
       expect(pasado.status).toBe(400);
       expect(mensajes(pasado)).toContain(`lineas.0.personalizacion.${MENSAJE}`);
     });
@@ -628,7 +628,7 @@ describe('Lo que entra al motor por el body (e2e)', () => {
           {
             itemId: recetaId,
             cantidad: '1',
-            personalizacion: conUnidades(MAX_UNIDADES_EXTRA + 1),
+            personalizacion: conUnidades(MAX_UNIDADES_POR_PLATO + 1),
           },
         ],
         pagos: pagoEfectivo,

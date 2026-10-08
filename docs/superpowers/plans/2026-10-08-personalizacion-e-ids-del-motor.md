@@ -45,8 +45,7 @@ los repetidos de `CreateItemDto` (otro frente); el desborde general de plata con
   `CalcularVentaDto` y `CreateVentaDto`, y a los cinco ids de `PersonalizacionRecetaDto` y sus hijos.
 - [x] **T3 — `@IsObject()`** en `LineaVentaDto.personalizacion`, `LineaDto.personalizacion`,
   `AddLineaDto.personalizacion`.
-- [x] **T4 — B3** (99 tentativo, `@Max` con mensaje propio; lo confirma el owner): la Sesión de
-  esfuerzo máximo recomendó 99 por plato y se lo llevó al owner.
+- [x] **T4 — B3**: `@Max(MAX_UNIDADES_POR_PLATO)`, 99 por plato (owner, 2026-10-08, AskUserQuestion de la Sesión de esfuerzo máximo).
 - [x] **T5 — e2e propio** `backend/test/motor-entrada.e2e-spec.ts` (la orquestadora pidió no tocar
   `topes-dto.e2e-spec.ts`, que editan otros dos frentes):
   - array en cada `personalizacion` → 400 nombrando el campo, y **nada escrito**: ni venta, ni línea
@@ -73,5 +72,5 @@ recibo `--full-index`. Suites pesadas con turno de la orquestadora. Sin Playwrig
   porque `@ArrayUnique` compara en el pipe, antes que cualquier service, y porque los mismos ids los
   leen tres resolvers en cuatro puertas. Se suma como tercera forma a `patterns/backend.md` § "Un UUID
   validado puede venir en mayúsculas".
-- **B3:** 99 por plato, tentativo. Lo recomendó la Sesión de esfuerzo máximo y lo confirma el
-  owner. El `:max` del drawer espera ese número (`pendientes.md` § 4).
+- **B3:** 99 por plato (owner, 2026-10-08, AskUserQuestion de la Sesión de esfuerzo máximo). El `:max` del drawer quedó en
+  `pendientes.md` § 1.

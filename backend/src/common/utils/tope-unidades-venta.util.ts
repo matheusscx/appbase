@@ -36,6 +36,26 @@ export const MAX_UNIDADES_POR_VENTA = '99999';
  */
 export const MAX_LINEAS_POR_VENTA = 500;
 
+/**
+ * **Cuántas veces entra una misma cosa en un plato: 99.** Decisión del owner
+ * del 2026-10-08, por AskUserQuestion de la Sesión de esfuerzo máximo, sobre
+ * 99.999 (el tope de una venta, que no ataja el tipeo) y un tope configurable
+ * por extra (pantalla aparte). La escena: el garzón tipea 30.000 en vez de 3 en
+ * "queso extra" y la hamburguesa queda en $15 M. Para 50 hamburguesas iguales se
+ * sube la `cantidad` de la línea: el tope es por plato y no limita un pedido
+ * grande.
+ *
+ * Acota las unidades de un extra (`PersonalizacionExtraInputDto.unidades`).
+ * Según el frente de DTOs sin cota (mensaje del 2026-10-08), el owner fijó el
+ * mismo número para el `max` de un grupo de modificadores y la `cantidad` de un
+ * componente de combo, que ese frente construye. Sin tope, 10^12 unidades de un extra de
+ * $500 desbordaban `precio_unitario` NUMERIC(18,4) y la línea de cuenta o la
+ * venta daban 500 (medido el 2026-10-08).
+ *
+ * Es `number` porque lo lee `@Max`; para `@IsDecimalHasta`, `String(...)`.
+ */
+export const MAX_UNIDADES_POR_PLATO = 99;
+
 const formato = new Intl.NumberFormat('es-CL', { maximumFractionDigits: 4 });
 
 /**

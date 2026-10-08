@@ -77,8 +77,7 @@ Request:
 // 2026-10-08): `metodoPagoId`, los de reglas de venta y los de la
 // personalización. `[D, d]` es un repetido; un id solo en mayúsculas funciona.
 // `personalizacion` es un objeto (un array es 400) y cada extra va hasta 99
-// veces por plato (`MAX_UNIDADES_EXTRA`; tentativo hasta que el owner lo
-// confirme).
+// veces por plato (`MAX_UNIDADES_POR_PLATO`, owner 2026-10-08).
 
 Response (201):
 {
