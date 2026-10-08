@@ -181,7 +181,9 @@ checkout principal es el offset 0 y no cambió.
   entorno propio en vez de correr contra el 5173 del checkout principal.
 - **`entorno.sh verificar`** dice si dos worktrees comparten offset, proyecto o puerto.
   Lo que no depende de acordarse es `scripts/check-aislamiento.mjs`, que corre en CI y en
-  el pre-commit y falla si alguien vuelve a clavar un puerto o un `container_name`.
+  el pre-commit y falla si alguien vuelve a clavar un puerto o un `container_name`, o si
+  un contexto de build del compose se queda sin el `.dockerignore` que deja afuera los
+  `node_modules` del host (sin él, un `npm ci` del host a medias se hornea en la imagen).
 - `borrar --purgar` saca también las imágenes del proyecto: `down -v` **no** las borra
   (medido, 2,83 GB por stack), y un worktree abandonado las filtra en silencio.
 
@@ -206,7 +208,7 @@ pre-commit (`.githooks/pre-commit`), que bloquea sobre lo staged: casing malo de
 hardcodeados (`.vue`), enlaces internos de docs rotos, tablas GFM partidas por un
 párrafo pegado (`.md`), helpers de `backend/test/` que leen el body de una
 respuesta sin mirar su status, y el entorno de desarrollo volviendo a ser compartido
-entre worktrees (`check-aislamiento.mjs`). N+1 y el filtro de
+entre worktrees o con el host (`check-aislamiento.mjs`). N+1 y el filtro de
 borrado son juicio y un hook no los puede evaluar, pero **sí exige la revisión que
 los cubre**: si el diff toca services de backend o `.vue` de `pages`/`components`,
 bloquea hasta que exista el recibo de la revisión independiente de `verify-feature`

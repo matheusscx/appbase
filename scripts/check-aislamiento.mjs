@@ -30,8 +30,9 @@ const staged = process.argv.includes('--staged')
 
 const VIGILADOS = ['docker-compose.yml', '.env.example', 'scripts/reset-db.sh']
 
+// `D` también: borrar un `.dockerignore` es justamente lo que el chequeo 5 tiene que ver.
 function stagedFiles() {
-  return execSync('git diff --cached --name-only --diff-filter=ACM', { cwd: root, encoding: 'utf8' })
+  return execSync('git diff --cached --name-only --diff-filter=ACMD', { cwd: root, encoding: 'utf8' })
     .split('\n')
     .filter(Boolean)
 }
@@ -122,8 +123,61 @@ if (reset !== null) {
     })
 }
 
+// ── 5: el host no puede volver a colarse en la imagen ────────────────────────
+// Cada `context:` del compose necesita su `.dockerignore` con `node_modules`. Sin él,
+// el `COPY . .` del Dockerfile copia los `node_modules` del host encima de los que
+// instaló la imagen, y el volumen anónimo `/app/node_modules` se puebla desde esa
+// imagen: con un `npm ci` del host a medias, los dos contenedores en restart loop
+// (medido el 2026-10-08). Los contextos salen del compose y no de una lista, para que
+// un servicio nuevo quede vigilado sin acordarse de este archivo.
+//
+// Se leen las dos sintaxis de `build:` (la larga con `context:` y la corta
+// `build: ./backend`). Si quedan `build:` sin contexto legible —`build: { context: … }`,
+// comillas, una variable—, eso es un hallazgo: un servicio que el chequeo no supo leer
+// tiene que dar rojo, no verde por omisión.
+const composeLimpio = compose === null ? '' : sinComentarios(compose)
+const builds = (composeLimpio.match(/^\s*build:/gm) ?? []).length
+const contextos = [
+  ...composeLimpio.matchAll(/^\s*context:\s*(?:\.\/)?([\w./-]+?)\/?\s*$/gm),
+  ...composeLimpio.matchAll(/^\s*build:\s*(?:\.\/)?([\w./-]+?)\/?\s*$/gm),
+].map((m) => m[1])
+if (contextos.length < builds) {
+  hallazgos.push({
+    file: 'docker-compose.yml',
+    line: 1,
+    que: `${builds} build: y solo ${contextos.length} contexto(s) legibles`,
+    comoSeArregla: 'escribir el contexto como `context: ./<carpeta>` o `build: ./<carpeta>`, sin comillas',
+    grupo: 'imagen',
+  })
+}
+const dockerignores = contextos.map((ctx) => `${ctx}/.dockerignore`)
+for (const rel of dockerignores) {
+  const ignore = leer(rel)
+  // En un .dockerignore gana la última regla que matchea: un `!node_modules` posterior
+  // vuelve a meter la carpeta. Por eso cuenta la última línea que la nombra. Y no pasa
+  // por `sinComentarios`: para Docker solo es comentario la línea que EMPIEZA con `#`, y
+  // `node_modules # x` es un patrón literal que no excluye nada.
+  const ultima =
+    ignore === null
+      ? undefined
+      : ignore
+          .split('\n')
+          .filter((l) => /^\s*!?(\*\*\/)?\/?node_modules\/?\s*$/.test(l))
+          .at(-1)
+  const excluye = ultima !== undefined && !ultima.trim().startsWith('!')
+  if (!excluye) {
+    hallazgos.push({
+      file: rel,
+      line: 1,
+      que: ignore === null ? 'no existe' : 'no excluye node_modules',
+      comoSeArregla: 'el contexto de build necesita un .dockerignore con la línea `node_modules`',
+      grupo: 'imagen',
+    })
+  }
+}
+
 if (staged) {
-  const tocados = stagedFiles().filter((f) => VIGILADOS.includes(f))
+  const tocados = stagedFiles().filter((f) => VIGILADOS.includes(f) || dockerignores.includes(f))
   if (tocados.length === 0) {
     console.log('✓ check-aislamiento: nada que revisar (el diff no toca el entorno)')
     process.exit(0)
@@ -136,12 +190,21 @@ if (hallazgos.length) {
     console.error(`  ${h.file}:${h.line}  ${h.que}`)
     console.error(`      → ${h.comoSeArregla}`)
   }
-  console.error(
-    '\nCada uno de estos vuelve a poner a dos worktrees sobre el mismo stack. El\n' +
-      'síntoma no aparece al commitear: aparece cuando otra sesión corre reset-db.sh y\n' +
-      'se lleva tu base. Ver docs/superpowers/specs/2026-09-20-stack-por-worktree-design.md\n',
-  )
+  if (hallazgos.some((h) => h.grupo !== 'imagen')) {
+    console.error(
+      '\nCada uno de estos vuelve a poner a dos worktrees sobre el mismo stack. El\n' +
+        'síntoma no aparece al commitear: aparece cuando otra sesión corre reset-db.sh y\n' +
+        'se lleva tu base. Ver docs/superpowers/specs/2026-09-20-stack-por-worktree-design.md\n',
+    )
+  }
+  if (hallazgos.some((h) => h.grupo === 'imagen')) {
+    console.error(
+      '\nUn contexto sin .dockerignore mete los node_modules del host en la imagen. El\n' +
+        'síntoma no aparece al commitear: aparece cuando un worktree corre `npm ci` mientras\n' +
+        'su primer `entorno.sh stack` construye, y backend y frontend quedan en restart loop.\n',
+    )
+  }
   process.exit(1)
 }
 
-console.log(`✓ check-aislamiento OK (${VIGILADOS.length} archivos vigilados)`)
+console.log(`✓ check-aislamiento OK (${VIGILADOS.length + dockerignores.length} archivos vigilados)`)

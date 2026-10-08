@@ -23,6 +23,119 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La imagen de desarrollo horneaba los `node_modules` del host: `.dockerignore` en `backend/` y `frontend/` (cerrada 2026-10-08)
+
+Sale de [`pendientes.md`](pendientes.md) § 1. Plan:
+[`2026-10-08-dockerignore-node-modules.md`](../superpowers/plans/2026-10-08-dockerignore-node-modules.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Un worktree que corre `npm ci` en el host mientras su primer `entorno.sh stack` construye
+  hornea los `node_modules` del host en la imagen** (entorno de desarrollo, `backend/` y `frontend/` sin
+  `.dockerignore`; medido el 2026-10-08 por el frente del plano, que lo esquivó en su worktree y no lo
+  arregló, por pedido de la orquestadora). Orden de los comandos: `entorno.sh stack` y, en paralelo,
+  `npm ci` en `backend/` y `frontend/` del host (un worktree nuevo llega con los `node_modules`
+  vacíos, y los gates del host los necesitan). El `COPY . .` de los Dockerfiles copia
+  el contexto entero, `node_modules` incluido, encima del que instaló `RUN npm ci` adentro: queda en la
+  imagen el de macOS, a medio instalar. Medido en paralelo; con el `npm ci` terminado **antes** del
+  build, leído y no medido: el `COPY . .` copiaría igual el de macOS entero. Síntomas: los dos
+  contenedores en restart loop con **RestartCount 11** a los pocos minutos; el backend con `sh: nest: Permission denied` (exit 126:
+  `@nestjs/cli/bin/nest.js` sin bit de ejecución) y el frontend con `@babel/parser` roto al cargar
+  Nuxt. El volumen anónimo `/app/node_modules` no lo salva: se puebla desde la imagen ya rota. Cómo se
+  esquivó: apartar los `node_modules` del host, `docker compose -p <proyecto> build backend frontend`,
+  `up -d --force-recreate --renew-anon-volumes backend frontend`, y devolverlos. **Arreglo probable:**
+  `.dockerignore` en `backend/` y `frontend/` con `node_modules`. **Verificación:** en un worktree
+  nuevo, `npm ci` en los dos paquetes, **después** `./scripts/entorno.sh stack`, y `docker inspect -f
+  '{{.RestartCount}}'` de backend y frontend en 0 con el `Seed complete` en el log.
+
+### Qué se midió
+
+En un worktree nuevo, con `entorno.sh stack` construyendo desde cero (`borrar --purgar` entre
+corridas) y la caché de build del daemon caliente para la capa del `npm ci` de la imagen:
+
+- **En paralelo, como dice la entrada: no reprodujo dos veces, y la regla es una carrera.**
+  Con la caché de npm del host los dos `npm ci` tardaron 8 s y 16 s, y BuildKit transfirió el
+  contexto (5,4 MB y 10,6 MB) cuando los `node_modules` del host todavía estaban casi vacíos:
+  RestartCount 0 en los dos. Con una caché de npm vacía, y el build lanzado apenas apareció
+  `@nestjs/cli/bin/nest.js` (`-rw-r--r--`, sin `.bin/nest`), el `npm ci` terminó 3 s después,
+  mientras se transfería el contexto, y BuildKit se llevó la versión terminada: también RC 0.
+  Que rompa depende de que la transferencia caiga adentro de la ventana entre que npm extrae un
+  archivo y que le da el bit de ejecución.
+- **Con la ventana abierta a la fuerza, reproduce.** Cada `npm ci` del host se congeló con
+  `kill -STOP` (sobre sus propios PID) en ese punto: 125 MB y 86 MB extraídos. Se construyó y
+  recién después se reanudaron con `-CONT`. Contexto de 70,7 MB y 104,6 MB, y a los 4 min los dos
+  contenedores en **RestartCount 12**. El backend dio `sh: nest: Permission denied`: en la imagen,
+  `nest.js` quedó `-rw-r--r--` con fecha de hoy, pisando el de la capa del `npm ci`. El frontend
+  dio `The requested module './_chunks/libs/js-yaml.mjs' does not provide an export named 'n'`:
+  otro módulo que el `@babel/parser` de la entrada, por el mismo mecanismo de un archivo a medio
+  escribir. `entorno.sh stack` salió con 1 porque no sembró en 180 s.
+- **Con el `npm ci` terminado antes del build (lo "leído y no medido"): no rompe, pero de
+  casualidad.** El contexto pasa a 227 MB y 427 MB, y la imagen queda con los `node_modules` de
+  macOS **mezclados** con los de Linux: `@esbuild/darwin-arm64`, `@rollup/rollup-darwin-arm64`,
+  `lightningcss-darwin-arm64`, etc., al lado de sus `linux-arm64-musl`. `COPY` superpone y no borra.
+  Anda porque los binarios nativos vienen en paquetes por plataforma y el JS es idéntico (mismo
+  lockfile). La imagen del front pesa 60 MB más.
+- **Railway no cambia** (verificado con el MCP de Railway, proyecto `illustrious-enchantment`).
+  Los dos servicios tienen `rootDirectory` `/backend` y `/frontend`. El `railway.json` de esa carpeta
+  (`builder: DOCKERFILE`, `Dockerfile.prod`) gana sobre el `RAILPACK` de la configuración del
+  servicio: el log del último deploy del front muestra `[builder 6/6] RUN npm run build` y
+  `[stage-1 3/3] COPY --from=builder /app/.output`. El contexto es el clon de git, y ningún archivo
+  trackeado matchea los patrones nuevos (`git ls-files backend frontend` filtrado por ellos, vacío):
+  Railway ve el mismo contexto que antes. Ningún Dockerfile copia ni lee un `.env`, y no hay
+  `.env` dentro de `backend/` ni de `frontend/`.
+
+### Qué se hizo
+
+- `backend/.dockerignore` y `frontend/.dockerignore`, solo con lo que se genera en el host:
+  `node_modules`, las salidas de build (`dist`, `.nuxt`, `.output`, `.data`, `.nitro`, `.cache`),
+  `coverage`, los artefactos de Playwright (`test-results`, `playwright-report`, `blob-report`,
+  `e2e/.auth`, `.playwright`) y `.env`/`.env.*`. En dev el bind mount (`./backend:/app`,
+  `./frontend:/app`) tapa todo lo de la imagen salvo `/app/node_modules`, que es el volumen
+  anónimo: ahí está lo único que el `.dockerignore` cambia en desarrollo.
+- `scripts/check-aislamiento.mjs` § 5 (abajo).
+
+Un stack construido **antes** de este cambio sigue con la imagen contaminada: `entorno.sh stack`
+no reconstruye una imagen que ya existe. Se arregla con `entorno.sh borrar --purgar` y `stack`.
+
+**Lo que no arregla, y no trae:** el frontend se reinicia una vez en el primer `up` del stack
+(`ENOENT` de `.nuxt/nuxt-fonts-global.css`). Apareció en la verificación y se midió que ya
+existía: en el primer `up` secuencial sale en 2 de 2 sin el `.dockerignore` y en 1 de 2 con él (con
+él también salió en el orden paralelo y en la carrera congelada). Quedó como
+entrada propia en [`pendientes.md`](pendientes.md) § 2, con la tabla y cómo leer una corrida
+mientras tanto.
+
+### Qué lo fija
+
+- **La verificación de la entrada**, con el arreglo: `npm ci` en los dos paquetes, **después**
+  `entorno.sh stack`. Contexto de 30,9 kB y 62,9 kB, `Seed complete`, front 200, api 200,
+  backend RC 0, imágenes sin binarios darwin. La misma carrera congelada de arriba: contexto de
+  31,7 kB y 63,5 kB, backend RC 0 con `Seed complete`.
+- **El orden paralelo de la entrada, con el arreglo:** `npm ci` de los dos paquetes desde
+  `node_modules` vacíos, a la vez que `entorno.sh stack`. Contexto de 31,7 kB y 63,5 kB, backend
+  RC 0 con `Seed complete`, imágenes sin binarios darwin. El frontend dio RC 1, el de arriba.
+- **Lo que construye Railway:** `docker build -f Dockerfile.prod` de los dos paquetes con el host
+  lleno (`node_modules`, `.nuxt`, `dist`). Exit 0 en los dos: `nest build` corrió de verdad (6,4 s,
+  sin caché), la imagen tiene `dist/main.js` y no trae `@nestjs/cli` (`--omit=dev`). `nuxt build`
+  tardó 21 s, la imagen solo tiene `.output` y `node .output/server/index.mjs` responde 200.
+- **Que no vuelva:** `check-aislamiento.mjs` (CI y pre-commit) saca los contextos del compose
+  (`context: ./x` y la forma corta `build: ./x`) y exige en cada uno un `.dockerignore` cuya
+  **última** regla sobre `node_modules` lo excluya. Salen del compose y no de una lista, para que un
+  servicio nuevo quede vigilado sin acordarse del script; un `build:` cuyo contexto no sabe leer da
+  rojo, no verde por omisión. El `--staged` pasó a `--diff-filter=ACMD`: borrar un `.dockerignore`
+  tiene que disparar el chequeo. Mutantes medidos: sin `backend/.dockerignore`, con `node_modules`
+  comentado, con `node_modules/foo`, con un `!node_modules` al final, con la forma corta sin
+  `.dockerignore` y con `build: { context: ./backend }` → exit 1; `/node_modules/`, la forma corta
+  con su `.dockerignore` y `!node_modules` seguido de `node_modules` → 0. Los tres de la lista que
+  la primera versión del chequeo dejaba en verde los encontró la revisión independiente. Borrado
+  staged (en un clon descartable) → exit 1, y con el filtro viejo `ACM` → *"nada que revisar"*: la
+  `D` hace falta. `node_modules # x` → 1: para Docker no es un comentario sino un patrón literal
+  (también lo vio la revisión). No cubre, y quedan a sabiendas: un `Dockerfile.dockerignore`, que
+  BuildKit prefiere si existe (hoy no hay ninguno); un servicio escrito entero en una línea
+  (`a: { build: ./x }`); y una línea `context:` suelta fuera de un `build:` que compense en el
+  conteo a un `build:` ilegible. Los dos últimos solo se alcanzan a propósito.
+
+---
+
 ## Pasarela: el `baseUrl` de la config del tenant se llevaba el secreto del mall; el retorno valida el tipo de sus campos (cerrada 2026-10-08)
 
 Salen de [`pendientes.md`](pendientes.md) § 2. Plan:

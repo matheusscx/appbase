@@ -74,29 +74,41 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
-- [ ] **Un worktree que corre `npm ci` en el host mientras su primer `entorno.sh stack` construye
-  hornea los `node_modules` del host en la imagen** (entorno de desarrollo, `backend/` y `frontend/` sin
-  `.dockerignore`; medido el 2026-10-08 por el frente del plano, que lo esquivó en su worktree y no lo
-  arregló, por pedido de la orquestadora). Orden de los comandos: `entorno.sh stack` y, en paralelo,
-  `npm ci` en `backend/` y `frontend/` del host (un worktree nuevo llega con los `node_modules`
-  vacíos, y los gates del host los necesitan). El `COPY . .` de los Dockerfiles copia
-  el contexto entero, `node_modules` incluido, encima del que instaló `RUN npm ci` adentro: queda en la
-  imagen el de macOS, a medio instalar. Medido en paralelo; con el `npm ci` terminado **antes** del
-  build, leído y no medido: el `COPY . .` copiaría igual el de macOS entero. Síntomas: los dos
-  contenedores en restart loop con **RestartCount 11** a los pocos minutos; el backend con `sh: nest: Permission denied` (exit 126:
-  `@nestjs/cli/bin/nest.js` sin bit de ejecución) y el frontend con `@babel/parser` roto al cargar
-  Nuxt. El volumen anónimo `/app/node_modules` no lo salva: se puebla desde la imagen ya rota. Cómo se
-  esquivó: apartar los `node_modules` del host, `docker compose -p <proyecto> build backend frontend`,
-  `up -d --force-recreate --renew-anon-volumes backend frontend`, y devolverlos. **Arreglo probable:**
-  `.dockerignore` en `backend/` y `frontend/` con `node_modules`. **Verificación:** en un worktree
-  nuevo, `npm ci` en los dos paquetes, **después** `./scripts/entorno.sh stack`, y `docker inspect -f
-  '{{.RestartCount}}'` de backend y frontend en 0 con el `Seed complete` en el log.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
+
+- [ ] **El frontend se reinicia una vez en el primer `up` del stack: `ENOENT` de
+  `.nuxt/nuxt-fonts-global.css`** (entorno de desarrollo; medido el 2026-10-08 por el frente del
+  `.dockerignore`, que no lo trae ni lo arregla: ver
+  [`resueltos.md`](resueltos.md#la-imagen-de-desarrollo-horneaba-los-node_modules-del-host-dockerignore-en-backend-y-frontend-cerrada-2026-10-08)).
+  En el primer arranque de `nuxt dev` falla `writeFileSync` de `generateApp` con
+  `ENOENT: no such file or directory, open '/app/.nuxt/nuxt-fonts-global.css'`; el contenedor
+  reinicia y queda estable sirviendo 200. El backend no lo tiene. Primer `up` completo en orden
+  secuencial (`npm ci` del host terminado → `entorno.sh borrar --purgar` → `stack`, RestartCount a
+  los 120 s):
+
+  | Corrida | `.dockerignore` | RC del frontend | `ENOENT` |
+  |---|---|---|---|
+  | 1 | sí | 0 | 0 |
+  | 2 | sí | 1 | 1 |
+  | 3 | no | 1 | 1 |
+  | 4 | no | 1 | 1 |
+
+  También salió en el orden paralelo de aquella entrada y en la carrera congelada, los dos con el
+  arreglo. **Lo que lo descarta como efecto del `.dockerignore` o del `.nuxt` del host:** sin el
+  arreglo sale igual, y en desarrollo el bind mount `./frontend:/app` tapa el `/app/.nuxt` de la
+  imagen (del contenedor, lo único que viene de la imagen es el volumen anónimo `/app/node_modules`).
+  Arrancar solo el frontend en frío (`up -d --force-recreate --renew-anon-volumes --no-deps frontend`)
+  dio RC 0 las 5 veces, dos de ellas con `nuxt prepare` recién corrido en el host: aparece solo en
+  el `up` del stack completo. **Medir:** por qué el primer `generateApp` encuentra `.nuxt` sin
+  crear (¿algo que lo vacía al mismo tiempo, un segundo arranque de Nuxt por la optimización de
+  dependencias de Vite?), y si pasa en el checkout principal.
+  **Mientras tanto, para leer una corrida:** un RC 1 del frontend con este `ENOENT`, ocurrido
+  **antes** de que arranque la corrida, no la invalida; un RC que sube **durante** la corrida sí.
+  Mirar RestartCount antes y después sigue siendo la regla.
 
 - [ ] **La tienda calcula el total dos veces, con dos "ahora": lo que cambia entre el pago y el callback deja un cargo sin venta** (backend; lo vio la revisión de seguridad del frente "reglas de línea salen del ítem", 2026-10-06; **leído en el código, no corrido**; las citas de línea son contra `54bc8f6e`). `POST /online/pagar` calcula el total con `calcular()` y ese número es el que se autoriza en Webpay. Cuando el comprador vuelve del formulario de Transbank, el callback (`online-callback.handler.ts`) crea la venta con `VentasService.crear`, que **vuelve a calcular desde cero** con el snapshot de la orden (solo `itemId`, `cantidad` y presentación) y el pago fijado en el total autorizado. Si los dos cálculos no dan lo mismo, la venta no se crea:
   - **total del callback mayor** → `ventas.service.ts:1019` *"Las ventas online requieren el pago completo"*;

@@ -1,0 +1,23 @@
+# Sin este archivo el `COPY . .` del Dockerfile copia los `node_modules` del HOST
+# (macOS) encima de los que instaló la imagen, y el volumen anónimo `/app/node_modules`
+# del compose se puebla desde esa imagen. Con un `npm ci` del host a medias el frontend
+# quedó en restart loop con `@babel/parser` roto (2026-10-08, `docs/agent/resueltos.md`).
+# `.nuxt` por lo mismo: pisaría el que generó el `nuxt prepare` del `npm ci` de la imagen.
+#
+# Solo va lo que se genera en el host. Nada de esto está en git, así que el build de
+# Railway (`Dockerfile.prod`, que clona el repo) ve el mismo contexto que antes.
+node_modules
+.nuxt
+.output
+.data
+.nitro
+.cache
+dist
+coverage
+test-results
+playwright-report
+blob-report
+e2e/.auth
+.playwright
+.env
+.env.*
