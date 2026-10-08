@@ -38,7 +38,6 @@ import { CerrarCuentaDto } from './dto/cerrar-cuenta.dto';
 import { AnularLineaDto } from './dto/anular-linea.dto';
 import { CancelarConMotivoDto } from './dto/cancelar-con-motivo.dto';
 import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
-import { ConfirmarComandaDto } from './dto/confirmar-comanda.dto';
 import { VentasService, type BoletaVenta } from '../ventas/ventas.service';
 import type { CreateVentaDto } from '../ventas/dto/create-venta.dto';
 import { EstrategiaAsignacionPropina } from '../propinas/enums/estrategia-asignacion-propina.enum';
@@ -765,15 +764,34 @@ export class SalonesService {
       return x < y ? -1 : x > y ? 1 : 0;
     });
     await this.db.transaccion(async (manager) => {
+      // CON las borradas, a propósito: lo que se pregunta acá es si la mesa es
+      // de este salón, no si sigue viva. Una borrada se saltea más abajo; una
+      // que no es del salón —o no existe— es 404.
+      const delSalon = await manager.find(Mesa, {
+        where: { id: In(enOrden.map((m) => m.mesaId)), tenantId, salonId },
+        withDeleted: true,
+        select: { id: true },
+      });
+      const ids = new Set(delSalon.map((m) => m.id));
+      const ajena = enOrden.find((m) => !ids.has(m.mesaId.toLowerCase()));
+      if (ajena) {
+        throw new NotFoundException(
+          `Mesa ${ajena.mesaId} no pertenece al salón`,
+        );
+      }
       for (const m of enOrden) {
-        const res = await manager.update(
+        // Una mesa borrada no se escribe y no corta el guardado: la pantalla
+        // manda todas las mesas que cargó en cada arrastre, así que una que
+        // otro admin borró después viaja en todos los guardados siguientes.
+        // Hasta el 2026-10-08 recibía la posición (y volvía con ella si se
+        // restauraba); con un 404 cada arrastre del plano fallaba hasta
+        // recargar. `affected` 0 acá es eso, o un borrado entre la lectura de
+        // arriba y este `UPDATE`.
+        await manager.update(
           Mesa,
-          { id: m.mesaId, tenantId, salonId },
+          { id: m.mesaId, tenantId, salonId, eliminadoEl: IsNull() },
           { posX: m.posX.toString(), posY: m.posY.toString() },
         );
-        if (!res.affected) {
-          throw new NotFoundException(`Mesa ${m.mesaId} no pertenece al salón`);
-        }
       }
     });
   }
@@ -2980,44 +2998,6 @@ export class SalonesService {
       throw new NotFoundException(`Cuenta ${cuentaId} no encontrada`);
     }
     return this.cuentaAsignacionesService.listar(tenantId, cuentaId);
-  }
-
-  /**
-   * Marca cantidad_enviada = cantidadEnviada para las líneas (legado; el flujo
-   * principal usa reclamarComanda). Idempotente ante reintentos.
-   */
-  async confirmarComanda(
-    tenantId: string,
-    cuentaId: string,
-    dto: ConfirmarComandaDto,
-  ): Promise<void> {
-    await this.db.transaccion(async (manager) => {
-      // Con lock, como toda escritura sobre las líneas de una cuenta (ver
-      // `getCuentaAbiertaConLock`).
-      await this.getCuentaAbiertaConLock(manager, tenantId, cuentaId);
-      for (const linea of dto.lineas) {
-        // La línea tiene que ser de ESTA cuenta y estar viva. Hasta el
-        // 2026-10-08 el `where` era id + tenant: con el id de una línea de otra
-        // cuenta le pisaba `cantidad_enviada` —lo que decide si se puede
-        // quitar, bajar o anular— y respondía OK. 404, igual que
-        // `actualizarLinea`/`quitarLinea` con una línea ajena.
-        const res = await manager.update(
-          CuentaLinea,
-          {
-            id: linea.cuentaLineaId,
-            tenantId,
-            cuentaId,
-            eliminadoEl: IsNull(),
-          },
-          { cantidadEnviada: linea.cantidadEnviada },
-        );
-        if (!res.affected) {
-          throw new NotFoundException(
-            `Línea ${linea.cuentaLineaId} no encontrada`,
-          );
-        }
-      }
-    });
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────

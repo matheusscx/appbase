@@ -390,9 +390,11 @@ Hay tres formas en el repo, y no son intercambiables:
   `PersonalizacionRecetaDto` los leen tres resolvers en cuatro endpoints). Va **antes** de
   `@ArrayUnique` en la lectura del DTO, aunque `class-transformer` lo corre primero igual. Hoy en los
   ids que entran al motor: `metodoPagoId` (en mayúsculas cobraba **sin** el recargo por método de
-  pago), los ids de reglas de venta, los de la personalización y el plato de la línea de cuenta. Y
-  en el método de cada pago (`PagoVentaDto` y `PagoItemDto`), que no entra al motor: lo compara
-  `PagosService.registrar` para tres puertas (venta, cierre de cuenta y abono).
+  pago), los ids de reglas de venta, los de la personalización y el plato de la línea de cuenta. En el
+  salón, el `garzonId` de `transferir-admin` (en mayúsculas registraba un traspaso del garzón a sí
+  mismo) y los `cuentaIds` de la fusión. Y en el método de cada pago (`PagoVentaDto` y
+  `PagoItemDto`), que no entra al motor: lo compara `PagosService.registrar` para tres puertas
+  (venta, cierre de cuenta y abono).
 - **`aliasarCasingDeIds`** (`items.service.ts`), para un cargador que devuelve un mapa a
   llamadores que hacen `.get(id)` con el casing del cliente. Solo sirve para `.get()`.
 

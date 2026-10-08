@@ -37,7 +37,6 @@ import { CerrarCuentaDto } from './dto/cerrar-cuenta.dto';
 import { AnularLineaDto } from './dto/anular-linea.dto';
 import { CancelarConMotivoDto } from './dto/cancelar-con-motivo.dto';
 import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
-import { ConfirmarComandaDto } from './dto/confirmar-comanda.dto';
 import {
   TransferirCuentaDto,
   TransferirCuentaAdminDto,
@@ -252,17 +251,6 @@ export class CuentasController {
   reclamarComanda(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     return this.salonesService.reclamarComanda(u.tenantId ?? '', id);
-  }
-
-  @Post(':id/comanda')
-  @RequiresPermiso('Salones', 'Operar')
-  confirmarComanda(
-    @Req() req: Request,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ConfirmarComandaDto,
-  ) {
-    const u = req.user as JwtUser;
-    return this.salonesService.confirmarComanda(u.tenantId ?? '', id, dto);
   }
 
   @Patch(':id/lineas/:lineaId')

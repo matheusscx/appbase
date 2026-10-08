@@ -2,7 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import Decimal from 'decimal.js';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { IsNull } from 'typeorm';
+import { In, IsNull } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import { SalonesService } from './salones.service';
 import { IdempotenciaService } from '../idempotencia/idempotencia.service';
@@ -1267,23 +1267,45 @@ describe('SalonesService', () => {
   });
 
   describe('guardarLayout', () => {
-    it('mover una mesa que no es del salón corta con 404, no en silencio', async () => {
-      // Sin el chequeo de `affected`, el drag&drop de una mesa ajena actualiza
-      // CERO filas y la pantalla responde OK: la mesa vuelve sola a su lugar y
-      // nadie se entera de por qué.
+    it('mover una mesa que no es del salón corta con 404 y no escribe ninguna', async () => {
+      // La lectura de las mesas del salón no la encuentra: ni viva ni borrada.
       salonRepo.findOne.mockResolvedValue({ id: 'salon-1', tenantId: TENANT });
-      manager.update.mockResolvedValue({ affected: 0 });
+      manager.find.mockResolvedValue([{ id: MESA }]);
 
       await expect(
         service.guardarLayout(TENANT, 'salon-1', {
-          mesas: [{ mesaId: 'mesa-ajena', posX: 10, posY: 20 }],
+          mesas: [
+            { mesaId: MESA, posX: 0.1, posY: 0.2 },
+            { mesaId: 'mesa-ajena', posX: 0.1, posY: 0.2 },
+          ],
         }),
       ).rejects.toThrow(NotFoundException);
+      expect(manager.update).not.toHaveBeenCalled();
     });
 
-    it('acota el UPDATE por tenant y salón, no solo por el id de la mesa', async () => {
+    it('lee las mesas del salón CON las borradas: la borrada no es ajena', async () => {
+      // Control débil (el SQL no corre con el manager mockeado); el fuerte es
+      // `salones-entrada.e2e-spec.ts`, que borra una mesa y la manda.
       salonRepo.findOne.mockResolvedValue({ id: 'salon-1', tenantId: TENANT });
-      manager.update.mockResolvedValue({ affected: 1 });
+      manager.find.mockResolvedValue([{ id: MESA }]);
+
+      await service.guardarLayout(TENANT, 'salon-1', {
+        mesas: [{ mesaId: MESA, posX: 0.1, posY: 0.2 }],
+      });
+
+      expect(manager.find).toHaveBeenCalledWith(
+        Mesa,
+        expect.objectContaining({
+          where: { id: In([MESA]), tenantId: TENANT, salonId: 'salon-1' },
+          withDeleted: true,
+        }),
+      );
+    });
+
+    it('acota el UPDATE por tenant, salón y mesa viva, y la borrada (affected 0) no corta', async () => {
+      salonRepo.findOne.mockResolvedValue({ id: 'salon-1', tenantId: TENANT });
+      manager.find.mockResolvedValue([{ id: MESA }]);
+      manager.update.mockResolvedValue({ affected: 0 });
 
       await service.guardarLayout(TENANT, 'salon-1', {
         mesas: [{ mesaId: MESA, posX: 10, posY: 20 }],
@@ -1291,7 +1313,12 @@ describe('SalonesService', () => {
 
       expect(manager.update).toHaveBeenCalledWith(
         Mesa,
-        { id: MESA, tenantId: TENANT, salonId: 'salon-1' },
+        {
+          id: MESA,
+          tenantId: TENANT,
+          salonId: 'salon-1',
+          eliminadoEl: IsNull(),
+        },
         { posX: '10', posY: '20' },
       );
     });
@@ -1300,12 +1327,12 @@ describe('SalonesService', () => {
       // `eliminarSalon` toma las mismas filas con `ORDER BY mesa_id FOR UPDATE`.
       // Una en mayúsculas se ordena por su valor: Postgres la guarda igual.
       salonRepo.findOne.mockResolvedValue({ id: 'salon-1', tenantId: TENANT });
-      manager.update.mockResolvedValue({ affected: 1 });
       const [m1, m2, m3] = [
         '10000000-0000-4000-8000-000000000000',
         'b0000000-0000-4000-8000-000000000000',
         'c0000000-0000-4000-8000-000000000000',
       ];
+      manager.find.mockResolvedValue([m1, m2, m3].map((id) => ({ id })));
 
       await service.guardarLayout(TENANT, 'salon-1', {
         mesas: [m3, m2.toUpperCase(), m1].map((mesaId) => ({
@@ -6324,56 +6351,6 @@ describe('SalonesService', () => {
     });
   });
 
-  describe('confirmarComanda', () => {
-    it('marca cantidad_enviada solo para las líneas impresas', async () => {
-      manager.findOne.mockResolvedValue({
-        id: CUENTA,
-        tenantId: TENANT,
-        estado: EstadoCuenta.ABIERTA,
-      });
-
-      await service.confirmarComanda(TENANT, CUENTA, {
-        lineas: [{ cuentaLineaId: 'linea-1', cantidadEnviada: '3' }],
-      });
-
-      expect(manager.update).toHaveBeenCalledWith(
-        CuentaLinea,
-        {
-          id: 'linea-1',
-          tenantId: TENANT,
-          cuentaId: CUENTA,
-          eliminadoEl: IsNull(),
-        },
-        { cantidadEnviada: '3' },
-      );
-    });
-
-    it('lanza NotFound si la línea no es de esa cuenta o ya se quitó', async () => {
-      manager.findOne.mockResolvedValue({
-        id: CUENTA,
-        tenantId: TENANT,
-        estado: EstadoCuenta.ABIERTA,
-      });
-      manager.update.mockResolvedValueOnce({ affected: 0 });
-
-      await expect(
-        service.confirmarComanda(TENANT, CUENTA, {
-          lineas: [{ cuentaLineaId: 'linea-ajena', cantidadEnviada: '3' }],
-        }),
-      ).rejects.toThrow(NotFoundException);
-    });
-
-    it('lanza BadRequest si la cuenta no está abierta', async () => {
-      manager.findOne.mockResolvedValue({
-        id: CUENTA,
-        tenantId: TENANT,
-        estado: EstadoCuenta.CERRADA,
-      });
-      await expect(
-        service.confirmarComanda(TENANT, CUENTA, { lineas: [] }),
-      ).rejects.toThrow(BadRequestException);
-    });
-  });
   describe('cerrarCuenta — reclamo de idempotencia', () => {
     const base = {
       garzonId: GARZON,

@@ -138,7 +138,10 @@ reintento vuelve a pedir el PIN. El PIN no entra en la huella de la clave. En pa
 `POST /cuentas/:id/transferir` body: `{ pin }` — el garzón destino reclama la cuenta
 con su PIN (requiere sesión abierta). `POST /cuentas/:id/transferir-admin` body:
 `{ garzonId }` — un usuario con permiso `Salones:Actualizar` fuerza la transferencia
-(registra `actor_usuario_id` en el historial).
+(registra `actor_usuario_id` en el historial). El `garzonId` pasa a minúsculas en el DTO
+(`@IdEnMinusculas`): el servicio lo compara en TypeScript contra el responsable que viene de la
+base, y hasta el 2026-10-08 el responsable en mayúsculas pasaba el guard *"ya es responsable"* y
+dejaba un tramo del garzón a sí mismo. Lo fija `backend/test/salones-entrada.e2e-spec.ts`.
 
 **Tres roles de garzón en la cuenta:**
 
@@ -157,7 +160,17 @@ cobró); el responsable vigente queda congelado para atribución. Ver
 
 `POST /mesas/:id/cuentas/fusionar` body: `{ cuentaIds: string[] }` (mínimo 2, deben
 estar `abierta` y pertenecer a la mesa). Combina, por ejemplo, "1 y 3", "3 y 4" o
-todas las de la mesa; ver detalle en Backend → Fusión de cuentas.
+todas las de la mesa; ver detalle en Backend → Fusión de cuentas. Los ids pasan a minúsculas en
+el DTO: `[X, x]` es una sola cuenta y da *"Selecciona al menos dos cuentas"* (antes, un 400 que
+decía que alguna no era de la mesa).
+
+`PATCH /salones/:salonId/layout` body: `{ mesas: [{ mesaId, posX, posY }] }`. **Una mesa
+borrada se saltea y el resto se guarda** (orquestadora, 2026-10-08): la pantalla del plano manda
+todas las mesas que cargó en cada arrastre, así que una que otro admin borró después viaja en
+todos los guardados siguientes, y un 404 habría hecho fallar cada arrastre hasta recargar. Hasta
+esa fecha la borrada recibía la posición y volvía con ella si se restauraba. Una mesa que no es
+del salón, o que no existe, sigue siendo 404 y no se escribe ninguna. Lo fija
+`backend/test/salones-entrada.e2e-spec.ts`.
 
 ---
 
@@ -315,11 +328,14 @@ Backfill al arrancar: cuentas existentes sin responsable reciben
   resuelven **fuera** del lock; lo que sí necesita leerse adentro va con el manager de
   la transacción, porque pedir una segunda conexión del pool sosteniendo el
   `FOR UPDATE` es un doble checkout que puede estancarse.
-- **Confirmar la comanda (`POST /cuentas/:id/comanda`, el legado de `reclamar`): el mismo
-  `FOR UPDATE` de la cuenta, y cada línea tiene que ser de esa cuenta y estar viva** (2026-10-08).
-  Hasta entonces el `UPDATE` iba por id + tenant: con el id de una línea de otra cuenta le pisaba
-  `cantidad_enviada` —lo que decide si se puede quitar, bajar o anular— y respondía 201. Ahora es
-  404, como en `actualizarLinea`/`quitarLinea`. Lo fija `backend/test/salones-comanda.e2e-spec.ts`.
+- **El confirmar legado de la comanda (`POST /cuentas/:id/comanda`) ya no existe: se retiró en vez
+  de validarse** (owner, 2026-10-08). Escribía `cantidad_enviada` con el número que mandara el
+  cliente —negativo, más que la línea, más de 4 decimales, o uno que daba 500—, y ninguna pantalla lo
+  llamaba desde el claim atómico. Ninguna cota cerraba lo peor: marcar despachada una línea que
+  nunca fue a cocina y anularla con un motivo que mueve stock. `cantidad_enviada` la escriben solo
+  `reclamar` (sobre las líneas vivas de la cuenta de la ruta, que lee él mismo), la anulación y la
+  fusión. Lo fijan `backend/test/salones-entrada.e2e-spec.ts` (la ruta da 404) y
+  `salones-comanda.e2e-spec.ts` § "reclamar solo escribe líneas de ESA cuenta".
 - Un solo tramo vigente por cuenta: índice parcial único en `cuenta_asignaciones`.
 
 ### Ítem eliminado con la cuenta abierta

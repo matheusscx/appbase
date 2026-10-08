@@ -50,10 +50,6 @@ Todos bajo `@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)`. Módulo RBAC
 valida que exista, sea del tenant, esté activa y tenga `rol='comanda'`. Acepta
 `null` explícito para desasignar la ruta.
 
-La comanda usa **dos fases** (permiso `Salones:Operar`, ver
-[salones-mesas.md](./salones-mesas.md)) para no perder pedidos si la impresión del
-navegador falla:
-
 La comanda usa **claim atómico** (permiso `Salones:Operar`, ver
 [`salones-mesas.md`](./salones-mesas.md)):
 
@@ -61,8 +57,9 @@ La comanda usa **claim atómico** (permiso `Salones:Operar`, ver
   avanza `cantidad_enviada` y devuelve `{ estaciones: [...] }` a imprimir. Dos
   clients concurrentes no duplican cocina (el segundo recibe vacío).
 - `GET /cuentas/:id/comanda/pendiente` queda como preview de solo lectura (no muta).
-- `POST /cuentas/:id/comanda` (confirm legado) se mantiene por compatibilidad; el FE
-  principal ya no lo usa tras el claim.
+- El confirm legado `POST /cuentas/:id/comanda` se retiró el 2026-10-08 (owner): el FE ya no lo
+  usaba tras el claim, y escribía lo despachado con el número que mandara el cliente (ver
+  [`salones-mesas.md`](./salones-mesas.md) § Concurrencia).
 
 **Precuenta**: no tiene endpoint propio. Es del carrito vivo, todavía sin venta —el
 frontend arma el ticket con el resultado del motor de precios y lo imprime en la
@@ -101,9 +98,8 @@ ticket no depende de que nadie lo use.
   validada en `CategoriasService`.
 - **`cuenta_lineas.cantidad_enviada`**: columna materializada. `SalonesService.
   previewComanda` calcula `diff = cantidad - cantidad_enviada` por línea **sin
-  persistir**; `confirmarComanda` marca `cantidad_enviada` (seteando el total
-  absoluto, idempotente) dentro de una transacción, recién cuando el navegador
-  confirma que imprimió. `fusionarCuentas` suma también `cantidadEnviada` al mergear
+  persistir**; `reclamarComanda` avanza `cantidad_enviada` bajo `FOR UPDATE` antes de
+  imprimir (el claim). `fusionarCuentas` suma también `cantidadEnviada` al mergear
   líneas del mismo ítem, para no reenviar lo ya impreso.
 
 ---
@@ -300,7 +296,8 @@ cd frontend && npx vitest run app/utils/ticket-builder.spec.ts app/composables/u
 
 - QZ Tray, ruteo por categoría, `cantidad_enviada` vs. tabla de historial, envío de
   comanda manual, dos fases preview/confirmar: ver
-  `docs/superpowers/specs/2026-07-13-impresion-termica-design.md`.
+  `docs/superpowers/specs/2026-07-13-impresion-termica-design.md`. El confirmar de esas dos fases
+  se reemplazó por el claim atómico y se retiró el 2026-10-08 (owner).
 - Plantilla unificada de boleta (emisor con RUT, DOCUMENTO INTERNO / slot electrónico
   dormante, Neto+impuestos reales, propina → TOTAL A PAGAR) + precuenta con propina
   sugerida: ver `docs/superpowers/specs/2026-07-18-boleta-pos-plantilla-unificada-design.md`.

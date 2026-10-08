@@ -226,15 +226,6 @@ const TOPES: FilaTope[] = [
     cuerpo: (n) => ({ pagos: lista(n, pago) }),
   },
   {
-    campo: 'lineas',
-    tope: 500,
-    metodo: 'post',
-    ruta: `cuentas/${ID}/comanda`,
-    cuerpo: (n) => ({
-      lineas: lista(n, (id) => ({ cuentaLineaId: id, cantidadEnviada: '1' })),
-    }),
-  },
-  {
     campo: 'cuentaIds',
     tope: 50,
     metodo: 'post',

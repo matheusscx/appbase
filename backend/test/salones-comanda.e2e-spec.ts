@@ -456,15 +456,16 @@ describe('Salones — comanda a cocina (e2e)', () => {
   });
 
   /**
-   * `POST /cuentas/:id/comanda` (el legado de `reclamar`) escribe
-   * `cantidad_enviada` de las líneas que le mandan. Hasta el 2026-10-08 el
-   * `UPDATE` iba por `cuenta_linea_id` + tenant, sin la cuenta de la ruta ni
-   * el filtro de borrado: con el id de una línea de OTRA cuenta del tenant le
-   * pisaba lo despachado, y respondía 201 (medido con este spec). Lo despachado
-   * es lo que decide si una línea se puede quitar, bajar o anular, así que
-   * pisarlo le cambia las reglas a una mesa ajena.
+   * `reclamar` escribe `cantidad_enviada` —lo que decide si una línea se puede
+   * quitar, bajar o anular— de las líneas que lee él mismo: no recibe ids del
+   * cliente, así que lo que lo ata a la cuenta de la ruta es el `WHERE` de
+   * `sqlLineasComanda` (cuenta + borrado). Estos casos venían de
+   * `POST /cuentas/:id/comanda`, el confirmar legado, que se retiró el
+   * 2026-10-08 (owner): ahí la línea la elegía el cliente y una de otra cuenta
+   * le pisaba lo despachado. La misma propiedad se fija acá, sobre la ruta que
+   * queda.
    */
-  describe('confirmar la comanda solo escribe líneas de ESA cuenta', () => {
+  describe('reclamar solo escribe líneas de ESA cuenta', () => {
     async function lineaDe(
       cuentaId: string,
     ): Promise<{ id: string; cantidadEnviada: string }> {
@@ -483,48 +484,49 @@ describe('Salones — comanda a cocina (e2e)', () => {
       return cuenta!.lineas[0];
     }
 
-    it('la línea de otra cuenta es 404, y su despacho no se mueve', async () => {
+    it('la otra cuenta de la mesa no se mueve, y la propia sí', async () => {
       const propia = await abrirCuentaCon([{ itemId: platoId, cantidad: '2' }]);
       const ajena = await abrirCuentaCon([{ itemId: platoId, cantidad: '3' }]);
-      const lineaAjena = await lineaDe(ajena.id);
 
-      await post(
-        `/api/cuentas/${propia.id}/comanda`,
-        { lineas: [{ cuentaLineaId: lineaAjena.id, cantidadEnviada: '3' }] },
-        404,
-      );
+      await post(`/api/cuentas/${propia.id}/comanda/reclamar`, {});
 
+      expect(Number((await lineaDe(propia.id)).cantidadEnviada)).toBe(2);
       expect(Number((await lineaDe(ajena.id)).cantidadEnviada)).toBe(0);
     });
 
-    it('una línea ya quitada de la propia cuenta es 404', async () => {
-      // El otro término del `where`: sin el filtro de borrado, el `UPDATE`
-      // encuentra la fila borrada, la escribe y responde 201.
-      const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '1' }]);
-      const linea = await lineaDe(cuenta.id);
+    it('una línea ya quitada no se reclama', async () => {
+      // El otro término del `WHERE`: sin el filtro de borrado, la línea
+      // quitada sale en el ticket y se cocina un plato que nadie pidió.
+      const cuenta = await abrirCuentaCon([
+        { itemId: platoId, cantidad: '1' },
+        { itemId: postreId, cantidad: '1' },
+      ]);
+      const res = await request(app.getHttpServer())
+        .get(`/api/mesas/${mesaId}/cuentas`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const lineas = (
+        res.body as {
+          id: string;
+          lineas: { id: string; itemId: string }[];
+        }[]
+      ).find((c) => c.id === cuenta.id)!.lineas;
+      const quitada = lineas.find((l) => l.itemId === postreId)!;
       await request(app.getHttpServer())
-        .delete(`/api/cuentas/${cuenta.id}/lineas/${linea.id}`)
+        .delete(`/api/cuentas/${cuenta.id}/lineas/${quitada.id}`)
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      await post(
-        `/api/cuentas/${cuenta.id}/comanda`,
-        { lineas: [{ cuentaLineaId: linea.id, cantidadEnviada: '1' }] },
-        404,
+      const reclamo = await post<ComandaResponse>(
+        `/api/cuentas/${cuenta.id}/comanda/reclamar`,
+        {},
       );
-    });
 
-    it('la línea de la propia cuenta se sigue confirmando', async () => {
-      // El contraste que hace falsables a los dos de arriba: un guard que
-      // rechazara todo también los pondría en verde.
-      const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '2' }]);
-      const linea = await lineaDe(cuenta.id);
-
-      await post(`/api/cuentas/${cuenta.id}/comanda`, {
-        lineas: [{ cuentaLineaId: linea.id, cantidadEnviada: '2' }],
-      });
-
-      expect(Number((await lineaDe(cuenta.id)).cantidadEnviada)).toBe(2);
+      const ids = reclamo.estaciones.flatMap((e) =>
+        e.items.map((i) => i.cuentaLineaId),
+      );
+      expect(ids).toHaveLength(1);
+      expect(ids).not.toContain(quitada.id);
     });
   });
 

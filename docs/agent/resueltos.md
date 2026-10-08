@@ -23,6 +23,124 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El salón: ids en mayúsculas, layout con mesa borrada, y el confirmar legado de la comanda se retiró (cerrada 2026-10-08)
+
+Tres entradas de [`pendientes.md`](pendientes.md) (§ 1 y dos de § 2), las tres en el módulo salones y
+las tres **leídas, no medidas**: se midieron por HTTP antes de tocar código (un e2e de medición contra
+la base del worktree, base `d14d6e29`). Spec y plan:
+[`2026-10-08-salon-ids-layout-comanda-design.md`](../superpowers/specs/2026-10-08-salon-ids-layout-comanda-design.md),
+[`2026-10-08-salon-ids-layout-comanda.md`](../superpowers/plans/2026-10-08-salon-ids-layout-comanda.md).
+Cómo se decidió: el layout lo decidieron la orquestadora y la Sesión de esfuerzo máximo, cada una por
+su lado y en el mismo sentido (saltear la borrada). La comanda **se retiró en vez de validarse**: lo
+decidió el owner (AskUserQuestion de la orquestadora, 2026-10-08) después de que la Sesión de esfuerzo
+máximo propusiera retirarla y la orquestadora lo frenara como decisión del owner; hasta entonces el
+frente había puesto una validación (piso en lo despachado, techo en la cantidad, escala 4), que se fue
+con la ruta. La regla viva está en [`features/salones-mesas.md`](../features/salones-mesas.md); el e2e
+de los tres es `backend/test/salones-entrada.e2e-spec.ts`.
+
+### Las entradas que cierran, como estaban en `pendientes.md`
+
+- [ ] **`TransferirCuentaAdminDto.garzonId` en mayúsculas registra una transferencia del garzón a
+  sí mismo** (backend, `salones/dto/transferir-cuenta.dto.ts`; visto el 2026-10-08 por la revisión
+  independiente del frente de los ids del motor, **por lectura, no medido**). Va crudo a
+  `cuenta-asignaciones.service.ts`, donde `transferir` compara `cuenta.garzonResponsableId ===
+  destinoGarzonId` (la base, en minúsculas, contra el casing del cliente): con el garzón actual en
+  mayúsculas el guard "El garzón ya es responsable" no salta, se cierra el tramo vigente y se abre
+  una asignación self→self con motivo `TRANSFERENCIA_ADMIN`. Es auditoría ensuciada, no plata.
+  Gemelo menor: `FusionarCuentasDto.cuentaIds` con `[X, x]` pasa `@ArrayUnique` y termina en un 400
+  con mensaje impreciso, sin efecto en datos. **Arreglo:** medirlo por HTTP y, si se confirma,
+  `@IdEnMinusculas()` (`common/decorators/`) en los dos, con su e2e y su mutante.
+
+- [ ] **`PATCH /salones/:salonId/layout` le escribe la posición a una mesa ya borrada** (backend,
+  `SalonesService.guardarLayout`; **leído, no corrido**, por el frente que cerró "la comanda escribe
+  líneas de otra cuenta", 2026-10-08). El `manager.update(Mesa, { id, tenantId, salonId }, …)` ata la
+  mesa al salón de la ruta pero no filtra `eliminado_el`, y el `update` de TypeORM no lo agrega solo:
+  una mesa borrada de ese salón recibe la posición y la respuesta es OK. Es inofensivo para la
+  operación (la mesa sigue borrada), pero si después se restaura vuelve con una posición que nadie
+  vio guardar. **Medir:** borrar una mesa, mandar el layout con su id y releerla desde la papelera.
+  **Arreglo probable:** `eliminadoEl: IsNull()` en el `where`, con lo que pasa al 404 *"no pertenece
+  al salón"* que ya existe; ver antes si la pantalla puede mandar una mesa que otro admin borró
+  (con el 404, el guardado del plano entero fallaría).
+
+- [ ] **`POST /cuentas/:id/comanda` acepta cualquier `cantidadEnviada`** (backend,
+  `ConfirmarComandaDto.cantidadEnviada`, que solo tiene `@IsNumberString`; lo leyó el
+  api-security-reviewer del frente que cerró "la comanda escribe líneas de otra cuenta", 2026-10-08;
+  **leído, no corrido**). Desde ese cierre solo alcanza a líneas vivas de la cuenta de la ruta, pero
+  ahí acepta negativos, más que `cantidad` y más de 4 decimales. `cantidad_enviada` es lo que
+  deciden `quitarLinea` (rechaza si es > 0) y `anularLinea` (tope de lo que se anula). Con
+  `cantidadEnviada = cantidad` en una línea que nunca fue a cocina, se puede anular entera con un
+  motivo que mueve stock (pide además `Salones:Anular`). Con un valor mayor que `cantidad`, anular
+  parte deja `cantidad_enviada > cantidad` (línea de 3 con 10, anular 2 → queda 1 con 8); anular
+  más que `cantidad` no pasa: `descontarReparto` (`reparto-linea.ts`) tira un `Error` plano, o
+  sea 500 con rollback. Con un valor > 0 nunca despachado, la línea ya no se puede quitar; con uno
+  negativo, la comanda pendiente reclama más de lo pedido. Un número con demasiados dígitos da 500
+  (`22003`). El frontend no usa la ruta (la reemplazó `reclamar`,
+  `features/impresion-termica.md`). **Medir** por HTTP cada caso, incluido el 500 del reparto.
+  **Salida probable:** `0 ≤ cantidadEnviada ≤ cantidad` y escala 4 en el service (el criterio de
+  `anularLinea`), o retirar la ruta si nada la usa: eso último es decisión del owner.
+
+### Qué se midió
+
+- **transferir-admin** con el responsable en mayúsculas: **201**, y el historial quedó con un tramo
+  `transferencia_admin` del garzón a sí mismo (en minúsculas: 400 *"El garzón ya es responsable de la
+  cuenta"*). Además, que la entrada no decía: la respuesta devolvía `garzonResponsableId` en mayúsculas,
+  el casing del cliente, aunque fuera una transferencia legítima a otro garzón.
+- **fusionar** `[X, x]`: 400 *"Todas las cuentas a fusionar deben pertenecer a la mesa y estar
+  abiertas"*, sin escribir. La entrada decía que pasaba `@ArrayUnique`: el DTO no lo tiene; lo que
+  deduplica es el `Set` del service.
+- **layout**: borrada M2, el layout con M1 y M2 → 200; M2 quedó con la posición nueva y `eliminado_el`
+  puesto, y así se lee desde `GET /salones?incluirEliminados=true`. **La pantalla del plano**
+  (`configuracion/salones.vue`, `guardarDistribucion`) manda todas las mesas que cargó en cada
+  `dragend`: con el 404 que proponía la entrada, una mesa que otro admin borró hacía fallar cada
+  arrastre hasta recargar. Por eso fue a decisión.
+- **comanda**, línea de 2 salvo donde se dice: `-1` → 201, enviada −1 y la comanda pendiente reclama 3
+  (y la línea se puede quitar); `10` en una de 3 → 201, anular 2 deja cantidad 1 con enviada 8, y anular
+  5 después → **500** de `descontarReparto` con rollback; `0.00005` → 201 y Postgres guarda 0.0001;
+  `1.123456` → guarda 1.1235; `99999999999999999999` → **500** (`22003`); `2` en una línea nunca
+  despachada → 201, y anularla entera con merma → 201.
+
+### Qué se hizo
+
+- `@IdEnMinusculas()` en `TransferirCuentaAdminDto.garzonId` y `FusionarCuentasDto.cuentaIds`.
+- `guardarLayout`: una lectura de las mesas del salón **con** las borradas (`withDeleted`, con el porqué
+  en la consulta); un id que no está es 404 y no se escribe ninguna. El `UPDATE` lleva
+  `eliminadoEl: IsNull()` y una borrada (affected 0) se saltea: el resto del plano se guarda
+  (orquestadora).
+- **`POST /cuentas/:id/comanda` se retiró en vez de validarse** (owner): la ruta, `confirmarComanda`,
+  su DTO (`ConfirmarComandaDto`) y su unitario. Antes de borrar se listaron los llamadores del método y
+  del path en todo el repo (backend, frontend, Playwright, scripts): solo el controller y tests; ningún
+  llamador interno, y `reclamarComanda` no comparte código con él. Los tres e2e que fijaban "solo
+  líneas de ESA cuenta" sobre la ruta (otra cuenta, línea quitada, control) pasaron a dos sobre
+  `reclamar` (el control quedó adentro del primero), que escribe `cantidad_enviada` sobre las
+  líneas que lee él mismo (`sqlLineasComanda`: cuenta de la ruta y `eliminado_el IS NULL`): no recibe
+  ids del cliente, así que el riesgo de la ruta no existe ahí, pero el `WHERE` que lo impide quedó
+  fijado. La fila de la ruta salió de `topes-dto.e2e-spec.ts`.
+
+### Qué lo fija
+
+`backend/test/salones-entrada.e2e-spec.ts` (8 tests), cada caso con su control al lado, y
+`salones-comanda.e2e-spec.ts` § "reclamar solo escribe líneas de ESA cuenta". Mutantes corridos uno por
+uno sobre el árbol final; los del § 1 y del layout contra `salones-entrada`, los de la comanda contra las
+dos suites. Se leyó el mensaje de cada rojo, no solo el conteo:
+
+| Mutante | Rojo |
+|---|---|
+| sin `@IdEnMinusculas` en `TransferirCuentaAdminDto` (el código anterior) | "es 400 ya es responsable" (201) y el control (responsable en mayúsculas) |
+| sin `@IdEnMinusculas` en `FusionarCuentasDto` (el código anterior) | "es 400 al menos dos cuentas" (mensaje de "deben pertenecer a la mesa") |
+| `guardarLayout` como estaba | "la borrada conserva la suya" (0.77 en vez de su posición) |
+| sin `eliminadoEl: IsNull()` en el `UPDATE` | "la borrada conserva la suya" (0.77) |
+| sin el 404 de la lectura | los dos "sigue siendo 404" (de otro salón, que no existe): 200 |
+| la lectura compara el id del cliente sin pasarlo a minúsculas | "la viva toma la posición nueva" (la manda en mayúsculas): 404 |
+| la ruta como estaba (controller, `confirmarComanda` y su DTO de `HEAD`) | "el confirmar legado ya no existe" (201 en vez de 404) |
+| `sqlLineasComanda` sin `cl.cuenta_id = $1` | "la otra cuenta de la mesa no se mueve" (la ajena en 3), y de paso "agrupa por impresora" y "reclamar avanza lo enviado" de `salones-comanda` |
+| `sqlLineasComanda` sin `cl.eliminado_el IS NULL` | "una línea ya quitada no se reclama" (2 líneas en el ticket) |
+
+**Lo que queda abierto:** el `PATCH` del layout devuelve vacío, así que la pantalla no se entera de
+que una mesa que mandó estaba borrada y la sigue dibujando hasta recargar (leído, no medido en
+navegador): [`pendientes.md`](pendientes.md) § 2.
+
+---
+
 ## El drawer ya no deja pedir más unidades de un extra que las que acepta el backend (cerrada 2026-10-08)
 
 Sale de [`pendientes.md`](pendientes.md) § 1. Plan:

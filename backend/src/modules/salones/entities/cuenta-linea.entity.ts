@@ -115,7 +115,7 @@ export class CuentaLinea {
   @Column({ name: 'unidad_codigo_presentacion', type: 'text', nullable: true })
   unidadCodigoPresentacion: string | null;
 
-  // Cuánto de `cantidad` ya se envió a cocina/barra (POST /cuentas/:id/comanda).
+  // Cuánto de `cantidad` ya se envió a cocina/barra (POST /cuentas/:id/comanda/reclamar).
   // El diff (cantidad - cantidad_enviada) es lo que se imprime en el próximo envío.
   @Column({
     name: 'cantidad_enviada',

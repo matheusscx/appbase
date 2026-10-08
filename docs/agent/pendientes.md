@@ -92,17 +92,6 @@ Hoy son tres:
   done
   ```
 
-- [ ] **`TransferirCuentaAdminDto.garzonId` en mayúsculas registra una transferencia del garzón a
-  sí mismo** (backend, `salones/dto/transferir-cuenta.dto.ts`; visto el 2026-10-08 por la revisión
-  independiente del frente de los ids del motor, **por lectura, no medido**). Va crudo a
-  `cuenta-asignaciones.service.ts`, donde `transferir` compara `cuenta.garzonResponsableId ===
-  destinoGarzonId` (la base, en minúsculas, contra el casing del cliente): con el garzón actual en
-  mayúsculas el guard "El garzón ya es responsable" no salta, se cierra el tramo vigente y se abre
-  una asignación self→self con motivo `TRANSFERENCIA_ADMIN`. Es auditoría ensuciada, no plata.
-  Gemelo menor: `FusionarCuentasDto.cuentaIds` con `[X, x]` pasa `@ArrayUnique` y termina en un 400
-  con mensaje impreciso, sin efecto en datos. **Arreglo:** medirlo por HTTP y, si se confirma,
-  `@IdEnMinusculas()` (`common/decorators/`) en los dos, con su e2e y su mutante.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -137,33 +126,17 @@ destapa una decisión que no es mía).
   - **Qué no cubre.** (1) **No hay forma de crear la venta después**: no existe un "reintentar el callback". `POST /pasarela/ordenes/:id/verificar` solo acepta `en_proceso`/`expirada` (`cobros.service.ts:1393`), y aunque existiera, recalcularía con un tercer "ahora". (2) **Nadie se entera**: no hay aviso al admin, solo el log. (3) **El comprador ve "Pago aprobado. Tu compra fue registrada correctamente."** (`tienda/retorno.vue:88-91`): `urlRetornoApp` (`pagos-redirect.service.ts:75-76`) manda `estado=pagada` igual con la orden sin venta, y la pantalla solo esconde el botón "Ver detalle de la venta".
   - **Lo que hay que decidir** (diseño aparte, no de arrastre): congelar en el snapshot de la orden lo que el checkout cobró (el total, o las líneas resueltas, como `reglasCongeladas` del salón) y que el callback lo respete, o calcular el callback con el instante del checkout. Y por separado, que una orden pagada sin venta avise y no le diga al comprador que su compra quedó registrada.
 
-- [ ] **`PATCH /salones/:salonId/layout` le escribe la posición a una mesa ya borrada** (backend,
-  `SalonesService.guardarLayout`; **leído, no corrido**, por el frente que cerró "la comanda escribe
-  líneas de otra cuenta", 2026-10-08). El `manager.update(Mesa, { id, tenantId, salonId }, …)` ata la
-  mesa al salón de la ruta pero no filtra `eliminado_el`, y el `update` de TypeORM no lo agrega solo:
-  una mesa borrada de ese salón recibe la posición y la respuesta es OK. Es inofensivo para la
-  operación (la mesa sigue borrada), pero si después se restaura vuelve con una posición que nadie
-  vio guardar. **Medir:** borrar una mesa, mandar el layout con su id y releerla desde la papelera.
-  **Arreglo probable:** `eliminadoEl: IsNull()` en el `where`, con lo que pasa al 404 *"no pertenece
-  al salón"* que ya existe; ver antes si la pantalla puede mandar una mesa que otro admin borró
-  (con el 404, el guardado del plano entero fallaría).
-
-- [ ] **`POST /cuentas/:id/comanda` acepta cualquier `cantidadEnviada`** (backend,
-  `ConfirmarComandaDto.cantidadEnviada`, que solo tiene `@IsNumberString`; lo leyó el
-  api-security-reviewer del frente que cerró "la comanda escribe líneas de otra cuenta", 2026-10-08;
-  **leído, no corrido**). Desde ese cierre solo alcanza a líneas vivas de la cuenta de la ruta, pero
-  ahí acepta negativos, más que `cantidad` y más de 4 decimales. `cantidad_enviada` es lo que
-  deciden `quitarLinea` (rechaza si es > 0) y `anularLinea` (tope de lo que se anula). Con
-  `cantidadEnviada = cantidad` en una línea que nunca fue a cocina, se puede anular entera con un
-  motivo que mueve stock (pide además `Salones:Anular`). Con un valor mayor que `cantidad`, anular
-  parte deja `cantidad_enviada > cantidad` (línea de 3 con 10, anular 2 → queda 1 con 8); anular
-  más que `cantidad` no pasa: `descontarReparto` (`reparto-linea.ts`) tira un `Error` plano, o
-  sea 500 con rollback. Con un valor > 0 nunca despachado, la línea ya no se puede quitar; con uno
-  negativo, la comanda pendiente reclama más de lo pedido. Un número con demasiados dígitos da 500
-  (`22003`). El frontend no usa la ruta (la reemplazó `reclamar`,
-  `features/impresion-termica.md`). **Medir** por HTTP cada caso, incluido el 500 del reparto.
-  **Salida probable:** `0 ≤ cantidadEnviada ≤ cantidad` y escala 4 en el service (el criterio de
-  `anularLinea`), o retirar la ruta si nada la usa: eso último es decisión del owner.
+- [ ] **El plano sigue dibujando una mesa que otro admin borró, hasta recargar** (frontend,
+  `pages/configuracion/salones.vue`; anotado el 2026-10-08 al cerrar "el layout le escribe la posición a
+  una mesa ya borrada", [`resueltos.md`](resueltos.md); **leído, no medido en navegador**).
+  `PATCH /salones/:salonId/layout` saltea una mesa borrada y responde vacío. `guardarDistribucion`
+  manda todas las de `localMesas` y, al volver, `patchSalonMesas` las repone como vivas, así que la
+  borrada sigue en el plano —arrastrable, y cada arrastre la manda de nuevo— hasta el próximo
+  `cargar()`. La página no tiene polling. No es nuevo: antes del arreglo pasaba lo mismo, solo que
+  además se le escribía la posición. **Medir:** dos sesiones de admin, borrar la mesa en una, arrastrar
+  otra en la segunda y mirar si la borrada sigue dibujada. **Salida probable:** que el `PATCH` devuelva
+  las mesas que guardó (o las que salteó) y la pantalla saque las que no vuelven (Sesión de esfuerzo
+  máximo, 2026-10-08: anotarlo, no construirlo en ese frente).
 
 - [ ] **Medir la ventana de consulta de Webpay Plus con un pago de más de 7 días** (queda del
   cierre de "Probar en el sandbox de Transbank el saldo…", 2026-10-04, [`resueltos.md`](resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04)).

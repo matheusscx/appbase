@@ -102,7 +102,7 @@ export interface ComandaEstacionItem {
   cuentaLineaId: string
   nombre: string
   cantidad: string // diff a imprimir
-  cantidadEnviada: string // total absoluto a persistir al confirmar
+  cantidadEnviada: string // total absoluto que el claim ya dejó persistido
   /** Personalización + comentario (desde reclamarComanda). */
   nota?: string
 }
