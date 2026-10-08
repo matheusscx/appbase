@@ -71,18 +71,18 @@ describe('CreateReembolsoDto', () => {
     expect(errores.length).toBeGreaterThan(0);
   });
 
-  it('acota el largo de devoluciones: 200 pasan, 201 no', async () => {
+  it('acota el largo de devoluciones: 500 pasan, 501 no', async () => {
     const linea = {
       itemId: '550e8400-e29b-41d4-a716-446655440116',
       cantidad: '1',
     };
     const ok = await validar({
       monto: '1100',
-      devoluciones: Array.from({ length: 200 }, () => linea),
+      devoluciones: Array.from({ length: 500 }, () => linea),
     });
     const mal = await validar({
       monto: '1100',
-      devoluciones: Array.from({ length: 201 }, () => linea),
+      devoluciones: Array.from({ length: 501 }, () => linea),
     });
     expect(ok).toHaveLength(0);
     expect(mal.some((e) => e.property === 'devoluciones')).toBe(true);

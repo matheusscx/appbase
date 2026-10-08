@@ -102,7 +102,10 @@ const linea = (extra: object) => ({
 });
 const personalizacion = (p: object) => linea({ personalizacion: p });
 
-/** Una fila por `@ArrayMaxSize` agregado el 2026-10-06. */
+/**
+ * Una fila por `@ArrayMaxSize` agregado el 2026-10-06, más los de las
+ * devoluciones de la nota de crédito y del reembolso (2026-10-08).
+ */
 const TOPES: FilaTope[] = [
   // caja
   {
@@ -565,6 +568,33 @@ const TOPES: FilaTope[] = [
     metodo: 'post',
     ruta: 'ventas',
     cuerpo: (n) => ({ descuentosVentaIds: uuids(n) }),
+  },
+  // devoluciones: una por ítem distinto de la venta, y una venta tiene a lo
+  // sumo 500 líneas. Con menos, el tope cortaba una nota válida.
+  {
+    campo: 'devoluciones',
+    tope: 500,
+    metodo: 'post',
+    ruta: `ventas/${ID}/notas-credito`,
+    cuerpo: (n) => ({
+      monto: '1',
+      devolucion: { sinPlata: true },
+      devoluciones: lista(n, lineaDe),
+    }),
+  },
+  {
+    campo: 'devoluciones',
+    tope: 500,
+    metodo: 'post',
+    ruta: `pasarela/admin/ordenes/${ID}/reembolsos`,
+    cuerpo: (n) => ({ monto: '1', devoluciones: lista(n, lineaDe) }),
+  },
+  {
+    campo: 'devoluciones',
+    tope: 500,
+    metodo: 'post',
+    ruta: `pasarela/admin/ordenes/${ID}/reembolsos/${ID}/nota`,
+    cuerpo: (n) => ({ devoluciones: lista(n, lineaDe) }),
   },
   {
     campo: 'recargosVentaIds',
@@ -1041,6 +1071,67 @@ describe('Topes y forma de los arrays y objetos de los DTOs (e2e)', () => {
       );
       expect(ventasDespues[0].n).toBe(ventasAntes[0].n);
     });
+  });
+
+  describe('nota de crédito: las devoluciones en el tope se emiten', () => {
+    // Una venta con 500 ítems distintos es el máximo que una nota puede tener
+    // que devolver entera. Servicios: no dependen del stock que dejan otras suites.
+    it('POST /ventas/:id/notas-credito con 500 devoluciones es 201; con 501, 400 y no escribe nada', async () => {
+      const ids: string[] = [];
+      for (let i = 0; i < 500; i++)
+        ids.push(
+          await crear('items', {
+            nombre: `Servicio devolución E2E ${i} ${randomUUID()}`,
+            precioBase: '1000',
+            precioIncluyeImpuesto: true,
+            monedaId: CLP_MONEDA_ID,
+            tipo: 'servicio',
+          }),
+        );
+      const ventaId = await crear('ventas', {
+        lineas: ids.map((itemId) => ({ itemId, cantidad: '1' })),
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000000.0000' }],
+      });
+      const leida = await request(app.getHttpServer())
+        .get(`/api/ventas/${ventaId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(leida.status).toBe(200);
+      const venta = leida.body as { totalFinal: string; pagos: IdResponse[] };
+      const nota = (devoluciones: string[]) =>
+        enviar('post', `ventas/${ventaId}/notas-credito`, {
+          monto: venta.totalFinal,
+          devolucion: { pagoId: venta.pagos[0].id },
+          devoluciones: devoluciones.map((itemId) => ({
+            itemId,
+            cantidad: '1',
+          })),
+        });
+      const notas = async (): Promise<number> =>
+        (
+          await ds.query<{ n: number }[]>(
+            `SELECT count(*)::int AS n FROM ventas
+             WHERE venta_referencia_id = $1 AND eliminado_el IS NULL`,
+            [ventaId],
+          )
+        )[0].n;
+
+      const pasada = await nota([...ids, ID]);
+      expect(pasada.status).toBe(400);
+      expect(mensajes(pasada)).toContain(
+        'devoluciones must contain no more than 500 elements',
+      );
+      expect(await notas()).toBe(0);
+
+      const tope = await nota(ids);
+      expect(tope.status).toBe(201);
+      const lineas = await ds.query<{ n: number }[]>(
+        `SELECT count(*)::int AS n FROM venta_detalles
+         WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [(tope.body as IdResponse).id],
+      );
+      expect(lineas[0].n).toBe(500);
+      expect(await notas()).toBe(1);
+    }, 120000);
   });
 
   describe('motor: con lineas en el tope el total es la suma por línea', () => {

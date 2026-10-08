@@ -23,6 +23,56 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `CreateNotaCreditoDto.devoluciones` tiene tope, y es 500 y no 200 (cerrada 2026-10-08)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. Frente fiscal propio (regla del 2026-08-23). Plan:
+[`2026-10-08-tope-devoluciones-nota-credito.md`](../superpowers/plans/2026-10-08-tope-devoluciones-nota-credito.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **`CreateNotaCreditoDto.devoluciones` no tiene tope** (backend, `ventas/dto/
+  create-nota-credito.dto.ts`; anotado el 2026-10-06 por el frente de topes de los DTOs, que no lo
+  tocó: lo fiscal va solo, owner 2026-08-23). Es el único campo array de entrada que quedó sin
+  `@ArrayMaxSize` por decisión y no por construcción. **El arreglo es mecánico y tiene precedente:**
+  sus dos gemelos de pasarela ya llevan `@ArrayMaxSize(200)` (`CreateReembolsoDto.devoluciones` y
+  `GenerarNotaReembolsoDto.devoluciones`, este último desde `d08aef16`). Va con el mismo 200 y su
+  fila en `topes-dto.e2e-spec.ts`; solo espera su sesión fiscal.
+
+### Qué se hizo
+
+**El 200 que proponía la entrada estaba mal.** Ese 200 venía de las líneas de una
+**compra**, no de las de una venta. `validarDevolucionesReembolso` acepta una devolución por
+ítem **distinto** de la venta (si el ítem viene repetido, es 400). Y el POS junta el mismo producto
+en una línea, así que las 500 líneas de `CreateVentaDto.lineas` pueden ser 500 ítems
+distintos. Se midió por HTTP antes de tocar código: una venta con 201 ítems distintos y su nota
+entera con 201 devoluciones dieron 201 (201 líneas en la nota). Con el 200, esa nota habría sido 400. Lo
+mismo valía para los gemelos de pasarela: la venta de una orden sale de `CalcularVentaDto.lineas`
+(500), y un reembolso de más de 200 ítems distintos ya rebotaba. Eso se leyó en el código y no
+se corrió por HTTP: haría falta una orden online de 201 líneas con el proveedor doblado. **Queda una
+excepción, y no se cerró acá:** cerrar una cuenta de salón crea la venta sin pasar por
+`CreateVentaDto` (`SalonesService.cerrarCuenta` → `crearEnTransaccion`), y la cuenta no tiene tope
+de líneas. Una venta de salón con más de 500 ítems distintos se devuelve en dos notas parciales.
+La cierra el tope por cuenta que sigue abierto en `pendientes.md` § 2 ("Una cuenta de salón no
+tiene tope de líneas"). Lo encontró la revisión independiente.
+
+- `@ArrayMaxSize(500)` en `CreateNotaCreditoDto.devoluciones`, `CreateReembolsoDto.devoluciones`
+  y `GenerarNotaReembolsoDto.devoluciones`. Es un literal con su porqué al lado, sin constante
+  compartida: una constante habría obligado a tocar los DTOs de venta y de cálculo desde un frente fiscal.
+- **Decidido por la Sesión de esfuerzo máximo (2026-10-08): 500 por construcción, igual al tope
+  de líneas de una venta.** Corrige el 200 que la misma sesión había dejado anotado sin verificar
+  de dónde salía.
+- Peor caso con stock, medido: 500 productos, nota entera con `stock: 'pierde'` (1000
+  movimientos de inventario): 1487 / 1450 / 1516 ms en tres corridas. Con servicios, 500
+  devoluciones: 182 ms.
+
+**Tests:** `topes-dto.e2e-spec.ts` suma una fila por decorador (con 501 da 400 nombrando el campo;
+con 500 ese 400 no aparece). Suma también una venta de 500 ítems distintos cuya nota entera es
+201 con 500 líneas, y con 501 da 400 sin escribir ninguna nota. `create-reembolso.dto.spec.ts`
+pasa a 500/501. **Mutantes**, medidos sobre el spec: sin el decorador de la nota, se ponen rojas
+su fila y la nota real; la nota en 200, las mismas dos; los dos de pasarela en 200, sus dos filas.
+
+---
+
 ## `stock-minimo.spec.ts` cierra los contextos que abre por rol (cerrada 2026-10-08)
 
 Sale de [`pendientes.md`](pendientes.md) § 1. Solo toca el spec: la app no cambió.
@@ -709,7 +759,8 @@ la orquestadora al integrar el frente, junto con las demás que se le pasaron.
 
 - el `@IsObject()` de las tres `personalizacion`, por exclusión de la orquestadora, con la medición
   del stock descontado;
-- `CreateNotaCreditoDto.devoluciones` (fiscal);
+- `CreateNotaCreditoDto.devoluciones` (fiscal): ~~cerrado 2026-10-08~~, con 500 y no 200 (ver
+  arriba);
 - el reemplazo por línea de las reglas del ítem y el `impuestoIds` repetido (producto y fiscal por
   separado);
 - `confirmarComanda`, que escribe líneas de cualquier cuenta del tenant (hallazgo lateral, leído).

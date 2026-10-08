@@ -122,14 +122,6 @@ destapa una decisión que no es mía).
   pedido aceptado le da al motor lo mismo que hoy. Falta la medición de `AddLineaDto` y que la
   orquestadora le dé frente.
 
-- [ ] **`CreateNotaCreditoDto.devoluciones` no tiene tope** (backend, `ventas/dto/
-  create-nota-credito.dto.ts`; anotado el 2026-10-06 por el frente de topes de los DTOs, que no lo
-  tocó: lo fiscal va solo, owner 2026-08-23). Es el único campo array de entrada que quedó sin
-  `@ArrayMaxSize` por decisión y no por construcción. **El arreglo es mecánico y tiene precedente:**
-  sus dos gemelos de pasarela ya llevan `@ArrayMaxSize(200)` (`CreateReembolsoDto.devoluciones` y
-  `GenerarNotaReembolsoDto.devoluciones`, este último desde `d08aef16`). Va con el mismo 200 y su
-  fila en `topes-dto.e2e-spec.ts`; solo espera su sesión fiscal.
-
 - [ ] **`POST /cuentas/:id/comanda` escribe líneas de cualquier cuenta del tenant** (backend,
   `SalonesService.confirmarComanda`, `salones.service.ts:2979-2985`; leído, **no corrido**, por un
   agente del frente de topes de los DTOs el 2026-10-06 y confirmado leyendo el código). El loop hace

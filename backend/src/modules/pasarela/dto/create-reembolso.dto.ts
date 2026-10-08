@@ -59,10 +59,12 @@ export class CreateReembolsoDto {
    */
   @IsOptional()
   @IsArray()
-  // Mismo tope que las líneas de una compra: la corrección hace trabajo por
-  // línea (validación y un movimiento de stock), y un array sin tope lo
-  // multiplica, sobre todo por la ruta de la llave de API.
-  @ArrayMaxSize(200)
+  // La corrección hace trabajo por línea (validación y movimientos de stock), y
+  // un array sin tope lo multiplica, sobre todo por la ruta de la llave de API.
+  // Una devolución por ítem distinto de la venta, y una venta tiene a lo sumo
+  // 500 líneas (`CreateVentaDto.lineas`): con menos se corta una corrección
+  // válida.
+  @ArrayMaxSize(500)
   @ValidateNested({ each: true })
   @Type(() => DevolucionLineaDto)
   devoluciones?: DevolucionLineaDto[];

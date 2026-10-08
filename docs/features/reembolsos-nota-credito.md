@@ -316,8 +316,8 @@ Response (200): orden pública + extras
 - **El `warning` no filtra texto de la base**: al cliente —también el de la llave de API— solo
   llega el mensaje de una `HttpException` (un motivo de negocio, p. ej. "no se puede emitir una
   nota sobre otra nota"); cualquier otro error da un texto fijo y el detalle queda en el log.
-- `devoluciones` del DTO tiene tope de 200 líneas (`@ArrayMaxSize`), el mismo que las líneas
-  de una compra.
+- `devoluciones` del DTO tiene tope de 500 líneas (`@ArrayMaxSize`), como la nota manual: ver
+  el contrato de abajo. Hasta el 2026-10-08 era 200, el de las líneas de una compra.
 - Índices nuevos: `pasarela_ordenes(venta_id)`, `pasarela_transacciones(orden_id)`
   (para el agregado de REFUNDs del listado de ventas).
 
@@ -345,6 +345,17 @@ y en los dos `POST …/reembolsos` de la pasarela (`DevolucionLineaDto`); es el 
 | sacó algo de serie o lote (`solo_perdida`) | **obligatorio**; `recupera` es 400 (la vuelta va por Inventario) |
 
 `stock: null` es 400 siempre (lo rechaza el DTO); ausente es 400 solo en la línea con stock. El campo de antes, `reponerStock`, ya no existe: el pipe lo rechaza.
+
+**Hasta 500 líneas** en los tres DTOs (`@ArrayMaxSize(500)`; la 501 es 400 del pipe): se acepta
+una línea por ítem distinto de la venta (repetido es 400), y una venta tiene a lo sumo 500 líneas
+(`CreateVentaDto.lineas`). Con menos, el tope cortaba una nota válida: medido el 2026-10-08, una
+venta con 201 ítems distintos se devolvía entera con 201 líneas. El peor caso, 500 productos con
+`pierde` (1000 movimientos de inventario), tardó ~1,5 s. Decidido por la Sesión de esfuerzo
+máximo (2026-10-08), por construcción. ⚠️ **La excepción, al cierre:** cerrar una cuenta de salón
+crea la venta sin pasar por `CreateVentaDto`, y la cuenta todavía no tiene tope de líneas
+([`pendientes.md`](../agent/pendientes.md) § 2, "Una cuenta de salón no tiene tope de líneas").
+Una venta así con más de 500 ítems distintos no se devuelve entera en una nota: van dos notas
+parciales.
 
 **Qué devuelve una línea: lo que salió por ella.** La misma fuente que revierte `cancelar` —el
 kardex de la venta, motivo `venta`— acotada a las líneas devueltas: desde el 2026-10-04 cada salida
@@ -862,7 +873,9 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
   ninguna fila, y `CobrosService` no liga por fuera del handler.
 - `transacciones.service.spec.ts`: `vincularCorreccion` acotado al tenant, escribe una vez,
   devuelve si ligó una fila y, con un `manager`, escribe con ese.
-- `create-reembolso.dto.spec.ts`: validación anidada del DTO y el tope de 200 `devoluciones`.
+- `create-reembolso.dto.spec.ts`: validación anidada del DTO y el tope de 500 `devoluciones`.
+- `topes-dto.e2e-spec.ts` (2026-10-08): el tope de `devoluciones` de los tres DTOs por HTTP, y
+  una venta de 500 ítems distintos cuya nota entera es 201 (con 501, 400 y ninguna nota).
 - `pasarela-reembolso.e2e-spec.ts` (2026-10-02): por la API real, con el proveedor doblado:
   el REFUND aprobado sin devoluciones deja la nota sobre la boleta y `correccion_venta_id`;
   dos reembolsos parciales, cada uno con su nota; `generarNotaCredito` da 400 por la ruta del

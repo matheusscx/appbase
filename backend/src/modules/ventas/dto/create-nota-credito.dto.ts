@@ -4,6 +4,7 @@ import {
   type DestinoStockDevolucion,
 } from '../../pasarela/services/reembolso-callback.registry';
 import {
+  ArrayMaxSize,
   Equals,
   IsArray,
   IsIn,
@@ -131,6 +132,9 @@ export class CreateNotaCreditoDto {
    */
   @IsOptional()
   @IsArray()
+  // Una devolución por ítem distinto de la venta, y una venta tiene a lo sumo
+  // 500 líneas (`CreateVentaDto.lineas`): con menos se corta una nota válida.
+  @ArrayMaxSize(500)
   @ValidateNested({ each: true })
   @Type(() => DevolucionNotaCreditoDto)
   devoluciones?: DevolucionNotaCreditoDto[];

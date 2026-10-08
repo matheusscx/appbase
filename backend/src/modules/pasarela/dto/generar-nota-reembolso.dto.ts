@@ -18,7 +18,7 @@ export class GenerarNotaReembolsoDto {
   @IsOptional()
   @IsArray()
   // El mismo tope que `CreateReembolsoDto.devoluciones`.
-  @ArrayMaxSize(200)
+  @ArrayMaxSize(500)
   @ValidateNested({ each: true })
   @Type(() => DevolucionLineaDto)
   devoluciones?: DevolucionLineaDto[];
