@@ -123,6 +123,24 @@ destapa una decisión que no es mía).
   **antes** de que arranque la corrida, no la invalida; un RC que sube **durante** la corrida sí.
   Mirar RestartCount antes y después sigue siendo la regla.
 
+- [ ] **Playwright en frío: `auth.setup` se queda 30 s en el spinner de `/login` con RestartCount 0**
+  (entorno de desarrollo; medido el 2026-10-08 por el frente que puso Playwright en el gate de
+  cierre). Con el stack recién levantado y `reset-db.sh` recién corrido, `npm run e2e:smoke` cayó
+  **2 de 2** en `auth.setup.ts:16`: `page.goto('/login', { waitUntil: 'networkidle' })` agota los
+  30 s del test, y la captura muestra solo el spinner "Cargando". Backend y frontend estaban en
+  RC 0, sin `OOMKilled`. El log del frontend no dice "discovered new dependencies", así que no es
+  una dependencia que falte en `optimizeDeps` (el arreglo de
+  [`resueltos.md`](resueltos.md), 2026-09-30). La 3ª corrida pasó 6/6 en 11,8 s, pero **después de
+  abrir `/login` una vez en un navegador** (~1000 peticiones de módulos al dev server): no se
+  midió si una 3ª corrida sola alcanzaba. El load del host estaba entre 8 y 12. Ya se había visto
+  una vez el 2026-09-30, con `caja/apertura-cierre` como primer spec (`resueltos.md`, la zona
+  horaria de CI). **Hipótesis:** la primera compilación de Vite de los módulos de la SPA, que
+  `nuxt dev` hace a pedido del navegador, tarda más que el timeout con el host cargado. En CI no
+  pasa porque el `webServer` sirve el build. **Medir:** cuánto tarda el primer `/login` en frío
+  (con `--timeout` alto) y con qué load, y si una 2ª corrida sola alcanza. Mientras tanto,
+  `verify-feature` paso 1 manda a repetir una vez. Una 4ª corrida, tras otro reset, no sirve para
+  esto: el frontend murió por OOM con tres stacks arriba.
+
 - [ ] **La tienda calcula el total dos veces, con dos "ahora": lo que cambia entre el pago y el callback deja un cargo sin venta** (backend; lo vio la revisión de seguridad del frente "reglas de línea salen del ítem", 2026-10-06; **leído en el código, no corrido**; las citas de línea son contra `54bc8f6e`). `POST /online/pagar` calcula el total con `calcular()` y ese número es el que se autoriza en Webpay. Cuando el comprador vuelve del formulario de Transbank, el callback (`online-callback.handler.ts`) crea la venta con `VentasService.crear`, que **vuelve a calcular desde cero** con el snapshot de la orden (solo `itemId`, `cantidad` y presentación) y el pago fijado en el total autorizado. Si los dos cálculos no dan lo mismo, la venta no se crea:
   - **total del callback mayor** → `ventas.service.ts:1019` *"Las ventas online requieren el pago completo"*;
   - **total del callback menor** → el pago sobra, y sin `permite_vuelto` en el método de tarjeta (el seed solo lo tiene en efectivo) `pagos.service.ts:270` da *"El pago supera el total pero ningún método de pago permite vuelto"*. Con `permite_vuelto`, la venta se guarda con vuelto sobre una tarjeta.
@@ -408,26 +426,6 @@ fiscal y va solo:
   cálculo + fiscal, frente propio (ADR-010).
 
 ### Qué lote o unidad sale de stock (owner, 2026-09-28)
-
-### Playwright entra al gate de cierre (owner, 2026-09-29)
-
-- [ ] **Un frente que toca pantallas o contratos de la API corre Playwright en local antes de
-  integrarse** (harness/proceso; antes era pregunta de la § 4). **Lo que pasó:** el gate entero
-  de `CLAUDE.md` dio verde en local sobre `867d996d` (compras pieza 3, tareas 1 y 2), y el CI del
-  push `479d8b56` dio rojo en `frontend · e2e navegador`. Cuatro specs de `frontend/e2e/compras/`
-  confirmaban una Factura sin el total del documento, que la tarea 1 hizo obligatorio, y
-  recibían un 400. Nadie corrió Playwright, porque el checklist no lo pide, y el demo de Railway
-  ya tenía el código.
-  **Cómo se decidió:** la orquestadora le planteó esa escena con tres opciones. *A: correrlo en
-  local antes de integrar*, con el costo de unos 5 minutos por cierre (el job de CI tardó 5 min 19 s
-  en `36610126257`) más levantar el stack propio. Era la recomendada, por ser la única que ataja
-  la rotura antes de `main`. *B: dejarlo como está.* *C: que Railway espere al CI*, que no ataja
-  la rotura en `main`. Contestó **"vamos con A"** en el chat de la orquestadora.
-  **Lo que falta al construirlo:** el paso en el checklist de `CLAUDE.md` y en `verify-feature`
-  (paso 1), con el criterio de cuándo aplica ("toca pantallas o contratos de la API") escrito de
-  forma que se pueda decidir sin preguntar; `entorno.sh stack` antes de `npm run e2e`; y la regla
-  de turnos (Playwright es suite pesada). ⚠️ C no quedó descartada por el owner: se eligió A. Si
-  alguna vez se abre el portón de CI de "Endurecimiento para producción", las dos conviven.
 
 ### Anular un plato devuelve lo que se consumió al venderlo (owner, 2026-09-29)
 

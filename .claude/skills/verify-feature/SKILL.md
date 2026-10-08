@@ -24,6 +24,7 @@ cd backend  && npm run test:e2e
 cd frontend && npm run build
 cd frontend && npm run typecheck:ratchet
 cd frontend && npm run design:check
+cd frontend && npm run e2e          # solo si el diff cae en el criterio de CLAUDE.md (🎭)
 ```
 
 Registrar el resultado real de cada comando. **No declarar que un paso pasó sin
@@ -48,7 +49,34 @@ Para el e2e de **navegador** hace falta el stack: `./scripts/entorno.sh stack` l
 uno propio a este worktree (backend y frontend en sus puertos), y ahí sí `reset-db.sh` y
 `--verificar` aplican, sobre el proyecto de este worktree y no sobre el de nadie más.
 Playwright toma esos puertos del `.env` sola. (Desde el 2026-09-20; antes era
-`db-aislada.sh` y el stack se pedía por turno.)
+`db-aislada.sh` y el stack se pedía por turno. La CPU sigue yendo por turno: ver abajo.)
+
+**Cómo leer la corrida de Playwright** (la secuencia está en el checklist de `CLAUDE.md`):
+
+- **La base se resetea justo antes de `npm run e2e`, no antes del `test:e2e`.** En modo `stack`
+  el `DATABASE_URL` del `.env` apunta al Postgres del stack, así que el e2e de la API escribe en
+  la misma base que lee Playwright.
+- **RestartCount y OOMKilled, antes y después:**
+  `docker inspect wt-<slug>_backend wt-<slug>_frontend --format '{{.Name}} {{.RestartCount}} {{.State.OOMKilled}} {{.State.StartedAt}}'`.
+  El "antes" se toma **después** del `reset-db.sh`, que recrea los contenedores y deja el contador en 0.
+  Un RC 1 del frontend con el `ENOENT` de `.nuxt/nuxt-fonts-global.css` en su log, que ya estaba
+  en el "antes", no invalida la corrida
+  ([`pendientes.md`](../../../docs/agent/pendientes.md) § 2). Un RC que sube **durante** la corrida, sí.
+- **Memoria de la VM de Docker (3,83 GiB).** El 2026-10-08, con tres stacks completos arriba
+  (el del checkout principal y dos de worktrees), el frontend propio murió por OOM a mitad de
+  una corrida (22:45:21 UTC). En la misma ventana se reiniciaron el frontend de otro worktree
+  (22:44:32 UTC) y `tecnica_backend` (22:37:28 UTC). Si ya hay dos stacks completos arriba
+  (`docker ps`), pedirle a la orquestadora que baje uno antes de levantar el tuyo. Si un
+  contenedor de **otra** sesión se reinicia durante tu corrida, avisale: su corrida tampoco vale.
+- **En frío, `auth.setup` puede quedarse en el spinner.** Si cae por timeout en
+  `page.goto('/login')` con RC 0, se repite **una vez**, sin `reset-db.sh`, antes de leerlo como
+  rojo. No hace falta resetear porque `auth.setup` cae antes de que corra ningún spec. El
+  2026-10-08 cayó así en las 2 corridas en frío. **No está medido que la repetición alcance**:
+  la causa está abierta en [`pendientes.md`](../../../docs/agent/pendientes.md) § 2
+  (*"Playwright en frío…"*). Si vuelve a caer ahí, la corrida no cuenta ni como verde ni como
+  rojo: anotarlo en esa entrada y avisar a la orquestadora, que decide cómo se cierra.
+- **Timeouts por todos lados con otra suite corriendo en paralelo:** la corrida no cuenta. Se
+  repite en turno.
 
 **`typecheck:ratchet`**: `nuxt build` NO tipa-chequea, así que el frontend arrastra una
 deuda de errores de tipo (vue-tsc estricto) registrada en `frontend/typecheck-baseline.json`.
@@ -250,6 +278,7 @@ Comandos
   frontend build      ✅ / ❌
   frontend typecheck  ✅ sin regresión / ❌ <archivo que empeoró>
   frontend design     ✅ / ❌ <neutral hardcodeado archivo:línea>
+  frontend e2e (PW)   ✅ <pasados/total> / ❌ <spec> / — no aplica (<el diff solo toca la lista de CLAUDE.md>)
 
 Invariantes      ✅ / ⚠️ <cuál>
 Consultas        ✅ / ⚠️ <N+1 o lectura sin filtro de borrado>

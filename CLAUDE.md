@@ -164,7 +164,8 @@ reinicia y **vuelve a sembrar** (medido: crear un `.ts` lleva el contador de
 fallos repartidos que **no son regresiones**. Ante un e2e que falla raro, la
 primera pregunta la contesta `./scripts/reset-db.sh --verificar`.
 
-🧪 **Cada worktree tiene su propio entorno, y ya no se pide turno** (2026-09-20). Hasta
+🧪 **Cada worktree tiene su propio entorno, y ya no se pide turno por puertos ni por stack**
+(2026-09-20; las suites pesadas sí van por turno, ver el bloque 🎭 del checklist). Hasta
 esa fecha `docker-compose` usaba **un** nombre de proyecto para todos los worktrees
 —`.env.example` lo fijaba y cada `.env` copió esa línea—, así que backend y frontend
 eran uno solo: había que repartir turno a mano para Playwright y para el smoke, y un
@@ -346,6 +347,29 @@ juicio (N+1, dinero-Decimal, alcance) no corre en CI: vive en el paso 7 del skil
 
 Mecánica de cada comando (por qué `isolatedModules` obliga a `typecheck` aparte, cómo
 funciona el ratchet de `vue-tsc`): `verify-feature` paso 1.
+
+🎭 **Playwright entero, si el diff toca pantallas o contratos de la API** (owner, 2026-09-29).
+Aplica salvo que **todo** el diff caiga en esta lista: `*.md`, specs unitarios (`*.spec.ts` de
+`backend/src/` y `frontend/app/`, no los de `frontend/e2e/`), `backend/test/`, y de la raíz
+`scripts/`, `.githooks/`, `.claude/`, `.github/` y `startup-pos.sql`. Un archivo fuera de la
+lista, aunque sea uno solo, lo activa, aunque parezca no tocar pantallas ni la API: **la lista gana
+sobre el título**. Cuenta todo `backend/src/`, no solo controllers y DTOs: el 400 que rompió
+cuatro specs de compras salía de una regla del service (`f34eb6bf`).
+
+```bash
+./scripts/entorno.sh borrar   # solo si el worktree está en modo db: stack aborta
+./scripts/entorno.sh stack
+./scripts/reset-db.sh         # después del test:e2e, que en modo stack escribe en esta base
+cd frontend && npm run e2e
+./scripts/entorno.sh borrar   # apenas leído el RestartCount de después: la VM no da para muchos stacks
+```
+
+CI ya lo corre (job `e2e-navegador`), pero Railway despliega en paralelo al CI
+([`ARCHITECTURE.md`](docs/ARCHITECTURE.md#demo-en-railway)), así que un rojo de navegador llega al demo antes
+de verse. Es suite pesada: con varias sesiones activas va **por turno de la orquestadora** (la
+sesión que reparte los frentes por encargo del owner). El
+"sin pedir turno" que imprime `entorno.sh stack` se refiere a los puertos, no a la CPU ni a la memoria.
+Cómo leer la corrida: `verify-feature` paso 1.
 
 Además verificar:
 

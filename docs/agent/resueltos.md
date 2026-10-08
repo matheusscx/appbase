@@ -23,6 +23,93 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Playwright entra al gate de cierre: criterio por rutas, secuencia y cómo leer la corrida (cerrada 2026-10-08)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Plan:
+[`2026-10-08-playwright-en-el-gate-de-cierre.md`](../superpowers/plans/2026-10-08-playwright-en-el-gate-de-cierre.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **Un frente que toca pantallas o contratos de la API corre Playwright en local antes de
+  integrarse** (harness/proceso; antes era pregunta de la § 4). **Lo que pasó:** el gate entero
+  de `CLAUDE.md` dio verde en local sobre `867d996d` (compras pieza 3, tareas 1 y 2), y el CI del
+  push `479d8b56` dio rojo en `frontend · e2e navegador`. Cuatro specs de `frontend/e2e/compras/`
+  confirmaban una Factura sin el total del documento, que la tarea 1 hizo obligatorio, y
+  recibían un 400. Nadie corrió Playwright, porque el checklist no lo pide, y el demo de Railway
+  ya tenía el código.
+  **Cómo se decidió:** la orquestadora le planteó esa escena con tres opciones. *A: correrlo en
+  local antes de integrar*, con el costo de unos 5 minutos por cierre (el job de CI tardó 5 min 19 s
+  en `36610126257`) más levantar el stack propio. Era la recomendada, por ser la única que ataja
+  la rotura antes de `main`. *B: dejarlo como está.* *C: que Railway espere al CI*, que no ataja
+  la rotura en `main`. Contestó **"vamos con A"** en el chat de la orquestadora.
+  **Lo que falta al construirlo:** el paso en el checklist de `CLAUDE.md` y en `verify-feature`
+  (paso 1), con el criterio de cuándo aplica ("toca pantallas o contratos de la API") escrito de
+  forma que se pueda decidir sin preguntar; `entorno.sh stack` antes de `npm run e2e`; y la regla
+  de turnos (Playwright es suite pesada). ⚠️ C no quedó descartada por el owner: se eligió A. Si
+  alguna vez se abre el portón de CI de "Endurecimiento para producción", las dos conviven.
+
+### Qué se hizo
+
+- **`CLAUDE.md`, checklist:** el bloque 🎭 con el criterio, la secuencia (`borrar` si está en
+  `db` → `stack` → `reset-db.sh` → `npm run e2e` → `borrar`), por qué en local si CI ya lo corre,
+  y el turno.
+- **`verify-feature` paso 1:** el comando, cómo leer la corrida y la línea `frontend e2e (PW)` del
+  reporte, que obliga a decir "no aplica" con su motivo.
+- **El criterio va por rutas, no por "¿esto lo consume el front?".** Esa pregunta es juicio, y en
+  el caso de la entrada nadie llegó a hacérsela. Se arma al revés: una lista de lo que **no** activa
+  Playwright (docs, unitarios, `backend/test/`, harness, `.github/`, `startup-pos.sql`). Fuera
+  de eso, todo lo activa, y la lista gana sobre el título. Lo apoyan dos casos reales:
+  - `f34eb6bf`, el de la entrada: el total obligatorio en Factura era una regla del service, y por
+    eso cuenta todo `backend/src/`, no solo controllers y DTOs.
+  - `d08aef16` ("Generar nota", 2026-10-06): uno de sus dos rojos en `e2e-navegador` fue un spec
+    de Playwright del propio frente (`frontend/e2e/ventas/nota-credito-generar-de-reembolso.spec.ts`),
+    y por eso `frontend/e2e/` no entra en "specs unitarios". El otro, `salones/anular-plato.spec.ts:188`,
+    era el flaky del toast, cerrado aparte.
+
+  De los 170 commits sin merge desde el 2026-10-01 hasta `01c09851`, 100 caen dentro: 46 solo
+  `backend/src`, 37 backend y `frontend/app`, 15 solo `frontend/`, todos con
+  `frontend/e2e/`, y 2 de `.dockerignore` o `package.json`. El conteo es por commit; un frente
+  son varios commits y corre Playwright una vez. El conteo:
+
+  ```bash
+  for h in $(git log --since=2026-10-01 --no-merges --format=%h 01c09851); do
+    git show --name-only --format= $h \
+      | grep -v -E '\.md$|^backend/test/|^scripts/|^\.githooks/|^\.claude/|^\.github/|^startup-pos\.sql$' \
+      | grep -v -E '^(backend/src|frontend/app)/.*\.spec\.ts$' | grep -q . && echo "$h"
+  done | wc -l
+  ```
+
+  La revisión independiente lo recontó y dio lo mismo. De los rojos de `e2e-navegador` desde el
+  2026-09-20, ninguno lo causó un diff que la lista deja afuera. El de `11ca7e68`, que es solo
+  docs, fue la zona horaria de CI y venía de código anterior.
+- **Entrada nueva en [`pendientes.md`](pendientes.md) § 2:** *"Playwright en frío: `auth.setup` se
+  queda 30 s en el spinner"*, por lo que salió al verificar.
+
+### Qué se verificó
+
+Sin gate de suites: el diff es solo docs y harness. Los comandos escritos se corrieron tal cual en
+este worktree. Por indicación de la orquestadora (turno), con `npm run e2e:smoke` y no la suite
+entera:
+
+- `entorno.sh stack` en 2 min 9 s (offset 3), RC 0 en los dos. `reset-db.sh` sobre esa base en
+  2 min 29 s (1 seed). `entorno.sh db` seguido de `stack` aborta con *"ya tiene el entorno en modo
+  'db'"* (exit 1), como dice el comentario del bloque.
+- Smoke: 2 de 2 en frío cayeron en `auth.setup` con RC 0 (la entrada nueva de la § 2). La 3ª,
+  después de abrir `/login` en un navegador, pasó **6/6 en 11,8 s**, con RC 0 antes y después. La
+  4ª, tras otro reset, cayó porque el frontend murió por OOM (`OOMKilled=true`): había tres stacks
+  completos arriba. En esa misma ventana se reiniciaron contenedores de otras dos sesiones. Eso
+  es la regla de memoria de `verify-feature`.
+- `node scripts/check-docs-links.mjs` y `node scripts/check-md-tables.mjs` en verde.
+
+### Qué quedó afuera
+
+- **C (que Railway espere al CI)** no se descartó: el owner eligió A. Si se abre el portón de CI
+  de "Endurecimiento para producción", conviven.
+- El mensaje *"sin pedir turno"* de `entorno.sh stack` no se tocó (el pedido era no cambiar
+  scripts). La regla aclara que habla de puertos.
+
+---
+
 ## Un monto calculado que no cabe en `NUMERIC(18,4)` es 400, no 500 (cerrada 2026-10-08)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Plan:
