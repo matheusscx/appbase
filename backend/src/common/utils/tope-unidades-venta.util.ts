@@ -56,6 +56,12 @@ export const MAX_LINEAS_POR_VENTA = 500;
  * venta daban 500 (medido el 2026-10-08).
  *
  * Es `number` porque lo lee `@Max`; para `@IsDecimalHasta`, `String(...)`.
+ *
+ * Tiene una gemela exacta en el frontend, `MAX_UNIDADES_POR_PLATO` de
+ * `frontend/app/composables/useRecetaPersonalizacion.ts`: es el `max` del input
+ * de unidades del extra en el drawer de personalización, para que el garzón no
+ * pueda pedir lo que este número rechaza. Back y front no comparten paquete: al
+ * tocar una punta, tocar la otra.
  */
 export const MAX_UNIDADES_POR_PLATO = 99;
 

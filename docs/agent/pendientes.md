@@ -103,15 +103,6 @@ Hoy son tres:
   con mensaje impreciso, sin efecto en datos. **Arreglo:** medirlo por HTTP y, si se confirma,
   `@IdEnMinusculas()` (`common/decorators/`) en los dos, con su e2e y su mutante.
 
-- [ ] **El drawer deja tipear más unidades de un extra que las que acepta el backend** (frontend,
-  `frontend/app/components/ventas/ItemPersonalizacionDrawer.vue:422`, el `UInputNumber` de la
-  cantidad del extra: `:min="1"` y sin `:max`; anotado el 2026-10-08 por el frente que le puso
-  `@Max(MAX_UNIDADES_POR_PLATO)` a `PersonalizacionExtraInputDto.unidades`). Con 100 el garzón ve el
-  400 *"…Un extra se puede agregar hasta 99 veces por plato"*. El número ya está decidido (99,
-  owner, 2026-10-08, AskUserQuestion de la Sesión de esfuerzo máximo). **Arreglo:** `:max` gemelo exacto del backend
-  (orquestadora, 2026-10-08) —back y front no comparten paquete, así que la constante va duplicada
-  con un comentario que nombre la otra—, y Playwright entero porque toca front.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:

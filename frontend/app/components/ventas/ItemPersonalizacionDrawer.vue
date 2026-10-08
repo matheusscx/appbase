@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   buildPersonalizacionPayload,
+  MAX_UNIDADES_POR_PLATO,
   precioConExtras,
   resumenPersonalizacion,
   sinStock,
@@ -423,6 +424,7 @@ function agregar() {
                   v-if="extraSeleccionado(extra.ingredienteItemId)"
                   :model-value="extrasCantidad[extra.ingredienteItemId] ?? 1"
                   :min="1"
+                  :max="MAX_UNIDADES_POR_PLATO"
                   :disabled="extraDeshabilitado(extra)"
                   class="w-28 shrink-0"
                   :aria-label="`Cantidad de ${extra.ingredienteNombre}`"

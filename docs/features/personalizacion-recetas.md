@@ -26,7 +26,10 @@ Food-service necesita adaptar el plato al pedido del comensal sin perder trazabi
   `unidades` es por plato —50
   hamburguesas con queso extra son `cantidad: 50` y `unidades: 1`—, así que el tope no limita un
   pedido grande: ataja el tipeo. Sin tope, 10^12 unidades desbordaban `precio_unitario` (500). La
-  pantalla todavía no lo topea (`docs/agent/pendientes.md` § 1).
+  pantalla lo topea con el mismo número: el input de unidades del extra tiene `max` y clampa lo
+  tipeado al salir del campo (100 queda en 99). La constante va duplicada —gemela exacta en
+  `composables/useRecetaPersonalizacion.ts`, cada una nombra a la otra— porque back y front no
+  comparten paquete.
 - `personalizacion` es un **objeto**: un array es 400 (hasta el 2026-10-08 se aceptaba y se perdía
   entera, descontando el ingrediente omitido). Los ids van en minúsculas en el borde: uno en
   mayúsculas es el mismo ingrediente, grupo u opción.
@@ -234,7 +237,7 @@ imprime la base, la decisión se reabre.
 
 ### Drawer compartido
 
-- `components/ventas/RecetaPersonalizacionDrawer.vue` (`VentasRecetaPersonalizacionDrawer`) — extras con checkbox + `UInputNumber` (stepper, min 1) para elegir unidades.
+- `components/ventas/ItemPersonalizacionDrawer.vue` (`VentasItemPersonalizacionDrawer`) — extras con checkbox + `UInputNumber` (stepper, min 1, max `MAX_UNIDADES_POR_PLATO`) para elegir unidades.
 - `composables/useRecetaPersonalizacion.ts` — helpers (resumen con `xN`, cargos × unidades, payload con `unidades`, validación vacía).
 
 ### POS

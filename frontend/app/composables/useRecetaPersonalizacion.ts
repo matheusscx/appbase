@@ -72,9 +72,22 @@ export interface RecetaDetallePersonalizacion {
   componentes?: ComponentePersonalizacion[]
 }
 
+/**
+ * Cuántas veces entra un mismo extra en un plato: 99 (owner, 2026-10-08). Es el
+ * `max` del input de unidades del extra en `ItemPersonalizacionDrawer`, que
+ * clampa lo tipeado al salir del campo.
+ *
+ * Gemela exacta de `MAX_UNIDADES_POR_PLATO` del backend
+ * (`backend/src/common/utils/tope-unidades-venta.util.ts`), que es el `@Max` de
+ * `PersonalizacionExtraInputDto.unidades`: back y front no comparten paquete. Al
+ * tocar una punta, tocar la otra; si el front dejara pasar más, el garzón vería
+ * el 400 recién al pedir.
+ */
+export const MAX_UNIDADES_POR_PLATO = 99
+
 export interface PersonalizacionExtraPayload {
   ingredienteItemId: string
-  /** Número de veces que se agrega el extra (≥ 1). */
+  /** Número de veces que se agrega el extra (1..`MAX_UNIDADES_POR_PLATO`). */
   unidades: number
 }
 

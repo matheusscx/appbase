@@ -23,6 +23,61 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El drawer ya no deja pedir más unidades de un extra que las que acepta el backend (cerrada 2026-10-08)
+
+Sale de [`pendientes.md`](pendientes.md) § 1. Plan:
+[`2026-10-08-tope-extra-en-el-drawer.md`](../superpowers/plans/2026-10-08-tope-extra-en-el-drawer.md).
+La regla viva está en [`features/personalizacion-recetas.md`](../features/personalizacion-recetas.md) § Scope.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **El drawer deja tipear más unidades de un extra que las que acepta el backend** (frontend,
+  `frontend/app/components/ventas/ItemPersonalizacionDrawer.vue:422`, el `UInputNumber` de la
+  cantidad del extra: `:min="1"` y sin `:max`; anotado el 2026-10-08 por el frente que le puso
+  `@Max(MAX_UNIDADES_POR_PLATO)` a `PersonalizacionExtraInputDto.unidades`). Con 100 el garzón ve el
+  400 *"…Un extra se puede agregar hasta 99 veces por plato"*. El número ya está decidido (99,
+  owner, 2026-10-08, AskUserQuestion de la Sesión de esfuerzo máximo). **Arreglo:** `:max` gemelo exacto del backend
+  (orquestadora, 2026-10-08) —back y front no comparten paquete, así que la constante va duplicada
+  con un comentario que nombre la otra—, y Playwright entero porque toca front.
+
+### Qué se midió
+
+- **Qué hace `UInputNumber` con un valor por encima del `max`**, leído en el fuente de `reka-ui`
+  2.9.9 (`NumberField/NumberFieldRoot.js`): lo tipeado se parsea y pasa por `clampInputValue` en
+  `applyInputValue`, que corre en el blur y con Enter. O sea que **clampa**, no rechaza ni deja
+  pasar; sin `max`, `clamp` no tiene techo y el 100 llega tal cual. En el navegador, el click en
+  "Agregar" con el 100 todavía en el campo saca el foco antes del click, así que el clamp llega a
+  tiempo (lo prueba el Playwright de abajo, que no sale del campo a mano).
+- **Quién más arma `unidades` de extras en el front:** nadie. El drawer es uno solo y lo montan el
+  POS y el salón; la tienda online no personaliza; `useSalones.personalizacionDesdeSnapshot`
+  reenvía las unidades que vinieron del backend. El stepper de opciones de grupo
+  (`ItemPersonalizacionGrupo.vue`) queda afuera a propósito: su tope es `grupo.max` (≤ 99 por
+  `ItemGrupoModificadorInputDto.max`), y un total por encima deja el grupo inválido y el botón
+  deshabilitado, así que no llega un 400.
+
+### Qué se hizo
+
+- `MAX_UNIDADES_POR_PLATO = 99` en `frontend/app/composables/useRecetaPersonalizacion.ts`, gemela
+  exacta de la del backend (`common/utils/tope-unidades-venta.util.ts`); cada una nombra a la otra
+  en su comentario.
+- `:max="MAX_UNIDADES_POR_PLATO"` en el `UInputNumber` de las unidades del extra
+  (`ItemPersonalizacionDrawer.vue`). `setExtraCantidad` **no** clampa también: sería un segundo
+  dueño de la regla y dejaría vivo el mutante de sacar el `:max`.
+
+### Qué lo fija
+
+- `frontend/app/components/ventas/ItemPersonalizacionDrawer.nuxt.spec.ts`, el primer spec del
+  drawer, con el `UInputNumber` real: 100 tipeado queda en 99 al salir del campo y el `confirm`
+  emite `unidades: 99`; 99 entra tal cual; la constante es 99. Mutante: sacar el `:max` —que es
+  volver al código anterior— pone rojo solo "100 tipeado queda en 99", por la aserción
+  (`expected '100' to be '99'`).
+- `frontend/e2e/ventas/personalizacion-tope-extra.spec.ts`: receta con un extra sembrada por API,
+  en el POS se tipea 100 y se agrega; el `POST /calculo-precios/calcular` lleva `unidades: 99`, el
+  servidor contesta 201 y el carrito muestra el extra "x99". Mismo mutante: rojo, con el pedido
+  saliendo con `unidades: 100`.
+
+---
+
 ## `pagos[].metodoPagoId` en mayúsculas guarda el pago, y un array como elemento de la personalización es 400 (cerrada 2026-10-08)
 
 Salen de [`pendientes.md`](pendientes.md) § 1, las dos en la misma sesión. Plan:
