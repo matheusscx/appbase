@@ -107,6 +107,27 @@ destapa una decisión que no es mía).
   - **Qué no cubre.** (1) **No hay forma de crear la venta después**: no existe un "reintentar el callback". `POST /pasarela/ordenes/:id/verificar` solo acepta `en_proceso`/`expirada` (`cobros.service.ts:1393`), y aunque existiera, recalcularía con un tercer "ahora". (2) **Nadie se entera**: no hay aviso al admin, solo el log. (3) **El comprador ve "Pago aprobado. Tu compra fue registrada correctamente."** (`tienda/retorno.vue:88-91`): `urlRetornoApp` (`pagos-redirect.service.ts:75-76`) manda `estado=pagada` igual con la orden sin venta, y la pantalla solo esconde el botón "Ver detalle de la venta".
   - **Lo que hay que decidir** (diseño aparte, no de arrastre): congelar en el snapshot de la orden lo que el checkout cobró (el total, o las líneas resueltas, como `reglasCongeladas` del salón) y que el callback lo respete, o calcular el callback con el instante del checkout. Y por separado, que una orden pagada sin venta avise y no le diga al comprador que su compra quedó registrada.
 
+- [ ] **El retorno de Webpay recibe el token sin DTO, en una ruta sin guard** (backend,
+  `pasarela/controllers/pasarela-retorno.controller.ts`; visto el 2026-10-08 por el
+  api-security-reviewer del barrido de `[[]]`, **leído, no medido**). `GET` y `POST` de
+  `pasarela/retorno/inscripcion` y `pasarela/retorno/pago` toman `TBK_TOKEN`, `token_ws` y
+  `TBK_ORDEN_COMPRA` con `@Query('…')`/`@Body('…')` sueltos (líneas 67, 75, 83-85 y 93-95), sin
+  DTO, así que el `ValidationPipe` no los mira: un objeto o un array llega tal cual. En el pago
+  termina en el `where`/`update` por `tokenProveedor` de `pagos-redirect.service.ts:158` y `:162`.
+  **Medir:** mandar `token_ws` como objeto y como array (por `POST` form y JSON, y por `GET` con
+  `token_ws[a]=1`) y ver qué contesta y si algo se escribe. **Arreglo probable:** un DTO por ruta con
+  `@IsOptional() @IsString()` y un tope de largo, como el resto de los bordes. Es la ruta pública a
+  la que vuelve el comprador: el arreglo no puede cambiar qué pasa con un token válido.
+
+- [ ] **Los valores de `configuracion` de la pasarela del tenant no se validan** (backend,
+  `pasarela/dto/create-tenant-pasarela.dto.ts`, el campo `configuracion?: Record<string, string>`;
+  visto el 2026-10-08 por el mismo revisor, **leído, no medido**). Solo tiene `@IsObject()`: los
+  valores internos pueden ser números, objetos o strings de cualquier largo, y se guardan cifrados
+  con `cifrarJson`. Es una ruta de admin. **Medir:** qué pasa con un valor no-string o enorme, al
+  guardar y cuando el cobro lee esa configuración. **Arreglo probable:** validar que los valores sean
+  strings con tope, o un DTO por `modoIntegracion` (MALL: `commerceCodeHijo`; INDIVIDUAL: las
+  credenciales del proveedor).
+
 - [ ] **Medir la ventana de consulta de Webpay Plus con un pago de más de 7 días** (queda del
   cierre de "Probar en el sandbox de Transbank el saldo…", 2026-10-04, [`resueltos.md`](resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04)).
   La documentación de Webpay Plus dice que el estado se consulta hasta 7 días; la referencia, "en
