@@ -475,12 +475,6 @@ fiscal y va solo:
   precio congelado de la línea (`dd54f81d`). El motor de precios y lo fiscal no se tocan.
   Escribe en `movimientos_inventario`: va en su propio frente.
 
-## 4. Necesita que el owner conteste
-
-Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
-elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
-prohíbe.
-
 - [ ] **Un componente de combo con cantidad fraccionaria no valida su personalización** (backend +
   producto, `ComboComponenteInputDto.cantidad` y `items.service.ts`, el loop por unidad de la
   personalización del combo; medido por HTTP el 2026-10-08 por el frente de los DTOs sin cota). Hoy
@@ -490,15 +484,11 @@ prohíbe.
   **La pregunta para el owner:** ¿un componente de combo puede ser fraccionario (medio kilo de algo
   dentro de un combo)? Si puede, hay que decidir cómo se valida su personalización; si no, va un 400.
 
-- [ ] **Un `REFUND` marcado "Sin nota de crédito" cuya venta ya está corregida entera por otras
-  notas no tiene salida** (backend + producto; anotado el 2026-10-04 al cerrar "Generar nota",
-  [`resueltos.md`](resueltos.md); **solo si aparece en uso real** — hoy no se construye, lo decidió
-  la Sesión de esfuerzo máximo). Escena: una venta online de $100.000 pagada con dos tarjetas, un
-  reembolso de $70.000 cuya nota falló, y después dos notas del POS "por el pago" que acreditan los
-  $100.000. "Generar nota" da 400 *"La venta ya está corregida entera…"* cada vez y el `REFUND`
-  sigue marcado para siempre. **La pregunta para el owner:** ¿se liga el `REFUND` a una de las
-  notas que ya existen (¿cuál, si son dos?), o se descarta la marca con un motivo escrito? Ninguna
-  de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
+  ✅ **Contestado por el owner (2026-10-08, AskUserQuestion de la orquestadora): sí, un componente
+  de combo puede ser fraccionario.** Lo que falta es el diseño de cómo se valida su personalización
+  (por ejemplo, si un componente de 0,5 cuenta como 1 para exigir sus grupos obligatorios, y cómo se
+  cobran sus extras). Eso es diseño, no mecánica: brainstorm → spec → plan. Si toca cómo se cobran los
+  extras, toca el motor y va solo.
 
 - [ ] **En la cuenta del salón, los avisos tapan los botones de la primera línea** (frontend, UX;
   anotado el 2026-10-06 por el frente que arregló el flaky de `anular-plato`, a pedido de la
@@ -512,6 +502,11 @@ prohíbe.
   **La pregunta para el owner:** ¿los avisos se mueven de lugar (abajo a la derecha, o arriba al
   centro) para toda la app, se mueven solo en el salón, o se deja como está porque se van solos en
   5 s?
+
+  ✅ **Contestado por el owner (2026-10-08, AskUserQuestion de la orquestadora): los avisos van abajo
+  a la derecha, en toda la app.** Falta construirlo: cambiar la posición del toaster en `app.vue` y
+  barrer las pantallas y los specs de Playwright que dependan de dónde aparecen los avisos. Playwright
+  entero, porque toca toda la UI.
 
 - [ ] **En una pasarela modo Mall, el código de comercio hijo lo escribe el propio local y nadie
   verifica que sea suyo** (producto + proceso de alta; anotado el 2026-10-08 al cerrar "la
@@ -532,6 +527,27 @@ prohíbe.
      aprobación y alguien que lo revise contra lo que dio Transbank.
   3. **Se deja como está**, confiando en el local. Costo: el error de la escena solo se nota cuando
      falta la plata.
+
+  ✅ **Contestado por el owner (2026-10-08, AskUserQuestion de la orquestadora): opción 1, lo asigna la
+  plataforma.** El superadmin lo carga al dar de alta el local en el mall, y el admin del local no lo
+  puede escribir. Falta construirlo. Va con la prioridad baja que el owner le dio a la pasarela el
+  mismo día.
+
+## 4. Necesita que el owner conteste
+
+Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
+elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
+prohíbe.
+
+- [ ] **Un `REFUND` marcado "Sin nota de crédito" cuya venta ya está corregida entera por otras
+  notas no tiene salida** (backend + producto; anotado el 2026-10-04 al cerrar "Generar nota",
+  [`resueltos.md`](resueltos.md); **solo si aparece en uso real** — hoy no se construye, lo decidió
+  la Sesión de esfuerzo máximo). Escena: una venta online de $100.000 pagada con dos tarjetas, un
+  reembolso de $70.000 cuya nota falló, y después dos notas del POS "por el pago" que acreditan los
+  $100.000. "Generar nota" da 400 *"La venta ya está corregida entera…"* cada vez y el `REFUND`
+  sigue marcado para siempre. **La pregunta para el owner:** ¿se liga el `REFUND` a una de las
+  notas que ya existen (¿cuál, si son dos?), o se descarta la marca con un motivo escrito? Ninguna
+  de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
 
 ## 5. Carreras de concurrencia
 
