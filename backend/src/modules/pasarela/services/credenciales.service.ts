@@ -44,7 +44,7 @@ export class CredencialesService {
     ]).toString('utf8');
   }
 
-  cifrarJson(obj: Record<string, unknown>): string {
+  cifrarJson(obj: object): string {
     return this.cifrarTexto(JSON.stringify(obj));
   }
 
@@ -54,8 +54,15 @@ export class CredencialesService {
 
   /**
    * Credenciales listas para el provider según modo + ambiente.
-   * MALL: credenciales de la plataforma (pasarelas.configuracion_*) + config del tenant (commerce code hijo).
-   * INDIVIDUAL: solo la configuración del tenant.
+   * MALL: credenciales de la plataforma (pasarelas.configuracion_*) + el commerce code hijo del tenant.
+   * INDIVIDUAL: la configuración del tenant.
+   *
+   * `baseUrl` sale siempre del ambiente, y en MALL del tenant pasa solo
+   * `commerceCodeHijo`. Hasta el 2026-10-08 lo guardado se esparcía encima de
+   * todo: un `baseUrl` en la config del tenant mandaba el cobro —con el
+   * `Tbk-Api-Key-Secret` del mall de la plataforma— al host que el tenant
+   * eligiera. El DTO ya rechaza esa clave; esto cubre lo que estuviera guardado
+   * y cualquier otra puerta de escritura.
    */
   resolver(
     tenantPasarela: TenantPasarela,
@@ -75,7 +82,7 @@ export class CredencialesService {
         throw new BadRequestException(
           'La pasarela no tiene credenciales configuradas',
         );
-      return { baseUrl, ...configTenant };
+      return { ...configTenant, baseUrl };
     }
 
     const blobPlataforma =
@@ -88,6 +95,11 @@ export class CredencialesService {
       );
     const configPlataforma =
       this.descifrarJson<Record<string, string>>(blobPlataforma);
-    return { baseUrl, ...configPlataforma, ...configTenant };
+    const { commerceCodeHijo } = configTenant;
+    return {
+      ...configPlataforma,
+      ...(commerceCodeHijo !== undefined && { commerceCodeHijo }),
+      baseUrl,
+    };
   }
 }

@@ -160,6 +160,14 @@ timeout post-autorización, aunque venga `token_ws`) → **no confirma**, marca 
 orden `fallida`; solo `TBK_ORDEN_COMPRA` (timeout en el formulario) → `fallida`.
 En los tres casos redirige 302 a la URL de éxito/fracaso de la app.
 
+Los campos se leen sueltos (`@Body('x')`/`@Query('x')`) y no con un DTO, porque Transbank
+manda campos que no controlamos (`TBK_ID_SESION`, entre otros) y el pipe global los
+rechazaría. El tipo lo valida un pipe de parámetro (`CampoDeRetornoPipe`, desde el
+2026-10-08): un campo que no es texto, o que pasa de 255 caracteres, es 400 en JSON, igual que
+el retorno sin token. La basura no redirige. Lo fija `test/pasarela-retorno.e2e-spec.ts`, que
+recorre además los desenlaces reales (aprobado, abortado con y sin `token_ws`, timeout y doble
+retorno) por GET, POST form y POST JSON.
+
 ### Ejemplo — cobro
 
 ```
@@ -353,7 +361,9 @@ dos tabs:
    alta/edición. Las credenciales son **write-only**: el listado solo dice si las hay,
    al editar los campos muestran `••••` y la configuración viaja solo si se tipeó algo.
    Como el backend reemplaza el JSON cifrado entero (no mergea), en modo individual,
-   si se toca una credencial, el drawer exige las 3 juntas para no borrar las otras.
+   si se toca una credencial, el drawer exige las 3 juntas para no borrar las otras. Una
+   credencial vacía o de solo espacios no se manda, en ninguno de los dos modos: es el gemelo
+   del `/\S/` del backend.
    El selector de proveedor sale de `pasarelas-disponibles`: un local cuya moneda
    oficial no es CLP no ve Transbank (ver "La moneda de una orden no es la del tenant").
    La **pasarela demo** (`codigo: 'demo'`) es la excepción: no habla con ningún
@@ -396,6 +406,14 @@ Configuración; `Reembolsar` en el drawer de Órdenes). Es UX: el candado es el
   bytes base64) en `.env`, blob `v1:iv:tag:data`. Cifra configuraciones,
   `identificador_externo` y `token_externo`. Verificado: el commerce code no
   aparece en claro en la BD.
+- **Configuración del tenant** (2026-10-08): solo entran las claves que leen los providers
+  (`commerceCodeHijo`, `mallCommerceCode`, `apiKeySecret`), como texto no vacío de hasta 255
+  caracteres (`ConfiguracionPasarelaDto`). Cualquier otra clave es 400. Además
+  `CredencialesService.resolver` no deja que lo guardado pise a la plataforma: `baseUrl` sale
+  siempre del ambiente, y en MALL del tenant pasa solo `commerceCodeHijo`. Hasta esa fecha un
+  `baseUrl` en la config de MALL mandaba el cobro, con el `Tbk-Api-Key-Secret` del mall de la
+  plataforma en el header, al host que eligiera el tenant (medido con un receptor local). Lo
+  fijan `test/pasarela-configuracion.e2e-spec.ts` y `credenciales.service.spec.ts`.
 - **Redacción**: `request`/`response` de transacciones enmascaran
   credenciales/tokens (`tbk_user`, `Tbk-Api-Key-Secret`, `authorization`…)
   antes de persistir.

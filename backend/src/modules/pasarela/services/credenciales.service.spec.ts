@@ -94,6 +94,91 @@ describe('CredencialesService', () => {
       expect(resultado.mallCommerceCode).toBe('M-TENANT');
     });
 
+    it('INDIVIDUAL: con las 3 credenciales de la pantalla, la credencial es la de siempre', () => {
+      const svc = makeService();
+      const tp = {
+        ambiente: 'pruebas',
+        modoIntegracion: 'individual',
+        configuracion: svc.cifrarJson({
+          mallCommerceCode: 'M-TENANT',
+          apiKeySecret: 'K-TENANT',
+          commerceCodeHijo: 'H-TENANT',
+        }),
+      } as TenantPasarela;
+      expect(svc.resolver(tp, pasarela)).toStrictEqual({
+        baseUrl: 'https://webpay3gint.transbank.cl',
+        mallCommerceCode: 'M-TENANT',
+        apiKeySecret: 'K-TENANT',
+        commerceCodeHijo: 'H-TENANT',
+      });
+    });
+
+    // Medido el 2026-10-08 con un receptor local: `{ baseUrl, ...plataforma,
+    // ...tenant }` dejaba que un `baseUrl` guardado por el tenant se llevara el
+    // cobro, con el secreto del mall de la plataforma en el header.
+    describe('lo que guardó el tenant no pisa lo de la plataforma', () => {
+      const plataforma = (svc: CredencialesService) =>
+        ({
+          ...pasarela,
+          configuracionPruebas: svc.cifrarJson({
+            mallCommerceCode: '597055555541',
+            apiKeySecret: 'S3CR3T',
+          }),
+        }) as Pasarela;
+
+      it('MALL: del tenant solo pasa commerceCodeHijo', () => {
+        const svc = makeService();
+        const tp = {
+          ambiente: 'pruebas',
+          modoIntegracion: 'mall',
+          configuracion: svc.cifrarJson({
+            commerceCodeHijo: '597055555542',
+            baseUrl: 'http://ladron.example',
+            mallCommerceCode: 'M-TENANT',
+            apiKeySecret: 'K-TENANT',
+            otraClave: 'x',
+          }),
+        } as TenantPasarela;
+        expect(svc.resolver(tp, plataforma(svc))).toStrictEqual({
+          baseUrl: 'https://webpay3gint.transbank.cl',
+          mallCommerceCode: '597055555541',
+          apiKeySecret: 'S3CR3T',
+          commerceCodeHijo: '597055555542',
+        });
+      });
+
+      it('MALL sin commerceCodeHijo: no agrega la clave', () => {
+        const svc = makeService();
+        const tp = {
+          ambiente: 'pruebas',
+          modoIntegracion: 'mall',
+          configuracion: svc.cifrarJson({ baseUrl: 'http://ladron.example' }),
+        } as TenantPasarela;
+        expect(svc.resolver(tp, plataforma(svc))).toStrictEqual({
+          baseUrl: 'https://webpay3gint.transbank.cl',
+          mallCommerceCode: '597055555541',
+          apiKeySecret: 'S3CR3T',
+        });
+      });
+
+      it('INDIVIDUAL: baseUrl sale del ambiente, no de la config', () => {
+        const svc = makeService();
+        const tp = {
+          ambiente: 'produccion',
+          modoIntegracion: 'individual',
+          configuracion: svc.cifrarJson({
+            mallCommerceCode: 'M-TENANT',
+            apiKeySecret: 'K-TENANT',
+            commerceCodeHijo: 'H-TENANT',
+            baseUrl: 'http://169.254.169.254',
+          }),
+        } as TenantPasarela;
+        expect(svc.resolver(tp, pasarela).baseUrl).toBe(
+          'https://webpay3g.transbank.cl',
+        );
+      });
+    });
+
     it('lanza BadRequest si faltan credenciales', () => {
       const svc = makeService();
       const tp = {

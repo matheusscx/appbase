@@ -107,27 +107,6 @@ destapa una decisión que no es mía).
   - **Qué no cubre.** (1) **No hay forma de crear la venta después**: no existe un "reintentar el callback". `POST /pasarela/ordenes/:id/verificar` solo acepta `en_proceso`/`expirada` (`cobros.service.ts:1393`), y aunque existiera, recalcularía con un tercer "ahora". (2) **Nadie se entera**: no hay aviso al admin, solo el log. (3) **El comprador ve "Pago aprobado. Tu compra fue registrada correctamente."** (`tienda/retorno.vue:88-91`): `urlRetornoApp` (`pagos-redirect.service.ts:75-76`) manda `estado=pagada` igual con la orden sin venta, y la pantalla solo esconde el botón "Ver detalle de la venta".
   - **Lo que hay que decidir** (diseño aparte, no de arrastre): congelar en el snapshot de la orden lo que el checkout cobró (el total, o las líneas resueltas, como `reglasCongeladas` del salón) y que el callback lo respete, o calcular el callback con el instante del checkout. Y por separado, que una orden pagada sin venta avise y no le diga al comprador que su compra quedó registrada.
 
-- [ ] **El retorno de Webpay recibe el token sin DTO, en una ruta sin guard** (backend,
-  `pasarela/controllers/pasarela-retorno.controller.ts`; visto el 2026-10-08 por el
-  api-security-reviewer del barrido de `[[]]`, **leído, no medido**). `GET` y `POST` de
-  `pasarela/retorno/inscripcion` y `pasarela/retorno/pago` toman `TBK_TOKEN`, `token_ws` y
-  `TBK_ORDEN_COMPRA` con `@Query('…')`/`@Body('…')` sueltos (líneas 67, 75, 83-85 y 93-95), sin
-  DTO, así que el `ValidationPipe` no los mira: un objeto o un array llega tal cual. En el pago
-  termina en el `where`/`update` por `tokenProveedor` de `pagos-redirect.service.ts:158` y `:162`.
-  **Medir:** mandar `token_ws` como objeto y como array (por `POST` form y JSON, y por `GET` con
-  `token_ws[a]=1`) y ver qué contesta y si algo se escribe. **Arreglo probable:** un DTO por ruta con
-  `@IsOptional() @IsString()` y un tope de largo, como el resto de los bordes. Es la ruta pública a
-  la que vuelve el comprador: el arreglo no puede cambiar qué pasa con un token válido.
-
-- [ ] **Los valores de `configuracion` de la pasarela del tenant no se validan** (backend,
-  `pasarela/dto/create-tenant-pasarela.dto.ts`, el campo `configuracion?: Record<string, string>`;
-  visto el 2026-10-08 por el mismo revisor, **leído, no medido**). Solo tiene `@IsObject()`: los
-  valores internos pueden ser números, objetos o strings de cualquier largo, y se guardan cifrados
-  con `cifrarJson`. Es una ruta de admin. **Medir:** qué pasa con un valor no-string o enorme, al
-  guardar y cuando el cobro lee esa configuración. **Arreglo probable:** validar que los valores sean
-  strings con tope, o un DTO por `modoIntegracion` (MALL: `commerceCodeHijo`; INDIVIDUAL: las
-  credenciales del proveedor).
-
 - [ ] **Medir la ventana de consulta de Webpay Plus con un pago de más de 7 días** (queda del
   cierre de "Probar en el sandbox de Transbank el saldo…", 2026-10-04, [`resueltos.md`](resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04)).
   La documentación de Webpay Plus dice que el estado se consulta hasta 7 días; la referencia, "en
@@ -138,6 +117,45 @@ destapa una decisión que no es mía).
   `RUN_TRANSBANK_SANDBOX=1 TBK_API_KEY_SECRET=<el de integración del seed> TBK_WEBPAY_MALL=597055555535 node scripts/qa/transbank-saldo-sandbox.mjs --reconsultar 01abe0ccb73419df9944e395fa2396743e230bb3eeb7f1cb003d1285f27209bf`.
   Si sigue contestando 200 con el detalle, la ventana no aplica a la consulta y el ADR se corrige;
   si no, el ADR ya lo dice.
+
+- [ ] **La configuración de la pasarela puede quedar incompleta para su modo, y el cobro da 500**
+  (backend, `pasarela/dto/create-tenant-pasarela.dto.ts` y `tenant-pasarela.service.ts`
+  `crear`/`actualizar`; queda del cierre de "la configuración de la pasarela no se valida",
+  2026-10-08, [`resueltos.md`](resueltos.md)). `ConfiguracionPasarelaDto` valida tipo y tope de cada
+  clave, pero las tres son opcionales. **Medido ese día:** `configuracion: {}` en MALL da 200 y el
+  cobro siguiente da **500** (Transbank: *"details[0].commerce_code is required!"*, que sale como
+  `ProviderComunicacionError` sin mapear desde `PagosRedirectService.iniciar`). **Leído, no medido:**
+  también pasan MALL sin `commerceCodeHijo`, INDIVIDUAL con una o dos de sus tres claves, y un
+  `PATCH` que cambia `modoIntegracion` sin mandar credenciales nuevas, que deja guardada la config
+  del otro modo (de MALL a INDIVIDUAL queda solo `commerceCodeHijo`). **Medir:** los tres casos por
+  HTTP y qué contesta el cobro en cada uno. **Arreglo probable:** validar la completitud con el modo
+  efectivo (`dto.modoIntegracion ?? tp.modoIntegracion`) en el service. MALL exige `commerceCodeHijo`
+  e INDIVIDUAL las tres. Hay que decidir qué pasa al cambiar de modo sin credenciales: un 400, o
+  limpiar la config. La pantalla ya exige las tres en INDIVIDUAL y el código hijo en MALL, pero solo
+  cuando se tocó la credencial.
+
+- [ ] **El `urlCallback` de un pago por API es un SSRF ciego desde el backend** (backend,
+  `pasarela/dto/create-pago.dto.ts` (`urlCallback`, solo `@IsUrl({ require_tld: false })`) y
+  `callback-dispatcher.service.ts` (el `fetch` del callback HTTP); visto el 2026-10-08 por el
+  api-security-reviewer del frente "configuración de la pasarela", **leído, no medido**). Quien tenga
+  una API key de un tenant crea un pago con `urlCallback` a `http://169.254.169.254/…`, a `localhost` o
+  a un host interno del compose, y cuando la orden queda `pagada` el backend le hace un `POST
+  {ordenId}`. En el ambiente `pruebas` se llega a `pagada` con las tarjetas de prueba de Transbank. Es
+  ciego (el body es fijo y la respuesta no se refleja; solo el `res.ok` concilia la orden), pero el
+  `fetch` no tiene timeout y sigue redirects. Las credenciales de la plataforma no viajan.
+  **Medir:** con un receptor local y un pago aprobado con el proveedor falso, mandar `urlCallback` a
+  `127.0.0.1`, ver si sale el POST, y ver qué pasa con un host que no contesta y con un 302.
+  **Arreglo probable:** rechazar los rangos privados, loopback y link-local del host resuelto, más
+  `redirect: 'manual'` y `AbortSignal.timeout`. Un callback a `localhost` en desarrollo es legítimo
+  hoy: cómo distinguirlo es parte del diseño.
+
+- [ ] **Cualquiera que conozca el código de una orden la puede marcar `fallida`** (backend,
+  `pagos-redirect.service.ts`, `abortarRetorno` con solo `TBK_ORDEN_COMPRA`; visto el 2026-10-08 por el
+  mismo revisor, **leído, no medido**). El retorno de timeout de Transbank trae solo
+  `TBK_ORDEN_COMPRA`, y con eso la orden abierta pasa a `fallida`, sin prueba de que la mande
+  Transbank. El código (`W` + timestamp + 32 bits aleatorios) lo ve el comprador. **Medir:** si un
+  comprador que vuelve a pagar después de eso queda trabado, o si la verificación contra Transbank
+  (`POST …/verificar`) la recupera. Si la recupera, va a Vigilancia.
 
 ## 3. Ya decidido, falta construir
 
@@ -482,6 +500,26 @@ prohíbe.
   **La pregunta para el owner:** ¿los avisos se mueven de lugar (abajo a la derecha, o arriba al
   centro) para toda la app, se mueven solo en el salón, o se deja como está porque se van solos en
   5 s?
+
+- [ ] **En una pasarela modo Mall, el código de comercio hijo lo escribe el propio local y nadie
+  verifica que sea suyo** (producto + proceso de alta; anotado el 2026-10-08 al cerrar "la
+  configuración de la pasarela no se valida", [`resueltos.md`](resueltos.md)). En Configuración ▸
+  Pasarelas, el admin del local elige "Mall (comercio de la plataforma)" y tipea el "Código de
+  comercio hijo". La plataforma lo guarda sin comprobar que Transbank se lo asignó a **ese** local.
+  **La escena:** la Panadería Sur copia mal el código y pone el de la Cafetería Norte, otro local del
+  mismo mall. Durante el fin de semana vende $500.000 por la tienda online: Transbank le cobra al
+  comprador, pero la plata se liquida a la Cafetería Norte. La Panadería ve las ventas pagadas y no
+  ve el dinero, y recuperarlo es un trámite entre los dos locales y la plataforma. Un reembolso
+  desde la Panadería sale contra el comercio de la Cafetería. Lo mismo, a propósito, es un local
+  que se lleva las ventas de otro.
+  **La pregunta para el owner:** ¿quién pone el código hijo?
+  1. **(Recomendada) Lo asigna la plataforma al dar de alta el local en el mall, y el local no lo
+     puede escribir.** Costo: el alta de Webpay Mall pasa por la plataforma (superadmin), no es
+     autoservicio.
+  2. **Lo escribe el local, pero no cobra hasta que la plataforma lo aprueba.** Costo: un paso de
+     aprobación y alguien que lo revise contra lo que dio Transbank.
+  3. **Se deja como está**, confiando en el local. Costo: el error de la escena solo se nota cuando
+     falta la plata.
 
 ## 5. Carreras de concurrencia
 

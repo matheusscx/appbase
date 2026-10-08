@@ -1,7 +1,10 @@
 import {
+  type ArgumentMetadata,
   BadRequestException,
   Controller,
   Get,
+  Injectable,
+  type PipeTransform,
   Post,
   Query,
   Body,
@@ -11,6 +14,34 @@ import { ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { InscripcionesService } from '../services/inscripciones.service';
 import { PagosRedirectService } from '../services/pagos-redirect.service';
+
+/**
+ * Un campo del retorno de Transbank: texto o ausente. Los campos se leen sueltos
+ * (`@Body('x')`/`@Query('x')`) y no con un DTO porque Transbank manda campos que
+ * no controlamos (`TBK_ID_SESION`, entre otros) y el pipe global los rechazaría
+ * (`validacion-global.e2e-spec.ts`); un parámetro con nombre no pasa por
+ * class-validator, así que el tipo lo valida este pipe.
+ *
+ * Es validación de borde, no un hueco (medido el 2026-10-08): un objeto o un
+ * array llegaba al `WHERE` por token u orden de compra, `pg` lo serializaba a
+ * texto y no matcheaba nada, así que contestaba el 404 de un token desconocido
+ * sin escribir. Ahora es 400 en JSON, como el retorno sin token: la basura no
+ * redirige. El tope deja margen sobre lo que manda Transbank (token de 64,
+ * orden de compra de hasta 26).
+ */
+@Injectable()
+class CampoDeRetornoPipe implements PipeTransform<unknown, string | undefined> {
+  static readonly MAX = 255;
+
+  transform(valor: unknown, { data }: ArgumentMetadata): string | undefined {
+    if (valor === undefined) return undefined;
+    if (typeof valor !== 'string' || valor.length > CampoDeRetornoPipe.MAX)
+      throw new BadRequestException(
+        `${data} debe ser un texto de hasta ${CampoDeRetornoPipe.MAX} caracteres`,
+      );
+    return valor;
+  }
+}
 
 /**
  * Retornos de Webpay. Públicos: la credencial es el token de un solo uso emitido
@@ -64,7 +95,7 @@ export class PasarelaRetornoController {
 
   @Get('inscripcion')
   retornoInscripcionGet(
-    @Query('TBK_TOKEN') token: string | undefined,
+    @Query('TBK_TOKEN', CampoDeRetornoPipe) token: string | undefined,
     @Res() res: Response,
   ) {
     return this.procesarInscripcion(token, res);
@@ -72,7 +103,7 @@ export class PasarelaRetornoController {
 
   @Post('inscripcion')
   retornoInscripcionPost(
-    @Body('TBK_TOKEN') token: string | undefined,
+    @Body('TBK_TOKEN', CampoDeRetornoPipe) token: string | undefined,
     @Res() res: Response,
   ) {
     return this.procesarInscripcion(token, res);
@@ -80,9 +111,10 @@ export class PasarelaRetornoController {
 
   @Get('pago')
   retornoPagoGet(
-    @Query('token_ws') tokenWs: string | undefined,
-    @Query('TBK_TOKEN') tbkToken: string | undefined,
-    @Query('TBK_ORDEN_COMPRA') ordenCompra: string | undefined,
+    @Query('token_ws', CampoDeRetornoPipe) tokenWs: string | undefined,
+    @Query('TBK_TOKEN', CampoDeRetornoPipe) tbkToken: string | undefined,
+    @Query('TBK_ORDEN_COMPRA', CampoDeRetornoPipe)
+    ordenCompra: string | undefined,
     @Res() res: Response,
   ) {
     return this.procesarPago({ tokenWs, tbkToken, ordenCompra }, res);
@@ -90,9 +122,10 @@ export class PasarelaRetornoController {
 
   @Post('pago')
   retornoPagoPost(
-    @Body('token_ws') tokenWs: string | undefined,
-    @Body('TBK_TOKEN') tbkToken: string | undefined,
-    @Body('TBK_ORDEN_COMPRA') ordenCompra: string | undefined,
+    @Body('token_ws', CampoDeRetornoPipe) tokenWs: string | undefined,
+    @Body('TBK_TOKEN', CampoDeRetornoPipe) tbkToken: string | undefined,
+    @Body('TBK_ORDEN_COMPRA', CampoDeRetornoPipe)
+    ordenCompra: string | undefined,
     @Res() res: Response,
   ) {
     return this.procesarPago({ tokenWs, tbkToken, ordenCompra }, res);

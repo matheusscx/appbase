@@ -190,7 +190,11 @@ la pantalla manda tiene que estar declarado**, y un campo que se retira del cont
 **borrar** del DTO: el pipe ya lo rechaza. Se deja con un validador que siempre rechaza solo si
 el 400 tiene que decir adónde ir (`UpdateItemDto.costo` y `.stock`). Lo que el
 flag no mira: los parámetros con nombre (`@Body('x')`, `@Query('x')`, sin DTO) y el interior
-de un `@IsObject()` libre.
+de un `@IsObject()` libre. Por eso los dos se cubren aparte (2026-10-08). Un parámetro con nombre que no puede
+pasar por DTO lleva un pipe de parámetro que valide su tipo (`CampoDeRetornoPipe` de los retornos
+de Webpay: Transbank manda campos que no controlamos, y con un DTO esos campos rebotarían). Un objeto
+con claves conocidas va con un DTO anidado y no con un `@IsObject()` libre: el libre de la
+configuración de la pasarela dejaba guardar un `baseUrl` que se llevaba el cobro a otro host.
 
 > **Contrato con el frontend:** `@IsNumberString` exige un **string** (`"10.50"`), no
 > un `number`. El cliente lo maneja string de punta a punta con `UInput`

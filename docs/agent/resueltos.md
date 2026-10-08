@@ -23,6 +23,123 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Pasarela: el `baseUrl` de la config del tenant se llevaba el secreto del mall; el retorno valida el tipo de sus campos (cerrada 2026-10-08)
+
+Salen de [`pendientes.md`](pendientes.md) § 2. Plan:
+[`2026-10-08-pasarela-retorno-y-configuracion.md`](../superpowers/plans/2026-10-08-pasarela-retorno-y-configuracion.md).
+Las decisiones técnicas (DTO anidado con tope de 255, defensa en el resolver, pipe de parámetro
+en el retorno) las tomó la orquestadora el 2026-10-08. La regla viva está en
+[`features/pasarela-pagos.md`](../features/pasarela-pagos.md) (Retornos y Seguridad) y en
+[`patterns/backend.md`](../patterns/backend.md) § 3.
+
+### Las entradas que cierra, como estaban en `pendientes.md` § 2
+
+- [ ] **El retorno de Webpay recibe el token sin DTO, en una ruta sin guard** (backend,
+  `pasarela/controllers/pasarela-retorno.controller.ts`; visto el 2026-10-08 por el
+  api-security-reviewer del barrido de `[[]]`, **leído, no medido**). `GET` y `POST` de
+  `pasarela/retorno/inscripcion` y `pasarela/retorno/pago` toman `TBK_TOKEN`, `token_ws` y
+  `TBK_ORDEN_COMPRA` con `@Query('…')`/`@Body('…')` sueltos (líneas 67, 75, 83-85 y 93-95), sin
+  DTO, así que el `ValidationPipe` no los mira: un objeto o un array llega tal cual. En el pago
+  termina en el `where`/`update` por `tokenProveedor` de `pagos-redirect.service.ts:158` y `:162`.
+  **Medir:** mandar `token_ws` como objeto y como array (por `POST` form y JSON, y por `GET` con
+  `token_ws[a]=1`) y ver qué contesta y si algo se escribe. **Arreglo probable:** un DTO por ruta con
+  `@IsOptional() @IsString()` y un tope de largo, como el resto de los bordes. Es la ruta pública a
+  la que vuelve el comprador: el arreglo no puede cambiar qué pasa con un token válido.
+
+- [ ] **Los valores de `configuracion` de la pasarela del tenant no se validan** (backend,
+  `pasarela/dto/create-tenant-pasarela.dto.ts`, el campo `configuracion?: Record<string, string>`;
+  visto el 2026-10-08 por el mismo revisor, **leído, no medido**). Solo tiene `@IsObject()`: los
+  valores internos pueden ser números, objetos o strings de cualquier largo, y se guardan cifrados
+  con `cifrarJson`. Es una ruta de admin. **Medir:** qué pasa con un valor no-string o enorme, al
+  guardar y cuando el cobro lee esa configuración. **Arreglo probable:** validar que los valores sean
+  strings con tope, o un DTO por `modoIntegracion` (MALL: `commerceCodeHijo`; INDIVIDUAL: las
+  credenciales del proveedor).
+
+### Qué se midió
+
+Por HTTP, contra el backend del worktree (`node dist/main`, Express 5.2.1, base nueva, en `05d58906`).
+
+**Retorno: no se confirmó un hueco.** Fueron 24 casos: `token_ws`, `TBK_TOKEN` y `TBK_ORDEN_COMPRA`
+como objeto, objeto vacío, array, número y booleano, por GET, POST form y POST JSON, en pago y en
+inscripción, con tres órdenes `en_proceso` al lado. **No se escribió nada en ningún caso.** El objeto
+o el array sí llegan al `WHERE`/`UPDATE`, pero `pg` los serializa a texto. El log de Postgres muestra
+`token_proveedor = '{"a":1}'`, `'{"x","y"}'` y `codigo_orden = '{}'`, que no matchean ninguna
+orden: la respuesta fue el mismo 404 *"Orden no encontrada…"* de un token desconocido. Por GET,
+`token_ws[a]=1` no arma un objeto (el query parser de Express 5 es `simple`): llega la clave literal
+y la respuesta es 400 *"Retorno de pago sin token"*. Repetir el parámetro sí arma un array, que da
+404. Lo que faltaba era la **validación de borde**, no había un hueco. El e2e de los flujos de
+retorno era uno solo: el GET con `token_ws` de la tienda.
+
+**Configuración: se confirmó, y era peor que lo que decía la entrada.** `CredencialesService.resolver`
+armaba la credencial de MALL como `{ baseUrl, ...plataforma, ...tenant }`. Con
+`PATCH /pasarela/admin/config/:id` y
+`{"commerceCodeHijo":"597055555536","baseUrl":"http://127.0.0.1:3990"}` la respuesta fue 200, y el
+siguiente `POST /pasarela/api/pagos` le mandó a ese receptor local **el `Tbk-Api-Key-Id` y el
+`Tbk-Api-Key-Secret` del mall de la plataforma**. Cualquier usuario con `Pasarelas:Actualizar` se
+llevaba el secreto con el que cobran todos los locales del mall. En INDIVIDUAL el mismo `baseUrl` era
+un SSRF desde el backend. Además, todo esto se guardaba con 200:
+- un `commerceCodeHijo` número, objeto o `null` viajaba tal cual en el body a Transbank;
+- un `apiKeySecret` objeto salía en el header como `"[object Object]"`;
+- un `apiKeySecret` de 90 kB hacía que el cobro diera 500;
+- `{}` también daba 500 al cobrar (Transbank: *"details[0].commerce_code is required!"*). **Esto no se cerró acá**:
+  ver más abajo.
+
+### Qué se hizo
+
+- **Retorno:** `CampoDeRetornoPipe` en `pasarela-retorno.controller.ts`, en los 8 parámetros: si el
+  valor no es texto o pasa de 255 caracteres, 400 en JSON, igual que el retorno sin token (la basura
+  no redirige). Es un pipe de parámetro y no un `@Body() dto` porque Transbank manda campos que no
+  controlamos y el pipe global los rechazaría (`validacion-global.e2e-spec.ts`). Un token válido, o
+  uno desconocido, sigue el mismo camino que antes.
+- **Configuración:** `ConfiguracionPasarelaDto` anidado (`@IsObject @ValidateNested @Type`) con las
+  tres claves que leen los providers. Cada una va con `@ValidateIf(v !== undefined) @IsString`, el
+  mensaje en español de `@Matches(/\S/)` y `@MaxLength(255)`. Es `@ValidateIf` y no `@IsOptional`
+  porque el e2e mostró que `@IsOptional` dejaba pasar `commerceCodeHijo: null`. Otra clave es 400
+  (`forbidNonWhitelisted`). Lo heredan el POST y el PATCH, que son las únicas puertas de escritura de
+  `tenant_pasarela.configuracion` (la otra es el seed; no hay ruta de superadmin).
+- **Resolver:** `baseUrl` sale siempre del ambiente, y en MALL del tenant pasa solo
+  `commerceCodeHijo`. Con lo que manda la pantalla, la credencial es idéntica a la de antes. Cubre lo
+  que ya estuviera guardado y cualquier otra puerta de escritura.
+- **Pantalla:** `pasarelas.vue` no manda un código hijo vacío o de solo espacios en MALL (antes lo
+  mandaba y el cobro fallaba en Transbank), y en INDIVIDUAL exige las 3 con `.trim()`. Es el gemelo
+  del `/\S/` del backend.
+- **Lo que no se cerró:** que la configuración esté completa para su modo. Las tres claves son
+  opcionales, así que `{}`, MALL sin `commerceCodeHijo` o INDIVIDUAL con una sola clave siguen dando
+  200, y `{}` sigue dando 500 al cobrar. Exigir las claves según el modo es otra forma: en el PATCH
+  el modo puede no venir, y un cambio de modo sin credenciales nuevas deja una config del otro modo.
+  Va como entrada propia en `pendientes.md` § 2 (orquestadora, 2026-10-08). El hueco de seguridad,
+  en cambio, quedó cerrado sin eso.
+- Queda como pregunta del owner, en `pendientes.md` § 4, que el código hijo de MALL lo declara el
+  propio local y nadie verifica que sea suyo.
+
+### Qué lo fija
+
+Cada mutante revierte al código anterior:
+
+- `backend/test/pasarela-retorno.e2e-spec.ts` (32 casos): los desenlaces reales en los tres
+  formatos (aprobado, doble retorno, abortado, abortado con `token_ws`, timeout e inscripción), la
+  basura de cada parámetro por `@Body` y por `@Query`, y el control.
+  - Mutante, el controller de `05d58906` → 13 rojos, todos con el 404 medido.
+  - Mutante, sacarle el pipe a uno solo de los parámetros de GET (`TBK_TOKEN` de inscripción y de
+    pago, `TBK_ORDEN_COMPRA`) → 1 rojo cada uno. Esos casos los sumó la revisión independiente.
+- `backend/test/pasarela-configuracion.e2e-spec.ts` (24 casos): POST y PATCH inválidos → 400 sin
+  escribir; el vacío llega en español; los controles de la pantalla (MALL, INDIVIDUAL con las 3, `null`
+  limpia) → 2xx; un `baseUrl` ya guardado en MALL e INDIVIDUAL no saca el cobro del host de la
+  plataforma, con sus credenciales en el header y el `commerce_code` del tenant en el body. `fetch`
+  se intercepta: el provider es el real y no sale nada a la red.
+  - Mutante, el DTO de antes → 17 rojos: 8 en POST, 8 en PATCH (el array ya lo frenaba
+    `@IsObject`) y el del mensaje en español.
+  - Mutante, el resolver de antes → 2 rojos, los del cobro.
+- `credenciales.service.spec.ts`: con datos válidos la credencial de MALL y la de INDIVIDUAL es la de
+  siempre (siguen verdes con el resolver de antes); con un `baseUrl` y claves de la plataforma en la
+  config del tenant, no las pisa. Mutante, el resolver de antes → 3 rojos.
+- `frontend/app/pages/configuracion/pasarelas.nuxt.spec.ts` (5 casos): un código o un secreto de
+  solo espacios no se manda, en MALL y en cada una de las tres de INDIVIDUAL.
+  - Mutante, `pasarelas.vue` de antes → 4 rojos, y el control sigue verde.
+  - Mutante, sacarle el `.trim()` a una sola de las tres → 1 rojo cada uno.
+
+---
+
 ## Un array de objetos con `@ValidateNested({ each: true })` dejaba pasar `[[]]`: barrido (cerrada 2026-10-08)
 
 Sale de [`pendientes.md`](pendientes.md) § 1. Plan:

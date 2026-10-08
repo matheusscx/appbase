@@ -135,14 +135,19 @@ async function guardarConfig() {
   if (!editingId.value) payload.pasarelaId = form.value.pasarelaId
   // Write-only: la configuración solo viaja si el usuario la tipeó. El backend
   // reemplaza el JSON completo (no mergea), así que en modo individual exigimos
-  // las 3 credenciales juntas para no borrar las no reingresadas.
+  // las 3 credenciales juntas para no borrar las no reingresadas. Vacío es
+  // también solo espacios: gemelo del `/\S/` de `ConfiguracionPasarelaDto`.
   if (tocoCredenciales.value) {
     if (form.value.modoIntegracion === 'mall') {
+      if (!form.value.commerceCodeHijo.trim()) {
+        toast.add({ title: 'El código de comercio hijo no puede quedar vacío', color: 'warning' })
+        return
+      }
       payload.configuracion = { commerceCodeHijo: form.value.commerceCodeHijo }
     }
     else {
       const cred = form.value.credencialesIndividual
-      if (!cred.mallCommerceCode || !cred.apiKeySecret || !cred.commerceCodeHijo) {
+      if (!cred.mallCommerceCode.trim() || !cred.apiKeySecret.trim() || !cred.commerceCodeHijo.trim()) {
         toast.add({
           title: 'En modo individual debes reingresar las 3 credenciales juntas',
           color: 'warning',
