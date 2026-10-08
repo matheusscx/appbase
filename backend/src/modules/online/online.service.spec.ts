@@ -522,6 +522,21 @@ describe('OnlineService', () => {
     });
   });
 
+  // Un monto que no cabe en su columna lo rechaza `calcular` (2026-10-08), antes
+  // de iniciar la orden: sin esto el cliente pagaría en Webpay y el callback no
+  // podría guardar la venta.
+  it('con Webpay: si el motor rechaza el monto, no inicia la orden', async () => {
+    tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+    calculo.calcular.mockRejectedValueOnce(
+      new BadRequestException('el sistema no puede guardar montos'),
+    );
+
+    await expect(
+      service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dto),
+    ).rejects.toThrow('el sistema no puede guardar montos');
+    expect(pagosRedirect.iniciar).not.toHaveBeenCalled();
+  });
+
   /**
    * Sobre el umbral de la Res. Ex. SII 44/2025 la boleta lleva nombre y RUT de
    * quien paga, y la tienda no los pide. El callback de Webpay crea la venta con

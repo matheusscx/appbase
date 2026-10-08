@@ -74,6 +74,19 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
+- [ ] **La previsualización no muestra el motivo de un 400 del motor** (frontend,
+  `composables/useCalculoPrecios.ts` → `useResultadoCalculado`; visto el 2026-10-08 por el frente del
+  guard del motor, que lo dejó afuera por decisión de la orquestadora). `ejecutar` atrapa el error de
+  `/calculo-precios/calcular` con un `catch` vacío, así que el mensaje del 400 se pierde. Al tocar
+  Cobrar o Pagar, las tres pantallas —POS (`pages/ventas/pos.vue`, `abrirCobro`), tienda
+  (`pages/tienda/index.vue`, `irAPagar`) y salones (`pages/salones/index.vue`, el cobro de la
+  cuenta)— muestran *"No se pudo calcular el total. Intentá de nuevo."*, y **el "intentá de nuevo"
+  miente**: reintentar no lo arregla, y quien cobra no sabe qué revisar. Vale para **cualquier** 400
+  del motor (el tope de unidades, el monto que no cabe, una regla que no existe), no solo para uno.
+  **Arreglo probable:** guardar el error en `useResultadoCalculado` y que los tres toasts usen
+  `apiErrorMsg`. La orquestadora lo toma en la tanda siguiente, junto con los avisos, que tocan la
+  misma capa.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -169,6 +182,16 @@ destapa una decisión que no es mía).
   comprador que vuelve a pagar después de eso queda trabado, o si la verificación contra Transbank
   (`POST …/verificar`) la recupera. Si la recupera, va a Vigilancia.
 
+- [ ] **`pasarela_orden.monto` es `NUMERIC(18,6)`: una orden de más de 10^12 no cabe** — ⬇️
+  **prioridad baja** (owner, 2026-10-08: la pasarela va después del resto de los arreglos) (backend,
+  `pasarela/entities/pasarela-orden.entity.ts`; visto el 2026-10-08 por el frente del guard del motor,
+  **leído, no medido**). El guard de `calcular` deja pasar totales de hasta 10^14, que es el techo
+  del libro de ventas; la orden de pasarela tiene dos decimales más y por eso dos enteros menos. Hoy
+  no se alcanza en Chile —la tienda y la suscripción rechazan antes todo total sobre el umbral SII
+  (`exigirCompraOnlineBajoUmbral`)—, pero un pago por API (`POST /pasarela/api/pagos`) lleva su
+  propio monto, y lo que se le valida es el formato (DTO) y la escala (service), no el tamaño. **Medir:** si ese
+  camino llega al `INSERT` con más de 10^12 y da 500.
+
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
@@ -180,32 +203,33 @@ oficial, `cashRounding`, el conteo por denominación, el envío diario del resum
 la acumulación de descuentos y compras— y el renombre de `moneda.decimales` se mudaron a
 [`desarrollo-nuevo.md`](desarrollo-nuevo.md) el 2026-10-06. Acá quedan las correcciones.
 
-- [ ] **Un monto calculado que no cabe en `NUMERIC(18,4)` da 500 al guardar, y una venta aceptada
-  deja la caja sin poder cerrarse** (backend, `CalculoPreciosService.calcular`; medido por HTTP el
-  2026-10-08 por el frente de los DTOs sin cota, que no lo tocó). Los montos que carga el admin
-  (`precioExtra` de un grupo, `precioBase` de un ítem) solo los acota su columna, `numeric(18,4)`
-  (< 10^14). El motor los multiplica por unidades y cantidad, y el resultado no cabe en la columna de
-  la venta. Medido en CLP, con caja abierta y customer con RUT:
-  - `precioExtra` 99.999.999.999.999 en una opción de grupo: `/calcular` → 201 con total
-    100.000.000.000.999, y `POST /ventas` → **500** ("numeric field overflow") **con 1 unidad**,
-    porque se suma al precio base. Con `precioExtra` 1.000.000, 10^7 unidades cortan en "Stock
-    insuficiente" y 10^8 dan 500.
-  - `precioBase` 99.999.999.999.999: cantidad 1 → 201 (la venta se guarda); cantidad 2 → 500.
-  - **Después de esa venta de cantidad 1 en efectivo, `POST /caja/:id/conteo` da 500** (22003): el
-    saldo esperado (saldo inicial + la venta) supera 10^14. El cajón queda ocupado y la caja no se
-    puede cerrar por la API.
-  - `/calcular` nunca falla: devuelve totales que después no se pueden guardar.
+- [ ] **El conteo de una caja da 500 cuando el saldo esperado no cabe en `NUMERIC(18,4)`, y el
+  cajón queda ocupado** (backend, `CajaService.calcularEsperadoEfectivo` → `enviarConteo`; medido por
+  HTTP el 2026-10-08 por el frente del guard del motor, que **no** lo cierra: ver
+  [`resueltos.md`](resueltos.md#un-monto-calculado-que-no-cabe-en-numeric184-es-400-no-500-cerrada-2026-10-08)).
+  El esperado es `saldo inicial + entradas en efectivo − salidas`, y lo que desborda es la **suma**:
+  cada movimiento cabe en su columna. `caja_arqueo_medio.esperado` y `cajas.saldo_final` son
+  `NUMERIC(18,4)`. Dos formas medidas:
+  - **Sin ninguna venta:** abrir con `saldoInicial` 99.999.999.999.999 (el DTO solo exige que no sea
+    negativo) y registrar un movimiento manual de entrada de $1 → `POST /caja/:id/conteo` da **500**.
+  - **Con el guard del motor puesto:** dos ventas en efectivo que caben cada una (6×10^13 + 6×10^13)
+    suman más que el techo y el conteo da 500 igual.
 
-  ✅ **Decidido por la Sesión de esfuerzo máximo (2026-10-08, a pedido del frente de los DTOs sin
-  cota):** no se inventa un tope de precio por moneda. Va un **guard técnico en el service**: si un
-  monto calculado no cabe en `numeric(18,4)`, 400 "el monto no cabe", antes de persistir, **en un
-  solo lugar, después de calcular los totales**. Cierra la clase entera y no campo por campo, y por
-  conducta solo rechaza lo que hoy da 500. Los topes de cantidad (el `max` de un grupo en 99, las
-  `unidades` de un extra en 99) bajan el producto, pero no lo cierran: con un `precioExtra` cerca del
-  tope de la columna desborda con una unidad. **Cuándo:** toca `CalculoPreciosService.calcular`, el
-  mismo lugar donde el frente de personalización del motor puso la suma por venta; la orquestadora
-  lo programa cuando ese frente integre. Falta medir si el conteo de caja necesita su propio guard o
-  si alcanza con que la venta no entre.
+  **Destrabe, hoy:** una salida manual que baje el esperado bajo el techo; después el conteo cierra.
+  **Arreglo probable (a decidir por el owner: es cuadratura de plata):** un guard **al entrar la
+  plata** —el movimiento manual, el pago en efectivo de una venta o un abono— que rechace con 400 lo
+  que dejaría el esperado sin caber, reusando `cabeEnColumnaDePlata`
+  (`common/utils/monto-persistible.util.ts`). En el conteo no sirve: el 400 deja la caja igual de
+  trabada.
+
+- [ ] **Pedir un plato cuyo precio no cabe en `NUMERIC(18,4)` da 500 en la línea de cuenta**
+  (backend, `SalonesService.agregarLinea`; medido por HTTP el 2026-10-08 por el frente del guard del
+  motor, que no lo toca porque la línea no pasa por `calcular`). Una receta en CLP con `precioBase`
+  99.999.999.999.999 y un extra de $1: `POST /cuentas/:id/lineas` → **500**. El `INSERT` de
+  `cuenta_lineas` lleva `precio_unitario` y `precio_unitario_origen` en 100.000.000.000.000. Sin
+  extras, la misma receta de a dos se pide bien (cada unidad cabe) y es el cierre el que la rechaza,
+  ya con 400 (el guard del motor). **Arreglo probable:** el mismo chequeo antes del `INSERT` de la
+  línea, reusando `cabeEnColumnaDePlata`.
 
 - [ ] **Lo que quedó del frente del modo ciego, ya cerrado** (backend + producto; la entrada
   madre —seis fugas, el eje mío/todos y el rastro de los oráculos— se mudó entera a

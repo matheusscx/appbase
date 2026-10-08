@@ -23,6 +23,128 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Un monto calculado que no cabe en `NUMERIC(18,4)` es 400, no 500 (cerrada 2026-10-08)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Plan:
+[`2026-10-08-monto-que-no-cabe.md`](../superpowers/plans/2026-10-08-monto-que-no-cabe.md); spec:
+[`2026-10-08-monto-que-no-cabe-design.md`](../superpowers/specs/2026-10-08-monto-que-no-cabe-design.md).
+
+⚠️ **No cierra la caja.** El título viejo traía *"y una venta aceptada deja la caja sin poder
+cerrarse"*, y esa mitad sigue abierta: el conteo da 500 **sin ninguna venta**, y con el guard
+puesto, con dos ventas que caben de a una. Quedó como entrada propia en
+[`pendientes.md`](pendientes.md) § 3.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **Un monto calculado que no cabe en `NUMERIC(18,4)` da 500 al guardar, y una venta aceptada
+  deja la caja sin poder cerrarse** (backend, `CalculoPreciosService.calcular`; medido por HTTP el
+  2026-10-08 por el frente de los DTOs sin cota, que no lo tocó). Los montos que carga el admin
+  (`precioExtra` de un grupo, `precioBase` de un ítem) solo los acota su columna, `numeric(18,4)`
+  (< 10^14). El motor los multiplica por unidades y cantidad, y el resultado no cabe en la columna de
+  la venta. Medido en CLP, con caja abierta y customer con RUT:
+  - `precioExtra` 99.999.999.999.999 en una opción de grupo: `/calcular` → 201 con total
+    100.000.000.000.999, y `POST /ventas` → **500** ("numeric field overflow") **con 1 unidad**,
+    porque se suma al precio base. Con `precioExtra` 1.000.000, 10^7 unidades cortan en "Stock
+    insuficiente" y 10^8 dan 500.
+  - `precioBase` 99.999.999.999.999: cantidad 1 → 201 (la venta se guarda); cantidad 2 → 500.
+  - **Después de esa venta de cantidad 1 en efectivo, `POST /caja/:id/conteo` da 500** (22003): el
+    saldo esperado (saldo inicial + la venta) supera 10^14. El cajón queda ocupado y la caja no se
+    puede cerrar por la API.
+  - `/calcular` nunca falla: devuelve totales que después no se pueden guardar.
+
+  ✅ **Decidido por la Sesión de esfuerzo máximo (2026-10-08, a pedido del frente de los DTOs sin
+  cota):** no se inventa un tope de precio por moneda. Va un **guard técnico en el service**: si un
+  monto calculado no cabe en `numeric(18,4)`, 400 "el monto no cabe", antes de persistir, **en un
+  solo lugar, después de calcular los totales**. Cierra la clase entera y no campo por campo, y por
+  conducta solo rechaza lo que hoy da 500. Los topes de cantidad (el `max` de un grupo en 99, las
+  `unidades` de un extra en 99) bajan el producto, pero no lo cierran: con un `precioExtra` cerca del
+  tope de la columna desborda con una unidad. **Cuándo:** toca `CalculoPreciosService.calcular`, el
+  mismo lugar donde el frente de personalización del motor puso la suma por venta; la orquestadora
+  lo programa cuando ese frente integre. Falta medir si el conteo de caja necesita su propio guard o
+  si alcanza con que la venta no entre.
+
+  ➕ *Agregado al cerrar:* **el owner lo confirmó el 2026-10-08** (*"solo el guard técnico,
+  lanzalo"*, por la orquestadora) y **decidió también que no hay tope de negocio**: el guard
+  rechaza solo lo que Postgres rechazaría.
+
+### Qué se midió
+
+Por HTTP, con la base nueva y sin el guard:
+
+- Servicio en CLP de `precioBase` 99.999.999.999.999: `/calcular` → 201 con `totalFinal`
+  118.999.999.999.999 (el IVA lo pasa del techo); `POST /ventas` → 500.
+- **Una mitad que la entrada no tenía: el precio en la moneda del ítem.** USD con `valorDelDia`
+  0,5 (la API acepta cualquier tasa) y una receta en USD de 99.999.999.999.999 + un extra de 1:
+  `/calcular` → 201 con total 50.000.000.000.000, `POST /ventas` → 500. El `INSERT` de
+  `venta_detalles` muestra que lo único que no cabe es `precio_unitario_origen`
+  (100.000.000.000.000,0000), que arma `ventas.service` antes de llamar al motor: el motor no lo
+  veía.
+- **La caja:** el conteo da 500 con `saldoInicial` 99.999.999.999.999 y un movimiento manual de
+  $1, sin ninguna venta. Lo que desborda es la suma, no un movimiento.
+- **La línea de cuenta:** `POST /cuentas/:id/lineas` da 500 con una receta al tope + un extra, al
+  pedir, sin pasar por el motor.
+- **Las puertas online:** `online/pagar` (demo y Webpay) y `POST /suscripciones` ya rechazaban con
+  400 todo total sobre el umbral SII (`exigirCompraOnlineBajoUmbral`) antes de cobrar, así que ahí
+  el desborde no se alcanzaba en Chile. `POST /ventas` con `canal: 'online'` —el paso que persiste de
+  la tienda demo— sí llegaba a 500, porque manda `customer`.
+
+### Qué se hizo
+
+- **`common/utils/monto-persistible.util.ts`:** `PRECISION_PERSISTIDA`/`ESCALA_PERSISTIDA` (18, 4;
+  la escala se mudó de `calculo-precios.service.ts`), `cabeEnColumnaDePlata` —redondea a 4 decimales
+  con `ROUND_HALF_UP`, como Postgres, y exige `|x| < 10^14`— y el formateo del monto sin pasar por
+  `number`.
+- **El guard, en un solo lugar:** `CalculoPreciosService.assertCabeEnLaVenta`, al final de
+  `calcular`. Revisa cada columna de plata que la venta escribe desde el resultado (la tabla vive en
+  [`motor-calculo-precios.md`](../features/motor-calculo-precios.md) § "Un monto que no cabe en su
+  columna") y el origen de cada línea. Solo mira: ningún cálculo cambió. Incluye
+  `base_ventas_sin_impuestos` con la misma resta que `ventas.service` (sugerencia de la revisión
+  independiente): hoy cabe si caben los dos, porque `validarPorcentaje` rechaza tasas ≤ 0, pero así
+  el guard no se apoya en una validación de otro módulo.
+- **El canal interno `precioUnitarioOrigenResuelto`** (decisión de la orquestadora, opción i: un
+  solo guard y la previsualización coherente con la venta). Hermano de `precioUnitarioResuelto`,
+  fuera de `LineaDto`, lo pone `ventas.service`; la previsualización usa el origen que ya arma.
+- **La previsualización también da 400** (decisión de la orquestadora): devolvía totales que
+  después no se podían guardar.
+
+### Qué lo fija
+
+- **e2e por puerta** (`test/motor-monto-no-cabe.e2e-spec.ts`): `POST /ventas` del POS con un
+  subtotal que no cabe y con un origen que no cabe, `POST /ventas` online con pago completo y origen
+  que no cabe, y `POST /cuentas/:id/cerrar` → 400 con el mensaje, y sin venta, detalle, movimiento
+  de stock, pago ni movimiento de caja nuevos; la cuenta sigue abierta. Previsualizaciones
+  (`/calcular`, la precuenta y `/online/checkout`) → 400, con su control de cantidad 1. Los tres
+  canales internos (`precioUnitarioResuelto`, `precioUnitarioOrigenResuelto`, `reglasCongeladas`) en
+  el body de `/ventas`, `/calcular`, `/online/checkout` y `/online/pagar` → 400 por el pipe, con su
+  control. Hasta este frente ningún e2e mandaba uno en el body.
+- **Unitarios:** el borde exacto en el util (`…,9999` y `…,99994` caben; `…,99995` y `10^14` no;
+  lo mismo en negativo), las columnas atadas a `(18, 4)` por la metadata de las entities, el guard
+  por familia en el service (subtotal, total de venta en el borde, cuenta, venta sin impuestos con
+  una tasa negativa, descuento topeado cuyo pedido no cabe, origen por el canal y por la
+  previsualización), no-regresión (mismo resultado con
+  el canal y sin él, con los valores de siempre), y suscripción y Webpay: si `calcular` rechaza, no
+  hay cobro ni orden.
+- **Mutantes medidos:**
+
+  | Mutante | Muere en |
+  |---|---|
+  | Sin la llamada al guard | 7 e2e (las 4 puertas vuelven a 500, las 3 previsualizaciones a 201) y 7 unitarios del service |
+  | Sin la resta `totalFinal − totalImpuestos` | 1 unitario: el de la tasa negativa (armada con un mock: por la API no se alcanza) |
+  | `lessThanOrEqualTo` en el techo | 7 unitarios: 4 del util (`10^14` y `…,99995`, con signo) y 3 del service (borde de la venta y los dos de origen) |
+  | Sin el redondeo previo a 4 decimales | 2 unitarios del util (`…,99995`, con signo). Desde el service no se alcanza con `nivelRedondeo: 'linea'`, que cuantiza las líneas |
+  | `ventas.service` sin pasar el origen | 2 e2e (el origen del POS y el online, que vuelven a 500) |
+
+- **No-regresión del motor:** los e2e y unitarios existentes del motor, sin cambiar ningún valor
+  esperado.
+
+### Qué quedó afuera
+
+Cuatro entradas propias en [`pendientes.md`](pendientes.md): el conteo de caja (§ 3), la línea de
+cuenta (§ 3), `pasarela_orden.monto` en `NUMERIC(18,6)` (§ 2, leído y no medido) y la
+previsualización que no muestra el motivo del 400 (§ 1, frontend).
+
+---
+
 ## La imagen de desarrollo horneaba los `node_modules` del host: `.dockerignore` en `backend/` y `frontend/` (cerrada 2026-10-08)
 
 Sale de [`pendientes.md`](pendientes.md) § 1. Plan:

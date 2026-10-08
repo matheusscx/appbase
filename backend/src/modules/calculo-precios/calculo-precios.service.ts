@@ -16,6 +16,12 @@ import {
 import { Db } from '../../common/db/db.service';
 import { assertTopeUnidadesVenta } from '../../common/utils/tope-unidades-venta.util';
 import {
+  cabeEnColumnaDePlata,
+  ESCALA_PERSISTIDA,
+  formatearMontoPersistible,
+  TECHO_PERSISTIBLE_FORMATEADO,
+} from '../../common/utils/monto-persistible.util';
+import {
   fechaLocalTenant,
   instanteLocalEnZona,
   zonaHorariaTenant,
@@ -38,18 +44,6 @@ import {
   type ReglaResuelta,
   type ResultadoVenta,
 } from './calculo-precios.engine';
-
-/**
- * Decimales con los que el libro mayor de ventas guarda plata: `precio_unitario`,
- * `subtotal`, `descuento_aplicado`, `total_linea` y los totales de la cabecera son
- * todos `NUMERIC(18,4)`.
- *
- * **No es `escalaCalculo`**, y la distinción es la que decide el redondeo de la
- * conversión — el porqué está en `convertirAMonedaOficial`. (Tampoco es universal
- * en el esquema: `tenants.monto_tolerancia` y los montos de la pasarela son
- * `NUMERIC(18,6)`. La afirmación acotada al libro de ventas es la que se sostiene.)
- */
-const ESCALA_PERSISTIDA = 4;
 
 /**
  * Una regla del catálogo con el dato que el motor **no** necesita: dónde se
@@ -365,12 +359,19 @@ export class CalculoPreciosService {
       : undefined;
 
     const preciosResueltos: (string | undefined)[] = [];
+    // El precio de cada línea en la moneda de su ítem, antes de convertir: la
+    // venta lo persiste en `precio_unitario_origen` y el guard del final lo mira.
+    // No entra en ningún cálculo.
+    const origenes: string[] = [];
     for (const linea of dto.lineas) {
+      const item = itemsBase.get(linea.itemId)!;
       if (linea.precioUnitarioResuelto !== undefined) {
         preciosResueltos.push(linea.precioUnitarioResuelto);
+        // Sin el canal, `precioBase`: sale de una columna igual y cabe siempre,
+        // así que un llamador que no lo pase queda sin este chequeo.
+        origenes.push(linea.precioUnitarioOrigenResuelto ?? item.precioBase);
         continue;
       }
-      const item = itemsBase.get(linea.itemId)!;
       const pers = linea.personalizacion;
       if (
         !pers ||
@@ -378,6 +379,7 @@ export class CalculoPreciosService {
         (item.tipo !== 'receta' && item.tipo !== 'combo')
       ) {
         preciosResueltos.push(undefined);
+        origenes.push(item.precioBase);
         continue;
       }
       const { precioExtraTotal } =
@@ -401,9 +403,13 @@ export class CalculoPreciosService {
       // redondeado de `items.service.ts`). Solo formatea. El único redondeo de
       // esta cuenta es el de la conversión, que sí toma el modo del tenant.
       // Mismo razonamiento —y misma cuenta— que `ventas.service.ts`.
+      const origen = new Decimal(item.precioBase)
+        .plus(precioExtraTotal)
+        .toFixed(4);
+      origenes.push(origen);
       preciosResueltos.push(
         this.convertirAMonedaOficial(
-          new Decimal(item.precioBase).plus(precioExtraTotal).toFixed(4),
+          origen,
           item.monedaId,
           tasaMap,
           config.modoRedondeo,
@@ -455,7 +461,96 @@ export class CalculoPreciosService {
 
     this.advertirItemsPausados(dto, itemsBase, resultado);
 
+    this.assertCabeEnLaVenta(dto, itemsBase, origenes, resultado);
+
     return resultado;
+  }
+
+  /**
+   * **Un monto que la venta va a persistir y no cabe en su columna es 400 acá,
+   * no un 500 del `INSERT`.** Los precios que carga el admin solo los acota su
+   * columna (`NUMERIC(18,4)`, menos de 10^14), y el motor los multiplica por
+   * cantidad y les suma extras, recargos e impuestos: medido el 2026-10-08, un
+   * `precioBase` al tope con cantidad 2 daba 500 en `POST /ventas`, y la
+   * previsualización devolvía 201 con un total que después no se podía guardar.
+   *
+   * Va **en un solo lugar y después de calcular todo**, porque lo que desborda
+   * es el resultado, no un campo de entrada. Así cierra la clase entera: por acá
+   * pasan la previsualización, la venta del POS y la online, el cierre de una
+   * cuenta y los cobros de la tienda y de la suscripción, que llaman a `calcular`
+   * antes de cobrar. Rechaza **solo** lo que Postgres rechazaría
+   * (`cabeEnColumnaDePlata`): no hay tope de negocio (owner, 2026-10-08), y una
+   * venta que hoy se guarda sale idéntica.
+   *
+   * Revisa cada columna de plata que la venta escribe desde este resultado —la
+   * lista y por qué quedan afuera `cantidad` y los porcentajes:
+   * `docs/features/motor-calculo-precios.md` § "Un monto que no cabe en su
+   * columna"—, más el precio en la moneda del ítem, que la venta también guarda
+   * y que con una tasa menor que 1 puede no caber aunque el convertido sí. Las
+   * líneas van primero porque su mensaje nombra qué revisar.
+   *
+   * `base_ventas_sin_impuestos` se mira con la misma resta que hace
+   * `ventas.service` (`totalFinal − totalImpuestos`). Hoy cabe si caben los dos,
+   * porque `ImpuestosService.validarPorcentaje` rechaza toda tasa ≤ 0 y el
+   * impuesto no puede restar; se mira igual para no apoyar el guard en una
+   * validación de otro módulo.
+   */
+  private assertCabeEnLaVenta(
+    dto: CalcularVentaInput,
+    itemsBase: ItemsBaseMap,
+    origenes: string[],
+    resultado: ResultadoVenta,
+  ): void {
+    const noCabe = (montos: string[]) =>
+      montos.find((m) => !cabeEnColumnaDePlata(m));
+    const techo = TECHO_PERSISTIBLE_FORMATEADO;
+
+    resultado.lineas.forEach((r, i) => {
+      const nombre = itemsBase.get(dto.lineas[i].itemId)!.nombre;
+      if (!cabeEnColumnaDePlata(origenes[i])) {
+        throw new BadRequestException(
+          `«${nombre}» cuesta ${formatearMontoPersistible(origenes[i])} en su moneda, y el sistema no puede guardar montos de ${techo} o más: revisá el precio y los extras`,
+        );
+      }
+      const fuera = noCabe([
+        r.precioUnitario,
+        r.subtotalNeto,
+        r.descuentoAplicado,
+        r.recargoAplicado,
+        r.ajusteVenta,
+        r.impuestoAplicado,
+        r.totalLinea,
+        ...r.trazas.descuentos.flatMap((t) => [t.monto, t.valorSolicitado]),
+        ...r.trazas.recargos.map((t) => t.monto),
+        ...r.trazas.impuestos.map((t) => t.monto),
+        ...r.trazas.promociones.flatMap((t) => [t.monto, t.valorEfectivo]),
+      ]);
+      if (fuera !== undefined) {
+        throw new BadRequestException(
+          `«${nombre}» da $${formatearMontoPersistible(fuera)}, y el sistema no puede guardar montos de $${techo} o más: revisá el precio y la cantidad`,
+        );
+      }
+    });
+
+    const t = resultado.totales;
+    const fuera = noCabe([
+      t.subtotalNeto,
+      t.totalDescuentos,
+      t.totalRecargos,
+      t.totalImpuestos,
+      t.totalFinal,
+      new Decimal(t.totalFinal).minus(t.totalImpuestos).toFixed(),
+      ...resultado.trazasVenta.descuentos.flatMap((d) => [
+        d.monto,
+        d.valorSolicitado,
+      ]),
+      ...resultado.trazasVenta.recargos.map((r) => r.monto),
+    ]);
+    if (fuera !== undefined) {
+      throw new BadRequestException(
+        `${dto.cuentaId ? 'La cuenta' : 'La venta'} da $${formatearMontoPersistible(fuera)}, y el sistema no puede guardar montos de $${techo} o más: revisá los precios y las cantidades`,
+      );
+    }
   }
 
   /**

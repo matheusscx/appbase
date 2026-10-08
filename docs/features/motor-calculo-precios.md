@@ -231,7 +231,11 @@ fijos, donde el orden no mueve el total.
   pasa por ahí y en mayúsculas daba 404 "Ítem … no encontrado". Ver
   `patterns/backend.md` § "Un UUID validado puede venir en mayúsculas".
 - `CalcularVentaInput` / `LineaCalculo` (mismo archivo) — la entrada **del
-  service**, un campo más ancha que el DTO HTTP. Ver la regla de abajo.
+  service**, más ancha que el DTO HTTP en tres canales internos que solo pone el
+  servidor: `precioUnitarioResuelto` y `reglasCongeladas` (ver la regla de abajo) y
+  `precioUnitarioOrigenResuelto`, que el motor no lee (ver "Un monto que no cabe en
+  su columna", en Notes). Ninguno está en `LineaDto`: el pipe global rechaza con 400
+  un body que los traiga, y lo fija `motor-monto-no-cabe.e2e-spec.ts`.
 
 ### El precio de una línea lo calcula el servidor (2026-08-30)
 
@@ -811,7 +815,9 @@ cd backend && npm test            # incluye los specs del motor y del servicio
   tramos, `valorSolicitado` de un descuento topeado).
 - `calculo-precios.service.spec.ts` — resolución de reglas asociadas vs las de la
   línea, tasación de la personalización, conversión a moneda oficial, errores
-  (regla inexistente, cantidad ≤ 0).
+  (regla inexistente, cantidad ≤ 0) y el monto que no cabe en su columna.
+- `common/utils/monto-persistible.util.spec.ts` — el borde exacto de
+  `NUMERIC(18,4)` y las columnas atadas a ese par.
 
 ### E2E (Backend)
 
@@ -819,6 +825,9 @@ cd backend && npm test            # incluye los specs del motor y del servicio
 ./scripts/reset-db.sh && cd backend && npx jest --config test/jest-e2e.json test/calculo-precios.e2e-spec.ts
 ```
 
+- `motor-monto-no-cabe.e2e-spec.ts` — un monto que no cabe: 400 en cada puerta que
+  persiste sin escribir nada, en las previsualizaciones, y los canales internos
+  rechazados por el pipe.
 - `calculo-precios.e2e-spec.ts` — descuento `monto_fijo` que supera el monto
   disponible ("Promo fija $5.000", seed): confirma que la advertencia de tope
   aparece en `lineas[].advertencias` cuando el descuento va por línea y en
@@ -847,6 +856,56 @@ cd backend && npm test            # incluye los specs del motor y del servicio
 ---
 
 ## Notes
+
+### Un monto que no cabe en su columna (2026-10-08)
+
+`calcular` rechaza con 400, **después de calcular todo y antes de devolver**, un resultado que
+la venta no podría guardar (`assertCabeEnLaVenta`). Los precios del catálogo solo los acota su
+columna, `NUMERIC(18,4)` (menos de 10^14), y el motor los multiplica por cantidad y les suma
+extras, recargos e impuestos. Hasta esta fecha el resultado salía con 201 de la
+previsualización y daba 500 en el `INSERT` de la venta. Owner, 2026-10-08: solo el guard técnico,
+**sin tope de negocio**. Rechaza exactamente lo que Postgres rechazaría
+(`cabeEnColumnaDePlata`: redondea a 4 decimales con el empate hacia afuera del cero, y exige
+`|x| < 10^14`), así que una venta que se guardaba sale idéntica. El techo se deriva del par
+`(18, 4)` de `common/utils/monto-persistible.util.ts`, y un test lo ata a la metadata de cada
+columna de esta tabla:
+
+| Tabla | Columnas | Sale de |
+|---|---|---|
+| `ventas` | `total_bruto`, `total_descuentos`, `total_recargos`, `total_impuestos`, `total_final`, `base_ventas_total_final` | `totales` |
+| `ventas` | `base_ventas_sin_impuestos` | `totalFinal − totalImpuestos`, que el guard calcula igual que `ventas.service` |
+| `venta_detalles` | `precio_unitario`, `subtotal`, `descuento_aplicado`, `recargo_aplicado`, `ajuste_venta`, `impuesto_aplicado`, `total_linea` | `lineas[i]` |
+| `venta_detalles` | `precio_unitario_origen` | `precioUnitarioOrigenResuelto` (la venta y el cierre de cuenta), el origen que arma la previsualización, o el `precioBase` del ítem (la precuenta y cualquier llamador que no lo pase: cabe siempre, porque sale de una columna igual) |
+| `ventas_descuentos` | `valor_aplicado`, `valor_solicitado` | trazas de descuento, de línea y de venta |
+| `ventas_recargos` | `valor_aplicado` | trazas de recargo, de línea y de venta |
+| `ventas_impuestos` | `valor_aplicado` | trazas de impuesto |
+| `ventas_promociones` | `monto`, `valor_efectivo` | trazas de promoción |
+
+Lo que queda afuera, y por qué: `venta_documentos.monto` y sus baldes (`monto_afecto`,
+`monto_exento`, `monto_impuestos`) son `totalFinal` —o una parte— repartido en partes no negativas
+(`componerBaldes`), así que caben si cabe el total, salvo a una unidad mínima del techo: el reparto
+cuantiza, y ahí un balde podría pasarse por a lo sumo una unidad mínima (leído, no medido; lo vio
+la revisión independiente). `cantidad` no es plata y la acota el tope de
+unidades. Los `porcentaje_aplicado` (7,4) salen de columnas de catálogo de la misma forma.
+
+**El precio en la moneda del ítem es la mitad que no se veía.** La venta guarda también
+`precio_unitario_origen` (`precioBase` + extras, sin convertir), y con una tasa menor que 1 puede
+no caber aunque el convertido sí: USD a 0,5 y una receta de 99.999.999.999.999 USD + 1 de extra
+daban 50.000.000.000.000 convertidos y 500 al guardar. Ese número lo arma `ventas.service` antes
+de llamar al motor, así que viaja por un canal interno (`precioUnitarioOrigenResuelto`) que el
+motor no lee: solo existe para que el guard siga siendo uno y la previsualización diga lo mismo
+que la venta.
+
+Las líneas se revisan primero porque su mensaje nombra el ítem (*«Torta» da $146.913.578.024.690,
+y el sistema no puede guardar montos de $100.000.000.000.000 o más: revisá el precio y la
+cantidad*); después la venta o la cuenta. Por acá pasan todas las puertas que persisten (POS,
+venta online, cierre de cuenta) y las que cobran antes de persistir (tienda con Webpay,
+suscripción), así que el 400 sale antes de tocar la tarjeta. Las notas de crédito no llaman al
+motor.
+
+⚠️ **No cubre lo que se escribe sin pasar por el motor:** el conteo de caja (el esperado es una
+suma de movimientos que caben de a uno) y la línea de cuenta al pedirla. Los dos están en
+`docs/agent/pendientes.md` § 3, y pueden reusar `cabeEnColumnaDePlata`.
 
 ### El tope de unidades de una venta (2026-10-06)
 

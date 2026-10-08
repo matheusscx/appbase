@@ -246,6 +246,13 @@ pierde el evento: se cuantiza y se registra el valor original en la traza. Ver
 produce más de 4 decimales y se recorta). No es incoherencia: la regla es sobre lo que
 alguien escribe.
 
+📌 **Lo que sí no se hace en silencio es dejar que un cálculo propio no quepa en su columna.**
+Los decimales se recortan; los enteros que sobran dan `22003` y un 500. Un monto que el sistema
+calcula y persiste se mira con `cabeEnColumnaDePlata` (`common/utils/monto-persistible.util.ts`,
+que replica el redondeo de Postgres) **una vez, después de calcular y antes de escribir**, y lo
+que no cabe es 400. El caso que lo estableció es el motor: [motor-calculo-precios.md](../features/motor-calculo-precios.md)
+§ "Un monto que no cabe en su columna".
+
 ✅ **El punto ciego de descuentos y recargos se cerró el 2026-08-23.** Su `valor` no se
 podía marcar —era monto fijo o porcentaje según el campo hermano `modo`, y ni el decorador
 ni el pipe leen campos hermanos—, así que se **partió en dos columnas**: `valor_monto`

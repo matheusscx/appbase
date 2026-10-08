@@ -159,6 +159,19 @@ export class CalcularVentaDto {
 export type LineaCalculo = LineaDto & {
   precioUnitarioResuelto?: string;
   /**
+   * El mismo precio **en la moneda del ítem y sin convertir** —`precioBase` más
+   * lo que sume la personalización—, que la venta persiste en
+   * `venta_detalles.precio_unitario_origen`. El motor no lo lee: lo pasa
+   * `ventas.service` solo para que el guard de `calcular` pueda decir que no
+   * cabe en su columna (con una tasa menor que 1, el origen puede no caber
+   * aunque el convertido sí: medido el 2026-10-08). Sin él, el guard mira el
+   * `precioBase` del ítem.
+   *
+   * ⛔ Mismo régimen que `precioUnitarioResuelto`: no está en `LineaDto`, así que
+   * el pipe global rechaza con 400 un body que lo traiga.
+   */
+  precioUnitarioOrigenResuelto?: string;
+  /**
    * Los descuentos y recargos **congelados en la línea de cuenta cuando se
    * pidió** (owner, 2026-08-30: *lo pedido se cobra como se pidió*). Cuando
    * vienen, el motor los usa tal cual y **no** mira las asociaciones vivas del

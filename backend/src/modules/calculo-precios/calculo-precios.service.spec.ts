@@ -1493,4 +1493,263 @@ describe('CalculoPreciosService', () => {
       });
     });
   });
+
+  /**
+   * Un monto que la venta va a persistir y no cabe en `NUMERIC(18,4)` es 400 acá,
+   * y no un 500 del `INSERT` (medido el 2026-10-08). El guard solo mira: los
+   * valores de los controles son los mismos que el motor daba antes de él.
+   *
+   * Moneda de 4 decimales (`decimalesOficiales` del `beforeEach`) para que el
+   * borde exacto —`…,9999` pasa, `10^14` no— sea alcanzable sin cuantizar.
+   */
+  describe('un monto que no cabe en su columna es 400', () => {
+    const TORTA = 'Torta de matrimonio';
+    const TECHO =
+      'el sistema no puede guardar montos de $100.000.000.000.000 o más';
+
+    const exenta = (precioBase: string) =>
+      mockItems(
+        { precioBase, clasificacionTributaria: 'exento', nombre: TORTA },
+        { descuentosIds: [] },
+      );
+
+    it('una línea cuyo subtotal no cabe, aunque su precio sí', async () => {
+      exenta('73456789012345.6789');
+
+      await expect(
+        service.calcular(TENANT, {
+          lineas: [{ itemId: 'item-1', cantidad: '2' }],
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          `«${TORTA}» da $146.913.578.024.691,3578, y ${TECHO}: revisá el precio y la cantidad`,
+        ),
+      );
+
+      // Control: la misma línea con cantidad 1 cabe y sale como siempre.
+      const r = await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+      expect(r.totales.totalFinal).toBe('73456789012345.678900');
+    });
+
+    it('en el borde exacto: el total máximo que cabe pasa y una unidad mínima más no', async () => {
+      exenta('100');
+      const venta = (a: string, b: string) =>
+        service.calcular(TENANT, {
+          lineas: [
+            { itemId: 'item-a', cantidad: '1', precioUnitarioResuelto: a },
+            { itemId: 'item-b', cantidad: '1', precioUnitarioResuelto: b },
+          ],
+        });
+
+      // Cada línea cabe; lo que se mide es el total.
+      const r = await venta('99999999999999.9997', '0.0002');
+      expect(r.totales.totalFinal).toBe('99999999999999.999900');
+
+      await expect(venta('99999999999999.9997', '0.0003')).rejects.toThrow(
+        new BadRequestException(
+          `La venta da $100.000.000.000.000, y ${TECHO}: revisá los precios y las cantidades`,
+        ),
+      );
+    });
+
+    it('la cuenta de una mesa se nombra como cuenta', async () => {
+      exenta('100');
+      // La vigencia lee la apertura de la cuenta; las líneas vienen del cierre.
+      db.query.mockImplementation((sql: string) =>
+        Promise.resolve(
+          sql.includes('FROM cuentas')
+            ? [{ abierta_el: new Date('2026-06-15T19:00:00Z') }]
+            : [],
+        ),
+      );
+      await expect(
+        service.calcular(TENANT, {
+          cuentaId: CUENTA_ID,
+          lineas: [
+            {
+              itemId: 'item-a',
+              cantidad: '1',
+              precioUnitarioResuelto: '60000000000000.0000',
+            },
+            {
+              itemId: 'item-b',
+              cantidad: '1',
+              precioUnitarioResuelto: '45000000000000.0000',
+            },
+          ],
+        }),
+      ).rejects.toThrow(
+        `La cuenta da $105.000.000.000.000, y ${TECHO}: revisá los precios y las cantidades`,
+      );
+    });
+
+    it('la venta sin impuestos no cabe con una tasa negativa, aunque el total sí', async () => {
+      // Hoy no se alcanza por la API —`validarPorcentaje` rechaza tasas ≤ 0—:
+      // fija que el guard no depende de esa validación. 60 + 60 (recargo) = 120
+      // billones de base; −30% deja 84 billones de total, y la venta sin
+      // impuestos —que `ventas.service` guarda como `totalFinal −
+      // totalImpuestos`— es la base.
+      impuestosService.findAll.mockResolvedValue([
+        {
+          id: 'imp-neg',
+          nombre: 'Rebaja',
+          porcentaje: '-0.3',
+          tipo: 'otro',
+          activo: true,
+        },
+      ]);
+      recargosService.findAll.mockResolvedValue([
+        {
+          id: 'rec-100',
+          nombre: 'Recargo 100%',
+          modo: 'porcentaje',
+          valorPorcentaje: '1',
+          tipoRegla: { codigo: 'general' },
+          tramos: [],
+          metodoPagoIds: [],
+          activo: true,
+          nivel: 'linea',
+        },
+      ]);
+      mockItems(
+        {
+          precioBase: '60000000000000',
+          clasificacionTributaria: 'exento',
+          nombre: TORTA,
+        },
+        {
+          impuestosIds: ['imp-neg'],
+          descuentosIds: [],
+          recargosIds: ['rec-100'],
+        },
+      );
+
+      await expect(
+        service.calcular(TENANT, {
+          lineas: [{ itemId: 'item-1', cantidad: '1' }],
+        }),
+      ).rejects.toThrow(
+        `La venta da $120.000.000.000.000, y ${TECHO}: revisá los precios y las cantidades`,
+      );
+    });
+
+    it('un descuento topeado cuyo valor pedido no cabe, aunque lo aplicado sí', async () => {
+      // 150% de 73.456.789.012.345: pide 110.185.183.518.518 y aplica lo que hay.
+      descuentosService.findAll.mockResolvedValue([
+        {
+          id: 'desc-150',
+          nombre: 'Desc 150%',
+          modo: 'porcentaje',
+          valorPorcentaje: '1.5',
+          tipoRegla: { codigo: 'general' },
+          tramos: [],
+          metodoPagoIds: [],
+          activo: true,
+          nivel: 'linea',
+        },
+      ]);
+      mockItems(
+        {
+          precioBase: '73456789012345',
+          clasificacionTributaria: 'exento',
+          nombre: TORTA,
+        },
+        { descuentosIds: ['desc-150'] },
+      );
+
+      await expect(
+        service.calcular(TENANT, {
+          lineas: [{ itemId: 'item-1', cantidad: '1' }],
+        }),
+      ).rejects.toThrow(
+        `«${TORTA}» da $110.185.183.518.517,5, y ${TECHO}: revisá el precio y la cantidad`,
+      );
+    });
+
+    describe('el precio en la moneda del ítem, antes de convertir', () => {
+      const ORIGEN_FUERA =
+        '«Torta de matrimonio» cuesta 100.000.000.000.000 en su moneda, y ' +
+        'el sistema no puede guardar montos de 100.000.000.000.000 o más: ' +
+        'revisá el precio y los extras';
+
+      it('el que pasa la venta por el canal interno', async () => {
+        exenta('100');
+        const venta = (origen: string) =>
+          service.calcular(TENANT, {
+            lineas: [
+              {
+                itemId: 'item-1',
+                cantidad: '1',
+                precioUnitarioResuelto: '50000000000000.0000',
+                precioUnitarioOrigenResuelto: origen,
+              },
+            ],
+          });
+
+        await expect(venta('100000000000000.0000')).rejects.toThrow(
+          new BadRequestException(ORIGEN_FUERA),
+        );
+        const r = await venta('99999999999999.9999');
+        expect(r.totales.totalFinal).toBe('50000000000000.000000');
+      });
+
+      it('el que arma la previsualización: base + extras con una moneda de tasa 0,5', async () => {
+        monedasService.findMonedas.mockResolvedValue([
+          { monedaId: 'moneda-clp', valorDelDia: '1' },
+          { monedaId: 'moneda-media', valorDelDia: '0.5' },
+        ]);
+        mockItems(
+          {
+            precioBase: '99999999999999',
+            monedaId: 'moneda-media',
+            tipo: 'receta',
+            clasificacionTributaria: 'exento',
+            nombre: TORTA,
+          },
+          { descuentosIds: [] },
+        );
+        itemsService.resolverPersonalizacionReceta.mockResolvedValue({
+          snapshot: { omitidos: [], extras: [] },
+          precioExtraTotal: '1.0000',
+        });
+
+        await expect(
+          service.calcular(TENANT, {
+            lineas: [
+              {
+                itemId: 'item-1',
+                cantidad: '1',
+                personalizacion: { extras: [{ ingredienteItemId: 'ing-1' }] },
+              },
+            ],
+          }),
+        ).rejects.toThrow(new BadRequestException(ORIGEN_FUERA));
+      });
+    });
+
+    it('no-regresión: el canal del origen no cambia nada del resultado', async () => {
+      const linea = {
+        itemId: 'item-1',
+        cantidad: '3',
+        precioUnitarioResuelto: '1490.0000',
+      };
+      const sin = await service.calcular(TENANT, { lineas: [linea] });
+      const con = await service.calcular(TENANT, {
+        lineas: [{ ...linea, precioUnitarioOrigenResuelto: '1490.0000' }],
+      });
+
+      expect(con).toEqual(sin);
+      // Los mismos valores que el motor daba antes del guard: 4.470 − 10% +
+      // 19% de IVA.
+      expect(sin.totales).toEqual({
+        subtotalNeto: '4470.000000',
+        totalDescuentos: '447.000000',
+        totalRecargos: '0.000000',
+        totalImpuestos: '764.370000',
+        totalFinal: '4787.370000',
+      });
+    });
+  });
 });

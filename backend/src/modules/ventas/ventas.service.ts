@@ -980,7 +980,7 @@ export class VentasService {
 
     const calcularDto = {
       lineas: lineasConversion.map(
-        ({ linea, precioConvertido, cantidadCanonica }, i) => ({
+        ({ linea, precioOrigen, precioConvertido, cantidadCanonica }, i) => ({
           itemId: linea.itemId,
           cantidad: cantidadCanonica,
           // Canal interno del motor, no un override del cliente: el precio ya
@@ -989,6 +989,10 @@ export class VentasService {
           // `calcular` la resolvería de nuevo y esta venta pagaría las
           // consultas dos veces. Ver `LineaCalculo` en `calcular.dto.ts`.
           precioUnitarioResuelto: precioConvertido,
+          // No entra en ningún cálculo: viaja para que el guard de `calcular`
+          // rechace con 400 el origen que no cabe en su columna, antes de
+          // escribir nada.
+          precioUnitarioOrigenResuelto: precioOrigen,
           reglasCongeladas: lineasCongeladas?.[i]?.reglasCongeladas,
         }),
       ),

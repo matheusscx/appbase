@@ -294,6 +294,21 @@ describe('SuscripcionesService', () => {
       expect(ventasServiceMock.crearEnTransaccion).not.toHaveBeenCalled();
     });
 
+    // Un monto que no cabe en su columna lo rechaza `calcular` (2026-10-08). Lo
+    // que importa acá es el orden: el 400 sale antes de tocar la tarjeta, no
+    // con el período ya cobrado y la venta sin poder guardarse.
+    it('si el motor rechaza el monto, 400 y NO cobra', async () => {
+      calculoPreciosServiceMock.calcular.mockRejectedValueOnce(
+        new BadRequestException('el sistema no puede guardar montos'),
+      );
+
+      await expect(service.crear(TENANT_ID, USUARIO_ID, dto)).rejects.toThrow(
+        'el sistema no puede guardar montos',
+      );
+      expect(cobrosServiceMock.cobrar).not.toHaveBeenCalled();
+      expect(ventasServiceMock.crearEnTransaccion).not.toHaveBeenCalled();
+    });
+
     it('timeout del proveedor (502) se propaga sin crear nada', async () => {
       const boom = new Error('502 timeout');
       cobrosServiceMock.cobrar.mockRejectedValueOnce(boom);
