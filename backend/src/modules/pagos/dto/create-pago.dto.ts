@@ -20,8 +20,12 @@ import type { ClaseDocumentoMaquina } from '../../venta-documentos/entities/vent
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 import { MAX_INT } from '../../../common/constants/escalas';
+import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
 export class PagoItemDto {
+  // En minúsculas por la misma razón que `PagoVentaDto.metodoPagoId`: el abono
+  // pasa por el mismo mapa de `PagosService.registrar`.
+  @IdEnMinusculas()
   @IsUUID()
   metodoPagoId: string;
 

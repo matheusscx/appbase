@@ -23,6 +23,14 @@ import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
  *   reglas de venta daban 400 "no encontrado", y los de la personalización 400
  *   "no pertenece". Van a minúsculas en el borde (`IdEnMinusculas`), antes de
  *   que `@ArrayUnique` compare: `[D, D.toUpperCase()]` es un repetido.
+ * - **Lo mismo con el método de cada pago** (`pagos[].metodoPagoId`), aunque no
+ *   entra al motor: `PagosService.registrar` lo buscaba con el casing del
+ *   cliente en el mapa de métodos del tenant, y en mayúsculas las tres puertas
+ *   (venta, cierre de cuenta y abono) daban 400 "Método de pago no habilitado".
+ * - **Un elemento de un array de la personalización es un objeto.** Con un
+ *   `[]` adentro (`extras: [[]]`), `@ValidateNested({ each: true })` no tiene
+ *   nada que validar y lo deja pasar: el service lo rechazaba con un 400 que
+ *   mentía ("La opción undefined no pertenece…", "Extra no permitido").
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -650,6 +658,147 @@ describe('Lo que entra al motor por el body (e2e)', () => {
       expect(res.status).toBe(400);
       expect(mensajes(res)).toContain(`personalizacion.${MENSAJE}`);
       expect(await lineasDeCuenta(cuentaId)).toBe(0);
+    });
+  });
+
+  describe('pagos[].metodoPagoId en mayúsculas es el mismo método', () => {
+    const EFECTIVO_MAYUSCULAS = EFECTIVO_ID.toUpperCase();
+
+    const pagosDe = (ventaId: string) =>
+      ds.query(
+        `SELECT metodo_pago_id, monto::text, vuelto::text FROM pagos
+          WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [ventaId],
+      );
+
+    // El servicio cuesta $1.000 con el IVA adentro: de $5.000 en efectivo
+    // vuelven $4.000. El vuelto sale de `permite_vuelto` del método, que se lee
+    // del mismo mapa que el gate: en mayúsculas tampoco se encontraba.
+    it('POST /ventas: guarda el pago con su vuelto', async () => {
+      const res = await enviar('ventas', {
+        lineas: [{ itemId: servicioId, cantidad: '1' }],
+        pagos: [{ metodoPagoId: EFECTIVO_MAYUSCULAS, monto: '5000.0000' }],
+      });
+      expect(mensajes(res)).toEqual([]);
+      expect(res.status).toBe(201);
+      expect(await pagosDe((res.body as IdResponse).id)).toEqual([
+        {
+          metodo_pago_id: EFECTIVO_ID,
+          monto: '5000.0000',
+          vuelto: '4000.0000',
+        },
+      ]);
+    });
+
+    it('POST /cuentas/:id/cerrar: guarda el pago con su vuelto', async () => {
+      const cuentaId = await abrirCuenta();
+      await crear(`cuentas/${cuentaId}/lineas`, {
+        itemId: servicioId,
+        cantidad: '1',
+      });
+      const res = await enviar(`cuentas/${cuentaId}/cerrar`, {
+        garzonId: garzon.id,
+        pin: garzon.pin,
+        pagos: [{ metodoPagoId: EFECTIVO_MAYUSCULAS, monto: '5000.0000' }],
+      });
+      expect(mensajes(res)).toEqual([]);
+      expect(res.status).toBe(201);
+      expect(await pagosDe((res.body as { ventaId: string }).ventaId)).toEqual([
+        {
+          metodo_pago_id: EFECTIVO_ID,
+          monto: '5000.0000',
+          vuelto: '4000.0000',
+        },
+      ]);
+    });
+
+    it('POST /pagos: el abono se guarda', async () => {
+      const venta = await crear('ventas', {
+        lineas: [{ itemId: servicioId, cantidad: '1' }],
+      });
+      const res = await enviar('pagos', {
+        ventaId: venta.id,
+        pagos: [{ metodoPagoId: EFECTIVO_MAYUSCULAS, monto: '400.0000' }],
+      });
+      expect(mensajes(res)).toEqual([]);
+      expect(res.status).toBe(201);
+      expect(await pagosDe(venta.id)).toEqual([
+        { metodo_pago_id: EFECTIVO_ID, monto: '400.0000', vuelto: '0.0000' },
+      ]);
+    });
+  });
+
+  describe('un array como elemento de la personalización es 400 con su mensaje', () => {
+    const grupoValido = () => ({
+      grupoId: PROTEINA_GRUPO_ID,
+      opciones: [{ itemId: CHULETA_ID }],
+    });
+    const componente = (grupos: unknown[]) => ({
+      componenteItemId: HAMBURGUESA_ESPECIAL_ID,
+      unidad: 1,
+      grupos,
+    });
+    // `valida` es el control: la misma forma con un objeto donde va el `[]`.
+    const FILAS = (): {
+      campo: string;
+      itemId: string;
+      conArray: object;
+      valida: object;
+      mensaje: string;
+    }[] => [
+      {
+        campo: 'extras',
+        itemId: recetaId,
+        conArray: { extras: [[]] },
+        valida: { extras: [{ ingredienteItemId: extraId }] },
+        mensaje: 'each value in extras must be an object',
+      },
+      {
+        campo: 'grupos',
+        itemId: HAMBURGUESA_ESPECIAL_ID,
+        conArray: { grupos: [[]] },
+        valida: { grupos: [grupoValido()] },
+        mensaje: 'each value in grupos must be an object',
+      },
+      {
+        campo: 'grupos[].opciones',
+        itemId: HAMBURGUESA_ESPECIAL_ID,
+        conArray: { grupos: [{ grupoId: PROTEINA_GRUPO_ID, opciones: [[]] }] },
+        valida: { grupos: [grupoValido()] },
+        mensaje: 'grupos.0.each value in opciones must be an object',
+      },
+      {
+        campo: 'componentes',
+        itemId: COMBO_ESPECIAL_ID,
+        conArray: { componentes: [[]] },
+        valida: { componentes: [componente([grupoValido()])] },
+        mensaje: 'each value in componentes must be an object',
+      },
+      {
+        campo: 'componentes[].grupos',
+        itemId: COMBO_ESPECIAL_ID,
+        conArray: { componentes: [componente([[]])] },
+        valida: { componentes: [componente([grupoValido()])] },
+        mensaje: 'componentes.0.each value in grupos must be an object',
+      },
+    ];
+
+    it('POST /calculo-precios/calcular: 400 que nombra el campo; el objeto pasa', async () => {
+      for (const { campo, itemId, conArray, valida, mensaje } of FILAS()) {
+        const calcular = (personalizacion: object) =>
+          enviar('calculo-precios/calcular', {
+            lineas: [{ itemId, cantidad: '1', personalizacion }],
+          });
+        const res = await calcular(conArray);
+        expect({ campo, status: res.status }).toEqual({ campo, status: 400 });
+        expect({ campo, mensajes: mensajes(res) }).toEqual({
+          campo,
+          mensajes: [`lineas.0.personalizacion.${mensaje}`],
+        });
+
+        const ok = await calcular(valida);
+        expect({ campo, status: ok.status }).toEqual({ campo, status: 201 });
+      }
     });
   });
 });

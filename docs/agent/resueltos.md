@@ -23,6 +23,81 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `pagos[].metodoPagoId` en mayúsculas guarda el pago, y un array como elemento de la personalización es 400 (cerrada 2026-10-08)
+
+Salen de [`pendientes.md`](pendientes.md) § 1, las dos en la misma sesión. Plan:
+[`2026-10-08-metodo-pago-mayusculas-y-personalizacion-arrays.md`](../superpowers/plans/2026-10-08-metodo-pago-mayusculas-y-personalizacion-arrays.md).
+La regla viva está en [`patterns/backend.md`](../patterns/backend.md) § 3 y § "Un UUID validado
+puede venir en mayúsculas".
+
+### Las entradas que cierra, como estaban en `pendientes.md` § 1
+
+- [ ] **`pagos[].metodoPagoId` en mayúsculas es 400 "Método de pago no habilitado para este
+  tenant"** (backend, `PagoVentaDto.metodoPagoId` en `ventas/dto/create-venta.dto.ts`, que también
+  usa `CerrarCuentaDto.pagos`; medido por HTTP el 2026-10-08 por el frente de los ids que entran al
+  motor, que no lo tocó porque este id no entra al motor). `POST /ventas` con
+  `pagos: [{ metodoPagoId: EFECTIVO.toUpperCase(), … }]` → 400: `pagos.service.ts:234` busca el id
+  con el casing del cliente en un mapa armado con los de la base. Es un 400 que miente: el método
+  está habilitado. **Arreglo:** `@IdEnMinusculas()` en el campo (`common/decorators/`, el mismo del
+  motor), con su e2e (en mayúsculas, el pago se guarda) y el mutante. Antes, barrer los demás
+  lectores de `p.metodoPagoId` en `pagos.service.ts` (vuelto, emisor, caja) por si alguno compara
+  y hoy no se ve porque el gate de arriba corta primero.
+
+- [ ] **Un array como elemento de `extras`, `grupos`, `opciones` o `componentes` de la
+  personalización pasa el pipe** (backend, `common/dto/personalizacion-receta.dto.ts`, los cinco
+  `@ValidateNested({ each: true })`; visto el 2026-10-08 por el `api-security-reviewer` del frente de
+  la personalización, que lo midió contra el pipe real). `extras: [[]]`, `grupos: [[]]` y
+  `opciones: [[]]` validan, porque `ValidateNested` no mira adentro de un `[]`. **No escribe nada:**
+  el service lo rechaza con 400 porque el id queda `undefined` y no matchea el catálogo, pero con un
+  mensaje que miente (*"La opción undefined no pertenece al grupo…"*, *"Extra no permitido"*).
+  **Arreglo:** `@IsObject({ each: true })` en los cinco, con un e2e por campo y su mutante.
+
+### Qué se midió
+
+Con el e2e nuevo contra el código sin tocar (base nueva del worktree): `pagos[].metodoPagoId` de
+efectivo en mayúsculas era 400 *"Método de pago no habilitado para este tenant"* en las **tres**
+puertas de `PagosService.registrar`: `POST /ventas`, `POST /cuentas/:id/cerrar` y el abono
+`POST /pagos` (`PagoItemDto`, que la entrada no nombraba). Un `[]` como elemento era 400 con el
+mensaje del service: *"Extra no permitido para esta receta"* (`extras`), *"Grupo de modificadores
+no asociado a este item"* (`grupos` y `componentes[].grupos`), *"La opción undefined no pertenece
+al grupo Proteína"* (`grupos[].opciones`) y *"El componente no pertenece a este combo o no admite
+grupos"* (`componentes`).
+
+**Barrido de los lectores de `metodoPagoId`.** `registrar` es el único que compara el id del
+cliente con los de la base: el gate, el vuelto (`permiteVuelto`), el orden del reparto del
+vuelto y de la propina, el concepto del movimiento de caja y el emisor que lee la emisión
+(`porPago`). Todos van después del gate y del mismo mapa, así que con el id en minúsculas en el
+borde quedan cubiertos; `venta-documentos` no compara el id. Ya funcionaban en mayúsculas porque
+el id solo va a SQL (`uuid` no distingue casing): compras (`CrearPagoProveedorDto`,
+`PagoAlConfirmarDto`), el filtro de `GET /pagos`, y suscripciones y el callback online, que toman
+el id de la base. **Quedaron afuera, anotados en `pendientes.md` sin medir:** en § 2, las líneas del
+cierre y la justificación de caja (`claveDe` cruza con el arqueo de la base) y `metodoPagoIds` de
+descuentos y recargos (`[x, X]` pasa `@ArrayUnique`); en § 1, como barrido mecánico, los otros
+arrays de objetos con `@ValidateNested({ each: true })`, que dejan pasar `[[]]` igual que la
+personalización.
+
+### Qué se hizo
+
+- `@IdEnMinusculas()` en `PagoVentaDto.metodoPagoId` (lo usan `CreateVentaDto.pagos` y
+  `CerrarCuentaDto.pagos`) y en `PagoItemDto.metodoPagoId` (el abono).
+- `@IsObject({ each: true })` en los cinco `@ValidateNested({ each: true })` de
+  `common/dto/personalizacion-receta.dto.ts`: `extras`, `grupos`, `componentes`,
+  `grupos[].opciones` y `componentes[].grupos`. El 400 nombra el campo (*"lineas.0.personalizacion.
+  each value in extras must be an object"*).
+
+### Qué lo fija
+
+`test/motor-entrada.e2e-spec.ts`: § "pagos[].metodoPagoId en mayúsculas es el mismo método", una
+prueba por puerta que relee la fila de `pagos` (id en minúsculas, monto y vuelto: los $4.000 de
+vuelto del efectivo salen del mismo mapa que el gate); § "un array como elemento de la
+personalización es 400 con su mensaje", una fila por campo con su control en 201. Mutantes, cada
+uno revierte al código anterior y muere solo en su test, por la aserción del mensaje: sin el
+decorador en `PagoVentaDto` (rojos `/ventas` y `/cerrar`), sin el de `PagoItemDto` (rojo el
+abono), y sin cada uno de los cinco `@IsObject` (rojo la fila de ese campo, con el mensaje del
+service de arriba).
+
+---
+
 ## Los campos de los DTOs sin cota: 500 por desborde, datos malos y trabajo lineal (cerrada 2026-10-08)
 
 Sale de [`pendientes.md`](pendientes.md) § 2: lo que quedaba de "Entradas sin cota…" (B2, B4/B5, B6 y

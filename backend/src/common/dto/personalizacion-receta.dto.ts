@@ -2,6 +2,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -86,6 +87,7 @@ export class PersonalizacionGrupoInputDto {
   @IsArray()
   // A lo sumo las opciones del grupo: el tope de `CreateGrupoModificadorDto`.
   @ArrayMaxSize(100)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => PersonalizacionGrupoOpcionInputDto)
   opciones: PersonalizacionGrupoOpcionInputDto[];
@@ -104,6 +106,7 @@ export class PersonalizacionComponenteInputDto {
   // A lo sumo los grupos del componente: el tope de
   // `CreateItemDto.gruposModificadores`.
   @ArrayMaxSize(50)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => PersonalizacionGrupoInputDto)
   grupos: PersonalizacionGrupoInputDto[];
@@ -126,6 +129,11 @@ export class PersonalizacionRecetaDto {
   // A lo sumo los extras de la receta: el tope de
   // `CreateItemDto.extrasPermitidos`.
   @ArrayMaxSize(100)
+  // `IsObject` además de `ValidateNested`, acá y en los otros cuatro arrays de
+  // objetos del archivo: con un `[]` como elemento (`extras: [[]]`), este no
+  // tiene nada que validar y lo deja pasar, y el service lo rechazaba con un
+  // 400 que mentía ("Extra no permitido", "La opción undefined…"; 2026-10-08).
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => PersonalizacionExtraInputDto)
   extras?: PersonalizacionExtraInputDto[];
@@ -139,6 +147,7 @@ export class PersonalizacionRecetaDto {
   @IsArray()
   // A lo sumo los grupos del ítem: el tope de `CreateItemDto.gruposModificadores`.
   @ArrayMaxSize(50)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => PersonalizacionGrupoInputDto)
   grupos?: PersonalizacionGrupoInputDto[];
@@ -148,6 +157,7 @@ export class PersonalizacionRecetaDto {
   // Una entrada por unidad de cada componente del combo (un combo de 50
   // componentes con varias unidades de alguno).
   @ArrayMaxSize(200)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => PersonalizacionComponenteInputDto)
   componentes?: PersonalizacionComponenteInputDto[];

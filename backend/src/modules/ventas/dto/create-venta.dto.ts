@@ -76,6 +76,10 @@ export class LineaVentaDto {
 }
 
 export class PagoVentaDto {
+  // En minúsculas: `PagosService.registrar` lo busca en el mapa de métodos del
+  // tenant, que tiene los ids de la base, y en mayúsculas la venta y el cierre
+  // de cuenta daban 400 "Método de pago no habilitado" (medido el 2026-10-08).
+  @IdEnMinusculas()
   @IsUUID()
   metodoPagoId: string;
 

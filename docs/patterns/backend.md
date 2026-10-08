@@ -137,9 +137,12 @@ cambiar el tamaño de página reseteaba el modo oscuro.
 **Un campo que es un objeto solo, con `@ValidateNested()`, lleva también `@IsObject()`.**
 `@ValidateNested()` acepta un array y valida cada elemento, así que al service llega un array
 donde espera un objeto: un 200 sin efecto (`ui` de `PATCH /me/preferencias`, 2026-10-06) o un 500
-(`customer` de una venta con Factura). Los campos que sí son arrays van con `@IsArray()` y
-`{ each: true }`. Quedan sin `@IsObject()` las tres `personalizacion` de una línea, anotadas en
-[`pendientes.md`](../agent/pendientes.md) § 2.
+(`customer` de una venta con Factura), y las tres `personalizacion` de una línea guardaban sin
+la omisión. Los campos que sí son arrays van con `@IsArray()` y `{ each: true }`, y el mismo hueco
+baja un nivel: **con un `[]` como elemento, `@ValidateNested({ each: true })` no tiene nada que
+validar**, así que `[[]]` llega al service. Lo cierra `@IsObject({ each: true })`; lo llevan los
+cinco arrays de la personalización (`common/dto/personalizacion-receta.dto.ts`, 2026-10-08), y los
+demás arrays de objetos están anotados en [`pendientes.md`](../agent/pendientes.md) § 1.
 
 **Todo array que entra por la API lleva `@ArrayMaxSize`, con el tope elegido por campo y el porqué
 al lado** (2026-10-06). No hay un número único. Se elige así:
@@ -387,7 +390,9 @@ Hay tres formas en el repo, y no son intercambiables:
   `PersonalizacionRecetaDto` los leen tres resolvers en cuatro endpoints). Va **antes** de
   `@ArrayUnique` en la lectura del DTO, aunque `class-transformer` lo corre primero igual. Hoy en los
   ids que entran al motor: `metodoPagoId` (en mayúsculas cobraba **sin** el recargo por método de
-  pago), los ids de reglas de venta, los de la personalización y el plato de la línea de cuenta.
+  pago), los ids de reglas de venta, los de la personalización y el plato de la línea de cuenta. Y
+  en el método de cada pago (`PagoVentaDto` y `PagoItemDto`), que no entra al motor: lo compara
+  `PagosService.registrar` para tres puertas (venta, cierre de cuenta y abono).
 - **`aliasarCasingDeIds`** (`items.service.ts`), para un cargador que devuelve un mapa a
   llamadores que hacen `.get(id)` con el casing del cliente. Solo sirve para `.get()`.
 

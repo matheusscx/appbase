@@ -76,7 +76,8 @@ Request:
 // Los ids del body se pasan a minúsculas en el borde (`@IdEnMinusculas`,
 // 2026-10-08): `metodoPagoId`, los de reglas de venta y los de la
 // personalización. `[D, d]` es un repetido; un id solo en mayúsculas funciona.
-// `personalizacion` es un objeto (un array es 400) y cada extra va hasta 99
+// `personalizacion` es un objeto (un array es 400), los elementos de sus arrays
+// también (`extras: [[]]` es 400, 2026-10-08), y cada extra va hasta 99
 // veces por plato (`MAX_UNIDADES_POR_PLATO`, owner 2026-10-08).
 
 Response (201):
