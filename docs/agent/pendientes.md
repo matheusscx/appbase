@@ -80,6 +80,23 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **Lo que dejó el frente del tope del esperado de caja (`ce3ab9d8`)** (backend, `caja` +
+  `pagos`; 2026-10-09; lo vieron el autor y el domain-reviewer, **leído, no corrido** salvo donde
+  se dice). Son cuatro residuos y ninguno traba una caja:
+  1. **Oráculo sin rastro.** El 400 del tope deja averiguar el esperado en modo ciego por
+     bisección. Solo los intentos que fallan salen gratis: cada acierto escribe una entrada real
+     de un monto cercano al techo, que queda a la vista. La salida que no alcanza (422) deja rastro
+     con `IntentoRechazadoError`, y este 400 no. Hay que decidir si lleva un motivo nuevo en el
+     rastro.
+  2. **Un `monto` suelto que no cabe en la columna**, de un movimiento o de un pago, ¿sigue dando
+     500 en el `INSERT`? El guard mira la suma, no el monto solo. **Medir:** ¿el DTO ya lo rechaza
+     con el 400 del redondeo de plata?
+  3. **Salida manual enorme:** sin cobertura. Medir qué devuelve.
+  4. **Texto.** Cuando el 400 sale de la reversa del pago a un proveedor
+     (`compras.service.ts`, ~3329), el mensaje dice "cobrá con otro medio de pago", que ahí no tiene
+     sentido. Además, `docs/features/gestion-cajas.md` nombra como consecuencia aceptada solo el
+     caso de las ventas, no el de anular un pago a proveedor, que se destraba con una salida.
+
 - [ ] **¿Un Enter en el formulario de suscripción de la tienda da de alta dos veces?** (frontend,
   `pages/tienda/suscripciones.vue`, `confirmar()`; lo vio el domain-reviewer del frente `013e5300`
   el 2026-10-09, **leído, no medido**). `confirmar()` no tiene un guard de reentrada
@@ -217,25 +234,6 @@ Las features de producto que también se decidieron —la NC como documento, la 
 oficial, `cashRounding`, el conteo por denominación, el envío diario del resumen de descuadres,
 la acumulación de descuentos y compras— y el renombre de `moneda.decimales` se mudaron a
 [`desarrollo-nuevo.md`](desarrollo-nuevo.md) el 2026-10-06. Acá quedan las correcciones.
-
-- [ ] **El conteo de una caja da 500 cuando el saldo esperado no cabe en `NUMERIC(18,4)`, y el
-  cajón queda ocupado** (backend, `CajaService.calcularEsperadoEfectivo` → `enviarConteo`; medido por
-  HTTP el 2026-10-08 por el frente del guard del motor, que **no** lo cierra: ver
-  [`resueltos.md`](resueltos.md#un-monto-calculado-que-no-cabe-en-numeric184-es-400-no-500-cerrada-2026-10-08)).
-  El esperado es `saldo inicial + entradas en efectivo − salidas`, y lo que desborda es la **suma**:
-  cada movimiento cabe en su columna. `caja_arqueo_medio.esperado` y `cajas.saldo_final` son
-  `NUMERIC(18,4)`. Dos formas medidas:
-  - **Sin ninguna venta:** abrir con `saldoInicial` 99.999.999.999.999 (el DTO solo exige que no sea
-    negativo) y registrar un movimiento manual de entrada de $1 → `POST /caja/:id/conteo` da **500**.
-  - **Con el guard del motor puesto:** dos ventas en efectivo que caben cada una (6×10^13 + 6×10^13)
-    suman más que el techo y el conteo da 500 igual.
-
-  **Destrabe, hoy:** una salida manual que baje el esperado bajo el techo; después el conteo cierra.
-  **Arreglo probable (a decidir por el owner: es cuadratura de plata):** un guard **al entrar la
-  plata** —el movimiento manual, el pago en efectivo de una venta o un abono— que rechace con 400 lo
-  que dejaría el esperado sin caber, reusando `cabeEnColumnaDePlata`
-  (`common/utils/monto-persistible.util.ts`). En el conteo no sirve: el 400 deja la caja igual de
-  trabada.
 
 - [ ] **Pedir un plato cuyo precio no cabe en `NUMERIC(18,4)` da 500 en la línea de cuenta**
   (backend, `SalonesService.agregarLinea`; medido por HTTP el 2026-10-08 por el frente del guard del

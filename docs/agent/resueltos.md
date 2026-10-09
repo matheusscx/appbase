@@ -23,6 +23,63 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El conteo de caja ya no da 500 por un esperado que no cabe: se frena al entrar la plata (cerrada 2026-10-09)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Commit `ce3ab9d8`. La regla está en
+[`gestion-cajas.md`](../features/gestion-cajas.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **El conteo de una caja da 500 cuando el saldo esperado no cabe en `NUMERIC(18,4)`, y el
+  cajón queda ocupado** (backend, `CajaService.calcularEsperadoEfectivo` → `enviarConteo`; medido por
+  HTTP el 2026-10-08 por el frente del guard del motor, que **no** lo cierra: ver
+  [`resueltos.md`](resueltos.md#un-monto-calculado-que-no-cabe-en-numeric184-es-400-no-500-cerrada-2026-10-08)).
+  El esperado es `saldo inicial + entradas en efectivo − salidas`, y lo que desborda es la **suma**:
+  cada movimiento cabe en su columna. `caja_arqueo_medio.esperado` y `cajas.saldo_final` son
+  `NUMERIC(18,4)`. Dos formas medidas:
+  - **Sin ninguna venta:** abrir con `saldoInicial` 99.999.999.999.999 (el DTO solo exige que no sea
+    negativo) y registrar un movimiento manual de entrada de $1 → `POST /caja/:id/conteo` da **500**.
+  - **Con el guard del motor puesto:** dos ventas en efectivo que caben cada una (6×10^13 + 6×10^13)
+    suman más que el techo y el conteo da 500 igual.
+
+  **Destrabe, hoy:** una salida manual que baje el esperado bajo el techo; después el conteo cierra.
+  **Arreglo probable (a decidir por el owner: es cuadratura de plata):** un guard **al entrar la
+  plata** —el movimiento manual, el pago en efectivo de una venta o un abono— que rechace con 400 lo
+  que dejaría el esperado sin caber, reusando `cabeEnColumnaDePlata`
+  (`common/utils/monto-persistible.util.ts`). En el conteo no sirve: el 400 deja la caja igual de
+  trabada.
+
+### Qué se hizo
+
+**El owner decidió el 2026-10-09, a una pregunta de la orquestadora, que el freno va "al entrar
+la plata".** `CajaService.assertEntradasCaben` es la única función de juicio. Juzga con
+`cabeEnColumnaDePlata` lo que el arqueo congela. El efectivo se juzga con el mismo
+`calcularEsperadoEfectivo` del conteo, y cada medio que no es efectivo con la suma de sus
+entradas, que es lo que guarda `caja_arqueo_medio.esperado`. Ahí dos ventas con tarjeta también
+trababan la caja, y ni una salida la destrababa. Hay dos cosas que el chequeo no mira. La caja
+virtual queda afuera porque nunca se cuenta, y rechazar ahí dejaría un cobro de la pasarela sin
+venta. Las salidas restan, así que no se chequean. Corre bajo el `FOR UPDATE` de
+`bloquearCajaAbierta`, que ya tomaban todos los llamadores de caja física.
+
+`registrarMovimientoEnTransaccion` lo aplica a los llamadores sueltos: el movimiento manual y la
+reversa de compras. `PagosService.registrar` lo hace **una vez por venta**, con los netos de
+todos los pagos (monto menos vuelto). Son 2 o 3 queries fijas, sin importar cuántos pagos haya.
+Después marca `topeYaVerificado`. Una primera versión consultaba por cada pago y se rehízo por
+N+1. `abrir` rechaza un saldo inicial que no cabe. El mensaje no lleva el esperado, porque en modo
+ciego lo entregaría.
+
+La fija `backend/test/caja-esperado-no-cabe.e2e-spec.ts`, con 10 casos. Cubre la apertura, el
+movimiento manual, el POS en efectivo, el POS con otro medio, la caja virtual, el abono, el cierre
+de cuenta del salón, la reversa de proveedor, y una venta de dos pagos en efectivo que juntos
+desbordan. En cada uno se ve el 400, que no se escribió nada, y que **el conteo cierra**. También
+hay unitarios en `caja.service.spec.ts` y `pagos.service.spec.ts`. Los 13 mutantes caen, y entre
+ellos está "PagosService sin batch pero con el flag", que lo cazan cinco e2e.
+
+**Lo que quedó afuera:** cuatro residuos, ninguno traba una caja, en
+[`pendientes.md`](pendientes.md) § 2 (*"Lo que dejó el frente del tope del esperado de caja"*).
+
+---
+
 ## Dos avisos del cálculo: la suscripción de la tienda dice el motivo, y un 401 ya no dice "Unauthorized" (cerrada 2026-10-09)
 
 Sale de [`pendientes.md`](pendientes.md) § 1, las dos entradas que dejó el frente del motivo del
