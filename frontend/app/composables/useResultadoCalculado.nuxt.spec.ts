@@ -424,6 +424,18 @@ describe('avisoCalculoFallido', () => {
     expect(aviso).toEqual({ title: 'No se pudo calcular el total. Intentá de nuevo.' })
   })
 
+  it('un 401 (sesión caída, el redirect a login ya va en camino) no muestra "Unauthorized" ni el mensaje del servidor', () => {
+    const aviso = avisoCalculoFallido(errorHttp(401, 'Unauthorized'))
+    expect(aviso).toEqual({ title: 'No se pudo calcular el total. Intentá de nuevo.' })
+    expect(JSON.stringify(aviso)).not.toContain('Unauthorized')
+    expect(avisoCalculoFallido(errorHttp(401, 'Token vencido por el servidor')).description).toBeUndefined()
+  })
+
+  it('un 403 y un 404 siguen llevando el motivo: el 401 es la única excepción', () => {
+    expect(avisoCalculoFallido(errorHttp(403, 'Sin permiso')).description).toBe('Sin permiso')
+    expect(avisoCalculoFallido(errorHttp(404, 'Ítem no encontrado')).description).toBe('Ítem no encontrado')
+  })
+
   it('un 5xx pide reintentar aunque traiga mensaje', () => {
     expect(avisoCalculoFallido(errorHttp(500, 'Internal server error')))
       .toEqual({ title: 'No se pudo calcular el total. Intentá de nuevo.' })

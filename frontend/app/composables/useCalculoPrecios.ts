@@ -157,6 +157,11 @@ export function useCalculoPrecios() {
  * verdad. Hasta el 2026-10-08 los dos decían "Intentá de nuevo": quien cobraba
  * reintentaba sin saber qué revisar.
  *
+ * **El 401 es la excepción**: `useApiFetch` ya intentó el refresh, y si falló
+ * limpia la sesión y manda a `/login` (sin aviso propio). Ese "Unauthorized" no
+ * es un motivo del carrito sino la sesión cayéndose, y mostrarlo un instante
+ * antes del redirect confunde; cae al título genérico.
+ *
  * Sin reintento automático: la app avisa y la persona decide.
  *
  * `detalleLocal: false` porque el `message` de un error de red de ofetch trae la
@@ -168,7 +173,7 @@ export function avisoCalculoFallido(
 ): { title: string, description?: string } {
   const status = (e as { status?: number })?.status
     ?? (e as { response?: { status?: number } })?.response?.status
-  if (status !== undefined && status >= 400 && status < 500) {
+  if (status !== undefined && status >= 400 && status < 500 && status !== 401) {
     const motivo = apiErrorMsg(e, '', { detalleLocal: false })
     if (motivo) return { title: titulo, description: motivo }
   }

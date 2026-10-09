@@ -167,8 +167,13 @@ const calculoInput = computed(() =>
     ? { lineas: [{ itemId: itemSeleccionado.value.id, cantidad: '1' }] }
     : null,
 )
-const { resultado: calculo, vigente: calculoVigente, loading: calculando }
-  = useResultadoCalculado(() => calculoInput.value, { debounceMs: 250 })
+const {
+  resultado: calculo,
+  vigente: calculoVigente,
+  loading: calculando,
+  error: errorCalculo,
+  asegurarVigente,
+} = useResultadoCalculado(() => calculoInput.value, { debounceMs: 250 })
 
 /** El total que se le va a cobrar. `null` mientras el cálculo no esté vigente. */
 const totalACobrar = computed(() =>
@@ -241,6 +246,15 @@ async function confirmar() {
   if (!item || !selectedInscripcionId.value) return
   confirmando.value = true
   try {
+    // Mismo guard que la tienda y el POS: se paga sobre el total que el cliente está
+    // viendo, y si el cálculo falló se dice por qué (y se reintenta, que `asegurarVigente`
+    // recalcula) en vez de dejar "Total a cobrar: —" mudo. El selector de ítem queda
+    // deshabilitado mientras `confirmando`: si no, cambiar de ítem durante esta espera
+    // validaría el total de uno y daría de alta el `item` capturado arriba.
+    if (!await asegurarVigente()) {
+      toast.add({ ...avisoCalculoFallido(errorCalculo.value), color: 'error' })
+      return
+    }
     const { diaMes, diaSemana } = diasDePayload(item)
     const { advertencias } = await crear({
       itemId: item.id,
@@ -474,7 +488,7 @@ onMounted(async () => {
                   :catalogo="catalogoItems"
                   :filtros="FILTROS_SUSCRIBIBLE"
                   :etiqueta="etiquetaSuscribible"
-                  :disabled="!oneclickDisponible"
+                  :disabled="!oneclickDisponible || confirmando"
                   placeholder="Elegí una suscripción del catálogo"
                   class="w-full"
                 />

@@ -23,6 +23,54 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Dos avisos del cálculo: la suscripción de la tienda dice el motivo, y un 401 ya no dice "Unauthorized" (cerrada 2026-10-09)
+
+Sale de [`pendientes.md`](pendientes.md) § 1, las dos entradas que dejó el frente del motivo del
+400 (`fda77f89`).
+
+### Las entradas que cierran, como estaban en `pendientes.md` § 1
+
+- [ ] **La suscripción de la tienda descarta el error de `/calcular` y deja pagar sin total**
+  (frontend, `frontend/app/pages/tienda/suscripciones.vue`, que usa `useResultadoCalculado` en la
+  línea 171 y no lee su error; visto el 2026-10-08 por el domain-reviewer del frente "la
+  previsualización dice el motivo de un 400", **leído, no medido**). Con un 400 de `/calcular`, el
+  drawer muestra "Total a cobrar por período: —" sin decir por qué, y "Suscribirme y pagar" queda
+  habilitado. **Arreglo:** el mismo que el POS, la tienda y el salón. Usar `avisoCalculoFallido`
+  (`composables/useCalculoPrecios.ts`) para el motivo y deshabilitar el botón mientras no haya un
+  total, con su spec de pantalla y el mutante.
+
+- [ ] **Un 401 que termina en logout muestra "Unauthorized" un instante en el aviso del cálculo**
+  (frontend, `avisoCalculoFallido` en `composables/useCalculoPrecios.ts`; cosmético, lo introdujo
+  el frente del motivo del 400 y lo vio su revisor, **leído, no medido**). La rama del motivo toma
+  cualquier 4xx, también un 401 cuyo refresh falla, así que el toast dice "Unauthorized" justo antes
+  de ir al login. **Arreglo:** excluir el 401 de esa rama, con un unitario.
+
+### Qué se hizo
+
+- **Suscripción de la tienda** (`pages/tienda/suscripciones.vue`). El bug se confirmó leyendo el
+  código: la página no tomaba el `error` de `useResultadoCalculado` y el botón no miraba el total.
+  Se siguió la forma de la tienda y el POS: el botón queda habilitado y `confirmar()` hace
+  `asegurarVigente()` antes de pagar. Si el cálculo no está vigente, lo recalcula, y si falla sale
+  el toast de `avisoCalculoFallido` y no se da de alta nada. Una primera versión con `watch` sobre
+  el error más el botón deshabilitado la frenó la revisión independiente por dos bordes. El primero:
+  al reabrir el drawer con el mismo ítem que falló, el fallo viejo sobrevivía y salían dos toasts.
+  El segundo: tras un 5xx pasajero el botón quedaba trabado sin reintento. Tres casos de
+  `suscripciones.nuxt.spec.ts` lo fijan. Con un 400 sale un solo toast y no hay `POST
+  /suscripciones`. Con un 503 y después un éxito, el clic recalcula y suscribe. Con total, el flujo
+  normal sigue. Con el `.vue` original fallan el del 400 y el del reintento. La segunda revisión vio
+  una carrera que abría el `await` nuevo. `confirmar()` captura el `item` antes de esperar, así que
+  cambiar de ítem durante la espera validaba el total de uno y daba de alta el otro. El backend
+  igual recalcula el monto. Para cerrarla, el selector de ítem queda deshabilitado mientras
+  `confirmando`. Lo fija un cuarto caso, en el que el recálculo queda colgado y el selector
+  deshabilitado. El mutante sin `|| confirmando` lo hace fallar.
+- **401** (`avisoCalculoFallido`). La rama del motivo excluye el 401, que cae al título genérico:
+  `useApiFetch` ya intentó el refresh y, si falló, manda a `/login` sin aviso propio. El 403 y el
+  404 siguen mostrando el motivo. Hay dos unitarios en `useResultadoCalculado.nuxt.spec.ts`. Con el
+  composable original falla el del 401, y el del 403/404 pasa también con el original porque es el
+  control.
+
+---
+
 ## El historial de cajas es de supervisión: el cajero ve solo su turno en curso (cerrada 2026-10-08)
 
 Sale de [`pendientes.md`](pendientes.md) § 3, residuo 2 de *"Lo que quedó del frente del modo

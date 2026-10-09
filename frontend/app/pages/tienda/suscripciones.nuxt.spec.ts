@@ -10,7 +10,11 @@
 //     término tipeado, con `pageSize=20`;
 //   - un ítem que llegó por búsqueda alcanza para los días y para el preview de
 //     precio (`itemSeleccionado` lee el caché `porId`);
-//   - un ítem sin `frecuencia` no se puede confirmar.
+//   - un ítem sin `frecuencia` no se puede confirmar;
+//   - al confirmar se espera el cálculo vigente (igual que la tienda y el POS): si falla,
+//     un solo toast con el motivo y no se crea la suscripción; si el fallo fue transitorio,
+//     confirmar reintenta el cálculo y sigue (antes un 400 dejaba "Total a cobrar: —" mudo
+//     y se podía pagar sin total).
 //
 // Abrirlo exige `puedeCrear`, gateado por `usePermissionsStore`. El molde de ESE
 // mock es `terceros.nuxt.spec.ts`: Nuxt instala su propia instancia de Pinia, así
@@ -46,19 +50,61 @@ const SIN_FRECUENCIA = {
 let urlsCatalogo: string[] = []
 /** Cada body que se mandó a `POST /calculo-precios/calcular` (el preview). */
 let calculos: { lineas: { itemId: string }[] }[] = []
+/** Si no es `null`, `POST /calculo-precios/calcular` rechaza con este error... */
+let falloCalculo: unknown = null
+/** ...las próximas N veces; después contesta bien (un fallo transitorio). */
+let fallosRestantes = 0
+/** Cada `POST /suscripciones` (el alta que cobra). */
+let altas: unknown[] = []
+/** Si está puesto, el próximo `/calcular` queda colgado hasta que se llame. */
+let soltarCalculo: (() => void) | null = null
+let retenerCalculo = false
+/** Tarjetas que devuelve `GET /online/medios-pago`. */
+let medios: unknown[] = []
+
+interface ToastSpec { title?: string, description?: string, color?: string }
+let toasts: ToastSpec[] = []
+mockNuxtImport('useToast', () => {
+  return () => ({
+    add: (t: ToastSpec) => {
+      toasts.push(t)
+    },
+  })
+})
+
+/** El 400 del motor tal como lo arma `$fetch`: `status` + cuerpo con `message`.
+ *  El mock de `useApiFetch` contesta 200 salvo que se lo haga rechazar a mano. */
+function error400(message: string) {
+  return Object.assign(new Error('[POST] calcular: 400'), { status: 400, data: { message } })
+}
+const TARJETA = {
+  inscripcionId: 'insc-1', estado: 'activa', preferida: true, creadoEl: '2026-01-01',
+  suscripcionesActivas: 0,
+  mediosPago: [{ tipo: 'credito', marca: 'Visa', ultimos4: '4242', estado: 'activa' }],
+}
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { body?: { lineas: { itemId: string }[] } }) => {
     if (typeof url !== 'string') return Promise.resolve([])
     const ruta = url.split('?')[0] ?? ''
 
-    if (ruta.endsWith('/suscripciones')) return Promise.resolve([])
+    if (ruta.endsWith('/suscripciones')) {
+      if ((opts as { method?: string } | undefined)?.method === 'POST') {
+        altas.push(opts)
+        return Promise.resolve({ id: 'susc-nueva', advertencias: [] })
+      }
+      return Promise.resolve([])
+    }
     if (ruta.endsWith('/online/medios-pago')) {
-      return Promise.resolve({ oneclickDisponible: true, medios: [] })
+      return Promise.resolve({ oneclickDisponible: true, medios })
     }
     if (ruta.endsWith('/calculo-precios/calcular')) {
       calculos.push(opts!.body!)
-      return Promise.resolve({
+      if (falloCalculo && fallosRestantes > 0) {
+        fallosRestantes--
+        return Promise.reject(falloCalculo)
+      }
+      const respuesta = {
         lineas: [],
         totales: {
           subtotalNeto: '10000', totalDescuentos: '0', totalRecargos: '0',
@@ -67,7 +113,14 @@ mockNuxtImport('useApiFetch', () => {
         trazasVenta: { descuentos: [], recargos: [] },
         advertencias: [],
         advertenciasVenta: [],
-      })
+      }
+      if (retenerCalculo) {
+        retenerCalculo = false
+        return new Promise((resolve) => {
+          soltarCalculo = () => resolve(respuesta)
+        })
+      }
+      return Promise.resolve(respuesta)
     }
     if (ruta.includes('/items')) {
       urlsCatalogo.push(url)
@@ -90,10 +143,39 @@ beforeEach(() => {
   esAdmin = true
   urlsCatalogo = []
   calculos = []
+  falloCalculo = null
+  fallosRestantes = 0
+  altas = []
+  medios = []
+  toasts = []
+  soltarCalculo = null
+  retenerCalculo = false
 })
 
+/**
+ * `AppDrawer` stubeado, como en `ventas/VentaDetalleDrawer.nuxt.spec.ts`: su root es
+ * `UDrawer` (reka-ui) y bajo happy-dom la transición de `usePresence` tira unhandled
+ * rejections al CERRARSE (lo que hace el alta exitosa) que sacan a `vitest run` con exit 1.
+ */
 async function montar() {
-  const wrapper = await mountSuspended(Suscripciones)
+  const wrapper = await mountSuspended(Suscripciones, {
+    attachTo: document.body,
+    global: {
+      stubs: {
+        AppDrawer: {
+          name: 'AppDrawer',
+          props: ['open'],
+          template: `
+            <div v-if="open" role="dialog">
+              <slot name="header" />
+              <slot name="body" />
+              <slot name="actions" />
+            </div>
+          `,
+        },
+      },
+    },
+  })
   montado = wrapper
   await new Promise(r => setTimeout(r, 0))
   return wrapper
@@ -215,5 +297,89 @@ describe('tienda/suscripciones — el selector de ítem suscribible busca en el 
       .find(b => b.textContent?.trim() === 'Suscribirme y pagar') as HTMLButtonElement | undefined
     expect(confirmar, 'botón confirmar').toBeTruthy()
     expect(confirmar!.disabled).toBe(true)
+  })
+})
+
+describe('tienda/suscripciones — confirmar espera el cálculo vigente', () => {
+  const botonConfirmar = () => [...document.body.querySelectorAll('button')]
+    .find(b => b.textContent?.trim() === 'Suscribirme y pagar') as HTMLButtonElement | undefined
+
+  async function confirmar() {
+    expect(botonConfirmar(), 'botón confirmar').toBeTruthy()
+    botonConfirmar()!.click()
+    await new Promise(r => setTimeout(r, 400))
+  }
+
+  it('con el cálculo en 400: un solo toast con el motivo y no se crea la suscripción', async () => {
+    medios = [TARJETA]
+    falloCalculo = error400('La cantidad supera el máximo permitido')
+    fallosRestantes = Infinity
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegir(wrapper, SEMANAL.id)
+    expect(toasts, 'el preview solo muestra "—", el aviso sale al confirmar').toEqual([])
+
+    await confirmar()
+
+    expect(toasts).toEqual([{
+      title: 'No se pudo calcular el total',
+      description: 'La cantidad supera el máximo permitido',
+      color: 'error',
+    }])
+    expect(altas).toHaveLength(0)
+  })
+
+  it('tras un fallo transitorio, confirmar reintenta el cálculo y suscribe', async () => {
+    medios = [TARJETA]
+    falloCalculo = Object.assign(new Error('network'), { status: 503 })
+    fallosRestantes = 1
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegir(wrapper, SEMANAL.id)
+    const intentosAntes = calculos.length
+    expect(intentosAntes, 'el primer cálculo falló').toBe(1)
+    expect(textoDrawer()).not.toContain('Neto')
+
+    await confirmar()
+
+    expect(calculos.length, 'confirmar volvió a calcular').toBe(intentosAntes + 1)
+    expect(altas).toHaveLength(1)
+    expect(toasts.some(t => t.color === 'error')).toBe(false)
+    expect(toasts.some(t => t.title === 'Suscripción activada y primer cobro realizado')).toBe(true)
+  })
+
+  it('mientras confirmar espera el cálculo, el selector de ítem no se puede cambiar', async () => {
+    medios = [TARJETA]
+    falloCalculo = Object.assign(new Error('network'), { status: 503 })
+    fallosRestantes = 1
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegir(wrapper, SEMANAL.id)
+    const selector = () => wrapper.findComponent({ name: 'AppItemSelect' })
+    expect(selector().props('disabled'), 'antes de confirmar se puede elegir').toBe(false)
+
+    retenerCalculo = true
+    botonConfirmar()!.click()
+    await new Promise(r => setTimeout(r, 50))
+    expect(soltarCalculo, 'confirmar quedó esperando el recálculo').toBeTruthy()
+    expect(selector().props('disabled')).toBe(true)
+
+    soltarCalculo!()
+    await new Promise(r => setTimeout(r, 400))
+    expect(altas).toHaveLength(1)
+  })
+
+  it('con total calculado: el flujo normal suscribe sin recalcular', async () => {
+    medios = [TARJETA]
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegir(wrapper, SEMANAL.id)
+    const intentosAntes = calculos.length
+
+    await confirmar()
+
+    expect(calculos.length).toBe(intentosAntes)
+    expect(altas).toHaveLength(1)
+    expect(toasts.some(t => t.color === 'error')).toBe(false)
   })
 })
