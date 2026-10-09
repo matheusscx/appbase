@@ -294,6 +294,21 @@ export class PagosService {
       }
     }
 
+    // El tope de la columna, de TODOS los pagos juntos y antes de escribir el
+    // primero: cada pago puede caber solo y desbordar el esperado en conjunto.
+    // Una sola tanda de lecturas por venta, no una por pago —los movimientos de
+    // abajo llevan `topeYaVerificado` justamente porque esto ya los juzgó—. Corre
+    // bajo el `FOR UPDATE` de la caja que tomó el llamador. El neto es lo que
+    // entra a la caja: el monto menos el vuelto que devuelve ese mismo pago.
+    await this.cajaService.assertEntradasCaben(
+      manager,
+      cajaId,
+      pagos.map((p, i) => ({
+        metodoPagoId: p.metodoPagoId,
+        monto: new Decimal(p.monto).minus(vueltoPorIdx.get(i) ?? 0).toFixed(4),
+      })),
+    );
+
     // Guardar pagos
     const pagosGuardados: Pago[] = [];
     for (let i = 0; i < pagos.length; i++) {
@@ -380,6 +395,7 @@ export class PagosService {
         ventaId,
         pagoId: pagosGuardados[i].id,
         metodoPagoId: p.metodoPagoId,
+        topeYaVerificado: true,
       });
     }
 

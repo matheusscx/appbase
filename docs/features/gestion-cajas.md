@@ -1124,6 +1124,40 @@ por medio (`calcularArqueo` arma una sola de efectivo y una por medio con `GROUP
 repetido solo llega de un cliente de la API. Detalle y
 mutantes: [`resueltos.md`](../agent/resueltos.md), "Ids en mayúsculas en el cierre de caja…".
 
+### El esperado que no cabe en la columna se frena al entrar la plata (2026-10-09)
+
+El esperado de cada línea del arqueo se congela en `caja_arqueo_medio.esperado` y, el de efectivo,
+también en `cajas.saldo_final`: `NUMERIC(18,4)`, menos de 10^14. Cada movimiento cabe en su
+columna; lo que desborda es la **suma** (`saldo inicial + entradas − salidas`), y el conteo daba
+500 con la caja trabada hasta que alguien registraba una salida. Decisión del owner: el freno va
+**al entrar la plata**, no en el conteo (un 400 ahí dejaría la caja igual de trabada). Toda entrada
+que dejaría el esperado de su línea sin caber es **400**, con `cabeEnColumnaDePlata`
+(`common/utils/monto-persistible.util.ts`), y no escribe nada. Consecuencia aceptada: una venta así
+no se cobra en esa caja con ese medio.
+
+- **Un solo punto:** `CajaService.registrarMovimientoEnTransaccion` (tipo `entrada`) es por donde
+  entra toda plata a una caja: el movimiento manual, el pago de una venta por cualquier canal (POS,
+  cierre de cuenta del salón, abono) y la reversa del pago a un proveedor. El saldo inicial se mira
+  aparte, en `abrir` (también es un sumando).
+- **Una tanda de lecturas por operación, no por pago:** el juicio vive en
+  `CajaService.assertEntradasCaben(manager, cajaId, entradas[])`, que acumula en memoria lo que suma
+  cada línea y hace a lo sumo tres queries (la caja y los medios, el esperado de efectivo, las sumas
+  por medio) sin importar cuántas entradas lleve. `PagosService.registrar` lo llama **una vez, antes
+  de escribir el primer pago**, con los netos (monto − vuelto) de todos, y manda
+  `topeYaVerificado: true` en sus movimientos para que no lo repitan. El default del movimiento
+  chequea: quien llame sin el flag queda protegido. Dos pagos que caben cada uno y desbordan juntos
+  son 400 sin escribir ninguno.
+- **Qué línea se mira:** efectivo y movimiento manual contra el esperado de efectivo
+  (`calcularEsperadoEfectivo`, el mismo cálculo del conteo); cada medio que no es efectivo contra la
+  suma de sus entradas (`calcularArqueo` la guarda en la misma columna).
+- **La caja virtual queda afuera:** nunca se cuenta ni se cierra, no congela esperado, y rechazar un
+  cobro que la pasarela ya capturó dejaría plata cobrada sin venta.
+- **Concurrencia:** corre bajo el `FOR UPDATE` de `bloquearCajaAbierta` que cada camino toma antes
+  (la virtual es la única que no lo toma, y está afuera del chequeo).
+- El mensaje no lleva el esperado: en modo ciego el cajero no lo ve.
+
+Test: `backend/test/caja-esperado-no-cabe.e2e-spec.ts`, un caso por camino.
+
 ### Motivos de diferencia — catálogo admin-only
 
 Igual patrón que `motivo_baja` (mermas de inventario): catálogo por tenant, admin-only,

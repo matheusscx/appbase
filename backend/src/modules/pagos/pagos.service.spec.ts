@@ -136,6 +136,7 @@ describe('PagosService', () => {
             findActiva: jest.fn().mockResolvedValue(cajaActiva),
             bloquearCajaAbierta: jest.fn().mockResolvedValue(undefined),
             registrarMovimientoEnTransaccion: jest.fn().mockResolvedValue({}),
+            assertEntradasCaben: jest.fn().mockResolvedValue(undefined),
           },
         },
         {
@@ -264,6 +265,78 @@ describe('PagosService', () => {
       expect(result.montoAplicadoVenta).toBe('100.0000');
 
       expect(cajaSvc.registrarMovimientoEnTransaccion).toHaveBeenCalledTimes(1);
+    });
+
+    // El tope de la columna se juzga UNA vez por venta, con los netos de todos
+    // los pagos juntos y antes de escribir el primero. El flag de cada
+    // movimiento es lo que evita repetirlo por pago: el e2e
+    // `caja-esperado-no-cabe` prueba que el batch de verdad corre.
+    it('juzga el tope de todos los pagos juntos, una vez y antes de escribir; los movimientos no lo repiten', async () => {
+      const manager = buildManagerMock([
+        ...METODO_EFECTIVO_ROWS,
+        ...METODO_TARJETA_ROWS,
+      ]);
+      const module: TestingModule = await setupModule(manager);
+      const svc = module.get<PagosService>(PagosService);
+      const cajaSvc = module.get<jest.Mocked<CajaService>>(CajaService);
+
+      await svc.registrar(manager as unknown as EntityManager, {
+        tenantId: TENANT_ID,
+        ventaId: VENTA_ID,
+        pagos: [
+          { metodoPagoId: EFECTIVO_ID, monto: '60.0000' },
+          { metodoPagoId: TARJETA_ID, monto: '40.0000' },
+        ],
+        cajaId: CAJA_ID,
+        monedaOficialId: MONEDA_ID,
+        target: '100.0000',
+      });
+
+      expect(cajaSvc.assertEntradasCaben).toHaveBeenCalledTimes(1);
+      expect(cajaSvc.assertEntradasCaben).toHaveBeenCalledWith(
+        manager,
+        CAJA_ID,
+        [
+          { metodoPagoId: EFECTIVO_ID, monto: '60.0000' },
+          { metodoPagoId: TARJETA_ID, monto: '40.0000' },
+        ],
+      );
+      // Antes de la primera escritura.
+      expect(
+        cajaSvc.assertEntradasCaben.mock.invocationCallOrder[0],
+      ).toBeLessThan(manager.save.mock.invocationCallOrder[0]);
+      expect(cajaSvc.registrarMovimientoEnTransaccion).toHaveBeenCalledTimes(2);
+      for (const [, params] of cajaSvc.registrarMovimientoEnTransaccion.mock
+        .calls) {
+        expect(params).toMatchObject({ topeYaVerificado: true });
+      }
+    });
+
+    it('si el tope no cabe, no escribe ningún pago ni movimiento', async () => {
+      const manager = buildManagerMock(METODO_EFECTIVO_ROWS);
+      const module: TestingModule = await setupModule(manager);
+      const svc = module.get<PagosService>(PagosService);
+      const cajaSvc = module.get<jest.Mocked<CajaService>>(CajaService);
+      cajaSvc.assertEntradasCaben.mockRejectedValueOnce(
+        new BadRequestException('no cabe'),
+      );
+
+      await expect(
+        svc.registrar(manager as unknown as EntityManager, {
+          tenantId: TENANT_ID,
+          ventaId: VENTA_ID,
+          pagos: [
+            { metodoPagoId: EFECTIVO_ID, monto: '50.0000' },
+            { metodoPagoId: EFECTIVO_ID, monto: '50.0000' },
+          ],
+          cajaId: CAJA_ID,
+          monedaOficialId: MONEDA_ID,
+          target: '100.0000',
+        }),
+      ).rejects.toThrow('no cabe');
+
+      expect(manager.save).not.toHaveBeenCalled();
+      expect(cajaSvc.registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
     });
 
     it('persiste aplicación venta y propina con cobro mixto (orden-independiente)', async () => {
@@ -519,6 +592,10 @@ describe('PagosService', () => {
         (c) => (c[1] as { monto: string }).monto,
       );
       expect(montos).toEqual(['30.0000', '20.0000', '70.0000']);
+      // El tope se juzga con esos mismos netos (lo que de verdad entra a la
+      // caja), no con el monto bruto de cada pago.
+      const [, , entradas] = cajaSvc.assertEntradasCaben.mock.calls[0];
+      expect(entradas.map((e) => e.monto)).toEqual(montos);
     });
 
     it('rechaza el excedente que no se puede devolver: los métodos sin vuelto superan el target', async () => {

@@ -44,6 +44,9 @@ const mockCajaAbierta: Partial<Caja> = {
   cerradaPor: null,
 };
 
+/** La fila que vuelve cuando la entrada no trae medio (movimiento manual). */
+const SIN_MEDIO = { metodo_pago_id: null, es_efectivo: false, nombre: null };
+
 describe('CajaService', () => {
   let service: CajaService;
   let cajaRepo: {
@@ -200,7 +203,10 @@ describe('CajaService', () => {
         .mockResolvedValueOnce([{ caja_id: CAJA_ID }]) // FOR UPDATE
         .mockResolvedValueOnce([
           { saldo_inicial: '1000', total_entradas: null, total_salidas: null },
-        ]);
+        ])
+        // El tope de la columna: línea del medio y esperado de efectivo.
+        .mockResolvedValueOnce([SIN_MEDIO])
+        .mockResolvedValueOnce([{ saldo_inicial: '1000' }]);
       const movCreado = {
         id: 'mov-001',
         cajaId: CAJA_ID,
@@ -1213,6 +1219,7 @@ describe('CajaService', () => {
     // pago devuelto íntegro como vuelto deja neto 0 y esa venta es legítima.
     // Exigir positivo acá la tumbaba entera con 422 (lo cazó la revisión).
     it.each([['0.0000'], ['500.0000']])('acepta monto %s', async (monto) => {
+      managerMock.query.mockResolvedValueOnce([]); // caja virtual: sin tope
       managerMock.save.mockResolvedValueOnce({ id: 'mov-1' });
       await service.registrarMovimientoEnTransaccion(managerMock as never, {
         cajaId: CAJA_ID,
@@ -1221,6 +1228,233 @@ describe('CajaService', () => {
         monto,
       });
       expect(managerMock.save).toHaveBeenCalled();
+    });
+  });
+
+  // El esperado se congela en una columna NUMERIC(18,4) y lo que desborda es la
+  // SUMA: cada movimiento cabe. El freno va al entrar la plata (owner,
+  // 2026-10-09); el e2e `caja-esperado-no-cabe` lo mide por HTTP.
+  describe('assertEntradasCaben: el esperado no puede dejar de caber', () => {
+    const METODO = 'dddddddd-0000-0000-0000-000000000004';
+    const OTRO = 'dddddddd-0000-0000-0000-000000000005';
+    const TARJETA = {
+      metodo_pago_id: METODO,
+      es_efectivo: false,
+      nombre: 'Tarjeta',
+    };
+    const CHEQUE = {
+      metodo_pago_id: OTRO,
+      es_efectivo: false,
+      nombre: 'Cheque',
+    };
+    const EFECTIVO = {
+      metodo_pago_id: OTRO,
+      es_efectivo: true,
+      nombre: 'Efectivo',
+    };
+    const esperadoDe = (saldo: string, entradas: string | null = null) => [
+      { saldo_inicial: saldo, entradas_efectivo: entradas, salidas: null },
+    ];
+    const caben = (
+      entradas: { metodoPagoId: string | null; monto: string }[],
+    ) => service.assertEntradasCaben(managerMock as never, CAJA_ID, entradas);
+    const entrada = (monto: string, metodoPagoId?: string) =>
+      service.registrarMovimientoEnTransaccion(managerMock as never, {
+        cajaId: CAJA_ID,
+        tipo: 'entrada',
+        concepto: 'prueba',
+        monto,
+        metodoPagoId,
+      });
+
+    it('efectivo: una entrada que lleva el esperado al techo es 400 y no escribe', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([SIN_MEDIO])
+        .mockResolvedValueOnce(esperadoDe('99999999999999'));
+      await expect(entrada('1')).rejects.toBeInstanceOf(BadRequestException);
+      expect(managerMock.save).not.toHaveBeenCalled();
+    });
+
+    it('efectivo: el esperado cuenta las entradas y descuenta las salidas', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([SIN_MEDIO])
+        .mockResolvedValueOnce([
+          {
+            saldo_inicial: '0',
+            entradas_efectivo: '90000000000000',
+            salidas: '10000000000000',
+          },
+        ]);
+      managerMock.save.mockResolvedValueOnce({ id: 'mov-1' });
+      // 80.000.000.000.000 + 19.999.999.999.999 = 99.999.999.999.999: cabe justo.
+      await entrada('19999999999999');
+      expect(managerMock.save).toHaveBeenCalled();
+    });
+
+    it('efectivo: lo que llega justo al máximo que cabe pasa, y un centavo de más no', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([SIN_MEDIO])
+        .mockResolvedValueOnce(esperadoDe('99999999999998'));
+      managerMock.save.mockResolvedValueOnce({ id: 'mov-1' });
+      await entrada('1.9999');
+      expect(managerMock.save).toHaveBeenCalled();
+
+      managerMock.query
+        .mockResolvedValueOnce([SIN_MEDIO])
+        .mockResolvedValueOnce(esperadoDe('99999999999998'));
+      await expect(entrada('2')).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('medio que no es efectivo: suma las entradas de ESE medio', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([TARJETA])
+        .mockResolvedValueOnce([
+          { metodo_pago_id: METODO, entradas: '60000000000000' },
+        ]);
+      await expect(entrada('60000000000000', METODO)).rejects.toThrow(
+        /Tarjeta/,
+      );
+      expect(managerMock.save).not.toHaveBeenCalled();
+      // La suma es por (caja, medios): el efectivo no entra en la cuenta.
+      expect(managerMock.query.mock.calls[1][1]).toEqual([CAJA_ID, [METODO]]);
+    });
+
+    it('medio que no es efectivo: lo que cabe pasa, y sin entradas previas también', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([TARJETA])
+        .mockResolvedValueOnce([
+          { metodo_pago_id: METODO, entradas: '60000000000000' },
+        ]);
+      managerMock.save.mockResolvedValueOnce({ id: 'mov-1' });
+      await entrada('39999999999999', METODO);
+      expect(managerMock.save).toHaveBeenCalled();
+
+      managerMock.query
+        .mockResolvedValueOnce([TARJETA])
+        .mockResolvedValueOnce([]);
+      managerMock.save.mockResolvedValueOnce({ id: 'mov-2' });
+      await entrada('99999999999999', METODO);
+      expect(managerMock.save).toHaveBeenCalledTimes(2);
+    });
+
+    it('caja virtual (sin fila): no se mira nada más, un cobro ya capturado no se rechaza', async () => {
+      managerMock.query.mockResolvedValueOnce([]);
+      managerMock.save.mockResolvedValueOnce({ id: 'mov-1' });
+      await entrada('99999999999999', METODO);
+      expect(managerMock.query).toHaveBeenCalledTimes(1);
+      expect(managerMock.save).toHaveBeenCalled();
+    });
+
+    it('una salida no consulta el tope: resta del esperado', async () => {
+      managerMock.save.mockResolvedValueOnce({ id: 'mov-1' });
+      await service.registrarMovimientoEnTransaccion(managerMock as never, {
+        cajaId: CAJA_ID,
+        tipo: 'salida',
+        concepto: 'prueba',
+        monto: '5',
+      });
+      expect(managerMock.query).not.toHaveBeenCalled();
+      expect(managerMock.save).toHaveBeenCalled();
+    });
+
+    it('topeYaVerificado: el movimiento no repite el chequeo (el default sí)', async () => {
+      managerMock.save.mockResolvedValue({ id: 'mov-1' });
+      await service.registrarMovimientoEnTransaccion(managerMock as never, {
+        cajaId: CAJA_ID,
+        tipo: 'entrada',
+        concepto: 'prueba',
+        monto: '5',
+        topeYaVerificado: true,
+      });
+      expect(managerMock.query).not.toHaveBeenCalled();
+      expect(managerMock.save).toHaveBeenCalledTimes(1);
+
+      managerMock.query.mockResolvedValueOnce([]);
+      await entrada('5');
+      expect(managerMock.query).toHaveBeenCalledTimes(1);
+    });
+
+    describe('en tanda (los pagos de una venta)', () => {
+      it('dos pagos que caben cada uno y desbordan juntos: 400', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([EFECTIVO])
+          .mockResolvedValueOnce(esperadoDe('0'));
+        await expect(
+          caben([
+            { metodoPagoId: OTRO, monto: '60000000000000' },
+            { metodoPagoId: OTRO, monto: '40000000000000' },
+          ]),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      });
+
+      it('los mismos dos pagos que sí caben juntos pasan', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([EFECTIVO])
+          .mockResolvedValueOnce(esperadoDe('0'));
+        await caben([
+          { metodoPagoId: OTRO, monto: '60000000000000' },
+          { metodoPagoId: OTRO, monto: '39999999999999' },
+        ]);
+      });
+
+      it('efectivo y otro medio se cuentan por separado: cada línea contra su propio esperado', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([EFECTIVO, TARJETA])
+          .mockResolvedValueOnce(esperadoDe('0'))
+          .mockResolvedValueOnce([]);
+        // 60 + 60 = 120 NO se suma: uno es efectivo y el otro tarjeta.
+        await caben([
+          { metodoPagoId: OTRO, monto: '60000000000000' },
+          { metodoPagoId: METODO, monto: '60000000000000' },
+        ]);
+      });
+
+      it('dos pagos con el mismo medio que no es efectivo suman entre sí y con lo previo', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([TARJETA])
+          .mockResolvedValueOnce([
+            { metodo_pago_id: METODO, entradas: '20000000000000' },
+          ]);
+        await expect(
+          caben([
+            { metodoPagoId: METODO, monto: '40000000000000' },
+            { metodoPagoId: METODO, monto: '40000000000000' },
+          ]),
+        ).rejects.toThrow(/Tarjeta/);
+      });
+
+      it('cada medio sin efectivo se juzga con su propia suma previa', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([TARJETA, CHEQUE])
+          .mockResolvedValueOnce([
+            { metodo_pago_id: METODO, entradas: '10000000000000' },
+            { metodo_pago_id: OTRO, entradas: '99999999999999' },
+          ]);
+        await expect(
+          caben([
+            { metodoPagoId: METODO, monto: '50000000000000' },
+            { metodoPagoId: OTRO, monto: '1' },
+          ]),
+        ).rejects.toThrow(/Cheque/);
+      });
+
+      it.each([1, 2, 5])(
+        'con %i pagos corre la misma cantidad de queries (no una por pago)',
+        async (n) => {
+          managerMock.query
+            .mockResolvedValueOnce([EFECTIVO, TARJETA])
+            .mockResolvedValueOnce(esperadoDe('0'))
+            .mockResolvedValueOnce([]);
+          await caben(
+            Array.from({ length: n }, (_, i) => ({
+              metodoPagoId: i % 2 === 0 ? OTRO : METODO,
+              monto: '1',
+            })),
+          );
+          // La caja y los medios, el esperado de efectivo, las sumas por medio.
+          expect(managerMock.query).toHaveBeenCalledTimes(n === 1 ? 2 : 3);
+        },
+      );
     });
   });
 
@@ -3014,6 +3248,31 @@ describe('CajaService.abrir', () => {
       estado: 'abierta',
     });
     expect(manager.save).toHaveBeenCalled();
+  });
+
+  it.each([['100000000000000'], ['99999999999999.99995']])(
+    'rechaza con 400 un saldo inicial que no cabe en la columna (%s) sin tocar la base',
+    async (saldoInicial) => {
+      build({ cajon: [{ cajon_id: CAJON, activo: true }] });
+      await expect(
+        service.abrir(TENANT, USER, { ...dto, saldoInicial }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(cajaRepo.findOne).not.toHaveBeenCalled();
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it('abre con el saldo inicial más grande que cabe', async () => {
+    build({
+      cajon: [{ cajon_id: CAJON, activo: true }],
+      allowTotal: 0,
+      ocupadas: [],
+    });
+    const res = await service.abrir(TENANT, USER, {
+      ...dto,
+      saldoInicial: '99999999999999.9999',
+    });
+    expect(res).toMatchObject({ saldoInicial: '99999999999999.9999' });
   });
 
   it('persiste saldoInicial y comentario del DTO en la caja creada', async () => {

@@ -37,6 +37,10 @@ import {
   resolvePagination,
 } from '../../common/utils/pagination.util';
 import {
+  cabeEnColumnaDePlata,
+  TECHO_PERSISTIBLE_FORMATEADO,
+} from '../../common/utils/monto-persistible.util';
+import {
   bordeFechaSql,
   bordeHastaSql,
   diaNegocioDeSql,
@@ -377,6 +381,16 @@ export class CajaService {
     usuarioId: string,
     dto: AbrirCajaDto,
   ): Promise<Caja> {
+    // El saldo inicial es el primer sumando del esperado de efectivo
+    // (`calcularEsperadoEfectivo`): si ni él solo cabe en `NUMERIC(18,4)`, el
+    // `INSERT` daría 500 y la caja no llegaría a abrirse. El DTO valida signo y
+    // escala, no el tope de la columna.
+    if (!cabeEnColumnaDePlata(dto.saldoInicial)) {
+      throw new BadRequestException(
+        `El saldo inicial no puede ser de $${TECHO_PERSISTIBLE_FORMATEADO} o más: el sistema no puede guardar montos así`,
+      );
+    }
+
     const existente = await this.findActiva(tenantId, usuarioId);
     if (existente) {
       throw new ConflictException('Ya tienes una caja abierta');
@@ -1169,6 +1183,15 @@ export class CajaService {
       metodoPagoId?: string | null;
       /** La salida (o su reversa) de un pago a proveedor (spec compras-deuda-proveedor § 3). */
       pagoProveedorId?: string | null;
+      /**
+       * El llamador ya corrió `assertEntradasCaben` con **todas** las entradas
+       * de su operación, en una tanda, antes de escribir la primera: acá no se
+       * repite. **Solo `PagosService.registrar` lo manda**, porque escribe una
+       * entrada por pago y repetir el chequeo por pago sería una lectura por
+       * iteración. El default (`false`) chequea: un llamador nuevo que lo
+       * olvide queda protegido, no abierto.
+       */
+      topeYaVerificado?: boolean;
     },
   ): Promise<MovimientoCaja> {
     // El signo lo codifica `tipo`, nunca `monto`: una "entrada" negativa RESTA
@@ -1185,6 +1208,11 @@ export class CajaService {
         'El monto de un movimiento de caja no puede ser negativo',
       );
     }
+    if (params.tipo === 'entrada' && !params.topeYaVerificado) {
+      await this.assertEntradasCaben(manager, params.cajaId, [
+        { metodoPagoId: params.metodoPagoId ?? null, monto: params.monto },
+      ]);
+    }
     const movimiento = manager.create(MovimientoCaja, {
       cajaId: params.cajaId,
       tipo: params.tipo,
@@ -1197,6 +1225,127 @@ export class CajaService {
       pagoProveedorId: params.pagoProveedorId ?? null,
     });
     return manager.save(MovimientoCaja, movimiento);
+  }
+
+  /**
+   * **Una entrada que dejaría el esperado de su línea sin caber en
+   * `NUMERIC(18,4)` es 400 al entrar la plata, no un 500 en el conteo**
+   * (owner, 2026-10-09). El esperado es `saldo inicial + entradas − salidas`
+   * y se congela en `caja_arqueo_medio.esperado` / `cajas.saldo_final`: lo que
+   * desborda es la **suma**, aunque cada movimiento quepa en su columna.
+   * Rechazar en el conteo no sirve —el 400 deja la caja igual de trabada—, así
+   * que el freno va acá, el único punto por donde entra toda plata a una caja
+   * (el movimiento manual, el pago de una venta por cualquier canal, un abono y
+   * la reversa del pago a un proveedor). Consecuencia aceptada: una venta así no
+   * se cobra en esa caja con ese medio.
+   *
+   * Cada línea del arqueo es un esperado distinto, y las dos se guardan en la
+   * misma columna: el efectivo (el mismo cálculo del conteo, que se reusa) y,
+   * por medio, la suma de sus entradas (`calcularArqueo`). Se mira la línea de
+   * cada entrada.
+   *
+   * **Recibe todas las entradas de una operación y hace una sola tanda de
+   * lecturas** —la caja y los medios, el esperado de efectivo si alguna es
+   * efectivo, las sumas por medio si alguna no lo es: a lo sumo tres queries
+   * sin importar cuántas entradas— y acumula en memoria lo que suma cada
+   * línea. Una venta con N pagos no paga N tandas, y un rechazo ocurre antes de
+   * escribir el primero. `registrarMovimientoEnTransaccion` lo llama con una
+   * entrada; `PagosService.registrar`, con todas las suyas, y avisa con
+   * `topeYaVerificado` para que el movimiento no lo repita. Es la misma
+   * función de juicio en los dos lados: el mensaje vive en un solo lugar.
+   *
+   * **Solo las cajas físicas**: la virtual nunca se cuenta ni se cierra, así que
+   * su esperado no se congela, y rechazar ahí un pago ya capturado por la
+   * pasarela dejaría plata cobrada sin venta.
+   *
+   * **Concurrencia:** corre bajo el `FOR UPDATE` de `bloquearCajaAbierta` que
+   * cada llamador toma antes (el POS y el abono, el movimiento manual y la
+   * reversa; la caja virtual es la única que no lo toma y está afuera de este
+   * chequeo). Dos entradas simultáneas a una caja se serializan, y la segunda ve
+   * a la primera.
+   *
+   * El mensaje no incluye el esperado: en modo ciego el cajero no lo ve, y un
+   * número en el 400 lo entregaría.
+   */
+  async assertEntradasCaben(
+    manager: EntityManager,
+    cajaId: string,
+    entradas: { metodoPagoId: string | null; monto: string }[],
+  ): Promise<void> {
+    if (!entradas.length) return;
+    const ids = [
+      ...new Set(
+        entradas
+          .map((e) => e.metodoPagoId?.toLowerCase())
+          .filter((id): id is string => id !== undefined),
+      ),
+    ];
+
+    // Sin `mp.eliminado_el` a propósito: `es_efectivo` es intrínseco al método
+    // del movimiento, igual que en `calcularEsperadoEfectivo`. Una entrada sin
+    // método (la manual) es efectivo, como allá. Si la caja no es física no
+    // vuelve ninguna fila.
+    const filas: {
+      metodo_pago_id: string | null;
+      es_efectivo: boolean;
+      nombre: string | null;
+    }[] = await manager.query(
+      `SELECT mp.metodo_pago_id, COALESCE(mp.es_efectivo, false) AS es_efectivo,
+              mp.nombre
+         FROM cajas c
+         LEFT JOIN metodos_pago mp ON mp.metodo_pago_id = ANY($2::uuid[])
+        WHERE c.caja_id = $1 AND c.tipo = 'fisica' AND c.eliminado_el IS NULL`,
+      [cajaId, ids],
+    );
+    if (!filas.length) return;
+    const medios = new Map(
+      filas
+        .filter((f) => f.metodo_pago_id !== null)
+        .map((f) => [f.metodo_pago_id!.toLowerCase(), f]),
+    );
+
+    let efectivo: Decimal | null = null;
+    const porMedio = new Map<string, Decimal>();
+    for (const e of entradas) {
+      const id = e.metodoPagoId?.toLowerCase();
+      if (id === undefined || medios.get(id)?.es_efectivo) {
+        efectivo = (efectivo ?? new Decimal(0)).plus(e.monto);
+      } else {
+        porMedio.set(id, (porMedio.get(id) ?? new Decimal(0)).plus(e.monto));
+      }
+    }
+
+    const techo = TECHO_PERSISTIBLE_FORMATEADO;
+    if (efectivo !== null) {
+      const esperado = await this.calcularEsperadoEfectivo(cajaId, manager);
+      if (!cabeEnColumnaDePlata(efectivo.plus(esperado))) {
+        throw new BadRequestException(
+          `Esta entrada de efectivo dejaría el saldo de la caja en $${techo} o más, y el sistema no puede guardar montos así. Registrá una salida para bajar el saldo, o cobrá con otro medio de pago`,
+        );
+      }
+    }
+
+    if (porMedio.size) {
+      const sumas: { metodo_pago_id: string; entradas: string }[] =
+        await manager.query(
+          `SELECT m.metodo_pago_id, SUM(m.monto)::text AS entradas
+             FROM movimientos_caja m
+            WHERE m.caja_id = $1 AND m.metodo_pago_id = ANY($2::uuid[])
+              AND m.tipo = 'entrada' AND m.eliminado_el IS NULL
+            GROUP BY m.metodo_pago_id`,
+          [cajaId, [...porMedio.keys()]],
+        );
+      const previas = new Map(
+        sumas.map((r) => [r.metodo_pago_id.toLowerCase(), r.entradas]),
+      );
+      for (const [id, nuevo] of porMedio) {
+        if (!cabeEnColumnaDePlata(nuevo.plus(previas.get(id) ?? 0))) {
+          throw new BadRequestException(
+            `Los cobros con ${medios.get(id)?.nombre ?? 'este medio de pago'} de esta caja sumarían $${techo} o más, y el sistema no puede guardar montos así. Cobrá con otro medio de pago`,
+          );
+        }
+      }
+    }
   }
 
   /**
