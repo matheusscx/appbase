@@ -23,6 +23,55 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El alta de suscripción de la tienda no se envía dos veces (cerrada 2026-10-09)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. Deja una entrada nueva en la misma sección: el backend
+tampoco frena dos `POST /suscripciones` iguales.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **¿Un Enter en el formulario de suscripción de la tienda da de alta dos veces?** (frontend,
+  `pages/tienda/suscripciones.vue`, `confirmar()`; lo vio el domain-reviewer del frente `013e5300`
+  el 2026-10-09, **leído, no medido**). `confirmar()` no tiene un guard de reentrada
+  (`if (confirmando.value) return`). El `:loading` del botón frena el segundo clic, pero un Enter
+  dentro del `UForm` vuelve a disparar el `@submit` mientras el primero sigue esperando. Es anterior
+  a ese frente: la espera ya existía con el `await crear(...)`. **Medir primero:** ¿un segundo
+  Enter llega a un segundo `POST /suscripciones`? Si llega, ¿el backend lo frena con
+  `Idempotency-Key` o crea dos suscripciones con dos primeros cobros? Si el backend no lo frena,
+  el arreglo es el guard, con su spec y el mutante.
+
+### Qué se midió
+
+Con un spec de pantalla (vitest, `@vitest-environment nuxt`), el primer `POST /suscripciones`
+retenido:
+
+- **El Enter no tiene desde dónde dispararse.** El `UForm` del drawer no tiene ningún `input` ni
+  `textarea`: los campos son `USelectMenu`, y el buscador del selector de ítem vive en un portal,
+  fuera del form. Sin un campo de texto del form no hay envío implícito. La premisa de la entrada
+  ("un Enter dentro del `UForm` vuelve a disparar el `@submit`") no se sostiene por ese camino.
+- **El botón sí queda `disabled`** con el primer POST en vuelo.
+- **Un segundo `submit` sobre el form llega a un segundo POST.** Ni `confirmar()` ni `UForm` lo
+  frenan: `onSubmitWrapper` de Nuxt UI pone su `loading` pero no lo mira antes de volver a llamar a
+  `@submit`.
+
+**No medido:** si un usuario real puede producir ese segundo `submit` en un navegador (Enter,
+doble clic, `requestSubmit`). La orquestadora decidió no medirlo (2026-10-09): el arreglo es el
+mismo con cualquier respuesta, y el stack no tenía turno.
+
+**El backend, leído:** `POST /suscripciones` no lleva `Idempotency-Key` ni hay restricción única, así
+que dos POST serían dos cobros Oneclick y dos suscripciones. No se tocó en este frente, por decisión
+de la orquestadora: quedó como entrada nueva en `pendientes.md` § 2.
+
+### Qué se hizo
+
+`confirmar()` empieza con `if (confirmando.value) return`, con el porqué en un comentario. Lo fija
+un caso nuevo de `suscripciones.nuxt.spec.ts`: dos `submit` seguidos con el alta retenida dan **un**
+`POST /suscripciones` y un solo toast de éxito. **Mutante:** con el `.vue` de `HEAD` (sin el guard)
+cae solo ese caso, con dos POST; los otros diez pasan. `reanudarAltaPendiente` no se tocó: corre
+una vez desde `onMounted`, no desde un submit.
+
+---
+
 ## Pedir un plato cuyo precio no cabe en `NUMERIC(18,4)` es 400, no 500 (cerrada 2026-10-09)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Commit `aa8d2d53`.

@@ -242,6 +242,10 @@ async function agregarTarjetaDesdeAlta() {
 }
 
 async function confirmar() {
+  // El `:loading` del botón no alcanza: `UForm` no frena un segundo `submit` mientras el
+  // primero espera, y `POST /suscripciones` no lleva `Idempotency-Key` — un segundo POST es un
+  // segundo cobro Oneclick y una segunda suscripción.
+  if (confirmando.value) return
   const item = itemSeleccionado.value
   if (!item || !selectedInscripcionId.value) return
   confirmando.value = true

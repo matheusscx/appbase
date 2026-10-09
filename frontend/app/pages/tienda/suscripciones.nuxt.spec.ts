@@ -14,7 +14,10 @@
 //   - al confirmar se espera el cálculo vigente (igual que la tienda y el POS): si falla,
 //     un solo toast con el motivo y no se crea la suscripción; si el fallo fue transitorio,
 //     confirmar reintenta el cálculo y sigue (antes un 400 dejaba "Total a cobrar: —" mudo
-//     y se podía pagar sin total).
+//     y se podía pagar sin total);
+//   - un segundo `submit` con el alta en vuelo no da de alta otra vez: `POST /suscripciones`
+//     cobra por Oneclick y no lleva `Idempotency-Key`, así que un segundo POST sería un
+//     segundo cobro y una segunda suscripción.
 //
 // Abrirlo exige `puedeCrear`, gateado por `usePermissionsStore`. El molde de ESE
 // mock es `terceros.nuxt.spec.ts`: Nuxt instala su propia instancia de Pinia, así
@@ -59,6 +62,9 @@ let altas: unknown[] = []
 /** Si está puesto, el próximo `/calcular` queda colgado hasta que se llame. */
 let soltarCalculo: (() => void) | null = null
 let retenerCalculo = false
+/** Si está puesto, el próximo `POST /suscripciones` queda colgado hasta que se llame. */
+let soltarAlta: (() => void) | null = null
+let retenerAlta = false
 /** Tarjetas que devuelve `GET /online/medios-pago`. */
 let medios: unknown[] = []
 
@@ -91,7 +97,14 @@ mockNuxtImport('useApiFetch', () => {
     if (ruta.endsWith('/suscripciones')) {
       if ((opts as { method?: string } | undefined)?.method === 'POST') {
         altas.push(opts)
-        return Promise.resolve({ id: 'susc-nueva', advertencias: [] })
+        const respuesta = { id: 'susc-nueva', advertencias: [] }
+        if (retenerAlta) {
+          retenerAlta = false
+          return new Promise((resolve) => {
+            soltarAlta = () => resolve(respuesta)
+          })
+        }
+        return Promise.resolve(respuesta)
       }
       return Promise.resolve([])
     }
@@ -150,6 +163,8 @@ beforeEach(() => {
   toasts = []
   soltarCalculo = null
   retenerCalculo = false
+  soltarAlta = null
+  retenerAlta = false
 })
 
 /**
@@ -381,5 +396,31 @@ describe('tienda/suscripciones — confirmar espera el cálculo vigente', () => 
     expect(calculos.length).toBe(intentosAntes)
     expect(altas).toHaveLength(1)
     expect(toasts.some(t => t.color === 'error')).toBe(false)
+  })
+
+  it('un segundo submit con el alta en vuelo no da de alta otra vez', async () => {
+    medios = [TARJETA]
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegir(wrapper, SEMANAL.id)
+    // El form no tiene inputs propios, así que el segundo envío se dispara sobre el form:
+    // es lo que llega a `confirmar()` venga de donde venga (Enter, `requestSubmit`, otro botón).
+    const form = document.getElementById('suscripcion-form') as HTMLFormElement | null
+    expect(form, 'form del drawer').toBeTruthy()
+    const enviar = () => form!.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+
+    retenerAlta = true
+    enviar()
+    await new Promise(r => setTimeout(r, 50))
+    expect(soltarAlta, 'el primer alta quedó esperando la respuesta').toBeTruthy()
+    expect(altas).toHaveLength(1)
+
+    enviar()
+    await new Promise(r => setTimeout(r, 50))
+    expect(altas, 'el segundo submit no llegó a un segundo POST').toHaveLength(1)
+
+    soltarAlta!()
+    await new Promise(r => setTimeout(r, 50))
+    expect(toasts.filter(t => t.title === 'Suscripción activada y primer cobro realizado')).toHaveLength(1)
   })
 })

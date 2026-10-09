@@ -111,15 +111,24 @@ destapa una decisión que no es mía).
      sentido. Además, `docs/features/gestion-cajas.md` nombra como consecuencia aceptada solo el
      caso de las ventas, no el de anular un pago a proveedor, que se destraba con una salida.
 
-- [ ] **¿Un Enter en el formulario de suscripción de la tienda da de alta dos veces?** (frontend,
-  `pages/tienda/suscripciones.vue`, `confirmar()`; lo vio el domain-reviewer del frente `013e5300`
-  el 2026-10-09, **leído, no medido**). `confirmar()` no tiene un guard de reentrada
-  (`if (confirmando.value) return`). El `:loading` del botón frena el segundo clic, pero un Enter
-  dentro del `UForm` vuelve a disparar el `@submit` mientras el primero sigue esperando. Es anterior
-  a ese frente: la espera ya existía con el `await crear(...)`. **Medir primero:** ¿un segundo
-  Enter llega a un segundo `POST /suscripciones`? Si llega, ¿el backend lo frena con
-  `Idempotency-Key` o crea dos suscripciones con dos primeros cobros? Si el backend no lo frena,
-  el arreglo es el guard, con su spec y el mutante.
+- [ ] **Dos `POST /suscripciones` iguales cobran dos veces: el alta no lleva `Idempotency-Key`**
+  (backend, `backend/src/modules/suscripciones/suscripciones.service.ts`, `crear`; anotado el
+  2026-10-09 por el frente que puso el guard de reentrada en la pantalla, ver
+  [`resueltos.md`](resueltos.md#el-alta-de-suscripción-de-la-tienda-no-se-envía-dos-veces-cerrada-2026-10-09);
+  **leído, no medido**). `crear` no recibe `@ClaveIdempotencia()` (ADR-026; la usan ventas, pagos,
+  compras, salones y la pasarela) y `suscripciones` no tiene restricción única. Cada POST que pasa
+  las validaciones cobra por Oneclick (`cobrosService.cobrar`, paso 7, una `pasarela_orden` nueva) y
+  después crea una venta y una suscripción (paso 9). Dos POST con el mismo body, entonces, serían dos
+  cobros a la tarjeta, dos ventas y dos suscripciones que vuelven a cobrar cada período. La pantalla
+  ya no manda dos por un segundo `submit`, pero queda abierta la escena de ADR-026: el alta entra, la
+  respuesta se corta, el cliente ve "No se pudo activar la suscripción" y vuelve a confirmar.
+  **Medir:** un e2e de API con `CobrosService`, `InscripcionesService` y `TenantPasarelaService`
+  (el de `assertOneclickActivo`) sobrescritos (no hay mock de
+  Oneclick en `backend/test/`: `pasarela-oneclick.e2e-spec.ts` va contra Transbank y está detrás de
+  `RUN_TRANSBANK_E2E`), que mande dos POST iguales y cuente suscripciones, ventas y llamadas a
+  `cobrar`. **Si se confirma, no es mecánico:** el cobro ocurre por HTTP **fuera** de la transacción,
+  y ADR-026 reclama la clave adentro de la transacción del cobro. Cómo se adapta, y si dos
+  suscripciones al mismo ítem son legítimas, va a la § 4.
 
 - [ ] **El frontend se reinicia una vez en el primer `up` del stack: `ENOENT` de
   `.nuxt/nuxt-fonts-global.css`** (entorno de desarrollo; medido el 2026-10-08 por el frente del
