@@ -80,6 +80,16 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **¿Un Enter en el formulario de suscripción de la tienda da de alta dos veces?** (frontend,
+  `pages/tienda/suscripciones.vue`, `confirmar()`; lo vio el domain-reviewer del frente `013e5300`
+  el 2026-10-09, **leído, no medido**). `confirmar()` no tiene un guard de reentrada
+  (`if (confirmando.value) return`). El `:loading` del botón frena el segundo clic, pero un Enter
+  dentro del `UForm` vuelve a disparar el `@submit` mientras el primero sigue esperando. Es anterior
+  a ese frente: la espera ya existía con el `await crear(...)`. **Medir primero:** ¿un segundo
+  Enter llega a un segundo `POST /suscripciones`? Si llega, ¿el backend lo frena con
+  `Idempotency-Key` o crea dos suscripciones con dos primeros cobros? Si el backend no lo frena,
+  el arreglo es el guard, con su spec y el mutante.
+
 - [ ] **El frontend se reinicia una vez en el primer `up` del stack: `ENOENT` de
   `.nuxt/nuxt-fonts-global.css`** (entorno de desarrollo; medido el 2026-10-08 por el frente del
   `.dockerignore`, que no lo trae ni lo arregla: ver
