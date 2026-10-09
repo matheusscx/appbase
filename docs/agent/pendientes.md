@@ -518,23 +518,6 @@ prohíbe.
   notas que ya existen (¿cuál, si son dos?), o se descarta la marca con un motivo escrito? Ninguna
   de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
 
-- [ ] **El cajero ya no ve sus cajas cerradas, pero con sus pagos rearma lo que cobró en cada
-  turno** (backend + producto; anotado el 2026-10-08 al cerrar "el historial de cajas es de
-  supervisión", [`resueltos.md`](resueltos.md)). **Escena:** desde hoy Bruno, el cajero, abre
-  "Mi caja" y ve solo su turno de hoy; los turnos de la semana pasada los ve el encargado. Pero en
-  "Pagos" Bruno sigue viendo todos los cobros que hizo, con la caja de cada uno: si filtra por la
-  caja del martes y suma, sabe que ese día cobró $412.000 en efectivo y $95.000 con tarjeta. Lo que
-  **no** puede rearmar es la diferencia del cierre (le falta lo que contó): esa la vio una vez,
-  al cerrar. **La pregunta para el owner:** ¿también se le esconden los cobros de turnos ya
-  cerrados?
-  - **Dejarlo así (recomendada):** Bruno sigue buscando una venta vieja para cobrar un saldo
-    pendiente, reimprimir o hacer una nota de crédito, que es trabajo de todos los días. El costo:
-    con paciencia, rearma lo que cobró en cada turno.
-  - **Esconderle los cobros de cajas cerradas:** ya no puede sumar turnos viejos, pero tampoco
-    encuentra la venta de ayer cuando el cliente vuelve a pagar el saldo o a devolver algo; eso
-    tendría que hacerlo el encargado. Es lo mismo que hizo descartar el ocultamiento en agosto
-    (§11.3 de la investigación de caja).
-
 ## 5. Carreras de concurrencia
 
 - [ ] **Borrar y restaurar la misma mesa mientras viaja el guardado del plano la saca del plano
@@ -905,6 +888,28 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
 ---
 
 ## Vigilancia — evaluado y descartado, no es trabajo
+
+- [ ] **El cajero ya no ve sus cajas cerradas, pero con sus pagos rearma lo que cobró en cada
+  turno** (backend + producto; anotado el 2026-10-08 al cerrar "el historial de cajas es de
+  supervisión", [`resueltos.md`](resueltos.md)). **Escena:** desde hoy Bruno, el cajero, abre
+  "Mi caja" y ve solo su turno de hoy; los turnos de la semana pasada los ve el encargado. Pero en
+  "Pagos" Bruno sigue viendo todos los cobros que hizo, con la caja de cada uno: si filtra por la
+  caja del martes y suma, sabe que ese día cobró $412.000 en efectivo y $95.000 con tarjeta. Lo que
+  **no** puede rearmar es la diferencia del cierre (le falta lo que contó): esa la vio una vez,
+  al cerrar. **La pregunta para el owner:** ¿también se le esconden los cobros de turnos ya
+  cerrados?
+  - **Dejarlo así (recomendada):** Bruno sigue buscando una venta vieja para cobrar un saldo
+    pendiente, reimprimir o hacer una nota de crédito, que es trabajo de todos los días. El costo:
+    con paciencia, rearma lo que cobró en cada turno.
+  - **Esconderle los cobros de cajas cerradas:** ya no puede sumar turnos viejos, pero tampoco
+    encuentra la venta de ayer cuando el cliente vuelve a pagar el saldo o a devolver algo; eso
+    tendría que hacerlo el encargado. Es lo mismo que hizo descartar el ocultamiento en agosto
+    (§11.3 de la investigación de caja).
+
+  ✅ **Contestado por el owner (2026-10-08, AskUserQuestion de la orquestadora): se deja así.**
+  Primero pidió bloquearlo; al ver el costo (Bruno deja de encontrar la venta de ayer para cobrar un
+  saldo, reimprimir o devolver) eligió dejarlo, la misma razón que en agosto. Queda en Vigilancia
+  para que nadie lo vuelva a plantear como fuga.
 
 - [ ] **El `400` *"Método de pago no pertenece al arqueo"* dice qué medios se usaron en el turno,
   y se deja así** (backend, caja; residuo 1 del frente del modo ciego, que se cerró el 2026-08-23 —
