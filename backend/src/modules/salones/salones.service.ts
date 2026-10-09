@@ -13,6 +13,11 @@ import {
 } from '../../common/db/reintento-deadlock';
 import Decimal from 'decimal.js';
 import { unwrap } from '../../common/utils/pg-returning.util';
+import {
+  cabeEnColumnaDePlata,
+  formatearMontoPersistible,
+  TECHO_PERSISTIBLE_FORMATEADO,
+} from '../../common/utils/monto-persistible.util';
 import { Salon } from './entities/salon.entity';
 import { Mesa, FormaMesa, TamanoMesa } from './entities/mesa.entity';
 import { Cuenta, EstadoCuenta } from './entities/cuenta.entity';
@@ -979,6 +984,24 @@ export class SalonesService {
       .toFixed(4);
     const tasaCambio = tasaDe(item.monedaId);
     const precioUnitario = convertir(precioUnitarioOrigen, item.monedaId);
+    // **Un precio que no cabe en su columna es 400 acá, no un 500 del `INSERT`**
+    // (medido el 2026-10-08: receta al tope + un extra de $1). Los dos montos
+    // que esta línea escribe en `NUMERIC(18,4)` son estos; la cantidad por el
+    // precio no se guarda —la calcula el motor al cerrar, con su propio guard
+    // (`CalculoPreciosService.assertCabeEnLaVenta`)—. Se revisan los dos: con una
+    // tasa mayor que 1 el convertido no cabe aunque el origen sí, y con una
+    // menor que 1, al revés. Mismo criterio y mismos textos que el guard del
+    // motor: rechaza solo lo que Postgres rechazaría.
+    if (!cabeEnColumnaDePlata(precioUnitarioOrigen)) {
+      throw new BadRequestException(
+        `«${item.nombre}» cuesta ${formatearMontoPersistible(precioUnitarioOrigen)} en su moneda, y el sistema no puede guardar montos de ${TECHO_PERSISTIBLE_FORMATEADO} o más: revisá el precio y los extras`,
+      );
+    }
+    if (!cabeEnColumnaDePlata(precioUnitario)) {
+      throw new BadRequestException(
+        `«${item.nombre}» da $${formatearMontoPersistible(precioUnitario)}, y el sistema no puede guardar montos de $${TECHO_PERSISTIBLE_FORMATEADO} o más: revisá el precio y los extras`,
+      );
+    }
     // Y lo mismo con las reglas de catálogo (owner, 2026-08-30). Se congelan
     // resueltas, no por id, para que cambiarle el valor a la regla tampoco
     // alcance a esta línea.
