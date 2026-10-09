@@ -59,22 +59,23 @@ Playwright toma esos puertos del `.env` sola. (Desde el 2026-09-20; antes era
 - **RestartCount y OOMKilled, antes y después:**
   `docker inspect wt-<slug>_backend wt-<slug>_frontend --format '{{.Name}} {{.RestartCount}} {{.State.OOMKilled}} {{.State.StartedAt}}'`.
   El "antes" se toma **después** del `reset-db.sh`, que recrea los contenedores y deja el contador en 0.
-  Un RC 1 del frontend con el `ENOENT` de `.nuxt/nuxt-fonts-global.css` en su log, que ya estaba
-  en el "antes", no invalida la corrida
-  ([`pendientes.md`](../../../docs/agent/pendientes.md) § 2). Un RC que sube **durante** la corrida, sí.
+  Un RC que sube **durante** la corrida la invalida. Un RC distinto de 0 ya en el "antes" tampoco
+  es normal: el reinicio por el `ENOENT` de `.nuxt/nuxt-fonts-global.css` se cerró el 2026-10-09
+  dándole al contenedor su propio `.nuxt` ([`resueltos.md`](../../../docs/agent/resueltos.md)).
+  Leer el log del frontend antes de seguir.
 - **Memoria de la VM de Docker (3,83 GiB).** El 2026-10-08, con tres stacks completos arriba
   (el del checkout principal y dos de worktrees), el frontend propio murió por OOM a mitad de
   una corrida (22:45:21 UTC). En la misma ventana se reiniciaron el frontend de otro worktree
   (22:44:32 UTC) y `tecnica_backend` (22:37:28 UTC). Si ya hay dos stacks completos arriba
   (`docker ps`), pedirle a la orquestadora que baje uno antes de levantar el tuyo. Si un
   contenedor de **otra** sesión se reinicia durante tu corrida, avisale: su corrida tampoco vale.
-- **En frío, `auth.setup` puede quedarse en el spinner.** Si cae por timeout en
-  `page.goto('/login')` con RC 0, se repite **una vez**, sin `reset-db.sh`, antes de leerlo como
-  rojo. No hace falta resetear porque `auth.setup` cae antes de que corra ningún spec. El
-  2026-10-08 cayó así en las 2 corridas en frío. **No está medido que la repetición alcance**:
-  la causa está abierta en [`pendientes.md`](../../../docs/agent/pendientes.md) § 2
-  (*"Playwright en frío…"*). Si vuelve a caer ahí, la corrida no cuenta ni como verde ni como
-  rojo: anotarlo en esa entrada y avisar a la orquestadora, que decide cómo se cierra.
+- **En frío, `auth.setup` paga la compilación de la SPA y por eso tiene 120 s.** `nuxt dev`
+  transforma a pedido los ~1000 módulos del primer `/login`, y cada `reset-db.sh` lo vuelve a
+  enfriar. Medido el 2026-10-09: tarda 9,9 s con load 7–8 y 29,4 s con la VM de Docker ocupada
+  (load 17–22). Si aun así cae por timeout en `page.goto('/login')` con RC 0, lo probable es que
+  el host esté más cargado que eso: se repite **una vez**, sin `reset-db.sh`. Con el servidor ya caliente, la 2ª
+  corrida sola pasó 2 de 2. Si vuelve a caer ahí, la corrida no cuenta ni como verde ni como rojo:
+  avisar a la orquestadora con `docker stats` y el load.
 - **Timeouts por todos lados con otra suite corriendo en paralelo:** la corrida no cuenta. Se
   repite en turno.
 

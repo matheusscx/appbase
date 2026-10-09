@@ -101,6 +101,12 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+      # `.nuxt` propio del contenedor, igual que `node_modules`. Compartido con el host,
+      # un `nuxt prepare` del host (el postinstall de `npm ci`) que reescribe `.nuxt`
+      # poco antes de que arranque el `nuxt dev` del contenedor lo hace fallar con
+      # `ENOENT` al escribir `nuxt-fonts-global.css`, y el contenedor se reinicia: 5 de 7
+      # corridas sin esto, 0 de 5 con esto (2026-10-09, `docs/agent/resueltos.md`).
+      - /app/.nuxt
     environment:
       # El navegador ya NO llega al backend por su cuenta: pide `/api` a este
       # mismo servicio y `server/api/[...].ts` lo reenvía. Por eso el destino sí

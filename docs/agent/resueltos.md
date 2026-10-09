@@ -23,6 +23,151 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El arranque en frío del stack: `.nuxt` propio del contenedor y más tiempo para `auth.setup` (cerrada 2026-10-09)
+
+Sale de [`pendientes.md`](pendientes.md) § 2, las dos entradas del entorno de desarrollo, medidas
+juntas. Plan: [`2026-10-09-arranque-en-frio-del-stack.md`](../superpowers/plans/2026-10-09-arranque-en-frio-del-stack.md).
+
+### Las entradas que cierra, como estaban en `pendientes.md` § 2
+
+- [ ] **El frontend se reinicia una vez en el primer `up` del stack: `ENOENT` de
+  `.nuxt/nuxt-fonts-global.css`** (entorno de desarrollo; medido el 2026-10-08 por el frente del
+  `.dockerignore`, que no lo trae ni lo arregla: ver
+  [`resueltos.md`](resueltos.md#la-imagen-de-desarrollo-horneaba-los-node_modules-del-host-dockerignore-en-backend-y-frontend-cerrada-2026-10-08)).
+  En el primer arranque de `nuxt dev` falla `writeFileSync` de `generateApp` con
+  `ENOENT: no such file or directory, open '/app/.nuxt/nuxt-fonts-global.css'`; el contenedor
+  reinicia y queda estable sirviendo 200. El backend no lo tiene. Primer `up` completo en orden
+  secuencial (`npm ci` del host terminado → `entorno.sh borrar --purgar` → `stack`, RestartCount a
+  los 120 s):
+
+  | Corrida | `.dockerignore` | RC del frontend | `ENOENT` |
+  |---|---|---|---|
+  | 1 | sí | 0 | 0 |
+  | 2 | sí | 1 | 1 |
+  | 3 | no | 1 | 1 |
+  | 4 | no | 1 | 1 |
+
+  También salió en el orden paralelo de aquella entrada y en la carrera congelada, los dos con el
+  arreglo. **Lo que lo descarta como efecto del `.dockerignore` o del `.nuxt` del host:** sin el
+  arreglo sale igual, y en desarrollo el bind mount `./frontend:/app` tapa el `/app/.nuxt` de la
+  imagen (del contenedor, lo único que viene de la imagen es el volumen anónimo `/app/node_modules`).
+  Arrancar solo el frontend en frío (`up -d --force-recreate --renew-anon-volumes --no-deps frontend`)
+  dio RC 0 las 5 veces, dos de ellas con `nuxt prepare` recién corrido en el host: aparece solo en
+  el `up` del stack completo. **Medir:** por qué el primer `generateApp` encuentra `.nuxt` sin
+  crear (¿algo que lo vacía al mismo tiempo, un segundo arranque de Nuxt por la optimización de
+  dependencias de Vite?), y si pasa en el checkout principal.
+  **Mientras tanto, para leer una corrida:** un RC 1 del frontend con este `ENOENT`, ocurrido
+  **antes** de que arranque la corrida, no la invalida; un RC que sube **durante** la corrida sí.
+  Mirar RestartCount antes y después sigue siendo la regla.
+
+- [ ] **Playwright en frío: `auth.setup` se queda 30 s en el spinner de `/login` con RestartCount 0**
+  (entorno de desarrollo; medido el 2026-10-08 por el frente que puso Playwright en el gate de
+  cierre). Con el stack recién levantado y `reset-db.sh` recién corrido, `npm run e2e:smoke` cayó
+  **2 de 2** en `auth.setup.ts:16`: `page.goto('/login', { waitUntil: 'networkidle' })` agota los
+  30 s del test, y la captura muestra solo el spinner "Cargando". Backend y frontend estaban en
+  RC 0, sin `OOMKilled`. El log del frontend no dice "discovered new dependencies", así que no es
+  una dependencia que falte en `optimizeDeps` (el arreglo de
+  [`resueltos.md`](resueltos.md), 2026-09-30). La 3ª corrida pasó 6/6 en 11,8 s, pero **después de
+  abrir `/login` una vez en un navegador** (~1000 peticiones de módulos al dev server): no se
+  midió si una 3ª corrida sola alcanzaba. El load del host estaba entre 8 y 12. Ya se había visto
+  una vez el 2026-09-30, con `caja/apertura-cierre` como primer spec (`resueltos.md`, la zona
+  horaria de CI). **Hipótesis:** la primera compilación de Vite de los módulos de la SPA, que
+  `nuxt dev` hace a pedido del navegador, tarda más que el timeout con el host cargado. En CI no
+  pasa porque el `webServer` sirve el build. **Medir:** cuánto tarda el primer `/login` en frío
+  (con `--timeout` alto) y con qué load, y si una 2ª corrida sola alcanza. Mientras tanto,
+  `verify-feature` paso 1 manda a repetir una vez. Una 4ª corrida, tras otro reset, no sirve para
+  esto: el frontend murió por OOM con tres stacks arriba.
+
+### Qué se midió
+
+Con un solo stack nuestro arriba (más los `tecnica_*`, que no se tocaron), el `uptime` en cada
+corrida, y RestartCount y `OOMKilled` antes y después.
+
+**El `ENOENT`. Correlaciona con un `nuxt prepare` del host que reescribe `.nuxt` poco antes de que
+arranque el `nuxt dev` del contenedor. Lo que sí está medido es que se va con un `.nuxt` propio del
+contenedor.**
+
+| Orden | Corridas | Reinicio del frontend |
+|---|---|---|
+| Secuencial: el `.nuxt` del host lo escribió el contenedor anterior, o el `npm ci` del host terminó ~40 s antes | 3 | 0 |
+| Paralelo, como en el frente del `.dockerignore`: `node_modules` del host vacíos y `npm ci` de los dos paquetes a la vez que `entorno.sh stack` | 7 | 5 (una con RC 2) |
+| El mismo paralelo con `npm ci --ignore-scripts` en el frontend, sin el `nuxt prepare` del postinstall (n=1: con 5 de 7, un 0 por azar es posible) | 1 | 0 |
+| El mismo paralelo **con el arreglo**, intercalado con las corridas sin él | 5 | 0 |
+
+- El load del host estuvo entre 4 y 14. Ningún `OOMKilled`, y el backend en RC 0 en todas.
+- La traza no sale del primer `generateApp`. Sale de uno con *debounce* (`perfect-debounce`), una
+  regeneración posterior al arranque.
+- Se puso un vigía en el host: inode y listado de `frontend/.nuxt` cada 20 ms. Del lado del host,
+  `.nuxt` **nunca** desaparece y su inode no cambia. El `prepare` del host lo reescribe unos 20 s
+  antes del `ENOENT` del contenedor. El contenedor ve a través del bind mount algo distinto de lo
+  que ve el host. **El mecanismo exacto dentro de la VM de Docker Desktop no se midió.** Una sonda
+  sin Nuxt no reprodujo: un contenedor crea el archivo, el host lo borra y otro contenedor lo
+  recrea a los 0, 5 y 20 s. La hipótesis de que el archivo tenía que existir de antes también
+  quedó refutada: una corrida sin él dio RC 2.
+- **Checkout principal:** `tecnica_frontend`, creado el 2026-10-03, no tiene el `ENOENT`. Su único
+  reinicio fue el SIGKILL del OOM del 2026-10-08. Ahí el `.nuxt` del host también es el del
+  contenedor, así que el mismo orden lo expone igual.
+- **Refutado de paso:** el `npm run build` del host con el stack arriba no reinicia ni enfría el dev
+  server. El `/login` tardó 2,1 s antes y 2,2 s después.
+
+**El spinner. Es la compilación en frío de Vite, y depende del load: con la VM ocupada, el primer
+`/login` llega a los 30 s.**
+
+| Carga en la VM de Docker (12 CPU) | Load del host | 1er `/login` en frío | 2º `/login` |
+|---|---|---|---|
+| sin quemadores | 7–8 | 9,9 s | 1,7 s |
+| 2 quemadores de CPU | 6 | 8,3 s | 1,5 s |
+| 12 quemadores de CPU (`--cpus=1` cada uno) | 17–22 | 29,4 s | 2,9 s |
+
+- Cada carga es un contexto nuevo con `networkidle` después de `reset-db.sh`, que recrea el
+  contenedor y enfría Vite. Son 1031 peticiones de módulos en las dos cargas, y la 2ª también usa un
+  contexto sin caché del navegador, con el Chromium igual de cargado: lo único que cambia entre las
+  dos es la caché de transformación del dev server. Lo que cuesta es esa compilación, no la cantidad
+  de peticiones.
+- **El síntoma de la entrada, reproducido.** Con 12 quemadores, `playwright test --project=setup` en
+  frío cae en `page.goto` a los 30 s, con RC 0, en 2 de 2. **Una 2ª corrida sola, sin reset, pasa**:
+  8,5 s y 9,0 s.
+- Sin carga sintética, `e2e:smoke` en frío pasó 6/6 en 20,7 s, con `auth.setup` en 11,8 s (load 7,2).
+  No confundir con el "6/6 en 11,8 s" de la entrada vieja: ese era el total de una corrida caliente.
+- **La memoria no se probó.** Con 3,83 GiB, forzar presión podía tumbar contenedores de otras
+  sesiones. El caso del 2026-10-08 tenía tres stacks arriba y terminó en OOM, así que con presión
+  de memoria el primer `/login` puede tardar más que lo medido acá.
+
+### Qué se hizo
+
+- **`docker-compose.yml`:** volumen anónimo `/app/.nuxt` en el frontend, igual que el de
+  `/app/node_modules`. El dev server del contenedor y el host dejan de compartir `.nuxt`. El host
+  conserva el suyo, del `nuxt prepare`, para vitest y el IDE. Ese ya no lo refresca el dev server:
+  si el IDE ve tipos viejos, `npx nuxt prepare` en `frontend/`. `typecheck:ratchet` no depende de eso,
+  porque `nuxi typecheck` regenera los tipos antes de chequear. `down -v` lo borra igual
+  que al de `node_modules`, así que `reset-db.sh` y `entorno.sh borrar` siguen arrancando de cero.
+  Afecta solo a desarrollo: Railway construye con `Dockerfile.prod` y CI levanta el `webServer`,
+  y ninguno de los dos usa el compose.
+- **`frontend/e2e/auth.setup.ts`:** `setup.setTimeout(120_000)`, solo para ese test, con el porqué
+  al lado. Es la primera página que pide la suite, así que paga la compilación del shell de la SPA.
+  Los specs siguen con 30 s: cuando corren, ese shell ya está compilado.
+- **`verify-feature` paso 1:** sale la excepción del RC 1 por el `ENOENT`. Un reinicio del frontend
+  vuelve a ser señal. La regla del spinner pasa a lo medido.
+
+### Qué lo fija
+
+- **El revert, corrido.** Con el `docker-compose.yml` de `HEAD`, intercalado con el arreglo, el
+  frontend reinició en 5 de 7 corridas; con el arreglo, en 0 de 5. Con el `auth.setup.ts` de
+  `HEAD` y 12 quemadores, cayó en 2 de 2; con el arreglo y la misma carga pasó en los 2 intentos, cada
+  uno con un reset y una sola corrida (38,0 s y 37,9 s), y `e2e:smoke` entero dio 6/6 (setup 33,1 s, load 12–21), con RC 0
+  antes y después.
+- No hay test automático: las dos cosas son del entorno. Lo que vigila es la regla de lectura de
+  `verify-feature`, que volvió a tratar cualquier reinicio del frontend como señal.
+
+### Qué quedó sin medir
+
+- El mecanismo dentro de la VM, que el arreglo esquiva sin explicar.
+- La suite entera de Playwright con carga: un spec que abre por primera vez una pantalla pesada
+  sigue pagando su parte en frío con 30 s. El 2026-09-30 le pasó a `caja/apertura-cierre`.
+- La presión de memoria, por lo dicho arriba.
+
+---
+
 ## El alta de suscripción de la tienda no se envía dos veces (cerrada 2026-10-09)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. Deja una entrada nueva en la misma sección: el backend

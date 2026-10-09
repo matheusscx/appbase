@@ -11,6 +11,12 @@ const PASSWORD = process.env.E2E_PASSWORD ?? 'admin'
 const TENANT = process.env.E2E_TENANT ?? 'Demo Restaurante'
 
 setup('autenticar y elegir tenant', async ({ page }) => {
+  // Es la primera página que pide la suite, así que paga la compilación en frío de
+  // `nuxt dev`: Vite transforma a pedido los ~1000 módulos de la SPA, y cada
+  // `reset-db.sh` recrea el contenedor y la vuelve a enfriar. Medido el 2026-10-09 con
+  // el host cargado (load 17–22): el primer `/login` tarda 29 s y cae en los 30 s por
+  // defecto; el segundo, 3 s. En CI no pasa: el `webServer` sirve el build.
+  setup.setTimeout(120_000)
   // networkidle: esperar la hidratación de Nuxt antes de tipear, si no el v-model
   // no captura y el form queda inválido (botón submit deshabilitado).
   await page.goto('/login', { waitUntil: 'networkidle' })
