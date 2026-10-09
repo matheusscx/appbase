@@ -80,6 +80,20 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **Anular como cortesía una línea de varias unidades con precio cerca del techo da 500 en
+  `cuenta_linea_anulaciones`** (backend, `SalonesService.escribirAnulacionEnLinea` con los baldes
+  de `baldesDeCortesia` en `salones/cortesia-retiro.ts`; lo vio el domain-reviewer del frente
+  `aa8d2d53` el 2026-10-09, **leído, no corrido**). Los baldes `monto_afecto`, `monto_exento` y
+  `monto_impuestos` son `NUMERIC(18,4)` y se calculan como `carta = cantidad × precioUnitario`.
+  Solo se llenan con motivo `cortesia` y un bien retirable, en `anularLinea` y
+  `cancelarConMotivo`. Ese camino no tiene ningún `cabeEnColumnaDePlata`. Ejemplo: precio
+  99.999.999.999.999 × 2 unidades ya enviadas, anuladas como cortesía, da un neto de
+  199.999.999.999.998, que es `numeric field overflow` en el `INSERT`. Con 1 unidad cabe. **No lo
+  introdujo `aa8d2d53`**, que solo cierra el alta de la línea: 5e13 × 3 ya lo disparaba antes.
+  **Medir:** correr la ruta y confirmar el 500. **Arreglo probable:** el mismo guard sobre `carta`
+  y los baldes antes del `INSERT`, con 400. Toca el cálculo de la cortesía, así que va como
+  frente aparte.
+
 - [ ] **Lo que dejó el frente del tope del esperado de caja (`ce3ab9d8`)** (backend, `caja` +
   `pagos`; 2026-10-09; lo vieron el autor y el domain-reviewer, **leído, no corrido** salvo donde
   se dice). Son cuatro residuos y ninguno traba una caja:
@@ -235,14 +249,6 @@ oficial, `cashRounding`, el conteo por denominación, el envío diario del resum
 la acumulación de descuentos y compras— y el renombre de `moneda.decimales` se mudaron a
 [`desarrollo-nuevo.md`](desarrollo-nuevo.md) el 2026-10-06. Acá quedan las correcciones.
 
-- [ ] **Pedir un plato cuyo precio no cabe en `NUMERIC(18,4)` da 500 en la línea de cuenta**
-  (backend, `SalonesService.agregarLinea`; medido por HTTP el 2026-10-08 por el frente del guard del
-  motor, que no lo toca porque la línea no pasa por `calcular`). Una receta en CLP con `precioBase`
-  99.999.999.999.999 y un extra de $1: `POST /cuentas/:id/lineas` → **500**. El `INSERT` de
-  `cuenta_lineas` lleva `precio_unitario` y `precio_unitario_origen` en 100.000.000.000.000. Sin
-  extras, la misma receta de a dos se pide bien (cada unidad cabe) y es el cierre el que la rechaza,
-  ya con 400 (el guard del motor). **Arreglo probable:** el mismo chequeo antes del `INSERT` de la
-  línea, reusando `cabeEnColumnaDePlata`.
 
 - [ ] **El token de Google viaja por la URL** — ⬇️ **prioridad muy baja, reconfirmada por el
   owner el 2026-08-22** (backend + frontend, auditoría RBAC/auth 2026-08-15; **dos lentes

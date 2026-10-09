@@ -23,6 +23,42 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Pedir un plato cuyo precio no cabe en `NUMERIC(18,4)` es 400, no 500 (cerrada 2026-10-09)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Commit `aa8d2d53`.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **Pedir un plato cuyo precio no cabe en `NUMERIC(18,4)` da 500 en la línea de cuenta**
+  (backend, `SalonesService.agregarLinea`; medido por HTTP el 2026-10-08 por el frente del guard del
+  motor, que no lo toca porque la línea no pasa por `calcular`). Una receta en CLP con `precioBase`
+  99.999.999.999.999 y un extra de $1: `POST /cuentas/:id/lineas` → **500**. El `INSERT` de
+  `cuenta_lineas` lleva `precio_unitario` y `precio_unitario_origen` en 100.000.000.000.000. Sin
+  extras, la misma receta de a dos se pide bien (cada unidad cabe) y es el cierre el que la rechaza,
+  ya con 400 (el guard del motor). **Arreglo probable:** el mismo chequeo antes del `INSERT` de la
+  línea, reusando `cabeEnColumnaDePlata`.
+
+### Qué se hizo
+
+`SalonesService.agregarLinea` revisa con `cabeEnColumnaDePlata` los dos montos que escribe en
+`NUMERIC(18,4)`: `precio_unitario_origen` y el `precio_unitario` convertido a la moneda oficial.
+Se revisan los dos porque con una tasa mayor que 1 el convertido no cabe aunque el origen sí. Lo
+que no cabe da 400, con el mismo texto que `assertCabeEnLaVenta` del motor. El guard va antes de
+cualquier efecto, sin lock, stock ni comanda, y juzga los valores ya cuantizados a 4 decimales que
+escribe el `INSERT`. Es el único escritor de precio en `cuenta_lineas`. Los otros caminos (fusión
+con una línea igual, cantidad, anulación, fusión de cuentas y comanda) solo mueven cantidades, y
+`cuenta_lineas` no guarda subtotal: el producto lo calcula el motor al cerrar, con su guard. La
+fija `backend/test/salones-linea-monto-no-cabe.e2e-spec.ts`, con cuatro casos. El de CLP al tope
+más un extra da 400 y 0 filas, y el de USD con el convertido arriba del techo da 400 y 0 filas.
+Los otros dos son controles que entran, uno en CLP y otro en USD. Con el service original, los
+dos rechazos vuelven al 500 (`numeric field overflow`) y los controles pasan.
+
+**Lo que no cierra:** anular como cortesía una línea de varias unidades cerca del techo desborda
+los baldes de `cuenta_linea_anulaciones`. Quedó como entrada nueva en
+[`pendientes.md`](pendientes.md) § 2.
+
+---
+
 ## El conteo de caja ya no da 500 por un esperado que no cabe: se frena al entrar la plata (cerrada 2026-10-09)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Commit `ce3ab9d8`. La regla está en
