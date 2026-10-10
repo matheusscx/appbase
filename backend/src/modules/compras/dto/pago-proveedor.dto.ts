@@ -16,6 +16,7 @@ import {
 import {
   IsDecimalNoNegativo,
   IsDecimalPositivo,
+  IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
@@ -52,6 +53,7 @@ export class CrearPagoProveedorDto {
 
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   monto: string;
 
@@ -102,6 +104,7 @@ export class FindPagosProveedorDto {
 export class PagoAlConfirmarDto {
   @IsNumberString()
   @IsDecimalPositivo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   monto: string;
 

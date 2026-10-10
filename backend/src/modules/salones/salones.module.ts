@@ -25,6 +25,7 @@ import { MotivosBajaModule } from '../motivos-baja/motivos-baja.module';
 import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
 import { InventarioModule } from '../inventario/inventario.module';
 import { IdempotenciaModule } from '../idempotencia/idempotencia.module';
+import { CajaModule } from '../caja/caja.module';
 
 @Module({
   imports: [
@@ -58,6 +59,10 @@ import { IdempotenciaModule } from '../idempotencia/idempotencia.module';
     // regla que usa la venta al sacarlas.
     InventarioModule,
     IdempotenciaModule,
+    // `cerrarCuenta` deja el rastro del tope del esperado con
+    // `CajaService.conRastroDeRechazo`. `CajaModule` no llega a `SalonesModule`
+    // por ningún import —no hay ciclo—.
+    CajaModule,
   ],
   controllers: [SalonesController, MesasController, CuentasController],
   providers: [

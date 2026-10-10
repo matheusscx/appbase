@@ -44,6 +44,7 @@ import { AnularLineaDto } from './dto/anular-linea.dto';
 import { CancelarConMotivoDto } from './dto/cancelar-con-motivo.dto';
 import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
 import { VentasService, type BoletaVenta } from '../ventas/ventas.service';
+import { CajaService } from '../caja/caja.service';
 import type { CreateVentaDto } from '../ventas/dto/create-venta.dto';
 import { EstrategiaAsignacionPropina } from '../propinas/enums/estrategia-asignacion-propina.enum';
 import { GarzonesService } from '../garzones/garzones.service';
@@ -341,6 +342,7 @@ export class SalonesService {
     private readonly ubicacionesService: UbicacionesService,
     private readonly inventarioService: InventarioService,
     private readonly idempotencia: IdempotenciaService,
+    private readonly cajaService: CajaService,
   ) {}
 
   // ── Administración: salones ──────────────────────────────────────────────
@@ -2058,20 +2060,35 @@ export class SalonesService {
           `El ítem "${item.nombre}" es afecto a IVA, pero el país del tenant no tiene un impuesto tipo 'iva' configurado`,
         );
       }
-      baldes.set(
-        linea.id,
-        baldesDeCortesia(
-          {
-            cantidad: cantidad.toString(),
-            precioUnitario: linea.precioUnitario,
-            clasificacion: item.clasificacion_tributaria,
-            precioIncluyeImpuesto: item.precio_incluye_impuesto,
-            tasaIva: item.tasa_iva,
-            tasasAdicionales: item.tasas_adicionales,
-          },
-          q,
-        ),
+      const deLinea = baldesDeCortesia(
+        {
+          cantidad: cantidad.toString(),
+          precioUnitario: linea.precioUnitario,
+          clasificacion: item.clasificacion_tributaria,
+          precioIncluyeImpuesto: item.precio_incluye_impuesto,
+          tasaIva: item.tasa_iva,
+          tasasAdicionales: item.tasas_adicionales,
+        },
+        q,
       );
+      // **Un balde que no cabe en su columna es 400 acá, no un 500 del
+      // `INSERT` en `cuenta_linea_anulaciones`** (medido el 2026-10-09: dos
+      // unidades de 99.999.999.999.999). El precio unitario ya cabe
+      // (`agregarLinea`); lo que desborda es la base de la cantidad anulada.
+      // Se miran los tres montos que se guardan, no la carta, que no se
+      // persiste: rechaza solo lo que Postgres rechazaría. Corre antes de la
+      // primera escritura de los dos llamadores.
+      const noCabe = [
+        deLinea.montoAfecto,
+        deLinea.montoExento,
+        deLinea.montoImpuestos,
+      ].find((m) => !cabeEnColumnaDePlata(m));
+      if (noCabe) {
+        throw new BadRequestException(
+          `La cortesía de «${item.nombre}» da $${formatearMontoPersistible(noCabe)}, y el sistema no puede guardar montos de $${TECHO_PERSISTIBLE_FORMATEADO} o más: anulá menos unidades por vez`,
+        );
+      }
+      baldes.set(linea.id, deLinea);
     }
     return baldes;
   }
@@ -2846,10 +2863,14 @@ export class SalonesService {
         );
         return { cuenta: detalle, ventaId: venta.id, boleta };
       });
-    return this.idempotencia.ejecutar(
-      { tenantId, usuarioId, clave, operacion: 'cuenta.cerrar', huella },
-      cerrar,
-      (r) => r.ventaId,
+    // El rastro de un cobro en efectivo que no cabe en el esperado
+    // (`EsperadoNoCabeError`), por fuera de la transacción que abre `ejecutar`.
+    return this.cajaService.conRastroDeRechazo(tenantId, () =>
+      this.idempotencia.ejecutar(
+        { tenantId, usuarioId, clave, operacion: 'cuenta.cerrar', huella },
+        cerrar,
+        (r) => r.ventaId,
+      ),
     );
   }
 

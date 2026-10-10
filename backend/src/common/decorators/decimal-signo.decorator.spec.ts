@@ -5,6 +5,7 @@ import {
   IsDecimalHasta,
   IsDecimalNoNegativo,
   IsDecimalPositivo,
+  IsMontoPersistible,
 } from './decimal-signo.decorator';
 
 class PositivoDto {
@@ -19,6 +20,11 @@ class HastaDto {
 
 class NoNegativoDto {
   @IsDecimalNoNegativo()
+  monto: string;
+}
+
+class PersistibleDto {
+  @IsMontoPersistible()
   monto: string;
 }
 
@@ -85,5 +91,30 @@ describe('IsDecimalHasta', () => {
     const dto = plainToInstance(HastaDto, { cantidad: 'mucho' });
     const errores = await validate(dto);
     expect(errores.some((e) => e.property === 'cantidad')).toBe(true);
+  });
+});
+
+describe('IsMontoPersistible', () => {
+  it('acepta el máximo que cabe en NUMERIC(18,4)', async () => {
+    for (const monto of ['99999999999999.9999', '99999999999999', '0']) {
+      const dto = plainToInstance(PersistibleDto, { monto });
+      expect(await validate(dto)).toHaveLength(0);
+    }
+  });
+
+  it('rechaza 10^14 y lo que Postgres redondearía a 10^14, con el techo en el mensaje', async () => {
+    for (const monto of ['100000000000000', '99999999999999.99995', '1e20']) {
+      const dto = plainToInstance(PersistibleDto, { monto });
+      const errores = await validate(dto);
+      expect(errores[0]?.constraints?.isMontoPersistible).toBe(
+        'monto no puede ser de $100.000.000.000.000 o más: el sistema no puede guardar montos así',
+      );
+    }
+  });
+
+  it('rechaza lo que no es número en vez de tirar', async () => {
+    const dto = plainToInstance(PersistibleDto, { monto: 'mucho' });
+    const errores = await validate(dto);
+    expect(errores.some((e) => e.property === 'monto')).toBe(true);
   });
 });

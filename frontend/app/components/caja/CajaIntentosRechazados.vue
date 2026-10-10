@@ -21,11 +21,17 @@ const TIPO_LABEL: Record<string, string> = {
   // spec compras-deuda-proveedor § 5.3 (tarea 2): un pago a proveedor en
   // efectivo sin plata en la caja. Mismo mecanismo que 'retiro', rótulo propio.
   pago_proveedor: 'Pago a proveedor',
+  // El tope del esperado (owner, 2026-10-09): plata que ENTRA y dejaría el
+  // saldo en un monto que el sistema no puede guardar. Mismo oráculo, mismo rastro.
+  ingreso: 'Ingreso a caja',
+  cobro: 'Cobro de una venta',
+  reversa_pago_proveedor: 'Anulación de un pago a proveedor',
 }
 
 const MOTIVO_LABEL: Record<string, string> = {
   saldo_insuficiente: 'Pidió más de lo que había en la caja',
   supera_efectivo_de_la_venta: 'Pidió más efectivo del que esa venta cobró en efectivo',
+  esperado_no_cabe: 'El saldo de la caja pasaría el máximo que el sistema puede guardar',
 }
 
 const columns: TableColumn<IntentoRechazado>[] = [
@@ -55,9 +61,10 @@ const columns: TableColumn<IntentoRechazado>[] = [
              a un número. Eso es alguien buscando el esperado del turno a
              fuerza de rechazos, no un error de tipeo. -->
         <p class="text-sm text-muted">
-          Retiros y devoluciones que el sistema <strong>no dejó pasar</strong> por falta
-          de plata. Una fila suelta suele ser un error de tipeo; lo que importa es la
-          <strong>ráfaga</strong>: muchos intentos seguidos, con montos que se van
+          Movimientos que el sistema <strong>no dejó pasar</strong>: retiros y
+          devoluciones por falta de plata, y entradas que llevarían el saldo más allá
+          de lo que el sistema puede guardar. Una fila suelta suele ser un error de
+          tipeo; lo que importa es la <strong>ráfaga</strong>: muchos intentos seguidos, con montos que se van
           acercando entre sí, es alguien deduciendo cuánto hay en la caja.
         </p>
       </div>

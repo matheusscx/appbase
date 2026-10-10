@@ -162,6 +162,8 @@ export class PagosService {
     manager: EntityManager,
     params: {
       tenantId: string;
+      /** Quien cobra: el actor del rastro si el tope del esperado rechaza. */
+      usuarioId: string;
       ventaId: string;
       pagos: PagoItemDto[];
       cajaId: string;
@@ -178,6 +180,7 @@ export class PagosService {
   }> {
     const {
       tenantId,
+      usuarioId,
       ventaId,
       pagos,
       cajaId,
@@ -307,6 +310,7 @@ export class PagosService {
         metodoPagoId: p.metodoPagoId,
         monto: new Decimal(p.monto).minus(vueltoPorIdx.get(i) ?? 0).toFixed(4),
       })),
+      { usuarioId, tipo: 'cobro' },
     );
 
     // Guardar pagos
@@ -533,6 +537,7 @@ export class PagosService {
         // Registrar los nuevos pagos
         const { pagos: savedPagos, porPago } = await this.registrar(manager, {
           tenantId,
+          usuarioId,
           ventaId: dto.ventaId,
           pagos: dto.pagos,
           cajaId: caja.id,
@@ -583,16 +588,20 @@ export class PagosService {
           },
         };
       });
-    return this.idempotencia.ejecutar(
-      {
-        tenantId,
-        usuarioId,
-        clave,
-        operacion: 'pago.abono',
-        huella: huellaDe('pago.abono', dto),
-      },
-      abonar,
-      (r) => r.venta.id,
+    // El rastro, por fuera de la transacción que abre `ejecutar`: un abono en
+    // efectivo que no cabe en el esperado es un oráculo (`EsperadoNoCabeError`).
+    return this.cajaService.conRastroDeRechazo(tenantId, () =>
+      this.idempotencia.ejecutar(
+        {
+          tenantId,
+          usuarioId,
+          clave,
+          operacion: 'pago.abono',
+          huella: huellaDe('pago.abono', dto),
+        },
+        abonar,
+        (r) => r.venta.id,
+      ),
     );
   }
 

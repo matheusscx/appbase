@@ -33,6 +33,15 @@ import { abrirCaja } from './helpers/caja';
  *
  * ⚠️ Sin `eliminado_el IS NULL` en los conteos, a propósito: lo que se cuenta es
  * si el pedido escribió algo, y una fila borrada también sería una escritura.
+ *
+ * **Cada rechazo deja rastro** (owner, 2026-10-09: *"Registrar los
+ * rechazos"*): el 400 acota el esperado en modo ciego por bisección, igual que
+ * el 422 de una salida sin saldo, así que cada camino deja una fila en
+ * `caja_intentos_rechazados` con motivo `esperado_no_cabe`, su tipo, quién y lo
+ * que pidió. El rastro se escribe fuera de la transacción que el 400 deshace.
+ *
+ * El último bloque es el monto SUELTO que no cabe (`IsMontoPersistible`): hasta
+ * el 2026-10-09 seis caminos daban 500 en un `INSERT`.
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -66,6 +75,7 @@ describe('El esperado de una caja que no cabe se frena al entrar la plata (e2e)'
   let mesaId: string;
   let productoId: string;
   let proveedorId: string;
+  let usuarioId: string;
   const cuentasAbiertas: string[] = [];
   const cajasAbiertas: string[] = [];
 
@@ -112,6 +122,33 @@ describe('El esperado de una caja que no cabe se frena al entrar la plata (e2e)'
       ),
     };
   }
+
+  /** El rastro de los rechazos de esta caja, en el orden en que ocurrieron. */
+  async function rastroDe(cajaId: string) {
+    const filas: {
+      tipo: string;
+      motivo: string;
+      usuario_id: string;
+      monto: string;
+    }[] = await ds.query(
+      // Sin `eliminado_el`, como `escrito()`: una fila borrada también sería
+      // un rastro escrito.
+      `SELECT tipo, motivo, usuario_id, monto_solicitado::text AS monto
+         FROM caja_intentos_rechazados
+        WHERE caja_id = $1
+        ORDER BY creado_el, intento_id`,
+      [cajaId],
+    );
+    return filas;
+  }
+
+  /** La fila que deja un rechazo del tope de ESTE usuario. */
+  const filaDelRastro = (tipo: string, monto: string) => ({
+    tipo,
+    motivo: 'esperado_no_cabe',
+    usuario_id: usuarioId,
+    monto,
+  });
 
   async function arqueo(cajaId: string): Promise<ArqueoLinea[]> {
     const res = await request(app.getHttpServer())
@@ -197,6 +234,12 @@ describe('El esperado de una caja que no cabe se frena al entrar la plata (e2e)'
       .send({ tenantId: PARIS_TENANT_ID });
     expect(resTenant.status).toBe(200);
     token = (resTenant.body as TokenResponse).access_token;
+    // Sin `eliminado_el`: el admin del seed es el que acaba de iniciar sesión.
+    const [admin]: { usuario_id: string }[] = await ds.query(
+      `SELECT usuario_id FROM usuarios WHERE correo = $1`,
+      [ADMIN_PARIS.email],
+    );
+    usuarioId = admin.usuario_id;
 
     const marca = randomUUID().slice(0, 8);
     productoId = (
@@ -275,13 +318,36 @@ describe('El esperado de una caja que no cabe se frena al entrar la plata (e2e)'
   });
 
   describe('el movimiento manual de entrada', () => {
+    it('N rechazos dejan N filas en el rastro, con su tipo, su motivo, quién y lo pedido', async () => {
+      const cajaId = await abrir('99999999999000');
+
+      // Una bisección en miniatura: tres pedidos que no caben.
+      for (const monto of ['5000', '2500', '1250']) {
+        expect(mensajes(await movimiento(cajaId, 'entrada', monto))).toContain(
+          MENSAJE_EFECTIVO,
+        );
+      }
+
+      expect(await rastroDe(cajaId)).toEqual([
+        filaDelRastro('ingreso', '5000.0000'),
+        filaDelRastro('ingreso', '2500.0000'),
+        filaDelRastro('ingreso', '1250.0000'),
+      ]);
+      // Lo que entra no deja rastro.
+      expect((await movimiento(cajaId, 'entrada', '625')).status).toBe(201);
+      expect(await rastroDe(cajaId)).toHaveLength(3);
+
+      expect(await contarYCerrar(cajaId)).toBe('99999999999625.0000');
+    });
+
     it('con la apertura en el techo, +$1 es 400, no escribe y el conteo cierra', async () => {
       const cajaId = await abrir('99999999999999');
       const antes = await escrito(cajaId);
 
-      expect(mensajes(await movimiento(cajaId, 'entrada', '1'))).toContain(
-        MENSAJE_EFECTIVO,
-      );
+      const rechazo = mensajes(await movimiento(cajaId, 'entrada', '1'));
+      expect(rechazo).toContain(MENSAJE_EFECTIVO);
+      // Una entrada manual no es un cobro: el remedio no habla de otro medio.
+      expect(rechazo).toMatch(/Registrá una salida para bajar el saldo$/);
       expect(await escrito(cajaId)).toEqual(antes);
 
       expect(await contarYCerrar(cajaId)).toBe('99999999999999.0000');
@@ -322,6 +388,9 @@ describe('El esperado de una caja que no cabe se frena al entrar la plata (e2e)'
         MENSAJE_EFECTIVO,
       );
       expect(await escrito(cajaId)).toEqual(antes);
+      expect(await rastroDe(cajaId)).toEqual([
+        filaDelRastro('cobro', '1490.0000'),
+      ]);
 
       expect(await contarYCerrar(cajaId)).toBe('99999999999490.0000');
     });
@@ -341,6 +410,9 @@ describe('El esperado de una caja que no cabe se frena al entrar la plata (e2e)'
         ),
       ).toContain(MENSAJE_EFECTIVO);
       expect(await escrito(cajaId)).toEqual(antes);
+      expect(await rastroDe(cajaId)).toEqual([
+        filaDelRastro('cobro', '1490.0000'),
+      ]);
 
       // Control: la misma venta con parte en tarjeta entra; el efectivo solo
       // sube 400 y la tarjeta tiene su propio esperado.
@@ -380,6 +452,9 @@ describe('El esperado de una caja que no cabe se frena al entrar la plata (e2e)'
       );
       expect(rechazo).toContain(`sumarían $${TECHO} o más`);
       expect(await escrito(cajaId)).toEqual(antes);
+      expect(await rastroDe(cajaId)).toEqual([
+        filaDelRastro('cobro', '1490.0000'),
+      ]);
 
       // Control: el efectivo de esa misma caja está en cero y recibe la venta.
       expect(
@@ -459,6 +534,10 @@ describe('El esperado de una caja que no cabe se frena al entrar la plata (e2e)'
       expect(mensajes(await abonar(EFECTIVO_ID, '1000'))).toContain(
         MENSAJE_EFECTIVO,
       );
+      expect(await rastroDe(cajaId)).toEqual([
+        filaDelRastro('cobro', '1490.0000'),
+        filaDelRastro('cobro', '1000.0000'),
+      ]);
       // Con otro medio de pago la venta se termina de cobrar.
       expect((await abonar(TARJETA_CREDITO_ID, '1000')).status).toBe(201);
 
@@ -489,6 +568,9 @@ describe('El esperado de una caja que no cabe se frena al entrar la plata (e2e)'
 
       expect(mensajes(await cerrar())).toContain(MENSAJE_EFECTIVO);
       expect(await escrito(cajaId)).toEqual(antes);
+      expect(await rastroDe(cajaId)).toEqual([
+        filaDelRastro('cobro', '1490.0000'),
+      ]);
       const [fila]: { estado: string }[] = await ds.query(
         `SELECT estado FROM cuentas
           WHERE cuenta_id = $1 AND eliminado_el IS NULL`,
@@ -524,8 +606,16 @@ describe('El esperado de una caja que no cabe se frena al entrar la plata (e2e)'
       const antes = await escrito(cajaId);
 
       // La reversa devuelve 500: 99.999.999.999.500 + 500 = 10^14 justo.
-      expect(mensajes(await anular())).toContain(MENSAJE_EFECTIVO);
+      const rechazo = mensajes(await anular());
+      expect(rechazo).toContain(MENSAJE_EFECTIVO);
+      // No es un cobro: el remedio es bajar el saldo y volver a anular.
+      expect(rechazo).toMatch(
+        /Registrá una salida para bajar el saldo y volvé a anular el pago$/,
+      );
       expect(await escrito(cajaId)).toEqual(antes);
+      expect(await rastroDe(cajaId)).toEqual([
+        filaDelRastro('reversa_pago_proveedor', '500.0000'),
+      ]);
       const [fila]: { estado: string }[] = await ds.query(
         `SELECT estado FROM pagos_proveedor WHERE pago_proveedor_id = $1`,
         [pagoId],
@@ -537,6 +627,117 @@ describe('El esperado de una caja que no cabe se frena al entrar la plata (e2e)'
       expect((await anular()).status).toBe(201);
 
       expect(await contarYCerrar(cajaId)).toBe('99999999999400.0000');
+    });
+  });
+
+  // Un monto suelto de 10^14 o más pasaba el DTO y daba 500 en un INSERT
+  // (medido el 2026-10-09): `pagos.monto` en la venta y el abono con vuelto,
+  // `pagos_proveedor.monto`, y el rastro de la salida sin saldo
+  // (`caja_intentos_rechazados.monto_solicitado`), que además se perdía. Ahora
+  // es 400 en el borde, antes de tocar nada: ni la caja ni el rastro.
+  describe('un monto suelto que no cabe', () => {
+    const NO_CABE = '100000000000000';
+    const MENSAJE_MONTO = `no puede ser de $${TECHO} o más`;
+
+    it('caja, venta, abono, cierre de cuenta y pago a proveedor: 400, sin escribir ni dejar rastro', async () => {
+      const cajaId = await abrir('1000');
+      const pendiente = await vender(productoId, []);
+      expect(pendiente.status).toBe(201);
+      const ventaId = (pendiente.body as IdResponse).id;
+      const cuenta = await crear(`mesas/${mesaId}/cuentas`, {
+        garzonId: garzon.id,
+        pin: garzon.pin,
+      });
+      cuentasAbiertas.push(cuenta.id);
+      await crear(`cuentas/${cuenta.id}/lineas`, {
+        itemId: productoId,
+        cantidad: '1',
+      });
+      const pagosProveedor = () =>
+        contar(
+          `SELECT count(*) AS n FROM pagos_proveedor WHERE proveedor_id = $1`,
+          [proveedorId],
+        );
+      const antes = await escrito(cajaId);
+      const proveedorAntes = await pagosProveedor();
+
+      const pedidos: [
+        string,
+        () => Promise<{ status: number; body: unknown }>,
+      ][] = [
+        ['salida manual', () => movimiento(cajaId, 'salida', NO_CABE)],
+        [
+          'salida manual 10^20',
+          () => movimiento(cajaId, 'salida', '100000000000000000000'),
+        ],
+        ['entrada manual', () => movimiento(cajaId, 'entrada', NO_CABE)],
+        [
+          'venta en efectivo con vuelto',
+          () =>
+            vender(productoId, [{ metodoPagoId: EFECTIVO_ID, monto: NO_CABE }]),
+        ],
+        [
+          'abono en efectivo',
+          () =>
+            enviar('pagos', {
+              ventaId,
+              pagos: [{ metodoPagoId: EFECTIVO_ID, monto: NO_CABE }],
+            }),
+        ],
+        [
+          'cierre de cuenta en efectivo',
+          () =>
+            enviar(`cuentas/${cuenta.id}/cerrar`, {
+              garzonId: garzon.id,
+              pin: garzon.pin,
+              pagos: [{ metodoPagoId: EFECTIVO_ID, monto: NO_CABE }],
+            }),
+        ],
+        [
+          'pago a proveedor en efectivo',
+          () =>
+            enviar('compras/pagos', {
+              proveedorId,
+              monto: NO_CABE,
+              metodoPagoId: EFECTIVO_ID,
+              aplicaciones: [],
+            }),
+        ],
+        [
+          'pago a proveedor con tarjeta',
+          () =>
+            enviar('compras/pagos', {
+              proveedorId,
+              monto: NO_CABE,
+              metodoPagoId: TARJETA_CREDITO_ID,
+              aplicaciones: [],
+            }),
+        ],
+        [
+          'pago al confirmar una compra',
+          () =>
+            enviar(`compras/${randomUUID()}/confirmar`, {
+              pago: { monto: NO_CABE, metodoPagoId: EFECTIVO_ID },
+            }),
+        ],
+      ];
+      for (const [que, pedir] of pedidos) {
+        const res = await pedir();
+        expect({ que, status: res.status }).toEqual({ que, status: 400 });
+        expect(mensajes(res)).toContain(MENSAJE_MONTO);
+      }
+
+      expect(await escrito(cajaId)).toEqual(antes);
+      expect(await pagosProveedor()).toBe(proveedorAntes);
+      expect(await rastroDe(cajaId)).toEqual([]);
+
+      // Control: el abono que cabe salda la venta y la caja cierra.
+      const abono = await enviar('pagos', {
+        ventaId,
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1490' }],
+      });
+      expect(abono.status).toBe(201);
+      expect(await contarYCerrar(cajaId)).toBe('2490.0000');
     });
   });
 });

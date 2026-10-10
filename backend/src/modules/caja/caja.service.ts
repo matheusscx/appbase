@@ -108,8 +108,11 @@ export interface IntentoRechazadoData {
    * `'retiro'`, `tipo` libre (`varchar`) en la tabla — sumar un valor acá no
    * cambia la regla del rastro.
    */
-  tipo: 'retiro' | 'devolucion_nc' | 'pago_proveedor';
-  motivo: 'saldo_insuficiente' | 'supera_efectivo_de_la_venta';
+  tipo: 'retiro' | 'devolucion_nc' | 'pago_proveedor' | RastroDelTope['tipo'];
+  motivo:
+    | 'saldo_insuficiente'
+    | 'supera_efectivo_de_la_venta'
+    | 'esperado_no_cabe';
   /** Lo pedido, escala 4 (convención de dinero del proyecto). */
   montoSolicitado: string;
   ventaId?: string | null;
@@ -133,6 +136,65 @@ export class IntentoRechazadoError extends UnprocessableEntityException {
     super(mensaje);
   }
 }
+
+/**
+ * Quién mete la plata y por qué camino: lo que el rastro de un 400 del tope
+ * del esperado necesita (`assertEntradasCaben`). `'ingreso'` es el movimiento
+ * manual de entrada; `'cobro'`, el pago de una venta (POS, cierre de cuenta,
+ * abono); `'reversa_pago_proveedor'`, la plata que vuelve al anular un pago a
+ * proveedor.
+ */
+export interface RastroDelTope {
+  usuarioId: string;
+  tipo: 'ingreso' | 'cobro' | 'reversa_pago_proveedor';
+}
+
+/**
+ * El 400 del tope del esperado, con el intento colgado encima para que
+ * `conRastroDeRechazo` lo deje en `caja_intentos_rechazados` (owner,
+ * 2026-10-09: *"Registrar los rechazos"*). Es un oráculo igual que el 422 del
+ * saldo insuficiente —en modo ciego, rechazos sucesivos acotan el esperado por
+ * bisección—, así que lleva el mismo rastro, con motivo `'esperado_no_cabe'`.
+ * Sigue siendo 400 para el cliente: no cambian ni el status ni el mensaje.
+ */
+export class EsperadoNoCabeError extends BadRequestException {
+  constructor(
+    mensaje: string,
+    readonly intento: IntentoRechazadoData,
+  ) {
+    super(mensaje);
+  }
+}
+
+/**
+ * Lo que recibe `CajaService.registrarMovimientoEnTransaccion`. **Una entrada
+ * tiene que pasar por el tope del esperado**, y lo ataja `tsc`: o el llamador
+ * ya la juzgó en tanda (`topeYaVerificado`, solo `PagosService.registrar`) o
+ * dice quién mete la plata y por qué camino (`rastroDelTope`), que es lo que el
+ * rastro de un rechazo necesita. Una entrada sin ninguno de los dos no compila.
+ */
+export type MovimientoEnTransaccion = {
+  cajaId: string;
+  concepto: string;
+  monto: string;
+  referencia?: string | null;
+  ventaId?: string | null;
+  pagoId?: string | null;
+  metodoPagoId?: string | null;
+  /** La salida (o su reversa) de un pago a proveedor (spec compras-deuda-proveedor § 3). */
+  pagoProveedorId?: string | null;
+} & (
+  | { tipo: 'salida' }
+  /**
+   * El llamador ya corrió `assertEntradasCaben` con **todas** las entradas de
+   * su operación, en una tanda, antes de escribir la primera: acá no se repite.
+   * Escribe una entrada por pago, y repetir el chequeo por pago sería una
+   * lectura por iteración.
+   */
+  | { tipo: 'entrada'; topeYaVerificado: true }
+  /** Quién mete la plata y por qué camino, para el rastro de un rechazo del tope. */
+  | { tipo: 'entrada'; topeYaVerificado?: false; rastroDelTope: RastroDelTope }
+);
 
 /** Una fila del rastro, ya resuelta con el nombre de quien lo intentó. */
 export interface IntentoRechazadoItem {
@@ -1172,27 +1234,7 @@ export class CajaService {
 
   async registrarMovimientoEnTransaccion(
     manager: EntityManager,
-    params: {
-      cajaId: string;
-      tipo: string;
-      concepto: string;
-      monto: string;
-      referencia?: string | null;
-      ventaId?: string | null;
-      pagoId?: string | null;
-      metodoPagoId?: string | null;
-      /** La salida (o su reversa) de un pago a proveedor (spec compras-deuda-proveedor § 3). */
-      pagoProveedorId?: string | null;
-      /**
-       * El llamador ya corrió `assertEntradasCaben` con **todas** las entradas
-       * de su operación, en una tanda, antes de escribir la primera: acá no se
-       * repite. **Solo `PagosService.registrar` lo manda**, porque escribe una
-       * entrada por pago y repetir el chequeo por pago sería una lectura por
-       * iteración. El default (`false`) chequea: un llamador nuevo que lo
-       * olvide queda protegido, no abierto.
-       */
-      topeYaVerificado?: boolean;
-    },
+    params: MovimientoEnTransaccion,
   ): Promise<MovimientoCaja> {
     // El signo lo codifica `tipo`, nunca `monto`: una "entrada" negativa RESTA
     // del esperado (`SUM(monto) FILTER (WHERE tipo='entrada')`). El endpoint HTTP
@@ -1209,9 +1251,12 @@ export class CajaService {
       );
     }
     if (params.tipo === 'entrada' && !params.topeYaVerificado) {
-      await this.assertEntradasCaben(manager, params.cajaId, [
-        { metodoPagoId: params.metodoPagoId ?? null, monto: params.monto },
-      ]);
+      await this.assertEntradasCaben(
+        manager,
+        params.cajaId,
+        [{ metodoPagoId: params.metodoPagoId ?? null, monto: params.monto }],
+        params.rastroDelTope,
+      );
     }
     const movimiento = manager.create(MovimientoCaja, {
       cajaId: params.cajaId,
@@ -1265,12 +1310,18 @@ export class CajaService {
    * a la primera.
    *
    * El mensaje no incluye el esperado: en modo ciego el cajero no lo ve, y un
-   * número en el 400 lo entregaría.
+   * número en el 400 lo entregaría. **El rechazo deja rastro** (owner,
+   * 2026-10-09): sale como `EsperadoNoCabeError` y lo escribe
+   * `conRastroDeRechazo` en el borde de cada camino, igual que el 422 del saldo
+   * insuficiente. Lo pedido es la suma de la línea en esta operación (cada
+   * monto suelto ya cabe: `IsMontoPersistible`). El remedio del mensaje depende
+   * del camino (`rastro.tipo`).
    */
   async assertEntradasCaben(
     manager: EntityManager,
     cajaId: string,
     entradas: { metodoPagoId: string | null; monto: string }[],
+    rastro: RastroDelTope,
   ): Promise<void> {
     if (!entradas.length) return;
     const ids = [
@@ -1316,11 +1367,33 @@ export class CajaService {
     }
 
     const techo = TECHO_PERSISTIBLE_FORMATEADO;
+    // Lo pedido que ya solo no cabe se rechaza sea cual sea el esperado (que
+    // nunca es negativo): no dice nada de él, así que no es oráculo y no lleva
+    // rastro, que además desbordaría `monto_solicitado`. Pasa con un cobro cuyo
+    // total más la propina llega a 10^14, aunque cada monto quepa solo.
+    const rechazo = (mensaje: string, pedido: Decimal) =>
+      cabeEnColumnaDePlata(pedido)
+        ? new EsperadoNoCabeError(mensaje, {
+            cajaId,
+            usuarioId: rastro.usuarioId,
+            tipo: rastro.tipo,
+            motivo: 'esperado_no_cabe',
+            montoSolicitado: pedido.toFixed(4),
+          })
+        : new BadRequestException(mensaje);
     if (efectivo !== null) {
       const esperado = await this.calcularEsperadoEfectivo(cajaId, manager);
       if (!cabeEnColumnaDePlata(efectivo.plus(esperado))) {
-        throw new BadRequestException(
-          `Esta entrada de efectivo dejaría el saldo de la caja en $${techo} o más, y el sistema no puede guardar montos así. Registrá una salida para bajar el saldo, o cobrá con otro medio de pago`,
+        const remedio = {
+          cobro:
+            'Registrá una salida para bajar el saldo, o cobrá con otro medio de pago',
+          ingreso: 'Registrá una salida para bajar el saldo',
+          reversa_pago_proveedor:
+            'Registrá una salida para bajar el saldo y volvé a anular el pago',
+        }[rastro.tipo];
+        throw rechazo(
+          `Esta entrada de efectivo dejaría el saldo de la caja en $${techo} o más, y el sistema no puede guardar montos así. ${remedio}`,
+          efectivo,
         );
       }
     }
@@ -1340,8 +1413,9 @@ export class CajaService {
       );
       for (const [id, nuevo] of porMedio) {
         if (!cabeEnColumnaDePlata(nuevo.plus(previas.get(id) ?? 0))) {
-          throw new BadRequestException(
+          throw rechazo(
             `Los cobros con ${medios.get(id)?.nombre ?? 'este medio de pago'} de esta caja sumarían $${techo} o más, y el sistema no puede guardar montos así. Cobrá con otro medio de pago`,
+            nuevo,
           );
         }
       }
@@ -1370,6 +1444,14 @@ export class CajaService {
    * decisión del owner del 2026-08-22 mandó volver detectivos en vez de
    * taparlos: el chequeo de saldo insuficiente existe para impedir retirar
    * plata que no está, y se queda intacto.
+   *
+   * El 400 del tope del esperado (`EsperadoNoCabeError`) es el mismo tipo de
+   * oráculo y lleva el mismo rastro (owner, 2026-10-09), así que también envuelve
+   * a todo camino por donde entra plata a una caja física: además del
+   * movimiento manual, `VentasService.crear`, `SalonesService.cerrarCuenta`,
+   * `PagosService.registrarAbono` y `ComprasService.anularPago`. Un camino
+   * nuevo que meta plata en una caja tiene que envolverse acá, o su rechazo no
+   * deja nada.
    */
   async conRastroDeRechazo<T>(
     tenantId: string,
@@ -1378,7 +1460,10 @@ export class CajaService {
     try {
       return await fn();
     } catch (e) {
-      if (e instanceof IntentoRechazadoError) {
+      if (
+        e instanceof IntentoRechazadoError ||
+        e instanceof EsperadoNoCabeError
+      ) {
         // Si la escritura del rastro falla, el error PROPAGA y el cajero recibe
         // un 500 en vez del 422 — decidido así a propósito. Tragarlo dejaría un
         // agujero silencioso en un control anti-fraude, que es exactamente la
@@ -1581,10 +1666,15 @@ export class CajaService {
 
       return this.registrarMovimientoEnTransaccion(manager, {
         cajaId,
-        tipo: dto.tipo,
         concepto: dto.concepto,
         monto: dto.monto,
         referencia: dto.referencia,
+        ...(dto.tipo === 'entrada'
+          ? {
+              tipo: 'entrada' as const,
+              rastroDelTope: { usuarioId, tipo: 'ingreso' as const },
+            }
+          : { tipo: 'salida' as const }),
       });
     });
   }

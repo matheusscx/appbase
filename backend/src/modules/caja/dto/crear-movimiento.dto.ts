@@ -5,7 +5,10 @@ import {
   IsOptional,
   IsString,
 } from 'class-validator';
-import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalPositivo,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 export class CrearMovimientoDto {
@@ -21,6 +24,7 @@ export class CrearMovimientoDto {
   // restar.
   @IsNumberString()
   @IsDecimalPositivo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   monto: string;
 

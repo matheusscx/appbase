@@ -80,36 +80,29 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
-- [ ] **Anular como cortesía una línea de varias unidades con precio cerca del techo da 500 en
-  `cuenta_linea_anulaciones`** (backend, `SalonesService.escribirAnulacionEnLinea` con los baldes
-  de `baldesDeCortesia` en `salones/cortesia-retiro.ts`; lo vio el domain-reviewer del frente
-  `aa8d2d53` el 2026-10-09, **leído, no corrido**). Los baldes `monto_afecto`, `monto_exento` y
-  `monto_impuestos` son `NUMERIC(18,4)` y se calculan como `carta = cantidad × precioUnitario`.
-  Solo se llenan con motivo `cortesia` y un bien retirable, en `anularLinea` y
-  `cancelarConMotivo`. Ese camino no tiene ningún `cabeEnColumnaDePlata`. Ejemplo: precio
-  99.999.999.999.999 × 2 unidades ya enviadas, anuladas como cortesía, da un neto de
-  199.999.999.999.998, que es `numeric field overflow` en el `INSERT`. Con 1 unidad cabe. **No lo
-  introdujo `aa8d2d53`**, que solo cierra el alta de la línea: 5e13 × 3 ya lo disparaba antes.
-  **Medir:** correr la ruta y confirmar el 500. **Arreglo probable:** el mismo guard sobre `carta`
-  y los baldes antes del `INSERT`, con 400. Toca el cálculo de la cortesía, así que va como
-  frente aparte.
-
-- [ ] **Lo que dejó el frente del tope del esperado de caja (`ce3ab9d8`)** (backend, `caja` +
-  `pagos`; 2026-10-09; lo vieron el autor y el domain-reviewer, **leído, no corrido** salvo donde
-  se dice). Son cuatro residuos y ninguno traba una caja:
-  1. **Oráculo sin rastro.** El 400 del tope deja averiguar el esperado en modo ciego por
-     bisección. Solo los intentos que fallan salen gratis: cada acierto escribe una entrada real
-     de un monto cercano al techo, que queda a la vista. La salida que no alcanza (422) deja rastro
-     con `IntentoRechazadoError`, y este 400 no. Hay que decidir si lleva un motivo nuevo en el
-     rastro.
-  2. **Un `monto` suelto que no cabe en la columna**, de un movimiento o de un pago, ¿sigue dando
-     500 en el `INSERT`? El guard mira la suma, no el monto solo. **Medir:** ¿el DTO ya lo rechaza
-     con el 400 del redondeo de plata?
-  3. **Salida manual enorme:** sin cobertura. Medir qué devuelve.
-  4. **Texto.** Cuando el 400 sale de la reversa del pago a un proveedor
-     (`compras.service.ts`, ~3329), el mensaje dice "cobrá con otro medio de pago", que ahí no tiene
-     sentido. Además, `docs/features/gestion-cajas.md` nombra como consecuencia aceptada solo el
-     caso de las ventas, no el de anular un pago a proveedor, que se destraba con una salida.
+- [ ] **Los ~40 campos `@EsMontoCobrado` no tienen techo: un monto que no cabe en su columna llega
+  al `INSERT`** (backend, DTOs con `@EsMontoCobrado()`; anotado el 2026-10-09 por el frente que cerró
+  los seis 500 del monto suelto de caja y pagos; **leído, no medido** salvo esos seis). Ese frente le
+  puso `IsMontoPersistible` (`common/decorators/decimal-signo.decorator.ts`) solo a los DTO que
+  midió: `CrearMovimientoDto`, `PagoVentaDto`, `PagoItemDto`, `CrearPagoProveedorDto` y
+  `PagoAlConfirmarDto`. El resto de los `@EsMontoCobrado` sigue sin techo: recargos, descuentos y
+  promociones (`valorMonto`, `minimoMonto`), compras (`descuentoTotal`, `totalDocumento`,
+  `AplicacionPagoProveedorDto.monto`), propinas (`montoPagado`, `montoSugerido`, ajustes y
+  liquidación), el `propinaMonto` y la `propinaSugerida` del cierre de cuenta, la nota de crédito,
+  `montoContado` del conteo, y la pasarela (que ya tiene su entrada, *"`pasarela_orden.monto` es `NUMERIC(18,6)`"*)
+  y las preferencias financieras. **No es un techo único:** la pasarela y
+  `tenants.monto_tolerancia` son `NUMERIC(18,6)` (techo 10^12), y un campo que no se guarda tal cual
+  (un umbral que solo se compara) puede no tener ninguno. **Medir:** por cada campo, a qué columna
+  llega y qué devuelve con 10^14 (o 10^12). **Arreglo probable:** `IsMontoPersistible` donde la
+  columna es `NUMERIC(18,4)`, y un techo por escala donde no. Si se hace en `EscalaMonedaPipe`, el
+  pipe tiene que saber la columna de cada campo, porque hoy solo mira la escala de la moneda.
+  **El que más pesa, según la revisión de seguridad de ese frente (leído, no corrido):** la
+  propina de `POST /cuentas/:id/cerrar` y de `POST /ventas` (`CerrarCuentaDto.propinaMonto` y
+  `propinaSugerida`, `PropinaCierreMesaDto`, `PropinaDirectaDto`). El service solo rechaza
+  negativos, y el `INSERT` en `venta_propina` corre antes que los pagos, así que 10^14 daría 500
+  ahí. La `propinaSugerida` llega aunque no se cobre propina. `AbrirCajaDto.saldoInicial` no está en
+  la lista porque ya lo frena `CajaService.abrir` con 400 (`caja-esperado-no-cabe.e2e-spec.ts`,
+  "la apertura").
 
 
 - [ ] **Medir la ventana de consulta de Webpay Plus con un pago de más de 7 días** (queda del

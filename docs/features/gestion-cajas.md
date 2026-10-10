@@ -1133,7 +1133,10 @@ columna; lo que desborda es la **suma** (`saldo inicial + entradas − salidas`)
 **al entrar la plata**, no en el conteo (un 400 ahí dejaría la caja igual de trabada). Toda entrada
 que dejaría el esperado de su línea sin caber es **400**, con `cabeEnColumnaDePlata`
 (`common/utils/monto-persistible.util.ts`), y no escribe nada. Consecuencia aceptada: una venta así
-no se cobra en esa caja con ese medio.
+no se cobra en esa caja con ese medio, y un pago a proveedor cuya reversa no cabe no se anula
+hasta que una salida baje el saldo. El remedio del mensaje depende del camino
+(`RastroDelTope.tipo`): un cobro ofrece la salida u otro medio de pago, una entrada manual solo la
+salida, y la reversa del pago a proveedor la salida y volver a anular.
 
 - **Un solo punto:** `CajaService.registrarMovimientoEnTransaccion` (tipo `entrada`) es por donde
   entra toda plata a una caja: el movimiento manual, el pago de una venta por cualquier canal (POS,
@@ -1155,6 +1158,16 @@ no se cobra en esa caja con ese medio.
 - **Concurrencia:** corre bajo el `FOR UPDATE` de `bloquearCajaAbierta` que cada camino toma antes
   (la virtual es la única que no lo toma, y está afuera del chequeo).
 - El mensaje no lleva el esperado: en modo ciego el cajero no lo ve.
+- **El rechazo deja rastro** (owner, 2026-10-09, *"Registrar los rechazos"*, sin límite de
+  intentos ni bloqueo). El 400 acota el esperado por bisección igual que el 422 de una salida sin
+  saldo (medido: 47 requests sin saber nada, o un barrido de 1.235 requests de a $1.000 con una
+  sola entrada escrita), así que sale como `EsperadoNoCabeError` y lo escribe
+  `conRastroDeRechazo` con motivo `esperado_no_cabe`. Ver [la tabla del rastro](#rastro-de-intentos-rechazados).
+- **Un monto suelto que no cabe es 400 en el DTO** (`IsMontoPersistible`, 2026-10-09): el
+  movimiento manual, el pago de una venta, de un cierre de cuenta y de un abono, y el pago a
+  proveedor (también al confirmar una compra). Hasta entonces 10^14 daba 500 en el `INSERT` —el
+  pago en efectivo con vuelto pasaba el tope, que mira el neto—, y la salida sin saldo perdía su
+  rastro, que desbordaba `monto_solicitado`.
 
 Test: `backend/test/caja-esperado-no-cabe.e2e-spec.ts`, un caso por camino.
 
@@ -1328,6 +1341,18 @@ plata** es además un oráculo sobre el esperado del turno:
 | Nota de crédito con devolución en efectivo por encima de lo que esa venta cobró en efectivo | `tipo:'devolucion_nc'`, `motivo:'supera_efectivo_de_la_venta'` |
 | Nota de crédito con devolución en efectivo y la caja sin saldo | `tipo:'devolucion_nc'`, `motivo:'saldo_insuficiente'` |
 | `POST /compras/pagos` con un pago a proveedor en efectivo y la caja sin saldo (spec compras-deuda-proveedor § 5.3, tarea 2) | `tipo:'pago_proveedor'`, `motivo:'saldo_insuficiente'` |
+| Una entrada que dejaría el esperado sin caber en `NUMERIC(18,4)` ([el tope](#el-esperado-que-no-cabe-en-la-columna-se-frena-al-entrar-la-plata-2026-10-09)): `POST /caja/:id/movimientos` con `tipo:'entrada'` | `tipo:'ingreso'`, `motivo:'esperado_no_cabe'` |
+| Lo mismo al cobrar: la venta del POS, el cierre de una cuenta del salón, el abono | `tipo:'cobro'`, `motivo:'esperado_no_cabe'` |
+| Lo mismo al anular un pago a proveedor en efectivo (la plata vuelve a la caja) | `tipo:'reversa_pago_proveedor'`, `motivo:'esperado_no_cabe'` |
+
+En las filas del tope, *cuánto pidió* es lo que esa operación metía en la línea rechazada (en un
+cobro, la suma de los netos de sus pagos en ese medio). Si eso solo ya no cabe, el rechazo no
+depende del esperado —que nunca es negativo—, así que no es oráculo y sale como 400 **sin** rastro
+(pasa con un cobro cuyo total más la propina llega a 10^14). Los cinco caminos envuelven su
+operación entera con `conRastroDeRechazo`, por fuera de la transacción: `CajaService.registrarMovimiento`,
+`VentasService.crear`, `SalonesService.cerrarCuenta`, `PagosService.registrarAbono` y
+`ComprasService.anularPago`. Un camino nuevo que meta plata en una caja física tiene que hacer lo
+mismo, o su rechazo no deja nada.
 
 Guarda **quién, cuándo, qué caja, cuánto pidió** y —en la NC— sobre qué venta. **No guarda
 el monto disponible**: ese es justo el dato que el rechazo filtraba, y persistirlo lo

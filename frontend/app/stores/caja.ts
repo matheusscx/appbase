@@ -137,9 +137,12 @@ export interface IntentoRechazado {
   cajonNombre: string | null
   usuarioId: string
   usuarioNombre: string
-  /** `'retiro'` | `'devolucion_nc'` | `'pago_proveedor'`. */
+  /**
+   * `'retiro'` | `'devolucion_nc'` | `'pago_proveedor'`, y los del tope del
+   * esperado: `'ingreso'` | `'cobro'` | `'reversa_pago_proveedor'`.
+   */
   tipo: string
-  /** `'saldo_insuficiente'` | `'supera_efectivo_de_la_venta'`. */
+  /** `'saldo_insuficiente'` | `'supera_efectivo_de_la_venta'` | `'esperado_no_cabe'`. */
   motivo: string
   /** Lo que PIDIÓ. El disponible no se guarda: era justo el dato que filtraba. */
   montoSolicitado: string

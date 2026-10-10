@@ -137,6 +137,9 @@ describe('PagosService', () => {
             bloquearCajaAbierta: jest.fn().mockResolvedValue(undefined),
             registrarMovimientoEnTransaccion: jest.fn().mockResolvedValue({}),
             assertEntradasCaben: jest.fn().mockResolvedValue(undefined),
+            conRastroDeRechazo: jest.fn(
+              (_tenantId: string, fn: () => Promise<unknown>) => fn(),
+            ),
           },
         },
         {
@@ -182,6 +185,7 @@ describe('PagosService', () => {
         manager as unknown as EntityManager,
         {
           tenantId: TENANT_ID,
+          usuarioId: USUARIO_ID,
           ventaId: VENTA_ID,
           pagos: [],
           cajaId: CAJA_ID,
@@ -209,6 +213,7 @@ describe('PagosService', () => {
       await expect(
         svc.registrar(manager as unknown as EntityManager, {
           tenantId: TENANT_ID,
+          usuarioId: USUARIO_ID,
           ventaId: VENTA_ID,
           pagos: [{ metodoPagoId: TARJETA_ID, monto: '100.0000' }],
           cajaId: CAJA_ID,
@@ -231,6 +236,7 @@ describe('PagosService', () => {
       await expect(
         svc.registrar(manager as unknown as EntityManager, {
           tenantId: TENANT_ID,
+          usuarioId: USUARIO_ID,
           ventaId: VENTA_ID,
           pagos: [
             { metodoPagoId: EFECTIVO_ID, monto: '50.0000' },
@@ -254,6 +260,7 @@ describe('PagosService', () => {
 
       const result = await svc.registrar(manager as unknown as EntityManager, {
         tenantId: TENANT_ID,
+        usuarioId: USUARIO_ID,
         ventaId: VENTA_ID,
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100.0000' }],
         cajaId: CAJA_ID,
@@ -282,6 +289,7 @@ describe('PagosService', () => {
 
       await svc.registrar(manager as unknown as EntityManager, {
         tenantId: TENANT_ID,
+        usuarioId: USUARIO_ID,
         ventaId: VENTA_ID,
         pagos: [
           { metodoPagoId: EFECTIVO_ID, monto: '60.0000' },
@@ -300,6 +308,7 @@ describe('PagosService', () => {
           { metodoPagoId: EFECTIVO_ID, monto: '60.0000' },
           { metodoPagoId: TARJETA_ID, monto: '40.0000' },
         ],
+        { usuarioId: USUARIO_ID, tipo: 'cobro' },
       );
       // Antes de la primera escritura.
       expect(
@@ -324,6 +333,7 @@ describe('PagosService', () => {
       await expect(
         svc.registrar(manager as unknown as EntityManager, {
           tenantId: TENANT_ID,
+          usuarioId: USUARIO_ID,
           ventaId: VENTA_ID,
           pagos: [
             { metodoPagoId: EFECTIVO_ID, monto: '50.0000' },
@@ -365,6 +375,7 @@ describe('PagosService', () => {
 
       const result = await svc.registrar(manager as unknown as EntityManager, {
         tenantId: TENANT_ID,
+        usuarioId: USUARIO_ID,
         ventaId: VENTA_ID,
         pagos: [
           { metodoPagoId: EFECTIVO_ID, monto: '30000' },
@@ -445,6 +456,7 @@ describe('PagosService', () => {
           manager as unknown as EntityManager,
           {
             tenantId: TENANT_ID,
+            usuarioId: USUARIO_ID,
             ventaId: VENTA_ID,
             pagos: [
               { metodoPagoId: EFECTIVO_ID, monto: '30000' },
@@ -494,6 +506,7 @@ describe('PagosService', () => {
           manager as unknown as EntityManager,
           {
             tenantId: TENANT_ID,
+            usuarioId: USUARIO_ID,
             ventaId: VENTA_ID,
             pagos: [
               { metodoPagoId: EFECTIVO_ID, monto: '30000' },
@@ -522,6 +535,7 @@ describe('PagosService', () => {
 
       await svc.registrar(manager as unknown as EntityManager, {
         tenantId: TENANT_ID,
+        usuarioId: USUARIO_ID,
         ventaId: VENTA_ID,
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '150.0000' }],
         cajaId: CAJA_ID,
@@ -566,6 +580,7 @@ describe('PagosService', () => {
       // suma 150, target 120 → excedente 30, cubierto por el efectivo (50).
       await svc.registrar(manager as unknown as EntityManager, {
         tenantId: TENANT_ID,
+        usuarioId: USUARIO_ID,
         ventaId: VENTA_ID,
         pagos: [
           { metodoPagoId: CHEQUE_ID, monto: '30.0000' },
@@ -614,6 +629,7 @@ describe('PagosService', () => {
       await expect(
         svc.registrar(manager as unknown as EntityManager, {
           tenantId: TENANT_ID,
+          usuarioId: USUARIO_ID,
           ventaId: VENTA_ID,
           pagos: [
             { metodoPagoId: TARJETA_ID, monto: '150.0000' },
@@ -642,6 +658,7 @@ describe('PagosService', () => {
       // suma 110, target 50 → excedente 60, mayor que el primer pago con vuelto.
       await svc.registrar(manager as unknown as EntityManager, {
         tenantId: TENANT_ID,
+        usuarioId: USUARIO_ID,
         ventaId: VENTA_ID,
         pagos: [
           { metodoPagoId: EFECTIVO_ID, monto: '10.0000' },
@@ -678,6 +695,7 @@ describe('PagosService', () => {
       await expect(
         svc.registrar(manager as unknown as EntityManager, {
           tenantId: TENANT_ID,
+          usuarioId: USUARIO_ID,
           ventaId: VENTA_ID,
           pagos: [{ metodoPagoId: TARJETA_ID, monto: '150.0000' }],
           cajaId: CAJA_ID,

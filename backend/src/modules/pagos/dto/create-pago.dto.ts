@@ -18,7 +18,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import type { ClaseDocumentoMaquina } from '../../venta-documentos/entities/venta-documento.entity';
-import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalPositivo,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 import { MAX_INT } from '../../../common/constants/escalas';
 import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
@@ -38,6 +41,7 @@ export class PagoItemDto {
   // dejaba pago, aplicación y movimiento de caja en cero, sin aportar nada.
   @IsNumberString()
   @IsDecimalPositivo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   monto: string;
 

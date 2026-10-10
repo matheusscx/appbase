@@ -3221,8 +3221,12 @@ export class ComprasService {
     pagoId: string,
     dto: AnularPagoProveedorDto,
   ): Promise<PagoProveedorInfo> {
-    return this.db.transaccion((manager) =>
-      this.anularPagoEnTransaccion(manager, tenantId, usuarioId, pagoId, dto),
+    // La reversa mete plata en la caja: si no cabe en el esperado, el 400
+    // (`EsperadoNoCabeError`) deja rastro, escrito ya fuera de la transacción.
+    return this.cajaService.conRastroDeRechazo(tenantId, () =>
+      this.db.transaccion((manager) =>
+        this.anularPagoEnTransaccion(manager, tenantId, usuarioId, pagoId, dto),
+      ),
     );
   }
 
@@ -3333,6 +3337,7 @@ export class ComprasService {
           monto: pago.monto,
           metodoPagoId: pago.metodo_pago_id,
           pagoProveedorId: pagoId,
+          rastroDelTope: { usuarioId, tipo: 'reversa_pago_proveedor' },
         });
       }
     }

@@ -1686,8 +1686,8 @@ CREATE TABLE "caja_intentos_rechazados" (
   "tenant_id"        UUID          NOT NULL,
   "caja_id"          UUID          NOT NULL,
   "usuario_id"       UUID          NOT NULL,  -- quién lo intentó, no el dueño de la caja
-  "tipo"             TEXT          NOT NULL,  -- 'retiro' | 'devolucion_nc'
-  "motivo"           TEXT          NOT NULL,  -- 'saldo_insuficiente' | 'supera_efectivo_de_la_venta'
+  "tipo"             TEXT          NOT NULL,  -- 'retiro' | 'devolucion_nc' | 'pago_proveedor' | 'ingreso' | 'cobro' | 'reversa_pago_proveedor'
+  "motivo"           TEXT          NOT NULL,  -- 'saldo_insuficiente' | 'supera_efectivo_de_la_venta' | 'esperado_no_cabe'
   -- Lo que se PIDIÓ, no lo que había: el disponible es el dato que el rechazo
   -- filtraba, y persistirlo lo dejaría a un endpoint del cajero.
   "monto_solicitado" NUMERIC(18,4) NOT NULL,

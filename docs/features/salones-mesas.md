@@ -868,6 +868,12 @@ reglas de negocio en [`PRODUCTO.md`](../PRODUCTO.md) (*"La cortesía es un retir
   la lectura del ítem no filtra `eliminado_el` a propósito. `anularLinea` la pide para su
   línea y `cancelarConMotivo` para todas las despachadas. Un ítem sin clasificación o afecto en
   un país sin IVA rechazan **la cortesía** con 400, como la venta.
+- **Un balde que no cabe en `NUMERIC(18,4)` es 400, no 500** (2026-10-09). El precio unitario ya
+  cabe (`agregarLinea`), pero la base es de la **cantidad anulada**: 2 × 99.999.999.999.999 exento
+  da 199.999.999.999.998 y desbordaba el `INSERT` de `cuenta_linea_anulaciones`. Se miran los tres
+  montos que se guardan (`cabeEnColumnaDePlata`), no la carta, que no se persiste: una carta de
+  110.000.000.000.000 con IVA incluido deja base e IVA que caben, y se anula. El mensaje pide
+  *"anulá menos unidades por vez"*. Test: `backend/test/salones-cortesia-monto-no-cabe.e2e-spec.ts`.
 - **Reporte:** cada fila de `GET /salones/anulaciones` trae `fiscal` (`null` salvo cortesía) y
   cada grupo de `porTipo` en `/resumen`, la suma de los baldes de sus filas. La pantalla suma la
   columna **IVA** al detalle y *"IVA: $X"* a la tarjeta *Cortesías*. `porGarzon` y lo vendido

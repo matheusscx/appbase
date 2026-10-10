@@ -540,6 +540,19 @@ export class VentasService {
      */
     clave?: string,
   ) {
+    // El rastro de un cobro en efectivo que no cabe en el esperado
+    // (`EsperadoNoCabeError`), por fuera de la transacción y de sus reintentos.
+    return this.cajaService.conRastroDeRechazo(tenantId, () =>
+      this.crearConReintento(tenantId, usuarioId, dto, clave),
+    );
+  }
+
+  private async crearConReintento(
+    tenantId: string,
+    usuarioId: string,
+    dto: CreateVentaDto,
+    clave?: string,
+  ) {
     for (let intento = 0; ; intento++) {
       try {
         return await this.db.transaccion(async (manager) => {
@@ -1480,6 +1493,7 @@ export class VentasService {
     // 7h. Pagos — delegado a PagosService (incluye vuelto + aplicaciones + caja)
     const saved = await this.pagosService.registrar(manager, {
       tenantId,
+      usuarioId,
       ventaId: venta.id,
       pagos: pagosDto,
       cajaId: caja.id,

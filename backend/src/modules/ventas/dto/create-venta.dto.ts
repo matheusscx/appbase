@@ -23,6 +23,7 @@ import type { ClaseDocumentoMaquina } from '../../venta-documentos/entities/vent
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
 import {
   IsDecimalPositivo,
+  IsMontoPersistible,
   IsDecimalHasta,
 } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
@@ -86,6 +87,7 @@ export class PagoVentaDto {
   // Una línea de pago en $0 no aporta nada; el POS ya los omite al confirmar.
   @IsNumberString()
   @IsDecimalPositivo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   monto: string;
 

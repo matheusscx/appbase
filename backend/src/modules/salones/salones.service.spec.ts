@@ -6,6 +6,7 @@ import { In } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import { SalonesService } from './salones.service';
 import { IdempotenciaService } from '../idempotencia/idempotencia.service';
+import { CajaService } from '../caja/caja.service';
 import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
 import { Salon } from './entities/salon.entity';
 import { Mesa } from './entities/mesa.entity';
@@ -330,6 +331,14 @@ describe('SalonesService', () => {
         { provide: UbicacionesService, useValue: ubicaciones },
         { provide: InventarioService, useValue: inventario },
         { provide: IdempotenciaService, useValue: idempotencia },
+        {
+          provide: CajaService,
+          useValue: {
+            conRastroDeRechazo: jest.fn(
+              (_tenantId: string, fn: () => Promise<unknown>) => fn(),
+            ),
+          },
+        },
       ],
     }).compile();
 

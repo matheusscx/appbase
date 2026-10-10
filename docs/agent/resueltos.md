@@ -23,6 +23,121 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los 500 de montos que no caben: la cortesía, el monto suelto de caja y pagos, y el rastro del tope (cerrada 2026-10-09)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. Spec y plan:
+[`2026-10-09-montos-que-no-caben-design.md`](../superpowers/specs/2026-10-09-montos-que-no-caben-design.md),
+[`2026-10-09-montos-que-no-caben.md`](../superpowers/plans/2026-10-09-montos-que-no-caben.md).
+
+### Las entradas que cierra, como estaban en `pendientes.md` § 2
+
+- [ ] **Anular como cortesía una línea de varias unidades con precio cerca del techo da 500 en
+  `cuenta_linea_anulaciones`** (backend, `SalonesService.escribirAnulacionEnLinea` con los baldes
+  de `baldesDeCortesia` en `salones/cortesia-retiro.ts`; lo vio el domain-reviewer del frente
+  `aa8d2d53` el 2026-10-09, **leído, no corrido**). Los baldes `monto_afecto`, `monto_exento` y
+  `monto_impuestos` son `NUMERIC(18,4)` y se calculan como `carta = cantidad × precioUnitario`.
+  Solo se llenan con motivo `cortesia` y un bien retirable, en `anularLinea` y
+  `cancelarConMotivo`. Ese camino no tiene ningún `cabeEnColumnaDePlata`. Ejemplo: precio
+  99.999.999.999.999 × 2 unidades ya enviadas, anuladas como cortesía, da un neto de
+  199.999.999.999.998, que es `numeric field overflow` en el `INSERT`. Con 1 unidad cabe. **No lo
+  introdujo `aa8d2d53`**, que solo cierra el alta de la línea: 5e13 × 3 ya lo disparaba antes.
+  **Medir:** correr la ruta y confirmar el 500. **Arreglo probable:** el mismo guard sobre `carta`
+  y los baldes antes del `INSERT`, con 400. Toca el cálculo de la cortesía, así que va como
+  frente aparte.
+
+- [ ] **Lo que dejó el frente del tope del esperado de caja (`ce3ab9d8`)** (backend, `caja` +
+  `pagos`; 2026-10-09; lo vieron el autor y el domain-reviewer, **leído, no corrido** salvo donde
+  se dice). Son cuatro residuos y ninguno traba una caja:
+  1. **Oráculo sin rastro.** El 400 del tope deja averiguar el esperado en modo ciego por
+     bisección. Solo los intentos que fallan salen gratis: cada acierto escribe una entrada real
+     de un monto cercano al techo, que queda a la vista. La salida que no alcanza (422) deja rastro
+     con `IntentoRechazadoError`, y este 400 no. Hay que decidir si lleva un motivo nuevo en el
+     rastro.
+  2. **Un `monto` suelto que no cabe en la columna**, de un movimiento o de un pago, ¿sigue dando
+     500 en el `INSERT`? El guard mira la suma, no el monto solo. **Medir:** ¿el DTO ya lo rechaza
+     con el 400 del redondeo de plata?
+  3. **Salida manual enorme:** sin cobertura. Medir qué devuelve.
+  4. **Texto.** Cuando el 400 sale de la reversa del pago a un proveedor
+     (`compras.service.ts`, ~3329), el mensaje dice "cobrá con otro medio de pago", que ahí no tiene
+     sentido. Además, `docs/features/gestion-cajas.md` nombra como consecuencia aceptada solo el
+     caso de las ventas, no el de anular un pago a proveedor, que se destraba con una salida.
+
+### Qué se midió
+
+Se midió por HTTP con e2e de API, sobre una base propia.
+
+- **Cortesía:** dos unidades a 99.999.999.999.999 anuladas como cortesía dan **500** por las dos
+  rutas, `anularLinea` y `cancelarConMotivo`, en el `INSERT` de `cuenta_linea_anulaciones`.
+- **Residuo 2, el monto suelto.** El DTO no lo frenaba: el `EscalaMonedaPipe` mira la escala, no el
+  techo. Seis 500:
+  - La salida manual de 10^14 (y la de 10^20): el 422 de saldo insuficiente intentaba escribir su
+    rastro y desbordaba `caja_intentos_rechazados.monto_solicitado`. El rastro también se perdía.
+  - El pago a proveedor en efectivo: la misma causa.
+  - El pago a proveedor con tarjeta: desbordaba `pagos_proveedor.monto`.
+  - La venta del POS y el abono en efectivo con vuelto: desbordaban `pagos.monto`. El tope del
+    esperado mira el neto, que sí cabe.
+  - La entrada manual de 10^14 ya daba 400, por el tope.
+- **Residuo 3:** la salida manual enorme es uno de esos 500.
+- **Residuo 1, la bisección,** contra un esperado secreto de $1.234.567:
+  - Sin saber nada: 47 requests en 0,3 s, con 37 entradas escritas.
+  - Sabiendo que el esperado es menor a $100M: 27 requests y 17 entradas.
+  - Barriendo de a $1.000 hasta el primer acierto: 1.235 requests en 6,6 s (5,3 ms por request en
+    proceso), con **una sola** entrada escrita más la salida que la deshace.
+  - En los tres casos `caja_intentos_rechazados` quedó en 0 filas, y la ruta no tiene throttling.
+
+### Qué se hizo
+
+- **Cortesía:** `SalonesService.baldesDeCortesias` mira con `cabeEnColumnaDePlata` los tres montos
+  que se guardan, antes de la primera escritura de los dos llamadores. Lo que no cabe da 400:
+  *"La cortesía de «X» da $N, y el sistema no puede guardar montos de $T o más: anulá menos unidades
+  por vez"*. El cálculo (`baldesDeCortesia`) no cambió. La carta no se mira, porque no se persiste.
+- **Monto suelto:** se agregó `IsMontoPersistible`, que valida con `cabeEnColumnaDePlata`. Lo llevan
+  el `monto` del movimiento de caja, del pago de una venta (también en el cierre de cuenta), del
+  abono, del pago a proveedor y del pago al confirmar una compra. Este último es gemelo: usa el
+  mismo `pagarEnTransaccion`, así que se cubrió por lectura.
+- **Rastro del tope** (decisión del owner, a una pregunta de la orquestadora: *"Registrar los
+  rechazos"*, sin límite ni bloqueo):
+  - El 400 de `assertEntradasCaben` sale como `EsperadoNoCabeError`, con motivo `esperado_no_cabe`.
+  - `conRastroDeRechazo` lo escribe en los cinco caminos: movimiento manual, `VentasService.crear`,
+    `SalonesService.cerrarCuenta`, `PagosService.registrarAbono` y `ComprasService.anularPago`.
+  - Los tipos son `ingreso`, `cobro` y `reversa_pago_proveedor`.
+  - `registrarMovimientoEnTransaccion` recibe `MovimientoEnTransaccion`, una unión discriminada:
+    una entrada trae `topeYaVerificado: true` o `rastroDelTope`, y sin ninguno de los dos no
+    compila. Lo fija un `@ts-expect-error` en `caja.service.spec.ts`; con `rastroDelTope` opcional,
+    el typecheck falla.
+  - Lo pedido que solo ya no cabe sale como 400 sin rastro: no depende del esperado.
+  - `SalonesModule` importa `CajaModule`, sin ciclo.
+  - La pantalla suma los rótulos nuevos.
+- **Residuo 4:** el remedio del mensaje depende del camino. La reversa dice *"Registrá una salida
+  para bajar el saldo y volvé a anular el pago"*, y la entrada manual ya no habla de otro medio de
+  pago. `gestion-cajas.md` nombra la anulación del pago a proveedor como consecuencia aceptada.
+
+### Qué lo fija
+
+- **`backend/test/salones-cortesia-monto-no-cabe.e2e-spec.ts`**, con 5 casos. Exento, afecto y
+  cancelar con motivo dan 400 sin escribir nada. Los controles son una unidad y una carta de 1,1e14
+  con IVA incluido. Con el service original los tres rechazos vuelven a 500.
+- **`backend/test/caja-esperado-no-cabe.e2e-spec.ts`**, con 12 casos:
+  - Tres rechazos manuales dejan tres filas, con tipo, motivo, usuario y monto.
+  - Cada camino afirma su fila del rastro.
+  - Un caso recorre los nueve montos sueltos y espera 400, nada escrito y el rastro vacío.
+- **Mutantes medidos:**
+  - Sin el envoltorio del POS: el rastro de la venta queda vacío.
+  - `conRastroDeRechazo` sin el error nuevo: los tres rechazos manuales no dejan fila.
+  - Sin `IsMontoPersistible`: vuelve el 500 de la salida manual.
+- **Unitarios:** en `caja.service.spec.ts` (payload, remedio por camino, sin rastro si lo pedido no
+  cabe, una entrada sin rastro que no se escribe) y en `decimal-signo.decorator.spec.ts`.
+
+### Lo que quedó afuera
+
+Los otros `@EsMontoCobrado`, sin techo: entrada nueva en [`pendientes.md`](pendientes.md) § 2.
+
+**Lo fiscal en este frente:** el guard de la cortesía toca los baldes de un retiro gravado y fue en
+un frente de caja. Lo decidió la orquestadora (2026-10-09): el cálculo no cambia, solo se rechaza
+antes de escribir.
+
+---
+
 ## El arranque en frío del stack: `.nuxt` propio del contenedor y más tiempo para `auth.setup` (cerrada 2026-10-09)
 
 Sale de [`pendientes.md`](pendientes.md) § 2, las dos entradas del entorno de desarrollo, medidas
@@ -248,8 +363,8 @@ Los otros dos son controles que entran, uno en CLP y otro en USD. Con el service
 dos rechazos vuelven al 500 (`numeric field overflow`) y los controles pasan.
 
 **Lo que no cierra:** anular como cortesía una línea de varias unidades cerca del techo desborda
-los baldes de `cuenta_linea_anulaciones`. Quedó como entrada nueva en
-[`pendientes.md`](pendientes.md) § 2.
+los baldes de `cuenta_linea_anulaciones`. Se cerró el 2026-10-09, en
+["Los 500 de montos que no caben"](#los-500-de-montos-que-no-caben-la-cortesía-el-monto-suelto-de-caja-y-pagos-y-el-rastro-del-tope-cerrada-2026-10-09).
 
 ---
 
@@ -305,8 +420,8 @@ desbordan. En cada uno se ve el 400, que no se escribió nada, y que **el conteo
 hay unitarios en `caja.service.spec.ts` y `pagos.service.spec.ts`. Los 13 mutantes caen, y entre
 ellos está "PagosService sin batch pero con el flag", que lo cazan cinco e2e.
 
-**Lo que quedó afuera:** cuatro residuos, ninguno traba una caja, en
-[`pendientes.md`](pendientes.md) § 2 (*"Lo que dejó el frente del tope del esperado de caja"*).
+**Lo que quedó afuera:** cuatro residuos, ninguno traba una caja. Se cerraron el 2026-10-09, en
+["Los 500 de montos que no caben"](#los-500-de-montos-que-no-caben-la-cortesía-el-monto-suelto-de-caja-y-pagos-y-el-rastro-del-tope-cerrada-2026-10-09).
 
 ---
 

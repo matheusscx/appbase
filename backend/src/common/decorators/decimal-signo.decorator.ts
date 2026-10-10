@@ -1,5 +1,9 @@
 import { registerDecorator, type ValidationOptions } from 'class-validator';
 import Decimal from 'decimal.js';
+import {
+  cabeEnColumnaDePlata,
+  TECHO_PERSISTIBLE_FORMATEADO,
+} from '../utils/monto-persistible.util';
 
 /**
  * Valida que un campo de dinero/porcentaje (string numérico, Decimal.js —
@@ -96,6 +100,41 @@ export function IsDecimalHasta(
         },
         defaultMessage(): string {
           return `${propertyName} no puede superar ${new Intl.NumberFormat('es-CL').format(Number(max))}`;
+        },
+      },
+    });
+  };
+}
+
+/**
+ * Valida que un monto suelto quepa en `NUMERIC(18,4)`, la columna de plata del
+ * proyecto (`cabeEnColumnaDePlata`). Sin esto, un monto de 10^14 o más pasaba
+ * el DTO y daba 500 en el `INSERT` (medido el 2026-10-09: el pago de una venta
+ * o de un abono en efectivo, un pago a proveedor, y una salida de caja sin
+ * saldo, cuyo rastro desbordaba `caja_intentos_rechazados.monto_solicitado`).
+ *
+ * Solo para campos que se guardan **tal cual** en una columna `NUMERIC(18,4)`:
+ * una columna de otra escala tiene otro techo. Se combina con
+ * `@IsNumberString()`, igual que los de arriba.
+ */
+export function IsMontoPersistible(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'isMontoPersistible',
+      target: object.constructor,
+      propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: unknown): boolean {
+          if (typeof value !== 'string') return false;
+          try {
+            return cabeEnColumnaDePlata(value);
+          } catch {
+            return false;
+          }
+        },
+        defaultMessage(): string {
+          return `${propertyName} no puede ser de $${TECHO_PERSISTIBLE_FORMATEADO} o más: el sistema no puede guardar montos así`;
         },
       },
     });

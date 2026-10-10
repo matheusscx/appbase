@@ -10,7 +10,12 @@ import {
 import { In, IsNull, QueryFailedError } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import { assertSinHuecos } from '../../common/db/db.spec-helper';
-import { CajaService, calcularNivelDescuadre } from './caja.service';
+import {
+  CajaService,
+  calcularNivelDescuadre,
+  EsperadoNoCabeError,
+  type MovimientoEnTransaccion,
+} from './caja.service';
 import type { LineaArqueo } from './caja.service';
 import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
@@ -43,6 +48,10 @@ const mockCajaAbierta: Partial<Caja> = {
   // importa quién contó lo sobreescribe explícitamente.
   cerradaPor: null,
 };
+
+/** Quién mete la plata, para el rastro del tope (`assertEntradasCaben`). */
+const RASTRO_INGRESO = { usuarioId: USUARIO_ID, tipo: 'ingreso' as const };
+const RASTRO_COBRO = { usuarioId: USUARIO_ID, tipo: 'cobro' as const };
 
 /** La fila que vuelve cuando la entrada no trae medio (movimiento manual). */
 const SIN_MEDIO = { metodo_pago_id: null, es_efectivo: false, nombre: null };
@@ -1210,6 +1219,7 @@ describe('CajaService', () => {
           tipo: 'entrada',
           concepto: 'prueba',
           monto: '-500.0000',
+          rastroDelTope: RASTRO_INGRESO,
         }),
       ).rejects.toBeInstanceOf(UnprocessableEntityException);
       expect(managerMock.save).not.toHaveBeenCalled();
@@ -1226,6 +1236,7 @@ describe('CajaService', () => {
         tipo: 'entrada',
         concepto: 'prueba',
         monto,
+        rastroDelTope: RASTRO_INGRESO,
       });
       expect(managerMock.save).toHaveBeenCalled();
     });
@@ -1257,7 +1268,13 @@ describe('CajaService', () => {
     ];
     const caben = (
       entradas: { metodoPagoId: string | null; monto: string }[],
-    ) => service.assertEntradasCaben(managerMock as never, CAJA_ID, entradas);
+    ) =>
+      service.assertEntradasCaben(
+        managerMock as never,
+        CAJA_ID,
+        entradas,
+        RASTRO_COBRO,
+      );
     const entrada = (monto: string, metodoPagoId?: string) =>
       service.registrarMovimientoEnTransaccion(managerMock as never, {
         cajaId: CAJA_ID,
@@ -1265,6 +1282,7 @@ describe('CajaService', () => {
         concepto: 'prueba',
         monto,
         metodoPagoId,
+        rastroDelTope: RASTRO_INGRESO,
       });
 
     it('efectivo: una entrada que lleva el esperado al techo es 400 y no escribe', async () => {
@@ -1273,6 +1291,79 @@ describe('CajaService', () => {
         .mockResolvedValueOnce(esperadoDe('99999999999999'));
       await expect(entrada('1')).rejects.toBeInstanceOf(BadRequestException);
       expect(managerMock.save).not.toHaveBeenCalled();
+    });
+
+    // El 400 es un oráculo del esperado en modo ciego: lleva el payload que
+    // `conRastroDeRechazo` escribe en `caja_intentos_rechazados` (owner,
+    // 2026-10-09). El remedio del mensaje depende del camino.
+    it('efectivo: el rechazo lleva el intento para el rastro, con el remedio del camino', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([SIN_MEDIO])
+        .mockResolvedValueOnce(esperadoDe('99999999999990'));
+      const error = (await entrada('37').catch((e: unknown) => e)) as {
+        intento: unknown;
+        message: string;
+      };
+      expect(error).toBeInstanceOf(EsperadoNoCabeError);
+      expect(error.intento).toEqual({
+        cajaId: CAJA_ID,
+        usuarioId: USUARIO_ID,
+        tipo: 'ingreso',
+        motivo: 'esperado_no_cabe',
+        montoSolicitado: '37.0000',
+      });
+      expect(error.message).toMatch(/Registrá una salida para bajar el saldo$/);
+    });
+
+    it.each([
+      ['cobro', /bajar el saldo, o cobrá con otro medio de pago$/],
+      ['reversa_pago_proveedor', /bajar el saldo y volvé a anular el pago$/],
+    ] as const)(
+      'efectivo, camino %s: su propio remedio',
+      async (tipo, texto) => {
+        managerMock.query
+          .mockResolvedValueOnce([SIN_MEDIO])
+          .mockResolvedValueOnce(esperadoDe('99999999999990'));
+        await expect(
+          service.assertEntradasCaben(
+            managerMock as never,
+            CAJA_ID,
+            [{ metodoPagoId: null, monto: '37' }],
+            { usuarioId: USUARIO_ID, tipo },
+          ),
+        ).rejects.toThrow(texto);
+      },
+    );
+
+    it('lo pedido que solo ya no cabe es 400 SIN rastro: no dice nada del esperado', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([EFECTIVO])
+        .mockResolvedValueOnce(esperadoDe('0'));
+      const error = await caben([
+        { metodoPagoId: EFECTIVO.metodo_pago_id, monto: '70000000000000' },
+        { metodoPagoId: EFECTIVO.metodo_pago_id, monto: '30000000000000' },
+      ]).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(error).not.toBeInstanceOf(EsperadoNoCabeError);
+    });
+
+    it('una entrada sin rastroDelTope ni topeYaVerificado no compila', () => {
+      // Lo ataja `tsc` (`npm run typecheck` incluye los specs): si el tipo la
+      // aceptara, la directiva de abajo sobraría y el typecheck fallaría.
+      // @ts-expect-error — una entrada dice quién mete la plata o viene juzgada
+      const sinRastro: MovimientoEnTransaccion = {
+        cajaId: CAJA_ID,
+        tipo: 'entrada',
+        concepto: 'prueba',
+        monto: '5',
+      };
+      const salida: MovimientoEnTransaccion = {
+        cajaId: CAJA_ID,
+        tipo: 'salida',
+        concepto: 'prueba',
+        monto: '5',
+      };
+      expect([sinRastro.tipo, salida.tipo]).toEqual(['entrada', 'salida']);
     });
 
     it('efectivo: el esperado cuenta las entradas y descuenta las salidas', async () => {
@@ -1311,9 +1402,17 @@ describe('CajaService', () => {
         .mockResolvedValueOnce([
           { metodo_pago_id: METODO, entradas: '60000000000000' },
         ]);
-      await expect(entrada('60000000000000', METODO)).rejects.toThrow(
-        /Tarjeta/,
+      const error = await entrada('60000000000000', METODO).catch(
+        (e: unknown) => e,
       );
+      expect(error).toBeInstanceOf(EsperadoNoCabeError);
+      expect(error).toMatchObject({
+        message: expect.stringMatching(/Tarjeta/) as unknown,
+        intento: {
+          motivo: 'esperado_no_cabe',
+          montoSolicitado: '60000000000000.0000',
+        },
+      });
       expect(managerMock.save).not.toHaveBeenCalled();
       // La suma es por (caja, medios): el efectivo no entra en la cuenta.
       expect(managerMock.query.mock.calls[1][1]).toEqual([CAJA_ID, [METODO]]);

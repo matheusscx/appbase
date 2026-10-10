@@ -40,11 +40,15 @@ export class CajaIntentoRechazado {
   @Column({ name: 'usuario_id', type: 'uuid' })
   usuarioId: string;
 
-  /** `'retiro'` (movimiento manual de salida) | `'devolucion_nc'`. */
+  /**
+   * `'retiro'` (movimiento manual de salida) | `'devolucion_nc'` |
+   * `'pago_proveedor'`, y los del tope del esperado: `'ingreso'` | `'cobro'` |
+   * `'reversa_pago_proveedor'` (`IntentoRechazadoData`).
+   */
   @Column({ type: 'varchar' })
   tipo: string;
 
-  /** `'saldo_insuficiente'` | `'supera_efectivo_de_la_venta'`. */
+  /** `'saldo_insuficiente'` | `'supera_efectivo_de_la_venta'` | `'esperado_no_cabe'`. */
   @Column({ type: 'varchar' })
   motivo: string;
 
