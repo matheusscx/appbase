@@ -247,8 +247,8 @@ la acumulación de descuentos y compras— y el renombre de `moneda.decimales` s
       - *Lo que A no cubre:* lo que no es precio. Un ítem borrado o sin stock entre el pago y el
         retorno sigue dejando el cargo sin venta. Para eso va la D.
     - ✅ **D. La orden pagada sin venta avisa y no miente** y ✅ **E. La venta online solo se crea
-      si lo pagado es igual al total, nunca con vuelto**: **hechas el 2026-10-10**, en un mismo
-      commit de la rama `claude/clever-volhard-b026ae`. El texto con el que se decidieron y lo
+      si lo pagado es igual al total, nunca con vuelto**: **hechas el 2026-10-10** en `63628bef`
+      (rama `claude/clever-volhard-b026ae`). El texto con el que se decidieron y lo
       construido están en
       [`resueltos.md`](resueltos.md#la-orden-pagada-sin-venta-avisa-y-la-venta-online-no-lleva-vuelto-d-y-e-cerradas-2026-10-10).
       Lo único que queda abierto acá es la A.

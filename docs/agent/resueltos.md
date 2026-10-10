@@ -27,7 +27,7 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 Sale de [`pendientes.md`](pendientes.md) § 3, de la entrada "La tienda calcula el total dos
 veces, con dos 'ahora'…". **La entrada sigue abierta allá con la A** ("vale lo que pagó"), que
-es frente fiscal propio. Se mudan las dos opciones que se construyeron. Plan:
+es frente fiscal propio. Se mudan las dos opciones que se construyeron, en `63628bef`. Plan:
 [`2026-10-10-tienda-pagada-sin-venta.md`](../superpowers/plans/2026-10-10-tienda-pagada-sin-venta.md).
 
 ### Las opciones que cierra, como estaban en `pendientes.md` § 3
