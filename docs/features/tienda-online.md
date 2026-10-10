@@ -192,6 +192,7 @@ o al salir de la página.
 POST /suscripciones
 
 Authorization: Bearer <token>
+Idempotency-Key: <uuid>        // obligatoria (400 sin ella): una por intento de alta
 
 Request:
 {
@@ -204,6 +205,7 @@ Request:
 Response (201):
 { "id": "uuid", "ventaInicialId": "uuid", "proximoCobro": "2026-08-15", "estado": "activa",
   "advertencias": [] }
+// + "repetida": true si el alta ya había entrado y esto es su reintento
 ```
 
 `advertencias` viene **siempre** (vacío si no hay nada que decir) y son las de la
@@ -215,7 +217,7 @@ impuesto pausado—; no frenan el alta, porque para cuando existen el cobro ya
 ocurrió. La tienda las muestra como toasts, igual que el POS con una venta.
 
 El primer período se cobra de verdad contra Transbank vía Oneclick
-(`CobrosService.cobrar`, origen `interno`) con la tarjeta tokenizada de
+(`CobrosService.prepararCobro` + `efectuarCobro`, origen `interno`) con la tarjeta tokenizada de
 `inscripcionId`. El `metodoPagoId` contable de la venta y el snapshot de tarjeta
 (`tarjeta_marca`/`tarjeta_last4`) se resuelven **server-side** desde la
 inscripción — el cliente ya no los envía. Requiere Oneclick activo en el tenant
@@ -269,15 +271,48 @@ hasta el día anterior y "se cancela ese día a primera hora". El PATCH devuelve
 
 `POST /suscripciones` valida item (`tipo = 'suscripcion'`, activo) y Oneclick
 activo, resuelve la tarjeta del usuario (ownership) y calcula el total del
-primer período con el mismo motor de precios que una venta normal. **El cobro
-Oneclick corre FUERA de toda transacción DB** (es una llamada HTTP): crea su
-propia `pasarela_ordenes` y autoriza contra Transbank. Si el cobro es rechazado
-(o timeout `502`) no se crea ni venta ni suscripción. Recién con el cobro
-aprobado se crean la venta inicial (canal `online`) y la fila `suscripciones`
-en una transacción, y luego se concilia la orden (`venta_id` + `conciliada`).
-Si esa transacción fallara con el cobro ya hecho, la orden queda `pagada` sin
-venta (reconciliable, mismo invariante que el checkout Webpay). `frecuencia` se
-copia como snapshot al alta.
+primer período con el mismo motor de precios que una venta normal. `frecuencia`
+se copia como snapshot al alta.
+
+**Un cobro por intento de alta** (desde el 2026-10-10,
+[ADR-029 § "El alta de suscripción"](../adr/029-reembolso-con-efecto-externo.md#actualización-2026-10-10--el-alta-de-suscripción-entra)).
+Antes, si la respuesta se cortaba y el cliente volvía a confirmar, se cobraba
+dos veces y quedaban dos suscripciones. El cargo lo hace Transbank, fuera de la
+base, así que el alta va por `IdempotenciaService.ejecutarConEfectoExterno`:
+
+1. Se reclama la clave, se hacen los chequeos de arriba y se escribe la
+   `pasarela_ordenes` en `en_proceso`, ligada al reclamo
+   (`solicitud_idempotente_id`). Todo eso se commitea **antes de cobrar**.
+2. Con el reclamo y la orden bloqueados se cobra (tope de 30 s). Si el cobro
+   sale, la venta inicial (canal `online`), la suscripción y la conciliación de
+   la orden (`venta_id` + `conciliada`) van en la misma transacción. Si
+   Transbank rechaza, la orden queda `fallida` y la clave se suelta (`400`): el
+   mismo intento con otra tarjeta vuelve a entrar.
+3. El reintento con la misma clave puede llegar en tres momentos:
+   - **Con el primero en curso:** espera su lock y responde lo mismo, con
+     `repetida: true` (*"ya estaba activa"*).
+   - **Con el primero muerto o en `502`:** se le pregunta a Transbank por la
+     orden, y **nunca se vuelve a cobrar**. Si salió, se termina el alta y se
+     responde `repetida: true`. Si no salió, `409` *"No se cobró… podés
+     intentar de nuevo"* y la clave se suelta. Un *"no la conozco"* de
+     Transbank cuenta como "no salió" recién 5 minutos después del intento sin
+     respuesta, porque antes puede ser un cargo que todavía no registró. Si no se puede aclarar, `409`
+     *"Esperá unos minutos y volvé a confirmar…"*, y la próxima vez se vuelve a
+     consultar.
+   - **Con otros datos:** `422`.
+
+   Si el cargo salió pero falla lo que sigue (la venta), sale `409` *"El cobro de
+   la suscripción salió, pero no se pudo terminar el alta…"*, y el reintento lo
+   termina sin cobrar.
+
+Una orden escrita antes de cobrar **no expira por reloj** (ni el cron ni la
+expiración perezosa): pudo haberse cobrado, y la cierra el reintento. Si el alta
+se termina por consulta, la orden queda con su AUTHORIZATION `aprobada`, sin
+código, para que se pueda reembolsar. Dos suscripciones de la misma persona al
+mismo ítem son legítimas (owner, 2026-10-09): no hay restricción única.
+
+La pantalla manda la cabecera con `useIntentoCobro` (ámbito `suscripcion`, por
+pestaña). El drawer y el retorno de inscribir una tarjeta comparten el ámbito.
 
 **Reanudar el alta tras inscribir una tarjeta:** si el usuario no tiene tarjetas,
 el drawer guarda la intención de alta en `localStorage` y redirige a Transbank
@@ -317,12 +352,14 @@ modal de borrado avise el N.
   `GET/PATCH/DELETE /admin[...]` con `@RequiresPermiso('Suscripciones', ...)`
   (el `PermisosGuard` de clase solo actúa donde hay decorador).
 - **Service**: `backend/src/modules/suscripciones/suscripciones.service.ts`:
-  - `crear()`: valida item + reglas cruzadas de día según `frecuencia`
-    (`mensual` requiere `diaMes` 1-28, `quincenal` requiere `diaMes` 1-13,
-    `semanal` requiere `diaSemana`), calcula el total del primer período con
-    `CalculoPreciosService`, y en una `dataSource.transaction()` llama a
-    `VentasService.crearEnTransaccion()` (reutiliza la lógica de venta
-    normal, canal `online`) seguido de `manager.save(Suscripcion, ...)`.
+  - `crear()`: corre por `ejecutarConEfectoExterno` (ver arriba). `leerAlta`
+    valida item + reglas cruzadas de día según `frecuencia` (`mensual`
+    requiere `diaMes` 1-28, `quincenal` requiere `diaMes` 1-13, `semanal`
+    requiere `diaSemana`) y calcula el total del primer período con
+    `CalculoPreciosService`. `CobrosService.prepararCobro` / `efectuarCobro` /
+    `aclararCobro` hacen el cobro partido. `materializarAlta` llama a
+    `VentasService.crearEnTransaccion()` (venta normal, canal `online`),
+    después a `manager.save(Suscripcion, ...)` y concilia la orden.
   - `findMias()`: `GET` con SQL raw, filtra por `tenant_id` + `usuario_id` del
     token, join con `items` para nombre/precio/moneda. Las columnas `DATE` se
     castean a `::text` para que la API devuelva `YYYY-MM-DD` plano (el driver

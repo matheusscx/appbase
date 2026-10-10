@@ -64,6 +64,18 @@ export class PasarelaOrden {
   @Column({ name: 'api_key_id', type: 'uuid', nullable: true })
   apiKeyId: string | null; // qué llave la creó (trazabilidad)
 
+  /**
+   * Solo en el cobro del alta de una suscripción: el reclamo de
+   * `Idempotency-Key` que la escribió. La orden se commitea en `en_proceso`
+   * con el reclamo, ANTES de llamar al proveedor (ADR-029, § "El alta de
+   * suscripción"): un reintento con esa clave consulta el estado de ESTA orden
+   * y nunca vuelve a cobrar. Por eso tampoco expira por reloj: pudo haberse
+   * cobrado. Sin FK, como `venta_id`.
+   */
+  @Index()
+  @Column({ name: 'solicitud_idempotente_id', type: 'uuid', nullable: true })
+  solicitudIdempotenteId: string | null;
+
   @Column({ type: 'jsonb', default: () => `'{}'` })
   metadata: Record<string, unknown>;
 

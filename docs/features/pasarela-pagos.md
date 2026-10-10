@@ -477,7 +477,7 @@ Con el stack arriba (`docker-compose up -d`):
 | Doble retorno de Webpay (reintento) | Inscripción/medio duplicado | Claim atómico `pendiente→procesando`; compensación a `pendiente` si el provider falla |
 | Reembolsos concurrentes exceden el total | Sobre-reembolso | `reembolsar()` corre dentro de una transacción con lock pesimista (`SELECT … FOR UPDATE`) de la fila de la orden: dos reembolsos sobre la misma orden se serializan; el segundo ve el REFUND del primero y no puede exceder el saldo. Con venta ligada, esa misma transacción toma después el `FOR UPDATE` de la venta para el tope por pago (orden → venta, el único orden: ningún camino toma la venta y luego la orden). El intento que no se confirmó se anota sobre su `REFUND` en `iniciada` **fuera** de la transacción (tras el rollback que libera el lock) |
 | Reintento de un reembolso después de un corte | Doble devolución por el proveedor | `Idempotency-Key` con el reclamo commiteado **antes** de llamar y el `REFUND` write-ahead en `iniciada`; el reintento de uno sin confirmar se aclara por saldo y nunca vuelve a llamar ([ADR-029](../adr/029-reembolso-con-efecto-externo.md)) |
-| Orden con timeout marcada `expirada` por reloj (deja de ser reconciliable) | Cobro real dado por perdido | `obtenerOrden()` no expira perezosamente órdenes con una transacción `AUTHORIZATION 'error'` (hubo intento); `verificar()` además acepta órdenes `expirada`. Solo la reconciliación con el proveedor las cierra |
+| Orden con timeout marcada `expirada` por reloj (deja de ser reconciliable) | Cobro real dado por perdido | `obtenerOrden()` y el cron `expirar-ordenes` no expiran órdenes con una transacción `AUTHORIZATION 'error'` (hubo intento), ni las escritas antes de cobrar (`solicitud_idempotente_id`, el alta de suscripción: ADR-029); `verificar()` además acepta órdenes `expirada`. Solo la reconciliación con el proveedor las cierra |
 | Credenciales expuestas | Fraude | Cifrado AES-256-GCM en reposo, API keys hasheadas, redacción de logs |
 
 ---
@@ -485,7 +485,8 @@ Con el stack arriba (`docker-compose up -d`):
 ## Related Features
 
 - [Tienda Online](./tienda-online.md) — consumidor real: alta de suscripción por
-  cobro Oneclick (`CobrosService.cobrar`) y checkout por Webpay Plus. El cobro
+  cobro Oneclick partido en preparar y efecto (`prepararCobro` / `efectuarCobro` /
+  `aclararCobro`, un cobro por intento: ADR-029) y checkout por Webpay Plus. El cobro
   recurrente de períodos siguientes sigue siendo futuro.
 - [ADR-008](../adr/008-cifrado-credenciales-pasarela.md) — cifrado de credenciales.
 

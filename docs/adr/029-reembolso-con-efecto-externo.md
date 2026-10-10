@@ -107,6 +107,88 @@ proveedores. Vencerlo es comunicación, no rechazo: "sin confirmar". Alcanza tam
 | **Otro reembolso** mientras uno está sin confirmar | Primero se aclara el pendiente; si no se puede, se frena |
 | La consulta **no lo puede aclarar** | *Volver a consultar*; si sigue, el admin revisa el portal y marca *Salió* (con el código) o *No salió*. Elegida por sobre "lo resuelve soporte" y "se deja pasar el nuevo" |
 
+## Actualización 2026-10-10 — el alta de suscripción entra
+
+`POST /suscripciones` cobra el primer período por Oneclick y tenía el mismo hueco, pero en el
+otro sentido: dos POST iguales daban **dos cobros**, dos ventas y dos suscripciones. Se midió el
+2026-10-09 con `test/suscripcion-alta-doble.e2e-spec.ts`, que hoy afirma lo contrario. ADR-026
+tal cual no servía: reclamar adentro del paso de la venta deja cobrar al reintento. Envolver todo
+`crear` en una transacción revertía la orden `pagada` (repo proxy, ADR-020) y dejaba un cargo sin
+rastro. **Decisión del owner (2026-10-09, por AskUserQuestion de la orquestadora, con el costo de
+cada opción):** la forma de este ADR. Lo que cambia respecto del reembolso:
+
+| | Reembolso | Alta de suscripción |
+|---|---|---|
+| **Write-ahead (tx0)** | El `REFUND` en `iniciada` | La `pasarela_orden` en `en_proceso`, con `solicitud_idempotente_id`. El historial de transacciones sigue siendo solo-INSERT |
+| **Efecto (tx1)** | `reembolsar` | `autorizarCobro` con `timeoutMs` opcional, que solo pasa el alta; `cobrar` (la API) queda igual. Después, venta, suscripción y conciliación de la orden en la misma tx |
+| **Rechazo del proveedor** | Se guarda como respuesta | La orden queda `fallida` y la clave **se suelta** (400): el mismo intento con otra tarjeta vuelve a entrar |
+| **Aclarado** | Por saldo | Por `consultarEstado`, como `/verificar`, también sobre una `fallida` que dejó otro lector. `pagada` → orden `pagada` + AUTHORIZATION `aprobada` sin código (sin ella no se podría reembolsar), se termina el alta sin cobrar y se responde `repetida: true`. `fallida` explícito (`FAILED`, `REVERSED`, `NULLIFIED`) → 409 *"No se cobró… podés intentar de nuevo"* y se suelta la clave. Un *"no la conozco"* (404) vale como `fallida` recién pasados 5 minutos (abajo). Desconocido, sin respuesta o 404 dentro de la ventana → 409 *"Esperá unos minutos y volvé a confirmar desde esta pantalla, sin recargarla: no se te va a cobrar dos veces"*, y el reclamo queda: el próximo reintento consulta de nuevo |
+| **Si no se aclara** | El admin marca *Salió/No salió* | Todavía no hay marcado manual para órdenes de cobro: entrada en `pendientes.md` (acordado con la orquestadora, 2026-10-10). La orden queda `en_proceso` y no traba nada más |
+
+Las cuatro decisiones del owner (2026-10-09): con el primero en curso, el reintento espera y
+responde *"ya estaba activa"*. Si el primero murió y el cobro salió, se termina sin cobrar; si
+no salió, se avisa; si no se aclara, va al portal. **Dos suscripciones de la misma persona al
+mismo ítem son legítimas** (dos cajas de vino al mes): no hay restricción única por persona e
+ítem. El cargo que ya salió dos veces antes de este cambio se devuelve con un reembolso, que es
+nota de crédito: queda en su frente fiscal (ADR-010).
+
+**Si el cargo salió y lo que sigue falla** (la venta, o re-leer el alta para terminarla), la tx
+hace rollback: la orden vuelve a `en_proceso` y el reclamo queda sin respuesta. El cliente no
+recibe el error crudo, porque un 400 de ventas o un 500 no dicen que se cobró y recargar pierde
+la clave. Recibe 409 *"El cobro de la suscripción salió, pero no se pudo terminar el alta.
+Volvé a confirmar desde esta pantalla, sin recargarla: no se te va a cobrar dos veces"*. El
+reintento consulta, ve `pagada` y vuelve a intentar terminar. Lo levantó la revisión
+independiente.
+
+**Un "no la conozco" de Transbank no es "no se cobró" durante 5 minutos** (owner, 2026-10-10,
+por AskUserQuestion de la orquestadora: 5 min, elegido sobre 2, 15 y "no esperar", cada uno con
+su costo). Si `autorizarCobro` vence a los 30 s y el cargo se aprueba tarde, el reintento puede
+consultar antes de que Transbank lo registre y recibir un 404. Leerlo como `fallida` soltaba la
+clave y habilitaba el segundo cobro (lo levantó la revisión independiente). Desde el último
+intento sin respuesta (la AUTHORIZATION `error`), o desde la creación de la orden si el proceso
+murió sin anotarlo, un 404 se responde *"Esperá unos minutos…"*. Pasada la ventana vale como
+"no se cobró". La ventana es `VENTANA_COBRO_SIN_CONFIRMAR_MS` en `cobros.service.ts`, y el
+provider marca el 404 con `noEncontrada`. Costo: si el primer cobro de verdad no salió, la
+persona espera 5 minutos para reintentar. `/verificar` de la API sigue leyendo el 404 como
+`fallida`, y el abort de un retorno de pago redirect también deja `fallida` lo que encuentra
+`en_proceso`. Por eso **el aclarado no le cree a una `fallida`**: vuelve a consultar. Los
+caminos del alta que dejan la orden `fallida` sueltan la clave en la misma tx y nunca llegan
+ahí, así que una `fallida` sin respuesta la puso otro lector sin mirar la ventana. Lo levantó la
+segunda vuelta de la revisión independiente.
+
+**Si falla algo que no es HTTP después de llamar a Transbank** (la base al registrar la
+respuesta, p. ej.), no se sabe si se cobró: sale 409 *"Esperá unos minutos…"* en vez de un 500
+crudo, y el reintento aclara.
+
+**La orden escrita antes de cobrar no expira por reloj.** El cron `expirar-ordenes` y la
+expiración perezosa de `obtenerOrden` la saltean, como a la que tiene una AUTHORIZATION
+`error`. Si el proceso cae con el cobro hecho no queda AUTHORIZATION, y una `expirada` se leería
+como "no se cobró". El aclarado consulta igual una `expirada` (como `/verificar`), así que el
+reloj nunca suelta la clave ni habilita un segundo cobro. Lo mide el e2e *"el proceso cae
+después de cobrar"*.
+
+**Orden de locks:** reclamo → orden → venta, el mismo de `verificarReembolsable`.
+
+**Límites conocidos:**
+
+- **La ventana entre tx0 y tx1 ya no suelta la clave.** En el reembolso, un reintento que gana
+  el lock del reclamo antes que la tx1 del primero puede aclarar como "no salió" algo que todavía
+  no se envió. Acá esa consulta da 404 dentro de la ventana: el reintento responde *"Esperá unos
+  minutos…"*, suelta el lock, y la tx1 del primero cobra normalmente.
+- **El reembolso tiene la misma exposición y no se cambió** (orquestadora, 2026-10-10). Su
+  aclarado lee "saldo sin cambio" como "no salió" apenas después de un timeout, y un `REFUND` que
+  Transbank aplica tarde quedaría `rechazada` con la plata devuelta. Límite conocido, sin
+  ventana.
+- **Terminar el alta re-lee el ítem, el día y la tarjeta.** Si cambiaron entre el cobro y el
+  reintento (el ítem se desactivó, se borró la tarjeta), el reintento rebota y la orden queda
+  sin aclarar.
+- **Precio distinto.** Si el plan cambió de precio, la venta recalculada no cuadraría con lo
+  cobrado: 409 y log, y no se crea nada.
+- **Recargar la pestaña pierde la clave**, como en ADR-026. Por eso los mensajes que piden volver
+  a confirmar dicen *"desde esta pantalla, sin recargarla"*.
+- **Gemelo sin cubrir:** `POST /pasarela/api/cobros` (el cobro de un integrador por llave de
+  API) tampoco pide clave. Es pasarela, de prioridad baja (owner, 2026-10-08), y va aparte.
+
 ## Alternatives Considered
 
 - **ADR-026 tal cual** (reclamo dentro de la transacción del efecto). Exactly-once en la base,

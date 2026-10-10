@@ -2226,6 +2226,7 @@ CREATE TABLE pasarela_ordenes (
     token_proveedor VARCHAR, -- token del proveedor en flujos redirect (Webpay Plus); claim transitorio 'procesando'
     origen VARCHAR NOT NULL, -- 'interno' | 'api'
     api_key_id UUID REFERENCES pasarela_api_keys(api_key_id),
+    solicitud_idempotente_id UUID, -- solo el cobro del alta de suscripción: el reclamo de Idempotency-Key que la escribió antes de cobrar (ADR-029). Sin FK; no expira por reloj
     metadata JSONB NOT NULL DEFAULT '{}',
     creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -2273,6 +2274,7 @@ CREATE UNIQUE INDEX idx_pasarela_tx_externo
     WHERE identificador_transaccion_externo IS NOT NULL;
 -- Visibilidad de reembolsos en ventas: agregados de REFUND por venta vinculada
 CREATE INDEX idx_pasarela_ordenes_venta ON pasarela_ordenes (venta_id);
+CREATE INDEX idx_pasarela_ordenes_solicitud ON pasarela_ordenes (solicitud_idempotente_id);
 CREATE INDEX idx_pasarela_tx_orden ON pasarela_transacciones (orden_id);
 
 -- Módulo de cron: registro de ejecuciones de jobs internos del sistema.

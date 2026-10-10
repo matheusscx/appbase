@@ -1,11 +1,15 @@
 import {
+  BadGatewayException,
   BadRequestException,
+  ConflictException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import { Suscripcion } from './entities/suscripcion.entity';
 import { CreateSuscripcionDto } from './dto/create-suscripcion.dto';
@@ -15,11 +19,81 @@ import { CalculoPreciosService } from '../calculo-precios/calculo-precios.servic
 import { VentasService } from '../ventas/ventas.service';
 import { MetodosPagoService } from '../metodos-pago/metodos-pago.service';
 import { InscripcionesService } from '../pasarela/services/inscripciones.service';
-import { CobrosService } from '../pasarela/services/cobros.service';
+import {
+  CobrosService,
+  type CobroPreparado,
+} from '../pasarela/services/cobros.service';
 import { TenantPasarelaService } from '../pasarela/services/tenant-pasarela.service';
+import { ProviderComunicacionError } from '../pasarela/providers/payment-provider.interface';
+import { IdempotenciaService } from '../idempotencia/idempotencia.service';
+import { huellaDe } from '../idempotencia/huella';
 import { calcularProximoCobro } from './utils/proximo-cobro.util';
 
 const PASARELA_TOKENIZADA = 'oneclick';
+
+// Lo que ve quien da de alta en cada caso (decisión del owner, 2026-10-09).
+// Las que piden volver a confirmar dicen "sin recargarla": la clave vive en la
+// memoria de la pestaña, y recargar empieza otro intento.
+const MENSAJE_ALTA_OTROS_DATOS =
+  'Esta suscripción ya se había pedido con otros datos. Revisá tus suscripciones antes de intentar de nuevo.';
+const MENSAJE_COBRO_RECHAZADO =
+  'El cobro de la suscripción fue rechazado. Probá con otra tarjeta.';
+const MENSAJE_COBRO_SIN_CONFIRMAR =
+  'Transbank no confirmó el cobro: no sabemos si salió. Volvé a confirmar desde esta pantalla, sin recargarla: el sistema lo consulta y no se te va a cobrar dos veces.';
+const MENSAJE_NO_SE_COBRO =
+  'No se cobró la suscripción: Transbank no registró el cargo. Podés intentar de nuevo.';
+const MENSAJE_NO_SE_PUEDE_ACLARAR =
+  'No pudimos confirmar con Transbank si se cobró. Esperá unos minutos y volvé a confirmar desde esta pantalla, sin recargarla: no se te va a cobrar dos veces.';
+const MENSAJE_COBRADO_SIN_TERMINAR =
+  'El cobro de la suscripción salió, pero no se pudo terminar el alta. Volvé a confirmar desde esta pantalla, sin recargarla: no se te va a cobrar dos veces.';
+const MENSAJE_PRECIO_CAMBIO =
+  'El cobro de la suscripción salió, pero el precio del plan cambió desde entonces y no se pudo terminar el alta. El comercio lo va a revisar: no vuelvas a intentar.';
+
+/** Lo que el alta necesita para cobrar y para crear venta y suscripción. */
+interface DatosAlta {
+  item: { nombre: string; precioBase: string; monedaId: string | null };
+  frecuencia: string;
+  marca: string | null;
+  ultimos4: string | null;
+  totalFinal: string;
+  metodoPagoId: string;
+}
+
+/** Lo que tx0 del alta le deja a tx1. */
+interface AltaPreparada {
+  datos: DatosAlta;
+  cobro: CobroPreparado;
+}
+
+export interface AltaSuscripcion {
+  id: string;
+  itemId: string;
+  itemNombre: string;
+  precio: string;
+  monedaId: string | null;
+  frecuencia: string;
+  diaMes: number | null;
+  diaSemana: number | null;
+  estado: string;
+  proximoCobro: string;
+  activaHasta: string | null;
+  inscripcionId: string | null;
+  tarjetaMarca: string | null;
+  tarjetaLast4: string | null;
+  ventaInicialId: string;
+  creadoEl: Date;
+  /**
+   * Lo que el motor de precios tuvo que avisar sobre el primer período —
+   * descuento topeado en cero, regla o impuesto pausado, faltante de receta.
+   * Viene **siempre**, vacío si no hay nada que decir: sin eso el cliente no
+   * puede distinguir "sin advertencias" de "el endpoint no las manda" (misma
+   * convención que `garzones.service.ts`).
+   *
+   * Se devuelven aunque el cobro ya haya ocurrido: no son un freno, son la
+   * explicación de por qué el monto autorizado no es el precio de catálogo.
+   */
+  advertencias: string[];
+}
 
 const TRANSICIONES: Record<string, { desde: string[]; hacia: string }> = {
   pausar: { desde: ['activa'], hacia: 'pausada' },
@@ -42,9 +116,194 @@ export class SuscripcionesService {
     private readonly inscripcionesService: InscripcionesService,
     private readonly cobrosService: CobrosService,
     private readonly tenantPasarelaService: TenantPasarelaService,
+    private readonly idempotencia: IdempotenciaService,
   ) {}
 
-  async crear(tenantId: string, usuarioId: string, dto: CreateSuscripcionDto) {
+  /**
+   * El alta: un cobro Oneclick por intento, aunque el cliente confirme dos
+   * veces (ADR-029, § "El alta de suscripción"). El cargo lo hace Transbank,
+   * fuera de la base, así que va por `ejecutarConEfectoExterno`:
+   * - **preparar** (tx0): reclamo de la clave, los chequeos que pueden rebotar
+   *   con 400 sin dejar rastro, y la orden en `en_proceso` (write-ahead);
+   * - **efectuar** (tx1): con reclamo y orden bloqueados, cobra; si sale, venta,
+   *   suscripción y conciliación de la orden en la misma tx. Un rechazo suelta
+   *   la clave: el mismo intento con otra tarjeta vuelve a entrar;
+   * - **resolverSinConfirmar**: el reintento cuyo primer intento murió o no
+   *   tuvo respuesta de Transbank le pregunta si el cargo salió. Si salió,
+   *   termina el alta sin cobrar; si no, lo dice y suelta la clave. Nunca vuelve
+   *   a cobrar.
+   *
+   * El reintento que llega con el primero en curso espera su lock y reproduce:
+   * `repetida: true`, "ya estaba activa".
+   */
+  async crear(
+    tenantId: string,
+    usuarioId: string,
+    dto: CreateSuscripcionDto,
+    clave: string,
+  ): Promise<AltaSuscripcion & { repetida?: true }> {
+    // El cobro al que Transbank pudo haber dicho que sí sin que nos enteremos:
+    // si la llamada falla por comunicación, se anota sobre su orden.
+    let llamado: CobroPreparado | undefined;
+    try {
+      const { origen, respuesta } =
+        await this.idempotencia.ejecutarConEfectoExterno<
+          AltaPreparada,
+          AltaSuscripcion
+        >(
+          {
+            tenantId,
+            actor: { usuarioId },
+            clave,
+            operacion: 'suscripcion.alta',
+            // Lo que el request pidió, campo por campo. Los días ausentes van
+            // como `null`: omitirlos y mandarlos vacíos es el mismo pedido.
+            huella: huellaDe('suscripcion.alta', {
+              itemId: dto.itemId,
+              diaMes: dto.diaMes ?? null,
+              diaSemana: dto.diaSemana ?? null,
+              inscripcionId: dto.inscripcionId,
+            }),
+            mensajeOtrosDatos: MENSAJE_ALTA_OTROS_DATOS,
+          },
+          {
+            preparar: async (solicitudId) => {
+              const datos = await this.leerAlta(tenantId, usuarioId, dto);
+              const cobro = await this.cobrosService.prepararCobro(
+                tenantId,
+                {
+                  inscripcionId: dto.inscripcionId,
+                  pagadorRef: usuarioId,
+                  monto: datos.totalFinal,
+                  descripcion: `Suscripción ${datos.item.nombre}`,
+                },
+                solicitudId,
+              );
+              return { datos, cobro };
+            },
+            efectuar: async (_solicitudId, { datos, cobro }) => {
+              const orden = await this.cobrosService.efectuarCobro(
+                tenantId,
+                cobro,
+                () => {
+                  llamado = cobro;
+                },
+              );
+              if (orden.estado === 'fallida')
+                return {
+                  soltar: new BadRequestException(MENSAJE_COBRO_RECHAZADO),
+                };
+              // Otro camino la cerró entre tx0 y el lock (un `/verificar` de
+              // la API): lo que no es `pagada` se aclara en el reintento.
+              if (orden.estado !== 'pagada')
+                throw new ConflictException(MENSAJE_NO_SE_PUEDE_ACLARAR);
+              try {
+                return {
+                  respuesta: await this.materializarAlta(
+                    tenantId,
+                    usuarioId,
+                    dto,
+                    datos,
+                    orden.ordenId,
+                  ),
+                };
+              } catch (e) {
+                throw this.cobradoSinTerminar(orden.ordenId, e);
+              }
+            },
+            resolverSinConfirmar: async (solicitudId) => {
+              const { veredicto, orden } =
+                await this.cobrosService.aclararCobro(tenantId, solicitudId);
+              if (veredicto === 'no_se_puede')
+                throw new ConflictException(MENSAJE_NO_SE_PUEDE_ACLARAR);
+              if (veredicto === 'fallida')
+                return { soltar: new ConflictException(MENSAJE_NO_SE_COBRO) };
+              // El cargo salió: se termina el alta con lo que pidió este
+              // request, que es el mismo pedido (la huella coincidió).
+              let datos: DatosAlta;
+              try {
+                datos = await this.leerAlta(tenantId, usuarioId, dto);
+              } catch (e) {
+                throw this.cobradoSinTerminar(orden.ordenId, e);
+              }
+              // La venta recalcula el precio; si cambió desde el cobro, no
+              // cuadraría con lo cobrado. Queda sin aclarar y en el log.
+              if (!new Decimal(datos.totalFinal).eq(orden.monto)) {
+                this.logger.error(
+                  `Cobro del alta aprobado (orden ${orden.ordenId}, ${orden.monto}) pero el plan hoy cuesta ${datos.totalFinal}: el alta no se termina`,
+                );
+                throw new ConflictException(MENSAJE_PRECIO_CAMBIO);
+              }
+              try {
+                return {
+                  respuesta: await this.materializarAlta(
+                    tenantId,
+                    usuarioId,
+                    dto,
+                    datos,
+                    orden.ordenId,
+                  ),
+                };
+              } catch (e) {
+                throw this.cobradoSinTerminar(orden.ordenId, e);
+              }
+            },
+            cuerpoOtrosDatos: () => Promise.resolve({}),
+          },
+        );
+      // Un alta sin confirmar que resultó cobrada se ve como la primera
+      // respuesta perdida: "ya estaba activa" (decisión del owner).
+      return origen === 'efectuada'
+        ? respuesta
+        : { ...respuesta, repetida: true };
+    } catch (e) {
+      if (e instanceof ProviderComunicacionError && llamado) {
+        // La tx del cobro hizo rollback: la orden sigue `en_proceso` (es de
+        // tx0) y el reclamo sin respuesta. El reintento lo aclara.
+        await this.cobrosService.anotarCobroSinConfirmar(tenantId, llamado, e);
+        throw new BadGatewayException(MENSAJE_COBRO_SIN_CONFIRMAR);
+      }
+      if (llamado && !(e instanceof HttpException)) {
+        // Falló algo que no es HTTP después de llamar a Transbank (la base al
+        // registrar la respuesta, p. ej.): no sabemos si se cobró, y un 500
+        // crudo no dice que no hay que recargar. El reintento lo aclara.
+        this.logger.error(
+          `Falló el alta después de llamar a Transbank (orden ${llamado.ordenId}): la orden queda 'en_proceso' y el reintento lo aclara. ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+        throw new ConflictException(MENSAJE_NO_SE_PUEDE_ACLARAR);
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * El cargo salió y lo que sigue falló (la venta, o re-leer el alta al
+   * terminarla). La tx hace rollback: la orden vuelve a `en_proceso` y el
+   * reclamo queda sin respuesta, así que el reintento consulta y termina sin
+   * cobrar. Lo que no puede salir es el error crudo: un 400 de ventas o un 500
+   * no dicen que el cobro ya ocurrió, y recargar la pantalla pierde la clave.
+   */
+  private cobradoSinTerminar(ordenId: string, e: unknown): ConflictException {
+    this.logger.error(
+      `Cobro Oneclick aprobado (orden ${ordenId}) pero no se pudo terminar el alta: la orden queda 'en_proceso' y el reintento lo aclara. ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+    return new ConflictException(MENSAJE_COBRADO_SIN_TERMINAR);
+  }
+
+  /**
+   * Los chequeos del alta y lo que se cobra (pasos 1 a 6 de siempre). Corre en
+   * tx0, después del reclamo: un rebote revierte la clave (ADR-026). Y otra vez
+   * al terminar un alta cuyo cobro salió sin respuesta.
+   */
+  private async leerAlta(
+    tenantId: string,
+    usuarioId: string,
+    dto: CreateSuscripcionDto,
+  ): Promise<DatosAlta> {
     // 1. Item suscribible del tenant
     const item = await this.itemsService.findOne(tenantId, dto.itemId);
     if (item.tipo !== 'suscripcion') {
@@ -84,12 +343,11 @@ export class SuscripcionesService {
         dto.inscripcionId,
         usuarioId,
       );
-
     // 5. Total del primer período (mismo motor que usará la venta). Se necesita
     //    ANTES del cobro: es el monto que se le autoriza a la tarjeta.
     //
     //    `resultado.advertencias` se descarta acá a propósito. Las que viajan al
-    //    cliente son las de la venta del paso 9, por una razón que no es de
+    //    cliente son las de la venta (`materializarAlta`), por una razón que no es de
     //    contenido sino de autoridad: la venta es el cálculo que queda
     //    persistido, así que sus advertencias explican la fila que existe. Las de
     //    acá explican un cálculo intermedio que no sobrevive.
@@ -112,9 +370,9 @@ export class SuscripcionesService {
     //    puedan dejar de coincidir.
     // `canal` explícito por el mismo motivo que `online.service.ts:348`: decide
     // qué promociones aplican, y `totalFinal` de ESTE cálculo es lo que se
-    // autoriza contra la tarjeta en el paso 7. Sin el `canal`, `calcular` cae
+    // autoriza contra la tarjeta en tx1 del alta. Sin el `canal`, `calcular` cae
     // al default `'fisico'` — un conjunto de promos distinto del que la venta
-    // usa al persistirse con `canal: 'online'` en el paso 9 — y lo cobrado
+    // usa al persistirse con `canal: 'online'` en `materializarAlta` — y lo cobrado
     // dejaría de coincidir con lo registrado.
     const resultado = await this.calculoPreciosService.calcular(tenantId, {
       canal: 'online' as const,
@@ -122,150 +380,109 @@ export class SuscripcionesService {
     });
     const totalFinal = resultado.totales.totalFinal;
     // 5b. Sobre el umbral de la Res. Ex. SII 44/2025, antes de cobrar: la venta
-    //     del paso 9 lo exigiría con la tarjeta ya cobrada.
+    //     de `materializarAlta` lo exigiría con la tarjeta ya cobrada.
     await this.ventasService.exigirCompraOnlineBajoUmbral(tenantId, totalFinal);
 
     // 6. Método de pago contable (se registra en el pago de la venta)
     const metodoPagoId =
       await this.metodosPagoService.resolverMetodoCredito(tenantId);
 
-    // 7. Cobro Oneclick real — FUERA de toda transacción DB (es una llamada HTTP
-    //    al proveedor). Crea su propia pasarela_orden y autoriza contra Transbank.
-    const orden = await this.cobrosService.cobrar(
-      tenantId,
-      {
-        inscripcionId: dto.inscripcionId,
-        pagadorRef: usuarioId,
-        monto: totalFinal,
-        descripcion: `Suscripción ${item.nombre}`,
+    return {
+      item: {
+        nombre: item.nombre,
+        precioBase: item.precioBase,
+        monedaId: item.monedaId ?? null,
       },
-      'interno',
-    );
-    if (orden.estado !== 'pagada') {
-      throw new BadRequestException(
-        'El cobro de la suscripción fue rechazado. Probá con otra tarjeta.',
-      );
-    }
-    const ordenId = orden.ordenId as string;
+      frecuencia,
+      marca,
+      ultimos4,
+      totalFinal,
+      metodoPagoId,
+    };
+  }
 
-    // 8. Nombre del usuario para el customer de la venta
+  /**
+   * Cobro OK → venta del primer período + suscripción, y la orden conciliada
+   * con esa venta. Corre en la tx del cobro (o del aclarado), con la orden
+   * bloqueada: si algo falla, todo vuelve atrás, la orden queda `en_proceso`
+   * (es de tx0) y el reintento lo aclara consultando a Transbank, sin cobrar
+   * de nuevo. Lock: orden → venta (`verificarReembolsable`).
+   */
+  private async materializarAlta(
+    tenantId: string,
+    usuarioId: string,
+    dto: CreateSuscripcionDto,
+    d: DatosAlta,
+    ordenId: string,
+  ): Promise<AltaSuscripcion> {
+    // Nombre del usuario para el customer de la venta
     const usuarioRows: { nombre: string }[] = await this.db.query(
       `SELECT nombre FROM usuarios WHERE usuario_id = $1 AND eliminado_el IS NULL`,
       [usuarioId],
     );
     const customerNombre = usuarioRows[0]?.nombre ?? 'Suscriptor online';
 
-    // 9. Cobro OK → venta del primer período + suscripción, en UNA transacción.
-    //    Si esto falla el cobro YA ocurrió: la orden queda 'pagada' sin venta
-    //    (reconciliable, mismo invariante que el checkout Webpay); no revertimos
-    //    el cobro automáticamente.
-    let salida: {
-      id: string;
-      itemId: string;
-      itemNombre: string;
-      precio: string;
-      monedaId: string | null;
-      frecuencia: string;
-      diaMes: number | null;
-      diaSemana: number | null;
-      estado: string;
-      proximoCobro: string;
-      activaHasta: string | null;
-      inscripcionId: string | null;
-      tarjetaMarca: string | null;
-      tarjetaLast4: string | null;
-      ventaInicialId: string;
-      creadoEl: Date;
-      /**
-       * Lo que el motor de precios tuvo que avisar sobre el primer período —
-       * descuento topeado en cero, regla o impuesto pausado, faltante de receta.
-       * Viene **siempre**, vacío si no hay nada que decir: sin eso el cliente no
-       * puede distinguir "sin advertencias" de "el endpoint no las manda" (misma
-       * convención que `garzones.service.ts`).
-       *
-       * Se devuelven aunque el cobro ya haya ocurrido: no son un freno, son la
-       * explicación de por qué el monto autorizado no es el precio de catálogo.
-       */
-      advertencias: string[];
-    };
-    try {
-      salida = await this.db.transaccion(async (manager) => {
-        const venta = await this.ventasService.crearEnTransaccion(
-          manager,
+    const salida = await this.db.transaccion(async (manager) => {
+      const venta = await this.ventasService.crearEnTransaccion(
+        manager,
+        tenantId,
+        usuarioId,
+        {
+          canal: 'online',
+          lineas: [{ itemId: dto.itemId, cantidad: '1' }],
+          pagos: [{ metodoPagoId: d.metodoPagoId, monto: d.totalFinal }],
+          customer: { nombre: customerNombre },
+        },
+      );
+
+      const suscripcion = await manager.save(
+        Suscripcion,
+        manager.create(Suscripcion, {
           tenantId,
           usuarioId,
-          {
-            canal: 'online',
-            lineas: [{ itemId: dto.itemId, cantidad: '1' }],
-            pagos: [{ metodoPagoId, monto: totalFinal }],
-            customer: { nombre: customerNombre },
-          },
-        );
-
-        const suscripcion = await manager.save(
-          Suscripcion,
-          manager.create(Suscripcion, {
-            tenantId,
-            usuarioId,
-            itemId: dto.itemId,
-            frecuencia,
-            diaMes: dto.diaMes ?? null,
-            diaSemana: dto.diaSemana ?? null,
-            estado: 'activa',
-            proximoCobro: calcularProximoCobro(
-              frecuencia,
-              new Date(),
-              dto.diaMes,
-              dto.diaSemana,
-            ),
-            inscripcionId: dto.inscripcionId,
-            tarjetaMarca: marca,
-            tarjetaLast4: ultimos4,
-            ventaInicialId: venta.id,
-          }),
-        );
-
-        return {
-          id: suscripcion.id,
           itemId: dto.itemId,
-          itemNombre: item.nombre,
-          precio: item.precioBase,
-          monedaId: item.monedaId ?? null,
-          frecuencia: suscripcion.frecuencia,
-          diaMes: suscripcion.diaMes,
-          diaSemana: suscripcion.diaSemana,
-          estado: suscripcion.estado,
-          proximoCobro: suscripcion.proximoCobro,
-          activaHasta: suscripcion.activaHasta ?? null,
-          inscripcionId: suscripcion.inscripcionId,
-          tarjetaMarca: marca,
-          tarjetaLast4: ultimos4,
+          frecuencia: d.frecuencia,
+          diaMes: dto.diaMes ?? null,
+          diaSemana: dto.diaSemana ?? null,
+          estado: 'activa',
+          proximoCobro: calcularProximoCobro(
+            d.frecuencia,
+            new Date(),
+            dto.diaMes,
+            dto.diaSemana,
+          ),
+          inscripcionId: dto.inscripcionId,
+          tarjetaMarca: d.marca,
+          tarjetaLast4: d.ultimos4,
           ventaInicialId: venta.id,
-          creadoEl: suscripcion.creadoEl,
-          advertencias: venta.advertencias,
-        };
-      });
-    } catch (e) {
-      this.logger.error(
-        `Cobro Oneclick aprobado (orden ${ordenId}) pero falló la creación de la venta/suscripción: la orden queda 'pagada' sin venta para reconciliación. ${
-          e instanceof Error ? e.message : String(e)
-        }`,
-      );
-      throw e;
-    }
-
-    // 10. Conciliar la orden con la venta creada (best-effort: el alta ya está
-    //     hecha; un fallo acá solo deja la orden 'pagada' en vez de 'conciliada').
-    await this.cobrosService
-      .vincularVenta(tenantId, ordenId, salida.ventaInicialId)
-      .catch((e) =>
-        this.logger.warn(
-          `No se pudo conciliar la orden ${ordenId} con la venta ${salida.ventaInicialId}: ${
-            e instanceof Error ? e.message : String(e)
-          }`,
-        ),
+        }),
       );
 
+      return {
+        id: suscripcion.id,
+        itemId: dto.itemId,
+        itemNombre: d.item.nombre,
+        precio: d.item.precioBase,
+        monedaId: d.item.monedaId,
+        frecuencia: suscripcion.frecuencia,
+        diaMes: suscripcion.diaMes,
+        diaSemana: suscripcion.diaSemana,
+        estado: suscripcion.estado,
+        proximoCobro: suscripcion.proximoCobro,
+        activaHasta: suscripcion.activaHasta ?? null,
+        inscripcionId: suscripcion.inscripcionId,
+        tarjetaMarca: d.marca,
+        tarjetaLast4: d.ultimos4,
+        ventaInicialId: venta.id,
+        creadoEl: suscripcion.creadoEl,
+        advertencias: venta.advertencias,
+      };
+    });
+    await this.cobrosService.vincularVenta(
+      tenantId,
+      ordenId,
+      salida.ventaInicialId,
+    );
     return salida;
   }
 

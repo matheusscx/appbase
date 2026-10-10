@@ -119,6 +119,8 @@ La huella ordena las `devoluciones`: el mismo pedido marcado en otro orden es la
   at-least-once contra el proveedor. Usa `ejecutarConEfectoExterno` (misma tabla, misma huella,
   reclamo commiteado antes de llamar): [ADR-029](029-reembolso-con-efecto-externo.md). Ahí la
   alternativa de "estado en proceso + 409" que este ADR descartó se elige por la razón inversa.
+  Por la misma razón el **alta de suscripción** (`POST /suscripciones`, que cobra por Oneclick)
+  entró por `ejecutarConEfectoExterno` el 2026-10-10 y no por `ejecutar`.
 - **Webpay no pasa por acá.** `OnlineCallbackHandler` llama a `VentasService.crear` sin HTTP y
   sin clave: ya es idempotente por orden (ADR-009).
 - **El primer deploy tiene una ventana.** Backend y frontend son servicios separados en

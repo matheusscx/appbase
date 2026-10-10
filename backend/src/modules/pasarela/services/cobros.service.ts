@@ -45,6 +45,7 @@ import {
 import {
   ProviderComunicacionError,
   ResultadoCobro,
+  TIMEOUT_LLAMADA_REEMBOLSO_MS,
   type ResultadoEstado,
 } from '../providers/payment-provider.interface';
 import type { PaginatedResponse } from '../../../common/interfaces/paginated-response.interface';
@@ -77,6 +78,15 @@ interface OrdenListRow {
 
 const PASARELA_V1 = 'oneclick';
 const EXPIRACION_ORDEN_MS = 2 * 60 * 60 * 1000; // 2 horas
+
+/**
+ * Cuánto tiempo, desde el último intento de cobro sin respuesta (o desde la
+ * orden, si el proceso murió sin anotarlo), un "no la conozco" de Transbank NO
+ * significa "no se cobró" en el alta de suscripción: puede estar registrando
+ * todavía un cargo que se aprobó tarde, y soltar la clave ahí habilita el
+ * segundo cobro. Owner, 2026-10-10 (5 min, elegido sobre 2, 15 y "no esperar").
+ */
+export const VENTANA_COBRO_SIN_CONFIRMAR_MS = 5 * 60 * 1000;
 
 /** Un REFUND en estos estados es "sin confirmar": el proveedor pudo haber devuelto la plata. */
 const SIN_CONFIRMAR = ['iniciada', 'error'];
@@ -150,6 +160,30 @@ function devolucionesNormalizadas(
         : a.itemId.localeCompare(b.itemId),
     );
 }
+
+/**
+ * Lo que tx0 del alta de suscripción le deja a tx1 (ADR-029, § "El alta de
+ * suscripción"): la orden ya commiteada y lo necesario para cobrar sin volver a
+ * resolver la tarjeta.
+ */
+export interface CobroPreparado {
+  ordenId: string;
+  codigoOrden: string;
+  monto: string;
+  moneda: string;
+  tenantPasarelaId: string;
+  inscripcionId: string;
+  username: string;
+  /** Cifrado, como lo guarda la inscripción: se descifra recién al llamar. */
+  identificadorExterno: string;
+}
+
+/**
+ * Qué dijo Transbank de la orden de un alta cuyo cobro quedó sin confirmar:
+ * `pagada` (el cargo salió), `fallida` (no salió) o `no_se_puede` (no contestó,
+ * o contestó algo que no aclara).
+ */
+export type VeredictoCobro = 'pagada' | 'fallida' | 'no_se_puede';
 
 /** Lo que tx0 le deja a tx1. */
 interface PreparadoReembolso {
@@ -334,6 +368,296 @@ export class CobrosService {
     orden.estado = 'conciliada';
     await this.ordenRepo.save(orden);
     return this.toPublico(orden);
+  }
+
+  /**
+   * tx0 del alta de suscripción (ADR-029, § "El alta de suscripción"): los
+   * chequeos que pueden rebotar y la orden en `en_proceso`, ligada al reclamo
+   * de la clave (write-ahead). Corre dentro de la transacción del reclamo: un
+   * 400 acá revierte los dos, sin rastro. Nada sale a Transbank.
+   *
+   * `cobrar` hace lo mismo y llama en el mismo paso; no se toca porque es la
+   * API de la pasarela, que no pide clave (gemelo anotado en `pendientes.md`).
+   */
+  async prepararCobro(
+    tenantId: string,
+    dto: {
+      inscripcionId: string;
+      pagadorRef: string;
+      monto: string;
+      descripcion: string;
+    },
+    solicitudId: string,
+  ): Promise<CobroPreparado> {
+    if (new Decimal(dto.monto).lte(0))
+      throw new BadRequestException('El monto debe ser mayor a cero');
+    await this.monedas.validarEscalaDeMoneda(dto.monto, MONEDA_ORDEN_V1);
+    const inscripcion = await this.inscripciones.resolverParaCobro(
+      tenantId,
+      dto.inscripcionId,
+      dto.pagadorRef,
+    );
+    const { tenantPasarela, pasarela } =
+      await this.tenantPasarelaService.resolverConfiguracionActiva(
+        tenantId,
+        PASARELA_V1,
+      );
+    // Que el proveedor exista se sabe ANTES de commitear la orden.
+    this.providerFactory.getTokenizado(pasarela.codigo);
+
+    const orden = await this.ordenRepo.save(
+      this.ordenRepo.create({
+        tenantId,
+        pagadorRef: inscripcion.pagadorRef,
+        referenciaExterna: null,
+        codigoOrden: this.generarCodigoOrden(),
+        descripcion: dto.descripcion,
+        monto: dto.monto,
+        moneda: MONEDA_ORDEN_V1,
+        estado: 'en_proceso',
+        fechaExpiracion: new Date(Date.now() + EXPIRACION_ORDEN_MS),
+        origen: 'interno',
+        apiKeyId: null,
+        solicitudIdempotenteId: solicitudId,
+        // Con qué se cobra: si la tx del cobro muere sin dejar AUTHORIZATION,
+        // el aclarado (y `/verificar`) resuelven el proveedor desde acá.
+        metadata: {
+          tenantPasarelaId: tenantPasarela.tenantPasarelaId,
+          inscripcionId: inscripcion.inscripcionId,
+        },
+      }),
+    );
+    return {
+      ordenId: orden.ordenId,
+      codigoOrden: orden.codigoOrden,
+      monto: orden.monto,
+      moneda: orden.moneda,
+      tenantPasarelaId: tenantPasarela.tenantPasarelaId,
+      inscripcionId: inscripcion.inscripcionId,
+      username: inscripcion.identificadorUsuarioExterno,
+      identificadorExterno: inscripcion.identificadorExterno!,
+    };
+  }
+
+  /**
+   * tx1 del alta, con el reclamo bloqueado: bloquea la orden, cobra y la
+   * cierra en `pagada` o `fallida`. Si la orden ya no está `en_proceso` (otro
+   * camino la resolvió entre el COMMIT de tx0 y este lock) no llama: responde
+   * lo que la orden dice.
+   *
+   * Un `ProviderComunicacionError` sale de acá: la tx hace rollback, la orden
+   * queda `en_proceso` (es de tx0) y el llamador anota el intento fuera de la
+   * tx (`anotarCobroSinConfirmar`). Anotarlo adentro no sirve: el rollback se
+   * lo llevaría.
+   */
+  async efectuarCobro(
+    tenantId: string,
+    p: CobroPreparado,
+    alLlamar: () => void,
+  ): Promise<PasarelaOrden> {
+    const orden = await this.bloquearOrden(tenantId, p.ordenId);
+    if (orden.estado !== 'en_proceso') return orden;
+
+    const { pasarela, cred } = await this.tenantPasarelaService.resolverPorId(
+      p.tenantPasarelaId,
+    );
+    // Antes de `alLlamar`: un error acá no mandó nada a Transbank, y no tiene
+    // que leerse como un cobro en duda.
+    const identificadorExterno = this.credenciales.descifrarTexto(
+      p.identificadorExterno,
+    );
+    alLlamar();
+    const resultado = await this.providerFactory
+      .getTokenizado(pasarela.codigo)
+      .autorizarCobro(cred, {
+        username: p.username,
+        identificadorExterno,
+        codigoOrden: orden.codigoOrden,
+        monto: orden.monto,
+        moneda: orden.moneda,
+        cuotas: 0,
+        // Se cobra con la tx abierta y el reclamo bloqueado: sin tope, un
+        // Transbank colgado retendría la conexión y al reintento sin fin.
+        timeoutMs: TIMEOUT_LLAMADA_REEMBOLSO_MS,
+      });
+
+    await this.transacciones.registrar({
+      tenantId,
+      ordenId: orden.ordenId,
+      tenantPasarelaId: p.tenantPasarelaId,
+      inscripcionId: p.inscripcionId,
+      tipo: 'AUTHORIZATION',
+      estado: resultado.aprobada ? 'aprobada' : 'rechazada',
+      monto: orden.monto,
+      moneda: orden.moneda,
+      codigoOrden: orden.codigoOrden,
+      codigoAutorizacion: resultado.codigoAutorizacion,
+      identificadorTransaccionExterno:
+        resultado.identificadorTransaccionExterno,
+      codigoRespuesta: resultado.codigoRespuesta,
+      tipoPago: resultado.tipoPago,
+      numeroCuotas: resultado.numeroCuotas,
+      montoCuota: resultado.montoCuota,
+      request: resultado.request,
+      response: resultado.response,
+    });
+    orden.estado = resultado.aprobada ? 'pagada' : 'fallida';
+    return this.ordenRepo.save(orden);
+  }
+
+  /**
+   * Transbank no contestó el cobro del alta: se anota lo que se mandó como
+   * AUTHORIZATION `error`, fuera de la tx que hizo rollback. La orden sigue
+   * `en_proceso`: no es un rechazo, el cargo pudo haber salido.
+   */
+  async anotarCobroSinConfirmar(
+    tenantId: string,
+    p: CobroPreparado,
+    e: ProviderComunicacionError,
+  ): Promise<void> {
+    await this.db.sinTransaccion(() =>
+      this.transacciones.registrar({
+        tenantId,
+        ordenId: p.ordenId,
+        tenantPasarelaId: p.tenantPasarelaId,
+        inscripcionId: p.inscripcionId,
+        tipo: 'AUTHORIZATION',
+        estado: 'error',
+        monto: p.monto,
+        moneda: p.moneda,
+        codigoOrden: p.codigoOrden,
+        request: e.request,
+        response: e.response,
+      }),
+    );
+  }
+
+  /**
+   * El reintento de un alta cuyo reclamo quedó sin respuesta (la tx del cobro
+   * murió, o Transbank no contestó): bloquea la orden del reclamo y, si sigue
+   * sin resolver, le pregunta a Transbank. **Nunca vuelve a cobrar.** Consulta
+   * también una `expirada`, como `/verificar`: el reloj no sabe si el cargo
+   * salió. Y una `fallida`: los caminos del alta que la dejan así sueltan la
+   * clave en la misma tx y nunca llegan acá, así que la puso otro lector
+   * (`/verificar` de la API, el abort de un retorno) sin mirar la ventana de un
+   * "no la conozco". Creerle soltaría la clave con un cargo quizá aprobado.
+   *
+   * Si salió, la orden queda `pagada` con su AUTHORIZATION `aprobada` (sin
+   * código: se perdió con la respuesta). Sin esa fila la orden no se podría
+   * reembolsar. Corre en la transacción del reclamo: si lo que sigue falla,
+   * todo vuelve a `en_proceso` y el próximo reintento consulta de nuevo.
+   */
+  async aclararCobro(
+    tenantId: string,
+    solicitudId: string,
+  ): Promise<{ veredicto: VeredictoCobro; orden: PasarelaOrden }> {
+    const delReclamo = await this.ordenRepo.findOne({
+      where: { tenantId, solicitudIdempotenteId: solicitudId },
+    });
+    // tx0 escribe reclamo y orden juntos: uno sin la otra es que algo rompió
+    // esa atomicidad. 500, nunca un falso "ya estaba activa".
+    if (!delReclamo)
+      throw new InternalServerErrorException('Reclamo de cobro sin su orden');
+    const orden = await this.bloquearOrden(tenantId, delReclamo.ordenId);
+    const tenantPasarelaId = orden.metadata?.tenantPasarelaId;
+    const inscripcionId = orden.metadata?.inscripcionId;
+    if (typeof tenantPasarelaId !== 'string')
+      throw new InternalServerErrorException(
+        'La orden del alta no sabe con qué pasarela se cobró',
+      );
+
+    if (orden.estado !== 'pagada') {
+      // `conciliada` o `reembolsada` sin respuesta guardada no puede pasar:
+      // conciliar va en la misma tx que la respuesta.
+      if (!['en_proceso', 'expirada', 'fallida'].includes(orden.estado))
+        throw new InternalServerErrorException(
+          `La orden del alta está ${orden.estado} y su reclamo no tiene respuesta`,
+        );
+      let consulta: ResultadoEstado;
+      try {
+        const { pasarela, cred } =
+          await this.tenantPasarelaService.resolverPorId(tenantPasarelaId);
+        consulta = await this.providerFactory
+          .getTokenizado(pasarela.codigo)
+          .consultarEstado(cred, {
+            codigoOrden: orden.codigoOrden,
+            tokenProveedor: orden.tokenProveedor,
+          });
+      } catch (e) {
+        if (!(e instanceof ProviderComunicacionError)) throw e;
+        this.logger.warn(
+          `No se pudo consultar el cobro sin confirmar de la orden ${orden.ordenId}: ${e.message}`,
+        );
+        return { veredicto: 'no_se_puede', orden };
+      }
+      if (consulta.estado === 'desconocido') {
+        this.logger.warn(
+          `La consulta no aclara el cobro de la orden ${orden.ordenId}: estado ${consulta.estadoProveedor}`,
+        );
+        return { veredicto: 'no_se_puede', orden };
+      }
+      if (
+        consulta.noEncontrada &&
+        (await this.dentroDeLaVentanaSinConfirmar(orden))
+      ) {
+        this.logger.warn(
+          `Transbank todavía no conoce la orden ${orden.ordenId}: dentro de la ventana no vale como "no se cobró"`,
+        );
+        return { veredicto: 'no_se_puede', orden };
+      }
+      orden.estado = consulta.estado;
+      orden.metadata = {
+        ...orden.metadata,
+        verificacion: this.transacciones.redactar(consulta.response),
+      };
+      await this.ordenRepo.save(orden);
+      if (consulta.estado === 'fallida') return { veredicto: 'fallida', orden };
+    }
+
+    // `pagada`: por la consulta de recién, o por un `/verificar` de la API.
+    const historial = await this.transacciones.listarPorOrden(
+      tenantId,
+      orden.ordenId,
+    );
+    if (
+      !historial.some(
+        (t) => t.tipo === 'AUTHORIZATION' && t.estado === 'aprobada',
+      )
+    )
+      await this.transacciones.registrar({
+        tenantId,
+        ordenId: orden.ordenId,
+        tenantPasarelaId,
+        inscripcionId: typeof inscripcionId === 'string' ? inscripcionId : null,
+        tipo: 'AUTHORIZATION',
+        estado: 'aprobada',
+        monto: orden.monto,
+        moneda: orden.moneda,
+        codigoOrden: orden.codigoOrden,
+        identificadorTransaccionExterno: orden.codigoOrden,
+        response: orden.metadata.verificacion as Record<string, unknown>,
+      });
+    return { veredicto: 'pagada', orden };
+  }
+
+  /**
+   * ¿Pasó menos de `VENTANA_COBRO_SIN_CONFIRMAR_MS` desde el último intento
+   * de cobro sin respuesta de la orden (su AUTHORIZATION `error`)? Sin uno —el
+   * proceso murió sin anotarlo—, se cuenta desde que se creó la orden.
+   */
+  private async dentroDeLaVentanaSinConfirmar(
+    orden: PasarelaOrden,
+  ): Promise<boolean> {
+    const historial = await this.transacciones.listarPorOrden(
+      orden.tenantId,
+      orden.ordenId,
+    );
+    const desde =
+      historial
+        .filter((t) => t.tipo === 'AUTHORIZATION' && t.estado === 'error')
+        .map((t) => t.fechaTransaccion)
+        .sort((a, b) => b.getTime() - a.getTime())[0] ?? orden.creadoEl;
+    return Date.now() - desde.getTime() < VENTANA_COBRO_SIN_CONFIRMAR_MS;
   }
 
   /**
@@ -1468,9 +1792,12 @@ export class CobrosService {
     const tuvoIntentoAuth = transacciones.some(
       (t) => t.tipo === 'AUTHORIZATION' && t.estado === 'error',
     );
+    // Tampoco sobre una escrita antes de cobrar (el alta de suscripción,
+    // ADR-029): pudo haberse cobrado aunque no haya dejado AUTHORIZATION.
     if (
       orden.estado === 'en_proceso' &&
       !tuvoIntentoAuth &&
+      !orden.solicitudIdempotenteId &&
       orden.fechaExpiracion &&
       orden.fechaExpiracion < new Date()
     ) {

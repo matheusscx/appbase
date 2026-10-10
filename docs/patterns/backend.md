@@ -1835,7 +1835,8 @@ seq scan igual —o casi—, así que un `EXPLAIN` sobre ella no distingue el pl
 
 ## 18. Operación idempotente (un cobro por intento)
 
-Todo endpoint que **cobra** —crea una venta, cierra una cuenta, registra un abono— o que
+Todo endpoint que **cobra** —crea una venta, cierra una cuenta, registra un abono, da de alta
+una suscripción— o que
 **devuelve plata** —emite una nota de crédito (también la de un `REFUND` que quedó sin ella,
 "Generar nota"), reembolsa por la pasarela— exige
 `Idempotency-Key` y corre su operación dentro de `IdempotenciaService.ejecutar`
@@ -1881,10 +1882,12 @@ return this.idempotencia.ejecutar(
   reclamo y bajo su lock. Chequearlo antes de llamar haría rebotar la reproducción.
 - **Un array cuyo orden no cambia el pedido se ordena para la huella** (las `devoluciones`
   de la nota): si no, el mismo pedido marcado en otro orden cae en "otros datos".
-- **Un llamador interno sin HTTP no pasa clave** (el callback de Webpay, las suscripciones):
+- **Un llamador interno sin HTTP no pasa clave** (el callback de Webpay; la venta del alta de
+  suscripción, que va por `crearEnTransaccion` dentro del reclamo del propio alta):
   ya tienen su propia idempotencia o no hay nadie que reintente. Por eso el parámetro del
   service es opcional solo en `VentasService.crear`.
-- **Si el efecto NO está en la base** (la plata que devuelve Transbank), `ejecutar` no sirve:
+- **Si el efecto NO está en la base** (la plata que devuelve o cobra Transbank: el reembolso y
+  el alta de suscripción), `ejecutar` no sirve:
   reclamar adentro de la transacción del efecto es at-least-once contra el proveedor. Va
   `ejecutarConEfectoExterno` ([ADR-029](../adr/029-reembolso-con-efecto-externo.md)): reclamo y
   registro write-ahead commiteados en tx0, el efecto en tx1 con la fila del reclamo bloqueada,

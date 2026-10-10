@@ -155,6 +155,15 @@ destapa una decisión que no es mía).
   comprador que vuelve a pagar después de eso queda trabado, o si la verificación contra Transbank
   (`POST …/verificar`) la recupera. Si la recupera, va a Vigilancia.
 
+- [ ] **`POST /pasarela/api/cobros` cobra dos veces si el integrador reintenta: no pide
+  `Idempotency-Key`** — ⬇️ **prioridad baja** (owner, 2026-10-08: la pasarela va después del resto
+  de los arreglos) (backend, `CobrosService.cobrar`; **leído, no medido**). Es el gemelo del alta de
+  suscripción, que se cerró el 2026-10-10 con ADR-029. `cobrar` persiste la orden y llama a Transbank
+  sin reclamar clave, así que un reintento después de un corte es otro cargo. El alta ya dejó
+  hechas las piezas: `prepararCobro`, `efectuarCobro` y `aclararCobro`, con la clave por llave de
+  API (`actor.apiKeyId`). **Medir:** dos POST iguales con un proveedor doble, como
+  `test/suscripcion-alta-doble.e2e-spec.ts`.
+
 - [ ] **`pasarela_orden.monto` es `NUMERIC(18,6)`: una orden de más de 10^12 no cabe** — ⬇️
   **prioridad baja** (owner, 2026-10-08: la pasarela va después del resto de los arreglos) (backend,
   `pasarela/entities/pasarela-orden.entity.ts`; visto el 2026-10-08 por el frente del guard del motor,
@@ -392,48 +401,16 @@ la acumulación de descuentos y compras— y el renombre de `moneda.decimales` s
   orquestadora eligió *A: que marque la línea que falló* (recomendada) por sobre *B: dejarlo
   como está*. Es chico e independiente del resto de esta entrada.
 
-- [ ] **Dos `POST /suscripciones` iguales cobran dos veces: el alta no lleva `Idempotency-Key`**
-  (backend + front, `suscripciones.service.ts` `crear`; anotado el 2026-10-09 por el frente del
-  guard de reentrada de la pantalla; **medido el 2026-10-09** con
-  `backend/test/suscripcion-alta-doble.e2e-spec.ts`, que sobrescribe `CobrosService`,
-  `InscripcionesService` y `TenantPasarelaService`, sin Transbank). **Lo medido:** dos POST
-  iguales y secuenciales, **con la misma `Idempotency-Key`**, dan dos 201, dos llamadas a `cobrar`
-  ($35.700 cada una), dos ventas y dos suscripciones del mismo usuario al mismo ítem. Ninguna
-  respuesta avisa que ya existía otra. Control: un POST solo da 1/1/1. El e2e afirma **el bug tal
-  como está hoy** y se pone rojo cuando se arregle; ese día se invierte la afirmación.
-  - **La escena.** Es la de ADR-026: el alta entra, la respuesta se corta, el cliente ve *"No se
-    pudo activar la suscripción"* y vuelve a confirmar. **Leído, no medido:** hay una segunda
-    escena que la clave de ADR-026 no cubre. Si Transbank no contesta, `cobrar` deja la orden
-    `en_proceso` y devuelve 502. No se crea ninguna suscripción, pero el cobro pudo haber salido, y
-    el reintento cobra otra vez.
-  - **Por qué no es mecánico.** El cobro (paso 7) es HTTP y ocurre **antes** de la transacción
-    de la venta (paso 9). **ADR-026 tal cual no sirve**, por dos razones (leído). Si se envuelve
-    solo el paso 9, el reintento cobra en el paso 7 y recién después choca con la clave: reproduce
-    la respuesta, pero el segundo cargo ya salió. Si se envuelve todo `crear`, la `pasarela_orden`
-    se escribe con el repo inyectado, que usa la transacción activa (ADR-020). Así, un fallo
-    después de que Transbank aprobó **revierte también la orden `pagada`**, y queda un cargo sin
-    ningún rastro, peor que hoy.
-  - **Gemelo, leído:** `POST /pasarela/api/cobros`, el cobro Oneclick de un integrador por llave de
-    API, tampoco pide la clave. Es pasarela, de prioridad baja (owner, 2026-10-08), y va aparte.
-  - ✅ **Decidido (owner, 2026-10-09, por AskUserQuestion de la orquestadora, en lenguaje de
-    local y con el costo de cada opción):**
-    1. **Se frena como el reembolso (ADR-029)**, por `ejecutarConEfectoExterno`. La clave se
-       reclama y la orden se escribe y se commitea **antes** de cobrar. Si el reintento llega con
-       el primero en curso, espera y responde *"ya estaba activa"*. Si el primero murió, se
-       consulta en Transbank si el cargo salió. Si salió, se termina el alta sin cobrar de nuevo.
-       Si no salió, se avisa *"no se cobró, podés intentar de nuevo"*. Si no se puede aclarar, va
-       al portal. Cubre también el 502. **Costo de la opción elegida:** parte `cobrar` en
-       preparar y efecto, la pantalla pasa a mandar la cabecera, el backend da 400 si falta, y hay
-       ventana de deploy como en ADR-026.
-    2. **Dos suscripciones de la misma persona al mismo ítem son legítimas** (dos cajas de vino al
-       mes). Por eso el owner descartó la red de "una sola viva por persona e ítem". La otra
-       opción, que no se eligió, era reclamar la clave antes de cobrar y responder 409 sin
-       consultar a Transbank. Su costo era dejar frenada a la persona cuyo primer cobro no salió.
-  - **Cuando se construya:** el e2e de la medición se pone rojo, y ese día se invierte su
-    afirmación (un alta, un cobro). La construcción la lanza la orquestadora como un frente
-    propio.
-  - **Queda afuera, fiscal y en su propio frente:** el cargo que ya salió dos veces. Hoy solo
-    vuelve con un reembolso de la orden desde Pasarela, y eso es una nota de crédito (ADR-010).
+- [ ] **Una orden de cobro de un alta de suscripción que quedó sin aclarar no tiene marcado manual**
+  (backend + front de Pasarela; anotado el 2026-10-10 por el frente del cobro único del alta, con el
+  acuerdo de la orquestadora). Desde ADR-029 § *"El alta de suscripción"*, si Transbank no contesta
+  y la consulta tampoco aclara, la orden queda `en_proceso`. Solo la cierra el reintento del cliente
+  con la misma clave, que vuelve a consultar. No traba nada más: no expira, no suelta la clave y no
+  frena otras altas. Pero el admin no tiene cómo cerrarla desde la app, porque `/verificar` existe
+  solo en la API por llave. **Lo que falta:** el gemelo del marcado *Salió / No salió* de los
+  reembolsos (ADR-029, *"Si la consulta no lo aclara, lo marca el admin"*), para órdenes de cobro
+  `en_proceso`. Si se marca *Salió* con la suscripción sin crear, falta decidir quién la termina.
+  Eso es pregunta para el owner antes de diseñar.
 
 ### Los tres que dejó el frente del redondeo por país (2026-09-03)
 
@@ -662,8 +639,10 @@ No se resuelve programando. Está acá para que tenga quién la reclame.
   un UUID"`: el cajero no puede cobrar hasta recargar la pantalla. **El paso:** desplegar
   frontend y backend juntos y recargar las pantallas abiertas. Desde el 2026-10-03 la ventana
   también toca la **nota de crédito**: un modal abierto de antes emite sin la cabecera y recibe
-  400 hasta recargar. Lo mismo vale para el alta de
-  la tabla `solicitudes_idempotentes`, que hoy la crea `synchronize` al arrancar (ligado a la
+  400 hasta recargar. Desde el 2026-10-10 también el **alta de suscripción** de la tienda
+  (`POST /suscripciones`, ADR-029): una pestaña de antes no puede suscribirse hasta recargar. Lo mismo vale para el alta de
+  la tabla `solicitudes_idempotentes` (y de la columna `pasarela_ordenes.solicitud_idempotente_id`,
+  del 2026-10-10), que hoy la crea `synchronize` al arrancar (ligado a la
   entrada CRÍTICA de migraciones, más abajo).
 
 - [ ] 🇨🇱 **Validar con un abogado el ángulo legal chileno del testigo** — quedó huérfano al

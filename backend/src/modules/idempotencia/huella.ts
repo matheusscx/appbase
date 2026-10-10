@@ -8,7 +8,8 @@ export type OperacionIdempotente =
   | 'compras.confirmar'
   | 'notaCredito.emitir'
   | 'pasarela.reembolso'
-  | 'pasarela.generarNota';
+  | 'pasarela.generarNota'
+  | 'suscripcion.alta';
 
 /**
  * Lo que distingue "el mismo cobro reintentado" de "otro cobro con la misma

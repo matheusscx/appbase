@@ -1,4 +1,9 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Db } from '../../common/db/db.service';
@@ -11,6 +16,12 @@ import { MetodosPagoService } from '../metodos-pago/metodos-pago.service';
 import { InscripcionesService } from '../pasarela/services/inscripciones.service';
 import { CobrosService } from '../pasarela/services/cobros.service';
 import { TenantPasarelaService } from '../pasarela/services/tenant-pasarela.service';
+import {
+  IdempotenciaService,
+  type PasosConEfectoExterno,
+  type SolicitudConEfectoExternoInput,
+} from '../idempotencia/idempotencia.service';
+import { ProviderComunicacionError } from '../pasarela/providers/payment-provider.interface';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const USUARIO_ID = '550e8400-e29b-41d4-a716-446655440056';
@@ -20,6 +31,31 @@ const INSCRIPCION_ID = '550e8400-e29b-41d4-a716-446655440500';
 const OTRA_INSCRIPCION_ID = '550e8400-e29b-41d4-a716-446655440501';
 const ORDEN_ID = '550e8400-e29b-41d4-a716-446655440600';
 const SUSCRIPCION_ID = '550e8400-e29b-41d4-a716-446655440400';
+const SOLICITUD_ID = '550e8400-e29b-41d4-a716-446655440700';
+const CLAVE = '550e8400-e29b-41d4-a716-446655440701';
+const COBRO_PREPARADO = { ordenId: ORDEN_ID, codigoOrden: 'O1' };
+
+/**
+ * `ejecutarConEfectoExterno` como pasa-manos: el camino que el test elija, sin
+ * base. Lo que importa de verdad —el reclamo commiteado antes de cobrar, el
+ * lock, el reintento que espera— solo se prueba contra Postgres:
+ * `test/suscripcion-alta-doble.e2e-spec.ts`.
+ */
+type Pasos = PasosConEfectoExterno<unknown, object>;
+async function primerIntento(_s: SolicitudConEfectoExternoInput, pasos: Pasos) {
+  const preparado = await pasos.preparar(SOLICITUD_ID);
+  const r = await pasos.efectuar(SOLICITUD_ID, preparado);
+  if ('soltar' in r) throw r.soltar;
+  return { origen: 'efectuada' as const, respuesta: r.respuesta };
+}
+async function reintentoSinConfirmar(
+  _s: SolicitudConEfectoExternoInput,
+  pasos: Pasos,
+) {
+  const r = await pasos.resolverSinConfirmar(SOLICITUD_ID);
+  if ('soltar' in r) throw r.soltar;
+  return { origen: 'resuelta' as const, respuesta: r.respuesta };
+}
 
 const mockItemSuscripcionMensual = {
   id: ITEM_ID,
@@ -64,7 +100,14 @@ describe('SuscripcionesService', () => {
   };
   let metodosPagoServiceMock: { resolverMetodoCredito: jest.Mock };
   let inscripcionesServiceMock: { resolverMedioDeUsuario: jest.Mock };
-  let cobrosServiceMock: { cobrar: jest.Mock; vincularVenta: jest.Mock };
+  let cobrosServiceMock: {
+    prepararCobro: jest.Mock;
+    efectuarCobro: jest.Mock;
+    anotarCobroSinConfirmar: jest.Mock;
+    aclararCobro: jest.Mock;
+    vincularVenta: jest.Mock;
+  };
+  let idempotenciaMock: { ejecutarConEfectoExterno: jest.Mock };
   let tenantPasarelaServiceMock: { resolverConfiguracionActiva: jest.Mock };
   let dataSourceMock: { transaction: jest.Mock; query: jest.Mock };
   let managerMock: ReturnType<typeof buildManagerMock>;
@@ -106,10 +149,16 @@ describe('SuscripcionesService', () => {
         .mockResolvedValue({ marca: 'Visa', ultimos4: '6623' }),
     };
     cobrosServiceMock = {
-      cobrar: jest
+      prepararCobro: jest.fn().mockResolvedValue(COBRO_PREPARADO),
+      efectuarCobro: jest
         .fn()
         .mockResolvedValue({ ordenId: ORDEN_ID, estado: 'pagada' }),
+      anotarCobroSinConfirmar: jest.fn().mockResolvedValue(undefined),
+      aclararCobro: jest.fn(),
       vincularVenta: jest.fn().mockResolvedValue({}),
+    };
+    idempotenciaMock = {
+      ejecutarConEfectoExterno: jest.fn().mockImplementation(primerIntento),
     };
     tenantPasarelaServiceMock = {
       resolverConfiguracionActiva: jest.fn().mockResolvedValue({}),
@@ -142,6 +191,7 @@ describe('SuscripcionesService', () => {
         { provide: MetodosPagoService, useValue: metodosPagoServiceMock },
         { provide: InscripcionesService, useValue: inscripcionesServiceMock },
         { provide: CobrosService, useValue: cobrosServiceMock },
+        { provide: IdempotenciaService, useValue: idempotenciaMock },
         {
           provide: TenantPasarelaService,
           useValue: tenantPasarelaServiceMock,
@@ -156,22 +206,40 @@ describe('SuscripcionesService', () => {
     const dto = { itemId: ITEM_ID, diaMes: 15, inscripcionId: INSCRIPCION_ID };
 
     it('happy path: cobra Oneclick, crea venta + suscripción y concilia la orden', async () => {
-      const result = await service.crear(TENANT_ID, USUARIO_ID, dto);
+      const result = await service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE);
 
       // Valida ownership de la tarjeta antes de cobrar
       expect(
         inscripcionesServiceMock.resolverMedioDeUsuario,
       ).toHaveBeenCalledWith(TENANT_ID, INSCRIPCION_ID, USUARIO_ID);
 
-      // Cobro real por la inscripción del usuario, origen interno
-      expect(cobrosServiceMock.cobrar).toHaveBeenCalledWith(
+      // Una clave por intento, del usuario del token (ADR-029)
+      const [solicitud] = idempotenciaMock.ejecutarConEfectoExterno.mock
+        .calls[0] as [SolicitudConEfectoExternoInput];
+      expect(solicitud).toEqual(
+        expect.objectContaining({
+          tenantId: TENANT_ID,
+          actor: { usuarioId: USUARIO_ID },
+          clave: CLAVE,
+          operacion: 'suscripcion.alta',
+        }),
+      );
+
+      // La orden se prepara (tx0) por la inscripción del usuario, ligada al
+      // reclamo, y recién después se cobra (tx1)
+      expect(cobrosServiceMock.prepararCobro).toHaveBeenCalledWith(
         TENANT_ID,
         expect.objectContaining({
           inscripcionId: INSCRIPCION_ID,
           pagadorRef: USUARIO_ID,
           monto: '30000.0000',
         }),
-        'interno',
+        SOLICITUD_ID,
+      );
+      expect(cobrosServiceMock.efectuarCobro).toHaveBeenCalledWith(
+        TENANT_ID,
+        COBRO_PREPARADO,
+        expect.any(Function),
       );
 
       // La venta registra el pago con el método contable resuelto server-side
@@ -240,7 +308,7 @@ describe('SuscripcionesService', () => {
         ],
       });
 
-      const result = await service.crear(TENANT_ID, USUARIO_ID, dto);
+      const result = await service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE);
 
       expect(result.advertencias).toEqual([
         'Descuento "Promo": no se aplicó completo porque superaba el monto disponible',
@@ -249,14 +317,14 @@ describe('SuscripcionesService', () => {
     });
 
     // El cálculo del paso 5 AUTORIZA el cargo a la tarjeta (`totalFinal` va a
-    // `cobrosServiceMock.cobrar`), y la venta del paso 9 se persiste con
+    // `cobrosServiceMock.prepararCobro`), y la venta del paso 9 se persiste con
     // `canal: 'online'`. Sin `canal` explícito en la llamada del paso 5,
     // `calcular` cae al default `'fisico'` — otro conjunto de promos que el
     // de la venta — y lo cobrado divergiría de lo registrado. Mismo molde que
     // `online.service.spec.ts` ("pagar: fuerza canal 'online' aunque el body
     // diga otra cosa").
     it("cobra con canal 'online' explícito, no el default 'fisico' del motor", async () => {
-      await service.crear(TENANT_ID, USUARIO_ID, dto);
+      await service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE);
 
       const [, calcularDto] = calculoPreciosServiceMock.calcular.mock
         .calls[0] as [string, { canal?: string }];
@@ -264,14 +332,14 @@ describe('SuscripcionesService', () => {
     });
 
     it('cobro rechazado → BadRequestException y NO crea venta/suscripción', async () => {
-      cobrosServiceMock.cobrar.mockResolvedValueOnce({
+      cobrosServiceMock.efectuarCobro.mockResolvedValueOnce({
         ordenId: ORDEN_ID,
         estado: 'fallida',
       });
 
-      await expect(service.crear(TENANT_ID, USUARIO_ID, dto)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE),
+      ).rejects.toThrow(BadRequestException);
       expect(ventasServiceMock.crearEnTransaccion).not.toHaveBeenCalled();
       expect(dataSourceMock.transaction).not.toHaveBeenCalled();
     });
@@ -284,13 +352,13 @@ describe('SuscripcionesService', () => {
         new BadRequestException('lleva el nombre y el RUT de quien paga'),
       );
 
-      await expect(service.crear(TENANT_ID, USUARIO_ID, dto)).rejects.toThrow(
-        'RUT de quien paga',
-      );
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE),
+      ).rejects.toThrow('RUT de quien paga');
       expect(
         ventasServiceMock.exigirCompraOnlineBajoUmbral,
       ).toHaveBeenCalledWith(TENANT_ID, '30000.0000');
-      expect(cobrosServiceMock.cobrar).not.toHaveBeenCalled();
+      expect(cobrosServiceMock.prepararCobro).not.toHaveBeenCalled();
       expect(ventasServiceMock.crearEnTransaccion).not.toHaveBeenCalled();
     });
 
@@ -302,21 +370,161 @@ describe('SuscripcionesService', () => {
         new BadRequestException('el sistema no puede guardar montos'),
       );
 
-      await expect(service.crear(TENANT_ID, USUARIO_ID, dto)).rejects.toThrow(
-        'el sistema no puede guardar montos',
-      );
-      expect(cobrosServiceMock.cobrar).not.toHaveBeenCalled();
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE),
+      ).rejects.toThrow('el sistema no puede guardar montos');
+      expect(cobrosServiceMock.prepararCobro).not.toHaveBeenCalled();
       expect(ventasServiceMock.crearEnTransaccion).not.toHaveBeenCalled();
     });
 
-    it('timeout del proveedor (502) se propaga sin crear nada', async () => {
-      const boom = new Error('502 timeout');
-      cobrosServiceMock.cobrar.mockRejectedValueOnce(boom);
+    it('Transbank no contesta: 502, se anota el intento sobre la orden y no crea nada', async () => {
+      const sinRespuesta = new ProviderComunicacionError('timeout', {}, {});
+      cobrosServiceMock.efectuarCobro.mockImplementationOnce(
+        (_t: string, _p: unknown, alLlamar: () => void) => {
+          alLlamar();
+          return Promise.reject(sinRespuesta);
+        },
+      );
 
-      await expect(service.crear(TENANT_ID, USUARIO_ID, dto)).rejects.toThrow(
-        boom,
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE),
+      ).rejects.toThrow(BadGatewayException);
+      expect(cobrosServiceMock.anotarCobroSinConfirmar).toHaveBeenCalledWith(
+        TENANT_ID,
+        COBRO_PREPARADO,
+        sinRespuesta,
       );
       expect(ventasServiceMock.crearEnTransaccion).not.toHaveBeenCalled();
+    });
+
+    // Un error de comunicación ANTES de llamar a Transbank no es un cobro en
+    // duda: no hay intento que anotar.
+    it('un error de comunicación sin haber llamado no se anota como cobro sin confirmar', async () => {
+      cobrosServiceMock.efectuarCobro.mockRejectedValueOnce(
+        new ProviderComunicacionError('antes', {}, {}),
+      );
+
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE),
+      ).rejects.toThrow(ProviderComunicacionError);
+      expect(cobrosServiceMock.anotarCobroSinConfirmar).not.toHaveBeenCalled();
+    });
+
+    it('la huella no distingue un día omitido de uno nulo', async () => {
+      await service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE);
+      await service.crear(
+        TENANT_ID,
+        USUARIO_ID,
+        { ...dto, diaSemana: undefined },
+        CLAVE,
+      );
+
+      const [[a], [b]] = idempotenciaMock.ejecutarConEfectoExterno.mock
+        .calls as [SolicitudConEfectoExternoInput][];
+      expect(a.huella).toBe(b.huella);
+    });
+
+    // El cargo ya salió: un error de la venta no puede llegar crudo (un 400 de
+    // ventas o un 500 no dicen que se cobró, y recargar pierde la clave).
+    it('si la venta falla con el cobro hecho, 409 que dice que se cobró y no empuja a recargar', async () => {
+      ventasServiceMock.crearEnTransaccion.mockRejectedValueOnce(
+        new BadRequestException('algo de ventas'),
+      );
+
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE),
+      ).rejects.toThrow(
+        new ConflictException(
+          'El cobro de la suscripción salió, pero no se pudo terminar el alta. Volvé a confirmar desde esta pantalla, sin recargarla: no se te va a cobrar dos veces.',
+        ),
+      );
+    });
+
+    describe('el reintento de un alta sin confirmar', () => {
+      beforeEach(() => {
+        idempotenciaMock.ejecutarConEfectoExterno.mockImplementation(
+          reintentoSinConfirmar,
+        );
+      });
+
+      it('si el cobro salió, termina el alta sin cobrar y responde "ya estaba activa"', async () => {
+        cobrosServiceMock.aclararCobro.mockResolvedValueOnce({
+          veredicto: 'pagada',
+          orden: { ordenId: ORDEN_ID, monto: '30000.000000' },
+        });
+
+        const result = await service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE);
+
+        expect(cobrosServiceMock.aclararCobro).toHaveBeenCalledWith(
+          TENANT_ID,
+          SOLICITUD_ID,
+        );
+        expect(cobrosServiceMock.prepararCobro).not.toHaveBeenCalled();
+        expect(cobrosServiceMock.efectuarCobro).not.toHaveBeenCalled();
+        expect(ventasServiceMock.crearEnTransaccion).toHaveBeenCalledTimes(1);
+        expect(cobrosServiceMock.vincularVenta).toHaveBeenCalledWith(
+          TENANT_ID,
+          ORDEN_ID,
+          'venta-1',
+        );
+        expect(result).toEqual(
+          expect.objectContaining({ id: SUSCRIPCION_ID, repetida: true }),
+        );
+      });
+
+      it('si no salió, 409 "no se cobró" y no crea nada', async () => {
+        cobrosServiceMock.aclararCobro.mockResolvedValueOnce({
+          veredicto: 'fallida',
+          orden: { ordenId: ORDEN_ID, monto: '30000' },
+        });
+
+        await expect(
+          service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE),
+        ).rejects.toThrow(/No se cobró/);
+        expect(ventasServiceMock.crearEnTransaccion).not.toHaveBeenCalled();
+      });
+
+      it('si no se puede aclarar, 409 que no empuja a cobrar de nuevo', async () => {
+        cobrosServiceMock.aclararCobro.mockResolvedValueOnce({
+          veredicto: 'no_se_puede',
+          orden: { ordenId: ORDEN_ID, monto: '30000' },
+        });
+
+        await expect(
+          service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE),
+        ).rejects.toThrow(/no se te va a cobrar dos veces/);
+        expect(ventasServiceMock.crearEnTransaccion).not.toHaveBeenCalled();
+      });
+
+      it('si re-leer el alta rebota con el cobro hecho (ítem desactivado), 409 de cobrado sin terminar', async () => {
+        cobrosServiceMock.aclararCobro.mockResolvedValueOnce({
+          veredicto: 'pagada',
+          orden: { ordenId: ORDEN_ID, monto: '30000' },
+        });
+        itemsServiceMock.findOne.mockResolvedValueOnce({
+          ...mockItemSuscripcionMensual,
+          activo: false,
+        });
+
+        await expect(
+          service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE),
+        ).rejects.toThrow(/El cobro de la suscripción salió/);
+        expect(ventasServiceMock.crearEnTransaccion).not.toHaveBeenCalled();
+      });
+
+      // La venta recalcula el precio: si el plan cambió desde el cobro, no
+      // cuadraría con lo cobrado.
+      it('si el precio del plan cambió desde el cobro, 409 y no crea la venta', async () => {
+        cobrosServiceMock.aclararCobro.mockResolvedValueOnce({
+          veredicto: 'pagada',
+          orden: { ordenId: ORDEN_ID, monto: '25000.000000' },
+        });
+
+        await expect(
+          service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE),
+        ).rejects.toThrow(ConflictException);
+        expect(ventasServiceMock.crearEnTransaccion).not.toHaveBeenCalled();
+      });
     });
 
     it('sin Oneclick activo → BadRequestException antes de cobrar', async () => {
@@ -324,10 +532,10 @@ describe('SuscripcionesService', () => {
         new Error('no config'),
       );
 
-      await expect(service.crear(TENANT_ID, USUARIO_ID, dto)).rejects.toThrow(
-        BadRequestException,
-      );
-      expect(cobrosServiceMock.cobrar).not.toHaveBeenCalled();
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE),
+      ).rejects.toThrow(BadRequestException);
+      expect(cobrosServiceMock.prepararCobro).not.toHaveBeenCalled();
     });
 
     it('item tipo producto → BadRequestException', async () => {
@@ -337,7 +545,9 @@ describe('SuscripcionesService', () => {
         frecuencia: null,
       });
 
-      await expect(service.crear(TENANT_ID, USUARIO_ID, dto)).rejects.toThrow(
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dto, CLAVE),
+      ).rejects.toThrow(
         new BadRequestException('El item no es una suscripción'),
       );
     });
@@ -346,9 +556,9 @@ describe('SuscripcionesService', () => {
       const sinDia = { itemId: ITEM_ID, inscripcionId: INSCRIPCION_ID };
 
       await expect(
-        service.crear(TENANT_ID, USUARIO_ID, sinDia as never),
+        service.crear(TENANT_ID, USUARIO_ID, sinDia as never, CLAVE),
       ).rejects.toThrow(BadRequestException);
-      expect(cobrosServiceMock.cobrar).not.toHaveBeenCalled();
+      expect(cobrosServiceMock.prepararCobro).not.toHaveBeenCalled();
     });
 
     it('quincenal con diaMes: 14 → BadRequestException (máximo 13)', async () => {
@@ -358,9 +568,9 @@ describe('SuscripcionesService', () => {
       });
       const q = { itemId: ITEM_ID, diaMes: 14, inscripcionId: INSCRIPCION_ID };
 
-      await expect(service.crear(TENANT_ID, USUARIO_ID, q)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, q, CLAVE),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 

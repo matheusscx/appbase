@@ -1023,6 +1023,328 @@ describe('CobrosService', () => {
     expect(estadosGuardados).not.toContain('reembolsada');
   });
 
+  describe('el cobro del alta de suscripción, partido en preparar y efecto (ADR-029)', () => {
+    const preparado = {
+      ordenId: 'orden-1',
+      codigoOrden: 'O1',
+      monto: '35700',
+      moneda: MONEDA_ORDEN_V1,
+      tenantPasarelaId: 'tp-1',
+      inscripcionId: 'insc-1',
+      username: 'insc-abc',
+      identificadorExterno: 'v1:blob-tbk',
+    };
+    const ordenDelAlta = (estado: string): Partial<PasarelaOrden> => ({
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      codigoOrden: 'O1',
+      monto: '35700.000000',
+      moneda: MONEDA_ORDEN_V1,
+      estado,
+      tokenProveedor: null,
+      solicitudIdempotenteId: 'sol-1',
+      metadata: { tenantPasarelaId: 'tp-1', inscripcionId: 'insc-1' },
+    });
+    const aprobadoPorTransbank = {
+      aprobada: true,
+      codigoRespuesta: '0',
+      codigoAutorizacion: '1213',
+      identificadorTransaccionExterno: 'O1',
+      tipoPago: 'VN',
+      numeroCuotas: 0,
+      montoCuota: null,
+      tarjetaUltimos4: '6623',
+      request: {},
+      response: {},
+    };
+
+    it('preparar escribe la orden en_proceso ligada al reclamo, sin llamar a Transbank', async () => {
+      const p = await service.prepararCobro(
+        't-1',
+        {
+          inscripcionId: 'insc-1',
+          pagadorRef: 'rut-123',
+          monto: '35700',
+          descripcion: 'Suscripción Plan',
+        },
+        'sol-1',
+      );
+
+      expect(ordenRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          estado: 'en_proceso',
+          origen: 'interno',
+          solicitudIdempotenteId: 'sol-1',
+          metadata: { tenantPasarelaId: 'tp-1', inscripcionId: 'insc-1' },
+        }),
+      );
+      expect(p).toEqual(
+        expect.objectContaining({
+          ordenId: 'orden-1',
+          tenantPasarelaId: 'tp-1',
+          identificadorExterno: 'v1:blob-tbk',
+        }),
+      );
+      expect(provider.autorizarCobro).not.toHaveBeenCalled();
+    });
+
+    it('preparar rechaza un monto fuera de escala ANTES de escribir la orden', async () => {
+      await expect(
+        service.prepararCobro(
+          't-1',
+          {
+            inscripcionId: 'insc-1',
+            pagadorRef: 'rut-123',
+            monto: '35700.5',
+            descripcion: 'x',
+          },
+          'sol-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(ordenRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('efectuar cobra con tope de tiempo y cierra la orden en pagada', async () => {
+      ordenRepo.findOne.mockResolvedValueOnce(ordenDelAlta('en_proceso'));
+      provider.autorizarCobro.mockResolvedValueOnce(aprobadoPorTransbank);
+      const alLlamar = jest.fn();
+
+      const orden = await service.efectuarCobro('t-1', preparado, alLlamar);
+
+      expect(alLlamar).toHaveBeenCalled();
+      expect(provider.autorizarCobro).toHaveBeenCalledWith(
+        {},
+        expect.objectContaining({
+          codigoOrden: 'O1',
+          identificadorExterno: 'tbk-u-1',
+          timeoutMs: expect.any(Number) as number,
+        }),
+      );
+      expect(orden.estado).toBe('pagada');
+      expect(deps.transacciones.registrar).toHaveBeenCalledWith(
+        expect.objectContaining({ tipo: 'AUTHORIZATION', estado: 'aprobada' }),
+      );
+    });
+
+    it('si el descifrado de la tarjeta falla, no se marca como llamado: nada salió a Transbank', async () => {
+      ordenRepo.findOne.mockResolvedValueOnce(ordenDelAlta('en_proceso'));
+      deps.credenciales.descifrarTexto.mockImplementationOnce(() => {
+        throw new Error('blob corrupto');
+      });
+      const alLlamar = jest.fn();
+
+      await expect(
+        service.efectuarCobro('t-1', preparado, alLlamar),
+      ).rejects.toThrow('blob corrupto');
+      expect(alLlamar).not.toHaveBeenCalled();
+      expect(provider.autorizarCobro).not.toHaveBeenCalled();
+    });
+
+    it('efectuar no llama si la orden ya no está en_proceso (otro camino la cerró)', async () => {
+      ordenRepo.findOne.mockResolvedValueOnce(ordenDelAlta('pagada'));
+      const alLlamar = jest.fn();
+
+      const orden = await service.efectuarCobro('t-1', preparado, alLlamar);
+
+      expect(orden.estado).toBe('pagada');
+      expect(alLlamar).not.toHaveBeenCalled();
+      expect(provider.autorizarCobro).not.toHaveBeenCalled();
+    });
+
+    describe('aclarar el cobro de un reclamo sin respuesta', () => {
+      const conOrden = (estado: string) => {
+        const o = ordenDelAlta(estado);
+        // La búsqueda por reclamo y el lock leen la misma fila.
+        ordenRepo.findOne.mockResolvedValueOnce(o).mockResolvedValueOnce(o);
+      };
+
+      it('pagada en Transbank: orden pagada y AUTHORIZATION aprobada, sin volver a cobrar', async () => {
+        conOrden('en_proceso');
+        provider.consultarEstado.mockResolvedValueOnce({
+          estado: 'pagada',
+          estadoProveedor: 'AUTHORIZED',
+          saldo: null,
+          response: { status: 'AUTHORIZED' },
+        });
+
+        const r = await service.aclararCobro('t-1', 'sol-1');
+
+        expect(r.veredicto).toBe('pagada');
+        expect(r.orden.estado).toBe('pagada');
+        expect(provider.autorizarCobro).not.toHaveBeenCalled();
+        expect(filas).toEqual([
+          expect.objectContaining({
+            tipo: 'AUTHORIZATION',
+            estado: 'aprobada',
+            ordenId: 'orden-1',
+            tenantPasarelaId: 'tp-1',
+          }),
+        ]);
+      });
+
+      it('consulta también una expirada: el reloj no sabe si el cargo salió', async () => {
+        conOrden('expirada');
+        provider.consultarEstado.mockResolvedValueOnce({
+          estado: 'fallida',
+          estadoProveedor: null,
+          saldo: null,
+          response: {},
+        });
+
+        const r = await service.aclararCobro('t-1', 'sol-1');
+
+        expect(provider.consultarEstado).toHaveBeenCalled();
+        expect(r.veredicto).toBe('fallida');
+        expect(r.orden.estado).toBe('fallida');
+      });
+
+      it('sin respuesta de Transbank o con un estado que no aclara: no_se_puede y la orden no cambia', async () => {
+        conOrden('en_proceso');
+        provider.consultarEstado.mockRejectedValueOnce(
+          new ProviderComunicacionError('timeout', {}),
+        );
+        expect((await service.aclararCobro('t-1', 'sol-1')).veredicto).toBe(
+          'no_se_puede',
+        );
+
+        conOrden('en_proceso');
+        provider.consultarEstado.mockResolvedValueOnce({
+          estado: 'desconocido',
+          estadoProveedor: 'INITIALIZED',
+          saldo: null,
+          response: {},
+        });
+        expect((await service.aclararCobro('t-1', 'sol-1')).veredicto).toBe(
+          'no_se_puede',
+        );
+
+        expect(ordenRepo.save).not.toHaveBeenCalled();
+        expect(filas).toEqual([]);
+      });
+
+      describe('un "no la conozco" (404) justo después del intento sin respuesta', () => {
+        const noLaConoce = {
+          estado: 'fallida',
+          estadoProveedor: null,
+          saldo: null,
+          noEncontrada: true,
+          response: {},
+        };
+        const haceMin = (min: number) => new Date(Date.now() - min * 60_000);
+        const conOrdenCreada = (creadoEl: Date) => {
+          const o = { ...ordenDelAlta('en_proceso'), creadoEl };
+          ordenRepo.findOne.mockResolvedValueOnce(o).mockResolvedValueOnce(o);
+        };
+
+        it('dentro de la ventana desde la AUTHORIZATION error: no se puede aclarar, la orden no cambia', async () => {
+          conOrdenCreada(haceMin(30));
+          conHistorial([
+            {
+              tipo: 'AUTHORIZATION',
+              estado: 'error',
+              fechaTransaccion: haceMin(1),
+            },
+          ]);
+          provider.consultarEstado.mockResolvedValueOnce(noLaConoce);
+
+          const r = await service.aclararCobro('t-1', 'sol-1');
+
+          expect(r.veredicto).toBe('no_se_puede');
+          expect(ordenRepo.save).not.toHaveBeenCalled();
+        });
+
+        it('pasada la ventana: vale como "no se cobró"', async () => {
+          conOrdenCreada(haceMin(30));
+          conHistorial([
+            {
+              tipo: 'AUTHORIZATION',
+              estado: 'error',
+              fechaTransaccion: haceMin(6),
+            },
+          ]);
+          provider.consultarEstado.mockResolvedValueOnce(noLaConoce);
+
+          expect((await service.aclararCobro('t-1', 'sol-1')).veredicto).toBe(
+            'fallida',
+          );
+        });
+
+        it('sin AUTHORIZATION error, la ventana se cuenta desde que se creó la orden', async () => {
+          conOrdenCreada(haceMin(1));
+          provider.consultarEstado.mockResolvedValueOnce(noLaConoce);
+          expect((await service.aclararCobro('t-1', 'sol-1')).veredicto).toBe(
+            'no_se_puede',
+          );
+
+          conOrdenCreada(haceMin(6));
+          provider.consultarEstado.mockResolvedValueOnce(noLaConoce);
+          expect((await service.aclararCobro('t-1', 'sol-1')).veredicto).toBe(
+            'fallida',
+          );
+        });
+
+        it('un FAILED explícito no espera la ventana', async () => {
+          conOrdenCreada(haceMin(0));
+          provider.consultarEstado.mockResolvedValueOnce({
+            estado: 'fallida',
+            estadoProveedor: 'FAILED',
+            saldo: null,
+            response: {},
+          });
+
+          expect((await service.aclararCobro('t-1', 'sol-1')).veredicto).toBe(
+            'fallida',
+          );
+        });
+      });
+
+      it('una orden que un /verificar ya dejó pagada no se consulta ni duplica su AUTHORIZATION', async () => {
+        conOrden('pagada');
+        conHistorial([
+          {
+            transaccionId: 'tx-prev',
+            tipo: 'AUTHORIZATION',
+            estado: 'aprobada',
+          },
+        ]);
+
+        const r = await service.aclararCobro('t-1', 'sol-1');
+
+        expect(r.veredicto).toBe('pagada');
+        expect(provider.consultarEstado).not.toHaveBeenCalled();
+        expect(filas).toEqual([]);
+      });
+
+      it('una fallida que dejó otro lector se vuelve a consultar, no se le cree', async () => {
+        conOrden('fallida');
+        provider.consultarEstado.mockResolvedValueOnce({
+          estado: 'pagada',
+          estadoProveedor: 'AUTHORIZED',
+          saldo: null,
+          response: {},
+        });
+
+        const r = await service.aclararCobro('t-1', 'sol-1');
+
+        expect(provider.consultarEstado).toHaveBeenCalled();
+        expect(r.veredicto).toBe('pagada');
+      });
+
+      it('un reclamo sin su orden, o con la orden ya conciliada, es un 500', async () => {
+        ordenRepo.findOne.mockResolvedValueOnce(null);
+        await expect(service.aclararCobro('t-1', 'sol-1')).rejects.toThrow(
+          'Reclamo de cobro sin su orden',
+        );
+
+        conOrden('conciliada');
+        await expect(service.aclararCobro('t-1', 'sol-1')).rejects.toThrow(
+          /conciliada/,
+        );
+        expect(provider.consultarEstado).not.toHaveBeenCalled();
+      });
+    });
+  });
+
   describe('reembolso idempotente con efecto externo (ADR-029)', () => {
     const orden = {
       ordenId: 'orden-1',

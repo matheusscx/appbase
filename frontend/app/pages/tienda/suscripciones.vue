@@ -8,7 +8,7 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 
-const { suscripciones, loading, pausar, reanudar, cancelar, cambiarTarjeta, crear } =
+const { suscripciones, loading, cargar, pausar, reanudar, cancelar, cambiarTarjeta, crear } =
   useSuscripciones()
 const {
   tarjetas,
@@ -243,8 +243,9 @@ async function agregarTarjetaDesdeAlta() {
 
 async function confirmar() {
   // El `:loading` del botón no alcanza: `UForm` no frena un segundo `submit` mientras el
-  // primero espera, y `POST /suscripciones` no lleva `Idempotency-Key` — un segundo POST es un
-  // segundo cobro Oneclick y una segunda suscripción.
+  // primero espera. Con la misma `Idempotency-Key` el segundo POST ya no cobra (espera al
+  // primero y lo reproduce), pero saldría un segundo aviso, "ya estaba activa", de un alta
+  // que la persona hizo una sola vez.
   if (confirmando.value) return
   const item = itemSeleccionado.value
   if (!item || !selectedInscripcionId.value) return
@@ -260,14 +261,14 @@ async function confirmar() {
       return
     }
     const { diaMes, diaSemana } = diasDePayload(item)
-    const { advertencias } = await crear({
+    const { advertencias, repetida } = await crear({
       itemId: item.id,
       diaMes: diaMes ?? undefined,
       diaSemana: diaSemana ?? undefined,
       inscripcionId: selectedInscripcionId.value,
     })
     drawerOpen.value = false
-    toast.add({ title: 'Suscripción activada y primer cobro realizado', color: 'success' })
+    avisarAlta(repetida)
     // Mismo trato que le da el POS a las advertencias de una venta
     // (`ventas/pos.vue`): un toast por mensaje, cada uno se explica solo. Van
     // después del éxito porque el cobro ya ocurrió — explican el monto, no lo
@@ -276,10 +277,26 @@ async function confirmar() {
       toast.add({ title: advertencia, color: 'warning' })
     }
   } catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'No se pudo activar la suscripción'), color: 'error' })
+    avisarAltaFallida(e)
   } finally {
     confirmando.value = false
   }
+}
+
+function avisarAlta(repetida: boolean) {
+  toast.add(repetida
+    ? { title: AVISO_ALTA_REPETIDA, color: 'warning' }
+    : { title: 'Suscripción activada y primer cobro realizado', color: 'success' })
+}
+
+// El 422 de "otros datos": ya había un alta con esta clave. El aviso cierra el
+// intento, el drawer se cierra y la lista se recarga con lo que entró.
+function avisarAltaFallida(e: unknown) {
+  if (esAltaConOtrosDatos(e)) {
+    drawerOpen.value = false
+    void cargar()
+  }
+  toast.add({ title: apiErrorMsg(e, 'No se pudo activar la suscripción'), color: 'error' })
 }
 
 // ── Reanudar alta tras inscribir una tarjeta (retorno de Transbank) ──────────
@@ -298,13 +315,13 @@ async function reanudarAltaPendiente(inscripcionId: string) {
   }
   procesandoAlta.value = true
   try {
-    const { advertencias } = await crear({
+    const { advertencias, repetida } = await crear({
       itemId: intent.itemId,
       diaMes: intent.diaMes ?? undefined,
       diaSemana: intent.diaSemana ?? undefined,
       inscripcionId,
     })
-    toast.add({ title: 'Suscripción activada y primer cobro realizado', color: 'success' })
+    avisarAlta(repetida)
     // Mismo trato que le da el POS a las advertencias de una venta
     // (`ventas/pos.vue`): un toast por mensaje, cada uno se explica solo. Van
     // después del éxito porque el cobro ya ocurrió — explican el monto, no lo
@@ -313,7 +330,7 @@ async function reanudarAltaPendiente(inscripcionId: string) {
       toast.add({ title: advertencia, color: 'warning' })
     }
   } catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'No se pudo activar la suscripción'), color: 'error' })
+    avisarAltaFallida(e)
   } finally {
     procesandoAlta.value = false
   }

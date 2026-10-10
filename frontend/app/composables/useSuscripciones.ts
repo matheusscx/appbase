@@ -44,6 +44,24 @@ export function diaAnterior(iso: string): string {
   return `${prev.getFullYear()}-${mm}-${dd}`
 }
 
+/**
+ * El ámbito de `useIntentoCobro` del alta: uno por pestaña, que comparten el
+ * drawer y el retorno de inscribir una tarjeta. Un alta cortada en cualquiera
+ * de los dos se reintenta desde el drawer con la misma clave.
+ */
+const AMBITO_ALTA = 'suscripcion'
+
+/** El reintento llegó con el primero ya cobrado: el backend lo reprodujo (ADR-029). */
+export const AVISO_ALTA_REPETIDA = 'Esta suscripción ya estaba activa: el cobro se hizo una sola vez.'
+
+/**
+ * El 422 de "este alta ya se pidió con otros datos" (`IdempotenciaService`).
+ * `POST /suscripciones` no tiene otro 422: los datos inválidos son 400.
+ */
+export function esAltaConOtrosDatos(error: unknown): boolean {
+  return (error as { status?: number })?.status === 422
+}
+
 const ESTADO_TRAS_ACCION = {
   pausar: 'pausada',
   reanudar: 'activa',
@@ -64,6 +82,10 @@ export function useSuscripciones() {
   const config = useRuntimeConfig()
   const toast = useToast()
   const apiUrl = config.public.apiUrl
+
+  // Una clave por intento de alta: el reintento después de un corte no cobra
+  // dos veces (`docs/adr/029-reembolso-con-efecto-externo.md`).
+  const intento = useIntentoCobro()
 
   const suscripciones = ref<Suscripcion[]>([])
   const loading = ref(false)
@@ -95,21 +117,33 @@ export function useSuscripciones() {
    * sobre el primer período (viene siempre, vacío si no hay nada). Se separa del
    * resto en vez de guardarlo: `advertencias` describe el cobro que acaba de
    * ocurrir, no el estado de la suscripción, y la fila de la tabla no lo muestra.
+   *
+   * `repetida`: el alta ya había entrado y el backend la reprodujo. El intento
+   * muere con el éxito y con el 422 de "otros datos"; cualquier otro error deja
+   * la clave viva, y el Confirmar siguiente es el mismo intento.
    */
   async function crear(body: {
     itemId: string
     diaMes?: number
     diaSemana?: number
     inscripcionId: string
-  }): Promise<{ suscripcion: Suscripcion, advertencias: string[] }> {
-    const { advertencias, ...suscripcion } = await useApiFetch<
-      Suscripcion & { advertencias: string[] }
-    >(`${apiUrl}/suscripciones`, {
-      method: 'POST',
-      body,
-    })
-    upsertLocal(suscripcion)
-    return { suscripcion, advertencias }
+  }): Promise<{ suscripcion: Suscripcion, advertencias: string[], repetida: boolean }> {
+    try {
+      const { advertencias, repetida, ...suscripcion } = await useApiFetch<
+        Suscripcion & { advertencias: string[], repetida?: boolean }
+      >(`${apiUrl}/suscripciones`, {
+        method: 'POST',
+        body,
+        headers: intento.cabecera(AMBITO_ALTA),
+      })
+      intento.terminar(AMBITO_ALTA)
+      upsertLocal(suscripcion)
+      return { suscripcion, advertencias, repetida: repetida === true }
+    }
+    catch (e: unknown) {
+      if (esAltaConOtrosDatos(e)) intento.terminar(AMBITO_ALTA)
+      throw e
+    }
   }
 
   async function accion(id: string, tipo: keyof typeof ESTADO_TRAS_ACCION) {

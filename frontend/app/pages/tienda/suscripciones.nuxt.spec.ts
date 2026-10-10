@@ -15,9 +15,10 @@
 //     un solo toast con el motivo y no se crea la suscripción; si el fallo fue transitorio,
 //     confirmar reintenta el cálculo y sigue (antes un 400 dejaba "Total a cobrar: —" mudo
 //     y se podía pagar sin total);
-//   - un segundo `submit` con el alta en vuelo no da de alta otra vez: `POST /suscripciones`
-//     cobra por Oneclick y no lleva `Idempotency-Key`, así que un segundo POST sería un
-//     segundo cobro y una segunda suscripción.
+//   - un segundo `submit` con el alta en vuelo no manda otro POST;
+//   - el alta lleva una `Idempotency-Key` por intento (ADR-029): la misma después de un
+//     error, otra después del éxito o del 422 de "otros datos"; el alta reproducida avisa
+//     "ya estaba activa", y el 422 cierra el drawer y recarga la lista.
 //
 // Abrirlo exige `puedeCrear`, gateado por `usePermissionsStore`. El molde de ESE
 // mock es `terceros.nuxt.spec.ts`: Nuxt instala su propia instancia de Pinia, así
@@ -25,6 +26,7 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Suscripciones from './suscripciones.vue'
+import { AVISO_ALTA_REPETIDA } from '~/composables/useSuscripciones'
 
 let esAdmin = true
 
@@ -62,6 +64,10 @@ let altas: unknown[] = []
 /** Si está puesto, el próximo `/calcular` queda colgado hasta que se llame. */
 let soltarCalculo: (() => void) | null = null
 let retenerCalculo = false
+/** Si está puesto, el próximo `POST /suscripciones` contesta esto en vez del 200. */
+let proximaAlta: (() => Promise<unknown>) | null = null
+/** Cada `GET /suscripciones` (la lista). */
+let cargasLista = 0
 /** Si está puesto, el próximo `POST /suscripciones` queda colgado hasta que se llame. */
 let soltarAlta: (() => void) | null = null
 let retenerAlta = false
@@ -97,6 +103,11 @@ mockNuxtImport('useApiFetch', () => {
     if (ruta.endsWith('/suscripciones')) {
       if ((opts as { method?: string } | undefined)?.method === 'POST') {
         altas.push(opts)
+        if (proximaAlta) {
+          const r = proximaAlta
+          proximaAlta = null
+          return r()
+        }
         const respuesta = { id: 'susc-nueva', advertencias: [] }
         if (retenerAlta) {
           retenerAlta = false
@@ -106,6 +117,7 @@ mockNuxtImport('useApiFetch', () => {
         }
         return Promise.resolve(respuesta)
       }
+      cargasLista++
       return Promise.resolve([])
     }
     if (ruta.endsWith('/online/medios-pago')) {
@@ -165,6 +177,8 @@ beforeEach(() => {
   retenerCalculo = false
   soltarAlta = null
   retenerAlta = false
+  proximaAlta = null
+  cargasLista = 0
 })
 
 /**
@@ -422,5 +436,77 @@ describe('tienda/suscripciones — confirmar espera el cálculo vigente', () => 
     soltarAlta!()
     await new Promise(r => setTimeout(r, 50))
     expect(toasts.filter(t => t.title === 'Suscripción activada y primer cobro realizado')).toHaveLength(1)
+  })
+})
+
+describe('tienda/suscripciones — una Idempotency-Key por intento de alta (ADR-029)', () => {
+  const botonConfirmar = () => [...document.body.querySelectorAll('button')]
+    .find(b => b.textContent?.trim() === 'Suscribirme y pagar') as HTMLButtonElement | undefined
+  const claveDe = (alta: unknown) =>
+    (alta as { headers?: Record<string, string> }).headers?.['Idempotency-Key']
+
+  async function confirmar() {
+    expect(botonConfirmar(), 'botón confirmar').toBeTruthy()
+    botonConfirmar()!.click()
+    await new Promise(r => setTimeout(r, 400))
+  }
+
+  async function drawerListo() {
+    medios = [TARJETA]
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegir(wrapper, SEMANAL.id)
+    return wrapper
+  }
+
+  it('después de un error la clave sigue: el Confirmar siguiente es el mismo intento', async () => {
+    const wrapper = await drawerListo()
+    proximaAlta = () => Promise.reject(Object.assign(new Error('502'), {
+      status: 502, data: { message: 'Transbank no confirmó el cobro' },
+    }))
+
+    await confirmar()
+    await confirmar()
+
+    expect(altas).toHaveLength(2)
+    expect(claveDe(altas[0])).toMatch(/^[0-9a-f-]{36}$/)
+    expect(claveDe(altas[1])).toBe(claveDe(altas[0]))
+
+    // El éxito cierra el intento: el alta siguiente es otra.
+    await abrirDrawer(wrapper)
+    await elegir(wrapper, SEMANAL.id)
+    await confirmar()
+    expect(altas).toHaveLength(3)
+    expect(claveDe(altas[2])).not.toBe(claveDe(altas[1]))
+  })
+
+  it('el alta reproducida avisa que ya estaba activa, no que se cobró de nuevo', async () => {
+    await drawerListo()
+    proximaAlta = () => Promise.resolve({ id: 'susc-nueva', advertencias: [], repetida: true })
+
+    await confirmar()
+
+    expect(toasts).toEqual([{ title: AVISO_ALTA_REPETIDA, color: 'warning' }])
+  })
+
+  it('el 422 de "otros datos" cierra el drawer, recarga la lista y cierra el intento', async () => {
+    const wrapper = await drawerListo()
+    const cargasAntes = cargasLista
+    proximaAlta = () => Promise.reject(Object.assign(new Error('422'), {
+      status: 422, data: { message: 'Esta suscripción ya se había pedido con otros datos.' },
+    }))
+
+    await confirmar()
+
+    expect(toasts).toEqual([{
+      title: 'Esta suscripción ya se había pedido con otros datos.', color: 'error',
+    }])
+    expect(textoDrawer()).not.toContain('Suscribirme y pagar')
+    expect(cargasLista).toBe(cargasAntes + 1)
+
+    await abrirDrawer(wrapper)
+    await elegir(wrapper, SEMANAL.id)
+    await confirmar()
+    expect(claveDe(altas[1])).not.toBe(claveDe(altas[0]))
   })
 })

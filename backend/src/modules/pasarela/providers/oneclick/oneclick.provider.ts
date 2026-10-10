@@ -178,6 +178,7 @@ export class OneclickProvider implements ProviderTokenizado {
       monto: string;
       moneda: string;
       cuotas: number;
+      timeoutMs?: number;
     },
   ): Promise<ResultadoCobro> {
     const amount = this.montoEntero(p.monto, p.moneda);
@@ -199,6 +200,7 @@ export class OneclickProvider implements ProviderTokenizado {
       'POST',
       '/transactions',
       body,
+      p.timeoutMs,
     );
     const detalle =
       (json.details as Record<string, unknown>[] | undefined)?.[0] ?? {};
@@ -290,6 +292,7 @@ export class OneclickProvider implements ProviderTokenizado {
         estado: 'fallida',
         estadoProveedor: null,
         saldo: null,
+        noEncontrada: true,
         response: json,
       };
     const detalle = (

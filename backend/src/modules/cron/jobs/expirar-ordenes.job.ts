@@ -10,7 +10,10 @@ export const JOB_EXPIRAR_ORDENES = 'expirar-ordenes';
  * crear la orden; hoy creación + 2 h). Replica la regla de la expiración
  * perezosa de cobros.service.ts: nunca expira una orden con un intento de
  * autorización en error — pudo haberse pagado en el proveedor y se cierra
- * solo vía /verificar. La vía perezosa se mantiene; ambas son idempotentes.
+ * solo vía /verificar —, ni una escrita antes de cobrar
+ * (`solicitud_idempotente_id`, el alta de suscripción, ADR-029): su cobro pudo
+ * haber salido sin dejar AUTHORIZATION, y la cierra el reintento consultando.
+ * La vía perezosa se mantiene; ambas son idempotentes.
  */
 @Injectable()
 export class ExpirarOrdenesJob implements OnApplicationBootstrap {
@@ -41,6 +44,7 @@ export class ExpirarOrdenesJob implements OnApplicationBootstrap {
          AND o.eliminado_el IS NULL
          AND o.fecha_expiracion IS NOT NULL
          AND o.fecha_expiracion < now()
+         AND o.solicitud_idempotente_id IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM pasarela_transacciones t
            WHERE t.orden_id = o.orden_id

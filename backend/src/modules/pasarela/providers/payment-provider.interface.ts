@@ -32,6 +32,13 @@ export interface ResultadoEstado {
    * (ADR-029). `null` si el proveedor no lo informó.
    */
   saldo: string | null;
+  /**
+   * El proveedor no conoce la transacción (Oneclick: 404). Se informa como
+   * `fallida`, pero justo después de un intento sin respuesta puede ser que
+   * todavía no la registró: el alta de suscripción no lo cree hasta que pasa
+   * `VENTANA_COBRO_SIN_CONFIRMAR_MS` (ADR-029).
+   */
+  noEncontrada?: true;
   response: Record<string, unknown>;
 }
 
@@ -107,6 +114,12 @@ export interface ProviderTokenizado extends ProviderReembolsable {
       monto: string;
       moneda: string;
       cuotas: number;
+      /**
+       * Tope de la llamada. Lo pasa el alta de suscripción, que cobra con la
+       * transacción abierta y el reclamo bloqueado (ADR-029): vencerlo es "sin
+       * confirmar". Sin él espera sin tope, como siempre (`cobrar`).
+       */
+      timeoutMs?: number;
     },
   ): Promise<ResultadoCobro>;
 }

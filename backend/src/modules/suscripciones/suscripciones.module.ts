@@ -8,6 +8,7 @@ import { CalculoPreciosModule } from '../calculo-precios/calculo-precios.module'
 import { VentasModule } from '../ventas/ventas.module';
 import { MetodosPagoModule } from '../metodos-pago/metodos-pago.module';
 import { PasarelaModule } from '../pasarela/pasarela.module';
+import { IdempotenciaModule } from '../idempotencia/idempotencia.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { PasarelaModule } from '../pasarela/pasarela.module';
     VentasModule, // exporta VentasService
     MetodosPagoModule, // exporta MetodosPagoService (método de pago contable)
     PasarelaModule, // exporta InscripcionesService + CobrosService + TenantPasarelaService
+    IdempotenciaModule, // el alta cobra una vez por intento (ADR-029)
   ],
   controllers: [SuscripcionesController],
   providers: [SuscripcionesService],

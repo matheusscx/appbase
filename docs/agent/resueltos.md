@@ -23,6 +23,130 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El alta de suscripción cobra una vez por intento: forma de ADR-029, con la orden escrita antes de cobrar (cerrada 2026-10-10)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Decisión del owner del 2026-10-09: la opción (a),
+como el reembolso. Plan: [`2026-10-10-alta-suscripcion-idempotente.md`](../superpowers/plans/2026-10-10-alta-suscripcion-idempotente.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **Dos `POST /suscripciones` iguales cobran dos veces: el alta no lleva `Idempotency-Key`**
+  (backend + front, `suscripciones.service.ts` `crear`; anotado el 2026-10-09 por el frente del
+  guard de reentrada de la pantalla; **medido el 2026-10-09** con
+  `backend/test/suscripcion-alta-doble.e2e-spec.ts`, que sobrescribe `CobrosService`,
+  `InscripcionesService` y `TenantPasarelaService`, sin Transbank). **Lo medido:** dos POST
+  iguales y secuenciales, **con la misma `Idempotency-Key`**, dan dos 201, dos llamadas a `cobrar`
+  ($35.700 cada una), dos ventas y dos suscripciones del mismo usuario al mismo ítem. Ninguna
+  respuesta avisa que ya existía otra. Control: un POST solo da 1/1/1. El e2e afirma **el bug tal
+  como está hoy** y se pone rojo cuando se arregle; ese día se invierte la afirmación.
+  - **La escena.** Es la de ADR-026: el alta entra, la respuesta se corta, el cliente ve *"No se
+    pudo activar la suscripción"* y vuelve a confirmar. **Leído, no medido:** hay una segunda
+    escena que la clave de ADR-026 no cubre. Si Transbank no contesta, `cobrar` deja la orden
+    `en_proceso` y devuelve 502. No se crea ninguna suscripción, pero el cobro pudo haber salido, y
+    el reintento cobra otra vez.
+  - **Por qué no es mecánico.** El cobro (paso 7) es HTTP y ocurre **antes** de la transacción
+    de la venta (paso 9). **ADR-026 tal cual no sirve**, por dos razones (leído). Si se envuelve
+    solo el paso 9, el reintento cobra en el paso 7 y recién después choca con la clave: reproduce
+    la respuesta, pero el segundo cargo ya salió. Si se envuelve todo `crear`, la `pasarela_orden`
+    se escribe con el repo inyectado, que usa la transacción activa (ADR-020). Así, un fallo
+    después de que Transbank aprobó **revierte también la orden `pagada`**, y queda un cargo sin
+    ningún rastro, peor que hoy.
+  - **Gemelo, leído:** `POST /pasarela/api/cobros`, el cobro Oneclick de un integrador por llave de
+    API, tampoco pide la clave. Es pasarela, de prioridad baja (owner, 2026-10-08), y va aparte.
+  - ✅ **Decidido (owner, 2026-10-09, por AskUserQuestion de la orquestadora, en lenguaje de
+    local y con el costo de cada opción):**
+    1. **Se frena como el reembolso (ADR-029)**, por `ejecutarConEfectoExterno`. La clave se
+       reclama y la orden se escribe y se commitea **antes** de cobrar. Si el reintento llega con
+       el primero en curso, espera y responde *"ya estaba activa"*. Si el primero murió, se
+       consulta en Transbank si el cargo salió. Si salió, se termina el alta sin cobrar de nuevo.
+       Si no salió, se avisa *"no se cobró, podés intentar de nuevo"*. Si no se puede aclarar, va
+       al portal. Cubre también el 502. **Costo de la opción elegida:** parte `cobrar` en
+       preparar y efecto, la pantalla pasa a mandar la cabecera, el backend da 400 si falta, y hay
+       ventana de deploy como en ADR-026.
+    2. **Dos suscripciones de la misma persona al mismo ítem son legítimas** (dos cajas de vino al
+       mes). Por eso el owner descartó la red de "una sola viva por persona e ítem". La otra
+       opción, que no se eligió, era reclamar la clave antes de cobrar y responder 409 sin
+       consultar a Transbank. Su costo era dejar frenada a la persona cuyo primer cobro no salió.
+  - **Cuando se construya:** el e2e de la medición se pone rojo, y ese día se invierte su
+    afirmación (un alta, un cobro). La construcción la lanza la orquestadora como un frente
+    propio.
+  - **Queda afuera, fiscal y en su propio frente:** el cargo que ya salió dos veces. Hoy solo
+    vuelve con un reembolso de la orden desde Pasarela, y eso es una nota de crédito (ADR-010).
+
+### Qué se hizo
+
+- `POST /suscripciones` exige `Idempotency-Key` y corre por `ejecutarConEfectoExterno`.
+- **tx0:** el reclamo, los chequeos de siempre (`leerAlta`) y la `pasarela_orden` en
+  `en_proceso` con `solicitud_idempotente_id` (`CobrosService.prepararCobro`).
+- **tx1:** `efectuarCobro` bloquea la orden y cobra con 30 s de tope. Si sale, `materializarAlta`
+  crea venta, suscripción y conciliación en la misma tx. Si Transbank rechaza, la orden queda
+  `fallida` y se suelta la clave.
+- **El reintento sin respuesta** pasa por `aclararCobro`, que consulta `consultarEstado` y nunca
+  vuelve a cobrar. Si salió, termina el alta con `repetida: true` y deja la AUTHORIZATION
+  `aprobada` para poder reembolsar. Si no salió, 409 y suelta la clave. Si no se aclara, 409 y el
+  reclamo queda.
+- El cron `expirar-ordenes` y la expiración perezosa no expiran una orden con
+  `solicitud_idempotente_id`.
+- `POST /pasarela/api/cobros` (`cobrar`) no se tocó: el timeout de `autorizarCobro` es opcional.
+- En la pantalla, `useSuscripciones.crear` manda la cabecera (ámbito `suscripcion`). Avisa
+  *"ya estaba activa"* y, con el 422, cierra el drawer y recarga.
+- Detalle: [ADR-029 § "El alta de suscripción"](../adr/029-reembolso-con-efecto-externo.md#actualización-2026-10-10--el-alta-de-suscripción-entra).
+
+### Qué lo fija
+
+`backend/test/suscripcion-alta-doble.e2e-spec.ts`, invertido en el mismo commit. Tiene 12 casos
+contra Postgres, con Transbank doble a la altura de `ProviderFactory`. Ya no se sobrescribe
+`CobrosService`, porque la orden write-ahead ES el arreglo. Los casos:
+
+- control;
+- 400 sin cabecera;
+- misma clave dos veces (1 cobro, 1 venta, 1 suscripción, y `repetida` con el mismo id);
+- dos a la vez;
+- 422;
+- rechazo que suelta la clave;
+- 502 + consulta `pagada`, `fallida` y desconocida (esta última, seguida de una que aclara);
+- 502 + un 404 de Transbank, dentro de los 5 minutos ("esperá") y fuera ("no se cobró"). En el
+  medio, una orden vieja con el intento reciente sigue adentro: la ventana cuenta desde el intento;
+- una orden que otro lector dejó `fallida` se vuelve a consultar y el alta se termina;
+- *"el proceso cae después de cobrar"*, con la orden que el cron no expira.
+
+Mutantes, medidos en este frente:
+
+- Sacar `solicitud_idempotente_id IS NULL` del cron hace caer solo *"el proceso cae…"*.
+- Anular el registro de la AUTHORIZATION `aprobada` del aclarado hace caer solo *"si el cobro
+  salió…"*.
+- Apagar la ventana de 5 minutos hace caer solo el caso del 404. Cae en la parte "dentro", con
+  el *"No se cobró"* que habilitaba el doble cobro. Contarla desde la orden en vez de desde el
+  intento hace caer el mismo test, en el paso de la orden vieja.
+- Volver a creerle a una `fallida` ajena hace caer solo *"una orden que otro lector dejó
+  fallida…"*. Sacar el 409 del error no HTTP después de llamar hace caer solo *"el proceso
+  cae…"*, que pasa a recibir un 500.
+- En el unit, no envolver el error de la venta en `efectuar` hace caer solo su test (el 409 de
+  "cobrado sin terminar").
+- En el front, sacar la cabecera hace caer 2 de 14, y no terminar el intento con el éxito, 1 de 14.
+- Con el código de antes (el `crear` de `12097cfa`) el e2e nuevo da rojo, pero no todos los
+  tests caen por el bug. El control cayó por un formato de monto del propio test, corregido
+  después. Las cuentas de órdenes leen `metadata.inscripcionId`, que el código viejo no escribe.
+  Los que sí caen por el bug son los de la misma clave (2 cobros) y el de la cabecera (201).
+
+### Lo que agregó la revisión independiente
+
+- **Un 404 justo después de un timeout podía ser un cargo que Transbank todavía no registró.**
+  Leerlo como "no se cobró" soltaba la clave. Ahora espera 5 minutos (owner, 2026-10-10).
+- **Si la venta fallaba con el cobro hecho, el cliente veía el error crudo.** Ahora recibe un
+  409 que dice que se cobró y que vuelva a confirmar sin recargar. Un error que no es HTTP
+  después de llamar a Transbank da el 409 de "esperá".
+- **`/verificar` de la API o el abort de un retorno podían dejar `fallida` la orden de un alta**
+  dentro de la ventana, y el aclarado le creía. Ahora vuelve a consultar.
+
+### Qué quedó afuera
+
+- El marcado manual de una orden de cobro sin aclarar, y el gemelo `POST /pasarela/api/cobros`.
+  Las dos son entradas nuevas de `pendientes.md`.
+- El cargo que ya salió dos veces: es nota de crédito, frente fiscal.
+
+---
+
 ## El plano ya no saca la mesa que esta pantalla borró y restauró con el guardado en vuelo (cerrada 2026-10-10)
 
 Sale de [`pendientes.md`](pendientes.md) § 5. Diseño:
