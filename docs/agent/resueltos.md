@@ -23,6 +23,95 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El plano ya no saca la mesa que esta pantalla borró y restauró con el guardado en vuelo (cerrada 2026-10-10)
+
+Sale de [`pendientes.md`](pendientes.md) § 5. Diseño:
+[`2026-10-10-plano-borrar-restaurar-en-vuelo-design.md`](../superpowers/specs/2026-10-10-plano-borrar-restaurar-en-vuelo-design.md);
+plan: [`2026-10-10-plano-borrar-restaurar-en-vuelo.md`](../superpowers/plans/2026-10-10-plano-borrar-restaurar-en-vuelo.md).
+El cierre lo eligió el frente (decisión técnica delegada por la orquestadora). La regla viva está en
+[`features/salones-mesas.md`](../features/salones-mesas.md), en el párrafo de
+`PATCH /salones/:salonId/layout`.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 5
+
+- [ ] **Borrar y restaurar la misma mesa mientras viaja el guardado del plano la saca del plano
+  estando viva, hasta recargar** (frontend, `pages/configuracion/salones.vue`,
+  `sacarMesasNoEscritas`; **leída, no medida**: la vio la revisión independiente del frente que hizo
+  que el plano saque la mesa que otra sesión borró, 2026-10-08,
+  [`resueltos.md`](resueltos.md#el-plano-saca-la-mesa-que-otra-sesión-borró-en-vez-de-seguir-dibujándola-cerrada-2026-10-08)).
+  El guardado sale con la mesa viva; antes de que vuelva, esta misma pantalla la borra y la restaura
+  (con «Ver eliminados» prendido). Si el `UPDATE` del guardado corrió con la mesa borrada, no vuelve
+  en la respuesta, y la pantalla la saca aunque en el servidor ya esté viva otra vez. Hacen falta dos
+  acciones con modal durante la latencia de un `PATCH`. **Cierre posible:** serializar el guardado
+  del plano con el borrado y la restauración de mesas (que esos dos esperen al guardado en vuelo), o
+  no sacar las mesas que esta pantalla borró o restauró durante el vuelo, anotadas en un set de ids
+  mientras el guardado viaja. Comparar el estado al enviar con el de la respuesta no alcanza: borrar y
+  restaurar deja `eliminadoEl` en `null` en las dos puntas. Tampoco alcanza encolar los `PATCH` entre
+  sí: la carrera es del guardado contra el borrado y la restauración.
+
+### Qué se midió
+
+Con vitest y el `PATCH` del plano retenido (`salones.nuxt.spec.ts`): el guardado sale con la mesa
+viva, la pantalla la borra y la restaura con «Ver eliminados», y la respuesta llega sin ella → la
+mesa **sale del plano** con el aviso de "otra sesión". Se confirmó tal cual. Tiene un **gemelo**
+en la misma pantalla, que la entrada no nombraba: borrar y restaurar el **salón** con el guardado
+en vuelo saca **todas** sus mesas (la respuesta llega vacía).
+
+### Qué se hizo
+
+Se eligió **marcar**, no serializar: serializar agregaba un `await` al principio de cuatro
+funciones, con ids que congelar y dos borrados sin guard de reentrada. Cada guardado en vuelo
+lleva un set; borrar o restaurar una mesa, o un salón (todas sus mesas), marca los ids en todos
+los guardados en vuelo **antes** del `await`, y `sacarMesasNoEscritas` no saca las marcadas.
+
+Marcar el borrado no estaba en la primera versión: la daba por cubierta el filtro de vivas del
+2026-10-08, y sacar la marca dejaba todo verde. La revisión independiente encontró la ventana que
+ningún caso ejercía: **mientras viaja el `DELETE`** la mesa sigue viva en pantalla, y la respuesta
+del guardado la sacaba con el aviso falso de "otra sesión" (medido con el `DELETE` retenido, en
+mesa y en salón). Y que el borrado marque tapaba a su vez la marca de restaurar y el filtro en los
+casos de borrar y restaurar, así que cada uno tiene ahora su escena propia: otra sesión borra y
+esta pantalla se entera por una recarga.
+
+### Qué lo fija
+
+`frontend/app/pages/configuracion/salones.nuxt.spec.ts`, § "plano: la mesa que otra sesión
+borró", ocho casos nuevos (28 en el archivo), con su tabla de mutantes medida fila por fila. Cada
+mutante de una sola marca pone rojo **un solo** caso:
+
+| Mutante | Rojo |
+|---|---|
+| `salones.vue` de antes | los siete casos de marca; el del filtro pasa (el filtro ya estaba) |
+| marcar solo en el último guardado en vuelo | "con dos guardados en vuelo…" |
+| sin marcar al borrar la mesa | "…mientras viaja el borrado de la mesa…" |
+| marcar el borrado de la mesa después del `await` | "…mientras viaja el borrado de la mesa…" |
+| sin marcar al borrar el salón | "…mientras viaja el borrado del salón…" |
+| sin marcar al restaurar la mesa | "la mesa que otra sesión borró y esta pantalla restauró…" |
+| sin marcar al restaurar el salón | "el salón que otra sesión borró y esta pantalla restauró…" |
+| sin el filtro de vivas | "…una recarga ya trajo como eliminada…" |
+| no sacar nada si hubo alguna marcada | "…borró y restauró…" (la Mesa C de otra sesión) |
+| marcar solo la primera mesa del salón (al borrar y al restaurar) | los tres casos de salón |
+
+Sobreviven tres, medidos: marcar la restauración **después** del `await` del POST (mesa; salón
+antes del `cargar()`) y la del salón **después** del `cargar()`. Los dos primeros son equivalentes:
+mientras viaja el POST la mesa todavía figura eliminada y la cubre el filtro. El tercero no lo es
+en teoría —entre que el `cargar()` revive las mesas y la marca hay saltos de microtarea en los que
+puede correr la respuesta del guardado—, pero ningún caso lo ejerce. Por eso se marca antes de
+todo, en los cuatro caminos.
+
+### Qué queda afuera
+
+- Otra sesión borra **y** restaura la mesa durante el vuelo: esta pantalla la saca con el aviso
+  (que dice algo cierto) y recargar la devuelve. No se cierra sin polling.
+- Una mesa que otra sesión borra en el mismo vuelo en que esta pantalla tocó **esa** mesa o su
+  salón queda dibujada hasta recargar: la marca no distingue quién la borró. Es la conducta de
+  antes del 2026-10-08, acotada a esa coincidencia.
+- Un guardado que **arranca** mientras viaja el `DELETE` no hereda la marca: su set nace después.
+  Hoy no puede pasar porque el modal de confirmación sigue abierto hasta que vuelve el `DELETE`
+  (se cierra en el `finally`) y tapa el plano. **Leído, no medido**: si ese modal dejara de tapar
+  el plano, la ventana vuelve.
+
+---
+
 ## Los 500 de montos que no caben: la cortesía, el monto suelto de caja y pagos, y el rastro del tope (cerrada 2026-10-09)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. Spec y plan:

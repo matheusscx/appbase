@@ -162,6 +162,9 @@ let postsRestaurarMesa: string[] = []
 /** Retiene la respuesta del restaurar en vuelo para el doble submit. */
 let restaurarSalonRetenido: Promise<unknown> | null = null
 let restaurarMesaRetenido: Promise<unknown> | null = null
+/** Retiene la respuesta de los `DELETE` (mesa y salón): el servidor ya borró y
+ * la pantalla todavía no se enteró. */
+let deleteRetenido: Promise<unknown> | null = null
 
 function respuestaGet(incluirEliminados: boolean) {
   return salonesBackend
@@ -252,6 +255,7 @@ mockNuxtImport('useApiFetch', () => {
           }
         }
       }
+      if (deleteRetenido) return deleteRetenido
       return Promise.resolve(undefined)
     }
 
@@ -262,6 +266,7 @@ mockNuxtImport('useApiFetch', () => {
         m.eliminadoEl = BORRADO_EL
         m.eliminadoPorNombre = 'admin.paris'
       }
+      if (deleteRetenido) return deleteRetenido
       return Promise.resolve(undefined)
     }
 
@@ -397,6 +402,7 @@ function reset() {
   postsRestaurarMesa = []
   restaurarSalonRetenido = null
   restaurarMesaRetenido = null
+  deleteRetenido = null
   toasts = []
   patchesLayout = []
   retenerLayout = false
@@ -897,6 +903,224 @@ describe('salones — plano: la mesa que otra sesión borró', () => {
     const estilo = wrapper.find('[data-qa="mesa-mesa-b"]').attributes('style') ?? ''
     expect(estilo).toContain('left: 70%')
     expect(estilo).toContain('top: 70%')
+
+    wrapper.unmount()
+  })
+
+  /** Los avisos de mesas sacadas del plano, sean de una o de varias. */
+  const avisosDeSacar = () => toasts.map(t => t.title ?? '').filter(t => t.startsWith('Se sac'))
+
+  /** Borra la mesa desde su drawer y confirma (con «Ver eliminados» prendido recarga). */
+  async function borrarMesa(wrapper: Awaited<ReturnType<typeof montar>>, mesaId: string) {
+    await abrirEditarMesaDesdePlano(wrapper, mesaId)
+    botonEnDialogo('Eliminar')!.click()
+    await new Promise(r => setTimeout(r, 20))
+    await confirmarEnModal('Eliminar')
+  }
+
+  it('la mesa que ESTA sesión borró y restauró con el guardado en vuelo sigue en el plano; la que borró otra sesión sale igual', async () => {
+    salonesBackend[0]!.mesas.push(mesa({ id: 'mesa-c', nombre: 'Mesa C', posX: '0.8', posY: '0.8' }))
+    const wrapper = await montar()
+    await activarVerEliminados(wrapper)
+    retenerLayout = true
+
+    // El guardado sale con las tres vivas…
+    await arrastrar(wrapper, 'mesa-b', 0.5, 0.5)
+    // …y antes de que vuelva, esta pantalla borra la A y la restaura.
+    await borrarMesa(wrapper, 'mesa-a')
+    expect(enPlano(wrapper, 'mesa-a')).toBe(false)
+    await abrirRestaurarDeLaFila(wrapper)
+    await confirmarEnModal('Restaurar')
+    expect(postsRestaurarMesa).toEqual(['mesa-a'])
+    expect(enPlano(wrapper, 'mesa-a'), 'A restaurada, antes de la respuesta').toBe(true)
+    // Y otra sesión borra la C, que esta pantalla no tocó.
+    otraSesionBorra('mesa-c')
+
+    // El `UPDATE` corrió con la A borrada y la C también: vuelve solo la B.
+    layoutEnVuelo[0]!([{ id: 'mesa-b', posX: '0.50000', posY: '0.50000' }])
+    await new Promise(r => setTimeout(r, 10))
+
+    expect(enPlano(wrapper, 'mesa-a'), 'A después de la respuesta').toBe(true)
+    expect(toasts.map(t => t.title)).not.toContain('Se sacó "Mesa A" del plano')
+    expect(enPlano(wrapper, 'mesa-c')).toBe(false)
+    expect(toasts).toContainEqual(expect.objectContaining({
+      title: 'Se sacó "Mesa C" del plano',
+      color: 'warning',
+    }))
+
+    // El arrastre siguiente la sigue mandando.
+    retenerLayout = false
+    await arrastrar(wrapper, 'mesa-b', 0.4, 0.4)
+    expect(patchesLayout[1]!.mesas.map(m => m.mesaId).sort()).toEqual(['mesa-a', 'mesa-b'])
+
+    wrapper.unmount()
+  })
+
+  it('con dos guardados en vuelo, borrar y restaurar la mesa no la saca con ninguna de las dos respuestas', async () => {
+    const wrapper = await montar()
+    await activarVerEliminados(wrapper)
+    retenerLayout = true
+
+    await arrastrar(wrapper, 'mesa-b', 0.5, 0.5)
+    await arrastrar(wrapper, 'mesa-b', 0.4, 0.4)
+    expect(layoutEnVuelo).toHaveLength(2)
+    await borrarMesa(wrapper, 'mesa-a')
+    await abrirRestaurarDeLaFila(wrapper)
+    await confirmarEnModal('Restaurar')
+
+    layoutEnVuelo[1]!([{ id: 'mesa-b', posX: '0.40000', posY: '0.40000' }])
+    await new Promise(r => setTimeout(r, 10))
+    layoutEnVuelo[0]!([{ id: 'mesa-b', posX: '0.50000', posY: '0.50000' }])
+    await new Promise(r => setTimeout(r, 10))
+
+    expect(enPlano(wrapper, 'mesa-a'), 'A después de la respuesta').toBe(true)
+    expect(avisosDeSacar()).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  it('la respuesta del guardado que llega mientras viaja el borrado de la mesa no la saca con un aviso de otra sesión', async () => {
+    const wrapper = await montar()
+    retenerLayout = true
+    let soltarDelete: () => void = () => {}
+    deleteRetenido = new Promise<void>((resolve) => { soltarDelete = resolve })
+
+    await arrastrar(wrapper, 'mesa-b', 0.5, 0.5)
+    await borrarMesa(wrapper, 'mesa-a')
+    // El servidor ya la borró; la pantalla la sigue teniendo viva.
+    expect(enPlano(wrapper, 'mesa-a'), 'A mientras viaja el DELETE').toBe(true)
+
+    layoutEnVuelo[0]!([{ id: 'mesa-b', posX: '0.50000', posY: '0.50000' }])
+    await new Promise(r => setTimeout(r, 10))
+    expect(avisosDeSacar()).toEqual([])
+
+    soltarDelete()
+    await new Promise(r => setTimeout(r, 20))
+    expect(enPlano(wrapper, 'mesa-a'), 'A después del DELETE').toBe(false)
+    expect(toasts.map(t => t.title)).toContain('Mesa eliminada')
+
+    wrapper.unmount()
+  })
+
+  it('la respuesta del guardado que llega mientras viaja el borrado del salón no le saca las mesas con un aviso de otra sesión', async () => {
+    const wrapper = await montar()
+    retenerLayout = true
+    let soltarDelete: () => void = () => {}
+    deleteRetenido = new Promise<void>((resolve) => { soltarDelete = resolve })
+
+    await arrastrar(wrapper, 'mesa-b', 0.5, 0.5)
+    await wrapper.find('[title="Eliminar salón"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+    await confirmarEnModal('Eliminar')
+    expect(enPlano(wrapper, 'mesa-a'), 'A mientras viaja el DELETE').toBe(true)
+
+    layoutEnVuelo[0]!([])
+    await new Promise(r => setTimeout(r, 10))
+    expect(avisosDeSacar()).toEqual([])
+
+    soltarDelete()
+    await new Promise(r => setTimeout(r, 20))
+    expect(toasts.map(t => t.title)).toContain('Salón eliminado')
+
+    wrapper.unmount()
+  })
+
+  // Los tres que siguen no pasan por un borrado de esta pantalla: otra sesión
+  // borra, y esta se entera por una recarga (prender «Ver eliminados») con el
+  // guardado en vuelo. Separan la marca de restaurar y el filtro de vivas de
+  // la marca del borrado, que en los casos de arriba los tapa.
+
+  it('la mesa que otra sesión borró y esta pantalla restauró con el guardado en vuelo sigue en el plano', async () => {
+    const wrapper = await montar()
+    retenerLayout = true
+
+    await arrastrar(wrapper, 'mesa-b', 0.5, 0.5)
+    otraSesionBorra('mesa-a')
+    await activarVerEliminados(wrapper)
+    expect(enPlano(wrapper, 'mesa-a'), 'A eliminada tras la recarga').toBe(false)
+    await abrirRestaurarDeLaFila(wrapper)
+    await confirmarEnModal('Restaurar')
+    expect(postsRestaurarMesa).toEqual(['mesa-a'])
+
+    layoutEnVuelo[0]!([{ id: 'mesa-b', posX: '0.50000', posY: '0.50000' }])
+    await new Promise(r => setTimeout(r, 10))
+
+    expect(enPlano(wrapper, 'mesa-a'), 'A después de la respuesta').toBe(true)
+    expect(avisosDeSacar()).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  it('el salón que otra sesión borró y esta pantalla restauró con el guardado en vuelo conserva sus mesas', async () => {
+    const wrapper = await montar()
+    retenerLayout = true
+
+    await arrastrar(wrapper, 'mesa-b', 0.5, 0.5)
+    const s = salonesBackend[0]!
+    s.eliminadoEl = BORRADO_EL
+    s.eliminadoPorNombre = 'otro.admin'
+    for (const m of s.mesas) {
+      m.eliminadoEl = BORRADO_EL
+      m.eliminadoPorNombre = 'otro.admin'
+    }
+    await activarVerEliminados(wrapper)
+    await wrapper.find('[title="Restaurar salón"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+    await confirmarEnModal('Restaurar')
+    expect(postsRestaurarSalon).toEqual([SALON_ID])
+
+    layoutEnVuelo[0]!([])
+    await new Promise(r => setTimeout(r, 10))
+
+    expect(enPlano(wrapper, 'mesa-a'), 'A después de la respuesta').toBe(true)
+    expect(enPlano(wrapper, 'mesa-b')).toBe(true)
+    expect(avisosDeSacar()).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  it('la mesa que otra sesión borró y una recarga ya trajo como eliminada sigue en "Mesas eliminadas", sin aviso', async () => {
+    const wrapper = await montar()
+    retenerLayout = true
+
+    await arrastrar(wrapper, 'mesa-b', 0.5, 0.5)
+    otraSesionBorra('mesa-a')
+    await activarVerEliminados(wrapper)
+    expect(wrapper.text()).toContain('Mesas eliminadas')
+
+    layoutEnVuelo[0]!([{ id: 'mesa-b', posX: '0.50000', posY: '0.50000' }])
+    await new Promise(r => setTimeout(r, 10))
+
+    expect(wrapper.text()).toContain('Mesas eliminadas')
+    expect(wrapper.text()).toContain('Mesa A')
+    expect(avisosDeSacar()).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  it('borrar y restaurar el salón con el guardado en vuelo no le saca las mesas del plano', async () => {
+    const wrapper = await montar()
+    await activarVerEliminados(wrapper)
+    retenerLayout = true
+
+    await arrastrar(wrapper, 'mesa-b', 0.5, 0.5)
+    await wrapper.find('[title="Eliminar salón"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+    await confirmarEnModal('Eliminar')
+    expect(enPlano(wrapper, 'mesa-a')).toBe(false)
+    await wrapper.find('[title="Restaurar salón"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+    await confirmarEnModal('Restaurar')
+    expect(postsRestaurarSalon).toEqual([SALON_ID])
+    expect(enPlano(wrapper, 'mesa-a'), 'A revivida con el salón, antes de la respuesta').toBe(true)
+
+    // El `UPDATE` corrió con el salón borrado: no escribió ninguna.
+    layoutEnVuelo[0]!([])
+    await new Promise(r => setTimeout(r, 10))
+
+    expect(enPlano(wrapper, 'mesa-a'), 'A después de la respuesta').toBe(true)
+    expect(enPlano(wrapper, 'mesa-b')).toBe(true)
+    expect(avisosDeSacar()).toEqual([])
 
     wrapper.unmount()
   })

@@ -563,21 +563,6 @@ prohíbe.
 
 ## 5. Carreras de concurrencia
 
-- [ ] **Borrar y restaurar la misma mesa mientras viaja el guardado del plano la saca del plano
-  estando viva, hasta recargar** (frontend, `pages/configuracion/salones.vue`,
-  `sacarMesasNoEscritas`; **leída, no medida**: la vio la revisión independiente del frente que hizo
-  que el plano saque la mesa que otra sesión borró, 2026-10-08,
-  [`resueltos.md`](resueltos.md#el-plano-saca-la-mesa-que-otra-sesión-borró-en-vez-de-seguir-dibujándola-cerrada-2026-10-08)).
-  El guardado sale con la mesa viva; antes de que vuelva, esta misma pantalla la borra y la restaura
-  (con «Ver eliminados» prendido). Si el `UPDATE` del guardado corrió con la mesa borrada, no vuelve
-  en la respuesta, y la pantalla la saca aunque en el servidor ya esté viva otra vez. Hacen falta dos
-  acciones con modal durante la latencia de un `PATCH`. **Cierre posible:** serializar el guardado
-  del plano con el borrado y la restauración de mesas (que esos dos esperen al guardado en vuelo), o
-  no sacar las mesas que esta pantalla borró o restauró durante el vuelo, anotadas en un set de ids
-  mientras el guardado viaja. Comparar el estado al enviar con el de la respuesta no alcanza: borrar y
-  restaurar deja `eliminadoEl` en `null` en las dos puntas. Tampoco alcanza encolar los `PATCH` entre
-  sí: la carrera es del guardado contra el borrado y la restauración.
-
 ---
 
 ## 6. Proyectos que van solos

@@ -132,6 +132,26 @@ function avisarSolape(_mesaId: string, nombres: string[]) {
 }
 
 /**
+ * Por cada guardado del plano en vuelo, los ids de las mesas que ESTA pantalla
+ * borró o restauró mientras viajaba (las de un salón borrado o restaurado,
+ * también). Que el servidor no las devuelva no dice que otra sesión las borró:
+ * el `UPDATE` pudo correr después del borrado de esta pantalla. Uno por
+ * guardado porque el guardado no se serializa: puede haber dos en vuelo.
+ *
+ * Las dos ventanas que el filtro de vivas no ve: mientras viaja el `DELETE` la
+ * mesa sigue viva en pantalla, y después de restaurarla vuelve a estarlo.
+ */
+const tocadasPorGuardado = new Set<Set<string>>()
+
+/** Se llama antes del `await` del borrado o la restauración: la ventana del
+ * borrado es justamente mientras el `DELETE` viaja. */
+function marcarTocadas(ids: string[]) {
+  for (const tocadas of tocadasPorGuardado) {
+    for (const id of ids) tocadas.add(id)
+  }
+}
+
+/**
  * Saca del plano las mesas que se mandaron y el servidor no escribió: otra
  * sesión las borró después de que esta cargó (no hay polling). Hasta el
  * 2026-10-08 se reponían como vivas y seguían arrastrables hasta recargar.
@@ -142,16 +162,25 @@ function avisarSolape(_mesaId: string, nombres: string[]) {
  * para atrás. Y como sacar no se deshace, una respuesta que llega después que
  * la de un guardado posterior no puede revivir una mesa ya sacada.
  *
- * Solo cuenta las que esta pantalla todavía tiene vivas: una que ESTA sesión
- * borró con el guardado en vuelo ya está marcada (con «Ver eliminados») o ya
- * no está, y sacarla la borraría de "Mesas eliminadas" con un aviso falso.
+ * Solo cuenta las que esta pantalla todavía tiene vivas: una que figura
+ * eliminada (con «Ver eliminados») ya no está en el plano, y sacarla la
+ * borraría de "Mesas eliminadas" con un aviso falso. Y deja las que esta
+ * pantalla borró o restauró durante el vuelo (`tocadas`): mientras viaja el
+ * borrado, y después de borrar y restaurar, `eliminadoEl` está en `null`, así
+ * que el filtro de vivas no las distingue de una que borró otra sesión.
  */
-function sacarMesasNoEscritas(salonId: string, enviadas: string[], escritas: MesaPosicionGuardada[]) {
+function sacarMesasNoEscritas(
+  salonId: string,
+  enviadas: string[],
+  escritas: MesaPosicionGuardada[],
+  tocadas: Set<string>,
+) {
   const salon = salones.value.find(s => s.id === salonId)
   if (!salon) return
   const vuelven = new Set(escritas.map(m => m.id))
   const enviadasSet = new Set(enviadas)
-  const noEscritas = salon.mesas.filter(m => !m.eliminadoEl && enviadasSet.has(m.id) && !vuelven.has(m.id))
+  const noEscritas = salon.mesas.filter(m =>
+    !m.eliminadoEl && enviadasSet.has(m.id) && !vuelven.has(m.id) && !tocadas.has(m.id))
   if (!noEscritas.length) return
   const sacadas = new Set(noEscritas.map(m => m.id))
   const nombres = noEscritas.map(m => m.nombre)
@@ -175,9 +204,11 @@ async function guardarDistribucion() {
     posY: Number(m.posY),
   }))
   savingLayout.value = true
+  const tocadas = new Set<string>()
+  tocadasPorGuardado.add(tocadas)
   try {
     const escritas = await salonesApi.guardarLayout(salonId, mesas)
-    sacarMesasNoEscritas(salonId, mesas.map(m => m.mesaId), escritas)
+    sacarMesasNoEscritas(salonId, mesas.map(m => m.mesaId), escritas, tocadas)
     // El salón seleccionado AHORA, no `salonId`: `localMesas` es de ese, y si
     // se cambió de salón con el guardado en vuelo, pasarle el capturado
     // escribiría las mesas de un salón dentro de otro.
@@ -188,6 +219,7 @@ async function guardarDistribucion() {
     toast.add({ title: apiErrorMsg(e, 'Error al guardar la distribución'), color: 'error' })
   }
   finally {
+    tocadasPorGuardado.delete(tocadas)
     savingLayout.value = false
   }
 }
@@ -252,6 +284,7 @@ async function eliminarSalon() {
   if (!selectedSalonId.value || selectedSalon.value?.eliminadoEl) return
   try {
     const id = selectedSalonId.value
+    marcarTocadas(selectedSalon.value?.mesas.map(m => m.id) ?? [])
     await salonesApi.eliminarSalon(id)
     // Con la papelera abierta la fila no desaparece: pasa a "eliminada" con su
     // autor y fecha. El DELETE no devuelve esos datos —solo llegan en el
@@ -302,6 +335,7 @@ async function restaurarSalonSeleccionado() {
   if (restaurandoSalon.value) return
   restaurandoSalon.value = true
   try {
+    marcarTocadas(selectedSalon.value?.mesas.map(m => m.id) ?? [])
     await restaurarSalonApi(selectedSalonId.value)
     await cargar()
     toast.add({ title: 'Salón restaurado', color: 'success' })
@@ -415,6 +449,7 @@ async function eliminarMesa() {
   if (!mesaToDelete.value || !selectedSalonId.value) return
   try {
     const mesaId = mesaToDelete.value.id
+    marcarTocadas([mesaId])
     await salonesApi.eliminarMesa(mesaId)
     // Mismo motivo que `eliminarSalon`: con la papelera abierta hay que
     // recargar para traer `eliminadoEl`/`eliminadoPorNombre`, que el DELETE
@@ -467,6 +502,7 @@ async function restaurarMesaSeleccionada(id: string) {
   if (restaurandoMesa.value) return
   restaurandoMesa.value = true
   try {
+    marcarTocadas([id])
     await restaurarMesaApi(id)
     const salon = salones.value.find(s => s.mesas.some(m => m.id === id))
     const mesa = salon?.mesas.find(m => m.id === id)

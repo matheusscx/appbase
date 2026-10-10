@@ -179,9 +179,12 @@ a mandar (medido en navegador con dos sesiones del admin). La pantalla **solo sa
 posiciones con la respuesta —la local puede ser más nueva, porque el guardado no se serializa y un
 arrastre posterior puede estar en vuelo— ni agrega mesas que otra sesión creó (no hay polling). Como
 sacar no se deshace, una respuesta vieja que llega tarde no revive una mesa ya sacada. Solo saca
-las que tiene vivas: una que esta misma sesión borró con el guardado en vuelo se queda donde la dejó
-su borrado. Con «Ver eliminados» prendido, la sacada aparece en "Mesas eliminadas" recién al
-recargar. Lo fijan
+las que tiene vivas, y **no saca las que esta sesión borró o restauró durante el vuelo** (una mesa,
+o las de un salón; desde el 2026-10-10): el `UPDATE` pudo correr con la mesa ya borrada, y mientras
+viaja el `DELETE`, o después de restaurarla, la pantalla la tiene viva. Cada guardado en vuelo
+lleva su propio set, porque puede haber dos. La que **otra** sesión borró sale igual, salvo que esta
+haya tocado esa misma mesa o su salón en ese vuelo: entonces queda dibujada hasta recargar. Con «Ver
+eliminados» prendido, la sacada aparece en "Mesas eliminadas" recién al recargar. Lo fijan
 `pages/configuracion/salones.nuxt.spec.ts` y `frontend/e2e/salones/plano-mesa-borrada.spec.ts`.
 
 ---
