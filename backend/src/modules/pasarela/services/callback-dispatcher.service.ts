@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PasarelaOrden } from '../entities/pasarela-orden.entity';
@@ -13,8 +13,10 @@ import { PagoCallbackRegistry } from './pago-callback.registry';
  * - `http` (apps externas): POST {ordenId} a la urlCallback, fire-and-forget (no
  *   detiene el redirect); al recibir 2xx marca `conciliada`.
  *
- * Un error del callback nunca rompe el retorno: la orden queda `pagada` sin
- * conciliar y es reconciliable después.
+ * Un error del callback interno nunca rompe el retorno: la orden queda `pagada`
+ * sin venta, con el motivo en `motivo_sin_venta`. Con eso el comprador recibe un
+ * estado propio y el admin la encuentra en `/ordenes` (pendientes.md § 3, D).
+ * Nada la convierte en venta después, sola: no hay reintento automático.
  */
 @Injectable()
 export class CallbackDispatcherService {
@@ -55,10 +57,19 @@ export class CallbackDispatcherService {
       orden.estado = 'conciliada';
       await this.ordenRepo.save(orden);
     } catch (e) {
-      // No romper el redirect: la orden queda `pagada` sin conciliar.
+      // No romper el redirect: la orden queda `pagada` sin venta. El detalle
+      // técnico va al log; a la orden, solo lo que el admin puede leer.
       this.logger.error(
         `Callback interno falló para orden ${orden.ordenId}: ${String(e)}`,
       );
+      orden.motivoSinVenta = motivoLegible(e);
+      try {
+        await this.ordenRepo.save(orden);
+      } catch (eGuardar) {
+        this.logger.error(
+          `No se pudo guardar el motivo sin venta de la orden ${orden.ordenId}: ${String(eGuardar)}`,
+        );
+      }
     }
   }
 
@@ -88,4 +99,22 @@ export class CallbackDispatcherService {
         );
       });
   }
+}
+
+const MOTIVO_GENERICO =
+  'Error interno al registrar la venta; el detalle quedó en el log del servidor';
+
+/**
+ * El motivo que ve el admin. Un `HttpException` es un error de dominio con un
+ * mensaje pensado para mostrarse: es el mismo 400 que ya devuelve la API.
+ * Cualquier otro (`QueryFailedError`, un `TypeError`) puede llevar SQL o
+ * nombres internos, así que queda el texto genérico y el detalle en el log.
+ */
+function motivoLegible(e: unknown): string {
+  if (!(e instanceof HttpException)) return MOTIVO_GENERICO;
+  const respuesta = e.getResponse();
+  if (typeof respuesta === 'string') return respuesta;
+  const mensaje = (respuesta as { message?: unknown }).message;
+  if (Array.isArray(mensaje)) return mensaje.map(String).join('; ');
+  return typeof mensaje === 'string' ? mensaje : e.message;
 }

@@ -210,7 +210,10 @@ la acumulación de descuentos y compras— y el renombre de `moneda.decimales` s
 
     Los dos casos de reloj se midieron con `Date` falso y **sin tocar el catálogo**: son los dos
     "ahora" en estado puro. El mutante que no mueve el reloj en el retorno da rojo en los dos.
-  - **El cargo sin venta, hoy.** El callback mayor rechaza con *"Las ventas online requieren el
+    La tabla es la medición del 2026-10-09. Desde E (abajo), el caso de `permite_vuelto` ya no
+    crea la venta: también queda sin venta.
+  - **El cargo sin venta, como se midió el 2026-10-09** (D cambió lo que ve el comprador y el
+    admin, ver abajo; que no haya venta lo cierra la A). El callback mayor rechaza con *"Las ventas online requieren el
     pago completo"* (`ventas.service.ts:1025`). El menor rechaza con *"…ningún método de pago
     permite vuelto"* (`pagos.service.ts:270`). El dispatcher se traga el error
     (`callback-dispatcher.service.ts:53-62`). Lo medido es esto:
@@ -243,22 +246,16 @@ la acumulación de descuentos y compras— y el renombre de `moneda.decimales` s
         salón está en `calculo-precios.service.ts:828-832`, y el caso de la hora la necesita.
       - *Lo que A no cubre:* lo que no es precio. Un ítem borrado o sin stock entre el pago y el
         retorno sigue dejando el cargo sin venta. Para eso va la D.
-    - **D. La orden pagada sin venta avisa y no miente** (va siempre). Es chica.
-      - El comprador ve "Recibimos tu pago pero no pudimos registrar la compra" en vez de
-        "registrada". `urlRetornoApp` distingue la orden `pagada` de origen interno sin
-        `ventaId`, y `retorno.vue` suma una vista.
-      - El admin recibe un aviso, no solo el log. La plata se sigue devolviendo con el reembolso
-        manual, que hoy funciona.
-    - **E. La venta online solo se crea si lo pagado es igual al total, nunca con vuelto.** Es
-      chica: va en `ventas.service.ts`, junto al chequeo del pago completo (`:1018-1028`).
-      - Cierra la venta del hallazgo aparte: precio que baja con `permite_vuelto` en la tarjeta,
-        que hoy se crea con un vuelto de 2.380 que nadie devuelve.
-      - Cuando el test lo dé vuelta, ese caso pasa a cargo sin venta, igual que con la tarjeta del
-        seed. Con A ya no ocurre.
-      - Queda sin preguntar, y no hace falta para E: si una tarjeta debería poder tener
-        `permite_vuelto`.
-    - **Al construir:** `tienda-dos-ahoras.e2e-spec.ts` fija la conducta de hoy, así que cada caso
-      se da vuelta a propósito. El control sin cambios tiene que seguir igual.
+    - ✅ **D. La orden pagada sin venta avisa y no miente** y ✅ **E. La venta online solo se crea
+      si lo pagado es igual al total, nunca con vuelto**: **hechas el 2026-10-10**, en un mismo
+      commit de la rama `claude/clever-volhard-b026ae`. El texto con el que se decidieron y lo
+      construido están en
+      [`resueltos.md`](resueltos.md#la-orden-pagada-sin-venta-avisa-y-la-venta-online-no-lleva-vuelto-d-y-e-cerradas-2026-10-10).
+      Lo único que queda abierto acá es la A.
+    - **Al construir la A:** `tienda-dos-ahoras.e2e-spec.ts` fija la conducta de hoy, así que cada
+      caso se da vuelta a propósito. Hoy afirma la orden pagada sin venta con su aviso (D). Con A,
+      los casos de precio, reloj y tasa crean la venta por lo cobrado. El control sin cambios tiene
+      que seguir igual.
 
 - [ ] **El token de Google viaja por la URL** — ⬇️ **prioridad muy baja, reconfirmada por el
   owner el 2026-08-22** (backend + frontend, auditoría RBAC/auth 2026-08-15; **dos lentes
@@ -537,6 +534,28 @@ prohíbe.
   sigue marcado para siempre. **La pregunta para el owner:** ¿se liga el `REFUND` a una de las
   notas que ya existen (¿cuál, si son dos?), o se descarta la marca con un motivo escrito? Ninguna
   de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
+
+- [ ] **`verificar` resuelve a `pagada` una orden de la tienda sin crear la venta y sin dejar el
+  aviso** (backend + producto; lo encontró la revisión independiente del frente D/E el 2026-10-10,
+  [`resueltos.md`](resueltos.md#la-orden-pagada-sin-venta-avisa-y-la-venta-online-no-lleva-vuelto-d-y-e-cerradas-2026-10-10);
+  es previo a ese frente). `CobrosService.verificar` acepta órdenes `en_proceso` o `expirada`. Si
+  Transbank dice pagada, hace `orden.estado = 'pagada'` y guarda, **sin pasar por
+  `CallbackDispatcherService`**. Una orden de la tienda llega ahí cuando el comprador pagó y el
+  retorno nunca volvió, o cuando `confirmarRetorno` la devolvió a `en_proceso` tras un error de
+  comunicación. Queda `pagada`, sin venta y sin `motivo_sin_venta`: el filtro "Pagada sin venta"
+  y la tarjeta de Inicio no la ven, y `/online/orden` dice `pagada`. **No se midió con un e2e**;
+  sale de leer `cobros.service.ts` (`verificar`). **La pregunta para el owner:** cuando
+  `verificar` encuentra pagada una orden de la tienda, ¿crea la venta en ese momento, que es lo
+  que el retorno habría hecho? ¿O la deja pagada sin venta con un motivo ("se confirmó por
+  verificación, sin venta") para que el admin la resuelva? La primera es crear la venta
+  "después", con un tercer "ahora", y la regla de no reintentar solo no la tiene que decidir el
+  agente.
+- [ ] **La marca "Pagada sin venta" no se apaga si el admin registra la venta a mano** (producto;
+  la vio la revisión del frente D/E, 2026-10-10). El aviso dice "devolvé el cargo o registrá la
+  venta a mano", pero nada liga una venta hecha en el POS a la orden. Solo el reembolso total la
+  saca de `pagada`, así que la orden resuelta a mano sigue en la tarjeta de Inicio para siempre.
+  **La pregunta para el owner:** ¿el admin liga la orden a una venta existente, se descarta la
+  marca con un motivo escrito, o el único camino válido es reembolsar?
 
 ## 5. Carreras de concurrencia
 

@@ -322,8 +322,19 @@ pestaña). `CallbackDispatcherService.dispatch(orden)` corre al resolver:
   (no bloquea el redirect); al recibir 2xx marca `conciliada`.
 
 Un error del callback nunca rompe el retorno: la orden queda `pagada` sin
-conciliar y es reconciliable después. Las 4 URLs y el `callbackModo`
-(`interno`/`http`) viven en `orden.metadata`.
+conciliar. En el modo `interno` eso es **una orden pagada sin venta** (2026-10-10):
+el comprador pagó y la venta no existe. Hay tres consecuencias:
+
+- El dispatcher guarda el porqué en `motivo_sin_venta`. Es texto legible: el mensaje
+  del `HttpException`, o un texto genérico si el error no es de dominio, para que no
+  filtre SQL ni un stack.
+- El redirect y `GET /online/orden/:id` dan `pagada_sin_venta` en vez de `pagada`.
+  La orden sigue `pagada`: no es un estado nuevo.
+- El admin la encuentra en Órdenes (abajo).
+
+**Nada la convierte en venta sola**: no hay reintento automático, y `verificar` la
+ve resuelta. La plata se devuelve con el reembolso, o la venta se registra a mano.
+Las 4 URLs y el `callbackModo` (`interno`/`http`) viven en `orden.metadata`.
 
 ### Detalle real del pago (Webpay)
 
@@ -387,6 +398,20 @@ detalle, el historial de transacciones y, si tiene venta, los links a la venta y
 pagos. Desde ahí se **reembolsa** (total o parcial) una orden `pagada` o `conciliada`
 mientras le quede saldo; el modal y la nota de crédito que deja el reembolso están en
 [reembolsos-nota-credito.md](./reembolsos-nota-credito.md).
+
+**Pagada sin venta.** La orden pagada cuya venta no se pudo crear (arriba) tiene tres
+lugares donde aparece:
+
+- en la tabla, con el badge "Pagada sin venta";
+- en el filtro de estado, como una opción más (`GET /pasarela/admin/ordenes?sinVenta=true`);
+- en el drawer, con el motivo y la acción.
+
+Es el aviso al admin. La tarjeta "Pagos sin venta" del inicio cuenta cuántas hay y
+lleva a `/ordenes?sinVenta=true`. Lee el `meta.total` de ese mismo listado, así que el
+guard es el suyo, `Pasarelas:Leer`. "Pagada sin venta" es `pagada` + motivo: un
+reembolso total la pasa a `reembolsada` y sale del aviso, aunque el motivo queda como
+rastro. La API de llave externa no expone el motivo. El mail al admin queda pendiente:
+se decide junto con el resumen diario de descuadres.
 
 ### Permisos
 

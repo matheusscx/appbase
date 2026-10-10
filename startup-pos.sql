@@ -2227,6 +2227,7 @@ CREATE TABLE pasarela_ordenes (
     origen VARCHAR NOT NULL, -- 'interno' | 'api'
     api_key_id UUID REFERENCES pasarela_api_keys(api_key_id),
     solicitud_idempotente_id UUID, -- solo el cobro del alta de suscripción: el reclamo de Idempotency-Key que la escribió antes de cobrar (ADR-029). Sin FK; no expira por reloj
+    motivo_sin_venta TEXT, -- por qué el callback in-process no creó la venta de una orden pagada (texto legible del error de dominio); 'pagada' + motivo = pagada sin venta
     metadata JSONB NOT NULL DEFAULT '{}',
     creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),

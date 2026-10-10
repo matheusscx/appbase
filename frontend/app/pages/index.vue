@@ -49,6 +49,9 @@ const permissionsStore = usePermissionsStore()
             <!-- En "Ahora" y no en "Hoy": el stock cambia todo el turno con cada
                  venta, igual que salón y cajas. -->
             <InicioStockBajo v-if="permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Leer')" />
+            <!-- Lo que la tienda cobró y no pudo registrar: plata del cliente
+                 que espera una acción del local. -->
+            <InicioPagosSinVenta v-if="permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Leer')" />
           </div>
         </section>
 

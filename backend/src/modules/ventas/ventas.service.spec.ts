@@ -2845,6 +2845,23 @@ describe('VentasService', () => {
       );
     });
 
+    it('lanza BadRequestException si lo pagado supera el total: online no lleva vuelto', async () => {
+      // Aunque el método permitiera vuelto: el chequeo corre antes de llegar a
+      // `PagosService`, que es quien lo repartiría.
+      const dtoDeMas = {
+        ...dtoOnline,
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100.0001' }],
+      };
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dtoDeMas as any),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Las ventas online no admiten vuelto: lo pagado supera el total',
+        ),
+      );
+      expect(pagosServiceMock.registrar).not.toHaveBeenCalled();
+    });
+
     it('lanza BadRequestException si no hay pagos', async () => {
       const dtoSinPago = { ...dtoOnline, pagos: undefined };
       await expect(

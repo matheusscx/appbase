@@ -16,6 +16,16 @@ export function esSinConfirmar(estado: string): boolean {
   return estado === 'iniciada' || estado === 'error'
 }
 
+/**
+ * El comprador pagó y la venta no se pudo crear (pendientes.md § 3, D): la orden
+ * sigue `pagada` y trae el motivo. Es la que pide un reembolso o registrar la
+ * venta a mano. Reembolsada sale del aviso. Mismo criterio que el filtro
+ * `sinVenta` del backend.
+ */
+export function esPagadaSinVenta(orden: { estado: string, motivoSinVenta?: string | null }): boolean {
+  return orden.estado === 'pagada' && orden.motivoSinVenta != null
+}
+
 const ETIQUETAS: Record<string, string> = {
   aprobada: 'Aprobada',
   rechazada: 'Rechazada',

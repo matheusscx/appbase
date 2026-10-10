@@ -1028,6 +1028,11 @@ export class VentasService {
 
     // 6. Preparar pagos (puede ser vacío → cuenta por cobrar; online no admite cuenta por cobrar)
     const pagosDto = dto.pagos ?? [];
+    // Online, lo pagado es EXACTAMENTE el total: ni de menos (no hay cuenta por
+    // cobrar) ni de más. De más pasaba cuando el precio bajaba entre el pago y
+    // el retorno de Webpay con `permite_vuelto` en la tarjeta: la venta se
+    // creaba con un "vuelto" sobre la tarjeta que nadie devolvía (pendientes.md
+    // § 3, E). Rechazada, la orden queda pagada sin venta y el admin la ve.
     if (canal === 'online') {
       const montoPagado = pagosDto.reduce(
         (acc, p) => acc.plus(new Decimal(p.monto)),
@@ -1036,6 +1041,11 @@ export class VentasService {
       if (montoPagado.lt(resultado.totales.totalFinal)) {
         throw new BadRequestException(
           'Las ventas online requieren el pago completo',
+        );
+      }
+      if (montoPagado.gt(resultado.totales.totalFinal)) {
+        throw new BadRequestException(
+          'Las ventas online no admiten vuelto: lo pagado supera el total',
         );
       }
     }

@@ -8,6 +8,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 import { randomUUID } from 'node:crypto';
+import { totalOnline } from './helpers/venta-online';
 
 /**
  * `GET /api/ventas/:id/boleta` — reimprimir la boleta de una venta ya cobrada
@@ -777,7 +778,15 @@ describe('GET /ventas/:id/boleta — reimprimir boleta (e2e)', () => {
         {
           canal: 'online',
           lineas: [{ itemId: itemBasicoId, cantidad: '1' }],
-          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100000.0000' }],
+          // Exacto: online no da vuelto.
+          pagos: [
+            {
+              metodoPagoId: EFECTIVO_ID,
+              monto: await totalOnline(app, tokenVendedor, [
+                { itemId: itemBasicoId, cantidad: '1' },
+              ]),
+            },
+          ],
         },
         tokenVendedor,
       );

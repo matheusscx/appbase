@@ -23,6 +23,72 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La orden pagada sin venta avisa, y la venta online no lleva vuelto (D y E, cerradas 2026-10-10)
+
+Sale de [`pendientes.md`](pendientes.md) § 3, de la entrada "La tienda calcula el total dos
+veces, con dos 'ahora'…". **La entrada sigue abierta allá con la A** ("vale lo que pagó"), que
+es frente fiscal propio. Se mudan las dos opciones que se construyeron. Plan:
+[`2026-10-10-tienda-pagada-sin-venta.md`](../superpowers/plans/2026-10-10-tienda-pagada-sin-venta.md).
+
+### Las opciones que cierra, como estaban en `pendientes.md` § 3
+
+    - **D. La orden pagada sin venta avisa y no miente** (va siempre). Es chica.
+      - El comprador ve "Recibimos tu pago pero no pudimos registrar la compra" en vez de
+        "registrada". `urlRetornoApp` distingue la orden `pagada` de origen interno sin
+        `ventaId`, y `retorno.vue` suma una vista.
+      - El admin recibe un aviso, no solo el log. La plata se sigue devolviendo con el reembolso
+        manual, que hoy funciona.
+    - **E. La venta online solo se crea si lo pagado es igual al total, nunca con vuelto.** Es
+      chica: va en `ventas.service.ts`, junto al chequeo del pago completo (`:1018-1028`).
+      - Cierra la venta del hallazgo aparte: precio que baja con `permite_vuelto` en la tarjeta,
+        que hoy se crea con un vuelto de 2.380 que nadie devuelve.
+      - Cuando el test lo dé vuelta, ese caso pasa a cargo sin venta, igual que con la tarjeta del
+        seed. Con A ya no ocurre.
+      - Queda sin preguntar, y no hace falta para E: si una tarjeta debería poder tener
+        `permite_vuelto`.
+
+### Lo que se hizo
+
+- **El mecanismo de aviso** lo eligió la orquestadora el 2026-10-10, entre tres opciones. En el
+  repo no había un aviso genérico al admin: estaban `MailService`, que solo manda invitación y
+  reset al propio usuario, y el patrón bandeja + tarjeta de Inicio de los descuadres. Ganó el
+  patrón bandeja. El mail queda con la pregunta abierta de los descuadres: a quién se manda.
+- **D, backend.**
+  - Columna `pasarela_ordenes.motivo_sin_venta` (`text`), en la entity y en `startup-pos.sql`.
+  - La escribe solo `CallbackDispatcherService.dispatchInterno` cuando el handler lanza. Usa el
+    mensaje del `HttpException`, o uno genérico si el error no es de dominio, para que no filtre
+    SQL ni un stack. El `logger.error` con el detalle se queda.
+  - La orden sigue `pagada`. "Pagada sin venta" es `pagada` + motivo (`esPagadaSinVenta`), así que
+    verificar, reembolsar y la expiración no cambian.
+  - El redirect y `GET /online/orden/:id` dan `pagada_sin_venta`, sin el motivo.
+  - El listado admin suma `sinVenta=true` y `motivoSinVenta`. El detalle admin suma
+    `motivoSinVenta`; la API de llave externa no lo expone.
+- **D, frontend.**
+  - `retorno.vue` suma la vista "Recibimos tu pago pero no pudimos registrar la compra; el local
+    se comunicará contigo" y vacía el carrito.
+  - `/ordenes` pinta "Pagada sin venta", con la opción de filtro y `?sinVenta=true`.
+  - El drawer muestra el motivo.
+  - La tarjeta de Inicio "Pagos sin venta" lee el `meta.total` del listado filtrado: el mismo
+    guard, `Pasarelas:Leer`.
+- **E.** En `ventas.service.ts`, el canal online rechaza lo pagado de más con *"Las ventas
+  online no admiten vuelto: lo pagado supera el total"*. El chequeo corre antes de
+  `PagosService`, que no se tocó.
+- **`tienda-dos-ahoras.e2e-spec.ts` invertido en el mismo commit.**
+  - Los cinco casos sin venta afirman el estado propio, el motivo exacto en la orden y en el
+    filtro, que el comprador no recibe el motivo y que `verificar` no la rescata.
+  - El de `permite_vuelto` pasa a cargo sin venta.
+  - El reembolso total la saca del aviso.
+  - Un rol con solo `Pasarelas:Leer` lee el aviso, y uno con solo `Crear` recibe 403.
+  - El control afirma `estado=pagada` exacto: un `toContain` aceptaba `pagada_sin_venta`.
+
+### Mutantes (e2e de la tienda, salvo que diga otra cosa)
+
+| Mutante | Resultado |
+|---|---|
+| Sin el chequeo de pago de más (E) | 2 rojos: los dos casos de precio que baja. En unitario, también rojo en `ventas.service.spec` |
+| El filtro `sinVenta` ignorado | 2 rojos: el control y el reembolso que sale del aviso |
+| El redirect y el resultado sin estado propio | 7 rojos: todos menos el control |
+
 ## El alta de suscripción cobra una vez por intento: forma de ADR-029, con la orden escrita antes de cobrar (cerrada 2026-10-10)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Decisión del owner del 2026-10-09: la opción (a),

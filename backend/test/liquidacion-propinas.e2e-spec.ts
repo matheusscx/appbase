@@ -9,6 +9,7 @@ import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 import { randomUUID } from 'node:crypto';
+import { totalOnline } from './helpers/venta-online';
 
 // Seed PARIS (docs/features/liquidacion-propinas-motor.md + seeder.service.ts):
 // config de distribución 0.10 con un único grupo "Garzones" (tipo_garzon=garzon,
@@ -767,7 +768,15 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
         .send({
           canal: 'online',
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
-          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000000.0000' }],
+          // Exacto: online no da vuelto. Tampoco suma la propina: se ignora.
+          pagos: [
+            {
+              metodoPagoId: EFECTIVO_ID,
+              monto: await totalOnline(app, token, [
+                { itemId: ITEM_ID, cantidad: '1' },
+              ]),
+            },
+          ],
           propinaDirecta: { montoPagado: '5000', porcentajeSugerido: '0.10' },
         })
         .expect(201);

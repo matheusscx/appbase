@@ -261,6 +261,56 @@ describe('PagosRedirectService', () => {
     expect(deps.dispatcher.dispatch).not.toHaveBeenCalled();
   });
 
+  it('confirmarRetorno aprobado sin venta: estado propio sobre la URL de éxito', async () => {
+    ordenRepo.findOne.mockResolvedValue({
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'en_proceso',
+      monto: '10000',
+      moneda: 'CLP',
+      codigoOrden: 'W-1',
+      motivoSinVenta: null,
+      metadata: {
+        urls: { exito: 'https://app/ok', fracaso: 'https://app/fail' },
+        tenantPasarelaId: 'tp-w',
+      },
+    });
+    provider.confirmarPago.mockResolvedValue({
+      aprobada: true,
+      codigoRespuesta: '0',
+      request: {},
+      response: {},
+    });
+    // Lo que hace el dispatcher real cuando el handler lanza.
+    deps.dispatcher.dispatch.mockImplementationOnce(
+      (o: { motivoSinVenta: string | null }) => {
+        o.motivoSinVenta = 'Las ventas online requieren el pago completo';
+        return Promise.resolve();
+      },
+    );
+    const res = await service.confirmarRetorno('tok-1');
+    expect(res.urlRedireccion).toBe(
+      'https://app/ok?ordenId=orden-1&estado=pagada_sin_venta',
+    );
+  });
+
+  it('confirmarRetorno doble sobre una pagada sin venta: el reintento tampoco dice "pagada"', async () => {
+    ordenRepo.update.mockResolvedValue({ affected: 0 });
+    ordenRepo.findOne.mockResolvedValue({
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'pagada',
+      motivoSinVenta: 'Las ventas online requieren el pago completo',
+      metadata: {
+        urls: { exito: 'https://app/ok', fracaso: 'https://app/fail' },
+      },
+    });
+    const res = await service.confirmarRetorno('tok-1');
+    expect(res.urlRedireccion).toBe(
+      'https://app/ok?ordenId=orden-1&estado=pagada_sin_venta',
+    );
+  });
+
   it('confirmarRetorno timeout: orden vuelve a en_proceso, transacción error, lanza BadGateway', async () => {
     ordenRepo.findOne.mockResolvedValue({
       ordenId: 'orden-1',
@@ -364,5 +414,31 @@ describe('PagosRedirectService', () => {
     });
     const res = await service.obtenerResultado('t-1', 'orden-2');
     expect(res.motivoRechazo).toBe('Tarjeta bloqueada');
+  });
+
+  it('obtenerResultado: la pagada sin venta da su estado propio y nunca el motivo', async () => {
+    ordenRepo.findOne.mockResolvedValue({
+      ordenId: 'orden-3',
+      estado: 'pagada',
+      ventaId: null,
+      motivoSinVenta: 'Las ventas online requieren el pago completo',
+      metadata: { resultadoPago: { codigoRespuesta: '0' } },
+    });
+    const res = await service.obtenerResultado('t-1', 'orden-3');
+    expect(res.estado).toBe('pagada_sin_venta');
+    expect(res.ventaId).toBeNull();
+    expect(res).not.toHaveProperty('motivoSinVenta');
+  });
+
+  it('obtenerResultado: una reembolsada con motivo ya no es "sin venta" (salió del aviso)', async () => {
+    ordenRepo.findOne.mockResolvedValue({
+      ordenId: 'orden-4',
+      estado: 'reembolsada',
+      ventaId: null,
+      motivoSinVenta: 'Las ventas online requieren el pago completo',
+      metadata: {},
+    });
+    const res = await service.obtenerResultado('t-1', 'orden-4');
+    expect(res.estado).toBe('reembolsada');
   });
 });

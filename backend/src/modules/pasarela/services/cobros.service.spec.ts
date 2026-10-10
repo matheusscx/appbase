@@ -2267,6 +2267,27 @@ describe('CobrosService', () => {
     expect(fila).not.toHaveProperty('devoluciones');
   });
 
+  it('obtenerOrden: el motivo de la pagada sin venta es de la vista del admin, no de la API externa', async () => {
+    ordenRepo.findOne.mockResolvedValue({
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'pagada',
+      motivoSinVenta: 'Las ventas online requieren el pago completo',
+      metadata: {},
+    });
+    conHistorial([]);
+
+    const admin = await service.obtenerOrden('t-1', 'orden-1', {
+      vistaAdmin: true,
+    });
+    expect(admin.motivoSinVenta).toBe(
+      'Las ventas online requieren el pago completo',
+    );
+
+    const api = await service.obtenerOrden('t-1', 'orden-1');
+    expect(api).not.toHaveProperty('motivoSinVenta');
+  });
+
   it('obtenerOrden aplica expiración perezosa', async () => {
     ordenRepo.findOne.mockResolvedValue({
       ordenId: 'orden-1',

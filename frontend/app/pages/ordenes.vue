@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
+import { esPagadaSinVenta } from '~/composables/useReembolsoPasarela'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -14,9 +15,12 @@ interface OrdenRow {
   moneda: string
   estado: string
   origen: string
+  /** Por qué el comprador pagó y la venta no se creó; `null` si no pasó. */
+  motivoSinVenta: string | null
   creadoEl: string
 }
 
+const route = useRoute()
 const { formatFecha, formatMonto } = useFormatters()
 const { pageSize } = useUserPreferences()
 
@@ -25,7 +29,13 @@ const ordenSeleccionadaId = ref<string | null>(null)
 
 const busqueda = ref('')
 const busquedaActiva = ref('')
-const filtroEstado = ref<string | undefined>()
+/**
+ * "Pagada sin venta" no es un estado de la orden (sigue `pagada`): es el filtro
+ * `sinVenta` del backend. Va en el mismo selector porque es como el admin la
+ * busca, y la tarjeta de Inicio llega con `?sinVenta=true`.
+ */
+const SIN_VENTA = 'pagada_sin_venta'
+const filtroEstado = ref<string | undefined>(route.query.sinVenta === 'true' ? SIN_VENTA : undefined)
 const filtroOrigen = ref<string | undefined>()
 const filtroFechaDesde = ref<string | undefined>()
 const filtroFechaHasta = ref<string | undefined>()
@@ -39,7 +49,8 @@ watch(busqueda, (value) => {
 })
 
 const listFilters = computed(() => ({
-  estado: filtroEstado.value,
+  estado: filtroEstado.value === SIN_VENTA ? undefined : filtroEstado.value,
+  sinVenta: filtroEstado.value === SIN_VENTA ? 'true' : undefined,
   origen: filtroOrigen.value,
   fechaDesde: filtroFechaDesde.value,
   fechaHasta: filtroFechaHasta.value,
@@ -86,7 +97,10 @@ function estadoLabel(estado: string): string {
   return estadoLabels[estado] ?? estado
 }
 
-const estadoOptions = Object.entries(estadoLabels).map(([value, label]) => ({ label, value }))
+const estadoOptions = [
+  ...Object.entries(estadoLabels).map(([value, label]) => ({ label, value })),
+  { label: 'Pagada sin venta', value: SIN_VENTA },
+]
 
 const origenOptions = [
   { label: 'Interno', value: 'interno' },
@@ -217,7 +231,16 @@ const columns: TableColumn<OrdenRow>[] = [
             <span class="font-mono">{{ formatMonto(row.original.monto) }}</span>
           </template>
           <template #estado-cell="{ row }">
-            <UBadge :color="estadoColor[row.original.estado] ?? 'neutral'" :label="estadoLabel(row.original.estado)" variant="subtle" size="sm" />
+            <UBadge
+              v-if="esPagadaSinVenta(row.original)"
+              color="warning"
+              label="Pagada sin venta"
+              icon="i-lucide-triangle-alert"
+              variant="subtle"
+              size="sm"
+              data-qa="orden-sin-venta"
+            />
+            <UBadge v-else :color="estadoColor[row.original.estado] ?? 'neutral'" :label="estadoLabel(row.original.estado)" variant="subtle" size="sm" />
           </template>
           <template #origen-cell="{ row }">
             <span class="text-muted capitalize">{{ row.original.origen === 'api' ? 'API' : 'Interno' }}</span>

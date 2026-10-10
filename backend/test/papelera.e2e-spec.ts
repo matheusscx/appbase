@@ -4,6 +4,7 @@ import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
+import { totalOnline } from './helpers/venta-online';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { loginSegundoTenant } from './helpers/segundo-tenant';
@@ -908,7 +909,15 @@ describe('Papelera (e2e) — items, restaurar INACTIVO + colateral acotado por t
       .send({
         canal: 'online', // evita depender de una caja abierta
         lineas: [{ itemId, cantidad: '1' }],
-        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100000.0000' }],
+        // Exacto: online no da vuelto.
+        pagos: [
+          {
+            metodoPagoId: EFECTIVO_ID,
+            monto: await totalOnline(app, tokenAdmin, [
+              { itemId, cantidad: '1' },
+            ]),
+          },
+        ],
       });
     expect(resVenta.status).toBe(201);
     const ventaId = (resVenta.body as { id: string }).id;

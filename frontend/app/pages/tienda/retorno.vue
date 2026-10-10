@@ -10,7 +10,7 @@ const { formatTipoPago } = useFormatters()
 
 const ordenId = computed(() => String(route.query.ordenId ?? ''))
 
-type Vista = 'cargando' | 'aprobada' | 'rechazada' | 'pendiente' | 'error'
+type Vista = 'cargando' | 'aprobada' | 'sin_venta' | 'rechazada' | 'pendiente' | 'error'
 const vista = ref<Vista>('cargando')
 const ventaId = ref<string | null>(null)
 const tipoPago = ref<string | null>(null)
@@ -45,6 +45,12 @@ onMounted(async () => {
     motivoRechazo.value = res.motivoRechazo
     if (res.estado === 'pagada' || res.estado === 'conciliada') {
       vista.value = 'aprobada'
+      limpiar()
+    } else if (res.estado === 'pagada_sin_venta') {
+      // Se cobró y la venta no se pudo crear: no decir "registrada" (el admin
+      // ya tiene el aviso en `/ordenes`). El carrito se vacía igual que en el
+      // éxito: el cargo existe, y dejarlo lleno invita a pagar dos veces.
+      vista.value = 'sin_venta'
       limpiar()
     } else if (res.estado === 'fallida') {
       vista.value = 'rechazada'
@@ -101,6 +107,15 @@ onMounted(async () => {
               variant="soft"
               block
             />
+            <UButton to="/tienda" label="Volver a la tienda" variant="ghost" block />
+          </div>
+
+          <div v-else-if="vista === 'sin_venta'" class="text-center py-6 space-y-3" data-qa="retorno-sin-venta">
+            <UIcon name="i-lucide-triangle-alert" class="text-warning size-12 mx-auto" />
+            <p class="font-medium">Pago recibido</p>
+            <p class="text-sm text-muted">
+              Recibimos tu pago pero no pudimos registrar la compra; el local se comunicará contigo.
+            </p>
             <UButton to="/tienda" label="Volver a la tienda" variant="ghost" block />
           </div>
 

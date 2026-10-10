@@ -1,4 +1,10 @@
-import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { Transform } from 'class-transformer';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
@@ -23,6 +29,12 @@ export class QueryOrdenesDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(['interno', 'api'])
   origen?: string;
+
+  /** Solo las pagadas cuya venta no se pudo crear (el aviso al admin). */
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  sinVenta?: boolean;
 
   @IsOptional()
   @EsFechaOTimestamp()

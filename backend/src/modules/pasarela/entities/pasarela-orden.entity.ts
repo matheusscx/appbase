@@ -76,6 +76,16 @@ export class PasarelaOrden {
   @Column({ name: 'solicitud_idempotente_id', type: 'uuid', nullable: true })
   solicitudIdempotenteId: string | null;
 
+  /**
+   * Por qué el callback in-process no pudo crear la venta de una orden que el
+   * comprador SÍ pagó. Lo escribe solo `CallbackDispatcherService` y es texto
+   * legible del error de dominio, nunca un stack ni un SQL: lo lee el admin en
+   * `/ordenes`. La orden sigue `pagada`; "pagada sin venta" es `pagada` con
+   * este motivo (`esPagadaSinVenta`). Queda como rastro aunque se reembolse.
+   */
+  @Column({ name: 'motivo_sin_venta', type: 'text', nullable: true })
+  motivoSinVenta: string | null;
+
   @Column({ type: 'jsonb', default: () => `'{}'` })
   metadata: Record<string, unknown>;
 
@@ -84,6 +94,17 @@ export class PasarelaOrden {
   actualizadoEl: Date;
   @DeleteDateColumn({ name: 'eliminado_el', type: 'timestamptz' })
   eliminadoEl: Date | null;
+}
+
+/**
+ * El comprador pagó y la venta no existe: la orden quedó `pagada` con motivo.
+ * Un reembolso total la pasa a `reembolsada` y deja de pedir atención. Mismo
+ * criterio que el filtro `sinVenta` del listado del admin (`CobrosService`).
+ */
+export function esPagadaSinVenta(
+  orden: Pick<PasarelaOrden, 'estado' | 'motivoSinVenta'>,
+): boolean {
+  return orden.estado === 'pagada' && orden.motivoSinVenta != null;
 }
 
 /**

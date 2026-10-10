@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { CallbackDispatcherService } from './callback-dispatcher.service';
@@ -41,15 +42,71 @@ describe('CallbackDispatcherService', () => {
     expect(ordenRepo.save).toHaveBeenCalledWith(o);
   });
 
-  it('interno: si el handler falla, no rompe (orden queda pagada, sin conciliar)', async () => {
+  it('interno: si el handler falla con un error de dominio, la orden queda pagada con ese motivo', async () => {
     const handler = {
-      onOrdenResuelta: jest.fn().mockRejectedValue(new Error('boom')),
+      onOrdenResuelta: jest
+        .fn()
+        .mockRejectedValue(
+          new BadRequestException(
+            'Las ventas online requieren el pago completo',
+          ),
+        ),
     };
     registry.get.mockReturnValue(handler);
     const o = orden();
     await expect(service.dispatch(o)).resolves.toBeUndefined();
     expect(o.estado).toBe('pagada');
-    expect(ordenRepo.save).not.toHaveBeenCalled();
+    expect(o.motivoSinVenta).toBe(
+      'Las ventas online requieren el pago completo',
+    );
+    expect(ordenRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        estado: 'pagada',
+        motivoSinVenta: 'Las ventas online requieren el pago completo',
+      }),
+    );
+  });
+
+  it('interno: un 400 de validación (mensaje en array) se une en un solo texto', async () => {
+    const handler = {
+      onOrdenResuelta: jest
+        .fn()
+        .mockRejectedValue(
+          new BadRequestException(['cantidad debe ser positiva', 'otro']),
+        ),
+    };
+    registry.get.mockReturnValue(handler);
+    const o = orden();
+    await service.dispatch(o);
+    expect(o.motivoSinVenta).toBe('cantidad debe ser positiva; otro');
+  });
+
+  it('interno: un error que no es de dominio no filtra su texto (puede traer SQL)', async () => {
+    const handler = {
+      onOrdenResuelta: jest
+        .fn()
+        .mockRejectedValue(
+          new Error('duplicate key value violates "ventas_pkey" SELECT ...'),
+        ),
+    };
+    registry.get.mockReturnValue(handler);
+    const o = orden();
+    await service.dispatch(o);
+    expect(o.estado).toBe('pagada');
+    expect(o.motivoSinVenta).toBe(
+      'Error interno al registrar la venta; el detalle quedó en el log del servidor',
+    );
+    expect(o.motivoSinVenta).not.toContain('ventas_pkey');
+  });
+
+  it('interno: si guardar el motivo falla, igual no rompe el retorno', async () => {
+    registry.get.mockReturnValue({
+      onOrdenResuelta: jest.fn().mockRejectedValue(new Error('boom')),
+    });
+    ordenRepo.save.mockRejectedValueOnce(new Error('db caída'));
+    const o = orden();
+    await expect(service.dispatch(o)).resolves.toBeUndefined();
+    expect(o.estado).toBe('pagada');
   });
 
   it('interno: sin handler registrado, no lanza', async () => {

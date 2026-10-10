@@ -172,3 +172,38 @@ describe('OrdenDetalleDrawer — el REFUND sin nota de crédito', () => {
     expect(texto()).not.toContain('Sin nota de crédito')
   })
 })
+
+// La orden pagada sin venta (pendientes.md § 3, D): el aviso al admin es el
+// motivo, acá, al lado del botón de reembolsar.
+describe('OrdenDetalleDrawer — la orden pagada sin venta', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    permisos = ['Pasarelas:Reembolsar']
+    cargasDeLaOrden = 0
+    lecturasDeLaVenta = []
+  })
+
+  const sinVenta = (estado: string) => ({
+    ...ordenCon([], null),
+    estado,
+    motivoSinVenta: 'Las ventas online requieren el pago completo',
+  })
+
+  it('muestra el motivo y se marca "Pagada sin venta"', async () => {
+    ordenActual = sinVenta('pagada')
+    await abrir()
+
+    const alerta = document.body.querySelector('[data-qa="orden-sin-venta-motivo"]')
+    expect(alerta).not.toBeNull()
+    expect(alerta!.textContent).toContain('Las ventas online requieren el pago completo')
+    expect(texto()).toContain('Pagada sin venta')
+  })
+
+  it('reembolsada, conserva el motivo como rastro pero ya no avisa', async () => {
+    ordenActual = sinVenta('reembolsada')
+    await abrir()
+
+    expect(document.body.querySelector('[data-qa="orden-sin-venta-motivo"]')).toBeNull()
+    expect(texto()).not.toContain('Pagada sin venta')
+  })
+})

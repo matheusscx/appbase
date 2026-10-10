@@ -4,6 +4,7 @@ import Decimal from 'decimal.js'
 import type { LineaDeclarada } from '~/composables/useDevolucionInventario'
 import {
   colorEstadoTransaccion,
+  esPagadaSinVenta,
   esRefundSinNota,
   esSinConfirmar,
   etiquetaEstadoTransaccion,
@@ -35,6 +36,8 @@ interface OrdenDetalle {
   estado: string
   origen: string
   creadoEl: string
+  /** Por qué el comprador pagó y la venta no se creó; `null` si no pasó. */
+  motivoSinVenta: string | null
   transacciones: TransaccionOrden[]
 }
 
@@ -210,7 +213,14 @@ function onReembolsoSuccess(payload: {
       <div class="flex items-center gap-2">
         <span class="font-semibold text-default">Detalle de orden</span>
         <UBadge
-          v-if="orden"
+          v-if="orden && esPagadaSinVenta(orden)"
+          color="warning"
+          label="Pagada sin venta"
+          variant="subtle"
+          size="xs"
+        />
+        <UBadge
+          v-else-if="orden"
           :color="estadoColor[orden.estado] ?? 'neutral'"
           :label="estadoLabel(orden.estado)"
           variant="subtle"
@@ -226,6 +236,15 @@ function onReembolsoSuccess(payload: {
       </div>
 
       <div v-else-if="orden" class="space-y-4">
+        <UAlert
+          v-if="esPagadaSinVenta(orden)"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-triangle-alert"
+          title="El comprador pagó y la venta no se registró"
+          :description="`Motivo: ${orden.motivoSinVenta}. Devolvé el cargo con Reembolsar, o registrá la venta a mano y comunicate con el comprador.`"
+          data-qa="orden-sin-venta-motivo"
+        />
         <UCard>
           <template #header>
             <h2 class="text-base font-semibold">

@@ -8,6 +8,8 @@ import { randomUUID } from 'node:crypto';
 import { AppModule } from '../src/app.module';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import { ProviderFactory } from '../src/modules/pasarela/providers/provider.factory';
+import { TokensAccesoService } from '../src/modules/auth/tokens-acceso.service';
+import { TipoTokenAcceso } from '../src/modules/auth/entities/token-acceso.entity';
 import {
   instanteLocalEnZona,
   zonaHorariaTenant,
@@ -18,6 +20,21 @@ const CLP = '550e8400-e29b-41d4-a716-446655440003';
 const USD = '550e8400-e29b-41d4-a716-446655440005';
 const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
 const ADMIN = { email: 'admin.paris@paris.cl', password: 'admin' };
+
+const PAGO_INCOMPLETO = 'Las ventas online requieren el pago completo';
+const SIN_VUELTO =
+  'Las ventas online no admiten vuelto: lo pagado supera el total';
+
+interface ModuloDisponible {
+  moduloTenantId: string;
+  nombre: string;
+  permisos: { moduloAppPermisoId: string; permisoNombre: string }[];
+}
+interface OrdenAdmin {
+  ordenId: string;
+  estado: string;
+  motivoSinVenta: string | null;
+}
 
 /** Todo lo que el reloj falso NO toca: solo se finge `Date`. */
 const NO_FINGIR = [
@@ -38,25 +55,29 @@ const NO_FINGIR = [
 ] as const;
 
 /**
- * La tienda calcula el total dos veces, con dos "ahora" — MEDICIÓN de un bug
- * conocido (`docs/agent/pendientes.md` § 3, medido el 2026-10-09).
+ * La tienda calcula el total dos veces, con dos "ahora"
+ * (`docs/agent/pendientes.md` § 3, medido el 2026-10-09).
  *
  * `POST /online/pagar` calcula y autoriza en Webpay ese total. Cuando el
  * comprador vuelve, `OnlineCallbackHandler` crea la venta con
  * `VentasService.crear`, que **recalcula** desde el snapshot (ítem y cantidad)
  * con el catálogo y el reloj del retorno. Si algo que mueve el total cambió en
  * el medio —la hora cruza el borde de una promo o de una regla, el precio, la
- * tasa del día—, la venta se rechaza y el dispatcher se traga el error.
+ * tasa del día—, la venta se rechaza.
  *
- * Estos casos están en VERDE porque fijan la conducta de HOY, no la deseada:
- * cargo autorizado, orden `pagada` sin venta, redirect de éxito al comprador y
- * ningún camino para rescatarla. Quien arregle la entrada los da vuelta a
- * propósito (el control de abajo es lo que ya debe valer después también).
+ * Que la venta se rechace sigue pasando: lo cierra la opción A ("vale lo que
+ * pagó"), que es frente fiscal propio. Lo que fijan estos casos es lo que
+ * construyeron D y E (owner, 2026-10-09):
+ * - D: la orden pagada sin venta no miente. El comprador ve que el pago llegó y
+ *   la compra no quedó registrada, y el admin la encuentra con su motivo.
+ * - E: la venta online no lleva vuelto. Lo pagado de más también es una orden
+ *   pagada sin venta.
+ * Ningún caso crea la venta "después": no hay reintento automático.
  *
  * El camino es el de `tienda-impuestos-del-item.e2e-spec.ts`: proveedor falso,
  * `pagar`, el retorno de Webpay por HTTP y el callback en proceso.
  */
-describe('Tienda: lo que cambia entre el pago y el retorno deja un cargo sin venta (e2e, bug conocido)', () => {
+describe('Tienda: lo que cambia entre el pago y el retorno deja una orden pagada sin venta, que avisa (e2e)', () => {
   let app: INestApplication<App>;
   let ds: DataSource;
   let token: string;
@@ -111,10 +132,12 @@ describe('Tienda: lo que cambia entre el pago y el retorno deja un cargo sin ven
   /** Los `logger.error` del dispatcher: el único rastro del motivo. */
   let errores: jest.SpyInstance;
 
-  const login = async (): Promise<string> => {
+  const login = async (
+    credenciales: { email: string; password: string } = ADMIN,
+  ): Promise<string> => {
     const resLogin = await request(app.getHttpServer())
       .post('/api/auth/login')
-      .send(ADMIN);
+      .send(credenciales);
     expect(resLogin.status).toBe(200);
     const resTenant = await request(app.getHttpServer())
       .post('/api/auth/switch-tenant')
@@ -196,13 +219,40 @@ describe('Tienda: lo que cambia entre el pago y el retorno deja un cargo sin ven
   };
 
   const ordenDe = async (ordenId: string) => {
-    const [fila]: { estado: string; venta_id: string | null }[] =
-      await ds.query(
-        `SELECT estado, venta_id FROM pasarela_ordenes
+    const [fila]: {
+      estado: string;
+      venta_id: string | null;
+      codigo_orden: string;
+    }[] = await ds.query(
+      `SELECT estado, venta_id, codigo_orden FROM pasarela_ordenes
           WHERE orden_id = $1 AND eliminado_el IS NULL`,
-        [ordenId],
-      );
+      [ordenId],
+    );
     return fila;
+  };
+
+  /** Lo que el admin encuentra en `/ordenes` filtrando "Pagada sin venta". */
+  const sinVentaEnElListado = async (
+    ordenId: string,
+    conToken = token,
+  ): Promise<OrdenAdmin[]> => {
+    const { codigo_orden } = await ordenDe(ordenId);
+    const res = await request(app.getHttpServer())
+      .get(`/api/pasarela/admin/ordenes?sinVenta=true&search=${codigo_orden}`)
+      .set('Authorization', `Bearer ${conToken}`);
+    expect(res.status).toBe(200);
+    return (res.body as { data: OrdenAdmin[] }).data;
+  };
+
+  const ordenAdmin = async (
+    ordenId: string,
+    conToken = token,
+  ): Promise<OrdenAdmin> => {
+    const res = await request(app.getHttpServer())
+      .get(`/api/pasarela/admin/ordenes/${ordenId}`)
+      .set('Authorization', `Bearer ${conToken}`);
+    expect(res.status).toBe(200);
+    return res.body as OrdenAdmin;
   };
 
   const ventasOnline = async (): Promise<number> => {
@@ -220,32 +270,49 @@ describe('Tienda: lo que cambia entre el pago y el retorno deja un cargo sin ven
       .filter((m) => m.includes(ordenId));
 
   /**
-   * Lo que queda HOY cuando el callback no puede crear la venta: el cargo está
-   * autorizado, la orden `pagada` sin venta, el comprador ve éxito y nada la
-   * rescata. Devuelve el motivo que solo quedó en el log.
+   * Cuando el callback no puede crear la venta (D): el cargo está autorizado y
+   * la orden queda `pagada` sin venta, pero ya no miente. El comprador recibe un
+   * estado propio, el admin la encuentra con el motivo de dominio, y nada la
+   * convierte en venta sola.
    */
   const afirmarCargoSinVenta = async (
     ordenId: string,
     location: string,
     ventasAntes: number,
-  ): Promise<string> => {
+    motivo: string,
+  ): Promise<void> => {
     const orden = await ordenDe(ordenId);
     expect(orden.estado).toBe('pagada');
     expect(orden.venta_id).toBeNull();
     expect(await ventasOnline()).toBe(ventasAntes);
 
-    // El redirect lleva `estado=pagada` igual que una orden conciliada, y la
-    // pantalla de retorno con eso pinta "Tu compra fue registrada".
-    expect(location).toContain(`ordenId=${ordenId}&estado=pagada`);
+    // El redirect ya no es el de una orden conciliada.
+    expect(location).toContain(`ordenId=${ordenId}&estado=pagada_sin_venta`);
 
-    // Lo que la pantalla de retorno lee para decidir qué mostrar.
+    // Lo que la pantalla de retorno lee para decidir qué mostrar: el estado
+    // propio, y nunca el motivo (ese es del admin).
     const resultado = await request(app.getHttpServer())
       .get(`/api/online/orden/${ordenId}`)
       .set('Authorization', `Bearer ${token}`);
     expect(resultado.status).toBe(200);
-    expect(resultado.body).toMatchObject({ estado: 'pagada', ventaId: null });
+    expect(resultado.body).toMatchObject({
+      estado: 'pagada_sin_venta',
+      ventaId: null,
+    });
+    expect(resultado.body).not.toHaveProperty('motivoSinVenta');
 
-    // El único "reconciliar" que existe no la toma: ya está resuelta.
+    // El aviso al admin: el motivo legible del dominio, en el drawer y en el
+    // filtro "Pagada sin venta" de `/ordenes`.
+    expect((await ordenAdmin(ordenId)).motivoSinVenta).toBe(motivo);
+    expect(await sinVentaEnElListado(ordenId)).toEqual([
+      expect.objectContaining({
+        ordenId,
+        estado: 'pagada',
+        motivoSinVenta: motivo,
+      }),
+    ]);
+
+    // Verificar no la rescata (sin reintento automático): sigue resuelta.
     const verificar = await request(app.getHttpServer())
       .post(`/api/pasarela/api/ordenes/${ordenId}/verificar`)
       .set('Authorization', `Bearer ${apiKey}`);
@@ -254,10 +321,12 @@ describe('Tienda: lo que cambia entre el pago y el retorno deja un cargo sin ven
       'La orden ya está resuelta (pagada)',
     );
     expect((await ordenDe(ordenId)).estado).toBe('pagada');
+    expect(await ventasOnline()).toBe(ventasAntes);
 
+    // El detalle técnico sigue en el log, con el mismo motivo.
     const log = erroresDeLaOrden(ordenId);
     expect(log).toHaveLength(1);
-    return log[0];
+    expect(log[0]).toContain(motivo);
   };
 
   // ─── Reloj ─────────────────────────────────────────────────────────────────
@@ -386,13 +455,19 @@ describe('Tienda: lo que cambia entre el pago y el retorno deja un cargo sin ven
     expect(orden.estado).toBe('conciliada');
     expect(orden.venta_id).not.toBeNull();
     expect(await ventasOnline()).toBe(ventasAntes + 1);
-    expect(location).toContain(`ordenId=${ordenId}&estado=pagada`);
+    // `estado=pagada` y nada más: un `toContain` aceptaría `pagada_sin_venta`.
+    expect(location).toMatch(
+      new RegExp(`[?&]ordenId=${ordenId}&estado=pagada$`),
+    );
     const [venta]: { total_final: string }[] = await ds.query(
       `SELECT total_final FROM ventas WHERE venta_id = $1 AND eliminado_el IS NULL`,
       [orden.venta_id],
     );
     expect(Number(venta.total_final)).toBe(Number(autorizado));
     expect(erroresDeLaOrden(ordenId)).toEqual([]);
+    // Sin aviso: la orden conciliada no aparece entre las pagadas sin venta.
+    expect((await ordenAdmin(ordenId)).motivoSinVenta).toBeNull();
+    expect(await sinVentaEnElListado(ordenId)).toEqual([]);
   });
 
   describe('el reloj: los dos "ahora" (sin tocar el catálogo)', () => {
@@ -428,13 +503,11 @@ describe('Tienda: lo que cambia entre el pago y el retorno deja un cargo sin ven
         expect(Number(autorizado)).toBeLessThan(Number(enElRetorno));
 
         const location = await volver(ordenId);
-        const motivo = await afirmarCargoSinVenta(
+        await afirmarCargoSinVenta(
           ordenId,
           location,
           ventasAntes,
-        );
-        expect(motivo).toContain(
-          'Las ventas online requieren el pago completo',
+          PAGO_INCOMPLETO,
         );
       });
     });
@@ -473,13 +546,11 @@ describe('Tienda: lo que cambia entre el pago y el retorno deja un cargo sin ven
         expect(Number(enElRetorno)).toBeGreaterThan(Number(autorizado));
 
         const location = await volver(ordenId);
-        const motivo = await afirmarCargoSinVenta(
+        await afirmarCargoSinVenta(
           ordenId,
           location,
           ventasAntes,
-        );
-        expect(motivo).toContain(
-          'Las ventas online requieren el pago completo',
+          PAGO_INCOMPLETO,
         );
       });
     });
@@ -497,11 +568,15 @@ describe('Tienda: lo que cambia entre el pago y el retorno deja un cargo sin ven
       );
 
       const location = await volver(ordenId);
-      const motivo = await afirmarCargoSinVenta(ordenId, location, ventasAntes);
-      expect(motivo).toContain('Las ventas online requieren el pago completo');
+      await afirmarCargoSinVenta(
+        ordenId,
+        location,
+        ventasAntes,
+        PAGO_INCOMPLETO,
+      );
 
-      // Lo único que hay hoy: el admin devuelve el cargo entero, a mano. Sin
-      // venta no hay corrección que dejar, y la venta sigue sin existir.
+      // Lo que hace el admin con el aviso: devuelve el cargo entero, a mano.
+      // Sin venta no hay corrección que dejar, y la venta sigue sin existir.
       const reembolso = await request(app.getHttpServer())
         .post(`/api/pasarela/admin/ordenes/${ordenId}/reembolsos`)
         .set('Authorization', `Bearer ${token}`)
@@ -516,6 +591,11 @@ describe('Tienda: lo que cambia entre el pago y el retorno deja un cargo sin ven
       expect(cuerpo.reembolsoAprobado).toBe(true);
       expect(cuerpo.notaCreditoId ?? null).toBeNull();
       expect(await ventasOnline()).toBe(ventasAntes);
+      // Devuelta, deja de pedir atención; el motivo queda como rastro.
+      const devuelta = await ordenAdmin(ordenId);
+      expect(devuelta.estado).toBe('reembolsada');
+      expect(devuelta.motivoSinVenta).toBe(PAGO_INCOMPLETO);
+      expect(await sinVentaEnElListado(ordenId)).toEqual([]);
     });
 
     it('el precio baja: lo cobrado sobra y la tarjeta no da vuelto', async () => {
@@ -527,13 +607,10 @@ describe('Tienda: lo que cambia entre el pago y el retorno deja un cargo sin ven
       expect(Number(await totalAhora(itemId))).toBeLessThan(Number(autorizado));
 
       const location = await volver(ordenId);
-      const motivo = await afirmarCargoSinVenta(ordenId, location, ventasAntes);
-      expect(motivo).toContain(
-        'El pago supera el total pero ningún método de pago permite vuelto',
-      );
+      await afirmarCargoSinVenta(ordenId, location, ventasAntes, SIN_VUELTO);
     });
 
-    it('el precio baja con permite_vuelto en la tarjeta: la venta se crea, con vuelto sobre la tarjeta', async () => {
+    it('el precio baja con permite_vuelto en la tarjeta: tampoco hay vuelto sobre la tarjeta (E)', async () => {
       // El método que el checkout resuelve como crédito (el del snapshot).
       const metodos = await request(app.getHttpServer())
         .get('/api/metodos-pago')
@@ -561,32 +638,20 @@ describe('Tienda: lo que cambia entre el pago y el retorno deja un cargo sin ven
           .send({ permiteVuelto });
 
       const itemId = await crearItem('10000');
+      const ventasAntes = await ventasOnline();
       expect((await ponerVuelto(true)).status).toBe(200);
       try {
         const { ordenId, autorizado } = await pagar(itemId);
         await cambiarPrecio(itemId, '8000');
-        const enElRetorno = await totalAhora(itemId);
-
-        await volver(ordenId);
-
-        const orden = await ordenDe(ordenId);
-        expect(orden.estado).toBe('conciliada');
-        const pagos: {
-          monto: string;
-          vuelto: string;
-          metodo_pago_id: string;
-        }[] = await ds.query(
-          `SELECT monto, vuelto, metodo_pago_id FROM pagos
-              WHERE venta_id = $1 AND eliminado_el IS NULL`,
-          [orden.venta_id],
+        expect(Number(await totalAhora(itemId))).toBeLessThan(
+          Number(autorizado),
         );
-        expect(pagos).toHaveLength(1);
-        expect(pagos[0].metodo_pago_id).toBe(credito.metodoPagoId);
-        expect(Number(pagos[0].monto)).toBe(Number(autorizado));
-        // La diferencia queda como "vuelto" de una tarjeta: nadie la devuelve.
-        expect(Number(pagos[0].vuelto)).toBe(
-          Number(autorizado) - Number(enElRetorno),
-        );
+
+        // Antes de E esta venta se creaba con un vuelto de 2.380 sobre la
+        // tarjeta, que nadie devolvía. Ahora es un cargo sin venta, igual que
+        // con la tarjeta del seed, y la plata se devuelve con el reembolso.
+        const location = await volver(ordenId);
+        await afirmarCargoSinVenta(ordenId, location, ventasAntes, SIN_VUELTO);
       } finally {
         expect((await ponerVuelto(false)).status).toBe(200);
       }
@@ -619,17 +684,97 @@ describe('Tienda: lo que cambia entre el pago y el retorno deja un cargo sin ven
         );
 
         const location = await volver(ordenId);
-        const motivo = await afirmarCargoSinVenta(
+        await afirmarCargoSinVenta(
           ordenId,
           location,
           ventasAntes,
-        );
-        expect(motivo).toContain(
-          'Las ventas online requieren el pago completo',
+          PAGO_INCOMPLETO,
         );
       } finally {
         expect((await ponerTasa(tasaOriginal)).status).toBe(200);
       }
+    });
+  });
+  describe('el aviso al admin, con un rol que no es admin', () => {
+    /**
+     * Un usuario propio con un rol propio que tiene EXACTAMENTE estos permisos
+     * de Pasarelas: el admin del seed tiene todo y tapa el 403. En el seed
+     * ningún otro rol tiene `Pasarelas:Leer`.
+     */
+    const usuarioConPasarelas = async (acciones: string[]): Promise<string> => {
+      const modulos = await request(app.getHttpServer())
+        .get('/api/roles/modulos-disponibles')
+        .set('Authorization', `Bearer ${token}`);
+      expect(modulos.status).toBe(200);
+      const rol = await request(app.getHttpServer())
+        .post('/api/roles')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ nombre: `E2E pagada sin venta ${randomUUID()}` });
+      expect(rol.status).toBe(201);
+      const rolId = (rol.body as { id: string }).id;
+      const m = (modulos.body as ModuloDisponible[]).find(
+        (x) => x.nombre === 'Pasarelas',
+      );
+      expect(m).toBeTruthy();
+      const ids = acciones.map((a) => {
+        const p = m!.permisos.find((x) => x.permisoNombre === a);
+        expect(p).toBeTruthy();
+        return p!.moduloAppPermisoId;
+      });
+      const set = await request(app.getHttpServer())
+        .put(`/api/roles/${rolId}/modules/${m!.moduloTenantId}/permissions`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ moduloAppPermisoIds: ids });
+      expect(set.status).toBe(200);
+      const correo = `pagada-sin-venta.${randomUUID()}@e2e.cl`;
+      const alta = await request(app.getHttpServer())
+        .post('/api/tenants/usuarios')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: 'Pagada',
+          apellido: 'SinVenta',
+          correo,
+          rolIds: [rolId],
+        });
+      expect(alta.status).toBe(201);
+      const usuarioId = (alta.body as { usuarioId: string }).usuarioId;
+      const invitacion = await app
+        .get(TokensAccesoService)
+        .emitir(usuarioId, TipoTokenAcceso.INVITACION);
+      const password = 'clave-e2e-pagada-sin-venta-1234';
+      const elegir = await request(app.getHttpServer())
+        .post(`/api/auth/invitacion/${invitacion}`)
+        .send({ contrasena: password });
+      expect(elegir.status).toBe(200);
+      return login({ email: correo, password });
+    };
+
+    it('Pasarelas:Leer encuentra la orden y su motivo; sin ese permiso, 403', async () => {
+      const itemId = await crearItem('10000');
+      const ventasAntes = await ventasOnline();
+      const { ordenId } = await pagar(itemId);
+      await cambiarPrecio(itemId, '12000');
+      const location = await volver(ordenId);
+      await afirmarCargoSinVenta(
+        ordenId,
+        location,
+        ventasAntes,
+        PAGO_INCOMPLETO,
+      );
+
+      const lector = await usuarioConPasarelas(['Leer']);
+      expect(await sinVentaEnElListado(ordenId, lector)).toEqual([
+        expect.objectContaining({ ordenId, motivoSinVenta: PAGO_INCOMPLETO }),
+      ]);
+      expect((await ordenAdmin(ordenId, lector)).motivoSinVenta).toBe(
+        PAGO_INCOMPLETO,
+      );
+
+      const sinLeer = await usuarioConPasarelas(['Crear']);
+      const prohibido = await request(app.getHttpServer())
+        .get('/api/pasarela/admin/ordenes?sinVenta=true&pageSize=1')
+        .set('Authorization', `Bearer ${sinLeer}`);
+      expect(prohibido.status).toBe(403);
     });
   });
 });

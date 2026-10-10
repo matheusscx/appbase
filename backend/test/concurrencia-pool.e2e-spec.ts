@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import type { Server, AddressInfo } from 'net';
 import { AppModule } from '../src/app.module';
 import { randomUUID } from 'node:crypto';
+import { totalOnline } from './helpers/venta-online';
 
 // Seed (IDs fijos, ver seeder.service.ts)
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
@@ -119,6 +120,8 @@ describe('Concurrencia: el pool de conexiones no se deadlockea (e2e)', () => {
   });
 
   it(`${RAFAGA} ventas simultáneas (= tamaño del pool) responden todas y el backend sigue vivo`, async () => {
+    // Exacto, y calculado ANTES de la ráfaga: online no da vuelto.
+    const total = await totalOnline(app, token, [{ itemId, cantidad: '1' }]);
     const respuestas = await Promise.all(
       Array.from({ length: RAFAGA }, () =>
         fetch(`http://127.0.0.1:${port}/api/ventas`, {
@@ -132,7 +135,7 @@ describe('Concurrencia: el pool de conexiones no se deadlockea (e2e)', () => {
           body: JSON.stringify({
             canal: 'online', // caja virtual: sin depender de una caja abierta
             lineas: [{ itemId, cantidad: '1' }],
-            pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '100000.0000' }],
+            pagos: [{ metodoPagoId: EFECTIVO_ID, monto: total }],
           }),
         }),
       ),

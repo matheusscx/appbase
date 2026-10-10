@@ -73,6 +73,7 @@ interface OrdenListRow {
   moneda: string;
   estado: string;
   origen: string;
+  motivo_sin_venta: string | null;
   creado_el: Date;
 }
 
@@ -1805,6 +1806,9 @@ export class CobrosService {
       await this.ordenRepo.save(orden);
     }
     return this.toPublico(orden, {
+      // Por qué la orden pagada no tiene venta: el aviso al admin. La API
+      // externa no lo expone (contrato, ver arriba).
+      ...(vistaAdmin && { motivoSinVenta: orden.motivoSinVenta }),
       transacciones: transacciones.map((t) => ({
         transaccionId: t.transaccionId,
         tipo: t.tipo,
@@ -1856,7 +1860,8 @@ export class CobrosService {
 
     const rows: OrdenListRow[] = await this.db.query(
       `SELECT o.orden_id, o.codigo_orden, o.pagador_ref, o.referencia_externa, o.venta_id,
-              o.descripcion, o.monto, o.moneda, o.estado, o.origen, o.creado_el
+              o.descripcion, o.monto, o.moneda, o.estado, o.origen,
+              o.motivo_sin_venta, o.creado_el
        FROM pasarela_ordenes o
        WHERE o.tenant_id = $1 AND o.eliminado_el IS NULL
        ${filters}
@@ -1888,6 +1893,11 @@ export class CobrosService {
     if (query.origen) {
       params.push(query.origen);
       filters += ` AND o.origen = $${params.length}`;
+    }
+    // "Pagada sin venta": mismo criterio que `esPagadaSinVenta`. Una reembolsada
+    // conserva el motivo pero ya no pide atención.
+    if (query.sinVenta) {
+      filters += ` AND o.estado = 'pagada' AND o.motivo_sin_venta IS NOT NULL`;
     }
     if (query.fechaDesde) {
       params.push(query.fechaDesde);
@@ -1929,6 +1939,7 @@ export class CobrosService {
       moneda: r.moneda,
       estado: r.estado,
       origen: r.origen,
+      motivoSinVenta: r.motivo_sin_venta,
       creadoEl: r.creado_el,
     };
   }

@@ -10,6 +10,7 @@ import { Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
 import Decimal from 'decimal.js';
 import {
+  esPagadaSinVenta,
   MONEDA_ORDEN_V1,
   PasarelaOrden,
 } from '../entities/pasarela-orden.entity';
@@ -69,13 +70,26 @@ export class PagosRedirectService {
     return `W${Date.now().toString(36)}${randomBytes(4).toString('hex')}`.toUpperCase();
   }
 
+  /**
+   * El estado de una orden de cara a la app que la pidió. La pagada sin venta
+   * tiene uno propio: con `pagada` el comprador leía "Tu compra fue
+   * registrada" sobre una venta que no existe (pendientes.md § 3, D).
+   */
+  private estadoParaLaApp(orden: PasarelaOrden): string {
+    return esPagadaSinVenta(orden) ? 'pagada_sin_venta' : orden.estado;
+  }
+
   /** URL de retorno al navegador según el estado resuelto de la orden. */
   private urlRetornoApp(orden: PasarelaOrden): string {
     const urls = (orden.metadata?.urls ?? {}) as Record<string, string>;
     // conciliada = pagada + materializada; de cara al usuario es un éxito.
-    const estado = orden.estado === 'conciliada' ? 'pagada' : orden.estado;
+    const estado =
+      orden.estado === 'conciliada' ? 'pagada' : this.estadoParaLaApp(orden);
     let base: string;
-    if (estado === 'pagada') base = urls.exito ?? '';
+    // Sin venta también vuelve a la URL de éxito: la plata llegó, y la página
+    // de retorno distingue el caso por el estado.
+    if (estado === 'pagada' || estado === 'pagada_sin_venta')
+      base = urls.exito ?? '';
     else if (estado === 'pendiente') base = urls.pendiente ?? urls.exito ?? '';
     else base = urls.fracaso ?? '';
     const sep = base.includes('?') ? '&' : '?';
@@ -293,7 +307,8 @@ export class PagosRedirectService {
       {}) as Partial<ResultadoPagoMeta>;
     return {
       ordenId: orden.ordenId,
-      estado: orden.estado,
+      // El motivo de la pagada sin venta NO va: es del admin (`/ordenes`).
+      estado: this.estadoParaLaApp(orden),
       ventaId: orden.ventaId,
       // Comprobante (éxito) y motivo de rechazo (nivel 2) para la página de retorno.
       tipoPago: rp.tipoPago ?? null,

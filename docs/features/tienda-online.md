@@ -130,10 +130,30 @@ venta —autorizado de menos o de más contra lo que el callback cobra con los i
 
 **Lo que todavía lo deja abierto** (medido el 2026-10-09): el callback recalcula con el catálogo y
 el reloj del retorno. Una promo por hora que termina, una regla que vence a medianoche, o un precio o
-una tasa que cambian mientras el comprador está en Webpay dejan la orden `pagada` sin venta, y el
-comprador ve "registrada". Lo fija `tienda-dos-ahoras.e2e-spec.ts`. El owner decidió ese mismo día
-que la venta vale lo que se pagó, que la orden sin venta avise y que una venta online no lleve vuelto.
-Falta construirlo: [`pendientes.md`](../agent/pendientes.md) § 3.
+una tasa que cambian mientras el comprador está en Webpay dejan la orden `pagada` sin venta. Lo fija
+`tienda-dos-ahoras.e2e-spec.ts`. El owner decidió ese mismo día tres cosas: que la venta vale lo que
+se pagó (la **A**, frente fiscal propio, todavía abierta en [`pendientes.md`](../agent/pendientes.md)
+§ 3), que la orden sin venta avise y que una venta online no lleve vuelto. Las dos últimas están
+construidas (2026-10-10):
+
+- **La orden pagada sin venta avisa y no miente (D).** El redirect lleva `estado=pagada_sin_venta`.
+  `/tienda/retorno` dice *"Recibimos tu pago pero no pudimos registrar la compra; el local se
+  comunicará contigo"* y vacía el carrito, porque el cargo existe. El motivo no se le muestra al
+  comprador. El admin lo ve en Órdenes y en la tarjeta "Pagos sin venta" del inicio
+  ([pasarela-pagos.md](pasarela-pagos.md)). La plata se devuelve con el reembolso manual, y nada
+  crea la venta "después", solo.
+- **La venta online no lleva vuelto (E).** Lo pagado tiene que ser igual al total. De más es 400:
+  *"Las ventas online no admiten vuelto: lo pagado supera el total"*. Antes, con `permite_vuelto`
+  en la tarjeta, un precio que bajaba creaba la venta con un vuelto sobre la tarjeta que nadie
+  devolvía. Ahora es una orden pagada sin venta, como con cualquier otra tarjeta. Vale también
+  para la venta del alta de suscripción, que paga el total de un cálculo de la misma request. Si
+  el precio bajara en esa ventana, el alta ya no crea la venta con vuelto: la transacción del
+  cobro vuelve atrás y la orden queda `en_proceso` para que el reintento la aclare (ADR-029),
+  igual que ya pasaba cuando el precio subía.
+
+Dos cosas quedan abiertas, para el owner, en [`pendientes.md`](../agent/pendientes.md) § 4:
+`verificar` puede dejar una orden de la tienda pagada sin venta y sin aviso, y la marca no se
+apaga si la venta se registra a mano.
 
 Un ítem pausado **no llega al catálogo**: las cuatro superficies de venta piden
 `GET /items?...&activo=true` y el filtro se resuelve en la query, no en el cliente
@@ -673,5 +693,7 @@ que devuelve Transbank (no un método fijo):
   retorno** (`/tienda/retorno`).
 - En **rechazo**, `/tienda/retorno` muestra el motivo nivel 2 traducido desde el
   `response_code` (ver `pasarela/utils/codigos-respuesta.ts`).
+- **Aprobado pero sin venta** (`pagada_sin_venta`, 2026-10-10), `/tienda/retorno` no dice
+  "registrada": dice que el pago llegó y que el local se va a comunicar.
 
 Detalle del mecanismo en [pasarela-pagos.md](pasarela-pagos.md).
