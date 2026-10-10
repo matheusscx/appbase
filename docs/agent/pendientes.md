@@ -111,14 +111,6 @@ destapa una decisión que no es mía).
      sentido. Además, `docs/features/gestion-cajas.md` nombra como consecuencia aceptada solo el
      caso de las ventas, no el de anular un pago a proveedor, que se destraba con una salida.
 
-- [ ] **La tienda calcula el total dos veces, con dos "ahora": lo que cambia entre el pago y el callback deja un cargo sin venta** (backend; lo vio la revisión de seguridad del frente "reglas de línea salen del ítem", 2026-10-06; **leído en el código, no corrido**; las citas de línea son contra `54bc8f6e`). `POST /online/pagar` calcula el total con `calcular()` y ese número es el que se autoriza en Webpay. Cuando el comprador vuelve del formulario de Transbank, el callback (`online-callback.handler.ts`) crea la venta con `VentasService.crear`, que **vuelve a calcular desde cero** con el snapshot de la orden (solo `itemId`, `cantidad` y presentación) y el pago fijado en el total autorizado. Si los dos cálculos no dan lo mismo, la venta no se crea:
-  - **total del callback mayor** → `ventas.service.ts:1019` *"Las ventas online requieren el pago completo"*;
-  - **total del callback menor** → el pago sobra, y sin `permite_vuelto` en el método de tarjeta (el seed solo lo tiene en efectivo) `pagos.service.ts:270` da *"El pago supera el total pero ningún método de pago permite vuelto"*. Con `permite_vuelto`, la venta se guarda con vuelto sobre una tarjeta.
-  - **Dónde sale cada "ahora".** Los dos pasan por `calcular()` sin `cuentaId` (la tienda lo pisa en `prepararLineasCheckout`), así que `instanteDeVigencia` devuelve `new Date()` (`calculo-precios.service.ts:566-567`) **en el momento de cada llamada**: uno al iniciar el pago, el otro al volver de Webpay, minutos después. Además del instante, los dos leen vivo el catálogo: precio del ítem, `valor_del_dia` de la moneda (`:260-262`, un ítem en USD), reglas y su pausa, promos.
-  - **La escena.** Promo "Happy hour 20%" de 18:00 a 19:59 (`hora_inicio`/`hora_fin` de `promociones`). El comprador paga un carrito de $10.000 a las 19:59:30: Webpay autoriza $8.000. Tarda un minuto en el formulario y el callback corre a las 20:00:30 sin la promo: total $10.000 contra $8.000 pagados → 400 → **$8.000 cobrados y ninguna venta**. Lo mismo con una promo que empieza, una regla con `fechaFin` que vence a medianoche, un cambio de precio o de tasa del día mientras alguien paga.
-  - **Qué cubre hoy "la orden reconciliable".** El dispatcher (`callback-dispatcher.service.ts:52-61`) atrapa el error y deja la orden en `pagada` sin `ventaId` (no `conciliada`), con un `logger.error`. El admin la ve en Ventas ▸ Órdenes (filtro por estado) y la puede **reembolsar** entera: "una orden sin venta se reembolsa sin corrección" (`pasarela-pagos.md`).
-  - **Qué no cubre.** (1) **No hay forma de crear la venta después**: no existe un "reintentar el callback". `POST /pasarela/ordenes/:id/verificar` solo acepta `en_proceso`/`expirada` (`cobros.service.ts:1393`), y aunque existiera, recalcularía con un tercer "ahora". (2) **Nadie se entera**: no hay aviso al admin, solo el log. (3) **El comprador ve "Pago aprobado. Tu compra fue registrada correctamente."** (`tienda/retorno.vue:88-91`): `urlRetornoApp` (`pagos-redirect.service.ts:75-76`) manda `estado=pagada` igual con la orden sin venta, y la pantalla solo esconde el botón "Ver detalle de la venta".
-  - **Lo que hay que decidir** (diseño aparte, no de arrastre): congelar en el snapshot de la orden lo que el checkout cobró (el total, o las líneas resueltas, como `reglasCongeladas` del salón) y que el callback lo respete, o calcular el callback con el instante del checkout. Y por separado, que una orden pagada sin venta avise y no le diga al comprador que su compra quedó registrada.
 
 - [ ] **Medir la ventana de consulta de Webpay Plus con un pago de más de 7 días** (queda del
   cierre de "Probar en el sandbox de Transbank el saldo…", 2026-10-04, [`resueltos.md`](resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04)).
@@ -191,6 +183,80 @@ oficial, `cashRounding`, el conteo por denominación, el envío diario del resum
 la acumulación de descuentos y compras— y el renombre de `moneda.decimales` se mudaron a
 [`desarrollo-nuevo.md`](desarrollo-nuevo.md) el 2026-10-06. Acá quedan las correcciones.
 
+- [ ] **La tienda calcula el total dos veces, con dos "ahora": lo que cambia entre el pago y el
+  retorno deja un cargo sin venta** (backend + producto; lo vio la revisión de seguridad del frente
+  "reglas de línea salen del ítem", 2026-10-06; **medido el 2026-10-09** con
+  [`tienda-dos-ahoras.e2e-spec.ts`](../../backend/test/tienda-dos-ahoras.e2e-spec.ts), proveedor
+  falso, citas contra `0339f214`; **decidido por el owner el mismo día**, abajo). `POST /online/pagar` calcula y autoriza ese total en Webpay. Al
+  volver, `OnlineCallbackHandler` crea la venta con `VentasService.crear`, que **recalcula** desde
+  el snapshot (solo ítem y cantidad) y fija el pago en lo autorizado
+  (`online-callback.handler.ts:79`). Los dos cálculos van sin `cuentaId`, así que cada uno toma
+  su propio `new Date()`: el de las promos en `calculo-precios.service.ts:650` y el de la fecha de
+  las reglas en `:689`. Los dos leen el catálogo vivo: precio, reglas, promos y la tasa del día
+  (`:256`).
+  - **Lo medido** (ítem de $10.000 + IVA, Paris):
+
+    | Qué cambia entre el pago y el retorno | Autorizado | El retorno calcula | Resultado |
+    |---|---|---|---|
+    | nada (control) | 11.900 | 11.900 | venta, orden `conciliada` |
+    | la hora: promo 18:00–19:59, pago 19:59:30, retorno 20:00:30 | 9.520 | 11.900 | **sin venta** |
+    | la fecha: descuento con `fechaFin` hoy, 23:59:30 → 01:00:30 del día siguiente | 10.710 | 11.900 | **sin venta** |
+    | el precio sube a 12.000 | 11.900 | 14.280 | **sin venta** |
+    | el precio baja a 8.000 | 11.900 | 9.520 | **sin venta** (vuelto) |
+    | el precio baja, tarjeta con `permite_vuelto` | 11.900 | 9.520 | venta, **vuelto 2.380 sobre la tarjeta** |
+    | la tasa USD pasa de 950 a 1.000 (ítem de US$10) | 11.305 | 11.900 | **sin venta** |
+
+    Los dos casos de reloj se midieron con `Date` falso y **sin tocar el catálogo**: son los dos
+    "ahora" en estado puro. El mutante que no mueve el reloj en el retorno da rojo en los dos.
+  - **El cargo sin venta, hoy.** El callback mayor rechaza con *"Las ventas online requieren el
+    pago completo"* (`ventas.service.ts:1025`). El menor rechaza con *"…ningún método de pago
+    permite vuelto"* (`pagos.service.ts:270`). El dispatcher se traga el error
+    (`callback-dispatcher.service.ts:53-62`). Lo medido es esto:
+    - La orden queda `pagada`, sin `venta_id`, y no se crea ninguna venta.
+    - El motivo queda **solo** en un `logger.error`.
+    - El comprador recibe `estado=pagada` (`pagos-redirect.service.ts:76`), y
+      `GET /online/orden/:id` da `{estado: 'pagada', ventaId: null}`: la pantalla dice *"Tu
+      compra fue registrada correctamente"*.
+    - `POST /pasarela/api/ordenes/:id/verificar` da 400 *"La orden ya está resuelta (pagada)"*.
+    - **Lo único que funciona** es el reembolso manual del admin: queda aprobado, sin nota, y
+      la venta sigue sin existir.
+  - **El vuelto sobre la tarjeta es un hallazgo aparte.** Que una venta online cobrada con
+    tarjeta registre "vuelto" depende solo de que nadie prenda `permite_vuelto` en ese método.
+    Cuando pasa, la diferencia cobrada de más queda anotada como entregada y nadie la devuelve.
+    No se midió qué le hace eso a la cuadratura de la caja virtual.
+  - **Decidido (owner, 2026-10-09).** Se le preguntó vía la orquestadora con AskUserQuestion: la
+    escena en lenguaje de local, el costo de cada opción y la A marcada como recomendada. No pidió
+    pasada de investigación de mercado. Las otras opciones (B, solo congelar el instante, que cubría
+    2 de los 6 casos; C, reembolsar solo) quedaron afuera. Rehacer la venta sola nunca fue opción:
+    es un reintento automático y calcularía con un tercer "ahora".
+    - **A. "Vale lo que pagó": congelar en la orden lo que se cobró, y que el callback cree la
+      venta con eso, sin recalcular.** `pagar` guarda en el snapshot el resultado resuelto:
+      líneas, impuestos, reglas y promos aplicadas. Lo arma el servidor y nunca viene del
+      cliente. **Va como frente propio, con el sistema quieto:** toca el motor, y la boleta sale
+      de ahí. Es fiscal (ADR-010, "congelar el hecho fiscal en la transacción").
+      - *Hay precedente:* `crearEnTransaccion` ya tiene un canal interno, `lineasCongeladas`
+        (el tipo en `ventas.service.ts:392-404`, el parámetro en `:622`), que congela precio, tasa y reglas de línea. Probablemente
+        cuesta menos que una entrada nueva.
+      - *Lo que el precedente no cubre:* no congela promos ni la fecha de vigencia. La grieta del
+        salón está en `calculo-precios.service.ts:828-832`, y el caso de la hora la necesita.
+      - *Lo que A no cubre:* lo que no es precio. Un ítem borrado o sin stock entre el pago y el
+        retorno sigue dejando el cargo sin venta. Para eso va la D.
+    - **D. La orden pagada sin venta avisa y no miente** (va siempre). Es chica.
+      - El comprador ve "Recibimos tu pago pero no pudimos registrar la compra" en vez de
+        "registrada". `urlRetornoApp` distingue la orden `pagada` de origen interno sin
+        `ventaId`, y `retorno.vue` suma una vista.
+      - El admin recibe un aviso, no solo el log. La plata se sigue devolviendo con el reembolso
+        manual, que hoy funciona.
+    - **E. La venta online solo se crea si lo pagado es igual al total, nunca con vuelto.** Es
+      chica: va en `ventas.service.ts`, junto al chequeo del pago completo (`:1018-1028`).
+      - Cierra la venta del hallazgo aparte: precio que baja con `permite_vuelto` en la tarjeta,
+        que hoy se crea con un vuelto de 2.380 que nadie devuelve.
+      - Cuando el test lo dé vuelta, ese caso pasa a cargo sin venta, igual que con la tarjeta del
+        seed. Con A ya no ocurre.
+      - Queda sin preguntar, y no hace falta para E: si una tarjeta debería poder tener
+        `permite_vuelto`.
+    - **Al construir:** `tienda-dos-ahoras.e2e-spec.ts` fija la conducta de hoy, así que cada caso
+      se da vuelta a propósito. El control sin cambios tiene que seguir igual.
 
 - [ ] **El token de Google viaja por la URL** — ⬇️ **prioridad muy baja, reconfirmada por el
   owner el 2026-08-22** (backend + frontend, auditoría RBAC/auth 2026-08-15; **dos lentes

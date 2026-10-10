@@ -128,6 +128,13 @@ descarta (documentado en `online.service.ts`). Los `impuestoIds` de una línea t
 en las cuatro puertas del motor (owner, 2026-10-06, fiscal), y con ellos se cerró el mismo cargo sin
 venta —autorizado de menos o de más contra lo que el callback cobra con los impuestos del ítem—.
 
+**Lo que todavía lo deja abierto** (medido el 2026-10-09): el callback recalcula con el catálogo y
+el reloj del retorno. Una promo por hora que termina, una regla que vence a medianoche, o un precio o
+una tasa que cambian mientras el comprador está en Webpay dejan la orden `pagada` sin venta, y el
+comprador ve "registrada". Lo fija `tienda-dos-ahoras.e2e-spec.ts`. El owner decidió ese mismo día
+que la venta vale lo que se pagó, que la orden sin venta avise y que una venta online no lleve vuelto.
+Falta construirlo: [`pendientes.md`](../agent/pendientes.md) § 3.
+
 Un ítem pausado **no llega al catálogo**: las cuatro superficies de venta piden
 `GET /items?...&activo=true` y el filtro se resuelve en la query, no en el cliente
 (2026-08-09). El parámetro tiene tres estados —ausente no filtra, `true` vendibles,
