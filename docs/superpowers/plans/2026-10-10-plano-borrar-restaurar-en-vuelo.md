@@ -1,6 +1,6 @@
 # Plan: el plano no saca la mesa que esta pantalla borró y restauró con el guardado en vuelo
 
-**Status**: In Progress
+**Status**: Done
 **Date**: 2026-10-10
 **Owner**: orquestadora (encargo)
 
@@ -35,7 +35,8 @@ plano la saca del plano estando viva, hasta recargar". Diseño y decisión:
 ## Verification
 
 - [x] Gate del frontend (`build`, `test`, `typecheck:ratchet`, `design:check`).
-- [ ] Playwright entero, por turno de la orquestadora, un solo stack.
+- [x] Playwright entero, por turno de la orquestadora, un solo stack: 114/114 (2026-10-10,
+  RestartCount 0 y sin OOM antes y después).
 - [x] `verify-feature` con revisión independiente y recibo del pre-commit.
 
 ## Decisions / Open questions
