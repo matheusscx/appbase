@@ -519,22 +519,6 @@ fiscal y va solo:
   puede escribir. Falta construirlo. Va con la prioridad baja que el owner le dio a la pasarela el
   mismo día.
 
-## 4. Necesita que el owner conteste
-
-Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
-elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
-prohíbe.
-
-- [ ] **Un `REFUND` marcado "Sin nota de crédito" cuya venta ya está corregida entera por otras
-  notas no tiene salida** (backend + producto; anotado el 2026-10-04 al cerrar "Generar nota",
-  [`resueltos.md`](resueltos.md); **solo si aparece en uso real** — hoy no se construye, lo decidió
-  la Sesión de esfuerzo máximo). Escena: una venta online de $100.000 pagada con dos tarjetas, un
-  reembolso de $70.000 cuya nota falló, y después dos notas del POS "por el pago" que acreditan los
-  $100.000. "Generar nota" da 400 *"La venta ya está corregida entera…"* cada vez y el `REFUND`
-  sigue marcado para siempre. **La pregunta para el owner:** ¿se liga el `REFUND` a una de las
-  notas que ya existen (¿cuál, si son dos?), o se descarta la marca con un motivo escrito? Ninguna
-  de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
-
 - [ ] **`verificar` resuelve a `pagada` una orden de la tienda sin crear la venta y sin dejar el
   aviso** (backend + producto; lo encontró la revisión independiente del frente D/E el 2026-10-10,
   [`resueltos.md`](resueltos.md#la-orden-pagada-sin-venta-avisa-y-la-venta-online-no-lleva-vuelto-d-y-e-cerradas-2026-10-10);
@@ -550,12 +534,42 @@ prohíbe.
   verificación, sin venta") para que el admin la resuelva? La primera es crear la venta
   "después", con un tercer "ahora", y la regla de no reintentar solo no la tiene que decidir el
   agente.
+  **Decidido (owner, 2026-10-10, por AskUserQuestion de la orquestadora, con escena y costo de cada
+  opción): marcarla sin venta.** Cuando `verificar` encuentra pagada una orden de la tienda, la deja
+  `pagada` con `motivo_sin_venta` = "se confirmó por verificación", para que aparezca en el filtro y
+  en la tarjeta de Inicio. **No** crea la venta: con el recálculo de hoy caería igual sin venta, y
+  crearla "después" es otro "ahora". Se puede revisar cuando exista "vale lo que pagó" (la A de la
+  entrada de los dos "ahora"). Es chico. **Medir antes** con un e2e que el camino exista como se
+  leyó.
+
 - [ ] **La marca "Pagada sin venta" no se apaga si el admin registra la venta a mano** (producto;
   la vio la revisión del frente D/E, 2026-10-10). El aviso dice "devolvé el cargo o registrá la
   venta a mano", pero nada liga una venta hecha en el POS a la orden. Solo el reembolso total la
   saca de `pagada`, así que la orden resuelta a mano sigue en la tarjeta de Inicio para siempre.
   **La pregunta para el owner:** ¿el admin liga la orden a una venta existente, se descarta la
   marca con un motivo escrito, o el único camino válido es reembolsar?
+  **Decidido (owner, 2026-10-10, por AskUserQuestion de la orquestadora, con escena y costo de cada
+  opción): ligarla a una venta.** En el detalle de la orden, el admin elige la venta que registró a
+  mano, y la orden queda ligada y deja de marcarse. Hay que validar que la venta sea compatible:
+  mismo tenant, monto, sin otra orden ligada. Queda rastro de quién la ligó y cuándo. **Descartar
+  con un motivo escrito** y **"solo reembolsar"** quedaron descartados: el primero no deja prueba
+  de que la venta exista. Costo medio.
+
+## 4. Necesita que el owner conteste
+
+Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
+elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
+prohíbe.
+
+- [ ] **Un `REFUND` marcado "Sin nota de crédito" cuya venta ya está corregida entera por otras
+  notas no tiene salida** (backend + producto; anotado el 2026-10-04 al cerrar "Generar nota",
+  [`resueltos.md`](resueltos.md); **solo si aparece en uso real** — hoy no se construye, lo decidió
+  la Sesión de esfuerzo máximo). Escena: una venta online de $100.000 pagada con dos tarjetas, un
+  reembolso de $70.000 cuya nota falló, y después dos notas del POS "por el pago" que acreditan los
+  $100.000. "Generar nota" da 400 *"La venta ya está corregida entera…"* cada vez y el `REFUND`
+  sigue marcado para siempre. **La pregunta para el owner:** ¿se liga el `REFUND` a una de las
+  notas que ya existen (¿cuál, si son dos?), o se descarta la marca con un motivo escrito? Ninguna
+  de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
 
 ## 5. Carreras de concurrencia
 
