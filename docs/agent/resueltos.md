@@ -170,8 +170,8 @@ contenedor.**
 
 ## El alta de suscripción de la tienda no se envía dos veces (cerrada 2026-10-09)
 
-Sale de [`pendientes.md`](pendientes.md) § 2. Deja una entrada nueva en la misma sección: el backend
-tampoco frena dos `POST /suscripciones` iguales.
+Sale de [`pendientes.md`](pendientes.md) § 2. Deja una entrada nueva, medida y decidida el mismo día, hoy en
+la § 3: el backend tampoco frena dos `POST /suscripciones` iguales.
 
 ### La entrada que cierra, como estaba en `pendientes.md` § 2
 
