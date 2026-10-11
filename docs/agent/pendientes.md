@@ -80,6 +80,21 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **La pantalla de retorno de la tienda muestra "rechazada" para una orden `reembolsada`**
+  (frontend, `tienda/retorno.vue`; lo vio la revisión del frente "los escritores de la orden"
+  `793abdfd`, 2026-10-11; **leído, no medido**). El mapeo de estados manda `reembolsada` a la vista
+  de pago rechazado. Ya era así para cualquier orden reembolsada, pero desde `793abdfd` es
+  alcanzable en el retorno mismo: el admin devuelve el cargo mientras se crea la venta (opción A
+  del owner: queda `reembolsada` con la venta ligada). El comprador vería "tu pago fue rechazado"
+  cuando en realidad se le cobró y se le devolvió. Medir con un e2e de navegador y decidir el texto
+  (probablemente "tu pago fue devuelto").
+- [ ] **La expiración perezosa excluye las órdenes del alta de suscripción y nada lo prueba**
+  (backend, `cobros.service.ts` `obtenerOrden`; anotado el 2026-10-11 al integrar `793abdfd`).
+  El UPDATE condicionado que expira la orden copia el WHERE del cron, incluida la exclusión de
+  `solicitud_idempotente_id` (ADR-029: la orden del alta no expira). Ningún test, de ningún nivel,
+  falla si se saca esa cláusula, ni en el cron ni acá. Agregar el caso (orden del alta vencida →
+  no expira) en los dos lugares, con mutante.
+
 - [ ] **Intermitente de Playwright: `caja/historial-cajero.spec.ts:91` no ve el toast a tiempo**
   (frontend e2e; visto el 2026-10-11 en el Playwright entero del frente del salón, `b6721c3a`, que
   no toca caja). El toast "El historial de cajas es solo para supervisión" no apareció en 5 s en
