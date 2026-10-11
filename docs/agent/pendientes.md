@@ -80,20 +80,26 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
-- [ ] **La pantalla de retorno de la tienda muestra "rechazada" para una orden `reembolsada`**
-  (frontend, `tienda/retorno.vue`; lo vio la revisión del frente "los escritores de la orden"
-  `793abdfd`, 2026-10-11; **leído, no medido**). El mapeo de estados manda `reembolsada` a la vista
-  de pago rechazado. Ya era así para cualquier orden reembolsada, pero desde `793abdfd` es
-  alcanzable en el retorno mismo: el admin devuelve el cargo mientras se crea la venta (opción A
-  del owner: queda `reembolsada` con la venta ligada). El comprador vería "tu pago fue rechazado"
-  cuando en realidad se le cobró y se le devolvió. Medir con un e2e de navegador y decidir el texto
-  (probablemente "tu pago fue devuelto").
-- [ ] **La expiración perezosa excluye las órdenes del alta de suscripción y nada lo prueba**
-  (backend, `cobros.service.ts` `obtenerOrden`; anotado el 2026-10-11 al integrar `793abdfd`).
-  El UPDATE condicionado que expira la orden copia el WHERE del cron, incluida la exclusión de
-  `solicitud_idempotente_id` (ADR-029: la orden del alta no expira). Ningún test, de ningún nivel,
-  falla si se saca esa cláusula, ni en el cron ni acá. Agregar el caso (orden del alta vencida →
-  no expira) en los dos lugares, con mutante.
+- [ ] **La pantalla de retorno de la tienda muestra "rechazado" para una orden `procesando` o
+  `en_proceso`** (frontend, `tienda/retorno.vue`; anotado el 2026-10-11 por el frente "cuatro
+  cabos sueltos de la orden", **leído, no medido**). La rama del final manda los dos estados a
+  "Pago rechazado… Tu carrito sigue disponible para reintentar", y ninguno es un rechazo: la
+  orden todavía no se resolvió, y el cargo pudo salir. Se llega poco: desde ese frente, la
+  anulación que entra mientras el retorno confirma redirige con `procesando` (antes la dejaba
+  `fallida` y la pantalla decía lo mismo). Decidir el texto con la orquestadora (¿"Pago
+  pendiente"?, ¿se vacía el carrito?).
+
+- [ ] **Una orden que el retorno dejó `procesando` sin compensar no la saca nadie** (backend,
+  `pagos-redirect.service.ts` `confirmarRetorno`; lo vio la revisión independiente del frente
+  "cuatro cabos sueltos de la orden", 2026-10-11; **leído, no medido**). El claim
+  (`en_proceso` → `procesando`) commitea solo, antes de llamar a Transbank, y la orden queda
+  `procesando` si no se llega a compensar: `verificar` responde 400, el cron y la expiración
+  perezosa no la miran, y no se puede reembolsar. El cargo pudo salir. Hay tres caminos, y no
+  solo la muerte del proceso: el `findOne` que sigue al claim está **antes** del `try` (un error
+  de base ahí sale sin compensar), la compensación misma es un `update` que puede fallar, y el
+  proceso puede morir en el medio. El arreglo cambia según el camino (meter el claim adentro de
+  la protección, volver robusta la compensación, o que `verificar` rescate una `procesando`
+  vieja): medir los dos primeros, que se arman en el e2e, antes de elegir.
 
 - [ ] **Intermitente de Playwright: `caja/historial-cajero.spec.ts:91` no ve el toast a tiempo**
   (frontend e2e; visto el 2026-10-11 en el Playwright entero del frente del salón, `b6721c3a`, que
@@ -410,25 +416,6 @@ prohíbe.
 
 
 ## 5. Carreras de concurrencia
-
-- [ ] **`vincularVenta` (el alta de suscripción) lee la orden sin lock y la guarda entera** (backend,
-  `cobros.service.ts` `vincularVenta`; anotado el 2026-10-11 por el frente "los escritores de la
-  orden", **leído, no medido**). Es el gemelo de los que cerró ese frente
-  ([`resueltos.md`](resueltos.md)): `findOne`, exige `pagada` y `save` con `conciliada` y la venta.
-  Un reembolso que entre entre el cobro del alta y el vínculo queda pisado (`reembolsada` →
-  `conciliada`). La ventana es lo que tarda crear la venta inicial en la misma request. **El
-  arreglo, por analogía:** el cierre del dispatcher (estado condicionado y `venta_id` ligado igual,
-  owner 2026-10-11). Hay que medir antes si la ventana existe.
-
-- [ ] **La anulación de Webpay puede marcar `fallida` una orden que el retorno está confirmando**
-  (backend, `pagos-redirect.service.ts`; anotado el 2026-10-11 por el frente "los escritores de la
-  orden", **leído, no medido**). `abortarRetorno` acepta `procesando`, el estado que deja el claim
-  de `confirmarRetorno` mientras confirma, y el retorno no tiene lock en esa ventana. Si los dos
-  llegan juntos, el `save` del retorno escribe `pagada` encima de la anulación. Si el commit falla
-  por comunicación, la compensación (`procesando` → `en_proceso`) no encuentra la fila y la orden
-  queda `fallida` con una AUTHORIZATION `error`: un pago que pudo salir, leído como fracaso.
-  Transbank no debería mandar las dos vueltas para la misma transacción. **Sin decidir:** si
-  `procesando` sale de los estados que anula.
 
 ---
 

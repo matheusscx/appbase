@@ -359,7 +359,12 @@ ya no lo hacen:
 
 - La expiración perezosa de `obtenerOrden` (el drawer) es un UPDATE condicionado al estado,
   con el mismo WHERE que el cron `expirar-ordenes`, y corre antes de leer.
-- El retorno de anulación (`abortarRetorno`) toma la orden con `FOR UPDATE`.
+- El retorno de anulación (`abortarRetorno`) toma la orden con `FOR UPDATE`, y **no anula
+  una `procesando`** (2026-10-11): el retorno ya tiene el `token_ws` y lo que conteste el
+  commit de Transbank decide (sobre una transacción anulada vuelve 4xx, y queda `fallida`
+  por ese camino). El retorno no bloquea la orden mientras confirma, así que la anulación la
+  dejaba `fallida` debajo suyo; si Transbank no contestaba, la compensación ya no la
+  encontraba y un cargo quizá aprobado quedaba `fallida`, donde `verificar` no la mira.
 
 Si `verificar` tiene la orden bloqueada, los dos esperan y deciden por lo que quedó. Antes
 dejaban `expirada` o `fallida`, sin la metadata de la verificación, una orden que `verificar`

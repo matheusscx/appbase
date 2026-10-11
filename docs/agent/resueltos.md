@@ -23,6 +23,148 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Cuatro cabos sueltos de la orden: el retorno de una reembolsada, la expiración del alta, `vincularVenta` y la anulación sobre `procesando` (cerradas 2026-10-11)
+
+Salen de [`pendientes.md`](pendientes.md) § 2 y § 5. Las cuatro las anotó el frente "los
+escritores de la orden" (`793abdfd`, abajo), leídas y no medidas. Se midieron antes de tocar
+nada: **dos se confirmaron, una se refutó y una estaba a medias.**
+
+### Las entradas que cierran, como estaban en `pendientes.md`
+
+- [ ] **La pantalla de retorno de la tienda muestra "rechazada" para una orden `reembolsada`**
+  (frontend, `tienda/retorno.vue`; lo vio la revisión del frente "los escritores de la orden"
+  `793abdfd`, 2026-10-11; **leído, no medido**). El mapeo de estados manda `reembolsada` a la vista
+  de pago rechazado. Ya era así para cualquier orden reembolsada, pero desde `793abdfd` es
+  alcanzable en el retorno mismo: el admin devuelve el cargo mientras se crea la venta (opción A
+  del owner: queda `reembolsada` con la venta ligada). El comprador vería "tu pago fue rechazado"
+  cuando en realidad se le cobró y se le devolvió. Medir con un e2e de navegador y decidir el texto
+  (probablemente "tu pago fue devuelto").
+- [ ] **La expiración perezosa excluye las órdenes del alta de suscripción y nada lo prueba**
+  (backend, `cobros.service.ts` `obtenerOrden`; anotado el 2026-10-11 al integrar `793abdfd`).
+  El UPDATE condicionado que expira la orden copia el WHERE del cron, incluida la exclusión de
+  `solicitud_idempotente_id` (ADR-029: la orden del alta no expira). Ningún test, de ningún nivel,
+  falla si se saca esa cláusula, ni en el cron ni acá. Agregar el caso (orden del alta vencida →
+  no expira) en los dos lugares, con mutante.
+
+  > **Corrección (2026-10-11, al medirla):** la mitad del cron era falsa. El caso *"el proceso
+  > cae después de cobrar: la orden no expira por reloj"* de `suscripcion-alta-doble.e2e-spec.ts`
+  > ya corría el cron sobre una orden del alta vencida, y sacar la cláusula del cron lo tiraba.
+  > Lo que no cubría nadie era la expiración perezosa de `obtenerOrden`.
+
+- [ ] **`vincularVenta` (el alta de suscripción) lee la orden sin lock y la guarda entera** (backend,
+  `cobros.service.ts` `vincularVenta`; anotado el 2026-10-11 por el frente "los escritores de la
+  orden", **leído, no medido**). Es el gemelo de los que cerró ese frente
+  ([`resueltos.md`](resueltos.md)): `findOne`, exige `pagada` y `save` con `conciliada` y la venta.
+  Un reembolso que entre entre el cobro del alta y el vínculo queda pisado (`reembolsada` →
+  `conciliada`). La ventana es lo que tarda crear la venta inicial en la misma request. **El
+  arreglo, por analogía:** el cierre del dispatcher (estado condicionado y `venta_id` ligado igual,
+  owner 2026-10-11). Hay que medir antes si la ventana existe.
+- [ ] **La anulación de Webpay puede marcar `fallida` una orden que el retorno está confirmando**
+  (backend, `pagos-redirect.service.ts`; anotado el 2026-10-11 por el frente "los escritores de la
+  orden", **leído, no medido**). `abortarRetorno` acepta `procesando`, el estado que deja el claim
+  de `confirmarRetorno` mientras confirma, y el retorno no tiene lock en esa ventana. Si los dos
+  llegan juntos, el `save` del retorno escribe `pagada` encima de la anulación. Si el commit falla
+  por comunicación, la compensación (`procesando` → `en_proceso`) no encuentra la fila y la orden
+  queda `fallida` con una AUTHORIZATION `error`: un pago que pudo salir, leído como fracaso.
+  Transbank no debería mandar las dos vueltas para la misma transacción. **Sin decidir:** si
+  `procesando` sale de los estados que anula.
+
+### Lo medido
+
+- **El retorno de una `reembolsada`: confirmado.** `GET /online/orden` devuelve el estado tal
+  cual (`reembolsada`, la venta ligada, sin motivo), y `retorno.vue` lo mandaba a la rama de
+  "en_proceso / procesando": **"Pago rechazado"**, con *"Tu carrito sigue disponible para
+  reintentar"*. Le decía "rechazado" a un comprador al que se le cobró y se le devolvió, y lo
+  invitaba a pagar de nuevo. Se midió con el unitario del mapeo (rojo con el código de
+  entonces) y con el e2e de API (lo que el endpoint devuelve). No con un e2e de navegador: la
+  pantalla es una sola lectura y el mapeo es lo único que decide.
+- **La expiración del alta: a medias.** La mitad del cron **ya estaba cubierta**: el caso *"el
+  proceso cae después de cobrar: la orden no expira por reloj"* de
+  `suscripcion-alta-doble.e2e-spec.ts` corre el cron sobre una orden del alta vencida. Sacar la
+  cláusula del cron lo tira (1 de 12). La que no cubría nadie era la expiración perezosa de
+  `obtenerOrden`: sin la cláusula, todo seguía verde.
+- **`vincularVenta`: refutada, no hay ventana.** El alta corre entera en la tx del cobro (tx1
+  de `ejecutarConEfectoExterno`): `efectuarCobro` bloquea la orden y la deja `pagada`, y
+  `materializarAlta` crea la venta y llama a `vincularVenta` en la **misma** tx
+  (`db.transaccion` reusa la activa). `pagada` nunca se commitea antes que `conciliada`, y la
+  fila está bloqueada todo el tiempo. Medido: un reembolso total que entra mientras se crea la
+  venta **queda esperando la fila** (`pg_stat_activity`, `wait_event_type = 'Lock'`), y al
+  soltarla la encuentra `conciliada` y hace el reembolso de siempre, con su nota de crédito.
+  La orden queda `reembolsada` con la venta ligada. No hubo nada que arreglar.
+- **La anulación sobre `procesando`: confirmada.** El retorno reclama la orden (`procesando`) y
+  confirma con Transbank sin lock. Si la anulación entra en ese momento, corre entera y la deja
+  `fallida`. Después:
+  - si Transbank aprueba, el `save` del retorno escribe `pagada` encima y la orden termina bien;
+  - si Transbank **no contesta**, la compensación (`procesando` → `en_proceso`) no la encuentra y
+    la orden queda **`fallida` con una AUTHORIZATION `error`**. `verificar` responde *"La orden
+    ya está resuelta"* a una `fallida`, así que un cargo quizá aprobado se quedaba como fracaso,
+    sin forma de aclararlo.
+
+### Cómo se cerró
+
+- **El retorno de una `reembolsada` dice "Pago devuelto".** Ícono de aviso, el texto *"Se te
+  cobró esta compra y el local te devolvió el pago. Si tienes dudas, comunícate con el local."*,
+  sin el botón de la venta, y **el carrito se vacía**. Lo decidió **la orquestadora** el
+  2026-10-11, por analogía con la pagada sin venta (D, que decidió el owner): lleno invita a
+  pagar de nuevo lo que el local decidió devolver. La alternativa era no vaciarlo, para que el
+  comprador reintente enseguida; su costo: si el local devolvió porque no tenía el producto, el
+  comprador paga otra vez y el admin reembolsa de nuevo. **El owner puede reabrirla.**
+- **La expiración perezosa del alta tiene su caso.** El mismo escenario del cron abre después
+  la orden en el drawer del admin y afirma que sigue `en_proceso`.
+- **`vincularVenta` no se tocó.** El caso nuevo de `suscripcion-alta-doble.e2e-spec.ts` fija
+  la garantía: el reembolso espera y la orden queda `reembolsada` con la venta ligada.
+- **La anulación ya no toca una `procesando`.** Es una decisión técnica sobre un estado interno,
+  así que la tomó esta sesión (la orquestadora estuvo de acuerdo). El porqué:
+  - `procesando` quiere decir que el retorno ya tiene el `token_ws` y está confirmando. Lo que
+    conteste Transbank decide, y la anulación no sabe nada que el commit no sepa.
+  - Transbank vuelve **una** sola vez por transacción: con `token_ws` (pago), con `TBK_TOKEN`
+    (anulación) o solo con `TBK_ORDEN_COMPRA` (timeout del formulario). El controller nunca
+    confirma si viene `TBK_TOKEN`. Las dos vueltas juntas no las manda Transbank: salen de un
+    pedido repetido o armado a mano.
+  - Si el pago de verdad se anuló, el commit lo dice: Transbank contesta 4xx a un commit sobre
+    una transacción no autorizada (su documentación; no se midió contra su ambiente), el
+    proveedor lee una respuesta menor a 500 con JSON legible y sin `AUTHORIZED` como rechazo, y
+    el retorno deja `fallida` por su cuenta. Un body que no es JSON es error de comunicación: la
+    orden vuelve a `en_proceso`. Si no contesta, la compensación
+    la devuelve a `en_proceso` y la aclara `verificar`.
+  - Anularla encima solo podía empeorar las cosas: en el mejor caso se pisaba, en el peor dejaba
+    `fallida` un cargo quizá aprobado.
+
+  **Lo que ve el comprador no empeora.** La anulación que llega sobre una `procesando`
+  redirige con el estado que hay. La pantalla de la tienda lee la orden y, si sigue
+  `procesando`, muestra "rechazado", lo mismo que mostraba con `fallida`. Esa rama quedó
+  anotada en § 2.
+
+  **La anulación no era el rescate de una `procesando` trabada.** Lo buscó la revisión
+  independiente: además del retorno (su `save` y su compensación), ningún escritor sale de
+  `procesando`. `verificar` responde 400, el cron y la expiración perezosa miran `creada` y
+  `en_proceso`, y el dispatcher y el reembolso piden `pagada`. La anulación la sacaba de ahí solo
+  si llegaba otra vuelta de Transbank después del `token_ws`, que no pasa. Un retorno que muere
+  entre el claim y el `save` deja la orden `procesando` para siempre, antes y después de este
+  frente: quedó anotado en § 2.
+
+### Tests y mutantes
+
+| Mutante | Cae |
+|---|---|
+| `retorno.vue` sin la rama `reembolsada` | el unitario de `retorno.nuxt.spec.ts` (vuelve "Pago rechazado") |
+| el UPDATE perezoso de `obtenerOrden` sin `solicitud_idempotente_id IS NULL` | el caso del alta caído después de cobrar (el drawer la deja `expirada`) |
+| el cron `expirar-ordenes` sin esa cláusula (ya caía antes de este frente) | el mismo caso (el cron la deja `expirada`) |
+| `abortarRetorno` vuelve a aceptar `procesando` | la anulación mientras el retorno confirma y Transbank no contesta (queda `fallida`), y su unitario |
+| el alta partida en dos tx: `efectuarCobro` sin lock y `pagada` commiteada aparte | el reembolso mientras el alta crea la venta (ya no espera la fila) |
+
+El último no revierte un arreglo, porque no lo hubo. Mide que el caso no es vacío: lo único que
+abriría la ventana es partir la tx del cobro, y eso el caso lo ve.
+
+El detector de "alguien espera la fila" de `suscripcion-alta-doble` busca el alias
+`"PasarelaOrden"` y no el nombre de la tabla. `pg_stat_activity.query` guarda 1024 bytes, y el
+`FOR UPDATE` de TypeORM nombra la tabla después de la lista de columnas. Con el nombre de la
+tabla, el caso daba un falso "no espera" (medido).
+
+Se restauró y se volvieron a correr los archivos en verde.
+
+---
+
 ## Escaneo de dependencias en CI (cerrada 2026-10-11)
 
 Sale de [`pendientes.md` § *Endurecimiento para producción*](pendientes.md). La entrada, verbatim:
@@ -992,12 +1134,10 @@ Los unitarios del dispatcher y de la expiración afirman la forma: binds sin hue
 antes de leer, y lo que recibe la orden en memoria. Qué órdenes toca lo decide el WHERE, y eso
 solo lo ve Postgres.
 
-**Lo que quedó afuera**, anotado en § 5:
-- `vincularVenta`, el gemelo del alta de suscripción.
-- La anulación que puede marcar `fallida` una orden `procesando`.
-
-La exclusión de la orden escrita antes de cobrar (`solicitud_idempotente_id`) es copia literal del
-cron y no tiene un caso propio en el e2e: tampoco lo tenía antes.
+**Lo que quedó afuera** se cerró el mismo día, en *"Cuatro cabos sueltos de la orden"*
+(arriba): `vincularVenta` resultó no tener ventana, la anulación ya no toca una `procesando`, y la
+exclusión de la orden del alta (`solicitud_idempotente_id`) tiene su caso en la expiración
+perezosa.
 
 ---
 

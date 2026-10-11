@@ -18,6 +18,7 @@ import { InscripcionesService } from '../src/modules/pasarela/services/inscripci
 import { TenantPasarelaService } from '../src/modules/pasarela/services/tenant-pasarela.service';
 import { CredencialesService } from '../src/modules/pasarela/services/credenciales.service';
 import { ExpirarOrdenesJob } from '../src/modules/cron/jobs/expirar-ordenes.job';
+import { VentasService } from '../src/modules/ventas/ventas.service';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris
 const ADMIN = { email: 'admin.paris@paris.cl', password: 'admin' };
@@ -58,6 +59,16 @@ describe('Suscripciones: el alta cobra una vez por intento (e2e)', () => {
 
   const autorizar = jest.fn<Promise<ResultadoCobro>, [unknown, unknown]>();
   const consultar = jest.fn<Promise<ResultadoEstado>, [unknown, unknown]>();
+  const reembolsar = jest.fn(() =>
+    Promise.resolve({
+      aprobada: true,
+      codigoRespuesta: '0',
+      codigoAutorizacion: 'AUT-E2E',
+      tipoPago: 'NULLIFIED',
+      request: {},
+      response: {},
+    }),
+  );
 
   const aprobado = (): Promise<ResultadoCobro> =>
     Promise.resolve({
@@ -135,10 +146,25 @@ describe('Suscripciones: el alta cobra una vez por intento (e2e)', () => {
       [ordenId],
     );
 
+  /**
+   * ¿Alguien está esperando el lock de una fila de órdenes? El `FOR UPDATE`
+   * de TypeORM nombra la tabla después de la lista de columnas, más allá de
+   * los 1024 bytes que guarda `pg_stat_activity.query`: se busca el alias.
+   */
+  const hayUnaEsperandoLaOrden = async (): Promise<boolean> => {
+    const filas: unknown[] = await ds.query(
+      `SELECT 1 FROM pg_stat_activity
+        WHERE wait_event_type = 'Lock'
+          AND query LIKE '%"PasarelaOrden"%'`,
+    );
+    return filas.length > 0;
+  };
+
   beforeAll(async () => {
     const proveedor = {
       autorizarCobro: autorizar,
       consultarEstado: consultar,
+      reembolsar,
     };
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -207,6 +233,8 @@ describe('Suscripciones: el alta cobra una vez por intento (e2e)', () => {
     autorizar.mockReset().mockImplementation(aprobado);
     consultar.mockReset();
   });
+
+  afterEach(() => jest.restoreAllMocks());
 
   afterAll(async () => {
     await app.close();
@@ -524,7 +552,59 @@ describe('Suscripciones: el alta cobra una vez por intento (e2e)', () => {
     ]);
   });
 
-  it('el proceso cae después de cobrar: la orden no expira por reloj y el reintento termina el alta', async () => {
+  /**
+   * `vincularVenta` lee la orden y la guarda entera, como el cierre del
+   * callback que pisaba un reembolso (pendientes.md § 5, 2026-10-11). Acá no
+   * hay ventana: `pagada`, la venta y `conciliada` van en la misma tx del
+   * cobro, con la orden bloqueada desde `efectuarCobro`. El reembolso que
+   * entra mientras se crea la venta espera la fila y la encuentra
+   * `conciliada`, con la venta ligada.
+   */
+  it('un reembolso mientras el alta crea la venta espera, y la orden queda reembolsada con la venta ligada', async () => {
+    const tarjeta = randomUUID();
+    const ventas = app.get(VentasService);
+    const original = ventas.crearEnTransaccion.bind(ventas);
+    let reembolso: Promise<request.Response> | undefined;
+    let esperoLaOrden = false;
+    jest
+      .spyOn(ventas, 'crearEnTransaccion')
+      .mockImplementationOnce(async (...args) => {
+        const [orden] = (await rastroDe(tarjeta)).ordenes;
+        reembolso = request(app.getHttpServer())
+          .post(`/api/pasarela/admin/ordenes/${orden.orden_id}/reembolsos`)
+          .set('Authorization', `Bearer ${token}`)
+          .set('Idempotency-Key', randomUUID())
+          .send({ monto: '35700' })
+          .then((r) => r);
+        const limite = Date.now() + 10_000;
+        while (!esperoLaOrden && Date.now() < limite) {
+          esperoLaOrden = await hayUnaEsperandoLaOrden();
+          if (!esperoLaOrden) await new Promise((r) => setTimeout(r, 50));
+        }
+        return original(...args);
+      });
+
+    const res = await alta(tarjeta, randomUUID());
+
+    expect(res.status).toBe(201);
+    expect(esperoLaOrden).toBe(true);
+    const r = await reembolso!;
+    expect(r.status).toBe(201);
+    // La encontró `conciliada`: el reembolso de siempre, con su nota.
+    expect(r.body).toMatchObject({
+      reembolsoAprobado: true,
+      notaCreditoId: expect.any(String) as string,
+    });
+    expect((await rastroDe(tarjeta)).ordenes).toEqual([
+      {
+        orden_id: expect.any(String) as string,
+        estado: 'reembolsada',
+        venta_id: (res.body as Alta).ventaInicialId,
+      },
+    ]);
+  });
+
+  it('el proceso cae después de cobrar: la orden no expira por reloj (ni el cron ni el drawer) y el reintento termina el alta', async () => {
     const tarjeta = randomUUID();
     const clave = randomUUID();
     // Transbank cobró y el request murió antes de registrar nada (un error que
@@ -553,6 +633,16 @@ describe('Suscripciones: el alta cobra una vez por intento (e2e)', () => {
       [enDuda.ordenes[0].orden_id],
     );
     await app.get(ExpirarOrdenesJob).expirarOrdenesVencidas();
+    expect((await rastroDe(tarjeta)).ordenes.map((o) => o.estado)).toEqual([
+      'en_proceso',
+    ]);
+    // La otra vía de la misma regla: el admin abre la orden vencida en el
+    // drawer, que la expira perezosamente si el cron no pasó todavía.
+    const drawer = await request(app.getHttpServer())
+      .get(`/api/pasarela/admin/ordenes/${enDuda.ordenes[0].orden_id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(drawer.status).toBe(200);
+    expect((drawer.body as { estado: string }).estado).toBe('en_proceso');
     expect((await rastroDe(tarjeta)).ordenes.map((o) => o.estado)).toEqual([
       'en_proceso',
     ]);

@@ -379,6 +379,18 @@ describe('PagosRedirectService', () => {
     expect(res.urlRedireccion).toContain('https://app/ok');
   });
 
+  it('abortarRetorno: no anula una orden que el retorno está confirmando (procesando)', async () => {
+    ordenRepo.findOne.mockResolvedValue({
+      ordenId: 'orden-1',
+      estado: 'procesando',
+      metadata: {
+        urls: { exito: 'https://app/ok', fracaso: 'https://app/fail' },
+      },
+    });
+    await service.abortarRetorno({ tbkToken: 'tbk-1' });
+    expect(ordenRepo.save).not.toHaveBeenCalled();
+  });
+
   it('abortarRetorno: sin identificador es rechazado', async () => {
     await expect(service.abortarRetorno({})).rejects.toThrow('identificador');
   });

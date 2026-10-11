@@ -10,7 +10,7 @@ const { formatTipoPago } = useFormatters()
 
 const ordenId = computed(() => String(route.query.ordenId ?? ''))
 
-type Vista = 'cargando' | 'aprobada' | 'sin_venta' | 'rechazada' | 'pendiente' | 'error'
+type Vista = 'cargando' | 'aprobada' | 'sin_venta' | 'devuelto' | 'rechazada' | 'pendiente' | 'error'
 const vista = ref<Vista>('cargando')
 const ventaId = ref<string | null>(null)
 const tipoPago = ref<string | null>(null)
@@ -51,6 +51,12 @@ onMounted(async () => {
       // ya tiene el aviso en `/ordenes`). El carrito se vacía igual que en el
       // éxito: el cargo existe, y dejarlo lleno invita a pagar dos veces.
       vista.value = 'sin_venta'
+      limpiar()
+    } else if (res.estado === 'reembolsada') {
+      // Se cobró y el local devolvió el cargo (puede pasar mientras se crea
+      // la venta). No es un rechazo, y el carrito se vacía como en `sin_venta`:
+      // lleno invita a pagar de nuevo lo que el local decidió devolver.
+      vista.value = 'devuelto'
       limpiar()
     } else if (res.estado === 'fallida') {
       vista.value = 'rechazada'
@@ -115,6 +121,15 @@ onMounted(async () => {
             <p class="font-medium">Pago recibido</p>
             <p class="text-sm text-muted">
               Recibimos tu pago pero no pudimos registrar la compra; el local se comunicará contigo.
+            </p>
+            <UButton to="/tienda" label="Volver a la tienda" variant="ghost" block />
+          </div>
+
+          <div v-else-if="vista === 'devuelto'" class="text-center py-6 space-y-3" data-qa="retorno-devuelto">
+            <UIcon name="i-lucide-undo-2" class="text-warning size-12 mx-auto" />
+            <p class="font-medium">Pago devuelto</p>
+            <p class="text-sm text-muted">
+              Se te cobró esta compra y el local te devolvió el pago. Si tienes dudas, comunícate con el local.
             </p>
             <UButton to="/tienda" label="Volver a la tienda" variant="ghost" block />
           </div>

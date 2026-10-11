@@ -271,6 +271,14 @@ export class PagosRedirectService {
    * metadata de la verificación, una orden que `verificar` acababa de
    * encontrar pagada (pendientes.md § 5, medido en
    * `pasarela-escritores-orden.e2e-spec.ts`).
+   *
+   * Una `procesando` no se anula: el retorno ya tiene el `token_ws` y está
+   * confirmando, y lo que conteste Transbank decide (un commit sobre una
+   * transacción anulada vuelve 4xx y queda `fallida` por ese camino). El
+   * retorno no bloquea la orden mientras confirma, así que anularla acá la
+   * dejaba `fallida` debajo suyo: si Transbank no contestaba, la compensación
+   * ya no la encontraba y un cargo quizá aprobado quedaba `fallida`, donde
+   * `verificar` ya no la mira (resueltos.md, medido en el mismo e2e).
    */
   async abortarRetorno(p: {
     tbkToken?: string;
@@ -288,7 +296,7 @@ export class PagosRedirectService {
       if (!bloqueada)
         throw new NotFoundException('Orden no encontrada para el retorno');
 
-      if (['creada', 'en_proceso', 'procesando'].includes(bloqueada.estado)) {
+      if (['creada', 'en_proceso'].includes(bloqueada.estado)) {
         bloqueada.estado = 'fallida';
         bloqueada.metadata = {
           ...bloqueada.metadata,

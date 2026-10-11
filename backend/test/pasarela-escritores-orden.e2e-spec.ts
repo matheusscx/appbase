@@ -335,7 +335,7 @@ describe('Pasarela: los escritores de la orden no pisan lo que otro resolvió (e
     });
   });
 
-  describe('el retorno de anulación, con verificar adentro', () => {
+  describe('el retorno de anulación, con otro escritor adentro', () => {
     it('Webpay vuelve anulado mientras verificar la encuentra pagada: queda pagada', async () => {
       const ordenId = await pagarPorLlave();
       const { codigo_orden } = await ordenDe(ordenId);
@@ -351,6 +351,60 @@ describe('Pasarela: los escritores de la orden no pisan lo que otro resolvió (e
       expect(orden.estado).toBe('pagada');
       expect(orden.metadata.verificacion).toBeDefined();
       expect(orden.metadata.resultadoPago).toBeDefined();
+      expect(orden.metadata.aborto).toBeUndefined();
+    });
+
+    /**
+     * El retorno ya reclamó la orden (`procesando`) y está confirmando con
+     * Transbank cuando llega la anulación. El retorno no tiene lock en esa
+     * ventana: la anulación entra, corre entera y recién ahí Transbank
+     * contesta.
+     */
+    const anularMientrasConfirma = async (
+      ordenId: string,
+      contesta: () => Promise<typeof aprobado>,
+    ) => {
+      const { codigo_orden, token_proveedor } = await ordenDe(ordenId);
+      let aborto: request.Response | undefined;
+      confirmarPago.mockImplementationOnce(async () => {
+        aborto = await request(app.getHttpServer()).get(
+          `/api/pasarela/retorno/pago?TBK_TOKEN=${token_proveedor}&TBK_ORDEN_COMPRA=${codigo_orden}`,
+        );
+        return contesta();
+      });
+      const retorno = await request(app.getHttpServer()).get(
+        `/api/pasarela/retorno/pago?token_ws=${token_proveedor}`,
+      );
+      expect(aborto?.status).toBe(302);
+      return retorno;
+    };
+
+    it('Webpay vuelve anulado mientras el retorno confirma y Transbank no contesta: queda en_proceso, para verificar', async () => {
+      const ordenId = await pagarPorLlave();
+
+      const retorno = await anularMientrasConfirma(ordenId, () =>
+        Promise.reject(new ProviderComunicacionError('timeout', {})),
+      );
+
+      expect(retorno.status).toBe(502);
+      // El cargo pudo salir: la compensación la devuelve a `en_proceso` y
+      // `verificar` la aclara. Con `fallida`, `verificar` ya no la miraba.
+      const orden = await ordenDe(ordenId);
+      expect(orden.estado).toBe('en_proceso');
+      expect(orden.metadata.aborto).toBeUndefined();
+      expect((await verificar(ordenId)).estado).toBe('pagada');
+    });
+
+    it('control: Webpay vuelve anulado mientras el retorno confirma y Transbank aprueba: queda pagada', async () => {
+      const ordenId = await pagarPorLlave();
+
+      const retorno = await anularMientrasConfirma(ordenId, () =>
+        Promise.resolve(aprobado),
+      );
+
+      expect(retorno.status).toBe(302);
+      const orden = await ordenDe(ordenId);
+      expect(orden.estado).toBe('pagada');
       expect(orden.metadata.aborto).toBeUndefined();
     });
 
@@ -445,6 +499,18 @@ describe('Pasarela: los escritores de la orden no pisan lo que otro resolvió (e
         expect(orden.estado).toBe('reembolsada');
         expect(orden.venta_id).not.toBeNull();
         expect(await ventasOnline()).toBe(ventasAntes + 1);
+
+        // Lo que lee `/tienda/retorno`: el estado tal cual, que la pantalla
+        // muestra como "Pago devuelto" (no como un rechazo).
+        const retorno = await request(app.getHttpServer())
+          .get(`/api/online/orden/${ordenId}`)
+          .set('Authorization', `Bearer ${token}`);
+        expect(retorno.status).toBe(200);
+        expect(retorno.body).toMatchObject({
+          estado: 'reembolsada',
+          ventaId: orden.venta_id,
+          motivoRechazo: null,
+        });
 
         // Lo que el drawer lee para la marca "sin nota de crédito": venta
         // ligada y un REFUND aprobado sin corrección.

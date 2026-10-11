@@ -59,6 +59,27 @@ describe('tienda/retorno', () => {
     expect(limpiezas).toBe(1)
   })
 
+  // El admin devolvió el cargo mientras se creaba la venta: la orden vuelve
+  // `reembolsada` (con la venta ligada) al retorno mismo. Caía en "Pago
+  // rechazado" con el carrito lleno para reintentar (pendientes.md § 2).
+  it('reembolsada: dice que el pago se devolvió, no que se rechazó, y vacía el carrito', async () => {
+    respuesta = orden('reembolsada', 'venta-1')
+    const wrapper = await mountSuspended(Retorno)
+    await flushPromises()
+
+    const vista = wrapper.find('[data-qa="retorno-devuelto"]')
+    expect(vista.exists()).toBe(true)
+    expect(vista.text()).toContain('Pago devuelto')
+    expect(vista.text()).toContain(
+      'Se te cobró esta compra y el local te devolvió el pago. Si tienes dudas, comunícate con el local.',
+    )
+    expect(wrapper.text()).not.toContain('Pago rechazado')
+    expect(wrapper.text()).not.toContain('Ver detalle de la venta')
+    // Mismo criterio que la pagada sin venta: el carrito lleno invita a pagar
+    // de nuevo lo que el local decidió devolver.
+    expect(limpiezas).toBe(1)
+  })
+
   it('conciliada: sigue siendo el éxito de siempre', async () => {
     respuesta = orden('conciliada', 'venta-1')
     const wrapper = await mountSuspended(Retorno)

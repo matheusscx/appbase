@@ -764,5 +764,10 @@ que devuelve Transbank (no un método fijo):
   `response_code` (ver `pasarela/utils/codigos-respuesta.ts`).
 - **Aprobado pero sin venta** (`pagada_sin_venta`, 2026-10-10), `/tienda/retorno` no dice
   "registrada": dice que el pago llegó y que el local se va a comunicar.
+- **Devuelto** (`reembolsada`, 2026-10-11), `/tienda/retorno` dice **"Pago devuelto"**: se
+  cobró y el local devolvió el cargo. Puede pasar en el retorno mismo, si el admin reembolsa
+  mientras se crea la venta ([pasarela-pagos.md](pasarela-pagos.md)). Antes caía en "Pago
+  rechazado". El carrito se vacía, como en el caso sin venta: lleno invita a pagar de nuevo
+  lo que el local decidió devolver (orquestadora, por analogía con ese caso).
 
 Detalle del mecanismo en [pasarela-pagos.md](pasarela-pagos.md).

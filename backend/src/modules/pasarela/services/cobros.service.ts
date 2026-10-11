@@ -1363,11 +1363,13 @@ export class CobrosService {
     //
     // ⚠️ Orden de bloqueo: orden → venta, siempre. Medido: ningún camino toma
     // la venta y después la orden (la venta online se crea y COMMITEA antes de
-    // que el dispatcher o `vincularVenta` toquen la orden; ventas solo lee
-    // `pasarela_*` sin lock), así que no hay ciclo. Quien algún día toque la
-    // orden dentro de una transacción que ya tiene `FOR UPDATE` sobre la venta
-    // cierra el ciclo. Sin handler (ventas no registrado) no hay lado de ventas
-    // que topar: el aviso de `aplicarPostReembolso` ya lo dice.
+    // que el dispatcher toque la orden; el alta de suscripción la crea con la
+    // orden ya bloqueada desde `efectuarCobro`, y `vincularVenta` corre en esa
+    // misma tx; ventas solo lee `pasarela_*` sin lock), así que no hay ciclo.
+    // Quien algún día toque la orden dentro de una transacción que ya tiene
+    // `FOR UPDATE` sobre la venta cierra el ciclo. Sin handler (ventas no
+    // registrado) no hay lado de ventas que topar: el aviso de
+    // `aplicarPostReembolso` ya lo dice.
     //
     // Los REFUND sin confirmar de la venta gastan ese tope (pudieron haber
     // devuelto la plata); en tx1 el propio ya está en `iniciada` y no se cuenta a
