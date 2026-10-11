@@ -355,6 +355,22 @@ export class OnlineService {
       }
     }
 
+    // Un ingrediente no se vende directo: la venta lo rechaza (`VentasService`),
+    // pero recién en el callback, con el cobro ya hecho. Con otra línea que le
+    // dé monto —su precio es siempre 0— Webpay cobraba y la orden quedaba
+    // pagada sin venta (medido el 2026-10-11). Es la misma regla de la venta
+    // dicha antes de cobrar, no una nueva; de los seis tipos es el único que la
+    // venta rechaza por `tipo`. El catálogo de la tienda no los ofrece (pide
+    // solo `producto`): esto ataja el carrito armado a mano. Se corta ANTES de `pagosRedirect.iniciar`, sin orden.
+    for (const linea of dto.lineas) {
+      const item = itemsBase.get(linea.itemId)!;
+      if (item.tipo === 'ingrediente') {
+        throw new BadRequestException(
+          `«${item.nombre}» es un ingrediente: no se vende directamente`,
+        );
+      }
+    }
+
     // Un producto con número de serie no se vende online: no hay cajero que
     // elija qué unidad sale, y el cobro ya habría pasado cuando la venta lo
     // rechace —un cargo de Webpay sin venta—. El catálogo de la tienda ya los

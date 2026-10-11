@@ -23,6 +23,53 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El checkout de la tienda ya no cobra un ingrediente (cerrada 2026-10-11)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. Se midió antes de arreglar, como pedía la entrada, y
+la medición corrigió un detalle: **un ingrediente solo no llega a cobrarse**, porque su precio es
+siempre 0 (`items.service.ts` lo fuerza al crearlo y al editarlo) y `PagosRedirectService.iniciar`
+rechaza un monto de $0 antes de crear la orden. El cargo sin venta aparece cuando el carrito lleva **otra línea que le da monto**.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **El checkout de la tienda cobra un ítem tipo `ingrediente` que la venta después rechaza**
+  (backend; lo vio la sesión de "vale lo que pagó" el 2026-10-11, y la orquestadora lo verificó
+  leyendo, **no medido**). `OnlineService.prepararLineasCheckout` ataja el ítem pausado y el de
+  `serie` antes de `pagosRedirect.iniciar`, pero no el `tipo`. Si llega un `ingrediente`, `pagar`
+  lo cobra en Webpay y `VentasService.crear` lo rechaza con *"Los ingredientes no se pueden vender
+  directamente"*: es otro cargo sin venta, y la A ("vale lo que pagó") no lo cubre. El catálogo de
+  la tienda no los muestra (`useCatalogoVenta` pide solo `producto`, `receta` y `combo`), así que
+  solo llega con un carrito armado a mano, igual que el caso de `serie`. **El arreglo probable:** un
+  400 en el mismo lugar y con la misma forma que el guard de `serie`, antes de crear la orden.
+  **Medir antes** con un e2e: un `POST /online/pagar` con un ingrediente tiene que dar 400 y no
+  dejar orden.
+
+### Cómo se cerró
+
+- **Lo medido** (Paris, proveedor falso, `tienda-dos-ahoras.e2e-spec.ts`): un carrito con un
+  servicio de $1.000 y un ingrediente → `POST /online/pagar` 201, Webpay autoriza $1.190, y al
+  volver la orden queda `pagada` sin venta con el motivo *"Los ingredientes no se pueden vender
+  directamente"*. El ingrediente solo → 400 *"El monto debe ser mayor a cero"*, sin orden (medido
+  con un caso temporal; no quedó fijado en un test).
+- **El arreglo:** `OnlineService.prepararLineasCheckout` rechaza la línea con 400 *"«Nombre» es un
+  ingrediente: no se vende directamente"*, en el mismo lugar y con la misma forma que el guard de
+  `serie`, antes de `pagosRedirect.iniciar`: no queda orden ni cobro.
+  Como el método lo usan `checkout` y `pagar`, también rebota la previsualización. El mensaje
+  nombra el ítem —a diferencia del de la venta y del salón— por el mismo motivo que el de `serie`:
+  en un carrito de varias líneas el comprador tiene que saber cuál sacar.
+- **Los otros tipos, enumerados:** son seis (`create-item.dto.ts`: producto, servicio, suscripción,
+  receta, ingrediente, combo). `VentasService.crear` rechaza por `tipo` solo al ingrediente, y su
+  otro rechazo del mismo bucle —clasificación tributaria `NULL`— lo tiene solo el ingrediente.
+  El ítem de sistema "Ajuste" (`servicio`, de las notas de crédito) nace pausado y lo ataja el
+  guard del ítem pausado. Un combo no puede llevar un producto con serie (`items.service.ts`). No
+  queda otro tipo que el checkout cobre y la venta rechace.
+- **Lo fijan:** `tienda-dos-ahoras.e2e-spec.ts` → *"lo que se ataja antes de cobrar"*
+  (`checkout` y `pagar`: 400 con el nombre, sin orden nueva y sin nada autorizado en el proveedor)
+  y el gemelo unitario `online.service.spec.ts` → *"ingrediente"*. Revertir el guard (el código
+  anterior) deja los dos e2e en 201 y cambiar el `tipo` que compara tumba los dos unitarios.
+
+---
+
 ## La venta online vale lo que se pagó (la A de los dos "ahora", cerrada 2026-10-11)
 
 Sale de [`pendientes.md`](pendientes.md) § 3, de la entrada "La tienda calcula el total dos veces,

@@ -227,6 +227,54 @@ describe('OnlineService', () => {
     });
   });
 
+  /**
+   * Un ingrediente no se vende directo: la venta lo rechaza en el callback,
+   * con el cargo de Webpay ya hecho. Se ataja antes de cobrar.
+   */
+  describe('ingrediente', () => {
+    const ingredienteEnLaSegundaLinea = () =>
+      items.cargarBasePorIds.mockImplementationOnce(
+        (_t: string, ids: string[]) =>
+          Promise.resolve(
+            new Map(
+              ids.map((id, i) => [
+                id,
+                itemBase(
+                  id,
+                  i === 1 ? { nombre: 'Harina', tipo: 'ingrediente' } : {},
+                ),
+              ]),
+            ),
+          ),
+      );
+
+    const dosLineas = {
+      lineas: [
+        { itemId: ITEM_ID, cantidad: '1' },
+        { itemId: '550e8400-e29b-41d4-a716-446655440117', cantidad: '1' },
+      ],
+    };
+
+    it('checkout: rechaza nombrándolo y no calcula nada', async () => {
+      ingredienteEnLaSegundaLinea();
+      await expect(service.checkout(TENANT_ID, dosLineas)).rejects.toThrow(
+        '«Harina» es un ingrediente: no se vende directamente',
+      );
+      expect(calculo.calcular).not.toHaveBeenCalled();
+    });
+
+    it('pagar con Webpay activo: no llega a crear la orden', async () => {
+      tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+      metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
+      ingredienteEnLaSegundaLinea();
+
+      await expect(
+        service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dosLineas),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(pagosRedirect.iniciar).not.toHaveBeenCalled();
+    });
+  });
+
   describe('sin Webpay activo', () => {
     const sinWebpay = () =>
       tenantPasarela.resolverConfiguracionActiva.mockRejectedValue(

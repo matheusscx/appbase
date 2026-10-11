@@ -144,8 +144,12 @@ qué quiere, no cuánto vale. El canal en la venta es `ventaCongelada`, ver
 
 **Lo que A no cubre** es lo que no es plata, que sigue vivo al retorno: un ítem borrado entre el pago
 y el retorno deja la orden `pagada` sin venta, con el aviso de abajo y el reembolso manual (medido
-en el e2e). El ítem sin stock en ese minuto caería por el mismo lado, pero está leído en el código,
-no medido. Tampoco entra una orden creada antes del deploy y resuelta después (no trae
+en el e2e). El stock tampoco se congela, y `pagar` no lo mira: si el producto se agota antes del
+retorno —o ya estaba agotado cuando el carrito, viejo, se pagó—, la orden queda `pagada` sin venta
+por el mismo camino (medido el 2026-10-11 con producto por cantidad y por lote, y con una receta
+de insumo bloqueante; con insumo no bloqueante la venta se crea sin descontarlo, como en el POS).
+Qué hacer con eso es una pregunta abierta del owner en [`pendientes.md`](../agent/pendientes.md)
+§ 4. Tampoco entra una orden creada antes del deploy y resuelta después (no trae
 congelado): falla igual y no se recalcula. El ítem sigue dando el nombre de la línea
 (`descripcion`) al retorno, que no es plata ni dato fiscal.
 
@@ -190,6 +194,11 @@ manda por los `filtros` de `useCatalogoVenta`); el filtro vive en `ItemsService.
 para que lo vean los dos caminos de `findAll`. El checkout rechaza la línea con *"«Nombre» se vende
 solo en el local"* **antes** de iniciar el pago, así que no queda orden creada.
 [Detalle](./inventario-serializado.md#quién-elige-qué-unidad-con-serie-sale).
+
+**Un ingrediente tampoco se vende online** (2026-10-11): la venta lo rechaza siempre, pero en el
+callback, con el cobro hecho. El catálogo no los ofrece; un carrito armado a mano que lo traiga
+junto a otra línea rebota en el checkout con *"«Nombre» es un ingrediente: no se vende
+directamente"*, también antes de iniciar el pago.
 
 Aun así el checkout lo revalida, y no es redundante: el carrito vive en el navegador,
 así que el ítem se puede pausar **después** de que el cliente lo agregó.

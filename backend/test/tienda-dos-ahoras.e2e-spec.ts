@@ -14,11 +14,13 @@ import {
   instanteLocalEnZona,
   zonaHorariaTenant,
 } from '../src/common/utils/rango-fecha.util';
+import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris: Webpay Plus activo (seed)
 const CLP = '550e8400-e29b-41d4-a716-446655440003';
 const USD = '550e8400-e29b-41d4-a716-446655440005';
 const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
+const EFECTIVO = '550e8400-e29b-41d4-a716-446655440105';
 const ADMIN = { email: 'admin.paris@paris.cl', password: 'admin' };
 
 /** El motivo que el admin lee cuando el ítem se borró durante el pago. */
@@ -74,8 +76,8 @@ const NO_FINGIR = [
  * tasa cambia en el medio y la venta guarda la que se cobró.
  *
  * Lo que A no cubre es que el ítem desaparezca (se borra mientras el comprador
- * está en Webpay): ahí la venta no se puede crear y la orden sigue pagada sin
- * venta. Para eso siguen valiendo D y E (owner, 2026-10-09):
+ * está en Webpay) o que se acabe su stock: ahí la venta no se puede crear y la
+ * orden sigue pagada sin venta. Para eso siguen valiendo D y E (owner, 2026-10-09):
  * - D: la orden pagada sin venta no miente. El comprador ve que el pago llegó y
  *   la compra no quedó registrada, y el admin la encuentra con su motivo.
  * - E: la venta online no lleva vuelto. Con A, lo pagado es exactamente el
@@ -284,6 +286,24 @@ describe('Tienda: la venta vale lo que se pagó, aunque algo cambie entre el pag
       [TENANT_ID],
     );
     return Number(fila.n);
+  };
+
+  const ordenesDelTenant = async (): Promise<number> => {
+    const [fila]: { n: string }[] = await ds.query(
+      `SELECT count(*) AS n FROM pasarela_ordenes
+        WHERE tenant_id = $1 AND eliminado_el IS NULL`,
+      [TENANT_ID],
+    );
+    return Number(fila.n);
+  };
+
+  const localDelTenant = async (): Promise<string> => {
+    const [fila]: { ubicacion_id: string }[] = await ds.query(
+      `SELECT ubicacion_id FROM ubicaciones
+        WHERE tenant_id = $1 AND tipo = 'local' AND eliminado_el IS NULL`,
+      [TENANT_ID],
+    );
+    return fila.ubicacion_id;
   };
 
   const erroresDeLaOrden = (ordenId: string): string[] =>
@@ -507,7 +527,8 @@ describe('Tienda: la venta vale lo que se pagó, aunque algo cambie entre el pag
         .set('Authorization', `Bearer ${token}`);
       if (res.status >= 300) fallas.push(`${ruta}/${id}: ${res.status}`);
     }
-    for (const id of itemsCreados) {
+    // Al revés de como se crearon: una receta viva tiene en uso a su insumo.
+    for (const id of [...itemsCreados].reverse()) {
       const res = await request(app.getHttpServer())
         .delete(`/api/items/${id}`)
         .set('Authorization', `Bearer ${token}`);
@@ -843,6 +864,256 @@ describe('Tienda: la venta vale lo que se pagó, aunque algo cambie entre el pag
       expect(devuelta.motivoSinVenta).toBe(ITEM_BORRADO);
       expect(await sinVentaEnElListado(ordenId)).toEqual([]);
     });
+  });
+
+  describe('lo que A no cubre: el stock se acaba mientras el comprador está en Webpay', () => {
+    /**
+     * Medido el 2026-10-11 (`docs/agent/pendientes.md` § 4). El precio quedó
+     * congelado al pagar, pero el stock no: baja recién cuando el callback
+     * crea la venta, y `pagar` no lo mira. Si el POS vende la última unidad
+     * antes del retorno —o ya la había vendido antes del pago—, la venta se
+     * rechaza y la orden queda pagada sin venta, con el aviso de D. Estos casos
+     * fijan la conducta de HOY; qué hacer es una pregunta del owner.
+     *
+     * Una venta del local en el medio, y no una merma: es el caso real (el
+     * mostrador vende lo último mientras el comprador está en Webpay).
+     */
+    let caja: CajaAbierta;
+
+    beforeAll(async () => {
+      caja = await abrirCaja(app, token, {
+        comentario: 'Apertura E2E tienda dos ahoras',
+      });
+    });
+
+    afterAll(async () => {
+      await cerrarCaja(app, token, caja);
+    });
+
+    /** El mostrador vende una unidad, al precio que da el motor ahora. */
+    const venderEnElLocal = async (itemId: string) => {
+      const calculo = await request(app.getHttpServer())
+        .post('/api/calculo-precios/calcular')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ lineas: [{ itemId, cantidad: '1' }] });
+      expect(calculo.status).toBe(201);
+      const { totalFinal } = (
+        calculo.body as { totales: { totalFinal: string } }
+      ).totales;
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO, monto: totalFinal }],
+        });
+      expect(res.status).toBe(201);
+      return (res.body as { id: string }).id;
+    };
+
+    /** Pagar, que el local venda lo último, y volver de Webpay. */
+    const pagarYQueSeAgote = async (itemId: string) => {
+      const ventasAntes = await ventasOnline();
+      const { ordenId, autorizado } = await pagar(itemId);
+      const ventaDelLocal = await venderEnElLocal(itemId);
+      const location = await volver(ordenId);
+      return { ordenId, autorizado, location, ventasAntes, ventaDelLocal };
+    };
+
+    const ingredienteConStock = (stock: string) =>
+      crearItem('0', {
+        nombre: `Insumo dos ahoras E2E ${randomUUID()}`,
+        tipo: 'ingrediente',
+        unidadMedida: 'unidad',
+        stock,
+        costo: '100',
+      });
+
+    it('producto por cantidad: la venta se rechaza y la orden queda pagada sin venta', async () => {
+      const nombre = `Producto dos ahoras E2E ${randomUUID()}`;
+      const itemId = await crearItem('1000', {
+        nombre,
+        tipo: 'producto',
+        unidadMedida: 'unidad',
+        stock: '1',
+        costo: '500',
+      });
+
+      const { ordenId, location, ventasAntes } = await pagarYQueSeAgote(itemId);
+
+      await afirmarCargoSinVenta(
+        ordenId,
+        location,
+        ventasAntes,
+        `Stock insuficiente de "${nombre}" en el local: quedan 0 unidad y lo que se está agregando necesita 1 unidad`,
+      );
+    });
+
+    it('producto que ya estaba agotado al pagar: Webpay cobra igual, porque `pagar` no mira el stock', async () => {
+      // El carrito vive en el navegador: el producto se agregó con stock y se
+      // agotó antes de pagar. La grilla no deja agregar uno agotado, pero
+      // nadie lo vuelve a mirar al cobrar.
+      const nombre = `Producto agotado dos ahoras E2E ${randomUUID()}`;
+      const itemId = await crearItem('1000', {
+        nombre,
+        tipo: 'producto',
+        unidadMedida: 'unidad',
+        stock: '1',
+        costo: '500',
+      });
+      await venderEnElLocal(itemId);
+      const ventasAntes = await ventasOnline();
+
+      const { ordenId } = await pagar(itemId);
+      const location = await volver(ordenId);
+
+      await afirmarCargoSinVenta(
+        ordenId,
+        location,
+        ventasAntes,
+        `Stock insuficiente de "${nombre}" en el local: quedan 0 unidad y lo que se está agregando necesita 1 unidad`,
+      );
+    });
+
+    it('producto por lote: lo mismo, con el mensaje de lotes', async () => {
+      const itemId = await crearItem('1000', {
+        nombre: `Lote dos ahoras E2E ${randomUUID()}`,
+        tipo: 'producto',
+        modoInventario: 'lote',
+      });
+      const entrada = await request(app.getHttpServer())
+        .patch(`/api/items/${itemId}/stock`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          tipo: 'entrada',
+          motivo: 'compra',
+          ubicacionId: await localDelTenant(),
+          cantidad: '1',
+          lote: {
+            codigoLote: `DOS-AHORAS-${randomUUID()}`,
+            fechaVencimiento: '2099-06-01',
+          },
+        });
+      expect(entrada.status).toBe(200);
+
+      const { ordenId, location, ventasAntes } = await pagarYQueSeAgote(itemId);
+
+      await afirmarCargoSinVenta(
+        ordenId,
+        location,
+        ventasAntes,
+        'Stock insuficiente en lotes en esta ubicación (disponible: 0, requerido: 1)',
+      );
+    });
+
+    it('receta con un insumo bloqueante que se acaba: pagada sin venta, y el motivo no nombra el insumo', async () => {
+      const insumoId = await ingredienteConStock('1');
+      const recetaId = await crearItem('3000', {
+        nombre: `Receta bloqueante dos ahoras E2E ${randomUUID()}`,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: insumoId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+      });
+
+      const { ordenId, location, ventasAntes } =
+        await pagarYQueSeAgote(recetaId);
+
+      await afirmarCargoSinVenta(
+        ordenId,
+        location,
+        ventasAntes,
+        'Stock insuficiente para la salida',
+      );
+      // Antes que el insumo: la receta viva lo tiene en uso.
+      await borrarItem(recetaId);
+    });
+
+    it('receta con un insumo NO bloqueante que se acaba: la venta se crea igual, sin descontar el insumo', async () => {
+      const insumoId = await ingredienteConStock('1');
+      const recetaId = await crearItem('3000', {
+        nombre: `Receta no bloqueante dos ahoras E2E ${randomUUID()}`,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: insumoId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: false,
+          },
+        ],
+      });
+
+      const { ordenId, autorizado, location, ventasAntes, ventaDelLocal } =
+        await pagarYQueSeAgote(recetaId);
+
+      const ventaId = await afirmarVentaPorLoCobrado(
+        ordenId,
+        location,
+        ventasAntes,
+        autorizado,
+      );
+      // La que vendió el local se llevó el insumo; la de la tienda salió sin él.
+      const movimientosDe = async (id: string): Promise<number> => {
+        const [fila]: { n: string }[] = await ds.query(
+          `SELECT count(*) AS n FROM movimientos_inventario
+            WHERE venta_id = $1 AND item_id = $2 AND eliminado_el IS NULL`,
+          [id, insumoId],
+        );
+        return Number(fila.n);
+      };
+      expect(await movimientosDe(ventaDelLocal)).toBe(1);
+      expect(await movimientosDe(ventaId)).toBe(0);
+      await borrarItem(recetaId);
+    });
+  });
+
+  describe('lo que se ataja antes de cobrar', () => {
+    /**
+     * Un ingrediente no se vende directo (`VentasService`), pero el checkout
+     * no lo miraba: con otra línea que le diera monto, Webpay cobraba y el
+     * callback rechazaba la venta. Medido el 2026-10-11: la orden quedaba
+     * pagada sin venta con *"Los ingredientes no se pueden vender
+     * directamente"*. Solo, un ingrediente no llegaba a cobrarse porque su
+     * precio es siempre 0; por eso el carrito lleva un servicio al lado.
+     */
+    it.each(['checkout', 'pagar'])(
+      'POST /online/%s con un ingrediente en el carrito: 400 nombrándolo, sin orden ni cobro',
+      async (ruta) => {
+        const nombre = `Insumo dos ahoras E2E ${randomUUID()}`;
+        const ingredienteId = await crearItem('0', {
+          nombre,
+          tipo: 'ingrediente',
+          unidadMedida: 'unidad',
+        });
+        const servicioId = await crearItem('1000');
+        const ordenesAntes = await ordenesDelTenant();
+        const autorizadosAntes = autorizados.length;
+
+        const res = await request(app.getHttpServer())
+          .post(`/api/online/${ruta}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            lineas: [
+              { itemId: servicioId, cantidad: '1' },
+              { itemId: ingredienteId, cantidad: '1' },
+            ],
+          });
+
+        expect(res.status).toBe(400);
+        expect((res.body as { message: string }).message).toBe(
+          `«${nombre}» es un ingrediente: no se vende directamente`,
+        );
+        expect(await ordenesDelTenant()).toBe(ordenesAntes);
+        expect(autorizados).toHaveLength(autorizadosAntes);
+      },
+    );
   });
 
   describe('el aviso al admin, con un rol que no es admin', () => {
