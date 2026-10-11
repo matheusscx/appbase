@@ -1442,6 +1442,9 @@ describe('salones — cuenta con un ítem eliminado del catálogo', () => {
     await abrirLaCuenta(wrapper)
 
     expect(drawerMesa()?.textContent).toContain('Hay un ítem eliminado del catálogo')
+    // El aviso del cálculo no se suma: diría "Item no encontrado", y la línea
+    // marcada y el aviso de abajo ya lo explican.
+    expect(drawerMesa()?.querySelector('[data-qa="aviso-calculo-cuenta"]')).toBeNull()
     // Tapar el total es la mitad que importa: el cálculo falló, así que
     // `totalFinal` cae a `'0'` y la cabecera mostraría **Total $0** para una
     // cuenta con productos. Eso invita a cobrar cero.
@@ -7018,6 +7021,9 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
       cuentasDeLaMesa = [cuentaConPedido('1.0000')]
       impresorasBoleta = [impresoraDeBoleta()]
       const wrapper = await montar()
+      // Con la moneda cargada: sin ella `formatMonto` da `—` para todo y la
+      // aserción sobre el total sería inerte.
+      useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
       await abrirLaCuenta(wrapper)
       await esperar(400)
       calculoFallaCon = error
@@ -7047,6 +7053,78 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
       await esperar(50)
 
       expect(toasts).toEqual([{ title: 'No se pudo calcular el total de la cuenta. Intentá de nuevo.', color: 'error' }])
+    })
+
+    /** El aviso de arriba de las líneas. */
+    function avisoDeLaCuenta(): HTMLElement | null {
+      return drawerMesa()?.querySelector<HTMLElement>('[data-qa="aviso-calculo-cuenta"]') ?? null
+    }
+
+    /** El valor de la fila "Total": la cabecera también rinde `—`, así que el drawer entero no sirve. */
+    function valorDelTotal(): string {
+      const spans = [...(drawerMesa()?.querySelectorAll('span') ?? [])]
+      const etiqueta = spans.find(s => s.textContent?.trim() === 'Total')
+      return etiqueta?.nextElementSibling?.textContent?.trim() ?? ''
+    }
+
+    // Hasta el 2026-10-11 cada línea dibujaba `—` sin decir por qué y el total
+    // seguía en el de antes de la edición: acá, el de 1 unidad con 2 pedidas.
+    it('un 400 del motor se dice arriba de las líneas, con el motivo, y el total no se muestra', async () => {
+      await cuentaConCalculoQueFalla(error400)
+
+      const aviso = avisoDeLaCuenta()
+      expect(aviso?.textContent).toContain('No se pudo calcular la cuenta')
+      expect(aviso?.textContent).toContain('La cantidad 99999999999 supera el máximo permitido para la línea 1.')
+      // Arriba de las líneas, no al pie: es lo que explica sus `—`.
+      const linea = [...(drawerMesa()?.querySelectorAll('p') ?? [])]
+        .find(p => p.textContent?.trim() === 'Coca-Cola')
+      expect(linea).toBeTruthy()
+      expect(aviso!.compareDocumentPosition(linea!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(valorDelTotal()).toBe('—')
+      // Con el motivo del motor, reintentar da lo mismo: no se ofrece.
+      expect(botonEn(drawerMesa(), 'Volver a calcular')).toBeUndefined()
+    })
+
+    it('un 401 no deja aviso (la sesión se cae), pero tampoco el total de antes', async () => {
+      await cuentaConCalculoQueFalla(Object.assign(new Error('401'), {
+        status: 401,
+        data: { statusCode: 401, message: 'Unauthorized' },
+      }))
+
+      expect(avisoDeLaCuenta()).toBeNull()
+      expect(valorDelTotal()).toBe('—')
+    })
+
+    it('con el cálculo sano no hay aviso y el total se muestra', async () => {
+      // El contraejemplo del de arriba: sin él, un aviso fijo o un total
+      // siempre tapado lo pasarían igual.
+      catalogoItemsMock = [producto('20.0000', '10.0000')]
+      cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+      const wrapper = await montar()
+      useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+      await abrirLaCuenta(wrapper)
+      await esperar(400)
+
+      expect(avisoDeLaCuenta()).toBeNull()
+      expect(valorDelTotal()).toBe('$5.000')
+    })
+
+    it('un corte de red pide reintentar, y "Volver a calcular" lo hace', async () => {
+      await cuentaConCalculoQueFalla(errorDeRed)
+
+      const aviso = avisoDeLaCuenta()
+      expect(aviso?.textContent).toContain('No se pudo calcular la cuenta. Intentá de nuevo.')
+      expect(valorDelTotal()).toBe('—')
+
+      // La red volvió: el garzón reintenta y la cuenta se calcula.
+      calculoFallaCon = null
+      const antes = calculosPedidos.length
+      botonEn(drawerMesa(), 'Volver a calcular')!.click()
+      await esperar(50)
+
+      expect(calculosPedidos.length).toBe(antes + 1)
+      expect(avisoDeLaCuenta()).toBeNull()
+      expect(valorDelTotal()).toBe('$5.000')
     })
 
     it('la precuenta con un 400 del motor muestra el motivo y no imprime', async () => {

@@ -171,13 +171,38 @@ export function avisoCalculoFallido(
   e: unknown,
   titulo = 'No se pudo calcular el total',
 ): { title: string, description?: string } {
-  const status = (e as { status?: number })?.status
-    ?? (e as { response?: { status?: number } })?.response?.status
+  const status = statusDelError(e)
   if (status !== undefined && status >= 400 && status < 500 && status !== 401) {
     const motivo = apiErrorMsg(e, '', { detalleLocal: false })
     if (motivo) return { title: titulo, description: motivo }
   }
   return { title: `${titulo}. Intentá de nuevo.` }
+}
+
+/**
+ * El mismo aviso, para dejarlo **a la vista** mientras el cálculo siga fallando
+ * (arriba de las líneas de la cuenta del salón) en vez de un toast que se va.
+ *
+ * Suma `reintentable`, que decide si el aviso ofrece volver a calcular. Es
+ * `true` exactamente cuando el título dice "Intentá de nuevo": con el motivo
+ * del motor, reintentar da lo mismo, y un botón que no cambia nada miente.
+ *
+ * `null` con el 401: la sesión se cayó y `useApiFetch` ya manda a `/login`. Un
+ * toast de ese caso dura un instante, pero un aviso fijo quedaría en rojo hasta
+ * que se desmonte la pantalla.
+ */
+export function avisoCalculoEnPantalla(
+  e: unknown,
+  titulo: string,
+): { title: string, description?: string, reintentable: boolean } | null {
+  if (statusDelError(e) === 401) return null
+  const aviso = avisoCalculoFallido(e, titulo)
+  return { ...aviso, reintentable: aviso.description === undefined }
+}
+
+function statusDelError(e: unknown): number | undefined {
+  return (e as { status?: number })?.status
+    ?? (e as { response?: { status?: number } })?.response?.status
 }
 
 /**

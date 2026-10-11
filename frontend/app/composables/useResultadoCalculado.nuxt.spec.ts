@@ -13,6 +13,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { ref, effectScope } from 'vue'
 import {
+  avisoCalculoEnPantalla,
   avisoCalculoFallido,
   useResultadoCalculado,
   type CalcularVentaInput,
@@ -455,5 +456,31 @@ describe('avisoCalculoFallido', () => {
       .toEqual({ title: 'No se pudo calcular el total de la cuenta. Intentá de nuevo.' })
     expect(avisoCalculoFallido(errorHttp(400, 'Motivo'), 'No se pudo calcular el total de la cuenta'))
       .toEqual({ title: 'No se pudo calcular el total de la cuenta', description: 'Motivo' })
+  })
+})
+
+describe('avisoCalculoEnPantalla', () => {
+  const T = 'No se pudo calcular la cuenta'
+
+  it('con el motivo del motor no ofrece reintentar: el servidor contesta lo mismo', () => {
+    expect(avisoCalculoEnPantalla(errorHttp(400, 'Motivo'), T))
+      .toEqual({ title: T, description: 'Motivo', reintentable: false })
+  })
+
+  it('un corte de red y un 5xx sí lo ofrecen, igual que su título', () => {
+    expect(avisoCalculoEnPantalla(errorDeRed(), T))
+      .toEqual({ title: `${T}. Intentá de nuevo.`, reintentable: true })
+    expect(avisoCalculoEnPantalla(errorHttp(500, 'Internal server error'), T))
+      .toEqual({ title: `${T}. Intentá de nuevo.`, reintentable: true })
+  })
+
+  it('un 4xx sin mensaje dice "Intentá de nuevo", así que también lo ofrece', () => {
+    const e = Object.assign(new Error('[POST] url: 400'), { status: 400, data: {} })
+    expect(avisoCalculoEnPantalla(e, T)?.reintentable).toBe(true)
+  })
+
+  it('con el 401 no hay aviso: la sesión se cae y la pantalla se va a /login', () => {
+    expect(avisoCalculoEnPantalla(errorHttp(401, 'Unauthorized'), T)).toBeNull()
+    expect(avisoCalculoEnPantalla({ response: { status: 401 } }, T)).toBeNull()
   })
 })

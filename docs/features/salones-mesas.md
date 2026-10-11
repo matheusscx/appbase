@@ -625,6 +625,24 @@ quite la línea. Las líneas **no** se filtran de la entrada del cálculo a prop
 `AdvertenciasPrecio` indexa `resultado.lineas[i]` contra las líneas de la pantalla, así
 que filtrar la entrada las desfasa.
 
+### Cuando el servidor no puede calcular la cuenta (2026-10-11)
+
+Si el cálculo de la cuenta falla por otra cosa (un monto que no cabe, por ejemplo), la pantalla
+**dice por qué arriba de las líneas**: un aviso con el mensaje del servidor, que explica los `—`
+de cada línea. El total tampoco se muestra (`—`), por el mismo criterio que con el ítem borrado:
+el último calculado ya no es el de la cuenta. Ante un corte de red o un 5xx el aviso pide reintentar
+y trae *Volver a calcular*, que recalcula una vez, a pedido. No hay reintento automático. Con el
+motivo del motor no hay botón, porque reintentar da lo mismo. Un 401 no deja aviso: la sesión se cae
+y la pantalla se va a `/login`. Hasta esa fecha cada línea dibujaba `—` sin decir por qué, y el
+total seguía en el de antes de la edición.
+
+**No marca la línea que falló, y es deliberado** (owner, 2026-10-11). El 400 del motor trae solo
+el mensaje, sin índice ni `itemId`, y el nombre del ítem no identifica la línea: dos pedidos del
+mismo plato con distinta personalización se llaman igual. Marcarla pide tocar el motor de cálculo,
+y no se hace salvo que aparezca en uso real: los 400 de una sola línea piden un monto de 10¹⁴ o
+un país sin IVA. El ítem borrado sí queda marcado: lo explican la línea y el aviso de la sección
+de arriba, y el aviso de cálculo no se suma, porque solo diría *"Item no encontrado"*.
+
 ### Anular una línea ya despachada (2026-09-16)
 
 El camino con motivo que la sección anterior prometía

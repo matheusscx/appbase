@@ -133,6 +133,7 @@ const {
   resultado,
   vigente,
   error: errorCalculo,
+  loading: calculando,
   recalcular,
   asegurarVigente,
   limpiar: limpiarResultado,
@@ -838,6 +839,30 @@ const totalFinal = computed(() => resultado.value?.totales.totalFinal ?? '0')
 const cuentaConItemEliminado = computed(
   () => activeCuenta.value?.lineas.some(l => l.itemEliminado) ?? false,
 )
+/**
+ * Por qué no se pudo calcular ESTA cuenta, para decirlo arriba de las líneas.
+ * Sin esto cada línea dibujaba `—` sin explicación, y el total seguía en el
+ * último calculado, que ya no es el de la cuenta.
+ *
+ * No marca la línea que falló: el 400 del motor trae solo el mensaje, sin índice
+ * ni `itemId`, y el nombre del ítem no la identifica (dos líneas del mismo plato
+ * con distinta personalización se llaman igual). Owner, 2026-10-11: el mensaje
+ * arriba alcanza, y no se toca el motor por esto.
+ *
+ * El ítem borrado del catálogo queda afuera: ese 404 dice "Item no encontrado",
+ * y la línea, su badge y el aviso de abajo ya lo explican mejor.
+ */
+const avisoCalculoCuenta = computed(() =>
+  errorCalculo.value && !cuentaConItemEliminado.value
+    ? avisoCalculoEnPantalla(errorCalculo.value, 'No se pudo calcular la cuenta')
+    : null,
+)
+/**
+ * Mismo criterio que con el ítem borrado: un total que no es el de la cuenta no
+ * se muestra. Mira el error y no el aviso: con el 401 no hay aviso (la sesión se
+ * cae), pero el total tampoco es el de la cuenta.
+ */
+const totalNoDisponible = computed(() => cuentaConItemEliminado.value || errorCalculo.value !== null)
 
 /**
  * El modal de cobro se abre recién cuando el total está calculado, y **se lleva
@@ -3238,6 +3263,28 @@ async function cerrarCuentaConPin(
 
               <p class="shrink-0 text-sm font-medium text-default">Productos de la cuenta</p>
 
+              <UAlert
+                v-if="avisoCalculoCuenta"
+                color="error"
+                variant="soft"
+                icon="i-lucide-triangle-alert"
+                :title="avisoCalculoCuenta.title"
+                :description="avisoCalculoCuenta.description"
+                class="shrink-0"
+                data-qa="aviso-calculo-cuenta"
+              >
+                <template v-if="avisoCalculoCuenta.reintentable" #actions>
+                  <UButton
+                    label="Volver a calcular"
+                    color="error"
+                    variant="outline"
+                    size="sm"
+                    :loading="calculando"
+                    @click="recalcular"
+                  />
+                </template>
+              </UAlert>
+
               <div class="min-h-0 flex-1 overflow-y-auto">
                 <div v-if="activeCuenta.lineas.length === 0" class="py-6 text-center text-sm text-muted">
                   Agrega productos desde el catálogo.
@@ -3356,7 +3403,7 @@ async function cerrarCuentaConPin(
                 />
                 <div class="mb-3 flex justify-between text-base font-semibold text-default">
                   <span>Total</span>
-                  <span>{{ cuentaConItemEliminado ? '—' : formatMonto(totalFinal) }}</span>
+                  <span>{{ totalNoDisponible ? '—' : formatMonto(totalFinal) }}</span>
                 </div>
                 <UAlert
                   v-if="!tieneCaja"

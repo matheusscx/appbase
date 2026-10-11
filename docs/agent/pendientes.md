@@ -260,13 +260,6 @@ la acumulación de descuentos y compras— y el renombre de `moneda.decimales` s
     martes no se evalúa, y eso es falso (se evalúa por línea; lo que no se carga es la promo de
     rango).
 
-- [ ] **La pantalla de la cuenta no marca la línea que el servidor rechazó** (frontend; ✅
-  **decidido por el owner el 2026-09-29**, en el selector interactivo de la orquestadora: *A: que
-  marque la línea que falló*, recomendada, por sobre *B: dejarlo como está*). `useCalculoPrecios`
-  se traga el 400 a propósito y `lineaSubtotal` dibuja `—` en **todas** las líneas sin decir por
-  qué. Tiene que marcar la que falló. Chico e independiente; salió de la misma entrada que la de
-  arriba.
-
 - [ ] **Una orden de cobro de un alta de suscripción que quedó sin aclarar no tiene marcado manual**
   (backend + front de Pasarela; anotado el 2026-10-10 por el frente del cobro único del alta, con el
   acuerdo de la orquestadora). Desde ADR-029 § *"El alta de suscripción"*, si Transbank no contesta

@@ -23,6 +23,100 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La cuenta del salón dice por qué no se pudo calcular (cerrada 2026-10-11)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Solo frontend: el motor no se tocó. La regla viva está
+en [`features/salones-mesas.md`](../features/salones-mesas.md), § *Cuando el servidor no puede
+calcular la cuenta*.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **La pantalla de la cuenta no marca la línea que el servidor rechazó** (frontend; ✅
+  **decidido por el owner el 2026-09-29**, en el selector interactivo de la orquestadora: *A: que
+  marque la línea que falló*, recomendada, por sobre *B: dejarlo como está*). `useCalculoPrecios`
+  se traga el 400 a propósito y `lineaSubtotal` dibuja `—` en **todas** las líneas sin decir por
+  qué. Tiene que marcar la que falló. Chico e independiente; salió de la misma entrada que la de
+  arriba.
+
+### Qué se midió
+
+Con un e2e descartable contra la base propia del worktree (borrado después de medir), una cuenta
+con un producto de $73.456.789.012.345 pedido de a uno y después de a dos (la cuenta los junta en una
+línea de 3): `POST /calculo-precios/calcular` con
+`cuentaId` contesta `{"message":"«…» da $220.370.367.037.035, y el sistema no puede guardar
+montos de $100.000.000.000.000 o más: revisá el precio y la cantidad","error":"Bad
+Request","statusCode":400}`. **Solo el mensaje: ni índice ni `itemId`.** El nombre del ítem no
+identifica la línea, porque dos pedidos del mismo plato con distinta personalización se llaman
+igual y puede no caber uno solo. Los 4xx del motor para una cuenta son estos:
+
+- el monto de una línea que no cabe y el ítem afecto sin IVA en el país: nombran el ítem;
+- el total que no cabe y el tope de 99.999 unidades: son de la cuenta entera;
+- el `404 Item no encontrado` del ítem borrado. Casi no se alcanza: borrar un ítem pedido en una
+  cuenta abierta da `400 No se puede eliminar: está pedido en …`. Y la pantalla ya marcaba esa
+  línea con su badge, su texto y el aviso del pie.
+
+Los de una sola línea piden un monto de 10¹⁴ o un país sin IVA: en uso real casi no pasan.
+
+### Cómo se decidió
+
+**El owner eligió B el 2026-10-11, y la A del 2026-09-29 quedó descartada.** Lo eligió por
+AskUserQuestion de la orquestadora, con la medición de arriba. B es: la cuenta muestra el mensaje
+del servidor arriba de las líneas en vez del `—` mudo, y en el caso del ítem borrado se marca esa
+línea. Sin tocar el motor. La marca del ítem borrado ya existía (badge, texto en la línea y aviso del
+pie), así que de esa mitad no hubo nada que construir. La A (que el motor diga el índice de la línea y la pantalla la marque)
+**no queda pendiente**: se reabre solo si aparece en uso real. Cuando el owner eligió A no se sabía
+que el 400 no identifica la línea ni que casi no se alcanza.
+
+### Qué se hizo
+
+En `pages/salones/index.vue`:
+
+- **El aviso.** Un `UAlert` arriba de las líneas, armado por `avisoCalculoEnPantalla` (nuevo en
+  `useCalculoPrecios.ts`, sobre `avisoCalculoFallido`). Con un 4xx lleva el motivo del servidor;
+  con un corte de red o un 5xx, *"… Intentá de nuevo."*, y solo en ese caso trae *Volver a
+  calcular*, que llama a `recalcular()` una vez, a pedido (no hay reintento automático). Con el
+  motivo del motor, reintentar da lo mismo. Con un 401 no hay aviso: `useApiFetch` ya manda a
+  `/login`, y un rojo fijo quedaba hasta el desmontaje (lo vio la revisión).
+- **El total.** Pasa a `—` mientras dura el error (también con el 401), igual que con el ítem
+  borrado. Antes quedaba en el último calculado: el de 1 unidad, con 2 pedidas.
+- **El ítem borrado** se excluye del aviso nuevo: ya estaba marcado, y el aviso solo diría *"Item
+  no encontrado"*.
+
+*Cerrar y cobrar* e *Imprimir precuenta* no cambian: ya avisaban con el motivo al tocarlos
+(2026-10-08).
+
+### Qué lo fija
+
+`pages/salones/index.nuxt.spec.ts`:
+- § "un cálculo que falla dice por qué" tiene cuatro casos nuevos: el 400 con su motivo arriba de la
+  línea, el total en `—` y sin botón; el 401 sin aviso y con el total en `—`; el control con el
+  cálculo sano; el corte de red con *Volver a calcular*.
+- § "cuenta con un ítem eliminado del catálogo" tiene una aserción nueva: ahí no aparece el aviso.
+
+`composables/useResultadoCalculado.nuxt.spec.ts`, § "avisoCalculoEnPantalla": cuándo ofrece
+reintentar y que el 401 no da aviso.
+
+Los mutantes, medidos uno por uno:
+
+| Mutante | Rojo |
+|---|---|
+| sin aviso (`avisoCalculoCuenta` siempre `null`) | el del 400 y el del corte de red |
+| el total vuelve a mirar solo el ítem borrado | el del 400 y el del corte de red |
+| el aviso también con el ítem borrado | "avisa, tapa el total y deshabilita el cobro" |
+| *Volver a calcular* sin `@click` | el del corte de red |
+| `reintentable` siempre `true` | el del 400 (página) y "con el motivo del motor no ofrece reintentar" |
+| *Volver a calcular* sin el `v-if` de `reintentable` | el del 400 |
+| sin el `return null` del 401 | el del 401 (página) y "con el 401 no hay aviso" |
+| el total mira el aviso y no el error | el del 401 |
+
+En navegador lo fija `frontend/e2e/salones/cuenta-calculo-rechazado.spec.ts`, como
+`encargado.salon`, con un garzón propio y el 400 real del motor. La segunda unidad del producto al
+tope hace aparecer el aviso con el mensaje del servidor y el total en `—`. Al quitar esa línea, el
+aviso se va y el total vuelve. Contra la `index.vue` de antes del cambio (`d6a934a5`) el spec cae
+en `expect(aviso).toBeVisible()`; con la actual pasa (medido sobre el stack propio).
+
+---
+
 ## El checkout de la tienda ya no cobra un ingrediente (cerrada 2026-10-11)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. Se midió antes de arreglar, como pedía la entrada, y
