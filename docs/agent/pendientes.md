@@ -332,9 +332,12 @@ fiscal y va solo:
   de verdad es cambiar la escala de todas las columnas de plata de `venta_detalles` — motor de
   cálculo + fiscal, frente propio (ADR-010).
 
-### Qué lote o unidad sale de stock (owner, 2026-09-28)
+### Otras entradas ya decididas
 
-### Anular un plato devuelve lo que se consumió al venderlo (owner, 2026-09-29)
+Los grupos "Qué lote o unidad sale de stock" (owner, 2026-09-28) y "Anular un plato devuelve lo
+que se consumió al venderlo" (owner, 2026-09-29) quedaron sin entradas abiertas, cerrados en
+[`resueltos.md`](resueltos.md). Lo que sigue no pertenecía a ninguno de los dos: colgaba de esos
+encabezados por orden de llegada.
 
 - [ ] **En una pasarela modo Mall, el código de comercio hijo lo escribe el propio local y nadie
   verifica que sea suyo** (producto + proceso de alta; anotado el 2026-10-08 al cerrar "la
