@@ -353,6 +353,25 @@ tenga. Si el retorno la reclamó antes, `verificar` la ve `procesando` y respond
 Antes, `verificar` la leía sin lock y su `save` pisaba la orden que el retorno acababa de
 conciliar (medido el 2026-10-11).
 
+**Nadie más pisa lo que `verificar` resolvió, y el callback no pisa un reembolso**
+(2026-10-11). Los escritores de la orden que la leían sin lock y guardaban la entidad entera
+ya no lo hacen:
+
+- La expiración perezosa de `obtenerOrden` (el drawer) es un UPDATE condicionado al estado,
+  con el mismo WHERE que el cron `expirar-ordenes`, y corre antes de leer.
+- El retorno de anulación (`abortarRetorno`) toma la orden con `FOR UPDATE`.
+
+Si `verificar` tiene la orden bloqueada, los dos esperan y deciden por lo que quedó. Antes
+dejaban `expirada` o `fallida`, sin la metadata de la verificación, una orden que `verificar`
+acababa de encontrar pagada.
+
+El cierre del callback escribe solo lo suyo. La orden ya está `pagada` y commiteada mientras
+se crea la venta, así que se puede reembolsar en el medio. **Si la reembolsan, sigue
+`reembolsada` y la venta se le liga igual** (owner, 2026-10-11): el drawer muestra ese
+reembolso "sin nota de crédito" con **Generar nota**, y nada se emite solo. Si la venta no se
+pudo crear, queda `reembolsada` sin motivo: no hay venta que registrar. El modo `http` marca
+`conciliada` solo si sigue `pagada`. Lo fija `pasarela-escritores-orden.e2e-spec.ts`.
+
 **`verificar` deja la autorización que el retorno no dejó.** Cuando la encuentra pagada y
 la orden no tiene una AUTHORIZATION `aprobada`, la agrega, con el código que informa la
 consulta, como ya hacía el aclarado del alta (ADR-029). Sin ella el reembolso daba 400

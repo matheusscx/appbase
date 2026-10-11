@@ -520,6 +520,115 @@ Se restauró y se volvieron a correr los archivos en verde.
 
 ---
 
+## Los escritores de la orden ya no pisan lo que otro resolvió (cerradas 2026-10-11)
+
+Salen de [`pendientes.md`](pendientes.md) § 5. Eran dos entradas leídas, no medidas, que dejó el
+frente "`verificar` crea la venta" (abajo). Las dos se midieron antes de tocar nada y se confirmaron.
+Lo fija `backend/test/pasarela-escritores-orden.e2e-spec.ts`.
+
+### Las entradas que cierran, como estaban en `pendientes.md`
+
+- [ ] **Dos escritores de la orden que todavía leen sin lock y guardan la entidad entera: la
+  expiración perezosa de `obtenerOrden` y `abortarRetorno`** (backend, `cobros.service.ts` y
+  `pagos-redirect.service.ts`; visto el 2026-10-11 por el frente "`verificar` crea la venta",
+  **leído, no medido**). Los dos hacen `findOne`, deciden por el estado leído y `save`. Si
+  `verificar` (que ahora bloquea la orden) o el retorno la resuelven en el medio, el `save` espera
+  el lock y después escribe `expirada` o `fallida` encima de una `pagada`/`conciliada`. El cron
+  `expirar-ordenes` no tiene el problema: es un UPDATE con el estado en el `WHERE`. La ventana de
+  la expiración perezosa es que un admin abra el drawer de una orden de más de 2 h justo cuando se
+  verifica. La de `abortarRetorno` es menos realista: un pago anulado en el formulario no puede
+  salir pagado. **El arreglo, sin decidir:** el mismo UPDATE condicionado al estado que usa el cron.
+
+- [ ] **Un reembolso entre el commit del estado y el callback: el `save` del dispatcher deja
+  `conciliada` una orden ya `reembolsada`** (backend, `callback-dispatcher.service.ts`
+  `dispatchInterno`; lo vio la revisión independiente del frente "`verificar` crea la venta",
+  2026-10-11; **leído, no medido**). El retorno y `verificar` commitean `pagada` con su
+  AUTHORIZATION `aprobada` y recién después despachan. Mientras `ventasService.crear` corre, la
+  orden ya es reembolsable: si un admin la reembolsa en esa ventana, el `save` del dispatcher
+  escribe el estado que tiene en memoria (`conciliada`) encima de `reembolsada`, y la venta queda
+  creada sobre un cobro devuelto. Ya pasaba en el retorno. Ventana: lo que tarda crear la venta.
+  **El arreglo, sin decidir:** que el dispatcher cierre con un UPDATE condicionado
+  (`WHERE estado = 'pagada'`), o que el reembolso espere a una orden `interno` sin conciliar.
+
+### Lo medido
+
+Con el código de entonces, el e2e dio 4 rojos (los controles, en verde):
+
+- **El drawer con `verificar` adentro**: una orden de una app por llave, vencida por reloj. El admin
+  la abre mientras `verificar` consulta a Transbank y la encuentra pagada: quedaba `expirada`, sin
+  `metadata.verificacion` ni `resultadoPago`.
+- **La anulación con `verificar` adentro**: quedaba `fallida`.
+- **Un reembolso total mientras el callback crea la venta**, por el retorno y por `verificar`:
+  quedaba `conciliada` encima de `reembolsada`, con la venta creada sobre un cobro devuelto.
+
+La orden de la tienda tapaba las dos primeras: el `save` del dispatcher, que corre después, la
+volvía a escribir entera. Por eso las mide una orden de una app por llave, que no tiene callback
+interno.
+
+### Cómo se cerró
+
+- **La expiración perezosa: un UPDATE condicionado, antes de leer.** Usa el mismo WHERE que el cron
+  `expirar-ordenes`: `en_proceso`, vencida, sin `solicitud_idempotente_id` y sin AUTHORIZATION
+  `error`. Si `verificar` tiene la fila, el UPDATE espera, la relee y no la toca. Después se lee,
+  así que el drawer muestra lo que hay.
+- **`abortarRetorno`: `FOR UPDATE` en una transacción**, como `verificar`. Espera y decide por el
+  estado que quedó.
+- **El cierre del callback escribe solo lo suyo.** Antes guardaba la entidad entera. Ahora:
+  - Al crear la venta: un `UPDATE … RETURNING` que pasa `pagada` → `conciliada`, deja cualquier
+    otro estado como está y liga `venta_id` si no tenía.
+  - Al fallar: escribe el motivo solo si sigue `pagada`.
+
+  La orden en memoria toma lo que devuelve la base, así que el redirect y la respuesta de
+  `verificar` dicen el estado real. El modo `http`, después del 2xx, es un UPDATE condicionado
+  a `pagada`: lo agregó la orquestadora al frente, porque es el mismo archivo y la misma carrera.
+- **No cambia el orden de locks.** El cierre corre después del commit de la venta y no sostiene
+  nada más.
+
+**Qué gana, y cómo se decidió.** Lo decidió el owner el 2026-10-11, por AskUserQuestion de la
+orquestadora. La escena: un comprador paga $10.000 en la tienda y el admin le devuelve el cargo
+mientras se arma la boleta. Hubo tres opciones, cada una con su costo:
+
+- **A (la recomendada, la elegida):** la orden queda `reembolsada` y con la venta ligada.
+- **B:** `reembolsada` sin venta. La boleta quedaba suelta, sin forma de corregirla.
+- **C:** que el reembolso rebote mientras corre el callback. Si el proceso moría, la orden no se
+  podía reembolsar nunca.
+
+Con A, el drawer muestra ese reembolso "sin nota de crédito" (venta ligada y REFUND aprobado sin
+corrección) y **Generar nota** lo corrige. Nada se emite solo. Es lo mismo que ya le pasaba a un
+reembolso parcial en esa ventana. Si la venta no se pudo crear, la orden queda `reembolsada` sin
+motivo: no hay venta que registrar.
+
+### Tests y mutantes
+
+`pasarela-escritores-orden.e2e-spec.ts` tiene 10 casos. Para controlar el orden, `verificar` dispara
+al otro escritor desde la consulta a Transbank y la suelta cuando terminó o quedó esperando la
+fila. El reembolso entra por un spy sobre `OnlineCallbackHandler.onOrdenResuelta`, y el de `http`
+desde un servidor del test que reembolsa antes de contestar 200. Cada mutante revierte una parte
+al código anterior y mata solo su caso:
+
+| Mutante | Cae |
+|---|---|
+| `obtenerOrden` con `findOne` + `save` | el drawer con `verificar` adentro (queda `expirada`) |
+| el UPDATE perezoso sin el `NOT EXISTS` de la AUTHORIZATION `error` | el control de la vencida que intentó autorizar |
+| `abortarRetorno` sin lock | la anulación con `verificar` adentro (queda `fallida`) |
+| el cierre con `save` | los 2 del reembolso con venta (queda `conciliada`) |
+| el cierre condicionado de la entrada (`WHERE estado = 'pagada'`), sin ligar la venta | los 2 del reembolso con venta (`venta_id` null) |
+| el motivo con `save` | los 2 del reembolso sin venta (queda `pagada`) |
+| `dispatchHttp` con `save` | el de la app externa (queda `conciliada`) |
+
+Los unitarios del dispatcher y de la expiración afirman la forma: binds sin huecos, el UPDATE
+antes de leer, y lo que recibe la orden en memoria. Qué órdenes toca lo decide el WHERE, y eso
+solo lo ve Postgres.
+
+**Lo que quedó afuera**, anotado en § 5:
+- `vincularVenta`, el gemelo del alta de suscripción.
+- La anulación que puede marcar `fallida` una orden `procesando`.
+
+La exclusión de la orden escrita antes de cobrar (`solicitud_idempotente_id`) es copia literal del
+cron y no tiene un caso propio en el e2e: tampoco lo tenía antes.
+
+---
+
 ## `verificar` crea la venta de la tienda, y ya no pisa al retorno (cerradas 2026-10-11)
 
 Salen de [`pendientes.md`](pendientes.md) § 3 y § 5, en un mismo frente fiscal (crea la boleta) y

@@ -1837,6 +1837,36 @@ export class CobrosService {
     ordenId: string,
     { vistaAdmin = false }: { vistaAdmin?: boolean } = {},
   ) {
+    // Expiración perezosa, PERO nunca sobre una orden que sí intentó autorizar
+    // (AUTHORIZATION 'error' por timeout): pudo haberse pagado en el
+    // proveedor. Esas se cierran solo vía /verificar, no por reloj. Tampoco
+    // sobre una escrita antes de cobrar (el alta de suscripción, ADR-029):
+    // pudo haberse cobrado aunque no haya dejado AUTHORIZATION.
+    //
+    // Un UPDATE con el estado en el WHERE, como el cron `expirar-ordenes`, y
+    // ANTES de leer: si `verificar` tiene la orden bloqueada, espera y no
+    // escribe sobre lo que resolvió. Leer y guardar la entidad entera dejaba
+    // `expirada`, y sin la metadata de la verificación, una orden que
+    // `verificar` acababa de encontrar pagada (pendientes.md § 5, medido en
+    // `pasarela-escritores-orden.e2e-spec.ts`).
+    await this.db.query(
+      `UPDATE pasarela_ordenes o
+          SET estado = 'expirada', actualizado_el = now()
+        WHERE o.orden_id = $1
+          AND o.tenant_id = $2
+          AND o.estado = 'en_proceso'
+          AND o.eliminado_el IS NULL
+          AND o.fecha_expiracion < now()
+          AND o.solicitud_idempotente_id IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM pasarela_transacciones t
+             WHERE t.orden_id = o.orden_id
+               AND t.tipo = 'AUTHORIZATION'
+               AND t.estado = 'error'
+               AND t.eliminado_el IS NULL
+          )`,
+      [ordenId, tenantId],
+    );
     const orden = await this.ordenRepo.findOne({
       where: { ordenId, tenantId },
     });
@@ -1845,24 +1875,6 @@ export class CobrosService {
       tenantId,
       ordenId,
     );
-    // Expiración perezosa (sin job en v1), PERO nunca sobre una orden que sí
-    // intentó autorizar (AUTHORIZATION 'error' por timeout): pudo haberse
-    // pagado en el proveedor. Esas se cierran solo vía /verificar, no por reloj.
-    const tuvoIntentoAuth = transacciones.some(
-      (t) => t.tipo === 'AUTHORIZATION' && t.estado === 'error',
-    );
-    // Tampoco sobre una escrita antes de cobrar (el alta de suscripción,
-    // ADR-029): pudo haberse cobrado aunque no haya dejado AUTHORIZATION.
-    if (
-      orden.estado === 'en_proceso' &&
-      !tuvoIntentoAuth &&
-      !orden.solicitudIdempotenteId &&
-      orden.fechaExpiracion &&
-      orden.fechaExpiracion < new Date()
-    ) {
-      orden.estado = 'expirada';
-      await this.ordenRepo.save(orden);
-    }
     return this.toPublico(orden, {
       // Por qué la orden pagada no tiene venta: el aviso al admin. La API
       // externa no lo expone (contrato, ver arriba).

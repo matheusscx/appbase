@@ -13,6 +13,7 @@ import {
 import { ProviderComunicacionError } from '../providers/payment-provider.interface';
 import { MonedasService } from '../../monedas/monedas.service';
 import { BadRequestException } from '@nestjs/common';
+import { Db } from '../../../common/db/db.service';
 
 describe('PagosRedirectService', () => {
   let service: PagosRedirectService;
@@ -69,6 +70,10 @@ describe('PagosRedirectService', () => {
         },
         { provide: ConfigService, useValue: deps.config },
         { provide: MonedasService, useValue: deps.monedas },
+        {
+          provide: Db,
+          useValue: { transaccion: (fn: () => unknown) => fn() },
+        },
       ],
     }).compile();
     service = module.get(PagosRedirectService);
@@ -349,8 +354,10 @@ describe('PagosRedirectService', () => {
       },
     });
     const res = await service.abortarRetorno({ ordenCompra: 'W-1' });
+    // Con la orden bloqueada: `verificar` puede tenerla tomada.
     expect(ordenRepo.findOne).toHaveBeenCalledWith({
       where: { codigoOrden: 'W-1' },
+      lock: { mode: 'pessimistic_write' },
     });
     const guardada = ordenRepo.save.mock.calls[0][0] as { estado: string };
     expect(guardada.estado).toBe('fallida');

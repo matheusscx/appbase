@@ -413,27 +413,24 @@ prohíbe.
 
 ## 5. Carreras de concurrencia
 
-- [ ] **Dos escritores de la orden que todavía leen sin lock y guardan la entidad entera: la
-  expiración perezosa de `obtenerOrden` y `abortarRetorno`** (backend, `cobros.service.ts` y
-  `pagos-redirect.service.ts`; visto el 2026-10-11 por el frente "`verificar` crea la venta",
-  **leído, no medido**). Los dos hacen `findOne`, deciden por el estado leído y `save`. Si
-  `verificar` (que ahora bloquea la orden) o el retorno la resuelven en el medio, el `save` espera
-  el lock y después escribe `expirada` o `fallida` encima de una `pagada`/`conciliada`. El cron
-  `expirar-ordenes` no tiene el problema: es un UPDATE con el estado en el `WHERE`. La ventana de
-  la expiración perezosa es que un admin abra el drawer de una orden de más de 2 h justo cuando se
-  verifica. La de `abortarRetorno` es menos realista: un pago anulado en el formulario no puede
-  salir pagado. **El arreglo, sin decidir:** el mismo UPDATE condicionado al estado que usa el cron.
+- [ ] **`vincularVenta` (el alta de suscripción) lee la orden sin lock y la guarda entera** (backend,
+  `cobros.service.ts` `vincularVenta`; anotado el 2026-10-11 por el frente "los escritores de la
+  orden", **leído, no medido**). Es el gemelo de los que cerró ese frente
+  ([`resueltos.md`](resueltos.md)): `findOne`, exige `pagada` y `save` con `conciliada` y la venta.
+  Un reembolso que entre entre el cobro del alta y el vínculo queda pisado (`reembolsada` →
+  `conciliada`). La ventana es lo que tarda crear la venta inicial en la misma request. **El
+  arreglo, por analogía:** el cierre del dispatcher (estado condicionado y `venta_id` ligado igual,
+  owner 2026-10-11). Hay que medir antes si la ventana existe.
 
-- [ ] **Un reembolso entre el commit del estado y el callback: el `save` del dispatcher deja
-  `conciliada` una orden ya `reembolsada`** (backend, `callback-dispatcher.service.ts`
-  `dispatchInterno`; lo vio la revisión independiente del frente "`verificar` crea la venta",
-  2026-10-11; **leído, no medido**). El retorno y `verificar` commitean `pagada` con su
-  AUTHORIZATION `aprobada` y recién después despachan. Mientras `ventasService.crear` corre, la
-  orden ya es reembolsable: si un admin la reembolsa en esa ventana, el `save` del dispatcher
-  escribe el estado que tiene en memoria (`conciliada`) encima de `reembolsada`, y la venta queda
-  creada sobre un cobro devuelto. Ya pasaba en el retorno. Ventana: lo que tarda crear la venta.
-  **El arreglo, sin decidir:** que el dispatcher cierre con un UPDATE condicionado
-  (`WHERE estado = 'pagada'`), o que el reembolso espere a una orden `interno` sin conciliar.
+- [ ] **La anulación de Webpay puede marcar `fallida` una orden que el retorno está confirmando**
+  (backend, `pagos-redirect.service.ts`; anotado el 2026-10-11 por el frente "los escritores de la
+  orden", **leído, no medido**). `abortarRetorno` acepta `procesando`, el estado que deja el claim
+  de `confirmarRetorno` mientras confirma, y el retorno no tiene lock en esa ventana. Si los dos
+  llegan juntos, el `save` del retorno escribe `pagada` encima de la anulación. Si el commit falla
+  por comunicación, la compensación (`procesando` → `en_proceso`) no encuentra la fila y la orden
+  queda `fallida` con una AUTHORIZATION `error`: un pago que pudo salir, leído como fracaso.
+  Transbank no debería mandar las dos vueltas para la misma transacción. **Sin decidir:** si
+  `procesando` sale de los estados que anula.
 
 ---
 

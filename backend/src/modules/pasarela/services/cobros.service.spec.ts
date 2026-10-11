@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Db } from '../../../common/db/db.service';
+import { assertSinHuecos } from '../../../common/db/db.spec-helper';
 import { CobrosService, veredictoPorSaldo } from './cobros.service';
 import { InscripcionesService } from './inscripciones.service';
 import { TenantPasarelaService } from './tenant-pasarela.service';
@@ -2429,32 +2430,26 @@ describe('CobrosService', () => {
     expect(api).not.toHaveProperty('motivoSinVenta');
   });
 
-  it('obtenerOrden aplica expiración perezosa', async () => {
+  // Qué órdenes expira lo decide el WHERE, y eso solo lo ve Postgres: los
+  // casos (vencida, con intento de autorización, con verificar adentro) están
+  // en `pasarela-escritores-orden.e2e-spec.ts`. Acá, la forma.
+  it('obtenerOrden expira con un UPDATE condicionado, antes de leer, y nunca guarda la entidad', async () => {
     ordenRepo.findOne.mockResolvedValue({
       ordenId: 'orden-1',
       tenantId: 't-1',
-      estado: 'en_proceso',
-      fechaExpiracion: new Date(Date.now() - 60_000),
+      estado: 'expirada',
       metadata: {},
     });
     const res = await service.obtenerOrden('t-1', 'orden-1');
-    expect(res.estado).toBe('expirada');
-  });
 
-  it('obtenerOrden NO expira una orden con intento de auth (timeout reconciliable)', async () => {
-    ordenRepo.findOne.mockResolvedValue({
-      ordenId: 'orden-1',
-      tenantId: 't-1',
-      estado: 'en_proceso',
-      fechaExpiracion: new Date(Date.now() - 60_000),
-      metadata: {},
-    });
-    conHistorial([
-      { transaccionId: 'tx-1', tipo: 'AUTHORIZATION', estado: 'error' },
-    ]);
-    const res = await service.obtenerOrden('t-1', 'orden-1');
-    // se mantiene en_proceso: solo /verificar puede cerrarla (pudo pagarse)
-    expect(res.estado).toBe('en_proceso');
+    expect(dbMock.query).toHaveBeenCalledTimes(1);
+    const [sql, params] = dbMock.query.mock.calls[0] as [string, unknown[]];
+    assertSinHuecos(sql, params);
+    expect(params).toEqual(['orden-1', 't-1']);
+    expect(dbMock.query.mock.invocationCallOrder[0]).toBeLessThan(
+      ordenRepo.findOne.mock.invocationCallOrder[0],
+    );
     expect(ordenRepo.save).not.toHaveBeenCalled();
+    expect(res.estado).toBe('expirada');
   });
 });

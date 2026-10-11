@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Db } from '../../../common/db/db.service';
 import { randomBytes } from 'crypto';
 import Decimal from 'decimal.js';
 import {
@@ -57,6 +58,7 @@ export class PagosRedirectService {
     private readonly providerFactory: ProviderFactory,
     private readonly config: ConfigService,
     private readonly monedas: MonedasService,
+    private readonly db: Db,
   ) {}
 
   /** buyOrder ≤26 chars (límite Webpay): 'W' + timestamp36 + 8 random. */
@@ -262,6 +264,13 @@ export class PagosRedirectService {
    * y SIN `token_ws` (nunca se autorizó). Marca la orden `fallida` si sigue abierta
    * y redirige a la URL de fracaso de la app. Idempotente: no pisa un estado
    * terminal (por un doble-retorno).
+   *
+   * La orden se lee con `FOR UPDATE`: si `verificar` la tiene bloqueada
+   * mientras consulta a Transbank, esto espera y decide por lo que quedó. Sin
+   * el lock, el `save` de la entidad entera dejaba `fallida`, y sin la
+   * metadata de la verificación, una orden que `verificar` acababa de
+   * encontrar pagada (pendientes.md § 5, medido en
+   * `pasarela-escritores-orden.e2e-spec.ts`).
    */
   async abortarRetorno(p: {
     tbkToken?: string;
@@ -269,25 +278,29 @@ export class PagosRedirectService {
   }): Promise<{ urlRedireccion: string }> {
     if (!p.ordenCompra && !p.tbkToken)
       throw new BadRequestException('Retorno de anulación sin identificador');
-    const orden = await this.ordenRepo.findOne({
-      where: p.ordenCompra
-        ? { codigoOrden: p.ordenCompra }
-        : { tokenProveedor: p.tbkToken },
-    });
-    if (!orden)
-      throw new NotFoundException('Orden no encontrada para el retorno');
+    const orden = await this.db.transaccion(async () => {
+      const bloqueada = await this.ordenRepo.findOne({
+        where: p.ordenCompra
+          ? { codigoOrden: p.ordenCompra }
+          : { tokenProveedor: p.tbkToken },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!bloqueada)
+        throw new NotFoundException('Orden no encontrada para el retorno');
 
-    if (['creada', 'en_proceso', 'procesando'].includes(orden.estado)) {
-      orden.estado = 'fallida';
-      orden.metadata = {
-        ...orden.metadata,
-        aborto: {
-          tbkToken: p.tbkToken ?? null,
-          en: new Date().toISOString(),
-        },
-      };
-      await this.ordenRepo.save(orden);
-    }
+      if (['creada', 'en_proceso', 'procesando'].includes(bloqueada.estado)) {
+        bloqueada.estado = 'fallida';
+        bloqueada.metadata = {
+          ...bloqueada.metadata,
+          aborto: {
+            tbkToken: p.tbkToken ?? null,
+            en: new Date().toISOString(),
+          },
+        };
+        await this.ordenRepo.save(bloqueada);
+      }
+      return bloqueada;
+    });
     return { urlRedireccion: this.urlRetornoApp(orden) };
   }
 

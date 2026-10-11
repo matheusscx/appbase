@@ -1,6 +1,8 @@
 import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Db } from '../../../common/db/db.service';
+import { unwrap } from '../../../common/utils/pg-returning.util';
 import { PasarelaOrden } from '../entities/pasarela-orden.entity';
 import { PagoCallbackRegistry } from './pago-callback.registry';
 
@@ -28,6 +30,7 @@ export class CallbackDispatcherService {
     @InjectRepository(PasarelaOrden)
     private readonly ordenRepo: Repository<PasarelaOrden>,
     private readonly registry: PagoCallbackRegistry,
+    private readonly db: Db,
   ) {}
 
   /** Se invoca tras resolver la orden. Solo concilia el camino pagado. */
@@ -54,19 +57,52 @@ export class CallbackDispatcherService {
       );
       return;
     }
+    // La orden ya está `pagada` y commiteada mientras se crea la venta, así
+    // que se puede reembolsar en el medio. Por eso el cierre no guarda la
+    // entidad entera —escribía `conciliada`, o `pagada` en el error, encima de
+    // `reembolsada`— sino solo lo suyo y condicionado al estado
+    // (pendientes.md § 5, medido en `pasarela-escritores-orden.e2e-spec.ts`).
     try {
       await handler.onOrdenResuelta(orden); // el handler setea orden.ventaId
-      orden.estado = 'conciliada';
-      await this.ordenRepo.save(orden);
+      // Si la reembolsaron en el medio, sigue `reembolsada` y la venta se le
+      // liga igual (owner, 2026-10-11): el REFUND queda sin nota de crédito y
+      // el drawer ofrece "Generar nota". Nada se emite solo.
+      const [cerrada] = unwrap<{ estado: string; venta_id: string | null }>(
+        await this.db.query(
+          `UPDATE pasarela_ordenes
+              SET estado = CASE WHEN estado = 'pagada' THEN 'conciliada' ELSE estado END,
+                  venta_id = COALESCE(venta_id, $2),
+                  actualizado_el = now()
+            WHERE orden_id = $1 AND eliminado_el IS NULL
+          RETURNING estado, venta_id`,
+          [orden.ordenId, orden.ventaId],
+        ),
+      );
+      orden.estado = cerrada.estado;
+      orden.ventaId = cerrada.venta_id;
     } catch (e) {
       // No romper el redirect: la orden queda `pagada` sin venta. El detalle
-      // técnico va al log; a la orden, solo lo que el admin puede leer.
+      // técnico va al log; a la orden, solo lo que el admin puede leer. Si la
+      // reembolsaron en el medio no hay venta que registrar: no lleva motivo.
       this.logger.error(
         `Callback interno falló para orden ${orden.ordenId}: ${String(e)}`,
       );
-      orden.motivoSinVenta = motivoLegible(e);
       try {
-        await this.ordenRepo.save(orden);
+        const [marcada] = unwrap<{
+          estado: string;
+          motivo_sin_venta: string | null;
+        }>(
+          await this.db.query(
+            `UPDATE pasarela_ordenes
+                SET motivo_sin_venta = CASE WHEN estado = 'pagada' THEN $2 ELSE motivo_sin_venta END,
+                    actualizado_el = now()
+              WHERE orden_id = $1 AND eliminado_el IS NULL
+            RETURNING estado, motivo_sin_venta`,
+            [orden.ordenId, motivoLegible(e)],
+          ),
+        );
+        orden.estado = marcada.estado;
+        orden.motivoSinVenta = marcada.motivo_sin_venta;
       } catch (eGuardar) {
         this.logger.error(
           `No se pudo guardar el motivo sin venta de la orden ${orden.ordenId}: ${String(eGuardar)}`,
@@ -86,9 +122,14 @@ export class CallbackDispatcherService {
       body: JSON.stringify({ ordenId: orden.ordenId }),
     })
       .then(async (res) => {
+        // Condicionado al estado, como el claim del retorno: un reembolso
+        // que entró mientras la app contestaba ya la dejó `reembolsada`, y
+        // guardar la entidad entera la volvía `conciliada` (pendientes.md § 5).
         if (res.ok) {
-          orden.estado = 'conciliada';
-          await this.ordenRepo.save(orden);
+          await this.ordenRepo.update(
+            { ordenId: orden.ordenId, estado: 'pagada' },
+            { estado: 'conciliada' },
+          );
         } else {
           this.logger.error(
             `Callback HTTP a ${url} respondió ${res.status} (orden ${orden.ordenId})`,
