@@ -375,6 +375,22 @@ porque el CI siempre parte de una base virgen — hoy eso está tapado por
 respuesta son migraciones, no más semáforos. Para resincronizar la base del demo:
 skill `railway-sync-db`.
 
+### Escaneo de dependencias
+
+El job `dependencias` de `.github/workflows/ci.yml` corre `scripts/check-dependencias.mjs`
+(`npm audit` sobre los lockfiles de backend y frontend). **Bloquea** con `high`/`critical` de
+dependencias de producción que no estén en `EXCEPCIONES`. Lo `moderate`/`low` y todo lo de
+desarrollo **se reporta sin fallar**. Si el registry de npm no contesta (error de red, 5xx o
+429), deja un aviso y **no** falla: eso no es un hallazgo, y el push siguiente vuelve a auditar
+el lockfile entero. Cualquier otro error de `npm audit` (sin lockfile, 404) **sí** falla.
+Como el resto del CI, corre después del push y no frena el deploy de Railway.
+
+Una excepción es una vulnerabilidad aceptada con lo medido al lado. Va en el script y tiene su
+entrada en `docs/agent/pendientes.md`, y se borra de los dos lados en el commit que la
+arregla. En el frontend son la mayoría por una razón estructural: `nuxt` es dependencia de
+producción y arrastra su cadena de build y de servidor de desarrollo, pero lo que se
+despliega es `.output/`, y casi nada de esa cadena entra ahí.
+
 ## Documentación
 
 - **ADRs** (`docs/adr/`) — decisiones arquitectónicas con contexto y consecuencias

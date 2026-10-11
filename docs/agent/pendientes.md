@@ -397,6 +397,16 @@ prohíbe.
   sigue marcado para siempre. **La pregunta para el owner:** ¿se liga el `REFUND` a una de las
   notas que ya existen (¿cuál, si son dos?), o se descarta la marca con un motivo escrito? Ninguna
   de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
+- [ ] **¿Se activan las alertas de Dependabot, sin PRs?** (harness; anotado el 2026-10-11 al
+  cerrar "Escaneo de dependencias en CI", [`resueltos.md`](resueltos.md)). El job `dependencias`
+  solo audita cuando alguien pushea. Si se publica una CVE para algo que ya está en `main` y
+  nadie pushea, nadie se entera. Las *alertas* de Dependabot (Settings → Code security) avisan
+  por mail y en la pestaña Security, y **no abren PRs ni ramas**. Lo que sí las abre son las
+  *security updates* y las *version updates*, y eso choca con el flujo de commitear directo a
+  `main` (`CLAUDE.md`, "Flujo de trabajo"). **La pregunta para el owner:** ¿activar solo las
+  alertas (es un ajuste del repo en GitHub, lo hace el owner), o dejarlo como está hasta el
+  paso a producción? Costo de activarlas: mails, y una alerta por cada excepción ya aceptada
+  en `scripts/check-dependencias.mjs` hasta que se descarte a mano en GitHub.
 
 
 ## 5. Carreras de concurrencia
@@ -728,8 +738,45 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
 - [ ] **Backups automáticos + restore probado (Postgres)** (infra) — datos financieros
   multi-tenant: backups automáticos + point-in-time recovery, y **restore probado** (un backup
   que nunca se restauró no es un backup). Tópico aparte del deploy de la app.
-- [ ] **Escaneo de dependencias en CI** (harness) — `npm audit` / Dependabot como paso del
-  gate, para no arrastrar CVEs conocidos a prod.
+- [ ] **Vulnerabilidades aceptadas en el escaneo de dependencias** (harness; anotado el
+  2026-10-11 al cerrar "Escaneo de dependencias en CI", [`resueltos.md`](resueltos.md)). Cada una
+  es una entrada de `EXCEPCIONES` en `scripts/check-dependencias.mjs`, y se borra de los dos
+  lados en el mismo commit que la arregla. Si el arreglo llega solo, el job `dependencias`
+  avisa con "Excepción vencida".
+  - **nodemailer 9 → 10** (backend; mecánico): dos `high` de DoS en el addressparser
+    (GHSA-v53p-9fqp-m79j, GHSA-prgh-xp8r-p3m5). Están arregladas en la 10, que es un major para
+    el rango `^9`. El CHANGELOG de la 10.0.0 declara un solo breaking: Node >= 20. Usamos
+    Node 22, y el uso que hacemos es uno solo (`mail.service.ts`, `createTransport`). Igual
+    va con el gate entero, porque la 10 también migró a TypeScript con builds ESM y CJS.
+  - **nuxt >= 4.5.1** (frontend; necesita una decisión de entorno, no de producto): cinco
+    `high` sobre server islands, payload de SSR y `routeRules`. Somos SPA (`ssr: false`,
+    ADR-017) y no usamos islands ni `routeRules`, así que hoy no aplican. **Por qué no
+    entró:** desde la 4.5, nuxt pide Node `^22.19.0` (la 4.6.1, `^22.22.3`), y el Node del
+    host es 22.18.0. Con ese Node, npm deja nuxt en 4.4.8 aunque el rango `^4.4.8` permita
+    más. Para subirlo, primero hay que actualizar Node en el host y en las sesiones. Además,
+    la 4.5 agrega `rolldown` como peer: medirlo con Playwright entero.
+  - **simple-git (y su `@simple-git/argv-parser`), node-forge, braces** (frontend; vigilar,
+    no hay qué hacer hoy): son críticos
+    y altos, pero viven en la cadena de desarrollo y build de nuxt (`@nuxt/devtools`, el
+    `listhen` de `@nuxt/cli` y el globbing de nitropack) y no entran en `.output/`, que es lo
+    único que corre en Railway (verificado buildeando el 2026-10-11). De node-forge (1.4.0) y
+    braces (3.0.3) no hay versión arreglada publicada. simple-git sí la tiene (4.0.1), pero
+    ninguna versión estable de `@nuxt/devtools` sale de simple-git 3.
+  - **El lockfile del frontend no se puede regenerar con npm 10.9**: `npm update` y
+    `npm audit fix` revientan con *"Cannot read properties of null (reading 'edgesOut')"* (un
+    bug de arborist con los peers exactos de tiptap). Cómo se hizo el 2026-10-11:
+    `npx npm@11.6.2 install` y después `npm install --package-lock-only` con el npm 10 del
+    host, para que el `npm ci` de npm 10 (el del CI y el de los Dockerfile) no falle por
+    entradas de `@emnapi` que npm 11 escribe distinto. Comprobación: `npm ci` en limpio con npm 10.
+    ⚠️ **Y una sola `reka-ui`.** El lock regenerado le dio a `vaul-vue` (el drawer de
+    `@nuxt/ui`, que pide `reka-ui ^2.0.0`) una 2.10.5 propia, al lado de la 2.9.9 exacta de
+    `@nuxt/ui`. Build, typecheck y unitarios pasaron, y Playwright no: 10 rojos en selects sin
+    opciones, botones que no se deshabilitaban y montos de nota de crédito que no se
+    capturaban. `npm dedupe` no sirve: con npm 10 revienta, y con npm 11 se llevó `rolldown` y
+    `nuxt prepare` dejó de encontrar un parser. Se arregló dejando a mano una sola entrada
+    `node_modules/reka-ui` 2.9.9, que cumple los dos rangos, y validando con npm 10 que el lock
+    no cambia. Comprobación: `node -e` sobre `package-lock.json`, una sola clave que termine en
+    `node_modules/reka-ui`.
 - [ ] **Pre-push que corre el gate completo local (todas las suites)** (harness) — hoy
   `.githooks/pre-push` solo hace `codegraph sync` (no-bloqueante); el gate real corre en CI
   DESPUÉS del push (fue lo que dejó `main` en rojo el 2026-07-23). Mover ese gate a un pre-push

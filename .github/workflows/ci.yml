@@ -134,6 +134,27 @@ jobs:
         working-directory: frontend
         run: npm run design:check
 
+  # Vulnerabilidades conocidas en las dependencias (`npm audit`). Job aparte y no un paso
+  # de `gate`: `npm audit` lee el lockfile y no necesita `npm ci` ni Postgres, así que
+  # corre en segundos y en paralelo; y un rojo acá se lee como "dependencias", sin
+  # mezclarse con los tests. Qué bloquea, qué solo reporta y qué pasa si el registry no
+  # contesta: cabecera de `scripts/check-dependencias.mjs`.
+  dependencias:
+    runs-on: ubuntu-latest
+    # Medido en local: 7 s con el registry sano, 33 s caído y 2 min 30 s colgado (el
+    # script corta cada consulta a los 20 s). Los dos últimos terminan en aviso, no en
+    # este timeout.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: npm audit · backend y frontend
+        run: node scripts/check-dependencias.mjs
+
   # Suite E2E de navegador (Playwright). Job separado a propósito: GitHub crea los
   # `services` por job, así que este Postgres nace virgen y el bootstrap del backend lo
   # siembra — la misma garantía que `scripts/reset-db.sh` da en local. Correrlo dentro de

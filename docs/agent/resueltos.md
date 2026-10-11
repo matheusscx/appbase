@@ -23,6 +23,101 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Escaneo de dependencias en CI (cerrada 2026-10-11)
+
+Sale de [`pendientes.md` § *Endurecimiento para producción*](pendientes.md). La entrada, verbatim:
+
+- [x] **Escaneo de dependencias en CI** (harness) — `npm audit` / Dependabot como paso del
+  gate, para no arrastrar CVEs conocidos a prod.
+
+**Lo medido antes de elegir el umbral.** Este conteo es el de `npm audit`, que cuenta paquetes
+y no advisories: backend 19 (producción: 1 crítico, 4 high, 3 moderate, 1 low), frontend 68
+(producción: 6 críticos, 21 high, 38 moderate, 1 low). Un paso que fallara con cualquier
+hallazgo dejaba `main` en rojo desde el primer push.
+
+**Qué se arregló.** Solo los lockfiles. Los dos `package.json` quedan iguales: todo cae dentro
+de los rangos ya declarados.
+- Backend, con `npm audit fix`: de 43 advisories únicas quedan 7. Las directas que se mueven son
+  `@nestjs/platform-express` 11.1.26 → 11.2.7, `@nestjs/swagger` 11.4.4 → 11.4.7, `typeorm`
+  1.0.0 → 1.1.2 y `nodemailer` 9.0.5 → 9.1.1. Entre las transitivas, la crítica era
+  `proxy-addr` 2.0.8 (IP spoofing), y además `multer`, `fast-uri`, `js-yaml`, `handlebars` y
+  `brace-expansion`.
+- Frontend: de 54 advisories únicas quedan 14. `npm audit fix` y `npm update` revientan con
+  npm 10.9, así que el lock se regeneró con npm 11 y se normalizó con npm 10 (el procedimiento
+  quedó en `pendientes.md`). Lo que cierra: `vue` 3.5.43 (XSS en server-renderer), `seroval`,
+  `shell-quote`, `tar`, `devalue`, `@tiptap/core`, `prosemirror-view`, `postcss` y `svgo`. Tres
+  cosas quedaron donde estaban, cada una por su motivo:
+  - `@nuxt/ui` (4.8.2) y `@playwright/test` (1.61.1): no cerraban nada, y subir Playwright
+    obligaba a cada sesión a bajar otro Chromium.
+  - `happy-dom` (20.10.6), por algo medido: con la 20.14.6 fallaban 124 unitarios en 3 specs
+    `.nuxt.spec.ts` con *"'defineProperty' on proxy: trap returned falsish for property
+    '__v_skip'"*. Esos specs envuelven `getComputedStyle` con `markRaw`, y la 20.14 devuelve un
+    Proxy que no acepta esa marca. Volviendo a 20.10.6 pasan los 2212.
+  - `reka-ui`, en **una sola copia** (2.9.9). El lock regenerado le había dado otra (2.10.5) a
+    `vaul-vue`, el drawer de `@nuxt/ui`. Build, typecheck y unitarios pasaron, pero Playwright
+    dio 10 rojos: selects sin opciones, botones que no se deshabilitaban, una nota de crédito
+    parcial que salía por el total. Con una sola copia, los mismos 10 pasan. **No es un pin en
+    `package.json`**: la 2.9.9 la fija `@nuxt/ui` 4.8.2, que la pide exacta, y lo único que se
+    corrigió es que el lock no le diera otra copia a `vaul-vue`. Por eso el próximo
+    `npm install` que regenere el lock la puede volver a duplicar sin que ningún gate rápido lo
+    note (el síntoma recién aparece en Playwright). El procedimiento y la comprobación de una
+    línea quedaron en `pendientes.md`.
+
+**El umbral.** Job `dependencias` en `.github/workflows/ci.yml`, que corre
+`scripts/check-dependencias.mjs`. Falla solo con `high`/`critical` de `npm audit --omit=dev`
+que no estén en `EXCEPCIONES`. Lo `moderate`/`low` y todo lo de desarrollo se reporta sin
+fallar. Es un job aparte porque `npm audit` lee el lockfile y no necesita `npm ci` ni
+Postgres: tarda 7 s, corre en paralelo con el resto, y su rojo no se mezcla con los tests.
+
+**Registry caído ≠ hallazgo.** `npm audit` sale con 1 en los dos casos. Lo que los distingue
+es el JSON: cuando no pudo consultar, trae `error` y no trae `vulnerabilities`. Si el error es de
+red, el script reintenta 3 veces y, si sigue sin respuesta, emite un `::warning::` y no falla.
+Cuenta como red un *"request to … failed, reason: …"*, el corte propio a los 20 s y un 5xx o 429
+del registry. El lockfile se audita entero en cada push, así que el siguiente lo vuelve a cubrir.
+**Cualquier otro error falla**: `ENOLOCK`, un 404 del endpoint o una salida que no es JSON no se
+arreglan con el próximo push, y como aviso dejarían el job verde para siempre (lo levantó la
+revisión independiente; la primera versión los trataba a todos como red).
+
+Los `--fetch-timeout` y `--fetch-retries` de npm **no alcanzan** contra un registry colgado: una
+sola llamada con `--fetch-timeout=20000 --fetch-retries=0 --registry http://10.255.255.1` tardó
+2 min 30 s igual. Por eso el script mata cada consulta a los 20 s. Medido sobre el script entero:
+7 s con el registry sano y 33 s caído. Colgado tarda 2 min 30 s, por otra cuenta: 3 cortes de
+20 s más 15 s de espera, en cada uno de los dos directorios. Los dos últimos casos terminan en
+aviso, lejos de los 5 min de `timeout-minutes`.
+
+**Las excepciones** (6 entradas, 13 advisories), cada una con su porqué en el script y en
+`pendientes.md` § *Endurecimiento para producción*: nodemailer (la versión arreglada es un
+major), nuxt (el arreglo pide Node >= 22.19 y el host tiene 22.18; y no aplica a una SPA sin
+islands ni `routeRules`), y simple-git/node-forge/braces, que no entran en `.output/`. Una
+excepción acepta un advisory **en un paquete**: si el mismo GHSA aparece en otro, bloquea.
+
+**Verificación del script**, mutante por mutante sobre los lockfiles reales:
+- Sin un id de nodemailer en `EXCEPCIONES`: sale 1, con el `::error::` de ese advisory.
+- Con la excepción de braces puesta a nombre de `micromatch`: sale 1, y además avisa
+  "Excepción vencida".
+- Con la consulta de desarrollo fallando y un high sin excepción: sale 1. La primera versión
+  descartaba el directorio entero, producción incluida.
+- Con un directorio sin lockfile (`ENOLOCK`) y con un 404 del endpoint: sale 1, con "no es la red".
+- Con el registry caído y con el registry colgado: sale 0, con los dos avisos.
+
+**Gate de cierre**, sobre `921d16e4` (que trae `helmet` y se mezcló solo en el lock del
+backend):
+- Backend: lint, typecheck, 4056 unitarios y `test:e2e` entero (2369 pasados; 6 saltados por
+  condición de los propios specs, la sonda del pool y Oneclick).
+- Frontend: build, 2212 unitarios, ratchet y `design:check`.
+- Playwright entero: 116/116, con RestartCount 0 antes y después.
+- Imágenes de `Dockerfile.prod` (las que despliega Railway) buildeadas y arrancadas: el backend
+  en `NODE_ENV=production` contra la base del stack (`/api/health` → `{"estado":"ok","base":"ok"}`),
+  y el frontend sirviendo `/`, un asset de `/_nuxt` y `/api/health` por su proxy.
+
+**La integración con Actions no se puede probar en local**: se verifica en el primer CI
+después del merge.
+
+**Dependabot no se activó**: sus *updates* abren PRs y ramas, y el flujo es directo a `main`.
+Las *alertas solas* quedaron como pregunta para el owner en `pendientes.md` § 4.
+
+---
+
 ## Cabeceras de seguridad, CORS por lista y apagado ordenado del backend (cerrada 2026-10-11)
 
 Salen de [`pendientes.md`](pendientes.md) § Endurecimiento para producción. `helmet` es
