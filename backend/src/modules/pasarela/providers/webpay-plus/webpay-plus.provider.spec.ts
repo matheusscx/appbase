@@ -109,6 +109,51 @@ describe('WebpayPlusProvider', () => {
     expect((await provider.consultarEstado(cred, ref)).estado).toBe('fallida');
   });
 
+  it('consultarEstado de una pagada trae el detalle del pago, igual que el commit', async () => {
+    const respuesta = {
+      card_detail: { card_number: '4321' },
+      details: [
+        {
+          status: 'AUTHORIZED',
+          response_code: 0,
+          authorization_code: '7788',
+          payment_type_code: 'VD',
+          installments_number: 0,
+        },
+      ],
+    };
+    const detallePago = {
+      tipoPago: 'VD',
+      numeroCuotas: 0,
+      tarjetaUltimos4: '4321',
+      codigoRespuesta: '0',
+      codigoAutorizacion: '7788',
+    };
+    mockFetch(200, respuesta);
+    expect(
+      await provider.consultarEstado(cred, {
+        codigoOrden: 'W-1',
+        tokenProveedor: 'tok-1',
+      }),
+    ).toMatchObject({ estado: 'pagada', detallePago });
+    mockFetch(200, respuesta);
+    expect(await provider.confirmarPago(cred, 'tok-1')).toMatchObject(
+      detallePago,
+    );
+  });
+
+  it('consultarEstado de una fallida no trae detalle del pago', async () => {
+    mockFetch(200, {
+      details: [{ status: 'FAILED', payment_type_code: 'VD' }],
+    });
+    const r = await provider.consultarEstado(cred, {
+      codigoOrden: 'W-1',
+      tokenProveedor: 'tok-1',
+    });
+    expect(r.estado).toBe('fallida');
+    expect(r.detallePago).toBeUndefined();
+  });
+
   it('consultarEstado: sin token → desconocido (no golpea al proveedor)', async () => {
     global.fetch = jest.fn();
     const r = await provider.consultarEstado(cred, {

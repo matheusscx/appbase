@@ -252,3 +252,22 @@ después de cobrar"*.
   reclamos de `main`): `synchronize` recrea el índice de usuario porque cambia la nulabilidad de
   su columna, pero lo hace en una transacción con lock exclusivo sobre la tabla, así que no hay
   instante sin unicidad: un `INSERT` concurrente espera el commit.
+
+## Actualización 2026-10-11 — `/verificar` bloquea la orden y deja la autorización
+
+`/verificar` adopta dos piezas de este ADR (pendientes.md § 3 y § 5, frente "verificar crea la
+venta de la tienda"):
+
+- **Toma la orden con `FOR UPDATE` mientras consulta al proveedor**, con el mismo tope de 30 s.
+  Es lo que lo separa del retorno de Webpay: antes leía sin lock y su `save` pisaba la orden que el
+  retorno acababa de conciliar (medido: la orden terminaba `pagada` encima de la conciliada, con
+  la venta suelta). Con la venta que ahora crea `/verificar`, un mutante sin el lock da dos ventas
+  para un cobro (`tienda-verificar.e2e-spec.ts`). El callback que crea la venta corre **después**
+  del commit, fuera del lock, como en el retorno: el orden orden → venta de arriba no cambia.
+- **Agrega la AUTHORIZATION `aprobada` que falta**, como el aclarado del alta: sin ella la orden no
+  se podía reembolsar (400 *"La orden no tiene una autorización aprobada"*, medido). Lleva el
+  código de autorización si la consulta lo informa (Webpay Plus sí). Solo-INSERT: un `error`
+  previo del retorno queda como rastro. El lock y el 400 sobre una orden ya resuelta hacen que sea
+  una sola aunque se verifique dos veces. Alcanza a cualquier orden que cierre `/verificar`, no
+  solo la de la tienda.
+

@@ -1,15 +1,12 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Db } from '../../../common/db/db.service';
-import {
-  CobrosService,
-  MOTIVO_SIN_VENTA_POR_VERIFICACION,
-  veredictoPorSaldo,
-} from './cobros.service';
+import { CobrosService, veredictoPorSaldo } from './cobros.service';
 import { InscripcionesService } from './inscripciones.service';
 import { TenantPasarelaService } from './tenant-pasarela.service';
 import { TransaccionesService } from './transacciones.service';
 import { CredencialesService } from './credenciales.service';
+import { CallbackDispatcherService } from './callback-dispatcher.service';
 import { ProviderFactory } from '../providers/provider.factory';
 import {
   MONEDA_ORDEN_V1,
@@ -182,6 +179,7 @@ describe('CobrosService', () => {
   const idempotencia = {
     ejecutarConEfectoExterno: jest.fn(efectuarDeUna),
   };
+  const callbackDispatcher = { dispatch: jest.fn() };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -200,6 +198,7 @@ describe('CobrosService', () => {
         { provide: ReembolsoCallbackRegistry, useValue: reembolsoRegistry },
         { provide: MonedasService, useValue: monedas },
         { provide: IdempotenciaService, useValue: idempotencia },
+        { provide: CallbackDispatcherService, useValue: callbackDispatcher },
         {
           provide: ProviderFactory,
           useValue: {
@@ -2192,7 +2191,14 @@ describe('CobrosService', () => {
     });
   });
 
-  describe('verificar una orden pagada: el aviso de pagada sin venta', () => {
+  describe('verificar una orden pagada: la venta de la tienda, por el callback', () => {
+    const detallePago = {
+      tipoPago: 'VD',
+      numeroCuotas: 0,
+      tarjetaUltimos4: '4321',
+      codigoRespuesta: '0',
+      codigoAutorizacion: '7788',
+    };
     const verificarPagada = async (orden: Record<string, unknown>) => {
       ordenRepo.findOne.mockResolvedValue({
         ordenId: 'orden-1',
@@ -2206,16 +2212,18 @@ describe('CobrosService', () => {
       });
       provider.consultarEstado.mockResolvedValue({
         estado: 'pagada',
+        detallePago,
         response: {},
       });
       await service.verificar('t-1', 'orden-1');
       return ordenRepo.save.mock.calls.at(-1)![0] as {
         estado: string;
         motivoSinVenta: string | null;
+        metadata: Record<string, unknown>;
       };
     };
 
-    it('la de la tienda (callback en proceso) queda con el motivo: su venta la crea el retorno', async () => {
+    it('la de la tienda (callback en proceso) pasa por el dispatcher, con el detalle del pago donde lo deja el retorno', async () => {
       const guardada = await verificarPagada({
         origen: 'interno',
         metadata: {
@@ -2225,10 +2233,25 @@ describe('CobrosService', () => {
         },
       });
       expect(guardada.estado).toBe('pagada');
-      expect(guardada.motivoSinVenta).toBe(MOTIVO_SIN_VENTA_POR_VERIFICACION);
+      expect(guardada.motivoSinVenta).toBeNull();
+      expect(guardada.metadata.resultadoPago).toEqual(detallePago);
+      expect(callbackDispatcher.dispatch).toHaveBeenCalledTimes(1);
+      expect(callbackDispatcher.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ ordenId: 'orden-1', estado: 'pagada' }),
+      );
     });
 
-    it('la del alta de suscripción, también de origen interno, queda sin el motivo', async () => {
+    it('lee la orden con FOR UPDATE, dentro de una transacción', async () => {
+      await verificarPagada({
+        metadata: { tenantPasarelaId: 'tp-1', callbackModo: 'interno' },
+      });
+      expect(dbMock.transaccion).toHaveBeenCalledTimes(1);
+      expect(ordenRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ lock: { mode: 'pessimistic_write' } }),
+      );
+    });
+
+    it('la del alta de suscripción, también de origen interno, no pasa por el dispatcher', async () => {
       const guardada = await verificarPagada({
         origen: 'interno',
         solicitudIdempotenteId: 'sol-1',
@@ -2236,6 +2259,73 @@ describe('CobrosService', () => {
       });
       expect(guardada.estado).toBe('pagada');
       expect(guardada.motivoSinVenta).toBeNull();
+      expect(callbackDispatcher.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('la de una app por llave (`http`) tampoco: verificar no le avisa', async () => {
+      await verificarPagada({
+        metadata: { tenantPasarelaId: 'tp-1', callbackModo: 'http' },
+      });
+      expect(callbackDispatcher.dispatch).not.toHaveBeenCalled();
+    });
+
+    const autorizaciones = () =>
+      filas.filter((f) => f.tipo === 'AUTHORIZATION');
+
+    it('agrega la AUTHORIZATION aprobada que el retorno no dejó, con el código de la consulta', async () => {
+      conHistorial([
+        {
+          transaccionId: 'tx-err',
+          tipo: 'AUTHORIZATION',
+          estado: 'error',
+          tenantPasarelaId: 'tp-1',
+        },
+      ]);
+      await verificarPagada({
+        monto: '11900',
+        moneda: 'CLP',
+        tokenProveedor: 'tok-1',
+        metadata: { tenantPasarelaId: 'tp-1', callbackModo: 'interno' },
+      });
+      expect(autorizaciones()).toEqual([
+        expect.objectContaining({
+          tipo: 'AUTHORIZATION',
+          estado: 'aprobada',
+          monto: '11900',
+          codigoAutorizacion: '7788',
+          identificadorTransaccionExterno: 'tok-1',
+        }),
+      ]);
+      // Solo-INSERT: el `error` sigue como estaba.
+      expect(deps.transacciones.resolverReembolso).not.toHaveBeenCalled();
+    });
+
+    it('no la duplica si la orden ya tiene una aprobada', async () => {
+      conHistorial([
+        { transaccionId: 'tx-ok', tipo: 'AUTHORIZATION', estado: 'aprobada' },
+      ]);
+      await verificarPagada({ metadata: { tenantPasarelaId: 'tp-1' } });
+      expect(autorizaciones()).toEqual([]);
+    });
+
+    it('si el proveedor no dice pagada, no hay venta que crear', async () => {
+      ordenRepo.findOne.mockResolvedValue({
+        ordenId: 'orden-1',
+        tenantId: 't-1',
+        estado: 'en_proceso',
+        codigoOrden: 'O-1',
+        tokenProveedor: null,
+        metadata: { tenantPasarelaId: 'tp-1', callbackModo: 'interno' },
+      });
+      provider.consultarEstado.mockResolvedValue({
+        estado: 'fallida',
+        response: {},
+      });
+      expect((await service.verificar('t-1', 'orden-1')).estado).toBe(
+        'fallida',
+      );
+      expect(callbackDispatcher.dispatch).not.toHaveBeenCalled();
+      expect(autorizaciones()).toEqual([]);
     });
   });
 

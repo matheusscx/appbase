@@ -461,21 +461,6 @@ fiscal y va solo:
     orden con un reembolso parcial previo, si se puede desligar, y la fiscal, que va aparte: con
     `venta_id` escrito, un reembolso posterior emite la nota de crédito sobre la venta manual.
 
-- [ ] **`verificar` crea la venta de la tienda con lo que se cobró** (backend, fiscal; ✅ **decidido
-  por el owner el 2026-10-11**, por AskUserQuestion de la orquestadora con la escena del cliente que
-  pagó $11.900 y no volvió del banco, y el costo de cada opción; eligió la recomendada por sobre
-  "dejarlo como está"). Hoy `CobrosService.verificar`, al encontrar pagada una orden de la tienda
-  (`metadata.callbackModo === 'interno'`), la deja `pagada` sin venta con el motivo "El pago se
-  confirmó por verificación…" (`4be41a7a`). La razón de entonces, "crearla después es otro
-  ahora", ya no vale para el precio: desde "vale lo que pagó" (`fb779b2b`) la orden guarda
-  `checkout.congelado` y la venta se crea con eso, sin recalcular (ver el puntero en
-  [`resueltos.md`](resueltos.md)). **Lo decidido:** `verificar` crea la venta con lo congelado,
-  igual que el retorno, y concilia la orden. Si en ese momento falta stock, el ítem ya no existe o
-  la orden no tiene congelado, queda `pagada` sin venta con su motivo, como hoy. **Va solo**: crea
-  la boleta. Ojo con la carrera de § 5 (`verificar` contra el retorno, sin lock): crear la venta
-  desde `verificar` la vuelve más cara (dos ventas para un cobro), así que se cierra en el mismo
-  frente o antes.
-
 - [ ] **La venta de la tienda toma el nombre del producto del catálogo del retorno, no del de
   cuando se pagó** (backend, fiscal; análisis de la orquestadora sobre "vale lo que pagó" (`fb779b2b`), 2026-10-11, anotado a pedido del owner). "Vale lo que pagó" congela la plata y lo fiscal en
   `checkout.congelado`, pero `descripcion` de `venta_detalles` se sigue leyendo del catálogo al
@@ -560,20 +545,27 @@ prohíbe.
 
 ## 5. Carreras de concurrencia
 
-- [ ] **`verificar` y el retorno de Webpay a la vez: el `save` de `verificar` pisa la orden ya
-  conciliada** (backend, `cobros.service.ts` `verificar`; lo vieron las dos revisiones del frente
-  "`verificar` deja el aviso", 2026-10-11; **leído, no medido**). `verificar` lee la orden con
-  `findOne`, sin lock, consulta al proveedor y guarda la entidad entera. Si en esos segundos el
-  retorno la reclama (`en_proceso` → `procesando`), crea la venta y la deja `conciliada`, el
-  `save` de `verificar` escribe lo que tiene en memoria: `estado = 'pagada'`, `venta_id = null`
-  y la `metadata` sin `resultadoPago`. La venta queda creada y suelta. Ya pasaba antes de ese
-  frente. Desde ese frente la orden de la tienda además queda con el motivo, así que el admin la
-  ve en "Pagada sin venta", y el drawer le sugiere reembolsar o registrar la venta a mano cuando
-  la venta sí existe. La ventana es lo que tarda la consulta a Transbank, y hace falta que una
-  llave del mismo tenant llame `verificar` justo cuando vuelve el comprador. **El arreglo, sin
-  decidir:** que `verificar` cierre con un UPDATE condicionado al estado (`WHERE estado IN
-  ('en_proceso','expirada')`), como el claim de `confirmarRetorno`, o con `bloquearOrden`. Tiene
-  que cubrir `venta_id` y `metadata`, no solo el motivo.
+- [ ] **Dos escritores de la orden que todavía leen sin lock y guardan la entidad entera: la
+  expiración perezosa de `obtenerOrden` y `abortarRetorno`** (backend, `cobros.service.ts` y
+  `pagos-redirect.service.ts`; visto el 2026-10-11 por el frente "`verificar` crea la venta",
+  **leído, no medido**). Los dos hacen `findOne`, deciden por el estado leído y `save`. Si
+  `verificar` (que ahora bloquea la orden) o el retorno la resuelven en el medio, el `save` espera
+  el lock y después escribe `expirada` o `fallida` encima de una `pagada`/`conciliada`. El cron
+  `expirar-ordenes` no tiene el problema: es un UPDATE con el estado en el `WHERE`. La ventana de
+  la expiración perezosa es que un admin abra el drawer de una orden de más de 2 h justo cuando se
+  verifica. La de `abortarRetorno` es menos realista: un pago anulado en el formulario no puede
+  salir pagado. **El arreglo, sin decidir:** el mismo UPDATE condicionado al estado que usa el cron.
+
+- [ ] **Un reembolso entre el commit del estado y el callback: el `save` del dispatcher deja
+  `conciliada` una orden ya `reembolsada`** (backend, `callback-dispatcher.service.ts`
+  `dispatchInterno`; lo vio la revisión independiente del frente "`verificar` crea la venta",
+  2026-10-11; **leído, no medido**). El retorno y `verificar` commitean `pagada` con su
+  AUTHORIZATION `aprobada` y recién después despachan. Mientras `ventasService.crear` corre, la
+  orden ya es reembolsable: si un admin la reembolsa en esa ventana, el `save` del dispatcher
+  escribe el estado que tiene en memoria (`conciliada`) encima de `reembolsada`, y la venta queda
+  creada sobre un cobro devuelto. Ya pasaba en el retorno. Ventana: lo que tarda crear la venta.
+  **El arreglo, sin decidir:** que el dispatcher cierre con un UPDATE condicionado
+  (`WHERE estado = 'pagada'`), o que el reembolso espere a una orden `interno` sin conciliar.
 
 ---
 

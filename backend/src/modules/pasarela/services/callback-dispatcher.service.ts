@@ -7,6 +7,8 @@ import { PagoCallbackRegistry } from './pago-callback.registry';
 /**
  * Notifica a la app consumidora que una orden se resolvió, para que materialice
  * su lado (crear la venta), y marca la orden `conciliada` cuando la app confirma.
+ * Lo llaman el retorno de Webpay y `CobrosService.verificar` (este, solo para
+ * el modo `interno`), los dos después de commitear el estado de la orden.
  *
  * - `interno` (monolito): llama in-process al handler registrado y espera (await).
  *   Al volver OK la venta ya existe → orden `conciliada` antes del redirect.

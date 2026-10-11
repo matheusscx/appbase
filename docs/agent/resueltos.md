@@ -23,6 +23,92 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `verificar` crea la venta de la tienda, y ya no pisa al retorno (cerradas 2026-10-11)
+
+Salen de [`pendientes.md`](pendientes.md) § 3 y § 5, en un mismo frente fiscal (crea la boleta) y
+con la carrera primero: crear la venta desde `verificar` volvía la carrera más cara, dos ventas
+para un cobro. Lo fija `backend/test/tienda-verificar.e2e-spec.ts` (antes
+`tienda-verificar-sin-venta.e2e-spec.ts`, que afirmaba la conducta vieja).
+
+### Las entradas que cierran, como estaban en `pendientes.md`
+
+§ 3:
+
+- [ ] **`verificar` crea la venta de la tienda con lo que se cobró** (backend, fiscal; ✅ **decidido
+  por el owner el 2026-10-11**, por AskUserQuestion de la orquestadora con la escena del cliente que
+  pagó $11.900 y no volvió del banco, y el costo de cada opción; eligió la recomendada por sobre
+  "dejarlo como está"). Hoy `CobrosService.verificar`, al encontrar pagada una orden de la tienda
+  (`metadata.callbackModo === 'interno'`), la deja `pagada` sin venta con el motivo "El pago se
+  confirmó por verificación…" (`4be41a7a`). La razón de entonces, "crearla después es otro
+  ahora", ya no vale para el precio: desde "vale lo que pagó" (`fb779b2b`) la orden guarda
+  `checkout.congelado` y la venta se crea con eso, sin recalcular (ver el puntero en
+  [`resueltos.md`](resueltos.md)). **Lo decidido:** `verificar` crea la venta con lo congelado,
+  igual que el retorno, y concilia la orden. Si en ese momento falta stock, el ítem ya no existe o
+  la orden no tiene congelado, queda `pagada` sin venta con su motivo, como hoy. **Va solo**: crea
+  la boleta. Ojo con la carrera de § 5 (`verificar` contra el retorno, sin lock): crear la venta
+  desde `verificar` la vuelve más cara (dos ventas para un cobro), así que se cierra en el mismo
+  frente o antes.
+
+§ 5:
+
+- [ ] **`verificar` y el retorno de Webpay a la vez: el `save` de `verificar` pisa la orden ya
+  conciliada** (backend, `cobros.service.ts` `verificar`; lo vieron las dos revisiones del frente
+  "`verificar` deja el aviso", 2026-10-11; **leído, no medido**). `verificar` lee la orden con
+  `findOne`, sin lock, consulta al proveedor y guarda la entidad entera. Si en esos segundos el
+  retorno la reclama (`en_proceso` → `procesando`), crea la venta y la deja `conciliada`, el
+  `save` de `verificar` escribe lo que tiene en memoria: `estado = 'pagada'`, `venta_id = null`
+  y la `metadata` sin `resultadoPago`. La venta queda creada y suelta. Ya pasaba antes de ese
+  frente. Desde ese frente la orden de la tienda además queda con el motivo, así que el admin la
+  ve en "Pagada sin venta", y el drawer le sugiere reembolsar o registrar la venta a mano cuando
+  la venta sí existe. La ventana es lo que tarda la consulta a Transbank, y hace falta que una
+  llave del mismo tenant llame `verificar` justo cuando vuelve el comprador. **El arreglo, sin
+  decidir:** que `verificar` cierre con un UPDATE condicionado al estado (`WHERE estado IN
+  ('en_proceso','expirada')`), como el claim de `confirmarRetorno`, o con `bloquearOrden`. Tiene
+  que cubrir `venta_id` y `metadata`, no solo el motivo.
+
+### Cómo se cerró
+
+- **La carrera, medida antes de tocar nada.** El e2e arranca el retorno con `verificar` ya adentro
+  de la consulta a Transbank (el proveedor falso suelta la consulta cuando el retorno terminó o
+  quedó esperando un lock). Con el código de entonces, el retorno creaba la venta y conciliaba, y el
+  `save` de `verificar` dejaba la orden `pagada` encima: lo que decía la entrada, ahora medido.
+- **La técnica: `bloquearOrden`, no un UPDATE condicionado.** `verificar` toma la orden con
+  `FOR UPDATE` en una transacción y la sostiene mientras consulta (hasta 30 s, como el reembolso de
+  ADR-029). El claim del retorno espera el lock y, si la orden quedó resuelta, no la reclama. Se
+  descartó reclamarla como el retorno (`→ procesando`) porque el retorno que llega en esa ventana
+  rebotaba sin hacer el commit en Transbank, y el comprador veía el fracaso de un pago que sí hizo.
+  Con el lock, espera y sigue. Cubre `venta_id` y `metadata` porque el estado se relee bajo el lock
+  y nada más escribe la orden en el medio.
+- **La venta, por el mismo camino que el retorno.** Después del commit, si la orden es `interno`,
+  `verificar` llama a `CallbackDispatcherService.dispatch`: `OnlineCallbackHandler` crea la venta
+  con lo congelado y el dispatcher deja la orden `conciliada`, o `pagada` sin venta con el motivo
+  del error. Fuera del lock a propósito: `Db.transaccion` anidada reusa la transacción (sin
+  savepoint), y un error de la venta adentro dejaría la transacción abortada sin poder guardar el
+  motivo. Se borró `MOTIVO_SIN_VENTA_POR_VERIFICACION`: el motivo ahora es el del error real.
+- **El detalle del pago sale de la consulta.** `ResultadoEstado.detallePago` (Webpay Plus lo
+  informa igual que el commit) va a `metadata.resultadoPago`, de donde el handler toma débito o
+  crédito, cuotas, últimos 4 y autorización.
+- **Agregado con el acuerdo de la orquestadora: la AUTHORIZATION `aprobada`.** Una sonda e2e midió
+  que la orden cerrada por `verificar` no se podía reembolsar desde la app (400 *"La orden no tiene
+  una autorización aprobada"*): ya le pasaba a la pagada sin venta de antes, a la que el aviso le
+  decía "devolvé el cargo". `verificar` la agrega bajo el mismo lock si falta, como el aclarado del
+  alta (ADR-029). Solo-INSERT, una sola aunque se verifique dos veces, y **alcanza a cualquier
+  orden que cierre `verificar`**, no solo la de la tienda.
+
+### Tests y mutantes
+
+`tienda-verificar.e2e-spec.ts`, 12 casos: la venta por lo cobrado (retorno con error de
+comunicación, retorno que nunca volvió, orden ya `expirada`), el reembolso desde la app tras
+`verificar`, verificar dos veces, los tres caminos sin venta (stock, ítem borrado, sin congelado),
+la carrera y su control (`verificar` con el retorno ya adentro: 400) y los controles de `fallida` y
+de una orden por llave.
+
+- Sin el lock (`findOne` sin `FOR UPDATE`): la carrera da **2 ventas para un cobro** (9 contra 8).
+- Sin registrar la AUTHORIZATION: caen 3 casos (el del error de comunicación, el del reembolso y el
+  de verificar dos veces).
+
+---
+
 ## La cuenta del salón dice por qué no se pudo calcular (cerrada 2026-10-11)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Solo frontend: el motor no se tocó. La regla viva está

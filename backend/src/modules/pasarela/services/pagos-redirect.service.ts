@@ -20,17 +20,11 @@ import { TenantPasarelaService } from './tenant-pasarela.service';
 import { TransaccionesService } from './transacciones.service';
 import { CallbackDispatcherService } from './callback-dispatcher.service';
 import { ProviderFactory } from '../providers/provider.factory';
-import { ProviderComunicacionError } from '../providers/payment-provider.interface';
+import {
+  DetallePago,
+  ProviderComunicacionError,
+} from '../providers/payment-provider.interface';
 import { descripcionCodigoRespuesta } from '../utils/codigos-respuesta';
-
-/** Detalle del pago que el commit devuelve y el callback / la app consumen. */
-interface ResultadoPagoMeta {
-  tipoPago: string | null;
-  numeroCuotas: number | null;
-  tarjetaUltimos4: string | null;
-  codigoRespuesta: string | null;
-  codigoAutorizacion: string | null;
-}
 
 const PASARELA_REDIRECT = 'webpay_plus'; // v1 redirect: única pasarela redirect
 const EXPIRACION_ORDEN_MS = 2 * 60 * 60 * 1000; // 2 horas
@@ -216,7 +210,7 @@ export class PagosRedirectService {
       // Propaga el detalle del commit a la orden: el callback lo usa para elegir
       // el método real (débito/crédito) y persistir cuotas / últimos4; en rechazo,
       // el codigoRespuesta permite traducir el motivo nivel 2 en la página de retorno.
-      const resultadoPago: ResultadoPagoMeta = {
+      const resultadoPago: DetallePago = {
         tipoPago: resultado.tipoPago,
         numeroCuotas: resultado.numeroCuotas,
         tarjetaUltimos4: resultado.tarjetaUltimos4,
@@ -303,8 +297,7 @@ export class PagosRedirectService {
       where: { ordenId, tenantId },
     });
     if (!orden) throw new NotFoundException('Orden no encontrada');
-    const rp = (orden.metadata?.resultadoPago ??
-      {}) as Partial<ResultadoPagoMeta>;
+    const rp = (orden.metadata?.resultadoPago ?? {}) as Partial<DetallePago>;
     return {
       ordenId: orden.ordenId,
       // El motivo de la pagada sin venta NO va: es del admin (`/ordenes`).

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import {
   CredencialesResueltas,
+  DetallePago,
   ProviderComunicacionError,
   ProviderPagoRedirect,
   ResultadoCobro,
@@ -15,6 +16,35 @@ const BASE_PATH = '/rswebpaytransaction/api/webpay/v1.2';
 /** Stringifica valores primitivos de un JSON externo sin caer en no-base-to-string. */
 function toStr(v: unknown): string {
   return String(v);
+}
+
+/**
+ * El detalle del pago en la respuesta de Transbank. El commit y la consulta de
+ * estado traen la misma forma: `details[]` con el resultado por tienda, y
+ * `card_detail` (últimos 4) en el top-level, compartido por todos los detalles.
+ */
+function detallePagoDe(json: Record<string, unknown>): DetallePago {
+  const detalle =
+    (json.details as Record<string, unknown>[] | undefined)?.[0] ?? {};
+  const cardDetail =
+    (json.card_detail as Record<string, unknown> | undefined) ?? {};
+  return {
+    tipoPago: detalle.payment_type_code
+      ? toStr(detalle.payment_type_code)
+      : null,
+    numeroCuotas:
+      typeof detalle.installments_number === 'number'
+        ? detalle.installments_number
+        : null,
+    tarjetaUltimos4: cardDetail.card_number
+      ? toStr(cardDetail.card_number)
+      : null,
+    codigoRespuesta:
+      detalle.response_code != null ? toStr(detalle.response_code) : null,
+    codigoAutorizacion: detalle.authorization_code
+      ? toStr(detalle.authorization_code)
+      : null,
+  };
 }
 
 /**
@@ -157,33 +187,15 @@ export class WebpayPlusProvider implements ProviderPagoRedirect {
       'PUT',
       `/transactions/${encodeURIComponent(token)}`,
     );
-    // Mall: la respuesta trae details[] con el resultado por tienda. card_detail
-    // (últimos 4 dígitos) va en el top-level, compartido por todos los detalles.
     const detalle =
       (json.details as Record<string, unknown>[] | undefined)?.[0] ?? {};
-    const cardDetail =
-      (json.card_detail as Record<string, unknown> | undefined) ?? {};
     const aprobada =
       detalle.response_code === 0 && detalle.status === 'AUTHORIZED';
     return {
       aprobada,
-      codigoRespuesta:
-        detalle.response_code != null ? toStr(detalle.response_code) : null,
-      codigoAutorizacion: detalle.authorization_code
-        ? toStr(detalle.authorization_code)
-        : null,
+      ...detallePagoDe(json),
       identificadorTransaccionExterno: token, // Webpay identifica por token
-      tipoPago: detalle.payment_type_code
-        ? toStr(detalle.payment_type_code)
-        : null,
-      numeroCuotas:
-        typeof detalle.installments_number === 'number'
-          ? detalle.installments_number
-          : null,
       montoCuota: null,
-      tarjetaUltimos4: cardDetail.card_number
-        ? toStr(cardDetail.card_number)
-        : null,
       request: requestInfo,
       response: json,
     };
@@ -279,7 +291,7 @@ export class WebpayPlusProvider implements ProviderPagoRedirect {
       response: json,
     };
     if (detalle.status === 'AUTHORIZED' || detalle.status === 'CAPTURED')
-      return { estado: 'pagada', ...leido };
+      return { estado: 'pagada', ...leido, detallePago: detallePagoDe(json) };
     if (
       detalle.status === 'FAILED' ||
       detalle.status === 'REVERSED' ||

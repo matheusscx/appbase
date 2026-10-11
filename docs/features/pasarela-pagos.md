@@ -333,23 +333,42 @@ el comprador pagó y la venta no existe. Hay tres consecuencias:
 - El admin la encuentra en Órdenes (abajo).
 
 **Nada la convierte en venta sola**: no hay reintento automático, y `verificar` la
-ve resuelta. La plata se devuelve con el reembolso, o la venta se registra a mano.
+ve resuelta (responde 400). La plata se devuelve con el reembolso, o la venta se registra a mano.
 Las 4 URLs y el `callbackModo` (`interno`/`http`) viven en `orden.metadata`.
 
-`verificar` tampoco pasa por el dispatcher: resuelve la orden con lo que dice el
-proveedor y nada más. Si encuentra pagada una orden `interno` —hoy, solo la tienda—,
-la deja pagada sin venta con el motivo *"El pago se confirmó por verificación, no en
-el retorno de la compra"* (owner, 2026-10-10). No crea la venta, porque sería otro
-"ahora". Lo que se distingue es el `callbackModo`, no el `origen`: el alta de
-suscripción también es `origen='interno'`, pero no lleva `callbackModo` porque crea su
-venta en la misma request. Las órdenes `http` de una app por llave no cambian.
+`verificar` pasa por el mismo dispatcher que el retorno (owner, 2026-10-11). Si
+encuentra pagada una orden `interno` —hoy, solo la tienda—, la venta se crea con lo que
+la orden congeló al pagar y la orden queda `conciliada`; si no se puede crear, pagada sin
+venta con su motivo, como arriba. El detalle del pago lo toma de la consulta a Transbank,
+que trae lo mismo que el commit, y lo escribe en `metadata.resultadoPago`. Lo que se
+distingue es el `callbackModo`, no el `origen`: el alta de suscripción también es
+`origen='interno'`, pero no lleva `callbackModo` porque crea su venta en la misma
+request. A las órdenes `http` de una app por llave, `verificar` no les avisa nada.
+
+**`verificar` y el retorno no se pisan.** `verificar` toma la orden con `FOR UPDATE`
+mientras consulta al proveedor (hasta 30 s, como el reembolso: ADR-029) y despacha el
+callback después del commit. El claim del retorno (`en_proceso` → `procesando`) espera
+ese lock y, si la orden ya quedó resuelta, no la reclama: redirige con el estado que
+tenga. Si el retorno la reclamó antes, `verificar` la ve `procesando` y responde 400.
+Antes, `verificar` la leía sin lock y su `save` pisaba la orden que el retorno acababa de
+conciliar (medido el 2026-10-11).
+
+**`verificar` deja la autorización que el retorno no dejó.** Cuando la encuentra pagada y
+la orden no tiene una AUTHORIZATION `aprobada`, la agrega, con el código que informa la
+consulta, como ya hacía el aclarado del alta (ADR-029). Sin ella el reembolso daba 400
+*"La orden no tiene una autorización aprobada"*: ni la venta que crea `verificar` ni la
+pagada sin venta se podían devolver desde la app. Vale para cualquier orden que cierre
+`verificar`, no solo la tienda. El historial sigue siendo solo-INSERT: un `error` previo
+queda como rastro.
 
 ### Detalle real del pago (Webpay)
 
 El commit (`confirmarPago`) devuelve el detalle real de la transacción, que
 `PagosRedirectService.confirmarRetorno` escribe en `orden.metadata.resultadoPago`
 (`tipoPago`, `numeroCuotas`, `tarjetaUltimos4`, `codigoRespuesta`,
-`codigoAutorizacion`) para que el callback y la app consumidora lo usen:
+`codigoAutorizacion`) para que el callback y la app consumidora lo usen. Si la orden
+la cierra `verificar`, el mismo detalle sale de la consulta de estado
+(`ResultadoEstado.detallePago`):
 
 - **Tipo de pago** — `payment_type_code`: `VD`=débito RedCompra · `VN`=crédito
   1 cuota · `VC`=cuotas · `SI`/`S2`/`NC`=cuotas sin interés · `VP`=prepago. El

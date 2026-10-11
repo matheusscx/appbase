@@ -106,9 +106,9 @@ el backend (tick inicial) y verificar `estado = 'expirada'` + fila `ok` en
   cerrable agregando `AND o.actualizado_el < now() - interval '5 minutes'` al
   WHERE del job cuando se vuelva a tocar. No reordenar los statements de la
   compensación (dejaría órdenes trabadas en `'procesando'`).
-- Backlog pasarela (preexistente): `/verificar` no despacha el callback al
-  rescatar una orden a `'pagada'` — una orden rescatada no materializa su
-  venta.
+- `/verificar` despacha el callback al rescatar una orden `interno` (la tienda)
+  a `'pagada'`: la venta se crea con lo congelado (2026-10-11,
+  [`pasarela-pagos.md`](pasarela-pagos.md)). A las órdenes `http` no les avisa.
 - Gotcha dev: tras agregar dependencias al backend, recrear el contenedor
   (`docker-compose up --build` o `--force-recreate`) — el volumen de
   `node_modules` no se refresca solo.

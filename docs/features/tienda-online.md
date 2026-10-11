@@ -170,14 +170,16 @@ El owner decidió ese mismo día dos cosas más, construidas el 2026-10-10:
   cobro vuelve atrás y la orden queda `en_proceso` para que el reintento la aclare (ADR-029),
   igual que ya pasaba cuando el precio subía.
 
-- **`verificar` también deja el aviso (2026-10-11).** Si el retorno no volvió, o volvió con un
-  error de comunicación, la orden queda `en_proceso` y la cierra
-  `POST /pasarela/api/ordenes/:id/verificar`. Cuando el proveedor dice pagada, queda pagada sin
-  venta con el motivo *"El pago se confirmó por verificación, no en el retorno de la compra"*, y
-  el comprador ve `pagada_sin_venta` como en D. `verificar` no crea la venta: sería otro "ahora"
-  (owner, 2026-10-10). Con la A el precio ya no se recalcularía al crearla ahí, pero el ítem y el
-  stock seguirían vivos: queda como pregunta para el owner en
-  [`pendientes.md`](../agent/pendientes.md) § 5. Lo fija `tienda-verificar-sin-venta.e2e-spec.ts`.
+- **`verificar` crea la venta por lo cobrado (owner, 2026-10-11).** Si el retorno no volvió, o
+  volvió con un error de comunicación, la orden queda `en_proceso` y la cierra
+  `POST /pasarela/api/ordenes/:id/verificar`. Cuando el proveedor dice pagada, la venta se crea por
+  el mismo callback que en el retorno, con lo que la orden congeló al pagar, y la orden queda
+  `conciliada`. El detalle del pago (débito o crédito, cuotas, últimos 4, autorización) sale de la
+  consulta a Transbank, que trae lo mismo que el commit. Si la venta no se puede crear —falta
+  stock, el ítem ya no existe, la orden no guarda lo cobrado— queda pagada sin venta con su motivo,
+  como en D. `verificar` y el retorno no se pisan: `verificar` bloquea la orden mientras consulta, y
+  el retorno que llega en ese momento espera y ya no la reclama, así que hay una sola venta por
+  cobro ([`pasarela-pagos.md`](pasarela-pagos.md)). Lo fija `tienda-verificar.e2e-spec.ts`.
 
 Queda abierto, decidido y sin construir, en [`pendientes.md`](../agent/pendientes.md) § 3: la
 marca no se apaga si la venta se registra a mano.

@@ -36,6 +36,7 @@ import { InscripcionesService } from './inscripciones.service';
 import { TenantPasarelaService } from './tenant-pasarela.service';
 import { TransaccionesService } from './transacciones.service';
 import { CredencialesService } from './credenciales.service';
+import { CallbackDispatcherService } from './callback-dispatcher.service';
 import { ProviderFactory } from '../providers/provider.factory';
 import {
   ReembolsoCallbackRegistry,
@@ -103,15 +104,6 @@ const MOTIVO_NO_SALIO =
 
 const MOTIVO_NO_SALIO_MANUAL =
   'Marcado "no salió" después de revisar el portal de Transbank.';
-
-/**
- * El aviso de la orden de la tienda que `verificar` encuentra pagada: la venta
- * la crea el retorno (el callback en proceso), y `verificar` no la crea
- * (owner, 2026-10-10). Mismo tono que los motivos del dispatcher: lo lee el
- * admin en `/ordenes`, después de "Motivo:".
- */
-export const MOTIVO_SIN_VENTA_POR_VERIFICACION =
-  'El pago se confirmó por verificación, no en el retorno de la compra';
 
 function mensajeNoSePuedeAclarar(monto: string): string {
   return `Hay un reembolso de $${new Decimal(monto).toString()} sin confirmar en esta orden y Transbank no pudo aclarar si salió. Revisalo en el portal de Transbank antes de volver a intentar.`;
@@ -226,6 +218,7 @@ export class CobrosService {
     private readonly reembolsoRegistry: ReembolsoCallbackRegistry,
     private readonly monedas: MonedasService,
     private readonly idempotencia: IdempotenciaService,
+    private readonly callbackDispatcher: CallbackDispatcherService,
   ) {}
 
   /** buyOrder ≤26 chars alfanumérico (límite Oneclick): 'O' + timestamp36 + 8 random. */
@@ -1728,62 +1721,108 @@ export class CobrosService {
    * Acepta 'en_proceso' y 'expirada': la expiración perezosa es solo por reloj,
    * así que una orden que hizo timeout (y pudo haberse pagado en el proveedor)
    * debe seguir siendo verificable aunque el reloj ya la haya marcado expirada.
+   *
+   * La orden queda bloqueada (`FOR UPDATE`) mientras se le pregunta al
+   * proveedor, hasta 30 s, como en el reembolso (ADR-029). Es lo que la
+   * separa del retorno de Webpay: su claim (`en_proceso` → `procesando`)
+   * espera a que esto termine y, si la orden ya quedó resuelta, no la
+   * reclama. Sin el lock, el `save` de acá pisaba la orden que el retorno
+   * acababa de conciliar —y ahora, además, crearía una segunda venta—
+   * (pendientes.md § 5, medido en `tienda-verificar.e2e-spec.ts`). Si el
+   * retorno la reclamó antes, la ve `procesando` y responde 400.
    */
   async verificar(tenantId: string, ordenId: string) {
-    const orden = await this.ordenRepo.findOne({
-      where: { ordenId, tenantId },
+    const orden = await this.db.transaccion(async () => {
+      const bloqueada = await this.bloquearOrden(tenantId, ordenId);
+      if (bloqueada.estado !== 'en_proceso' && bloqueada.estado !== 'expirada')
+        throw new BadRequestException(
+          `La orden ya está resuelta (${bloqueada.estado})`,
+        );
+
+      // Resolver el proveedor de la orden (no la activa del tenant): por la
+      // configuración con que se cobró, tomada de sus transacciones o metadata.
+      const historial = await this.transacciones.listarPorOrden(
+        tenantId,
+        ordenId,
+      );
+      const tenantPasarelaId =
+        historial.find((t) => t.tenantPasarelaId)?.tenantPasarelaId ??
+        (typeof bloqueada.metadata?.tenantPasarelaId === 'string'
+          ? bloqueada.metadata.tenantPasarelaId
+          : null);
+      if (!tenantPasarelaId)
+        throw new BadRequestException(
+          'No se puede determinar la pasarela de la orden para verificar',
+        );
+
+      const { pasarela, cred } =
+        await this.tenantPasarelaService.resolverPorId(tenantPasarelaId);
+      const consulta = await this.providerFactory
+        .getReembolsable(pasarela.codigo)
+        .consultarEstado(cred, {
+          codigoOrden: bloqueada.codigoOrden,
+          tokenProveedor: bloqueada.tokenProveedor,
+        });
+
+      if (consulta.estado !== 'desconocido') {
+        bloqueada.estado = consulta.estado;
+        // Redactar la respuesta del proveedor antes de persistir (mismo invariante
+        // que el historial de transacciones). El detalle del pago va donde lo
+        // deja el retorno: de ahí lo toma el callback para el pago de la venta.
+        bloqueada.metadata = {
+          ...bloqueada.metadata,
+          verificacion: this.transacciones.redactar(consulta.response),
+          ...(consulta.estado === 'pagada' &&
+            consulta.detallePago && { resultadoPago: consulta.detallePago }),
+        };
+        await this.ordenRepo.save(bloqueada);
+        // Sin una AUTHORIZATION `aprobada` la orden no se puede reembolsar
+        // (`verificarReembolsable`), y la que cierra `verificar` no la tiene:
+        // el retorno no volvió, o anotó un `error`. Se agrega, como en
+        // `aclararCobro` (ADR-029); el historial es solo-INSERT, así que el
+        // `error` queda como rastro. El lock y el 400 de arriba hacen que sea
+        // una sola aunque se verifique dos veces.
+        if (
+          consulta.estado === 'pagada' &&
+          !historial.some(
+            (t) => t.tipo === 'AUTHORIZATION' && t.estado === 'aprobada',
+          )
+        )
+          await this.transacciones.registrar({
+            tenantId,
+            ordenId,
+            tenantPasarelaId,
+            inscripcionId:
+              typeof bloqueada.metadata?.inscripcionId === 'string'
+                ? bloqueada.metadata.inscripcionId
+                : null,
+            tipo: 'AUTHORIZATION',
+            estado: 'aprobada',
+            monto: bloqueada.monto,
+            moneda: bloqueada.moneda,
+            codigoOrden: bloqueada.codigoOrden,
+            codigoAutorizacion:
+              consulta.detallePago?.codigoAutorizacion ?? null,
+            codigoRespuesta: consulta.detallePago?.codigoRespuesta ?? null,
+            tipoPago: consulta.detallePago?.tipoPago ?? null,
+            identificadorTransaccionExterno:
+              bloqueada.tokenProveedor ?? bloqueada.codigoOrden,
+            response: consulta.response,
+          });
+      }
+      return bloqueada;
     });
-    if (!orden) throw new NotFoundException('Orden no encontrada');
-    if (orden.estado !== 'en_proceso' && orden.estado !== 'expirada')
-      throw new BadRequestException(
-        `La orden ya está resuelta (${orden.estado})`,
-      );
 
-    // Resolver el proveedor de la orden (no la activa del tenant): por la
-    // configuración con que se cobró, tomada de sus transacciones o metadata.
-    const historial = await this.transacciones.listarPorOrden(
-      tenantId,
-      ordenId,
-    );
-    const tenantPasarelaId =
-      historial.find((t) => t.tenantPasarelaId)?.tenantPasarelaId ??
-      (typeof orden.metadata?.tenantPasarelaId === 'string'
-        ? orden.metadata.tenantPasarelaId
-        : null);
-    if (!tenantPasarelaId)
-      throw new BadRequestException(
-        'No se puede determinar la pasarela de la orden para verificar',
-      );
-
-    const { pasarela, cred } =
-      await this.tenantPasarelaService.resolverPorId(tenantPasarelaId);
-    const consulta = await this.providerFactory
-      .getReembolsable(pasarela.codigo)
-      .consultarEstado(cred, {
-        codigoOrden: orden.codigoOrden,
-        tokenProveedor: orden.tokenProveedor,
-      });
-
-    if (consulta.estado !== 'desconocido') {
-      orden.estado = consulta.estado;
-      // La venta de una orden con callback en proceso (hoy, solo la tienda)
-      // la crea el retorno, por el dispatcher. Acá no se crea —sería otro
-      // "ahora"—, así que queda pagada sin venta, con el aviso de D. Las de
-      // una app por llave (`http`) y el alta de suscripción no llevan
-      // `callbackModo: 'interno'`: su venta no depende del retorno.
-      if (
-        consulta.estado === 'pagada' &&
-        orden.metadata?.callbackModo === 'interno'
-      )
-        orden.motivoSinVenta = MOTIVO_SIN_VENTA_POR_VERIFICACION;
-      // Redactar la respuesta del proveedor antes de persistir (mismo invariante
-      // que el historial de transacciones).
-      orden.metadata = {
-        ...orden.metadata,
-        verificacion: this.transacciones.redactar(consulta.response),
-      };
-      await this.ordenRepo.save(orden);
-    }
+    // La venta de una orden con callback en proceso (hoy, solo la tienda) se
+    // crea por el mismo camino que en el retorno, con lo que la orden congeló
+    // al pagar (owner, 2026-10-11): el dispatcher la deja `conciliada`, o
+    // `pagada` sin venta con el motivo si no se puede crear. Va después del
+    // commit, como en el retorno: la venta abre su propia transacción, y si
+    // fallara adentro de esta no quedaría cómo guardar el motivo. Las de una
+    // app por llave (`http`) y el alta de suscripción no llevan
+    // `callbackModo: 'interno'`: acá no se les avisa nada, como antes.
+    if (orden.estado === 'pagada' && orden.metadata?.callbackModo === 'interno')
+      await this.callbackDispatcher.dispatch(orden);
     return this.toPublico(orden);
   }
 

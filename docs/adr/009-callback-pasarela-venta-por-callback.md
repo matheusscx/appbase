@@ -74,3 +74,15 @@ admin ve el motivo "El pago se inició antes de una actualización del sistema y
 que no es plata (que el ítem exista, el stock) sigue vivo al retorno. Detalle:
 [`tienda-online.md`](../features/tienda-online.md) y
 [`ventas.md`](../features/ventas.md#la-venta-online-no-recalcula-ventacongelada-2026-10-11).
+
+## Actualización 2026-10-11 — `verificar` también despacha
+
+`CobrosService.verificar`, cuando encuentra pagada una orden `interno` (la tienda), llama al mismo
+`CallbackDispatcherService.dispatch` que el retorno, después de commitear el estado (owner,
+2026-10-11). La venta sale de lo congelado igual que en el retorno, y si no se puede crear queda
+pagada sin venta con su motivo. Antes la dejaba pagada sin venta siempre, porque crearla después
+era recalcular en otro "ahora"; con el congelado esa razón ya no vale para la plata. Las órdenes
+`http` no se despachan desde `verificar`. Para que el retorno y `verificar` no creen dos ventas,
+`verificar` bloquea la orden mientras consulta ([ADR-029](029-reembolso-con-efecto-externo.md),
+actualización del 2026-10-11).
+

@@ -22,6 +22,19 @@ export interface ResultadoCobro extends ResultadoProvider {
   tarjetaUltimos4: string | null; // card_detail.card_number (solo 4 finales, no sensible)
 }
 
+/**
+ * El detalle de un pago aprobado, como lo informa el proveedor: lo que la
+ * orden guarda en `metadata.resultadoPago` y el callback usa para el pago de
+ * la venta (método débito/crédito, cuotas, últimos 4, autorización).
+ */
+export interface DetallePago {
+  tipoPago: string | null;
+  numeroCuotas: number | null;
+  tarjetaUltimos4: string | null;
+  codigoRespuesta: string | null;
+  codigoAutorizacion: string | null;
+}
+
 export interface ResultadoEstado {
   estado: 'pagada' | 'fallida' | 'desconocido';
   /** El `status` del detalle tal como lo informa el proveedor (`AUTHORIZED`, `NULLIFIED`…). */
@@ -39,6 +52,12 @@ export interface ResultadoEstado {
    * `VENTANA_COBRO_SIN_CONFIRMAR_MS` (ADR-029).
    */
   noEncontrada?: true;
+  /**
+   * El detalle del pago de una transacción `pagada`, si el proveedor lo
+   * informa en la consulta (Webpay Plus: el mismo que da el commit). Con él,
+   * `/verificar` crea la venta de la tienda igual que el retorno.
+   */
+  detallePago?: DetallePago;
   response: Record<string, unknown>;
 }
 
