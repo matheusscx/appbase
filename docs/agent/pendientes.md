@@ -342,6 +342,14 @@ la acumulación de descuentos y compras— y el renombre de `moneda.decimales` s
   reembolsos (ADR-029, *"Si la consulta no lo aclara, lo marca el admin"*), para órdenes de cobro
   `en_proceso`. Si se marca *Salió* con la suscripción sin crear, falta decidir quién la termina.
   Eso es pregunta para el owner antes de diseñar.
+  ✅ **Decidido (owner, 2026-10-11, por AskUserQuestion de la orquestadora, con la escena de la caja
+  de vino de María y el costo de cada opción): al marcar *Salió*, el alta se termina sola.** Se
+  crean en ese momento la venta y la suscripción, sin volver a cobrar: es el mismo camino que hoy
+  sigue el reintento cuando la consulta da `pagada`. Con *Salió* se guarda el código de autorización
+  que el admin dice ver y quién marcó, como en los reembolsos (ADR-029). *No salió* deja la orden
+  `fallida` y suelta la clave, igual que un rechazo. Descartados: devolver la plata y repetir el
+  alta (es nota de crédito, fiscal) y dejarla marcada para arreglarla a mano (hoy no hay forma de
+  crear la suscripción sin cobrar). **Lista para tomar**, backend + front de Pasarela.
 
 ### Los tres que dejó el frente del redondeo por país (2026-09-03)
 
@@ -427,6 +435,22 @@ fiscal y va solo:
   (por ejemplo, si un componente de 0,5 cuenta como 1 para exigir sus grupos obligatorios, y cómo se
   cobran sus extras). Eso es diseño, no mecánica: brainstorm → spec → plan. Si toca cómo se cobran los
   extras, toca el motor y va solo.
+
+  ✅ **Diseño decidido (owner, 2026-10-11, por AskUserQuestion de la orquestadora, con la escena del
+  combo familiar —1 pollo + medio kilo de papas con salsa obligatoria— y el costo de cada opción;
+  eligió las dos recomendadas):**
+  - **Una fracción cuenta como una unidad entera, redondeando hacia arriba**: 0,5 kg pide elegir 1
+    salsa y 1,5 kg pide 2. Es la cantidad de vueltas del loop por unidad (`ceil(cantidad)`), y se
+    exigen los obligatorios de cada una. Descartado: prohibir opciones en un componente
+    fraccionario.
+  - **El extra se cobra entero** ($500 sobre el medio kilo, no $250), una vez por unidad redondeada.
+    Descartado: el proporcional, que tocaba el cálculo de precios.
+  - Con las dos, el cobro de los extras sigue la regla que ya existe (`precioExtra × unidades`)
+    sobre la cantidad redondeada: lo que cambia es cuántas unidades se piden. Igual toca
+    `resolverPersonalizacionCombo`, que es motor (ver "re-tasar" arriba): **va solo, con el sistema
+    quieto**, y la venta, el stock (`venderComponentesCombo`) y la anulación tienen que leer la
+    misma cantidad de unidades. Medir con e2e: 0,5 sin la salsa → 400; 0,5 con una salsa → 201 y un
+    extra cobrado una vez; 1,5 pide dos.
 
 - [ ] **En una pasarela modo Mall, el código de comercio hijo lo escribe el propio local y nadie
   verifica que sea suyo** (producto + proceso de alta; anotado el 2026-10-08 al cerrar "la
