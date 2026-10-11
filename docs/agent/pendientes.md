@@ -80,6 +80,17 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **Un producto sin stock entre el pago y el retorno deja la orden de la tienda pagada sin
+  venta: leído, no medido** (backend; análisis de la orquestadora sobre "vale lo que pagó" (`fb779b2b`), 2026-10-11, anotado a pedido del owner). Con "vale lo que pagó" el precio ya no cambia
+  entre el pago y el retorno, pero el stock sigue vivo: se descuenta recién al crear la venta en el
+  callback, y la tienda no lo reserva al pagar. Si otro canal vende la última unidad en ese minuto,
+  la venta se rechaza y la orden queda `pagada` sin venta con el aviso de D. Es el caso más
+  probable de los que quedan en una tienda real (el ítem borrado ya está medido en
+  `tienda-dos-ahoras.e2e-spec.ts`). **Medir** con un caso más en ese archivo: stock 1, pagar,
+  vender la unidad por el POS, retorno. Si se confirma, la salida de fondo (reservar stock al
+  pagar) es **pregunta de producto para el owner**, no del agente: cambia cuándo baja el stock y
+  qué pasa con un pago abandonado.
+
 - [ ] **El checkout de la tienda cobra un ítem tipo `ingrediente` que la venta después rechaza**
   (backend; lo vio la sesión de "vale lo que pagó" el 2026-10-11, y la orquestadora lo verificó
   leyendo, **no medido**). `OnlineService.prepararLineasCheckout` ataja el ítem pausado y el de
@@ -465,6 +476,28 @@ fiscal y va solo:
     orden con un reembolso parcial previo, si se puede desligar, y la fiscal, que va aparte: con
     `venta_id` escrito, un reembolso posterior emite la nota de crédito sobre la venta manual.
 
+- [ ] **`verificar` crea la venta de la tienda con lo que se cobró** (backend, fiscal; ✅ **decidido
+  por el owner el 2026-10-11**, por AskUserQuestion de la orquestadora con la escena del cliente que
+  pagó $11.900 y no volvió del banco, y el costo de cada opción; eligió la recomendada por sobre
+  "dejarlo como está"). Hoy `CobrosService.verificar`, al encontrar pagada una orden de la tienda
+  (`metadata.callbackModo === 'interno'`), la deja `pagada` sin venta con el motivo "El pago se
+  confirmó por verificación…" (`4be41a7a`). La razón de entonces, "crearla después es otro
+  ahora", ya no vale para el precio: desde "vale lo que pagó" (`fb779b2b`) la orden guarda
+  `checkout.congelado` y la venta se crea con eso, sin recalcular (ver el puntero en
+  [`resueltos.md`](resueltos.md)). **Lo decidido:** `verificar` crea la venta con lo congelado,
+  igual que el retorno, y concilia la orden. Si en ese momento falta stock, el ítem ya no existe o
+  la orden no tiene congelado, queda `pagada` sin venta con su motivo, como hoy. **Va solo**: crea
+  la boleta. Ojo con la carrera de § 5 (`verificar` contra el retorno, sin lock): crear la venta
+  desde `verificar` la vuelve más cara (dos ventas para un cobro), así que se cierra en el mismo
+  frente o antes.
+
+- [ ] **La venta de la tienda toma el nombre del producto del catálogo del retorno, no del de
+  cuando se pagó** (backend, fiscal; análisis de la orquestadora sobre "vale lo que pagó" (`fb779b2b`), 2026-10-11, anotado a pedido del owner). "Vale lo que pagó" congela la plata y lo fiscal en
+  `checkout.congelado`, pero `descripcion` de `venta_detalles` se sigue leyendo del catálogo al
+  crear la venta. Si el producto se renombra justo entre el pago y el retorno, la boleta lleva el
+  nombre nuevo. Es menor: el arreglo es congelar también el nombre por línea en `pagar` y que
+  `crearEnTransaccion` lo tome de ahí. Toca la boleta, así que **va solo** (CLAUDE.md, lo fiscal).
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
@@ -772,6 +805,14 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
   upgradea WebSockets (importa el día que haya comandas en vivo). Verificado el 2026-08-23:
   hoy no hay ni un `multipart` ni un gateway de WS en el backend.
 
+- [ ] **Un pago de la tienda a medias durante un deploy queda sin venta** (infra + proceso; análisis de la orquestadora sobre "vale lo que pagó" (`fb779b2b`), 2026-10-11, anotado a pedido del owner).
+  Desde "vale lo que pagó", una orden que se creó **sin** `checkout.congelado` (antes del deploy que
+  lo introdujo) y vuelve del banco después queda `pagada` sin venta, con el motivo "El pago se
+  inició antes de una actualización del sistema…". Lo mismo puede pasar en cualquier deploy futuro
+  que cambie la forma del congelado. Hoy no hay datos productivos. Para producción: la ventana es
+  la del formulario de Webpay (4 minutos), así que el plan de deploy tiene que decir cómo se cubre
+  (por ejemplo, no desplegar con órdenes de la tienda `en_proceso` de menos de 5 minutos, o que el
+  callback acepte las dos versiones del congelado mientras dure la transición).
 - [ ] **Deploy seguro: rollback + feature flags + canary** (infra) — el portón de CI evita
   el error *conocido* (que los tests detectan), no el desconocido (bug que ningún test cubre y
   pasa en verde). Para acotar ese: rollback rápido a la versión anterior (deploy inmutable),
