@@ -499,6 +499,7 @@ describe('OnlineService', () => {
           monedaIdOrigen: 'usd',
           tasaCambio: '950.000000',
           clasificacionTributaria: 'afecto',
+          descripcion: 'Producto demo',
         },
       ],
     });
@@ -531,7 +532,7 @@ describe('OnlineService', () => {
     expect(calculo.cargarConfig).toHaveBeenCalledTimes(1);
   });
 
-  it('pagar: cada línea congelada lleva la moneda y la tasa de su ítem', async () => {
+  it('pagar: cada línea congelada lleva la moneda, la tasa y el nombre de su ítem', async () => {
     tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
     metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
     metodos.findMetodosPago.mockResolvedValue([]);
@@ -546,8 +547,8 @@ describe('OnlineService', () => {
             itemBase(
               id,
               id === ID_CLP
-                ? { precioBase: '5000.0000', monedaId: 'clp' }
-                : { precioBase: '10.0000', monedaId: 'usd' },
+                ? { precioBase: '5000.0000', monedaId: 'clp', nombre: 'Pisco' }
+                : { precioBase: '10.0000', monedaId: 'usd', nombre: 'Whisky' },
             ),
           ]),
         ),
@@ -577,12 +578,14 @@ describe('OnlineService', () => {
         monedaIdOrigen: 'clp',
         tasaCambio: '1.000000',
         clasificacionTributaria: 'afecto',
+        descripcion: 'Pisco',
       },
       {
         precioUnitarioOrigen: '10.0000',
         monedaIdOrigen: 'usd',
         tasaCambio: '950.000000',
         clasificacionTributaria: 'afecto',
+        descripcion: 'Whisky',
       },
     ]);
   });

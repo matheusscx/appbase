@@ -23,6 +23,58 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La boleta de la tienda lleva el nombre con que se pagó (cerrada 2026-10-11)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Frente fiscal (el nombre es el de la boleta), hecho
+solo. Detalle de la conducta: [`tienda-online.md`](../features/tienda-online.md) y
+[`ventas.md`](../features/ventas.md#la-venta-online-no-recalcula-ventacongelada-2026-10-11).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **La venta de la tienda toma el nombre del producto del catálogo del retorno, no del de
+  cuando se pagó** (backend, fiscal; análisis de la orquestadora sobre "vale lo que pagó" (`fb779b2b`), 2026-10-11, anotado a pedido del owner). "Vale lo que pagó" congela la plata y lo fiscal en
+  `checkout.congelado`, pero `descripcion` de `venta_detalles` se sigue leyendo del catálogo al
+  crear la venta. Si el producto se renombra justo entre el pago y el retorno, la boleta lleva el
+  nombre nuevo. Es menor: el arreglo es congelar también el nombre por línea en `pagar` y que
+  `crearEnTransaccion` lo tome de ahí. Toca la boleta, así que **va solo** (CLAUDE.md, lo fiscal).
+
+### Cómo se cerró
+
+- **`pagar` congela el nombre por línea**: `LineaVentaCongelada.descripcion`, leído de la misma
+  carga del ítem que da el precio y la clasificación (`cargarBasePorIds`), sin consulta nueva.
+- **`crearEnTransaccion` lo toma de ahí** cuando viene `ventaCongelada`, y lo escribe en
+  `venta_detalles.descripcion`, que es lo que imprime la boleta (`armarBoleta`). Vale igual para la
+  venta que crea el retorno y para la que crea `verificar`: los dos pasan por el mismo handler.
+- **La orden con congelado de antes de este cambio** no trae el nombre. La técnica: el campo es
+  **opcional** en el tipo y la venta **cae al catálogo** solo para él
+  (`congelada?.descripcion ?? item.nombre`). Se eligió el fallback y no rechazar porque el nombre no
+  es plata: venderla con el nombre de hoy no cobra de más ni de menos, y rechazarla dejaría un cargo
+  sin venta por un texto. La plata y lo fiscal siguen sin fallback (una orden sin congelado no se
+  vende). Queda escrito en el tipo, en la línea que lo resuelve y en `ventas.md`.
+- **Lo que no entra:** las otras lecturas de `item.nombre` dentro de la venta (los mensajes de
+  stock y el nombre de receta o combo que se pasa al descontar ingredientes) no llegan a la boleta.
+
+### Tests y mutantes
+
+e2e: `tienda-dos-ahoras.e2e-spec.ts` suma dos casos —el producto se renombra entre el pago y el
+retorno (`venta_detalles` y `GET /ventas/:id/boleta` llevan el nombre pagado; rojo antes del
+arreglo: salía el nombre nuevo), y la orden de antes del nombre (se le saca
+`{checkout,congelado,lineas,0,descripcion}` por SQL, que es la única forma de armarla: se vende con
+el nombre del catálogo del retorno)—; `tienda-verificar.e2e-spec.ts` suma el renombrado antes de
+`verificar`. Unitarios en `ventas.service.spec.ts` (persiste el nombre congelado, uno por línea en
+dos líneas del mismo ítem, y el fallback del congelado viejo con la plata igual congelada) y en
+`online.service.spec.ts` (el congelado de `pagar` lleva el nombre de cada ítem).
+
+| Mutante | Resultado |
+|---|---|
+| La venta vuelve a leer del catálogo (`descripcion: item.nombre`) | cae el renombrado en `tienda-dos-ahoras` (1 de 19), el de `tienda-verificar` (1 de 13) y 2 unitarios de ventas |
+| Sin fallback (`congelada ? congelada.descripcion : item.nombre`) | cae la orden de antes del nombre en `tienda-dos-ahoras` (1 de 19: la línea queda con `descripcion` null) y su unitario |
+| `pagar` no congela el nombre | cae el renombrado en `tienda-dos-ahoras` (1 de 19) y 2 unitarios de online |
+
+Se restauró y se volvieron a correr los archivos en verde.
+
+---
+
 ## `verificar` crea la venta de la tienda, y ya no pisa al retorno (cerradas 2026-10-11)
 
 Salen de [`pendientes.md`](pendientes.md) § 3 y § 5, en un mismo frente fiscal (crea la boleta) y
@@ -373,7 +425,8 @@ antes del cobro, preguntas de producto nuevas.
 - **Lo que sigue vivo a propósito** en la venta: la caja virtual y el tipo de documento, que el ítem
   exista y se pueda vender, el stock, el umbral de identidad de la boleta (mira el total congelado), el
   pago exacto de E (que ahora se cumple por construcción) y `descripcion`, que sale del catálogo
-  del retorno y no es plata ni dato fiscal.
+  del retorno y no es plata ni dato fiscal. *(Ya no: desde el 2026-10-11 el nombre también se
+  congela, ver "La boleta de la tienda lleva el nombre con que se pagó", arriba.)*
 - **Una ventana que se acepta:** la clasificación tributaria sale de la lectura de `pagar` y el
   motor lee el ítem otra vez dentro de `calcular`. Si cambia justo entre las dos lecturas de la misma
   request, lo congelado y lo cobrado difieren. Es la que ya tenía `crearEnTransaccion`.

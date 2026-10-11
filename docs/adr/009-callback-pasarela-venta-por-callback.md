@@ -61,7 +61,7 @@ orden nuevos: `pendiente` (conciliación demorada, modelado) y `conciliada`.
 
 El snapshot dejó de ser solo "qué se pidió" (ítem y cantidad). `pagar` guarda además, en
 `orden.metadata.checkout.congelado`, el resultado que autorizó en Webpay y, por línea, el precio de
-origen, su moneda, la tasa y la clasificación tributaria. El callback crea la venta con eso y **no
+origen, su moneda, la tasa, la clasificación tributaria y el nombre del producto. El callback crea la venta con eso y **no
 recalcula**: antes lo hacía con el catálogo y el reloj del retorno, y cualquier cambio entre el
 pago y el retorno (una promo por hora, una regla que vence, un precio, una tasa) dejaba un cargo
 sin venta. Lo decidió el owner el 2026-10-09: la venta vale lo que se pagó, y es hecho fiscal

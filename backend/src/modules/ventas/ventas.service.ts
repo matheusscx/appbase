@@ -424,6 +424,12 @@ export interface LineaVentaCongelada {
   tasaCambio: string;
   /** La que decidió el IVA cobrado. */
   clasificacionTributaria: string | null;
+  /**
+   * El nombre del ítem al pagar: va a `venta_detalles.descripcion` y a la
+   * boleta. Opcional porque las órdenes pagadas antes de congelarlo no lo
+   * tienen; a esas la venta les pone el nombre del catálogo, que no es plata.
+   */
+  descripcion?: string;
 }
 
 /**
@@ -1078,6 +1084,10 @@ export class VentasService {
         monedaIdOrigen: congelada?.monedaIdOrigen ?? item.monedaId,
         clasificacionTributaria:
           congelada?.clasificacionTributaria ?? item.clasificacionTributaria,
+        // El nombre con que se pagó, para la boleta. La orden pagada antes de
+        // congelarlo no lo trae y cae al catálogo: es texto, no plata, así que
+        // no hay nada que cobrar de más ni de menos.
+        descripcion: congelada?.descripcion ?? item.nombre,
       };
     });
 
@@ -1193,7 +1203,6 @@ export class VentasService {
       VentaDetalle,
       resultado.lineas.map((rLinea, i) => {
         const {
-          item,
           precioOrigen,
           tasa,
           precioConvertido,
@@ -1203,6 +1212,7 @@ export class VentasService {
           unidadBaseCodigo,
           monedaIdOrigen,
           clasificacionTributaria,
+          descripcion,
         } = lineasConversion[i];
         return manager.create(VentaDetalle, {
           ventaId: venta.id,
@@ -1211,7 +1221,7 @@ export class VentasService {
           precioUnitarioOrigen: precioOrigen,
           tasaCambio: tasa,
           precioUnitario: precioConvertido,
-          descripcion: item.nombre,
+          descripcion,
           // Non-null garantizado por el guard del paso 2, que rechaza la venta
           // antes de escribir si algún ítem no tiene clasificación.
           clasificacionTributaria: clasificacionTributaria!,

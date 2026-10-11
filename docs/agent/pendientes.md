@@ -461,13 +461,6 @@ fiscal y va solo:
     orden con un reembolso parcial previo, si se puede desligar, y la fiscal, que va aparte: con
     `venta_id` escrito, un reembolso posterior emite la nota de crédito sobre la venta manual.
 
-- [ ] **La venta de la tienda toma el nombre del producto del catálogo del retorno, no del de
-  cuando se pagó** (backend, fiscal; análisis de la orquestadora sobre "vale lo que pagó" (`fb779b2b`), 2026-10-11, anotado a pedido del owner). "Vale lo que pagó" congela la plata y lo fiscal en
-  `checkout.congelado`, pero `descripcion` de `venta_detalles` se sigue leyendo del catálogo al
-  crear la venta. Si el producto se renombra justo entre el pago y el retorno, la boleta lleva el
-  nombre nuevo. Es menor: el arreglo es congelar también el nombre por línea en `pagar` y que
-  `crearEnTransaccion` lo tome de ahí. Toca la boleta, así que **va solo** (CLAUDE.md, lo fiscal).
-
 - [ ] **La tienda cobra un producto que ya no hay: revisar el stock antes de mandarla a Webpay**
   (backend + producto; análisis de la orquestadora sobre "vale lo que pagó" (`fb779b2b`), anotado a
   pedido del owner; **medido el 2026-10-11** con

@@ -855,8 +855,8 @@ detalle necesita para mostrar "2,5 kg" en vez de "2,5". Ver también el congelad
 
 El paso 4 tiene una excepción: la venta que crea el callback de la tienda. `crear` y
 `crearEnTransaccion` aceptan un parámetro interno `ventaCongelada`, el resultado del motor que
-`pagar` ya autorizó en Webpay más, por línea, el precio de origen, su moneda, la tasa y la
-clasificación tributaria. Con él la venta **no carga la config, no convierte y no llama a
+`pagar` ya autorizó en Webpay más, por línea, el precio de origen, su moneda, la tasa, la
+clasificación tributaria y el nombre (`descripcion`). Con él la venta **no carga la config, no convierte y no llama a
 `calcular`**: el total, las trazas y `config_calculo` son los que se cobraron. Recalcular al
 retorno, con otro "ahora", era lo que dejaba el cargo sin venta (ver
 [`tienda-online.md`](tienda-online.md)).
@@ -868,8 +868,14 @@ lo congelado sea este carrito, línea por línea y en orden, y si no lanza.
 
 **Qué queda vivo, a propósito:** la caja virtual y el tipo de documento, que el ítem exista y se
 pueda vender (un ítem borrado deja la orden pagada sin venta), el stock, el umbral de identidad de
-la boleta, el pago exacto (sin vuelto) y el nombre de la línea (`descripcion`), que sale del
-catálogo del retorno.
+la boleta y el pago exacto (sin vuelto).
+
+**El nombre de la línea** (`descripcion`, el que imprime la boleta) sale del congelado desde el
+2026-10-11: antes se leía del catálogo del retorno, y un producto renombrado mientras el comprador
+estaba en Webpay salía en la boleta con el nombre nuevo. Es el único campo del congelado que
+**cae al catálogo** si falta: una orden pagada antes de congelarlo no lo trae, y el nombre no es
+plata, así que venderla con el nombre de hoy no cobra de más ni de menos. La plata y lo fiscal no
+tienen ese fallback: una orden sin congelado no se vende.
 
 ### Dependencias reutilizadas
 

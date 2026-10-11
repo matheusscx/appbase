@@ -131,10 +131,10 @@ venta —autorizado de menos o de más contra lo que el callback cobra con los i
 **La venta vale lo que se pagó** (la **A** de "la tienda calcula el total dos veces", owner,
 2026-10-09; construida el 2026-10-11). `pagar` congela en la orden (`checkout.congelado`) lo que
 autorizó en Webpay: el resultado del motor —líneas, impuestos, reglas y promos aplicadas, total— y, por
-línea, el precio de origen, su moneda, la tasa y la clasificación tributaria que decidió el IVA. El
-callback crea la venta con eso y **no vuelve al motor**: el pago es ese `totalFinal` y no hay segundo
-cálculo con otro "ahora". Antes recalculaba con el catálogo y el reloj del retorno, y una promo por
-hora que terminaba, una regla que vencía a medianoche, o un precio o una tasa que cambiaban mientras
+línea, el precio de origen, su moneda, la tasa, la clasificación tributaria que decidió el IVA y el
+nombre del producto que va a la boleta. El callback crea la venta con eso y **no vuelve al motor**:
+el pago es ese `totalFinal` y no hay segundo cálculo con otro "ahora". Antes recalculaba con el
+catálogo y el reloj del retorno, y una promo por hora que terminaba, una regla que vencía a medianoche, o un precio o una tasa que cambiaban mientras
 el comprador estaba en Webpay dejaban la orden `pagada` sin venta (6 de 7 casos medidos el
 2026-10-09). Lo fija `tienda-dos-ahoras.e2e-spec.ts`, con la tabla antes y después en
 [`resueltos.md`](../agent/resueltos.md#la-venta-online-vale-lo-que-se-pagó-la-a-de-los-dos-ahora-cerrada-2026-10-11).
@@ -150,8 +150,14 @@ por el mismo camino (medido el 2026-10-11 con producto por cantidad y por lote, 
 de insumo bloqueante; con insumo no bloqueante la venta se crea sin descontarlo, como en el POS).
 Qué hacer con eso es una pregunta abierta del owner en [`pendientes.md`](../agent/pendientes.md)
 § 4. Tampoco entra una orden creada antes del deploy y resuelta después (no trae
-congelado): falla igual y no se recalcula. El ítem sigue dando el nombre de la línea
-(`descripcion`) al retorno, que no es plata ni dato fiscal.
+congelado): falla igual y no se recalcula.
+
+**El nombre de la boleta es el de cuando se pagó** (2026-10-11). Si el producto se renombra mientras
+el comprador está en Webpay, o antes de que `verificar` cree la venta, la línea (`descripcion`) y
+la boleta llevan el nombre con que se cobró, no el del catálogo del retorno. Una orden pagada antes
+de congelar el nombre no lo trae y **sí se vende**: toma el nombre del catálogo, porque el nombre no
+es plata y no hay nada que cobrar de más ni de menos. Lo fijan `tienda-dos-ahoras.e2e-spec.ts` y
+`tienda-verificar.e2e-spec.ts`.
 
 El owner decidió ese mismo día dos cosas más, construidas el 2026-10-10:
 

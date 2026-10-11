@@ -187,6 +187,8 @@ export class OnlineService {
           // Misma forma que escribe la venta (`tasa.toFixed(6)`).
           tasaCambio: new Decimal(tasaMap.get(item.monedaId) ?? '1').toFixed(6),
           clasificacionTributaria: item.clasificacionTributaria,
+          // El nombre de la boleta es el de cuando se pagó, no el del retorno.
+          descripcion: item.nombre,
         };
       },
     );

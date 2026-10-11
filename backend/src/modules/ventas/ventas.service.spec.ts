@@ -2933,6 +2933,7 @@ describe('VentasService', () => {
           monedaIdOrigen: 'moneda-extranjera',
           tasaCambio: '950.000000',
           clasificacionTributaria: 'exento',
+          descripcion: 'Smartphone (al pagar)',
         },
       ],
     };
@@ -2972,7 +2973,7 @@ describe('VentasService', () => {
       ).not.toHaveBeenCalled();
     });
 
-    it('persiste lo congelado: precio, origen, moneda, tasa, clasificación y totales', async () => {
+    it('persiste lo congelado: precio, origen, moneda, tasa, clasificación, nombre y totales', async () => {
       const manager = conManager();
       const venta = await service.crear(
         TENANT_ID,
@@ -2989,12 +2990,41 @@ describe('VentasService', () => {
           monedaIdOrigen: 'moneda-extranjera',
           tasaCambio: '950.000000',
           clasificacionTributaria: 'exento',
+          descripcion: 'Smartphone (al pagar)',
           impuestoAplicado: '1805.0000',
           totalLinea: '11305.0000',
         }),
       ]);
       expect(venta.totalFinal).toBe('11305.0000');
       expect(venta.configCalculo).toEqual(resultadoCongelado.config);
+    });
+
+    it('congelado de antes del nombre: la línea lleva el nombre del catálogo y la plata sigue congelada', async () => {
+      const manager = conManager();
+      // La forma que tenía el congelado antes del nombre: los cuatro campos
+      // de plata y lo fiscal, sin `descripcion`.
+      const { precioUnitarioOrigen, monedaIdOrigen, tasaCambio } =
+        congelada.lineas[0];
+      await service.crear(TENANT_ID, USUARIO_ID, dtoOnline, undefined, {
+        ...congelada,
+        lineas: [
+          {
+            precioUnitarioOrigen,
+            monedaIdOrigen,
+            tasaCambio,
+            clasificacionTributaria:
+              congelada.lineas[0].clasificacionTributaria,
+          },
+        ],
+      });
+
+      expect(detallesGuardados(manager)).toEqual([
+        expect.objectContaining({
+          descripcion: 'Smartphone',
+          precioUnitario: '9500.0000',
+          precioUnitarioOrigen: '10.0000',
+        }),
+      ]);
     });
 
     it('rechaza antes de escribir si el ítem congelado no es el de la línea', async () => {
@@ -3083,7 +3113,7 @@ describe('VentasService', () => {
       ).resolves.toBeDefined();
     });
 
-    it('dos líneas del mismo ítem: cada detalle lleva SU precio congelado, por posición', async () => {
+    it('dos líneas del mismo ítem: cada detalle lleva SU precio y SU nombre congelados, por posición', async () => {
       const manager = conManager();
       const linea = resultadoCongelado.lineas[0];
       const dosLineas: VentaCongelada = {
@@ -3095,8 +3125,16 @@ describe('VentasService', () => {
           ],
         },
         lineas: [
-          { ...congelada.lineas[0], precioUnitarioOrigen: '10.0000' },
-          { ...congelada.lineas[0], precioUnitarioOrigen: '1.9000' },
+          {
+            ...congelada.lineas[0],
+            precioUnitarioOrigen: '10.0000',
+            descripcion: 'Primera',
+          },
+          {
+            ...congelada.lineas[0],
+            precioUnitarioOrigen: '1.9000',
+            descripcion: 'Segunda',
+          },
         ],
       };
       await service.crear(
@@ -3117,10 +3155,11 @@ describe('VentasService', () => {
         detallesGuardados(manager).map((d) => [
           d.precioUnitario,
           d.precioUnitarioOrigen,
+          d.descripcion,
         ]),
       ).toEqual([
-        ['9500.0000', '10.0000'],
-        ['1805.0000', '1.9000'],
+        ['9500.0000', '10.0000', 'Primera'],
+        ['1805.0000', '1.9000', 'Segunda'],
       ]);
     });
 

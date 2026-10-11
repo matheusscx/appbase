@@ -206,6 +206,14 @@ describe('Tienda: la venta vale lo que se pagó, aunque algo cambie entre el pag
     expect(res.status).toBe(200);
   };
 
+  const renombrar = async (itemId: string, nombre: string) => {
+    const res = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre });
+    expect(res.status).toBe(200);
+  };
+
   /** El total que el motor da para el carrito en este instante (no cobra). */
   const totalAhora = async (itemId: string): Promise<string> => {
     const res = await request(app.getHttpServer())
@@ -414,12 +422,24 @@ describe('Tienda: la venta vale lo que se pagó, aunque algo cambie entre el pag
       precio_unitario: string;
       precio_unitario_origen: string;
       tasa_cambio: string;
+      descripcion: string | null;
     }[] = await ds.query(
-      `SELECT precio_unitario, precio_unitario_origen, tasa_cambio
+      `SELECT precio_unitario, precio_unitario_origen, tasa_cambio, descripcion
          FROM venta_detalles WHERE venta_id = $1 AND eliminado_el IS NULL`,
       [ventaId],
     );
     return d;
+  };
+
+  /** El nombre de la (única) línea en la boleta que reimprime el local. */
+  const nombreEnLaBoleta = async (ventaId: string): Promise<string> => {
+    const res = await request(app.getHttpServer())
+      .get(`/api/ventas/${ventaId}/boleta`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const { items } = res.body as { items: { descripcion: string }[] };
+    expect(items).toHaveLength(1);
+    return items[0].descripcion;
   };
 
   // ─── Reloj ─────────────────────────────────────────────────────────────────
@@ -829,6 +849,51 @@ describe('Tienda: la venta vale lo que se pagó, aunque algo cambie entre el pag
       } finally {
         await borrarItem(itemId);
       }
+    });
+
+    it('el producto se renombra: la venta y su boleta llevan el nombre con que se pagó', async () => {
+      const nombrePagado = `Pisco pagado E2E ${randomUUID()}`;
+      const itemId = await crearItem('10000', { nombre: nombrePagado });
+      const ventasAntes = await ventasOnline();
+
+      const { ordenId, autorizado } = await pagar(itemId);
+      await renombrar(itemId, `Pisco renombrado E2E ${randomUUID()}`);
+
+      const location = await volver(ordenId);
+      const ventaId = await afirmarVentaPorLoCobrado(
+        ordenId,
+        location,
+        ventasAntes,
+        autorizado,
+      );
+      expect((await detalleDe(ventaId)).descripcion).toBe(nombrePagado);
+      expect(await nombreEnLaBoleta(ventaId)).toBe(nombrePagado);
+    });
+
+    it('una orden pagada antes de congelar el nombre se vende igual, con el nombre del catálogo del retorno', async () => {
+      const itemId = await crearItem('10000');
+      const ventasAntes = await ventasOnline();
+
+      const { ordenId, autorizado } = await pagar(itemId);
+      // Una orden de antes de congelar el nombre: hoy `pagar` siempre lo
+      // congela, así que la única forma de armarla es sacárselo.
+      await ds.query(
+        `UPDATE pasarela_ordenes
+            SET metadata = metadata #- '{checkout,congelado,lineas,0,descripcion}'
+          WHERE orden_id = $1`,
+        [ordenId],
+      );
+      const nombreDelRetorno = `Pisco del retorno E2E ${randomUUID()}`;
+      await renombrar(itemId, nombreDelRetorno);
+
+      const location = await volver(ordenId);
+      const ventaId = await afirmarVentaPorLoCobrado(
+        ordenId,
+        location,
+        ventasAntes,
+        autorizado,
+      );
+      expect((await detalleDe(ventaId)).descripcion).toBe(nombreDelRetorno);
     });
   });
 

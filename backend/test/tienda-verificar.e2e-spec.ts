@@ -400,6 +400,27 @@ describe('Tienda: verificar una orden pagada crea la venta por lo cobrado (e2e)'
       expect(resultado.body).toMatchObject({ estado: 'conciliada' });
     });
 
+    it('el producto se renombra antes de verificar: la venta lleva el nombre con que se pagó', async () => {
+      const ventasAntes = await ventasOnline();
+      const { itemId, nombre } = await crearItem();
+      const ordenId = await pagar(itemId);
+      const renombrado = await request(app.getHttpServer())
+        .patch(`/api/items/${itemId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ nombre: `Renombrado verificar E2E ${randomUUID()}` });
+      expect(renombrado.status).toBe(200);
+
+      expect((await verificar(ordenId)).estado).toBe('conciliada');
+
+      const { orden } = await afirmarConciliadaConSuVenta(ordenId, ventasAntes);
+      const detalles: { descripcion: string | null }[] = await ds.query(
+        `SELECT descripcion FROM venta_detalles
+          WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [orden.venta_id],
+      );
+      expect(detalles).toEqual([{ descripcion: nombre }]);
+    });
+
     it('la orden que cerró verificar se puede reembolsar desde la app', async () => {
       const ordenId = await pagarEnLaTienda();
       expect((await verificar(ordenId)).estado).toBe('conciliada');
