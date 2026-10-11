@@ -80,6 +80,14 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **Intermitente de Playwright: `caja/historial-cajero.spec.ts:91` no ve el toast a tiempo**
+  (frontend e2e; visto el 2026-10-11 en el Playwright entero del frente del salón, `b6721c3a`, que
+  no toca caja). El toast "El historial de cajas es solo para supervisión" no apareció en 5 s en
+  la 2ª de tres corridas; en la 1ª y en la 3ª pasó, y solo dio 8/8. **Primera vez anotado.** Junto
+  con el de abajo son dos intermitentes nuevos el mismo día bajo carga: si alguno vuelve, correrlo
+  en loop con la suite cargando antes de subirle el timeout (memoria del repo: un intermitente se
+  cierra corriéndolo en loop, no subiendo el número).
+
 - [ ] **Intermitente de Playwright: `menu-lateral.spec.ts:83` no llega a `networkidle` en `/ventas/pos`**
   (frontend e2e; visto el 2026-10-11 en el Playwright entero del frente "ingrediente + stock",
   `3c5b6858`, que no toca el POS). `page.goto('/ventas/pos')` no alcanzó `networkidle` en 30 s:
