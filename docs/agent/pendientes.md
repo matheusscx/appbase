@@ -350,6 +350,14 @@ la acumulación de descuentos y compras— y el renombre de `moneda.decimales` s
   `fallida` y suelta la clave, igual que un rechazo. Descartados: devolver la plata y repetir el
   alta (es nota de crédito, fiscal) y dejarla marcada para arreglarla a mano (hoy no hay forma de
   crear la suscripción sin cobrar). **Lista para tomar**, backend + front de Pasarela.
+  ⬇️ **Prioridad baja y botones *Aprobar / Rechazar* (owner, 2026-10-11, en el chat de la
+  orquestadora).** La documentación de Transbank dice que Oneclick devuelve el resultado del cobro
+  "inmediatamente" y que su estado se consulta "en cualquier momento"
+  ([Oneclick](https://www.transbankdevelopers.cl/documentacion/oneclick)). Por eso este caso pide
+  que fallen las dos llamadas, el cobro (30 s) y la consulta, y es raro. Al ver eso el owner la
+  bajó. Tampoco le gusta *Salió / No salió* para estos botones: van **Aprobar** (lo que arriba se
+  llama *Salió*) y **Rechazar** (*No salió*). La conducta decidida arriba no cambia. Los botones de
+  los reembolsos siguen como están: el owner habló de estos.
 
 ### Los tres que dejó el frente del redondeo por país (2026-09-03)
 
