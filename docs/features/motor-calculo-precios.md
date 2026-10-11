@@ -265,6 +265,12 @@ cuenta—; lo que mentía era la previsualización.
    personalizada. Usa los mismos resolvers de `ItemsService` que el cobro.
 3. `precioBase` convertido — el resto de las líneas.
 
+**Un componente fraccionario de combo cobra sus recargos enteros** (owner,
+2026-10-11). `resolverPersonalizacionCombo` recorre `ceil(cantidad)` unidades del
+componente y cada una suma `precioExtra × unidades` de lo elegido: la salsa de
+medio kilo de papas vale $500, no $250. El recargo no se prorratea por la fracción.
+Detalle: [grupos-modificadores.md](./grupos-modificadores.md) § "Componente fraccionario".
+
 **Una línea que solo omite no cuesta nada.** El criterio *"sacar no cobra, agregar
 sí"* se evalúa **antes** de resolver: si la personalización no trae extras, grupos
 ni componentes, el precio es `precioBase` y no se consulta la base. Vivía duplicado

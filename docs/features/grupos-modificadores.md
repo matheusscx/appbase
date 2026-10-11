@@ -348,6 +348,9 @@ original (ver Scope arriba, versión anterior a esta fecha).
 - **Por unidad:** un componente con `cantidad = N` pregunta N veces —
   independientes entre sí (2 hamburguesas → una proteína por cada una, pueden
   ser distintas). El snapshot y el descuento de stock trackean por unidad.
+- **Una fracción cuenta como unidad entera** (owner, 2026-10-11): un
+  componente de 0,5 pregunta una vez, uno de 1,5 pregunta dos. Ver
+  "Componente fraccionario" abajo.
 - **Solo recetas:** hoy solo `receta` (y `combo`) pueden tener grupos; un
   `producto` puro no.
 - **Un nivel de profundidad:** combo → componente receta → sus grupos, sin ir
@@ -377,7 +380,7 @@ entrada por cada (componente, unidad) con elección. El backend:
 1. Valida que `componenteItemId` sea un componente **vivo** de ESTE combo y
    de tipo `receta` (rechaza con `400` cualquier item ajeno al combo o que no
    admita grupos — el frontend no puede inyectar grupos de items arbitrarios).
-2. Valida `unidad ∈ 1..cantidad` del componente, sin `unidad` duplicada.
+2. Valida `unidad ∈ 1..ceil(cantidad)` del componente, sin `unidad` duplicada.
 3. Resuelve cada (componente, unidad) vía `resolverGruposDeItem` — incluso las
    que el frontend omitió, para que un grupo obligatorio sin elección dispare
    la validación de `min` igual que hoy.
@@ -392,6 +395,27 @@ salida; receta → expande a sus ingredientes fijos; servicio → nada), por cad
 (componente, unidad) con grupos congelados se llama a `venderOpcionesGrupos`
 — descuenta la opción elegida (ej. la proteína), siempre bloqueante, dentro de
 la misma transacción de la venta.
+
+**Componente fraccionario (owner, 2026-10-08 y 2026-10-11).** Un componente
+de combo puede ser fraccionario —el combo familiar lleva medio kilo de papas, con
+salsa obligatoria—, y para preguntar sus grupos **una fracción cuenta como una
+unidad entera, redondeando hacia arriba**: las vueltas por unidad son
+`ceil(cantidad)` (`unidadesDe` en `resolverPersonalizacionCombo`, gemela de
+`unidadesDeComponente` en el drawer). 0,5 kg pide una salsa; 1,5 kg pide dos.
+El recargo sigue la regla de siempre, `precioExtra × unidades` por cada
+(componente, unidad), así que la salsa de medio kilo se cobra **entera** ($500,
+no $250), y el stock la sigue solo: se descuenta por entrada del snapshot, una
+salsa entera por unidad redondeada, la misma que se cobró —el componente en sí
+sale por su fracción, 0,5 kg de papas—. Venta, salón y anulación leen el mismo
+snapshot, así que cuentan las mismas unidades. Hasta el arreglo el loop corría
+`u <= 0.5` → **cero vueltas**: el grupo obligatorio no se exigía y mandar la
+salsa era 400 ("Unidad inválida"). Lo fijan `combos.e2e-spec.ts` 15 a 19 y la spec
+del drawer.
+
+La tienda online no ofrece combos (su catálogo pide solo `producto`) ni manda
+personalización. Un carrito armado a mano con un combo de grupo obligatorio, entero o
+fraccionario, se cobra y el callback lo rechaza con 400: hueco abierto en
+`docs/agent/pendientes.md` § 2.
 
 **Solo se descuenta lo que se sirvió.** Si un componente **no bloqueante** se
 omite por falta de stock (el combo se vendió sin la hamburguesa), sus grupos
@@ -617,7 +641,8 @@ entrada por cada (componente receta, unidad) con elección:
 ```
 
 `400` si `componenteItemId` no es un componente vivo de ESE combo, o si
-`unidad` está fuera de `1..cantidad` del componente o duplicada. El recargo se
+`unidad` está fuera de `1..ceil(cantidad)` del componente o duplicada (un
+componente de 0,5 tiene una unidad; ver "Componente fraccionario" más arriba). El recargo se
 suma (Decimal.js) al del combo; el descuento de stock por opción es siempre
 bloqueante, igual que los grupos propios. Ver "Grupos anidados en combos (un
 nivel)" arriba para el detalle completo.

@@ -96,6 +96,26 @@ destapa una decisión que no es mía).
   request deja abierta la página del POS (un `networkidle` que nunca llega suele ser un polling o
   un stream). No bloquea la integración.
 
+- [ ] **Un carrito armado a mano con un combo o receta de grupo obligatorio se cobra en la tienda y
+  la venta no se crea** (backend, tienda online; anotado el 2026-10-11 por el frente del componente
+  fraccionario de combo, a pedido de la orquestadora. **Leído, no medido.**) **Alcance:** la
+  pantalla de la tienda no lo ofrece, porque su catálogo pide solo `producto`
+  (`frontend/app/pages/tienda/index.vue`, `tipos: ['producto']`) y un producto no lleva grupos. Lo
+  alcanza un carrito armado contra la API, el mismo caso que ya ataja el guard de ingrediente
+  (`online.service.ts`, "esto ataja el carrito armado a mano"). **El mecanismo:** `OnlineService`
+  descarta la personalización al armar el cálculo (el comentario de `personalizacion: undefined`),
+  sin ella `/calcular` no resuelve (`puedeCostar`), y `prepararLineasCheckout` no mira grupos, así
+  que el checkout manda a Webpay. La venta del callback (`online-callback.handler.ts` →
+  `VentasService.crear` con `ventaCongelada`; `lineasCongeladas` llega `undefined`) **sí** resuelve:
+  el loop de `personalizaciones` de `ventas.service.ts` llama a `resolverPersonalizacionCombo` (o
+  `…Receta`) sin personalización, y el grupo obligatorio tira 400 *"El grupo … requiere elegir entre
+  1 y 1 unidades"* con el pago ya hecho: orden pagada sin venta. Desde el 2026-10-11 cae igual un
+  combo cuyos únicos grupos obligatorios eran de un componente con cantidad menor que 1 (antes, el
+  loop de cero vueltas no exigía nada). **Qué medir:** por HTTP contra el checkout (pasarela demo),
+  con un combo de grupo obligatorio en el body, y leer la orden y el motivo del rechazo. **Arreglo
+  probable:** atajarlo en `prepararLineasCheckout` antes de Webpay, como `serie` e ingrediente. Es
+  pregunta para el owner si la tienda algún día ofrece combos o recetas.
+
 - [ ] **El mostrador vende lo que una mesa ya apartó** (backend, `ventas.service.ts` → el
   chokepoint `InventarioService.registrarMovimiento`; anotado el 2026-10-11 por el frente "la tienda
   revisa el stock antes de Webpay", a pedido del owner vía la orquestadora; **leído, no medido**).
@@ -360,37 +380,6 @@ fiscal y va solo:
   momento), y anular devuelve eso aunque el catálogo haya cambiado. Es la misma idea que el
   precio congelado de la línea (`dd54f81d`). El motor de precios y lo fiscal no se tocan.
   Escribe en `movimientos_inventario`: va en su propio frente.
-
-- [ ] **Un componente de combo con cantidad fraccionaria no valida su personalización** (backend +
-  producto, `ComboComponenteInputDto.cantidad` y `items.service.ts`, el loop por unidad de la
-  personalización del combo; medido por HTTP el 2026-10-08 por el frente de los DTOs sin cota). Hoy
-  `cantidad: "0.5"` en un componente da 201. Al resolver la personalización, el loop
-  `for (u = 1; u <= unidades; u++)` corre **0 veces**, así que un grupo obligatorio de ese componente
-  nunca se exige y lo que elija el cliente no se valida. (`-1` y `0` ya dan 400 en el service.)
-  **La pregunta para el owner:** ¿un componente de combo puede ser fraccionario (medio kilo de algo
-  dentro de un combo)? Si puede, hay que decidir cómo se valida su personalización; si no, va un 400.
-
-  ✅ **Contestado por el owner (2026-10-08, AskUserQuestion de la orquestadora): sí, un componente
-  de combo puede ser fraccionario.** Lo que falta es el diseño de cómo se valida su personalización
-  (por ejemplo, si un componente de 0,5 cuenta como 1 para exigir sus grupos obligatorios, y cómo se
-  cobran sus extras). Eso es diseño, no mecánica: brainstorm → spec → plan. Si toca cómo se cobran los
-  extras, toca el motor y va solo.
-
-  ✅ **Diseño decidido (owner, 2026-10-11, por AskUserQuestion de la orquestadora, con la escena del
-  combo familiar —1 pollo + medio kilo de papas con salsa obligatoria— y el costo de cada opción;
-  eligió las dos recomendadas):**
-  - **Una fracción cuenta como una unidad entera, redondeando hacia arriba**: 0,5 kg pide elegir 1
-    salsa y 1,5 kg pide 2. Es la cantidad de vueltas del loop por unidad (`ceil(cantidad)`), y se
-    exigen los obligatorios de cada una. Descartado: prohibir opciones en un componente
-    fraccionario.
-  - **El extra se cobra entero** ($500 sobre el medio kilo, no $250), una vez por unidad redondeada.
-    Descartado: el proporcional, que tocaba el cálculo de precios.
-  - Con las dos, el cobro de los extras sigue la regla que ya existe (`precioExtra × unidades`)
-    sobre la cantidad redondeada: lo que cambia es cuántas unidades se piden. Igual toca
-    `resolverPersonalizacionCombo`, que es motor (ver "re-tasar" arriba): **va solo, con el sistema
-    quieto**, y la venta, el stock (`venderComponentesCombo`) y la anulación tienen que leer la
-    misma cantidad de unidades. Medir con e2e: 0,5 sin la salsa → 400; 0,5 con una salsa → 201 y un
-    extra cobrado una vez; 1,5 pide dos.
 
 - [ ] **En una pasarela modo Mall, el código de comercio hijo lo escribe el propio local y nadie
   verifica que sea suyo** (producto + proceso de alta; anotado el 2026-10-08 al cerrar "la

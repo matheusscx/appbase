@@ -4057,6 +4057,15 @@ export class ItemsService {
       ).get(comboItemId) ??
       [];
     const compById = new Map(compRows.map((c) => [c.componente_item_id, c]));
+    // Cuántas veces pregunta un componente: una por unidad, y una fracción
+    // cuenta como unidad entera, redondeando hacia arriba (owner, 2026-10-11):
+    // medio kilo de papas pide una salsa, kilo y medio pide dos, y la salsa se
+    // cobra entera. Con `u <= 0.5` el loop de abajo no corría ninguna vez y el
+    // grupo obligatorio no se exigía. El rango del paso 4 y el loop del 5 leen
+    // este mismo número, y el stock lo sigue solo: se descuenta por entrada del
+    // snapshot (`venderComponentesCombo`).
+    const unidadesDe = (comp: ComponenteCombo): number =>
+      new Decimal(comp.cantidad).ceil().toNumber();
 
     // 2. El catálogo de grupos del combo Y de sus componentes receta, de una.
     //    Antes esto eran dos cosas distintas: un `SELECT DISTINCT` para saber
@@ -4108,7 +4117,7 @@ export class ItemsService {
       if (
         !Number.isInteger(c.unidad) ||
         c.unidad < 1 ||
-        new Decimal(comp.cantidad).lt(c.unidad)
+        c.unidad > unidadesDe(comp)
       ) {
         throw new BadRequestException(
           `Unidad inválida para el componente ${comp.nombre}`,
@@ -4132,7 +4141,7 @@ export class ItemsService {
     for (const comp of compRows) {
       const catalogo = catalogoDe(comp.componente_item_id);
       if (!catalogo.asociados.length) continue;
-      const unidades = new Decimal(comp.cantidad).toNumber();
+      const unidades = unidadesDe(comp);
       for (let u = 1; u <= unidades; u++) {
         const grupos = elegidasPorClave.get(`${comp.componente_item_id}#${u}`);
         const resuelto = await this.resolverGruposDeItem(
@@ -4786,7 +4795,9 @@ export class ItemsService {
     // Grupos de los componentes receta (elección por unidad congelada en el
     // snapshot). Cada entrada es UNA unidad → venderOpcionesGrupos ya
     // multiplica por cantidadVendida; no multiplicar por la cantidad del
-    // componente (ya está enumerada como unidades separadas).
+    // componente (ya está enumerada como unidades separadas). Tampoco por su
+    // fracción: medio kilo de papas lleva una salsa entera, la que se cobró
+    // (`unidadesDe` en `resolverPersonalizacionCombo`).
     // Se excluyen los componentes que no se sirvieron: si el combo se vendió
     // sin la hamburguesa, la proteína que el cliente había elegido para ella
     // tampoco salió de la cocina. Sin este filtro el pre-chequeo de arriba

@@ -6,6 +6,7 @@ import {
   resumenPersonalizacion,
   sinStock,
   opcionSinStock,
+  unidadesDeComponente,
   type PersonalizacionPayload,
   type PersonalizacionGrupoPayload,
   type PersonalizacionComponentePayload,
@@ -139,7 +140,7 @@ const gruposValidos = computed(() =>
 const componentesValidos = computed(() => {
   for (const comp of detalle.value?.componentes ?? []) {
     if (!comp.grupos.length) continue
-    for (let u = 1; u <= Number(comp.cantidad); u++) {
+    for (let u = 1; u <= unidadesDeComponente(comp.cantidad); u++) {
       const sel = componentesSeleccion.value[`${comp.componenteItemId}#${u}`] ?? {}
       for (const g of comp.grupos) {
         if (!grupoValidoEn(g, sel[g.grupoModificadorId] ?? {})) return false
@@ -183,7 +184,7 @@ const componentesOpcionesSeleccionadas = computed(() => {
   const flat: { precioExtra: string, unidades: number }[] = []
   for (const comp of detalle.value.componentes ?? []) {
     if (!comp.grupos.length) continue
-    for (let u = 1; u <= Number(comp.cantidad); u++) {
+    for (let u = 1; u <= unidadesDeComponente(comp.cantidad); u++) {
       const sel = componentesSeleccion.value[`${comp.componenteItemId}#${u}`] ?? {}
       for (const g of comp.grupos) {
         const selGrupo = sel[g.grupoModificadorId] ?? {}
@@ -209,9 +210,9 @@ const gruposResumen = computed(() => {
   }
   for (const comp of detalle.value.componentes ?? []) {
     if (!comp.grupos.length) continue
-    for (let u = 1; u <= Number(comp.cantidad); u++) {
+    for (let u = 1; u <= unidadesDeComponente(comp.cantidad); u++) {
       const sel = componentesSeleccion.value[`${comp.componenteItemId}#${u}`] ?? {}
-      const sufijoUnidad = Number(comp.cantidad) > 1 ? ` #${u}` : ''
+      const sufijoUnidad = unidadesDeComponente(comp.cantidad) > 1 ? ` #${u}` : ''
       for (const g of comp.grupos) {
         const selGrupo = sel[g.grupoModificadorId] ?? {}
         for (const o of g.opciones) {
@@ -291,7 +292,7 @@ function agregar() {
   const componentes: PersonalizacionComponentePayload[] = []
   for (const comp of detalle.value.componentes ?? []) {
     if (!comp.grupos.length) continue
-    for (let u = 1; u <= Number(comp.cantidad); u++) {
+    for (let u = 1; u <= unidadesDeComponente(comp.cantidad); u++) {
       const sel = componentesSeleccion.value[`${comp.componenteItemId}#${u}`] ?? {}
       componentes.push({
         componenteItemId: comp.componenteItemId,
@@ -346,12 +347,12 @@ function agregar() {
           class="space-y-4"
         >
           <div
-            v-for="u in Number(comp.cantidad)"
+            v-for="u in unidadesDeComponente(comp.cantidad)"
             :key="`${comp.componenteItemId}#${u}`"
             class="space-y-3 rounded-lg border border-default p-4"
           >
             <p class="text-sm font-semibold text-default">
-              {{ comp.componenteNombre }}<span v-if="Number(comp.cantidad) > 1" class="text-muted"> #{{ u }}</span>
+              {{ comp.componenteNombre }}<span v-if="unidadesDeComponente(comp.cantidad) > 1" class="text-muted"> #{{ u }}</span>
             </p>
             <VentasItemPersonalizacionGrupo
               v-for="grupo in comp.grupos"

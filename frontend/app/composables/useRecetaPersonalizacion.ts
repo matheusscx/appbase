@@ -101,9 +101,23 @@ export interface PersonalizacionGrupoPayload {
   opciones: PersonalizacionGrupoOpcionPayload[]
 }
 
+/**
+ * Cuántas veces pregunta sus grupos un componente de combo: una por unidad, y
+ * una fracción cuenta como unidad entera, redondeando hacia arriba (owner,
+ * 2026-10-11): medio kilo de papas pide una salsa, kilo y medio pide dos.
+ *
+ * Gemela de `unidadesDe` en `resolverPersonalizacionCombo` (backend), que es la
+ * que exige. Con la cantidad cruda el drawer no preguntaba la salsa de medio kilo:
+ * Vue 3.5 no recorre un `v-for` sobre 0,5 (en dev avisa y no pinta nada; en
+ * producción `new Array(0.5)` tira), y los loops `u <= 0.5` no daban vueltas.
+ */
+export function unidadesDeComponente(cantidad: string): number {
+  return new Decimal(cantidad).ceil().toNumber()
+}
+
 export interface PersonalizacionComponentePayload {
   componenteItemId: string
-  /** 1..cantidad del componente. */
+  /** 1..`unidadesDeComponente(cantidad)` del componente. */
   unidad: number
   grupos: PersonalizacionGrupoPayload[]
 }

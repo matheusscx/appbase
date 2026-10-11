@@ -85,7 +85,7 @@ combo".
 | `tenant_id` | UUID | Del token |
 | `combo_item_id` | UUID | Item tipo `combo` |
 | `componente_item_id` | UUID | Siempre `tipo='producto' \| 'receta' \| 'servicio'` |
-| `cantidad` | NUMERIC(18,4) | Por 1 unidad de combo; debe ser > 0 |
+| `cantidad` | NUMERIC(18,4) | Por 1 unidad de combo; debe ser > 0. Puede ser fraccionaria (0,5 kg): para sus grupos cuenta como `ceil(cantidad)` unidades ([grupos-modificadores.md](./grupos-modificadores.md) § "Componente fraccionario") |
 | `bloqueante` | BOOLEAN | Default `true` |
 | `creado_el` / `actualizado_el` / `eliminado_el` | TIMESTAMPTZ | Soft delete al reemplazar lista |
 

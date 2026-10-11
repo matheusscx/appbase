@@ -52,11 +52,60 @@ const RECETA: RecetaDetallePersonalizacion = {
   grupos: [],
 }
 
+const PAPAS = '22222222-2222-4222-8222-222222222222'
+const SALSA = '33333333-3333-4333-8333-333333333333'
+const GRUPO_SALSA = '44444444-4444-4444-8444-444444444444'
+
+/** El combo familiar: las papas, con salsa obligatoria, en la cantidad dada. */
+function comboConPapas(cantidad: string): RecetaDetallePersonalizacion {
+  return {
+    id: `combo-${cantidad}`,
+    nombre: 'Combo familiar',
+    precioBase: '6000',
+    monedaId: 'clp-1',
+    ingredientes: [],
+    extrasPermitidos: [],
+    grupos: [],
+    componentes: [
+      {
+        componenteItemId: PAPAS,
+        componenteNombre: 'Papas fritas',
+        tipo: 'receta',
+        cantidad,
+        grupos: [
+          {
+            grupoModificadorId: GRUPO_SALSA,
+            nombre: 'Salsa',
+            min: 1,
+            max: 1,
+            orden: 0,
+            opciones: [
+              {
+                grupoOpcionId: 'opcion-salsa',
+                itemId: SALSA,
+                itemNombre: 'Salsa',
+                tipo: 'producto',
+                cantidad: '1',
+                unidadCodigo: null,
+                precioExtra: '500',
+                orden: 0,
+                stock: null,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  }
+}
+
 mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
     if (typeof url === 'string' && url.endsWith('/items/receta-1')) {
       return Promise.resolve(structuredClone(RECETA))
     }
+    const combo = typeof url === 'string' && url.match(/\/items\/combo-(.+)$/)
+    if (combo) return Promise.resolve(comboConPapas(combo[1]!))
     return Promise.resolve([])
   }
 })
@@ -73,11 +122,20 @@ afterEach(() => {
  * monta CERRADO y se abre después: el `watch` que carga el ítem no es
  * `immediate`, igual que en la app.
  */
-async function montar() {
+async function montar(itemId = 'receta-1') {
   const w = await mountSuspended(ItemPersonalizacionDrawer, {
-    props: { itemId: 'receta-1', open: false },
+    props: { itemId, open: false },
     global: {
       stubs: {
+        // El grupo, stubeado: lo que se prueba es cuántas veces pregunta el
+        // drawer y qué manda, no el `USelectMenu` de adentro. Un click elige la
+        // única opción, como el garzón.
+        VentasItemPersonalizacionGrupo: {
+          name: 'VentasItemPersonalizacionGrupo',
+          props: ['grupo', 'seleccion'],
+          emits: ['update:seleccion'],
+          template: `<button class="elegir-opcion" @click="$emit('update:seleccion', { [grupo.opciones[0].itemId]: 1 })">elegir</button>`,
+        },
         AppDrawer: {
           name: 'AppDrawer',
           props: ['open'],
@@ -109,14 +167,24 @@ async function tipearUnidadesDelExtra(w: NonNullable<typeof wrapper>, valor: str
   await input.trigger('blur')
 }
 
-/** Confirma y devuelve lo que el drawer emitió: es lo que la pantalla manda al servidor. */
-async function confirmar(w: NonNullable<typeof wrapper>): Promise<PersonalizacionPayload> {
+function botonAgregar(w: NonNullable<typeof wrapper>) {
   const agregar = w.findAll('button').find(b => b.text().startsWith('Agregar'))
   expect(agregar, 'el botón Agregar').toBeDefined()
+  return agregar!
+}
+
+/** Confirma y devuelve lo que el drawer emitió: es lo que la pantalla manda al servidor. */
+async function confirmar(w: NonNullable<typeof wrapper>): Promise<PersonalizacionPayload> {
+  const agregar = botonAgregar(w)
   await agregar!.trigger('click')
   const emitido = w.emitted('confirm')
   expect(emitido, 'el drawer emitió confirm').toHaveLength(1)
   return (emitido![0] as [PersonalizacionPayload, string])[0]
+}
+
+/** El resumen que acompaña al `confirm`: es lo que la cuenta y el carrito muestran de la línea. */
+function resumenEmitido(w: NonNullable<typeof wrapper>): string {
+  return (w.emitted('confirm')![0] as [PersonalizacionPayload, string])[1]
 }
 
 describe('ItemPersonalizacionDrawer — tope de unidades de un extra', () => {
@@ -142,5 +210,48 @@ describe('ItemPersonalizacionDrawer — tope de unidades de un extra', () => {
 
     const payload = await confirmar(wrapper)
     expect(payload.extras).toEqual([{ ingredienteItemId: QUESO, unidades: 99 }])
+  })
+})
+
+// Una fracción de componente cuenta como unidad entera, redondeando hacia
+// arriba (owner, 2026-10-11). Gemelo del e2e `combos.e2e-spec.ts` 15 a 19: el
+// drawer contaba con `Number(cantidad)`, y Vue 3.5 no recorre un `v-for` sobre
+// 0,5 (en dev avisa y no pinta nada; en producción `new Array(0.5)` tira), así
+// que la salsa ni se ofrecía y el pedido salía sin ella.
+describe('ItemPersonalizacionDrawer — componente fraccionario de un combo', () => {
+  const salsaEn = (unidad: number) => ({
+    componenteItemId: PAPAS,
+    unidad,
+    grupos: [{ grupoId: GRUPO_SALSA, opciones: [{ itemId: SALSA, unidades: 1 }] }],
+  })
+
+  it('medio kilo pregunta una salsa: sin elegirla no se agrega, y elegida viaja como la unidad 1', async () => {
+    wrapper = await montar('combo-0.5000')
+    const elegir = wrapper.findAll('button.elegir-opcion')
+    expect(elegir).toHaveLength(1)
+    expect(botonAgregar(wrapper).attributes('disabled')).toBeDefined()
+
+    await elegir[0]!.trigger('click')
+    expect(botonAgregar(wrapper).attributes('disabled')).toBeUndefined()
+    // La salsa entra entera al precio que se muestra: 6.000 + 500.
+    expect(botonAgregar(wrapper).text()).toContain('6.500')
+    const payload = await confirmar(wrapper)
+    expect(payload.componentes).toEqual([salsaEn(1)])
+    expect(resumenEmitido(wrapper)).toContain('Papas fritas · Salsa: Salsa')
+  })
+
+  it('kilo y medio pregunta dos: con una sola no se agrega', async () => {
+    wrapper = await montar('combo-1.5000')
+    const elegir = wrapper.findAll('button.elegir-opcion')
+    expect(elegir).toHaveLength(2)
+    expect(wrapper.text()).toContain('Papas fritas #2')
+
+    await elegir[0]!.trigger('click')
+    expect(botonAgregar(wrapper).attributes('disabled')).toBeDefined()
+    await elegir[1]!.trigger('click')
+    expect(botonAgregar(wrapper).text()).toContain('7.000')
+    const payload = await confirmar(wrapper)
+    expect(payload.componentes).toEqual([salsaEn(1), salsaEn(2)])
+    expect(resumenEmitido(wrapper)).toContain('Papas fritas #2 · Salsa: Salsa')
   })
 })

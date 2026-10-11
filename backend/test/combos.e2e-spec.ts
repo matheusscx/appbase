@@ -5,6 +5,7 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
+import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import type { PersonalizacionRecetaSnapshot } from '../src/common/dto/personalizacion-receta.dto';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
@@ -719,5 +720,276 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
     expect(JSON.stringify(repetido.body)).toContain(
       'no puede aparecer más de una vez como componente',
     );
+  });
+
+  // Un componente de combo puede ser fraccionario (owner, 2026-10-08), y su
+  // personalización cuenta la fracción como una unidad entera, redondeando
+  // hacia arriba (owner, 2026-10-11): medio kilo de papas pide una salsa, kilo
+  // y medio pide dos, y la salsa se cobra entera. Hasta el arreglo el loop por
+  // unidad corría `u <= 0.5` → cero vueltas: la salsa obligatoria no se exigía
+  // y mandarla era 400 ("Unidad inválida"). Fixture propio: nada del seed.
+  describe('componente fraccionario', () => {
+    let papaId: string;
+    let salsaId: string;
+    let grupoSalsaId: string;
+    let papasFritasId: string;
+    let comboMedioId: string;
+    let comboUnoYMedioId: string;
+
+    const crearCombo = async (cantidad: string): Promise<string> => {
+      const res = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Combo familiar ${cantidad} ${marca}`,
+          precioBase: '6000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'combo',
+          componentes: [
+            { componenteItemId: papasFritasId, cantidad, bloqueante: true },
+          ],
+        });
+      expect(res.status).toBe(201);
+      return (res.body as ItemResponse).id;
+    };
+
+    /** La personalización con una salsa en cada una de las unidades pedidas. */
+    const conSalsaEn = (...unidades: number[]) => ({
+      componentes: unidades.map((unidad) => ({
+        componenteItemId: papasFritasId,
+        unidad,
+        grupos: [
+          {
+            grupoId: grupoSalsaId,
+            opciones: [{ itemId: salsaId, unidades: 1 }],
+          },
+        ],
+      })),
+    });
+
+    const vender = (
+      comboItemId: string,
+      personalizacion: Record<string, unknown>,
+      monto: string,
+    ) =>
+      request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: comboItemId, cantidad: '1', personalizacion }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto }],
+        });
+
+    const salidas = async (ventaId: string, itemId: string) => {
+      const rows: { total: string | null }[] = await ds.query(
+        `SELECT SUM(cantidad)::numeric(18,4)::text AS total
+           FROM movimientos_inventario
+          WHERE venta_id = $1 AND item_id = $2 AND tipo = 'salida'
+            AND eliminado_el IS NULL`,
+        [ventaId, itemId],
+      );
+      return rows[0]?.total ?? null;
+    };
+
+    beforeAll(async () => {
+      papaId = await crearIngrediente(
+        app,
+        token,
+        'Papa fracción',
+        '100',
+        '100',
+      );
+      salsaId = await crearProducto(app, token, 'Salsa fracción', '100', '100');
+
+      const resGrupo = await request(app.getHttpServer())
+        .post('/api/grupos-modificadores')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Salsa fracción ${marca}`,
+          opciones: [{ itemId: salsaId, cantidad: '1', precioExtra: '500' }],
+        });
+      expect(resGrupo.status).toBe(201);
+      grupoSalsaId = (resGrupo.body as { grupoModificadorId: string })
+        .grupoModificadorId;
+
+      const resReceta = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Papas fritas fracción ${marca}`,
+          precioBase: '3000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'receta',
+          ingredientes: [
+            {
+              ingredienteItemId: papaId,
+              cantidad: '1',
+              unidadCodigo: 'unidad',
+              bloqueante: true,
+            },
+          ],
+          gruposModificadores: [
+            { grupoModificadorId: grupoSalsaId, min: 1, max: 1 },
+          ],
+        });
+      expect(resReceta.status).toBe(201);
+      papasFritasId = (resReceta.body as ItemResponse).id;
+
+      comboMedioId = await crearCombo('0.5');
+      comboUnoYMedioId = await crearCombo('1.5');
+    });
+
+    it('15. medio kilo de papas sin la salsa obligatoria → 400', async () => {
+      // 6000 + 19% IVA = 7140: lo que valdría sin salsa si pasara.
+      const res = await vender(comboMedioId, { componentes: [] }, '7140.0000');
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain('requiere elegir entre 1 y 1');
+    });
+
+    it('16. medio kilo de papas con una salsa → 201, la salsa se cobra entera ($500, no $250) y sale una del stock', async () => {
+      const calculo = await request(app.getHttpServer())
+        .post('/api/calculo-precios/calcular')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [
+            {
+              itemId: comboMedioId,
+              cantidad: '1',
+              personalizacion: conSalsaEn(1),
+            },
+          ],
+        });
+      expect(calculo.status).toBe(201);
+      // (6000 + 500) + 19% IVA = 7735.
+      expect(
+        new Decimal(
+          (calculo.body as { totales: { totalFinal: string } }).totales
+            .totalFinal,
+        ).toFixed(4),
+      ).toBe('7735.0000');
+
+      const res = await vender(comboMedioId, conSalsaEn(1), '7735.0000');
+      expect(res.status).toBe(201);
+      const venta = res.body as VentaResponse;
+      expect(venta.estado).toBe('pagada');
+      expect(venta.totalFinal).toBe('7735.0000');
+
+      const [detalle]: {
+        personalizacion: PersonalizacionRecetaSnapshot | null;
+      }[] = await ds.query(
+        `SELECT personalizacion FROM venta_detalles
+          WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [venta.id],
+      );
+      expect(detalle.personalizacion?.componentes).toHaveLength(1);
+      expect(detalle.personalizacion?.componentes?.[0]?.unidad).toBe(1);
+
+      // La papa sale por la fracción; la salsa, entera: la que se cobró.
+      expect(await salidas(venta.id, papaId)).toBe('0.5000');
+      expect(await salidas(venta.id, salsaId)).toBe('1.0000');
+    });
+
+    it('17. una segunda unidad en medio kilo no existe → 400', async () => {
+      const res = await vender(comboMedioId, conSalsaEn(1, 2), '8330.0000');
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain('Unidad inválida');
+    });
+
+    it('18. kilo y medio pide dos salsas: con una es 400, con dos se cobran las dos y salen dos', async () => {
+      const conUna = await vender(comboUnoYMedioId, conSalsaEn(1), '7735.0000');
+      expect(conUna.status).toBe(400);
+      expect(JSON.stringify(conUna.body)).toContain(
+        'requiere elegir entre 1 y 1',
+      );
+
+      // (6000 + 500 + 500) + 19% IVA = 8330.
+      const res = await vender(comboUnoYMedioId, conSalsaEn(1, 2), '8330.0000');
+      expect(res.status).toBe(201);
+      const venta = res.body as VentaResponse;
+      expect(venta.totalFinal).toBe('8330.0000');
+      expect(await salidas(venta.id, papaId)).toBe('1.5000');
+      expect(await salidas(venta.id, salsaId)).toBe('2.0000');
+
+      const fueraDeRango = await vender(
+        comboUnoYMedioId,
+        conSalsaEn(1, 2, 3),
+        '8925.0000',
+      );
+      expect(fueraDeRango.status).toBe(400);
+      expect(JSON.stringify(fueraDeRango.body)).toContain('Unidad inválida');
+    });
+
+    it('19. en la mesa: medio kilo sin salsa no entra a la cuenta, con salsa entra y se cobra entera', async () => {
+      // Garzón, salón y mesa propios: la sesión es única por garzón y la del
+      // seed la comparten otras suites.
+      const post = async <T>(url: string, body: Record<string, unknown>) => {
+        const r = await request(app.getHttpServer())
+          .post(url)
+          .set('Authorization', `Bearer ${token}`)
+          .send(body);
+        expect(r.status).toBe(201);
+        return r.body as T;
+      };
+      const garzon = await post<{ id: string; pin: string }>('/api/garzones', {
+        nombre: `Garzón fracción ${marca}`,
+      });
+      await post('/api/sesiones-garzon/iniciar', {
+        garzonId: garzon.id,
+        pin: garzon.pin,
+        turnoId: TURNO_MANANA_ID,
+      });
+      try {
+        const salon = await post<{ id: string }>('/api/salones', {
+          nombre: `Salón fracción ${marca}`,
+        });
+        const mesa = await post<{ id: string }>(
+          `/api/salones/${salon.id}/mesas`,
+          { nombre: 'Mesa fracción' },
+        );
+        const cuenta = await post<{ id: string }>(
+          `/api/mesas/${mesa.id}/cuentas`,
+          { garzonId: garzon.id, pin: garzon.pin },
+        );
+
+        const agregar = (personalizacion: Record<string, unknown>) =>
+          request(app.getHttpServer())
+            .post(`/api/cuentas/${cuenta.id}/lineas`)
+            .set('Authorization', `Bearer ${token}`)
+            .send({ itemId: comboMedioId, cantidad: '1', personalizacion });
+
+        const sinSalsa = await agregar({ componentes: [] });
+        expect(sinSalsa.status).toBe(400);
+        expect(JSON.stringify(sinSalsa.body)).toContain(
+          'requiere elegir entre 1 y 1',
+        );
+        expect((await agregar(conSalsaEn(1))).status).toBe(201);
+
+        const cierre = await request(app.getHttpServer())
+          .post(`/api/cuentas/${cuenta.id}/cerrar`)
+          .set('Idempotency-Key', randomUUID())
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            garzonId: garzon.id,
+            pin: garzon.pin,
+            pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '7735.0000' }],
+          });
+        expect(cierre.status).toBe(201);
+        const ventaId = (cierre.body as { ventaId: string }).ventaId;
+        const [venta]: { estado: string; total_final: string }[] =
+          await ds.query(
+            `SELECT estado, total_final FROM ventas
+              WHERE venta_id = $1 AND eliminado_el IS NULL`,
+            [ventaId],
+          );
+        expect(venta).toEqual({ estado: 'pagada', total_final: '7735.0000' });
+        expect(await salidas(ventaId, salsaId)).toBe('1.0000');
+      } finally {
+        await request(app.getHttpServer())
+          .post('/api/sesiones-garzon/cerrar')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ garzonId: garzon.id, pin: garzon.pin });
+      }
+    });
   });
 });

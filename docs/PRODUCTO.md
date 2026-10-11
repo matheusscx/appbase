@@ -759,6 +759,13 @@ pudiendo ser distinta en cada una). Reglas:
   combo mismo ni curar qué grupos aplican.
 - **Por unidad, elecciones independientes.** El snapshot y el descuento de
   stock trackean cada (componente, unidad) por separado.
+- **Una fracción cuenta como unidad entera, redondeando hacia arriba**
+  (owner, 2026-10-11). Un componente puede ser fraccionario (medio kilo de
+  papas), y pregunta sus grupos `ceil(cantidad)` veces: 0,5 kg pide una salsa,
+  1,5 kg pide dos, y los obligatorios se exigen en cada una. El recargo se
+  cobra **entero** por unidad redondeada ($500 sobre el medio kilo, no $250), y
+  sale del stock la opción entera que se cobró. Descartados: prohibir opciones
+  en un componente fraccionario, y el recargo proporcional.
 - **Solo componentes receta.** Un componente `producto` puro no tiene grupos
   propios (los grupos solo se asocian a `receta` o `combo`).
 - **Un nivel de profundidad.** Combo → componente receta → sus grupos; no se
