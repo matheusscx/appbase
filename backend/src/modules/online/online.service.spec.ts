@@ -89,6 +89,7 @@ describe('OnlineService', () => {
       .mockImplementation((_t: string, ids: string[]) =>
         Promise.resolve(new Map(ids.map((id) => [id, itemBase(id)]))),
       ),
+    validarStockAlPedir: jest.fn().mockResolvedValue(undefined),
   };
   const catalog = {
     findAllUnidadesMedida: jest.fn().mockResolvedValue(UNIDADES),
@@ -272,6 +273,82 @@ describe('OnlineService', () => {
         service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dosLineas),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(pagosRedirect.iniciar).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Lo que ya no hay no se cobra (owner, 2026-10-11): la tienda revisa el
+   * stock con la regla del salón al pedir antes de mandar a Webpay. Al
+   * comprador le llega solo el nombre, no el saldo ni las bodegas.
+   */
+  describe('stock agotado', () => {
+    /** El 400 tal como lo arma `errorStockInsuficiente`. */
+    const agotado = () =>
+      items.validarStockAlPedir.mockRejectedValueOnce(
+        new BadRequestException({
+          message:
+            'Stock insuficiente de "Pisco" en el local: quedan 0 unidad y lo que se está agregando necesita 1 unidad — hay 4 unidad en Bodega Central',
+          itemId: 'pisco',
+          itemNombre: 'Pisco',
+          faltante: '1',
+          ubicaciones: [
+            { ubicacionId: 'b', nombre: 'Bodega Central', stock: '4' },
+          ],
+        }),
+      );
+
+    it('revisa todo el carrito de una vez, en la cantidad canónica y sin lock', async () => {
+      await service.checkout(TENANT_ID, {
+        lineas: [
+          { itemId: ITEM_ID, cantidad: '2' },
+          { itemId: '550e8400-e29b-41d4-a716-446655440117', cantidad: '1' },
+        ],
+      });
+
+      expect(items.validarStockAlPedir).toHaveBeenCalledTimes(1);
+      expect(items.validarStockAlPedir).toHaveBeenCalledWith(
+        TENANT_ID,
+        [
+          { itemId: ITEM_ID, cantidad: '2', personalizacion: null },
+          {
+            itemId: '550e8400-e29b-41d4-a716-446655440117',
+            cantidad: '1',
+            personalizacion: null,
+          },
+        ],
+        [],
+        { bloquear: false },
+      );
+    });
+
+    it('checkout: rechaza con el nombre y nada más, y no calcula', async () => {
+      agotado();
+      await expect(service.checkout(TENANT_ID, dto)).rejects.toThrow(
+        new BadRequestException('«Pisco» se agotó'),
+      );
+      expect(calculo.calcular).not.toHaveBeenCalled();
+    });
+
+    it('pagar con Webpay activo: no llega a crear la orden', async () => {
+      tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+      metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
+      agotado();
+
+      await expect(
+        service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dto),
+      ).rejects.toThrow('«Pisco» se agotó');
+      expect(pagosRedirect.iniciar).not.toHaveBeenCalled();
+    });
+
+    it('otro 400 de la revisión (sin `itemNombre`) pasa tal cual', async () => {
+      items.validarStockAlPedir.mockRejectedValueOnce(
+        new BadRequestException(
+          'No se puede verificar el stock de "Pisco": el ítem ya no está disponible en el catálogo',
+        ),
+      );
+      await expect(service.checkout(TENANT_ID, dto)).rejects.toThrow(
+        'No se puede verificar el stock de "Pisco": el ítem ya no está disponible en el catálogo',
+      );
     });
   });
 

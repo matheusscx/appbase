@@ -875,7 +875,7 @@ describe('Reserva de stock al pedir (e2e)', () => {
       // `sort` por `ingredienteItemId` que, siendo estable, deja el empate como
       // vino: la base ANTES que el extra—. Si ese empate se invirtiera, el extra
       // (no bloqueante) se comería la única unidad y la base (bloqueante)
-      // reventaría con 'Stock insuficiente para la salida': el `POST` seguiría
+      // reventaría por falta de stock: el `POST` seguiría
       // dando 201 y la mesa quedaría trabada al cobrar, que es exactamente el
       // bug que este describe vino a cerrar. Verificado con el mutante
       // (`[...extras, ...fijos]`): sin esta línea el test queda verde, con ella

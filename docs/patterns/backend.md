@@ -1497,7 +1497,8 @@ el orden del layout).
 sobre `stock_ubicacion` directamente — es el contrato de esta sección, no una lista
 cerrada de sitios. `InventarioService.registrarMovimiento` (el chokepoint de todo
 movimiento de stock) y `ItemsService.validarStockAlPedir` son los dos que **leen** saldo
-bajo ese lock; `TrasladosService.crearEnTransaccion` lo toma igual y además es el único
+bajo ese lock (este último salvo con `bloquear: false`, el chequeo de la tienda antes de
+Webpay, que no escribe nada después y por eso no lockea); `TrasladosService.crearEnTransaccion` lo toma igual y además es el único
 que antes encadena un `FOR SHARE` sobre `motivo_traslado`
 (`MotivosTrasladoService.assertMotivoActivo`) para que el borrado del motivo lo espere.
 Sumale los sitios preexistentes que ya tomaban `FOR UPDATE` directo sobre la fila de

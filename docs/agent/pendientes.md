@@ -96,6 +96,24 @@ destapa una decisión que no es mía).
   request deja abierta la página del POS (un `networkidle` que nunca llega suele ser un polling o
   un stream). No bloquea la integración.
 
+- [ ] **El mostrador vende lo que una mesa ya apartó** (backend, `ventas.service.ts` → el
+  chokepoint `InventarioService.registrarMovimiento`; anotado el 2026-10-11 por el frente "la tienda
+  revisa el stock antes de Webpay", a pedido del owner vía la orquestadora; **leído, no medido**).
+  La venta directa del POS descuenta contra el saldo del local y no resta lo comprometido por las
+  cuentas abiertas del salón (`comprometidoPorItem`). Escena: queda una botella, la mesa 4 la
+  pidió y no la cobró, y el cajero la vende en el mostrador: la venta entra y la mesa 4 no puede
+  cobrar esa línea. La tienda, desde ese frente, sí respeta lo apartado (owner, 2026-10-11), así
+  que hoy son dos reglas. **Medir:** reproducirlo por API (mesa con la última unidad + `POST
+  /ventas` de esa unidad) y ver qué ve la mesa al cerrar; qué hacer es del owner (§ 4).
+
+- [ ] **Un lote con saldo solo vencido pasa el chequeo de stock y la venta lo rechaza** (backend,
+  `ItemsService.validarStockAlPedir`; anotado el 2026-10-11 por el mismo frente; **leído, no
+  medido**). El chequeo lee `stock_ubicacion`, que suma los lotes vencidos
+  (`recalcularStockLote`), y la venta los salta (`MOTIVOS_QUE_SALTAN_VENCIDOS`). En la tienda eso
+  es un carrito que se cobra y queda pagado sin venta; en el salón, una mesa que pide y no puede
+  cobrar. **Medir** con un producto por lote cuyo único lote venció ayer, por la tienda y por una
+  cuenta.
+
 - [ ] **Los ~40 campos `@EsMontoCobrado` no tienen techo: un monto que no cabe en su columna llega
   al `INSERT`** (backend, DTOs con `@EsMontoCobrado()`; anotado el 2026-10-09 por el frente que cerró
   los seis 500 del monto suelto de caja y pagos; **leído, no medido** salvo esos seis). Ese frente le
@@ -428,64 +446,6 @@ fiscal y va solo:
   - Las cuatro preguntas que quedaron sin contestar: el estado de la venta (¿solo `pagada`?), una
     orden con un reembolso parcial previo, si se puede desligar, y la fiscal, que va aparte: con
     `venta_id` escrito, un reembolso posterior emite la nota de crédito sobre la venta manual.
-
-- [ ] **La tienda cobra un producto que ya no hay: revisar el stock antes de mandarla a Webpay**
-  (backend + producto; análisis de la orquestadora sobre "vale lo que pagó" (`fb779b2b`), anotado a
-  pedido del owner; **medido el 2026-10-11** con
-  [`tienda-dos-ahoras.e2e-spec.ts`](../../backend/test/tienda-dos-ahoras.e2e-spec.ts) → *"lo que A
-  no cubre: el stock se acaba mientras el comprador está en Webpay"*, que fija la conducta de hoy).
-  Con "vale lo que pagó" el precio ya no cambia entre el pago y el retorno, pero el stock sí: baja
-  recién cuando el callback crea la venta, y `POST /online/pagar` no lo mira (ni el motor ni
-  `prepararLineasCheckout` leen stock). La grilla de la tienda no deja agregar un agotado, pero el
-  carrito vive en el navegador y nadie lo vuelve a mirar al cobrar.
-  - **Lo medido** (Paris, productos de $1.000 y recetas de $3.000, + IVA; el local vende la unidad
-    por `POST /ventas`):
-
-    | Caso | Webpay cobra | Al volver |
-    |---|---|---|
-    | producto por cantidad, stock 1, el local lo vende **mientras** está en Webpay | $1.190 | **pagada sin venta** |
-    | el mismo, pero el local lo vendió **antes** de que pagara (carrito viejo) | $1.190 | **pagada sin venta** |
-    | producto por lote, un lote de 1 | $1.190 | **pagada sin venta** |
-    | receta con un insumo **bloqueante** que se acaba | $3.570 | **pagada sin venta** |
-    | receta con un insumo **no bloqueante** que se acaba | $3.570 | venta creada, **sin descontar el insumo** (igual que en el POS) |
-
-    En los cuatro sin venta queda el aviso de D (el comprador lo ve, el admin lo encuentra en
-    Órdenes) y la plata vuelve con el reembolso manual. **`modo_inventario` no ofrece un producto
-    sin control de stock:** los modos son `cantidad`, `lote` y `serie`, ninguno deja el stock
-    negativo en una venta, y `serie` ya no se vende online. De paso: el motivo de la receta con
-    insumo bloqueante es el genérico *"Stock insuficiente para la salida"*, sin nombrar el insumo
-    (el de producto sí lo nombra); el admin no sabe qué faltó.
-  - **La pregunta para el owner.** Escena: te queda **una** botella de pisco de $11.900. Una
-    clienta la agrega al carrito de la tienda y se va a pagar con Webpay. Mientras tanto —en el
-    minuto que está en Webpay, o en la hora que dejó el carrito abierto— el cajero vende esa botella
-    en el mostrador. Webpay le cobra los $11.900, la tienda no puede registrar la venta, ella ve
-    *"Recibimos tu pago pero no pudimos registrar la compra"* y vos tenés que devolverle la plata a
-    mano desde Órdenes. ¿Qué querés que pase?
-    1. **Revisar el stock justo antes de mandarla a Webpay** (recomendada): si ya no hay, la tienda
-       le dice *"«Pisco» se agotó"* y no le cobra nada. Costo: chico —un chequeo más en el mismo
-       lugar que el del producto pausado, mirando también los insumos de recetas y combos, como ya
-       hace el salón al pedir—. Cubre el carrito viejo, que es el caso más probable. **No** cubre el
-       minuto en que ella está en Webpay: ese sigue terminando en pago sin venta y reembolso manual.
-    2. **Apartar la botella mientras ella está en Webpay:** el mostrador la ve agotada y no la puede
-       vender; si ella abandona el pago, la botella vuelve sola a los N minutos. Costo: el más caro
-       —un estado nuevo de stock, decidir los N minutos, qué pasa si Webpay aprueba después de que
-       venció el apartado, y un mostrador que ve menos stock mientras alguien duda en Webpay—.
-       Cubre los dos casos.
-    3. **Dejarlo como está:** pago sin venta, aviso y reembolso manual. Costo de construir: cero.
-       El costo lo paga la clienta (cobrada y devuelta días después) y vos (el reembolso a mano).
-
-    Vender igual dejando el stock en negativo no va en la lista: rompe que una venta nunca deja el
-    stock bajo cero.
-  - ✅ **Decidido (owner, 2026-10-11, por AskUserQuestion de la orquestadora, con una escena
-    equivalente —el "Vino Reserva" agotado entre que el cliente lo agrega y paga— y el costo de las
-    tres opciones; eligió la recomendada): 1, revisar el stock justo antes de mandarla a Webpay.**
-    No pidió investigación de mercado. Si no hay, 400 con el nombre del producto (o del insumo
-    bloqueante) y sin orden creada, en `prepararLineasCheckout` junto a los guards de pausado,
-    `serie` e ingrediente. El minuto en Webpay sigue con el aviso de D y el reembolso manual, y
-    apartar quedó descartado. **Es lectura de stock, no escritura** (no toca
-    `movimientos_inventario`). Los casos medidos de arriba se dan vuelta a propósito: el carrito
-    viejo da 400; el que se agota *durante* Webpay sigue sin venta. Mejorar de paso el motivo
-    genérico *"Stock insuficiente para la salida"* para que nombre el insumo.
 
 ## 4. Necesita que el owner conteste
 

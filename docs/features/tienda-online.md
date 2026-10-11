@@ -144,13 +144,13 @@ qué quiere, no cuánto vale. El canal en la venta es `ventaCongelada`, ver
 
 **Lo que A no cubre** es lo que no es plata, que sigue vivo al retorno: un ítem borrado entre el pago
 y el retorno deja la orden `pagada` sin venta, con el aviso de abajo y el reembolso manual (medido
-en el e2e). El stock tampoco se congela, y `pagar` no lo mira: si el producto se agota antes del
-retorno —o ya estaba agotado cuando el carrito, viejo, se pagó—, la orden queda `pagada` sin venta
-por el mismo camino (medido el 2026-10-11 con producto por cantidad y por lote, y con una receta
-de insumo bloqueante; con insumo no bloqueante la venta se crea sin descontarlo, como en el POS).
-Qué hacer con eso es una pregunta abierta del owner en [`pendientes.md`](../agent/pendientes.md)
-§ 4. Tampoco entra una orden creada antes del deploy y resuelta después (no trae
-congelado): falla igual y no se recalcula.
+en el e2e). El stock tampoco se congela: `pagar` lo revisa antes de mandar a Webpay (abajo, *Lo
+que ya no hay no se cobra*), pero si el producto se agota **mientras** el comprador está en Webpay,
+la orden queda `pagada` sin venta por el mismo camino (medido el 2026-10-11 con producto por
+cantidad y por lote, y con una receta de insumo bloqueante, cuyo motivo nombra el insumo; con
+insumo no bloqueante la venta se crea sin descontarlo, como en el POS). Apartar el stock durante
+el pago quedó descartado (owner, 2026-10-11). Tampoco entra una orden creada antes del deploy y
+resuelta después (no trae congelado): falla igual y no se recalcula.
 
 **El nombre de la boleta es el de cuando se pagó** (2026-10-11). Si el producto se renombra mientras
 el comprador está en Webpay, o antes de que `verificar` cree la venta, la línea (`descripcion`) y
@@ -207,6 +207,26 @@ solo en el local"* **antes** de iniciar el pago, así que no queda orden creada.
 callback, con el cobro hecho. El catálogo no los ofrece; un carrito armado a mano que lo traiga
 junto a otra línea rebota en el checkout con *"«Nombre» es un ingrediente: no se vende
 directamente"*, también antes de iniciar el pago.
+
+**Lo que ya no hay no se cobra** (owner, 2026-10-11). El carrito vive en el navegador y el stock
+baja recién cuando el callback crea la venta, así que un carrito viejo —agotado entre que se armó
+y que se paga— terminaba cobrado en Webpay y con la orden pagada sin venta. Ahora
+`prepararLineasCheckout` (checkout y pagar, Webpay y demo) revisa el carrito entero con la regla del
+salón al pedir, `ItemsService.validarStockAlPedir`: lo **bloqueante** de productos (por cantidad y
+por lote), de los insumos de recetas y de los componentes de combos, contra el saldo del **local**
+**menos lo que las cuentas abiertas del salón ya apartaron**. Si no alcanza, 400 *"«Nombre» se
+agotó"* —el producto, o el insumo que faltó— antes de iniciar el pago, sin orden. El comprador lee
+solo el nombre: cuánto queda y en qué bodega es del local. Lo no bloqueante no frena, igual que en
+el POS.
+
+- **Más estricta que la venta, a propósito** (owner, 2026-10-11, entre "gemela de la venta" y
+  "respetar lo apartado"): si una mesa pidió la última botella y no la cobró, la tienda dice que
+  se agotó. El mostrador, en cambio, sí se la lleva (abierto en
+  [`pendientes.md`](../agent/pendientes.md) § 2).
+- **Sin lock** (`bloquear: false`): no se escribe nada después, y lo que descuenta de verdad es la
+  venta del callback, bajo su propio lock.
+- **No cubre** el minuto en Webpay (sigue en D, arriba) ni un lote cuyo único saldo está vencido:
+  el chequeo lee el saldo del local, que lo cuenta, y la venta lo salta.
 
 Aun así el checkout lo revalida, y no es redundante: el carrito vive en el navegador,
 así que el ítem se puede pausar **después** de que el cliente lo agregó.

@@ -111,6 +111,26 @@ function resolverContexto(ctx: ContextoConsumo): ContextoResuelto {
   };
 }
 
+/**
+ * Falta de stock en una salida por cantidad, dicha de cualquiera de las dos
+ * formas: el genérico del chokepoint (`moverCantidad`) o el que
+ * `moverConsumoOSaltear` re-arma con el nombre del insumo bloqueante
+ * (`errorStockInsuficiente`, el único que lleva `faltante`). Quien degrada un
+ * faltante a advertencia tiene que reconocer las dos: si no, un insumo
+ * bloqueante adentro de un componente NO bloqueante de un combo abortaría la
+ * venta en vez de omitir el componente.
+ */
+function esFaltaDeStockEnCantidad(error: unknown): boolean {
+  if (!(error instanceof BadRequestException)) return false;
+  if (error.message === 'Stock insuficiente para la salida') return true;
+  const respuesta = error.getResponse();
+  return (
+    typeof respuesta === 'object' &&
+    respuesta !== null &&
+    'faltante' in respuesta
+  );
+}
+
 /** El mismo contexto ya resuelto, reempaquetado para pasarlo a una llamada
  * anidada (`venderIngredientesReceta` → `venderOpcionesGrupos`, etc.) sin
  * volver a bifurcar por `motivo`. */
@@ -4322,8 +4342,9 @@ export class ItemsService {
    * vieja solo llegaba a uno de los tres).
    *
    * - **Venta** (`enAnulacion` false, dentro de `ContextoResuelto`): un
-   *   ingrediente/componente bloqueante deja que 'Stock insuficiente para la
-   *   salida' aborte toda la venta (sin try/catch, gratis). Uno no bloqueante
+   *   ingrediente/componente bloqueante sin stock aborta toda la venta; el
+   *   genérico 'Stock insuficiente para la salida' del chokepoint se re-arma
+   *   con el nombre del insumo (desde el 2026-10-11). Uno no bloqueante
    *   degrada esa misma excepción a advertencia y NO escribe nada — todo o
    *   nada, sin cambios de comportamiento.
    * - **Anulación** (owner, ronda de fixes 1): bloqueante y no bloqueante se
@@ -4357,22 +4378,45 @@ export class ItemsService {
       unidadMedida: string | null | (() => Promise<string | null>);
     },
   ): Promise<{ advertencia: string | null; sirvioAlgo: boolean }> {
+    const resolverUnidad = async () =>
+      typeof opciones.unidadMedida === 'function'
+        ? await opciones.unidadMedida()
+        : opciones.unidadMedida;
+
     if (!opciones.enAnulacion && opciones.bloqueante) {
-      await this.inventarioService.registrarMovimiento(
-        manager,
-        movimientoParams,
-      );
+      try {
+        await this.inventarioService.registrarMovimiento(
+          manager,
+          movimientoParams,
+        );
+      } catch (error) {
+        // El chokepoint rechaza con el genérico "Stock insuficiente para la
+        // salida" porque no sabe qué insumo de qué plato lo llamó; acá sí. Se
+        // re-arma con el mismo enriquecido que el producto suelto en
+        // `ventas.service.ts` —nombre, cuánto queda en el local y dónde hay—,
+        // para que el admin sepa qué faltó (el motivo de una orden de la
+        // tienda pagada sin venta lo mostraba pelado). Solo ese mensaje: el
+        // de lotes ya habla de unidades concretas y se deja pasar.
+        if (
+          error instanceof BadRequestException &&
+          error.message === 'Stock insuficiente para la salida'
+        ) {
+          throw await this.errorStockInsuficienteEnLocal(
+            movimientoParams.tenantId,
+            movimientoParams.itemId,
+            opciones.itemNombre,
+            new Decimal(movimientoParams.cantidad),
+            (await resolverUnidad()) ?? '',
+          );
+        }
+        throw error;
+      }
       return { advertencia: null, sirvioAlgo: true };
     }
 
     const paramsEnvio = opciones.enAnulacion
       ? { ...movimientoParams, permiteSalidaParcial: true }
       : movimientoParams;
-
-    const resolverUnidad = async () =>
-      typeof opciones.unidadMedida === 'function'
-        ? await opciones.unidadMedida()
-        : opciones.unidadMedida;
 
     try {
       const mov = await this.inventarioService.registrarMovimiento(
@@ -4680,8 +4724,7 @@ export class ItemsService {
           if (
             !ctx.enAnulacion &&
             !comp.bloqueante &&
-            error instanceof BadRequestException &&
-            error.message === 'Stock insuficiente para la salida'
+            esFaltaDeStockEnCantidad(error)
           ) {
             advertencias.push(
               `${params.comboNombre}: no había stock suficiente de ${comp.componente_nombre}, se vendió sin ese componente`,
@@ -5441,9 +5484,11 @@ export class ItemsService {
    *    cuando no hay transacción en el contexto (ALS, ver `db.service.ts`): sin
    *    transacción, el lock del statement 2 se suelta al terminar su
    *    transacción implícita y el saldo del 2b se lee sin lock, o sea con el
-   *    guard apagado y en silencio. Hoy los dos llamadores
+   *    guard apagado y en silencio. Hoy los dos llamadores que lockean
    *    (`SalonesService.agregarLinea` y el de editar línea) abren
-   *    `db.transaccion`; el llamador que se agregue mañana también tiene que.
+   *    `db.transaccion`; el llamador que se agregue mañana también tiene que,
+   *    salvo que no escriba nada después y pase `bloquear: false` (la tienda,
+   *    ver abajo).
    * 3. Recién **después** del lock se lee el comprometido. El orden es
    *    load-bearing: bajo READ COMMITTED, la consulta que corre después de
    *    esperar el lock ve la línea que la otra transacción acababa de
@@ -5457,11 +5502,23 @@ export class ItemsService {
    * (`ventas.service.ts` → "Los ingredientes no se pueden vender
    * directamente"). Es otro camino a la mesa trabada, preexistente y ajeno a
    * esta feature: acá el ingrediente se reserva como cualquier otro consumo.
+   *
+   * ## `bloquear: false`: la tienda online, antes de mandar a Webpay
+   *
+   * `OnlineService.prepararLineasCheckout` usa esta misma regla —lo bloqueante
+   * de productos, recetas y combos contra el saldo del local menos lo que las
+   * mesas ya apartaron (owner, 2026-10-11)— para no cobrar un carrito que ya no
+   * se puede vender. Ahí no se escribe nada después: el chequeo solo avisa, y lo
+   * que de verdad descuenta es la venta del callback, minutos más tarde y bajo
+   * su propio lock. Tomar el `FOR UPDATE` no compraría nada y el checkout no
+   * corre en una transacción, así que la precondición de arriba no aplica: sin
+   * lock, el statement 2 lee lo mismo y no encola a nadie.
    */
   async validarStockAlPedir(
     tenantId: string,
     lineasNuevas: LineaConsumo[],
     lineasPrevias: LineaConsumo[] = [],
+    { bloquear = true }: { bloquear?: boolean } = {},
   ): Promise<void> {
     const consumoNuevo = await this.consumoDeLineas(tenantId, lineasNuevas);
     // Segunda expansión, también ANTES del lock: no lee stock, así que alargar
@@ -5555,7 +5612,7 @@ export class ItemsService {
           AND i.tenant_id = $2
           AND i.eliminado_el IS NULL
         ORDER BY ip.item_id
-        FOR UPDATE OF ip`,
+        ${bloquear ? 'FOR UPDATE OF ip' : ''}`,
       [ids, tenantId],
     );
     const stockPorItem = new Map(stockRows.map((r) => [r.item_id, r]));

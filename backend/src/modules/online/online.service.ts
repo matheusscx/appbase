@@ -434,6 +434,46 @@ export class OnlineService {
       });
     }
 
+    // Lo que ya no hay no se cobra (owner, 2026-10-11). El carrito vive en el
+    // navegador y el stock baja recién cuando el callback crea la venta: un
+    // producto agotado entre que se agregó y que se paga terminaba cobrado en
+    // Webpay y con la orden pagada sin venta (medido en
+    // `tienda-dos-ahoras.e2e-spec.ts`). Es la regla del salón al pedir —lo
+    // bloqueante de productos, recetas y combos contra el saldo del local—, y
+    // por decisión del owner también respeta lo que las mesas ya apartaron, así
+    // que es más estricta que la venta: el mostrador sí se lleva lo apartado.
+    // No cubre el minuto en Webpay: eso sigue en el aviso de la orden sin venta.
+    //
+    // El comprador lee el nombre y nada más: cuánto queda y en qué bodega es
+    // información del local, no suya. Se corta ANTES de `pagosRedirect.iniciar`,
+    // sin orden.
+    try {
+      await this.itemsService.validarStockAlPedir(
+        tenantId,
+        lineasSnapshot.map((l) => ({
+          itemId: l.itemId,
+          cantidad: l.cantidad,
+          personalizacion: null,
+        })),
+        [],
+        { bloquear: false },
+      );
+    } catch (e) {
+      const respuesta =
+        e instanceof BadRequestException ? e.getResponse() : null;
+      // `itemNombre` es el dato suelto de `errorStockInsuficiente`: se lee de
+      // ahí y no del `message`, que trae el saldo y las bodegas.
+      if (
+        respuesta !== null &&
+        typeof respuesta === 'object' &&
+        'itemNombre' in respuesta &&
+        typeof respuesta.itemNombre === 'string'
+      ) {
+        throw new BadRequestException(`«${respuesta.itemNombre}» se agotó`);
+      }
+      throw e;
+    }
+
     return {
       // `cuentaId` NUNCA se reenvía tal cual llegó del cliente: `CalcularVentaDto`
       // lo declara opcional para la previsualización de salón (que no cobra), y

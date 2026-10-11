@@ -501,7 +501,9 @@ liberar. El porqué completo de los tres enfoques está en la
 [spec](../superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md) § 3.
 
 **Dos puertas crean compromiso, y las dos están topeadas** — `ItemsService.validarStockAlPedir`
-es el único guard y lo llaman las dos:
+es el único guard y lo llaman las dos (desde el 2026-10-11 lo llama también la tienda antes de
+Webpay, con `bloquear: false`: lee el mismo tope sin crear compromiso,
+[`tienda-online.md`](tienda-online.md)):
 
 | Camino | Qué valida |
 |---|---|

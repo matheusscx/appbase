@@ -172,7 +172,7 @@ el ítem y rechaza. Patrón y orden de locks:
 
 ### POST /ventas (línea con item tipo receta)
 
-Por cada unidad vendida, un movimiento de salida por ingrediente (cantidad convertida). Bloqueante sin stock → error `'Stock insuficiente para la salida'` aborta la transacción. No bloqueante: se captura solo ese mensaje y se agrega a `advertencias` en la respuesta (sin pre-chequeo racey).
+Por cada unidad vendida, un movimiento de salida por ingrediente (cantidad convertida). Bloqueante sin stock → aborta la transacción con el mismo 400 que un producto suelto, que nombra el insumo (*"Stock insuficiente de "X" en el local: quedan… y lo que se está agregando necesita…"*, y la bodega con saldo si hay; hasta el 2026-10-11 era el genérico `'Stock insuficiente para la salida'`). No bloqueante: se captura el genérico del chokepoint y se agrega a `advertencias` en la respuesta (sin pre-chequeo racey); un componente de combo no bloqueante reconoce también el enriquecido (`esFaltaDeStockEnCantidad`).
 
 ---
 

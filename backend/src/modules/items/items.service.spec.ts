@@ -5391,10 +5391,18 @@ describe('ItemsService', () => {
       inventarioServiceMock.registrarMovimiento.mockRejectedValueOnce(
         new BadRequestException('Stock insuficiente para la salida'),
       );
+      // El saldo del local y las bodegas con saldo, que lee el 400 enriquecido.
+      dataSource.query
+        .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([]);
 
+      // El genérico del chokepoint no dice qué insumo faltó: se re-arma con
+      // el nombre, igual que el de un producto suelto en la venta.
       await expect(
         service.venderIngredientesReceta(managerMock as any, PARAMS),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(
+        'Stock insuficiente de "Carne" en el local: quedan 0 kg y lo que se está agregando necesita 0.3 kg',
+      );
     });
 
     it('en anulación (motivo merma), un ingrediente bloqueante en modo serie/lote sin stock se saltea y avisa el faltante completo, sin abortar', async () => {
@@ -6219,6 +6227,9 @@ describe('ItemsService', () => {
         .mockRejectedValue(
           new BadRequestException('Stock insuficiente para la salida'),
         );
+      dataSource.query
+        .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([]);
 
       await expect(
         service.venderComponentesCombo(managerMock as any, {
@@ -6230,7 +6241,7 @@ describe('ItemsService', () => {
           comboNombre: 'Combo',
           cantidadVendida: '1',
         }),
-      ).rejects.toThrow('Stock insuficiente para la salida');
+      ).rejects.toThrow('Stock insuficiente de "Papas" en el local');
     });
 
     it('componente receta NO bloqueante sin disponible suficiente → pre-chequeo omite el llamado (cero escrituras)', async () => {
@@ -6397,6 +6408,52 @@ describe('ItemsService', () => {
         }),
       );
       expect(advertencias).toEqual([]);
+    });
+
+    it('componente receta NO bloqueante cuyo insumo bloqueante se acaba en la carrera → se omite aunque el 400 ya nombre el insumo', async () => {
+      // El pre-chequeo vio stock y entre medio otra venta se lo llevó: el
+      // insumo bloqueante de la receta rechaza, y desde que ese rechazo nombra
+      // el insumo (`moverConsumoOSaltear`) ya no es el genérico. El componente
+      // sigue siendo no bloqueante: se omite con advertencia, no aborta.
+      managerMock.query.mockResolvedValueOnce([
+        {
+          componente_item_id: 'receta-uuid',
+          componente_nombre: 'Hamburguesa',
+          tipo: 'receta',
+          cantidad: '1',
+          bloqueante: false,
+        },
+      ]);
+      jest
+        .spyOn(service as any, 'calcularDisponibleReceta')
+        .mockResolvedValueOnce(5);
+      jest.spyOn(service, 'venderIngredientesReceta').mockRejectedValueOnce(
+        new BadRequestException({
+          message:
+            'Stock insuficiente de "Carne" en el local: quedan 0 kg y lo que se está agregando necesita 0.15 kg',
+          itemId: 'carne',
+          itemNombre: 'Carne',
+          faltante: '0.15',
+          ubicaciones: [],
+        }),
+      );
+
+      const advertencias = await service.venderComponentesCombo(
+        managerMock as any,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          ventaDetalleId: 'detalle-uuid',
+          comboItemId: COMBO_NO_BLOQ_ID,
+          comboNombre: 'Combo',
+          cantidadVendida: '1',
+        },
+      );
+
+      expect(advertencias).toEqual([
+        'Combo: no había stock suficiente de Hamburguesa, se vendió sin ese componente',
+      ]);
     });
 
     it('componente receta NO bloqueante con disponible=null (sin ingredientes bloqueantes) → procede normalmente', async () => {
@@ -6803,6 +6860,9 @@ describe('ItemsService', () => {
         .mockRejectedValue(
           new BadRequestException('Stock insuficiente para la salida'),
         );
+      dataSource.query
+        .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([]);
       managerMock.query.mockResolvedValueOnce([
         { tipo: 'producto', unidad_medida: 'unidad' },
       ]);
@@ -6834,7 +6894,7 @@ describe('ItemsService', () => {
             },
           ],
         ),
-      ).rejects.toThrow('Stock insuficiente para la salida');
+      ).rejects.toThrow('Stock insuficiente de "Coca" en el local');
     });
 
     it('en anulación (motivo merma), una opción sin stock no aborta: avisa el faltante en vez de propagar', async () => {
@@ -8054,6 +8114,29 @@ describe('ItemsService', () => {
       // El soft delete: `item_producto` no tiene la columna, así que el filtro
       // solo puede vivir en el JOIN al padre.
       expect(sql).toContain('i.eliminado_el IS NULL');
+    });
+
+    it('con `bloquear: false` (la tienda antes de Webpay) no lockea, pero topea igual contra lo apartado', async () => {
+      // 3 físicos, 2 apartados por una mesa, la tienda pide 2: no alcanza.
+      mockearPedidoDeProducto({ stock: '3', comprometido: '2' });
+
+      await expect(
+        service.validarStockAlPedir(
+          TENANT,
+          [{ itemId: PAPAS, cantidad: '2', personalizacion: null }],
+          [],
+          { bloquear: false },
+        ),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ itemNombre: NOMBRE }),
+      });
+
+      const sqls = dataSource.query.mock.calls.map((c) => c[0] as string);
+      const filaDeStock = sqls.find((sql) =>
+        sql.includes('FROM item_producto ip'),
+      );
+      expect(filaDeStock).toBeDefined();
+      expect(filaDeStock).not.toContain('FOR UPDATE');
     });
 
     it('rechaza cuando lo comprometido más lo pedido pasa el stock, y nombra el ítem', async () => {
