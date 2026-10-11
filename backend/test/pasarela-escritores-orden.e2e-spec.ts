@@ -12,7 +12,9 @@ import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import { ProviderFactory } from '../src/modules/pasarela/providers/provider.factory';
 import { ProviderComunicacionError } from '../src/modules/pasarela/providers/payment-provider.interface';
 import { OnlineCallbackHandler } from '../src/modules/online/online-callback.handler';
-import type { PasarelaOrden } from '../src/modules/pasarela/entities/pasarela-orden.entity';
+import { TransaccionesService } from '../src/modules/pasarela/services/transacciones.service';
+import { PasarelaOrden } from '../src/modules/pasarela/entities/pasarela-orden.entity';
+import { VENTANA_COBRO_SIN_CONFIRMAR_MS } from '../src/modules/pasarela/services/cobros.service';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris: Webpay Plus activo (seed)
 const CLP = '550e8400-e29b-41d4-a716-446655440003';
@@ -617,6 +619,252 @@ describe('Pasarela: los escritores de la orden no pisan lo que otro resolvió (e
       } finally {
         await new Promise((r) => servidor.close(r));
       }
+    });
+  });
+
+  /**
+   * El retorno reclama la orden (`en_proceso` → `procesando`) en su propio
+   * commit, antes de llamar a Transbank. Si no llega a compensar, nadie la
+   * sacaba de `procesando`: `verificar` respondía 400, el cron y la
+   * expiración perezosa no la miran y no se puede reembolsar, aunque el cargo
+   * pudo salir (pendientes.md § 2, 2026-10-11). Tres caminos: un error de
+   * base en la lectura que seguía al claim, la compensación que falla, y el
+   * proceso que muere en el medio.
+   */
+  describe('el retorno que reclamó la orden y no llegó a compensar', () => {
+    const retornar = async (ordenId: string) => {
+      const { token_proveedor } = await ordenDe(ordenId);
+      return request(app.getHttpServer()).get(
+        `/api/pasarela/retorno/pago?token_ws=${token_proveedor}`,
+      );
+    };
+    const verificarCrudo = (ordenId: string) =>
+      request(app.getHttpServer())
+        .post(`/api/pasarela/api/ordenes/${ordenId}/verificar`)
+        .set('Authorization', `Bearer ${apiKey}`);
+    /** El reloj, no el estado: la última escritura de la orden fue hace `ms`. */
+    const tocadaHace = (ordenId: string, ms: number) =>
+      ds.query(
+        `UPDATE pasarela_ordenes
+            SET actualizado_el = now() - ($2 || ' milliseconds')::interval
+          WHERE orden_id = $1`,
+        [ordenId, String(ms)],
+      );
+    /** La compensación (`procesando` → `en_proceso`) falla una vez. */
+    const compensacionQueFalla = () => {
+      const repo = ds.getRepository(PasarelaOrden);
+      const original = repo.update.bind(repo);
+      return jest
+        .spyOn(repo, 'update')
+        .mockImplementation((criterio, cambios) =>
+          (cambios as { estado?: string }).estado === 'en_proceso'
+            ? Promise.reject(new Error('conexión perdida (e2e)'))
+            : original(criterio, cambios),
+        );
+    };
+    const autorizacionesAprobadas = async (ordenId: string) => {
+      const [fila]: { n: string }[] = await ds.query(
+        `SELECT count(*) AS n FROM pasarela_transacciones
+          WHERE orden_id = $1 AND tipo = 'AUTHORIZATION'
+            AND estado = 'aprobada' AND eliminado_el IS NULL`,
+        [ordenId],
+      );
+      return Number(fila.n);
+    };
+
+    it('(a) la base falla al leer la orden del token: no queda procesando', async () => {
+      const ordenId = await pagarPorLlave();
+      jest
+        .spyOn(ds.getRepository(PasarelaOrden), 'findOne')
+        .mockRejectedValueOnce(new Error('conexión perdida (e2e)'));
+
+      const retorno = await retornar(ordenId);
+
+      expect(retorno.status).toBe(500);
+      expect(confirmarPago).not.toHaveBeenCalled();
+      expect((await ordenDe(ordenId)).estado).toBe('en_proceso');
+      // Un reintento del retorno la confirma.
+      expect((await retornar(ordenId)).status).toBe(302);
+      expect((await ordenDe(ordenId)).estado).toBe('pagada');
+    });
+
+    it('(b) Transbank no contesta y la compensación falla: sale el 502 del timeout, no el error de la compensación', async () => {
+      const ordenId = await pagarPorLlave();
+      const compensacion = compensacionQueFalla();
+      confirmarPago.mockRejectedValueOnce(
+        new ProviderComunicacionError('timeout', {}),
+      );
+
+      const retorno = await retornar(ordenId);
+
+      expect(compensacion).toHaveBeenCalledWith(
+        { ordenId, estado: 'procesando' },
+        { estado: 'en_proceso' },
+      );
+      expect(retorno.status).toBe(502);
+      expect((await ordenDe(ordenId)).estado).toBe('procesando');
+    });
+
+    it('(b) recién trabada, verificar no la toca: el retorno puede estar confirmando todavía', async () => {
+      const ordenId = await pagarPorLlave();
+      // La ventana se cuenta desde el claim, no desde que se creó la orden:
+      // el comprador pudo demorar en el formulario de Webpay.
+      await tocadaHace(ordenId, VENTANA_COBRO_SIN_CONFIRMAR_MS + 1000);
+      compensacionQueFalla();
+      confirmarPago.mockRejectedValueOnce(
+        new ProviderComunicacionError('timeout', {}),
+      );
+      expect((await retornar(ordenId)).status).toBe(502);
+      jest.restoreAllMocks();
+
+      const res = await verificarCrudo(ordenId);
+
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toContain(
+        'está confirmando esta orden',
+      );
+      expect(consultarEstado).not.toHaveBeenCalled();
+      expect((await ordenDe(ordenId)).estado).toBe('procesando');
+    });
+
+    it('(b) pasada la ventana, verificar la rescata: Transbank dice pagada y queda pagada y reembolsable', async () => {
+      const ordenId = await pagarPorLlave();
+      compensacionQueFalla();
+      confirmarPago.mockRejectedValueOnce(
+        new ProviderComunicacionError('timeout', {}),
+      );
+      expect((await retornar(ordenId)).status).toBe(502);
+      jest.restoreAllMocks();
+      await tocadaHace(ordenId, VENTANA_COBRO_SIN_CONFIRMAR_MS + 1000);
+
+      expect((await verificar(ordenId)).estado).toBe('pagada');
+      expect(await autorizacionesAprobadas(ordenId)).toBe(1);
+      expect((await reembolsarEntera(ordenId)).status).toBe(201);
+    });
+
+    it('(c) el proceso murió en el medio: pasada la ventana, Transbank no sabe y verificar la devuelve a en_proceso', async () => {
+      const ordenId = await pagarPorLlave();
+      // El proceso muere con el claim commiteado: el retorno nunca vuelve.
+      // Lo que lo representa es que nadie compensa ni cierra.
+      compensacionQueFalla();
+      confirmarPago.mockRejectedValueOnce(new Error('el proceso murió (e2e)'));
+      expect((await retornar(ordenId)).status).toBe(500);
+      jest.restoreAllMocks();
+      expect((await ordenDe(ordenId)).estado).toBe('procesando');
+      await tocadaHace(ordenId, VENTANA_COBRO_SIN_CONFIRMAR_MS + 1000);
+      consultarEstado.mockResolvedValueOnce({
+        estado: 'desconocido',
+        estadoProveedor: 'INITIALIZED',
+        saldo: null,
+        response: {},
+      });
+
+      expect((await verificar(ordenId)).estado).toBe('en_proceso');
+      // Ya no está trabada: el reintento del retorno la confirma.
+      expect((await retornar(ordenId)).status).toBe(302);
+      expect((await ordenDe(ordenId)).estado).toBe('pagada');
+    });
+
+    it('un retorno lento que sigue vivo pasada la ventana no pisa lo que verificar rescató', async () => {
+      const ordenId = await pagarEnLaTienda();
+      const ventasAntes = await ventasOnline();
+      let rescate: request.Response | undefined;
+      confirmarPago.mockImplementationOnce(async () => {
+        await tocadaHace(ordenId, VENTANA_COBRO_SIN_CONFIRMAR_MS + 1000);
+        rescate = await verificarCrudo(ordenId);
+        return aprobado;
+      });
+
+      const retorno = await retornar(ordenId);
+
+      expect(rescate?.status).toBe(201);
+      expect(retorno.status).toBe(302);
+      expect(retorno.headers.location).toContain('estado=pagada');
+      const orden = await ordenDe(ordenId);
+      expect(orden.estado).toBe('conciliada');
+      expect(orden.metadata.verificacion).toBeDefined();
+      expect(await ventasOnline()).toBe(ventasAntes + 1);
+      expect(await autorizacionesAprobadas(ordenId)).toBe(1);
+    });
+
+    it('un retorno lento que aprueba después de que el rescate la devolvió a en_proceso la cierra pagada', async () => {
+      const ordenId = await pagarEnLaTienda();
+      const ventasAntes = await ventasOnline();
+      confirmarPago.mockImplementationOnce(async () => {
+        await tocadaHace(ordenId, VENTANA_COBRO_SIN_CONFIRMAR_MS + 1000);
+        consultarEstado.mockResolvedValueOnce({
+          estado: 'desconocido',
+          estadoProveedor: 'INITIALIZED',
+          saldo: null,
+          response: {},
+        });
+        const rescate = await verificarCrudo(ordenId);
+        expect(rescate.status).toBe(201);
+        expect((rescate.body as { estado: string }).estado).toBe('en_proceso');
+        return aprobado;
+      });
+
+      const retorno = await retornar(ordenId);
+
+      // La aprobación no se descarta: Transbank acaba de contestar y la
+      // orden sigue sin resolver.
+      expect(retorno.status).toBe(302);
+      expect(retorno.headers.location).toContain('estado=pagada');
+      expect((await ordenDe(ordenId)).estado).toBe('conciliada');
+      expect(await ventasOnline()).toBe(ventasAntes + 1);
+      expect(await autorizacionesAprobadas(ordenId)).toBe(1);
+    });
+
+    it('el cierre falla con Transbank ya aprobado: queda en_proceso con rastro, no expira por reloj y verificar la cierra', async () => {
+      const ordenId = await pagarPorLlave();
+      jest
+        .spyOn(app.get(TransaccionesService), 'registrar')
+        .mockRejectedValueOnce(new Error('conexión perdida (e2e)'));
+
+      expect((await retornar(ordenId)).status).toBe(500);
+
+      expect((await ordenDe(ordenId)).estado).toBe('en_proceso');
+      const [{ n }]: { n: string }[] = await ds.query(
+        `SELECT count(*) AS n FROM pasarela_transacciones
+          WHERE orden_id = $1 AND tipo = 'AUTHORIZATION'
+            AND estado = 'error' AND eliminado_el IS NULL`,
+        [ordenId],
+      );
+      expect(Number(n)).toBe(1);
+      // El rastro la saca de la expiración por reloj: el cargo pudo salir.
+      await ds.query(
+        `UPDATE pasarela_ordenes
+            SET fecha_expiracion = now() - interval '1 minute'
+          WHERE orden_id = $1`,
+        [ordenId],
+      );
+      const drawer = await request(app.getHttpServer())
+        .get(`/api/pasarela/admin/ordenes/${ordenId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(drawer.status).toBe(200);
+      expect((drawer.body as { estado: string }).estado).toBe('en_proceso');
+      expect((await verificar(ordenId)).estado).toBe('pagada');
+      expect(await autorizacionesAprobadas(ordenId)).toBe(1);
+    });
+
+    it('si la venta del rescate no se pudo crear, el retorno lento no la reintenta', async () => {
+      const ordenId = await pagarEnLaTienda();
+      const crearVenta = jest
+        .spyOn(app.get(OnlineCallbackHandler), 'onOrdenResuelta')
+        .mockRejectedValue(new BadRequestException('Item no encontrado'));
+      confirmarPago.mockImplementationOnce(async () => {
+        await tocadaHace(ordenId, VENTANA_COBRO_SIN_CONFIRMAR_MS + 1000);
+        expect((await verificarCrudo(ordenId)).status).toBe(201);
+        return aprobado;
+      });
+
+      expect((await retornar(ordenId)).status).toBe(302);
+
+      // Sin reintento automático: la pagada sin venta la resuelve el admin.
+      expect(crearVenta).toHaveBeenCalledTimes(1);
+      const orden = await ordenDe(ordenId);
+      expect(orden.estado).toBe('pagada');
+      expect(orden.venta_id).toBeNull();
     });
   });
 });

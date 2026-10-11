@@ -2,6 +2,7 @@ import {
   BadGatewayException,
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -24,6 +25,7 @@ import { ProviderFactory } from '../providers/provider.factory';
 import {
   DetallePago,
   ProviderComunicacionError,
+  ResultadoCobro,
 } from '../providers/payment-provider.interface';
 import { descripcionCodigoRespuesta } from '../utils/codigos-respuesta';
 
@@ -49,6 +51,8 @@ export interface IniciarPagoOpts {
  */
 @Injectable()
 export class PagosRedirectService {
+  private readonly logger = new Logger(PagosRedirectService.name);
+
   constructor(
     @InjectRepository(PasarelaOrden)
     private readonly ordenRepo: Repository<PasarelaOrden>,
@@ -160,26 +164,45 @@ export class PagosRedirectService {
     };
   }
 
-  /** Retorno de Webpay: confirma el pago contra el proveedor y redirige a la app. */
+  /**
+   * Retorno de Webpay: confirma el pago contra el proveedor y redirige a la app.
+   *
+   * El claim (`en_proceso` → `procesando`) commitea solo, antes de llamar a
+   * Transbank, y lo único que lo deshace es la compensación del `catch`. Por
+   * eso la orden se lee ANTES de reclamarla: leerla después dejaba un error
+   * de base fuera del `try`, y la orden `procesando`. La compensación no tapa
+   * el error original; si falla, o si el proceso muere en el medio, la orden
+   * queda `procesando` y la rescata `verificar` pasada la ventana
+   * (`CobrosService.verificar`). Los tres caminos, medidos en
+   * `pasarela-escritores-orden.e2e-spec.ts`.
+   */
   async confirmarRetorno(token: string): Promise<{ urlRedireccion: string }> {
+    const leida = await this.ordenRepo.findOne({
+      where: { tokenProveedor: token },
+    });
+    if (!leida)
+      throw new NotFoundException('Orden no encontrada para el token');
     // Claim atómico: solo una request pasa 'en_proceso' → 'procesando'. Cierra la
     // ventana de doble retorno de Webpay (reintento) que duplicaría el commit.
     const claim = await this.ordenRepo.update(
-      { tokenProveedor: token, estado: 'en_proceso' },
+      { ordenId: leida.ordenId, estado: 'en_proceso' },
       { estado: 'procesando' },
     );
-    const orden = await this.ordenRepo.findOne({
-      where: { tokenProveedor: token },
-    });
-    if (!orden)
-      throw new NotFoundException('Orden no encontrada para el token');
     // Otra request ya la reclamó/resolvió: redirige con el estado actual (idempotente).
-    if (!claim.affected) return { urlRedireccion: this.urlRetornoApp(orden) };
+    if (!claim.affected) {
+      const actual = await this.ordenRepo.findOne({
+        where: { ordenId: leida.ordenId },
+      });
+      return { urlRedireccion: this.urlRetornoApp(actual ?? leida) };
+    }
 
     const tenantPasarelaId =
-      typeof orden.metadata?.tenantPasarelaId === 'string'
-        ? orden.metadata.tenantPasarelaId
+      typeof leida.metadata?.tenantPasarelaId === 'string'
+        ? leida.metadata.tenantPasarelaId
         : undefined;
+    let orden = leida;
+    let resultado: ResultadoCobro | undefined;
+    let yaResuelta = false;
 
     try {
       const { pasarela, cred } =
@@ -187,48 +210,101 @@ export class PagosRedirectService {
           orden.tenantId,
           PASARELA_REDIRECT,
         );
-      const resultado = await this.providerFactory
+      const confirmado = await this.providerFactory
         .getPagoRedirect(pasarela.codigo)
         .confirmarPago(cred, token);
+      resultado = confirmado;
 
-      await this.transacciones.registrar({
-        tenantId: orden.tenantId,
-        ordenId: orden.ordenId,
-        tenantPasarelaId,
-        tipo: 'AUTHORIZATION',
-        estado: resultado.aprobada ? 'aprobada' : 'rechazada',
-        monto: orden.monto,
-        moneda: orden.moneda,
-        codigoOrden: orden.codigoOrden,
-        codigoAutorizacion: resultado.codigoAutorizacion,
-        identificadorTransaccionExterno:
-          resultado.identificadorTransaccionExterno,
-        codigoRespuesta: resultado.codigoRespuesta,
-        tipoPago: resultado.tipoPago,
-        request: resultado.request,
-        response: resultado.response,
+      // El cierre, con la orden bloqueada y solo si sigue sin resolver: un
+      // retorno que tardó más que la ventana puede encontrarla rescatada por
+      // `verificar`. Si `verificar` la resolvió (y, en la tienda, creó la
+      // venta), pisarla duplicaba la AUTHORIZATION y la dejaba `pagada` sobre
+      // una `conciliada`. Si Transbank no le supo decir y la devolvió a
+      // `en_proceso`, lo que acaba de contestar el commit es la respuesta.
+      orden = await this.db.transaccion(async () => {
+        const bloqueada = await this.ordenRepo.findOne({
+          where: { ordenId: leida.ordenId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!bloqueada)
+          throw new NotFoundException('Orden no encontrada para el token');
+        if (
+          !['procesando', 'en_proceso', 'expirada'].includes(bloqueada.estado)
+        ) {
+          yaResuelta = true;
+          return bloqueada;
+        }
+
+        await this.transacciones.registrar({
+          tenantId: bloqueada.tenantId,
+          ordenId: bloqueada.ordenId,
+          tenantPasarelaId,
+          tipo: 'AUTHORIZATION',
+          estado: confirmado.aprobada ? 'aprobada' : 'rechazada',
+          monto: bloqueada.monto,
+          moneda: bloqueada.moneda,
+          codigoOrden: bloqueada.codigoOrden,
+          codigoAutorizacion: confirmado.codigoAutorizacion,
+          identificadorTransaccionExterno:
+            confirmado.identificadorTransaccionExterno,
+          codigoRespuesta: confirmado.codigoRespuesta,
+          tipoPago: confirmado.tipoPago,
+          request: confirmado.request,
+          response: confirmado.response,
+        });
+
+        // Propaga el detalle del commit a la orden: el callback lo usa para elegir
+        // el método real (débito/crédito) y persistir cuotas / últimos4; en rechazo,
+        // el codigoRespuesta permite traducir el motivo nivel 2 en la página de retorno.
+        const resultadoPago: DetallePago = {
+          tipoPago: confirmado.tipoPago,
+          numeroCuotas: confirmado.numeroCuotas,
+          tarjetaUltimos4: confirmado.tarjetaUltimos4,
+          codigoRespuesta: confirmado.codigoRespuesta,
+          codigoAutorizacion: confirmado.codigoAutorizacion,
+        };
+        bloqueada.metadata = { ...bloqueada.metadata, resultadoPago };
+        bloqueada.estado = confirmado.aprobada ? 'pagada' : 'fallida';
+        return this.ordenRepo.save(bloqueada);
       });
-
-      // Propaga el detalle del commit a la orden: el callback lo usa para elegir
-      // el método real (débito/crédito) y persistir cuotas / últimos4; en rechazo,
-      // el codigoRespuesta permite traducir el motivo nivel 2 en la página de retorno.
-      const resultadoPago: DetallePago = {
-        tipoPago: resultado.tipoPago,
-        numeroCuotas: resultado.numeroCuotas,
-        tarjetaUltimos4: resultado.tarjetaUltimos4,
-        codigoRespuesta: resultado.codigoRespuesta,
-        codigoAutorizacion: resultado.codigoAutorizacion,
-      };
-      orden.metadata = { ...orden.metadata, resultadoPago };
-      orden.estado = resultado.aprobada ? 'pagada' : 'fallida';
-      await this.ordenRepo.save(orden);
     } catch (e) {
       // Compensación: devolver 'procesando' → 'en_proceso' para no dejarla trabada
-      // y que un reintento del retorno / verificación pueda reprocesarla.
-      await this.ordenRepo.update(
-        { ordenId: orden.ordenId, estado: 'procesando' },
-        { estado: 'en_proceso' },
-      );
+      // y que un reintento del retorno / verificación pueda reprocesarla. No
+      // tapa el error original: si falla, la orden queda `procesando` y la
+      // rescata `verificar` pasada la ventana.
+      await this.ordenRepo
+        .update(
+          { ordenId: orden.ordenId, estado: 'procesando' },
+          { estado: 'en_proceso' },
+        )
+        .catch((err) =>
+          this.logger.warn(
+            `No se pudo devolver la orden ${orden.ordenId} a 'en_proceso': queda 'procesando' hasta que la rescate verificar: ${String(err)}`,
+          ),
+        );
+      // Transbank ya contestó y lo que falló fue el cierre: su rollback se
+      // llevó la AUTHORIZATION. Sin rastro, el reloj la expiraba como si no
+      // hubiera intentado cobrar, y el cargo pudo salir. La `error` la saca de
+      // la expiración y la deja para `verificar`, como un timeout.
+      if (resultado)
+        await this.transacciones
+          .registrar({
+            tenantId: orden.tenantId,
+            ordenId: orden.ordenId,
+            tenantPasarelaId,
+            tipo: 'AUTHORIZATION',
+            estado: 'error',
+            monto: orden.monto,
+            moneda: orden.moneda,
+            codigoOrden: orden.codigoOrden,
+            request: resultado.request,
+            response: resultado.response,
+          })
+          .catch((err) =>
+            this.logger.warn(
+              `No se pudo anotar el commit de la orden ${orden.ordenId}, que Transbank contestó: ${String(err)}`,
+            ),
+          );
       if (e instanceof ProviderComunicacionError) {
         // Mismo invariante que cobrar(): un timeout NO es rechazo. Dejar rastro y
         // responder consistente (BadGateway); la orden queda en_proceso.
@@ -253,7 +329,9 @@ export class PagosRedirectService {
 
     // Dispara el callback (materializa la venta en el monolito y concilia la
     // orden). No rompe el redirect si falla; ver CallbackDispatcherService.
-    await this.callbackDispatcher.dispatch(orden);
+    // Si la resolvió `verificar`, no: ella crea la venta de la tienda, y la
+    // app por llave es la que la llamó.
+    if (!yaResuelta) await this.callbackDispatcher.dispatch(orden);
 
     return { urlRedireccion: this.urlRetornoApp(orden) };
   }

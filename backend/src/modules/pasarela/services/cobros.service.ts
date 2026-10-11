@@ -1730,13 +1730,36 @@ export class CobrosService {
    * espera a que esto termine y, si la orden ya quedó resuelta, no la
    * reclama. Sin el lock, el `save` de acá pisaba la orden que el retorno
    * acababa de conciliar —y ahora, además, crearía una segunda venta—
-   * (pendientes.md § 5, medido en `tienda-verificar.e2e-spec.ts`). Si el
-   * retorno la reclamó antes, la ve `procesando` y responde 400.
+   * (pendientes.md § 5, medido en `tienda-verificar.e2e-spec.ts`).
+   *
+   * Una `procesando` es del retorno que la reclamó mientras confirma: hasta
+   * `VENTANA_COBRO_SIN_CONFIRMAR_MS` desde el claim (su `actualizado_el`; nadie
+   * más escribe una `procesando`) responde 400. Pasada la ventana se rescata
+   * como una `en_proceso`: el retorno no la compensó (un error de base o el
+   * proceso que murió) y nadie más la saca de ahí. Si Transbank no sabe, se
+   * devuelve a `en_proceso`, que es lo que habría hecho la compensación. Un
+   * retorno lento que siga vivo no pisa el rescate: cierra solo si la orden
+   * sigue sin resolver (`PagosRedirectService.confirmarRetorno`). Los 5
+   * minutos son los mismos que el alta espera a Transbank antes de dar por
+   * muerto un intento (ADR-029).
    */
   async verificar(tenantId: string, ordenId: string) {
     const orden = await this.db.transaccion(async () => {
       const bloqueada = await this.bloquearOrden(tenantId, ordenId);
-      if (bloqueada.estado !== 'en_proceso' && bloqueada.estado !== 'expirada')
+      const reclamadaPorUnRetorno = bloqueada.estado === 'procesando';
+      if (
+        reclamadaPorUnRetorno &&
+        Date.now() - bloqueada.actualizadoEl.getTime() <
+          VENTANA_COBRO_SIN_CONFIRMAR_MS
+      )
+        throw new BadRequestException(
+          'El retorno de Webpay está confirmando esta orden: volvé a verificarla en unos minutos',
+        );
+      if (
+        !reclamadaPorUnRetorno &&
+        bloqueada.estado !== 'en_proceso' &&
+        bloqueada.estado !== 'expirada'
+      )
         throw new BadRequestException(
           `La orden ya está resuelta (${bloqueada.estado})`,
         );
@@ -1811,6 +1834,9 @@ export class CobrosService {
               bloqueada.tokenProveedor ?? bloqueada.codigoOrden,
             response: consulta.response,
           });
+      } else if (reclamadaPorUnRetorno) {
+        bloqueada.estado = 'en_proceso';
+        await this.ordenRepo.save(bloqueada);
       }
       return bloqueada;
     });

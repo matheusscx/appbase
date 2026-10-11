@@ -23,6 +23,131 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Una orden que el retorno dejó `procesando` sin compensar no la sacaba nadie (cerrada 2026-10-11)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. La anotó la revisión independiente del frente
+"cuatro cabos sueltos de la orden" (`c755776c`, abajo), leída y no medida. No toca el motor de
+precios, el inventario ni lo fiscal, y no cambia el orden de bloqueo orden → venta.
+
+### La entrada que cierra, como estaba en `pendientes.md`
+
+- [ ] **Una orden que el retorno dejó `procesando` sin compensar no la saca nadie** (backend,
+  `pagos-redirect.service.ts` `confirmarRetorno`; lo vio la revisión independiente del frente
+  "cuatro cabos sueltos de la orden", 2026-10-11; **leído, no medido**). El claim
+  (`en_proceso` → `procesando`) commitea solo, antes de llamar a Transbank, y la orden queda
+  `procesando` si no se llega a compensar: `verificar` responde 400, el cron y la expiración
+  perezosa no la miran, y no se puede reembolsar. El cargo pudo salir. Hay tres caminos, y no
+  solo la muerte del proceso: el `findOne` que sigue al claim está **antes** del `try` (un error
+  de base ahí sale sin compensar), la compensación misma es un `update` que puede fallar, y el
+  proceso puede morir en el medio. El arreglo cambia según el camino (meter el claim adentro de
+  la protección, volver robusta la compensación, o que `verificar` rescate una `procesando`
+  vieja): medir los dos primeros, que se arman en el e2e, antes de elegir.
+
+### Lo medido
+
+En `pasarela-escritores-orden.e2e-spec.ts`, describe *"el retorno que reclamó la orden y no llegó
+a compensar"*, contra el código de entonces. El error de base se fuerza con un `spyOn` sobre el
+repositorio de la orden: fuera de una transacción, el proxy de `@InjectRepository` (ADR-020)
+resuelve a `ds.getRepository(PasarelaOrden)`, que es la misma instancia.
+
+- **(a) La lectura que seguía al claim: confirmado.** El `findOne` falla una vez: el retorno
+  responde 500, `confirmarPago` ni se llama y la orden queda `procesando`.
+- **(b) La compensación que falla: confirmado, y peor que lo anotado.** Transbank no contesta y
+  la compensación (`procesando` → `en_proceso`) falla: el retorno responde **500 con el error de
+  la compensación**, no el 502 del timeout. Como lanza antes, tampoco se anota la AUTHORIZATION
+  `error`: la orden queda `procesando` sin rastro de que intentó cobrar.
+- **(c) El proceso que muere en el medio** no se puede matar dentro de un e2e. Se representa con
+  lo mismo que deja: un error en el commit con la compensación caída, así que nadie compensa ni
+  cierra. `verificar` respondía 400 (*"La orden ya está resuelta (procesando)"*).
+
+### Cómo se cerró
+
+- **(a) La orden se lee antes de reclamarla**, y el claim va por `ordenId`. Entre el claim y el
+  `try` no queda nada que pueda fallar. En el camino idempotente (otra request ya la reclamó) se
+  relee para redirigir con el estado de ahora, no con el leído antes del claim.
+- **(b) La compensación no tapa el error original.** Si falla, deja un `warn` y sale el error que
+  la provocó (el 502 con la AUTHORIZATION `error`, en el timeout). Es el patrón que ya tenía
+  `InscripcionesService.confirmarRetorno`. No se reintenta: la orden queda `procesando` y la rescata
+  `verificar`.
+- **(c) y lo que (b) deja: `verificar` rescata una `procesando` vieja.** Pasados
+  `VENTANA_COBRO_SIN_CONFIRMAR_MS` (5 min) desde el claim, la trata como una `en_proceso`: consulta
+  a Transbank y la deja `pagada` (con la AUTHORIZATION `aprobada` que agrega `verificar`, así se
+  puede reembolsar) o `fallida`. Si Transbank no sabe, la devuelve a `en_proceso`, que es lo que
+  habría hecho la compensación, y un reintento del retorno la confirma. Antes de la ventana
+  responde 400 con *"El retorno de Webpay está confirmando esta orden: volvé a verificarla en unos
+  minutos"*: el retorno puede estar vivo.
+  - **"Desde el claim" es el `actualizado_el`.** El `UPDATE` del claim lo refresca (TypeORM pone
+    el `@UpdateDateColumn` en un `update`) y nadie más escribe una `procesando`. Lo fija el caso
+    *"recién trabada"*, que envejece la orden **antes** del retorno: si la ventana se contara
+    desde que se creó, `verificar` la rescataba.
+  - **Por qué 5 minutos.** Es la ventana que el owner eligió para dar por muerto un intento sin
+    respuesta frente a Transbank (2026-10-10, ADR-029: elegida sobre 2, 15 y "no esperar").
+    Acá cumple el mismo papel. No hay un umbral más natural: el commit del retorno no tiene
+    tope propio (abajo), así que ningún número garantiza que el retorno ya murió. Lo que hace
+    seguro el rescate es el punto siguiente, no el número.
+  - **Por qué `verificar` y no el cron.** El cron no consulta a Transbank, y sacar una
+    `procesando` por reloj daría por perdido un cargo que pudo salir. Tampoco hay un loop nuevo:
+    sin reintento automático (owner), el rescate lo dispara quien llama a `verificar`.
+- **El cierre del retorno no pisa lo que `verificar` resolvió.** Un retorno lento que sigue
+  vivo pasada la ventana puede encontrar la orden rescatada. Ahora cierra con la orden bloqueada
+  (`FOR UPDATE`) y solo si sigue sin resolver (`procesando`, `en_proceso` o `expirada`).
+  - Si `verificar` la resolvió, no registra, no guarda y no dispara el callback: redirige con lo
+    que dejó. Sin eso, medido: **dos AUTHORIZATION `aprobada`** en la misma orden, y si la venta
+    del rescate no se pudo crear, el retorno la volvía a intentar sola (el handler de la tienda,
+    llamado dos veces): un reintento automático.
+  - Si `verificar` la devolvió a `en_proceso` porque Transbank no sabía, la cierra el retorno con
+    lo que le acaba de contestar el commit. La primera versión cerraba solo sobre `procesando`,
+    y ahí descartaba en silencio una aprobación (lo levantó la revisión independiente; medido).
+- **Si falla el cierre después de que Transbank contestó, queda el rastro.** Registrar y guardar
+  van ahora en una sola tx, así que su rollback se lleva la AUTHORIZATION: la orden volvía a
+  `en_proceso` sin rastro de que Transbank había aprobado, y el reloj la expiraba (antes la
+  `aprobada` quedaba, porque eran dos escrituras sueltas). Ahora el `catch` anota una
+  AUTHORIZATION `error` con la respuesta del commit, fuera de la tx y sin tapar el error. La
+  `error` es la que saca la orden de la expiración y la deja para `verificar`, como un timeout.
+  Lo levantó la revisión independiente; medido.
+
+**Lo que ve el comprador no cambia.** El retorno redirige con el estado que hay, como antes.
+Con una `procesando` la pantalla de la tienda muestra "Pago pendiente" (la sección de abajo,
+cerrada el mismo día).
+
+**Lo que queda afuera.**
+- `verificar` existe solo en la API por llave: una orden de la tienda trabada la rescata quien
+  tenga una llave del tenant, igual que hoy cualquier `en_proceso`. El admin no tiene el botón;
+  es la entrada de § 2 sobre el marcado manual del alta (*"`/verificar` existe solo en la API
+  por llave"*).
+- El commit de Webpay (`WebpayPlusProvider.confirmarPago`) no lleva tope, a diferencia de la
+  consulta y el reembolso (`TIMEOUT_LLAMADA_REEMBOLSO_MS`). Quedó anotado en § 2.
+- Recargar el retorno después de una compensación repite el commit, y un 4xx de Transbank se
+  lee como rechazo: puede dejar `fallida` un cargo aprobado. Ya pasaba antes con el timeout.
+  Este frente le suma una variante angosta: un commit de más de 5 minutos, el rescate que la
+  devuelve a `en_proceso` y una recarga en ese momento. Lo vio la segunda vuelta de la revisión
+  independiente, y quedó anotado en § 2.
+
+### Tests y mutantes
+
+Nueve casos nuevos en el describe de arriba, y tres unitarios en
+`pagos-redirect.service.spec.ts`. Cada mutante revierte o saca una pieza del arreglo:
+
+| Mutante | Cae |
+|---|---|
+| leer la orden después del claim (el código anterior) | (a) |
+| compensación sin `.catch` (el código anterior) | los tres casos de (b): sale 500, no 502 |
+| `verificar` no acepta `procesando` (el código anterior) | el rescate de (b), (c) y el retorno lento |
+| rescate sin ventana | (b) *"recién trabada"* |
+| rescate que no devuelve a `en_proceso` lo que Transbank no sabe | (c) |
+| cierre del retorno sin mirar el estado | el retorno lento (dos AUTHORIZATION `aprobada`) y *"si la venta del rescate no se pudo crear…"* |
+| cierre del retorno solo sobre `procesando` (la primera versión) | el retorno lento que aprueba después de que el rescate la devolvió a `en_proceso` |
+| sin la AUTHORIZATION `error` cuando falla el cierre | *"el cierre falla con Transbank ya aprobado…"* |
+| el retorno dispara el callback aunque la resolvió `verificar` | *"si la venta del rescate no se pudo crear…"* |
+
+El último sobrevivía al primer caso del retorno lento, y el motivo se midió: en la tienda la
+orden ya está `conciliada` y `dispatch` vuelve sin hacer nada. Donde importa es la pagada sin
+venta, y para eso está el último caso.
+
+Se restauró y se volvieron a correr los archivos en verde.
+
+---
+
 ## La pantalla de retorno de la tienda decía "rechazado" a una orden sin resolver (cerrada 2026-10-11)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. Solo frontend: no toca el backend (ni
@@ -66,9 +191,9 @@ con un estado desconocido. Mutantes, todos rojos: la página anterior entera, y 
 `data-qa` de la vista pendiente agregado (así el rojo es por la lógica, no por el selector), 3
 rojos; `procesando` → `rechazada` en el mapa, 3; el desconocido → `rechazada`, 2.
 
-**Queda afuera:** que una `procesando` trabada no la saque nadie es backend, y está en § 2
-(*"Una orden que el retorno dejó `procesando` sin compensar"*). Mientras siga trabada, el
-comprador ve "Pago pendiente", que es lo cierto.
+**Queda afuera:** que una `procesando` trabada no la saque nadie es backend. Se cerró el mismo
+día (la sección de arriba): pasados 5 minutos desde el claim la rescata `verificar`. Mientras siga
+trabada, el comprador ve "Pago pendiente", que es lo cierto.
 
 ---
 

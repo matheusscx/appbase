@@ -277,6 +277,7 @@ Convenciones del repo: UUID PK/FK `type:'uuid'`, soft delete `eliminado_el`,
 - **Orden**: `creada → en_proceso → pagada | fallida | expirada` (+ `reembolsada`).
   En pago redirect, el retorno reclama `en_proceso → procesando` (claim atómico
   anti-doble-retorno) antes de confirmar; compensa a `en_proceso` si el commit falla.
+  Una `procesando` que nadie compensó la rescata `verificar` pasados 5 minutos (abajo).
   Tras `pagada`, el callback marca `conciliada` cuando la app materializó su lado.
   `pendiente` está modelado (pago con conciliación demorada) aunque Webpay Plus
   resuelve inmediato en v1.
@@ -349,9 +350,28 @@ request. A las órdenes `http` de una app por llave, `verificar` no les avisa na
 mientras consulta al proveedor (hasta 30 s, como el reembolso: ADR-029) y despacha el
 callback después del commit. El claim del retorno (`en_proceso` → `procesando`) espera
 ese lock y, si la orden ya quedó resuelta, no la reclama: redirige con el estado que
-tenga. Si el retorno la reclamó antes, `verificar` la ve `procesando` y responde 400.
-Antes, `verificar` la leía sin lock y su `save` pisaba la orden que el retorno acababa de
+tenga. Si el retorno la reclamó antes, `verificar` la ve `procesando` y, durante los
+primeros 5 minutos, responde 400 (abajo). Antes, `verificar` la leía sin lock y su `save` pisaba la orden que el retorno acababa de
 conciliar (medido el 2026-10-11).
+
+**Una `procesando` trabada la rescata `verificar`** (2026-10-11). El claim commitea solo,
+antes de llamar a Transbank, y lo deshace la compensación. Si la compensación falla o el
+proceso muere en el medio, la orden queda `procesando` y nadie más la saca: el cron y la
+expiración perezosa no la miran (expirarla por reloj daría por perdido un cargo que pudo
+salir) y el reembolso pide `pagada`. Por eso, pasados `VENTANA_COBRO_SIN_CONFIRMAR_MS`
+(5 minutos, la ventana de ADR-029 para dar por muerto un intento sin respuesta) desde el claim
+—el `actualizado_el` de la orden—, `verificar` la trata como una `en_proceso`: consulta, y si
+Transbank no sabe, la devuelve a `en_proceso`, que es lo que habría hecho la compensación.
+Antes de la ventana responde 400: el retorno puede estar confirmando. Un retorno lento que
+sigue vivo no pisa el rescate: cierra con la orden bloqueada y solo si sigue sin resolver
+(`procesando`, `en_proceso` o `expirada`). Si `verificar` ya la resolvió, redirige con lo
+que dejó, sin registrar ni disparar el callback; si la devolvió a `en_proceso` porque
+Transbank no sabía, lo que acaba de contestar el commit la cierra. Si lo que falla es el
+cierre, con la respuesta de Transbank en la mano, se anota una AUTHORIZATION `error`: el
+rollback se lleva la `aprobada`, y sin rastro el reloj la expiraba. La orden se lee antes del
+claim y la compensación no tapa el error original: un error de base en la lectura ya no la
+deja `procesando`, y una compensación caída la deja `procesando` hasta el rescate, no para
+siempre (medidos en `pasarela-escritores-orden.e2e-spec.ts`).
 
 **Nadie más pisa lo que `verificar` resolvió, y el callback no pisa un reembolso**
 (2026-10-11). Los escritores de la orden que la leían sin lock y guardaban la entidad entera
@@ -551,6 +571,7 @@ Con el stack arriba (`docker-compose up -d`):
 |---|---|---|
 | Timeout del proveedor malinterpretado como rechazo | Cobro perdido / doble cobro | Orden queda `en_proceso`; endpoint `.../verificar` reconcilia contra el proveedor |
 | Doble retorno de Webpay (reintento) | Inscripción/medio duplicado | Claim atómico `pendiente→procesando`; compensación a `pendiente` si el provider falla |
+| Retorno de pago que reclamó la orden y no la compensó (error de base, proceso muerto) | Orden `procesando` para siempre: no se verifica ni se reembolsa, con un cargo que pudo salir | La orden se lee antes del claim y la compensación no tapa el error; pasados 5 minutos desde el claim `verificar` la rescata, y el cierre del retorno solo escribe si la orden sigue sin resolver |
 | Reembolsos concurrentes exceden el total | Sobre-reembolso | `reembolsar()` corre dentro de una transacción con lock pesimista (`SELECT … FOR UPDATE`) de la fila de la orden: dos reembolsos sobre la misma orden se serializan; el segundo ve el REFUND del primero y no puede exceder el saldo. Con venta ligada, esa misma transacción toma después el `FOR UPDATE` de la venta para el tope por pago (orden → venta, el único orden: ningún camino toma la venta y luego la orden). El intento que no se confirmó se anota sobre su `REFUND` en `iniciada` **fuera** de la transacción (tras el rollback que libera el lock) |
 | Reintento de un reembolso después de un corte | Doble devolución por el proveedor | `Idempotency-Key` con el reclamo commiteado **antes** de llamar y el `REFUND` write-ahead en `iniciada`; el reintento de uno sin confirmar se aclara por saldo y nunca vuelve a llamar ([ADR-029](../adr/029-reembolso-con-efecto-externo.md)) |
 | Orden con timeout marcada `expirada` por reloj (deja de ser reconciliable) | Cobro real dado por perdido | `obtenerOrden()` y el cron `expirar-ordenes` no expiran órdenes con una transacción `AUTHORIZATION 'error'` (hubo intento), ni las escritas antes de cobrar (`solicitud_idempotente_id`, el alta de suscripción: ADR-029); `verificar()` además acepta órdenes `expirada`. Solo la reconciliación con el proveedor las cierra |

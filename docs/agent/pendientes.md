@@ -94,17 +94,33 @@ destapa una decisión que no es mía).
   de tu compra" o "el local se comunicará contigo"), o se construye un aviso (correo)? Lo primero
   es chico; lo segundo, un frente.
 
-- [ ] **Una orden que el retorno dejó `procesando` sin compensar no la saca nadie** (backend,
-  `pagos-redirect.service.ts` `confirmarRetorno`; lo vio la revisión independiente del frente
-  "cuatro cabos sueltos de la orden", 2026-10-11; **leído, no medido**). El claim
-  (`en_proceso` → `procesando`) commitea solo, antes de llamar a Transbank, y la orden queda
-  `procesando` si no se llega a compensar: `verificar` responde 400, el cron y la expiración
-  perezosa no la miran, y no se puede reembolsar. El cargo pudo salir. Hay tres caminos, y no
-  solo la muerte del proceso: el `findOne` que sigue al claim está **antes** del `try` (un error
-  de base ahí sale sin compensar), la compensación misma es un `update` que puede fallar, y el
-  proceso puede morir en el medio. El arreglo cambia según el camino (meter el claim adentro de
-  la protección, volver robusta la compensación, o que `verificar` rescate una `procesando`
-  vieja): medir los dos primeros, que se arman en el e2e, antes de elegir.
+- [ ] **El commit de Webpay Plus no tiene tope: el retorno puede quedar colgado minutos**
+  (backend, `webpay-plus.provider.ts` `confirmarPago`; anotado el 2026-10-11 por el frente que
+  destrabó la `procesando`, [`resueltos.md`](resueltos.md); **leído, no medido**). La consulta y
+  el reembolso llevan `TIMEOUT_LLAMADA_REEMBOLSO_MS` (30 s); el commit no pasa `timeoutMs`, así
+  que solo lo corta el default de `fetch` de Node, que para esperar la respuesta es de 300 s según
+  la documentación de undici. Mientras tanto la orden queda `procesando` y el comprador mirando el
+  navegador. No rompe nada desde ese frente: el rescate de `verificar` empieza a los 5 minutos y el
+  cierre del retorno no pisa lo rescatado. **Medir:** cuánto tarda en cortar hoy un commit contra
+  un servidor que no contesta. **Arreglo probable:** el mismo tope que la consulta, que lo vuelve un
+  `ProviderComunicacionError` (orden a `en_proceso`, 502 y `verificar`).
+
+- [ ] **Recargar el retorno de Webpay después de una compensación puede dejar `fallida` un cargo
+  aprobado** (backend, `pagos-redirect.service.ts` `confirmarRetorno` y `webpay-plus.provider.ts`
+  `confirmarPago`; lo vio la revisión independiente del frente que destrabó la `procesando`,
+  2026-10-11, [`resueltos.md`](resueltos.md); **leído, no medido**). Si el commit aprobó pero el
+  retorno no llegó a cerrarlo (timeout, o falla el cierre), la compensación la devuelve a
+  `en_proceso`. Si el comprador recarga la URL de retorno, el mismo `token_ws` se reclama de nuevo y
+  se llama otra vez al commit. `request` solo lanza en 5xx, y un 4xx con JSON sin `details` vuelve
+  como `aprobada: false`: si Transbank contesta 4xx a un segundo commit, la orden queda `fallida`
+  con AUTHORIZATION `rechazada`, y `verificar` ya no mira una `fallida`. **Ya existía antes de ese
+  frente.** El frente le suma una variante angosta: un retorno con un commit de más de 5 minutos,
+  rescatado por `verificar` con Transbank `desconocido` (vuelve a `en_proceso`), y una recarga en
+  ese momento. Gana el cierre que toma primero el lock. **Medir:** qué contesta Transbank (status y
+  body) a un segundo `PUT /transactions/{token}` sobre uno ya confirmado, en integración.
+  **Arreglo probable:** antes de repetir el commit, si la orden ya tiene una AUTHORIZATION
+  (`aprobada` o `error`), consultar el estado en vez de confirmar. O leer ese 4xx como "sin
+  confirmar" y no como rechazo.
 
 - [ ] **Intermitente de Playwright: `caja/historial-cajero.spec.ts:91` no ve el toast a tiempo**
   (frontend e2e; visto el 2026-10-11 en el Playwright entero del frente del salón, `b6721c3a`, que

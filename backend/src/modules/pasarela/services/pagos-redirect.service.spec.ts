@@ -56,6 +56,7 @@ describe('PagosRedirectService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    ordenRepo.findOne.mockReset();
     ordenRepo.update.mockResolvedValue({ affected: 1 });
     const module = await Test.createTestingModule({
       providers: [
@@ -78,6 +79,12 @@ describe('PagosRedirectService', () => {
     }).compile();
     service = module.get(PagosRedirectService);
   });
+
+  /** La orden del token antes del claim, y la que el cierre lee bloqueada: ya reclamada. */
+  const ordenDelRetorno = (orden: Record<string, unknown>) =>
+    ordenRepo.findOne
+      .mockResolvedValueOnce(orden)
+      .mockResolvedValueOnce({ ...orden, estado: 'procesando' });
 
   const dtoBase = {
     monto: '10000',
@@ -181,7 +188,7 @@ describe('PagosRedirectService', () => {
   });
 
   it('confirmarRetorno aprobado: orden pagada, dispara callback y redirige a urls.exito', async () => {
-    ordenRepo.findOne.mockResolvedValue({
+    ordenDelRetorno({
       ordenId: 'orden-1',
       tenantId: 't-1',
       estado: 'en_proceso',
@@ -227,7 +234,7 @@ describe('PagosRedirectService', () => {
   });
 
   it('confirmarRetorno rechazado: orden fallida, redirige a urls.fracaso', async () => {
-    ordenRepo.findOne.mockResolvedValue({
+    ordenDelRetorno({
       ordenId: 'orden-1',
       tenantId: 't-1',
       estado: 'en_proceso',
@@ -267,7 +274,7 @@ describe('PagosRedirectService', () => {
   });
 
   it('confirmarRetorno aprobado sin venta: estado propio sobre la URL de éxito', async () => {
-    ordenRepo.findOne.mockResolvedValue({
+    ordenDelRetorno({
       ordenId: 'orden-1',
       tenantId: 't-1',
       estado: 'en_proceso',
@@ -342,6 +349,67 @@ describe('PagosRedirectService', () => {
     expect(deps.transacciones.registrar).toHaveBeenCalledWith(
       expect.objectContaining({ tipo: 'AUTHORIZATION', estado: 'error' }),
     );
+    expect(deps.dispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('confirmarRetorno: la orden se lee antes de reclamarla, así un error de base no la deja procesando', async () => {
+    ordenRepo.findOne.mockRejectedValueOnce(new Error('conexión perdida'));
+    await expect(service.confirmarRetorno('tok-1')).rejects.toThrow(
+      'conexión perdida',
+    );
+    expect(ordenRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('confirmarRetorno timeout con la compensación caída: sale el BadGateway, no el error de la compensación', async () => {
+    ordenRepo.findOne.mockResolvedValueOnce({
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'en_proceso',
+      monto: '10000',
+      moneda: 'CLP',
+      codigoOrden: 'W-1',
+      metadata: { tenantPasarelaId: 'tp-w' },
+    });
+    ordenRepo.update
+      .mockResolvedValueOnce({ affected: 1 })
+      .mockRejectedValueOnce(new Error('conexión perdida'));
+    provider.confirmarPago.mockRejectedValue(
+      new ProviderComunicacionError('timeout', {}),
+    );
+    await expect(service.confirmarRetorno('tok-1')).rejects.toThrow(
+      'verifique el estado',
+    );
+    expect(deps.transacciones.registrar).toHaveBeenCalledWith(
+      expect.objectContaining({ tipo: 'AUTHORIZATION', estado: 'error' }),
+    );
+  });
+
+  it('confirmarRetorno lento: si verificar la rescató mientras confirmaba, no la pisa ni repite el callback', async () => {
+    const orden = {
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'en_proceso',
+      monto: '10000',
+      moneda: 'CLP',
+      codigoOrden: 'W-1',
+      metadata: {
+        urls: { exito: 'https://app/ok', fracaso: 'https://app/fail' },
+        tenantPasarelaId: 'tp-w',
+      },
+    };
+    ordenRepo.findOne
+      .mockResolvedValueOnce(orden)
+      .mockResolvedValueOnce({ ...orden, estado: 'conciliada' });
+    provider.confirmarPago.mockResolvedValue({
+      aprobada: true,
+      codigoRespuesta: '0',
+      request: {},
+      response: {},
+    });
+    const res = await service.confirmarRetorno('tok-1');
+    expect(res.urlRedireccion).toContain('estado=pagada');
+    expect(deps.transacciones.registrar).not.toHaveBeenCalled();
+    expect(ordenRepo.save).not.toHaveBeenCalled();
     expect(deps.dispatcher.dispatch).not.toHaveBeenCalled();
   });
 

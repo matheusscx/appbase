@@ -156,6 +156,13 @@ caminos del alta que dejan la orden `fallida` sueltan la clave en la misma tx y 
 ahí, así que una `fallida` sin respuesta la puso otro lector sin mirar la ventana. Lo levantó la
 segunda vuelta de la revisión independiente.
 
+La misma ventana usa `/verificar` para rescatar una orden de pago redirect que el retorno dejó
+`procesando` sin compensar (2026-10-11): antes de los 5 minutos desde el claim responde 400,
+porque el retorno puede estar confirmando; después la trata como una `en_proceso`. No es un
+umbral que garantice que el retorno murió (su commit no tiene tope propio): lo seguro es que el
+retorno cierra solo si la orden sigue sin resolver. Detalle en
+[`pasarela-pagos.md`](../features/pasarela-pagos.md).
+
 **Si falla algo que no es HTTP después de llamar a Transbank** (la base al registrar la
 respuesta, p. ej.), no se sabe si se cobró: sale 409 *"Esperá unos minutos…"* en vez de un 500
 crudo, y el reintento aclara.
