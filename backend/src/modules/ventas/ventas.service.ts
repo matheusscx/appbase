@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { EntityManager, IsNull } from 'typeorm';
 import type { ReglasCongeladas } from '../../common/dto/reglas-congeladas.dto';
+import type { ConsumoCongelado } from '../../common/dto/consumo-congelado.dto';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import {
@@ -402,6 +403,12 @@ export interface LineaCongelada {
   precioUnitarioOrigen: string;
   tasaCambio: string;
   reglasCongeladas: ReglasCongeladas;
+  /**
+   * Lo que el plato consumió al pedirse (`cuenta_lineas.consumo_congelado`): la
+   * receta y el combo se descuentan contra esto, no contra el catálogo de hoy.
+   * `null` en un producto o en una línea anterior al congelado.
+   */
+  consumoCongelado: ConsumoCongelado | null;
 }
 
 /**
@@ -1505,6 +1512,7 @@ export class VentasService {
             snapshot: personalizacion ?? undefined,
             convertir,
             ubicacionLocalId,
+            consumo: lineasCongeladas?.[i]?.consumoCongelado ?? undefined,
           });
         advertencias.push(...advertenciasIngrediente);
       } else if (item.tipo === 'combo') {
@@ -1521,6 +1529,7 @@ export class VentasService {
             snapshot: personalizacion ?? undefined,
             convertir,
             ubicacionLocalId,
+            consumo: lineasCongeladas?.[i]?.consumoCongelado ?? undefined,
           });
         advertencias.push(...advertenciasComponente);
       }

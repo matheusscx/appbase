@@ -336,51 +336,6 @@ fiscal y va solo:
 
 ### Anular un plato devuelve lo que se consumió al venderlo (owner, 2026-09-29)
 
-- [ ] **Lo que se consume al anular un plato sale de lo que HOY dice el catálogo, no de lo que se
-  pidió: un extra, una opción o un componente que ya no está se saltea sin movimiento, y el costo de
-  la anulación queda bajo sin marca** (backend; heredado del frente *"Anular un plato ya enviado a
-  cocina"*, [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md)
-  § 4 y § 7). **Re-medido el 2026-09-28** (sub-agente Sonnet; la orquestadora verificó contra el
-  código lo que la corrige): la versión anterior de esta entrada decía que llegar al hueco
-  necesitaba dos pasos y era muy raro. **Es más fácil de alcanzar:**
-  - **Un extra se borra en un paso.** `obtenerUsoItem` (`items.service.ts`, ~:2627) pone
-    `receta_extras_permitidos` en **advertencias**, no en bloqueos: `DELETE /items/:id` del
-    champiñón funciona directo, y `remove()` además da de baja sus filas de extras. Al anular, el
-    extra congelado en la línea no encuentra su ingrediente y se saltea — con una advertencia en la
-    respuesta HTTP que **no se guarda en ningún lado**.
-  - **Una opción de grupo** necesita dos pasos (la opción sí bloquea el borrado: primero `PATCH
-    /grupos-modificadores/:id` sin esa opción, después el `DELETE`), y se saltea **sin ninguna
-    advertencia** (`venderOpcionesGrupos`).
-  - **Receta o combo editados, sin borrar nada:** `receta_ingredientes` y `combo_componentes` se
-    leen **en vivo** al anular (`obtenerIngredientesRecetaPorIds`, `venderComponentesCombo`). Si
-    entre la venta y la anulación alguien edita la receta o el combo (`PATCH /items/:id`), la
-    anulación consume la receta **nueva**, no la que se cocinó. Sin aviso.
-  - **Vender y anular comparten el hueco** (mismo código; lo dice el docblock de
-    `consumirLineaAnulada`). Pausar un ítem (en vez de borrarlo) **no** lo dispara: las consultas
-    filtran solo `eliminado_el`.
-  **Qué ve el usuario:** el reporte de anulaciones marca `sin_valorizar` solo si **ningún**
-  movimiento tuvo costo; si una parte se movió y otra se salteó, la fila sale `valorizado` con la
-  suma parcial — **más baja que la real y sin marca**, indistinguible de un plato barato
-  (`anulaciones-reporte.service.ts`, `resolverCosto`). Mermas hereda el mismo sesgo.
-  **La pregunta para el owner, en lenguaje de local** (escena real, medida): *un mesero pide un
-  risotto con extra de champiñones; el encargado borra "champiñones" del catálogo; más tarde
-  se anula ese risotto. Los champiñones no se descuentan del inventario, y el costo de esa
-  anulación aparece completo cuando no lo es. Lo mismo si el que cambió fue la receta.*
-  - **A — no bloquear, pero marcar el costo como incompleto** en el reporte y en mermas. Trabajo
-    medio: la advertencia hoy es transitoria y hay que guardarla para que el reporte la lea.
-    (Era la candidata de la orquestadora el 2026-09-20.)
-  - **B — congelar al vender** lo que el plato consumió (la receta y los extras de ese momento) y
-    anular contra eso: la anulación siempre devuelve lo que se pidió, aunque el catálogo haya
-    cambiado. Más trabajo; arregla la causa en vez de marcarla.
-  - **C — aceptarlo** y escribirlo en `docs/features/` como límite conocido. Cero trabajo; el
-    número sigue saliendo bajo sin aviso.
-  ✅ **DECIDIDO (owner, 2026-09-29): B, congelar al vender.** Cómo se decidió: en el selector
-  interactivo de la orquestadora, con la escena del risotto, eligió *B* (recomendada) por sobre A
-  y C. Al vender se guarda lo que el plato consumió (la receta, los extras y las opciones de ese
-  momento), y anular devuelve eso aunque el catálogo haya cambiado. Es la misma idea que el
-  precio congelado de la línea (`dd54f81d`). El motor de precios y lo fiscal no se tocan.
-  Escribe en `movimientos_inventario`: va en su propio frente.
-
 - [ ] **En una pasarela modo Mall, el código de comercio hijo lo escribe el propio local y nadie
   verifica que sea suyo** (producto + proceso de alta; anotado el 2026-10-08 al cerrar "la
   configuración de la pasarela no se valida", [`resueltos.md`](resueltos.md)). En Configuración ▸

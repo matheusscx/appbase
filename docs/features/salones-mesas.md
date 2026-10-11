@@ -458,15 +458,34 @@ sentó la mesa— mientras la de las promos ya era por línea. Ahora las dos son
 lleva la promo de la semana pasada. Detalle en
 [`motor-promociones.md`](./motor-promociones.md).
 
-**Dos líneas se juntan solo si comparten ítem, personalización, precio congelado Y reglas
-congeladas.** Los tres últimos cubren tres formas distintas de que dos pedidos del mismo
-plato sean dos hechos distintos:
+**Lo que el plato consume también se congela** (`consumo_congelado`, jsonb, 2026-10-11; owner,
+2026-09-29): al pedir, la línea guarda la forma del catálogo que la expansión de stock lee (la
+receta, los componentes del combo, y el tipo y la unidad de cada extra y opción elegida). Anular
+el plato con un motivo que descuenta, cobrar la cuenta y la reserva de las mesas abiertas leen
+eso, no el catálogo de después: si el encargado le cambia el arroz al risotto con la mesa
+sentada, la mesa consume el arroz con que se cocinó. Un ingrediente o una opción que se sacó de
+la receta o del grupo y se borró después **igual se descuenta**, también al cobrar (owner,
+2026-10-11): el inventario lo deja salir por `venta` solo con la marca `consumoDePlatoPedido`,
+que pone únicamente la expansión de lo congelado, y el POS sigue sin poder vender un producto
+borrado. Una línea sin congelado (un producto, o anterior a la columna) usa el catálogo vivo.
+**Límites conocidos:** subir la cantidad de una línea existente reusa lo que la línea congeló;
+y la conversión usa la unidad de stock congelada, así que un ingrediente que se sacó de la receta
+sin haber tenido nunca movimientos, se le cambió la unidad y recibió stock antes del cobro se
+descontaría en la escala vieja (el cambio de unidad lo bloquean los movimientos y las
+referencias vivas, que es casi siempre).
+Detalle: [`resueltos.md`](../agent/resueltos.md), *"Anular un plato, y cobrarlo, consume lo que
+se pidió"*.
+
+**Dos líneas se juntan solo si comparten ítem, personalización, precio congelado, reglas
+congeladas Y consumo congelado.** Los cuatro últimos cubren cuatro formas distintas de que dos
+pedidos del mismo plato sean dos hechos distintos:
 
 | Cambia | Escena |
 |---|---|
 | la personalización | una con queso y otra sin |
 | el precio | pedís, sube la carta, pedís otra |
 | las reglas | pedís, sale un 20%, pedís otra — *"esa sí sale con el descuento"* (owner) |
+| el consumo | pedís un risotto, le cambian el arroz a la receta, pedís otro |
 
 El caso de las reglas es el que **no** se ve en el precio: el de lista no se movió, así que
 sin ese término las dos se fusionaban y la segunda perdía su descuento.
@@ -675,7 +694,7 @@ eliminados) ni la línea quitar (ya está despachada).
 
 | Tipo del motivo | Efecto |
 |---|---|
-| `merma` / `cortesia` / `consumo_personal` | Descuenta stock — `ItemsService.consumirLineaAnulada`, misma expansión de receta/combo/opciones que el cobro, con el snapshot de personalización **congelado en la línea**. El movimiento va `motivo: 'merma'` + `motivoBajaId` + `cuentaLineaAnulacionId` (nunca `motivo: 'anulacion'`, que en el kardex significa *anular una venta* y hace que el stock **vuelva**) |
+| `merma` / `cortesia` / `consumo_personal` | Descuenta stock — `ItemsService.consumirLineaAnulada`, misma expansión de receta/combo/opciones que el cobro, con la personalización y el **consumo congelados en la línea** (lo que se pidió, aunque la receta, el combo o el grupo hayan cambiado después, y aunque un ingrediente u opción se haya borrado). El movimiento va `motivo: 'merma'` + `motivoBajaId` + `cuentaLineaAnulacionId` (nunca `motivo: 'anulacion'`, que en el kardex significa *anular una venta* y hace que el stock **vuelva**) |
 | `no_elaborado` | Sin movimiento: ese stock nunca salió |
 
 La regla vive en una sola función, `tipoMotivoBajaDescuenta` (junto al enum, con un `switch`
@@ -851,10 +870,11 @@ rango, también a los que no anularon nada** — van con `platos`/`precioCarta` 
 garzón sin anulaciones es el punto de comparación que hace sospechoso el % alto de otro.
 Orden: por `garzonNombre`, *Sin garzón* al final.
 
-**Fuera de este frente** (`pendientes.md`): el día comercial que cruza la medianoche; los
-ingredientes/componentes borrados del catálogo que se saltean sin movimiento al anular (el
-costo sale bajo sin marca — hueco heredado de la parte 2). La cortesía como retiro gravado con
-IVA se construyó el 2026-10-03 (sección siguiente).
+**Fuera de este frente** (`pendientes.md`): el día comercial que cruza la medianoche. El costo
+bajo y sin marca de un plato con ingredientes, componentes u opciones que cambiaron después de
+pedirlo se cerró el 2026-10-11: la anulación consume lo congelado en la línea (§ *"El precio de
+la línea se congela al pedirla"*). La cortesía como retiro gravado con IVA se construyó el
+2026-10-03 (sección siguiente).
 
 **El rol sembrado `Salones · Encargado` lleva `Items:Leer`** (owner, 2026-09-28). Con
 `Operar` llegaba a la mesa y con `Anular` anulaba lo despachado, pero `GET /items` —el catálogo

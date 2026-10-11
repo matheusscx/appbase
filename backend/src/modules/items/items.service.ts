@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -46,6 +47,7 @@ import {
   type PersonalizacionRecetaSnapshot,
   type SnapshotGrupo,
 } from '../../common/dto/personalizacion-receta.dto';
+import type { ConsumoCongelado } from '../../common/dto/consumo-congelado.dto';
 
 /**
  * A quién le atribuye el kardex el consumo que genera la expansión
@@ -146,6 +148,19 @@ function contextoParaHijo(r: ContextoResuelto): ContextoConsumo {
         ventaId: r.ventaId!,
         ventaDetalleId: r.ventaDetalleId!,
       };
+}
+
+/**
+ * La marca que deja salir por `venta` un ítem borrado
+ * (`RegistrarMovimientoParams.consumoDePlatoPedido`): solo cuando la expansión
+ * lee lo que una línea de cuenta congeló, y solo en la venta. La anulación no
+ * la necesita porque `merma` ya pasa sobre un eliminado.
+ */
+function marcaDePlatoPedido(
+  ctx: ContextoResuelto,
+  consumo: ConsumoCongelado | undefined,
+): { consumoDePlatoPedido?: true } {
+  return consumo && !ctx.enAnulacion ? { consumoDePlatoPedido: true } : {};
 }
 
 interface ItemRow {
@@ -381,6 +396,31 @@ export interface LineaConsumo {
   itemId: string;
   cantidad: string;
   personalizacion: PersonalizacionRecetaSnapshot | null;
+  /**
+   * Lo que la línea de cuenta congeló al pedirse (`cuenta_lineas.consumo_congelado`).
+   * Si viene, la receta o el combo se expanden contra esto y no contra el
+   * catálogo de hoy: lo que una mesa abierta reserva es lo que va a descontar
+   * al cobrar. Ausente o `null`: catálogo vivo.
+   */
+  consumo?: ConsumoCongelado | null;
+}
+
+/**
+ * Los grupos que consume una línea. Los de sus componentes solo cuentan en un
+ * combo: `venderIngredientesReceta` ignora `snapshot.componentes`. Lo usan la
+ * carga de la foto y la acumulación, así que las dos pasadas no pueden
+ * discrepar.
+ */
+function gruposDeConsumo(
+  tipo: string,
+  personalizacion: PersonalizacionRecetaSnapshot | null | undefined,
+): SnapshotGrupo[] {
+  const propios = personalizacion?.grupos ?? [];
+  if (tipo !== 'combo') return propios;
+  return [
+    ...propios,
+    ...(personalizacion?.componentes ?? []).flatMap((c) => c.grupos),
+  ];
 }
 
 /**
@@ -4190,15 +4230,18 @@ export class ItemsService {
     manager: EntityManager | Db,
     tenantId: string,
     ingredienteIds: string[],
-  ): Promise<Map<string, { nombre: string; unidad_medida: string }>> {
+  ): Promise<
+    Map<string, { tipo: string; nombre: string; unidad_medida: string }>
+  > {
     const ids = [...new Set(ingredienteIds)];
     if (!ids.length) return new Map();
     const rows: {
       item_id: string;
+      tipo: string;
       nombre: string;
       unidad_medida: string;
     }[] = await manager.query(
-      `SELECT i.item_id, i.nombre, ip.unidad_medida
+      `SELECT i.item_id, i.tipo, i.nombre, ip.unidad_medida
          FROM items i
          JOIN item_producto ip ON ip.item_id = i.item_id
         WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
@@ -4208,8 +4251,44 @@ export class ItemsService {
     return new Map(
       rows.map((r) => [
         r.item_id,
-        { nombre: r.nombre, unidad_medida: r.unidad_medida },
+        { tipo: r.tipo, nombre: r.nombre, unidad_medida: r.unidad_medida },
       ]),
+    );
+  }
+
+  /**
+   * Los ingredientes de una receta según lo congelado en la línea. Que falte la
+   * receta no es "sin ingredientes": `congelarConsumos` guarda TODA receta que
+   * la expansión de esa línea recorre, así que una ausencia es una foto rota, y
+   * descontar nada en silencio es justo el error que el congelado vino a sacar.
+   */
+  private recetaCongelada(
+    consumo: ConsumoCongelado,
+    recetaItemId: string,
+  ): IngredienteReceta[] {
+    const ingredientes = consumo.recetas[recetaItemId];
+    if (!ingredientes) {
+      throw new InternalServerErrorException(
+        `El consumo congelado de la línea no trae la receta ${recetaItemId}`,
+      );
+    }
+    return ingredientes;
+  }
+
+  /**
+   * Los extras congelados en la forma de `catalogoDeExtras`. Solo los que
+   * tienen unidad de stock: un extra siempre es producto o ingrediente, y la
+   * misma foto guarda opciones receta, que no la tienen.
+   */
+  private extrasCongelados(
+    consumo: ConsumoCongelado,
+  ): Map<string, { nombre: string; unidad_medida: string }> {
+    return new Map(
+      Object.entries(consumo.items).flatMap(([id, it]) =>
+        it.unidadMedida != null
+          ? [[id, { nombre: it.nombre, unidad_medida: it.unidadMedida }]]
+          : [],
+      ),
     );
   }
 
@@ -4513,25 +4592,38 @@ export class ItemsService {
        * esto, `localDe` se releía una vez por receta dentro de ese loop.
        */
       ubicacionLocalId?: string;
+      /**
+       * Lo que la línea de cuenta congeló al pedirse. Si viene, la receta y sus
+       * extras se leen de acá y no del catálogo de hoy (owner, 2026-09-29), y
+       * cada salida lleva `consumoDePlatoPedido`: un ingrediente que se sacó de
+       * la receta y se borró después igual sale, porque se cocinó. Ausente: la
+       * venta del POS o de la tienda, que expande en el mismo momento en que
+       * vende.
+       */
+      consumo?: ConsumoCongelado;
     } & ContextoConsumo,
   ): Promise<string[]> {
     const ctx = resolverContexto(params);
     const convertir =
       params.convertir ?? (await this.catalogService.crearConversor());
-    const ingredientesBase = await this.obtenerIngredientesReceta(
-      manager,
-      params.tenantId,
-      params.recetaItemId,
-    );
+    const ingredientesBase = params.consumo
+      ? this.recetaCongelada(params.consumo, params.recetaItemId)
+      : await this.obtenerIngredientesReceta(
+          manager,
+          params.tenantId,
+          params.recetaItemId,
+        );
     // Un extra que ya no está en la carta sí llega hasta acá: la venta de una
     // cuenta de salón trae la foto congelada sin re-resolverla (test 20 de
     // `cuenta-precio-congelado.e2e-spec.ts`). La unidad de stock sale del ítem,
     // no de la carta, así que ese extra se descuenta igual mientras siga vivo.
-    const extrasCat = await this.catalogoDeExtras(
-      manager,
-      params.tenantId,
-      params.snapshot?.extras.map((e) => e.ingredienteItemId) ?? [],
-    );
+    const extrasCat = params.consumo
+      ? this.extrasCongelados(params.consumo)
+      : await this.catalogoDeExtras(
+          manager,
+          params.tenantId,
+          params.snapshot?.extras.map((e) => e.ingredienteItemId) ?? [],
+        );
 
     // El orden por id (y no el del snapshot) lo fija la expansión compartida:
     // es el orden de bloqueo. Efecto lateral aceptado: el orden de las
@@ -4575,6 +4667,7 @@ export class ItemsService {
         ventaDetalleId: ctx.ventaDetalleId,
         motivoBajaId: ctx.motivoBajaId,
         cuentaLineaAnulacionId: ctx.cuentaLineaAnulacionId,
+        ...marcaDePlatoPedido(ctx, params.consumo),
       };
 
       const { advertencia } = await this.moverConsumoOSaltear(
@@ -4600,6 +4693,7 @@ export class ItemsService {
         cantidadVendida: params.cantidadVendida,
         convertir,
         ubicacionLocalId,
+        consumo: params.consumo,
       },
       params.snapshot?.grupos,
     );
@@ -4634,6 +4728,8 @@ export class ItemsService {
        * una vez por combo.
        */
       ubicacionLocalId?: string;
+      /** Ver `venderIngredientesReceta`: los componentes y sus recetas salen de acá. */
+      consumo?: ConsumoCongelado;
     } & ContextoConsumo,
   ): Promise<string[]> {
     const ctx = resolverContexto(params);
@@ -4642,29 +4738,39 @@ export class ItemsService {
     // ingredientes (N componentes × M ingredientes).
     const convertir =
       params.convertir ?? (await this.catalogService.crearConversor());
-    const componentes: {
+    type ComponenteAVender = {
       componente_item_id: string;
       componente_nombre: string;
       tipo: string;
       cantidad: string;
       bloqueante: boolean;
       unidad_medida: string | null;
-    }[] = await manager.query(
-      // `LEFT JOIN item_producto`, no `JOIN`: una receta o un servicio no
-      // tienen fila ahí, y siguen siendo componentes válidos (`ip.unidad_medida`
-      // les queda NULL, sin filtrar la fila). La unidad viaja en ESTA query —
-      // una por combo, no una por componente— para que la advertencia de
-      // faltante del producto-componente (`moverConsumoOSaltear`) no dispare
-      // una consulta propia por cada uno (ronda de fixes 2, Important I-B).
-      `SELECT cc.componente_item_id, i.nombre AS componente_nombre, i.tipo,
+    };
+    const componentes: ComponenteAVender[] = params.consumo
+      ? params.consumo.componentes.map((c) => ({
+          componente_item_id: c.componenteItemId,
+          componente_nombre: c.nombre,
+          tipo: c.tipo,
+          cantidad: c.cantidad,
+          bloqueante: c.bloqueante,
+          unidad_medida: c.unidadMedida,
+        }))
+      : await manager.query(
+          // `LEFT JOIN item_producto`, no `JOIN`: una receta o un servicio no
+          // tienen fila ahí, y siguen siendo componentes válidos (`ip.unidad_medida`
+          // les queda NULL, sin filtrar la fila). La unidad viaja en ESTA query —
+          // una por combo, no una por componente— para que la advertencia de
+          // faltante del producto-componente (`moverConsumoOSaltear`) no dispare
+          // una consulta propia por cada uno (ronda de fixes 2, Important I-B).
+          `SELECT cc.componente_item_id, i.nombre AS componente_nombre, i.tipo,
               cc.cantidad, cc.bloqueante, ip.unidad_medida
        FROM combo_componentes cc
        JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
        LEFT JOIN item_producto ip ON ip.item_id = cc.componente_item_id
        WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2 AND cc.eliminado_el IS NULL
        ORDER BY cc.componente_item_id`,
-      [params.comboItemId, params.tenantId],
-    );
+          [params.comboItemId, params.tenantId],
+        );
 
     const advertencias: string[] = [];
     // Componentes que no se sirvieron NADA: sus grupos de modificadores
@@ -4705,6 +4811,8 @@ export class ItemsService {
             comp.componente_item_id,
             convertir,
             ubicacionLocalId,
+            params.consumo &&
+              this.recetaCongelada(params.consumo, comp.componente_item_id),
           );
           if (
             disponible !== null &&
@@ -4727,6 +4835,7 @@ export class ItemsService {
             cantidadVendida: cantidadTotal,
             convertir,
             ubicacionLocalId,
+            consumo: params.consumo,
           });
           advertencias.push(...adv);
         } catch (error) {
@@ -4759,6 +4868,7 @@ export class ItemsService {
         ventaDetalleId: ctx.ventaDetalleId,
         motivoBajaId: ctx.motivoBajaId,
         cuentaLineaAnulacionId: ctx.cuentaLineaAnulacionId,
+        ...marcaDePlatoPedido(ctx, params.consumo),
       };
       const { advertencia, sirvioAlgo } = await this.moverConsumoOSaltear(
         manager,
@@ -4787,6 +4897,7 @@ export class ItemsService {
         cantidadVendida: params.cantidadVendida,
         convertir,
         ubicacionLocalId,
+        consumo: params.consumo,
       },
       params.snapshot?.grupos,
     );
@@ -4816,6 +4927,7 @@ export class ItemsService {
           cantidadVendida: params.cantidadVendida,
           convertir,
           ubicacionLocalId,
+          consumo: params.consumo,
         },
         gruposComponentes,
       );
@@ -4845,6 +4957,8 @@ export class ItemsService {
       convertir: ConvertirUnidad;
       /** Requerido: los tres llamadores ya lo tienen cargado (ver `venderIngredientesReceta`). */
       ubicacionLocalId: string;
+      /** Ver `venderIngredientesReceta`: el tipo y la unidad de cada opción salen de acá. */
+      consumo?: ConsumoCongelado;
     } & ContextoConsumo,
     grupos: SnapshotGrupo[] | undefined,
   ): Promise<string[]> {
@@ -4868,17 +4982,44 @@ export class ItemsService {
     // `localDe` una vez por invocación, N+1 en el camino más caliente del
     // sistema.
     const { ubicacionLocalId } = params;
-    for (const op of opciones) {
-      const rows: { tipo: string; unidad_medida: string | null }[] =
-        await manager.query(
-          `SELECT i.tipo, ip.unidad_medida
+    // Qué es cada opción y en qué unidad se guarda su stock, de una para todas:
+    // de lo congelado en la línea, o del catálogo en UNA consulta. Hasta el
+    // 2026-10-11 era una consulta por opción adentro del loop (N+1).
+    const catalogo = new Map<
+      string,
+      { tipo: string; unidad_medida: string | null }
+    >();
+    if (params.consumo) {
+      for (const op of opciones) {
+        const it = params.consumo.items[op.itemId];
+        if (it) {
+          catalogo.set(op.itemId, {
+            tipo: it.tipo,
+            unidad_medida: it.unidadMedida,
+          });
+        }
+      }
+    } else if (opciones.length) {
+      const rows: {
+        item_id: string;
+        tipo: string;
+        unidad_medida: string | null;
+      }[] = await manager.query(
+        `SELECT i.item_id, i.tipo, ip.unidad_medida
            FROM items i
            LEFT JOIN item_producto ip ON ip.item_id = i.item_id
-           WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
-          [op.itemId, params.tenantId],
-        );
-      if (!rows.length) continue;
-      const { tipo, unidad_medida } = rows[0];
+          WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
+            AND i.eliminado_el IS NULL`,
+        [[...new Set(opciones.map((op) => op.itemId))], params.tenantId],
+      );
+      for (const r of rows) catalogo.set(r.item_id, r);
+    }
+    for (const op of opciones) {
+      const cat = catalogo.get(op.itemId);
+      // Opción que ya no está (borrada antes de congelar, o en vivo): no se
+      // mueve stock de un ítem que no existe.
+      if (!cat) continue;
+      const { tipo, unidad_medida } = cat;
       if (tipo === 'servicio') continue;
 
       // cantidad total = cantidad de la opción × unidades elegidas × cantidad vendida del item
@@ -4898,6 +5039,7 @@ export class ItemsService {
           cantidadVendida: cantidadTotal,
           convertir: params.convertir,
           ubicacionLocalId,
+          consumo: params.consumo,
         });
         advertencias.push(...adv);
         continue;
@@ -4922,6 +5064,7 @@ export class ItemsService {
           ventaDetalleId: ctx.ventaDetalleId,
           motivoBajaId: ctx.motivoBajaId,
           cuentaLineaAnulacionId: ctx.cuentaLineaAnulacionId,
+          ...marcaDePlatoPedido(ctx, params.consumo),
         },
         {
           enAnulacion: ctx.enAnulacion,
@@ -4947,10 +5090,15 @@ export class ItemsService {
    * opciones de grupo, moduladas por el snapshot congelado en la línea— para
    * no duplicarla; lo único que cambia es a quién se le atribuye el consumo:
    * `motivo: 'merma'` + `motivoBajaId` + `cuentaLineaAnulacionId`, nunca
-   * `ventaId` (`ContextoConsumo`, arriba de esta clase). Ingredientes,
-   * componentes y opciones borrados se siguen salteando sin movimiento —eso
-   * lo decide la expansión compartida, no este método— y se saltean igual
-   * que al cobrar.
+   * `ventaId` (`ContextoConsumo`, arriba de esta clase).
+   *
+   * **Consume lo que el plato consumió al pedirse, no lo que hoy dice el
+   * catálogo** (owner, 2026-09-29): con `consumo`, la receta, los componentes,
+   * los extras y las opciones salen de lo que la línea congeló, igual que al
+   * cobrar. Editar la receta o sacar una opción del grupo y borrarla ya no
+   * cambian lo que se descuenta, y el costo del reporte de anulaciones sale
+   * completo. Sin `consumo` (una línea anterior al congelado) se expande contra
+   * el catálogo vivo, y lo borrado se saltea como antes.
    *
    * El producto simple NO pasa por `venderComponentesCombo` ni por
    * `venderIngredientesReceta`: tampoco lo hace la venta (vive en el loop de
@@ -5008,6 +5156,12 @@ export class ItemsService {
       cantidad: string;
       /** El congelado en la línea. Ausente = sin extras/omitidos/grupos. */
       snapshot?: PersonalizacionRecetaSnapshot | null;
+      /**
+       * Lo que la línea consumió al pedirse (`cuenta_lineas.consumo_congelado`).
+       * Ausente o `null`: una línea anterior al congelado, que se expande contra
+       * el catálogo de hoy.
+       */
+      consumo?: ConsumoCongelado | null;
       motivoBajaId: string;
       cuentaLineaAnulacionId: string;
       /**
@@ -5068,6 +5222,7 @@ export class ItemsService {
         snapshot: params.snapshot ?? undefined,
         convertir: params.convertir,
         ubicacionLocalId: params.ubicacionLocalId,
+        consumo: params.consumo ?? undefined,
       });
     }
 
@@ -5082,6 +5237,7 @@ export class ItemsService {
       snapshot: params.snapshot ?? undefined,
       convertir: params.convertir,
       ubicacionLocalId: params.ubicacionLocalId,
+      consumo: params.consumo ?? undefined,
     });
   }
 
@@ -5181,113 +5337,37 @@ export class ItemsService {
     const tipos = new Map(tipoRows.map((r) => [r.item_id, r.tipo]));
     const nombres = new Map(tipoRows.map((r) => [r.item_id, r.nombre]));
 
-    /**
-     * Los grupos que una línea consume. Los de sus componentes solo cuentan en
-     * un combo — `venderIngredientesReceta` ignora `snapshot.componentes`. Se
-     * usa para juntar los ids Y para acumular, así que las dos pasadas no
-     * pueden discrepar.
-     */
-    const gruposDeLinea = (linea: LineaConsumo): SnapshotGrupo[] => {
-      const propios = linea.personalizacion?.grupos ?? [];
-      if (tipos.get(linea.itemId) !== 'combo') return propios;
-      return [
-        ...propios,
-        ...(linea.personalizacion?.componentes ?? []).flatMap((c) => c.grupos),
-      ];
-    };
-
-    // 2) Componentes de todos los combos pedidos, en una consulta.
-    const comboIds = lineas
-      .filter((l) => tipos.get(l.itemId) === 'combo')
-      .map((l) => l.itemId);
-    const componenteRows: {
-      combo_item_id: string;
-      componente_item_id: string;
-      tipo: string;
-      nombre: string;
-      cantidad: string;
-      bloqueante: boolean;
-    }[] = comboIds.length
-      ? await this.db.query(
-          `SELECT cc.combo_item_id, cc.componente_item_id, i.tipo, i.nombre,
-                  cc.cantidad, cc.bloqueante
-             FROM combo_componentes cc
-             JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
-            WHERE cc.combo_item_id = ANY($1::uuid[]) AND cc.tenant_id = $2
-              AND cc.eliminado_el IS NULL`,
-          [[...new Set(comboIds)], tenantId],
-        )
-      : [];
-    const componentes = new Map<string, typeof componenteRows>();
-    for (const r of componenteRows) {
-      componentes.set(r.combo_item_id, [
-        ...(componentes.get(r.combo_item_id) ?? []),
-        r,
-      ]);
-    }
-
-    // 3) Catálogo de TODAS las opciones de grupo elegidas, en una consulta: qué
-    //    es cada una y en qué unidad se guarda su stock. `LEFT JOIN` porque una
-    //    opción puede ser una receta, que no tiene fila en `item_producto`.
-    const opcionIds = lineas.flatMap((l) =>
-      gruposDeLinea(l).flatMap((g) => g.opciones.map((op) => op.itemId)),
+    // 2) Lo que consume cada receta o combo: lo que la línea congeló al
+    //    pedirse, o el catálogo vivo, cargado de una para todas las que no lo
+    //    traen. Una mesa abierta reserva lo mismo que va a descontar al cobrar.
+    const aCongelar = lineas.filter(
+      (l) =>
+        !l.consumo &&
+        (tipos.get(l.itemId) === 'receta' || tipos.get(l.itemId) === 'combo'),
     );
-    const opcionRows: {
-      item_id: string;
-      tipo: string;
-      nombre: string;
-      unidad_medida: string | null;
-    }[] = opcionIds.length
-      ? await this.db.query(
-          `SELECT i.item_id, i.tipo, i.nombre, ip.unidad_medida
-             FROM items i
-             LEFT JOIN item_producto ip ON ip.item_id = i.item_id
-            WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
-              AND i.eliminado_el IS NULL`,
-          [[...new Set(opcionIds)], tenantId],
-        )
-      : [];
-    const opcionesCat = new Map(opcionRows.map((r) => [r.item_id, r]));
-
-    // 4) Ingredientes de TODAS las recetas que van a expandirse —pedidas
-    //    directo, como componente de un combo o como opción de un grupo— en una
-    //    consulta. Los tres orígenes se juntan antes de consultar justamente
-    //    para que sea una y no tres.
-    const recetaIds = [
-      ...new Set([
-        ...lineas
-          .filter((l) => tipos.get(l.itemId) === 'receta')
-          .map((l) => l.itemId),
-        ...componenteRows
-          .filter((r) => r.tipo === 'receta')
-          .map((r) => r.componente_item_id),
-        ...opcionRows.filter((r) => r.tipo === 'receta').map((r) => r.item_id),
-      ]),
-    ];
-    const ingredientesPorReceta = await this.obtenerIngredientesRecetaPorIds(
+    const congelados = await this.congelarConsumos(
       this.db,
       tenantId,
-      recetaIds,
+      aCongelar.map((l) => ({
+        itemId: l.itemId,
+        tipo: tipos.get(l.itemId)!,
+        personalizacion: l.personalizacion,
+      })),
     );
-
-    // 5) Catálogo de los extras de todos los snapshots, en una consulta.
-    const extrasCat = await this.catalogoDeExtras(
-      this.db,
-      tenantId,
-      lineas.flatMap(
-        (l) => l.personalizacion?.extras.map((e) => e.ingredienteItemId) ?? [],
-      ),
+    const consumoDeLinea = new Map<LineaConsumo, ConsumoCongelado>(
+      aCongelar.map((l, i) => [l, congelados[i]!]),
     );
 
     const acumularReceta = (
+      consumoLinea: ConsumoCongelado,
       recetaItemId: string,
       cantidadPedida: string,
       personalizacion: PersonalizacionRecetaSnapshot | null,
       bloqueanteDelContexto: boolean,
     ): void => {
       const { ingredientes } = this.expandirIngredientesPersonalizados({
-        ingredientesBase: ingredientesPorReceta.get(recetaItemId) ?? [],
-        extrasCat,
+        ingredientesBase: this.recetaCongelada(consumoLinea, recetaItemId),
+        extrasCat: this.extrasCongelados(consumoLinea),
         snapshot: personalizacion ?? undefined,
         // Solo alimenta advertencias, que acá se descartan: preguntar cuánto se
         // consumiría no le avisa nada a nadie.
@@ -5307,20 +5387,21 @@ export class ItemsService {
     };
 
     const acumularGrupos = (
+      consumoLinea: ConsumoCongelado,
       grupos: SnapshotGrupo[],
       cantidadPedida: string,
     ): void => {
       for (const op of grupos.flatMap((g) => g.opciones)) {
-        const cat = opcionesCat.get(op.itemId);
-        // Opción borrada del catálogo: no consume stock de un ítem que ya no
-        // existe. Mismo criterio que `venderOpcionesGrupos`.
+        const cat = consumoLinea.items[op.itemId];
+        // Opción borrada del catálogo antes de congelar: no consume stock de un
+        // ítem que ya no existía. Mismo criterio que `venderOpcionesGrupos`.
         if (!cat || cat.tipo === 'servicio') continue;
         const cantidadTotal = new Decimal(op.cantidad)
           .mul(op.unidades)
           .mul(cantidadPedida)
           .toString();
         if (cat.tipo === 'receta') {
-          acumularReceta(op.itemId, cantidadTotal, null, true);
+          acumularReceta(consumoLinea, op.itemId, cantidadTotal, null, true);
           continue;
         }
         // Una opción de grupo SIEMPRE bloquea: `venderOpcionesGrupos` propaga
@@ -5330,7 +5411,7 @@ export class ItemsService {
           op.itemId,
           cat.nombre,
           cat.tipo === 'ingrediente' && op.unidadCodigo
-            ? conv(cantidadTotal, op.unidadCodigo, cat.unidad_medida!)
+            ? conv(cantidadTotal, op.unidadCodigo, cat.unidadMedida!)
             : cantidadTotal,
           true,
         );
@@ -5343,37 +5424,50 @@ export class ItemsService {
       if (!tipo) continue;
       if (tipo === 'servicio' || tipo === 'suscripcion') continue;
 
-      if (tipo === 'receta') {
-        acumularReceta(
-          linea.itemId,
-          linea.cantidad,
-          linea.personalizacion,
-          true,
-        );
-      } else if (tipo === 'combo') {
-        for (const comp of componentes.get(linea.itemId) ?? []) {
-          if (comp.tipo === 'servicio') continue;
-          const cantidadTotal = new Decimal(comp.cantidad)
-            .mul(linea.cantidad)
-            .toString();
-          if (comp.tipo === 'receta') {
-            // Sin snapshot: la personalización de un componente vive en
-            // `snapshot.componentes[].grupos`, que se acumula abajo.
-            acumularReceta(
-              comp.componente_item_id,
-              cantidadTotal,
-              null,
-              comp.bloqueante,
-            );
-          } else {
-            sumar(
-              comp.componente_item_id,
-              comp.nombre,
-              cantidadTotal,
-              comp.bloqueante,
-            );
+      if (tipo === 'receta' || tipo === 'combo') {
+        const consumoLinea = linea.consumo ?? consumoDeLinea.get(linea)!;
+        if (tipo === 'receta') {
+          acumularReceta(
+            consumoLinea,
+            linea.itemId,
+            linea.cantidad,
+            linea.personalizacion,
+            true,
+          );
+        } else {
+          for (const comp of consumoLinea.componentes) {
+            if (comp.tipo === 'servicio') continue;
+            const cantidadTotal = new Decimal(comp.cantidad)
+              .mul(linea.cantidad)
+              .toString();
+            if (comp.tipo === 'receta') {
+              // Sin snapshot: la personalización de un componente vive en
+              // `snapshot.componentes[].grupos`, que se acumula abajo.
+              acumularReceta(
+                consumoLinea,
+                comp.componenteItemId,
+                cantidadTotal,
+                null,
+                comp.bloqueante,
+              );
+            } else {
+              sumar(
+                comp.componenteItemId,
+                comp.nombre,
+                cantidadTotal,
+                comp.bloqueante,
+              );
+            }
           }
         }
+        // Los grupos NO se multiplican por la cantidad del componente: el
+        // snapshot ya los enumera por unidad. Se pasan la cantidad de la línea,
+        // igual que `venderComponentesCombo`.
+        acumularGrupos(
+          consumoLinea,
+          gruposDeConsumo(tipo, linea.personalizacion),
+          linea.cantidad,
+        );
       } else {
         // ⚠️ Una línea `tipo='ingrediente'` se reserva acá pero la venta la
         // RECHAZA al cerrar (un ingrediente no tiene clasificación tributaria).
@@ -5382,6 +5476,13 @@ export class ItemsService {
         // producto o ingrediente: la línea se consume a sí misma. `cantidad` ya
         // viene en la unidad base del ítem (la venta la resuelve antes, ver
         // `cantidadCanonica` en `ventas.service.ts`), así que no se convierte.
+        //
+        // Sus grupos no se acumulan, igual que en la venta: solo
+        // `venderIngredientesReceta` y `venderComponentesCombo` miran los
+        // grupos, y `agregarLinea` rechaza con 400 la personalización sobre algo
+        // que no sea receta o combo. Si ese guard se relaja, la reserva y el
+        // descuento siguen contando igual: ninguno de los dos descuenta esa
+        // opción.
         sumar(
           linea.itemId,
           nombres.get(linea.itemId) ?? '',
@@ -5389,31 +5490,186 @@ export class ItemsService {
           true,
         );
       }
-
-      // Los grupos NO se multiplican por la cantidad del componente: el
-      // snapshot ya los enumera por unidad. Se pasan la cantidad de la línea,
-      // igual que `venderComponentesCombo`.
-      //
-      // ⚠️ Esto corre para TODA línea, `producto`/`ingrediente` incluidos, y la
-      // venta no las expande así: `venderIngredientesReceta` y
-      // `venderComponentesCombo` son los únicos que miran los grupos. Hoy es
-      // inalcanzable —`salones.service.ts:704` rechaza con 400 la
-      // personalización sobre algo que no sea receta o combo, así que un
-      // producto nunca llega acá con grupos—. **Si ese guard se relaja, esta
-      // línea hace que reservar y descontar divergan**: se apartaría stock de
-      // una opción que después nadie descuenta.
-      //
-      // Ese eje —que la reserva y el descuento cuenten distinto— es el que esta
-      // feature no puede permitirse, porque la divergencia no tira error: se ve
-      // en la mesa que no puede cobrar. Y ya mordió una vez por otro lado: hasta
-      // el 2026-09-02 el consumo llevaba un flag `bloqueante` por ítem mergeado
-      // con AND mientras la venta frena **por ocurrencia**
-      // (ver `ConsumoDeItem`). Que este camino sea inalcanzable no es garantía
-      // de nada; lo que la da es que las dos cuentas se hagan igual.
-      acumularGrupos(gruposDeLinea(linea), linea.cantidad);
     }
 
     return consumo;
+  }
+
+  /**
+   * **Lo que consume cada receta o combo, leído del catálogo de hoy**, en la
+   * forma que se congela en la línea de cuenta (`ConsumoCongelado`). Uno por
+   * línea, en el mismo orden; `null` si la línea no es receta ni combo.
+   *
+   * Lo usan los dos que necesitan esa foto: `SalonesService.agregarLinea`, que
+   * la congela al pedir, y `consumoDeLineas`, que la arma para las líneas que
+   * no la traen (la venta del POS, una línea anterior al congelado).
+   *
+   * **A lo sumo cuatro consultas que no crecen con las líneas**, una por nivel
+   * de la expansión con `= ANY($1)`: componentes de los combos, opciones de
+   * grupo, ingredientes de las recetas de los tres orígenes (pedidas directo,
+   * componente de un combo u opción de un grupo) y extras. El anidamiento tiene
+   * fondo: un ingrediente siempre es producto o ingrediente, y una opción
+   * receta se expande sin snapshot propio.
+   *
+   * Lo que el catálogo ya no tiene, la foto tampoco: un componente, una opción
+   * o un ingrediente borrado antes de pedir no entran.
+   */
+  async congelarConsumos(
+    manager: EntityManager | Db,
+    tenantId: string,
+    lineas: {
+      itemId: string;
+      tipo: string;
+      personalizacion: PersonalizacionRecetaSnapshot | null;
+    }[],
+  ): Promise<(ConsumoCongelado | null)[]> {
+    const expandibles = lineas.filter(
+      (l) => l.tipo === 'receta' || l.tipo === 'combo',
+    );
+
+    // 1) Componentes de todos los combos, con la unidad de stock: la venta la
+    //    usa para frasear el faltante de un componente producto.
+    const comboIds = expandibles
+      .filter((l) => l.tipo === 'combo')
+      .map((l) => l.itemId);
+    const componenteRows: {
+      combo_item_id: string;
+      componente_item_id: string;
+      tipo: string;
+      nombre: string;
+      cantidad: string;
+      bloqueante: boolean;
+      unidad_medida: string | null;
+    }[] = comboIds.length
+      ? await manager.query(
+          // `LEFT JOIN item_producto`: una receta o un servicio no tienen fila
+          // ahí y siguen siendo componentes. El orden por componente es el de
+          // bloqueo de `venderComponentesCombo`.
+          `SELECT cc.combo_item_id, cc.componente_item_id, i.tipo, i.nombre,
+                  cc.cantidad, cc.bloqueante, ip.unidad_medida
+             FROM combo_componentes cc
+             JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
+             LEFT JOIN item_producto ip ON ip.item_id = cc.componente_item_id
+            WHERE cc.combo_item_id = ANY($1::uuid[]) AND cc.tenant_id = $2
+              AND cc.eliminado_el IS NULL
+            ORDER BY cc.combo_item_id, cc.componente_item_id`,
+          [[...new Set(comboIds)], tenantId],
+        )
+      : [];
+    const componentes = new Map<string, typeof componenteRows>();
+    for (const r of componenteRows) {
+      componentes.set(r.combo_item_id, [
+        ...(componentes.get(r.combo_item_id) ?? []),
+        r,
+      ]);
+    }
+
+    // 2) Tipo, nombre y unidad de todas las opciones de grupo elegidas. `LEFT
+    //    JOIN` porque una opción puede ser una receta.
+    const opcionIds = expandibles.flatMap((l) =>
+      gruposDeConsumo(l.tipo, l.personalizacion).flatMap((g) =>
+        g.opciones.map((op) => op.itemId),
+      ),
+    );
+    const opcionRows: {
+      item_id: string;
+      tipo: string;
+      nombre: string;
+      unidad_medida: string | null;
+    }[] = opcionIds.length
+      ? await manager.query(
+          `SELECT i.item_id, i.tipo, i.nombre, ip.unidad_medida
+             FROM items i
+             LEFT JOIN item_producto ip ON ip.item_id = i.item_id
+            WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
+              AND i.eliminado_el IS NULL`,
+          [[...new Set(opcionIds)], tenantId],
+        )
+      : [];
+
+    // 3) Ingredientes de TODAS las recetas que se van a expandir, de los tres
+    //    orígenes juntos para que sea una consulta y no tres.
+    const ingredientesPorReceta = await this.obtenerIngredientesRecetaPorIds(
+      manager,
+      tenantId,
+      [
+        ...new Set([
+          ...expandibles
+            .filter((l) => l.tipo === 'receta')
+            .map((l) => l.itemId),
+          ...componenteRows
+            .filter((r) => r.tipo === 'receta')
+            .map((r) => r.componente_item_id),
+          ...opcionRows
+            .filter((r) => r.tipo === 'receta')
+            .map((r) => r.item_id),
+        ]),
+      ],
+    );
+
+    // 4) Los extras de todos los snapshots.
+    const extrasCat = await this.catalogoDeExtras(
+      manager,
+      tenantId,
+      expandibles.flatMap(
+        (l) => l.personalizacion?.extras.map((e) => e.ingredienteItemId) ?? [],
+      ),
+    );
+
+    const opcionesCat = new Map(opcionRows.map((r) => [r.item_id, r]));
+    return lineas.map((linea) => {
+      if (linea.tipo !== 'receta' && linea.tipo !== 'combo') return null;
+
+      const items: ConsumoCongelado['items'] = {};
+      for (const e of linea.personalizacion?.extras ?? []) {
+        const cat = extrasCat.get(e.ingredienteItemId);
+        if (cat) {
+          items[e.ingredienteItemId] = {
+            tipo: cat.tipo,
+            nombre: cat.nombre,
+            unidadMedida: cat.unidad_medida,
+          };
+        }
+      }
+      for (const g of gruposDeConsumo(linea.tipo, linea.personalizacion)) {
+        for (const op of g.opciones) {
+          const cat = opcionesCat.get(op.itemId);
+          if (cat) {
+            items[op.itemId] = {
+              tipo: cat.tipo,
+              nombre: cat.nombre,
+              unidadMedida: cat.unidad_medida,
+            };
+          }
+        }
+      }
+
+      const comps =
+        linea.tipo === 'combo' ? (componentes.get(linea.itemId) ?? []) : [];
+      const recetaIds = [
+        ...(linea.tipo === 'receta' ? [linea.itemId] : []),
+        ...comps
+          .filter((c) => c.tipo === 'receta')
+          .map((c) => c.componente_item_id),
+        ...Object.entries(items)
+          .filter(([, it]) => it.tipo === 'receta')
+          .map(([id]) => id),
+      ];
+      return {
+        recetas: Object.fromEntries(
+          recetaIds.map((id) => [id, ingredientesPorReceta.get(id) ?? []]),
+        ),
+        componentes: comps.map((c) => ({
+          componenteItemId: c.componente_item_id,
+          nombre: c.nombre,
+          tipo: c.tipo,
+          cantidad: c.cantidad,
+          bloqueante: c.bloqueante,
+          unidadMedida: c.unidad_medida ?? null,
+        })),
+        items,
+      };
+    });
   }
 
   /**
@@ -5886,28 +6142,54 @@ export class ItemsService {
    * `LEFT JOIN`, no `JOIN`: un ingrediente sin fila en esa ubicación tiene
    * saldo CERO, no "no existe" — con `JOIN` desaparecería de `rows` y ese
    * ingrediente bloqueante quedaría fuera del mínimo en vez de forzarlo a 0.
+   *
+   * Con `congelados` (la receta que la línea de cuenta congeló al pedirse) el
+   * pre-chequeo mira esa receta y no la de hoy: tiene que decidir sobre lo que
+   * después se va a deducir. Ahí solo se lee el stock.
    */
   private async calcularDisponibleReceta(
     tenantId: string,
     recetaItemId: string,
     convertir: ConvertirUnidad,
     localId: string,
+    congelados?: IngredienteReceta[],
   ): Promise<number | null> {
-    const rows: {
+    type FilaDisponible = {
       cantidad: string;
       unidad_codigo: string;
       ingrediente_unidad_medida: string;
       stock: string;
-    }[] = await this.db.query(
-      `SELECT ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS ingrediente_unidad_medida,
-              COALESCE(su.stock, 0) AS stock
-       FROM receta_ingredientes ri
-       JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
-       LEFT JOIN stock_ubicacion su ON su.item_id = ip.item_id AND su.ubicacion_id = $3
-       WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2
-         AND ri.bloqueante = true AND ri.eliminado_el IS NULL`,
-      [recetaItemId, tenantId, localId],
-    );
+    };
+    let rows: FilaDisponible[];
+    if (congelados) {
+      const bloqueantes = congelados.filter((i) => i.bloqueante);
+      const saldos: { item_id: string; stock: string }[] = bloqueantes.length
+        ? await this.db.query(
+            `SELECT item_id, stock FROM stock_ubicacion
+              WHERE item_id = ANY($1::uuid[]) AND ubicacion_id = $2`,
+            [bloqueantes.map((i) => i.ingredienteItemId), localId],
+          )
+        : [];
+      const saldo = new Map(saldos.map((r) => [r.item_id, r.stock]));
+      rows = bloqueantes.map((i) => ({
+        cantidad: i.cantidad,
+        unidad_codigo: i.unidadCodigo,
+        ingrediente_unidad_medida: i.ingredienteUnidadMedida,
+        // Sin fila en esa ubicación: saldo cero, igual que el `LEFT JOIN`.
+        stock: saldo.get(i.ingredienteItemId) ?? '0',
+      }));
+    } else {
+      rows = await this.db.query(
+        `SELECT ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS ingrediente_unidad_medida,
+                COALESCE(su.stock, 0) AS stock
+         FROM receta_ingredientes ri
+         JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
+         LEFT JOIN stock_ubicacion su ON su.item_id = ip.item_id AND su.ubicacion_id = $3
+         WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2
+           AND ri.bloqueante = true AND ri.eliminado_el IS NULL`,
+        [recetaItemId, tenantId, localId],
+      );
+    }
     if (!rows.length) return null;
 
     let minimo: Decimal | null = null;
@@ -6180,8 +6462,9 @@ export class ItemsService {
       item_id: string;
       cantidad: string;
       personalizacion: PersonalizacionRecetaSnapshot | null;
+      consumo_congelado: ConsumoCongelado | null;
     }[] = await this.db.query(
-      `SELECT cl.item_id, cl.cantidad, cl.personalizacion
+      `SELECT cl.item_id, cl.cantidad, cl.personalizacion, cl.consumo_congelado
          FROM cuenta_lineas cl
          JOIN cuentas c ON c.cuenta_id = cl.cuenta_id
           AND c.tenant_id = $1 AND c.eliminado_el IS NULL
@@ -6214,6 +6497,8 @@ export class ItemsService {
         // aparte en `cantidad_presentacion`), que es lo que `LineaConsumo` pide.
         cantidad: r.cantidad,
         personalizacion: r.personalizacion,
+        // Lo que la mesa va a descontar al cobrar, no la receta de hoy.
+        consumo: r.consumo_congelado,
       })),
       tolerante,
     );

@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import Decimal from 'decimal.js';
 import type { PersonalizacionRecetaSnapshot } from '../dto/personalizacion-receta.dto';
+import type { ConsumoCongelado } from '../dto/consumo-congelado.dto';
 
 export type { PersonalizacionRecetaSnapshot };
 
@@ -99,6 +100,51 @@ export function hashReglasCongeladas<T extends { id: string }>(
       }),
     )
     .digest('hex');
+}
+
+/**
+ * Huella del consumo congelado de una línea de cuenta: el **cuarto término** del
+ * criterio que decide si dos pedidos del mismo plato son una línea o dos (los
+ * otros son la personalización, el precio y las reglas). La mesa pide un
+ * risotto, el encargado le cambia el arroz a la receta, la mesa pide otro: son
+ * dos platos que consumieron cosas distintas, y una línea de cantidad 2 solo
+ * puede congelar una de las dos.
+ *
+ * Los nombres quedan afuera, por el mismo lado seguro que en
+ * `hashReglasCongeladas`: renombrar un ingrediente no cambia qué se consume, y
+ * si entrara, partiría en dos una línea que el garzón espera ver junta. Todo
+ * array se trata como conjunto (`estable`), y acá ninguno significa por su
+ * orden: cada entrada lleva su propio id.
+ *
+ * `null` (un producto, o una línea sin congelado) es su propia huella.
+ */
+export function hashConsumoCongelado(
+  c: ConsumoCongelado | null | undefined,
+): string {
+  const canonico = c
+    ? {
+        recetas: Object.fromEntries(
+          Object.entries(c.recetas).map(([recetaId, ingredientes]) => [
+            recetaId,
+            ingredientes.map(
+              // eslint-disable-next-line @typescript-eslint/no-unused-vars
+              ({ ingredienteNombre: _nombre, ...resto }) => resto,
+            ),
+          ]),
+        ),
+        componentes: c.componentes.map(
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          ({ nombre: _nombre, ...resto }) => resto,
+        ),
+        items: Object.fromEntries(
+          Object.entries(c.items).map(
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            ([id, { nombre: _nombre, ...resto }]) => [id, resto],
+          ),
+        ),
+      }
+    : null;
+  return createHash('sha256').update(estable(canonico)).digest('hex');
 }
 
 /**

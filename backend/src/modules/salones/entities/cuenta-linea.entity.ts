@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 import type { PersonalizacionRecetaSnapshot } from '../../../common/dto/personalizacion-receta.dto';
 import type { ReglasCongeladas } from '../../../common/dto/reglas-congeladas.dto';
+import type { ConsumoCongelado } from '../../../common/dto/consumo-congelado.dto';
 
 /**
  * `idx_cuenta_lineas_personalizacion` (GIN): lo pide la SEGUNDA rama `'cuenta'`
@@ -207,6 +208,22 @@ export class CuentaLinea {
    */
   @Column({ name: 'reglas_congeladas', type: 'jsonb' })
   reglasCongeladas: ReglasCongeladas;
+
+  /**
+   * **Lo que consume una unidad de esta línea, congelado al pedirla** (owner,
+   * 2026-09-29): la receta, los componentes del combo y el tipo y la unidad de
+   * cada extra y cada opción, como estaban en el catálogo en ese momento
+   * (`ItemsService.congelarConsumos`). Anular el plato con un motivo que
+   * descuenta y cobrar la cuenta leen esto, no el catálogo de hoy: editar la
+   * receta o borrar una opción después ya no cambia lo que la mesa consumió.
+   *
+   * `NULL` en un producto, que se consume a sí mismo. Una receta o un combo sin
+   * congelado se expanden contra el catálogo vivo, que es lo de antes de esta
+   * columna. Decide además si dos pedidos son una línea o dos
+   * (`hashConsumoCongelado`).
+   */
+  @Column({ name: 'consumo_congelado', type: 'jsonb', nullable: true })
+  consumoCongelado: ConsumoCongelado | null;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;

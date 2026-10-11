@@ -227,6 +227,13 @@ que sí sobrevivieron el filtro por venir de una merma de mesa, no de bodega: la
 muestra con el badge *"Anulación en mesa"*, junto al nombre del motivo — es lo que hace
 visible que ese plato quemado también está contado en el otro reporte.
 
+**Lo que descuenta una merma de mesa es lo que el plato consumió al pedirse** (2026-10-11): la
+receta, los componentes, los extras y las opciones congelados en la línea de cuenta
+(`cuenta_lineas.consumo_congelado`), aunque el catálogo haya cambiado o algo se haya borrado
+entretanto. Hasta esa fecha se leía el catálogo de hoy: una opción borrada se salteaba y la
+merma salía con un costo más bajo que el real, sin marca. Ver `salones-mesas.md` § *"El precio de
+la línea se congela al pedirla"*.
+
 ---
 
 ## Backend

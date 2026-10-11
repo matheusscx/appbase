@@ -1,5 +1,6 @@
 import {
   detallePersonalizacion,
+  hashConsumoCongelado,
   hashPersonalizacion,
   hashReglasCongeladas,
   textoComandaPersonalizacion,
@@ -486,6 +487,64 @@ describe('personalizacion-receta.util', () => {
       const r = regla();
       expect(hashReglasCongeladas({ descuentos: [r], recargos: [] })).not.toBe(
         hashReglasCongeladas({ descuentos: [], recargos: [r] }),
+      );
+    });
+  });
+
+  describe('hashConsumoCongelado', () => {
+    const ing = (id: string, cantidad: string, nombre = id) => ({
+      ingredienteItemId: id,
+      ingredienteNombre: nombre,
+      ingredienteUnidadMedida: 'unidad',
+      cantidad,
+      unidadCodigo: 'unidad',
+      bloqueante: true,
+    });
+    const consumo = (
+      ingredientes: ReturnType<typeof ing>[],
+      nombreSalsa = 'Salsa',
+    ) => ({
+      recetas: { risotto: ingredientes },
+      componentes: [],
+      items: {
+        salsa: {
+          tipo: 'producto',
+          nombre: nombreSalsa,
+          unidadMedida: 'unidad',
+        },
+      },
+    });
+
+    it('cambiar un ingrediente o su cantidad mueve la huella: son dos platos distintos', () => {
+      const base = hashConsumoCongelado(consumo([ing('arborio', '1')]));
+      expect(hashConsumoCongelado(consumo([ing('grado1', '1')]))).not.toBe(
+        base,
+      );
+      expect(hashConsumoCongelado(consumo([ing('arborio', '2')]))).not.toBe(
+        base,
+      );
+    });
+
+    it('renombrar un ingrediente o una opción no la mueve: no cambia qué se consume', () => {
+      expect(
+        hashConsumoCongelado(consumo([ing('arborio', '1', 'Arroz')], 'Salsa')),
+      ).toBe(
+        hashConsumoCongelado(
+          consumo([ing('arborio', '1', 'Arroz arborio')], 'Salsa de la casa'),
+        ),
+      );
+    });
+
+    it('el orden de los ingredientes no la mueve', () => {
+      expect(
+        hashConsumoCongelado(consumo([ing('a', '1'), ing('b', '2')])),
+      ).toBe(hashConsumoCongelado(consumo([ing('b', '2'), ing('a', '1')])));
+    });
+
+    it('sin congelado (un producto) es distinto de cualquier receta congelada', () => {
+      expect(hashConsumoCongelado(null)).toBe(hashConsumoCongelado(undefined));
+      expect(hashConsumoCongelado(null)).not.toBe(
+        hashConsumoCongelado(consumo([])),
       );
     });
   });

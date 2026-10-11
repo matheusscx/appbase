@@ -519,6 +519,77 @@ describe('InventarioService', () => {
       expect(res.stockResultante).toBe('8');
     });
 
+    // Owner, 2026-10-11: el consumo de un plato que una mesa YA pidió sale por
+    // `venta` aunque el ingrediente se haya borrado después, porque se cocinó.
+    // La excepción es la marca `consumoDePlatoPedido`, no el motivo: vender un
+    // producto borrado sigue rechazado.
+    const VENTA_ID = '00000000-0000-0000-0000-0000000000f1';
+    const VENTA_DETALLE_ID = '00000000-0000-0000-0000-0000000000f2';
+    const salidaDeVenta = {
+      tenantId: TENANT,
+      itemId: ITEM_ID,
+      ubicacionId: UBICACION_ID,
+      tipo: 'salida' as const,
+      motivo: 'venta',
+      cantidad: '2',
+      usuarioId: USER_ID,
+      ventaId: VENTA_ID,
+      ventaDetalleId: VENTA_DETALLE_ID,
+    };
+
+    it('una salida de venta sobre un ítem eliminado, sin la marca de plato pedido, se rechaza: el POS no vende un borrado', async () => {
+      managerMock.query.mockResolvedValueOnce(lockRowEliminado());
+
+      await expect(
+        service.registrarMovimiento(
+          managerMock as unknown as EntityManager,
+          salidaDeVenta,
+        ),
+      ).rejects.toThrow(/Queso mantecoso.*eliminado/s);
+      expect(managerMock.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('con la marca de plato pedido, la salida de venta sobre un ítem eliminado pasa: el ingrediente congelado se cocinó', async () => {
+      managerMock.query
+        .mockResolvedValueOnce(lockRowEliminado())
+        .mockResolvedValueOnce(saldoRow()) // SELECT saldo, ya bajo el lock
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-plato-pedido' }]); // INSERT kardex
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        { ...salidaDeVenta, consumoDePlatoPedido: true },
+      );
+
+      expect(res.stockResultante).toBe('8');
+    });
+
+    it.each([
+      ['otro motivo', { motivo: 'merma', motivoBajaId: MOTIVO_BAJA_ID }],
+      ['una entrada', { tipo: 'entrada' as const }],
+      ['sin la línea vendida', { ventaDetalleId: null }],
+    ])(
+      'la marca de plato pedido con %s es un 400 y no mueve stock',
+      async (_caso, cambio) => {
+        managerMock.query
+          .mockResolvedValueOnce(lockRowEliminado())
+          .mockResolvedValueOnce(saldoRow());
+
+        await expect(
+          service.registrarMovimiento(managerMock as unknown as EntityManager, {
+            ...salidaDeVenta,
+            ...cambio,
+            consumoDePlatoPedido: true,
+          }),
+        ).rejects.toThrow(
+          'consumoDePlatoPedido solo aplica a la salida de una línea vendida',
+        );
+        // El lock y la lectura del saldo, que van antes de las validaciones de
+        // pares; ni el stock ni el kardex se escriben.
+        expect(managerMock.query).toHaveBeenCalledTimes(2);
+      },
+    );
+
     it('un ítem vivo no cambia: el guard solo mira `eliminado_el`', async () => {
       managerMock.query
         .mockResolvedValueOnce([

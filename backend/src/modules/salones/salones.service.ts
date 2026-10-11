@@ -78,6 +78,7 @@ import {
 } from '../../common/utils/tope-unidades-venta.util';
 import {
   detallePersonalizacion,
+  hashConsumoCongelado,
   hashPersonalizacion,
   hashReglasCongeladas,
   textoComandaPersonalizacion,
@@ -1016,6 +1017,16 @@ export class SalonesService {
         dto.itemId,
       );
     const hashReglas = hashReglasCongeladas(reglasCongeladas);
+    // Y lo que el plato consume (owner, 2026-09-29): la receta, los componentes
+    // del combo y el tipo y la unidad de cada extra y opción, como están hoy.
+    // Anular el plato y cobrar la cuenta leen esto, no el catálogo de después:
+    // si la receta cambia con la mesa sentada, lo que se cocinó es lo de acá.
+    const [consumoCongelado] = await this.itemsService.congelarConsumos(
+      this.db,
+      tenantId,
+      [{ itemId: dto.itemId, tipo: item.tipo, personalizacion: snapshot }],
+    );
+    const hashConsumo = hashConsumoCongelado(consumoCongelado);
 
     // **Reintento ante `40P01`.** Desde el 2026-09-01 esta transacción toma un
     // `FOR UPDATE` sobre `item_producto` (`validarStockAlPedir`) y entra a
@@ -1100,6 +1111,7 @@ export class SalonesService {
               itemId: dto.itemId,
               cantidad: resuelta.cantidadCanonica,
               personalizacion: snapshot,
+              consumo: consumoCongelado,
             },
           ]);
           // **`cuentaId: null` a propósito:** con la cuenta, el chokepoint deja
@@ -1119,20 +1131,24 @@ export class SalonesService {
           const existentes = await manager.find(CuentaLinea, {
             where: { tenantId, cuentaId, itemId: dto.itemId },
           });
-          // El merge exige **los tres**: misma personalización, mismo precio
-          // congelado y mismas reglas congeladas. Cada uno cubre una forma distinta
-          // de que dos pedidos del mismo plato sean dos hechos distintos:
+          // El merge exige **los cuatro**: misma personalización, mismo precio
+          // congelado, mismas reglas congeladas y mismo consumo congelado. Cada uno
+          // cubre una forma distinta de que dos pedidos del mismo plato sean dos
+          // hechos distintos:
           //   - el precio → la mesa pide a $5.000, sube la carta, pide otra;
           //   - las reglas → la mesa pide, sale un 20%, pide otra ("esa sí sale con
           //     el descuento", owner 2026-08-30). El precio de lista no se movió, así
-          //     que sin este término se fusionaban y la segunda perdía su descuento.
-          // Con los tres iguales siguen fusionándose, que es lo que el garzón espera
-          // ver ("2 ×", no "1 + 1").
+          //     que sin este término se fusionaban y la segunda perdía su descuento;
+          //   - el consumo → la mesa pide un risotto, le cambian el arroz a la
+          //     receta, pide otro. Una línea de cantidad 2 congela un solo consumo.
+          // Con los cuatro iguales siguen fusionándose, que es lo que el garzón
+          // espera ver ("2 ×", no "1 + 1").
           const match = existentes.find(
             (l) =>
               hashPersonalizacion(l.personalizacion) === hash &&
               new Decimal(l.precioUnitario).eq(precioUnitario) &&
-              hashReglasCongeladas(l.reglasCongeladas) === hashReglas,
+              hashReglasCongeladas(l.reglasCongeladas) === hashReglas &&
+              hashConsumoCongelado(l.consumoCongelado) === hashConsumo,
           );
           if (match) {
             match.cantidad = new Decimal(match.cantidad)
@@ -1173,6 +1189,7 @@ export class SalonesService {
                 precioUnitarioOrigen,
                 tasaCambio,
                 reglasCongeladas,
+                consumoCongelado,
                 unidadIds,
               }),
             );
@@ -1355,8 +1372,11 @@ export class SalonesService {
             new Decimal(resuelta.cantidadCanonica).greaterThan(linea.cantidad)
           ) {
             // La personalización NO se edita por acá: es la misma de los dos
-            // lados, y es la que dice qué consume cada unidad.
+            // lados, y es la que dice qué consume cada unidad. El consumo
+            // congelado también: las unidades que se suman a una línea consumen
+            // lo que la línea congeló al pedirse.
             const personalizacion = linea.personalizacion;
+            const consumo = linea.consumoCongelado;
             await this.itemsService.validarStockAlPedir(
               tenantId,
               [
@@ -1364,6 +1384,7 @@ export class SalonesService {
                   itemId: linea.itemId,
                   cantidad: resuelta.cantidadCanonica,
                   personalizacion,
+                  consumo,
                 },
               ],
               [
@@ -1371,6 +1392,7 @@ export class SalonesService {
                   itemId: linea.itemId,
                   cantidad: linea.cantidad,
                   personalizacion,
+                  consumo,
                 },
               ],
             );
@@ -1862,6 +1884,7 @@ export class SalonesService {
         itemNombre: item.nombre,
         cantidad: cantidad.toString(),
         snapshot: linea.personalizacion,
+        consumo: linea.consumoCongelado,
         motivoBajaId: motivo.id,
         cuentaLineaAnulacionId: anulacion.id,
         ...(unidadIdsAnuladas.length > 0
@@ -2428,9 +2451,9 @@ export class SalonesService {
         else porOrigen.set(l.cuentaId, [l]);
       }
 
-      // La clave lleva **los mismos tres términos** que el merge de
+      // La clave lleva **los mismos cuatro términos** que el merge de
       // `agregarLinea`, y por el mismo motivo: dos líneas del mismo plato con
-      // precio o reglas distintas son dos hechos distintos. Sin el precio acá,
+      // precio, reglas o consumo congelado distintos son dos hechos distintos. Sin el precio acá,
       // fusionar dos cuentas colapsaba las dos sobre la de destino y la plata de
       // la otra desaparecía —medido: 3000 + 4000 quedaban como 2 × 3000—.
       // `toFixed(4)` canoniza: la escala persistida es la misma para las dos,
@@ -2438,12 +2461,14 @@ export class SalonesService {
       // que se rompe sola.
       //
       // ⚠️ Los dos criterios tienen que moverse juntos. Cuando el precio entró
-      // acá se olvidó esta puerta y hubo que volver; el que agregue un cuarto
+      // acá se olvidó esta puerta y hubo que volver; el que agregue un quinto
       // término, que lo agregue en los dos.
       const claveFusion = (l: CuentaLinea) =>
         `${l.itemId}|${hashPersonalizacion(l.personalizacion)}|${new Decimal(
           l.precioUnitario,
-        ).toFixed(4)}|${hashReglasCongeladas(l.reglasCongeladas)}`;
+        ).toFixed(4)}|${hashReglasCongeladas(
+          l.reglasCongeladas,
+        )}|${hashConsumoCongelado(l.consumoCongelado)}`;
       const enDestino = new Map<string, CuentaLinea>();
       for (const l of await manager.find(CuentaLinea, {
         where: { tenantId, cuentaId: destino.id },
@@ -2833,6 +2858,7 @@ export class SalonesService {
             precioUnitarioOrigen: l.precioUnitarioOrigen,
             tasaCambio: l.tasaCambio,
             reglasCongeladas: l.reglasCongeladas,
+            consumoCongelado: l.consumoCongelado,
           })),
         );
 

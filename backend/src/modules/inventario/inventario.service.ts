@@ -115,6 +115,18 @@ export interface RegistrarMovimientoParams {
    */
   permiteSalidaParcial?: boolean;
   /**
+   * La salida es el consumo de un plato **ya pedido en una cuenta de salón**,
+   * leído de lo que su línea congeló al pedirse (`cuenta_lineas.consumo_congelado`):
+   * un ingrediente de su receta, un componente de su combo, un extra o una
+   * opción de grupo. Es lo único que deja una salida de `venta` sobre un ítem
+   * eliminado — ver el guard de eliminados en `registrarMovimiento`.
+   *
+   * Solo con `motivo: 'venta'`, `tipo: 'salida'` y `ventaDetalleId`. La pasa
+   * únicamente `ItemsService` cuando expande un `ConsumoCongelado`; vender un
+   * producto en el POS nunca la lleva.
+   */
+  consumoDePlatoPedido?: boolean;
+  /**
    * La entrada congela `costoUnitario` en el kardex pero **no** mueve el CPP, y
    * queda `costo_informado = false` para que "rehacer la cuenta" tampoco la
    * promedie. Es la vuelta de lo que se perdió en una nota de crédito: entra y
@@ -204,6 +216,12 @@ interface MoverResult {
  * versión anterior de este comentario decía que la allowlist "solo le abre la
  * puerta" al llamador nuevo, lo cual no es cierto: la lista no distingue
  * quién llama.
+ *
+ * `venta` no está, y vender un producto eliminado sigue rechazado. La única
+ * excepción es por llamador y no por motivo: el consumo de un plato que una mesa
+ * ya pidió, leído de lo que su línea congeló (`consumoDePlatoPedido`, owner
+ * 2026-10-11). Sin ella, sacar el arborio de la receta y borrarlo dejaba sin
+ * poder cobrar a la mesa que pidió el risotto con arborio.
  *
  * Es una allowlist y no una lista de rechazos a propósito: un motivo nuevo nace
  * rechazado sobre un eliminado, que es el lado seguro del default.
@@ -436,9 +454,17 @@ export class InventarioService {
     // acote por tenant, y significa otra cosa. Acá no hay nada que ocultar —
     // quien llama ya sabe que el ítem existe— y confundirlos manda a buscar un
     // problema de permisos donde hay un producto discontinuado.
+    // La única `venta` que pasa sobre un eliminado es el consumo de un plato
+    // que una mesa YA pidió, leído de lo que su línea congeló (owner,
+    // 2026-10-11): el arborio que se borró del catálogo después de pedir el
+    // risotto igual se cocinó, y el kardex tiene que decirlo. Vender un
+    // producto eliminado en el POS no lleva la marca y sigue rechazado.
+    const consumoCongeladoDePlatoPedido =
+      params.motivo === 'venta' && params.consumoDePlatoPedido === true;
     if (
       productoRows[0].item_eliminado_el != null &&
-      !MOTIVOS_SOBRE_ITEM_ELIMINADO.includes(params.motivo)
+      !MOTIVOS_SOBRE_ITEM_ELIMINADO.includes(params.motivo) &&
+      !consumoCongeladoDePlatoPedido
     ) {
       throw new BadRequestException(
         `El producto "${productoRows[0].item_nombre}" está eliminado: ` +
@@ -526,6 +552,16 @@ export class InventarioService {
     if (params.permiteSalidaParcial && params.tipo !== 'salida') {
       throw new BadRequestException(
         'permiteSalidaParcial solo aplica a una salida',
+      );
+    }
+    if (
+      params.consumoDePlatoPedido &&
+      (params.motivo !== 'venta' ||
+        params.tipo !== 'salida' ||
+        !params.ventaDetalleId)
+    ) {
+      throw new BadRequestException(
+        'consumoDePlatoPedido solo aplica a la salida de una línea vendida',
       );
     }
     if (params.motivo === 'recuento' && !params.motivoDiferenciaId) {

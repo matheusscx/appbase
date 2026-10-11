@@ -23,6 +23,142 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Anular un plato, y cobrarlo, consume lo que se pidió y no lo que hoy dice el catálogo (cerrada 2026-10-11)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Escribe en `movimientos_inventario`, así que fue
+solo y con el sistema quieto. No toca `modo_inventario`, el motor de precios ni lo fiscal. Spec:
+[`2026-10-11-consumo-congelado-linea-cuenta-design.md`](../superpowers/specs/2026-10-11-consumo-congelado-linea-cuenta-design.md).
+
+**Qué se hizo.** Al pedir, `agregarLinea` congela en `cuenta_lineas.consumo_congelado`
+(`ConsumoCongelado`, `common/dto/consumo-congelado.dto.ts`) **la forma del catálogo** que la
+expansión lee: los ingredientes de cada receta que recorre (el plato, sus componentes receta y
+sus opciones receta), los componentes del combo, y el tipo, el nombre y la unidad de cada extra y
+cada opción elegida. No congela el consumo ya multiplicado: la expansión necesita la estructura
+para decidir quién frena, qué componente no se sirvió y en qué orden se bloquea. Lo arma
+`ItemsService.congelarConsumos`, con las mismas consultas en lote que `consumoDeLineas` ya hacía
+(extraídas, no escritas de nuevo). `venderIngredientesReceta`, `venderComponentesCombo`,
+`venderOpcionesGrupos` y el pre-chequeo `calcularDisponibleReceta` reciben `consumo?` y, si viene,
+leen de ahí. Una receta que falta en lo congelado es una foto rota y lanza: no descuenta nada en
+silencio. Sin `consumo` (venta del POS o de la tienda, que expanden en el momento de vender, o
+una línea anterior a la columna) leen el catálogo vivo, como antes.
+
+**El cobro lee lo mismo que la anulación (decidido con evidencia, no preguntado).** Los dos
+usaban el mismo código y tenían el mismo hueco: con la receta editada entre el pedido y el cobro,
+la venta descontaba la receta nueva. Si solo la anulación leyera lo congelado, una línea de 2
+risottos con 1 anulado descontaría dos recetas distintas. Lo que se cocinó es lo del pedido, y
+varianza ya toma el kardex de `venta` como su teórico. La venta lo recibe por `lineasCongeladas`
+(`LineaCongelada.consumoCongelado`). Por la misma razón, la reserva de las mesas abiertas
+(`comprometidoPorItem`, y `validarStockAlPedir` al pedir y al subir la cantidad) acumula lo
+congelado: lo que una mesa aparta es lo que va a descontar.
+
+**Cómo se decidió lo borrado.** Lo congelado puede nombrar un ingrediente o una opción que
+después se sacó de la receta o del grupo y se borró: son los dos pasos que ya estaban permitidos.
+La anulación ya pasaba (`merma` está en `MOTIVOS_SOBRE_ITEM_ELIMINADO`), pero el cobro habría dado
+400 y la mesa no se habría podido cobrar. La sesión del frente se lo preguntó a la orquestadora
+con la escena del arborio y tres salidas: descontar igual, bloquear el borrado mientras una mesa
+abierta lo use, o cobrar sin descontar y avisar. **El owner eligió descontar igual (2026-10-11,
+AskUserQuestion de la orquestadora, con el costo de las tres).** La excepción es angosta y va
+por llamador, no por motivo: `RegistrarMovimientoParams.consumoDePlatoPedido` (solo con
+`venta`, `salida` y `ventaDetalleId`; si no, 400). La pasa únicamente `marcaDePlatoPedido`, cuando
+la expansión lee un `ConsumoCongelado` en la venta. El porqué está escrito en el guard. Vender un
+producto borrado en el POS sigue rechazado.
+
+**Identidad de la línea.** Dos pedidos del mismo plato con distinto consumo congelado son dos
+líneas: es el cuarto término del merge en `agregarLinea` y en `fusionarCuentas`
+(`hashConsumoCongelado`, sin nombres, para que renombrar un ingrediente no parta la línea).
+**Límites conocidos:** subir la cantidad de una línea existente (`actualizarLinea`) reusa su
+congelado, así que las unidades nuevas consumen la receta de cuando se pidió la línea. Y la
+conversión usa la unidad de stock congelada: si un ingrediente se saca de la receta sin haber
+tenido nunca movimientos, le cambian la unidad y recibe stock antes del cobro, se descontaría en
+la escala vieja. Lo encontró la revisión independiente. El cambio de unidad ya lo bloquean los
+movimientos y las referencias vivas (`tieneMovimientosDeStock`, `referenciaConUnidad`), que es
+casi siempre.
+
+**De paso, un N+1.** `venderOpcionesGrupos` hacía una consulta por opción adentro del loop. Ahora
+es una en lote, o ninguna con lo congelado. Y `consumoDeLineas` ya no reserva los grupos de una
+línea de producto, que la venta tampoco descuenta: era inalcanzable (`agregarLinea` rechaza esa
+personalización) y era la divergencia que su propio comentario advertía.
+
+**La escena del extra no se alcanza (medido).** La entrada decía que el extra se borraba en un
+paso. No es así: la rama `'cuenta'` de `obtenerUsoItem` bloquea borrar un ítem que es extra de
+una línea en una cuenta abierta, que es todo el tiempo en que se puede anular. Sacarlo de la lista
+de extras de la receta tampoco cambiaba nada, porque el extra viaja en el snapshot. Lo fija el
+test 1 del e2e.
+
+**El reporte de anulaciones no cambió de código.** Con la expansión completa, el costo sale
+completo: el test 2 lo afirma (arroz + la salsa borrada = 800).
+
+**Qué lo fija.** `salones-consumo-congelado.e2e-spec.ts`, con fixture propio (ingredientes,
+recetas, grupo, combo, impresora, garzón, mesa y caja creados por el test):
+1. el extra pedido no se borra (400 *está pedido en*) y la anulación lo descuenta;
+2. la opción sacada del grupo y borrada se descuenta al anular, y el reporte da `valorizado` 800;
+3. la receta editada: la anulación consume la pedida (arborio × 2, costo 800);
+4. el combo editado: la anulación consume el componente pedido;
+5. el cobro con la receta editada y el ingrediente borrado descuenta lo pedido;
+6. el POS rechaza un producto borrado (404, sin movimientos);
+7. pedir antes y después de editar la receta da dos líneas, y cada una se cobra con lo suyo;
+8. fusionar dos cuentas no junta consumos distintos;
+9. la reserva de una mesa abierta sigue apartando el ingrediente pedido después de editar la
+   receta.
+
+Antes del arreglo, 2 a 5, 7 y 9 en rojo (el 8 se escribió después, contra su mutante).
+Mutantes: que la expansión ignore `consumo` (2, 3, 4, 5 y 7 en rojo); la marca del inventario
+apagada (5 en rojo); sin el cuarto término en `agregarLinea` (7) o en `fusionarCuentas` (8).
+Unitarios: el guard del inventario (venta sobre un borrado sin la marca se rechaza, con la marca
+pasa, la marca fuera de su par es 400), `venderIngredientesReceta` con lo congelado (sin
+consultas, con la marca en venta y sin ella en merma, y la receta faltante lanza),
+`venderOpcionesGrupos` en una consulta, `consumoDeLineas` con una línea congelada y
+`hashConsumoCongelado`.
+
+La entrada, tal como estaba:
+
+- [x] **Lo que se consume al anular un plato sale de lo que HOY dice el catálogo, no de lo que se
+  pidió: un extra, una opción o un componente que ya no está se saltea sin movimiento, y el costo de
+  la anulación queda bajo sin marca** (backend; heredado del frente *"Anular un plato ya enviado a
+  cocina"*, [`2026-09-18-reporte-anulaciones-design.md`](../superpowers/specs/2026-09-18-reporte-anulaciones-design.md)
+  § 4 y § 7). **Re-medido el 2026-09-28** (sub-agente Sonnet; la orquestadora verificó contra el
+  código lo que la corrige): la versión anterior de esta entrada decía que llegar al hueco
+  necesitaba dos pasos y era muy raro. **Es más fácil de alcanzar:**
+  - **Un extra se borra en un paso.** `obtenerUsoItem` (`items.service.ts`, ~:2627) pone
+    `receta_extras_permitidos` en **advertencias**, no en bloqueos: `DELETE /items/:id` del
+    champiñón funciona directo, y `remove()` además da de baja sus filas de extras. Al anular, el
+    extra congelado en la línea no encuentra su ingrediente y se saltea — con una advertencia en la
+    respuesta HTTP que **no se guarda en ningún lado**.
+  - **Una opción de grupo** necesita dos pasos (la opción sí bloquea el borrado: primero `PATCH
+    /grupos-modificadores/:id` sin esa opción, después el `DELETE`), y se saltea **sin ninguna
+    advertencia** (`venderOpcionesGrupos`).
+  - **Receta o combo editados, sin borrar nada:** `receta_ingredientes` y `combo_componentes` se
+    leen **en vivo** al anular (`obtenerIngredientesRecetaPorIds`, `venderComponentesCombo`). Si
+    entre la venta y la anulación alguien edita la receta o el combo (`PATCH /items/:id`), la
+    anulación consume la receta **nueva**, no la que se cocinó. Sin aviso.
+  - **Vender y anular comparten el hueco** (mismo código; lo dice el docblock de
+    `consumirLineaAnulada`). Pausar un ítem (en vez de borrarlo) **no** lo dispara: las consultas
+    filtran solo `eliminado_el`.
+  **Qué ve el usuario:** el reporte de anulaciones marca `sin_valorizar` solo si **ningún**
+  movimiento tuvo costo; si una parte se movió y otra se salteó, la fila sale `valorizado` con la
+  suma parcial — **más baja que la real y sin marca**, indistinguible de un plato barato
+  (`anulaciones-reporte.service.ts`, `resolverCosto`). Mermas hereda el mismo sesgo.
+  **La pregunta para el owner, en lenguaje de local** (escena real, medida): *un mesero pide un
+  risotto con extra de champiñones; el encargado borra "champiñones" del catálogo; más tarde
+  se anula ese risotto. Los champiñones no se descuentan del inventario, y el costo de esa
+  anulación aparece completo cuando no lo es. Lo mismo si el que cambió fue la receta.*
+  - **A — no bloquear, pero marcar el costo como incompleto** en el reporte y en mermas. Trabajo
+    medio: la advertencia hoy es transitoria y hay que guardarla para que el reporte la lea.
+    (Era la candidata de la orquestadora el 2026-09-20.)
+  - **B — congelar al vender** lo que el plato consumió (la receta y los extras de ese momento) y
+    anular contra eso: la anulación siempre devuelve lo que se pidió, aunque el catálogo haya
+    cambiado. Más trabajo; arregla la causa en vez de marcarla.
+  - **C — aceptarlo** y escribirlo en `docs/features/` como límite conocido. Cero trabajo; el
+    número sigue saliendo bajo sin aviso.
+  ✅ **DECIDIDO (owner, 2026-09-29): B, congelar al vender.** Cómo se decidió: en el selector
+  interactivo de la orquestadora, con la escena del risotto, eligió *B* (recomendada) por sobre A
+  y C. Al vender se guarda lo que el plato consumió (la receta, los extras y las opciones de ese
+  momento), y anular devuelve eso aunque el catálogo haya cambiado. Es la misma idea que el
+  precio congelado de la línea (`dd54f81d`). El motor de precios y lo fiscal no se tocan.
+  Escribe en `movimientos_inventario`: va en su propio frente.
+
+---
+
 ## Un componente fraccionario de combo pide sus grupos por unidad redondeada (cerrada 2026-10-11)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Toca `resolverPersonalizacionCombo`, que es motor:

@@ -149,6 +149,7 @@ describe('SalonesService', () => {
     resolverPersonalizacionCombo: jest.Mock;
     validarStockAlPedir: jest.Mock;
     consumirLineaAnulada: jest.Mock;
+    congelarConsumos: jest.Mock;
   };
   let catalog: { findAllUnidadesMedida: jest.Mock; crearConversor: jest.Mock };
   let monedas: { findMonedas: jest.Mock };
@@ -226,6 +227,10 @@ describe('SalonesService', () => {
       // solo devuelve las advertencias que el test arma, para que
       // `anularLinea` hable del tope, el borrado de línea y la cancelación.
       consumirLineaAnulada: jest.fn().mockResolvedValue([]),
+      // Qué consume el plato, congelado al pedir: la conducta (anular y cobrar
+      // contra eso) la cubre `salones-consumo-congelado.e2e-spec.ts`. Acá no
+      // congela nada, como un producto.
+      congelarConsumos: jest.fn().mockResolvedValue([null]),
     };
 
     catalog = {
@@ -1529,9 +1534,10 @@ describe('SalonesService', () => {
       // por este mock, así que acá solo se ve el alta que sigue.
       expect(orden).toEqual(['lock-cuenta', 'tope-stock', 'save', 'save']);
       // Y con lo que la línea REALMENTE va a escribir: la cantidad canónica,
-      // no la de presentación.
+      // no la de presentación, y el consumo que congela (acá ninguno: el mock
+      // de `congelarConsumos` devuelve el de un producto).
       expect(items.validarStockAlPedir).toHaveBeenCalledWith(TENANT, [
-        { itemId: ITEM, cantidad: '2', personalizacion: null },
+        { itemId: ITEM, cantidad: '2', personalizacion: null, consumo: null },
       ]);
     });
 
