@@ -530,6 +530,22 @@ fiscal y va solo:
   mismo tenant, monto, sin otra orden ligada. Queda rastro de quién la ligó y cuándo. **Descartar
   con un motivo escrito** y **"solo reembolsar"** quedaron descartados: el primero no deja prueba
   de que la venta exista. Costo medio.
+  ⏸ **En espera hasta después de "vale lo que pagó" (owner, 2026-10-11, en el chat de la
+  orquestadora).** Se lanzó y se canceló el mismo día, antes de escribir código. La razón: casi
+  todas las órdenes pagadas sin venta salen del recálculo al volver del banco (precio, hora, promo o
+  tasa que cambian), y eso lo elimina la A de la entrada de los dos "ahora". Después de la A, lo que
+  quede sin venta (ítem borrado o sin stock en ese minuto) se resuelve devolviendo la plata. **Se
+  retoma solo si, con la A en producción, siguen apareciendo órdenes sin venta que el admin quiera
+  registrar a mano.** Lo que la sesión cancelada dejó listo, para no rehacerlo:
+  - La pasarela no lee `ventas`: la validación y la lista de candidatas irían por un contrato que
+    implementa `ventas` (`VentaLigableRegistry`, patrón §13, como `PagoCallbackRegistry`).
+  - `GET /pasarela/admin/ordenes/:id/ventas-candidatas` y `POST …/ordenes/:id/venta`, con
+    `Pasarelas:Actualizar`. Lock de orden y después de venta (el orden del reembolso), y el chequeo
+    de "otra orden ya ligada" bajo el lock de la venta. Rastro en `venta_ligada_por` /
+    `venta_ligada_el`.
+  - Las cuatro preguntas que quedaron sin contestar: el estado de la venta (¿solo `pagada`?), una
+    orden con un reembolso parcial previo, si se puede desligar, y la fiscal, que va aparte: con
+    `venta_id` escrito, un reembolso posterior emite la nota de crédito sobre la venta manual.
 
 ## 4. Necesita que el owner conteste
 
