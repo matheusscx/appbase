@@ -80,6 +80,20 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **La pantalla de retorno de la tienda muestra "rechazado" para una orden `expirada` que pudo
+  cobrarse** (frontend, `useRetornoTienda`; lo vio la revisión del frente `3c9e15de`, 2026-10-11;
+  **leído, no medido**). `verificar` acepta `expirada` y la puede pasar a `pagada`, así que una
+  `expirada` no es un rechazo seguro: es el mismo riesgo que se cerró para `procesando`. La ventana
+  es la expiración de la orden (2 h), así que es casi inalcanzable. Si se toma, decidir con la
+  orquestadora si va a la vista pendiente.
+- [ ] **La vista "Pago pendiente" de la tienda promete "Te avisaremos cuando se acredite" y no hay
+  aviso** (frontend + producto; lo vio la revisión del frente `3c9e15de`, 2026-10-11). Ningún
+  mecanismo avisa al comprador cuando su orden se resuelve. No es nuevo, pero desde ese frente
+  llegan más órdenes a esa vista (`procesando`, `en_proceso`). **Pregunta para el owner** cuando
+  se tome: ¿se cambia el texto por uno honesto (p. ej. "Revisá el estado más tarde desde el link
+  de tu compra" o "el local se comunicará contigo"), o se construye un aviso (correo)? Lo primero
+  es chico; lo segundo, un frente.
+
 - [ ] **Una orden que el retorno dejó `procesando` sin compensar no la saca nadie** (backend,
   `pagos-redirect.service.ts` `confirmarRetorno`; lo vio la revisión independiente del frente
   "cuatro cabos sueltos de la orden", 2026-10-11; **leído, no medido**). El claim
