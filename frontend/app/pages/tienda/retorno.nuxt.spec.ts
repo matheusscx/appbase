@@ -80,6 +80,34 @@ describe('tienda/retorno', () => {
     expect(limpiezas).toBe(1)
   })
 
+  // La orden que el retorno todavía no resolvió (la anulación entró mientras
+  // confirmaba, o el comprador volvió antes de tiempo) caía en "Pago rechazado…
+  // Tu carrito sigue disponible para reintentar", y el cargo pudo haber salido
+  // (pendientes.md § 2). Va a la vista de pago en confirmación, como `pendiente`.
+  it.each(['procesando', 'en_proceso'])('%s: dice que el pago está en confirmación, no que se rechazó', async (estado) => {
+    respuesta = orden(estado, null)
+    const wrapper = await mountSuspended(Retorno)
+    await flushPromises()
+
+    const vista = wrapper.find('[data-qa="retorno-pendiente"]')
+    expect(vista.exists()).toBe(true)
+    expect(vista.text()).toContain('Tu pago está en proceso de confirmación. Te avisaremos cuando se acredite.')
+    expect(wrapper.text()).not.toContain('Pago rechazado')
+    expect(wrapper.text()).not.toContain('Tu carrito sigue disponible para reintentar')
+    // Lo mismo que hace hoy `pendiente` con el carrito: no lo toca.
+    expect(limpiezas).toBe(0)
+  })
+
+  it('un estado que este front no conoce no dice "rechazado": dice que no se pudo verificar', async () => {
+    respuesta = orden('estado_nuevo_del_backend', null)
+    const wrapper = await mountSuspended(Retorno)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('No pudimos verificar el pago')
+    expect(wrapper.text()).not.toContain('Pago rechazado')
+    expect(limpiezas).toBe(0)
+  })
+
   it('conciliada: sigue siendo el éxito de siempre', async () => {
     respuesta = orden('conciliada', 'venta-1')
     const wrapper = await mountSuspended(Retorno)

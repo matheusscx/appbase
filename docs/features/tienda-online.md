@@ -769,5 +769,17 @@ que devuelve Transbank (no un método fijo):
   mientras se crea la venta ([pasarela-pagos.md](pasarela-pagos.md)). Antes caía en "Pago
   rechazado". El carrito se vacía, como en el caso sin venta: lleno invita a pagar de nuevo
   lo que el local decidió devolver (orquestadora, por analogía con ese caso).
+- **Sin resolver** (`procesando`, `en_proceso`, 2026-10-11), `/tienda/retorno` dice **"Pago
+  pendiente"**, la misma vista que `pendiente`: el pago no se resolvió y el cargo pudo salir, así
+  que no es un rechazo. Se llega, por ejemplo, cuando la anulación entra mientras el retorno
+  confirma. El carrito no se toca, como en `pendiente`, y no hay polling: la pantalla lee una vez
+  (orquestadora, por analogía con esa vista). Antes caía en "Pago rechazado… Tu carrito sigue
+  disponible para reintentar".
+- **El mapeo es exhaustivo** (`useRetornoTienda`): cada estado que puede devolver
+  `GET /online/orden` tiene su vista en un `Record` completo, así que sumar uno a la unión no
+  compila sin darle vista. `creada` va con los sin resolver (el flujo redirect no la usa: la
+  orden nace `en_proceso`), `expirada` con `fallida`. Un estado que el front no conoce cae en
+  *"No pudimos verificar el pago"*, nunca en "rechazado". La pantalla no lee el `estado` del
+  query del redirect: consulta la orden.
 
 Detalle del mecanismo en [pasarela-pagos.md](pasarela-pagos.md).

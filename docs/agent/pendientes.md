@@ -80,15 +80,6 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
-- [ ] **La pantalla de retorno de la tienda muestra "rechazado" para una orden `procesando` o
-  `en_proceso`** (frontend, `tienda/retorno.vue`; anotado el 2026-10-11 por el frente "cuatro
-  cabos sueltos de la orden", **leído, no medido**). La rama del final manda los dos estados a
-  "Pago rechazado… Tu carrito sigue disponible para reintentar", y ninguno es un rechazo: la
-  orden todavía no se resolvió, y el cargo pudo salir. Se llega poco: desde ese frente, la
-  anulación que entra mientras el retorno confirma redirige con `procesando` (antes la dejaba
-  `fallida` y la pantalla decía lo mismo). Decidir el texto con la orquestadora (¿"Pago
-  pendiente"?, ¿se vacía el carrito?).
-
 - [ ] **Una orden que el retorno dejó `procesando` sin compensar no la saca nadie** (backend,
   `pagos-redirect.service.ts` `confirmarRetorno`; lo vio la revisión independiente del frente
   "cuatro cabos sueltos de la orden", 2026-10-11; **leído, no medido**). El claim

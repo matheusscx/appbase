@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { VistaRetorno } from '~/composables/useRetornoTienda'
+
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 const route = useRoute()
@@ -7,10 +9,11 @@ const apiUrl = config.public.apiUrl
 
 const { limpiar } = useTiendaCarrito()
 const { formatTipoPago } = useFormatters()
+const { resolverRetorno } = useRetornoTienda()
 
 const ordenId = computed(() => String(route.query.ordenId ?? ''))
 
-type Vista = 'cargando' | 'aprobada' | 'sin_venta' | 'devuelto' | 'rechazada' | 'pendiente' | 'error'
+type Vista = 'cargando' | VistaRetorno
 const vista = ref<Vista>('cargando')
 const ventaId = ref<string | null>(null)
 const tipoPago = ref<string | null>(null)
@@ -43,29 +46,9 @@ onMounted(async () => {
     numeroCuotas.value = res.numeroCuotas
     tarjetaUltimos4.value = res.tarjetaUltimos4
     motivoRechazo.value = res.motivoRechazo
-    if (res.estado === 'pagada' || res.estado === 'conciliada') {
-      vista.value = 'aprobada'
-      limpiar()
-    } else if (res.estado === 'pagada_sin_venta') {
-      // Se cobró y la venta no se pudo crear: no decir "registrada" (el admin
-      // ya tiene el aviso en `/ordenes`). El carrito se vacía igual que en el
-      // éxito: el cargo existe, y dejarlo lleno invita a pagar dos veces.
-      vista.value = 'sin_venta'
-      limpiar()
-    } else if (res.estado === 'reembolsada') {
-      // Se cobró y el local devolvió el cargo (puede pasar mientras se crea
-      // la venta). No es un rechazo, y el carrito se vacía como en `sin_venta`:
-      // lleno invita a pagar de nuevo lo que el local decidió devolver.
-      vista.value = 'devuelto'
-      limpiar()
-    } else if (res.estado === 'fallida') {
-      vista.value = 'rechazada'
-    } else if (res.estado === 'pendiente') {
-      vista.value = 'pendiente'
-    } else {
-      // en_proceso / procesando: el pago no se resolvió (abort/timeout).
-      vista.value = 'rechazada'
-    }
+    const resultado = resolverRetorno(res.estado)
+    vista.value = resultado.vista
+    if (resultado.limpiaCarrito) limpiar()
   } catch {
     vista.value = 'error'
   }
@@ -134,7 +117,7 @@ onMounted(async () => {
             <UButton to="/tienda" label="Volver a la tienda" variant="ghost" block />
           </div>
 
-          <div v-else-if="vista === 'pendiente'" class="text-center py-6 space-y-3">
+          <div v-else-if="vista === 'pendiente'" class="text-center py-6 space-y-3" data-qa="retorno-pendiente">
             <UIcon name="i-lucide-clock" class="text-warning size-12 mx-auto" />
             <p class="font-medium">Pago pendiente</p>
             <p class="text-sm text-muted">

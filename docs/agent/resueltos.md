@@ -23,6 +23,55 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La pantalla de retorno de la tienda decía "rechazado" a una orden sin resolver (cerrada 2026-10-11)
+
+Sale de [`pendientes.md`](pendientes.md) § 2. Solo frontend: no toca el backend (ni
+`pagos-redirect.service.ts`, que tenía otra sesión en paralelo), el motor de precios ni lo fiscal.
+
+- [x] **La pantalla de retorno de la tienda muestra "rechazado" para una orden `procesando` o
+  `en_proceso`** (frontend, `tienda/retorno.vue`; anotado el 2026-10-11 por el frente "cuatro
+  cabos sueltos de la orden", **leído, no medido**). La rama del final manda los dos estados a
+  "Pago rechazado… Tu carrito sigue disponible para reintentar", y ninguno es un rechazo: la
+  orden todavía no se resolvió, y el cargo pudo salir. Se llega poco: desde ese frente, la
+  anulación que entra mientras el retorno confirma redirige con `procesando` (antes la dejaba
+  `fallida` y la pantalla decía lo mismo). Decidir el texto con la orquestadora (¿"Pago
+  pendiente"?, ¿se vacía el carrito?).
+
+**Lo medido antes de decidir.** `GET /online/orden/:id` devuelve el `estado` de la orden tal
+cual (más `pagada_sin_venta`, que arma `estadoParaLaApp`); el redirect manda `en_proceso` y
+`procesando` a la URL de fracaso, pero la tienda pasa la misma `retornoUrl` para éxito, fracaso y
+pendiente, y la pantalla no lee el `estado` del query: consulta la orden. Así que quien decide la
+vista es solo la página. Y la rama final no recibía únicamente esos dos: `creada` (que el flujo
+redirect no usa, la orden nace `en_proceso`), `expirada` y cualquier estado nuevo del backend
+también caían en "Pago rechazado".
+
+**Qué se hizo.**
+- **`procesando` y `en_proceso` van a la vista "Pago pendiente"** que la pantalla ya tenía (*"Tu
+  pago está en proceso de confirmación. Te avisaremos cuando se acredite."*), con su mismo
+  comportamiento de carrito: no lo toca. La vista no hace polling, lee una vez, así que no hay un
+  bucle que con `procesando` no termine (decidido por la orquestadora, 2026-10-11, por analogía
+  con esa vista).
+- **El mapeo salió de la página a `useRetornoTienda`** (`frontend/app/composables/`), como un
+  `Record<EstadoOrdenTienda, { vista, limpiaCarrito }>` completo: sumar un estado a la unión no
+  compila sin darle vista y decir qué pasa con el carrito. `creada` va con los sin resolver y
+  `expirada` con `fallida` (como hasta ahora). **Un estado que el front no conoce cae en "No
+  pudimos verificar el pago"**, sin vaciar el carrito, nunca en "rechazado". Estas tres las
+  propuso la sesión del frente por analogía y las aprobó la orquestadora (2026-10-11), sin
+  consultar al owner: se pueden reabrir.
+
+**Qué lo fija.** `useRetornoTienda.spec.ts` recorre los diez estados con su vista y su carrito,
+más el desconocido; `retorno.nuxt.spec.ts` monta la página con `procesando` y `en_proceso` (ve la
+vista pendiente, no "Pago rechazado" ni "Tu carrito sigue disponible", y el carrito sin tocar) y
+con un estado desconocido. Mutantes, todos rojos: la página anterior entera, y la misma con el
+`data-qa` de la vista pendiente agregado (así el rojo es por la lógica, no por el selector), 3
+rojos; `procesando` → `rechazada` en el mapa, 3; el desconocido → `rechazada`, 2.
+
+**Queda afuera:** que una `procesando` trabada no la saque nadie es backend, y está en § 2
+(*"Una orden que el retorno dejó `procesando` sin compensar"*). Mientras siga trabada, el
+comprador ve "Pago pendiente", que es lo cierto.
+
+---
+
 ## El catálogo ofrecía como disponible un lote que ya venció (cerrada 2026-10-11)
 
 Sale de [`pendientes.md`](pendientes.md) § 2, anotada al cerrar el chequeo sin vencidos (la
