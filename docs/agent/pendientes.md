@@ -80,6 +80,14 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **Intermitente de Playwright: `menu-lateral.spec.ts:83` no llega a `networkidle` en `/ventas/pos`**
+  (frontend e2e; visto el 2026-10-11 en el Playwright entero del frente "ingrediente + stock",
+  `3c5b6858`, que no toca el POS). `page.goto('/ventas/pos')` no alcanzó `networkidle` en 30 s:
+  114/115, con RestartCount 0, OOMKilled false y load ~3,5. Solo, 8/8 verde. **Primera vez
+  anotado**: si vuelve a aparecer, correrlo en loop con el resto de la suite cargando y mirar qué
+  request deja abierta la página del POS (un `networkidle` que nunca llega suele ser un polling o
+  un stream). No bloquea la integración.
+
 - [ ] **Los ~40 campos `@EsMontoCobrado` no tienen techo: un monto que no cabe en su columna llega
   al `INSERT`** (backend, DTOs con `@EsMontoCobrado()`; anotado el 2026-10-09 por el frente que cerró
   los seis 500 del monto suelto de caja y pagos; **leído, no medido** salvo esos seis). Ese frente le
@@ -103,7 +111,6 @@ destapa una decisión que no es mía).
   ahí. La `propinaSugerida` llega aunque no se cobre propina. `AbrirCajaDto.saldoInicial` no está en
   la lista porque ya lo frena `CajaService.abrir` con 400 (`caja-esperado-no-cabe.e2e-spec.ts`,
   "la apertura").
-
 
 - [ ] **Medir la ventana de consulta de Webpay Plus con un pago de más de 7 días** (queda del
   cierre de "Probar en el sandbox de Transbank el saldo…", 2026-10-04, [`resueltos.md`](resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04)).
@@ -475,23 +482,7 @@ fiscal y va solo:
   nombre nuevo. Es menor: el arreglo es congelar también el nombre por línea en `pagar` y que
   `crearEnTransaccion` lo tome de ahí. Toca la boleta, así que **va solo** (CLAUDE.md, lo fiscal).
 
-## 4. Necesita que el owner conteste
-
-Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
-elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
-prohíbe.
-
-- [ ] **Un `REFUND` marcado "Sin nota de crédito" cuya venta ya está corregida entera por otras
-  notas no tiene salida** (backend + producto; anotado el 2026-10-04 al cerrar "Generar nota",
-  [`resueltos.md`](resueltos.md); **solo si aparece en uso real** — hoy no se construye, lo decidió
-  la Sesión de esfuerzo máximo). Escena: una venta online de $100.000 pagada con dos tarjetas, un
-  reembolso de $70.000 cuya nota falló, y después dos notas del POS "por el pago" que acreditan los
-  $100.000. "Generar nota" da 400 *"La venta ya está corregida entera…"* cada vez y el `REFUND`
-  sigue marcado para siempre. **La pregunta para el owner:** ¿se liga el `REFUND` a una de las
-  notas que ya existen (¿cuál, si son dos?), o se descarta la marca con un motivo escrito? Ninguna
-  de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
-
-- [ ] **La tienda cobra un producto que ya no hay: el stock no se mira al pagar ni se aparta**
+- [ ] **La tienda cobra un producto que ya no hay: revisar el stock antes de mandarla a Webpay**
   (backend + producto; análisis de la orquestadora sobre "vale lo que pagó" (`fb779b2b`), anotado a
   pedido del owner; **medido el 2026-10-11** con
   [`tienda-dos-ahoras.e2e-spec.ts`](../../backend/test/tienda-dos-ahoras.e2e-spec.ts) → *"lo que A
@@ -537,8 +528,34 @@ prohíbe.
        El costo lo paga la clienta (cobrada y devuelta días después) y vos (el reembolso a mano).
 
     Vender igual dejando el stock en negativo no va en la lista: rompe que una venta nunca deja el
-    stock bajo cero. ¿Querés una pasada de investigación de mercado (cómo lo resuelven Shopify,
-    Square, Toast) antes de elegir?
+    stock bajo cero.
+  - ✅ **Decidido (owner, 2026-10-11, por AskUserQuestion de la orquestadora, con una escena
+    equivalente —el "Vino Reserva" agotado entre que el cliente lo agrega y paga— y el costo de las
+    tres opciones; eligió la recomendada): 1, revisar el stock justo antes de mandarla a Webpay.**
+    No pidió investigación de mercado. Si no hay, 400 con el nombre del producto (o del insumo
+    bloqueante) y sin orden creada, en `prepararLineasCheckout` junto a los guards de pausado,
+    `serie` e ingrediente. El minuto en Webpay sigue con el aviso de D y el reembolso manual, y
+    apartar quedó descartado. **Es lectura de stock, no escritura** (no toca
+    `movimientos_inventario`). Los casos medidos de arriba se dan vuelta a propósito: el carrito
+    viejo da 400; el que se agota *durante* Webpay sigue sin venta. Mejorar de paso el motivo
+    genérico *"Stock insuficiente para la salida"* para que nombre el insumo.
+
+## 4. Necesita que el owner conteste
+
+Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
+elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
+prohíbe.
+
+- [ ] **Un `REFUND` marcado "Sin nota de crédito" cuya venta ya está corregida entera por otras
+  notas no tiene salida** (backend + producto; anotado el 2026-10-04 al cerrar "Generar nota",
+  [`resueltos.md`](resueltos.md); **solo si aparece en uso real** — hoy no se construye, lo decidió
+  la Sesión de esfuerzo máximo). Escena: una venta online de $100.000 pagada con dos tarjetas, un
+  reembolso de $70.000 cuya nota falló, y después dos notas del POS "por el pago" que acreditan los
+  $100.000. "Generar nota" da 400 *"La venta ya está corregida entera…"* cada vez y el `REFUND`
+  sigue marcado para siempre. **La pregunta para el owner:** ¿se liga el `REFUND` a una de las
+  notas que ya existen (¿cuál, si son dos?), o se descarta la marca con un motivo escrito? Ninguna
+  de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
+
 
 ## 5. Carreras de concurrencia
 
