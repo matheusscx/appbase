@@ -374,7 +374,9 @@ al final, y con el mismo vencimiento decide la llegada y después el código del
 vende— **no se vende**: la venta lo salta, y elegido a mano se rechaza. Tampoco viaja en un
 traslado sin lote elegido. **Sí se merma**, y la merma sin lote elegido se lo lleva primero.
 Desde el 2026-10-11 tampoco se puede **pedir** en una mesa ni **pagar** en la tienda: el chequeo
-de stock antes de vender lo cuenta igual que la venta.
+de stock antes de vender lo cuenta igual que la venta. Y el catálogo no lo
+ofrece: el menú del salón, el POS y la tienda no lo muestran disponible, aunque el stock
+físico lo siga contando hasta que se merme.
 
 **Qué unidad con serie sale** (implementado 2026-10-03, [`features/inventario-serializado.md`](features/inventario-serializado.md#quién-elige-qué-unidad-con-serie-sale)):
 en un producto con número de serie **la unidad la elige quien vende**, nunca el sistema: el cajero

@@ -275,6 +275,24 @@ const MOTIVOS_DE_VALOR = ['ajuste_costo', 'correccion_compra'];
 const MOTIVOS_QUE_SALTAN_VENCIDOS = ['venta', 'traslado'];
 
 /**
+ * El lote vencido en una ubicación, como lo salta la venta: lote vivo, con
+ * saldo ahí, cuyo día (`fecha_vencimiento::date`, el mismo cast que el FEFO de
+ * `moverCantidad`) ya pasó en el calendario del local (`hoy`, de
+ * `fechaLocalTenant`); el que vence hoy todavía se vende. Supone los alias `l`
+ * (`item_lote`) y `lu` (`lote_ubicacion`); `ubicacion` y `hoy` son los
+ * placeholders del llamador.
+ *
+ * Una sola definición para el chequeo al pedir (`saldoEnLotesVencidos`) y para
+ * lo vendible del catálogo (`ItemsService`): si discreparan, el catálogo
+ * ofrecería lo que la mesa no puede pedir, o escondería lo que sí.
+ */
+export function loteVencidoSql(ubicacion: string, hoy: string): string {
+  return `lu.ubicacion_id = ${ubicacion} AND lu.cantidad > 0
+          AND l.eliminado_el IS NULL
+          AND l.fecha_vencimiento::date::text < ${hoy}`;
+}
+
+/**
  * El par está bajo su mínimo: hay mínimo cargado y el saldo —0 si nunca se
  * movió ahí— es estrictamente menor. Igual al mínimo no avisa. Cuenta unidades
  * del saldo materializado, igual para los modos `cantidad`, `serie` y `lote`.
@@ -342,14 +360,25 @@ export class InventarioService {
   }
 
   /**
+   * El día de hoy con el que `loteVencidoSql` decide qué lote ya venció: el
+   * calendario del local (`fechaLocalTenant`, sin hora de corte: la fecha de la
+   * etiqueta es civil), lo mismo que `hoyLocal` del FEFO. Público para que el
+   * catálogo (`ItemsService`) reste con el mismo día que el chequeo al pedir.
+   */
+  hoyDeVencimiento(db: Db, tenantId: string): Promise<string> {
+    return fechaLocalTenant(db, tenantId, new Date());
+  }
+
+  /**
    * Cuánto hay, por ítem, en lotes **vencidos** de una ubicación: lo que la
    * venta no puede sacar aunque esté en el saldo. Gemelo exacto de la
    * auto-selección FEFO de `moverCantidad` con un motivo de
    * `MOTIVOS_QUE_SALTAN_VENCIDOS`: vencido es el lote vivo cuyo día
    * (`fecha_vencimiento::date`, el mismo cast) ya pasó en el calendario del
    * local (`fechaLocalTenant`, lo mismo que `hoyLocal`); el que vence hoy
-   * todavía se vende. Lo usa `ItemsService.validarStockAlPedir` para contar
-   * igual que la venta. Un ítem sin lotes vencidos no aparece.
+   * todavía se vende (`loteVencidoSql`, que comparte con el catálogo). Lo usa
+   * `ItemsService.validarStockAlPedir` para contar igual que la venta. Un ítem
+   * sin lotes vencidos no aparece.
    */
   async saldoEnLotesVencidos(
     db: Db,
@@ -357,15 +386,13 @@ export class InventarioService {
     itemIds: string[],
     ubicacionId: string,
   ): Promise<Map<string, string>> {
-    const hoy = await fechaLocalTenant(db, tenantId, new Date());
+    const hoy = await this.hoyDeVencimiento(db, tenantId);
     const rows: { item_id: string; cantidad: string }[] = await db.query(
       `SELECT l.item_id, SUM(lu.cantidad) AS cantidad
          FROM item_lote l
          JOIN lote_ubicacion lu ON lu.lote_id = l.lote_id
         WHERE l.item_id = ANY($1::uuid[]) AND l.tenant_id = $2
-          AND lu.ubicacion_id = $3 AND lu.cantidad > 0
-          AND l.eliminado_el IS NULL
-          AND l.fecha_vencimiento::date::text < $4
+          AND ${loteVencidoSql('$3', '$4')}
         GROUP BY l.item_id`,
       [itemIds, tenantId, ubicacionId, hoy],
     );

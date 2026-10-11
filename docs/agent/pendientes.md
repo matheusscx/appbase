@@ -117,17 +117,6 @@ destapa una decisión que no es mía).
   request deja abierta la página del POS (un `networkidle` que nunca llega suele ser un polling o
   un stream). No bloquea la integración.
 
-- [ ] **El catálogo muestra como disponible un lote que ya venció** (backend, `GET /items` y
-  `GET /items/:id`; anotado el 2026-10-11 al cerrar el chequeo sin vencidos, ver
-  [`resueltos.md`](resueltos.md); **leído, no medido**). `stockVendible` sale de `stock_ubicacion`
-  del local, que suma los lotes vencidos (`recalcularStockLote`), así que `stockDisponible` los
-  ofrece. Desde ese cierre la mesa ya no puede pedirlo y la tienda no lo cobra, pero el menú del
-  salón, el POS y el catálogo de la tienda lo siguen mostrando con stock: la mesa lo elige y
-  rebota al pedir. **Medir:** un producto por lote con su único lote vencido, y leer su fila en
-  `GET /items`. **Arreglo probable:** el mismo descuento de vencidos en el `stockVendible` del
-  catálogo, en la misma consulta. Ojo: `stock` sigue siendo el físico, y ahí los vencidos sí
-  cuentan, porque están en el local hasta que se mermen.
-
 - [ ] **Los ~40 campos `@EsMontoCobrado` no tienen techo: un monto que no cabe en su columna llega
   al `INSERT`** (backend, DTOs con `@EsMontoCobrado()`; anotado el 2026-10-09 por el frente que cerró
   los seis 500 del monto suelto de caja y pagos; **leído, no medido** salvo esos seis). Ese frente le

@@ -164,6 +164,34 @@ describe('Esquema (e2e) — invariantes medidas contra Postgres', () => {
   });
 
   /**
+   * Lo que el catálogo resta como vencido del local (`vencidosDelLocalSql`)
+   * entra por los lotes con saldo. Las filas en cero de `lote_ubicacion` se
+   * quedan como histórico, y sin este índice la lectura recorre todo ese
+   * histórico: el resultado sigue siendo correcto, así que solo esto lo ve.
+   * El `WHERE` es la mitad que importa: un `@Index` con `where` mal escrito se
+   * crea sin la condición.
+   *
+   * ⚠️ Solo lo ve **sobre una base vacía**, como la de CI o la de
+   * `entorno.sh db` recién creada. `synchronize` compara índices por nombre: si
+   * `idx_lote_ubicacion_con_saldo` ya existe, no lo recrea aunque la entity
+   * cambie el `where`. Medido el 2026-10-11 con el mutante (el `@Index` sin
+   * `where`): sobre una base que ya tenía el índice el test pasó; sobre una
+   * vacía, falló.
+   */
+  it('lote_ubicacion tiene el índice parcial de los lotes con saldo', async () => {
+    const indices: { indexdef: string }[] = await ds.query(
+      `SELECT indexdef FROM pg_indexes
+        WHERE tablename = 'lote_ubicacion' AND indexname = 'idx_lote_ubicacion_con_saldo'`,
+    );
+
+    expect(indices).toHaveLength(1);
+    expect(indices[0].indexdef).toMatch(
+      /USING btree \(ubicacion_id, lote_id\)/,
+    );
+    expect(indices[0].indexdef).toMatch(/WHERE \(cantidad > \(0\)::numeric\)/);
+  });
+
+  /**
    * Y la normalización del índice es la MISMA que usa el guard del chokepoint.
    *
    * No es redundante con el test de arriba: ese mira la forma del índice, este

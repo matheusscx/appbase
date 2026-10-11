@@ -177,6 +177,11 @@ vence antes**, porque en comida es lo que evita tirar mercadería.
   lleva primero el vencido, que es justo lo que hay que hacer con él.
 - Costo aceptado: el stock cuenta los vencidos hasta que alguien los merme, así que puede
   mostrar más de lo que se puede vender.
+- **Lo que se ofrece para vender no los cuenta** (2026-10-11): el chequeo al pedir y el catálogo
+  (`stockVendible`, `stockDisponible` y el `disponible` de un combo, en `GET /items` y
+  `GET /items/:id`) restan lo que está en lotes vencidos del local, con una sola definición de
+  vencido (`loteVencidoSql`). El menú del salón, el POS y la tienda no ofrecen un lote vencido; el
+  `stock` físico, sí, hasta que se merme.
 
 Medido contra la API real en `test/lote-fefo.e2e-spec.ts` (el yogur de enero y junio en la
 misma factura, desempate, sin fecha, y los vencidos en venta, traslado y merma).

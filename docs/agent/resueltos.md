@@ -23,6 +23,101 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El catálogo ofrecía como disponible un lote que ya venció (cerrada 2026-10-11)
+
+Sale de [`pendientes.md`](pendientes.md) § 2, anotada al cerrar el chequeo sin vencidos (la
+sección de abajo, *"Tres huecos entre el chequeo de stock y la venta"*). No escribe en
+`movimientos_inventario`, no toca `modo_inventario`, el motor de precios ni lo fiscal.
+
+**Lo medido.** Un producto por lote con su único lote, vencido, de una unidad en el local
+(fixture propio, sin stock del seed). Por los cinco lados por los que un lote llega al catálogo,
+lo pedible daba **1**: la fila de `GET /items` (`stockVendible` y `stockDisponible`), la misma con
+`orden=disponibilidad`, el `disponible` de un combo que lo lleva, y en `GET /items/:id` el
+`stockVendible` del producto, el componente del combo y la opción de un grupo. Son cinco y no
+más porque un insumo de receta (ingrediente, extra, opción ingrediente) solo admite modo
+`cantidad`: no tiene lotes. El físico (`stock`) era y sigue siendo 1.
+
+**Qué se hizo.**
+- **Una sola definición de "vencido"**: `loteVencidoSql` (`inventario.service.ts`), el predicado
+  que ahora usan `saldoEnLotesVencidos` (el chequeo al pedir) y el catálogo, con el mismo "hoy"
+  (`InventarioService.hoyDeVencimiento`, `fechaLocalTenant`). Son gemelos por construcción: el
+  que vence hoy sigue contando en los dos. El "hoy" vive en inventario por la invariante
+  `dia-negocio`, que deja la hora de reloj solo en los archivos de su allowlist.
+- **El catálogo resta lo vencido del local** en esas cinco consultas: `stockVendible` es ahora
+  lo que la venta puede sacar del local, y `stockDisponible` y el `disponible` de los combos
+  derivan de él como antes. `stock` y el desglose por ubicación no cambian: el lote vencido está
+  en el local hasta que se merme. El local y el "hoy" se resuelven una vez por request
+  (`ItemsService.localYHoy`).
+- **`cargarBasePorIds` no lo paga** (decisión técnica de la orquestadora, 2026-10-11). Es el
+  camino caliente de la venta, el checkout online y el cálculo de precios, y ninguno de los tres
+  lee `stockVendible`. Calcularlo ahí costaba en cada venta la zona del tenant y la tabla
+  derivada. Ahora no pide ni el local ni el "hoy", y `stockVendible` sale también de su tipo
+  (`Omit<…, 'stockVendible'>`): así nadie puede leer un número que ahí no se calculó, y el
+  compilador lo frena. Lo fija un unitario en `items.service.spec.ts` (*"no pide el local ni el
+  día…"*), que matan dos mutantes: devolver la fila con `stockVendible` y volver a armar lo
+  vendible.
+- **Agregado una vez por consulta, no una subconsulta por fila**, con un índice parcial nuevo,
+  `idx_lote_ubicacion_con_saldo` (`lote_ubicacion (ubicacion_id, lote_id) WHERE cantidad > 0`).
+  Las filas en cero de `lote_ubicacion` no se borran (son el histórico de cada lote agotado), así
+  que la primera versión, correlacionada, recorría todo ese histórico por ítem.
+
+**Lo medido de la consulta** (EXPLAIN ANALYZE en una transacción con `ROLLBACK`: 378k lotes, 300
+por cada uno de los 126 productos —298 agotados y vencidos, uno vencido con saldo y uno vigente—
+y 340k de otro tenant como ruido):
+
+| Consulta | Antes | Correlacionada | Agregada | Agregada + índice |
+|---|---|---|---|---|
+| Lectura liviana de `orden=disponibilidad` (126 productos) | 0,1–0,2 ms | 125 ms | 4,0 ms | 0,7–0,9 ms |
+| `baseQuery`, página de 50 | 2,5 ms | — | — | 3,1 ms |
+| `baseQuery`, un ítem con 300 lotes | 0,09 ms | — | — | 2,3 ms |
+
+Con un solo ítem Postgres empuja el filtro adentro de la tabla agregada y entra por los lotes de
+ese ítem: es el peor caso, y lo paga solo un ítem por lote con mucho histórico.
+
+**Qué lo fija.** E2E en `reserva-stock-mesa.e2e-spec.ts`, *"El catálogo no ofrece un lote
+vencido"*: el vencido (los ocho números pedibles en 0, el físico en 1) y el control del que vence
+hoy (todo en 1). Mutantes, cada uno corrido contra ese describe:
+
+| Mutante | Lo mata |
+|---|---|
+| sacar la resta en las cinco consultas (el código de antes) | el vencido: los ocho números |
+| sacar la resta de `baseQuery` | el vencido: `stockVendible`, `stockDisponible`, y `stockVendible` del detalle |
+| sacar la resta de la lectura liviana | el vencido: `stockDisponible` con `orden=disponibilidad` |
+| sacar la resta del batch de combos | el vencido: `disponible` del combo, en los dos órdenes |
+| sacar la resta del componente en `GET /items/:id` | el vencido: el componente |
+| sacar la resta de la opción de grupo | el vencido: la opción |
+| `<` → `<=` en `loteVencidoSql` (el que vence hoy cuenta como vencido) | el control del que vence hoy |
+
+Las restas se sacaron multiplicándolas por 0 y no borrándolas: borrada, el parámetro del "hoy"
+queda sin usar y Postgres responde 500, que también es rojo pero no prueba la aserción.
+
+El índice lo fija `esquema.e2e-spec.ts` (*"lote_ubicacion tiene el índice parcial de los lotes
+con saldo"*), sobre `pg_indexes` y con su `WHERE`: sin él el resultado sigue siendo correcto, así
+que el e2e de arriba no lo ve. El mutante (el `@Index` sin `where`) lo mata **sobre una base
+vacía**; sobre una base donde el índice ya existía con ese nombre, `synchronize` no lo recrea y
+el mutante sobrevive.
+
+**Consumidores revisados.** Leen lo pedible la grilla de venta (`CatalogoGrid`: POS, salón y
+tienda) y el drawer de personalización (componentes y opciones). Traslados lee `stockDisponible`
+solo para un ítem que no es por lote; uno por lote va por sus lotes. `stockVendible` no lo lee
+ninguna pantalla. El `stock` físico lo muestran configuración de ítems e inventario, donde 1 es
+correcto. Ninguna pantalla de venta muestra el físico junto a lo pedible.
+
+**El texto con que se anotó:**
+
+- [x] **El catálogo muestra como disponible un lote que ya venció** (backend, `GET /items` y
+  `GET /items/:id`; anotado el 2026-10-11 al cerrar el chequeo sin vencidos, ver
+  [`resueltos.md`](resueltos.md); **leído, no medido**). `stockVendible` sale de `stock_ubicacion`
+  del local, que suma los lotes vencidos (`recalcularStockLote`), así que `stockDisponible` los
+  ofrece. Desde ese cierre la mesa ya no puede pedirlo y la tienda no lo cobra, pero el menú del
+  salón, el POS y el catálogo de la tienda lo siguen mostrando con stock: la mesa lo elige y
+  rebota al pedir. **Medir:** un producto por lote con su único lote vencido, y leer su fila en
+  `GET /items`. **Arreglo probable:** el mismo descuento de vencidos en el `stockVendible` del
+  catálogo, en la misma consulta. Ojo: `stock` sigue siendo el físico, y ahí los vencidos sí
+  cuentan, porque están en el local hasta que se mermen.
+
+---
+
 ## Cuatro cabos sueltos de la orden: el retorno de una reembolsada, la expiración del alta, `vincularVenta` y la anulación sobre `procesando` (cerradas 2026-10-11)
 
 Salen de [`pendientes.md`](pendientes.md) § 2 y § 5. Las cuatro las anotó el frente "los
@@ -492,8 +587,8 @@ Mutantes, cada uno corrido contra su e2e:
 | sacar el guard del checkout | receta en checkout y pagar, y combo (3) |
 | que la venta directa lockee solo lo que frena | el unitario "con `soloLoApartado`… lockea también lo que no frena" |
 
-**Qué quedó afuera.** El catálogo (`GET /items`) sigue ofreciendo como disponible un lote vencido.
-Es otra entrada en `pendientes.md` § 2.
+**Qué quedó afuera.** El catálogo (`GET /items`) seguía ofreciendo como disponible un lote vencido.
+Se cerró el mismo día: *"El catálogo ofrecía como disponible un lote que ya venció"*, arriba.
 
 **El texto con que se anotaron:**
 

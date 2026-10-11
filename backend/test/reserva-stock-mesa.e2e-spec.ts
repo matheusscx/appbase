@@ -6,6 +6,8 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { randomUUID } from 'node:crypto';
+import { DataSource } from 'typeorm';
+import { fechaLocalTenant } from '../src/common/utils/rango-fecha.util';
 
 /**
  * **Reserva de stock al pedir.** Hasta el 2026-09-01 el sistema no apartaba
@@ -282,6 +284,45 @@ describe('Reserva de stock al pedir (e2e)', () => {
     );
     expect(fila).toBeDefined();
     return fila!;
+  }
+
+  /**
+   * Un producto por lote con UNA unidad en el local, en un solo lote que vence
+   * `fechaVencimiento` (`YYYY-MM-DD`). El físico es 1 se venza o no: el lote
+   * vencido está en el local hasta que se merme.
+   */
+  async function crearProductoPorLote(
+    nombre: string,
+    fechaVencimiento: string,
+  ): Promise<{ id: string; nombre: string }> {
+    const nombreFinal = nombreUnico(nombre);
+    const { id } = await post<IdResponse>('/api/items', {
+      nombre: nombreFinal,
+      precioBase: '1000',
+      monedaId: CLP_MONEDA_ID,
+      tipo: 'producto',
+      unidadMedida: 'unidad',
+      modoInventario: 'lote',
+    });
+    const ubicaciones = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${token}`);
+    expect(ubicaciones.status).toBe(200);
+    const localId = (ubicaciones.body as { id: string; tipo: string }[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
+    const entrada = await request(app.getHttpServer())
+      .patch(`/api/items/${id}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'entrada',
+        motivo: 'compra',
+        ubicacionId: localId,
+        cantidad: '1',
+        lote: { codigoLote: `LOTE-${randomUUID()}`, fechaVencimiento },
+      });
+    expect(entrada.status).toBe(200);
+    return { id, nombre: nombreFinal };
   }
 
   beforeAll(async () => {
@@ -1258,36 +1299,10 @@ describe('Reserva de stock al pedir (e2e)', () => {
      * lotes vencidos"*.
      */
     it('el único lote venció: rebota al pedirlo, no al cobrar', async () => {
-      const nombre = nombreUnico('Queso vencido');
-      const { id } = await post<IdResponse>('/api/items', {
-        nombre,
-        precioBase: '1000',
-        monedaId: CLP_MONEDA_ID,
-        tipo: 'producto',
-        unidadMedida: 'unidad',
-        modoInventario: 'lote',
-      });
-      const ubicaciones = await request(app.getHttpServer())
-        .get('/api/ubicaciones')
-        .set('Authorization', `Bearer ${token}`);
-      expect(ubicaciones.status).toBe(200);
-      const localId = (ubicaciones.body as { id: string; tipo: string }[]).find(
-        (u) => u.tipo === 'local',
-      )!.id;
-      const entrada = await request(app.getHttpServer())
-        .patch(`/api/items/${id}/stock`)
-        .set('Authorization', `Bearer ${token}`)
-        .send({
-          tipo: 'entrada',
-          motivo: 'compra',
-          ubicacionId: localId,
-          cantidad: '1',
-          lote: {
-            codigoLote: `VENCIDO-${randomUUID()}`,
-            fechaVencimiento: '2020-01-01',
-          },
-        });
-      expect(entrada.status).toBe(200);
+      const { id, nombre } = await crearProductoPorLote(
+        'Queso vencido',
+        '2020-01-01',
+      );
       const cuentaId = await abrirCuenta();
 
       const pedido = await intentarLinea(cuentaId, id, '1');
@@ -1295,6 +1310,159 @@ describe('Reserva de stock al pedir (e2e)', () => {
       expect(pedido).toEqual({
         status: 400,
         message: `Stock insuficiente de "${nombre}" en el local: quedan 0 unidad y lo que se está agregando necesita 1 unidad`,
+      });
+    });
+  });
+
+  describe('El catálogo no ofrece un lote vencido', () => {
+    /**
+     * Desde `7ac87acb` la mesa no puede pedir un lote vencido (arriba), pero
+     * `GET /items` y `GET /items/:id` seguían armando lo vendible con el saldo
+     * del local, que suma los lotes vencidos: el menú del salón, el POS y la
+     * tienda lo ofrecían con stock, la mesa lo elegía y rebotaba al pedir. Un
+     * lote solo llega al catálogo por cinco lados —la fila del producto, la
+     * fila del orden por disponibilidad, el combo que lo lleva (grilla y
+     * detalle) y la opción de un grupo—, porque los insumos de receta solo
+     * admiten modo `cantidad`; cada uno tiene su número abajo.
+     */
+    interface FilaConVendible extends FilaItem {
+      stockVendible: string | null;
+    }
+    interface DetalleCatalogo {
+      stock: string | null;
+      stockVendible: string | null;
+      componentes: {
+        componenteItemId: string;
+        stockDisponible: string | null;
+      }[];
+      grupos: {
+        opciones: { itemId: string; stockDisponible: string | null }[];
+      }[];
+    }
+
+    async function filasPorId(
+      ids: string[],
+      orden?: 'disponibilidad',
+    ): Promise<Map<string, FilaConVendible>> {
+      const res = await request(app.getHttpServer())
+        .get(`/api/items?ids=${ids.join(',')}${orden ? `&orden=${orden}` : ''}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const data = (res.body as { data: FilaConVendible[] }).data;
+      expect(data).toHaveLength(ids.length);
+      return new Map(data.map((f) => [f.id, f]));
+    }
+
+    async function detalle(itemId: string): Promise<DetalleCatalogo> {
+      const res = await request(app.getHttpServer())
+        .get(`/api/items/${itemId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      return res.body as DetalleCatalogo;
+    }
+
+    /**
+     * El producto por lote, un combo que lo lleva y una receta que lo ofrece
+     * como opción de un grupo: los cinco lados por los que el lote llega.
+     */
+    async function armarCatalogo(fechaVencimiento: string) {
+      const lote = await crearProductoPorLote('Yogur', fechaVencimiento);
+      const { id: comboId } = await post<IdResponse>('/api/items', {
+        nombre: nombreUnico('Combo con yogur'),
+        precioBase: '2000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'combo',
+        componentes: [
+          { componenteItemId: lote.id, cantidad: '1', bloqueante: true },
+        ],
+      });
+      const { grupoModificadorId } = await post<{
+        grupoModificadorId: string;
+      }>('/api/grupos-modificadores', {
+        nombre: nombreUnico('Postre'),
+        opciones: [{ itemId: lote.id, cantidad: '1', precioExtra: '500' }],
+      });
+      const base = await crearIngrediente('Insumo con postre', '10');
+      const { id: recetaId } = await post<IdResponse>('/api/items', {
+        nombre: nombreUnico('Plato con postre'),
+        precioBase: '4000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: base.id,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        gruposModificadores: [{ grupoModificadorId, min: 0, max: 1 }],
+      });
+      return { loteId: lote.id, comboId, recetaId };
+    }
+
+    /** Lo que muestra cada uno de los cinco lados, en un solo objeto. */
+    async function loQueOfrece(c: Awaited<ReturnType<typeof armarCatalogo>>) {
+      const listado = await filasPorId([c.loteId, c.comboId]);
+      const porDisponibilidad = await filasPorId(
+        [c.loteId, c.comboId],
+        'disponibilidad',
+      );
+      const delProducto = await detalle(c.loteId);
+      const delCombo = await detalle(c.comboId);
+      const deLaReceta = await detalle(c.recetaId);
+      return {
+        stock: listado.get(c.loteId)!.stock,
+        stockVendible: listado.get(c.loteId)!.stockVendible,
+        stockDisponible: listado.get(c.loteId)!.stockDisponible,
+        combo: listado.get(c.comboId)!.disponible,
+        porDisponibilidad: porDisponibilidad.get(c.loteId)!.stockDisponible,
+        comboPorDisponibilidad: porDisponibilidad.get(c.comboId)!.disponible,
+        detalleStock: delProducto.stock,
+        detalleVendible: delProducto.stockVendible,
+        componente: delCombo.componentes[0].stockDisponible,
+        opcion: deLaReceta.grupos[0].opciones.find(
+          (o) => o.itemId === c.loteId,
+        )!.stockDisponible,
+      };
+    }
+
+    it('el único lote venció: ningún lado lo ofrece, y el físico sigue en 1', async () => {
+      const c = await armarCatalogo('2020-01-01');
+
+      expect(await loQueOfrece(c)).toEqual({
+        stock: '1.0000',
+        stockVendible: '0.0000',
+        stockDisponible: '0.0000',
+        combo: 0,
+        porDisponibilidad: '0.0000',
+        comboPorDisponibilidad: 0,
+        detalleStock: '1.0000',
+        detalleVendible: '0.0000',
+        componente: '0.0000',
+        opcion: '0.0000',
+      });
+    });
+
+    it('control: el lote que vence hoy todavía se ofrece, igual que lo vende la venta', async () => {
+      const hoy = await fechaLocalTenant(
+        app.get(DataSource),
+        PARIS_TENANT_ID,
+        new Date(),
+      );
+      const c = await armarCatalogo(hoy);
+
+      expect(await loQueOfrece(c)).toEqual({
+        stock: '1.0000',
+        stockVendible: '1.0000',
+        stockDisponible: '1.0000',
+        combo: 1,
+        porDisponibilidad: '1.0000',
+        comboPorDisponibilidad: 1,
+        detalleStock: '1.0000',
+        detalleVendible: '1.0000',
+        componente: '1.0000',
+        opcion: '1.0000',
       });
     });
   });

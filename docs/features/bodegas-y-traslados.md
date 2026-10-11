@@ -56,8 +56,8 @@ distintos. Las dos venden, así que ninguna es una bodega — esa es la discusi�
   - Saldo por `(ítem, ubicación)` en los tres modos de inventario (`cantidad`, `serie`, `lote`)
   - Traslados como documento interno, con motivo tipado por catálogo (`motivo_traslado`)
   - Compra, merma, recuento y ajuste manual con `ubicacionId` obligatorio
-  - `GET /items` con el stock desglosado en `stock` (total), `stockVendible` (el del local) y
-    `stockDisponible`
+  - `GET /items` con el stock desglosado en `stock` (total), `stockVendible` (el del local, sin
+    lotes vencidos desde el 2026-10-11) y `stockDisponible`
   - El 400 por falta de stock nombra dónde está la mercadería, con el traslado precargado a
     un clic para quien tiene el permiso
 - NOT included (future):
@@ -96,7 +96,7 @@ preguntas:
 | Campo | Significa |
 |---|---|
 | `stock` | el **total** del tenant, sumando todas las ubicaciones |
-| `stockVendible` | lo que hay **en el local** |
+| `stockVendible` | lo que hay **en el local**, menos lo que ahí está en lotes vencidos (desde el 2026-10-11: la venta no los saca) |
 | `stockDisponible` | `stockVendible − comprometido` (lo que una mesa puede pedir) |
 
 `stockDisponible` **no cambia de significado** con este frente — sigue siendo "lo que la mesa
@@ -274,7 +274,8 @@ movimiento.
 
 ### `GET /items`, `GET /items/:id`
 
-`GET /items` gana `stock` (total), `stockVendible` (del local) y mantiene `stockDisponible`
+`GET /items` gana `stock` (total), `stockVendible` (del local; sin lotes vencidos desde el
+2026-10-11) y mantiene `stockDisponible`
 con su significado angostado al local. `GET /items/:id` gana el desglose por ubicación.
 
 ### Compra, merma, recuento, ajuste manual

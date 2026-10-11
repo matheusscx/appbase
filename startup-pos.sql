@@ -1335,6 +1335,10 @@ CREATE TABLE "lote_ubicacion" (
   PRIMARY KEY ("lote_id", "ubicacion_id")
 );
 CREATE INDEX "idx_lote_ubicacion_ubicacion" ON "lote_ubicacion" ("ubicacion_id");
+-- Los lotes con saldo en un lugar: las filas en cero quedan como histórico, y
+-- el catálogo resta los vencidos del local entrando por acá.
+CREATE INDEX "idx_lote_ubicacion_con_saldo"
+  ON "lote_ubicacion" ("ubicacion_id", "lote_id") WHERE "cantidad" > 0;
 
 -- Unidades serializadas (modo 'serie')
 CREATE TABLE "item_unidad" (

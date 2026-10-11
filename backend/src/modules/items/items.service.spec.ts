@@ -38,7 +38,10 @@ describe('ItemsService', () => {
     query: jest.Mock;
     sinTransaccion: (fn: () => unknown) => unknown;
   };
-  let inventarioServiceMock: { registrarMovimiento: jest.Mock };
+  let inventarioServiceMock: {
+    registrarMovimiento: jest.Mock;
+    hoyDeVencimiento: jest.Mock;
+  };
   let ubicacionesServiceMock: { localDe: jest.Mock; findOneOrFail: jest.Mock };
   let catalogServiceMock: {
     findAllUnidadesMedida: jest.Mock;
@@ -64,7 +67,12 @@ describe('ItemsService', () => {
     };
     itemRepo = { findOne: jest.fn() };
     itemServicioRepo = { findOne: jest.fn() };
-    inventarioServiceMock = { registrarMovimiento: jest.fn() };
+    inventarioServiceMock = {
+      registrarMovimiento: jest.fn(),
+      // Mockeado a nivel de SERVICE, como `localDe`: no consume ningún slot de
+      // `mockResolvedValueOnce` de los tests de abajo.
+      hoyDeVencimiento: jest.fn().mockResolvedValue('2026-10-11'),
+    };
     ubicacionesServiceMock = {
       localDe: jest.fn().mockResolvedValue(UBICACION_LOCAL_ID),
       // Mockeado a nivel de SERVICE: `ajustarStock` lo llama para validar
@@ -418,6 +426,7 @@ describe('ItemsService', () => {
         TENANT,
         UBICACION_LOCAL_ID,
         false,
+        '2026-10-11',
       ]);
       expect(sqlPaso2).toContain('i.eliminado_el IS NULL');
     });
@@ -477,6 +486,7 @@ describe('ItemsService', () => {
         TENANT,
         UBICACION_LOCAL_ID,
         false,
+        '2026-10-11',
       ]);
     });
 
@@ -997,6 +1007,56 @@ describe('ItemsService', () => {
       expect(disp.stockDisponible.get('prod-uuid')).toBe('8.0000');
       // El roto queda como estaba antes de este cambio: su stock, sin restar.
       expect(disp.stockDisponible.get('ing-roto')).toBe('5.0000');
+    });
+  });
+
+  // ── cargarBasePorIds ───────────────────────────────────────────────────────
+
+  describe('cargarBasePorIds', () => {
+    /**
+     * El camino caliente de la venta, el checkout y el cálculo no paga lo
+     * vendible del catálogo (orquestadora, 2026-10-11): ni el local, ni el
+     * "hoy" de los vencidos, ni la tabla derivada. Y la fila no trae
+     * `stockVendible`, para que nadie lea un número que acá no se calculó.
+     */
+    it('no pide el local ni el día, no arma lo vendible y no devuelve stockVendible', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        {
+          item_id: ITEM_ID,
+          nombre: 'Test',
+          descripcion: null,
+          tipo: 'producto',
+          activo: true,
+          precio_base: '5000',
+          precio_incluye_impuesto: false,
+          moneda_id: MONEDA_ID,
+          moneda_codigo: 'CLP',
+          moneda_simbolo: '$',
+          categoria_id: null,
+          categoria_nombre: null,
+          creado_el: new Date(),
+          stock: '3.0000',
+          unidad_medida: 'unidad',
+          fecha_elaboracion: null,
+          fecha_vencimiento: null,
+          modo_inventario: 'lote',
+        },
+      ]);
+
+      const porId = await service.cargarBasePorIds(TENANT, [ITEM_ID]);
+
+      expect(ubicacionesServiceMock.localDe).not.toHaveBeenCalled();
+      expect(inventarioServiceMock.hoyDeVencimiento).not.toHaveBeenCalled();
+      const [sql, params] = dataSource.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).not.toContain('lote_ubicacion');
+      expect(sql).not.toContain('stock_vendible');
+      expect(params).toEqual([[ITEM_ID], TENANT]);
+      const fila = porId.get(ITEM_ID);
+      expect(fila?.stock).toBe('3.0000');
+      expect(fila).not.toHaveProperty('stockVendible');
     });
   });
 
@@ -1528,6 +1588,7 @@ describe('ItemsService', () => {
         ['item-grupo-1'],
         TENANT,
         UBICACION_LOCAL_ID,
+        '2026-10-11',
       ]);
       // Y no hay una novena query: 2 fijas para los grupos, no 1 + N. La
       // octava es la del comprometido, UNA para toda la respuesta.

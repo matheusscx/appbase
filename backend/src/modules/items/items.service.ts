@@ -27,6 +27,7 @@ import { QueryItemsDto } from './dto/query-items.dto';
 import { compararPorDisponibilidad, esPedible } from './catalogo-orden';
 import {
   InventarioService,
+  loteVencidoSql,
   type RegistrarMovimientoParams,
 } from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
@@ -179,7 +180,10 @@ interface ItemRow {
   categoria_nombre: string | null;
   creado_el: Date;
   stock: string | null;
-  /** Lo vendible: el stock del LOCAL del tenant, `stock_ubicacion` acotado a esa fila. */
+  /**
+   * Lo vendible: el stock del LOCAL del tenant, `stock_ubicacion` acotado a esa
+   * fila, menos lo que ahí está en lotes vencidos (`vencidosDelLocalSql`).
+   */
   stock_vendible: string | null;
   unidad_medida: string | null;
   fecha_elaboracion: Date | null;
@@ -265,6 +269,44 @@ function disponibleDe(
 ): string | null {
   if (vendible === null) return null;
   return new Decimal(vendible).minus(comprometido.get(itemId) ?? 0).toFixed(4);
+}
+
+/**
+ * Por ítem, lo que está en **lotes vencidos del local**: una tabla derivada
+ * `(item_id, cantidad)` para restar del saldo del local, así lo vendible del
+ * catálogo es lo que la venta puede sacar. El saldo de un ítem por lote es la
+ * suma de sus lotes vivos (`recalcularStockLote`), y la venta salta los
+ * vencidos; sin esto el menú del salón, el POS y la tienda ofrecían el lote
+ * vencido, la mesa lo elegía y rebotaba al pedir (medido el 2026-10-11).
+ *
+ * El predicado es `loteVencidoSql`, el mismo del chequeo al pedir
+ * (`saldoEnLotesVencidos`): son gemelos por construcción, el que vence hoy
+ * sigue contando en los dos. La única diferencia es el tenant: el chequeo
+ * filtra `l.tenant_id` y esto no, porque ya lo acotan el local del tenant y el
+ * `JOIN` por un `item_id` del tenant. `local` y `hoy` son placeholders del llamador;
+ * `hoy` sale de `localYHoy`. Un ítem sin lotes vencidos ahí no tiene fila: el
+ * llamador hace `LEFT JOIN` y `COALESCE(venc.cantidad, 0)`.
+ *
+ * ⚠️ **Agregada una vez por consulta, no una subconsulta por fila.** Medido el
+ * 2026-10-11 con 378k lotes (300 por producto, casi todos agotados y vencidos):
+ * la correlacionada recorría el histórico entero de cada ítem —125 ms la
+ * lectura liviana de 126 productos—; esta entra por los lotes **con saldo**
+ * del local (`idx_lote_ubicacion_con_saldo`, que existe para esto) y la deja
+ * en 0,9 ms. Por eso el `lu.cantidad > 0` de `loteVencidoSql` es literal: es el
+ * predicado del índice parcial. Con un solo ítem Postgres empuja el filtro
+ * adentro y entra por los lotes de ese ítem (2,3 ms con 300).
+ *
+ * Va donde un lote puede llegar: la fila del producto (`baseQuery` y la
+ * lectura liviana del orden por disponibilidad), el componente de un combo y
+ * la opción de un grupo. **No** en ingredientes ni extras de receta: un insumo
+ * de receta solo admite modo `cantidad`, así que no tiene lotes.
+ */
+function vencidosDelLocalSql(local: string, hoy: string): string {
+  return `(SELECT l.item_id, SUM(lu.cantidad) AS cantidad
+             FROM lote_ubicacion lu
+             JOIN item_lote l ON l.lote_id = lu.lote_id
+            WHERE ${loteVencidoSql(local, hoy)}
+            GROUP BY l.item_id)`;
 }
 
 export interface IngredienteReceta {
@@ -499,15 +541,21 @@ export class ItemsService {
   ) {}
 
   /**
-   * `localIdx` es la posición ($N) del `ubicacion_id` del local dentro del
-   * array de params del llamador — el propio llamador lo resuelve UNA vez por
-   * request con `UbicacionesService.localDe` y lo empuja a su array de params
-   * (frente de bodegas y traslados). No es un valor fijo porque los tres call
-   * sites (`findAll`, `cargarBasePorIds`, `findOne`) arman params de largo
-   * distinto.
+   * `vendible.localIdx` es la posición ($N) del `ubicacion_id` del local dentro
+   * del array de params del llamador, y `vendible.hoyIdx` la del día con el que
+   * se decide qué lote venció — el propio llamador los resuelve UNA vez por
+   * request con `localYHoy` y los empuja a su array de params. No son valores
+   * fijos porque los call sites arman params de largo distinto.
+   *
+   * `vendible = null` no arma lo vendible: ni el `FILTER` del local ni la resta
+   * de vencidos, y la fila sale sin `stock_vendible`. Es para
+   * `cargarBasePorIds`, el camino caliente de la venta, el checkout y el
+   * cálculo, que no lo lee: así no paga el local, el "hoy" ni la tabla
+   * derivada por un número que nadie consume.
    *
    * `stock` sigue siendo el TOTAL del tenant (`SUM` sin filtrar), y
-   * `stock_vendible` lo acota a esa ubicación (`FILTER`) — los dos agregados
+   * `stock_vendible` lo acota a esa ubicación (`FILTER`) y le resta lo que ahí
+   * está en lotes vencidos (`vencidosDelLocalSql`, con `hoyIdx`) — los dos agregados
    * salen de `stock_ubicacion`, único dueño del saldo desde el frente de
    * bodegas y traslados (`item_producto.stock` ya no existe). `LEFT JOIN
    * LATERAL`, no `JOIN` + `GROUP BY`: una sola consulta para todas las filas de
@@ -531,7 +579,9 @@ export class ItemsService {
    * que filtrar en la práctica — es defensa en profundidad para que las dos
    * vistas nunca vuelvan a desacordar, no el guard principal.
    */
-  private baseQuery(localIdx: number): string {
+  private baseQuery(
+    vendible: { localIdx: number; hoyIdx: number } | null,
+  ): string {
     return `
     SELECT
       i.item_id, i.nombre, i.descripcion, i.tipo, i.activo,
@@ -540,7 +590,12 @@ export class ItemsService {
       i.moneda_id, i.categoria_id, i.creado_el,
       m.codigo_iso AS moneda_codigo, m.simbolo AS moneda_simbolo,
       c.nombre AS categoria_nombre,
-      s.total AS stock, s.vendible AS stock_vendible,
+      s.total AS stock,${
+        vendible
+          ? `
+      (s.vendible - COALESCE(venc.cantidad, 0))::numeric(18,4) AS stock_vendible,`
+          : ''
+      }
       ip.unidad_medida, ip.fecha_elaboracion, ip.fecha_vencimiento,
       ip.modo_inventario,
       COALESCE(ip.costo_actual, ir.costo_actual, icb.costo_actual) AS costo_actual,
@@ -551,12 +606,21 @@ export class ItemsService {
     LEFT JOIN categorias c ON c.categoria_id = i.categoria_id AND c.eliminado_el IS NULL
     LEFT JOIN item_producto ip ON ip.item_id = i.item_id
     LEFT JOIN LATERAL (
-      SELECT COALESCE(SUM(su.stock), 0)::numeric(18,4) AS total,
-             COALESCE(SUM(su.stock) FILTER (WHERE su.ubicacion_id = $${localIdx}), 0)::numeric(18,4) AS vendible
+      SELECT COALESCE(SUM(su.stock), 0)::numeric(18,4) AS total${
+        vendible
+          ? `,
+             COALESCE(SUM(su.stock) FILTER (WHERE su.ubicacion_id = $${vendible.localIdx}), 0)::numeric(18,4) AS vendible`
+          : ''
+      }
         FROM stock_ubicacion su
         JOIN ubicaciones u2 ON u2.ubicacion_id = su.ubicacion_id AND u2.eliminado_el IS NULL
        WHERE su.item_id = ip.item_id
-    ) s ON ip.item_id IS NOT NULL
+    ) s ON ip.item_id IS NOT NULL${
+      vendible
+        ? `
+    LEFT JOIN ${vencidosDelLocalSql(`$${vendible.localIdx}`, `$${vendible.hoyIdx}`)} venc ON venc.item_id = ip.item_id`
+        : ''
+    }
     LEFT JOIN item_servicio isr ON isr.item_id = i.item_id
     LEFT JOIN item_suscripcion isu ON isu.item_id = i.item_id
     LEFT JOIN item_receta ir ON ir.item_id = i.item_id
@@ -582,8 +646,9 @@ export class ItemsService {
       creadoEl: r.creado_el,
       stock: r.stock,
       // Informativo (`docs/features/bodegas-y-traslados.md`, «GET /items,
-      // GET /items/:id»): lo que hay EN EL LOCAL. Con un solo local
-      // coincide con `stock`; con bodega, no. `stockDisponible` —abajo, batcheado
+      // GET /items/:id»): lo que la venta puede sacar DEL LOCAL. Con un solo
+      // local y sin lotes vencidos coincide con `stock`; con bodega, o con un
+      // lote vencido en el local, no. `stockDisponible` —abajo, batcheado
       // en `findAll`, o calculado en `findOne`— es el que de verdad frena al pedir.
       stockVendible: r.stock_vendible,
       unidadMedida: r.unidad_medida,
@@ -783,6 +848,23 @@ export class ItemsService {
     return { where, params };
   }
 
+  /**
+   * Los dos parámetros de lo vendible, una vez por request (nunca por fila): el
+   * local del tenant y el día de hoy en su calendario, con el que
+   * `vencidosDelLocalSql` decide qué lote ya venció. Es el mismo `hoy` que el
+   * chequeo al pedir (`saldoEnLotesVencidos`), de `hoyDeVencimiento`.
+   */
+  private async localYHoy(
+    tenantId: string,
+  ): Promise<{ localId: string; hoy: string }> {
+    const localId = await this.ubicacionesService.localDe(tenantId);
+    const hoy = await this.inventarioService.hoyDeVencimiento(
+      this.db,
+      tenantId,
+    );
+    return { localId, hoy };
+  }
+
   async findAll(
     tenantId: string,
     query: QueryItemsDto,
@@ -829,18 +911,19 @@ export class ItemsService {
     );
     const total = countRows[0]?.total ?? 0;
 
-    // Una sola vez por request (no por fila): el ítem `$L` de `baseQuery`, y
+    // Una sola vez por request (no por fila): `$L` y `$H` de `baseQuery`, y
     // también lo que alimenta el `stockVendible` de `calcularDisponibilidadBatch`
     // más abajo.
-    const localId = await this.ubicacionesService.localDe(tenantId);
-    const paramsConLocal = [...params, localId];
-    const localIdx = paramsConLocal.length;
+    const { localId, hoy } = await this.localYHoy(tenantId);
+    const paramsConLocal = [...params, localId, hoy];
+    const localIdx = paramsConLocal.length - 1;
+    const hoyIdx = paramsConLocal.length;
     const listParams = [...paramsConLocal, pageSize, offset];
     const limitIdx = paramsConLocal.length + 1;
     const offsetIdx = paramsConLocal.length + 2;
 
     const rows: ItemRow[] = await this.db.query(
-      this.baseQuery(localIdx) +
+      this.baseQuery({ localIdx, hoyIdx }) +
         where +
         ` ORDER BY i.nombre ASC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
       listParams,
@@ -850,6 +933,7 @@ export class ItemsService {
       tenantId,
       rows,
       localId,
+      hoy,
     );
     const data = await this.armarFilasListado(
       tenantId,
@@ -886,7 +970,7 @@ export class ItemsService {
   ): ReturnType<ItemsService['findAll']> {
     const { page, pageSize, offset } = resolvePagination(query);
     const { where, params } = this.buildFindAllFilters(tenantId, query);
-    const localId = await this.ubicacionesService.localDe(tenantId);
+    const { localId, hoy } = await this.localYHoy(tenantId);
 
     const livianas: {
       item_id: string;
@@ -894,18 +978,21 @@ export class ItemsService {
       nombre: string;
       stock_vendible: string | null;
     }[] = await this.db.query(
-      `SELECT i.item_id, i.tipo, i.nombre, su.stock AS stock_vendible
+      `SELECT i.item_id, i.tipo, i.nombre,
+              su.stock - COALESCE(venc.cantidad, 0) AS stock_vendible
          FROM items i
          LEFT JOIN stock_ubicacion su
-           ON su.item_id = i.item_id AND su.ubicacion_id = $${params.length + 1}` +
-        where,
-      [...params, localId],
+           ON su.item_id = i.item_id AND su.ubicacion_id = $${params.length + 1}
+         LEFT JOIN ${vencidosDelLocalSql(`$${params.length + 1}`, `$${params.length + 2}`)} venc
+           ON venc.item_id = i.item_id` + where,
+      [...params, localId, hoy],
     );
 
     const { dispPorId, stockDispPorId } = await this.disponibilidadDe(
       tenantId,
       livianas,
       localId,
+      hoy,
     );
     // `pedible` una vez por fila (decorar, ordenar, descartar), no en el comparador.
     const ids = livianas
@@ -927,10 +1014,10 @@ export class ItemsService {
       // El mismo criterio de borrado que el paso 1 (`buildFindAllFilters`): vivos,
       // o con `incluirEliminados` también los que borró una persona.
       const completas: ItemRow[] = await this.db.query(
-        this.baseQuery(3) +
+        this.baseQuery({ localIdx: 3, hoyIdx: 5 }) +
           ' WHERE i.item_id = ANY($1) AND i.tenant_id = $2' +
           ' AND (i.eliminado_el IS NULL OR ($4::boolean AND i.eliminado_por IS NOT NULL))',
-        [ids, tenantId, localId, !!query.incluirEliminados],
+        [ids, tenantId, localId, !!query.incluirEliminados, hoy],
       );
       const porId = new Map(completas.map((r) => [r.item_id, r]));
       rows = ids.flatMap((id) => porId.get(id) ?? []);
@@ -958,6 +1045,7 @@ export class ItemsService {
     tenantId: string,
     rows: { item_id: string; tipo: string; stock_vendible: string | null }[],
     localId: string,
+    hoy: string,
   ) {
     // Disponibilidad de recetas/combos/productos en un nº CONSTANTE de queries
     // (batch), no una por fila (N+1).
@@ -984,6 +1072,7 @@ export class ItemsService {
         comboIds,
         productos,
         localId,
+        hoy,
       );
     return { dispPorId, stockDispPorId };
   }
@@ -1085,13 +1174,15 @@ export class ItemsService {
    * la respuesta— y no se consulta acá: esta función corre dos veces por ítem
    * (los grupos del combo y los de cada componente receta), así que pedirlo
    * adentro duplicaría la consulta sin cambiar el resultado. Mismo criterio
-   * para `localId`: lo resuelve `findOne` una sola vez con `localDe` y lo pasa.
+   * para `localId` y `hoy`: los resuelve `findOne` una sola vez con
+   * `localYHoy` y los pasa.
    */
   private async cargarGruposPorItem(
     tenantId: string,
     itemIds: string[],
     comprometido: Map<string, Decimal>,
     localId: string,
+    hoy: string,
   ): Promise<Map<string, GrupoDetalle[]>> {
     const out = new Map<string, GrupoDetalle[]>();
     if (!itemIds.length) return out;
@@ -1144,7 +1235,8 @@ export class ItemsService {
               o.precio_extra AS precio_extra_default,
               ovr.cantidad AS cantidad_propia, ovr.unidad_codigo AS unidad_propia,
               ovr.precio_extra AS precio_extra_propio, o.unidad_codigo AS unidad_default,
-              o.orden, s.total AS stock, s.vendible AS stock_vendible
+              o.orden, s.total AS stock,
+              (s.vendible - COALESCE(venc.cantidad, 0))::numeric(18,4) AS stock_vendible
        FROM item_grupos_modificadores igm
        JOIN grupo_modificador_opciones o ON o.grupo_modificador_id = igm.grupo_modificador_id
          AND o.tenant_id = igm.tenant_id AND o.eliminado_el IS NULL
@@ -1156,13 +1248,14 @@ export class ItemsService {
            FROM stock_ubicacion su
           WHERE su.item_id = ip.item_id
        ) s ON ip.item_id IS NOT NULL
+       LEFT JOIN ${vencidosDelLocalSql('$3', '$4')} venc ON venc.item_id = ip.item_id
        LEFT JOIN item_grupo_modificador_opciones ovr
          ON ovr.grupo_opcion_id = o.grupo_opcion_id
         AND ovr.item_grupo_id = igm.item_grupo_id
         AND ovr.eliminado_el IS NULL
        WHERE igm.item_grupo_id = ANY($1) AND igm.tenant_id = $2 AND igm.eliminado_el IS NULL
        ORDER BY o.orden ASC`,
-      [itemGrupoIds, tenantId, localId],
+      [itemGrupoIds, tenantId, localId, hoy],
     );
     const opsPorItemGrupo = new Map<string, typeof ops>();
     for (const o of ops) {
@@ -1220,26 +1313,35 @@ export class ItemsService {
    *
    * Lanza `NotFoundException` si algún id no existe o no es del tenant, igual
    * que `findOne`, para no cambiar el comportamiento de sus llamadores.
+   *
+   * **Sin `stockVendible`, también en el tipo** (orquestadora, 2026-10-11):
+   * ninguno de sus llamadores lo lee, y calcularlo como el catálogo —el local
+   * menos sus lotes vencidos— costaba en cada venta la zona del tenant y la
+   * tabla derivada. Sacarlo del tipo y no solo de la consulta es lo que impide
+   * que alguien lea un número que acá no se calculó: el compilador lo frena.
    */
   async cargarBasePorIds(
     tenantId: string,
     itemIds: string[],
-  ): Promise<Map<string, ReturnType<ItemsService['mapRow']>>> {
+  ): Promise<
+    Map<string, Omit<ReturnType<ItemsService['mapRow']>, 'stockVendible'>>
+  > {
     const unicos = [...new Set(itemIds.map((id) => id.toLowerCase()))];
     if (unicos.length === 0) return new Map();
 
-    const localId = await this.ubicacionesService.localDe(tenantId);
-    // `$L` va al final del array, no hardcodeado: si algún día esta query
-    // gana un filtro nuevo antes del local, el índice se corre solo en vez de
-    // quedar apuntando al parámetro equivocado sin que TypeScript lo vea.
-    const paramsBase = [unicos, tenantId, localId];
     const rows: ItemRow[] = await this.db.query(
-      this.baseQuery(paramsBase.length) +
+      this.baseQuery(null) +
         ` WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
-      paramsBase,
+      [unicos, tenantId],
     );
 
-    const porId = new Map(rows.map((r) => [r.item_id, this.mapRow(r)]));
+    const porId = new Map(
+      rows.map((r) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { stockVendible: _stockVendible, ...fila } = this.mapRow(r);
+        return [r.item_id, fila];
+      }),
+    );
     const faltante = unicos.find((id) => !porId.has(id));
     if (faltante) throw new NotFoundException('Item no encontrado');
     return this.aliasarCasingDeIds(porId, itemIds);
@@ -1365,10 +1467,13 @@ export class ItemsService {
     // Una vez por request: alimenta `baseQuery` y las tres queries anidadas de
     // abajo (ingredientes, extras, componentes), más las dos llamadas a
     // `cargarGruposPorItem`.
-    const localId = await this.ubicacionesService.localDe(tenantId);
-    const paramsBase = [itemId, tenantId, localId];
+    const { localId, hoy } = await this.localYHoy(tenantId);
+    const paramsBase = [itemId, tenantId, localId, hoy];
     const rows: ItemRow[] = await this.db.query(
-      this.baseQuery(paramsBase.length) +
+      this.baseQuery({
+        localIdx: paramsBase.length - 1,
+        hoyIdx: paramsBase.length,
+      }) +
         ` WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
       paramsBase,
     );
@@ -1522,7 +1627,8 @@ export class ItemsService {
       }[] = await this.db.query(
         `SELECT cc.componente_item_id, i.nombre AS componente_nombre, i.tipo,
                 cc.cantidad, cc.bloqueante,
-                s.total AS stock, s.vendible AS stock_vendible
+                s.total AS stock,
+                (s.vendible - COALESCE(venc.cantidad, 0))::numeric(18,4) AS stock_vendible
          FROM combo_componentes cc
          JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
          LEFT JOIN item_producto ip ON ip.item_id = cc.componente_item_id
@@ -1532,8 +1638,9 @@ export class ItemsService {
              FROM stock_ubicacion su
             WHERE su.item_id = ip.item_id
          ) s ON ip.item_id IS NOT NULL
+         LEFT JOIN ${vencidosDelLocalSql('$3', '$4')} venc ON venc.item_id = ip.item_id
          WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2 AND cc.eliminado_el IS NULL`,
-        [itemId, tenantId, localId],
+        [itemId, tenantId, localId, hoy],
       );
       const gruposPorComp = await this.cargarGruposPorItem(
         tenantId,
@@ -1542,6 +1649,7 @@ export class ItemsService {
           .map((r) => r.componente_item_id),
         comprometido,
         localId,
+        hoy,
       );
       componentes = compRows.map((r) => ({
         componenteItemId: r.componente_item_id,
@@ -1571,6 +1679,7 @@ export class ItemsService {
               [itemId],
               comprometido,
               localId,
+              hoy,
             )
           ).get(itemId) ?? [])
         : [];
@@ -6382,6 +6491,8 @@ export class ItemsService {
     productos: { itemId: string; stockVendible: string | null }[],
     /** El `ubicacion_id` del local, resuelto UNA vez por request por `findAll`. */
     localId: string,
+    /** Hoy en el calendario del local, del mismo `localYHoy` que `localId`. */
+    hoy: string,
   ): Promise<{
     disponible: Map<string, number | null>;
     stockDisponible: Map<string, string>;
@@ -6418,14 +6529,16 @@ export class ItemsService {
       stock_vendible: string | null;
     }[] = comboIds.length
       ? await this.db.query(
-          `SELECT cc.combo_item_id, cc.componente_item_id, i.tipo, cc.cantidad, su.stock AS stock_vendible
+          `SELECT cc.combo_item_id, cc.componente_item_id, i.tipo, cc.cantidad,
+                  su.stock - COALESCE(venc.cantidad, 0) AS stock_vendible
            FROM combo_componentes cc
            JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
            LEFT JOIN item_producto ip ON ip.item_id = cc.componente_item_id
            LEFT JOIN stock_ubicacion su ON su.item_id = ip.item_id AND su.ubicacion_id = $3
+           LEFT JOIN ${vencidosDelLocalSql('$3', '$4')} venc ON venc.item_id = ip.item_id
            WHERE cc.combo_item_id = ANY($1) AND cc.tenant_id = $2
              AND cc.bloqueante = true AND cc.eliminado_el IS NULL`,
-          [comboIds, tenantId, localId],
+          [comboIds, tenantId, localId, hoy],
         )
       : [];
 
